@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>
@@ -26,6 +27,21 @@ enum class EntityPoolKind : std::uint32_t {
     pool_3 = 3,
     effects = 4,
 };
+
+struct EntityPoolShape {
+    std::uint32_t element_size{};
+    std::uint32_t capacity{};
+};
+
+inline constexpr std::size_t kEntityPoolCount = 5;
+inline constexpr std::array<EntityPoolShape, kEntityPoolCount>
+    kEntityPoolShapes{{
+        {904, 256},
+        {1360, 1200},
+        {812, 1200},
+        {988, 768},
+        {988, 128},
+    }};
 
 // Exact-size sparse overlay of the recovered organic/player record. Every
 // named field is witnessed; uncharacterized spans remain explicit. This is
@@ -79,6 +95,10 @@ static_assert(std::is_standard_layout_v<EntityPool>);
 static_assert(std::is_trivially_copyable_v<EntityPool>);
 
 static_assert(sizeof(EntityPoolKind) == sizeof(std::uint32_t));
+static_assert(
+    kEntityPoolShapes[
+        static_cast<std::size_t>(EntityPoolKind::organic)].element_size ==
+    sizeof(PlayerEntity));
 
 static_assert(sizeof(PlayerEntity) == 0x388);
 static_assert(alignof(PlayerEntity) == alignof(std::uint32_t));

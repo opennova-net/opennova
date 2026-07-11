@@ -39,6 +39,28 @@ func _weapon_arm_pitch_deg(sim: NovaSimulation) -> float:
 	return float(angles[4].x) if angles.size() > 4 else 0.0
 
 
+func test_weapon_state_preserves_parity_pose_and_identity() -> void:
+	var sim := NovaSimulation.new()
+	var weapon := _minimal_weapon("ASH_G3D", "rifle.adm")
+	var hip_pose := PackedFloat32Array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+	var aimed_pose := PackedFloat32Array([-1.0, -2.0, -3.0, -4.0, -5.0, -6.0])
+	weapon["special_hold"] = 3
+	weapon["attack_anim"] = 7
+	weapon["pos"] = hip_pose
+	weapon["tpos"] = aimed_pose
+	weapon["renderfov"] = 71.5
+
+	sim.set_local_player_weapon(weapon, {})
+	var state: Dictionary = sim.get_local_player_weapon_state()
+	assert_eq(String(state.get("name", "")), "ASH_G3D")
+	assert_eq(int(state.get("special_hold", -1)), 3)
+	assert_eq(int(state.get("attack_anim", -1)), 7)
+	assert_eq(state.get("pos", PackedFloat32Array()), hip_pose)
+	assert_eq(state.get("tpos", PackedFloat32Array()), aimed_pose)
+	assert_almost_eq(float(state.get("renderfov", 0.0)), 71.5, 0.001)
+	sim.free()
+
+
 func test_weapon_channel_keeps_own_phase_and_switch_identity_per_entity() -> void:
 	var md := NovaMissionData.new()
 	assert_eq(md.create_default(), OK)
@@ -384,3 +406,46 @@ func test_ai_state_name_static_lookup() -> void:
 	assert_eq(NovaSimulation.ai_state_name(16), "GROUND_FOLLOWWP")
 	assert_eq(NovaSimulation.ai_state_name(13), "?", "id gaps read as unknowns")
 	assert_eq(NovaSimulation.ai_state_name(23), "GROUND_DEAD")
+
+
+func test_configured_parity_trace_records_a_completed_logic_tick() -> void:
+	var trace_path := ProjectSettings.globalize_path("user://nova-parity-test.ontrace")
+	DirAccess.remove_absolute(trace_path)
+	var configured := {
+		"OPENNOVA_PARITY_TRACE": trace_path,
+		"OPENNOVA_PARITY_PIPE": "",
+		"OPENNOVA_PARITY_RUN_ID": "gut-run",
+		"OPENNOVA_PARITY_SCENARIO": "player-combat-loop",
+		"OPENNOVA_PARITY_TITLE": "joint-operations",
+		"OPENNOVA_PARITY_EXPANSION": "revx02",
+		"OPENNOVA_PARITY_MISSION": "ASH_G3D.bms",
+		"OPENNOVA_PARITY_ROLE": "opennova-host",
+		"OPENNOVA_PARITY_STREAM_ID": "opennova-host",
+	}
+	var previous := {}
+	for key: String in configured:
+		previous[key] = OS.get_environment(key) if OS.has_environment(key) else null
+		OS.set_environment(key, configured[key])
+
+	var sim := NovaSimulation.new()
+	sim.build_demo_mission()
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1),
+		"parity checkpoints wait for a local player")
+	sim.set_local_player_weapon(_minimal_weapon("WPN_PARITY", "rifle.adm"), {})
+	sim.step()
+	sim.free()
+
+	for key: String in configured:
+		if previous[key] == null:
+			OS.unset_environment(key)
+		else:
+			OS.set_environment(key, previous[key])
+
+	assert_true(FileAccess.file_exists(trace_path),
+		"configured capture writes a direct trace when no inspector pipe is present")
+	var bytes := FileAccess.get_file_as_bytes(trace_path)
+	assert_gt(bytes.size(), 8, "metadata, checkpoints, and a frame follow the header")
+	if bytes.size() >= 4:
+		assert_eq(Array(bytes.slice(0, 4)), [0x4f, 0x4e, 0x50, 0x54],
+			"trace starts with canonical ONPT magic")
+	DirAccess.remove_absolute(trace_path)

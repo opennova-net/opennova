@@ -10,6 +10,7 @@
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -106,6 +107,14 @@ public:
 	};
 
 private:
+	struct ParityCaptureState;
+	std::unique_ptr<ParityCaptureState> parity_capture_;
+	void ensure_parity_capture();
+	void capture_parity_tick();
+	void capture_parity_datagram(bool p_outbound,
+			const String &p_remote_ip, int p_remote_port,
+			const uint8_t *p_data, std::size_t p_size);
+
 	std::unique_ptr<opennova::world::World> world_;
 	std::unique_ptr<opennova::world::AiSystem> ai_;
 	std::unique_ptr<opennova::mission::BmsEventSystem> bms_;
@@ -163,6 +172,8 @@ private:
 	bool joiner_started_ = false;          // ClientHello emitted (Idle -> Hello)
 	bool joiner_local_spawned_ = false;    // L spawned at reached_in_match (one-shot guard)
 	uint16_t joiner_self_wire_handle_ = 0; // H: stamped in the C2S 0x0C + present self-filter
+	String joiner_host_ip_;
+	uint16_t joiner_host_port_ = 0;
 	// Send one framed datagram to the dialed host (the joiner's send_datagram).
 	void ship_to_host(const std::vector<uint8_t> &dg);
 	// SelfSpawn (mission i32 16.16 + full BAM32 orientation) -> PlayerSpawn for L.
@@ -195,6 +206,13 @@ private:
 	uint64_t weapon_unscope_serial_ = 0;
 	uint64_t weapon_rescope_serial_ = 0;
 	float weapon_scope_max_mag_ = 0.0f; // def scope_max_mag (0 = key absent)
+	// Raw weapon.def presentation values retained for parity evidence. These stay in
+	// their source coordinate/order so the trace adapter can publish both exact and
+	// normalized values without reverse-engineering them from a rendered transform.
+	String weapon_name_;
+	PackedFloat32Array weapon_hip_pose_;
+	PackedFloat32Array weapon_aimed_pose_;
+	float weapon_render_fov_ = 0.0f;
 	// The mounted def's 3P body-channel kinds (special_hold / attack_anim; 0 = rifle)
 	// plus the resolved AnimMap identity. The serial advances only when that AnimMap
 	// changes; each InfantryState remembers which serial it observed, matching the
@@ -275,6 +293,7 @@ protected:
 
 public:
 	NovaSimulation();
+	~NovaSimulation() override;
 
 	// Load + promote the editor's live mission (the in-memory bms::File, including unsaved
 	// edits). This is the editor-integration entry: simulate exactly what is on screen.

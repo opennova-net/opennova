@@ -1,7 +1,7 @@
 add_subdirectory(core)
 
 option(OPENNOVA_ENABLE_RETAIL_HOOK_TOOLS
-    "Build the read-only Joint Operations retail validation hook when supported"
+    "Build the Joint Operations retail parity validation tools when supported"
     ON)
 
 if(OPENNOVA_ENABLE_RETAIL_HOOK_TOOLS)

@@ -10,8 +10,18 @@
 
 namespace opennova::retail_hook::windows {
 
+class RetailCaptureAgent;
+
 // Runs a modeless validation window and its message pump on the calling thread.
 // A null session displays startup diagnostics without attempting to sample.
+[[nodiscard]] DWORD run_validation_window(
+    HINSTANCE module,
+    ValidationSession* session,
+    RetailCaptureAgent* capture,
+    bool writes_enabled,
+    std::wstring window_identity,
+    std::wstring startup_diagnostic);
+
 [[nodiscard]] DWORD run_validation_window(
     HINSTANCE module,
     ValidationSession* session,

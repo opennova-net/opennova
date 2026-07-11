@@ -117,7 +117,7 @@ func _resolve_root(dir: String) -> NovaResourceRoot:
 	if _injected_root != null:
 		return _injected_root
 	if dir.is_empty():
-		dir = ResourceDirSettings.get_resource_dir()
+		dir = ResourceDirSettings.get_runtime_resource_dir()
 	if dir.is_empty():
 		load_failed.emit("no resource directory set")
 		return null

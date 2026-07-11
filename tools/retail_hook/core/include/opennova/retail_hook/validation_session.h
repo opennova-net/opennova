@@ -95,6 +95,8 @@ enum class ProbeSet : std::uint32_t {
 struct WeaponObservation {
     ProcessAddress address{};
     std::string name{};
+    std::int32_t special_hold{};
+    std::int32_t attack_anim{};
     float position_x{};
     float position_y{};
     float position_z{};
@@ -141,11 +143,21 @@ struct PlayerObservation {
     std::optional<WeaponObservation> weapon{};
 };
 
+struct PoolDescriptorObservation {
+    std::uint32_t index{};
+    ProcessAddress descriptor_address{};
+    ProcessAddress data_address{};
+    std::uint32_t element_size{};
+    std::uint32_t used{};
+    std::uint32_t capacity{};
+};
+
 struct ValidationSnapshot {
     CheckResult check{};
     std::string profile_name{};
     std::uint32_t player_pool_used{};
     std::uint32_t player_pool_capacity{};
+    std::vector<PoolDescriptorObservation> pool_descriptors{};
     std::vector<PlayerObservation> players{};
 
     [[nodiscard]] bool ok() const noexcept;
@@ -173,7 +185,77 @@ struct SetEquippedAdmIndex {
     std::uint8_t value{};
 };
 
-using Mutation = std::variant<SetPlayerHealth, SetPlayerTeam, SetEquippedAdmIndex>;
+enum class ActiveWeaponPose : std::uint8_t {
+    hip,
+    aimed,
+};
+
+struct WeaponPoseValue {
+    float position_x{};
+    float position_y{};
+    float position_z{};
+    std::int32_t rotation_yaw_raw{};
+    std::int32_t rotation_pitch_raw{};
+    std::int32_t rotation_roll_raw{};
+};
+
+struct SetActiveWeaponPose {
+    std::uint32_t player_slot{};
+    std::uint32_t expected_owner_connection_id{};
+    ProcessAddress expected_weapon_address{};
+    ActiveWeaponPose pose{ActiveWeaponPose::hip};
+    WeaponPoseValue expected_value{};
+    WeaponPoseValue value{};
+};
+
+struct SetActiveWeaponFov {
+    std::uint32_t player_slot{};
+    std::uint32_t expected_owner_connection_id{};
+    ProcessAddress expected_weapon_address{};
+    float expected_value{};
+    float value{};
+};
+
+using Mutation = std::variant<
+    SetPlayerHealth,
+    SetPlayerTeam,
+    SetEquippedAdmIndex,
+    SetActiveWeaponPose,
+    SetActiveWeaponFov>;
+
+enum class MutationKind : std::uint8_t {
+    player_health,
+    player_team,
+    equipped_adm_index,
+    active_weapon_pose,
+    active_weapon_render_fov,
+};
+
+enum class MutationStage : std::uint8_t {
+    rejected,
+    validated,
+    write_attempted,
+    written,
+    verified,
+};
+
+struct MutationAudit {
+    Mutation request{};
+    MutationKind kind{MutationKind::player_health};
+    MutationStage stage{MutationStage::rejected};
+    std::uint32_t player_slot{};
+    std::uint32_t expected_owner_connection_id{};
+    ProcessAddress target_address{};
+    ProcessAddress active_weapon_address{};
+};
+
+struct MutationResult {
+    CheckResult check{};
+    MutationAudit audit{};
+
+    [[nodiscard]] bool ok() const noexcept;
+    explicit operator bool() const noexcept;
+};
 
 struct SessionOptions {
     // Mutations fail with writes_disabled unless explicitly enabled.
@@ -201,7 +283,7 @@ public:
                                          SessionOptions options = {});
 
     [[nodiscard]] ValidationSnapshot sample(ProbeSet probes = ProbeSet::all) const;
-    [[nodiscard]] CheckResult apply(const Mutation& mutation);
+    [[nodiscard]] MutationResult apply(const Mutation& mutation);
 
 private:
     struct Impl;

@@ -8,9 +8,14 @@ const STATE_CONFIG_PATH := "user://terrain_editor_state.cfg"
 
 var _saved_state_config := PackedByteArray()
 var _had_state_config := false
+var _saved_resource_env := ""
+var _had_resource_env := false
 
 
 func before_each() -> void:
+	_had_resource_env = OS.has_environment("OPENNOVA_RESOURCE_DIR")
+	_saved_resource_env = OS.get_environment("OPENNOVA_RESOURCE_DIR") if _had_resource_env else ""
+	OS.unset_environment("OPENNOVA_RESOURCE_DIR")
 	_had_state_config = FileAccess.file_exists(STATE_CONFIG_PATH)
 	_saved_state_config = FileAccess.get_file_as_bytes(STATE_CONFIG_PATH) if _had_state_config else PackedByteArray()
 	if _had_state_config:
@@ -18,6 +23,10 @@ func before_each() -> void:
 
 
 func after_each() -> void:
+	if _had_resource_env:
+		OS.set_environment("OPENNOVA_RESOURCE_DIR", _saved_resource_env)
+	else:
+		OS.unset_environment("OPENNOVA_RESOURCE_DIR")
 	if _had_state_config:
 		var f := FileAccess.open(STATE_CONFIG_PATH, FileAccess.WRITE)
 		if f != null:
@@ -39,6 +48,15 @@ func test_game_round_trip_and_normalizes() -> void:
 func test_blank_game_reads_as_jo() -> void:
 	NovaResourceDirSettings.set_game("   ")
 	assert_eq(NovaResourceDirSettings.get_game(), "jo", "A blank stored code reads back as JO.")
+
+
+func test_runtime_resource_dir_reads_trimmed_environment_override() -> void:
+	OS.set_environment("OPENNOVA_RESOURCE_DIR", "  C:/validation/JO  ")
+	assert_eq(
+		NovaResourceDirSettings.get_runtime_resource_dir(),
+		"C:/validation/JO",
+		"The parity harness can override the runtime resource directory without persisting machine state.",
+	)
 
 
 func test_set_game_preserves_other_sections() -> void:

@@ -1686,6 +1686,94 @@ target_link_libraries(retail_hook_validation_test PRIVATE
     opennova_retail_hook_core)
 add_test(NAME retail_hook_validation COMMAND retail_hook_validation_test)
 
+add_executable(retail_hook_capture_agent_test
+    retail_hook/capture_agent_test.cpp)
+target_link_libraries(retail_hook_capture_agent_test PRIVATE
+    opennova_retail_hook_core)
+add_test(NAME retail_hook_capture_agent COMMAND retail_hook_capture_agent_test)
+
+if(WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4)
+    add_executable(retail_hook_winsock_capture_test
+        retail_hook/winsock_capture_test.cpp
+        ../tools/retail_hook/windows/src/winsock_capture.cpp
+        ../tools/retail_hook/windows/src/winsock_hooks.cpp
+        ../tools/retail_hook/windows/src/winsock_parity.cpp)
+    target_include_directories(retail_hook_winsock_capture_test PRIVATE
+        ../tools/retail_hook/windows/include)
+    target_compile_features(retail_hook_winsock_capture_test PRIVATE cxx_std_17)
+    target_link_libraries(retail_hook_winsock_capture_test PRIVATE
+        opennova_retail_hook_core opennova_parity ws2_32)
+    add_test(NAME retail_hook_winsock_capture
+        COMMAND retail_hook_winsock_capture_test)
+
+    add_executable(retail_hook_named_pipe_trace_test
+        retail_hook/named_pipe_trace_test.cpp
+        ../tools/retail_hook/windows/src/named_pipe_trace.cpp)
+    target_include_directories(retail_hook_named_pipe_trace_test PRIVATE
+        ../tools/retail_hook/windows/include)
+    target_compile_features(retail_hook_named_pipe_trace_test PRIVATE cxx_std_17)
+    target_link_libraries(retail_hook_named_pipe_trace_test PRIVATE
+        opennova_parity
+        opennova_parity_windows)
+    add_test(NAME retail_hook_named_pipe_trace
+        COMMAND retail_hook_named_pipe_trace_test)
+
+    add_executable(retail_hook_cli_test
+        retail_hook/retail_cli_test.cpp
+        ../tools/retail_hook/windows/src/retail_cli.cpp)
+    target_include_directories(retail_hook_cli_test PRIVATE
+        ../tools/retail_hook/windows/include)
+    target_compile_features(retail_hook_cli_test PRIVATE cxx_std_17)
+    add_test(NAME retail_hook_cli COMMAND retail_hook_cli_test)
+endif()
+
+add_executable(parity_trace_test parity/parity_trace_test.cpp)
+target_link_libraries(parity_trace_test PRIVATE opennova_parity)
+add_test(NAME parity_trace COMMAND parity_trace_test)
+
+add_executable(parity_file_event_sink_test
+    parity/file_event_sink_test.cpp)
+target_link_libraries(parity_file_event_sink_test PRIVATE opennova_parity)
+add_test(NAME parity_file_event_sink COMMAND parity_file_event_sink_test)
+
+add_executable(parity_tool_cli_test
+    parity/parity_tool_cli_test.cpp)
+target_link_libraries(parity_tool_cli_test PRIVATE
+    opennova_parity_tool_core)
+add_test(NAME parity_tool_cli COMMAND parity_tool_cli_test)
+
+add_executable(parity_tool_network_test
+    parity/parity_tool_network_test.cpp)
+target_link_libraries(parity_tool_network_test PRIVATE
+    opennova_parity_tool_core)
+add_test(NAME parity_tool_network COMMAND parity_tool_network_test)
+
+add_executable(parity_tool_export_test
+    parity/parity_tool_export_test.cpp)
+target_link_libraries(parity_tool_export_test PRIVATE
+    opennova_parity_tool_core)
+add_test(NAME parity_tool_export COMMAND parity_tool_export_test)
+
+add_executable(parity_tool_compare_test
+    parity/parity_tool_compare_test.cpp)
+target_link_libraries(parity_tool_compare_test PRIVATE
+    opennova_parity_tool_core)
+add_test(NAME parity_tool_compare COMMAND parity_tool_compare_test)
+
+add_executable(parity_compare_test parity/parity_compare_test.cpp)
+target_link_libraries(parity_compare_test PRIVATE opennova_parity)
+add_test(NAME parity_compare COMMAND parity_compare_test)
+
+add_executable(parity_capture_test parity/parity_capture_test.cpp)
+target_link_libraries(parity_capture_test PRIVATE opennova_parity)
+add_test(NAME parity_capture COMMAND parity_capture_test)
+
+add_executable(parity_opennova_capture_test
+    parity/opennova_capture_test.cpp)
+target_link_libraries(parity_opennova_capture_test PRIVATE
+    opennova_parity_opennova)
+add_test(NAME parity_opennova_capture COMMAND parity_opennova_capture_test)
+
 # NET-4 (ADR 0019 §5): the C-ABI export-identity guard. The shared library's
 # flat export list must match scripts/lint/abi_exports_baseline.txt, and no
 # net-lib symbol family may appear at all. Runs wherever BUILD_SHARED_LIB=ON

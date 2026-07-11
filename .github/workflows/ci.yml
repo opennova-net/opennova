@@ -117,8 +117,9 @@ jobs:
           ctest --test-dir build-server --output-on-failure -R \
             "^(url_cipher|crc32|nwu|pubcrypto|epask|envelope|tlv|session|registration_url|gate_response|gate_probe|lobby_update|gate_server_loopback|gsb_roundtrip|protocol_message|connection_registry|connection_manager|db_sqlite|session_hello_roundtrip|lobby_session|backend_schema|nw_codec_identity|nw_self_capture)$"
 
-  # Research-only retail validator: keep its portable memory/session logic under
-  # test while also proving the injected DLL and injector remain 32-bit clean.
+  # Research-only retail parity stack: synthetic evidence only. Keep the
+  # portable capture/compare contracts under test while also proving every
+  # injected or coordinating Windows binary remains 32-bit clean.
   retail-hook:
     runs-on: windows-latest
     steps:
@@ -135,17 +136,32 @@ jobs:
             -DOPENNOVA_ENABLE_MODSUPEROED_TOOLS=OFF `
             -DOPENNOVA_ENABLE_RETAIL_HOOK_TOOLS=ON
 
-      - name: Build Win32 retail validator
+      - name: Build Win32 retail parity stack
         shell: pwsh
         run: |
           cmake --build build-retail-hook --config Release --target `
-            retail_hook_validation_test opennova_retail_hook opennova_retail_injector
+            retail_hook_validation_test retail_hook_capture_agent_test `
+            retail_hook_winsock_capture_test retail_hook_named_pipe_trace_test `
+            retail_hook_cli_test parity_trace_test parity_file_event_sink_test `
+            parity_tool_cli_test parity_tool_network_test parity_tool_export_test `
+            parity_tool_compare_test `
+            parity_compare_test parity_capture_test parity_opennova_capture_test `
+            opennova_retail_hook retail_hook_injector retail_parity_inspector `
+            opennova_parity_tool
 
-      - name: Test Win32 retail validator
+      - name: Test Win32 retail parity stack
         shell: pwsh
         run: |
           ctest --test-dir build-retail-hook -C Release --output-on-failure `
-            -R "^retail_hook_validation$"
+            -R "^(retail_hook_|parity_)"
+
+      - name: Test parity launcher contracts
+        shell: bash
+        run: |
+          bash -n scripts/retail_parity.sh
+          bash tests/scripts/retail_parity_cli_test.sh
+          bash tests/scripts/retail_parity_doctor_test.sh
+          bash tests/scripts/retail_parity_lifecycle_test.sh
 
   modsuperoed-smoke:
     runs-on: windows-latest

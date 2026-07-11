@@ -1,4 +1,6 @@
 #include <opennova/retail_hook/windows/file_sha256.h>
+#include <opennova/retail_hook/windows/hook_start_config.h>
+#include <opennova/retail_hook/windows/retail_cli.h>
 #include <opennova/retail_hook/validation_session.h>
 
 #define WIN32_LEAN_AND_MEAN
@@ -19,6 +21,7 @@ namespace {
 
 using opennova::retail_hook::windows::compute_file_sha256;
 using opennova::retail_hook::windows::FileSha256;
+using opennova::retail_hook::windows::HookStartConfig;
 using opennova::retail_hook::jo_1_7_5_7_profile;
 
 static_assert(sizeof(void*) == 4, "The retail injector must be compiled for 32-bit Windows.");
@@ -86,6 +89,28 @@ void report_error(std::wstring_view operation, DWORD error) {
     return std::wstring(path.substr(0, slash));
 }
 
+[[nodiscard]] bool current_module_path(
+    std::wstring& output,
+    DWORD& error) {
+    error = ERROR_SUCCESS;
+    std::vector<wchar_t> buffer(512);
+    while (buffer.size() <= 32768) {
+        const DWORD copied = GetModuleFileNameW(
+            nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+        if (copied == 0) {
+            error = GetLastError();
+            return false;
+        }
+        if (copied < buffer.size()) {
+            output.assign(buffer.data(), copied);
+            return true;
+        }
+        buffer.resize(buffer.size() * 2);
+    }
+    error = ERROR_INSUFFICIENT_BUFFER;
+    return false;
+}
+
 [[nodiscard]] bool ansi_path(
     std::wstring_view input,
     std::string& output,
@@ -149,6 +174,19 @@ void report_error(std::wstring_view operation, DWORD error) {
     quoted.push_back(L'"');
     return quoted;
 }
+
+template <std::size_t Capacity>
+[[nodiscard]] bool copy_config_text(
+    std::wstring_view source,
+    wchar_t (&destination)[Capacity]) noexcept {
+    if (source.empty() || source.size() >= Capacity) {
+        return false;
+    }
+    std::copy(source.begin(), source.end(), destination);
+    destination[source.size()] = L'\0';
+    return true;
+}
+
 [[nodiscard]] std::uintptr_t remote_module_base(
     DWORD process_id,
     const wchar_t* module_name,
@@ -379,6 +417,7 @@ void report_error(std::wstring_view operation, DWORD error) {
     HANDLE process,
     std::uintptr_t remote_module,
     std::uint32_t start_rva,
+    const HookStartConfig& config,
     DWORD& error) {
     const std::uint64_t start =
         static_cast<std::uint64_t>(remote_module) + start_rva;
@@ -387,13 +426,45 @@ void report_error(std::wstring_view operation, DWORD error) {
         return false;
     }
 
+    void* remote_config = VirtualAllocEx(
+        process,
+        nullptr,
+        sizeof(config),
+        MEM_RESERVE | MEM_COMMIT,
+        PAGE_READWRITE);
+    if (remote_config == nullptr) {
+        error = GetLastError();
+        return false;
+    }
+    SIZE_T written = 0;
+    const BOOL config_written = WriteProcessMemory(
+            process,
+            remote_config,
+            &config,
+            sizeof(config),
+            &written);
+    if (config_written == FALSE || written != sizeof(config)) {
+        error = config_written == FALSE
+            ? GetLastError()
+            : ERROR_PARTIAL_COPY;
+        VirtualFreeEx(process, remote_config, 0, MEM_RELEASE);
+        return false;
+    }
+
     DWORD result = ERROR_SUCCESS;
     if (!remote_call(
             process,
             static_cast<std::uintptr_t>(start),
-            nullptr,
+            remote_config,
             result,
             error)) {
+        // A timeout leaves the remote call live. The caller terminates the
+        // failed launch, so its argument must remain valid until then.
+        return false;
+    }
+    if (VirtualFreeEx(
+            process, remote_config, 0, MEM_RELEASE) == FALSE) {
+        error = GetLastError();
         return false;
     }
     if (result != ERROR_SUCCESS && result != ERROR_ALREADY_EXISTS) {
@@ -406,21 +477,53 @@ void report_error(std::wstring_view operation, DWORD error) {
 }  // namespace
 
 int wmain(int argc, wchar_t** argv) {
-    if (argc < 3) {
+    const std::vector<std::wstring> arguments(argv, argv + argc);
+    const auto usage = []() {
         std::wcerr
-            << L"Usage: opennova_retail_injector.exe "
-               L"<Jointops.exe> <opennova_retail_hook.dll> [game arguments...]\n";
+            << L"Usage: retail_hook_injector.exe "
+               L"--game-dir <dir> --role <retail-host|retail-client> "
+               L"--pipe <name> --run-id <id> --stream-id <id> "
+               L"--scenario <name> --mission <name> [--allow-writes] "
+               L"-- /w /exp revx02\n";
+    };
+    const auto parsed =
+        opennova::retail_hook::windows::parse_injector_cli(arguments);
+    if (!parsed) {
+        std::wcerr << L"Invalid arguments: " << parsed.error << L"\n";
+        usage();
         return 1;
     }
-
+    const auto& options = parsed.options;
     DWORD error = ERROR_SUCCESS;
+    std::wstring game_directory;
     std::wstring executable_path;
-    std::wstring hook_path;
-    if (!absolute_path(argv[1], executable_path, error)) {
+    if (!absolute_path(
+            options.game_directory.c_str(), game_directory, error)) {
+        report_error(L"Resolve game directory", error);
+        return 2;
+    }
+    std::wstring executable_input = game_directory;
+    if (!executable_input.empty() &&
+        executable_input.back() != L'\\' &&
+        executable_input.back() != L'/') {
+        executable_input.push_back(L'\\');
+    }
+    executable_input += L"Jointops.exe";
+    if (!absolute_path(
+            executable_input.c_str(), executable_path, error)) {
         report_error(L"Resolve Jointops.exe path", error);
         return 2;
     }
-    if (!absolute_path(argv[2], hook_path, error)) {
+
+    std::wstring injector_path;
+    if (!current_module_path(injector_path, error)) {
+        report_error(L"Resolve injector path", error);
+        return 2;
+    }
+    std::wstring hook_input =
+        parent_directory(injector_path) + L"\\opennova_retail_hook.dll";
+    std::wstring hook_path;
+    if (!absolute_path(hook_input.c_str(), hook_path, error)) {
         report_error(L"Resolve hook DLL path", error);
         return 2;
     }
@@ -475,12 +578,32 @@ int wmain(int argc, wchar_t** argv) {
         return 2;
     }
 
-    std::wstring command_line = quote_argument(executable_path);
-    for (int index = 3; index < argc; ++index) {
-        command_line.push_back(L' ');
-        command_line += quote_argument(argv[index]);
+    HookStartConfig config{};
+    config.structure_size = sizeof(config);
+    config.version =
+        opennova::retail_hook::windows::kHookStartConfigVersion;
+    config.allow_writes = options.allow_writes ? 1U : 0U;
+    config.role = options.role ==
+            opennova::retail_hook::windows::RetailRole::host
+        ? opennova::retail_hook::windows::HookRole::retail_host
+        : opennova::retail_hook::windows::HookRole::retail_client;
+    if (!copy_config_text(options.pipe_name, config.pipe_name) ||
+        !copy_config_text(options.run_id, config.run_id) ||
+        !copy_config_text(options.stream_id, config.stream_id) ||
+        !copy_config_text(options.scenario, config.scenario) ||
+        !copy_config_text(options.mission, config.mission)) {
+        std::wcerr
+            << L"Pipe and metadata values must fit the versioned hook "
+               L"configuration and may not be empty.\n";
+        return 2;
     }
-    const std::wstring working_directory = parent_directory(executable_path);
+
+    std::wstring command_line = quote_argument(executable_path);
+    for (const std::wstring& argument : options.game_arguments) {
+        command_line.push_back(L' ');
+        command_line += quote_argument(argument);
+    }
+    const std::wstring working_directory = game_directory;
 
     STARTUPINFOW startup{};
     startup.cb = sizeof(startup);
@@ -549,16 +672,25 @@ int wmain(int argc, wchar_t** argv) {
         report_error(L"Inject hook with LoadLibraryA", error);
         return abort_launch();
     }
-    if (!start_hook(process.hProcess, remote_hook, start_rva, error)) {
+    if (!start_hook(
+            process.hProcess,
+            remote_hook,
+            start_rva,
+            config,
+            error)) {
         report_error(L"Invoke OpenNovaRetailHook_Start", error);
         return abort_launch();
     }
     const DWORD process_id = process.dwProcessId;
     CloseHandle(process.hThread);
     CloseHandle(process.hProcess);
-    std::wcout
-        << L"Validated supported Jointops.exe, injected the read-only hook, "
-           L"and started validation outside loader lock in process "
-        << process_id << L".\n";
+    std::wcout << L"JO_PROCESS_ID=" << process_id << L"\n";
+    std::wcout << L"Validated supported Jointops.exe, injected the "
+               << (options.allow_writes
+                       ? L"explicitly write-enabled"
+                       : L"read-only")
+               << L" hook, and started validation outside loader lock in "
+                  L"process "
+               << process_id << L".\n";
     return 0;
 }

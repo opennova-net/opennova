@@ -4,6 +4,7 @@ project(opennova LANGUAGES C CXX)
 # Add libraries
 # io first: header-only shared infrastructure (byte/bit IO, fixed-point, strutil)
 add_subdirectory(libs/io)
+add_subdirectory(libs/parity)
 # Exact, fixed-width views of witnessed retail process memory. Header-only so
 # research tools consume the same declarations without pulling runtime code
 # into an injected process.
@@ -96,6 +97,10 @@ add_subdirectory(libs/novaworld)
 # world (opennova_world) and the wire codec (opennova_novaworld); linked into the
 # Godot client GDExtension and the netsim tests, not the FFI shared lib.
 add_subdirectory(libs/netsim)
+
+# OpenNova's typed adapter from the live World/client-view state into portable
+# parity evidence. Kept separate so the retail producer never links the runtime.
+add_subdirectory(libs/parity_opennova)
 
 # npruntime — the IDA-faithful in-match NAPI NP runtime (the named server/client
 # state machines + frame loop) built on the netsim seam. Godot-free and socket-free;
@@ -280,6 +285,7 @@ endif()
 # Research-only retail introspection. The validation core is portable and
 # testable on every host; the injected DLL/injector are added only by a 32-bit
 # Windows configure inside the tool's own CMake file.
+add_subdirectory(tools/parity)
 add_subdirectory(tools/retail_hook)
 
 # Enable testing

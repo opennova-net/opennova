@@ -59,7 +59,7 @@ func _ready() -> void:
 	if not OS.get_environment("NW_REPLAY").is_empty():
 		_enter_net_session()
 		return
-	var dir := ResourceDirSettings.get_resource_dir()
+	var dir := ResourceDirSettings.get_runtime_resource_dir()
 	if dir.is_empty():
 		_request_resource_dir()
 		return

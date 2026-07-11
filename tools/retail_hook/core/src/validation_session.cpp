@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstring>
 #include <limits>
 #include <sstream>
 #include <type_traits>
@@ -18,7 +19,6 @@ namespace abi = opennova::retail::jo_1_7_5_7;
 using opennova::retail::Address32;
 
 constexpr std::uint32_t kHardMaximumPlayerCapacity = 65536;
-constexpr std::uint32_t kHardMaximumPoolIndex = 63;
 
 static_assert(std::is_same_v<decltype(abi::PlayerEntity::owner_connection_id),
                              std::uint32_t>);
@@ -117,6 +117,57 @@ template <typename T>
     return CheckResult::success();
 }
 
+template <typename T>
+[[nodiscard]] CheckResult write_verified(IMemory& memory,
+                                         ProcessAddress address,
+                                         const T& value,
+                                         MutationAudit& audit) {
+    static_assert(std::is_trivially_copyable_v<T>);
+    audit.target_address = address;
+    audit.stage = MutationStage::validated;
+    // IMemory::write returning false cannot prove the destination was left
+    // untouched (the production adapter may fail after the copy), so record
+    // that the write boundary was crossed before making the call.
+    audit.stage = MutationStage::write_attempted;
+    if (!memory.write(address, &value, sizeof(value))) {
+        return CheckResult::failure(ValidationError::memory_write_failed,
+                                    "memory write was attempted but did not report success");
+    }
+    audit.stage = MutationStage::written;
+
+    T observed{};
+    auto check = read_object(memory, address, observed, "mutated field");
+    if (!check) {
+        return check;
+    }
+    if (std::memcmp(&observed, &value, sizeof(value)) != 0) {
+        return CheckResult::failure(
+            ValidationError::write_verification_failed,
+            "mutated field did not retain the requested value");
+    }
+    audit.stage = MutationStage::verified;
+    return CheckResult::success();
+}
+
+[[nodiscard]] bool pose_matches(const abi::WeaponPose& actual,
+                                const WeaponPoseValue& expected) noexcept {
+    return actual.position.x == expected.position_x &&
+           actual.position.y == expected.position_y &&
+           actual.position.z == expected.position_z &&
+           actual.rotation.yaw == expected.rotation_yaw_raw &&
+           actual.rotation.pitch == expected.rotation_pitch_raw &&
+           actual.rotation.roll == expected.rotation_roll_raw;
+}
+
+[[nodiscard]] abi::WeaponPose to_abi_pose(const WeaponPoseValue& value) noexcept {
+    return abi::WeaponPose{
+        {value.position_x, value.position_y, value.position_z},
+        {value.rotation_yaw_raw,
+         value.rotation_pitch_raw,
+         value.rotation_roll_raw},
+    };
+}
+
 [[nodiscard]] std::string bounded_name(const abi::PlayerEntity& entity) {
     const auto* characters = reinterpret_cast<const char*>(&entity.name);
     std::size_t length = 0;
@@ -141,6 +192,9 @@ struct LoadedPlayerPool {
     std::size_t used_bytes{};
 };
 
+using PoolDescriptors =
+    std::array<abi::EntityPool, abi::kEntityPoolCount>;
+
 }  // namespace
 
 struct ValidationSession::Impl {
@@ -148,17 +202,98 @@ struct ValidationSession::Impl {
     ProcessAddress image_base{};
     BuildProfile profile{};
     SessionOptions options{};
-    ProcessAddress player_pool_descriptor{};
+    ProcessAddress pool_descriptor_table{};
     ProcessAddress local_player_global{};
 
-    [[nodiscard]] CheckResult load_player_pool(LoadedPlayerPool& loaded) const {
-        auto check = read_object(*memory,
-                                 player_pool_descriptor,
-                                 loaded.descriptor,
-                                 "player pool descriptor");
+    [[nodiscard]] CheckResult load_pool_descriptors(
+        PoolDescriptors& descriptors,
+        std::vector<PoolDescriptorObservation>* observations = nullptr) const {
+        auto check = read_object(
+            *memory,
+            pool_descriptor_table,
+            descriptors,
+            "entity pool descriptor table");
         if (!check) {
             return check;
         }
+
+        if (observations != nullptr) {
+            observations->clear();
+            observations->reserve(descriptors.size());
+        }
+        for (std::size_t index = 0; index < descriptors.size(); ++index) {
+            const abi::EntityPool& descriptor = descriptors[index];
+            const abi::EntityPoolShape expected =
+                abi::kEntityPoolShapes[index];
+            if (descriptor.element_size != expected.element_size) {
+                std::ostringstream detail;
+                detail << "pool " << index << " element size is "
+                       << descriptor.element_size << ", expected "
+                       << expected.element_size;
+                return CheckResult::failure(
+                    ValidationError::element_size_mismatch,
+                    detail.str());
+            }
+            if (descriptor.capacity != expected.capacity) {
+                std::ostringstream detail;
+                detail << "pool " << index << " capacity is "
+                       << descriptor.capacity << ", expected "
+                       << expected.capacity;
+                return CheckResult::failure(
+                    ValidationError::implausible_pool_count,
+                    detail.str());
+            }
+            if (descriptor.used > descriptor.capacity) {
+                return CheckResult::failure(
+                    ValidationError::corrupt_pool_counts,
+                    "pool " + std::to_string(index) +
+                        " used count exceeds its capacity");
+            }
+            if (descriptor.data.is_null()) {
+                return CheckResult::failure(
+                    ValidationError::null_address,
+                    "pool " + std::to_string(index) +
+                        " has a null data pointer");
+            }
+            std::size_t capacity_bytes{};
+            if (!checked_byte_count(
+                    descriptor.capacity,
+                    descriptor.element_size,
+                    capacity_bytes) ||
+                !checked_range(
+                    descriptor.data.value(), capacity_bytes)) {
+                return CheckResult::failure(
+                    ValidationError::address_overflow,
+                    "pool " + std::to_string(index) +
+                        " capacity range overflows");
+            }
+            if (observations != nullptr) {
+                ProcessAddress descriptor_address{};
+                if (!checked_add(
+                        pool_descriptor_table,
+                        index * sizeof(abi::EntityPool),
+                        descriptor_address)) {
+                    return CheckResult::failure(
+                        ValidationError::address_overflow,
+                        "pool descriptor address overflows");
+                }
+                observations->push_back(PoolDescriptorObservation{
+                    static_cast<std::uint32_t>(index),
+                    descriptor_address,
+                    descriptor.data.value(),
+                    descriptor.element_size,
+                    descriptor.used,
+                    descriptor.capacity,
+                });
+            }
+        }
+        return CheckResult::success();
+    }
+
+    [[nodiscard]] CheckResult validate_player_pool(
+        const abi::EntityPool& descriptor,
+        LoadedPlayerPool& loaded) const {
+        loaded.descriptor = descriptor;
 
         if (loaded.descriptor.element_size != sizeof(abi::PlayerEntity)) {
             std::ostringstream detail;
@@ -217,6 +352,17 @@ struct ValidationSession::Impl {
         }
 
         return CheckResult::success();
+    }
+
+    [[nodiscard]] CheckResult load_player_pool(
+        LoadedPlayerPool& loaded) const {
+        PoolDescriptors descriptors{};
+        auto check = load_pool_descriptors(descriptors);
+        if (!check) {
+            return check;
+        }
+        return validate_player_pool(
+            descriptors[profile.player_pool_index], loaded);
     }
 
     [[nodiscard]] CheckResult player_address(const LoadedPlayerPool& loaded,
@@ -311,6 +457,14 @@ CheckResult CheckResult::failure(ValidationError error, std::string detail) {
     return CheckResult{error, std::move(detail)};
 }
 
+bool MutationResult::ok() const noexcept {
+    return check.ok() && audit.stage == MutationStage::verified;
+}
+
+MutationResult::operator bool() const noexcept {
+    return ok();
+}
+
 bool ValidationSnapshot::ok() const noexcept {
     return check.ok();
 }
@@ -349,7 +503,7 @@ OpenResult ValidationSession::open(IMemory& memory,
         profile.symbols.local_player_entity == 0 ||
         profile.maximum_player_capacity == 0 ||
         profile.maximum_player_capacity > kHardMaximumPlayerCapacity ||
-        profile.player_pool_index > kHardMaximumPoolIndex ||
+        profile.player_pool_index >= abi::kEntityPoolCount ||
         digest_is_zero(profile.identity.sha256)) {
         return fail(ValidationError::invalid_profile,
                     "build profile is incomplete or outside safety limits");
@@ -366,13 +520,8 @@ OpenResult ValidationSession::open(IMemory& memory,
                     "executable identity does not match the selected profile");
     }
 
-    const auto pool_offset = static_cast<std::uint64_t>(profile.player_pool_index) *
-                             sizeof(abi::EntityPool);
-    const auto pool_rva = static_cast<std::uint64_t>(profile.symbols.entity_pools) +
-                          pool_offset;
-    if (pool_rva > std::numeric_limits<std::uint32_t>::max() ||
-        !range_within_image(static_cast<std::uint32_t>(pool_rva),
-                            sizeof(abi::EntityPool),
+    if (!range_within_image(profile.symbols.entity_pools,
+                            sizeof(PoolDescriptors),
                             executable.image_size) ||
         !range_within_image(profile.symbols.local_player_entity,
                             sizeof(Address32<abi::PlayerEntity>),
@@ -381,16 +530,20 @@ OpenResult ValidationSession::open(IMemory& memory,
                     "profile symbols fall outside the executable image");
     }
 
-    ProcessAddress player_pool_descriptor{};
+    ProcessAddress pool_descriptor_table{};
     ProcessAddress local_player_global{};
-    if (!checked_add(image_base, pool_rva, player_pool_descriptor) ||
+    if (!checked_add(
+            image_base,
+            profile.symbols.entity_pools,
+            pool_descriptor_table) ||
         !checked_add(image_base,
                      profile.symbols.local_player_entity,
                      local_player_global)) {
         return fail(ValidationError::address_overflow,
                     "relocating profile symbols overflowed 32-bit addresses");
     }
-    if (!memory.readable(player_pool_descriptor, sizeof(abi::EntityPool)) ||
+    if (!memory.readable(
+            pool_descriptor_table, sizeof(PoolDescriptors)) ||
         !memory.readable(local_player_global,
                          sizeof(Address32<abi::PlayerEntity>))) {
         return fail(ValidationError::unreadable_memory,
@@ -402,7 +555,7 @@ OpenResult ValidationSession::open(IMemory& memory,
     impl->image_base = image_base;
     impl->profile = profile;
     impl->options = options;
-    impl->player_pool_descriptor = player_pool_descriptor;
+    impl->pool_descriptor_table = pool_descriptor_table;
     impl->local_player_global = local_player_global;
 
     auto session = std::unique_ptr<ValidationSession>(
@@ -426,8 +579,15 @@ ValidationSnapshot ValidationSession::sample(ProbeSet probes) const {
         return snapshot;
     }
 
+    PoolDescriptors descriptors{};
+    snapshot.check = impl_->load_pool_descriptors(
+        descriptors, &snapshot.pool_descriptors);
+    if (!snapshot.check) {
+        return snapshot;
+    }
     LoadedPlayerPool loaded{};
-    snapshot.check = impl_->load_player_pool(loaded);
+    snapshot.check = impl_->validate_player_pool(
+        descriptors[impl_->profile.player_pool_index], loaded);
     if (!snapshot.check) {
         return snapshot;
     }
@@ -507,6 +667,8 @@ ValidationSnapshot ValidationSession::sample(ProbeSet probes) const {
                 observation.weapon = WeaponObservation{
                     entity.weapon_def.value(),
                     bounded_name(weapon),
+                    weapon.special_hold,
+                    weapon.attack_anim,
                     weapon.hip_pose.position.x,
                     weapon.hip_pose.position.y,
                     weapon.hip_pose.position.z,
@@ -533,20 +695,49 @@ ValidationSnapshot ValidationSession::sample(ProbeSet probes) const {
     return snapshot;
 }
 
-CheckResult ValidationSession::apply(const Mutation& mutation) {
+MutationResult ValidationSession::apply(const Mutation& mutation) {
+    MutationAudit audit = std::visit(
+        [](const auto& requested) {
+            using Request = std::decay_t<decltype(requested)>;
+            MutationKind kind{};
+            if constexpr (std::is_same_v<Request, SetPlayerHealth>) {
+                kind = MutationKind::player_health;
+            } else if constexpr (std::is_same_v<Request, SetPlayerTeam>) {
+                kind = MutationKind::player_team;
+            } else if constexpr (std::is_same_v<Request, SetEquippedAdmIndex>) {
+                kind = MutationKind::equipped_adm_index;
+            } else if constexpr (std::is_same_v<Request, SetActiveWeaponPose>) {
+                kind = MutationKind::active_weapon_pose;
+            } else {
+                static_assert(std::is_same_v<Request, SetActiveWeaponFov>);
+                kind = MutationKind::active_weapon_render_fov;
+            }
+            MutationAudit result{};
+            result.request = requested;
+            result.kind = kind;
+            result.player_slot = requested.player_slot;
+            result.expected_owner_connection_id =
+                requested.expected_owner_connection_id;
+            return result;
+        },
+        mutation);
+
     if (!impl_->options.writes_enabled) {
-        return CheckResult::failure(ValidationError::writes_disabled,
-                                    "session was opened with writes disabled");
+        return MutationResult{
+            CheckResult::failure(ValidationError::writes_disabled,
+                                 "session was opened with writes disabled"),
+            audit,
+        };
     }
 
     LoadedPlayerPool loaded{};
     auto check = impl_->load_player_pool(loaded);
     if (!check) {
-        return check;
+        return MutationResult{std::move(check), audit};
     }
 
-    return std::visit(
-        [this, &loaded](const auto& requested) -> CheckResult {
+    check = std::visit(
+        [this, &loaded, &audit](const auto& requested) -> CheckResult {
             using Request = std::decay_t<decltype(requested)>;
 
             ProcessAddress player_address{};
@@ -587,6 +778,8 @@ CheckResult ValidationSession::apply(const Mutation& mutation) {
                     return CheckResult::failure(ValidationError::address_overflow,
                                                 "health field address overflows");
                 }
+                return write_verified(
+                    *impl_->memory, field_address, requested.value, audit);
             } else if constexpr (std::is_same_v<Request, SetPlayerTeam>) {
                 if (entity.team != requested.expected_value) {
                     return CheckResult::failure(
@@ -600,8 +793,9 @@ CheckResult ValidationSession::apply(const Mutation& mutation) {
                     return CheckResult::failure(ValidationError::address_overflow,
                                                 "team field address overflows");
                 }
-            } else {
-                static_assert(std::is_same_v<Request, SetEquippedAdmIndex>);
+                return write_verified(
+                    *impl_->memory, field_address, requested.value, audit);
+            } else if constexpr (std::is_same_v<Request, SetEquippedAdmIndex>) {
                 if (entity.equipped_adm_index != requested.expected_value) {
                     return CheckResult::failure(
                         ValidationError::mutation_precondition_failed,
@@ -615,31 +809,102 @@ CheckResult ValidationSession::apply(const Mutation& mutation) {
                         ValidationError::address_overflow,
                         "equipped ADM index field address overflows");
                 }
-            }
+                return write_verified(
+                    *impl_->memory, field_address, requested.value, audit);
+            } else if constexpr (std::is_same_v<Request, SetActiveWeaponPose>) {
+                if (entity.weapon_def.is_null()) {
+                    return CheckResult::failure(
+                        ValidationError::null_address,
+                        player_context(requested.player_slot) +
+                            " has no active weapon definition");
+                }
+                audit.active_weapon_address = entity.weapon_def.value();
+                if (audit.active_weapon_address !=
+                    requested.expected_weapon_address) {
+                    return CheckResult::failure(
+                        ValidationError::mutation_precondition_failed,
+                        player_context(requested.player_slot) +
+                            " active weapon no longer has the expected address");
+                }
 
-            if (!impl_->memory->write(field_address,
-                                      &requested.value,
-                                      sizeof(requested.value))) {
-                return CheckResult::failure(ValidationError::memory_write_failed,
-                                            "memory adapter rejected the mutation");
-            }
+                abi::WeaponDef weapon{};
+                result = read_object(
+                    *impl_->memory,
+                    audit.active_weapon_address,
+                    weapon,
+                    player_context(requested.player_slot) +
+                        " active weapon definition");
+                if (!result) {
+                    return result;
+                }
+                const abi::WeaponPose& actual =
+                    requested.pose == ActiveWeaponPose::hip
+                    ? weapon.hip_pose
+                    : weapon.aimed_pose;
+                if (!pose_matches(actual, requested.expected_value)) {
+                    return CheckResult::failure(
+                        ValidationError::mutation_precondition_failed,
+                        "active weapon pose no longer has the expected value");
+                }
+                const std::size_t offset =
+                    requested.pose == ActiveWeaponPose::hip
+                    ? offsetof(abi::WeaponDef, hip_pose)
+                    : offsetof(abi::WeaponDef, aimed_pose);
+                if (!checked_add(
+                        audit.active_weapon_address, offset, field_address)) {
+                    return CheckResult::failure(
+                        ValidationError::address_overflow,
+                        "active weapon pose field address overflows");
+                }
+                const abi::WeaponPose value = to_abi_pose(requested.value);
+                return write_verified(
+                    *impl_->memory, field_address, value, audit);
+            } else {
+                static_assert(std::is_same_v<Request, SetActiveWeaponFov>);
+                if (entity.weapon_def.is_null()) {
+                    return CheckResult::failure(
+                        ValidationError::null_address,
+                        player_context(requested.player_slot) +
+                            " has no active weapon definition");
+                }
+                audit.active_weapon_address = entity.weapon_def.value();
+                if (audit.active_weapon_address !=
+                    requested.expected_weapon_address) {
+                    return CheckResult::failure(
+                        ValidationError::mutation_precondition_failed,
+                        player_context(requested.player_slot) +
+                            " active weapon no longer has the expected address");
+                }
 
-            decltype(requested.value) observed{};
-            result = read_object(*impl_->memory,
-                                 field_address,
-                                 observed,
-                                 "mutated field");
-            if (!result) {
-                return result;
+                abi::WeaponDef weapon{};
+                result = read_object(
+                    *impl_->memory,
+                    audit.active_weapon_address,
+                    weapon,
+                    player_context(requested.player_slot) +
+                        " active weapon definition");
+                if (!result) {
+                    return result;
+                }
+                if (weapon.render_fov != requested.expected_value) {
+                    return CheckResult::failure(
+                        ValidationError::mutation_precondition_failed,
+                        "active weapon render FOV no longer has the expected value");
+                }
+                if (!checked_add(
+                        audit.active_weapon_address,
+                        offsetof(abi::WeaponDef, render_fov),
+                        field_address)) {
+                    return CheckResult::failure(
+                        ValidationError::address_overflow,
+                        "active weapon render FOV field address overflows");
+                }
+                return write_verified(
+                    *impl_->memory, field_address, requested.value, audit);
             }
-            if (observed != requested.value) {
-                return CheckResult::failure(
-                    ValidationError::write_verification_failed,
-                    "mutated field did not retain the requested value");
-            }
-            return CheckResult::success();
         },
         mutation);
+    return MutationResult{std::move(check), audit};
 }
 
 }  // namespace opennova::retail_hook

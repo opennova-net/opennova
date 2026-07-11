@@ -15,6 +15,15 @@ const EXPANSION_KEY := "expansion"
 const GAME_KEY := "game"
 const RECENT_KEY := "recent_dirs"
 const RECENT_LIMIT := 8
+const RUNTIME_DIR_ENV := "OPENNOVA_RESOURCE_DIR"
+
+
+## The resource directory for this process. Validation and automation may override
+## the persisted user choice without mutating it; normal interactive runs keep using
+## the shared editor/runtime setting.
+static func get_runtime_resource_dir() -> String:
+	var override := OS.get_environment(RUNTIME_DIR_ENV).strip_edges()
+	return override if not override.is_empty() else get_resource_dir()
 
 
 ## The persisted resource directory, or "" when unset / no longer a valid dir.

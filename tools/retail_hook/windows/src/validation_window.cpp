@@ -1,4 +1,5 @@
 #include <opennova/retail_hook/windows/validation_window.h>
+#include <opennova/retail_hook/windows/retail_capture_agent.h>
 
 #include <algorithm>
 #include <iomanip>
@@ -14,7 +15,10 @@ namespace {
 static_assert(sizeof(void*) == 4, "The retail hook must be compiled for 32-bit Windows.");
 
 constexpr wchar_t kWindowClass[] = L"OpenNovaRetailValidationWindow";
-constexpr wchar_t kWindowTitle[] = L"OpenNova Retail Validation (read-only)";
+constexpr wchar_t kReadOnlyWindowTitle[] =
+    L"OpenNova Retail Validation (read-only)";
+constexpr wchar_t kWriteEnabledWindowTitle[] =
+    L"OpenNova Retail Validation (WRITE-ENABLED)";
 constexpr UINT_PTR kSampleTimer = 1;
 constexpr UINT kSampleIntervalMs = 750;
 constexpr int kLineHeight = 19;
@@ -60,9 +64,15 @@ public:
     ValidationWindow(
         HINSTANCE module,
         ValidationSession* session,
+        RetailCaptureAgent* capture,
+        bool writes_enabled,
+        std::wstring window_identity,
         std::wstring startup_diagnostic)
         : module_(module),
           session_(session),
+          capture_(capture),
+          writes_enabled_(writes_enabled),
+          window_identity_(std::move(window_identity)),
           startup_diagnostic_(std::move(startup_diagnostic)) {}
 
     [[nodiscard]] DWORD run() {
@@ -77,10 +87,17 @@ public:
             return GetLastError();
         }
 
+        std::wstring window_title = writes_enabled_
+            ? kWriteEnabledWindowTitle
+            : kReadOnlyWindowTitle;
+        if (!window_identity_.empty()) {
+            window_title += L" - ";
+            window_title += window_identity_;
+        }
         HWND window = CreateWindowExW(
             WS_EX_APPWINDOW,
             kWindowClass,
-            kWindowTitle,
+            window_title.c_str(),
             WS_OVERLAPPEDWINDOW | WS_VSCROLL,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
@@ -151,6 +168,14 @@ private:
                 InvalidateRect(window_, nullptr, FALSE);
                 return 0;
             }
+            if (wparam >= VK_F6 && wparam <= VK_F10) {
+                mutate(
+                    static_cast<UINT>(wparam),
+                    (GetKeyState(VK_SHIFT) & 0x8000) != 0);
+                sample();
+                InvalidateRect(window_, nullptr, FALSE);
+                return 0;
+            }
             break;
         case WM_VSCROLL:
             scroll(LOWORD(wparam));
@@ -190,11 +215,158 @@ private:
         return output.str();
     }
 
+    void mutate(UINT key, bool shifted) {
+        if (!writes_enabled_ || session_ == nullptr) {
+            last_mutation_ =
+                L"Mutation rejected: launch without --allow-writes.";
+            return;
+        }
+        const ValidationSnapshot snapshot =
+            session_->sample(ProbeSet::players);
+        if (!snapshot) {
+            last_mutation_ =
+                L"Mutation pre-sample failed: " +
+                widen(snapshot.check.detail);
+            return;
+        }
+        const auto local = std::find_if(
+            snapshot.players.begin(),
+            snapshot.players.end(),
+            [](const PlayerObservation& player) {
+                return player.is_local;
+            });
+        if (local == snapshot.players.end()) {
+            last_mutation_ =
+                L"Mutation rejected: no local player is present.";
+            return;
+        }
+
+        Mutation request{};
+        if (key == VK_F6) {
+            if (local->health ==
+                std::numeric_limits<std::int16_t>::min()) {
+                last_mutation_ =
+                    L"Mutation rejected: health is already at its type limit.";
+                return;
+            }
+            request = SetPlayerHealth{
+                local->slot,
+                local->owner_connection_id,
+                local->health,
+                static_cast<std::int16_t>(local->health - 1),
+            };
+        } else if (key == VK_F7) {
+            request = SetPlayerTeam{
+                local->slot,
+                local->owner_connection_id,
+                local->team,
+                static_cast<std::int16_t>(
+                    local->team == 1 ? 2 : 1),
+            };
+        } else if (key == VK_F8) {
+            request = SetEquippedAdmIndex{
+                local->slot,
+                local->owner_connection_id,
+                local->equipped_adm_index,
+                static_cast<std::uint8_t>(
+                    local->equipped_adm_index + 1U),
+            };
+        } else {
+            if (!local->weapon.has_value()) {
+                last_mutation_ =
+                    L"Mutation rejected: no active weapon definition.";
+                return;
+            }
+            const WeaponObservation& weapon = *local->weapon;
+            if (key == VK_F9) {
+                request = SetActiveWeaponFov{
+                    local->slot,
+                    local->owner_connection_id,
+                    weapon.address,
+                    weapon.render_fov,
+                    weapon.render_fov - 1.0F,
+                };
+            } else {
+                SetActiveWeaponPose pose{};
+                pose.player_slot = local->slot;
+                pose.expected_owner_connection_id =
+                    local->owner_connection_id;
+                pose.expected_weapon_address = weapon.address;
+                pose.pose = shifted
+                    ? ActiveWeaponPose::aimed
+                    : ActiveWeaponPose::hip;
+                pose.expected_value = shifted
+                    ? WeaponPoseValue{
+                          weapon.alternate_position_x,
+                          weapon.alternate_position_y,
+                          weapon.alternate_position_z,
+                          weapon.alternate_rotation_yaw_raw,
+                          weapon.alternate_rotation_pitch_raw,
+                          weapon.alternate_rotation_roll_raw,
+                      }
+                    : WeaponPoseValue{
+                          weapon.position_x,
+                          weapon.position_y,
+                          weapon.position_z,
+                          weapon.rotation_yaw_raw,
+                          weapon.rotation_pitch_raw,
+                          weapon.rotation_roll_raw,
+                      };
+                pose.value = pose.expected_value;
+                pose.value.position_x += 1.0F;
+                request = pose;
+            }
+        }
+
+        const MutationResult result = session_->apply(request);
+        const bool audit_queued =
+            capture_ != nullptr &&
+            capture_->capture_mutation(result);
+        const bool possibly_applied =
+            result.audit.stage == MutationStage::write_attempted ||
+            result.audit.stage == MutationStage::written;
+        if (result) {
+            last_mutation_ = audit_queued
+                ? L"Mutation verified and audit queued."
+                : L"Mutation verified, but the bounded audit queue rejected "
+                  L"the record.";
+        } else if (possibly_applied) {
+            last_mutation_ =
+                L"WRITE MAY HAVE OCCURRED but verification failed [" +
+                widen(validation_error_name(result.check.error)) +
+                L"]: " + widen(result.check.detail) +
+                L". Do not blindly retry." +
+                (audit_queued
+                     ? L" (unverified audit queued)"
+                     : L" (audit queue rejected the unverified record)");
+        } else {
+            last_mutation_ = L"Mutation rejected before any write [" +
+                widen(validation_error_name(result.check.error)) +
+                L"]: " + widen(result.check.detail) +
+                (audit_queued
+                     ? L" (audit queued)"
+                     : L" (audit queue rejected the record)");
+        }
+    }
+
     void sample() {
         lines_.clear();
         has_error_ = false;
-        lines_.emplace_back(L"OpenNova retail memory validator | READ ONLY");
-        lines_.emplace_back(L"F5: sample now | Esc: close | automatic sample: 750 ms");
+        lines_.emplace_back(
+            writes_enabled_
+            ? L"OpenNova retail memory validator | WRITE-ENABLED"
+            : L"OpenNova retail memory validator | READ ONLY");
+        lines_.emplace_back(
+            L"F5: sample | Esc: close | UI refresh: 750 ms "
+            L"(parity capture: nominal 60 Hz)");
+        if (writes_enabled_) {
+            lines_.emplace_back(
+                L"F6: health -1 | F7: toggle team | F8: ADM +1 | "
+                L"F9: FOV -1 | F10: hip X +1 | Shift+F10: aimed X +1");
+        }
+        if (!last_mutation_.empty()) {
+            lines_.push_back(last_mutation_);
+        }
         if (!startup_diagnostic_.empty()) {
             lines_.push_back(startup_diagnostic_);
         }
@@ -223,6 +395,19 @@ private:
             std::to_wstring(snapshot.player_pool_capacity));
         lines_.emplace_back(
             L"Observed players: " + std::to_wstring(snapshot.players.size()));
+        for (const PoolDescriptorObservation& pool :
+             snapshot.pool_descriptors) {
+            std::wostringstream descriptor;
+            descriptor << L"Pool " << pool.index
+                       << L": data=" << hexadecimal(pool.data_address)
+                       << L" stride=" << pool.element_size
+                       << L" used=" << pool.used
+                       << L" capacity=" << pool.capacity
+                       << (pool.index == 0
+                               ? L" | entity records decoded"
+                               : L" | descriptor only");
+            lines_.push_back(descriptor.str());
+        }
         for (const PlayerObservation& player : snapshot.players) {
             append_player(player);
         }
@@ -450,7 +635,11 @@ private:
     HINSTANCE module_{};
     HWND window_{};
     ValidationSession* session_{};
+    RetailCaptureAgent* capture_{};
+    bool writes_enabled_{};
+    std::wstring window_identity_;
     std::wstring startup_diagnostic_;
+    std::wstring last_mutation_;
     std::vector<std::wstring> lines_;
     bool has_error_{};
     int scroll_line_{};
@@ -461,9 +650,31 @@ private:
 DWORD run_validation_window(
     HINSTANCE module,
     ValidationSession* session,
+    RetailCaptureAgent* capture,
+    bool writes_enabled,
+    std::wstring window_identity,
     std::wstring startup_diagnostic) {
-    ValidationWindow window(module, session, std::move(startup_diagnostic));
+    ValidationWindow window(
+        module,
+        session,
+        capture,
+        writes_enabled,
+        std::move(window_identity),
+        std::move(startup_diagnostic));
     return window.run();
+}
+
+DWORD run_validation_window(
+    HINSTANCE module,
+    ValidationSession* session,
+    std::wstring startup_diagnostic) {
+    return run_validation_window(
+        module,
+        session,
+        nullptr,
+        false,
+        {},
+        std::move(startup_diagnostic));
 }
 
 }  // namespace opennova::retail_hook::windows

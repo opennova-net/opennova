@@ -105,6 +105,7 @@ Each workspace reads and writes the game's canonical formats directly. The packa
 | `deploy/`, `infra/` | Deployment stack for the NovaWorld service (Docker, Terraform); see [DEPLOY.md](DEPLOY.md). |
 | `scripts/` | Build, test, and packaging scripts (sh + ps1). |
 | `tests/` | C++ test suite (ctest). Godot tests live under `godot/tests/`. |
+| [`tools/retail_hook/`](tools/retail_hook/README.md) | Research-only retail ABI validator and the guided retail/OpenNova parity workflow. |
 | `third_party/` | Vendored deps: godot-cpp, gut, modsuperoed. |
 
 **Conventions.** Format libraries use `opennova_<domain>` CMake target names and the `opennova` C++ namespace; C ABI exports stay flat and domain-prefixed for FFI stability. The shared library target is `opennova_shared`, which bundles the core statics into `opennova.dll` / `libopennova.so`. Blender custom properties owned by this project use `opennova_*` keys.
@@ -186,6 +187,7 @@ Wire-compatible with the original protocols: our encoders produce bytes a stock 
 | Library | Description |
 |---------|-------------|
 | **io** | Header-only shared infrastructure: bounds-checked byte cursors, bit streams, little-endian primitives, fixed-point conversions, and ASCII string helpers the format libraries build on. |
+| **parity** | Typed, provenance-aware state/network traces plus capture and comparison contracts used to validate the retail RE against OpenNova. |
 
 ## Building
 

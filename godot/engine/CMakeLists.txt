@@ -4,6 +4,7 @@ project(opennova_godot LANGUAGES C CXX)
 
 add_subdirectory(../../third_party/godot-cpp godot-cpp)
 add_subdirectory(../../libs/io opennova_io)
+add_subdirectory(../../libs/parity opennova_parity)
 add_subdirectory(../../libs/pcx opennova_pcx)
 add_subdirectory(../../libs/fnt opennova_fnt)
 add_subdirectory(../../libs/foliage opennova_foliage)
@@ -55,6 +56,7 @@ add_subdirectory(../../libs/npwire opennova_npwire)
 add_subdirectory(../../libs/novaworld opennova_novaworld)
 # netsim: the in-match net seam (NetSystem + World<->wire bridge + loopback).
 add_subdirectory(../../libs/netsim opennova_netsim)
+add_subdirectory(../../libs/parity_opennova opennova_parity_opennova)
 # npruntime: the IDA-faithful in-match NAPI NP runtime (host owner loop + headless client).
 # PUBLIC-links netsim/novaworld/world/mission (all already linked below). The Godot binding
 # (nova_simulation) drives it as a thin adapter; protocol/crypto stay in libs (ADR 0009-0012).
@@ -210,7 +212,12 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     opennova_novaworld_gate
     opennova_netsim
     opennova_npruntime
+    opennova_parity_opennova
 )
+
+if(WIN32)
+    target_link_libraries(${TARGET_NAME} PRIVATE opennova_parity_windows)
+endif()
 
 # The bake worker thread in nova_terrain_build_job.cpp installs
 # _set_se_translator so Windows SEH (access violations, div/0, etc.) surfaces

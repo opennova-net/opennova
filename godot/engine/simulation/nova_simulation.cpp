@@ -6,8 +6,19 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <filesystem>
 #include <string>
+#include <thread>
 #include <utility>
+
+#include <godot_cpp/classes/os.hpp>
+#include <godot_cpp/variant/utility_functions.hpp>
+
+#include <parity/file_event_sink.h>
+#include <parity/opennova_capture.h>
+#ifdef _WIN32
+#include <opennova/parity/windows/named_pipe_event_sink.h>
+#endif
 
 #include "netsim/connection.h"
 #include "netsim/entity_wire_bridge.h" // build_player_uplink (joiner-side C2S 0x0C body)
@@ -53,6 +64,42 @@ uint64_t perf_now_us() {
 	using Clock = std::chrono::steady_clock;
 	return static_cast<uint64_t>(
 	    std::chrono::duration_cast<std::chrono::microseconds>(Clock::now().time_since_epoch()).count());
+}
+
+uint64_t parity_now_ns() {
+	using Clock = std::chrono::steady_clock;
+	return static_cast<uint64_t>(
+	    std::chrono::duration_cast<std::chrono::nanoseconds>(
+	        Clock::now().time_since_epoch()).count());
+}
+
+uint64_t parity_unix_now_ns() {
+	using Clock = std::chrono::system_clock;
+	return static_cast<uint64_t>(
+	    std::chrono::duration_cast<std::chrono::nanoseconds>(
+	        Clock::now().time_since_epoch()).count());
+}
+
+std::string parity_environment(const char *name) {
+	const String value = OS::get_singleton()->get_environment(name).strip_edges();
+	return std::string(value.utf8().get_data());
+}
+
+opennova::parity::RunRole parity_role(const std::string &value) {
+	if (value == "opennova-host" || value == "host") {
+		return opennova::parity::RunRole::host;
+	}
+	if (value == "opennova-client" || value == "client") {
+		return opennova::parity::RunRole::client;
+	}
+	if (value == "opennova-dedicated-server" || value == "dedicated-server") {
+		return opennova::parity::RunRole::dedicated_server;
+	}
+	return opennova::parity::RunRole::unknown;
+}
+
+std::filesystem::path parity_path(const std::string &utf8) {
+	return std::filesystem::u8path(utf8);
 }
 
 opennova::world::SeatType seat_type_from_variant(int value) {
@@ -165,9 +212,207 @@ opennova::bms::File make_demo_mission() {
 
 } // namespace
 
+struct NovaSimulation::ParityCaptureState {
+	opennova::parity::RunMetadata metadata;
+	std::unique_ptr<opennova::parity::IEventSink> sink;
+	opennova::parity::OpenNovaQueuedEventSink *queued_pipe = nullptr;
+	std::unique_ptr<opennova::parity::OpenNovaCaptureRecorder> recorder;
+	uint64_t next_frame = 0;
+	bool active = false;
+};
+
 NovaSimulation::NovaSimulation() {
 	reset_world();
 	set_process(true);
+}
+
+NovaSimulation::~NovaSimulation() {
+	if (parity_capture_ && parity_capture_->active && parity_capture_->recorder) {
+		if (!parity_capture_->recorder->finish()) {
+			UtilityFunctions::push_error(String("OpenNova parity capture did not finish: ") +
+				String(parity_capture_->recorder->last_error().c_str()));
+		}
+	}
+	if (parity_capture_ && parity_capture_->queued_pipe) {
+		for (int attempt = 0;
+				attempt < 250 &&
+				parity_capture_->queued_pipe->pending_count() != 0;
+				++attempt) {
+			if (parity_capture_->queued_pipe->drain()) break;
+			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+		}
+		if (parity_capture_->queued_pipe->pending_count() != 0) {
+			UtilityFunctions::push_error(
+				"OpenNova parity capture closed with pending pipe events");
+		}
+	}
+	parity_capture_.reset();
+}
+
+void NovaSimulation::ensure_parity_capture() {
+	if (parity_capture_) return;
+	parity_capture_ = std::make_unique<ParityCaptureState>();
+	const std::string trace_path = parity_environment("OPENNOVA_PARITY_TRACE");
+	if (trace_path.empty()) return;
+
+	opennova::parity::RunMetadata metadata{};
+	metadata.run_id = parity_environment("OPENNOVA_PARITY_RUN_ID");
+	metadata.producer = "opennova-godot";
+	metadata.build_id = parity_environment("OPENNOVA_PARITY_BUILD_ID");
+	if (metadata.build_id.empty()) {
+		metadata.build_id = "opennova-godot-worktree";
+	}
+	metadata.scenario = parity_environment("OPENNOVA_PARITY_SCENARIO");
+	metadata.started_unix_ns = parity_unix_now_ns();
+	metadata.identity.source = opennova::parity::SourceKind::opennova;
+	metadata.identity.role = parity_role(
+		parity_environment("OPENNOVA_PARITY_ROLE"));
+	metadata.identity.stream_id =
+		parity_environment("OPENNOVA_PARITY_STREAM_ID");
+	metadata.title = parity_environment("OPENNOVA_PARITY_TITLE");
+	metadata.expansion = parity_environment("OPENNOVA_PARITY_EXPANSION");
+	metadata.mission = parity_environment("OPENNOVA_PARITY_MISSION");
+	if (metadata.run_id.empty() || metadata.scenario.empty() ||
+		metadata.identity.role == opennova::parity::RunRole::unknown ||
+		metadata.identity.stream_id.empty() || metadata.title.empty() ||
+		metadata.expansion.empty() || metadata.mission.empty()) {
+		UtilityFunctions::push_error(
+			"OpenNova parity capture disabled: required metadata is incomplete");
+		return;
+	}
+
+	std::unique_ptr<opennova::parity::IEventSink> sink;
+	const std::string pipe_name = parity_environment("OPENNOVA_PARITY_PIPE");
+	if (!pipe_name.empty()) {
+#ifdef _WIN32
+		auto pipe = std::make_unique<
+			opennova::parity::windows::NamedPipeEventSink>(
+				parity_path(pipe_name).wstring());
+		if (!pipe->connect()) {
+			UtilityFunctions::push_error(String("OpenNova parity pipe connect failed: ") +
+				String(pipe->last_error().c_str()));
+			return;
+		}
+		auto queued = std::make_unique<
+			opennova::parity::OpenNovaQueuedEventSink>(std::move(pipe));
+		parity_capture_->queued_pipe = queued.get();
+		sink = std::move(queued);
+#else
+		UtilityFunctions::push_error(
+			"OpenNova parity pipe capture is only available on Windows");
+		return;
+#endif
+	} else {
+		std::string error;
+		sink = opennova::parity::FileEventSink::open(
+			parity_path(trace_path), {}, &error);
+		if (!sink) {
+			UtilityFunctions::push_error(String("OpenNova parity trace open failed: ") +
+				String(error.c_str()));
+			return;
+		}
+	}
+
+	parity_capture_->metadata = std::move(metadata);
+	parity_capture_->sink = std::move(sink);
+	parity_capture_->recorder = std::make_unique<
+		opennova::parity::OpenNovaCaptureRecorder>(
+			parity_capture_->metadata, *parity_capture_->sink);
+	if (!parity_capture_->recorder->start()) {
+		UtilityFunctions::push_error(String("OpenNova parity capture start failed: ") +
+			String(parity_capture_->recorder->last_error().c_str()));
+		return;
+	}
+	parity_capture_->active = true;
+}
+
+void NovaSimulation::capture_parity_tick() {
+	ensure_parity_capture();
+	if (!parity_capture_ || !parity_capture_->active || !world_ ||
+		!world_->cached.local_player.valid() || !weapon_active_ ||
+		weapon_name_.is_empty()) {
+		return;
+	}
+
+	opennova::parity::OpenNovaWeaponPresentation weapon{};
+	weapon.name = std::string(weapon_name_.utf8().get_data());
+	weapon.special_hold = weapon_hold_kind_;
+	weapon.attack_anim = weapon_attack_kind_;
+	for (int i = 0; i < 6; ++i) {
+		if (i < weapon_hip_pose_.size()) weapon.primary[i] = weapon_hip_pose_[i];
+		if (i < weapon_aimed_pose_.size()) weapon.alternate[i] = weapon_aimed_pose_[i];
+	}
+	weapon.render_fov = weapon_render_fov_;
+
+	opennova::parity::OpenNovaCaptureState state{};
+	state.world = world_.get();
+	state.presented = runtime_ ? &runtime_->state() : nullptr;
+	state.authoritative_player = world_->cached.local_player;
+	state.presented_player_wire_handle = joiner_
+		? joiner_self_wire_handle_
+		: world_->cached.local_player.packed;
+	state.resolve_presented_from_world = !joiner_;
+	state.input = &player_input_;
+	state.weapon_def = &weapon_def_;
+	state.weapon_slot = &weapon_slot_;
+	state.weapon_presentation = &weapon;
+	state.player_view = &player_view_;
+	state.scope_max_magnification = weapon_scope_max_mag_;
+	opennova::parity::OpenNovaCaptureSource source(
+		parity_capture_->metadata, state);
+
+	const opennova::parity::StateLane lane =
+		parity_capture_->metadata.identity.role ==
+			opennova::parity::RunRole::client
+		? opennova::parity::StateLane::presented
+		: opennova::parity::StateLane::authoritative;
+	if (!parity_capture_->recorder->record_tick(
+			source, {lane}, parity_capture_->next_frame, parity_now_ns())) {
+		UtilityFunctions::push_error(String("OpenNova parity capture failed: ") +
+			String(parity_capture_->recorder->last_error().c_str()));
+		parity_capture_->active = false;
+		return;
+	}
+	++parity_capture_->next_frame;
+}
+
+void NovaSimulation::capture_parity_datagram(
+		bool p_outbound,
+		const String &p_remote_ip,
+		int p_remote_port,
+		const uint8_t *p_data,
+		std::size_t p_size) {
+	ensure_parity_capture();
+	if (!parity_capture_ || !parity_capture_->active || !parity_capture_->sink) {
+		return;
+	}
+	opennova::parity::NetworkEndpoint local{
+		"0.0.0.0",
+		static_cast<std::uint16_t>(pump_.is_valid()
+			? std::clamp(pump_->local_port(), 0, 0xFFFF) : 0),
+	};
+	opennova::parity::NetworkEndpoint remote{
+		std::string(p_remote_ip.utf8().get_data()),
+		static_cast<std::uint16_t>(std::clamp(p_remote_port, 0, 0xFFFF)),
+	};
+	opennova::parity::NetworkDatagram datagram =
+		opennova::parity::make_open_nova_datagram(
+			parity_capture_->metadata.identity,
+			p_outbound
+				? opennova::parity::DatagramDirection::outbound
+				: opennova::parity::DatagramDirection::inbound,
+			parity_now_ns(),
+			1,
+			std::move(local),
+			std::move(remote),
+			p_data,
+			p_size);
+	if (!parity_capture_->sink->append(
+			opennova::parity::Event{std::move(datagram)})) {
+		UtilityFunctions::push_error(String("OpenNova parity datagram capture failed: ") +
+			String(parity_capture_->sink->last_error().c_str()));
+		parity_capture_->active = false;
+	}
 }
 
 void NovaSimulation::reset_world() {
@@ -514,6 +759,7 @@ void NovaSimulation::finish_load(const opennova::bms::File &file) {
 	ai_->capture_spawn_baseline();
 	have_baseline_ = true;
 	loaded_ = true;
+	ensure_parity_capture();
 }
 
 void NovaSimulation::apply_host_session_mission_header(const opennova::bms::File &file) {
@@ -723,11 +969,13 @@ void NovaSimulation::step() {
 	const uint64_t sim_start = perf_now_us();
 	if (listen_server_) { // P7 listen server (SP + LAN host) -> the npruntime owner loop
 		host_pump();
+		capture_parity_tick();
 		last_sim_tick_us_ = perf_now_us() - sim_start;
 		return;
 	}
 	if (joiner_) { // P7 co-op joiner -> the npruntime ClientRuntime (non-authority)
 		joiner_pump();
+		capture_parity_tick();
 		last_sim_tick_us_ = perf_now_us() - sim_start;
 		return;
 	}
@@ -736,6 +984,7 @@ void NovaSimulation::step() {
 	world_->run_logic_tick(/*is_authority=*/true);
 	tick_local_player_weapon(); // the equipped-slot FSM pump, after the world tick (net-re §5.62)
 	tick_local_player_view();   // the ADS ease + 3P anchor chase, same cadence
+	capture_parity_tick();
 	last_sim_tick_us_ = perf_now_us() - sim_start;
 }
 
@@ -752,11 +1001,13 @@ bool NovaSimulation::advance_frame() {
 	const uint64_t sim_start = perf_now_us();
 	if (listen_server_) { // P7 listen server (SP + LAN host) -> the npruntime owner loop
 		host_pump();
+		capture_parity_tick();
 		last_sim_tick_us_ = perf_now_us() - sim_start;
 		return true;
 	}
 	if (joiner_) { // P7 co-op joiner -> the npruntime ClientRuntime (non-authority)
 		joiner_pump();
+		capture_parity_tick();
 		last_sim_tick_us_ = perf_now_us() - sim_start;
 		return true;
 	}
@@ -765,6 +1016,7 @@ bool NovaSimulation::advance_frame() {
 	world_->run_logic_tick(/*is_authority=*/true);
 	tick_local_player_weapon(); // the equipped-slot FSM pump, after the world tick (net-re §5.62)
 	tick_local_player_view();   // the ADS ease + 3P anchor chase, same cadence
+	capture_parity_tick();
 	last_sim_tick_us_ = perf_now_us() - sim_start;
 	return true;
 }
@@ -862,7 +1114,12 @@ namespace {
 // peer_from_addr / send_datagram.
 class NovaUdpPumpDatagramSocket : public opennova::netsim::IDatagramSocket {
 public:
-	explicit NovaUdpPumpDatagramSocket(NovaUdpPump *pump) : pump_(pump) {}
+	using Observer = void (*)(void *, bool, const String &, int,
+			const uint8_t *, std::size_t);
+
+	NovaUdpPumpDatagramSocket(NovaUdpPump *pump, void *observer_context,
+			Observer observer)
+		: pump_(pump), observer_context_(observer_context), observer_(observer) {}
 
 	int recv_from(uint8_t *buf, std::size_t cap, opennova::PeerAddr &from) override {
 		if (pump_ == nullptr || !pump_->is_open()) return 0;
@@ -874,6 +1131,10 @@ public:
 		const String ip = d.get("ip", String());
 		const int port = d.get("port", 0);
 		const PackedByteArray bytes = d.get("bytes", PackedByteArray());
+		if (observer_ != nullptr && bytes.size() > 0) {
+			observer_(observer_context_, false, ip, port, bytes.ptr(),
+				static_cast<std::size_t>(bytes.size()));
+		}
 		uint32_t packed = 0;
 		const PackedStringArray parts = ip.split(".");
 		if (parts.size() == 4) {
@@ -896,11 +1157,16 @@ public:
 		PackedByteArray bytes;
 		bytes.resize(static_cast<int64_t>(len));
 		std::memcpy(bytes.ptrw(), data, len);
+		if (observer_ != nullptr) {
+			observer_(observer_context_, true, String(ipbuf), to.port, data, len);
+		}
 		pump_->send_to(String(ipbuf), to.port, bytes);
 	}
 
 private:
 	NovaUdpPump *pump_;
+	void *observer_context_ = nullptr;
+	Observer observer_ = nullptr;
 };
 } // namespace
 
@@ -913,7 +1179,13 @@ void NovaSimulation::host_pump() {
 	namespace np = opennova::np;
 	const uint32_t now = host_owner_.now_tick;
 	apply_player_input_pre_tick(); // input -> the host player's body input, before logic (ADR 0009/0012)
-	NovaUdpPumpDatagramSocket sock(host_listen_ ? pump_.ptr() : nullptr);
+	const auto observe = [](void *context, bool outbound, const String &ip,
+			int port, const uint8_t *data, std::size_t size) {
+		static_cast<NovaSimulation *>(context)->capture_parity_datagram(
+			outbound, ip, port, data, size);
+	};
+	NovaUdpPumpDatagramSocket sock(
+		host_listen_ ? pump_.ptr() : nullptr, this, observe);
 	np::host_session_pump(host_owner_, sock); // recv-drain -> tick_connections -> Server_TickUpdate -> S2C flush
 	tick_local_player_weapon(); // the equipped-slot FSM pump, after the world tick (net-re §5.62)
 	tick_local_player_view();   // the ADS ease + 3P anchor chase, same cadence
@@ -944,7 +1216,13 @@ void NovaSimulation::joiner_pump() {
 		pump_->poll();
 		while (pump_->has_inbound()) {
 			const Dictionary d = pump_->take_inbound();
+			const String ip = d.get("ip", String());
+			const int port = d.get("port", 0);
 			const PackedByteArray bytes = d.get("bytes", PackedByteArray());
+			if (bytes.size() > 0) {
+				capture_parity_datagram(false, ip, port, bytes.ptr(),
+					static_cast<std::size_t>(bytes.size()));
+			}
 			runtime_->receive(bytes.ptr(), static_cast<std::size_t>(bytes.size()));
 		}
 	}
@@ -1230,6 +1508,10 @@ void NovaSimulation::set_local_player_weapon(const Dictionary &p_def,
 	weapon_def_.burst3 = (flags & 0x20) != 0;     // [orig: WeaponAction_Fire @ 0x542c8a]
 	weapon_def_.flags = flags;                    // raw mask: the scope gate + fov policy read it
 	weapon_scope_max_mag_ = float(double(p_def.get("scope_max_mag", 0.0)));
+	weapon_name_ = String(p_def.get("name", String()));
+	weapon_hip_pose_ = p_def.get("pos", PackedFloat32Array());
+	weapon_aimed_pose_ = p_def.get("tpos", PackedFloat32Array());
+	weapon_render_fov_ = float(double(p_def.get("renderfov", 0.0)));
 	// The 3P body-channel kinds [orig: weapon.def special_hold/attack_anim -> the
 	// AdmDefs record +0xA4/+0xA8; world-wac-ai-re.md §14.8.4].
 	weapon_hold_kind_ = int(int64_t(p_def.get("special_hold", 0)));
@@ -1267,6 +1549,10 @@ void NovaSimulation::clear_local_player_weapon() {
 	weapon_hold_kind_ = 0;
 	weapon_attack_kind_ = 0;
 	weapon_anim_map_ = String();
+	weapon_name_ = String();
+	weapon_hip_pose_ = PackedFloat32Array();
+	weapon_aimed_pose_ = PackedFloat32Array();
+	weapon_render_fov_ = 0.0f;
 }
 
 void NovaSimulation::set_local_player_weapon_input(bool p_fire_held, bool p_fire_pressed,
@@ -1402,6 +1688,12 @@ Dictionary NovaSimulation::get_local_player_weapon_state() const {
 	out["clip"] = weapon_slot_.clip;
 	out["reserve"] = weapon_slot_.reserve;
 	out["kick"] = static_cast<int>(weapon_slot_.kick);
+	out["name"] = weapon_name_;
+	out["special_hold"] = weapon_hold_kind_;
+	out["attack_anim"] = weapon_attack_kind_;
+	out["pos"] = weapon_hip_pose_;
+	out["tpos"] = weapon_aimed_pose_;
+	out["renderfov"] = weapon_render_fov_;
 	// The 3P body's weapon channel (the entity's secondary AnimMap channel): the clip key
 	// + its own playhead for the host's mask-bone override. The key remains populated
 	// when the state id matches the primary because the two playheads are independent.
@@ -1981,6 +2273,8 @@ bool NovaSimulation::enable_join(const String &p_host_ip, int p_port, const Stri
 		joiner_ = false;
 		return false;
 	}
+	joiner_host_ip_ = p_host_ip;
+	joiner_host_port_ = static_cast<uint16_t>(std::clamp(p_port, 0, 0xFFFF));
 	joiner_player_name_ = std::string(p_player_name.utf8().get_data());
 	// Build the Joiner runtime now so get_joiner_phase reads Idle before the first load (the contract
 	// the legacy joiner_session_ held); finish_load rebuilds it fresh on each (re)load.
@@ -2007,6 +2301,8 @@ int NovaSimulation::get_joiner_self_handle() const {
 
 void NovaSimulation::ship_to_host(const std::vector<uint8_t> &dg) {
 	if (pump_.is_null() || dg.empty()) return;
+	capture_parity_datagram(true, joiner_host_ip_, joiner_host_port_,
+		dg.data(), dg.size());
 	PackedByteArray bytes;
 	bytes.resize(static_cast<int64_t>(dg.size()));
 	std::memcpy(bytes.ptrw(), dg.data(), dg.size());
