@@ -312,6 +312,40 @@ void test_resolver_wall_pushout() {
 }
 
 // ---------------------------------------------------------------------------
+void test_secondary_vertical_force_is_full_strength() {
+    CollisionModel model = box_model(1, 0, 2.0, 2.0, 2.0);
+    model.finalize_sections();
+    const int32_t target_pos[3] = {0, 0, 0};
+    const CollisionMatrix matrix = collision_matrix_from_heading(0, target_pos);
+
+    CollisionTargetView target;
+    target.model = &model;
+    target.matrices = &matrix;
+    target.bound_radius = fx(4.0);
+
+    // Enter the expanded +X/+Z corner with +X as the primary separator and
+    // +Z as the secondary. Retail adds the secondary Z component at full
+    // strength while halving only X/Y. [orig: @ 0x4aedd1-0x4aee20]
+    const CollisionPoint point{fx(2.9), 0, fx(2.8), 0};
+    const int32_t radius = fx(1.0);
+    ContactQuery query;
+    query.points = &point;
+    query.radii = &radius;
+    query.num_points = 1;
+    query.prev_pos[0] = fx(3.5);
+    query.prev_pos[2] = fx(3.5);
+    query.source_bound_radius = fx(4.0);
+
+    BlinkAccum blink;
+    PlatformContact platform;
+    ContactResult result;
+    CHECK(collision_contact_force(target, query, blink, platform, result));
+    CHECK(result.force[0] < 0);
+    CHECK(result.force[2] < 0);
+    CHECK(std::abs(result.force[2] - result.force[0]) <= 1);
+}
+
+// ---------------------------------------------------------------------------
 void test_resolver_hurt_and_zones() {
     // A hurt volume (type 18: -1 HP) overlapping the soldier.
     Rig rig(box_model(18, 0, 3.0, 3.0, 3.0));
@@ -488,11 +522,11 @@ void test_slice_cadence_and_invuln() {
     cw.build_tick_tables(world); // the 17th call builds
     CHECK(cw.candidate_count(soldier) == 1);
 
-    // Hurt volumes never damage a Flags-0x4000000 entity. [orig: the
+    // Hurt volumes never damage an EngineFlags-0x4000000 entity. [orig: the
     // (Flags & 0x4000000) == 0 wrap @ 0x4b3148]
     Rig rig(box_model(18, 0, 3.0, 3.0, 3.0));
     Entity *inv = rig.world.registry.get(rig.soldier);
-    inv->flags |= 0x4000000u;
+    inv->engine_flags |= 0x4000000u;
     rig.move_soldier(10.0, 10.0, 0.5);
     int32_t pos[3] = {fx(10.0), fx(10.0), fx(0.5)};
     int32_t vel[3] = {0, 0, 0};
@@ -501,6 +535,32 @@ void test_slice_cadence_and_invuln() {
     rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2], 0, fx(1.8), 0, 0,
                           false, true, 0, 43, 0u, health);
     CHECK(health == 100);
+}
+
+// ---------------------------------------------------------------------------
+void test_pool1_item_is_one_collision_candidate() {
+    World world;
+    CollisionWorld cw;
+    world.registry.configure_pool(0, 8);
+    world.registry.configure_pool(1, 8);
+
+    Entity item;
+    item.kind = EntityKind::Item;
+    item.position = {10.0f, 10.0f, 0.0f};
+    item.alive = true;
+    const EntityHandle item_handle = world.registry.spawn(1, item);
+
+    Entity organic;
+    organic.kind = EntityKind::Organic;
+    organic.position = {10.0f, 10.0f, 0.0f};
+    organic.alive = true;
+    const EntityHandle source = world.registry.spawn(0, organic);
+
+    const int32_t model_id = cw.add_model(box_model(1, 0, 2.0, 2.0, 3.0));
+    cw.assign_entity(item_handle, model_id);
+    for (int i = 0; i < 17; ++i) cw.build_tick_tables(world);
+
+    CHECK(cw.candidate_count(source) == 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -563,9 +623,11 @@ int main() {
     test_ray_clip();
     test_ground_probe_roof();
     test_resolver_wall_pushout();
+    test_secondary_vertical_force_is_full_strength();
     test_resolver_hurt_and_zones();
     test_idle_skip_throttle();
     test_slice_cadence_and_invuln();
+    test_pool1_item_is_one_collision_candidate();
     test_platform_latch();
     test_debug_seams();
     if (failures == 0) std::printf("collision_test: all checks passed\n");

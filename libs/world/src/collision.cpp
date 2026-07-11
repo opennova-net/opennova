@@ -632,8 +632,9 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
         }
 
         if (has_collision) {
-            // Rotate the accumulated force into world axes; secondary added at half
-            // when it grows the component. [orig: @ 0x4aed5b-0x4aee23]
+            // Rotate the accumulated force into world axes; secondary X/Y are
+            // halved, while Z is added at full strength, when they grow the
+            // component. [orig: @ 0x4aed5b-0x4aee23]
             int32_t world_primary[3];
             mat.rotate_point(primary, world_primary);
             out_force[0] += world_primary[0];
@@ -642,10 +643,12 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
             if (secondary[0] != 0 || secondary[1] != 0 || secondary[2] != 0) {
                 int32_t world_secondary[3];
                 mat.rotate_point(secondary, world_secondary);
-                for (int i = 0; i < 3; ++i) {
+                for (int i = 0; i < 2; ++i) {
                     const int32_t grown = out_force[i] + (world_secondary[i] >> 1);
                     if (abs32(out_force[i]) < abs32(grown)) out_force[i] = grown;
                 }
+                const int32_t grown_z = out_force[2] + world_secondary[2];
+                if (abs32(out_force[2]) < abs32(grown_z)) out_force[2] = grown_z;
             }
             any_collision = 1;
         }
@@ -753,13 +756,11 @@ void CollisionWorld::build_tick_tables(World &world) {
     // [orig: pass 1 = itemDef type == Building; pass 2 = everything else with a
     // def — our instance map plays the "has a collision model" role.]
     world.registry.for_each([&](const Entity &e) {
-        if (e.kind == EntityKind::Building) push_static(e);
+        if (e.handle.pool() == 2 && e.kind == EntityKind::Building) push_static(e);
     });
     static_building_count_ = static_cast<int32_t>(statics_.size());
     world.registry.for_each([&](const Entity &e) {
-        if (e.kind == EntityKind::Building || e.kind == EntityKind::Organic ||
-            e.kind == EntityKind::Marker)
-            return;
+        if (e.handle.pool() != 2 || e.kind == EntityKind::Building) return;
         push_static(e);
     });
     static_count_ = static_cast<int32_t>(statics_.size());
@@ -1367,9 +1368,9 @@ std::vector<CollisionWorld::DebugInstance> CollisionWorld::debug_instances(
 void CollisionWorld::apply_touch_flags(Entity *ent, uint32_t flags, int16_t &health,
                                        bool is_authority) {
     if (ent == nullptr || flags == 0) return;
-    // Hurt damage is authority-only AND gated off for Flags 0x4000000 entities.
+    // Hurt damage is authority-only AND gated off for EngineFlags 0x4000000 entities.
     // [orig: the is_authority + (Flags & 0x4000000) == 0 wrap @ 0x4b3139-0x4b3148]
-    if (is_authority && (ent->flags & 0x4000000u) == 0) {
+    if (is_authority && (ent->engine_flags & 0x4000000u) == 0) {
         // Hurt-volume damage tiers. [orig: @ 0x4b317b-0x4b31d7 — -1 / -6 / -50 HP]
         if ((flags & 0x40u) != 0 && health > 0) health = static_cast<int16_t>(health - 1);
         if ((flags & 0x80u) != 0 && health > 0) health = static_cast<int16_t>(health - 6);
