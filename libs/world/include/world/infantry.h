@@ -31,6 +31,13 @@ enum : int {
     kClimbIdle = 32,
     kSwimIdle = 36,
     kSwimForward = 37,
+    // The prone roll pair (table names "roll_left"/"roll_right"): LOCKED
+    // deferred-promote states (anim-flags 0x285) — once entered the barrel roll
+    // plays out, displacing through the clip's root motion.
+    // [orig: g_animStateNameTable @ 0x8135F0 idx 41/42; selection
+    //  Entity_UpdateInfantryPlayerBody @ 0x4b7335/@ 0x4b734c]
+    kRollLeft = 41,
+    kRollRight = 42,
     kIdle = 43,
     kIdle2 = 44,
     kIdleCrouch = 45,
@@ -146,6 +153,12 @@ struct InfantryState {
     // [orig: Player_PackInputStateToEntity @0x4df450; player body @0x4b40e0]
     bool player_moving = false;
     int player_move_dir_index = 0;
+    // The Lean/Roll keys (Q/E — bindings 0x94/0x93): prone selects the roll_left/
+    // roll_right barrel-roll states; the standing lean camera term (+0xB0 >> 2) is
+    // an open witness. [orig: g_inputFlags 0x2000/0x4000 @ 0x4e10f1/@ 0x4e10c8 ->
+    // MoveOrder 0x40/0x80, Player_PackInputStateToEntity @ 0x4df855]
+    bool lean_left = false;
+    bool lean_right = false;
     // NPC route-order fields. Org1 think writes these; the local player is driven by
     // player_moving/player_move_dir_index instead.
     int move_dir_index = 0;

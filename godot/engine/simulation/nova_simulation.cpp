@@ -805,7 +805,7 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("spawn_local_player_at_start"), &NovaSimulation::spawn_local_player_at_start);
 	ClassDB::bind_method(D_METHOD("has_local_player"), &NovaSimulation::has_local_player);
 	ClassDB::bind_method(D_METHOD("get_local_player_wire_handle"), &NovaSimulation::get_local_player_wire_handle);
-	ClassDB::bind_method(D_METHOD("set_player_input", "forward", "back", "left", "right", "run", "crouch", "prone", "jump", "look_yaw_deg", "look_pitch_deg"), &NovaSimulation::set_player_input);
+	ClassDB::bind_method(D_METHOD("set_player_input", "forward", "back", "left", "right", "run", "crouch", "prone", "jump", "lean_left", "lean_right", "look_yaw_deg", "look_pitch_deg"), &NovaSimulation::set_player_input);
 	ClassDB::bind_method(D_METHOD("get_local_player_position"), &NovaSimulation::get_local_player_position);
 	ClassDB::bind_method(D_METHOD("get_local_player_yaw_deg"), &NovaSimulation::get_local_player_yaw_deg);
 	ClassDB::bind_method(D_METHOD("get_local_player_pitch_deg"), &NovaSimulation::get_local_player_pitch_deg);
@@ -1319,6 +1319,7 @@ int NovaSimulation::get_local_player_wire_handle() const {
 
 void NovaSimulation::set_player_input(bool p_forward, bool p_back, bool p_left, bool p_right,
                                       bool p_run, bool p_crouch, bool p_prone, bool p_jump,
+                                      bool p_lean_left, bool p_lean_right,
                                       float p_look_yaw_deg, float p_look_pitch_deg) {
 	player_input_.forward = p_forward;
 	player_input_.back = p_back;
@@ -1330,6 +1331,10 @@ void NovaSimulation::set_player_input(bool p_forward, bool p_back, bool p_left, 
 	player_input_.crouch = p_crouch;
 	player_input_.prone = p_prone;
 	player_input_.jump = p_jump;
+	// The Lean/Roll keys — prone selects the roll_left/roll_right barrel roll.
+	// [orig: g_inputFlags 0x2000/0x4000 -> MoveOrder 0x40/0x80 @ 0x4df855]
+	player_input_.lean_left = p_lean_left;
+	player_input_.lean_right = p_lean_right;
 	// Look yaw (mission degrees) -> engine BAM heading, the (90 - yaw) convention used at spawn.
 	player_input_.look_heading = opennova::world::bam_heading_from_mission_yaw_deg(p_look_yaw_deg);
 	// Look pitch (mission degrees, up positive) -> entity Pitch@+0x14 (BAM32). No 90-offset.

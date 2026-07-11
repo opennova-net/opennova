@@ -12,6 +12,10 @@ PlayerBodyInput pack_player_body_input(const PlayerInput &in) {
     body.stance = in.prone ? InfantryState::Stance::kProne
                 : (in.crouch ? InfantryState::Stance::kCrouch : InfantryState::Stance::kStand);
     body.jump = in.jump;
+    // The Lean/Roll bits ride the same packed order as the original's MoveOrder
+    // 0x40/0x80. [orig: Player_PackInputStateToEntity @ 0x4df855]
+    body.lean_left = in.lean_left;
+    body.lean_right = in.lean_right;
     // [orig: Player_PackInputStateToEntity @0x4df450] F/B/L/R bits collapse to an
     // 8-way move_direction_index plus a moving bit. There is no heading offset here.
     if (in.forward) body.direction_bits |= 1;
@@ -81,6 +85,8 @@ void apply_player_body_input(AiEntity &e, const PlayerBodyInput &body) {
     if (body.jump) inf.jump_requested = true;
     inf.player_moving = body.moving;
     inf.player_move_dir_index = body.move_dir_index;
+    inf.lean_left = body.lean_left;
+    inf.lean_right = body.lean_right;
 
     // Clear NPC route fields so the local player cannot accidentally route through org1
     // waypoint/scripted-order semantics.

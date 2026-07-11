@@ -358,8 +358,19 @@ void AiSystem::infantry_select(AiEntity &e) {
     // move_direction_index are org2 input bits; do not apply them to NPC org1 selection.
     if (inf.is_local_player && inf.airborne)
         target = anim_state::kJumpLoop;
-    else if (inf.is_local_player)
+    else if (inf.is_local_player) {
         target = player_stance_remap(target, inf.stance, inf.player_move_dir_index);
+        // The prone roll: the Lean/Roll keys select roll_left/roll_right while prone —
+        // LOCKED deferred-promote states (anim-flags 0x285), so the barrel roll plays
+        // out through the commit rules below and displaces via the clip's root motion.
+        // [orig: Entity_UpdateInfantryPlayerBody @ 0x4b731b..0x4b7354 — MoveOrder 0x40
+        //  -> 0x29, 0x80 -> 0x2A, gated on the prone context and !(Flags & 0x112002);
+        //  the excluded bits (swim/climb/parachute) are unmodeled — stance is the gate]
+        if (inf.stance == InfantryState::Stance::kProne) {
+            if (inf.lean_left) target = anim_state::kRollLeft;
+            if (inf.lean_right) target = anim_state::kRollRight;
+        }
+    }
 
     const int resolved = infantry_resolve_state(inf.adm_id, target);
     if (resolved < 0) return; // no clips at all: hold the current state
@@ -657,6 +668,23 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     if (reset_capsule_bottom_state(inf.anim_state)) inf.prev_capsule_bottom = 0;
     if (root_motion != nullptr)
         have_clip = root_motion->advance(inf.adm_id, inf.anim_state, inf.clip_phase, frame);
+    // Deferred-state promotion at clip end for the PRIMARY channel: a LOCKED state
+    // (anim-flags bit 4 — the prone rolls; the death pose is excluded by its own edge)
+    // queues follow-ups to anim_pending and holds until its clip's last tick, then the
+    // queued state commits — the same clip-end promotion the weapon channel runs.
+    // [orig: the +0x2B8 pending pair promoted on the 0x20000 clip-end channel flag,
+    //  AnimMap_UpdateEntity @ 0x40b77b; the selection queue @ 0x4b7356-96;
+    //  witness world-wac-ai-re.md §14.8.1]
+    if (inf.anim_pending != 0 && root_motion != nullptr &&
+        (infantry_anim_flags(inf.anim_state) & 0x4u) != 0) {
+        const int32_t len = root_motion->clip_length_ticks(inf.adm_id, inf.anim_state);
+        if (len >= 0 && inf.clip_phase >= len) {
+            inf.anim_prev = inf.anim_state;
+            inf.anim_state = inf.anim_pending;
+            inf.anim_pending = 0;
+            inf.clip_phase = 0;
+        }
+    }
     if (have_clip) {
         if (inf.prev_capsule_bottom != 0)
             frame.dz = frame.capsule_bottom - inf.prev_capsule_bottom;
@@ -937,6 +965,10 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
         // prone suppressed by Flags & 0x10A000 — swim/parachute unmodeled]).
         inf.player_moving = (ent->net_move_input & 0x08u) != 0;
         inf.player_move_dir_index = ent->net_move_input & 0x07u;
+        // The Lean/Roll bits ride the same replicated MoveOrder byte
+        // [orig: Player_PackInputStateToEntity @ 0x4df855 — 0x40 left / 0x80 right].
+        inf.lean_left = (ent->net_move_input & 0x40u) != 0;
+        inf.lean_right = (ent->net_move_input & 0x80u) != 0;
         inf.stance = (ent->net_stance_bits & 0x1u) != 0
                          ? InfantryState::Stance::kProne
                          : ((ent->net_stance_bits & 0x2u) != 0 ? InfantryState::Stance::kCrouch
@@ -957,8 +989,16 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
             target = inf.idle_counter >= 62 ? anim_state::kIdle2 : anim_state::kIdle;
         }
         target = player_stance_remap(target, inf.stance, inf.player_move_dir_index);
-        // Prone lean 41/42 from MoveOrder bits 6-7 [orig: @0x4b731b-0x4b7354, gated on prone
-        // and !(Flags & 0x112002)] is deferred with the lean input bits (never uplinked yet).
+        // The prone roll: the Lean/Roll keys select roll_left/roll_right while prone —
+        // LOCKED deferred-promote states (flags 0x285), so the barrel roll plays out
+        // through the commit arbitration below and displaces via the clip's root
+        // motion. [orig: @ 0x4b731b..0x4b7354 — MoveOrder 0x40 -> 0x29, 0x80 -> 0x2A,
+        // gated on the prone context and !(Flags & 0x112002); the excluded bits
+        // (swim/climb/parachute states) are unmodeled here — stance covers the gate]
+        if (inf.stance == InfantryState::Stance::kProne) {
+            if (inf.lean_left) target = anim_state::kRollLeft;
+            if (inf.lean_right) target = anim_state::kRollRight;
+        }
         const int resolved = infantry_resolve_state(inf.adm_id, target);
         if (resolved >= 0 && resolved != inf.anim_state) {
             // Commit via the state-flags arbitration [orig: @0x4b7356-96]: an uninterruptible

@@ -266,6 +266,8 @@ func before_world_tick(_delta: float, capture_mouse: bool = false) -> void:
 		_crouch,
 		_prone,
 		_bool(state, "jump"),
+		_bool(state, "lean_left"),
+		_bool(state, "lean_right"),
 		_look_yaw,
 		_look_pitch)
 	_send_weapon_input()
@@ -516,6 +518,10 @@ func _read_input_state() -> Dictionary:
 		"right": Input.is_physical_key_pressed(KEY_D),
 		"run": Input.is_physical_key_pressed(KEY_SHIFT),
 		"jump": Input.is_physical_key_pressed(KEY_SPACE),
+		# The Lean/Roll keys — prone rolls left/right [orig: bindings 0x94 Q /
+		# 0x93 E; g_inputFlags 0x2000/0x4000 -> MoveOrder 0x40/0x80 @0x4df855].
+		"lean_left": Input.is_physical_key_pressed(KEY_Q),
+		"lean_right": Input.is_physical_key_pressed(KEY_E),
 	}
 
 

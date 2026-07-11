@@ -250,9 +250,9 @@ func local_player_max_health() -> int:
 func local_player_team() -> int:
 	return int(_sim.get_local_player_team()) if _sim != null else 0
 
-func set_player_input(forward: bool, back: bool, left: bool, right: bool, run: bool, crouch: bool, prone: bool, jump: bool, look_yaw_deg: float, look_pitch_deg: float) -> void:
+func set_player_input(forward: bool, back: bool, left: bool, right: bool, run: bool, crouch: bool, prone: bool, jump: bool, lean_left: bool, lean_right: bool, look_yaw_deg: float, look_pitch_deg: float) -> void:
 	if _sim != null:
-		_sim.set_player_input(forward, back, left, right, run, crouch, prone, jump, look_yaw_deg, look_pitch_deg)
+		_sim.set_player_input(forward, back, left, right, run, crouch, prone, jump, lean_left, lean_right, look_yaw_deg, look_pitch_deg)
 
 
 func get_sim() -> NovaSimulation:

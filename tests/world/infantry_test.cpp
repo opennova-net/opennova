@@ -204,6 +204,52 @@ void test_remote_player_body_anim() {
     CHECK(ent->net_anim_state == anim_state::kIdle2);
 }
 
+// The prone roll: the Lean/Roll keys while prone select the roll_left/roll_right
+// barrel-roll states, which are LOCKED deferred-promote (anim-flags 0x285) — the roll
+// plays out before the next state commits; standing lean selects nothing (JO's
+// on-foot mechanic is the roll only). [orig: Entity_UpdateInfantryPlayerBody
+// @ 0x4b731b..0x4b7354; the flags arbitration @ 0x4b7356-96]
+void test_player_prone_roll() {
+    World w;
+    AiSystem ai;
+    TestSource src;
+    src.clips.insert(anim_state::kIdle);
+    src.clips.insert(anim_state::kIdle2);
+    src.clips.insert(anim_state::kIdleProne);
+    src.clips.insert(anim_state::kRollLeft);
+    src.clips.insert(anim_state::kRollRight);
+    // Finite roll clips: the LOCKED state's pending promotion fires at clip end.
+    src.lengths[anim_state::kRollLeft] = 40;
+    src.lengths[anim_state::kRollRight] = 40;
+    ai.root_motion = &src;
+    AiEntity *e = soldier(ai);
+    e->inf.is_local_player = true;
+    e->health = 100;
+
+    // Standing + lean: NO roll (the states are prone-gated) [orig: the prone
+    // context gate @ 0x4b731b].
+    e->inf.lean_left = true;
+    run_ticks(ai, w, 1, 9);
+    CHECK(e->inf.anim_state != anim_state::kRollLeft);
+
+    // Prone + lean left -> roll_left.
+    e->inf.stance = InfantryState::Stance::kProne;
+    run_ticks(ai, w, 9, 17);
+    CHECK(e->inf.anim_state == anim_state::kRollLeft);
+
+    // Release mid-roll: the LOCKED state (0x285 bit 4) defers the follow-up —
+    // the roll keeps playing this selection pass instead of snapping to idle.
+    e->inf.lean_left = false;
+    run_ticks(ai, w, 17, 18);
+    CHECK(e->inf.anim_state == anim_state::kRollLeft);
+
+    // Lean right from prone idle selects the right roll once the left completes;
+    // drive enough ticks for the lock to release via the pending promotion.
+    e->inf.lean_right = true;
+    run_ticks(ai, w, 18, 90);
+    CHECK(e->inf.anim_state == anim_state::kRollRight);
+}
+
 // Local-player body chase + leg-chain re-plant [orig: §3.3; consumed by the render
 // overlay, Entity_BuildBoneTransformMatrices @0x4b1290 / world-wac-ai-re.md §14; the
 // org2 chase source is unwitnessed — org1 math applied under D-INF-12]. Own function:
@@ -1463,6 +1509,7 @@ int main() {
     // change landed alongside it.
     test_remote_player_body_anim();
     test_player_body_chase_and_legs();
+    test_player_prone_roll();
     test_player_body_chase_crosses_the_bam_seam();
     test_player_weapon_channel();
     test_player_weapon_hold_kinds();

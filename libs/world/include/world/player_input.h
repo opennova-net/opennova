@@ -25,6 +25,11 @@ struct PlayerInput {
     bool crouch = false;
     bool prone = false;
     bool jump = false;
+    // The Lean/Roll keys (bindings 0x94 Q / 0x93 E): prone = the roll_left/roll_right
+    // barrel roll. [orig: g_inputFlags 0x2000/0x4000 -> MoveOrder 0x40/0x80,
+    // Player_PackInputStateToEntity @ 0x4df855]
+    bool lean_left = false;
+    bool lean_right = false;
     int32_t look_heading = 0; // absolute facing (entity Yaw@+0x10), BAM32
     int32_t look_pitch = 0;   // absolute look pitch (entity Pitch@+0x14), BAM32
 };
@@ -38,6 +43,8 @@ struct PlayerBodyInput {
     bool run = false;                 // reserved until the IDA player-run path is ported
     InfantryState::Stance stance = InfantryState::Stance::kStand;
     bool jump = false;
+    bool lean_left = false;           // MoveOrder 0x40 [orig: @ 0x4df855 block]
+    bool lean_right = false;          // MoveOrder 0x80
     int32_t look_heading = 0;
     int32_t look_pitch = 0;
 };

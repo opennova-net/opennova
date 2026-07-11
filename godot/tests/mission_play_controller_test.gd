@@ -31,7 +31,8 @@ class FakeWorld:
 		return node
 
 	func set_local_player_input(forward: bool, back: bool, left: bool, right: bool, run: bool,
-			crouch: bool, prone: bool, jump: bool, look_yaw_deg: float, look_pitch_deg: float) -> void:
+			crouch: bool, prone: bool, jump: bool, lean_left: bool, lean_right: bool,
+			look_yaw_deg: float, look_pitch_deg: float) -> void:
 		input_calls.append({
 			"forward": forward,
 			"back": back,
@@ -41,6 +42,8 @@ class FakeWorld:
 			"crouch": crouch,
 			"prone": prone,
 			"jump": jump,
+			"lean_left": lean_left,
+			"lean_right": lean_right,
 			"yaw": look_yaw_deg,
 			"pitch": look_pitch_deg,
 		})

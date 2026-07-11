@@ -1440,3 +1440,43 @@ probes, pool builders, blink query, action-218 gate, the ACCEPT handler, the
 WEAPON registration, and the type-6/11 dispatch sites. Proposed, NOT applied
 (curated-name policy): `collisionModel @ 0xB52FD8 -> g_StaticProxEntity`,
 `result @ 0xB5AB78 -> g_PlatformContactX`.
+
+## 16. The Lean/Roll keys — the prone roll (engine-research, 2026-07-11)
+
+The `LeanRoll_left`/`LeanRoll_right` bindings (display "!Lean/Roll Left/Right",
+default Q/E, action ids 0x94/0x93 [orig: the bindings table @ 0x815c30..0x815d00])
+drive JO's on-foot lean mechanic, which is the PRONE ROLL:
+
+- **Input**: case 0x94 sets `g_inputFlags |= 0x2000` (left; an analog variant writes
+  the low word of `dword_B3B75C`), case 0x93 sets `0x4000` (right)
+  [orig: Input_HandleActionBinding_0 @ 0x4e10f1/@ 0x4e10c8].
+- **Pack**: `0x2000 -> MoveOrder 0x40`, `0x4000 -> MoveOrder 0x80`
+  [orig: Player_PackInputStateToEntity @ 0x4df855 block]. The same function carries
+  a bonus witness: ANY movement input sets `byte_B7653B` and force-unscopes a
+  Scoped (Flags & 1) weapon [orig: @ 0x4df0a2..0x4df0d5 leg] — the §5.62
+  "unscope-on-move" tail, now witnessed (port pending).
+- **Body**: while the prone context holds and `!(entity Flags & 0x112002)`,
+  MoveOrder 0x40 selects body state 0x29 `roll_left`, 0x80 selects 0x2A
+  `roll_right` [orig: Entity_UpdateInfantryPlayerBody @ 0x4b731b..0x4b7354;
+  g_animStateNameTable @ 0x8135F0 idx 41/42]. Both states carry anim-flags
+  **0x285** (locked + deferred-promote) [orig: g_animStateFlagsTable @ 0x8139e8],
+  so the barrel roll plays to its clip end before the queued follow-up commits,
+  displacing through the clip's root motion.
+- **Camera**: the FP roll is `g_view_rot_roll = entity[+0x2DC] (torsoRoll) +
+  (entity[+0x2C0-adjacent +0xB0] >> 2)` [orig: Camera_ComputeThirdPersonView
+  @ 0x437d10 mode 0]. The `+0xB0` lean-angle writer is UNWITNESSED (no direct
+  displacement writers found; likely the analog-lean blend) — open.
+- **Standing lean**: no witnessed standing-lean state or camera path exists in JO
+  (the roll states are prone-gated; the binding display name is BHD lineage).
+  Do not invent one.
+
+Port row: `PlayerInput/PlayerBodyInput.lean_left/right` -> `InfantryState` ->
+the prone-gated roll selection in `infantry_select` (local) and
+`remote_player_body_anim` (the replicated MoveOrder 0x40/0x80 bits), plus the
+PRIMARY channel's clip-end pending promotion (locked states previously
+deadlocked — the weapon channel had the promotion, the primary did not). Host
+chain: Q/E in LocalPlayerHost -> GameWorld -> MissionRuntime -> NovaSimulation
+(set_player_input grew lean args; pre-1.0, all callers updated). ctest
+`infantry` test_player_prone_roll pins the gate, the lock, and the promotion.
+Open: the `+0xB0` camera term; the analog lean axis; roll while scoped/reload
+interactions unwitnessed.

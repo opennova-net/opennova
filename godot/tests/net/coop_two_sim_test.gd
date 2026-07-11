@@ -72,7 +72,7 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 
 	# Drive the joiner forward + settle: its C2S 0x0C uplink reaches the host (SNAP), and the
 	# host's S2C 0x0A carries everyone (incl. the host player + the joiner) back to the joiner.
-	joiner.set_player_input(true, false, false, false, false, false, false, false, 0.0, 0.0)
+	joiner.set_player_input(true, false, false, false, false, false, false, false, false, false, 0.0, 0.0)
 	for _i in range(30):
 		host.advance_frame()
 		joiner.advance_frame()

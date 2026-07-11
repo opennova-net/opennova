@@ -383,6 +383,7 @@ public:
 	// @0x4e1330]; the caller clamps pitch to ±80°.
 	void set_player_input(bool p_forward, bool p_back, bool p_left, bool p_right, bool p_run,
 	                      bool p_crouch, bool p_prone, bool p_jump,
+	                      bool p_lean_left, bool p_lean_right,
 	                      float p_look_yaw_deg, float p_look_pitch_deg);
 	// The local player's authoritative position in Godot world space (for the follow camera);
 	// Vector3() when no player is spawned.
