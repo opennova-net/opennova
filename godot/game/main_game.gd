@@ -19,6 +19,9 @@ const LocalPlayerHostScript := preload("res://engine/world/local_player_host.gd"
 const CHANGE_DIR_KEY := KEY_F9
 # The mission debug overlay (entities / sim transport / script variables).
 const DEBUG_OVERLAY_KEY := KEY_F3
+# The HUD's message ring has 40 physical slots; keep no more pre-HUD messages
+# than it can ever present (net spectators may never acquire a local-player HUD).
+const MAX_PENDING_HUD_MESSAGES := 40
 
 enum State { MENU, WORLD, PAUSED }
 
@@ -36,6 +39,10 @@ var _net_killfeed   # net spectator kill feed, built while in a net session
 var _game_hud       # GameHud, built on the first frame a mission has a local player
 var _warned_hud_no_player := false  # one-shot: warn if a loaded world never yields a local player
 var _hud_weapon_name := ""  # the HUD's equipped-weapon cache (re-resolves WepDes on change)
+# Latest player-facing mission text. Presentation rides the message feed; this is
+# the public ADR 0018 read seam used by parity tests and future HUD consumers.
+var _hud_objective := ""
+var _pending_hud_messages: Array[Dictionary] = []
 var _player_host: LocalPlayerHost = null
 var _mp_host  # MpMenuHost: drives the multiplayer (mp.mnu) menu by control name
 var _player_info_host  # PlayerInfoMenuHost: drives the PLAYER_INFO (player.mnu) character screen
@@ -45,6 +52,11 @@ var _chosen_avatar: Dictionary = {}  # last avatar/name picked on PLAYER_INFO (t
 func _ready() -> void:
 	if _world == null or _camera == null or _menu_host == null:
 		return
+	# Connect before any world can tick: PreMission/WAC effects may drain on the
+	# first runtime tick, while the local-player HUD is deliberately built only
+	# after that tick. The host owns this persistent GameWorld for its lifetime.
+	if _world.has_signal("mission_effects") and not _world.mission_effects.is_connected(apply_mission_effects):
+		_world.mission_effects.connect(apply_mission_effects)
 	# Esc toggles pause/resume in a world (the fly camera reports the key; the
 	# host decides what it means).
 	if _camera.has_signal("escape_pressed") and not _camera.is_connected("escape_pressed", _on_camera_escape):
@@ -175,8 +187,6 @@ func _ensure_game_hud() -> void:
 	_game_hud.set_crosshair_style(ResourceDirSettings.get_crosshair_style())
 	_game_hud.set_layout(hudpos, root)
 	_load_hud_text_tables(root)
-	if _world != null and _world.has_signal("mission_effects") and not _world.mission_effects.is_connected(_on_mission_effects):
-		_world.mission_effects.connect(_on_mission_effects)
 
 
 # The string tables the HUD resolves against: the gametext table (weapon "WepDes"
@@ -285,6 +295,9 @@ func _update_game_hud() -> void:
 		"fov_deg": fov_deg,
 		"ticks": _hud_ticks(),
 	})
+	# Effects drain synchronously during _world.tick(), before this HUD update.
+	# Flush afterward so GameHud.push_message stamps the current 62 Hz tick.
+	_flush_pending_hud_messages()
 
 
 # The HUD's 62 Hz presentation clock driving the fade/message timers.
@@ -305,13 +318,41 @@ func _resolve_weapon_display_name(weapon_name: String) -> String:
 	return ""
 
 
-# Mission effects feed the HUD: a WAC/BMS "text" action carries the GameText id in
-# `a`; resolve it against the mission string table and push it onto the HUD's
-# triggered-text message feed.
-func _on_mission_effects(effects: Array) -> void:
+# Mission effects feed the HUD's text surfaces. Drained effects carry
+# {kind, a..d, str}: WAC text/ptext carries a literal in `str`, while BMS
+# OutputText carries a nonzero Triggered-Text id in `a`. consol/pconsol uses the
+# distinct `debug_text` kind and remains off the player-facing feed. Queue both
+# forms because PreMission effects can arrive before the lazy HUD and its mission
+# table exist. Public with hud_objective_line() as the ADR 0018 read seam.
+func apply_mission_effects(effects: Array) -> void:
 	for e in effects:
 		if e is Dictionary and String(e.get("kind", "")) == "text":
-			_show_triggered_text(int(e.get("a", 0)))
+			var t := String(e.get("str", ""))
+			if not t.is_empty():
+				_hud_objective = t
+				_queue_hud_message(t, 0)
+			else:
+				var text_id := int(e.get("a", 0))
+				if text_id != 0:
+					_queue_hud_message("", text_id)
+
+
+func _queue_hud_message(text: String, text_id: int) -> void:
+	_pending_hud_messages.append({"text": text, "text_id": text_id})
+	while _pending_hud_messages.size() > MAX_PENDING_HUD_MESSAGES:
+		_pending_hud_messages.pop_front()
+
+
+func _flush_pending_hud_messages() -> void:
+	if _game_hud == null:
+		return
+	for pending in _pending_hud_messages:
+		var text := String(pending.get("text", ""))
+		if not text.is_empty():
+			_game_hud.push_message(text)
+		else:
+			_show_triggered_text(int(pending.get("text_id", 0)))
+	_pending_hud_messages.clear()
 
 
 # [orig: HUD_DisplayTriggeredText @0x51f190 — the mission table's "Triggered Text"
@@ -327,7 +368,12 @@ func _show_triggered_text(text_id: int) -> void:
 	if text.is_empty():
 		push_warning("GameHud: mission text %s not found in the mission string table." % key)
 		return
+	_hud_objective = text
 	_game_hud.push_message(text)
+
+
+func hud_objective_line() -> String:
+	return _hud_objective
 
 
 func _on_skeleton_debug_toggled(enabled: bool) -> void:
@@ -643,7 +689,11 @@ func _enter_net_session() -> void:
 
 
 func _on_world_loaded() -> void:
-	_menu_host.enter_game_music()
+	# The GAME music context is the world's to open at mission start (GameWorld
+	# calls NovaMusicService.open_game_context — host-neutral, so ONED play gets
+	# the same music); nothing to do here. Quit-to-menu re-enters menu music via
+	# reset_to_root().
+	pass
 
 
 func _on_world_load_failed(reason: String) -> void:
@@ -683,12 +733,12 @@ func _on_return_to_menu() -> void:
 		_net_killfeed.queue_free()
 		_net_killfeed = null
 	if _game_hud != null:
-		if _world != null and _world.has_signal("mission_effects") and _world.mission_effects.is_connected(_on_mission_effects):
-			_world.mission_effects.disconnect(_on_mission_effects)
 		_game_hud.queue_free()
 		_game_hud = null
-		_hud_weapon_name = ""
-		NovaStrings.register_table("mission", null)
+	_hud_weapon_name = ""
+	_hud_objective = ""
+	_pending_hud_messages.clear()
+	NovaStrings.register_table("mission", null)
 	_warned_hud_no_player = false
 	if _root != null:
 		_enter_menu(_root.get_root_dir())

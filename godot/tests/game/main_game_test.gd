@@ -57,6 +57,34 @@ func test_cannot_summon_while_picker_open() -> void:
 	picker.queue_free()
 
 
+func test_mission_text_effect_reaches_hud_objective() -> void:
+	# Drained effects carry {kind, a..d, str} (NovaSimulation::drain_effects); the
+	# WAC text/ptext family lands as kind=="text" with the string in "str". The
+	# old handler read nonexistent "text"/"message" keys, so mission text never
+	# reached the HUD.
+	var game := _make()
+	game.apply_mission_effects([
+		{"kind": "dialog", "a": 3},
+		{"kind": "text", "str": "Proceed to the beach"},
+		{"kind": "text", "str": ""},
+	])
+	assert_eq(game.hud_objective_line(), "Proceed to the beach",
+		"kind=='text' effect drives the HUD objective line; empty/other kinds ignored")
+
+
+func test_console_debug_text_does_not_reach_hud_objective() -> void:
+	# consol/pconsol ride the distinct debug_text channel. The game does not yet
+	# present an on-screen debug console, so these effects remain intentionally
+	# unrouted instead of replacing player-facing mission text.
+	var game := _make()
+	game.apply_mission_effects([
+		{"kind": "text", "str": "Hold this position"},
+		{"kind": "debug_text", "str": "trigger 17 entered"},
+	])
+	assert_eq(game.hud_objective_line(), "Hold this position",
+		"debug_text stays off the player-facing HUD mission-text channel")
+
+
 func test_crosshair_option_updates_an_existing_hud() -> void:
 	var game := _make()
 	var hud := FakeGameHud.new()

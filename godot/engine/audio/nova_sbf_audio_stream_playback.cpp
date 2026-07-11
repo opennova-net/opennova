@@ -42,6 +42,7 @@ void NovaSbfAudioStreamPlayback::_start(double p_from_pos) {
 	_current_chunk = -1; // force reload on first mix
 	_decoded_count = 0;
 	_frames_consumed = (uint64_t)(p_from_pos * (double)SBF_SAMPLE_RATE);
+	begin_resample();
 }
 
 void NovaSbfAudioStreamPlayback::_stop() {
@@ -56,6 +57,7 @@ void NovaSbfAudioStreamPlayback::_seek(double p_position) {
 	_frames_consumed = (uint64_t)(p_position * (double)SBF_SAMPLE_RATE);
 	_current_chunk = -1; // force reload on next mix
 	_decoded_count = 0;
+	begin_resample();
 }
 
 bool NovaSbfAudioStreamPlayback::_load_chunk(int p_chunk_index) {
@@ -93,14 +95,30 @@ bool NovaSbfAudioStreamPlayback::_load_chunk(int p_chunk_index) {
 	return true;
 }
 
-int32_t NovaSbfAudioStreamPlayback::_mix(AudioFrame *p_buffer,
-		float /*p_rate_scale*/,
+float NovaSbfAudioStreamPlayback::_get_stream_sampling_rate() const {
+	return (float)SBF_SAMPLE_RATE;
+}
+
+int32_t NovaSbfAudioStreamPlayback::_mix_resampled(AudioFrame *p_buffer,
 		int32_t p_frames) {
-	if (!_playing || _bank.is_null()) {
+	// AudioStreamPlaybackResampled uses frames beyond the returned count as
+	// cubic-interpolation lookahead. Keep that tail deterministic even when an
+	// invalid entry or EOF makes us return fewer frames than requested.
+	for (int32_t i = 0; i < p_frames; ++i) {
+		p_buffer[i].left = 0.0f;
+		p_buffer[i].right = 0.0f;
+	}
+
+	if (!_playing) {
+		return 0;
+	}
+	if (_bank.is_null()) {
+		_playing = false;
 		return 0;
 	}
 	const SbfRawEntry *e = _bank->raw_entry_at(_entry_index);
 	if (!e || e->block_size == 0) {
+		_playing = false;
 		return 0;
 	}
 

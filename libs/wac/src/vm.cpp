@@ -189,13 +189,38 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     if (ieq(n, "win")) { w.effects.push({"win", A(0), 0, 0, 0, std::string()}); return 0; }
     if (ieq(n, "lose")) { w.effects.push({"lose", A(0), 0, 0, 0, std::string()}); return 0; }
 
-    // ---- text / console ----
-    if (ieq(n, "text") || ieq(n, "consol") || ieq(n, "ptext") || ieq(n, "pconsol")) {
+    // ---- player text / debug console ----
+    // text/ptext feed the player message channel [orig: WAC text @ 0x4EDB50
+    // -> Chat_AddMessageChannel1 @ 0x4985D0], while consol/pconsol feed the
+    // distinct on-screen debug channel [orig: @ 0x4EDBE0 ->
+    // Chat_AddDebugMessage]. Keep them separate so game hosts can present
+    // mission text without leaking authored debug output into the HUD.
+    if (ieq(n, "text") || ieq(n, "ptext")) {
         w.effects.push({"text", 0, 0, 0, 0, S(0)});
         return 0;
     }
-    if (ieq(n, "text#") || ieq(n, "consol#")) {
+    if (ieq(n, "consol") || ieq(n, "pconsol")) {
+        w.effects.push({"debug_text", 0, 0, 0, 0, S(0)});
+        return 0;
+    }
+    if (ieq(n, "text#")) {
         w.effects.push({"text", A(1), 0, 0, 0, S(0)});
+        return 0;
+    }
+    if (ieq(n, "consol#")) {
+        w.effects.push({"debug_text", A(1), 0, 0, 0, S(0)});
+        return 0;
+    }
+
+    // ---- scripted voice (wave / pwave): play a .wav by FILENAME ----
+    // [orig: wave/pwave @ 0x4ED610] loads the named wav from the archive
+    // (Audio_LoadWavFileFromArchive @ 0x766480) and plays it on a single dedicated
+    // voice channel (dword_C6EC30) that it RESETS first -- so a new wave interrupts
+    // the previous one. This is a separate channel from the .DBF dialog queue
+    // (PlayWavList), not serialized with it. The filename rides the effect string.
+    // pwave is the network-broadcast twin (same handler); host-side identical.
+    if (ieq(n, "wave") || ieq(n, "pwave")) {
+        w.effects.push({"dialog_wav", 0, 0, 0, 0, S(0)});
         return 0;
     }
 

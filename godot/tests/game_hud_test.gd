@@ -15,6 +15,13 @@ class WeaponClusterOnlyHud:
 		_draw_weapon_cluster(Vector2(1024, 768), 0)
 
 
+class StanceOnlyHud:
+	extends GameHud
+
+	func _draw() -> void:
+		_draw_stance(Vector2(1024, 768), 100)
+
+
 func after_each() -> void:
 	for dir_path in _temp_dirs:
 		for file_name in DirAccess.get_files_at(dir_path):
@@ -23,17 +30,21 @@ func after_each() -> void:
 	_temp_dirs.clear()
 
 
-func _load_temp_layout(lines: PackedStringArray, textures: PackedStringArray) -> Dictionary:
+func _load_temp_layout(lines: PackedStringArray, textures: PackedStringArray,
+		texture_sizes: Dictionary = {}) -> Dictionary:
 	var dir_path := OS.get_temp_dir().path_join("game_hud_%d" % Time.get_ticks_usec())
 	assert_eq(DirAccess.make_dir_recursive_absolute(dir_path), OK)
 	_temp_dirs.append(dir_path)
 	for texture_name in textures:
-		# Minimal uncompressed 2x2 BGRA TGA, loaded through GameHud's real VFS path.
+		# Minimal uncompressed BGRA TGA, loaded through GameHud's real VFS path.
+		var texture_size: Vector2i = texture_sizes.get(texture_name, Vector2i(2, 2))
 		var bytes := PackedByteArray()
-		bytes.resize(18 + 2 * 2 * 4)
+		bytes.resize(18 + texture_size.x * texture_size.y * 4)
 		bytes[2] = 2
-		bytes[12] = 2
-		bytes[14] = 2
+		bytes[12] = texture_size.x & 0xff
+		bytes[13] = (texture_size.x >> 8) & 0xff
+		bytes[14] = texture_size.y & 0xff
+		bytes[15] = (texture_size.y >> 8) & 0xff
 		bytes[16] = 32
 		bytes[17] = 0x28
 		for i in range(18, bytes.size()):
@@ -100,19 +111,23 @@ func test_stance_assets_use_explicit_ids_for_slots() -> void:
 		"HUDSTANCE 4 40 41 stance_5.tga EMPLACED",
 		"HUDSTANCE 1 12 13 stance_2.tga CROUCH",
 		"HUDSTANCE 2 22 23 stance_3.tga PRONE",
+		"HUDSTANCE 3 30 31 stance_4.tga SITTING",
 	]), PackedStringArray([
 		"stance_1.tga", "stance_2.tga", "stance_old.tga",
-		"stance_3.tga", "stance_5.tga", "stance_6.tga",
+		"stance_3.tga", "stance_4.tga", "stance_5.tga", "stance_6.tga",
 	]))
-	var hud := GameHud.new()
+	var hud := StanceOnlyHud.new()
+	hud.size = Vector2(1024, 768)
 	add_child_autofree(hud)
 	hud.set_layout(fixture["layout"], fixture["root"])
+	hud.update_info({"stance": 2, "ticks": 100})
+	hud.queue_redraw()
+	await get_tree().process_frame
+	RenderingServer.canvas_item_set_custom_rect(hud.get_canvas_item(), false)
 
-	assert_eq(hud._stance_textures.size(), 6, "The six retail stance slots stay index-addressable.")
-	assert_eq(hud._stance_offsets[0], Vector2(10, 11), "Out-of-order ID 0 occupies slot 0.")
-	assert_eq(hud._stance_offsets[2], Vector2(22, 23), "The later duplicate ID replaces slot 2.")
-	assert_null(hud._stance_textures[3], "A missing ID leaves its slot unloaded for the six-frame gate.")
-	assert_eq(hud._stance_offsets[5], Vector2(50, 51), "Out-of-order ID 5 occupies slot 5.")
+	assert_eq(RenderingServer.debug_canvas_item_get_rect(hud.get_canvas_item()),
+		Rect2(43, 653, 128, 128),
+		"Explicit IDs select slots independent of file order; the later ID 2 offset replaces the earlier one.")
 	hud.free()
 
 
@@ -194,19 +209,35 @@ func test_weapon_cluster_draws_nothing_without_crosshair_texture() -> void:
 func test_crosshair_style_clamps_and_reloads_live() -> void:
 	var fixture := _load_temp_layout(PackedStringArray([
 		"ALPHAFADE 30 50 3",
-	]), PackedStringArray(["cross01.tga", "cross25.tga"]))
-	var hud := GameHud.new()
+	]), PackedStringArray(["cross01.tga", "cross25.tga"]), {
+		"cross01.tga": Vector2i(2, 2),
+		"cross25.tga": Vector2i(6, 6),
+	})
+	var hud := WeaponClusterOnlyHud.new()
+	hud.size = Vector2(1024, 768)
 	add_child_autofree(hud)
 	hud.set_crosshair_style(99)
 	hud.set_layout(fixture["layout"], fixture["root"])
-	var high_style_texture: Texture2D = hud._crosshair_tex
-	assert_not_null(high_style_texture, "Styles above 24 clamp to cross25.tga.")
+	hud.set_weapon(PlayerHudWeaponDef.from_weapon_dict({
+		"name": "WPN_TEST",
+		"error": PackedFloat32Array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+	}), "Test weapon")
+	hud.update_info({
+		"weapon_active": true, "stance": 0, "scope_engaged": false,
+		"fov_deg": 80.0, "ticks": 0,
+	})
+	await get_tree().process_frame
+	RenderingServer.canvas_item_set_custom_rect(hud.get_canvas_item(), false)
+	var high_style_rect := RenderingServer.debug_canvas_item_get_rect(hud.get_canvas_item())
+	assert_ne(high_style_rect, Rect2(), "Styles above 24 clamp to drawable cross25.tga.")
 
 	hud.set_crosshair_style(-4)
-	assert_not_null(hud._crosshair_tex, "Negative styles clamp and live-reload cross01.tga.")
-	assert_ne(hud._crosshair_tex.get_instance_id(), high_style_texture.get_instance_id(),
-		"Changing style reloads the selected texture on a live HUD.")
-	high_style_texture = null
+	await get_tree().process_frame
+	RenderingServer.canvas_item_set_custom_rect(hud.get_canvas_item(), false)
+	var low_style_rect := RenderingServer.debug_canvas_item_get_rect(hud.get_canvas_item())
+	assert_ne(low_style_rect, Rect2(), "Negative styles clamp to drawable cross01.tga.")
+	assert_gt(high_style_rect.size.x, low_style_rect.size.x,
+		"Changing style live-reloads the differently sized selected texture.")
 	hud.free()
 
 

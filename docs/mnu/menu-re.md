@@ -314,6 +314,13 @@ widget through a single host `.lwf` profile - all corrected.
 `@ 0x5613bf`) is a RED HERRING: it is the player-info VOICE preview bank
 (`VOICE_%d`, `sub_55FF70`), not the widget sound mechanism.
 
+## Screen music `[orig: UI_DispatchScreenEvent @ 0x54e6a0]`
+
+Every screen event stores the active screen's `MUSICVAR` field (screen +0x14) into
+AudioVM Var2 at `0x54eff4`. The write is unconditional: an absent field contributes
+its parsed default zero, and showing the same screen again repeats the store. The
+runtime mirrors that rule through `NovaMnuMenu::apply_music_for_screen`.
+
 ## XML entities `[orig: XML_ParseCharEntity @ 0x769cc0; table @ 0x85a628]`
 
 Numeric entities are DECIMAL-only (`_wtol` base 10; `&#xNN;` -> 0) and truncate to the
@@ -467,7 +474,7 @@ Accepted/divergent (each a documented decision, not a defect):
 Deferred (unwitnessed or out of bar; backlog, not blocking):
 
 - The hotkey consume-on-effect vtable path (`CUIWidget_HandleScriptedAction @ 0x649790`,
-  no direct xrefs) and MUSICVAR host dedup policy.
+  no direct xrefs).
 - `GLB_TABLE/RADIOEDIT/LAN_LIST/GOPHER` runtime behavior (multiplayer-browser widgets;
   build as containers, behavior rides with the net workspace).
 - Real 3D globe; the table SCROLLBAR delegate `(*(tableWnd[244]+60)) @ 0x643b22`.

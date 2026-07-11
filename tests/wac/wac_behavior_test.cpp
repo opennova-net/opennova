@@ -148,6 +148,69 @@ static void test_paren_less_and_effects() {
     CHECK(w.effects.count("flash") == 1);
 }
 
+// WAC scripted voice: wave/pwave route to a "dialog_wav" effect carrying the
+// filename so the host can play it [orig: wave/pwave @ 0x4ED610]. Without the
+// explicit handler they fall through to the default case as an unrouted "wave".
+static void test_wac_wave_emits_dialog_wav() {
+    World w = make_world();
+    WacSystem sys;
+    CompileEnv env;
+    sys.set_program(compile_source("if never then wave(brief1) endif\n", env));
+    w.add_system(&sys);
+    w.load_systems();
+    run(w, sys, 1);
+    CHECK(w.effects.count("dialog_wav") == 1);
+    CHECK(w.effects.count("wave") == 0); // not the unrouted default-case kind
+    bool carried_filename = false;
+    for (const Effect &e : w.effects.entries())
+        if (e.kind == "dialog_wav" && e.str == "brief1") carried_filename = true;
+    CHECK(carried_filename);
+}
+
+// Mission text and the on-screen debug console are separate retail channels:
+// text/text# (and their peer-broadcast ptext twin) feed the player message
+// presentation, while consol/consol# and pconsol feed Chat_AddDebugMessage and
+// must remain distinguishable for hosts that deliberately do not present them.
+static void test_wac_text_and_console_use_distinct_effect_channels() {
+    World w = make_world();
+    WacSystem sys;
+    CompileEnv env;
+    Program p = compile_source(
+        "if never then "
+        "text(local_text) ptext(peer_text) text#(numbered_text,7) "
+        "consol(local_debug) pconsol(peer_debug) consol#(numbered_debug,9) "
+        "endif\n",
+        env);
+    CHECK(p.ok());
+    sys.set_program(std::move(p));
+    w.add_system(&sys);
+    w.load_systems();
+    run(w, sys, 1);
+
+    CHECK(w.effects.count("text") == 3);
+    CHECK(w.effects.count("debug_text") == 3);
+    bool saw_local_text = false;
+    bool saw_peer_text = false;
+    bool saw_numbered_text = false;
+    bool saw_local_debug = false;
+    bool saw_peer_debug = false;
+    bool saw_numbered_debug = false;
+    for (const Effect &e : w.effects.entries()) {
+        saw_local_text |= e.kind == "text" && e.str == "local_text" && e.a == 0;
+        saw_peer_text |= e.kind == "text" && e.str == "peer_text" && e.a == 0;
+        saw_numbered_text |= e.kind == "text" && e.str == "numbered_text" && e.a == 7;
+        saw_local_debug |= e.kind == "debug_text" && e.str == "local_debug" && e.a == 0;
+        saw_peer_debug |= e.kind == "debug_text" && e.str == "peer_debug" && e.a == 0;
+        saw_numbered_debug |= e.kind == "debug_text" && e.str == "numbered_debug" && e.a == 9;
+    }
+    CHECK(saw_local_text);
+    CHECK(saw_peer_text);
+    CHECK(saw_numbered_text);
+    CHECK(saw_local_debug);
+    CHECK(saw_peer_debug);
+    CHECK(saw_numbered_debug);
+}
+
 static void test_authority_gate() {
     World w = make_world();
     WacSystem sys;
@@ -171,6 +234,8 @@ int main() {
     test_else_branch();
     test_environment();
     test_paren_less_and_effects();
+    test_wac_wave_emits_dialog_wav();
+    test_wac_text_and_console_use_distinct_effect_channels();
     test_authority_gate();
     std::printf(failures ? "BEHAVIOR TESTS FAILED (%d)\n" : "behavior tests passed\n", failures);
     return failures ? 1 : 0;

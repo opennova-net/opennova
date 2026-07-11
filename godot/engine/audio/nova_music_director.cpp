@@ -170,6 +170,16 @@ void NovaMusicDirector::_process(double p_delta) {
 	if (!_vm_running || _vm == nullptr) {
 		return;
 	}
+	// Pace the VM the way the original engine does: AudioVM advances the script
+	// only when the current track has finished streaming -- audio_stream_update
+	// @0x671c60 steps the VM (sub_672EE0) solely on `remaining_bytes <= 0`, never
+	// once per frame. While the track the last `play` started is still sounding,
+	// leave the VM halted where that `play` stopped it. Without this gate the VM
+	// races through `play`/`setstate` every frame, restarting the SBF stream
+	// (AudioVM_StartSound @0x671ff0 seeks to the start) ~60x/sec -> a low buzz.
+	if (_active_play != nullptr && _active_play->is_playing()) {
+		return;
+	}
 	mus_vm_tick(_vm, (uint32_t)(p_delta * 1000.0));
 	MusVMState state = mus_vm_state(_vm);
 	// PAUSED is a non-terminal pause-and-resume condition; only RUNNING -> something
@@ -190,6 +200,7 @@ void NovaMusicDirector::_exit_tree() {
 	// automatically; just drop our pointers so the next _ready can rebuild.
 	_players.clear();
 	_next_player = 0;
+	_active_play = nullptr;
 }
 
 // --- Methods -----------------------------------------------------------
@@ -220,6 +231,7 @@ void NovaMusicDirector::start() {
 	hooks.on_echo = _on_echo;
 	mus_vm_set_hooks(_vm, &hooks);
 
+	_active_play = nullptr; // fresh context: first _process advances the VM to the first play
 	mus_vm_start(_vm);
 	_vm_running = (mus_vm_state(_vm) == MUS_VM_RUNNING);
 }
@@ -229,6 +241,15 @@ void NovaMusicDirector::stop() {
 		mus_vm_stop(_vm);
 	}
 	_vm_running = false;
+	for (int i = 0; i < _players.size(); ++i) {
+		if (_players[i]) {
+			_players[i]->stop();
+			// A stopped player still owns its AudioStream (and therefore the old
+			// SBF bank). Drop it so a context teardown actually releases the pair.
+			_players[i]->set_stream(Ref<AudioStream>());
+		}
+	}
+	_active_play = nullptr;
 }
 
 void NovaMusicDirector::pause() {
@@ -312,6 +333,10 @@ void NovaMusicDirector::_on_play_sound(void *user, uint32_t sbf_entry_index, int
 			if (p != nullptr) {
 				p->set_stream(stream);
 				p->play();
+				// Gate the VM on this track finishing (see _process). The original
+				// streams exactly one music context at a time (audio_stream_update),
+				// so the most-recently started player is THE active track.
+				self->_active_play = p;
 			}
 		}
 		sound_name = self->_bank->get_entry_name((int)sbf_entry_index);
