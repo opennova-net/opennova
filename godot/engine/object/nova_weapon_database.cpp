@@ -102,6 +102,7 @@ void NovaWeaponDatabase::append_entry(const DefWeaponDef &e) {
 	}
 	w.renderfov = e.renderfov;
 	w.flags = e.flags;
+	w.flags2 = e.flags2;
 	w.scope_max_mag = e.scope_max_mag;
 	w.special_hold = e.special_hold;
 	w.attack_anim = e.attack_anim;
@@ -116,6 +117,24 @@ void NovaWeaponDatabase::append_entry(const DefWeaponDef &e) {
 	w.hudrndgfx_offset[1] = e.hudrndgfx_offset[1];
 	for (int k = 0; k < 3; ++k) {
 		w.hudrndgfx_layout[k] = e.hudrndgfx_layout[k];
+	}
+	// The SIGHTS card rows (the scoped-ADS overlay), authored draw order preserved
+	// [orig: rows at the weapon record +0x1C8 (stride 36, count +0x258) drawn by
+	// draw_weapon_sight_overlays @ 0x4dce00 when Scoped + scope raised].
+	w.sights.clear();
+	for (size_t si = 0; si < e.sights_count; ++si) {
+		const DefSightEntry &se = e.sights[si];
+		Dictionary row;
+		row["texture"] = String(se.texture);
+		row["x1"] = se.x1;
+		row["y1"] = se.y1;
+		row["x2"] = se.x2;
+		row["y2"] = se.y2;
+		row["blend"] = se.blend; // 0=Blend 1=Add 2=BlendAt
+		row["scale"] = se.scale != 0;
+		row["slide"] = se.slide != 0;
+		row["slide_frames"] = se.slide_frames;
+		w.sights.push_back(row);
 	}
 	for (size_t a = 0; a < e.actions_count; ++a) {
 		const DefWeaponAction &row = e.actions[a];
@@ -190,7 +209,9 @@ Dictionary NovaWeaponDatabase::weapon_dict(int index) const {
 	d["tpos"] = tpos; // the ADS variant [orig: WeaponDef.AltCamOffset @ 0x10C]
 	d["renderfov"] = w.renderfov;
 	d["flags"] = w.flags;
+	d["flags2"] = w.flags2;
 	d["scope_max_mag"] = w.scope_max_mag;
+	d["sights"] = w.sights.duplicate(true);
 	// The 3P body-channel kinds [orig: weapon.def special_hold/attack_anim ->
 	// AdmDefs +0xA4/+0xA8; world-wac-ai-re.md section 14.8].
 	d["special_hold"] = w.special_hold;

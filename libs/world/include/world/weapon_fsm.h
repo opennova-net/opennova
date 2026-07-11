@@ -104,7 +104,10 @@ struct WeaponFsmDef {
     bool auto_fire = false;
     bool burst3 = false;
     int32_t clip_capacity = 0; // rounds per clip; < 0 = infinite (the def+0x58 == -1 paths)
-    int32_t flags = 0;         // the raw weapon.def flag mask (scoped 1 / sighted 2 / ...)
+    int32_t flags = 0;         // the flags1 dword [orig: token table @ 0x830bf0 — scoped 1,
+                               // sighted 2, ..., forcecrouch 0x40000 (keep-scope reload),
+                               // nocardswitch 0x2000000, forcescoped 0x20000000]
+    int32_t flags2 = 0;        // the flags2 dword (noselect 1 / ... / inset 0x200)
 };
 
 // ms -> 62.5 Hz ticks. [orig: Anim_GetDurationTicks @ 0x53ee10 = ms * 62.5 / 1000 + 1

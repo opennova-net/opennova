@@ -186,12 +186,14 @@ func tick() -> void:
 			reserve += clip
 	var scope_engaged := false
 	var scope_fraction := 0.0
+	var scope_card := false
 	var fov_deg := 80.0
 	var lv: PlayerLocalView = _world.local_player_view() \
 			if _world.has_method("local_player_view") else null
 	if lv != null:
 		scope_engaged = lv.scope_engaged
 		scope_fraction = lv.scope_fraction
+		scope_card = lv.scope_card_active
 		fov_deg = lv.fov_h_deg
 
 	_game_hud.update_info({
@@ -206,6 +208,8 @@ func tick() -> void:
 		# The ease progress: the crosshair yields only at the SETTLED sight view
 		# (fraction 1) [orig: the @0x4de4f7 promoter; Player_CanFireWeapon @0x5cf780].
 		"scope_fraction": scope_fraction,
+		# The SIGHTS card switch [orig: Player_IsEquippedWeaponScoped @0x4dcc80].
+		"scope_card": scope_card,
 		# The crosshair's witnessed anchor: Vector2.INF in first person (the HUD pins
 		# the design center @0x5928a0), the projected aim in 3P/spectate (@0x592910).
 		"aim_screen": _player_host.aim_screen_point() \

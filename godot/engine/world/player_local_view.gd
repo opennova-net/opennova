@@ -10,7 +10,17 @@ extends RefCounted
 ## anchor chase ThirdPersonCamera_Update @0x437c8d]
 
 var scope_engaged := false
-var scope_fraction := 0.0     # 0 = hip .. 1 = sighted, in 1/15ths
+var scope_fraction := 0.0     # 0 = hip .. 1 = sighted, over the toggle's ease steps
+# The NoCardSwitch reload rule: true while the slot is mid-RELOAD on a weapon
+# WITHOUT NoCardSwitch — the FP view bias is dropped for the frame (the host
+# reads the eased fraction as 0). [orig: Player_UpdateFirstPersonCamera
+# @0x4dd439/@0x4dd4cc; predicate Player_IsReloadingCardSwitchWeapon @0x4dcdd0]
+var suppress_view_bias := false
+# The scope-card switch: a Scoped weapon at FULL raise in first person shows the
+# SIGHTS card INSTEAD of the FP viewmodel. [orig: Player_IsEquippedWeaponScoped
+# @0x4dcc80 -> draw_weapon_sight_overlays @0x4dce00; the FP model draw @0x5d822c
+# requires the gate clear]
+var scope_card_active := false
 var fov_h_deg := 80.0         # the main camera's HORIZONTAL fov (policy applied)
 var tp_anchor := Vector3.ZERO # the chased eye anchor, Godot space
 var tp_anchor_valid := false
@@ -23,6 +33,8 @@ static func from_view_dict(d: Dictionary) -> PlayerLocalView:
 	var out := PlayerLocalView.new()
 	out.scope_engaged = bool(d.get("scope_engaged", false))
 	out.scope_fraction = float(d.get("scope_fraction", 0.0))
+	out.suppress_view_bias = bool(d.get("suppress_view_bias", false))
+	out.scope_card_active = bool(d.get("scope_card_active", false))
 	out.fov_h_deg = float(d.get("fov_h_deg", 80.0))
 	out.tp_anchor = d.get("tp_anchor", Vector3.ZERO)
 	out.tp_anchor_valid = bool(d.get("tp_anchor_valid", false))
