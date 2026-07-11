@@ -142,6 +142,7 @@ func _toggle_debug_overlay() -> void:
 		_debug_overlay.set_runtime_source(_current_runtime)
 		# The View tab toggles: the overlay only emits intent; we own the world.
 		_debug_overlay.skeleton_debug_toggled.connect(_on_skeleton_debug_toggled)
+		_debug_overlay.collision_debug_toggled.connect(_on_collision_debug_toggled)
 		_debug_overlay.foliage_hidden_toggled.connect(_on_foliage_hidden_toggled)
 		_debug_overlay.viewmodel_forced_toggled.connect(_on_viewmodel_forced_toggled)
 		_debug_overlay.body_in_first_person_toggled.connect(_on_body_in_first_person_toggled)
@@ -219,6 +220,11 @@ func _on_mission_effects(effects: Array) -> void:
 func _on_skeleton_debug_toggled(enabled: bool) -> void:
 	if _world != null:
 		_world.set_skeleton_debug(enabled)
+
+
+func _on_collision_debug_toggled(enabled: bool) -> void:
+	if _world != null:
+		_world.set_collision_debug(enabled)
 
 
 func _on_foliage_hidden_toggled(hidden: bool) -> void:
