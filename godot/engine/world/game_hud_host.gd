@@ -77,7 +77,10 @@ func _ensure_game_hud() -> void:
 	_game_hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var host: Node = _ui_parent if _ui_parent != null else self
 	host.add_child(_game_hud)
-	_game_hud.set_anchors_preset(Control.PRESET_FULL_RECT)
+	# anchors AND offsets: an anchors-only preset keeps a fresh Control's
+	# zero rect, and a clipping parent (ONED's GameplayOverlay) then clips
+	# every HUD element to nothing.
+	_game_hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var hudpos := NovaHudPos.new()
 	var root: NovaResourceRoot = _world.get_resource_root() \
 			if _world != null and _world.has_method("get_resource_root") else null
