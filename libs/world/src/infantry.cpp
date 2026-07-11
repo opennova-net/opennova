@@ -841,6 +841,11 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         ent->position.x = static_cast<float>(from_fixed(e.pos[0]));
         ent->position.y = static_cast<float>(from_fixed(e.pos[1]));
         ent->position.z = static_cast<float>(from_fixed(e.pos[2]));
+        // Collision and landing damage mutate the motor-side health field. The original
+        // has one Entity store; mirror that result into the registry store consumed by
+        // scripts, the HUD, and wire snapshots.
+        ent->health = e.health;
+        ent->alive = e.health > 0;
         // BAM32 engine heading -> mission yaw (int16): mission_yaw = 90 - heading/deg.
         // (The exact yaw round-trip is the Q1 reconciliation handled with the present.)
         ent->yaw = static_cast<int16_t>(
