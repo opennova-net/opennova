@@ -139,3 +139,22 @@ Phases:
   probes' scenes visually re-checked (near brightness, far tint, no flicker,
   black far models); GUT foliage files + ctest foliage suite green; the
   RE record rewritten as the single source.
+
+### Phase A findings (2026-07-11, fresh decompiles — both pool managers verified)
+
+- FAR pool `foliage_lod_update_texture_slots @ 0x601b30`: ONE static VB/IB per
+  pool; slots are FIXED ranges (36-B verts x this[15] per slot; 2-B indices x
+  this[16]); per frame: clear active bytes, mark+stamp hits, collect NEW keys
+  (deduped, <=64/frame), LRU-adopt each new key and bake ONCE via
+  generate_foliage_instances_0 STRAIGHT INTO the slot's locked VB/IB range.
+  Steady state = zero regeneration, zero uploads.
+- MODEL tiles `Foliage_UpdateModelTiles @ 0x601f50`: per visible sector entity
+  per def slot; view-Z >= 38.0 gate; 4 quadrant 16u tiles; 1000-entry per-def
+  cache (stride 1368 B; [0] key, [1] stamp, [341] count). HIT: restamp;
+  regenerate ONLY on the 8-frame stagger ((frameParity + 2*defSlot) & 7) == 0 —
+  and the regen (Foliage_GenerateModelTileInstances @ 0x600980) is a CPU
+  instance-LIST rebuild, NOT geometry: draws submit per-model static buffers
+  (Foliage_DrawModelTileSlot @ 0x601d90). MISS: unrolled LRU evict, adopt,
+  generate once. => The rebuild keeps the witnessed stagger but must make tile
+  regen a cheap list write; NO per-frame mesh building or MultiMesh re-upload
+  (our model_uploads=76k is the divergence, not the regen count).
