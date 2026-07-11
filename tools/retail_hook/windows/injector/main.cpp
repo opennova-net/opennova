@@ -24,6 +24,8 @@ using opennova::retail_hook::jo_1_7_5_7_profile;
 static_assert(sizeof(void*) == 4, "The retail injector must be compiled for 32-bit Windows.");
 
 constexpr DWORD kRemoteCallTimeoutMs = 30000;
+constexpr int kModuleSnapshotAttempts = 50;
+constexpr DWORD kModuleSnapshotRetryMs = 10;
 
 void report_error(std::wstring_view operation, DWORD error) {
     wchar_t* system_message = nullptr;
@@ -153,16 +155,17 @@ void report_error(std::wstring_view operation, DWORD error) {
     DWORD& error) {
     error = ERROR_SUCCESS;
     HANDLE snapshot = INVALID_HANDLE_VALUE;
-    for (int attempt = 0; attempt < 8; ++attempt) {
+    for (int attempt = 0; attempt < kModuleSnapshotAttempts; ++attempt) {
         snapshot = CreateToolhelp32Snapshot(
             TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, process_id);
         if (snapshot != INVALID_HANDLE_VALUE) {
             break;
         }
         error = GetLastError();
-        if (error != ERROR_BAD_LENGTH) {
+        if (error != ERROR_BAD_LENGTH && error != ERROR_PARTIAL_COPY) {
             return 0;
         }
+        Sleep(kModuleSnapshotRetryMs);
     }
     if (snapshot == INVALID_HANDLE_VALUE) {
         return 0;
@@ -332,14 +335,15 @@ void report_error(std::wstring_view operation, DWORD error) {
     }
 
     SIZE_T written = 0;
-    if (WriteProcessMemory(
-            process,
-            remote_path,
-            hook_path.c_str(),
-            path_size,
-            &written) == FALSE ||
-        written != path_size) {
-        error = GetLastError();
+    const BOOL write_result = WriteProcessMemory(
+        process,
+        remote_path,
+        hook_path.c_str(),
+        path_size,
+        &written);
+    const DWORD write_error = write_result == FALSE ? GetLastError() : ERROR_SUCCESS;
+    if (write_result == FALSE || written != path_size) {
+        error = write_result == FALSE ? write_error : ERROR_PARTIAL_COPY;
         VirtualFreeEx(process, remote_path, 0, MEM_RELEASE);
         return false;
     }
@@ -355,7 +359,7 @@ void report_error(std::wstring_view operation, DWORD error) {
         remote_call(process, load_library, remote_path, loaded, error);
     if (!called) {
         // A timeout does not stop the remote thread. Keep its argument alive;
-        // the caller aborts the suspended process on every failure path.
+        // the caller terminates the process on every failure path.
         return false;
     }
     const BOOL freed = VirtualFreeEx(process, remote_path, 0, MEM_RELEASE);
@@ -455,8 +459,8 @@ int wmain(int argc, wchar_t** argv) {
     if (actual_digest != jo_1_7_5_7_profile().identity.sha256) {
         std::wcerr
             << L"Refusing to inject: Jointops.exe SHA-256 is not the "
-               L"canonical a42ee2d8895fc5867d8ad611e4c517f9725a4a146cc5ba43"
-               L"d64805c0e19b81c7 build.\n";
+               L"supported patched 9a1035440a53af2057ce0995ac42dced840d3b9fd"
+               L"53c04dc86041a962b84fe57 build.\n";
         return 2;
     }
 
@@ -492,16 +496,21 @@ int wmain(int argc, wchar_t** argv) {
             working_directory.c_str(),
             &startup,
             &process) == FALSE) {
-        report_error(L"Create suspended Jointops.exe", GetLastError());
+        report_error(L"Create Jointops.exe", GetLastError());
         return 3;
     }
 
     const auto abort_launch = [&process]() {
-        if (TerminateProcess(process.hProcess, ERROR_CANCELLED) == FALSE) {
-            report_error(L"Terminate failed suspended launch", GetLastError());
+        DWORD exit_code = STILL_ACTIVE;
+        const bool already_exited =
+            GetExitCodeProcess(process.hProcess, &exit_code) != FALSE &&
+            exit_code != STILL_ACTIVE;
+        if (!already_exited &&
+            TerminateProcess(process.hProcess, ERROR_CANCELLED) == FALSE) {
+            report_error(L"Terminate failed launch", GetLastError());
             std::wcerr << L"Process " << process.dwProcessId
-                       << L" may still be suspended and must be terminated manually.\n";
-        } else {
+                       << L" may still be running and must be terminated manually.\n";
+        } else if (!already_exited) {
             const DWORD wait = WaitForSingleObject(process.hProcess, 5000);
             if (wait == WAIT_FAILED) {
                 report_error(L"Wait for failed launch termination", GetLastError());
@@ -514,6 +523,21 @@ int wmain(int argc, wchar_t** argv) {
         CloseHandle(process.hProcess);
         return 3;
     };
+
+    if (ResumeThread(process.hThread) == static_cast<DWORD>(-1)) {
+        report_error(L"Start Jointops.exe loader", GetLastError());
+        return abort_launch();
+    }
+    const DWORD idle_wait = WaitForInputIdle(
+        process.hProcess, kRemoteCallTimeoutMs);
+    if (idle_wait == WAIT_FAILED) {
+        report_error(L"Wait for Jointops.exe loader", GetLastError());
+        return abort_launch();
+    }
+    if (idle_wait == WAIT_TIMEOUT) {
+        report_error(L"Wait for Jointops.exe loader", ERROR_TIMEOUT);
+        return abort_launch();
+    }
 
     std::uintptr_t remote_hook = 0;
     if (!load_hook(
@@ -529,17 +553,12 @@ int wmain(int argc, wchar_t** argv) {
         report_error(L"Invoke OpenNovaRetailHook_Start", error);
         return abort_launch();
     }
-    if (ResumeThread(process.hThread) == static_cast<DWORD>(-1)) {
-        report_error(L"Resume Jointops.exe", GetLastError());
-        return abort_launch();
-    }
-
     const DWORD process_id = process.dwProcessId;
     CloseHandle(process.hThread);
     CloseHandle(process.hProcess);
     std::wcout
-        << L"Validated canonical Jointops.exe, injected the read-only hook, "
-           L"started validation outside loader lock, and resumed process "
+        << L"Validated supported Jointops.exe, injected the read-only hook, "
+           L"and started validation outside loader lock in process "
         << process_id << L".\n";
     return 0;
 }

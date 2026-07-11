@@ -40,7 +40,7 @@ struct BuildProfile {
     std::uint32_t maximum_player_capacity{4096};
 };
 
-// Canonical, SHA-locked profile for the witnessed Joint Operations build.
+// Exact, SHA-locked profile for the witnessed patched Joint Operations build.
 [[nodiscard]] const BuildProfile& jo_1_7_5_7_profile();
 
 enum class ValidationError {

@@ -7,11 +7,11 @@ carry a second set of private struct definitions.
 
 ## Supported executable
 
-The only accepted build is Joint Operations 1.7.5.7 with this executable
-SHA-256:
+The only accepted build is the patched Joint Operations 1.7.5.7 executable
+distributed by the original onHook tooling, with this SHA-256:
 
 ```text
-a42ee2d8895fc5867d8ad611e4c517f9725a4a146cc5ba43d64805c0e19b81c7
+9a1035440a53af2057ce0995ac42dced840d3b9fd53c04dc86041a962b84fe57
 ```
 
 The injector checks the file before launch, and the injected DLL checks the
@@ -50,8 +50,9 @@ remaining arguments are forwarded to the game:
   [game arguments...]
 ```
 
-The injector creates the game suspended, loads the DLL, starts its worker, and
-then resumes the game. The validation window samples automatically every 750 ms.
+The injector starts the game under a controlled launch, waits for the Windows
+loader to reach input-idle, then loads the DLL and starts its worker. The
+validation window samples automatically every 750 ms.
 Press F5 to sample immediately, use the mouse wheel or vertical scrollbar to
 scroll, and press Esc to close the validation window.
 

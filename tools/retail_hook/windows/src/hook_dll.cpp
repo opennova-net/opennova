@@ -122,7 +122,7 @@ std::atomic_bool g_started{false};
     return run_validation_window(
         g_module,
         opened.session.get(),
-        L"Canonical executable profile accepted; mutation access is disabled.");
+        L"Supported executable profile accepted; mutation access is disabled.");
 }
 
 unsigned __stdcall validation_worker(void*) {
