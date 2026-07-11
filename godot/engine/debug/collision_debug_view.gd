@@ -52,7 +52,7 @@ var _world: Node                # duck-typed GameWorld (get_sim()); re-resolved 
 var _hull_mesh: ImmediateMesh
 var _player_mesh: ImmediateMesh
 var _gap_label: Label3D
-var _hull_signature := 0        # hash of (handle, pos) pairs; hulls rebuild on change
+var _hull_signature := 0        # hash of instance pose + emitted geometry
 var _hull_has_surface := false
 
 
@@ -93,6 +93,13 @@ func _make_lines_node(node_name: String, mesh: ImmediateMesh) -> MeshInstance3D:
 
 
 func _process(_delta: float) -> void:
+	refresh_now()
+
+
+## Immediately refresh the debug geometry from the current simulation.
+## The process hook delegates here; tests and tooling can request a deterministic
+## refresh without reaching into Godot's private frame callback.
+func refresh_now() -> void:
 	var sim := _resolve_sim()
 	if sim == null:
 		_clear_all()
@@ -124,12 +131,15 @@ func _clear_all() -> void:
 # --- Hull volumes -------------------------------------------------------------
 
 func _update_hulls(instances: Array) -> void:
-	# Rebuild only when the nearby set (or a member's position) changed: hulls are
-	# static world geometry, so steady-state frames skip the vertex re-emit.
+	# Rebuild only when the nearby set, a member's full pose, or its emitted
+	# geometry changed. Vehicles can rotate without translating, and mission
+	# reloads can reuse entity handles at the same pose with different hulls.
 	var sig_parts := []
 	for inst in instances:
 		sig_parts.append(inst.get("entity_handle", -1))
 		sig_parts.append(inst.get("pos", Vector3.ZERO))
+		sig_parts.append(inst.get("heading", 0.0))
+		sig_parts.append(hash(inst.get("volumes", [])))
 	var sig := hash(sig_parts)
 	if sig == _hull_signature and _hull_has_surface == (not instances.is_empty()):
 		return

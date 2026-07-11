@@ -2,9 +2,9 @@ extends GutTest
 
 # CollisionDebugView: the F3 "Show collision" 3D overlay. Drives it with a
 # duck-typed world/sim pair feeding a crafted get_collision_debug() dictionary
-# (the same shape NovaSimulation emits) to pin: hull boxes + the player capsule
-# draw, the ground-gap label reports, and a vanished sim clears everything
-# instead of erroring.
+# (the same shape NovaSimulation emits) through the public refresh seam to pin:
+# hull boxes + the player capsule draw, the ground-gap label reports, rotation
+# refreshes cached hulls, and a vanished sim clears everything instead of erroring.
 
 const ViewScript := preload("res://engine/debug/collision_debug_view.gd")
 
@@ -34,6 +34,15 @@ static func _unit_box_corners() -> PackedVector3Array:
 			1.0 if (c & 1) != 0 else 0.0,
 			1.0 if (c & 2) != 0 else 0.0,
 			1.0 if (c & 4) != 0 else 0.0)
+	return corners
+
+
+static func _quarter_turn_box_corners() -> PackedVector3Array:
+	# The same local unit box after a +90-degree world-space yaw about its origin.
+	var corners := _unit_box_corners()
+	for c in range(corners.size()):
+		var corner := corners[c]
+		corners[c] = Vector3(corner.z, corner.y, -corner.x)
 	return corners
 
 
@@ -75,10 +84,7 @@ func _make_view(world: Node) -> Node3D:
 func test_draws_hulls_capsule_and_gap_label() -> void:
 	var world := _make_world(_debug_payload())
 	var view := _make_view(world)
-	# Drive the frame hook directly: process_frame's signal fires BEFORE nodes
-	# process, so awaiting it races the view's first draw (in-suite vs isolation
-	# scheduling differed). A direct call is deterministic.
-	view._process(0.0)
+	view.refresh_now()
 
 	var hull := view.get_node("CollisionHullLines") as MeshInstance3D
 	assert_gt((hull.mesh as ImmediateMesh).get_surface_count(), 0, "hull wireframe drawn")
@@ -92,11 +98,11 @@ func test_draws_hulls_capsule_and_gap_label() -> void:
 func test_missing_sim_clears_instead_of_erroring() -> void:
 	var world := _make_world(_debug_payload())
 	var view := _make_view(world)
-	view._process(0.0)
+	view.refresh_now()
 
 	# The sim goes away (mission unloaded): the next frame clears every surface.
 	world.sim = null
-	view._process(0.0)
+	view.refresh_now()
 	var hull := view.get_node("CollisionHullLines") as MeshInstance3D
 	assert_eq((hull.mesh as ImmediateMesh).get_surface_count(), 0, "hulls cleared")
 	var player := view.get_node("CollisionPlayerLines") as MeshInstance3D
@@ -107,7 +113,29 @@ func test_missing_sim_clears_instead_of_erroring() -> void:
 func test_empty_world_draws_nothing() -> void:
 	var world := _make_world({ "instances": [], "player": { "valid": false } })
 	var view := _make_view(world)
-	view._process(0.0)
+	view.refresh_now()
 	var hull := view.get_node("CollisionHullLines") as MeshInstance3D
 	assert_eq((hull.mesh as ImmediateMesh).get_surface_count(), 0)
 	assert_false((view.get_node("CollisionGapLabel") as Label3D).visible)
+
+
+func test_rotation_only_refreshes_hull_geometry() -> void:
+	var payload := _debug_payload()
+	var world := _make_world(payload)
+	var view := _make_view(world)
+	view.refresh_now()
+	var hull := view.get_node("CollisionHullLines") as MeshInstance3D
+	var initial_bounds := (hull.mesh as ImmediateMesh).get_aabb()
+
+	# The entity did not translate and kept the same collision model. Its new
+	# heading changes only the transformed world-space corners in the sim payload.
+	var instance: Dictionary = payload["instances"][0]
+	instance["heading"] = 90.0
+	(instance["volumes"][0] as Dictionary)["corners"] = _quarter_turn_box_corners()
+	view.refresh_now()
+
+	var rotated_bounds := (hull.mesh as ImmediateMesh).get_aabb()
+	assert_ne(rotated_bounds, initial_bounds,
+		"a vehicle rotating in place redraws its collision hull")
+	assert_eq(rotated_bounds.position, Vector3(0.0, 0.0, -1.0),
+		"the redrawn hull uses the rotated corners from the sim")

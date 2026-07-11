@@ -163,6 +163,7 @@ func _build_panel() -> void:
 	add_child(panel)
 
 	var box := VBoxContainer.new()
+	box.name = "DebugContent"
 	box.add_theme_constant_override("separation", 6)
 	panel.add_child(box)
 

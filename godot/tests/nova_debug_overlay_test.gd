@@ -9,6 +9,8 @@ extends GutTest
 const OverlayScript := preload("res://engine/debug/nova_debug_overlay.gd")
 const MissionRuntime := preload("res://engine/world/mission_runtime.gd")
 const MainGameScript := preload("res://game/main_game.gd")
+const COLLISION_TOGGLE_PATH := NodePath(
+	"DebugPanel/DebugContent/DebugTabs/View/ViewCollision")
 
 
 class FakeModel:
@@ -104,14 +106,14 @@ func test_view_tab_collision_toggle_emits() -> void:
 	# the collision debug view.
 	var overlay := _make_overlay()
 	overlay.toggle()
-	assert_not_null(overlay._collision_check, "the collision checkbox is reachable as a member")
-	assert_eq(overlay._collision_check.name, "ViewCollision")
-	assert_false(overlay._collision_check.button_pressed, "it defaults off")
+	var collision_check := overlay.get_node_or_null(COLLISION_TOGGLE_PATH) as CheckBox
+	assert_not_null(collision_check, "the collision checkbox has a stable public node path")
+	assert_false(collision_check.button_pressed, "it defaults off")
 
 	watch_signals(overlay)
-	overlay._collision_check.toggled.emit(true)
+	collision_check.toggled.emit(true)
 	assert_signal_emitted_with_parameters(overlay, "collision_debug_toggled", [true])
-	overlay._collision_check.toggled.emit(false)
+	collision_check.toggled.emit(false)
 	assert_signal_emitted_with_parameters(overlay, "collision_debug_toggled", [false])
 
 
@@ -143,5 +145,4 @@ func before_all() -> void:
 
 func after_all() -> void:
 	ResourceDirSettings.set_resource_dir(_saved_resource_dir)
-
 
