@@ -68,16 +68,30 @@ struct WeaponFsmActionRow {
     char function[128] = {};
     int32_t delaystart = -1;
     int32_t delayend = -1;
+    // The row's audio/effect legs [orig: ActionDef_ParseScriptLine @ 0x4023c0
+    // soundset/soundsetend/particle/particleuserpoint keys]. Empty = none.
+    char soundset[128] = {};
+    char soundsetend[128] = {};
+    char particle[128] = {};
+    char particleuserpoint[128] = {};
 };
 
 // A baked runtime action slot. [orig: ActionDef pool entry — delayStart/+0x24,
-// delayEnd/+0x28 (dwords +9/+10), anim name +58, resolved anim slot +24]
+// delayEnd/+0x28 (dwords +9/+10), anim name +58, resolved anim slot +24; the pool
+// entry also carries the row's resolved sound/effect references consumed by the
+// begin leg ActionSlot_ExecuteActionWithEffect @ 0x541860 / ActionSlot_SpawnEffect
+// @ 0x401f20 — carried here as the authored names; the host seams resolve them]
 struct WeaponFsmAction {
+    int32_t id = -1;         // the action slot id (weapon_action::*), stamped by the bake
     int32_t delay_start = 0;
     int32_t delay_end = 0;
     bool has_anim = false;   // anim name present AND the clip resolved
     char anim_key[64] = {};  // the .adm clip key (ACTION rows name them directly,
                              // e.g. "anim_wpn_fire")
+    char soundset[128] = {};          // played when the action's active phase begins
+    char soundsetend[128] = {};       // the end-leg set (host seam; not yet emitted)
+    char particle[128] = {};          // effect spawned at the model user point
+    char particle_userpoint[128] = {};
 };
 
 // The per-weapon def slice the FSM consumes. Flag bits are the witnessed WeaponDef+8
@@ -154,6 +168,10 @@ struct WeaponFsmInputs {
 struct WeaponFsmEvents {
     bool play_anim = false;
     char anim_key[64] = {};
+    int32_t action_started = -1;   // slot id whose ACTIVE phase began this tick — the
+                                   // host's sound/muzzle seam (def.actions[id] carries
+                                   // the soundset/particle names)
+                                   // [orig: ActionSlot_ExecuteActionWithEffect @ 0x541860]
     bool fired = false;            // Entity_FireWeaponAndSendPacket seam [orig: @ 0x542c5e]
     bool dry_fired = false;        // the EMPTY one-shot entered
     bool reload_requested = false; // C2S 0x25 seam [orig: @ 0x5430ff; net-re §5.58]

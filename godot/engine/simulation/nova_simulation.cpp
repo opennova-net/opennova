@@ -1457,6 +1457,16 @@ void NovaSimulation::set_local_player_weapon(const Dictionary &p_def,
 		snprintf(row.function, sizeof(row.function), "%s", function.get_data());
 		row.delaystart = static_cast<int32_t>(int64_t(a.get("delaystart", -1)));
 		row.delayend = static_cast<int32_t>(int64_t(a.get("delayend", -1)));
+		// The audio/effect legs ride the bake into the pool entries
+		// [orig: ActionDef_ParseScriptLine @ 0x4023c0 rows].
+		const CharString soundset = String(a.get("soundset", "")).utf8();
+		const CharString soundsetend = String(a.get("soundsetend", "")).utf8();
+		const CharString particle = String(a.get("particle", "")).utf8();
+		const CharString userpoint = String(a.get("particleuserpoint", "")).utf8();
+		snprintf(row.soundset, sizeof(row.soundset), "%s", soundset.get_data());
+		snprintf(row.soundsetend, sizeof(row.soundsetend), "%s", soundsetend.get_data());
+		snprintf(row.particle, sizeof(row.particle), "%s", particle.get_data());
+		snprintf(row.particleuserpoint, sizeof(row.particleuserpoint), "%s", userpoint.get_data());
 		rows.push_back(row);
 	}
 	// Clip lengths come from the loaded viewmodel's .adm (seconds); the bake converts to
@@ -1503,6 +1513,8 @@ void NovaSimulation::set_local_player_weapon(const Dictionary &p_def,
 	weapon_anim_key_ = String();
 	weapon_fired_serial_ = weapon_dry_serial_ = weapon_reload_serial_ = 0;
 	weapon_unscope_serial_ = weapon_rescope_serial_ = 0;
+	weapon_action_serial_ = 0;
+	weapon_action_started_ = -1;
 	weapon_fire_held_ = weapon_fire_pressed_ = weapon_reload_pressed_ = false;
 	player_view_.scope_engaged = false; // a fresh mount starts at the hip
 	weapon_active_ = true;
@@ -1599,6 +1611,13 @@ void NovaSimulation::tick_local_player_weapon() {
 		++weapon_play_serial_;
 		weapon_anim_key_ = String::utf8(ev.anim_key);
 	}
+	if (ev.action_started >= 0) {
+		// The begin leg's sound/muzzle seam: the host resolves the started action's
+		// soundset/particle from the state dict on the serial edge
+		// [orig: ActionSlot_ExecuteActionWithEffect @ 0x541860].
+		++weapon_action_serial_;
+		weapon_action_started_ = ev.action_started;
+	}
 	if (ev.fired) {
 		++weapon_fired_serial_;
 		// The 3P body attack stamp — knife/grenade kinds only; rifle fire stamps NO body
@@ -1641,6 +1660,21 @@ Dictionary NovaSimulation::get_local_player_weapon_state() const {
 	out["current"] = weapon_slot_.current;
 	out["anim_key"] = weapon_anim_key_;
 	out["play_serial"] = static_cast<int64_t>(weapon_play_serial_);
+	// The last-started action's audio/effect legs (valid while action_serial holds;
+	// the host drains on the serial edge) [orig: ActionSlot_ExecuteActionWithEffect
+	// @ 0x541860 -> ActionSlot_SpawnEffect @ 0x401f20].
+	out["action_serial"] = static_cast<int64_t>(weapon_action_serial_);
+	if (weapon_action_started_ >= 0 &&
+			weapon_action_started_ < opennova::world::weapon_action::kCount) {
+		const opennova::world::WeaponFsmAction &act = weapon_def_.actions[weapon_action_started_];
+		out["action_soundset"] = String::utf8(act.soundset);
+		out["action_particle"] = String::utf8(act.particle);
+		out["action_particle_userpoint"] = String::utf8(act.particle_userpoint);
+	} else {
+		out["action_soundset"] = String();
+		out["action_particle"] = String();
+		out["action_particle_userpoint"] = String();
+	}
 	out["fired_serial"] = static_cast<int64_t>(weapon_fired_serial_);
 	out["dry_serial"] = static_cast<int64_t>(weapon_dry_serial_);
 	out["reload_serial"] = static_cast<int64_t>(weapon_reload_serial_);

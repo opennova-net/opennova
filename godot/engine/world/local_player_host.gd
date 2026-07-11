@@ -94,6 +94,8 @@ var _vm_camera: Camera3D = null
 # BOTH viewmodel parts (arms + gun share the animadm), and places nodes.
 var _vm_parts: Array = []           # NovaObjectModel parts under the viewmodel container
 var _weapon_play_serial := -1
+var _weapon_action_serial := -1     # action-begin drain; -1 adopts the first snapshot
+                                    # silently (viewmodel rebuilds must not refire sounds)
 var _weapon_view: PlayerWeaponView = null  # this tick's FSM view (body channel rides it)
 var _fire_was_held := false
 var _reload_was_down := false
@@ -318,6 +320,55 @@ func _consume_weapon_view() -> void:
 	if view.play_serial != _weapon_play_serial:
 		_weapon_play_serial = view.play_serial
 		_play_viewmodel_clip(view.anim_key)
+	if view.action_serial != _weapon_action_serial:
+		var adopt_only := _weapon_action_serial < 0
+		_weapon_action_serial = view.action_serial
+		if not adopt_only:
+			_fire_action_effects(view)
+
+
+# The action-begin sound/muzzle legs: play the started ACTION's soundset 3D-positional
+# at the firing entity and spawn its particle effect at the weapon model's user point
+# [orig: ActionSlot_ExecuteActionWithEffect @0x541860 plays the row's soundset and calls
+# ActionSlot_SpawnEffect @0x401f20 with the row's particle + userpoint; the one-shot
+# 3D placement is Sound_Play3DPositional @0x527cb0]. Several 62.5 Hz ticks can land in
+# one frame; like the clip drain above, the last started action wins the frame.
+func _fire_action_effects(view: PlayerWeaponView) -> void:
+	if _world == null:
+		return
+	if not view.action_soundset.is_empty() and _world.has_method("get_mission_audio"):
+		var audio = _world.get_mission_audio()
+		if audio != null:
+			audio.fire_soundset(view.action_soundset, _world.local_player_position())
+	if not view.action_particle.is_empty() and _world.has_method("get_effect_world"):
+		var fx = _world.get_effect_world()
+		if fx != null:
+			fx.spawn_effect(view.action_particle, _action_particle_world_position(view.action_particle_userpoint))
+
+
+# World-space spawn point for an ACTION particle: the named user point on a viewmodel
+# part (the gun carries the muzzle points), through the part's global transform. The
+# static model-space point is used as-is — composing the current bone pose onto it is a
+# tracked deferral. Falls back to the first part's origin, then the player eye.
+func _action_particle_world_position(userpoint: String) -> Vector3:
+	var fallback := Vector3.INF
+	for part in _vm_parts:
+		if part == null or not is_instance_valid(part) or not part.has_method("get_object_data"):
+			continue
+		if fallback == Vector3.INF:
+			fallback = part.global_transform.origin
+		if userpoint.is_empty():
+			continue
+		var data = part.get_object_data()
+		if data == null:
+			continue
+		for i in range(data.get_user_point_count()):
+			var info: Dictionary = data.get_user_point_info(i)
+			if String(info.get("name", "")).nocasecmp_to(userpoint) == 0:
+				return part.global_transform * Vector3(info.get("position", Vector3.ZERO))
+	if fallback != Vector3.INF:
+		return fallback
+	return _world.local_player_position() + Vector3(0, PLAYER_EYE_HEIGHT, 0)
 
 
 # Start an FSM clip on every viewmodel part (arms + gun share the animadm) - a replay
@@ -463,6 +514,27 @@ func _set_fly_camera_locked(locked: bool) -> void:
 func _release_mouse_capture() -> void:
 	if Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
 		Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+
+
+# The aim ray projected to screen pixels through the ACTIVE camera — the crosshair's
+# witnessed anchor (the projected aim point; equal to the screen center in first person,
+# where the camera looks exactly along the aim, and the true aim marker in third person,
+# where the orbit-pitched chase camera does not) [orig: HUD_DrawCrosshair @0x592640
+# centers on the projected aim -> Viewport_ScreenToVirtual @0x5d2c70; hud-re.md].
+# Vector2.INF when there is no camera/player or the far point falls behind the camera.
+const AIM_PROJECT_RANGE := 4096.0
+
+func aim_screen_point() -> Vector2:
+	if _world == null or _camera == null or not _has_player():
+		return Vector2.INF
+	var yr := deg_to_rad(_world.local_player_yaw_deg())
+	var pr := deg_to_rad(_world.local_player_pitch_deg())
+	var forward := Vector3(sin(yr) * cos(pr), sin(pr), -cos(yr) * cos(pr))
+	var eye: Vector3 = _world.local_player_position() + Vector3(0, PLAYER_EYE_HEIGHT, 0)
+	var target := eye + forward * AIM_PROJECT_RANGE
+	if _camera.is_position_behind(target):
+		return Vector2.INF
+	return _camera.unproject_position(target)
 
 
 # Place the camera from the player's authoritative pose. First person: eye = player + 1.0u

@@ -29,6 +29,11 @@ void copy_key(char (&dst)[64], const char *src) {
     dst[sizeof(dst) - 1] = '\0';
 }
 
+void copy_str128(char (&dst)[128], const char *src) {
+    std::strncpy(dst, src, sizeof(dst) - 1);
+    dst[sizeof(dst) - 1] = '\0';
+}
+
 // Recoil kick accumulation, capped at 20 (signed-char compare in the original).
 // [orig: @ 0x53f7f0..0x53f805 / @ 0x542cf1..0x542d0f]
 void kick_add(WeaponSlotState &slot, int32_t amount) {
@@ -67,6 +72,11 @@ void begin_active(const WeaponFsmAction &desc, WeaponSlotState &slot,
                   const WeaponFsmInputs &in, WeaponFsmEvents &out) {
     if ((slot.phase & 1) != 0 || (slot.phase & weapon_phase::kHeld) != 0) {
         slot.phase = weapon_phase::kActive;
+        // The begin leg's sound/muzzle seam: the host plays the action's
+        // soundset and spawns its particle at the model user point
+        // [orig: ActionSlot_ExecuteActionWithEffect @ 0x541860 ->
+        //  ActionSlot_SpawnEffect @ 0x401f20].
+        out.action_started = desc.id;
         if (desc.has_anim && in.is_local) {
             out.play_anim = true;
             copy_key(out.anim_key, desc.anim_key);
@@ -412,6 +422,7 @@ void weapon_fsm_bake(const WeaponFsmActionRow *rows, size_t row_count,
                      WeaponClipSecondsFn clip_seconds, void *ctx, WeaponFsmDef &out) {
     for (int i = 0; i < weapon_action::kCount; ++i) {
         WeaponFsmAction &a = out.actions[i];
+        a.id = i;
         // Absent rows are generated defaults: zeroed fields, unresolved anim.
         // [orig: ActionDef_InitDefaults @ 0x4022b0 memsets the record]
         int32_t ds = 0;
@@ -422,6 +433,12 @@ void weapon_fsm_bake(const WeaponFsmActionRow *rows, size_t row_count,
             ds = rows[r].delaystart;
             de = rows[r].delayend;
             if (rows[r].anim[0] != '\0') anim = rows[r].anim;
+            // The row's audio/effect legs ride the baked pool entry [orig: the
+            // ActionDef record carries the resolved references].
+            copy_str128(a.soundset, rows[r].soundset);
+            copy_str128(a.soundsetend, rows[r].soundsetend);
+            copy_str128(a.particle, rows[r].particle);
+            copy_str128(a.particle_userpoint, rows[r].particleuserpoint);
             break;
         }
         a.has_anim = false;

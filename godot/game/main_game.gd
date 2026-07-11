@@ -26,7 +26,12 @@ const ARMORY_KEY := KEY_B
 # The mission debug overlay (entities / sim transport / script variables).
 const DEBUG_OVERLAY_KEY := KEY_F3
 
-enum State { MENU, WORLD, PAUSED }
+# ARMORY = the WEAPON screen over LIVE play: the world keeps ticking (the witnessed
+# armory runs with no world-stop leg — and under the listen-server model a pausing
+# host would freeze every peer), only the mouse is released and player input idles.
+# [orig: input action 218 -> UI_OpenMenuScreen("weapon.mnu", "WEAPON") @0x49b8e3;
+# ADR 0009/0011]
+enum State { MENU, WORLD, PAUSED, ARMORY }
 
 @onready var _world: GameWorld = $World
 @onready var _camera: Camera3D = $Camera3D
@@ -234,7 +239,7 @@ func _load_rtxt(root: NovaResourceRoot, name: String) -> RtxtStringFile:
 # Rebuild the HUD's per-frame info from the authoritative local player, mirroring the
 # original rebuilding its HUD info struct each frame. [orig: HUD_BuildEntityInfo @0x4b8440]
 func _update_game_hud() -> void:
-	if _state != State.WORLD or not _world.is_loaded():
+	if (_state != State.WORLD and _state != State.ARMORY) or not _world.is_loaded():
 		return
 	if not _world.has_local_player():
 		if not _warned_hud_no_player:
@@ -275,10 +280,12 @@ func _update_game_hud() -> void:
 		clip = wv.clip if weapon == null or weapon.clipsize != -1 else -1
 		reserve = wv.reserve
 	var scope_engaged := false
+	var scope_fraction := 0.0
 	var fov_deg := 80.0
 	var lv: PlayerLocalView = _world.local_player_view() if _world.has_method("local_player_view") else null
 	if lv != null:
 		scope_engaged = lv.scope_engaged
+		scope_fraction = lv.scope_fraction
 		fov_deg = lv.fov_h_deg
 
 	_game_hud.update_info({
@@ -290,6 +297,11 @@ func _update_game_hud() -> void:
 		"clip": clip,
 		"reserve": reserve,
 		"scope_engaged": scope_engaged,
+		"scope_fraction": scope_fraction,
+		# The crosshair's witnessed anchor: the aim ray projected through the live
+		# camera (screen px; INF = no projection this frame) [orig: HUD_DrawCrosshair
+		# @0x592640 centers on the projected aim point].
+		"aim_screen": _player_host.aim_screen_point() if _player_host != null else Vector2.INF,
 		"fov_deg": fov_deg,
 		"ticks": _hud_ticks(),
 	})
@@ -440,10 +452,11 @@ func _on_avatar_chosen(profile: Dictionary) -> void:
 	_chosen_avatar = profile
 
 
-# The armory key while in-world: open weapon.mnu's WEAPON screen over the paused
-# world when the player stands in an armory zone [orig: input action 218 ->
-# UI_OpenMenuScreen("weapon.mnu", "WEAPON") @0x49b8e3, gated on Flags & 0x400000
-# @0x49b848 + the host weapons rule]. Returns false when out of zone (key ignored).
+# The armory key while in-world: open weapon.mnu's WEAPON screen over LIVE play
+# when the player stands in an armory zone — the world keeps ticking underneath
+# (State.ARMORY) [orig: input action 218 -> UI_OpenMenuScreen("weapon.mnu",
+# "WEAPON") @0x49b8e3, gated on Flags & 0x400000 @0x49b848 + the host weapons
+# rule; no world-stop leg]. Returns false when out of zone (key ignored).
 func _try_open_armory() -> bool:
 	var sim = _world.get_sim() if _world != null and _world.has_method("get_sim") else null
 	if sim == null or not sim.has_method("local_player_in_armory_zone"):
@@ -452,7 +465,7 @@ func _try_open_armory() -> bool:
 		return false
 	if _armory_host != null:
 		_armory_host.set_player_team(int(_chosen_avatar.get("team", 0)))
-	_state = State.PAUSED
+	_state = State.ARMORY
 	if not _menu_host.open_menu("weapon.mnu", "WEAPON"):
 		_state = State.WORLD
 		return false
@@ -716,10 +729,11 @@ func _on_world_load_failed(reason: String) -> void:
 
 
 func _on_camera_escape() -> void:
-	# Esc: pause <-> resume while in a world; ignored in the main menu (EXIT quits).
+	# Esc: pause <-> resume while in a world (the armory closes back to play);
+	# ignored in the main menu (EXIT quits).
 	if _state == State.WORLD:
 		_pause()
-	elif _state == State.PAUSED:
+	elif _state == State.PAUSED or _state == State.ARMORY:
 		_on_resume()
 
 
@@ -730,7 +744,7 @@ func _pause() -> void:
 
 
 func _on_resume() -> void:
-	if _state != State.PAUSED:
+	if _state != State.PAUSED and _state != State.ARMORY:
 		return
 	_menu_host.hide_menu()
 	_state = State.WORLD
@@ -778,10 +792,15 @@ func _set_hud_visible(v: bool) -> void:
 # also lets a host that drives load_world() directly (the headless runtime probe,
 # which stays in MENU) keep dispatching foliage.
 func _process(delta: float) -> void:
-	# Release the captured mouse while paused / unloaded so the menus stay usable.
-	if _state == State.PAUSED or not _world.is_loaded():
+	# Release the captured mouse while a menu overlays the world (pause / armory) or
+	# nothing is loaded, so the menus stay usable.
+	if _state == State.PAUSED or _state == State.ARMORY or not _world.is_loaded():
 		if Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
 			Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+	# Only the pause menu freezes the world. The armory runs over LIVE play: the
+	# match keeps simulating around the player while the WEAPON screen is up
+	# [orig: UI_OpenMenuScreen("weapon.mnu") @0x49b8e3 has no world-stop leg].
+	if _state == State.PAUSED or not _world.is_loaded():
 		return
 	if _player_host != null:
 		_player_host.before_world_tick(delta, _state == State.WORLD)

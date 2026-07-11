@@ -754,11 +754,22 @@ func set_local_player_weapon_by_name(weapon_name: String) -> bool:
 		return false
 	if _weapon_db == null:
 		local_player_viewmodel_def()  # lazily loads weapon.def into _weapon_db
-	if _weapon_db == null or not _weapon_db.is_loaded() \
-			or _weapon_db.find_weapon(weapon_name) < 0:
+	var index: int = _weapon_db.find_weapon(weapon_name) \
+			if _weapon_db != null and _weapon_db.is_loaded() else -1
+	if index < 0:
 		push_warning("GameWorld: armory weapon '%s' not in weapon.def — keeping current" % weapon_name)
 		return false
 	_viewmodel_weapon_override = weapon_name
+	# Install the new weapon's FSM on the sim NOW — the mount is not hostage to the FP
+	# model load [orig: WeaponLoadout_ApplyFromBuffer @0x565cd0 -> Player_MountWeaponSlot
+	# @0x4dfa40 installs the action table regardless of the render model]. Clip lengths
+	# bake in again when the rebuilt viewmodel resolves (_setup_local_player_weapon); a
+	# model that never loads leaves 'auto' delays collapsed instead of leaving the OLD
+	# weapon's FSM live under the new entity stamp.
+	_local_weapon_dict = _weapon_db.get_weapon(index)
+	var sim := get_sim()
+	if sim != null:
+		sim.set_local_player_weapon(_local_weapon_dict, {})
 	return true
 
 func build_local_player_viewmodel() -> Node3D:
@@ -978,15 +989,18 @@ func _route_mission_effects(effects: Array) -> void:
 				_mission_audio.play_wac_wave(String(eff.get("str", "")))
 		elif kind == "fx2ssn":
 			# WAC fx2ssn: spawn the named effect at the SSN entity's position with
-			# the emitter handle owned per entity (respawn detaches the old one)
+			# the emitter handle owned per entity — a scripted re-trigger detaches
+			# the previous group (spawn_effect_owned), so loops/respawns never stack
+			# emitters and FOREVEREMIT effects never accumulate
 			# [orig: WacScript_SpawnSoundAtEntity @ 0x4f23a0 — kong "sound" misnomer,
 			# it spawns a particle emitter]. The original orients the emitter to the
 			# terrain surface normal at the entity's grid cell; ported as up-vector
 			# until the terrain-normal read lands (ptl-format-re §8 follow-up).
 			if _effect_world != null and _runtime != null:
-				var pos = _runtime.entity_position_for_ssn(int(eff.get("b", 0)))
+				var ssn := int(eff.get("b", 0))
+				var pos = _runtime.entity_position_for_ssn(ssn)
 				if pos != null:
-					_effect_world.spawn_effect(String(eff.get("str", "")), pos)
+					_effect_world.spawn_effect_owned(ssn, String(eff.get("str", "")), pos)
 		# fx2tgt (spawn at a placed type-6088 target marker
 		# [orig: WacScript_PlaySoundAtEmitter @ 0x4f7fd0 — same misnomer family])
 		# stays unrouted: which .bms record field carries the 1..99 target number
