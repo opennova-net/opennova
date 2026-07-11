@@ -102,6 +102,10 @@ const EXPANSION_DISPLAY_NAMES := {"jox01": "Kendari"}
 @export var control_device_names := PackedStringArray([
 	"KEYBOARD", "MOUSE", "JOYSTICK",
 ])
+# Spin lists that select the retail crosshair art (cross01.tga through cross25.tga).
+@export var crosshair_style_control_names := PackedStringArray([
+	"XHAIR_APPEARANCE",
+])
 # Controls that open NovaWorld (online multiplayer). The shipped JO main menu
 # carries an NW_MULTI_PLAYER button and jo_mp.mnu a NOVAWORLD window/screen.
 @export var novaworld_control_names := PackedStringArray([
@@ -121,6 +125,8 @@ signal novaworld_requested()
 # mounted onto the live root and persisted (read back at the next launch/world load
 # by main_game.gd), so it affects gameplay, not just the menu.
 signal expansion_selected(name: String)
+# Emitted after the Options spin list changes so an active HUD can reload its art.
+signal crosshair_style_changed(style: int)
 
 var _menu: NovaMnuMenu
 var _root: NovaResourceRoot
@@ -291,6 +297,7 @@ func open_ingame_menu() -> bool:
 # start controls are left to the menu's own actions. Binding them globally is what
 # made OK on Options launch the first mission.
 func _wire_named_controls() -> void:
+	_seed_crosshair_style_controls()
 	# A companion (e.g. the multiplayer menu driver, or the PLAYER_INFO character screen)
 	# can own a whole menu: when one claims this one, hand it the named-control wiring and
 	# skip the generic launch/mission wiring, so e.g. START_GAME means "host a game" rather
@@ -322,6 +329,14 @@ func _wire_named_controls() -> void:
 	_connect_named(exit_control_names, _on_exit_control)
 	_connect_named(return_control_names, _on_return_control)
 	_connect_named(novaworld_control_names, _on_novaworld_control)
+
+
+func _seed_crosshair_style_controls() -> void:
+	var persisted := ResourceDirSettings.get_crosshair_style()
+	for control_name in crosshair_style_control_names:
+		var spin := _menu.find_child(control_name, true, false)
+		if spin is NovaMnuSpinList:
+			(spin as NovaMnuSpinList).set_value_index(persisted)
 
 
 func _connect_named(names: PackedStringArray, handler: Callable) -> void:
@@ -486,8 +501,11 @@ func _on_quit_requested() -> void:
 		exit_to_desktop_requested.emit()
 
 
-func _on_widget_value_changed(widget_name: String, kind: String, _index: int, value: String) -> void:
-	if kind == "list" and _is_mission_list(widget_name):
+func _on_widget_value_changed(widget_name: String, kind: String, index: int, value: String) -> void:
+	if kind == "spinlist" and _is_crosshair_style_control(widget_name):
+		ResourceDirSettings.set_crosshair_style(index)
+		crosshair_style_changed.emit(ResourceDirSettings.get_crosshair_style())
+	elif kind == "list" and _is_mission_list(widget_name):
 		_selected_mission = value
 	elif kind == "list" and _is_mod_list(widget_name):
 		# Single click previews the description; activation (double-click) mounts it.
@@ -666,6 +684,13 @@ func _is_mod_list(widget_name: String) -> bool:
 	return false
 
 
+func _is_crosshair_style_control(widget_name: String) -> bool:
+	for n in crosshair_style_control_names:
+		if n == widget_name:
+			return true
+	return false
+
+
 func _find_mod_list() -> NovaMnuList:
 	for n in mod_list_names:
 		var node := _menu.find_child(n, true, false)
@@ -710,6 +735,10 @@ func get_selected_mission() -> String:
 
 func get_selected_expansion() -> String:
 	return _selected_expansion
+
+
+func get_crosshair_style() -> int:
+	return ResourceDirSettings.get_crosshair_style()
 
 
 func get_menu_stack_depth() -> int:

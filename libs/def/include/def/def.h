@@ -351,19 +351,24 @@ typedef struct DefHudPosDef {
     int spinmap_x1, spinmap_x2;
     int spinmap_y1, spinmap_y2;
 
-    int flag_carrier[3];
-    int game_info[3];
-    int wpd_info[3];
-    int zone_info[3];
-    int exp_points[3];
-    int connect_status[3];
-    int team_xy[3];
-    int player_count[3];
-    int ammo_count_pos[3];
-    int weapon_name_pos[3];
-    int map_coords[3];
-    int time_clock[3];
-    int breath_time[3];
+    /* Positioned text tokens carry FOUR fields in the original's global layout:
+       x, y, hidden (0 = draw; the element draws only when this is 0), then the
+       alignment word (left=0/right=1/center=2). [orig: AMMOCOUNTPOS parse
+       @0x59fc3d writes x/y/hidden/align to 0x27235FC/600/604/608; the draw gates
+       on the hidden dword, hud_draw_weapon_ammo_and_name @0x5939d0] */
+    int flag_carrier[4];
+    int game_info[4];
+    int wpd_info[4];
+    int zone_info[4];
+    int exp_points[4];
+    int connect_status[4];
+    int team_xy[4];
+    int player_count[4];
+    int ammo_count_pos[4];
+    int weapon_name_pos[4];
+    int map_coords[4];
+    int time_clock[4];
+    int breath_time[4];
 
     int title_x, title_y;
     int ping_x, ping_y;
@@ -390,7 +395,11 @@ typedef struct DefHudPosDef {
     int hud_chline;
     int agl_radius;
     int roc_len;
-    int alpha_fade[3];
+    /* ALPHAFADE raw file fields (base %, max %, seconds) kept as floats: the
+       original reads each via atof and the fraction survives into the x2.55 /
+       x2.55 / x62 converts before ftol [orig: alphafade parse @0x5a0882..0x5a08c2];
+       consumers apply that conversion. */
+    float alpha_fade[3];
 
     int agl_tlrx[2];
     int agl_ylen[2];

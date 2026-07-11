@@ -15,6 +15,10 @@ const EXPANSION_KEY := "expansion"
 const GAME_KEY := "game"
 const RECENT_KEY := "recent_dirs"
 const RECENT_LIMIT := 8
+const PLAYER_SECTION := "player"
+const CROSSHAIR_STYLE_KEY := "crosshair_style"
+const CROSSHAIR_STYLE_MIN := 0
+const CROSSHAIR_STYLE_MAX := 24
 
 
 ## The persisted resource directory, or "" when unset / no longer a valid dir.
@@ -75,6 +79,26 @@ static func set_game(code: String) -> void:
 	var config := ConfigFile.new()
 	config.load(CONFIG_PATH)
 	config.set_value(SECTION, GAME_KEY, code.strip_edges().to_lower())
+	config.save(CONFIG_PATH)
+
+
+## The player's retail crosshair index (0 = cross01.tga, 24 = cross25.tga).
+## Clamp corrupt or out-of-range values so HUD asset lookup always stays inside
+## the authored XHAIR_APPEARANCE table.
+static func get_crosshair_style() -> int:
+	var config := ConfigFile.new()
+	if config.load(CONFIG_PATH) != OK:
+		return CROSSHAIR_STYLE_MIN
+	return clampi(int(config.get_value(PLAYER_SECTION, CROSSHAIR_STYLE_KEY, CROSSHAIR_STYLE_MIN)),
+		CROSSHAIR_STYLE_MIN, CROSSHAIR_STYLE_MAX)
+
+
+## Persist the selected retail crosshair index, preserving every other setting.
+static func set_crosshair_style(style: int) -> void:
+	var config := ConfigFile.new()
+	config.load(CONFIG_PATH)
+	config.set_value(PLAYER_SECTION, CROSSHAIR_STYLE_KEY,
+		clampi(style, CROSSHAIR_STYLE_MIN, CROSSHAIR_STYLE_MAX))
 	config.save(CONFIG_PATH)
 
 
