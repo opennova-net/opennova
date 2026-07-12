@@ -11,6 +11,15 @@ const EffectWorldScript = preload("res://engine/world/effect_world.gd")
 var _root_dir := ""
 
 
+class OwnerPositions:
+	extends RefCounted
+	var state: Variant = Vector3.ZERO
+	var alive := true
+
+	func resolve(_owner_key: Variant) -> Variant:
+		return state if alive else null
+
+
 func before_each() -> void:
 	# OS cache dir, not user:// — resource roots inside the app user-data dir are
 	# rejected by NovaResourceRoot.is_valid_root (mirrors the other fixture roots).
@@ -129,6 +138,34 @@ func test_spawn_by_name_creates_emitters_and_sweep_expires() -> void:
 	assert_eq(world.live_group_count(), 0, "finished finite group is swept")
 
 
+func test_pending_delayed_emitter_outlives_the_heuristic_window() -> void:
+	var world := _make_world()
+	var file := _make_short_effect_file()
+	file.find_particle("puff dots").emit_delay = 31.0
+	world.load_particle_file(file)
+	assert_gt(world.spawn_effect("puff", Vector3.ZERO), 0)
+
+	world.sweep(31.0)
+	assert_eq(world.live_group_count(), 1,
+			"a finite group remains live while its emitter still has pending delay/emission")
+
+
+func test_unless_alive_owner_mapping_clears_when_group_finishes() -> void:
+	var world := _make_world()
+	world.load_particle_file(_make_short_effect_file())
+	var owner := "action-slot-generation"
+	assert_gt(world.spawn_effect_unless_alive(owner, "puff", Vector3.ZERO), 0)
+	assert_true(world._owned_groups.has(owner))
+	var emitter := world.get_children().filter(
+			func(child: Node) -> bool: return child is NovaParticleEmitter)[0] as NovaParticleEmitter
+	for _i in 30:
+		emitter.advance(0.1)
+	world.sweep(3.0)
+	assert_eq(world.live_group_count(), 0)
+	assert_false(world._owned_groups.has(owner),
+			"the action-slot death callback equivalent does not leak stale owner keys")
+
+
 func test_spawn_by_handle_matches_name_spawn() -> void:
 	var world := _make_world()
 	world.load_particle_file(_make_short_effect_file())
@@ -137,6 +174,95 @@ func test_spawn_by_handle_matches_name_spawn() -> void:
 	assert_true(world.spawn_effect_by_handle(handle, Vector3.ZERO), "handle spawn succeeds")
 	assert_eq(world.live_group_count(), 1)
 	assert_false(world.spawn_effect_by_handle(99, Vector3.ZERO), "out-of-range handle refuses")
+
+
+func test_owned_effect_follows_entity_and_detaches_when_owner_disappears() -> void:
+	var world := _make_world()
+	var file := _make_short_effect_file()
+	var particle := file.find_particle("puff dots")
+	particle.flags = 1 << 18  # FOREVEREMIT: detachment must make it finite.
+	world.load_particle_file(file)
+	var positions := OwnerPositions.new()
+	positions.state = Vector3(1, 2, 3)
+	world.set_owner_position_provider(Callable(positions, "resolve"))
+	assert_gt(world.spawn_effect_owned(17, "puff", positions.state, Vector3.UP), 0)
+
+	var emitter: NovaParticleEmitter = null
+	for child in world.get_children():
+		if child is NovaParticleEmitter:
+			emitter = child
+			break
+	assert_not_null(emitter)
+	assert_false(emitter.is_finite(), "the FOREVEREMIT group begins attached and infinite")
+	positions.state = Vector3(9, 8, 7)
+	world.sweep(0.0)
+	assert_almost_eq(emitter.global_position, positions.state, Vector3(0.001, 0.001, 0.001),
+			"CEffect_UpdateEmitterTransform-style follow updates the emitter each sweep")
+	assert_eq(emitter.emission_forward, Vector3.UP,
+			"a position-only provider preserves the descriptor's initial up-vector fallback")
+
+	var attached_transform := Transform3D(Basis(Vector3.UP, PI * 0.5), Vector3(6, 5, 4))
+	positions.state = attached_transform
+	world.sweep(0.0)
+	assert_almost_eq(emitter.global_position, attached_transform.origin, Vector3(0.001, 0.001, 0.001))
+	assert_almost_eq(emitter.emission_forward, attached_transform.basis.z.normalized(),
+			Vector3(0.001, 0.001, 0.001),
+			"the attached entity's live forward reaches the simulator frame")
+
+	positions.alive = false
+	world.sweep(0.0)
+	assert_true(emitter.is_finite(), "owner removal detaches and stops FOREVEREMIT emission")
+
+
+func test_replacing_an_owned_group_detaches_the_old_group_transform() -> void:
+	var world := _make_world()
+	var file := _make_short_effect_file()
+	file.find_particle("puff dots").flags = 1 << 18
+	world.load_particle_file(file)
+	var positions := OwnerPositions.new()
+	positions.state = Transform3D(Basis.IDENTITY, Vector3(1, 2, 3))
+	world.set_owner_position_provider(Callable(positions, "resolve"))
+	assert_gt(world.spawn_effect_owned(17, "puff", Vector3(1, 2, 3), Vector3.UP), 0)
+	var old_emitter := world.get_children().filter(
+			func(child: Node) -> bool: return child is NovaParticleEmitter)[0] as NovaParticleEmitter
+
+	assert_gt(world.spawn_effect_owned(17, "puff", Vector3(4, 5, 6), Vector3.UP), 0)
+	var emitters := world.get_children().filter(
+			func(child: Node) -> bool: return child is NovaParticleEmitter)
+	assert_eq(emitters.size(), 2)
+	var new_emitter := emitters[1] as NovaParticleEmitter
+	assert_true(old_emitter.is_finite(), "replacement stops the old FOREVEREMIT group")
+	assert_false(new_emitter.is_finite(), "the replacement remains attached")
+
+	positions.state = Transform3D(Basis(Vector3.UP, PI * 0.25), Vector3(9, 8, 7))
+	world.sweep(0.0)
+	assert_eq(old_emitter.global_position, Vector3(1, 2, 3),
+			"the detached old group drains at its last position")
+	assert_eq(new_emitter.global_position, Vector3(9, 8, 7),
+			"only the replacement follows the owner")
+
+
+func test_authored_water_flags_bind_to_the_mission_water_plane() -> void:
+	var cases := [
+		{"flag": 1 << 27, "mode": 1},  # BELOWH20: kill above.
+		{"flag": 1 << 28, "mode": 2},  # ABOVEH20: kill at/below.
+	]
+	for entry in cases:
+		var world := _make_world()
+		world.set_water_height(12.5)
+		var file := _make_short_effect_file()
+		file.find_particle("puff dots").flags = entry.flag
+		world.load_particle_file(file)
+		world.spawn_effect("puff", Vector3.ZERO)
+		var emitter: NovaParticleEmitter = null
+		for child in world.get_children():
+			if child is NovaParticleEmitter:
+				emitter = child
+				break
+		assert_not_null(emitter)
+		assert_eq(emitter.kill_plane_mode, entry.mode)
+		assert_almost_eq(emitter.kill_plane_y, 12.5, 0.001,
+				"authored water culling uses the active mission plane")
 
 
 func test_clear_world_frees_live_groups() -> void:

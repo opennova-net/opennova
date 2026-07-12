@@ -10,6 +10,8 @@ extends RefCounted
 ## anchor chase ThirdPersonCamera_Update @0x437c8d]
 
 var scope_engaged := false
+var mounted := false
+var vehicle_attack_context := false
 var scope_fraction := 0.0     # 0 = hip .. 1 = sighted, over the toggle's ease steps
 # The NoCardSwitch reload rule: true while the slot is mid-RELOAD on a weapon
 # WITHOUT NoCardSwitch — the FP view bias is dropped for the frame (the host
@@ -32,6 +34,8 @@ static func from_view_dict(d: Dictionary) -> PlayerLocalView:
 		return null
 	var out := PlayerLocalView.new()
 	out.scope_engaged = bool(d.get("scope_engaged", false))
+	out.mounted = bool(d.get("mounted", false))
+	out.vehicle_attack_context = bool(d.get("vehicle_attack_context", false))
 	out.scope_fraction = float(d.get("scope_fraction", 0.0))
 	out.suppress_view_bias = bool(d.get("suppress_view_bias", false))
 	out.scope_card_active = bool(d.get("scope_card_active", false))

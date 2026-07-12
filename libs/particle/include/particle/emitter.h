@@ -1,11 +1,17 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
 #include "particle/particle.h"
 
 namespace opennova::particle {
+
+// Host safety ceiling for a single emitter. The retail JO PTL corpus tops out
+// at emit_maxoverride=400 (17 non-zero values across 1,402 field records); 4096
+// preserves more than 10x that authored headroom while bounding hostile mods.
+inline constexpr std::size_t kEmitterHardParticleLimit = 4096;
 
 // Portable, Godot-agnostic particle simulator. Captures the engine's
 // CParticleEmitter behavior (per-particle physics, emission shapes, lifetime,
@@ -99,14 +105,16 @@ struct Emitter {
 	// explosion tints. Default {1, 1, 1} matches the engine neutral state.
 	Vec3 color_tint = {1.0f, 1.0f, 1.0f};
 
-	// GRAVITATE spring scalar. Engine reads `*((float*)emitter + 77)` =
-	// emitter+0x308 (manager-set in `CEffectEmitter_Initialize @ 0x5e6020`
-	// at spawn time; varies per spawn site). When 0.0 (default), our
-	// portable simulator falls back to `def.gravity` as a stand-in so
-	// stand-alone usage (without a manager) still produces sensible
-	// behaviour. Callers that need the engine-set value override after
-	// `emitter_init`.
+	// Optional override for the shared NORMAL-gravity / GRAVITATE-force slot.
+	// Retail seeds that slot in CEffectEmitter_Initialize @ 0x5e6020 as
+	// `def.gravity * -0.09803897`; `gravity_accel` stores that converted value.
+	// A non-zero spring_const lets a manager override only the GRAVITATE path.
 	float spring_const = 0.0f;
+	float gravity_accel = 0.0f;     // retail authored gravity × -0.09803897
+	float drag_coefficient = 0.0f;  // retail authored drag × 0.01
+	// Signed-randomized authored orbitalspeed ± orbitalspeed_adj. The host
+	// ORBIT integrator remains an approximation of retail's basis/age chain.
+	float orbit_speed = 0.0f;
 
 	// CParticleEmitter_TranslatePosition @ 0x5efe90 mirror.
 	// `last_translation_delta` holds (new_pos - old_pos) from the most
@@ -138,20 +146,24 @@ struct Emitter {
 	// Default mode 0 = disabled (no kill plane). Bits 27/28 are the named
 	// flags BELOWH20 / ABOVEH20 (`particle_flag::BelowH2O` / `AboveH2O`,
 	// engine flag-table idx 27/28 — corrected from the earlier "engine-
-	// internal" note per the ParticleEdit grill D5). `def.flags` can now
-	// carry them via the parser; the corpus doesn't use them. The kill
-	// threshold y is still manager-supplied per spawn site. Like
-	// `color_tint` / `spring_const` / `lod_divisor`, these are runtime
-	// scalars NOT reset by `emitter_init`.
+	// internal" note per the ParticleEdit grill D5). `def.flags` carries them
+	// via the parser and the retail corpus authors both bits. A
+	// caller still has to map the bit to a mode and provide the site-specific
+	// threshold. Like `color_tint` / `spring_const` / `lod_divisor`, these are
+	// runtime scalars NOT reset by `emitter_init`.
 	std::uint32_t kill_plane_mode = 0;  // 0=disabled, 1=kill above, 2=kill at/below
 	float kill_plane_y = 0.0f;
 
 	std::vector<Particle> particles;
-	std::size_t max_particles = 256;   // soft cap; engine uses emit_maxoverride
+	// Caller/authored soft cap, always bounded by kEmitterHardParticleLimit in
+	// the simulator even when a caller assigns this field directly.
+	std::size_t max_particles = 256;
 
 	// Emission scheduling
 	float emit_accumulator = 0.0f;     // tracks time since last burst
 	float emit_dur_remaining = 0.0f;   // counts down from def.emit_dur (by AGE, not per burst)
+	float emit_dur_total = 0.0f;
+	float emit_rate = 0.0f;
 	float age = 0.0f;                  // emitter wall-clock
 	float emit_delay_remaining = 0.0f; // counts down from def.emit_delay before any spawn
 	bool emit_started = false;         // first burst primed? (it lands at t≈0, not one interval in)
@@ -178,10 +190,10 @@ enum class EmitShape : std::uint32_t {
 // same range so tests can pin behavior without depending on libc rand().
 std::uint32_t emitter_rand10(Emitter &e) noexcept;
 
-// rand10 normalized to [0, 1).
+// rand10 normalized to [0, 1], inclusive, using retail's /1023 scale.
 float emitter_rand_unit(Emitter &e) noexcept;
 
-// rand10 normalized to [-1, 1).
+// rand10 normalized to [-1, 1], inclusive.
 float emitter_rand_signed(Emitter &e) noexcept;
 
 // Initialise an emitter against a particle def. Resets all state, including

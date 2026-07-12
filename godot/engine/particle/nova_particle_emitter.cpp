@@ -109,6 +109,10 @@ void NovaParticleEmitter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_auto_advance"), &NovaParticleEmitter::get_auto_advance);
 	ClassDB::bind_method(D_METHOD("set_time_scale", "p_value"), &NovaParticleEmitter::set_time_scale);
 	ClassDB::bind_method(D_METHOD("get_time_scale"), &NovaParticleEmitter::get_time_scale);
+	ClassDB::bind_method(D_METHOD("set_procedural_fallback_enabled", "p_value"),
+			&NovaParticleEmitter::set_procedural_fallback_enabled);
+	ClassDB::bind_method(D_METHOD("get_procedural_fallback_enabled"),
+			&NovaParticleEmitter::get_procedural_fallback_enabled);
 	ClassDB::bind_method(D_METHOD("set_texture_dir", "p_dir"), &NovaParticleEmitter::set_texture_dir);
 	ClassDB::bind_method(D_METHOD("get_texture_dir"), &NovaParticleEmitter::get_texture_dir);
 	ClassDB::bind_method(D_METHOD("set_texture_provider", "p_provider"), &NovaParticleEmitter::set_texture_provider);
@@ -172,6 +176,8 @@ void NovaParticleEmitter::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "seed"), "set_seed", "get_seed");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "auto_advance"), "set_auto_advance", "get_auto_advance");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "time_scale"), "set_time_scale", "get_time_scale");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "procedural_fallback_enabled"),
+			"set_procedural_fallback_enabled", "get_procedural_fallback_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "texture_dir", PROPERTY_HINT_DIR), "set_texture_dir", "get_texture_dir");
 	ADD_PROPERTY(PropertyInfo(Variant::COLOR, "color_tint"), "set_color_tint", "get_color_tint");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "spring_const"), "set_spring_const", "get_spring_const");
@@ -351,8 +357,10 @@ void NovaParticleEmitter::_clear_meshes() {
 void NovaParticleEmitter::_refresh_emitter() {
 	if (def.is_valid()) {
 		native_def = std::make_unique<opennova::particle::ParticleDef>(def->to_native());
-		emitter.max_particles = native_def->emit_maxoverride > 0 ?
+		const std::size_t requested_max_particles = native_def->emit_maxoverride > 0 ?
 				static_cast<std::size_t>(native_def->emit_maxoverride) : 256u;
+		emitter.max_particles = std::min(
+				requested_max_particles, opennova::particle::kEmitterHardParticleLimit);
 
 		// Bake per-graphic curve LUTs (and any other runtime-resolved
 		// graphic state) before init. Engine analogue:
@@ -484,6 +492,11 @@ void NovaParticleEmitter::_refresh_layer_materials(
 		}
 
 		if (texture_name != layer_texture_names[i]) {
+			// The old cache signature only included dimensions and presence. A
+			// different same-sized texture therefore kept stale atlas pixels.
+			// Texture identity changes force a re-blit; UV layout is still cached
+			// across ordinary simulation restarts.
+			atlas_texture.unref();
 			layer_texture_names[i] = texture_name;
 			layer_texture_paths[i] = String();
 			layer_textures[i].unref();
@@ -719,6 +732,12 @@ void NovaParticleEmitter::_update_meshes() {
 		if (!present[layer_idx]) {
 			continue;
 		}
+		if (!procedural_fallback_enabled && layer_textures[layer_idx].is_null()) {
+			// `graphicN = , blend` is authored as an invisible-but-live
+			// particle in retail (stockeffect uses this deliberately). The soft
+			// disc is an editor diagnostic, never a runtime substitute texture.
+			continue;
+		}
 		// Curve clock: the per-particle phase (0 -> 256 over the lifetime,
 		// wrapping via % 256 for NEVERAGE cycles). Color/alpha LUTs read the
 		// raw byte at the integer index, / 256; the scale LUT LERPS between
@@ -789,7 +808,13 @@ void NovaParticleEmitter::_update_meshes() {
 		// AFTER the per-curve modulation, BEFORE the 0..1 clamp.
 		const opennova::particle::Vec3 tint = emitter.color_tint;
 
-		Color color = _layer_color(layer, p.color_slot);
+		// Retail captures the selected graphic color in the particle record at
+		// spawn. Re-reading the mutable resource here made already-live particles
+		// change color when the editor modified their definition.
+		constexpr float BYTE_TO_UNIT = 1.0f / 255.0f;
+		Color color(static_cast<float>(p.color.r) * BYTE_TO_UNIT,
+				static_cast<float>(p.color.g) * BYTE_TO_UNIT,
+				static_cast<float>(p.color.b) * BYTE_TO_UNIT, 1.0f);
 		color.r = std::clamp(color.r * red_mult * tint.x, 0.0f, 1.0f);
 		color.g = std::clamp(color.g * green_mult * tint.y, 0.0f, 1.0f);
 		color.b = std::clamp(color.b * blue_mult * tint.z, 0.0f, 1.0f);
@@ -1115,7 +1140,10 @@ Ref<NovaParticleDef> NovaParticleEmitter::get_def() const { return def; }
 void NovaParticleEmitter::set_tables(const TypedArray<NovaParticleTable> &p_tables) {
 	tables = p_tables;
 	if (is_inside_tree()) {
-		_update_meshes();
+		// Curve references are resolved and baked into native_def. Merely
+		// rebuilding meshes leaves that snapshot stale, so live table edits and
+		// late table assignment must rebuild the simulator definition too.
+		_refresh_emitter();
 	}
 }
 
@@ -1138,6 +1166,20 @@ void NovaParticleEmitter::set_time_scale(float p_value) {
 }
 
 float NovaParticleEmitter::get_time_scale() const { return time_scale; }
+
+void NovaParticleEmitter::set_procedural_fallback_enabled(bool p_value) {
+	if (procedural_fallback_enabled == p_value) {
+		return;
+	}
+	procedural_fallback_enabled = p_value;
+	if (is_inside_tree()) {
+		_update_meshes();
+	}
+}
+
+bool NovaParticleEmitter::get_procedural_fallback_enabled() const {
+	return procedural_fallback_enabled;
+}
 
 void NovaParticleEmitter::set_texture_dir(const String &p_dir) {
 	if (texture_dir == p_dir) {

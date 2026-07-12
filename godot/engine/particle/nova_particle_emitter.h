@@ -44,6 +44,9 @@ private:
 	bool auto_advance = true;
 	float time_scale = 1.0f;
 	bool playing = false;
+	// Runtime PTL graphics with no resolved texture are intentionally invisible,
+	// matching retail. Editor previews may opt into a diagnostic soft disc.
+	bool procedural_fallback_enabled = false;
 	// Emission direction for cone-shaped defs (Emitter::forward). The node's
 	// transform does NOT feed the simulator — quads render world-space
 	// top-level — so spawn sites set this explicitly (the original's spawn
@@ -138,6 +141,9 @@ public:
 
 	void set_time_scale(float p_value);
 	float get_time_scale() const;
+
+	void set_procedural_fallback_enabled(bool p_value);
+	bool get_procedural_fallback_enabled() const;
 
 	void set_texture_dir(const String &p_dir);
 	String get_texture_dir() const;

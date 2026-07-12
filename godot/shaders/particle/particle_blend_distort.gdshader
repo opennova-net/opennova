@@ -6,7 +6,7 @@ shader_type spatial;
 // UV channel; falls back to standard alpha when the screen texture is not
 // available. Bounded Deviation: heat-haze magnitude differs from engine
 // until the scene-texture distortion factor is witnessed.
-render_mode unshaded, cull_disabled, blend_mix, depth_draw_never, depth_test_disabled, fog_disabled;
+render_mode unshaded, cull_disabled, blend_mix, depth_draw_never;
 
 uniform sampler2D albedo_tex : source_color, filter_linear, repeat_disable;
 uniform sampler2D screen_tex : hint_screen_texture, filter_linear, repeat_disable;

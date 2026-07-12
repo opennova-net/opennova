@@ -28,6 +28,9 @@ Variant ResourceFormatLoaderPTL::_load(const String &p_path, const String &p_ori
 	if (file->load_from_file(p_path) != OK) {
 		return Variant();
 	}
+	const String logical_path = p_original_path.is_empty() ? p_path : p_original_path;
+	file->set_source_path(logical_path);
+	file->set_path(logical_path);
 	return file;
 }
 

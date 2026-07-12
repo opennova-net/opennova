@@ -1071,7 +1071,7 @@ func _route_mission_effects(effects: Array) -> void:
 				var ssn := int(eff.get("b", 0))
 				var pos = _runtime.entity_position_for_ssn(ssn)
 				if pos != null:
-					_effect_world.spawn_effect_owned(ssn, String(eff.get("str", "")), pos)
+					_effect_world.spawn_effect_owned(ssn, String(eff.get("str", "")), pos, Vector3.UP)
 		# fx2tgt (spawn at a placed type-6088 target marker
 		# [orig: WacScript_SpawnEffectAtTargetMarker @ 0x4f7fd0 — same misnomer
 		# family]) stays unrouted: which .bms record field carries the 1..99
@@ -1251,6 +1251,11 @@ func _start_effect_world() -> void:
 	_effect_world.name = "EffectWorld"
 	add_child(_effect_world)
 	var count := _effect_world.load_from_resource_root(_resource_root)
+	if _water != null:
+		_effect_world.set_water_height(float(_water.water_height))
+	if _runtime != null:
+		_effect_world.set_owner_position_provider(
+				Callable(_runtime, "entity_effect_transform_for_ssn"))
 	print("GameWorld: effect world — %d effect(s) across %d .ptl file(s)" % [
 		count, _effect_world.file_count()])
 

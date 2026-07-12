@@ -7,7 +7,7 @@ extends Control
 ## a node drives the model selection (and the inspector lane + preview); dragging
 ## an edge edits a reference:
 ##   effect  → particle   = membership in the effect's pdefs
-##   particle → effect     = the particle's child_id spawn chain
+##   particle → particle   = the particle's child_id spawn chain
 ## Curve tables appear as standalone selectable nodes (edited in the inspector).
 ##
 ## The workspace keeps driving the inner preview directly via get_preview(), so
@@ -18,7 +18,7 @@ const ParticlePreviewScript = preload("res://modtools/particle/particle_preview.
 
 # Slot port "types" — gate which ports can be wired together interactively.
 const T_MEMBER := 0  # effect output  <-> particle input
-const T_SPAWN := 1   # particle output <-> effect input
+const T_SPAWN := 1   # particle output <-> child-particle input
 
 var _editor: ParticleEditor
 var _workspace
@@ -78,10 +78,13 @@ func set_particle_editor(value: ParticleEditor) -> void:
 			_editor.document_changed.disconnect(_rebuild_graph)
 		if _editor.selection_changed.is_connected(_highlight_selected):
 			_editor.selection_changed.disconnect(_highlight_selected)
+		if _editor.presentation_changed.is_connected(_refresh_presentations):
+			_editor.presentation_changed.disconnect(_refresh_presentations)
 	_editor = value
 	if _editor != null:
 		_editor.document_changed.connect(_rebuild_graph)
 		_editor.selection_changed.connect(_highlight_selected)
+		_editor.presentation_changed.connect(_refresh_presentations)
 	_rebuild_graph()
 
 
@@ -132,8 +135,8 @@ func _add_effect_node(effect, pos: Vector2) -> void:
 	var label := Label.new()
 	label.text = "%d particle(s)" % effect.pdefs.size()
 	node.add_child(label)
-	# Row 0: left input (a particle's spawn target) + right output (members).
-	node.set_slot(0, true, T_SPAWN, Color(0.9, 0.7, 0.3), true, T_MEMBER, Color(0.4, 0.7, 0.95))
+	# Effects only own membership edges; child_id never targets an effect.
+	node.set_slot(0, false, T_SPAWN, Color(0.9, 0.7, 0.3), true, T_MEMBER, Color(0.4, 0.7, 0.95))
 	_graph.add_child(node)
 	_register(node_name, "effect", effect)
 
@@ -148,8 +151,13 @@ func _add_particle_node(particle, pos: Vector2) -> void:
 	var label := Label.new()
 	label.text = _particle_summary(particle)
 	node.add_child(label)
-	# Row 0: left input (member-of an effect) + right output (spawns a child effect).
+	# Row 0: left input (member-of an effect) + right output (spawns a child particle).
 	node.set_slot(0, true, T_MEMBER, Color(0.4, 0.7, 0.95), true, T_SPAWN, Color(0.9, 0.7, 0.3))
+	var child_label := Label.new()
+	child_label.text = "child spawn target"
+	node.add_child(child_label)
+	# Membership and child chains terminate on separate typed inputs.
+	node.set_slot(1, true, T_SPAWN, Color(0.9, 0.7, 0.3), false, T_SPAWN, Color(0.9, 0.7, 0.3))
 	_graph.add_child(node)
 	_register(node_name, "particle", particle)
 
@@ -187,16 +195,48 @@ func _rebuild_connections() -> void:
 			var particle := file.find_particle(pid)
 			if particle != null and _obj_to_name.has(particle):
 				_graph.connect_node(effect_name, 0, _obj_to_name[particle], 0)
-	# Spawn chain: particle output(0) -> effect input(0) (child_id).
+	# Spawn chain: particle output(0) -> child-particle spawn input(1).
 	for particle in file.particles:
 		if particle == null or String(particle.child_id).is_empty():
 			continue
 		var particle_name: String = _obj_to_name.get(particle, "")
 		if particle_name.is_empty():
 			continue
-		var child := file.find_effect(String(particle.child_id))
+		var child := file.find_particle(String(particle.child_id))
 		if child != null and _obj_to_name.has(child):
-			_graph.connect_node(particle_name, 0, _obj_to_name[child], 0)
+			_graph.connect_node(particle_name, 0, _obj_to_name[child], 1)
+
+
+func _refresh_presentations() -> void:
+	if _graph == null or _editor == null or _editor.particle_file == null:
+		return
+	for node_name in _nodes:
+		var node := _graph.get_node_or_null(NodePath(String(node_name))) as GraphNode
+		var info: Dictionary = _nodes[node_name]
+		if node == null or info.is_empty():
+			continue
+		match String(info.kind):
+			"effect":
+				var effect := info.obj as NovaParticleEffect
+				node.title = "▣ %s" % effect.id
+				var label := node.get_child(0) as Label
+				if label != null:
+					label.text = "%d particle(s)" % effect.pdefs.size()
+			"particle":
+				var particle := info.obj as NovaParticleDef
+				node.title = "● %s" % particle.id
+				var label := node.get_child(0) as Label
+				if label != null:
+					label.text = _particle_summary(particle)
+			"table":
+				var table := info.obj as NovaParticleTable
+				node.title = "∿ %s" % table.id
+				var spark := node.get_child(0) as Control
+				if spark != null:
+					spark.queue_redraw()
+	_graph.clear_connections()
+	_rebuild_connections()
+	_highlight_selected()
 
 
 func _particle_summary(particle) -> String:
@@ -220,13 +260,14 @@ func _on_connection_request(from_node: StringName, from_port: int, to_node: Stri
 			_workspace.effect_add_pdef(from_info.obj, to_info.obj.id)
 		if not _graph.is_node_connected(from_node, from_port, to_node, to_port):
 			_graph.connect_node(from_node, from_port, to_node, to_port)
-	elif from_info.kind == "particle" and to_info.kind == "effect":
-		# Spawn chain: a particle has at most one child effect, so replace any
+	elif from_info.kind == "particle" and to_info.kind == "particle":
+		# Spawn chain: a particle has at most one child particle, so replace any
 		# existing spawn edge from this particle first.
 		_clear_spawn_edges_from(from_node)
 		if _workspace != null:
 			_workspace.set_child_id(from_info.obj, to_info.obj.id)
-		_graph.connect_node(from_node, from_port, to_node, to_port)
+		if not _graph.is_node_connected(from_node, from_port, to_node, to_port):
+			_graph.connect_node(from_node, from_port, to_node, to_port)
 	# Any other combination (table involvement, effect->effect, ...) is ignored.
 
 
@@ -238,17 +279,18 @@ func _on_disconnection_request(from_node: StringName, from_port: int, to_node: S
 	if from_info.kind == "effect" and to_info.kind == "particle":
 		if _workspace != null:
 			_workspace.effect_remove_pdef(from_info.obj, to_info.obj.id)
-	elif from_info.kind == "particle" and to_info.kind == "effect":
+	elif from_info.kind == "particle" and to_info.kind == "particle":
 		if _workspace != null:
 			_workspace.set_child_id(from_info.obj, "")
-	_graph.disconnect_node(from_node, from_port, to_node, to_port)
+	if _graph.is_node_connected(from_node, from_port, to_node, to_port):
+		_graph.disconnect_node(from_node, from_port, to_node, to_port)
 
 
 func _clear_spawn_edges_from(node_name: StringName) -> void:
 	for c in _graph.get_connection_list():
 		if String(c.from_node) == String(node_name):
 			var to_info: Dictionary = _nodes.get(c.to_node, {})
-			if not to_info.is_empty() and to_info.kind == "effect":
+			if not to_info.is_empty() and to_info.kind == "particle":
 				_graph.disconnect_node(c.from_node, c.from_port, c.to_node, c.to_port)
 
 
@@ -271,10 +313,16 @@ func _on_node_selected(node: Node) -> void:
 
 
 func _on_delete_nodes_request(node_names: Array) -> void:
+	# Removing one entry rebuilds/reindexes the graph synchronously. Resolve the
+	# whole user selection first so later deletes cannot drift onto new n0/n1 rows.
+	var selected: Array[Dictionary] = []
 	for n in node_names:
 		var info: Dictionary = _nodes.get(n, {})
-		if info.is_empty() or _workspace == null:
-			continue
+		if not info.is_empty():
+			selected.append({"kind": String(info.kind), "obj": info.obj})
+	if _workspace == null:
+		return
+	for info in selected:
 		match info.kind:
 			"effect":
 				_workspace.remove_effect(info.obj)
@@ -295,17 +343,21 @@ func _highlight_selected() -> void:
 	if _editor == null or _graph == null:
 		return
 	_syncing = true
-	var selected_obj = _editor.current_particle
-	if _editor.current_effect != null and selected_obj == null:
-		selected_obj = _editor.current_effect
+	var selected_obj: Object = _editor.current_particle
+	if _workspace != null and _workspace.has_method("get_active_workflow_id"):
+		match int(_workspace.get_active_workflow_id()):
+			ParticleEditorWorkspace.Workflow.EFFECTS:
+				selected_obj = _editor.current_effect
+			ParticleEditorWorkspace.Workflow.TABLES:
+				selected_obj = _editor.current_table
+			_:
+				selected_obj = _editor.current_particle
 	for node_name in _nodes:
 		var node := _graph.get_node_or_null(NodePath(String(node_name))) as GraphNode
 		if node == null:
 			continue
 		var info: Dictionary = _nodes[node_name]
-		var is_sel: bool = (info.obj == _editor.current_particle
-				or info.obj == _editor.current_effect
-				or info.obj == _editor.current_table)
+		var is_sel: bool = info.obj == selected_obj
 		node.set_selected(is_sel)
 	_syncing = false
 

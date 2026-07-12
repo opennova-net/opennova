@@ -188,7 +188,8 @@ func _build_identity(p: NovaParticleDef) -> void:
 	_id_edit.focus_exited.connect(func() -> void: _on_id_focus_exited(p))
 
 	_row_line(box, p, "child_id", "Spawns on death",
-		"Name of a child effect this particle spawns when it dies (optional).")
+		"Name of a child particle definition this particle spawns when it dies (optional).",
+		func(value: String) -> void: _editor.set_child_id(p, value))
 	_row_float(box, p, "lod", "Detail distance", 0.0, 100000.0, 1.0,
 		"Distance fade hint. 0 keeps the particle always drawn.")
 
@@ -426,7 +427,8 @@ func _row_color(parent: Control, target: Object, prop: String, label_text: Strin
 		func(v): _commit(target, prop, v))
 
 
-func _row_line(parent: Control, target: Object, prop: String, label_text: String, tip := "") -> void:
+func _row_line(parent: Control, target: Object, prop: String, label_text: String,
+		tip := "", on_commit := Callable()) -> void:
 	var row := HBoxContainer.new()
 	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	parent.add_child(row)
@@ -442,7 +444,11 @@ func _row_line(parent: Control, target: Object, prop: String, label_text: String
 	row.add_child(line)
 	_binder.bind_line(line,
 		func(_i): return String(target.get(prop)),
-		func(v): _commit(target, prop, v))
+		func(v):
+			if on_commit.is_valid():
+				on_commit.call(v)
+			else:
+				_commit(target, prop, v))
 
 
 func _row_check(parent: Control, target: Object, prop: String, label_text: String) -> void:
@@ -510,8 +516,7 @@ func _set_bit(p: NovaParticleDef, prop: String, bit: int, on: bool) -> void:
 
 func _touch() -> void:
 	if _editor != null:
-		_editor.mark_dirty()
-		_editor.request_preview_refresh()
+		_editor.notify_particle_changed()
 
 
 func _update_flags_label(p: NovaParticleDef) -> void:
@@ -528,12 +533,11 @@ func _on_id_changed(p: NovaParticleDef, text: String) -> void:
 		return
 	if text.strip_edges().is_empty():
 		return  # don't commit an empty id; reverts on focus loss
-	p.id = text
+	if _editor != null:
+		_editor.set_particle_id(p, text)
 	var idx := _particles.find(p)
 	if idx >= 0:
 		_list.set_item_text(idx, text)
-	if _editor != null:
-		_editor.mark_dirty()
 
 
 func _on_id_focus_exited(p: NovaParticleDef) -> void:
@@ -605,7 +609,7 @@ func _on_sounds_changed(p: NovaParticleDef, edit: TextEdit) -> void:
 			sounds.append(trimmed)
 	p.collide_sounds = sounds
 	if _editor != null:
-		_editor.mark_dirty()
+		_editor.notify_particle_changed()
 
 
 # --- Helpers -----------------------------------------------------------------

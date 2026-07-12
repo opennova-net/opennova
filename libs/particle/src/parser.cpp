@@ -180,7 +180,7 @@ int match_graphic_decl(const std::string &key) {
 	return digit - '1';
 }
 
-void apply_graphic_field(GraphicLayer &layer, const std::string &key,
+bool apply_graphic_field(GraphicLayer &layer, const std::string &key,
 		const std::string &raw_value, const std::vector<std::string> &values) {
 	if (key == "flip_frames") {
 		layer.flip_frames = parse_int(raw_value);
@@ -210,7 +210,10 @@ void apply_graphic_field(GraphicLayer &layer, const std::string &key,
 		layer.green_func = parse_curve_ref(raw_value);
 	} else if (key == "blue_func") {
 		layer.blue_func = parse_curve_ref(raw_value);
+	} else {
+		return false;
 	}
+	return true;
 }
 
 // ------------------------------------------------------------ per-section apply
@@ -263,7 +266,10 @@ void apply_particle_key(ParticleDef &particle, const std::string &key,
 	int graphic_index = -1;
 	std::string graphic_remainder;
 	if (match_graphic_key(key, graphic_index, graphic_remainder)) {
-		apply_graphic_field(particle.graphics[graphic_index], graphic_remainder, raw_value, values);
+		if (!apply_graphic_field(
+				particle.graphics[graphic_index], graphic_remainder, raw_value, values)) {
+			particle.unknown_keys.emplace_back(key, raw_value);
+		}
 		return;
 	}
 
@@ -394,6 +400,39 @@ void apply_particle_key(ParticleDef &particle, const std::string &key,
 	}
 }
 
+struct PendingParticleStatement {
+	std::string key;
+	std::string raw_value;
+	std::vector<std::string> values;
+};
+
+void hydrate_particle(ParticleDef &particle,
+		const std::vector<PendingParticleStatement> &statements) {
+	// The retail config-map hydrator is source-order independent: particle
+	// defaults are established first, then graphic declarations inherit them,
+	// then gN fields override the inherited values.
+	for (const PendingParticleStatement &statement : statements) {
+		int graphic_index = -1;
+		std::string graphic_remainder;
+		if (match_graphic_decl(statement.key) < 0 &&
+				!match_graphic_key(statement.key, graphic_index, graphic_remainder)) {
+			apply_particle_key(particle, statement.key, statement.raw_value, statement.values);
+		}
+	}
+	for (const PendingParticleStatement &statement : statements) {
+		if (match_graphic_decl(statement.key) >= 0) {
+			apply_particle_key(particle, statement.key, statement.raw_value, statement.values);
+		}
+	}
+	for (const PendingParticleStatement &statement : statements) {
+		int graphic_index = -1;
+		std::string graphic_remainder;
+		if (match_graphic_key(statement.key, graphic_index, graphic_remainder)) {
+			apply_particle_key(particle, statement.key, statement.raw_value, statement.values);
+		}
+	}
+}
+
 void apply_table_key(TableDef &table, const std::string &key,
 		const std::string &raw_value, const std::vector<std::string> &values,
 		std::vector<std::pair<std::string, std::string>> &unknown) {
@@ -402,17 +441,34 @@ void apply_table_key(TableDef &table, const std::string &key,
 		return;
 	}
 	if (key.size() > 2 && key[0] == 't' && key[1] == 'l') {
-		// tlN row. We don't enforce 32 rows here (smoke test does); we do
-		// require exactly 8 values per row.
-		if (values.size() < 8) {
+		int row_number = 0;
+		bool valid_row_key = true;
+		for (std::size_t i = 2; i < key.size(); ++i) {
+			const unsigned char c = static_cast<unsigned char>(key[i]);
+			if (std::isdigit(c) == 0) {
+				valid_row_key = false;
+				break;
+			}
+			row_number = row_number * 10 + (key[i] - '0');
+			if (row_number > 32) {
+				valid_row_key = false;
+				break;
+			}
+		}
+		if (!valid_row_key || row_number < 1 || values.size() < 8) {
 			unknown.emplace_back(key, raw_value);
 			return;
 		}
+		// tlN names are indexed config-map fields, not append records. Source
+		// order is irrelevant and duplicate keys are last-wins.
 		std::array<std::uint8_t, 8> row{};
 		for (std::size_t i = 0; i < row.size(); ++i) {
 			row[i] = parse_byte(values[i]);
 		}
-		table.rows.push_back(row);
+		if (table.rows.size() < static_cast<std::size_t>(row_number)) {
+			table.rows.resize(static_cast<std::size_t>(row_number));
+		}
+		table.rows[static_cast<std::size_t>(row_number - 1)] = row;
 		return;
 	}
 	unknown.emplace_back(key, raw_value);
@@ -487,6 +543,7 @@ bool load_particles(std::istream &input, ParticleFile &out, ParseError &error) {
 	ParticleDef current_particle;
 	TableDef current_table;
 	TableEditHandles current_handles;
+	std::vector<PendingParticleStatement> pending_particle;
 	std::vector<std::pair<std::string, std::string>> stray_unknown; // for [effectdef]/[tabledef]/[handles]
 
 	std::size_t line_number = 0;
@@ -522,6 +579,7 @@ bool load_particles(std::istream &input, ParticleFile &out, ParseError &error) {
 						break;
 					case Section::Particle:
 						current_particle = ParticleDef();
+						pending_particle.clear();
 						break;
 					case Section::Table:
 						current_table = TableDef();
@@ -553,6 +611,7 @@ bool load_particles(std::istream &input, ParticleFile &out, ParseError &error) {
 							out.effects.push_back(std::move(current_effect));
 							break;
 						case Section::Particle: {
+							hydrate_particle(current_particle, pending_particle);
 							// Engine clamps emit_burst < 1 to 1 (sub_5ed6c2);
 							// we preserve the source value but mirror the clamp
 							// so consumers see authoring intent.
@@ -597,7 +656,7 @@ bool load_particles(std::istream &input, ParticleFile &out, ParseError &error) {
 						apply_effect_key(current_effect, key, raw_value, values, stray_unknown);
 						break;
 					case Section::Particle:
-						apply_particle_key(current_particle, key, raw_value, values);
+						pending_particle.push_back({key, raw_value, values});
 						break;
 					case Section::Table:
 						apply_table_key(current_table, key, raw_value, values, stray_unknown);

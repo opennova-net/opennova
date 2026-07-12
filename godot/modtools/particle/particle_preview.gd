@@ -253,7 +253,10 @@ func _add_transport_button(parent: Control, text: String, tip: String, cb: Calla
 
 func _process(delta: float) -> void:
 	if not _paused and not _emitters.is_empty():
-		_elapsed += clampf(delta, 0.0, 0.1) * _time_scale
+		_elapsed = minf(_elapsed + clampf(delta, 0.0, 0.1) * _time_scale,
+				_max_seconds)
+		if _elapsed >= _max_seconds:
+			set_paused(true)
 	_stats_accum += delta
 	if _stats_accum >= 0.2:
 		_stats_accum = 0.0
@@ -325,6 +328,9 @@ func _add_emitter(def: NovaParticleDef, index: int) -> NovaParticleEmitter:
 		return null
 	var emitter := NovaParticleEmitter.new()
 	emitter.name = "ParticleEmitter%d" % index
+	# Blank/missing authored graphics are invisible in the runtime. The editor
+	# opts into a soft disc so emission and motion remain diagnosable.
+	emitter.procedural_fallback_enabled = true
 	emitter.auto_advance = not _paused
 	emitter.time_scale = _time_scale
 	emitter.seed = 1 + index * 101
@@ -394,6 +400,9 @@ func step_frame(direction: int) -> void:
 	set_paused(true)
 	if direction < 0:
 		seek_seconds(_elapsed - STEP_SECONDS)
+		return
+	if _elapsed + STEP_SECONDS >= _max_seconds:
+		seek_seconds(_max_seconds)
 		return
 	for emitter in _emitters:
 		if emitter != null:
@@ -505,6 +514,7 @@ func _on_speed_changed(value: float) -> void:
 func _on_timeline_changed(value: float) -> void:
 	if _seek_guard:
 		return
+	set_paused(true)
 	seek_seconds(value * STEP_SECONDS)
 
 

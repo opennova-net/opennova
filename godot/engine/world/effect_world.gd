@@ -23,6 +23,8 @@ extends Node3D
 
 ## Per the original's FOREVEREMIT flag bit (flag-table idx 18, post-HAZE).
 const PARTICLE_FLAG_FOREVER_EMIT := 1 << 18
+const PARTICLE_FLAG_BELOW_H2O := 1 << 27
+const PARTICLE_FLAG_ABOVE_H2O := 1 << 28
 
 ## One loaded .ptl document (a NovaParticleFile) per mounted file.
 var _files: Array = []
@@ -51,6 +53,12 @@ var _spawn_serial := 0
 ## same key detaches the previous group [orig: WacScript_SpawnSoundAtEntity
 ## @ 0x4f23a0 — the per-entity emitter handle; respawn detaches the old one].
 var _owned_groups: Dictionary = {}
+## Resolves an owned WAC SSN to its current Transform3D (a Vector3 position is
+## retained as a compatibility fallback). fx2ssn emitters are attached handles
+## in retail, updated every frame and detached when the entity disappears
+## [orig: CEffect_UpdateEmitterTransform @ 0x5f7410].
+var _owner_position_provider := Callable()
+var _water_height := 0.0
 
 
 func file_count() -> int:
@@ -67,6 +75,18 @@ func live_group_count() -> int:
 
 func get_texture_provider() -> Callable:
 	return _texture_provider
+
+
+func set_owner_position_provider(provider: Callable) -> void:
+	_owner_position_provider = provider
+
+
+func get_owner_position_provider() -> Callable:
+	return _owner_position_provider
+
+
+func set_water_height(value: float) -> void:
+	_water_height = value
 
 
 ## Load every .ptl reachable in the mounted root (loose overrides + all PFF
@@ -115,6 +135,8 @@ func clear_world() -> void:
 	_tables.clear()
 	_root = null
 	_texture_provider = Callable()
+	_owner_position_provider = Callable()
+	_water_height = 0.0
 	_spawn_serial = 0
 
 
@@ -196,6 +218,11 @@ func spawn_effect_owned(owner_key: Variant, name: String, position: Vector3,
 	var group_id := _spawn_interned(handle, position, orientation)
 	if group_id > 0:
 		_owned_groups[owner_key] = group_id
+		for group in _live:
+			if int(group.get("id", 0)) == group_id:
+				group.owner_key = owner_key
+				group.follow_owner = true
+				break
 	return handle
 
 
@@ -218,6 +245,10 @@ func spawn_effect_unless_alive(owner_key: Variant, name: String, position: Vecto
 	var group_id := _spawn_interned(handle, position, orientation)
 	if group_id > 0:
 		_owned_groups[owner_key] = group_id
+		for group in _live:
+			if int(group.get("id", 0)) == group_id:
+				group.owner_key = owner_key
+				break
 	return handle
 
 
@@ -244,6 +275,7 @@ func stop_group(group_id: int) -> void:
 			continue
 		group.forever = false
 		group.window = 0.0
+		group.follow_owner = false
 		for emitter in group.emitters:
 			if is_instance_valid(emitter):
 				emitter.stop_emitting()
@@ -256,7 +288,15 @@ func _spawn_interned(handle: int, position: Vector3, orientation: Vector3) -> in
 	var effect: NovaParticleEffect = entry.get("effect")
 	if effect == null:
 		return 0
-	var group := {"id": _spawn_serial + 1, "emitters": [], "window": 1.0, "forever": false, "elapsed": 0.0}
+	var group := {
+		"id": _spawn_serial + 1,
+		"emitters": [],
+		"window": 1.0,
+		"forever": false,
+		"elapsed": 0.0,
+		"owner_key": null,
+		"follow_owner": false,
+	}
 	var window := 0.0
 	var pdefs: PackedStringArray = effect.pdefs
 	for i in range(pdefs.size()):
@@ -266,6 +306,12 @@ func _spawn_interned(handle: int, position: Vector3, orientation: Vector3) -> in
 		var emitter := NovaParticleEmitter.new()
 		emitter.name = "Fx%d_%d" % [_spawn_serial, i]
 		emitter.seed = 1 + ((_spawn_serial * 17 + i) % 1023)
+		if (int(def.flags) & PARTICLE_FLAG_BELOW_H2O) != 0:
+			emitter.kill_plane_mode = 1
+			emitter.kill_plane_y = _water_height
+		elif (int(def.flags) & PARTICLE_FLAG_ABOVE_H2O) != 0:
+			emitter.kill_plane_mode = 2
+			emitter.kill_plane_y = _water_height
 		emitter.set_tables(_tables)
 		if _texture_provider.is_valid():
 			# Call the setter: texture_provider is bound as set/get methods without a
@@ -324,15 +370,51 @@ func sweep(delta: float) -> void:
 	var i := 0
 	while i < _live.size():
 		var group: Dictionary = _live[i]
+		if bool(group.get("follow_owner", false)) and _owner_position_provider.is_valid():
+			var owner_key: Variant = group.get("owner_key")
+			var current_state: Variant = _owner_position_provider.call(owner_key)
+			var owner_alive := current_state is Transform3D or current_state is Vector3
+			if not owner_alive:
+				# The attached entity was destroyed: detach the emitter handle just
+				# like retail, allowing already-live world-space particles to drain.
+				group.forever = false
+				group.window = 0.0
+				group.follow_owner = false
+				if int(_owned_groups.get(owner_key, 0)) == int(group.id):
+					_owned_groups.erase(owner_key)
+				for emitter in group.emitters:
+					if is_instance_valid(emitter):
+						emitter.stop_emitting()
+			else:
+				var current_position: Vector3
+				var current_forward := Vector3.ZERO
+				var has_forward := false
+				if current_state is Transform3D:
+					var current_transform: Transform3D = current_state
+					current_position = current_transform.origin
+					current_forward = current_transform.basis.z
+					has_forward = current_forward.length_squared() > 0.000001
+				else:
+					current_position = current_state
+				for emitter in group.emitters:
+					if is_instance_valid(emitter):
+						emitter.global_position = current_position
+						if has_forward:
+							emitter.emission_forward = current_forward.normalized()
 		group.elapsed += delta
-		var finished := false
-		if not group.forever and group.elapsed >= group.window:
-			finished = true
+		# The native emitter owns randomized delay/duration and terminal-frame
+		# state. A heuristic wall-clock window can expire before a delayed emitter
+		# ever starts, so completion must come from the emitters themselves.
+		var finished := not bool(group.forever)
+		if finished:
 			for emitter in group.emitters:
-				if is_instance_valid(emitter) and emitter.get_alive_count() > 0:
+				if is_instance_valid(emitter) and not emitter.is_finished():
 					finished = false
 					break
 		if finished:
+			var owner_key: Variant = group.get("owner_key")
+			if owner_key != null and int(_owned_groups.get(owner_key, 0)) == int(group.id):
+				_owned_groups.erase(owner_key)
 			for emitter in group.emitters:
 				if is_instance_valid(emitter):
 					emitter.queue_free()

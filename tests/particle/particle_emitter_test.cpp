@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdio>
 #include <fstream>
+#include <limits>
 #include <string>
 
 namespace {
@@ -64,6 +65,36 @@ bool test_init() {
 	return true;
 }
 
+bool test_init_randomizes_retail_emission_window_and_rate() {
+	using namespace opennova::particle;
+	ParticleDef def = make_minimal_def();
+	def.emit_dur = 10.0f;
+	def.emit_dur_adj = 2.0f;
+	def.emit_rate = 20.0f;
+	def.emit_rate_adj = 10.0f;
+	Emitter e;
+	emitter_init(e, &def, {0, 0, 0}, 142u);
+	if (!expect(near(e.emit_dur_remaining, 12.0f, 0.0001f), __func__)) return false;
+	return expect(near(e.emit_rate, 20.263929f, 0.0001f), __func__);
+}
+
+bool test_init_randomizes_orbital_speed_adjustment() {
+	using namespace opennova::particle;
+	ParticleDef def = make_minimal_def();
+	def.orbitalspeed = 10.0f;
+	def.orbitalspeed_adj = 2.0f;
+	Emitter e;
+	emitter_init(e, &def, {0, 0, 0}, 142u);
+	return expect(near(e.orbit_speed, 8.758553f, 0.0001f), __func__);
+}
+
+bool test_rand_unit_includes_retail_one_endpoint() {
+	using namespace opennova::particle;
+	Emitter e;
+	e.rng_state = 142u;
+	return expect(near(emitter_rand_unit(e), 1.0f, 1e-7f), __func__);
+}
+
 bool test_manual_spawn() {
 	using namespace opennova::particle;
 	ParticleDef def = make_minimal_def();
@@ -79,6 +110,20 @@ bool test_manual_spawn() {
 	if (!expect(emitter_spawn_one(e), "second spawn ok")) return false;
 	if (!expect(e.particles[1].serial == 1, "second serial is 1")) return false;
 	return true;
+}
+
+bool test_nonpositive_and_nonfinite_lifetimes_are_rejected() {
+	using namespace opennova::particle;
+	ParticleDef def = make_minimal_def();
+	def.emit_rate = 0.0f;
+	def.age = 0.0f;
+	def.age_adj = 0.0f;
+	Emitter e;
+	emitter_init(e, &def, {0, 0, 0}, 7);
+	if (!expect(!emitter_spawn_one(e) && e.particles.empty(), __func__)) return false;
+	def.age = std::numeric_limits<float>::quiet_NaN();
+	emitter_init(e, &def, {0, 0, 0}, 7);
+	return expect(!emitter_spawn_one(e) && e.particles.empty(), __func__);
 }
 
 bool test_spawn_records_visual_choices() {
@@ -203,6 +248,38 @@ bool test_burst() {
 	return true;
 }
 
+bool test_nonfinite_dt_is_ignored() {
+	using namespace opennova::particle;
+	ParticleDef def = make_minimal_def();
+	def.emit_rate = 0.0f;
+	Emitter e;
+	emitter_init(e, &def, {0, 0, 0}, 1);
+	if (!expect(emitter_spawn_one(e), __func__)) return false;
+	const float age_before = e.particles[0].age;
+	const std::uint32_t rng_before = e.rng_state;
+	emitter_advance(e, std::numeric_limits<float>::quiet_NaN());
+	if (!expect(e.particles[0].age == age_before && e.age == 0.0f &&
+			e.rng_state == rng_before, __func__)) return false;
+	emitter_advance(e, std::numeric_limits<float>::infinity());
+	return expect(e.particles[0].age == age_before && e.age == 0.0f &&
+			e.rng_state == rng_before, __func__);
+}
+
+bool test_extreme_rate_and_burst_stop_at_capacity() {
+	using namespace opennova::particle;
+	ParticleDef def = make_minimal_def();
+	def.emit_rate = std::numeric_limits<float>::max();
+	def.emit_burst = std::numeric_limits<int>::max();
+	def.emit_dur = 1.0f;
+	def.age = 100.0f;
+	Emitter e;
+	emitter_init(e, &def, {0, 0, 0}, 1);
+	e.max_particles = std::numeric_limits<std::size_t>::max();
+	emitter_advance(e, 0.1f);
+	if (!expect(e.particles.size() == kEmitterHardParticleLimit, __func__)) return false;
+	return expect(std::isfinite(e.emit_accumulator), __func__);
+}
+
 bool test_lifetime_expires() {
 	using namespace opennova::particle;
 	ParticleDef def = make_minimal_def();
@@ -215,8 +292,11 @@ bool test_lifetime_expires() {
 	emitter_advance(e, 0.1f);
 	const std::size_t after_first = e.particles.size();
 	if (!expect(after_first > 0, "particles spawn during emit window")) return false;
-	// Advance well past the lifetime + emit_delay; everything must die.
+	// Advance well past the lifetime. Retail leaves the particle in its
+	// terminal frame and reclaims it at the next AdvanceFrame expiry pass.
 	emitter_advance(e, 2.0f);
+	if (!expect(!e.particles.empty(), "terminal frame remains observable")) return false;
+	emitter_advance(e, 0.001f);
 	if (!expect(e.particles.empty(), "all particles expire after lifetime")) {
 		std::fprintf(stderr, "  still alive: %zu\n", e.particles.size());
 		return false;
@@ -224,15 +304,29 @@ bool test_lifetime_expires() {
 	return true;
 }
 
-bool test_gravity_adds_authored_sign_to_vy() {
-	// NORMAL-move gravity ADDS the authored value onto vel.y per tick
-	// [orig: UpdateParticles @ 0x5e6980 — `vel.y += slot * dt`, the emitter
-	// slot seeded from def.gravity]: negative authored gravity sinks, positive
-	// lifts (smoke). The earlier port subtracted, inverting every authored
-	// sign.
+bool test_terminal_frame_is_removed_on_next_advance() {
 	using namespace opennova::particle;
 	ParticleDef def = make_minimal_def();
-	def.gravity = -100.0f;         // authored negative = downward
+	def.age = 0.1f;
+	def.age_adj = 0.0f;
+	def.emit_rate = 0.0f;
+	Emitter e;
+	emitter_init(e, &def, {0, 0, 0}, 99);
+	if (!expect(emitter_spawn_one(e), __func__)) return false;
+	emitter_advance(e, 0.1f);
+	if (!expect(e.particles.size() == 1, __func__)) return false;
+	if (!expect(e.particles[0].age <= 0.0f, __func__)) return false;
+	emitter_advance(e, 0.001f);
+	return expect(e.particles.empty(), __func__);
+}
+
+bool test_gravity_uses_retail_authored_units() {
+	// NORMAL movement adds the emitter slot to vel.y. Initialize seeds that
+	// slot as authored gravity × -0.09803897, so positive authored gravity
+	// sinks and negative authored gravity lifts.
+	using namespace opennova::particle;
+	ParticleDef def = make_minimal_def();
+	def.gravity = 100.0f;
 	def.gravity_mask = {0.0f, 1.0f, 0.0f}; // GRAVITATE-only input; inert here
 	def.drag = 0.0f;
 	def.age = 5.0f;
@@ -251,6 +345,7 @@ bool test_gravity_adds_authored_sign_to_vy() {
 	}
 	const float vy = e.particles[0].velocity.y;
 	const float y1 = e.particles[0].position.y;
+	if (!expect(near(vy, -9.803897f, 0.001f), __func__)) return false;
 	if (!expect(vy < 0.0f, "gravity reduces vy")) {
 		std::fprintf(stderr, "  vy=%f\n", vy);
 		return false;
@@ -262,7 +357,7 @@ bool test_gravity_adds_authored_sign_to_vy() {
 	return true;
 }
 
-bool test_drag_decelerates() {
+bool test_drag_uses_retail_authored_units() {
 	using namespace opennova::particle;
 	ParticleDef def = make_minimal_def();
 	def.gravity = 0.0f;
@@ -276,6 +371,7 @@ bool test_drag_decelerates() {
 	e.particles[0].velocity = {10.0f, 0.0f, 0.0f};
 	emitter_advance(e, 0.1f);
 	const float v_after = std::abs(e.particles[0].velocity.x);
+	if (!expect(near(v_after, 9.98f, 0.0001f), __func__)) return false;
 	if (!expect(v_after < 10.0f && v_after > 0.0f, "drag reduces velocity magnitude")) {
 		std::fprintf(stderr, "  v=%f\n", v_after);
 		return false;
@@ -403,7 +499,7 @@ bool test_spawn_distort_flag() {
 	return true;
 }
 
-bool test_gravitate_pushes_away_from_emitter() {
+bool test_gravitate_uses_converted_gravity_slot() {
 	// CParticleEmitter_UpdateParticles @ 0x5e6980 / UpdateAllParticles
 	// @ 0x5f3be0 path B: when move & 2 (GRAVITATE) is set,
 	//   delta = pos - emitter.pos
@@ -438,14 +534,15 @@ bool test_gravitate_pushes_away_from_emitter() {
 	emitter_advance(e_far, 0.1f);
 	const Vec3 v_far = e_far.particles[0].velocity;
 
-	if (!expect(v_near.x > 0.0f, "near particle pushed away from emitter (+x)")) {
+	if (!expect(v_near.x < 0.0f, "positive authored gravity attracts toward the emitter")) {
 		std::fprintf(stderr, "  vx=%f\n", v_near.x);
 		return false;
 	}
-	// Constant-magnitude (normalized): vel ≈ unit * gravity * dt = 1 * 5 * 0.1 = 0.5.
-	if (!expect(std::fabs(v_near.x - 0.5f) < 0.05f,
-			"vel magnitude ~ unit × spring × dt")) {
-		std::fprintf(stderr, "  vx=%f want~+0.5\n", v_near.x);
+	// Constant-magnitude (normalized): authored 5 becomes slot -0.49019485;
+	// multiplying by dt 0.1 yields vx ≈ -0.0490195.
+	if (!expect(near(v_near.x, -0.049019485f, 0.0001f),
+			"velocity uses unit delta × converted gravity slot × dt")) {
+		std::fprintf(stderr, "  vx=%f want~-0.049\n", v_near.x);
 		return false;
 	}
 	// Far particle gets the SAME magnitude (engine normalizes delta).
@@ -460,8 +557,8 @@ bool test_gravitate_pushes_away_from_emitter() {
 bool test_gravitate_negative_mask_inverts_direction() {
 	// Authors enable attractive gravitate via negative gravity_mask. With
 	// {-1,1,1}, the x component of the normalized delta is sign-flipped
-	// (mask applies AFTER normalize @ 0x5e6980), so the force on the x axis
-	// pulls the particle TOWARD the emitter while y/z still push away.
+	// (mask applies AFTER normalize @ 0x5e6980). The converted gravity slot is
+	// negative, so that flipped x component pushes outward while y/z attract.
 	using namespace opennova::particle;
 	ParticleDef def = make_minimal_def();
 	def.move = move_flag::Gravitate;
@@ -479,8 +576,8 @@ bool test_gravitate_negative_mask_inverts_direction() {
 	emitter_advance(e, 0.1f);
 	const Vec3 v = e.particles[0].velocity;
 
-	if (!expect(v.x < 0.0f, "negative x mask flips x to attractive")) {
-		std::fprintf(stderr, "  vx=%f (want < 0)\n", v.x);
+	if (!expect(v.x > 0.0f, "negative x mask flips the converted force")) {
+		std::fprintf(stderr, "  vx=%f (want > 0)\n", v.x);
 		return false;
 	}
 	return true;
@@ -517,10 +614,10 @@ bool test_gravitate_respects_zero_mask() {
 		return false;
 	}
 	// Pin the normalize-then-mask ORDER: unit delta of {10,10,10} has
-	// y = 1/sqrt(3) ≈ 0.5774, so vy = 0.5774 * spring(1.0) * dt(0.1) ≈
-	// 0.0577. The pre-2026-07-10 mask-then-normalize order gave 0.1 here.
-	if (!expect(v.y > 0.05f && v.y < 0.07f, "y push is the masked unit component (normalize before mask)")) {
-		std::fprintf(stderr, "  vy=%f (want ~0.0577)\n", v.y);
+	// y = 1/sqrt(3) ≈ 0.5774, so vy = 0.5774 × converted slot
+	// (-0.09803897) × dt(0.1) ≈ -0.005660.
+	if (!expect(near(v.y, -0.005660f, 0.0001f), "normalize then mask uses converted gravity")) {
+		std::fprintf(stderr, "  vy=%f (want ~-0.005660)\n", v.y);
 		return false;
 	}
 	return true;
@@ -581,11 +678,11 @@ bool test_gravitate_spring_const_overrides_def_gravity() {
 	// Engine-faithful: the manager sets `*((float*)emitter+77)` = emitter+0x308
 	// at spawn time (CEffectEmitter_Initialize @ 0x5e6020). Our portable
 	// simulator exposes `Emitter::spring_const`; when non-zero it overrides
-	// the `def.gravity` stand-in.
+	// the converted gravity slot.
 	using namespace opennova::particle;
 	ParticleDef def = make_minimal_def();
 	def.move = move_flag::Gravitate;
-	def.gravity = 5.0f;            // would normally produce vel ≈ 0.5 in 0.1s
+	def.gravity = 5.0f;            // converted slot produces vel ≈ -0.049 in 0.1s
 	def.gravity_mask = {1.0f, 1.0f, 1.0f};
 	def.drag = 0.0f;
 	def.age = 100.0f;
@@ -606,7 +703,7 @@ bool test_gravitate_spring_const_overrides_def_gravity() {
 		return false;
 	}
 
-	// Reset spring_const = 0 → fallback to def.gravity = 5.0.
+	// Reset spring_const = 0 → use converted gravity slot from def.gravity = 5.
 	Emitter e2;
 	emitter_init(e2, &def, {0, 0, 0}, 1);
 	e2.spring_const = 0.0f;
@@ -616,9 +713,9 @@ bool test_gravitate_spring_const_overrides_def_gravity() {
 	emitter_advance(e2, 0.1f);
 	const Vec3 v2 = e2.particles[0].velocity;
 
-	if (!expect(std::fabs(v2.x - 0.5f) < 0.05f,
-			"spring_const = 0 falls back to def.gravity (yields 0.5)")) {
-		std::fprintf(stderr, "  vx=%f want~+0.5\n", v2.x);
+	if (!expect(near(v2.x, -0.049019485f, 0.0001f),
+			"spring_const = 0 uses converted gravity slot")) {
+		std::fprintf(stderr, "  vx=%f want~-0.049\n", v2.x);
 		return false;
 	}
 	return true;
@@ -839,13 +936,15 @@ bool test_kill_plane_above_kills_when_particle_rises() {
 
 	emitter_advance(e, 0.1f);   // 0.0 + 100*0.1 = +10 → above threshold 5 → kills
 
-	if (!expect(e.particles.empty(),
-			"mode 1 kills particle once it ascends past kill_plane_y")) {
+	if (!expect(e.particles.size() == 1 && e.particles[0].age <= 0.0f,
+			"mode 1 marks the crossing particle for next-frame removal")) {
 		std::fprintf(stderr, "  alive=%zu y=%f\n",
 				e.particles.size(),
 				e.particles.empty() ? 0.0f : e.particles[0].position.y);
 		return false;
 	}
+	emitter_advance(e, 0.001f);
+	if (!expect(e.particles.empty(), "mode 1 reclaims the marked particle next frame")) return false;
 	return true;
 }
 
@@ -870,13 +969,15 @@ bool test_kill_plane_below_kills_at_threshold_or_lower() {
 
 	emitter_advance(e, 0.1f);   // 5.0 + (-100)*0.1 = -5.0 → at/below 0 → kills
 
-	if (!expect(e.particles.empty(),
-			"mode 2 kills particle once it descends to or past kill_plane_y")) {
+	if (!expect(e.particles.size() == 1 && e.particles[0].age <= 0.0f,
+			"mode 2 marks the crossing particle for next-frame removal")) {
 		std::fprintf(stderr, "  alive=%zu y=%f\n",
 				e.particles.size(),
 				e.particles.empty() ? 0.0f : e.particles[0].position.y);
 		return false;
 	}
+	emitter_advance(e, 0.001f);
+	if (!expect(e.particles.empty(), "mode 2 reclaims the marked particle next frame")) return false;
 
 	// Boundary case: particle exactly at threshold should also be killed
 	// (mode 2 condition is y <= threshold, inclusive).
@@ -888,8 +989,10 @@ bool test_kill_plane_below_kills_at_threshold_or_lower() {
 	e2.particles[0].position = {0.0f, 0.0f, 0.0f};   // exactly at threshold
 	e2.particles[0].velocity = {0.0f, 0.0f, 0.0f};
 	emitter_advance(e2, 0.01f);
-	if (!expect(e2.particles.empty(),
-			"mode 2 kills exactly-at-threshold particles (inclusive boundary)")) return false;
+	if (!expect(e2.particles.size() == 1 && e2.particles[0].age <= 0.0f,
+			"mode 2 marks exactly-at-threshold particles (inclusive boundary)")) return false;
+	emitter_advance(e2, 0.001f);
+	if (!expect(e2.particles.empty(), "mode 2 reclaims threshold particles next frame")) return false;
 	return true;
 }
 
@@ -965,20 +1068,27 @@ bool test_against_real_fixture() {
 int main() {
 	int failures = 0;
 	if (!test_init())                       ++failures;
+	if (!test_init_randomizes_retail_emission_window_and_rate()) ++failures;
+	if (!test_init_randomizes_orbital_speed_adjustment()) ++failures;
+	if (!test_rand_unit_includes_retail_one_endpoint()) ++failures;
 	if (!test_manual_spawn())               ++failures;
+	if (!test_nonpositive_and_nonfinite_lifetimes_are_rejected()) ++failures;
 	if (!test_spawn_records_visual_choices()) ++failures;
 	if (!test_curve_phase_clock())          ++failures;
 	if (!test_spawn_size_from_graphic_scale()) ++failures;
 	if (!test_advance_emits())              ++failures;
 	if (!test_burst())                      ++failures;
+	if (!test_nonfinite_dt_is_ignored())    ++failures;
+	if (!test_extreme_rate_and_burst_stop_at_capacity()) ++failures;
 	if (!test_lifetime_expires())           ++failures;
-	if (!test_gravity_adds_authored_sign_to_vy()) ++failures;
-	if (!test_drag_decelerates())           ++failures;
+	if (!test_terminal_frame_is_removed_on_next_advance()) ++failures;
+	if (!test_gravity_uses_retail_authored_units()) ++failures;
+	if (!test_drag_uses_retail_authored_units()) ++failures;
 	if (!test_determinism_same_seed())      ++failures;
 	if (!test_determinism_different_seed()) ++failures;
 	if (!test_spawn_records_curve_flags())  ++failures;
 	if (!test_spawn_distort_flag())         ++failures;
-	if (!test_gravitate_pushes_away_from_emitter()) ++failures;
+	if (!test_gravitate_uses_converted_gravity_slot()) ++failures;
 	if (!test_gravitate_negative_mask_inverts_direction()) ++failures;
 	if (!test_gravitate_respects_zero_mask()) ++failures;
 	if (!test_gravitate_spring_const_overrides_def_gravity()) ++failures;

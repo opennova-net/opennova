@@ -55,7 +55,9 @@ const MUSIC_NAME := "jo_gamemus.bin"
 const SOUND_NAME := "00TRa.LWF"
 # The game ships .ptl inside PFFs rather than loose in the resource dir, so the
 # particles shot leans on the bundled repo fixture when the dir has none.
-# buildup.ptl is a small, self-contained effect with a steady emitter.
+# buildup.ptl is a compact editor fixture with a steady emitter. Its retail
+# texture/curve dependencies are external to the fixture set, so this capture
+# intentionally shows the preview's diagnostic fallback, not a parity image.
 const PARTICLE_NAME := "buildup.ptl"
 const FALLBACK_ASSETS := {
 	MUSIC_NAME: "res://../fixtures/mus/jo_gamemus.bin",

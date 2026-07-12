@@ -210,6 +210,50 @@ bool test_velocity_from_speed_within_spread_cone() {
 	return true;
 }
 
+bool test_velocity_spread_skip_excludes_inner_cone() {
+	using namespace opennova::particle;
+	ParticleDef def = base_def();
+	def.speed = 10.0f;
+	def.spread = 90.0f;
+	def.spread_skip = 90.0f;
+	Emitter e;
+	emitter_init(e, &def, {0, 0, 0}, 0x5150);
+	e.forward = {0.0f, 1.0f, 0.0f};
+	for (int i = 0; i < 64; ++i) {
+		e.particles.clear();
+		if (!emitter_spawn_one(e)) return false;
+		const Vec3 v = e.particles[0].velocity;
+		const float speed = std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+		const float forward_dot = v.y / speed;
+		if (!expect(std::fabs(forward_dot) < 0.001f, __func__)) return false;
+	}
+	return true;
+}
+
+bool test_velocity_spread_skip_bounds_each_yaw_and_pitch_rotation() {
+	using namespace opennova::particle;
+	ParticleDef def = base_def();
+	def.speed = 10.0f;
+	def.spread = 60.0f;
+	def.spread_skip = 60.0f;
+	Emitter e;
+	emitter_init(e, &def, {0, 0, 0}, 0x6161);
+	e.forward = {0.0f, 1.0f, 0.0f};
+	const float expected_forward_dot = 0.25f; // cos(60 degrees) * cos(60 degrees)
+	for (int i = 0; i < 32; ++i) {
+		e.particles.clear();
+		if (!emitter_spawn_one(e)) return false;
+		const Vec3 v = e.particles[0].velocity;
+		const float speed = std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+		const float forward_dot = v.y / speed;
+		if (!expect(std::fabs(forward_dot - expected_forward_dot) < 0.001f, __func__)) {
+			std::fprintf(stderr, "  iter=%d dot=%f\n", i, forward_dot);
+			return false;
+		}
+	}
+	return true;
+}
+
 bool test_cone_position_cap_around_forward() {
 	// Cone displaces POSITION within a 90°-cap shell around emitter.forward
 	// (flt_7DCBF0 = 90.0) — every offset lands in the forward hemisphere.
@@ -249,6 +293,8 @@ int main() {
 	if (!test_box_signedrotations_flag_clamps_sign_positive())  ++failures;
 	if (!test_sphere_position_shell_within_skip_size_range())   ++failures;
 	if (!test_velocity_from_speed_within_spread_cone())         ++failures;
+	if (!test_velocity_spread_skip_excludes_inner_cone())       ++failures;
+	if (!test_velocity_spread_skip_bounds_each_yaw_and_pitch_rotation()) ++failures;
 	if (!test_cone_position_cap_around_forward())               ++failures;
 	if (failures != 0) {
 		std::fprintf(stderr, "%d test(s) failed\n", failures);

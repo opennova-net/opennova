@@ -417,13 +417,13 @@ class FakeEffectWorld:
 	extends Node
 	var spawns: Array = []
 
-	func spawn_effect_unless_alive(_owner_key, effect: String, pos: Vector3,
-			_orientation: Vector3 = Vector3.ZERO) -> int:
-		spawns.append({"effect": effect, "pos": pos})
+	func spawn_effect_unless_alive(owner_key, effect: String, pos: Vector3,
+			orientation: Vector3 = Vector3.ZERO) -> int:
+		spawns.append({"owner": owner_key, "effect": effect, "pos": pos, "orientation": orientation})
 		return 1
 
-	func spawn_effect(effect: String, pos: Vector3, _orientation: Vector3 = Vector3.ZERO) -> int:
-		spawns.append({"effect": effect, "pos": pos})
+	func spawn_effect(effect: String, pos: Vector3, orientation: Vector3 = Vector3.ZERO) -> int:
+		spawns.append({"effect": effect, "pos": pos, "orientation": orientation})
 		return 1
 
 
@@ -473,6 +473,10 @@ func test_action_particles_gate_on_fire_and_scope() -> void:
 	host.after_world_tick()
 	assert_eq(fx.spawns.size(), 1, "FIRE begins spawn the muzzle particle")
 	assert_eq(String(fx.spawns[0]["effect"]), "Effect_TestMF")
+	assert_true(fx.spawns[0].owner is String,
+			"the muzzle guard is keyed by action-slot generation, not the host object")
+	assert_almost_eq((fx.spawns[0].orientation as Vector3).length(), 1.0, 0.001,
+			"the user-point/camera direction reaches the particle descriptor")
 
 	# FIRE begin scoped in first person: suppressed.
 	var scoped_view := PlayerLocalView.new()
@@ -484,13 +488,35 @@ func test_action_particles_gate_on_fire_and_scope() -> void:
 	host.after_world_tick()
 	assert_eq(fx.spawns.size(), 1, "scoped FP fire shows no muzzle flash [orig: @0x541aba]")
 
+	# Mounted local fire uses the vehicle-capable leg and is not hidden by ADS.
+	scoped_view.mounted = true
+	scoped_view.vehicle_attack_context = true
+	world.weapon_events.append(_weapon_particle_event(2, "Effect_TestMF"))
+	world.weapon_view = _weapon_view()
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+	assert_eq(fx.spawns.size(), 2, "mounted scoped fire keeps the muzzle flash")
+	scoped_view.mounted = false
+	scoped_view.vehicle_attack_context = false
+
 	# The same scoped fire in THIRD person spawns (the 3P leg [orig: @0x541a70]).
 	host.set_third_person(true)
 	world.weapon_events.append(_weapon_particle_event(2, "Effect_TestMF"))
 	world.weapon_view = _weapon_view()
 	host.before_world_tick(0.016)
 	host.after_world_tick()
-	assert_eq(fx.spawns.size(), 2, "3P scoped fire keeps the muzzle flash")
+	assert_eq(fx.spawns.size(), 3, "3P scoped fire keeps the muzzle flash")
+
+	var first_owner: String = fx.spawns[0].owner
+	host.refresh_viewmodel()
+	world.view = PlayerLocalView.new()
+	host.set_third_person(false)
+	world.weapon_events.append(_weapon_particle_event(2, "Effect_TestMF"))
+	world.weapon_view = _weapon_view()
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+	assert_ne(String(fx.spawns[3].owner), first_owner,
+			"a weapon re-mount gets a fresh action-slot effect handle")
 
 
 func test_catch_up_weapon_action_events_are_not_coalesced() -> void:

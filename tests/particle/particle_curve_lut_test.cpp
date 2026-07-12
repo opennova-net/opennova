@@ -6,11 +6,13 @@
 // CParticleDef_ParseProperties (`scale_func @ 0x5eafdd`, etc.) which set bits
 // 0x02 (reverse) / 0x01 (inverse) on each curve.
 
+#include <particle/parser.h>
 #include <particle/particle.h>
 
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <sstream>
 
 namespace {
 
@@ -121,6 +123,32 @@ bool test_short_table_zero_pad() {
 		if (!expect(lut[i] == 0, "rows beyond row_count read as zero")) return false;
 	}
 	return true;
+}
+
+bool test_table_rows_follow_tl_indices_and_last_write_wins() {
+	const char *source = R"PTL(
+[tabledef]
+{
+	id = shuffled;
+	tl2 = 2, 2, 2, 2, 2, 2, 2, 2;
+	tl1 = 1, 1, 1, 1, 1, 1, 1, 1;
+	tl2 = 9, 9, 9, 9, 9, 9, 9, 9;
+	tl32 = 32, 32, 32, 32, 32, 32, 32, 32;
+	tl0 = 77, 77, 77, 77, 77, 77, 77, 77;
+	tlfoo = 88, 88, 88, 88, 88, 88, 88, 88;
+}
+)PTL";
+	std::istringstream stream(source);
+	opennova::particle::ParticleFile file;
+	opennova::particle::ParseError error;
+	if (!opennova::particle::load_particles(stream, file, error)) return false;
+	if (!expect(file.tables.size() == 1, "shuffled table parses")) return false;
+	const auto &rows = file.tables[0].rows;
+	if (!expect(rows.size() == 32, "tl32 establishes indexed row 32")) return false;
+	if (!expect(rows[0][0] == 1, "tl1 maps to row zero")) return false;
+	if (!expect(rows[1][0] == 9, "duplicate tl2 is last-wins")) return false;
+	if (!expect(rows[2][0] == 0, "missing tl3 stays zero")) return false;
+	return expect(rows[31][0] == 32, "tl32 maps to final row");
 }
 
 bool test_def_bake_resolves_named_curves() {
@@ -262,6 +290,7 @@ int main() {
 	if (!test_inverse())                        ++failures;
 	if (!test_reverse_and_inverse_compose())    ++failures;
 	if (!test_short_table_zero_pad())           ++failures;
+	if (!test_table_rows_follow_tl_indices_and_last_write_wins()) ++failures;
 	if (!test_def_bake_resolves_named_curves()) ++failures;
 	if (!test_def_bake_handles_graphic_layers()) ++failures;
 	if (!test_uv_rect_bake_horizontal_strip_default()) ++failures;

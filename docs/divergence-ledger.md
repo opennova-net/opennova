@@ -330,6 +330,7 @@ witness: [mission/mis-format-re.md](mission/mis-format-re.md).
 | D-PTL-4 | `bump`/`bumpadd` lit-color rotation about view-Z vs the engine's composite-matrix X (combiner topology matches; pending a 4×4 port + reference capture) | A | OPEN (approximation) | PAR-UI/render |
 | D-PTL-5 | `distort` fixed-strength screen-tex UV offset; the engine stage-1 combiner bytes are undecoded | B | NEEDS-RE | PAR-UI/render |
 | D-PTL-6 | Atlas pack strategy undecoded (shelf vs the engine's layout); `inset` bleed padding defaults to 0 | B | NEEDS-RE | PAR-UI/render |
+| D-PTL-7 | Scripted effect initial orientation starts at world-up instead of the retail terrain surface normal; attached fx2ssn groups subsequently follow the live entity basis | A | OPEN (terrain-normal lookup) | PAR-WORLD/runtime |
 
 The LW `.3di` record is unlanded overall (PR #45 closed); its rows ride whenever an LW
 import is revived. Note D-3DILW-1's v8 branch overlaps the 3DI/GP audit surface only at
@@ -632,6 +633,9 @@ one-line rationale for why porting it would be *wrong*.
 | D-3DI-1 | MTRX byte-exact output needs OED's x87 `_PC_24` precision; a 64-bit SSE2 build diverges in low FP bits | Byte-exactness is a property of the original's 24-bit x87 mantissa; a modern SSE2 host cannot match the low bits without the documented `_controlfp(_PC_24)` parity sub-build. |
 | D-MNU-4 | The original truncates each scaled quad rect to int per element; the reimpl applies one float `CanvasItem` scale | A sub-pixel cosmetic difference; reproducing per-element int truncation would fight Godot's scene-graph scale model for no visible gain. |
 | D-PTL-2 | One mesh batch per graphic layer vs the engine's shared vertex/index buffer pooling | A host renderer architecture choice; visually equivalent, and pooling is a performance strategy, not observable behavior. |
+| D-PTL-9 | Portable LCG and host-basis yaw/pitch construction vs retail `rand()`/DirectX/FPU direction helper | The authored component bounds, `spread_skip`, and two-draw cadence match; byte-identical platform RNG and FPU basis construction would make deterministic host simulation platform-dependent. |
+| D-PTL-10 | GFXFLIPRAND derives its start frame from a stable particle serial instead of the retail slot pointer | The original value depends on process address layout; a serial preserves the distribution intent without making playback allocator-dependent. |
+| D-PTL-12 | Per-emitter capacity is capped at 4096 (default 256; shipped maximum override 400) while the exact retail manager-wide ceiling is unwitnessed | The bounded superset preserves authored headroom and prevents hostile mods from causing unbounded allocation or burst work. |
 | D-NET-131 | A dedicated ("serve only") host runs as a mode-3 in-process listen server (`serve_and_play=false`), not the original's mode-1 host-only | Wire-equivalent from a joiner's view ([ADR 0011](adr/0011-single-player-in-process-listen-server.md)); the difference is host-internal bookkeeping that never reaches a connected client. |
 | D-VFS-4 | Snapshot resource index vs retail's live per-call resolution | A host cache; our hosts remount on change — re-resolving every open would fight the indexed host model for no observable gain (mid-session loose drops are a dev workflow, not gameplay). |
 | D-VFS-8 | Retail's 16-search-path x 16-byte / 16-slot / 6-name caps (incl. the >5-char expansion-name strcpy overflow) | Capacity supersets; reproducing the caps (and the overflow) would manufacture the original's buffer bugs. |
@@ -648,6 +652,7 @@ one-line rationale for why porting it would be *wrong*.
 | D-MUS-7 | `op_callvl` (`0x0A` call form) resolves against an uninitialised-BSS name table in Jointops, so the opcode is dead; the reimpl mirrors the dead stub (push 0) | The original behavior *is* "do nothing" (the table is never populated); porting a "working" call would invent behavior the engine never had. |
 | D-MUS-5 | `inc_g`/`dec_g` (`0x11`/`0x12`) operate on 1 byte and raise no globals-dirty notify | An intentional mirror of the original's silence; adding the notify would diverge from the witnessed behavior. |
 | D-PTL-1 | The engine's outer dispatcher remaps `g2_color1`/`g3_color1`/… into higher color slots (a parse bug); the reimpl maps `g{N}_color{M}` correctly | A recorded intentional divergence: the correct mapping is what an author means; reproducing the dispatch remap would carry the engine's parse bug forward. |
+| D-PTL-11 | Retail reads `scale_lut[i+1]` one byte past the 256-byte table at the final sample; the host clamps to byte 255 | The overread is adjacent heap memory and therefore allocator-dependent garbage; clamping the last 1/256th avoids manufacturing undefined data. |
 | D-VFS-6 | Retail's PFF open trusts the header blindly (no magic/entry_size/count checks; entry_size>36 overflows; two write-after-free bugs @ 0x768348/0x7685ba) — ours validates and is UAF-free | Reproducing unvalidated reads and UAFs would manufacture garbage against ADR 0003. |
 | D-SCR-1 / D-SCR-2 | The SCR container codec accepts version bytes 0–2 and selects the key from the version byte + policy, where each original call site fixes the key | A deliberate multi-title superset so one codec serves JO-demo-era and shader containers; load-bearing equivalence holds for everything retail JO ships. |
 | D-RORD-6 | The original's two sort-key defects: opaque key bits 15+ OR in an uninitialized stack slot (`@ 0x5d92b9`), and a transparent strip's key reads the depth slot BEFORE its own store, lagging one strip within a render object (`@ 0x5d9326`) | Both are stale/uninitialized-memory reads whose effect is accidental (constant-per-call garbage; a one-strip-stale depth); reproducing them would manufacture the bugs rather than the intent (back-to-front by depth), against ADR 0003. |
@@ -738,9 +743,9 @@ existing text (no new findings, no reworded witnesses):
   SSE2 low-FP-bit divergence; `PERMANENT`).
 - [threedi/3di-lw-format-re.md](threedi/3di-lw-format-re.md) → **D-3DILW-1..3** (v8
   branch, textures, SAF/KSA playback — the record's own deferrals).
-- [particles/ptl-format-re.md](particles/ptl-format-re.md) → **D-PTL-1..6** (the
-  intentional `g{N}_color{M}` map + the §6 bounded deviations; pure "not yet researched"
-  §8 items stay in §8).
+- [particles/ptl-format-re.md](particles/ptl-format-re.md) → **D-PTL-1..12** (the
+  intentional parse mapping, renderer/runtime approximations, platform-stable substitutions,
+  and bounded-safety choices; pure "not yet researched" §8 items stay in §8; D-PTL-8 is closed).
 - [mission/mis-format-re.md](mission/mis-format-re.md) → **D-MIS-1..5** (the
   writer-subset gaps + the full `dfx2med.exe` grill as a `NEEDS-RE` row;
   D-MIS-4/-5 minted-and-FIXED at the 2026-07-07 Nile parity pass).

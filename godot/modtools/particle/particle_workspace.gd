@@ -25,6 +25,7 @@ var _screen: ParticleBlueprintScreen
 var _preview: ParticlePreview
 var _active_workflow: int = Workflow.PARTICLES
 var _last_open_dir: String = ""
+var _last_save_failure_message: String = ""
 
 
 func _init() -> void:
@@ -124,6 +125,10 @@ func shows_view_guides() -> bool:
 	return true
 
 
+func get_viewport_camera() -> Camera3D:
+	return _screen.get_viewport_camera() if _screen != null else null
+
+
 func set_grid_visible(value: bool) -> void:
 	if _preview != null:
 		_preview.set_grid_visible(value)
@@ -212,8 +217,12 @@ func get_new_action_label() -> String:
 func new_current() -> Error:
 	if particle_editor == null:
 		return ERR_UNAVAILABLE
-	particle_editor.new_document()
-	_apply_current_selection_to_preview()
+	var make_new := func() -> void:
+		particle_editor.new_document()
+		_apply_current_selection_to_preview()
+	if _prompt_dirty_guard(make_new):
+		return OK
+	make_new.call()
 	return OK
 
 
@@ -248,6 +257,16 @@ func get_current_resource_path() -> String:
 func open_file(path: String) -> Error:
 	if particle_editor == null:
 		return ERR_UNAVAILABLE
+	var open_it := func() -> void:
+		var err := _open_file_unchecked(path)
+		if err != OK:
+			_notify_status("Open failed for %s (error %d)." % [path.get_file(), err], &"error")
+	if _prompt_dirty_guard(open_it):
+		return OK
+	return _open_file_unchecked(path)
+
+
+func _open_file_unchecked(path: String) -> Error:
 	var err: int
 	var vfs := _vfs_root_for_open(path)
 	if vfs != null:
@@ -258,6 +277,21 @@ func open_file(path: String) -> Error:
 		_last_open_dir = particle_editor.current_path.get_base_dir()
 		_apply_current_selection_to_preview()
 	return err
+
+
+# New/Open replace the single PTL document. When it is dirty, hand ownership
+# of that continuation to the shell's shared Save/Discard/Cancel prompt.
+func _prompt_dirty_guard(run: Callable) -> bool:
+	if particle_editor == null or not particle_editor.is_dirty:
+		return false
+	if editor_shell == null or not editor_shell.has_method("prompt_unsaved_for"):
+		return false
+	var shell: Object = editor_shell
+	var workspace: EditorWorkspace = self
+	shell.prompt_unsaved_for(
+		func() -> void: shell.save_then(workspace, run),
+		run)
+	return true
 
 
 func can_save() -> bool:
@@ -277,12 +311,13 @@ func get_save_as_action_label() -> String:
 
 
 func save_current() -> Error:
+	_last_save_failure_message = ""
 	if particle_editor == null:
 		return ERR_UNAVAILABLE
 	if particle_editor.current_path.is_empty():
 		return ERR_INVALID_PARAMETER  # shell will fall back to Save As
 	if not _passes_presave_validation():
-		return OK  # blocking message already shown; nothing written, stays dirty
+		return ERR_INVALID_DATA  # message already shown; shell must not continue
 	var err: int = particle_editor.save_current()
 	if err == OK:
 		_notify_status("Saved %s." % particle_editor.current_path.get_file(), &"success")
@@ -290,25 +325,44 @@ func save_current() -> Error:
 
 
 func save_as(dir_path: String) -> Error:
+	return save_as_file(dir_path.path_join(get_save_file_dialog_default_name()))
+
+
+func uses_save_file_dialog() -> bool:
+	return true
+
+
+func get_save_file_dialog_filters() -> PackedStringArray:
+	return PackedStringArray(["*.ptl,*.PTL ; NovaLogic Particle"])
+
+
+func get_save_file_dialog_default_name() -> String:
+	if particle_editor != null and not particle_editor.current_path.is_empty():
+		return particle_editor.current_path.get_file()
+	return "untitled.ptl"
+
+
+func save_as_file(path: String) -> Error:
+	_last_save_failure_message = ""
 	if particle_editor == null:
 		return ERR_UNAVAILABLE
 	if not _passes_presave_validation():
-		return OK
-	# Save dialog returns a directory; pick a default filename if the document
-	# doesn't have one yet, otherwise reuse the existing leaf.
-	var leaf: String = "untitled.ptl"
-	if not particle_editor.current_path.is_empty():
-		leaf = particle_editor.current_path.get_file()
-	var err: int = particle_editor.save_to_path(dir_path.path_join(leaf))
+		return ERR_INVALID_DATA
+	var err: int = particle_editor.save_to_path(path)
 	if err == OK:
-		_notify_status("Saved %s." % leaf, &"success")
+		_last_open_dir = path.get_base_dir()
+		_notify_status("Saved %s." % path.get_file(), &"success")
 	return err
+
+
+func get_save_failure_message(_error: Error) -> String:
+	return _last_save_failure_message
 
 
 # Runs ParticleEditor.validate() before a write. Returns false (and shows the
 # blocking message) when there is a structural error; surfaces the first warning
-# but returns true otherwise. The save handlers return OK on a block so the shell
-# doesn't overwrite our specific message with a generic one.
+# but returns true otherwise. The save handlers return ERR_INVALID_DATA on a
+# block so dirty-close/open continuations cannot run as if a write succeeded.
 func _passes_presave_validation() -> bool:
 	if particle_editor == null:
 		return false
@@ -318,6 +372,7 @@ func _passes_presave_validation() -> bool:
 		var msg: String = errors[0].get("message", "Cannot save: invalid particle data.")
 		if errors.size() > 1:
 			msg += " (+%d more issue%s)" % [errors.size() - 1, "" if errors.size() == 2 else "s"]
+		_last_save_failure_message = msg
 		_notify_status(msg, &"error")
 		return false
 	var warnings: Array = issues.filter(func(i): return i.get("severity") == "warning")

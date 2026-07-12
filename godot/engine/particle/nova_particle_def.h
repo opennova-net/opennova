@@ -3,6 +3,7 @@
 #include <godot_cpp/classes/resource.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/color.hpp>
+#include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
@@ -70,6 +71,9 @@ private:
 
 	PackedStringArray collide_sounds;
 	TypedArray<NovaParticleGraphicLayer> graphics;
+	// Ordered {key,value} dictionaries. Array form preserves duplicate unknown
+	// keys and source order across Godot load/edit/save round-trips.
+	Array unknown_keys;
 
 protected:
 	static void _bind_methods();
@@ -140,6 +144,7 @@ public:
 
 	void set_collide_sounds(const PackedStringArray &v); PackedStringArray get_collide_sounds() const;
 	void set_graphics(const TypedArray<NovaParticleGraphicLayer> &v); TypedArray<NovaParticleGraphicLayer> get_graphics() const;
+	void set_unknown_keys(const Array &v); Array get_unknown_keys() const;
 
 	void copy_from_native(const opennova::particle::ParticleDef &def);
 	opennova::particle::ParticleDef to_native() const;

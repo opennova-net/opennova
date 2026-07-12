@@ -18,6 +18,36 @@ const OUTPUT_DIR_NAME := "particle_editor_workstation_test"
 const PARTICLE_FLAG_FOREVER_EMIT := 1 << 18  # particle_flag::ForeverEmit = 0x40000 (engine flag-table idx 18, post-HAZE)
 
 
+class DirtyGuardShell:
+	extends Node
+	var save_action := Callable()
+	var discard_action := Callable()
+	var status_messages: Array[String] = []
+
+	func prompt_unsaved_for(on_save: Callable, on_discard: Callable) -> void:
+		save_action = on_save
+		discard_action = on_discard
+
+	func save_then(workspace: EditorWorkspace, on_done: Callable,
+			_failure_message := "Save failed.") -> void:
+		if workspace.save_current() == OK and on_done.is_valid():
+			on_done.call()
+
+	func show_status_message(message: String, _duration := 0.0,
+			_severity: StringName = &"info") -> void:
+		status_messages.append(message)
+const PARTICLE_SHADER_PATHS := [
+	"res://shaders/particle/particle_blend_blend.gdshader",
+	"res://shaders/particle/particle_blend_additive.gdshader",
+	"res://shaders/particle/particle_blend_premult.gdshader",
+	"res://shaders/particle/particle_blend_bump.gdshader",
+	"res://shaders/particle/particle_blend_mod.gdshader",
+	"res://shaders/particle/particle_blend_mod2x.gdshader",
+	"res://shaders/particle/particle_blend_bumpadd.gdshader",
+	"res://shaders/particle/particle_blend_distort.gdshader",
+]
+
+
 func before_each() -> void:
 	_cleanup_dir(_output_dir())
 
@@ -116,8 +146,17 @@ func _make_render_test_particle(
 	return particle
 
 
+func _add_synthetic_render_emitter() -> NovaParticleEmitter:
+	var emitter := NovaParticleEmitter.new()
+	# Synthetic render probes deliberately have no texture. Runtime emitters
+	# keep blank authored graphics invisible; these editor diagnostics opt in.
+	emitter.procedural_fallback_enabled = true
+	add_child_autofree(emitter)
+	return emitter
+
+
 func _add_render_test_emitter(particle: NovaParticleDef, dt: float = 0.26) -> NovaParticleEmitter:
-	var emitter := add_child_autofree(NovaParticleEmitter.new()) as NovaParticleEmitter
+	var emitter := _add_synthetic_render_emitter()
 	emitter.auto_advance = false
 	emitter.def = particle
 	emitter.play()
@@ -196,6 +235,11 @@ func test_particle_viewport_is_shell_managed() -> void:
 	assert_eq(str(lane.get_child(0).name), "ParticleBlueprint",
 			"Particle workspace should mount the blueprint screen (graph + preview).")
 	assert_not_null(_preview_in(lane), "The blueprint screen should host a ParticlePreview.")
+	var adapter = workstation.get_workspace_adapter(EditorWorkstationScript.Workspace.PARTICLE)
+	assert_not_null(adapter.get_viewport_camera(),
+			"The workspace should expose the nested preview camera to shared shell controls.")
+	assert_eq(workstation.get_editor_camera(), adapter.get_viewport_camera(),
+			"The workstation camera seam should resolve to the active particle preview.")
 
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.MISSION)
 	await get_tree().process_frame
@@ -396,6 +440,72 @@ func test_blend_mode_distort_routes_to_distort_shader() -> void:
 			"Distort blend mode should bind particle_blend_distort.gdshader (got %s)" % path)
 
 
+func test_particle_shaders_keep_depth_tests_and_scene_fog() -> void:
+	for path in PARTICLE_SHADER_PATHS:
+		var shader := load(path) as Shader
+		assert_not_null(shader, "Particle shader should load: %s" % path)
+		if shader == null:
+			continue
+		var code := String(shader.code)
+		assert_true(code.contains("depth_draw_never"),
+				"Particles should remain transparent and never write depth: %s" % path)
+		assert_false(code.contains("depth_test_disabled"),
+				"World geometry should occlude particles: %s" % path)
+		assert_false(code.contains("fog_disabled"),
+				"Scene fog should affect particles: %s" % path)
+
+
+func test_additive_particle_shaders_do_not_double_apply_alpha() -> void:
+	var additive := load(PARTICLE_SHADER_PATHS[1]) as Shader
+	var bumpadd := load(PARTICLE_SHADER_PATHS[6]) as Shader
+	assert_not_null(additive)
+	assert_not_null(bumpadd)
+	if additive != null:
+		var additive_code := String(additive.code)
+		assert_true(additive_code.contains("ALBEDO = base.rgb;"),
+				"Additive color should be passed straight to the alpha-aware blend state.")
+		assert_false(additive_code.contains("ALBEDO = base.rgb * base.a"),
+				"Additive color must not be premultiplied a second time.")
+	if bumpadd != null:
+		var bumpadd_code := String(bumpadd.code)
+		assert_true(bumpadd_code.contains("ALBEDO = base.rgb + lit_color.rgb * 0.5;"),
+				"Bumpadd should follow the same non-premultiplied additive contract.")
+		assert_false(bumpadd_code.contains("base.rgb * base.a"),
+				"Bumpadd color must not be premultiplied a second time.")
+
+
+func test_premult_particle_shader_fades_rgb_with_particle_alpha() -> void:
+	var premult := load(PARTICLE_SHADER_PATHS[2]) as Shader
+	assert_not_null(premult)
+	if premult == null:
+		return
+	var code := String(premult.code)
+	assert_true(code.contains("float opacity = COLOR.a;"),
+			"Particle/curve alpha must contribute to premultiplied source RGB.")
+	assert_true(code.contains("opacity *= radial;"),
+			"The diagnostic fallback must remain premultiplied at its soft edge.")
+	assert_true(code.contains("ALBEDO = base.rgb * opacity;"),
+			"SrcBlend ONE requires RGB to carry non-texture opacity.")
+
+
+func test_particle_shader_resources_drive_all_render_batches() -> void:
+	for blend_mode in range(PARTICLE_SHADER_PATHS.size()):
+		var emitter := _add_synthetic_render_emitter()
+		emitter.auto_advance = false
+		emitter.def = _make_render_test_particle(blend_mode)
+		emitter.play()
+		emitter.advance(0.26)
+		assert_gt(emitter.get_rendered_instance_count(), 0,
+				"Blend mode %d should produce a rendered particle batch." % blend_mode)
+		var material := emitter.get_debug_layer_material(0) as ShaderMaterial
+		assert_not_null(material, "Blend mode %d should bind a ShaderMaterial." % blend_mode)
+		if material == null:
+			continue
+		assert_not_null(material.shader, "Blend mode %d should load its shader." % blend_mode)
+		if material.shader != null:
+			assert_eq(String(material.shader.resource_path), PARTICLE_SHADER_PATHS[blend_mode])
+
+
 # CParticleEmitter_BuildBillboardQuads @ 0x5e6d60: per-channel `(emitter_byte
 # * channel) >> 7` modulates the rendered color by emitter+200..202. We
 # expose this as `color_tint` (Color, default white = neutral). The renderer
@@ -414,7 +524,7 @@ func test_color_tint_default_is_neutral() -> void:
 
 
 func test_color_tint_zeroes_channel() -> void:
-	var emitter := add_child_autofree(NovaParticleEmitter.new()) as NovaParticleEmitter
+	var emitter := _add_synthetic_render_emitter()
 	emitter.auto_advance = false
 	emitter.color_tint = Color(0.0, 1.0, 1.0, 1.0)  # zero out red
 	emitter.def = _make_render_test_particle(0)
@@ -549,7 +659,7 @@ func test_atlas_texture_combines_multiple_layers() -> void:
 	layer1.scale_value = 4.0
 	particle.set_graphics(graphics)
 
-	var emitter := add_child_autofree(NovaParticleEmitter.new()) as NovaParticleEmitter
+	var emitter := _add_synthetic_render_emitter()
 	emitter.auto_advance = false
 	emitter.texture_dir = dir
 	emitter.def = particle
@@ -592,7 +702,7 @@ func test_atlas_clears_when_def_unset() -> void:
 	var path0 := dir.path_join("atlas_clear_a.png")
 	_write_test_texture(path0)
 	var particle := _make_render_test_particle(0, 1, 8, 0.0, 0.0, "atlas_clear_a.png")
-	var emitter := add_child_autofree(NovaParticleEmitter.new()) as NovaParticleEmitter
+	var emitter := _add_synthetic_render_emitter()
 	emitter.auto_advance = false
 	emitter.texture_dir = dir
 	emitter.def = particle
@@ -609,7 +719,7 @@ func test_world_space_default_keeps_particles_when_emitter_moves() -> void:
 	# Engine default (PositionRelative clear): particles render in world
 	# space. Translating the emitter mid-life does NOT carry alive particles
 	# along. Quad world-coordinates remain near the spawn position.
-	var emitter := add_child_autofree(NovaParticleEmitter.new()) as NovaParticleEmitter
+	var emitter := _add_synthetic_render_emitter()
 	emitter.auto_advance = false
 	emitter.def = _make_render_test_particle(0)
 	emitter.play()
@@ -640,7 +750,7 @@ func test_position_relative_carries_particles_with_emitter() -> void:
 	# shift by the same delta as the emitter.
 	var particle := _make_render_test_particle(0)
 	particle.flags = PARTICLE_FLAG_POSITION_RELATIVE
-	var emitter := add_child_autofree(NovaParticleEmitter.new()) as NovaParticleEmitter
+	var emitter := _add_synthetic_render_emitter()
 	emitter.auto_advance = false
 	emitter.def = particle
 	emitter.play()
@@ -669,7 +779,7 @@ func test_lod_divisor_default_renders_every_particle() -> void:
 	var particle := _make_render_test_particle(0)
 	particle.emit_rate = 20.0
 	particle.emit_dur = 0.5
-	var emitter := add_child_autofree(NovaParticleEmitter.new()) as NovaParticleEmitter
+	var emitter := _add_synthetic_render_emitter()
 	emitter.auto_advance = false
 	emitter.def = particle
 	assert_eq(emitter.lod_divisor, 1, "default lod_divisor is 1")
@@ -687,7 +797,7 @@ func test_lod_divisor_skips_particles_by_serial() -> void:
 	var particle := _make_render_test_particle(0)
 	particle.emit_rate = 20.0
 	particle.emit_dur = 0.5
-	var emitter := add_child_autofree(NovaParticleEmitter.new()) as NovaParticleEmitter
+	var emitter := _add_synthetic_render_emitter()
 	emitter.auto_advance = false
 	emitter.def = particle
 	emitter.lod_divisor = 4
@@ -711,7 +821,7 @@ func test_kill_plane_mode_property_clamps_invalid_values() -> void:
 	# Engine: bits 27/28 in def.flags select kill-above vs kill-at/below.
 	# Our portable scalar mode accepts {0=Disabled, 1=KillAbove,
 	# 2=KillAtOrBelow}; out-of-range values clamp to Disabled.
-	var emitter := add_child_autofree(NovaParticleEmitter.new()) as NovaParticleEmitter
+	var emitter := _add_synthetic_render_emitter()
 	assert_eq(emitter.kill_plane_mode, 0, "default kill_plane_mode is 0 (Disabled)")
 
 	emitter.kill_plane_mode = 1
@@ -734,7 +844,7 @@ func test_kill_plane_mode_property_clamps_invalid_values() -> void:
 func test_lod_divisor_setter_clamps_to_one() -> void:
 	# Setter clamps non-positive values to 1 (matches engine post-round
 	# guard where divisor = max(1, round(1.0 / budget))).
-	var emitter := add_child_autofree(NovaParticleEmitter.new()) as NovaParticleEmitter
+	var emitter := _add_synthetic_render_emitter()
 	emitter.lod_divisor = 0
 	assert_eq(emitter.lod_divisor, 1, "setter clamps 0 to 1")
 	emitter.lod_divisor = -3
@@ -750,7 +860,7 @@ func test_single_emitter_aabb_center_tracks_world_position() -> void:
 	# center. With the world-space rendering refactor (top_level=true on
 	# layer meshes + vertex data in world coords), the AABB center should
 	# track the emitter's world position.
-	var emitter := add_child_autofree(NovaParticleEmitter.new()) as NovaParticleEmitter
+	var emitter := _add_synthetic_render_emitter()
 	emitter.auto_advance = false
 	emitter.def = _make_render_test_particle(0)
 	emitter.global_position = Vector3(7.0, 0.0, 0.0)
@@ -767,14 +877,14 @@ func test_cross_emitter_aabb_centers_at_distinct_world_positions() -> void:
 	# near each emitter — Godot's transparent renderer uses these centers
 	# as the cross-emitter sort key (back-to-front by view-space depth),
 	# matching CParticleManager_RecursiveSortAndRender @ 0x5ec980.
-	var em_a := add_child_autofree(NovaParticleEmitter.new()) as NovaParticleEmitter
+	var em_a := _add_synthetic_render_emitter()
 	em_a.auto_advance = false
 	em_a.def = _make_render_test_particle(0)
 	em_a.global_position = Vector3(-10.0, 0.0, 0.0)
 	em_a.play()
 	em_a.advance(0.26)
 
-	var em_b := add_child_autofree(NovaParticleEmitter.new()) as NovaParticleEmitter
+	var em_b := _add_synthetic_render_emitter()
 	em_b.auto_advance = false
 	em_b.def = _make_render_test_particle(0)
 	em_b.global_position = Vector3(10.0, 0.0, 0.0)
@@ -797,7 +907,7 @@ func test_emitter_position_change_translates_simulator() -> void:
 	# is moved, the simulator's last_translation_delta should reflect the
 	# per-frame delta. set_notify_transform(true) is enabled in
 	# NOTIFICATION_READY so the engine forwards every transform change.
-	var emitter := add_child_autofree(NovaParticleEmitter.new()) as NovaParticleEmitter
+	var emitter := _add_synthetic_render_emitter()
 	emitter.auto_advance = false
 	emitter.def = _make_render_test_particle(0)
 	emitter.play()
@@ -825,7 +935,7 @@ func test_color_tint_boost_clamps_at_one() -> void:
 	# Engine clamps each channel at 255 after the (byte * channel) >> 7
 	# multiply. Our portable form clamps at 1.0 — a 2× boost on a fully
 	# saturated channel still saturates at 1.0.
-	var emitter := add_child_autofree(NovaParticleEmitter.new()) as NovaParticleEmitter
+	var emitter := _add_synthetic_render_emitter()
 	emitter.auto_advance = false
 	emitter.color_tint = Color(2.0, 2.0, 2.0, 1.0)
 	emitter.def = _make_render_test_particle(0)
@@ -847,6 +957,19 @@ func test_forever_emit_particle_stays_unfinished_after_emit_duration() -> void:
 	assert_false(emitter.is_finished(), "FOREVEREMIT particles should remain eligible for continuous preview.")
 	assert_gt(emitter.get_alive_count(), 0,
 			"FOREVEREMIT particles should continue spawning after finite emit_dur would have elapsed.")
+
+
+func test_timeline_scrub_pauses_and_holds_the_requested_frame() -> void:
+	var preview := add_child_autofree(ParticlePreview.new()) as ParticlePreview
+	await get_tree().process_frame
+	preview.set_particle_def(_make_render_test_particle(0, 1, 8, 0.0, 0.0, "", true))
+	preview._on_timeline_changed(10.0)
+	assert_true(preview.is_paused(), "a user scrub takes manual control of playback")
+	assert_eq(preview.get_current_frame(), 10)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	assert_eq(preview.get_current_frame(), 10,
+			"auto-advance stays off after the deterministic seek")
 
 
 func test_short_lived_particle_preview_does_not_auto_repeat_after_selection() -> void:
@@ -1014,6 +1137,87 @@ func test_workflow_swap_mounts_correct_inspector() -> void:
 	await get_tree().process_frame
 	assert_not_null(_find_inspector_of_type(inspector_host, ParticleTableInspectorScript),
 			"Tables workflow should mount the table inspector.")
+
+
+func test_invalid_particle_save_reports_failure_and_writes_nothing() -> void:
+	var workspace := ParticleWorkspaceScript.new()
+	var particle = workspace.particle_editor.add_particle()
+	particle.id = ""
+	var dir := _output_dir().path_join("blocked_save")
+	DirAccess.make_dir_recursive_absolute(dir)
+	assert_eq(workspace.save_as(dir), ERR_INVALID_DATA,
+			"validation blocks must not masquerade as successful saves")
+	assert_false(FileAccess.file_exists(dir.path_join("untitled.ptl")),
+			"an invalid document is not written")
+	assert_true(workspace.get_save_failure_message(ERR_INVALID_DATA).contains("empty name"),
+			"the shell can preserve the specific validation reason")
+
+
+func test_particle_save_as_uses_the_chosen_file_name() -> void:
+	var workspace := ParticleWorkspaceScript.new()
+	workspace.particle_editor.add_particle()
+	var dir := _output_dir().path_join("named_save")
+	DirAccess.make_dir_recursive_absolute(dir)
+	var path := dir.path_join("custom-name.ptl")
+
+	assert_true(workspace.uses_save_file_dialog(), "A PTL is a single named file, not a project directory.")
+	assert_true(workspace.get_save_file_dialog_filters().has("*.ptl,*.PTL ; NovaLogic Particle"))
+	assert_eq(workspace.get_save_file_dialog_default_name(), "untitled.ptl")
+	assert_eq(workspace.save_as_file(path), OK)
+	assert_true(FileAccess.file_exists(path), "Save As writes the exact file selected by the user.")
+	assert_eq(workspace.particle_editor.current_path, path)
+	assert_eq(workspace.get_save_file_dialog_default_name(), "custom-name.ptl")
+
+
+func test_dirty_new_and_open_wait_for_discard_or_successful_save() -> void:
+	var workspace := ParticleWorkspaceScript.new()
+	var shell := DirtyGuardShell.new()
+	add_child_autofree(shell)
+	workspace.set_editor_shell(shell)
+	workspace.particle_editor.add_particle()
+	assert_true(workspace.particle_editor.is_dirty)
+
+	assert_eq(workspace.new_current(), OK)
+	assert_eq(workspace.particle_editor.particle_count(), 1,
+			"New PTL does not replace the dirty document before confirmation")
+	assert_true(shell.discard_action.is_valid())
+	shell.discard_action.call()
+	assert_eq(workspace.particle_editor.particle_count(), 0,
+			"Discard runs the deferred New continuation")
+
+	workspace.particle_editor.add_particle()
+	shell.discard_action = Callable()
+	assert_eq(workspace.open_file(_fixture("buildup.ptl")), OK)
+	assert_true(workspace.particle_editor.current_path.is_empty(),
+			"Open PTL does not replace the dirty document before confirmation")
+	assert_true(shell.discard_action.is_valid())
+	shell.discard_action.call()
+	assert_eq(workspace.particle_editor.current_path, _fixture("buildup.ptl"))
+	assert_false(workspace.particle_editor.is_dirty)
+
+
+func test_failed_deferred_open_reports_error_and_keeps_dirty_document() -> void:
+	var workspace := ParticleWorkspaceScript.new()
+	var shell := DirtyGuardShell.new()
+	add_child_autofree(shell)
+	workspace.set_editor_shell(shell)
+	workspace.particle_editor.add_particle()
+	var corrupt_path := _output_dir().path_join("corrupt.ptl")
+	DirAccess.make_dir_recursive_absolute(_output_dir())
+	var corrupt := FileAccess.open(corrupt_path, FileAccess.WRITE)
+	assert_not_null(corrupt)
+	corrupt.store_string("[particledef]\n{\nid = Broken;\n")
+	corrupt.close()
+
+	assert_eq(workspace.open_file(corrupt_path), OK,
+			"the dirty guard owns the asynchronous open result")
+	assert_true(shell.discard_action.is_valid())
+	shell.discard_action.call()
+	assert_true(workspace.particle_editor.current_path.is_empty(),
+			"a failed deferred open does not replace the dirty document")
+	assert_true(workspace.particle_editor.is_dirty)
+	assert_false(shell.status_messages.is_empty(), "the deferred failure is surfaced through the shell")
+	assert_true(shell.status_messages[-1].contains("Open failed"))
 
 
 func test_property_edit_marks_document_dirty() -> void:

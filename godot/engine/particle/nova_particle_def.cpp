@@ -122,6 +122,7 @@ void NovaParticleDef::_bind_methods() {
 
 	BIND_GETSET(collide_sounds, "set_collide_sounds", "get_collide_sounds");
 	BIND_GETSET(graphics, "set_graphics", "get_graphics");
+	BIND_GETSET(unknown_keys, "set_unknown_keys", "get_unknown_keys");
 
 	#undef BIND_GETSET
 
@@ -211,6 +212,8 @@ void NovaParticleDef::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "graphics", PROPERTY_HINT_TYPE_STRING,
 			String::num(Variant::OBJECT) + "/" + String::num(PROPERTY_HINT_RESOURCE_TYPE) + ":NovaParticleGraphicLayer"),
 			"set_graphics", "get_graphics");
+	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "unknown_keys", PROPERTY_HINT_NONE, "",
+			PROPERTY_USAGE_STORAGE), "set_unknown_keys", "get_unknown_keys");
 }
 
 #define TRIVIAL_SET(name, type) \
@@ -285,6 +288,15 @@ TRIVIAL_SET_REF(orbital_axis, Vector3)
 
 TRIVIAL_SET_REF(collide_sounds, PackedStringArray)
 TRIVIAL_SET_REF(graphics, TypedArray<NovaParticleGraphicLayer>)
+
+void NovaParticleDef::set_unknown_keys(const Array &v) {
+	unknown_keys = v.duplicate(true);
+	emit_changed();
+}
+
+Array NovaParticleDef::get_unknown_keys() const {
+	return unknown_keys.duplicate(true);
+}
 
 #undef TRIVIAL_SET
 #undef TRIVIAL_SET_REF
@@ -368,6 +380,13 @@ void NovaParticleDef::copy_from_native(const opennova::particle::ParticleDef &de
 		g.instantiate();
 		g->copy_from_native(def.graphics[static_cast<size_t>(i)]);
 		graphics[i] = g;
+	}
+	unknown_keys.clear();
+	for (const auto &entry : def.unknown_keys) {
+		Dictionary item;
+		item["key"] = String::utf8(entry.first.c_str());
+		item["value"] = String::utf8(entry.second.c_str());
+		unknown_keys.push_back(item);
 	}
 	emit_changed();
 }
@@ -481,6 +500,18 @@ opennova::particle::ParticleDef NovaParticleDef::to_native() const {
 		if (g.is_valid()) {
 			out.graphics[static_cast<size_t>(i)] = g->to_native();
 		}
+	}
+	for (int i = 0; i < unknown_keys.size(); ++i) {
+		if (unknown_keys[i].get_type() != Variant::DICTIONARY) {
+			continue;
+		}
+		const Dictionary item = unknown_keys[i];
+		const String key = item.get("key", String());
+		if (key.is_empty()) {
+			continue;
+		}
+		const String value = item.get("value", String());
+		out.unknown_keys.emplace_back(key.utf8().get_data(), value.utf8().get_data());
 	}
 
 	return out;

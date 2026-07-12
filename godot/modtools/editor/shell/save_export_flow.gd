@@ -68,7 +68,10 @@ func open_save_as_dialog(workspace: EditorWorkspace, on_success: Callable = Call
 	if workspace == null:
 		return
 	var report_failure := func(err: Error) -> void:
-		if not failure_message.is_empty():
+		var detail := workspace.get_save_failure_message(err)
+		if not detail.is_empty():
+			_show_status.call(detail, 6.0)
+		elif not failure_message.is_empty():
 			_show_status.call(failure_message, 6.0)
 		else:
 			_show_status.call("Save failed (error %d)" % err, 6.0)
@@ -135,7 +138,11 @@ func save_then(workspace: EditorWorkspace, on_done: Callable, failure_message :=
 	if err == ERR_INVALID_PARAMETER:
 		open_save_as_dialog(workspace, on_done, failure_message)
 		return
-	_show_status.call("%s (error %d)" % [failure_message.trim_suffix("."), err], 6.0)
+	var detail := workspace.get_save_failure_message(err)
+	if not detail.is_empty():
+		_show_status.call(detail, 6.0)
+	else:
+		_show_status.call("%s (error %d)" % [failure_message.trim_suffix("."), err], 6.0)
 
 
 func on_save_pressed(workspace: EditorWorkspace = null) -> void:
@@ -150,7 +157,11 @@ func on_save_pressed(workspace: EditorWorkspace = null) -> void:
 	if err == ERR_INVALID_PARAMETER:
 		open_save_as_dialog(workspace)
 	elif err != OK:
-		_show_status.call("%s save is not available." % workspace.get_workspace_label(), 4.0)
+		var detail := workspace.get_save_failure_message(err)
+		if not detail.is_empty():
+			_show_status.call(detail, 6.0)
+		else:
+			_show_status.call("%s save is not available." % workspace.get_workspace_label(), 4.0)
 
 
 func on_export_pressed(workspace: EditorWorkspace = null) -> void:

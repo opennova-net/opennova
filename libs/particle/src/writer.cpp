@@ -113,8 +113,7 @@ void write_handles(std::ostream &out, const TableEditHandles &handles) {
 	out << "}" << NL;
 }
 
-void write_graphic(std::ostream &out, const GraphicLayer &layer, int slot,
-		const ParticleDef &particle) {
+void write_graphic(std::ostream &out, const GraphicLayer &layer, int slot) {
 	// Per CParticleDef_SaveToFile @ 0x5e4d70 graphic loop (0x5e540b..0x5e56ee).
 	// Header line uses tab, space-equals, tab, then "<texture>, <blend>;".
 	out << "\tgraphic" << slot << " =\t" << layer.texture << ", "
@@ -129,17 +128,17 @@ void write_graphic(std::ostream &out, const GraphicLayer &layer, int slot,
 	out << prefix << "color2\t= "; write_color(out, layer.color2); out << ";" << NL;
 	out << prefix << "color3\t= "; write_color(out, layer.color3); out << ";" << NL;
 	out << prefix << "color4\t= "; write_color(out, layer.color4); out << ";" << NL;
+	out << prefix << "alpha\t= " << format_float(layer.alpha) << ";" << NL;
 	out << prefix << "scale\t= " << format_float(layer.scale) << ";" << NL;
 	out << prefix << "scale_adj\t= " << format_float(layer.scale_adj) << ";" << NL;
 
-	// Engine gates each per-graphic _func line on the particle-level "set" bit
-	// (e.g. *((_BYTE *)this + 3752) for scale_func). We don't model those bits
-	// directly — the per-graphic CurveRef.present is our equivalent.
-	if (particle.scale_func.present) write_curve_line(out, prefix.c_str(), "scale_func", layer.scale_func);
-	if (particle.alpha_func.present) write_curve_line(out, prefix.c_str(), "alpha_func", layer.alpha_func);
-	if (particle.red_func.present)   write_curve_line(out, prefix.c_str(), "red_func",   layer.red_func);
-	if (particle.green_func.present) write_curve_line(out, prefix.c_str(), "green_func", layer.green_func);
-	if (particle.blue_func.present)  write_curve_line(out, prefix.c_str(), "blue_func",  layer.blue_func);
+	// CurveRef::present is the serialization gate. A graphic can author a
+	// curve without a particle-level fallback, so each layer is independent.
+	write_curve_line(out, prefix.c_str(), "scale_func", layer.scale_func);
+	write_curve_line(out, prefix.c_str(), "alpha_func", layer.alpha_func);
+	write_curve_line(out, prefix.c_str(), "red_func", layer.red_func);
+	write_curve_line(out, prefix.c_str(), "green_func", layer.green_func);
+	write_curve_line(out, prefix.c_str(), "blue_func", layer.blue_func);
 }
 
 void write_particle(std::ostream &out, const ParticleDef &p) {
@@ -217,18 +216,19 @@ void write_particle(std::ostream &out, const ParticleDef &p) {
 	out << "\torbitalspeed_adj\t= " << format_float(p.orbitalspeed_adj) << ";" << NL;
 	out << "\torbital_axis\t= ";    write_vec3(out, p.orbital_axis);  out << ";" << NL;
 
-	int graphic_count = 0;
-	for (const GraphicLayer &g : p.graphics) {
-		if (g.present) ++graphic_count;
-	}
-	for (int slot = 1; slot <= graphic_count; ++slot) {
-		write_graphic(out, p.graphics[static_cast<std::size_t>(slot - 1)], slot, p);
+	for (std::size_t i = 0; i < p.graphics.size(); ++i) {
+		if (p.graphics[i].present) {
+			write_graphic(out, p.graphics[i], static_cast<int>(i + 1));
+		}
 	}
 
 	for (std::size_t i = 0; i < p.collide_sounds.size(); ++i) {
 		if (!p.collide_sounds[i].empty()) {
 			out << "collide_sound" << i << "\t= " << p.collide_sounds[i] << ";" << NL;
 		}
+	}
+	for (const auto &entry : p.unknown_keys) {
+		out << '\t' << entry.first << "\t= " << entry.second << ";" << NL;
 	}
 
 	out << NL << "}" << NL;

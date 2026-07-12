@@ -126,8 +126,7 @@ func _on_item_selected(idx: int) -> void:
 func _on_id_changed(new_text: String) -> void:
 	if _suppress_signals or _editor == null or _editor.current_effect == null:
 		return
-	_editor.current_effect.id = new_text
-	_editor.mark_dirty()
+	_editor.set_effect_id(_editor.current_effect, new_text)
 	# Keep list label in sync.
 	var idx := _effects.find(_editor.current_effect)
 	if idx >= 0:
@@ -142,5 +141,4 @@ func _on_pdefs_changed() -> void:
 		var trimmed: String = raw_line.strip_edges()
 		if not trimmed.is_empty():
 			lines.append(trimmed)
-	_editor.current_effect.pdefs = lines
-	_editor.mark_dirty()
+	_editor.set_effect_pdefs(_editor.current_effect, lines)

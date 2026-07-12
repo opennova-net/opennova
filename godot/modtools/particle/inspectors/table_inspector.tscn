@@ -25,6 +25,18 @@ text = "Open a .ptl with [tabledef] entries."
 theme_type_variation = &"Muted"
 horizontal_alignment = 1
 
+[node name="IdRow" type="HBoxContainer" parent="."]
+
+[node name="IdLabel" type="Label" parent="IdRow"]
+custom_minimum_size = Vector2(56, 0)
+text = "Name"
+
+[node name="IdEdit" type="LineEdit" parent="IdRow"]
+unique_name_in_owner = true
+size_flags_horizontal = 3
+placeholder_text = "Table identifier"
+editable = false
+
 [node name="CurveCaption" type="Label" parent="."]
 unique_name_in_owner = true
 text = "(no table selected)"

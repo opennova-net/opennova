@@ -203,16 +203,30 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 
 
 # World position of the entity addressed by a runtime SSN (WAC/BMS addressing),
-# or null when no live entity carries that net id. Linear entity walk — matches
-# the original's pool scans in the WAC fx/sound handlers
+# or null when no live registry entity carries that net id.
 # [orig: WacScript_SpawnSoundAtEntity @ 0x4f23a0].
 func entity_position_for_ssn(ssn: int) -> Variant:
 	if _sim == null or ssn <= 0:
 		return null
-	for i in _sim.get_entity_count():
-		if _sim.get_entity_net_id(i) == ssn:
-			return _sim.get_entity_position(i)
-	return null
+	var state: PackedVector3Array = _sim.get_entity_effect_state_for_ssn(ssn)
+	if state.size() != NovaSimulation.EFFECT_STATE_COUNT:
+		return null
+	return state[NovaSimulation.EFFECT_STATE_POSITION]
+
+
+# Full attached-effect transform for fx2ssn. NovaSimulation owns the LIVE
+# registry lookup and frame data; the host applies the single canonical basis
+# conversion shared with the mission present pass.
+func entity_effect_transform_for_ssn(ssn: int) -> Variant:
+	if _sim == null or ssn <= 0:
+		return null
+	var state: PackedVector3Array = _sim.get_entity_effect_state_for_ssn(ssn)
+	if state.size() != NovaSimulation.EFFECT_STATE_COUNT:
+		return null
+	return Transform3D(
+			MissionObjectPlacer.bms_to_godot_basis(
+					state[NovaSimulation.EFFECT_STATE_ROTATION_DEG]),
+			state[NovaSimulation.EFFECT_STATE_POSITION])
 
 
 # --- the local player (Phase 2; ADR 0012). Thin delegates to the sim for the host. ---

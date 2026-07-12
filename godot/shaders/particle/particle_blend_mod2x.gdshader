@@ -5,7 +5,7 @@ shader_type spatial;
 // blend_mul with the source pre-multiplied by 2.0. Result over-brightens by
 // design (the engine effect is "darken-or-brighten depending on src around
 // 0.5"); documented as a Bounded Deviation in particle_visual_parity.md.
-render_mode unshaded, cull_disabled, blend_mul, depth_draw_never, depth_test_disabled, fog_disabled;
+render_mode unshaded, cull_disabled, blend_mul, depth_draw_never;
 
 uniform sampler2D albedo_tex : source_color, filter_linear, repeat_disable;
 uniform bool has_texture = false;

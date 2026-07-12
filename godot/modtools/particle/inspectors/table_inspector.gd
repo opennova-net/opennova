@@ -7,6 +7,7 @@ extends Control
 
 @onready var _list: ItemList = %TableList
 @onready var _empty_label: Label = %EmptyLabel
+@onready var _id_edit: LineEdit = %IdEdit
 @onready var _curve_view: Control = %CurveView
 @onready var _curve_caption: Label = %CurveCaption
 
@@ -17,11 +18,13 @@ var _dup_button: Button
 var _del_button: Button
 var _last_paint_index := -1
 var _last_paint_value := 0
+var _suppress_signals := false
 
 
 func _ready() -> void:
 	_build_toolbar()
 	_list.item_selected.connect(_on_item_selected)
+	_id_edit.text_changed.connect(_on_id_changed)
 	_curve_view.draw.connect(_on_curve_draw)
 	_curve_view.mouse_filter = Control.MOUSE_FILTER_STOP
 	_curve_view.gui_input.connect(_on_curve_input)
@@ -119,6 +122,7 @@ func _refresh() -> void:
 	_refresh_selection()
 	_empty_label.visible = _tables.is_empty()
 	var has_selection := _editor != null and _editor.current_table != null
+	_id_edit.editable = has_selection
 	if _dup_button != null:
 		_dup_button.disabled = not has_selection
 	if _del_button != null:
@@ -127,12 +131,18 @@ func _refresh() -> void:
 
 func _refresh_selection() -> void:
 	if _editor == null or _editor.current_table == null:
+		_suppress_signals = true
+		_id_edit.text = ""
+		_suppress_signals = false
 		_curve_caption.text = "(no table selected)"
 		_curve_view.queue_redraw()
 		return
 	var idx := _tables.find(_editor.current_table)
 	if idx >= 0:
 		_list.select(idx)
+	_suppress_signals = true
+	_id_edit.text = _editor.current_table.id
+	_suppress_signals = false
 	_update_caption()
 	_curve_view.queue_redraw()
 
@@ -157,6 +167,17 @@ func _on_item_selected(idx: int) -> void:
 		return
 	if _workspace != null and _workspace.has_method("select_table"):
 		_workspace.select_table(_tables[idx])
+
+
+func _on_id_changed(value: String) -> void:
+	if _suppress_signals or _editor == null or _editor.current_table == null:
+		return
+	var table := _editor.current_table
+	_editor.set_table_id(table, value)
+	var idx := _tables.find(table)
+	if idx >= 0:
+		_list.set_item_text(idx, value)
+	_update_caption()
 
 
 func _on_curve_draw() -> void:
@@ -277,5 +298,4 @@ func _commit_curve(data: PackedByteArray) -> void:
 	_editor.current_table.set_data(data)
 	_curve_view.queue_redraw()
 	_update_caption()
-	_editor.mark_dirty()
-	_editor.request_preview_refresh()
+	_editor.notify_table_changed()

@@ -112,25 +112,32 @@ Vec3 annular_axis_scales(Emitter &e, const ParticleDef &def) noexcept {
 	return {r0, r1, r2};
 }
 
-// Random direction within a half-angle cap around `axis`. The engine builds
-// these through the emitter vtable direction helpers
-// (CEffectEmitter_SetOrientationFromDirection @ 0x5e5b00 family); we build a
-// perpendicular basis and perturb — a square (yaw,pitch)-bounded cap,
-// equivalent for the corpus-typical half-angles.
-Vec3 random_direction_in_cap(Emitter &e, Vec3 axis, float half_angle_rad) noexcept {
+// Random direction from independently bounded yaw and pitch rotations around
+// `axis`. The retail direction-helper vtable receives both spread and
+// spread_skip; each signed random angle has magnitude in [skip, spread].
+// Applying real axis rotations keeps each Euler component inside its authored
+// bound while preserving the helper's two-draw RNG cadence.
+Vec3 random_direction_in_cap(
+		Emitter &e, Vec3 axis, float outer_angle_rad, float inner_angle_rad = 0.0f) noexcept {
 	const Vec3 forward = vec3_normalize(axis);
 	Vec3 seed_axis = std::abs(forward.x) > 0.9f ?
 			Vec3{0.0f, 1.0f, 0.0f} : Vec3{1.0f, 0.0f, 0.0f};
 	Vec3 up = vec3_normalize(vec3_cross(forward, seed_axis));
 	Vec3 right = vec3_cross(up, forward);
-	const float a = emitter_rand_signed(e) * half_angle_rad;
-	const float b = emitter_rand_signed(e) * half_angle_rad;
-	Vec3 dir{
-		forward.x + right.x * a + up.x * b,
-		forward.y + right.y * a + up.y * b,
-		forward.z + right.z * a + up.z * b,
+	constexpr float kTwoPi = 6.28318530717958647692f;
+	const float outer = std::isfinite(outer_angle_rad)
+			? clampf(std::abs(outer_angle_rad), 0.0f, kTwoPi) : 0.0f;
+	const float inner = std::isfinite(inner_angle_rad)
+			? clampf(std::abs(inner_angle_rad), 0.0f, outer) : 0.0f;
+	const auto bounded_angle = [inner, outer](float sample) {
+		const float magnitude = lerp(inner, outer, std::abs(sample));
+		return std::copysign(magnitude, sample);
 	};
-	return vec3_normalize(dir);
+	const float yaw = bounded_angle(emitter_rand_signed(e));
+	const float pitch = bounded_angle(emitter_rand_signed(e));
+	const Vec3 yawed_forward = vec3_rotate_around_axis(forward, up, yaw);
+	const Vec3 yawed_right = vec3_rotate_around_axis(right, up, yaw);
+	return vec3_normalize(vec3_rotate_around_axis(yawed_forward, yawed_right, pitch));
 }
 
 void apply_emission_shape(Emitter &e, const ParticleDef &def, Particle &p) noexcept {
@@ -228,9 +235,10 @@ void integrate_particle(Particle &p, const ParticleDef &def, const Emitter &e, f
 		// (def+3916) scales the unit vector per axis with no renormalize —
 		// a zeroed axis drops that component, leaving a sub-unit force.
 		// Re-witnessed 2026-07-10 (order was mask-then-normalize here before;
-		// identical for the corpus-typical {1,1,1} mask). The direction is
-		// REPULSIVE (away from the emitter) — authors flip via negative mask
-		// components.
+		// identical for the corpus-typical {1,1,1} mask). The normalized delta
+		// points outward; the converted shared gravity slot supplies the sign
+		// (positive authored gravity therefore attracts). Negative mask
+		// components flip individual axes.
 		Vec3 delta{
 			p.position.x - e.position.x,
 			p.position.y - e.position.y,
@@ -246,25 +254,24 @@ void integrate_particle(Particle &p, const ParticleDef &def, const Emitter &e, f
 			// Spring scalar source: prefer the explicit `Emitter::spring_const`
 			// (engine-faithful — set by the manager in
 			// `CEffectEmitter_Initialize @ 0x5e6020`) when non-zero; otherwise
-			// fall back to `def.gravity` so stand-alone callers without a
-			// manager still get sensible behaviour.
-			const float spring = e.spring_const != 0.0f ? e.spring_const : def.gravity;
+			// use the same converted retail gravity slot as NORMAL movement.
+			const float spring = e.spring_const != 0.0f ? e.spring_const : e.gravity_accel;
 			p.velocity = vec3_add(p.velocity, vec3_scale(delta, spring * dt));
 		}
 	} else {
-		// NORMAL move: y-only gravity accel. The engine applies the raw
+		// NORMAL move: y-only gravity accel. The engine applies the converted
 		// emitter gravity slot here — gravity_mask is read ONLY in the
 		// GRAVITATE branch [orig: @ 0x5e6980; mask read at def+3916 sits
 		// inside the move&2 path]. Re-witnessed 2026-07-10 (was scaled by
-		// gravity_mask.y here before). The slot ADDS onto vel.y — authored
-		// `gravity` is a signed Y-up accel (negative sinks, positive lifts
-		// smoke); the earlier `-=` inverted every authored sign.
-		p.velocity.y += def.gravity * dt;
+		// gravity_mask.y here before). The slot ADDS onto vel.y, but
+		// CEffectEmitter_Initialize seeds it as authored gravity × -0.09803897:
+		// positive authored gravity sinks/attracts and negative gravity lifts.
+		p.velocity.y += e.gravity_accel * dt;
 	}
 
-	// Drag: exponential decay (1 - drag*dt) per axis. Engine writes
-	// `vel -= drag*dt * vel`; same form, clamped to non-negative coefficient.
-	const float drag_coef = clampf(def.drag * dt, 0.0f, 1.0f);
+	// Drag: Euler decay (1 - drag_slot*dt) per axis. Engine writes
+	// `vel -= drag_slot*dt * vel`; Initialize seeds drag_slot = authored × .01.
+	const float drag_coef = e.drag_coefficient * dt;
 	p.velocity.x -= p.velocity.x * drag_coef;
 	p.velocity.y -= p.velocity.y * drag_coef;
 	p.velocity.z -= p.velocity.z * drag_coef;
@@ -273,15 +280,15 @@ void integrate_particle(Particle &p, const ParticleDef &def, const Emitter &e, f
 	// particle.h::move_flag). When set, after the ballistic / spring step, the
 	// engine rotates the relative position vector and velocity around
 	// `def.orbital_axis` by an angle proportional to time. We use
-	// `def.orbitalspeed * dt` as the per-frame angle (engine derives a similar
+	// the emitter-randomized `orbit_speed * dt` as the per-frame angle (engine derives a similar
 	// quantity from emitter state × particle.age × dt; the exact FPU stack
 	// chain is not byte-decodable without full register tracing). Rotates
 	// both position offset and velocity so the orbital trajectory stays
 	// stable across frames. Engine cite: CParticleEmitter_UpdateAllParticles
 	// @ 0x5f3be0 — `(move & 4)` branch + init_D3DXMatrixRotationAxis call.
-	if ((def.move & move_flag::Orbit) != 0 && def.orbitalspeed != 0.0f) {
+	if ((def.move & move_flag::Orbit) != 0 && e.orbit_speed != 0.0f) {
 		const Vec3 axis = vec3_normalize(def.orbital_axis);
-		const float angle = def.orbitalspeed * dt;
+		const float angle = e.orbit_speed * dt;
 		const Vec3 rel{
 			p.position.x - e.position.x,
 			p.position.y - e.position.y,
@@ -317,10 +324,8 @@ void integrate_particle(Particle &p, const ParticleDef &def, const Emitter &e, f
 	// → kill if particle.y <= threshold. Engine writes `particle.age = 0`
 	// to mark expired (no position clamp); next-frame `expire_dead` pass
 	// removes. Our portable form lifts the trigger to runtime emitter
-	// scalars `kill_plane_mode` + `kill_plane_y` so the API surface
-	// doesn't depend on engine-internal flag bits 27/28 (those are
-	// outside the 26-name flag table at 0x846A18 — manager-set, not
-	// authored).
+	// scalars `kill_plane_mode` + `kill_plane_y`: bits 27/28 are named and
+	// authored, while the threshold itself remains manager/site supplied.
 	if (e.kill_plane_mode == 1u && p.position.y > e.kill_plane_y) {
 		p.age = 0.0f;
 	} else if (e.kill_plane_mode == 2u && p.position.y <= e.kill_plane_y) {
@@ -353,9 +358,10 @@ std::uint32_t compute_spawn_flags(const ParticleDef &def, std::uint32_t graphic_
 	return flags;
 }
 
-void emit_one_internal(Emitter &e, const ParticleDef &def) noexcept {
-	if (e.particles.size() >= e.max_particles) {
-		return;
+bool emit_one_internal(Emitter &e, const ParticleDef &def) noexcept {
+	const std::size_t pool_limit = std::min(e.max_particles, kEmitterHardParticleLimit);
+	if (e.particles.size() >= pool_limit) {
+		return false;
 	}
 	Particle p{};
 	// Spawn order mirrors CParticleEmitter_SpawnParticle @ 0x5e7640.
@@ -369,8 +375,9 @@ void emit_one_internal(Emitter &e, const ParticleDef &def) noexcept {
 	// Alpha comes from the chosen GRAPHIC's alpha (already def-inherited at
 	// parse), not the def's — [orig: @ 0x5e77a0: graphic+0x198 * 255].
 	p.alpha = static_cast<std::uint8_t>(clampf(layer.alpha * 255.0f, 0.0f, 255.0f));
-	p.lifetime = std::max(def.age + emitter_rand_signed(e) * def.age_adj, 1e-3f);
+	p.lifetime = def.age + emitter_rand_signed(e) * def.age_adj;
 	p.age = p.lifetime;
+	const bool valid_lifetime = std::isfinite(p.lifetime) && p.lifetime > 0.0f;
 	// Roll seed = orientation.z + orientationadj.z * rand01 (degrees; we store
 	// radians) [orig: @ 0x5e7803 — def+3824/+3836 into +0x3C]. Rate = roll_rot
 	// family with a random sign flip unless SIGNEDROTATIONS pins it
@@ -404,7 +411,7 @@ void emit_one_internal(Emitter &e, const ParticleDef &def) noexcept {
 	// [orig: @ 0x5e788c/0x5e7898 — flt_7D1D70 (256.0) / age into +0x34, zero
 	// into +0x30]. This is the LUT index clock, not a draw-size ramp.
 	p.curve_phase = 0.0f;
-	p.phase_rate = 256.0f / p.lifetime;
+	p.phase_rate = valid_lifetime ? 256.0f / p.lifetime : 0.0f;
 	// Spawn position: emitter + (0, y_offset, 0) [orig: @ 0x5e78a1 — only
 	// def+3724 lands in the position; z_offset is NOT positional — it becomes
 	// the render-side camera-ward pull (emitter+0x140, seeded -z_offset in
@@ -423,10 +430,17 @@ void emit_one_internal(Emitter &e, const ParticleDef &def) noexcept {
 	// unported distinction].
 	if (def.speed != 0.0f || def.speed_adj != 0.0f) {
 		const float speed = def.speed + emitter_rand_signed(e) * def.speed_adj;
-		const Vec3 dir = random_direction_in_cap(e, e.forward, def.spread * 0.0174533f);
+		const Vec3 dir = random_direction_in_cap(
+				e, e.forward, def.spread * 0.0174533f, def.spread_skip * 0.0174533f);
 		p.velocity = vec3_add(p.velocity, vec3_scale(dir, speed));
 	}
+	// Retail completes the spawn RNG path but rejects particles whose resolved
+	// lifetime is non-positive or non-finite instead of clamping them alive.
+	if (!valid_lifetime) {
+		return false;
+	}
 	e.particles.push_back(p);
+	return true;
 }
 
 void expire_dead(Emitter &e) noexcept {
@@ -443,7 +457,7 @@ std::uint32_t emitter_rand10(Emitter &e) noexcept {
 }
 
 float emitter_rand_unit(Emitter &e) noexcept {
-	return static_cast<float>(emitter_rand10(e)) / 1024.0f;
+	return static_cast<float>(emitter_rand10(e)) / 1023.0f;
 }
 
 float emitter_rand_signed(Emitter &e) noexcept {
@@ -451,6 +465,7 @@ float emitter_rand_signed(Emitter &e) noexcept {
 }
 
 void emitter_init(Emitter &e, const ParticleDef *def, Vec3 pos, std::uint32_t seed) {
+	e.rng_state = seed != 0 ? seed : 0x9E3779B9u;
 	e.def = def;
 	e.position = pos;
 	e.prev_position = pos;
@@ -459,8 +474,34 @@ void emitter_init(Emitter &e, const ParticleDef *def, Vec3 pos, std::uint32_t se
 	e.emit_accumulator = 0.0f;
 	e.emit_started = false;
 	e.emit_delay_remaining = def != nullptr ? std::max(def->emit_delay, 0.0f) : 0.0f;
-	e.emit_dur_remaining = def != nullptr ? std::max(def->emit_dur, 0.0f) : 0.0f;
+	if (def != nullptr) {
+		const float duration = def->emit_dur + emitter_rand_signed(e) * def->emit_dur_adj;
+		const float rate = def->emit_rate + emitter_rand_signed(e) * def->emit_rate_adj;
+		e.emit_dur_total = std::isfinite(duration) ? std::max(duration, 0.0f) : 0.0f;
+		e.emit_dur_remaining = e.emit_dur_total;
+		e.emit_rate = std::isfinite(rate) ? std::max(rate, 0.0f) : 0.0f;
+	} else {
+		e.emit_dur_total = 0.0f;
+		e.emit_dur_remaining = 0.0f;
+		e.emit_rate = 0.0f;
+	}
 	e.age = 0.0f;
+	e.gravity_accel = def != nullptr && std::isfinite(def->gravity)
+			? def->gravity * -0.09803897f : 0.0f;
+	e.drag_coefficient = def != nullptr && std::isfinite(def->drag)
+			? def->drag * 0.01f : 0.0f;
+	e.orbit_speed = def != nullptr && std::isfinite(def->orbitalspeed)
+			? def->orbitalspeed : 0.0f;
+	// The adjustment is authored as a signed random range. Avoid an otherwise
+	// unused RNG draw when the adjustment is zero so definitions without the
+	// field keep their established deterministic spawn sequence.
+	if (def != nullptr && def->orbitalspeed_adj != 0.0f &&
+			std::isfinite(def->orbitalspeed_adj)) {
+		e.orbit_speed += emitter_rand_signed(e) * def->orbitalspeed_adj;
+	}
+	if (!std::isfinite(e.orbit_speed)) {
+		e.orbit_speed = 0.0f;
+	}
 	e.next_serial = 0;
 	e.active = def != nullptr;
 	e.finite = def != nullptr ? (def->flags & particle_flag::ForeverEmit) == 0 : true;
@@ -471,8 +512,6 @@ void emitter_init(Emitter &e, const ParticleDef *def, Vec3 pos, std::uint32_t se
 	// equivalents are set per-frame from outside `Initialize`), and
 	// resetting them on every `play()` / `restart()` would clobber the
 	// caller's intent.
-	// Avoid seed=0 producing a zero-bound LCG for the first few values.
-	e.rng_state = seed != 0 ? seed : 0x9E3779B9u;
 }
 
 void emitter_translate(Emitter &e, Vec3 new_pos) noexcept {
@@ -507,18 +546,22 @@ void emitter_translate(Emitter &e, Vec3 new_pos) noexcept {
 }
 
 bool emitter_spawn_one(Emitter &e) {
-	if (e.def == nullptr || e.particles.size() >= e.max_particles) {
+	const std::size_t pool_limit = std::min(e.max_particles, kEmitterHardParticleLimit);
+	if (e.def == nullptr || e.particles.size() >= pool_limit) {
 		return false;
 	}
-	emit_one_internal(e, *e.def);
-	return true;
+	return emit_one_internal(e, *e.def);
 }
 
 void emitter_advance(Emitter &e, float dt) {
-	if (!e.active || e.def == nullptr || dt <= 0.0f) {
+	if (!e.active || e.def == nullptr || !std::isfinite(dt) || dt <= 0.0f) {
 		return;
 	}
 	const ParticleDef &def = *e.def;
+	// Retail's AdvanceFrame expiry pass runs before UpdateParticles. A particle
+	// that reaches age <= 0 during this integration remains observable for its
+	// terminal frame and is reclaimed at the beginning of the next advance.
+	expire_dead(e);
 	e.age += dt;
 	e.prev_position = e.position;
 
@@ -530,7 +573,6 @@ void emitter_advance(Emitter &e, float dt) {
 			for (Particle &p : e.particles) {
 				integrate_particle(p, def, e, dt);
 			}
-			expire_dead(e);
 			return;
 		}
 		dt += e.emit_delay_remaining; // consume any sub-step overrun
@@ -548,12 +590,12 @@ void emitter_advance(Emitter &e, float dt) {
 	// against `def.emit_dur` so the curve plays out across the emitter's
 	// finite emission window; FOREVEREMIT loops the curve modulo 256.
 	const bool can_emit = e.finite ? e.emit_dur_remaining > 0.0f : true;
-	if (can_emit && def.emit_rate > 0.0f) {
+	if (can_emit && e.emit_rate > 0.0f) {
 		float rate_scale = 1.0f;
 		if (def.emit_rate_func.baked) {
 			float t_norm = 0.0f;
-			if (def.emit_dur > 1e-6f) {
-				t_norm = clampf(e.age / def.emit_dur, 0.0f, 0.999999f);
+			if (e.emit_dur_total > 1e-6f) {
+				t_norm = clampf(e.age / e.emit_dur_total, 0.0f, 0.999999f);
 			} else {
 				// FOREVEREMIT or zero-dur: cycle through the LUT every second.
 				t_norm = e.age - std::floor(e.age);
@@ -562,34 +604,59 @@ void emitter_advance(Emitter &e, float dt) {
 			const std::uint8_t lut_byte = def.emit_rate_func.baked_lut[static_cast<std::size_t>(lut_idx)];
 			rate_scale = static_cast<float>(lut_byte) / 128.0f;
 		}
-		const float scaled_rate = def.emit_rate * rate_scale;
-		if (scaled_rate > 1e-3f) {
+		const float scaled_rate = e.emit_rate * rate_scale;
+		if (std::isfinite(scaled_rate) && scaled_rate > 1e-3f) {
 			const float interval = 1.0f / scaled_rate;
-			// The first burst lands on the first emitting advance (t ≈ 0), not one
-			// full interval in: a flash-class def (emit_dur 0.1, emit_rate 10) must
-			// emit inside its authored window at all. The base cadence is not pinned
-			// by the AdvanceEmission @ 0x5e1d30 record (it witnesses only the LUT
-			// scaling); an immediate first burst is the only reading under which such
-			// windows produce their particles.
-			if (!e.emit_started) {
-				e.emit_started = true;
-				e.emit_accumulator += interval;
-			}
-			e.emit_accumulator += dt;
-			// Bound this frame's bursts by the remaining window so one large dt
-			// cannot overshoot it; the window itself elapses with AGE below.
-			float window = e.finite ? e.emit_dur_remaining : 0.0f;
-			while (e.emit_accumulator >= interval) {
-				e.emit_accumulator -= interval;
-				const int burst = std::max(def.emit_burst, 1);
-				for (int b = 0; b < burst; ++b) {
-					emit_one_internal(e, def);
+			if (std::isfinite(interval) && interval > 0.0f) {
+				// The first burst lands on the first emitting advance (t ≈ 0), not one
+				// full interval in: a flash-class def (emit_dur 0.1, emit_rate 10) must
+				// emit inside its authored window at all. The base cadence is not pinned
+				// by the AdvanceEmission @ 0x5e1d30 record (it witnesses only the LUT
+				// scaling); an immediate first burst is the only reading under which such
+				// windows produce their particles.
+				if (!std::isfinite(e.emit_accumulator) || e.emit_accumulator < 0.0f) {
+					e.emit_accumulator = 0.0f;
 				}
-				if (e.finite) {
-					window -= interval;
-					if (window <= 0.0f) {
+				if (!e.emit_started) {
+					e.emit_started = true;
+					e.emit_accumulator += interval;
+				}
+				e.emit_accumulator += dt;
+				if (!std::isfinite(e.emit_accumulator)) {
+					e.emit_accumulator = interval;
+				}
+				// Bound this frame's bursts by the remaining window so one large dt
+				// cannot overshoot it; the window itself elapses with AGE below.
+				float window = e.finite ? e.emit_dur_remaining : 0.0f;
+				const std::size_t pool_limit = std::min(e.max_particles, kEmitterHardParticleLimit);
+				while (e.emit_accumulator >= interval && e.particles.size() < pool_limit) {
+					e.emit_accumulator -= interval;
+					const std::size_t remaining = pool_limit - e.particles.size();
+					const std::size_t requested = def.emit_burst > 0
+							? static_cast<std::size_t>(def.emit_burst) : std::size_t{1};
+					const std::size_t burst = std::min(requested, remaining);
+					bool emitted = false;
+					for (std::size_t b = 0; b < burst; ++b) {
+						if (!emit_one_internal(e, def)) {
+							break;
+						}
+						emitted = true;
+					}
+					if (!emitted) {
 						break;
 					}
+					if (e.finite) {
+						window -= interval;
+						if (window <= 0.0f) {
+							break;
+						}
+					}
+				}
+				// A full pool must not turn an authored extreme rate into unbounded
+				// catch-up work. Advance the cadence and retain only the fractional
+				// interval, just as if the skipped full-pool ticks had been consumed.
+				if (e.particles.size() >= pool_limit && e.emit_accumulator >= interval) {
+					e.emit_accumulator = std::fmod(e.emit_accumulator, interval);
 				}
 			}
 		} else {
@@ -612,7 +679,6 @@ void emitter_advance(Emitter &e, float dt) {
 	for (Particle &p : e.particles) {
 		integrate_particle(p, def, e, dt);
 	}
-	expire_dead(e);
 
 	// Emitter is "done" when finite duration is exhausted AND no live particles
 	// remain — caller can flip e.active off based on this if they want pooling.

@@ -94,6 +94,7 @@ var _vm_camera: Camera3D = null
 # input (trigger edges, the RMB toggle REQUEST), plays the FSM's event clips on
 # BOTH viewmodel parts (arms + gun share the animadm), and places nodes.
 var _vm_parts: Array = []           # NovaObjectModel parts under the viewmodel container
+var _viewmodel_generation := 0      # action-slot owner identity across weapon re-mounts
 var _weapon_play_serial := -1
 var _weapon_view: PlayerWeaponView = null  # this tick's FSM view (body channel rides it)
 var _fire_was_held := false
@@ -205,6 +206,7 @@ func _free_viewmodel_pass() -> void:
 ## (changed) equipped weapon — the armory ACCEPT re-mount [orig:
 ## WeaponLoadout_ApplyFromBuffer @0x565cd0 tail -> Player_MountWeaponSlot @0x4dfa40].
 func refresh_viewmodel() -> void:
+	_viewmodel_generation += 1
 	if _viewmodel != null and is_instance_valid(_viewmodel):
 		_viewmodel.queue_free()
 	_viewmodel = null
@@ -384,18 +386,23 @@ func _fire_action_effects(event: PlayerWeaponEvent) -> void:
 	if event.action_started != WEAPON_ACTION_FIRE:
 		return  # local non-fire begins are the no-effect shim [orig: @0x541b17]
 	var scoped := _view != null and _view.scope_engaged
-	if scoped and not _third_person:
+	var vehicle_attack_context := _view != null and _view.vehicle_attack_context
+	if scoped and not _third_person and not vehicle_attack_context:
 		return  # scoped FP fire shows no muzzle flash [orig: @0x541aba !g_weaponScopeActive]
 	var fx = _world.get_effect_world()
 	if fx == null:
 		return
 	var pos := _action_particle_world_position(event.action_particle_userpoint)
+	var forward := _action_particle_world_forward(event.action_particle_userpoint)
+	# The live handle belongs to the runtime ACTION slot, not the whole player
+	# host. A weapon re-mount creates a new slot generation.
+	var owner_key := "%d:%d:%d" % [get_instance_id(), _viewmodel_generation, event.action_started]
 	if fx.has_method("spawn_effect_unless_alive"):
 		# One live muzzle group at a time — the witnessed slot+24 guard
 		# [orig: @0x5418c8 spawns only when the recorded handle is clear].
-		fx.spawn_effect_unless_alive(self, event.action_particle, pos)
+		fx.spawn_effect_unless_alive(owner_key, event.action_particle, pos, forward)
 	else:
-		fx.spawn_effect(event.action_particle, pos)
+		fx.spawn_effect(event.action_particle, pos, forward)
 
 
 # World-space spawn point for an ACTION particle: the named user point on a viewmodel
@@ -422,6 +429,26 @@ func _action_particle_world_position(userpoint: String) -> Vector3:
 	if fallback != Vector3.INF:
 		return fallback
 	return _world.local_player_position() + Vector3(0, PLAYER_EYE_HEIGHT, 0)
+
+
+func _action_particle_world_forward(userpoint: String) -> Vector3:
+	for part in _vm_parts:
+		if part == null or not is_instance_valid(part) or not part.has_method("get_object_data"):
+			continue
+		var data = part.get_object_data()
+		if data == null:
+			continue
+		for i in range(data.get_user_point_count()):
+			var info: Dictionary = data.get_user_point_info(i)
+			if String(info.get("name", "")).nocasecmp_to(userpoint) != 0:
+				continue
+			var direction := Vector3(info.get("rotation", Vector3(0, 0, 1)))
+			var world_direction: Vector3 = part.global_transform.basis * direction
+			if world_direction.length_squared() > 0.000001:
+				return world_direction.normalized()
+	if _camera != null:
+		return -_camera.global_transform.basis.z.normalized()
+	return Vector3(0, 0, 1)
 
 
 # The action-END sound leg: the finished ACTION's soundsetend, 3D-positional at the

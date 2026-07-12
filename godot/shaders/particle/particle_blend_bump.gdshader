@@ -9,11 +9,10 @@ shader_type spatial;
 //
 // Our `CUSTOM0` carries the lit color (RGBA8 unorm) computed Godot-side
 // from `def.bump_scale × (1/√3, 1/√3, 1/√3)` (engine's hardcoded light
-// direction) encoded via `(value + 1) * 0.5`. Bounded deviation: we skip
-// the engine's per-particle rotation transform, so the lit color is a
-// uniform tint rather than direction-dependent — see
-// notes/ida_particle_witness.md for the full RE.
-render_mode unshaded, cull_disabled, blend_mix, depth_draw_never, depth_test_disabled, fog_disabled;
+// direction) encoded via `(value + 1) * 0.5`. The host computes this per
+// particle from its current billboard rotation. Its view-Z axis convention is
+// a documented bounded deviation from the retail composite-matrix X axis.
+render_mode unshaded, cull_disabled, blend_mix, depth_draw_never;
 
 uniform sampler2D albedo_tex : source_color, filter_linear, repeat_disable;
 uniform bool has_texture = false;

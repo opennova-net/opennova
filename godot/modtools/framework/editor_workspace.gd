@@ -464,6 +464,12 @@ func save_as_file(_path: String) -> Error:
 	return ERR_UNAVAILABLE
 
 
+## Optional detail for a failed save. The shell uses this instead of replacing
+## a workspace's domain-specific validation message with a generic error.
+func get_save_failure_message(_error: Error) -> String:
+	return ""
+
+
 func can_export() -> bool:
 	return false
 

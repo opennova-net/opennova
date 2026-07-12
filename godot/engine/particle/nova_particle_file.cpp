@@ -1,8 +1,10 @@
 #include "nova_particle_file.h"
 
+#include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
-#include <fstream>
+#include <cstring>
+#include <sstream>
 
 using namespace godot;
 
@@ -54,16 +56,19 @@ void NovaParticleFile::set_table_handles(const TypedArray<NovaParticleTableHandl
 TypedArray<NovaParticleTableHandles> NovaParticleFile::get_table_handles() const { return table_handles; }
 
 Error NovaParticleFile::load_from_file(const String &path) {
-	opennova::particle::ParticleFile native;
-	opennova::particle::ParseError err;
-	const std::string utf = path.utf8().get_data();
-	if (!opennova::particle::load_particles_from_file(utf, native, err)) {
-		UtilityFunctions::printerr(String::utf8(("ptl load failed at line " + std::to_string(err.line) + ": " + err.message).c_str()));
+	Ref<FileAccess> file = FileAccess::open(path, FileAccess::READ);
+	if (file.is_null()) {
+		UtilityFunctions::printerr("ptl load failed: cannot open ", path);
 		return ERR_FILE_CANT_READ;
 	}
-	source_path = path;
-	copy_from_native(native);
-	return OK;
+	const int64_t length = file->get_length();
+	const PackedByteArray bytes = file->get_buffer(length);
+	file->close();
+	if (bytes.size() != length) {
+		UtilityFunctions::printerr("ptl load failed: short read from ", path);
+		return ERR_FILE_CANT_READ;
+	}
+	return load_from_buffer(bytes, path);
 }
 
 Error NovaParticleFile::load_from_buffer(const PackedByteArray &bytes, const String &display_path) {
@@ -82,10 +87,28 @@ Error NovaParticleFile::load_from_buffer(const PackedByteArray &bytes, const Str
 Error NovaParticleFile::save_to_file(const String &path) {
 	opennova::particle::ParticleFile native = to_native();
 	std::string err;
-	if (!opennova::particle::save_particles_to_file(path.utf8().get_data(), native, err)) {
+	std::ostringstream stream;
+	if (!opennova::particle::save_particles(stream, native, err)) {
 		UtilityFunctions::printerr(String::utf8(("ptl save failed: " + err).c_str()));
 		return ERR_FILE_CANT_WRITE;
 	}
+	const std::string serialized = stream.str();
+	PackedByteArray bytes;
+	bytes.resize(static_cast<int64_t>(serialized.size()));
+	if (!serialized.empty()) {
+		std::memcpy(bytes.ptrw(), serialized.data(), serialized.size());
+	}
+	Ref<FileAccess> file = FileAccess::open(path, FileAccess::WRITE);
+	if (file.is_null()) {
+		UtilityFunctions::printerr("ptl save failed: cannot open ", path);
+		return ERR_FILE_CANT_WRITE;
+	}
+	if (!file->store_buffer(bytes)) {
+		file->close();
+		UtilityFunctions::printerr("ptl save failed: short write to ", path);
+		return ERR_FILE_CANT_WRITE;
+	}
+	file->close();
 	source_path = path;
 	return OK;
 }

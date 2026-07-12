@@ -7,7 +7,7 @@ shader_type spatial;
 // SPECULAR), but we use additive blend on the framebuffer (the engine's
 // combiner mode for Bumpadd is unwitnessed; this shader approximates with
 // `texture × COLOR + CUSTOM0`).
-render_mode unshaded, cull_disabled, blend_add, depth_draw_never, depth_test_disabled, fog_disabled;
+render_mode unshaded, cull_disabled, blend_add, depth_draw_never;
 
 uniform sampler2D albedo_tex : source_color, filter_linear, repeat_disable;
 uniform bool has_texture = false;
@@ -29,6 +29,6 @@ void fragment() {
 	}
 	// texture × COLOR + lit (additive combine on top of the additive
 	// framebuffer blend = brighter overall vs Bump).
-	ALBEDO = (base.rgb * base.a) + lit_color.rgb * 0.5;
+	ALBEDO = base.rgb + lit_color.rgb * 0.5;
 	ALPHA = base.a;
 }

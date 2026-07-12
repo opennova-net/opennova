@@ -20,14 +20,16 @@ a deterministic timeline scrubber, time scale, and background brightness.
 The three inspector workflows:
 
 - **Effects** — compose effects from particle entries.
-- **Particles** — the full per-particle form: emission, motion, appearance
+- **Particles** — a practical per-particle form: core emission, motion, appearance
   flags as checkboxes, colors, curve assignments, and the per-layer texture
   editor. Edits refresh the preview live.
 - **Tables** — draw curve tables directly (drag to paint, Ramp/Flat/Invert)
   and see each curve as a sparkline.
 
-Saving validates first: empty or duplicate names and broken references block
-the save with a message instead of writing a file the game would reject.
+Saving validates first: empty names block the save and duplicate names warn.
+References may intentionally resolve through another mounted `.ptl`, so the
+editor preserves unresolved names instead of treating every cross-file link as
+a local-document error.
 
 ## Formats
 

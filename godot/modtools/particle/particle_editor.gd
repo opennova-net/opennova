@@ -9,6 +9,9 @@ extends RefCounted
 signal document_changed
 signal selection_changed
 signal dirty_changed(is_dirty: bool)
+## Lightweight presentation updates (ids, references, card summaries, curves).
+## Unlike document_changed, this never asks inspectors to rebuild their forms.
+signal presentation_changed
 ## Emitted when an edit should be reflected in the live preview (debounced by
 ## the preview itself). Kept separate from document_changed so field tweaks
 ## don't force a full inspector rebuild.
@@ -134,6 +137,19 @@ func table_count() -> int:
 
 ## Ask the live preview to re-apply the current selection (no model reload).
 func request_preview_refresh() -> void:
+	preview_refresh_requested.emit()
+
+
+## Commit an in-place particle/graphic edit without rebuilding its inspector.
+func notify_particle_changed() -> void:
+	_set_dirty(true)
+	presentation_changed.emit()
+	preview_refresh_requested.emit()
+
+
+func notify_table_changed() -> void:
+	_set_dirty(true)
+	presentation_changed.emit()
 	preview_refresh_requested.emit()
 
 
@@ -340,10 +356,11 @@ func remove_table(t: NovaParticleTable) -> void:
 	selection_changed.emit()
 
 
-# --- Graphic layers (contiguity-preserving) ----------------------------------
+# --- Graphic layers -----------------------------------------------------------
 
-## Mark the first non-present layer present (keeps layers contiguous from slot
-## 0, which the writer requires). Returns the new layer index, or -1 if full.
+## Mark the first non-present layer present. Editor-created layers use the first
+## free slot; loaded retail files may still retain sparse authored slots.
+## Returns the new layer index, or -1 if full.
 func add_graphic_layer(p: NovaParticleDef) -> int:
 	if p == null:
 		return -1
@@ -355,6 +372,7 @@ func add_graphic_layer(p: NovaParticleDef) -> int:
 			layer.index = i + 1
 			p.set_graphics(graphics)
 			_set_dirty(true)
+			presentation_changed.emit()
 			return i
 	return -1
 
@@ -385,6 +403,7 @@ func remove_graphic_layer(p: NovaParticleDef, slot: int) -> void:
 		out.append(blank)
 	p.set_graphics(out)
 	_set_dirty(true)
+	presentation_changed.emit()
 
 
 func present_graphic_count(p: NovaParticleDef) -> int:
@@ -399,6 +418,90 @@ func present_graphic_count(p: NovaParticleDef) -> int:
 
 # --- Reference edits (used by the blueprint graph + inspectors) --------------
 
+func set_particle_id(particle: NovaParticleDef, value: String) -> void:
+	if particle == null or particle.id == value:
+		return
+	var old_id := String(particle.id)
+	particle.id = value
+	if particle_file != null:
+		for effect_entry in particle_file.effects:
+			var effect := effect_entry as NovaParticleEffect
+			if effect == null:
+				continue
+			var pdefs := effect.pdefs
+			var changed := false
+			for i in range(pdefs.size()):
+				if pdefs[i] == old_id:
+					pdefs[i] = value
+					changed = true
+			if changed:
+				effect.pdefs = pdefs
+		for entry in particle_file.particles:
+			var candidate := entry as NovaParticleDef
+			if candidate != null and candidate.child_id == old_id:
+				candidate.child_id = value
+	_set_dirty(true)
+	presentation_changed.emit()
+	preview_refresh_requested.emit()
+
+
+func set_table_id(table: NovaParticleTable, value: String) -> void:
+	if table == null or table.id == value:
+		return
+	var old_id := String(table.id)
+	table.id = value
+	if particle_file != null:
+		for entry in particle_file.particles:
+			var particle := entry as NovaParticleDef
+			if particle != null:
+				_rename_table_refs(particle, old_id, value)
+		for entry in particle_file.table_handles:
+			var handles := entry as NovaParticleTableHandles
+			if handles != null and handles.table_id == old_id:
+				handles.table_id = value
+	_set_dirty(true)
+	presentation_changed.emit()
+	preview_refresh_requested.emit()
+
+
+func _rename_table_refs(particle: NovaParticleDef, old_id: String, new_id: String) -> void:
+	const PARTICLE_CURVES := [
+		"scale_func", "alpha_func", "red_func", "green_func", "blue_func",
+		"emit_rate_func",
+	]
+	const GRAPHIC_CURVES := [
+		"scale_func", "alpha_func", "red_func", "green_func", "blue_func",
+	]
+	for field in PARTICLE_CURVES:
+		var curve := particle.get(field) as NovaParticleCurveRef
+		if curve != null and curve.name == old_id:
+			curve.name = new_id
+	for graphic_entry in particle.get_graphics():
+		var graphic := graphic_entry as NovaParticleGraphicLayer
+		if graphic == null:
+			continue
+		for field in GRAPHIC_CURVES:
+			var curve := graphic.get(field) as NovaParticleCurveRef
+			if curve != null and curve.name == old_id:
+				curve.name = new_id
+
+
+func set_effect_id(effect: NovaParticleEffect, value: String) -> void:
+	if effect == null or effect.id == value:
+		return
+	effect.id = value
+	_set_dirty(true)
+	document_changed.emit()
+
+
+func set_effect_pdefs(effect: NovaParticleEffect, values: PackedStringArray) -> void:
+	if effect == null or effect.pdefs == values:
+		return
+	effect.pdefs = values
+	_set_dirty(true)
+	document_changed.emit()
+	preview_refresh_requested.emit()
+
 func effect_add_pdef(effect: NovaParticleEffect, pdef_id: String) -> void:
 	if effect == null or pdef_id.is_empty():
 		return
@@ -409,6 +512,7 @@ func effect_add_pdef(effect: NovaParticleEffect, pdef_id: String) -> void:
 	effect.pdefs = arr
 	_set_dirty(true)
 	document_changed.emit()
+	preview_refresh_requested.emit()
 
 
 func effect_remove_pdef(effect: NovaParticleEffect, pdef_id: String) -> void:
@@ -422,14 +526,16 @@ func effect_remove_pdef(effect: NovaParticleEffect, pdef_id: String) -> void:
 	effect.pdefs = arr
 	_set_dirty(true)
 	document_changed.emit()
+	preview_refresh_requested.emit()
 
 
 func set_child_id(p: NovaParticleDef, child: String) -> void:
-	if p == null:
+	if p == null or p.child_id == child:
 		return
 	p.child_id = child
 	_set_dirty(true)
-	document_changed.emit()
+	presentation_changed.emit()
+	preview_refresh_requested.emit()
 
 
 ## Assign (or clear, when table_id == "") a [tabledef] to one of the particle's
@@ -487,9 +593,6 @@ func validate() -> Array:
 		if p.emit_burst < 1:
 			issues.append({"severity": "error",
 					"message": "Particle '%s': burst count must be at least 1." % p.id})
-		if not _graphics_contiguous(p):
-			issues.append({"severity": "error",
-					"message": "Particle '%s': graphic layers are not contiguous." % p.id})
 	return issues
 
 
@@ -506,17 +609,6 @@ func _validate_unique_nonempty(items: Array, label: String, issues: Array) -> vo
 					"message": "Duplicate %s name '%s'." % [label, id]})
 		else:
 			seen[id] = true
-
-
-func _graphics_contiguous(p: NovaParticleDef) -> bool:
-	var saw_gap := false
-	for layer in p.get_graphics():
-		var present: bool = layer != null and layer.present
-		if present and saw_gap:
-			return false
-		if not present:
-			saw_gap = true
-	return true
 
 
 # --- Internal array mutation --------------------------------------------------

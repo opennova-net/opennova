@@ -22,6 +22,26 @@ class TransportRuntimeStub:
 		return true
 
 
+class FxRuntimeStub:
+	extends Node
+	func entity_position_for_ssn(ssn: int) -> Variant:
+		return Vector3(4, 5, 6) if ssn == 17 else null
+
+
+class FxWorldStub:
+	extends NovaEffectWorld
+	var spawns: Array = []
+	func spawn_effect_owned(owner_key: Variant, effect: String, position: Vector3,
+			orientation: Vector3 = Vector3.ZERO) -> int:
+		spawns.append({
+			"owner": owner_key,
+			"effect": effect,
+			"position": position,
+			"orientation": orientation,
+		})
+		return 1
+
+
 func test_tick_gates_the_runtime_on_its_transport() -> void:
 	# The game host's tick must respect MissionRuntime's play flag - the debug
 	# overlay's Pause/Step work on a live mission BECAUSE this gate exists
@@ -43,6 +63,26 @@ func test_tick_gates_the_runtime_on_its_transport() -> void:
 	assert_eq(runtime.ticks, 1, "pausing stops it again")
 	world._runtime = null
 	world._loaded = false
+
+
+func test_fx2ssn_routes_position_owner_and_up_orientation() -> void:
+	var world := _make_world()
+	add_child_autofree(world)
+	var runtime := FxRuntimeStub.new()
+	var effects := FxWorldStub.new()
+	add_child_autofree(runtime)
+	add_child_autofree(effects)
+	world._runtime = runtime
+	world._effect_world = effects
+	world._route_mission_effects([{"kind": "fx2ssn", "b": 17, "str": "Dust"}])
+	assert_eq(effects.spawns.size(), 1)
+	assert_eq(effects.spawns[0].owner, 17)
+	assert_eq(effects.spawns[0].effect, "Dust")
+	assert_eq(effects.spawns[0].position, Vector3(4, 5, 6))
+	assert_eq(effects.spawns[0].orientation, Vector3.UP,
+			"the documented terrain-normal placeholder must actually reach the emitter")
+	world._runtime = null
+	world._effect_world = null
 
 
 func test_load_world_requires_hardcoded_environment_in_global_root() -> void:
