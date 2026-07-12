@@ -27,6 +27,7 @@ add_subdirectory(libs/ase)
 add_subdirectory(libs/tdp)
 add_subdirectory(libs/oed)
 add_subdirectory(libs/renderer)
+add_subdirectory(libs/particle)
 add_subdirectory(libs/terrain_query)
 add_subdirectory(libs/terrain)
 add_subdirectory(libs/vfs)
@@ -144,6 +145,7 @@ set(OPENNOVA_CORE_TARGETS
     opennova_tdp
     opennova_oed
     opennova_renderer
+    opennova_particle
     opennova_vfs
     opennova_resource_index
     opennova_world

@@ -791,6 +791,21 @@ if(MSVC)
 endif()
 add_test(NAME dvxi5_repro COMMAND dvxi5_repro_test)
 
+# Particle (.ptl) text-format parser/simulator tests. See libs/particle and the
+# witness matrix in docs/particles/ptl-format-re.md
+# (CParticleDef_ParseFromConfigMap @ 0x5ed210, Jointops.exe IDB).
+foreach(name smallest minimal_effect multi_section multi_layer table_handles smoke_all_fixtures enum_parse writer_roundtrip emitter curve_lut emit_shape translate atlas)
+    add_executable(particle_${name}_test particle/particle_${name}_test.cpp)
+    target_link_libraries(particle_${name}_test PRIVATE opennova_particle)
+    target_include_directories(particle_${name}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(particle_${name}_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    add_test(NAME particle_${name} COMMAND particle_${name}_test)
+endforeach()
+
+# Smoke test stays disabled until the full 77-file corpus is mirrored into
+# fixtures/particle/ (mirrors the parametric_parity DISABLED pattern above).
+set_tests_properties(particle_smoke_all_fixtures PROPERTIES DISABLED TRUE)
+
 # CBIN tests
 add_executable(cbin_unit_test cbin/cbin_unit_test.cpp)
 target_link_libraries(cbin_unit_test PRIVATE opennova_cbin)

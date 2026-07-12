@@ -1,0 +1,4 @@
+[gd_scene load_steps=2 format=3 uid="uid://c8fxvisprobe00"]
+[ext_resource type="Script" path="res://tests/effects_visual_probe.gd" id="1_fxvis"]
+[node name="EffectsVisualProbe" type="Node3D"]
+script = ExtResource("1_fxvis")
