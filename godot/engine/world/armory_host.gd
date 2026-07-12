@@ -24,6 +24,13 @@ const STYLESHEET_FILE := "menu_style.mns"  # the canonical name (menu_shell's de
 const DESIGN_SIZE := Vector2(800, 600)
 const MUSIC_VAR_INDEX := 2
 
+# The ACCEPT hotkey: the WEAPON screen's on-show registers the USE-ITEM binding
+# row's runtime keys (retail default: the Shifts — the same row 177 the shells'
+# open key mirrors) as ACCEPT accelerators on the ACCEPT control
+# [orig: UI_InitTeamClassSelection @0x567370 finds control "ACCEPT" (@0x7C7650)
+#  and adds word_81A468/word_81A46A @0x5674a8/@0x5674c0].
+const ACCEPT_HOTKEY := KEY_SHIFT
+
 signal opened
 signal closed
 
@@ -102,7 +109,13 @@ func try_open() -> bool:
 		_player_class = int(sim.get_local_player_class())
 	_armory.set_player_team(_team)
 	_armory.set_player_class(_player_class)
-	_armory.set_class_selection_enabled(false)
+	# D-MNU-10 (deliberate divergence, user decision 2026-07-11): the class spin is
+	# LIVE in offline play. Retail enables it only in a network session
+	# [orig: UI_InitTeamClassSelection @0x567370 — the is_in_session branch;
+	# UI_OpenWeaponScreenSinglePlayer @0x424390 exists because SP has no session,
+	# and retail SP pins the class]. Our runtime is a listen session even offline
+	# (ADR 0009), and the SP loadout flow wants the choice.
+	_armory.set_class_selection_enabled(true)
 	var vmdef: PlayerViewmodelDef = _world.local_player_viewmodel_def() \
 			if _world.has_method("local_player_viewmodel_def") else null
 	var current_primary := vmdef.weapon_name if vmdef != null else ""
@@ -124,6 +137,19 @@ func close() -> void:
 		return
 	_menu.visible = false
 	closed.emit()
+
+
+# Route the armory-key edges to the companion's debounced ACCEPT accelerator
+# while the screen is open (the companion owns the armed state — its
+# on_menu_built stamp is the original's open-debounce [orig: @0x4e0b21]).
+func _unhandled_key_input(event: InputEvent) -> void:
+	if not is_open():
+		return
+	var key := event as InputEventKey
+	if key == null or key.keycode != ACCEPT_HOTKEY or key.echo:
+		return
+	if _armory.accept_hotkey_edge(key.pressed):
+		get_viewport().set_input_as_handled()
 
 
 func teardown() -> void:
@@ -218,7 +244,8 @@ func _on_loadout_accepted(loadout: Dictionary) -> void:
 # ONED play does not — fill only the missing tables.
 # [orig: Game_InitSubsystems @0x4a6cd0 loads menutxt/gametext at boot]
 func _register_text_tables(root: NovaResourceRoot) -> void:
-	for spec in [["menutxt", "menutxt.BIN"], ["gametext", "Game.bin"]]:
+	for spec in [["menutxt", "menutxt.BIN"], ["gametext", "gametext.bin"],
+			["gameui", "Game.bin"]]:
 		var bytes := root.read_file(spec[1])
 		var table: RtxtStringFile = null
 		if not bytes.is_empty():

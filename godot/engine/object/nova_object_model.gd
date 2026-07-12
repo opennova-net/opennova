@@ -64,6 +64,9 @@ var _skeletal                       # NovaSkeletalAnim, or null
 var _skeleton: Skeleton3D           # built in rebuild() when skinned + _skeletal loaded
 var _skeleton_skin: Skin
 var _anim_key := ""                 # active clip key (ADM key, e.g. "anim_walk")
+var _anim_variant := 0              # same-key variant index (multi-clip .adm rows; the
+                                    # sim's ring latch picks it for viewmodel plays
+                                    # [orig: AnimMap_PlayAnimBySlot @0x40bda0 latch +68])
 var _anim_time := 0.0               # playhead seconds into the active clip
 var _anim_playing := false
 var _anim_external_phase := false   # true when the sim, not _process(delta), owns _anim_time
@@ -152,6 +155,7 @@ func reset_animation_time() -> void:
 func set_skeletal_anim(skeletal) -> void:
 	_skeletal = skeletal
 	_anim_key = ""
+	_anim_variant = 0
 	_anim_time = 0.0
 	_anim_playing = false
 	_anim_external_phase = false
@@ -173,13 +177,22 @@ func has_skeleton() -> bool:
 
 ## Play a main-body clip by ADM key (e.g. "anim_walk"). No-op if no skeletal set / unknown.
 func play_body_clip(key: String) -> void:
+	play_body_clip_variant(key, 0)
+
+
+## play_body_clip selecting a same-key VARIANT (multi-clip .adm rows): the FSM owner's
+## ring serves the index and playback follows that latch until the next play — a
+## variant change re-poses even on the same key. [orig: AnimMap_PlayAnimBySlot
+## @0x40bda0 latches the served ring entry at animState+68]
+func play_body_clip_variant(key: String, variant: int) -> void:
 	if _skeletal == null or not _skeletal.has_clip(key):
 		return
-	if key == _anim_key:
+	if key == _anim_key and variant == _anim_variant:
 		_anim_external_phase = false
 		_anim_playing = true
 		return
 	_anim_key = key
+	_anim_variant = variant
 	_anim_time = 0.0
 	_anim_playing = true
 	_anim_external_phase = false
@@ -201,6 +214,7 @@ func play_body_clip_at(key: String, phase_ticks: int) -> void:
 		seconds = float(maxi(phase_ticks, 0)) / (2.0 * fps)
 	var same_external := previous_external and key == previous_key and is_equal_approx(previous_time, seconds)
 	_anim_key = key
+	_anim_variant = 0  # stamp-driven body path: variant rings deferred to the 3P channel
 	_set_body_playhead(seconds)
 	_anim_playing = false
 	_anim_external_phase = true
@@ -264,10 +278,10 @@ func set_animation_time(seconds: float) -> void:
 
 
 func _set_body_playhead(seconds: float) -> void:
-	var length: float = _skeletal.get_clip_length(_anim_key)
+	var length: float = _skeletal.get_clip_length(_anim_key, _anim_variant)
 	if length <= 0.0:
 		_anim_time = 0.0
-	elif _skeletal.is_clip_looping(_anim_key):
+	elif _skeletal.is_clip_looping(_anim_key, _anim_variant):
 		_anim_time = fposmod(seconds, length)
 	else:
 		_anim_time = clampf(seconds, 0.0, length)
@@ -278,10 +292,10 @@ func _set_body_playhead(seconds: float) -> void:
 func get_animation_time() -> float:
 	if _skeletal == null or _anim_key.is_empty():
 		return 0.0
-	var length: float = _skeletal.get_clip_length(_anim_key)
+	var length: float = _skeletal.get_clip_length(_anim_key, _anim_variant)
 	if length <= 0.0:
 		return 0.0
-	if _skeletal.is_clip_looping(_anim_key):
+	if _skeletal.is_clip_looping(_anim_key, _anim_variant):
 		return fposmod(_anim_time, length)
 	return clampf(_anim_time, 0.0, length)
 
@@ -506,7 +520,7 @@ func _advance_body_anim(delta: float) -> void:
 	else:
 		# The weapon channel only renders through the overlay path — its export gate
 		# (primary-state flag 0x40) implies the aim overlay is active [orig: @0x4b14a7].
-		pose = _skeletal.eval_pose(_anim_key, _anim_time)
+		pose = _skeletal.eval_pose(_anim_key, _anim_time, _anim_variant)
 	var count: int = mini(pose.size(), _skeleton.get_bone_count())
 	for i in range(count):
 		var t: Transform3D = pose[i]
@@ -610,8 +624,22 @@ func _build_skeleton() -> void:
 	_skeleton.name = "Skeleton3D"
 	add_child(_skeleton)
 	var bones: Array = _skeletal.get_skeleton_bones()
-	for b in bones:
-		_skeleton.add_bone(String((b as Dictionary).get("name", "bone")))
+	# The rig is INDEX-driven (the model bone table pairs channels/parts by row —
+	# net-re §5.40; empty or duplicate row names are legal in shipped models, e.g.
+	# the REVX M82_1st carries unnamed rows). Godot's Skeleton3D refuses empty/
+	# duplicate/':'/'/' names, and a refused add_bone SHIFTS every later index —
+	# the whole rig past the first bad row then binds to the wrong bones. Sanitize
+	# to unique placeholders so row i is ALWAYS bone i.
+	var used := {}
+	for i in range(bones.size()):
+		var n := String((bones[i] as Dictionary).get("name", "")).strip_edges()
+		n = n.replace(":", "_").replace("/", "_")
+		if n.is_empty():
+			n = "bone_%d" % i
+		if used.has(n):
+			n = "%s_%d" % [n, i]
+		used[n] = true
+		_skeleton.add_bone(n)
 	for i in range(bones.size()):
 		var bd: Dictionary = bones[i]
 		var parent := int(bd.get("parent_index", -1))

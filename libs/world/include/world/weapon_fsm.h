@@ -68,16 +68,31 @@ struct WeaponFsmActionRow {
     char function[128] = {};
     int32_t delaystart = -1;
     int32_t delayend = -1;
+    // The row's audio/effect legs [orig: ActionDef_ParseScriptLine @ 0x4023c0
+    // soundset/soundsetend/particle/particleuserpoint keys]. Empty = none.
+    char soundset[128] = {};
+    char soundsetend[128] = {};
+    char particle[128] = {};
+    char particleuserpoint[128] = {};
 };
 
 // A baked runtime action slot. [orig: ActionDef pool entry — delayStart/+0x24,
-// delayEnd/+0x28 (dwords +9/+10), anim name +58, resolved anim slot +24]
+// delayEnd/+0x28 (dwords +9/+10), anim name +58, resolved anim slot +24; the pool
+// entry also carries the row's resolved sound/effect references consumed by the
+// begin leg ActionSlot_ExecuteActionWithEffect @ 0x541860 / ActionSlot_SpawnEffect
+// @ 0x401f20 — carried here as the authored names; the host seams resolve them]
 struct WeaponFsmAction {
+    int32_t id = -1;         // the action slot id (weapon_action::*), stamped by the bake
     int32_t delay_start = 0;
     int32_t delay_end = 0;
     bool has_anim = false;   // anim name present AND the clip resolved
     char anim_key[64] = {};  // the .adm clip key (ACTION rows name them directly,
                              // e.g. "anim_wpn_fire")
+    char soundset[128] = {};          // played when the action's active phase begins
+    char soundsetend[128] = {};       // played when the active phase finishes (the
+                                      // events.action_finished seam)
+    char particle[128] = {};          // effect spawned at the model user point
+    char particle_userpoint[128] = {};
 };
 
 // The per-weapon def slice the FSM consumes. Flag bits are the witnessed WeaponDef+8
@@ -89,30 +104,45 @@ struct WeaponFsmDef {
     bool auto_fire = false;
     bool burst3 = false;
     int32_t clip_capacity = 0; // rounds per clip; < 0 = infinite (the def+0x58 == -1 paths)
-    int32_t flags = 0;         // the raw weapon.def flag mask (scoped 1 / sighted 2 / ...)
+    int32_t flags = 0;         // the flags1 dword [orig: token table @ 0x830bf0 — scoped 1,
+                               // sighted 2, ..., forcecrouch 0x40000 (keep-scope reload),
+                               // nocardswitch 0x2000000, forcescoped 0x20000000]
+    int32_t flags2 = 0;        // the flags2 dword (noselect 1 / ... / inset 0x200)
 };
 
 // ms -> 62.5 Hz ticks. [orig: Anim_GetDurationTicks @ 0x53ee10 = ms * 62.5 / 1000 + 1
 // (flt_7C3B3C)]
 int32_t weapon_anim_ticks_from_ms(int32_t ms);
 
-// Clip-duration source for the bake: clip length in SECONDS for an .adm key,
-// < 0 when the key does not resolve.
+// Clip-duration source for the bake: clip length in SECONDS for an .adm key, < 0
+// on failure. Multi-clip .adm rows make the slot a circular VARIANT ring; each call
+// is one duration READ — the callback serves the ring head and ADVANCES it, so
+// consecutive calls for one key may serve different variants
+// [orig: Anim_GetDurationTicks @ 0x53ee10 serves *slot then *slot = next(+36)].
 using WeaponClipSecondsFn = float (*)(void *ctx, const char *anim_key);
+
+// Existence probe for an .adm key — a pure lookup, never advances the ring
+// (0 = unresolved, non-zero = resolves)
+// [orig: AnimMap_FindSlotByName @ 0x40cfa0 != -1, checked at @ 0x5421ae].
+using WeaponClipResolvesFn = int (*)(void *ctx, const char *anim_key);
 
 // Bind the 12 action slots from the weapon's parsed ACTION rows — the Anim_InitActions
 // structural translation. Rows bind by suffix name (the original registers each row as
 // "<weaponName>_<suffix>" in a global pool and looks the composite back up per slot
 // [orig: @ 0x4023d5 prefix concat / @ 0x5420c6 lookup]; per-weapon rows + bare-suffix
 // match is the same binding). Missing rows become generated defaults. 'auto' (-1)
-// delays bake from the clip: delaystart = ticks; delayend = ticks, or ticks -
-// delaystart when ticks > delaystart; no anim / unresolved clip -> 0.
-// [orig: @ 0x5421b3..0x5421ec / 0x542152..0x542164]
+// delays bake from the clip via ONE duration read PER auto field — an action with
+// both delays auto consumes TWO ring entries, and the two reads can serve different
+// variants: delaystart = ticks(read1); delayend = ticks(read2), or ticks(read2) -
+// delaystart when greater; no anim / unresolved clip -> 0.
+// [orig: @ 0x5421b3..0x5421ec (the two Anim_GetDurationTicks calls @ 0x5421c5 /
+//  @ 0x5421d8) / 0x542152..0x542164]
 // FUNCTION rows are not consulted: every shipped row names the standard handler for its
 // own suffix (wpn_std_<suffix>, JOX + REVX corpora), so the per-state behavior is fixed
 // (divergence D-WPN-1).
 void weapon_fsm_bake(const WeaponFsmActionRow *rows, size_t row_count,
-                     WeaponClipSecondsFn clip_seconds, void *ctx, WeaponFsmDef &out);
+                     WeaponClipResolvesFn clip_resolves, WeaponClipSecondsFn clip_seconds,
+                     void *ctx, WeaponFsmDef &out);
 
 // The MountSlot FSM fields. [orig: MountSlot (100 B): counter +0, clip u16 +0x10,
 // currentAction +0x2C, nextAction +0x30, prevAction +0x34, switchTimer +0x58,
@@ -133,15 +163,22 @@ struct WeaponSlotState {
     // Scope stash across a reload: reload unscoped us, rescope when it completes.
     // [orig: g_rescopeAfterReload @ 0xB7647C; write @ 0x54312f, consume @ 0x54139e]
     bool rescope_after_reload = false;
+    // The deferred fire re-queue — the port's slot for the original's
+    // Input_QueueDeferredEvent(149, current_tick) events: set by the recoil window's
+    // refire and by a mid-FIRE fire request, consumed as a fire request by the NEXT
+    // tick's input stage (the deferred dispatch runs before the pump).
+    // [orig: Input_QueueDeferredEvent @ 0x4993e0; writers @ 0x542e9d / @ 0x53effd]
+    bool refire_queued = false;
 };
 
 // Per-tick inputs (the input-dispatcher writers run before the pump).
 struct WeaponFsmInputs {
     bool fire_pressed = false;  // the binding-149 activation edge
                                 // [orig: Player_RequestPrimaryFire @ 0x5414c0]
-    bool fire_held = false;     // held state; autos re-request per tick and the recoil
-                                // arbiter re-queues on it [orig: Input_IsBindingActive(149)
-                                // @ 0x542e7f]
+    bool fire_held = false;     // held state — polled ONLY by the recoil window's
+                                // deferred refire; held auto fire is the re-queue
+                                // chain, never a per-tick re-request
+                                // [orig: Input_IsBindingActive(149) @ 0x542e7f]
     bool reload_pressed = false; // the reload-key edge (case 0xD3 gates applied by caller)
     bool is_local = true;        // owner == g_local_player_entity paths
     bool is_authority = true;    // listen-host/SP: reload requests apply immediately
@@ -154,6 +191,19 @@ struct WeaponFsmInputs {
 struct WeaponFsmEvents {
     bool play_anim = false;
     char anim_key[64] = {};
+    int32_t action_started = -1;   // slot id whose ACTIVE phase began this tick — the
+                                   // host's sound/muzzle seam (def.actions[id] carries
+                                   // the soundset/particle names)
+                                   // [orig: ActionSlot_ExecuteActionWithEffect @ 0x541860]
+    int32_t action_finished = -1;  // slot id whose ACTIVE phase finished this tick — the
+                                   // END-leg sound seam (def.actions[id].soundsetend).
+                                   // Fire rows carry the gunshot here (118/130 REVX,
+                                   // 83/89 JOX fire rows use soundsetend, not soundset).
+                                   // [orig: ActionSlot_FinishActivePhase @ 0x53f7b0
+                                   //  plays ActionDef+12 via the end shim @ 0x401100,
+                                   //  gated on the phase byte being 2 (ACTIVE) at entry;
+                                   //  reached from WeaponAction_Fire @ 0x542d1a (per
+                                   //  shot) and WeaponAction_Reload @ 0x54316e]
     bool fired = false;            // Entity_FireWeaponAndSendPacket seam [orig: @ 0x542c5e]
     bool dry_fired = false;        // the EMPTY one-shot entered
     bool reload_requested = false; // C2S 0x25 seam [orig: @ 0x5430ff; net-re §5.58]
@@ -164,8 +214,9 @@ struct WeaponFsmEvents {
 
 // Request writers (the input-dispatcher sites).
 // [orig: WeaponSlot_RequestFire @ 0x53efa0] AUTO (Flags&0x100): current {0,3,9,10} ->
-// next=FIRE, {1} -> next=EMPTY, {2} -> deferred re-queue (the per-tick held re-request
-// covers it); SEMI: {0} -> FIRE, {1} -> EMPTY. Returns true when a fire was queued.
+// next=FIRE, {1} -> next=EMPTY, {2} -> re-queues the deferred fire event (the
+// refire_queued latch [orig: @ 0x53effd]); SEMI: {0} -> FIRE, {1} -> EMPTY. Returns
+// true when a fire was queued.
 bool weapon_fsm_request_fire(const WeaponFsmDef &def, WeaponSlotState &slot);
 // [orig: WeaponSlot_RequestReload @ 0x53f110] next {0,1,11} and no reload pending
 // (phase sign bit) -> next = RELOAD.

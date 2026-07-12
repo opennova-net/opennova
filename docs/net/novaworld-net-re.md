@@ -5873,7 +5873,18 @@ fire pipeline and §5.58 reload round-trip plug into.
 "<name>"` find-or-creates a global ActionDef pool entry named `<prefix>_<name>` (the
 prefix argument is the weapon's name; entry name at +122, `ActionDef_InitDefaults
 @ 0x4022b0` memsets the record — so **absent keys default to 0**, only an explicit
-`auto` writes the bake sentinel −1). Keys: `function` → +0 handler via
+`auto` writes the bake sentinel −1). The weapon.def driver
+(`WeaponDefs_ParseLineCallback @ 0x543680`) latches `g_weaponParseInActionBlock
+@ 0x252DB88` on `action` (after validating the name against the 12-suffix table;
+the created row — `ActionDef_GetCurrent @ 0x401ef0` — is stored per-suffix at
+`WeaponDef+0x2A4`) and forwards EVERY in-block line here — **before** its own
+`action` dispatch (`@ 0x54388d`). A nested `action` while one is open is therefore
+REFUSED: `@ 0x402409` logs "forgot an end", returns 1 WITHOUT creating the row, the
+old row stays current (subsequent keys overwrite it, last writer wins), and the
+driver ignores the rc — there is NO implicit closure; never-created suffixes become
+zeroed generated defaults at bind time. (Corpus note, 2026-07-10: every shipped
+weapon.def — JOX, JOTAC localres, RevX02, JO:CA, jox01, demo — is fully
+END-terminated; only malformed data reaches the refusal.) Keys: `function` → +0 handler via
 `ActionFuncDef_FindByName @ 0x401040` (unknown name → the `ActionSlot_ExecuteAction
 @ 0x4020a0` placeholder + warn), `anim` → +58 (a literal `.adm` clip key, e.g.
 `anim_wpn_fire`), `delaystart` → +36 / `delay`/`delayend` → +40 (ticks; `auto` → −1),
@@ -5895,11 +5906,48 @@ reload `@ 0x5430B0`, empty `@ 0x543180`, switchto `@ 0x5431D0`, switchfrom `@ 0x
 switchrank `@ 0x543500`, scopeup `@ 0x543290`, scopedown `@ 0x543320`, overheated →
 the idle handler. Missing rows become generated defaults; a null/placeholder handler
 takes the table default. The ANIM name resolves to an AnimMap slot (+24 via
-`AnimMap_FindSlotByName @ 0x40cfa0`) and the −1 delays bake from the clip:
-`delaystart = Anim_GetDurationTicks(adm, slot)` (`@ 0x53ee10` = ms × 62.5/1000 + 1 —
-the 62.5 t/s constant `flt_7C3B3C`), `delayend = ticks`, minus `delaystart` when
-`ticks > delaystart`; no anim/adm → −1 collapses to 0. Ends by playing global slot 241
+`AnimMap_FindSlotByName @ 0x40cfa0` — **stricmp, case-insensitive**, comparing from
+name+5 so the `anim_` prefix is skipped against the unprefixed 252-entry
+`g_animStateNameTable @ 0x8135F0`; JOTAC-era defs author `ANIM_WPN_*` uppercase
+while the .adm stores lowercase, D-WPN-10) and the −1 delays bake from the clip:
+each `−1` field is its OWN `Anim_GetDurationTicks(adm, slot)` call — delaystart
+`@ 0x5421c5`, delayend `@ 0x5421d8` — and every call is a CONSUMING ring read (below):
+it serves the slot's current entry then advances it (`@ 0x53ee26`), so a both-auto
+action consumes TWO ring entries and the two reads can serve different clips
+(CORRECTED 2026-07-11: the earlier "both auto → ds = de = ticks" reading is the
+single-clip special case, where every entry has one duration). The conversion is
+**trunc(ms × 62.5/1000 + 0.5) + 1** — the 62.5 t/s constant `flt_7C3B3C` and the
+round-to-nearest 0.5 `flt_7C3B94 @ 0x7C3B94` (byte-witnessed 2026-07-10, the
+pre-#219 port truncated without the +0.5); `delayend = ticks`, minus `delaystart` when
+`ticks > delaystart` (the just-baked delaystart); unresolved anim (`@ 0x542202`) / no
+adm (`@ 0x542180`) / no anim key (`@ 0x542152`) → −1 collapses to 0 (existence is the
+`FindSlotByName` LOOKUP `@ 0x5421ae`, never a read). Ends by playing global slot 241
 (`wpn_idle`) on the weapon's adm.
+
+**Multi-clip variant rings** (2026-07-11). A .adm row may list several quoted clips —
+`anim_wpn_reload	"m4_1r" "m4_1r" "m4_1r2"` — and `AnimMap_ParseConfigLine @ 0x40cb60`
+registers EVERY token on the same anim slot: `AnimMap_RegisterBoneNode @ 0x40c2d0`
+links each into a per-slot CIRCULAR list (node+36 = next), so the slot is a variant
+ring in authored order, and the duplication is the rotation weighting (r plays twice
+per r2 cycle). Both consumers serve-then-advance the ring head (the per-entity
+animState's slot array +72): `Anim_GetDurationTicks @ 0x53ee10` (the bake reads
+above) and `AnimMap_PlayAnimBySlot @ 0x40bda0`, which also LATCHES the served entry
+into the animState (+68 entry / +64 data / +60 slot) — playback samples the latch
+while the head moves on. Corpus: 792 multi-clip rows across the REVX02 .adm set
+(max 6 variants on one row), 72 in JOX. Worked REVVY M4 example: RELOAD authors
+`delaystart 200 / delayend auto` → ONE bake read (serves entry 0, head → 1), so the
+first reload PLAY serves entry 1 and the next served play is entry 2 — live-verified
+in the weapon_round probe (a refused reload request advances nothing). Port mapping:
+`libs/anim` adm keeps every token (`AdmEntry.values[]`, `value` = first);
+`NovaSkeletalAnim` registers one clip per token under the same key (peek-only —
+`get_clip_variant_count/lengths`, variant-arg getters/eval); the ring CURSORS live on
+`NovaSimulation` (the animState+72 analog — `weapon_fsm_bake`’s per-auto-field reads
+and the FSM play events consume them, and the play latch rides the weapon view as
+`anim_variant`, the +68 analog, so both viewmodel parts follow one serve). Riders:
+the sim re-seeds the rings per equip, riding the existing per-equip re-bake shape
+(retail bakes a def once globally, so its rings persist across re-equips — D-WPN-6
+family); the 3P body weapon channel and AI body clips still play variant 0 (the
+per-entity body-adm rings are an open tail of §14.8).
 
 **The slot + the pump** [orig: `WeaponAction_ProcessFrame @ 0x540e60`, driven per
 pooled entity by `WeaponAction_ProcessAllEntities @ 0x542690`]. MountSlot (100 B):
@@ -5907,15 +5955,17 @@ counter +0, clip u16 +0x10, rate/muzzle-flash tick +0x14, Def +0x20, owner +0x24
 currentAction +0x2C, nextAction +0x30, prevAction +0x34, switchTimer +0x58 (i16),
 phase +0x5A, kickIntensity +0x5B, charge +0x5C, flags +0x5E (bit0 = the §5.16 net-fire
 pose latch, bit1 = FP), burstCounter +0x62. Phase protocol: a transition writes
-phase=1 + counter=newDesc.delayStart; the handler's first tick flips 1(|0x40)→2 and
-**starts the action's clip on the equipped WeaponDef's own adm channel
+phase=1 + counter=newDesc.delayStart; the handler's first tick flips 1→2, **starts
+the action's clip on the equipped WeaponDef's own adm channel
 (`WeaponDef+0x174`, the FP viewmodel rig) — local player only** (CORRECTED 2026-07-09:
 the earlier "owner's animadm" reading; the 3P body's weapon layer is a separate
 producer, world-wac-ai-re.md §14.8)
 [orig: `ActionSlot_BeginActivePhase @ 0x53f830`; the effect shims
 `@ 0x541860`/`@ 0x5419e0` write the same protocol and same play target — they differ
 only in muzzle/particle spawning, forked by `ActionSlot_ExecuteActionTick @ 0x541a70`
-on third person / vehicle-attack / remoteness]; `ActionSlot_FinishActivePhase
+on third person / vehicle-attack / remoteness]. The held-ready phase 0x40 also
+flips to 2 and replays the clip, but skips the begin sound/ctrlreg/effect leg
+(`@0x53f88b`; normal phase-1 begin sound `@0x53f873`). `ActionSlot_FinishActivePhase
 @ 0x53f7b0(desc, slot, entity, next)` sets counter=delayEnd, nextAction=arg4, the
 ACTIVE→DONE kick bump (skipped for RELOAD), phase=4. Pump tail per tick: kick decay;
 overheat deny (heat > 0xFFFF converts a queued FIRE to EMPTY `@ 0x541046`); the IDLE
@@ -5946,7 +5996,15 @@ kick += recoil.ds+de+counter+10 cap 20. **recoil** — THE ARBITER: at clip end
 rounds → next = burst ? FIRE : IDLE; else reserve ≥ clipSize×unitsPerRound &&
 auto-reload → RELOAD `@ 0x54301d`; else EMPTYIDLE + one-shot unscope + the def+0x168
 auto-switch (`Player_SwitchToWeaponByHandle(65×def+0x164)` `@ 0x54307c`); the
-held-trigger refire re-queues input binding 149 `@ 0x542e9d`. **reload** — first tick
+held-trigger refire is a DEFERRED RE-QUEUE, not a per-tick request: the closing
+recoil ticks (`counter <= 1` — the phase-4 delayend ticks, or ANY tick of a
+zero-length recoil, entry included) re-queue binding 149
+(`Input_QueueDeferredEvent(149, current_tick) @ 0x542e9d`), gated `owner==local &&
+rounds && Flags&0x100 && (char)burst<=0 && Input_IsBindingActive(149)` `@ 0x542e7f`
+— the dispatch lands in RequestFire before the next pump (RECOIL → next=FIRE). The
+ROUNDS gate kills the chain at an empty magazine, so the arbiter's queued RELOAD
+stands and the volley never resumes after an auto-reload without a fresh press
+edge. **reload** — first tick
 (phase bit0, no 0x80) sends C2S 0x25 (§5.58), phase|=0x80 (transient — the first shim
 tick overwrites 2), stashes the scope (`g_rescopeAfterReload = g_weaponScopeActive`
 unless Flags&0x40000) + unscopes; clip end → Finish(next=IDLE `push 0 @ 0x543169`),
@@ -5961,7 +6019,9 @@ on every shipped def; the ADS easing is the camera interp).
 fire = `WeaponSlot_RequestFire @ 0x53efa0` (ex `sub_53EFA0`; via
 `Player_RequestPrimaryFire @ 0x5414c0`, ex the kong-misnamed
 `Terrain_UpdateColorInterpolation`) — AUTO (Flags&0x100): current {0,3,9,10}→FIRE,
-{1}→EMPTY, {2}→deferred re-queue; SEMI: {0}→FIRE, {1}→EMPTY; charge weapons
+{1}→EMPTY, {2}→deferred re-queue (`Input_QueueDeferredEvent @ 0x53effd` — the loop
+self-sustains while FIRE is current, so a mid-FIRE press banks ONE follow-up shot
+through the recoil dispatch even if released); SEMI: {0}→FIRE, {1}→EMPTY; charge weapons
 (Flags&0x80000000) hold-release via `g_fireChargeStartTick @ 0xB76800` (≥31 ticks
 scales the charge, binding 150). reload = `WeaponSlot_RequestReload @ 0x53f110`
 (phase sign clear && queued next ∈ {0,1,11}); the key case 0xD3 pre-gates clip ≠
@@ -5983,25 +6043,107 @@ fire→recoil chain, auto cadence, semi edge, burst-3, empty paths, auto-reload 
 `libs/def` parses `scope_max_mag` (+ the `whileswimming` flag-table length fixed:
 13, not 14 — the token never matched); `NovaWeaponDatabase` surfaces
 flags/scope_max_mag/actions; `NovaSimulation` pumps the LOCAL player's slot once per
-logic tick after the world advances (all four paths) and exposes typed-record state
-(serial counters); `GameWorld` bakes from the resolved weapon dict + the loaded
-viewmodel's clip lengths; `LocalPlayerHost` feeds LMB/R/RMB through the world-tick
-input path, plays FSM clips on BOTH viewmodel parts (restart via
-`set_animation_time(0)`), and realizes ADS: the eased pos→tpos view bias
+logic tick after the world advances (all four paths), keeps latest-value snapshot
+serials for diagnostics/rebuild, and appends each tick's clip/begin/end payload to an
+ordered destructive event batch with `age_ticks`; `GameWorld` bakes from the resolved
+weapon dict + the loaded viewmodel's clip lengths and types the drained records;
+`LocalPlayerHost` feeds LMB/R/RMB through the world-tick input path, drains every event
+in order, plays FSM clips on BOTH viewmodel parts at their catch-up age, and realizes
+ADS: the eased pos→tpos view bias
 (15-tick fraction), the main-camera FOV 80h → 80/mag h→v through the live aspect,
 reload/one-shot forced unscope + the pump's rescope. Live-verified (fp_clean_probe
 `NOVA_VM_FSM=1`, JOX 05TR): 6-shot auto burst (clip 30→24, ~9-tick cadence from the
 recoil clip), reload refill 24→30 with reserve 300→294 (the §5.58 refund math),
 mid-reload RMB refused, ADS engage fraction→1 with cam fov 80h→40h, disengage clean.
 
-**Divergences** (ledger D-WPN-1..9): the FUNCTION registry unported (std-only in all
+**Divergences** (ledger D-WPN-1..13): the FUNCTION registry unported (std-only in all
 shipped data, D-WPN-1); single-pool ammo vs per-class pools (D-WPN-2); CanFire's
 busy-child/underwater/score-lock legs + kick sound gate (D-WPN-3); the heat model
 (`WeaponSlot_CalcAccumulatedHeat @ 0x53f780` internals unwitnessed, D-WPN-4); the
 weapon-switch machinery seams (D-WPN-5); local-player-only pump (D-WPN-6); interim
 ammo seed clipsize/startrounds (D-WPN-7); FSM↔net uplink unwired (C2S 0x06/0x25 from
 events, D-WPN-8); ADS residuals — SIGHTS overlay draw, unscope-on-move site, zoom-level
-keys, scope net notify, 7-step interp variant, stance/NVG gates (D-WPN-9).
+keys, scope net notify, 7-step interp variant, stance/NVG gates (D-WPN-9);
+**D-WPN-10** [reimpl divergence, FIXED 2026-07-10] the host clip-key lookup
+(`NovaSkeletalAnim::find_clip`) compared case-SENSITIVELY where the original is
+stricmp (`AnimMap_FindSlotByName @ 0x40cfa0`) — on JOTAC-era data (base localres +
+RevX02 author `ANIM_WPN_*` uppercase; the .adm stores `anim_wpn_*` lowercase) every
+`auto` delaystart/delayend collapsed to 0 and `has_anim` died, so the viewmodel
+played no weapon-action clips (JOX's lowercase rows masked it). Fixed to
+`nocasecmp_to`. **D-WPN-11** [reimpl divergence, FIXED 2026-07-11] `begin_active`
+treated phase 0x40 as a normal phase-1 entry and emitted `action_started`, replaying
+begin sound/effects; split to match `ActionSlot_BeginActivePhase`'s anim-only held
+branch `@0x53f88b`. **D-WPN-12** [integration divergence, FIXED 2026-07-11] action
+presentation crossed the sim/host boundary as a latest-value snapshot plus serials;
+several fixed catch-up ticks before one present pass overwrote distinct payloads and
+the host consumed a serial jump as one edge. Replaced by the ordered destructive event
+batch above; snapshot serials remain diagnostic/rebuild state. **D-WPN-13** [reimpl
+divergence, FIXED 2026-07-12] the port ran held auto fire as a per-tick
+`request_fire` re-request where the original sustains the volley through the recoil
+window's rounds-gated deferred re-queue (`@ 0x542e7f..0x542e9d`) — at an empty
+magazine the ungated re-request overwrote the recoil arbiter's queued RELOAD every
+tick, so a held trigger never auto-reloaded and the FSM thrashed FIRE↔RECOIL at
+31 Hz replaying the recoil row's soundset/particle (REVVY M4: SHELLDROP + the muzzle
+flash strobing on a dry gun). Fixed by porting the witnessed chain: a
+`refire_queued` slot latch (the deferred-event queue) written by the recoil window
+and by RequestFire's mid-FIRE re-queue (`@ 0x53effd`), consumed as the fire request
+one tick later.
+
+**The delaystart/delayend grill (2026-07-10, PR #219 validation).** Re-witnessed the
+delay pipeline end to end: parse (`delaystart` → +36, `delay`/`delayend` → +40 — the
+bare `delay` alias now ported; `auto` → −1, absent → 0), the bake (formula corrected
+above), and every pump consumption site (transition `counter=ds @ 0x5413ea` +
+`@ 0x54146d`; finish `counter=de @ 0x53f7b0`; idle reseed `ds+de @ 0x54135d`;
+idle-with-queued-next counter cut to 0 `@ 0x541370`; kick `recoil.ds+de+counter+10`)
+— all MATCHING. #219's interim "implicit ACTION closure" parser change was REVERTED
+to the witnessed nested-`action` refusal (see the registry paragraph): its
+justifying corpus claim (JOTAC AK47AUTO missing `end`s) is false — all six corpus
+copies are fully terminated, and retail parses a genuinely-mixed file by swallowing,
+not closing. Retail tolerates the resulting zero-delay generated defaults: at
+counter==0 with phase 1/2 the pump still runs the handler (LABEL_118 `@ 0x5414a2`),
+so a {ds 0, de 0} action finishes on its entry tick — shipped data leans on this
+(every JO fire row is `delaystart 0` + explicit `delayend`; the AK's cadence is the
+fire delayend + recoil {0,0}).
+
+**The held-refire grill (2026-07-12, the PR #226 REVVY M4 fix round).** The REVVY
+`WPN_M4AUTO` (fire {0,3} → recoil {0,0}, the standard retail shape) wedged at
+clip-empty under a held trigger — root-caused to D-WPN-13 above and fixed by porting
+the deferred-refire chain verbatim. The volley cadence is unchanged and now derived,
+not invented: fire delayend N → an (N+2)-tick cycle (shot tick + N counter ticks +
+the zero-length recoil pass whose re-queue dispatches the following tick) — REVVY M4
+{0,3} = 5 ticks = 750 rpm, JOX AK {0,6} = 8 ticks ≈ 469 rpm. Behavioral corollaries
+now pinned in ctest `weapon_fsm` (empty-mag held auto-reload with no FIRE↔RECOIL
+thrash + no post-reload resume; the mid-FIRE banked tap; held-empty dry-click
+silence — clicks are per press EDGE, the input dispatch is edge-based): a held
+trigger alone never re-requests fire; every sustained volley is the recoil window's
+re-queue loop.
+
+**The frozen-viewmodel grill (2026-07-12, the PR #226 fix round 5).** With the refire
+chain fixed the REVVY M4 still presented wrong live: ammo drained at the correct
+5-tick cadence but the gun kicked once and froze until release. The sim, the event
+batch, and the host drain all verified correct (headless FSM probe on the real dict;
+per-tick drain dump; the weapon_round_probe NOVA_WR_ANIMTRACE playhead trace) — the
+root cause was OUTSIDE the FSM: the `.bad` pose bake dropped every clip's final
+channel key (the header `frame_count` counts INTERVALS; channels carry
+`frame_count + 1` keys), and `m4_1f` — the M4 fire clip — is a ONE-frame clip whose
+entire kick motion is key 0 -> key 1, so it collapsed to a static kicked pose
+(D-ANIM-1, FIXED; ADR 0007 §3). Witnessed along the way and RECORDED AS RESIDUAL:
+the FP weapon adm channel is CLOCKED BY THE FSM, not wall time — every play re-inits
+the channel (`AnimChannel_InitFromData(.., rate 4096, phase 0.0)` inside
+`AnimMap_PlayAnimBySlot @ 0x40bdd1`), and the begin shim's phase-2/DONE leg advances
+it ONE dispatch per pump tick only while the action's COUNTER is nonzero and the
+action row resolved an anim (`ActionSlot_BeginActivePhase @ 0x53f8d2..0x53f8de` —
+the counter gate; anim-less rows like the shipped RECOILs freeze the channel). The
+port free-runs clips at wall clock: at 62.5 Hz the witnessed advance is ~one
+half-frame per tick (2 x 30 fps ~= 62.5), so the rates agree; the freeze during
+anim-less/expired actions is the recorded divergence tail (rides D-WPN-6's
+presentation family).
+
+**IDB (2026-07-10 session).** Renamed: `ActionDef_GetCurrent @ 0x401ef0` (ex
+`sub_401EF0` — returns the open ActionDef), `g_currentActionDef @ 0xA2E8E8`,
+`g_weaponParseInActionBlock @ 0x252DB88`, `g_weaponParseCurActionDef @ 0x252DB8C`.
+Comments: the `@ 0x402409` refusal, the `@ 0x54388d` forward-before-dispatch order,
+`@ 0x40cfa0` stricmp + name+5 prefix skip, `@ 0x401ef0`. idb_save run.
 
 **IDB (this session).** Renamed: `WeaponSlot_RequestFire @ 0x53efa0`,
 `Player_RequestPrimaryFire @ 0x5414c0`, `WeaponSlot_TryQueueScopeUp @ 0x53f050`,
@@ -6028,9 +6170,164 @@ resets the scope + FOV 80. View biases zeroed, `Player_UpdateFirstPersonCamera` 
 immediately, seat-flag 0x40000 → C2S 0x1D/169, scoped-capable slots re-arm the camera
 interp. IDB: both queue helpers renamed + commented; saved.
 
+**The ACTION sound legs (2026-07-10, the "no gun sounds" grill).** The rows carry TWO
+sound fields and the engine plays them at different phase edges:
+
+- **Begin leg** — `soundset` → `ActionDef+8`, resolved at parse
+  (`SoundBank_FindSetByNameAnyBank @ 0x5274f0`; a missing set logs + skips the write).
+  Played by `ActionSlot_PlaySound @ 0x4010c0` from every begin shim on the phase 1→2
+  edge (`ActionSlot_BeginActivePhase @ 0x53f873`, `..ExecuteActionWithEffect @ 0x5418b0
+  / @ 0x541976`, `..ExecuteActionNoEffect @ 0x541a2a`) — 3D at the owner entity
+  (`Entity_PlaySound3D_FullVolume @ 0x528e20`; local uses entity+4 position directly).
+  The plain-Begin held-variant (0x40) plays anim only, no sound `@ 0x53f88b`
+  (D-WPN-11, fixed in the port 2026-07-11).
+- **End leg** — `soundsetend` → `ActionDef+12`. Played by the end shim `@ 0x401100`
+  (ex kong "ActionSlot_RenderModelWithLOD" — a misnomer; its "LOD loop" is the
+  `dupsound` repeat scheduler) from `ActionSlot_FinishActivePhase @ 0x53f7d6`, gated
+  on the phase byte being 2 (ACTIVE) at entry `@ 0x53f7b9` — a phase-1 abort finishes
+  silently. FinishActivePhase is reached from exactly two handlers:
+  `WeaponAction_Fire @ 0x542d1a` (per shot — **the gunshot lives here**: 118/130 REVX
+  and 83/89 JOX fire rows use `soundsetend`, not `soundset`) and `WeaponAction_Reload
+  @ 0x54316e` (completion). `dupsound N M` (`+44` count / `+48` interval; `N==1`
+  normalized to 0 `@ 0x40260f`) schedules N−1 delayed repeats — zero uses in the
+  JOX/REVX corpora (data-dead).
+- **Weapon-level sounds** — four 24-B name strings at WeaponDef `+0x2F8/+0x310/+0x328/
+  +0x340` from keys `soundfireloop`/`soundtrailoff`/`soundhead`/`soundlockedtone`
+  (`WeaponDefs_ParseLineCallback @ 0x5444c8..0x544578`), resolved post-parse into ids
+  `+0x294/+0x298/+0x29C/+0x2A0` (`WeaponDef_ResolveAllReferences @ 0x54042c..0x540482`).
+  The fire handler plays `+0x294` only when `kickIntensity == 0` (volley start)
+  `@ 0x542ccc..0x542ce9`. **Zero uses in JOX+REVX weapon.def** — the leg is data-dead
+  for our SKUs (witnessed, unported; the `sub_527AD0(+8)` read after the fire begin is
+  a discarded pure read `set+72 << 16` — no audible effect).
+- **Effect (particle) routing** — the local player's begins route through
+  `ActionSlot_ExecuteActionTick @ 0x541a70`: only FIRE (`slot+44 == 2`) can take the
+  with-effect shim, and only in third person (`g_camera_mode`), from a vehicle-attack
+  seat, or un-scoped FP (`dword_24D20C0 & 1 && !g_weaponScopeActive @ 0x541aba`);
+  every other local begin is the no-effect shim `@ 0x541b17` — casing ejects
+  (`recoil` rows' particles) never spawn in your own FP view. Remote entities always
+  take the with-effect shim `@ 0x541a83` (an MP seam for us). The muzzle spawn is
+  double-spawn-guarded: `@ 0x5418c8` spawns only when `slot+24` is clear;
+  `ActionSlot_SpawnEffect @ 0x401f20` records the emitter handle there with the
+  on-death callback `ActionSlot_ClearEffectHandle @ 0x53f760` riding the 14-dword
+  descriptor. The spawn point is the weapon model's `launchuserpoint` (name `+0x2E8`
+  → resolved 1-based index `+0x2D4` on the gfx1 model; per-entity fallback
+  `Entity_GetWeaponSlotByte(entity, clip & 3, 1) @ 0x541912`). Reload begins pass
+  effectScale 0.0 (`@ 0x543150`) — reload rows' particles never spawn anywhere.
+- **Cadence refutation** — the June "+20 fire-expiry" note is refuted at both request
+  sites: `WeaponSlot_RequestFire @ 0x53efa0` and `WeaponSlot_CanFire @ 0x541ba0` carry
+  no tick gate; the rate of fire IS the fire row's `delayend` (AK47AUTO `delayend 6` ≈
+  625 rpm at 62.5 Hz) + the recoil delays. `WeaponSlot_CanFire`'s other legs annotated:
+  busy weapon child (`Entity_FindChildByDefType(e,1,1)`), underwater refusal (def
+  `Underwater 0x4` / entity swim `0x8000` vs `Env_WaterHeightFixed`), and the empty leg
+  writing `slot+48` = 3 (reserve) / 1 — the port's `can_fire_ammo` shape.
+
+Port row: each tick's `WeaponFsmEvents` clip/begin/end payload is copied into
+`NovaSimulation`'s ordered event batch → `GameWorld.drain_local_player_weapon_events`
+types and destructively drains it → `LocalPlayerHost` consumes every record in order.
+Each record carries `age_ticks` and the production-tick position, so a clip emitted early
+in a multi-tick catch-up starts at its correct presentation age and 3D sounds retain their
+tick-local origin. Snapshot serials
+remain available for diagnostics and viewmodel rebuild, but are not the event-delivery
+mechanism (D-WPN-12). `action_finished` is still emitted only by `finish_active` on the
+was-ACTIVE edge; the begin-leg SOUND follows `action_started`, except held-ready 0x40
+which replays only the animation (D-WPN-11).
+The particle legs (the `@ 0x541a70` routing gates, `spawn_effect_unless_alive` /
+the slot+24 guard) ride the particles slice with `NovaEffectWorld` itself. ctest
+`weapon_fsm` pins both legs + the silent abort; GUT `local_player_host_test` pins
+the sound drains.
+
+**The FLAGS table + the ADS toggle protocol (2026-07-10, the nocardswitch grill).**
+The weapon.def `flags` token table is fully witnessed: a 16-B-stride
+`{name, 0, flags1 bit, flags2 bit}` table `@ 0x830bf0` — flags1: Scoped 1, Sighted 2,
+Underwater 4, ShowComander 8, NoClipsNoDraw 0x10, Burst 0x20, NotDropable 0x40,
+Emplaced 0x80, Auto 0x100, norangecheck 0x200, ShowRange 0x400, ShowElevation 0x800,
+Armor 0x1000, OkWhileJumping 0x2000, OnlyFireScoped 0x4000, LollyPop 0x8000,
+AbsorbPitch 0x10000, NoMove 0x20000, ForceCrouch 0x40000, OnlyScoped 0x80000,
+2DImpact 0x100000, UseDesignator 0x200000, UseSpreadTwo 0x400000,
+ShowImpactDist 0x800000, WhileSwimming 0x1000000, **NoCardSwitch 0x2000000**,
+HandGunUp 0x4000000, QuickSwitch 0x8000000, OnlyFireLocked 0x10000000,
+ForceScoped 0x20000000, LaserBeam 0x40000000, PowerThrow 0x80000000; flags2:
+NoSelect 1, Parachute 2, Thermal 4, Monitor 8, ViewLock 0x10, onlylockscoped 0x20,
+NoAmmoTypes 0x40, showhudpip 0x80, FixVerticalOfst 0x100, **Inset 0x200**,
+NoAutoZero 0x400, Invisible 0x800. The libs/def 7-entry subset had WhileSwimming
+aliased onto Underwater's 0x4 — replaced with the full two-dword table
+(`DefWeaponDef.flags2` appended; both FFI mirrors extended).
+
+`Player_ToggleWeaponScope @ 0x4df0c0`, re-read in full:
+
+- Every toggle is REFUSED while the scope-camera interp runs
+  (`!g_fpCameraInterp.activeFlag @ 0x4df177`), and while swimming/parachuting
+  (entity Flags 0xA000), on mounts with parentSlot 2/5, un-scoping a ForceScoped
+  weapon (`0x20000000 && g_weaponScopeActive @ 0x4df12d`), or NVG-blocked Inset
+  weapons (flags2 0x200 + `g_NVGActive`).
+- The ease is `CNetPlayerInterp_Setup` between the def POS (`AltCamOffset` + 0x10C)
+  and TPOS (+0x124): **15 steps, or 7 for Inset weapons** (`Def->Field0C & 0x200`
+  `@ 0x4df1d2/@ 0x4df33f`), and **1 step on the hipfire-return leg**
+  (`g_scopeHipfire @ 0x82CE98`, set 1 on disengage `@ 0x4df212`, 0 on engage
+  `@ 0x4df373`). The stepper (`CNetPlayer_InterpolateTransformStep @ 0x4ddd20`)
+  writes the view bias globals (`g_view_pos_bias_* @ 0xB76520..`,
+  `g_view_rot_bias_* @ 0xB7652C..`) the FP camera adds each frame;
+  `Player_MountWeaponSlot` zeroes them `@ 0x4dfbcf`.
+- Sighted-weapon FOV: engaged FP = `80 / Player_GetClampedWeaponElevation
+  @ 0x4dc6b0` — the slot's ADJUSTABLE zoom (`MountSlot.Elevation`), seeded to
+  `Def->MaxElevation` (scope_max_mag) on first use and clamped [0, max]; 3P or
+  disengaged = 80 (`g_cameraFovDeg = 0x500000`). Port note: our 80/scope_max_mag
+  equals the seeded default; the zoom-adjust input is an open tail.
+- The engage leg replicates C2S 0x1D (type 169) when seat-flag 0x40000 allows,
+  and seat-flag 0x10000 zeroes the pitch.
+
+**NoCardSwitch (0x2000000) — the witnessed consumers** (the full binary sweep for
+the 0x02000000 immediate): while the equipped slot is mid-RELOAD on a weapon
+WITHOUT the flag — the predicate is `Player_IsReloadingCardSwitchWeapon @ 0x4dcdd0`
+(ex kong "Player_IsDriverInVehicle"; its "seat 4" was currentAction==RELOAD) —
+(a) `Player_UpdateFirstPersonCamera` SKIPS the view bias add, rot and pos legs
+(`@ 0x4dd439/@ 0x4dd4cc`): the sight picture drops instantly for the reload;
+(b) `Player_CanFireWeapon @ 0x5cf7be` refuses fire. NoCardSwitch weapons (REVX:
+knife, pistols, shotgun, the PointAim MGs, mortar/emplaced/turrets) keep their
+raised view through a reload. A third `test edx, 2000000h` site sits in
+`RoundData_SpawnRound @ 0x4ec249` (unclassified — likely a different dword; open).
+Related reload rule: **ForceCrouch (0x40000) weapons skip the reload scope stash
+entirely** (`@ 0x543126` -> `g_rescopeAfterReload = 0 @ 0x54313d`) — the mortars
+keep the sight view; every other weapon stashes + unscopes `@ 0x54312f`. The
+one-shot last-round unscope sites are gated on `!ForceScoped` (0x20000000).
+
+Port row: libs/def full flag table + `flags2`; `player_view_set_engaged` (the
+latch/refusal protocol, 15/7/1 steps, the hipfire latch);
+`weapon_fsm` keep-scope reload + ForceScoped gates; the sim exposes
+`suppress_view_bias` (the NoCardSwitch reload camera rule) and refuses mid-ease
+scope toggles; ctest player_view/weapon_fsm/def_parse_weapons pin all three.
+
+**The movement-scope legs (2026-07-11, the weapon-round grill).** The input packer
+`Player_PackInputStateToEntity @ 0x4df450` latches `g_movementKeyHeld @ 0xB7653B`
+on any of the four direction keys (`@ 0x4df4bb` / cleared `@ 0x4df4f9`) and drives:
+(a) **unscope-on-move** — SETTLED at scope (`g_weaponScopeActive`, promoted only at
+ease completion by `Player_UpdatePerFrame @ 0x4de4f7`: `scopeActive = engaged`)
+on a Scoped (flags 1) weapon, movement routes through `Player_ToggleWeaponScope`
+(`@ 0x4df4c9..0x4df4ec`) = the full unscope, subject to the toggle's own
+**ForceScoped pin** (`(flags1 & 0x20000000) == 0 || !scopeActive` `@ 0x4df12d` —
+a grill catch: the pin previously lived only on the FSM one-shot path in the
+port); (b) **scope-UP refusal while moving** — `g_movementKeyHeld && (flags & 1)
+-> return` `@ 0x4df29c`. PORTED: `player_view_move_input` /
+`player_view_scope_up_blocked` + the `NovaSimulation` wiring; the prior
+"@ 0x4df0a2" site note was the FP-viewmodel render epilogue (corrected).
+WITNESSED-DEFERRED (the tri-state follow-up): the mid-UP-ease movement reversal
+(`@ 0x4df548` — ease back to hip, `g_scopeEngaged` stays latched), the settled
+drop-with-memory (`@ 0x4df5ae`, masked by `flags & 0x20000080`), and the
+auto-re-raise on key release (`@ 0x4df607`) — all keep `engaged` latched while
+away from the scope, which needs the explicit engaged/active/hipfire tri-state
+our derived `scope_card_active` cannot represent. Related new witness: weapons
+with **HandGunUp (0x4000000)** auto-follow player flag 0x4000 raise/lower when
+the ease is idle (`@ 0x4de444..0x4de4b7`; the player-flag writer is unwalked).
+
 **Open follow-ups:** who queues OVERHEATED(11);
 the `*_map` scope function variants; `WeaponSlot_CalcAccumulatedHeat @ 0x53f780`;
-`dword_24D20C0` option bits; the `word_B7C670` transition write vs the §5.16 shot-seq.
+`dword_24D20C0` option bits; the `word_B7C670` transition write vs the §5.16 shot-seq;
+remote-entity action sounds/effects (the `@ 0x541a83` leg) once remote slots pump;
+the RoundData_SpawnRound 0x2000000 test site; the slot Elevation zoom-adjust input;
+the scope tri-state (engaged/active/hipfire) for the movement reversal legs; the
+HandGunUp auto-follow (player flag 0x4000 writer); loose-REVX audio: a loose
+extract advertises no expansion, so revx02.LWF (the M82 GS_/GF_ sets) never
+loads — the expansion setting must name it (config, not code).
 
 ## 6. Struct reference
 
@@ -8260,4 +8557,3 @@ other observer decodes. FIXED: `resolve_item_traits` caches the Player-template 
 the structural port of the retail spawn init. Pinned by player_spawn + two_peer_fanout (spawn
 byte 0x28). LIVE-VERIFIED retail-join v16/v18 (2026-07-02): the joiner's field-17 reads the
 golden 0x28 on the wire; diff_0a header health = 150 matches golden.
-

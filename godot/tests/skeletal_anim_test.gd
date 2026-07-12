@@ -303,3 +303,65 @@ func test_object_preview_arms_overlay() -> void:
 	# Clear removes it.
 	preview.clear_arms()
 	assert_false(preview.has_arms(), "arms model removed after clear")
+
+
+func test_multi_clip_adm_rows_register_variants() -> void:
+	# Multi-clip .adm rows: every quoted token registers a VARIANT of the same key in
+	# file order — the original's per-slot circular ring; the CURSOR lives with the
+	# FSM owner (NovaSimulation), so this surface is peek-only data.
+	# [orig: AnimMap_ParseConfigLine @0x40cb60; AnimMap_RegisterBoneNode @0x40c2d0]
+	var dir := ProjectSettings.globalize_path("res://.godot/skeletal_variants_test")
+	if not DirAccess.dir_exists_absolute(dir):
+		assert_eq(DirAccess.make_dir_recursive_absolute(dir), OK)
+	for bad in ["idle.bad", "walk.bad"]:
+		var out := FileAccess.open(dir.path_join(bad), FileAccess.WRITE)
+		assert_not_null(out)
+		out.store_buffer(FileAccess.get_file_as_bytes("res://../fixtures/anim/" + bad))
+		out.close()
+	var adm := FileAccess.open(dir.path_join("variants.adm"), FileAccess.WRITE)
+	assert_not_null(adm)
+	adm.store_string("
+anim_reset				\"idle.bad\"
+"
+		+ "anim_wpn_idle				\"idle.bad\"
+"
+		+ "anim_wpn_reload				\"walk.bad\" \"walk.bad\" \"idle.bad\"
+")
+	adm.close()
+
+	var sk := NovaSkeletalAnim.new()
+	var root := NovaResourceRoot.new()
+	root.set_root_dir(dir)
+	assert_true(sk.load_from_resource_root(root, "variants.adm"),
+		"variants.adm loads: %s" % sk.get_last_error())
+	assert_eq(sk.get_clip_variant_count("anim_wpn_reload"), 3,
+		"the triple row registered three variants (duplication = rotation weighting)")
+	assert_eq(sk.get_clip_variant_count("anim_wpn_idle"), 1, "single rows stay single")
+	var lengths: PackedFloat32Array = sk.get_clip_variant_lengths("anim_wpn_reload")
+	assert_eq(lengths.size(), 3, "one ring length per variant, file order")
+	assert_almost_eq(float(lengths[0]), sk.get_clip_length("anim_wpn_reload", 0), 0.0001)
+	assert_almost_eq(float(lengths[2]), sk.get_clip_length("anim_wpn_reload", 2), 0.0001)
+	# Out-of-range variants wrap modulo the count (per-part load divergence guard).
+	assert_almost_eq(sk.get_clip_length("anim_wpn_reload", 5),
+		sk.get_clip_length("anim_wpn_reload", 2), 0.0001, "variant 5 wraps to 5 %% 3")
+	assert_eq(sk.eval_pose("anim_wpn_reload", 0.0, 2).size(), sk.get_bone_count(),
+		"variant-aware eval poses every bone")
+
+	# The model's variant latch: play_body_clip_variant re-poses on a variant change
+	# and resumes on the same key+variant (mirrors play_body_clip's same-key resume).
+	var model = NovaObjectModelScript.new()
+	add_child_autofree(model)
+	model.set_skeletal_anim(sk)
+	model.play_body_clip_variant("anim_wpn_reload", 2)
+	assert_eq(model.get_active_body_clip(), "anim_wpn_reload")
+	model.set_animation_time(0.05)
+	var t_before: float = model.get_animation_time()
+	model.play_body_clip_variant("anim_wpn_reload", 2)  # same variant: resume
+	assert_almost_eq(model.get_animation_time(), t_before, 0.0001,
+		"a same-key same-variant replay resumes (no playhead reset)")
+	model.play_body_clip_variant("anim_wpn_reload", 0)  # variant change: restart
+	assert_eq(model.get_animation_time(), 0.0, "a variant change restarts the clip")
+
+	for name in ["idle.bad", "walk.bad", "variants.adm"]:
+		DirAccess.remove_absolute(dir.path_join(name))
+	DirAccess.remove_absolute(dir)

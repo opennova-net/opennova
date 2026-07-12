@@ -32,6 +32,8 @@ var _viewport: SubViewport
 var _world  # GameWorld
 var _camera: Camera3D
 var _player_host: LocalPlayerHost
+var _container: SubViewportContainer
+var _ui_overlay_layer: CanvasLayer
 var _ui_overlay: Control
 var _armory: NovaArmoryHost
 var _hud_host: NovaGameHudHost
@@ -49,8 +51,9 @@ func _ready() -> void:
 	container.name = "PlayViewportContainer"
 	container.stretch = true
 	container.mouse_filter = Control.MOUSE_FILTER_STOP
-	container.set_anchors_preset(Control.PRESET_FULL_RECT)
+	container.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(container)
+	_container = container
 
 	_viewport = SubViewport.new()
 	_viewport.name = "PlayViewport"
@@ -80,14 +83,24 @@ func _ready() -> void:
 	add_child(_player_host)
 	_player_host.setup(_world, _camera)
 
-	# One clipped overlay surface sized to the embedded play panel. The HUD and
-	# armory share it; PlayStatus is added afterward and stays above both.
+	# One clipped overlay surface tracking the embedded play panel. The HUD and
+	# armory share it. It rides its own CanvasLayer at the game shell's $HUD
+	# layer (viewmodel pass 0 < HUD 1 < menus 2), or the FP viewmodel pass —
+	# a CanvasLayer itself — draws the gun OVER every HUD element; and the rect
+	# syncs to the panel each frame (a CanvasLayer child cannot anchor to a
+	# sibling Control, and an anchors-only preset on a fresh zero-rect Control
+	# keeps it zero-sized: with clip_contents that clipped the HUD and the
+	# armory to nothing in play-in-editor).
+	_ui_overlay_layer = CanvasLayer.new()
+	_ui_overlay_layer.name = "GameplayOverlayLayer"
+	_ui_overlay_layer.layer = 1
+	add_child(_ui_overlay_layer)
 	_ui_overlay = Control.new()
 	_ui_overlay.name = "GameplayOverlay"
 	_ui_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_ui_overlay.clip_contents = true
-	add_child(_ui_overlay)
-	_ui_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_ui_overlay_layer.add_child(_ui_overlay)
+	_sync_overlay_rect()
 
 	# The in-game HUD — the SAME NovaGameHudHost the game shell mounts (crosshair,
 	# ammo cluster, mission text), so play-in-editor shows the game's HUD. Added
@@ -182,9 +195,23 @@ func get_player_host():
 	return _player_host
 
 
+# Track the play panel with the overlay: the overlay lives on a CanvasLayer (so
+# it draws above the FP viewmodel pass), which cannot anchor to the panel — copy
+# the rect instead. Cheap no-op compares; runs every frame while mounted.
+func _sync_overlay_rect() -> void:
+	if _ui_overlay == null or _container == null:
+		return
+	var r := _container.get_global_rect()
+	if _ui_overlay.global_position != r.position:
+		_ui_overlay.global_position = r.position
+	if _ui_overlay.size != r.size:
+		_ui_overlay.size = r.size
+
+
 # The literal game-shell per-frame order (main_game._process): drive the loaded
 # world's foliage + runtime + audio around the play camera.
 func _process(delta: float) -> void:
+	_sync_overlay_rect()
 	if _playing and _world != null and _world.is_loaded():
 		# The armory overlay frees the mouse like the debug overlay does — play
 		# keeps ticking (LIVE armory, no world-stop leg) but input idles and the

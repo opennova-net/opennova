@@ -63,6 +63,28 @@ func _combo_texts(c: NovaMnuCombo) -> Array:
 	return out
 
 
+# The armory row label = LOADOUT_MENU_TEXTID resolved in the gametext table's WepDes
+# section [orig: WeaponDef_ParseProperty @0x54d730 — GameText_GetString("WepDes",
+# textid) -> g_loadoutWeaponTable entry+40, raw weapon name fallback; g_TextGameText
+# loads gametext.bin @0x4a6cd0 — NOT Game.bin, the separate menu resource @0x552510].
+func test_weapon_labels_resolve_from_gametext_wepdes() -> void:
+	var t := RtxtStringFile.new()
+	assert_eq(t.load_from_byte_array(
+			FileAccess.get_file_as_bytes("res://../fixtures/rtxt/gametext.bin")), OK,
+			"gametext.bin fixture loads")
+	NovaStrings.register_table("gametext", t)
+	var expected := t.get_string_in_section("WepDes", "WEAP_SHORT_M4")
+	assert_true(not expected.is_empty(), "the fixture carries WepDes/WEAP_SHORT_M4")
+	var host := ArmoryMenuHost.new()
+	host.set_weapon_database(_load_weapons())
+	host.set_player_class(8)
+	var menu := _make_menu()
+	host.on_menu_built(menu, "weapon.mnu", "WEAPON", null)
+	var texts := _combo_texts(_combo(menu, "PRIMARY"))
+	assert_has(texts, expected,
+			"PRIMARY rows show the resolved WepDes name, not the raw WPN_ id")
+
+
 func test_owns_menu_detects_weapon_screen() -> void:
 	var host := ArmoryMenuHost.new()
 	var menu := _make_menu()
@@ -200,6 +222,38 @@ func test_accept_emits_loadout_and_cancel_closes() -> void:
 
 	menu.find_child("CANCEL", true, false).emit_signal("pressed")
 	assert_signal_emitted(host, "armory_closed", "CANCEL closes without applying")
+
+
+# The ACCEPT hotkey: the WEAPON screen's on-show registers the USE-ITEM binding row's
+# runtime keys (the armory opener — Shift) on the ACCEPT control, debounced until the
+# opener press releases once [orig: UI_InitTeamClassSelection @0x567370 adds
+# g_useItemBindingKey0/1 to control "ACCEPT" via CUIWidget_AddScreenHotkey
+# @0x5674a8/@0x5674c0; the open stamps g_weaponScreenOpenDebounce @0x4e0b21,
+# cleared only by the row's KEYUP — Input_HandleMenuKeyRelease @0x4de2d0].
+# on_menu_built = the on-show: it stamps the debounce; NovaArmoryHost routes the
+# key edges here while its overlay is open.
+func test_armory_accept_hotkey_debounces_until_release() -> void:
+	var host := ArmoryMenuHost.new()
+	host.set_weapon_database(_load_weapons())
+	host.set_player_class(8)
+	host.set_current_loadout("WPN_M4AUTO")
+	var menu := _make_menu()
+	host.on_menu_built(menu, "weapon.mnu", "WEAPON", null)
+	watch_signals(host)
+
+	assert_false(host.accept_hotkey_edge(true),
+		"the still-held opener press must not ACCEPT [orig: @0x4e0b21]")
+	assert_signal_not_emitted(host, "loadout_accepted")
+	assert_false(host.accept_hotkey_edge(false),
+		"the release arms the key, no ACCEPT of its own [orig: @0x4de2d0]")
+	assert_true(host.accept_hotkey_edge(true),
+		"the armed press is the ACCEPT accelerator [orig: @0x5674a8]")
+	assert_signal_emitted(host, "loadout_accepted")
+
+	# A re-show re-stamps the debounce — the next press is swallowed again.
+	host.on_menu_built(menu, "weapon.mnu", "WEAPON", null)
+	assert_false(host.accept_hotkey_edge(true),
+		"the on-show re-stamps the open debounce [orig: @0x4e0b21]")
 
 
 func test_degrades_without_weapon_def() -> void:

@@ -53,6 +53,8 @@ static func label(kind: String) -> String:
 			return "HUD layout"
 		"avatar":
 			return "character"
+		"particle":
+			return "particle effect"
 		"object", "object_project", "object_model", "object_scene":
 			return "object"
 		"music", "sbf", "music_script":

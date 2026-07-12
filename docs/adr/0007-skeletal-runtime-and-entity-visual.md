@@ -42,6 +42,12 @@ rigid-gun view model.
    frame index passes its keyframe count — which collapses *compressed* clips (≈11% of the corpus: idle/
    run/attack variants). The FK accumulates over **one shared skeleton's** rest origins across all of a
    model's clips (a clip's own `.bad` bone positions can be zero and would otherwise collapse the pose).
+   **The header `frame_count` counts INTERVALS** — a dense channel carries `frame_count + 1` keys
+   (fence-post; the original's walk visits every key and holds the last). The baked pose table must
+   include the final key: truncating at `frame_count` is invisible on loops (the seam key ≈ key 0) but
+   collapses a ONE-frame clip — 2 keys, one motion window — to a static pose (the M4 viewmodel fire
+   kick `m4_1f`, frozen through every volley until fixed 2026-07-12, D-ANIM-1). The translation block
+   carries exactly `frame_count` rows; the final key holds the last row.
 
 **`NovaEntityVisual` contract.** The mission present pass duck-types each placed entity node:
 `transform`, `set_part_phase` (PANM), `set_entity_visible`/`visible`, and `play_body_anim(slot)`. Mission

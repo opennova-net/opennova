@@ -69,7 +69,11 @@ int main() {
     TEST_EXPECT(clip.frame_count == 3);
     TEST_EXPECT(clip.fps == 30);
     TEST_EXPECT(clip.loops());  // flags == 1
-    TEST_EXPECT(clip.frames.size() == 3);
+    // frame_count counts INTERVALS; the pose table bakes every channel key
+    // (frame_count + 1 — the fence-post witness, BoneAnim_FindKeyframeAtTime
+    // @0x410220 walks all keys; dropping the last one erased one-frame clips'
+    // whole motion, the REVVY M4 fire kick).
+    TEST_EXPECT(clip.frames.size() == 4);
 
     // Bone 0 is the root (no parent): world == local, and (no translations on this clip)
     // its world position is its bind origin in Z-up.
@@ -198,7 +202,7 @@ int main() {
         sbad.channels = schan; sbad.num_channels = 2;
 
         Clip sclip = sample_clip(sbad);
-        TEST_EXPECT(sclip.frames.size() == 10);
+        TEST_EXPECT(sclip.frames.size() == 11);  // frame_count intervals + the final key
         const Quat held = bad_channel_quat(0.0f, 0.0f, 0.70710678f, 0.70710678f);
         const Quat identity = {1.0f, 0.0f, 0.0f, 0.0f};
         // bone0 (one keyframe) is HELD for the whole clip -- never identity past frame 0.
@@ -209,6 +213,37 @@ int main() {
         // bone1 mid-window (tick 5 spans keyframe 1->2): a valid normalized, non-identity slerp.
         const Quat &w1 = sclip.frames[5][1].world_rotation;
         TEST_EXPECT(approx(w1.w * w1.w + w1.x * w1.x + w1.y * w1.y + w1.z * w1.z, 1.0f, 1e-3f));
+    }
+
+    // --- a ONE-frame clip is one window of motion, not a static pose (the REVVY M4 ---
+    // fire kick, m4_1f: header frame_count 1, channels keyed rest -> kicked). Both keys
+    // must land in the pose table; the pre-fix truncation collapsed the clip to key 0
+    // and the viewmodel froze through every volley.
+    {
+        BadBone obone[1] = {};
+        obone[0].parent_index = -1;
+        obone[0].rotation[0] = obone[0].rotation[4] = obone[0].rotation[8] = 1.0f;
+
+        uint16_t ofl[2] = {1, 1};
+        BadQuaternion orot[2] = {{0, 0, 0, 1},                                  // key 0: rest
+                                 {0.0f, 0.0f, 0.70710678f, 0.70710678f}};       // key 1: kicked
+        BadChannel ochan[1] = {};
+        ochan[0].frame_count = 2; ochan[0].frame_lengths = ofl; ochan[0].rotations = orot;
+
+        BadFile obad = {};
+        obad.fps = 30; obad.frame_count = 1; obad.flags = 0;  // one-shot
+        obad.bones = obone; obad.num_bones = 1;
+        obad.channels = ochan; obad.num_channels = 1;
+
+        Clip oclip = sample_clip(obad);
+        TEST_EXPECT(oclip.frame_count == 1);
+        TEST_EXPECT(oclip.frames.size() == 2);
+        const Quat rest = bad_channel_quat(0.0f, 0.0f, 0.0f, 1.0f);
+        const Quat kicked = bad_channel_quat(0.0f, 0.0f, 0.70710678f, 0.70710678f);
+        TEST_EXPECT(quat_approx(oclip.frames[0][0].world_rotation, rest));
+        TEST_EXPECT(quat_approx(oclip.frames[1][0].world_rotation, kicked));
+        TEST_EXPECT(!quat_approx(oclip.frames[0][0].world_rotation,
+                                 oclip.frames[1][0].world_rotation));
     }
 
     // --- model_bind: the witnessed faithful channel semantics (the FP viewmodel fix). ---

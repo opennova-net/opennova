@@ -13,9 +13,20 @@
 extern "C" {
 #endif
 
+// The most variants observed on one row across the JOX/REVX corpora is 6
+// (anim_cover_idle); 8 leaves headroom.
+#define ADM_MAX_VARIANTS 8
+
 typedef struct AdmEntry {
     char key[64];
-    char value[256];
+    char value[256];  // the FIRST variant (compat read path; == values[0])
+    // A row may list several quoted clips: variants registered on ONE anim slot
+    // as a circular ring the engine rotates on every play and duration read
+    // [orig: AnimMap_ParseConfigLine @ 0x40cb60 registers every token;
+    //  AnimMap_PlayAnimBySlot @ 0x40bda0 and Anim_GetDurationTicks @ 0x53ee10
+    //  both serve the head and advance it].
+    size_t value_count;
+    char values[ADM_MAX_VARIANTS][64];
 } AdmEntry;
 
 typedef struct AdmFile {

@@ -29,6 +29,11 @@ void copy_key(char (&dst)[64], const char *src) {
     dst[sizeof(dst) - 1] = '\0';
 }
 
+void copy_str128(char (&dst)[128], const char *src) {
+    std::strncpy(dst, src, sizeof(dst) - 1);
+    dst[sizeof(dst) - 1] = '\0';
+}
+
 // Recoil kick accumulation, capped at 20 (signed-char compare in the original).
 // [orig: @ 0x53f7f0..0x53f805 / @ 0x542cf1..0x542d0f]
 void kick_add(WeaponSlotState &slot, int32_t amount) {
@@ -60,13 +65,24 @@ bool can_fire_ammo(const WeaponFsmDef &def, WeaponSlotState &slot) {
 // The begin-active shim shared by every handler's tick path: the first tick after a
 // transition (phase 1, or the held-ready 0x40) flips the slot ACTIVE and starts the
 // action's clip on the owner's animadm channel — LOCAL PLAYER ONLY in the original.
+// Only a real phase-1 entry runs the begin sound/effect leg: held-ready resumes at
+// the animation call inside BeginActivePhase, after that leg has already been skipped.
 // [orig: ActionSlot_BeginActivePhase @ 0x53f830; the FP-routing variants
 //  ActionSlot_ExecuteActionWithEffect @ 0x541860 / ..NoEffect @ 0x5419e0 write the same
-//  phase protocol; sound/ctrlreg/muzzle legs are host seams]
+//  phase protocol; held-ready animation branch @ 0x53f88b]
 void begin_active(const WeaponFsmAction &desc, WeaponSlotState &slot,
                   const WeaponFsmInputs &in, WeaponFsmEvents &out) {
-    if ((slot.phase & 1) != 0 || (slot.phase & weapon_phase::kHeld) != 0) {
+    const bool entered = (slot.phase & 1) != 0;
+    const bool held = (slot.phase & weapon_phase::kHeld) != 0;
+    if (entered || held) {
         slot.phase = weapon_phase::kActive;
+        // The begin leg's sound/muzzle seam belongs only to phase-1 entry. The
+        // held-ready 0x40 path rejoins below at animation playback.
+        // [orig: ActionSlot_ExecuteActionWithEffect @ 0x541860 ->
+        //  ActionSlot_SpawnEffect @ 0x401f20; held branch @ 0x53f88b].
+        if (entered) {
+            out.action_started = desc.id;
+        }
         if (desc.has_anim && in.is_local) {
             out.play_anim = true;
             copy_key(out.anim_key, desc.anim_key);
@@ -76,15 +92,25 @@ void begin_active(const WeaponFsmAction &desc, WeaponSlotState &slot,
 }
 
 // [orig: ActionSlot_FinishActivePhase @ 0x53f7b0 (desc, slot, entity, nextAction)]:
-// counter = delayEnd, nextAction = the passed value, the ACTIVE->DONE kick bump
-// (skipped for RELOAD), phase = DONE. The original gates the kick on the weapon's
-// fire-sound id being set (Def+0x294) — every shipped weapon carries one (D-WPN-3).
-void finish_active(const WeaponFsmAction &desc, WeaponSlotState &slot, int32_t next) {
+// counter = delayEnd, nextAction = the passed value, the END-leg sound (ACTIVE only),
+// the ACTIVE->DONE kick bump (skipped for RELOAD), phase = DONE. The original gates the
+// kick on the weapon's fire-sound id being set (Def+0x294) — every shipped weapon
+// carries one (D-WPN-3).
+void finish_active(const WeaponFsmAction &desc, WeaponSlotState &slot, int32_t next,
+                   WeaponFsmEvents &out) {
     const bool was_active = slot.phase == weapon_phase::kActive;
     slot.counter = desc.delay_end;
     slot.next = next;
-    if (was_active && slot.current != weapon_action::kReload)
-        kick_add(slot, desc.delay_start + desc.delay_end + slot.counter + 10);
+    if (was_active) {
+        // The end-leg sound plays only when the phase byte was 2 (ACTIVE) at entry —
+        // a phase-1 abort (the fire CanFire refusal) finishes silently.
+        // [orig: @ 0x53f7b9 phase==2 latch -> the end shim @ 0x53f7d6 (sub_401100
+        //  plays ActionDef+12); the shim's dupsound repeat loop (+44 count / +48
+        //  interval) is data-dead in the JOX/REVX corpora]
+        out.action_finished = desc.id;
+        if (slot.current != weapon_action::kReload)
+            kick_add(slot, desc.delay_start + desc.delay_end + slot.counter + 10);
+    }
     slot.phase = weapon_phase::kDone;
 }
 
@@ -123,10 +149,10 @@ void handler_idle(const WeaponFsmDef &def, const WeaponFsmAction &desc,
         return;
     }
     slot.next = weapon_action::kEmptyIdle; // [orig: @ 0x5429cf]
-    // One-shot weapons drop the scope with the last round (the Flags & 0x20000000
-    // stay-scoped exception is unmapped in our flag table; no JOX/REVX token sets it).
-    // [orig: @ 0x5429ee g_weaponScopeActive = 0]
-    if (in.is_local && def.clip_capacity == 1) out.unscope = true;
+    // One-shot weapons drop the scope with the last round — unless ForceScoped
+    // (0x20000000) pins the sight view. [orig: @ 0x5429ee g_weaponScopeActive = 0]
+    if (in.is_local && def.clip_capacity == 1 && (def.flags & 0x20000000) == 0)
+        out.unscope = true;
 }
 
 // [orig: WeaponAction_EmptyIdle @ 0x542a20] Same LOOP shape on the global
@@ -148,7 +174,8 @@ void handler_emptyidle(const WeaponFsmDef &def, const WeaponFsmAction &desc,
             weapon_fsm_request_reload(slot); // [orig: @ 0x542aa3]
         } else {
             slot.next = weapon_action::kEmptyIdle; // hold [orig: @ 0x542ab2]
-            if (in.is_local && def.clip_capacity == 1) out.unscope = true; // [orig: @ 0x542ad1]
+            if (in.is_local && def.clip_capacity == 1 && (def.flags & 0x20000000) == 0)
+                out.unscope = true; // [orig: @ 0x542ad1; ForceScoped pins the view]
         }
     }
     slot.phase = weapon_phase::kDone; // [orig: @ 0x542ae1]
@@ -161,9 +188,10 @@ void handler_fire(const WeaponFsmDef &def, const WeaponFsmAction &desc,
                   WeaponSlotState &slot, const WeaponFsmInputs &in, WeaponFsmEvents &out) {
     if (slot.phase == weapon_phase::kEntered && !can_fire_ammo(def, slot)) {
         // The abort adopts whatever CanFire queued (RECOIL toward auto-reload, or
-        // EMPTYIDLE) — the [esi+30h] read happens AFTER the CanFire call.
+        // EMPTYIDLE) — the [esi+30h] read happens AFTER the CanFire call. Phase is
+        // still 1 here, so the finish plays no end-leg sound.
         // [orig: @ 0x542b44..0x542b5e]
-        finish_active(desc, slot, slot.next);
+        finish_active(desc, slot, slot.next, out);
         slot.counter = 0;
         return;
     }
@@ -183,13 +211,14 @@ void handler_fire(const WeaponFsmDef &def, const WeaponFsmAction &desc,
     const WeaponFsmAction &recoil = def.actions[weapon_action::kRecoil];
     // [orig: @ 0x542cf1..0x542d0f — recoil ds + de + counter + 10, cap 20]
     kick_add(slot, recoil.delay_start + recoil.delay_end + slot.counter + 10);
-    finish_active(desc, slot, slot.next); // [orig: @ 0x542d13 push [esi+30h] — keeps 3]
+    finish_active(desc, slot, slot.next, out); // [orig: @ 0x542d13 push [esi+30h] — keeps
+                                               //  3; the finish plays the fire row's
+                                               //  soundsetend = the per-shot gunshot]
 }
 
 // [orig: WpnAction_Recoil @ 0x542dd0] THE ARBITER: when the recoil clip ends, decide
 // refire (burst), idle, auto-reload, or emptyidle; the held-trigger auto refire is the
-// per-tick fire re-request (the original re-queues input binding 149 here
-// [orig: @ 0x542e9d]).
+// deferred re-queue of input binding 149 in the window below [orig: @ 0x542e9d].
 void handler_recoil(const WeaponFsmDef &def, const WeaponFsmAction &desc,
                     WeaponSlotState &slot, const WeaponFsmInputs &in,
                     WeaponFsmEvents &out) {
@@ -197,8 +226,17 @@ void handler_recoil(const WeaponFsmDef &def, const WeaponFsmAction &desc,
     begin_active(desc, slot, in, out);         // [orig: ExecuteActionTick @ 0x542e2a]
     if (slot.phase == weapon_phase::kDone ||
         (desc.delay_start == 0 && desc.delay_end == 0)) {
-        // (the deferred-event refire block sits here in the original; the port's
-        //  held re-request covers it)
+        // The deferred-refire window — the auto-fire sustainer: the closing ticks of
+        // the recoil (counter <= 1 on the post-arbitration delayend ticks, or any tick
+        // of a zero-length recoil) re-queue the still-held fire binding as a deferred
+        // input event; the next tick's dispatch routes it into RequestFire (RECOIL ->
+        // next = FIRE). The ROUNDS gate kills the chain on an empty magazine, so the
+        // arbiter's queued RELOAD stands and the volley does NOT resume after the
+        // auto-reload without a fresh press.
+        // [orig: @ 0x542e7f..0x542e9d Input_QueueDeferredEvent(149, current_tick)]
+        if (slot.counter <= 1 && in.is_local && rounds && def.auto_fire &&
+            static_cast<int8_t>(slot.burst) <= 0 && in.fire_held)
+            slot.refire_queued = true;
         if (desc.delay_start != 0 || desc.delay_end != 0) return; // [orig: @ 0x542eae]
     }
     if (slot.counter != 0) return; // [orig: @ 0x542eb7]
@@ -221,7 +259,8 @@ void handler_recoil(const WeaponFsmDef &def, const WeaponFsmAction &desc,
         return;
     }
     slot.next = weapon_action::kEmptyIdle; // [orig: @ 0x543036]
-    if (in.is_local && def.clip_capacity == 1) out.unscope = true; // [orig: @ 0x543053]
+    if (in.is_local && def.clip_capacity == 1 && (def.flags & 0x20000000) == 0)
+        out.unscope = true; // [orig: @ 0x543053; ForceScoped pins the view]
     // (auto-switch to the def+0x168 follow-up weapon — Player_SwitchToWeaponByHandle
     //  @ 0x54307c — is the weapon-switch seam, D-WPN-5)
 }
@@ -238,11 +277,17 @@ void handler_reload(const WeaponFsmDef &def, const WeaponFsmAction &desc,
         out.reload_requested = true; // [orig: NetPacket send @ 0x5430ff]
         slot.phase = static_cast<uint8_t>(slot.phase | weapon_phase::kReloadPendingBit);
         if (in.is_local) {
-            // Stash the scope across the reload; the pump rescopes when it completes.
-            // (The Flags & 0x40000 keep-scoped class is unmapped — no JOX/REVX token.)
-            // [orig: @ 0x54312f g_rescopeAfterReload = g_weaponScopeActive]
-            slot.rescope_after_reload = in.scope_active;
-            if (in.scope_active) out.unscope = true; // [orig: Player_ToggleWeaponScope @ 0x543136]
+            if ((def.flags & 0x40000) != 0) {
+                // The keep-scope reload class (ForceCrouch 0x40000 — the mortars):
+                // no stash, no unscope; the sight view rides through the reload.
+                // [orig: @ 0x543126 -> g_rescopeAfterReload = 0 @ 0x54313d]
+                slot.rescope_after_reload = false;
+            } else {
+                // Stash the scope across the reload; the pump rescopes on completion.
+                // [orig: @ 0x54312f g_rescopeAfterReload = g_weaponScopeActive]
+                slot.rescope_after_reload = in.scope_active;
+                if (in.scope_active) out.unscope = true; // [orig: Player_ToggleWeaponScope @ 0x543136]
+            }
         }
         if (in.is_authority) {
             // Listen-host/SP zero-latency loopback of the §5.58 round-trip: the
@@ -253,7 +298,7 @@ void handler_reload(const WeaponFsmDef &def, const WeaponFsmAction &desc,
     }
     begin_active(desc, slot, in, out); // [orig: ExecuteActionTick @ 0x543150]
     if (slot.counter == 0 && slot.phase != weapon_phase::kDone) {
-        finish_active(desc, slot, weapon_action::kIdle); // [orig: @ 0x54316e push 0]
+        finish_active(desc, slot, weapon_action::kIdle, out); // [orig: @ 0x54316e push 0]
         slot.burst = 0; // [orig: @ 0x543176]
     }
 }
@@ -401,14 +446,19 @@ const char *const kWeaponActionSuffixes[weapon_action::kCount] = {
 };
 
 int32_t weapon_anim_ticks_from_ms(int32_t ms) {
-    // [orig: Anim_GetDurationTicks @ 0x53ee10 — ms * 62.5 (flt_7C3B3C) / 1000 + 1]
-    return static_cast<int32_t>(static_cast<float>(ms) * 62.5f / 1000.0f) + 1;
+    // [orig: Anim_GetDurationTicks @ 0x53ee10 — trunc(ms * 62.5 (flt_7C3B3C)
+    // / 1000 + 0.5 (flt_7C3B94)) + 1: ROUND-to-nearest, then +1. The prior
+    // port truncated without the +0.5 (re-grilled 2026-07-10 at the oscarmike
+    // adjudication — one tick short whenever the fraction reached .5).]
+    return static_cast<int32_t>(static_cast<float>(ms) * 62.5f / 1000.0f + 0.5f) + 1;
 }
 
 void weapon_fsm_bake(const WeaponFsmActionRow *rows, size_t row_count,
-                     WeaponClipSecondsFn clip_seconds, void *ctx, WeaponFsmDef &out) {
+                     WeaponClipResolvesFn clip_resolves, WeaponClipSecondsFn clip_seconds,
+                     void *ctx, WeaponFsmDef &out) {
     for (int i = 0; i < weapon_action::kCount; ++i) {
         WeaponFsmAction &a = out.actions[i];
+        a.id = i;
         // Absent rows are generated defaults: zeroed fields, unresolved anim.
         // [orig: ActionDef_InitDefaults @ 0x4022b0 memsets the record]
         int32_t ds = 0;
@@ -419,21 +469,39 @@ void weapon_fsm_bake(const WeaponFsmActionRow *rows, size_t row_count,
             ds = rows[r].delaystart;
             de = rows[r].delayend;
             if (rows[r].anim[0] != '\0') anim = rows[r].anim;
+            // The row's audio/effect legs ride the baked pool entry [orig: the
+            // ActionDef record carries the resolved references].
+            copy_str128(a.soundset, rows[r].soundset);
+            copy_str128(a.soundsetend, rows[r].soundsetend);
+            copy_str128(a.particle, rows[r].particle);
+            copy_str128(a.particle_userpoint, rows[r].particleuserpoint);
             break;
         }
         a.has_anim = false;
         a.anim_key[0] = '\0';
-        float seconds = -1.0f;
-        if (anim != nullptr && clip_seconds != nullptr)
-            seconds = clip_seconds(ctx, anim);
-        if (anim != nullptr && seconds >= 0.0f) {
+        // Existence is a pure LOOKUP [orig: AnimMap_FindSlotByName @ 0x40cfa0
+        // checked @ 0x5421ae]; durations are consuming ring READS below.
+        const bool resolves = anim != nullptr && clip_resolves != nullptr &&
+                clip_resolves(ctx, anim) != 0;
+        if (resolves) {
             a.has_anim = true;
             copy_key(a.anim_key, anim);
-            const int32_t ticks =
-                    weapon_anim_ticks_from_ms(static_cast<int32_t>(seconds * 1000.0f));
-            // [orig: Anim_InitActions @ 0x5421b3..0x5421ec]
-            if (ds == -1) ds = ticks;
+            // ONE Anim_GetDurationTicks read per 'auto' field — each read serves
+            // the slot ring's head and advances it, so a both-auto action consumes
+            // TWO ring entries and the reads can serve different variants
+            // [orig: Anim_InitActions @ 0x5421b3..0x5421ec, the two calls
+            //  @ 0x5421c5 / @ 0x5421d8].
+            if (ds == -1) {
+                const float s = clip_seconds != nullptr ? clip_seconds(ctx, anim) : -1.0f;
+                ds = s >= 0.0f
+                        ? weapon_anim_ticks_from_ms(static_cast<int32_t>(s * 1000.0f))
+                        : 0;
+            }
             if (de == -1) {
+                const float s = clip_seconds != nullptr ? clip_seconds(ctx, anim) : -1.0f;
+                const int32_t ticks = s >= 0.0f
+                        ? weapon_anim_ticks_from_ms(static_cast<int32_t>(s * 1000.0f))
+                        : 0;
                 de = ticks;
                 if (ticks > ds) de = ticks - ds;
             }
@@ -462,8 +530,11 @@ bool weapon_fsm_request_fire(const WeaponFsmDef &def, WeaponSlotState &slot) {
                 slot.next = weapon_action::kEmpty;
                 return false;
             case weapon_action::kFire:
-                // deferred re-queue in the original; the per-tick held re-request
-                // covers it.
+                // A fire request landing mid-FIRE re-queues itself as a deferred
+                // event — the loop self-sustains until a state that accepts the
+                // dispatch consumes it (RECOIL banks the shot, even if the trigger
+                // was already released). [orig: @ 0x53effd Input_QueueDeferredEvent]
+                slot.refire_queued = true;
                 return false;
             default:
                 return false;
@@ -523,10 +594,15 @@ void weapon_fsm_tick(const WeaponFsmDef &def, WeaponSlotState &slot,
     out = WeaponFsmEvents{};
 
     // Input-dispatcher writers run before the frame pump [orig: the input layer
-    // dispatches binding events ahead of WeaponAction_ProcessAllEntities in the frame].
+    // dispatches binding events ahead of WeaponAction_ProcessAllEntities in the
+    // frame]. Held-trigger auto fire is NOT a per-tick re-request: the press edge
+    // starts the volley and the recoil window's deferred re-queue sustains it,
+    // consumed here one tick after it was queued — the deferred dispatch
+    // [orig: Input_QueueDeferredEvent @ 0x4993e0 -> WeaponSlot_RequestFire @ 0x53efa0].
     if (in.reload_pressed) weapon_fsm_request_reload(slot);
-    if (in.fire_pressed || (def.auto_fire && in.fire_held))
-        weapon_fsm_request_fire(def, slot);
+    const bool fire_request = in.fire_pressed || slot.refire_queued;
+    slot.refire_queued = false; // consumed (RequestFire may re-queue it mid-FIRE)
+    if (fire_request) weapon_fsm_request_fire(def, slot);
 
     // --- the pump tail [orig: WeaponAction_ProcessFrame @ 0x541262..0x5414ac] -----
 

@@ -30,6 +30,7 @@ from `EditorWorkstation._workspace_defs()` in
 | Interface | Menu | menu screens (`.mnu`) and the shared menu stylesheet (`.mns`): named colors, fonts, pictures | [mnu/](mnu/README.md) |
 | Interface | HUD | in-game HUD layout preview (`hudpos.def`, read-only) | [hud/](hud/README.md) |
 | Audio | Music | interactive music (`.sbf` + `.bin` script) | [music/](music/README.md) |
+| Atmosphere | Particles | particle effects: explosions, smoke, muzzle flashes, water spray (`.ptl`) | [particle/](particle/README.md) |
 | Atmosphere | Sound | sound profiles (`.lwf`) | [sound/](sound/README.md) |
 | Atmosphere | Environment | weather, lighting, time of day, sky/celestial (`.env`) | [environment/](environment/README.md) |
 
@@ -66,6 +67,7 @@ What to look at, per workspace:
 | Menu | the menu set boots your screens |
 | HUD | spawn into any mission; the HUD reads your layout |
 | Music | menu music plays on boot, mission music in game |
+| Particles | trigger the effect in game (the weapon, explosion, or scripted event that spawns it) |
 | Sound | trigger the sound in game (the weapon or action that uses it) |
 | Environment | time of day, sky, and fog follow your settings in missions that use them |
 

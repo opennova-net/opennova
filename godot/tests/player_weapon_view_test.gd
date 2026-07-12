@@ -37,6 +37,31 @@ func test_weapon_view_null_when_inactive() -> void:
 	assert_null(PlayerWeaponView.from_state_dict({ "active": false }))
 
 
+func test_weapon_event_decodes_transport_row() -> void:
+	var event := PlayerWeaponEvent.from_event_dict({
+		"age_ticks": 3,
+		"world_position": Vector3(1.0, 2.0, 3.0),
+		"anim_key": "anim_wpn_fire",
+		"anim_variant": 2,
+		"action_started": 2,
+		"action_soundset": "GF_FIRE",
+		"action_particle": "muzzle",
+		"action_particle_userpoint": "flash",
+		"action_finished": 2,
+		"action_end_soundset": "GS_FIRE",
+	})
+	assert_eq(event.age_ticks, 3)
+	assert_eq(event.world_position, Vector3(1.0, 2.0, 3.0))
+	assert_eq(event.anim_key, "anim_wpn_fire")
+	assert_eq(event.anim_variant, 2)
+	assert_eq(event.action_started, 2)
+	assert_eq(event.action_soundset, "GF_FIRE")
+	assert_eq(event.action_particle, "muzzle")
+	assert_eq(event.action_particle_userpoint, "flash")
+	assert_eq(event.action_finished, 2)
+	assert_eq(event.action_end_soundset, "GS_FIRE")
+
+
 func test_viewmodel_def_carries_fsm_fields() -> void:
 	var def := PlayerViewmodelDef.from_weapon_dict({
 		"name": "WPN_AK47AUTO",

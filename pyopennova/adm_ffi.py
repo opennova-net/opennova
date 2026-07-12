@@ -13,10 +13,17 @@ from ._native import load_lib
 # Struct definitions matching adm.h
 # ---------------------------------------------------------------------------
 
+ADM_MAX_VARIANTS = 8
+
+
 class AdmEntry(ctypes.Structure):
     _fields_ = [
         ("key",   ctypes.c_char * 64),
-        ("value", ctypes.c_char * 256),
+        ("value", ctypes.c_char * 256),  # first variant (== values[0])
+        # Multi-clip rows: every quoted token on the row, rotated round-robin
+        # by the engine (see adm.h ADM_MAX_VARIANTS).
+        ("value_count", ctypes.c_size_t),
+        ("values", (ctypes.c_char * 64) * ADM_MAX_VARIANTS),
     ]
 
 
@@ -80,6 +87,8 @@ def write_adm(path: str, entries) -> None:
     for i, (key, value) in enumerate(pairs):
         arr[i].key = str(key).encode("utf-8")[:63]
         arr[i].value = str(value).encode("utf-8")[:255]
+        arr[i].value_count = 1
+        arr[i].values[0].value = str(value).encode("utf-8")[:63]
     if isinstance(path, str):
         path = path.encode("utf-8")
     ptr = arr if pairs else None

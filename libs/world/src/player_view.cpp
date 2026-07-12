@@ -9,11 +9,12 @@
 namespace opennova::world {
 
 void player_view_tick(PlayerViewState &v, const float eye[3]) {
-    // The 15-step scope-camera ease, one step per tick toward the engaged
-    // target. [orig: the interp steps @ 0x4df36e]
+    // The scope-camera ease, one step per tick toward the engaged target within
+    // the ease length this toggle latched. [orig: CNetPlayerInterp steps —
+    // 15 @ 0x4df36e / 7 Inset @ 0x4df355 / 1 hipfire-return @ 0x4df1c3]
     v.scope_step += v.scope_engaged ? 1 : -1;
     if (v.scope_step < 0) v.scope_step = 0;
-    if (v.scope_step > kScopeEaseSteps) v.scope_step = kScopeEaseSteps;
+    if (v.scope_step > v.ease_steps) v.scope_step = v.ease_steps;
 
     if (v.third_person) {
         if (!v.tp_anchor_valid) {
@@ -35,7 +36,54 @@ void player_view_tick(PlayerViewState &v, const float eye[3]) {
 }
 
 float player_view_scope_fraction(const PlayerViewState &v) {
-    return static_cast<float>(v.scope_step) / static_cast<float>(kScopeEaseSteps);
+    if (v.ease_steps <= 0) return v.scope_engaged ? 1.0f : 0.0f;
+    return static_cast<float>(v.scope_step) / static_cast<float>(v.ease_steps);
+}
+
+bool player_view_scope_ease_active(const PlayerViewState &v) {
+    // Mid-ease = the step has not reached the engaged target's endpoint.
+    // [orig: g_fpCameraInterp.activeFlag, tested @ 0x4df177]
+    return v.scope_engaged ? (v.scope_step < v.ease_steps) : (v.scope_step > 0);
+}
+
+bool player_view_set_engaged(PlayerViewState &v, bool engaged, bool inset_weapon) {
+    if (engaged == v.scope_engaged) return true;
+    // Every toggle is refused while the previous ease still runs.
+    // [orig: the !activeFlag gate @ 0x4df177 — both directions]
+    if (player_view_scope_ease_active(v)) return false;
+    const int32_t full = inset_weapon ? kScopeEaseStepsInset : kScopeEaseSteps;
+    if (engaged) {
+        // [orig: Setup 15 @ 0x4df36e / 7 @ 0x4df355; g_scopeHipfire = 0 @ 0x4df373]
+        v.ease_steps = full;
+        v.scope_step = 0;
+        v.scope_hipfire = false;
+    } else {
+        // [orig: Setup 1 @ 0x4df1c3 (hipfire return) / 7 @ 0x4df1e8 / 15 @ 0x4df201;
+        //  g_scopeHipfire = 1 @ 0x4df212]
+        v.ease_steps = v.scope_hipfire ? kScopeEaseStepsHipfire : full;
+        v.scope_step = v.ease_steps;
+        v.scope_hipfire = true;
+    }
+    v.scope_engaged = engaged;
+    return true;
+}
+
+bool player_view_move_input(PlayerViewState &v, bool move_held, int32_t def_flags) {
+    // [orig: Player_PackInputStateToEntity @ 0x4df450 — byte_B7653B = 1 while any
+    //  of the four direction keys is down @ 0x4df4bb, = 0 otherwise @ 0x4df4f9]
+    v.move_held = move_held;
+    if (!move_held) return false;
+    // Settled at scope on a Scoped (flags 1) weapon: movement forces the full
+    // unscope through the normal toggle [orig: g_weaponScopeActive gate
+    // @ 0x4df4c9 (only ever 1 once the ease completed — the @ 0x4de4f7 promoter)
+    // && Def->Flags & 1 @ 0x4df4ea -> Player_ToggleWeaponScope @ 0x4df4ec].
+    return (def_flags & 1) != 0 && v.scope_engaged && !player_view_scope_ease_active(v);
+}
+
+bool player_view_scope_up_blocked(const PlayerViewState &v, int32_t def_flags) {
+    // [orig: the engage leg refuses while the movement latch is held on a
+    //  Scoped weapon — byte_B7653B && (scope_flags & 1) -> return @ 0x4df29c]
+    return v.move_held && (def_flags & 1) != 0;
 }
 
 float player_view_fov_h_deg(const PlayerViewState &v, int32_t def_flags, float scope_max_mag) {

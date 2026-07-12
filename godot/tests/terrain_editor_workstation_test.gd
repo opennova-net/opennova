@@ -223,6 +223,7 @@ func _make_resource_fixture(name: String) -> String:
 	_write_fixture_file(root.path_join("alpha.3di"), "3di")
 	_write_fixture_file(root.path_join("alpha.ase"), "ase")
 	_write_fixture_file(root.path_join("alpha.fnt"), "fnt")
+	_write_fixture_file(root.path_join("alpha.ptl"), "ptl")
 	_write_fixture_file(root.path_join("alpha.bin"), "RTXTstrings")
 	_write_fixture_file(root.path_join("raw.bin"), "raw")
 	_write_fixture_file(root.path_join("ignored/nested.trn"), "nested")
@@ -255,7 +256,7 @@ func test_workstation_starts_with_domain_workspaces() -> void:
 		if child is Button:
 			var bar_label := child.find_child("BarButtonLabel", true, false) as Label
 			row_texts.append(bar_label.text if bar_label != null else "")
-	assert_eq(row_texts, ["Mission", "Terrain", "Object", "Avatars", "Fonts", "Credits", "Strings", "Menus", "HUD", "Music", "Sound"],
+	assert_eq(row_texts, ["Mission", "Terrain", "Object", "Avatars", "Fonts", "Credits", "Strings", "Menus", "HUD", "Music", "Particles", "Sound"],
 		"The bar should list every viewport workspace; Environment stays on its top-bar toggle, not the bar.")
 
 	assert_false(_has_label_text(workspace_rail, "World"), "Workspace groups should use separators, not inline category words.")
@@ -296,7 +297,7 @@ func test_every_workspace_rail_button_has_an_icon() -> void:
 			if icon_rect != null:
 				assert_not_null(icon_rect.texture, "the dock button icon should resolve to a workspace texture")
 			checked += 1
-	assert_eq(checked, 11, "all eleven workspace rows checked")
+	assert_eq(checked, 12, "all twelve workspace rows checked")
 
 
 func test_icon_library_resolves_every_registered_icon_id() -> void:
@@ -377,10 +378,12 @@ func test_resource_index_lists_object_resources_without_glb_models() -> void:
 	assert_eq(index.get_resource_files("object_model").size(), 1, "3DI files should be indexed as object model resources.")
 	assert_eq(index.get_resource_files("object_scene").size(), 1, "ASE files should be indexed as importable object scenes.")
 	assert_eq(index.get_resource_files("font").size(), 1, "FNT files should be indexed as font resources.")
+	assert_eq(index.get_resource_files("particle").size(), 1, "PTL files should be indexed as particle resources.")
 	assert_eq(index.get_resource_files("strings").size(), 1, "RTXT BIN files should be indexed as strings resources.")
 	assert_eq(index.get_resource_files("glb").size(), 0, "GLB files should no longer be indexed.")
-	assert_eq(index.get_resource_files("all").size(), 8, "All openable resources should exclude GLB and non-RTXT BIN blobs.")
+	assert_eq(index.get_resource_files("all").size(), 9, "All openable resources should exclude GLB and non-RTXT BIN blobs.")
 	assert_eq(String((index.get_resource_files("object_model")[0] as Dictionary).get("relative_path", "")), "alpha.3di", "Object model entries should keep root-relative paths.")
+	assert_eq(String((index.get_resource_files("particle")[0] as Dictionary).get("relative_path", "")), "alpha.ptl", "Particle entries should keep root-relative paths.")
 	assert_eq(String((index.get_resource_files("strings")[0] as Dictionary).get("relative_path", "")), "alpha.bin", "Strings entries should keep root-relative paths.")
 
 
@@ -1810,7 +1813,7 @@ func test_browser_pane_lists_and_filters_by_kind() -> void:
 	workstation._layout.set_browser_pane_visible(true)
 	var pane = workstation._layout.browser_pane()
 	assert_not_null(pane, "showing the pane builds it lazily")
-	assert_eq(pane.table.get_visible_count(), 8,
+	assert_eq(pane.table.get_visible_count(), 9,
 		"the All filter lists every recognized fixture resource")
 
 	var fonts_index := -1

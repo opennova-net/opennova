@@ -78,6 +78,180 @@ func test_weapon_channel_keeps_own_phase_and_switch_identity_per_entity() -> voi
 		"a replacement local entity observes the current AnimMap as new")
 	sim.free()
 
+func test_weapon_clip_variant_ring_rotates_bake_reads_and_plays() -> void:
+	# Multi-clip .adm variant rings, end to end through the public binding: clip
+	# lengths arrive as per-key VARIANT arrays; the bake consumes ONE ring entry per
+	# 'auto' delay field (serve-then-advance), and every play consumes + latches the
+	# served variant into the state dict. A both-auto reload over a 3-ring therefore
+	# eats entries 0 and 1 at bake — the FIRST reload PLAY serves variant 2, the
+	# next serves 0 (the REVVY M4 "m4_1r" "m4_1r" "m4_1r2" shape).
+	# [orig: Anim_InitActions reads @0x5421c5/@0x5421d8 via Anim_GetDurationTicks
+	#  @0x53ee10; AnimMap_PlayAnimBySlot @0x40bda0 latches at animState+68]
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	var def := {
+		"name": "WPN_RING", "animadm": "ring.adm",
+		"actions": [
+			{"name": "idle", "anim": "anim_wpn_idle", "delaystart": 0, "delayend": 0},
+			{"name": "fire", "anim": "anim_wpn_fire", "delaystart": 0, "delayend": 0},
+			{"name": "reload", "anim": "anim_wpn_reload", "delaystart": -1, "delayend": -1},
+		],
+		"flags": 0, "clipsize": 30, "startrounds": 60,
+	}
+	sim.set_local_player_weapon(def, {
+		"anim_wpn_idle": PackedFloat32Array([0.2]),
+		"anim_wpn_fire": PackedFloat32Array([0.05]),
+		"anim_wpn_reload": PackedFloat32Array([0.5, 1.0, 0.25]),
+	})
+	sim.step()
+	var state: Dictionary = sim.get_local_player_weapon_state()
+	assert_eq(String(state.get("anim_key", "")), "anim_wpn_idle", "fresh slot idles")
+	assert_eq(int(state.get("anim_variant", -1)), 0, "single-entry rings always serve 0")
+
+	# Spend a round (letting the fire+recoil chain settle back to idle — the reload
+	# dispatch gate refuses the edge mid-FIRE), then reload: the bake left the reload
+	# ring's head at 2 (two 'auto' reads), so the FIRST reload serves variant 2.
+	sim.set_local_player_weapon_input(false, true, false)
+	for _i in range(6):
+		sim.step()
+	assert_eq(int(sim.get_local_player_weapon_state().get("clip", 0)), 29, "one round spent")
+	sim.set_local_player_weapon_input(false, false, true)
+	var reload_variant := -1
+	var first_reload_serial := -1
+	for _i in range(90):
+		sim.step()
+		state = sim.get_local_player_weapon_state()
+		if String(state.get("anim_key", "")) == "anim_wpn_reload":
+			reload_variant = int(state.get("anim_variant", -1))
+			first_reload_serial = int(state.get("play_serial", 0))
+			break
+	assert_eq(reload_variant, 2,
+		"the first reload serves variant 2 — the both-auto bake consumed entries 0+1")
+
+	# Let the reload finish (ds 32 + de 32 ticks and the transitions), spend another
+	# round, reload again: the ring wrapped, so the play serves variant 0.
+	for _i in range(90):
+		sim.step()
+	sim.set_local_player_weapon_input(false, true, false)
+	for _i in range(6):
+		sim.step()
+	sim.set_local_player_weapon_input(false, false, true)
+	reload_variant = -1
+	for _i in range(90):
+		sim.step()
+		state = sim.get_local_player_weapon_state()
+		if String(state.get("anim_key", "")) == "anim_wpn_reload" 				and int(state.get("play_serial", 0)) != first_reload_serial:
+			reload_variant = int(state.get("anim_variant", -1))
+			break
+	assert_eq(reload_variant, 0, "the second reload wraps the ring back to variant 0")
+	sim.free()
+
+
+func test_weapon_event_batch_preserves_three_undrained_ticks() -> void:
+	# Game_MainLoop catch-up presents once after N fixed ticks. The sim must retain
+	# each tick's clip/begin/end payload in order, including its age at the drain.
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	var def := {
+		"name": "WPN_EVENT_BATCH",
+		"actions": [
+			{"name": "idle", "anim": "anim_wpn_idle", "delaystart": 0, "delayend": 0},
+			{"name": "fire", "anim": "anim_wpn_fire", "delaystart": 0, "delayend": 0,
+				"soundset": "FIRE_BEGIN", "soundsetend": "FIRE_END"},
+			{"name": "recoil", "anim": "anim_wpn_recoil", "delaystart": 0,
+				"delayend": 0, "soundset": "RECOIL_BEGIN"},
+		],
+		"flags": 0x100,
+		"clipsize": 30,
+		"startrounds": 60,
+	}
+	sim.set_local_player_weapon(def, {
+		"anim_wpn_idle": 0.1,
+		"anim_wpn_fire": 0.1,
+		"anim_wpn_recoil": 0.1,
+	})
+	sim.step()
+	sim.drain_local_player_weapon_events() # discard the initial idle play
+
+	sim.set_local_player_weapon_input(true, true, false)
+	sim.step()
+	sim.step()
+	sim.step()
+	var events: Array = sim.drain_local_player_weapon_events()
+	assert_eq(events.size(), 3, "FIRE, RECOIL, FIRE survive one three-tick catch-up")
+	if events.size() == 3:
+		assert_eq([
+			String((events[0] as Dictionary).get("anim_key", "")),
+			String((events[1] as Dictionary).get("anim_key", "")),
+			String((events[2] as Dictionary).get("anim_key", "")),
+		], ["anim_wpn_fire", "anim_wpn_recoil", "anim_wpn_fire"])
+		assert_eq([
+			int((events[0] as Dictionary).get("action_started", -1)),
+			int((events[1] as Dictionary).get("action_started", -1)),
+			int((events[2] as Dictionary).get("action_started", -1)),
+		], [2, 3, 2])
+		assert_eq([
+			int((events[0] as Dictionary).get("action_finished", -1)),
+			int((events[1] as Dictionary).get("action_finished", -1)),
+			int((events[2] as Dictionary).get("action_finished", -1)),
+		], [2, -1, 2])
+		assert_eq([
+			int((events[0] as Dictionary).get("age_ticks", -1)),
+			int((events[1] as Dictionary).get("age_ticks", -1)),
+			int((events[2] as Dictionary).get("age_ticks", -1)),
+		], [2, 1, 0])
+		assert_eq([
+			String((events[0] as Dictionary).get("action_soundset", "")),
+			String((events[1] as Dictionary).get("action_soundset", "")),
+			String((events[2] as Dictionary).get("action_soundset", "")),
+		], ["FIRE_BEGIN", "RECOIL_BEGIN", "FIRE_BEGIN"],
+			"payloads are copied before a later tick or remount can overwrite them")
+		assert_eq([
+			String((events[0] as Dictionary).get("action_end_soundset", "")),
+			String((events[1] as Dictionary).get("action_end_soundset", "")),
+			String((events[2] as Dictionary).get("action_end_soundset", "")),
+		], ["FIRE_END", "", "FIRE_END"])
+	assert_true(sim.drain_local_player_weapon_events().is_empty(), "the drain is destructive")
+	sim.free()
+
+
+func test_weapon_event_batch_does_not_cross_lifecycle_boundaries() -> void:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	var def := {
+		"name": "WPN_EVENT_LIFECYCLE",
+		"actions": [
+			{"name": "idle", "anim": "anim_wpn_idle", "delaystart": 0, "delayend": 0},
+		],
+	}
+	var clips := {"anim_wpn_idle": 0.1}
+
+	sim.set_local_player_weapon(def, clips)
+	sim.step()
+	sim.set_local_player_weapon(def, clips)
+	assert_true(sim.drain_local_player_weapon_events().is_empty(),
+		"remount discards the previous weapon's queued presentation")
+	sim.step()
+	sim.clear_local_player_weapon()
+	assert_true(sim.drain_local_player_weapon_events().is_empty(),
+		"clear discards the unmounted weapon's queued presentation")
+	sim.set_local_player_weapon(def, clips)
+	sim.step()
+	sim.restart()
+	assert_true(sim.drain_local_player_weapon_events().is_empty(),
+		"restart cannot age a pre-rewind event across the logic-tick reset")
+	sim.free()
+
+
 func test_armory_reads_and_clears_authoritative_local_loadout() -> void:
 	var md := NovaMissionData.new()
 	assert_eq(md.create_default(), OK)
@@ -374,6 +548,33 @@ func test_entity_debug_card_carries_named_scalars() -> void:
 	sim.free()
 
 
+func test_effect_state_lookup_uses_the_live_registry_not_the_ai_pool() -> void:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var placed := md.add_entity(
+			NovaMissionData.KIND_BUILDING, 0, Vector3(3, 4, 5), Vector3(10, 20, 30))
+	assert_false(placed.is_empty())
+	var ssn := int(placed.get("bms_id", 0))
+	assert_gt(ssn, 0)
+
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	assert_eq(sim.get_entity_count(), 0,
+			"a building has a registry slot but no AI-pool row")
+	var state: PackedVector3Array = sim.get_entity_effect_state_for_ssn(ssn)
+	assert_eq(state.size(), NovaSimulation.EFFECT_STATE_COUNT,
+			"the SSN query reaches non-AI registry entities")
+	if state.size() == NovaSimulation.EFFECT_STATE_COUNT:
+		assert_eq(state[NovaSimulation.EFFECT_STATE_POSITION], Vector3(3, 5, -4),
+				"effect position uses the canonical mission-to-Godot frame")
+		assert_eq(state[NovaSimulation.EFFECT_STATE_ROTATION_DEG], Vector3(10, 20, 30),
+				"effect orientation remains mission Euler degrees for the host adapter")
+	assert_true(sim.get_entity_effect_state_for_ssn(0).is_empty(), "SSN zero is invalid")
+	assert_true(sim.get_entity_effect_state_for_ssn(65536).is_empty(),
+			"out-of-range SSNs must not wrap onto a different registry entity")
+	sim.free()
+
+
 func test_entity_debug_card_keeps_its_shape_after_a_scripted_remove() -> void:
 	# VaporizeSingle (action 22) despawns the registry slot while the AI entity
 	# stays in the pool - the card must keep a STABLE key set with typed
@@ -390,6 +591,8 @@ func test_entity_debug_card_keeps_its_shape_after_a_scripted_remove() -> void:
 	assert_false(md.add_event_action(0, {"action_type": 22, "param1": ssn}).is_empty())
 	var sim := NovaSimulation.new()
 	assert_true(sim.load_from_mission_data(md))
+	assert_eq(sim.get_entity_effect_state_for_ssn(ssn).size(), NovaSimulation.EFFECT_STATE_COUNT,
+			"the effect lookup sees the live registry slot before VaporizeSingle")
 	for _i in range(16):
 		sim.step()
 
@@ -400,6 +603,8 @@ func test_entity_debug_card_keeps_its_shape_after_a_scripted_remove() -> void:
 	assert_eq(int(card["kind"]), -1, "...with typed defaults (kind -1)")
 	assert_false(bool(card["alive"]), "...alive false")
 	assert_eq(int(card["net_id"]), ssn, "the AI half still reports its scalars")
+	assert_true(sim.get_entity_effect_state_for_ssn(ssn).is_empty(),
+			"attached effects detach as soon as VaporizeSingle removes the registry slot")
 	sim.free()
 
 

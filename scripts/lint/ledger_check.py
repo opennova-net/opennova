@@ -37,6 +37,7 @@ DOMAIN_ORDER: list[tuple[str, str]] = [
     ("NET", "Net"),
     ("env", "Environment"),
     ("INF", "World / AI + events"),
+    ("ANIM", "World / AI + events"),
     ("EVT", "World / AI + events"),
     ("WPN", "World / AI + events"),
     ("ITEMDEF", "Item def"),

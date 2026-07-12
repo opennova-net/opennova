@@ -1172,7 +1172,9 @@ Deferred (later slices): NPC/remote threading (D-NET-117 — includes the AI-bod
 backfill question, see the data-coverage note in §14.8.4), the binoculars input toggle
 (case-26 binding + forced-clear rules; the ladder side is ported), blend windows on
 channel re-init (D-INF-1), the audio-level pitch kick (needs a mixer level tap —
-§14.3/§14.5). Reimpl divergence to note: unknown body keys NO-OP in our host
+§14.3/§14.5), and the per-entity BODY-adm variant rings — multi-clip .adm rows rotate
+round-robin per animState (net-re §5.62 "Multi-clip variant rings", ported for the FP
+weapon adm 2026-07-11); the 3P weapon channel and AI body clips still play variant 0. Reimpl divergence to note: unknown body keys NO-OP in our host
 (`play_body_clip`) where the original backfills to the RESET clip (§14.8.1) —
 invisible for the local-player slice (US01 ships every key), observable only for AI
 bodies once threading lands.

@@ -25,6 +25,7 @@ const _KIND_FILTERS := [
 	["Menu styles", "menu_style"],
 	["Music", "music"],
 	["Sounds", "sound"],
+	["Particle effects", "particle"],
 ]
 
 var kind_option: OptionButton

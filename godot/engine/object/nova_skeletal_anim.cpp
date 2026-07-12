@@ -131,12 +131,41 @@ std::vector<int> to_model_parents(const PackedInt32Array &p_parents) {
 }  // namespace
 
 const NovaSkeletalAnim::LoadedClip *NovaSkeletalAnim::find_clip(const String &p_key) const {
+	// Case-insensitive: JOTAC-era weapon.def ACTION rows author ANIM_WPN_* uppercase
+	// while the .adm stores anim_wpn_* lowercase — an exact match starves the FSM
+	// bake's clip lengths (every 'auto' delay collapsed to 0) and has_anim.
+	// [orig: AnimMap_FindSlotByName @ 0x40cfa0 — stricmp]
 	for (const LoadedClip &c : clips_) {
-		if (c.key == p_key) {
+		if (c.key.nocasecmp_to(p_key) == 0) {
 			return &c;
 		}
 	}
 	return nullptr;
+}
+
+const NovaSkeletalAnim::LoadedClip *NovaSkeletalAnim::find_clip_variant(
+		const String &p_key, int p_variant) const {
+	if (p_variant <= 0) {
+		return find_clip(p_key);
+	}
+	// Two passes over the small clip table: count the same-key run, then serve the
+	// wrapped index — variants registered under one key stay in .adm file order.
+	int count = 0;
+	for (const LoadedClip &c : clips_) {
+		if (c.key.nocasecmp_to(p_key) == 0) {
+			++count;
+		}
+	}
+	if (count == 0) {
+		return nullptr;
+	}
+	int want = p_variant % count;
+	for (const LoadedClip &c : clips_) {
+		if (c.key.nocasecmp_to(p_key) == 0 && want-- == 0) {
+			return &c;
+		}
+	}
+	return nullptr;  // unreachable
 }
 
 bool NovaSkeletalAnim::load_from_resource_root(const Ref<NovaResourceRoot> &p_resource_root, const String &p_adm_name,
@@ -202,15 +231,25 @@ bool NovaSkeletalAnim::load_from_resource_root(const Ref<NovaResourceRoot> &p_re
 	std::vector<std::pair<String, PackedByteArray>> clip_bads;
 	for (size_t i = 0; i < adm.count; ++i) {
 		const String key = String(adm.entries[i].key);
-		const String value = String(adm.entries[i].value);
-		if (value.is_empty()) {
-			continue;
+		// EVERY quoted token on the row is a VARIANT of the same slot, registered in
+		// file order (the authored duplication is the rotation weighting — REVVY's
+		// reload "m4_1r" "m4_1r" "m4_1r2" plays r twice per r2 cycle)
+		// [orig: AnimMap_ParseConfigLine @ 0x40cb60 loops the tokens;
+		//  AnimMap_RegisterBoneNode @ 0x40c2d0 links each into the slot ring].
+		const size_t vcount = adm.entries[i].value_count > 0 ? adm.entries[i].value_count : 1;
+		for (size_t v = 0; v < vcount; ++v) {
+			const String value = v < adm.entries[i].value_count
+					? String(adm.entries[i].values[v])
+					: String(adm.entries[i].value);
+			if (value.is_empty()) {
+				continue;
+			}
+			const PackedByteArray bad_bytes = p_resource_root->read_file(resolve_bad(value));
+			if (bad_bytes.is_empty()) {
+				continue;  // continue-on-failure (matches the DCC importer's behaviour)
+			}
+			clip_bads.emplace_back(key, bad_bytes);
 		}
-		const PackedByteArray bad_bytes = p_resource_root->read_file(resolve_bad(value));
-		if (bad_bytes.is_empty()) {
-			continue;  // continue-on-failure (matches the DCC importer's behaviour)
-		}
-		clip_bads.emplace_back(key, bad_bytes);
 	}
 	adm_free(&adm);
 
@@ -409,32 +448,55 @@ Array NovaSkeletalAnim::get_skeleton_bones() const {
 	return out;
 }
 
-int NovaSkeletalAnim::get_clip_frame_count(const String &p_key) const {
-	const LoadedClip *c = find_clip(p_key);
+int NovaSkeletalAnim::get_clip_variant_count(const String &p_key) const {
+	int count = 0;
+	for (const LoadedClip &c : clips_) {
+		if (c.key.nocasecmp_to(p_key) == 0) {
+			++count;
+		}
+	}
+	return count;
+}
+
+PackedFloat32Array NovaSkeletalAnim::get_clip_variant_lengths(const String &p_key) const {
+	PackedFloat32Array out;
+	for (const LoadedClip &c : clips_) {
+		if (c.key.nocasecmp_to(p_key) == 0) {
+			out.push_back(c.clip.fps > 0 && c.clip.frame_count > 0
+					? static_cast<float>(c.clip.frame_count) / static_cast<float>(c.clip.fps)
+					: 0.0f);
+		}
+	}
+	return out;
+}
+
+int NovaSkeletalAnim::get_clip_frame_count(const String &p_key, int p_variant) const {
+	const LoadedClip *c = find_clip_variant(p_key, p_variant);
 	return c != nullptr ? static_cast<int>(c->clip.frame_count) : 0;
 }
 
-float NovaSkeletalAnim::get_clip_fps(const String &p_key) const {
-	const LoadedClip *c = find_clip(p_key);
+float NovaSkeletalAnim::get_clip_fps(const String &p_key, int p_variant) const {
+	const LoadedClip *c = find_clip_variant(p_key, p_variant);
 	return c != nullptr ? static_cast<float>(c->clip.fps) : 0.0f;
 }
 
-float NovaSkeletalAnim::get_clip_length(const String &p_key) const {
-	const LoadedClip *c = find_clip(p_key);
+float NovaSkeletalAnim::get_clip_length(const String &p_key, int p_variant) const {
+	const LoadedClip *c = find_clip_variant(p_key, p_variant);
 	if (c == nullptr || c->clip.fps == 0 || c->clip.frame_count == 0) {
 		return 0.0f;
 	}
 	return static_cast<float>(c->clip.frame_count) / static_cast<float>(c->clip.fps);
 }
 
-bool NovaSkeletalAnim::is_clip_looping(const String &p_key) const {
-	const LoadedClip *c = find_clip(p_key);
+bool NovaSkeletalAnim::is_clip_looping(const String &p_key, int p_variant) const {
+	const LoadedClip *c = find_clip_variant(p_key, p_variant);
 	return c != nullptr && c->clip.loops();
 }
 
-Array NovaSkeletalAnim::eval_pose(const String &p_key, double p_playhead_seconds) const {
+Array NovaSkeletalAnim::eval_pose(const String &p_key, double p_playhead_seconds,
+		int p_variant) const {
 	Array out;
-	const LoadedClip *lc = find_clip(p_key);
+	const LoadedClip *lc = find_clip_variant(p_key, p_variant);
 	if (lc == nullptr || lc->clip.frame_count == 0) {
 		// Unknown / empty clip: fall back to the bind pose.
 		for (const Transform3D &t : bind_local_) {
@@ -451,6 +513,13 @@ Array NovaSkeletalAnim::eval_pose(const String &p_key, double p_playhead_seconds
 	int a = 0;
 	int b = 0;
 	double frac = 0.0;
+	// The pose table holds frame_count + 1 keys (the header counts INTERVALS; the
+	// sampler bakes every channel key). Loops cycle the frame_count interval windows
+	// (the seam key ~= key 0; the original's loop-wrap window is unwalked); one-shots
+	// play every window and HOLD the true final key — a one-frame clip is one full
+	// window of motion, not a static pose. [orig: BoneAnim_FindKeyframeAtTime
+	// @0x410220 — hold-last past the summed durations]
+	const int last_pose = static_cast<int>(clip.frames.size()) - 1;
 	if (clip.loops() && frame_count > 1) {
 		double m = std::fmod(frame_time, static_cast<double>(frame_count));
 		if (m < 0.0) {
@@ -461,8 +530,8 @@ Array NovaSkeletalAnim::eval_pose(const String &p_key, double p_playhead_seconds
 		b = (a + 1) % frame_count;
 	} else if (frame_time <= 0.0) {
 		a = b = 0;
-	} else if (frame_time >= frame_count - 1) {
-		a = b = frame_count - 1;
+	} else if (frame_time >= last_pose) {
+		a = b = last_pose;
 	} else {
 		a = static_cast<int>(std::floor(frame_time));
 		frac = frame_time - a;
@@ -618,11 +687,13 @@ void NovaSkeletalAnim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_skeleton_bones"), &NovaSkeletalAnim::get_skeleton_bones);
 	ClassDB::bind_method(D_METHOD("slot_to_key", "slot"), &NovaSkeletalAnim::slot_to_key);
 	ClassDB::bind_method(D_METHOD("has_clip", "key"), &NovaSkeletalAnim::has_clip);
-	ClassDB::bind_method(D_METHOD("get_clip_frame_count", "key"), &NovaSkeletalAnim::get_clip_frame_count);
-	ClassDB::bind_method(D_METHOD("get_clip_fps", "key"), &NovaSkeletalAnim::get_clip_fps);
-	ClassDB::bind_method(D_METHOD("get_clip_length", "key"), &NovaSkeletalAnim::get_clip_length);
-	ClassDB::bind_method(D_METHOD("is_clip_looping", "key"), &NovaSkeletalAnim::is_clip_looping);
-	ClassDB::bind_method(D_METHOD("eval_pose", "key", "playhead_seconds"), &NovaSkeletalAnim::eval_pose);
+	ClassDB::bind_method(D_METHOD("get_clip_variant_count", "key"), &NovaSkeletalAnim::get_clip_variant_count);
+	ClassDB::bind_method(D_METHOD("get_clip_variant_lengths", "key"), &NovaSkeletalAnim::get_clip_variant_lengths);
+	ClassDB::bind_method(D_METHOD("get_clip_frame_count", "key", "variant"), &NovaSkeletalAnim::get_clip_frame_count, DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("get_clip_fps", "key", "variant"), &NovaSkeletalAnim::get_clip_fps, DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("get_clip_length", "key", "variant"), &NovaSkeletalAnim::get_clip_length, DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("is_clip_looping", "key", "variant"), &NovaSkeletalAnim::is_clip_looping, DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("eval_pose", "key", "playhead_seconds", "variant"), &NovaSkeletalAnim::eval_pose, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("get_overlay_classes"), &NovaSkeletalAnim::get_overlay_classes);
 	ClassDB::bind_method(D_METHOD("eval_pose_overlay", "key", "playhead_seconds", "classes", "deltas", "wpn_key", "wpn_playhead_seconds"), &NovaSkeletalAnim::eval_pose_overlay, DEFVAL(String()), DEFVAL(0.0));
 }
