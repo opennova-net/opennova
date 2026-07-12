@@ -77,6 +77,55 @@ func test_fnt_editor_builds_atlas_authoring_surface_and_edits_alpha() -> void:
 	assert_eq(doc.resource.get_pixel_alpha(0, 1, 1), 222, "Redo should reapply the alpha edit.")
 
 
+func test_engine_preview_panel_renders_the_edited_font_through_the_game_path() -> void:
+	# FNT-1 gate (docs/oned/workspace-maturity-program.md): the type-a-line sample
+	# is the F2 EngineTextPreview — the game's own draw path (NovaFntResource ->
+	# FontFile + HudText.draw_text) — not a Godot Label truth-claim. The glyph
+	# canvas stays beside it as the paint surface.
+	var doc = autofree(FntEditorDocument.new())
+	assert_eq(doc.open_fnt(FNT_PATH), OK, "Fixture should open before binding the editor.")
+
+	var editor := FntEditorScript.new()
+	add_child_autofree(editor)
+	editor.set_document(doc)
+	await get_tree().process_frame
+
+	var preview: Control = editor.get_node_or_null("%SamplePreview")
+	assert_not_null(preview, "The editor mounts the engine text sample panel.")
+	if preview == null:
+		return
+	assert_false(preview is Label, "The sample panel is the engine draw, not a Label approximation.")
+	assert_true(preview.has_font(), "The edited document's font adopts into the panel on load.")
+	assert_gt(preview.get_font_file().get_fixed_size(), 0,
+		"The adopted FontFile carries the .fnt's own fixed pixel size (the engine draw resolution).")
+
+	var sample_edit: LineEdit = editor.get_node_or_null("%SampleEdit")
+	assert_not_null(sample_edit, "The panel is type-a-line: a sample edit feeds it.")
+	if sample_edit != null:
+		sample_edit.text = "AMMO 30 / 90"
+		sample_edit.text_changed.emit(sample_edit.text)
+		assert_eq(preview.get_sample_text(), "AMMO 30 / 90", "Typing a line updates the engine-drawn sample.")
+
+	assert_not_null(editor.get_node_or_null("%AtlasCanvas"),
+		"The glyph canvas stays beside the sample — it is a paint surface, not a preview claim.")
+
+
+func test_engine_preview_panel_is_empty_until_a_font_loads() -> void:
+	var editor := FntEditorScript.new()
+	add_child_autofree(editor)
+	await get_tree().process_frame
+	var preview: Control = editor.get_node_or_null("%SamplePreview")
+	assert_not_null(preview, "The panel exists before any document binds.")
+	if preview == null:
+		return
+	assert_false(preview.has_font(), "Without a document there is no font claim to render.")
+
+	var doc = autofree(FntEditorDocument.new())
+	assert_eq(doc.open_fnt(FNT_PATH), OK)
+	editor.set_document(doc)
+	assert_true(preview.has_font(), "Binding a loaded document adopts its font into the panel.")
+
+
 func test_fonts_workspace_exposes_document_actions_and_inspector() -> void:
 	var workspace = autofree(FontsWorkspaceScript.new())
 	assert_eq(workspace.get_workspace_label(), "Fonts", "Fonts workspace should label itself for the rail.")
