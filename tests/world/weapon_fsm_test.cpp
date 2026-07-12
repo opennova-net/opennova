@@ -160,6 +160,46 @@ void test_auto_refire_cadence() {
     CHECK(s.clip == 30 - fired);
 }
 
+void test_revx_m4_zero_recoil_auto_cadence() {
+    // The REVX02 M4AUTO shape: FIRE {0, 3} carries the cadence and RECOIL is a
+    // ZERO-LENGTH pass-through arbiter (DELAYEND 0, ANIM authored as a comment ->
+    // empty). Retail runs the {0,0} action on its entry tick (LABEL_118
+    // @ 0x5414a2) and the held trigger re-fires through the recoil arbiter
+    // [orig: @ 0x542e9d family] — the volley must run at the FIRE row's cadence
+    // with the per-shot end leg (SOUNDSETEND GS_M4) on every shot.
+    WeaponFsmActionRow rows[5];
+    set_row(rows[0], "idle", "anim_wpn_idle", 0, -1);
+    set_row(rows[1], "fire", "anim_wpn_fire", 0, 3);
+    set_row(rows[2], "recoil", "", 0, 0);
+    set_row(rows[3], "reload", "anim_wpn_reload", 200, -1);
+    set_row(rows[4], "empty", "anim_wpn_empty", -1, -1);
+    WeaponFsmDef def;
+    weapon_fsm_bake(rows, 5, clip_seconds, nullptr, def);
+    def.auto_fire = true;
+    def.clip_capacity = 30;
+    WeaponSlotState s;
+    s.clip = 30;
+    s.reserve = 300;
+    WeaponFsmInputs in;
+    in.fire_pressed = true;
+    in.fire_held = true;
+    int fired = 0;
+    int fire_ends = 0;
+    for (int t = 0; t < 100; ++t) {
+        WeaponFsmEvents ev;
+        weapon_fsm_tick(def, s, in, ev);
+        in.fire_pressed = false;
+        if (ev.fired) ++fired;
+        if (ev.action_finished == wa::kFire) ++fire_ends;
+    }
+    // fire entry + 3 counter ticks + the zero-length recoil pass = a 5-6 tick
+    // cycle -> 16-20 shots in 100 ticks. A wedge (0-2 shots) or a runaway
+    // (>25) are the failure modes this pins.
+    CHECK(fired >= 14 && fired <= 22);
+    CHECK(fire_ends == fired);
+    CHECK(s.clip == 30 - fired);
+}
+
 void test_semi_no_auto_refire() {
     WeaponFsmDef def = make_ak_def();
     def.auto_fire = false;
@@ -460,6 +500,7 @@ int main() {
     test_bake();
     test_fire_chains_recoil();
     test_auto_refire_cadence();
+    test_revx_m4_zero_recoil_auto_cadence();
     test_semi_no_auto_refire();
     test_burst3();
     test_empty_clip_paths();
