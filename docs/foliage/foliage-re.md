@@ -467,10 +467,11 @@ Witnessed at the instruction level (session addenda; IDB comments landed):
   target with progressive LOD masks — T1 is that tile RT, sampled through the
   world→tile UV matrix staged at `[orig: @ 0x60a220..0x60a356]`.
 
-Proposed renames (curated-name policy — NOT applied, awaiting maintainer OK):
+Renames APPLIED 2026-07-12 (maintainer OK'd with the rebuild slice):
 `render_terrain_lightmaps @ 0x609de0 → Foliage_RenderFarPatches` (it renders
-the FAR foliage patches over the tile RTs; the current name is a kong
-misnomer), `Terrain_SetupSectorModelDraw @ 0x6007c0 → Foliage_SetupFarSlotDraw`.
+the FAR foliage patches over the tile RTs; the old name was a kong misnomer),
+`Terrain_SetupSectorModelDraw @ 0x6007c0 → Foliage_SetupFarSlotDraw`;
+`idb_save` checkpointed.
 
 IDB changes this session: `sub_6042A0 → Terrain_FindSectorTileRT`; witness
 comments at `0x609efe`, `0x60a45d`, `0x60a4a8`, `0x60a171`, `0x60a53d`,
