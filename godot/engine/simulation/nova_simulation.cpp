@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <utility>
 
@@ -873,6 +874,8 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_entity_yaw_deg", "index"), &NovaSimulation::get_entity_yaw_deg);
 	ClassDB::bind_method(D_METHOD("get_entity_state", "index"), &NovaSimulation::get_entity_state);
 	ClassDB::bind_method(D_METHOD("get_entity_net_id", "index"), &NovaSimulation::get_entity_net_id);
+	ClassDB::bind_method(D_METHOD("get_entity_effect_state_for_ssn", "ssn"),
+	                     &NovaSimulation::get_entity_effect_state_for_ssn);
 	ClassDB::bind_method(D_METHOD("get_entity_bms_id", "index"), &NovaSimulation::get_entity_bms_id);
 	ClassDB::bind_method(D_METHOD("get_entity_owner_connection_id", "index"),
 	                     &NovaSimulation::get_entity_owner_connection_id);
@@ -934,6 +937,9 @@ void NovaSimulation::_bind_methods() {
 	BIND_ENUM_CONSTANT(PF_TYPE_ID);
 	BIND_ENUM_CONSTANT(PF_WIRE_HANDLE);
 	BIND_ENUM_CONSTANT(PF_STRIDE);
+	BIND_ENUM_CONSTANT(EFFECT_STATE_POSITION);
+	BIND_ENUM_CONSTANT(EFFECT_STATE_ROTATION_DEG);
+	BIND_ENUM_CONSTANT(EFFECT_STATE_COUNT);
 
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "playing"), "set_playing", "is_playing");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "tick_mode"), "set_tick_mode", "get_tick_mode");
@@ -1691,6 +1697,14 @@ void NovaSimulation::tick_local_player_view() {
 Dictionary NovaSimulation::get_local_player_view() const {
 	Dictionary out;
 	out["scope_engaged"] = player_view_.scope_engaged;
+	const opennova::world::Entity *local = world_ != nullptr
+			? world_->registry.get(world_->cached.local_player)
+			: nullptr;
+	out["mounted"] = local != nullptr && local->mounted;
+	// Structural proxy for Player_IsVehicleHasAttackCapability until mounted
+	// weapon inventory is modeled: these seat classes replace the on-foot
+	// upper-body weapon channel; passenger seats do not.
+	out["vehicle_attack_context"] = local != nullptr && mount_blocks_weapon_channel(*local);
 	out["scope_fraction"] = opennova::world::player_view_scope_fraction(player_view_);
 	// The NoCardSwitch reload rule: while the equipped slot is mid-RELOAD on a
 	// weapon WITHOUT NoCardSwitch (flags 0x2000000), the FP camera drops the ADS
@@ -2291,6 +2305,26 @@ int NovaSimulation::get_entity_net_id(int p_index) const {
 	if (!ai_) return 0;
 	AiEntity *e = ai_->at(p_index);
 	return e ? e->net_id : 0;
+}
+
+PackedVector3Array NovaSimulation::get_entity_effect_state_for_ssn(int p_ssn) const {
+	PackedVector3Array out;
+	if (world_ == nullptr || p_ssn <= 0 ||
+			p_ssn > static_cast<int>(std::numeric_limits<std::uint16_t>::max())) {
+		return out;
+	}
+	const opennova::world::Entity *entity = world_->registry.get(
+			world_->registry.find_by_net_id(static_cast<std::uint16_t>(p_ssn)));
+	if (entity == nullptr) return out;
+
+	out.resize(EFFECT_STATE_COUNT);
+	out.set(EFFECT_STATE_POSITION, Vector3(
+			entity->position.x, entity->position.z, -entity->position.y));
+	out.set(EFFECT_STATE_ROTATION_DEG, Vector3(
+			static_cast<float>(entity->pitch),
+			static_cast<float>(entity->yaw),
+			static_cast<float>(entity->roll)));
+	return out;
 }
 
 int NovaSimulation::get_entity_bms_id(int p_index) const {

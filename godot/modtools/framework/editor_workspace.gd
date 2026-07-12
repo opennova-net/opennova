@@ -464,6 +464,12 @@ func save_as_file(_path: String) -> Error:
 	return ERR_UNAVAILABLE
 
 
+## Optional detail for a failed save. The shell uses this instead of replacing
+## a workspace's domain-specific validation message with a generic error.
+func get_save_failure_message(_error: Error) -> String:
+	return ""
+
+
 func can_export() -> bool:
 	return false
 
@@ -547,6 +553,14 @@ func _notify_status(message: String, severity: StringName = &"info", duration: f
 func _sync_shell() -> void:
 	if editor_shell != null and editor_shell.has_method("sync_from_editor_state"):
 		editor_shell.sync_from_editor_state()
+
+
+## Re-sync the shell's workflow rail + inspector after this workspace changed
+## its active workflow programmatically (activate_workflow from workspace UI
+## rather than the rail). No-op without a shell (headless tests).
+func _sync_shell_workflow() -> void:
+	if editor_shell != null and editor_shell.has_method("sync_workflow_from_workspace"):
+		editor_shell.sync_workflow_from_workspace()
 
 
 ## Parent a Node under the shell: domain editors that need _process/audio,

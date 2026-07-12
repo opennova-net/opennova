@@ -29,6 +29,15 @@
 #include "env/nova_glare_occlusion.h"
 #include "env/nova_star_field.h"
 #include "env/nova_water_core.h"
+#include "particle/nova_particle_curve_ref.h"
+#include "particle/nova_particle_effect.h"
+#include "particle/nova_particle_table_handles.h"
+#include "particle/nova_particle_table.h"
+#include "particle/nova_particle_graphic_layer.h"
+#include "particle/nova_particle_def.h"
+#include "particle/nova_particle_file.h"
+#include "particle/nova_particle_emitter.h"
+#include "particle/ptl_resource_format.h"
 #include "object/nova_object_data.h"
 #include "object/nova_object_shader_cache.h"
 #include "object/nova_item_database.h"
@@ -108,6 +117,8 @@ static Ref<KdaResourceFormatSaver> kda_saver;
 static Ref<ResourceFormatLoaderFNT> fnt_loader;
 static Ref<ResourceFormatSaverFNT> fnt_saver;
 static Ref<ResourceFormatLoaderNovaTexture> nova_tex_loader;
+static Ref<ResourceFormatLoaderPTL> ptl_loader;
+static Ref<ResourceFormatSaverPTL> ptl_saver;
 static Ref<ResourceFormatLoaderRTXT> rtxt_loader;
 static Ref<ResourceFormatSaverRTXT> rtxt_saver;
 static Ref<SbfResourceFormatLoader> sbf_loader;
@@ -188,6 +199,16 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(NovaDataFile);
 	GDREGISTER_CLASS(NovaPaths);
 	GDREGISTER_CLASS(ResourceFormatLoaderNovaTexture);
+	GDREGISTER_CLASS(NovaParticleCurveRef);
+	GDREGISTER_CLASS(NovaParticleEffect);
+	GDREGISTER_CLASS(NovaParticleTableHandles);
+	GDREGISTER_CLASS(NovaParticleTable);
+	GDREGISTER_CLASS(NovaParticleGraphicLayer);
+	GDREGISTER_CLASS(NovaParticleDef);
+	GDREGISTER_CLASS(NovaParticleFile);
+	GDREGISTER_CLASS(NovaParticleEmitter);
+	GDREGISTER_CLASS(ResourceFormatLoaderPTL);
+	GDREGISTER_CLASS(ResourceFormatSaverPTL);
 	GDREGISTER_CLASS(NovaResourceIndex);
 	GDREGISTER_CLASS(NovaReferenceIndex);
 	GDREGISTER_CLASS(NovaResourceRoot);
@@ -266,6 +287,12 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	nova_tex_loader.instantiate();
 	ResourceLoader::get_singleton()->add_resource_format_loader(nova_tex_loader, true);
 
+	ptl_loader.instantiate();
+	ResourceLoader::get_singleton()->add_resource_format_loader(ptl_loader);
+
+	ptl_saver.instantiate();
+	ResourceSaver::get_singleton()->add_resource_format_saver(ptl_saver);
+
 	rtxt_loader.instantiate();
 	ResourceLoader::get_singleton()->add_resource_format_loader(rtxt_loader);
 
@@ -342,6 +369,12 @@ void uninitialize_opennova_module(ModuleInitializationLevel p_level) {
 
 	ResourceLoader::get_singleton()->remove_resource_format_loader(nova_tex_loader);
 	nova_tex_loader.unref();
+
+	ResourceLoader::get_singleton()->remove_resource_format_loader(ptl_loader);
+	ptl_loader.unref();
+
+	ResourceSaver::get_singleton()->remove_resource_format_saver(ptl_saver);
+	ptl_saver.unref();
 
 	ResourceLoader::get_singleton()->remove_resource_format_loader(rtxt_loader);
 	rtxt_loader.unref();

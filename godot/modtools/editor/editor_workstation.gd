@@ -13,8 +13,9 @@ const MnuWorkspaceAdapter = preload("res://modtools/mnu/mnu_workspace.gd")
 const HudWorkspaceAdapter = preload("res://modtools/hud/hud_workspace.gd")
 const MusicWorkspaceAdapter = preload("res://modtools/music/music_workspace.gd")
 const AvatarsWorkspaceAdapter = preload("res://modtools/avatar/avatars_workspace.gd")
+const ParticleWorkspaceAdapter = preload("res://modtools/particle/particle_workspace.gd")
 
-enum Workspace { TERRAIN, ENVIRONMENT, OBJECT, MISSION, CREDITS, FONTS, STRINGS, MUSIC, SOUND, MNU, HUD, AVATARS }
+enum Workspace { TERRAIN, ENVIRONMENT, OBJECT, MISSION, CREDITS, FONTS, STRINGS, MUSIC, SOUND, MNU, HUD, AVATARS, PARTICLE }
 
 # Workspaces are declared as WorkspaceDef rows in _workspace_defs(); the rail
 # shows the non-popup ones in order. The enum above stays only as the stable id
@@ -415,6 +416,7 @@ func _workspace_defs() -> Array:
 		WorkspaceDef.make(Workspace.MNU, MnuWorkspaceAdapter, false, &"Interface", &"menu"),
 		WorkspaceDef.make(Workspace.HUD, HudWorkspaceAdapter, false, &"Interface", &"hud"),
 		WorkspaceDef.make(Workspace.MUSIC, MusicWorkspaceAdapter, false, &"Audio", &"music"),
+		WorkspaceDef.make(Workspace.PARTICLE, ParticleWorkspaceAdapter, false, &"Atmosphere", &"particle"),
 		WorkspaceDef.make(Workspace.SOUND, SoundWorkspaceAdapter, false, &"Atmosphere", &"sound"),
 		WorkspaceDef.make(Workspace.ENVIRONMENT, EnvironmentWorkspaceAdapter, true, &"Atmosphere", &"environment"),
 	]
@@ -1479,6 +1481,13 @@ func _swap_workflow_inspector(workspace: EditorWorkspace, workflow_id: int) -> v
 ## notification surface for workspaces, tools, and MCP).
 func show_status_message(text: String, duration: float = 0.0, severity: StringName = &"info") -> void:
 	_status.show_status_message(text, duration, severity)
+
+
+## Re-sync the workflow rail + inspector after a workspace changed its active
+## workflow programmatically (e.g. the particle blueprint selecting a node of a
+## different kind). Public seam for EditorWorkspace._sync_shell_workflow().
+func sync_workflow_from_workspace() -> void:
+	_refresh_workflow_from_workspace()
 
 
 ## Saves the workspace's current document, then runs on_done (Save As fallback

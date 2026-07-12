@@ -53,9 +53,16 @@ const HUDPOS_NAME := "hudpos.def"
 const AVATARS_NAME := "Avatars.def"
 const MUSIC_NAME := "jo_gamemus.bin"
 const SOUND_NAME := "00TRa.LWF"
+# The game ships .ptl inside PFFs rather than loose in the resource dir, so the
+# particles shot leans on the bundled repo fixture when the dir has none.
+# buildup.ptl is a compact editor fixture with a steady emitter. Its retail
+# texture/curve dependencies are external to the fixture set, so this capture
+# intentionally shows the preview's diagnostic fallback, not a parity image.
+const PARTICLE_NAME := "buildup.ptl"
 const FALLBACK_ASSETS := {
 	MUSIC_NAME: "res://../fixtures/mus/jo_gamemus.bin",
 	SOUND_NAME: "res://../fixtures/lwf/00TRa.LWF",
+	PARTICLE_NAME: "res://../fixtures/particle/buildup.ptl",
 }
 
 # [workspace_id, asset_name, out_filename]. The asset is resolved from the
@@ -71,6 +78,7 @@ var _shots: Array = [
 	[EditorWorkstation.Workspace.MNU, MENU_NAME, "menus.png"],
 	[EditorWorkstation.Workspace.HUD, HUDPOS_NAME, "hud.png"],
 	[EditorWorkstation.Workspace.MUSIC, MUSIC_NAME, "music.png"],
+	[EditorWorkstation.Workspace.PARTICLE, PARTICLE_NAME, "particles.png"],
 	[EditorWorkstation.Workspace.SOUND, SOUND_NAME, "sound.png"],
 	[EditorWorkstation.Workspace.ENVIRONMENT, ENV_NAME, "environment.png"],
 ]
@@ -187,6 +195,7 @@ func _run_all() -> bool:
 			or ws_id == EditorWorkstation.Workspace.OBJECT \
 			or ws_id == EditorWorkstation.Workspace.AVATARS \
 			or ws_id == EditorWorkstation.Workspace.MISSION \
+			or ws_id == EditorWorkstation.Workspace.PARTICLE \
 			or ws_id == EditorWorkstation.Workspace.ENVIRONMENT
 
 		# Open the asset BEFORE activating the workspace: set_active_workspace()

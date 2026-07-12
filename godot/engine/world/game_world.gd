@@ -73,6 +73,7 @@ var _placer  # MissionObjectPlacer (kept so mission audio reuses its item databa
 var _weapon_db: NovaWeaponDatabase = null  # weapon.def, lazy per mounted root (FP viewmodel)
 var _local_weapon_dict := {}  # the resolved weapon's raw dict (FSM setup transport, ADR 0017 edge)
 var _mission_audio: NovaMissionAudio
+var _effect_world: NovaEffectWorld  # the runtime .ptl effect world (render-only, per mission)
 # Frame-clear cache (divergence #21): recompute only when the env generation
 # moves or the camera crosses the water plane.
 var _clear_env_generation: int = -1
@@ -387,6 +388,9 @@ func _load_mission_internal(mission: NovaMissionData, bms_name: String, resource
 	timeline.span("audio")
 	_start_mission_audio(mission, bms_name)
 	timeline.end_span()
+	timeline.span("effects")
+	_start_effect_world()
+	timeline.end_span()
 	timeline.finish()
 	_loaded_mission_file = bms_name
 	_loaded = true
@@ -515,6 +519,9 @@ func unload() -> void:
 	if _runtime != null:
 		_runtime.queue_free()  # frees its off-tree sim too (MissionRuntime._exit_tree)
 	_runtime = null
+	if _effect_world != null:
+		_effect_world.queue_free()
+		_effect_world = null
 	_mission_audio = null
 	_placer = null
 	_weapon_db = null  # re-resolves against the next load's mounted root
@@ -1033,22 +1040,42 @@ func is_foliage_hidden() -> bool:
 	return _foliage_hidden
 
 
-# Fire mission audio for presentation effects. PlayWavList actions surface as "dialog" effects
-# carrying the dialog/wav id in `a`; route them to the mission audio (which resolves the id through
-# the co-named .DBF and plays the LWF set). Other kinds are still emitted via mission_effects for
-# host consumers (HUD, etc.).
+# Fire mission audio + particle effects for presentation. PlayWavList actions surface as "dialog"
+# effects carrying the dialog/wav id in `a`; route them to the mission audio (which resolves the id
+# through the co-named .DBF and plays the LWF set). WAC fx commands surface with the effect name in
+# `str`; route them to the effect world. Other kinds are still emitted via mission_effects for host
+# consumers (HUD, etc.).
 func _route_mission_effects(effects: Array) -> void:
-	if _mission_audio == null:
-		return
 	for e in effects:
 		var eff: Dictionary = e
 		var kind := String(eff.get("kind", ""))
 		if kind == "dialog":
 			# BMS PlayWavList: dialog id resolved through the co-named .DBF (queued).
-			_mission_audio.play_dialog(int(eff.get("a", 0)))
+			if _mission_audio != null:
+				_mission_audio.play_dialog(int(eff.get("a", 0)))
 		elif kind == "dialog_wav":
 			# WAC wave/pwave: a scripted voice .wav by filename on its own channel.
-			_mission_audio.play_wac_wave(String(eff.get("str", "")))
+			if _mission_audio != null:
+				_mission_audio.play_wac_wave(String(eff.get("str", "")))
+		elif kind == "fx2ssn":
+			# WAC fx2ssn: spawn the named effect at the SSN entity's position with
+			# the emitter handle owned per entity — a scripted re-trigger detaches
+			# the previous group (spawn_effect_owned), so loops/respawns never stack
+			# emitters and FOREVEREMIT effects never accumulate
+			# [orig: WacScript_SpawnEffectAtSsnEntity @ 0x4f23a0 — renamed from the
+			# kong "sound" misnomer, it spawns a particle emitter]. The original
+			# orients the emitter to the terrain surface normal at the entity's
+			# grid cell; ported as up-vector until the terrain-normal read lands
+			# (ptl-format-re.md §8, D-PTL-7).
+			if _effect_world != null and _runtime != null:
+				var ssn := int(eff.get("b", 0))
+				var pos = _runtime.entity_position_for_ssn(ssn)
+				if pos != null:
+					_effect_world.spawn_effect_owned(ssn, String(eff.get("str", "")), pos, Vector3.UP)
+		# fx2tgt (spawn at a placed type-6088 target marker
+		# [orig: WacScript_SpawnEffectAtTargetMarker @ 0x4f7fd0 — same misnomer
+		# family]) stays unrouted: which .bms record field carries the 1..99
+		# target number is unwitnessed — ptl-format-re.md §8.
 
 
 # Start the shared mission runtime driver: it promotes the mission, builds the present index over the
@@ -1214,6 +1241,27 @@ func _start_mission_audio(mission: NovaMissionData, bms_name: String) -> void:
 	# 0009/0011/0012). gamemus's discriminator Var1 stays 0 (never written in
 	# retail), so the Multiplayerstart P0 loop plays.
 	NovaMusicService.open_game_context(_resource_root)
+
+
+# Mission-start load of EVERY mounted .ptl into the runtime effect world
+# [orig: CEffectSystem_Init @ 0x5f6070 <- Game_StartMission @ 0x524980 — no fixed
+# file list: the loose ptl\*.ptl set and every PFF .ptl entry both parse].
+func _start_effect_world() -> void:
+	_effect_world = NovaEffectWorld.new()
+	_effect_world.name = "EffectWorld"
+	add_child(_effect_world)
+	var count := _effect_world.load_from_resource_root(_resource_root)
+	if _water != null:
+		_effect_world.set_water_height(float(_water.water_height))
+	if _runtime != null:
+		_effect_world.set_owner_position_provider(
+				Callable(_runtime, "entity_effect_transform_for_ssn"))
+	print("GameWorld: effect world — %d effect(s) across %d .ptl file(s)" % [
+		count, _effect_world.file_count()])
+
+
+func get_effect_world() -> NovaEffectWorld:
+	return _effect_world
 
 
 func get_mission_audio() -> NovaMissionAudio:

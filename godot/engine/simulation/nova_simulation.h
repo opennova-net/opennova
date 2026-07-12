@@ -7,6 +7,7 @@
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
+#include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
@@ -103,6 +104,15 @@ public:
 		PF_TYPE_ID,    // items.def runtime type id from the wire (0 = none); keys the joiner's wire avatars
 		PF_WIRE_HANDLE,// (pool<<12)|slot wire handle from the decoded stream (joiner render key; 0 = none)
 		PF_STRIDE      // record length; also the count of fields above
+	};
+
+	// Typed record returned by get_entity_effect_state_for_ssn(). Position is
+	// already in Godot space; rotation remains mission Euler degrees so the
+	// host applies the one MissionObjectPlacer basis conversion.
+	enum EffectStateField {
+		EFFECT_STATE_POSITION = 0,
+		EFFECT_STATE_ROTATION_DEG,
+		EFFECT_STATE_COUNT
 	};
 
 private:
@@ -565,6 +575,9 @@ public:
 	float get_entity_yaw_deg(int p_index) const;    // heading in mission degrees (for the editor remap)
 	int get_entity_state(int p_index) const;        // AI state id (16 = GROUND_FOLLOWWP)
 	int get_entity_net_id(int p_index) const;       // runtime SSN (WAC/BMS addressing), 0 if none
+	// Empty when no LIVE registry entity owns p_ssn. Unlike the AI-indexed
+	// getters, this includes non-AI pools and drops immediately on despawn.
+	PackedVector3Array get_entity_effect_state_for_ssn(int p_ssn) const;
 	int get_entity_bms_id(int p_index) const;       // file entity id; the host maps this to a placed node
 	int get_entity_owner_connection_id(int p_index) const; // entity+0x78 dcb; the networked-player identity (D-NET-112)
 	int get_entity_wire_handle(int p_index) const;  // (pool<<12)|slot — the per-entity wire identity
@@ -693,3 +706,4 @@ public:
 
 VARIANT_ENUM_CAST(godot::NovaSimulation::TickMode);
 VARIANT_ENUM_CAST(godot::NovaSimulation::PresentField);
+VARIANT_ENUM_CAST(godot::NovaSimulation::EffectStateField);

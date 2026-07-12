@@ -25,6 +25,7 @@ add_subdirectory(../../libs/ase opennova_ase)
 add_subdirectory(../../libs/tdp opennova_tdp)
 add_subdirectory(../../libs/oed opennova_oed)
 add_subdirectory(../../libs/renderer opennova_renderer)
+add_subdirectory(../../libs/particle opennova_particle)
 add_subdirectory(../../libs/cbin opennova_cbin)
 add_subdirectory(../../libs/terrain_query opennova_terrain_query)
 add_subdirectory(../../libs/terrain opennova_terrain)
@@ -92,6 +93,15 @@ add_library(${TARGET_NAME} SHARED
     env/nova_water_core.cpp
     env/nova_star_field.cpp
     env/nova_glare_occlusion.cpp
+    particle/nova_particle_curve_ref.cpp
+    particle/nova_particle_effect.cpp
+    particle/nova_particle_table_handles.cpp
+    particle/nova_particle_table.cpp
+    particle/nova_particle_graphic_layer.cpp
+    particle/nova_particle_def.cpp
+    particle/nova_particle_file.cpp
+    particle/nova_particle_emitter.cpp
+    particle/ptl_resource_format.cpp
     object/nova_object_data.cpp
     object/nova_object_shader_cache.cpp
     object/nova_item_database.cpp
@@ -184,6 +194,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     opennova_tdp
     opennova_oed
     opennova_renderer
+    opennova_particle
     opennova_terrain_query
     opennova_terrain
     opennova_vfs

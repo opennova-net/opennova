@@ -548,6 +548,33 @@ func test_entity_debug_card_carries_named_scalars() -> void:
 	sim.free()
 
 
+func test_effect_state_lookup_uses_the_live_registry_not_the_ai_pool() -> void:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var placed := md.add_entity(
+			NovaMissionData.KIND_BUILDING, 0, Vector3(3, 4, 5), Vector3(10, 20, 30))
+	assert_false(placed.is_empty())
+	var ssn := int(placed.get("bms_id", 0))
+	assert_gt(ssn, 0)
+
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	assert_eq(sim.get_entity_count(), 0,
+			"a building has a registry slot but no AI-pool row")
+	var state: PackedVector3Array = sim.get_entity_effect_state_for_ssn(ssn)
+	assert_eq(state.size(), NovaSimulation.EFFECT_STATE_COUNT,
+			"the SSN query reaches non-AI registry entities")
+	if state.size() == NovaSimulation.EFFECT_STATE_COUNT:
+		assert_eq(state[NovaSimulation.EFFECT_STATE_POSITION], Vector3(3, 5, -4),
+				"effect position uses the canonical mission-to-Godot frame")
+		assert_eq(state[NovaSimulation.EFFECT_STATE_ROTATION_DEG], Vector3(10, 20, 30),
+				"effect orientation remains mission Euler degrees for the host adapter")
+	assert_true(sim.get_entity_effect_state_for_ssn(0).is_empty(), "SSN zero is invalid")
+	assert_true(sim.get_entity_effect_state_for_ssn(65536).is_empty(),
+			"out-of-range SSNs must not wrap onto a different registry entity")
+	sim.free()
+
+
 func test_entity_debug_card_keeps_its_shape_after_a_scripted_remove() -> void:
 	# VaporizeSingle (action 22) despawns the registry slot while the AI entity
 	# stays in the pool - the card must keep a STABLE key set with typed
@@ -564,6 +591,8 @@ func test_entity_debug_card_keeps_its_shape_after_a_scripted_remove() -> void:
 	assert_false(md.add_event_action(0, {"action_type": 22, "param1": ssn}).is_empty())
 	var sim := NovaSimulation.new()
 	assert_true(sim.load_from_mission_data(md))
+	assert_eq(sim.get_entity_effect_state_for_ssn(ssn).size(), NovaSimulation.EFFECT_STATE_COUNT,
+			"the effect lookup sees the live registry slot before VaporizeSingle")
 	for _i in range(16):
 		sim.step()
 
@@ -574,6 +603,8 @@ func test_entity_debug_card_keeps_its_shape_after_a_scripted_remove() -> void:
 	assert_eq(int(card["kind"]), -1, "...with typed defaults (kind -1)")
 	assert_false(bool(card["alive"]), "...alive false")
 	assert_eq(int(card["net_id"]), ssn, "the AI half still reports its scalars")
+	assert_true(sim.get_entity_effect_state_for_ssn(ssn).is_empty(),
+			"attached effects detach as soon as VaporizeSingle removes the registry slot")
 	sim.free()
 
 

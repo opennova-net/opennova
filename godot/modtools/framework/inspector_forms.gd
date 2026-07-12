@@ -27,7 +27,8 @@ static func add_spin_row(parent: Control, node_name: String, label_text: String,
 	label.custom_minimum_size = Vector2(LABEL_COL_WIDTH, 0)
 	row.add_child(label)
 	var spin := SpinBox.new()
-	spin.name = node_name
+	if not node_name.is_empty():
+		spin.name = node_name
 	spin.min_value = min_value
 	spin.max_value = max_value
 	spin.step = step
@@ -38,7 +39,8 @@ static func add_spin_row(parent: Control, node_name: String, label_text: String,
 
 static func add_checkbox(parent: Control, node_name: String, text: String) -> CheckBox:
 	var checkbox := CheckBox.new()
-	checkbox.name = node_name
+	if not node_name.is_empty():
+		checkbox.name = node_name
 	checkbox.text = text
 	parent.add_child(checkbox)
 	return checkbox
@@ -55,7 +57,8 @@ static func add_color_row(parent: Control, node_name: String, label_text: String
 	label.custom_minimum_size = Vector2(LABEL_COL_WIDTH, 0)
 	row.add_child(label)
 	var picker := ColorPickerButton.new()
-	picker.name = node_name
+	if not node_name.is_empty():
+		picker.name = node_name
 	picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(picker)
 	return picker
@@ -72,7 +75,8 @@ static func add_id_option_row(parent: Control, node_name: String, label_text: St
 	label.custom_minimum_size = Vector2(LABEL_COL_WIDTH, 0)
 	row.add_child(label)
 	var option := OptionButton.new()
-	option.name = node_name
+	if not node_name.is_empty():
+		option.name = node_name
 	option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(option)
 	populate_id_option(option, options, 0)
@@ -151,7 +155,8 @@ static func set_spin(node, value: float) -> void:
 
 static func build_channel_card(parent: VBoxContainer, node_name: String) -> VBoxContainer:
 	var card := PanelContainer.new()
-	card.name = node_name
+	if not node_name.is_empty():
+		card.name = node_name
 	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	parent.add_child(card)
 
@@ -195,3 +200,29 @@ static func add_empty_state(parent: Control, text: String, node_name := "") -> L
 	if not node_name.is_empty():
 		label.name = node_name
 	return label
+
+
+## Collapsible section: a flat toggle-header button + a content VBox that shows or
+## hides with it. Returns the content VBox to add rows into. Used for Primary /
+## Advanced grouping so dense inspectors stay scannable.
+static func add_foldable_section(parent: Control, title: String, expanded := true) -> VBoxContainer:
+	var header := Button.new()
+	header.flat = true
+	header.toggle_mode = true
+	header.button_pressed = expanded
+	header.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	header.focus_mode = Control.FOCUS_NONE
+	header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.text = ("  ▾  " if expanded else "  ▸  ") + title
+	parent.add_child(header)
+
+	var content := VBoxContainer.new()
+	content.add_theme_constant_override("separation", 6)
+	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	content.visible = expanded
+	parent.add_child(content)
+
+	header.toggled.connect(func(on: bool) -> void:
+		content.visible = on
+		header.text = ("  ▾  " if on else "  ▸  ") + title)
+	return content
