@@ -48,6 +48,14 @@ func _run() -> void:
 	# regardless, which masks the hide — the foliage MeshInstances honor it).
 	if world is Node3D:
 		(world as Node3D).visible = true
+	# Attribution switch: NOVA_PROBE_HIDE_FOLIAGE=1 hides the dispatcher so sky/env
+	# artifacts can be separated from foliage draws (probe-only).
+	if OS.get_environment("NOVA_PROBE_HIDE_FOLIAGE") == "1":
+		var terr0: Node = world.get_node_or_null("NovaTerrain")
+		if terr0 != null:
+			for c0 in terr0.get_children():
+				if c0 is NovaFoliageDispatcher:
+					(c0 as Node3D).visible = false
 	var menu_layer: Node = scene.get_node_or_null("MenuLayer")
 	if menu_layer != null and menu_layer is CanvasLayer:
 		(menu_layer as CanvasLayer).visible = false
@@ -148,16 +156,6 @@ func _run() -> void:
 							" c0=", cols[0] if cols.size() > 0 else Color.BLACK)
 						var uvs: PackedVector2Array = arr[Mesh.ARRAY_TEX_UV]
 						print("[capture] uvs n=", uvs.size(), " uv0=", uvs[0] if uvs.size() > 0 else Vector2.ZERO, " uv1=", uvs[1] if uvs.size() > 1 else Vector2.ZERO, " uv2=", uvs[2] if uvs.size() > 2 else Vector2.ZERO)
-						print("[capture] material: ", nearest.material_override)
-						var debug_mat := StandardMaterial3D.new()
-						debug_mat.albedo_color = Color(1.0, 0.0, 0.0)
-						debug_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-						debug_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-						for fc2 in c.get_children():
-							if fc2 is MeshInstance3D and String(fc2.name).begins_with("FarCell"):
-								(fc2 as MeshInstance3D).material_override = debug_mat
-						for _j in range(5):
-							await get_tree().process_frame
 						if nearest.material_override is ShaderMaterial:
 							var sm := nearest.material_override as ShaderMaterial
 							print("[capture] u_fd_texture=", sm.get_shader_parameter("u_fd_texture"),
@@ -168,7 +166,14 @@ func _run() -> void:
 	var img: Image = get_tree().root.get_viewport().get_texture().get_image()
 	var err := img.save_png(out_png)
 	print("[capture] save_png -> ", err, " (", out_png, ")")
-	get_tree().quit(0 if err == OK else 1)
+	# Second frame ~1.5s later, same camera: the wind-sway A/B pair.
+	for _k in range(90):
+		await get_tree().process_frame
+	var out_b := out_png.get_basename() + "_b." + out_png.get_extension()
+	var img_b: Image = get_tree().root.get_viewport().get_texture().get_image()
+	var err_b := img_b.save_png(out_b)
+	print("[capture] save_png -> ", err_b, " (", out_b, ")")
+	get_tree().quit(0 if err == OK and err_b == OK else 1)
 
 
 static func _alpha_histogram(tex: Texture2D) -> String:
