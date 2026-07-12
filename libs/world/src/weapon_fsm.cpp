@@ -440,7 +440,8 @@ int32_t weapon_anim_ticks_from_ms(int32_t ms) {
 }
 
 void weapon_fsm_bake(const WeaponFsmActionRow *rows, size_t row_count,
-                     WeaponClipSecondsFn clip_seconds, void *ctx, WeaponFsmDef &out) {
+                     WeaponClipResolvesFn clip_resolves, WeaponClipSecondsFn clip_seconds,
+                     void *ctx, WeaponFsmDef &out) {
     for (int i = 0; i < weapon_action::kCount; ++i) {
         WeaponFsmAction &a = out.actions[i];
         a.id = i;
@@ -464,17 +465,29 @@ void weapon_fsm_bake(const WeaponFsmActionRow *rows, size_t row_count,
         }
         a.has_anim = false;
         a.anim_key[0] = '\0';
-        float seconds = -1.0f;
-        if (anim != nullptr && clip_seconds != nullptr)
-            seconds = clip_seconds(ctx, anim);
-        if (anim != nullptr && seconds >= 0.0f) {
+        // Existence is a pure LOOKUP [orig: AnimMap_FindSlotByName @ 0x40cfa0
+        // checked @ 0x5421ae]; durations are consuming ring READS below.
+        const bool resolves = anim != nullptr && clip_resolves != nullptr &&
+                clip_resolves(ctx, anim) != 0;
+        if (resolves) {
             a.has_anim = true;
             copy_key(a.anim_key, anim);
-            const int32_t ticks =
-                    weapon_anim_ticks_from_ms(static_cast<int32_t>(seconds * 1000.0f));
-            // [orig: Anim_InitActions @ 0x5421b3..0x5421ec]
-            if (ds == -1) ds = ticks;
+            // ONE Anim_GetDurationTicks read per 'auto' field — each read serves
+            // the slot ring's head and advances it, so a both-auto action consumes
+            // TWO ring entries and the reads can serve different variants
+            // [orig: Anim_InitActions @ 0x5421b3..0x5421ec, the two calls
+            //  @ 0x5421c5 / @ 0x5421d8].
+            if (ds == -1) {
+                const float s = clip_seconds != nullptr ? clip_seconds(ctx, anim) : -1.0f;
+                ds = s >= 0.0f
+                        ? weapon_anim_ticks_from_ms(static_cast<int32_t>(s * 1000.0f))
+                        : 0;
+            }
             if (de == -1) {
+                const float s = clip_seconds != nullptr ? clip_seconds(ctx, anim) : -1.0f;
+                const int32_t ticks = s >= 0.0f
+                        ? weapon_anim_ticks_from_ms(static_cast<int32_t>(s * 1000.0f))
+                        : 0;
                 de = ticks;
                 if (ticks > ds) de = ticks - ds;
             }

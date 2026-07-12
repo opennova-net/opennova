@@ -31,6 +31,12 @@ float clip_seconds(void *, const char *key) {
     return 0.1f;
 }
 
+// Existence probe paired with the table above — a lookup, never a read
+// [orig: AnimMap_FindSlotByName @ 0x40cfa0].
+int clip_resolves(void *, const char *key) {
+    return std::strcmp(key, "missing") != 0;
+}
+
 void set_row(WeaponFsmActionRow &row, const char *name, const char *anim, int32_t ds,
              int32_t de) {
     std::snprintf(row.name, sizeof(row.name), "%s", name);
@@ -49,7 +55,7 @@ WeaponFsmDef make_ak_def() {
     set_row(rows[3], "reload", "anim_wpn_reload", 0, -1);
     set_row(rows[4], "empty", "anim_wpn_empty", 0, -1);
     WeaponFsmDef def;
-    weapon_fsm_bake(rows, 5, clip_seconds, nullptr, def);
+    weapon_fsm_bake(rows, 5, clip_resolves, clip_seconds, nullptr, def);
     def.auto_fire = true;
     def.clip_capacity = 30;
     return def;
@@ -89,7 +95,7 @@ void test_bake() {
     WeaponFsmActionRow bad;
     set_row(bad, "reload", "missing", -1, -1);
     WeaponFsmDef def2;
-    weapon_fsm_bake(&bad, 1, clip_seconds, nullptr, def2);
+    weapon_fsm_bake(&bad, 1, clip_resolves, clip_seconds, nullptr, def2);
     CHECK(def2.actions[wa::kReload].delay_start == 0);
     CHECK(def2.actions[wa::kReload].delay_end == 0);
     CHECK(!def2.actions[wa::kReload].has_anim);
@@ -98,14 +104,14 @@ void test_bake() {
     WeaponFsmActionRow part;
     set_row(part, "reload", "anim_wpn_reload", 10, -1);
     WeaponFsmDef def3;
-    weapon_fsm_bake(&part, 1, clip_seconds, nullptr, def3);
+    weapon_fsm_bake(&part, 1, clip_resolves, clip_seconds, nullptr, def3);
     CHECK(def3.actions[wa::kReload].delay_start == 10);
     CHECK(def3.actions[wa::kReload].delay_end == 22); // 32 - 10
     // suffix binding is case-insensitive [orig: stricmp @ 0x402360].
     WeaponFsmActionRow upper;
     set_row(upper, "RELOAD", "anim_wpn_reload", 3, 4);
     WeaponFsmDef def4;
-    weapon_fsm_bake(&upper, 1, clip_seconds, nullptr, def4);
+    weapon_fsm_bake(&upper, 1, clip_resolves, clip_seconds, nullptr, def4);
     CHECK(def4.actions[wa::kReload].delay_start == 3);
     CHECK(def4.actions[wa::kReload].delay_end == 4);
 }
@@ -174,7 +180,7 @@ void test_revx_m4_zero_recoil_auto_cadence() {
     set_row(rows[3], "reload", "anim_wpn_reload", 200, -1);
     set_row(rows[4], "empty", "anim_wpn_empty", -1, -1);
     WeaponFsmDef def;
-    weapon_fsm_bake(rows, 5, clip_seconds, nullptr, def);
+    weapon_fsm_bake(rows, 5, clip_resolves, clip_seconds, nullptr, def);
     def.auto_fire = true;
     def.clip_capacity = 30;
     WeaponSlotState s;
@@ -397,7 +403,7 @@ void test_action_sound_legs() {
     std::snprintf(rows[1].soundset, sizeof(rows[1].soundset), "%s", "GF_RL_TEST");
     set_row(rows[2], "idle", "anim_wpn_idle", 0, -1);
     WeaponFsmDef def;
-    weapon_fsm_bake(rows, 3, clip_seconds, nullptr, def);
+    weapon_fsm_bake(rows, 3, clip_resolves, clip_seconds, nullptr, def);
     def.auto_fire = true;
     def.clip_capacity = 10;
     CHECK(std::strcmp(def.actions[wa::kFire].soundsetend, "GS_TEST") == 0);
@@ -493,11 +499,67 @@ void test_non_local_recoil_makes_no_decision() {
     CHECK(s.next == wa::kIdle); // no reload/emptyidle decision made
 }
 
+// Multi-clip variant rows: each 'auto' field is its OWN consuming ring read --
+// serve-then-advance -- so a both-auto action reads TWO entries (possibly different
+// durations), one-auto reads one, explicit delays read none, and existence stays a
+// pure lookup [orig: Anim_InitActions @ 0x5421b3..0x5421ec -- Anim_GetDurationTicks
+// @ 0x5421c5 (delaystart) / @ 0x5421d8 (delayend), each serving *slot then
+// advancing *slot = next(+36) @ 0x53ee26; the lookup @ 0x5421ae].
+void test_bake_ring_read_multiplicity() {
+    struct RingCtx {
+        float lengths[3];
+        int head;
+        int reads;
+    } ring{{0.5f, 1.0f, 0.25f}, 0, 0};
+    const auto ring_seconds = [](void *p, const char *) -> float {
+        RingCtx *r = static_cast<RingCtx *>(p);
+        ++r->reads;
+        const float s = r->lengths[r->head];
+        r->head = (r->head + 1) % 3;
+        return s;
+    };
+    const auto always_resolves = [](void *, const char *) -> int { return 1; };
+
+    // Both auto: read1 (0.5s -> 32) bakes delaystart, read2 (1.0s -> 64) bakes
+    // delayend = 64 - 32 (ticks > ds) -- the two reads served DIFFERENT variants.
+    WeaponFsmActionRow both;
+    set_row(both, "reload", "anim_wpn_reload", -1, -1);
+    WeaponFsmDef def;
+    weapon_fsm_bake(&both, 1, always_resolves, ring_seconds, &ring, def);
+    CHECK(ring.reads == 2);
+    CHECK(def.actions[wa::kReload].delay_start == 32);
+    CHECK(def.actions[wa::kReload].delay_end == 32); // 64 - 32
+    CHECK(def.actions[wa::kReload].has_anim);
+
+    // One auto: exactly one more read, serving the NEXT ring entry (0.25s -> 17).
+    ring.reads = 0;
+    WeaponFsmActionRow one;
+    set_row(one, "fire", "anim_wpn_fire", -1, 0);
+    WeaponFsmDef def2;
+    weapon_fsm_bake(&one, 1, always_resolves, ring_seconds, &ring, def2);
+    CHECK(ring.reads == 1);
+    CHECK(def2.actions[wa::kFire].delay_start == 17); // 0.25s: 15.625 + 0.5 -> 16 + 1
+    CHECK(def2.actions[wa::kFire].delay_end == 0);
+
+    // Explicit delays: zero reads, and the anim still binds (existence is the
+    // lookup, not a read).
+    ring.reads = 0;
+    WeaponFsmActionRow fixed;
+    set_row(fixed, "idle", "anim_wpn_idle", 3, 4);
+    WeaponFsmDef def3;
+    weapon_fsm_bake(&fixed, 1, always_resolves, ring_seconds, &ring, def3);
+    CHECK(ring.reads == 0);
+    CHECK(def3.actions[wa::kIdle].has_anim);
+    CHECK(def3.actions[wa::kIdle].delay_start == 3);
+    CHECK(def3.actions[wa::kIdle].delay_end == 4);
+}
+
 } // namespace
 
 int main() {
     test_ticks_from_ms();
     test_bake();
+    test_bake_ring_read_multiplicity();
     test_fire_chains_recoil();
     test_auto_refire_cadence();
     test_revx_m4_zero_recoil_auto_cadence();

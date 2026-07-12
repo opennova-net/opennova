@@ -165,6 +165,30 @@ int adm_parse_buffer(const char *bytes, size_t size, AdmFile *out) {
                          sizeof(out->entries[out->count].value),
                          q1 + 1, q2);
 
+            // Every additional quoted token on the row is a VARIANT of the
+            // same anim slot [orig: AnimMap_ParseConfigLine @ 0x40cb60 loops
+            // the whole line, registering each token on one slot ring].
+            {
+                AdmEntry *e = &out->entries[out->count];
+                const char *vq1 = q1;
+                const char *vq2 = q2;
+                e->value_count = 0;
+                while (vq1 && vq2 && e->value_count < ADM_MAX_VARIANTS) {
+                    copy_trimmed(e->values[e->value_count],
+                                 sizeof(e->values[e->value_count]),
+                                 vq1 + 1, vq2);
+                    if (e->values[e->value_count][0] != '\0')
+                        e->value_count++;
+                    vq1 = (const char *)memchr(vq2 + 1, '"',
+                                (size_t)(trimmed_end - (vq2 + 1)));
+                    vq2 = vq1 ? (const char *)memchr(vq1 + 1, '"',
+                                (size_t)(trimmed_end - (vq1 + 1)))
+                              : NULL;
+                }
+                if (e->value_count == 0)
+                    e->values[0][0] = '\0';
+            }
+
             // Skip entries with empty key
             if (out->entries[out->count].key[0] != '\0') {
                 out->count++;
@@ -247,6 +271,14 @@ int adm_write(const char *path, const AdmEntry *entries, size_t count) {
 
     for (i = 0; i < count && ok; ++i) {
         if (fprintf(f, "%s\t\t\t\t\"%s\"", entries[i].key, entries[i].value) < 0) ok = 0;
+        // Additional variants ride the same row as further quoted tokens
+        // (stock multi-clip rows: anim_wpn_reload "m4_1r" "m4_1r" "m4_1r2").
+        if (ok && entries[i].value_count > 1) {
+            size_t v;
+            for (v = 1; v < entries[i].value_count && ok; ++v) {
+                if (fprintf(f, " \"%s\"", entries[i].values[v]) < 0) ok = 0;
+            }
+        }
         if (ok && i + 1 < count) {
             if (fputs("\r\n", f) < 0) ok = 0;
         }

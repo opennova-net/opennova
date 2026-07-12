@@ -114,23 +114,35 @@ struct WeaponFsmDef {
 // (flt_7C3B3C)]
 int32_t weapon_anim_ticks_from_ms(int32_t ms);
 
-// Clip-duration source for the bake: clip length in SECONDS for an .adm key,
-// < 0 when the key does not resolve.
+// Clip-duration source for the bake: clip length in SECONDS for an .adm key, < 0
+// on failure. Multi-clip .adm rows make the slot a circular VARIANT ring; each call
+// is one duration READ — the callback serves the ring head and ADVANCES it, so
+// consecutive calls for one key may serve different variants
+// [orig: Anim_GetDurationTicks @ 0x53ee10 serves *slot then *slot = next(+36)].
 using WeaponClipSecondsFn = float (*)(void *ctx, const char *anim_key);
+
+// Existence probe for an .adm key — a pure lookup, never advances the ring
+// (0 = unresolved, non-zero = resolves)
+// [orig: AnimMap_FindSlotByName @ 0x40cfa0 != -1, checked at @ 0x5421ae].
+using WeaponClipResolvesFn = int (*)(void *ctx, const char *anim_key);
 
 // Bind the 12 action slots from the weapon's parsed ACTION rows — the Anim_InitActions
 // structural translation. Rows bind by suffix name (the original registers each row as
 // "<weaponName>_<suffix>" in a global pool and looks the composite back up per slot
 // [orig: @ 0x4023d5 prefix concat / @ 0x5420c6 lookup]; per-weapon rows + bare-suffix
 // match is the same binding). Missing rows become generated defaults. 'auto' (-1)
-// delays bake from the clip: delaystart = ticks; delayend = ticks, or ticks -
-// delaystart when ticks > delaystart; no anim / unresolved clip -> 0.
-// [orig: @ 0x5421b3..0x5421ec / 0x542152..0x542164]
+// delays bake from the clip via ONE duration read PER auto field — an action with
+// both delays auto consumes TWO ring entries, and the two reads can serve different
+// variants: delaystart = ticks(read1); delayend = ticks(read2), or ticks(read2) -
+// delaystart when greater; no anim / unresolved clip -> 0.
+// [orig: @ 0x5421b3..0x5421ec (the two Anim_GetDurationTicks calls @ 0x5421c5 /
+//  @ 0x5421d8) / 0x542152..0x542164]
 // FUNCTION rows are not consulted: every shipped row names the standard handler for its
 // own suffix (wpn_std_<suffix>, JOX + REVX corpora), so the per-state behavior is fixed
 // (divergence D-WPN-1).
 void weapon_fsm_bake(const WeaponFsmActionRow *rows, size_t row_count,
-                     WeaponClipSecondsFn clip_seconds, void *ctx, WeaponFsmDef &out);
+                     WeaponClipResolvesFn clip_resolves, WeaponClipSecondsFn clip_seconds,
+                     void *ctx, WeaponFsmDef &out);
 
 // The MountSlot FSM fields. [orig: MountSlot (100 B): counter +0, clip u16 +0x10,
 // currentAction +0x2C, nextAction +0x30, prevAction +0x34, switchTimer +0x58,
