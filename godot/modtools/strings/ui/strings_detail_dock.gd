@@ -3,12 +3,15 @@ extends Control
 ## Per-entry detail editor for the Strings workspace. Lives inside the
 ## StringsEditorView (right side of the center HSplit). Edits the key, text,
 ## section, and position of the selected entry, plus the {hot} accelerator marker
-## with a live preview.
+## with a live preview, and renders the entry through the game's own font draw
+## (STR-1: the F2 EngineTextPreview widget with a chooseable .fnt).
 ##
 ## All field edits update the model immediately and are bracketed by the
 ## document's begin_edit()/commit_edit() so one editing session is one undo step.
 ## A row-changed callback patches just the edited row in the table — no rebuild,
 ## no shell round-trip.
+
+const EngineTextPreviewScript = preload("res://modtools/framework/engine_text_preview.gd")
 
 const POS_MIN := -32768
 const POS_MAX := 32767
@@ -28,6 +31,9 @@ var _pos_x: SpinBox
 var _pos_y: SpinBox
 var _hotkey_button: Button
 var _hotkey_preview: RichTextLabel
+var _font_service: Dictionary = {}  # {list: Callable, load: Callable} from the workspace
+var _font_option: OptionButton
+var _game_preview: Control  # EngineTextPreview (framework F2 widget)
 
 
 func setup(doc: StringsEditor, row_changed: Callable) -> void:
@@ -37,6 +43,15 @@ func setup(doc: StringsEditor, row_changed: Callable) -> void:
 
 func set_document(doc: StringsEditor) -> void:
 	_doc = doc
+
+
+## Fonts capability from the workspace ({list, load} Callables, the
+## reference-services shape): the picker enumerates the mounted game folder's
+## fonts and the panel loads them through the runtime path. {} (headless / no
+## mounted folder) leaves the picker empty and the panel on its load hint.
+func set_font_service(service: Dictionary) -> void:
+	_font_service = service if service != null else {}
+	_rebuild_font_options()
 
 
 func _ready() -> void:
@@ -103,6 +118,23 @@ func _ready() -> void:
 	_pos_y = InspectorForms.add_spin_row(_fields_box, "StringsPosY", "Y", POS_MIN, POS_MAX, 1)
 	_wire_spin(_pos_x)
 	_wire_spin(_pos_y)
+
+	# STR-1: the selected entry rendered through the game's draw path (the F2
+	# EngineTextPreview: .fnt -> FontFile + HudText.draw_text), with a chooseable
+	# font — "how will this read in-game", not a UI-font approximation.
+	InspectorForms.add_section_heading(_fields_box, "Game preview")
+	var font_row := InspectorForms.add_detail_field(_fields_box, "Font")
+	_font_option = OptionButton.new()
+	_font_option.name = "StringsPreviewFontOption"
+	_font_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_font_option.item_selected.connect(_on_preview_font_selected)
+	font_row.add_child(_font_option)
+	_game_preview = EngineTextPreviewScript.new()
+	_game_preview.name = "StringsGamePreview"
+	_game_preview.custom_minimum_size = Vector2(0, 56)
+	_game_preview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_fields_box.add_child(_game_preview)
+	_rebuild_font_options()
 
 	show_entry(_current_index)
 
@@ -241,6 +273,48 @@ func _update_preview(text: String) -> void:
 		_hotkey_preview.text = "In-game: %s[u][color=%s]%s[/color][/u]%s" % [left, ACCEL_COLOR, ch, right]
 	else:
 		_hotkey_preview.text = "In-game: %s" % _escape_bbcode(stripped)
+	if _game_preview != null:
+		# The engine draw shows the string as the game resolves it for display:
+		# {hot} marker stripped (the accelerator styling above stays the honest
+		# marker readout). The panel draws one line; multi-line entries preview
+		# joined — line layout belongs to the consuming screen, not the string.
+		_game_preview.set_sample_text(stripped.replace("\r", " ").replace("\n", " "))
+
+
+# --- Game preview font picker (STR-1) ---
+
+func _rebuild_font_options() -> void:
+	if _font_option == null:
+		return
+	var names := PackedStringArray()
+	if _font_service.has("list"):
+		names = _font_service["list"].call()
+	_font_option.clear()
+	if names.is_empty():
+		_font_option.add_item("No fonts in the game folder")
+		_font_option.disabled = true
+		if _game_preview != null:
+			_game_preview.set_font_file(null)
+		return
+	_font_option.disabled = false
+	for n in names:
+		_font_option.add_item(n)
+	_font_option.select(0)
+	_apply_preview_font(names[0])
+
+
+func _on_preview_font_selected(item_index: int) -> void:
+	if _font_option.disabled:
+		return
+	_apply_preview_font(_font_option.get_item_text(item_index))
+
+
+func _apply_preview_font(font_name: String) -> void:
+	if _game_preview == null or not _font_service.has("load"):
+		return
+	var font: FontFile = _font_service["load"].call(font_name)
+	if font != null:
+		_game_preview.set_font_file(font)  # a failed load keeps the current font
 
 
 func _escape_bbcode(text: String) -> String:
