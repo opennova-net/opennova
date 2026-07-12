@@ -60,6 +60,11 @@ add_subdirectory(../../libs/netsim opennova_netsim)
 # (nova_simulation) drives it as a thin adapter; protocol/crypto stay in libs (ADR 0009-0012).
 add_subdirectory(../../libs/npruntime opennova_npruntime)
 
+# Family link-interface groups (LIBS-2, ADR 0024): this root is the canonical
+# whole-family consumer — the extension links the family targets below instead
+# of naming every terrain/audio member.
+include(${CMAKE_CURRENT_SOURCE_DIR}/../../libs/families.cmake)
+
 set(TARGET_NAME "opennova")
 
 add_library(${TARGET_NAME} SHARED
@@ -167,11 +172,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     opennova_pcx
     opennova_refs
     opennova_fnt
-    opennova_foliage
-    opennova_til
-    opennova_tpj
-    opennova_trn
-    opennova_cpt
+    opennova_terrain_family
     opennova_cbin
     opennova_env
     opennova_threedi
@@ -184,13 +185,9 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     opennova_tdp
     opennova_oed
     opennova_renderer
-    opennova_terrain_query
-    opennova_terrain
     opennova_vfs
     opennova_resource_index
-    opennova_sbf
     opennova_scr
-    opennova_mus
     opennova_mnu
     opennova_mns
     opennova_def
@@ -198,9 +195,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     opennova_world
     opennova_wac
     opennova_mission
-    opennova_lwf
-    opennova_dbf
-    opennova_audio
+    opennova_audio_family
     opennova_oned_edit
     opennova_controls
     opennova_novacrypto

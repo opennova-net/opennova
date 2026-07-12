@@ -45,6 +45,10 @@ add_subdirectory(libs/oned_edit)
 add_subdirectory(libs/refs)
 add_subdirectory(libs/controls)
 
+# Family link-interface groups (LIBS-2, ADR 0024) — defined once every member
+# target exists; consumed by whole-family linkers (the godot/engine root).
+include(libs/families.cmake)
+
 # Vendored third-party deps that the net stack pulls in.
 add_subdirectory(third_party/sqlite)
 add_subdirectory(third_party/bcrypt)

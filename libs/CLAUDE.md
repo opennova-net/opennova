@@ -14,6 +14,13 @@
   their historical semantics (some predate this — `opennova_vfs_*` returns 1=success,
   `oed` uses a status enum); changing a shipped export's return semantics is an FFI
   behavior change and needs a deliberate, versioned decision.
+- Family link groups (LIBS-2, ADR 0024): one-lib-per-format stands; the terrain and
+  audio format stacks additionally exist as CMake INTERFACE groups
+  (`opennova_terrain_family`, `opennova_audio_family` — `libs/families.cmake`, included
+  by both CMake roots) so whole-family consumers (the GDExtension) name the family, not
+  twelve targets. Link conveniences only — never physical merges, and never a way around
+  `link_graph_check.py`'s forbidden edges; leaf consumers (ctests, apps) keep linking
+  exactly the libs they use.
 - Shared infrastructure lives in `libs/io` (`opennova::io` / `opennova::strutil`,
   header-only): bounds-checked `ByteReader`/`ByteWriter`, LSB-first `BitReader`/
   `BitWriter`, `io/le.h` primitives, `io/fixed.h` (16.16 / 2.14), `io/strutil.h`
