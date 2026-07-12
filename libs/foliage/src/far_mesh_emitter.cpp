@@ -78,6 +78,7 @@ bool emit_far_mesh(const FarSourceMesh &source,
 		const float cos_yaw = std::cos(placement.rotation_radians);
 		const uint32_t vertex_base = static_cast<uint32_t>(emitted.vertices.size());
 
+		bool ground_valid = true;
 		for (const FarSourceVertex &source_vertex : source.vertices) {
 			FarVertex vertex{};
 			vertex.x = center_x + FAR_HORIZONTAL_SCALE *
@@ -88,12 +89,22 @@ bool emit_far_mesh(const FarSourceMesh &source,
 			                                     ? height_at(world_to_fixed(vertex.x),
 			                                                 world_to_fixed(vertex.z))
 			                                     : 0;
+			if (ground_fixed == HEIGHT_INVALID) {
+				// "No terrain here" (host contract, placement.h): drop the
+				// whole instance rather than bend a blade to the sentinel.
+				ground_valid = false;
+				break;
+			}
 			vertex.y = static_cast<float>(ground_fixed) * FIXED_TO_FLOAT +
 			           source_vertex.y * FAR_VERTICAL_SCALE;
 			vertex.u = source_vertex.u;
 			vertex.v = source_vertex.v;
 			vertex.color = far_wind_color(source_vertex.y);
 			emitted.vertices.push_back(vertex);
+		}
+		if (!ground_valid) {
+			emitted.vertices.resize(vertex_base);
+			continue;
 		}
 
 		for (uint32_t source_index : source.indices) {

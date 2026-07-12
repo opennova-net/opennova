@@ -100,9 +100,8 @@ func set_preview_state(
 	if terrain_changed and _terrain_mesh != null:
 		# Height sampler → live-sculpt-aware path (sub_5C6770 analogue).
 		_dispatcher.height_sampler = Callable(self, "_sample_height")
-		# Foliage sampler → world→source_coords→map_pixel→index chain.
-		# Consumer applies polytrn_origin + sector_grid shift (editor has both
-		# via EditorTerrainMesh).
+		# Foliage sampler → the game's gate texel (negate + runtime wrap kernel
+		# via NovaTerrainData) over the live document map.
 		_dispatcher.foliage_sampler = Callable(self, "_sample_foliage_index")
 		# FAR consumes the foliagemap remapped through the def match values, at
 		# the original (x, -z) call boundary [orig: Foliage_SampleFarMapMask
@@ -122,12 +121,19 @@ func _sample_height(world_x: float, world_z: float) -> float:
 	return _terrain_mesh.sample_world_height(world_x, world_z)
 
 
-# Foliagemap sampler: world coords → heightmap-atlas coords → foliage map pixel
-# → palette index. Honors Dvxi5-style polytrn_origin via world_to_source_coords.
+# Foliagemap sampler: the gate texel the GAME resolves at this world point.
+# The witnessed foliagemap read negates z before the shared wrap kernel (the
+# PCX row-order compensation) [orig: Foliage_SampleFoliageMapMask @ 0x606620 /
+# Foliage_SampleFarMapMask @ 0x6066d0 — both index (-z)], so the editor must
+# NOT resolve the un-negated row the terrain-mesh chain yields — that
+# previewed (and painted) foliage z-mirrored relative to the game
+# (D-FOLIAGE-9's editor half). The negate happens here at the boundary; the
+# wrap runs inside NovaTerrainData's runtime-kernel resolver, so this read is
+# bit-equal with the game's — over the live document foliage map.
 func _sample_foliage_index(world_x: float, world_z: float) -> int:
-	if _terrain_mesh == null or _foliage_map == null:
+	if _terrain_data == null or _foliage_map == null:
 		return 0
-	var source := _terrain_mesh.world_to_source_coords(world_x, world_z)
+	var source := _terrain_data.world_to_source_coords_wrapped(world_x, -world_z)
 	if source.x < 0.0:
 		return 0
 	var w := _foliage_map.get_width()
@@ -144,9 +150,10 @@ func _sample_foliage_index(world_x: float, world_z: float) -> int:
 # The FAR def-slot mask: the foliagemap pixel remapped through the def match
 # values (pixel == match -> bit(def); pixel 0 never matches) [orig:
 # Foliage_SampleFarMapMask @ 0x6066d0; remap sub_605AD0 -> sub_5FF4E0].
-# native_z is already -candidate_world_z (the witnessed argument boundary);
-# the pixel resolves through the editor's shared world->map chain — the same
-# resolution the runtime uses on the atlas-normalized map resource.
+# native_z is already -candidate_world_z (the witnessed argument boundary), so
+# un-negating it here hands _sample_foliage_index render z — whose own
+# negation lands the read on the game's gate texel. The remap runs over the
+# LIVE editor defs (unsaved match edits preview correctly).
 func _sample_far_mask(world_x: float, native_z: float) -> int:
 	var pixel := _sample_foliage_index(world_x, -native_z)
 	if pixel == 0:

@@ -258,6 +258,15 @@ public:
 	// returns Vector2(-1e9,-1e9) for out-of-extent / empty cells (the sentinels the
 	// GDScript callers branch on); get_cell_atlas_rect returns a zero Rect2i.
 	Vector2 world_to_source_coords(double world_x, double world_z) const;
+	// The RUNTIME kernel form of the same transform (& 0xF sector wrap, raw
+	// sector id, no bounds-reject) — the resolution every game-side sampler
+	// uses [orig: Terrain_SampleHeightBilinear @ 0x5C6770 /
+	// Terrain_GetFoliageMapValue @ 0x5C65E0]. The editor's foliage brush and
+	// eyedropper must address the foliagemap through this form with NEGATED z
+	// (the witnessed foliagemap read indexes (-z) [orig: Foliage_SampleFarMapMask
+	// @ 0x6066d0]), so paints land on the texel the game gates by. Returns
+	// Vector2(-1,-1) when the wrapped sector is empty.
+	Vector2 world_to_source_coords_wrapped(double world_x, double world_z) const;
 	Vector2 world_to_cell_source_coords(double world_x, double world_z, int row, int col) const;
 	// World -> authored sector-grid cell (row, col), or (-1,-1) outside the
 	// authored extent. Mirrors EditorTerrainMesh's extent-guarded cell lookup:

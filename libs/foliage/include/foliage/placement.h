@@ -31,14 +31,23 @@ constexpr float FIXED_TO_FLOAT = 1.0f / 65536.0f;
 // path_blocked: returns true if the given world-fixed point has a blocker
 // (Terrain_IsNearAmbientSource in the decomp). Our port currently returns false
 // unconditionally.
-// slot_mask_at: returns a bitmask of permitted foliage slots (bit 0..3).
-// FAR supplies the raw surface-map byte at (x,-z); MODEL supplies its
-// foliage-map-derived mask at (x,z).
+// slot_mask_at: returns a bitmask of permitted foliage slots (bit 0..3),
+// derived from the FOLIAGEMAP pixel remapped through the def match values
+// (both tiers; the charmap is not a foliage input anywhere). FAR calls at
+// (x,-z) [orig: Foliage_SampleFarMapMask @ 0x6066d0]; MODEL at (x,z)
+// [orig: Foliage_SampleFoliageMapMask @ 0x606620].
 // height_at: returns 16.16-fixed world height at the given 16.16 world coords,
-// analogous to Terrain_SampleHeightBilinear@0x005C6770.
+// analogous to Terrain_SampleHeightBilinear@0x005C6770, or HEIGHT_INVALID for
+// "no terrain here" (a HOST concept: editor documents end at the authored
+// region; retail's wrapped world always resolves a height). Consumers SKIP
+// the candidate/instance — a sentinel fed through as a real height bent FAR
+// blades into kilometer spikes and poisoned the MODEL corner fit.
 using PathBlockedFn = std::function<bool(Fixed16_16 wx, Fixed16_16 wz, int32_t range)>;
 using SlotMaskFn = std::function<uint32_t(Fixed16_16 wx, Fixed16_16 wz)>;
 using HeightFn = std::function<Fixed16_16(Fixed16_16 wx, Fixed16_16 wz)>;
+
+// "No terrain here" sentinel for HeightFn (never a plausible 16.16 height).
+inline constexpr Fixed16_16 HEIGHT_INVALID = INT32_MIN;
 
 struct PlacementSamplers {
 	PathBlockedFn path_blocked;

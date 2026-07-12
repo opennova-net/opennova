@@ -2,9 +2,10 @@
 
 // The foliage MODEL-tier tile walk + per-def cache, ported from retail
 // Jointops.exe [orig: Foliage_UpdateModelTiles @ 0x601f50, driven per visible
-// sector entity by Terrain_RenderSectorEntitiesBySide @ 0x5c7d50]. Mirrors
-// the FAR tier's Dispatcher shape (dispatcher.h): one instance per foliage
-// def slot; the host walks it once per anchor per frame.
+// sector entity by Terrain_RenderSectorEntitiesBySide @ 0x5c7d50]. One
+// instance per foliage def slot; the host walks it once per anchor per frame
+// (the FAR tier has no dispatcher class — it is a bake-once slot pool in the
+// host, docs/foliage/foliage-re.md).
 //
 // Witnessed behavior: gate the whole walk on the anchor's view-space depth
 // >= 38.0; walk the 4 quadrant tiles (16u cells overlapping anchor +-8u);
@@ -30,11 +31,13 @@ constexpr float MODEL_DEPTH_GATE = 38.0f;      // view-space depth gate @ 0x5c7d
 struct ModelCacheEntry {
 	uint32_t tile_key = 0xFFFFFFFFu;
 	int32_t last_touched = -1;  // frame stamp on last hit (retail entry dword [1])
-	int32_t last_regen = -1;    // host stamp: dedupe same-frame stagger regens (see walk())
-	// Host content stamp, bumped on every (re)generation so hosts can skip
-	// re-uploading unchanged cached tiles. Not a retail field: retail re-uploads
-	// its per-draw VS constant block from the cache entry every submission.
-	int32_t generation = 0;
+	// Host content stamp: the dispatcher's monotonic counter at the entry's
+	// last (re)generation, so hosts can skip re-uploading unchanged cached
+	// tiles. Dispatcher-wide (never reused across evict/re-adopt cycles —
+	// a per-entry counter collided after re-adoption and froze stale
+	// uploads). Not a retail field: retail re-uploads its per-draw VS
+	// constant block from the cache entry every submission.
+	int64_t generation = 0;
 	ModelTileResult cached;
 	bool occupied = false;
 };
@@ -49,7 +52,7 @@ struct ModelTileDraw {
 	uint32_t tile_key = 0;
 	Fixed16_16 snap_x_fixed = 0;
 	Fixed16_16 snap_z_fixed = 0;
-	int32_t generation = 0;  // ModelCacheEntry.generation at emission time
+	int64_t generation = 0;  // ModelCacheEntry.generation at emission time
 	const ModelInstance *instances = nullptr;
 	int count = 0;
 };
@@ -99,6 +102,8 @@ private:
 	int64_t cache_hits_ = 0;
 	int64_t cache_misses_ = 0;
 	int64_t regenerations_ = 0;
+	// Monotonic content stamp source for ModelCacheEntry.generation.
+	int64_t generation_stamp_ = 0;
 	int64_t skipped_adoptions_ = 0;
 };
 

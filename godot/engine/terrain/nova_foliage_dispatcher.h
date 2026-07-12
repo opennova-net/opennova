@@ -217,7 +217,7 @@ private:
 	struct ModelDrawNodeState {
 		int slot = -1;
 		uint32_t tile_key = 0xFFFFFFFFu;
-		int32_t generation = -1;
+		int64_t generation = -1;
 		int count = 0;
 		uint64_t last_used_frame = 0;  // LRU reuse stamp (0 = never used)
 		bool in_use = false;           // used by a batch this dispatch
@@ -253,7 +253,7 @@ private:
 	struct ModelDrawBatch {
 		int slot = 0;
 		uint32_t tile_key = 0;
-		int32_t generation = 0;
+		int64_t generation = 0;
 		Vector3 anchor;
 		float view_depth = 0.0f;
 		float anchor_distance = 0.0f;

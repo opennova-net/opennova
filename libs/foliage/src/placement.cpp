@@ -120,9 +120,11 @@ PlacementResult place_cell(int slot_index,
 			}
 		}
 
-		// FAR surface-map mask check. The raw charmap byte is already the
-		// four-slot bitmask. [orig: Terrain_GetSurfaceTypeAtFixedPoint
-		// @ 0x6066d0, caller @ 0x600065..0x600079]
+		// FAR foliagemap mask check: the FOLIAGEMAP pixel remapped through the
+		// def match values into a four-slot bitmask (the charmap is not a
+		// foliage input anywhere). [orig: Foliage_SampleFarMapMask @ 0x6066d0
+		// (ex kong "Terrain_GetSurfaceTypeAtFixedPoint") over the load-remap
+		// @ 0x605AD0/0x5FF4E0, caller @ 0x600065..0x600079]
 		const uint32_t mask = samplers.slot_mask_at
 		                         ? samplers.slot_mask_at(world_x_fixed, -world_z_fixed)
 		                         : 0u;

@@ -235,13 +235,19 @@ func _find_painted_world_point(data: NovaTerrainData) -> Dictionary:
 				continue
 
 			var world_x := float((origin_x + grid_cell.x) * 512) + local_x
-			var world_z := float((origin_y + grid_cell.y) * 512) + local_z
-			if int(data.get_foliage_index_world(world_x, world_z)) <= 0:
+			var source_z := float((origin_y + grid_cell.y) * 512) + local_z
+			# The game gates foliage where the witnessed read (-z into the wrap
+			# kernel [orig: Foliage_SampleFarMapMask @ 0x6066d0]) resolves this
+			# texel — the RENDER-space z is the negated source-space z. The gate
+			# cross-check below is the runtime read at that render point
+			# (get_foliage_index_world(x, -render_z) == kernel(source_z)).
+			var render_z := -source_z
+			if int(data.get_foliage_index_world(world_x, -render_z)) <= 0:
 				continue
 
-			var world_y := data.get_height_world_bilinear(Vector3(world_x, 0.0, world_z))
+			var world_y := data.get_height_world_bilinear(Vector3(world_x, 0.0, render_z))
 			return {
-				"position": Vector3(world_x, world_y, world_z),
+				"position": Vector3(world_x, world_y, render_z),
 				"painted": painted,
 				"map": Vector2i(map_x, map_y),
 				"sector_id": sector_id,

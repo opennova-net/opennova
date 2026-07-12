@@ -52,6 +52,10 @@ func _own_dispatcher(dispatcher: NovaFoliageDispatcher) -> void:
 
 
 # A sloped, non-planar height field so corner heights and folds carry signal.
+func _sample_flat_height(_world_x: float, _world_z: float) -> float:
+	return 0.0
+
+
 func _sample_height(world_x: float, world_z: float) -> float:
 	return 0.08 * world_x - 0.05 * world_z + 0.004 * world_x * world_z
 
@@ -232,6 +236,26 @@ func test_cache_stable_and_regen_on_stagger() -> void:
 	assert_gt(tiles, 0, "Tiles keep drawing from the cache.")
 
 
+func test_uploads_move_only_with_regenerated_content() -> void:
+	_dispatch(FAR_DEPTH_ANCHOR)
+	var prev: Dictionary = _dispatcher.get_dispatch_stats()
+	assert_gt(int(prev.model_uploads), 0, "The initial bake uploads its tiles.")
+	# Across an 8-frame window, MultiMesh uploads move ONLY on frames whose
+	# stagger regenerated content (the generation stamp changed); pure-hit
+	# frames re-use the retained buffers — the 76k-uploads/frame churn the
+	# keyed draw-node pool replaced (D-FOLIAGE-11 host mechanics).
+	for i in range(8):
+		_dispatch(FAR_DEPTH_ANCHOR)
+		var cur: Dictionary = _dispatcher.get_dispatch_stats()
+		var upload_delta := int(cur.model_uploads) - int(prev.model_uploads)
+		var regen_delta := int(cur.model_regenerations) - int(prev.model_regenerations)
+		if regen_delta == 0:
+			assert_eq(upload_delta, 0, "Pure-hit frames re-upload nothing.")
+		else:
+			assert_gt(upload_delta, 0, "Stagger-regenerated content re-uploads.")
+		prev = cur
+
+
 func test_no_anchors_clears_model_tier() -> void:
 	_dispatch(FAR_DEPTH_ANCHOR)
 	assert_gt(_dispatcher.get_model_tile_debug(0).size(), 0, "Anchored dispatch stamps.")
@@ -325,6 +349,35 @@ func test_far_tier_replicates_full_source_mesh_and_bends_each_vertex() -> void:
 		"Cells inside distance 20 draw with c6.a = 1.")
 	assert_almost_eq(float(mi.get_instance_shader_parameter("u_cell_alpha_ref")), 180.0, 0.000001,
 		"Cells under distance 33 draw the high pass (alpha-test ref 180).")
+
+
+func test_far_pool_evicts_stalest_at_the_128_cap() -> void:
+	# The pool cap is the witnessed 128 [orig: Foliage_UpdateFarCellSlots
+	# @ 0x601b30]. Fill past it from five disjoint views (~33 cells each):
+	# residency never exceeds the cap and a return to the first view re-bakes
+	# what was evicted (bake-once holds for RESIDENT keys only).
+	var dispatcher := _make_far_dispatcher()
+	# Flat ground for THIS test: the shared saddle mock steepens with |x| and
+	# the collect metric is 3D (camera_y - height counts against the 42u
+	# sphere), which would starve the distant views below the cap.
+	dispatcher.height_sampler = Callable(self, "_sample_flat_height")
+	dispatcher.dispatch(Vector3.ZERO, _camera_xform())
+	var first: Dictionary = dispatcher.get_dispatch_stats()
+	var first_baked := int(first.far_cells_baked)
+	assert_gt(first_baked, 0, "The first view bakes its cells.")
+	for x in [200.0, 400.0, 600.0, 800.0]:
+		dispatcher.dispatch(Vector3(x, 0, 0), _camera_xform())
+	var crowded: Dictionary = dispatcher.get_dispatch_stats()
+	assert_gt(int(crowded.far_cells_baked), first_baked * 3,
+		"Disjoint views keep baking new cells (the fill crossed the cap).")
+	assert_lte(int(crowded.cached_cells), 128,
+		"Pool residency never exceeds the witnessed 128 cap.")
+	var baked_before_return := int(crowded.far_cells_baked)
+	dispatcher.dispatch(Vector3.ZERO, _camera_xform())
+	var returned: Dictionary = dispatcher.get_dispatch_stats()
+	assert_gt(int(returned.far_cells_baked), baked_before_return,
+		"Evicted cells re-bake when their view returns.")
+	assert_lte(int(returned.cached_cells), 128, "Residency stays capped after the return.")
 
 
 func test_far_pool_bakes_once_fades_by_distance_and_survives_reset() -> void:

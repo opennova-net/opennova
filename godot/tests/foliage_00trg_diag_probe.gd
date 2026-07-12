@@ -88,8 +88,8 @@ func _run() -> void:
 			cam.global_position = pos + Vector3(0, 1.8, 0)
 		for _i in range(30):
 			await get_tree().process_frame
-		if dispatcher.has_method("get_debug_stats"):
-			print("[diag] dispatcher stats: ", dispatcher.get_debug_stats())
+		if dispatcher.has_method("get_dispatch_stats"):
+			print("[diag] dispatcher stats: ", dispatcher.get_dispatch_stats())
 		else:
 			var n := 0
 			var inst := 0

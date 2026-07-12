@@ -171,8 +171,17 @@ void NovaFoliageDispatcher::set_slot_fd_textures(const Array &p_textures) {
 	// Texture-only swap: refresh materials, keep every placement cache. The
 	// FAR pool nodes re-adopt the recreated shared material on their next
 	// active frame; MODEL draw nodes rebuild their per-draw clones.
-	for (Ref<ShaderMaterial> &material : foliage_materials_) {
-		material.unref();
+	for (int s = 0; s < opennova::FOLIAGE_MAX_DEFS; ++s) {
+		const bool had_material = foliage_materials_[s].is_valid();
+		foliage_materials_[s].unref();
+		if (had_material) {
+			// Recreate the shared slot material NOW: the resident pool's
+			// lazy re-adopt (_apply_far_cell_state) and the per-frame
+			// wind-phase refresh both key off its validity - deferring to
+			// the next NEW cell bake left resident cells on the stale
+			// texture with a frozen u_far_wind_phase.
+			_update_slot_material(s);
+		}
 	}
 	for (Ref<ShaderMaterial> &material : foliage_model_materials_) {
 		material.unref();
@@ -768,6 +777,11 @@ void NovaFoliageDispatcher::_make_model_sampler_bindings(
 			args.push_back(wz_f);
 			y = static_cast<float>(static_cast<double>(height_sampler_.callv(args)));
 		}
+		if (y <= INVALID_HEIGHT_THRESHOLD) {
+			// "No terrain here": hand the libs consumers their skip sentinel
+			// (a raw *65536 cast of the float sentinel overflowed int32).
+			return opennova::foliage::HEIGHT_INVALID;
+		}
 		return static_cast<opennova::foliage::Fixed16_16>(y * 65536.0f);
 	};
 
@@ -966,9 +980,15 @@ void NovaFoliageDispatcher::_dispatch_model_tier(const Transform3D &view_xform,
 					// A later submission of the same tile: retail's second
 					// draw overwrites the first in the framebuffer - the
 					// rendered batch takes the LAST submission's anchor
-					// state (alpha ref, wind phase).
+					// state (alpha ref, wind phase) AND, on stagger frames,
+					// its regenerated instance list (the per-anchor regen
+					// replaced the cache entry the earlier borrowed view
+					// pointed into - re-borrow so nothing reads the
+					// reallocated buffer).
 					ModelDrawBatch &existing = model_draw_batches_[seen->second];
 					existing.generation = draw.generation;
+					existing.instances = draw.instances;
+					existing.instance_count = draw.count;
 					existing.anchor = anchor;
 					existing.view_depth = view_depth;
 					existing.anchor_distance = anchor_distance;
@@ -1060,6 +1080,11 @@ Ref<Mesh> NovaFoliageDispatcher::_build_far_mesh(
 			args.push_back(x);
 			args.push_back(z);
 			height = static_cast<float>(static_cast<double>(height_sampler_.callv(args)));
+		}
+		if (height <= INVALID_HEIGHT_THRESHOLD) {
+			// "No terrain here": the emitter drops the instance (placement.h
+			// contract) instead of bending a blade to the sentinel.
+			return opennova::foliage::HEIGHT_INVALID;
 		}
 		return static_cast<Fixed16_16>(height * FIXED_SCALE);
 	};
@@ -1379,7 +1404,10 @@ bool NovaFoliageDispatcher::_scatter_cell(int slot_index,
 			args.push_back(wz_f);
 			y = static_cast<float>(static_cast<double>(height_sampler_.callv(args)));
 		} else {
-			return static_cast<Fixed16_16>(INVALID_HEIGHT_THRESHOLD * 65536.0f);
+			return opennova::foliage::HEIGHT_INVALID;
+		}
+		if (y <= INVALID_HEIGHT_THRESHOLD) {
+			return opennova::foliage::HEIGHT_INVALID;
 		}
 		return static_cast<Fixed16_16>(y * 65536.0f);
 	};
@@ -1409,10 +1437,13 @@ bool NovaFoliageDispatcher::_scatter_cell(int slot_index,
 			far_mask = td->get_foliage_far_mask_world(wx_f, -native_z);
 		} else if (surface_sampler_.is_valid()) {
 			// The editor-preview seam keeps the witnessed (x, -z) boundary:
-			// its far-mask wrapper negates once onto an index sampler that
-			// takes RENDER z (EditorTerrainMesh.world_to_source_coords), so
-			// the Callable receives NATIVE z (terrain_foliage_preview.gd
-			// _sample_far_mask; pinned by foliage_model_tier_test).
+			// the Callable receives NATIVE z; the preview's far-mask wrapper
+			// un-negates it to render z, and its index sampler negates again
+			// into NovaTerrainData's runtime wrap kernel — landing on the
+			// SAME gate texel as the TD fast path above
+			// (terrain_foliage_preview.gd _sample_far_mask /
+			// _sample_foliage_index; the editor's old EditorTerrainMesh
+			// chain resolved the un-negated row = the z-MIRRORED map).
 			Array args;
 			args.push_back(wx_f);
 			args.push_back(native_z);

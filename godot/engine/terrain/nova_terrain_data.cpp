@@ -448,6 +448,7 @@ void NovaTerrainData::_bind_methods() {
 	                     &NovaTerrainData::get_foliage_far_mask_world);
 	ClassDB::bind_method(D_METHOD("get_foliage_index_world", "world_x", "world_z"), &NovaTerrainData::get_foliage_index_world);
 	ClassDB::bind_method(D_METHOD("world_to_source_coords", "world_x", "world_z"), &NovaTerrainData::world_to_source_coords);
+	ClassDB::bind_method(D_METHOD("world_to_source_coords_wrapped", "world_x", "world_z"), &NovaTerrainData::world_to_source_coords_wrapped);
 	ClassDB::bind_method(D_METHOD("world_to_sector_cell", "world_x", "world_z"), &NovaTerrainData::world_to_sector_cell);
 	ClassDB::bind_method(D_METHOD("sample_heights_world_live", "world_xz"), &NovaTerrainData::sample_heights_world_live);
 	ClassDB::bind_method(D_METHOD("sample_height_world_live", "world_x", "world_z"),
@@ -1510,6 +1511,24 @@ Vector2 NovaTerrainData::world_to_source_coords(double world_x, double world_z) 
 		return Vector2(-1.0f, -1.0f);
 	}
 	return Vector2(static_cast<real_t>(r.source_x), static_cast<real_t>(r.source_z));
+}
+
+Vector2 NovaTerrainData::world_to_source_coords_wrapped(double world_x, double world_z) const {
+	// The runtime kernel form (& 0xF wrap via coords_runtime_options) of
+	// world_to_source_coords above — one shared kernel, the game samplers'
+	// guard set. resolve_world_sample's float kernel is used deliberately so
+	// the result is bit-equal with the game-side foliage/height resolution.
+	if (sector_grid.size() < 256) {
+		return Vector2(-1.0f, -1.0f);
+	}
+	// Live editor grids edit the Godot-side properties; the kernel reads the
+	// native TrnConfig — sync scalars first (documented always-safe).
+	const_cast<NovaTerrainData *>(this)->_sync_trn_scalars_from_properties();
+	TerrainWorldSample sample;
+	if (!resolve_world_sample(trn, static_cast<float>(world_x), static_cast<float>(world_z), sample)) {
+		return Vector2(-1.0f, -1.0f);
+	}
+	return Vector2(static_cast<real_t>(sample.source_x), static_cast<real_t>(sample.source_z));
 }
 
 Vector2i NovaTerrainData::world_to_sector_cell(double world_x, double world_z) const {

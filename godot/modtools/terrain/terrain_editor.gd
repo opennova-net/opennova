@@ -1408,7 +1408,12 @@ func _apply_foliage_paint_stroke(delta: float) -> bool:
 	for dab_idx in range(dab_count):
 		var t: float = 1.0 if dab_count == 1 else float(dab_idx + 1) / float(dab_count)
 		var dab_hit := start_hit.lerp(end_hit, t)
-		var source := terrain_mesh.world_to_source_coords(dab_hit.x, dab_hit.z)
+		# Address the texel the GAME gates by at this world point: the witnessed
+		# foliagemap read negates z into the runtime wrap kernel [orig:
+		# Foliage_SampleFarMapMask @ 0x6066d0 indexes (-z)] — the un-negated
+		# editor chain painted z-mirrored relative to the game (D-FOLIAGE-9's
+		# editor half). The wrapped resolver rejects only empty sectors.
+		var source := _data.world_to_source_coords_wrapped(dab_hit.x, -dab_hit.z)
 		if source.x < 0.0 or source.y < 0.0:
 			continue
 		var center_x := _document.foliage_map.map_x_from_heightmap_x(source.x)
@@ -1433,7 +1438,9 @@ func _apply_foliage_paint_stroke(delta: float) -> bool:
 func _eyedrop_foliage_at_hover() -> bool:
 	if _document.foliage_map == null or not _hover_hit_valid:
 		return false
-	var source := terrain_mesh.world_to_source_coords(_hover_hit.x, _hover_hit.z)
+	# Same gate-texel addressing as the brush: negate into the runtime wrap
+	# kernel so the eyedropper reads the def the game grows here.
+	var source := _data.world_to_source_coords_wrapped(_hover_hit.x, -_hover_hit.z)
 	if source.x < 0.0 or source.y < 0.0:
 		return false
 	var map_x := _document.foliage_map.map_x_from_heightmap_x(source.x)

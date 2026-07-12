@@ -58,7 +58,7 @@ std::array<ModelTileRef, 4> model_quadrant_tiles(Fixed16_16 anchor_x_fixed,
                                                  Fixed16_16 anchor_z_fixed) noexcept {
 	// [orig: Foliage_UpdateModelTiles @ 0x601f50] - the 4 quadrant tiles are
 	// the 16u cells (snap mask 0xFFF00000) overlapping anchor +-0x80000 on
-	// each axis. Quadrant sign layout mirrors the quad dispatcher's walk.
+	// each axis.
 	std::array<ModelTileRef, 4> out{};
 	for (int quad = 0; quad < 4; ++quad) {
 		const Fixed16_16 x_off = (quad & 1) ? -MODEL_QUADRANT_OFFSET : MODEL_QUADRANT_OFFSET;
@@ -137,9 +137,10 @@ ModelTileResult generate_model_tile_instances(int slot_index,
 			}
 		}
 
-		// Gate 3: foliage-map mask - the model tier gates on the FOLIAGEMAP
-		// byte [orig: Foliage_SampleFoliageMapMask @ 0x606620], not the FAR
-		// tier's raw charmap surface mask.
+		// Gate 3: foliage-map mask - the FOLIAGEMAP pixel remapped through the
+		// def match values [orig: Foliage_SampleFoliageMapMask @ 0x606620]
+		// (both tiers gate on the foliagemap; the charmap is not a foliage
+		// input anywhere).
 		const uint32_t mask = samplers.slot_mask_at
 		                          ? samplers.slot_mask_at(world_x_fixed, world_z_fixed)
 		                          : 0u;
@@ -159,6 +160,7 @@ ModelTileResult generate_model_tile_instances(int slot_index,
 		// Corners k = 0..3 at (A, B) = (k&1 ? +F : -F, k&2 ? +F : -F);
 		// corner local = (LA + A*cos - B*sin, LB + A*sin + B*cos); corner
 		// world via the axis form above.
+		bool ground_valid = true;
 		for (int k = 0; k < 4; ++k) {
 			const float fa = ((k & 1) ? 1.0f : -1.0f) * footprint;
 			const float fb = ((k & 2) ? 1.0f : -1.0f) * footprint;
@@ -171,24 +173,40 @@ ModelTileResult generate_model_tile_instances(int slot_index,
 			const Fixed16_16 h = samplers.height_at
 			                         ? samplers.height_at(inst.corner_x_fixed[k], inst.corner_z_fixed[k])
 			                         : 0;
+			if (h == HEIGHT_INVALID) {
+				// "No terrain here" (host contract, placement.h): reject the
+				// candidate instead of fitting to the sentinel.
+				ground_valid = false;
+				break;
+			}
 			inst.corner_height[k] = static_cast<float>(h) * FIXED_TO_FLOAT;
+		}
+		if (!ground_valid) {
+			continue;
 		}
 
 		// Edge midpoints, sampled at the integer midpoint of the FIXED corner
 		// coords ((x1+x2)>>1): mid(c0,c2) = -A edge, mid(c1,c3) = +A,
 		// mid(c0,c1) = -B, mid(c2,c3) = +B.
-		auto sample_mid = [&samplers, &inst](int a, int b) -> float {
+		auto sample_mid = [&samplers, &inst, &ground_valid](int a, int b) -> float {
 			const Fixed16_16 mx = static_cast<Fixed16_16>(
 			    (inst.corner_x_fixed[a] + inst.corner_x_fixed[b]) >> 1);
 			const Fixed16_16 mz = static_cast<Fixed16_16>(
 			    (inst.corner_z_fixed[a] + inst.corner_z_fixed[b]) >> 1);
 			const Fixed16_16 h = samplers.height_at ? samplers.height_at(mx, mz) : 0;
+			if (h == HEIGHT_INVALID) {
+				ground_valid = false;
+				return 0.0f;
+			}
 			return static_cast<float>(h) * FIXED_TO_FLOAT;
 		};
 		const float h_mid_minus_a = sample_mid(0, 2);
 		const float h_mid_plus_a = sample_mid(1, 3);
 		const float h_mid_minus_b = sample_mid(0, 1);
 		const float h_mid_plus_b = sample_mid(2, 3);
+		if (!ground_valid) {
+			continue;
+		}
 
 		// Sag per edge: D_edge = h_mid - (h_cornerA + h_cornerB)/2; fold:
 		// E_A = (D_-A + D_+A)/2, T_A = D_+A - E_A (same for B).

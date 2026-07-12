@@ -43,8 +43,8 @@ int ModelDispatcher::cache_occupancy() const noexcept {
 namespace {
 
 // The eviction scan: prefer an empty entry, else the max-age (smallest
-// last_touched relative to now) occupied one - mirrors the quad dispatcher's
-// walk and the retail evict-oldest-by-frame-stamp scan. Entries touched THIS
+// last_touched relative to now) occupied one - the retail
+// evict-oldest-by-frame-stamp scan. Entries touched THIS
 // frame are never victims: hosts hold borrowed pointers into this frame's
 // emitted entries (retail draws immediately per tile, so it has no such
 // aliasing window; the skip is the host-retained analog - see walk()).
@@ -102,18 +102,20 @@ void ModelDispatcher::walk(int slot_index,
 			entry = &entries_[found->second];
 			entry->last_touched = frame_counter;
 			++cache_hits_;
-			// Stagger regen, deduped to once per (entry, frame): retail re-runs
-			// generate for EVERY anchor touching the tile on its stagger frame
-			// [orig: Foliage_UpdateModelTiles @ 0x601f50 regenerates per hit],
-			// but the output is deterministic per (slot, key) - the repeats are
-			// byte-identical, so a same-frame stamp is observationally
-			// equivalent and drops the N-anchors-per-tile duplicate cost.
-			if (should_regen && entry->last_regen != frame_counter) {
+			// Stagger regen runs once per TOUCHING ANCHOR, exactly as retail
+			// [orig: Foliage_UpdateModelTiles @ 0x601f50 regenerates per hit].
+			// The repeats are NOT byte-identical: generate's accept gate is
+			// anchor-relative (|world - anchor| <= 0x40000), so anchors
+			// sharing a tile produce different subsets — each regen
+			// overwrites the entry and the LAST touching anchor's subset is
+			// the frame's end state (the same last-wins the retained draw
+			// keeps per D-FOLIAGE-10). A same-frame dedup here froze the
+			// FIRST anchor's subset into the cache instead.
+			if (should_regen) {
 				entry->cached = generate_model_tile_instances(
 				    slot_index, tile.key, anchor_x_fixed, anchor_z_fixed,
 				    MODEL_CANDIDATE_RADIUS, config, samplers);
-				entry->last_regen = frame_counter;
-				++entry->generation;
+				entry->generation = ++generation_stamp_;
 				++regenerations_;
 			}
 		}
@@ -136,12 +138,11 @@ void ModelDispatcher::walk(int slot_index,
 			entry = &victim_entry;
 			entry->tile_key = tile.key;
 			entry->last_touched = frame_counter;
-			entry->last_regen = frame_counter;
 			entry->occupied = true;
 			entry->cached = generate_model_tile_instances(
 			    slot_index, tile.key, anchor_x_fixed, anchor_z_fixed,
 			    MODEL_CANDIDATE_RADIUS, config, samplers);
-			++entry->generation;
+			entry->generation = ++generation_stamp_;
 			++cache_misses_;
 			key_index_.emplace(tile.key, victim);
 		}

@@ -1,0 +1,135 @@
+extends GutTest
+## The foliagemap gate resolvers — the D-FOLIAGE-9 sign conventions, pinned.
+##
+## The witnessed foliagemap read NEGATES z before the shared wrap kernel (the
+## PCX row-order compensation) while heights read +z:
+## [orig: Foliage_SampleFarMapMask @ 0x6066d0 indexes ((x>>16)&1023,
+## (-z>>16)&1023); Terrain_SampleHeightBilinear @ 0x5C6770 reads +z].
+## These tests pin the NovaTerrainData fast-path resolvers the runtime seams
+## depend on (get_foliage_index_world / get_foliage_far_mask_world's internal
+## negation, pixel==0 early-out, def.match remap) and the runtime-kernel
+## coords form (world_to_source_coords_wrapped) the editor's foliage
+## preview/brush/eyedropper address the map through.
+
+const DVXI5_FIXTURE_RES_DIR := "res://../fixtures/godot/dvxi5"
+
+
+func _fixture_path(filename: String) -> String:
+	return ProjectSettings.globalize_path(DVXI5_FIXTURE_RES_DIR).path_join(filename)
+
+
+func _load_dvxi5() -> NovaTerrainData:
+	var data := NovaTerrainData.new()
+	data.set_trn_path(_fixture_path("Dvxi5.trn"))
+	if data.load() != OK:
+		return null
+	return data
+
+
+## Find an interior source-space point: both coordinate forms resolve it and
+## its foliage-map texel is addressable.
+func _interior_point(data: NovaTerrainData) -> Vector2:
+	for sz in range(64, 8192, 256):
+		for sx in range(64, 8192, 256):
+			var editor_form := data.world_to_source_coords(float(sx), float(sz))
+			if editor_form.x >= 0.0:
+				return Vector2(float(sx), float(sz))
+	return Vector2(-1, -1)
+
+
+func test_far_mask_negates_once_onto_the_index_resolve() -> void:
+	var data := _load_dvxi5()
+	assert_not_null(data, "Dvxi5 fixture should load.")
+	if data == null:
+		return
+	var p := _interior_point(data)
+	assert_gt(p.x, 0.0, "fixture should expose an interior point")
+
+	var map := data.get_foliage_map()
+	assert_not_null(map, "fixture should carry a foliage map")
+
+	# Address the texel exactly as the game read resolves it, through the
+	# runtime wrap kernel.
+	var source := data.world_to_source_coords_wrapped(p.x, p.y)
+	assert_gte(source.x, 0.0, "wrapped resolver should resolve the interior point")
+	var map_x := map.map_x_from_heightmap_x(source.x)
+	var map_y := map.map_y_from_heightmap_y(source.y)
+
+	# Paint a def-matchable index at that texel (defs come from the fixture
+	# when it has any; otherwise pin the index path alone).
+	var defs: Array = data.get_foliage_defs()
+	var match_index := 7
+	var match_slot := -1
+	for d in mini(defs.size(), 4):
+		if defs[d] != null and int(defs[d].get_match()) > 0:
+			match_index = int(defs[d].get_match())
+			match_slot = d
+			break
+	map.paint_circle(map_x, map_y, 1, 1.0, 1.0, match_index)
+
+	# The index resolver reads the kernel at its own z argument.
+	assert_eq(data.get_foliage_index_world(p.x, p.y), match_index,
+			"get_foliage_index_world resolves the painted texel at source z")
+
+	# The far-mask wrapper negates ONCE internally: handing it -source_z (the
+	# witnessed native boundary) must land on the same texel...
+	var mask := data.get_foliage_far_mask_world(p.x, -p.y)
+	if match_slot >= 0:
+		assert_eq(mask, 1 << match_slot,
+				"far mask at (x, -z) remaps the painted texel through def.match")
+	# ...and handing it +source_z must NOT (the pre-fix z-mirror read).
+	var mirrored := data.get_foliage_far_mask_world(p.x, p.y)
+	assert_ne(mirrored, mask if match_slot >= 0 else -1,
+			"far mask at (x, +z) is the MIRRORED read — it must not see the texel")
+
+
+func test_pixel_zero_never_matches() -> void:
+	var data := _load_dvxi5()
+	assert_not_null(data, "Dvxi5 fixture should load.")
+	if data == null:
+		return
+	var p := _interior_point(data)
+	var map := data.get_foliage_map()
+	var source := data.world_to_source_coords_wrapped(p.x, p.y)
+	map.paint_circle(map.map_x_from_heightmap_x(source.x),
+			map.map_y_from_heightmap_y(source.y), 1, 1.0, 1.0, 0)
+	# [orig: the pixel == 0 early-out @ 0x5ff4e8] — even a def authored with
+	# match 0 never gates on an unpainted texel.
+	assert_eq(data.get_foliage_far_mask_world(p.x, -p.y), 0,
+			"pixel 0 never matches any def")
+
+
+func test_wrapped_coords_is_the_runtime_kernel_form() -> void:
+	var data := _load_dvxi5()
+	assert_not_null(data, "Dvxi5 fixture should load.")
+	if data == null:
+		return
+	var p := _interior_point(data)
+
+	# Interior points: the wrapped (runtime) form and the editor form resolve
+	# the same source coords — one kernel, two guard sets.
+	var editor_form := data.world_to_source_coords(p.x, p.y)
+	var wrapped_form := data.world_to_source_coords_wrapped(p.x, p.y)
+	assert_almost_eq(wrapped_form.x, editor_form.x, 0.01,
+			"interior x resolves identically through both guard sets")
+	assert_almost_eq(wrapped_form.y, editor_form.y, 0.01,
+			"interior z resolves identically through both guard sets")
+
+	# The negated-z region: the runtime form WRAPS (& 0xF sector wrap) where
+	# the editor form bounds-rejects anything outside the authored extent —
+	# the reason the editor's foliage addressing goes through the wrapped
+	# form (D-FOLIAGE-9's editor half). Whether -p.y falls inside the extent
+	# depends on the map's origin, so the invariant pinned here is agreement
+	# with the game's own index read at the negated coordinate.
+	var wrapped_neg := data.world_to_source_coords_wrapped(p.x, -p.y)
+	# The wrap can land in an empty sector (sentinel) but on a full 16-grid
+	# map it resolves; either way it must agree with the game's index read.
+	var idx_direct := data.get_foliage_index_world(p.x, -p.y)
+	if wrapped_neg.x < 0.0:
+		assert_eq(idx_direct, 0, "empty wrapped sector reads index 0")
+	else:
+		var map := data.get_foliage_map()
+		var expected := int(map.get_index(map.map_x_from_heightmap_x(wrapped_neg.x),
+				map.map_y_from_heightmap_y(wrapped_neg.y)))
+		assert_eq(idx_direct, expected,
+				"the wrapped form addresses the texel the game index read resolves")
