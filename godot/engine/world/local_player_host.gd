@@ -739,22 +739,27 @@ func _apply_viewmodel_def() -> void:
 
 
 # Convert a weapon.def `pos`/`tpos` POSITION (raw file units) into a Godot camera-local offset.
-# Faithful to the witnessed pipeline [orig: Player_UpdateFirstPersonCamera @0x4dd380; scale
-# flt_7D1D70=256 @0x544770]: the camera adds `ftol(Bone.pos)` straight onto g_view_pos, and at a
-# level look the view matrix is identity [orig: Math_BuildFixedPointRotationMatrixYXZ @0x615400], so
-# component i lands on world axis i (world Z = up). The view-local frame is therefore
-# (x = right, y = forward, z = up) — `pos[2]` is the grip's DOWN offset (the dominant term; the barrel
-# reaches forward via the model), NOT depth. Godot camera-local is (x right, y up, -z forward), so:
-#   file x (right)   -> Godot  x
-#   file y (forward) -> Godot -z
-#   file z (up)      -> Godot  y      (e.g. MP5SD pos.z -183 -> grip ~0.715u below the eye)
-# The two small lateral/forward terms (x, y) are sign-confirmable by drive; the z->y (down) term is
-# the certain one. (oscarmike WeaponManager._jo_to_godot_position agrees on /256 + z->up/down.)
+# The witnessed pipeline [orig: Player_UpdateFirstPersonCamera @0x4dd380 — the offset is
+# VIEW-LOCAL: Math_FixedPointTransformPoint22(g_view_matrix, &cam_offset, ..) @0x4dd5d8
+# rotates it by the view basis before adding onto g_view_pos; at ADS settle (entity
+# Flags & 2) the tpos/AltCamOffset REPLACES the offset wholesale @0x4dd58f..0x4dd5c7;
+# scale flt_7D1D70=256 @0x544770]. The view/def frame is X = FORWARD, Y = LEFT,
+# Z = UP — proven by the aim ray's far point being {+65536000, 0, 0} through the SAME
+# transform [orig: HUD_DrawCrosshair @0x592a0f aim_direction = (1000.0, 0, 0) q16].
+# Godot camera-local is (x right, y up, -z forward), so:
+#   file x (forward) -> Godot -z   (M4 tpos x -50.9 = ~0.2u BACK into the shoulder)
+#   file y (left)    -> Godot -x
+#   file z (up)      -> Godot  y   (e.g. MP5SD pos.z -183 -> grip ~0.715u below the eye)
+# (The 2026-07-11 grill REFUTED the earlier x=right/y=forward reading: the AK's
+# |x| ~= |y| masked the swap; the JOX/REVX M4 tpos made it glare — the canted-ADS
+# report. oscarmike's onhook-derived map agrees with the witnessed frame.) The
+# velocity lead (>>7, clamps @0x4dd4f2..) and the prone Z drop (-1280 @0x4dd578)
+# are recorded unported tails.
 func _viewmodel_offset(units: Vector3) -> Vector3:
 	return Vector3(
-		units.x / WEAPON_DEF_POS_SCALE,
+		-units.y / WEAPON_DEF_POS_SCALE,
 		units.z / WEAPON_DEF_POS_SCALE,
-		-units.y / WEAPON_DEF_POS_SCALE)
+		-units.x / WEAPON_DEF_POS_SCALE)
 
 
 # Fold degrees into (-180, 180] (def rot columns store e.g. 353 for -7).

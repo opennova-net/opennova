@@ -210,6 +210,24 @@ func _fire_diag() -> void:
 	var t0 = _world.local_player_weapon_view()
 	print("[wr] pre-fire: active=%s clip=%s reserve=%s act=%s" % [
 			str(t0.active), str(t0.clip), str(t0.reserve), str(t0.current_action)])
+	var vdef: PlayerViewmodelDef = _world.local_player_viewmodel_def() \
+			if _world.has_method("local_player_viewmodel_def") else null
+	if vdef != null:
+		print("[wr] vmdef %s: pos=%s rot=%s tpos=%s fov=%s gfx1=%s adm=%s" % [
+				vdef.weapon_name, str(vdef.pos_units), str(vdef.rot_bias_deg),
+				str(vdef.tpos_units), str(vdef.renderfov_h_deg), vdef.gfx1, vdef.animadm])
+	await _capture("90_diag_hip.png")
+	# ADS alignment check: raise, settle, capture, drop (the Sighted tpos view).
+	_mouse_btn(MOUSE_BUTTON_RIGHT, true)
+	await _settle(3)
+	_mouse_btn(MOUSE_BUTTON_RIGHT, false)
+	await _settle(40)
+	_log_view("diag ADS settled")
+	await _capture("91_diag_ads.png")
+	_mouse_btn(MOUSE_BUTTON_RIGHT, true)
+	await _settle(3)
+	_mouse_btn(MOUSE_BUTTON_RIGHT, false)
+	await _settle(30)
 	_mouse_btn(MOUSE_BUTTON_LEFT, true)
 	for i in range(10):
 		await _settle(10)
