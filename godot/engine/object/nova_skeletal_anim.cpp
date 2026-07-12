@@ -513,6 +513,13 @@ Array NovaSkeletalAnim::eval_pose(const String &p_key, double p_playhead_seconds
 	int a = 0;
 	int b = 0;
 	double frac = 0.0;
+	// The pose table holds frame_count + 1 keys (the header counts INTERVALS; the
+	// sampler bakes every channel key). Loops cycle the frame_count interval windows
+	// (the seam key ~= key 0; the original's loop-wrap window is unwalked); one-shots
+	// play every window and HOLD the true final key — a one-frame clip is one full
+	// window of motion, not a static pose. [orig: BoneAnim_FindKeyframeAtTime
+	// @0x410220 — hold-last past the summed durations]
+	const int last_pose = static_cast<int>(clip.frames.size()) - 1;
 	if (clip.loops() && frame_count > 1) {
 		double m = std::fmod(frame_time, static_cast<double>(frame_count));
 		if (m < 0.0) {
@@ -523,8 +530,8 @@ Array NovaSkeletalAnim::eval_pose(const String &p_key, double p_playhead_seconds
 		b = (a + 1) % frame_count;
 	} else if (frame_time <= 0.0) {
 		a = b = 0;
-	} else if (frame_time >= frame_count - 1) {
-		a = b = frame_count - 1;
+	} else if (frame_time >= last_pose) {
+		a = b = last_pose;
 	} else {
 		a = static_cast<int>(std::floor(frame_time));
 		frac = frame_time - a;

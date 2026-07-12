@@ -27,6 +27,10 @@ func _ready() -> void:
 	var root := OS.get_environment("NOVA_RESOURCE_DIR").strip_edges()
 	if root.is_empty():
 		root = ResourceDirSettings.get_resource_dir()
+	# NOVA_WR_EXPANSION: mount an expansion over the base game for this run (the
+	# persisted key is what GameWorld reads — mirror of the retail /exp flag).
+	var expn := OS.get_environment("NOVA_WR_EXPANSION").strip_edges()
+	ResourceDirSettings.set_expansion(expn)
 	ResourceDirSettings.set_resource_dir(root)
 
 	var app = EditorScene.instantiate()
@@ -77,7 +81,12 @@ func _ready() -> void:
 		var wpn := OS.get_environment("NOVA_WR_WEAPON").strip_edges()
 		if not wpn.is_empty():
 			await _equip_direct(wpn)
-		await _fire_diag()
+		# NOVA_WR_ANIMTRACE=1: per-frame viewmodel playhead trace across a held
+		# volley + the release — pins whether per-shot clip restarts land visually.
+		if OS.get_environment("NOVA_WR_ANIMTRACE") == "1":
+			await _anim_trace()
+		else:
+			await _fire_diag()
 		print("[wr] done -> ", _out_abs)
 		get_tree().quit()
 		return
@@ -201,6 +210,61 @@ func _equip_direct(weapon: String) -> void:
 
 # Hold LMB and log the FSM/audio state — which layer breaks: the FSM (serials),
 # the ammo (clip), or the sound (bank lookup).
+# Per-frame viewmodel playhead trace: hold LMB ~70 frames, then release and watch
+# ~50 more. Prints the active clip key + playhead seconds per frame alongside the
+# FSM view — per-shot restarts must show the playhead snapping back near 0 at the
+# fire cadence, and the release must NOT be the first visible kick.
+func _anim_trace() -> void:
+	var tracef := FileAccess.open(_out_abs + "/animtrace.log", FileAccess.WRITE)
+	var part: Node = null
+	for _attempt in range(120):  # the equip rebuilds the viewmodel over several frames
+		if _host != null and "_vm_parts" in _host and _host._vm_parts.size() > 0:
+			part = _host._vm_parts[0]
+			break
+		await get_tree().process_frame
+	if part == null:
+		var diag := "no viewmodel part: host=%s vm=%s def=%s" % [
+				str(_host != null),
+				str(_host._viewmodel) if _host != null else "-",
+				str(_world.local_player_viewmodel_def() != null)
+						if _world.has_method("local_player_viewmodel_def") else "?"]
+		print("[wr] ANIMTRACE: ", diag)
+		if tracef != null:
+			tracef.store_line(diag)
+			tracef.close()
+		return
+	var v0 = _world.local_player_weapon_view()
+	var pre := "[wr] ANIMTRACE pre: key=%s t=%.3f clip=%d act=%d" % [
+			part.get_active_body_clip(), part.get_animation_time(),
+			v0.clip, v0.current_action]
+	print(pre)
+	if tracef != null: tracef.store_line(pre)
+	_mouse_btn(MOUSE_BUTTON_LEFT, true)
+	for i in range(70):
+		await get_tree().process_frame
+		var v = _world.local_player_weapon_view()
+		var hl := "[wr] HOLD f=%02d key=%-16s t=%.3f fired=%d act=%d clip=%d" % [
+				i, part.get_active_body_clip(), part.get_animation_time(),
+				v.fired_serial, v.current_action, v.clip]
+		print(hl)
+		if tracef != null: tracef.store_line(hl)
+	_mouse_btn(MOUSE_BUTTON_LEFT, false)
+	print("[wr] RELEASE")
+	if tracef != null: tracef.store_line("[wr] RELEASE")
+	for i in range(50):
+		await get_tree().process_frame
+		var v = _world.local_player_weapon_view()
+		var rl := "[wr] REL  f=%02d key=%-16s t=%.3f fired=%d act=%d" % [
+				i, part.get_active_body_clip(), part.get_animation_time(),
+				v.fired_serial, v.current_action]
+		print(rl)
+		if tracef != null: tracef.store_line(rl)
+
+
+	if tracef != null:
+		tracef.close()
+
+
 func _fire_diag() -> void:
 	var audio = _world.get_mission_audio() if _world.has_method("get_mission_audio") else null
 	if audio != null:

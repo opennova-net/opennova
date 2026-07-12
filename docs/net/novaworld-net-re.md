@@ -6118,6 +6118,27 @@ silence — clicks are per press EDGE, the input dispatch is edge-based): a held
 trigger alone never re-requests fire; every sustained volley is the recoil window's
 re-queue loop.
 
+**The frozen-viewmodel grill (2026-07-12, the PR #226 fix round 5).** With the refire
+chain fixed the REVVY M4 still presented wrong live: ammo drained at the correct
+5-tick cadence but the gun kicked once and froze until release. The sim, the event
+batch, and the host drain all verified correct (headless FSM probe on the real dict;
+per-tick drain dump; the weapon_round_probe NOVA_WR_ANIMTRACE playhead trace) — the
+root cause was OUTSIDE the FSM: the `.bad` pose bake dropped every clip's final
+channel key (the header `frame_count` counts INTERVALS; channels carry
+`frame_count + 1` keys), and `m4_1f` — the M4 fire clip — is a ONE-frame clip whose
+entire kick motion is key 0 -> key 1, so it collapsed to a static kicked pose
+(D-ANIM-1, FIXED; ADR 0007 §3). Witnessed along the way and RECORDED AS RESIDUAL:
+the FP weapon adm channel is CLOCKED BY THE FSM, not wall time — every play re-inits
+the channel (`AnimChannel_InitFromData(.., rate 4096, phase 0.0)` inside
+`AnimMap_PlayAnimBySlot @ 0x40bdd1`), and the begin shim's phase-2/DONE leg advances
+it ONE dispatch per pump tick only while the action's COUNTER is nonzero and the
+action row resolved an anim (`ActionSlot_BeginActivePhase @ 0x53f8d2..0x53f8de` —
+the counter gate; anim-less rows like the shipped RECOILs freeze the channel). The
+port free-runs clips at wall clock: at 62.5 Hz the witnessed advance is ~one
+half-frame per tick (2 x 30 fps ~= 62.5), so the rates agree; the freeze during
+anim-less/expired actions is the recorded divergence tail (rides D-WPN-6's
+presentation family).
+
 **IDB (2026-07-10 session).** Renamed: `ActionDef_GetCurrent @ 0x401ef0` (ex
 `sub_401EF0` — returns the open ActionDef), `g_currentActionDef @ 0xA2E8E8`,
 `g_weaponParseInActionBlock @ 0x252DB88`, `g_weaponParseCurActionDef @ 0x252DB8C`.

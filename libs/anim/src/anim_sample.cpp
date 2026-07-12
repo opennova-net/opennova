@@ -257,8 +257,16 @@ Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origin
         clip.bones[b].rest_position[2] = origin.z;
     }
 
-    clip.frames.resize(clip.frame_count);
-    for (uint32_t f = 0; f < clip.frame_count; ++f) {
+    // The channel tables carry frame_count + 1 keys — the header counts INTERVALS
+    // (fence-post): a 16-frame idle stores 17 keys, and a ONE-frame clip stores its
+    // entire motion as key 0 -> key 1 (the M4 viewmodel fire kick, m4_1f). Bake a
+    // pose at every key tick, 0..frame_count inclusive; stopping at frame_count - 1
+    // dropped the final key — invisible on loops (the seam key ~= key 0) but it
+    // erased a one-frame clip's whole motion into a static pose.
+    // [orig: BoneAnim_FindKeyframeAtTime @0x410220 walks every channel key; the
+    //  final window holds key_last]
+    clip.frames.resize(clip.frame_count + 1);
+    for (uint32_t f = 0; f <= clip.frame_count; ++f) {
         std::vector<BoneSample> &frame = clip.frames[f];
         frame.resize(bone_count);
 
@@ -308,8 +316,14 @@ Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origin
             Vec3 translation = kZeroVec;
             if (translated && bad.translations != nullptr && b < bad_bone_count) {
                 // The translation block is laid out by the FILE's own bone count (its stride),
-                // regardless of the rig's row count in model-table mode.
-                const size_t idx = static_cast<size_t>(f) * bad_bone_count + b;
+                // regardless of the rig's row count in model-table mode. It carries exactly
+                // frame_count rows (no fence-post key): the final key's pose HOLDS the last
+                // row — a zero fallback would pop translated clips' last key to the origin.
+                // (The original's translation read at the final key window is unwalked; the
+                // hold mirrors the rotation walk's hold-last shape.)
+                const uint32_t tf = (bad.frame_count > 0 && f >= bad.frame_count)
+                        ? bad.frame_count - 1 : f;
+                const size_t idx = static_cast<size_t>(tf) * bad_bone_count + b;
                 if (idx < bad.num_translations) {
                     const float *t = bad.translations[idx];
                     translation = {t[0], t[1], t[2]};
