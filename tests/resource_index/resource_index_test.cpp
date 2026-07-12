@@ -107,6 +107,7 @@ int main() {
 	write_file(root / "first.bms", "bms");
 	write_file(root / "finale.kda", "kda");
 	write_file(root / "Serpen24.fnt", "fnt");
+	write_file(root / "sparks.ptl", "ptl");
 	write_file(root / "main.mnu", "mnu");
 	write_file(root / "menu_style.mns", "DEF_TEXT_FG FFFFFFFF");
 	// Avatars.def classifies by name -> "avatar" (browsable); hudpos.def classifies
@@ -130,7 +131,7 @@ int main() {
 
 	TEST_EXPECT(index.scan(root.string()));
 	const std::vector<opennova::ResourceFileEntry> all_files = index.resource_files("*");
-	TEST_EXPECT(all_files.size() == 16);  // base 13 +1 hudpos.def (HUD) +1 briefing.MIS (mission) +1 Avatars.def (avatar)
+	TEST_EXPECT(all_files.size() == 17);  // base 13 +1 hudpos.def (HUD) +1 briefing.MIS (mission) +1 Avatars.def (avatar) +1 sparks.ptl (particle)
 	TEST_EXPECT(has_relative_path(all_files, "Alpha.TRN"));
 	TEST_EXPECT(has_relative_path(all_files, "Avatars.def"));
 	TEST_EXPECT(!has_relative_path(all_files, "weapon.def"));  // co-extension .def stays unbrowsable
@@ -144,6 +145,7 @@ int main() {
 	TEST_EXPECT(has_relative_path(all_files, "briefing.MIS"));
 	TEST_EXPECT(has_relative_path(all_files, "finale.kda"));
 	TEST_EXPECT(has_relative_path(all_files, "Serpen24.fnt"));
+	TEST_EXPECT(has_relative_path(all_files, "sparks.ptl"));
 	TEST_EXPECT(!has_relative_path(all_files, "missions/first.bms"));
 	TEST_EXPECT(!has_relative_path(all_files, "models/tree.3di"));
 	TEST_EXPECT(!has_relative_path(all_files, "models/source.ase"));
@@ -197,6 +199,10 @@ int main() {
 	TEST_EXPECT(index.resource_files("font").size() == 1);
 	TEST_EXPECT(index.resource_files("fnt").size() == 1);
 	TEST_EXPECT(index.resource_files("font")[0].display_name == "Serpen24");
+	TEST_EXPECT(index.resource_files("particle").size() == 1);
+	TEST_EXPECT(index.resource_files("ptl").size() == 1);
+	TEST_EXPECT(index.resource_files("particles").size() == 1);
+	TEST_EXPECT(index.resource_files("particle")[0].display_name == "sparks");
 	TEST_EXPECT(index.resource_files("strings").size() == 1);
 	TEST_EXPECT(index.resource_files("bin").size() == 1);
 	TEST_EXPECT(index.resource_files("rtxt").size() == 1);
@@ -228,7 +234,7 @@ int main() {
 	TEST_EXPECT(as_string(bytes) == "archived model");
 	TEST_EXPECT(!index.read_file("missing.trn", bytes));
 
-	TEST_EXPECT(mounted_files.size() == 19);  // the 16 loose (incl. hudpos.def + briefing.MIS + Avatars.def) +3 archive-only logical names
+	TEST_EXPECT(mounted_files.size() == 20);  // the 17 loose (incl. hudpos.def + briefing.MIS + Avatars.def + sparks.ptl) +3 archive-only logical names
 	TEST_EXPECT(has_relative_path(mounted_files, "Archive.env"));
 	TEST_EXPECT(has_relative_path(mounted_files, "MenusP.BIN"));
 	TEST_EXPECT(has_relative_path(mounted_files, "Patch.3DI"));
