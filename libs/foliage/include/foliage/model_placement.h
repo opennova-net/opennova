@@ -2,7 +2,8 @@
 
 // The foliage MODEL tier: per-tile 3DI-cluster placement around sector
 // entities, ported from retail Jointops.exe. Retail runs TWO foliage tiers -
-// the byte-exact quad placements (placement.h) at range, and this NEAR tier
+// the deterministic FAR candidate placements (placement.h) at range, and this
+// NEAR tier
 // stamping the def graphic's full 3DI geometry in clusters around visible
 // sector entities. Witness record: docs/foliage/foliage-re.md §The model tier.
 //
@@ -34,7 +35,7 @@ constexpr float MODEL_YAW_SCALE =
 // [orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7d50 ->
 // Foliage_UpdateModelTiles(slot, entityPos, 0x40000, alphaRef)].
 constexpr int32_t MODEL_CANDIDATE_RADIUS = 0x40000;
-// Path/spacing reject range, 16.16 fixed (2.0 u), same family as the quad
+// Path/spacing reject range, 16.16 fixed (2.0 u), same family as the FAR
 // tier [orig: sub_606490(x, -z, 0x20000) in Foliage_GenerateModelTileInstances].
 constexpr int32_t MODEL_PATH_SPACING = 0x20000;
 // Footprint = 0.75 * Chebyshev bound radius [orig: Foliage_DefTable_Footprint

@@ -231,6 +231,18 @@ public:
 	float get_height_world_bilinear(const Vector3 &p_world_pos) const;
 	Color get_colormap_color_world(float world_x, float world_z) const;
 	Color get_modulated_colormap_color_world(float world_x, float world_z, const Color &light_color) const;
+	// The FAR foliage-slot mask at the witnessed sampler boundary [orig:
+	// Foliage_SampleFarMapMask @ 0x6066d0, ex kong
+	// "Terrain_GetSurfaceTypeAtFixedPoint" — a misnomer: the buffer it reads is
+	// the FOLIAGEMAP ("PolyTrn Foliagemap" @ 0x605b35), remapped at load so each
+	// pixel holds the def-slot bitmask (pixel == any of the def's match values
+	// -> bit(def); pixel 0 never matches) [orig: sub_605AD0 -> sub_5FF4E0]].
+	// The caller passes candidate (x, -worldZ); the callee restores world z.
+	// Retail addresses the raw PCX with world & 1023 (its quadrants congruent
+	// with the sector grid on every shipped map); our map resource is
+	// atlas-normalized, so this resolves through the shared sector-routed
+	// world->pixel chain and remaps at query time.
+	int get_foliage_far_mask_world(float world_x, float native_z) const;
 	// Returns the foliagemap palette index at the given world position, or 0
 	// for "outside map / empty".
 	// Engine: jodemo.exe sub_5C65E0@0x5C65E0

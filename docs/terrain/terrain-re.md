@@ -93,9 +93,24 @@ PolyTrn_PSConstC1_Light @ 0x31a182c); values init_terrain_lighting_color_ramps
 @ 0x604ee0 ← Render_TerrainScene @ 0x610c80 (Env_LightBlock/Env_SkyBlock;
 NVG blends the sky arg toward the modulator, the vehicle scope forces
 0x101010/0xF0F0F0)]` — so the shared shape is **terrain light =
-colormapAlpha × light + sky** (colormap alpha = the baked sun mask; the ÷2
-and MODULATE2X cancel). The foliage/sector-model blend PS inherits the same
-device constants. Ported: `terrain_lighting.gdshaderinc` (the prior
+t0Alpha × light + sky** (the ÷2 and MODULATE2X cancel). **t0-identity
+correction (2026-07-10 foliage regrill)**: the mesh draw's t0 is the BAKED
+TILE RT, not the raw colormap — `CD3DDevice_FindBestTexturePermutation
+@ 0x604392` resolves the 128-slot tile cache into the t0 dynamic slot — and
+the tile bake zeroes the colormap alpha (base-pass diffuse `0x00808080`,
+alpha byte 0) then adds **saturate(N·L)** into alpha via the additive DOT3
+pass (`PolyTrn_TileBakeDot3LightPass`: TrnNMap · packed light-dir diffuse)
+`[orig: PolyTrn_RenderTile @ 0x60dce5 / 0x60e38a]`. The earlier "colormap
+alpha = the baked sun mask" fold-input reading is RETRACTED — the fold
+consumes the tile RT's N·L, rebaked as the TOD moves (the tile cache stamps
+`Env_TodMinutesElapsed @ 0x60dbc0`); tile rgb is the colormap ×1.004 (no
+detail, no noise). The host include (`terrain_lighting.gdshaderinc`) folds
+the colormap alpha as its stand-in until the heightmap normal-map generator
+ports (D-TRN ledger row; the foliage FAR pass shares the same stand-in —
+[foliage/foliage-re.md](../foliage/foliage-re.md) §The tile RT). The
+foliage/sector-model blend PS inherits the same
+device constants and the same tile RT as its t1. Ported:
+`terrain_lighting.gdshaderinc` (the prior
 combined/fill pairing was a gobj-era stand-in) +
 `renderer::terrain_surface_light` (T1 section 5). Full chain:
 [render/render-lighting-re.md](../render/render-lighting-re.md).
@@ -129,32 +144,54 @@ sampler params, opaque + additive variants; the four texture slot ids 1-4
 @ 0x609de0` (REN-5), `Terrain_CollectAndRenderTileModels @ 0x60d250`,
 `PolyTrn_RenderTile @ 0x60da70`.
 
-**Foliage / sector models** (the four terrain-attached model slots):
-`Terrain_InitSectors @ 0x601260` loads the models, smooths each texture's
-alpha by a 9-tap kernel (2× center+cross, 1× corners, `>> 4`) with
-gray-0x808080 mip fill (alpha preserved), and creates TWO materials per
-model — pass flags 0x2560000 (fog + alpha-test + z-write-OFF + cull-none +
-stage-1 clamp) and 0x2460000 (same, z-write ON) — whose stage tables are
-3-stage on the shader path (s0 `MODULATE(tex, DIFFUSE)` → TEMP; s1
-`MODULATE4X(tex, TEMP)`; s2 `MODULATE2X(CURRENT, CURRENT|ALPHAREPLICATE)`)
-or 2-stage `MODULATE2X` chains without it. `Terrain_CreateFoliageVertexShaders
-@ 0x5ff630` assembles the WIND-SWAY vs_1_1 (`Foliage_WindSwayVS @ 0x2c25e5c`
-— a polynomial sine of `world.x · c24.y + time`, weighted by vertex RED,
-displacing Z; constant diffuse c6; lightmap UV = planar world projection
-via c7/c8) and the per-patch GRID-PLACEMENT vs_1_1 (`Foliage_GridPlacementVS
-@ 0x2c25e60` — a0-indexed per-patch constants, bilinear + quadratic height);
-`Foliage_CreateLightmapBlendPS @ 0x5ff7a0` (`Foliage_LightmapBlendPS
-@ 0x2c25e64`) is the fragment combine `rgb = t0 × (t1 × (t1.a·c1 + c0)) ×
-v0 × 8, a = t0.a × v0.a` (t1 = the planar-projected lightmap).
-`Terrain_SetupSectorModelDraw @ 0x6007c0` (ex-misnomer
-`terrain_setup_display_adapter`; per model slot 0-3) picks the LOD entry,
-binds the wind VS + FVF 338, fog mode 8 (VS fog) when the wind VS exists,
-and **alpha-test ref 180 (high quality) / 8 (low)** — the host
-`foliage.gdshader` cutoff 0.33 is a tracked stand-in (its header carries
-the witness). The old "0x005BF064 pixel shader" / "sub_5C1790" anchors in
-that shader were BOGUS (a stale note: 0x5BF064 is inside
-`draw_death_screen_overlay`; 0x5c1790 is not a function) — corrected at
-REN-4.
+**Foliage / sector models** (corrected two-tier witness, 2026-07-09):
+`Foliage_LoadDefAssets @ 0x601260` loads each slot's source 3DI and creates the
+shared `:fd` alpha texture (wrapped 3×3 smoothing, RGB flattened to 0x808080),
+but FAR and MODEL use distinct geometry and material paths.
+
+- **FAR feed** - terrain traversal collects leaf tiles within 42.0 of the
+  camera (<=128) into `Terrain_NearSectorPatchList`/`Foliage_VisibleFarKeyList`
+  `[orig: Terrain_TraverseQuadtreeNode @ 0x60905c ->
+  Terrain_CollectNearFoliagePatches @ 0x603e60]`; per-def slot pools bake each
+  new key once and LRU-evict by frame stamp `[orig: Foliage_UpdateFarCellSlots
+  @ 0x601b30]`. Draws walk the collected list far-to-near with per-patch
+  fade (knee 20.0, slope 1/22) and the high/low pass split at 33.0
+  `[orig: render_terrain_lightmaps @ 0x60a171..0x60a53b]`.
+- **FAR geometry** — `generate_foliage_instances_0 @ 0x5ffdd0` (args: key, VB, IB, out counts - no view cull) accepts up to
+  all 36 candidates and copies the complete source vertex/index arrays per
+  candidate; it is not a square/quad/ground patch. XZ scale is 1.0, source Y is
+  halved, and terrain is sampled below every transformed source vertex. Source
+  UVs and indices are replicated. After dead terrain-color work,
+  `@ 0x6002DB..0x60030A` unconditionally stores red-only
+  `clamp(trunc(srcY*128),0,255)<<16` as the wind weight. After the importer's X
+  reflection, the host basis is `rotY(yaw + π/2)`.
+- **FAR render** — `Terrain_CreateFoliageVertexShaders @ 0x5ff630` assembles
+  `Foliage_WindSwayVS`: c27 phase wrapping plus the witnessed tenth-order
+  cosine polynomial, weighted by vertex red at amplitude 0.03, displacing
+  render Z only. `Foliage_LightmapBlendPS @ 0x5ff7a0` computes
+  `rgb=t0*(t1*(t1.a*c1+c0))*c6.rgb*8`, `a=t0.a*c6.a`; vertex red is not a
+  lighting color. FAR high/low pass flags are `0x02460000`/`0x02560000`, with
+  alpha-test refs **180**/**8**. The fixed-function fallback is stage0
+  `2*T0*diffuse` plus alpha `T0.a*diffuse.a`, then stage1 `2*T1*current`.
+  Retail c24.x adds `Env_WaveOscRing[0]*1.5258789e-6` to the wall-clock phase;
+  the host binds that complete witnessed expression through the
+  environment/global/dispatcher seam.
+- **MODEL** — `Foliage_GenerateModelTileInstances @ 0x600980` stamps the full
+  source mesh with its separate cap 21, XZ scale 0.75/Y scale 0.5, and the
+  eight-sample biquadratic fit evaluated by `Foliage_GridPlacementVS`. The
+  per-anchor alpha ref is `clamp(4096/(distance+1),8,128)` and the wind counter
+  advances per tile draw. The one-stage table[16] pass (flags `0x00440000`)
+  binds T0=`:fd`, selects c6 diffuse `(0,0,0,1)` for black RGB, and multiplies
+  `T0.a*diffuse.a`; MODEL does not run FAR's lightmap blend
+  `[orig: Foliage_DrawModelTileSlot @ 0x601d90]`.
+
+The host ports these as separate `foliage_far.gdshader` and
+`foliage_model.gdshader` paths, with the FAR feed/pool/draw state hosted as
+witnessed. Still approximate under D-FOLIAGE-7: the exact per-tile T1
+render-target content, the c6.rgb float chain, the MODEL sector-entity
+visibility stream, the blocker registry, and the second low wireframe
+resubmit. Full detail is in
+[foliage/foliage-re.md](../foliage/foliage-re.md).
 
 **Embedded-shader census (REN-4)**: every `D3DXAssembleShader` caller in the
 retail image is now witnessed — the sky dome pair

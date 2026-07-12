@@ -280,9 +280,11 @@ func get_terrain_lighting_attenuation() -> Vector3:
 	# written and freed but its three readers (0x606ce0, 0x606c30,
 	# Terrain_GetColorMapBilinear @ 0x606d80) have zero xrefs (full .text
 	# E8/E9 scan), so the GPU terrain textures ship untinted
-	# (docs/env/env-tod-re.md #19). The two LIVE terrain_rgb consumers render
-	# elsewhere: the .til tile overlay (get_tile_overlay_tint below) and the
-	# foliage lightmap sample (NovaFoliageDispatcher.terrain_tint).
+	# (docs/env/env-tod-re.md #19). The one LIVE terrain_rgb consumer renders
+	# elsewhere: the .til tile overlay (get_tile_overlay_tint below). The
+	# foliage sample (sample_terrain_colormap_tinted @ 0x606030) executes but
+	# its output is DEAD — the emitted color is replaced wholesale @ 0x60030A
+	# (env-tod-re.md #19; the rebuilt dispatcher carries no tint input).
 	return Vector3.ONE
 
 

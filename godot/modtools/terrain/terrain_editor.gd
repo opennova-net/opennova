@@ -1375,6 +1375,7 @@ func _sync_foliage_preview() -> void:
 	_foliage_preview.set_preview_state(
 		terrain_mesh,
 		camera,
+		_document.surface_map,
 		_document.foliage_map,
 		_document.foliage_defs,
 		_document.selected_foliage_def_index,
@@ -2378,5 +2379,4 @@ func _get_material() -> ShaderMaterial:
 	if terrain_mesh == null:
 		return null
 	return terrain_mesh.get_material()
-
 

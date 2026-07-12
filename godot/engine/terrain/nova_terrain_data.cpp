@@ -444,6 +444,8 @@ void NovaTerrainData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_colormap_color_world", "world_x", "world_z"), &NovaTerrainData::get_colormap_color_world);
 	ClassDB::bind_method(D_METHOD("get_modulated_colormap_color_world", "world_x", "world_z", "light_color"),
 	                     &NovaTerrainData::get_modulated_colormap_color_world);
+	ClassDB::bind_method(D_METHOD("get_foliage_far_mask_world", "world_x", "native_z"),
+	                     &NovaTerrainData::get_foliage_far_mask_world);
 	ClassDB::bind_method(D_METHOD("get_foliage_index_world", "world_x", "world_z"), &NovaTerrainData::get_foliage_index_world);
 	ClassDB::bind_method(D_METHOD("world_to_source_coords", "world_x", "world_z"), &NovaTerrainData::world_to_source_coords);
 	ClassDB::bind_method(D_METHOD("world_to_sector_cell", "world_x", "world_z"), &NovaTerrainData::world_to_sector_cell);
@@ -1693,6 +1695,40 @@ Rect2i NovaTerrainData::get_cell_atlas_rect(int row, int col) const {
 
 int NovaTerrainData::get_tile_count() const {
 	return static_cast<int>(cpt.tiles.size());
+}
+
+int NovaTerrainData::get_foliage_far_mask_world(float world_x, float native_z) const {
+	// [orig: Foliage_SampleFarMapMask @ 0x6066d0 (ex kong
+	// "Terrain_GetSurfaceTypeAtFixedPoint")] — the buffer is the FOLIAGEMAP
+	// ("PolyTrn Foliagemap"), whose pixels retail remaps AT LOAD into per-def
+	// slot masks: bit(def) set when the pixel equals any of the def's match
+	// values; pixel 0 never matches [orig: sub_605AD0 @ 0x605b8a ->
+	// sub_5FF4E0]. The sampler indexes ((x >> 16) & 1023, (-z >> 16) & 1023)
+	// downscaled by the floor-log2 shift (>> (10 - log2(width))) — a flat
+	// 1024-world wrap with NO sector-origin/grid routing (that belongs to the
+	// MODEL sampler [orig: Foliage_SampleFoliageMapMask @ 0x606620]). The
+	// caller passes candidate (x, -worldZ); the internal negation restores
+	// world z, matching the retail callee exactly. The reimpl remaps at query
+	// time (same result; the map resource keeps the raw authored indices for
+	// the editor round-trip).
+	// Host-structural equivalence note: retail addresses the raw PCX with
+	// world & 1023 (quadrants congruent with the sector grid for every shipped
+	// map); our foliage-map resource is atlas-normalized, so the equivalent
+	// resolution is the shared sector-routed world->pixel chain
+	// (resolve_world_sample — the same one the MODEL sampler and the editor
+	// use, proven by the MODEL tier's placement parity).
+	const int pixel = get_foliage_index_world(world_x, -native_z);
+	if (pixel == 0) {
+		return 0;  // [orig: the pixel == 0 early-out @ 0x5ff4e8]
+	}
+	int mask = 0;
+	const int def_count = static_cast<int>(trn.foliage_defs.size());
+	for (int d = 0; d < def_count && d < 4; ++d) {
+		if (trn.foliage_defs[d].match >= 0 && pixel == trn.foliage_defs[d].match) {
+			mask |= (1 << d);
+		}
+	}
+	return mask;
 }
 
 int NovaTerrainData::get_foliage_index_world(float world_x, float world_z) const {

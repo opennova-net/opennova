@@ -15,7 +15,7 @@ namespace opennova::foliage {
 
 namespace {
 
-constexpr uint32_t MODEL_PRNG_SEED_CONST = 0xA55B1EEDu;  // shared with the quad tier
+constexpr uint32_t MODEL_PRNG_SEED_CONST = 0xA55B1EEDu;  // shared with the FAR tier
 
 inline uint32_t rol32(uint32_t x, int n) noexcept {
 	n &= 31;
@@ -35,7 +35,7 @@ inline uint32_t model_prng_step(uint32_t state) noexcept {
 }
 
 // Sign-extend the lower 15 bits of a packed key half to a signed cell/unit
-// index (same decode family as the quad tier's pack_cell_key consumers).
+// index (same decode family as the FAR tier's pack_cell_key consumers).
 inline int32_t sext_key_half(uint32_t half) noexcept {
 	int32_t v = static_cast<int32_t>(half << 17);
 	return v >> 17;
@@ -138,8 +138,8 @@ ModelTileResult generate_model_tile_instances(int slot_index,
 		}
 
 		// Gate 3: foliage-map mask - the model tier gates on the FOLIAGEMAP
-		// byte [orig: Foliage_SampleFoliageMapMask @ 0x606620], not the quad
-		// tier's charmap surface fn.
+		// byte [orig: Foliage_SampleFoliageMapMask @ 0x606620], not the FAR
+		// tier's raw charmap surface mask.
 		const uint32_t mask = samplers.slot_mask_at
 		                          ? samplers.slot_mask_at(world_x_fixed, world_z_fixed)
 		                          : 0u;

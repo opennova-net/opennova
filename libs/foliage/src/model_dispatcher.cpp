@@ -95,6 +95,7 @@ void ModelDispatcher::walk(int slot_index,
 					entry->cached = generate_model_tile_instances(
 					    slot_index, tile.key, anchor_x_fixed, anchor_z_fixed,
 					    MODEL_CANDIDATE_RADIUS, config, samplers);
+					++entry->generation;
 					++regenerations_;
 				}
 				break;
@@ -113,6 +114,7 @@ void ModelDispatcher::walk(int slot_index,
 			entry->cached = generate_model_tile_instances(
 			    slot_index, tile.key, anchor_x_fixed, anchor_z_fixed,
 			    MODEL_CANDIDATE_RADIUS, config, samplers);
+			++entry->generation;
 			++cache_misses_;
 		}
 
@@ -122,6 +124,7 @@ void ModelDispatcher::walk(int slot_index,
 			draw.tile_key = tile.key;
 			draw.snap_x_fixed = tile.snap_x_fixed;
 			draw.snap_z_fixed = tile.snap_z_fixed;
+			draw.generation = entry->generation;
 			draw.result = entry->cached;
 			out.push_back(draw);
 		}

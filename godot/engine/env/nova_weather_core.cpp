@@ -56,6 +56,7 @@ void NovaWeatherCore::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_sun"), &NovaWeatherCore::get_sun);
 	ClassDB::bind_method(D_METHOD("get_fog"), &NovaWeatherCore::get_fog);
 	ClassDB::bind_method(D_METHOD("get_sky"), &NovaWeatherCore::get_sky);
+	ClassDB::bind_method(D_METHOD("get_wave_osc_ring0"), &NovaWeatherCore::get_wave_osc_ring0);
 	ClassDB::bind_method(D_METHOD("get_sway_amount"), &NovaWeatherCore::get_sway_amount);
 	ClassDB::bind_method(D_METHOD("get_sway_phase"), &NovaWeatherCore::get_sway_phase);
 	ClassDB::bind_method(D_METHOD("get_lightning_intensity"), &NovaWeatherCore::get_lightning_intensity);
@@ -199,6 +200,10 @@ Color NovaWeatherCore::get_fog() const {
 
 Color NovaWeatherCore::get_sky() const {
 	return packed_to_color(sky_block.render_color);
+}
+
+int NovaWeatherCore::get_wave_osc_ring0() const {
+	return oscillator.osc_ring[0];
 }
 
 float NovaWeatherCore::get_sway_amount() const {
