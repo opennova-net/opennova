@@ -299,9 +299,8 @@ func supports_document_tabs() -> bool:
 	return false
 
 
-## One Dictionary per open document: {"label": String, "dirty": bool,
-## "path": String, "tooltip": String}.
-func get_document_tabs() -> Array:
+## One DocumentTabRow per open document (see framework/document_tab_row.gd).
+func get_document_tabs() -> Array[DocumentTabRow]:
 	return []
 
 
@@ -334,7 +333,7 @@ func has_unsaved_changes() -> bool:
 	# Any open tab with unsaved work counts, not just the active one (B6: the
 	# fold every multi-document workspace used to override for).
 	for row in get_document_tabs():
-		if bool((row as Dictionary).get("dirty", false)):
+		if row.dirty:
 			return true
 	return false
 

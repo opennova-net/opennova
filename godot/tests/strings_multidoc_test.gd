@@ -41,9 +41,9 @@ func test_dirty_badge_isolates_to_the_edited_tab() -> void:
 
 	ws.add_entry_default()  # edits the ACTIVE table (the second)
 
-	var tabs: Array = ws.get_document_tabs()
-	assert_false((tabs[0] as Dictionary).get("dirty"), "the untouched tab stays clean")
-	assert_true((tabs[1] as Dictionary).get("dirty"), "only the edited tab is dirty")
+	var tabs: Array[DocumentTabRow] = ws.get_document_tabs()
+	assert_false(tabs[0].dirty, "the untouched tab stays clean")
+	assert_true(tabs[1].dirty, "only the edited tab is dirty")
 	assert_true(ws.has_unsaved_changes(), "the workspace reports any dirty tab")
 
 	assert_eq(ws.activate_document(0), OK)
@@ -92,7 +92,7 @@ func test_session_restore_reopens_all_tabs_and_active_index() -> void:
 	var workstation2 = add_child_autofree(EditorWorkstationScene.instantiate())
 	var ws2 = _strings_ws(workstation2)
 	await get_tree().process_frame
-	var tabs: Array = ws2.get_document_tabs()
+	var tabs: Array[DocumentTabRow] = ws2.get_document_tabs()
 	assert_eq(tabs.size(), 2, "both tables reopen")
 	assert_eq(ws2.get_active_document_index(), 0, "the active tab is restored")
 	assert_eq(ws2.strings_editor.current_path, FIXTURE, "the alias points at the restored active tab")
@@ -121,5 +121,5 @@ func test_new_strings_opens_its_own_tab_beside_unsaved_work() -> void:
 	assert_eq(ws.new_current(), OK)
 	assert_eq(ws.get_document_tabs().size(), 2, "New leaves the dirty table open in its own tab")
 	assert_eq(ws.strings_editor.current_path, "", "the new active document is untitled")
-	var tabs: Array = ws.get_document_tabs()
-	assert_true((tabs[0] as Dictionary).get("dirty"), "the unsaved work is intact")
+	var tabs: Array[DocumentTabRow] = ws.get_document_tabs()
+	assert_true(tabs[0].dirty, "the unsaved work is intact")

@@ -178,9 +178,9 @@ func test_tab_set_add_activate_and_rows() -> void:
 	assert_eq(changes[0], 2, "each add emits once")
 
 	var rows := tabs.tabs()
-	assert_eq((rows[0] as Dictionary).get("label"), "a.bin")
-	assert_eq((rows[1] as Dictionary).get("label"), "Untitled")
-	assert_true((rows[1] as Dictionary).get("dirty"))
+	assert_eq(rows[0].label, "a.bin")
+	assert_eq(rows[1].label, "Untitled")
+	assert_true(rows[1].dirty)
 	assert_eq(tabs.index_of_path("USER://A.BIN"), 0, "path match is case-insensitive")
 	assert_eq(tabs.index_of_path(""), -1, "empty path never matches")
 

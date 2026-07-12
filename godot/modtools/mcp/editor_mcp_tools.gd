@@ -362,7 +362,7 @@ func _workspace_state(ws: Variant) -> Dictionary:
 		},
 	}
 	if ws.supports_document_tabs():
-		out["documents"] = { "tabs": ws.get_document_tabs(), "active": ws.get_active_document_index() }
+		out["documents"] = { "tabs": DocumentTabRow.to_dict_rows(ws.get_document_tabs()), "active": ws.get_active_document_index() }
 	return out
 
 

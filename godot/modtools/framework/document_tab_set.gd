@@ -86,8 +86,8 @@ func notify_changed() -> void:
 
 
 ## The get_document_tabs() rows, derived from the documents.
-func tabs() -> Array:
-	var rows := []
+func tabs() -> Array[DocumentTabRow]:
+	var rows: Array[DocumentTabRow] = []
 	for doc in _docs:
 		var path := String(doc.get("current_path"))
 		var dirty := false
@@ -95,12 +95,11 @@ func tabs() -> Array:
 			dirty = doc.is_dirty()
 		else:
 			dirty = bool(doc.get("is_dirty"))
-		rows.append({
-			"label": path.get_file() if not path.is_empty() else "Untitled",
-			"dirty": dirty,
-			"path": path,
-			"tooltip": path if not path.is_empty() else "Not saved yet",
-		})
+		rows.append(DocumentTabRow.make(
+			path.get_file() if not path.is_empty() else "Untitled",
+			dirty,
+			path,
+			path if not path.is_empty() else "Not saved yet"))
 	return rows
 
 

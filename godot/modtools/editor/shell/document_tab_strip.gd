@@ -52,17 +52,17 @@ func rebuild() -> void:
 	if workspace == null or not workspace.supports_document_tabs():
 		_strip.visible = false
 		return
-	var tabs: Array = workspace.get_document_tabs()
+	var tabs: Array[DocumentTabRow] = workspace.get_document_tabs()
 	var active := workspace.get_active_document_index()
 	var active_style: StyleBoxFlat = _active_stylebox.call()
 	for i in tabs.size():
-		var tab: Dictionary = tabs[i]
-		var label := String(tab.get("label", "Untitled"))
+		var tab: DocumentTabRow = tabs[i]
+		var label := tab.label
 		var btn := Button.new()
 		btn.name = "DocumentTab%d" % i
 		btn.toggle_mode = true
-		btn.text = label + ("*" if bool(tab.get("dirty", false)) else "")
-		btn.tooltip_text = String(tab.get("tooltip", label))
+		btn.text = label + ("*" if tab.dirty else "")
+		btn.tooltip_text = tab.tooltip
 		btn.clip_text = true
 		btn.custom_minimum_size = Vector2(96, 28)
 		btn.focus_mode = Control.FOCUS_NONE
@@ -98,10 +98,10 @@ func _on_tab_close_pressed(index: int) -> void:
 	var workspace: EditorWorkspace = _active_workspace.call()
 	if workspace == null:
 		return
-	var tabs: Array = workspace.get_document_tabs()
+	var tabs: Array[DocumentTabRow] = workspace.get_document_tabs()
 	if index < 0 or index >= tabs.size():
 		return
-	if not bool((tabs[index] as Dictionary).get("dirty", false)):
+	if not tabs[index].dirty:
 		workspace.close_document(index)
 		_sync.call()
 		return

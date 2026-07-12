@@ -313,7 +313,7 @@ func _widget_node(resource: Variant, id: int, full: bool, budget: Dictionary) ->
 
 
 func _tabs_block(ws: Variant) -> Dictionary:
-	return { "tabs": ws.get_document_tabs(), "active": ws.get_active_document_index() }
+	return { "tabs": DocumentTabRow.to_dict_rows(ws.get_document_tabs()), "active": ws.get_active_document_index() }
 
 
 # --- read / tabs --------------------------------------------------------------------
@@ -431,18 +431,18 @@ func _tool_menu_tabs(args: Dictionary, ctx: McpToolContext) -> Variant:
 				return McpToolResult.error("New tab failed (%s)." % error_string(err))
 		"activate":
 			var index := int(args.get("index", -1))
-			var tabs: Array = ws.get_document_tabs()
+			var tabs: Array[DocumentTabRow] = ws.get_document_tabs()
 			if index < 0 or index >= tabs.size():
 				return McpToolResult.error("No tab %d — get_menu lists tabs 0..%d." % [index, tabs.size() - 1])
 			ws.activate_document(index)
 		"close":
 			var index := int(args.get("index", -1))
-			var tabs: Array = ws.get_document_tabs()
+			var tabs: Array[DocumentTabRow] = ws.get_document_tabs()
 			if index < 0 or index >= tabs.size():
 				return McpToolResult.error("No tab %d — get_menu lists tabs 0..%d." % [index, tabs.size() - 1])
-			var row: Dictionary = tabs[index]
-			if bool(row.get("dirty", false)) and not bool(args.get("discard", false)):
-				return McpToolResult.error("Tab %d (%s) has unsaved changes — save_menu first, or pass discard: true." % [index, row.get("label", "?")])
+			var row: DocumentTabRow = tabs[index]
+			if row.dirty and not bool(args.get("discard", false)):
+				return McpToolResult.error("Tab %d (%s) has unsaved changes — save_menu first, or pass discard: true." % [index, row.label])
 			ws.close_document(index)
 		_:
 			return McpToolResult.error("op must be new | activate | close.")

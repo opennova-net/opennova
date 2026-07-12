@@ -168,7 +168,7 @@ func supports_document_tabs() -> bool:
 	return true
 
 
-func get_document_tabs() -> Array:
+func get_document_tabs() -> Array[DocumentTabRow]:
 	return _tabs.tabs()
 
 
