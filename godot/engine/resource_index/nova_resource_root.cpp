@@ -6,6 +6,7 @@
 #include "util/texture_path_resolver.h"
 
 #include <gameprofile/gameprofile.h>
+#include <gameprofile/required_resources.h>
 #include <vfs/vfs.h>
 
 #include <godot_cpp/classes/dir_access.hpp>
@@ -49,6 +50,38 @@ void NovaResourceRoot::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("read_file", "name"), &NovaResourceRoot::read_file);
 	ClassDB::bind_method(D_METHOD("load_texture", "name"), &NovaResourceRoot::load_texture);
 	ClassDB::bind_method(D_METHOD("load_font", "name"), &NovaResourceRoot::load_font);
+	ClassDB::bind_method(D_METHOD("list_missing_boot_resources"), &NovaResourceRoot::list_missing_boot_resources);
+	ClassDB::bind_method(D_METHOD("boot_resource_failure_text", "name"), &NovaResourceRoot::boot_resource_failure_text);
+}
+
+PackedStringArray NovaResourceRoot::list_missing_boot_resources() const {
+	PackedStringArray missing;
+	if (root_dir_.is_empty()) {
+		return missing;
+	}
+	for (int i = 0; i < gameprofile_required_resource_count(); ++i) {
+		const NovaRequiredResource *row = gameprofile_required_resource_at(i);
+		if (row->severity != NOVA_RES_FATAL) {
+			continue;
+		}
+		// The archive-table trio's all-missing gate belongs to mount_runtime
+		// itself [orig: fatal check @ 0x4a6f44]; pattern rows carry no
+		// probeable literal name.
+		if ((row->flags & (NOVA_RES_F_PFF_TABLE_ANY | NOVA_RES_F_PATTERN)) != 0) {
+			continue;
+		}
+		const String name = String::utf8(row->name);
+		if (!has_file(name)) {
+			missing.push_back(name);
+		}
+	}
+	return missing;
+}
+
+String NovaResourceRoot::boot_resource_failure_text(const String &name) const {
+	const NovaRequiredResource *row =
+			gameprofile_required_resource_find(name.utf8().get_data());
+	return row ? String::utf8(row->failure) : String();
 }
 
 bool NovaResourceRoot::has_virtual_scheme(const String &path) {

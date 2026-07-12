@@ -198,6 +198,10 @@ target_link_libraries(gameprofile_test PRIVATE opennova_gameprofile)
 target_include_directories(gameprofile_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME gameprofile COMMAND gameprofile_test)
 
+add_executable(required_resources_test gameprofile/required_resources_test.c)
+target_link_libraries(required_resources_test PRIVATE opennova_gameprofile)
+add_test(NAME required_resources COMMAND required_resources_test)
+
 # SBF tests
 add_executable(sbf_header_test sbf/sbf_header_test.cpp)
 target_link_libraries(sbf_header_test PRIVATE opennova_sbf)
