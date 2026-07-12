@@ -71,6 +71,17 @@ func _ready() -> void:
 			print("[wr] overlay=%s rect=%s hud_rect=%s" % [
 				ov.name, str(ov.get_global_rect()), str(hud.get_global_rect())])
 
+	# NOVA_WR_FIRE=1: the fire-chain diagnostic — equip NOVA_WR_WEAPON, hold LMB
+	# ~100 frames, log the FSM view + the audio bank result every 10 frames.
+	if OS.get_environment("NOVA_WR_FIRE") == "1":
+		var wpn := OS.get_environment("NOVA_WR_WEAPON").strip_edges()
+		if not wpn.is_empty():
+			await _equip_direct(wpn)
+		await _fire_diag()
+		print("[wr] done -> ", _out_abs)
+		get_tree().quit()
+		return
+
 	# Try the armory at the spawn tents (zone-gated) BEFORE walking out.
 	var armory_done := await _armory_sequence()
 
@@ -186,6 +197,41 @@ func _equip_direct(weapon: String) -> void:
 	if _host != null and _host.has_method("refresh_viewmodel"):
 		_host.refresh_viewmodel()
 	await _settle(90)
+
+
+# Hold LMB and log the FSM/audio state — which layer breaks: the FSM (serials),
+# the ammo (clip), or the sound (bank lookup).
+func _fire_diag() -> void:
+	var audio = _world.get_mission_audio() if _world.has_method("get_mission_audio") else null
+	if audio != null:
+		for set_name in ["GS_M4", "GF_RL_AR15_2", "SHELLDROP", "DRY_TRIGGER"]:
+			print("[wr] bank probe %-14s -> %s" % [set_name,
+					str(audio.fire_soundset(set_name, _world.local_player_position()))])
+	var t0 = _world.local_player_weapon_view()
+	print("[wr] pre-fire: active=%s clip=%s reserve=%s act=%s" % [
+			str(t0.active), str(t0.clip), str(t0.reserve), str(t0.current_action)])
+	_mouse_btn(MOUSE_BUTTON_LEFT, true)
+	for i in range(10):
+		await _settle(10)
+		var v = _world.local_player_weapon_view()
+		print("[wr] fire t+%03d: act=%d fired=%d dry=%d clip=%d res=%d endss=%s" % [
+				(i + 1) * 10, v.current_action, v.fired_serial, v.dry_serial,
+				v.clip, v.reserve, v.action_end_soundset])
+	_mouse_btn(MOUSE_BUTTON_LEFT, false)
+	await _settle(10)
+	var vf = _world.local_player_weapon_view()
+	print("[wr] post-fire: act=%d fired=%d clip=%d res=%d" % [
+			vf.current_action, vf.fired_serial, vf.clip, vf.reserve])
+	# The armory-name thread: is the loadout text table resolvable on this root?
+	var root: NovaResourceRoot = _world.get_resource_root() \
+			if _world.has_method("get_resource_root") else null
+	if root != null:
+		for f in ["menutxt.BIN", "Game.bin", "gametext.bin"]:
+			print("[wr] root has %-12s -> %s" % [f, str(root.has_file(f))])
+	for table in ["menutxt", "gametext"]:
+		var tb = NovaStrings.get_table(table)
+		print("[wr] strings %-9s -> %s  WepDes/WEAP_SHORT_M4=%s" % [table, str(tb != null),
+				NovaStrings.lookup(table, "WepDes", "WEAP_SHORT_M4") if tb != null else "<no table>"])
 
 
 func _log_view(stage: String) -> void:
