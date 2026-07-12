@@ -246,8 +246,14 @@ func test_particle_preview_spawns_visible_instances_after_selection() -> void:
 	var preview := _preview_in(lane)
 	assert_not_null(preview, "Viewport lane child should be a ParticlePreview.")
 
-	for i in range(12):
-		await get_tree().process_frame
+	# Selection warm-up already advanced the sim deterministically to the first
+	# alive frame (fixed emitter seed + fixed steps). Pause wall-clock
+	# auto-advance before yielding: a slow headless runner's clamped 0.1s frame
+	# deltas age a finite def out within a couple dozen frames (macos CI hit
+	# 0 alive), a fast runner barely advances it — the wall clock is not what
+	# these tests measure.
+	preview.set_paused(true)
+	await get_tree().process_frame
 
 	assert_gt(preview.get_alive_count(), 0,
 			"Selecting/opening a particle should produce live preview instances.")
@@ -265,8 +271,8 @@ func test_particle_preview_populates_render_instances_after_selection() -> void:
 	var preview := _preview_in(lane)
 	assert_not_null(preview, "Viewport lane child should be a ParticlePreview.")
 
-	for i in range(24):
-		await get_tree().process_frame
+	preview.set_paused(true)
+	await get_tree().process_frame
 
 	assert_gt(preview.get_rendered_instance_count(), 0,
 			"Live particles should populate render instances in the preview particle batches.")
@@ -858,11 +864,15 @@ func test_short_lived_particle_preview_does_not_auto_repeat_after_selection() ->
 	var preview := _preview_in(lane)
 	assert_not_null(preview, "Viewport lane child should be a ParticlePreview.")
 
-	for i in range(120):
-		await get_tree().process_frame
-
 	var emitter := preview.get_emitter()
 	assert_not_null(emitter, "Short-lived preview should have one emitter.")
+	# Let the preview's own wall-clock playback run the one-shot to completion:
+	# a fixed frame count under-ages on a fast headless runner and over-waits on
+	# a slow one, so pace on the emitter's own finished flag (bounded).
+	for i in range(600):
+		if emitter.is_finished():
+			break
+		await get_tree().process_frame
 	assert_true(emitter.is_finite(), "Short-lived fixture particle should be finite.")
 	assert_true(emitter.is_finished(), "Finite one-shot preview should finish instead of auto-repeating.")
 	assert_eq(preview.get_alive_count(), 0,
@@ -942,8 +952,8 @@ func test_particle_preview_routes_particles_to_selected_graphic_layer() -> void:
 	var lane: Control = workstation.get_node("%ViewportHost")
 	var preview := _preview_in(lane)
 	assert_not_null(preview, "Viewport lane child should be a ParticlePreview.")
-	for i in range(24):
-		await get_tree().process_frame
+	preview.set_paused(true)
+	await get_tree().process_frame
 
 	assert_gt(preview.get_alive_count(), 0, "Selected multi-graphic particle should spawn preview particles.")
 	assert_eq(preview.get_rendered_instance_count(), preview.get_alive_count(),
