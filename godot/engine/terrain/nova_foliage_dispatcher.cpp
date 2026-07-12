@@ -293,9 +293,7 @@ void NovaFoliageDispatcher::reset() {
 	for (auto &dispatcher : model_dispatchers_) {
 		dispatcher.reset();
 	}
-	for (auto &slot_instances : model_instances_) {
-		slot_instances.clear();
-	}
+
 	model_draw_batches_.clear();
 	_clear_children();
 }
@@ -346,6 +344,9 @@ Dictionary NovaFoliageDispatcher::get_dispatch_stats() const {
 		model_regens += dispatcher.regenerations();
 		model_cached_tiles += dispatcher.cache_occupancy();
 	}
+	out["far_us"] = dispatch_stats_.far_us;
+	out["material_us"] = dispatch_stats_.material_us;
+	out["model_us"] = dispatch_stats_.model_us;
 	out["model_cache_hits"] = model_hits;
 	out["model_cache_misses"] = model_misses;
 	out["model_regenerations"] = model_regens;
@@ -360,7 +361,12 @@ Array NovaFoliageDispatcher::get_model_tile_debug(int p_slot) const {
 	}
 	using opennova::foliage::FIXED_TO_FLOAT;
 	const SlotModelBounds &bounds = slot_bounds_[p_slot];
-	for (const auto &inst : model_instances_[p_slot]) {
+	for (const auto &batch : model_draw_batches_) {
+		if (batch.slot != p_slot || batch.instances == nullptr) {
+			continue;
+		}
+		for (int bi = 0; bi < batch.instance_count; ++bi) {
+			const auto &inst = batch.instances[bi];
 		const float hbase = opennova::foliage::model_instance_hbase(inst);
 		Dictionary d;
 		d["center"] = Vector3(static_cast<float>(inst.center_x_fixed) * FIXED_TO_FLOAT, hbase,
@@ -381,6 +387,7 @@ Array NovaFoliageDispatcher::get_model_tile_debug(int p_slot) const {
 		d["bound_center"] = Vector2(bounds.center_x, bounds.center_z);
 		d["bound_radius"] = bounds.radius;
 		out.push_back(d);
+		}
 	}
 	return out;
 }
@@ -400,7 +407,7 @@ Array NovaFoliageDispatcher::get_model_draw_debug() const {
 		d["alpha_ref"] = batch.alpha_ref;
 		d["wind_counter"] = batch.wind_counter;
 		d["wind_phase"] = batch.wind_phase;
-		d["instance_count"] = static_cast<int64_t>(batch.instances.size());
+		d["instance_count"] = static_cast<int64_t>(batch.instance_count);
 		d["submissions"] = batch.submissions;
 		out.push_back(d);
 	}
@@ -445,7 +452,9 @@ void NovaFoliageDispatcher::dispatch(Vector3 centre, Transform3D view_xform) {
 		return;
 	}
 
+	const uint64_t t0 = Time::get_singleton()->get_ticks_usec();
 	_dispatch_far_tier(centre);
+	const uint64_t t1 = Time::get_singleton()->get_ticks_usec();
 
 	// The FAR wind phase advances every draw; refresh the small per-slot
 	// material parameter sets each frame.
@@ -455,7 +464,12 @@ void NovaFoliageDispatcher::dispatch(Vector3 centre, Transform3D view_xform) {
 		}
 	}
 
+	const uint64_t t2 = Time::get_singleton()->get_ticks_usec();
 	_dispatch_model_tier(view_xform, defs_by_match);
+	const uint64_t t3 = Time::get_singleton()->get_ticks_usec();
+	dispatch_stats_.far_us = static_cast<int64_t>(t1 - t0);
+	dispatch_stats_.material_us = static_cast<int64_t>(t2 - t1);
+	dispatch_stats_.model_us = static_cast<int64_t>(t3 - t2);
 }
 
 // --- The FAR tier ------------------------------------------------------------
@@ -558,9 +572,20 @@ void NovaFoliageDispatcher::_dispatch_far_tier(const Vector3 &camera_pos) {
 		const bool slot_enabled = def.is_valid() && slot_mesh.is_valid();
 
 		if (slot_enabled) {
+			// New-key bake budget: the engine's per-call new-texture list is a
+			// 64-entry stack array (dedup into `ib_and_new_textures[1..64]`,
+			// no growth) [orig: Foliage_UpdateFarCellSlots @ 0x601b30 — the
+			// _WORD *[65] frame local]. A fresh view fills over successive
+			// frames instead of spiking one; misses beyond the budget stay
+			// unbaked and re-collect next frame.
+			int bake_budget = 64;
 			for (const FarVisibleCell &cell : far_visible_) {
 				auto it = pool.find(cell.key);
 				if (it == pool.end()) {
+					if (bake_budget <= 0) {
+						continue;
+					}
+					--bake_budget;
 					++dispatch_stats_.far_pool_misses;
 					it = pool.emplace(cell.key, FarCellEntry{}).first;
 					_bake_far_cell_into(s, cell, def, it->second);
@@ -756,7 +781,14 @@ void NovaFoliageDispatcher::_make_model_sampler_bindings(
 		const float wz_f = static_cast<float>(wz) * opennova::foliage::FIXED_TO_FLOAT;
 		int painted = 0;
 		if (td != nullptr) {
-			painted = td->get_foliage_index_world(wx_f, wz_f);
+			// Placement candidates are RENDER-space; get_foliage_index_world
+			// expects NATIVE z (the engine's sampler indexes (-z) internally
+			// [orig: Foliage_SampleFarMapMask @ 0x6066d0 — ((x>>16)&1023,
+			// (-z>>16)&1023)], and the Godot-side API keeps the native arg).
+			// Passing render z here read the MIRRORED map: painted clusters
+			// gated empty and ~mirror-accident instances landed elsewhere —
+			// the 00TRg sparse-coverage bug the capture probe caught.
+			painted = td->get_foliage_index_world(wx_f, -wz_f);
 		} else if (foliage_sampler_.is_valid()) {
 			Array args;
 			args.push_back(wx_f);
@@ -826,9 +858,6 @@ void NovaFoliageDispatcher::_dispatch_model_tier(const Transform3D &view_xform,
 	dispatch_stats_.model_tiles_emitted = 0;
 	dispatch_stats_.model_instances = 0;
 
-	for (auto &slot_instances : model_instances_) {
-		slot_instances.clear();
-	}
 	model_draw_batches_.clear();
 
 	// Which slots can stamp models: a def AND a mesh with usable bounds.
@@ -959,21 +988,19 @@ void NovaFoliageDispatcher::_dispatch_model_tier(const Transform3D &view_xform,
 				batch.alpha_ref = static_cast<float>(alpha_ref_byte);
 				batch.wind_counter = wind_counter;
 				batch.wind_phase = wind_phase;
-				batch.instances.reserve(static_cast<size_t>(draw.result.count));
-				auto &slot_instances = model_instances_[s];
-				for (int i = 0; i < draw.result.count; ++i) {
-					const ModelInstance &instance = draw.result.instances[i];
-					batch.instances.push_back(instance);
-					slot_instances.push_back(instance);
-				}
+				// Borrowed from the dispatcher cache (stable until its next
+				// walk) - the per-frame instance copies were the model tier's
+				// dominant CPU cost at jungle-map density.
+				batch.instances = draw.instances;
+				batch.instance_count = draw.count;
 				frame_batches.emplace(batch_key, model_draw_batches_.size());
 				model_draw_batches_.push_back(std::move(batch));
 			}
 		}
 	}
 
-	for (const auto &slot_instances : model_instances_) {
-		dispatch_stats_.model_instances += static_cast<int64_t>(slot_instances.size());
+	for (const auto &batch : model_draw_batches_) {
+		dispatch_stats_.model_instances += static_cast<int64_t>(batch.instance_count);
 	}
 
 	_update_model_draw_nodes();
@@ -1235,7 +1262,8 @@ void NovaFoliageDispatcher::_update_model_draw_nodes() {
 
 	for (const ModelDrawBatch &batch : model_draw_batches_) {
 		const int s = batch.slot;
-		if (s < 0 || s >= opennova::FOLIAGE_MAX_DEFS || batch.instances.empty()) {
+		if (s < 0 || s >= opennova::FOLIAGE_MAX_DEFS || batch.instance_count <= 0 ||
+		    batch.instances == nullptr) {
 			continue;
 		}
 
@@ -1276,7 +1304,7 @@ void NovaFoliageDispatcher::_update_model_draw_nodes() {
 			state.material->set_shader_parameter("u_model_wind_phase", batch.wind_phase);
 		}
 
-		const int count = static_cast<int>(batch.instances.size());
+		const int count = batch.instance_count;
 		// With keyed nodes, content changes only when the tile's instance list
 		// actually regenerated (the witnessed 8-frame stagger / LRU adoption
 		// bumps generation) or the slot mesh swapped.
@@ -1358,22 +1386,33 @@ bool NovaFoliageDispatcher::_scatter_cell(int slot_index,
 
 	samplers.slot_mask_at = [this, td](Fixed16_16 wx, Fixed16_16 wz) -> uint32_t {
 		const float wx_f = static_cast<float>(wx) * opennova::foliage::FIXED_TO_FLOAT;
-		// place_cell() supplies -cellZ [orig: Foliage_SampleFarMapMask
-		// @ 0x6066d0 over the match-remapped foliagemap, NOT a charmap]. The
-		// host's FAR cells are keyed in Godot render space (z = -native), so
-		// the incoming value is already TRUE native z — exactly the argument
-		// the far-mask seam takes: get_foliage_far_mask_world (and the
-		// surface_sampler callable, see terrain_foliage_preview.gd) applies
-		// the witnessed -z internally to index the map. Negating again here
-		// sampled the z-mirrored map pixel — FAR gated on the wrong paint.
-		// (Native-keyed cells — retail's PRNG key provenance — are tracked
-		// as D-FOLIAGE-8.)
-		const float native_z =
-		    static_cast<float>(wz) * opennova::foliage::FIXED_TO_FLOAT;
+		// Sign chain, measured end-to-end on 00TRg (the diag probe's
+		// m_code/f cross-check): FAR cells are keyed in Godot RENDER space;
+		// libs place_cell pre-negates its candidate z before this sampler
+		// [orig: the (x, -z) call @ 0x600065..0x600079 into
+		// Foliage_SampleFarMapMask @ 0x6066d0], so the incoming `wz` is
+		// NATIVE z. get_foliage_far_mask_world negates ONCE internally to
+		// feed get_foliage_index_world, whose resolve chain wants NATIVE z —
+		// so this seam must hand it RENDER z (= -wz) for the two negations
+		// to cancel onto the painted texel. Passing native straight through
+		// (the previous form, rationalized off the parameter's misleading
+		// "native_z" name) read the z-MIRRORED map: painted clusters gated
+		// empty, ~2 stray instances/cell everywhere else — the 00TRg
+		// sparse-coverage bug.
+		const float native_z = static_cast<float>(wz) * opennova::foliage::FIXED_TO_FLOAT;
 		int far_mask = 0;
 		if (td != nullptr) {
-			far_mask = td->get_foliage_far_mask_world(wx_f, native_z);
+			// NovaTerrainData's chain: far_mask negates once internally and
+			// get_foliage_index_world's resolve wants NATIVE z — hand it
+			// RENDER z (= -incoming) so the negations cancel onto the painted
+			// texel (measured end-to-end on 00TRg).
+			far_mask = td->get_foliage_far_mask_world(wx_f, -native_z);
 		} else if (surface_sampler_.is_valid()) {
+			// The editor-preview seam keeps the witnessed (x, -z) boundary:
+			// its far-mask wrapper negates once onto an index sampler that
+			// takes RENDER z (EditorTerrainMesh.world_to_source_coords), so
+			// the Callable receives NATIVE z (terrain_foliage_preview.gd
+			// _sample_far_mask; pinned by foliage_model_tier_test).
 			Array args;
 			args.push_back(wx_f);
 			args.push_back(native_z);

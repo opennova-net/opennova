@@ -67,7 +67,19 @@ int main() {
 	dispatcher.walk(slot, ax, az, MODEL_DEPTH_GATE, 1, cfg, s, out);
 	if (!expect(height_calls > 0, "the priming walk generates (samples heights)")) return 1;
 	if (!expect(out.size() == 4, "priming walk emits 4 tiles")) return 1;
-	const auto primed = out;
+	// Draws carry BORROWED views into the cache; snapshot the primed VALUES so
+	// the stability comparison below cannot alias the same memory.
+	struct PrimedTile {
+		int count = 0;
+		std::vector<ModelInstance> instances;
+	};
+	std::vector<PrimedTile> primed;
+	for (const auto &draw : out) {
+		PrimedTile tile;
+		tile.count = draw.count;
+		tile.instances.assign(draw.instances, draw.instances + draw.count);
+		primed.push_back(std::move(tile));
+	}
 
 	// Off-stagger hits (frames 2..7): cached content, NO sampler traffic.
 	for (int32_t frame = 2; frame <= 7; ++frame) {
@@ -80,13 +92,13 @@ int main() {
 		}
 		if (!expect(hit_out.size() == primed.size(), "off-stagger walks emit the cached tiles")) return 1;
 		for (size_t t = 0; t < hit_out.size(); ++t) {
-			if (!expect(hit_out[t].result.count == primed[t].result.count,
+			if (!expect(hit_out[t].count == primed[t].count,
 			            "cached tile content is stable across off-stagger frames")) return 1;
-			for (int i = 0; i < hit_out[t].result.count; ++i) {
-				if (!expect(hit_out[t].result.instances[i].center_x_fixed ==
-				                    primed[t].result.instances[i].center_x_fixed &&
-				                hit_out[t].result.instances[i].center_z_fixed ==
-				                    primed[t].result.instances[i].center_z_fixed,
+			for (int i = 0; i < hit_out[t].count; ++i) {
+				if (!expect(hit_out[t].instances[i].center_x_fixed ==
+				                    primed[t].instances[i].center_x_fixed &&
+				                hit_out[t].instances[i].center_z_fixed ==
+				                    primed[t].instances[i].center_z_fixed,
 				            "cached instances are bit-stable across off-stagger frames")) return 1;
 			}
 		}

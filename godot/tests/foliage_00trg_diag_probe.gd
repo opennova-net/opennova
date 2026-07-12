@@ -1,14 +1,15 @@
-extends SceneTree
+extends Node
 
 # One-off diagnostic for the trunk foliage-coverage report (00TRg.bms): loads the
 # mission against a retail install, then prints — around the local player spawn —
 # the charmap surface mask under both Z sign conventions, the foliage-map byte,
 # the TRN's foliage def slots, and the dispatcher's live FAR cell/instance stats.
 #
-# Use: godot --headless --path godot -s res://tests/foliage_00trg_diag_probe.gd -- <install_dir> [mission.bms]
+# Scene mode (autoloads must exist for game_world.gd to compile):
+# godot --headless --path godot res://tests/foliage_00trg_diag_probe.tscn -- <install_dir> [mission.bms]
 
 
-func _initialize() -> void:
+func _ready() -> void:
 	call_deferred("_run")
 
 
@@ -16,27 +17,27 @@ func _run() -> void:
 	var args := OS.get_cmdline_user_args()
 	if args.is_empty():
 		push_error("usage: -- <install_dir> [mission.bms]")
-		quit(2)
+		get_tree().quit(2)
 		return
 	var dir := args[0]
 	var bms := args[1] if args.size() >= 2 else "00TRg.bms"
 
 	var packed := load("res://game/main_game.tscn") as PackedScene
 	var scene := packed.instantiate()
-	root.add_child(scene)
+	get_tree().root.add_child(scene)
 	var world: GameWorld = scene.get_node_or_null("World")
 	var rc: int = world.load_mission(bms, dir)
 	print("[diag] load_mission rc=", rc)
 
 	var data: NovaTerrainData = null
 	for _i in range(120):
-		await process_frame
+		await get_tree().process_frame
 		data = world.get_terrain_data()
 		if data != null and data.is_loaded():
 			break
 	if data == null or not data.is_loaded():
 		push_error("[diag] terrain data never loaded")
-		quit(1)
+		get_tree().quit(1)
 		return
 
 	var pos: Vector3 = world.local_player_position()
@@ -86,7 +87,7 @@ func _run() -> void:
 		if cam != null:
 			cam.global_position = pos + Vector3(0, 1.8, 0)
 		for _i in range(30):
-			await process_frame
+			await get_tree().process_frame
 		if dispatcher.has_method("get_debug_stats"):
 			print("[diag] dispatcher stats: ", dispatcher.get_debug_stats())
 		else:
@@ -98,4 +99,4 @@ func _run() -> void:
 	else:
 		print("[diag] no dispatcher found")
 
-	quit(0)
+	get_tree().quit(0)

@@ -226,6 +226,9 @@ private:
 
 	struct DispatchStats {
 		int64_t dispatch_calls = 0;
+		int64_t far_us = 0;
+		int64_t material_us = 0;
+		int64_t model_us = 0;
 		// FAR (witnessed pool mechanics).
 		int64_t far_cells_visible = 0;   // last dispatch
 		int64_t far_pool_hits = 0;
@@ -247,8 +250,6 @@ private:
 
 	// NEAR/MODEL tier: one shared-core model dispatcher per foliage slot.
 	std::array<opennova::foliage::ModelDispatcher, opennova::FOLIAGE_MAX_DEFS> model_dispatchers_{};
-	std::array<std::vector<opennova::foliage::ModelInstance>, opennova::FOLIAGE_MAX_DEFS>
-	    model_instances_{};
 	struct ModelDrawBatch {
 		int slot = 0;
 		uint32_t tile_key = 0;
@@ -260,7 +261,11 @@ private:
 		int64_t wind_counter = 0;
 		float wind_phase = 0.0f; // counter * 0.001
 		int submissions = 1;     // retail-equivalent draws folded into this batch
-		std::vector<opennova::foliage::ModelInstance> instances;
+		// Borrowed view into the slot dispatcher's cache entry (valid until
+		// its next walk(); see ModelTileDraw). Upload paths copy from here
+		// only when `generation` changed.
+		const opennova::foliage::ModelInstance *instances = nullptr;
+		int instance_count = 0;
 	};
 	std::vector<ModelDrawBatch> model_draw_batches_;
 	std::vector<MultiMeshInstance3D *> model_draw_nodes_;

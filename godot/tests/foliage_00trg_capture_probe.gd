@@ -1,14 +1,15 @@
-extends SceneTree
+extends Node
 
 # Windowed (non-headless) capture probe for the 00TRg foliage report: loads the
 # mission, teleports the camera to the player spawn turned ~180deg (the user's
 # repro view toward the armory), lets the dispatcher settle, saves the viewport
 # to PNG, and quits. Captures ONLY the engine viewport — never the desktop.
 #
-# Use: godot --path godot -s res://tests/foliage_00trg_capture_probe.gd -- <install_dir> <out.png> [mission.bms] [yaw_deg]
+# Scene mode (autoloads must exist for game_world.gd to compile):
+# godot --path godot res://tests/foliage_00trg_capture_probe.tscn -- <install_dir> <out.png> [mission.bms] [yaw_deg]
 
 
-func _initialize() -> void:
+func _ready() -> void:
 	call_deferred("_run")
 
 
@@ -16,7 +17,7 @@ func _run() -> void:
 	var args := OS.get_cmdline_user_args()
 	if args.size() < 2:
 		push_error("usage: -- <install_dir> <out.png> [mission.bms] [yaw_deg]")
-		quit(2)
+		get_tree().quit(2)
 		return
 	var dir := args[0]
 	var out_png := args[1]
@@ -26,22 +27,27 @@ func _run() -> void:
 
 	var packed := load("res://game/main_game.tscn") as PackedScene
 	var scene := packed.instantiate()
-	root.add_child(scene)
+	get_tree().root.add_child(scene)
 	var world: GameWorld = scene.get_node_or_null("World")
 	var rc: int = world.load_mission(bms, dir)
 	print("[capture] load_mission rc=", rc)
 
 	var data: NovaTerrainData = null
 	for _i in range(240):
-		await process_frame
+		await get_tree().process_frame
 		data = world.get_terrain_data()
 		if data != null and data.is_loaded():
 			break
 	if data == null:
 		push_error("[capture] terrain never loaded")
-		quit(1)
+		get_tree().quit(1)
 		return
 
+	# The shell shows World on entering gameplay; the probe bypasses the shell
+	# state machine, so mirror that here (the C++ terrain draws server-side
+	# regardless, which masks the hide — the foliage MeshInstances honor it).
+	if world is Node3D:
+		(world as Node3D).visible = true
 	var menu_layer: Node = scene.get_node_or_null("MenuLayer")
 	if menu_layer != null and menu_layer is CanvasLayer:
 		(menu_layer as CanvasLayer).visible = false
@@ -50,7 +56,7 @@ func _run() -> void:
 	var player_host: Node = scene.get_node_or_null("LocalPlayerHost")
 	if player_host != null:
 		player_host.queue_free()
-	await process_frame
+	await get_tree().process_frame
 
 	var pos: Vector3 = world.local_player_position()
 	# yaw_deg < -900 = "find a painted foliage cluster near the spawn and frame
@@ -90,7 +96,7 @@ func _run() -> void:
 	# Let streaming/foliage settle and report an FPS estimate over 120 frames.
 	var t0 := Time.get_ticks_msec()
 	for _i in range(120):
-		await process_frame
+		await get_tree().process_frame
 	var dt := (Time.get_ticks_msec() - t0) / 1000.0
 	print("[capture] avg fps over 120 frames: %.1f" % (120.0 / dt))
 
@@ -99,6 +105,22 @@ func _run() -> void:
 		for c in terr.get_children():
 			if c is NovaFoliageDispatcher:
 				print("[capture] dispatch stats: ", c.get_dispatch_stats())
+				print("[capture] dispatcher visible=", c.visible, " in_tree=", c.is_visible_in_tree(),
+					" terr_visible=", (terr as Node3D).visible if terr is Node3D else "n/a")
+				var walk: Node = c
+				while walk != null:
+					var v = walk.visible if (walk is Node3D or walk is CanvasItem) else "-"
+					print("[capture] chain: ", walk.name, " (", walk.get_class(), ") visible=", v)
+					walk = walk.get_parent()
+				var first_cell: Node3D = null
+				for fc0 in c.get_children():
+					if fc0 is MeshInstance3D and String(fc0.name).begins_with("FarCell"):
+						first_cell = fc0
+						break
+				if first_cell != null:
+					print("[capture] cell visible=", first_cell.visible, " in_tree=", first_cell.is_visible_in_tree(),
+						" layers=", first_cell.layers, " origin=", first_cell.global_transform.origin,
+						" top_level=", first_cell.top_level, " cam_cull=", camera.cull_mask)
 				print("[capture] slot meshes: ", c.get_slot_meshes())
 				var cells: Array = []
 				for fc in c.get_children():
@@ -135,7 +157,7 @@ func _run() -> void:
 							if fc2 is MeshInstance3D and String(fc2.name).begins_with("FarCell"):
 								(fc2 as MeshInstance3D).material_override = debug_mat
 						for _j in range(5):
-							await process_frame
+							await get_tree().process_frame
 						if nearest.material_override is ShaderMaterial:
 							var sm := nearest.material_override as ShaderMaterial
 							print("[capture] u_fd_texture=", sm.get_shader_parameter("u_fd_texture"),
@@ -143,10 +165,10 @@ func _run() -> void:
 								" ref=", nearest.get_instance_shader_parameter("u_cell_alpha_ref"))
 				break
 
-	var img: Image = root.get_viewport().get_texture().get_image()
+	var img: Image = get_tree().root.get_viewport().get_texture().get_image()
 	var err := img.save_png(out_png)
 	print("[capture] save_png -> ", err, " (", out_png, ")")
-	quit(0 if err == OK else 1)
+	get_tree().quit(0 if err == OK else 1)
 
 
 static func _alpha_histogram(tex: Texture2D) -> String:
@@ -157,14 +179,22 @@ static func _alpha_histogram(tex: Texture2D) -> String:
 		return "no image"
 	var over_high := 0
 	var over_low := 0
+	var top_high := 0
+	var bottom_high := 0
 	var total := img.get_width() * img.get_height()
+	var half := img.get_height() / 2
 	for y in img.get_height():
 		for x in img.get_width():
 			var a := img.get_pixel(x, y).a
 			if a > 180.0 / 255.0:
 				over_high += 1
+				if y < half:
+					top_high += 1
+				else:
+					bottom_high += 1
 			if a > 8.0 / 255.0:
 				over_low += 1
-	return "%dx%d alpha>180: %d/%d (%.1f%%)  alpha>8: %d/%d (%.1f%%)" % [
+	return "%dx%d alpha>180: %d/%d (%.1f%%; top %d bottom %d)  alpha>8: %d/%d (%.1f%%)" % [
 		img.get_width(), img.get_height(), over_high, total, 100.0 * over_high / total,
+		top_high, bottom_high,
 		over_low, total, 100.0 * over_low / total]

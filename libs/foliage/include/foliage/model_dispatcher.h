@@ -15,6 +15,7 @@
 // draw only when count > 0.
 
 #include <cstdint>
+#include <unordered_map>
 #include <vector>
 
 #include "foliage/model_placement.h"
@@ -29,6 +30,7 @@ constexpr float MODEL_DEPTH_GATE = 38.0f;      // view-space depth gate @ 0x5c7d
 struct ModelCacheEntry {
 	uint32_t tile_key = 0xFFFFFFFFu;
 	int32_t last_touched = -1;  // frame stamp on last hit (retail entry dword [1])
+	int32_t last_regen = -1;    // host stamp: dedupe same-frame stagger regens (see walk())
 	// Host content stamp, bumped on every (re)generation so hosts can skip
 	// re-uploading unchanged cached tiles. Not a retail field: retail re-uploads
 	// its per-draw VS constant block from the cache entry every submission.
@@ -38,15 +40,18 @@ struct ModelCacheEntry {
 };
 
 // One walked tile emitted to the host: the packed key, the snapped 16u tile
-// origin, and a copy of the current cache content (retail draws straight from
-// the cache entry per tile; the copy keeps the out list stable across later
-// evictions in the same frame).
+// origin, and a BORROWED view of the cache entry's instance list (retail
+// draws straight from the cache entry per tile). The pointer stays valid
+// until the dispatcher's next walk()/reset(): the LRU never evicts an entry
+// touched this frame (walk() skips the adoption instead), so nothing emitted
+// this frame can be recycled under the host.
 struct ModelTileDraw {
 	uint32_t tile_key = 0;
 	Fixed16_16 snap_x_fixed = 0;
 	Fixed16_16 snap_z_fixed = 0;
 	int32_t generation = 0;  // ModelCacheEntry.generation at emission time
-	ModelTileResult result;
+	const ModelInstance *instances = nullptr;
+	int count = 0;
 };
 
 // Per-slot model-tier dispatcher state. One instance per foliage def slot
@@ -84,12 +89,17 @@ public:
 	int64_t cache_hits() const noexcept { return cache_hits_; }
 	int64_t cache_misses() const noexcept { return cache_misses_; }
 	int64_t regenerations() const noexcept { return regenerations_; }
+	int64_t skipped_adoptions() const noexcept { return skipped_adoptions_; }
 
 private:
 	std::vector<ModelCacheEntry> entries_;
+	// Key -> entries_ index. A host lookup accelerator over the same 1000
+	// entries (identical hit/evict/stamp semantics to the retail linear scan).
+	std::unordered_map<uint32_t, int> key_index_;
 	int64_t cache_hits_ = 0;
 	int64_t cache_misses_ = 0;
 	int64_t regenerations_ = 0;
+	int64_t skipped_adoptions_ = 0;
 };
 
 } // namespace opennova::foliage
