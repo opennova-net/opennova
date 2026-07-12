@@ -36,7 +36,7 @@ func _ready() -> void:
 		return
 	await _settle(240)  # let load spikes drain
 
-	var world = ws._play_node().get_world()
+	var world = ws.play_controller().get_world()
 	var frames := 0
 	var t0 := Time.get_ticks_msec()
 	var worst_ms := 0.0
