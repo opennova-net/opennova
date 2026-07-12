@@ -103,37 +103,65 @@ bool test_spawn_records_visual_choices() {
 	if (!expect(p.color_slot <= 3, "spawn records color slot")) return false;
 	if (!expect(p.graphic_layer == 2, "single present graphic preserves actual layer index")) return false;
 	if (!expect(near(p.position.y, 3.0f), "y_offset applies at spawn")) return false;
-	if (!expect(near(p.position.z, -2.0f), "z_offset applies at spawn")) return false;
+	// z_offset does NOT land in the spawn position — the engine folds it into
+	// the render-side camera-ward pull (emitter+0x140 = -z_offset, seeded in
+	// CEffectEmitter_Initialize @ 0x5e6349; applied per quad in
+	// BuildBillboardQuads @ 0x5e71c9). Spawn position is (0, y_offset, 0)
+	// [orig: SpawnParticle @ 0x5e78a1].
+	if (!expect(near(p.position.z, 0.0f), "z_offset does not apply at spawn")) return false;
 	return true;
 }
 
-bool test_spawn_pop_scale_ramp() {
-	// The per-particle scale ramp is a SPAWN-POP softener, not whole-life growth:
-	// scale_velocity = 256 / lifetime, so the ramp saturates at 1.0 within
-	// lifetime/256 seconds. A 1/lifetime rate (the prior read) kept every particle
-	// under-sized for its entire life — fire at ~1/3, smoke at ~1/15 — the
-	// invisible-effects bug. [orig: CParticleEmitter_SpawnParticle @ 0x5e7892
-	// flt_7D1D70 (256.0) / age -> +0x34; advance `+0x30 += +0x34 * dt` clamp 1]
+bool test_curve_phase_clock() {
+	// The engine's particle+0x30/+0x34 pair is the CURVE PHASE clock, not a
+	// draw-size ramp: phase starts 0, advances at 256/lifetime per second, and
+	// sweeps 0 -> 256 across the whole life as the LUT index source
+	// [orig: SpawnParticle @ 0x5e788c/0x5e7898; UpdateParticles advance;
+	// BuildBillboardQuads @ 0x5e6d60 indexes (int)phase % 256].
 	using namespace opennova::particle;
 	ParticleDef def = make_minimal_def();
 	def.emit_rate = 1.0f;
 	def.emit_burst = 1;
 	def.emit_dur = 5.0f;
-	def.age = 2.0f;  // lifetime 2 s -> full scale after 2/256 s
+	def.age = 2.0f;  // lifetime 2 s -> phase completes 256 at 2 s
 	Emitter e;
 	emitter_init(e, &def, {0, 0, 0}, 1);
-	if (!expect(emitter_spawn_one(e), "spawn for the ramp test")) return false;
-	if (!expect(near(e.particles[0].scale_velocity, 256.0f / 2.0f),
-			"scale_velocity = 256 / lifetime [orig: @ 0x5e7892]")) {
-		std::fprintf(stderr, "  got %f\n", e.particles[0].scale_velocity);
+	if (!expect(emitter_spawn_one(e), "spawn for the phase test")) return false;
+	if (!expect(near(e.particles[0].phase_rate, 256.0f / 2.0f),
+			"phase_rate = 256 / lifetime [orig: @ 0x5e788c]")) {
+		std::fprintf(stderr, "  got %f\n", e.particles[0].phase_rate);
 		return false;
 	}
-	emitter_advance(e, 2.0f / 256.0f);  // one full ramp interval
-	if (!expect(e.particles[0].scale >= 1.0f - 1e-4f,
-			"the ramp saturates within lifetime/256 s")) {
-		std::fprintf(stderr, "  got %f\n", e.particles[0].scale);
+	if (!expect(near(e.particles[0].curve_phase, 0.0f),
+			"phase starts at 0 [orig: @ 0x5e7898]")) return false;
+	emitter_advance(e, 1.0f);  // half the lifetime
+	if (!expect(near(e.particles[0].curve_phase, 128.0f, 0.5f),
+			"phase reaches 128 at half-life (the LUT midpoint)")) {
+		std::fprintf(stderr, "  got %f\n", e.particles[0].curve_phase);
 		return false;
 	}
+	return true;
+}
+
+bool test_spawn_size_from_graphic_scale() {
+	// Base draw size is randomized once at spawn from the chosen graphic
+	// layer: size = graphic.scale + graphic.scale_adj * rand_signed
+	// [orig: SpawnParticle @ 0x5e7862 — graphic+328/+332 into +0x38]. With
+	// scale_adj = 0 the size pins exactly; it never changes over the life.
+	using namespace opennova::particle;
+	ParticleDef def = make_minimal_def();
+	def.graphics[0].scale = 7.5f;
+	def.graphics[0].scale_adj = 0.0f;
+	Emitter e;
+	emitter_init(e, &def, {0, 0, 0}, 3);
+	if (!expect(emitter_spawn_one(e), "spawn for the size test")) return false;
+	if (!expect(near(e.particles[0].size, 7.5f),
+			"size = graphic.scale at spawn [orig: @ 0x5e7862]")) {
+		std::fprintf(stderr, "  got %f\n", e.particles[0].size);
+		return false;
+	}
+	emitter_advance(e, 0.5f);
+	if (!expect(near(e.particles[0].size, 7.5f), "size is fixed over the life")) return false;
 	return true;
 }
 
@@ -196,11 +224,16 @@ bool test_lifetime_expires() {
 	return true;
 }
 
-bool test_gravity_pulls_y_down() {
+bool test_gravity_adds_authored_sign_to_vy() {
+	// NORMAL-move gravity ADDS the authored value onto vel.y per tick
+	// [orig: UpdateParticles @ 0x5e6980 — `vel.y += slot * dt`, the emitter
+	// slot seeded from def.gravity]: negative authored gravity sinks, positive
+	// lifts (smoke). The earlier port subtracted, inverting every authored
+	// sign.
 	using namespace opennova::particle;
 	ParticleDef def = make_minimal_def();
-	def.gravity = 100.0f;
-	def.gravity_mask = {0.0f, 1.0f, 0.0f}; // only y feels gravity
+	def.gravity = -100.0f;         // authored negative = downward
+	def.gravity_mask = {0.0f, 1.0f, 0.0f}; // GRAVITATE-only input; inert here
 	def.drag = 0.0f;
 	def.age = 5.0f;
 	def.emit_rate = 0.0f;          // no auto emission; we'll spawn manually
@@ -934,11 +967,12 @@ int main() {
 	if (!test_init())                       ++failures;
 	if (!test_manual_spawn())               ++failures;
 	if (!test_spawn_records_visual_choices()) ++failures;
-	if (!test_spawn_pop_scale_ramp())       ++failures;
+	if (!test_curve_phase_clock())          ++failures;
+	if (!test_spawn_size_from_graphic_scale()) ++failures;
 	if (!test_advance_emits())              ++failures;
 	if (!test_burst())                      ++failures;
 	if (!test_lifetime_expires())           ++failures;
-	if (!test_gravity_pulls_y_down())       ++failures;
+	if (!test_gravity_adds_authored_sign_to_vy()) ++failures;
 	if (!test_drag_decelerates())           ++failures;
 	if (!test_determinism_same_seed())      ++failures;
 	if (!test_determinism_different_seed()) ++failures;

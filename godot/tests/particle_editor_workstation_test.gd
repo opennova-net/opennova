@@ -273,12 +273,17 @@ func test_particle_preview_populates_render_instances_after_selection() -> void:
 
 
 func test_particle_renderer_builds_rotated_quads() -> void:
-	var emitter := _add_render_test_emitter(_make_render_test_particle(0, 1, 8, 45.0))
+	# Initial roll seeds from def.orientation.z (+ orientationadj.z * rand01),
+	# in degrees [orig: CParticleEmitter_SpawnParticle @ 0x5e7803 — def+3824
+	# into particle+0x3C]; yaw_rot/roll_rot are angular RATES, not seeds.
+	var particle := _make_render_test_particle(0, 1, 8)
+	particle.orientation = Vector3(0.0, 0.0, 45.0)
+	var emitter := _add_render_test_emitter(particle)
 
 	assert_gt(emitter.get_rendered_instance_count(), 0,
 			"Synthetic particle should render at least one quad.")
 	assert_almost_eq(emitter.get_debug_first_rotation(), deg_to_rad(45.0), 0.01,
-			"Renderer should use particle rotation when building billboard quads.")
+			"Renderer should seed the billboard roll from orientation.z.")
 	var quad: PackedVector3Array = emitter.get_debug_first_quad_vertices()
 	assert_eq(quad.size(), 4, "Renderer should expose the first debug quad vertices.")
 	var top_edge := quad[1] - quad[0]
@@ -287,12 +292,15 @@ func test_particle_renderer_builds_rotated_quads() -> void:
 
 
 func test_particle_renderer_advances_flipbook_uv_frame() -> void:
-	var emitter := _add_render_test_emitter(_make_render_test_particle(0, 4, 8))
+	# Flipbook clock = 4 x flip_rate x elapsed seconds [orig:
+	# BuildBillboardQuads @ 0x5e6f17 — (256/phase_rate) * flip_rate * phase / 64]:
+	# rate 8, dt 0.07 -> int(4 * 8 * 0.07) = 2 of 4 frames.
+	var emitter := _add_render_test_emitter(_make_render_test_particle(0, 4, 8), 0.07)
 
 	assert_gt(emitter.get_rendered_instance_count(), 0,
 			"Synthetic flipbook particle should render at least one quad.")
 	assert_eq(emitter.get_debug_first_flip_frame(), 2,
-			"flip_frames/flip_rate should advance the rendered UV frame from particle elapsed time.")
+			"flip_frames/flip_rate should advance the rendered UV frame at 4x flip_rate per second.")
 
 
 func test_particle_renderer_keeps_blend_mode_and_depth_counts() -> void:
@@ -308,30 +316,43 @@ func test_particle_renderer_keeps_blend_mode_and_depth_counts() -> void:
 
 # CParticleEmitter_RenderStaticBillboards @ 0x5f4e10 — selected when
 # def.flags & 0x100 (= particle_flag::YawAndPitch, bit 8) is set. The static
-# render path uses D3DXMatrixScaling only; no per-particle rotation.
+# path renders WORLD-ORIENTED quads through the per-particle (yaw, pitch,
+# roll) Euler matrix [orig: @ 0x5f5068] — not rotation-suppressed billboards.
 const PARTICLE_FLAG_YAW_AND_PITCH := 1 << 8
 
 
-func test_yaw_and_pitch_skips_billboard_rotation() -> void:
-	var particle := _make_render_test_particle(0, 1, 8, 0.0, 90.0)
+func test_yaw_and_pitch_renders_world_oriented_quads() -> void:
+	# pitch seeds from orientation.y; 90 degrees tips the quad out of the
+	# camera plane (headless default right/up = world X/Y), so the corner Z
+	# coordinates must diverge — impossible on the billboard path.
+	var particle := _make_render_test_particle(0, 1, 8)
 	particle.flags = PARTICLE_FLAG_YAW_AND_PITCH
+	particle.orientation = Vector3(0.0, 90.0, 0.0)
 	var emitter := _add_render_test_emitter(particle)
 
 	assert_gt(emitter.get_rendered_instance_count(), 0,
 			"YAWANDPITCH particle should still render at least one quad.")
 	assert_true(emitter.get_debug_static_billboard(),
-			"YAWANDPITCH bit should drive the renderer onto the static-billboard path.")
-	assert_almost_eq(emitter.get_debug_first_rotation(), 0.0, 0.001,
-			"Static-billboard renderer must use rotation = 0 even when roll_rot is set.")
+			"YAWANDPITCH bit should drive the renderer onto the world-oriented path.")
+	var quad: PackedVector3Array = emitter.get_debug_first_quad_vertices()
+	assert_eq(quad.size(), 4, "World-oriented path should expose the debug quad.")
+	var z_span := 0.0
+	for v in quad:
+		z_span = maxf(z_span, absf(v.z - quad[0].z))
+	assert_gt(z_span, 0.001,
+			"90-degree pitch must tip the world-oriented quad out of the XY plane.")
 
 
 func test_yaw_and_pitch_clear_keeps_rotation() -> void:
+	# roll_rot is an angular RATE (deg/s, random sign unless SIGNEDROTATIONS)
+	# [orig: SpawnParticle @ 0x5e782a]; after 0.26 s a 90 deg/s roll shows up
+	# in the accumulated billboard rotation.
 	var emitter := _add_render_test_emitter(_make_render_test_particle(0, 1, 8, 0.0, 90.0))
 
 	assert_false(emitter.get_debug_static_billboard(),
 			"Without YAWANDPITCH the renderer should take the rotated billboard path.")
 	assert_gt(absf(emitter.get_debug_first_rotation()), 0.001,
-			"Rotated billboard path must apply the per-particle rotation.")
+			"Rotated billboard path must apply the accumulated per-particle roll.")
 
 
 # CParticleDefEntry_ParseBlendMode @ 0x5e29f0 → 8 distinct shader paths under

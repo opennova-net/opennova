@@ -46,10 +46,38 @@ struct Particle {
 	Vec3 velocity{};
 	float age = 0.0f;          // remaining seconds; <=0 means expired
 	float lifetime = 0.0f;     // initial age (for normalized t = 1 - age/lifetime)
-	float scale = 0.0f;        // grows from 0..def.scale over lifetime (engine: scale_velocity = 1/age)
-	float scale_velocity = 0.0f;
-	float rotation = 0.0f;     // accumulated radians
+	// Base draw size in world units, randomized once at spawn from the chosen
+	// graphic layer: `graphic.scale + graphic.scale_adj * rand_signed`
+	// [orig: CParticleEmitter_SpawnParticle @ 0x5e7862 — graphic+328/+332 into
+	// particle+0x38]. The renderer's quad half-extent is
+	// `0.5 * size * (ScaleCurve ? scale_lut_lerp(phase) / 128 : 1)`
+	// [orig: CParticleEmitter_BuildBillboardQuads @ 0x5e6d60 — the
+	// flt_7C3DD4 (1/128) * flt_7C3B94 (0.5) chain].
+	float size = 0.0f;
+	// Curve phase: 0 -> 256 across the particle's lifetime. This is the LUT
+	// index source for every per-particle curve (color/alpha/scale) — the
+	// engine stores it at particle+0x30 and advances it by `phase_rate * dt`
+	// per frame; it is NOT a draw-size ramp (the earlier "spawn-pop softener"
+	// reading was wrong). Color LUTs read `lut[(int)phase % 256]` (no lerp);
+	// the scale LUT lerps between bytes with the fractional part
+	// [orig: SpawnParticle @ 0x5e7898 seeds 0; UpdateParticles @ 0x5e6980
+	// advances; BuildBillboardQuads @ 0x5e6d60 indexes].
+	float curve_phase = 0.0f;
+	// 256 / lifetime — the phase advance per second
+	// [orig: SpawnParticle @ 0x5e788c — flt_7D1D70 (256.0) / age into +0x34].
+	float phase_rate = 0.0f;
+	float rotation = 0.0f;     // roll, accumulated radians (engine stores degrees at +0x3C, deg->rad at render)
 	float rotation_rate = 0.0f;
+	// YAWANDPITCH channel (def.flags & 0x100): world-oriented quads carry
+	// per-particle yaw/pitch Euler state in a parallel array at emitter+0x150
+	// [orig: CParticleEmitter_SpawnNewParticle @ 0x5f3663 seeds yaw =
+	// def.orientation.x + adj.x*rand01, yaw_rate = yaw_rot family @ 0x5f36a5;
+	// pitch pair follows; RenderStaticBillboards @ 0x5f5068 feeds
+	// (yaw, pitch, roll) * pi/180 into the Euler matrix]. Radians here.
+	float yaw = 0.0f;
+	float yaw_rate = 0.0f;
+	float pitch = 0.0f;
+	float pitch_rate = 0.0f;
 	Color3 color{};            // sampled from one of color1..4 at spawn (per engine, DWORD-randomized)
 	std::uint8_t alpha = 255;
 	std::uint8_t color_slot = 0;     // which of color1..4 this particle sampled at spawn

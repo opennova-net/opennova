@@ -42,6 +42,12 @@ struct RenderParticle {
 	int layer_idx = 0;
 	float depth = 0.0f;
 	float rotation = 0.0f;
+	// YAWANDPITCH world-oriented quads carry the full per-particle Euler
+	// state [orig: RenderStaticBillboards @ 0x5f5068 — the (yaw, pitch, roll)
+	// x pi/180 matrix args]; camera-facing billboards use `rotation` only.
+	float yaw = 0.0f;
+	float pitch = 0.0f;
+	bool oriented = false;
 	float scale = 1.0f;
 	int frame = 0;
 	int flip_frames = 1;
@@ -680,6 +686,20 @@ void NovaParticleEmitter::_update_meshes() {
 		}
 	}
 
+	// z_offset is a CAMERA-WARD pull applied to the quad center at render
+	// time, not a world-Z spawn offset: the engine seeds emitter+0x140 =
+	// -def.z_offset [orig: CEffectEmitter_Initialize @ 0x5e6349] and adds
+	// `emitter+0x140 * view_axis` to the particle position per quad
+	// [orig: BuildBillboardQuads @ 0x5e71c9; RenderStaticBillboards
+	// @ 0x5f5296 — the flt_2C06578/7C/80 view-axis globals from
+	// CParticleManager_BeginFrame @ 0x5ecfe8]. In Godot the camera basis
+	// column 2 points backward (toward the viewer), so a positive z_offset
+	// pulls along +column2.
+	Vector3 zoffset_pull;
+	if (camera != nullptr && native_def->z_offset != 0.0f) {
+		zoffset_pull = camera->get_global_transform().basis.get_column(2) * native_def->z_offset;
+	}
+
 	std::vector<RenderParticle> sorted;
 	sorted.reserve(static_cast<std::size_t>(alive));
 
@@ -699,38 +719,68 @@ void NovaParticleEmitter::_update_meshes() {
 		if (!present[layer_idx]) {
 			continue;
 		}
-		const float t = p.lifetime > 0.0f ?
-				std::clamp(1.0f - (p.age / p.lifetime), 0.0f, 1.0f) : 1.0f;
+		// Curve clock: the per-particle phase (0 -> 256 over the lifetime,
+		// wrapping via % 256 for NEVERAGE cycles). Color/alpha LUTs read the
+		// raw byte at the integer index, / 256; the scale LUT LERPS between
+		// adjacent bytes with the fractional part, / 128 (byte 128 = 1.0)
+		// [orig: BuildBillboardQuads @ 0x5e6d60 + RenderStaticBillboards
+		// @ 0x5f4e10 — the shared flt_7C3DD4 (1/128) chain under flag 0x10,
+		// raw-byte channel multiplies under flags 0x1/0x2/0x4/0x8].
+		// Reverse/inverse are baked into the LUTs at resolve time
+		// (bake_particle_def_curves), matching the engine's resolve pass.
+		const float phase = std::max(0.0f, p.curve_phase);
+		const int lut_idx = static_cast<int>(phase) & 0xFF;
+		const float lut_frac = phase - std::floor(phase);
+		const opennova::particle::GraphicLayer &native_layer =
+				native_def->graphics[static_cast<std::size_t>(layer_idx)];
 		const Ref<NovaParticleGraphicLayer> layer = layers[layer_idx];
-		float base_scale = def->get_scale_value();
-		float layer_alpha = 1.0f;
-		Ref<NovaParticleCurveRef> scale_curve = def->get_scale_func();
-		Ref<NovaParticleCurveRef> alpha_curve = def->get_alpha_func();
-		Ref<NovaParticleCurveRef> red_curve = def->get_red_func();
-		Ref<NovaParticleCurveRef> green_curve = def->get_green_func();
-		Ref<NovaParticleCurveRef> blue_curve = def->get_blue_func();
-		if (layer.is_valid() && layer->get_present()) {
-			if (layer->get_scale_value() > 0.0f) {
-				base_scale = layer->get_scale_value();
+
+		auto color_mult = [&](std::uint32_t flag_bit,
+				const opennova::particle::CurveRef &layer_curve,
+				const opennova::particle::CurveRef &def_curve) -> float {
+			if ((p.flags & flag_bit) == 0) {
+				return 1.0f;
 			}
-			layer_alpha = layer->get_alpha();
-			scale_curve = choose_curve(layer->get_scale_func(), scale_curve);
-			alpha_curve = choose_curve(layer->get_alpha_func(), alpha_curve);
-			red_curve = choose_curve(layer->get_red_func(), red_curve);
-			green_curve = choose_curve(layer->get_green_func(), green_curve);
-			blue_curve = choose_curve(layer->get_blue_func(), blue_curve);
-		}
-		if (base_scale <= 0.0f) {
-			base_scale = 1.0f;
+			const opennova::particle::CurveRef &curve =
+					layer_curve.baked ? layer_curve : def_curve;
+			if (!curve.baked) {
+				return 1.0f;
+			}
+			return static_cast<float>(curve.baked_lut[static_cast<std::size_t>(lut_idx)]) / 256.0f;
+		};
+		using opennova::particle::particle_runtime_flag::AlphaCurve;
+		using opennova::particle::particle_runtime_flag::RedCurve;
+		using opennova::particle::particle_runtime_flag::GreenCurve;
+		using opennova::particle::particle_runtime_flag::BlueCurve;
+		using opennova::particle::particle_runtime_flag::ScaleCurve;
+		const float alpha_mult = color_mult(AlphaCurve, native_layer.alpha_func, native_def->alpha_func);
+		const float red_mult = color_mult(RedCurve, native_layer.red_func, native_def->red_func);
+		const float green_mult = color_mult(GreenCurve, native_layer.green_func, native_def->green_func);
+		const float blue_mult = color_mult(BlueCurve, native_layer.blue_func, native_def->blue_func);
+
+		float scale_mult = 1.0f;
+		if ((p.flags & ScaleCurve) != 0) {
+			const opennova::particle::CurveRef &curve =
+					native_layer.scale_func.baked ? native_layer.scale_func : native_def->scale_func;
+			if (curve.baked) {
+				const std::uint8_t b0 = curve.baked_lut[static_cast<std::size_t>(lut_idx)];
+				// The engine reads lut[idx + 1] unguarded (one byte past the
+				// 256-byte LUT at idx 255 — adjacent heap memory); we clamp to
+				// the last byte, a bounded deviation.
+				const std::uint8_t b1 = curve.baked_lut[static_cast<std::size_t>(
+						std::min(lut_idx + 1, 255))];
+				const float lerped = static_cast<float>(b0) +
+						(static_cast<float>(b1) - static_cast<float>(b0)) * lut_frac;
+				scale_mult = lerped / 128.0f;
+			}
 		}
 
-		const float scale_mult = _sample_curve(scale_curve, t, 1.0f);
-		const float alpha_mult = _sample_curve(alpha_curve, t, 1.0f);
-		const float red_mult = _sample_curve(red_curve, t, 1.0f);
-		const float green_mult = _sample_curve(green_curve, t, 1.0f);
-		const float blue_mult = _sample_curve(blue_curve, t, 1.0f);
-
-		const float s = std::max(0.01f, p.scale * base_scale * scale_mult);
+		// Draw size: the spawn-time per-particle base size (graphic scale +-
+		// scale_adj, world units) x the optional scale-curve multiplier. The
+		// def/layer scale is NOT re-read here — it is baked into p.size at
+		// spawn [orig: SpawnParticle @ 0x5e7862; quad half-extent chain
+		// @ 0x5e6d60].
+		const float s = p.size * scale_mult;
 
 		// Manager-level RGB tint — CParticleEmitter_BuildBillboardQuads @
 		// 0x5e6d60 multiplies each channel by `(emitter_byte * channel) >> 7`
@@ -743,25 +793,44 @@ void NovaParticleEmitter::_update_meshes() {
 		color.r = std::clamp(color.r * red_mult * tint.x, 0.0f, 1.0f);
 		color.g = std::clamp(color.g * green_mult * tint.y, 0.0f, 1.0f);
 		color.b = std::clamp(color.b * blue_mult * tint.z, 0.0f, 1.0f);
-		color.a = std::clamp((static_cast<float>(p.alpha) / 255.0f) * layer_alpha * alpha_mult,
-				0.0f, 1.0f);
+		// Spawn alpha already carries the graphic's authored alpha
+		// (p.alpha = graphic.alpha * 255 [orig: SpawnParticle @ 0x5e77a0]);
+		// only the curve modulates here — no static layer-alpha re-multiply.
+		color.a = std::clamp((static_cast<float>(p.alpha) / 255.0f) * alpha_mult, 0.0f, 1.0f);
 
 		const int flip_frames = layer.is_valid() && layer->get_present() ?
 				std::max(1, layer->get_flip_frames()) : 1;
 		const int flip_rate = layer.is_valid() && layer->get_present() ?
 				std::max(0, layer->get_flip_rate()) : 0;
-		const float elapsed = p.lifetime > 0.0f ? std::max(0.0f, p.lifetime - p.age) : 0.0f;
-		const int frame = flip_frames > 1 && flip_rate > 0 ?
-				static_cast<int>(std::floor(elapsed * static_cast<float>(flip_rate))) % flip_frames : 0;
+		// Flipbook clock [orig: BuildBillboardQuads @ 0x5e6f17 / static path
+		// @ 0x5f4f84]: frame counter = (256 / phase_rate) * flip_rate * phase
+		// / 64 = 4 * flip_rate * elapsed_seconds — the authored flip_rate runs
+		// at x4 the naive frames-per-second reading. GFXFLIPRAND (0x200000)
+		// adds a per-particle start offset (engine derives it from the
+		// particle slot pointer; we use the serial — a bounded deviation with
+		// the same distribution intent).
+		const float elapsed = p.phase_rate > 0.0f ? phase / p.phase_rate : 0.0f;
+		int frame = 0;
+		if (flip_frames > 1 && flip_rate > 0) {
+			int offset = 0;
+			if ((native_def->flags & opennova::particle::particle_flag::GfxFlipRand) != 0) {
+				offset = static_cast<int>(p.serial * 9u) % flip_frames;
+			}
+			frame = (offset + static_cast<int>(4.0f * static_cast<float>(flip_rate) * elapsed)) %
+					flip_frames;
+		}
 
 		RenderParticle rp;
 		rp.layer_idx = layer_idx;
 		rp.rotation = p.rotation;
+		rp.yaw = p.yaw;
+		rp.pitch = p.pitch;
+		rp.oriented = (native_def->flags & opennova::particle::particle_flag::YawAndPitch) != 0;
 		rp.scale = s;
 		rp.frame = frame;
 		rp.flip_frames = flip_frames;
 		rp.blend_mode = layer_blend_modes[layer_idx];
-		rp.position = Vector3(p.position.x, p.position.y, p.position.z);
+		rp.position = Vector3(p.position.x, p.position.y, p.position.z) + zoffset_pull;
 		rp.color = color;
 
 		// Engine-faithful lit color computation when the LitColor flag is
@@ -842,10 +911,10 @@ void NovaParticleEmitter::_update_meshes() {
 	debug_first_flip_frame = 0;
 	debug_first_blend_mode = 0;
 	// Engine: CParticleEmitter_RenderStaticBillboards @ 0x5f4e10 is selected
-	// when `def.flags & 0x100` is set (= particle_flag::YawAndPitch); that path
-	// uses D3DXMatrixScaling only (no per-particle rotation). We mirror by
-	// suppressing the 2D rotate when the bit is set. The debug bool is
-	// captured per render so GUT tests can verify the branch was taken.
+	// when `def.flags & 0x100` (YAWANDPITCH) is set; that path renders
+	// WORLD-ORIENTED quads through the per-particle (yaw, pitch, roll) Euler
+	// matrix [orig: @ 0x5f5068] rather than camera-facing billboards. The
+	// debug bool is captured per render so GUT tests can verify the branch.
 	debug_static_billboard =
 			(native_def->flags & opennova::particle::particle_flag::YawAndPitch) != 0;
 	debug_first_color = Color(1.0f, 1.0f, 1.0f, 1.0f);
@@ -890,16 +959,15 @@ void NovaParticleEmitter::_update_meshes() {
 			const RenderParticle &rp = layer_particles[static_cast<std::size_t>(q)];
 			const float half = 0.5f * rp.scale;
 			// CParticleEmitter_BuildBillboardQuads @ 0x5e6d60 vs.
-			// CParticleEmitter_RenderStaticBillboards @ 0x5f4e10 dispatch:
-			// rotated path applies a `D3DXMatrixRotationX(angle)` per particle,
-			// static path uses `D3DXMatrixScaling` only. The engine selects
-			// based on `(def.flags & 0x100) == 0` (YawAndPitch suppresses
-			// rotation). We branch the same way using the per-render
-			// `debug_static_billboard` snapshot so all particles in a frame
-			// take a consistent path.
-			const float effective_rotation = debug_static_billboard ? 0.0f : rp.rotation;
-			const float c = std::cos(effective_rotation);
-			const float s = std::sin(effective_rotation);
+			// CParticleEmitter_RenderStaticBillboards @ 0x5f4e10 dispatch on
+			// `def.flags & 0x100` (YAWANDPITCH). The rotated path spins the
+			// camera-facing quad by the particle roll; the YAWANDPITCH path is
+			// NOT a rotation-suppressed billboard — it is a WORLD-ORIENTED
+			// quad through the per-particle Euler matrix
+			// [orig: @ 0x5f5068..0x5f508d — (yaw, pitch, roll) x pi/180 into
+			// the (M, x, y, z) helper; the import label "D3DXMatrixScaling" is
+			// a FLIRT signature collision — scaling by angle-sized factors
+			// would collapse the +-half corners fed through it].
 			const Vector2 local_corners[4] = {
 				Vector2(-half, half),
 				Vector2(half, half),
@@ -907,11 +975,26 @@ void NovaParticleEmitter::_update_meshes() {
 				Vector2(half, -half),
 			};
 			Vector3 quad_verts[4];
-			for (int corner = 0; corner < 4; ++corner) {
-				const Vector2 local = local_corners[corner];
-				const float rx = local.x * c - local.y * s;
-				const float ry = local.x * s + local.y * c;
-				quad_verts[corner] = rp.position + right * rx + up * ry;
+			if (rp.oriented) {
+				// D3DXMatrixRotationYawPitchRoll composition: roll about Z,
+				// then pitch about X, then yaw about Y.
+				const Basis euler = Basis(Vector3(0, 1, 0), rp.yaw) *
+						Basis(Vector3(1, 0, 0), rp.pitch) *
+						Basis(Vector3(0, 0, 1), rp.rotation);
+				for (int corner = 0; corner < 4; ++corner) {
+					const Vector2 local = local_corners[corner];
+					quad_verts[corner] = rp.position +
+							euler.xform(Vector3(local.x, local.y, 0.0f));
+				}
+			} else {
+				const float c = std::cos(rp.rotation);
+				const float s = std::sin(rp.rotation);
+				for (int corner = 0; corner < 4; ++corner) {
+					const Vector2 local = local_corners[corner];
+					const float rx = local.x * c - local.y * s;
+					const float ry = local.x * s + local.y * c;
+					quad_verts[corner] = rp.position + right * rx + up * ry;
+				}
 			}
 
 			// Engine: CParticleEmitter_BuildBillboardQuads @ 0x5e6d60 reads
@@ -976,11 +1059,10 @@ void NovaParticleEmitter::_update_meshes() {
 			indices[index_offset + 5] = vertex_offset + 2;
 
 			if (!debug_quad_set) {
-				// debug_first_rotation reflects the *effective* rotation used
-				// to construct the quad (= 0 when static-billboard, particle
-				// rotation otherwise). Tests use this to verify YawAndPitch
-				// suppresses rotation regardless of the per-particle accumulator.
-				debug_first_rotation = effective_rotation;
+				// debug_first_rotation captures the particle roll fed into the
+				// quad construction (camera-plane spin for billboards, the
+				// Euler roll component for YAWANDPITCH world-oriented quads).
+				debug_first_rotation = rp.rotation;
 				debug_first_flip_frame = rp.frame;
 				debug_first_blend_mode = rp.blend_mode;
 				debug_first_color = rp.color;

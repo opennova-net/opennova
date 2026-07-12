@@ -78,7 +78,7 @@ behavior is summarized and cited.
 | Mission | [`mission/bms-event-runtime-re.md`](mission/bms-event-runtime-re.md) | landed |
 | Mission | [`mission/mis-format-re.md`](mission/mis-format-re.md) | partial: writer-generated subset, full `dfx2med.exe` grill pending |
 | Net | [`net/novaworld-net-re.md`](net/novaworld-net-re.md) | authoritative NovaWorld wire record — layering, matchmaking, and the in-match protocol; §5 carries the tag-level findings (indexed at its top), §8 the D-NET divergence catalog with per-entry fix/live-verify state and the ranked open items |
-| Particles | [`particles/ptl-format-re.md`](particles/ptl-format-re.md) | redesign in flight in a worktree |
+| Particles | [`particles/ptl-format-re.md`](particles/ptl-format-re.md) | landing via the #219 extraction train (`particles-ida-parity`); re-grilled 2026-07-12 |
 | Player info | [`playerinfo/avatars-re.md`](playerinfo/avatars-re.md) | landed (`libs/avatars` + ONED editor bridge + full `PLAYER_INFO` screen orchestration grilled, D-PLAYERINFO-1..12; runtime `player.mnu` host wiring + spawned-player binding open) |
 | Render | [`render/render-material-re.md`](render/render-material-re.md) | landed (REN-2: the runtime material path — HLSLEffect registry, tag resolution, flag-byte state, blend/depth policy — D-RMAT-1..6) |
 | Render | [`render/render-order-re.md`](render/render-order-re.md) | landed (REN-3: the batch queues, sort keys, technique-class selection, render-state stack, and the frame pass sequence — D-RORD-1..6; the ordering ladder ported to `libs/renderer/render_order`) |

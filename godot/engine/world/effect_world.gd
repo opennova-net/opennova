@@ -135,9 +135,11 @@ func _register_file(file: NovaParticleFile) -> void:
 
 
 ## Intern an effect name to its stable 1-based handle, registering on first
-## use. 0 = unknown effect. [orig: CEffect_FindOrCreateMaterial @ 0x5f7310;
-## the original clones "stockeffect" under an unknown name — not ported yet,
-## recorded as follow-up in docs/particles/ptl-format-re.md §8.]
+## use. An unknown name clones the "stockeffect" def under the requested name
+## (still 0 when no stockeffect is mounted — e.g. an empty resource root)
+## [orig: CEffectWorld_InternEffectHandle @ 0x5f7310 — linear stricmp scan,
+## miss -> FindDefByName, still missing -> the vtable+28 stockeffect clone
+## registered under the requested name; docs/particles/ptl-format-re.md D-PTL-8].
 func intern_effect(name: String) -> int:
 	var key := name.to_lower()
 	var existing: int = _interned_by_name.get(key, 0)
@@ -145,7 +147,13 @@ func intern_effect(name: String) -> int:
 		return existing
 	var entry: Dictionary = _effects_by_name.get(key, {})
 	if entry.is_empty():
-		return 0
+		var stock: Dictionary = _effects_by_name.get("stockeffect", {})
+		if stock.is_empty():
+			return 0
+		entry = stock.duplicate()
+		entry["name"] = name
+		_effects_by_name[key] = entry
+		push_warning("NovaEffectWorld: unknown effect '%s' — cloned stockeffect [orig: @ 0x5f7310]" % name)
 	_interned.append(entry)
 	_interned_by_name[key] = _interned.size()
 	return _interned.size()

@@ -89,7 +89,23 @@ func test_intern_is_case_insensitive_and_stable() -> void:
 	var other := world.intern_effect("stockeffect")
 	if other > 0:
 		assert_ne(other, handle, "distinct names take distinct handles")
-	assert_eq(world.intern_effect("no-such-effect-xyz"), 0, "unknown name -> 0 (no spawn)")
+	# Unknown names clone the stockeffect def under the requested name
+	# [orig: CEffectWorld_InternEffectHandle @ 0x5f7310 — the vtable+28 clone;
+	# D-PTL-8 CLOSED]. stock.ptl is mounted here, so the clone must intern.
+	var cloned := world.intern_effect("no-such-effect-xyz")
+	assert_gt(cloned, 0, "unknown name clones stockeffect under the requested name")
+	assert_ne(cloned, handle, "the clone takes its own handle")
+	assert_eq(world.effect_name_for_handle(cloned), "no-such-effect-xyz",
+			"the clone registers under the REQUESTED name")
+	assert_eq(world.intern_effect("NO-SUCH-EFFECT-XYZ"), cloned,
+			"the cloned registration is stable and case-insensitive")
+
+
+func test_intern_unknown_without_stockeffect_returns_zero() -> void:
+	var world := _make_world()
+	world.load_particle_file(_make_short_effect_file())  # no stockeffect mounted
+	assert_eq(world.intern_effect("no-such-effect-xyz"), 0,
+			"unknown name with no mounted stockeffect stays 0 (no spawn)")
 
 
 func test_spawn_by_name_creates_emitters_and_sweep_expires() -> void:

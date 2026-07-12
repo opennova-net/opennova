@@ -112,48 +112,78 @@ Vec3 annular_axis_scales(Emitter &e, const ParticleDef &def) noexcept {
 	return {r0, r1, r2};
 }
 
+// Random direction within a half-angle cap around `axis`. The engine builds
+// these through the emitter vtable direction helpers
+// (CEffectEmitter_SetOrientationFromDirection @ 0x5e5b00 family); we build a
+// perpendicular basis and perturb — a square (yaw,pitch)-bounded cap,
+// equivalent for the corpus-typical half-angles.
+Vec3 random_direction_in_cap(Emitter &e, Vec3 axis, float half_angle_rad) noexcept {
+	const Vec3 forward = vec3_normalize(axis);
+	Vec3 seed_axis = std::abs(forward.x) > 0.9f ?
+			Vec3{0.0f, 1.0f, 0.0f} : Vec3{1.0f, 0.0f, 0.0f};
+	Vec3 up = vec3_normalize(vec3_cross(forward, seed_axis));
+	Vec3 right = vec3_cross(up, forward);
+	const float a = emitter_rand_signed(e) * half_angle_rad;
+	const float b = emitter_rand_signed(e) * half_angle_rad;
+	Vec3 dir{
+		forward.x + right.x * a + up.x * b,
+		forward.y + right.y * a + up.y * b,
+		forward.z + right.z * a + up.z * b,
+	};
+	return vec3_normalize(dir);
+}
+
 void apply_emission_shape(Emitter &e, const ParticleDef &def, Particle &p) noexcept {
-	// CParticleEmitter_SpawnParticle @ 0x5e7640 — switch on def.emit_shape.
+	// CParticleEmitter_SpawnParticle @ 0x5e7640 — switch on def.emit_shape
+	// (def+3924, read @ 0x5e78ef). Every shape displaces the spawn POSITION;
+	// velocity is seeded separately for ALL shapes (spread cone x speed, in
+	// emit_one_internal) — the earlier port wrote the annular scales into
+	// velocity, which turned hollow-shell spawn volumes into speed
+	// distributions.
 	const EmitShape shape = static_cast<EmitShape>(def.emit_shape);
 	switch (shape) {
 		case EmitShape::Point: {
-			// No shape impulse — particle spawns at emitter position with zero
-			// velocity (any subsequent velocity comes from spread / orbital
-			// scalars in the post-shape pass).
+			// No shape offset (engine switch default).
 			break;
 		}
 		case EmitShape::Box: {
-			// Engine case 1: pick one axis at random; assign a directed impulse
-			// of `±emit_shape_size[axis]` (sign = +1 when ONEFRAME flag is set,
-			// else `±1` from `rand() & 1`). Other axes get a small range
-			// perturbation `rand_signed × emit_shape_size_skip[k]`. Position-
-			// space, not velocity. The engine's exact form multiplies the
-			// chosen axis by a deg2rad constant — a coordinate-space quirk we
-			// intentionally elide; the resulting "one dominant axis, others
-			// inset" geometry matches engine intent.
+			// Engine case 1 [orig: SpawnParticle @ 0x5e7900..0x5e795e]: pick one
+			// dominant axis (rand % 3). Sign is random unless SIGNEDROTATIONS
+			// (0x800000) pins it positive [@ 0x5e790f]. The dominant axis
+			// starts at `sign * skip[axis] * 0.5` [@ 0x5e7939: the def+3940
+			// table * flt_7C3B94], then the per-axis loop adds:
+			//   - dominant axis: rand01 * (size[axis] - skip[axis]) * 0.5,
+			//     pushed OUTWARD (sign-matched to the accumulated component) —
+			//     total one-sided offset in [skip/2, size/2];
+			//   - other axes: rand_signed * size[axis] * 0.5.
+			// I.e. a hollow-box shell: inner half-extent skip/2, outer size/2.
 			const std::uint32_t axis = emitter_rand10(e) % 3u;
-			const float chosen_sign =
-					(def.flags & particle_flag::OneFrame) != 0 ? 1.0f :
+			const float sign =
+					(def.flags & particle_flag::SignedRotations) != 0 ? 1.0f :
 					((emitter_rand10(e) & 1u) != 0 ? 1.0f : -1.0f);
-			const float chosen_size = axis == 0 ? def.emit_shape_size.x :
-					axis == 1 ? def.emit_shape_size.y : def.emit_shape_size.z;
-			Vec3 offset{
-				emitter_rand_signed(e) * def.emit_shape_size_skip.x,
-				emitter_rand_signed(e) * def.emit_shape_size_skip.y,
-				emitter_rand_signed(e) * def.emit_shape_size_skip.z,
-			};
-			if (axis == 0) offset.x = chosen_sign * chosen_size;
-			else if (axis == 1) offset.y = chosen_sign * chosen_size;
-			else offset.z = chosen_sign * chosen_size;
-			p.position = vec3_add(p.position, offset);
+			const float size_a[3] = {def.emit_shape_size.x, def.emit_shape_size.y,
+					def.emit_shape_size.z};
+			const float skip_a[3] = {def.emit_shape_size_skip.x, def.emit_shape_size_skip.y,
+					def.emit_shape_size_skip.z};
+			float off[3] = {0.0f, 0.0f, 0.0f};
+			off[axis] = sign * skip_a[axis] * 0.5f;
+			for (std::uint32_t k = 0; k < 3; ++k) {
+				if (k == axis) {
+					const float grow = emitter_rand_unit(e) * (size_a[k] - skip_a[k]) * 0.5f;
+					off[k] += off[k] < 0.0f ? -grow : grow;
+				} else {
+					off[k] += emitter_rand_signed(e) * size_a[k] * 0.5f;
+				}
+			}
+			p.position = vec3_add(p.position, {off[0], off[1], off[2]});
 			break;
 		}
 		case EmitShape::Sphere: {
-			// Engine case 2: random unit direction, then per-axis annular
-			// `lerp(skip, size, rand)` magnitude → velocity. Hollow ellipsoidal
-			// shell with radial thickness `[skip, size]` per axis. Engine reads
-			// shape size from def[3928..]; magnitude is NOT def.speed (that is
-			// reserved for the WANDER move integrator).
+			// Engine case 2 [orig: SpawnParticle @ 0x5e7640 case 2]: random
+			// unit direction over the full sphere (the engine passes 360.0 =
+			// flt_7C3BA4 to its direction helper), each component scaled by the
+			// annular `lerp(skip, size, rand01)` per axis, added to POSITION —
+			// a hollow ellipsoidal spawn shell.
 			Vec3 unit{
 				emitter_rand_signed(e),
 				emitter_rand_signed(e),
@@ -161,36 +191,17 @@ void apply_emission_shape(Emitter &e, const ParticleDef &def, Particle &p) noexc
 			};
 			unit = vec3_normalize(unit);
 			const Vec3 r = annular_axis_scales(e, def);
-			p.velocity = {unit.x * r.x, unit.y * r.y, unit.z * r.z};
+			p.position = vec3_add(p.position, {unit.x * r.x, unit.y * r.y, unit.z * r.z});
 			break;
 		}
 		case EmitShape::Cone: {
-			// Engine case 3: vtable[+0x1C](this, &out_dir, dir, ...) builds a
-			// random direction within the cone's spread half-angle around the
-			// passed-in dir, then per-axis annular `lerp(skip, size, rand)`
-			// scales it into a velocity. We approximate by building a
-			// perpendicular basis off `Emitter::forward` and offsetting in
-			// (right, up) by a half-angle drawn from `def.spread` degrees.
-			const Vec3 forward = vec3_normalize(e.forward);
-			Vec3 right_axis = std::abs(forward.x) > 0.9f ?
-					Vec3{0.0f, 1.0f, 0.0f} : Vec3{1.0f, 0.0f, 0.0f};
-			Vec3 up = vec3_normalize(vec3_cross(forward, right_axis));
-			Vec3 right = vec3_cross(up, forward);
-			const float half_angle = def.spread * 0.0174533f;
-			const float yaw = emitter_rand_signed(e) * half_angle;
-			const float pitch = emitter_rand_signed(e) * half_angle;
-			// Small-angle direction perturbation: forward + yaw*right + pitch*up,
-			// normalized. Approximates a square (yaw,pitch)-bounded cone region
-			// — close to the engine's spherical-cap sampling for typical
-			// `def.spread` ≤ 30° and easier to reason about in tests.
-			Vec3 cone_dir{
-				forward.x + right.x * yaw + up.x * pitch,
-				forward.y + right.y * yaw + up.y * pitch,
-				forward.z + right.z * yaw + up.z * pitch,
-			};
-			cone_dir = vec3_normalize(cone_dir);
+			// Engine case 3 [orig: SpawnParticle @ 0x5e7640 case 3]: direction
+			// within a fixed 90-degree cap (flt_7DCBF0) around the emitter
+			// forward, annular per-axis magnitude, added to POSITION — a hollow
+			// hemispherical spawn cap.
+			const Vec3 dir = random_direction_in_cap(e, e.forward, 90.0f * 0.0174533f);
 			const Vec3 r = annular_axis_scales(e, def);
-			p.velocity = {cone_dir.x * r.x, cone_dir.y * r.y, cone_dir.z * r.z};
+			p.position = vec3_add(p.position, {dir.x * r.x, dir.y * r.y, dir.z * r.z});
 			break;
 		}
 	}
@@ -245,8 +256,10 @@ void integrate_particle(Particle &p, const ParticleDef &def, const Emitter &e, f
 		// emitter gravity slot here — gravity_mask is read ONLY in the
 		// GRAVITATE branch [orig: @ 0x5e6980; mask read at def+3916 sits
 		// inside the move&2 path]. Re-witnessed 2026-07-10 (was scaled by
-		// gravity_mask.y here before).
-		p.velocity.y -= def.gravity * dt;
+		// gravity_mask.y here before). The slot ADDS onto vel.y — authored
+		// `gravity` is a signed Y-up accel (negative sinks, positive lifts
+		// smoke); the earlier `-=` inverted every authored sign.
+		p.velocity.y += def.gravity * dt;
 	}
 
 	// Drag: exponential decay (1 - drag*dt) per axis. Engine writes
@@ -283,16 +296,20 @@ void integrate_particle(Particle &p, const ParticleDef &def, const Emitter &e, f
 		p.velocity = vec3_rotate_around_axis(p.velocity, axis, angle);
 	}
 
-	// The spawn-pop ramp: scale runs 0 -> 1 at 256/lifetime per second — full size
-	// within lifetime/256 s (2-12 ms for typical ages), a pop softener, NOT a
-	// whole-life growth. The prior 1/lifetime read made every particle spend its
-	// entire life under-sized (fire at ~1/3, smoke at ~1/15 — the invisible-effects
-	// bug). (engine: `*(extra+48) += *(extra+52) * dt`, clamp 1.)
-	p.scale += p.scale_velocity * dt;
-	if (p.scale > 1.0f) p.scale = 1.0f;
+	// Curve phase advances 0 -> 256 across the lifetime, unclamped — for
+	// NEVERAGE particles it keeps running and the renderer's `% 256` wraps the
+	// curves cyclically [orig: UpdateParticles @ 0x5e6980 — `+0x30 += +0x34 *
+	// dt`; BuildBillboardQuads @ 0x5e6d60 indexes `(int)phase % 256`]. The
+	// prior port misread this pair as a draw-size "spawn-pop ramp".
+	p.curve_phase += p.phase_rate * dt;
 
-	// Rotation accumulates at the per-particle rate.
+	// Euler angles accumulate at their per-particle rates. Roll drives the
+	// billboard spin; yaw/pitch only render for YAWANDPITCH defs
+	// [orig: the +0x3C += +0x40 form; yaw/pitch pairs in the emitter+0x150
+	// array via CParticleEmitter_UpdateAllParticles @ 0x5f3be0].
 	p.rotation += p.rotation_rate * dt;
+	p.yaw += p.yaw_rate * dt;
+	p.pitch += p.pitch_rate * dt;
 
 	// Kill-plane check. Engine: CParticleEmitter_UpdateParticles @ 0x5e6980
 	// reads `*(emitter+332)` as a `float*` threshold; def.flags bit 27
@@ -341,24 +358,74 @@ void emit_one_internal(Emitter &e, const ParticleDef &def) noexcept {
 		return;
 	}
 	Particle p{};
-	p.position = e.position;
-	p.lifetime = std::max(def.age + emitter_rand_unit(e) * def.age_adj, 1e-3f);
-	p.age = p.lifetime;
-	p.scale = 0.0f;
-	// [orig: CParticleEmitter_SpawnParticle @ 0x5e7892 — flt_7D1D70 (256.0) / age
-	//  into +0x34; the ramp saturates in lifetime/256 s]
-	p.scale_velocity = 256.0f / p.lifetime;
-	p.rotation = (def.yaw_rot + emitter_rand_unit(e) * def.yaw_rot_adj) * 0.0174533f;
-	p.rotation_rate = (def.roll_rot + emitter_rand_unit(e) * def.roll_rot_adj) * 0.0174533f;
-	p.alpha = static_cast<std::uint8_t>(clampf(def.alpha * 255.0f, 0.0f, 255.0f));
-	p.position.y += def.y_offset;
-	p.position.z += def.z_offset;
-	p.color_slot = static_cast<std::uint8_t>(pick_color_slot(e));
+	// Spawn order mirrors CParticleEmitter_SpawnParticle @ 0x5e7640.
 	p.graphic_layer = static_cast<std::uint8_t>(pick_graphic(e, def));
+	const GraphicLayer &layer = def.graphics[p.graphic_layer];
+	p.flags = compute_spawn_flags(def, p.graphic_layer);
+	// Base draw size, randomized once from the chosen graphic layer's
+	// scale/scale_adj (the layer inherits particle-level scale at parse)
+	// [orig: @ 0x5e7862 — rand_signed * graphic+332 + graphic+328 into +0x38].
+	p.size = layer.scale + emitter_rand_signed(e) * layer.scale_adj;
+	// Alpha comes from the chosen GRAPHIC's alpha (already def-inherited at
+	// parse), not the def's — [orig: @ 0x5e77a0: graphic+0x198 * 255].
+	p.alpha = static_cast<std::uint8_t>(clampf(layer.alpha * 255.0f, 0.0f, 255.0f));
+	p.lifetime = std::max(def.age + emitter_rand_signed(e) * def.age_adj, 1e-3f);
+	p.age = p.lifetime;
+	// Roll seed = orientation.z + orientationadj.z * rand01 (degrees; we store
+	// radians) [orig: @ 0x5e7803 — def+3824/+3836 into +0x3C]. Rate = roll_rot
+	// family with a random sign flip unless SIGNEDROTATIONS pins it
+	// [orig: @ 0x5e782a..0x5e7889 — def+3856/+3860, flag 0x800000 gate].
+	p.rotation = (def.orientation.z + emitter_rand_unit(e) * def.orientationadj.z) * 0.0174533f;
+	const float roll_sign =
+			(def.flags & particle_flag::SignedRotations) != 0 ? 1.0f :
+			((emitter_rand10(e) & 1u) != 0 ? 1.0f : -1.0f);
+	p.rotation_rate = (def.roll_rot * roll_sign +
+			emitter_rand_signed(e) * def.roll_rot_adj) * 0.0174533f;
+	// YAWANDPITCH particles additionally carry yaw/pitch Euler state (the
+	// engine's parallel array at emitter+0x150)
+	// [orig: CParticleEmitter_SpawnNewParticle @ 0x5f3663/0x5f36a5 —
+	// orientation.x/adj.x seed + yaw_rot-family rate; the pitch pair follows
+	// the same shape]. Same SIGNEDROTATIONS gate per rate.
+	if ((def.flags & particle_flag::YawAndPitch) != 0) {
+		p.yaw = (def.orientation.x + emitter_rand_unit(e) * def.orientationadj.x) * 0.0174533f;
+		const float yaw_sign =
+				(def.flags & particle_flag::SignedRotations) != 0 ? 1.0f :
+				((emitter_rand10(e) & 1u) != 0 ? 1.0f : -1.0f);
+		p.yaw_rate = (def.yaw_rot * yaw_sign +
+				emitter_rand_signed(e) * def.yaw_rot_adj) * 0.0174533f;
+		p.pitch = (def.orientation.y + emitter_rand_unit(e) * def.orientationadj.y) * 0.0174533f;
+		const float pitch_sign =
+				(def.flags & particle_flag::SignedRotations) != 0 ? 1.0f :
+				((emitter_rand10(e) & 1u) != 0 ? 1.0f : -1.0f);
+		p.pitch_rate = (def.pitch_rot * pitch_sign +
+				emitter_rand_signed(e) * def.pitch_rot_adj) * 0.0174533f;
+	}
+	// Curve phase starts at 0 and sweeps to 256 across the lifetime
+	// [orig: @ 0x5e788c/0x5e7898 — flt_7D1D70 (256.0) / age into +0x34, zero
+	// into +0x30]. This is the LUT index clock, not a draw-size ramp.
+	p.curve_phase = 0.0f;
+	p.phase_rate = 256.0f / p.lifetime;
+	// Spawn position: emitter + (0, y_offset, 0) [orig: @ 0x5e78a1 — only
+	// def+3724 lands in the position; z_offset is NOT positional — it becomes
+	// the render-side camera-ward pull (emitter+0x140, seeded -z_offset in
+	// CEffectEmitter_Initialize @ 0x5e6349)].
+	p.position = e.position;
+	p.position.y += def.y_offset;
+	p.color_slot = static_cast<std::uint8_t>(pick_color_slot(e));
 	p.color = color_for_slot(def, p.graphic_layer, p.color_slot);
 	p.serial = e.next_serial++;
-	p.flags = compute_spawn_flags(def, p.graphic_layer);
 	apply_emission_shape(e, def, p);
+	// Velocity: EVERY shape gets direction-in-spread-cone around the emitter
+	// forward, scaled by `speed + speed_adj * rand_signed`
+	// [orig: SpawnParticle @ 0x5e7640 post-switch block — the vtable direction
+	// helper, then the def+3892/+3896 multiply onto all three components;
+	// EMITVECTOR (0x10000) selects the alternate direction helper, an
+	// unported distinction].
+	if (def.speed != 0.0f || def.speed_adj != 0.0f) {
+		const float speed = def.speed + emitter_rand_signed(e) * def.speed_adj;
+		const Vec3 dir = random_direction_in_cap(e, e.forward, def.spread * 0.0174533f);
+		p.velocity = vec3_add(p.velocity, vec3_scale(dir, speed));
+	}
 	e.particles.push_back(p);
 }
 
