@@ -881,6 +881,11 @@ func test_short_lived_particle_preview_does_not_auto_repeat_after_selection() ->
 			"Finished one-shot previews should clear rendered particle batches.")
 
 	preview.restart()
+	# restart() un-pauses and warm-ups deterministically to the first alive
+	# frame; pause before yielding so the awaited frame's wall-clock delta
+	# (clamped 0.1s on a loaded runner) cannot age the flash out again — the
+	# same race the selection-path tests pause against.
+	preview.set_paused(true)
 	await get_tree().process_frame
 	assert_gt(preview.get_alive_count(), 0,
 			"Manual preview restart should still replay a completed one-shot particle.")
