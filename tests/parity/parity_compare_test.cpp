@@ -646,6 +646,76 @@ void entity_membership_is_compared_only_for_mutually_complete_pools() {
     CHECK(has_difference(report, "entities[bms:303].present"));
 }
 
+void stable_entity_ids_win_over_reordered_pool_slots() {
+    parity::Trace reference =
+        trace_with_frame(parity::SourceKind::retail, 100, 6200, 75, 80.0);
+    parity::Trace candidate =
+        trace_with_frame(parity::SourceKind::opennova, 700, 9000, 75, 80.0);
+
+    selected_frame(reference).entities[1].identity.pool = 0;
+    selected_frame(reference).entities[1].identity.slot = 11;
+    selected_frame(candidate).entities[1].identity.pool = 0;
+    selected_frame(candidate).entities[1].identity.slot = 10;
+    selected_frame(candidate).entities[0].identity.slot = 11;
+    selected_frame(reference).entities[0].identity.wire_handle = 10;
+    selected_frame(reference).entities[1].identity.wire_handle = 11;
+    selected_frame(candidate).entities[0].identity.wire_handle = 11;
+    selected_frame(candidate).entities[1].identity.wire_handle = 10;
+    for (parity::EntityState& entity : selected_frame(reference).entities) {
+        entity.identity.type_id = 5305;
+        entity.identity.name = "duplicate-weak-identity";
+    }
+    for (parity::EntityState& entity : selected_frame(candidate).entities) {
+        entity.identity.type_id = 5305;
+        entity.identity.name = "duplicate-weak-identity";
+    }
+
+    const parity::ComparisonReport report =
+        parity::compare_traces(reference, candidate);
+    CHECK(report.classification == parity::ComparisonClassification::mismatch);
+    CHECK(has_difference(report, "entities[bms:101].identity.slot"));
+    CHECK(has_difference(report, "entities[bms:202].identity.slot"));
+    CHECK(!has_difference(report, "entities[bms:101].health"));
+    CHECK(!has_difference(report, "entities[bms:202].health"));
+    CHECK(!has_difference(report, "entities[bms:101].present"));
+    CHECK(!has_difference(report, "entities[bms:202].present"));
+}
+
+void pool_slot_identity_is_reflexive_for_complete_pool_entities() {
+    parity::Trace trace =
+        trace_with_frame(parity::SourceKind::retail, 100, 6200, 75, 80.0);
+    parity::EntityIdentity& identity =
+        selected_frame(trace).entities[0].identity;
+    identity.wire_handle = 0;
+    identity.bms_id = 0;
+    identity.ssn = 0;
+    identity.net_id = 0;
+    identity.type_id.reset();
+    identity.name.clear();
+
+    const parity::ComparisonReport report = parity::compare_traces(trace, trace);
+    CHECK(report.classification == parity::ComparisonClassification::clean);
+}
+
+void duplicate_bms_ids_are_disambiguated_by_more_specific_identity() {
+    parity::Trace trace =
+        trace_with_frame(parity::SourceKind::opennova, 100, 6200, 75, 80.0);
+    parity::FrameSnapshot& snapshot = selected_frame(trace);
+    snapshot.entities[0].identity.pool = 0;
+    snapshot.entities[0].identity.slot = 16;
+    snapshot.entities[0].identity.bms_id = 10000;
+    snapshot.entities[0].identity.net_id = 512;
+    snapshot.entities[0].identity.name = "DevUser";
+    snapshot.entities[1].identity.pool = 0;
+    snapshot.entities[1].identity.slot = 17;
+    snapshot.entities[1].identity.bms_id = 10000;
+    snapshot.entities[1].identity.net_id = 33287;
+    snapshot.entities[1].identity.name = "cdouglass";
+
+    const parity::ComparisonReport report = parity::compare_traces(trace, trace);
+    CHECK(report.classification == parity::ComparisonClassification::clean);
+}
+
 }  // namespace
 
 int main() {
@@ -658,6 +728,9 @@ int main() {
     player_identity_fields_use_the_same_observation_policy();
     unavailable_optional_observations_are_coverage_not_zero_values();
     entity_membership_is_compared_only_for_mutually_complete_pools();
+    stable_entity_ids_win_over_reordered_pool_slots();
+    pool_slot_identity_is_reflexive_for_complete_pool_entities();
+    duplicate_bms_ids_are_disambiguated_by_more_specific_identity();
     std::printf("parity_compare: %s\n", failures == 0 ? "OK" : "FAILED");
     return failures == 0 ? 0 : 1;
 }

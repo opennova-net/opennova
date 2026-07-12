@@ -366,18 +366,64 @@ void compare_input(ComparisonReport& report,
                  options.normalized_angle_alignment_allowance_deg, Severity::error);
 }
 
-bool identities_match(const EntityIdentity& expected,
-                      const EntityIdentity& actual) {
-    if (expected.wire_handle != 0 && actual.wire_handle != 0 &&
-        expected.wire_handle == actual.wire_handle) return true;
+struct IdentityAffinity {
+    std::uint8_t persistent_matches{};
+    bool type_and_name_match{};
+    bool locator_match{};
+};
+
+IdentityAffinity identity_affinity(const EntityIdentity& expected,
+    const EntityIdentity& actual) {
+    IdentityAffinity affinity{};
     if (expected.bms_id > 0 && actual.bms_id > 0 &&
-        expected.bms_id == actual.bms_id) return true;
-    if (expected.ssn != 0 && actual.ssn != 0 && expected.ssn == actual.ssn) return true;
-    if (expected.net_id != 0 && actual.net_id != 0 && expected.net_id == actual.net_id) return true;
-    return expected.type_id.has_value() && actual.type_id.has_value() &&
-           *expected.type_id != 0 &&
-           expected.type_id == actual.type_id &&
-           !expected.name.empty() && expected.name == actual.name;
+        expected.bms_id == actual.bms_id) {
+        ++affinity.persistent_matches;
+    }
+    if (expected.ssn != 0 && actual.ssn != 0 &&
+        expected.ssn == actual.ssn) {
+        ++affinity.persistent_matches;
+    }
+    if (expected.net_id != 0 && actual.net_id != 0 &&
+        expected.net_id == actual.net_id) {
+        ++affinity.persistent_matches;
+    }
+    affinity.type_and_name_match =
+        expected.type_id.has_value() && actual.type_id.has_value() &&
+        *expected.type_id != 0 && expected.type_id == actual.type_id &&
+        !expected.name.empty() && expected.name == actual.name;
+    const bool wire_match =
+        expected.wire_handle != 0 && actual.wire_handle != 0 &&
+        expected.wire_handle == actual.wire_handle;
+    const bool pool_and_slot_match =
+        expected.pool >= 0 && actual.pool >= 0 &&
+        expected.slot >= 0 && actual.slot >= 0 &&
+        expected.pool == actual.pool && expected.slot == actual.slot;
+    affinity.locator_match = wire_match || pool_and_slot_match;
+    return affinity;
+}
+
+bool has_identity_affinity(const IdentityAffinity& affinity) {
+    return affinity.persistent_matches != 0 ||
+           affinity.type_and_name_match ||
+           affinity.locator_match;
+}
+
+bool stronger_identity_affinity(const IdentityAffinity& left,
+                                const IdentityAffinity& right) {
+    if (left.persistent_matches != right.persistent_matches) {
+        return left.persistent_matches > right.persistent_matches;
+    }
+    if (left.type_and_name_match != right.type_and_name_match) {
+        return left.type_and_name_match;
+    }
+    return left.locator_match && !right.locator_match;
+}
+
+bool equal_identity_affinity(const IdentityAffinity& left,
+                             const IdentityAffinity& right) {
+    return left.persistent_matches == right.persistent_matches &&
+           left.type_and_name_match == right.type_and_name_match &&
+           left.locator_match == right.locator_match;
 }
 
 std::string entity_label(const EntityIdentity& identity) {
@@ -541,11 +587,24 @@ bool compare_entities(ComparisonReport& report,
     std::vector<bool> matched(actual.size(), false);
     for (const EntityState& expected_entity : expected) {
         std::size_t found = actual.size();
+        IdentityAffinity best_affinity{};
+        bool ambiguous = false;
         for (std::size_t index = 0; index < actual.size(); ++index) {
-            if (matched[index] || !identities_match(expected_entity.identity, actual[index].identity)) continue;
-            if (found != actual.size()) return false;
-            found = index;
+            if (matched[index]) continue;
+            const IdentityAffinity affinity =
+                identity_affinity(expected_entity.identity,
+                                  actual[index].identity);
+            if (!has_identity_affinity(affinity)) continue;
+            if (found == actual.size() ||
+                stronger_identity_affinity(affinity, best_affinity)) {
+                found = index;
+                best_affinity = affinity;
+                ambiguous = false;
+            } else if (equal_identity_affinity(affinity, best_affinity)) {
+                ambiguous = true;
+            }
         }
+        if (ambiguous) return false;
         const std::string path = "entities[" + entity_label(expected_entity.identity) + "]";
         if (found == actual.size()) {
             if (is_complete(actual_complete_pools,

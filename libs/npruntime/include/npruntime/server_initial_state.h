@@ -32,6 +32,10 @@ struct InitialStateStep {
 	bool reached_in_game = false;               // emitted the world-stream terminator (game-state 9) this step
 };
 
+// Build the channel/rule flags snapshot advertised in ServerHello.P2 and repeated in the
+// initial-state server-config block. [orig: CNapiServerConfig_BuildFlags @0x4c4dc0]
+uint32_t build_server_config_flags(const NapiNPServerCtx &ctx);
+
 // Advance `conn.burst` by one phase step and return the message(s) to ship. Drive it once per frame
 // per non-spawned connection until reached_in_game. No-op (advanced=false) when ctx.world == nullptr,
 // the connection has not reached PlayerAdded, or its burst is already complete. Sets

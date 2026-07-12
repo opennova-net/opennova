@@ -276,6 +276,9 @@ void handle_client_hello(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// R1: advertise our real host key (seed-injected via SessionStartup) rather than
 	// build_server_hello's placeholder default, when one is set. The retail 0x81 carries host_key.
 	if (ctx.np_protocol.host_key != 0) reply.hk = ctx.np_protocol.host_key;
+	// Advertise the session's snapshotted transport/rule flags. A LAN browser requires the 0x100
+	// channel bit; build_server_hello's generic 0x404 default identifies a different channel.
+	reply.p2 = ctx.np_protocol.build_flags;
 	out.outbound.push_back(
 			nw_encode_outbound(SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(reply)));
 	HostAcceptEvent ev;

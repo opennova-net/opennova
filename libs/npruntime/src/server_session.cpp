@@ -1,5 +1,6 @@
 #include "npruntime/server_session.h"
 
+#include "npruntime/server_initial_state.h" // build_server_config_flags
 #include "npruntime/server_spawn.h" // Server_InitNewRoundState (§5.2a step 1)
 
 namespace opennova::np {
@@ -41,6 +42,9 @@ void create_session(NapiNPServerCtx &ctx, const GameConfig &config,
 	ctx.np_protocol.session_name = config.server_name; // "HOST STARTED \"%s\"" log name
 	ctx.np_protocol.max_players = config.max_players;
 	ctx.is_in_session = 1; // gates the whole replication loop (+0x58)
+	// The original snapshots CNapiServerConfig_BuildFlags into NapiNPProtocol before StartServer.
+	// ServerHello.P2 must advertise this value so a retail LAN browser accepts the discovered row.
+	ctx.np_protocol.build_flags = build_server_config_flags(ctx);
 
 	if (ctx.is_authority) {
 		start_server(ctx, startup);

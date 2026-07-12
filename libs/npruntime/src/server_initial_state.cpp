@@ -53,7 +53,7 @@ std::vector<uint8_t> serialize_server_name_map(const GameConfig &cfg) {
 }
 
 // [orig: CNapiServerConfig_BuildFlags @0x4c4dc0] The trailing flags dword of the 0x08 block.
-uint32_t build_server_config_flags(const NapiNPServerCtx &ctx) {
+uint32_t build_server_config_flags_impl(const NapiNPServerCtx &ctx) {
 	const GameConfig &r = ctx.config;   // rule-flag inputs (squad / perm-death / config_flag_*)
 	const GameConfig &gs = ctx.config;  // §6.4 game_settings inputs (passwords / game_type / mp_attributes)
 	uint32_t flags = 0;
@@ -503,6 +503,10 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 }
 
 } // namespace
+
+uint32_t build_server_config_flags(const NapiNPServerCtx &ctx) {
+	return build_server_config_flags_impl(ctx);
+}
 
 // [orig: Server_SendInitialGameStateToPlayer @0x51bba0]
 InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiNPConnection &conn,

@@ -644,6 +644,38 @@ bool run_character_join_vars_parsed() {
 	return true;
 }
 
+bool run_lan_hello_advertises_lan_channel() {
+	np::NapiNPServerCtx ctx;
+	np::GameConfig config;
+	config.game_type = 0x00010010u;
+	config.mp_attributes = 0x4u;
+	np::test::bring_up_host(ctx, np::ConnectionMode::HostOnly,
+	                        np::SocketMode::Lan, kHostKey, nullptr, config);
+
+	ClientHello client;
+	client.pn = "JOINTOPERATIONS";
+	client.ci = 2;
+	const auto request =
+		craft(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(client));
+	const PeerAddr peer{0x780AA8C0u, 32769};
+	const np::HandleResult result = np::handle_server_datagram(
+		ctx, peer, request.data(), request.size(), 1);
+	if (!expect(result.outbound.size() == 1,
+	            "LAN ClientHello receives one ServerHello")) return false;
+
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	if (!expect(nw_decode_inbound(result.outbound[0].data(),
+	                              result.outbound[0].size(), opcode, body) &&
+	            opcode == SESSION_OPCODE_SERVER_HELLO,
+	            "LAN discovery reply decodes as ServerHello")) return false;
+	ServerHello server;
+	if (!expect(parse_server_hello(body.data(), body.size(), server),
+	            "LAN ServerHello parses")) return false;
+	return expect(server.p2 == 0x00000904u,
+	              "LAN ServerHello P2 advertises the retail channel-2 flags");
+}
+
 } // namespace
 
 int main() {
@@ -658,5 +690,6 @@ int main() {
 	ok = run_retransmit_0x42_keeps_keys() && ok;
 	ok = run_capacity_rejects_when_full() && ok;
 	ok = run_character_join_vars_parsed() && ok;
+	ok = run_lan_hello_advertises_lan_channel() && ok;
 	return ok ? 0 : 1;
 }

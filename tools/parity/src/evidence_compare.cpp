@@ -213,6 +213,10 @@ bool finite_transform(const parity::EntityTransform& transform) {
            std::isfinite(transform.roll_deg);
 }
 
+bool has_available_position(const parity::EntityTransform& transform) {
+    return transform.x != 0.0 || transform.y != 0.0 || transform.z != 0.0;
+}
+
 bool has_meaningful_excursion(const parity::Trace& trace,
                               const CaptureInterval& interval,
                               std::string& detail) {
@@ -254,6 +258,9 @@ bool has_meaningful_excursion(const parity::Trace& trace,
             return false;
         }
         const auto& transform = *frame->player->transform;
+        if (!has_available_position(transform)) {
+            continue;
+        }
         const double dx = transform.x - anchor.x;
         const double dy = transform.y - anchor.y;
         const double dz = transform.z - anchor.z;

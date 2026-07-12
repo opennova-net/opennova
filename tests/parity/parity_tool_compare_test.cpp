@@ -298,12 +298,36 @@ void capture_start_anchor_is_strict_and_movement_is_required() {
     CHECK(error.find("movement excursion") != std::string::npos);
 }
 
+void zero_position_sentinel_does_not_prove_movement() {
+    const std::vector<Message> messages{{0x5a, "weapon-loadout"}};
+    const parity::Trace reference = trace(
+        parity::SourceKind::retail, "baseline-client", {28.0}, messages);
+    parity::Trace candidate = trace(parity::SourceKind::opennova,
+                                    "candidate-client",
+                                    {25.0, 25.0},
+                                    messages);
+    for (parity::Event& event : candidate.events) {
+        auto* snapshot = std::get_if<parity::FrameSnapshot>(&event);
+        if (snapshot != nullptr && snapshot->frame_index == 2) {
+            snapshot->player->transform->x = 0.0;
+            snapshot->player->transform->y = 0.0;
+            snapshot->player->transform->z = 0.0;
+        }
+    }
+
+    std::string output;
+    std::string error;
+    CHECK(compare(reference, candidate, output, error) == 3);
+    CHECK(error.find("movement excursion") != std::string::npos);
+}
+
 }  // namespace
 
 int main() {
     manual_paths_counts_capture_fields_and_raw_bytes_do_not_mismatch();
     semantic_phase_order_still_detects_a_mismatch();
     capture_start_anchor_is_strict_and_movement_is_required();
+    zero_position_sentinel_does_not_prove_movement();
     std::printf("parity_tool_compare: %s\n",
                 failures == 0 ? "OK" : "FAILED");
     return failures == 0 ? 0 : 1;
