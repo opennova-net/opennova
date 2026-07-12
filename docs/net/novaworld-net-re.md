@@ -5996,7 +5996,15 @@ kick += recoil.ds+de+counter+10 cap 20. **recoil** — THE ARBITER: at clip end
 rounds → next = burst ? FIRE : IDLE; else reserve ≥ clipSize×unitsPerRound &&
 auto-reload → RELOAD `@ 0x54301d`; else EMPTYIDLE + one-shot unscope + the def+0x168
 auto-switch (`Player_SwitchToWeaponByHandle(65×def+0x164)` `@ 0x54307c`); the
-held-trigger refire re-queues input binding 149 `@ 0x542e9d`. **reload** — first tick
+held-trigger refire is a DEFERRED RE-QUEUE, not a per-tick request: the closing
+recoil ticks (`counter <= 1` — the phase-4 delayend ticks, or ANY tick of a
+zero-length recoil, entry included) re-queue binding 149
+(`Input_QueueDeferredEvent(149, current_tick) @ 0x542e9d`), gated `owner==local &&
+rounds && Flags&0x100 && (char)burst<=0 && Input_IsBindingActive(149)` `@ 0x542e7f`
+— the dispatch lands in RequestFire before the next pump (RECOIL → next=FIRE). The
+ROUNDS gate kills the chain at an empty magazine, so the arbiter's queued RELOAD
+stands and the volley never resumes after an auto-reload without a fresh press
+edge. **reload** — first tick
 (phase bit0, no 0x80) sends C2S 0x25 (§5.58), phase|=0x80 (transient — the first shim
 tick overwrites 2), stashes the scope (`g_rescopeAfterReload = g_weaponScopeActive`
 unless Flags&0x40000) + unscopes; clip end → Finish(next=IDLE `push 0 @ 0x543169`),
@@ -6011,7 +6019,9 @@ on every shipped def; the ADS easing is the camera interp).
 fire = `WeaponSlot_RequestFire @ 0x53efa0` (ex `sub_53EFA0`; via
 `Player_RequestPrimaryFire @ 0x5414c0`, ex the kong-misnamed
 `Terrain_UpdateColorInterpolation`) — AUTO (Flags&0x100): current {0,3,9,10}→FIRE,
-{1}→EMPTY, {2}→deferred re-queue; SEMI: {0}→FIRE, {1}→EMPTY; charge weapons
+{1}→EMPTY, {2}→deferred re-queue (`Input_QueueDeferredEvent @ 0x53effd` — the loop
+self-sustains while FIRE is current, so a mid-FIRE press banks ONE follow-up shot
+through the recoil dispatch even if released); SEMI: {0}→FIRE, {1}→EMPTY; charge weapons
 (Flags&0x80000000) hold-release via `g_fireChargeStartTick @ 0xB76800` (≥31 ticks
 scales the charge, binding 150). reload = `WeaponSlot_RequestReload @ 0x53f110`
 (phase sign clear && queued next ∈ {0,1,11}); the key case 0xD3 pre-gates clip ≠
@@ -6046,7 +6056,7 @@ reload/one-shot forced unscope + the pump's rescope. Live-verified (fp_clean_pro
 recoil clip), reload refill 24→30 with reserve 300→294 (the §5.58 refund math),
 mid-reload RMB refused, ADS engage fraction→1 with cam fov 80h→40h, disengage clean.
 
-**Divergences** (ledger D-WPN-1..12): the FUNCTION registry unported (std-only in all
+**Divergences** (ledger D-WPN-1..13): the FUNCTION registry unported (std-only in all
 shipped data, D-WPN-1); single-pool ammo vs per-class pools (D-WPN-2); CanFire's
 busy-child/underwater/score-lock legs + kick sound gate (D-WPN-3); the heat model
 (`WeaponSlot_CalcAccumulatedHeat @ 0x53f780` internals unwitnessed, D-WPN-4); the
@@ -6067,7 +6077,17 @@ branch `@0x53f88b`. **D-WPN-12** [integration divergence, FIXED 2026-07-11] acti
 presentation crossed the sim/host boundary as a latest-value snapshot plus serials;
 several fixed catch-up ticks before one present pass overwrote distinct payloads and
 the host consumed a serial jump as one edge. Replaced by the ordered destructive event
-batch above; snapshot serials remain diagnostic/rebuild state.
+batch above; snapshot serials remain diagnostic/rebuild state. **D-WPN-13** [reimpl
+divergence, FIXED 2026-07-12] the port ran held auto fire as a per-tick
+`request_fire` re-request where the original sustains the volley through the recoil
+window's rounds-gated deferred re-queue (`@ 0x542e7f..0x542e9d`) — at an empty
+magazine the ungated re-request overwrote the recoil arbiter's queued RELOAD every
+tick, so a held trigger never auto-reloaded and the FSM thrashed FIRE↔RECOIL at
+31 Hz replaying the recoil row's soundset/particle (REVVY M4: SHELLDROP + the muzzle
+flash strobing on a dry gun). Fixed by porting the witnessed chain: a
+`refire_queued` slot latch (the deferred-event queue) written by the recoil window
+and by RequestFire's mid-FIRE re-queue (`@ 0x53effd`), consumed as the fire request
+one tick later.
 
 **The delaystart/delayend grill (2026-07-10, PR #219 validation).** Re-witnessed the
 delay pipeline end to end: parse (`delaystart` → +36, `delay`/`delayend` → +40 — the
@@ -6084,6 +6104,19 @@ counter==0 with phase 1/2 the pump still runs the handler (LABEL_118 `@ 0x5414a2
 so a {ds 0, de 0} action finishes on its entry tick — shipped data leans on this
 (every JO fire row is `delaystart 0` + explicit `delayend`; the AK's cadence is the
 fire delayend + recoil {0,0}).
+
+**The held-refire grill (2026-07-12, the PR #226 REVVY M4 fix round).** The REVVY
+`WPN_M4AUTO` (fire {0,3} → recoil {0,0}, the standard retail shape) wedged at
+clip-empty under a held trigger — root-caused to D-WPN-13 above and fixed by porting
+the deferred-refire chain verbatim. The volley cadence is unchanged and now derived,
+not invented: fire delayend N → an (N+2)-tick cycle (shot tick + N counter ticks +
+the zero-length recoil pass whose re-queue dispatches the following tick) — REVVY M4
+{0,3} = 5 ticks = 750 rpm, JOX AK {0,6} = 8 ticks ≈ 469 rpm. Behavioral corollaries
+now pinned in ctest `weapon_fsm` (empty-mag held auto-reload with no FIRE↔RECOIL
+thrash + no post-reload resume; the mid-FIRE banked tap; held-empty dry-click
+silence — clicks are per press EDGE, the input dispatch is edge-based): a held
+trigger alone never re-requests fire; every sustained volley is the recoil window's
+re-queue loop.
 
 **IDB (2026-07-10 session).** Renamed: `ActionDef_GetCurrent @ 0x401ef0` (ex
 `sub_401EF0` — returns the open ActionDef), `g_currentActionDef @ 0xA2E8E8`,

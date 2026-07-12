@@ -45,17 +45,21 @@ void set_row(WeaponFsmActionRow &row, const char *name, const char *anim, int32_
     row.delayend = de;
 }
 
-// The JOX AK-47-shaped def: idle (delayend auto), fire (0/0), recoil (delaystart auto,
-// anim_wpn_fire), reload (delayend auto), empty (0/auto), auto-fire flags.
+// The JOX AK-47 def shape (weapon "WPN_AK47AUTO" rows): idle/emptyidle {0, auto},
+// fire {0, 6} carrying the cadence, recoil {0, 0} — the zero-length pass-through
+// arbiter with a real anim (retail recoils carry no delays; a delaystart-carried
+// recoil never ships and would not sustain the refire chain) — reload/empty
+// {0, auto}, auto-fire flags.
 WeaponFsmDef make_ak_def() {
-    WeaponFsmActionRow rows[5];
+    WeaponFsmActionRow rows[6];
     set_row(rows[0], "idle", "anim_wpn_idle", 0, -1);
-    set_row(rows[1], "fire", "anim_wpn_idle", 0, 0);
-    set_row(rows[2], "recoil", "anim_wpn_fire", -1, 0);
-    set_row(rows[3], "reload", "anim_wpn_reload", 0, -1);
-    set_row(rows[4], "empty", "anim_wpn_empty", 0, -1);
+    set_row(rows[1], "emptyidle", "anim_wpn_idle", 0, -1);
+    set_row(rows[2], "fire", "anim_wpn_fire", 0, 6);
+    set_row(rows[3], "recoil", "anim_wpn_recoil", 0, 0);
+    set_row(rows[4], "reload", "anim_wpn_reload", 0, -1);
+    set_row(rows[5], "empty", "anim_wpn_empty", 0, -1);
     WeaponFsmDef def;
-    weapon_fsm_bake(rows, 5, clip_resolves, clip_seconds, nullptr, def);
+    weapon_fsm_bake(rows, 6, clip_resolves, clip_seconds, nullptr, def);
     def.auto_fire = true;
     def.clip_capacity = 30;
     return def;
@@ -83,11 +87,11 @@ void test_bake() {
     CHECK(def.actions[wa::kIdle].delay_start == 0);
     CHECK(def.actions[wa::kIdle].delay_end == 64);
     CHECK(def.actions[wa::kIdle].has_anim);
-    // recoil: ds auto -> 7 ticks (anim_wpn_fire); de explicit 0.
-    CHECK(def.actions[wa::kRecoil].delay_start == 7);
+    // recoil: explicit {0, 0} — the witnessed retail shape; the anim still binds.
+    CHECK(def.actions[wa::kRecoil].delay_start == 0);
     CHECK(def.actions[wa::kRecoil].delay_end == 0);
-    CHECK(std::strcmp(def.actions[wa::kRecoil].anim_key, "anim_wpn_fire") == 0);
-    // absent rows (scopeup/scopedown/overheated/emptyidle...) bake to zero-length.
+    CHECK(std::strcmp(def.actions[wa::kRecoil].anim_key, "anim_wpn_recoil") == 0);
+    // absent rows (scopeup/scopedown/overheated...) bake to zero-length.
     CHECK(def.actions[wa::kScopeUp].delay_start == 0);
     CHECK(def.actions[wa::kScopeUp].delay_end == 0);
     CHECK(!def.actions[wa::kScopeUp].has_anim);
@@ -138,11 +142,14 @@ void test_fire_chains_recoil() {
     CHECK(s.next == wa::kRecoil);    // [orig: @ 0x542c9e unconditional]
     CHECK(s.kick > 0);
     in.fire_pressed = false;
+    in.fire_held = false;
+    for (int t = 0; t < 6; ++t) weapon_fsm_tick(def, s, in, ev); // the delayend window
+    CHECK(s.current == wa::kFire);   // still counting the fire row's delayend
     weapon_fsm_tick(def, s, in, ev); // FIRE(done) -> RECOIL
     CHECK(s.current == wa::kRecoil);
-    // The recoil anim (anim_wpn_fire) starts on its entry tick.
+    // The recoil anim starts on its entry tick.
     CHECK(ev.play_anim);
-    CHECK(std::strcmp(ev.anim_key, "anim_wpn_fire") == 0);
+    CHECK(std::strcmp(ev.anim_key, "anim_wpn_recoil") == 0);
 }
 
 void test_auto_refire_cadence() {
@@ -158,11 +165,11 @@ void test_auto_refire_cadence() {
         in.fire_pressed = false;
         if (ev.fired) ++fired;
     }
-    // Recoil ds = 7 ticks; the full cycle fire->recoil->fire is 9 ticks
-    // (entry tick + 7 counter ticks + the re-queued transition tick), so a 100-tick
-    // hold lands 11-12 shots. The pin is the CADENCE (clip-length-driven), not an
-    // invented rate.
-    CHECK(fired >= 10 && fired <= 13);
+    // fire {0, 6}: the shot tick + 6 delayend ticks + the recoil pass whose deferred
+    // re-queue dispatches on the following tick = a deterministic 8-tick cycle ->
+    // shots at t=0,8,...,96 = 13 in a 100-tick hold. The pin is the witnessed refire
+    // chain (recoil re-queue -> next-tick dispatch), not an invented rate.
+    CHECK(fired == 13);
     CHECK(s.clip == 30 - fired);
 }
 
@@ -198,10 +205,10 @@ void test_revx_m4_zero_recoil_auto_cadence() {
         if (ev.fired) ++fired;
         if (ev.action_finished == wa::kFire) ++fire_ends;
     }
-    // fire entry + 3 counter ticks + the zero-length recoil pass = a 5-6 tick
-    // cycle -> 16-20 shots in 100 ticks. A wedge (0-2 shots) or a runaway
-    // (>25) are the failure modes this pins.
-    CHECK(fired >= 14 && fired <= 22);
+    // fire entry + 3 counter ticks + the zero-length recoil pass (refire re-queued on
+    // its entry tick, dispatched the next) = a deterministic 5-tick cycle -> shots at
+    // t=0,5,...,95 = 20 in 100 ticks, each with the per-shot end leg.
+    CHECK(fired == 20);
     CHECK(fire_ends == fired);
     CHECK(s.clip == 30 - fired);
 }
@@ -261,19 +268,88 @@ void test_empty_clip_paths() {
         if (s.current == wa::kEmptyIdle) saw_emptyidle = true;
     }
     // Clip spent, no reserve -> EMPTYIDLE (the fire-abort adopts CanFire's queued 1
-    // [orig: @ 0x541cb9]; the recoil arbiter lands the same [orig: @ 0x543036]). A held
-    // trigger then oscillates EMPTYIDLE <-> EMPTY (repeated dry clicks
-    // [orig: WeaponSlot_RequestFire {1} -> 5]).
+    // [orig: @ 0x541cb9]; the recoil arbiter lands the same [orig: @ 0x543036]). The
+    // refire chain died with the rounds [orig: the re-queue @ 0x542e9d is
+    // rounds-gated], so the held trigger goes SILENT — dry clicks need fresh press
+    // edges (binding 149 dispatches on edges, not per-tick).
     CHECK(s.clip == 0);
     CHECK(saw_emptyidle);
     CHECK(s.current == wa::kEmptyIdle || s.current == wa::kEmpty);
-    bool saw_empty_click = false;
+    bool held_click = false;
     for (int t = 0; t < 20; ++t) {
         WeaponFsmEvents ev;
-        weapon_fsm_tick(def, s, in, ev);
-        saw_empty_click |= ev.dry_fired;
+        weapon_fsm_tick(def, s, in, ev); // still held, no new edge
+        held_click |= ev.dry_fired;
     }
-    CHECK(saw_empty_click);
+    CHECK(!held_click);
+    // A fresh press edge lands ONE dry click [orig: WeaponSlot_RequestFire {1} -> 5].
+    int clicks = 0;
+    for (int t = 0; t < 20; ++t) {
+        WeaponFsmEvents ev;
+        in.fire_pressed = (t == 0);
+        weapon_fsm_tick(def, s, in, ev);
+        if (ev.dry_fired) ++clicks;
+    }
+    CHECK(clicks == 1);
+}
+
+void test_empty_clip_held_auto_reload() {
+    // THE REVVY M4 wedge (grilled 2026-07-12): hold the trigger through the whole
+    // magazine. The last shot's recoil arbitration queues RELOAD; the refire chain is
+    // dead (the ROUNDS gate [orig: @ 0x542e7f]), so nothing overwrites it — the
+    // auto-reload runs WHILE the trigger is held, with no FIRE<->RECOIL thrash. (The
+    // pre-fix port's per-tick held re-request overwrote the queued RELOAD every tick:
+    // the gun never reloaded and the recoil row's soundset/particle spammed at 31 Hz.)
+    // After the reload the volley does NOT resume until a fresh press edge.
+    WeaponFsmDef def = make_ak_def();
+    WeaponSlotState s = make_ak_slot();
+    s.clip = 2;
+    s.reserve = 300;
+    WeaponFsmInputs in;
+    in.auto_reload = true;
+    in.fire_pressed = true;
+    in.fire_held = true;
+    int fired = 0, recoil_starts = 0;
+    bool applied = false;
+    for (int t = 0; t < 200; ++t) {
+        WeaponFsmEvents ev;
+        weapon_fsm_tick(def, s, in, ev);
+        in.fire_pressed = false;
+        if (ev.fired) ++fired;
+        if (ev.action_started == wa::kRecoil) ++recoil_starts;
+        applied |= ev.reload_applied;
+    }
+    CHECK(fired == 2);             // the volley stopped at the empty clip
+    CHECK(applied);                // the auto-reload ran despite the held trigger
+    CHECK(recoil_starts == 2);     // one recoil per shot — no empty-mag thrash
+    CHECK(s.clip == 30);           // refilled
+    CHECK(s.current == wa::kIdle); // settled idle, NOT firing
+    // A fresh press edge restarts the volley from the refilled magazine.
+    WeaponFsmEvents ev;
+    in.fire_pressed = true;
+    weapon_fsm_tick(def, s, in, ev);
+    CHECK(ev.fired);
+    CHECK(s.current == wa::kFire);
+}
+
+void test_tap_during_fire_banks_one() {
+    // A fire press landing DURING the FIRE delayend window re-queues as a deferred
+    // event; the loop self-sustains through the FIRE ticks and the recoil dispatch
+    // banks exactly ONE follow-up shot — even though the trigger is already released
+    // when the recoil runs. [orig: WeaponSlot_RequestFire case FIRE @ 0x53effd
+    // re-queues; the RECOIL dispatch consumes -> next = FIRE]
+    WeaponFsmDef def = make_ak_def();
+    WeaponSlotState s = make_ak_slot();
+    WeaponFsmInputs in;
+    int fired = 0;
+    for (int t = 0; t < 60; ++t) {
+        WeaponFsmEvents ev;
+        in.fire_pressed = (t == 0 || t == 3); // tap, tap-mid-FIRE-window
+        weapon_fsm_tick(def, s, in, ev);
+        if (ev.fired) ++fired;
+    }
+    CHECK(fired == 2);
+    CHECK(s.current == wa::kIdle); // the bank is one shot deep, then the volley dies
 }
 
 void test_auto_reload_from_recoil() {
@@ -584,6 +660,8 @@ int main() {
     test_semi_no_auto_refire();
     test_burst3();
     test_empty_clip_paths();
+    test_empty_clip_held_auto_reload();
+    test_tap_during_fire_banks_one();
     test_auto_reload_from_recoil();
     test_reload_scope_stash();
     test_reload_request_gate();

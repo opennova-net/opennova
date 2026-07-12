@@ -163,15 +163,22 @@ struct WeaponSlotState {
     // Scope stash across a reload: reload unscoped us, rescope when it completes.
     // [orig: g_rescopeAfterReload @ 0xB7647C; write @ 0x54312f, consume @ 0x54139e]
     bool rescope_after_reload = false;
+    // The deferred fire re-queue — the port's slot for the original's
+    // Input_QueueDeferredEvent(149, current_tick) events: set by the recoil window's
+    // refire and by a mid-FIRE fire request, consumed as a fire request by the NEXT
+    // tick's input stage (the deferred dispatch runs before the pump).
+    // [orig: Input_QueueDeferredEvent @ 0x4993e0; writers @ 0x542e9d / @ 0x53effd]
+    bool refire_queued = false;
 };
 
 // Per-tick inputs (the input-dispatcher writers run before the pump).
 struct WeaponFsmInputs {
     bool fire_pressed = false;  // the binding-149 activation edge
                                 // [orig: Player_RequestPrimaryFire @ 0x5414c0]
-    bool fire_held = false;     // held state; autos re-request per tick and the recoil
-                                // arbiter re-queues on it [orig: Input_IsBindingActive(149)
-                                // @ 0x542e7f]
+    bool fire_held = false;     // held state — polled ONLY by the recoil window's
+                                // deferred refire; held auto fire is the re-queue
+                                // chain, never a per-tick re-request
+                                // [orig: Input_IsBindingActive(149) @ 0x542e7f]
     bool reload_pressed = false; // the reload-key edge (case 0xD3 gates applied by caller)
     bool is_local = true;        // owner == g_local_player_entity paths
     bool is_authority = true;    // listen-host/SP: reload requests apply immediately
@@ -207,8 +214,9 @@ struct WeaponFsmEvents {
 
 // Request writers (the input-dispatcher sites).
 // [orig: WeaponSlot_RequestFire @ 0x53efa0] AUTO (Flags&0x100): current {0,3,9,10} ->
-// next=FIRE, {1} -> next=EMPTY, {2} -> deferred re-queue (the per-tick held re-request
-// covers it); SEMI: {0} -> FIRE, {1} -> EMPTY. Returns true when a fire was queued.
+// next=FIRE, {1} -> next=EMPTY, {2} -> re-queues the deferred fire event (the
+// refire_queued latch [orig: @ 0x53effd]); SEMI: {0} -> FIRE, {1} -> EMPTY. Returns
+// true when a fire was queued.
 bool weapon_fsm_request_fire(const WeaponFsmDef &def, WeaponSlotState &slot);
 // [orig: WeaponSlot_RequestReload @ 0x53f110] next {0,1,11} and no reload pending
 // (phase sign bit) -> next = RELOAD.

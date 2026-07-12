@@ -218,8 +218,7 @@ void handler_fire(const WeaponFsmDef &def, const WeaponFsmAction &desc,
 
 // [orig: WpnAction_Recoil @ 0x542dd0] THE ARBITER: when the recoil clip ends, decide
 // refire (burst), idle, auto-reload, or emptyidle; the held-trigger auto refire is the
-// per-tick fire re-request (the original re-queues input binding 149 here
-// [orig: @ 0x542e9d]).
+// deferred re-queue of input binding 149 in the window below [orig: @ 0x542e9d].
 void handler_recoil(const WeaponFsmDef &def, const WeaponFsmAction &desc,
                     WeaponSlotState &slot, const WeaponFsmInputs &in,
                     WeaponFsmEvents &out) {
@@ -227,8 +226,17 @@ void handler_recoil(const WeaponFsmDef &def, const WeaponFsmAction &desc,
     begin_active(desc, slot, in, out);         // [orig: ExecuteActionTick @ 0x542e2a]
     if (slot.phase == weapon_phase::kDone ||
         (desc.delay_start == 0 && desc.delay_end == 0)) {
-        // (the deferred-event refire block sits here in the original; the port's
-        //  held re-request covers it)
+        // The deferred-refire window — the auto-fire sustainer: the closing ticks of
+        // the recoil (counter <= 1 on the post-arbitration delayend ticks, or any tick
+        // of a zero-length recoil) re-queue the still-held fire binding as a deferred
+        // input event; the next tick's dispatch routes it into RequestFire (RECOIL ->
+        // next = FIRE). The ROUNDS gate kills the chain on an empty magazine, so the
+        // arbiter's queued RELOAD stands and the volley does NOT resume after the
+        // auto-reload without a fresh press.
+        // [orig: @ 0x542e7f..0x542e9d Input_QueueDeferredEvent(149, current_tick)]
+        if (slot.counter <= 1 && in.is_local && rounds && def.auto_fire &&
+            static_cast<int8_t>(slot.burst) <= 0 && in.fire_held)
+            slot.refire_queued = true;
         if (desc.delay_start != 0 || desc.delay_end != 0) return; // [orig: @ 0x542eae]
     }
     if (slot.counter != 0) return; // [orig: @ 0x542eb7]
@@ -522,8 +530,11 @@ bool weapon_fsm_request_fire(const WeaponFsmDef &def, WeaponSlotState &slot) {
                 slot.next = weapon_action::kEmpty;
                 return false;
             case weapon_action::kFire:
-                // deferred re-queue in the original; the per-tick held re-request
-                // covers it.
+                // A fire request landing mid-FIRE re-queues itself as a deferred
+                // event — the loop self-sustains until a state that accepts the
+                // dispatch consumes it (RECOIL banks the shot, even if the trigger
+                // was already released). [orig: @ 0x53effd Input_QueueDeferredEvent]
+                slot.refire_queued = true;
                 return false;
             default:
                 return false;
@@ -583,10 +594,15 @@ void weapon_fsm_tick(const WeaponFsmDef &def, WeaponSlotState &slot,
     out = WeaponFsmEvents{};
 
     // Input-dispatcher writers run before the frame pump [orig: the input layer
-    // dispatches binding events ahead of WeaponAction_ProcessAllEntities in the frame].
+    // dispatches binding events ahead of WeaponAction_ProcessAllEntities in the
+    // frame]. Held-trigger auto fire is NOT a per-tick re-request: the press edge
+    // starts the volley and the recoil window's deferred re-queue sustains it,
+    // consumed here one tick after it was queued — the deferred dispatch
+    // [orig: Input_QueueDeferredEvent @ 0x4993e0 -> WeaponSlot_RequestFire @ 0x53efa0].
     if (in.reload_pressed) weapon_fsm_request_reload(slot);
-    if (in.fire_pressed || (def.auto_fire && in.fire_held))
-        weapon_fsm_request_fire(def, slot);
+    const bool fire_request = in.fire_pressed || slot.refire_queued;
+    slot.refire_queued = false; // consumed (RequestFire may re-queue it mid-FIRE)
+    if (fire_request) weapon_fsm_request_fire(def, slot);
 
     // --- the pump tail [orig: WeaponAction_ProcessFrame @ 0x541262..0x5414ac] -----
 
