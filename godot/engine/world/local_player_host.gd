@@ -69,6 +69,7 @@ var PLAYER_VIEWMODEL_ROT_BIAS_DEF := Vector3(5.0, 3.75, 353.0)
 # layer, composited over the finished frame (the depth-remap's visible equivalent).
 var PLAYER_VIEWMODEL_RENDERFOV_H_DEG := 80.0
 const VIEWMODEL_PASS_NEAR := 0.05
+const WEAPON_TICK_DT := 1.0 / 62.5
 
 var _world
 var _camera: Camera3D
@@ -94,10 +95,6 @@ var _vm_camera: Camera3D = null
 # BOTH viewmodel parts (arms + gun share the animadm), and places nodes.
 var _vm_parts: Array = []           # NovaObjectModel parts under the viewmodel container
 var _weapon_play_serial := -1
-var _weapon_action_serial := -1     # action-begin drain; -1 adopts the first snapshot
-                                    # silently (viewmodel rebuilds must not refire sounds)
-var _weapon_action_end_serial := -1 # action-END drain (soundsetend — the per-shot
-                                    # gunshot / reload-complete legs); same adopt rule
 var _weapon_view: PlayerWeaponView = null  # this tick's FSM view (body channel rides it)
 var _fire_was_held := false
 var _reload_was_down := false
@@ -139,6 +136,11 @@ func setup(world, camera: Camera3D) -> void:
 	# guards make the deferred call a no-op after teardown()/double setup().
 	_build_viewmodel_pass.call_deferred()
 	_reset_state()
+	# Attachment is the adoption boundary: discard presentation history produced
+	# before this host existed. Every event produced after setup is live, including
+	# a first-tick shot before the first active snapshot is presented.
+	if _world != null and _world.has_method("drain_local_player_weapon_events"):
+		_world.drain_local_player_weapon_events()
 
 
 func teardown() -> void:
@@ -303,6 +305,10 @@ func after_world_tick() -> void:
 		_set_fly_camera_locked(false)
 		_release_mouse_capture()
 		_clear_models()
+		if _world != null and _world.has_method("drain_local_player_weapon_events"):
+			_world.drain_local_player_weapon_events()
+		_weapon_play_serial = -1
+		_weapon_view = null
 		_view = null
 		return
 	_view = _world.local_player_view() if _world.has_method("local_player_view") else null
@@ -310,8 +316,9 @@ func after_world_tick() -> void:
 	_update_player_camera()
 
 
-# Drain the FSM's clip events (a monotonic serial - several 62.5 Hz ticks can run
-# per frame): clip starts land on BOTH viewmodel parts. The scope side effects
+# Drain the FSM's ordered per-tick presentation batch: several 62.5 Hz ticks can
+# run per frame, and every clip/begin/end payload must survive. Clip starts land on
+# BOTH viewmodel parts and resume at their age within the catch-up batch. Scope side effects
 # (forced unscope, rescope-after-reload) flip the SIM's own engaged bit — they
 # arrive here already folded into the view snapshot.
 # [orig: ActionSlot_BeginActivePhase @0x53f830 plays the action clip on the owner's
@@ -319,23 +326,30 @@ func after_world_tick() -> void:
 func _consume_weapon_view() -> void:
 	if _world == null or not _world.has_method("local_player_weapon_view"):
 		return
+	var events: Array[PlayerWeaponEvent] = []
+	if _world.has_method("drain_local_player_weapon_events"):
+		events = _world.drain_local_player_weapon_events()
 	var view: PlayerWeaponView = _world.local_player_weapon_view()
 	_weapon_view = view
 	if view == null:
+		_weapon_play_serial = -1
 		return
+	var batch_started_clip := false
+	for event in events:
+		if not event.anim_key.is_empty():
+			_play_viewmodel_clip(event.anim_key, event.anim_variant, event.age_ticks)
+			batch_started_clip = true
+		if event.action_started >= 0:
+			_fire_action_effects(event)
+		if event.action_finished >= 0:
+			_fire_action_end_sound(event)
+	if batch_started_clip:
+		_weapon_play_serial = view.play_serial
+	# First adoption and a fresh viewmodel both synchronize to the latest snapshot,
+	# but never replay the snapshot's historical sound/effect payloads.
 	if view.play_serial != _weapon_play_serial:
 		_weapon_play_serial = view.play_serial
 		_play_viewmodel_clip(view.anim_key, view.anim_variant)
-	if view.action_serial != _weapon_action_serial:
-		var adopt_only := _weapon_action_serial < 0
-		_weapon_action_serial = view.action_serial
-		if not adopt_only:
-			_fire_action_effects(view)
-	if view.action_end_serial != _weapon_action_end_serial:
-		var end_adopt := _weapon_action_end_serial < 0
-		_weapon_action_end_serial = view.action_end_serial
-		if not end_adopt:
-			_fire_action_end_sound(view)
 
 
 # The action-begin SOUND leg: play the started ACTION's soundset 3D-positional at the
@@ -344,16 +358,15 @@ func _consume_weapon_view() -> void:
 # original's paired MUZZLE leg (ActionSlot_SpawnEffect @0x401f20 at the row's
 # particle + userpoint, with the FIRE-only / !scoped-FP / no-local-casings routing
 # [orig: ActionSlot_ExecuteActionTick @0x541a70] and the slot+24 one-live-group guard
-# [orig: @0x5418c8]) rides the particles slice with the effect world itself. Several
-# 62.5 Hz ticks can land in one frame; like the clip drain above, the last started
-# action wins the frame.
-func _fire_action_effects(view: PlayerWeaponView) -> void:
+# [orig: @0x5418c8]) rides the particles slice with the effect world itself. The
+# ordered event batch preserves each begin leg when several ticks land in one frame.
+func _fire_action_effects(event: PlayerWeaponEvent) -> void:
 	if _world == null:
 		return
-	if not view.action_soundset.is_empty() and _world.has_method("get_mission_audio"):
+	if not event.action_soundset.is_empty() and _world.has_method("get_mission_audio"):
 		var audio = _world.get_mission_audio()
 		if audio != null:
-			audio.fire_soundset(view.action_soundset, _world.local_player_position())
+			audio.fire_soundset(event.action_soundset, event.world_position)
 
 
 # The action-END sound leg: the finished ACTION's soundsetend, 3D-positional at the
@@ -361,14 +374,14 @@ func _fire_action_effects(view: PlayerWeaponView) -> void:
 # [orig: ActionSlot_FinishActivePhase @0x53f7b0 -> the end shim @0x401100 plays
 #  ActionDef+12 at the owner entity, gated on the phase byte being 2 (ACTIVE); its
 #  dupsound repeat loop (+44/+48) is data-dead in the JOX/REVX corpora]
-func _fire_action_end_sound(view: PlayerWeaponView) -> void:
-	if _world == null or view.action_end_soundset.is_empty():
+func _fire_action_end_sound(event: PlayerWeaponEvent) -> void:
+	if _world == null or event.action_end_soundset.is_empty():
 		return
 	if not _world.has_method("get_mission_audio"):
 		return
 	var audio = _world.get_mission_audio()
 	if audio != null:
-		audio.fire_soundset(view.action_end_soundset, _world.local_player_position())
+		audio.fire_soundset(event.action_end_soundset, event.world_position)
 
 
 # Start an FSM clip on every viewmodel part (arms + gun share the animadm) - a replay
@@ -376,7 +389,7 @@ func _fire_action_end_sound(view: PlayerWeaponView) -> void:
 # same-key resume. `variant` is the sim ring's latched serve for multi-clip .adm
 # rows — both parts follow the ONE latch, so arms and gun never split variants
 # [orig: AnimMap_PlayAnimBySlot @0x40bda0 latches the served entry at animState+68].
-func _play_viewmodel_clip(key: String, variant: int = 0) -> void:
+func _play_viewmodel_clip(key: String, variant: int = 0, age_ticks: int = 0) -> void:
 	if key.is_empty():
 		return
 	for part in _vm_parts:
@@ -387,7 +400,7 @@ func _play_viewmodel_clip(key: String, variant: int = 0) -> void:
 		else:
 			part.play_body_clip(key)
 		if part.has_method("set_animation_time"):
-			part.set_animation_time(0.0)
+			part.set_animation_time(float(maxi(age_ticks, 0)) * WEAPON_TICK_DT)
 
 
 # Edge-triggered gameplay keys. F4 toggles first/third person [orig: g_camera_mode
@@ -440,6 +453,11 @@ func _reset_state() -> void:
 	_third_person = false
 	_crouch = false
 	_prone = false
+	_weapon_play_serial = -1
+	_weapon_view = null
+	_fire_was_held = false
+	_reload_was_down = false
+	_scope_was_down = false
 	_view = null
 	_sync_camera_mode()
 

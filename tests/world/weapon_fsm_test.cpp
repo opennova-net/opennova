@@ -422,6 +422,24 @@ void test_action_sound_legs() {
     CHECK(ev.action_finished == wa::kFire); // the per-shot GS_* leg
 }
 
+void test_held_replay_skips_the_begin_sound_leg() {
+    // The held-ready branch replays only the animation. It deliberately skips the
+    // begin sound/ctrlreg legs [orig: ActionSlot_BeginActivePhase @ 0x53f88b].
+    WeaponFsmDef def = make_ak_def();
+    std::snprintf(def.actions[wa::kIdle].soundset,
+                  sizeof(def.actions[wa::kIdle].soundset), "%s", "GS_MUST_NOT_PLAY");
+    WeaponSlotState s = make_ak_slot();
+    s.current = wa::kIdle;
+    s.next = wa::kIdle;
+    s.phase = weapon_phase::kHeld;
+    s.counter = 2;
+    WeaponFsmInputs in;
+    WeaponFsmEvents ev;
+    weapon_fsm_tick(def, s, in, ev);
+    CHECK(ev.play_anim);
+    CHECK(ev.action_started == -1);
+}
+
 void test_fire_abort_finishes_silently() {
     // A CanFire refusal finishes from phase 1 (never ACTIVE) -> no end-leg sound.
     // [orig: @ 0x542b5e finish; the phase==2 latch @ 0x53f7b9 stays false]
@@ -572,6 +590,7 @@ int main() {
     test_scope_queue();
     test_idle_plays_once_per_entry();
     test_action_sound_legs();
+    test_held_replay_skips_the_begin_sound_leg();
     test_fire_abort_finishes_silently();
     test_reload_end_leg();
     test_keep_scope_reload_class();

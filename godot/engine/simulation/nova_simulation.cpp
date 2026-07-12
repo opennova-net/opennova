@@ -172,6 +172,11 @@ NovaSimulation::NovaSimulation() {
 }
 
 void NovaSimulation::reset_world() {
+	pending_weapon_events_.clear();
+	weapon_active_ = false;
+	weapon_fire_held_ = false;
+	weapon_fire_pressed_ = false;
+	weapon_reload_pressed_ = false;
 	world_ = std::make_unique<World>();
 	ai_ = std::make_unique<AiSystem>();
 	bms_ = std::make_unique<opennova::mission::BmsEventSystem>();
@@ -832,6 +837,7 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_local_player_view"), &NovaSimulation::get_local_player_view);
 	ClassDB::bind_static_method("NovaSimulation", D_METHOD("fov_vertical_from_horizontal", "fov_h_deg", "aspect"), &NovaSimulation::fov_vertical_from_horizontal);
 	ClassDB::bind_method(D_METHOD("get_local_player_weapon_state"), &NovaSimulation::get_local_player_weapon_state);
+	ClassDB::bind_method(D_METHOD("drain_local_player_weapon_events"), &NovaSimulation::drain_local_player_weapon_events);
 	ClassDB::bind_method(D_METHOD("get_local_player_health"), &NovaSimulation::get_local_player_health);
 	ClassDB::bind_method(D_METHOD("get_local_player_max_health"), &NovaSimulation::get_local_player_max_health);
 	ClassDB::bind_method(D_METHOD("get_local_player_team"), &NovaSimulation::get_local_player_team);
@@ -1498,6 +1504,9 @@ int NovaSimulation::weapon_ring_take_variant(const String &p_key) {
 void NovaSimulation::set_local_player_weapon(const Dictionary &p_def,
 		const Dictionary &p_clip_seconds) {
 	using opennova::world::WeaponFsmActionRow;
+	// A mount is a new presentation epoch: no payload from the previous weapon may
+	// cross this seam, even though its strings were copied into the pending records.
+	pending_weapon_events_.clear();
 	// Mirror the weapon dict's ACTION rows into the def-agnostic bake inputs.
 	std::vector<WeaponFsmActionRow> rows;
 	const Array actions = p_def.get("actions", Array());
@@ -1608,6 +1617,10 @@ void NovaSimulation::set_local_player_weapon(const Dictionary &p_def,
 
 void NovaSimulation::clear_local_player_weapon() {
 	weapon_active_ = false;
+	pending_weapon_events_.clear();
+	weapon_fire_held_ = false;
+	weapon_fire_pressed_ = false;
+	weapon_reload_pressed_ = false;
 	weapon_clip_rings_.clear();
 	weapon_anim_variant_ = 0;
 	player_view_.scope_engaged = false;
@@ -1730,6 +1743,9 @@ void NovaSimulation::tick_local_player_weapon() {
 	opennova::world::weapon_fsm_tick(weapon_def_, weapon_slot_, in, ev);
 	weapon_fire_pressed_ = false; // edges consume on the first tick of the frame
 	weapon_reload_pressed_ = false;
+	PendingWeaponEvent pending;
+	pending.tick = world_->logic_tick;
+	bool has_presentation_event = false;
 	if (ev.play_anim) {
 		++weapon_play_serial_;
 		weapon_anim_key_ = String::utf8(ev.anim_key);
@@ -1738,13 +1754,24 @@ void NovaSimulation::tick_local_player_weapon() {
 		// [orig: AnimMap_PlayAnimBySlot @ 0x40bda0 advances the head and latches
 		//  the served entry at animState+68].
 		weapon_anim_variant_ = weapon_ring_take_variant(weapon_anim_key_);
+		pending.anim_key = weapon_anim_key_;
+		pending.anim_variant = weapon_anim_variant_;
+		has_presentation_event = true;
 	}
 	if (ev.action_started >= 0) {
-		// The begin leg's sound/muzzle seam: the host resolves the started action's
-		// soundset/particle from the state dict on the serial edge
+		// Copy the begin leg while this def is mounted; a later weapon switch cannot
+		// change the queued sound/effect payload.
 		// [orig: ActionSlot_ExecuteActionWithEffect @ 0x541860].
 		++weapon_action_serial_;
 		weapon_action_started_ = ev.action_started;
+		pending.action_started = ev.action_started;
+		if (ev.action_started < opennova::world::weapon_action::kCount) {
+			const opennova::world::WeaponFsmAction &act = weapon_def_.actions[ev.action_started];
+			pending.action_soundset = String::utf8(act.soundset);
+			pending.action_particle = String::utf8(act.particle);
+			pending.action_particle_userpoint = String::utf8(act.particle_userpoint);
+		}
+		has_presentation_event = true;
 	}
 	if (ev.action_finished >= 0) {
 		// The END leg: the finished action's soundsetend — fire rows carry the gunshot
@@ -1752,6 +1779,18 @@ void NovaSimulation::tick_local_player_weapon() {
 		// [orig: ActionSlot_FinishActivePhase @ 0x53f7b0 -> the end shim @ 0x401100].
 		++weapon_action_end_serial_;
 		weapon_action_finished_ = ev.action_finished;
+		pending.action_finished = ev.action_finished;
+		if (ev.action_finished < opennova::world::weapon_action::kCount) {
+			pending.action_end_soundset =
+					String::utf8(weapon_def_.actions[ev.action_finished].soundsetend);
+		}
+		has_presentation_event = true;
+	}
+	// Preserve the retail call order within one pump: clip start, begin leg, then
+	// finish leg. Records themselves stay in logic-tick order until the host drains.
+	if (has_presentation_event) {
+		pending.world_position = get_local_player_position();
+		pending_weapon_events_.push_back(std::move(pending));
 	}
 	if (ev.fired) {
 		++weapon_fired_serial_;
@@ -1801,8 +1840,9 @@ Dictionary NovaSimulation::get_local_player_weapon_state() const {
 	out["anim_key"] = weapon_anim_key_;
 	out["anim_variant"] = weapon_anim_variant_;
 	out["play_serial"] = static_cast<int64_t>(weapon_play_serial_);
-	// The last-started action's audio/effect legs (valid while action_serial holds;
-	// the host drains on the serial edge) [orig: ActionSlot_ExecuteActionWithEffect
+	// The last-started action's audio/effect legs remain useful snapshot diagnostics;
+	// ordered delivery uses drain_local_player_weapon_events().
+	// [orig: ActionSlot_ExecuteActionWithEffect
 	// @ 0x541860 -> ActionSlot_SpawnEffect @ 0x401f20].
 	out["action_serial"] = static_cast<int64_t>(weapon_action_serial_);
 	if (weapon_action_started_ >= 0 &&
@@ -1818,8 +1858,8 @@ Dictionary NovaSimulation::get_local_player_weapon_state() const {
 		out["action_particle"] = String();
 		out["action_particle_userpoint"] = String();
 	}
-	// The END-leg seam: the finished action's soundsetend on its own serial edge — fire
-	// rows carry the per-shot gunshot here (GS_*), reload rows the completion sound
+	// The latest END-leg snapshot diagnostic: fire rows carry the per-shot gunshot
+	// here (GS_*), reload rows the completion sound. Ordered delivery uses the batch.
 	// [orig: ActionSlot_FinishActivePhase @ 0x53f7b0 -> the end shim @ 0x401100 plays
 	//  ActionDef+12 at the owner entity].
 	out["action_end_serial"] = static_cast<int64_t>(weapon_action_end_serial_);
@@ -1858,6 +1898,28 @@ Dictionary NovaSimulation::get_local_player_weapon_state() const {
 			out["body_anim_phase"] = p->inf.wpn_clip_phase;
 		}
 	}
+	return out;
+}
+
+Array NovaSimulation::drain_local_player_weapon_events() {
+	Array out;
+	const uint32_t now = world_ ? world_->logic_tick : 0;
+	for (const PendingWeaponEvent &event : pending_weapon_events_) {
+		Dictionary row;
+		// Unsigned subtraction intentionally preserves age across logic-tick wrap.
+		row["age_ticks"] = static_cast<int64_t>(now - event.tick);
+		row["world_position"] = event.world_position;
+		row["anim_key"] = event.anim_key;
+		row["anim_variant"] = event.anim_variant;
+		row["action_started"] = event.action_started;
+		row["action_soundset"] = event.action_soundset;
+		row["action_particle"] = event.action_particle;
+		row["action_particle_userpoint"] = event.action_particle_userpoint;
+		row["action_finished"] = event.action_finished;
+		row["action_end_soundset"] = event.action_end_soundset;
+		out.push_back(row);
+	}
+	pending_weapon_events_.clear();
 	return out;
 }
 
@@ -1900,6 +1962,7 @@ String NovaSimulation::get_local_player_weapon_name() const {
 
 void NovaSimulation::restart() {
 	if (!loaded_ || !have_baseline_) return;
+	pending_weapon_events_.clear();
 	world_->restore(baseline_); // rewinds registry/vars/env/clock + re-inits systems (incl. AI;
 	                            // WacSystem::on_load also resets its 62-tick accumulator)
 }

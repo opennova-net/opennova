@@ -924,6 +924,18 @@ func local_player_weapon_view() -> PlayerWeaponView:
 	return PlayerWeaponView.from_state_dict(sim.get_local_player_weapon_state())
 
 
+## Destructively drain the equipped FSM's ordered presentation batch, decoding the
+## C++ transport Dictionaries at this one adapter edge (ADR 0017).
+func drain_local_player_weapon_events() -> Array[PlayerWeaponEvent]:
+	var out: Array[PlayerWeaponEvent] = []
+	var sim := get_sim()
+	if sim == null:
+		return out
+	for row in sim.drain_local_player_weapon_events():
+		out.append(PlayerWeaponEvent.from_event_dict(row as Dictionary))
+	return out
+
+
 ## The resolved weapon.def record driving the FP viewmodel: model/adm names plus the
 ## witnessed view-bias fields (pos/tpos raw units + rot degrees, renderfov horizontal
 ## degrees) LocalPlayerHost consumes — decoded from NovaWeaponDatabase's transport dict

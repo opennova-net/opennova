@@ -5955,15 +5955,17 @@ counter +0, clip u16 +0x10, rate/muzzle-flash tick +0x14, Def +0x20, owner +0x24
 currentAction +0x2C, nextAction +0x30, prevAction +0x34, switchTimer +0x58 (i16),
 phase +0x5A, kickIntensity +0x5B, charge +0x5C, flags +0x5E (bit0 = the §5.16 net-fire
 pose latch, bit1 = FP), burstCounter +0x62. Phase protocol: a transition writes
-phase=1 + counter=newDesc.delayStart; the handler's first tick flips 1(|0x40)→2 and
-**starts the action's clip on the equipped WeaponDef's own adm channel
+phase=1 + counter=newDesc.delayStart; the handler's first tick flips 1→2, **starts
+the action's clip on the equipped WeaponDef's own adm channel
 (`WeaponDef+0x174`, the FP viewmodel rig) — local player only** (CORRECTED 2026-07-09:
 the earlier "owner's animadm" reading; the 3P body's weapon layer is a separate
 producer, world-wac-ai-re.md §14.8)
 [orig: `ActionSlot_BeginActivePhase @ 0x53f830`; the effect shims
 `@ 0x541860`/`@ 0x5419e0` write the same protocol and same play target — they differ
 only in muzzle/particle spawning, forked by `ActionSlot_ExecuteActionTick @ 0x541a70`
-on third person / vehicle-attack / remoteness]; `ActionSlot_FinishActivePhase
+on third person / vehicle-attack / remoteness]. The held-ready phase 0x40 also
+flips to 2 and replays the clip, but skips the begin sound/ctrlreg/effect leg
+(`@0x53f88b`; normal phase-1 begin sound `@0x53f873`). `ActionSlot_FinishActivePhase
 @ 0x53f7b0(desc, slot, entity, next)` sets counter=delayEnd, nextAction=arg4, the
 ACTIVE→DONE kick bump (skipped for RELOAD), phase=4. Pump tail per tick: kick decay;
 overheat deny (heat > 0xFFFF converts a queued FIRE to EMPTY `@ 0x541046`); the IDLE
@@ -6031,18 +6033,20 @@ fire→recoil chain, auto cadence, semi edge, burst-3, empty paths, auto-reload 
 `libs/def` parses `scope_max_mag` (+ the `whileswimming` flag-table length fixed:
 13, not 14 — the token never matched); `NovaWeaponDatabase` surfaces
 flags/scope_max_mag/actions; `NovaSimulation` pumps the LOCAL player's slot once per
-logic tick after the world advances (all four paths) and exposes typed-record state
-(serial counters); `GameWorld` bakes from the resolved weapon dict + the loaded
-viewmodel's clip lengths; `LocalPlayerHost` feeds LMB/R/RMB through the world-tick
-input path, plays FSM clips on BOTH viewmodel parts (restart via
-`set_animation_time(0)`), and realizes ADS: the eased pos→tpos view bias
+logic tick after the world advances (all four paths), keeps latest-value snapshot
+serials for diagnostics/rebuild, and appends each tick's clip/begin/end payload to an
+ordered destructive event batch with `age_ticks`; `GameWorld` bakes from the resolved
+weapon dict + the loaded viewmodel's clip lengths and types the drained records;
+`LocalPlayerHost` feeds LMB/R/RMB through the world-tick input path, drains every event
+in order, plays FSM clips on BOTH viewmodel parts at their catch-up age, and realizes
+ADS: the eased pos→tpos view bias
 (15-tick fraction), the main-camera FOV 80h → 80/mag h→v through the live aspect,
 reload/one-shot forced unscope + the pump's rescope. Live-verified (fp_clean_probe
 `NOVA_VM_FSM=1`, JOX 05TR): 6-shot auto burst (clip 30→24, ~9-tick cadence from the
 recoil clip), reload refill 24→30 with reserve 300→294 (the §5.58 refund math),
 mid-reload RMB refused, ADS engage fraction→1 with cam fov 80h→40h, disengage clean.
 
-**Divergences** (ledger D-WPN-1..10): the FUNCTION registry unported (std-only in all
+**Divergences** (ledger D-WPN-1..12): the FUNCTION registry unported (std-only in all
 shipped data, D-WPN-1); single-pool ammo vs per-class pools (D-WPN-2); CanFire's
 busy-child/underwater/score-lock legs + kick sound gate (D-WPN-3); the heat model
 (`WeaponSlot_CalcAccumulatedHeat @ 0x53f780` internals unwitnessed, D-WPN-4); the
@@ -6056,7 +6060,14 @@ stricmp (`AnimMap_FindSlotByName @ 0x40cfa0`) — on JOTAC-era data (base localr
 RevX02 author `ANIM_WPN_*` uppercase; the .adm stores `anim_wpn_*` lowercase) every
 `auto` delaystart/delayend collapsed to 0 and `has_anim` died, so the viewmodel
 played no weapon-action clips (JOX's lowercase rows masked it). Fixed to
-`nocasecmp_to`.
+`nocasecmp_to`. **D-WPN-11** [reimpl divergence, FIXED 2026-07-11] `begin_active`
+treated phase 0x40 as a normal phase-1 entry and emitted `action_started`, replaying
+begin sound/effects; split to match `ActionSlot_BeginActivePhase`'s anim-only held
+branch `@0x53f88b`. **D-WPN-12** [integration divergence, FIXED 2026-07-11] action
+presentation crossed the sim/host boundary as a latest-value snapshot plus serials;
+several fixed catch-up ticks before one present pass overwrote distinct payloads and
+the host consumed a serial jump as one edge. Replaced by the ordered destructive event
+batch above; snapshot serials remain diagnostic/rebuild state.
 
 **The delaystart/delayend grill (2026-07-10, PR #219 validation).** Re-witnessed the
 delay pipeline end to end: parse (`delaystart` → +36, `delay`/`delayend` → +40 — the
@@ -6114,7 +6125,8 @@ sound fields and the engine plays them at different phase edges:
   edge (`ActionSlot_BeginActivePhase @ 0x53f873`, `..ExecuteActionWithEffect @ 0x5418b0
   / @ 0x541976`, `..ExecuteActionNoEffect @ 0x541a2a`) — 3D at the owner entity
   (`Entity_PlaySound3D_FullVolume @ 0x528e20`; local uses entity+4 position directly).
-  The plain-Begin held-variant (0x40) plays anim only, no sound `@ 0x53f88b`.
+  The plain-Begin held-variant (0x40) plays anim only, no sound `@ 0x53f88b`
+  (D-WPN-11, fixed in the port 2026-07-11).
 - **End leg** — `soundsetend` → `ActionDef+12`. Played by the end shim `@ 0x401100`
   (ex kong "ActionSlot_RenderModelWithLOD" — a misnomer; its "LOD loop" is the
   `dupsound` repeat scheduler) from `ActionSlot_FinishActivePhase @ 0x53f7d6`, gated
@@ -6155,9 +6167,16 @@ sound fields and the engine plays them at different phase edges:
   `Underwater 0x4` / entity swim `0x8000` vs `Env_WaterHeightFixed`), and the empty leg
   writing `slot+48` = 3 (reserve) / 1 — the port's `can_fire_ammo` shape.
 
-Port row: `WeaponFsmEvents.action_finished` (emitted in `finish_active` on the
-was-ACTIVE edge) → `NovaSimulation` `action_end_serial`/`action_end_soundset` →
-`LocalPlayerHost._fire_action_end_sound`; the begin-leg SOUND drains the same way.
+Port row: each tick's `WeaponFsmEvents` clip/begin/end payload is copied into
+`NovaSimulation`'s ordered event batch → `GameWorld.drain_local_player_weapon_events`
+types and destructively drains it → `LocalPlayerHost` consumes every record in order.
+Each record carries `age_ticks` and the production-tick position, so a clip emitted early
+in a multi-tick catch-up starts at its correct presentation age and 3D sounds retain their
+tick-local origin. Snapshot serials
+remain available for diagnostics and viewmodel rebuild, but are not the event-delivery
+mechanism (D-WPN-12). `action_finished` is still emitted only by `finish_active` on the
+was-ACTIVE edge; the begin-leg SOUND follows `action_started`, except held-ready 0x40
+which replays only the animation (D-WPN-11).
 The particle legs (the `@ 0x541a70` routing gates, `spawn_effect_unless_alive` /
 the slot+24 guard) ride the particles slice with `NovaEffectWorld` itself. ctest
 `weapon_fsm` pins both legs + the silent abort; GUT `local_player_host_test` pins
@@ -8484,4 +8503,3 @@ other observer decodes. FIXED: `resolve_item_traits` caches the Player-template 
 the structural port of the retail spawn init. Pinned by player_spawn + two_peer_fanout (spawn
 byte 0x28). LIVE-VERIFIED retail-join v16/v18 (2026-07-02): the joiner's field-17 reads the
 golden 0x28 on the wire; diff_0a header health = 150 matches golden.
-

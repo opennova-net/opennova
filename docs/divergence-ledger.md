@@ -222,6 +222,8 @@ the ref-32 discard was a misport, now deleted (env-tod-re.md #34).
 | D-WPN-8 | FSM↔net uplink unwired: the fired event does not emit C2S 0x06 nor spawn rounds through world::RoundSim, and a joiner's reload_requested does not send C2S 0x25 / await the S2C 0x49 refill (the authority path is complete and zero-latency) (net-re §5.62, §5.16, §5.58) | A | OPEN (rides the npruntime in-match integration) | PAR-WORLD |
 | D-WPN-9 | ADS residuals: zoom-level adjust keys (`Player_AdjustWeaponZoomLevel @0x4dbcc0`), the scope-state C2S 0x1D notify, stance (parentSlot 2/5) + NVG gates, the mid-ease movement reversal + auto-re-raise legs (`@0x4df548`/`@0x4df5ae`/`@0x4df607` — need the engaged/active/hipfire tri-state), the HandGunUp (0x4000000) auto-follow leg (`@0x4de444`, player-flag writer unwalked) (net-re §5.62, §5.41) | A | OPEN (landed: toggle/tpos-ease/FOV/rescope, the SIGHTS card, the 7-step Inset interp, unscope-on-move + the scope-up move refusal + the ForceScoped toggle pin — the weapon round) | PAR-WORLD |
 | D-WPN-10 | Host clip-key lookup was case-SENSITIVE (`NovaSkeletalAnim::find_clip` exact ==) where the original resolves anim names with stricmp (`AnimMap_FindSlotByName @0x40cfa0`, name+5 `anim_` skip): JOTAC-era weapon.def rows author `ANIM_WPN_*` uppercase vs the .adm's lowercase clip keys, so every `auto` delaystart/delayend collapsed to 0 and no weapon-action clip played on JOTAC/RevX02 mounts (JOX's lowercase rows masked it) (net-re §5.62) | A | FIXED 2026-07-10 (`nocasecmp_to`) | PAR-WORLD |
+| D-WPN-11 | The FSM's held-ready phase (0x40) reused the normal begin leg and emitted `action_started`, replaying begin sound/effects; retail's `ActionSlot_BeginActivePhase` plays sound/ctrlreg only on phase 1 (`@0x53f873`) while the held branch replays the animation only (`@0x53f88b`) (net-re §5.62) | A | FIXED 2026-07-11 (held replay no longer emits the begin event) | PAR-WORLD |
+| D-WPN-12 | Weapon presentation events crossed the sim/host seam as one latest-value snapshot plus serials; a `MissionRuntime` catch-up could run several fixed ticks before one present pass, overwriting distinct clips/begin/end sounds and collapsing the serial jump to one host edge. The single host consumer now drains an ordered per-tick event batch with `age_ticks` and the production position; snapshot serials remain diagnostic/rebuild state (net-re §5.62) | A | FIXED 2026-07-11 (ordered destructive event drain) | PAR-WORLD |
 | D-EVT-1 | Spawn-point activation on fire: fully witnessed (POI/deploy list `0xB76570`, marker @0x452ce0, +0x210/+0x217/+0x218 authoring) — rides the deploy/POI subsystem port | A | WITNESSED-READY-DEFERRED | PAR-WORLD |
 | D-EVT-3 | Residual after the TriggerRelations port (state + evaluators + recounts + alert stamps + damage-site SHOT writes landed): the acquisition/fire-time write quads ride the combat pass, motor visited marks ride D-INF-2, sub 11 needs the held-object link; cat-2 alert/count + 42-45 subs unwitnessed | A | WITNESSED-READY-DEFERRED (write-sites) + NEEDS-RE (cat-2 subs) | PAR-WORLD |
 
@@ -575,7 +577,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 |---|---|---|---|---|---|
 | Net | 11 | 1 | 11 | 23 | 0 |
 | Environment | 0 | 0 | 3 | 3 | 3 |
-| World / AI + events | 12 | 1 | 6 | 19 | 2 |
+| World / AI + events | 12 | 1 | 6 | 19 | 4 |
 | UI (menu/ctrl/sound/playerinfo/HUD) | 8 | 2 | 5 | 15 | 5 |
 | Mission `.mis` | 0 | 2 | 1 | 3 | 0 |
 | LW `.3di` | 0 | 2 | 1 | 3 | 0 |
@@ -590,7 +592,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Render — materials/state | 0 | 0 | 1 | 1 | 1 |
 | Render — draw order | 1 | 0 | 1 | 2 | 3 |
 | Render — lighting | 4 | 0 | 2 | 6 | 0 |
-| **Total** | **44** | **13** | **31** | **88** | 26 |
+| **Total** | **44** | **13** | **31** | **88** | 28 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-FOLIAGE-6, D-NET-136, D-NET-64.
 

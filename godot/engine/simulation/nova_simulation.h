@@ -184,8 +184,9 @@ private:
 	// world advances [orig: WeaponAction_ProcessAllEntities @ 0x542690 in the frame loop;
 	// this port pumps the LOCAL player's slot only — D-WPN-6]. The host feeds the baked def
 	// via set_local_player_weapon and per-frame trigger state via
-	// set_local_player_weapon_input; events surface as monotonic serials in
-	// get_local_player_weapon_state (several logic ticks can run per render frame).
+	// set_local_player_weapon_input. Presentation outputs accumulate as ordered
+	// per-tick records because several logic ticks can run per render frame; the
+	// snapshot's monotonic serials remain diagnostics/rebuild state.
 	opennova::world::WeaponFsmDef weapon_def_{};
 	opennova::world::WeaponSlotState weapon_slot_{};
 	bool weapon_active_ = false;
@@ -227,6 +228,22 @@ private:
 	// [orig: ActionSlot_FinishActivePhase @ 0x53f7b0 -> the end shim @ 0x401100].
 	uint64_t weapon_action_end_serial_ = 0;
 	int weapon_action_finished_ = -1;
+	// One tick's presentation payload, copied while the mounted def and variant-ring
+	// result are still authoritative. A host frame drains these records in tick order;
+	// the tick stamp lets delayed clip starts resume at the correct playhead.
+	struct PendingWeaponEvent {
+		uint32_t tick = 0;
+		Vector3 world_position;
+		String anim_key;
+		int anim_variant = 0;
+		int action_started = -1;
+		String action_soundset;
+		String action_particle;
+		String action_particle_userpoint;
+		int action_finished = -1;
+		String action_end_soundset;
+	};
+	std::vector<PendingWeaponEvent> pending_weapon_events_;
 	float weapon_scope_max_mag_ = 0.0f; // def scope_max_mag (0 = key absent)
 	// The mounted def's 3P body-channel kinds (special_hold / attack_anim; 0 = rifle)
 	// plus the resolved AnimMap identity. The serial advances only when that AnimMap
@@ -471,11 +488,13 @@ public:
 	// Horizontal -> vertical projection fov (degrees) through the aspect — the
 	// ONE conversion both cameras use [orig: @ 0x58d900].
 	static float fov_vertical_from_horizontal(float p_fov_h_deg, float p_aspect);
-	// The FSM view for the host: {active, current, anim_key, play_serial,
-	// fired_serial, dry_serial, reload_serial, unscope_serial, rescope_serial,
-	// clip, reserve, kick}. Serials are monotonic so no event is lost when several
-	// logic ticks run per render frame.
+	// The FSM snapshot for the host: latest clip/action payloads, diagnostic serials,
+	// ammo, kick, and the 3P body channel. Ordered presentation events drain through
+	// drain_local_player_weapon_events(); the snapshot alone is not an event queue.
 	Dictionary get_local_player_weapon_state() const;
+	// Destructively drain the ordered presentation outputs accumulated since the
+	// previous host frame. Each Dictionary encodes one PlayerWeaponEvent.
+	Array drain_local_player_weapon_events();
 
 	// --- WAC scripts ------------------------------------------------------
 	// Install a compiled program on the script VM (NovaWacProgram). Applied now if

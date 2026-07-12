@@ -4,10 +4,10 @@ extends RefCounted
 ## The local player's equipped-weapon FSM view — the typed record behind
 ## `NovaSimulation.get_local_player_weapon_state()`'s transport Dictionary (ADR 0017:
 ## the record is the contract, the dict is its C++-binding encoding). Serials are
-## monotonic event counters (several 62.5 Hz logic ticks can run per render frame, so
-## edge events surface as counts, never booleans): `play_serial` bumps each time the
-## FSM starts a clip (`anim_key`), `fired`/`dry`/`reload`/`unscope`/`rescope` mirror
-## the handler events. [orig: WeaponAction_ProcessFrame @0x540e60 + the wpn_std_*
+## monotonic diagnostics and rebuild cursors; lossless clip/begin/end delivery uses
+## GameWorld's ordered PlayerWeaponEvent drain because several 62.5 Hz logic ticks can
+## run per render frame. `fired`/`dry`/`reload`/`unscope`/`rescope` mirror the handler
+## counters. [orig: WeaponAction_ProcessFrame @0x540e60 + the wpn_std_*
 ## handlers; docs/net/novaworld-net-re.md §5.62]
 
 var active := false
@@ -19,18 +19,18 @@ var anim_key := ""         # the .adm clip key of the last play event
 # ring entry at animState+68 while the head advances]
 var anim_variant := 0
 var play_serial := 0
-# The action-begin seam: `action_serial` bumps when an action's ACTIVE phase begins;
-# the started ACTION row's audio/effect legs ride alongside. The host plays the
-# soundset and spawns the particle at the model user point on the serial edge.
+# Snapshot diagnostics for the last action begin: `action_serial` bumps when an
+# action's ACTIVE phase begins and the latest ACTION row rides alongside. Presentation
+# consumes PlayerWeaponEvent records instead; these fields are not a delivery queue.
 # [orig: ActionSlot_ExecuteActionWithEffect @0x541860 -> ActionSlot_SpawnEffect @0x401f20]
 var action_serial := 0
 var action_started := -1   # the started action's slot id (weapon_action::*; -1 = none)
 var action_soundset := ""
 var action_particle := ""
 var action_particle_userpoint := ""
-# The action-END seam: `action_end_serial` bumps when an ACTIVE phase finishes; the
-# finished row's soundsetend rides alongside — fire rows carry the per-shot gunshot
-# here (GS_*), reload rows the completion sound.
+# Snapshot diagnostics for the last action end: `action_end_serial` bumps when an
+# ACTIVE phase finishes and the latest row's soundsetend rides alongside — fire rows
+# carry the per-shot gunshot here (GS_*), reload rows the completion sound.
 # [orig: ActionSlot_FinishActivePhase @0x53f7b0 -> the end shim @0x401100 plays
 #  ActionDef+12, gated on the phase byte being 2 (ACTIVE)]
 var action_end_serial := 0

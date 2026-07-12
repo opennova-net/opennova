@@ -150,6 +150,108 @@ func test_weapon_clip_variant_ring_rotates_bake_reads_and_plays() -> void:
 	sim.free()
 
 
+func test_weapon_event_batch_preserves_three_undrained_ticks() -> void:
+	# Game_MainLoop catch-up presents once after N fixed ticks. The sim must retain
+	# each tick's clip/begin/end payload in order, including its age at the drain.
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	var def := {
+		"name": "WPN_EVENT_BATCH",
+		"actions": [
+			{"name": "idle", "anim": "anim_wpn_idle", "delaystart": 0, "delayend": 0},
+			{"name": "fire", "anim": "anim_wpn_fire", "delaystart": 0, "delayend": 0,
+				"soundset": "FIRE_BEGIN", "soundsetend": "FIRE_END"},
+			{"name": "recoil", "anim": "anim_wpn_recoil", "delaystart": 0,
+				"delayend": 0, "soundset": "RECOIL_BEGIN"},
+		],
+		"flags": 0x100,
+		"clipsize": 30,
+		"startrounds": 60,
+	}
+	sim.set_local_player_weapon(def, {
+		"anim_wpn_idle": 0.1,
+		"anim_wpn_fire": 0.1,
+		"anim_wpn_recoil": 0.1,
+	})
+	sim.step()
+	sim.drain_local_player_weapon_events() # discard the initial idle play
+
+	sim.set_local_player_weapon_input(true, true, false)
+	sim.step()
+	sim.step()
+	sim.step()
+	var events: Array = sim.drain_local_player_weapon_events()
+	assert_eq(events.size(), 3, "FIRE, RECOIL, FIRE survive one three-tick catch-up")
+	if events.size() == 3:
+		assert_eq([
+			String((events[0] as Dictionary).get("anim_key", "")),
+			String((events[1] as Dictionary).get("anim_key", "")),
+			String((events[2] as Dictionary).get("anim_key", "")),
+		], ["anim_wpn_fire", "anim_wpn_recoil", "anim_wpn_fire"])
+		assert_eq([
+			int((events[0] as Dictionary).get("action_started", -1)),
+			int((events[1] as Dictionary).get("action_started", -1)),
+			int((events[2] as Dictionary).get("action_started", -1)),
+		], [2, 3, 2])
+		assert_eq([
+			int((events[0] as Dictionary).get("action_finished", -1)),
+			int((events[1] as Dictionary).get("action_finished", -1)),
+			int((events[2] as Dictionary).get("action_finished", -1)),
+		], [2, -1, 2])
+		assert_eq([
+			int((events[0] as Dictionary).get("age_ticks", -1)),
+			int((events[1] as Dictionary).get("age_ticks", -1)),
+			int((events[2] as Dictionary).get("age_ticks", -1)),
+		], [2, 1, 0])
+		assert_eq([
+			String((events[0] as Dictionary).get("action_soundset", "")),
+			String((events[1] as Dictionary).get("action_soundset", "")),
+			String((events[2] as Dictionary).get("action_soundset", "")),
+		], ["FIRE_BEGIN", "RECOIL_BEGIN", "FIRE_BEGIN"],
+			"payloads are copied before a later tick or remount can overwrite them")
+		assert_eq([
+			String((events[0] as Dictionary).get("action_end_soundset", "")),
+			String((events[1] as Dictionary).get("action_end_soundset", "")),
+			String((events[2] as Dictionary).get("action_end_soundset", "")),
+		], ["FIRE_END", "", "FIRE_END"])
+	assert_true(sim.drain_local_player_weapon_events().is_empty(), "the drain is destructive")
+	sim.free()
+
+
+func test_weapon_event_batch_does_not_cross_lifecycle_boundaries() -> void:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	var def := {
+		"name": "WPN_EVENT_LIFECYCLE",
+		"actions": [
+			{"name": "idle", "anim": "anim_wpn_idle", "delaystart": 0, "delayend": 0},
+		],
+	}
+	var clips := {"anim_wpn_idle": 0.1}
+
+	sim.set_local_player_weapon(def, clips)
+	sim.step()
+	sim.set_local_player_weapon(def, clips)
+	assert_true(sim.drain_local_player_weapon_events().is_empty(),
+		"remount discards the previous weapon's queued presentation")
+	sim.step()
+	sim.clear_local_player_weapon()
+	assert_true(sim.drain_local_player_weapon_events().is_empty(),
+		"clear discards the unmounted weapon's queued presentation")
+	sim.set_local_player_weapon(def, clips)
+	sim.step()
+	sim.restart()
+	assert_true(sim.drain_local_player_weapon_events().is_empty(),
+		"restart cannot age a pre-rewind event across the logic-tick reset")
+	sim.free()
+
+
 func test_armory_reads_and_clears_authoritative_local_loadout() -> void:
 	var md := NovaMissionData.new()
 	assert_eq(md.create_default(), OK)

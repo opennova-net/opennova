@@ -65,18 +65,24 @@ bool can_fire_ammo(const WeaponFsmDef &def, WeaponSlotState &slot) {
 // The begin-active shim shared by every handler's tick path: the first tick after a
 // transition (phase 1, or the held-ready 0x40) flips the slot ACTIVE and starts the
 // action's clip on the owner's animadm channel — LOCAL PLAYER ONLY in the original.
+// Only a real phase-1 entry runs the begin sound/effect leg: held-ready resumes at
+// the animation call inside BeginActivePhase, after that leg has already been skipped.
 // [orig: ActionSlot_BeginActivePhase @ 0x53f830; the FP-routing variants
 //  ActionSlot_ExecuteActionWithEffect @ 0x541860 / ..NoEffect @ 0x5419e0 write the same
-//  phase protocol; sound/ctrlreg/muzzle legs are host seams]
+//  phase protocol; held-ready animation branch @ 0x53f88b]
 void begin_active(const WeaponFsmAction &desc, WeaponSlotState &slot,
                   const WeaponFsmInputs &in, WeaponFsmEvents &out) {
-    if ((slot.phase & 1) != 0 || (slot.phase & weapon_phase::kHeld) != 0) {
+    const bool entered = (slot.phase & 1) != 0;
+    const bool held = (slot.phase & weapon_phase::kHeld) != 0;
+    if (entered || held) {
         slot.phase = weapon_phase::kActive;
-        // The begin leg's sound/muzzle seam: the host plays the action's
-        // soundset and spawns its particle at the model user point
+        // The begin leg's sound/muzzle seam belongs only to phase-1 entry. The
+        // held-ready 0x40 path rejoins below at animation playback.
         // [orig: ActionSlot_ExecuteActionWithEffect @ 0x541860 ->
-        //  ActionSlot_SpawnEffect @ 0x401f20].
-        out.action_started = desc.id;
+        //  ActionSlot_SpawnEffect @ 0x401f20; held branch @ 0x53f88b].
+        if (entered) {
+            out.action_started = desc.id;
+        }
         if (desc.has_anim && in.is_local) {
             out.play_anim = true;
             copy_key(out.anim_key, desc.anim_key);
