@@ -325,7 +325,7 @@ func _consume_weapon_view() -> void:
 		return
 	if view.play_serial != _weapon_play_serial:
 		_weapon_play_serial = view.play_serial
-		_play_viewmodel_clip(view.anim_key)
+		_play_viewmodel_clip(view.anim_key, view.anim_variant)
 	if view.action_serial != _weapon_action_serial:
 		var adopt_only := _weapon_action_serial < 0
 		_weapon_action_serial = view.action_serial
@@ -373,14 +373,19 @@ func _fire_action_end_sound(view: PlayerWeaponView) -> void:
 
 # Start an FSM clip on every viewmodel part (arms + gun share the animadm) - a replay
 # of the active key restarts it (fire/recoil re-triggers), unlike play_body_clip's
-# same-key resume.
-func _play_viewmodel_clip(key: String) -> void:
+# same-key resume. `variant` is the sim ring's latched serve for multi-clip .adm
+# rows — both parts follow the ONE latch, so arms and gun never split variants
+# [orig: AnimMap_PlayAnimBySlot @0x40bda0 latches the served entry at animState+68].
+func _play_viewmodel_clip(key: String, variant: int = 0) -> void:
 	if key.is_empty():
 		return
 	for part in _vm_parts:
 		if part == null or not is_instance_valid(part):
 			continue
-		part.play_body_clip(key)
+		if part.has_method("play_body_clip_variant"):
+			part.play_body_clip_variant(key, variant)
+		else:
+			part.play_body_clip(key)
 		if part.has_method("set_animation_time"):
 			part.set_animation_time(0.0)
 

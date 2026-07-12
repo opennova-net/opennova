@@ -866,7 +866,11 @@ func _setup_local_player_weapon(model) -> void:
 				keys.append(k)
 		for k in keys:
 			if skeletal.has_clip(k):
-				clip_seconds[k] = float(skeletal.get_clip_length(k))
+				# EVERY variant's length, .adm file order — the sim seeds its slot
+				# rings from these and consumes them serve-then-advance (bake reads
+				# and play latches) [orig: the animState slot heads +72;
+				# Anim_GetDurationTicks @0x53ee10 / AnimMap_PlayAnimBySlot @0x40bda0].
+				clip_seconds[k] = skeletal.get_clip_variant_lengths(k)
 	sim.set_local_player_weapon(_local_weapon_dict, clip_seconds)
 
 

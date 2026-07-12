@@ -1466,6 +1466,35 @@ Dictionary NovaSimulation::get_local_player_aim_overlay() const {
 
 // --- the local player's equipped-weapon FSM (net-re §5.62) --------------------------
 
+NovaSimulation::WeaponClipRing *NovaSimulation::weapon_ring_for(const String &p_key_lower) {
+	for (std::pair<String, WeaponClipRing> &kv : weapon_clip_rings_) {
+		if (kv.first == p_key_lower) return &kv.second;
+	}
+	return nullptr;
+}
+
+float NovaSimulation::weapon_ring_take_length(const char *p_key) {
+	// Serve the ring head's duration, then advance the head — the consuming read
+	// [orig: Anim_GetDurationTicks @ 0x53ee10: currentEntry = *slot;
+	//  *slot = *(currentEntry + 36); duration from currentEntry's data].
+	WeaponClipRing *ring = weapon_ring_for(String::utf8(p_key).to_lower());
+	if (ring == nullptr || ring->lengths.is_empty()) return -1.0f;
+	const float served = ring->lengths[ring->head];
+	ring->head = (ring->head + 1) % static_cast<int>(ring->lengths.size());
+	return served;
+}
+
+int NovaSimulation::weapon_ring_take_variant(const String &p_key) {
+	// Serve the head as the PLAYED variant and advance — the play latch: playback
+	// follows the served entry while the ring moves on [orig: AnimMap_PlayAnimBySlot
+	// @ 0x40bda0: animEntry = slot[i]; slot[i] = next; animState+68 = animEntry].
+	WeaponClipRing *ring = weapon_ring_for(p_key.to_lower());
+	if (ring == nullptr || ring->lengths.is_empty()) return 0;
+	const int served = ring->head;
+	ring->head = (ring->head + 1) % static_cast<int>(ring->lengths.size());
+	return served;
+}
+
 void NovaSimulation::set_local_player_weapon(const Dictionary &p_def,
 		const Dictionary &p_clip_seconds) {
 	using opennova::world::WeaponFsmActionRow;
@@ -1496,19 +1525,40 @@ void NovaSimulation::set_local_player_weapon(const Dictionary &p_def,
 		snprintf(row.particleuserpoint, sizeof(row.particleuserpoint), "%s", userpoint.get_data());
 		rows.push_back(row);
 	}
-	// Clip lengths come from the loaded viewmodel's .adm (seconds); the bake converts to
-	// the 62.5 Hz ticks [orig: Anim_GetDurationTicks @ 0x53ee10].
-	struct ClipCtx {
-		const Dictionary *seconds;
-	} ctx{ &p_clip_seconds };
+	// Clip lengths come from the loaded viewmodel's .adm (seconds) as per-key VARIANT
+	// arrays; they seed the slot rings the bake and the play events consume
+	// serve-then-advance [orig: the animState slot heads (+72) built by
+	// AnimMap_RegisterBoneNode @ 0x40c2d0; Anim_GetDurationTicks @ 0x53ee10].
+	weapon_clip_rings_.clear();
+	weapon_anim_variant_ = 0;
+	{
+		const Array keys = p_clip_seconds.keys();
+		for (int i = 0; i < keys.size(); ++i) {
+			WeaponClipRing ring;
+			const Variant v = p_clip_seconds[keys[i]];
+			if (v.get_type() == Variant::PACKED_FLOAT32_ARRAY) {
+				ring.lengths = v;
+			} else {
+				// Single-variant convenience: a plain number is a one-entry ring.
+				ring.lengths.push_back(static_cast<float>(double(v)));
+			}
+			if (ring.lengths.is_empty()) continue;
+			weapon_clip_rings_.emplace_back(String(keys[i]).to_lower(), ring);
+		}
+	}
+	// The bake probes existence as a pure lookup and reads durations ring-wise —
+	// one consuming read per 'auto' field [orig: Anim_InitActions @ 0x541fa0;
+	// the lookup @ 0x5421ae, the reads @ 0x5421c5 / @ 0x5421d8].
+	const auto resolve_fn = [](void *p_ctx, const char *key) -> int {
+		NovaSimulation *self = static_cast<NovaSimulation *>(p_ctx);
+		return self->weapon_ring_for(String::utf8(key).to_lower()) != nullptr ? 1 : 0;
+	};
 	const auto clip_fn = [](void *p_ctx, const char *key) -> float {
-		const ClipCtx *c = static_cast<const ClipCtx *>(p_ctx);
-		const String k = String::utf8(key);
-		if (!c->seconds->has(k)) return -1.0f;
-		return static_cast<float>(double((*c->seconds)[k]));
+		return static_cast<NovaSimulation *>(p_ctx)->weapon_ring_take_length(key);
 	};
 	weapon_def_ = opennova::world::WeaponFsmDef{};
-	opennova::world::weapon_fsm_bake(rows.data(), rows.size(), clip_fn, &ctx, weapon_def_);
+	opennova::world::weapon_fsm_bake(rows.data(), rows.size(), resolve_fn, clip_fn, this,
+			weapon_def_);
 	const int flags = int(p_def.get("flags", 0));
 	weapon_def_.auto_fire = (flags & 0x100) != 0; // [orig: WeaponSlot_CanFireInCurrentState @ 0x53f0b0]
 	weapon_def_.burst3 = (flags & 0x20) != 0;     // [orig: WeaponAction_Fire @ 0x542c8a]
@@ -1539,6 +1589,7 @@ void NovaSimulation::set_local_player_weapon(const Dictionary &p_def,
 	weapon_slot_.reserve = int(p_def.get("startrounds", 0));
 	weapon_play_serial_ = 0;
 	weapon_anim_key_ = String();
+	weapon_anim_variant_ = 0;
 	weapon_fired_serial_ = weapon_dry_serial_ = weapon_reload_serial_ = 0;
 	weapon_unscope_serial_ = weapon_rescope_serial_ = 0;
 	weapon_action_serial_ = 0;
@@ -1557,6 +1608,8 @@ void NovaSimulation::set_local_player_weapon(const Dictionary &p_def,
 
 void NovaSimulation::clear_local_player_weapon() {
 	weapon_active_ = false;
+	weapon_clip_rings_.clear();
+	weapon_anim_variant_ = 0;
 	player_view_.scope_engaged = false;
 	player_view_.scope_step = 0;
 	player_view_.ease_steps = opennova::world::kScopeEaseSteps;
@@ -1680,6 +1733,11 @@ void NovaSimulation::tick_local_player_weapon() {
 	if (ev.play_anim) {
 		++weapon_play_serial_;
 		weapon_anim_key_ = String::utf8(ev.anim_key);
+		// The play consumes the slot ring and latches the served variant — the host
+		// plays exactly this variant on every viewmodel part
+		// [orig: AnimMap_PlayAnimBySlot @ 0x40bda0 advances the head and latches
+		//  the served entry at animState+68].
+		weapon_anim_variant_ = weapon_ring_take_variant(weapon_anim_key_);
 	}
 	if (ev.action_started >= 0) {
 		// The begin leg's sound/muzzle seam: the host resolves the started action's
@@ -1741,6 +1799,7 @@ Dictionary NovaSimulation::get_local_player_weapon_state() const {
 	if (!weapon_active_) return out;
 	out["current"] = weapon_slot_.current;
 	out["anim_key"] = weapon_anim_key_;
+	out["anim_variant"] = weapon_anim_variant_;
 	out["play_serial"] = static_cast<int64_t>(weapon_play_serial_);
 	// The last-started action's audio/effect legs (valid while action_serial holds;
 	// the host drains on the serial edge) [orig: ActionSlot_ExecuteActionWithEffect

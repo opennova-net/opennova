@@ -194,6 +194,24 @@ private:
 	bool weapon_reload_pressed_ = false;
 	uint64_t weapon_play_serial_ = 0;
 	String weapon_anim_key_;
+	// The equipped .adm's per-slot VARIANT rings — multi-clip rows rotate round-robin.
+	// The sim owns the ring heads exactly where the original keeps them (the weapon's
+	// animState slot array +72): bake duration reads and play starts both SERVE the
+	// head then ADVANCE it, and the play latches the served index for the host's clip
+	// playback (both viewmodel parts follow one latch, so arms and gun never split).
+	// [orig: Anim_GetDurationTicks @ 0x53ee10; AnimMap_PlayAnimBySlot @ 0x40bda0
+	//  (+68 entry latch); ring build AnimMap_RegisterBoneNode @ 0x40c2d0]
+	struct WeaponClipRing {
+		PackedFloat32Array lengths;  // every variant's clip length (seconds), file order
+		int head = 0;                // next variant to serve
+	};
+	std::vector<std::pair<String, WeaponClipRing>> weapon_clip_rings_;  // keys lowercased
+	int weapon_anim_variant_ = 0;  // the play latch [orig: animState+68]
+	WeaponClipRing *weapon_ring_for(const String &p_key_lower);
+	// Serve-then-advance duration read; < 0 when the key has no ring.
+	float weapon_ring_take_length(const char *p_key);
+	// Serve-then-advance play take; returns the served variant index (0 for ringless).
+	int weapon_ring_take_variant(const String &p_key);
 	uint64_t weapon_fired_serial_ = 0;
 	uint64_t weapon_dry_serial_ = 0;
 	uint64_t weapon_reload_serial_ = 0;
@@ -422,9 +440,15 @@ public:
 	// --- the local player's equipped-weapon FSM (net-re §5.62) -------------
 	// Install the equipped weapon: p_def is the NovaWeaponDatabase weapon dict (the
 	// {actions, flags, clipsize, startrounds} slice is consumed) and p_clip_seconds
-	// maps each .adm clip key to its length in SECONDS — the Anim_InitActions bake
-	// source [orig: @ 0x541fa0; 'auto' delays come from Anim_GetDurationTicks
-	// @ 0x53ee10]. Resets the slot to a fresh idle with a full magazine.
+	// maps each .adm clip key to its VARIANT lengths in SECONDS — a
+	// PackedFloat32Array in .adm file order (NovaSkeletalAnim.get_clip_variant_lengths;
+	// a plain float is accepted as a single-variant convenience). The lengths seed the
+	// per-slot rings and the Anim_InitActions bake consumes them ring-wise: one
+	// serve-then-advance read per 'auto' delay field [orig: @ 0x541fa0;
+	// Anim_GetDurationTicks @ 0x53ee10]. Resets the slot to a fresh idle with a full
+	// magazine (retail bakes a def ONCE globally, so its rings persist across
+	// re-equips; this per-equip reset rides the existing per-equip re-bake shape,
+	// D-WPN-6 family).
 	void set_local_player_weapon(const Dictionary &p_def, const Dictionary &p_clip_seconds);
 	void clear_local_player_weapon();
 	// Per-frame trigger state: fire held + edge, raw reload edge (the dispatch

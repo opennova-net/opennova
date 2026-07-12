@@ -78,6 +78,78 @@ func test_weapon_channel_keeps_own_phase_and_switch_identity_per_entity() -> voi
 		"a replacement local entity observes the current AnimMap as new")
 	sim.free()
 
+func test_weapon_clip_variant_ring_rotates_bake_reads_and_plays() -> void:
+	# Multi-clip .adm variant rings, end to end through the public binding: clip
+	# lengths arrive as per-key VARIANT arrays; the bake consumes ONE ring entry per
+	# 'auto' delay field (serve-then-advance), and every play consumes + latches the
+	# served variant into the state dict. A both-auto reload over a 3-ring therefore
+	# eats entries 0 and 1 at bake — the FIRST reload PLAY serves variant 2, the
+	# next serves 0 (the REVVY M4 "m4_1r" "m4_1r" "m4_1r2" shape).
+	# [orig: Anim_InitActions reads @0x5421c5/@0x5421d8 via Anim_GetDurationTicks
+	#  @0x53ee10; AnimMap_PlayAnimBySlot @0x40bda0 latches at animState+68]
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	var def := {
+		"name": "WPN_RING", "animadm": "ring.adm",
+		"actions": [
+			{"name": "idle", "anim": "anim_wpn_idle", "delaystart": 0, "delayend": 0},
+			{"name": "fire", "anim": "anim_wpn_fire", "delaystart": 0, "delayend": 0},
+			{"name": "reload", "anim": "anim_wpn_reload", "delaystart": -1, "delayend": -1},
+		],
+		"flags": 0, "clipsize": 30, "startrounds": 60,
+	}
+	sim.set_local_player_weapon(def, {
+		"anim_wpn_idle": PackedFloat32Array([0.2]),
+		"anim_wpn_fire": PackedFloat32Array([0.05]),
+		"anim_wpn_reload": PackedFloat32Array([0.5, 1.0, 0.25]),
+	})
+	sim.step()
+	var state: Dictionary = sim.get_local_player_weapon_state()
+	assert_eq(String(state.get("anim_key", "")), "anim_wpn_idle", "fresh slot idles")
+	assert_eq(int(state.get("anim_variant", -1)), 0, "single-entry rings always serve 0")
+
+	# Spend a round (letting the fire+recoil chain settle back to idle — the reload
+	# dispatch gate refuses the edge mid-FIRE), then reload: the bake left the reload
+	# ring's head at 2 (two 'auto' reads), so the FIRST reload serves variant 2.
+	sim.set_local_player_weapon_input(false, true, false)
+	for _i in range(6):
+		sim.step()
+	assert_eq(int(sim.get_local_player_weapon_state().get("clip", 0)), 29, "one round spent")
+	sim.set_local_player_weapon_input(false, false, true)
+	var reload_variant := -1
+	var first_reload_serial := -1
+	for _i in range(90):
+		sim.step()
+		state = sim.get_local_player_weapon_state()
+		if String(state.get("anim_key", "")) == "anim_wpn_reload":
+			reload_variant = int(state.get("anim_variant", -1))
+			first_reload_serial = int(state.get("play_serial", 0))
+			break
+	assert_eq(reload_variant, 2,
+		"the first reload serves variant 2 — the both-auto bake consumed entries 0+1")
+
+	# Let the reload finish (ds 32 + de 32 ticks and the transitions), spend another
+	# round, reload again: the ring wrapped, so the play serves variant 0.
+	for _i in range(90):
+		sim.step()
+	sim.set_local_player_weapon_input(false, true, false)
+	for _i in range(6):
+		sim.step()
+	sim.set_local_player_weapon_input(false, false, true)
+	reload_variant = -1
+	for _i in range(90):
+		sim.step()
+		state = sim.get_local_player_weapon_state()
+		if String(state.get("anim_key", "")) == "anim_wpn_reload" 				and int(state.get("play_serial", 0)) != first_reload_serial:
+			reload_variant = int(state.get("anim_variant", -1))
+			break
+	assert_eq(reload_variant, 0, "the second reload wraps the ring back to variant 0")
+	sim.free()
+
+
 func test_armory_reads_and_clears_authoritative_local_loadout() -> void:
 	var md := NovaMissionData.new()
 	assert_eq(md.create_default(), OK)

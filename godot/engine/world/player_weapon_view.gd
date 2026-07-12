@@ -13,6 +13,11 @@ extends RefCounted
 var active := false
 var current_action := 0    # world::weapon_action id (0 idle .. 11 overheated)
 var anim_key := ""         # the .adm clip key of the last play event
+# The served VARIANT of that key — multi-clip .adm rows rotate round-robin and the
+# sim's ring latches which variant this play consumed; every viewmodel part plays
+# the same latched index. [orig: AnimMap_PlayAnimBySlot @0x40bda0 latches the served
+# ring entry at animState+68 while the head advances]
+var anim_variant := 0
 var play_serial := 0
 # The action-begin seam: `action_serial` bumps when an action's ACTIVE phase begins;
 # the started ACTION row's audio/effect legs ride alongside. The host plays the
@@ -55,6 +60,7 @@ static func from_state_dict(d: Dictionary) -> PlayerWeaponView:
 	out.active = true
 	out.current_action = int(d.get("current", 0))
 	out.anim_key = String(d.get("anim_key", ""))
+	out.anim_variant = int(d.get("anim_variant", 0))
 	out.play_serial = int(d.get("play_serial", 0))
 	out.action_serial = int(d.get("action_serial", 0))
 	out.action_started = int(d.get("action_started", -1))

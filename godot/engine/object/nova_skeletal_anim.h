@@ -46,12 +46,24 @@ private:
 
 	std::vector<opennova::anim::ClipBone> bones_;  // canonical skeleton (names + parents)
 	std::vector<Transform3D> bind_local_;          // per-bone parent-local rest (Godot space)
+	// A multi-clip .adm row registers one clip PER quoted token under the same key,
+	// kept in file order — the slot's variant ring in the original; consecutive
+	// same-key entries here [orig: AnimMap_ParseConfigLine @ 0x40cb60 registers every
+	// token; AnimMap_RegisterBoneNode @ 0x40c2d0 links them into a circular ring].
+	// The ring CURSOR is not here: rotation state lives with the weapon/entity FSM
+	// that consumes it (NovaSimulation), exactly as the original keeps the heads on
+	// the per-entity animState (+72) — this class is the loaded clip data only, so
+	// the two viewmodel parts sharing one .adm stay in lockstep.
 	std::vector<LoadedClip> clips_;
 	String adm_name_;
 	String last_error_;
 	bool loaded_ = false;
 
 	const LoadedClip *find_clip(const String &p_key) const;
+	// The p_variant-th same-key clip (file order, wrapped modulo the variant count —
+	// robust when a variant's .bad failed to load on one part). p_variant <= 0 or a
+	// single-clip key serve the first match.
+	const LoadedClip *find_clip_variant(const String &p_key, int p_variant) const;
 
 	// Shared core: build bones_/bind_local_/clips_ from already-resolved .bad bytes.
 	// p_reset_bytes defines the shared skeleton + bind pose; each (key, bytes) pair is sampled
@@ -122,14 +134,22 @@ public:
 	String slot_to_key(int p_slot) const;
 
 	bool has_clip(const String &p_key) const { return find_clip(p_key) != nullptr; }
-	int get_clip_frame_count(const String &p_key) const;
-	float get_clip_fps(const String &p_key) const;
-	float get_clip_length(const String &p_key) const;  // seconds
-	bool is_clip_looping(const String &p_key) const;
+	// Variant surface: p_variant selects among same-key clips (0-based file order,
+	// wrapped). All getters/eval are non-consuming PEEKS — the consuming ring
+	// rotation (serve-then-advance on duration reads and play starts [orig:
+	// Anim_GetDurationTicks @ 0x53ee10 / AnimMap_PlayAnimBySlot @ 0x40bda0]) is
+	// driven by the FSM owner, which passes the served index back in.
+	int get_clip_variant_count(const String &p_key) const;
+	// Every variant's length (seconds) in ring order — the FSM owner's ring data.
+	PackedFloat32Array get_clip_variant_lengths(const String &p_key) const;
+	int get_clip_frame_count(const String &p_key, int p_variant = 0) const;
+	float get_clip_fps(const String &p_key, int p_variant = 0) const;
+	float get_clip_length(const String &p_key, int p_variant = 0) const;  // seconds
+	bool is_clip_looping(const String &p_key, int p_variant = 0) const;
 
 	// Per-bone parent-local pose at playhead t (seconds), Godot space. Size == bone count.
 	// Returns the bind pose for an unknown clip / empty result.
-	Array eval_pose(const String &p_key, double p_playhead_seconds) const;
+	Array eval_pose(const String &p_key, double p_playhead_seconds, int p_variant = 0) const;
 
 	// The upper-body WEAPON channel: sample p_wpn_key at ITS OWN playhead and hard-override
 	// the mask bones' WORLD rotations (clavicles/arms/forearms/neck/head/hands — the
