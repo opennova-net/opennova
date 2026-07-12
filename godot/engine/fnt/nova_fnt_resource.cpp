@@ -5,6 +5,7 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <cstring>
+#include <vector>
 
 namespace godot {
 
@@ -30,6 +31,47 @@ void NovaFntResource::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_pixel_alpha", "page", "x", "y", "alpha"), &NovaFntResource::set_pixel_alpha);
 
 	ClassDB::bind_method(D_METHOD("to_font_file"), &NovaFntResource::to_font_file);
+
+	ClassDB::bind_static_method("NovaFntResource", D_METHOD("pack_shelf", "sizes"), &NovaFntResource::pack_shelf);
+
+	BIND_CONSTANT(FIRST_CHAR);
+	BIND_CONSTANT(GLYPH_COUNT);
+	BIND_CONSTANT(TEXTURE_WIDTH);
+	BIND_CONSTANT(TEXTURE_HEIGHT);
+	BIND_CONSTANT(MAX_PAGES);
+	BIND_CONSTANT(PACK_PAD);
+}
+
+PackedInt32Array NovaFntResource::pack_shelf(const PackedInt32Array &p_sizes) {
+	PackedInt32Array result;
+	if (p_sizes.size() % 2 != 0) {
+		return result;
+	}
+	const size_t count = (size_t)(p_sizes.size() / 2);
+	if (count == 0) {
+		return result;
+	}
+	std::vector<fnt_pack_size_t> sizes(count);
+	for (size_t i = 0; i < count; ++i) {
+		const int32_t w = p_sizes[(int64_t)(i * 2)];
+		const int32_t h = p_sizes[(int64_t)(i * 2 + 1)];
+		sizes[i].width = w > 0 ? (uint32_t)w : 0u;
+		sizes[i].height = h > 0 ? (uint32_t)h : 0u;
+	}
+	std::vector<fnt_pack_rect_t> rects(count);
+	uint32_t page_count = 0;
+	if (fnt_pack_shelf(sizes.data(), count, rects.data(), &page_count) != FNT_OK) {
+		return result;
+	}
+	result.resize((int64_t)(count * 5));
+	for (size_t i = 0; i < count; ++i) {
+		result[(int64_t)(i * 5 + 0)] = (int32_t)rects[i].page;
+		result[(int64_t)(i * 5 + 1)] = (int32_t)rects[i].x;
+		result[(int64_t)(i * 5 + 2)] = (int32_t)rects[i].y;
+		result[(int64_t)(i * 5 + 3)] = (int32_t)rects[i].width;
+		result[(int64_t)(i * 5 + 4)] = (int32_t)rects[i].height;
+	}
+	return result;
 }
 
 NovaFntResource::NovaFntResource() {

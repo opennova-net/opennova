@@ -601,6 +601,10 @@ target_include_directories(fnt_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR
 target_compile_definitions(fnt_roundtrip_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 add_test(NAME fnt_roundtrip COMMAND fnt_roundtrip_test)
 
+add_executable(fnt_pack_test fnt/fnt_pack_test.c)
+target_link_libraries(fnt_pack_test PRIVATE opennova_fnt)
+add_test(NAME fnt_pack COMMAND fnt_pack_test)
+
 add_executable(pcx_roundtrip_test pcx/pcx_roundtrip_test.cpp)
 target_link_libraries(pcx_roundtrip_test PRIVATE opennova_pcx)
 target_include_directories(pcx_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

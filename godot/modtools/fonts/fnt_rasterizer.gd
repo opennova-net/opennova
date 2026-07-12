@@ -4,13 +4,13 @@ extends RefCounted
 # Rasterizes a TTF/OTF or system Font into a NovaFntResource (FntMaker-style).
 # Editor-only: uses the TextServer glyph cache, which renders glyph bitmaps when a
 # real text server is active (i.e. in the running editor, not headless dummy mode).
-# Pure-data packing is deterministic and lives in _pack().
+# The deterministic shelf packing lives in libs/fnt (fnt_pack_shelf) behind
+# NovaFntResource.pack_shelf; this script only rasterizes and blits.
 
-const FIRST_CHAR := 32
-const GLYPH_COUNT := 224
-const TEX := 256
-const PAD := 1
-const MAX_PAGES := 16
+# Format facts are aliases of the NovaFntResource binding (libs/fnt) — ENG-4.
+const FIRST_CHAR := NovaFntResource.FIRST_CHAR
+const GLYPH_COUNT := NovaFntResource.GLYPH_COUNT
+const TEX := NovaFntResource.TEXTURE_WIDTH  # pages are square (== TEXTURE_HEIGHT)
 
 const FLAG_BOLD := 1
 const FLAG_ITALIC := 2
@@ -44,11 +44,18 @@ static func rasterize(font: Font, px_size: int, flags: int) -> NovaFntResource:
 	for i in range(GLYPH_COUNT):
 		cells.append(_rasterize_glyph(ts, rid, px_size, size_v, FIRST_CHAR + i, ascent, tex_cache, flags))
 
-	var packed := _pack(cells)
-	if packed.is_empty():
+	var sizes := PackedInt32Array()
+	for cell in cells:
+		var c: Dictionary = cell
+		sizes.append(0 if c.is_empty() else int(c["w"]))
+		sizes.append(0 if c.is_empty() else int(c["h"]))
+	var rects := NovaFntResource.pack_shelf(sizes)
+	if rects.is_empty():
 		return null
-	var rects: Array = packed["rects"]
-	var page_count: int = maxi(1, int(packed["pages"]))
+	var page_count := 1
+	for i in range(GLYPH_COUNT):
+		if rects[i * 5 + 3] > 0:
+			page_count = maxi(page_count, rects[i * 5] + 1)
 
 	var res := NovaFntResource.new()
 	var shadow := -3 if (flags & FLAG_SHADOW) != 0 else 0
@@ -64,15 +71,17 @@ static func rasterize(font: Font, px_size: int, flags: int) -> NovaFntResource:
 	for i in range(GLYPH_COUNT):
 		var code := FIRST_CHAR + i
 		var cell: Dictionary = cells[i]
-		var r: Dictionary = rects[i]
-		if cell.is_empty() or r.is_empty():
+		var rw := rects[i * 5 + 3]
+		var rh := rects[i * 5 + 4]
+		if cell.is_empty() or rw <= 0:
 			res.set_glyph_rect(code, 0, Rect2i(0, 0, 0, 0))
 			continue
 		var glyph_img: Image = cell["img"]
-		var page: int = r["page"]
-		var dst := Vector2i(int(r["x"]), int(r["y"]))
-		(page_imgs[page] as Image).blit_rect(glyph_img, Rect2i(0, 0, int(r["w"]), int(r["h"])), dst)
-		res.set_glyph_rect(code, page, Rect2i(int(r["x"]), int(r["y"]), int(r["w"]), int(r["h"])))
+		var page := rects[i * 5]
+		var rx := rects[i * 5 + 1]
+		var ry := rects[i * 5 + 2]
+		(page_imgs[page] as Image).blit_rect(glyph_img, Rect2i(0, 0, rw, rh), Vector2i(rx, ry))
+		res.set_glyph_rect(code, page, Rect2i(rx, ry, rw, rh))
 
 	for p in range(page_count):
 		res.set_page_image(p, page_imgs[p])
@@ -154,35 +163,3 @@ static func _dilate(img: Image) -> Image:
 			if m > 0.0:
 				out.set_pixel(x, y, Color(1.0, 1.0, 1.0, m))
 	return out
-
-
-# Deterministic shelf packer. cells: per-glyph {img,w,h} or {} for empty.
-# Returns { rects: Array of {page,x,y,w,h} ({} for empty), pages: int } or {} on overflow.
-static func _pack(cells: Array) -> Dictionary:
-	var rects: Array = []
-	var page := 0
-	var cx := PAD
-	var cy := PAD
-	var shelf_h := 0
-	for cell in cells:
-		var c: Dictionary = cell
-		if c.is_empty():
-			rects.append({})
-			continue
-		var w: int = mini(int(c["w"]), TEX - 2 * PAD)
-		var h: int = mini(int(c["h"]), TEX - 2 * PAD)
-		if cx + w + PAD > TEX:
-			cx = PAD
-			cy += shelf_h + PAD
-			shelf_h = 0
-		if cy + h + PAD > TEX:
-			page += 1
-			cx = PAD
-			cy = PAD
-			shelf_h = 0
-			if page >= MAX_PAGES:
-				return {}
-		rects.append({"page": page, "x": cx, "y": cy, "w": w, "h": h})
-		cx += w + PAD
-		shelf_h = maxi(shelf_h, h)
-	return {"rects": rects, "pages": page + 1}
