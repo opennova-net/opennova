@@ -5910,14 +5910,44 @@ takes the table default. The ANIM name resolves to an AnimMap slot (+24 via
 name+5 so the `anim_` prefix is skipped against the unprefixed 252-entry
 `g_animStateNameTable @ 0x8135F0`; JOTAC-era defs author `ANIM_WPN_*` uppercase
 while the .adm stores lowercase, D-WPN-10) and the −1 delays bake from the clip:
-`delaystart = Anim_GetDurationTicks(adm, slot)` (`@ 0x53ee10` =
+each `−1` field is its OWN `Anim_GetDurationTicks(adm, slot)` call — delaystart
+`@ 0x5421c5`, delayend `@ 0x5421d8` — and every call is a CONSUMING ring read (below):
+it serves the slot's current entry then advances it (`@ 0x53ee26`), so a both-auto
+action consumes TWO ring entries and the two reads can serve different clips
+(CORRECTED 2026-07-11: the earlier "both auto → ds = de = ticks" reading is the
+single-clip special case, where every entry has one duration). The conversion is
 **trunc(ms × 62.5/1000 + 0.5) + 1** — the 62.5 t/s constant `flt_7C3B3C` and the
-round-to-nearest 0.5 `flt_7C3B94 @ 0x7C3B94`; byte-witnessed 2026-07-10, the
-pre-#219 port truncated without the +0.5), `delayend = ticks`, minus `delaystart` when
-`ticks > delaystart` (the just-baked delaystart — both fields auto → ds = de = ticks);
-unresolved anim (`@ 0x542202`) / no adm (`@ 0x542180`) / no anim key (`@ 0x542152`)
-→ −1 collapses to 0. Ends by playing global slot 241
+round-to-nearest 0.5 `flt_7C3B94 @ 0x7C3B94` (byte-witnessed 2026-07-10, the
+pre-#219 port truncated without the +0.5); `delayend = ticks`, minus `delaystart` when
+`ticks > delaystart` (the just-baked delaystart); unresolved anim (`@ 0x542202`) / no
+adm (`@ 0x542180`) / no anim key (`@ 0x542152`) → −1 collapses to 0 (existence is the
+`FindSlotByName` LOOKUP `@ 0x5421ae`, never a read). Ends by playing global slot 241
 (`wpn_idle`) on the weapon's adm.
+
+**Multi-clip variant rings** (2026-07-11). A .adm row may list several quoted clips —
+`anim_wpn_reload	"m4_1r" "m4_1r" "m4_1r2"` — and `AnimMap_ParseConfigLine @ 0x40cb60`
+registers EVERY token on the same anim slot: `AnimMap_RegisterBoneNode @ 0x40c2d0`
+links each into a per-slot CIRCULAR list (node+36 = next), so the slot is a variant
+ring in authored order, and the duplication is the rotation weighting (r plays twice
+per r2 cycle). Both consumers serve-then-advance the ring head (the per-entity
+animState's slot array +72): `Anim_GetDurationTicks @ 0x53ee10` (the bake reads
+above) and `AnimMap_PlayAnimBySlot @ 0x40bda0`, which also LATCHES the served entry
+into the animState (+68 entry / +64 data / +60 slot) — playback samples the latch
+while the head moves on. Corpus: 792 multi-clip rows across the REVX02 .adm set
+(max 6 variants on one row), 72 in JOX. Worked REVVY M4 example: RELOAD authors
+`delaystart 200 / delayend auto` → ONE bake read (serves entry 0, head → 1), so the
+first reload PLAY serves entry 1 and the next served play is entry 2 — live-verified
+in the weapon_round probe (a refused reload request advances nothing). Port mapping:
+`libs/anim` adm keeps every token (`AdmEntry.values[]`, `value` = first);
+`NovaSkeletalAnim` registers one clip per token under the same key (peek-only —
+`get_clip_variant_count/lengths`, variant-arg getters/eval); the ring CURSORS live on
+`NovaSimulation` (the animState+72 analog — `weapon_fsm_bake`’s per-auto-field reads
+and the FSM play events consume them, and the play latch rides the weapon view as
+`anim_variant`, the +68 analog, so both viewmodel parts follow one serve). Riders:
+the sim re-seeds the rings per equip, riding the existing per-equip re-bake shape
+(retail bakes a def once globally, so its rings persist across re-equips — D-WPN-6
+family); the 3P body weapon channel and AI body clips still play variant 0 (the
+per-entity body-adm rings are an open tail of §14.8).
 
 **The slot + the pump** [orig: `WeaponAction_ProcessFrame @ 0x540e60`, driven per
 pooled entity by `WeaponAction_ProcessAllEntities @ 0x542690`]. MountSlot (100 B):
