@@ -225,6 +225,14 @@ TOD/celestial/fog/weather math that belongs in `libs/env`.
 
 #### Boundary conformance checklist (ENG-5 instrument; seeded 2026-07-04)
 
+Sweep #2 ran 2026-07-12 over the post-#210..#230 fidelity-train GDScript
+(HUD/weapon, collision/armory, sound, particles) plus regression checks on the
+closed domains. Verdict: the boundary holds at the sim/FSM/def-parse level
+(weapon FSM, view state, collision, def tables, particle sim are libs-side
+with typed-record decodes at the edges); three new host-side math clusters
+landed with those trains (HUD helpers, sound curves, the mission TOD clock)
+and are tracked below with their recommended slicing.
+
 | Item | Where | Status |
 |---|---|---|
 | Scalar GDScript height sampler duplicating C++ | terrain editor mesh | **closed (ENG-3, 2026-07-07)** — `EditorTerrainMesh.sample_world_height` forwards to the new `NovaTerrainData.sample_height_world_live` (the batch sampler's per-point core, shared so the two can never disagree); the GDScript bilinear deleted; `terrain_height_revision_test` flipped from pinning batch/scalar drift to pinning the single path |
@@ -233,7 +241,15 @@ TOD/celestial/fog/weather math that belongs in `libs/env`.
 | FNT format facts + shelf packer in editor | fonts rasterizer | open (ENG-4) |
 | MATERIAL_FLAG_* / OED_UPDATE_* duplicated | engine object model GDScript | **flags closed (REN-2, confirmed at REN-7)** — MATERIAL_FLAG_* single-sourced onto NovaObjectShaderCache; the REN-7 detail slice extended the same surface (CAP_DETAIL) instead of re-duplicating; OED_UPDATE_* remains open (ENG-4) |
 | Env/TOD/celestial/weather math in GDScript | godot/engine/environment | **closed (ENG-2, 2026-07-06)** — nodes are plumbing over libs/env; the tracked stand-ins are divergence rows (env #29 strip tessellation, #33 star instancing, #27 smoothed scalars) |
-| Menu absolute-rect math in canvas | mnu canvas | review (minor; canvas hosts the live engine node) |
+| Menu absolute-rect math in canvas | mnu canvas | **closed as reviewed exception (ENG-5 sweep #2, 2026-07-12)** — the canvas's absolute-rect summation is edit-model gesture math over the document tree (picking, ghost drags, snap tuning in board units); the witnessed scale model stays in the hosted live engine node (`[orig: CUIScene_SetScreenScale @ 0x639480]`); no engine constant or witnessed math is duplicated |
+| HUD view-helper math cluster (exact-integer fade decay, 1024×768 design scale, 16.16 crosshair spread + TAPER strip, Q16 stance scaling, health thresholds, message tick policy, half-bright text, ammo format, stance→ERROR-row remap, capacity-1 reserve fold — all `[orig]`-cited) | `godot/engine/ui/hud_*.gd`, `game_hud.gd`, `game_hud_host.gd` | open (sweep #2, 2026-07-12) — **tracked: one `libs/hud` port slice** (ENG-4/FNT pattern: math + constants native, `draw_*`/Font blits stay host); no libs home exists today — `libs/def` deliberately keeps ALPHAFADE raw |
+| Sound distance/TOD-crossfade curves (`calc_distance_volume` Q16 chain `[orig: @ 0x75ca20]`, emitter falloff arms `[orig: @ 0x528667]`, oneshot curve `[orig: @ 0x75cf14]`, `time_of_day_region` cuts + blend `[orig: @ 0x408110]`, crossfade byte, marker stagger) | `nova_sound_bank.gd`, `nova_mission_audio.gd` | open (sweep #2) — **tracked: one `libs/audio` curves slice** (beside the selector; Godot voice/bus writes stay host) |
+| Mission TOD clock (`Env_TodAdvancePerTick = 0x18000000/(3720·minutes)` `[orig: @ 0x57d108]`, Q8.8→8.24 widening, 60-min clamp) | `nova_environment.gd` | open (sweep #2) — **tracked: `libs/env` clock slice**; a post-ENG-2 arrival with the game-runtime train, zero presence in libs/env |
+| Camera/view composition remainder (eye height 1.0 dual-declared with `nova_simulation.cpp`, TP distance/orbit `[orig: @ 0x4391d0]`, eye re-aim `[orig: @ 0x437d10]`, weapon.def /256 view-offset + axis map `[orig: @ 0x4dd380]`; the ADS bias lerp shadows the production-callerless `player_view_bias_units`) | `local_player_host.gd` | open (sweep #2) — **tracked (S): fold into `libs/world` player_view**; the ADS-lerp, the anim-key-substring stance probe (sim owns `net_stance_bits`), and the 4×-re-declared 62.5 Hz tick constant are close-now candidates riding this or any adjacent slice |
+| Editor-preview PLAYPARTANIM phase integrator coexisting with `AiSystem::advance_part_anim` | `nova_object_model.gd` | open (sweep #2) — **tracked**: route the preview through the engine integrator (the height-sampler dual-implementation pattern); runtime already uses `set_part_phase` correctly |
+| Armory derivation math (class resolve scan + masks `[orig: @ 0x5642f0]`, loadout weight Σ + encumbrance bands `[orig: @ 0x565490; @ 0x565640]`) | `armory_menu_host.gd` | open (sweep #2) — **tracked (S): `libs/def` helpers** bound on `NovaWeaponDatabase`; def parsing/slot filtering already native |
+| Particle flag literals (`1<<18/27/28`) re-declared + flags→kill-plane dispatch | `effect_world.gd`, `particle_preview.gd` | open (sweep #2) — **close-now candidate**: alias off the already-bound `NovaParticleDef` flag table (the MATERIAL_FLAG_*/OED_UPDATE_* pattern exactly) |
+| Avatar menu-portrait presentation math (BAM/frame idle, 2^28 sway, rand-yaw `[orig: @ 0x55dba0; @ 0x5600d0]`) | `avatar_preview.gd` | open (sweep #2) — minor, exception-leaning (witnessed menu-frontend presentation over Godot camera); disposition with the HUD slice's review |
 
 ### STD — records, constants, testability standards + enforcement
 
