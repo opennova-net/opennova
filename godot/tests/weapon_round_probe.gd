@@ -240,6 +240,30 @@ func _fire_diag() -> void:
 	var vf = _world.local_player_weapon_view()
 	print("[wr] post-fire: act=%d fired=%d clip=%d res=%d" % [
 			vf.current_action, vf.fired_serial, vf.clip, vf.reserve])
+	# Variant-ring rotation: reload three times and log the served reload variant per
+	# play — REVVY M4's row is "m4_1r" "m4_1r" "m4_1r2", so the plays must walk the
+	# ring in .adm order from wherever the bake's auto-delay reads left the head.
+	# [orig: AnimMap_PlayAnimBySlot @0x40bda0]
+	for r in range(3):
+		var press := true
+		var seen_serial: int = _world.local_player_weapon_view().play_serial
+		_hold(KEY_R, true)
+		await _settle(2)
+		_hold(KEY_R, false)
+		for _w in range(30):
+			await _settle(5)
+			var rv = _world.local_player_weapon_view()
+			if rv.anim_key.nocasecmp_to("anim_wpn_reload") == 0 and rv.play_serial != seen_serial:
+				print("[wr] reload %d: key=%s variant=%d clip=%d" % [r, rv.anim_key, rv.anim_variant, rv.clip])
+				press = false
+				break
+		if press:
+			print("[wr] reload %d: NOT OBSERVED" % r)
+		await _settle(90)  # let the reload finish before the next request
+		_mouse_btn(MOUSE_BUTTON_LEFT, true)  # spend a round so the next reload is allowed
+		await _settle(6)
+		_mouse_btn(MOUSE_BUTTON_LEFT, false)
+		await _settle(20)
 	# The armory-name thread: is the loadout text table resolvable on this root?
 	var root: NovaResourceRoot = _world.get_resource_root() \
 			if _world.has_method("get_resource_root") else null
