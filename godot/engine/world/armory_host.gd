@@ -238,7 +238,8 @@ func _on_loadout_accepted(loadout: Dictionary) -> void:
 # ONED play does not — fill only the missing tables.
 # [orig: Game_InitSubsystems @0x4a6cd0 loads menutxt/gametext at boot]
 func _register_text_tables(root: NovaResourceRoot) -> void:
-	for spec in [["menutxt", "menutxt.BIN"], ["gametext", "Game.bin"]]:
+	for spec in [["menutxt", "menutxt.BIN"], ["gametext", "gametext.bin"],
+			["gameui", "Game.bin"]]:
 		var bytes := root.read_file(spec[1])
 		var table: RtxtStringFile = null
 		if not bytes.is_empty():

@@ -419,7 +419,9 @@ func _connect_pressed(name: String, handler: Callable) -> void:
 
 
 func _menu_text(key: String, fallback: String) -> String:
-	for spec in [["menutxt", "Menu"], ["gametext", "Menu"]]:
+	# [orig: the armory's menu tokens resolve against the menu resource (game.bin)
+	#  via TextResource_GetStringWithFallback(resource, "Menu", key) @0x562ee0]
+	for spec in [["menutxt", "Menu"], ["gameui", "Menu"]]:
 		var t: RtxtStringFile = NovaStrings.get_table(spec[0])
 		if t != null and t.has_string_in_section(spec[1], key):
 			return t.get_string_in_section(spec[1], key)

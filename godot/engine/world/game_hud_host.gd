@@ -103,11 +103,10 @@ func _load_hud_text_tables(root: NovaResourceRoot) -> void:
 		return
 	# Refresh this global registry from the current world's root every build.
 	# Otherwise a second ONED play session can silently reuse the first root's
-	# strings, and its armory will skip the JO Game.bin table it expects.
-	var gametext := _load_rtxt(root, "Game.bin")
-	if gametext == null:
-		gametext = _load_rtxt(root, "gametext.bin")
-	NovaStrings.register_table("gametext", gametext)
+	# strings. The gametext table IS gametext.bin [orig: Game_InitSubsystems
+	# @0x4a6cd0 — TextResource_LoadFromArchive("gametext.bin") -> g_TextGameText;
+	# Game.bin is the SEPARATE menu resource (@0x552510) and carries no WepDes].
+	NovaStrings.register_table("gametext", _load_rtxt(root, "gametext.bin"))
 	# The medmssn fallback fires only when the mission .bin does not EXIST — a
 	# present-but-unparseable file loads to nothing with no fallback.
 	# [orig: TextResource_LoadMissionTextBin @0x51ede3 — FileSystem_FileExists picks

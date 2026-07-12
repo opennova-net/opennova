@@ -100,7 +100,7 @@ func _ensure_db() -> void:
 func _display_name(key: String) -> String:
 	if key.is_empty():
 		return ""
-	var t: RtxtStringFile = NovaStrings.get_table("gametext")
+	var t: RtxtStringFile = NovaStrings.get_table("gameui")
 	if t != null and t.has_string_in_section(ATBL_SECTION, key):
 		return t.get_string_in_section(ATBL_SECTION, key)
 	return key
@@ -411,7 +411,7 @@ func _menu_text(key: String, fallback: String) -> String:
 	# DEFAULT_VOICE / CHARVOICE_%d are menu UI strings: try menutxt's "Menu" then gametext's
 	# "Avatars" in the shared registry, else the readable fallback. Voice labels are cosmetic,
 	# so a miss never blocks population.
-	for spec in [["menutxt", "Menu"], ["gametext", ATBL_SECTION]]:
+	for spec in [["menutxt", "Menu"], ["gameui", ATBL_SECTION]]:
 		var t: RtxtStringFile = NovaStrings.get_table(spec[0])
 		if t != null and t.has_string_in_section(spec[1], key):
 			return t.get_string_in_section(spec[1], key)

@@ -83,7 +83,7 @@ func before_each() -> void:
 	_copy_fixture("res://../fixtures/mnu/jo_weapon.mnu", dir.path_join("weapon.mnu"))
 	_copy_fixture("res://../fixtures/def/weapon.def", dir.path_join("weapon.def"))
 	_copy_fixture("res://../fixtures/rtxt/menutxt.bin", dir.path_join("menutxt.BIN"))
-	_copy_fixture("res://../fixtures/rtxt/gametext.bin", dir.path_join("Game.bin"))
+	_copy_fixture("res://../fixtures/rtxt/gametext.bin", dir.path_join("gametext.bin"))
 
 
 func after_each() -> void:
@@ -92,7 +92,7 @@ func after_each() -> void:
 
 func after_all() -> void:
 	var dir := ProjectSettings.globalize_path(TMP_DIR)
-	for name in ["weapon.mnu", "weapon.def", "menutxt.BIN", "Game.bin"]:
+	for name in ["weapon.mnu", "weapon.def", "menutxt.BIN", "gametext.bin"]:
 		var path := dir.path_join(name)
 		if FileAccess.file_exists(path):
 			DirAccess.remove_absolute(path)

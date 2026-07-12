@@ -51,9 +51,14 @@ const EXPANSION_DISPLAY_NAMES := {"jox01": "Kendari"}
 @export var main_menu_file := "main.mnu"
 @export var ingame_menu_file := "game.mnu"
 @export var menu_text_file := "menutxt.BIN"
-# The gametext table (the original's g_TextGameText). Carries the "Avatars", weapon, and
-# macro sections the PLAYER_INFO host and others consume; registered into NovaStrings.
-@export var game_text_file := "Game.bin"
+# The gametext table (the original's g_TextGameText — in-game strings + the "WepDes"
+# weapon names the HUD/armory/killfeed resolve) [orig: Game_InitSubsystems @0x4a6cd0
+# loads "gametext.bin"].
+@export var game_text_file := "gametext.bin"
+# The menu shell's OWN text resource (options/menu strings + the "Avatars" section)
+# [orig: the menu boot loads "game.bin" @0x552510 -> the menu resource @0x25510F8 —
+# a SEPARATE table from g_TextGameText; the two were conflated pre-#226].
+@export var menu_ui_text_file := "Game.bin"
 # The menu stylesheet has a fixed canonical name the original engine looks for
 # ("named menu_style.mns for the game to find it"). It is usually PFF-archived;
 # .mns is indexed as the "menu_style" kind (so list_files and the editor's
@@ -191,14 +196,19 @@ func setup(root: NovaResourceRoot) -> bool:
 func _assemble_assets() -> void:
 	_text = _load_text(menu_text_file)
 	# Register the engine text tables into the shared NovaStrings registry, the way the
-	# original loads its TextResource globals at boot [orig: Game_InitSubsystems @ 0x4A6CD0]:
-	# menutxt (UI/voice labels) and gametext = Game.bin (the "Avatars"/weapon/macro sections
-	# host companions, the killfeed, and the HUD GameText path resolve against).
+	# original loads its TextResource globals: menutxt (UI/voice labels), gametext =
+	# gametext.bin (g_TextGameText — the "WepDes" weapon names + in-game strings
+	# [orig: Game_InitSubsystems @0x4a6cd0]), and gameui = Game.bin (the menu shell's
+	# own resource: options/menu + "Avatars" sections [orig: the menu boot @0x552510
+	# -> the menu resource @0x25510F8]).
 	if _text != null:
 		NovaStrings.register_table("menutxt", _text)
 	var gametext := _load_text(game_text_file)
 	if gametext != null:
 		NovaStrings.register_table("gametext", gametext)
+	var gameui := _load_text(menu_ui_text_file)
+	if gameui != null:
+		NovaStrings.register_table("gameui", gameui)
 	_style = _load_style(_discover_name(menu_stylesheet_file, ".mns", ""))
 	_sound_profile = _load_sound_profile(_discover_name(menu_sound_profile_file, ".lwf", "menu"))
 
