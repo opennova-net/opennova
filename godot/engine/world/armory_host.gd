@@ -109,7 +109,13 @@ func try_open() -> bool:
 		_player_class = int(sim.get_local_player_class())
 	_armory.set_player_team(_team)
 	_armory.set_player_class(_player_class)
-	_armory.set_class_selection_enabled(false)
+	# D-MNU-10 (deliberate divergence, user decision 2026-07-11): the class spin is
+	# LIVE in offline play. Retail enables it only in a network session
+	# [orig: UI_InitTeamClassSelection @0x567370 — the is_in_session branch;
+	# UI_OpenWeaponScreenSinglePlayer @0x424390 exists because SP has no session,
+	# and retail SP pins the class]. Our runtime is a listen session even offline
+	# (ADR 0009), and the SP loadout flow wants the choice.
+	_armory.set_class_selection_enabled(true)
 	var vmdef: PlayerViewmodelDef = _world.local_player_viewmodel_def() \
 			if _world.has_method("local_player_viewmodel_def") else null
 	var current_primary := vmdef.weapon_name if vmdef != null else ""

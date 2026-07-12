@@ -736,3 +736,12 @@ g_hostClassAllowMask`; `WeaponLoadout_ApplyFromBuffer` param 3 ->
   with full clips pre-selected and no per-class memory. Kept until the
   per-class buffer layer is ported; the ACCEPT-side clamp and −1 default match
   the original.
+
+- **D-MNU-10 (offline class selection, deliberate — user decision 2026-07-11):**
+  the retail WEAPON screen enables the PLAYER_CLASS spin only **in a network
+  session** `[orig: UI_InitTeamClassSelection @ 0x567370 is_in_session branch;
+  the SP-only open UI_OpenWeaponScreenSinglePlayer @ 0x424390 exists because SP
+  runs sessionless, and retail SP pins the class]`. The reimpl enables it in
+  offline play too: our runtime hosts a listen session even for SP (ADR 0009),
+  and the offline loadout flow wants the choice. The in-session filter masks,
+  sorted rows, and ACCEPT class apply are unchanged.
