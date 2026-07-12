@@ -97,11 +97,15 @@ class FakeWorld:
 	var view = null  # PlayerLocalView
 	var scope_toggle_requests := 0
 	var camera_mode_calls: Array = []
-	# The ordered action-sound seam (the effect-world seam rides the particles slice).
+	# The ordered action-sound + effect-world seams the host drains on the event batch.
 	var mission_audio = null  # FakeMissionAudio
+	var effect_world = null   # FakeEffectWorld
 
 	func get_mission_audio():
 		return mission_audio
+
+	func get_effect_world():
+		return effect_world
 
 	func local_player_weapon_view():
 		return weapon_view
@@ -407,6 +411,86 @@ func _weapon_begin_event(set_name: String) -> PlayerWeaponEvent:
 	event.action_started = 2
 	event.action_soundset = set_name
 	return event
+
+
+class FakeEffectWorld:
+	extends Node
+	var spawns: Array = []
+
+	func spawn_effect_unless_alive(_owner_key, effect: String, pos: Vector3,
+			_orientation: Vector3 = Vector3.ZERO) -> int:
+		spawns.append({"effect": effect, "pos": pos})
+		return 1
+
+	func spawn_effect(effect: String, pos: Vector3, _orientation: Vector3 = Vector3.ZERO) -> int:
+		spawns.append({"effect": effect, "pos": pos})
+		return 1
+
+
+func _weapon_particle_event(kind: int, effect: String) -> PlayerWeaponEvent:
+	var event := PlayerWeaponEvent.new()
+	event.action_started = kind
+	event.action_particle = effect
+	event.action_particle_userpoint = "muzzle1"
+	return event
+
+
+func test_action_particles_gate_on_fire_and_scope() -> void:
+	# The witnessed local-player particle routing [orig: ActionSlot_ExecuteActionTick
+	# @0x541a70]: only FIRE takes the with-effect shim, and scoped FP fire suppresses
+	# the muzzle flash [orig: @0x541aba !g_weaponScopeActive]; non-fire local begins
+	# (casing ejects on RECOIL rows) route through the no-effect shim @0x5419e0.
+	var world := FakeWorld.new()
+	var camera := Camera3D.new()
+	var host := LocalPlayerHost.new()
+	add_child_autofree(world)
+	add_child_autofree(camera)
+	add_child_autofree(host)
+	var fx := FakeEffectWorld.new()
+	add_child_autofree(fx)
+	world.effect_world = fx
+	host.setup(world, camera)
+	host.set_input_source(func() -> Dictionary:
+		return {})
+
+	# Adopt the view baseline (snapshot payloads never replay).
+	world.weapon_view = _weapon_view()
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+	assert_eq(fx.spawns.size(), 0, "snapshot adoption spawns nothing")
+
+	# RECOIL begin with a particle (the casing row): no local spawn.
+	world.weapon_events.append(_weapon_particle_event(3, "Effect_TestCas"))
+	world.weapon_view = _weapon_view()
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+	assert_eq(fx.spawns.size(), 0, "non-fire local begins spawn no particle [orig: @0x541b17]")
+
+	# FIRE begin unscoped: the muzzle flash spawns through the slot+24-style guard.
+	world.weapon_events.append(_weapon_particle_event(2, "Effect_TestMF"))
+	world.weapon_view = _weapon_view()
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+	assert_eq(fx.spawns.size(), 1, "FIRE begins spawn the muzzle particle")
+	assert_eq(String(fx.spawns[0]["effect"]), "Effect_TestMF")
+
+	# FIRE begin scoped in first person: suppressed.
+	var scoped_view := PlayerLocalView.new()
+	scoped_view.scope_engaged = true
+	world.view = scoped_view
+	world.weapon_events.append(_weapon_particle_event(2, "Effect_TestMF"))
+	world.weapon_view = _weapon_view()
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+	assert_eq(fx.spawns.size(), 1, "scoped FP fire shows no muzzle flash [orig: @0x541aba]")
+
+	# The same scoped fire in THIRD person spawns (the 3P leg [orig: @0x541a70]).
+	host.set_third_person(true)
+	world.weapon_events.append(_weapon_particle_event(2, "Effect_TestMF"))
+	world.weapon_view = _weapon_view()
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+	assert_eq(fx.spawns.size(), 2, "3P scoped fire keeps the muzzle flash")
 
 
 func test_catch_up_weapon_action_events_are_not_coalesced() -> void:

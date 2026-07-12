@@ -352,14 +352,26 @@ func _consume_weapon_view() -> void:
 		_play_viewmodel_clip(view.anim_key, view.anim_variant)
 
 
-# The action-begin SOUND leg: play the started ACTION's soundset 3D-positional at the
-# firing entity [orig: ActionSlot_ExecuteActionWithEffect @0x541860 plays the row's
-# soundset; the one-shot 3D placement is Sound_Play3DPositional @0x527cb0]. The
-# original's paired MUZZLE leg (ActionSlot_SpawnEffect @0x401f20 at the row's
-# particle + userpoint, with the FIRE-only / !scoped-FP / no-local-casings routing
-# [orig: ActionSlot_ExecuteActionTick @0x541a70] and the slot+24 one-live-group guard
-# [orig: @0x5418c8]) rides the particles slice with the effect world itself. The
-# ordered event batch preserves each begin leg when several ticks land in one frame.
+# The FIRE action kind [orig: libs/world weapon_fsm.h weapon_action::kFire = 2] —
+# the only local action-begin that takes the with-effect (muzzle) shim.
+const WEAPON_ACTION_FIRE := 2
+
+
+# The action-begin SOUND + MUZZLE legs: play the started ACTION's soundset
+# 3D-positional at the firing entity and spawn its particle effect at the weapon
+# model's user point [orig: ActionSlot_ExecuteActionWithEffect @0x541860 plays the
+# row's soundset and calls ActionSlot_SpawnEffect @0x401f20 with the row's
+# particle + userpoint; the one-shot 3D placement is Sound_Play3DPositional
+# @0x527cb0]. The ordered event batch preserves each begin leg when several ticks
+# land in one frame.
+#
+# Particle gating is the witnessed local-player routing [orig:
+# ActionSlot_ExecuteActionTick @0x541a70]: for the LOCAL player only the FIRE
+# action takes the with-effect shim, and only in third person, from a vehicle, or
+# un-scoped in first person (the FP muzzle-flash config dword_24D20C0 bit 0 rides
+# that leg; treated always-on here) — every other local begin routes through the
+# no-effect shim @0x5419e0 (no casing ejects in your own FP view; remote views
+# spawn them via the remote leg @0x541a83, an MP seam).
 func _fire_action_effects(event: PlayerWeaponEvent) -> void:
 	if _world == null:
 		return
@@ -367,6 +379,49 @@ func _fire_action_effects(event: PlayerWeaponEvent) -> void:
 		var audio = _world.get_mission_audio()
 		if audio != null:
 			audio.fire_soundset(event.action_soundset, event.world_position)
+	if event.action_particle.is_empty() or not _world.has_method("get_effect_world"):
+		return
+	if event.action_started != WEAPON_ACTION_FIRE:
+		return  # local non-fire begins are the no-effect shim [orig: @0x541b17]
+	var scoped := _view != null and _view.scope_engaged
+	if scoped and not _third_person:
+		return  # scoped FP fire shows no muzzle flash [orig: @0x541aba !g_weaponScopeActive]
+	var fx = _world.get_effect_world()
+	if fx == null:
+		return
+	var pos := _action_particle_world_position(event.action_particle_userpoint)
+	if fx.has_method("spawn_effect_unless_alive"):
+		# One live muzzle group at a time — the witnessed slot+24 guard
+		# [orig: @0x5418c8 spawns only when the recorded handle is clear].
+		fx.spawn_effect_unless_alive(self, event.action_particle, pos)
+	else:
+		fx.spawn_effect(event.action_particle, pos)
+
+
+# World-space spawn point for an ACTION particle: the named user point on a viewmodel
+# part (the gun carries the muzzle points), through the part's global transform. The
+# static model-space point is used as-is — composing the current bone pose onto it is a
+# tracked deferral (ptl-format-re.md §8). Falls back to the first part's origin, then
+# the player eye.
+func _action_particle_world_position(userpoint: String) -> Vector3:
+	var fallback := Vector3.INF
+	for part in _vm_parts:
+		if part == null or not is_instance_valid(part) or not part.has_method("get_object_data"):
+			continue
+		if fallback == Vector3.INF:
+			fallback = part.global_transform.origin
+		if userpoint.is_empty():
+			continue
+		var data = part.get_object_data()
+		if data == null:
+			continue
+		for i in range(data.get_user_point_count()):
+			var info: Dictionary = data.get_user_point_info(i)
+			if String(info.get("name", "")).nocasecmp_to(userpoint) == 0:
+				return part.global_transform * Vector3(info.get("position", Vector3.ZERO))
+	if fallback != Vector3.INF:
+		return fallback
+	return _world.local_player_position() + Vector3(0, PLAYER_EYE_HEIGHT, 0)
 
 
 # The action-END sound leg: the finished ACTION's soundsetend, 3D-positional at the
