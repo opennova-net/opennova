@@ -299,14 +299,39 @@ int main(void) {
     }
     printf("M4AUTO/M4 armory fields OK\n");
 
-    /* Weapon flags mask (WeaponDef+8 bits via the token table: auto = 0x100, Sighted =
-       0x2, WhileSwimming = 0x4; LaserBeam is unmapped -> raw_lines) and the ADS zoom
-       magnification [orig: WeaponSlot_CanFireInCurrentState @ 0x53f0b0 auto gate;
+    /* Weapon flags — the FULL witnessed token table, both dwords [orig: the
+       16-B-stride {name, 0, flags1, flags2} table @ 0x830bf0]: auto = 0x100,
+       Sighted = 0x2, WhileSwimming = 0x1000000 (the old 7-entry table aliased it
+       onto Underwater's 0x4 — corrected), LaserBeam = 0x40000000 (previously
+       unmapped -> raw_lines only), NoAmmoTypes = flags2 0x40.
+       [orig: WeaponSlot_CanFireInCurrentState @ 0x53f0b0 auto gate;
        Player_ToggleWeaponScope @ 0x4df0c0 Flags & 3 gate + FOV 80/zoom @ 0x4df401]. */
-    if (m4->flags != (0x100 | 0x2 | 0x4)) {
+    if (m4->flags != (0x100 | 0x2 | 0x1000000 | 0x40000000)) {
         fprintf(stderr, "FAIL: M4AUTO flags mismatch: 0x%x\n", m4->flags);
         def_free_weapons(&wf);
         return 1;
+    }
+    if (m4->flags2 != 0) {
+        fprintf(stderr, "FAIL: M4AUTO flags2 mismatch: 0x%x\n", m4->flags2);
+        def_free_weapons(&wf);
+        return 1;
+    }
+    /* flags2 tokens land in the SECOND dword (the table's fourth column):
+       the shotgun's NoAmmoTypes = flags2 0x40, flags1 untouched by it. */
+    {
+        const DefWeaponDef *sg = NULL;
+        for (size_t i = 0; i < wf.count; ++i) {
+            if (strcmp(wf.entries[i].weapon_name, "WPN_RemmingtonSG") == 0) {
+                sg = &wf.entries[i];
+                break;
+            }
+        }
+        if (!sg || sg->flags2 != 0x40) {
+            fprintf(stderr, "FAIL: RemmingtonSG flags2 mismatch (found=%d flags2=0x%x)\n",
+                    sg != NULL, sg ? sg->flags2 : 0);
+            def_free_weapons(&wf);
+            return 1;
+        }
     }
     if (fabsf(m4->scope_max_mag - 2.0f) > FEPS) {
         fprintf(stderr, "FAIL: M4AUTO scope_max_mag mismatch: %.3f\n", m4->scope_max_mag);
@@ -424,6 +449,61 @@ int main(void) {
     }
 
     def_free_weapons(&wf);
+    /* A nested `action` line while one is open is REFUSED by the original: it
+       logs "forgot an end", keeps the current row open (subsequent keys
+       overwrite it, last writer wins) and never creates the new row — the
+       never-created suffixes become zeroed generated defaults at bind time.
+       [orig: ActionDef_ParseScriptLine @ 0x402409 "forgot an end"; the driver
+       WeaponDefs_ParseLineCallback @ 0x54388d forwards in-ACTION lines before
+       its own `action` dispatch]. Every shipped weapon.def corpus (JOX, JOTAC
+       localres, RevX02, JO:CA, jox01, demo) is fully END-terminated, so only
+       malformed data reaches this. Also covers the bare `delay` alias
+       (= delayend) [orig: @ 0x40279a / @ 0x402b2c]. */
+    {
+        static const char mixed[] =
+            "weapon \"WPN_MIXED\"\n"
+            "\tflags auto\n"
+            "\taction \"idle\"\n"
+            "\t\tdelayend auto\n"
+            "\t\tanim anim_wpn_idle\n"
+            "\taction \"emptyidle\"\n"
+            "\t\tdelayend auto\n"
+            "\t\tanim anim_wpn_idle\n"
+            "\taction \"fire\"\n"
+            "\t\tdelayend 6\n"
+            "\t\tanim anim_wpn_fire\n"
+            "\tend\n"
+            "\taction \"recoil\"\n"
+            "\t\tdelay 4\n"
+            "\tend\n"
+            "end\n";
+        DefWeaponsFile wx;
+        if (def_parse_weapons_memory((const uint8_t *)mixed, sizeof(mixed) - 1, &wx) != 0) {
+            fprintf(stderr, "FAIL: mixed-terminator parse errored\n");
+            return 1;
+        }
+        const DefWeaponDef *w = NULL;
+        for (size_t i = 0; i < wx.count; ++i)
+            if (strcmp(wx.entries[i].weapon_name, "WPN_MIXED") == 0) w = &wx.entries[i];
+        /* idle stays open through both refused `action` lines and ends up
+           carrying fire's keys; emptyidle/fire rows are never created. */
+        int ok = w != NULL && w->actions_count == 2;
+        if (ok) {
+            const DefWeaponAction *idle = &w->actions[0];
+            const DefWeaponAction *recoil = &w->actions[1];
+            ok = strcmp(idle->name, "idle") == 0 && idle->delaystart == 0 &&
+                 idle->delayend == 6 && strcmp(idle->anim, "anim_wpn_fire") == 0 &&
+                 strcmp(recoil->name, "recoil") == 0 && recoil->delaystart == 0 &&
+                 recoil->delayend == 4;
+        }
+        def_free_weapons(&wx);
+        if (!ok) {
+            fprintf(stderr, "FAIL: nested-action refusal (swallow) semantics\n");
+            return 1;
+        }
+        printf("nested-action refusal + delay alias OK\n");
+    }
+
     printf("PASS: weapon parsing OK\n");
     return 0;
 }

@@ -4,16 +4,37 @@ extends RefCounted
 ## The local player's equipped-weapon FSM view — the typed record behind
 ## `NovaSimulation.get_local_player_weapon_state()`'s transport Dictionary (ADR 0017:
 ## the record is the contract, the dict is its C++-binding encoding). Serials are
-## monotonic event counters (several 62.5 Hz logic ticks can run per render frame, so
-## edge events surface as counts, never booleans): `play_serial` bumps each time the
-## FSM starts a clip (`anim_key`), `fired`/`dry`/`reload`/`unscope`/`rescope` mirror
-## the handler events. [orig: WeaponAction_ProcessFrame @0x540e60 + the wpn_std_*
+## monotonic diagnostics and rebuild cursors; lossless clip/begin/end delivery uses
+## GameWorld's ordered PlayerWeaponEvent drain because several 62.5 Hz logic ticks can
+## run per render frame. `fired`/`dry`/`reload`/`unscope`/`rescope` mirror the handler
+## counters. [orig: WeaponAction_ProcessFrame @0x540e60 + the wpn_std_*
 ## handlers; docs/net/novaworld-net-re.md §5.62]
 
 var active := false
 var current_action := 0    # world::weapon_action id (0 idle .. 11 overheated)
 var anim_key := ""         # the .adm clip key of the last play event
+# The served VARIANT of that key — multi-clip .adm rows rotate round-robin and the
+# sim's ring latches which variant this play consumed; every viewmodel part plays
+# the same latched index. [orig: AnimMap_PlayAnimBySlot @0x40bda0 latches the served
+# ring entry at animState+68 while the head advances]
+var anim_variant := 0
 var play_serial := 0
+# Snapshot diagnostics for the last action begin: `action_serial` bumps when an
+# action's ACTIVE phase begins and the latest ACTION row rides alongside. Presentation
+# consumes PlayerWeaponEvent records instead; these fields are not a delivery queue.
+# [orig: ActionSlot_ExecuteActionWithEffect @0x541860 -> ActionSlot_SpawnEffect @0x401f20]
+var action_serial := 0
+var action_started := -1   # the started action's slot id (weapon_action::*; -1 = none)
+var action_soundset := ""
+var action_particle := ""
+var action_particle_userpoint := ""
+# Snapshot diagnostics for the last action end: `action_end_serial` bumps when an
+# ACTIVE phase finishes and the latest row's soundsetend rides alongside — fire rows
+# carry the per-shot gunshot here (GS_*), reload rows the completion sound.
+# [orig: ActionSlot_FinishActivePhase @0x53f7b0 -> the end shim @0x401100 plays
+#  ActionDef+12, gated on the phase byte being 2 (ACTIVE)]
+var action_end_serial := 0
+var action_end_soundset := ""
 var fired_serial := 0
 var dry_serial := 0
 var reload_serial := 0
@@ -39,7 +60,15 @@ static func from_state_dict(d: Dictionary) -> PlayerWeaponView:
 	out.active = true
 	out.current_action = int(d.get("current", 0))
 	out.anim_key = String(d.get("anim_key", ""))
+	out.anim_variant = int(d.get("anim_variant", 0))
 	out.play_serial = int(d.get("play_serial", 0))
+	out.action_serial = int(d.get("action_serial", 0))
+	out.action_started = int(d.get("action_started", -1))
+	out.action_soundset = String(d.get("action_soundset", ""))
+	out.action_particle = String(d.get("action_particle", ""))
+	out.action_particle_userpoint = String(d.get("action_particle_userpoint", ""))
+	out.action_end_serial = int(d.get("action_end_serial", 0))
+	out.action_end_soundset = String(d.get("action_end_soundset", ""))
 	out.fired_serial = int(d.get("fired_serial", 0))
 	out.dry_serial = int(d.get("dry_serial", 0))
 	out.reload_serial = int(d.get("reload_serial", 0))

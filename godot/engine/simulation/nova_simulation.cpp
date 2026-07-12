@@ -172,6 +172,11 @@ NovaSimulation::NovaSimulation() {
 }
 
 void NovaSimulation::reset_world() {
+	pending_weapon_events_.clear();
+	weapon_active_ = false;
+	weapon_fire_held_ = false;
+	weapon_fire_pressed_ = false;
+	weapon_reload_pressed_ = false;
 	world_ = std::make_unique<World>();
 	ai_ = std::make_unique<AiSystem>();
 	bms_ = std::make_unique<opennova::mission::BmsEventSystem>();
@@ -832,6 +837,7 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_local_player_view"), &NovaSimulation::get_local_player_view);
 	ClassDB::bind_static_method("NovaSimulation", D_METHOD("fov_vertical_from_horizontal", "fov_h_deg", "aspect"), &NovaSimulation::fov_vertical_from_horizontal);
 	ClassDB::bind_method(D_METHOD("get_local_player_weapon_state"), &NovaSimulation::get_local_player_weapon_state);
+	ClassDB::bind_method(D_METHOD("drain_local_player_weapon_events"), &NovaSimulation::drain_local_player_weapon_events);
 	ClassDB::bind_method(D_METHOD("get_local_player_health"), &NovaSimulation::get_local_player_health);
 	ClassDB::bind_method(D_METHOD("get_local_player_max_health"), &NovaSimulation::get_local_player_max_health);
 	ClassDB::bind_method(D_METHOD("get_local_player_team"), &NovaSimulation::get_local_player_team);
@@ -1348,6 +1354,20 @@ void NovaSimulation::set_player_input(bool p_forward, bool p_back, bool p_left, 
 	// Look pitch (mission degrees, up positive) -> entity Pitch@+0x14 (BAM32). No 90-offset.
 	player_input_.look_pitch =
 	    static_cast<int32_t>(static_cast<double>(p_look_pitch_deg) * opennova::world::kBamPerDegree);
+	// The movement-held latch and the unscope-on-move [orig:
+	// Player_PackInputStateToEntity @ 0x4df450 — any of the four direction keys
+	// sets byte_B7653B (blocks scope-UP on Scoped weapons @ 0x4df29c) and, while
+	// SETTLED at scope on a Scoped (flags 1) weapon, routes through
+	// Player_ToggleWeaponScope @ 0x4df4c9..0x4df4ec = the full unscope. The
+	// toggle's ForceScoped pin (@ 0x4df12d) keeps pinned sights raised].
+	const bool move_held = p_forward || p_back || p_left || p_right;
+	if (opennova::world::player_view_move_input(player_view_, move_held,
+			weapon_active_ ? weapon_def_.flags : 0) &&
+			(weapon_def_.flags & 0x20000000) == 0) {
+		if (opennova::world::player_view_set_engaged(player_view_, false,
+				(weapon_def_.flags2 & 0x200) != 0))
+			opennova::world::weapon_fsm_queue_scope_down(weapon_slot_);
+	}
 }
 
 Vector3 NovaSimulation::get_local_player_position() const {
@@ -1452,9 +1472,41 @@ Dictionary NovaSimulation::get_local_player_aim_overlay() const {
 
 // --- the local player's equipped-weapon FSM (net-re §5.62) --------------------------
 
+NovaSimulation::WeaponClipRing *NovaSimulation::weapon_ring_for(const String &p_key_lower) {
+	for (std::pair<String, WeaponClipRing> &kv : weapon_clip_rings_) {
+		if (kv.first == p_key_lower) return &kv.second;
+	}
+	return nullptr;
+}
+
+float NovaSimulation::weapon_ring_take_length(const char *p_key) {
+	// Serve the ring head's duration, then advance the head — the consuming read
+	// [orig: Anim_GetDurationTicks @ 0x53ee10: currentEntry = *slot;
+	//  *slot = *(currentEntry + 36); duration from currentEntry's data].
+	WeaponClipRing *ring = weapon_ring_for(String::utf8(p_key).to_lower());
+	if (ring == nullptr || ring->lengths.is_empty()) return -1.0f;
+	const float served = ring->lengths[ring->head];
+	ring->head = (ring->head + 1) % static_cast<int>(ring->lengths.size());
+	return served;
+}
+
+int NovaSimulation::weapon_ring_take_variant(const String &p_key) {
+	// Serve the head as the PLAYED variant and advance — the play latch: playback
+	// follows the served entry while the ring moves on [orig: AnimMap_PlayAnimBySlot
+	// @ 0x40bda0: animEntry = slot[i]; slot[i] = next; animState+68 = animEntry].
+	WeaponClipRing *ring = weapon_ring_for(p_key.to_lower());
+	if (ring == nullptr || ring->lengths.is_empty()) return 0;
+	const int served = ring->head;
+	ring->head = (ring->head + 1) % static_cast<int>(ring->lengths.size());
+	return served;
+}
+
 void NovaSimulation::set_local_player_weapon(const Dictionary &p_def,
 		const Dictionary &p_clip_seconds) {
 	using opennova::world::WeaponFsmActionRow;
+	// A mount is a new presentation epoch: no payload from the previous weapon may
+	// cross this seam, even though its strings were copied into the pending records.
+	pending_weapon_events_.clear();
 	// Mirror the weapon dict's ACTION rows into the def-agnostic bake inputs.
 	std::vector<WeaponFsmActionRow> rows;
 	const Array actions = p_def.get("actions", Array());
@@ -1470,25 +1522,57 @@ void NovaSimulation::set_local_player_weapon(const Dictionary &p_def,
 		snprintf(row.function, sizeof(row.function), "%s", function.get_data());
 		row.delaystart = static_cast<int32_t>(int64_t(a.get("delaystart", -1)));
 		row.delayend = static_cast<int32_t>(int64_t(a.get("delayend", -1)));
+		// The audio/effect legs ride the bake into the pool entries
+		// [orig: ActionDef_ParseScriptLine @ 0x4023c0 rows].
+		const CharString soundset = String(a.get("soundset", "")).utf8();
+		const CharString soundsetend = String(a.get("soundsetend", "")).utf8();
+		const CharString particle = String(a.get("particle", "")).utf8();
+		const CharString userpoint = String(a.get("particleuserpoint", "")).utf8();
+		snprintf(row.soundset, sizeof(row.soundset), "%s", soundset.get_data());
+		snprintf(row.soundsetend, sizeof(row.soundsetend), "%s", soundsetend.get_data());
+		snprintf(row.particle, sizeof(row.particle), "%s", particle.get_data());
+		snprintf(row.particleuserpoint, sizeof(row.particleuserpoint), "%s", userpoint.get_data());
 		rows.push_back(row);
 	}
-	// Clip lengths come from the loaded viewmodel's .adm (seconds); the bake converts to
-	// the 62.5 Hz ticks [orig: Anim_GetDurationTicks @ 0x53ee10].
-	struct ClipCtx {
-		const Dictionary *seconds;
-	} ctx{ &p_clip_seconds };
+	// Clip lengths come from the loaded viewmodel's .adm (seconds) as per-key VARIANT
+	// arrays; they seed the slot rings the bake and the play events consume
+	// serve-then-advance [orig: the animState slot heads (+72) built by
+	// AnimMap_RegisterBoneNode @ 0x40c2d0; Anim_GetDurationTicks @ 0x53ee10].
+	weapon_clip_rings_.clear();
+	weapon_anim_variant_ = 0;
+	{
+		const Array keys = p_clip_seconds.keys();
+		for (int i = 0; i < keys.size(); ++i) {
+			WeaponClipRing ring;
+			const Variant v = p_clip_seconds[keys[i]];
+			if (v.get_type() == Variant::PACKED_FLOAT32_ARRAY) {
+				ring.lengths = v;
+			} else {
+				// Single-variant convenience: a plain number is a one-entry ring.
+				ring.lengths.push_back(static_cast<float>(double(v)));
+			}
+			if (ring.lengths.is_empty()) continue;
+			weapon_clip_rings_.emplace_back(String(keys[i]).to_lower(), ring);
+		}
+	}
+	// The bake probes existence as a pure lookup and reads durations ring-wise —
+	// one consuming read per 'auto' field [orig: Anim_InitActions @ 0x541fa0;
+	// the lookup @ 0x5421ae, the reads @ 0x5421c5 / @ 0x5421d8].
+	const auto resolve_fn = [](void *p_ctx, const char *key) -> int {
+		NovaSimulation *self = static_cast<NovaSimulation *>(p_ctx);
+		return self->weapon_ring_for(String::utf8(key).to_lower()) != nullptr ? 1 : 0;
+	};
 	const auto clip_fn = [](void *p_ctx, const char *key) -> float {
-		const ClipCtx *c = static_cast<const ClipCtx *>(p_ctx);
-		const String k = String::utf8(key);
-		if (!c->seconds->has(k)) return -1.0f;
-		return static_cast<float>(double((*c->seconds)[k]));
+		return static_cast<NovaSimulation *>(p_ctx)->weapon_ring_take_length(key);
 	};
 	weapon_def_ = opennova::world::WeaponFsmDef{};
-	opennova::world::weapon_fsm_bake(rows.data(), rows.size(), clip_fn, &ctx, weapon_def_);
+	opennova::world::weapon_fsm_bake(rows.data(), rows.size(), resolve_fn, clip_fn, this,
+			weapon_def_);
 	const int flags = int(p_def.get("flags", 0));
 	weapon_def_.auto_fire = (flags & 0x100) != 0; // [orig: WeaponSlot_CanFireInCurrentState @ 0x53f0b0]
 	weapon_def_.burst3 = (flags & 0x20) != 0;     // [orig: WeaponAction_Fire @ 0x542c8a]
 	weapon_def_.flags = flags;                    // raw mask: the scope gate + fov policy read it
+	weapon_def_.flags2 = int(p_def.get("flags2", 0)); // Inset (0x200) picks the 7-step ease
 	weapon_scope_max_mag_ = float(double(p_def.get("scope_max_mag", 0.0)));
 	// The 3P body-channel kinds [orig: weapon.def special_hold/attack_anim -> the
 	// AdmDefs record +0xA4/+0xA8; world-wac-ai-re.md §14.8.4].
@@ -1514,16 +1598,35 @@ void NovaSimulation::set_local_player_weapon(const Dictionary &p_def,
 	weapon_slot_.reserve = int(p_def.get("startrounds", 0));
 	weapon_play_serial_ = 0;
 	weapon_anim_key_ = String();
+	weapon_anim_variant_ = 0;
 	weapon_fired_serial_ = weapon_dry_serial_ = weapon_reload_serial_ = 0;
 	weapon_unscope_serial_ = weapon_rescope_serial_ = 0;
+	weapon_action_serial_ = 0;
+	weapon_action_started_ = -1;
+	weapon_action_end_serial_ = 0;
+	weapon_action_finished_ = -1;
 	weapon_fire_held_ = weapon_fire_pressed_ = weapon_reload_pressed_ = false;
-	player_view_.scope_engaged = false; // a fresh mount starts at the hip
+	// A fresh mount starts at the hip with the interp cleared and the hipfire
+	// latch reset [orig: Player_MountWeaponSlot zeroes the view biases @ 0x4dfbcf].
+	player_view_.scope_engaged = false;
+	player_view_.scope_step = 0;
+	player_view_.ease_steps = opennova::world::kScopeEaseSteps;
+	player_view_.scope_hipfire = true;
 	weapon_active_ = true;
 }
 
 void NovaSimulation::clear_local_player_weapon() {
 	weapon_active_ = false;
+	pending_weapon_events_.clear();
+	weapon_fire_held_ = false;
+	weapon_fire_pressed_ = false;
+	weapon_reload_pressed_ = false;
+	weapon_clip_rings_.clear();
+	weapon_anim_variant_ = 0;
 	player_view_.scope_engaged = false;
+	player_view_.scope_step = 0;
+	player_view_.ease_steps = opennova::world::kScopeEaseSteps;
+	player_view_.scope_hipfire = true;
 	weapon_hold_kind_ = 0;
 	weapon_attack_kind_ = 0;
 	weapon_anim_map_ = String();
@@ -1542,7 +1645,22 @@ bool NovaSimulation::request_local_player_scope_toggle() {
 	//  @ 0x82CE94, and queues the scopeup/scopedown FSM state @ 0x53f050/0x53f080]
 	if (!weapon_active_) return false;
 	if (!opennova::world::weapon_fsm_scope_toggle_allowed(weapon_def_, weapon_slot_)) return false;
-	player_view_.scope_engaged = !player_view_.scope_engaged;
+	// Scope-UP is refused while a movement key is held on a Scoped weapon
+	// [orig: byte_B7653B && (flags & 1) -> return @ 0x4df29c].
+	if (!player_view_.scope_engaged &&
+			opennova::world::player_view_scope_up_blocked(player_view_, weapon_def_.flags))
+		return false;
+	// ForceScoped pins the raised sight: un-scoping is refused once settled
+	// [orig: (flags1 & 0x20000000) == 0 || !g_weaponScopeActive @ 0x4df12d].
+	if (player_view_.scope_engaged && (weapon_def_.flags & 0x20000000) != 0 &&
+			!opennova::world::player_view_scope_ease_active(player_view_))
+		return false;
+	// The toggle latches this ease's step count (7 for Inset weapons, else 15;
+	// 1 on the hipfire-return leg) and REFUSES while the previous ease runs
+	// [orig: Player_ToggleWeaponScope @ 0x4df177 !activeFlag; Setup @ 0x4df1b3..0x4df36e].
+	if (!opennova::world::player_view_set_engaged(player_view_, !player_view_.scope_engaged,
+			(weapon_def_.flags2 & 0x200) != 0))
+		return false;
 	if (player_view_.scope_engaged)
 		opennova::world::weapon_fsm_queue_scope_up(weapon_slot_);
 	else
@@ -1574,6 +1692,23 @@ Dictionary NovaSimulation::get_local_player_view() const {
 	Dictionary out;
 	out["scope_engaged"] = player_view_.scope_engaged;
 	out["scope_fraction"] = opennova::world::player_view_scope_fraction(player_view_);
+	// The NoCardSwitch reload rule: while the equipped slot is mid-RELOAD on a
+	// weapon WITHOUT NoCardSwitch (flags 0x2000000), the FP camera drops the ADS
+	// view bias for the frame — the host reads the eased fraction as 0.
+	// [orig: Player_UpdateFirstPersonCamera @ 0x4dd439/@ 0x4dd4cc; the same
+	//  predicate is Player_IsReloadingCardSwitchWeapon @ 0x4dcdd0 (ex kong
+	//  "Player_IsDriverInVehicle"), whose one caller refuses fire @ 0x5cf7be]
+	out["suppress_view_bias"] = weapon_active_ &&
+			weapon_slot_.current == opennova::world::weapon_action::kReload &&
+			(weapon_def_.flags & 0x2000000) == 0;
+	// The scope-card switch: a Scoped (flags 0x1) weapon at FULL raise in first person
+	// draws the SIGHTS card INSTEAD of the FP viewmodel — the frame draws one or the
+	// other, never both. [orig: Player_IsEquippedWeaponScoped @ 0x4dcc80 (Flags & 1 &&
+	// g_weaponScopeActive) routes the frame to draw_weapon_sight_overlays @ 0x4dce00;
+	// the FP model call @ 0x5d822c requires both scope gates CLEAR @ 0x5d8212..0x5d8218]
+	out["scope_card_active"] = weapon_active_ && (weapon_def_.flags & 1) != 0 &&
+			player_view_.scope_engaged && !player_view_.third_person &&
+			!opennova::world::player_view_scope_ease_active(player_view_);
 	out["fov_h_deg"] = opennova::world::player_view_fov_h_deg(player_view_,
 			weapon_active_ ? weapon_def_.flags : 0,
 			weapon_active_ ? weapon_scope_max_mag_ : 0.0f);
@@ -1608,9 +1743,54 @@ void NovaSimulation::tick_local_player_weapon() {
 	opennova::world::weapon_fsm_tick(weapon_def_, weapon_slot_, in, ev);
 	weapon_fire_pressed_ = false; // edges consume on the first tick of the frame
 	weapon_reload_pressed_ = false;
+	PendingWeaponEvent pending;
+	pending.tick = world_->logic_tick;
+	bool has_presentation_event = false;
 	if (ev.play_anim) {
 		++weapon_play_serial_;
 		weapon_anim_key_ = String::utf8(ev.anim_key);
+		// The play consumes the slot ring and latches the served variant — the host
+		// plays exactly this variant on every viewmodel part
+		// [orig: AnimMap_PlayAnimBySlot @ 0x40bda0 advances the head and latches
+		//  the served entry at animState+68].
+		weapon_anim_variant_ = weapon_ring_take_variant(weapon_anim_key_);
+		pending.anim_key = weapon_anim_key_;
+		pending.anim_variant = weapon_anim_variant_;
+		has_presentation_event = true;
+	}
+	if (ev.action_started >= 0) {
+		// Copy the begin leg while this def is mounted; a later weapon switch cannot
+		// change the queued sound/effect payload.
+		// [orig: ActionSlot_ExecuteActionWithEffect @ 0x541860].
+		++weapon_action_serial_;
+		weapon_action_started_ = ev.action_started;
+		pending.action_started = ev.action_started;
+		if (ev.action_started < opennova::world::weapon_action::kCount) {
+			const opennova::world::WeaponFsmAction &act = weapon_def_.actions[ev.action_started];
+			pending.action_soundset = String::utf8(act.soundset);
+			pending.action_particle = String::utf8(act.particle);
+			pending.action_particle_userpoint = String::utf8(act.particle_userpoint);
+		}
+		has_presentation_event = true;
+	}
+	if (ev.action_finished >= 0) {
+		// The END leg: the finished action's soundsetend — fire rows carry the gunshot
+		// here, reload rows the completion sound
+		// [orig: ActionSlot_FinishActivePhase @ 0x53f7b0 -> the end shim @ 0x401100].
+		++weapon_action_end_serial_;
+		weapon_action_finished_ = ev.action_finished;
+		pending.action_finished = ev.action_finished;
+		if (ev.action_finished < opennova::world::weapon_action::kCount) {
+			pending.action_end_soundset =
+					String::utf8(weapon_def_.actions[ev.action_finished].soundsetend);
+		}
+		has_presentation_event = true;
+	}
+	// Preserve the retail call order within one pump: clip start, begin leg, then
+	// finish leg. Records themselves stay in logic-tick order until the host drains.
+	if (has_presentation_event) {
+		pending.world_position = get_local_player_position();
+		pending_weapon_events_.push_back(std::move(pending));
 	}
 	if (ev.fired) {
 		++weapon_fired_serial_;
@@ -1639,11 +1819,16 @@ void NovaSimulation::tick_local_player_weapon() {
 	// [orig: g_weaponScopeActive writes; the rescope block @ 0x54139e].
 	if (ev.unscope) {
 		++weapon_unscope_serial_;
-		player_view_.scope_engaged = false;
+		// The forced paths run the same refusing toggle — a mid-ease unscope keeps
+		// the scope (rare: a reload requested inside the raise ease)
+		// [orig: @ 0x543136 calls Player_ToggleWeaponScope, activeFlag-gated].
+		opennova::world::player_view_set_engaged(player_view_, false,
+				(weapon_def_.flags2 & 0x200) != 0);
 	}
 	if (ev.rescope) {
 		++weapon_rescope_serial_;
-		player_view_.scope_engaged = true;
+		opennova::world::player_view_set_engaged(player_view_, true,
+				(weapon_def_.flags2 & 0x200) != 0);
 	}
 }
 
@@ -1653,7 +1838,38 @@ Dictionary NovaSimulation::get_local_player_weapon_state() const {
 	if (!weapon_active_) return out;
 	out["current"] = weapon_slot_.current;
 	out["anim_key"] = weapon_anim_key_;
+	out["anim_variant"] = weapon_anim_variant_;
 	out["play_serial"] = static_cast<int64_t>(weapon_play_serial_);
+	// The last-started action's audio/effect legs remain useful snapshot diagnostics;
+	// ordered delivery uses drain_local_player_weapon_events().
+	// [orig: ActionSlot_ExecuteActionWithEffect
+	// @ 0x541860 -> ActionSlot_SpawnEffect @ 0x401f20].
+	out["action_serial"] = static_cast<int64_t>(weapon_action_serial_);
+	if (weapon_action_started_ >= 0 &&
+			weapon_action_started_ < opennova::world::weapon_action::kCount) {
+		const opennova::world::WeaponFsmAction &act = weapon_def_.actions[weapon_action_started_];
+		out["action_started"] = weapon_action_started_;
+		out["action_soundset"] = String::utf8(act.soundset);
+		out["action_particle"] = String::utf8(act.particle);
+		out["action_particle_userpoint"] = String::utf8(act.particle_userpoint);
+	} else {
+		out["action_started"] = -1;
+		out["action_soundset"] = String();
+		out["action_particle"] = String();
+		out["action_particle_userpoint"] = String();
+	}
+	// The latest END-leg snapshot diagnostic: fire rows carry the per-shot gunshot
+	// here (GS_*), reload rows the completion sound. Ordered delivery uses the batch.
+	// [orig: ActionSlot_FinishActivePhase @ 0x53f7b0 -> the end shim @ 0x401100 plays
+	//  ActionDef+12 at the owner entity].
+	out["action_end_serial"] = static_cast<int64_t>(weapon_action_end_serial_);
+	if (weapon_action_finished_ >= 0 &&
+			weapon_action_finished_ < opennova::world::weapon_action::kCount) {
+		out["action_end_soundset"] =
+				String::utf8(weapon_def_.actions[weapon_action_finished_].soundsetend);
+	} else {
+		out["action_end_soundset"] = String();
+	}
 	out["fired_serial"] = static_cast<int64_t>(weapon_fired_serial_);
 	out["dry_serial"] = static_cast<int64_t>(weapon_dry_serial_);
 	out["reload_serial"] = static_cast<int64_t>(weapon_reload_serial_);
@@ -1682,6 +1898,28 @@ Dictionary NovaSimulation::get_local_player_weapon_state() const {
 			out["body_anim_phase"] = p->inf.wpn_clip_phase;
 		}
 	}
+	return out;
+}
+
+Array NovaSimulation::drain_local_player_weapon_events() {
+	Array out;
+	const uint32_t now = world_ ? world_->logic_tick : 0;
+	for (const PendingWeaponEvent &event : pending_weapon_events_) {
+		Dictionary row;
+		// Unsigned subtraction intentionally preserves age across logic-tick wrap.
+		row["age_ticks"] = static_cast<int64_t>(now - event.tick);
+		row["world_position"] = event.world_position;
+		row["anim_key"] = event.anim_key;
+		row["anim_variant"] = event.anim_variant;
+		row["action_started"] = event.action_started;
+		row["action_soundset"] = event.action_soundset;
+		row["action_particle"] = event.action_particle;
+		row["action_particle_userpoint"] = event.action_particle_userpoint;
+		row["action_finished"] = event.action_finished;
+		row["action_end_soundset"] = event.action_end_soundset;
+		out.push_back(row);
+	}
+	pending_weapon_events_.clear();
 	return out;
 }
 
@@ -1724,6 +1962,7 @@ String NovaSimulation::get_local_player_weapon_name() const {
 
 void NovaSimulation::restart() {
 	if (!loaded_ || !have_baseline_) return;
+	pending_weapon_events_.clear();
 	world_->restore(baseline_); // rewinds registry/vars/env/clock + re-inits systems (incl. AI;
 	                            // WacSystem::on_load also resets its 62-tick accumulator)
 }

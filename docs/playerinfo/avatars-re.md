@@ -221,17 +221,20 @@ So the menu reads the parsed object directly; the display vocabulary lives in th
 `"Avatars"` RTXT string table, keyed by the name fields, and the head/body
 display names form a "lastname - firstname" character label.
 
-**The `"Avatars"` section lives in `Game.bin`** — the *gametext* resource the
-engine loads into `g_TextGameText` at boot
-`[orig: Game_InitSubsystems @ 0x4A6CD0; lookup GameText_GetStringWithFallback
-@ 0x51eb90]` (NOT `menutxt.BIN`, which carries only `Menu`/`MenuStats`). Verified
-by extraction: the retail `Game.bin` has sections `MENU / RemapActions / RemapKeys
-/ WeaponDescriptions / Macros / Avatars`, and the `Avatars` keys resolve
-(`AV_NAT_RUSSIA → "Russia"`, `AV_DIV_SEAL → "SEAL"`, `AV_BOONIEHAT → "Boonie
-Hat"`). Reimpl: `menu_shell.gd` registers `Game.bin` into the shared `NovaStrings`
-registry as `gametext`, and `player_info_menu_host.gd::_display_name` resolves the
-nationality/division/combo keys against `gametext`'s `"Avatars"` section (raw-key
-fallback on a miss). On-disk-miss fallback to the raw key is the witnessed
+**The `"Avatars"` section lives in `Game.bin`** — the MENU SHELL'S text resource,
+loaded once at menu boot `[orig: the menu init @ 0x552510 —
+TextResource_LoadFromArchive("game.bin") -> the menu resource @ 0x25510F8; lookup
+TextResource_GetStringWithFallback @ 0x562ee0]` (NOT `menutxt.BIN`, which carries
+only `Menu`/`MenuStats`, and NOT `g_TextGameText`, which loads `gametext.bin`
+`[orig: Game_InitSubsystems @ 0x4A6CD0]` — the 2026-07-11 weapon-round grill
+corrected the earlier conflation of the two). Verified by extraction: the retail
+`Game.bin` has sections `MENU / RemapActions / RemapKeys / WeaponDescriptions /
+Macros / Avatars`, and the `Avatars` keys resolve (`AV_NAT_RUSSIA → "Russia"`,
+`AV_DIV_SEAL → "SEAL"`, `AV_BOONIEHAT → "Boonie Hat"`). Reimpl: `menu_shell.gd`
+registers `Game.bin` into the shared `NovaStrings` registry as **`gameui`**
+(gametext = `gametext.bin`), and `player_info_menu_host.gd::_display_name`
+resolves the nationality/division/combo keys against `gameui`'s `"Avatars"`
+section (raw-key fallback on a miss). On-disk-miss fallback to the raw key is the witnessed
 `GetStringWithFallback` behavior; the expansion override table (JOX avatars) is a
 follow-up via `NovaStrings.set_override_table`.
 
@@ -392,10 +395,12 @@ Consumer `populate_weapon_slot_lists @ 0x560430` shows a row when `loadout_selec
 `(teamfilter +112 & g_playerInfoTeamMask) != 0`; routes by `weapon_class (+108)` (1→
 PRIMARY, 2→SECONDARY, 0→ACCESSORY; 3=grenade is handled by the ammo UI, not these
 three lists); display = `loadout_menu_textid (+40)` resolved string, else the raw
-`weapon_name (+0)`; `"NONE"` (`GameText "Menu"/"NONE"`) at index 0. Names resolve
-through `g_TextGameText` (Game.bin) section `"WepDes"` `[orig: GameText_GetString
-@ 0x51ebd0]` (REVX02's Game.bin ships that section empty, so names there fall back to
-raw ids; the retail install carries the strings).
+`weapon_name (+0)`; `"NONE"` (the menu resource `"Menu"/"NONE"`) at index 0. Names
+resolve through `g_TextGameText` (**`gametext.bin`**) section `"WepDes"`
+`[orig: GameText_GetString @ 0x51ebd0; the textid resolve at parse time is
+WeaponDef_ParseProperty @ 0x54d730 — GameText_GetString("WepDes", textid)]`.
+(The earlier note blaming "REVX02's Game.bin" for raw-id fallbacks described the
+port's own misload — Game.bin never carries `WepDes`; corrected 2026-07-11.)
 
 Reimpl plan (now fully witnessed; producer + consumer + masks): extend `libs/def`
 `DefWeaponDef` to capture the loadout fields above + add VFS (in-memory) parsers, add

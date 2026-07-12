@@ -107,7 +107,7 @@ func test_resolves_friendly_names_from_gametext_avatars_section() -> void:
 	t.add_entry(head_key, "Boonie Hat", 0, Vector2i())
 	if body_key != head_key:
 		t.add_entry(body_key, "Camo BDU", 0, Vector2i())
-	NovaStrings.register_table("gametext", t)
+	NovaStrings.register_table("gameui", t)
 
 	var menu := _make_menu()
 	host.on_menu_built(menu, "player.mnu", "PLAYER_INFO", null)

@@ -83,7 +83,7 @@ func before_each() -> void:
 	_copy_fixture("res://../fixtures/mnu/jo_weapon.mnu", dir.path_join("weapon.mnu"))
 	_copy_fixture("res://../fixtures/def/weapon.def", dir.path_join("weapon.def"))
 	_copy_fixture("res://../fixtures/rtxt/menutxt.bin", dir.path_join("menutxt.BIN"))
-	_copy_fixture("res://../fixtures/rtxt/gametext.bin", dir.path_join("Game.bin"))
+	_copy_fixture("res://../fixtures/rtxt/gametext.bin", dir.path_join("gametext.bin"))
 
 
 func after_each() -> void:
@@ -92,7 +92,7 @@ func after_each() -> void:
 
 func after_all() -> void:
 	var dir := ProjectSettings.globalize_path(TMP_DIR)
-	for name in ["weapon.mnu", "weapon.def", "menutxt.BIN", "Game.bin"]:
+	for name in ["weapon.mnu", "weapon.def", "menutxt.BIN", "gametext.bin"]:
 		var path := dir.path_join(name)
 		if FileAccess.file_exists(path):
 			DirAccess.remove_absolute(path)
@@ -161,8 +161,10 @@ func test_sp_open_uses_authoritative_context_and_full_menu_protocol() -> void:
 
 	var spin := menu.find_child("PLAYER_CLASS", true, false) as NovaMnuSpinList
 	assert_eq(spin.get_value_index(), 3, "entity class 8 selects Rifleman by value")
-	assert_eq(spin.process_mode, Node.PROCESS_MODE_DISABLED,
-		"the class selector stays disabled outside a multiplayer session")
+	assert_ne(spin.process_mode, Node.PROCESS_MODE_DISABLED,
+		"the class selector is LIVE offline — D-MNU-10 (retail enables it only "
+		+ "in-session [orig: UI_InitTeamClassSelection @0x567370]; deliberate "
+		+ "divergence under the ADR 0009 listen-server model, user decision)")
 	var primary := menu.find_child("PRIMARY", true, false) as NovaMnuCombo
 	assert_eq(primary.get_item_count(), red_rifleman.size() + 1,
 		"entity team 2 maps to the red weapon-filter domain")

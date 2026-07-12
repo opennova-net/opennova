@@ -1,0 +1,4 @@
+[gd_scene load_steps=2 format=3 uid="uid://cweaponroundpr0"]
+[ext_resource type="Script" path="res://tests/weapon_round_probe.gd" id="1_wrprobe"]
+[node name="WeaponRoundProbe" type="Node"]
+script = ExtResource("1_wrprobe")

@@ -91,6 +91,8 @@ class DefWeaponDef(ctypes.Structure):
         # 'attack_anim' 1 knife / 2 grenade; 0 = key absent; mirror def.h).
         ("special_hold", ctypes.c_int),
         ("attack_anim", ctypes.c_int),
+        # The second FLAGS dword (NoSelect/.../Inset; appended; mirror def.h).
+        ("flags2", ctypes.c_int),
     ]
 
 

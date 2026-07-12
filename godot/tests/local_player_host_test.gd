@@ -3,6 +3,21 @@ extends GutTest
 const LocalPlayerHost := preload("res://engine/world/local_player_host.gd")
 
 
+class FakeWeaponPart:
+	extends Node3D
+	var plays: Array = []
+	var times: Array[float] = []
+
+	func play_body_clip(key: String) -> void:
+		plays.append({"key": key, "variant": 0})
+
+	func play_body_clip_variant(key: String, variant: int) -> void:
+		plays.append({"key": key, "variant": variant})
+
+	func set_animation_time(seconds: float) -> void:
+		times.append(seconds)
+
+
 class FakeWorld:
 	extends Node3D
 	var input_calls: Array = []
@@ -10,6 +25,7 @@ class FakeWorld:
 	var viewmodel_count := 0
 	var last_avatar: Node3D = null
 	var last_viewmodel: Node3D = null
+	var last_weapon_part: FakeWeaponPart = null
 	var _has_player := true
 	var _loaded := true
 
@@ -34,8 +50,11 @@ class FakeWorld:
 		viewmodel_count += 1
 		var node := Node3D.new()
 		node.add_child(MeshInstance3D.new())
+		var part := FakeWeaponPart.new()
+		node.add_child(part)
 		add_child(node)
 		last_viewmodel = node
+		last_weapon_part = part
 		return node
 
 	func set_local_player_input(forward: bool, back: bool, left: bool, right: bool, run: bool,
@@ -73,13 +92,26 @@ class FakeWorld:
 
 	# The equipped-weapon FSM seam (null = no weapon installed, the default).
 	var weapon_view = null  # PlayerWeaponView
+	var weapon_events: Array[PlayerWeaponEvent] = []
 	# The sim-owned view state seam (ADS ease / fov policy / 3P anchor).
 	var view = null  # PlayerLocalView
 	var scope_toggle_requests := 0
 	var camera_mode_calls: Array = []
+	# The ordered action-sound seam (the effect-world seam rides the particles slice).
+	var mission_audio = null  # FakeMissionAudio
+
+	func get_mission_audio():
+		return mission_audio
 
 	func local_player_weapon_view():
 		return weapon_view
+
+	func drain_local_player_weapon_events() -> Array[PlayerWeaponEvent]:
+		var drained: Array[PlayerWeaponEvent] = []
+		for event in weapon_events:
+			drained.append(event)
+		weapon_events.clear()
+		return drained
 
 	func local_player_view():
 		return view
@@ -346,3 +378,184 @@ func test_shared_host_teardown_releases_captured_mouse() -> void:
 	host.teardown()
 
 	assert_eq(Input.get_mouse_mode(), Input.MOUSE_MODE_VISIBLE)
+
+
+class FakeMissionAudio:
+	extends Node
+	var oneshots: Array = []
+
+	func fire_soundset(set_name: String, world_pos: Vector3) -> bool:
+		oneshots.append({"set": set_name, "pos": world_pos})
+		return true
+
+
+func _weapon_view() -> PlayerWeaponView:
+	var v := PlayerWeaponView.new()
+	v.active = true
+	return v
+
+
+func _weapon_end_event(set_name: String) -> PlayerWeaponEvent:
+	var event := PlayerWeaponEvent.new()
+	event.action_finished = 2
+	event.action_end_soundset = set_name
+	return event
+
+
+func _weapon_begin_event(set_name: String) -> PlayerWeaponEvent:
+	var event := PlayerWeaponEvent.new()
+	event.action_started = 2
+	event.action_soundset = set_name
+	return event
+
+
+func test_catch_up_weapon_action_events_are_not_coalesced() -> void:
+	var world := FakeWorld.new()
+	var camera := Camera3D.new()
+	var host := LocalPlayerHost.new()
+	add_child_autofree(world)
+	add_child_autofree(camera)
+	add_child_autofree(host)
+	var audio := FakeMissionAudio.new()
+	add_child_autofree(audio)
+	world.mission_audio = audio
+	host.setup(world, camera)
+	host.set_input_source(func() -> Dictionary:
+		return {})
+
+	var baseline := _weapon_view()
+	baseline.action_end_serial = 7
+	world.weapon_view = baseline
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+	assert_eq(audio.oneshots.size(), 0, "snapshot diagnostics never replay sounds")
+
+	world.weapon_events.append(_weapon_end_event("GS_FIRST"))
+	world.weapon_events.append(_weapon_end_event("GS_SECOND"))
+	var catch_up := _weapon_view()
+	catch_up.action_end_serial = 9
+	catch_up.action_end_soundset = "GS_SECOND"
+	world.weapon_view = catch_up
+	host.before_world_tick(0.032)
+	host.after_world_tick()
+
+	assert_eq(audio.oneshots.size(), 2, "two fixed ticks drain two ordered END legs")
+	if audio.oneshots.size() == 2:
+		assert_eq(String(audio.oneshots[0]["set"]), "GS_FIRST")
+		assert_eq(String(audio.oneshots[1]["set"]), "GS_SECOND")
+
+
+func test_action_sound_legs_drain_to_mission_audio() -> void:
+	# The two ACTION sound legs [orig: ActionSlot_PlaySound @0x4010c0 at begin;
+	# ActionSlot_FinishActivePhase @0x53f7b0 -> the end shim @0x401100]: the begin
+	# and END payloads drain in their tick order. Snapshot-only payloads are never
+	# replayed, so a viewmodel rebuild cannot refire historical sounds.
+	var world := FakeWorld.new()
+	var camera := Camera3D.new()
+	var host := LocalPlayerHost.new()
+	add_child_autofree(world)
+	add_child_autofree(camera)
+	add_child_autofree(host)
+	var audio := FakeMissionAudio.new()
+	add_child_autofree(audio)
+	world.mission_audio = audio
+	host.setup(world, camera)
+	host.set_input_source(func() -> Dictionary:
+		return {})
+
+	# Snapshot diagnostics may arrive non-zero; without a queued event nothing plays.
+	var v := _weapon_view()
+	v.action_serial = 4
+	v.action_end_serial = 7
+	v.action_soundset = "GF_RL_TEST"
+	v.action_end_soundset = "GS_TEST"
+	world.weapon_view = v
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+	assert_eq(audio.oneshots.size(), 0, "snapshot diagnostics do not replay sounds")
+
+	# End leg: the finished action's soundsetend plays at the player.
+	world.weapon_events.append(_weapon_end_event("GS_TEST"))
+	v.action_end_serial = 8
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+	assert_eq(audio.oneshots.size(), 1, "the drained end leg plays one set")
+	if audio.oneshots.size() == 1:
+		assert_eq(String(audio.oneshots[0]["set"]), "GS_TEST",
+			"the END leg plays the finished action's soundsetend [orig: ActionDef+12]")
+
+	# Begin leg: its soundset plays too.
+	world.weapon_events.append(_weapon_begin_event("GF_RL_TEST"))
+	v.action_serial = 5
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+	assert_eq(audio.oneshots.size(), 2, "the drained begin leg plays one set")
+	if audio.oneshots.size() == 2:
+		assert_eq(String(audio.oneshots[1]["set"]), "GF_RL_TEST",
+			"the begin leg plays the started action's soundset [orig: ActionDef+8]")
+
+
+func test_weapon_event_attachment_discards_backlog_but_keeps_first_live_batch() -> void:
+	var world := FakeWorld.new()
+	var camera := Camera3D.new()
+	var host := LocalPlayerHost.new()
+	add_child_autofree(world)
+	add_child_autofree(camera)
+	add_child_autofree(host)
+	var audio := FakeMissionAudio.new()
+	add_child_autofree(audio)
+	world.mission_audio = audio
+	world.weapon_events.append(_weapon_end_event("GS_STALE"))
+	host.setup(world, camera)
+
+	world.weapon_view = _weapon_view()
+	var live := PlayerWeaponEvent.new()
+	live.action_started = 2
+	live.action_soundset = "GF_LIVE"
+	live.action_finished = 2
+	live.action_end_soundset = "GS_LIVE"
+	live.world_position = Vector3(4.0, 5.0, 6.0)
+	world.weapon_events.append(live)
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+
+	assert_eq(audio.oneshots.size(), 2, "setup discards only pre-attachment history")
+	if audio.oneshots.size() == 2:
+		assert_eq(String(audio.oneshots[0]["set"]), "GF_LIVE")
+		assert_eq(String(audio.oneshots[1]["set"]), "GS_LIVE")
+		assert_eq(audio.oneshots[0]["pos"], Vector3(4.0, 5.0, 6.0),
+			"catch-up audio keeps its production-tick origin")
+		assert_eq(audio.oneshots[1]["pos"], Vector3(4.0, 5.0, 6.0))
+
+
+func test_catch_up_clip_resumes_at_its_tick_age() -> void:
+	var world := FakeWorld.new()
+	var camera := Camera3D.new()
+	var host := LocalPlayerHost.new()
+	add_child_autofree(world)
+	add_child_autofree(camera)
+	add_child_autofree(host)
+	host.setup(world, camera)
+
+	var view := _weapon_view()
+	view.anim_key = "anim_wpn_fire"
+	view.anim_variant = 2
+	view.play_serial = 1
+	world.weapon_view = view
+	var event := PlayerWeaponEvent.new()
+	event.age_ticks = 2
+	event.anim_key = "anim_wpn_fire"
+	event.anim_variant = 2
+	world.weapon_events.append(event)
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+
+	assert_not_null(world.last_weapon_part)
+	if world.last_weapon_part != null:
+		assert_eq(world.last_weapon_part.plays.size(), 1)
+		if world.last_weapon_part.plays.size() == 1:
+			assert_eq(String(world.last_weapon_part.plays[0]["key"]), "anim_wpn_fire")
+			assert_eq(int(world.last_weapon_part.plays[0]["variant"]), 2)
+		assert_eq(world.last_weapon_part.times.size(), 1)
+		if world.last_weapon_part.times.size() == 1:
+			assert_almost_eq(world.last_weapon_part.times[0], 0.032, 0.00001)

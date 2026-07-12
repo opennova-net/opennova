@@ -69,6 +69,7 @@ var PLAYER_VIEWMODEL_ROT_BIAS_DEF := Vector3(5.0, 3.75, 353.0)
 # layer, composited over the finished frame (the depth-remap's visible equivalent).
 var PLAYER_VIEWMODEL_RENDERFOV_H_DEG := 80.0
 const VIEWMODEL_PASS_NEAR := 0.05
+const WEAPON_TICK_DT := 1.0 / 62.5
 
 var _world
 var _camera: Camera3D
@@ -135,6 +136,11 @@ func setup(world, camera: Camera3D) -> void:
 	# guards make the deferred call a no-op after teardown()/double setup().
 	_build_viewmodel_pass.call_deferred()
 	_reset_state()
+	# Attachment is the adoption boundary: discard presentation history produced
+	# before this host existed. Every event produced after setup is live, including
+	# a first-tick shot before the first active snapshot is presented.
+	if _world != null and _world.has_method("drain_local_player_weapon_events"):
+		_world.drain_local_player_weapon_events()
 
 
 func teardown() -> void:
@@ -299,6 +305,10 @@ func after_world_tick() -> void:
 		_set_fly_camera_locked(false)
 		_release_mouse_capture()
 		_clear_models()
+		if _world != null and _world.has_method("drain_local_player_weapon_events"):
+			_world.drain_local_player_weapon_events()
+		_weapon_play_serial = -1
+		_weapon_view = null
 		_view = null
 		return
 	_view = _world.local_player_view() if _world.has_method("local_player_view") else null
@@ -306,8 +316,9 @@ func after_world_tick() -> void:
 	_update_player_camera()
 
 
-# Drain the FSM's clip events (a monotonic serial - several 62.5 Hz ticks can run
-# per frame): clip starts land on BOTH viewmodel parts. The scope side effects
+# Drain the FSM's ordered per-tick presentation batch: several 62.5 Hz ticks can
+# run per frame, and every clip/begin/end payload must survive. Clip starts land on
+# BOTH viewmodel parts and resume at their age within the catch-up batch. Scope side effects
 # (forced unscope, rescope-after-reload) flip the SIM's own engaged bit — they
 # arrive here already folded into the view snapshot.
 # [orig: ActionSlot_BeginActivePhase @0x53f830 plays the action clip on the owner's
@@ -315,27 +326,81 @@ func after_world_tick() -> void:
 func _consume_weapon_view() -> void:
 	if _world == null or not _world.has_method("local_player_weapon_view"):
 		return
+	var events: Array[PlayerWeaponEvent] = []
+	if _world.has_method("drain_local_player_weapon_events"):
+		events = _world.drain_local_player_weapon_events()
 	var view: PlayerWeaponView = _world.local_player_weapon_view()
 	_weapon_view = view
 	if view == null:
+		_weapon_play_serial = -1
 		return
+	var batch_started_clip := false
+	for event in events:
+		if not event.anim_key.is_empty():
+			_play_viewmodel_clip(event.anim_key, event.anim_variant, event.age_ticks)
+			batch_started_clip = true
+		if event.action_started >= 0:
+			_fire_action_effects(event)
+		if event.action_finished >= 0:
+			_fire_action_end_sound(event)
+	if batch_started_clip:
+		_weapon_play_serial = view.play_serial
+	# First adoption and a fresh viewmodel both synchronize to the latest snapshot,
+	# but never replay the snapshot's historical sound/effect payloads.
 	if view.play_serial != _weapon_play_serial:
 		_weapon_play_serial = view.play_serial
-		_play_viewmodel_clip(view.anim_key)
+		_play_viewmodel_clip(view.anim_key, view.anim_variant)
+
+
+# The action-begin SOUND leg: play the started ACTION's soundset 3D-positional at the
+# firing entity [orig: ActionSlot_ExecuteActionWithEffect @0x541860 plays the row's
+# soundset; the one-shot 3D placement is Sound_Play3DPositional @0x527cb0]. The
+# original's paired MUZZLE leg (ActionSlot_SpawnEffect @0x401f20 at the row's
+# particle + userpoint, with the FIRE-only / !scoped-FP / no-local-casings routing
+# [orig: ActionSlot_ExecuteActionTick @0x541a70] and the slot+24 one-live-group guard
+# [orig: @0x5418c8]) rides the particles slice with the effect world itself. The
+# ordered event batch preserves each begin leg when several ticks land in one frame.
+func _fire_action_effects(event: PlayerWeaponEvent) -> void:
+	if _world == null:
+		return
+	if not event.action_soundset.is_empty() and _world.has_method("get_mission_audio"):
+		var audio = _world.get_mission_audio()
+		if audio != null:
+			audio.fire_soundset(event.action_soundset, event.world_position)
+
+
+# The action-END sound leg: the finished ACTION's soundsetend, 3D-positional at the
+# firing entity — the fire rows' per-shot gunshot (GS_*) and the reload completion.
+# [orig: ActionSlot_FinishActivePhase @0x53f7b0 -> the end shim @0x401100 plays
+#  ActionDef+12 at the owner entity, gated on the phase byte being 2 (ACTIVE); its
+#  dupsound repeat loop (+44/+48) is data-dead in the JOX/REVX corpora]
+func _fire_action_end_sound(event: PlayerWeaponEvent) -> void:
+	if _world == null or event.action_end_soundset.is_empty():
+		return
+	if not _world.has_method("get_mission_audio"):
+		return
+	var audio = _world.get_mission_audio()
+	if audio != null:
+		audio.fire_soundset(event.action_end_soundset, event.world_position)
 
 
 # Start an FSM clip on every viewmodel part (arms + gun share the animadm) - a replay
 # of the active key restarts it (fire/recoil re-triggers), unlike play_body_clip's
-# same-key resume.
-func _play_viewmodel_clip(key: String) -> void:
+# same-key resume. `variant` is the sim ring's latched serve for multi-clip .adm
+# rows — both parts follow the ONE latch, so arms and gun never split variants
+# [orig: AnimMap_PlayAnimBySlot @0x40bda0 latches the served entry at animState+68].
+func _play_viewmodel_clip(key: String, variant: int = 0, age_ticks: int = 0) -> void:
 	if key.is_empty():
 		return
 	for part in _vm_parts:
 		if part == null or not is_instance_valid(part):
 			continue
-		part.play_body_clip(key)
+		if part.has_method("play_body_clip_variant"):
+			part.play_body_clip_variant(key, variant)
+		else:
+			part.play_body_clip(key)
 		if part.has_method("set_animation_time"):
-			part.set_animation_time(0.0)
+			part.set_animation_time(float(maxi(age_ticks, 0)) * WEAPON_TICK_DT)
 
 
 # Edge-triggered gameplay keys. F4 toggles first/third person [orig: g_camera_mode
@@ -388,6 +453,11 @@ func _reset_state() -> void:
 	_third_person = false
 	_crouch = false
 	_prone = false
+	_weapon_play_serial = -1
+	_weapon_view = null
+	_fire_was_held = false
+	_reload_was_down = false
+	_scope_was_down = false
 	_view = null
 	_sync_camera_mode()
 
@@ -467,6 +537,31 @@ func _set_fly_camera_locked(locked: bool) -> void:
 func _release_mouse_capture() -> void:
 	if Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
 		Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+
+
+# The crosshair's witnessed anchor. First person PINS the exact screen center — the
+# original never projects there [orig: HUD_DrawCrosshair @0x592640 — 1P local takes
+# screen_w/2, screen_h/2 @0x5928a0/@0x5928ae]; third person / spectate projects the
+# aim ray's far point through the live camera [orig: the else branch @0x592910 —
+# Entity_BuildCameraView(entity, 1, 1, 65536000 = 1000.0 q16) transformed + frustum-
+# clipped @0x592932..3c; Viewport_ScreenToVirtual @0x5d2c70]. Vector2.INF = "no
+# projection" (1P pin, no camera/player, or the far point behind the camera) — the
+# HUD falls back to the design center.
+const AIM_PROJECT_RANGE := 1000.0  # [orig: 65536000 q16 = 1000.0 units]
+
+func aim_screen_point() -> Vector2:
+	if not _third_person:
+		return Vector2.INF  # 1P: the HUD pins the design center [orig: @0x5928a0]
+	if _world == null or _camera == null or not _has_player():
+		return Vector2.INF
+	var yr := deg_to_rad(_world.local_player_yaw_deg())
+	var pr := deg_to_rad(_world.local_player_pitch_deg())
+	var forward := Vector3(sin(yr) * cos(pr), sin(pr), -cos(yr) * cos(pr))
+	var eye: Vector3 = _world.local_player_position() + Vector3(0, PLAYER_EYE_HEIGHT, 0)
+	var target := eye + forward * AIM_PROJECT_RANGE
+	if _camera.is_position_behind(target):
+		return Vector2.INF
+	return _camera.unproject_position(target)
 
 
 # Place the camera from the player's authoritative pose. First person: eye = player + 1.0u
@@ -615,6 +710,11 @@ func _update_viewmodel() -> void:
 	# at the world cadence [orig: CNetPlayerInterp_Setup @0x4df36e / g_fpCameraInterp
 	# @0x82CE40; libs/world player_view_bias_units states the blend].
 	var ads := _view.scope_fraction if _view != null else 0.0
+	# The NoCardSwitch reload rule: reloading a card-switching weapon drops the
+	# ADS bias for the frame (instant, not eased) [orig: Player_UpdateFirstPersonCamera
+	# @0x4dd439/@0x4dd4cc skip the bias add while Player_IsReloadingCardSwitchWeapon].
+	if _view != null and _view.suppress_view_bias:
+		ads = 0.0
 	var view_units := PLAYER_VIEWMODEL_POS_UNITS.lerp(PLAYER_VIEWMODEL_TPOS_UNITS, ads)
 	_viewmodel.global_transform = _camera.global_transform * Transform3D(
 		vm_basis, bias * _viewmodel_offset(view_units))
@@ -623,7 +723,11 @@ func _update_viewmodel() -> void:
 	# Player_RenderFirstPersonViewModel @ 0x4ded60]; hosted, the dedicated layer is drawn
 	# only by the pass camera (and excluded by the mirror camera's cull_mask).
 	_set_visual_layers(_viewmodel, NovaWater.VISUAL_LAYER_VIEWMODEL)
-	_viewmodel.visible = (not _third_person) or debug_force_viewmodel
+	# The card switch: while the SIGHTS card is up, the FP model does not draw —
+	# the frame shows one or the other [orig: the FP model call @0x5d822c requires
+	# the scope gates clear @0x5d8212; the card path is draw_weapon_sight_overlays].
+	var carded := _view != null and _view.scope_card_active
+	_viewmodel.visible = ((not _third_person) and not carded) or debug_force_viewmodel
 	_update_viewmodel_pass()
 
 
@@ -658,22 +762,27 @@ func _apply_viewmodel_def() -> void:
 
 
 # Convert a weapon.def `pos`/`tpos` POSITION (raw file units) into a Godot camera-local offset.
-# Faithful to the witnessed pipeline [orig: Player_UpdateFirstPersonCamera @0x4dd380; scale
-# flt_7D1D70=256 @0x544770]: the camera adds `ftol(Bone.pos)` straight onto g_view_pos, and at a
-# level look the view matrix is identity [orig: Math_BuildFixedPointRotationMatrixYXZ @0x615400], so
-# component i lands on world axis i (world Z = up). The view-local frame is therefore
-# (x = right, y = forward, z = up) — `pos[2]` is the grip's DOWN offset (the dominant term; the barrel
-# reaches forward via the model), NOT depth. Godot camera-local is (x right, y up, -z forward), so:
-#   file x (right)   -> Godot  x
-#   file y (forward) -> Godot -z
-#   file z (up)      -> Godot  y      (e.g. MP5SD pos.z -183 -> grip ~0.715u below the eye)
-# The two small lateral/forward terms (x, y) are sign-confirmable by drive; the z->y (down) term is
-# the certain one. (oscarmike WeaponManager._jo_to_godot_position agrees on /256 + z->up/down.)
+# The witnessed pipeline [orig: Player_UpdateFirstPersonCamera @0x4dd380 — the offset is
+# VIEW-LOCAL: Math_FixedPointTransformPoint22(g_view_matrix, &cam_offset, ..) @0x4dd5d8
+# rotates it by the view basis before adding onto g_view_pos; at ADS settle (entity
+# Flags & 2) the tpos/AltCamOffset REPLACES the offset wholesale @0x4dd58f..0x4dd5c7;
+# scale flt_7D1D70=256 @0x544770]. The view/def frame is X = FORWARD, Y = LEFT,
+# Z = UP — proven by the aim ray's far point being {+65536000, 0, 0} through the SAME
+# transform [orig: HUD_DrawCrosshair @0x592a0f aim_direction = (1000.0, 0, 0) q16].
+# Godot camera-local is (x right, y up, -z forward), so:
+#   file x (forward) -> Godot -z   (M4 tpos x -50.9 = ~0.2u BACK into the shoulder)
+#   file y (left)    -> Godot -x
+#   file z (up)      -> Godot  y   (e.g. MP5SD pos.z -183 -> grip ~0.715u below the eye)
+# (The 2026-07-11 grill REFUTED the earlier x=right/y=forward reading: the AK's
+# |x| ~= |y| masked the swap; the JOX/REVX M4 tpos made it glare — the canted-ADS
+# report. oscarmike's onhook-derived map agrees with the witnessed frame.) The
+# velocity lead (>>7, clamps @0x4dd4f2..) and the prone Z drop (-1280 @0x4dd578)
+# are recorded unported tails.
 func _viewmodel_offset(units: Vector3) -> Vector3:
 	return Vector3(
-		units.x / WEAPON_DEF_POS_SCALE,
+		-units.y / WEAPON_DEF_POS_SCALE,
 		units.z / WEAPON_DEF_POS_SCALE,
-		-units.y / WEAPON_DEF_POS_SCALE)
+		-units.x / WEAPON_DEF_POS_SCALE)
 
 
 # Fold degrees into (-180, 180] (def rot columns store e.g. 353 for -7).

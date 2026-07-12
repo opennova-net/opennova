@@ -210,25 +210,65 @@ static int next_line(LineIter *it, const char **out, size_t *out_len) {
     return 1;
 }
 
-/* Weapon flags table */
-typedef struct { const char *name; size_t name_len; int bit; } FlagEntry;
+/* Weapon flags table — the FULL witnessed token set, both flag dwords.
+   [orig: the 16-B-stride {name, 0, flags1 bit, flags2 bit} table @ 0x830bf0;
+   tokens compare case-insensitively]. The previous 7-entry table aliased
+   whileswimming onto Underwater's 0x4 — corrected to the witnessed 0x1000000. */
+typedef struct { const char *name; size_t name_len; int bit; int bit2; } FlagEntry;
 static const FlagEntry flag_table[] = {
-    {"scoped",        6, 0x0001},
-    {"sighted",       7, 0x0002},
-    {"underwater",   10, 0x0004},
-    {"whileswimming",13, 0x0004},
-    {"burst",         5, 0x0020},
-    {"auto",          4, 0x0100},
-    {"nocardswitch", 12, 0x02000000},
+    {"scoped",          6, 0x00000001, 0},
+    {"sighted",         7, 0x00000002, 0},
+    {"underwater",     10, 0x00000004, 0},
+    {"showcomander",   12, 0x00000008, 0},
+    {"noclipsnodraw",  13, 0x00000010, 0},
+    {"burst",           5, 0x00000020, 0},
+    {"notdropable",    11, 0x00000040, 0},
+    {"emplaced",        8, 0x00000080, 0},
+    {"auto",            4, 0x00000100, 0},
+    {"norangecheck",   12, 0x00000200, 0},
+    {"showrange",       9, 0x00000400, 0},
+    {"showelevation",  13, 0x00000800, 0},
+    {"armor",           5, 0x00001000, 0},
+    {"okwhilejumping", 14, 0x00002000, 0},
+    {"onlyfirescoped", 14, 0x00004000, 0},
+    {"lollypop",        8, 0x00008000, 0},
+    {"absorbpitch",    11, 0x00010000, 0},
+    {"nomove",          6, 0x00020000, 0},
+    {"forcecrouch",    11, 0x00040000, 0},
+    {"onlyscoped",     10, 0x00080000, 0},
+    {"2dimpact",        8, 0x00100000, 0},
+    {"usedesignator",  13, 0x00200000, 0},
+    {"usespreadtwo",   12, 0x00400000, 0},
+    {"showimpactdist", 14, 0x00800000, 0},
+    {"whileswimming",  13, 0x01000000, 0},
+    {"nocardswitch",   12, 0x02000000, 0},
+    {"handgunup",       9, 0x04000000, 0},
+    {"quickswitch",    11, 0x08000000, 0},
+    {"onlyfirelocked", 14, 0x10000000, 0},
+    {"forcescoped",    11, 0x20000000, 0},
+    {"laserbeam",       9, 0x40000000, 0},
+    {"powerthrow",     10, (int)0x80000000, 0},
+    {"noselect",        8, 0, 0x00000001},
+    {"parachute",       9, 0, 0x00000002},
+    {"thermal",         7, 0, 0x00000004},
+    {"monitor",         7, 0, 0x00000008},
+    {"viewlock",        8, 0, 0x00000010},
+    {"onlylockscoped", 14, 0, 0x00000020},
+    {"noammotypes",    11, 0, 0x00000040},
+    {"showhudpip",     10, 0, 0x00000080},
+    {"fixverticalofst",15, 0, 0x00000100},
+    {"inset",           5, 0, 0x00000200},
+    {"noautozero",     10, 0, 0x00000400},
+    {"invisible",       9, 0, 0x00000800},
 };
 static const int flag_table_count = sizeof(flag_table) / sizeof(flag_table[0]);
 
-static int lookup_flag(const char *name, size_t len) {
+static const FlagEntry *lookup_flag(const char *name, size_t len) {
     for (int i = 0; i < flag_table_count; ++i) {
         if (len == flag_table[i].name_len && memcmp(name, flag_table[i].name, len) == 0)
-            return flag_table[i].bit;
+            return &flag_table[i];
     }
-    return 0;
+    return NULL;
 }
 
 /* items.def `attrib:` tokens -> ItemDefAttrib (+0x54) bits. Token names lowercased (the
@@ -885,9 +925,10 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 char flag_lower[64];
                 size_t fl = vl < sizeof(flag_lower) - 1 ? vl : sizeof(flag_lower) - 1;
                 to_lower_buf(flag_lower, v, fl);
-                int bit = lookup_flag(flag_lower, fl);
-                if (bit) {
-                    cw.flags |= bit;
+                const FlagEntry *fe = lookup_flag(flag_lower, fl);
+                if (fe) {
+                    cw.flags |= fe->bit;
+                    cw.flags2 |= fe->bit2;
                     parsed = 1;
                 }
                 /* Unknown flags fall through to raw_lines */
@@ -977,6 +1018,18 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 state = ST_WEAPON;
                 continue;
             }
+            /* A nested `action` line while one is open is REFUSED by the
+               original: it logs "forgot an end", keeps the current row open
+               (subsequent keys overwrite it, last writer wins), and never
+               creates the new row — suffixes that never got a row become
+               zeroed generated defaults at bind time
+               [orig: ActionDef_ParseScriptLine @ 0x402409 "forgot an end";
+               the driver forwards in-ACTION lines before its own `action`
+               dispatch, WeaponDefs_ParseLineCallback @ 0x54388d]. Falling
+               through to raw_lines below reproduces exactly that. Every
+               shipped weapon.def corpus (JOX, JOTAC localres, RevX02, JO:CA,
+               jox01, demo) is fully END-terminated, so no retail data hits
+               this path. */
 
             int parsed = 0;
             if (lower_starts_with(lower, ll, "anim", 4) &&
@@ -995,6 +1048,15 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 parsed = 1;
             } else if (lower_match_key(lower, ll, "delayend", 8)) {
                 size_t vl; const char *v = consume_value_span(trimmed, tlen, 8, &vl);
+                char vlow[16];
+                size_t vll = vl < 15 ? vl : 15;
+                to_lower_buf(vlow, v, vll);
+                ca.delayend = (vll == 4 && memcmp(vlow, "auto", 4) == 0) ? -1 : parse_int_n(v, vl);
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "delay", 5)) {
+                /* bare `delay` is an alias of delayend — both write +40
+                   [orig: ActionDef_ParseScriptLine @ 0x40279a / @ 0x402b2c] */
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 5, &vl);
                 char vlow[16];
                 size_t vll = vl < 15 ? vl : 15;
                 to_lower_buf(vlow, v, vll);
@@ -1819,6 +1881,10 @@ DEF_EXPORT int def_parse_def(const char *path, DefFile *out) {
         }
 
         if (state == ST_ACTION) {
+            /* A nested `action` line is REFUSED by the original ("forgot an
+               end"): the open row stays current and the new row is never
+               created — ignoring the line here reproduces that
+               [orig: ActionDef_ParseScriptLine @ 0x402409]. */
             if (ll == 3 && memcmp(lower, "end", 3) == 0) {
                 DA_PUSH(out->weapon.actions, out->weapon.actions_count, act_cap, ca);
                 memset(&ca, 0, sizeof(ca));

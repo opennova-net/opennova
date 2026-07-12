@@ -53,7 +53,7 @@ target_include_directories(threedi_collision_ir_test PRIVATE ${CMAKE_CURRENT_SOU
 add_test(NAME threedi_collision_ir COMMAND threedi_collision_ir_test)
 
 # ADM tests
-foreach(test comment trim_value parse write)
+foreach(test comment trim_value parse write variants)
     add_executable(adm_${test}_test anim/adm_${test}_test.cpp)
     target_link_libraries(adm_${test}_test PRIVATE opennova_anim)
     target_include_directories(adm_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

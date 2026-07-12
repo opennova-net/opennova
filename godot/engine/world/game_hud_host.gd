@@ -77,7 +77,10 @@ func _ensure_game_hud() -> void:
 	_game_hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var host: Node = _ui_parent if _ui_parent != null else self
 	host.add_child(_game_hud)
-	_game_hud.set_anchors_preset(Control.PRESET_FULL_RECT)
+	# anchors AND offsets: an anchors-only preset keeps a fresh Control's
+	# zero rect, and a clipping parent (ONED's GameplayOverlay) then clips
+	# every HUD element to nothing.
+	_game_hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var hudpos := NovaHudPos.new()
 	var root: NovaResourceRoot = _world.get_resource_root() \
 			if _world != null and _world.has_method("get_resource_root") else null
@@ -100,11 +103,10 @@ func _load_hud_text_tables(root: NovaResourceRoot) -> void:
 		return
 	# Refresh this global registry from the current world's root every build.
 	# Otherwise a second ONED play session can silently reuse the first root's
-	# strings, and its armory will skip the JO Game.bin table it expects.
-	var gametext := _load_rtxt(root, "Game.bin")
-	if gametext == null:
-		gametext = _load_rtxt(root, "gametext.bin")
-	NovaStrings.register_table("gametext", gametext)
+	# strings. The gametext table IS gametext.bin [orig: Game_InitSubsystems
+	# @0x4a6cd0 — TextResource_LoadFromArchive("gametext.bin") -> g_TextGameText;
+	# Game.bin is the SEPARATE menu resource (@0x552510) and carries no WepDes].
+	NovaStrings.register_table("gametext", _load_rtxt(root, "gametext.bin"))
 	# The medmssn fallback fires only when the mission .bin does not EXIST — a
 	# present-but-unparseable file loads to nothing with no fallback.
 	# [orig: TextResource_LoadMissionTextBin @0x51ede3 — FileSystem_FileExists picks
@@ -185,11 +187,15 @@ func tick() -> void:
 		if weapon != null and weapon.clipsize == 1 and clip >= 0 and reserve >= 0:
 			reserve += clip
 	var scope_engaged := false
+	var scope_fraction := 0.0
+	var scope_card := false
 	var fov_deg := 80.0
 	var lv: PlayerLocalView = _world.local_player_view() \
 			if _world.has_method("local_player_view") else null
 	if lv != null:
 		scope_engaged = lv.scope_engaged
+		scope_fraction = lv.scope_fraction
+		scope_card = lv.scope_card_active
 		fov_deg = lv.fov_h_deg
 
 	_game_hud.update_info({
@@ -201,6 +207,16 @@ func tick() -> void:
 		"clip": clip,
 		"reserve": reserve,
 		"scope_engaged": scope_engaged,
+		# The ease progress: the crosshair yields only at the SETTLED sight view
+		# (fraction 1) [orig: the @0x4de4f7 promoter; Player_CanFireWeapon @0x5cf780].
+		"scope_fraction": scope_fraction,
+		# The SIGHTS card switch [orig: Player_IsEquippedWeaponScoped @0x4dcc80].
+		"scope_card": scope_card,
+		# The crosshair's witnessed anchor: Vector2.INF in first person (the HUD pins
+		# the design center @0x5928a0), the projected aim in 3P/spectate (@0x592910).
+		"aim_screen": _player_host.aim_screen_point() \
+				if _player_host != null and _player_host.has_method("aim_screen_point") \
+				else Vector2.INF,
 		"fov_deg": fov_deg,
 		"ticks": _hud_ticks(),
 	})

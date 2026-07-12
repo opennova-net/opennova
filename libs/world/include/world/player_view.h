@@ -21,8 +21,13 @@
 
 namespace opennova::world {
 
-// [orig: the interp step count @ 0x4df36e]
+// The per-toggle ease lengths [orig: CNetPlayerInterp_Setup call sites in
+// Player_ToggleWeaponScope — engage 15 @ 0x4df36e / 7 for Inset (flags2 0x200)
+// weapons @ 0x4df355; disengage mirrors them @ 0x4df201 / @ 0x4df1e8, and the
+// hipfire-return leg is a single step @ 0x4df1c3].
 constexpr int32_t kScopeEaseSteps = 15;
+constexpr int32_t kScopeEaseStepsInset = 7;
+constexpr int32_t kScopeEaseStepsHipfire = 1;
 // [orig: g_cameraFovDeg @ 0x26C6848 default 0x500000 = 80.0 horizontal degrees]
 constexpr float kPlayerCameraFovHDeg = 80.0f;
 // [orig: the chase anchor ease @ 0x437c8d — one quarter per 62 Hz tick]
@@ -30,7 +35,10 @@ constexpr float kTpAnchorEase = 0.25f;
 
 struct PlayerViewState {
     bool scope_engaged = false;   // [orig: g_scopeEngaged @ 0x82CE94]
-    int32_t scope_step = 0;       // 0 (hip) .. kScopeEaseSteps (sighted)
+    int32_t scope_step = 0;       // 0 (hip) .. ease_steps (sighted), of the CURRENT ease
+    int32_t ease_steps = kScopeEaseSteps; // latched per toggle [orig: the Setup steps arg]
+    bool scope_hipfire = true;    // [orig: g_scopeHipfire @ 0x82CE98, init/reset 1]
+    bool move_held = false;       // [orig: the movement-held latch byte_B7653B @ 0xB7653B]
     bool third_person = false;    // [orig: g_camera_mode @ 0xA890C8]
     bool tp_anchor_valid = false;
     float tp_anchor[3] = {0.0f, 0.0f, 0.0f}; // mission space (Z-up)
@@ -42,8 +50,38 @@ struct PlayerViewState {
 // the track on change]; leaving invalidates it.
 void player_view_tick(PlayerViewState &v, const float eye[3]);
 
+// Whether the scope-camera interp is mid-ease. Every scope toggle is REFUSED
+// while it runs [orig: the !g_fpCameraInterp.activeFlag gate @ 0x4df177].
+bool player_view_scope_ease_active(const PlayerViewState &v);
+
+// The witnessed toggle: latch this ease's step count (engage: 15, or 7 for
+// Inset weapons; disengage: the same, or 1 on the hipfire-return leg), seed the
+// step at the departing endpoint, and flip the target. Returns false (state
+// untouched) when refused mid-ease. [orig: Player_ToggleWeaponScope
+// @ 0x4df1b3..0x4df373 — the Setup calls + the g_scopeHipfire writes]
+bool player_view_set_engaged(PlayerViewState &v, bool engaged, bool inset_weapon);
+
 // The eased hip->sighted blend, 0..1 in 1/15ths.
 float player_view_scope_fraction(const PlayerViewState &v);
+
+// The per-tick movement input and its settled-scope leg [orig:
+// Player_PackInputStateToEntity @ 0x4df450]. Latches `move_held` (any of the
+// four movement-direction keys [orig: byte_B7653B set @ 0x4df4bb, cleared
+// @ 0x4df4f9]) and returns true when the SETTLED-at-scope auto-unscope must
+// fire: movement while fully sighted on a Scoped (flags 1) weapon routes
+// through the normal scope toggle [orig: g_weaponScopeActive && Def->Flags & 1
+// -> Player_ToggleWeaponScope @ 0x4df4c9..0x4df4ec] — the caller runs its
+// standard disengage, and the toggle's own ForceScoped pin applies there.
+// The mid-ease reversal and the auto-re-raise legs (@ 0x4df548 / @ 0x4df5ae /
+// @ 0x4df607) are witnessed-deferred: they keep g_scopeEngaged latched while
+// easing to the hip, which needs the explicit engaged/active/hipfire tri-state
+// (net-re section 5.62 follow-up).
+bool player_view_move_input(PlayerViewState &v, bool move_held, int32_t def_flags);
+
+// Whether a scope-UP toggle is refused by the movement-held latch: engaging a
+// Scoped (flags 1) weapon is blocked while a movement key is down
+// [orig: byte_B7653B && (flags & 1) -> return @ 0x4df29c].
+bool player_view_scope_up_blocked(const PlayerViewState &v, int32_t def_flags);
 
 // The main camera's HORIZONTAL fov in degrees: 80 at the hip, eased to
 // 80 / scope_max_mag for sighted defs (file flag 2) with a magnification,

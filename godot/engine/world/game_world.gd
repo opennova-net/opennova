@@ -866,7 +866,11 @@ func _setup_local_player_weapon(model) -> void:
 				keys.append(k)
 		for k in keys:
 			if skeletal.has_clip(k):
-				clip_seconds[k] = float(skeletal.get_clip_length(k))
+				# EVERY variant's length, .adm file order — the sim seeds its slot
+				# rings from these and consumes them serve-then-advance (bake reads
+				# and play latches) [orig: the animState slot heads +72;
+				# Anim_GetDurationTicks @0x53ee10 / AnimMap_PlayAnimBySlot @0x40bda0].
+				clip_seconds[k] = skeletal.get_clip_variant_lengths(k)
 	sim.set_local_player_weapon(_local_weapon_dict, clip_seconds)
 
 
@@ -918,6 +922,18 @@ func local_player_weapon_view() -> PlayerWeaponView:
 	if sim == null:
 		return null
 	return PlayerWeaponView.from_state_dict(sim.get_local_player_weapon_state())
+
+
+## Destructively drain the equipped FSM's ordered presentation batch, decoding the
+## C++ transport Dictionaries at this one adapter edge (ADR 0017).
+func drain_local_player_weapon_events() -> Array[PlayerWeaponEvent]:
+	var out: Array[PlayerWeaponEvent] = []
+	var sim := get_sim()
+	if sim == null:
+		return out
+	for row in sim.drain_local_player_weapon_events():
+		out.append(PlayerWeaponEvent.from_event_dict(row as Dictionary))
+	return out
 
 
 ## The resolved weapon.def record driving the FP viewmodel: model/adm names plus the

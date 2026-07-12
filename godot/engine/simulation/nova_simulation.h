@@ -184,8 +184,9 @@ private:
 	// world advances [orig: WeaponAction_ProcessAllEntities @ 0x542690 in the frame loop;
 	// this port pumps the LOCAL player's slot only — D-WPN-6]. The host feeds the baked def
 	// via set_local_player_weapon and per-frame trigger state via
-	// set_local_player_weapon_input; events surface as monotonic serials in
-	// get_local_player_weapon_state (several logic ticks can run per render frame).
+	// set_local_player_weapon_input. Presentation outputs accumulate as ordered
+	// per-tick records because several logic ticks can run per render frame; the
+	// snapshot's monotonic serials remain diagnostics/rebuild state.
 	opennova::world::WeaponFsmDef weapon_def_{};
 	opennova::world::WeaponSlotState weapon_slot_{};
 	bool weapon_active_ = false;
@@ -194,11 +195,55 @@ private:
 	bool weapon_reload_pressed_ = false;
 	uint64_t weapon_play_serial_ = 0;
 	String weapon_anim_key_;
+	// The equipped .adm's per-slot VARIANT rings — multi-clip rows rotate round-robin.
+	// The sim owns the ring heads exactly where the original keeps them (the weapon's
+	// animState slot array +72): bake duration reads and play starts both SERVE the
+	// head then ADVANCE it, and the play latches the served index for the host's clip
+	// playback (both viewmodel parts follow one latch, so arms and gun never split).
+	// [orig: Anim_GetDurationTicks @ 0x53ee10; AnimMap_PlayAnimBySlot @ 0x40bda0
+	//  (+68 entry latch); ring build AnimMap_RegisterBoneNode @ 0x40c2d0]
+	struct WeaponClipRing {
+		PackedFloat32Array lengths;  // every variant's clip length (seconds), file order
+		int head = 0;                // next variant to serve
+	};
+	std::vector<std::pair<String, WeaponClipRing>> weapon_clip_rings_;  // keys lowercased
+	int weapon_anim_variant_ = 0;  // the play latch [orig: animState+68]
+	WeaponClipRing *weapon_ring_for(const String &p_key_lower);
+	// Serve-then-advance duration read; < 0 when the key has no ring.
+	float weapon_ring_take_length(const char *p_key);
+	// Serve-then-advance play take; returns the served variant index (0 for ringless).
+	int weapon_ring_take_variant(const String &p_key);
 	uint64_t weapon_fired_serial_ = 0;
 	uint64_t weapon_dry_serial_ = 0;
 	uint64_t weapon_reload_serial_ = 0;
 	uint64_t weapon_unscope_serial_ = 0;
 	uint64_t weapon_rescope_serial_ = 0;
+	// The action-begin seam: serial + the started slot id; the state dict resolves
+	// the started action's soundset/particle names for the host's sound/muzzle legs
+	// [orig: ActionSlot_ExecuteActionWithEffect @ 0x541860].
+	uint64_t weapon_action_serial_ = 0;
+	int weapon_action_started_ = -1;
+	// The action-END seam: serial + the finished slot id; the state dict resolves the
+	// finished action's soundsetend — the per-shot gunshot / reload-complete sound
+	// [orig: ActionSlot_FinishActivePhase @ 0x53f7b0 -> the end shim @ 0x401100].
+	uint64_t weapon_action_end_serial_ = 0;
+	int weapon_action_finished_ = -1;
+	// One tick's presentation payload, copied while the mounted def and variant-ring
+	// result are still authoritative. A host frame drains these records in tick order;
+	// the tick stamp lets delayed clip starts resume at the correct playhead.
+	struct PendingWeaponEvent {
+		uint32_t tick = 0;
+		Vector3 world_position;
+		String anim_key;
+		int anim_variant = 0;
+		int action_started = -1;
+		String action_soundset;
+		String action_particle;
+		String action_particle_userpoint;
+		int action_finished = -1;
+		String action_end_soundset;
+	};
+	std::vector<PendingWeaponEvent> pending_weapon_events_;
 	float weapon_scope_max_mag_ = 0.0f; // def scope_max_mag (0 = key absent)
 	// The mounted def's 3P body-channel kinds (special_hold / attack_anim; 0 = rifle)
 	// plus the resolved AnimMap identity. The serial advances only when that AnimMap
@@ -412,9 +457,15 @@ public:
 	// --- the local player's equipped-weapon FSM (net-re §5.62) -------------
 	// Install the equipped weapon: p_def is the NovaWeaponDatabase weapon dict (the
 	// {actions, flags, clipsize, startrounds} slice is consumed) and p_clip_seconds
-	// maps each .adm clip key to its length in SECONDS — the Anim_InitActions bake
-	// source [orig: @ 0x541fa0; 'auto' delays come from Anim_GetDurationTicks
-	// @ 0x53ee10]. Resets the slot to a fresh idle with a full magazine.
+	// maps each .adm clip key to its VARIANT lengths in SECONDS — a
+	// PackedFloat32Array in .adm file order (NovaSkeletalAnim.get_clip_variant_lengths;
+	// a plain float is accepted as a single-variant convenience). The lengths seed the
+	// per-slot rings and the Anim_InitActions bake consumes them ring-wise: one
+	// serve-then-advance read per 'auto' delay field [orig: @ 0x541fa0;
+	// Anim_GetDurationTicks @ 0x53ee10]. Resets the slot to a fresh idle with a full
+	// magazine (retail bakes a def ONCE globally, so its rings persist across
+	// re-equips; this per-equip reset rides the existing per-equip re-bake shape,
+	// D-WPN-6 family).
 	void set_local_player_weapon(const Dictionary &p_def, const Dictionary &p_clip_seconds);
 	void clear_local_player_weapon();
 	// Per-frame trigger state: fire held + edge, raw reload edge (the dispatch
@@ -437,11 +488,13 @@ public:
 	// Horizontal -> vertical projection fov (degrees) through the aspect — the
 	// ONE conversion both cameras use [orig: @ 0x58d900].
 	static float fov_vertical_from_horizontal(float p_fov_h_deg, float p_aspect);
-	// The FSM view for the host: {active, current, anim_key, play_serial,
-	// fired_serial, dry_serial, reload_serial, unscope_serial, rescope_serial,
-	// clip, reserve, kick}. Serials are monotonic so no event is lost when several
-	// logic ticks run per render frame.
+	// The FSM snapshot for the host: latest clip/action payloads, diagnostic serials,
+	// ammo, kick, and the 3P body channel. Ordered presentation events drain through
+	// drain_local_player_weapon_events(); the snapshot alone is not an event queue.
 	Dictionary get_local_player_weapon_state() const;
+	// Destructively drain the ordered presentation outputs accumulated since the
+	// previous host frame. Each Dictionary encodes one PlayerWeaponEvent.
+	Array drain_local_player_weapon_events();
 
 	// --- WAC scripts ------------------------------------------------------
 	// Install a compiled program on the script VM (NovaWacProgram). Applied now if

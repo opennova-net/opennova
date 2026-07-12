@@ -56,7 +56,11 @@ private:
 		// magnification [orig: Player_ToggleWeaponScope @ 0x4df0c0 gates Flags & 3;
 		// scoped FOV = 80 / zoom @ 0x4df401].
 		int flags = 0;
+		int flags2 = 0;  // the second FLAGS dword (Inset 0x200 = the 7-step ADS ease)
 		float scope_max_mag = 0.0f;
+		// The SIGHTS card rows (dicts: texture/x1/y1/x2/y2/blend/scale/slide/
+		// slide_frames), authored order [orig: record +0x1C8, count +0x258].
+		Array sights;
 		// The 3P body-channel kinds (0 = absent, rifle): special_hold 1..8 picks the
 		// body hold-pose ladder 50-61 (2 also selects reload2), attack_anim 1/2 stamps
 		// 62/63 on fire [orig: AdmDefs +0xA4/+0xA8, read @ 0x4b5dba / @ 0x542bbc].
