@@ -57,6 +57,7 @@ behavior is summarized and cited.
 | [0021](adr/0021-avatars-writer-policy.md) | Avatars.def writer: from-scratch canonical output; lossless + idempotent round-trip, not byte-exact vs the hand-authored file |
 | [0022](adr/0022-divergence-burn-down.md) | Divergence burn-down: zero-OPEN target, the canonical disposition vocabulary, the PAR freeze exemption, and the permanent register of ratified deliberate divergences |
 | [0023](adr/0023-render-visual-parity.md) | Render visual parity (REN): the fixed-function look is the target (no PBR), the D3D device layer is witness-source only, REN runs freeze-exempt on the PAR model, and the three-tier parity instrument's tolerances never widen |
+| [0024](adr/0024-lib-family-topology.md) | Lib family topology: one-lib-per-format affirmed; terrain/audio families are CMake INTERFACE link groups (never merges, never edge laundering); the renderer-fold reversal recorded; the two consumption models named (Model A flat C ABI / Model B C++ static link) |
 
 ## RE records by domain
 
