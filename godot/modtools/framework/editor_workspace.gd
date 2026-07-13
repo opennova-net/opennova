@@ -571,24 +571,13 @@ func _host_under_shell(node: Node) -> void:
 
 
 ## Reference-strip services riding the shell's reference index — the
-## {referrers, is_ready, jump} Callables ReferenceStrip.configure takes; {}
-## when headless or the shell lacks the index (callers then skip the strip).
-## Inspectors ask their workspace for this instead of reaching for the shell.
-func get_reference_services() -> Dictionary:
-	if editor_shell == null or not editor_shell.has_method("get_reference_index") \
-			or not editor_shell.has_method("open_in_workspace"):
-		return {}
-	# Capture the shell into a local so the service lambdas don't hold this
-	# RefCounted workspace through a member access.
-	var shell: Object = editor_shell
-	return {
-		"referrers": func(name: String) -> Array:
-			return shell.get_reference_index().referrers_of(name),
-		"is_ready": func() -> bool:
-			return shell.get_reference_index().is_built(),
-		"jump": func(kind: String, path: String) -> void:
-			shell.open_in_workspace(kind, ReferenceStrip.resolve_source_path(shell, path)),
-	}
+## ReferenceServices record ReferenceStrip.configure takes; null when headless
+## or the shell lacks the index (callers then skip the strip). Inspectors ask
+## their workspace for this instead of reaching for the shell.
+func get_reference_services() -> ReferenceServices:
+	# from_shell receives the shell itself, so the service lambdas never hold
+	# this RefCounted workspace through a member access.
+	return ReferenceServices.from_shell(editor_shell)
 
 
 # --- Resource root (the shared VFS the shell mounts) -----------------------

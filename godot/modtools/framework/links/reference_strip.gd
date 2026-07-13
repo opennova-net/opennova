@@ -17,7 +17,7 @@ var rows: VBoxContainer
 var empty_label: Label
 
 var _noun := "file"
-var _services: Dictionary = {}
+var _services: ReferenceServices = null
 var _allowed_kinds := PackedStringArray()
 var _keys := PackedStringArray()
 # True once a referrers query has run (user asked, or the graph pre-existed):
@@ -60,19 +60,15 @@ func _init() -> void:
 	add_child(empty_label)
 
 
-## services (all Callables, any subset; missing referrers/is_ready hides the strip):
-##   "referrers": Callable(name: String) -> Array of reference-edge Dictionaries
-##                ({source_path, source_kind, target_kind, site, ...})
-##   "is_ready":  Callable() -> bool — whether the whole-root graph is already
-##                built (querying then is free, so the strip skips the button)
-##   "jump":      Callable(kind: String, path: String) — open a source file
+## services: the ReferenceServices record (null, or one with invalid
+## referrers/is_ready Callables, hides the strip).
 ##
 ## allowed_kinds: target_kind values that count as uses of this target. The
 ## graph indexes referrers by NAME alone, and bare-stem queries share buckets
 ## with every extensionless namespace (terrain headers, 3di textures, string
 ## keys) — without the filter a name collision renders wrong-kind rows and
 ## inflates "(n places)" counts. Empty = accept everything.
-func configure(noun: String, services: Dictionary = {},
+func configure(noun: String, services: ReferenceServices = null,
 		allowed_kinds: PackedStringArray = PackedStringArray()) -> void:
 	_noun = noun
 	_services = services
@@ -94,21 +90,15 @@ func refresh() -> void:
 	_refresh_state()
 
 
-func _service(service_name: String) -> Callable:
-	var cb: Variant = _services.get(service_name)
-	return cb if cb is Callable else Callable()
-
-
 func _refresh_state() -> void:
 	if _scanning:
 		return
-	var referrers := _service("referrers")
-	var is_ready := _service("is_ready")
-	if not referrers.is_valid() or not is_ready.is_valid() or _keys.is_empty():
+	if _services == null or not _services.referrers.is_valid() \
+			or not _services.is_ready.is_valid() or _keys.is_empty():
 		visible = false
 		return
 	visible = true
-	if _live or bool(is_ready.call()):
+	if _live or bool(_services.is_ready.call()):
 		_live = true
 		find_button.visible = false
 		_populate()
@@ -143,7 +133,7 @@ func _clear_rows() -> void:
 
 func _populate() -> void:
 	_clear_rows()
-	var referrers := _service("referrers")
+	var referrers := _services.referrers
 	# Merge every key's edges, deduped per source file (lowercase — the VFS is
 	# case-insensitive). The graph lowercases queries itself, keys pass raw;
 	# duplicate keys (an extensionless document's file == stem) query once or
@@ -199,9 +189,8 @@ func _populate() -> void:
 
 
 func _on_row_pressed(kind: String, path: String) -> void:
-	var jump := _service("jump")
-	if jump.is_valid():
-		jump.call(ResourceKinds.jump_kind(kind), path)
+	if _services != null and _services.jump.is_valid():
+		_services.jump.call(ResourceKinds.jump_kind(kind), path)
 
 
 ## Referrer edges carry VFS-logical source names (the graph is built from the

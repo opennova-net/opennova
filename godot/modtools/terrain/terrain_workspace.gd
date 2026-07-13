@@ -241,7 +241,7 @@ func set_asset_dock(dock: Control) -> void:
 	# one terrain surface built with the shell seam in scope (the workflow
 	# inspectors receive only the terrain editor).
 	var services := get_reference_services()
-	if not services.is_empty() and _asset_dock.has_method("set_reference_services"):
+	if services != null and _asset_dock.has_method("set_reference_services"):
 		_asset_dock.set_reference_services(services)
 
 

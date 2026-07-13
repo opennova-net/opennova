@@ -188,20 +188,12 @@ func _build_text_value(value: String) -> void:
 # style_var edge per menu per variable, so the strip lists the menus that use
 # this one and jumps into the Menus workspace.
 func _build_used_by() -> void:
-	if _shell == null or not _shell.has_method("get_reference_index") \
-			or not _shell.has_method("open_in_workspace"):
+	var services := ReferenceServices.from_shell(_shell)
+	if services == null:
 		return
-	var shell: Object = _shell
 	var strip := ReferenceStrip.new()
 	strip.name = "UsedByStrip"
-	strip.configure("style variable", {
-		"referrers": func(name: String) -> Array:
-			return shell.get_reference_index().referrers_of(name),
-		"is_ready": func() -> bool:
-			return shell.get_reference_index().is_built(),
-		"jump": func(kind: String, path: String) -> void:
-			shell.open_in_workspace(kind, ReferenceStrip.resolve_source_path(shell, path)),
-	}, PackedStringArray(["style_var"]))
+	strip.configure("style variable", services, PackedStringArray(["style_var"]))
 	strip.set_target(PackedStringArray([_name]))
 	_box.add_child(strip)
 
