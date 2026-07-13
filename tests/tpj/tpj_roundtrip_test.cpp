@@ -45,6 +45,7 @@ int main() {
 	foliage_b.color_lower = static_cast<int>(opennova::FoliageColorMode::MatchGround);
 	foliage_b.color_upper = static_cast<int>(opennova::FoliageColorMode::Blend50);
 	foliage_b.match = 1;
+	foliage_b.match_extra = {2, 3, 4};
 	foliage_b.attrib_flags = opennova::FOLIAGE_ATTRIB_FORCE_ON;
 	saved.foliage_defs.push_back(foliage_b);
 	saved.has_metadata = true;
@@ -83,6 +84,8 @@ int main() {
 	if (!expect(loaded.foliage_defs[0].graphic == "tree_a.3di", "first foliage graphic should round-trip")) return 1;
 	if (!expect(loaded.foliage_defs[0].attrib_flags == opennova::FOLIAGE_ATTRIB_SHADOW, "first foliage attrib_flags should round-trip")) return 1;
 	if (!expect(loaded.foliage_defs[1].match == 1, "second foliage match should round-trip")) return 1;
+	if (!expect(loaded.foliage_defs[1].match_extra == std::array<int, 3>{2, 3, 4},
+	            "all four project foliage matches should round-trip")) return 1;
 	if (!expect(loaded.foliage_defs[1].attrib_flags == opennova::FOLIAGE_ATTRIB_FORCE_ON, "second foliage attrib_flags should round-trip")) return 1;
 
 	std::printf("OK: tpj round-trip preserved authoring metadata\n");

@@ -91,6 +91,21 @@ substrate; the divergence is wire/visually equivalent or host-internal.
   effect index → fine depth) is a device-era mechanism; the host's internal opaque
   ordering serves the same intent, with the key semantics preserved as T1-pinned pure
   functions. (Ratified at REN-3; entry back-filled here 2026-07-06.)
+- **D-FOLIAGE-10** — retail immediate-mode draws a shared MODEL (slot, tile) once per
+  qualifying sector entity, later draws overwriting earlier in the framebuffer; retained
+  copies would z-fight, so the host renders ONE node per (slot, tile) per frame carrying
+  the last submission's draw state (submission count and per-submission wind advance
+  preserved). Sub-texel residual documented in the record. (Entry added with the
+  foliage-rebuild slice, 2026-07-12.)
+- **D-FOLIAGE-11** — model-tile cache host mechanics with identical hit/evict/stamp
+  semantics: a key→index hash beside the 1000-entry cache (vs retail's per-tile linear
+  scan) and borrowed instance views with this-frame eviction protection (vs retail's
+  immediate draws). (Entry added with the foliage-rebuild slice, 2026-07-12.)
+- **D-FOLIAGE-12** — the FAR bake budget: retail's per-call new-texture list is a
+  64-entry stack array with no overflow guard; the host caps adoptions at 64/slot/frame
+  explicitly — a faithful guard on the retail array bound (the witnessed 42u collect
+  tops out below it). (Entry added with the
+  foliage-rebuild slice, 2026-07-12.)
 - **D-RMAT-8** — framebuffer blending runs on the host's blit-encoded (linear) values;
   retail blends gamma bytes. Under D-RMAT-7's gamma-space convention, opaque and
   alpha-tested surfaces display byte-exact; translucent composites diverge boundedly

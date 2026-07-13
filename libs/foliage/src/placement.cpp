@@ -1,13 +1,11 @@
 // Procedural per-cell foliage placement — a faithful port of the deterministic
-// grass/bush instancer. [orig: generate_foliage_instances_0 @ 0x600197 (retail
+// FAR grass/bush instancer. [orig: generate_foliage_instances_0 @ 0x5ffdd0 (retail
 // Jointops) — seed 0xA55B1EED, the ROL-hash PRNG, 36 candidates/cell, the
-// surface-type gate (Terrain_GetSurfaceTypeAtFixedPoint @ 0x6066d0), and the
+// match-remapped FOLIAGEMAP slot-mask gate (Foliage_SampleFarMapMask
+// @ 0x6066d0), and the
 // 0x20000 proximity spacing; byte-identical, see docs/foliage/foliage-re.md
 // (PAR-R2). Originally ported from jodemo sub_5C0240/5C6450/5C65E0.]
 #include "foliage/placement.h"
-
-#include <cmath>
-#include <cstdlib>
 
 namespace opennova::foliage {
 
@@ -33,10 +31,10 @@ inline uint32_t prng_advance(uint32_t state) noexcept {
 	return rol32(state + rol32(state, 11), 4) ^ 1u;
 }
 
-// Low 16 bits of the PRNG output drive the candidate frac; sub_5C0240 stores
-// `v55 = (uint16_t)v7 ^ 1` and uses it as the frac for x, then repeats for y.
+// Low 16 bits of the already-^1-folded PRNG state drive each candidate draw.
+// [orig: generate_foliage_instances_0 @ 0x5ffdd0]
 inline uint16_t prng_frac16(uint32_t state) noexcept {
-	return static_cast<uint16_t>(state ^ 1u);
+	return static_cast<uint16_t>(state);
 }
 
 // Sign-extend the lower 16 bits of a cell-key field to a signed 32-bit cell index.
@@ -59,29 +57,29 @@ uint32_t pack_cell_key(Fixed16_16 cell_x_fixed, Fixed16_16 cell_z_fixed) noexcep
 
 PlacementResult place_cell(int slot_index,
                            uint32_t cell_key,
-                           Fixed16_16 view_center_x,
-                           Fixed16_16 view_center_z,
-                           int32_t view_radius,
                            const PlacementConfig &config,
                            const PlacementSamplers &samplers) noexcept {
 	PlacementResult result{};
 	if (slot_index < 0 || slot_index >= FOLIAGE_MAX_DEFS) {
 		return result;
 	}
+	// [orig: generate_foliage_instances_0 @ 0x5ffdd0] The packed-key sign
+	// bit is the empty-cell marker; it must not decode as real coordinates.
+	if ((cell_key & 0x80000000u) != 0u) {
+		return result;
+	}
 
-	// Decode cell origin from the key. Engine uses the raw packed dword; the low
-	// 16 bits encode the z-cell (<<16) and the upper 16 bits encode the x-cell.
-	// `v43` (engine) = cell_z integer in world units, and `v38` = cell_x integer.
-	// Note the asymmetry between pack/unpack here - the engine decodes the key by
-	// sign-extending its HIWORD and LOWORD directly, which is the same as reading
-	// the upper/lower halves of the original (x_fixed, z_fixed) truncated to 16 bits.
-	const int32_t cell_z_int = sext_key_half(cell_key >> 16);  // v43
-	const int32_t cell_x_int = sext_key_half(cell_key);        // v38
+	// Decode cell origin from the key. Engine uses the raw packed dword; the
+	// HIGH half is the world-X cell base and the LOW half the world-Z cell
+	// base - retail passes the HIWORD-derived coordinate as the X argument of
+	// the spacing/FOLIAGEMAP slot-mask queries [orig: generate_foliage_instances_0
+	// @ 0x600001..0x600009]. Sign-extension mirrors the engine's
+	// `(half << 17) >> 17` decode.
+	const int32_t key_x_int = sext_key_half(cell_key >> 16);
+	const int32_t key_z_int = sext_key_half(cell_key);
 
 	const uint8_t slot_force_on =
 	    (config.attrib_flags[slot_index] & FOLIAGE_ATTRIB_FORCE_ON) != 0 ? 1u : 0u;
-	const float quad_half = config.quad_half_width[slot_index];
-
 	uint32_t rng = prng_seed_from_cell(cell_key);
 
 	for (int candidate_idx = 0; candidate_idx < FOLIAGE_CANDIDATES_PER_CELL; ++candidate_idx) {
@@ -104,33 +102,39 @@ PlacementResult place_cell(int slot_index,
 		const uint16_t frac_rot = prng_frac16(rng);
 		const float rotation = static_cast<float>(frac_rot) * FOLIAGE_ROTATION_SCALE;
 
-		// World-fixed position. Engine @ 0x5c042d:
-		//   (int)((v43 + v39) * 65536.0) - *a4  // x delta
-		//   v32 = (int)((v38 - v27) * 65536.0); // z in engine's negated convention
+		// Candidate position: BOTH axes ADD their grid coordinate to the
+		// (unbiased) cell base — witnessed in the vertex writes, where the
+		// emitted position is (keyLow&0x1FF)+localA on one axis and
+		// (keyHigh&0x1FF)+localB on the other, and in the sampler args
+		// (base+candidate on both axes) [orig: generate_foliage_instances_0
+		// vertex bases @ 0x6000b0..0x6000dc, adds @ 0x60013f..0x60014d,
+		// sampler coords @ 0x5fff84..0x5fff9d]. The earlier "keyLow - localB"
+		// reading belongs to the MODEL tier's +16-biased tile keys
+		// (pack_model_tile_key), not to this generator.
 		const Fixed16_16 world_x_fixed =
-		    static_cast<Fixed16_16>((static_cast<float>(cell_z_int) + cand_x) * FIXED_SCALE);
+		    static_cast<Fixed16_16>((static_cast<float>(key_x_int) + cand_x) * FIXED_SCALE);
 		const Fixed16_16 world_z_fixed =
-		    static_cast<Fixed16_16>((static_cast<float>(cell_x_int) - cand_y) * FIXED_SCALE);
+		    static_cast<Fixed16_16>((static_cast<float>(key_z_int) + cand_y) * FIXED_SCALE);
 
-		// L-infinity cull. Engine @ 0x5c04a5:
-		//   abs(world_x - center.x) <= view_radius && abs(z_delta) <= view_radius
-		const int64_t dx = static_cast<int64_t>(world_x_fixed) - static_cast<int64_t>(view_center_x);
-		const int64_t dz = static_cast<int64_t>(world_z_fixed) - static_cast<int64_t>(view_center_z);
-		if (std::llabs(dx) > view_radius || std::llabs(dz) > view_radius) {
-			continue;
-		}
-
-		// Path-blocker check: engine short-circuits this when the slot has FORCE_ON.
-		// Engine @ 0x5c04a5:
-		//   (FORCE_ON) || !sub_5C6450(world_x, -world_z, 0x20000)
+		// Path-blocker check: retail short-circuits it when the slot has
+		// FORCE_ON [orig: generate_foliage_instances_0 @ 0x5fffb6 (attrib
+		// byte_2C2608C bit 0) / the sub_606490(.., .., 0x20000) call
+		// @ 0x600009]. The callback takes the candidate's own (x, z); the
+		// retail arg negation is the native sampler convention, absorbed by
+		// the host seam (placement.h).
 		if (!slot_force_on) {
-			if (samplers.path_blocked && samplers.path_blocked(world_x_fixed, -world_z_fixed, 0x20000)) {
+			if (samplers.path_blocked && samplers.path_blocked(world_x_fixed, world_z_fixed, 0x20000)) {
 				continue;
 			}
 		}
 
-		// Foliagemap slot-mask check. Engine @ 0x5c04a5:
-		//   (1 << slot) & sub_5C65E0(world_x, world_z)
+		// FAR foliagemap mask check: the FOLIAGEMAP pixel remapped through the
+		// def match values into a four-slot bitmask (the charmap is not a
+		// foliage input anywhere). Gated at the candidate's own position — the
+		// retail call feeds the SAME coordinate pair to this gate and to the
+		// four ground probes. [orig: Foliage_SampleFarMapMask @ 0x6066d0
+		// (ex kong "Terrain_GetSurfaceTypeAtFixedPoint") over the load-remap
+		// @ 0x605AD0/0x5FF4E0, caller @ 0x600029..0x600079]
 		const uint32_t mask = samplers.slot_mask_at
 		                         ? samplers.slot_mask_at(world_x_fixed, world_z_fixed)
 		                         : 0u;
@@ -138,96 +142,14 @@ PlacementResult place_cell(int slot_index,
 			continue;
 		}
 
-		// Accepted - build the instance. Engine samples 4 corners + 4 midpoints of
-		// the quad for tangent/normal/curvature; we mirror that geometry.
+		// Accepted FAR candidate. Geometry-dependent terrain samples happen in
+		// emit_far_mesh(), once the authored source vertices are available.
 		PlacementInstance inst{};
 		inst.world_x_fixed = world_x_fixed;
 		inst.world_z_fixed = world_z_fixed;
 		inst.rotation_radians = rotation;
 
-		const float cos_r = std::cos(rotation);
-		const float sin_r = std::sin(rotation);
-
-		// Corners: bit 0 picks +x/-x, bit 1 picks +y/-y of the quad half-vector.
-		// Engine @ 0x5c04f7..0x5c0540.
-		Fixed16_16 corner_x_fixed[4];
-		Fixed16_16 corner_z_fixed[4];
-		for (int c = 0; c < 4; ++c) {
-			const float qx = ((c & 1) ? 1.0f : -1.0f) * quad_half;
-			const float qy = ((c & 2) ? 1.0f : -1.0f) * quad_half;
-			const float rotated_x = qx * cos_r + cand_x - qy * sin_r;
-			const float rotated_y = qy * cos_r + qx * sin_r + cand_y;
-			corner_x_fixed[c] = static_cast<Fixed16_16>(
-			    (static_cast<float>(cell_z_int) + rotated_x) * FIXED_SCALE);
-			corner_z_fixed[c] = static_cast<Fixed16_16>(
-			    (static_cast<float>(cell_x_int) - rotated_y) * FIXED_SCALE);
-
-			const Fixed16_16 h = samplers.height_at
-			                         ? samplers.height_at(corner_x_fixed[c], corner_z_fixed[c])
-			                         : 0;
-			inst.corner_y_fixed[c] = h;
-		}
-
-		// Midpoints: engine @ 0x5c05ca..0x5c0694 uses asymmetric pairings rather
-		// than simple edge midpoints.
-		//   m0: x = (c0.x + c2.x) / 2, z = (c0.z + c1.z) / 2
-		//   m1: x = (c1.x + c3.x) / 2, z = (c2.z + c3.z) / 2
-		//   m2: x = (c0.x + c1.x) / 2, z = (c1.z + c2.z) / 2
-		//   m3: x = (c2.x + c3.x) / 2, z = (c0.z + c3.z) / 2
-		// Engine: jodemo.exe sub_5C0240@0x5C05CA-0x5C0694
-		// docs/engine_spec_foliage.md 4.4.7
-		const Fixed16_16 midpoint_x_fixed[4] = {
-		    static_cast<Fixed16_16>((corner_x_fixed[0] + corner_x_fixed[2]) >> 1),
-		    static_cast<Fixed16_16>((corner_x_fixed[1] + corner_x_fixed[3]) >> 1),
-		    static_cast<Fixed16_16>((corner_x_fixed[0] + corner_x_fixed[1]) >> 1),
-		    static_cast<Fixed16_16>((corner_x_fixed[2] + corner_x_fixed[3]) >> 1),
-		};
-		const Fixed16_16 midpoint_z_fixed[4] = {
-		    static_cast<Fixed16_16>((corner_z_fixed[0] + corner_z_fixed[1]) >> 1),
-		    static_cast<Fixed16_16>((corner_z_fixed[2] + corner_z_fixed[3]) >> 1),
-		    static_cast<Fixed16_16>((corner_z_fixed[1] + corner_z_fixed[2]) >> 1),
-		    static_cast<Fixed16_16>((corner_z_fixed[0] + corner_z_fixed[3]) >> 1),
-		};
-		for (int m = 0; m < 4; ++m) {
-			inst.midpoint_y_fixed[m] = samplers.height_at
-			                               ? samplers.height_at(midpoint_x_fixed[m], midpoint_z_fixed[m])
-			                               : 0;
-		}
-
-		// Engine: Foliage_BuildPatchData@0x005C0240, 0x5C06B8..0x5C07FC.
-		// These four values are derived from the same asymmetric midpoint
-		// samples above and written into the patch record after the corner
-		// offsets/heights. They are patch control data, not final foliage color.
-		const float c0 = static_cast<float>(inst.corner_y_fixed[0]) * FIXED_TO_FLOAT;
-		const float c1 = static_cast<float>(inst.corner_y_fixed[1]) * FIXED_TO_FLOAT;
-		const float c2 = static_cast<float>(inst.corner_y_fixed[2]) * FIXED_TO_FLOAT;
-		const float c3 = static_cast<float>(inst.corner_y_fixed[3]) * FIXED_TO_FLOAT;
-		const float m0 = static_cast<float>(inst.midpoint_y_fixed[0]) * FIXED_TO_FLOAT;
-		const float m1 = static_cast<float>(inst.midpoint_y_fixed[1]) * FIXED_TO_FLOAT;
-		const float m2 = static_cast<float>(inst.midpoint_y_fixed[2]) * FIXED_TO_FLOAT;
-		const float m3 = static_cast<float>(inst.midpoint_y_fixed[3]) * FIXED_TO_FLOAT;
-		const float edge_bottom = m1 - (c3 + c1) * 0.5f;
-		const float edge_right = m3 - (c3 + c2) * 0.5f;
-		const float control0 = (m0 - (c2 + c0) * 0.5f + edge_bottom) * 0.5f;
-		const float control2 = (m2 - (c1 + c0) * 0.5f + edge_right) * 0.5f;
-		inst.patch_control[0] = control0;
-		inst.patch_control[1] = edge_bottom - control0;
-		inst.patch_control[2] = control2;
-		inst.patch_control[3] = edge_right - control2;
-
-		// Centre-point height (used as the instance's world_y). Not in the engine's
-		// per-instance output (engine consumes corners only), but convenient for the
-		// Godot side that positions MultiMesh instances by centre.
-		const Fixed16_16 centre_x =
-		    static_cast<Fixed16_16>((static_cast<float>(cell_z_int) + cand_x) * FIXED_SCALE);
-		const Fixed16_16 centre_z =
-		    static_cast<Fixed16_16>((static_cast<float>(cell_x_int) - cand_y) * FIXED_SCALE);
-		inst.world_y_fixed = samplers.height_at ? samplers.height_at(centre_x, centre_z) : 0;
-
 		result.instances[result.count++] = inst;
-		if (result.count >= FOLIAGE_CELL_CAP) {
-			break;
-		}
 	}
 
 	return result;

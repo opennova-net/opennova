@@ -124,11 +124,13 @@ func _run() -> void:
 		if dispatcher != null and dispatcher.has_method("get_dispatch_stats"):
 			stats = dispatcher.get_dispatch_stats()
 		var total: int = dispatcher.get_total_instances() if dispatcher != null and dispatcher.has_method("get_total_instances") else -1
-		series.append({"total": total, "stats": stats})
+		var foliage_us: int = int(world.get("_perf_foliage_us")) if world.get("_perf_foliage_us") != null else -1
+		series.append({"total": total, "fps": Engine.get_frames_per_second(), "foliage_us": foliage_us, "stats": stats})
 	print("foliage_visual_probe: stats series (first/last 6):")
 	for i in range(series.size()):
 		if i < 6 or i >= series.size() - 6:
-			print("  f%02d total=%s stats=%s" % [i, str(series[i]["total"]), str(series[i]["stats"])])
+			print("  f%02d total=%s fps=%s foliage_us=%s stats=%s" % [i, str(series[i]["total"]),
+				str(series[i]["fps"]), str(series[i]["foliage_us"]), str(series[i]["stats"])])
 	var totals: Array = series.map(func(s): return int(s["total"]))
 	var t_min: int = totals.min()
 	var t_max: int = totals.max()

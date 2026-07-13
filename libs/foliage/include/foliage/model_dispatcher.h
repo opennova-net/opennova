@@ -2,9 +2,10 @@
 
 // The foliage MODEL-tier tile walk + per-def cache, ported from retail
 // Jointops.exe [orig: Foliage_UpdateModelTiles @ 0x601f50, driven per visible
-// sector entity by Terrain_RenderSectorEntitiesBySide @ 0x5c7d50]. Mirrors
-// the quad tier's Dispatcher shape (dispatcher.h): one instance per foliage
-// def slot; the host walks it once per anchor per frame.
+// sector entity by Terrain_RenderSectorEntitiesBySide @ 0x5c7d50]. One
+// instance per foliage def slot; the host walks it once per anchor per frame
+// (the FAR tier has no dispatcher class — it is a bake-once slot pool in the
+// host, docs/foliage/foliage-re.md).
 //
 // Witnessed behavior: gate the whole walk on the anchor's view-space depth
 // >= 38.0; walk the 4 quadrant tiles (16u cells overlapping anchor +-8u);
@@ -15,6 +16,7 @@
 // draw only when count > 0.
 
 #include <cstdint>
+#include <unordered_map>
 #include <vector>
 
 #include "foliage/model_placement.h"
@@ -29,19 +31,30 @@ constexpr float MODEL_DEPTH_GATE = 38.0f;      // view-space depth gate @ 0x5c7d
 struct ModelCacheEntry {
 	uint32_t tile_key = 0xFFFFFFFFu;
 	int32_t last_touched = -1;  // frame stamp on last hit (retail entry dword [1])
+	// Host content stamp: the dispatcher's monotonic counter at the entry's
+	// last (re)generation, so hosts can skip re-uploading unchanged cached
+	// tiles. Dispatcher-wide (never reused across evict/re-adopt cycles —
+	// a per-entry counter collided after re-adoption and froze stale
+	// uploads). Not a retail field: retail re-uploads its per-draw VS
+	// constant block from the cache entry every submission.
+	int64_t generation = 0;
 	ModelTileResult cached;
 	bool occupied = false;
 };
 
 // One walked tile emitted to the host: the packed key, the snapped 16u tile
-// origin, and a copy of the current cache content (retail draws straight from
-// the cache entry per tile; the copy keeps the out list stable across later
-// evictions in the same frame).
+// origin, and a BORROWED view of the cache entry's instance list (retail
+// draws straight from the cache entry per tile). The pointer stays valid
+// until the dispatcher's next walk()/reset(): the LRU never evicts an entry
+// touched this frame (walk() skips the adoption instead), so nothing emitted
+// this frame can be recycled under the host.
 struct ModelTileDraw {
 	uint32_t tile_key = 0;
 	Fixed16_16 snap_x_fixed = 0;
 	Fixed16_16 snap_z_fixed = 0;
-	ModelTileResult result;
+	int64_t generation = 0;  // ModelCacheEntry.generation at emission time
+	const ModelInstance *instances = nullptr;
+	int count = 0;
 };
 
 // Per-slot model-tier dispatcher state. One instance per foliage def slot
@@ -71,7 +84,7 @@ public:
 	          std::vector<ModelTileDraw> &out) noexcept;
 
 	// The 8-frame regen stagger [orig: Foliage_UpdateModelTiles @ 0x601f50]:
-	// ((frame + 2 * slot) & 7) == 0 - same gate family as the quad tier.
+	// ((frame + 2 * slot) & 7) == 0 - same gate family as the FAR tier.
 	static bool is_staggered_regen_frame(int32_t frame_counter, int slot_index) noexcept;
 
 	// Introspection for hosts/tests.
@@ -79,12 +92,19 @@ public:
 	int64_t cache_hits() const noexcept { return cache_hits_; }
 	int64_t cache_misses() const noexcept { return cache_misses_; }
 	int64_t regenerations() const noexcept { return regenerations_; }
+	int64_t skipped_adoptions() const noexcept { return skipped_adoptions_; }
 
 private:
 	std::vector<ModelCacheEntry> entries_;
+	// Key -> entries_ index. A host lookup accelerator over the same 1000
+	// entries (identical hit/evict/stamp semantics to the retail linear scan).
+	std::unordered_map<uint32_t, int> key_index_;
 	int64_t cache_hits_ = 0;
 	int64_t cache_misses_ = 0;
 	int64_t regenerations_ = 0;
+	// Monotonic content stamp source for ModelCacheEntry.generation.
+	int64_t generation_stamp_ = 0;
+	int64_t skipped_adoptions_ = 0;
 };
 
 } // namespace opennova::foliage

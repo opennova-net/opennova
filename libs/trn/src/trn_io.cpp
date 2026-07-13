@@ -48,6 +48,7 @@ bool load_trn(std::istream &f, TrnConfig &out, std::string &error) {
 		if (key == "foliage") {
 			if (out.foliage_defs.size() < 4) {
 				FoliageDef def;
+				size_t match_index = 0;
 				std::string fline;
 				while (std::getline(f, fline)) {
 					auto fsc = fline.find(';');
@@ -73,7 +74,13 @@ bool load_trn(std::istream &f, TrnConfig &out, std::string &error) {
 					} else if (fk == "color_upper") {
 						def.color_upper = std::atoi(fv.c_str());
 					} else if (fk == "match") {
-						def.match = std::atoi(fv.c_str());
+						const int match_value = std::atoi(fv.c_str());
+						if (match_index == 0) {
+							def.match = match_value;
+						} else if (match_index < FOLIAGE_MATCH_VALUES_PER_DEF) {
+							def.match_extra[match_index - 1] = match_value;
+						}
+						++match_index;
 					} else if (fk == "attrib") {
 						def.attrib_flags = 0;
 						def.attrib_flags = static_cast<uint8_t>(def.attrib_flags | (
@@ -257,6 +264,11 @@ bool save_trn(std::ostream &f, const TrnConfig &cfg, std::string &error) {
 		f << "  color_upper     " << normalized.color_upper << nl;
 		if (normalized.match >= 0) {
 			f << "  match           " << normalized.match << nl;
+		}
+		for (const int match : normalized.match_extra) {
+			if (match >= 0) {
+				f << "  match           " << match << nl;
+			}
 		}
 		if (normalized.attrib_flags != 0) {
 			f << "  attrib          ";

@@ -231,10 +231,23 @@ public:
 	float get_height_world_bilinear(const Vector3 &p_world_pos) const;
 	Color get_colormap_color_world(float world_x, float world_z) const;
 	Color get_modulated_colormap_color_world(float world_x, float world_z, const Color &light_color) const;
-	// Returns the foliagemap palette index at the given world position, or 0
-	// for "outside map / empty".
-	// Engine: jodemo.exe sub_5C65E0@0x5C65E0
-	// docs/engine_spec_foliage.md 4.4.4, docs/engine_spec_stampdown.md 4.5
+	// The FAR foliage-slot mask at the witnessed sampler boundary [orig:
+	// Foliage_SampleFarMapMask @ 0x6066d0, ex kong
+	// "Terrain_GetSurfaceTypeAtFixedPoint" — a misnomer: the buffer it reads is
+	// the FOLIAGEMAP ("PolyTrn Foliagemap" @ 0x605b35), remapped at load so each
+	// pixel holds the def-slot bitmask (pixel == any of the def's match values
+	// -> bit(def); pixel 0 never matches) [orig: sub_605AD0 -> sub_5FF4E0]].
+	// The flat & 1023 addressing is SOURCE-ATLAS space: retail's FAR keys pack
+	// source coordinates [orig: key construction @ 0x603f8a], so this accessor
+	// is only world-correct on layouts where world == source. World-coordinate
+	// gating goes through get_foliage_index_world instead (the runtime
+	// dispatcher does).
+	int get_foliage_far_mask_world(float world_x, float native_z) const;
+	// Returns the foliagemap palette index at the given Godot world position
+	// (same coordinate convention as get_height_world_bilinear; no caller-side
+	// negation), or 0 for "outside map / empty".
+	// [orig: Foliage_SampleFoliageMapMask @ 0x606620; jodemo
+	// Terrain_GetFoliageMapValue @ 0x5C65E0]
 	// Shared by runtime NovaFoliageDispatcher wiring and editor paint previews
 	// so the world->sector->source mapping lives in exactly one place.
 	int get_foliage_index_world(float world_x, float world_z) const;
@@ -246,6 +259,15 @@ public:
 	// returns Vector2(-1e9,-1e9) for out-of-extent / empty cells (the sentinels the
 	// GDScript callers branch on); get_cell_atlas_rect returns a zero Rect2i.
 	Vector2 world_to_source_coords(double world_x, double world_z) const;
+	// The RUNTIME kernel form of the same transform (& 0xF sector wrap, raw
+	// sector id, no bounds-reject) — the resolution every game-side sampler
+	// uses [orig: Terrain_SampleHeightBilinear @ 0x5C6770 /
+	// Terrain_GetFoliageMapValue @ 0x5C65E0]. The editor's foliage brush and
+	// eyedropper must address the foliagemap through this form with NEGATED z
+	// (the witnessed foliagemap read indexes (-z) [orig: Foliage_SampleFarMapMask
+	// @ 0x6066d0]), so paints land on the texel the game gates by. Returns
+	// Vector2(-1,-1) when the wrapped sector is empty.
+	Vector2 world_to_source_coords_wrapped(double world_x, double world_z) const;
 	Vector2 world_to_cell_source_coords(double world_x, double world_z, int row, int col) const;
 	// World -> authored sector-grid cell (row, col), or (-1,-1) outside the
 	// authored extent. Mirrors EditorTerrainMesh's extent-guarded cell lookup:

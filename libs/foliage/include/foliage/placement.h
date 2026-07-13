@@ -1,10 +1,9 @@
 #pragma once
 
-// Per-cell foliage placement, ported from jodemo.exe
-// Foliage_BuildPatchData@0x005C0240. Generates up to FOLIAGE_CELL_CAP
-// instances on a 6x6 candidate grid inside a 16-world-unit cell, rejecting
-// candidates outside the caller's L-infinity view radius or failing the
-// foliagemap slot mask.
+// Retail FAR foliage candidate placement. Generates up to FAR_CELL_CAP
+// placements on a 6x6 grid inside a 16-world-unit cell. Source geometry and
+// terrain bending belong to far_mesh_emitter.h; FAR does not synthesize or
+// ground-fit a quad. [orig: generate_foliage_instances_0 @ 0x5ffdd0]
 
 #include <array>
 #include <cstdint>
@@ -15,8 +14,8 @@
 namespace opennova::foliage {
 
 // Engine constants. Do not change; these are byte-exact from the decomp.
-constexpr int FOLIAGE_CELL_CAP = 21;               // 0x5C080D cap
 constexpr int FOLIAGE_CANDIDATES_PER_CELL = 36;    // 6x6 grid; v41 = 0..35
+constexpr int FAR_CELL_CAP = FOLIAGE_CANDIDATES_PER_CELL;  // FAR has no accepted-count early cap
 constexpr int FOLIAGE_CELL_GRID = 6;
 constexpr float FOLIAGE_CANDIDATE_STEP = 2.5999999f;       // 0x5C033A
 constexpr float FOLIAGE_CANDIDATE_BASE = 1.0f;
@@ -28,18 +27,37 @@ using Fixed16_16 = int32_t;
 constexpr float FIXED_SCALE = 65536.0f;
 constexpr float FIXED_TO_FLOAT = 1.0f / 65536.0f;
 
-// Sampler callbacks, decoupled from the concrete FoliageMap / heightmap container.
-// path_blocked: returns true if the given world-fixed point has a blocker
-// (Terrain_IsNearAmbientSource in the decomp). Our port currently returns false
-// unconditionally.
-// slot_mask_at: returns a bitmask of which foliage slots (bit 0..3) are
-// permitted at the given world-fixed point, analogous to
-// Terrain_GetFoliageMapValue@0x005C65E0.
+// Sampler callbacks, decoupled from the concrete FoliageMap / heightmap
+// container. EVERY callback receives the candidate's own position as 16.16
+// world-fixed (x, z) in the generator's axes — there is NO negation at this
+// boundary. Retail's samplers take native coordinates and negate internally
+// (Terrain_GetSurfaceTypeAtFixedPoint @ 0x6066d0 rows at (-z)>>16;
+// sub_606490's y axis likewise); the host seams absorb that sign the same way
+// the height samplers already do, so a candidate is gated, spacing-checked,
+// and grounded at ONE position. The retail far generator feeds its map gate
+// and its four ground probes the SAME coordinate pair
+// [orig: generate_foliage_instances_0 @ 0x600029..0x600065].
+// path_blocked: true when the point sits within `range` of a placed terrain
+// tile's 16u footprint — the .til overlap reject that keeps grass off
+// roads/pads [orig: sub_606490 @ 0x606490 over g_TerrainTileArray, the
+// mission's placed tiles (PolyTrn_LoadTileData @ 0x6081d0); range 0x20000].
+// slot_mask_at: returns a bitmask of permitted foliage slots (bit 0..3),
+// derived from the FOLIAGEMAP pixel remapped through the def match values
+// (both tiers; the charmap is not a foliage input anywhere)
+// [orig: Foliage_SampleFarMapMask @ 0x6066d0 (FAR);
+// Foliage_SampleFoliageMapMask @ 0x606620 (MODEL)].
 // height_at: returns 16.16-fixed world height at the given 16.16 world coords,
-// analogous to Terrain_SampleHeightBilinear@0x005C6770.
+// analogous to Terrain_SampleHeightBilinear@0x005C6770, or HEIGHT_INVALID for
+// "no terrain here" (a HOST concept: editor documents end at the authored
+// region; retail's wrapped world always resolves a height). Consumers SKIP
+// the candidate/instance — a sentinel fed through as a real height bent FAR
+// blades into kilometer spikes and poisoned the MODEL corner fit.
 using PathBlockedFn = std::function<bool(Fixed16_16 wx, Fixed16_16 wz, int32_t range)>;
 using SlotMaskFn = std::function<uint32_t(Fixed16_16 wx, Fixed16_16 wz)>;
 using HeightFn = std::function<Fixed16_16(Fixed16_16 wx, Fixed16_16 wz)>;
+
+// "No terrain here" sentinel for HeightFn (never a plausible 16.16 height).
+inline constexpr Fixed16_16 HEIGHT_INVALID = INT32_MIN;
 
 struct PlacementSamplers {
 	PathBlockedFn path_blocked;
@@ -48,47 +66,21 @@ struct PlacementSamplers {
 };
 
 struct PlacementConfig {
-	// FoliageDef attribute flags. Foliage_BuildPatchData only consumes FORCE_ON.
+	// Retail FAR placement consumes only FORCE_ON from the def attributes.
 	uint8_t attrib_flags[FOLIAGE_MAX_DEFS] = {};
-	// Per-slot quad half-width. Engine source: flt_15F9154[17 * slot].
-	float quad_half_width[FOLIAGE_MAX_DEFS] = {1.0f, 1.0f, 1.0f, 1.0f};
-	// Per-slot color modes parsed from the .trn. The final retail render emitter
-	// still needs a verified anchor; placement keeps these in config for downstream
-	// render parity.
-	int color_lower[FOLIAGE_MAX_DEFS] = {0, 0, 0, 0};
-	int color_upper[FOLIAGE_MAX_DEFS] = {0, 0, 0, 0};
 };
 
 struct PlacementInstance {
 	// Position: 16.16 fixed world x, z (engine coordinate convention).
 	Fixed16_16 world_x_fixed = 0;
 	Fixed16_16 world_z_fixed = 0;
-	// World y in 16.16 fixed. The engine consumes the corner/midpoint heights;
-	// this center height is retained for the Godot MultiMesh adapter.
-	Fixed16_16 world_y_fixed = 0;
 
 	// Rotation in radians.
 	float rotation_radians = 0.0f;
-
-	// 4 corner heights (TL, TR, BL, BR) and 4 midpoint heights (top, bottom,
-	// left, right) as 16.16 fixed. Foliage_BuildPatchData samples these before
-	// computing the four patch_control values below.
-	Fixed16_16 corner_y_fixed[4] = {};
-	Fixed16_16 midpoint_y_fixed[4] = {};
-
-	// The patch ground-fit fold (E_A, T_A, E_B, T_B), written by
-	// Foliage_BuildPatchData@0x005C0240 at 0x5C07E8..0x5C07FC - the SAME fold
-	// family the model tier feeds its grid-placement VS: per edge the sag
-	// D = h_mid - (h_cornerA + h_cornerB)/2 over the corner pairing
-	// (-A: c0/c2 with m0, +A: c1/c3 with m1, -B: c0/c1 with m2, +B: c2/c3
-	// with m3), folded to E = (D_- + D_+)/2, T = D_+ - E. Pinned by
-	// tests/foliage/foliage_quad_fold_test.cpp; the far-tier host consumes
-	// these as its ground-fit constants.
-	float patch_control[4] = {};
 };
 
 struct PlacementResult {
-	std::array<PlacementInstance, FOLIAGE_CELL_CAP> instances{};
+	std::array<PlacementInstance, FAR_CELL_CAP> instances{};
 	int count = 0;
 };
 
@@ -98,19 +90,21 @@ struct PlacementResult {
 // (Foliage_RenderAtPosition@0x005C1940, 0x5C1A4B).
 uint32_t pack_cell_key(Fixed16_16 cell_x_fixed, Fixed16_16 cell_z_fixed) noexcept;
 
-// Deterministic per-cell placement matching Foliage_BuildPatchData@0x005C0240.
+// Deterministic retail FAR per-cell candidate placement.
 //
 //   slot_index:       foliage def slot (0..3)
 //   cell_key:         packed 32-bit cell key (see pack_cell_key)
-//   view_center_x/z:  16.16 fixed world coords of the visibility origin
-//   view_radius:      16.16 fixed L-infinity radius; candidates outside reject
 //
-// Returns the populated result. Count is in [0, FOLIAGE_CELL_CAP].
+// Returns the populated result. Count is in [0, FAR_CELL_CAP]. Unlike the
+// MODEL tier's separate MODEL_TILE_CAP=21, all 36 FAR candidates may survive.
+// The retail generator takes no view center or radius: it bakes the whole
+// cell once into its slot-pool VB, and visibility is the caller's collect
+// gate [orig: generate_foliage_instances_0 @ 0x5ffdd0 (args: key, VB, IB,
+// out counts); Foliage_UpdateFarCellSlots @ 0x601b30]. The former L-infinity
+// cull parameters were jodemo-era (sub_5C1940) and left with that
+// architecture.
 PlacementResult place_cell(int slot_index,
                            uint32_t cell_key,
-                           Fixed16_16 view_center_x,
-                           Fixed16_16 view_center_z,
-                           int32_t view_radius,
                            const PlacementConfig &config,
                            const PlacementSamplers &samplers) noexcept;
 

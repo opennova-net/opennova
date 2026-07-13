@@ -84,6 +84,7 @@ void parse_foliage_block(std::istream &input, TpjProject &out) {
 	}
 
 	FoliageDef def;
+	size_t match_index = 0;
 	std::string line;
 	while (std::getline(input, line)) {
 		if (!line.empty() && line.back() == '\r') {
@@ -114,7 +115,13 @@ void parse_foliage_block(std::istream &input, TpjProject &out) {
 		} else if (iequals(tokens[0], "color_upper")) {
 			def.color_upper = std::atoi(tokens[1].c_str());
 		} else if (iequals(tokens[0], "match")) {
-			def.match = std::atoi(tokens[1].c_str());
+			const int match_value = std::atoi(tokens[1].c_str());
+			if (match_index == 0) {
+				def.match = match_value;
+			} else if (match_index < FOLIAGE_MATCH_VALUES_PER_DEF) {
+				def.match_extra[match_index - 1] = match_value;
+			}
+			++match_index;
 		} else if (iequals(tokens[0], "attrib")) {
 			parse_foliage_attrib_tokens(tokens, def);
 		}
@@ -240,6 +247,11 @@ bool save_tpj(std::ostream &output, const TpjProject &project, std::string &erro
 			output << "  color_lower\t\t" << normalized.color_lower << nl;
 			output << "  color_upper\t\t" << normalized.color_upper << nl;
 			output << "  match\t\t" << normalized.match << nl;
+			for (const int match : normalized.match_extra) {
+				if (match >= 0) {
+					output << "  match\t\t" << match << nl;
+				}
+			}
 			if (normalized.attrib_flags != 0) {
 				output << "  attrib\t\t";
 				bool wrote = false;

@@ -2,6 +2,7 @@ class_name TerrainEditor
 extends Node3D
 
 signal ui_state_changed(version: int)
+signal foliage_preview_invalidated
 
 enum Tool { RAISE, LOWER, SMOOTH, FLATTEN, PAINT_DETAIL, EDIT_SECTORS, PAINT_COLORMAP, CLONE_COLOR, TILE_STAMP, FOLIAGE_PAINT, SURFACE_PAINT }
 enum TileInteractionMode { PLACE, EDIT_SELECTED }
@@ -500,6 +501,25 @@ func set_tool(tool: Tool) -> void:
 	flatten_target_set = false
 	_sync_surface_overlay_state(_get_material())
 	_mark_ui_state_changed()
+
+
+## Apply one complete brush stroke at a world-space terrain hit. This is the
+## public action seam used by automation and tests; viewport input drives the
+## same start/apply/end lifecycle. Returns true when the stroke changed height.
+func apply_brush_stroke_at(world_position: Vector3, delta: float = 1.0) -> bool:
+	if is_export_running() or not _is_valid_hit(world_position):
+		return false
+	var previous_hit := _hover_hit
+	var previous_hit_valid := _hover_hit_valid
+	var revision_before := _height_revision
+	_hover_hit = world_position
+	_hover_hit_valid = true
+	_on_primary_start()
+	_apply_brush_stroke(delta)
+	_on_primary_end()
+	_hover_hit = previous_hit
+	_hover_hit_valid = previous_hit_valid
+	return _height_revision != revision_before
 
 
 func _sync_surface_overlay_state(material: ShaderMaterial) -> void:
@@ -1367,6 +1387,7 @@ func _push_foliage_defs_history(before_state: Variant, after_state: Variant) -> 
 func _mark_foliage_preview_dirty() -> void:
 	if _foliage_preview:
 		_foliage_preview.mark_dirty()
+		foliage_preview_invalidated.emit()
 
 
 func _sync_foliage_preview() -> void:
@@ -1375,11 +1396,13 @@ func _sync_foliage_preview() -> void:
 	_foliage_preview.set_preview_state(
 		terrain_mesh,
 		camera,
+		_document.surface_map,
 		_document.foliage_map,
 		_document.foliage_defs,
 		_document.selected_foliage_def_index,
 		_data,
-		get_resource_root()
+		get_resource_root(),
+		_document.tileinfo_resource
 	)
 	_foliage_preview.rebuild_if_needed()
 
@@ -1407,7 +1430,13 @@ func _apply_foliage_paint_stroke(delta: float) -> bool:
 	for dab_idx in range(dab_count):
 		var t: float = 1.0 if dab_count == 1 else float(dab_idx + 1) / float(dab_count)
 		var dab_hit := start_hit.lerp(end_hit, t)
-		var source := terrain_mesh.world_to_source_coords(dab_hit.x, dab_hit.z)
+		# Address the texel the GAME gates by at this world point: the gate
+		# consumes the SAME un-negated world (x, z) as the height samplers
+		# [orig: Foliage_SampleFoliageMapMask @ 0x606620; the 2026-07-13
+		# water-mask proof — the former negated-z claim is retracted,
+		# docs/foliage/foliage-re.md (D-FOLIAGE-9)]. The wrapped resolver
+		# rejects only empty sectors.
+		var source := _data.world_to_source_coords_wrapped(dab_hit.x, dab_hit.z)
 		if source.x < 0.0 or source.y < 0.0:
 			continue
 		var center_x := _document.foliage_map.map_x_from_heightmap_x(source.x)
@@ -1432,7 +1461,9 @@ func _apply_foliage_paint_stroke(delta: float) -> bool:
 func _eyedrop_foliage_at_hover() -> bool:
 	if _document.foliage_map == null or not _hover_hit_valid:
 		return false
-	var source := terrain_mesh.world_to_source_coords(_hover_hit.x, _hover_hit.z)
+	# Same gate-texel addressing as the brush (un-negated world coords), so
+	# the eyedropper reads the def the game grows here.
+	var source := _data.world_to_source_coords_wrapped(_hover_hit.x, _hover_hit.z)
 	if source.x < 0.0 or source.y < 0.0:
 		return false
 	var map_x := _document.foliage_map.map_x_from_heightmap_x(source.x)
@@ -1628,8 +1659,7 @@ func _on_primary_start() -> void:
 			_eyedrop_foliage_at_hover()
 			return
 		if not Input.is_key_pressed(KEY_CTRL):
-			var selected_def := _document.get_selected_foliage_def()
-			if selected_def == null or selected_def.get_match() < 0:
+			if _document.get_selected_foliage_paint_index() < 0:
 				return
 		_foliage_map_stroke_before = _document.capture_foliage_map_history_state()
 		_foliage_map_stroke_changed = false
@@ -1728,6 +1758,7 @@ func _apply_brush_stroke(delta: float) -> void:
 	if result["changed_heightmap"]:
 		terrain_mesh.set_heightmap(_heightmap_image)
 		_height_revision += 1
+		_mark_foliage_preview_dirty()
 		_mark_tile_overlay_dirty()
 	if result["changed_blendmap"]:
 		_blendmap_tex.update(_blendmap_image)
@@ -1794,6 +1825,7 @@ func _apply_history_snapshot(snapshot: Dictionary, is_undo: bool) -> void:
 	if result["changed_heightmap"]:
 		terrain_mesh.set_heightmap(_heightmap_image)
 		_height_revision += 1
+		_mark_foliage_preview_dirty()
 		_mark_tile_overlay_dirty()
 	if result["changed_blendmap"]:
 		_blendmap_tex.update(_blendmap_image)
@@ -2378,5 +2410,3 @@ func _get_material() -> ShaderMaterial:
 	if terrain_mesh == null:
 		return null
 	return terrain_mesh.get_material()
-
-

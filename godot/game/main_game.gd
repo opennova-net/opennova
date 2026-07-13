@@ -206,6 +206,9 @@ func _toggle_debug_overlay() -> void:
 		var host: Node = _hud if _hud != null else self
 		host.add_child(_debug_overlay)
 		_debug_overlay.set_runtime_source(_current_runtime)
+		# The world feed for the host-wide panes (the Perf tab's frame budget,
+		# the Foliage tab). The GameWorld node lives for the shell's whole life.
+		_debug_overlay.set_world(_world)
 		# The View tab toggles: the overlay only emits intent; we own the world.
 		_debug_overlay.skeleton_debug_toggled.connect(_on_skeleton_debug_toggled)
 		_debug_overlay.collision_debug_toggled.connect(_on_collision_debug_toggled)

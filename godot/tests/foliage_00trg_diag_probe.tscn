@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://c00trgfoldiag1"]
+
+[ext_resource type="Script" path="res://tests/foliage_00trg_diag_probe.gd" id="1"]
+
+[node name="Foliage00TrgDiagProbe" type="Node"]
+script = ExtResource("1")

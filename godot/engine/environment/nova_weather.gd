@@ -15,6 +15,8 @@ extends Node3D
 
 @export var environment_path: NodePath
 
+const FOLIAGE_WAVE_PHASE_SCALE := 1.5258789e-6
+
 # Declared before wind_strength: the export's default assignment runs the
 # setter during init, which needs the core.
 var _core := NovaWeatherCore.new()
@@ -151,6 +153,13 @@ func get_sway_phase() -> float:
 	return _core.get_sway_phase()
 
 
+## The fixed ring-head contribution to FAR foliage c24.x. Retail reads
+## Env_WaveOscRing[0], not the oscillator's current writer/index phase
+## [orig: setup_water_vertex_shader_constants @ 0x600450].
+func get_foliage_wind_phase_addend() -> float:
+	return float(_core.get_wave_osc_ring0()) * FOLIAGE_WAVE_PHASE_SCALE
+
+
 func get_smooth_fill() -> Vector3:
 	return _color_vec3(_core.get_fill())
 
@@ -200,7 +209,7 @@ func _write_shader_globals(env: Node) -> void:
 	RenderingServer.global_shader_parameter_set(&"opennova_sun_light", get_smooth_sun())
 	RenderingServer.global_shader_parameter_set(&"opennova_sky_ambient", get_smooth_sky())
 	RenderingServer.global_shader_parameter_set(&"opennova_fog_color", get_smooth_fog())
-	RenderingServer.global_shader_parameter_set(&"opennova_sun_direction", env.get_sun_direction())
+	RenderingServer.global_shader_parameter_set(&"opennova_sun_direction", env.get_light_direction())
 	var fog_end: float = float(env.get_fog_level())
 	var fog_start: float = float(env.get_fog_start()) if env.has_method("get_fog_start") else 0.5
 	RenderingServer.global_shader_parameter_set(&"opennova_fog_end", fog_end)
@@ -208,6 +217,8 @@ func _write_shader_globals(env: Node) -> void:
 	RenderingServer.global_shader_parameter_set(&"opennova_fog_type", env.get_fog_type())
 	RenderingServer.global_shader_parameter_set(&"opennova_wind_sway_amount", maxf(0.25, absf(get_sway_amount())))
 	RenderingServer.global_shader_parameter_set(&"opennova_wind_sway_phase", get_sway_phase())
+	RenderingServer.global_shader_parameter_set(
+		&"opennova_foliage_wave_addend", get_foliage_wind_phase_addend())
 	# The modulator /64 gain (iris exposure) for self-lit/effect shaders
 	# [orig: Render_UnpackModulatorToLightScale @ 0x58db30].
 	RenderingServer.global_shader_parameter_set(&"opennova_color_src_gain", _core.get_color_src_gain())

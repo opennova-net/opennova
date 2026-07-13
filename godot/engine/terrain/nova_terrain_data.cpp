@@ -133,7 +133,18 @@ static bool foliage_def_from_variant(const Variant &value, opennova::FoliageDef 
 		out_def.graphic = String(dict.get("graphic", "")).utf8().get_data();
 		out_def.color_lower = static_cast<int>(dict.get("color_lower", static_cast<int>(opennova::FoliageColorMode::MatchGround)));
 		out_def.color_upper = static_cast<int>(dict.get("color_upper", static_cast<int>(opennova::FoliageColorMode::MatchGround)));
-		out_def.match = static_cast<int>(dict.get("match", -1));
+		if (dict.has("matches")) {
+			const PackedInt32Array matches = dict["matches"];
+			for (int i = 0; i < std::min<int>(matches.size(), opennova::FOLIAGE_MATCH_VALUES_PER_DEF); ++i) {
+				if (i == 0) {
+					out_def.match = matches[i];
+				} else {
+					out_def.match_extra[i - 1] = matches[i];
+				}
+			}
+		} else {
+			out_def.match = static_cast<int>(dict.get("match", -1));
+		}
 		int attrib_flags = static_cast<int>(dict.get("attrib_flags", 0));
 		if (static_cast<bool>(dict.get("shadow", false))) {
 			attrib_flags |= opennova::FOLIAGE_ATTRIB_SHADOW;
@@ -444,8 +455,11 @@ void NovaTerrainData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_colormap_color_world", "world_x", "world_z"), &NovaTerrainData::get_colormap_color_world);
 	ClassDB::bind_method(D_METHOD("get_modulated_colormap_color_world", "world_x", "world_z", "light_color"),
 	                     &NovaTerrainData::get_modulated_colormap_color_world);
+	ClassDB::bind_method(D_METHOD("get_foliage_far_mask_world", "world_x", "native_z"),
+	                     &NovaTerrainData::get_foliage_far_mask_world);
 	ClassDB::bind_method(D_METHOD("get_foliage_index_world", "world_x", "world_z"), &NovaTerrainData::get_foliage_index_world);
 	ClassDB::bind_method(D_METHOD("world_to_source_coords", "world_x", "world_z"), &NovaTerrainData::world_to_source_coords);
+	ClassDB::bind_method(D_METHOD("world_to_source_coords_wrapped", "world_x", "world_z"), &NovaTerrainData::world_to_source_coords_wrapped);
 	ClassDB::bind_method(D_METHOD("world_to_sector_cell", "world_x", "world_z"), &NovaTerrainData::world_to_sector_cell);
 	ClassDB::bind_method(D_METHOD("sample_heights_world_live", "world_xz"), &NovaTerrainData::sample_heights_world_live);
 	ClassDB::bind_method(D_METHOD("sample_height_world_live", "world_x", "world_z"),
@@ -1510,6 +1524,24 @@ Vector2 NovaTerrainData::world_to_source_coords(double world_x, double world_z) 
 	return Vector2(static_cast<real_t>(r.source_x), static_cast<real_t>(r.source_z));
 }
 
+Vector2 NovaTerrainData::world_to_source_coords_wrapped(double world_x, double world_z) const {
+	// The runtime kernel form (& 0xF wrap via coords_runtime_options) of
+	// world_to_source_coords above — one shared kernel, the game samplers'
+	// guard set. resolve_world_sample's float kernel is used deliberately so
+	// the result is bit-equal with the game-side foliage/height resolution.
+	if (sector_grid.size() < 256) {
+		return Vector2(-1.0f, -1.0f);
+	}
+	// Live editor grids edit the Godot-side properties; the kernel reads the
+	// native TrnConfig — sync scalars first (documented always-safe).
+	const_cast<NovaTerrainData *>(this)->_sync_trn_scalars_from_properties();
+	TerrainWorldSample sample;
+	if (!resolve_world_sample(trn, static_cast<float>(world_x), static_cast<float>(world_z), sample)) {
+		return Vector2(-1.0f, -1.0f);
+	}
+	return Vector2(static_cast<real_t>(sample.source_x), static_cast<real_t>(sample.source_z));
+}
+
 Vector2i NovaTerrainData::world_to_sector_cell(double world_x, double world_z) const {
 	// World -> authored sector-grid cell. Mirrors EditorTerrainMesh's
 	// extent-guarded cell lookup: floor(world / SECTOR_SIZE) minus the origin,
@@ -1695,11 +1727,75 @@ int NovaTerrainData::get_tile_count() const {
 	return static_cast<int>(cpt.tiles.size());
 }
 
+int NovaTerrainData::get_foliage_far_mask_world(float world_x, float native_z) const {
+	// [orig: Foliage_SampleFarMapMask @ 0x6066d0 (ex kong
+	// "Terrain_GetSurfaceTypeAtFixedPoint")] — the buffer is the FOLIAGEMAP
+	// ("PolyTrn Foliagemap"), whose pixels retail remaps AT LOAD into per-def
+	// slot masks: bit(def) set when the pixel equals any of the def's match
+	// values; pixel 0 never matches [orig: sub_605AD0 @ 0x605b8a ->
+	// sub_5FF4E0]. The sampler indexes ((x >> 16) & 1023, (-z >> 16) & 1023)
+	// downscaled by the floor-log2 shift (>> (10 - log2(width))) — a flat
+	// 1024 wrap with no sector-origin/grid routing. The flat form is only
+	// world-correct because the retail FAR pipeline feeds it SOURCE-ATLAS
+	// coordinates: its cell keys pack source coords + the sector scroll
+	// [orig: key construction @ 0x603f8a; decode @ 0x5fffbc..0x5ffffb], so
+	// &0x3FF lands on the atlas texel directly. A WORLD-coordinate caller
+	// must route world->source first (get_foliage_index_world); the runtime
+	// dispatcher does exactly that and no longer consumes this accessor. The
+	// reimpl remaps at query time (same result; the map resource keeps the
+	// raw authored indices for the editor round-trip).
+	if (!loaded || foliage_map_resource.is_null()) {
+		return 0;
+	}
+	const int width = foliage_map_resource->get_width();
+	const int height = foliage_map_resource->get_height();
+	if (width <= 0 || height <= 0) {
+		return 0;
+	}
+	const auto flat_map_coord = [](float coordinate, int dimension) {
+		// PCX foliage maps are power-of-two. Retail derives this shift from
+		// floor(log2(dimension)); malformed odd dimensions intentionally use
+		// their lower power, matching that rule.
+		int log2_dimension = 0;
+		int power = 1;
+		while (power <= dimension / 2 && log2_dimension < 10) {
+			power <<= 1;
+			++log2_dimension;
+		}
+		const int shift = std::max(10 - log2_dimension, 0);
+		const int64_t integral = static_cast<int64_t>(std::floor(coordinate));
+		const int wrapped = static_cast<int>(static_cast<uint64_t>(integral) & 1023u);
+		return wrapped >> shift;
+	};
+	const int map_x = flat_map_coord(world_x, width);
+	const int map_y = flat_map_coord(-native_z, height);
+	if (map_x < 0 || map_x >= width || map_y < 0 || map_y >= height) {
+		return 0;
+	}
+	const int pixel = foliage_map_resource->get_index(map_x, map_y);
+	if (pixel == 0) {
+		return 0;  // [orig: the pixel == 0 early-out @ 0x5ff4e8]
+	}
+	int mask = 0;
+	const int def_count = static_cast<int>(trn.foliage_defs.size());
+	for (int d = 0; d < def_count && d < 4; ++d) {
+		if (opennova::foliage_def_matches_index(trn.foliage_defs[d], pixel)) {
+			mask |= (1 << d);
+		}
+	}
+	return mask;
+}
+
 int NovaTerrainData::get_foliage_index_world(float world_x, float world_z) const {
-	// Engine sub_5C65E0 (Terrain_GetFoliageMapValue) analogue. Uses the same
-	// sector+origin+quadrant math as get_height_world_bilinear — the sector
-	// grid is always 16×16; origin places the active region inside it with a
-	// wraparound mask on the lookup.
+	// [orig: Foliage_SampleFoliageMapMask @ 0x606620 (Jointops); jodemo
+	// Terrain_GetFoliageMapValue @ 0x5C65E0] — the sector-routed foliage-map
+	// read: 512u sector cell -> 16x16 grid id -> (id-1) low bits select the
+	// 512x512 source quadrant -> flat downscale. Same sector+origin+quadrant
+	// math as get_height_world_bilinear, consuming the same Godot world
+	// (x, z) that seam consumes (retail negates z internally against native
+	// axes; the shared coords kernel absorbs that exactly as the
+	// terrain-proven height chain does). Callers pass world coordinates
+	// UN-negated.
 	if (!loaded || foliage_map_resource.is_null()) {
 		return 0;
 	}

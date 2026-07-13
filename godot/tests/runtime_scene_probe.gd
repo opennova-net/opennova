@@ -72,6 +72,15 @@ func _run() -> void:
 		and data.get_detailmap_c3() != null
 		and data.get_detailblendmap() != null
 	)
+	var far_cell_node_count := 0
+	var model_draw_node_count := 0
+	if dispatcher != null:
+		for child in dispatcher.get_children():
+			var child_name := String(child.name)
+			if child_name.begins_with("FarCell"):
+				far_cell_node_count += 1
+			elif child_name.begins_with("FoliageModelDraw"):
+				model_draw_node_count += 1
 
 	var diagnostics := {
 		"terrain_node": terrain != null,
@@ -83,11 +92,11 @@ func _run() -> void:
 		"foliage_defs": data.get_foliage_defs().size() if data != null else -1,
 		"painted_probe_found": painted_probe.has("position"),
 		"painted_probe": painted_probe,
-		"dispatcher_algorithm": dispatcher.get_dispatch_algorithm() if dispatcher != null else -1,
-		"dispatcher_cell_grid_radius": dispatcher.get_cell_grid_radius() if dispatcher != null else -1,
 		"dispatcher_total_instances": dispatcher.get_total_instances() if dispatcher != null else -1,
 		"dispatcher_cached_cells": dispatcher.get_cached_cells() if dispatcher != null else -1,
-		"terrain_foliage_centers": terrain.get_foliage_dispatch_centers().size() if terrain != null else -1,
+		"dispatcher_stats": dispatcher.get_dispatch_stats() if dispatcher != null else {},
+		"far_cell_nodes": far_cell_node_count,
+		"model_draw_nodes": model_draw_node_count,
 		"overlay_tile_info": overlay != null and overlay.tile_info != null,
 		"overlay_tilestrip": overlay != null and overlay.tilestrip != null,
 		"overlay_entries_rendered": overlay.get_entry_count_rendered() if overlay != null else -1,
@@ -103,14 +112,9 @@ func _run() -> void:
 
 	if dispatcher == null:
 		failures.append("expected NovaTerrain/FoliageDispatcher to exist")
-	elif dispatcher.get_dispatch_algorithm() != NovaFoliageDispatcher.DISPATCH_ALGORITHM_CELL_GRID:
-		failures.append(
-			"expected runtime dispatcher algorithm CELL_GRID until engine-center radius/center feed is fully recovered, got %d"
-				% dispatcher.get_dispatch_algorithm()
-		)
 	elif dispatcher.get_cached_cells() <= 0:
 		failures.append(
-			"expected dispatcher.cached_cells > 0 after camera-grid dispatch, got %d"
+			"expected dispatcher.cached_cells > 0 after the 42u near-cell dispatch, got %d"
 				% dispatcher.get_cached_cells()
 		)
 	if terrain == null:
@@ -135,52 +139,57 @@ func _run() -> void:
 	if dispatcher != null and data != null:
 		var defs: Array = data.get_foliage_defs()
 		for child in dispatcher.get_children():
-			if not (child is MultiMeshInstance3D):
-				continue
-			var name_str := child.name as String
-			if not name_str.begins_with("FoliageSlot"):
-				continue
-			var slot_index := int(name_str.substr("FoliageSlot".length()))
-			if slot_index < 0 or slot_index >= defs.size():
-				continue
-			var def: NovaTerrainFoliageDef = defs[slot_index]
-			if def == null:
-				continue
-			var wants_shadow := (int(def.attrib_flags) & NovaTerrainFoliageDef.ATTRIB_SHADOW) != 0
-			var expected := GeometryInstance3D.SHADOW_CASTING_SETTING_ON if wants_shadow \
-				else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-			if child.cast_shadow != expected:
-				failures.append(
-					"slot %d: SHADOW attrib=%s, expected shadow_setting=%d, got %d"
-						% [slot_index, wants_shadow, expected, child.cast_shadow]
-				)
+			var name_str := String(child.name)
+			if name_str.begins_with("FarCell"):
+				if not (child is MeshInstance3D):
+					failures.append("%s: expected a MeshInstance3D FAR pool node" % name_str)
+					continue
+				var key_separator := name_str.find("_", "FarCell".length())
+				var slot_text := ""
+				if key_separator > "FarCell".length():
+					slot_text = name_str.substr(
+						"FarCell".length(), key_separator - "FarCell".length()
+					)
+				if not slot_text.is_valid_int():
+					failures.append("%s: expected FarCell<slot>_<key> naming" % name_str)
+					continue
+				var slot_index := int(slot_text)
+				if slot_index < 0 or slot_index >= defs.size():
+					failures.append("%s: foliage slot %d is outside the def table" % [name_str, slot_index])
+					continue
+				var def: NovaTerrainFoliageDef = defs[slot_index]
+				if def == null:
+					failures.append("%s: foliage slot %d has no def" % [name_str, slot_index])
+					continue
+				var far_node := child as MeshInstance3D
+				var wants_shadow := (int(def.attrib_flags) & NovaTerrainFoliageDef.ATTRIB_SHADOW) != 0
+				var expected := GeometryInstance3D.SHADOW_CASTING_SETTING_ON if wants_shadow \
+					else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+				if far_node.cast_shadow != expected:
+					failures.append(
+						"%s: SHADOW attrib=%s, expected shadow_setting=%d, got %d"
+							% [name_str, wants_shadow, expected, far_node.cast_shadow]
+					)
+				var far_material := far_node.material_override as ShaderMaterial
+				if far_material == null or far_material.shader == null \
+						or not far_material.shader.resource_path.ends_with("foliage_far.gdshader"):
+					failures.append("%s: expected the FAR foliage shader material" % name_str)
+			elif name_str.begins_with("FoliageModelDraw"):
+				if not (child is MultiMeshInstance3D):
+					failures.append("%s: expected a MultiMeshInstance3D MODEL pool node" % name_str)
+					continue
+				var model_node := child as MultiMeshInstance3D
+				if model_node.multimesh == null:
+					failures.append("%s: MODEL pool node has no MultiMesh" % name_str)
+				var model_material := model_node.material_override as ShaderMaterial
+				if model_material == null or model_material.shader == null \
+						or not model_material.shader.resource_path.ends_with("foliage_model.gdshader"):
+					failures.append("%s: expected the MODEL foliage shader material" % name_str)
 
-	# Foliage ground-color tint. The runtime dispatcher (terrain_data set) tints
-	# each instance from the colormap. Pre-fix the editor path left foliage white.
-	if dispatcher != null and dispatcher.get_total_instances() > 0:
-		if not _has_nonwhite_instance(dispatcher):
-			failures.append("runtime foliage instances are all white; colormap tint not applied")
-
-	# Editor-path parity: a dispatcher wired like terrain_foliage_preview.gd
-	# (colormap_source set, terrain_data UNSET, Callable samplers) must tint from
-	# the colormap too. This is the regression gate for the editor-foliage fix.
-	if data != null and data.is_loaded() and camera != null and painted_probe.has("position"):
-		var editor_dispatcher := _make_editor_style_dispatcher(data)
-		root.add_child(editor_dispatcher)
-		for _i in range(6):
-			await process_frame
-		editor_dispatcher.dispatch(camera.global_position)
-		for _i in range(4):
-			await process_frame
-		var editor_instances := editor_dispatcher.get_total_instances()
-		var editor_nonwhite := _has_nonwhite_instance(editor_dispatcher)
-		print("editor-style foliage: instances=%d nonwhite=%s" % [editor_instances, editor_nonwhite])
-		if editor_instances <= 0:
-			failures.append("editor-style dispatcher placed no foliage at painted point")
-		elif not editor_nonwhite:
-			failures.append("editor-style foliage instances are all white (colormap_source tint missing)")
-		editor_dispatcher.queue_free()
-		await process_frame
+	# FAR vertex COLOR.r is the source-height wind weight; COLOR.gba carries the
+	# host's underlying terrain normal for the retail patch-cache N.L fold.
+	# Lighting otherwise comes from the distinct FAR shader's terrain-light/c6
+	# inputs; treating the channel as a CPU terrain tint was a false-positive.
 
 	if failures.is_empty():
 		print("runtime_scene_probe: OK")
@@ -191,20 +200,6 @@ func _run() -> void:
 	scene.queue_free()
 	await process_frame
 	quit(0 if failures.is_empty() else 1)
-
-
-func _has_nonwhite_instance(dispatcher: NovaFoliageDispatcher) -> bool:
-	for child in dispatcher.get_children():
-		if not (child is MultiMeshInstance3D):
-			continue
-		var mm: MultiMesh = (child as MultiMeshInstance3D).multimesh
-		if mm == null or not mm.use_colors:
-			continue
-		for i in range(mm.instance_count):
-			var c := mm.get_instance_color(i)
-			if absf(c.r - 1.0) > 0.02 or absf(c.g - 1.0) > 0.02 or absf(c.b - 1.0) > 0.02:
-				return true
-	return false
 
 
 func _default_runtime_resource_root() -> String:
@@ -247,21 +242,6 @@ func _copy_file(src_path: String, dst_path: String) -> void:
 	src.close()
 
 
-func _make_editor_style_dispatcher(data: NovaTerrainData) -> NovaFoliageDispatcher:
-	# Mirror terrain_foliage_preview.gd: colormap_source set for tint, terrain_data
-	# left null, placement driven by Callable samplers over the same data.
-	var d := NovaFoliageDispatcher.new()
-	d.dispatch_algorithm = NovaFoliageDispatcher.DISPATCH_ALGORITHM_CELL_GRID
-	d.cell_grid_radius = 8
-	d.foliage_defs = data.get_foliage_defs()
-	d.colormap_source = data
-	d.height_sampler = func(wx: float, wz: float) -> float:
-		return data.get_height_world_bilinear(Vector3(wx, 0.0, wz))
-	d.foliage_sampler = func(wx: float, wz: float) -> int:
-		return int(data.get_foliage_index_world(wx, wz))
-	return d
-
-
 func _find_painted_world_point(data: NovaTerrainData) -> Dictionary:
 	var foliage_map: NovaTerrainFoliageMap = data.get_foliage_map()
 	if foliage_map == null:
@@ -294,13 +274,19 @@ func _find_painted_world_point(data: NovaTerrainData) -> Dictionary:
 				continue
 
 			var world_x := float((origin_x + grid_cell.x) * 512) + local_x
-			var world_z := float((origin_y + grid_cell.y) * 512) + local_z
-			if int(data.get_foliage_index_world(world_x, world_z)) <= 0:
+			var source_z := float((origin_y + grid_cell.y) * 512) + local_z
+			# The game gates foliage where the witnessed read (-z into the wrap
+			# kernel [orig: Foliage_SampleFarMapMask @ 0x6066d0]) resolves this
+			# texel — the RENDER-space z is the negated source-space z. The gate
+			# cross-check below is the runtime read at that render point
+			# (get_foliage_index_world(x, -render_z) == kernel(source_z)).
+			var render_z := -source_z
+			if int(data.get_foliage_index_world(world_x, -render_z)) <= 0:
 				continue
 
-			var world_y := data.get_height_world_bilinear(Vector3(world_x, 0.0, world_z))
+			var world_y := data.get_height_world_bilinear(Vector3(world_x, 0.0, render_z))
 			return {
-				"position": Vector3(world_x, world_y, world_z),
+				"position": Vector3(world_x, world_y, render_z),
 				"painted": painted,
 				"map": Vector2i(map_x, map_y),
 				"sector_id": sector_id,
@@ -315,8 +301,9 @@ func _has_matching_foliage_def(defs: Array, painted: int) -> bool:
 		if not (value is NovaTerrainFoliageDef):
 			continue
 		var def := value as NovaTerrainFoliageDef
-		if int(def.match) == painted:
-			return true
+		for match_value in def.matches:
+			if int(match_value) == painted:
+				return true
 	return false
 
 

@@ -90,8 +90,9 @@ int main() {
 		if (!expect(blocked.count == 0, "an always-blocked path rejects every candidate")) return 1;
 		if (!expect(!path_range.empty() && path_range[0] == MODEL_PATH_SPACING,
 		            "the path gate passes the witnessed 0x20000 spacing")) return 1;
-		// The path sampler sees the engine's negated-Z convention.
-		bool z_negated = true;
+		// The path sampler receives the candidate's own (x, z) — no boundary
+		// negation (placement.h) — and the stream is deterministic per key.
+		bool coords_stable = true;
 		size_t idx = 0;
 		// Re-run permissively to collect the candidate centers in order.
 		PlacementSamplers probe = s;
@@ -104,12 +105,12 @@ int main() {
 		(void)generate_model_tile_instances(0, key, anchor_x, anchor_z, 0x40000000, cfg, probe);
 		for (idx = 0; idx < path_x.size() && idx < cand_x.size(); ++idx) {
 			if (path_x[idx] != cand_x[idx] || path_z[idx] != cand_z[idx]) {
-				z_negated = false;
+				coords_stable = false;
 				break;
 			}
 		}
-		if (!expect(z_negated && !cand_x.empty(),
-		            "path gate coordinates are stable (x, -z) across runs")) return 1;
+		if (!expect(coords_stable && !cand_x.empty(),
+		            "path gate coordinates are stable across runs")) return 1;
 
 		// FORCE_ON skips the path gate entirely.
 		ModelPlacementConfig forced{};

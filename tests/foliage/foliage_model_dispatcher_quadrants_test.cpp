@@ -57,11 +57,11 @@ int main() {
 		for (int j = i + 1; j < 4; ++j) {
 			if (!expect(out[i].tile_key != out[j].tile_key, "quadrant keys are distinct")) return 1;
 		}
-		if (!expect(out[i].result.count > 0 && out[i].result.count <= MODEL_TILE_CAP,
+		if (!expect(out[i].count > 0 && out[i].count <= MODEL_TILE_CAP,
 		            "each tile carries a bounded instance list")) return 1;
 		// Every instance stays inside its own tile square and the +-4u anchor box.
-		for (int k = 0; k < out[i].result.count; ++k) {
-			const auto &inst = out[i].result.instances[k];
+		for (int k = 0; k < out[i].count; ++k) {
+			const auto &inst = out[i].instances[k];
 			if (!expect(inst.center_x_fixed >= out[i].snap_x_fixed &&
 			                inst.center_x_fixed <= out[i].snap_x_fixed + MODEL_TILE_SIZE &&
 			                inst.center_z_fixed >= out[i].snap_z_fixed &&

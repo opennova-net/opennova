@@ -10,15 +10,18 @@ namespace opennova::foliage {
 
 ModelDispatcher::ModelDispatcher() {
 	entries_.resize(MODEL_CACHE_ENTRIES);
+	key_index_.reserve(MODEL_CACHE_ENTRIES * 2);
 }
 
 void ModelDispatcher::reset() noexcept {
 	for (auto &entry : entries_) {
 		entry = ModelCacheEntry{};
 	}
+	key_index_.clear();
 	cache_hits_ = 0;
 	cache_misses_ = 0;
 	regenerations_ = 0;
+	skipped_adoptions_ = 0;
 }
 
 bool ModelDispatcher::is_staggered_regen_frame(int32_t frame_counter, int slot_index) noexcept {
@@ -40,11 +43,14 @@ int ModelDispatcher::cache_occupancy() const noexcept {
 namespace {
 
 // The eviction scan: prefer an empty entry, else the max-age (smallest
-// last_touched relative to now) occupied one - mirrors the quad dispatcher's
-// walk and the retail evict-oldest-by-frame-stamp scan.
+// last_touched relative to now) occupied one - the retail
+// evict-oldest-by-frame-stamp scan. Entries touched THIS
+// frame are never victims: hosts hold borrowed pointers into this frame's
+// emitted entries (retail draws immediately per tile, so it has no such
+// aliasing window; the skip is the host-retained analog - see walk()).
 int find_evict_slot(const std::vector<ModelCacheEntry> &entries, int32_t now) noexcept {
 	int best_idx = -1;
-	int32_t best_age = -1;
+	int32_t best_age = 0;
 	const int n = static_cast<int>(entries.size());
 	for (int i = 0; i < n; ++i) {
 		if (!entries[i].occupied) {
@@ -56,7 +62,7 @@ int find_evict_slot(const std::vector<ModelCacheEntry> &entries, int32_t now) no
 			best_idx = i;
 		}
 	}
-	return best_idx;
+	return best_idx;  // -1 when every occupied entry was touched this frame
 }
 
 } // namespace
@@ -86,34 +92,59 @@ void ModelDispatcher::walk(int slot_index,
 	const auto tiles = model_quadrant_tiles(anchor_x_fixed, anchor_z_fixed);
 	for (const auto &tile : tiles) {
 		ModelCacheEntry *entry = nullptr;
-		for (auto &candidate : entries_) {
-			if (candidate.occupied && candidate.tile_key == tile.key) {
-				entry = &candidate;
-				entry->last_touched = frame_counter;
-				++cache_hits_;
-				if (should_regen) {
-					entry->cached = generate_model_tile_instances(
-					    slot_index, tile.key, anchor_x_fixed, anchor_z_fixed,
-					    MODEL_CANDIDATE_RADIUS, config, samplers);
-					++regenerations_;
-				}
-				break;
+		// Keyed lookup. The engine linear-scans its 1000-entry stripe per tile
+		// [orig: the unrolled key scan in Foliage_UpdateModelTiles @ 0x601f50]
+		// - a hash index over the same entries is a host data-structure choice
+		// with identical hit/evict/stamp semantics (~2.3M compares/frame at
+		// jungle-map anchor density otherwise).
+		auto found = key_index_.find(tile.key);
+		if (found != key_index_.end()) {
+			entry = &entries_[found->second];
+			entry->last_touched = frame_counter;
+			++cache_hits_;
+			// Stagger regen runs once per TOUCHING ANCHOR, exactly as retail
+			// [orig: Foliage_UpdateModelTiles @ 0x601f50 regenerates per hit].
+			// The repeats are NOT byte-identical: generate's accept gate is
+			// anchor-relative (|world - anchor| <= 0x40000), so anchors
+			// sharing a tile produce different subsets — each regen
+			// overwrites the entry and the LAST touching anchor's subset is
+			// the frame's end state (the same last-wins the retained draw
+			// keeps per D-FOLIAGE-10). A same-frame dedup here froze the
+			// FIRST anchor's subset into the cache instead.
+			if (should_regen) {
+				entry->cached = generate_model_tile_instances(
+				    slot_index, tile.key, anchor_x_fixed, anchor_z_fixed,
+				    MODEL_CANDIDATE_RADIUS, config, samplers);
+				entry->generation = ++generation_stamp_;
+				++regenerations_;
 			}
 		}
 
 		if (entry == nullptr) {
 			const int victim = find_evict_slot(entries_, frame_counter);
 			if (victim < 0) {
-				continue;  // unreachable with a non-empty cache; mirrors the quad walk's guard
+				// Every cache entry was touched this frame (>1000 live tiles):
+				// skip the adoption - the tile re-collects next frame. Retail
+				// would recycle a same-frame entry here (its draws are
+				// immediate, so nothing aliases); the host defers draws, so
+				// recycling would dangle this frame's emitted pointers.
+				++skipped_adoptions_;
+				continue;
 			}
-			entry = &entries_[victim];
+			ModelCacheEntry &victim_entry = entries_[victim];
+			if (victim_entry.occupied) {
+				key_index_.erase(victim_entry.tile_key);
+			}
+			entry = &victim_entry;
 			entry->tile_key = tile.key;
 			entry->last_touched = frame_counter;
 			entry->occupied = true;
 			entry->cached = generate_model_tile_instances(
 			    slot_index, tile.key, anchor_x_fixed, anchor_z_fixed,
 			    MODEL_CANDIDATE_RADIUS, config, samplers);
+			entry->generation = ++generation_stamp_;
 			++cache_misses_;
+			key_index_.emplace(tile.key, victim);
 		}
 
 		// Draw only when count > 0 [orig: Foliage_UpdateModelTiles @ 0x601f50].
@@ -122,7 +153,9 @@ void ModelDispatcher::walk(int slot_index,
 			draw.tile_key = tile.key;
 			draw.snap_x_fixed = tile.snap_x_fixed;
 			draw.snap_z_fixed = tile.snap_z_fixed;
-			draw.result = entry->cached;
+			draw.generation = entry->generation;
+			draw.instances = entry->cached.instances.data();
+			draw.count = entry->cached.count;
 			out.push_back(draw);
 		}
 	}

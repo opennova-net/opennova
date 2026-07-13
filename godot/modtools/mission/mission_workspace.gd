@@ -364,6 +364,9 @@ func toggle_debug_overlay() -> void:
 		# through _on_overlay_transport so the controller stays in step.
 		_debug_overlay.lock_writes("Editing is off while simulating from the editor.")
 		_debug_overlay.set_runtime_source(Callable(self, "_debug_runtime_source"))
+		# The world feed for the host-wide panes (frame budget / foliage): only
+		# Play Mission has a GameWorld, so this resolves null while idle.
+		_debug_overlay.set_world_source(Callable(self, "_debug_world_source"))
 		_debug_overlay.transport_used.connect(_on_overlay_transport)
 		_debug_overlay.skeleton_debug_toggled.connect(_on_overlay_skeleton_debug)
 		_debug_overlay.collision_debug_toggled.connect(_on_overlay_collision_debug)
@@ -433,6 +436,12 @@ func _debug_runtime_source():
 		var world = _play_node().get_world()
 		return world.get_runtime() if world != null else null
 	return _controller.get_sim_runtime() if _controller != null else null
+
+
+# The overlay's world supplier (frame budget / foliage): the PIE GameWorld while
+# Play Mission runs, null otherwise (the in-place Simulate driver has no world).
+func _debug_world_source():
+	return _play_node().get_world() if is_playing_mission() else null
 
 
 ## The live runtime an external surface (the MCP agent service) should read:

@@ -44,8 +44,27 @@ FoliageDef foliage_normalize_def(const FoliageDef &def) {
 	normalized.color_lower = foliage_normalize_color_mode(normalized.color_lower);
 	normalized.color_upper = foliage_normalize_color_mode(normalized.color_upper);
 	normalized.match = std::clamp(normalized.match, -1, 255);
+	for (int &match : normalized.match_extra) {
+		match = std::clamp(match, -1, 255);
+	}
 	normalized.attrib_flags = foliage_normalize_attrib_flags(normalized.attrib_flags);
 	return normalized;
+}
+
+std::array<int, FOLIAGE_MATCH_VALUES_PER_DEF> foliage_def_match_values(const FoliageDef &def) {
+	return { def.match, def.match_extra[0], def.match_extra[1], def.match_extra[2] };
+}
+
+bool foliage_def_matches_index(const FoliageDef &def, int index) {
+	if (index <= 0) {
+		return false; // [orig: pixel 0 early-out @ 0x5ff4e8]
+	}
+	for (const int match : foliage_def_match_values(def)) {
+		if (match >= 0 && match == index) {
+			return true;
+		}
+	}
+	return false;
 }
 
 void foliage_fill_grayscale_palette(uint8_t palette[256][3]) {

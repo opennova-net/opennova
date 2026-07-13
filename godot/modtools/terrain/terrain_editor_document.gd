@@ -517,13 +517,23 @@ func get_canonical_foliage_match(index: int) -> int:
 
 
 func get_selected_foliage_paint_index() -> int:
-	return get_canonical_foliage_match(selected_foliage_def_index)
+	var def := get_selected_foliage_def()
+	if def == null:
+		return -1
+	for match_index in def.matches:
+		if match_index > 0:
+			return match_index
+	return -1
 
 
 func find_foliage_def_index_by_match(match_index: int) -> int:
 	for i in foliage_defs.size():
-		if get_canonical_foliage_match(i) == match_index:
-			return i
+		var def := foliage_defs[i]
+		if def == null:
+			continue
+		for authored_match in def.matches:
+			if authored_match > 0 and authored_match == match_index:
+				return i
 	return -1
 
 
@@ -590,27 +600,21 @@ func restore_foliage_editor_history_state(state: Dictionary) -> void:
 
 
 func normalize_foliage_state_for_editor() -> void:
-	var remap: Dictionary = {}
-	var claimed_matches: Dictionary = {}
-	for def in foliage_defs:
-		if def == null:
-			continue
-		var old_match := int(def.match)
-		if old_match > 0:
-			claimed_matches[old_match] = int(claimed_matches.get(old_match, 0)) + 1
-
+	# Retail definitions may carry four bytes, and the same byte may
+	# intentionally select more than one slot. Preserve that authored relation;
+	# canonicalizing by slot would orphan shared pixels and discard secondary
+	# matches. Only definitions with no usable byte need an editor paint value.
 	for i in foliage_defs.size():
 		var def := foliage_defs[i]
 		if def == null:
 			continue
-		var canonical_match := get_canonical_foliage_match(i)
-		var old_match := int(def.match)
-		if canonical_match > 0 and old_match > 0 and old_match != canonical_match and int(claimed_matches.get(old_match, 0)) == 1:
-			remap[old_match] = canonical_match
-
-	if not remap.is_empty():
-		_remap_foliage_map_indices(remap)
-	_assign_canonical_foliage_matches()
+		var has_match := false
+		for match_index in def.matches:
+			if match_index > 0:
+				has_match = true
+				break
+		if not has_match:
+			def.matches = PackedInt32Array([_find_available_foliage_match(i), -1, -1, -1])
 	_clamp_foliage_selection()
 
 
@@ -620,8 +624,8 @@ func add_foliage_def() -> bool:
 	var def := NovaTerrainFoliageDef.new()
 	def.color_lower = NovaTerrainFoliageDef.COLOR_MATCH_GROUND
 	def.color_upper = NovaTerrainFoliageDef.COLOR_MATCH_GROUND
+	def.matches = PackedInt32Array([_find_available_foliage_match(foliage_defs.size()), -1, -1, -1])
 	foliage_defs.append(def)
-	_assign_canonical_foliage_matches()
 	selected_foliage_def_index = foliage_defs.size() - 1
 	return true
 
@@ -630,20 +634,23 @@ func remove_foliage_def(index: int) -> bool:
 	if index < 0 or index >= foliage_defs.size():
 		return false
 
+	var remaining_matches: Dictionary = {}
+	for slot_index in foliage_defs.size():
+		if slot_index == index or foliage_defs[slot_index] == null:
+			continue
+		for match_index in foliage_defs[slot_index].matches:
+			if match_index > 0:
+				remaining_matches[match_index] = true
 	var remap: Dictionary = {}
-	var removed_match := get_canonical_foliage_match(index)
-	if removed_match > 0:
-		remap[removed_match] = 0
-	for slot_index in range(index + 1, foliage_defs.size()):
-		var from_match := get_canonical_foliage_match(slot_index)
-		var to_match := get_canonical_foliage_match(slot_index - 1)
-		if from_match > 0 and to_match > 0:
-			remap[from_match] = to_match
+	var removed_def := foliage_defs[index]
+	if removed_def != null:
+		for match_index in removed_def.matches:
+			if match_index > 0 and not remaining_matches.has(match_index):
+				remap[match_index] = 0
 	if not remap.is_empty():
 		_remap_foliage_map_indices(remap)
 
 	foliage_defs.remove_at(index)
-	_assign_canonical_foliage_matches()
 	if selected_foliage_def_index == index:
 		selected_foliage_def_index = mini(index, foliage_defs.size() - 1)
 	elif selected_foliage_def_index > index:
@@ -1085,7 +1092,7 @@ func _clone_foliage_def(value: Variant) -> NovaTerrainFoliageDef:
 		copy.graphic = source.graphic
 		copy.color_lower = source.color_lower
 		copy.color_upper = source.color_upper
-		copy.match = source.match
+		copy.matches = source.matches
 		copy.attrib_flags = source.attrib_flags
 		return copy
 	if value is Dictionary:
@@ -1094,7 +1101,10 @@ func _clone_foliage_def(value: Variant) -> NovaTerrainFoliageDef:
 		copy.graphic = String(dict.get("graphic", ""))
 		copy.color_lower = int(dict.get("color_lower", NovaTerrainFoliageDef.COLOR_MATCH_GROUND))
 		copy.color_upper = int(dict.get("color_upper", NovaTerrainFoliageDef.COLOR_MATCH_GROUND))
-		copy.match = int(dict.get("match", -1))
+		if dict.has("matches"):
+			copy.matches = dict.get("matches", PackedInt32Array())
+		else:
+			copy.match = int(dict.get("match", -1))
 		var attrib_flags := int(dict.get("attrib_flags", 0))
 		if bool(dict.get("shadow", false)):
 			attrib_flags |= NovaTerrainFoliageDef.ATTRIB_SHADOW
@@ -1121,11 +1131,21 @@ func _surface_map_from_slot(state: Dictionary) -> NovaTerrainSurfaceMap:
 	return map
 
 
-func _assign_canonical_foliage_matches() -> void:
-	for i in foliage_defs.size():
-		var def := foliage_defs[i]
-		if def != null:
-			def.match = get_canonical_foliage_match(i)
+func _find_available_foliage_match(preferred_index: int) -> int:
+	var claimed: Dictionary = {}
+	for def in foliage_defs:
+		if def == null:
+			continue
+		for match_index in def.matches:
+			if match_index > 0:
+				claimed[match_index] = true
+	var preferred := get_canonical_foliage_match(preferred_index)
+	if preferred > 0 and not claimed.has(preferred):
+		return preferred
+	for candidate in range(255, 0, -1):
+		if not claimed.has(candidate):
+			return candidate
+	return -1
 
 
 func _remap_foliage_map_indices(remap: Dictionary) -> bool:

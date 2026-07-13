@@ -56,6 +56,7 @@ int main() {
 	foliage_a.color_lower = static_cast<int>(opennova::FoliageColorMode::Blend50);
 	foliage_a.color_upper = static_cast<int>(opennova::FoliageColorMode::RetainFullColor);
 	foliage_a.match = 2;
+	foliage_a.match_extra = { 3, 4, 5 };
 	foliage_a.attrib_flags = opennova::FOLIAGE_ATTRIB_SHADOW;
 	saved.foliage_defs.push_back(foliage_a);
 
@@ -97,6 +98,9 @@ int main() {
 	if (!expect(loaded.foliage_defs[0].graphic == saved.foliage_defs[0].graphic, "foliage_defs graphic should round-trip")) return 1;
 	if (!expect(loaded.foliage_defs[0].color_lower == saved.foliage_defs[0].color_lower, "foliage_defs color_lower should round-trip")) return 1;
 	if (!expect(loaded.foliage_defs[0].color_upper == saved.foliage_defs[0].color_upper, "foliage_defs color_upper should round-trip")) return 1;
+	if (!expect(loaded.foliage_defs[0].match == 2 &&
+	            loaded.foliage_defs[0].match_extra == std::array<int, 3>{ 3, 4, 5 },
+	            "all four retail foliage match values should round-trip")) return 1;
 	if (!expect(loaded.foliage_defs[0].attrib_flags == saved.foliage_defs[0].attrib_flags, "foliage_defs attrib_flags should round-trip")) return 1;
 	if (!expect(loaded.foliage_defs[1].graphic == saved.foliage_defs[1].graphic, "multiple foliage_defs should round-trip")) return 1;
 	if (!expect(loaded.foliage_defs[1].attrib_flags == saved.foliage_defs[1].attrib_flags, "multiple foliage attrib_flags should round-trip")) return 1;
