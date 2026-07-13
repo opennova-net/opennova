@@ -45,7 +45,7 @@ decision (ADR / RE-record entry) saying why not:
 | Environment | ✓ | ✓ | ✓ (runtime nodes shared; water unified) | ✓ (the F3 launcher carries the .env staging note) | at bar (ENV-1, 2026-07-12) |
 | Object | ✓ (v8/v9; LW v10 on branch) | ✓ (.3dp + .3di export) | partial (isolated preview; env-lit but no world context, no LOD-by-distance) | — | E |
 | Mission | ✓ | ✓ | ✓ (PIE runs the real runtime) | ✓ | data semantics (heading, ANIMNUM) |
-| Credits | ✓ | ✓ | ✓ (`NovaCreditsPlayer` hosted in the editor) | — | G |
+| Credits | ✓ | ✓ | ✓ (`NovaCreditsPlayer` hosted in the editor; play/pause/scrub transport, CRE-1) | — | G (F3 wiring = CRE-2) |
 | Fonts | ✓ | ✓ | partial (glyph canvas is editor-drawn; fine for painting, no engine text sample) | — | E |
 | Strings | ✓ | ✓ | partial (no in-context render) | — | E (minor by format) |
 | Sound | ✓ | ✓ (`write_lwf`) | ✓ (audition rides the runtime set→member→wav path) | — | G |
@@ -280,6 +280,19 @@ the shell left lane (the only one); and a separate Bank mode.
   play/pause/scrub transport over the hosted player so the roll (not just the
   layout) previews in-editor. Verify the player's cadence citations while
   there (R5 only if uncited). Gate: credits suites (20 files).
+  **DONE 2026-07-12.** Play/pause/stop + speed already drove the hosted
+  player (since the workspace landed, #22); the missing transport piece was
+  direct scrubbing — a scrub bar under the preview now drives the player's
+  scroll offset over the roll's full extent and follows playback, wheel, and
+  card-selection seeks. Cadence-citation verdict: **UNCITED — R5 is OPEN.**
+  The SCROLL_RATE format side is witnessed
+  ([orig: marquee_load_credits_from_ini @ 0x65c5a0]), but
+  `NovaCreditsPlayer::_process_scroll` converts the per-frame rate to
+  per-second with an assumed 60 fps cadence (`* 60.0f`) and the ~F overlay
+  fade zone is a bare 50 px (`kFadeZonePixels`) — neither carries a witness
+  of `CMarqueeWnd`'s update/render cadence (note: the engine tick elsewhere
+  is 62 Hz, so the 60 is doubly suspect). Marked in the source as
+  do-not-cite-without-a-grill; not invented here.
 - CRE-2: wire F3 (authored `nlist.kda` → game credits screen).
 
 ### Fonts
@@ -391,7 +404,10 @@ with to make a new game"; the Game workspace itself stays out of scope.
 - R3 3di LOD select rule — distance thresholds/CDEP interaction (blocks OBJ-2)
 - R4 hudpos.def consumption semantics — full-field draw behavior incl. the
   objective line/GameText (blocks HUD-1 completeness + HUD-3)
-- R5 credits roll cadence citations (only if CRE-1 finds them uncited)
+- R5 credits roll cadence citations — CRE-1 verdict 2026-07-12: UNCITED, so
+  R5 is OPEN (the 60 fps frame→second conversion in
+  `NovaCreditsPlayer::_process_scroll` and the 50 px ~F fade zone; the
+  witnessed side stops at the SCROLL_RATE parse @ 0x65c5a0)
 - R6 menu action verbs beyond current witness (only if MNU-2 finds gaps)
 - R7 sound attenuation/falloff model (blocks SND-2 if unwitnessed)
 - R8 boot-required resource enumeration — owned by the umbrella's ENG-6;
