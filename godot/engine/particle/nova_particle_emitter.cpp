@@ -9,6 +9,7 @@
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
 #include <godot_cpp/classes/shader.hpp>
+#include <godot_cpp/variant/utility_functions.hpp>
 #include <godot_cpp/classes/shader_material.hpp>
 #include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/variant/packed_color_array.hpp>
@@ -486,8 +487,8 @@ static PackedStringArray texture_name_candidates(const String &name) {
 	if (stem.is_empty()) {
 		return out;
 	}
-	const String dot_ext = ext.is_empty() ? String() : String(".") + ext;
-	out.push_back(stem + "_01" + dot_ext);
+	const String dot_ext = ext.is_empty() ? String() : vformat(".%s", ext);
+	out.push_back(vformat("%s_01%s", stem, dot_ext));
 	if (stem.length() >= 2) {
 		const char32_t last = stem[stem.length() - 1];
 		const char32_t prev = stem[stem.length() - 2];
@@ -495,7 +496,7 @@ static PackedStringArray texture_name_candidates(const String &name) {
 				(last >= 'a' && last <= 'z') || (last >= 'A' && last <= 'Z');
 		const bool prev_is_digit = prev >= '0' && prev <= '9';
 		if (last_is_letter && prev_is_digit) {
-			out.push_back(stem.substr(0, stem.length() - 1) + dot_ext);
+			out.push_back(vformat("%s%s", stem.substr(0, stem.length() - 1), dot_ext));
 		}
 	}
 	return out;
