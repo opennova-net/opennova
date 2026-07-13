@@ -140,6 +140,26 @@ func get_save_dialog_dir() -> String:
 	return environment_editor.get_last_save_dir() if environment_editor else ""
 
 
+# See in game (maturity ENV-1): the launched game loads the SAME .env this
+# workspace edits — missions name it and GameWorld reads it from the mounted
+# resource root — so the authored file reaches the game by being saved into
+# the launch directory, where the loose-file override wins over the packed
+# copy. Save IS the staging step, so unsaved changes un-stage the note (the
+# game reads the file on disk, not the editor's buffer).
+func get_game_launch_note(launch_dir: String) -> GameLaunchNote:
+	if environment_editor == null:
+		return null
+	var path := String(environment_editor.current_path)
+	if path.is_empty() or not GameLaunchNote.same_dir(path.get_base_dir(), launch_dir):
+		return GameLaunchNote.make(false,
+			"Save your environment into the game folder to see it in game.")
+	if environment_editor.is_dirty:
+		return GameLaunchNote.make(false,
+			"Save \"%s\" first — the game reads the file on disk." % path.get_file())
+	return GameLaunchNote.make(true,
+		"Time of day, sky, and fog follow \"%s\" in missions that use it." % path.get_file())
+
+
 func build_inspector(host: Control) -> void:
 	if environment_editor == null:
 		return

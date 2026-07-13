@@ -56,7 +56,8 @@ original tools.
 Workspaces whose files reach the game through a specific step tell the button
 about it: the tooltip and the post-launch message carry the active workspace's
 pointer (Terrain: export into the game folder first, then load a mission on
-it), and warn when that step hasn't happened yet.
+it; Environment: save the `.env` into the game folder — the game reads that
+same file), and warn when that step hasn't happened yet.
 
 What to look at, per workspace:
 

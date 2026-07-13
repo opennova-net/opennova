@@ -42,7 +42,7 @@ decision (ADR / RE-record entry) saying why not:
 | Workspace | R | W | E | G | Weakest axis today |
 |---|---|---|---|---|---|
 | Terrain | ✓ | ✓ | ✓ (viewport is the renderer) | ✓ (mission PIE + the F3 launcher's terrain staging note) | at bar — the E/G exemplar (TER-1, 2026-07-12) |
-| Environment | ✓ | ✓ | ✓ (runtime nodes shared; water unified) | partial | G polish |
+| Environment | ✓ | ✓ | ✓ (runtime nodes shared; water unified) | ✓ (the F3 launcher carries the .env staging note) | at bar (ENV-1, 2026-07-12) |
 | Object | ✓ (v8/v9; LW v10 on branch) | ✓ (.3dp + .3di export) | partial (isolated preview; env-lit but no world context, no LOD-by-distance) | — | E |
 | Mission | ✓ | ✓ | ✓ (PIE runs the real runtime) | ✓ | data semantics (heading, ANIMNUM) |
 | Credits | ✓ | ✓ | ✓ (`NovaCreditsPlayer` hosted in the editor) | — | G |
@@ -226,7 +226,21 @@ the shell left lane (the only one); and a separate Bank mode.
 
 - ENV-1: bar audit (E already exemplary — direct runtime-node reuse). Wire F3
   (authored `.env` override → launch; the runtime loads the same file). Gate:
-  environment suite.
+  environment suite. **DONE 2026-07-12.** Audit: R ✓ (loose opens plus
+  VFS/PFF entries via `open_env_from_resource_root`); W ✓ (from-scratch save
+  through libs/env `EnvFile.save_to_path`, roundtrip-pinned by
+  env_file_test); E ✓ re-verified — the exemplar (editor edits drive the SAME
+  `NovaEnvironment`/`NovaSky`/`NovaWater` runtime nodes;
+  editor-runtime-parity.md: water parameterized, not forked); G ✓ (the
+  launcher's env note over TER-1's `GameLaunchNote` seam: the launched game
+  reads `<mission env ref>.env` from the mounted root, so Save into the
+  launch dir IS the staging step — the note stages on a clean save there and
+  un-stages on unsaved edits, since the game reads the disk copy). Because
+  Environment is a popup workspace (never the active one), the shell routes
+  the launcher's note through the open panel: panel open = the environment's
+  note, panel closed = the active workspace's. No LaunchPlan change was
+  needed: "the launch carries the authored .env" resolves to the
+  `/d`-mounted directory carrying it.
 
 ### Object
 
