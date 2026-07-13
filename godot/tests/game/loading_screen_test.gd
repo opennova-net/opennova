@@ -77,14 +77,23 @@ func test_unknown_gametype_yields_no_key() -> void:
 
 # --- bar smoothing [orig: 0x586c3f] --------------------------------------------
 
-func test_displayed_value_creeps_one_per_draw() -> void:
-	assert_eq(LoadingScreen.step_displayed(0, 0), 1)
-	assert_eq(LoadingScreen.step_displayed(50, 100), 51)
+func test_displayed_value_catches_up_to_reported() -> void:
+	# Our present() runs at the coarse progress-emit cadence, not the original's
+	# high-frequency pump, so the displayed value must catch up to reported in
+	# one draw or the bar never leaves ~10 (D-LOADSCR-1). A big jump lands ON
+	# reported, not one step past a stale value.
+	assert_eq(LoadingScreen.step_displayed(6, 26), 26, "a reported jump catches the bar up")
+	assert_eq(LoadingScreen.step_displayed(50, 100), 100, "a jump to 100 fills the bar")
 
 
 func test_displayed_value_leads_reported_by_at_most_ten() -> void:
+	# Once caught up, the bar creeps +1 ahead per draw (the witnessed liveness
+	# lead for a grinding stage that pulses one reported value), capped at +10.
+	assert_eq(LoadingScreen.step_displayed(0, 0), 1, "creep ahead of a stalled 0")
+	assert_eq(LoadingScreen.step_displayed(26, 26), 27, "creep one point ahead")
 	assert_eq(LoadingScreen.step_displayed(9, 0), 10)
 	assert_eq(LoadingScreen.step_displayed(10, 0), 10, "cap at reported + 10")
+	assert_eq(LoadingScreen.step_displayed(36, 26), 36, "cap the lead at reported + 10")
 
 
 func test_displayed_value_caps_at_hundred() -> void:
@@ -133,14 +142,23 @@ func test_mp_setup_carries_the_session_variables() -> void:
 	NovaStrings.register_table("gametext", null)
 
 
-func test_present_creeps_toward_reported_progress() -> void:
+func test_present_tracks_reported_progress_then_leads() -> void:
 	var screen := _setup_screen({"mission_file": "00TRg.bms"})
 	screen.set_progress(50)
+	# Unthrottled while the displayed value trails the reported one; the first
+	# present catches the bar up to reported (not one step past a stale 0), so
+	# the bar reflects real progress at our coarse present() cadence.
 	screen.present()
+	assert_eq(screen.displayed_progress(), 50,
+		"the bar catches up to the reported value in one present")
+	# Once caught up, an immediate re-present is throttled (no 100 ms elapsed,
+	# reported unchanged, not trailing) — the bar holds, not double-steps.
 	screen.present()
-	screen.present()
-	assert_eq(screen.displayed_progress(), 3,
-		"unthrottled while the displayed value trails the reported one")
+	assert_eq(screen.displayed_progress(), 50, "an immediate re-present is throttled")
+	# The witnessed liveness lead (+1 past reported while a stage grinds) advances
+	# on a due draw; force one to exercise it without the 100 ms wait.
+	screen.present(true)
+	assert_eq(screen.displayed_progress(), 51, "a due draw leads reported by one")
 
 
 func test_background_availability_is_publicly_observable() -> void:

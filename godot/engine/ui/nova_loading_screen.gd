@@ -110,13 +110,19 @@ static func gametype_text_key(game_type: int) -> String:
 	return ""
 
 
-## One smoothing step: the displayed value creeps +1 per draw, allowed up to 10
-## points ahead of the reported progress, capped at 100
-## [orig: if (smooth < progress + 10 && smooth < 100) smooth++ @ 0x586c3f].
+## One smoothing step: catch the displayed value up to the reported progress,
+## then creep +1 per draw up to 10 points ahead as the witnessed liveness lead,
+## capped at 100 [orig: displayed this[9] += 1 up to min(progress+10, 100) per
+## draw, LoadingScreen_UpdateAndPresent @ 0x586c3f]. The original reaches the
+## catch-up for free because it pumps UpdateAndPresent at window-message
+## frequency — hundreds of calls per load (per-model + the per-subsystem slot++
+## 62..69). Our present() is driven by the coarser progress emits (D-LOADSCR-1),
+## so a literal +1-only step never leaves ~10 in 8 calls; the displayed value
+## must track reported here. The +1 lead-ahead past reported is preserved for
+## the per-object pulse phase where multiple draws share one reported value.
 static func step_displayed(displayed: int, reported: int) -> int:
-	if displayed < reported + 10 and displayed < 100:
-		return displayed + 1
-	return displayed
+	var lead_cap := mini(reported + 10, 100)
+	return clampi(maxi(displayed + 1, reported), 0, lead_cap)
 
 
 ## The fill rect's horizontal span (left, right) for a bar whose outer frame
