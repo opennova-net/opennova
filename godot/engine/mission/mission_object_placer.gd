@@ -205,6 +205,11 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 	var env_node: Node = options.get("environment_node", null)
 	# Optional load-stage attribution (the editor's mission open passes one).
 	var timeline: PerfTimeline = options.get("timeline", null) as PerfTimeline
+	# Optional per-model load-progress pulse (the game shell's loading screen);
+	# invoked once per resolved graphic / animated entity, mirroring the
+	# original's per-model loading-screen presents [orig: Game_StartMission's
+	# in-loop LoadingScreen_UpdateAndPresent calls @ 0x524d9c/0x524f32].
+	var progress: Callable = options.get("progress", Callable())
 	var container := _ensure_container(parent)
 
 	# Bucket entities by graphic, split static vs animated.
@@ -258,6 +263,8 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 	PerfTimeline.span_on(timeline, "static_batches")
 	var resolved_graphics: Array = []
 	for graphic in static_by_graphic.keys():
+		if progress.is_valid():
+			progress.call()
 		var xforms: Array = static_by_graphic[graphic]
 		var batches := _get_static_batches(graphic, env_node, container)
 		if batches.is_empty():
@@ -313,6 +320,8 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 	# Animated: an individual NovaObjectModel per entity.
 	PerfTimeline.span_on(timeline, "animated_models")
 	for a in animated:
+		if progress.is_valid():
+			progress.call()
 		var data := _load_object_data(a["graphic"])
 		if data == null:
 			stats.unresolved += 1
