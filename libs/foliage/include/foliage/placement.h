@@ -27,15 +27,25 @@ using Fixed16_16 = int32_t;
 constexpr float FIXED_SCALE = 65536.0f;
 constexpr float FIXED_TO_FLOAT = 1.0f / 65536.0f;
 
-// Sampler callbacks, decoupled from the concrete FoliageMap / heightmap container.
-// path_blocked: returns true if the given world-fixed point has a blocker
-// (Terrain_IsNearAmbientSource in the decomp). Our port currently returns false
-// unconditionally.
+// Sampler callbacks, decoupled from the concrete FoliageMap / heightmap
+// container. EVERY callback receives the candidate's own position as 16.16
+// world-fixed (x, z) in the generator's axes — there is NO negation at this
+// boundary. Retail's samplers take native coordinates and negate internally
+// (Terrain_GetSurfaceTypeAtFixedPoint @ 0x6066d0 rows at (-z)>>16;
+// sub_606490's y axis likewise); the host seams absorb that sign the same way
+// the height samplers already do, so a candidate is gated, spacing-checked,
+// and grounded at ONE position. The retail far generator feeds its map gate
+// and its four ground probes the SAME coordinate pair
+// [orig: generate_foliage_instances_0 @ 0x600029..0x600065].
+// path_blocked: true when the point sits within `range` of a placed terrain
+// tile's 16u footprint — the .til overlap reject that keeps grass off
+// roads/pads [orig: sub_606490 @ 0x606490 over g_TerrainTileArray, the
+// mission's placed tiles (PolyTrn_LoadTileData @ 0x6081d0); range 0x20000].
 // slot_mask_at: returns a bitmask of permitted foliage slots (bit 0..3),
 // derived from the FOLIAGEMAP pixel remapped through the def match values
-// (both tiers; the charmap is not a foliage input anywhere). FAR calls at
-// (x,-z) [orig: Foliage_SampleFarMapMask @ 0x6066d0]; MODEL at (x,z)
-// [orig: Foliage_SampleFoliageMapMask @ 0x606620].
+// (both tiers; the charmap is not a foliage input anywhere)
+// [orig: Foliage_SampleFarMapMask @ 0x6066d0 (FAR);
+// Foliage_SampleFoliageMapMask @ 0x606620 (MODEL)].
 // height_at: returns 16.16-fixed world height at the given 16.16 world coords,
 // analogous to Terrain_SampleHeightBilinear@0x005C6770, or HEIGHT_INVALID for
 // "no terrain here" (a HOST concept: editor documents end at the authored

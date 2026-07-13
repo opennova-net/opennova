@@ -1,9 +1,12 @@
 #include "nova_foliage_dispatcher.h"
 
 #include "nova_terrain_data.h"
+#include "nova_terrain_tile_entry.h"
+#include "nova_terrain_tile_info.h"
 
 #include <foliage/fd_bake.h>
 #include <foliage/far_mesh_emitter.h>
+#include <til/til.h>
 
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/geometry_instance3d.hpp>
@@ -118,6 +121,8 @@ void NovaFoliageDispatcher::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_terrain_data"), &NovaFoliageDispatcher::get_terrain_data);
 	ClassDB::bind_method(D_METHOD("set_colormap_source", "data"), &NovaFoliageDispatcher::set_colormap_source);
 	ClassDB::bind_method(D_METHOD("get_colormap_source"), &NovaFoliageDispatcher::get_colormap_source);
+	ClassDB::bind_method(D_METHOD("set_tile_info", "tile_info"), &NovaFoliageDispatcher::set_tile_info);
+	ClassDB::bind_method(D_METHOD("get_tile_info"), &NovaFoliageDispatcher::get_tile_info);
 	ClassDB::bind_method(D_METHOD("dispatch", "centre", "view_xform"),
 	                     &NovaFoliageDispatcher::dispatch, DEFVAL(Transform3D()));
 	ClassDB::bind_method(D_METHOD("reset"), &NovaFoliageDispatcher::reset);
@@ -142,6 +147,8 @@ void NovaFoliageDispatcher::_bind_methods() {
 	             "set_terrain_data", "get_terrain_data");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "colormap_source", PROPERTY_HINT_RESOURCE_TYPE, "NovaTerrainData"),
 	             "set_colormap_source", "get_colormap_source");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "tile_info", PROPERTY_HINT_RESOURCE_TYPE, "NovaTerrainTileInfo"),
+	             "set_tile_info", "get_tile_info");
 }
 
 void NovaFoliageDispatcher::set_foliage_defs(const Array &p_defs) {
@@ -294,6 +301,39 @@ void NovaFoliageDispatcher::set_colormap_source(const Ref<NovaTerrainData> &p_da
 }
 
 Ref<NovaTerrainData> NovaFoliageDispatcher::get_colormap_source() const { return colormap_source_; }
+
+void NovaFoliageDispatcher::set_tile_info(const Ref<NovaTerrainTileInfo> &p_info) {
+	// No identity early-out: editors mutate entries in place and re-assign the
+	// same resource to refresh the cached origins.
+	tile_info_ = p_info;
+	_rebuild_tile_origins();
+	// The blocker is a placement gate: cached bakes are stale.
+	reset();
+}
+
+Ref<NovaTerrainTileInfo> NovaFoliageDispatcher::get_tile_info() const { return tile_info_; }
+
+void NovaFoliageDispatcher::_rebuild_tile_origins() {
+	tile_origins_.clear();
+	if (tile_info_.is_null()) {
+		return;
+	}
+	const int count = tile_info_->get_entry_count();
+	tile_origins_.reserve(static_cast<size_t>(count));
+	for (int i = 0; i < count; ++i) {
+		Ref<NovaTerrainTileEntry> entry = tile_info_->get_entry(i);
+		if (entry.is_null()) {
+			continue;
+		}
+		// World corner of the 16u footprint - the same fixed->world placement
+		// the overlay renderer draws [orig: the 12-byte g_TerrainTileArray
+		// entries sub_606490 scans; the stored z is native (negated), which
+		// til_world_z_from_fixed absorbs].
+		tile_origins_.emplace_back(
+		    opennova::til_world_x_from_fixed(entry->get_x_fixed()),
+		    opennova::til_world_z_from_fixed(entry->get_z_fixed()));
+	}
+}
 
 bool NovaFoliageDispatcher::_has_sampling_source() const {
 	return terrain_data_.is_valid() ||
@@ -470,7 +510,7 @@ void NovaFoliageDispatcher::dispatch(Vector3 centre, Transform3D view_xform) {
 	}
 
 	const uint64_t t0 = Time::get_singleton()->get_ticks_usec();
-	_dispatch_far_tier(centre);
+	_dispatch_far_tier(centre, defs_by_match);
 	const uint64_t t1 = Time::get_singleton()->get_ticks_usec();
 
 	// The FAR wind phase advances every draw; refresh the small per-slot
@@ -515,13 +555,14 @@ void NovaFoliageDispatcher::_collect_far_cells(const Vector3 &camera_pos) {
 	far_visible_.clear();
 
 	const float r = FAR_COLLECT_RADIUS;
-	// A cell keyed (kx, kz) covers world x in [kx, kx+16] and z in [kz-16, kz]
-	// (the witnessed +16 Z key bias; the placement B axis runs negative world
-	// Z).
+	// A cell keyed (kx, kz) covers world x in [kx, kx+16] and z in
+	// [kz, kz+16]: the generator ADDS both candidate axes to the unbiased
+	// cell base [orig: generate_foliage_instances_0 vertex bases
+	// @ 0x6000b0..0x60014d].
 	const int kx_min = static_cast<int>(std::floor((camera_pos.x - r) / FOLIAGE_CELL_SIZE)) * 16;
 	const int kx_max = static_cast<int>(std::floor((camera_pos.x + r) / FOLIAGE_CELL_SIZE)) * 16;
-	const int kz_min = static_cast<int>(std::floor((camera_pos.z - r) / FOLIAGE_CELL_SIZE)) * 16 + 16;
-	const int kz_max = static_cast<int>(std::floor((camera_pos.z + r) / FOLIAGE_CELL_SIZE)) * 16 + 16;
+	const int kz_min = static_cast<int>(std::floor((camera_pos.z - r) / FOLIAGE_CELL_SIZE)) * 16;
+	const int kz_max = static_cast<int>(std::floor((camera_pos.z + r) / FOLIAGE_CELL_SIZE)) * 16;
 
 	for (int kz = kz_min; kz <= kz_max; kz += 16) {
 		for (int kx = kx_min; kx <= kx_max; kx += 16) {
@@ -533,10 +574,10 @@ void NovaFoliageDispatcher::_collect_far_cells(const Vector3 &camera_pos) {
 				dx = camera_pos.x - (static_cast<float>(kx) + FOLIAGE_CELL_SIZE);
 			}
 			float dz = 0.0f;
-			if (camera_pos.z < static_cast<float>(kz) - FOLIAGE_CELL_SIZE) {
-				dz = (static_cast<float>(kz) - FOLIAGE_CELL_SIZE) - camera_pos.z;
-			} else if (camera_pos.z > static_cast<float>(kz)) {
-				dz = camera_pos.z - static_cast<float>(kz);
+			if (camera_pos.z < static_cast<float>(kz)) {
+				dz = static_cast<float>(kz) - camera_pos.z;
+			} else if (camera_pos.z > static_cast<float>(kz) + FOLIAGE_CELL_SIZE) {
+				dz = camera_pos.z - (static_cast<float>(kz) + FOLIAGE_CELL_SIZE);
 			}
 			if (dx * dx + dz * dz > r * r) {
 				continue;
@@ -555,11 +596,11 @@ void NovaFoliageDispatcher::_collect_far_cells(const Vector3 &camera_pos) {
 			    static_cast<float>(kx) + FOLIAGE_CELL_SIZE * 0.5f,
 			};
 			const float sample_z[5] = {
-			    static_cast<float>(kz) - FOLIAGE_CELL_SIZE,
-			    static_cast<float>(kz) - FOLIAGE_CELL_SIZE,
 			    static_cast<float>(kz),
 			    static_cast<float>(kz),
-			    static_cast<float>(kz) - FOLIAGE_CELL_SIZE * 0.5f,
+			    static_cast<float>(kz) + FOLIAGE_CELL_SIZE,
+			    static_cast<float>(kz) + FOLIAGE_CELL_SIZE,
+			    static_cast<float>(kz) + FOLIAGE_CELL_SIZE * 0.5f,
 			};
 			bool has_height = false;
 			float min_height = 0.0f;
@@ -603,7 +644,8 @@ void NovaFoliageDispatcher::_collect_far_cells(const Vector3 &camera_pos) {
 	}
 }
 
-void NovaFoliageDispatcher::_dispatch_far_tier(const Vector3 &camera_pos) {
+void NovaFoliageDispatcher::_dispatch_far_tier(const Vector3 &camera_pos,
+                                               const Dictionary &defs_by_match) {
 	++far_frame_counter_;
 	_collect_far_cells(camera_pos);
 	dispatch_stats_.far_cells_visible = static_cast<int64_t>(far_visible_.size());
@@ -638,7 +680,7 @@ void NovaFoliageDispatcher::_dispatch_far_tier(const Vector3 &camera_pos) {
 					--bake_budget;
 					++dispatch_stats_.far_pool_misses;
 					it = pool.emplace(cell.key, FarCellEntry{}).first;
-					_bake_far_cell_into(s, cell, def, it->second);
+					_bake_far_cell_into(s, cell, def, defs_by_match, it->second);
 				} else {
 					++dispatch_stats_.far_pool_hits;
 				}
@@ -669,13 +711,14 @@ void NovaFoliageDispatcher::_dispatch_far_tier(const Vector3 &camera_pos) {
 void NovaFoliageDispatcher::_bake_far_cell_into(int slot_index,
                                                 const FarVisibleCell &cell,
                                                 const Ref<NovaTerrainFoliageDef> &def,
+                                                const Dictionary &defs_by_match,
                                                 FarCellEntry &entry) {
 	// Bake once per newly-resident key [orig: Foliage_UpdateFarCellSlots
 	// @ 0x601b30 -> generate_foliage_instances_0 @ 0x5ffdd0]. A cell that
 	// bakes empty stays resident with no node - retail keeps zero-count slots
 	// and draws nothing for them.
 	std::vector<opennova::foliage::PlacementInstance> placements;
-	_scatter_cell(slot_index, cell.cell_x_int, cell.cell_z_int, def, placements);
+	_scatter_cell(slot_index, cell.cell_x_int, cell.cell_z_int, def, defs_by_match, placements);
 	++dispatch_stats_.far_cells_baked;
 	dispatch_stats_.far_instances_baked += static_cast<int64_t>(placements.size());
 
@@ -798,16 +841,38 @@ Dictionary NovaFoliageDispatcher::_build_defs_by_match() const {
 	return out;
 }
 
-// --- The NEAR/MODEL tier -----------------------------------------------------
+// --- Placement samplers (both tiers) -----------------------------------------
 
-void NovaFoliageDispatcher::_make_model_sampler_bindings(
+void NovaFoliageDispatcher::_make_placement_samplers(
 		const Dictionary &defs_by_match,
 		opennova::foliage::PlacementSamplers &out_samplers) const {
 	NovaTerrainData *td = terrain_data_.ptr();
 
-	// sub_606490 (path/ambient-source spacing) remains deferred until the
-	// ambient-source registry exists (D-FOLIAGE-7).
-	out_samplers.path_blocked = nullptr;
+	// The placed-tile blocker: reject a candidate within `range` of any placed
+	// 16u tile footprint [orig: sub_606490 @ 0x606490 - AABB [ex, ex+0x100000]
+	// x [-ez, -ez+0x100000] vs the +-range box, closed comparisons; the FORCE_ON
+	// short-circuit lives in the libs generators]. tile_origins_ carries the
+	// Godot-world corner of each footprint; the entry's native z negation is
+	// already absorbed by til_world_z_from_fixed.
+	if (tile_origins_.empty()) {
+		out_samplers.path_blocked = nullptr;
+	} else {
+		out_samplers.path_blocked = [this](opennova::foliage::Fixed16_16 wx,
+		                                   opennova::foliage::Fixed16_16 wz,
+		                                   int32_t range) -> bool {
+			const float x = static_cast<float>(wx) * opennova::foliage::FIXED_TO_FLOAT;
+			const float z = static_cast<float>(wz) * opennova::foliage::FIXED_TO_FLOAT;
+			const float r = static_cast<float>(range) * opennova::foliage::FIXED_TO_FLOAT;
+			const float extent = static_cast<float>(opennova::TIL_CELL_WORLD_UNITS);
+			for (const Vector2 &origin : tile_origins_) {
+				if (origin.x <= x + r && origin.x + extent >= x - r &&
+				    origin.y <= z + r && origin.y + extent >= z - r) {
+					return true;
+				}
+			}
+			return false;
+		};
+	}
 
 	out_samplers.height_at = [this, td](opennova::foliage::Fixed16_16 wx,
 	                                    opennova::foliage::Fixed16_16 wz) -> opennova::foliage::Fixed16_16 {
@@ -830,29 +895,37 @@ void NovaFoliageDispatcher::_make_model_sampler_bindings(
 		return static_cast<opennova::foliage::Fixed16_16>(y * 65536.0f);
 	};
 
-	// The model tier's witnessed gate is the FOLIAGEMAP byte
-	// [orig: Foliage_SampleFoliageMapMask @ 0x606620]; the host analog is the
-	// foliage-map index -> def-slot mask chain. Dictionary captured by value
-	// (COW ref) so the samplers outlive the caller's local.
+	// The map gate, shared by BOTH tiers: the FOLIAGEMAP byte at the
+	// candidate's own world position, remapped through the def match values.
+	// The retail samplers differ only in routing spelled against native
+	// coordinates - the MODEL one routes world through the sector grid
+	// [orig: Foliage_SampleFoliageMapMask @ 0x606620], the FAR one reads the
+	// source atlas flat because its keys already carry source coordinates
+	// [orig: Foliage_SampleFarMapMask @ 0x6066d0; key construction @ 0x603f8a].
+	// Both resolve the same texel for the same position, which the host
+	// obtains through the terrain-proven world->source seam - the same
+	// coordinate pair retail feeds its ground probes and this gate
+	// [orig: generate_foliage_instances_0 @ 0x600029..0x600065].
+	// Dictionary captured by value (COW ref) so the samplers outlive the
+	// caller's local.
 	out_samplers.slot_mask_at = [this, td, defs_by_match](opennova::foliage::Fixed16_16 wx,
 	                                                      opennova::foliage::Fixed16_16 wz) -> uint32_t {
 		const float wx_f = static_cast<float>(wx) * opennova::foliage::FIXED_TO_FLOAT;
 		const float wz_f = static_cast<float>(wz) * opennova::foliage::FIXED_TO_FLOAT;
 		int painted = 0;
 		if (td != nullptr) {
-			// Placement candidates are RENDER-space; get_foliage_index_world
-			// expects NATIVE z (the engine's sampler indexes (-z) internally
-			// [orig: Foliage_SampleFarMapMask @ 0x6066d0 — ((x>>16)&1023,
-			// (-z>>16)&1023)], and the Godot-side API keeps the native arg).
-			// Passing render z here read the MIRRORED map: painted clusters
-			// gated empty and ~mirror-accident instances landed elsewhere —
-			// the 00TRg sparse-coverage bug the capture probe caught.
-			painted = td->get_foliage_index_world(wx_f, -wz_f);
+			painted = td->get_foliage_index_world(wx_f, wz_f);
 		} else if (foliage_sampler_.is_valid()) {
 			Array args;
 			args.push_back(wx_f);
 			args.push_back(wz_f);
 			painted = static_cast<int>(foliage_sampler_.callv(args));
+		} else if (far_slot_mask_sampler_.is_valid()) {
+			// Editor fallback that already returns a remapped mask.
+			Array args;
+			args.push_back(wx_f);
+			args.push_back(wz_f);
+			return static_cast<uint32_t>(static_cast<int>(far_slot_mask_sampler_.callv(args))) & 0xFFu;
 		}
 		if (painted == 0 || !defs_by_match.has(painted)) {
 			return 0u;
@@ -868,6 +941,8 @@ void NovaFoliageDispatcher::_make_model_sampler_bindings(
 		return mask;
 	};
 }
+
+// --- The NEAR/MODEL tier -----------------------------------------------------
 
 // The source-model -> Godot mapping witnessed in the MODEL draw path:
 //
@@ -945,7 +1020,7 @@ void NovaFoliageDispatcher::_dispatch_model_tier(const Transform3D &view_xform,
 	}
 
 	PlacementSamplers samplers;
-	_make_model_sampler_bindings(defs_by_match, samplers);
+	_make_placement_samplers(defs_by_match, samplers);
 
 	const bool has_view = !(view_xform == Transform3D());
 	const Transform3D view_inv = has_view ? view_xform.affine_inverse() : Transform3D();
@@ -1450,56 +1525,15 @@ bool NovaFoliageDispatcher::_scatter_cell(int slot_index,
                                           int cell_x_int,
                                           int cell_z_int,
                                           const Ref<NovaTerrainFoliageDef> &def,
+                                          const Dictionary &defs_by_match,
 	                                      std::vector<opennova::foliage::PlacementInstance> &out_placements) {
 	using opennova::foliage::Fixed16_16;
 
+	// The FAR gate shares the MODEL tier's samplers: one map gate, one
+	// blocker, one height seam, all at the candidate's own world position
+	// (_make_placement_samplers).
 	opennova::foliage::PlacementSamplers samplers;
-	samplers.path_blocked = nullptr;
-
-	NovaTerrainData *td = terrain_data_.ptr();
-
-	samplers.height_at = [this, td](Fixed16_16 wx, Fixed16_16 wz) -> Fixed16_16 {
-		const float wx_f = static_cast<float>(wx) * opennova::foliage::FIXED_TO_FLOAT;
-		const float wz_f = static_cast<float>(wz) * opennova::foliage::FIXED_TO_FLOAT;
-		float y;
-		if (td != nullptr) {
-			y = td->get_height_world_bilinear(Vector3(wx_f, 0.0f, wz_f));
-		} else if (height_sampler_.is_valid()) {
-			Array args;
-			args.push_back(wx_f);
-			args.push_back(wz_f);
-			y = static_cast<float>(static_cast<double>(height_sampler_.callv(args)));
-		} else {
-			return opennova::foliage::HEIGHT_INVALID;
-		}
-		if (y <= INVALID_HEIGHT_THRESHOLD) {
-			return opennova::foliage::HEIGHT_INVALID;
-		}
-		return static_cast<Fixed16_16>(y * 65536.0f);
-	};
-
-	samplers.slot_mask_at = [this, td](Fixed16_16 wx, Fixed16_16 wz) -> uint32_t {
-		const float wx_f = static_cast<float>(wx) * opennova::foliage::FIXED_TO_FLOAT;
-		// libs place_cell negates its candidate z at the witnessed sampler
-		// boundary [orig: @ 0x600065..0x600079]. Because host cell keys remain
-		// render-space (D-FOLIAGE-8), incoming `wz` is native z instead of the
-		// retail native-key path's render z. The direct runtime accessor applies
-		// the retail sampler's own negation, so compensate here with render z;
-		// this sign disappears when D-FOLIAGE-8 moves collection to native keys.
-		const float native_z = static_cast<float>(wz) * opennova::foliage::FIXED_TO_FLOAT;
-		int far_mask = 0;
-		if (td != nullptr) {
-			far_mask = td->get_foliage_far_mask_world(wx_f, -native_z);
-		} else if (far_slot_mask_sampler_.is_valid()) {
-			// Editor preview keeps the same boundary over its live, potentially
-			// unsaved foliage map and definitions.
-			Array args;
-			args.push_back(wx_f);
-			args.push_back(native_z);
-			far_mask = static_cast<int>(far_slot_mask_sampler_.callv(args));
-		}
-		return static_cast<uint32_t>(far_mask) & 0xFFu;
-	};
+	_make_placement_samplers(defs_by_match, samplers);
 
 	opennova::foliage::PlacementConfig config;
 	config.attrib_flags[slot_index] = static_cast<uint8_t>(def.is_valid() ? def->get_attrib_flags() : 0);

@@ -636,6 +636,13 @@ func _configure_foliage() -> void:
 	_dispatcher.slot_meshes = VegAssets.resolve_slot_meshes(_resource_root, defs)
 	# The ":fd" bake both tiers bind [orig: Foliage_LoadDefAssets @ 0x601260].
 	_dispatcher.slot_fd_textures = VegAssets.resolve_slot_fd_textures(_resource_root, defs)
+	# The placed-tile blocker: candidates within 2u of a placed tile footprint
+	# are rejected (FORCE_ON defs excepted) [orig: sub_606490 @ 0x606490 over
+	# g_TerrainTileArray]. Same list the terrain overlay composites.
+	var placed_tiles: NovaTerrainTileInfo = _terrain.tile_info_override
+	if placed_tiles == null:
+		placed_tiles = _terrain_data.get_tileinfo_resource()
+	_dispatcher.tile_info = placed_tiles
 	if _tile_overlay != null:
 		# NovaTerrain composites the tile overlay into its own material; the scene
 		# TileOverlay node is only an authoring override provider here.

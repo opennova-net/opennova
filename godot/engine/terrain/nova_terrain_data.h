@@ -237,14 +237,17 @@ public:
 	// the FOLIAGEMAP ("PolyTrn Foliagemap" @ 0x605b35), remapped at load so each
 	// pixel holds the def-slot bitmask (pixel == any of the def's match values
 	// -> bit(def); pixel 0 never matches) [orig: sub_605AD0 -> sub_5FF4E0]].
-	// The caller passes candidate (x, -worldZ); the callee restores world z.
-	// Retail addresses the raw PCX flat with world & 1023. This is deliberately
-	// independent of get_foliage_index_world's MODEL sector route.
+	// The flat & 1023 addressing is SOURCE-ATLAS space: retail's FAR keys pack
+	// source coordinates [orig: key construction @ 0x603f8a], so this accessor
+	// is only world-correct on layouts where world == source. World-coordinate
+	// gating goes through get_foliage_index_world instead (the runtime
+	// dispatcher does).
 	int get_foliage_far_mask_world(float world_x, float native_z) const;
-	// Returns the foliagemap palette index at the given world position, or 0
-	// for "outside map / empty".
-	// Engine: jodemo.exe sub_5C65E0@0x5C65E0
-	// docs/engine_spec_foliage.md 4.4.4, docs/engine_spec_stampdown.md 4.5
+	// Returns the foliagemap palette index at the given Godot world position
+	// (same coordinate convention as get_height_world_bilinear; no caller-side
+	// negation), or 0 for "outside map / empty".
+	// [orig: Foliage_SampleFoliageMapMask @ 0x606620; jodemo
+	// Terrain_GetFoliageMapValue @ 0x5C65E0]
 	// Shared by runtime NovaFoliageDispatcher wiring and editor paint previews
 	// so the world->sector->source mapping lives in exactly one place.
 	int get_foliage_index_world(float world_x, float world_z) const;

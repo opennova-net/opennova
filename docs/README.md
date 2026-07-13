@@ -68,7 +68,7 @@ behavior is summarized and cited.
 | Audio | [`audio/mus-sbf-re.md`](audio/mus-sbf-re.md) | landed |
 | Environment | [`env/env-tod-re.md`](env/env-tod-re.md) | landed |
 | Fonts | [`fonts/fnt-re.md`](fonts/fnt-re.md) | landed (PAR-R4 audit: the `.fnt` format + load contract, D-FNT-1..3) |
-| Foliage | [`foliage/foliage-re.md`](foliage/foliage-re.md) | landed (PAR-R2 audit: placement MATCHING vs retail `@0x600197`, D-FOLIAGE-1 color; + 2026-07-08 the MODEL tier witnessed AND ported — sector-entity clusters, 0.75-XZ/0.5-height scale, the biquadratic ground fit, the `:fd` bake — D-FOLIAGE-4/-5 FIXED; the model-pass color chain = D-FOLIAGE-6 OPEN, NEEDS-RE facet) |
+| Foliage | [`foliage/foliage-re.md`](foliage/foliage-re.md) | landed (PAR-R2 audit + the 2026-07-08 MODEL-tier port + the 2026-07-13 map-gate grill: both tiers gate at the candidate's own world position through the height-seam route — water-mask proven; FAR key provenance witnessed (source+scroll packing `@ 0x603f8a`), emission transform re-derived, the placed-tile blocker (`@ 0x606490`) implemented; D-FOLIAGE-8 narrows to key bit-layout pattern parity, D-FOLIAGE-9's negated-z claim retracted) |
 | Tiles | [`tiles/til-re.md`](tiles/til-re.md) | landed (PAR-R3 audit: overlay/atlas/flip-rotate MATCHING vs retail `@0x60df0d`/`@0x604700`, D-TIL-1 outline) |
 | Importer | [`importer/importer-audit.md`](importer/importer-audit.md) | landed (PAR-R6: tracked-by-composition — no independent parity surface, composes RE'd `libs` via `pyopennova`) |
 | Interface | [`interface/rtxt-strings-re.md`](interface/rtxt-strings-re.md) | landed |

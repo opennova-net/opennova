@@ -128,11 +128,13 @@ ModelTileResult generate_model_tile_instances(int slot_index,
 			continue;
 		}
 
-		// Gate 2: path/spacing reject, skipped on FORCE_ON (attrib bit 0,
-		// byte_2C2608C family; record byte +532).
+		// Gate 2: the placed-tile overlap reject, skipped on FORCE_ON (attrib
+		// bit 0, byte_2C2608C family; record byte +532). Checked at the
+		// candidate's own (x, z); the retail arg negation is the native
+		// sampler convention, absorbed by the host seam (placement.h).
 		if (!slot_force_on) {
 			if (samplers.path_blocked &&
-			    samplers.path_blocked(world_x_fixed, -world_z_fixed, MODEL_PATH_SPACING)) {
+			    samplers.path_blocked(world_x_fixed, world_z_fixed, MODEL_PATH_SPACING)) {
 				continue;
 			}
 		}

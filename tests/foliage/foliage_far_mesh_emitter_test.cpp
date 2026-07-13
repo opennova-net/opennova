@@ -83,27 +83,31 @@ bool asymmetric_mesh_is_replicated() {
 		            "replicated indices preserve topology with a vertex-base offset")) return false;
 	}
 
-	// Input vertices already use the renderer/importer axes. At yaw zero the
-	// retail FAR basis is rotY(pi/2): render X += source Z, render Z -= source X.
+	// Input vertices already use the renderer/importer (Godot) axes. The
+	// witnessed native transform X' = x*cos - z*sin, Z' = x*sin + z*cos
+	// [orig: generate_foliage_instances_0 @ 0x600112..0x60014d] composed with
+	// the importer's -X mesh flip and the world z = -native z boundary gives
+	// x = cx - (sx*cos + sz*sin), z = cz + (sx*sin - sz*cos). At yaw zero:
+	// x = cx - sx, z = cz - sz.
 	const FarVertex &a0 = emitted.vertices[0];
-	if (!expect(near(a0.x, 13.0f) && near(a0.z, -21.0f),
+	if (!expect(near(a0.x, 9.0f) && near(a0.z, -23.0f),
 	            "yaw-zero FAR transform uses the witnessed source-axis mapping")) return false;
-	const float a0_ground = 13.0f / 4.0f + -21.0f / 8.0f;
+	const float a0_ground = 9.0f / 4.0f + -23.0f / 8.0f;
 	if (!expect(near(a0.y, a0_ground + 1.0f),
 	            "source Y is scaled by 0.5 and added to per-vertex ground height")) return false;
 	if (!expect(near(a0.u, 0.10f) && near(a0.v, 0.20f), "source UVs are preserved")) return false;
 	if (!expect(a0.color == 0x00FF0000u, "source Y drives the packed red wind byte")) return false;
 
 	const FarVertex &b0 = emitted.vertices[1];
-	if (!expect(near(b0.x, 10.5f) && near(b0.z, -18.0f),
+	if (!expect(near(b0.x, 12.0f) && near(b0.z, -20.5f),
 	            "asymmetric source vertex is transformed independently")) return false;
-	const float b0_ground = 10.5f / 4.0f + -18.0f / 8.0f;
+	const float b0_ground = 12.0f / 4.0f + -20.5f / 8.0f;
 	if (!expect(near(b0.y, b0_ground - 0.5f), "negative source Y retains the 0.5 vertical scale")) return false;
 	if (!expect(b0.color == 0u, "negative source Y clamps wind to zero")) return false;
 
-	// At yaw pi/2 the basis is rotY(pi): X -= source X, Z -= source Z.
+	// At yaw pi/2 (cos 0, sin 1): x = cx - source z, z = cz + source x.
 	const FarVertex &a1 = emitted.vertices[3];
-	if (!expect(near(a1.x, -5.0f) && near(a1.z, 4.0f),
+	if (!expect(near(a1.x, -7.0f) && near(a1.z, 8.0f),
 	            "FAR yaw rotates the full source mesh around each placement")) return false;
 	if (!expect(near(a1.u, 0.10f) && near(a1.v, 0.20f),
 	            "UV preservation is independent of placement rotation")) return false;

@@ -58,21 +58,41 @@ func test_in_place_match_change_flushes_bake_once_preview_cache() -> void:
 		"Changing a match value in place flushes placements baked with the old gate.")
 
 
-func test_far_preview_compensates_for_render_key_provenance() -> void:
+func test_far_preview_reads_the_world_routed_texel() -> void:
+	# The FAR preview mask samples the SAME world->source-routed texel the
+	# MODEL gate resolves [orig: Foliage_SampleFoliageMapMask @ 0x606620;
+	# retail's flat FAR sampler consumes source-space keys @ 0x603f8a].
+	var data := NovaTerrainData.new()
+	data.set_trn_path(ProjectSettings.globalize_path(
+		"res://../fixtures/godot/dvxi5").path_join("Dvxi5.trn"))
+	assert_eq(data.load(), OK, "Dvxi5 fixture should load.")
 	var preview = add_child_autofree(TerrainFoliagePreviewScript.new())
 	await get_tree().process_frame
-	var map := NovaTerrainFoliageMap.new()
-	map.set_size(16, 16)
-	# 64 and 128 downshift to flat texel (1, 2) for a 16x16 map.
-	map.set_index(1, 2, 7)
+
+	# An interior world point whose source coords resolve.
+	var world := Vector2(-1, -1)
+	for sz in range(64, 8192, 256):
+		for sx in range(64, 8192, 256):
+			if data.world_to_source_coords(float(sx), float(sz)).x >= 0.0:
+				world = Vector2(float(sx), float(sz))
+				break
+		if world.x >= 0.0:
+			break
+	assert_gt(world.x, 0.0, "fixture should expose an interior point")
+
+	var map := data.get_foliage_map()
+	map.clear(0)
+	var source := data.world_to_source_coords_wrapped(world.x, world.y)
+	map.set_index(map.map_x_from_heightmap_x(source.x),
+		map.map_y_from_heightmap_y(source.y), 7)
 	var def := NovaTerrainFoliageDef.new()
 	def.match = 7
-	preview.set_preview_state(null, null, null, map, [def], -1)
+	preview.set_preview_state(null, null, null, map, [def], -1, data)
 
-	assert_eq(preview.sample_far_slot_mask(64.0, 128.0), 1,
-		"Host render keys hand the preview native z, so it reads that flat row directly.")
-	assert_eq(preview.sample_far_slot_mask(64.0, -128.0), 0,
-		"The uncompensated mirrored row remains empty while D-FOLIAGE-8 is open.")
+	assert_eq(preview.sample_far_slot_mask(world.x, world.y), 1,
+		"The FAR preview mask resolves the world-routed texel at the candidate's own (x, z).")
+	assert_eq(preview.sample_far_slot_mask(world.x, -world.y), 0,
+		"The mirrored z reads a different (unpainted) texel.")
 
 
 func test_height_stroke_and_undo_invalidate_bake_once_preview() -> void:

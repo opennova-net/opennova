@@ -102,32 +102,41 @@ PlacementResult place_cell(int slot_index,
 		const uint16_t frac_rot = prng_frac16(rng);
 		const float rotation = static_cast<float>(frac_rot) * FOLIAGE_ROTATION_SCALE;
 
-		// World-fixed position [orig: generate_foliage_instances_0
-		// @ 0x5fff7a..0x5fffb2]: world X = keyHigh + localA, world Z =
-		// keyLow - localB (the local B axis runs negative world Z). The
-		// retail generator applies no view cull here - the caller's collect
-		// list already scoped the cell set.
+		// Candidate position: BOTH axes ADD their grid coordinate to the
+		// (unbiased) cell base — witnessed in the vertex writes, where the
+		// emitted position is (keyLow&0x1FF)+localA on one axis and
+		// (keyHigh&0x1FF)+localB on the other, and in the sampler args
+		// (base+candidate on both axes) [orig: generate_foliage_instances_0
+		// vertex bases @ 0x6000b0..0x6000dc, adds @ 0x60013f..0x60014d,
+		// sampler coords @ 0x5fff84..0x5fff9d]. The earlier "keyLow - localB"
+		// reading belongs to the MODEL tier's +16-biased tile keys
+		// (pack_model_tile_key), not to this generator.
 		const Fixed16_16 world_x_fixed =
 		    static_cast<Fixed16_16>((static_cast<float>(key_x_int) + cand_x) * FIXED_SCALE);
 		const Fixed16_16 world_z_fixed =
-		    static_cast<Fixed16_16>((static_cast<float>(key_z_int) - cand_y) * FIXED_SCALE);
+		    static_cast<Fixed16_16>((static_cast<float>(key_z_int) + cand_y) * FIXED_SCALE);
 
 		// Path-blocker check: retail short-circuits it when the slot has
 		// FORCE_ON [orig: generate_foliage_instances_0 @ 0x5fffb6 (attrib
-		// byte_2C2608C bit 0) / sub_606490(x, -z, 0x20000) @ 0x600009].
+		// byte_2C2608C bit 0) / the sub_606490(.., .., 0x20000) call
+		// @ 0x600009]. The callback takes the candidate's own (x, z); the
+		// retail arg negation is the native sampler convention, absorbed by
+		// the host seam (placement.h).
 		if (!slot_force_on) {
-			if (samplers.path_blocked && samplers.path_blocked(world_x_fixed, -world_z_fixed, 0x20000)) {
+			if (samplers.path_blocked && samplers.path_blocked(world_x_fixed, world_z_fixed, 0x20000)) {
 				continue;
 			}
 		}
 
 		// FAR foliagemap mask check: the FOLIAGEMAP pixel remapped through the
 		// def match values into a four-slot bitmask (the charmap is not a
-		// foliage input anywhere). [orig: Foliage_SampleFarMapMask @ 0x6066d0
+		// foliage input anywhere). Gated at the candidate's own position — the
+		// retail call feeds the SAME coordinate pair to this gate and to the
+		// four ground probes. [orig: Foliage_SampleFarMapMask @ 0x6066d0
 		// (ex kong "Terrain_GetSurfaceTypeAtFixedPoint") over the load-remap
-		// @ 0x605AD0/0x5FF4E0, caller @ 0x600065..0x600079]
+		// @ 0x605AD0/0x5FF4E0, caller @ 0x600029..0x600079]
 		const uint32_t mask = samplers.slot_mask_at
-		                         ? samplers.slot_mask_at(world_x_fixed, -world_z_fixed)
+		                         ? samplers.slot_mask_at(world_x_fixed, world_z_fixed)
 		                         : 0u;
 		if (((1u << slot_index) & mask) == 0u) {
 			continue;

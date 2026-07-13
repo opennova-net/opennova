@@ -81,10 +81,17 @@ bool emit_far_mesh(const FarSourceMesh &source,
 		bool ground_valid = true;
 		for (const FarSourceVertex &source_vertex : source.vertices) {
 			FarVertex vertex{};
-			vertex.x = center_x + FAR_HORIZONTAL_SCALE *
-			                         (-source_vertex.x * sin_yaw + source_vertex.z * cos_yaw);
+			// Witnessed native transform: X' = x*cos - z*sin + cx,
+			// Z' = x*sin + z*cos + cz [orig: generate_foliage_instances_0
+			// @ 0x600112..0x60014d; the VB stores (Z', Y, X') at +0/+4/+8].
+			// Host source vertices carry the importer's -X mesh flip
+			// (nova_object_data.cpp godot_from_native) and world z = -native
+			// z; composing both gives x = cx - (sx*cos + sz*sin),
+			// z = cz + (sx*sin - sz*cos).
+			vertex.x = center_x - FAR_HORIZONTAL_SCALE *
+			                         (source_vertex.x * cos_yaw + source_vertex.z * sin_yaw);
 			vertex.z = center_z + FAR_HORIZONTAL_SCALE *
-			                         (-source_vertex.x * cos_yaw - source_vertex.z * sin_yaw);
+			                         (source_vertex.x * sin_yaw - source_vertex.z * cos_yaw);
 			const Fixed16_16 ground_fixed = height_at
 			                                     ? height_at(world_to_fixed(vertex.x),
 			                                                 world_to_fixed(vertex.z))

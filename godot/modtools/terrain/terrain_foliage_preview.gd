@@ -20,6 +20,7 @@ var _terrain_data: NovaTerrainData
 var _resource_root: NovaResourceRoot
 var _surface_map: NovaTerrainSurfaceMap
 var _foliage_map: NovaTerrainFoliageMap
+var _tile_info: NovaTerrainTileInfo = null
 var _foliage_defs: Array[NovaTerrainFoliageDef] = []
 # Deep value signatures, not foliage-def object references. Editor field edits
 # mutate the existing RefCounted in place; a shallow snapshot therefore missed
@@ -65,7 +66,8 @@ func set_preview_state(
 	foliage_defs: Array,
 	selected_index: int,
 	terrain_data: NovaTerrainData = null,
-	resource_root: NovaResourceRoot = null
+	resource_root: NovaResourceRoot = null,
+	tile_info: NovaTerrainTileInfo = null
 ) -> void:
 	var terrain_changed := _terrain_mesh != terrain_mesh
 	var data_changed := _terrain_data != terrain_data
@@ -74,6 +76,7 @@ func set_preview_state(
 	var map_changed := _foliage_map != foliage_map
 	var defs_changed := _defs_changed_raw(foliage_defs) or root_changed
 	var sel_changed := _selected_index != selected_index
+	var tiles_changed := _tile_info != tile_info
 
 	_terrain_mesh = terrain_mesh
 	_camera = camera
@@ -82,6 +85,13 @@ func set_preview_state(
 	_surface_map = surface_map
 	_foliage_map = foliage_map
 	_selected_index = selected_index
+	_tile_info = tile_info
+
+	if tiles_changed and _dispatcher != null:
+		# The placed-tile blocker gate [orig: sub_606490 @ 0x606490]; assigning
+		# rebuilds the dispatcher's cached footprints and resets its pools.
+		_dispatcher.tile_info = _tile_info
+		_pending_flush = true
 
 	if data_changed and _dispatcher != null:
 		# Colormap-only source for the FAR fragment pass's terrain-light T1.
@@ -111,12 +121,12 @@ func set_preview_state(
 	if terrain_changed and _terrain_mesh != null:
 		# Height sampler → live-sculpt-aware path (sub_5C6770 analogue).
 		_dispatcher.height_sampler = Callable(self, "_sample_height")
-		# Foliage sampler → the game's gate texel (negate + runtime wrap kernel
-		# via NovaTerrainData) over the live document map.
+		# Foliage sampler → the game's gate texel (the sector-routed
+		# world->source kernel via NovaTerrainData) over the live document map.
 		_dispatcher.foliage_sampler = Callable(self, "_sample_foliage_index")
-		# FAR consumes the foliagemap remapped through the def match values, at
-		# the original (x, -z) call boundary [orig: Foliage_SampleFarMapMask
-		# @ 0x6066d0 over the load-remapped map @ 0x605AD0/0x5FF4E0].
+		# FAR consumes the same texel remapped through the LIVE def match
+		# values [orig: Foliage_SampleFarMapMask @ 0x6066d0 over the
+		# load-remapped map @ 0x605AD0/0x5FF4E0; world-routed, see the func].
 		_dispatcher.far_slot_mask_sampler = Callable(self, "sample_far_slot_mask")
 		_pending_flush = true
 
@@ -132,14 +142,15 @@ func _sample_height(world_x: float, world_z: float) -> float:
 	return _terrain_mesh.sample_world_height(world_x, world_z)
 
 
-# MODEL/editor foliagemap sampler: the gate texel the sector-routed game path
-# resolves at this world point. That accessor negates z for PCX row order
-# [orig: Foliage_SampleFoliageMapMask @ 0x606620]. FAR has its own flat
-# world&1023 accessor below. Both operate over the live document foliage map.
+# Foliagemap sampler for BOTH tiers: the gate texel the sector-routed game
+# path resolves at this Godot world point (the same coordinate convention the
+# height sampler consumes - retail's internal native-z negation is absorbed by
+# the shared coords kernel) [orig: Foliage_SampleFoliageMapMask @ 0x606620].
+# Operates over the live document foliage map.
 func _sample_foliage_index(world_x: float, world_z: float) -> int:
 	if _terrain_data == null or _foliage_map == null:
 		return 0
-	var source := _terrain_data.world_to_source_coords_wrapped(world_x, -world_z)
+	var source := _terrain_data.world_to_source_coords_wrapped(world_x, world_z)
 	if source.x < 0.0:
 		return 0
 	var w := _foliage_map.get_width()
@@ -153,23 +164,17 @@ func _sample_foliage_index(world_x: float, world_z: float) -> int:
 	return int(_foliage_map.get_index(map_x, map_y))
 
 
-# The FAR def-slot mask: the foliagemap pixel remapped through the def match
-# values (pixel == match -> bit(def); pixel 0 never matches) [orig:
-# Foliage_SampleFarMapMask @ 0x6066d0; remap sub_605AD0 -> sub_5FF4E0].
-# native_z is already -candidate_render_z. While FAR collection remains keyed
-# in render space (D-FOLIAGE-8), this is the retail native map coordinate, so
-# the preview reads it directly; the runtime fast path makes the equivalent
-# compensating sign before its flat accessor. The remap runs over LIVE defs.
-func sample_far_slot_mask(world_x: float, native_z: float) -> int:
+# The FAR def-slot mask at a Godot world position: the foliagemap pixel
+# remapped through the def match values (pixel == match -> bit(def); pixel 0
+# never matches) [orig: Foliage_SampleFarMapMask @ 0x6066d0 over the load
+# remap sub_605AD0 -> sub_5FF4E0]. Retail's flat sampler consumes SOURCE-ATLAS
+# coordinates (its keys pack them @ 0x603f8a); a world-coordinate caller
+# routes world->source first - the same texel the MODEL sampler resolves.
+# The remap runs over LIVE defs.
+func sample_far_slot_mask(world_x: float, world_z: float) -> int:
 	if _foliage_map == null:
 		return 0
-	var width := _foliage_map.get_width()
-	var height := _foliage_map.get_height()
-	if width <= 0 or height <= 0:
-		return 0
-	var map_x := _flat_far_map_coord(floori(world_x), width)
-	var map_y := _flat_far_map_coord(floori(native_z), height)
-	var pixel := int(_foliage_map.get_index(map_x, map_y))
+	var pixel := _sample_foliage_index(world_x, world_z)
 	if pixel == 0:
 		return 0
 	var mask := 0
@@ -182,15 +187,6 @@ func sample_far_slot_mask(world_x: float, native_z: float) -> int:
 				mask |= 1 << d
 				break
 	return mask
-
-
-func _flat_far_map_coord(value: int, dimension: int) -> int:
-	var log2_dimension := 0
-	var power := 1
-	while power * 2 <= dimension and log2_dimension < 10:
-		power *= 2
-		log2_dimension += 1
-	return (value & 1023) >> maxi(10 - log2_dimension, 0)
 
 
 func mark_dirty() -> void:

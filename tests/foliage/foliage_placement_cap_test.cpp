@@ -50,8 +50,9 @@ int main() {
 	if (!expect(captured_mask_point, "FAR placement must query the slot mask")) return 1;
 	if (!expect(mask_x_fixed == result.instances[0].world_x_fixed,
 	            "slot-mask X receives the candidate world X")) return 1;
-	if (!expect(mask_engine_z_fixed == -result.instances[0].world_z_fixed,
-	            "slot-mask Z receives the negated candidate world Z")) return 1;
+	if (!expect(mask_engine_z_fixed == result.instances[0].world_z_fixed,
+	            "slot-mask Z receives the candidate's own world Z (no boundary "
+	            "negation; placement.h)")) return 1;
 
 	// Zero slot mask should emit nothing (FORCE_ON bypasses path check but NOT slot mask).
 	// The retail generator has no view cull [orig: generate_foliage_instances_0

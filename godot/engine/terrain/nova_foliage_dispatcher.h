@@ -28,6 +28,7 @@ namespace godot {
 
 class Image;
 class NovaTerrainData;
+class NovaTerrainTileInfo;
 
 // Foliage adapter for the shared engine-spec placement core. Renders the two
 // witnessed retail tiers, and only those (docs/foliage/foliage-re.md):
@@ -124,13 +125,21 @@ public:
 	void set_foliage_sampler(const Callable &p_sampler);
 	Callable get_foliage_sampler() const;
 
-	// Callable receiving the retail FAR FOLIAGEMAP boundary
-	// (world_x: float, native_z: float) -> match-remapped uint8 slot mask.
-	// FAR passes native_z=-candidate_world_z exactly as witnessed. Unlike
+	// Callable receiving (world_x: float, world_z: float) -> match-remapped
+	// uint8 slot mask at the candidate's own position. Unlike
 	// MODEL's foliage_sampler, the callback has already translated the painted
 	// palette index through every definition's authored match values into bits.
 	void set_far_slot_mask_sampler(const Callable &p_sampler);
 	Callable get_far_slot_mask_sampler() const;
+
+	// The mission's placed terrain tiles (.til). Both tiers reject candidates
+	// within 2u of a placed tile's 16u footprint unless the def is FORCE_ON
+	// [orig: sub_606490 @ 0x606490 over g_TerrainTileArray, the placed-tile
+	// list loaded by PolyTrn_LoadTileData @ 0x6081d0; FAR caller @ 0x600009,
+	// MODEL caller in Foliage_GenerateModelTileInstances]. Unset = no tiles =
+	// nothing blocked.
+	void set_tile_info(const Ref<NovaTerrainTileInfo> &p_info);
+	Ref<NovaTerrainTileInfo> get_tile_info() const;
 
 	// Direct runtime fast path. When set, dispatch uses NovaTerrainData
 	// height, match-remapped FAR FOLIAGEMAP slot-mask, and MODEL FOLIAGEMAP
@@ -312,6 +321,10 @@ private:
 	Callable far_slot_mask_sampler_;
 	Ref<NovaTerrainData> terrain_data_;
 	Ref<NovaTerrainData> colormap_source_;
+	Ref<NovaTerrainTileInfo> tile_info_;
+	// Placed-tile world origins (each covers [x, x+16] x [z, z+16]), cached
+	// from tile_info_ for the per-candidate path_blocked scan.
+	std::vector<Vector2> tile_origins_;
 
 	DispatchStats dispatch_stats_;
 
@@ -320,10 +333,11 @@ private:
 	bool _has_sampling_source() const;
 	float _sample_height_world(float p_world_x, float p_world_z) const;
 	void _collect_far_cells(const Vector3 &camera_pos);
-	void _dispatch_far_tier(const Vector3 &camera_pos);
+	void _dispatch_far_tier(const Vector3 &camera_pos, const Dictionary &defs_by_match);
 	void _bake_far_cell_into(int slot_index,
 	                         const FarVisibleCell &cell,
 	                         const Ref<NovaTerrainFoliageDef> &def,
+	                         const Dictionary &defs_by_match,
 	                         FarCellEntry &entry);
 	void _apply_far_cell_state(int slot_index, FarCellEntry &entry, float distance);
 	void _evict_far_overflow(int slot_index);
@@ -343,14 +357,19 @@ private:
 	                                      const SlotModelBounds &bounds) const;
 	void _refresh_slot_bounds();
 	Ref<Texture2D> _slot_fd_texture(int slot_index) const;
-	void _make_model_sampler_bindings(
+	// Samplers shared by BOTH tiers: the map gate at the candidate's own
+	// world (x, z) via the sector-routed accessor, the placed-tile blocker,
+	// and the terrain height.
+	void _make_placement_samplers(
 	    const Dictionary &defs_by_match,
 	    opennova::foliage::PlacementSamplers &out_samplers) const;
+	void _rebuild_tile_origins();
 	void _update_slot_material(int slot_index);
 	void _update_model_slot_material(int slot_index);
 	bool _scatter_cell(int slot_index,
 	                   int cell_x_int, int cell_z_int,
 	                   const Ref<NovaTerrainFoliageDef> &def,
+	                   const Dictionary &defs_by_match,
 	                   std::vector<opennova::foliage::PlacementInstance> &out_placements);
 	Dictionary _build_defs_by_match() const;
 	void _clear_children();

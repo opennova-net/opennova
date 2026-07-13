@@ -1735,14 +1735,15 @@ int NovaTerrainData::get_foliage_far_mask_world(float world_x, float native_z) c
 	// values; pixel 0 never matches [orig: sub_605AD0 @ 0x605b8a ->
 	// sub_5FF4E0]. The sampler indexes ((x >> 16) & 1023, (-z >> 16) & 1023)
 	// downscaled by the floor-log2 shift (>> (10 - log2(width))) — a flat
-	// 1024-world wrap with NO sector-origin/grid routing (that belongs to the
-	// MODEL sampler [orig: Foliage_SampleFoliageMapMask @ 0x606620]). The
-	// caller passes candidate (x, -worldZ); the internal negation restores
-	// world z, matching the retail callee exactly. The reimpl remaps at query
-	// time (same result; the map resource keeps the raw authored indices for
-	// the editor round-trip).
-	// Keep this flat read independent from get_foliage_index_world: MODEL and
-	// editor painting use the sector-routed accessor, while FAR does not.
+	// 1024 wrap with no sector-origin/grid routing. The flat form is only
+	// world-correct because the retail FAR pipeline feeds it SOURCE-ATLAS
+	// coordinates: its cell keys pack source coords + the sector scroll
+	// [orig: key construction @ 0x603f8a; decode @ 0x5fffbc..0x5ffffb], so
+	// &0x3FF lands on the atlas texel directly. A WORLD-coordinate caller
+	// must route world->source first (get_foliage_index_world); the runtime
+	// dispatcher does exactly that and no longer consumes this accessor. The
+	// reimpl remaps at query time (same result; the map resource keeps the
+	// raw authored indices for the editor round-trip).
 	if (!loaded || foliage_map_resource.is_null()) {
 		return 0;
 	}
@@ -1786,10 +1787,15 @@ int NovaTerrainData::get_foliage_far_mask_world(float world_x, float native_z) c
 }
 
 int NovaTerrainData::get_foliage_index_world(float world_x, float world_z) const {
-	// Engine sub_5C65E0 (Terrain_GetFoliageMapValue) analogue. Uses the same
-	// sector+origin+quadrant math as get_height_world_bilinear — the sector
-	// grid is always 16×16; origin places the active region inside it with a
-	// wraparound mask on the lookup.
+	// [orig: Foliage_SampleFoliageMapMask @ 0x606620 (Jointops); jodemo
+	// Terrain_GetFoliageMapValue @ 0x5C65E0] — the sector-routed foliage-map
+	// read: 512u sector cell -> 16x16 grid id -> (id-1) low bits select the
+	// 512x512 source quadrant -> flat downscale. Same sector+origin+quadrant
+	// math as get_height_world_bilinear, consuming the same Godot world
+	// (x, z) that seam consumes (retail negates z internally against native
+	// axes; the shared coords kernel absorbs that exactly as the
+	// terrain-proven height chain does). Callers pass world coordinates
+	// UN-negated.
 	if (!loaded || foliage_map_resource.is_null()) {
 		return 0;
 	}

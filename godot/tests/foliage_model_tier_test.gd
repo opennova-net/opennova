@@ -99,9 +99,10 @@ func _make_far_dispatcher() -> NovaFoliageDispatcher:
 	return dispatcher
 
 
-# The cell that contains the origin camera: key = pack(0, 16) = 16 (a cell
-# keyed (kx, kz) covers x in [kx, kx+16], z in [kz-16, kz]).
-const ORIGIN_CELL_KEY := 16
+# The cell that contains the origin camera: key = pack(0, 0) = 0 (a cell
+# keyed (kx, kz) covers x in [kx, kx+16], z in [kz, kz+16] - both candidate
+# axes ADD from the unbiased cell base).
+const ORIGIN_CELL_KEY := 0
 
 
 func _far_cell_node(dispatcher: NovaFoliageDispatcher, slot: int, key: int) -> MeshInstance3D:
@@ -342,11 +343,14 @@ func test_far_tier_replicates_full_source_mesh_and_bends_each_vertex() -> void:
 			var source: Vector3 = source_positions[source_index]
 			var emitted_index := placement_index * source_positions.size() + source_index
 			var emitted: Vector3 = emitted_positions[emitted_index]
-			var expected_x := center.x - source.x * sin(yaw) + source.z * cos(yaw)
-			var expected_z := center.z - source.x * cos(yaw) - source.z * sin(yaw)
+			# Witnessed native transform X' = x*cos - z*sin, Z' = x*sin + z*cos
+			# [orig: generate_foliage_instances_0 @ 0x600112..0x60014d],
+			# composed with the importer's -X mesh flip and world z = -native z.
+			var expected_x := center.x - (source.x * cos(yaw) + source.z * sin(yaw))
+			var expected_z := center.z + (source.x * sin(yaw) - source.z * cos(yaw))
 			var expected_y := _sample_height(expected_x, expected_z) + source.y * 0.5
-			assert_almost_eq(emitted.x, expected_x, 0.002, "FAR vertex X uses rotY(yaw+PI/2).")
-			assert_almost_eq(emitted.z, expected_z, 0.002, "FAR vertex Z uses rotY(yaw+PI/2).")
+			assert_almost_eq(emitted.x, expected_x, 0.002, "FAR vertex X uses the witnessed transform.")
+			assert_almost_eq(emitted.z, expected_z, 0.002, "FAR vertex Z uses the witnessed transform.")
 			assert_almost_eq(emitted.y, expected_y, 0.002,
 				"Each source vertex samples terrain independently and keeps Y scale 0.5.")
 			assert_eq(emitted_uvs[emitted_index], source_uvs[source_index],
@@ -566,54 +570,74 @@ func test_reset_detaches_far_nodes_before_queue_free() -> void:
 		"The queued far cell node is detached before deferred destruction.")
 
 
-func test_far_slot_mask_and_model_foliage_index_seams() -> void:
-	# Both tiers consume the FOLIAGEMAP. The FAR callback receives its painted
-	# index already match-remapped through all defs into a slot mask at the
-	# Foliage_SampleFarMapMask(x, -z) boundary; MODEL receives the painted
-	# palette index and maps it through def.match inside the dispatcher.
-	var split := NovaFoliageDispatcher.new()
-	_own_dispatcher(split)
+func test_shared_map_gate_feeds_both_tiers() -> void:
+	# BOTH tiers gate on the same FOLIAGEMAP texel at the candidate's own
+	# world position: retail's two samplers read the same load-remapped
+	# buffer [orig: Foliage_SampleFoliageMapMask @ 0x606620 (MODEL);
+	# Foliage_SampleFarMapMask @ 0x6066d0 over source-space FAR keys]. The
+	# byte-returning foliage_sampler seam feeds both; the mask-returning
+	# far_slot_mask_sampler is the fallback when no byte source is bound.
+	var shared := NovaFoliageDispatcher.new()
+	_own_dispatcher(shared)
 	var def := NovaTerrainFoliageDef.new()
 	def.graphic = "test_model"
 	def.match = 7
 	var mesh := BoxMesh.new()
 	mesh.size = Vector3(2.0, 6.0, 2.0)
-	split.foliage_defs = [def]
-	split.slot_meshes = [mesh]
-	split.height_sampler = Callable(self, "_sample_height")
-	split.far_slot_mask_sampler = Callable(self, "_sample_split_far_slot_mask")
-	split.foliage_sampler = Callable(self, "_sample_split_foliage_index")
-	split.model_anchors = PackedVector3Array([FAR_DEPTH_ANCHOR])
+	shared.foliage_defs = [def]
+	shared.slot_meshes = [mesh]
+	shared.height_sampler = Callable(self, "_sample_height")
+	shared.foliage_sampler = Callable(self, "_sample_split_foliage_index")
+	shared.model_anchors = PackedVector3Array([FAR_DEPTH_ANCHOR])
 
-	_split_far_slot_mask = 0
+	# Painted byte matches the def -> BOTH tiers accept.
 	_split_foliage_index = 7
-	_split_far_slot_samples.clear()
-	split.dispatch(Vector3.ZERO, _camera_xform())
-	assert_eq(split.get_far_tile_debug(0).size(), 0,
-		"A zero FAR FOLIAGEMAP slot mask rejects FAR even when MODEL's painted index matches.")
-	assert_gt(split.get_model_tile_debug(0).size(), 0,
-		"MODEL still accepts through its independent foliage-map match.")
+	shared.dispatch(Vector3.ZERO, _camera_xform())
+	var far_debug: Array = shared.get_far_tile_debug(0)
+	assert_gt(far_debug.size(), 0, "A def-matching painted byte accepts FAR.")
+	assert_eq(far_debug.size() % 36, 0,
+		"Permissive painted texels accept all 36 candidates per collected cell.")
+	assert_gt(shared.get_model_tile_debug(0).size(), 0,
+		"The same painted byte accepts MODEL through the same gate.")
+
+	# Unpainted byte -> BOTH tiers reject: one map, one gate.
+	_split_foliage_index = 0
+	shared.reset()
+	shared.dispatch(Vector3.ZERO, _camera_xform())
+	assert_eq(shared.get_far_tile_debug(0).size(), 0,
+		"An unpainted texel rejects FAR through the shared gate.")
+	assert_eq(shared.get_model_tile_debug(0).size(), 0,
+		"An unpainted texel rejects MODEL through the shared gate.")
+
+	# Without a byte source, the pre-remapped mask seam gates both tiers.
+	var mask_only := NovaFoliageDispatcher.new()
+	_own_dispatcher(mask_only)
+	mask_only.foliage_defs = [def]
+	mask_only.slot_meshes = [mesh]
+	mask_only.height_sampler = Callable(self, "_sample_height")
+	mask_only.far_slot_mask_sampler = Callable(self, "_sample_split_far_slot_mask")
+	mask_only.model_anchors = PackedVector3Array([FAR_DEPTH_ANCHOR])
 
 	_split_far_slot_mask = 1 << 0
-	_split_foliage_index = 0
 	_split_far_slot_samples.clear()
-	split.reset()
-	split.dispatch(Vector3.ZERO, _camera_xform())
-	var far_debug: Array = split.get_far_tile_debug(0)
+	mask_only.dispatch(Vector3.ZERO, _camera_xform())
+	far_debug = mask_only.get_far_tile_debug(0)
 	assert_gt(far_debug.size(), 0,
 		"The already match-remapped slot bit accepts FAR without a second def.match translation.")
-	assert_eq(far_debug.size() % 36, 0,
-		"Permissive FOLIAGEMAP slot masks accept all 36 candidates per collected cell.")
-	assert_eq(split.get_model_tile_debug(0).size(), 0,
-		"A zero FOLIAGEMAP index rejects MODEL even when FAR's remapped slot mask matches.")
-	assert_gt(_split_far_slot_samples.size(), 0, "FAR queried its dedicated slot-mask seam.")
+	assert_gt(_split_far_slot_samples.size(), 0, "FAR queried the mask fallback seam.")
 	if not far_debug.is_empty() and not _split_far_slot_samples.is_empty():
 		var placement: Dictionary = far_debug[0]
 		var center: Vector3 = placement.center
 		var found_boundary_sample := false
 		for sample in _split_far_slot_samples:
-			if absf(sample.x - center.x) < 0.0001 and absf(sample.y + center.z) < 0.0001:
+			if absf(sample.x - center.x) < 0.0001 and absf(sample.y - center.z) < 0.0001:
 				found_boundary_sample = true
 				break
 		assert_true(found_boundary_sample,
-			"The seam carries the placement's TRUE native z (-render Z under the render-keyed host cells, D-FOLIAGE-8); the consumer applies the witnessed -z internally [orig: Foliage_SampleFarMapMask @ 0x6066d0].")
+			"The seam carries the placement's own Godot world (x, z) - no boundary negation (placement.h).")
+
+	_split_far_slot_mask = 0
+	mask_only.reset()
+	mask_only.dispatch(Vector3.ZERO, _camera_xform())
+	assert_eq(mask_only.get_far_tile_debug(0).size(), 0,
+		"A zero mask from the fallback seam rejects FAR.")

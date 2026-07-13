@@ -1,13 +1,19 @@
 extends GutTest
-## The foliagemap gate resolvers — the D-FOLIAGE-9 sign conventions, pinned.
+## The foliagemap resolvers, pinned.
 ##
-## The witnessed foliagemap read NEGATES z before the shared wrap kernel (the
-## PCX row-order compensation) while heights read +z:
-## [orig: Foliage_SampleFarMapMask @ 0x6066d0 indexes ((x>>16)&1023,
-## (-z>>16)&1023); Terrain_SampleHeightBilinear @ 0x5C6770 reads +z].
-## These tests pin the two independent NovaTerrainData fast paths: FAR's flat
-## world&1023 read and MODEL/editor's sector-routed index read, plus the z
-## negation, pixel-zero early-out, and definition match remap.
+## Two NovaTerrainData accessors exist because retail has two samplers over
+## the same load-remapped buffer:
+## - get_foliage_far_mask_world: the flat & 1023 read with an internal z
+##   negation [orig: Foliage_SampleFarMapMask @ 0x6066d0 indexes
+##   ((x>>16)&1023, (-z>>16)&1023)]. Retail feeds it SOURCE-ATLAS coordinates
+##   (its FAR keys pack them @ 0x603f8a); it is NOT world-correct on
+##   origin-shifted layouts.
+## - get_foliage_index_world: the sector-routed world read, consuming the
+##   same Godot world (x, z) as the height samplers [orig:
+##   Foliage_SampleFoliageMapMask @ 0x606620]. This is the gate BOTH runtime
+##   tiers use.
+## These tests pin each accessor's own addressing, the pixel-zero early-out,
+## and the definition match remap.
 
 const DVXI5_FIXTURE_RES_DIR := "res://../fixtures/godot/dvxi5"
 
@@ -64,13 +70,13 @@ func test_far_mask_negates_once_onto_the_flat_wrapped_row() -> void:
 	map.clear(0)
 	map.paint_circle(map_x, map_y, 1, 1.0, 1.0, match_index)
 
-	# The far-mask wrapper negates ONCE internally: handing it -source_z (the
-	# witnessed native boundary) must land on the flat wrapped texel...
+	# The far-mask accessor negates ONCE internally: handing it -source_z (the
+	# retail native arg form) must land on the flat wrapped texel...
 	var mask := data.get_foliage_far_mask_world(p.x, -p.y)
 	if match_slot >= 0:
 		assert_eq(mask, 1 << match_slot,
 				"far mask at (x, -z) remaps the flat painted texel through all matches")
-	# ...and handing it +source_z must NOT (the pre-fix z-mirror read).
+	# ...and handing it +source_z must NOT (the z-mirror read).
 	var mirrored := data.get_foliage_far_mask_world(p.x, p.y)
 	assert_ne(mirrored, mask if match_slot >= 0 else -1,
 			"far mask at (x, +z) is the MIRRORED read — it must not see the texel")
@@ -153,9 +159,9 @@ func test_far_mask_uses_flat_wrapped_address_not_model_sector_route() -> void:
 	data.foliage_defs = [def]
 
 	assert_eq(data.get_foliage_far_mask_world(witness.x, witness.y), 1,
-			"FAR reads the retail flat (world & 1023) FOLIAGEMAP texel.")
+			"the flat accessor reads the source-space (& 1023) FOLIAGEMAP texel.")
 	assert_eq(data.get_foliage_index_world(witness.x, -witness.y), 0,
-			"MODEL's sector-routed sampler remains independent at the same position.")
+			"the sector-routed world accessor stays independent at the same args.")
 
 
 func _flat_far_map_coord(value: int, dimension: int) -> int:
@@ -183,12 +189,12 @@ func test_wrapped_coords_is_the_runtime_kernel_form() -> void:
 	assert_almost_eq(wrapped_form.y, editor_form.y, 0.01,
 			"interior z resolves identically through both guard sets")
 
-	# The negated-z region: the runtime form WRAPS (& 0xF sector wrap) where
+	# Out-of-extent coords: the runtime form WRAPS (& 0xF sector wrap) where
 	# the editor form bounds-rejects anything outside the authored extent —
 	# the reason the editor's foliage addressing goes through the wrapped
-	# form (D-FOLIAGE-9's editor half). Whether -p.y falls inside the extent
-	# depends on the map's origin, so the invariant pinned here is agreement
-	# with the game's own index read at the negated coordinate.
+	# form. Whether -p.y falls inside the extent depends on the map's origin,
+	# so the invariant pinned here is agreement between the wrapped form and
+	# the game's own index read at an arbitrary (here negated) coordinate.
 	var wrapped_neg := data.world_to_source_coords_wrapped(p.x, -p.y)
 	# The wrap can land in an empty sector (sentinel) but on a full 16-grid
 	# map it resolves; either way it must agree with the game's index read.

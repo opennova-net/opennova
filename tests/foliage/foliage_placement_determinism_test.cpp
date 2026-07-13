@@ -66,10 +66,12 @@ int main() {
 	// [orig: generate_foliage_instances_0 @ 0x5ffdd0]
 	// seed=0xA56B1F0D; the first three already-^1-folded states expose
 	// low16 draws C38E, ABFB, A257 for jitter X, jitter Z, and yaw.
+	// Both axes ADD the candidate to the cell base (the witnessed vertex
+	// writes @ 0x60013f..0x60014d): z = (32 + candB) * 65536.
 	const PlacementInstance &candidate0 = r1.instances[0];
 	if (!expect(candidate0.world_x_fixed == 1204223,
 	            "candidate 0 fixed X matches the retail PRNG golden")) return 1;
-	if (!expect(candidate0.world_z_fixed == 1952367,
+	if (!expect(candidate0.world_z_fixed == 2241936,
 	            "candidate 0 fixed Z matches the retail PRNG golden")) return 1;
 	if (!expect(float_bits(candidate0.rotation_radians) == 0x407F00ACu,
 	            "candidate 0 yaw matches the retail float32 golden")) return 1;
