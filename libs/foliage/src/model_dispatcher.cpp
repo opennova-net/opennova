@@ -21,7 +21,6 @@ void ModelDispatcher::reset() noexcept {
 	cache_hits_ = 0;
 	cache_misses_ = 0;
 	regenerations_ = 0;
-	skipped_adoptions_ = 0;
 }
 
 bool ModelDispatcher::is_staggered_regen_frame(int32_t frame_counter, int slot_index) noexcept {
@@ -44,15 +43,29 @@ namespace {
 
 // The eviction scan: prefer an empty entry, else the max-age (smallest
 // last_touched relative to now) occupied one - the retail
-// evict-oldest-by-frame-stamp scan. Entries touched THIS
-// frame are never victims: hosts hold borrowed pointers into this frame's
-// emitted entries (retail draws immediately per tile, so it has no such
-// aliasing window; the skip is the host-retained analog - see walk()).
-int find_evict_slot(const std::vector<ModelCacheEntry> &entries, int32_t now) noexcept {
+// evict-oldest-by-frame-stamp scan. Same-frame entries ARE eligible victims:
+// retail recycles and draws immediately when the live tile set outruns the
+// cache, and every ModelTileDraw view dies at the next walk() (the header
+// contract), so recycling cannot dangle a retained host draw. The only
+// exclusions are the entries THIS walk call already emitted into `out`
+// (`used`, at most the 4 quadrant tiles) - recycling one of those would
+// invalidate a view before the call even returned.
+int find_evict_slot(const std::vector<ModelCacheEntry> &entries, int32_t now,
+                    const int *used, int used_count) noexcept {
 	int best_idx = -1;
-	int32_t best_age = 0;
+	int32_t best_age = -1;
 	const int n = static_cast<int>(entries.size());
 	for (int i = 0; i < n; ++i) {
+		bool in_use = false;
+		for (int u = 0; u < used_count; ++u) {
+			if (used[u] == i) {
+				in_use = true;
+				break;
+			}
+		}
+		if (in_use) {
+			continue;
+		}
 		if (!entries[i].occupied) {
 			return i;
 		}
@@ -62,7 +75,7 @@ int find_evict_slot(const std::vector<ModelCacheEntry> &entries, int32_t now) no
 			best_idx = i;
 		}
 	}
-	return best_idx;  // -1 when every occupied entry was touched this frame
+	return best_idx;  // >= 0 whenever entries.size() > used_count
 }
 
 } // namespace
@@ -90,8 +103,13 @@ void ModelDispatcher::walk(int slot_index,
 	const bool should_regen = is_staggered_regen_frame(frame_counter, slot_index);
 
 	const auto tiles = model_quadrant_tiles(anchor_x_fixed, anchor_z_fixed);
+	// Entry indices this call has touched so far - excluded from eviction so
+	// an emitted view survives to the end of the call (see find_evict_slot).
+	int used_entries[4] = {};
+	int used_count = 0;
 	for (const auto &tile : tiles) {
 		ModelCacheEntry *entry = nullptr;
+		int entry_index = -1;
 		// Keyed lookup. The engine linear-scans its 1000-entry stripe per tile
 		// [orig: the unrolled key scan in Foliage_UpdateModelTiles @ 0x601f50]
 		// - a hash index over the same entries is a host data-structure choice
@@ -100,6 +118,7 @@ void ModelDispatcher::walk(int slot_index,
 		auto found = key_index_.find(tile.key);
 		if (found != key_index_.end()) {
 			entry = &entries_[found->second];
+			entry_index = found->second;
 			entry->last_touched = frame_counter;
 			++cache_hits_;
 			// Stagger regen runs once per TOUCHING ANCHOR, exactly as retail
@@ -121,21 +140,14 @@ void ModelDispatcher::walk(int slot_index,
 		}
 
 		if (entry == nullptr) {
-			const int victim = find_evict_slot(entries_, frame_counter);
-			if (victim < 0) {
-				// Every cache entry was touched this frame (>1000 live tiles):
-				// skip the adoption - the tile re-collects next frame. Retail
-				// would recycle a same-frame entry here (its draws are
-				// immediate, so nothing aliases); the host defers draws, so
-				// recycling would dangle this frame's emitted pointers.
-				++skipped_adoptions_;
-				continue;
-			}
+			const int victim =
+			    find_evict_slot(entries_, frame_counter, used_entries, used_count);
 			ModelCacheEntry &victim_entry = entries_[victim];
 			if (victim_entry.occupied) {
 				key_index_.erase(victim_entry.tile_key);
 			}
 			entry = &victim_entry;
+			entry_index = victim;
 			entry->tile_key = tile.key;
 			entry->last_touched = frame_counter;
 			entry->occupied = true;
@@ -146,6 +158,7 @@ void ModelDispatcher::walk(int slot_index,
 			++cache_misses_;
 			key_index_.emplace(tile.key, victim);
 		}
+		used_entries[used_count++] = entry_index;
 
 		// Draw only when count > 0 [orig: Foliage_UpdateModelTiles @ 0x601f50].
 		if (entry->cached.count > 0) {

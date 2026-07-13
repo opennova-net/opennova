@@ -641,3 +641,68 @@ func test_shared_map_gate_feeds_both_tiers() -> void:
 	mask_only.dispatch(Vector3.ZERO, _camera_xform())
 	assert_eq(mask_only.get_far_tile_debug(0).size(), 0,
 		"A zero mask from the fallback seam rejects FAR.")
+
+
+func test_far_mesh_uv2_carries_sector_routed_source_texels() -> void:
+	# FAR T1 addressing: retail binds one patch-cache RT per tile through a
+	# per-tile world-planar transform [orig: render_terrain_lightmaps
+	# @ 0x60a220..0x60a356], so world position resolves to that tile's own
+	# SOURCE-ATLAS texels. The host carries those texels per vertex in UV2 via
+	# the sector-routed seam; a flat world tap reads the wrong atlas quadrant
+	# on origin-shifted layouts (the 00TRg white-tuft report).
+	var data := NovaTerrainData.new()
+	data.set_trn_path(ProjectSettings.globalize_path(
+			"res://../fixtures/godot/dvxi5").path_join("Dvxi5.trn"))
+	assert_eq(data.load(), OK, "Dvxi5 fixture should load.")
+
+	# A cell interior to one 512u sector whose routed source offset is nonzero
+	# (flat == routed would make the pin vacuous).
+	var cell := Vector2(-1e9, 0)
+	for wz in range(-768, 769, 16):
+		for wx in range(-768, 769, 16):
+			if posmod(wx, 512) < 64 or posmod(wx, 512) > 432 \
+					or posmod(wz, 512) < 64 or posmod(wz, 512) > 432:
+				continue  # keep the whole 16u cell inside one sector
+			var routed := data.world_to_source_coords_wrapped(wx + 8.0, wz + 8.0)
+			if routed.x < 0.0:
+				continue
+			if (routed - Vector2(wx + 8.0, wz + 8.0)).length() > 0.5:
+				cell = Vector2(wx, wz)
+				break
+		if cell.x > -1e8:
+			break
+	assert_gt(cell.x, -1e8, "Dvxi5 exposes a cell where routed and flat texels differ.")
+	if cell.x < -1e8:
+		return
+
+	var dispatcher := _make_far_dispatcher()
+	dispatcher.colormap_source = data
+	# Flat heights: the witness cell can sit far from the origin, where the
+	# sloped fixture height field would push the cell's Y bounds outside the
+	# 42u clamped-box collect distance.
+	dispatcher.height_sampler = Callable(self, "_sample_flat_height")
+	var centre := Vector3(cell.x + 8.0, 0.0, cell.y + 8.0)
+	dispatcher.dispatch(centre, _camera_xform())
+
+	var checked := 0
+	for child in dispatcher.get_children():
+		if not (child is MeshInstance3D) or child.mesh == null:
+			continue
+		var arrays: Array = (child as MeshInstance3D).mesh.surface_get_arrays(0)
+		var positions: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+		var uv2s: PackedVector2Array = arrays[Mesh.ARRAY_TEX_UV2]
+		assert_eq(uv2s.size(), positions.size(),
+			"Every FAR vertex carries its source-atlas texel coordinates in UV2.")
+		if uv2s.size() != positions.size():
+			return
+		for i in range(0, positions.size(), 7):
+			var routed := data.world_to_source_coords_wrapped(positions[i].x, positions[i].z)
+			if routed.x < 0.0:
+				continue
+			assert_almost_eq(uv2s[i].x, routed.x, 0.01,
+				"UV2.x is the sector-routed source texel, not the flat world coordinate.")
+			assert_almost_eq(uv2s[i].y, routed.y, 0.01,
+				"UV2.y is the sector-routed source texel, not the flat world coordinate.")
+			checked += 1
+		break
+	assert_gt(checked, 0, "The routed cell baked far vertices to check.")

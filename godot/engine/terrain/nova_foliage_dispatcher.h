@@ -273,11 +273,14 @@ private:
 		int64_t wind_counter = 0;
 		float wind_phase = 0.0f; // counter * 0.001
 		int submissions = 1;     // retail-equivalent draws folded into this batch
-		// Borrowed view into the slot dispatcher's cache entry (valid until
-		// its next walk(); see ModelTileDraw). Upload paths copy from here
-		// only when `generation` changed.
-		const opennova::foliage::ModelInstance *instances = nullptr;
-		int instance_count = 0;
+		// Owned copy of the emitted tile's instances, taken while the walk's
+		// borrowed view is still valid (the view dies at the NEXT walk() —
+		// a later anchor's miss can recycle the entry, and a later same-frame
+		// anchor's stagger regen can rewrite a shared tile even to EMPTY,
+		// which emits no replacing draw). Owning the last SUBMISSION's data
+		// keeps D-FOLIAGE-10's retained state exact. Upload paths copy to the
+		// MultiMesh only when `generation` changed.
+		std::vector<opennova::foliage::ModelInstance> instances;
 	};
 	std::vector<ModelDrawBatch> model_draw_batches_;
 	std::vector<MultiMeshInstance3D *> model_draw_nodes_;

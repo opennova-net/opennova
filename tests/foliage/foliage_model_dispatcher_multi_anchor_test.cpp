@@ -6,10 +6,10 @@
 //     touching anchor's subset is the frame's end state — a same-frame dedup
 //     froze the FIRST anchor's subset (caught in the 2026-07-12 pre-PR
 //     review; docs/foliage/foliage-re.md D-FOLIAGE-11).
-// (2) with more live tiles than cache entries in ONE frame, the no-victim
-//     miss SKIPS adoption instead of recycling a this-frame entry (hosts hold
-//     borrowed pointers into this frame's emissions; retail draws immediately
-//     so it has no aliasing window).
+// (2) with more live tiles than cache entries in ONE frame, the miss
+//     RECYCLES the oldest entry and still generates + draws the tile —
+//     retail recycles and draws immediately; the ModelTileDraw views are
+//     only valid until the next walk() (hosts copy what they retain).
 #include <foliage/model_dispatcher.h>
 #include <foliage/model_placement.h>
 
@@ -100,26 +100,32 @@ int main() {
 		}
 	}
 
-	// --- (2) the no-victim miss skips adoption -----------------------------
+	// --- (2) a full cache recycles and still draws -------------------------
 	// 260 anchors spaced 32u apart touch 4 distinct tiles each: 1040 live
-	// tiles in one frame against 1000 entries.
+	// tiles in one frame against 1000 entries. Retail recycles the oldest
+	// entry and draws the new tile immediately; no tile goes undrawn.
 	ModelDispatcher crowded;
 	std::vector<ModelTileDraw> crowd_out;
+	int64_t total_misses = 0;
 	for (int a = 0; a < 260; ++a) {
 		const Fixed16_16 ax = static_cast<Fixed16_16>((32 * a + 20) * 0x10000);
+		// Each walk invalidates prior borrowed views (the header contract);
+		// consume this walk's draws before the next.
+		crowd_out.clear();
 		crowded.walk(slot, ax, a1z, MODEL_DEPTH_GATE, 1, cfg, s, crowd_out);
+		// A tile may legitimately bake zero accepted candidates (the accept
+		// window is anchor-relative +-4u) - only emitted draws are checked.
+		for (const auto &draw : crowd_out) {
+			if (!expect(draw.count > 0 && draw.instances != nullptr,
+			            "recycled adoption still generates the tile's instances")) return 1;
+		}
 	}
-	if (!expect(crowded.skipped_adoptions() > 0,
-	            ">1000 live tiles in one frame skips adoptions")) return 1;
+	total_misses = crowded.cache_misses();
+	if (!expect(total_misses == 260 * 4,
+	            "all 1040 live tiles adopt (recycle-on-full, no skipped adoptions)")) return 1;
 	if (!expect(crowded.cache_occupancy() == MODEL_CACHE_ENTRIES,
 	            "the cache fills to exactly its 1000 entries")) return 1;
-	// Every emitted borrowed view stays consistent (no this-frame recycling
-	// dangled a pointer): counts match the instances the entry still holds.
-	for (const auto &draw : crowd_out) {
-		if (!expect(draw.count >= 0 && draw.instances != nullptr,
-		            "emitted draws keep valid borrowed views")) return 1;
-	}
 
-	std::printf("OK: per-anchor stagger regen (last wins) + no-victim adoption skip\n");
+	std::printf("OK: per-anchor stagger regen (last wins) + recycle-on-full adoption\n");
 	return 0;
 }

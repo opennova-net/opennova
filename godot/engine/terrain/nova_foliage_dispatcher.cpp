@@ -84,7 +84,31 @@ inline float far_alpha_ref_for_distance(float distance) {
 } // namespace
 
 NovaFoliageDispatcher::NovaFoliageDispatcher() = default;
-NovaFoliageDispatcher::~NovaFoliageDispatcher() = default;
+
+NovaFoliageDispatcher::~NovaFoliageDispatcher() {
+	// Free the renderer nodes while the slot/per-node materials are still
+	// alive: base ~Node frees remaining children only AFTER this class's
+	// members (the material Refs) are destroyed, and the render server then
+	// tears down instances whose override material is already gone
+	// ("Parameter \"material\" is null" spam at exit).
+	for (MultiMeshInstance3D *node : model_draw_nodes_) {
+		if (node != nullptr) {
+			memdelete(node);
+		}
+	}
+	model_draw_nodes_.clear();
+	model_draw_node_states_.clear();
+	model_node_by_key_.clear();
+	for (auto &slot_cells : far_cells_) {
+		for (auto &kv : slot_cells) {
+			if (kv.second.node != nullptr) {
+				memdelete(kv.second.node);
+				kv.second.node = nullptr;
+			}
+		}
+		slot_cells.clear();
+	}
+}
 
 void NovaFoliageDispatcher::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_foliage_defs", "defs"), &NovaFoliageDispatcher::set_foliage_defs);
@@ -419,11 +443,10 @@ Array NovaFoliageDispatcher::get_model_tile_debug(int p_slot) const {
 	using opennova::foliage::FIXED_TO_FLOAT;
 	const SlotModelBounds &bounds = slot_bounds_[p_slot];
 	for (const auto &batch : model_draw_batches_) {
-		if (batch.slot != p_slot || batch.instances == nullptr) {
+		if (batch.slot != p_slot || batch.instances.empty()) {
 			continue;
 		}
-		for (int bi = 0; bi < batch.instance_count; ++bi) {
-			const auto &inst = batch.instances[bi];
+		for (const auto &inst : batch.instances) {
 		const float hbase = opennova::foliage::model_instance_hbase(inst);
 		Dictionary d;
 		d["center"] = Vector3(static_cast<float>(inst.center_x_fixed) * FIXED_TO_FLOAT, hbase,
@@ -464,7 +487,7 @@ Array NovaFoliageDispatcher::get_model_draw_debug() const {
 		d["alpha_ref"] = batch.alpha_ref;
 		d["wind_counter"] = batch.wind_counter;
 		d["wind_phase"] = batch.wind_phase;
-		d["instance_count"] = static_cast<int64_t>(batch.instance_count);
+		d["instance_count"] = static_cast<int64_t>(batch.instances.size());
 		d["submissions"] = batch.submissions;
 		out.push_back(d);
 	}
@@ -1103,13 +1126,11 @@ void NovaFoliageDispatcher::_dispatch_model_tier(const Transform3D &view_xform,
 					// rendered batch takes the LAST submission's anchor
 					// state (alpha ref, wind phase) AND, on stagger frames,
 					// its regenerated instance list (the per-anchor regen
-					// replaced the cache entry the earlier borrowed view
-					// pointed into - re-borrow so nothing reads the
-					// reallocated buffer).
+					// replaced the cache entry behind the earlier draw).
 					ModelDrawBatch &existing = model_draw_batches_[seen->second];
 					existing.generation = draw.generation;
-					existing.instances = draw.instances;
-					existing.instance_count = draw.count;
+					existing.instances.assign(draw.instances,
+					                          draw.instances + draw.count);
 					existing.anchor = anchor;
 					existing.view_depth = view_depth;
 					existing.anchor_distance = anchor_distance;
@@ -1129,11 +1150,11 @@ void NovaFoliageDispatcher::_dispatch_model_tier(const Transform3D &view_xform,
 				batch.alpha_ref = static_cast<float>(alpha_ref_byte);
 				batch.wind_counter = wind_counter;
 				batch.wind_phase = wind_phase;
-				// Borrowed from the dispatcher cache (stable until its next
-				// walk) - the per-frame instance copies were the model tier's
-				// dominant CPU cost at jungle-map density.
-				batch.instances = draw.instances;
-				batch.instance_count = draw.count;
+				// Copied out of the walk's borrowed view while it is still
+				// valid (the view dies at the next walk(); see the batch
+				// declaration). The GPU-array uploads, the model tier's
+				// dominant CPU cost, still run only on generation change.
+				batch.instances.assign(draw.instances, draw.instances + draw.count);
 				frame_batches.emplace(batch_key, model_draw_batches_.size());
 				model_draw_batches_.push_back(std::move(batch));
 			}
@@ -1141,7 +1162,7 @@ void NovaFoliageDispatcher::_dispatch_model_tier(const Transform3D &view_xform,
 	}
 
 	for (const auto &batch : model_draw_batches_) {
-		dispatch_stats_.model_instances += static_cast<int64_t>(batch.instance_count);
+		dispatch_stats_.model_instances += static_cast<int64_t>(batch.instances.size());
 	}
 
 	_update_model_draw_nodes();
@@ -1190,6 +1211,27 @@ Ref<Mesh> NovaFoliageDispatcher::_build_far_mesh(
 	}
 
 	NovaTerrainData *td = terrain_data_.ptr();
+	// FAR T1 addressing: retail binds ONE patch-cache RT per collected tile and
+	// projects it with a per-tile world-planar texture transform
+	// [orig: render_terrain_lightmaps @ 0x60a220..0x60a356] — world position
+	// resolves to THAT tile's own source-atlas texels. The host stand-in binds
+	// the whole colormap, so each cell needs the sector-routed world->source
+	// translation (constant across a 16u cell: cells never straddle the 512u
+	// sector grid). A flat world tap reads texels (+512,+512)-shifted on
+	// origin-centered maps — the same wrong-quadrant class the map gate had.
+	NovaTerrainData *cm_src = terrain_data_.is_valid() ? terrain_data_.ptr()
+	                                                   : colormap_source_.ptr();
+	Vector2 source_offset;  // routed source texel - world coordinate, per cell
+	if (cm_src != nullptr) {
+		const float anchor_x =
+		    static_cast<float>(placements.front().world_x_fixed) * opennova::foliage::FIXED_TO_FLOAT;
+		const float anchor_z =
+		    static_cast<float>(placements.front().world_z_fixed) * opennova::foliage::FIXED_TO_FLOAT;
+		const Vector2 routed = cm_src->world_to_source_coords_wrapped(anchor_x, anchor_z);
+		if (routed.x >= 0.0f) {
+			source_offset = routed - Vector2(anchor_x, anchor_z);
+		}
+	}
 	HeightFn height_at = [this, td](Fixed16_16 wx, Fixed16_16 wz) -> Fixed16_16 {
 		const float x = static_cast<float>(wx) * FIXED_TO_FLOAT;
 		const float z = static_cast<float>(wz) * FIXED_TO_FLOAT;
@@ -1248,6 +1290,7 @@ Ref<Mesh> NovaFoliageDispatcher::_build_far_mesh(
 
 		PackedVector3Array out_positions;
 		PackedVector2Array out_uvs;
+		PackedVector2Array out_uv2s;
 		PackedColorArray out_colors;
 		PackedInt32Array out_indices;
 		uint32_t vertex_base = 0;
@@ -1265,6 +1308,9 @@ Ref<Mesh> NovaFoliageDispatcher::_build_far_mesh(
 			for (const FarVertex &vertex : emitted.vertices) {
 				out_positions.push_back(Vector3(vertex.x, vertex.y, vertex.z));
 				out_uvs.push_back(Vector2(vertex.u, vertex.v));
+				// Source-atlas texel coordinates for the T1 tap (UV2), the
+				// per-cell translation resolved above.
+				out_uv2s.push_back(Vector2(vertex.x, vertex.z) + source_offset);
 				const float wind =
 				    static_cast<float>((vertex.color >> 16) & 0xFFu) / 255.0f;
 
@@ -1303,6 +1349,7 @@ Ref<Mesh> NovaFoliageDispatcher::_build_far_mesh(
 		arrays[Mesh::ARRAY_VERTEX] = out_positions;
 		arrays[Mesh::ARRAY_COLOR] = out_colors;
 		arrays[Mesh::ARRAY_TEX_UV] = out_uvs;
+		arrays[Mesh::ARRAY_TEX_UV2] = out_uv2s;
 		arrays[Mesh::ARRAY_INDEX] = out_indices;
 		emitted_mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
 	}
@@ -1428,8 +1475,7 @@ void NovaFoliageDispatcher::_update_model_draw_nodes() {
 
 	for (const ModelDrawBatch &batch : model_draw_batches_) {
 		const int s = batch.slot;
-		if (s < 0 || s >= opennova::FOLIAGE_MAX_DEFS || batch.instance_count <= 0 ||
-		    batch.instances == nullptr) {
+		if (s < 0 || s >= opennova::FOLIAGE_MAX_DEFS || batch.instances.empty()) {
 			continue;
 		}
 
@@ -1470,7 +1516,7 @@ void NovaFoliageDispatcher::_update_model_draw_nodes() {
 			state.material->set_shader_parameter("u_model_wind_phase", batch.wind_phase);
 		}
 
-		const int count = batch.instance_count;
+		const int count = static_cast<int>(batch.instances.size());
 		// With keyed nodes, content changes only when the tile's instance list
 		// actually regenerated (the witnessed 8-frame stagger / LRU adoption
 		// bumps generation) or the slot mesh swapped.

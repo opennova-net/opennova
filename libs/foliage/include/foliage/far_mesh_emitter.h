@@ -18,11 +18,15 @@ constexpr float FAR_WIND_BYTE_SCALE = 128.0f;
 
 // Source vertices are in the repository renderer/importer convention, ready
 // to copy directly from a Godot Mesh surface: importer X is already the
-// negation of retail 3DI source X, while Y and Z are unchanged. The emitter
-// therefore applies the witnessed FAR basis as rotY(yaw + pi/2):
+// negation of retail 3DI source X, while Y and Z are unchanged. The witnessed
+// native transform is X' = x*cos - z*sin + cx, Z' = x*sin + z*cos + cz
+// [orig: generate_foliage_instances_0 @ 0x600112..0x60014d — the VB stores
+// (Z', Y, X') at +0/+4/+8; component-resolved 2026-07-13, replacing the
+// retracted rotY(yaw + pi/2) reading]. Composed with the importer's -X mesh
+// flip and world z = -native z, the emitter applies:
 //
-//   world_x = placement_x - source_x*sin(yaw) + source_z*cos(yaw)
-//   world_z = placement_z - source_x*cos(yaw) - source_z*sin(yaw)
+//   world_x = placement_x - (source_x*cos(yaw) + source_z*sin(yaw))
+//   world_z = placement_z + (source_x*sin(yaw) - source_z*cos(yaw))
 //
 // XZ uses retail scale 1.0. Y is source_y*0.5 above terrain sampled at the
 // transformed (world_x, world_z). Normals are intentionally absent: the

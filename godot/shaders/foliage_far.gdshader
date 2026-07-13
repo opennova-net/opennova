@@ -113,12 +113,13 @@ void vertex() {
 
 void fragment() {
 	vec4 fd = texture(u_fd_texture, UV);
-	// World-planar T1 projection in the host terrain row order (1 texel per
-	// world unit, +z rows - the same mapping the terrain mesh UVs use; the
-	// witnessed native query (x, -z) is this same texel through the native-Z
-	// sign boundary [orig: Terrain_GetModulatedColorAtPos @ 0x5C5FE0]).
-	vec2 terrain_uv = vec2(v_world_pos.x, v_world_pos.z)
-		/ vec2(textureSize(u_terrain_light_texture, 0));
+	// T1 tap: UV2 carries the SECTOR-ROUTED source-atlas texel coordinates
+	// (resolved per cell by the emitter — retail binds one patch-cache RT per
+	// tile through a per-tile world-planar transform, so world position lands
+	// on that tile's own source texels [orig: render_terrain_lightmaps
+	// @ 0x60a220..0x60a356]). A flat world.xz tap here read the wrong atlas
+	// quadrant on origin-centered maps (+512,+512 — hueless ocean-gray tufts).
+	vec2 terrain_uv = UV2 / vec2(textureSize(u_terrain_light_texture, 0));
 	// LOD 0: retail's tile render target carries no mip chain, and
 	// derivative-driven mips collapse planar projections on the
 	// near-vertical foliage surfaces to their texture averages.

@@ -85,6 +85,11 @@ func test_far_pass_has_witnessed_wind_and_lighting_contract() -> void:
 		"The far fragment keeps the witnessed T0/T1/c0/c1/c6 multiply chain.")
 	assert_false(source.contains("terrain_light.a * opennova_sun_light"),
 		"A 24-bit colormap samples alpha=1; it cannot stand in for patch-cache N dot L.")
+	assert_true(source.contains("UV2 / vec2(textureSize(u_terrain_light_texture, 0))"),
+		"The T1 tap addresses the sector-routed source-atlas texels carried in UV2 "
+		+ "(the host analog of retail's per-tile world-planar RT transform).")
+	assert_false(source.contains("vec2(v_world_pos.x, v_world_pos.z)"),
+		"A flat world.xz T1 tap reads the wrong atlas quadrant on origin-centered maps.")
 	assert_false(source.contains("u_terrain_tint"),
 		"Far lighting never derives a half-plus-bias v0 from vertex color.")
 	assert_false(source.contains("u_terrain_detail") or source.contains("u_terrain_blend"),

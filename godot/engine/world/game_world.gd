@@ -556,6 +556,18 @@ func unload() -> void:
 	NovaMusicService.stop_context()
 	if _env != null and _env.environment_data != null:
 		_env.environment_data.clear_mission_overrides()
+	# Foliage teardown: drop the baked FAR cell meshes / MODEL draw nodes and
+	# release the old mission's terrain data + placed-tile list (otherwise the
+	# whole heightmap/colormap set stays resident behind the menu, and the F3
+	# Foliage tab keeps reporting the dead world's stats). The scene-installed
+	# tile override is per-mission state too — the next _configure_foliage
+	# re-resolves it.
+	if _dispatcher != null:
+		_dispatcher.reset()
+		_dispatcher.terrain_data = null
+		_dispatcher.tile_info = null
+	if _terrain != null:
+		_terrain.tile_info_override = null
 	_loaded_mission = null
 	_loaded_mission_file = ""
 	if _runtime != null:
@@ -636,13 +648,6 @@ func _configure_foliage() -> void:
 	_dispatcher.slot_meshes = VegAssets.resolve_slot_meshes(_resource_root, defs)
 	# The ":fd" bake both tiers bind [orig: Foliage_LoadDefAssets @ 0x601260].
 	_dispatcher.slot_fd_textures = VegAssets.resolve_slot_fd_textures(_resource_root, defs)
-	# The placed-tile blocker: candidates within 2u of a placed tile footprint
-	# are rejected (FORCE_ON defs excepted) [orig: sub_606490 @ 0x606490 over
-	# g_TerrainTileArray]. Same list the terrain overlay composites.
-	var placed_tiles: NovaTerrainTileInfo = _terrain.tile_info_override
-	if placed_tiles == null:
-		placed_tiles = _terrain_data.get_tileinfo_resource()
-	_dispatcher.tile_info = placed_tiles
 	if _tile_overlay != null:
 		# NovaTerrain composites the tile overlay into its own material; the scene
 		# TileOverlay node is only an authoring override provider here.
@@ -650,6 +655,14 @@ func _configure_foliage() -> void:
 			_terrain.tile_info_override = _tile_overlay.tile_info
 		_tile_overlay.clear()
 		_tile_overlay.visible = false
+	# The placed-tile blocker: candidates within 2u of a placed tile footprint
+	# are rejected (FORCE_ON defs excepted) [orig: sub_606490 @ 0x606490 over
+	# g_TerrainTileArray]. Resolved AFTER the override install above so the
+	# dispatcher rejects around the same list the terrain composites.
+	var placed_tiles: NovaTerrainTileInfo = _terrain.tile_info_override
+	if placed_tiles == null:
+		placed_tiles = _terrain_data.get_tileinfo_resource()
+	_dispatcher.tile_info = placed_tiles
 
 
 func get_terrain_data() -> NovaTerrainData:
@@ -694,11 +707,18 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 		# MODEL walk gates on view depth + the view frustum via camera_xform
 		# (retail dispatches only VISIBLE sector entities [orig:
 		# Terrain_RenderSectorEntitiesBySide @ 0x5c7d50]).
+		# The frustum gate only makes sense when the viewport's active camera
+		# IS the dispatch view: pair its fov with camera_xform only when the
+		# two agree (a PIE/probe host can tick the world from a camera that is
+		# not current). Otherwise disable the gate — the depth-only walk culls
+		# strictly less, never wrongly.
 		var cam := get_viewport().get_camera_3d() if get_viewport() != null else null
-		if cam != null:
+		if cam != null and cam.global_transform.origin.is_equal_approx(camera_xform.origin):
 			var vp_size := get_viewport().get_visible_rect().size
 			var aspect := (vp_size.x / vp_size.y) if vp_size.y > 0.0 else 1.777
 			_dispatcher.set_model_view_fov(cam.fov, aspect)
+		else:
+			_dispatcher.set_model_view_fov(0.0, 1.0)
 		_dispatcher.dispatch(camera_pos, camera_xform)
 		_perf_foliage_us = Time.get_ticks_usec() - foliage_start
 	var runtime_start := Time.get_ticks_usec()

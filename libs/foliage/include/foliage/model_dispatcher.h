@@ -44,10 +44,12 @@ struct ModelCacheEntry {
 
 // One walked tile emitted to the host: the packed key, the snapped 16u tile
 // origin, and a BORROWED view of the cache entry's instance list (retail
-// draws straight from the cache entry per tile). The pointer stays valid
-// until the dispatcher's next walk()/reset(): the LRU never evicts an entry
-// touched this frame (walk() skips the adoption instead), so nothing emitted
-// this frame can be recycled under the host.
+// draws straight from the cache entry per tile). The pointer is valid ONLY
+// until the dispatcher's NEXT walk()/reset() call: a later anchor's walk can
+// recycle the entry on a miss (retail recycles and draws immediately) or
+// rewrite it in place on a stagger regen — even to an empty subset, which
+// emits no replacing draw. Hosts that retain draw state across walks must
+// copy the instances before walking again.
 struct ModelTileDraw {
 	uint32_t tile_key = 0;
 	Fixed16_16 snap_x_fixed = 0;
@@ -92,7 +94,6 @@ public:
 	int64_t cache_hits() const noexcept { return cache_hits_; }
 	int64_t cache_misses() const noexcept { return cache_misses_; }
 	int64_t regenerations() const noexcept { return regenerations_; }
-	int64_t skipped_adoptions() const noexcept { return skipped_adoptions_; }
 
 private:
 	std::vector<ModelCacheEntry> entries_;
@@ -104,7 +105,6 @@ private:
 	int64_t regenerations_ = 0;
 	// Monotonic content stamp source for ModelCacheEntry.generation.
 	int64_t generation_stamp_ = 0;
-	int64_t skipped_adoptions_ = 0;
 };
 
 } // namespace opennova::foliage

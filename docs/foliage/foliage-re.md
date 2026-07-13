@@ -259,12 +259,22 @@ contribute to the cache entry's RGB when present. The 2026-07-10 regrill
 witnessed its base colormap RGB and saturate(N·L) alpha paths (§The terrain
 patch-cache RT below) — there is NO detail-splat term in retail foliage T1.
 The host binds the colormap alone, so it matches a base-only cache entry but
-omits optional composite RGB. Because real terrain colormaps such as Dvxi5 are
-24-bit and therefore sample alpha=1, FAR mesh COLOR.gba now carries the
-central-difference heightfield normal under each transformed vertex; the
-shader reconstructs `saturate(N·L)` against the active sun/moon direction.
-c6.rgb carries the witnessed 128/255 avg-detail constant. Exact per-texel
-normal-map sampling and optional composite RGB remain D-FOLIAGE-7.
+omits optional composite RGB. The tap must address the colormap the way the
+per-tile RT transform does: retail binds ONE tile RT per collected patch and
+its world-planar texture transform lands world positions on THAT tile's own
+source-atlas texels — a per-tile-constant world→source translation. The host
+therefore resolves the sector-routed world→source offset once per baked cell
+(`world_to_source_coords_wrapped`, constant across a 16u cell — cells never
+straddle the 512u sector grid) and carries the source-atlas texel coordinates
+per vertex in UV2; `foliage_far.gdshader` divides by the texture size at the
+tap. A flat `world.xz / textureSize` projection read the wrong atlas quadrant
+on origin-centered maps (+512,+512 — the 2026-07-13 00TRg hueless white-tuft
+report: ocean-gray texels under painted grass). Because real terrain colormaps
+such as Dvxi5 are 24-bit and therefore sample alpha=1, FAR mesh COLOR.gba
+carries the central-difference heightfield normal under each transformed
+vertex; the shader reconstructs `saturate(N·L)` against the active sun/moon
+direction. c6.rgb carries the witnessed 128/255 avg-detail constant. Exact
+per-texel normal-map sampling and optional composite RGB remain D-FOLIAGE-7.
 
 ## The MODEL tier (`Foliage_GenerateModelTileInstances @ 0x600980`)
 
@@ -697,9 +707,15 @@ fixes, all landed in the same round:
   anchor-relative ±4u `[orig: Foliage_GenerateModelTileInstances @ 0x600980]`),
   so the cache froze the FIRST touching anchor's subset where retail ends
   the frame on the LAST. Regen now runs per touching anchor
-  `[orig: Foliage_UpdateModelTiles @ 0x601f50 regenerates per hit]`; the
-  host's repeat-submission upsert re-borrows the regenerated instance view
-  (the earlier borrowed pointer dies with the entry's reallocation).
+  `[orig: Foliage_UpdateModelTiles @ 0x601f50 regenerates per hit]`.
+  **Corrected again 2026-07-13**: the repeat-submission upsert re-borrowed
+  the regenerated view, but a later anchor's regen-to-EMPTY emits no
+  replacing draw — the earlier retained batch kept a stale count over the
+  cleared storage (zeroed clusters at the world origin, flashing on stagger
+  frames). The host now copies emitted instance lists into its batches at
+  emit time (views die at the next walk), which also let the eviction scan
+  return to retail's recycle-and-draw on a full cache (the adoption skip is
+  gone; only the current call's ≤4 emitted entries are eviction-exempt).
 - **Content stamps made dispatcher-monotonic**: per-entry generation counters
   could collide across an evict/re-adopt cycle and freeze a stale MultiMesh
   upload; `ModelCacheEntry.generation` now stamps from a dispatcher-wide
@@ -836,7 +852,7 @@ unconditionally (client parity follow-up, not a placement input).
 | D-FOLIAGE-8 | A | OPEN — provenance witnessed 2026-07-13, bit-layout parity pending | FAR cell-key provenance is now witnessed: retail packs, per axis half, the quadtree node's SOURCE-ATLAS coordinate (bits 9..0, bit 9 = the quadrant) plus the world sector index (bits 14..10) `[orig: @ 0x603f8a; decode @ 0x5fffbc..0x5ffffb]`, and the per-cell PRNG seeds from that packed dword. The host keys cells as plain wrapped world ints (`pack_cell_key` = x_fixed & 0x7FFF0000 \| z>>16 & 0x7FFF — no source/scroll split, no bit-9 semantics), so per-cell jitter PATTERNS remain plausible-random rather than retail-identical (all gates, counts, and coverage are position-correct; only the per-cell random arrangement differs). The 2026-07-12 "pre-negation compensation" was removed with the 2026-07-13 boundary de-negation — the gate now reads the candidate's own world position through the routed seam, which equals retail's flat read of its source-space key coordinates. Residual retail nuance: FAR heights/colors/gate all sample the SOURCE atlas via the key, so on layouts where the sector grid repeats a page across world cells retail's far content repeats per page while the host samples the actual world spot (identical on non-repeating layouts such as 00TRg's 2×2). Fix direction for full parity: pack keys with the witnessed source+scroll layout (X high / Z low). |
 | D-FOLIAGE-9 | B | **FIXED (2026-07-13 — the negated-z claim itself retracted)** | The 2026-07-12 fix installed "the witnessed negated-z sector route" for MODEL/editor and a flat+compensation read for FAR — that model was itself the bug: the foliage map carries NO PCX row-order compensation; its world mapping is the SAME un-negated sector route the height samplers use (proven by the 2026-07-13 water-mask measurement: routed (x, z) → 0.0% painted-on-water; the installed negated route → 9.5%; flat → ~33%). MODEL/editor/preview/eyedropper and FAR now all resolve the gate texel at the candidate's own (x, z) through `get_foliage_index_world`/`world_to_source_coords_wrapped` with no caller-side negation. The earlier lighting half of this entry (24-bit colormap alpha as N·L=1; Godot transparency on alpha-test passes) stands fixed as recorded. |
 | D-FOLIAGE-10 | C | PERMANENT (host translation, minted 2026-07-10; ADR 0022 register) | Duplicate MODEL tile submissions: retail immediate-mode draws the shared (slot, tile) once per qualifying sector entity and each later draw OVERWRITES the earlier (z-write on, LESSEQUAL `[orig: Foliage_DrawModelTileSlot @ 0x601e33]`) — the framebuffer keeps the LAST submission's alpha ref/wind phase. Two coexisting retained copies z-fight instead (the reported far-foliage flicker), so the host renders ONE `MultiMeshInstance3D` per (slot, tile) per frame carrying the LAST walk-order submission's draw state, with a `submissions` counter preserving the retail draw count and the per-SUBMISSION wind-counter advance. Residual: retail's earlier-draw edge texels can survive where the later draw's alpha test discards (ref differences between anchors) — sub-texel at ≥ 38u and unreproducible without immediate-mode compositing. Pinned by foliage_model_draw_state_test.gd. |
-| D-FOLIAGE-11 | C | PERMANENT (host translation, minted 2026-07-12; corrected in the pre-PR round; ADR 0022 register) | Model-tier cache mechanics, host-optimized at jungle-map density with identical hit/evict/stamp semantics: (1) a key→index hash beside the 1000-entry cache (retail linear-scans its stripe per tile `[orig: Foliage_UpdateModelTiles @ 0x601f50]` — ~2.3M compares/frame on REVVY ASB_G11A); (2) walk() emits BORROWED views of cache entries instead of copying instance lists per frame (retail draws straight from the entry; the LRU never evicts a this-frame-touched entry, and a miss with no safe victim skips adoption — retail would recycle, but its draws are immediate so nothing aliases; the entry content stamp is a dispatcher-monotonic counter so an evict/re-adopt cycle can never alias a host upload skip). A third mechanism minted here — same-frame stagger-regen dedup — was REMOVED in the pre-PR review round: its premise (generate deterministic per (slot, key)) is false, since the accept gate is anchor-relative (|world − anchor| ≤ 0x40000) and anchors sharing a tile produce different subsets; the dedup froze the FIRST touching anchor's subset while retail's per-hit regen leaves the LAST touching anchor's as the frame's end state (the same last-wins the retained draw keeps per D-FOLIAGE-10). Regen now runs per touching anchor, exactly as retail. foliage_us on ASB_G11A: 15849 (pre-rebuild) → 10993 (correct density, pre-optimization) → 1370 (with the since-removed dedup) → 1472 re-measured with per-anchor regen (Phase C gate < 3000 holds). |
+| D-FOLIAGE-11 | C | PERMANENT (host translation, minted 2026-07-12; corrected in the pre-PR round and again 2026-07-13; ADR 0022 register) | Model-tier cache mechanics, host-optimized at jungle-map density with identical hit/evict/stamp semantics: (1) a key→index hash beside the 1000-entry cache (retail linear-scans its stripe per tile `[orig: Foliage_UpdateModelTiles @ 0x601f50]` — ~2.3M compares/frame on REVVY ASB_G11A); (2) walk() emits views of cache entries valid ONLY until the next walk(); the host copies the emitted instance lists into its retained batches at emit time (the GPU re-uploads — the actual dominant cost — still run only on generation change; the entry content stamp is a dispatcher-monotonic counter so an evict/re-adopt cycle can never alias a host upload skip). The 2026-07-13 review round replaced the earlier this-frame eviction protection + skip-adoption-on-full with retail's recycle-and-draw (only the current call's ≤4 emitted entries are excluded from eviction): the borrow-across-walks design let a later same-frame anchor's stagger regen rewrite a shared tile to an EMPTY subset — which emits no replacing draw — leaving the earlier retained batch uploading a stale count over cleared storage (zeroed clusters at the world origin), and the skip left overflow tiles undrawn where retail recycles and draws them. Two mechanisms minted here were REMOVED: the same-frame stagger-regen dedup (pre-PR round — its determinism premise is false, since the accept gate is anchor-relative (|world − anchor| ≤ 0x40000) and anchors sharing a tile produce different subsets; the dedup froze the FIRST touching anchor's subset while retail's per-hit regen leaves the LAST touching anchor's as the frame's end state, the same last-wins the retained draw keeps per D-FOLIAGE-10), and the adoption skip (2026-07-13). Regen runs per touching anchor, exactly as retail. foliage_us on ASB_G11A: 15849 (pre-rebuild) → 10993 (correct density, pre-optimization) → 1370 (with the since-removed dedup) → 1472 re-measured with per-anchor regen (Phase C gate < 3000 holds). |
 | D-FOLIAGE-12 | C | PERMANENT (host translation, minted 2026-07-12; ADR 0022 register) | FAR new-key bake budget: the engine's per-call new-texture list is a 64-entry stack array with no growth or overflow guard (`_WORD *[65]`, keys at [1..64] `[orig: Foliage_UpdateFarCellSlots @ 0x601b30]`) — churn is expected to stay under 64/frame. The host caps adoptions at 64/slot/frame explicitly. With the witnessed 42u collect disc (~49 cells/slot) per-frame demand tops out below the cap — the budget is the faithful guard on the retail array bound, not a steady-state path. |
 
 Candidate placement arithmetic carries no divergence **for a supplied retail
