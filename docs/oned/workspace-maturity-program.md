@@ -41,11 +41,11 @@ decision (ADR / RE-record entry) saying why not:
 
 | Workspace | R | W | E | G | Weakest axis today |
 |---|---|---|---|---|---|
-| Terrain | ✓ | ✓ | ✓ (viewport is the renderer) | partial (via mission PIE) | G polish |
-| Environment | ✓ | ✓ | ✓ (runtime nodes shared; water unified) | partial | G polish |
+| Terrain | ✓ | ✓ | ✓ (viewport is the renderer) | ✓ (mission PIE + the F3 launcher's terrain staging note) | at bar — the E/G exemplar (TER-1, 2026-07-12) |
+| Environment | ✓ | ✓ | ✓ (runtime nodes shared; water unified) | ✓ (the F3 launcher carries the .env staging note) | at bar (ENV-1, 2026-07-12) |
 | Object | ✓ (v8/v9; LW v10 on branch) | ✓ (.3dp + .3di export) | partial (isolated preview; env-lit but no world context, no LOD-by-distance) | — | E |
 | Mission | ✓ | ✓ | ✓ (PIE runs the real runtime) | ✓ | data semantics (heading, ANIMNUM) |
-| Credits | ✓ | ✓ | ✓ (`NovaCreditsPlayer` hosted in the editor) | — | G |
+| Credits | ✓ | ✓ | ✓ (`NovaCreditsPlayer` hosted in the editor; play/pause/scrub transport, CRE-1) | — | G (F3 wiring = CRE-2) |
 | Fonts | ✓ | ✓ | partial (glyph canvas is editor-drawn; fine for painting, no engine text sample) | — | E |
 | Strings | ✓ | ✓ | partial (no in-context render) | — | E (minor by format) |
 | Sound | ✓ | ✓ (`write_lwf`) | ✓ (audition rides the runtime set→member→wav path) | — | G |
@@ -496,13 +496,42 @@ along seams that already exist as signal boundaries in the code.
 - TER-1: bar audit — confirm all four axes against this doc's definitions,
   wire the F3 launcher entry ("open the exported terrain's mission in game"),
   and record terrain as the E/G exemplar. No new capability. Gate: existing
-  terrain suites; driver overview shot.
+  terrain suites; driver overview shot. **DONE 2026-07-12.** Audit: R ✓
+  (loose `.trn` projects and imported game assets, plus VFS/PFF opens via
+  `open_trn`'s resource-root branch); W ✓ (F4 practiced: from-scratch
+  TrnGen-parity bake + the roundtrip/import-export suites); E ✓ (the editor
+  viewport IS the ported terrain renderer — the E exemplar); G ✓ (mission
+  PIE runs the real runtime on the terrain, and the See-in-game launcher now
+  carries terrain's staging note: exported-into-the-game-folder → "load a
+  mission on it", otherwise an honest export-first pointer). One correction
+  to the phase's wording: terrain's export bakes the terrain data set
+  (`.trn`/`.cpt`/`.til`/maps), not a mission dir — there is no "exported
+  terrain's mission" to boot directly, so the launcher entry points at the
+  game's mission list over the staged terrain instead. The wiring introduced
+  the per-workspace seam every later F3 phase reuses:
+  `EditorWorkspace.get_game_launch_note(launch_dir)` returning a typed
+  `GameLaunchNote` (staged + artist-facing detail), consumed by
+  `ShellGameLaunch` in the tooltip and post-launch status.
 
 ### Environment
 
 - ENV-1: bar audit (E already exemplary — direct runtime-node reuse). Wire F3
   (authored `.env` override → launch; the runtime loads the same file). Gate:
-  environment suite.
+  environment suite. **DONE 2026-07-12.** Audit: R ✓ (loose opens plus
+  VFS/PFF entries via `open_env_from_resource_root`); W ✓ (from-scratch save
+  through libs/env `EnvFile.save_to_path`, roundtrip-pinned by
+  env_file_test); E ✓ re-verified — the exemplar (editor edits drive the SAME
+  `NovaEnvironment`/`NovaSky`/`NovaWater` runtime nodes;
+  editor-runtime-parity.md: water parameterized, not forked); G ✓ (the
+  launcher's env note over TER-1's `GameLaunchNote` seam: the launched game
+  reads `<mission env ref>.env` from the mounted root, so Save into the
+  launch dir IS the staging step — the note stages on a clean save there and
+  un-stages on unsaved edits, since the game reads the disk copy). Because
+  Environment is a popup workspace (never the active one), the shell routes
+  the launcher's note through the open panel: panel open = the environment's
+  note, panel closed = the active workspace's. No LaunchPlan change was
+  needed: "the launch carries the authored .env" resolves to the
+  `/d`-mounted directory carrying it.
 
 ### Object
 
@@ -542,6 +571,19 @@ along seams that already exist as signal boundaries in the code.
   play/pause/scrub transport over the hosted player so the roll (not just the
   layout) previews in-editor. Verify the player's cadence citations while
   there (R5 only if uncited). Gate: credits suites (20 files).
+  **DONE 2026-07-12.** Play/pause/stop + speed already drove the hosted
+  player (since the workspace landed, #22); the missing transport piece was
+  direct scrubbing — a scrub bar under the preview now drives the player's
+  scroll offset over the roll's full extent and follows playback, wheel, and
+  card-selection seeks. Cadence-citation verdict: **UNCITED — R5 is OPEN.**
+  The SCROLL_RATE format side is witnessed
+  ([orig: marquee_load_credits_from_ini @ 0x65c5a0]), but
+  `NovaCreditsPlayer::_process_scroll` converts the per-frame rate to
+  per-second with an assumed 60 fps cadence (`* 60.0f`) and the ~F overlay
+  fade zone is a bare 50 px (`kFadeZonePixels`) — neither carries a witness
+  of `CMarqueeWnd`'s update/render cadence (note: the engine tick elsewhere
+  is 62 Hz, so the 60 is doubly suspect). Marked in the source as
+  do-not-cite-without-a-grill; not invented here.
 - CRE-2: wire F3 (authored `nlist.kda` → game credits screen).
 
 ### Fonts
@@ -653,7 +695,10 @@ with to make a new game"; the Game workspace itself stays out of scope.
 - R3 3di LOD select rule — distance thresholds/CDEP interaction (blocks OBJ-2)
 - R4 hudpos.def consumption semantics — full-field draw behavior incl. the
   objective line/GameText (blocks HUD-1 completeness + HUD-3)
-- R5 credits roll cadence citations (only if CRE-1 finds them uncited)
+- R5 credits roll cadence citations — CRE-1 verdict 2026-07-12: UNCITED, so
+  R5 is OPEN (the 60 fps frame→second conversion in
+  `NovaCreditsPlayer::_process_scroll` and the 50 px ~F fade zone; the
+  witnessed side stops at the SCROLL_RATE parse @ 0x65c5a0)
 - R6 menu action verbs beyond current witness (only if MNU-2 finds gaps)
 - R7 sound attenuation/falloff model (blocks SND-2 if unwitnessed)
 - R8 boot-required resource enumeration — owned by the umbrella's ENG-6;

@@ -23,6 +23,7 @@ enum Mode { VISUAL, SOURCE }
 @onready var _pause_button: Button = %Pause
 @onready var _stop_button: Button = %Stop
 @onready var _speed_spin: SpinBox = %Speed
+@onready var _scrub_slider: HSlider = %Scrub
 @onready var _empty_hint: Control = %EmptyHint
 
 var _document: CreditsEditorDocument
@@ -114,6 +115,7 @@ func _ready() -> void:
 	_pause_button.pressed.connect(_on_pause_pressed)
 	_stop_button.pressed.connect(_on_stop_pressed)
 	_speed_spin.value_changed.connect(func(v): _player.speed_scale = v)
+	_scrub_slider.value_changed.connect(_on_scrub_slider_changed)
 	_set_mode(Mode.VISUAL)
 	_add_text_button.pressed.connect(func(): _block_list.add_text())
 	_add_image_button.pressed.connect(func(): _block_list.add_image())
@@ -150,6 +152,7 @@ func _ready() -> void:
 	_pause_button.tooltip_text = "Pause credits preview"
 	_stop_button.tooltip_text = "Stop and show the first entries"
 	_speed_spin.tooltip_text = "Preview playback speed"
+	_scrub_slider.tooltip_text = "Drag to move through the credits roll"
 	_scroll_rate_spin.tooltip_text = "Pixels the credits scroll upward each frame"
 	_vertical_space_spin.tooltip_text = "Extra blank pixels between entries"
 	_center_x_spin.tooltip_text = "Horizontal center of the credits column, in game pixels"
@@ -299,6 +302,28 @@ func _refresh_preview_toolbar_state() -> void:
 	_pause_button.disabled = not _player.is_playing()
 	_stop_button.disabled = not has_resource
 	_play_button.text = "Resume" if _preview_paused else "Play"
+	_scrub_slider.editable = has_resource
+	_sync_scrub_thumb(_player.get_scroll_offset())
+
+
+# The roll's extent changes on deferred player rebuilds (edits, image loads,
+# resizes) with no completion signal to ride, so the transport polls the cheap
+# extent each frame; the thumb itself only moves on scroll_offset_changed.
+func _process(_delta: float) -> void:
+	_sync_scrub_range()
+
+
+func _sync_scrub_range() -> void:
+	_scrub_slider.max_value = _max_preview_scroll_offset()
+
+
+func _sync_scrub_thumb(offset: float) -> void:
+	_sync_scrub_range()
+	_scrub_slider.set_value_no_signal(clampf(offset, 0.0, float(_scrub_slider.max_value)))
+
+
+func _on_scrub_slider_changed(value: float) -> void:
+	_player.set_scroll_offset(value)
 
 func _seek_player_to_entry(idx: int) -> void:
 	var content_y := _player.content_y_for_entry(idx)
@@ -319,7 +344,10 @@ func _on_block_scroll(_value: float) -> void:
 		return
 	_seek_player_to_entry(idx)
 
-func _on_player_scroll_offset_changed(_offset: float) -> void:
+func _on_player_scroll_offset_changed(offset: float) -> void:
+	# The scrub thumb mirrors the roll position unconditionally (playback,
+	# wheel, seeks); only the list-selection sync below honors the suppress.
+	_sync_scrub_thumb(offset)
 	if _sync_suppress:
 		return
 	if _document == null or _document.resource == null:

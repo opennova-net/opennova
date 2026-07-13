@@ -286,6 +286,11 @@ void NovaCreditsPlayer::rebuild() {
 void NovaCreditsPlayer::_process_scroll(double p_delta) {
 	if (!content_ || !credits_resource_.is_valid()) return;
 
+	// The SCROLL_RATE value itself is witnessed (parsed per-frame pixels,
+	// [orig: marquee_load_credits_from_ini @ 0x65c5a0]), but the frame CADENCE
+	// this 60.0f converts it with is NOT — CMarqueeWnd's update rate is
+	// unwitnessed (R5 in docs/oned/workspace-maturity-program.md; the engine
+	// tick elsewhere is 62 Hz). Do not cite or change without a grill.
 	float scroll_rate = credits_resource_->get_scroll_rate() * speed_scale_ * 60.0f;
 	scroll_offset_ += scroll_rate * p_delta;
 	emit_signal("scroll_offset_changed", scroll_offset_);

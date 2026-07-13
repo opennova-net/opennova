@@ -19,6 +19,12 @@ extends RefCounted
 ## Shell sub-controller in the EditorResourceLibrary style: owns one surface
 ## (the top-bar button) over injected nodes + Callables (the A8 captured-lambda
 ## rule), so tests drive the composition without touching the OS.
+##
+## Per-workspace honesty (TER-1/ENV-1): the active workspace may supply a
+## typed EditorWorkspace.GameLaunchNote (via the injected launch_note seam) —
+## whether its authored data is staged in the launch directory and what to
+## look at after launching. The note refines the tooltip and the post-launch
+## status; the launch itself is always the same generic gesture.
 
 const RUNTIME_SCENE := "res://game/main_game.tscn"
 ## The packaged two-product install (ADR 0015): the game exe ships beside the
@@ -55,6 +61,10 @@ var _game_code: Callable
 var _spawn: Callable
 # func(path: String) -> bool: file-existence probe (the packaged runtime exe).
 var _file_exists: Callable
+# func(launch_dir: String) -> EditorWorkspace.GameLaunchNote (or null): the
+# ACTIVE workspace's See-in-game note — per-workspace staging honesty for the
+# tooltip and the post-launch status. Invalid/absent = the generic copy.
+var _launch_note: Callable
 var _show_status: Callable
 
 
@@ -65,6 +75,7 @@ func setup(
 	game_code: Callable,
 	spawn: Callable,
 	file_exists: Callable,
+	launch_note: Callable,
 	show_status: Callable
 ) -> void:
 	_button = button
@@ -73,6 +84,7 @@ func setup(
 	_game_code = game_code
 	_spawn = spawn
 	_file_exists = file_exists
+	_launch_note = launch_note
 	_show_status = show_status
 	if _button != null:
 		_button.icon = EditorIconLibrary.resolve(&"play_in_game")
@@ -128,7 +140,8 @@ func can_launch() -> bool:
 	return available() and not String(_resource_dir.call()).is_empty()
 
 
-## Re-gate the button (called by the shell whenever the resource root changes).
+## Re-gate the button (called by the shell whenever the resource root or the
+## active workspace changes).
 func refresh() -> void:
 	if _button == null:
 		return
@@ -139,7 +152,11 @@ func refresh() -> void:
 	elif _button.disabled:
 		_button.tooltip_text = TOOLTIP_NEEDS_DIR
 	else:
-		_button.tooltip_text = TOOLTIP_READY
+		var tooltip := TOOLTIP_READY
+		var note := _workspace_note()
+		if note != null and not note.detail.is_empty():
+			tooltip += "\n" + note.detail
+		_button.tooltip_text = tooltip
 
 
 func launch() -> bool:
@@ -151,8 +168,22 @@ func launch() -> bool:
 	if pid < 0:
 		_show_status.call("Could not launch the game runtime.", 0.0, &"error")
 		return false
-	_show_status.call("Game launched — your saved files override the packed data (/d).", 0.0, &"info")
+	var note := _workspace_note()
+	if note != null and not note.detail.is_empty():
+		# The active workspace's staging honesty: a warn when the authored data
+		# has not reached the launch directory yet (the game boots fine either
+		# way — it just will not show the unstaged work).
+		_show_status.call("Game launched — " + note.detail, 0.0,
+			&"info" if note.staged else &"warn")
+	else:
+		_show_status.call("Game launched — your saved files override the packed data (/d).", 0.0, &"info")
 	return true
+
+
+func _workspace_note() -> EditorWorkspace.GameLaunchNote:
+	if not _launch_note.is_valid():
+		return null
+	return _launch_note.call(String(_resource_dir.call())) as EditorWorkspace.GameLaunchNote
 
 
 func _current_plan() -> LaunchPlan:

@@ -240,6 +240,58 @@ func test_mouse_wheel_over_preview_scrubs_preview() -> void:
 	assert_gt(player.get_scroll_offset(), 0.0, "wheel down over preview advances the preview offset")
 	assert_not_null(block_list._selected_entry, "wheel scrub syncs editor selection")
 
+# CRE-1 transport: play/pause buttons and the scrub bar drive the HOSTED
+# engine player (NovaCreditsPlayer), so the roll itself — not just the layout —
+# previews in-editor. Public seams only: named nodes + the player's API.
+func test_transport_play_pause_and_scrub_drive_the_hosted_player() -> void:
+	var editor = CreditsEditorScene.instantiate()
+	add_child_autofree(editor)
+	editor.set_size(Vector2(1280, 720))
+	var doc: CreditsEditorDocument = autofree(CreditsEditorDocument.new())
+	for i in range(30):
+		var entry := CbinTextEntry.new()
+		entry.set_text("Entry %d" % i)
+		doc.resource.add_entry(entry)
+	editor.set_document(doc)
+	await get_tree().process_frame
+	await get_tree().process_frame  # player rebuild + one _process range sync
+
+	var player: NovaCreditsPlayer = editor.get_node("%Player")
+	var play_button: Button = editor.get_node("%Play")
+	var pause_button: Button = editor.get_node("%Pause")
+	var scrub: HSlider = editor.get_node("%Scrub")
+
+	assert_true(scrub.editable, "a loaded roll arms the scrub bar")
+	assert_gt(scrub.max_value, player.get_size().y + 1.0,
+		"the scrub range spans the whole roll, not just the viewport")
+
+	play_button.pressed.emit()
+	assert_true(player.is_playing(), "Play rolls the hosted engine player")
+	pause_button.pressed.emit()
+	assert_false(player.is_playing(), "Pause freezes the roll")
+	assert_eq(play_button.text, "Resume", "the play button offers Resume while paused")
+
+	var target: float = scrub.max_value * 0.5
+	scrub.value = target
+	assert_almost_eq(player.get_scroll_offset(), target, 1.0,
+		"dragging the scrub bar seeks the roll to that point")
+
+	player.set_scroll_offset(120.0)
+	assert_almost_eq(scrub.value, 120.0, 1.0, "the scrub thumb follows the roll position")
+
+	play_button.pressed.emit()
+	assert_true(player.is_playing(), "Resume rolls again from the scrubbed point")
+
+
+func test_scrub_bar_disarmed_without_a_roll() -> void:
+	var editor = CreditsEditorScene.instantiate()
+	add_child_autofree(editor)
+	await get_tree().process_frame
+
+	var scrub: HSlider = editor.get_node("%Scrub")
+	assert_false(scrub.editable, "no roll loaded = nothing to scrub")
+
+
 func test_editor_scroll_sync_uses_centered_card() -> void:
 	var editor = CreditsEditorScene.instantiate()
 	add_child_autofree(editor)

@@ -166,3 +166,49 @@ func test_theme_carries_all_four_severity_variations() -> void:
 	for variation in [&"Info", &"Success", &"Warn", &"Error"]:
 		assert_true(theme.has_color(&"font_color", variation),
 			"%s label variation exists in the editor theme" % variation)
+
+
+# --- See in game: popup-workspace note routing (ENV-1) ------------------------
+# Environment is a popup over the active view (never the active workspace), so
+# while its panel is open the launcher's See-in-game note comes from it; closed,
+# the gesture returns to the active workspace's copy. Public seams only.
+
+func test_open_environment_panel_supplies_the_see_in_game_note() -> void:
+	var shell := _shell()
+	var environment_editor: EnvironmentEditor = add_child_autofree(EnvironmentEditor.new())
+	environment_editor.create_default_environment(false)
+	shell.get_workspace_adapter(EditorWorkstationScript.Workspace.ENVIRONMENT) \
+		.set_environment_editor(environment_editor)
+
+	# A real (non-user-data) resource dir arms the gesture; the GUT run is the
+	# editor binary, so the dev-runtime fallback is available.
+	var root: String = OS.get_cache_dir().path_join(
+		"opennova_shell_launch_note_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(root)
+	shell.set_resource_root_dir(root, false, false)
+
+	var play_button: Button = shell.get_node("%PlayInGameButton")
+	assert_false(play_button.disabled, "a mounted directory arms the See-in-game button")
+	assert_false(play_button.tooltip_text.contains("Save your environment"),
+		"with the panel closed, the active workspace (Mission, no note) keeps the generic copy")
+
+	var sun_button: Button = shell.get_node("%EnvironmentToggleButton")
+	sun_button.toggled.emit(true)
+	await get_tree().process_frame
+	shell.sync_from_editor_state()
+	assert_string_contains(play_button.tooltip_text, "Save your environment",
+		"an open environment panel's staging note rides the launch tooltip")
+
+	environment_editor.set_current_path(root.path_join("full_08.env"))
+	shell.sync_from_editor_state()
+	assert_string_contains(play_button.tooltip_text, "full_08.env",
+		"a clean save into the game folder flips the note to the staged pointer")
+
+	sun_button.toggled.emit(false)
+	await get_tree().process_frame
+	shell.sync_from_editor_state()
+	assert_false(play_button.tooltip_text.contains("full_08.env"),
+		"closing the panel returns the gesture to the active workspace's copy")
+
+	shell.set_resource_root_dir("", false, false)
+	DirAccess.remove_absolute(root)

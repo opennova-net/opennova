@@ -217,6 +217,17 @@ func _ready() -> void:
 		func() -> String: return NovaResourceDirSettings.get_game(),
 		func(path: String, args: PackedStringArray) -> int: return OS.create_process(path, args),
 		func(path: String) -> bool: return FileAccess.file_exists(path),
+		func(launch_dir: String) -> EditorWorkspace.GameLaunchNote:
+			# Environment is a popup over the active view (never the active
+			# workspace), so while its panel is open the gesture speaks to
+			# what the user is editing in it.
+			if _popovers.environment_open():
+				var popup_ws := _popup_workspace()
+				var popup_note := popup_ws.get_game_launch_note(launch_dir) if popup_ws != null else null
+				if popup_note != null:
+					return popup_note
+			var note_workspace := _get_active_workspace()
+			return note_workspace.get_game_launch_note(launch_dir) if note_workspace != null else null,
 		show_status_message
 	)
 	_tile_gizmo_overlay.setup(_tile_gizmo, _tile_gizmo_label, _viewport_lane, active_workspace_supplier)
@@ -387,6 +398,9 @@ func sync_from_editor_state() -> void:
 	_export_progress.sync()
 	_popovers.refresh_camera_state()
 	_popovers.refresh_environment_state()
+	# The See-in-game tooltip carries the ACTIVE workspace's staging note, so it
+	# follows workspace switches and save/export state changes.
+	_game_launch.refresh()
 	var workspace := _get_active_workspace()
 	if workspace != null:
 		workspace.sync_asset_dock()

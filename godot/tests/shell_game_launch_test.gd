@@ -52,7 +52,7 @@ func test_launch_plan_reports_unavailable_outside_dev_without_a_packaged_exe() -
 
 
 func _make_launcher(button: Button, dir: String, spawned: Array, statuses: Array,
-		spawn_result: int = 1234) -> ShellGameLaunch:
+		spawn_result: int = 1234, launch_note: Callable = Callable()) -> ShellGameLaunch:
 	var launcher := ShellGameLaunch.new()
 	launcher.setup(
 		button,
@@ -63,8 +63,9 @@ func _make_launcher(button: Button, dir: String, spawned: Array, statuses: Array
 			spawned.append({"path": path, "args": args})
 			return spawn_result,
 		Callable(self, "_exists_none"),
-		func(text: String, _duration: float = 0.0, _kind: StringName = &"info") -> void:
-			statuses.append(text)
+		launch_note,
+		func(text: String, _duration: float = 0.0, kind: StringName = &"info") -> void:
+			statuses.append({"text": text, "kind": kind})
 	)
 	return launcher
 
@@ -114,7 +115,7 @@ func test_failed_spawn_reports_and_returns_false() -> void:
 
 	assert_false(launcher.launch(), "A failed spawn reports failure.")
 	assert_eq(statuses.size(), 1, "The failure lands on the status line.")
-	assert_true(String(statuses[0]).begins_with("Could not launch"), "The message is the honest one.")
+	assert_true(String(statuses[0]["text"]).begins_with("Could not launch"), "The message is the honest one.")
 
 
 func test_launch_without_a_dir_refuses_before_spawning() -> void:
@@ -124,3 +125,63 @@ func test_launch_without_a_dir_refuses_before_spawning() -> void:
 	var launcher := _make_launcher(button, "", spawned, [])
 	assert_false(launcher.launch(), "No authoring directory refuses the launch.")
 	assert_eq(spawned.size(), 0, "Nothing spawns without a directory.")
+
+
+# --- The per-workspace See-in-game note (TER-1/ENV-1 F3 wiring) --------------
+# The active workspace can refine the gesture's copy through a typed
+# EditorWorkspace.GameLaunchNote; the launch itself never changes.
+
+
+func test_staged_workspace_note_rides_the_tooltip_and_launch_status() -> void:
+	var button := Button.new()
+	add_child_autofree(button)
+	var spawned: Array = []
+	var statuses: Array = []
+	var asked_dirs: Array = []
+	var launcher := _make_launcher(button, "C:/assets", spawned, statuses, 1234,
+		func(launch_dir: String) -> EditorWorkspace.GameLaunchNote:
+			asked_dirs.append(launch_dir)
+			return EditorWorkspace.GameLaunchNote.make(true,
+				"Load a mission on \"alpha\" to walk your terrain."))
+
+	assert_true(button.tooltip_text.begins_with(ShellGameLaunch.TOOLTIP_READY),
+		"The generic gesture explanation stays first.")
+	assert_string_contains(button.tooltip_text, "Load a mission on \"alpha\"",
+		"The workspace's pointer rides the tooltip.")
+	assert_true(asked_dirs.size() > 0 and String(asked_dirs[0]) == "C:/assets",
+		"The note is asked about the actual launch directory.")
+
+	assert_true(launcher.launch(), "A staged workspace launches normally.")
+	assert_eq(String(statuses[0]["text"]), "Game launched — Load a mission on \"alpha\" to walk your terrain.",
+		"The post-launch status carries the workspace's pointer.")
+	assert_eq(statuses[0]["kind"], &"info", "Staged data reports as plain info.")
+
+
+func test_unstaged_workspace_note_still_launches_but_warns() -> void:
+	var button := Button.new()
+	add_child_autofree(button)
+	var spawned: Array = []
+	var statuses: Array = []
+	var launcher := _make_launcher(button, "C:/assets", spawned, statuses, 1234,
+		func(_launch_dir: String) -> EditorWorkspace.GameLaunchNote:
+			return EditorWorkspace.GameLaunchNote.make(false,
+				"Export your terrain into the game folder to see it in game."))
+
+	assert_true(launcher.launch(), "Unstaged data never blocks the launch — the game boots fine without it.")
+	assert_eq(spawned.size(), 1, "The spawn happens regardless of staging.")
+	assert_eq(statuses[0]["kind"], &"warn", "Unstaged data warns instead of celebrating.")
+	assert_string_contains(String(statuses[0]["text"]), "Export your terrain",
+		"The warning says what to do about it, in artist terms.")
+
+
+func test_without_a_note_the_generic_copy_stands() -> void:
+	var button := Button.new()
+	add_child_autofree(button)
+	var statuses: Array = []
+	var launcher := _make_launcher(button, "C:/assets", [], statuses)
+
+	assert_eq(button.tooltip_text, ShellGameLaunch.TOOLTIP_READY,
+		"No note supplier leaves the generic ready tooltip untouched.")
+	assert_true(launcher.launch(), "The generic gesture still launches.")
+	assert_string_contains(String(statuses[0]["text"]), "your saved files override",
+		"The generic launch status survives for note-less workspaces.")

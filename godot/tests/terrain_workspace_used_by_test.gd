@@ -3,10 +3,12 @@ extends GutTest
 # The terrain workspace's editor-feature wiring: the asset dock's "Used by"
 # strip (which missions sit on this terrain, riding the shell's reference index
 # through the workspace's service injection — the fonts/strings adopters'
-# pattern) and the View grid/axes guides (the grid toggle drives the
+# pattern), the View grid/axes guides (the grid toggle drives the
 # surface-following sector overlay; a flat y=0 grid would be buried under
-# sculpted heights). Pins the lazy-scan contract (no query until the explicit
-# ask), the key spellings, the mission jump, and the shell-less fallback.
+# sculpted heights), and the See-in-game launch note (TER-1: terrain reaches
+# the game through Export into the launch dir). Pins the lazy-scan contract
+# (no query until the explicit ask), the key spellings, the mission jump, and
+# the shell-less fallback.
 
 const EditorMainScene = preload("res://modtools/editor/editor_main.tscn")
 const TerrainWorkspaceScript = preload("res://modtools/terrain/terrain_workspace.gd")
@@ -121,6 +123,49 @@ func test_asset_dock_without_shell_mounts_no_strip() -> void:
 		assert_null(dock.find_child("TerrainUsedByStrip", true, false),
 			"headless host: no shell, no reference index, no strip")
 	workspace.set_asset_dock(null)
+
+
+# Light stand-in for the note hook: the workspace only asks the editor for the
+# terrain name and the last export directory.
+class LaunchNoteEditorStub:
+	extends Node
+	var terrain_name := "dvxi5"
+	var export_dir := ""
+
+	func get_terrain_name_value() -> String:
+		return terrain_name
+
+	func get_last_export_dir() -> String:
+		return export_dir
+
+
+func test_game_launch_note_reports_export_staging() -> void:
+	var stub: LaunchNoteEditorStub = autofree(LaunchNoteEditorStub.new())
+	var workspace = autofree(TerrainWorkspaceScript.new(stub))
+
+	var unstaged = workspace.get_game_launch_note("C:/games/jo")
+	assert_not_null(unstaged, "terrain always speaks to the See-in-game gesture")
+	if unstaged == null:
+		return
+	assert_false(unstaged.staged, "never exported = the authored terrain is not in the game yet")
+	assert_string_contains(unstaged.detail, "Export your terrain",
+		"the pointer says what to do first, in artist terms")
+
+	stub.export_dir = "C:\\Games\\JO\\"
+	var staged = workspace.get_game_launch_note("C:/games/jo")
+	assert_true(staged.staged,
+		"an export into the launch dir stages the terrain (separator- and case-insensitive)")
+	assert_string_contains(staged.detail, "dvxi5", "the pointer names the exported terrain")
+	assert_string_contains(staged.detail, "mission", "the gesture points at the mission list")
+
+	stub.export_dir = "C:/games/jo/exports"
+	var elsewhere = workspace.get_game_launch_note("C:/games/jo")
+	assert_false(elsewhere.staged,
+		"a subfolder export is NOT staged — the loose-file override never scans subfolders")
+
+	var unbound = autofree(TerrainWorkspaceScript.new(null))
+	assert_null(unbound.get_game_launch_note("C:/games/jo"),
+		"no editor bound = no note (the launcher keeps its generic copy)")
 
 
 func test_view_guides_drive_grid_guide_and_axes() -> void:
