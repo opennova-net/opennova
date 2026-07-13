@@ -90,11 +90,10 @@ func shows_tile_gizmo() -> bool:
 
 
 # In-world tile gizmo payload (shows_tile_gizmo() opt-in). The shell polls this
-# each frame and shows the gizmo while it returns a non-empty Dictionary:
-#   {"label": String, "anchor_world": Vector3}
-# Empty means no active selection - gizmo hidden.
-func get_tile_gizmo_state() -> Dictionary:
-	return {}
+# each frame and shows the gizmo while it returns a TileGizmoState.
+# Null means no active selection - gizmo hidden.
+func get_tile_gizmo_state() -> TileGizmoState:
+	return null
 
 
 # Gizmo button actions: &"done", &"rotate", &"flip_x", &"flip_y", &"delete".
