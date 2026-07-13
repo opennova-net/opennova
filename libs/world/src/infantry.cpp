@@ -600,6 +600,12 @@ bool infantry_weapon_channel_visible(const InfantryState &inf, bool weapon_in_ha
 void AiSystem::infantry_slope_pass(AiEntity &e, uint32_t logic_tick, uint32_t key) {
     if (terrain == nullptr) return;
     InfantryState &inf = e.inf;
+    // The org1/org2 split is load-bearing: org2 is the PLAYER-BODY updater's leg
+    // (in the original it runs for every player-class body; our motor only ever
+    // simulates the local one — remote peers net-snap and skip the motor, D-NET-89),
+    // org1 is the NPC/AI updater's leg. The selector is witnessed identical in both,
+    // but the cadence, slope math, chase rates, thresholds, and slide impulses are
+    // NOT interchangeable — never collapse the legs.
     const bool org2 = inf.is_local_player;
     if (!org2 && (key & 7u) != 0) return; // org1 runs on the entity's 8-tick phase
 
