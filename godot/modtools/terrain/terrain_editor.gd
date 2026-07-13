@@ -2,6 +2,7 @@ class_name TerrainEditor
 extends Node3D
 
 signal ui_state_changed(version: int)
+signal foliage_preview_invalidated
 
 enum Tool { RAISE, LOWER, SMOOTH, FLATTEN, PAINT_DETAIL, EDIT_SECTORS, PAINT_COLORMAP, CLONE_COLOR, TILE_STAMP, FOLIAGE_PAINT, SURFACE_PAINT }
 enum TileInteractionMode { PLACE, EDIT_SELECTED }
@@ -500,6 +501,25 @@ func set_tool(tool: Tool) -> void:
 	flatten_target_set = false
 	_sync_surface_overlay_state(_get_material())
 	_mark_ui_state_changed()
+
+
+## Apply one complete brush stroke at a world-space terrain hit. This is the
+## public action seam used by automation and tests; viewport input drives the
+## same start/apply/end lifecycle. Returns true when the stroke changed height.
+func apply_brush_stroke_at(world_position: Vector3, delta: float = 1.0) -> bool:
+	if is_export_running() or not _is_valid_hit(world_position):
+		return false
+	var previous_hit := _hover_hit
+	var previous_hit_valid := _hover_hit_valid
+	var revision_before := _height_revision
+	_hover_hit = world_position
+	_hover_hit_valid = true
+	_on_primary_start()
+	_apply_brush_stroke(delta)
+	_on_primary_end()
+	_hover_hit = previous_hit
+	_hover_hit_valid = previous_hit_valid
+	return _height_revision != revision_before
 
 
 func _sync_surface_overlay_state(material: ShaderMaterial) -> void:
@@ -1367,6 +1387,7 @@ func _push_foliage_defs_history(before_state: Variant, after_state: Variant) -> 
 func _mark_foliage_preview_dirty() -> void:
 	if _foliage_preview:
 		_foliage_preview.mark_dirty()
+		foliage_preview_invalidated.emit()
 
 
 func _sync_foliage_preview() -> void:

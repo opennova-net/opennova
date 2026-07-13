@@ -75,8 +75,8 @@ func test_far_pass_has_witnessed_wind_and_lighting_contract() -> void:
 	assert_false(source.contains("u_terrain_tint"),
 		"Far lighting never derives a half-plus-bias v0 from vertex color.")
 	assert_false(source.contains("u_terrain_detail") or source.contains("u_terrain_blend"),
-		"Far T1 is the colormap-only tile RT - the bake writes rgb ~= colormap with NO "
-		+ "detail splat [orig: PolyTrn_RenderTile @ 0x60dce5]; the recompose stays removed.")
+		"The host's terrain patch-cache RT stand-in stays colormap-only with no detail "
+		+ "recompose; optional retail overlay/decal/scorch RGB remains D-FOLIAGE-7.")
 	assert_true(source.contains("opennova_fog_color"),
 		"FAR pass words 0x02460000/0x02560000 carry FOGENABLE - the far pass keeps its fog fold.")
 

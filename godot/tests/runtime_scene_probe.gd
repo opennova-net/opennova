@@ -300,8 +300,9 @@ func _has_matching_foliage_def(defs: Array, painted: int) -> bool:
 		if not (value is NovaTerrainFoliageDef):
 			continue
 		var def := value as NovaTerrainFoliageDef
-		if int(def.match) == painted:
-			return true
+		for match_value in def.matches:
+			if int(match_value) == painted:
+				return true
 	return false
 
 

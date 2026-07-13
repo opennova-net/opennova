@@ -46,7 +46,7 @@ func test_in_place_match_change_flushes_bake_once_preview_cache() -> void:
 
 	var dispatcher := preview.get_node("Dispatcher") as NovaFoliageDispatcher
 	dispatcher.height_sampler = Callable(self, "_flat_height")
-	dispatcher.surface_sampler = Callable(self, "_slot_zero_mask")
+	dispatcher.far_slot_mask_sampler = Callable(self, "_slot_zero_mask")
 	dispatcher.dispatch(Vector3.ZERO)
 	assert_gt(dispatcher.get_cached_cells(), 0, "Precondition: FAR cells are resident.")
 
@@ -69,9 +69,9 @@ func test_far_preview_compensates_for_render_key_provenance() -> void:
 	def.match = 7
 	preview.set_preview_state(null, null, null, map, [def], -1)
 
-	assert_eq(preview._sample_far_mask(64.0, 128.0), 1,
+	assert_eq(preview.sample_far_slot_mask(64.0, 128.0), 1,
 		"Host render keys hand the preview native z, so it reads that flat row directly.")
-	assert_eq(preview._sample_far_mask(64.0, -128.0), 0,
+	assert_eq(preview.sample_far_slot_mask(64.0, -128.0), 0,
 		"The uncompensated mirrored row remains empty while D-FOLIAGE-8 is open.")
 
 
@@ -82,23 +82,20 @@ func test_height_stroke_and_undo_invalidate_bake_once_preview() -> void:
 	editor.brush_radius = 8.0
 	editor.brush_strength = 1.0
 	editor.brush_hardness = 1.0
-	editor._hover_hit = Vector3(16.0, TerrainEditorScript.DEFAULT_HEIGHT, 16.0)
-	editor._hover_hit_valid = true
-	editor._foliage_preview._pending_flush = false
 	var revision_before: int = editor.get_height_revision()
+	watch_signals(editor)
 
-	editor._on_primary_start()
-	editor._apply_brush_stroke(1.0)
-	editor._on_primary_end()
+	assert_true(editor.apply_brush_stroke_at(
+		Vector3(16.0, TerrainEditorScript.DEFAULT_HEIGHT, 16.0), 1.0),
+		"The public brush action reports a changed height.")
 
 	assert_gt(editor.get_height_revision(), revision_before, "Precondition: the stroke edits terrain height.")
-	assert_true(editor._foliage_preview._pending_flush,
+	assert_signal_emit_count(editor, "foliage_preview_invalidated", 1,
 		"A height stroke invalidates FAR meshes baked against the old terrain.")
 	assert_true(editor.can_undo(), "Precondition: the height stroke is undoable.")
 
-	editor._foliage_preview._pending_flush = false
 	editor.undo()
-	assert_true(editor._foliage_preview._pending_flush,
+	assert_signal_emit_count(editor, "foliage_preview_invalidated", 2,
 		"Undoing a height edit also invalidates bake-once FAR meshes.")
 
 

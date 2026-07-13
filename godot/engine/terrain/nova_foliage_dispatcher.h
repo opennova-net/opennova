@@ -128,8 +128,8 @@ public:
 	// FAR passes native_z=-candidate_world_z exactly as witnessed. Unlike
 	// MODEL's foliage_sampler, the callback has already translated the painted
 	// palette index through every definition's authored match values into bits.
-	void set_surface_sampler(const Callable &p_sampler);
-	Callable get_surface_sampler() const;
+	void set_far_slot_mask_sampler(const Callable &p_sampler);
+	Callable get_far_slot_mask_sampler() const;
 
 	// Direct runtime fast path. When set, dispatch uses NovaTerrainData
 	// height, match-remapped FAR FOLIAGEMAP slot-mask, and MODEL FOLIAGEMAP
@@ -308,7 +308,7 @@ private:
 	Array slot_fd_textures_;
 	Callable height_sampler_;
 	Callable foliage_sampler_;
-	Callable surface_sampler_;
+	Callable far_slot_mask_sampler_;
 	Ref<NovaTerrainData> terrain_data_;
 	Ref<NovaTerrainData> colormap_source_;
 

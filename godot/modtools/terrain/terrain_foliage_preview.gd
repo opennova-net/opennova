@@ -117,7 +117,7 @@ func set_preview_state(
 		# FAR consumes the foliagemap remapped through the def match values, at
 		# the original (x, -z) call boundary [orig: Foliage_SampleFarMapMask
 		# @ 0x6066d0 over the load-remapped map @ 0x605AD0/0x5FF4E0].
-		_dispatcher.surface_sampler = Callable(self, "_sample_far_mask")
+		_dispatcher.far_slot_mask_sampler = Callable(self, "sample_far_slot_mask")
 		_pending_flush = true
 
 	if surface_changed or map_changed or sel_changed:
@@ -160,7 +160,7 @@ func _sample_foliage_index(world_x: float, world_z: float) -> int:
 # in render space (D-FOLIAGE-8), this is the retail native map coordinate, so
 # the preview reads it directly; the runtime fast path makes the equivalent
 # compensating sign before its flat accessor. The remap runs over LIVE defs.
-func _sample_far_mask(world_x: float, native_z: float) -> int:
+func sample_far_slot_mask(world_x: float, native_z: float) -> int:
 	if _foliage_map == null:
 		return 0
 	var width := _foliage_map.get_width()

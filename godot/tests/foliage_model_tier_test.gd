@@ -34,7 +34,7 @@ func before_each() -> void:
 	_dispatcher.slot_meshes = [mesh]
 	_dispatcher.height_sampler = Callable(self, "_sample_height")
 	_dispatcher.foliage_sampler = Callable(self, "_sample_foliage_index")
-	_dispatcher.surface_sampler = Callable(self, "_sample_far_slot_mask")
+	_dispatcher.far_slot_mask_sampler = Callable(self, "_sample_far_slot_mask")
 
 
 func after_each() -> void:
@@ -95,7 +95,7 @@ func _make_far_dispatcher() -> NovaFoliageDispatcher:
 	dispatcher.slot_meshes = [mesh]
 	dispatcher.height_sampler = Callable(self, "_sample_height")
 	dispatcher.foliage_sampler = Callable(self, "_sample_foliage_index")
-	dispatcher.surface_sampler = Callable(self, "_sample_far_slot_mask")
+	dispatcher.far_slot_mask_sampler = Callable(self, "_sample_far_slot_mask")
 	return dispatcher
 
 
@@ -561,7 +561,7 @@ func test_far_slot_mask_and_model_foliage_index_seams() -> void:
 	split.foliage_defs = [def]
 	split.slot_meshes = [mesh]
 	split.height_sampler = Callable(self, "_sample_height")
-	split.surface_sampler = Callable(self, "_sample_split_far_slot_mask")
+	split.far_slot_mask_sampler = Callable(self, "_sample_split_far_slot_mask")
 	split.foliage_sampler = Callable(self, "_sample_split_foliage_index")
 	split.model_anchors = PackedVector3Array([FAR_DEPTH_ANCHOR])
 

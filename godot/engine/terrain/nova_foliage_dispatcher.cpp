@@ -112,8 +112,8 @@ void NovaFoliageDispatcher::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_height_sampler"), &NovaFoliageDispatcher::get_height_sampler);
 	ClassDB::bind_method(D_METHOD("set_foliage_sampler", "sampler"), &NovaFoliageDispatcher::set_foliage_sampler);
 	ClassDB::bind_method(D_METHOD("get_foliage_sampler"), &NovaFoliageDispatcher::get_foliage_sampler);
-	ClassDB::bind_method(D_METHOD("set_surface_sampler", "sampler"), &NovaFoliageDispatcher::set_surface_sampler);
-	ClassDB::bind_method(D_METHOD("get_surface_sampler"), &NovaFoliageDispatcher::get_surface_sampler);
+	ClassDB::bind_method(D_METHOD("set_far_slot_mask_sampler", "sampler"), &NovaFoliageDispatcher::set_far_slot_mask_sampler);
+	ClassDB::bind_method(D_METHOD("get_far_slot_mask_sampler"), &NovaFoliageDispatcher::get_far_slot_mask_sampler);
 	ClassDB::bind_method(D_METHOD("set_terrain_data", "data"), &NovaFoliageDispatcher::set_terrain_data);
 	ClassDB::bind_method(D_METHOD("get_terrain_data"), &NovaFoliageDispatcher::get_terrain_data);
 	ClassDB::bind_method(D_METHOD("set_colormap_source", "data"), &NovaFoliageDispatcher::set_colormap_source);
@@ -136,7 +136,8 @@ void NovaFoliageDispatcher::_bind_methods() {
 	             "set_model_anchor_range", "get_model_anchor_range");
 	ADD_PROPERTY(PropertyInfo(Variant::CALLABLE, "height_sampler"), "set_height_sampler", "get_height_sampler");
 	ADD_PROPERTY(PropertyInfo(Variant::CALLABLE, "foliage_sampler"), "set_foliage_sampler", "get_foliage_sampler");
-	ADD_PROPERTY(PropertyInfo(Variant::CALLABLE, "surface_sampler"), "set_surface_sampler", "get_surface_sampler");
+	ADD_PROPERTY(PropertyInfo(Variant::CALLABLE, "far_slot_mask_sampler"),
+	             "set_far_slot_mask_sampler", "get_far_slot_mask_sampler");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "terrain_data", PROPERTY_HINT_RESOURCE_TYPE, "NovaTerrainData"),
 	             "set_terrain_data", "get_terrain_data");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "colormap_source", PROPERTY_HINT_RESOURCE_TYPE, "NovaTerrainData"),
@@ -258,12 +259,12 @@ void NovaFoliageDispatcher::set_foliage_sampler(const Callable &p_sampler) {
 
 Callable NovaFoliageDispatcher::get_foliage_sampler() const { return foliage_sampler_; }
 
-void NovaFoliageDispatcher::set_surface_sampler(const Callable &p_sampler) {
-	surface_sampler_ = p_sampler;
+void NovaFoliageDispatcher::set_far_slot_mask_sampler(const Callable &p_sampler) {
+	far_slot_mask_sampler_ = p_sampler;
 	reset();
 }
 
-Callable NovaFoliageDispatcher::get_surface_sampler() const { return surface_sampler_; }
+Callable NovaFoliageDispatcher::get_far_slot_mask_sampler() const { return far_slot_mask_sampler_; }
 
 void NovaFoliageDispatcher::set_terrain_data(const Ref<NovaTerrainData> &p_data) {
 	if (terrain_data_ == p_data) {
@@ -297,7 +298,7 @@ Ref<NovaTerrainData> NovaFoliageDispatcher::get_colormap_source() const { return
 bool NovaFoliageDispatcher::_has_sampling_source() const {
 	return terrain_data_.is_valid() ||
 	       (height_sampler_.is_valid() &&
-	        (foliage_sampler_.is_valid() || surface_sampler_.is_valid()));
+	        (foliage_sampler_.is_valid() || far_slot_mask_sampler_.is_valid()));
 }
 
 void NovaFoliageDispatcher::reset() {
@@ -1469,13 +1470,13 @@ bool NovaFoliageDispatcher::_scatter_cell(int slot_index,
 		int far_mask = 0;
 		if (td != nullptr) {
 			far_mask = td->get_foliage_far_mask_world(wx_f, -native_z);
-		} else if (surface_sampler_.is_valid()) {
+		} else if (far_slot_mask_sampler_.is_valid()) {
 			// Editor preview keeps the same boundary over its live, potentially
 			// unsaved foliage map and definitions.
 			Array args;
 			args.push_back(wx_f);
 			args.push_back(native_z);
-			far_mask = static_cast<int>(surface_sampler_.callv(args));
+			far_mask = static_cast<int>(far_slot_mask_sampler_.callv(args));
 		}
 		return static_cast<uint32_t>(far_mask) & 0xFFu;
 	};
@@ -1525,14 +1526,16 @@ void NovaFoliageDispatcher::_update_slot_material(int slot_index) {
 	Ref<Texture2D> fd_tex = _slot_fd_texture(slot_index);
 	material->set_shader_parameter("u_fd_texture", fd_tex);
 
-	// FAR T1: retail binds the per-tile terrain render target, and the tile
-	// BAKE writes rgb ~= the colormap only (MODULATE2X with diffuse
-	// 0x808080; NO detail splat, NO noise) with alpha = saturate(N.L)
+	// FAR T1: retail binds the terrain patch-cache render target. Its base
+	// bake writes rgb ~= the colormap (MODULATE2X with diffuse 0x808080;
+	// NO detail splat/noise), optional overlay/decal/scorch passes can add
+	// RGB, and the final DOT3 pass writes alpha = saturate(N.L)
 	// [orig: PolyTrn_RenderTile @ 0x60dce5 / 0x60e38a;
-	// Terrain_FindSectorTileRT @ 0x6042a0]. The host binds the colormap as
-	// that stand-in; its alpha is the same fold input the host ground
-	// include consumes (the exact N.L alpha rides the terrain normal-map
-	// generator port, tracked with D-FOLIAGE-7).
+	// Terrain_FindSectorPatchRT @ 0x6042a0]. This renderer cache is unrelated
+	// to the .til overlay resource; .til entries are only optional bake inputs.
+	// The host binds the colormap as a base-only stand-in; its alpha is the same
+	// fold input the host ground include consumes. Omitted composite RGB and
+	// exact N.L alpha are tracked by D-FOLIAGE-7.
 	Ref<NovaTerrainData> cm_src = terrain_data_.is_valid() ? terrain_data_ : colormap_source_;
 	Ref<Texture2D> terrain_light =
 	    cm_src.is_valid() ? cm_src->get_colormap() : Ref<Texture2D>();

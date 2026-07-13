@@ -142,7 +142,7 @@ func test_view_tab_collision_toggle_emits() -> void:
 	var overlay := _make_overlay()
 	overlay.toggle()
 	assert_false(overlay.is_collision_debug_on(), "the collision toggle seam resolves")
-	
+
 	assert_false(overlay.is_collision_debug_on(), "it defaults off")
 
 	watch_signals(overlay)
@@ -240,5 +240,3 @@ func before_all() -> void:
 
 func after_all() -> void:
 	ResourceDirSettings.set_resource_dir(_saved_resource_dir)
-
-

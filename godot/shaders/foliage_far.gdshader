@@ -8,22 +8,22 @@ render_mode unshaded, cull_disabled, depth_draw_opaque;
 #include "res://shaders/nova_color.gdshaderinc"
 
 uniform sampler2D u_fd_texture : filter_linear_mipmap, repeat_enable;
-// FAR T1. Retail binds the per-tile terrain RENDER TARGET (world-planar UV)
-// [orig: render_terrain_lightmaps @ 0x60a1de (Terrain_FindSectorTileRT
-// lookup) + 0x60a220..0x60a356 (the texture transform)]. The tile BAKE was
-// witnessed 2026-07-10: the base quad draws the colormap quadrant with
-// MODULATE2X(TEXTURE, DIFFUSE=0x808080) - rgb ~= the colormap x 1.004 - and
-// the quad diffuse ALPHA byte is 0, so tile alpha starts at ZERO; the
+// FAR T1. Retail binds the terrain patch-cache RENDER TARGET (world-planar
+// UV), not a `.til` overlay list [orig: Foliage_RenderFarPatches @ 0x60a1de
+// (Terrain_FindSectorPatchRT lookup) + 0x60a220..0x60a356 (the texture
+// transform)]. The base bake was witnessed 2026-07-10: its quad draws the
+// colormap quadrant with MODULATE2X(TEXTURE, DIFFUSE=0x808080) - rgb ~= the
+// colormap x 1.004 - and diffuse ALPHA byte 0 starts RT alpha at ZERO; the
 // additive ONE/ONE DOT3 pass then adds dp3(TrnNMap, packed-light-dir) to
 // ALPHA only (its stage 1 selects TFACTOR = 0 for RGB on the multitexture
-// path). Final tile RT: rgb ~= colormap.rgb (NO detail splat, NO noise),
-// alpha = saturate(N.L) with the CURRENT light direction
+// path). Optional overlay/decal/scorch draws can composite additional RGB;
+// base-only RT rgb ~= colormap.rgb (NO detail splat, NO noise), while alpha
+// receives saturate(N.L) with the CURRENT light direction
 // [orig: PolyTrn_RenderTile @ 0x60dce5 / 0x60e38a; PolyTrn_TileBakeBasePass
-// mode 0x20650; PolyTrn_TileBakeDot3LightPass]. The host binds the colormap
-// and folds through ITS alpha - the same fold input the host ground include
-// uses - so foliage tracks the host ground exactly the way retail foliage
-// tracks the tile RT (the exact N.L alpha rides the terrain normal-map
-// generator port, tracked with D-FOLIAGE-7).
+// mode 0x20650; PolyTrn_TileBakeDot3LightPass]. The host binds a colormap-only
+// stand-in, omitting optional composite RGB, and folds through ITS alpha - the
+// same fold input the host ground include uses. Both the omitted composite and
+// exact N.L alpha ride D-FOLIAGE-7.
 uniform sampler2D u_terrain_light_texture : filter_linear, repeat_enable;
 
 // Foliage_WindSwayVS c24.x. Retail supplies
@@ -119,8 +119,9 @@ void fragment() {
 
 	// Foliage_LightmapBlendPS:
 	// rgb=t0*(t1*(t1.a*c1+c0))*v0*8, alpha=t0.a*v0.a.
-	// t1.rgb is the colormap-only tile RT (see the T1 uniform note): retail
-	// foliage carries NO detail-splat term - c6 = the average detail color
+	// t1.rgb is the host's colormap-only terrain patch-cache RT stand-in (see
+	// the T1 uniform note): retail foliage carries NO detail-splat term - c6
+	// = the average detail color
 	// (128/255 on the blendmap tier) supplies the ground chain's
 	// 4*splat x 2*dp3 AVERAGE instead, so tufts sit at the brightness of the
 	// ground they grow from [orig: Foliage_LightmapBlendPS @ 0x5ff7a0;
