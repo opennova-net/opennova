@@ -370,6 +370,9 @@ func toggle_debug_overlay() -> void:
 		_debug_overlay.foliage_hidden_toggled.connect(_on_overlay_foliage_hidden)
 		_debug_overlay.viewmodel_forced_toggled.connect(_on_overlay_viewmodel_forced)
 		_debug_overlay.body_in_first_person_toggled.connect(_on_overlay_body_in_first_person)
+		_debug_overlay.particles_hidden_toggled.connect(_on_overlay_particles_hidden)
+		_debug_overlay.particle_boxes_toggled.connect(_on_overlay_particle_boxes)
+		_debug_overlay.set_effect_world_source(Callable(self, "_debug_effect_world_source"))
 		_host_under_shell(_debug_overlay)
 	_debug_overlay.toggle()
 	# While the overlay is up during play, the play session frees the mouse so
@@ -418,6 +421,29 @@ func _on_overlay_body_in_first_person(enabled: bool) -> void:
 		var host = _play_node().get_player_host()
 		if host != null:
 			host.set_debug_body_in_first_person(enabled)
+
+
+func _on_overlay_particles_hidden(hidden: bool) -> void:
+	if is_playing_mission():
+		var world = _play_node().get_world()
+		if world != null:
+			world.set_particles_hidden(hidden)
+
+
+func _on_overlay_particle_boxes(enabled: bool) -> void:
+	if is_playing_mission():
+		var world = _play_node().get_world()
+		if world != null:
+			world.set_particle_debug(enabled)
+
+
+# The Particles tab's data source: only Play Mission has a GameWorld (and so
+# an effect world); the in-place Simulate driver renders none.
+func _debug_effect_world_source():
+	if not is_playing_mission():
+		return null
+	var world = _play_node().get_world()
+	return world.get_effect_world() if world != null else null
 
 
 func is_debug_overlay_open() -> bool:

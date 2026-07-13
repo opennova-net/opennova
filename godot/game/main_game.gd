@@ -203,11 +203,18 @@ func _toggle_debug_overlay() -> void:
 		_debug_overlay.foliage_hidden_toggled.connect(_on_foliage_hidden_toggled)
 		_debug_overlay.viewmodel_forced_toggled.connect(_on_viewmodel_forced_toggled)
 		_debug_overlay.body_in_first_person_toggled.connect(_on_body_in_first_person_toggled)
+		_debug_overlay.particles_hidden_toggled.connect(_on_particles_hidden_toggled)
+		_debug_overlay.particle_boxes_toggled.connect(_on_particle_boxes_toggled)
+		_debug_overlay.set_effect_world_source(_current_effect_world)
 	_debug_overlay.toggle()
 
 
 func _current_runtime():
 	return _world.get_runtime() if _world != null else null
+
+
+func _current_effect_world():
+	return _world.get_effect_world() if _world != null else null
 
 
 # Mission-effect passthrough + the last-text read seam: the surface lives on the
@@ -245,6 +252,16 @@ func _on_viewmodel_forced_toggled(enabled: bool) -> void:
 func _on_body_in_first_person_toggled(enabled: bool) -> void:
 	if _player_host != null:
 		_player_host.set_debug_body_in_first_person(enabled)
+
+
+func _on_particles_hidden_toggled(hidden: bool) -> void:
+	if _world != null:
+		_world.set_particles_hidden(hidden)
+
+
+func _on_particle_boxes_toggled(enabled: bool) -> void:
+	if _world != null:
+		_world.set_particle_debug(enabled)
 
 
 # Whether the folder picker may be summoned right now: only from the menu front-end

@@ -30,9 +30,11 @@ const NetWorldView := preload("res://engine/world/net_world_view.gd")
 const NetEventView := preload("res://engine/world/net_event_view.gd")
 const SkeletonDebugView := preload("res://engine/debug/skeleton_debug_view.gd")
 const CollisionDebugView := preload("res://engine/debug/collision_debug_view.gd")
+const ParticleDebugView := preload("res://engine/debug/particle_debug_view.gd")
 const NET_CONTAINER_NAME := "NetObjects"
 const SKELETON_DEBUG_NAME := "SkeletonDebug"
 const COLLISION_DEBUG_NAME := "CollisionDebug"
+const PARTICLE_DEBUG_NAME := "ParticleDebug"
 const TICK_DT := 1.0 / 62.5  # mirrors MissionRuntime.TICK_DT; default for tick()'s delta param
 
 signal world_loaded()
@@ -103,6 +105,11 @@ var _skeleton_debug := false
 var _collision_debug := false
 # Debug: hide the scattered foliage (F3 overlay's "Hide foliage"). Off by default.
 var _foliage_hidden := false
+# Debug: hide every particle effect (F3 overlay's "Hide particles" — the retail
+# master particle switch, mimicked). Off by default; survives mission reloads.
+var _particles_hidden := false
+# Debug: draw live emitter bounds + effect names (F3 overlay's "Show effect boxes").
+var _particle_debug := false
 var _playable := true
 var _host_config: Dictionary = {}  # set by load_mission_as_host; consumed once by _start_runtime
 var _perf_tick_us: int = 0
@@ -1044,6 +1051,33 @@ func set_collision_debug(enabled: bool) -> void:
 func is_collision_debug() -> bool:
 	return _collision_debug
 
+
+## The F3 overlay's Particles tab seams (the existing get_effect_world() is
+## the data source; these are the two debug toggles).
+func set_particles_hidden(hidden: bool) -> void:
+	_particles_hidden = hidden
+	if _effect_world != null:
+		_effect_world.set_particles_hidden(hidden)
+
+
+# Build / free a child ParticleDebugView drawing every live emitter's bounds +
+# effect name, on the overlay's "Show effect boxes" toggle (the collision-view
+# contract; survives mission reloads by re-resolving the effect world).
+func set_particle_debug(enabled: bool) -> void:
+	_particle_debug = enabled
+	var existing := get_node_or_null(NodePath(PARTICLE_DEBUG_NAME))
+	if existing != null:
+		existing.queue_free()
+	if not enabled:
+		return
+	var view := ParticleDebugView.new()
+	view.name = PARTICLE_DEBUG_NAME
+	add_child(view)
+	var ref: WeakRef = weakref(self)
+	view.setup(func():
+		var world = ref.get_ref()
+		return world.get_effect_world() if world != null else null)
+
 func _refresh_collision_debug() -> void:
 	var existing := get_node_or_null(NodePath(COLLISION_DEBUG_NAME))
 	if existing != null:
@@ -1280,6 +1314,8 @@ func _start_effect_world() -> void:
 	_effect_world = NovaEffectWorld.new()
 	_effect_world.name = "EffectWorld"
 	add_child(_effect_world)
+	if _particles_hidden:
+		_effect_world.set_particles_hidden(true)
 	var count := _effect_world.load_from_resource_root(_resource_root)
 	if _water != null:
 		_effect_world.set_water_height(float(_water.water_height))

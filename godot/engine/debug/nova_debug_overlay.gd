@@ -44,6 +44,17 @@ signal viewmodel_forced_toggled(enabled: bool)
 ## torso/legs/feet posed by the aim overlay (world-wac-ai-re.md §14).
 signal body_in_first_person_toggled(enabled: bool)
 
+## Fired when the Particles tab's "Hide particles" checkbox is toggled — the
+## retail master particle switch, mimicked [orig: byte_24D261D — every effect
+## facade no-ops when set]. Same host-neutral contract: the host that owns the
+## effect world hides/shows it.
+signal particles_hidden_toggled(hidden: bool)
+
+## Fired when the Particles tab's "Show effect boxes" checkbox is toggled. The
+## host builds/frees the ParticleDebugView (per-emitter wireframe bounds +
+## effect-name labels), the collision-view contract.
+signal particle_boxes_toggled(enabled: bool)
+
 const REFRESH_INTERVAL := 0.25
 const PANEL_WIDTH := 380.0
 
@@ -89,6 +100,17 @@ var _foliage_check: CheckBox
 var _viewmodel_check: CheckBox
 var _body_fp_check: CheckBox
 
+# Particles pane: the retail particle debug pages, mimicked (ptl-format-re.md
+# §11 — Debug_DrawParticleStats @ 0x44c840 counts + entry list;
+# Debug_DrawEffectBrowser @ 0x44c950 name + source file). Fed by its own
+# effect-world source; the peak latch lives here like retail's debug global.
+var _effect_world_source := Callable()
+var _ptl_count_label: Label
+var _ptl_list: ItemList
+var _ptl_hide_check: CheckBox
+var _ptl_boxes_check: CheckBox
+var _ptl_peak := 0
+
 
 func _init() -> void:
 	layer = 90
@@ -114,6 +136,15 @@ func set_runtime_source(source: Callable) -> void:
 func set_runtime(runtime) -> void:
 	var ref: WeakRef = weakref(runtime)
 	set_runtime_source(func(): return ref.get_ref())
+
+
+## The effect-world supplier for the Particles tab: a Callable returning the
+## live NovaEffectWorld (or null). Re-resolved every refresh — mission loads
+## free and rebuild the effect world.
+func set_effect_world_source(source: Callable) -> void:
+	_effect_world_source = source
+	if visible:
+		_refresh()
 
 
 func toggle() -> void:
@@ -186,6 +217,7 @@ func _build_panel() -> void:
 	_build_entities_tab()
 	_build_sim_tab()
 	_build_vars_tab()
+	_build_particles_tab()
 	_build_perf_tab()
 	_build_view_tab()
 
@@ -194,6 +226,47 @@ func _build_perf_tab() -> void:
 	_perf_pane = DebugPerfPane.new()
 	_perf_pane.name = "Perf"
 	_tabs.add_child(_perf_pane)
+
+
+# The retail particle debug pages, mimicked (ptl-format-re.md §11): the counts
+# header keeps retail's current/peak form INCLUDING the peak reset when the
+# current count hits zero [orig: Debug_DrawParticleStats @ 0x44c840]; the list
+# shows each live group "%02d   name" with indented per-emitter rows [orig:
+# the "%02ld   %s" / "      %s" pair], plus our diagnostics: the source .ptl
+# (the browser's "File:" row [orig: Debug_DrawEffectBrowser @ 0x44c950]) and
+# any authored-but-unresolved texture names (the layers that render nothing).
+func _build_particles_tab() -> void:
+	var tab := VBoxContainer.new()
+	tab.name = "Particles"
+	tab.add_theme_constant_override("separation", 6)
+	_tabs.add_child(tab)
+
+	_ptl_count_label = Label.new()
+	_ptl_count_label.name = "ParticleCounts"
+	_ptl_count_label.text = "Current Particle Count:  0 / 0"
+	tab.add_child(_ptl_count_label)
+
+	_ptl_list = ItemList.new()
+	_ptl_list.name = "ParticleGroups"
+	_ptl_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_ptl_list.focus_mode = Control.FOCUS_NONE
+	tab.add_child(_ptl_list)
+
+	_ptl_hide_check = CheckBox.new()
+	_ptl_hide_check.name = "ParticlesHide"
+	_ptl_hide_check.text = "Hide particles"
+	_ptl_hide_check.tooltip_text = "Hide every particle effect (the retail master particle switch) — flip it to check whether an artifact is particles at all."
+	_ptl_hide_check.button_pressed = false
+	_ptl_hide_check.toggled.connect(_on_particles_hidden_toggled)
+	tab.add_child(_ptl_hide_check)
+
+	_ptl_boxes_check = CheckBox.new()
+	_ptl_boxes_check.name = "ParticlesBoxes"
+	_ptl_boxes_check.text = "Show effect boxes"
+	_ptl_boxes_check.tooltip_text = "Draw a wireframe box + effect name over every live emitter (red = the effect references textures that failed to load)."
+	_ptl_boxes_check.button_pressed = false
+	_ptl_boxes_check.toggled.connect(_on_particle_boxes_toggled)
+	tab.add_child(_ptl_boxes_check)
 
 
 # Render-debug toggles. Unlike the other tabs these don't read the sim: the checkbox holds
@@ -376,6 +449,10 @@ func _refresh() -> void:
 	# monitors), not the sim — it refreshes regardless, so "that load was slow,
 	# let me look" works from the menu after returning from a mission.
 	_perf_pane.refresh()
+	# The particles pane rides its own effect-world source (the effect world is
+	# render-side, not the sim) and null-clears itself, so it also refreshes
+	# regardless of the sim.
+	_refresh_particles()
 	# The other tabs stay usable without a sim too: the panes that need one
 	# clear to their empty states (their handlers already null-check).
 	if not live:
@@ -401,6 +478,50 @@ func _clear_live_panes() -> void:
 		for child in _vars_rows.get_children():
 			_vars_rows.remove_child(child)
 			child.queue_free()
+
+
+func _refresh_particles() -> void:
+	var world = _effect_world_source.call() if _effect_world_source.is_valid() else null
+	if world == null or not is_instance_valid(world):
+		_ptl_peak = 0
+		_ptl_count_label.text = "Current Particle Count:  0 / 0"
+		if _ptl_list.item_count > 0:
+			_ptl_list.clear()
+		return
+	var stats: Dictionary = world.get_debug_stats()
+	var current := int(stats.get("alive", 0))
+	# The retail peak latch, quirk included: it resets to zero whenever the
+	# current count is zero [orig: Debug_DrawParticleStats @ 0x44c840].
+	_ptl_peak = 0 if current == 0 else maxi(_ptl_peak, current)
+	_ptl_count_label.text = "Current Particle Count:  %d / %d   (groups %d, effects %d)" % [
+		current, _ptl_peak, int(stats.get("groups", 0)), int(stats.get("effects", 0))]
+	_ptl_list.clear()
+	for group_v in world.get_debug_group_report():
+		var group: Dictionary = group_v
+		var source := String(group.get("source", ""))
+		var header := "%02d   %s" % [int(group.get("id", 0)), String(group.get("name", ""))]
+		if not source.is_empty():
+			header += "   [%s]" % source
+		var header_idx := _ptl_list.add_item(header, null, false)
+		var unresolved: PackedStringArray = group.get("unresolved", PackedStringArray())
+		if not unresolved.is_empty():
+			_ptl_list.set_item_custom_fg_color(header_idx, Color(1.0, 0.35, 0.3))
+		for emitter_v in group.get("emitters", []):
+			var emitter: Dictionary = emitter_v
+			_ptl_list.add_item("      %s  alive %d  drawn %d" % [
+					String(emitter.get("name", "")), int(emitter.get("alive", 0)),
+					int(emitter.get("rendered", 0))], null, false)
+		for miss in unresolved:
+			var miss_idx := _ptl_list.add_item("      missing texture: %s" % miss, null, false)
+			_ptl_list.set_item_custom_fg_color(miss_idx, Color(1.0, 0.35, 0.3))
+
+
+func _on_particles_hidden_toggled(pressed: bool) -> void:
+	particles_hidden_toggled.emit(pressed)
+
+
+func _on_particle_boxes_toggled(pressed: bool) -> void:
+	particle_boxes_toggled.emit(pressed)
 
 
 func _refresh_entities(sim: Object) -> void:

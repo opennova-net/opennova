@@ -73,6 +73,82 @@ func live_group_count() -> int:
 	return _live.size()
 
 
+## --- Debug seams (the retail particle debug pages, mimicked; ptl-format-re.md §11) ---
+
+## The retail "particles off" master switch [orig: byte_24D261D — every effect
+## facade no-ops when set; retail arms it from the command line]. The mimic
+## hides the render output (the sim keeps running so re-enabling is seamless);
+## it exists so the F3 overlay can bisect "is the artifact particles at all?".
+func set_particles_hidden(hidden: bool) -> void:
+	visible = not hidden
+
+
+func are_particles_hidden() -> bool:
+	return not visible
+
+
+## Counts for the overlay's header line [orig: Debug_DrawParticleStats
+## @ 0x44c840 — "Current Particle Count: current / peak"; the PEAK latch +
+## its reset-at-zero quirk live overlay-side, as in retail].
+func get_debug_stats() -> Dictionary:
+	var alive := 0
+	var rendered := 0
+	for group in _live:
+		for emitter_v in group.get("emitters", []):
+			var emitter := emitter_v as NovaParticleEmitter
+			if emitter == null:
+				continue
+			alive += emitter.get_alive_count()
+			rendered += emitter.get_rendered_instance_count()
+	return {
+		"alive": alive,
+		"rendered": rendered,
+		"groups": _live.size(),
+		"effects": _effect_entries.size(),
+		"interned": _interned.size(),
+	}
+
+
+## Per-live-group report for the overlay's list [orig: Debug_DrawParticleStats
+## lists entry names via the world; Debug_DrawEffectBrowser @ 0x44c950 shows
+## each effect's NAME + source FILE]. `unresolved` carries the authored
+## graphic names that resolved to no texture (the D-PTL-14 misses, live).
+func get_debug_group_report() -> Array:
+	var out: Array = []
+	for group in _live:
+		var handle := int(group.get("handle", 0))
+		var effect_name := ""
+		var source_file := ""
+		if handle >= 1 and handle <= _interned.size():
+			var entry: Dictionary = _interned[handle - 1]
+			effect_name = String(entry.get("name", ""))
+			source_file = String(entry.get("source", ""))
+		var emitters: Array = []
+		var unresolved := PackedStringArray()
+		for emitter_v in group.get("emitters", []):
+			var emitter := emitter_v as NovaParticleEmitter
+			if emitter == null:
+				continue
+			emitters.append({
+				"name": String(emitter.name),
+				"alive": emitter.get_alive_count(),
+				"rendered": emitter.get_rendered_instance_count(),
+				"node": emitter,
+			})
+			for miss in emitter.get_unresolved_texture_names():
+				if not unresolved.has(miss):
+					unresolved.append(miss)
+		out.append({
+			"id": int(group.get("id", 0)),
+			"name": effect_name,
+			"source": source_file,
+			"forever": bool(group.get("forever", false)),
+			"emitters": emitters,
+			"unresolved": unresolved,
+		})
+	return out
+
+
 func get_texture_provider() -> Callable:
 	return _texture_provider
 
@@ -145,7 +221,8 @@ func _register_file(file: NovaParticleFile) -> void:
 	for effect in file.get_effects():
 		if effect == null:
 			continue
-		var entry := {"name": String(effect.id), "effect": effect, "file": file}
+		var entry := {"name": String(effect.id), "effect": effect, "file": file,
+				"source": String(file.get_source_path()).get_file()}
 		_effect_entries.append(entry)
 		var key := String(effect.id).to_lower()
 		# First registration wins on duplicate ids (linear-scan-first semantics).
@@ -290,6 +367,7 @@ func _spawn_interned(handle: int, position: Vector3, orientation: Vector3) -> in
 		return 0
 	var group := {
 		"id": _spawn_serial + 1,
+		"handle": handle,
 		"emitters": [],
 		"window": 1.0,
 		"forever": false,

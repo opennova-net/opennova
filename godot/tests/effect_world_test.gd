@@ -273,3 +273,37 @@ func test_clear_world_frees_live_groups() -> void:
 	world.clear_world()
 	assert_eq(world.live_group_count(), 0)
 	assert_eq(world.effect_count(), 0)
+
+
+# --- Debug seams (the retail particle debug pages, mimicked; ptl-format-re.md §11) ---
+
+func test_debug_stats_and_group_report_shapes() -> void:
+	var world := _make_world()
+	world.load_particle_file(_make_short_effect_file())
+	world.spawn_effect("puff", Vector3.ZERO)
+	var stats := world.get_debug_stats()
+	assert_eq(int(stats.get("groups", -1)), 1, "one live group")
+	assert_eq(int(stats.get("effects", -1)), 1, "one registered effect")
+	assert_gt(int(stats.get("interned", 0)), 0, "the spawn interned its handle")
+	var report := world.get_debug_group_report()
+	assert_eq(report.size(), 1, "one group row")
+	var group: Dictionary = report[0]
+	assert_eq(String(group.get("name", "")), "puff", "the group names its interned effect")
+	assert_eq((group.get("emitters", []) as Array).size(), 1, "one emitter row")
+	var emitter: Dictionary = (group.get("emitters", []) as Array)[0]
+	assert_true(emitter.has("alive") and emitter.has("rendered") and emitter.has("node"),
+			"emitter rows carry counts + the node for the box view")
+	assert_true((group.get("unresolved", null) is PackedStringArray),
+			"unresolved texture names ride the report")
+
+
+func test_set_particles_hidden_toggles_render_visibility() -> void:
+	var world := _make_world()
+	world.load_particle_file(_make_short_effect_file())
+	world.spawn_effect("puff", Vector3.ZERO)
+	assert_false(world.are_particles_hidden(), "visible by default")
+	world.set_particles_hidden(true)
+	assert_true(world.are_particles_hidden())
+	assert_false(world.visible, "the retail master switch hides the render output")
+	world.set_particles_hidden(false)
+	assert_true(world.visible)

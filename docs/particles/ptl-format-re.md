@@ -770,6 +770,20 @@ carried here.
 - **`.ptu`/`.ptg` alternate set**: `CEffectSystem_Init @ 0x5f6070` loads `*.ptu` — or `*.ptg`
   when `byte_24D4DF9` is set — alongside `*.ptl`; the selector byte's meaning (gore toggle?)
   is unwitnessed, and the runtime port loads only `.ptl`.
+- **The flip-frame NAME registrar (D-PTL-14's grill)**: entries carry per-frame file names
+  at +24 (§11) and the path builder is a plain dir⧺name concat with no sprintf-style frame
+  format string anywhere in the image — so the derivation happens where the per-frame entry
+  ARRAY (graphic+0x2D4, count +0x2CC) is populated. The writer hunt (byte-pattern scan for
+  `mov [reg+2D4h]` in 0x5dc000..0x600000) wedged the IDA bridge; resume there, or from
+  `CParticleManager_ResolveAllReferences @ 0x5ec850`'s per-def virtual resolve (vtable+8).
+- **The missing-texture on-screen result**: a never-packed entry renders its quads under the
+  null-material default pass (§11) — pin what that actually draws (invisible? last-texture?)
+  for the 32 shipped absent-texture layers; the user-observed retail result on the same data
+  is "nothing visible".
+- **The debug overlay's 3D bounding boxes** (user-attested): locate the box drawer — the
+  debug page global has no render-path readers, so it likely lives in the stripped
+  dispatcher's 3D pass or behind an unfound flag; check the jodemo image too (its debug
+  wiring may be intact where retail stripped it).
 - **Weapon-action effect completion** (muzzle flash chain): local FIRE now consumes the ACTION
   `particle` and `particleuserpoint`, applies scoped first-person suppression, forwards a static
   userpoint/camera direction, and uses a per-viewmodel-generation live handle. Full parity still
@@ -862,3 +876,90 @@ orientation-matrix/age-chain port, collision sounds, and the pending parser deco
   FLIRT-collision note), `0x5f3663` (aux yaw seed), `0x5f51ab` (scale-LUT lerp /128),
   `0x5f5296` (z_offset camera pull).
 - IDB saved.
+
+## 11. The retail debug family (witnessed 2026-07-13)
+
+Retail ships an intact particle debug-page pair (the whole `Debug_Draw*` page
+family is UNREFERENCED in the retail image — the page dispatcher/key wiring is
+stripped, the functions and their globals survive; mimic the CONTENT, not the
+wiring). Witnessed from the kong IDB:
+
+- **`Debug_DrawParticleStats @ 0x44c840`** — the counts + emitter-list page:
+  - Header: `"Current Particle Count:  %ld / %ld"` — current vs PEAK. Current
+    comes through the checked facade `sub_5F69C0` (0 when the global disable
+    byte `byte_24D261D` is set, the world is absent, or its init probe
+    `sub_5DF7A0` fails; otherwise `sub_5DFED0(g_EffectWorld)` = the world's
+    active-entry count, the used size of the circular buffer at `world+116`).
+    The peak global (`dword_A895E0`) latches the max and RESETS TO ZERO when
+    the current count hits 0.
+  - Body: iterates from the shared debug scroll global (`dword_A895B4`, also
+    written by `Debug_ScrollPageUp @ 0x44a390` / `Debug_ScrollPageDown
+    @ 0x44a900`), listing names via `sub_5F6710(group, index)` → the entry's
+    vtable slot-0 name getter; first row of a group prints `"%02ld   %s"`,
+    subsequent rows indent `"      %s"`. Rows draw at x=566 from y=148, step
+    20, clipped at y>588.
+- **`Debug_DrawEffectBrowser @ 0x44c950`** — the interactive browser page:
+  - Header rows at (25, 20/40/60/80), color 0xFFC10DFF-style (-4128769):
+    `"Total: %d"` (registered effect count via `sub_5E01D0(world)`),
+    `"Current: %d"` (the selection global), `"Effect: %s"` (selected
+    effect's vtable slot-0 NAME), `"File: %s"` (vtable +20 — **each effect
+    knows its source file**; the browser displays which .ptl provided it).
+  - A 20-row scrolling window (`"   %d  %s"`) with per-row color: RED
+    (0xFFFF0000) for the row whose debug instance is live, GREEN
+    (0xFF00FF00) for the selection.
+  - The spawn latch `dword_A895B0` is armed by `Debug_CheckPageIsSix
+    @ 0x44a8e0` (`page global dword_A895A4 == 6`); when set, the browser
+    DESPAWNS the previous debug instance (`sub_5E57C0`, handle
+    `dword_A895E8`, validity probe `sub_5E5FF0`) or SPAWNS the selected
+    effect at `camera_pos + camera_fwd >> 3` (fixed-point camera globals →
+    `Math_FixedPointToFloat3_YNegated @ 0x611210` → `sub_5EA200(world, …,
+    effect, origin, dir, 1)`).
+- **Registration-time miss log**: `CEffectManager_RegisterAllMaterials
+  @ 0x5f79c0` interns a fixed 78-pair table of engine-referenced effect
+  names (`off_8490D0/off_8490D4`) and logs
+  `"Particle Effect Not Found! (%s)\n"` via `ErrorLog_WriteTimestamped
+  @ 0x53c6d0` for every miss, then runs `CParticleManager_ResolveAllReferences
+  @ 0x5ec850`.
+- **The 3D bounding boxes** (user-attested part of the overlay): NOT located
+  this session — the page global has no render-path readers, and the hunt was
+  cut short by the IDA bridge going down; see §8.
+
+### Texture entries, the atlas exclusion gate, and the null-material path
+
+- A texture ENTRY carries its (already per-frame) file name at +24; the size
+  probe `sub_5DFAA0` builds `path = manager+732 dir ⧺ name` (`sub_5DF8C0` —
+  plain concat, NO frame derivation here), header-loads via
+  `CTextureData_LoadTGA @ 0x5f7b20`, and stores width/height at +288/+292;
+  a load failure leaves the size unset and returns 0.
+- `CParticleManager_BuildTextureAtlases @ 0x5e8db0` collects ONLY entries
+  with `+288 > 0` — **a missing texture's entry is never packed into any
+  atlas**.
+- The graphic object: `+0x2CC` flip-frame COUNT, `+0x2D0` flip rate,
+  `+0x2D4` the per-frame ARRAY of texture-entry pointers (the billboard
+  renderers index it per frame; GFXFLIPRAND offsets `(ptr + ptr>>3) %
+  frames` — D-PTL-10's form). The renderer dereferences `entry[0]` = the
+  MATERIAL object and rebinds on change via `CParticleBatch_FlushAndBindMaterial
+  @ 0x5e4230`: material TYPE byte selects fog/blend mode (1/2/6→2, 4→3,
+  5→1, else 0), shader pass from material[1]/[2], `SetTexture(material[4])`.
+  **A NULL material** takes the else path: default render state
+  (`CD3DDevice_GetRenderStateByIndex(…, 2)` + a validated default pass) and
+  the channel's current-material cleared — the quads are still emitted under
+  that default state. What that renders on screen for the shipped
+  missing-texture layers (SMOKE1-3 etc.) was not pinned before the bridge
+  died; the user-observed retail behavior on the same data is "nothing
+  visible" (§8 follow-up).
+
+### Pending IDB write-backs (bridge down; apply next session)
+
+Rename proposals at anchored confidence: `sub_5F69C0 →
+EffectWorld_GetActiveEntryCountChecked`, `sub_5F6710 →
+EffectWorld_GetEntryNameByIndex`, `sub_5DFED0 → CEffectWorld_GetEntryCount`,
+`sub_5DFAA0 → CParticleTextureEntry_ProbeSizeFromDisk`, `sub_5DF8C0 →
+CParticleManager_BuildTexturePath`, `sub_5E01D0 →
+CEffectWorld_GetEffectDefCount` (probable), plus entry comments on
+`Debug_DrawParticleStats` / `Debug_DrawEffectBrowser` globals
+(`dword_A895A4` = debug page index, `dword_A895B0` = page-6 action latch,
+`dword_A895E0` = particle peak, `dword_A895E8` = browser debug-spawn
+handle). The misnomer pair `CEffectWorld_ResizeAndGetBufferSize` /
+`CEffectWorld_ResizeCircularBuffer` (both are get-entry-by-index readers)
+needs the rename-everywhere treatment.

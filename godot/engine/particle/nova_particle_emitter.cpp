@@ -146,6 +146,7 @@ void NovaParticleEmitter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_visual_layer_count"), &NovaParticleEmitter::get_visual_layer_count);
 	ClassDB::bind_method(D_METHOD("get_rendered_instance_count"), &NovaParticleEmitter::get_rendered_instance_count);
 	ClassDB::bind_method(D_METHOD("get_textured_layer_count"), &NovaParticleEmitter::get_textured_layer_count);
+	ClassDB::bind_method(D_METHOD("get_unresolved_texture_names"), &NovaParticleEmitter::get_unresolved_texture_names);
 	ClassDB::bind_method(D_METHOD("get_render_batch_count"), &NovaParticleEmitter::get_render_batch_count);
 	ClassDB::bind_method(D_METHOD("get_sorted_depth_count"), &NovaParticleEmitter::get_sorted_depth_count);
 	ClassDB::bind_method(D_METHOD("get_debug_first_rotation"), &NovaParticleEmitter::get_debug_first_rotation);
@@ -1424,6 +1425,20 @@ int NovaParticleEmitter::get_textured_layer_count() const {
 		}
 	}
 	return total;
+}
+
+PackedStringArray NovaParticleEmitter::get_unresolved_texture_names() const {
+	// Debug seam for the particle overlay (the D-PTL-14 misses, live):
+	// authored graphic names that resolved to no texture through any source
+	// or candidate derivation. Empty authored names are the deliberate
+	// invisible-layer form, not misses.
+	PackedStringArray out;
+	for (int i = 0; i < MAX_VISUAL_LAYERS; ++i) {
+		if (!layer_texture_names[i].is_empty() && layer_textures[i].is_null()) {
+			out.push_back(layer_texture_names[i]);
+		}
+	}
+	return out;
 }
 
 int NovaParticleEmitter::get_render_batch_count() const {

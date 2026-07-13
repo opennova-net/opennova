@@ -146,3 +146,71 @@ func before_all() -> void:
 func after_all() -> void:
 	ResourceDirSettings.set_resource_dir(_saved_resource_dir)
 
+
+
+# --- Particles tab (the retail particle debug pages, mimicked; ptl-format-re.md §11) ---
+
+func test_particles_tab_toggles_emit() -> void:
+	# Same host-neutral contract as the View toggles: the checkboxes only emit
+	# intent; the host hides the effect world / builds the box view. All access
+	# rides stable node names (ADR 0018 — no private pokes).
+	var overlay := _make_overlay()
+	overlay.toggle()
+	assert_not_null(overlay.find_child("Particles", true, false), "a Particles tab exists")
+	var hide_check := overlay.find_child("ParticlesHide", true, false) as CheckBox
+	var boxes_check := overlay.find_child("ParticlesBoxes", true, false) as CheckBox
+	assert_not_null(hide_check, "the hide checkbox has a stable node name")
+	assert_not_null(boxes_check, "the boxes checkbox has a stable node name")
+	assert_false(hide_check.button_pressed, "hide defaults off")
+	assert_false(boxes_check.button_pressed, "boxes default off")
+
+	watch_signals(overlay)
+	hide_check.toggled.emit(true)
+	assert_signal_emitted_with_parameters(overlay, "particles_hidden_toggled", [true])
+	boxes_check.toggled.emit(true)
+	assert_signal_emitted_with_parameters(overlay, "particle_boxes_toggled", [true])
+
+
+func test_particles_tab_reports_counts_and_peak_reset() -> void:
+	# The counts header keeps retail's current/peak form INCLUDING the peak
+	# reset when the current count hits zero [orig: Debug_DrawParticleStats
+	# @ 0x44c840 — dword_A895E0 zeroes with the count].
+	var overlay := _make_overlay()
+	overlay.toggle()
+	var stub := _StubEffectWorld.new()
+	add_child_autofree(stub)
+	overlay.set_effect_world_source(func(): return stub)
+	var counts := overlay.find_child("ParticleCounts", true, false) as Label
+	var groups := overlay.find_child("ParticleGroups", true, false) as ItemList
+	assert_not_null(counts, "the counts label has a stable node name")
+	assert_not_null(groups, "the group list has a stable node name")
+
+	stub.alive = 7
+	overlay.refresh_now()
+	assert_string_contains(counts.text, "7 / 7", "current and peak track the live count")
+	assert_eq(groups.item_count, 3, "group header + emitter row + missing-texture row")
+
+	stub.alive = 3
+	overlay.refresh_now()
+	assert_string_contains(counts.text, "3 / 7", "the peak latches")
+
+	stub.alive = 0
+	overlay.refresh_now()
+	assert_string_contains(counts.text, "0 / 0", "the peak resets at zero, like retail")
+
+
+class _StubEffectWorld extends Node3D:
+	var alive := 0
+
+	func get_debug_stats() -> Dictionary:
+		return {"alive": alive, "rendered": alive, "groups": 1, "effects": 2, "interned": 1}
+
+	func get_debug_group_report() -> Array:
+		return [{
+			"id": 1,
+			"name": "puff",
+			"source": "stock.ptl",
+			"forever": false,
+			"emitters": [{"name": "Fx0_0", "alive": alive, "rendered": alive, "node": self}],
+			"unresolved": PackedStringArray(["SMOKE1.TGA"]),
+		}]

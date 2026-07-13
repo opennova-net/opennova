@@ -13,6 +13,7 @@
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/color.hpp>
+#include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
@@ -187,6 +188,7 @@ public:
 	int get_visual_layer_count() const;
 	int get_rendered_instance_count() const;
 	int get_textured_layer_count() const;
+	PackedStringArray get_unresolved_texture_names() const;
 	int get_render_batch_count() const;
 	int get_sorted_depth_count() const;
 	float get_debug_first_rotation() const;
