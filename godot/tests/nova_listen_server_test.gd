@@ -88,7 +88,7 @@ func test_listen_server_auto_spawns_and_replicates_local_player() -> void:
 	assert_true(sim.has_local_player(), "the host's own player auto-spawned at load")
 
 	# Drive forward for several frames (exercises input -> pre-tick hook -> motor -> 0x0A -> present).
-	sim.set_player_input(true, false, false, false, false, false, false, false, 0.0, 0.0)
+	sim.set_player_input(true, false, false, false, false, false, false)
 	for _i in range(8):
 		sim.advance_frame()
 
