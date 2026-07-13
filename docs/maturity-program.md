@@ -25,17 +25,63 @@ of the game (ADR 0015).
 
 | Field | Value |
 |---|---|
-| State | **Wave 2 OPEN** — Wave-1 trunk #204 merged 2026-07-05 as `50fce423`; the Wave-2 boundary slice (this row's train) executed the STD-3 enforce flip + GOV-4 sync |
-| Current wave | 2 — portability + standards adoption (WIP cap: two trains). Contents: ENG-2/3/4 (**all done** — #206, #209, Wave-2 trunk 2), ENG-5 sweep #1 (runs at the boundary), ENG-6 manifest (**done** — Wave-2 trunk 2); LIBS-2/3 (**done** — Wave-2 trunk 2, ADR 0024); STD-2 (STD-3 flip done at the boundary); ONED-W1, ONED-TST, ONED-RSP, ONED-MUS-D; REN-0..2 (second train, opened 2026-07-05 — the REN trunk; the full REN track ran through REN-7 and merged #207). Remaining to close the wave: STD-2 seeds, the ONED items (RSP + MUS-D gate the exit), ENG-5 sweep + GOV-4 at the boundary |
+| State | **CLOSED 2026-07-12** at the post-trunk-2 boundary, under the stop-anywhere property (maintainer decision, the close-out session). Waves 0–1 complete (Wave-1 trunk #204 = `50fce423`); Wave 2 landed the boundary flip (#205), ENG-2 (#206), ENG-3 (#209), the full REN track (#207 — REN-3..7 pulled forward from Wave 3), Wave-2 trunk 2 (#227 = `66076f66`: LIBS-2/3, ENG-4, the ENG-6 manifest), and the close-out tail (PR #236: STD-2 conversions, ONED-W1 TER-1/ENV-1/CRE-1/FNT-1/STR-1/STR-2, the MUS-D design at the maintainer gate, ENG-5 sweep #2, D-FNT-4, this close-out). Everything not executed is dispositioned in the Close-out section below |
+| Final wave reached | 2 — portability + standards adoption. At close: ENG-2/3/4 done (#206, #209, trunk 2), ENG-5 sweeps #1 (boundary) + #2 (close-out) run, ENG-6 done (R8 + the trunk-2 manifest); LIBS-2/3 done (ADR 0024); STD-3 flip done (boundary), STD-2 seeds converted 7/8 (the tail; the object-material-defs contract deferred with cause); ONED-W1 six slices landed (the tail), ONED-MUS-D design landed (acceptance = the open maintainer gate); the full REN track closed. Not executed: ONED-RSP, ONED-TST refits, the ONED-W1 remainder — dispositioned below |
 | Boundary gates (Wave 1→2) | full ctest: 246/248 green; the two reds are pre-existing, tracked, and not Wave-1 regressions — `npruntime_golden_gameplay` (TODO.md, D-NET-159 wire adjudication, asset-gated so CI never sees it) and `opennova_python_pytest` (diagnosed at this boundary, TODO.md: the two DCC-parity tests build a zero-write request the jobs validation rejects, then their in-parent `import bpy` poisons the 13 spawn-context worker tests — all 13 pass in isolation). FULL GUT attested in the boundary PR |
-| Freeze | ON for non-PAR/non-REN work: new reimplementation features wait for their foundation phase (ONED-W2 releases at Wave 3); IDA research/grills are exempt and continue. **PAR burn-down slices are exempt** (maintainer 2026-07-05, [ADR 0022](adr/0022-divergence-burn-down.md)) **and REN slices are exempt on the same model** (maintainer 2026-07-05, [ADR 0023](adr/0023-render-visual-parity.md) — ports are ledger closures landed libs-first). |
-| Detail docs | ONED track: [docs/oned/workspace-maturity-program.md](oned/workspace-maturity-program.md) (all other tracks live here) |
+| Freeze | **LIFTED at close (2026-07-12)** — new reimplementation work no longer waits on foundation phases. What survives is the standing rule set, not the gate: ADRs 0015–0018 (products/serve mode, engine–editor boundary, typed records, public-API testability), 0019–0021, [0022](adr/0022-divergence-burn-down.md) (the PAR zero-OPEN target — burn-down continues as standing policy), [0023](adr/0023-render-visual-parity.md) (the REN rules), [0024](adr/0024-lib-family-topology.md) (family topology), and every instrument in the enforcement table (all hard-fail-forever by design) |
+| Detail docs | ONED track: [docs/oned/workspace-maturity-program.md](oned/workspace-maturity-program.md) — survives the program as the editor's standing roadmap; its phases execute as ordinary slices under the standing ADRs, RE gates unchanged |
 | Decision ADRs | [0015](adr/0015-two-products-serve-mode.md) products/serve-mode, [0016](adr/0016-engine-editor-boundary.md) engine/editor boundary, [0017](adr/0017-typed-records-named-constants.md) records/constants, [0018](adr/0018-public-api-testability.md) testability, [0022](adr/0022-divergence-burn-down.md) divergence burn-down, [0024](adr/0024-lib-family-topology.md) lib family topology + consumption models; boundary ADRs (npwire, world seam, responsive shell) minted in their tracks at decision time |
+
+## Close-out (2026-07-12)
+
+The program closed at the post-trunk-2 boundary under the stop-anywhere
+property. Wave-2 exit-gate accounting, honestly:
+
+- **env GDScript deleted, vectors green** — met (ENG-2; re-verified by sweep
+  #2 modulo the tracked TOD-clock arrival, a post-ENG-2 fidelity-train
+  addition with its own checklist row).
+- **conformance checklist closed-or-tracked** — met: every row is closed or
+  carries a tracked slice; sweep #2 added the fidelity-train rows.
+- **ratchets hard and trending down** — met with an honest caveat:
+  `libs_uncited_src_files` fell 88 → 60 across the program;
+  `test_private_pokes` rose 1319 → 1384 via maintainer-ratified bumps (AVA's
+  two pre-ratchet white-box files, probe diagnostics, the particle tests —
+  each logged in the slice table). The claw-back remains ONED-TST's charter.
+- **responsiveness landed + one re-baseline** — not executed; dispositioned
+  below.
+- **music design accepted** — the design landed (track doc §The MUS-D
+  design); acceptance is the open maintainer gate.
+- **REN instrument landed + materials converged** — exceeded: the whole REN
+  track closed at REN-7.
+
+Dispositions — every item not executed, and where it lives now:
+
+| Item | Disposition |
+|---|---|
+| ONED-RSP (responsive shell) | ONED track doc backlog. RSP-1 policy ADR first whenever picked up; the two-floor conflict and raw-px persistence stay recorded there |
+| ONED-MUS-D → MUS-I | the design landed (track doc §The MUS-D design), **at the maintainer gate**; MUS-I per its 8-slice plan after acceptance |
+| ONED-TST | rides the hard private-pokes ratchet + the track doc's refit list; needs no wave gate |
+| ONED-W1 remainder (OBJ-1/3/4, MNU-1, SND-1; F3 wirings CRE-2/FNT-3/STR-3/SND-3/OBJ-5/MNU-3/MUS-G) | ONED track doc backlog — ordinary slices under the standing ADRs |
+| ONED-W2/W3, REF-1..4, REQ | ONED track doc backlog; the RE gates (R1–R7) unchanged — UI never ahead of the witness. R5 re-opened at CRE-1: the credits cadence constants (60 fps rate convert, 50 px fade zone) are uncited pending a grill |
+| STD-2 remainder | the object-material-defs contract deferred with cause (native-owned in both directions; the 980-line materials inspector has no dedicated test bar — a conversion needs its own slice with tests first); everything else converts adopt-on-touch under the standing diff-scoped dict-contract lint |
+| ENG-5 sweep-#2 tracked rows | ordinary port slices (libs/hud, libs/audio curves, libs/env TOD clock, the player_view fold, the part-anim integrator, the armory helpers); the sweep itself remains a standing instrument, run ad hoc |
+| PROD-1 serve mode, PROD-2 taxonomy, PROD-3 release dry run | tracked future work; ADR 0015 remains the decision of record — implementation unscheduled |
+| PAR ledger (at close: 46 OPEN / 13 NEEDS-RE / 31 witnessed-ready-deferred per the generated scoreboard; D-FNT-4 the newest mint) | unchanged: ADR 0022's zero-OPEN target is standing policy; `ledger_check` enforces sync forever; the burn-down continues in fidelity work |
+| GOV-4 | this close-out |
+
+What the program leaves behind, permanent: the enforcement table below
+(goldens, ratchets, lints, link-graph, ledger check, ABI guard — all
+hard-fail forever); ADRs 0015–0024; `libs/npwire` + the terrain_query seam +
+the family groups; the witnessed render/lighting/env/terrain-query cores;
+twelve workspaces on the R/W/E/G bar with two recorded exemplars (terrain =
+E/G, environment = runtime-node reuse); the divergence-ledger discipline;
+and this dashboard as the program's record.
 
 Landed slices (hash per slice, newest first):
 
 | Slice | Commit | Note |
 |---|---|---|
+| Wave-2 tail + GOV-4 close-out (PR #236) | (this PR) | the closing train, ground in parallel agent slices and consolidated green: **STD-2** 7/8 seeded contracts → typed records (DocumentTabRow, TileGizmoState, ReferenceServices deduped, ReferenceEdge, FocusPayload + EditorNavLocation, MissionParamSpec/SlotSpec, McpToolDef; net −9 class-level Dictionary signatures, 3 transport edges precisely allowlisted); **ONED-W1 ×6** — TER-1 (at bar, the E/G exemplar; F3 staging note via the new `get_game_launch_note` hook + typed GameLaunchNote), ENV-1 (at bar; save-into-launch-dir is the staging; popup note routing), CRE-1 (scrub transport; cadence UNCITED → R5 re-opened), FNT-1 + STR-1 (EngineTextPreview adopted — the game's draw path replaces the Label truth-claims), STR-2 (encoding pinned; **D-FNT-4 minted** — cp1252 specials fall to the system-font fallback where retail draws `glyph = byte−32`); **MUS-D** design landed at the maintainer gate; **ENG-5 sweep #2** on the conformance checklist; this close-out. Gates: canary 719/720 (the documented intra-file flake, isolation-green ×2 + master-green), mission_inspector 125/500, every touched suite re-verified on the consolidated tree, ratchets +0, dict-contract 0, ledger synced, link-graph 0 forbidden |
 | ENG-6 manifest leg (Wave-2 trunk 2) | (this trunk) | `libs/gameprofile/required_resources.{h,c}` instantiates the R8 record — ~75 rows phase-major in the witnessed load order, severity classes (FATAL/DIALOG/REQUIRED/SOFT/OPTIONAL), the boot-archive-table any-of flag, per-row witnessed failure text + `[orig]` citation; Model B only (no C-ABI change); `required_resources` ctest pins the eight-row fatal set + completeness. `NovaResourceRoot.list_missing_boot_resources()`/`boot_resource_failure_text()` probe the individually-fatal file rows (the archive trio stays `mount_runtime`'s gate), and `main_game.gd` raises honest missing-resource errors at mount (reported-not-enforced — the picker flow keeps a partial dir inspectable where retail MessageBox-exits). ONED conveniences over the same table stay ONED-REQ (Wave 3) |
 | ENG-4 fonts + OED_UPDATE_* (Wave-2 trunk 2) | (this trunk) | **both conformance rows closed**: `fnt_pack_shelf` ports the rasterizer's deterministic shelf packer into `libs/fnt` beside the format facts (authoring policy, not witnessed engine behavior — noted in-header), bound as `NovaFntResource.pack_shelf` + six format class constants; `fnt_rasterizer.gd` keeps only TextServer rasterization + blits (constants now aliases, `_pack()` deleted); `fnt_pack` ctest hand-walks the reference layout + the 16-page boundary, GUT `fnt_resource` gains the binding contract pin. `OED_UPDATE_*`: the C++ chain was already single-sourced (libs/oed → `NovaObjectData::UPDATE_*` → bound constants) — the three GDScript re-declarations became aliases (engine model + workspace) and deliberate literal pins (the test suite, + a new binding-drift test), the ENG-3 contract-pin pattern |
 | LIBS-2 + LIBS-3 family topology (Wave-2 trunk 2) | (this trunk) | ADR 0024: one-lib-per-format affirmed; `opennova_terrain_family` + `opennova_audio_family` minted as pure INTERFACE link groups (`libs/families.cmake`, included by both CMake roots) and adopted by the GDExtension in place of the twelve member lines — link conveniences, never merges, never an edge-laundering path (`link_graph_check` 330 targets / 0 forbidden). The ADR records the ADR-0023 renderer-fold reversal where the clause originated, and names the two consumption models; LIBS-3's operational text (Model A flat C ABI / Model B C++ static link, mixing rules, the annotate+baseline-bump protocol) lands in libs/CLAUDE.md |
@@ -540,9 +586,9 @@ freely).
 |---|---|---|
 | **0 — bootstrap** (M) | GOV-1/2/3, STD-1 soft, NET-0 | umbrella merged; tier-1 goldens green on all CI legs; lints reporting (not failing) |
 | **1 — boundary moves + ONED foundations** (L) | NET-1 → NET-2 → NET-3; LIBS-1 (after NET-2); ENG-1; ENG-6 research start; ONED-A then ONED-F | npwire landed goldens-green + tier-2 attested; seam landed with the link-graph check permanent; env vectors committed; twelve workspaces merged; F1–F5 done (FULL GUT at F5) |
-| **2 — portability + standards adoption** (L, widest; WIP cap: two trains) | ENG-2/3/4, ENG-5 sweep #1, ENG-6 manifest; LIBS-2/3; STD-2, STD-3 flip; ONED-W1, ONED-TST, ONED-RSP, ONED-MUS-D (gate at end); REN-0..2 (the REN trunk opens) | env GDScript deleted, vectors green; conformance checklist closed-or-tracked; ratchets hard and trending down; responsiveness landed + one re-baseline; music design accepted; REN instrument landed + materials converged (or the trunk merged at its last green slice — stop-anywhere) |
-| **3 — feature-bearing maturity** (L) | ONED-W2 (freeze releases here), ONED-MUS-I, ONED-REF, ONED-REQ; PROD-1/2; ENG-5 sweep #2; REN-3..7 | targeted R/W/E/G cells at bar; music shipped (46 tests untouched-green); serve mode boot-smoked in the packaged exe; REN closed out (T3 retail A/B attested, folded env rows closed) |
-| **4 — equalize + close** (M) | ONED-W3; PROD-3; GOV-4 close-out; ENG-5 final sweep | matrix re-audit over twelve workspaces; release dry run green; **freeze lifted** |
+| **2 — portability + standards adoption** (L, widest; WIP cap: two trains) | ENG-2/3/4, ENG-5 sweep #1, ENG-6 manifest; LIBS-2/3; STD-2, STD-3 flip; ONED-W1, ONED-TST, ONED-RSP, ONED-MUS-D (gate at end); REN-0..2 (the REN trunk opens) | env GDScript deleted, vectors green; conformance checklist closed-or-tracked; ratchets hard and trending down; responsiveness landed + one re-baseline; music design accepted; REN instrument landed + materials converged (or the trunk merged at its last green slice — stop-anywhere) — **the program closed here 2026-07-12**: gate accounting + the RSP/MUS-D-acceptance dispositions in the Close-out section |
+| **3 — feature-bearing maturity** (L) | ONED-W2 (freeze releases here), ONED-MUS-I, ONED-REF, ONED-REQ; PROD-1/2; ENG-5 sweep #2; REN-3..7 | **not executed as a wave** — REN-3..7 and ENG-5 sweep #2 completed early (in Wave 2); the rest is dispositioned at the close-out (the freeze lift releases ONED-W2 outright) |
+| **4 — equalize + close** (M) | ONED-W3; PROD-3; GOV-4 close-out; ENG-5 final sweep | **not executed as a wave** — GOV-4 ran at the 2026-07-12 close-out; the freeze lifted there; ONED-W3/PROD-3 dispositioned |
 
 Cross-track ordering: NET-0 before NET-2 (protection precedes the move);
 NET-1 before NET-2 (quiesce precedes the move); NET-2 before LIBS-1 (one

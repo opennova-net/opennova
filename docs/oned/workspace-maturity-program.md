@@ -1,9 +1,12 @@
 # ONED workspace maturity program (the maturity program's ONED track)
 
 **This document is the ONED track detail of the
-[maturity program](../maturity-program.md)** — the umbrella owns waves,
+[maturity program](../maturity-program.md)** — the umbrella owned waves,
 freeze policy, cross-track ordering, and enforcement; this doc owns the
-editor-side phases. Standing rules this track builds under: ADR 0015 (two
+editor-side phases. **The umbrella program closed 2026-07-12 (freeze
+lifted); this doc survives as the editor's standing roadmap** — phases
+execute as ordinary slices under the standing ADRs, RE gates unchanged.
+Standing rules this track builds under: ADR 0015 (two
 products, serve mode), ADR 0016 (editor over public engine APIs — no
 bypasses), ADR 0017 (typed records, named constants), ADR 0018 (public-API
 testability).
