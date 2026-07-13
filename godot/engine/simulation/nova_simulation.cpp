@@ -1512,15 +1512,16 @@ Dictionary NovaSimulation::get_local_player_aim_overlay() const {
 	// The head-look decay term carries the arms-dip feed (the +0x371 weapon-switch
 	// window drops it 0x2800000/tick; infantry_weapon_channel owns the decay)
 	// [orig: @ 0x4b5cab..0x4b5cd5]. The lean term is the sim's lean angle
-	// (entity+0xB0; ramp/decay in infantry_lean_tick); roll is the slope-chase
+	// (entity+0xB0; ramp/decay in infantry_lean_tick); roll is the slope-conform
 	// visual roll (entity+0x18) and torso_roll its sixteenth-step chaser
-	// (entity+0x2DC, infantry_torso_roll_tick). body_pitch / pitch_blend stay 0
-	// until their sim sources (slope body pitch on this seam, recoil impulses)
-	// are ported — the formulas carry the terms so those drop in without
-	// touching this seam.
+	// (entity+0x2DC, infantry_torso_roll_tick); body_pitch is the slope-conform
+	// body pitch (entity+0x90; both fed by infantry_slope_pass). pitch_blend
+	// stays 0 until its sim source (recoil impulses) is ported — the formulas
+	// carry the term so it drops in without touching this seam.
 	in.head_look_decay = p->inf.head_look_decay;
 	in.lean = p->inf.lean_angle;
 	in.roll = p->roll;
+	in.body_pitch = p->body_pitch;
 	in.torso_roll = p->inf.torso_roll;
 	in.aim_state = (opennova::world::infantry_anim_flags(p->inf.anim_state) & 0x40u) != 0;
 	in.rolling = (p->inf.anim_state == opennova::world::anim_state::kRollLeft ||

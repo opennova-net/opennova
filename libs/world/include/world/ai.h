@@ -234,6 +234,16 @@ struct AiEntity {
     int32_t heading = 0;       // entity+16 (32-bit binary angle); copied to brain[132]
     int32_t pitch = 0;         // entity+20
     int32_t roll = 0;          // entity+24
+    // The slope-conform body pitch (entity+0x90): the slope pass chases it toward the
+    // fore-aft ground slope for conforming (prone-family / flagged / dead) bodies and
+    // decays it to level otherwise; the §14 overlay body-pitch term reads it.
+    // [orig: org1 @0x4ba320 / org2 @0x4b6fc1-0x4b6fda]
+    int32_t body_pitch = 0;
+    // The entity DEFINITION's attrib dword (def = entity+0x20, attrib at def+0x54).
+    // Bit 0x200 forces slope-conform in the slope pass. JO infantry defs leave it
+    // clear; host wiring is deferred until a consumer needs the other bits.
+    // [orig: selector @0x4ba10f / @0x4b6d99]
+    uint32_t def_attrib = 0;
 
     // --- network receive-apply: a remote peer's pose, read-applied on the host ---
     // The host stages a joiner's reported 0x0C pose into these engine-frame slots
@@ -645,8 +655,20 @@ public:
     void infantry_weapon_channel(AiEntity &e);
     // Availability resolution against root_motion->has_clip with the cited fallback chains.
     int infantry_resolve_state(int adm_id, int state) const;
-    // Slope sampling + slide [orig: every-8 block, 4 probes around the entity].
-    void infantry_slope_slide(AiEntity &e);
+    // The slope pass: 4 ground probes around the entity feeding the slide impulse and
+    // the body_pitch/roll slope-conform chase — but ONLY for conforming bodies:
+    // def attrib 0x200, an anim state with flag bit 2 (the prone family — crawl 19-26,
+    // rolls 41/42, prone idle 48), or a grounded corpse. Every other body DECAYS
+    // body_pitch/roll back to level 1/16-step — a live standing/crouched soldier
+    // neither slope-leans nor slope-slides, which is what keeps the standing FP camera
+    // level on hillsides (torso_roll chases roll; fp_roll = torsoRoll + lean/4).
+    // Two witnessed legs: the org1 NPC leg every 8th tick (shifted small-angle slopes,
+    // eighth-step chase, 2048 slide) and the org2 player leg every tick (decay) with
+    // probes/chase every 2nd tick (atan2 slopes, quarter-step chase, 512 slide,
+    // 60-deg live / 48-deg dead slide threshold, roll write skipped during 41/42).
+    // [orig: Entity_UpdateInfantryAI @0x4ba10f-0x4ba34c;
+    //  Entity_UpdateInfantryPlayerBody @0x4b6d95-0x4b6ff4]
+    void infantry_slope_pass(AiEntity &e, uint32_t logic_tick, uint32_t key);
 
     const StateRow &row(int32_t state) const;
 

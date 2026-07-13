@@ -13,7 +13,10 @@
 //   * kJumpLoop forced forward delta 1024,
 //   * gravity -416/2t to terminal -32768, landing snap + fall damage excess>>4 with the
 //     injectable scale [orig: dword_C6EAE4],
-//   * slope slide on steep ground: the exact 2048/8-tick downhill drift + body lean.
+//   * the slope pass: the conform selector (prone family / corpse / def attrib), the
+//     org1 2048/8-tick slide + eighth-step body_pitch/roll chase, the org2 atan2
+//     quarter-step leg, the non-conform decay — and the regression that a standing
+//     local player's camera roll chain stays level on side slopes.
 #include <cmath>
 #include <io/bam.h>
 #include <cstdint>
@@ -696,9 +699,149 @@ void test_weapon_channel_consumer_gate_and_switch_identity() {
     CHECK(replacement.arms_dip_ticks == 3);
 }
 
+// The 0.25 u/u X-gradient ramp (~14 deg): raw16 = x*64 -> height = x*0.25u.
+struct GentleRamp : Field {
+    GentleRamp()
+        : Field([](int x) {
+              int v = x * 64;
+              return static_cast<uint16_t>(v > 65535 ? 65535 : v);
+          }) {}
+};
+
+// Regression (the slope-roll camera lean): a live STANDING local player across a
+// side slope, no lean keys -> the conform selector routes to the DECAY leg, so the
+// slope never reaches roll, torso_roll, or the composed FP camera roll.
+// [orig: selector @0x4b6d95 -> decay @0x4b6dbd; fp_roll = torsoRoll + lean/4 @0x437fe6]
+void test_slope_standing_camera_stays_level() {
+    GentleRamp ramp;
+    World w;
+    AiSystem ai;
+    ai.terrain = &ramp.field;
+    TestSource src;
+    src.clips = {anim_state::kIdle};
+    ai.root_motion = &src;
+    AiEntity *e = soldier(ai);
+    e->inf.is_local_player = true;
+    e->health = 100;
+    // Facing +Y: the gradient is pure LATERAL (roll) slope. The motor chases
+    // target_heading and rewrites e->heading, so drive all three.
+    e->heading = 0x40000000;
+    e->inf.body_heading = 0x40000000;
+    e->inf.target_heading = 0x40000000;
+    e->pos[0] = fx(100);
+    e->pos[1] = fx(100);
+    e->pos[2] = fx(25) + kFloorStand; // ground at x=100 on the 0.25 ramp
+
+    run_ticks(ai, w, 0, 240);
+    CHECK(e->roll == 0);
+    CHECK(e->body_pitch == 0);
+    CHECK(e->inf.torso_roll == 0);
+    CHECK(e->inf.vel[0] == 0 && e->inf.vel[1] == 0); // no slide for a stander
+    CHECK(e->pos[0] == fx(100));                     // ...so no drift either
+}
+
+// The org2 conform leg: the same slope, PRONE. The body roll quarter-chases the
+// true atan2 slope angle every 2nd tick while prone idle 48 decays torso_roll, so
+// the BODY conforms (~-14 deg) and the FP camera still stays level.
+// [orig: probes/chase @0x4b6e41-0x4b6ff4; atan2 bases 45056/11264, scale 2^32/2pi;
+//  torso decay @0x4b5d05-0x4b5d16]
+void test_slope_prone_body_conforms_org2() {
+    GentleRamp ramp;
+    World w;
+    AiSystem ai;
+    ai.terrain = &ramp.field;
+    TestSource src;
+    src.clips = {anim_state::kIdle, anim_state::kIdleProne};
+    ai.root_motion = &src;
+    AiEntity *e = soldier(ai);
+    e->inf.is_local_player = true;
+    e->health = 100;
+    e->inf.stance = InfantryState::Stance::kProne;
+    e->inf.anim_state = anim_state::kIdleProne;
+    e->heading = 0x40000000;
+    e->inf.body_heading = 0x40000000;
+    e->inf.target_heading = 0x40000000;
+    e->pos[0] = fx(100);
+    e->pos[1] = fx(100);
+    e->pos[2] = fx(25) + kFloorStand;
+
+    // First pass (t=0, even tick): lateral probes at +-0.0859375u see dh = -2816 ->
+    // roll_slope = trunc(atan2(-2816, 11264) * 683565275.5764316) = -167458907
+    // (-14.036 deg), first quarter-step (-167458905) >> 2 = -41864727.
+    run_ticks(ai, w, 0, 1);
+    CHECK(e->roll == -41864727);
+    CHECK(e->body_pitch == 0); // no fore-aft gradient facing +Y
+
+    // Converged: roll sits at the chase fixed point of the slope angle; the prone
+    // idle decay keeps torso_roll level (the camera does NOT barrel with the body).
+    run_ticks(ai, w, 1, 240);
+    CHECK(e->roll >= -167458908 && e->roll <= -167458905);
+    CHECK(e->inf.torso_roll > -0x100000 && e->inf.torso_roll <= 0);
+    CHECK(e->inf.vel[0] == 0 && e->inf.vel[1] == 0); // 14 deg is under the 60-deg threshold
+}
+
+// The org1 leg + the selector, unit-driven through the pass itself (the NPC think/
+// select churn would otherwise rewrite the anim state before the pass sees it).
+// [orig: selector @0x4ba10f; chase @0x4ba320; decay @0x4ba133; slide @0x4ba24c]
+void test_slope_pass_org1_selector_and_chase() {
+    // Gradient 1 u/u (the steep 45-deg dune of the slide test).
+    Field ramp([](int x) {
+        int v = x * 256;
+        return static_cast<uint16_t>(v > 65535 ? 65535 : v);
+    });
+    World w;
+    AiSystem ai;
+    ai.terrain = &ramp.field;
+    AiEntity *e = soldier(ai);
+    e->health = 100;
+    e->pos[0] = fx(100);
+    e->pos[1] = fx(100);
+    e->pos[2] = fx(100) + kFloorStand;
+
+    // Prone crawl (19, flags 0x603 bit 2): conform. Probes see the 0.6875u rise ->
+    // pitch slope 45056<<14 clamped to 656175520, over the 0x22222200 threshold ->
+    // slide back 2048; body_pitch chases an eighth-step; the X-only ramp has no roll.
+    e->inf.anim_state = anim_state::kWalkProneForward;
+    ai.infantry_slope_pass(*e, 0, 0);
+    CHECK(e->body_pitch == (656175520 + 4) >> 3);
+    CHECK(e->roll == 0);
+    CHECK(e->inf.vel[0] == -2048 && e->inf.vel[1] == 0);
+
+    // org1 cadence: off-phase key -> untouched.
+    const int32_t held = e->body_pitch;
+    ai.infantry_slope_pass(*e, 0, 3);
+    CHECK(e->body_pitch == held);
+
+    // Standing (43, flags 0x048): NOT conform -> both fields decay 1/16, no slide.
+    e->inf.anim_state = anim_state::kIdle;
+    e->inf.vel[0] = 0;
+    e->roll = 0x01000000;
+    ai.infantry_slope_pass(*e, 0, 0);
+    CHECK(e->body_pitch == held - ((held + 8) >> 4));
+    CHECK(e->roll == 0x01000000 - ((0x01000000 + 8) >> 4));
+    CHECK(e->inf.vel[0] == 0);
+
+    // A grounded corpse conforms regardless of state; dead + airborne is the
+    // (unported) tumble branch -> the pass leaves everything alone.
+    e->health = 0;
+    e->body_pitch = 0;
+    e->inf.vel[0] = 0;
+    ai.infantry_slope_pass(*e, 0, 0);
+    CHECK(e->body_pitch == (656175520 + 4) >> 3);
+    CHECK(e->inf.vel[0] == -2048);
+    const int32_t at_death = e->body_pitch;
+    e->inf.airborne = true;
+    ai.infantry_slope_pass(*e, 0, 0);
+    CHECK(e->body_pitch == at_death);
+    CHECK(e->inf.vel[0] == -2048);
+}
+
 } // namespace
 
 int main() {
+    test_slope_standing_camera_stays_level();
+    test_slope_prone_body_conforms_org2();
+    test_slope_pass_org1_selector_and_chase();
     // ---- body heading: quarter-step toward the target, clamped ±69273360/tick ----
     // [orig: 0x4b9910 dump 4600-4611 — step = (diff + 2) >> 2, clamp]
     {
@@ -1088,9 +1231,11 @@ int main() {
         CHECK(ai.at(1)->inf.vel[2] == -416);     // player: one gravity step -> 2-tick discretization
     }
 
-    // ---- slope slide: steep ground drifts the soldier downhill + leans the body ----
-    // [orig: dump 930-1000 — probes ±22528-dir; pitch slope <<14 vs threshold 0x22222200;
-    //  slide (cos|sin)<<11>>22 = 2048 per 8-tick pass at heading 0; lean eighth-step]
+    // ---- slope pass through the motor: a live STANDING soldier holds steep ground —
+    //      the conform selector routes him to the decay leg, so no slide impulse and
+    //      no body lean ever build (the slide/lean live inside the conform branch;
+    //      the conform legs themselves are pinned in the test_slope_* functions).
+    //      [orig: selector @0x4ba10f -> decay @0x4ba133]
     {
         // Gradient 1 u/u along X (raw16 = x*256, capped); facing +X means uphill ahead.
         Field ramp([](int x) {
@@ -1105,29 +1250,14 @@ int main() {
         e->pos[1] = fx(100);
         e->pos[2] = fx(100) + kFloorStand; // standing on the slope
 
-        // First pass (t=0), pinned exactly: probes at ±0.34375u see a 0.6875u rise ->
-        // pitch slope 45056<<14 = 738197504, clamped to 656175520, over the 0x22222200
-        // threshold -> vel gains -2048 along the facing ((cos<<11)>>22), then the
-        // NPC horizontal decay from 0x4b9910 damps it before integration.
-        // The lean chases the clamped slope by an eighth-step: pitch = (656175520 + 4) >> 3.
-        run_ticks(ai, w, 0, 8);
-        CHECK(e->pos[0] < fx(100) - 2048);
-        CHECK(e->pos[1] == fx(100));    // no roll component on an X-only ramp
-        CHECK(e->pos[2] == fx(100) + kFloorStand); // landed back on the (cached) floor
-        CHECK(e->inf.vel[0] < 0 && e->inf.vel[2] == 0);
-        CHECK(e->pitch == (656175520 + 4) >> 3);
-        CHECK(e->roll == 0);
-
-        // Long run: slide velocity persists through the IDA decay path, so assert the
-        // qualitative shape rather than a hand-derived trajectory.
-        run_ticks(ai, w, 8, 80);
-        CHECK(e->pos[0] < fx(100) - 8 * 2048);  // kept sliding downhill
-        CHECK(e->pos[0] > fx(92));              // ...at a bounded rate
+        run_ticks(ai, w, 0, 80);
+        CHECK(e->pos[0] == fx(100));               // no downhill drift
         CHECK(e->pos[1] == fx(100));
-        CHECK(e->pitch > (656175520 + 4) >> 3); // lean keeps growing...
-        CHECK(e->pitch <= 656175520);           // ...never past the clamped slope
-        CHECK(e->pos[2] < fx(100) + kFloorStand);        // followed the ground down
-        CHECK(e->pos[2] > fx(90) + kFloorStand);
+        CHECK(e->pos[2] == fx(100) + kFloorStand); // stays on the floor
+        CHECK(e->inf.vel[0] == 0 && e->inf.vel[1] == 0);
+        CHECK(e->pitch == 0);
+        CHECK(e->body_pitch == 0);
+        CHECK(e->roll == 0);
     }
 
     // ---- ground settle floors pos[2] to ground + the frame's capsule_bottom (origin->feet),
