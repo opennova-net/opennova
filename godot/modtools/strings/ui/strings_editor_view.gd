@@ -14,6 +14,7 @@ const DETAIL_MIN_WIDTH := 360
 var _doc: StringsEditor
 var _table: Control
 var _detail: Control
+var _font_service: Dictionary = {}
 
 
 func _ready() -> void:
@@ -40,6 +41,8 @@ func _ready() -> void:
 	_table.entry_selected.connect(_on_table_selected)
 	_table.delete_requested.connect(_on_delete_requested)
 	_detail.setup(_doc, _patch_row)
+	if not _font_service.is_empty():
+		_detail.set_font_service(_font_service)
 
 	if _doc != null:
 		_table.set_document(_doc)
@@ -53,6 +56,14 @@ func set_document(doc: StringsEditor) -> void:
 	if _detail != null:
 		_detail.set_document(doc)
 	rebuild()
+
+
+## Forward the workspace's font capability ({list, load}) to the detail panel's
+## game preview; stashed when the view has not built yet (mount order).
+func set_font_service(service: Dictionary) -> void:
+	_font_service = service
+	if _detail != null:
+		_detail.set_font_service(service)
 
 
 func set_filter(search: String, section_filter: int) -> void:

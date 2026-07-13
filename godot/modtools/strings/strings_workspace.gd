@@ -225,6 +225,7 @@ func mount_viewport(host: Control) -> void:
 	if _view != null:
 		_view.set_document(strings_editor)
 		_view.set_filter(_search, _section_filter)
+		_view.set_font_service(_preview_font_service())
 
 
 func unmount_viewport(_host: Control) -> void:
@@ -248,6 +249,40 @@ func build_inspector(host: Control) -> void:
 	_inspector.setup(self)
 	host.add_child(_inspector)
 	_inspector.refresh()
+
+
+# --- Game preview fonts (STR-1) ---
+# The detail panel renders the selected entry through the engine draw with a
+# chooseable font. These are the workspace-owned seams the picker consumes;
+# the panel itself is the framework EngineTextPreview (F2).
+
+## .fnt names available in the shell's mounted game folder, sorted; empty when
+## headless or nothing is mounted (strings stays shell-only on purpose — see
+## _resource_root_or_settings's do-not-widen note).
+func get_preview_font_names() -> PackedStringArray:
+	var root := _resource_root()
+	if root == null:
+		return PackedStringArray()
+	var names := PackedStringArray()
+	for path in root.list_files(".fnt"):
+		var file := String(path).get_file()
+		if not names.has(file):
+			names.append(file)
+	names.sort()
+	return names
+
+
+## Load one of those fonts the way the runtime does (VFS read ->
+## NovaFntResource -> FontFile). Null when unresolvable.
+func load_preview_font(font_name: String) -> FontFile:
+	return HudText.load_font(_resource_root(), font_name)
+
+
+func _preview_font_service() -> Dictionary:
+	return {
+		"list": get_preview_font_names,
+		"load": load_preview_font,
+	}
 
 
 # --- Coordinator state shared with the views ---

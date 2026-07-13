@@ -166,6 +166,98 @@ func test_used_by_queries_table_spellings_and_retargets_on_tab_switch() -> void:
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(copy_dir))
 
 
+class FontRootShell:
+	extends Node
+
+	var root: NovaResourceRoot
+
+	func get_resource_root() -> NovaResourceRoot:
+		return root
+
+
+func test_detail_game_preview_renders_selected_entry_through_engine_font() -> void:
+	# STR-1 gate (docs/oned/workspace-maturity-program.md): the selected entry
+	# renders through the game's draw path (F2 EngineTextPreview) with a font
+	# chosen from the mounted game folder's .fnt set.
+	var root_dir := OS.get_cache_dir().path_join("opennova_test_strings_preview_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(root_dir)
+	var fnt_bytes := FileAccess.get_file_as_bytes(
+		ProjectSettings.globalize_path("res://../fixtures/fnt/Serpen24.fnt"))
+	assert_gt(fnt_bytes.size(), 0, "font fixture bytes should read")
+	var out := FileAccess.open(root_dir.path_join("Serpen24.fnt"), FileAccess.WRITE)
+	out.store_buffer(fnt_bytes)
+	out.close()
+
+	var workspace_script := preload("res://modtools/strings/strings_workspace.gd")
+	var shell: FontRootShell = add_child_autofree(FontRootShell.new())
+	shell.root = NovaResourceRoot.new()
+	assert_eq(shell.root.set_root_dir(root_dir), OK)
+	var ws = autofree(workspace_script.new())
+	ws.set_editor_shell(shell)
+
+	assert_eq(ws.get_preview_font_names(), PackedStringArray(["Serpen24.fnt"]),
+		"the picker capability lists the mounted folder's fonts")
+	assert_not_null(ws.load_preview_font("Serpen24.fnt"),
+		"fonts load through the runtime path (VFS read -> NovaFntResource -> FontFile)")
+
+	assert_eq(ws.open_file("res://fixtures/strings/menu.bin"), OK)
+	var host := Control.new()
+	add_child_autofree(host)
+	ws.mount_viewport(host)
+	await get_tree().process_frame
+
+	var preview: Control = host.find_child("StringsGamePreview", true, false)
+	assert_not_null(preview, "the detail panel mounts the engine text preview")
+	if preview == null:
+		return
+	assert_true(preview.has_font(), "the first available font auto-adopts into the panel")
+	assert_gt(preview.get_font_file().get_fixed_size(), 0,
+		"the adopted FontFile carries the .fnt's fixed pixel size (the engine draw resolution)")
+	assert_eq(preview.get_sample_text(), "New Game",
+		"the selected entry renders as the game shows it ({hot} marker stripped)")
+
+	var picker: OptionButton = host.find_child("StringsPreviewFontOption", true, false)
+	assert_not_null(picker, "the preview font is chooseable")
+	if picker != null:
+		assert_false(picker.disabled, "fonts exist, so the picker is live")
+		assert_eq(picker.get_item_text(0), "Serpen24.fnt")
+
+	# Selecting another entry re-renders the panel with that entry's display text.
+	var detail: Control = host.find_child("StringsDetailPanel", true, false)
+	assert_not_null(detail)
+	if detail != null:
+		detail.show_entry(5)  # HUD_AMMO -> "Ammo"
+		assert_eq(preview.get_sample_text(), "Ammo", "switching entries updates the engine-drawn line")
+
+	ws.release_viewport()
+	DirAccess.remove_absolute(root_dir.path_join("Serpen24.fnt"))
+	DirAccess.remove_absolute(root_dir)
+
+
+func test_detail_game_preview_without_a_mounted_root_offers_no_fonts() -> void:
+	var workspace_script := preload("res://modtools/strings/strings_workspace.gd")
+	var ws = autofree(workspace_script.new())
+	assert_eq(ws.get_preview_font_names(), PackedStringArray(),
+		"headless / no mounted folder yields no fonts (strings stays shell-only)")
+
+	assert_eq(ws.open_file("res://fixtures/strings/menu.bin"), OK)
+	var host := Control.new()
+	add_child_autofree(host)
+	ws.mount_viewport(host)
+	await get_tree().process_frame
+
+	var preview: Control = host.find_child("StringsGamePreview", true, false)
+	assert_not_null(preview, "the panel still mounts without fonts")
+	if preview != null:
+		assert_false(preview.has_font(), "no font claim is rendered without a mounted game folder")
+	var picker: OptionButton = host.find_child("StringsPreviewFontOption", true, false)
+	assert_not_null(picker)
+	if picker != null:
+		assert_true(picker.disabled, "the picker states the gap instead of listing nothing")
+	ws.release_viewport()
+	autofree(ws.get_document())  # shell-less: the document node has no shell parent to free it
+
+
 func test_section_filter_scopes_rows() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.STRINGS)
