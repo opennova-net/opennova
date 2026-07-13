@@ -80,7 +80,7 @@ func _run() -> void:
 				var score := 0
 				for oz in [-4, 0, 4]:
 					for ox in [-4, 0, 4]:
-						if data.get_foliage_far_mask_world(wx + ox, wz + oz) != 0:
+						if data.get_foliage_far_mask_world(wx + ox, -(wz + oz)) != 0:
 							score += 1
 				if score > best_score:
 					best_score = score

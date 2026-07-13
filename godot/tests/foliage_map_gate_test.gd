@@ -5,11 +5,9 @@ extends GutTest
 ## PCX row-order compensation) while heights read +z:
 ## [orig: Foliage_SampleFarMapMask @ 0x6066d0 indexes ((x>>16)&1023,
 ## (-z>>16)&1023); Terrain_SampleHeightBilinear @ 0x5C6770 reads +z].
-## These tests pin the NovaTerrainData fast-path resolvers the runtime seams
-## depend on (get_foliage_index_world / get_foliage_far_mask_world's internal
-## negation, pixel==0 early-out, def.match remap) and the runtime-kernel
-## coords form (world_to_source_coords_wrapped) the editor's foliage
-## preview/brush/eyedropper address the map through.
+## These tests pin the two independent NovaTerrainData fast paths: FAR's flat
+## world&1023 read and MODEL/editor's sector-routed index read, plus the z
+## negation, pixel-zero early-out, and definition match remap.
 
 const DVXI5_FIXTURE_RES_DIR := "res://../fixtures/godot/dvxi5"
 
@@ -37,7 +35,7 @@ func _interior_point(data: NovaTerrainData) -> Vector2:
 	return Vector2(-1, -1)
 
 
-func test_far_mask_negates_once_onto_the_index_resolve() -> void:
+func test_far_mask_negates_once_onto_the_flat_wrapped_row() -> void:
 	var data := _load_dvxi5()
 	assert_not_null(data, "Dvxi5 fixture should load.")
 	if data == null:
@@ -50,10 +48,8 @@ func test_far_mask_negates_once_onto_the_index_resolve() -> void:
 
 	# Address the texel exactly as the game read resolves it, through the
 	# runtime wrap kernel.
-	var source := data.world_to_source_coords_wrapped(p.x, p.y)
-	assert_gte(source.x, 0.0, "wrapped resolver should resolve the interior point")
-	var map_x := map.map_x_from_heightmap_x(source.x)
-	var map_y := map.map_y_from_heightmap_y(source.y)
+	var map_x := _flat_far_map_coord(floori(p.x), map.get_width())
+	var map_y := _flat_far_map_coord(floori(p.y), map.get_height())
 
 	# Paint a def-matchable index at that texel (defs come from the fixture
 	# when it has any; otherwise pin the index path alone).
@@ -65,18 +61,15 @@ func test_far_mask_negates_once_onto_the_index_resolve() -> void:
 			match_index = int(defs[d].get_match())
 			match_slot = d
 			break
+	map.clear(0)
 	map.paint_circle(map_x, map_y, 1, 1.0, 1.0, match_index)
 
-	# The index resolver reads the kernel at its own z argument.
-	assert_eq(data.get_foliage_index_world(p.x, p.y), match_index,
-			"get_foliage_index_world resolves the painted texel at source z")
-
 	# The far-mask wrapper negates ONCE internally: handing it -source_z (the
-	# witnessed native boundary) must land on the same texel...
+	# witnessed native boundary) must land on the flat wrapped texel...
 	var mask := data.get_foliage_far_mask_world(p.x, -p.y)
 	if match_slot >= 0:
 		assert_eq(mask, 1 << match_slot,
-				"far mask at (x, -z) remaps the painted texel through def.match")
+				"far mask at (x, -z) remaps the flat painted texel through all matches")
 	# ...and handing it +source_z must NOT (the pre-fix z-mirror read).
 	var mirrored := data.get_foliage_far_mask_world(p.x, p.y)
 	assert_ne(mirrored, mask if match_slot >= 0 else -1,
@@ -97,6 +90,81 @@ func test_pixel_zero_never_matches() -> void:
 	# match 0 never gates on an unpainted texel.
 	assert_eq(data.get_foliage_far_mask_world(p.x, -p.y), 0,
 			"pixel 0 never matches any def")
+
+
+func test_all_four_definition_match_values_set_the_same_slot_bit() -> void:
+	var data := _load_dvxi5()
+	assert_not_null(data, "Dvxi5 fixture should load.")
+	if data == null:
+		return
+	var p := _interior_point(data)
+	var map := data.get_foliage_map()
+	var map_x := _flat_far_map_coord(floori(p.x), map.get_width())
+	var map_y := _flat_far_map_coord(floori(p.y), map.get_height())
+	var def := NovaTerrainFoliageDef.new()
+	def.graphic = "four_match_fixture"
+	def.matches = PackedInt32Array([7, 8, 9, 10])
+	data.foliage_defs = [def]
+	map.clear(0)
+
+	for match_value in def.matches:
+		map.paint_circle(map_x, map_y, 1, 1.0, 1.0, match_value)
+		assert_eq(data.get_foliage_far_mask_world(p.x, -p.y), 1,
+				"Every authored match byte maps the foliage pixel to slot 0.")
+
+
+func test_far_mask_uses_flat_wrapped_address_not_model_sector_route() -> void:
+	var data := _load_dvxi5()
+	assert_not_null(data, "Dvxi5 fixture should load.")
+	if data == null:
+		return
+	var map := data.get_foliage_map()
+	var witness := Vector2i(-1, -1)
+	var flat_pixel := Vector2i(-1, -1)
+	var routed_pixel := Vector2i(-1, -1)
+	for native_z in range(-768, 769, 17):
+		for world_x in range(-768, 769, 19):
+			var routed_source := data.world_to_source_coords_wrapped(world_x, -native_z)
+			if routed_source.x < 0.0:
+				continue
+			var flat := Vector2i(
+					_flat_far_map_coord(world_x, map.get_width()),
+					_flat_far_map_coord(-native_z, map.get_height()))
+			var routed := Vector2i(
+					map.map_x_from_heightmap_x(routed_source.x),
+					map.map_y_from_heightmap_y(routed_source.y))
+			if flat != routed:
+				witness = Vector2i(world_x, native_z)
+				flat_pixel = flat
+				routed_pixel = routed
+				break
+		if witness.x != -1:
+			break
+	assert_ne(witness, Vector2i(-1, -1),
+			"Fixture exposes an address where FAR flat wrap and MODEL routing differ.")
+	if witness == Vector2i(-1, -1):
+		return
+
+	map.clear(0)
+	map.set_index(flat_pixel.x, flat_pixel.y, 7)
+	map.set_index(routed_pixel.x, routed_pixel.y, 0)
+	var def := NovaTerrainFoliageDef.new()
+	def.match = 7
+	data.foliage_defs = [def]
+
+	assert_eq(data.get_foliage_far_mask_world(witness.x, witness.y), 1,
+			"FAR reads the retail flat (world & 1023) FOLIAGEMAP texel.")
+	assert_eq(data.get_foliage_index_world(witness.x, -witness.y), 0,
+			"MODEL's sector-routed sampler remains independent at the same position.")
+
+
+func _flat_far_map_coord(value: int, dimension: int) -> int:
+	var log2_dimension := 0
+	var power := 1
+	while power * 2 <= dimension and log2_dimension < 10:
+		power *= 2
+		log2_dimension += 1
+	return (value & 1023) >> maxi(10 - log2_dimension, 0)
 
 
 func test_wrapped_coords_is_the_runtime_kernel_form() -> void:

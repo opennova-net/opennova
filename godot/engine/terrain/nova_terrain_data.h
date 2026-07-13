@@ -238,10 +238,8 @@ public:
 	// pixel holds the def-slot bitmask (pixel == any of the def's match values
 	// -> bit(def); pixel 0 never matches) [orig: sub_605AD0 -> sub_5FF4E0]].
 	// The caller passes candidate (x, -worldZ); the callee restores world z.
-	// Retail addresses the raw PCX with world & 1023 (its quadrants congruent
-	// with the sector grid on every shipped map); our map resource is
-	// atlas-normalized, so this resolves through the shared sector-routed
-	// world->pixel chain and remaps at query time.
+	// Retail addresses the raw PCX flat with world & 1023. This is deliberately
+	// independent of get_foliage_index_world's MODEL sector route.
 	int get_foliage_far_mask_world(float world_x, float native_z) const;
 	// Returns the foliagemap palette index at the given world position, or 0
 	// for "outside map / empty".

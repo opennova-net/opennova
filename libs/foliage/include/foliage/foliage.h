@@ -11,6 +11,7 @@ namespace opennova {
 // Foliage_BuildPatchData@0x005C0240, Terrain_GetFoliageMapValue@0x005C65E0.
 
 constexpr int FOLIAGE_MAX_DEFS = 4;
+constexpr int FOLIAGE_MATCH_VALUES_PER_DEF = 4;
 constexpr int FOLIAGE_HEIGHTMAP_SIZE = 1024;
 constexpr uint8_t FOLIAGE_ATTRIB_FORCE_ON = 1 << 0;
 constexpr uint8_t FOLIAGE_ATTRIB_SHADOW = 1 << 1;
@@ -29,10 +30,11 @@ struct FoliageDef {
 	std::string graphic;
 	int color_lower = static_cast<int>(FoliageColorMode::MatchGround);
 	int color_upper = static_cast<int>(FoliageColorMode::MatchGround);
-	// Fidelity: bounded deviation. Engine stores up to 4 match codes per slot;
-	// the shared port still exposes one authored match until the terrain/TRN
-	// wrappers are widened.
+	// Retail stores up to four authored FOLIAGEMAP byte matches per slot. Keep
+	// the historical primary field for source/API compatibility and preserve
+	// the remaining three in file order.
 	int match = -1;
+	std::array<int, FOLIAGE_MATCH_VALUES_PER_DEF - 1> match_extra = { -1, -1, -1 };
 	uint8_t attrib_flags = 0;
 };
 
@@ -46,6 +48,8 @@ struct FoliageMap {
 int foliage_normalize_color_mode(int value);
 uint8_t foliage_normalize_attrib_flags(uint8_t flags);
 FoliageDef foliage_normalize_def(const FoliageDef &def);
+std::array<int, FOLIAGE_MATCH_VALUES_PER_DEF> foliage_def_match_values(const FoliageDef &def);
+bool foliage_def_matches_index(const FoliageDef &def, int index);
 
 void foliage_fill_grayscale_palette(uint8_t palette[256][3]);
 FoliageMap foliage_make_default_map(int width, int height, uint8_t fill_index = 0);

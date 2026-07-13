@@ -60,7 +60,8 @@ void vertex() {
 void fragment() {
 	vec4 fd = texture(u_fd_texture, UV);
 	float alpha_threshold = clamp(u_model_alpha_ref, 8.0, 128.0) / 255.0;
-	if (fd.a < alpha_threshold) {
+	// Retail applies D3DCMP_GREATER: equality with the byte reference fails.
+	if (fd.a <= alpha_threshold) {
 		discard;
 	}
 

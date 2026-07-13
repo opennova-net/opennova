@@ -123,15 +123,17 @@ public:
 	void set_foliage_sampler(const Callable &p_sampler);
 	Callable get_foliage_sampler() const;
 
-	// Callable receiving the retail surface-query boundary
-	// (world_x: float, native_z: float) -> raw uint8 slot mask. FAR passes
-	// native_z=-candidate_world_z exactly as witnessed; unlike MODEL's
-	// foliage_sampler, this value is never translated through def.match.
+	// Callable receiving the retail FAR FOLIAGEMAP boundary
+	// (world_x: float, native_z: float) -> match-remapped uint8 slot mask.
+	// FAR passes native_z=-candidate_world_z exactly as witnessed. Unlike
+	// MODEL's foliage_sampler, the callback has already translated the painted
+	// palette index through every definition's authored match values into bits.
 	void set_surface_sampler(const Callable &p_sampler);
 	Callable get_surface_sampler() const;
 
 	// Direct runtime fast path. When set, dispatch uses NovaTerrainData
-	// height, raw surface-mask, and foliage-map queries directly and skips
+	// height, match-remapped FAR FOLIAGEMAP slot-mask, and MODEL FOLIAGEMAP
+	// index queries directly and skips
 	// Callable/Variant boxing. Editor leaves this unset so the
 	// live-sculpt-aware Callable path still runs.
 	void set_terrain_data(const Ref<NovaTerrainData> &p_data);

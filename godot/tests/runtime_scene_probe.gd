@@ -72,6 +72,15 @@ func _run() -> void:
 		and data.get_detailmap_c3() != null
 		and data.get_detailblendmap() != null
 	)
+	var far_cell_node_count := 0
+	var model_draw_node_count := 0
+	if dispatcher != null:
+		for child in dispatcher.get_children():
+			var child_name := String(child.name)
+			if child_name.begins_with("FarCell"):
+				far_cell_node_count += 1
+			elif child_name.begins_with("FoliageModelDraw"):
+				model_draw_node_count += 1
 
 	var diagnostics := {
 		"terrain_node": terrain != null,
@@ -86,6 +95,8 @@ func _run() -> void:
 		"dispatcher_total_instances": dispatcher.get_total_instances() if dispatcher != null else -1,
 		"dispatcher_cached_cells": dispatcher.get_cached_cells() if dispatcher != null else -1,
 		"dispatcher_stats": dispatcher.get_dispatch_stats() if dispatcher != null else {},
+		"far_cell_nodes": far_cell_node_count,
+		"model_draw_nodes": model_draw_node_count,
 		"overlay_tile_info": overlay != null and overlay.tile_info != null,
 		"overlay_tilestrip": overlay != null and overlay.tilestrip != null,
 		"overlay_entries_rendered": overlay.get_entry_count_rendered() if overlay != null else -1,
@@ -128,25 +139,52 @@ func _run() -> void:
 	if dispatcher != null and data != null:
 		var defs: Array = data.get_foliage_defs()
 		for child in dispatcher.get_children():
-			if not (child is MultiMeshInstance3D):
-				continue
-			var name_str := child.name as String
-			if not name_str.begins_with("FoliageSlot"):
-				continue
-			var slot_index := int(name_str.substr("FoliageSlot".length()))
-			if slot_index < 0 or slot_index >= defs.size():
-				continue
-			var def: NovaTerrainFoliageDef = defs[slot_index]
-			if def == null:
-				continue
-			var wants_shadow := (int(def.attrib_flags) & NovaTerrainFoliageDef.ATTRIB_SHADOW) != 0
-			var expected := GeometryInstance3D.SHADOW_CASTING_SETTING_ON if wants_shadow \
-				else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-			if child.cast_shadow != expected:
-				failures.append(
-					"slot %d: SHADOW attrib=%s, expected shadow_setting=%d, got %d"
-						% [slot_index, wants_shadow, expected, child.cast_shadow]
-				)
+			var name_str := String(child.name)
+			if name_str.begins_with("FarCell"):
+				if not (child is MeshInstance3D):
+					failures.append("%s: expected a MeshInstance3D FAR pool node" % name_str)
+					continue
+				var key_separator := name_str.find("_", "FarCell".length())
+				var slot_text := ""
+				if key_separator > "FarCell".length():
+					slot_text = name_str.substr(
+						"FarCell".length(), key_separator - "FarCell".length()
+					)
+				if not slot_text.is_valid_int():
+					failures.append("%s: expected FarCell<slot>_<key> naming" % name_str)
+					continue
+				var slot_index := int(slot_text)
+				if slot_index < 0 or slot_index >= defs.size():
+					failures.append("%s: foliage slot %d is outside the def table" % [name_str, slot_index])
+					continue
+				var def: NovaTerrainFoliageDef = defs[slot_index]
+				if def == null:
+					failures.append("%s: foliage slot %d has no def" % [name_str, slot_index])
+					continue
+				var far_node := child as MeshInstance3D
+				var wants_shadow := (int(def.attrib_flags) & NovaTerrainFoliageDef.ATTRIB_SHADOW) != 0
+				var expected := GeometryInstance3D.SHADOW_CASTING_SETTING_ON if wants_shadow \
+					else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+				if far_node.cast_shadow != expected:
+					failures.append(
+						"%s: SHADOW attrib=%s, expected shadow_setting=%d, got %d"
+							% [name_str, wants_shadow, expected, far_node.cast_shadow]
+					)
+				var far_material := far_node.material_override as ShaderMaterial
+				if far_material == null or far_material.shader == null \
+						or not far_material.shader.resource_path.ends_with("foliage_far.gdshader"):
+					failures.append("%s: expected the FAR foliage shader material" % name_str)
+			elif name_str.begins_with("FoliageModelDraw"):
+				if not (child is MultiMeshInstance3D):
+					failures.append("%s: expected a MultiMeshInstance3D MODEL pool node" % name_str)
+					continue
+				var model_node := child as MultiMeshInstance3D
+				if model_node.multimesh == null:
+					failures.append("%s: MODEL pool node has no MultiMesh" % name_str)
+				var model_material := model_node.material_override as ShaderMaterial
+				if model_material == null or model_material.shader == null \
+						or not model_material.shader.resource_path.ends_with("foliage_model.gdshader"):
+					failures.append("%s: expected the MODEL foliage shader material" % name_str)
 
 	# FAR vertex COLOR is the source-height wind weight. Lighting comes from
 	# the distinct FAR shader's terrain-light texture/c6 inputs; treating the

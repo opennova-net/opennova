@@ -10,9 +10,9 @@ const NEAR_DEPTH_ANCHOR := Vector3(24.0, 0.0, -20.0)  # view depth 20 < 38
 const FAR_DEPTH_ANCHOR := Vector3(24.0, 0.0, -100.0)  # view depth 100 >= 38
 
 var _dispatcher: NovaFoliageDispatcher
-var _split_surface_mask := 0
+var _split_far_slot_mask := 0
 var _split_foliage_index := 0
-var _split_surface_samples: Array[Vector2] = []
+var _split_far_slot_samples: Array[Vector2] = []
 var _owned_dispatchers: Array[NovaFoliageDispatcher] = []
 
 
@@ -34,7 +34,7 @@ func before_each() -> void:
 	_dispatcher.slot_meshes = [mesh]
 	_dispatcher.height_sampler = Callable(self, "_sample_height")
 	_dispatcher.foliage_sampler = Callable(self, "_sample_foliage_index")
-	_dispatcher.surface_sampler = Callable(self, "_sample_surface_mask")
+	_dispatcher.surface_sampler = Callable(self, "_sample_far_slot_mask")
 
 
 func after_each() -> void:
@@ -60,17 +60,23 @@ func _sample_height(world_x: float, world_z: float) -> float:
 	return 0.08 * world_x - 0.05 * world_z + 0.004 * world_x * world_z
 
 
+func _sample_steep_cell_height(world_x: float, _world_z: float) -> float:
+	# In cell key 16 (x=[0,16], z=[0,16]), the center is y=80 while the
+	# footprint spans y=[0,160]. A camera at y=0 is inside the leaf Y range.
+	return world_x * 10.0
+
+
 func _sample_foliage_index(_world_x: float, _world_z: float) -> int:
 	return 1  # everywhere painted with the def's match index
 
 
-func _sample_surface_mask(_world_x: float, _native_z: float) -> int:
-	return 1  # raw slot-0 bit, independent from the foliage-map palette index
+func _sample_far_slot_mask(_world_x: float, _native_z: float) -> int:
+	return 1  # FOLIAGEMAP index already match-remapped to the slot-0 bit
 
 
-func _sample_split_surface_mask(world_x: float, native_z: float) -> int:
-	_split_surface_samples.append(Vector2(world_x, native_z))
-	return _split_surface_mask
+func _sample_split_far_slot_mask(world_x: float, native_z: float) -> int:
+	_split_far_slot_samples.append(Vector2(world_x, native_z))
+	return _split_far_slot_mask
 
 
 func _sample_split_foliage_index(_world_x: float, _world_z: float) -> int:
@@ -89,7 +95,7 @@ func _make_far_dispatcher() -> NovaFoliageDispatcher:
 	dispatcher.slot_meshes = [mesh]
 	dispatcher.height_sampler = Callable(self, "_sample_height")
 	dispatcher.foliage_sampler = Callable(self, "_sample_foliage_index")
-	dispatcher.surface_sampler = Callable(self, "_sample_surface_mask")
+	dispatcher.surface_sampler = Callable(self, "_sample_far_slot_mask")
 	return dispatcher
 
 
@@ -236,6 +242,25 @@ func test_cache_stable_and_regen_on_stagger() -> void:
 	assert_gt(tiles, 0, "Tiles keep drawing from the cache.")
 
 
+func test_anchorless_frames_still_advance_model_stagger_clock() -> void:
+	_dispatch(FAR_DEPTH_ANCHOR) # frame 1: populate slot-0's four tiles
+	var first: Dictionary = _dispatcher.get_dispatch_stats()
+	var regens_before := int(first.model_regenerations)
+
+	# Retail's frame counter is global, not conditional on there being a
+	# qualifying sector-entity anchor. Six empty frames take us through frame 7;
+	# restoring the same anchor on frame 8 must hit slot 0's stagger phase.
+	_dispatcher.set_model_anchors(PackedVector3Array())
+	for i in range(6):
+		_dispatcher.dispatch(Vector3.ZERO, _camera_xform())
+	_dispatch(FAR_DEPTH_ANCHOR)
+
+	var after: Dictionary = _dispatcher.get_dispatch_stats()
+	assert_eq(int(after.model_regenerations) - regens_before,
+		int(first.model_cache_misses),
+		"Anchorless render frames advance the witnessed ((frame + 2*slot) & 7) MODEL stagger.")
+
+
 func test_uploads_move_only_with_regenerated_content() -> void:
 	_dispatch(FAR_DEPTH_ANCHOR)
 	var prev: Dictionary = _dispatcher.get_dispatch_stats()
@@ -380,6 +405,28 @@ func test_far_pool_evicts_stalest_at_the_128_cap() -> void:
 	assert_lte(int(returned.cached_cells), 128, "Residency stays capped after the return.")
 
 
+func test_far_collect_clamps_camera_to_steep_cell_height_range() -> void:
+	# Retail measures distance to the leaf AABB, including a clamped Y term.
+	# The target cell's center is 80u above the camera, so the former
+	# center-only approximation rejected it despite its low edge meeting y=0.
+	var dispatcher := _make_far_dispatcher()
+	dispatcher.height_sampler = Callable(self, "_sample_steep_cell_height")
+	dispatcher.dispatch(Vector3(8.0, 0.0, 8.0), _camera_xform())
+
+	var node := _far_cell_node(dispatcher, 0, ORIGIN_CELL_KEY)
+	assert_not_null(node,
+		"A steep cell is collected when the camera lies inside its footprint height range.")
+	var found_target := false
+	for placement: Dictionary in dispatcher.get_far_tile_debug(0):
+		if int(placement.cell_key) != ORIGIN_CELL_KEY:
+			continue
+		found_target = true
+		assert_almost_eq(float(placement.distance), 0.0, 0.000001,
+			"Clamping camera Y to the leaf range contributes zero vertical distance.")
+		break
+	assert_true(found_target, "The steep target cell exposes its collected draw state.")
+
+
 func test_far_pool_bakes_once_fades_by_distance_and_survives_reset() -> void:
 	# The witnessed slot-pool mechanics [orig: Foliage_UpdateFarCellSlots
 	# @ 0x601b30]: resident keys are only re-stamped; per-cell fade/pass state
@@ -441,12 +488,47 @@ func test_far_pool_bakes_once_fades_by_distance_and_survives_reset() -> void:
 	assert_eq(dispatcher.get_cached_cells(), 0, "Reset drops the pool.")
 
 
-func test_far_only_requires_height_plus_surface_sampler() -> void:
+func test_colormap_swap_rebinds_resident_far_pool_material() -> void:
+	var dispatcher := _make_far_dispatcher()
+	var source_a := NovaTerrainData.new()
+	var source_b := NovaTerrainData.new()
+	var image_a := Image.create(2, 2, false, Image.FORMAT_RGBA8)
+	var image_b := Image.create(2, 2, false, Image.FORMAT_RGBA8)
+	image_a.fill(Color.RED)
+	image_b.fill(Color.BLUE)
+	var texture_a := ImageTexture.create_from_image(image_a)
+	var texture_b := ImageTexture.create_from_image(image_b)
+	source_a.colormap = texture_a
+	source_b.colormap = texture_b
+
+	dispatcher.colormap_source = source_a
+	dispatcher.dispatch(Vector3.ZERO, _camera_xform())
+	var node := _far_cell_node(dispatcher, 0, ORIGIN_CELL_KEY)
+	assert_not_null(node, "The stable camera view bakes a resident FAR node.")
+	if node == null:
+		return
+	var material_a := node.material_override as ShaderMaterial
+	assert_not_null(material_a)
+	assert_same(material_a.get_shader_parameter("u_terrain_light_texture"), texture_a)
+	var baked_before := int(dispatcher.get_dispatch_stats().far_cells_baked)
+
+	dispatcher.colormap_source = source_b
+	dispatcher.dispatch(Vector3.ZERO, _camera_xform())
+	var material_b := node.material_override as ShaderMaterial
+	assert_eq(int(dispatcher.get_dispatch_stats().far_cells_baked), baked_before,
+		"A colormap-only swap keeps the bake-once placement pool resident.")
+	assert_ne(material_b, material_a,
+		"The resident node adopts a recreated shared material after the source swap.")
+	assert_same(material_b.get_shader_parameter("u_terrain_light_texture"), texture_b,
+		"The recreated material binds the new terrain-light/colormap source.")
+
+
+func test_far_only_requires_height_plus_slot_mask_sampler() -> void:
 	var dispatcher := _make_far_dispatcher()
 	dispatcher.foliage_sampler = Callable()
 	dispatcher.dispatch(Vector3(8.0, 0.0, -8.0), _camera_xform())
 	assert_gt(dispatcher.get_far_tile_debug(0).size(), 0,
-		"FAR only requires height plus its raw surface sampler.")
+		"FAR only requires height plus its match-remapped FOLIAGEMAP slot-mask sampler.")
 
 
 func test_reset_detaches_far_nodes_before_queue_free() -> void:
@@ -464,10 +546,11 @@ func test_reset_detaches_far_nodes_before_queue_free() -> void:
 		"The queued far cell node is detached before deferred destruction.")
 
 
-func test_far_surface_mask_and_model_foliage_map_gate_independently() -> void:
-	# Retail FAR consumes the raw charmap byte as a slot mask at the
-	# Terrain_GetSurfaceTypeAtFixedPoint(x, -z) boundary. MODEL separately maps
-	# the foliage-map palette index through def.match.
+func test_far_slot_mask_and_model_foliage_index_seams() -> void:
+	# Both tiers consume the FOLIAGEMAP. The FAR callback receives its painted
+	# index already match-remapped through all defs into a slot mask at the
+	# Foliage_SampleFarMapMask(x, -z) boundary; MODEL receives the painted
+	# palette index and maps it through def.match inside the dispatcher.
 	var split := NovaFoliageDispatcher.new()
 	_own_dispatcher(split)
 	var def := NovaTerrainFoliageDef.new()
@@ -478,37 +561,37 @@ func test_far_surface_mask_and_model_foliage_map_gate_independently() -> void:
 	split.foliage_defs = [def]
 	split.slot_meshes = [mesh]
 	split.height_sampler = Callable(self, "_sample_height")
-	split.surface_sampler = Callable(self, "_sample_split_surface_mask")
+	split.surface_sampler = Callable(self, "_sample_split_far_slot_mask")
 	split.foliage_sampler = Callable(self, "_sample_split_foliage_index")
 	split.model_anchors = PackedVector3Array([FAR_DEPTH_ANCHOR])
 
-	_split_surface_mask = 0
+	_split_far_slot_mask = 0
 	_split_foliage_index = 7
-	_split_surface_samples.clear()
+	_split_far_slot_samples.clear()
 	split.dispatch(Vector3.ZERO, _camera_xform())
 	assert_eq(split.get_far_tile_debug(0).size(), 0,
-		"A zero raw surface mask rejects FAR even when MODEL's foliage map matches.")
+		"A zero FAR FOLIAGEMAP slot mask rejects FAR even when MODEL's painted index matches.")
 	assert_gt(split.get_model_tile_debug(0).size(), 0,
 		"MODEL still accepts through its independent foliage-map match.")
 
-	_split_surface_mask = 1 << 0
+	_split_far_slot_mask = 1 << 0
 	_split_foliage_index = 0
-	_split_surface_samples.clear()
+	_split_far_slot_samples.clear()
 	split.reset()
 	split.dispatch(Vector3.ZERO, _camera_xform())
 	var far_debug: Array = split.get_far_tile_debug(0)
 	assert_gt(far_debug.size(), 0,
-		"The raw slot bit accepts FAR without any def.match translation.")
+		"The already match-remapped slot bit accepts FAR without a second def.match translation.")
 	assert_eq(far_debug.size() % 36, 0,
-		"Permissive surface masks accept all 36 candidates per collected cell.")
+		"Permissive FOLIAGEMAP slot masks accept all 36 candidates per collected cell.")
 	assert_eq(split.get_model_tile_debug(0).size(), 0,
-		"A zero foliage-map index rejects MODEL even when FAR's surface mask matches.")
-	assert_gt(_split_surface_samples.size(), 0, "FAR queried the dedicated surface seam.")
-	if not far_debug.is_empty() and not _split_surface_samples.is_empty():
+		"A zero FOLIAGEMAP index rejects MODEL even when FAR's remapped slot mask matches.")
+	assert_gt(_split_far_slot_samples.size(), 0, "FAR queried its dedicated slot-mask seam.")
+	if not far_debug.is_empty() and not _split_far_slot_samples.is_empty():
 		var placement: Dictionary = far_debug[0]
 		var center: Vector3 = placement.center
 		var found_boundary_sample := false
-		for sample in _split_surface_samples:
+		for sample in _split_far_slot_samples:
 			if absf(sample.x - center.x) < 0.0001 and absf(sample.y + center.z) < 0.0001:
 				found_boundary_sample = true
 				break

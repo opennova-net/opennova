@@ -21,10 +21,10 @@ var _resource_root: NovaResourceRoot
 var _surface_map: NovaTerrainSurfaceMap
 var _foliage_map: NovaTerrainFoliageMap
 var _foliage_defs: Array[NovaTerrainFoliageDef] = []
-# Raw input array reference, retained to do element-wise change detection.
-# Comparing against a freshly-built typed array each frame triggered false
-# positives that flushed the LRU every frame (see plan Step 1).
-var _last_raw_foliage_defs: Array = []
+# Deep value signatures, not foliage-def object references. Editor field edits
+# mutate the existing RefCounted in place; a shallow snapshot therefore missed
+# graphic/match changes and left the preview's assets/placement cache stale.
+var _last_foliage_def_signatures: Array[String] = []
 var _selected_index: int = -1
 
 var _dispatcher: NovaFoliageDispatcher
@@ -39,11 +39,20 @@ func _ready() -> void:
 	add_child(_dispatcher)
 
 
+func _foliage_def_signature(value: Variant) -> String:
+	if not (value is NovaTerrainFoliageDef):
+		return "<null>"
+	# to_dictionary is the definition's complete value contract. JSON gives us
+	# a detached, stable deep snapshot (including the widened match list) while
+	# keeping the steady-frame comparison cheap for the four-slot maximum.
+	return JSON.stringify((value as NovaTerrainFoliageDef).to_dictionary())
+
+
 func _defs_changed_raw(raw: Array) -> bool:
-	if raw.size() != _last_raw_foliage_defs.size():
+	if raw.size() != _last_foliage_def_signatures.size():
 		return true
 	for i in range(raw.size()):
-		if raw[i] != _last_raw_foliage_defs[i]:
+		if _foliage_def_signature(raw[i]) != _last_foliage_def_signatures[i]:
 			return true
 	return false
 
@@ -86,7 +95,9 @@ func set_preview_state(
 			if value is NovaTerrainFoliageDef:
 				typed_defs.append(value)
 		_foliage_defs = typed_defs
-		_last_raw_foliage_defs = foliage_defs.duplicate()  # snapshot refs
+		_last_foliage_def_signatures.clear()
+		for value in foliage_defs:
+			_last_foliage_def_signatures.append(_foliage_def_signature(value))
 		if _dispatcher != null:
 			_dispatcher.foliage_defs = _foliage_defs
 			_dispatcher.slot_meshes = VegAssets.resolve_slot_meshes(_resource_root, _foliage_defs)
@@ -121,15 +132,10 @@ func _sample_height(world_x: float, world_z: float) -> float:
 	return _terrain_mesh.sample_world_height(world_x, world_z)
 
 
-# Foliagemap sampler: the gate texel the GAME resolves at this world point.
-# The witnessed foliagemap read negates z before the shared wrap kernel (the
-# PCX row-order compensation) [orig: Foliage_SampleFoliageMapMask @ 0x606620 /
-# Foliage_SampleFarMapMask @ 0x6066d0 — both index (-z)], so the editor must
-# NOT resolve the un-negated row the terrain-mesh chain yields — that
-# previewed (and painted) foliage z-mirrored relative to the game
-# (D-FOLIAGE-9's editor half). The negate happens here at the boundary; the
-# wrap runs inside NovaTerrainData's runtime-kernel resolver, so this read is
-# bit-equal with the game's — over the live document foliage map.
+# MODEL/editor foliagemap sampler: the gate texel the sector-routed game path
+# resolves at this world point. That accessor negates z for PCX row order
+# [orig: Foliage_SampleFoliageMapMask @ 0x606620]. FAR has its own flat
+# world&1023 accessor below. Both operate over the live document foliage map.
 func _sample_foliage_index(world_x: float, world_z: float) -> int:
 	if _terrain_data == null or _foliage_map == null:
 		return 0
@@ -150,20 +156,41 @@ func _sample_foliage_index(world_x: float, world_z: float) -> int:
 # The FAR def-slot mask: the foliagemap pixel remapped through the def match
 # values (pixel == match -> bit(def); pixel 0 never matches) [orig:
 # Foliage_SampleFarMapMask @ 0x6066d0; remap sub_605AD0 -> sub_5FF4E0].
-# native_z is already -candidate_world_z (the witnessed argument boundary), so
-# un-negating it here hands _sample_foliage_index render z — whose own
-# negation lands the read on the game's gate texel. The remap runs over the
-# LIVE editor defs (unsaved match edits preview correctly).
+# native_z is already -candidate_render_z. While FAR collection remains keyed
+# in render space (D-FOLIAGE-8), this is the retail native map coordinate, so
+# the preview reads it directly; the runtime fast path makes the equivalent
+# compensating sign before its flat accessor. The remap runs over LIVE defs.
 func _sample_far_mask(world_x: float, native_z: float) -> int:
-	var pixel := _sample_foliage_index(world_x, -native_z)
+	if _foliage_map == null:
+		return 0
+	var width := _foliage_map.get_width()
+	var height := _foliage_map.get_height()
+	if width <= 0 or height <= 0:
+		return 0
+	var map_x := _flat_far_map_coord(floori(world_x), width)
+	var map_y := _flat_far_map_coord(floori(native_z), height)
+	var pixel := int(_foliage_map.get_index(map_x, map_y))
 	if pixel == 0:
 		return 0
 	var mask := 0
 	for d in mini(_foliage_defs.size(), 4):
 		var def := _foliage_defs[d]
-		if def != null and def.get_match() >= 0 and pixel == def.get_match():
-			mask |= 1 << d
+		if def == null:
+			continue
+		for match_value in def.get_matches():
+			if match_value >= 0 and pixel == match_value:
+				mask |= 1 << d
+				break
 	return mask
+
+
+func _flat_far_map_coord(value: int, dimension: int) -> int:
+	var log2_dimension := 0
+	var power := 1
+	while power * 2 <= dimension and log2_dimension < 10:
+		power *= 2
+		log2_dimension += 1
+	return (value & 1023) >> maxi(10 - log2_dimension, 0)
 
 
 func mark_dirty() -> void:

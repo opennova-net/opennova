@@ -2,8 +2,9 @@ extends Node
 
 # One-off diagnostic for the trunk foliage-coverage report (00TRg.bms): loads the
 # mission against a retail install, then prints — around the local player spawn —
-# the charmap surface mask under both Z sign conventions, the foliage-map byte,
-# the TRN's foliage def slots, and the dispatcher's live FAR cell/instance stats.
+# the match-remapped FOLIAGEMAP slot mask under both Z sign conventions, the
+# painted FOLIAGEMAP byte, the TRN's foliage def slots, and the dispatcher's
+# live FAR cell/instance stats.
 #
 # Scene mode (autoloads must exist for game_world.gd to compile):
 # godot --headless --path godot res://tests/foliage_00trg_diag_probe.tscn -- <install_dir> [mission.bms]
@@ -59,8 +60,9 @@ func _run() -> void:
 				hist[v] = int(hist.get(v, 0)) + 1
 		print("[diag] foliage map histogram (4-stride): ", hist)
 
-	# Charmap mask sampling around the spawn under both conventions: the sampler's
-	# contract arg is native -z; probe what the code does vs the mirrored read.
+	# Match-remapped FOLIAGEMAP slot-mask sampling around the spawn under both
+	# conventions: the sampler's contract arg is native -z; probe the witnessed
+	# read against the mirrored read.
 	for dz: int in [-24, -12, 0, 12, 24]:
 		var row := ""
 		for dx: int in [-24, -12, 0, 12, 24]:

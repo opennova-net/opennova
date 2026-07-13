@@ -133,7 +133,18 @@ static bool foliage_def_from_variant(const Variant &value, opennova::FoliageDef 
 		out_def.graphic = String(dict.get("graphic", "")).utf8().get_data();
 		out_def.color_lower = static_cast<int>(dict.get("color_lower", static_cast<int>(opennova::FoliageColorMode::MatchGround)));
 		out_def.color_upper = static_cast<int>(dict.get("color_upper", static_cast<int>(opennova::FoliageColorMode::MatchGround)));
-		out_def.match = static_cast<int>(dict.get("match", -1));
+		if (dict.has("matches")) {
+			const PackedInt32Array matches = dict["matches"];
+			for (int i = 0; i < std::min<int>(matches.size(), opennova::FOLIAGE_MATCH_VALUES_PER_DEF); ++i) {
+				if (i == 0) {
+					out_def.match = matches[i];
+				} else {
+					out_def.match_extra[i - 1] = matches[i];
+				}
+			}
+		} else {
+			out_def.match = static_cast<int>(dict.get("match", -1));
+		}
 		int attrib_flags = static_cast<int>(dict.get("attrib_flags", 0));
 		if (static_cast<bool>(dict.get("shadow", false))) {
 			attrib_flags |= opennova::FOLIAGE_ATTRIB_SHADOW;
@@ -1730,20 +1741,44 @@ int NovaTerrainData::get_foliage_far_mask_world(float world_x, float native_z) c
 	// world z, matching the retail callee exactly. The reimpl remaps at query
 	// time (same result; the map resource keeps the raw authored indices for
 	// the editor round-trip).
-	// Host-structural equivalence note: retail addresses the raw PCX with
-	// world & 1023 (quadrants congruent with the sector grid for every shipped
-	// map); our foliage-map resource is atlas-normalized, so the equivalent
-	// resolution is the shared sector-routed world->pixel chain
-	// (resolve_world_sample — the same one the MODEL sampler and the editor
-	// use, proven by the MODEL tier's placement parity).
-	const int pixel = get_foliage_index_world(world_x, -native_z);
+	// Keep this flat read independent from get_foliage_index_world: MODEL and
+	// editor painting use the sector-routed accessor, while FAR does not.
+	if (!loaded || foliage_map_resource.is_null()) {
+		return 0;
+	}
+	const int width = foliage_map_resource->get_width();
+	const int height = foliage_map_resource->get_height();
+	if (width <= 0 || height <= 0) {
+		return 0;
+	}
+	const auto flat_map_coord = [](float coordinate, int dimension) {
+		// PCX foliage maps are power-of-two. Retail derives this shift from
+		// floor(log2(dimension)); malformed odd dimensions intentionally use
+		// their lower power, matching that rule.
+		int log2_dimension = 0;
+		int power = 1;
+		while (power <= dimension / 2 && log2_dimension < 10) {
+			power <<= 1;
+			++log2_dimension;
+		}
+		const int shift = std::max(10 - log2_dimension, 0);
+		const int64_t integral = static_cast<int64_t>(std::floor(coordinate));
+		const int wrapped = static_cast<int>(static_cast<uint64_t>(integral) & 1023u);
+		return wrapped >> shift;
+	};
+	const int map_x = flat_map_coord(world_x, width);
+	const int map_y = flat_map_coord(-native_z, height);
+	if (map_x < 0 || map_x >= width || map_y < 0 || map_y >= height) {
+		return 0;
+	}
+	const int pixel = foliage_map_resource->get_index(map_x, map_y);
 	if (pixel == 0) {
 		return 0;  // [orig: the pixel == 0 early-out @ 0x5ff4e8]
 	}
 	int mask = 0;
 	const int def_count = static_cast<int>(trn.foliage_defs.size());
 	for (int d = 0; d < def_count && d < 4; ++d) {
-		if (trn.foliage_defs[d].match >= 0 && pixel == trn.foliage_defs[d].match) {
+		if (opennova::foliage_def_matches_index(trn.foliage_defs[d], pixel)) {
 			mask |= (1 << d);
 		}
 	}

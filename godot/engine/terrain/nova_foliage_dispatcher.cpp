@@ -280,8 +280,15 @@ void NovaFoliageDispatcher::set_colormap_source(const Ref<NovaTerrainData> &p_da
 		return;
 	}
 	colormap_source_ = p_data;
-	for (Ref<ShaderMaterial> &material : foliage_materials_) {
-		material.unref();
+	for (int s = 0; s < opennova::FOLIAGE_MAX_DEFS; ++s) {
+		const bool had_material = foliage_materials_[s].is_valid();
+		foliage_materials_[s].unref();
+		if (had_material) {
+			// Resident FAR nodes only re-adopt the slot material when this
+			// shared entry is valid. Recreate it eagerly so a colormap-only
+			// swap does not strand a stable bake-once pool on stale T1/wind.
+			_update_slot_material(s);
+		}
 	}
 }
 
@@ -502,8 +509,8 @@ void NovaFoliageDispatcher::_collect_far_cells(const Vector3 &camera_pos) {
 	// leaf cell whose clamped-box 3D distance from the camera is <= 42.0 joins
 	// the frame's key list (<= 128). Retail measures leaf AABBs during the
 	// frustum-culled traversal; the host enumerates the 42u disc directly and
-	// lets Godot's per-node culling drop the off-screen draws, and it uses the
-	// terrain height under the cell center as the leaf's Y metric.
+	// lets Godot's per-node culling drop the off-screen draws. Without retained
+	// leaf bounds, footprint height samples approximate the vertical AABB.
 	far_visible_.clear();
 
 	const float r = FAR_COLLECT_RADIUS;
@@ -534,14 +541,47 @@ void NovaFoliageDispatcher::_collect_far_cells(const Vector3 &camera_pos) {
 				continue;
 			}
 
-			// Y metric: terrain height under the cell center. No terrain here
-			// means no key - the OOB analog of the 0x80000000 empty marker.
-			const float height = _sample_height_world(static_cast<float>(kx) + 8.0f,
-			                                          static_cast<float>(kz) - 8.0f);
-			if (height <= INVALID_HEIGHT_THRESHOLD) {
+			// Y metric: retail clamps the camera to the leaf's vertical AABB.
+			// The host has no retained leaf bounds, so approximate them from the
+			// terrain footprint's four corners plus center. This matters on steep
+			// cells: the center can be more than 42u above the camera while the
+			// cell's lower edge still intersects the collect sphere.
+			const float sample_x[5] = {
+			    static_cast<float>(kx),
+			    static_cast<float>(kx) + FOLIAGE_CELL_SIZE,
+			    static_cast<float>(kx),
+			    static_cast<float>(kx) + FOLIAGE_CELL_SIZE,
+			    static_cast<float>(kx) + FOLIAGE_CELL_SIZE * 0.5f,
+			};
+			const float sample_z[5] = {
+			    static_cast<float>(kz) - FOLIAGE_CELL_SIZE,
+			    static_cast<float>(kz) - FOLIAGE_CELL_SIZE,
+			    static_cast<float>(kz),
+			    static_cast<float>(kz),
+			    static_cast<float>(kz) - FOLIAGE_CELL_SIZE * 0.5f,
+			};
+			bool has_height = false;
+			float min_height = 0.0f;
+			float max_height = 0.0f;
+			for (int sample = 0; sample < 5; ++sample) {
+				const float height = _sample_height_world(sample_x[sample], sample_z[sample]);
+				if (height <= INVALID_HEIGHT_THRESHOLD) {
+					continue;
+				}
+				if (!has_height) {
+					min_height = height;
+					max_height = height;
+					has_height = true;
+				} else {
+					min_height = std::min(min_height, height);
+					max_height = std::max(max_height, height);
+				}
+			}
+			if (!has_height) {
 				continue;
 			}
-			const float dy = camera_pos.y - height;
+			const float nearest_y = std::clamp(camera_pos.y, min_height, max_height);
+			const float dy = camera_pos.y - nearest_y;
 			const float dist_sq = dx * dx + dz * dz + dy * dy;
 			if (dist_sq > r * r) {
 				continue;
@@ -739,16 +779,20 @@ Dictionary NovaFoliageDispatcher::_build_defs_by_match() const {
 		if (def.is_null()) {
 			continue;
 		}
-		const int match = def->get_match();
-		if (match <= 0) {
-			continue;
+		const PackedInt32Array matches = def->get_matches();
+		for (const int match : matches) {
+			if (match <= 0) {
+				continue;
+			}
+			Array list;
+			if (out.has(match)) {
+				list = out[match];
+			}
+			if (!list.has(i)) {
+				list.push_back(i);
+			}
+			out[match] = list;
 		}
-		Array list;
-		if (out.has(match)) {
-			list = out[match];
-		}
-		list.push_back(i);
-		out[match] = list;
 	}
 	return out;
 }
@@ -873,6 +917,9 @@ void NovaFoliageDispatcher::_dispatch_model_tier(const Transform3D &view_xform,
 	dispatch_stats_.model_instances = 0;
 
 	model_draw_batches_.clear();
+	// Retail's stagger is keyed to the global frame counter, not the count of
+	// frames that happened to carry a qualifying sector-entity anchor.
+	++model_frame_counter_;
 
 	// Which slots can stamp models: a def AND a mesh with usable bounds.
 	ModelPlacementConfig config;
@@ -898,8 +945,6 @@ void NovaFoliageDispatcher::_dispatch_model_tier(const Transform3D &view_xform,
 
 	PlacementSamplers samplers;
 	_make_model_sampler_bindings(defs_by_match, samplers);
-
-	++model_frame_counter_;
 
 	const bool has_view = !(view_xform == Transform3D());
 	const Transform3D view_inv = has_view ? view_xform.affine_inverse() : Transform3D();
@@ -1414,36 +1459,19 @@ bool NovaFoliageDispatcher::_scatter_cell(int slot_index,
 
 	samplers.slot_mask_at = [this, td](Fixed16_16 wx, Fixed16_16 wz) -> uint32_t {
 		const float wx_f = static_cast<float>(wx) * opennova::foliage::FIXED_TO_FLOAT;
-		// Sign chain, measured end-to-end on 00TRg (the diag probe's
-		// m_code/f cross-check): FAR cells are keyed in Godot RENDER space;
-		// libs place_cell pre-negates its candidate z before this sampler
-		// [orig: the (x, -z) call @ 0x600065..0x600079 into
-		// Foliage_SampleFarMapMask @ 0x6066d0], so the incoming `wz` is
-		// NATIVE z. get_foliage_far_mask_world negates ONCE internally to
-		// feed get_foliage_index_world, whose resolve chain wants NATIVE z —
-		// so this seam must hand it RENDER z (= -wz) for the two negations
-		// to cancel onto the painted texel. Passing native straight through
-		// (the previous form, rationalized off the parameter's misleading
-		// "native_z" name) read the z-MIRRORED map: painted clusters gated
-		// empty, ~2 stray instances/cell everywhere else — the 00TRg
-		// sparse-coverage bug.
+		// libs place_cell negates its candidate z at the witnessed sampler
+		// boundary [orig: @ 0x600065..0x600079]. Because host cell keys remain
+		// render-space (D-FOLIAGE-8), incoming `wz` is native z instead of the
+		// retail native-key path's render z. The direct runtime accessor applies
+		// the retail sampler's own negation, so compensate here with render z;
+		// this sign disappears when D-FOLIAGE-8 moves collection to native keys.
 		const float native_z = static_cast<float>(wz) * opennova::foliage::FIXED_TO_FLOAT;
 		int far_mask = 0;
 		if (td != nullptr) {
-			// NovaTerrainData's chain: far_mask negates once internally and
-			// get_foliage_index_world's resolve wants NATIVE z — hand it
-			// RENDER z (= -incoming) so the negations cancel onto the painted
-			// texel (measured end-to-end on 00TRg).
 			far_mask = td->get_foliage_far_mask_world(wx_f, -native_z);
 		} else if (surface_sampler_.is_valid()) {
-			// The editor-preview seam keeps the witnessed (x, -z) boundary:
-			// the Callable receives NATIVE z; the preview's far-mask wrapper
-			// un-negates it to render z, and its index sampler negates again
-			// into NovaTerrainData's runtime wrap kernel — landing on the
-			// SAME gate texel as the TD fast path above
-			// (terrain_foliage_preview.gd _sample_far_mask /
-			// _sample_foliage_index; the editor's old EditorTerrainMesh
-			// chain resolved the un-negated row = the z-MIRRORED map).
+			// Editor preview keeps the same boundary over its live, potentially
+			// unsaved foliage map and definitions.
 			Array args;
 			args.push_back(wx_f);
 			args.push_back(native_z);

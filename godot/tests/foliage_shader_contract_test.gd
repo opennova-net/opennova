@@ -17,6 +17,8 @@ func test_model_pass_uses_fd_alpha_and_black_diffuse() -> void:
 	var source := _shader_source(MODEL_SHADER_PATH)
 	assert_true(source.contains("uniform float u_model_alpha_ref"),
 		"The host supplies the anchor-derived model alpha-test reference.")
+	assert_true(source.contains("if (fd.a <= alpha_threshold)"),
+		"Retail D3DCMP_GREATER rejects :fd alpha exactly equal to the MODEL reference.")
 	assert_true(source.contains("ALPHA = fd.a"), ":fd supplies model alpha.")
 	assert_true(source.contains("vec3 result = vec3(0.0)"),
 		"GridPlacementVS emits c6=(0,0,0,1), so the model pass starts black.")
@@ -62,8 +64,11 @@ func test_far_pass_has_witnessed_wind_and_lighting_contract() -> void:
 		"Far wind retains the retail tenth-order cosine coefficients.")
 	assert_true(source.contains("world_pos.z -= wind_weight * wave * 0.03"),
 		"Retail render-Z wind maps to negative Godot world Z.")
-	assert_true(source.contains("ALPHA = fd.a * u_far_pass_color.a * u_cell_fade"),
+	assert_true(source.contains("float far_alpha = fd.a * u_far_pass_color.a * u_cell_fade")
+		and source.contains("ALPHA = far_alpha"),
 		":fd alpha is modulated by the per-cell distance fade in c6.a.")
+	assert_true(source.contains("if (far_alpha <= alpha_threshold)"),
+		"Retail D3DCMP_GREATER rejects faded FAR alpha exactly equal to the pass reference.")
 	assert_true(source.contains("terrain_light.a * opennova_sun_light + opennova_sky_ambient")
 		and source.contains("fd.rgb * lit * u_far_pass_color.rgb * 8.0"),
 		"The far fragment keeps the witnessed T0/T1/c0/c1/c6 multiply chain.")

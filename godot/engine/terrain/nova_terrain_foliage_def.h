@@ -3,6 +3,7 @@
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/packed_int32_array.hpp>
 
 #include <foliage/foliage.h>
 
@@ -16,6 +17,7 @@ private:
 	int color_lower = static_cast<int>(opennova::FoliageColorMode::MatchGround);
 	int color_upper = static_cast<int>(opennova::FoliageColorMode::MatchGround);
 	int match = -1;
+	std::array<int, opennova::FOLIAGE_MATCH_VALUES_PER_DEF - 1> match_extra = { -1, -1, -1 };
 	int attrib_flags = 0;
 
 protected:
@@ -41,6 +43,8 @@ public:
 
 	void set_match(int value);
 	int get_match() const;
+	void set_matches(const PackedInt32Array &values);
+	PackedInt32Array get_matches() const;
 
 	void set_attrib_flags(int value);
 	int get_attrib_flags() const;

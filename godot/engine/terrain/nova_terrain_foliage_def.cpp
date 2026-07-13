@@ -22,6 +22,8 @@ void NovaTerrainFoliageDef::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_color_upper"), &NovaTerrainFoliageDef::get_color_upper);
 	ClassDB::bind_method(D_METHOD("set_match", "value"), &NovaTerrainFoliageDef::set_match);
 	ClassDB::bind_method(D_METHOD("get_match"), &NovaTerrainFoliageDef::get_match);
+	ClassDB::bind_method(D_METHOD("set_matches", "values"), &NovaTerrainFoliageDef::set_matches);
+	ClassDB::bind_method(D_METHOD("get_matches"), &NovaTerrainFoliageDef::get_matches);
 	ClassDB::bind_method(D_METHOD("set_attrib_flags", "value"), &NovaTerrainFoliageDef::set_attrib_flags);
 	ClassDB::bind_method(D_METHOD("get_attrib_flags"), &NovaTerrainFoliageDef::get_attrib_flags);
 	ClassDB::bind_method(D_METHOD("set_shadow", "enabled"), &NovaTerrainFoliageDef::set_shadow);
@@ -38,6 +40,7 @@ void NovaTerrainFoliageDef::_bind_methods() {
 	             "set_color_upper",
 	             "get_color_upper");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "match", PROPERTY_HINT_RANGE, "-1,255,1"), "set_match", "get_match");
+	ADD_PROPERTY(PropertyInfo(Variant::PACKED_INT32_ARRAY, "matches"), "set_matches", "get_matches");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "attrib_flags"), "set_attrib_flags", "get_attrib_flags");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "shadow"), "set_shadow", "get_shadow");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "force_on"), "set_force_on", "get_force_on");
@@ -81,6 +84,30 @@ int NovaTerrainFoliageDef::get_match() const {
 	return match;
 }
 
+void NovaTerrainFoliageDef::set_matches(const PackedInt32Array &values) {
+	match = -1;
+	match_extra.fill(-1);
+	const int count = std::min<int>(values.size(), opennova::FOLIAGE_MATCH_VALUES_PER_DEF);
+	for (int i = 0; i < count; ++i) {
+		const int value = std::clamp(values[i], -1, 255);
+		if (i == 0) {
+			match = value;
+		} else {
+			match_extra[i - 1] = value;
+		}
+	}
+}
+
+PackedInt32Array NovaTerrainFoliageDef::get_matches() const {
+	PackedInt32Array out;
+	out.resize(opennova::FOLIAGE_MATCH_VALUES_PER_DEF);
+	out.set(0, match);
+	for (int i = 0; i < static_cast<int>(match_extra.size()); ++i) {
+		out.set(i + 1, match_extra[i]);
+	}
+	return out;
+}
+
 void NovaTerrainFoliageDef::set_attrib_flags(int value) {
 	attrib_flags = clamp_int<int>(opennova::foliage_normalize_attrib_flags(static_cast<uint8_t>(std::clamp(value, 0, 255))), 0, 255);
 }
@@ -121,6 +148,7 @@ Dictionary NovaTerrainFoliageDef::to_dictionary() const {
 	out["color_lower"] = color_lower;
 	out["color_upper"] = color_upper;
 	out["match"] = match;
+	out["matches"] = get_matches();
 	out["attrib_flags"] = attrib_flags;
 	out["shadow"] = get_shadow();
 	out["force_on"] = get_force_on();
@@ -133,6 +161,7 @@ void NovaTerrainFoliageDef::copy_from_native(const opennova::FoliageDef &def) {
 	color_lower = normalized.color_lower;
 	color_upper = normalized.color_upper;
 	match = normalized.match;
+	match_extra = normalized.match_extra;
 	attrib_flags = clamp_int<int>(normalized.attrib_flags, 0, 255);
 }
 
@@ -142,6 +171,7 @@ opennova::FoliageDef NovaTerrainFoliageDef::to_native() const {
 	def.color_lower = color_lower;
 	def.color_upper = color_upper;
 	def.match = match;
+	def.match_extra = match_extra;
 	def.attrib_flags = clamp_int<uint8_t>(attrib_flags, 0, 255);
 	return opennova::foliage_normalize_def(def);
 }

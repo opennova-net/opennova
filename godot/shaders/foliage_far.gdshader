@@ -134,9 +134,14 @@ void fragment() {
 	result = mix(opennova_fog_color, result, fog_factor);
 
 	float alpha_threshold = clamp(u_cell_alpha_ref, 8.0, 180.0) / 255.0;
+	float far_alpha = fd.a * u_far_pass_color.a * u_cell_fade;
+	// Retail applies D3DCMP_GREATER: equality with the byte reference fails.
+	if (far_alpha <= alpha_threshold) {
+		discard;
+	}
 	ALBEDO = nova_gamma_to_linear(result);
 	// c6.a fade multiplies the ":fd" alpha before the alpha test - the retail
 	// dissolve: as fade drops toward the 42.0 edge, fewer texels clear the ref.
-	ALPHA = fd.a * u_far_pass_color.a * u_cell_fade;
+	ALPHA = far_alpha;
 	ALPHA_SCISSOR_THRESHOLD = alpha_threshold;
 }

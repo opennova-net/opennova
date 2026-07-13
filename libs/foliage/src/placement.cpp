@@ -1,7 +1,8 @@
 // Procedural per-cell foliage placement — a faithful port of the deterministic
 // FAR grass/bush instancer. [orig: generate_foliage_instances_0 @ 0x5ffdd0 (retail
 // Jointops) — seed 0xA55B1EED, the ROL-hash PRNG, 36 candidates/cell, the
-// surface-type gate (Terrain_GetSurfaceTypeAtFixedPoint @ 0x6066d0), and the
+// match-remapped FOLIAGEMAP slot-mask gate (Foliage_SampleFarMapMask
+// @ 0x6066d0), and the
 // 0x20000 proximity spacing; byte-identical, see docs/foliage/foliage-re.md
 // (PAR-R2). Originally ported from jodemo sub_5C0240/5C6450/5C65E0.]
 #include "foliage/placement.h"
@@ -71,7 +72,7 @@ PlacementResult place_cell(int slot_index,
 	// Decode cell origin from the key. Engine uses the raw packed dword; the
 	// HIGH half is the world-X cell base and the LOW half the world-Z cell
 	// base - retail passes the HIWORD-derived coordinate as the X argument of
-	// the spacing/surface queries [orig: generate_foliage_instances_0
+	// the spacing/FOLIAGEMAP slot-mask queries [orig: generate_foliage_instances_0
 	// @ 0x600001..0x600009]. Sign-extension mirrors the engine's
 	// `(half << 17) >> 17` decode.
 	const int32_t key_x_int = sext_key_half(cell_key >> 16);

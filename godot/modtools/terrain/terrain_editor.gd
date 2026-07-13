@@ -1636,8 +1636,7 @@ func _on_primary_start() -> void:
 			_eyedrop_foliage_at_hover()
 			return
 		if not Input.is_key_pressed(KEY_CTRL):
-			var selected_def := _document.get_selected_foliage_def()
-			if selected_def == null or selected_def.get_match() < 0:
+			if _document.get_selected_foliage_paint_index() < 0:
 				return
 		_foliage_map_stroke_before = _document.capture_foliage_map_history_state()
 		_foliage_map_stroke_changed = false
@@ -1736,6 +1735,7 @@ func _apply_brush_stroke(delta: float) -> void:
 	if result["changed_heightmap"]:
 		terrain_mesh.set_heightmap(_heightmap_image)
 		_height_revision += 1
+		_mark_foliage_preview_dirty()
 		_mark_tile_overlay_dirty()
 	if result["changed_blendmap"]:
 		_blendmap_tex.update(_blendmap_image)
@@ -1802,6 +1802,7 @@ func _apply_history_snapshot(snapshot: Dictionary, is_undo: bool) -> void:
 	if result["changed_heightmap"]:
 		terrain_mesh.set_heightmap(_heightmap_image)
 		_height_revision += 1
+		_mark_foliage_preview_dirty()
 		_mark_tile_overlay_dirty()
 	if result["changed_blendmap"]:
 		_blendmap_tex.update(_blendmap_image)
@@ -2386,4 +2387,3 @@ func _get_material() -> ShaderMaterial:
 	if terrain_mesh == null:
 		return null
 	return terrain_mesh.get_material()
-
