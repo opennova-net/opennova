@@ -22,7 +22,6 @@ extends Node3D
 #     audio, env overrides) before loading another mission or leaving.
 
 const VegAssets := preload("res://engine/terrain/veg_assets.gd")
-const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
 const MissionRuntime := preload("res://engine/world/mission_runtime.gd")
 const NovaModelResolver := preload("res://engine/mission/nova_model_resolver.gd")
@@ -113,7 +112,7 @@ var _perf_audio_us: int = 0
 
 ## Inject the resource root the next load resolves through (play-in-editor hands
 ## the editor's root over so play uses exactly the assets being authored). Null
-## returns to the game's settings-driven mount.
+## returns to explicit-directory mounting.
 func set_resource_root(root: NovaResourceRoot) -> void:
 	_injected_root = root
 
@@ -126,14 +125,12 @@ func is_playable() -> bool:
 	return _playable
 
 
-# The root a load resolves through: the injected one, else a fresh runtime mount of
-# `dir` (or the persisted resource directory when empty). Emits load_failed and
-# returns null when nothing resolves.
+# The root a load resolves through: the injected one, else a fresh packed mount
+# of the explicit dir. Product settings and command-line policy belong to the
+# game host, so this shared engine module never resolves either independently.
 func _resolve_root(dir: String) -> NovaResourceRoot:
 	if _injected_root != null:
 		return _injected_root
-	if dir.is_empty():
-		dir = ResourceDirSettings.get_resource_dir()
 	if dir.is_empty():
 		load_failed.emit("no resource directory set")
 		return null
@@ -419,16 +416,11 @@ func _load_mission_internal(mission: NovaMissionData, bms_name: String, resource
 	return OK
 
 
-# Mount `dir` as the runtime resource root: PFF archives are the packed game data,
-# the `/exp <name>` flag (or persisted setting) layers an expansion over the base,
-# loose files override the archives only under the `/d` dev flag, and the `/game <code>`
-# flag (or persisted setting, default "jo") selects the SCR decode key so demo data
-# decodes correctly. Emits load_failed and returns null on a bad root.
+# Fallback for explicit engine callers that did not inject a session root.
+# Game and ONED hosts inject their already-resolved root instead.
 func _mount_runtime_root(dir: String) -> NovaResourceRoot:
 	var resource_root := NovaResourceRoot.new()
-	var expansion := NovaLaunchFlags.expansion(ResourceDirSettings.get_expansion())
-	var game := NovaLaunchFlags.game(ResourceDirSettings.get_game())
-	if resource_root.mount_runtime(dir, expansion, NovaLaunchFlags.loose_override_enabled(), game) != OK:
+	if resource_root.mount_runtime(dir) != OK:
 		load_failed.emit(resource_root.get_last_error())
 		return null
 	return resource_root

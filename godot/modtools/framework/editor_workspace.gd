@@ -638,7 +638,7 @@ func _resource_root_or_settings() -> NovaResourceRoot:
 	var root := _resource_root()
 	if root != null:
 		return root
-	var dir := NovaResourceDirSettings.get_resource_dir()
+	var dir := NovaOnedSettings.get_resource_dir()
 	if dir.is_empty():
 		return null
 	var resources := NovaResourceRoot.new()

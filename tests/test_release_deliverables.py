@@ -347,6 +347,24 @@ def test_godot_test_wrapper_allows_fixture_inner_classes() -> None:
     assert all("Inner Class" not in pattern for pattern in collection_patterns)
 
 
+def test_godot_test_wrapper_runs_real_runtime_launch_argument_probe() -> None:
+    test_script = (ROOT / "scripts/test_godot.sh").read_text(encoding="utf-8")
+    probe = (ROOT / "godot/tests/runtime_launch_args_probe.gd").read_text(encoding="utf-8")
+
+    assert "-s res://tests/runtime_launch_args_probe.gd" in test_script
+    assert "OPENNOVA_GODOT_PROBE_ONLY" in test_script
+    assert "MSYS2_ARG_CONV_EXCL='/D;/EXP;/game'" in test_script
+    assert "run_launch_probe direct /D /game jodemo /EXP revx02" in test_script
+    assert "run_launch_probe oned -- /D /game jodemo /EXP revx02" in test_script
+    assert '--oned-resource-root "C:/OpenNova Loose Root"' in test_script
+    assert "OPENNOVA_RUNTIME_LAUNCH_ARGS_PROBE: OK" in test_script
+    assert 'EXPECTED_ROOT := "C:/OpenNova Loose Root"' in probe
+    assert 'MODE_DIRECT := "direct"' in probe
+    assert 'MODE_ONED := "oned"' in probe
+    assert '_count_option(observed_args, "/game") != 1' in probe
+    assert '_has_property(parsed, "game") or _has_script_method("game")' in probe
+
+
 def test_release_splits_godot_editor_and_runtime_package_jobs() -> None:
     workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
     package_jobs = [
@@ -404,6 +422,12 @@ def test_godot_package_wrappers_target_editor_and_runtime() -> None:
     assert "[ValidateSet(\"all\", \"editor\", \"runtime\")]" in windows_shared
     assert "package_godot_macos.sh editor" in macos_editor
     assert "package_godot_macos.sh runtime" in macos_runtime
+    assert "function Test-GodotAppBoot" in windows_shared
+    assert "Test-GodotAppBoot -PackageName" in windows_shared
+    assert "--headless --quit-after 120 --verbose" in windows_shared
+    assert "boot_app()" in macos_shared
+    assert 'boot_app "$preset" "$app_path"' in macos_shared
+    assert "--headless --quit-after 120 --verbose" in macos_shared
     assert "TARGET=\"${1:-all}\"" in macos_shared
 
 

@@ -19,7 +19,7 @@ extends Control
 # for those names and connects them. The control-name sets are exported so a
 # different game's menu set can be pointed at the same shell.
 
-const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
+const GameSettings := preload("res://game/game_settings.gd")
 
 # Var index the director sets to the current screen's MUSICVAR. The menumus MUS
 # script reads its section discriminator at var INDEX 2 (golden test
@@ -135,6 +135,7 @@ signal crosshair_style_changed(style: int)
 
 var _menu: NovaMnuMenu
 var _root: NovaResourceRoot
+var _resource_session: NovaRuntimeResourceSession
 var _text: RtxtStringFile
 var _style: MnsStyleSheet
 var _sound_profile: NovaLwfData
@@ -181,8 +182,10 @@ func add_companion(companion) -> void:
 # the asset/menu/director wiring (only assembled once); call reset_to_root() to
 # return to the main menu on later entries. Returns false when the main menu
 # cannot be resolved/loaded (an empty/incomplete resource dir).
-func setup(root: NovaResourceRoot) -> bool:
+func setup(root: NovaResourceRoot, resource_session: NovaRuntimeResourceSession = null) -> bool:
 	_root = root
+	_resource_session = resource_session
+	_selected_expansion = _current_expansion()
 	if _menu == null:
 		_assemble_assets()
 	_enter_menu_music()
@@ -342,7 +345,7 @@ func _wire_named_controls() -> void:
 
 
 func _seed_crosshair_style_controls() -> void:
-	var persisted := ResourceDirSettings.get_crosshair_style()
+	var persisted := GameSettings.get_crosshair_style()
 	for control_name in crosshair_style_control_names:
 		var spin := _menu.find_child(control_name, true, false)
 		if spin is NovaMnuSpinList:
@@ -394,20 +397,29 @@ func _fill_control_mapping(table: NovaMnuTable, device: int) -> void:
 
 # --- Expansion / mod selection (Options -> Mods) ------------------------------
 
-# Fill a mod list with the expansions discoverable under the resource root, mirror
-# the persisted current selection, and wire activation. list_expansions scans
-# <root>/expansion/<name>/<name>.pff and is independent of the mounted root.
+# Fill a mod list from the launch session. Retail sessions discover PFF-backed
+# expansions; ONED loose-only sessions discover expansion directories.
 func _seed_mod_list(list: NovaMnuList) -> void:
 	if _root == null:
 		return
-	var expansions := _root.list_expansions(_root.get_root_dir())
+	var expansions := PackedStringArray()
+	if _resource_session != null:
+		expansions = _resource_session.list_expansions()
+	else:
+		expansions = _root.list_expansions(_root.get_root_dir())
 	list.set_items(expansions)
 	var current := _current_expansion()
 	var sel := expansions.find(current)
 	if sel >= 0:
 		list.select(sel)
-	_update_mod_desc(current if sel >= 0 else "")
-	if not list.item_activated.is_connected(_on_mod_activated):
+	_update_mod_desc(current)
+	var locked := _resource_session != null and _resource_session.is_expansion_locked()
+	list.mouse_filter = Control.MOUSE_FILTER_IGNORE if locked else Control.MOUSE_FILTER_STOP
+	list.focus_mode = Control.FOCUS_NONE if locked else Control.FOCUS_ALL
+	list.tooltip_text = "Expansion selected by /exp for this session." if locked else ""
+	if locked and list.item_activated.is_connected(_on_mod_activated):
+		list.item_activated.disconnect(_on_mod_activated)
+	elif not locked and not list.item_activated.is_connected(_on_mod_activated):
 		list.item_activated.connect(_on_mod_activated)
 
 
@@ -442,18 +454,30 @@ func _on_apply_selected_mod() -> void:
 func _apply_expansion(name: String) -> void:
 	if _root == null or name.is_empty() or name == _current_expansion():
 		return
-	var dir := _root.get_root_dir()
-	var prev := _current_expansion()
+	if _resource_session != null and _resource_session.is_expansion_locked():
+		return
 	# A full context reload clears the AudioVM globals. Preserve the active
 	# screen selector so the expansion's newly selected M<n> script enters the
 	# same menu section [orig: Expansion_ReloadAllAssets @ 0x568370 followed by
 	# UI_DispatchScreenEvent @ 0x54e6a0 -> AudioVM_SetVariable(2, MUSICVAR)].
 	var active_music_var := NovaMusicService.get_var(MUSIC_VAR_INDEX)
-	if _root.mount_runtime(dir, name, NovaLaunchFlags.loose_override_enabled()) != OK:
-		push_warning("NovaMenuHost: could not mount expansion '%s': %s" % [name, _root.get_last_error()])
-		_root.mount_runtime(dir, prev, NovaLaunchFlags.loose_override_enabled())  # rollback
+	var err := OK
+	if _resource_session != null:
+		err = _resource_session.select_expansion(name)
+	else:
+		var dir := _root.get_root_dir()
+		var prev := _current_expansion()
+		err = _root.mount_runtime(dir, name, false)
+		if err != OK:
+			_root.mount_runtime(dir, prev, false)
+		else:
+			GameSettings.set_expansion(name)
+	if err != OK:
+		var detail := _root.get_last_error()
+		if _resource_session != null:
+			detail = _resource_session.get_last_error()
+		push_warning("NovaMenuHost: could not mount expansion '%s': %s" % [name, detail])
 		return
-	ResourceDirSettings.set_expansion(name)
 	_selected_expansion = name
 	_enter_menu_music()
 	NovaMusicService.set_var(MUSIC_VAR_INDEX, active_music_var)
@@ -488,7 +512,9 @@ func _describe(name: String) -> String:
 
 
 func _current_expansion() -> String:
-	return ResourceDirSettings.get_expansion()
+	if _resource_session != null:
+		return _resource_session.get_expansion()
+	return GameSettings.get_expansion()
 
 
 # --- Menu signal handlers -----------------------------------------------------
@@ -513,8 +539,8 @@ func _on_quit_requested() -> void:
 
 func _on_widget_value_changed(widget_name: String, kind: String, index: int, value: String) -> void:
 	if kind == "spinlist" and _is_crosshair_style_control(widget_name):
-		ResourceDirSettings.set_crosshair_style(index)
-		crosshair_style_changed.emit(ResourceDirSettings.get_crosshair_style())
+		GameSettings.set_crosshair_style(index)
+		crosshair_style_changed.emit(GameSettings.get_crosshair_style())
 	elif kind == "list" and _is_mission_list(widget_name):
 		_selected_mission = value
 	elif kind == "list" and _is_mod_list(widget_name):
@@ -748,7 +774,7 @@ func get_selected_expansion() -> String:
 
 
 func get_crosshair_style() -> int:
-	return ResourceDirSettings.get_crosshair_style()
+	return GameSettings.get_crosshair_style()
 
 
 func get_menu_stack_depth() -> int:

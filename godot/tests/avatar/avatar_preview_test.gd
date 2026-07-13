@@ -282,7 +282,7 @@ func _retail_root():
 	if dir.is_empty() or not DirAccess.dir_exists_absolute(dir):
 		return null
 	var root := NovaResourceRoot.new()
-	if root.mount_runtime(dir, "", false, "jo") != OK:
+	if root.mount_runtime(dir, "", false) != OK:
 		return null
 	if not root.has_file("PI_Idle.BAD") or not root.has_file("Dt1rst.bad"):
 		return null

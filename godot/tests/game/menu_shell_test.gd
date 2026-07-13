@@ -6,6 +6,7 @@ extends GutTest
 # degrades gracefully when menu assets are missing - all headless, no blocking.
 
 const MenuHostScript := preload("res://game/menu_shell.gd")
+const GameSettings := preload("res://game/game_settings.gd")
 
 const MAIN_FIXTURE := "res://../fixtures/mnu/jo_main.mnu"   # STARTUP, MUSICVAR 1
 const SP_FIXTURE := "res://../fixtures/mnu/jo_loadout.mnu"  # the cross-.mnu target
@@ -32,7 +33,7 @@ class _MissingBankMusicRoot extends RefCounted:
 		return PackedByteArray([1])
 
 
-const STATE_CONFIG_PATH := "user://terrain_editor_state.cfg"
+const STATE_CONFIG_PATH := "user://game_settings.cfg"
 
 var _saved_state_config := PackedByteArray()
 var _had_state_config := false
@@ -203,13 +204,13 @@ func test_start_without_selection_falls_back_to_first_mission() -> void:
 
 
 func test_crosshair_spinlist_seeds_persists_and_notifies() -> void:
-	var saved := NovaResourceDirSettings.get_crosshair_style()
-	NovaResourceDirSettings.set_crosshair_style(11)
+	var saved := GameSettings.get_crosshair_style()
+	GameSettings.set_crosshair_style(11)
 	var dir := _make_runtime_dir()
 	var host = _make_runtime_host(dir)
 	if host == null:
 		pass_test("runtime resource root unavailable in this environment")
-		NovaResourceDirSettings.set_crosshair_style(saved)
+		GameSettings.set_crosshair_style(saved)
 		_rm_runtime_dir(dir)
 		return
 	var spin = host.get_menu().find_child("XHAIR_APPEARANCE", true, false)
@@ -219,10 +220,10 @@ func test_crosshair_spinlist_seeds_persists_and_notifies() -> void:
 			"The spin list starts on the persisted crosshair.")
 	watch_signals(host)
 	host.get_menu().notify_widget_value("XHAIR_APPEARANCE", "spinlist", 18, "cross19.tga")
-	assert_eq(NovaResourceDirSettings.get_crosshair_style(), 18, "Selection persists.")
+	assert_eq(GameSettings.get_crosshair_style(), 18, "Selection persists.")
 	assert_signal_emitted_with_parameters(host, "crosshair_style_changed", [18])
 	host.get_menu().get_resource_root().clear()
-	NovaResourceDirSettings.set_crosshair_style(saved)
+	GameSettings.set_crosshair_style(saved)
 	_rm_runtime_dir(dir)
 
 
@@ -231,13 +232,13 @@ func test_crosshair_spinlist_seeds_persists_and_notifies() -> void:
 # (read back by main_game at the next launch), and announces it. Uses a runtime
 # (packed PFF) mount so list_expansions/mount_runtime have real archives to work on.
 func test_mods_tab_lists_mounts_and_persists_expansion() -> void:
-	var saved := NovaResourceDirSettings.get_expansion()
-	NovaResourceDirSettings.set_expansion("")  # clean slate so the activate is not a no-op
+	var saved := GameSettings.get_expansion()
+	GameSettings.set_expansion("")  # clean slate so the activate is not a no-op
 	var dir := _make_runtime_dir()
 	var host = _make_runtime_host(dir)
 	if host == null:
 		pass_test("runtime resource root unavailable in this environment")
-		NovaResourceDirSettings.set_expansion(saved)
+		GameSettings.set_expansion(saved)
 		_rm_runtime_dir(dir)
 		return
 	watch_signals(host)
@@ -255,7 +256,7 @@ func test_mods_tab_lists_mounts_and_persists_expansion() -> void:
 	host._on_mod_activated(0)
 	assert_signal_emitted_with_parameters(host, "expansion_selected", ["jox01"])
 	assert_eq(host.get_selected_expansion(), "jox01")
-	assert_eq(NovaResourceDirSettings.get_expansion(), "jox01", "choice persisted to config")
+	assert_eq(GameSettings.get_expansion(), "jox01", "choice persisted to config")
 	assert_not_null(NovaMusicService.current_script(), "expansion menu context reopens")
 	if NovaMusicService.current_script() != null:
 		assert_eq(NovaMusicService.current_script().get_source_path(), "Mjox01.bin",
@@ -269,7 +270,7 @@ func test_mods_tab_lists_mounts_and_persists_expansion() -> void:
 	assert_eq(host._root.read_file("expmodel.3di").get_string_from_utf8(), "exp model",
 		"expansion archive mounted over the base game")
 	host._root.clear()  # release PFF handles before deleting the temp archives
-	NovaResourceDirSettings.set_expansion(saved)
+	GameSettings.set_expansion(saved)
 	_rm_runtime_dir(dir)
 
 
@@ -278,13 +279,13 @@ func test_mods_tab_lists_mounts_and_persists_expansion() -> void:
 # plain OK on Options); the host scopes it by screen role, so on a Mods screen (mod
 # list, no mission list) ACCEPT applies. Regression for the "OK loads a mission" bug.
 func test_mods_ok_applies_expansion_without_launching() -> void:
-	var saved := NovaResourceDirSettings.get_expansion()
-	NovaResourceDirSettings.set_expansion("")  # so the apply is not a no-op
+	var saved := GameSettings.get_expansion()
+	GameSettings.set_expansion("")  # so the apply is not a no-op
 	var dir := _make_runtime_dir()
 	var host = _make_runtime_host(dir)
 	if host == null:
 		pass_test("runtime resource root unavailable in this environment")
-		NovaResourceDirSettings.set_expansion(saved)
+		GameSettings.set_expansion(saved)
 		_rm_runtime_dir(dir)
 		return
 	var menu = host.get_menu()
@@ -297,9 +298,40 @@ func test_mods_ok_applies_expansion_without_launching() -> void:
 	(accept as BaseButton).pressed.emit()  # press OK
 	assert_signal_not_emitted(host, "start_requested", "OK on the Mods screen must not launch")
 	assert_signal_emitted_with_parameters(host, "expansion_selected", ["jox01"])  # OK applied the highlighted mod
-	assert_eq(NovaResourceDirSettings.get_expansion(), "jox01", "applied choice persisted")
+	assert_eq(GameSettings.get_expansion(), "jox01", "applied choice persisted")
 	host._root.clear()
-	NovaResourceDirSettings.set_expansion(saved)
+	GameSettings.set_expansion(saved)
+	_rm_runtime_dir(dir)
+
+
+func test_explicit_expansion_makes_mods_session_read_only_without_persisting() -> void:
+	var saved := GameSettings.get_expansion()
+	GameSettings.set_expansion("persisted")
+	var dir := _make_runtime_dir()
+	var root := NovaResourceRoot.new()
+	var launch := NovaLaunchFlags.parse(PackedStringArray(["/exp", "jox01"]), "persisted")
+	var session := NovaRuntimeResourceSession.new()
+	assert_eq(session.start(dir, "persisted", launch, root,
+		func(name: String) -> void: GameSettings.set_expansion(name)), OK)
+	var host = MenuHostScript.new()
+	host.main_menu_file = "options.mnu"
+	host.size = Vector2(800, 600)
+	add_child_autofree(host)
+	assert_true(host.setup(root, session))
+
+	var avail = host.get_menu().find_child("AVAIL_LIST", true, false)
+	assert_not_null(avail)
+	assert_eq(host.get_selected_expansion(), "jox01")
+	assert_eq(avail.mouse_filter, Control.MOUSE_FILTER_IGNORE)
+	assert_eq(avail.focus_mode, Control.FOCUS_NONE)
+	assert_false(avail.item_activated.is_connected(host._on_mod_activated))
+	host._apply_expansion("other")
+	assert_eq(host.get_selected_expansion(), "jox01")
+	assert_eq(GameSettings.get_expansion(), "persisted",
+		"command-line /exp is launch-only and never overwrites game settings")
+
+	root.clear()
+	GameSettings.set_expansion(saved)
 	_rm_runtime_dir(dir)
 
 

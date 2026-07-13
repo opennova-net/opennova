@@ -7,7 +7,7 @@ extends Node
 # refutes) the "F3/F4/armory dead in editor preview" report at the routing layer
 # the GUT unit tests bypass (they call handle_viewport_input directly).
 
-const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
+const OnedSettings := preload("res://modtools/editor/oned_settings.gd")
 const EditorScene := preload("res://modtools/editor/editor_main.tscn")
 
 var _fails := 0
@@ -16,8 +16,8 @@ var _fails := 0
 func _ready() -> void:
 	var root := OS.get_environment("NOVA_RESOURCE_DIR").strip_edges()
 	if root.is_empty():
-		root = ResourceDirSettings.get_resource_dir()
-	ResourceDirSettings.set_resource_dir(root)
+		root = OnedSettings.get_resource_dir()
+	OnedSettings.set_resource_dir(root)
 
 	var app = EditorScene.instantiate()
 	add_child(app)

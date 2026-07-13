@@ -36,9 +36,12 @@ void NovaResourceRoot::_bind_methods() {
 	ClassDB::bind_static_method("NovaResourceRoot", D_METHOD("cache_epoch"), &NovaResourceRoot::cache_epoch);
 	ClassDB::bind_static_method("NovaResourceRoot", D_METHOD("bump_cache_epoch"), &NovaResourceRoot::bump_cache_epoch);
 	ClassDB::bind_method(D_METHOD("set_root_dir", "path"), &NovaResourceRoot::set_root_dir);
-	ClassDB::bind_method(D_METHOD("mount_runtime", "path", "expansion", "allow_loose_override", "game_code"),
-			&NovaResourceRoot::mount_runtime, DEFVAL(String()), DEFVAL(false), DEFVAL("jo"));
+	ClassDB::bind_method(D_METHOD("mount_runtime", "path", "expansion", "allow_loose_override"),
+			&NovaResourceRoot::mount_runtime, DEFVAL(String()), DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("mount_loose_runtime", "path", "expansion"),
+			&NovaResourceRoot::mount_loose_runtime, DEFVAL(String()));
 	ClassDB::bind_method(D_METHOD("list_expansions", "path"), &NovaResourceRoot::list_expansions);
+	ClassDB::bind_method(D_METHOD("list_loose_expansions", "path"), &NovaResourceRoot::list_loose_expansions);
 	ClassDB::bind_method(D_METHOD("get_expansion"), &NovaResourceRoot::get_expansion);
 	ClassDB::bind_method(D_METHOD("get_root_dir"), &NovaResourceRoot::get_root_dir);
 	ClassDB::bind_method(D_METHOD("get_last_error"), &NovaResourceRoot::get_last_error);
@@ -141,26 +144,32 @@ Error NovaResourceRoot::set_root_dir(const String &path) {
 	// Editor / authoring: loose files only, never the PFF archives. Loose files aren't SCR-wrapped,
 	// so the JO default (version-detect) is correct here.
 	expansion_ = String();
-	return mount_with_mode(path, String(), opennova::VfsMountMode::LooseOnly, "jo",
+	return mount_with_mode(path, String(), opennova::VfsMountMode::LooseOnly,
 			opennova::VfsArchiveDiscovery::ScanAll);
 }
 
-Error NovaResourceRoot::mount_runtime(const String &path, const String &expansion, bool allow_loose_override,
-		const String &game_code) {
+Error NovaResourceRoot::mount_runtime(const String &path, const String &expansion, bool allow_loose_override) {
 	// Runtime: the packed PFFs are the game data; loose files only shadow them under `/d`.
 	const opennova::VfsMountMode mode = allow_loose_override
 			? opennova::VfsMountMode::PackedWithLooseOverride
 			: opennova::VfsMountMode::Packed;
 	// The game mounts the witnessed fixed boot table - extra .pff files in the
 	// root never mount in retail (docs/vfs/vfs-pff-mount-re.md D-VFS-2).
-	const Error err = mount_with_mode(path, expansion, mode, game_code,
+	const Error err = mount_with_mode(path, expansion, mode,
 			opennova::VfsArchiveDiscovery::RetailTable);
 	expansion_ = (err == OK) ? expansion : String();
 	return err;
 }
 
+Error NovaResourceRoot::mount_loose_runtime(const String &path, const String &expansion) {
+	const Error err = mount_with_mode(path, expansion, opennova::VfsMountMode::LooseOnly,
+			opennova::VfsArchiveDiscovery::ScanAll);
+	expansion_ = (err == OK) ? expansion : String();
+	return err;
+}
+
 Error NovaResourceRoot::mount_with_mode(const String &path, const String &expansion, opennova::VfsMountMode mode,
-		const String &game_code, opennova::VfsArchiveDiscovery discovery) {
+		opennova::VfsArchiveDiscovery discovery) {
 	// The resolver's per-session caches are keyed to the previous root; drop them so a
 	// new (or re-scanned) resource directory is read fresh. scan_root() in the editor
 	// routes through here too, so a rescan picks up on-disk edits. The epoch bump tells
@@ -184,9 +193,9 @@ Error NovaResourceRoot::mount_with_mode(const String &path, const String &expans
 		last_error_ = String(index_.last_error().c_str());
 		return ERR_CANT_OPEN;
 	}
-	// Game-aware SCR keying: resolve the chosen game's policy once (gameprofile is the single
-	// source) and apply it for subsequent read_file calls. An empty/unknown code is the JO default.
-	index_.set_scr_policy(gameprofile_scr_policy_for_code(game_code.utf8().get_data()));
+	// JO, DFX, and DFX2 use version-detected SCR keying. Decode-profile selection belongs
+	// to import tooling, not to the runtime mount contract.
+	index_.set_scr_policy(SCR_POLICY_VERSION_DETECT);
 	last_error_ = String();
 	return OK;
 }
@@ -198,6 +207,18 @@ PackedStringArray NovaResourceRoot::list_expansions(const String &path) const {
 		return out;
 	}
 	for (const std::string &name : opennova::vfs_list_expansions(clean.utf8().get_data())) {
+		out.push_back(String(name.c_str()));
+	}
+	return out;
+}
+
+PackedStringArray NovaResourceRoot::list_loose_expansions(const String &path) const {
+	PackedStringArray out;
+	const String clean = normalize_dir(path);
+	if (clean.is_empty()) {
+		return out;
+	}
+	for (const std::string &name : opennova::vfs_list_loose_expansions(clean.utf8().get_data())) {
 		out.push_back(String(name.c_str()));
 	}
 	return out;

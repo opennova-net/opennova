@@ -5,7 +5,7 @@ extends Node
 # play-in-editor, walks forward to clear the tents, stays first person, captures level + a
 # slight look-down. Fullscreen + clean play SubViewport (same as bend_capture_probe).
 
-const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
+const GameSettings := preload("res://game/game_settings.gd")
 const EditorScene := preload("res://modtools/editor/editor_main.tscn")
 const OUT_DIR := "res://../.scratch/fp"
 const ENV_NAME := "full_00.env"
@@ -19,8 +19,8 @@ func _ready() -> void:
 	DirAccess.make_dir_recursive_absolute(_out_abs)
 	var root := OS.get_environment("NOVA_RESOURCE_DIR").strip_edges()
 	if root.is_empty():
-		root = ResourceDirSettings.get_resource_dir()
-	ResourceDirSettings.set_resource_dir(root)
+		root = GameSettings.get_resource_dir()
+	GameSettings.set_resource_dir(root)
 
 	var app = EditorScene.instantiate()
 	add_child(app)

@@ -12,6 +12,24 @@ tracked **D-VFS** catalog below. IDB write-back applied in the same session
 (the FileSystem_*/PFF_* renames + the `g_FS_*` globals; the old
 "SetBypassFlag" name had the polarity backwards).
 
+## OpenNova product mount policies
+
+The portable VFS exposes several mount modes, but each application enters
+through one fixed product policy:
+
+| Entry | Root | Mode | PFF requirement |
+|---|---|---|---|
+| `opennova.exe` | `game_settings.cfg` resource root | `Packed` | At least one archive from the retail boot table must open |
+| `opennova.exe /d` | The same saved game root | `PackedWithLooseOverride` | Same requirement; loose files beside the archives win lookups |
+| ONED Play | Private handoff of the root from `oned_settings.cfg` | `LooseOnly` | None; archives are ignored |
+
+`/exp <name>` selects an expansion within the active root and preserves that
+mode. Packed modes use the expansion archive chain and retain the base-PFF
+gate. ONED's loose-only mode accepts an
+`expansion/<name>/` directory without requiring `<name>.pff`. The private
+ONED root marker is an application handoff, not a public game option; the
+public launch options covered here are only `/d` and `/exp`.
+
 Write side: the runtime never writes PFFs — the 0x768200–0x768b97 cluster is
 mount/lookup/read/close only; every `_lcreat/_lwrite` caller is a loose-file
 writer. [ADR 0008](../adr/0008-pff-writer-policy.md) (our editor-side writer)

@@ -7,11 +7,14 @@ extends GutTest
 
 func test_list_games_returns_the_profile_table() -> void:
 	var games := NovaPffArchive.list_games()
-	assert_eq(games.size(), 5, "Five shipping game profiles are exposed.")
+	assert_eq(games.size(), 5, "All five asset decode profiles are exposed.")
 	var names := []
 	for g in games:
 		var entry := g as Dictionary
-		assert_true(entry.has("id") and entry.has("name"), "Each game has an id and a name.")
+		assert_true(
+			entry.has("id") and entry.has("name"),
+			"Each asset profile has an id and a name."
+		)
 		names.append(String(entry["name"]))
 	assert_true(names.has("Joint Operations"), "Joint Operations should be listed.")
 

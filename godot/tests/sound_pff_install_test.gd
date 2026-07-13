@@ -27,7 +27,7 @@ func test_pff_install_mission_audio() -> void:
 		return
 
 	var root := NovaResourceRoot.new()
-	var err: int = root.mount_runtime(install_dir, expansion, false, "jo")
+	var err: int = root.mount_runtime(install_dir, expansion, false)
 	assert_eq(err, OK, "mount_runtime(%s, exp=%s) mounts" % [install_dir, expansion])
 	if err != OK:
 		return

@@ -102,17 +102,20 @@ func _ensure_dialog() -> void:
 	_extract_selected_button = _make_tool_button("Extract Selected…", "Save the highlighted files to a folder.", _on_extract_selected_pressed)
 	_extract_all_button = _make_tool_button("Extract All…", "Save every file from all open archives to a folder.", _on_extract_all_pressed)
 
-	# Game row.
+	# Source asset profile row.
 	var game_row := HBoxContainer.new()
 	game_row.name = "PffToolGameRow"
 	game_row.add_theme_constant_override("separation", 8)
 	box.add_child(game_row)
 	var game_label := Label.new()
-	game_label.text = "Game:"
+	game_label.text = "Asset profile:"
 	game_row.add_child(game_label)
 	_game_option = OptionButton.new()
 	_game_option.name = "PffToolGameOption"
-	_game_option.tooltip_text = "Which game these files come from. This controls how the archive is unscrambled."
+	_game_option.tooltip_text = (
+		"The source title for these assets. This controls archive and SCR decoding; "
+		+ "it does not select runtime game support."
+	)
 	_game_option.item_selected.connect(_on_game_selected)
 	game_row.add_child(_game_option)
 	_populate_games()
@@ -216,7 +219,7 @@ func _populate_games() -> void:
 	for game in NovaPffArchive.list_games():
 		var entry := game as Dictionary
 		var idx := _game_option.item_count
-		_game_option.add_item(String(entry.get("name", "Game")))
+		_game_option.add_item(String(entry.get("name", "Asset profile")))
 		_game_option.set_item_metadata(idx, int(entry.get("id", 0)))
 
 

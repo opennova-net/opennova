@@ -57,6 +57,33 @@ func test_cannot_summon_while_picker_open() -> void:
 	picker.queue_free()
 
 
+func test_oned_handoff_never_falls_back_to_the_game_folder_picker() -> void:
+	var game := _make()
+	game._state = MainGameScript.State.MENU
+	game._launch_flags = NovaLaunchFlags.parse(PackedStringArray([
+		"/d", "--oned-resource-root", "C:/ONED loose root",
+	]))
+
+	assert_false(game._can_summon_dir_picker(),
+		"an explicit ONED root owns the launch, including its failure path")
+
+
+func test_installing_session_injects_the_same_root_into_game_world() -> void:
+	var game := _make()
+	var world := GameWorld.new()
+	autofree(world)
+	game._world = world
+	var session := NovaRuntimeResourceSession.new()
+	var root := NovaResourceRoot.new()
+	session._root = root
+
+	game._install_resource_session(session)
+
+	assert_same(game._root, root)
+	assert_same(world._injected_root, root,
+		"menu host and world must never resolve separate launch roots")
+
+
 func test_mission_text_effect_reaches_hud_objective() -> void:
 	# Drained effects carry {kind, a..d, str} (NovaSimulation::drain_effects); the
 	# WAC text/ptext family lands as kind=="text" with the string in "str". The

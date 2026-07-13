@@ -29,7 +29,7 @@ func _run() -> void:
 		missions.append(args[i])
 
 	var root := NovaResourceRoot.new()
-	var err: int = root.mount_runtime(dir, expansion, false, "jo")
+	var err: int = root.mount_runtime(dir, expansion, false)
 	print("[probe] mount %s exp='%s' -> %d" % [dir, expansion, err])
 	if err != OK:
 		quit(1)

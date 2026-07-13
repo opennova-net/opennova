@@ -10,10 +10,14 @@ func before_each() -> void:
 	_cap = {}
 
 
-func test_dialog_builds_and_lists_games() -> void:
+func test_dialog_builds_and_lists_asset_profiles() -> void:
 	var t := _new_tool()
 	assert_not_null(t._dialog, "ensure builds the dialog.")
-	assert_eq(t._game_option.item_count, NovaPffArchive.list_games().size(), "Game dropdown lists every profile.")
+	assert_eq(
+		t._game_option.item_count,
+		NovaPffArchive.list_games().size(),
+		"Asset profile dropdown lists every decode profile."
+	)
 	t._refresh_all()
 	assert_true(t._extract_all_button.disabled, "Extract All is disabled with no archive open.")
 	assert_false(t._open_button.disabled, "Open is always available.")

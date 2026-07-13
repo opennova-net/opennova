@@ -5,7 +5,8 @@ extends GutTest
 # carries the catalog), server.json lifecycle, and settings persistence.
 
 const McpClient := preload("res://tests/mcp/mcp_test_client.gd")
-const STATE_CONFIG_PATH := "user://terrain_editor_state.cfg"
+const McpSettings := preload("res://modtools/mcp/mcp_settings.gd")
+const STATE_CONFIG_PATH := "user://oned_settings.cfg"
 
 const BUILTIN_TOOLS := [
 	"get_editor_state", "get_logs", "show_status_message", "describe_api",

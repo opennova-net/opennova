@@ -135,7 +135,8 @@ public:
 	NovaPffArchive();
 	~NovaPffArchive();
 
-	// The games the tool can target: [{id:int, name:String}, ...] from the gameprofile table.
+	// Asset decode profiles the PFF tool can target: [{id:int, name:String}, ...].
+	// These source-format rows do not select or advertise runtime game support.
 	static Array list_games();
 
 	Error open(const String &path);

@@ -9,7 +9,7 @@ extends Node
 # ~220 ticks of 62.5 Hz — frame counts would race it). Screenshots land in .scratch/body.
 # [orig: producer @0x4b5dad + WeaponSlot_ReloadAmmo @0x54173c; world-wac-ai-re.md §14.8]
 
-const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
+const GameSettings := preload("res://game/game_settings.gd")
 const EditorScene := preload("res://modtools/editor/editor_main.tscn")
 const OUT_DIR := "res://../.scratch/body"
 const ENV_NAME := "full_00.env"
@@ -24,8 +24,8 @@ func _ready() -> void:
 	DirAccess.make_dir_recursive_absolute(_out_abs)
 	var root := OS.get_environment("NOVA_RESOURCE_DIR").strip_edges()
 	if root.is_empty():
-		root = ResourceDirSettings.get_resource_dir()
-	ResourceDirSettings.set_resource_dir(root)
+		root = GameSettings.get_resource_dir()
+	GameSettings.set_resource_dir(root)
 
 	var app = EditorScene.instantiate()
 	add_child(app)

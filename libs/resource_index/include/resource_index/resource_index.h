@@ -39,7 +39,8 @@ public:
 
 	// Mount and index a game install. When `expansion` is non-empty and
 	// <root>/expansion/<name>/<name>.pff exists, the expansion's loose files + archives
-	// override the base game (see opennova::Vfs::mount_game). Empty expansion = base game.
+	// override the base game (see opennova::Vfs::mount_game). LooseOnly also accepts an
+	// archive-free expansion directory. Empty expansion = base game.
 	// `mode` selects which layers are mounted (loose, archives, or both) — see VfsMountMode.
 	// `discovery` selects base-archive discovery: the index defaults to ScanAll (the
 	// editor's browse index must see arbitrary modder archives — a deliberate divergence,

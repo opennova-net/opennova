@@ -154,6 +154,37 @@ done
 # ---------------------------------------------------------------------------
 # 5. Export, ad-hoc sign, and zip each app.
 # ---------------------------------------------------------------------------
+boot_app() {
+  local package_name="$1" app_path="$2"
+  local plist="$app_path/Contents/Info.plist"
+  local executable
+  executable="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$plist")"
+  local app_bin="$app_path/Contents/MacOS/$executable"
+  [[ -x "$app_bin" ]] || {
+    echo "error: boot smoke executable missing for '$package_name': $app_bin" >&2
+    exit 1
+  }
+
+  echo "=== Boot smoke: $package_name ==="
+  local log status
+  log="$(mktemp)"
+  status=0
+  "$app_bin" --headless --quit-after 120 --verbose >"$log" 2>&1 || status=$?
+  cat "$log"
+
+  if [[ "$status" -ne 0 ]]; then
+    rm -f "$log"
+    echo "error: boot smoke for '$package_name' exited with code $status" >&2
+    exit 1
+  fi
+  if grep -Eq "Failed loading scene|Cannot open file 'res://|SCRIPT ERROR|GDExtension dynamic library not found|Failed to load script" "$log"; then
+    rm -f "$log"
+    echo "error: boot smoke for '$package_name' logged load errors" >&2
+    exit 1
+  fi
+  rm -f "$log"
+}
+
 export_app() {
   local preset="$1" app_path="$2" zip_path="$3"
   echo "=== Exporting $preset -> $app_path ==="
@@ -174,6 +205,8 @@ export_app() {
   echo "=== Ad-hoc signing $(basename "$app_path") ==="
   codesign --force --deep --sign - "$app_path"
   codesign --verify --deep --strict "$app_path" || echo "::warning::codesign verify reported issues"
+
+  boot_app "$preset" "$app_path"
 
   # ditto preserves bundle structure + signatures inside the zip.
   rm -f "$zip_path"

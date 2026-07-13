@@ -5,13 +5,14 @@
 
 /* The PFF container key is universal across every NovaLogic title we have reversed (the ROL7
    keystream seeded 0x0312A4CE, verified vs Jointops.exe PFF_LoadFileToMemory @ 0x768920). The
-   per-game row still carries the key so a future un-reversed game only needs a new table entry,
+   per-profile row still carries the key so a future reversed asset family only needs a table entry,
    not a code change. No BFC1 compressor exists, so every row uses bfc1_compress 0 and defaults new
    archives to PFF3.
 
-   SCR keying is per-game. Retail JO/DFX2 version-1 payloads use the JO_DFX2 key, which the SCR
-   version byte selects, so those rows use VERSION_DETECT. The JO Demo stamps the SAME version byte
-   (1) on every SCR file but keys them with the DEFAULT key (0xABEEFACE) — verified by decrypting
+   SCR keying is per source asset family. Retail JO/DFX2 version-1 payloads use the JO_DFX2 key,
+   which the SCR version byte selects, so those rows use VERSION_DETECT. The JO Demo stamps the
+   SAME version byte (1) on every SCR file but keys them with the DEFAULT key (0xABEEFACE) —
+   verified by decrypting
    demores.pff: all 214 version-1 payloads (.def/.adm/.aip/.ptg/.ptl/.ptu/.txt) decode cleanly under
    DEFAULT and to garbage under JO_DFX2, and the demo ships no version-2 files. So the demo forces
    the DEFAULT key. */

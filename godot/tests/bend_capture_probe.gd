@@ -12,7 +12,7 @@ extends Node
 ## shows the body/legs lagging a fast aim flick, 06 settled.
 ## [orig: Entity_BuildBoneTransformMatrices @0x4b1290; world-wac-ai-re.md §14]
 
-const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
+const GameSettings := preload("res://game/game_settings.gd")
 const EditorScene := preload("res://modtools/editor/editor_main.tscn")
 
 const OUT_DIR := "res://../.scratch/bend"
@@ -33,12 +33,12 @@ func _ready() -> void:
 
 	_root = OS.get_environment("NOVA_RESOURCE_DIR").strip_edges()
 	if _root.is_empty():
-		_root = ResourceDirSettings.get_resource_dir()
-	if not ResourceDirSettings.is_valid_root(_root):
+		_root = GameSettings.get_resource_dir()
+	if not GameSettings.is_valid_root(_root):
 		push_error("[bend] no valid resource dir; set NOVA_RESOURCE_DIR")
 		get_tree().quit(1)
 		return
-	ResourceDirSettings.set_resource_dir(_root)
+	GameSettings.set_resource_dir(_root)
 	print("[bend] resource dir: ", _root)
 
 	_app = EditorScene.instantiate()

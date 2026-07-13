@@ -192,7 +192,7 @@ target_link_libraries(pff_unit_test PRIVATE opennova_pff)
 target_include_directories(pff_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME pff_unit COMMAND pff_unit_test)
 
-# Game profile table tests
+# Asset decode profile table tests
 add_executable(gameprofile_test gameprofile/gameprofile_test.c)
 target_link_libraries(gameprofile_test PRIVATE opennova_gameprofile)
 target_include_directories(gameprofile_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

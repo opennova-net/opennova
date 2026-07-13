@@ -100,13 +100,16 @@ visual check in the driver run.
 
 ### F3 — Play-with-overrides launcher ("See it in game")
 
-The editor gains one affordance that launches the game runtime with the
-authoring directory as the loose-file override — the engine's own mechanism
-([orig: `/d` loose-override @ 0x4a7310], already ported per the runtime
-launch flags). The game runtime stays PFF-mount-first; `/d` overlays the
-authored files exactly as retail did, so every workspace's G axis is the same
-gesture: save, launch, see it. Editor side: a shell action (enabled when a
-runtime binary/scene is available) + per-workspace doc of what to look at.
+The editor gains one affordance that launches the game runtime with `/d` and
+a private handoff for ONED's authoring root ([orig: `/d` loose-override
+@ 0x4a7310]). That private launch is deliberately loose-only: it ignores PFFs
+and does not require a retail install, so every workspace's G axis is the same
+gesture: save, launch, see it. Standalone game launches keep retail behavior:
+packed-only by default, or packed plus loose overrides under public `/d`, with
+at least one boot-table PFF required in either case. ONED and the game persist
+their roots separately in `oned_settings.cfg` and `game_settings.cfg`.
+Editor side: a shell action (enabled when a runtime binary/scene is available)
+and per-workspace documentation of what to look at.
 Packaged-product side is already guarded: the packaging boot smoke landed
 2026-07-04 with the `run/main_scene.modtools` fix (every exported exe must
 boot headless before it ships).

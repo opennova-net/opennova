@@ -9,7 +9,7 @@ extends Node
 # the ease reads ~2 sim ticks per render frame fullscreen (62.5 Hz vs ~30-45 fps),
 # so the mid-ease captures sit a few FRAMES after the RMB edge.
 
-const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
+const GameSettings := preload("res://game/game_settings.gd")
 const EditorScene := preload("res://modtools/editor/editor_main.tscn")
 const OUT_DIR := "res://../.scratch/weapon_round"
 const ENV_NAME := "full_00.env"
@@ -26,12 +26,12 @@ func _ready() -> void:
 	DirAccess.make_dir_recursive_absolute(_out_abs)
 	var root := OS.get_environment("NOVA_RESOURCE_DIR").strip_edges()
 	if root.is_empty():
-		root = ResourceDirSettings.get_resource_dir()
+		root = GameSettings.get_resource_dir()
 	# NOVA_WR_EXPANSION: mount an expansion over the base game for this run (the
 	# persisted key is what GameWorld reads — mirror of the retail /exp flag).
 	var expn := OS.get_environment("NOVA_WR_EXPANSION").strip_edges()
-	ResourceDirSettings.set_expansion(expn)
-	ResourceDirSettings.set_resource_dir(root)
+	GameSettings.set_expansion(expn)
+	GameSettings.set_resource_dir(root)
 
 	var app = EditorScene.instantiate()
 	add_child(app)

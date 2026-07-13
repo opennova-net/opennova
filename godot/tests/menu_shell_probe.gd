@@ -14,7 +14,7 @@ extends SceneTree
 const MAIN_FIXTURE := "res://../fixtures/mnu/jo_main.mnu"
 const SP_FIXTURE := "res://../fixtures/mnu/jo_loadout.mnu"
 const RESULT_PATH := "user://menu_shell_probe_result.txt"
-const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
+const GameSettings := preload("res://game/game_settings.gd")
 
 
 func _initialize() -> void:
@@ -24,16 +24,16 @@ func _initialize() -> void:
 func _run() -> void:
 	var diag := {}
 	var failures: Array[String] = []
-	var prev := ResourceDirSettings.get_resource_dir()
+	var prev := GameSettings.get_resource_dir()
 	var dir := _build_resource_dir()
-	ResourceDirSettings.set_resource_dir(dir)
+	GameSettings.set_resource_dir(dir)
 	diag["temp_dir"] = dir
 	# is_valid_root may reject temp/user-data paths in some environments; the
 	# persisted dir then reads back empty. Skip cleanly rather than fail.
-	diag["persisted_ok"] = (ResourceDirSettings.get_resource_dir() == dir)
+	diag["persisted_ok"] = (GameSettings.get_resource_dir() == dir)
 	if not diag["persisted_ok"]:
 		_write_result(diag, [], true)
-		ResourceDirSettings.set_resource_dir(prev)
+		GameSettings.set_resource_dir(prev)
 		_cleanup(dir)
 		quit(0)
 		return
@@ -41,7 +41,7 @@ func _run() -> void:
 	var packed := load("res://game/main_game.tscn") as PackedScene
 	if packed == null:
 		_write_result(diag, ["failed to load main_game.tscn"], false)
-		ResourceDirSettings.set_resource_dir(prev)
+		GameSettings.set_resource_dir(prev)
 		_cleanup(dir)
 		quit(1)
 		return
@@ -71,7 +71,7 @@ func _run() -> void:
 	scene.queue_free()
 	await process_frame
 	_write_result(diag, failures, false)
-	ResourceDirSettings.set_resource_dir(prev)
+	GameSettings.set_resource_dir(prev)
 	_cleanup(dir)
 	quit(0 if failures.is_empty() else 1)
 

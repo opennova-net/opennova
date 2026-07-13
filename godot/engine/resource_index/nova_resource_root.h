@@ -49,12 +49,10 @@ class NovaResourceRoot : public RefCounted {
 	static String lookup_name(const String &name);
 	static Dictionary file_entry_to_dictionary(const opennova::ResourceFileEntry &entry);
 
-	// Shared validate-and-scan body for both mount entry points. `game_code` selects the SCR
-	// decode policy (gameprofile code, e.g. "jo"/"jodemo"); an empty/unknown code is the JO default.
-	// `discovery` splits the two products: the runtime mounts the witnessed retail boot table,
-	// the editor's browse index scans every archive (D-VFS-2's recorded decision).
+	// Shared validate-and-scan body for every mount entry point. `discovery` splits packed
+	// runtime mounting from authoring discovery; SCR decoding is always version-detected.
 	Error mount_with_mode(const String &path, const String &expansion, opennova::VfsMountMode mode,
-	                      const String &game_code, opennova::VfsArchiveDiscovery discovery);
+	                      opennova::VfsArchiveDiscovery discovery);
 
 	String expansion_;
 
@@ -70,24 +68,29 @@ public:
 	// Runtime mount: the PFF archives are the packed game data. `expansion` (e.g. "jox01")
 	// layers the expansion's archives over the base game. When `allow_loose_override` is true
 	// (the engine's `/d` dev flag) loose files next to the archives shadow the packed entries;
-	// otherwise the runtime reads from PFFs exclusively. `game_code` (the `/game <code>` launch
-	// flag, default "jo") selects the SCR decode key so demo data decodes correctly.
+	// otherwise the runtime reads from PFFs exclusively.
 	Error mount_runtime(const String &path, const String &expansion = String(),
-	                    bool allow_loose_override = false, const String &game_code = "jo");
+	                    bool allow_loose_override = false);
+	// ONED Play mount: loose files only, PFF archives ignored. Unlike set_root_dir(), this
+	// accepts an expansion so a directory-only authoring expansion can layer over the base root.
+	Error mount_loose_runtime(const String &path, const String &expansion = String());
 	// Global cache epoch (see util/engine_caches.h): bumped by every mount/clear on ANY
 	// root. GDScript cache holders compare it against the epoch they were built under and
 	// self-clear when it moved. bump_cache_epoch() lets the editor force-invalidate after
 	// editing files on disk without remounting.
 	static int64_t cache_epoch();
 	static void bump_cache_epoch();
-	// The expansion name this root was runtime-mounted with ("" for base game or
-	// editor/loose mounts). Feeds the expansion bank slots and the M<exp>/G<exp>
+	// The expansion name this root was runtime-mounted with ("" for base game or an
+	// editor browse mount). Feeds the expansion bank slots and the M<exp>/G<exp>
 	// music forms [orig: Expansion_LoadAssets @ 0x4a4730].
 	String get_expansion() const;
 
 	// Expansion names discoverable under `<path>/expansion/` (each subdir with a matching
 	// <name>.pff). Independent of the currently mounted root, so the UI can list before mounting.
 	PackedStringArray list_expansions(const String &path) const;
+	// Every immediate expansion subdirectory, including directory-only authoring expansions.
+	// ONED sessions use this seam; retail discovery remains list_expansions().
+	PackedStringArray list_loose_expansions(const String &path) const;
 	String get_root_dir() const;
 	String get_last_error() const;
 	void clear();

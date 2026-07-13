@@ -52,7 +52,7 @@ func _run() -> void:
 			sim_ticks = int(args[i + 1])
 
 	var root := NovaResourceRoot.new()
-	var err: int = root.mount_runtime(dir, expansion, false, "jo")
+	var err: int = root.mount_runtime(dir, expansion, false)
 	print("[dlgprobe] mount %s exp='%s' -> %d  ambient=%s" % [dir, expansion, err, str(ambient)])
 	if err != OK:
 		quit(1)

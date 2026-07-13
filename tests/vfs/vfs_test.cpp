@@ -213,6 +213,71 @@ static int test_mount_game_modes() {
     return 1;
 }
 
+// Packed runtime modes require at least one usable base archive. Loose files and
+// expansion archives cannot make an otherwise unpacked root bootable.
+static int test_packed_modes_require_base_archive() {
+    using opennova::VfsMountMode;
+    fs::path root = fresh_dir("packed_requires_base");
+    fs::path exp = root / "expansion" / "jox01";
+    write_loose(root / "base.txt", "LOOSE_BASE");
+    write_loose(root / "resource.pff", "not a usable archive");
+    write_pff1(exp / "jox01.pff", "exp.txt", "EXPANSION");
+
+    {
+        Vfs v;
+        CHECK(!v.mount_game(root.string(), "jox01", VfsMountMode::Packed),
+              "Packed rejects a root with no usable base PFF");
+        CHECK(v.last_error().find("base PFF") != std::string::npos,
+              "Packed failure explains the missing base PFF");
+    }
+    {
+        Vfs v;
+        CHECK(!v.mount_game(root.string(), "jox01", VfsMountMode::PackedWithLooseOverride),
+              "PackedWithLooseOverride rejects a root with no usable base PFF");
+        CHECK(!v.has_file("base.txt"), "failed mount exposes no partial loose layer");
+    }
+    return 1;
+}
+
+// ONED sessions are loose-only. A selected expansion is therefore a directory
+// layer and does not need a matching <name>.pff archive.
+static int test_loose_only_directory_expansion() {
+    using opennova::VfsMountMode;
+    fs::path root = fresh_dir("loose_directory_expansion");
+    fs::path exp = root / "expansion" / "jox01";
+    write_loose(root / "shared.txt", "BASE");
+    write_loose(root / "base_only.txt", "BASE_ONLY");
+    write_loose(exp / "shared.txt", "EXPANSION");
+    write_loose(exp / "exp_only.txt", "EXP_ONLY");
+
+    Vfs v;
+    CHECK(v.mount_game(root.string(), "jox01", VfsMountMode::LooseOnly),
+          "LooseOnly accepts an archive-free expansion directory");
+    CHECK(read_vfs(v, "shared.txt") == "EXPANSION", "loose expansion shadows base loose file");
+    CHECK(read_vfs(v, "exp_only.txt") == "EXP_ONLY", "loose expansion-only file is mounted");
+    CHECK(read_vfs(v, "base_only.txt") == "BASE_ONLY", "base loose fallback remains mounted");
+    return 1;
+}
+
+static int test_expansion_discovery_modes() {
+    fs::path root = fresh_dir("expansion_discovery");
+    fs::path packed = root / "expansion" / "jox01";
+    fs::path loose = root / "expansion" / "loosemod";
+    fs::create_directories(packed);
+    write_pff1(packed / "jox01.pff", "packed.txt", "PACKED");
+    write_loose(loose / "loose.txt", "LOOSE");
+
+    const std::vector<std::string> retail = opennova::vfs_list_expansions(root.string());
+    CHECK(retail.size() == 1 && retail[0] == "jox01", "retail discovery requires <name>.pff");
+    const std::vector<std::string> authoring = opennova::vfs_list_loose_expansions(root.string());
+    CHECK(authoring.size() == 2, "loose discovery includes every expansion directory");
+    CHECK(std::find(authoring.begin(), authoring.end(), "jox01") != authoring.end(),
+          "loose discovery includes packed expansion directories too");
+    CHECK(std::find(authoring.begin(), authoring.end(), "loosemod") != authoring.end(),
+          "loose discovery includes directory-only expansions");
+    return 1;
+}
+
 // D-VFS-2 pin: the witnessed fixed boot table [orig: PFF_OpenAllArchives
 // @ 0x4a4310, name table @ 0x829f90]. RetailTable (the default) mounts
 // language.pff / localres.pff / resource.pff in slot order — slot order IS
@@ -367,6 +432,9 @@ int main() {
     RUN_TEST(test_mount_game_expansion);
     RUN_TEST(test_mount_game_no_expansion);
     RUN_TEST(test_mount_game_modes);
+    RUN_TEST(test_packed_modes_require_base_archive);
+    RUN_TEST(test_loose_only_directory_expansion);
+    RUN_TEST(test_expansion_discovery_modes);
     RUN_TEST(test_mount_game_retail_table);
     RUN_TEST(test_scr_decode_on_read);
     RUN_TEST(test_scr_decode_policy);

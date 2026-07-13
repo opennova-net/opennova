@@ -18,7 +18,7 @@ func _run() -> void:
 	print("[probe] mount_runtime dir=%s exp='%s'" % [dir, expansion])
 	var t0 := Time.get_ticks_msec()
 	var root := NovaResourceRoot.new()
-	var err: int = root.mount_runtime(dir, expansion, false, "jo")
+	var err: int = root.mount_runtime(dir, expansion, false)
 	var t1 := Time.get_ticks_msec()
 	print("[probe] mount_runtime -> %d in %d ms" % [err, t1 - t0])
 	if err == OK:

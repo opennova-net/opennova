@@ -10,6 +10,8 @@ extends RefCounted
 # Item metadata sentinel for the "Clear list" entry in the recent-directories
 # dropdown; real entries carry their path, the disabled placeholder carries "".
 const _RECENT_CLEAR_META := "::clear::"
+const McpSettings := preload("res://modtools/mcp/mcp_settings.gd")
+const OnedSettings := preload("res://modtools/editor/oned_settings.gd")
 
 var _resource_library: EditorResourceLibrary
 # func() -> EditorWorkspace: the active workspace (view-guide targeting).
@@ -36,6 +38,7 @@ var _settings_apply_resource_dir_button: Button
 var _settings_recent_row: HBoxContainer
 var _settings_recent_option: OptionButton
 var _settings_expansion_row: HBoxContainer
+var _settings_expansion_option: OptionButton
 var _settings_view_section: VBoxContainer
 var _settings_grid_toggle: CheckBox
 var _settings_axes_toggle: CheckBox
@@ -75,7 +78,8 @@ func setup(
 func bind_nodes(
 	resource_dir_edit: LineEdit, browse_button: Button, apply_button: Button,
 	recent_row: HBoxContainer, recent_option: OptionButton,
-	expansion_row: HBoxContainer, view_section: VBoxContainer,
+	expansion_row: HBoxContainer, expansion_option: OptionButton,
+	view_section: VBoxContainer,
 	grid_toggle: CheckBox, axes_toggle: CheckBox,
 	mcp_toggle: CheckBox, mcp_port_edit: LineEdit, mcp_status_label: Label,
 	pff_tool_button: Button
@@ -86,6 +90,7 @@ func bind_nodes(
 	_settings_recent_row = recent_row
 	_settings_recent_option = recent_option
 	_settings_expansion_row = expansion_row
+	_settings_expansion_option = expansion_option
 	_settings_view_section = view_section
 	_settings_grid_toggle = grid_toggle
 	_settings_axes_toggle = axes_toggle
@@ -104,6 +109,8 @@ func wire() -> void:
 		_settings_resource_dir_edit.text_submitted.connect(_on_resource_dir_submitted)
 	if _settings_recent_option != null and not _settings_recent_option.item_selected.is_connected(_on_recent_selected):
 		_settings_recent_option.item_selected.connect(_on_recent_selected)
+	if _settings_expansion_option != null and not _settings_expansion_option.item_selected.is_connected(_on_expansion_selected):
+		_settings_expansion_option.item_selected.connect(_on_expansion_selected)
 	if _settings_grid_toggle != null and not _settings_grid_toggle.toggled.is_connected(_on_grid_toggled):
 		_settings_grid_toggle.toggled.connect(_on_grid_toggled)
 	if _settings_axes_toggle != null and not _settings_axes_toggle.toggled.is_connected(_on_axes_toggled):
@@ -204,12 +211,42 @@ func apply_resource_settings(scan: bool, persist: bool = true) -> Error:
 	return _set_resource_root_dir.call(path, persist, scan)
 
 
-# The editor authors loose files only; PFF expansions are a runtime concern (mounted
-# via the `/exp` launch flag), so the settings popup no longer offers an expansion picker.
-# The row is hidden here in case the scene still carries it.
+# ONED layers directory-only authoring expansions over its loose root. Base is
+# always index zero; the row hides only when the live root has no expansions.
 func _populate_expansion_options() -> void:
+	if _settings_expansion_option == null:
+		if _settings_expansion_row != null:
+			_settings_expansion_row.visible = false
+		return
+	_settings_expansion_option.clear()
+	_settings_expansion_option.add_item("(base game)")
+	_settings_expansion_option.set_item_metadata(0, "")
+	var expansions := _resource_library.get_loose_expansions()
+	expansions.sort()
+	var wanted := OnedSettings.get_expansion()
+	var selected_index := 0
+	for expansion in expansions:
+		var index := _settings_expansion_option.item_count
+		_settings_expansion_option.add_item(expansion)
+		_settings_expansion_option.set_item_metadata(index, expansion)
+		if expansion.to_lower() == wanted.to_lower():
+			selected_index = index
+	_settings_expansion_option.select(selected_index)
+	if selected_index == 0 and not wanted.is_empty():
+		# Clear stale state only when this is ONED's persisted root. Transient
+		# probe mounts must not rewrite the user's saved expansion.
+		var live_key := OnedSettings.canonical_key(_resource_library.get_root_dir())
+		var saved_key := OnedSettings.canonical_key(OnedSettings.get_resource_dir())
+		if live_key == saved_key:
+			OnedSettings.set_expansion("")
 	if _settings_expansion_row != null:
-		_settings_expansion_row.visible = false
+		_settings_expansion_row.visible = not expansions.is_empty()
+
+
+func _on_expansion_selected(index: int) -> void:
+	if _settings_expansion_option == null or index < 0 or index >= _settings_expansion_option.item_count:
+		return
+	OnedSettings.set_expansion(String(_settings_expansion_option.get_item_metadata(index)))
 
 
 # Fill the "Recent directories…" dropdown from the shared recent-dirs list. Index 0

@@ -86,7 +86,7 @@ int main() {
     write_bytes(root / "junk.bin", std::vector<uint8_t>(2000, 0x5A));
 
     opennova::ResourceIndex index;
-    TEST_EXPECT(index.scan(root.string()));
+    TEST_EXPECT(index.scan(root.string(), "", opennova::VfsMountMode::LooseOnly));
 
     const std::vector<opennova::ResourceFileEntry> music = index.resource_files("music_script");
     TEST_EXPECT(has(music, "plainmus.bin"));

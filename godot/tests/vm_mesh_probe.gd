@@ -8,7 +8,7 @@ extends SceneTree
 #
 # Use: godot --headless --path godot -s res://tests/vm_mesh_probe.gd -- <resource-dir>
 
-const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
+const GameSettings := preload("res://game/game_settings.gd")
 
 
 func _initialize() -> void:
@@ -17,7 +17,7 @@ func _initialize() -> void:
 
 func _run() -> void:
 	var args := OS.get_cmdline_user_args()
-	var dir: String = args[0] if not args.is_empty() else ResourceDirSettings.get_resource_dir()
+	var dir: String = args[0] if not args.is_empty() else GameSettings.get_resource_dir()
 	var root := NovaResourceRoot.new()
 	if root.set_root_dir(dir) != OK:
 		push_error("[vm] set_root_dir failed")

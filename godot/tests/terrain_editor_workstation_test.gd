@@ -11,7 +11,7 @@ const EnvironmentInspectorScript = preload("res://modtools/environment/environme
 const QuadrantBoardScript = preload("res://modtools/terrain/ui/widgets/quadrant_board.gd")
 const MissionInspectorScript = preload("res://modtools/mission/mission_inspector.gd")
 const LinkPayloadScript = preload("res://modtools/framework/links/link_payload.gd")
-const STATE_CONFIG_PATH := "user://terrain_editor_state.cfg"
+const STATE_CONFIG_PATH := "user://oned_settings.cfg"
 const FIXTURE_CACHE_DIR := "opennova_test"
 
 var _saved_state_config := PackedByteArray()
@@ -73,7 +73,7 @@ func after_each() -> void:
 				or (child is Control and child.get_script() == EditorWorkstationScript):
 			child.queue_free()
 	await get_tree().process_frame
-	# Persistence tests write user://terrain_editor_state.cfg; restore it so they
+	# Persistence tests write user://oned_settings.cfg; restore it so they
 	# never leak a temp resource directory into the real editor's saved state.
 	if _had_state_config:
 		var f := FileAccess.open(STATE_CONFIG_PATH, FileAccess.WRITE)
@@ -796,7 +796,7 @@ func test_resource_root_inside_user_data_is_rejected_on_load() -> void:
 	# internal path.
 	var bogus := OS.get_user_data_dir().path_join("resource_settings_persist_bogus_%d" % Time.get_ticks_usec())
 	DirAccess.make_dir_recursive_absolute(bogus)
-	NovaResourceDirSettings.set_resource_dir(bogus)
+	NovaOnedSettings.set_resource_dir(bogus)
 
 	var w2 = add_child_autofree(EditorWorkstationScene.instantiate())
 	assert_eq(w2.get_resource_root_dir(), "", "A resource root inside the app user-data dir should be rejected on load.")

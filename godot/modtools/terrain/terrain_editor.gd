@@ -22,6 +22,7 @@ const TerrainEditorBrushSession = preload("res://modtools/terrain/terrain_editor
 const TerrainFoliagePreview = preload("res://modtools/terrain/terrain_foliage_preview.gd")
 const TerrainTileOverlayPreview = preload("res://modtools/terrain/terrain_tile_overlay_preview.gd")
 const WorldContextPreview = preload("res://modtools/framework/world_context_preview.gd")
+const OnedSettings = preload("res://modtools/editor/oned_settings.gd")
 const DEFAULT_SECTOR_PATTERN := [
 	0, 0, 0, 0, 0, 0, 0, 0,
 	0, 0, 0, 0, 0, 0, 0, 0,
@@ -1858,21 +1859,14 @@ func _on_camera_escape() -> void:
 
 
 func _load_editor_state() -> void:
-	var config := ConfigFile.new()
-	if config.load("user://terrain_editor_state.cfg") != OK:
-		return
-	_last_open_dir = String(config.get_value("paths", "last_open_dir", ""))
-	_last_save_dir = String(config.get_value("paths", "last_save_dir", ""))
-	_last_export_dir = String(config.get_value("paths", "last_export_dir", ""))
+	var paths := OnedSettings.load_terrain_paths()
+	_last_open_dir = String(paths.open)
+	_last_save_dir = String(paths.save)
+	_last_export_dir = String(paths.export)
 
 
 func _save_editor_state() -> void:
-	var config := ConfigFile.new()
-	config.load("user://terrain_editor_state.cfg")
-	config.set_value("paths", "last_open_dir", _last_open_dir)
-	config.set_value("paths", "last_save_dir", _last_save_dir)
-	config.set_value("paths", "last_export_dir", _last_export_dir)
-	config.save("user://terrain_editor_state.cfg")
+	OnedSettings.save_terrain_paths(_last_open_dir, _last_save_dir, _last_export_dir)
 
 
 func _remember_open_path(path: String) -> void:
@@ -2378,5 +2372,4 @@ func _get_material() -> ShaderMaterial:
 	if terrain_mesh == null:
 		return null
 	return terrain_mesh.get_material()
-
 

@@ -34,7 +34,7 @@ func _run() -> void:
 		_write(out + ["RESULT=SKIP (no dir)"]); quit(0); return
 
 	var root := NovaResourceRoot.new()
-	root.mount_runtime(dir, "", false, "jo")
+	root.mount_runtime(dir, "", false)
 
 	# Dump main.mnu per-screen MUSICVARs (the value the menu pushes into the VM).
 	var mnu_bytes := root.read_file("main.mnu")

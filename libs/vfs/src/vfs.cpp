@@ -213,7 +213,8 @@ bool Vfs::mount_game(const std::string &game_root, const std::string &expansion,
     fs::path exp_dir;
     if (!expansion.empty()) {
         exp_dir = root / "expansion" / expansion;
-        if (fs::exists(exp_dir / (expansion + ".pff"), ec)) {
+        if (mode == VfsMountMode::LooseOnly ? fs::is_directory(exp_dir, ec)
+                                            : fs::exists(exp_dir / (expansion + ".pff"), ec)) {
             have_expansion = true;
         }
         // A missing/unknown expansion silently falls back to base-game mounting.
@@ -237,6 +238,8 @@ bool Vfs::mount_game(const std::string &game_root, const std::string &expansion,
         return true;
     }
 
+    size_t usable_base_archives = 0;
+
     if (discovery == VfsArchiveDiscovery::ScanAll) {
         // Authoring discovery (the editor's browse index): every base-root
         // *.pff, alphabetical for determinism. A deliberate divergence from
@@ -251,7 +254,16 @@ bool Vfs::mount_game(const std::string &game_root, const std::string &expansion,
         std::sort(base_pffs.begin(), base_pffs.end(), [](const fs::path &a, const fs::path &b) {
             return to_lower(a.filename().string()) < to_lower(b.filename().string());
         });
-        for (const fs::path &p : base_pffs) add_secondary_archive(p.string());
+        for (const fs::path &p : base_pffs) {
+            if (add_secondary_archive(p.string())) ++usable_base_archives;
+        }
+        if (usable_base_archives == 0) {
+            const std::string error = "No usable base PFF archives found in game root: " + root.string();
+            clear();
+            impl_->last_error = error;
+            return false;
+        }
+        impl_->last_error.clear();
         return true;
     }
 
@@ -262,7 +274,7 @@ bool Vfs::mount_game(const std::string &game_root, const std::string &expansion,
     // precedence; extra .pff files in the root never mount in retail. Names
     // probe case-insensitively (retail opens via _lopen on a case-insensitive
     // filesystem); a missing archive just leaves its slot empty — only the
-    // all-missing case is fatal at the caller (required-resources.md).
+    // all-missing case is fatal for packed modes (required-resources.md).
     static constexpr const char *kBootArchiveTable[] = {
         "language.pff",
         "localres.pff",
@@ -271,7 +283,7 @@ bool Vfs::mount_game(const std::string &game_root, const std::string &expansion,
     for (const char *slot_name : kBootArchiveTable) {
         fs::path direct = root / slot_name;
         if (fs::exists(direct, ec)) {
-            add_secondary_archive(direct.string());
+            if (add_secondary_archive(direct.string())) ++usable_base_archives;
             continue;
         }
         // Case-insensitive probe for case-sensitive filesystems.
@@ -279,12 +291,20 @@ bool Vfs::mount_game(const std::string &game_root, const std::string &expansion,
              fs::directory_iterator(root, fs::directory_options::skip_permission_denied, ec)) {
             if (ec) break;
             if (de.is_regular_file(ec) && to_lower(de.path().filename().string()) == slot_name) {
-                add_secondary_archive(de.path().string());
+                if (add_secondary_archive(de.path().string())) ++usable_base_archives;
                 break;
             }
         }
     }
 
+    if (usable_base_archives == 0) {
+        const std::string error = "No usable base PFF archives found in game root: " + root.string();
+        clear();
+        impl_->last_error = error;
+        return false;
+    }
+
+    impl_->last_error.clear();
     return true;
 }
 
@@ -356,7 +376,7 @@ std::vector<VfsFileLocation> Vfs::list_files() const {
 const std::string &Vfs::game_root() const { return impl_->game_root; }
 const std::string &Vfs::last_error() const { return impl_->last_error; }
 
-std::vector<std::string> vfs_list_expansions(const std::string &game_root) {
+static std::vector<std::string> list_expansion_dirs(const std::string &game_root, bool require_pff) {
     std::vector<std::string> out;
     std::error_code ec;
     const fs::path exp_root = fs::path(game_root) / "expansion";
@@ -366,10 +386,18 @@ std::vector<std::string> vfs_list_expansions(const std::string &game_root) {
         if (ec) break;
         if (!de.is_directory(ec)) continue;
         const std::string name = de.path().filename().string();
-        if (fs::exists(de.path() / (name + ".pff"), ec)) out.push_back(name);
+        if (!require_pff || fs::exists(de.path() / (name + ".pff"), ec)) out.push_back(name);
     }
     std::sort(out.begin(), out.end());
     return out;
+}
+
+std::vector<std::string> vfs_list_expansions(const std::string &game_root) {
+    return list_expansion_dirs(game_root, true);
+}
+
+std::vector<std::string> vfs_list_loose_expansions(const std::string &game_root) {
+    return list_expansion_dirs(game_root, false);
 }
 
 } // namespace opennova

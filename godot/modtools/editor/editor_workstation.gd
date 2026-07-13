@@ -213,8 +213,7 @@ func _ready() -> void:
 	_game_launch.setup(
 		_play_in_game_button,
 		func() -> String: return _resource_library.get_root_dir(),
-		func() -> String: return NovaResourceDirSettings.get_expansion(),
-		func() -> String: return NovaResourceDirSettings.get_game(),
+		func() -> String: return NovaOnedSettings.get_expansion(),
 		func(path: String, args: PackedStringArray) -> int: return OS.create_process(path, args),
 		func(path: String) -> bool: return FileAccess.file_exists(path),
 		func(launch_dir: String) -> EditorWorkspace.GameLaunchNote:
@@ -269,7 +268,8 @@ func _ready() -> void:
 	_settings_panel.bind_nodes(
 		_settings_resource_dir_edit, _settings_browse_resource_dir_button,
 		_settings_apply_resource_dir_button, _settings_recent_row,
-		_settings_recent_option, _settings_expansion_row, _settings_view_section,
+		_settings_recent_option, _settings_expansion_row, _settings_expansion_option,
+		_settings_view_section,
 		_settings_grid_toggle, _settings_axes_toggle, _settings_mcp_toggle,
 		_settings_mcp_port_edit, _settings_mcp_status_label, _settings_pff_tool_button)
 	_settings_panel.load_view_state()
@@ -1524,4 +1524,3 @@ func on_export_started(dir_path: String) -> void:
 
 func on_export_completed(err: Error, message: String) -> void:
 	_export_progress.on_export_completed(err, message)
-

@@ -19,7 +19,7 @@ import tempfile
 from pathlib import Path
 
 from . import gameprofile_ffi
-from .vfs_ffi import Vfs
+from .vfs_ffi import MOUNT_LOOSE_ONLY, Vfs
 
 TEXTURE_STRATEGY_GENERIC = "generic"
 TEXTURE_STRATEGY_3DI3_DF4OED = "3di3_df4oed"
@@ -38,8 +38,9 @@ class AssetResolver:
     are decoded natively. Resolved bytes are materialized to a temp file so the C/DCC
     parsers (which take paths) can read them.
 
-    `game` is the source game's code (e.g. "jo", "jodemo"); it selects the SCR decode key,
-    since the JO Demo keys version-1 payloads differently from retail JO/DFX2. Defaults to "jo".
+    `game` is the legacy parameter name for the source asset profile code (for example
+    "jo" or "jodemo"). It selects the import-time SCR decode key because JO Demo assets
+    key version-1 payloads differently from retail JO/DFX2. It does not select runtime support.
 
     Usage::
 
@@ -55,9 +56,13 @@ class AssetResolver:
         self._vfs = Vfs()
         # No expansion -> base-game mounting (loose shadows archives; *.pff mounted
         # sorted). A non-directory base_dir leaves the VFS empty, so resolve() -> None.
-        self._vfs.mount_game(str(self.base_dir))
-        # Game-aware SCR keying: resolve the policy through the single C mapping so the
-        # importer decodes exactly like the engine. Unknown/None code -> JO default.
+        # Prefer the normal packed-plus-loose authoring view when archives exist.
+        # A fresh ONED workspace may contain only loose files, so fall back to a
+        # loose-only mount instead of leaving the resolver empty.
+        if not self._vfs.mount_game(str(self.base_dir)):
+            self._vfs.mount_game(str(self.base_dir), mode=MOUNT_LOOSE_ONLY)
+        # Source-profile-aware SCR keying: resolve through the single C mapping rather
+        # than duplicating title codec facts. Unknown/None code -> JO default.
         self._vfs.set_scr_policy(gameprofile_ffi.scr_policy_for_code(game))
 
         # Materialized temp files: lowercase logical name -> temp Path

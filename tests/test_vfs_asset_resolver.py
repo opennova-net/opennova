@@ -117,7 +117,7 @@ def test_resolve_texture_extension_fallback(tmp_path: Path) -> None:
         assert Path(resolved).name.lower() == "tex.dds"
 
 
-# ----------------------------- game-aware SCR decode policy -----------------------------
+# -------------------------- asset-profile SCR decode policy --------------------------
 
 def test_gameprofile_scr_policy_for_code() -> None:
     from pyopennova import gameprofile_ffi as gp

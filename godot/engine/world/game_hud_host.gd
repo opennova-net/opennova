@@ -11,7 +11,6 @@ extends Node
 ##  TextResource_LoadMissionTextBin @0x51ed90]
 
 const GameHudScript := preload("res://engine/world/game_hud.gd")
-const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
 
 var _world = null           # GameWorld
 var _player_host = null     # LocalPlayerHost (reserved for the weapon-round anchors)
@@ -28,6 +27,7 @@ var _hud_weapon_name := ""  # equipped-weapon cache (re-resolves WepDes on chang
 # the public ADR 0018 read seam used by parity tests and future HUD consumers.
 var _hud_objective := ""
 var _pending_hud_messages: Array[Dictionary] = []
+var _crosshair_style := 0
 
 
 func setup(world, player_host, ui_parent: Node) -> void:
@@ -59,11 +59,12 @@ func get_hud():
 	return _game_hud
 
 
-## The USER crosshair style (Options); applied to a built HUD immediately, else
-## picked up from settings on the next build.
+## The host supplies the user's crosshair style. Keep it across mission teardown
+## so both game and ONED hosts can inject policy without engine-layer persistence.
 func set_crosshair_style(style: int) -> void:
+	_crosshair_style = clampi(style, 0, 24)
 	if _game_hud != null:
-		_game_hud.set_crosshair_style(style)
+		_game_hud.set_crosshair_style(_crosshair_style)
 
 
 # The in-game HUD over the live runtime: built lazily the first frame a mission has a
@@ -88,7 +89,7 @@ func _ensure_game_hud() -> void:
 		push_warning("GameHud: world exposed no resource root; the HUD layout cannot load.")
 	elif hudpos.load_from_resource_root(root, "hudpos.def") != OK:
 		push_warning("GameHud: hudpos.def did not load: %s" % hudpos.get_last_error())
-	_game_hud.set_crosshair_style(ResourceDirSettings.get_crosshair_style())
+	_game_hud.set_crosshair_style(_crosshair_style)
 	_game_hud.set_layout(hudpos, root)
 	_load_hud_text_tables(root)
 

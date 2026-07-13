@@ -134,15 +134,14 @@ func test_view_tab_hide_foliage_toggle_emits() -> void:
 
 
 
-const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
+const GameSettings := preload("res://game/game_settings.gd")
 var _saved_resource_dir := ""
 
 
 func before_all() -> void:
-	_saved_resource_dir = ResourceDirSettings.get_resource_dir()
-	ResourceDirSettings.set_resource_dir("")
+	_saved_resource_dir = GameSettings.get_resource_dir()
+	GameSettings.set_resource_dir("")
 
 
 func after_all() -> void:
-	ResourceDirSettings.set_resource_dir(_saved_resource_dir)
-
+	GameSettings.set_resource_dir(_saved_resource_dir)

@@ -163,7 +163,8 @@ confirmation; it needs a retail install.
 ## Validation (asset-gated — needs a retail JO install)
 
 1. Launch `Jointops.exe` with the authored `language.pff` / `localres.pff` /
-   `resource.pff` present in the game root (and optionally `/d <loose dir>`) —
+   `resource.pff` present in the game root (and optionally `/d` so loose
+   files beside those archives override packed entries) —
    confirm boot to the main menu (the fatal set is sufficient). The archives
    must bear the boot-table names (witnessed above; an arbitrary name never
    mounts) and `/d` alone is not enough. **Done 2026-07-05 on the three-way

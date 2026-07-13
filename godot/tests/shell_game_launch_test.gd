@@ -11,42 +11,46 @@ func _exists_none(_path: String) -> bool:
 	return false
 
 
-func test_runtime_flags_always_carry_the_loose_override() -> void:
-	assert_eq(ShellGameLaunch.runtime_flags("", "jo"), PackedStringArray(["/d", "/game", "jo"]),
-		"The base launch is /d plus an explicit game code — the loose override IS the gesture.")
-	assert_eq(ShellGameLaunch.runtime_flags("jox01", "jo"),
-		PackedStringArray(["/d", "/exp", "jox01", "/game", "jo"]),
+func test_runtime_flags_carry_the_oned_loose_root() -> void:
+	assert_eq(ShellGameLaunch.runtime_flags("C:/authoring/root", ""),
+		PackedStringArray(["/d", "--oned-resource-root", "C:/authoring/root"]),
+		"ONED Play explicitly hands its loose-only root to the game.")
+	assert_eq(ShellGameLaunch.runtime_flags("C:/authoring/root", "jox01"),
+		PackedStringArray(["/d", "--oned-resource-root", "C:/authoring/root", "/exp", "jox01"]),
 		"A mounted expansion rides along as the retail /exp flag.")
-	assert_eq(ShellGameLaunch.runtime_flags("  ", " JODEMO "), PackedStringArray(["/d", "/game", "jodemo"]),
-		"Whitespace expansion is dropped; the game code normalizes lowercase.")
-	assert_eq(ShellGameLaunch.runtime_flags("", ""), PackedStringArray(["/d", "/game", "jo"]),
-		"An empty game code resolves to the JO default, matching NovaLaunchFlags.")
+	assert_eq(ShellGameLaunch.runtime_flags(" C:/authoring/root ", "  "),
+		PackedStringArray(["/d", "--oned-resource-root", "C:/authoring/root"]),
+		"Whitespace-only expansion is dropped and the root is normalized.")
 
 
 func test_launch_plan_prefers_the_packaged_runtime_beside_the_editor() -> void:
 	var exe := "C:/install/opennova-modtools.exe"
-	var plan := ShellGameLaunch.launch_plan(exe, "C:/proj", true, "", "jo",
+	var plan := ShellGameLaunch.launch_plan(exe, "C:/proj", true, "C:/authoring/root", "",
 		func(path: String) -> bool: return path == "C:/install/opennova.exe")
 	assert_eq(plan.path, "C:/install/opennova.exe",
 		"The shipped two-product layout launches the sibling game exe.")
-	assert_eq(plan.args, PackedStringArray(["/d", "/game", "jo"]),
-		"The packaged runtime takes the retail-style flags directly.")
+	assert_eq(plan.args, PackedStringArray([
+		"--", "/d", "--oned-resource-root", "C:/authoring/root",
+	]), "The packaged runtime receives custom flags behind Godot's separator.")
 
 
 func test_launch_plan_falls_back_to_the_dev_binary_on_the_game_scene() -> void:
-	var plan := ShellGameLaunch.launch_plan("C:/godot/godot.exe", "C:/repo/godot", true, "jox01", "jo",
+	var plan := ShellGameLaunch.launch_plan("C:/godot/godot.exe", "C:/repo/godot", true,
+		"C:/authoring/root", "jox01",
 		Callable(self, "_exists_none"))
 	assert_eq(plan.path, "C:/godot/godot.exe", "Running from source re-runs this binary.")
 	assert_eq(plan.args[0], "--path", "The dev fallback targets the project.")
 	assert_eq(plan.args[1], "C:/repo/godot", "The project dir rides the --path flag.")
 	assert_eq(plan.args[2], ShellGameLaunch.RUNTIME_SCENE, "The game scene is the launch target.")
 	assert_eq(plan.args[3], "--", "Runtime flags sit behind the user-args separator.")
-	assert_eq(plan.args.slice(4), PackedStringArray(["/d", "/exp", "jox01", "/game", "jo"]),
-		"The same retail flags follow the separator.")
+	assert_eq(plan.args.slice(4), PackedStringArray([
+		"/d", "--oned-resource-root", "C:/authoring/root", "/exp", "jox01",
+	]), "The ONED loose root and retail options follow the separator.")
 
 
 func test_launch_plan_reports_unavailable_outside_dev_without_a_packaged_exe() -> void:
-	var plan := ShellGameLaunch.launch_plan("C:/install/opennova-modtools.exe", "C:/proj", false, "", "jo",
+	var plan := ShellGameLaunch.launch_plan("C:/install/opennova-modtools.exe", "C:/proj", false,
+		"C:/authoring/root", "",
 		Callable(self, "_exists_none"))
 	assert_null(plan, "No sibling exe and no dev binary means the action is honestly unavailable.")
 
@@ -58,7 +62,6 @@ func _make_launcher(button: Button, dir: String, spawned: Array, statuses: Array
 		button,
 		func() -> String: return dir,
 		func() -> String: return "",
-		func() -> String: return "jo",
 		func(path: String, args: PackedStringArray) -> int:
 			spawned.append({"path": path, "args": args})
 			return spawn_result,
@@ -183,5 +186,5 @@ func test_without_a_note_the_generic_copy_stands() -> void:
 	assert_eq(button.tooltip_text, ShellGameLaunch.TOOLTIP_READY,
 		"No note supplier leaves the generic ready tooltip untouched.")
 	assert_true(launcher.launch(), "The generic gesture still launches.")
-	assert_string_contains(String(statuses[0]["text"]), "your saved files override",
+	assert_string_contains(String(statuses[0]["text"]), "ONED's loose files",
 		"The generic launch status survives for note-less workspaces.")

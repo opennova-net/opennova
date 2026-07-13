@@ -514,7 +514,7 @@ unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 focus_mode = 0
-tooltip_text = "Layer an expansion's assets over the base game; \"(base game)\" mounts only the base archives."
+tooltip_text = "Layer a loose expansion's assets over the base game; \"(base game)\" uses only the root directory."
 
 [node name="SettingsApplyResourceDirButton" type="Button" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox"]
 unique_name_in_owner = true

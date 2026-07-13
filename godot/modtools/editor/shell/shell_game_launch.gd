@@ -3,18 +3,12 @@ extends RefCounted
 
 ## The "See in game" affordance (maturity slice F3): one top-bar gesture that
 ## launches the game runtime over the SAME authoring directory the editor has
-## mounted, using the engine's own loose-file override — the retail `/d` dev
-## flag the runtime already honors ([orig: `/d` loose-override @ 0x4a7310],
-## NovaLaunchFlags). The runtime stays PFF-mount-first; `/d` overlays the
-## authored loose files exactly as retail did, so every workspace's G axis is
-## the same gesture: save, launch, see it.
+## mounted. ONED passes /d plus a private resource-root handoff; that exact
+## combination creates a loose-only runtime session with no PFF dependency.
 ##
-## The editor and the runtime share one persisted resource directory
-## (NovaResourceDirSettings), so the spawned game mounts the authoring dir
-## without any hand-off; `/exp` and `/game` are passed explicitly so the launch
-## never depends on stale config. One button + spawn, not a session manager:
-## the runtime owns its own mount errors (an authoring dir without PFFs
-## reports honestly in the game), and the editor never tracks the process.
+## The private handoff is session-only: ONED and the game keep separate saved
+## resource roots. /exp rides along when selected in ONED, but is not persisted
+## by the launched game. The editor never tracks the process.
 ##
 ## Shell sub-controller in the EditorResourceLibrary style: owns one surface
 ## (the top-bar button) over injected nodes + Callables (the A8 captured-lambda
@@ -31,7 +25,7 @@ const RUNTIME_SCENE := "res://game/main_game.tscn"
 ## editor exe (export_presets.cfg: opennova.exe / opennova-modtools.exe).
 const PACKAGED_RUNTIME_CANDIDATES: Array[String] = ["opennova.exe", "opennova.x86_64", "opennova"]
 
-const TOOLTIP_READY := "See in game: launch the game with your saved files on top (loose-file override)."
+const TOOLTIP_READY := "See in game: launch the game from ONED's loose files."
 const TOOLTIP_NEEDS_DIR := "See in game: pick a resource directory first (Settings)."
 const TOOLTIP_NO_RUNTIME := "See in game: no game runtime is available beside this editor."
 
@@ -55,8 +49,6 @@ var _button: Button
 var _resource_dir: Callable
 # func() -> String: the persisted expansion name ("" = base game).
 var _expansion: Callable
-# func() -> String: the persisted game code ("jo", "jodemo", ...).
-var _game_code: Callable
 # func(path: String, args: PackedStringArray) -> int: process spawn, pid or -1.
 var _spawn: Callable
 # func(path: String) -> bool: file-existence probe (the packaged runtime exe).
@@ -72,7 +64,6 @@ func setup(
 	button: Button,
 	resource_dir: Callable,
 	expansion: Callable,
-	game_code: Callable,
 	spawn: Callable,
 	file_exists: Callable,
 	launch_note: Callable,
@@ -81,7 +72,6 @@ func setup(
 	_button = button
 	_resource_dir = resource_dir
 	_expansion = expansion
-	_game_code = game_code
 	_spawn = spawn
 	_file_exists = file_exists
 	_launch_note = launch_note
@@ -93,18 +83,18 @@ func setup(
 	refresh()
 
 
-## The retail-style runtime flags: `/d` always (the whole point of the
-## gesture), `/exp` when an expansion is mounted, `/game` always so the SCR
-## key choice never rides stale config.
-static func runtime_flags(expansion: String, game_code: String) -> PackedStringArray:
+## /d is the public dev flag. The private root marker distinguishes ONED's
+## loose-only session from a normal game's packed-plus-loose /d behavior.
+static func runtime_flags(resource_dir: String, expansion: String) -> PackedStringArray:
 	var flags := PackedStringArray(["/d"])
+	var root_dir := resource_dir.strip_edges()
+	if not root_dir.is_empty():
+		flags.append("--oned-resource-root")
+		flags.append(root_dir)
 	var exp_name := expansion.strip_edges()
 	if not exp_name.is_empty():
 		flags.append("/exp")
 		flags.append(exp_name)
-	var code := game_code.strip_edges().to_lower()
-	flags.append("/game")
-	flags.append(code if not code.is_empty() else "jo")
 	return flags
 
 
@@ -116,18 +106,20 @@ static func launch_plan(
 	editor_exe: String,
 	project_dir: String,
 	dev_mode: bool,
+	resource_dir: String,
 	expansion: String,
-	game_code: String,
 	file_exists: Callable
 ) -> LaunchPlan:
 	var exe_dir := editor_exe.get_base_dir()
 	for candidate in PACKAGED_RUNTIME_CANDIDATES:
 		var path := exe_dir.path_join(candidate)
 		if bool(file_exists.call(path)):
-			return LaunchPlan.make(path, runtime_flags(expansion, game_code))
+			var args := PackedStringArray(["--"])
+			args.append_array(runtime_flags(resource_dir, expansion))
+			return LaunchPlan.make(path, args)
 	if dev_mode:
 		var args := PackedStringArray(["--path", project_dir, RUNTIME_SCENE, "--"])
-		args.append_array(runtime_flags(expansion, game_code))
+		args.append_array(runtime_flags(resource_dir, expansion))
 		return LaunchPlan.make(editor_exe, args)
 	return null
 
@@ -176,7 +168,7 @@ func launch() -> bool:
 		_show_status.call("Game launched — " + note.detail, 0.0,
 			&"info" if note.staged else &"warn")
 	else:
-		_show_status.call("Game launched — your saved files override the packed data (/d).", 0.0, &"info")
+		_show_status.call("Game launched — using ONED's loose files (/d).", 0.0, &"info")
 	return true
 
 
@@ -191,8 +183,8 @@ func _current_plan() -> LaunchPlan:
 		OS.get_executable_path(),
 		ProjectSettings.globalize_path("res://"),
 		OS.has_feature("editor"),
+		String(_resource_dir.call()),
 		String(_expansion.call()),
-		String(_game_code.call()),
 		_file_exists
 	)
 

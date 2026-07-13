@@ -1,8 +1,8 @@
-"""ctypes binding for the per-game profile table (libs/gameprofile, in opennova.dll / libopennova.so).
+"""ctypes binding for the asset decode profile table (libs/gameprofile).
 
-The game->SCR-policy mapping is the single source of truth in C (libs/gameprofile); Python resolves
-through it rather than duplicating the table, so the importer keys SCR payloads exactly like the
-engine. Only the code->policy lookup the importer needs is wrapped here.
+The source-profile -> SCR-policy mapping is the single source of truth in C; Python resolves
+through it rather than duplicating the table, so importer assets use the correct title-specific
+codec. This tooling table does not select or advertise game-runtime support.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ def _bind():
 
 
 def scr_policy_for_code(code: str | None) -> int:
-    """The SCR decode policy (an SCR_POLICY_* value) for a game code (e.g. "jo", "jodemo").
+    """The SCR decode policy for an asset profile code (for example "jo" or "jodemo").
     A None/unknown code resolves to version-detect (the JO default), matching the C helper."""
     _bind()
     enc = code.encode("utf-8") if isinstance(code, str) else None

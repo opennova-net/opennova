@@ -7,7 +7,7 @@ extends Node3D
 # from the chosen resource dir. The first-launch directory picker lives here
 # (runtime-only); headless probes set the dir explicitly and never block on it.
 
-const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
+const GameSettings := preload("res://game/game_settings.gd")
 const DebugOverlayScript := preload("res://engine/debug/nova_debug_overlay.gd")
 const NetKillFeedScript := preload("res://game/net_killfeed.gd")
 const LocalPlayerHostScript := preload("res://engine/world/local_player_host.gd")
@@ -41,6 +41,8 @@ enum State { MENU, WORLD, PAUSED, ARMORY }
 
 var _picker: FileDialog
 var _root: NovaResourceRoot
+var _resource_session: NovaRuntimeResourceSession
+var _launch_flags
 var _state: int = State.MENU
 var _host_wired := false
 var _debug_overlay  # NovaDebugOverlay, lazily built on the first F3
@@ -91,14 +93,16 @@ func _ready() -> void:
 	_hud_host.name = "GameHudHost"
 	add_child(_hud_host)
 	_hud_host.setup(_world, _player_host, _hud if _hud != null else self)
+	_hud_host.set_crosshair_style(GameSettings.get_crosshair_style())
+	_launch_flags = NovaLaunchFlags.from_process(GameSettings.get_expansion())
 	# Net-replay connect mode: when NW_REPLAY is set (the env all F5/F6 instances
 	# inherit from the editor), skip the menu and dial the replay tool / server
 	# directly — each instance gets slotted into a role on connect.
 	if not OS.get_environment("NW_REPLAY").is_empty():
 		_enter_net_session()
 		return
-	var dir := ResourceDirSettings.get_resource_dir()
-	if dir.is_empty():
+	var dir := GameSettings.get_resource_dir()
+	if dir.is_empty() and String(_launch_flags.oned_resource_root).is_empty():
 		_request_resource_dir()
 		return
 	_enter_menu(dir)
@@ -251,23 +255,35 @@ func _on_body_in_first_person_toggled(enabled: bool) -> void:
 # and only when one is not already open. Pure predicate so it is unit-testable
 # headless (the native dialog itself cannot be shown without a display).
 func _can_summon_dir_picker() -> bool:
-	return _state == State.MENU and _picker == null
+	return _state == State.MENU and _picker == null and not _has_oned_handoff() and (
+		_resource_session == null or not _resource_session.is_oned_session()
+	)
+
+
+func _has_oned_handoff() -> bool:
+	return _launch_flags != null and not String(_launch_flags.oned_resource_root).is_empty()
 
 
 # --- Menu state ---------------------------------------------------------------
 
-func _enter_menu(dir: String) -> void:
-	if _root == null or _root.get_root_dir() != dir:
+func _enter_menu(dir: String = "") -> void:
+	var needs_session := _resource_session == null
+	if not needs_session and not dir.is_empty() and not _resource_session.is_oned_session():
+		needs_session = _resource_session.get_resource_dir() != dir
+	if needs_session:
 		var root := _mount_runtime_root(dir)
 		if root == null:
-			_request_resource_dir()
+			# A bad ONED handoff cannot be repaired with the game's folder picker:
+			# every retry would still target ONED's explicit loose-only root.
+			if not _has_oned_handoff():
+				_request_resource_dir()
 			return
 		_root = root
 	_state = State.MENU
 	_world.visible = false
 	_set_hud_visible(false)
 	_wire_host()
-	if not _menu_host.setup(_root):
+	if not _menu_host.setup(_root, _resource_session):
 		push_warning("MainGame: no menu found in resource dir (looked for %s)" % _menu_host.main_menu_file)
 	_menu_host.show_menu()
 
@@ -348,21 +364,37 @@ func _on_dir_selected(dir: String) -> void:
 	if root == null:
 		_request_resource_dir()
 		return
-	_root = root
-	ResourceDirSettings.set_resource_dir(dir)
-	_enter_menu(dir)
+	GameSettings.set_resource_dir(dir)
+	_enter_menu()
 
 
-# Mount `dir` as the runtime resource root (packed PFFs, `/exp` expansion, `/d` loose
-# override). Warns and returns null on failure.
+# Resolve and mount the launch once. Normal game sessions use the saved game
+# root in packed mode (with retail /d overlay when requested); ONED's private
+# handoff uses its own root in loose-only mode.
 func _mount_runtime_root(dir: String) -> NovaResourceRoot:
-	var root := NovaResourceRoot.new()
-	var expansion := NovaLaunchFlags.expansion(ResourceDirSettings.get_expansion())
-	if root.mount_runtime(dir, expansion, NovaLaunchFlags.loose_override_enabled()) != OK:
-		push_warning("MainGame: %s" % root.get_last_error())
+	if _launch_flags == null:
+		_launch_flags = NovaLaunchFlags.from_process(GameSettings.get_expansion())
+	var session := NovaRuntimeResourceSession.new()
+	var err := session.start(
+		dir,
+		GameSettings.get_expansion(),
+		_launch_flags,
+		null,
+		func(name: String) -> void: GameSettings.set_expansion(name)
+	)
+	if err != OK:
+		push_warning("MainGame: %s" % session.get_last_error())
 		return null
-	_report_missing_boot_resources(root)
-	return root
+	_install_resource_session(session)
+	_report_missing_boot_resources(_root)
+	return _root
+
+
+func _install_resource_session(session: NovaRuntimeResourceSession) -> void:
+	_resource_session = session
+	_root = session.get_root() as NovaResourceRoot
+	if _world != null:
+		_world.set_resource_root(_root)
 
 
 # Honest missing-resource errors over the witnessed boot manifest (ENG-6,
@@ -635,10 +667,13 @@ func _enter_net_session() -> void:
 		_world.world_loaded.connect(_on_world_loaded)
 	if not _world.load_failed.is_connected(_on_world_load_failed):
 		_world.load_failed.connect(_on_world_load_failed)
+	var replay_dir := OS.get_environment("NW_REPLAY_DIR")
+	if replay_dir.is_empty():
+		replay_dir = GameSettings.get_resource_dir()
 	var err := _world.load_net_session({
 		"replay_host": parts[0] if parts.size() > 0 else "127.0.0.1",
 		"replay_port": int(parts[1]) if parts.size() > 1 else 42000,
-		"dir": OS.get_environment("NW_REPLAY_DIR"),
+		"dir": replay_dir,
 		"loose": not OS.get_environment("NW_REPLAY_LOOSE").is_empty(),
 		"items": OS.get_environment("NW_REPLAY_ITEMS"),
 		"camera": _camera,
@@ -674,7 +709,7 @@ func _on_world_load_failed(reason: String) -> void:
 	_dismiss_loading_screen()
 	push_warning("MainGame: mission load failed: %s" % reason)
 	if _root != null:
-		_enter_menu(_root.get_root_dir())
+		_enter_menu()
 
 
 func _on_camera_escape() -> void:
@@ -717,7 +752,7 @@ func _on_return_to_menu() -> void:
 	if _hud_host != null:
 		_hud_host.teardown()
 	if _root != null:
-		_enter_menu(_root.get_root_dir())
+		_enter_menu()
 
 
 func _on_exit_to_desktop() -> void:

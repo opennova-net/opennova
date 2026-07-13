@@ -19,7 +19,7 @@ static int failed = 0;
 
 static int test_count(void) {
     CHECK(gameprofile_count() == NOVA_GAME_COUNT, "count == NOVA_GAME_COUNT");
-    CHECK(gameprofile_count() == 5, "five shipping profiles");
+    CHECK(gameprofile_count() == 5, "five asset decode profiles");
     return 1;
 }
 
@@ -62,7 +62,7 @@ static int test_universal_key_and_labels(void) {
     return 1;
 }
 
-/* gameprofile_by_code + the game->policy seam the runtime and Python importer share. */
+/* gameprofile_by_code + the asset-profile policy seam used by importer/PFF tooling. */
 static int test_by_code_and_policy(void) {
     const NovaGameProfile *demo = gameprofile_by_code("jodemo");
     CHECK(demo != NULL && demo->id == NOVA_GAME_JO_DEMO, "by_code jodemo -> demo");
@@ -78,9 +78,9 @@ static int test_by_code_and_policy(void) {
     return 1;
 }
 
-/* SCR keying is per-game. Retail titles key version-1 payloads with JO_DFX2 (which the version
-   byte selects), so they version-detect. The JO Demo keys the same version byte with the DEFAULT
-   key, so it must force that key. */
+/* SCR keying is per source asset profile. Retail titles key version-1 payloads with JO_DFX2
+   (which the version byte selects), so they version-detect. The JO Demo keys the same version
+   byte with the DEFAULT key, so it must force that key. */
 static int test_scr_policy_per_game(void) {
     const NovaGameProfile *demo = gameprofile_by_id(NOVA_GAME_JO_DEMO);
     CHECK(demo != NULL, "demo profile exists");

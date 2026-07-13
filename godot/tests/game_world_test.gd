@@ -93,8 +93,13 @@ func test_load_world_requires_hardcoded_environment_in_global_root() -> void:
 	var world := _make_world()
 	add_child_autofree(world)
 	await get_tree().process_frame
+	var resources := NovaResourceRoot.new()
+	assert_eq(resources.set_root_dir(root), OK,
+		"the engine-level test injects its explicit loose fixture root")
+	world.set_resource_root(resources)
 
-	assert_eq(world.load_world(root), ERR_FILE_NOT_FOUND, "Runtime global root must contain full_00.env next to Dvxi5.trn.")
+	assert_eq(world.load_world(), ERR_FILE_NOT_FOUND,
+		"Runtime global root must contain full_00.env next to Dvxi5.trn.")
 
 
 func test_packaged_scene_instantiates_with_intact_wiring() -> void:

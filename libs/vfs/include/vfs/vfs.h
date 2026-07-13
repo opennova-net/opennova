@@ -64,8 +64,9 @@ public:
     // (the engine's CWD probe), <name>L.pff as the primary archive and <name>.pff as a
     // secondary, then the base-root archives per `discovery` (the witnessed fixed boot
     // table by default). Mirrors Expansion_LoadAssets @ 0x4a4730 +
-    // PFF_OpenAllArchives @ 0x4a4310. Returns false only on a bad root; a
-    // missing/unknown expansion gracefully falls back to base-game mounting. `mode` selects
+    // PFF_OpenAllArchives @ 0x4a4310. LooseOnly accepts an expansion directory without an
+    // archive; packed modes require at least one usable base archive. A missing/unknown
+    // expansion gracefully falls back to base-game mounting. `mode` selects
     // which layers are mounted (loose, archives, or both) — see VfsMountMode.
     bool mount_game(const std::string &game_root, const std::string &expansion = std::string(),
                     VfsMountMode mode = VfsMountMode::PackedWithLooseOverride,
@@ -97,6 +98,10 @@ private:
 // List expansion subdirectories under <game_root>/expansion that contain a <name>.pff
 // (i.e. the expansions mount_game accepts). Returns the bare expansion names.
 std::vector<std::string> vfs_list_expansions(const std::string &game_root);
+
+// List every immediate expansion subdirectory. Loose authoring sessions do not need a
+// matching archive, so this is deliberately broader than retail expansion discovery.
+std::vector<std::string> vfs_list_loose_expansions(const std::string &game_root);
 
 } // namespace opennova
 

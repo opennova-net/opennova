@@ -81,6 +81,35 @@ func test_runtime_mount_is_packed_with_optional_loose_override() -> void:
 	assert_eq(resources.read_file("Alpha.trn").get_string_from_utf8(), "loose trn", "With /d a loose file overrides the archived entry.")
 
 
+func test_runtime_mount_requires_a_usable_base_pff() -> void:
+	var root := _make_flat_root("packed_requires_base")
+	_write_file(root.path_join("Alpha.TRN"), "loose trn")
+
+	var resources := NovaResourceRoot.new()
+	assert_eq(resources.mount_runtime(root), ERR_CANT_OPEN,
+		"Retail runtime cannot boot without at least one usable base PFF archive.")
+	assert_string_contains(resources.get_last_error(), "base PFF")
+	assert_false(resources.has_file("Alpha.TRN"), "A failed mount must not expose a partial loose layer.")
+	assert_eq(resources.mount_runtime(root, "", true), ERR_CANT_OPEN,
+		"/d adds loose overrides but still requires the packed base game.")
+
+
+func test_oned_loose_runtime_mount_accepts_directory_only_expansion() -> void:
+	var root := _make_flat_root("loose_runtime_expansion")
+	DirAccess.make_dir_recursive_absolute(root.path_join("expansion/jox01"))
+	_write_file(root.path_join("shared.env"), "base loose")
+	_write_file(root.path_join("baseonly.trn"), "base only")
+	_write_file(root.path_join("expansion/jox01/shared.env"), "exp loose")
+	_write_file(root.path_join("expansion/jox01/exponly.3di"), "exp only")
+
+	var resources := NovaResourceRoot.new()
+	assert_eq(resources.mount_loose_runtime(root, "jox01"), OK)
+	assert_eq(resources.get_expansion(), "jox01")
+	assert_eq(resources.read_file("shared.env").get_string_from_utf8(), "exp loose")
+	assert_eq(resources.read_file("baseonly.trn").get_string_from_utf8(), "base only")
+	assert_eq(resources.read_file("exponly.3di").get_string_from_utf8(), "exp only")
+
+
 func test_runtime_expansion_override_chain() -> void:
 	var root := _make_flat_root("expansion")
 	DirAccess.make_dir_recursive_absolute(root.path_join("expansion/jox01"))
@@ -123,7 +152,7 @@ func test_boot_manifest_reports_missing_fatal_resources() -> void:
 
 	var resources := NovaResourceRoot.new()
 	assert_eq(resources.mount_runtime(root), OK)
-	var missing := resources.list_missing_boot_resources()
+	var missing: PackedStringArray = resources.list_missing_boot_resources()
 	assert_false("gametext.bin" in missing, "A mounted fatal-set file is not reported missing.")
 	assert_true("vmacros.bin" in missing, "Missing fatal-set files are named.")
 	assert_true("keyhelp.bin" in missing, "Missing fatal-set files are named.")
@@ -155,9 +184,16 @@ func test_resource_root_list_expansions() -> void:
 	assert_true(expansions.has("jox02"))
 	assert_false(expansions.has("incomplete"), "A subdir without <name>.pff is not an expansion.")
 
+	var loose_expansions: PackedStringArray = NovaResourceRoot.new().list_loose_expansions(root)
+	assert_eq(loose_expansions.size(), 3, "Loose discovery accepts directory-only expansions.")
+	assert_true(loose_expansions.has("jox01"))
+	assert_true(loose_expansions.has("jox02"))
+	assert_true(loose_expansions.has("incomplete"))
+
 	# A root with no expansion/ dir yields an empty list (the UI hides the control).
 	var base_only := _make_flat_root("list_expansions_base")
 	assert_eq(NovaResourceRoot.new().list_expansions(base_only).size(), 0)
+	assert_eq(NovaResourceRoot.new().list_loose_expansions(base_only).size(), 0)
 
 
 func test_resource_root_loads_dds_from_pff() -> void:

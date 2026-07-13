@@ -45,13 +45,16 @@ visible on the scene you are editing.
 
 ## See it in game
 
-The top bar's **See in game** button launches the game runtime over the same
-resource directory the editor has mounted, with the engine's own dev override:
-loose files next to the packed archives win (the retail `/d` flag). The gesture
-is always the same — **save, launch, see it**. The runtime still boots from the
-packed game data, so your resource directory needs to be a real game install
-(PFFs present); your saved files sit on top of it exactly as they did for the
-original tools.
+The top bar's **See in game** button launches the game runtime over ONED's
+current authoring directory. It passes the retail `/d` gesture plus a private
+ONED root handoff, so that play session mounts loose files only: PFF archives
+are ignored and are not required. The gesture is always the same — **save,
+launch, see it** — even when the authoring tree contains no packed game data.
+
+ONED persists that authoring root in `user://oned_settings.cfg`. The standalone
+game has a separate `user://game_settings.cfg`; playing from ONED neither reads
+nor rewrites the game's saved resource directory. If ONED has an expansion
+selected, `/exp <name>` selects its loose expansion directory for the session.
 
 Workspaces whose files reach the game through a specific step tell the button
 about it: the tooltip and the post-launch message carry the active workspace's

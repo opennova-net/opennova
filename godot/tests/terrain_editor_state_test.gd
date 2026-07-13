@@ -1,7 +1,7 @@
 extends GutTest
 
 const TerrainEditorScript = preload("res://modtools/terrain/terrain_editor.gd")
-const STATE_CONFIG_PATH := "user://terrain_editor_state.cfg"
+const STATE_CONFIG_PATH := "user://oned_settings.cfg"
 const TEST_ROOT := "opennova_state_test"
 
 var _saved_state_config := PackedByteArray()
@@ -24,15 +24,15 @@ func after_each() -> void:
 	_remove_dir_recursive(OS.get_cache_dir().path_join(TEST_ROOT))
 
 
-func test_terrain_editor_path_state_preserves_shared_resource_directory() -> void:
+func test_terrain_path_state_preserves_oned_resource_directory() -> void:
 	var root := OS.get_cache_dir().path_join(TEST_ROOT).path_join("root_%d" % Time.get_ticks_usec())
 	DirAccess.make_dir_recursive_absolute(root)
-	NovaResourceDirSettings.set_resource_dir(root)
+	NovaOnedSettings.set_resource_dir(root)
 
 	var editor = autofree(TerrainEditorScript.new())
 	editor._remember_open_path(root.path_join("Dvxi5.trn"))
 
-	assert_eq(NovaResourceDirSettings.get_resource_dir(), root, "Saving terrain editor path state must preserve the shared resource directory.")
+	assert_eq(NovaOnedSettings.get_resource_dir(), root, "Saving terrain path state preserves ONED's resource directory.")
 
 
 func _remove_dir_recursive(path: String) -> void:

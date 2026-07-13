@@ -13,6 +13,7 @@ extends Node
 ## documents, so disable it in Settings on shared machines.
 
 const SERVER_JSON_PATH := "user://oned_mcp/server.json"
+const McpSettings := preload("res://modtools/mcp/mcp_settings.gd")
 
 var server: McpServer
 var log_hub: McpLogHub

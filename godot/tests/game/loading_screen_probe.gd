@@ -23,7 +23,7 @@ func _ready() -> void:
 		get_tree().quit(1)
 		return
 	var root := NovaResourceRoot.new()
-	if root.mount_runtime(dir, "", false, "jo") != OK:
+	if root.mount_runtime(dir, "", false) != OK:
 		push_error("loading_screen_probe: mount failed: %s" % root.get_last_error())
 		get_tree().quit(1)
 		return

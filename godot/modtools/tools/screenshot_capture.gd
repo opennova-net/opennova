@@ -24,7 +24,7 @@ extends Node
 ## Must run with a real rendering window: --headless does not render, so the
 ## captured viewport texture would be blank.
 
-const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
+const OnedSettings := preload("res://modtools/editor/oned_settings.gd")
 const EditorScene := preload("res://modtools/editor/editor_main.tscn")
 
 # Generous settle budget: lets Control layout, the deferred split layout, and the
@@ -99,14 +99,14 @@ func _ready() -> void:
 	# object) is opened by name from this one root.
 	_root = OS.get_environment("NOVA_RESOURCE_DIR").strip_edges()
 	if _root.is_empty():
-		_root = ResourceDirSettings.get_resource_dir()
-	if not ResourceDirSettings.is_valid_root(_root):
+		_root = OnedSettings.get_resource_dir()
+	if not OnedSettings.is_valid_root(_root):
 		_fail("[capture] no valid resource dir; set NOVA_RESOURCE_DIR")
 		get_tree().quit(1)
 		return
 	# Persist before instancing so the workstation seeds VegAssets + scans the
 	# root on its own _ready (the fonts/credits workspaces read it from there).
-	ResourceDirSettings.set_resource_dir(_root)
+	OnedSettings.set_resource_dir(_root)
 	print("[capture] resource dir: ", _root)
 
 	_app = EditorScene.instantiate()

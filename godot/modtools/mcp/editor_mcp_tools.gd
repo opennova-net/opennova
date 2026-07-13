@@ -73,6 +73,7 @@ const WORKSPACE_TO_KIND := {
 ## and places its objects; screenshots wait on render frames.
 const _OPEN_TIMEOUT_MS := 120000
 const _SCREENSHOT_TIMEOUT_MS := 30000
+const OnedSettings := preload("res://modtools/editor/oned_settings.gd")
 
 const EXTRA_API_CLASSES: Array[String] = ["EnvFile", "RtxtStringFile", "CbinCreditsResource", "MnsStyleSheet", "PerfTimeline", "FlyCamera"]
 
@@ -326,8 +327,7 @@ func _tool_editor_state(_args: Dictionary, ctx: McpToolContext) -> Variant:
 		"resource_root": {
 			"dir": shell.get_resource_root_dir() if shell.has_method("get_resource_root_dir") else "",
 			"mounted": ctx.root() != null,
-			"expansion": NovaResourceDirSettings.get_expansion(),
-			"game": NovaResourceDirSettings.get_game(),
+			"expansion": OnedSettings.get_expansion(),
 		},
 		"active_workspace": String(active.get_workspace_id()) if active != null else "",
 		"workspaces": workspaces,
@@ -787,5 +787,4 @@ func _undo_redo(args: Dictionary, ctx: McpToolContext, is_undo: bool) -> Variant
 		"can_redo": ws.can_redo(),
 		"workspace": String(ws.get_workspace_id()),
 	}
-
 

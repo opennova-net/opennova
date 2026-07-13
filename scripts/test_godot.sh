@@ -31,6 +31,7 @@ fi
 log="$(mktemp)"
 trap 'rm -f "$log"' EXIT
 
+if [[ "${OPENNOVA_GODOT_PROBE_ONLY:-0}" != "1" ]]; then
 set +e
 "$GODOT_BIN" --headless --path "$root/godot" \
   -s addons/gut/gut_cmdln.gd \
@@ -64,4 +65,44 @@ if grep -qE 'Ignoring script .*does not extend GutTest' "$log"; then
   exit 1
 fi
 
-exit "$status"
+if [[ "$status" -ne 0 ]]; then
+  exit "$status"
+fi
+fi
+
+# GUT exercises NovaLaunchFlags.parse with injected arrays. These separate
+# processes pin both real invocation forms: public options passed directly to
+# an exported game and ONED's private handoff after Godot's separator.
+run_launch_probe() {
+  local mode="$1"
+  shift
+  echo "=== Runtime launch-argument probe: $mode ==="
+  set +e
+  # Git Bash/MSYS otherwise rewrites retail-style /D and /EXP tokens as
+  # Windows paths. Other arguments (notably --path) keep normal conversion.
+  OPENNOVA_RUNTIME_LAUNCH_ARGS_MODE="$mode" \
+  MSYS2_ARG_CONV_EXCL='/D;/EXP;/game' \
+  "$GODOT_BIN" --headless --path "$root/godot" \
+    -s res://tests/runtime_launch_args_probe.gd "$@" 2>&1 | tee "$log"
+  local probe_status=${PIPESTATUS[0]}
+  set -e
+
+  if [[ "$probe_status" -ne 0 ]]; then
+    echo "error: $mode runtime launch-argument probe exited with status $probe_status" >&2
+    exit "$probe_status"
+  fi
+  if grep -qE 'SCRIPT ERROR: Parse Error|Failed to load script' "$log"; then
+    echo "error: $mode runtime launch-argument probe logged a script load failure" >&2
+    exit 1
+  fi
+  if ! grep -qF "OPENNOVA_RUNTIME_LAUNCH_ARGS_PROBE: OK ($mode)" "$log"; then
+    echo "error: $mode runtime launch-argument probe did not report success" >&2
+    exit 1
+  fi
+}
+
+run_launch_probe direct /D /game jodemo /EXP revx02
+run_launch_probe oned -- /D /game jodemo /EXP revx02 \
+  --oned-resource-root "C:/OpenNova Loose Root"
+
+exit 0

@@ -141,7 +141,8 @@ class Vfs:
 
     def set_scr_policy(self, policy: int) -> None:
         """Choose how read_file keys SCR payloads (an SCR_POLICY_* value). Persists across
-        mounts. Resolve a game's policy via gameprofile_ffi.scr_policy_for_code()."""
+        mounts. Import tooling resolves a source asset profile's policy via
+        gameprofile_ffi.scr_policy_for_code()."""
         self._lib.opennova_vfs_set_scr_policy(self._handle, int(policy))
 
     # --- Resolution ---

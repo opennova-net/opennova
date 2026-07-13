@@ -129,7 +129,7 @@ int main() {
 	TEST_EXPECT(!index.scan((root / "missing").string()));
 	TEST_EXPECT(!index.last_error().empty());
 
-	TEST_EXPECT(index.scan(root.string()));
+	TEST_EXPECT(index.scan(root.string(), "", opennova::VfsMountMode::LooseOnly));
 	const std::vector<opennova::ResourceFileEntry> all_files = index.resource_files("*");
 	TEST_EXPECT(all_files.size() == 17);  // base 13 +1 hudpos.def (HUD) +1 briefing.MIS (mission) +1 Avatars.def (avatar) +1 sparks.ptl (particle)
 	TEST_EXPECT(has_relative_path(all_files, "Alpha.TRN"));
@@ -295,6 +295,36 @@ int main() {
 		TEST_EXPECT(as_string(mb) == "local env");          // L.pff wins; loose ignored
 		TEST_EXPECT(packed_idx.read_file("exponly.3di", mb)); // archive entry present
 		packed_idx.clear();
+	}
+
+	// ONED's LooseOnly session accepts a directory-only expansion. Packed modes
+	// still reject a root with no usable base archive.
+	{
+		const fs::path loose_game = fs::temp_directory_path() / "opennova_resource_index_loose_exp";
+		fs::remove_all(loose_game);
+		fs::create_directories(loose_game / "expansion" / "jox02");
+		write_file(loose_game / "shared.env", "base loose");
+		write_file(loose_game / "baseonly.trn", "base only");
+		write_file(loose_game / "expansion" / "jox02" / "shared.env", "exp loose");
+		write_file(loose_game / "expansion" / "jox02" / "exponly.3di", "exp only");
+
+		opennova::ResourceIndex loose_runtime;
+		TEST_EXPECT(loose_runtime.scan(loose_game.string(), "jox02", opennova::VfsMountMode::LooseOnly));
+		std::vector<uint8_t> loose_bytes;
+		TEST_EXPECT(loose_runtime.read_file("shared.env", loose_bytes));
+		TEST_EXPECT(as_string(loose_bytes) == "exp loose");
+		TEST_EXPECT(loose_runtime.read_file("baseonly.trn", loose_bytes));
+		TEST_EXPECT(as_string(loose_bytes) == "base only");
+		TEST_EXPECT(loose_runtime.read_file("exponly.3di", loose_bytes));
+		TEST_EXPECT(as_string(loose_bytes) == "exp only");
+		loose_runtime.clear();
+
+		opennova::ResourceIndex packed_runtime;
+		TEST_EXPECT(!packed_runtime.scan(loose_game.string(), "jox02", opennova::VfsMountMode::Packed));
+		TEST_EXPECT(packed_runtime.last_error().find("base PFF") != std::string::npos);
+		TEST_EXPECT(!packed_runtime.scan(loose_game.string(), "jox02",
+		                                         opennova::VfsMountMode::PackedWithLooseOverride));
+		fs::remove_all(loose_game);
 	}
 	fs::remove_all(game);
 

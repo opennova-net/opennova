@@ -30,7 +30,25 @@ Three layers:
 
 All of this is pre-1.0 and under active development. Nothing here is production-ready. The asset pipeline (importer, Blender addon, and ONED) is the most exercised surface today; the Godot runtime loads exported scenes, runs the terrain and foliage systems, and simulates authored missions (WAC scripts, BMS events, AI). Player interaction and multiplayer are still being built.
 
-Pre-JO NovaLogic titles may sort of work by chance, but are not officially supported.
+The game runtime targets Joint Operations and the shared Delta Force: Xtreme /
+Delta Force: Xtreme 2 engine family. Other title rows retained by
+`libs/gameprofile` are asset decode profiles for the importer and PFF tools;
+their presence does not claim runtime support.
+
+The two shipped applications also keep independent state. ONED stores its
+authoring root and editor preferences in `user://oned_settings.cfg`; the game
+stores its retail-style resource root and player settings in
+`user://game_settings.cfg`. Changing one product's resource directory never
+changes the other's.
+
+| Launch | Active root | Resource sources |
+|---|---|---|
+| `opennova.exe` | Game's saved root | Packed PFF archives only |
+| `opennova.exe /d` | Game's saved root | PFF archives, with loose files in that root overriding packed entries; at least one retail-table PFF is still required |
+| ONED **See in game** | ONED's saved authoring root | Loose files only; PFFs are ignored and are not required |
+
+`/exp <name>` selects an expansion inside whichever root and mode the launch
+uses. `/d` and `/exp` are the only public game options in this surface.
 
 ## Downloads
 
@@ -156,7 +174,7 @@ Modular libraries for the NovaLogic formats and runtime systems. The format pars
 | **anim** | Skeletal animation: `.adm` definition parsing plus the evaluator that samples `.bad` clips into per-bone transforms. |
 | **audio** | Sound-set member-selection state machine shared by the runtime and the editor. |
 | **vfs** | Virtual file system: loose directories and PFF archives behind one lookup, with SCR/BFC1 decode. |
-| **gameprofile** | Per-game profiles: one source of truth for game identity, archive keys, and SCR codec policy. |
+| **gameprofile** | Asset decode profiles used by the importer and PFF tools: source-title labels, archive keys, and SCR codec policy. These rows do not select or advertise game-runtime support. |
 
 ### Networking
 

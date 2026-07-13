@@ -10,12 +10,12 @@
 extern "C" {
 #endif
 
-/* Per-game profiles. A single "game" choice drives how an existing archive's contents are decoded
-   (container key + SCR payload-codec policy) and how a new/edited archive is written. It is the one
-   source of truth for game identity across the whole engine: the editor PFF tool picks a game by id,
-   the runtime picks one by short `code` (the `/game <code>` launch flag), and the Python importer
-   picks one by code over FFI — all resolve to the same `scr_policy` here. Dependency-free by design
-   (no pff.h include): the format field is a plain int whose values mirror PffFormat. */
+/* Asset decode profiles. A source-title choice drives how an existing archive's contents are
+   decoded (container key + SCR payload-codec policy) and how a new/edited archive is written.
+   The editor PFF tool picks a profile by id; the Python and Blender importers pick one by code
+   over FFI. The game runtime does not select a row from this table: its supported JO/DFX/DFX2
+   engine family always uses SCR_POLICY_VERSION_DETECT. Dependency-free by design (no pff.h
+   include): the format field is a plain int whose values mirror PffFormat. */
 
 typedef enum NovaGameId {
     NOVA_GAME_JO = 0,    /* Joint Operations: Typhoon Rising            */
@@ -26,9 +26,9 @@ typedef enum NovaGameId {
     NOVA_GAME_COUNT
 } NovaGameId;
 
-/* How SCR-wrapped payloads are keyed. Every shipping game decodes by the SCR version byte
-   (libs/scr + opennova::vfs_decode_payload); the FORCE_* values are headroom for a title that
-   ever needs a fixed key. */
+/* How SCR-wrapped source assets are keyed. Most profiles decode by the SCR version byte
+   (libs/scr + opennova::vfs_decode_payload); FORCE_DEFAULT records the JO Demo asset exception
+   used by importer/PFF tooling, and the remaining FORCE_* values preserve codec headroom. */
 typedef enum ScrPolicy {
     SCR_POLICY_VERSION_DETECT = 0,
     SCR_POLICY_FORCE_DEFAULT,
@@ -38,7 +38,8 @@ typedef enum ScrPolicy {
 
 typedef struct NovaGameProfile {
     int         id;             /* NovaGameId                                                    */
-    const char *code;           /* short launch-flag / FFI token, lowercase (e.g. "jo", "jodemo") */
+    const char *code;           /* lowercase source-profile / FFI token
+                                   (e.g. "jo", "jodemo")                                      */
     const char *display_name;   /* artist-facing label                                           */
     uint32_t    container_key;  /* ROL7 XOR seed for PFF_FLAG_ENCRYPTED entries (all = 0x0312A4CE
                                    today; verified vs PFF_LoadFileToMemory @ 0x768920)            */
@@ -59,9 +60,9 @@ GAMEPROFILE_EXPORT const NovaGameProfile *gameprofile_by_id(int game_id);
 /* Profile whose `code` matches (case-insensitive); NULL for NULL/unknown code. */
 GAMEPROFILE_EXPORT const NovaGameProfile *gameprofile_by_code(const char *code);
 
-/* The SCR policy (ScrPolicy) for a game `code`. Returns SCR_POLICY_VERSION_DETECT for a
-   NULL/unknown code, so a missing or bad `/game` value safely behaves like the JO default.
-   This is the single game->policy seam the runtime and the Python importer share. */
+/* The SCR policy (ScrPolicy) for an asset profile `code`. Returns
+   SCR_POLICY_VERSION_DETECT for a NULL/unknown code, giving importer and PFF-tool callers the
+   normal JO/DFX-family decode behavior when no specialized profile is selected. */
 GAMEPROFILE_EXPORT int gameprofile_scr_policy_for_code(const char *code);
 
 #ifdef __cplusplus
