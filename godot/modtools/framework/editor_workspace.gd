@@ -39,7 +39,7 @@ extends RefCounted
 #     export   : can_export / begin_export + get_export_flavors +
 #                get_export_dialog_* + get_export_progress_*
 #     jump     : focus_reference(focus) — focus an element after a cross-workspace
-#                jump (shell open_in_workspace); keys are workspace-defined
+#                jump (shell open_in_workspace); reads its own FocusPayload fields
 #
 #   Edit + state: override get_editor_document() to return the domain
 #     document/controller owning edit history + dirty state; the base derives

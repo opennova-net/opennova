@@ -9,6 +9,8 @@ extends RefCounted
 ## Window; an ACTION is behavior the file expresses (navigate/show-hide/pop/
 ## url); a COMMAND is game behavior the engine binds to a widget's NAME.
 
+## Watchdog budget for the board screenshot (waits on render frames).
+const _SCREENSHOT_TIMEOUT_MS := 30000
 const ROW_CAP := 50
 const RECT_CAP := 100
 
@@ -46,7 +48,7 @@ func _init(mcp_service: Node) -> void:
 
 
 func register_all(registry: McpToolRegistry) -> void:
-	registry.register(_def("get_menu",
+	registry.register(McpToolDef.make("get_menu",
 			"The open Menu document (active tab of the Menus workspace): tabs (+active), menu_size, the visible Screen, the selection, and per-Screen widget trees — every Window node carries {id, type, name, rect [x,y,w,h] in menu-space pixels (parent-relative; child order = z-order), text (+string_type: \"id\" means text is a string-table key in the screen's text_rsrc), font, flags, group} plus action/sound/item counts. detail=\"full\" inlines actions, sounds and items. screen=<name> returns just that Screen; widget=<id> returns ONE widget's complete card instead (all 8 color slots, 4 texture slots, actions, sounds, items, table columns, absolute rect). Widget NAMES are Command hooks — the engine binds game behavior to them. %VAR% color/font values are stylesheet references. Requires the Menus workspace (open_in_workspace workspace=\"mnu\").",
 			{
 				"screen": { "type": "string" },
@@ -54,14 +56,14 @@ func register_all(registry: McpToolRegistry) -> void:
 				"detail": { "type": "string", "enum": ["summary", "full"], "default": "summary" },
 				"max_widgets": { "type": "integer", "default": 500, "minimum": 1, "maximum": 2000 },
 			}), Callable(self, "_tool_get_menu"))
-	registry.register(_def("menu_tabs",
+	registry.register(McpToolDef.make("menu_tabs",
 			"Manage the Menus workspace's document tabs (menus are MULTIDOC — each tab is one .mnu with its own dirty flag and undo history). op=\"new\": a fresh Untitled menu in its own tab (the start of a build-from-scratch flow). op=\"activate\" {index}: switches the active tab — undo/redo and every menu tool act on the ACTIVE tab. op=\"close\" {index}: refused while the tab has unsaved changes unless discard=true (closing the last tab seeds a fresh Untitled one). get_menu lists the tabs; opening files is open_in_workspace's job (it activates an existing tab instead of reopening).",
 			{
 				"op": { "type": "string", "enum": ["new", "activate", "close"] },
 				"index": { "type": "integer" },
 				"discard": { "type": "boolean", "default": false },
 			}, ["op"]), Callable(self, "_tool_menu_tabs"))
-	registry.register(_def("edit_menu_screen",
+	registry.register(McpToolDef.make("edit_menu_screen",
 			"One Screen operation per call. add={name, background?, frame?}: a new Screen with a game-shaped root (a MAIN window with full position and an appearance row — the original engine crashes without them); text_rsrc/cursor/music_var auto-copy from the first Screen. background = a .tga drawn as the root's backdrop (e.g. letterbox.tga, what shipped screens use over the main menu); WITHOUT it the root keeps type=\"custom\" — an ENGINE-painted backdrop, which on the main menu means the bink video shows through. frame = {stencil, stencil_size?, brush, monogram?} border assets that DRAW_FRAME children render with (options.mnu uses BORDER2.tga/BOXTILE.tga/MONOGRAM.tga). delete={screen}: shows then deletes that Screen and everything on it (refused for the last one). set={screen, props}: props from {name, music_var (int), text_rsrc, cursor_file, background, frame} — one undo step per field. show={screen}: makes that Screen visible on the authoring canvas and selects it. screen = a Screen name or id from get_menu. Marks the menu dirty (except show); never save unless asked.",
 			{
 				"add": { "type": "object", "properties": { "name": { "type": "string" }, "background": { "type": "string" }, "frame": { "type": "object" } }, "required": ["name"] },
@@ -69,7 +71,7 @@ func register_all(registry: McpToolRegistry) -> void:
 				"set": { "type": "object", "properties": { "screen": { "type": ["integer", "string"] }, "props": { "type": "object" } }, "required": ["screen", "props"] },
 				"show": { "type": ["string", "integer"] },
 			}), Callable(self, "_tool_edit_screen"))
-	registry.register(_def("add_menu_widgets",
+	registry.register(McpToolDef.make("add_menu_widgets",
 			"BATCH-create Windows with initial properties — the whole batch is ONE undo step. rows: [{parent (a widget id, or a Screen name/id to add at that Screen's root), type (widget type NAME: WINDOW, STATIC, BUTTON, EDIT, MULTILINE_EDIT, LIST, CHECKBOX, RADIO, COMBOBOX, SCROLL, TABLE, SPINLIST, MULTI, MAP, GLOBE, LABEL, GOTO, MARQUEE_WND), rect [x,y,w,h] (menu-space pixels, parent-relative; later siblings draw on top; w/h null or -1 = AUTO-SIZE, which box-art toggles and labels need — an explicit width STRETCHES appearance art in the game), name?, text?, string_type? (\"id\"=string-table key, \"\"=literal), font? (.fnt name), flags? (int bitmask), group? (radio group), appearances? (per-state rows [{state, type?, value?, map_state?, height?}])}]. Game-proven shaping: BUTTON/GOTO rows without appearances get the four EMPTY state rows shipped text buttons carry; CHECKBOX/RADIO need image rows (map_state 0..3 state-strip art like btn5.tga) or the game draws nothing — pass appearances; give text colors via font %DEF_TEXT_*% vars or edit_menu_widget color (colorless text renders unreadable in the game); a RADIO's own text clips to its art — pair an art-only radio with a sibling label STATIC instead. NAMES are Command hooks — reuse shipped names exactly when reproducing shipped menus. The batch validates up front: an unknown type or parent rejects the whole call. Max 50 rows. Wire navigation afterwards with set_widget_actions. Marks the menu dirty.",
 			{
 				"rows": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "type": "object", "properties": {
@@ -80,8 +82,8 @@ func register_all(registry: McpToolRegistry) -> void:
 					"font": { "type": "string" }, "flags": { "type": "integer" }, "group": { "type": "integer" },
 					"appearances": { "type": "array", "items": { "type": "object" } },
 				}, "required": ["parent", "type", "rect"] } },
-			}, ["rows"], { "timeout_ms": 60000 }), Callable(self, "_tool_add_widgets"))
-	registry.register(_def("edit_menu_widget",
+			}, ["rows"]), Callable(self, "_tool_add_widgets"))
+	registry.register(McpToolDef.make("edit_menu_widget",
 			"Edit existing Windows — exactly one op per call. set={id, props}: props from {name (CAUTION: names are Command hooks — renaming a shipped widget can sever its game behavior), rect [x,y,w,h] (w/h null or -1 = auto-size), text, string_type, font, flags (1 Hidden, 2 Disabled, 4 Checked, 8 Draw Frame, 16 Modal, 32 Read Only), group, datasource, orientation (HORIZONTAL|VERTICAL), color {slot 0-7 or name default_fg/default_bg/mouseover_fg/mouseover_bg/selected_fg/selected_bg/disabled_fg/disabled_bg, value}, texture {slot 0-3 or name default/mouseover/selected/disabled, value}, appearances [{state, type?, value?, map_state?, height?}] (REPLACES all per-state rows — the only way to author shipped empty-state rows or custom/backdrop rows; the slot setters always write type=\"image\"), frame {stencil, stencil_size?, brush, monogram?} (border assets DRAW_FRAME children render with — normally on a screen's root window), table_count, table_spacing} — one undo step per field; values like %TITLE_COLOR% are stylesheet references, preserve them verbatim. Actions/sounds belong to set_widget_actions. move_rects={rows:[{id, rect}]}: a layout pass — up to 100 rects in ONE undo step. reparent={id, parent (widget id or Screen name), index}: moves a Window in the tree (index = position among the new parent's children = z-order). delete={id}: removes the Window and its subtree (Screens and a Screen's root window are not deletable — Screens go through edit_menu_screen). Marks the menu dirty.",
 			{
 				"set": { "type": "object", "properties": { "id": { "type": "integer" }, "props": { "type": "object" } }, "required": ["id", "props"] },
@@ -89,7 +91,7 @@ func register_all(registry: McpToolRegistry) -> void:
 				"reparent": { "type": "object", "properties": { "id": { "type": "integer" }, "parent": { "type": ["integer", "string"] }, "index": { "type": "integer", "default": -1 } }, "required": ["id", "parent"] },
 				"delete": { "type": "integer" },
 			}), Callable(self, "_tool_edit_widget"))
-	registry.register(_def("set_widget_actions",
+	registry.register(McpToolDef.make("set_widget_actions",
 			"REPLACE a Window's Action list and/or sound list — the navigation and audio wiring. Actions are the ENTIRE behavior vocabulary the .mnu format carries; anything else a button does is a Command the engine binds to the widget's NAME. actions: full replacement list of [{type: \"screen\" (navigate; target=Screen name; file=another .mnu for a cross-menu jump) | \"window\" (show/hide a named Window on the same Screen — the Tab pattern; target=widget name, state=SHOW|HIDE|TOGGLE) | \"pop_screen\" (back) | \"url\" (target=address, external_browser?) | \"quit_game\", target?, state?, file?, external_browser?}]. Actions run in order on press. The game REQUIRES file= on every screen action (even a same-screen-file jump — an empty file crashes the original engine): for a target in THIS document with no file, the tool auto-fills the menu's own filename; an Untitled tab is allowed but warns (save_menu, then re-wire to bake it — analyze_menu's game_safety flags it meanwhile). Validation: in-document screen targets must exist (error lists Screens); cross-file and unmatched window targets warn; type tokens are case-insensitive (shipped files use SCREEN/POP_SCREEN), stored canonical lowercase. sounds: full replacement list of [{state, trigger, file}] — triggers are sound-set names in the menu .lwf (MOUSE_OVER, CLICK_SELECT, ...). Each list replace is one undo step. Marks the menu dirty.",
 			{
 				"id": { "type": "integer" },
@@ -99,7 +101,7 @@ func register_all(registry: McpToolRegistry) -> void:
 				"sounds": { "type": "array", "items": { "type": "object", "properties": {
 					"state": { "type": "string" }, "trigger": { "type": "string" }, "file": { "type": "string" } } } },
 			}, ["id"]), Callable(self, "_tool_set_actions"))
-	registry.register(_def("edit_widget_items",
+	registry.register(McpToolDef.make("edit_widget_items",
 			"Edit a data widget's rows — List/Combo/SpinList/Multi items and Table columns. One op per call, each one undo step: item_add={row {type, value, text}}, item_remove={index}, item_move={from, to}, item_field={index, key, value}; Table columns: header_add/header_remove/header_field (rows {column, width, justify, vjustify, sort, text}), body_add/body_remove/body_field (rows {column, justify, vjustify, bitmap_draw, scale_bitmap, bitmap_flags}), subst_add/subst_remove/subst_field (rows {column, value, is_file, file}); set_table={count?, spacing?} sets a Table's column count/spacing. Returns the updated list. Marks the menu dirty.",
 			{
 				"id": { "type": "integer" },
@@ -111,42 +113,33 @@ func register_all(registry: McpToolRegistry) -> void:
 				"key": { "type": "string" }, "value": {},
 				"count": { "type": "integer" }, "spacing": { "type": "integer" },
 			}, ["id", "op"]), Callable(self, "_tool_edit_items"))
-	registry.register(_def("preview_menu",
+	registry.register(McpToolDef.make("preview_menu",
 			"Drive the Interactive preview — the menu PLAYS inside the canvas: navigators wire up, pressing runs window show/hide and screen Actions, while external behavior (quit, URL, cross-menu jumps) is sandboxed to no-ops. No document edits ever result, but ALL menu editing tools are locked while it plays. Ops: on (start at the visible Screen) | off (back to authoring) | show={screen} (jump the preview, no back-stack push) | press={widget id or name, resolved on the current Screen} — your substitute for clicking: activates a Button/Checkbox/Radio/Goto exactly as a click would, runs its authored Actions, returns the resulting visible Screen and the actions fired | back (pop the navigation stack) | status. Follow with menu_screenshot to see the result. Hotkeys do not exist in the preview.",
 			{
 				"op": { "type": "string", "enum": ["on", "off", "show", "press", "back", "status"] },
 				"screen": { "type": "string" },
 				"widget": { "type": ["integer", "string"] },
 			}, ["op"]), Callable(self, "_tool_preview"))
-	registry.register(_def("menu_screenshot",
+	registry.register(McpToolDef.make("menu_screenshot",
 			"Capture the Menus WYSIWYG board as an image (cropped from the editor window). Optional screen=<name> shows that Screen first (authoring mode only — while the Interactive preview plays, navigate with preview_menu and call this with no args). The Menus workspace must be the ACTIVE workspace (open_in_workspace workspace=\"mnu\" activates it) and the editor must be windowed. Caption carries document, visible Screen, and interactive state. get_menu rects are menu-space pixels; the image is the letterboxed board.",
 			{
 				"screen": { "type": "string" },
 				"max_dim": { "type": "integer", "default": 1280, "minimum": 64, "maximum": 4096 },
 				"format": { "type": "string", "enum": ["webp", "png"], "default": "webp" },
 				"quality": { "type": "number", "default": 0.8 },
-			}, [], { "timeout_ms": 30000 }), Callable(self, "_tool_menu_screenshot"))
+			}, [], true, _SCREENSHOT_TIMEOUT_MS), Callable(self, "_tool_menu_screenshot"))
 	# NOTE: the result's game_safety block applies corpus rules proven against the
 	# original engine (crash + visual classes from live debugging) — treat its
 	# errors as must-fix before a file ships to the game.
-	registry.register(_def("analyze_menu",
+	registry.register(McpToolDef.make("analyze_menu",
 			"Composition study of a Menu — the open one (no args, active tab) or ANY .mnu by name/path (read-only; nothing opens in the editor). Returns menu_size, per-Screen summaries, a widget-type histogram, the Action graph (Screen -> Screen edges incl. cross-file jumps and pops, plus per-Screen window show/hide counts), fonts in use, the text_rsrc string tables with id-key/literal text counts, likely Command hooks — named pressable widgets WITHOUT authored Actions, where the engine binds game behavior by name — and game_safety: findings from corpus rules proven against the ORIGINAL game engine (screen actions without file= and malformed screen roots crash it; missing text colors/appearance rows/frame assets render wrong). Fix every game_safety error before a save ships to the game; use the study output to author in a shipped menu's style.",
 			{
 				"path": { "type": "string" },
 				"top": { "type": "integer", "default": 15, "minimum": 1, "maximum": 50 },
-			}, [], { "timeout_ms": 60000 }), Callable(self, "_tool_analyze"))
-	registry.register(_def("save_menu",
+			}), Callable(self, "_tool_analyze"))
+	registry.register(McpToolDef.make("save_menu",
 			"Write the ACTIVE menu tab to disk. ONLY call this when the user explicitly asked to save. No args: saves to the tab's current path (errors if the tab is Untitled — pass path). path: a filename (\"my_menu.mnu\", written into the mounted resource root) or an absolute path; must end in .mnu and becomes the tab's current path. Clears that tab's dirty flag; its undo history survives. Other tabs are untouched.",
 			{ "path": { "type": "string" } }), Callable(self, "_tool_save"))
-
-
-static func _def(name: String, description: String, properties := {}, required: Array = [], extra := {}) -> Dictionary:
-	var schema := { "type": "object", "properties": properties }
-	if not required.is_empty():
-		schema["required"] = required
-	var def := { "name": name, "description": description, "input_schema": schema }
-	def.merge(extra)
-	return def
 
 
 # --- guards / helpers -------------------------------------------------------------

@@ -17,6 +17,8 @@
     "to_drag_data",
     "from_drag_data",
     "selected_weapon",
-    "document_tab_row.gd|func to_dict()"
+    "document_tab_row.gd|func to_dict()",
+    "mcp_tool_def.gd|var input_schema",
+    "mcp_tool_def.gd|func to_list_entry()"
   ]
 }
