@@ -93,18 +93,32 @@ func _ready() -> void:
 	_look(Vector2(0, 120))
 	await _settle(20)
 	_dump("C fp aimed")
-	_project("C fp", [10.0, 50.0, 1000.0])
+	# Capture world points ALONG THE FP AIM from the live FP camera (its forward
+	# IS the aim ray; the 0.1875u eye pull-back moves the origin along the same
+	# ray, so the projected line is identical). After F4 the SAME points are
+	# re-projected — the continuity the crosshair must keep.
+	var ray_points := _capture_fp_ray_points([10.0, 50.0, 1000.0])
+	_project_points("C fp", ray_points)
 	await _capture("C_fp_aim.png")
-	_press(KEY_F4)
-	await _settle(60)
+	# A synthesized keypress can be swallowed by editor focus — press until the
+	# host's mode actually flips.
+	for _attempt in 5:
+		_press(KEY_F4)
+		await _settle(10)
+		if _host.is_third_person():
+			break
+	await _settle(50)
 	_dump("C tp settled")
-	_project("C tp", [10.0, 50.0, 1000.0])
+	_project_points("C tp", ray_points)
 	var aim: Vector2 = _host.aim_screen_point()
 	var vp_size: Vector2 = _cam.get_viewport().get_visible_rect().size
 	print("[leantp] C tp aim_screen_point=%s viewport=%s center=%s" % [str(aim), str(vp_size), str(vp_size * 0.5)])
 	await _capture("C_tp_aim.png")
-	_press(KEY_F4)
-	await _settle(30)
+	for _attempt in 5:
+		_press(KEY_F4)
+		await _settle(10)
+		if not _host.is_third_person():
+			break
 
 	ws.stop_play_mission()
 	print("[leantp] done -> ", _out_abs)
@@ -126,17 +140,24 @@ func _dump(tag: String) -> void:
 		str(_host.is_third_person())])
 
 
-# Project the aim ray's points at the given ranges through the live camera —
-# the FP center-vs-TP crosshair continuity check.
-func _project(tag: String, ranges: Array) -> void:
-	var yr := deg_to_rad(_world.local_player_yaw_deg())
-	var pr := deg_to_rad(_world.local_player_pitch_deg())
-	var forward := Vector3(sin(yr) * cos(pr), sin(pr), -cos(yr) * cos(pr))
-	var eye: Vector3 = _host._eye_position(_world.local_player_position())
+# World points at the given ranges along the CURRENT FP camera's forward — the
+# aim ray, sampled through the camera's public transform only.
+func _capture_fp_ray_points(ranges: Array) -> Array:
+	var origin: Vector3 = _cam.global_position
+	var forward: Vector3 = -_cam.global_transform.basis.z
+	var out: Array = []
 	for r in ranges:
-		var p: Vector3 = eye + forward * float(r)
+		out.append([float(r), origin + forward * float(r)])
+	return out
+
+
+# Project captured [range, world_point] pairs through the live camera — the FP
+# center-vs-TP crosshair continuity check.
+func _project_points(tag: String, points: Array) -> void:
+	for pair in points:
+		var p: Vector3 = pair[1]
 		var s := "BEHIND" if _cam.is_position_behind(p) else str(_cam.unproject_position(p))
-		print("[leantp] %s ray@%.0f -> screen %s" % [tag, float(r), s])
+		print("[leantp] %s ray@%.0f -> screen %s" % [tag, float(pair[0]), s])
 
 
 func _find_by_method(node: Node, method: String) -> Node:
