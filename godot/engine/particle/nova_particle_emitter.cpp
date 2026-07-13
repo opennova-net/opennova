@@ -468,6 +468,39 @@ Color NovaParticleEmitter::_layer_color(const Ref<NovaParticleGraphicLayer> &lay
 	return Color(1.0f, 1.0f, 1.0f, 1.0f);
 }
 
+// Candidate on-disk names for an authored graphic name. Flipbook layers are
+// commonly authored by BASE name while the archives ship only per-frame files
+// (BCas.tga + 4 flip frames -> BCas_01.tga..BCas_04.tga), and a few authored
+// names carry a trailing variant letter the files lack (CFlamet3a.tga ->
+// CFlamet3.tga). Retail feeds per-frame TGAs to the atlas builder as separate
+// entries [orig: CParticleManager_BuildTextureAtlases @ 0x5e8db0 ->
+// CTextureData_LoadTGA @ 0x5f7b20]; the frame-NAME derivation routine is not
+// yet witnessed (D-PTL-14), so until that grill lands we probe the two
+// empirically-proven derivations before surrendering to the untextured-disc
+// fallback. Only the observed derivations — nothing speculative.
+static PackedStringArray texture_name_candidates(const String &name) {
+	PackedStringArray out;
+	out.push_back(name);
+	const String ext = name.get_extension();
+	const String stem = name.get_basename();
+	if (stem.is_empty()) {
+		return out;
+	}
+	const String dot_ext = ext.is_empty() ? String() : String(".") + ext;
+	out.push_back(stem + "_01" + dot_ext);
+	if (stem.length() >= 2) {
+		const char32_t last = stem[stem.length() - 1];
+		const char32_t prev = stem[stem.length() - 2];
+		const bool last_is_letter =
+				(last >= 'a' && last <= 'z') || (last >= 'A' && last <= 'Z');
+		const bool prev_is_digit = prev >= '0' && prev <= '9';
+		if (last_is_letter && prev_is_digit) {
+			out.push_back(stem.substr(0, stem.length() - 1) + dot_ext);
+		}
+	}
+	return out;
+}
+
 void NovaParticleEmitter::_refresh_layer_materials(
 		const std::array<Ref<NovaParticleGraphicLayer>, MAX_VISUAL_LAYERS> &layers,
 		const std::array<bool, MAX_VISUAL_LAYERS> &present) {
@@ -500,14 +533,31 @@ void NovaParticleEmitter::_refresh_layer_materials(
 			layer_texture_names[i] = texture_name;
 			layer_texture_paths[i] = String();
 			layer_textures[i].unref();
-			if (!texture_name.is_empty() && texture_provider.is_valid()) {
+			if (!texture_name.is_empty()) {
 				// Host texture seam first (runtime archives); falls through to
-				// the loose-dir path when the provider returns null.
-				layer_textures[i] = texture_provider.call(texture_name);
-			}
-			if (layer_textures[i].is_null() && !texture_dir.is_empty() && !texture_name.is_empty()) {
-				layer_texture_paths[i] = opennova::resolve_texture_path(texture_dir, texture_name);
-				layer_textures[i] = opennova::load_texture_from_dir(texture_dir, texture_name);
+				// the loose-dir path when the provider returns null. Each
+				// candidate name (literal, then the flipbook/variant
+				// derivations — see texture_name_candidates) tries both
+				// sources before the next is considered.
+				const PackedStringArray candidates = texture_name_candidates(texture_name);
+				for (int c = 0; c < candidates.size() && layer_textures[i].is_null(); ++c) {
+					const String candidate = candidates[c];
+					if (texture_provider.is_valid()) {
+						layer_textures[i] = texture_provider.call(candidate);
+					}
+					if (layer_textures[i].is_null() && !texture_dir.is_empty()) {
+						layer_textures[i] = opennova::load_texture_from_dir(texture_dir, candidate);
+						if (layer_textures[i].is_valid()) {
+							layer_texture_paths[i] = opennova::resolve_texture_path(texture_dir, candidate);
+						}
+					}
+				}
+				if (layer_textures[i].is_null() && !texture_dir.is_empty()) {
+					// Nothing resolved: keep the pre-probe behavior of
+					// recording where the literal name would live (editor
+					// diagnostics read this).
+					layer_texture_paths[i] = opennova::resolve_texture_path(texture_dir, texture_name);
+				}
 			}
 		}
 	}
