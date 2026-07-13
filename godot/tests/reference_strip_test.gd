@@ -19,7 +19,7 @@ func _make_strip(services: ReferenceServices, noun := "font") -> ReferenceStrip:
 	return strip
 
 
-# edges_by_key: key -> Array of edge dicts; log["queries"] counts referrers calls.
+# edges_by_key: key -> Array[ReferenceEdge]; log["queries"] counts referrers calls.
 func _services(edges_by_key: Dictionary, log: Dictionary, ready := false) -> ReferenceServices:
 	return ReferenceServices.make(
 		func(name: String) -> Array:
@@ -32,9 +32,13 @@ func _services(edges_by_key: Dictionary, log: Dictionary, ready := false) -> Ref
 
 
 func _edge(source_path: String, source_kind: String, site: String,
-		target_kind := "font") -> Dictionary:
-	return {"source_path": source_path, "source_kind": source_kind, "site": site,
-		"target_kind": target_kind}
+		target_kind := "font") -> ReferenceEdge:
+	var edge := ReferenceEdge.new()
+	edge.source_path = source_path
+	edge.source_kind = source_kind
+	edge.site = site
+	edge.target_kind = target_kind
+	return edge
 
 
 # The find press defers its query by one frame (so the busy state actually
@@ -227,7 +231,8 @@ func test_real_index_first_query_builds_and_merges_extension_and_stem_keys() -> 
 	index.set_resource_root(root)
 
 	var strip := _make_strip(ReferenceServices.make(
-		func(name: String) -> Array: return index.referrers_of(name),
+		func(name: String) -> Array[ReferenceEdge]:
+			return ReferenceEdge.from_dict_rows(index.referrers_of(name)),
 		func() -> bool: return index.is_built(),
 		func(_kind: String, _path: String) -> void: pass))
 	# Fonts are referenced both with the extension (menus) and bare (credits).

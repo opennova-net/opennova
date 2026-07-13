@@ -145,26 +145,24 @@ func _populate() -> void:
 			continue
 		seen_keys[String(key).to_lower()] = true
 		for edge_value in referrers.call(String(key)):
-			var edge := edge_value as Dictionary
+			var edge := edge_value as ReferenceEdge
 			if not _allowed_kinds.is_empty() \
-					and not _allowed_kinds.has(String(edge.get("target_kind", ""))):
+					and not _allowed_kinds.has(edge.target_kind):
 				continue
-			var source_path := String(edge.get("source_path", ""))
-			if source_path.is_empty():
+			if edge.source_path.is_empty():
 				continue
-			var dedupe_key := source_path.to_lower()
+			var dedupe_key := edge.source_path.to_lower()
 			if not merged.has(dedupe_key):
 				merged[dedupe_key] = {
-					"path": source_path,
-					"kind": String(edge.get("source_kind", "")),
+					"path": edge.source_path,
+					"kind": edge.source_kind,
 					# A plain Array: packed arrays are value types, an appended
 					# copy would never land back in the dictionary.
 					"sites": [],
 				}
 			var row: Dictionary = merged[dedupe_key]
-			var site := String(edge.get("site", ""))
-			if not site.is_empty():
-				(row["sites"] as Array).append(site)
+			if not edge.site.is_empty():
+				(row["sites"] as Array).append(edge.site)
 
 	if merged.is_empty():
 		empty_label.text = "Nothing in the resource folder uses this %s." % _noun

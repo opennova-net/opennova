@@ -7,8 +7,7 @@ extends RefCounted
 ## (from from_shell on a headless/partial shell) means no services: adopters
 ## skip the strip.
 
-## func(name: String) -> Array of reference-edge Dictionaries
-## ({source_path, source_kind, target_kind, site, ...}).
+## func(name: String) -> Array[ReferenceEdge].
 var referrers: Callable = Callable()
 ## func() -> bool — whether the whole-root graph is already built (querying
 ## then is free, so the strip skips its "Find uses" button).
@@ -34,8 +33,8 @@ static func from_shell(shell: Object) -> ReferenceServices:
 			or not shell.has_method("open_in_workspace"):
 		return null
 	return make(
-		func(name: String) -> Array:
-			return shell.get_reference_index().referrers_of(name),
+		func(name: String) -> Array[ReferenceEdge]:
+			return ReferenceEdge.from_dict_rows(shell.get_reference_index().referrers_of(name)),
 		func() -> bool:
 			return shell.get_reference_index().is_built(),
 		func(kind: String, path: String) -> void:
