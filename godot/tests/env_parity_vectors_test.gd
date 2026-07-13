@@ -951,11 +951,22 @@ func test_sky_ambient_serves_smoothed_writeback() -> void:
 	simulate(weather, 64, TICK)
 	assert_eq(env.get_sky_ambient(), weather.get_smooth_sky(),
 		"driven sky ambient should be the weather writeback")
-	# A discrete TOD scrub re-seeds from the new keyframe (the _fill_light
-	# contract) until the next tick writes back the smoothed current.
+	# The writer split [orig: Environment_ComputeTimeOfDayColors @ 0x57de40]:
+	# once weather-driven, a TOD change refreshes the TARGETS only -- the
+	# currents stay weather-owned (re-seeding raw keyframes here is the
+	# dual-writer strobe the mission clock exposed, 2026-07-13). Discrete
+	# editor scrubs snap via resync_colors() instead (world_context_preview).
 	env.time_of_day = 2200.0
-	assert_eq(env.get_sky_ambient(), env.get_sky_ambient_target(),
-		"post-scrub sky ambient should re-seed from the keyframe")
+	assert_eq(env.get_sky_ambient(), weather.get_smooth_sky(),
+		"post-scrub currents stay weather-owned (no raw re-seed)")
+	assert_true(env.get_sky_ambient_target() != env.get_sky_ambient(),
+		"the scrub moved the TARGET for the smoothers to chase")
+	weather.resync_colors()
 	simulate(weather, 4, TICK)
 	assert_eq(env.get_sky_ambient(), weather.get_smooth_sky(),
-		"post-scrub ticks should serve the writeback again")
+		"post-resync ticks serve the writeback")
+	# The writeback is the smoothed block WITH the iris modulation applied, so
+	# raw-keyframe equality never holds — assert the snap landed the currents
+	# in the new keyframe's neighborhood (vs the ~0.15 pre-scrub gap).
+	assert_lt(env.get_sky_ambient().distance_to(env.get_sky_ambient_target()), 0.05,
+		"the resync snap lands the currents at the new keyframe (mod the iris gain)")

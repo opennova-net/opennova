@@ -155,6 +155,37 @@ func test_environment_owns_the_authored_mission_clock() -> void:
 		"the environment advances at minutes_per_day for every downstream consumer")
 
 
+func test_weather_driven_clock_advance_never_clobbers_smoothed_currents() -> void:
+	# The witnessed writer split [orig: Environment_ComputeTimeOfDayColors
+	# @ 0x57de40]: TOD recomputes refresh the keyframe TARGETS; the weather
+	# tick's smoothed writeback owns the CURRENT render colors. Before this pin,
+	# the per-tick mission clock re-stamped raw keyframe colors between weather
+	# writebacks and the whole scene strobed at the tick/frame beat (the
+	# 2026-07-13 black-flicker regression).
+	var env_node := NovaEnvironment.new()
+	add_child_autofree(env_node)
+	env_node.environment_data = _load_full_00()
+	env_node.set_weather_driven(true)
+	var smoothed := Vector3(0.25, 0.5, 0.75)
+	env_node.set_fill_light(smoothed)
+	env_node.set_sun_light(smoothed)
+	env_node.configure_mission_clock(0x0C00, 60)
+	env_node.advance_mission_clock(310)  # 5 s of ticks -- many TOD recomputes
+	assert_eq(env_node.get_fill_light(), smoothed,
+		"weather-driven, the clock's TOD recompute must not clobber the smoothed fill")
+	assert_eq(env_node.get_sun_light(), smoothed,
+		"weather-driven, the clock's TOD recompute must not clobber the smoothed sun")
+	assert_true(env_node.get_fill_light_target() != smoothed,
+		"the keyframe TARGETS keep refreshing for the smoothers to chase")
+
+	# Standalone (no weather node): the direct writes remain -- the editor env
+	# preview owns its currents.
+	env_node.set_weather_driven(false)
+	env_node.advance_mission_clock(310)
+	assert_true(env_node.get_fill_light() != smoothed,
+		"without a weather driver the TOD recompute updates the currents directly")
+
+
 func test_fog_start_follows_engine_policy() -> void:
 	var env := _new_default_env()
 	env.set_fog_level(1000.0)

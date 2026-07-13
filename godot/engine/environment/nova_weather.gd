@@ -43,12 +43,25 @@ func _process(_delta: float) -> void:
 	if not _cached_env or not _cached_env.has_method("is_loaded") or not _cached_env.is_loaded():
 		return
 	var env := _cached_env
+	# Claim the current render colors + shader globals: from here on the env's
+	# _update_tod refreshes TARGETS only and this tick's writeback owns the
+	# currents — the witnessed split [orig: Environment_ComputeTimeOfDayColors
+	# @ 0x57de40], and the fix for the raw-vs-modulated strobe the per-tick
+	# mission clock exposed.
+	if env.has_method("set_weather_driven") and not env.is_weather_driven():
+		env.set_weather_driven(true)
 	if not _colors_synced:
+		# Snap TO THE TARGETS — the witnessed snap form [orig:
+		# Environment_SnapStateToTargets @ 0x57d1e0]: at mission start the
+		# targets ARE the load-time keyframes, and after a discrete scrub
+		# (resync_colors) they are the new keyframes. Seeding from the env
+		# CURRENTS would re-seed the stale writeback (the currents are
+		# weather-owned once driven).
 		_core.snap_colors(
-			_vec3_color(env.get_fill_light()),
-			_vec3_color(env.get_sun_light()),
-			_vec3_color(env.get_fog_color()),
-			_vec3_color(env.get_sky_ambient()))
+			_vec3_color(env.get_fill_light_target()),
+			_vec3_color(env.get_sun_light_target()),
+			_vec3_color(env.get_fog_color_target()),
+			_vec3_color(env.get_sky_ambient_target()))
 		_colors_synced = true
 	var env_data: EnvFile = env.get_environment_data()
 	var lightning := Color.WHITE
