@@ -3878,8 +3878,12 @@ renamed in the IDB this session (`g_camera_*`; world-wac-ai-re §14.7 lists them
   vehicle's `orientationMatrix(+0xb4)`, and model types 3/4 (helo/plane byte @ model+406) drop the
   eye by boundRadius/2. Final rotation = atan2 look-at from eye to anchor(+R·(0.125,0.125,0.125)),
   roll 0 (+ explosion-shake sway from `dword_B764B0` filtered `Env_WeatherPrng` noise).
-- **Collision** `[orig: Camera_RaycastCollisionOffset @ 0x4378b0]` + inline in the view fn:
-  0.25u-step march along the offset ray (skipped when dist ≥ 8.0), bone-collision force
+- **Collision** `[orig: Camera_RaycastCollisionOffset @ 0x4378b0]` + inline in the view fn
+  `@ 0x438213..0x43832e`: 0.25u-step march along the offset ray (skipped when dist ≥ 8.0),
+  stepIndex 1..numSteps−1 with numSteps = dist>>14 — **the no-collision landing is the LAST
+  step, (numSteps−1)·0.25, never the full distance** (witnessed 2026-07-13; at the reset
+  dist 1.0 the on-foot camera sits 0.75u behind the nudged pivot — ported as
+  `tp_effective_distance`; numSteps ≤ 1 skips the march, eye = pivot), bone-collision force
   (`Entity_ComputeCollisionForceFromBones @ 0x4afff0`) against a per-entity collider list at
   entity+0x1bc (ptr)/+0x1c0 (count) filtered to defless/type-5 entities, radius 0.25; terrain
   clearance via `Terrain_SampleHeightBilinear @ 0x6067b0`; eye clamped ≥ water+0.25 (when entity

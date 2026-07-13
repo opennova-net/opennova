@@ -313,15 +313,29 @@ func test_camera_state_rides_the_sim_view() -> void:
 		NovaSimulation.fov_vertical_from_horizontal(20.0, size.x / size.y), 0.001,
 		"the camera fov is the sim's policy value through the shared conversion")
 
-	# Third person: the sim's chased anchor is the look target; the eye sits back
-	# along the orbit. (level look, yaw 0 -> anchor - back*3 with 22.5 deg orbit)
+	# Third person: the camera backs off the NUDGED pivot — the sim's chased
+	# anchor + R*(0.125 fwd/left/up) — by the round-start reset distance 1.0
+	# with orbit yaw/pitch 0 [orig: Camera_ResetToLocalPlayer @0x4a3d30; the
+	# nudge @0x43818a]. Level look at yaw 0: fwd = (0,0,-1), left = (-1,0,0),
+	# up = (0,1,0).
 	world.view.tp_anchor = Vector3(4.0, 2.0, -6.0)
 	world.view.tp_anchor_valid = true
 	host.set_third_person(true)
 	host.after_world_tick()
-	var to_anchor: Vector3 = world.view.tp_anchor - camera.global_position
-	assert_almost_eq(to_anchor.length(), 3.0, 0.001,
-		"the camera orbits the SIM anchor at the witnessed 3.0 distance")
+	var pivot: Vector3 = world.view.tp_anchor \
+			+ (Vector3(0, 0, -1) + Vector3(-1, 0, 0) + Vector3(0, 1, 0)) \
+			* host.PLAYER_TP_PIVOT_NUDGE
+	var to_pivot: Vector3 = pivot - camera.global_position
+	assert_almost_eq(host.PLAYER_TP_DISTANCE, 1.0, 0.001,
+		"the in-play chase distance is the reset 1.0 [orig: @0x4a3d4c]")
+	# The march's no-collision landing: (floor(1.0/0.25) - 1) * 0.25 = 0.75 back
+	# [orig: @0x438213..0x43832e — the eye stays on the LAST 0.25u step].
+	assert_almost_eq(to_pivot.length(), 0.75, 0.001,
+		"the camera lands on the march's last 0.25u step, not the full distance")
+	var expected_eye: Vector3 = pivot - Vector3(0, 0, -1) \
+			* LocalPlayerHost.tp_effective_distance(host.PLAYER_TP_DISTANCE)
+	assert_almost_eq((camera.global_position - expected_eye).length(), 0.0, 0.001,
+		"the eye is pivot - effective_dist*forward (orbit pitch 0 at the reset)")
 
 
 func test_camera_mode_and_scope_toggle_reach_the_sim() -> void:
