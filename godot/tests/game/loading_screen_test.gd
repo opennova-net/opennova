@@ -9,6 +9,14 @@ extends GutTest
 
 const LoadingScreen := preload("res://engine/ui/nova_loading_screen.gd")
 
+var _temp_dirs: Array[String] = []
+
+
+func after_each() -> void:
+	for dir in _temp_dirs:
+		_remove_dir_recursive(dir)
+	_temp_dirs.clear()
+
 
 # --- sidecar image name [orig: 0x521d66/0x521dab] -----------------------------
 
@@ -135,6 +143,39 @@ func test_present_creeps_toward_reported_progress() -> void:
 		"unthrottled while the displayed value trails the reported one")
 
 
+func test_background_availability_is_publicly_observable() -> void:
+	var screen := _setup_screen({"mission_file": "00TRg.bms"})
+	assert_true(screen.has_background(),
+		"tests and hosts can observe whether setup found loading art")
+
+
+func test_prepare_for_blocking_load_waits_for_a_registered_frame() -> void:
+	var screen := _setup_screen({"mission_file": "00TRg.bms"})
+	add_child(screen)
+	var preparable := screen.has_method("prepare_for_blocking_load")
+	assert_true(preparable,
+		"a mounted loading screen exposes the frame-registration handoff")
+	if not preparable:
+		return
+	var frame_before := Engine.get_process_frames()
+	var prepared: bool = bool(await screen.call("prepare_for_blocking_load"))
+	assert_true(prepared)
+	assert_gt(Engine.get_process_frames(), frame_before,
+		"the blocking load may not begin in the screen's mounting frame")
+	assert_gt(screen.displayed_progress(), 0,
+		"preparation submits a non-empty progress bar with the registered frame")
+
+
+func test_prepare_for_blocking_load_rejects_an_unmounted_screen() -> void:
+	var screen := _setup_screen({"mission_file": "00TRg.bms"})
+	var preparable := screen.has_method("prepare_for_blocking_load")
+	assert_true(preparable)
+	if not preparable:
+		return
+	assert_false(bool(await screen.call("prepare_for_blocking_load")),
+		"there is no frame to present before the Control enters the SceneTree")
+
+
 # --- helpers -------------------------------------------------------------------
 
 func _setup_screen(info: Dictionary) -> NovaLoadingScreen:
@@ -145,7 +186,7 @@ func _setup_screen(info: Dictionary) -> NovaLoadingScreen:
 	root.set_root_dir(dir)
 	var screen: NovaLoadingScreen = autofree(NovaLoadingScreen.new())
 	screen.setup(root, info)
-	assert_not_null(screen._texture, "the test pcx decodes into a texture")
+	assert_true(screen.has_background(), "the test pcx decodes into a texture")
 	return screen
 
 
@@ -160,6 +201,7 @@ func _register_gametext_fixture() -> void:
 func _make_temp_dir(name: String) -> String:
 	var dir := OS.get_cache_dir().path_join("opennova_%s_%d" % [name, Time.get_ticks_usec()])
 	DirAccess.make_dir_recursive_absolute(dir)
+	_temp_dirs.append(dir)
 	return dir
 
 
@@ -167,6 +209,23 @@ func _touch(path: String) -> void:
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	f.store_8(0)
 	f.close()
+
+
+func _remove_dir_recursive(path: String) -> void:
+	var dir := DirAccess.open(path)
+	if dir == null:
+		return
+	dir.list_dir_begin()
+	var entry := dir.get_next()
+	while entry != "":
+		var child := path.path_join(entry)
+		if dir.current_is_dir():
+			_remove_dir_recursive(child)
+		else:
+			DirAccess.remove_absolute(child)
+		entry = dir.get_next()
+	dir.list_dir_end()
+	DirAccess.remove_absolute(path)
 
 
 # A minimal valid 8-bit palettized PCX (2x2) so NovaResourceRoot.load_texture

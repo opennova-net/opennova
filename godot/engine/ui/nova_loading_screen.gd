@@ -155,6 +155,7 @@ func setup(root: NovaResourceRoot, info: Dictionary) -> void:
 	_texture = root.load_texture(String(bg["name"])) if root != null else null
 	_in_session = bool(info.get("in_session", false))
 	if not _in_session:
+		queue_redraw()
 		return
 	# MP only: the text overlay and its fonts [orig: fonts loaded only on the
 	# in-session path @ 0x521eec/0x521f5a].
@@ -164,6 +165,7 @@ func setup(root: NovaResourceRoot, info: Dictionary) -> void:
 	_game_type_text = _lookup_loading_text(gametype_text_key(int(info.get("game_type", 0))), "")
 	_font_small = _load_font(root, FONT_SMALL)
 	_font_large = _load_font(root, FONT_LARGE)
+	queue_redraw()
 
 
 ## Report load progress [orig: the per-stage/per-model calls into
@@ -201,8 +203,30 @@ func present(force := false) -> void:
 		RenderingServer.force_draw(true, 0.0)
 
 
+## Give a newly mounted Control one SceneTree frame to receive layout and submit
+## its queued draw before the caller enters synchronous mission loading. The
+## forced present after that frame keeps the window responsive during the block.
+func prepare_for_blocking_load() -> bool:
+	if not is_inside_tree():
+		return false
+	# Seed the smoothed bar before the registration frame so that frame submits
+	# both the background and a non-empty fill to the canvas draw list.
+	present(true)
+	await get_tree().process_frame
+	if not is_inside_tree():
+		return false
+	present(true)
+	return true
+
+
 func displayed_progress() -> int:
 	return _displayed
+
+
+## Whether setup resolved and decoded loading art. Hosts and tests should not
+## inspect the screen's private texture resource directly (ADR 0018).
+func has_background() -> bool:
+	return _texture != null
 
 
 func _draw() -> void:
