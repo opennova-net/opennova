@@ -655,7 +655,6 @@ void NovaTerrain::_clear_collision_bodies() {
 }
 
 void NovaTerrain::_hide_visible_patches() {
-	foliage_dispatch_centers.clear();
 	RenderingServer* rs = RenderingServer::get_singleton();
 	for (int i = 0; i < PATCH_POOL_SIZE; i++) {
 		if (!patch_visible[i]) {
