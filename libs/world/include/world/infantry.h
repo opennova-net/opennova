@@ -31,9 +31,12 @@ enum : int {
     kClimbIdle = 32,
     kSwimIdle = 36,
     kSwimForward = 37,
+    kRollLeft = 41,  // prone lean, MoveOrder bit 6 [orig: @0x4b7335]
+    kRollRight = 42, // prone lean, MoveOrder bit 7 [orig: @0x4b734c]
     kIdle = 43,
     kIdle2 = 44,
     kIdleCrouch = 45,
+    kIdleMortar = 46, // crouch idle for ForceCrouch (0x40000) weapons [orig: @0x4b726f]
     kIdleProne = 48,
     kIdle3 = 49,
     // The weapon-channel hold-pose ladder [orig: g_animStateNameTable @ 0x8135F0
@@ -203,6 +206,29 @@ struct InfantryState {
     // Entity_UpdateInfantryPlayerBody @0x4b727b-0x4b7293 (state = 0x2B + (cnt >= 0x3E)),
     // reset @0x4b719b]
     int32_t idle_counter = 0;
+    // Lean inputs (MoveOrder bits 6/7 [orig: entity+0x12C 0x40/0x80]) and the smoothed
+    // lean angle (entity+0xB0, BAM32). Every body tick decays lean -= (lean+8)>>4
+    // [orig: @0x4b5c97]; the on-foot ramp adds -/+0x3000000 per held lean key, gated
+    // alive + not prone [orig: @0x4b7dbf/@0x4b7dd6; Flags&0x100020 legs unmodeled].
+    // Consumers: prone roll anims 41/42, the aim-overlay lean term, and the FP camera
+    // roll = torsoRoll + lean/4 [orig: @0x437fcd].
+    bool lean_left = false;
+    bool lean_right = false;
+    int32_t lean_angle = 0;
+    // The torso roll (entity+0x2DC, BAM32): chases the entity's slope roll (+0x18)
+    // a sixteenth-step per body tick with the LAG clamped to roll +-20 deg; prone
+    // idle 48 decays it toward level; the combat rolls 41/42 RAMP it -/+5.625 deg
+    // per tick (the FP barrel-roll view). Consumers: the FP camera roll
+    // (torsoRoll + lean/4 [orig: @0x437fe6]) and the section-14 head/spine roll
+    // terms. [orig: @0x4b5cff-0x4b5d6d + @0x4b700c-0x4b7025]
+    int32_t torso_roll = 0;
+    // The held weapon's run-gait class (weapon.def run_anim -> AdmDefs +0xAC) and its
+    // ForceCrouch flag (weapon.def flags 0x40000), mirrored per tick like wpn_hold_kind.
+    // run gait: forward-walk promotes to run_2/run_3 by 2 + run_anim [orig: @0x4b729d];
+    // ForceCrouch: crouch idle promotes 45 -> 46 idle_mortar [orig: @0x4b723f] and
+    // stance-change requests are refused [orig: @0x4e0d8a].
+    int wpn_run_anim = 0;
+    bool wpn_force_crouch = false;
     uint32_t last_events = 0;
     int32_t prev_capsule_bottom = 0;      // anim_slot[19]
     int32_t adm_id = 0;

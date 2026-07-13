@@ -54,6 +54,10 @@ struct DirectionalClip : IRootMotionSource {
             return state_id - anim_state::kWalkCrouchForward;
         if (state_id >= anim_state::kWalkProneForward && state_id < anim_state::kWalkProneForward + 8)
             return state_id - anim_state::kWalkProneForward;
+        // The forward run gaits the promotion reaches from pure-forward walk
+        // [orig: run_2/run_3 @0x4b729d; ANIMNUM 9/10 are forward-only clips].
+        if (state_id == anim_state::kRun2 || state_id == anim_state::kRun3)
+            return 0;
         return -1;
     }
 };

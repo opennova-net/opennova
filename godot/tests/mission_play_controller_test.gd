@@ -30,20 +30,26 @@ class FakeWorld:
 		add_child(node)
 		return node
 
-	func set_local_player_input(forward: bool, back: bool, left: bool, right: bool, run: bool,
-			crouch: bool, prone: bool, jump: bool, look_yaw_deg: float, look_pitch_deg: float) -> void:
+	func set_local_player_input(forward: bool, back: bool, left: bool, right: bool,
+			lean_left: bool, lean_right: bool, jump: bool) -> void:
 		input_calls.append({
 			"forward": forward,
 			"back": back,
 			"left": left,
 			"right": right,
-			"run": run,
-			"crouch": crouch,
-			"prone": prone,
+			"lean_left": lean_left,
+			"lean_right": lean_right,
 			"jump": jump,
-			"yaw": look_yaw_deg,
-			"pitch": look_pitch_deg,
 		})
+
+	var look_calls: Array = []
+	func add_local_player_look(dx_px: float, dy_px: float) -> void:
+		look_calls.append(Vector2(dx_px, dy_px))
+
+	var stance_requests: Array = []
+	func request_local_player_stance(stance: int) -> bool:
+		stance_requests.append(stance)
+		return true
 
 	func local_player_position() -> Vector3:
 		return Vector3.ZERO
@@ -110,8 +116,8 @@ func test_play_viewport_input_route_drives_player_keys_and_mouse_look() -> void:
 	host.before_world_tick(0.016)
 
 	assert_eq(world.input_calls.size(), 1)
-	assert_gt(world.input_calls[0]["yaw"], 0.0)
-	assert_gt(world.input_calls[0]["pitch"], 0.0)
+	assert_eq(world.look_calls.size(), 1, "mouse motion forwards raw pixels to the sim pipeline")
+	assert_eq(world.look_calls[0], Vector2(40.0, -20.0))
 
 	# The stance/camera keys ride the same route the input-stage interception
 	# feeds: F4 flips the shared host's first/third person...
@@ -119,17 +125,12 @@ func test_play_viewport_input_route_drives_player_keys_and_mouse_look() -> void:
 	assert_true(play.handle_viewport_input(_pressed_key(KEY_F4)), "F4 is claimed by the play session")
 	assert_true(host.is_third_person(), "and toggles third person on the shared host")
 
-	# ...and C / Z edge-toggle the stance, mutually exclusive, observed through
-	# the input the host packs into the world (the public seam).
-	assert_true(play.handle_viewport_input(_pressed_key(KEY_C)), "C (crouch) is claimed")
-	host.before_world_tick(0.016)
+	# ...and Z / X / C are the witnessed 3-key stance SELECT requests, applied by
+	# the sim (mutual exclusion + ForceCrouch refusal live there).
+	assert_true(play.handle_viewport_input(_pressed_key(KEY_X)), "X (crouch) is claimed")
 	assert_true(play.handle_viewport_input(_pressed_key(KEY_Z)), "Z (prone) is claimed")
-	host.before_world_tick(0.016)
-	assert_eq(world.input_calls.size(), 3)
-	assert_true(world.input_calls[1]["crouch"], "C toggles crouch on")
-	assert_false(world.input_calls[1]["prone"])
-	assert_false(world.input_calls[2]["crouch"], "prone clears crouch (mutually exclusive)")
-	assert_true(world.input_calls[2]["prone"], "Z toggles prone on")
+	assert_true(play.handle_viewport_input(_pressed_key(KEY_C)), "C (stand) is claimed")
+	assert_eq(world.stance_requests, [1, 2, 0])
 
 	# While playing the game owns the keyboard: a key pushed through the root
 	# viewport's real input pipeline is claimed at the input stage, before the
@@ -139,8 +140,8 @@ func test_play_viewport_input_route_drives_player_keys_and_mouse_look() -> void:
 	editor_box.grab_focus()
 	get_tree().root.push_input(_pressed_key(KEY_C, "c"))
 	host.before_world_tick(0.016)
-	assert_eq(world.input_calls.size(), 4)
-	assert_true(world.input_calls[3]["crouch"], "the pushed key reached the player host, not the editor UI")
+	assert_eq(world.stance_requests, [1, 2, 0, 0],
+		"the pushed key reached the player host as a stance request, not the editor UI")
 	assert_eq(editor_box.text, "", "the focused control never saw the key while playing")
 
 	# F3 summons the workspace's debug overlay — the game shell's key

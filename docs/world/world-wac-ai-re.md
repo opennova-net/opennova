@@ -249,8 +249,14 @@ can see it (`Physics_RaycastTerrainAndSectors` watch-check, retry 62); respawn r
     (flag&2) seen → alert 25; pick emits 4 relation-matrix marks.
 14. **Recoil/flinch decay** (dump 4430–4462, combat pass): entity[224]/[225] impulses decay by
     sixteenth-steps (floor 768→0) feeding pitch entity[5] and a PRNG-signed heading jitter
-    entity[4]; entity[44]/[219] decay; torso-roll chase entity[183] → entity[6] sixteenth-step
-    clamped ±238609280 (prone 48 halves the chase).
+    entity[4]; entity[44]/[219] decay. Torso roll entity[183] (`@0x4b5cff-0x4b5d6d`,
+    corrected 2026-07-13 — the earlier "prone 48 halves the chase" reading was wrong):
+    anim 48 idle_prone → decay toward level `t −= (t+8)>>4` `@0x4b5d0a`; anims 41/42 →
+    skipped here but RAMPED −/+0x4000000 (5.625°) per tick at the separate site
+    `@0x4b700e/@0x4b701d` (the FP barrel-roll view); else chase entity[6]
+    `t += (roll−t+8)>>4` with the LAG clamped to roll ±238609280 (20°) `@0x4b5d2a..6d`
+    — the clamp snaps the wrapped post-roll value back once the clip ends. Ported:
+    `AiSystem::infantry_torso_roll_tick`.
 15. **Mounted pose states** (dump 4464–4539, mount/B2 pass): emplaced gunners force 67–75
     (`emplaced_N` by mount config +2156); seat passengers pose from the seat bone and take
     `sit_N` = `atol(bone_name_digits) + 76`; sit_24 (=100) drivers lean 107–110 by steering
@@ -356,6 +362,27 @@ can see it (`Physics_RaycastTerrainAndSectors` watch-check, retry 62); respawn r
     target fields (+0x2e4/+0x2e8) whose per-leg divergence/stagger is unknown. Consequence:
     twist/shuffle timing may differ from retail by small constants. Closes with an org2
     grill of @0x4b40e0's writes to +0x8c/+0x2e4/+0x2e8.
+  - **D-INF-16** the run promotion's pitch-tier term ported as the constant 2. The
+    original reads `entity+0x37C` (`>0x430000 or <0 → 0; ≥0x210000 → 1; else 2` before
+    adding `run_anim` [orig: `@0x4b72aa-0x4b72cf`]), but the field has NO writer anywhere
+    in the retail image (full-image displacement sweep, 2026-07-13) — pool memory is
+    zero-initialized, so the band is constantly 2. `player_body_select` bakes the 2 and
+    records the thresholds here; if a sibling title (DFX/BHD) turns out to write +0x37C,
+    lift the term into a live field. `libs/world/src/infantry.cpp`.
+  - **D-INF-17** lean producer gate legs unmodeled. The on-foot lean ramp skips on
+    `Flags & 0x100020` (bit 5 + the on-platform bit) and the prone roll-anim selection
+    skips on `Flags & 0x112002`'s 0x10000/0x100000 legs [orig: `@0x4b7da2/@0x4b7322`];
+    our port gates on alive/prone/airborne only (the modeled equivalents of 0x2/0x2000).
+    The seated (`+0x168 == 1`) ±0x1400000 ramp variant [orig: `@0x4b66b5`] rides the
+    mounting slice. `infantry_lean_tick` / `player_body_select`.
+  - **D-INF-18** the FP eye's terrain clamp and the remote CameraOffset approximation
+    unported. The local head-bone eye is sampled host-side from the render skeleton (the
+    structural translation of the `@0x4b6bb3` bone path, floored at Position + 0.125
+    [orig min `0x2000 @0x4b6b98`]); the original additionally floors it at
+    `max(4 terrain samples ±0x4000) + 0x1000` unless `Flags & 0x800000` [orig:
+    `@0x4b6c1c-0x4b6c97`], and remote players take the capsule-height trig path
+    [orig: `@0x4b6984`]. The camera's `torsoRoll(+0x2DC)` and `2·pitchBlend(+0x380)`
+    terms are also unported (their producers are open). `local_player_host.gd`.
   Everything else is structurally translated with per-mechanic dump citations and byte-pinned
   constants, unit-tested in tests/world/infantry_test.cpp and end-to-end in promote_test.
 - **Root-motion data path** (`AnimMap_UpdateEntity @ 0x40b5f0` → engine `InfantryRootMotion`):
@@ -922,7 +949,7 @@ Ported for the local player, end to end, in the controller train:
   `LocalPlayerHost._update_avatar` builds the per-class deltas via the single-sourced
   `bms_to_godot_basis` and sets the avatar node to the BODY frame →
   `NovaObjectModel.set_aim_overlay` → `NovaSkeletalAnim.eval_pose_overlay`. The 3P camera now
-  uses the witnessed 3.0 / 22.5° / ¼-step-anchor numbers (net-re §5.39 addendum).
+  uses the witnessed 3.0 / 5.625° / ¼-step-anchor numbers (net-re §5.39 addendum; the orbit pitch was misconverted as 22.5° until 2026-07-13).
 - **Verified**: `godot/tests/bend_capture_probe.gd(.tscn)` — boots ONED play-in-editor,
   injects F4 + mouse-look, captures poses; look-down bends the spine/head forward, look-up
   arches back (05TR.bms, JOX root).

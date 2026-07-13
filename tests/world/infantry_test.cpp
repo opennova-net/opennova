@@ -1267,9 +1267,11 @@ int main() {
         CHECK(e->inf.vel[1] <= 0 && e->inf.vel[1] > -100);
     }
 
-    // ---- stance: crouch/prone remap the gait + idle to the stance clips (player) ----
-    // [orig: Entity_UpdateInfantryPlayerBody @0x4b40e0 — moving base 1/11/19, idle 43/45/48;
-    //  player body tests prone bit 0x100 before crouch bit 0x200]
+    // ---- stance: crouch/prone select the stance gait + idle clips (player). The
+    //      selection runs every 4th tick, so each stance flip advances a full 4-tick
+    //      window. [orig: Entity_UpdateInfantryPlayerBody @0x4b40e0 — moving base
+    //      1/11/19, idle 43/45/48; 4th-tick gate @0x4b70ce; the player body tests
+    //      prone bit 0x100 before crouch bit 0x200]
     {
         World w;
         AiSystem ai;
@@ -1286,31 +1288,166 @@ int main() {
         // NPC move_mode/target_dist (which apply_player_body_input clears). [a61a7e04]
         e->inf.player_moving = true; // moving forward
         e->inf.stance = InfantryState::Stance::kCrouch;
-        run_ticks(ai, w, 0, 1);
+        run_ticks(ai, w, 0, 4);
         CHECK(e->inf.anim_state == anim_state::kWalkCrouchForward); // 11
 
         e->inf.stance = InfantryState::Stance::kProne;
-        run_ticks(ai, w, 1, 2);
+        run_ticks(ai, w, 4, 8);
         CHECK(e->inf.anim_state == anim_state::kWalkProneForward); // 19
 
-        e->inf.alert_timer = 16; // alerted -> run gait, but crouch has no run clip...
+        e->inf.alert_timer = 16; // an org1 alert flag: the player selection ignores it
         e->inf.stance = InfantryState::Stance::kCrouch;
-        run_ticks(ai, w, 2, 3);
-        CHECK(e->inf.anim_state == anim_state::kWalkCrouchForward); // ...still crouch WALK (11)
+        run_ticks(ai, w, 8, 12);
+        CHECK(e->inf.anim_state == anim_state::kWalkCrouchForward); // still crouch WALK (11)
         e->inf.alert_timer = 0;
 
         e->inf.player_moving = false; // stationary
         e->inf.stance = InfantryState::Stance::kCrouch;
-        run_ticks(ai, w, 3, 4);
+        run_ticks(ai, w, 12, 16);
         CHECK(e->inf.anim_state == anim_state::kIdleCrouch); // 45
 
         e->inf.stance = InfantryState::Stance::kProne;
-        run_ticks(ai, w, 4, 5);
+        run_ticks(ai, w, 16, 20);
         CHECK(e->inf.anim_state == anim_state::kIdleProne); // 48
 
         e->inf.stance = InfantryState::Stance::kStand;
-        run_ticks(ai, w, 5, 6);
+        run_ticks(ai, w, 20, 24);
         CHECK(e->inf.anim_state == anim_state::kIdle); // 43
+    }
+
+    // ---- the run promotion: pure-forward standing walk promotes to run_3 (run_2 at
+    //      tier 1), suppressed while scoped; strafe/back/stance gaits never promote.
+    //      [orig: @0x4b729d-0x4b731b — tier = 2 (the dead +0x37C pitch term) +
+    //      run_anim; scope Flags&0x10 @0x4b72e2; run_2 fallback @0x4b7311]
+    {
+        World w;
+        AiSystem ai;
+        TestSource src;
+        src.clips = {anim_state::kWalkForward, anim_state::kWalkForward + 4,
+                     anim_state::kIdle, anim_state::kRun2, anim_state::kRun3,
+                     anim_state::kWalkCrouchForward};
+        ai.root_motion = &src;
+        AiEntity *e = soldier(ai);
+        e->inf.is_local_player = true;
+        e->health = 100;
+
+        e->inf.player_moving = true; // pure forward, standing
+        run_ticks(ai, w, 0, 4);
+        CHECK(e->inf.anim_state == anim_state::kRun3); // tier 2 -> run_3
+
+        e->inf.scope_raised = true; // scope suppresses the promotion
+        run_ticks(ai, w, 4, 8);
+        CHECK(e->inf.anim_state == anim_state::kWalkForward);
+        e->inf.scope_raised = false;
+
+        e->inf.wpn_run_anim = -1; // tier 1 -> run_2 [orig: the tier==1 leg]
+        run_ticks(ai, w, 8, 12);
+        CHECK(e->inf.anim_state == anim_state::kRun2);
+        e->inf.wpn_run_anim = 0;
+
+        e->inf.player_move_dir_index = 4; // moving BACK: never promotes
+        run_ticks(ai, w, 12, 16);
+        CHECK(e->inf.anim_state == anim_state::kWalkForward + 4);
+        e->inf.player_move_dir_index = 0;
+
+        e->inf.stance = InfantryState::Stance::kCrouch; // crouch gait: never promotes
+        run_ticks(ai, w, 16, 20);
+        CHECK(e->inf.anim_state == anim_state::kWalkCrouchForward);
+    }
+
+    // ---- the lean chain: the angle ramps -/+0x3000000 per held key against the
+    //      1/16-step decay; prone + lean selects the roll anims 41/42 (right wins).
+    //      [orig: decay @0x4b5c97; ramp @0x4b7dbf/@0x4b7dd6; anims @0x4b731b-0x4b7354]
+    {
+        World w;
+        AiSystem ai;
+        TestSource src;
+        src.clips = {anim_state::kWalkForward, anim_state::kIdle, anim_state::kIdleProne,
+                     anim_state::kRollLeft, anim_state::kRollRight};
+        ai.root_motion = &src;
+        AiEntity *e = soldier(ai);
+        e->inf.is_local_player = true;
+        e->health = 100;
+
+        e->inf.lean_left = true; // standing lean: angle ramps negative
+        run_ticks(ai, w, 0, 1);
+        CHECK(e->inf.lean_angle == -0x3000000); // decay of 0, then one ramp step
+        run_ticks(ai, w, 1, 2);
+        // decay pulls 1/16 back before the second ramp step
+        CHECK(e->inf.lean_angle < -0x3000000 && e->inf.lean_angle > -0x6000000);
+
+        e->inf.lean_left = false; // released: decays toward 0
+        for (int t = 2; t < 200; ++t) run_ticks(ai, w, t, t + 1);
+        CHECK(e->inf.lean_angle > -0x100000 && e->inf.lean_angle <= 0);
+
+        e->inf.stance = InfantryState::Stance::kProne; // prone: the ramp is gated off...
+        e->inf.lean_right = true;
+        const int32_t before = e->inf.lean_angle;
+        run_ticks(ai, w, 200, 201);
+        // ...so the angle only decays toward 0 (never ramps right).
+        CHECK(e->inf.lean_angle >= before && e->inf.lean_angle <= 0);
+        run_ticks(ai, w, 201, 205); // ...and the selection picks roll_right 42
+        CHECK(e->inf.anim_state == anim_state::kRollRight);
+
+        e->inf.lean_left = true; // both held: right wins [orig: 42 written last]
+        run_ticks(ai, w, 205, 209);
+        CHECK(e->inf.anim_state == anim_state::kRollRight);
+
+        // The rolls are LOCKED states (flags 0x285, bit 0x4): a new target parks in
+        // pending and lands on the clip-end promotion [orig: the @0x40b77b end-flag
+        // path; commit arbitration @0x4b7356]. Give roll_right a finite length so
+        // the pending roll_left promotes when it runs out.
+        e->inf.lean_right = false; // left only -> roll_left 41 queued behind 42
+        src.lengths[anim_state::kRollRight] = 30;
+        run_ticks(ai, w, 209, 213);
+        CHECK(e->inf.anim_pending == anim_state::kRollLeft);
+        CHECK(e->inf.anim_state == anim_state::kRollRight);
+        run_ticks(ai, w, 213, 245); // the playing roll reaches its end and promotes
+        CHECK(e->inf.anim_state == anim_state::kRollLeft);
+    }
+
+    // ---- the torso roll: chases the slope roll (entity+0x18) a sixteenth-step per
+    //      tick clamped to roll +-0x0E38E380 (20 deg); the combat rolls 41/42 freeze
+    //      it; prone idle 48 decays it toward level.
+    //      [orig: Entity_UpdateInfantryPlayerBody @0x4b5cff-0x4b5d6d]
+    {
+        World w;
+        AiSystem ai;
+        TestSource src;
+        src.clips = {anim_state::kIdle, anim_state::kIdleProne, anim_state::kRollLeft};
+        ai.root_motion = &src;
+        AiEntity *e = soldier(ai);
+        e->inf.is_local_player = true;
+        e->health = 100;
+
+        e->roll = 0x04000000; // a slope roll inside the +-20 deg window: pure chase
+        run_ticks(ai, w, 0, 1);
+        CHECK(e->inf.torso_roll == 0x400000); // one sixteenth-step
+        for (int t = 1; t < 200; ++t) run_ticks(ai, w, t, t + 1);
+        CHECK(e->inf.torso_roll > 0x3F00000 && e->inf.torso_roll <= 0x4000000);
+
+        // A slope jump far past the window: the clamp is on the LAG — torsoRoll
+        // snaps to within 20 deg of roll immediately and eases the rest
+        // [orig: delta = newTorso - roll vs +-0x0E38E380 @0x4b5d47/@0x4b5d5a].
+        e->roll = -0x30000000;
+        run_ticks(ai, w, 200, 201);
+        CHECK(e->inf.torso_roll == -0x30000000 + 0x0E38E380);
+
+        // The combat roll RAMPS torsoRoll -0x4000000 (5.625 deg) per tick — the FP
+        // barrel-roll view [orig: @0x4b700e; the chase block skips 41/42
+        // @0x4b5d20-0x4b5d28] (41 is a LOCKED state, so the selection parks its
+        // own target in pending and the state holds).
+        e->inf.anim_state = anim_state::kRollLeft;
+        const int32_t at_roll_start = e->inf.torso_roll;
+        run_ticks(ai, w, 201, 205);
+        CHECK(e->inf.torso_roll == at_roll_start - 4 * 0x4000000);
+
+        // Prone idle decays toward level regardless of the slope
+        // [orig: @0x4b5d0a-0x4b5d16].
+        e->inf.anim_state = anim_state::kIdleProne;
+        e->inf.stance = InfantryState::Stance::kProne;
+        for (int t = 205; t < 400; ++t) run_ticks(ai, w, t, t + 1);
+        CHECK(e->inf.torso_roll > -0x100000 && e->inf.torso_roll <= 0);
     }
 
     // ---- stance availability fallback: a model with no crouch/prone clips uses stand siblings ----
@@ -1325,10 +1462,10 @@ int main() {
         e->health = 100;
         e->inf.player_moving = true;
         e->inf.stance = InfantryState::Stance::kCrouch;
-        run_ticks(ai, w, 0, 1);
+        run_ticks(ai, w, 0, 4);
         CHECK(e->inf.anim_state == anim_state::kWalkForward); // crouch-walk -> stand walk
         e->inf.stance = InfantryState::Stance::kProne;
-        run_ticks(ai, w, 1, 2);
+        run_ticks(ai, w, 4, 8);
         CHECK(e->inf.anim_state == anim_state::kWalkForward); // prone-walk -> crouch -> stand walk
     }
     {
@@ -1371,13 +1508,14 @@ int main() {
         CHECK(e->pos[2] == floor_z);
 
         e->inf.jump_requested = true;
-        run_ticks(ai, w, 2, 3);               // the jump tick
+        run_ticks(ai, w, 2, 3);               // the jump tick: physics is immediate
         CHECK(e->inf.airborne);
         CHECK(e->inf.vel[2] == 0x1600 - 416); // launch impulse minus one gravity step
-        CHECK(e->inf.anim_state == anim_state::kJumpLoop);
         CHECK(e->pos[2] > floor_z);           // rose off the ground
+        run_ticks(ai, w, 3, 5);               // the jump_loop CLIP lands on the next
+        CHECK(e->inf.anim_state == anim_state::kJumpLoop); // 4th-tick selection pass
 
-        run_ticks(ai, w, 3, 400);             // ...arcs up and lands
+        run_ticks(ai, w, 5, 400);             // ...arcs up and lands
         CHECK(!e->inf.airborne);
         CHECK(e->pos[2] == floor_z);
     }
@@ -1413,9 +1551,9 @@ int main() {
         CHECK(e->inf.anim_state == anim_state::kIdle);
         CHECK(e->pos[0] == fx(10) + 8 * 0x2000);
 
-        e->inf.player_moving = true; // walk forward
+        e->inf.player_moving = true; // forward: the every-clip source promotes to run_3
         run_ticks(ai, w, 8, 14);
-        CHECK(e->inf.anim_state == anim_state::kWalkForward);
+        CHECK(e->inf.anim_state == anim_state::kRun3);
         CHECK(e->pos[0] > fx(10)); // a movement state DOES translate the same clip step
     }
 

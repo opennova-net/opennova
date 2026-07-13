@@ -3,22 +3,64 @@ extends Node
 
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
 
-# Faithful first-person camera. The eye is +1.0 world unit above the player
-# [orig: Camera_ComputeThirdPersonView @0x437d10]; F4 swaps to a behind+above
-# third person [orig: ThirdPersonCamera_Update @0x437af0]. The mouse drives look
-# yaw/pitch (pitch clamped ±80° [orig: Input_HandleActionBinding_0 @0x4e1330]).
-const PLAYER_EYE_HEIGHT := 1.0          # +0x10000 = +1.0 world unit above Position
-const PLAYER_PITCH_CLAMP_DEG := 80.0    # ±954437120 BAM
-const PLAYER_MOUSE_SENS_DEG := 0.12     # degrees per mouse pixel (tunable)
-# Witnessed chase-camera numbers: distance 3.0 (0x30000) and orbit pitch 22.5 deg
-# (0x4000000), the on-change defaults [orig: Camera_SetTrackedEntity @0x4391d0]; the
-# eye is anchor + R(yaw, pitch + orbit)*(-dist) re-aimed at the anchor
-# [orig: Camera_ComputeThirdPersonView @0x437d10]; the anchor eases quarter-step
-# [orig: ThirdPersonCamera_Update @0x437c8d]. Orbit keys, the bone/terrain collision
-# march, and the 0.125u look-at offset are tracked deferrals (net-re section 5.39
-# 2026-07-08 addendum).
-const PLAYER_TP_DISTANCE := 3.0
-const PLAYER_TP_ORBIT_PITCH_DEG := 22.5
+# Faithful first-person camera. The on-foot eye is Position + CameraOffset, where
+# the local player's CameraOffset is the POSED HEAD BONE minus Position — the eye
+# follows the animation (stand/crouch/prone/jump all move it) [orig: the local bone
+# path @0x4b6bb3 stores head−Position into CameraOffset(+0x6C); the on-foot person
+# camera leg adds it @0x437f9c]. +1.0 is the witnessed NON-person fallback bump
+# [orig: @0x437e8f], kept for the no-skeleton case. F4 swaps to the mode-1 chase
+# camera [orig: ThirdPersonCamera_Update @0x437af0]. Mouse look is SIM-owned:
+# raw pixel deltas feed NovaSimulation.add_local_player_look (the witnessed integer
+# pipeline — sensitivity<<11, scoped zoom reduction, ±80° pitch clamp with the +40°
+# up-limit while prone) [orig: Input_ProcessMouseAxisBindings @0x499680].
+const PLAYER_EYE_HEIGHT := 1.0          # the non-person +0x10000 bump [orig: @0x437e8f]
+const PLAYER_EYE_MIN := 0.125           # CameraOffset.z floor 0x2000 [orig: @0x4b6b98]
+# The head is bone INDEX 14 (.bad row "BN15 Head") — the rig is index-driven and the
+# model bone order IS the BN order [world-wac-ai-re §14.2]; the original reads the
+# head row of its bone-matrix array, never a name [orig: the local bone path @0x4b6bb3].
+const PLAYER_HEAD_BONE_INDEX := 14
+# The witnessed FP eye pull-back: after adding CameraOffset the eye moves -0x3000
+# (0.1875u) along the view FORWARD axis, through the full view rotation (roll
+# included) [orig: @0x438001..0x438031 — Math_FixedPointTransformPoint22 of
+# (-0x3000, 0, 0) added onto g_view_pos].
+const PLAYER_EYE_PULLBACK := 0.1875
+# Witnessed chase-camera numbers. The in-play state is the ROUND-START RESET —
+# distance 1.0, orbit yaw 0, orbit pitch 0 [orig: Camera_ResetToLocalPlayer
+# @0x4a3d30 (distance 0x10000 @0x4a3d4c, orbit zeroed @0x4a3d56/5b), called from
+# Game_StartMission @0x525c54 and Game_InitNewRound @0x4227a2] — the tight
+# over-the-shoulder view. The 3.0 / 5.625 deg pair is only the tracked-entity-
+# CHANGE seed (kill-cam/spectate retarget) [orig: Camera_SetTrackedEntity
+# @0x439213/@0x43921d]. The eye is anchor + R(yaw + orbit_yaw, pitch +
+# orbit_pitch)*(-dist, 0, 0) with the SAME angles as the view rotation (roll 0)
+# [orig: Camera_ComputeThirdPersonView @0x438100..0x438171, offset @0x4383e2];
+# the anchor chases Position + CameraOffset (the head-bone eye) quarter-step per
+# tick [orig: ThirdPersonCamera_Update @0x437b70/@0x437c8d]. Orbit keys (view
+# bits 0x10/0x40 -> orbit_yaw ±0x1000000/tick @0x437c1b), the zoom keys (view
+# actions 409/410: dist -/+= max(dist>>6, 0x800), clamped [0.5, 512]
+# @0x49c1c5..0x49c23f), the march's bone-collision FORCES (@0x4382d9; its
+# no-collision landing IS ported — see tp_effective_distance), and the
+# dead-target 10.0 -> 3.0 distance ease @0x437cc0 are tracked deferrals
+# (net-re section 5.39).
+const PLAYER_TP_DISTANCE := 1.0          # [orig: the reset 0x10000 @0x4a3d4c]
+const PLAYER_TP_ORBIT_PITCH_DEG := 0.0   # [orig: the reset zero @0x4a3d5b]
+const PLAYER_TP_PIVOT_NUDGE := 0.125     # [orig: R*(0x2000,0x2000,0x2000) @0x43818a]
+const PLAYER_TP_MARCH_STEP := 0.25       # [orig: 0.25u march steps @0x438243]
+
+
+# The collision march's NO-COLLISION landing [orig: @0x438213..0x43832e]: under
+# 8.0u the eye marches back in 0.25u steps for stepIndex 1..numSteps-1
+# (numSteps = floor(dist/0.25)) and stays on the LAST step — (numSteps-1)*0.25,
+# never the full distance (numSteps <= 1 skips the march and leaves the eye at
+# the pivot @0x43821f). The reset distance 1.0 therefore lands the retail
+# on-foot camera 0.75u back. The per-step bone collision FORCES (the actual
+# obstruction pull-in, min back-off 0.25 @0x4383ca) stay deferred.
+static func tp_effective_distance(dist: float) -> float:
+	if dist >= 8.0:  # [orig: the march gate @0x4381e9]
+		return dist
+	var steps := int(dist / PLAYER_TP_MARCH_STEP)
+	if steps <= 1:
+		return 0.0
+	return float(steps - 1) * PLAYER_TP_MARCH_STEP
 # First-person weapon viewmodel placement, witnessed from weapon.def `pos` (hip) / `tpos` (ADS).
 # The original adds the equipped weapon's view-bias offset to the eye in view-local space, rotated by
 # the view orientation, then draws the gun (gfx1) + character arms at that view root
@@ -74,12 +116,7 @@ const WEAPON_TICK_DT := 1.0 / 62.5
 var _world
 var _camera: Camera3D
 var _input_source := Callable()
-var _look_yaw := 0.0
-var _look_pitch := 0.0
-var _look_seeded := false
 var _third_person := false
-var _crouch := false
-var _prone := false
 var _avatar: Node3D = null
 var _viewmodel: Node3D = null
 # The FP render pass nodes (see PLAYER_VIEWMODEL_RENDERFOV_H_DEG).
@@ -254,10 +291,8 @@ func before_world_tick(_delta: float, capture_mouse: bool = false,
 		_set_fly_camera_locked(false)
 		_release_mouse_capture()
 		_clear_models()
-		_look_seeded = false
 		return
 	_set_fly_camera_locked(true)
-	_seed_look_from_world()
 	if capture_mouse and Input.get_mouse_mode() != Input.MOUSE_MODE_CAPTURED:
 		Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 	_ensure_models()
@@ -270,12 +305,17 @@ func before_world_tick(_delta: float, capture_mouse: bool = false,
 		_bool(state, "back"),
 		_bool(state, "left"),
 		_bool(state, "right"),
-		_bool(state, "run"),
-		_crouch,
-		_prone,
-		_bool(state, "jump"),
-		_look_yaw,
-		_look_pitch)
+		_bool(state, "lean_left"),
+		_bool(state, "lean_right"),
+		_bool(state, "jump"))
+	# Feed the sim the head-bone eye for the 3P anchor chase [orig: the chase target
+	# is Position + CameraOffset @0x437b70; CameraOffset is the posed head bone,
+	# computed sim-side in the original @0x4b6bb3 — hosted, the render skeleton is
+	# the sample source (D-INF-18)].
+	if _world.has_method("set_local_player_eye"):
+		var head := _avatar_head_world()
+		_world.set_local_player_eye(head if head != Vector3.INF else Vector3.ZERO,
+				head != Vector3.INF)
 	_send_weapon_input()
 
 
@@ -428,7 +468,7 @@ func _action_particle_world_position(userpoint: String) -> Vector3:
 				return part.global_transform * Vector3(info.get("position", Vector3.ZERO))
 	if fallback != Vector3.INF:
 		return fallback
-	return _world.local_player_position() + Vector3(0, PLAYER_EYE_HEIGHT, 0)
+	return _eye_position(_world.local_player_position())
 
 
 func _action_particle_world_forward(userpoint: String) -> Vector3:
@@ -488,10 +528,11 @@ func _play_viewmodel_clip(key: String, variant: int = 0, age_ticks: int = 0) -> 
 # Edge-triggered gameplay keys. F4 toggles first/third person [orig: g_camera_mode
 # @ 0xA890C8; view actions 400/402/412 @ 0x49C073; ThirdPersonCamera_Update @0x437af0
 # — full 3P camera + torso-bend witness: docs/world/world-wac-ai-re.md §14 (D-INF-11),
-# net-re §5.39 2026-07-08 addendum]. C / Z toggle the player's stance
-# (crouch / prone), mutually exclusive — the original toggles stance on a key edge
-# [orig: stance bits on entity+0x12C; NapiNPServerMsg_HandleStanceChange @0x501c60;
-# crouch wins].
+# net-re §5.39 2026-07-08 addendum]. Stance is the witnessed 3-key SELECT — Z prone,
+# X crouch, C stand (catalog ids 9/10/11, defaults Z/X/C) — each key REQUESTS its
+# stance from the sim, which applies the mutual exclusion and the ForceCrouch
+# refusal (the C2S 0x1D semantics). [orig: input cases 170/169/172 @0x4e0df3/
+# @0x4e0d77/@0x4e0e3e -> NapiNPServerMsg_HandleStanceChange @0x501c60]
 func handle_key_input(event: InputEvent, active: bool) -> bool:
 	if not active or not _has_player() or not (event is InputEventKey):
 		return false
@@ -502,39 +543,38 @@ func handle_key_input(event: InputEvent, active: bool) -> bool:
 		_third_person = not _third_person
 		_sync_camera_mode()
 		return true
-	if key.keycode == KEY_C:
-		_crouch = not _crouch
-		if _crouch:
-			_prone = false
-		return true
 	if key.keycode == KEY_Z:
-		_prone = not _prone
-		if _prone:
-			_crouch = false
+		_request_stance(2)  # prone [orig: case 170 sends 0xAA]
+		return true
+	if key.keycode == KEY_X:
+		_request_stance(1)  # crouch [orig: case 169 sends 0xA9]
+		return true
+	if key.keycode == KEY_C:
+		_request_stance(0)  # stand [orig: case 172 sends 0xAC]
 		return true
 	return false
 
 
-# Mouse-look: turn the look yaw (X) and pitch (Y, clamped ±80°). [orig: mouse -> entity
-# Yaw@+0x10 / Pitch@+0x14, Input_HandleActionBinding_0 @0x4e1330]. Signs are tunable.
+func _request_stance(stance: int) -> void:
+	if _world != null and _world.has_method("request_local_player_stance"):
+		_world.request_local_player_stance(stance)
+
+
+# Mouse-look: raw pixel deltas into the SIM's witnessed integer pipeline (the sim
+# owns sensitivity, the scoped zoom reduction, Y-invert, and the pitch clamps).
+# [orig: Input_ProcessMouseAxisBindings @0x499680 -> the axis cases 166/164]
 func handle_input(event: InputEvent, active: bool) -> bool:
 	if not active or not _has_player() or not (event is InputEventMouseMotion):
 		return false
-	_seed_look_from_world()
+	if not _world.has_method("add_local_player_look"):
+		return false
 	var mm := event as InputEventMouseMotion
-	_look_yaw = _wrap_degrees(_look_yaw + mm.relative.x * PLAYER_MOUSE_SENS_DEG)
-	_look_pitch = clampf(_look_pitch - mm.relative.y * PLAYER_MOUSE_SENS_DEG,
-		-PLAYER_PITCH_CLAMP_DEG, PLAYER_PITCH_CLAMP_DEG)
+	_world.add_local_player_look(mm.relative.x, mm.relative.y)
 	return true
 
 
 func _reset_state() -> void:
-	_look_yaw = 0.0
-	_look_pitch = 0.0
-	_look_seeded = false
 	_third_person = false
-	_crouch = false
-	_prone = false
 	_weapon_play_serial = -1
 	_weapon_view = null
 	_fire_was_held = false
@@ -552,18 +592,11 @@ func _has_player() -> bool:
 	return _world.has_method("has_local_player") and _world.has_local_player()
 
 
-func _seed_look_from_world() -> void:
-	if _look_seeded or _world == null:
-		return
-	_look_yaw = _wrap_degrees(float(_world.local_player_yaw_deg()))
-	_look_pitch = clampf(float(_world.local_player_pitch_deg()),
-		-PLAYER_PITCH_CLAMP_DEG, PLAYER_PITCH_CLAMP_DEG)
-	_look_seeded = true
-
-
-# WASD is the 8-way move relative to the look (W/S forward/back, A/D strafe); Shift
-# runs; Space jumps (momentary — the motor jumps once when grounded).
-# [orig: Player_PackInputStateToEntity @0x4df450]
+# WASD is the 8-way move relative to the look (W/S forward/back, A/D strafe);
+# Q/E lean (catalog ids 6/7); Space jumps (momentary — the motor jumps once when
+# grounded). There is no run key: running is the automatic forward-walk promotion
+# in the sim's body selection, suppressed while scoped.
+# [orig: Player_PackInputStateToEntity @0x4df450; promotion @0x4b729d]
 func _read_input_state() -> Dictionary:
 	if _input_source.is_valid():
 		var out = _input_source.call()
@@ -574,7 +607,8 @@ func _read_input_state() -> Dictionary:
 		"back": Input.is_physical_key_pressed(KEY_S),
 		"left": Input.is_physical_key_pressed(KEY_A),
 		"right": Input.is_physical_key_pressed(KEY_D),
-		"run": Input.is_physical_key_pressed(KEY_SHIFT),
+		"lean_left": Input.is_physical_key_pressed(KEY_Q),
+		"lean_right": Input.is_physical_key_pressed(KEY_E),
 		"jump": Input.is_physical_key_pressed(KEY_SPACE),
 	}
 
@@ -639,18 +673,62 @@ func aim_screen_point() -> Vector2:
 	var yr := deg_to_rad(_world.local_player_yaw_deg())
 	var pr := deg_to_rad(_world.local_player_pitch_deg())
 	var forward := Vector3(sin(yr) * cos(pr), sin(pr), -cos(yr) * cos(pr))
-	var eye: Vector3 = _world.local_player_position() + Vector3(0, PLAYER_EYE_HEIGHT, 0)
+	var eye := _eye_position(_world.local_player_position())
 	var target := eye + forward * AIM_PROJECT_RANGE
 	if _camera.is_position_behind(target):
 		return Vector2.INF
 	return _camera.unproject_position(target)
 
 
-# Place the camera from the player's authoritative pose. First person: eye = player + 1.0u
-# looking along the facing. Third person (F4): behind + above, looking at the player
-# [orig: Camera_ComputeThirdPersonView @0x437d10; ThirdPersonCamera_Update @0x437af0]. The
-# mission yaw -> Godot forward mirrors the present remap (x,y,z)->(x,z,-y): a mission facing
-# yaw faces (sin yaw, cos yaw) -> Godot (sin yaw, 0, -cos yaw), tilted by pitch.
+# The eye anchor: Position + CameraOffset, where the local player's CameraOffset is
+# the POSED HEAD BONE minus Position — sampled from the avatar's render skeleton, the
+# same bone matrices the original builds sim-side. Stance, lean, the walk/run bob,
+# and the jump arc all move the eye exactly as the animation moves the head.
+# [orig: the local bone path @0x4b6bb3 (Entity_BuildBoneTransformMatrices -> head,
+# CameraOffset = head - Position); consumed by the on-foot person leg @0x437f9c.
+# Unported tails: the 4-sample terrain clamp @0x4b6c1c and the remote trig
+# approximation @0x4b6984; the 0.125u floor is the witnessed min @0x4b6b98.]
+func _eye_position(pos: Vector3) -> Vector3:
+	var head := _avatar_head_world()
+	if head == Vector3.INF:
+		return pos + Vector3(0, PLAYER_EYE_HEIGHT, 0)  # non-person bump [orig: @0x437e8f]
+	head.y = maxf(head.y, pos.y + PLAYER_EYE_MIN)
+	return head
+
+
+func _avatar_head_world() -> Vector3:
+	if _avatar == null or not is_instance_valid(_avatar):
+		return Vector3.INF
+	var skel := _find_skeleton(_avatar)
+	if skel == null or skel.get_bone_count() <= PLAYER_HEAD_BONE_INDEX:
+		return Vector3.INF
+	return skel.global_transform * skel.get_bone_global_pose(PLAYER_HEAD_BONE_INDEX).origin
+
+
+func _find_skeleton(root: Node) -> Skeleton3D:
+	if root is Skeleton3D:
+		return root
+	for child in root.get_children():
+		var found := _find_skeleton(child)
+		if found != null:
+			return found
+	return null
+
+
+# Place the camera from the player's authoritative pose. First person: eye = the
+# head-bone anchor pulled back 0.1875u along the view, looking along the facing,
+# rolled by torsoRoll + lean/4 [orig: the on-foot person leg @0x437f9c..0x438031 —
+# pitch = entPitch + 2*pitchBlend (pitchBlend = the unported recoil impulse),
+# roll = torsoRoll + lean/4 @0x437fe6, then eye += R*(-0x3000, 0, 0)].
+# Third person (F4): (yaw + orbit_yaw, pitch + orbit_pitch) seeds the R*(-dist,0,0)
+# eye offset from the NUDGED pivot (anchor + R*(0.125 fwd/left/up)); the original's
+# FINAL rotation is the atan2 look-at from the (collision-pulled) eye back to that
+# same nudged point — with no march ported, setting the seed angles directly is
+# exactly equal [orig: Camera_ComputeThirdPersonView @0x438100..0x438171, nudge
+# @0x43818a, offset @0x4383e2, the look-at recompute per net-re section 5.39].
+# The mission yaw -> Godot forward mirrors the
+# present remap (x,y,z)->(x,z,-y): a mission facing yaw faces (sin yaw, cos yaw)
+# -> Godot (sin yaw, 0, -cos yaw), tilted by pitch.
 func _update_player_camera() -> void:
 	if _world == null or _camera == null:
 		return
@@ -658,25 +736,41 @@ func _update_player_camera() -> void:
 	var yr := deg_to_rad(_world.local_player_yaw_deg())
 	var pr := deg_to_rad(_world.local_player_pitch_deg())
 	var forward := Vector3(sin(yr) * cos(pr), sin(pr), -cos(yr) * cos(pr))
-	var eye := pos + Vector3(0, PLAYER_EYE_HEIGHT, 0)
+	var eye := _eye_position(pos)
 	if _third_person:
-		# Chase camera: the smoothed anchor is SIM state, eased a quarter-step per
-		# 62.5 Hz TICK (render-rate independent) [orig: anchor = Position +
-		# CameraOffset, quarter-step per 62 Hz tick — ThirdPersonCamera_Update
-		# @0x437af0; ported in libs/world player_view]. The eye sits back along the
-		# look direction pitched up by the orbit default and the rotation re-aims
-		# at the anchor [orig: Camera_ComputeThirdPersonView @0x437d10 mode 1].
-		# Until the first 3P tick seeds the chase, the eye stands in.
+		# Chase camera: the smoothed anchor is SIM state — Position + CameraOffset
+		# (the head-bone eye) eased a quarter-step per 62.5 Hz TICK (render-rate
+		# independent) [orig: ThirdPersonCamera_Update @0x437b70/@0x437c8d; ported
+		# in libs/world player_view]. Until the first 3P tick seeds the chase, the
+		# eye stands in. The camera keeps the AIM angles pitched up by the orbit
+		# default; on-foot orbit_yaw stays 0 until the orbit keys port.
 		var anchor := eye
 		if _view != null and _view.tp_anchor_valid:
 			anchor = _view.tp_anchor
 		var opr := pr + deg_to_rad(PLAYER_TP_ORBIT_PITCH_DEG)
-		var back := Vector3(sin(yr) * cos(opr), sin(opr), -cos(yr) * cos(opr))
-		_camera.global_position = anchor - back * PLAYER_TP_DISTANCE
-		_camera.look_at(anchor, Vector3.UP)
+		var tp_forward := Vector3(sin(yr) * cos(opr), sin(opr), -cos(yr) * cos(opr))
+		var tp_basis := Basis.looking_at(tp_forward, Vector3.UP)
+		# The pivot nudge: the camera backs away from — and aims at — the point
+		# R*(0x2000, 0x2000, 0x2000) from the anchor, view frame X=fwd/Y=left/Z=up
+		# (0.125u each) [orig: @0x43818a..0x4381c4 — the transformed nudge becomes
+		# the matrix translation the (-dist,0,0) eye offset and the look-at use].
+		# It is what frames the retail view OVER the head with the hat below-right
+		# of center instead of body-centered.
+		var pivot := anchor + (tp_forward - tp_basis.x + tp_basis.y) * PLAYER_TP_PIVOT_NUDGE
+		_camera.global_position = pivot - tp_forward * tp_effective_distance(PLAYER_TP_DISTANCE)
+		_camera.global_basis = tp_basis
 	else:
 		_camera.global_position = eye
 		_camera.look_at(eye + forward, Vector3.UP)
+		# The FP roll: torsoRoll + lean/4, composed in the sim (fp_roll_deg). Sign
+		# pinned host-side: lean right (positive lean) tilts the view right.
+		# [orig: @0x437fe6 — g_view_rot_roll = entity+0x2DC + lean>>2]
+		var roll_deg := _view.fp_roll_deg if _view != null else 0.0
+		if absf(roll_deg) > 0.001:
+			_camera.rotate_object_local(Vector3(0, 0, -1), deg_to_rad(roll_deg))
+		# The witnessed eye pull-back: -0x3000 (0.1875u) along the view FORWARD,
+		# after the roll is in the basis [orig: @0x438001..0x438031].
+		_camera.global_position += _camera.global_transform.basis.z * PLAYER_EYE_PULLBACK
 	_update_scope_camera()
 	_update_avatar(pos)
 	_update_viewmodel()
@@ -873,10 +967,3 @@ func _wrap180(degrees: float) -> float:
 	if out < 0.0:
 		out += 360.0
 	return out - 180.0
-
-
-func _wrap_degrees(degrees: float) -> float:
-	var out := fmod(degrees, 360.0)
-	if out < 0.0:
-		out += 360.0
-	return out

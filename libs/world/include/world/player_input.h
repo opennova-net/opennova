@@ -15,13 +15,18 @@ struct AiEntity;
 
 // The movement keys + look the engine reads each frame. look_heading is the absolute
 // body/aim heading (BAM32) the caller accumulates from the mouse, matching
-// Input_ProcessMouseAxisBindings @0x499680.
+// Input_ProcessMouseAxisBindings @0x499680. There is no run key in the original's
+// catalog: running is the automatic forward-walk promotion in the body selection
+// [orig: @0x4b729d], so no run bit exists here.
 struct PlayerInput {
     bool forward = false;
     bool back = false;
     bool left = false;
     bool right = false;
-    bool run = false;       // reserved until the IDA player-run path is ported
+    // Lean/roll keys (catalog ids 6/7, Q/E): g_inputFlags 0x2000/0x4000 -> MoveOrder
+    // bits 6/7 [orig: cases 148/147 @0x4e10d9/@0x4e10c8; packer @0x4df708-0x4df741].
+    bool lean_left = false;
+    bool lean_right = false;
     bool crouch = false;
     bool prone = false;
     bool jump = false;
@@ -35,7 +40,8 @@ struct PlayerBodyInput {
     uint8_t direction_bits = 0;       // F/B/L/R = 1/2/4/8
     bool moving = false;
     int move_dir_index = 0;           // 0 F, 1 F+L, 2 L, 3 B+L, 4 B, 5 B+R, 6 R, 7 F+R
-    bool run = false;                 // reserved until the IDA player-run path is ported
+    bool lean_left = false;           // MoveOrder bit 6 [orig: @0x4df71f]
+    bool lean_right = false;          // MoveOrder bit 7 [orig: @0x4df737]
     InfantryState::Stance stance = InfantryState::Stance::kStand;
     bool jump = false;
     int32_t look_heading = 0;

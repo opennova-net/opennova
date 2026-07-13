@@ -100,10 +100,6 @@ int32_t damp_npc_slide(int32_t v) {
     return abs_bam(out) <= 8 ? 0 : out;
 }
 
-bool in_directional_block(int state, int base) {
-    return state >= base && state < base + 8;
-}
-
 int player_directional_state(int base, int move_dir_index) {
     static constexpr int kOffsetFromInputIndex[8] = {0, 7, 6, 5, 4, 3, 2, 1};
     return base + kOffsetFromInputIndex[move_dir_index & 7];
@@ -273,42 +269,24 @@ int AiSystem::infantry_resolve_state(int adm_id, int state) const {
     return -1; // nothing playable: keep the current state
 }
 
-// Player-only body-state selection. The local player consumes entity+0x12C's moving bit,
-// stance bits, and move_direction_index: moving base 1/11/19 plus the IDA direction
-// offset table; stationary 43/45/48. NPC org1 selection does not read these player
-// stance bits. [orig: Entity_UpdateInfantryPlayerBody @0x4b40e0]
-static int player_stance_remap(int state, InfantryState::Stance st, int move_dir_index) {
-    const bool moving_state =
-        in_directional_block(state, anim_state::kWalkForward) ||
-        in_directional_block(state, anim_state::kWalkCrouchForward) ||
-        in_directional_block(state, anim_state::kWalkProneForward) ||
-        state == anim_state::kJogForward || state == anim_state::kRunForward ||
-        state == anim_state::kRun2 || state == anim_state::kRun3 ||
-        state == anim_state::kWoundedWalk || state == anim_state::kWoundedRun;
-
-    if (moving_state) {
-        int base = anim_state::kWalkForward;
-        if (st == InfantryState::Stance::kCrouch)
-            base = anim_state::kWalkCrouchForward;
-        else if (st == InfantryState::Stance::kProne)
-            base = anim_state::kWalkProneForward;
-        return player_directional_state(base, move_dir_index);
-    }
-
-    switch (state) {
-        case anim_state::kIdle:
-        case anim_state::kIdle2:
-        case anim_state::kIdle3:
-        case anim_state::kStop:
-            if (st == InfantryState::Stance::kCrouch) return anim_state::kIdleCrouch;
-            if (st == InfantryState::Stance::kProne) return anim_state::kIdleProne;
-            // Standing keeps the SELECTED idle: the 62-pass promotion writes 44
-            // directly (state = 0x2B + (cnt >= 0x3E) [orig: @0x4b727b]) and must
-            // survive the remap — coercing to 43 here suppressed it (caught when the
-            // dormant remote-body test was wired up).
-            return state == anim_state::kStop ? anim_state::kIdle : state;
-        default:
-            return state;
+// Commit a resolved target state under the flag-table arbitration [orig:
+// @0x4b7356-0x4b7396, identical in the org1 selector dump 3693-3710]: an
+// uninterruptible current (bit 0x4) queues the target to pending; an exit-gated
+// current (0x20) commits only a movement-flagged (bit 0) target; else commit now.
+static void commit_body_state(InfantryState &inf, int resolved) {
+    if (resolved < 0) return; // no clips at all: hold the current state
+    if (resolved == inf.anim_state) { inf.anim_pending = 0; return; }
+    const uint32_t curf = infantry_anim_flags(inf.anim_state);
+    if ((curf & 0x4u) != 0) {
+        inf.anim_pending = resolved;
+    } else if ((curf & 0x20u) == 0 || (infantry_anim_flags(resolved) & 0x1u) != 0) {
+        inf.anim_prev = inf.anim_state;
+        inf.anim_state = resolved;
+        inf.anim_pending = 0;
+        inf.clip_phase = 0; // (D-INF-1: no blend window; clip restarts)
+        if (reset_capsule_bottom_state(resolved)) inf.prev_capsule_bottom = 0;
+    } else {
+        inf.anim_pending = resolved;
     }
 }
 
@@ -319,8 +297,7 @@ void AiSystem::infantry_select(AiEntity &e) {
         inf.alert_timer != 0 || e.slot.bytes()[AiSlot::kMoveFlagByte] != 0 || inf.combat_reaction;
 
     int target = anim_state::kIdle; // [orig: targetAnimState seeds 43]
-    const bool npc_moving = inf.move_mode != 0 && inf.target_dist > 0;
-    const bool moving = inf.is_local_player ? inf.player_moving : npc_moving;
+    const bool moving = inf.move_mode != 0 && inf.target_dist > 0;
     if (moving) {
         target = alerted ? anim_state::kRunForward : anim_state::kWalkForward; // [dump 2898-2906]
         // Final-node approach gait. [orig: dump 2907-2924, ported literally incl. the skip]
@@ -335,10 +312,8 @@ void AiSystem::infantry_select(AiEntity &e) {
         }
     }
 
-    // Turn-in-place overrides are from org1 AI selection. The local player org2 body
-    // selects movement from entity+0x12C input bits, not from this NPC turn gate.
-    // [orig: Entity_UpdateInfantryAI @0x4b9910 dump 2940-2952]
-    if (!inf.is_local_player) {
+    // Turn-in-place overrides. [orig: Entity_UpdateInfantryAI @0x4b9910 dump 2940-2952]
+    {
         const int32_t err = abs_bam(opennova::io::bam_sub(inf.target_heading, inf.body_heading));
         if (err > kTurnStopGate) target = anim_state::kStop;
         else if (err > kTurnWalkGate) target = anim_state::kWalkForward;
@@ -356,31 +331,119 @@ void AiSystem::infantry_select(AiEntity &e) {
             target = anim_state::kWoundedWalk;
     }
 
-    // Airborne local player overrides the gait with jump_loop. Player stance and the
-    // move_direction_index are org2 input bits; do not apply them to NPC org1 selection.
-    if (inf.is_local_player && inf.airborne)
+    commit_body_state(inf, infantry_resolve_state(inf.adm_id, target));
+}
+
+// The witnessed org2 player-body selection — see the ai.h declaration. One function
+// for the local player AND the authority's remote-player path, exactly as the
+// original runs the same @0x4b40e0 body for both. Inputs are the already-deposited
+// entity+0x12C mirrors (player_moving / dir index / stance / lean bits) plus the
+// per-tick weapon mirrors (scope_raised, wpn_run_anim, wpn_force_crouch).
+// [orig: Entity_UpdateInfantryPlayerBody @0x4b7183-0x4b7396]
+void AiSystem::player_body_select(AiEntity &e) {
+    InfantryState &inf = e.inf;
+    auto has = [&](int s) {
+        return root_motion != nullptr && root_motion->has_clip(inf.adm_id, s);
+    };
+
+    int target;
+    if (inf.airborne) {
+        // The in-air overlay wins over ground selection (jump arc / falling); the
+        // parachute 47 variant rides the unported 0x40 flag. [orig: the 0x2000 in-air
+        // flag path @0x4b7e22-0x4b7e3f; overlay states 31/47 dump 3679]
         target = anim_state::kJumpLoop;
-    else if (inf.is_local_player)
-        target = player_stance_remap(target, inf.stance, inf.player_move_dir_index);
-
-    const int resolved = infantry_resolve_state(inf.adm_id, target);
-    if (resolved < 0) return; // no clips at all: hold the current state
-    if (resolved == inf.anim_state) { inf.anim_pending = 0; return; }
-
-    // Commit rules. [orig: dump 3693-3710 — locked states queue; emotes yield only to
-    // movement-flagged targets]
-    const uint32_t curf = infantry_anim_flags(inf.anim_state);
-    if ((curf & 0x4u) != 0) {
-        inf.anim_pending = resolved;
-    } else if ((curf & 0x20u) == 0 || (infantry_anim_flags(resolved) & 0x1u) != 0) {
-        inf.anim_prev = inf.anim_state;
-        inf.anim_state = resolved;
-        inf.anim_pending = 0;
-        inf.clip_phase = 0; // (D-INF-1: no blend window; clip restarts)
-        if (reset_capsule_bottom_state(resolved)) inf.prev_capsule_bottom = 0;
+    } else if (inf.player_moving) {
+        inf.idle_counter = 0;                        // [orig: @0x4b719b]
+        int base = anim_state::kWalkForward;         // [orig: @0x4b7196]
+        if (inf.stance == InfantryState::Stance::kProne)
+            base = anim_state::kWalkProneForward;    // [orig: @0x4b71ad]
+        else if (inf.stance == InfantryState::Stance::kCrouch)
+            base = anim_state::kWalkCrouchForward;   // [orig: @0x4b71bd]
+        target = player_directional_state(base, inf.player_move_dir_index); // [orig: @0x4b71c7]
+    } else if (inf.stance == InfantryState::Stance::kProne) {
+        target = anim_state::kIdleProne;             // [orig: @0x4b722f]
+    } else if (inf.stance == InfantryState::Stance::kCrouch) {
+        target = anim_state::kIdleCrouch;            // [orig: @0x4b724b]
+        // ForceCrouch (0x40000) weapons promote the crouch idle to idle_mortar when
+        // the clip exists. [orig: @0x4b723f-0x4b7279 — Entity_CheckWeaponSeatFlags
+        // (equipped, 0x40000) then animMap[46] != animMap[0]]
+        if (inf.wpn_force_crouch && has(anim_state::kIdleMortar))
+            target = anim_state::kIdleMortar;
     } else {
-        inf.anim_pending = resolved;
+        // Standing idle: 43 until 62 selection passes have elapsed, then 44.
+        // [orig: @0x4b727b-0x4b7293 state = 0x2B + (++entity[0x148] >= 0x3E)]
+        ++inf.idle_counter;
+        target = inf.idle_counter >= 62 ? anim_state::kIdle2 : anim_state::kIdle;
     }
+
+    // Run promotion: pure-forward standing walk only, suppressed while scoped.
+    // tier = pitch_tier + run_anim; the pitch tier reads entity+0x37C, which has NO
+    // writer in the retail image (zero-initialized pool memory), so it contributes
+    // the constant 2 (0 <= 0 < 0x210000 band; thresholds recorded in the RE doc,
+    // D-INF-16). tier 1 -> run_2 if available; tier >= 2 -> run_3, else run_2.
+    // [orig: @0x4b729d-0x4b731b; scope Flags&0x10 test @0x4b72e2]
+    if (target == anim_state::kWalkForward && !inf.scope_raised) {
+        const int tier = 2 + inf.wpn_run_anim;
+        if (tier >= 2 && has(anim_state::kRun3))
+            target = anim_state::kRun3;              // [orig: @0x4b72fa]
+        else if (tier >= 1 && has(anim_state::kRun2))
+            target = anim_state::kRun2;              // [orig: @0x4b7311]
+    }
+
+    // Prone lean rolls from the lean bits; right (bit 7) wins when both are held.
+    // The original gates on !(Flags & 0x112002): dead 0x2 and in-air 0x2000 are
+    // modeled (health/airborne); the 0x10000/0x100000 legs are unmodeled tails.
+    // [orig: @0x4b731b-0x4b7354]
+    if (inf.stance == InfantryState::Stance::kProne && e.health > 0 && !inf.airborne) {
+        if (inf.lean_left) target = anim_state::kRollLeft;   // [orig: @0x4b7335]
+        if (inf.lean_right) target = anim_state::kRollRight; // [orig: @0x4b734c]
+    }
+
+    commit_body_state(inf, infantry_resolve_state(inf.adm_id, target));
+}
+
+// The lean-angle producer — see the ai.h declaration. Decay runs every body tick for
+// every infantry body (the corpse keeps decaying, matching the original's placement
+// before the weapon-channel block); the ramp needs a live, non-prone body.
+// [orig: decay @0x4b5c97 lean -= (lean+8)>>4; ramp @0x4b7dbf/@0x4b7dd6]
+void AiSystem::infantry_lean_tick(AiEntity &e) {
+    InfantryState &inf = e.inf;
+    inf.lean_angle =
+        io::bam_sub(inf.lean_angle, io::bam_sar(io::bam_add(inf.lean_angle, 8), 4));
+    if (e.health <= 0) return;                      // [orig: the Flags&2 gate legs]
+    if (inf.stance == InfantryState::Stance::kProne) return; // [orig: the prone skip]
+    if (inf.lean_left) inf.lean_angle = io::bam_add(inf.lean_angle, -0x3000000);
+    if (inf.lean_right) inf.lean_angle = io::bam_add(inf.lean_angle, 0x3000000);
+}
+
+// The torso-roll producer -- see the ai.h declaration. Prone idle decays toward
+// level; the combat rolls RAMP it +-0x4000000 (5.625 deg) per tick -- the FP
+// barrel-roll view (the chase block skips 41/42; the ramp is a separate site in
+// the same body pass); everything else chases the entity's slope roll a
+// sixteenth-step per tick with the LAG clamped to roll +-0x0E38E380 (20 deg) --
+// the clamp also snaps the wrapped post-roll value back once the clip ends.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4b5cff-0x4b5d6d (decay/skip/chase)
+//  + @0x4b700c-0x4b7025 (the 41/42 ramp)]
+void AiSystem::infantry_torso_roll_tick(AiEntity &e) {
+    InfantryState &inf = e.inf;
+    if (inf.anim_state == anim_state::kIdleProne) {  // [orig: cmp 0x30 @0x4b5d05]
+        inf.torso_roll =
+            io::bam_sub(inf.torso_roll, io::bam_sar(io::bam_add(inf.torso_roll, 8), 4));
+        return;
+    }
+    if (inf.anim_state == anim_state::kRollLeft) {   // [orig: @0x4b700e]
+        inf.torso_roll = io::bam_add(inf.torso_roll, -0x4000000);
+        return;
+    }
+    if (inf.anim_state == anim_state::kRollRight) {  // [orig: @0x4b701d]
+        inf.torso_roll = io::bam_add(inf.torso_roll, 0x4000000);
+        return;
+    }
+    inf.torso_roll = io::bam_add(
+        inf.torso_roll, io::bam_sar(io::bam_add(io::bam_sub(e.roll, inf.torso_roll), 8), 4));
+    const int32_t delta = io::bam_sub(inf.torso_roll, e.roll);
+    if (delta > 0x0E38E380) inf.torso_roll = io::bam_add(e.roll, 0x0E38E380);   // [orig: @0x4b5d4e]
+    if (delta < -0x0E38E380) inf.torso_roll = io::bam_add(e.roll, -0x0E38E380); // [orig: @0x4b5d61]
 }
 
 // ----------------------------------------------------------------------------
@@ -640,10 +703,12 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         }
     } else if (inf.is_local_player) {
         // 2'. Local player: the player-body input is set from host input each frame
-        // (world::apply_player_body_input), never by the org1 AI think path. Map the body
-        // input to an anim every tick (responsive). The player
-        // takes the motor's simulate branch on host (is_authority) and on a client
-        // (entity==local) alike. [orig: Entity_UpdateInfantryAI loc_4B9C3E; net-re §5.38]
+        // (world::apply_player_body_input), never by the org1 AI think path. The body
+        // selection is the witnessed org2 selector, every 4th tick like the original
+        // (idle 43->44 counts SELECTION passes, so the cadence is load-bearing). The
+        // player takes the motor's simulate branch on host (is_authority) and on a
+        // client (entity==local) alike. [orig: Entity_UpdateInfantryPlayerBody
+        // @0x4b40e0; 4th-tick gate @0x4b70ce; net-re §5.38]
         // Player jump: a grounded jump request launches the vertical impulse and enters the
         // jump arc; gravity (step 9) brings it back down. [orig: Entity_UpdateInfantryPlayerBody
         // @0x4b7ee5 sets entity+0xA0 (vel_z) = 0x1600 and entity+0x24 |= 0x2000 (in-air) on the
@@ -653,11 +718,20 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             inf.airborne = true;
         }
         inf.jump_requested = false;
-        infantry_select(e);
+        if ((logic_tick & 3u) == 0) player_body_select(e);
     } else if (is_authority && (key & 15u) == 0) {
         // 2. Think + selection (every 16 ticks). [orig: gate (tick & 0xF) | !authority]
         infantry_think(e, world);
         infantry_select(e);
+    }
+
+    // The lean angle decays every body tick (corpse included — the decay sits before
+    // the weapon-channel block in the original) and ramps while a lean key is held;
+    // the torso roll chases the slope roll in the same pass [orig: @0x4b5cff].
+    // [orig: @0x4b5c97 / @0x4b7dbf; see infantry_lean_tick]
+    if (inf.is_local_player) {
+        infantry_lean_tick(e);
+        infantry_torso_roll_tick(e);
     }
 
     // The secondary (weapon) channel and its arms/head-look decay block run on every
@@ -677,6 +751,22 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         inf.prev_capsule_bottom = frame.capsule_bottom;
     }
     inf.last_events = have_clip ? frame.events : 0;
+
+    // 3b. Deferred promotion when a LOCKED (flag 0x4) playing clip reaches its end —
+    // the PRIMARY channel's end-flag path, the same machinery the weapon channel uses.
+    // Before this, a pending target parked behind a locked state (the prone rolls
+    // 41/42, flags 0x285) could never land. [orig: AnimMap_UpdateEntity @0x40b77b
+    // promotes the queued state on the channel end flag]
+    if (inf.anim_pending != 0 && root_motion != nullptr) {
+        const int32_t len = root_motion->clip_length_ticks(inf.adm_id, inf.anim_state);
+        if (len >= 0 && inf.clip_phase >= len) {
+            inf.anim_prev = inf.anim_state;
+            inf.anim_state = inf.anim_pending;
+            inf.anim_pending = 0;
+            inf.clip_phase = 0;
+            if (reset_capsule_bottom_state(inf.anim_state)) inf.prev_capsule_bottom = 0;
+        }
+    }
 
     // 4. Ground resample (every 8 ticks). [orig: dump 319-326, cache entity+676]
     if (terrain != nullptr && ((key & 7u) == 0 || !inf.ground_cache_valid)) {
@@ -896,8 +986,12 @@ void AiSystem::mirror_wire_anim(AiEntity &e, World &world) {
     ent->net_anim_phase =
         static_cast<uint8_t>(inf.clip_phase < 0 ? 0 : (inf.clip_phase > 255 ? 255 : inf.clip_phase));
     if (inf.is_local_player) {
+        // Bits 0-2 dir, 3 moving, 6/7 the lean keys — the MoveOrder LOW byte layout the
+        // uplink's byte 19 carries [orig: the packer @0x4df68f-0x4df741].
         ent->net_move_input = static_cast<uint8_t>((inf.player_move_dir_index & 7) |
-                                                   (inf.player_moving ? 8 : 0));
+                                                   (inf.player_moving ? 8 : 0) |
+                                                   (inf.lean_left ? 0x40 : 0) |
+                                                   (inf.lean_right ? 0x80 : 0));
         // Local stance mirrors into the MoveOrder bits 8-9 model too (prone bit0/crouch bit1)
         // so the host's own 0x0A tail echo carries it [orig: dword_B76484/dword_B76480 latch
         // the same bits the packer writes @0x4df6a7-0x4df6cd].
@@ -926,6 +1020,10 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
     // `mov edx,[esi+24h]; test dl,1; jnz return`]
     if ((ent->flags & 1u) != 0) return;
 
+    // The motor's registry hydration is skipped for wire-snapped peers (tick_infantry
+    // returns before it); sync the health copy the selection/lean gates read.
+    e.health = ent->health;
+
     if (ent->health <= 0) {
         // Death edge — one-shot to the death pose, same policy as the motor's death edge
         // (generic torso-forward bullet death, else the 173 fire fallback; the +0x2C0
@@ -943,53 +1041,26 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
         }
     } else if ((logic_tick & 3u) == 0) {
         // Every 4th tick [orig: `test tickCounter, 3` @0x4b70ce]: decode the REPLICATED
-        // MoveOrder byte (bits 0-2 = 8-way dir, bit 3 = moving [orig: @0x4b4153/@0x4b415c])
-        // + the stance bits (MoveOrder bits 8-9, fed by C2S 0x1D [orig: @0x4b4165-0x4b4181;
-        // prone suppressed by Flags & 0x10A000 — swim/parachute unmodeled]).
+        // MoveOrder byte (bits 0-2 = 8-way dir, bit 3 = moving, bits 6-7 = lean
+        // [orig: @0x4b4153/@0x4b415c]) + the stance bits (MoveOrder bits 8-9, fed by
+        // C2S 0x1D [orig: @0x4b4165-0x4b4181; prone suppressed by Flags & 0x10A000 —
+        // swim/parachute unmodeled]), then run the SAME witnessed selection the local
+        // player runs (one function in the original).
         inf.player_moving = (ent->net_move_input & 0x08u) != 0;
         inf.player_move_dir_index = ent->net_move_input & 0x07u;
+        inf.lean_left = (ent->net_move_input & 0x40u) != 0;
+        inf.lean_right = (ent->net_move_input & 0x80u) != 0;
         inf.stance = (ent->net_stance_bits & 0x1u) != 0
                          ? InfantryState::Stance::kProne
                          : ((ent->net_stance_bits & 0x2u) != 0 ? InfantryState::Stance::kCrouch
                                                                : InfantryState::Stance::kStand);
-        int target;
-        if (inf.player_moving) {
-            // Walk base 1 + the direction offset; the stance remap below lifts it to the
-            // crouch/prone blocks (11/19). Run/jog promotion (states 9/10 via the ADM gait
-            // class dword_24E808C[adm*0x460] + pitch) is deferred — the gait class is not
-            // in our weapon table yet (tracked, D-NET-159). [orig: @0x4b7196-0x4b7226]
-            inf.idle_counter = 0; // [orig: @0x4b719b zeroes entity+0x148]
-            target = anim_state::kWalkForward;
-        } else {
-            // Standing idle: 43 until 62 selection passes (one per 4 ticks, ~4 s) have
-            // elapsed, then 44. [orig: @0x4b727b-0x4b7293 state = 0x2B + (++entity[0x148]
-            // >= 0x3E), incremented once per selection]
-            ++inf.idle_counter;
-            target = inf.idle_counter >= 62 ? anim_state::kIdle2 : anim_state::kIdle;
-        }
-        target = player_stance_remap(target, inf.stance, inf.player_move_dir_index);
-        // Prone lean 41/42 from MoveOrder bits 6-7 [orig: @0x4b731b-0x4b7354, gated on prone
-        // and !(Flags & 0x112002)] is deferred with the lean input bits (never uplinked yet).
-        const int resolved = infantry_resolve_state(inf.adm_id, target);
-        if (resolved >= 0 && resolved != inf.anim_state) {
-            // Commit via the state-flags arbitration [orig: @0x4b7356-96]: an uninterruptible
-            // current (bit 0x4) queues the target to pending; an exit-gated current (0x20)
-            // commits only a movement-flagged (bit0) target; else commit now.
-            const uint32_t curf = infantry_anim_flags(inf.anim_state);
-            if ((curf & 0x4u) != 0) {
-                inf.anim_pending = resolved;
-            } else if ((curf & 0x20u) == 0 || (infantry_anim_flags(resolved) & 0x1u) != 0) {
-                inf.anim_prev = inf.anim_state;
-                inf.anim_state = resolved;
-                inf.anim_pending = 0;
-                inf.clip_phase = 0;
-            } else {
-                inf.anim_pending = resolved;
-            }
-        } else if (resolved == inf.anim_state) {
-            inf.anim_pending = 0;
-        }
+        player_body_select(e);
     }
+    // The lean angle runs on the authority for every player body (the wire echoes the
+    // lean BITS, each end integrates the angle), and the torso roll rides the same
+    // body pass. [orig: @0x4b5c97 / @0x4b7dbf / @0x4b5cff]
+    infantry_lean_tick(e);
+    infantry_torso_roll_tick(e);
 
     // Advance the playing clip's channel every tick — the wire ratio source. Uses the real
     // .adm loop rate when the host has anim data; without it the phase self-advances on a
@@ -998,6 +1069,16 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
     if (root_motion != nullptr) {
         RootMotionFrame discard;
         root_motion->advance(inf.adm_id, inf.anim_state, inf.clip_phase, discard);
+        // The end-flag pending promotion, as on the local path [orig: @0x40b77b].
+        if (inf.anim_pending != 0) {
+            const int32_t len = root_motion->clip_length_ticks(inf.adm_id, inf.anim_state);
+            if (len >= 0 && inf.clip_phase >= len) {
+                inf.anim_prev = inf.anim_state;
+                inf.anim_state = inf.anim_pending;
+                inf.anim_pending = 0;
+                inf.clip_phase = 0;
+            }
+        }
     } else {
         inf.clip_phase = (inf.clip_phase + 1) % 62;
     }

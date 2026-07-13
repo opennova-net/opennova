@@ -26,6 +26,10 @@ var scope_card_active := false
 var fov_h_deg := 80.0         # the main camera's HORIZONTAL fov (policy applied)
 var tp_anchor := Vector3.ZERO # the chased eye anchor, Godot space
 var tp_anchor_valid := false
+# The FP camera roll in degrees, composed in the sim: torsoRoll + lean/4
+# (torsoRoll chases the slope roll; lean is the Q/E ramp — both entity BAM state)
+# [orig: the on-foot person leg @0x437fe6 — roll = entity+0x2DC + (entity+0xB0)/4].
+var fp_roll_deg := 0.0
 
 
 ## Decode one sim view dict; null on an empty dict (no sim).
@@ -42,4 +46,5 @@ static func from_view_dict(d: Dictionary) -> PlayerLocalView:
 	out.fov_h_deg = float(d.get("fov_h_deg", 80.0))
 	out.tp_anchor = d.get("tp_anchor", Vector3.ZERO)
 	out.tp_anchor_valid = bool(d.get("tp_anchor_valid", false))
+	out.fp_roll_deg = float(d.get("fp_roll_deg", 0.0))
 	return out

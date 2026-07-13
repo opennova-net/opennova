@@ -362,8 +362,16 @@ int main(void) {
             def_free_weapons(&wf);
             return 1;
         }
+        /* run-gait class [orig: 'run_anim' -> +0xAC @ 0x543d15]: the knife family
+           ships 1; rifles omit the key (0). */
+        if (knife->run_anim != 1 || m4->run_anim != 0) {
+            fprintf(stderr, "FAIL: run_anim: knife=%d m4=%d\n", knife->run_anim,
+                    m4->run_anim);
+            def_free_weapons(&wf);
+            return 1;
+        }
     }
-    printf("special_hold + attack_anim OK\n");
+    printf("special_hold + attack_anim + run_anim OK\n");
 
     /* renderfov: no shipped JO weapon.def sets the key, so every entry carries the
        record default 80.0 [orig: AdmDef_InitEntryDefaults @ 0x53ff31]; the parser

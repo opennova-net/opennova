@@ -212,6 +212,13 @@ typedef struct DefWeaponDef {
        the token table's fourth column. Appended (FFI mirror stability); `flags`
        above stays the flags1 dword. [orig: the 16-B-stride token table @ 0x830bf0] */
     int flags2;
+    /* Run-gait class (record +0xAC, plain atol, 0 = key absent). The player body's
+       forward-walk promotion adds this to the pitch tier: tier 1 -> state 9 run_2,
+       tier >= 2 -> state 10 run_3 (fallback 9), <= 0 stays walk. The pitch-tier term
+       (entity+0x37C) has no writer in the retail image, so it contributes the
+       constant 2 — JO data ships only run_anim 0/1, both landing on run_3.
+       [orig: parser key 'run_anim' @ 0x543d15 -> +0xAC; promotion @ 0x4b729d-0x4b731b]. */
+    int run_anim;
 } DefWeaponDef;
 
 typedef struct DefWeaponsFile {
