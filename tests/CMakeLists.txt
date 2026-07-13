@@ -947,6 +947,15 @@ target_include_directories(player_view_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(player_view_test PRIVATE cxx_std_17)
 add_test(NAME player_view COMMAND player_view_test)
 
+# The mouse-look pipeline (pixel deltas -> yaw/pitch BAM): the witnessed integer
+# math — sens << 11, the +0x8000 rounding, the scoped zoom divide, flipmouse,
+# and the pitch clamps with the prone +40-degree up-limit.
+add_executable(player_look_test world/player_look_test.cpp)
+target_link_libraries(player_look_test PRIVATE opennova_world)
+target_include_directories(player_look_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(player_look_test PRIVATE cxx_std_17)
+add_test(NAME player_look COMMAND player_look_test)
+
 # Spawn-state init (Entity_ResetToSpawnState @0x4B9610, net-re §5.2b): the entity+36
 # bit-1 movement-gate clear + Position backup — the field-init half of the host
 # player-spawn machine that the Phase-2 listen-server player spawn reuses.

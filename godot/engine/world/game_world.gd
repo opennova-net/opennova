@@ -771,9 +771,18 @@ func local_player_max_health() -> int:
 func local_player_team() -> int:
 	return _runtime.local_player_team() if _runtime != null else 0
 
-func set_local_player_input(forward: bool, back: bool, left: bool, right: bool, run: bool, crouch: bool, prone: bool, jump: bool, look_yaw_deg: float, look_pitch_deg: float) -> void:
+func set_local_player_input(forward: bool, back: bool, left: bool, right: bool, lean_left: bool, lean_right: bool, jump: bool) -> void:
 	if _runtime != null:
-		_runtime.set_player_input(forward, back, left, right, run, crouch, prone, jump, look_yaw_deg, look_pitch_deg)
+		_runtime.set_player_input(forward, back, left, right, lean_left, lean_right, jump)
+
+## One frame of raw mouse pixels -> the sim-owned look (see mission_runtime).
+func add_local_player_look(dx_px: float, dy_px: float) -> void:
+	if _runtime != null:
+		_runtime.add_player_look(dx_px, dy_px)
+
+## Stance SELECT request: 0 stand / 1 crouch / 2 prone.
+func request_local_player_stance(stance: int) -> bool:
+	return _runtime.request_player_stance(stance) if _runtime != null else false
 
 ## Build a host-managed avatar model for the local player (which has no BMS placement of its
 ## own). The caller (LocalPlayerHost) positions it and swaps its visual layer per first/third

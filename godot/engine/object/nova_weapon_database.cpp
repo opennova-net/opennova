@@ -106,6 +106,7 @@ void NovaWeaponDatabase::append_entry(const DefWeaponDef &e) {
 	w.scope_max_mag = e.scope_max_mag;
 	w.special_hold = e.special_hold;
 	w.attack_anim = e.attack_anim;
+	w.run_anim = e.run_anim;
 	for (int k = 0; k < 6; ++k) {
 		w.error[k] = e.error[k];
 	}
@@ -216,6 +217,8 @@ Dictionary NovaWeaponDatabase::weapon_dict(int index) const {
 	// AdmDefs +0xA4/+0xA8; world-wac-ai-re.md section 14.8].
 	d["special_hold"] = w.special_hold;
 	d["attack_anim"] = w.attack_anim;
+	// The run-gait class [orig: 'run_anim' -> AdmDefs +0xAC; promotion @ 0x4b729d].
+	d["run_anim"] = w.run_anim;
 	PackedFloat32Array error;
 	for (int k = 0; k < 6; ++k) {
 		error.push_back(w.error[k]);

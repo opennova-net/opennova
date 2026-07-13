@@ -356,6 +356,27 @@ can see it (`Physics_RaycastTerrainAndSectors` watch-check, retry 62); respawn r
     target fields (+0x2e4/+0x2e8) whose per-leg divergence/stagger is unknown. Consequence:
     twist/shuffle timing may differ from retail by small constants. Closes with an org2
     grill of @0x4b40e0's writes to +0x8c/+0x2e4/+0x2e8.
+  - **D-INF-16** the run promotion's pitch-tier term ported as the constant 2. The
+    original reads `entity+0x37C` (`>0x430000 or <0 → 0; ≥0x210000 → 1; else 2` before
+    adding `run_anim` [orig: `@0x4b72aa-0x4b72cf`]), but the field has NO writer anywhere
+    in the retail image (full-image displacement sweep, 2026-07-13) — pool memory is
+    zero-initialized, so the band is constantly 2. `player_body_select` bakes the 2 and
+    records the thresholds here; if a sibling title (DFX/BHD) turns out to write +0x37C,
+    lift the term into a live field. `libs/world/src/infantry.cpp`.
+  - **D-INF-17** lean producer gate legs unmodeled. The on-foot lean ramp skips on
+    `Flags & 0x100020` (bit 5 + the on-platform bit) and the prone roll-anim selection
+    skips on `Flags & 0x112002`'s 0x10000/0x100000 legs [orig: `@0x4b7da2/@0x4b7322`];
+    our port gates on alive/prone/airborne only (the modeled equivalents of 0x2/0x2000).
+    The seated (`+0x168 == 1`) ±0x1400000 ramp variant [orig: `@0x4b66b5`] rides the
+    mounting slice. `infantry_lean_tick` / `player_body_select`.
+  - **D-INF-18** the FP eye's terrain clamp and the remote CameraOffset approximation
+    unported. The local head-bone eye is sampled host-side from the render skeleton (the
+    structural translation of the `@0x4b6bb3` bone path, floored at Position + 0.125
+    [orig min `0x2000 @0x4b6b98`]); the original additionally floors it at
+    `max(4 terrain samples ±0x4000) + 0x1000` unless `Flags & 0x800000` [orig:
+    `@0x4b6c1c-0x4b6c97`], and remote players take the capsule-height trig path
+    [orig: `@0x4b6984`]. The camera's `torsoRoll(+0x2DC)` and `2·pitchBlend(+0x380)`
+    terms are also unported (their producers are open). `local_player_host.gd`.
   Everything else is structurally translated with per-mechanic dump citations and byte-pinned
   constants, unit-tested in tests/world/infantry_test.cpp and end-to-end in promote_test.
 - **Root-motion data path** (`AnimMap_UpdateEntity @ 0x40b5f0` → engine `InfantryRootMotion`):

@@ -613,6 +613,19 @@ public:
     // Map the movement order to an anim state (walk/run/jog/turn/stop/wounded + availability
     // fallbacks) and commit it under the lock/emote rules.
     void infantry_select(AiEntity &e);
+    // The witnessed org2 PLAYER-BODY selection, shared by the local player and the
+    // authority-side remote-player path (the original runs ONE function for both):
+    // moving base 1/11/19 + direction offset; idle 48 / 45 (46 idle_mortar for
+    // ForceCrouch weapons) / 43-then-44; the forward-walk run promotion (run_2/run_3
+    // by 2 + run_anim, scope-suppressed); prone lean rolls 41/42; airborne jump_loop;
+    // commit via the flag-table arbitration. Callers gate it to every 4th tick.
+    // [orig: Entity_UpdateInfantryPlayerBody @0x4b7183-0x4b7396; 4th-tick gate @0x4b70ce]
+    void player_body_select(AiEntity &e);
+    // The lean-angle producer, every body tick: decay lean -= (lean+8)>>4, then the
+    // on-foot ramp -0x3000000 (left) / +0x3000000 (right) per held lean bit, gated
+    // alive + not prone. [orig: decay @0x4b5c97; ramp @0x4b7dbf/@0x4b7dd6; the seated
+    // (+0x168==1) +-0x1400000 variant and the Flags 0x20/0x100000 gate legs unported]
+    void infantry_lean_tick(AiEntity &e);
     // The upper-body weapon channel (the entity's SECONDARY AnimMap channel): per-tick
     // desired-state selection + the locked/emote commit rule + the clip-end deferred
     // promotion + the playhead advance. Local-player slice: reload 65 via the 80-tick

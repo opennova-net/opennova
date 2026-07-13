@@ -93,6 +93,8 @@ class DefWeaponDef(ctypes.Structure):
         ("attack_anim", ctypes.c_int),
         # The second FLAGS dword (NoSelect/.../Inset; appended; mirror def.h).
         ("flags2", ctypes.c_int),
+        # Run-gait class ('run_anim'; 0 = key absent; mirror def.h).
+        ("run_anim", ctypes.c_int),
     ]
 
 

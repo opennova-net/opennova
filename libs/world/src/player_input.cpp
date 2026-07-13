@@ -8,7 +8,10 @@ PlayerBodyInput pack_player_body_input(const PlayerInput &in) {
     PlayerBodyInput body;
     body.look_heading = in.look_heading;
     body.look_pitch = in.look_pitch;
-    body.run = in.run;
+    // Lean keys map to MoveOrder bits 6/7 [orig: Player_PackInputStateToEntity
+    // @0x4df708-0x4df741 — g_inputFlags 0x2000 -> 0x40, 0x4000 -> 0x80].
+    body.lean_left = in.lean_left;
+    body.lean_right = in.lean_right;
     body.stance = in.prone ? InfantryState::Stance::kProne
                 : (in.crouch ? InfantryState::Stance::kCrouch : InfantryState::Stance::kStand);
     body.jump = in.jump;
@@ -81,17 +84,16 @@ void apply_player_body_input(AiEntity &e, const PlayerBodyInput &body) {
     if (body.jump) inf.jump_requested = true;
     inf.player_moving = body.moving;
     inf.player_move_dir_index = body.move_dir_index;
+    // Lean inputs (MoveOrder bits 6/7): consumed by the lean-angle ramp and the prone
+    // roll-anim selection [orig: ramp @0x4b7dbf/@0x4b7dd6; anims 41/42 @0x4b731b].
+    inf.lean_left = body.lean_left;
+    inf.lean_right = body.lean_right;
 
     // Clear NPC route fields so the local player cannot accidentally route through org1
     // waypoint/scripted-order semantics.
     inf.move_mode = 0;
     inf.target_dist = 0;
     inf.move_dir_index = 0;
-
-    // body.run is deliberately not mapped to InfantryState::alert_timer. That timer is
-    // the AI alert source in Entity_UpdateInfantryAI; the player run path needs the
-    // player-body state/flag path from IDA, not an AI shortcut.
-    (void)body.run;
 }
 
 } // namespace opennova::world

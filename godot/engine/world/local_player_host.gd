@@ -3,13 +3,19 @@ extends Node
 
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
 
-# Faithful first-person camera. The eye is +1.0 world unit above the player
-# [orig: Camera_ComputeThirdPersonView @0x437d10]; F4 swaps to a behind+above
-# third person [orig: ThirdPersonCamera_Update @0x437af0]. The mouse drives look
-# yaw/pitch (pitch clamped ±80° [orig: Input_HandleActionBinding_0 @0x4e1330]).
-const PLAYER_EYE_HEIGHT := 1.0          # +0x10000 = +1.0 world unit above Position
-const PLAYER_PITCH_CLAMP_DEG := 80.0    # ±954437120 BAM
-const PLAYER_MOUSE_SENS_DEG := 0.12     # degrees per mouse pixel (tunable)
+# Faithful first-person camera. The on-foot eye is Position + CameraOffset, where
+# the local player's CameraOffset is the POSED HEAD BONE minus Position — the eye
+# follows the animation (stand/crouch/prone/jump all move it) [orig: the local bone
+# path @0x4b6bb3 stores head−Position into CameraOffset(+0x6C); the on-foot person
+# camera leg adds it @0x437f9c]. +1.0 is the witnessed NON-person fallback bump
+# [orig: @0x437e8f], kept for the no-skeleton case. F4 swaps to a behind+above
+# third person [orig: ThirdPersonCamera_Update @0x437af0]. Mouse look is SIM-owned:
+# raw pixel deltas feed NovaSimulation.add_local_player_look (the witnessed integer
+# pipeline — sensitivity<<11, scoped zoom reduction, ±80° pitch clamp with the +40°
+# up-limit while prone) [orig: Input_ProcessMouseAxisBindings @0x499680].
+const PLAYER_EYE_HEIGHT := 1.0          # the non-person +0x10000 bump [orig: @0x437e8f]
+const PLAYER_EYE_MIN := 0.125           # CameraOffset.z floor 0x2000 [orig: @0x4b6b98]
+const PLAYER_HEAD_BONE := "BN15"        # bone 14 = the head [world-wac-ai-re §14]
 # Witnessed chase-camera numbers: distance 3.0 (0x30000) and orbit pitch 22.5 deg
 # (0x4000000), the on-change defaults [orig: Camera_SetTrackedEntity @0x4391d0]; the
 # eye is anchor + R(yaw, pitch + orbit)*(-dist) re-aimed at the anchor
@@ -74,12 +80,7 @@ const WEAPON_TICK_DT := 1.0 / 62.5
 var _world
 var _camera: Camera3D
 var _input_source := Callable()
-var _look_yaw := 0.0
-var _look_pitch := 0.0
-var _look_seeded := false
 var _third_person := false
-var _crouch := false
-var _prone := false
 var _avatar: Node3D = null
 var _viewmodel: Node3D = null
 # The FP render pass nodes (see PLAYER_VIEWMODEL_RENDERFOV_H_DEG).
@@ -254,10 +255,8 @@ func before_world_tick(_delta: float, capture_mouse: bool = false,
 		_set_fly_camera_locked(false)
 		_release_mouse_capture()
 		_clear_models()
-		_look_seeded = false
 		return
 	_set_fly_camera_locked(true)
-	_seed_look_from_world()
 	if capture_mouse and Input.get_mouse_mode() != Input.MOUSE_MODE_CAPTURED:
 		Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 	_ensure_models()
@@ -270,12 +269,9 @@ func before_world_tick(_delta: float, capture_mouse: bool = false,
 		_bool(state, "back"),
 		_bool(state, "left"),
 		_bool(state, "right"),
-		_bool(state, "run"),
-		_crouch,
-		_prone,
-		_bool(state, "jump"),
-		_look_yaw,
-		_look_pitch)
+		_bool(state, "lean_left"),
+		_bool(state, "lean_right"),
+		_bool(state, "jump"))
 	_send_weapon_input()
 
 
@@ -428,7 +424,7 @@ func _action_particle_world_position(userpoint: String) -> Vector3:
 				return part.global_transform * Vector3(info.get("position", Vector3.ZERO))
 	if fallback != Vector3.INF:
 		return fallback
-	return _world.local_player_position() + Vector3(0, PLAYER_EYE_HEIGHT, 0)
+	return _eye_position(_world.local_player_position())
 
 
 func _action_particle_world_forward(userpoint: String) -> Vector3:
@@ -488,10 +484,11 @@ func _play_viewmodel_clip(key: String, variant: int = 0, age_ticks: int = 0) -> 
 # Edge-triggered gameplay keys. F4 toggles first/third person [orig: g_camera_mode
 # @ 0xA890C8; view actions 400/402/412 @ 0x49C073; ThirdPersonCamera_Update @0x437af0
 # — full 3P camera + torso-bend witness: docs/world/world-wac-ai-re.md §14 (D-INF-11),
-# net-re §5.39 2026-07-08 addendum]. C / Z toggle the player's stance
-# (crouch / prone), mutually exclusive — the original toggles stance on a key edge
-# [orig: stance bits on entity+0x12C; NapiNPServerMsg_HandleStanceChange @0x501c60;
-# crouch wins].
+# net-re §5.39 2026-07-08 addendum]. Stance is the witnessed 3-key SELECT — Z prone,
+# X crouch, C stand (catalog ids 9/10/11, defaults Z/X/C) — each key REQUESTS its
+# stance from the sim, which applies the mutual exclusion and the ForceCrouch
+# refusal (the C2S 0x1D semantics). [orig: input cases 170/169/172 @0x4e0df3/
+# @0x4e0d77/@0x4e0e3e -> NapiNPServerMsg_HandleStanceChange @0x501c60]
 func handle_key_input(event: InputEvent, active: bool) -> bool:
 	if not active or not _has_player() or not (event is InputEventKey):
 		return false
@@ -502,39 +499,38 @@ func handle_key_input(event: InputEvent, active: bool) -> bool:
 		_third_person = not _third_person
 		_sync_camera_mode()
 		return true
-	if key.keycode == KEY_C:
-		_crouch = not _crouch
-		if _crouch:
-			_prone = false
-		return true
 	if key.keycode == KEY_Z:
-		_prone = not _prone
-		if _prone:
-			_crouch = false
+		_request_stance(2)  # prone [orig: case 170 sends 0xAA]
+		return true
+	if key.keycode == KEY_X:
+		_request_stance(1)  # crouch [orig: case 169 sends 0xA9]
+		return true
+	if key.keycode == KEY_C:
+		_request_stance(0)  # stand [orig: case 172 sends 0xAC]
 		return true
 	return false
 
 
-# Mouse-look: turn the look yaw (X) and pitch (Y, clamped ±80°). [orig: mouse -> entity
-# Yaw@+0x10 / Pitch@+0x14, Input_HandleActionBinding_0 @0x4e1330]. Signs are tunable.
+func _request_stance(stance: int) -> void:
+	if _world != null and _world.has_method("request_local_player_stance"):
+		_world.request_local_player_stance(stance)
+
+
+# Mouse-look: raw pixel deltas into the SIM's witnessed integer pipeline (the sim
+# owns sensitivity, the scoped zoom reduction, Y-invert, and the pitch clamps).
+# [orig: Input_ProcessMouseAxisBindings @0x499680 -> the axis cases 166/164]
 func handle_input(event: InputEvent, active: bool) -> bool:
 	if not active or not _has_player() or not (event is InputEventMouseMotion):
 		return false
-	_seed_look_from_world()
+	if not _world.has_method("add_local_player_look"):
+		return false
 	var mm := event as InputEventMouseMotion
-	_look_yaw = _wrap_degrees(_look_yaw + mm.relative.x * PLAYER_MOUSE_SENS_DEG)
-	_look_pitch = clampf(_look_pitch - mm.relative.y * PLAYER_MOUSE_SENS_DEG,
-		-PLAYER_PITCH_CLAMP_DEG, PLAYER_PITCH_CLAMP_DEG)
+	_world.add_local_player_look(mm.relative.x, mm.relative.y)
 	return true
 
 
 func _reset_state() -> void:
-	_look_yaw = 0.0
-	_look_pitch = 0.0
-	_look_seeded = false
 	_third_person = false
-	_crouch = false
-	_prone = false
 	_weapon_play_serial = -1
 	_weapon_view = null
 	_fire_was_held = false
@@ -552,18 +548,11 @@ func _has_player() -> bool:
 	return _world.has_method("has_local_player") and _world.has_local_player()
 
 
-func _seed_look_from_world() -> void:
-	if _look_seeded or _world == null:
-		return
-	_look_yaw = _wrap_degrees(float(_world.local_player_yaw_deg()))
-	_look_pitch = clampf(float(_world.local_player_pitch_deg()),
-		-PLAYER_PITCH_CLAMP_DEG, PLAYER_PITCH_CLAMP_DEG)
-	_look_seeded = true
-
-
-# WASD is the 8-way move relative to the look (W/S forward/back, A/D strafe); Shift
-# runs; Space jumps (momentary — the motor jumps once when grounded).
-# [orig: Player_PackInputStateToEntity @0x4df450]
+# WASD is the 8-way move relative to the look (W/S forward/back, A/D strafe);
+# Q/E lean (catalog ids 6/7); Space jumps (momentary — the motor jumps once when
+# grounded). There is no run key: running is the automatic forward-walk promotion
+# in the sim's body selection, suppressed while scoped.
+# [orig: Player_PackInputStateToEntity @0x4df450; promotion @0x4b729d]
 func _read_input_state() -> Dictionary:
 	if _input_source.is_valid():
 		var out = _input_source.call()
@@ -574,7 +563,8 @@ func _read_input_state() -> Dictionary:
 		"back": Input.is_physical_key_pressed(KEY_S),
 		"left": Input.is_physical_key_pressed(KEY_A),
 		"right": Input.is_physical_key_pressed(KEY_D),
-		"run": Input.is_physical_key_pressed(KEY_SHIFT),
+		"lean_left": Input.is_physical_key_pressed(KEY_Q),
+		"lean_right": Input.is_physical_key_pressed(KEY_E),
 		"jump": Input.is_physical_key_pressed(KEY_SPACE),
 	}
 
@@ -639,15 +629,55 @@ func aim_screen_point() -> Vector2:
 	var yr := deg_to_rad(_world.local_player_yaw_deg())
 	var pr := deg_to_rad(_world.local_player_pitch_deg())
 	var forward := Vector3(sin(yr) * cos(pr), sin(pr), -cos(yr) * cos(pr))
-	var eye: Vector3 = _world.local_player_position() + Vector3(0, PLAYER_EYE_HEIGHT, 0)
+	var eye := _eye_position(_world.local_player_position())
 	var target := eye + forward * AIM_PROJECT_RANGE
 	if _camera.is_position_behind(target):
 		return Vector2.INF
 	return _camera.unproject_position(target)
 
 
-# Place the camera from the player's authoritative pose. First person: eye = player + 1.0u
-# looking along the facing. Third person (F4): behind + above, looking at the player
+# The eye anchor: Position + CameraOffset, where the local player's CameraOffset is
+# the POSED HEAD BONE minus Position — sampled from the avatar's render skeleton, the
+# same bone matrices the original builds sim-side. Stance, lean, the walk/run bob,
+# and the jump arc all move the eye exactly as the animation moves the head.
+# [orig: the local bone path @0x4b6bb3 (Entity_BuildBoneTransformMatrices -> head,
+# CameraOffset = head - Position); consumed by the on-foot person leg @0x437f9c.
+# Unported tails: the 4-sample terrain clamp @0x4b6c1c and the remote trig
+# approximation @0x4b6984; the 0.125u floor is the witnessed min @0x4b6b98.]
+func _eye_position(pos: Vector3) -> Vector3:
+	var head := _avatar_head_world()
+	if head == Vector3.INF:
+		return pos + Vector3(0, PLAYER_EYE_HEIGHT, 0)  # non-person bump [orig: @0x437e8f]
+	head.y = maxf(head.y, pos.y + PLAYER_EYE_MIN)
+	return head
+
+
+func _avatar_head_world() -> Vector3:
+	if _avatar == null or not is_instance_valid(_avatar):
+		return Vector3.INF
+	var skel := _find_skeleton(_avatar)
+	if skel == null:
+		return Vector3.INF
+	var idx := skel.find_bone(PLAYER_HEAD_BONE)
+	if idx < 0:
+		return Vector3.INF
+	return skel.global_transform * skel.get_bone_global_pose(idx).origin
+
+
+func _find_skeleton(root: Node) -> Skeleton3D:
+	if root is Skeleton3D:
+		return root
+	for child in root.get_children():
+		var found := _find_skeleton(child)
+		if found != null:
+			return found
+	return null
+
+
+# Place the camera from the player's authoritative pose. First person: eye = the
+# head-bone anchor looking along the facing, rolled by the lean tilt (lean/4)
+# [orig: @0x437f9c/@0x437fcd — roll = torsoRoll + leanAngle/4; torsoRoll unported].
+# Third person (F4): behind + above, looking at the player
 # [orig: Camera_ComputeThirdPersonView @0x437d10; ThirdPersonCamera_Update @0x437af0]. The
 # mission yaw -> Godot forward mirrors the present remap (x,y,z)->(x,z,-y): a mission facing
 # yaw faces (sin yaw, cos yaw) -> Godot (sin yaw, 0, -cos yaw), tilted by pitch.
@@ -658,7 +688,7 @@ func _update_player_camera() -> void:
 	var yr := deg_to_rad(_world.local_player_yaw_deg())
 	var pr := deg_to_rad(_world.local_player_pitch_deg())
 	var forward := Vector3(sin(yr) * cos(pr), sin(pr), -cos(yr) * cos(pr))
-	var eye := pos + Vector3(0, PLAYER_EYE_HEIGHT, 0)
+	var eye := _eye_position(pos)
 	if _third_person:
 		# Chase camera: the smoothed anchor is SIM state, eased a quarter-step per
 		# 62.5 Hz TICK (render-rate independent) [orig: anchor = Position +
@@ -677,6 +707,13 @@ func _update_player_camera() -> void:
 	else:
 		_camera.global_position = eye
 		_camera.look_at(eye + forward, Vector3.UP)
+		# The FP lean tilt: roll = leanAngle/4 about the view forward (the torsoRoll
+		# term is an unported tail). Sign pinned host-side: lean right (positive
+		# lean) tilts the view right. [orig: @0x437fcd — g_view_rot_roll =
+		# torsoRoll + lean>>2 on the on-foot person leg]
+		var roll_deg := _view.lean_deg * 0.25 if _view != null else 0.0
+		if absf(roll_deg) > 0.001:
+			_camera.rotate_object_local(Vector3(0, 0, -1), deg_to_rad(roll_deg))
 	_update_scope_camera()
 	_update_avatar(pos)
 	_update_viewmodel()
@@ -873,10 +910,3 @@ func _wrap180(degrees: float) -> float:
 	if out < 0.0:
 		out += 360.0
 	return out - 180.0
-
-
-func _wrap_degrees(degrees: float) -> float:
-	var out := fmod(degrees, 360.0)
-	if out < 0.0:
-		out += 360.0
-	return out

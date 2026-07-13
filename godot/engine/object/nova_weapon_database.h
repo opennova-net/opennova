@@ -66,6 +66,9 @@ private:
 		// 62/63 on fire [orig: AdmDefs +0xA4/+0xA8, read @ 0x4b5dba / @ 0x542bbc].
 		int special_hold = 0;
 		int attack_anim = 0;
+		// Run-gait class: the forward-walk promotion adds this to the constant pitch
+		// tier 2 to pick run_2/run_3 [orig: 'run_anim' -> AdmDefs +0xAC; @ 0x4b729d].
+		int run_anim = 0;
 		// HUD weapon-coupled slice (docs/interface/hud-re.md): the 6-row dispersion
 		// table in DEGREES, rows = hip prone/crouch/stand then scoped prone/crouch/
 		// stand — the crosshair spread reads ERROR[stance + 3*scoped] [orig: weapon

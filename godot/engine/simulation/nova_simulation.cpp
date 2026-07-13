@@ -822,7 +822,10 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("spawn_local_player_at_start"), &NovaSimulation::spawn_local_player_at_start);
 	ClassDB::bind_method(D_METHOD("has_local_player"), &NovaSimulation::has_local_player);
 	ClassDB::bind_method(D_METHOD("get_local_player_wire_handle"), &NovaSimulation::get_local_player_wire_handle);
-	ClassDB::bind_method(D_METHOD("set_player_input", "forward", "back", "left", "right", "run", "crouch", "prone", "jump", "look_yaw_deg", "look_pitch_deg"), &NovaSimulation::set_player_input);
+	ClassDB::bind_method(D_METHOD("set_player_input", "forward", "back", "left", "right", "lean_left", "lean_right", "jump"), &NovaSimulation::set_player_input);
+	ClassDB::bind_method(D_METHOD("add_local_player_look", "dx_px", "dy_px"), &NovaSimulation::add_local_player_look);
+	ClassDB::bind_method(D_METHOD("set_local_player_mouse", "sensitivity", "invert_y"), &NovaSimulation::set_local_player_mouse);
+	ClassDB::bind_method(D_METHOD("request_local_player_stance", "stance"), &NovaSimulation::request_local_player_stance);
 	ClassDB::bind_method(D_METHOD("get_local_player_position"), &NovaSimulation::get_local_player_position);
 	ClassDB::bind_method(D_METHOD("get_local_player_yaw_deg"), &NovaSimulation::get_local_player_yaw_deg);
 	ClassDB::bind_method(D_METHOD("get_local_player_pitch_deg"), &NovaSimulation::get_local_player_pitch_deg);
@@ -1107,6 +1110,8 @@ void NovaSimulation::bringup_host_runtime(const opennova::bms::File &file) {
 		// Seed the look heading from the auto-spawned player's facing so the body starts aligned (the
 		// motor drives entity Yaw from player_input_.look_heading each frame, else input snaps it to 0).
 		player_input_ = opennova::world::PlayerInput{};
+		stance_latch_ = 0;
+		look_px_accum_x_ = look_px_accum_y_ = 0.0f;
 		if (world_->ai && world_->cached.local_player.valid()) {
 			if (const AiEntity *pe = world_->ai->for_handle(world_->cached.local_player)) {
 				player_input_.look_heading = pe->heading;
@@ -1250,6 +1255,8 @@ void NovaSimulation::joiner_pump() {
 		joiner_local_spawned_ = h.valid();
 		player_input_ = opennova::world::PlayerInput{};
 		player_input_.look_heading = opennova::world::bam_heading_from_mission_yaw_deg(spawn.yaw);
+		stance_latch_ = 0;
+		look_px_accum_x_ = look_px_accum_y_ = 0.0f;
 	}
 	++now_tick_;
 }
@@ -1270,6 +1277,11 @@ void NovaSimulation::apply_player_input_pre_tick() {
 		}
 		p->inf.wpn_hold_kind = weapon_active_ ? weapon_hold_kind_ : 0;
 		p->inf.scope_raised = weapon_active_ && player_view_.scope_engaged;
+		// The run-gait class + ForceCrouch mirror, same per-tick re-read pattern as the
+		// hold kind [orig: the selection reads AdmDefs[+0x2B0]+0xAC each pass @ 0x4b72cf;
+		// the ForceCrouch checks read the equipped def flags @ 0x4b7245/@ 0x4e0d8a].
+		p->inf.wpn_run_anim = weapon_active_ ? weapon_run_anim_ : 0;
+		p->inf.wpn_force_crouch = weapon_active_ && weapon_force_crouch_;
 	}
 }
 
@@ -1291,6 +1303,8 @@ bool NovaSimulation::spawn_local_player(Vector3 p_position, float p_yaw_deg, int
 	// Seed the look heading to the spawn facing so the body starts aligned. [(90 - yaw) BAM]
 	player_input_ = opennova::world::PlayerInput{};
 	player_input_.look_heading = opennova::world::bam_heading_from_mission_yaw_deg(p_yaw_deg);
+	stance_latch_ = 0;
+	look_px_accum_x_ = look_px_accum_y_ = 0.0f;
 	return true;
 }
 
@@ -1324,6 +1338,8 @@ int NovaSimulation::spawn_local_player_at_start() {
 	// Seed the look heading to the spawn facing so the body starts aligned. [(90 - yaw) BAM]
 	player_input_ = opennova::world::PlayerInput{};
 	player_input_.look_heading = opennova::world::bam_heading_from_mission_yaw_deg(spawn.yaw);
+	stance_latch_ = 0;
+	look_px_accum_x_ = look_px_accum_y_ = 0.0f;
 	return sel.found ? 1 : 0;
 }
 
@@ -1343,23 +1359,20 @@ int NovaSimulation::get_local_player_wire_handle() const {
 }
 
 void NovaSimulation::set_player_input(bool p_forward, bool p_back, bool p_left, bool p_right,
-                                      bool p_run, bool p_crouch, bool p_prone, bool p_jump,
-                                      float p_look_yaw_deg, float p_look_pitch_deg) {
+                                      bool p_lean_left, bool p_lean_right, bool p_jump) {
 	player_input_.forward = p_forward;
 	player_input_.back = p_back;
 	player_input_.left = p_left;
 	player_input_.right = p_right;
-	player_input_.run = p_run;
-	// Stance is the host's already-resolved posture (the host owns the key-edge toggle); jump is a
-	// per-frame edge the motor consumes once when grounded. [orig: entity+0x12C stance/jump bits]
-	player_input_.crouch = p_crouch;
-	player_input_.prone = p_prone;
+	// Lean keys -> MoveOrder bits 6/7 [orig: g_inputFlags 0x2000/0x4000 packed
+	// @ 0x4df708-0x4df741]; jump is a per-frame edge the motor consumes once grounded.
+	player_input_.lean_left = p_lean_left;
+	player_input_.lean_right = p_lean_right;
 	player_input_.jump = p_jump;
-	// Look yaw (mission degrees) -> engine BAM heading, the (90 - yaw) convention used at spawn.
-	player_input_.look_heading = opennova::world::bam_heading_from_mission_yaw_deg(p_look_yaw_deg);
-	// Look pitch (mission degrees, up positive) -> entity Pitch@+0x14 (BAM32). No 90-offset.
-	player_input_.look_pitch =
-	    static_cast<int32_t>(static_cast<double>(p_look_pitch_deg) * opennova::world::kBamPerDegree);
+	// Stance comes from the sim-owned SELECT latches (request_local_player_stance —
+	// the C2S 0x1D apply semantics [orig: @ 0x501c60]).
+	player_input_.crouch = (stance_latch_ == 1);
+	player_input_.prone = (stance_latch_ == 2);
 	// The movement-held latch and the unscope-on-move [orig:
 	// Player_PackInputStateToEntity @ 0x4df450 — any of the four direction keys
 	// sets byte_B7653B (blocks scope-UP on Scoped weapons @ 0x4df29c) and, while
@@ -1374,6 +1387,55 @@ void NovaSimulation::set_player_input(bool p_forward, bool p_back, bool p_left, 
 				(weapon_def_.flags2 & 0x200) != 0))
 			opennova::world::weapon_fsm_queue_scope_down(weapon_slot_);
 	}
+}
+
+void NovaSimulation::add_local_player_look(float p_dx_px, float p_dy_px) {
+	// The scoped sensitivity reduction divides by the CURRENT zoom magnification —
+	// the slot zoom seeded from the def's scope_max_mag [orig: sens /
+	// Player_GetClampedWeaponElevation() @ 0x499714, applied while scoped and the
+	// binocular view is down; no binoculars input exists yet]. Engaged-at-scope is
+	// the sim's own bit; the zoom-adjust keys are an unported tail, so the seed
+	// (scope_max_mag) IS the current zoom.
+	int32_t scoped_zoom = 0;
+	if (weapon_active_ && player_view_.scope_engaged && weapon_scope_max_mag_ > 1.0f)
+		scoped_zoom = static_cast<int32_t>(weapon_scope_max_mag_);
+	const bool prone = (stance_latch_ == 2); // [orig: MoveOrder & 0x100 @ 0x4e0ff7]
+	// Godot supplies float relative motion; the original consumes whole center-lock
+	// pixels. Accumulate the fraction so slow motion is not truncated away.
+	look_px_accum_x_ += p_dx_px;
+	look_px_accum_y_ += p_dy_px;
+	const int32_t dx = static_cast<int32_t>(look_px_accum_x_);
+	const int32_t dy = static_cast<int32_t>(look_px_accum_y_);
+	look_px_accum_x_ -= static_cast<float>(dx);
+	look_px_accum_y_ -= static_cast<float>(dy);
+	if (dx == 0 && dy == 0) return;
+	opennova::world::player_look_apply(player_input_.look_heading, player_input_.look_pitch,
+	                                   look_settings_, dx, dy, scoped_zoom, prone);
+}
+
+void NovaSimulation::set_local_player_mouse(int p_sensitivity, bool p_invert_y) {
+	// The mousescale clamp [orig: @ 0x49b19b-0x49b1b9: >= 0x200 -> 0x1FF, <= 0 -> 1].
+	int s = p_sensitivity;
+	if (s < opennova::world::kMouseSensitivityMin) s = opennova::world::kMouseSensitivityMin;
+	if (s > opennova::world::kMouseSensitivityMax) s = opennova::world::kMouseSensitivityMax;
+	look_settings_.sensitivity = s;
+	look_settings_.invert_y = p_invert_y;
+}
+
+bool NovaSimulation::request_local_player_stance(int p_stance) {
+	if (p_stance < 0 || p_stance > 2) return false;
+	// ForceCrouch weapons refuse stance changes [orig: the case-169/170/172 gate
+	// Entity_CheckWeaponSeatFlags(equipped, 0x40000) @ 0x4e0d8a; the seat-kind-3
+	// mount refusal rides the unported mounting slice].
+	if (weapon_active_ && weapon_force_crouch_) return false;
+	if (stance_latch_ == p_stance) return false;
+	// SELECT with mutual exclusion — the 0x1D apply writes one stance bit and clears
+	// the other [orig: NapiNPServerMsg_HandleStanceChange @ 0x501c60: 169 -> crouch,
+	// 170 -> prone, 172 -> clear both].
+	stance_latch_ = p_stance;
+	player_input_.crouch = (stance_latch_ == 1);
+	player_input_.prone = (stance_latch_ == 2);
+	return true;
 }
 
 Vector3 NovaSimulation::get_local_player_position() const {
@@ -1447,12 +1509,16 @@ Dictionary NovaSimulation::get_local_player_aim_overlay() const {
 	in.leg_yaw_l = p->inf.leg_yaw[1];
 	// The head-look decay term carries the arms-dip feed (the +0x371 weapon-switch
 	// window drops it 0x2800000/tick; infantry_weapon_channel owns the decay)
-	// [orig: @ 0x4b5cab..0x4b5cd5]. roll / body_pitch / torso_roll / lean / pitch_blend
-	// stay 0 until their sim sources (lean keys, recoil, AI head-look) are ported —
-	// the formulas above carry the terms so those drop in without touching this seam.
+	// [orig: @ 0x4b5cab..0x4b5cd5]. The lean term is the sim's lean angle
+	// (entity+0xB0; ramp/decay in infantry_lean_tick). roll / body_pitch /
+	// torso_roll / pitch_blend stay 0 until their sim sources (recoil, slope roll,
+	// AI head-look) are ported — the formulas carry the terms so those drop in
+	// without touching this seam.
 	in.head_look_decay = p->inf.head_look_decay;
+	in.lean = p->inf.lean_angle;
 	in.aim_state = (opennova::world::infantry_anim_flags(p->inf.anim_state) & 0x40u) != 0;
-	in.rolling = (p->inf.anim_state == 41 || p->inf.anim_state == 42);
+	in.rolling = (p->inf.anim_state == opennova::world::anim_state::kRollLeft ||
+	              p->inf.anim_state == opennova::world::anim_state::kRollRight);
 
 	opennova::anim::AimOverlayAngles angles[opennova::anim::kOverlayClassCount];
 	opennova::anim::compute_aim_overlay_angles(in, angles);
@@ -1584,6 +1650,10 @@ void NovaSimulation::set_local_player_weapon(const Dictionary &p_def,
 	// AdmDefs record +0xA4/+0xA8; world-wac-ai-re.md §14.8.4].
 	weapon_hold_kind_ = int(int64_t(p_def.get("special_hold", 0)));
 	weapon_attack_kind_ = int(int64_t(p_def.get("attack_anim", 0)));
+	// The run-gait class [orig: 'run_anim' -> AdmDefs +0xAC; promotion @ 0x4b729d] and
+	// ForceCrouch (0x40000): idle_mortar promotion + stance-change refusal.
+	weapon_run_anim_ = int(int64_t(p_def.get("run_anim", 0)));
+	weapon_force_crouch_ = (flags & 0x40000) != 0;
 	// A held-AnimMap CHANGE advances a host serial; the local InfantryState observes
 	// that edge pre-tick and stamps its own 20-tick arms-dip window. Compare the
 	// resolved map identity, not the weapon name: two weapon records sharing one
@@ -1635,6 +1705,8 @@ void NovaSimulation::clear_local_player_weapon() {
 	player_view_.scope_hipfire = true;
 	weapon_hold_kind_ = 0;
 	weapon_attack_kind_ = 0;
+	weapon_run_anim_ = 0;
+	weapon_force_crouch_ = false;
 	weapon_anim_map_ = String();
 }
 
@@ -1730,6 +1802,18 @@ Dictionary NovaSimulation::get_local_player_view() const {
 	out["tp_anchor"] = Vector3(player_view_.tp_anchor[0], player_view_.tp_anchor[2],
 			-player_view_.tp_anchor[1]);
 	out["tp_anchor_valid"] = player_view_.tp_anchor_valid;
+	// The lean angle in degrees for the FP camera roll term: roll = torsoRoll + lean/4
+	// (torsoRoll is an unported tail). [orig: the on-foot person leg @ 0x437fcd —
+	// g_view_rot_roll = entity+0x2DC + (entity+0xB0 >> 2)]
+	{
+		float lean_deg = 0.0f;
+		if (world_ && world_->ai && world_->cached.local_player.valid()) {
+			if (const AiEntity *p = world_->ai->for_handle(world_->cached.local_player))
+				lean_deg = static_cast<float>(
+						static_cast<double>(p->inf.lean_angle) * opennova::world::kDegreesPerBam);
+		}
+		out["lean_deg"] = lean_deg;
+	}
 	return out;
 }
 

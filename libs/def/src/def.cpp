@@ -959,6 +959,12 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 size_t vl; const char *v = consume_value_span(trimmed, tlen, 11, &vl);
                 cw.attack_anim = parse_int_n(v, vl);
                 parsed = 1;
+            } else if (lower_match_key(lower, ll, "run_anim", 8)) {
+                /* Run-gait class, atol [orig: weapon.def key 'run_anim' ->
+                   record+0xAC @ 0x543d15/0x543d3c]. */
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 8, &vl);
+                cw.run_anim = parse_int_n(v, vl);
+                parsed = 1;
             } else if (ll > 3 && lower_starts_with(lower, ll, "pos", 3) &&
                        (lower[3] == ' ' || lower[3] == '\t')) {
                 size_t vl; const char *v = consume_value_span(trimmed, tlen, 3, &vl);

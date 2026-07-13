@@ -26,6 +26,10 @@ var scope_card_active := false
 var fov_h_deg := 80.0         # the main camera's HORIZONTAL fov (policy applied)
 var tp_anchor := Vector3.ZERO # the chased eye anchor, Godot space
 var tp_anchor_valid := false
+# The sim's lean angle in degrees (entity+0xB0; ramp/decay at the world cadence).
+# The FP camera rolls by lean/4 [orig: the on-foot person leg @0x437fcd —
+# roll = torsoRoll + leanAngle/4; torsoRoll is an unported tail].
+var lean_deg := 0.0
 
 
 ## Decode one sim view dict; null on an empty dict (no sim).
@@ -42,4 +46,5 @@ static func from_view_dict(d: Dictionary) -> PlayerLocalView:
 	out.fov_h_deg = float(d.get("fov_h_deg", 80.0))
 	out.tp_anchor = d.get("tp_anchor", Vector3.ZERO)
 	out.tp_anchor_valid = bool(d.get("tp_anchor_valid", false))
+	out.lean_deg = float(d.get("lean_deg", 0.0))
 	return out

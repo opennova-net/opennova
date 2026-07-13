@@ -1698,7 +1698,7 @@ Inside §5.9 tag-0x0A's event loop (`tag==1` branch): the lookup
 | 10 | 1 | yaw byte | high byte of a 32-bit BAM → `entity+0x10` (heading) on read [D-NET-57]; CARRIER-RELATIVE local heading when carrierHandle != none (`(Yaw − carrierYaw) >> 24`, the `sar 24` of the pose transform's out[3] [orig: `@0x4c0b85`]) |
 | 11 | 1 | pitch byte | same shape → `entity+0x14` (pitch) on read; the write sources `(entity+0x14 + 0x800000) >> 24` [D-NET-57] |
 | 12 | 1 | moveOrder (movement-INPUT byte) | entity+0x12C low [orig: write `@0x4c0c9c`] — bits 0-2 = 8-way dir, bit 3 = moving, bits 6/7 = lean L/R (the packing `Player_PackInputStateToEntity @ 0x4df68f`); remote players are MOTOR-driven from it (see the apply bullets below) |
-| 13 | 1 | state flags | entity+0x24 low, UNMASKED on write [orig: `@0x4c0c7d`]: **bit 0x01 = hidden (respawn-pending — the flags1-bit1 writer ORs it while undeployed, the golden pre-deploy byte)**, bit `0x02` = dead/undeployed, bits 2-4 = the local-UI modifier family (0x4 `dword_B7654C`, 0x8 walk-toggle `byte_B7653A`, 0x10 scope `g_weaponScopeActive` [orig: local-only writer `@0x4b5d7f-0x4b5da9`; 0x10 suppresses the run promotion `@0x4b72e2`]), bit `0x40` = mounted |
+| 13 | 1 | state flags | entity+0x24 low, UNMASKED on write [orig: `@0x4c0c7d`]: **bit 0x01 = hidden (respawn-pending — the flags1-bit1 writer ORs it while undeployed, the golden pre-deploy byte)**, bit `0x02` = dead/undeployed, bits 2-4 = the local-UI modifier family (0x4 = NVG `g_NVGActive @0xB7654C`, 0x8 = binoculars `g_binocularsRaised @0xB7653A`, 0x10 = scope `g_weaponScopeActive` [orig: local-only writer `@0x4b5d7f-0x4b5da9`; 0x10 suppresses the run promotion `@0x4b72e2`]; the earlier "0x8 walk-toggle" reading was WRONG — there is no walk toggle, running is the automatic forward-walk promotion, corrected 2026-07-13), bit `0x40` = mounted |
 | 14 | 1 | body-anim STATE id | write = pendingAnimStateId (+0x2B8) if nonzero else animStateId (+0x2BC) [orig: `@0x4c0cc7`]; **the server RECOMPUTES this with its own body motor from the replicated input — it is never echoed from an uplink** (the uplink carries no anim state; D-NET-159) |
 | 15 | 1 | anim-channel ratio | write = the anim channel's (entity+0x188) elapsed-ticks-in-current-loop, trunc + clamp 255 [orig: `@0x4c0cf2`; `AnimChannel_AdvancePlayback @ 0x40B140` advances normalized time, wraps at 1.0] |
 | 16 | 1 | anim def index | → entity+0x2B0 |
@@ -1745,11 +1745,20 @@ misnomers corrected here):**
   {0,7,6,5,4,3,2,1} @ the 0x4b71c7 switch), bit 3 (moving), bits 8/9 (prone/crouch — fed by C2S
   0x1D since the uplink's low byte cannot carry them; prone suppressed by `Flags & 0x10A000`
   @ 0x4b416c). Selection: moving → base 1/11/19 (stand/crouch/prone) + dir offset
-  (@ 0x4b7183-0x4b7226); idle → 45 (crouch) / 48 (prone) / 43-then-44 after 62 selection passes
-  (`state = 0x2B + (++entity[0x148] >= 0x3E)` @ 0x4b727b-0x4b7293); forward-walk promotes to
-  run/jog 9/10 by the equipped ADM's gait class (`dword_24E808C[adm*0x460]`) + look pitch, unless
-  Flags & 0x10 (scope) (@ 0x4b729d-0x4b731b); prone lean 41/42 from MoveOrder bits 6/7
-  (@ 0x4b731b-0x4b7354); commit via the flag-table arbitration (@ 0x4b7356-96).
+  (@ 0x4b7183-0x4b7226); idle → 45 (crouch — promoted to **46 idle_mortar** when the equipped
+  def has ForceCrouch 0x40000 and the clip exists @ 0x4b723f-0x4b7279) / 48 (prone) /
+  43-then-44 after 62 selection passes (`state = 0x2B + (++entity[0x148] >= 0x3E)`
+  @ 0x4b727b-0x4b7293); **the run promotion (decoded 2026-07-13)**: pure-forward standing walk
+  (state == 1 only) promotes to `run_2`/`run_3` (ANIMNUM 9/10) by
+  `tier = pitchTier(entity+0x37C) + AdmDef.run_anim` — the tier bands are `>0x430000 or <0 → 0`,
+  `≥0x210000 → 1`, `else 2`, but **entity+0x37C has NO writer in the retail image** (pool
+  zero-init ⇒ the constant 2); `run_anim` is the weapon.def key at AdmDefs+0xAC
+  (`dword_24E808C[adm*0x460]`, parser @ 0x543d15, JOX ships only 0/1 ⇒ every weapon runs at
+  run_3); tier 1 → 9 if `animMap[9]!=animMap[0]`, tier ≥ 2 → 10 with a 9 fallback; suppressed
+  by Flags & 0x10 (scope) (@ 0x4b729d-0x4b731b); prone lean rolls 41/42 from MoveOrder bits 6/7
+  (@ 0x4b731b-0x4b7354, gated `!(Flags & 0x112002)`, bit 7 wins); commit via the flag-table
+  arbitration (@ 0x4b7356-96). The LOCAL player runs this same selection (the local-or-authority
+  gate above) — the reimpl shares one `player_body_select` for both paths.
 - **off 16 (ADM anim-def index): 0 is a VALID index — 0xFF is the null sentinel** (entries
   stride 1120): the client stores it to +0x2B0 AND resolves `entity+0x298 =
   AdmDef_GetEntryByIndex(byte)` UNGATED for remote players (`@0x4c11f2-0x4c120d`) — 0xFF nulls
@@ -3792,9 +3801,18 @@ anchored (decompiled this session); read-only, no IDB writes.
 
 **First person (mode 0)** `[orig: Camera_ComputeThirdPersonView @ 0x437d10]` — despite the name this
 is the master view placement; the mode-0 branch is FP:
-- `g_view_pos {x,y,z}` ← entity `Position` (+4/+8/+12); then **`g_view_pos_z += 0x10000`** = **+1.0
-  world-unit eye height** (a fixed standing-infantry bump, NOT CameraOffset) `[orig: @ 0x437e8f]`.
-- `g_view_rot {yaw,pitch,roll}` ← entity `Yaw/Pitch/Roll` (+16/+20/+24, 32-bit BAM) `[orig: @ 0x437d92]`.
+- `g_view_pos {x,y,z}` ← entity `Position` (+4/+8/+12); the base rotation
+  `g_view_rot {yaw,pitch,roll}` ← entity `Yaw/Pitch/Roll` (+16/+20/+24, 32-bit BAM) `[orig: @ 0x437d92]`.
+- **Correction (2026-07-13): the `+0x10000` (+1.0) bump `@ 0x437e8f` is the NON-person leg only**
+  (itemDef+0x5C != 3). An on-foot PERSON takes the type-3 leg `@ 0x437f9c`:
+  `g_view_pos += CameraOffset(+0x6C)`, `pitch = entPitch + 2·pitchBlend(+0x380)`,
+  `roll = torsoRoll(+0x2DC) + leanAngle(+0xB0)/4` (the FP lean tilt `@ 0x437fcd`). The local
+  player's `CameraOffset` is produced by the body updater's bone path `@ 0x4b6bb3`:
+  `Entity_BuildBoneTransformMatrices` → the POSED HEAD BONE world position, floored to the max of
+  4 terrain samples (±0x4000 x/y) + 0x1000 unless Flags & 0x800000 `@ 0x4b6c1c`, stored as
+  `head − Position`; remote players get a cheaper trig approximation from the capsule height
+  (clamped 0xD000) rotated by −lean/body pitch/roll with a 0x2000 z floor `@ 0x4b6984-0x4b6ba5`.
+  So the FP eye FOLLOWS THE ANIMATION — stand/crouch/prone/jump and the walk/run bob all move it.
 
 The final 1P view matrix `g_view_matrix @ 0xB764E0` is built by `[orig: Player_UpdateFirstPersonCamera
 @ 0x4dd380]` = `g_view_pos`/`g_view_rot` + weapon view-bias + weapon bone offset + clamped velocity
@@ -3811,6 +3829,20 @@ mouse delta: `Yaw ±= analog<<16` (**wraps, no clamp**); `Pitch = clamp(Pitch ±
 (dword_24D207C<<11) + 0x8000) >> 16`; `dword_24D207C ∈ [1,511]`; Y inverted unless `dword_24D2078`.
 FOV = `dword_A7839C / 65536` degrees (16.16; base `dword_26C6844`, scope-modified)
 `[orig: Render_ProcessMainSceneFrame @ 0x5ca0f0 @ 0x5ca601]`.
+Completed 2026-07-13: the raw deltas are **center-lock cursor PIXELS per frame**
+(`Input_PumpAndCenterCursor @ 0x7616e0` pins the cursor at (320,240) and reads the offset);
+the sens setting is profile+0x590, **default 128** (`PlayerProfile_InitDefaults @ 0x54bbc0`),
+stepped ±0x10 and clamped [1,0x1FF] by the `mousescale` adjust (`case 17 @ 0x49b18b`); the
+invert is profile+0x594 (`flipmouse` toggles it, case 9 @ 0x49afbb; default OFF = push-forward
+looks up). **The scoped reduction** `@ 0x499706-0x499714`: `sens /= Player_GetClampedWeaponElevation()
+@ 0x4dc6b0` — the CURRENT zoom level (slot+0xC, seeded from and clamped to the def's
+`scope_max_mag` @ +0x90) — while `CanFire && (weapon scoped || vehicle gunner scoped) &&
+!g_binocularsViewActive (0xB76538)`. Apply: `yaw −= scaledX << 16` (case 166 @ 0x4e109d,
+mouse-right = heading negative); `pitch += scaledY << 16` (case 164 @ 0x4e0fed) clamped ±80°
+with the **up-limit +40° while PRONE** (`MoveOrder & 0x100` @ 0x4e0ff7 — not a turret variant);
+AbsorbPitch (0x10000) weapons route Y into the turret elevation accumulator instead
+(`dword_B79008 @ 0x4e0fe2`). Ported: `libs/world/player_look.{h,cpp}` +
+`NovaSimulation::add_local_player_look` (sim-owned look state; the host feeds raw pixels).
 
 **OpenNova port (Phase 2.5).** The host first-person camera places the `Camera3D` at the player's
 Godot position + 1.0u eye, oriented by the player's authoritative Yaw/Pitch
@@ -3873,6 +3905,48 @@ on-foot chase numbers — distance 3.0, orbit pitch 22.5°, quarter-step anchor 
 re-aimed at the anchor — and the third-person body renders with the §14 aim overlay
 (world-wac-ai-re §14.6, D-INF-11 partial). Still deferred: the collision march, orbit keys, the
 0.125u look-at offset, per-stance `CameraOffset`, vehicle mode-1 (no local mounting), FOV.
+
+**2026-07-13 addendum (the controller-parity pass) — lean, stance keys, input bits, the eye.**
+
+- **The lean-angle producer (entity+0xB0, BAM32), witnessed end to end** — the old audit's
+  "@0x483fe0/@0x46e100" guess was wrong; every writer lives in the body updater:
+  decay `lean −= (lean+8)>>4` EVERY body tick `@ 0x4b5c97` (before the weapon-channel block);
+  the on-foot ramp `@ 0x4b7dbf/@ 0x4b7dd6` — MoveOrder bit 6 (left) −0x3000000/tick, bit 7
+  (right) +0x3000000/tick, gated `!(Flags & 0x100020)`, not prone, and `!(Flags & 2)`; a seated
+  (`+0x168 == 1`) ±0x1400000 variant `@ 0x4b66b5/@ 0x4b66c3`. Ramp-vs-decay equilibrium
+  ≈ ±0x30000000 (67.5°). Consumers: the FP camera roll (`torsoRoll + lean/4` @ 0x437fcd), the
+  §14 aim-overlay lean term, the remote CameraOffset trig (reads −lean `@ 0x4b699f`), and the
+  prone roll anims 41/42.
+- **`g_inputFlags` bit map (the key handlers `Input_HandleActionBinding_0 @ 0x4e0420`)**:
+  0x2 forward / 0x4 back / 0x8 strafe-left / 0x10 strafe-right (cases 152/151/156/157);
+  0x20 look-up (155) / 0x40 look-down; 0x100/0x200 keyboard turn L/R (158/159); 0x1000 jump
+  (153); **0x2000 lean-left (case 148, catalog id 6 Q) / 0x4000 lean-right (case 147, id 7 E)**;
+  0x8000 fire. The packer `@ 0x4df68f-0x4df79a` maps them onto MoveOrder: dir index | 8·moving,
+  jump → 0x20, fire → 0x10, lean → **0x40/0x80**, keyboard-turn → 0x1000/0x2000,
+  look-up/down → 0x4000/0x8000, prone/crouch latches (`dword_B76484/dword_B76480`) → 0x100/0x200.
+- **Stance keys are a 3-key SELECT, not toggles** (catalog ids 9/10/11 = Z prone, X crouch,
+  C stand): cases 169/170/172 `@ 0x4e0d77/@ 0x4e0df3/@ 0x4e0e3e` send **C2S 0x1D** with the
+  action id (0xA9/0xAA/0xAC), refused while the equipped def has ForceCrouch (0x40000) or in a
+  seat-kind-3 mount; the local player's own stance rides the same loopback. The apply
+  (`NapiNPServerMsg_HandleStanceChange @ 0x501c60`) is pure SELECT with mutual exclusion:
+  169 → crouch (0x200, prone cleared), 170 → prone (0x100, crouch cleared), 172 → clear both;
+  local latches `dword_B76484` (prone) / `dword_B76480` (crouch). The function's old header
+  comment mislabeled 170/172 (corrected in the IDB 2026-07-13).
+- **`byte_B76538` identified** → renamed `g_binocularsViewActive`: the per-frame effective
+  binocular-VIEW flag (`Player_UpdatePerFrame @ 0x4de382` copies `g_binocularsToggle`, forced 0
+  when dead / spawn-gated / any move key (`g_inputFlags & 0x1E`) / camera mode 1). It gates the
+  crosshair, the FP-model draw, several HUD overlays, and the scoped mouse reduction.
+- **Ported this pass** (libs/world + NovaSimulation + LocalPlayerHost): the shared
+  `player_body_select` (run promotion + idle_mortar + prone rolls + the 4th-tick cadence for the
+  LOCAL player too), `infantry_lean_tick`, the primary channel's clip-end pending promotion
+  [orig: @ 0x40b77b], the full mouse pipeline (`player_look_apply`), stance SELECT requests with
+  the ForceCrouch refusal, the head-bone eye (host-side skeleton sampling — the structural
+  translation of the @ 0x4b6bb3 bone path), the FP lean roll (lean/4), and weapon.def `run_anim`
+  parsing through the def → database → sim seam. The lean bits ride the wire byte 19 (bits 6/7)
+  both directions. **Unported tails**: the seated lean ramp variant, the Flags 0x20/0x100000
+  ramp gates, the 4-sample terrain eye clamp + the remote trig CameraOffset, torsoRoll(+0x2DC)
+  and pitchBlend(+0x380) camera terms, the zoom-adjust keys (slot+0xC beyond the scope_max_mag
+  seed), analog axes, keyboard look/turn keys, binoculars/NVG inputs.
 
 **§5.40 viewmodel correction (2026-07-08, same train):** the FP viewmodel hardcode named a
 model that does not exist in the JO assets ("AKM_1st"), so the gun never loaded and the arms

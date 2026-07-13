@@ -57,20 +57,26 @@ class FakeWorld:
 		last_weapon_part = part
 		return node
 
-	func set_local_player_input(forward: bool, back: bool, left: bool, right: bool, run: bool,
-			crouch: bool, prone: bool, jump: bool, look_yaw_deg: float, look_pitch_deg: float) -> void:
+	func set_local_player_input(forward: bool, back: bool, left: bool, right: bool,
+			lean_left: bool, lean_right: bool, jump: bool) -> void:
 		input_calls.append({
 			"forward": forward,
 			"back": back,
 			"left": left,
 			"right": right,
-			"run": run,
-			"crouch": crouch,
-			"prone": prone,
+			"lean_left": lean_left,
+			"lean_right": lean_right,
 			"jump": jump,
-			"yaw": look_yaw_deg,
-			"pitch": look_pitch_deg,
 		})
+
+	var look_calls: Array = []
+	func add_local_player_look(dx_px: float, dy_px: float) -> void:
+		look_calls.append(Vector2(dx_px, dy_px))
+
+	var stance_requests: Array = []
+	func request_local_player_stance(stance: int) -> bool:
+		stance_requests.append(stance)
+		return true
 
 	func local_player_position() -> Vector3:
 		return Vector3.ZERO
@@ -141,7 +147,7 @@ func test_shared_host_drives_simultaneous_raw_input_before_world_tick() -> void:
 	add_child_autofree(host)
 	host.setup(world, camera)
 	host.set_input_source(func() -> Dictionary:
-		return {"forward": true, "left": true, "run": true, "jump": true})
+		return {"forward": true, "left": true, "lean_left": true, "jump": true})
 
 	host.before_world_tick(0.016)
 
@@ -149,10 +155,11 @@ func test_shared_host_drives_simultaneous_raw_input_before_world_tick() -> void:
 	var call: Dictionary = world.input_calls[0]
 	assert_true(call["forward"])
 	assert_true(call["left"])
-	assert_true(call["run"])
+	assert_true(call["lean_left"])
 	assert_true(call["jump"])
 	assert_false(call["back"])
 	assert_false(call["right"])
+	assert_false(call["lean_right"])
 	assert_eq(world.avatar_count, 1, "3P avatar is owned by the shared host")
 	assert_eq(world.viewmodel_count, 1, "FP viewmodel is owned by the shared host")
 
@@ -166,17 +173,21 @@ func test_inactive_gameplay_submits_neutral_movement_while_world_keeps_ticking()
 	add_child_autofree(host)
 	host.setup(world, camera)
 	host.set_input_source(func() -> Dictionary:
-		return {"forward": true, "left": true, "run": true, "jump": true})
+		return {"forward": true, "left": true, "lean_left": true, "jump": true})
 
 	host.before_world_tick(0.016, false, false)
 
 	assert_eq(world.input_calls.size(), 1, "the live overlay still submits one input frame")
 	var call: Dictionary = world.input_calls[0]
-	for key in ["forward", "back", "left", "right", "run", "jump"]:
+	for key in ["forward", "back", "left", "right", "lean_left", "lean_right", "jump"]:
 		assert_false(bool(call[key]), "%s is neutral while the armory owns input" % key)
 
 
-func test_shared_host_mouse_yaw_wraps_and_pitch_clamps() -> void:
+func test_mouse_motion_forwards_raw_pixels_to_the_sim_pipeline() -> void:
+	# The host no longer scales or accumulates look: raw pixel deltas go to
+	# NovaSimulation.add_local_player_look (the witnessed integer pipeline —
+	# sens<<11, scoped zoom reduction, the prone 40-degree up-clamp — is SIM
+	# state, covered by the ctest player_look suite).
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
 	var host := LocalPlayerHost.new()
@@ -184,18 +195,34 @@ func test_shared_host_mouse_yaw_wraps_and_pitch_clamps() -> void:
 	add_child_autofree(camera)
 	add_child_autofree(host)
 	host.setup(world, camera)
-	host.set_input_source(func() -> Dictionary:
-		return {})
 
 	var motion := InputEventMouseMotion.new()
-	motion.relative = Vector2(4000.0, -4000.0)
+	motion.relative = Vector2(17.0, -6.0)
 	assert_true(host.handle_input(motion, true))
-	host.before_world_tick(0.016)
+	assert_eq(world.look_calls.size(), 1)
+	assert_eq(world.look_calls[0], Vector2(17.0, -6.0))
+	assert_false(host.handle_input(motion, false), "inactive input is not forwarded")
+	assert_eq(world.look_calls.size(), 1)
 
-	var call: Dictionary = world.input_calls[0]
-	assert_gte(call["yaw"], 0.0)
-	assert_lt(call["yaw"], 360.0)
-	assert_eq(call["pitch"], 80.0)
+
+func test_stance_keys_are_three_key_select_requests() -> void:
+	# The witnessed 3-key SELECT (Z prone, X crouch, C stand — catalog ids 9/10/11):
+	# each key REQUESTS its stance; the sim owns mutual exclusion + the ForceCrouch
+	# refusal. [orig: input cases 170/169/172 -> C2S 0x1D @0x501c60]
+	var world := FakeWorld.new()
+	var camera := Camera3D.new()
+	var host := LocalPlayerHost.new()
+	add_child_autofree(world)
+	add_child_autofree(camera)
+	add_child_autofree(host)
+	host.setup(world, camera)
+
+	for keycode in [KEY_Z, KEY_X, KEY_C]:
+		var key := InputEventKey.new()
+		key.keycode = keycode
+		key.pressed = true
+		assert_true(host.handle_key_input(key, true))
+	assert_eq(world.stance_requests, [2, 1, 0])
 
 
 func test_first_person_routes_the_body_to_the_water_mirror_by_layer() -> void:

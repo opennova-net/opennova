@@ -23,6 +23,7 @@
 #include "wac/nova_wac_program.h"
 #include <world/ai.h>
 #include <world/player_input.h>
+#include <world/player_look.h>
 #include <world/player_spawn.h>
 #include <world/player_view.h>
 #include <world/weapon_fsm.h>
@@ -188,6 +189,20 @@ private:
 	// player then locomotes through the same infantry motor as an NPC. [net-re §5.38]
 	opennova::world::PlayerInput player_input_{};
 	void apply_player_input_pre_tick();
+	// The mouse options + the sim-owned stance latches (the dword_B76484/dword_B76480
+	// equivalents the 0x1D apply writes) — the host sends key EDGES and pixel deltas;
+	// look angles and stance state live here. [orig: profile +0x590/+0x594; the
+	// stance latches @ 0x501d1b/0x501d2d]
+	opennova::world::PlayerLookSettings look_settings_{};
+	int stance_latch_ = 0; // 0 stand, 1 crouch, 2 prone
+	// Godot mouse motion is float; the original consumes whole center-lock pixels.
+	// Carry the sub-pixel remainder between frames so slow motion is not lost.
+	float look_px_accum_x_ = 0.0f;
+	float look_px_accum_y_ = 0.0f;
+	// The mounted def's run-gait class + ForceCrouch flag, mirrored per tick into the
+	// infantry state like wpn_hold_kind [orig: AdmDefs +0xAC 'run_anim'; flags 0x40000].
+	int weapon_run_anim_ = 0;
+	bool weapon_force_crouch_ = false;
 
 	// --- the local player's equipped-weapon action FSM (net-re §5.62) ------------------
 	// The 12-state action queue on the equipped slot, pumped once per logic tick after the
@@ -423,12 +438,28 @@ public:
 	// (host: its own pool-0 player; joiner: L, never present in the wire stream anyway).
 	int get_local_player_wire_handle() const;
 	// Feed one frame of player input: the move keys + look yaw/pitch (mission degrees). Applied
-	// to the player's body input at the top of the next frame. The original drives
-	// entity Yaw@+0x10 / Pitch@+0x14 straight from the mouse [orig: Input_HandleActionBinding_0
-	// @0x4e1330]; the caller clamps pitch to ±80°.
-	void set_player_input(bool p_forward, bool p_back, bool p_left, bool p_right, bool p_run,
-	                      bool p_crouch, bool p_prone, bool p_jump,
-	                      float p_look_yaw_deg, float p_look_pitch_deg);
+	// to the player's body input at the top of the next frame. Movement keys + the lean
+	// keys (Q/E, catalog ids 6/7) + jump; stance and look are SIM-owned state
+	// (request_local_player_stance / add_local_player_look). There is no run key in the
+	// original's catalog — running is the automatic forward-walk promotion in the body
+	// selection [orig: @0x4b729d].
+	void set_player_input(bool p_forward, bool p_back, bool p_left, bool p_right,
+	                      bool p_lean_left, bool p_lean_right, bool p_jump);
+	// One frame of mouse pixels (screen sense: +x right, +y down) applied to the local
+	// player's look through the witnessed integer pipeline: sens = setting << 11,
+	// scoped zoom reduction, (px*sens+0x8000)>>16 per axis; yaw wraps; pitch clamps
+	// +-80 deg with the up-limit +40 deg while prone. [orig: Input_ProcessMouseAxisBindings
+	// @ 0x499680; axis cases 166/164 @ 0x4e109d/@ 0x4e0fed]
+	void add_local_player_look(float p_dx_px, float p_dy_px);
+	// Mouse options: sensitivity [1,511], default 128; Y invert (flipmouse, default off).
+	// [orig: dword_24D207C / dword_24D2078; profile +0x590/+0x594; defaults @ 0x54bbc0]
+	void set_local_player_mouse(int p_sensitivity, bool p_invert_y);
+	// Stance SELECT request (0 stand / 1 crouch / 2 prone) — the 3-key semantics: each
+	// key selects its stance, mutual exclusion at apply, REFUSED while the equipped
+	// weapon has ForceCrouch (0x40000). Returns whether the stance changed. [orig:
+	// input cases 169/170/172 @ 0x4e0d77.. -> C2S 0x1D ->
+	// NapiNPServerMsg_HandleStanceChange @ 0x501c60]
+	bool request_local_player_stance(int p_stance);
 	// The local player's authoritative position in Godot world space (for the follow camera);
 	// Vector3() when no player is spawned.
 	Vector3 get_local_player_position() const;
