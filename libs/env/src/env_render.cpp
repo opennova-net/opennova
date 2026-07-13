@@ -554,18 +554,25 @@ void water_noise_color_pixels(uint32_t *out_pixels, const WaterNoiseTables &tabl
 		animated[i] = tables.sine_lut[index];
 	}
 
-	const auto at = [&animated](int row, int col) -> int {
-		return animated[((row & 0x7F) << 7) + (col & 0x7F)];
-	};
+	// Toroidal 9-tap kernel: 3x the four corners + 4x the cross (center +
+	// 4-neighborhood), >> 5 [orig: @ 0x5c04b7..0x5c0552]. Written with
+	// explicit wrapped row pointers + masked columns: the earlier
+	// lambda-indexed form was miscompiled by the macos-26 AppleClang
+	// autovectorizer (wrap-row taps went wrong for a band of row-0 pixels
+	// while the same bytes summed correctly — caught by env_render_unit's
+	// landmark pins; the math here is unchanged).
 	for (int row = 0; row < kWaterNoiseSize; ++row) {
+		const uint8_t *row_up = animated + (((row - 1) & 0x7F) << 7);
+		const uint8_t *row_mid = animated + (row << 7);
+		const uint8_t *row_down = animated + (((row + 1) & 0x7F) << 7);
 		for (int col = 0; col < kWaterNoiseSize; ++col) {
-			// Toroidal 9-tap kernel: 3x the four corners + 4x the cross
-			// (center + 4-neighborhood), >> 5 [orig: @ 0x5c04b7..0x5c0552].
+			const int col_left = (col - 1) & 0x7F;
+			const int col_right = (col + 1) & 0x7F;
 			const int kernel =
-					(3 * (at(row - 1, col - 1) + at(row - 1, col + 1) +
-					      at(row + 1, col - 1) + at(row + 1, col + 1)) +
-					 4 * (at(row, col) + at(row - 1, col) + at(row + 1, col) +
-					      at(row, col - 1) + at(row, col + 1))) >> 5;
+					(3 * (row_up[col_left] + row_up[col_right] +
+					      row_down[col_left] + row_down[col_right]) +
+					 4 * (row_mid[col] + row_up[col] + row_down[col] +
+					      row_mid[col_left] + row_mid[col_right])) >> 5;
 			int intensity = 128 - std::abs(kernel - 128);
 			if (intensity < 0) {
 				intensity = 0;
