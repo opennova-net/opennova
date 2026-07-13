@@ -432,6 +432,7 @@ the model tier's generator shares the family `[orig: Foliage_GenerateModelTileIn
 | D-FNT-1 | Offset +4 is the design-width scale reference, not a version; our reader rejected `!= 800` | A | **FIXED** (no equality gate; non-800 parses, `fnt_roundtrip`) | PAR (fonts) |
 | D-FNT-2 | The per-font design scale `800/designWidth` was not retained | A | **FIXED** (`design_width` carried; `fnt_design_scale`) | PAR (fonts) |
 | D-FNT-3 | Offset +12 (`hdr3`) named `shadow_offset` but only STORED by the loader — the shadow semantics are unconfirmed | B | NEEDS-RE | PAR (fonts) |
+| D-FNT-4 | cp1252 specials (0x80–0x9F): `to_font_file` keys glyphs at raw bytes while the display decode maps to Unicode, so the FontFile misses and Godot's default `allow_system_fallback` silently draws a SYSTEM font glyph where retail draws the font's own slot (glyph = byte−32) | A | **OPEN** — pinned as-is (`strings_encoding_test`); fix = key glyphs at decoded codepoints or disable fallback (tracked decision) | STR-2 audit (2026-07-12) |
 
 ### Boot-required resources — [required-resources.md](required-resources.md) (D-BOOT catalog; R8/ENG-6)
 
@@ -591,12 +592,12 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Terrain | 0 | 0 | 0 | 0 | 4 |
 | Tiles | 0 | 0 | 0 | 0 | 1 |
 | Foliage | 3 | 0 | 0 | 3 | 3 |
-| Fonts | 0 | 1 | 0 | 1 | 2 |
+| Fonts | 1 | 1 | 0 | 2 | 2 |
 | Boot-required resources | 0 | 0 | 0 | 0 | 1 |
 | Render — materials/state | 0 | 0 | 1 | 1 | 1 |
 | Render — draw order | 1 | 0 | 1 | 2 | 3 |
 | Render — lighting | 4 | 0 | 2 | 6 | 0 |
-| **Total** | **45** | **13** | **31** | **89** | 31 |
+| **Total** | **46** | **13** | **31** | **90** | 31 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-FOLIAGE-6, D-NET-136, D-NET-64.
 
@@ -676,7 +677,7 @@ unknowns.
 | System | Slice | Result |
 |---|---|---|
 | VFS / PFF | PAR-R7 | full record — [vfs/vfs-pff-mount-re.md](vfs/vfs-pff-mount-re.md) (D-VFS-1..9) |
-| Fonts | PAR-R4 | full record — [fonts/fnt-re.md](fonts/fnt-re.md) (D-FNT-1..3) |
+| Fonts | PAR-R4 | full record — [fonts/fnt-re.md](fonts/fnt-re.md) (D-FNT-1..4) |
 | Foliage | PAR-R2 | full record — [foliage/foliage-re.md](foliage/foliage-re.md), placement MATCHING vs retail `@0x600197` |
 | Tiles | PAR-R3 | full record — [tiles/til-re.md](tiles/til-re.md), overlay/atlas/flip-rotate MATCHING vs retail `@0x60df0d`/`@0x604700` |
 | Credits (CBIN) | PAR-R5 | partial — [credits/cbin-re.md](credits/cbin-re.md); codec (magic + header + ROL32/XOR cipher `@0x75e348`) MATCHING vs `libs/cbin`, witnessed read-only via raw disasm; markup + read-path NEEDS-RE |
