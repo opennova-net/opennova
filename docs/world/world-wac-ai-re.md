@@ -174,11 +174,33 @@ Everything below was decompiled and read this session (pseudocode dumps:
    **fall damage** when `vel_z ≤ −1057·dword_C6EAE4`: `health −= (excess)>>4`;
    >61440 ⇒ set swim (flag 0x2000, states 47/31 hmm 47=tread/31 per anim availability).
    Water-edge climb-out: probe ahead 81920·dir for pool-0 entity with z-overlap → state 32.
-4. Every 8 ticks: **slope slide/lean** — 4 probes `sub_4142C0(entity, ±dir·22528>>22 …, 0x4000,
-   0x20000)` ahead/behind (pitch slope ×2^14) and left/right at quarter offset (roll slope ×2^16),
-   clamp ±656175520; if |slope| > 572662272: **slide** `vel ∓= dir·2^11>>22`; body-pitch
-   `entity[36]` and roll `entity[6]` chase slopes at eighth-step (decay 1/16 when N/A);
-   gate: `def+84 & 0x200 || stateflag & 2 || dead`.
+4. Every 8 ticks: **the slope pass** — the CONFORM SELECTOR first [orig: `@0x4ba10f`]:
+   `def+84 & 0x200 || g_animStateFlagsTable[state] & 2 || (Flags&2 && !(Flags & 0x10A000))`
+   (the flag-2 states = the low-to-ground family: prone crawls 19–26 `0x603`, rolls 41/42
+   `0x285`, prone idle 48 `0x202`, draggers 137–139; the dead leg excludes swim/parachute).
+   Non-conforming bodies take the DECAY [orig: `@0x4ba133`]: `bodyPitch(+0x90)` and
+   `Roll(+0x18)` ease to level 1/16-step — a live standing/crouched soldier neither
+   slope-leans nor slope-slides (the slide impulse only exists inside the conform branch;
+   dead+airborne diverts to the corpse tumble `@0x4ba0b2` instead). Conforming: 4 probes
+   `sub_4142C0(entity, ±dir·22528>>22 …, 0x4000, 0x20000)` ahead/behind (pitch slope ×2^14)
+   and left/right at quarter offset (roll slope ×2^16), clamp ±656175520; if |slope| >
+   572662272: **slide** `vel ∓= dir·2^11>>22`; then `bodyPitch(+0x90)` and `Roll(+0x18)`
+   chase the slopes at eighth-step [orig: `@0x4ba320`]; a dead NPC also aims along the
+   slope (`+0x2D0 = pitchSlope`, `+0x2EC = targetHeading(+0x1A8)`, byte `+0x360 = 0`
+   [orig: `@0x4ba301-0x4ba319`]). The **org2 player leg** (`Entity_UpdateInfantryPlayerBody`) carries the
+   SAME selector every tick [orig: `@0x4b6d95`] with the decay every tick [orig: `@0x4b6dbd`],
+   but probes/chases only every 2nd tick (hold between) [orig: `test tick,1 @0x4b6de4`] and
+   differs in kind: slopes are TRUE angles `ftol(atan2(dh, separation)·2^32/2π)`
+   (separations 45056 fore-aft / 11264 lateral [orig: `dbl_7C9BE8/dbl_7C9BE0·dbl_7C19D8
+   @0x4b6e68`]), the slide threshold is 60° alive / 48° dead [orig: `@0x4b6ee5`] with the
+   impulse `dir·2^9>>22` [orig: `@0x4b6f01`], the chase is QUARTER-step [orig: `@0x4b6fc1`]
+   with the Roll write skipped while a combat roll 41/42 plays [orig: `@0x4b6fd7`], and a
+   corpse additionally tips its LOOK pitch `Pitch(+0x14)` eighth-step [orig: `@0x4b6fa9`].
+   This selector is what keeps the standing FP camera LEVEL on hillsides: Roll decays,
+   `torsoRoll(+0x2DC)` chases Roll (§ camera), `fp_roll = torsoRoll + lean/4 @0x437fe6`
+   stays 0 (D-INF-19 fix log). Port: `AiSystem::infantry_slope_pass`
+   (`libs/world/src/infantry.cpp`), pinned by the `test_slope_*` cases in
+   `tests/world/infantry_test.cpp`.
 5. Inter-entity separation + 8-direction avoidance raycasts + swim details + combat maneuver modes
    (1/2/5/7/8/12) — **RE'd to address level, detail pass pending** (dump lines ~1080–1290, 3000–4550).
 
@@ -383,6 +405,25 @@ can see it (`Physics_RaycastTerrainAndSectors` watch-check, retry 62); respawn r
     `@0x4b6c1c-0x4b6c97`], and remote players take the capsule-height trig path
     [orig: `@0x4b6984`]. The camera's `torsoRoll(+0x2DC)` and `2·pitchBlend(+0x380)`
     terms are also unported (their producers are open). `local_player_host.gd`.
+  - **D-INF-19** the slope pass's conform selector dropped by the port — FIXED 2026-07-13.
+    The dump-based port applied the slope lean+slide to EVERY live body and wrote the look
+    pitch (`+0x14`) instead of `bodyPitch(+0x90)`, so a standing local player's Roll chased
+    the side-slope, `torsoRoll` chased Roll, and the FP camera (`torsoRoll + lean/4
+    @0x437fe6`) leaned on hillsides with no lean input (the reported bug). The original
+    gates BOTH updaters' slope passes on the three-way selector (§3.5 item 4 [orig:
+    `@0x4ba10f` / `@0x4b6d95`]) and decays `bodyPitch/Roll` to level otherwise; the org2
+    player leg additionally differs in kind (atan2 slopes, quarter-step, 512 slide,
+    60°/48° thresholds, 2-tick cadence, 41/42 roll-write skip, corpse-only `Pitch`
+    tip). Ported as `AiSystem::infantry_slope_pass` with both legs; `AiEntity.body_pitch`
+    (+0x90) added and fed to the §14 overlay body-pitch term; `AiEntity.def_attrib`
+    carries the `def+84 & 0x200` selector leg (host wiring deferred — JO infantry defs
+    leave it clear). Residuals: the dead+airborne corpse TUMBLE branch [orig: `@0x4ba0b2` /
+    `@0x4b6ccb`] unported (the pass holds instead); the dead leg's `Flags & 0x10A000`
+    swim/parachute exclusion unmodeled (rides D-INF-17's flag legs); org1 cadence uses the
+    port's entity-salted `key` (net_id-staggered) where the original uses the global tick.
+    Guarded by `test_slope_standing_camera_stays_level` / `test_slope_prone_body_conforms_org2`
+    / `test_slope_pass_org1_selector_and_chase` + the motor-level standing case in
+    `tests/world/infantry_test.cpp`.
   Everything else is structurally translated with per-mechanic dump citations and byte-pinned
   constants, unit-tested in tests/world/infantry_test.cpp and end-to-end in promote_test.
 - **Root-motion data path** (`AnimMap_UpdateEntity @ 0x40b5f0` → engine `InfantryRootMotion`):
