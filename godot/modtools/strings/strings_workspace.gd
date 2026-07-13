@@ -266,8 +266,16 @@ func get_preview_font_names() -> PackedStringArray:
 	var names := PackedStringArray()
 	for path in root.list_files(".fnt"):
 		var file := String(path).get_file()
-		if not names.has(file):
-			names.append(file)
+		if names.has(file):
+			continue
+		# Sniff the header 4CC (single-sourced from libs/fnt) so a stray
+		# non-font .fnt never reaches the parser — which error-logs — from
+		# plain picker enumeration; the picker then eager-previews only fonts
+		# that can actually load.
+		var bytes := root.read_file(file)
+		if bytes.size() < 4 or bytes.decode_u32(0) != NovaFntResource.MAGIC:
+			continue
+		names.append(file)
 	names.sort()
 	return names
 

@@ -40,6 +40,7 @@ void NovaFntResource::_bind_methods() {
 	BIND_CONSTANT(TEXTURE_HEIGHT);
 	BIND_CONSTANT(MAX_PAGES);
 	BIND_CONSTANT(PACK_PAD);
+	BIND_CONSTANT(MAGIC);
 }
 
 PackedInt32Array NovaFntResource::pack_shelf(const PackedInt32Array &p_sizes) {
