@@ -46,8 +46,8 @@ decision (ADR / RE-record entry) saying why not:
 | Object | ✓ (v8/v9; LW v10 on branch) | ✓ (.3dp + .3di export) | partial (isolated preview; env-lit but no world context, no LOD-by-distance) | — | E |
 | Mission | ✓ | ✓ | ✓ (PIE runs the real runtime) | ✓ | data semantics (heading, ANIMNUM) |
 | Credits | ✓ | ✓ | ✓ (`NovaCreditsPlayer` hosted in the editor; play/pause/scrub transport, CRE-1) | — | G (F3 wiring = CRE-2) |
-| Fonts | ✓ | ✓ | partial (glyph canvas is editor-drawn; fine for painting, no engine text sample) | — | E |
-| Strings | ✓ | ✓ | partial (no in-context render) | — | E (minor by format) |
+| Fonts | ✓ | ✓ | ✓ (type-a-line sample through the game's draw path beside the glyph paint canvas, FNT-1 2026-07-12) | — | G (F3 wiring = FNT-3) |
+| Strings | ✓ | ✓ | ✓ (selected entry rendered through the engine path with a font picker, STR-1 2026-07-12; encoding pinned by STR-2, D-FNT-4 minted) | — | G (F3 wiring = STR-3) |
 | Sound | ✓ | ✓ (`write_lwf`) | ✓ (audition rides the runtime set→member→wav path) | — | G |
 | Music | ✓ (headerless form excluded by pinned decision, D-SCR-1/2) | ✓ | ✓ (live director runs the VM) | — | G + usability (see MUS-D) |
 | Menus | ✓ (.mnu/.mns) | ✓ | ✓ (canvas hosts live `NovaMnuMenu`, edit_mode on) | partial (no flow run; actions authored blind) | G |
