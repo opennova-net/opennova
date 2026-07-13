@@ -85,30 +85,10 @@ inline float far_alpha_ref_for_distance(float distance) {
 
 NovaFoliageDispatcher::NovaFoliageDispatcher() = default;
 
-NovaFoliageDispatcher::~NovaFoliageDispatcher() {
-	// Free the renderer nodes while the slot/per-node materials are still
-	// alive: base ~Node frees remaining children only AFTER this class's
-	// members (the material Refs) are destroyed, and the render server then
-	// tears down instances whose override material is already gone
-	// ("Parameter \"material\" is null" spam at exit).
-	for (MultiMeshInstance3D *node : model_draw_nodes_) {
-		if (node != nullptr) {
-			memdelete(node);
-		}
-	}
-	model_draw_nodes_.clear();
-	model_draw_node_states_.clear();
-	model_node_by_key_.clear();
-	for (auto &slot_cells : far_cells_) {
-		for (auto &kv : slot_cells) {
-			if (kv.second.node != nullptr) {
-				memdelete(kv.second.node);
-				kv.second.node = nullptr;
-			}
-		}
-		slot_cells.clear();
-	}
-}
+// No child cleanup here: Node deletes its children during PREDELETE, BEFORE
+// this destructor runs — freeing model_draw_nodes_/far cell nodes from here
+// double-frees them (the CI godot-tests crash at foliage_model_draw_state).
+NovaFoliageDispatcher::~NovaFoliageDispatcher() = default;
 
 void NovaFoliageDispatcher::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_foliage_defs", "defs"), &NovaFoliageDispatcher::set_foliage_defs);
