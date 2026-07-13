@@ -8,6 +8,8 @@ extends GutTest
 
 const CHARMODEL := "res://../fixtures/threedi/3di3/CharModel.3di"
 const SHED := "res://../fixtures/threedi/3di3/Shed.3di"
+const VIEWMODEL_RIG_TMP := "res://.godot/viewmodel_rig_test"
+const MissionObjectPlacerScript = preload("res://engine/mission/mission_object_placer.gd")
 const NovaObjectModelScript = preload("res://engine/object/nova_object_model.gd")
 
 
@@ -15,6 +17,26 @@ func _open(path: String) -> NovaObjectData:
 	var data := NovaObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(path)), OK, "fixture should open: %s" % path)
 	return data
+
+
+func _stage_viewmodel_rig_file(name: String, source: String) -> void:
+	var out := FileAccess.open(
+		ProjectSettings.globalize_path(VIEWMODEL_RIG_TMP.path_join(name)), FileAccess.WRITE)
+	assert_not_null(out, "staging %s" % name)
+	if out != null:
+		out.store_buffer(FileAccess.get_file_as_bytes(source))
+		out.close()
+
+
+func _clear_viewmodel_rig_fixture() -> void:
+	var path := ProjectSettings.globalize_path(VIEWMODEL_RIG_TMP)
+	if not DirAccess.dir_exists_absolute(path):
+		return
+	var dir := DirAccess.open(path)
+	if dir != null:
+		for name in dir.get_files():
+			DirAccess.remove_absolute(path.path_join(name))
+	DirAccess.remove_absolute(path)
 
 
 func test_skinned_model_emits_bone_arrays() -> void:
@@ -86,6 +108,50 @@ func test_rigid_fake_skin_when_skeletal() -> void:
 		assert_almost_eq(float(weights[1]), 0.0, 0.001, "secondary weight 0")
 		var b0 := int(bones[0])
 		assert_true(b0 >= 0 and b0 < 64, "fake-skin bone index within skeleton range")
+
+
+func test_viewmodel_graphic_bones_are_covered_when_adm_model_is_shorter() -> void:
+	# M14 regression shape: its M21B_1st graphic and reload BAD carry 42 indexed
+	# parts/bones, while the M21_1st model sharing the ADM basename has only 40.
+	# Reproduce that mismatch with committed fixtures: a 19-part graphic whose skin
+	# reaches bone 18 and a 1-part ADM-named decoy model. The visible gun's model
+	# table must size the shared gun+arms rig, or late parts clamp to the last bone.
+	_clear_viewmodel_rig_fixture()
+	var tmp := ProjectSettings.globalize_path(VIEWMODEL_RIG_TMP)
+	assert_eq(DirAccess.make_dir_recursive_absolute(tmp), OK)
+	_stage_viewmodel_rig_file("CharModel.3di", CHARMODEL)
+	_stage_viewmodel_rig_file("soldier.3di", SHED)
+	_stage_viewmodel_rig_file("soldier.adm", "res://../fixtures/anim/soldier.adm")
+	_stage_viewmodel_rig_file("idle.bad", "res://../fixtures/anim/idle.bad")
+	_stage_viewmodel_rig_file("walk.bad", "res://../fixtures/anim/walk.bad")
+
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(tmp), OK)
+	var placer := MissionObjectPlacerScript.new(root, null)
+	var parent := Node3D.new()
+	add_child_autofree(parent)
+	var model = placer.build_model_from_graphic("CharModel", "soldier", parent, "anim_idle", null)
+	assert_not_null(model, "the synthetic viewmodel resolves")
+	if model != null:
+		var bone_count: int = model.get_skeletal_anim().get_bone_count()
+		var max_weighted_bone := -1
+		for entry in model.get_object_data().build_lod_submeshes(0, true, bone_count):
+			var mesh := (entry as Dictionary).get("mesh") as ArrayMesh
+			if mesh == null:
+				continue
+			var arrays := mesh.surface_get_arrays(0)
+			var bones = arrays[Mesh.ARRAY_BONES]
+			var weights = arrays[Mesh.ARRAY_WEIGHTS]
+			if not (bones is PackedInt32Array and weights is PackedFloat32Array):
+				continue
+			for i in range(mini(bones.size(), weights.size())):
+				if float(weights[i]) > 0.0:
+					max_weighted_bone = maxi(max_weighted_bone, int(bones[i]))
+		assert_eq(bone_count, 19, "the visible graphic's model table sizes the rig")
+		assert_eq(max_weighted_bone, 18, "the fixture exercises its final model bone")
+		assert_lt(max_weighted_bone, bone_count,
+			"every weighted gun part has a matching animation bone")
+	_clear_viewmodel_rig_fixture()
 
 
 func test_skeletal_anim_resource_basics() -> void:

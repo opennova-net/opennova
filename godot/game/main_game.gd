@@ -356,7 +356,19 @@ func _mount_runtime_root(dir: String) -> NovaResourceRoot:
 	if root.mount_runtime(dir, expansion, NovaLaunchFlags.loose_override_enabled()) != OK:
 		push_warning("MainGame: %s" % root.get_last_error())
 		return null
+	_report_missing_boot_resources(root)
 	return root
+
+
+# Honest missing-resource errors over the witnessed boot manifest (ENG-6,
+# docs/required-resources.md): name each missing fatal-set file with retail's
+# witnessed failure behavior instead of dead-ending silently later. Reported,
+# not enforced — this shell keeps running so a partial dir stays inspectable
+# (the picker flow), where retail shows a MessageBox and exits.
+func _report_missing_boot_resources(root: NovaResourceRoot) -> void:
+	for name in root.list_missing_boot_resources():
+		push_error("MainGame: boot-required resource missing: %s — retail: %s"
+				% [name, root.boot_resource_failure_text(name)])
 
 
 func _on_dir_canceled() -> void:

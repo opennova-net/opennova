@@ -838,8 +838,11 @@ func build_local_player_viewmodel() -> Node3D:
 	var gun_name := def.gfx1 if def != null and not def.gfx1.is_empty() else "ak47_1st"
 	var arms_name := def.gfx1a if def != null and not def.gfx1a.is_empty() else "armsG"
 	var adm_name := def.animadm if def != null and not def.animadm.is_empty() else "ak47_1st"
-	var arms = _placer.build_model_from_graphic(arms_name, adm_name, container, "anim_wpn_idle", _env)  # _placer untyped -> no :=
-	var gun = _placer.build_model_from_graphic(gun_name, adm_name, container, "anim_wpn_idle", _env)
+	# Both submits reuse the equipped GUN's model table, while `adm_name` supplies the clips.
+	# Some valid retail sets differ (M21B_1st: 42 parts, M21_1st: 40); sizing from the ADM
+	# basename truncates late animated parts such as the M14 magazine. [orig: @0x4ded60]
+	var arms = _placer.build_model_from_graphic(arms_name, adm_name, container, "anim_wpn_idle", _env, gun_name)  # _placer untyped -> no :=
+	var gun = _placer.build_model_from_graphic(gun_name, adm_name, container, "anim_wpn_idle", _env, gun_name)
 	if arms == null:
 		push_warning("GameWorld: FP arms model '%s' failed to load from the resource root" % arms_name)
 	if gun == null:

@@ -1,5 +1,6 @@
 add_library(opennova_gameprofile STATIC
     src/gameprofile.c
+    src/required_resources.c
 )
 
 target_include_directories(opennova_gameprofile

@@ -26,16 +26,19 @@ of the game (ADR 0015).
 | Field | Value |
 |---|---|
 | State | **Wave 2 OPEN** — Wave-1 trunk #204 merged 2026-07-05 as `50fce423`; the Wave-2 boundary slice (this row's train) executed the STD-3 enforce flip + GOV-4 sync |
-| Current wave | 2 — portability + standards adoption (WIP cap: two trains). Contents: ENG-2/3/4, ENG-5 sweep #1, ENG-6 manifest; LIBS-2/3; STD-2 (STD-3 flip done at the boundary); ONED-W1, ONED-TST, ONED-RSP, ONED-MUS-D; REN-0..2 (second train, opened 2026-07-05 — the REN trunk; its tail rides into Wave 3 under the stop-anywhere property). First train: ENG-2 env port — merged #206 |
+| Current wave | 2 — portability + standards adoption (WIP cap: two trains). Contents: ENG-2/3/4 (**all done** — #206, #209, Wave-2 trunk 2), ENG-5 sweep #1 (runs at the boundary), ENG-6 manifest (**done** — Wave-2 trunk 2); LIBS-2/3 (**done** — Wave-2 trunk 2, ADR 0024); STD-2 (STD-3 flip done at the boundary); ONED-W1, ONED-TST, ONED-RSP, ONED-MUS-D; REN-0..2 (second train, opened 2026-07-05 — the REN trunk; the full REN track ran through REN-7 and merged #207). Remaining to close the wave: STD-2 seeds, the ONED items (RSP + MUS-D gate the exit), ENG-5 sweep + GOV-4 at the boundary |
 | Boundary gates (Wave 1→2) | full ctest: 246/248 green; the two reds are pre-existing, tracked, and not Wave-1 regressions — `npruntime_golden_gameplay` (TODO.md, D-NET-159 wire adjudication, asset-gated so CI never sees it) and `opennova_python_pytest` (diagnosed at this boundary, TODO.md: the two DCC-parity tests build a zero-write request the jobs validation rejects, then their in-parent `import bpy` poisons the 13 spawn-context worker tests — all 13 pass in isolation). FULL GUT attested in the boundary PR |
 | Freeze | ON for non-PAR/non-REN work: new reimplementation features wait for their foundation phase (ONED-W2 releases at Wave 3); IDA research/grills are exempt and continue. **PAR burn-down slices are exempt** (maintainer 2026-07-05, [ADR 0022](adr/0022-divergence-burn-down.md)) **and REN slices are exempt on the same model** (maintainer 2026-07-05, [ADR 0023](adr/0023-render-visual-parity.md) — ports are ledger closures landed libs-first). |
 | Detail docs | ONED track: [docs/oned/workspace-maturity-program.md](oned/workspace-maturity-program.md) (all other tracks live here) |
-| Decision ADRs | [0015](adr/0015-two-products-serve-mode.md) products/serve-mode, [0016](adr/0016-engine-editor-boundary.md) engine/editor boundary, [0017](adr/0017-typed-records-named-constants.md) records/constants, [0018](adr/0018-public-api-testability.md) testability, [0022](adr/0022-divergence-burn-down.md) divergence burn-down; boundary ADRs (npwire, world seam, lib topology, responsive shell) minted in their tracks at decision time |
+| Decision ADRs | [0015](adr/0015-two-products-serve-mode.md) products/serve-mode, [0016](adr/0016-engine-editor-boundary.md) engine/editor boundary, [0017](adr/0017-typed-records-named-constants.md) records/constants, [0018](adr/0018-public-api-testability.md) testability, [0022](adr/0022-divergence-burn-down.md) divergence burn-down, [0024](adr/0024-lib-family-topology.md) lib family topology + consumption models; boundary ADRs (npwire, world seam, responsive shell) minted in their tracks at decision time |
 
 Landed slices (hash per slice, newest first):
 
 | Slice | Commit | Note |
 |---|---|---|
+| ENG-6 manifest leg (Wave-2 trunk 2) | (this trunk) | `libs/gameprofile/required_resources.{h,c}` instantiates the R8 record — ~75 rows phase-major in the witnessed load order, severity classes (FATAL/DIALOG/REQUIRED/SOFT/OPTIONAL), the boot-archive-table any-of flag, per-row witnessed failure text + `[orig]` citation; Model B only (no C-ABI change); `required_resources` ctest pins the eight-row fatal set + completeness. `NovaResourceRoot.list_missing_boot_resources()`/`boot_resource_failure_text()` probe the individually-fatal file rows (the archive trio stays `mount_runtime`'s gate), and `main_game.gd` raises honest missing-resource errors at mount (reported-not-enforced — the picker flow keeps a partial dir inspectable where retail MessageBox-exits). ONED conveniences over the same table stay ONED-REQ (Wave 3) |
+| ENG-4 fonts + OED_UPDATE_* (Wave-2 trunk 2) | (this trunk) | **both conformance rows closed**: `fnt_pack_shelf` ports the rasterizer's deterministic shelf packer into `libs/fnt` beside the format facts (authoring policy, not witnessed engine behavior — noted in-header), bound as `NovaFntResource.pack_shelf` + six format class constants; `fnt_rasterizer.gd` keeps only TextServer rasterization + blits (constants now aliases, `_pack()` deleted); `fnt_pack` ctest hand-walks the reference layout + the 16-page boundary, GUT `fnt_resource` gains the binding contract pin. `OED_UPDATE_*`: the C++ chain was already single-sourced (libs/oed → `NovaObjectData::UPDATE_*` → bound constants) — the three GDScript re-declarations became aliases (engine model + workspace) and deliberate literal pins (the test suite, + a new binding-drift test), the ENG-3 contract-pin pattern |
+| LIBS-2 + LIBS-3 family topology (Wave-2 trunk 2) | (this trunk) | ADR 0024: one-lib-per-format affirmed; `opennova_terrain_family` + `opennova_audio_family` minted as pure INTERFACE link groups (`libs/families.cmake`, included by both CMake roots) and adopted by the GDExtension in place of the twelve member lines — link conveniences, never merges, never an edge-laundering path (`link_graph_check` 330 targets / 0 forbidden). The ADR records the ADR-0023 renderer-fold reversal where the clause originated, and names the two consumption models; LIBS-3's operational text (Model A flat C ABI / Model B C++ static link, mixing rules, the annotate+baseline-bump protocol) lands in libs/CLAUDE.md |
 | Gates repair after the #230 merge | (this slice) | master merged #230 with two red STD-1 gates (the #229 pattern): the merge's post-review particle tests raised `test_private_pokes` 1370 → **1384** (+5 `game_world_test.gd`, +6 `particle_authoring_test.gd`, +2 `effect_world_test.gd`, +1 `particle_editor_workstation_test.gd` — logged here per the ratchet policy; baseline bumped via `--write-baseline`, MAINTAINER RATIFIES ON MERGE), and the review round edited ledger tables without regenerating the count-to-zero scoreboard (`ledger_check.py --write` re-run). Every open PR is red on both gates until this lands. |
 | Gates repair after the #226 merge | (this slice) | master merged #226 with two red STD-1 gates: the ledger's new D-ANIM-1 row had no scoreboard domain mapping (`ledger_check.py` DOMAIN_ORDER gains `ANIM` → World / AI + events; scoreboard regenerated) and `test_private_pokes` rose 1367 → **1370** (the three pokes are #226's own `weapon_round_probe.gd` `_host._vm_parts`/`_host._viewmodel` reads — probe diagnostics, logged here per the ratchet policy; baseline bumped via `--write-baseline`, MAINTAINER RATIFIES ON MERGE). Every open PR was red on both gates until this lands. |
 | ENG-3 terrain query APIs (PR #209 train: A, C, B0, B1a, B1b) | 9a7c05b3 / 25a7cc01 / 09fd1ca2 / 54c3f269 / (B1b this slice) | one slice per boundary-conformance row: **A** scalar height sampler unified on the C++ live core (`NovaTerrainData.sample_height_world_live`, GDScript bilinear deleted, parity test flipped to pin the single path); **C** sector/atlas constants single-sourced (`COORDS_ATLAS_SIZE`/`COORDS_SECTOR_ID_MAX` minted, four bound class constants + `world_to_sector_cell`, all GDScript re-declarations now aliases, contract pin); **B0** the raycast witnessed (terrain-re.md §Runtime terrain queries: the ~1-unit major-axis march + point-coarse/bilinear-confirm, the ÷4-step ≤9/≤9/8-bisection refine, the column-shortcut crossing rule; headline IDB repair — `null_stub @ 0x6067b0` was the canonical bilinear height sampler mistyped `void()`, retyped + renamed `Terrain_SampleHeightBilinear`, ~40 callers un-elided; 14 renames saved); **B1a** the core ported to `libs/terrain_query/terrain_raycast` (16.16 structural translation behind a point+bilinear sampler seam, ~60-check ctest, four witness claims sharpened at the port against live decompiles); **B1b** `NovaTerrainData.raycast_terrain(from, to)` over live-image/baked-CPT substrates, mission picking + celestial glare adopted, the GDScript march/slab/bisection trio deleted, D-TERRAIN-4 minted (editor-guard residuals, class C candidate). Checklist rows 1/2/3 closed; ENG-4's fonts + `OED_UPDATE_*` row is the remainder |
@@ -160,18 +163,20 @@ rule. The real issues are one heavy edge and two families.
   `scripts/lint/link_graph_check.py` (transitive-closure forbidden-edge
   check, soft mode in CI) makes the cut permanent. Ran AFTER NET-2 so
   link topology churned once.
-- **LIBS-2** (S+M) family topology ADR + execution: affirm
-  one-lib-per-format; the terrain and audio families become CMake
-  link-interface groups (`opennova_terrain_family`, `opennova_audio_family`)
-  rather than physical merges. The original "fold `libs/renderer`" clause
-  (4 files that existed to dodge one oed header) is **reversed** (maintainer
-  2026-07-05, [ADR 0023](adr/0023-render-visual-parity.md)): REN grows
-  `libs/renderer` into the witnessed render library instead.
-- **LIBS-3** (S) document the two consumption models in libs/CLAUDE.md:
-  Model A = the flat C ABI (`opennova_shared`, importer/Python/DCC),
-  Model B = C++ static link (engine, apps, net). They already exist de
-  facto; naming them makes the npwire ADR's "net stays out of the C ABI"
-  clause legible.
+- **LIBS-2** (S+M) — **DONE (Wave-2 trunk 2, [ADR 0024](adr/0024-lib-family-topology.md))** —
+  family topology ADR + execution: one-lib-per-format affirmed; the terrain
+  and audio families are CMake link-interface groups
+  (`opennova_terrain_family`, `opennova_audio_family`; `libs/families.cmake`
+  included by both roots, adopted by the GDExtension) rather than physical
+  merges. The original "fold `libs/renderer`" clause (4 files that existed
+  to dodge one oed header) is **reversed** (maintainer 2026-07-05,
+  [ADR 0023](adr/0023-render-visual-parity.md)): REN grew `libs/renderer`
+  into the witnessed render library instead — recorded in ADR 0024.
+- **LIBS-3** (S) — **DONE (Wave-2 trunk 2)** — the two consumption models
+  documented in libs/CLAUDE.md and named in ADR 0024: Model A = the flat C
+  ABI (`opennova_shared`, importer/Python/DCC, `abi_export_identity`-pinned),
+  Model B = C++ static link (engine, apps, tests, net). Naming them makes
+  the npwire ADR's "net stays out of the C ABI" clause structural.
 
 ### ENG — engine portability, boundary APIs, required resources
 
@@ -198,11 +203,15 @@ TOD/celestial/fog/weather math that belongs in `libs/env`.
   (the GDScript ray-march + slab test deleted; mission picking gated by the
   mission suites + a manual picking pass); sector/atlas constants and
   transforms exposed once and consumed everywhere.
-- **ENG-4** (S/M) FNT packing port (shelf packer + format facts into
-  `libs/fnt`; the Godot TextServer rasterization stays host-side) and
-  object-flag single-sourcing — the `MATERIAL_FLAG_*` leg is **subsumed by
-  REN-2** (which single-sources the engine-side flag spaces during the
-  materials grill); `OED_UPDATE_*` and the Python/DCC mirrors stay here.
+- **ENG-4** (S/M) — **DONE (Wave-2 trunk 2)** — FNT packing port (shelf
+  packer + format facts into `libs/fnt`; the Godot TextServer rasterization
+  stays host-side) and object-flag single-sourcing — the `MATERIAL_FLAG_*`
+  leg was **subsumed by REN-2**; `OED_UPDATE_*` closed here (GDScript
+  aliases over the bound `NovaObjectData.UPDATE_*` + test contract pins).
+  The DCC-side `THREEDI_IR_MATERIAL_FLAG_*` ctypes mirror is FFI-inherent
+  (every FFI struct mirrors its C header; the roundtrip pytest suite is its
+  guard), not an eliminable duplication — recorded here so ENG-5 sweeps
+  don't re-flag it.
 - **ENG-5** (S per wave) **the generalized bypass sweep** — a standing
   audit instrument, run at every wave boundary: per-domain review of
   modtools/engine GDScript for math and constants that exist in `libs/`,
@@ -216,12 +225,14 @@ TOD/celestial/fog/weather math that belongs in `libs/env`.
   main.mnu set, hudpos.def, default world files, items/weapon defs,
   controls, ...). **R8 landed 2026-07-05**:
   [docs/required-resources.md](required-resources.md) (+ engine-primer
-  cross-ref; D-BOOT catalog minted, D-BOOT-1 ledgered). The Wave-2 leg is
-  the engine-side manifest table (in `libs/`, near gameprofile) that BOTH
-  the game (boot validation, honest missing-resource errors) and ONED
-  (diagnostics, the future "new game" scaffold) consume. This defines
-  "what a person starts with to make a new game"; the Game workspace
-  itself stays out of scope.
+  cross-ref; D-BOOT catalog minted, D-BOOT-1 ledgered). **The Wave-2 leg is
+  DONE (Wave-2 trunk 2)**: the engine-side manifest table lives in
+  `libs/gameprofile/required_resources.{h,c}` (Model B only), the game's
+  boot validation consumes it (`NovaResourceRoot.list_missing_boot_resources`
+  + honest errors in `main_game.gd`), and ONED's diagnostics/new-game
+  scaffold conveniences over the same table are ONED-REQ (Wave 3). This
+  defines "what a person starts with to make a new game"; the Game
+  workspace itself stays out of scope.
 
 #### Boundary conformance checklist (ENG-5 instrument; seeded 2026-07-04)
 
@@ -238,8 +249,8 @@ and are tracked below with their recommended slicing.
 | Scalar GDScript height sampler duplicating C++ | terrain editor mesh | **closed (ENG-3, 2026-07-07)** — `EditorTerrainMesh.sample_world_height` forwards to the new `NovaTerrainData.sample_height_world_live` (the batch sampler's per-point core, shared so the two can never disagree); the GDScript bilinear deleted; `terrain_height_revision_test` flipped from pinning batch/scalar drift to pinning the single path |
 | Hand-rolled terrain ray-march + slab test | terrain editor → mission picking | **closed (ENG-3, 2026-07-07)** — the witnessed raycast ported to `libs/terrain_query/terrain_raycast` (`[orig: @ 0x60cb80; @ 0x60e710]`, ENG-3 B0 grill → B1 port), bound as `NovaTerrainData.raycast_terrain` over both substrates; the GDScript march/slab/bisection trio deleted; the celestial glare stand-in retired onto the same binding; editor-guard residuals = D-TERRAIN-4 |
 | Sector/atlas constants + coord math duplicated | terrain editor mesh | **closed (ENG-3, 2026-07-07)** — `COORDS_ATLAS_SIZE`/`COORDS_SECTOR_ID_MAX` minted beside the existing pair in `terrain/coords.h`; all four bound as `NovaTerrainData` class constants and consumed by the editor scripts (the `ATLAS_SIZE`/`SECTOR_SIZE`/`PATCH_VERTS`/`HM_SIZE` re-declarations are now aliases; `row*16+col` strides + 0..4 clamps on the constants); `world_to_sector_cell` bound and forwarded like the sibling transforms; contract pinned by `terrain_coords_test` |
-| FNT format facts + shelf packer in editor | fonts rasterizer | open (ENG-4) |
-| MATERIAL_FLAG_* / OED_UPDATE_* duplicated | engine object model GDScript | **flags closed (REN-2, confirmed at REN-7)** — MATERIAL_FLAG_* single-sourced onto NovaObjectShaderCache; the REN-7 detail slice extended the same surface (CAP_DETAIL) instead of re-duplicating; OED_UPDATE_* remains open (ENG-4) |
+| FNT format facts + shelf packer in editor | fonts rasterizer | **closed (ENG-4, Wave-2 trunk 2)** — the deterministic shelf packer ported to `libs/fnt` (`fnt_pack_shelf`, `FNT_PACK_PAD` minted; ctest hand-walks the reference layout); `NovaFntResource` binds it plus the six format class constants; `fnt_rasterizer.gd` keeps only the TextServer rasterization + page blits, its constants now aliases |
+| MATERIAL_FLAG_* / OED_UPDATE_* duplicated | engine object model GDScript | **closed (flags: REN-2, confirmed at REN-7; OED_UPDATE_*: ENG-4, Wave-2 trunk 2)** — MATERIAL_FLAG_* single-sourced onto NovaObjectShaderCache; OED_UPDATE_* GDScript re-declarations became aliases of the already-bound `NovaObjectData.UPDATE_*` (engine model + object workspace), with the test suite keeping deliberate literal pins + a binding-drift test (the ENG-3 contract-pin pattern) |
 | Env/TOD/celestial/weather math in GDScript | godot/engine/environment | **closed (ENG-2, 2026-07-06)** — nodes are plumbing over libs/env; the tracked stand-ins are divergence rows (env #29 strip tessellation, #33 star instancing, #27 smoothed scalars) |
 | Menu absolute-rect math in canvas | mnu canvas | **closed as reviewed exception (ENG-5 sweep #2, 2026-07-12)** — the canvas's absolute-rect summation is edit-model gesture math over the document tree (picking, ghost drags, snap tuning in board units); the witnessed scale model stays in the hosted live engine node (`[orig: CUIScene_SetScreenScale @ 0x639480]`); no engine constant or witnessed math is duplicated |
 | HUD view-helper math cluster (exact-integer fade decay, 1024×768 design scale, 16.16 crosshair spread + TAPER strip, Q16 stance scaling, health thresholds, message tick policy, half-bright text, ammo format, stance→ERROR-row remap, capacity-1 reserve fold — all `[orig]`-cited) | `godot/engine/ui/hud_*.gd`, `game_hud.gd`, `game_hud_host.gd` | open (sweep #2, 2026-07-12) — **tracked: one `libs/hud` port slice** (ENG-4/FNT pattern: math + constants native, `draw_*`/Font blits stay host); no libs home exists today — `libs/def` deliberately keeps ALPHAFADE raw |

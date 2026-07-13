@@ -5,11 +5,13 @@ signal bounds_changed(bounds: AABB)
 
 # The per-material 3DI flag byte constants live on NovaObjectShaderCache,
 # single-sourced from libs/threedi (THREEDI_MATERIAL_FLAG_*) — REN-2.
-const OED_UPDATE_NONE := 0
-const OED_UPDATE_MTRL := 1
-const OED_UPDATE_LGHT := 2
-const OED_UPDATE_PANM := 4
-const OED_UPDATE_ALL := OED_UPDATE_MTRL | OED_UPDATE_LGHT | OED_UPDATE_PANM
+# The OED re-export mask bits are aliases of the NovaObjectData binding,
+# single-sourced from libs/oed (OED_UPDATE_*) — ENG-4.
+const OED_UPDATE_NONE := NovaObjectData.UPDATE_NONE
+const OED_UPDATE_MTRL := NovaObjectData.UPDATE_MTRL
+const OED_UPDATE_LGHT := NovaObjectData.UPDATE_LGHT
+const OED_UPDATE_PANM := NovaObjectData.UPDATE_PANM
+const OED_UPDATE_ALL := NovaObjectData.UPDATE_ALL
 
 # The witnessed lighting uniform surface (REN-5): HemiSky/HemiGround/DirLight
 # + ColorSrcGlobalGain; the composer applies the fixed-function

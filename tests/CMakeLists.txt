@@ -198,6 +198,10 @@ target_link_libraries(gameprofile_test PRIVATE opennova_gameprofile)
 target_include_directories(gameprofile_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME gameprofile COMMAND gameprofile_test)
 
+add_executable(required_resources_test gameprofile/required_resources_test.c)
+target_link_libraries(required_resources_test PRIVATE opennova_gameprofile)
+add_test(NAME required_resources COMMAND required_resources_test)
+
 # SBF tests
 add_executable(sbf_header_test sbf/sbf_header_test.cpp)
 target_link_libraries(sbf_header_test PRIVATE opennova_sbf)
@@ -600,6 +604,10 @@ target_link_libraries(fnt_roundtrip_test PRIVATE opennova_fnt)
 target_include_directories(fnt_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(fnt_roundtrip_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 add_test(NAME fnt_roundtrip COMMAND fnt_roundtrip_test)
+
+add_executable(fnt_pack_test fnt/fnt_pack_test.c)
+target_link_libraries(fnt_pack_test PRIVATE opennova_fnt)
+add_test(NAME fnt_pack COMMAND fnt_pack_test)
 
 add_executable(pcx_roundtrip_test pcx/pcx_roundtrip_test.cpp)
 target_link_libraries(pcx_roundtrip_test PRIVATE opennova_pcx)
