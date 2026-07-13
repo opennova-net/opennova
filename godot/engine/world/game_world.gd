@@ -665,6 +665,22 @@ func _configure_foliage() -> void:
 	_dispatcher.tile_info = placed_tiles
 
 
+## Bound the MODEL-tier anchor cull range to the environment's terrain draw
+## distance (the fog level). Retail's model candidate set is the sector
+## renderer's per-frame entity wave — entities of RENDERED sectors, so the set
+## is inherently bounded by the terrain traversal's reach (the fog level) plus
+## the per-entity occlusion test [orig: Terrain_RenderSectorEntitiesBySide
+## @ 0x5c7d50 over the wave list @ 0x2984890]. The model pass draws UNFOGGED
+## black, so anchors past the fog wash must not dispatch (a fixed range painted
+## unfogged silhouettes onto fog-washed ground and blinked clusters at the
+## cutoff — docs/foliage/foliage-re.md D-FOLIAGE-7). Public so it is drivable
+## without a full mission load (ADR 0018); tick() calls it each frame.
+func apply_model_anchor_range_from_env() -> void:
+	if _dispatcher == null or _env == null:
+		return
+	_dispatcher.model_anchor_range = maxf(_env.get_fog_level(), 64.0)
+
+
 func get_terrain_data() -> NovaTerrainData:
 	return _terrain_data
 
@@ -703,16 +719,7 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 		if _placer != null and _placer.has_method("get_placed_world_positions"):
 			model_anchors = _placer.get_placed_world_positions()
 		_dispatcher.set_model_anchors(model_anchors)
-		# Retail's candidate set is the sector renderer's per-frame entity wave
-		# (entities of RENDERED sectors — the traversal reaches the terrain
-		# draw distance, i.e. the fog level) [orig:
-		# Terrain_RenderSectorEntitiesBySide @ 0x5c7d50 over the wave list
-		# @ 0x2984890]. The model pass itself draws UNFOGGED black, so anchors
-		# past the fog wash must not dispatch: a fixed range both painted
-		# unfogged silhouettes onto fog-washed ground and blinked whole
-		# clusters as the camera swayed across the cutoff.
-		if _env != null:
-			_dispatcher.model_anchor_range = maxf(_env.get_fog_level(), 64.0)
+		apply_model_anchor_range_from_env()
 		# FAR runs the witnessed 42u near-cell pool around the camera; the
 		# MODEL walk gates on view depth + the view frustum via camera_xform
 		# (retail dispatches only VISIBLE sector entities [orig:

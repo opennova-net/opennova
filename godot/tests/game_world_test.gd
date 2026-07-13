@@ -449,7 +449,8 @@ func test_tick_bounds_model_anchors_by_the_terrain_draw_distance() -> void:
 	# [orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7d50 over the wave list
 	# @ 0x2984890]. The model pass draws UNFOGGED black, so a fixed host range
 	# painted silhouettes onto fog-washed ground and blinked clusters at the
-	# cutoff. The host must re-wire the gate to the env fog level every tick.
+	# cutoff. GameWorld re-wires the gate to the env fog level (tick() calls the
+	# public seam every frame; the seam is drivable directly here — ADR 0018).
 	var world := GameWorld.new()
 	var terrain := NovaTerrain.new()
 	terrain.name = "NovaTerrain"
@@ -463,22 +464,20 @@ func test_tick_bounds_model_anchors_by_the_terrain_draw_distance() -> void:
 	add_child_autofree(world)
 	await get_tree().process_frame  # _ready wires _dispatcher/_env from the named children
 
-	world._loaded = true
 	env.fog_level = 300.0
-	world.tick(Vector3.ZERO)
+	world.apply_model_anchor_range_from_env()
 	assert_almost_eq(disp.model_anchor_range, 300.0, 0.001,
 		"the model anchor gate tracks the environment's terrain draw distance")
 
 	env.fog_level = 750.0
-	world.tick(Vector3.ZERO)
+	world.apply_model_anchor_range_from_env()
 	assert_almost_eq(disp.model_anchor_range, 750.0, 0.001,
-		"a fog change re-bounds the gate on the next tick")
+		"a fog change re-bounds the gate")
 
 	env.fog_level = 1.0
-	world.tick(Vector3.ZERO)
+	world.apply_model_anchor_range_from_env()
 	assert_almost_eq(disp.model_anchor_range, 64.0, 0.001,
 		"a degenerate fog level clamps to the floor instead of disabling the tier")
-	world._loaded = false
 
 
 func _make_world() -> GameWorld:
