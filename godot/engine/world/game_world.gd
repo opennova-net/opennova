@@ -85,6 +85,7 @@ var _effect_world: NovaEffectWorld  # the runtime .ptl effect world (render-only
 # moves or the camera crosses the water plane.
 var _clear_env_generation: int = -1
 var _clear_above_water := true
+var _idle_frame_clear_color := Color.BLACK
 var _net_client     # NovaNetClient: the in-match wire client (replay or live)
 var _net_view       # NetWorldView: spawns + drives models from the decoded world
 var _net_event_view # NetEventView: draws the decoded event stream over the world
@@ -141,9 +142,21 @@ func _resolve_root(dir: String) -> NovaResourceRoot:
 
 
 func _ready() -> void:
+	if _clear_color != null and _clear_color.environment != null:
+		_idle_frame_clear_color = _clear_color.environment.background_color
 	if _terrain != null:
 		_dispatcher = _terrain.get_node_or_null("FoliageDispatcher") as NovaFoliageDispatcher
 		_tile_overlay = _terrain.get_node_or_null("TileOverlay") as NovaTerrainTileOverlay
+
+
+func _notification(what: int) -> void:
+	if what != NOTIFICATION_VISIBILITY_CHANGED or not is_node_ready():
+		return
+	if _loaded and is_visible_in_tree():
+		_clear_env_generation = -1
+		_update_frame_clear_color()
+	else:
+		_restore_idle_frame_clear_color()
 
 
 ## Load the world from `dir`, or from the persisted resource directory when empty.
@@ -503,6 +516,9 @@ func get_mission_stats() -> Dictionary:
 ## environment scene nodes are kept in place and rebuilt by the next load_*().
 ## Safe to call when nothing is loaded.
 func unload() -> void:
+	_loaded = false
+	_host_config = {}
+	_restore_idle_frame_clear_color()
 	var container := get_node_or_null(NodePath(MissionObjectPlacer.CONTAINER_NAME))
 	if container != null:
 		container.queue_free()
@@ -540,7 +556,6 @@ func unload() -> void:
 	NovaMusicService.stop_context()
 	if _env != null and _env.environment_data != null:
 		_env.environment_data.clear_mission_overrides()
-	_loaded = false
 	_loaded_mission = null
 	_loaded_mission_file = ""
 	if _runtime != null:
@@ -654,6 +669,12 @@ func get_resource_root() -> NovaResourceRoot:
 
 func is_loaded() -> bool:
 	return _loaded
+
+
+func get_current_frame_clear_color() -> Color:
+	if _clear_color == null or _clear_color.environment == null:
+		return Color.BLACK
+	return _clear_color.environment.background_color
 
 
 ## The host per-frame order, faithful to the original main loop's server-tick-then-client-render:
@@ -1340,7 +1361,17 @@ func _music_var_pump() -> void:
 # --- Frame clear color (env divergence #21, closed) ----------------------------
 
 func _process(_delta: float) -> void:
+	if not _loaded or not is_visible_in_tree():
+		_restore_idle_frame_clear_color()
+		return
 	_update_frame_clear_color()
+
+
+func _restore_idle_frame_clear_color() -> void:
+	_clear_env_generation = -1
+	if _clear_color == null or _clear_color.environment == null:
+		return
+	_clear_color.environment.background_color = _idle_frame_clear_color
 
 
 # The witnessed frame clear: the horizon-blended skyfog above water, the lit

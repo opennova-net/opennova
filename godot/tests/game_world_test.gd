@@ -140,6 +140,72 @@ func test_clear_color_environment_renders_the_witnessed_frame_clear() -> void:
 		"Godot ambient must never inject into the witnessed lighting model - all OpenNova materials light themselves; AMBIENT_SOURCE_BG would derive ambient from the clear color")
 
 
+func test_hidden_world_suppresses_retained_terrain_and_restores_idle_frame_clear() -> void:
+	var packed := load("res://engine/world/game_world.tscn") as PackedScene
+	var world := packed.instantiate() as GameWorld
+	var clear := world.get_node("ClearColor") as WorldEnvironment
+	clear.environment = clear.environment.duplicate()
+	var idle_clear := Color(0.01, 0.02, 0.03)
+	clear.environment.background_color = idle_clear
+
+	var camera := Camera3D.new()
+	camera.position = Vector3(0, 71, 0)
+	camera.current = true
+	world.add_child(camera)
+	add_child_autofree(world)
+	world.set_playable(false)
+	assert_eq(world.get_current_frame_clear_color(), idle_clear,
+		"the scene-authored clear is the menu/loading baseline before a mission presents")
+
+	var root_dir := OS.get_cache_dir().path_join(WORLD_TEST_ROOT).path_join(
+		"presentation_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(root_dir)
+	for source_dir in [
+		ProjectSettings.globalize_path("res://../fixtures/godot/dvxi5"),
+		ProjectSettings.globalize_path("res://../fixtures/minimal/resources"),
+	]:
+		for file_name in DirAccess.get_files_at(source_dir):
+			assert_eq(DirAccess.copy_absolute(
+				source_dir.path_join(file_name), root_dir.path_join(file_name)), OK)
+
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(root_dir), OK)
+	world.set_resource_root(root)
+	var mission := NovaMissionData.new()
+	assert_eq(mission.open_from_resource_root(root, "mnml.bms"), OK)
+	assert_true(mission.set_header_string("terrain", "Dvxi5"))
+	assert_true(mission.set_header_string("environment", "mnml"))
+	assert_eq(world.load_mission_data(mission, "mnml.bms"), OK)
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	var terrain := world.get_node("NovaTerrain") as NovaTerrain
+	assert_gt(terrain.get_visible_patch_count(), 0,
+		"the loaded fixture presents native RenderingServer terrain patches")
+	var mission_clear := world.get_current_frame_clear_color()
+	assert_ne(mission_clear, idle_clear,
+		"the loaded mission replaces the scene-authored frame clear")
+
+	world.visible = false
+	await get_tree().process_frame
+	assert_eq(terrain.get_visible_patch_count(), 0,
+		"a hidden GameWorld must hide native terrain RIDs that bypass Node3D visibility")
+	assert_eq(world.get_current_frame_clear_color(), idle_clear,
+		"a hidden GameWorld must restore the menu/loading frame clear")
+
+	world.visible = true
+	await get_tree().process_frame
+	assert_gt(terrain.get_visible_patch_count(), 0,
+		"showing the retained world lets terrain traversal present patches again")
+	assert_eq(world.get_current_frame_clear_color(), mission_clear,
+		"showing the loaded world restores its mission frame clear")
+
+	world.unload()
+	await get_tree().process_frame
+	assert_eq(world.get_current_frame_clear_color(), idle_clear,
+		"an unloaded GameWorld restores the scene-authored frame clear")
+
+
 func test_water_mirror_camera_sees_the_body_layer_but_never_the_viewmodel() -> void:
 	# The reflection layer contract (env #30): the witnessed mirror is a
 	# re-render of the WORLD scene - which contains the local player's body -
