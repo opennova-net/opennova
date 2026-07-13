@@ -37,6 +37,13 @@ const TICK_DT := 1.0 / 62.5  # mirrors MissionRuntime.TICK_DT; default for tick(
 
 signal world_loaded()
 signal load_failed(reason: String)
+# Mission-load progress, 0..100, emitted at the stage boundaries below and
+# pulsed (at the stage's constant value) from inside the object-placement loop.
+# The values are the witnessed schedule's anchor points; the original pumps its
+# loading screen the same way — constant per-stage percentages, re-presented
+# from inside the model-load loops [orig: Game_StartMission's
+# LoadingScreen_UpdateAndPresent calls @ 0x52498f..0x525d29].
+signal load_progress(percent: int)
 # Host-presentation side effects drained from the mission runtime's EffectLog each tick
 # (kind: "text"/"debug_text"/"win"/"subgoal_*"/"show_waypoints"/"set_light"/"dialog").
 # Player text is consumed by the HUD; debug_text remains a distinct unrouted channel.
@@ -366,34 +373,48 @@ func _load_mission_internal(mission: NovaMissionData, bms_name: String, resource
 	# load costs stay comparable (one timeline ring serves both).
 	var timeline := PerfTimeline.begin("Mission load %s" % bms_name)
 	_resource_root = resource_root
+	# Progress values are anchor points from the witnessed schedule (2..100);
+	# our pipeline has fewer stages than the original's ~30 call sites, so each
+	# boundary reports the nearest witnessed value
+	# (docs/interface/loading-screen-re.md D-LOADSCR-1)
+	# [orig: Game_StartMission @ 0x524360 progress schedule
+	# 2,3,4,6,20,26,...,41,45,50,60,70,90,95,100].
+	load_progress.emit(2)
 	timeline.span("environment")
 	if not _load_environment(env_name):
 		load_failed.emit("failed to load %s" % env_name)
 		return ERR_CANT_OPEN
 	_apply_mission_environment_overrides(mission)
 	timeline.end_span()
+	load_progress.emit(6)
 	timeline.span("terrain")
 	if not _load_terrain(trn):
 		load_failed.emit("failed to load %s" % trn)
 		return ERR_CANT_OPEN
 	timeline.end_span()
+	load_progress.emit(26)
 
 	_loaded_mission = mission
 	timeline.span("objects")
 	_place_mission_objects(mission, timeline)
 	timeline.end_span()
+	load_progress.emit(41)
 	timeline.span("runtime")
 	_start_runtime(mission, bms_name)
 	timeline.end_span()
+	load_progress.emit(70)
 	timeline.span("audio")
 	_start_mission_audio(mission, bms_name)
 	timeline.end_span()
+	load_progress.emit(90)
 	timeline.span("effects")
 	_start_effect_world()
 	timeline.end_span()
+	load_progress.emit(95)
 	timeline.finish()
 	_loaded_mission_file = bms_name
 	_loaded = true
+	load_progress.emit(100)
 	world_loaded.emit()
 	return OK
 
@@ -434,6 +455,12 @@ func _place_mission_objects(mission: NovaMissionData, timeline: PerfTimeline = n
 	var options := { "environment_node": _env }
 	if timeline != null:
 		options["timeline"] = timeline
+	# Pulse the load-progress screen from inside the model-load loop at the
+	# stage's constant value — the original re-presents its loading screen the
+	# same way, with a constant percentage from within the per-model loops
+	# [orig: the paired constant-value LoadingScreen_UpdateAndPresent calls
+	# inside Game_StartMission's model loops @ 0x524d9c/0x524e09, 0x524f32/0x524fe0].
+	options["progress"] = func() -> void: load_progress.emit(26)
 	_mission_stats = _placer.place(mission, self, options)
 	print("GameWorld: placed %d mission objects (%d batched / %d animated, %d unresolved, %d markers)" % [
 		int(_mission_stats.get("placed", 0)),
