@@ -41,7 +41,7 @@ decision (ADR / RE-record entry) saying why not:
 
 | Workspace | R | W | E | G | Weakest axis today |
 |---|---|---|---|---|---|
-| Terrain | ✓ | ✓ | ✓ (viewport is the renderer) | partial (via mission PIE) | G polish |
+| Terrain | ✓ | ✓ | ✓ (viewport is the renderer) | ✓ (mission PIE + the F3 launcher's terrain staging note) | at bar — the E/G exemplar (TER-1, 2026-07-12) |
 | Environment | ✓ | ✓ | ✓ (runtime nodes shared; water unified) | partial | G polish |
 | Object | ✓ (v8/v9; LW v10 on branch) | ✓ (.3dp + .3di export) | partial (isolated preview; env-lit but no world context, no LOD-by-distance) | — | E |
 | Mission | ✓ | ✓ | ✓ (PIE runs the real runtime) | ✓ | data semantics (heading, ANIMNUM) |
@@ -205,7 +205,22 @@ the shell left lane (the only one); and a separate Bank mode.
 - TER-1: bar audit — confirm all four axes against this doc's definitions,
   wire the F3 launcher entry ("open the exported terrain's mission in game"),
   and record terrain as the E/G exemplar. No new capability. Gate: existing
-  terrain suites; driver overview shot.
+  terrain suites; driver overview shot. **DONE 2026-07-12.** Audit: R ✓
+  (loose `.trn` projects and imported game assets, plus VFS/PFF opens via
+  `open_trn`'s resource-root branch); W ✓ (F4 practiced: from-scratch
+  TrnGen-parity bake + the roundtrip/import-export suites); E ✓ (the editor
+  viewport IS the ported terrain renderer — the E exemplar); G ✓ (mission
+  PIE runs the real runtime on the terrain, and the See-in-game launcher now
+  carries terrain's staging note: exported-into-the-game-folder → "load a
+  mission on it", otherwise an honest export-first pointer). One correction
+  to the phase's wording: terrain's export bakes the terrain data set
+  (`.trn`/`.cpt`/`.til`/maps), not a mission dir — there is no "exported
+  terrain's mission" to boot directly, so the launcher entry points at the
+  game's mission list over the staged terrain instead. The wiring introduced
+  the per-workspace seam every later F3 phase reuses:
+  `EditorWorkspace.get_game_launch_note(launch_dir)` returning a typed
+  `GameLaunchNote` (staged + artist-facing detail), consumed by
+  `ShellGameLaunch` in the tooltip and post-launch status.
 
 ### Environment
 

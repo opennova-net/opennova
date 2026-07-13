@@ -473,6 +473,24 @@ func get_export_dialog_dir() -> String:
 	return terrain_editor.get_last_save_dir()
 
 
+# See in game (maturity TER-1): the terrain reaches the game through Export —
+# the baked terrain files must sit in the launch directory for the loose-file
+# override to mount them (the project Save writes authoring sources, not game
+# data). Once exported there, the game shows it through whatever mission sits
+# on it, so the pointer is the mission list.
+func get_game_launch_note(launch_dir: String) -> GameLaunchNote:
+	if terrain_editor == null:
+		return null
+	if GameLaunchNote.same_dir(String(terrain_editor.get_last_export_dir()), launch_dir):
+		var terrain_name := String(terrain_editor.get_terrain_name_value()).strip_edges()
+		if terrain_name.is_empty():
+			terrain_name = "your terrain"
+		return GameLaunchNote.make(true,
+			"Load a mission on \"%s\" to walk your terrain." % terrain_name)
+	return GameLaunchNote.make(false,
+		"Export your terrain into the game folder to see it in game.")
+
+
 func _workflow_for_tool(tool: int) -> int:
 	match tool:
 		TerrainEditor.Tool.RAISE, TerrainEditor.Tool.LOWER, TerrainEditor.Tool.SMOOTH, TerrainEditor.Tool.FLATTEN:
