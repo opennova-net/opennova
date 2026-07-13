@@ -404,7 +404,7 @@ func build_player_animated_model(runtime_type_id: int, parent: Node3D, env_node:
 ## name, in rest pose, parented under `parent`. For host-managed viewmodels that resolve their
 ## model + animation directly from weapon.def (gfx1/gfx1a + animadm) rather than from an items.def
 ## item id — the first-person weapon viewmodel. Returns null when the graphic doesn't resolve.
-func build_model_from_graphic(graphic: String, adm_name: String, parent: Node3D, clip_key: String = "", env_node: Node = null) -> Node3D:
+func build_model_from_graphic(graphic: String, adm_name: String, parent: Node3D, clip_key: String = "", env_node: Node = null, rig_graphic: String = "") -> Node3D:
 	if graphic.is_empty() or parent == null:
 		return null
 	var data := _load_object_data(graphic)
@@ -416,17 +416,19 @@ func build_model_from_graphic(graphic: String, adm_name: String, parent: Node3D,
 	if env_node != null and model.has_method("set_environment_node"):
 		model.set_environment_node(env_node)
 	if not adm_name.is_empty():
-		# The skeleton belongs to the .adm's model, NOT necessarily THIS graphic: the FP arms
-		# (armsG) share the gun's ak47_1st skeleton, so their bone table must come from the gun
-		# model -- exactly as retail draws the arms with the GUN's bone matrices, not their own
+		# The ADM names the CLIP SET; the rig table belongs to the equipped FP gun. The arms
+		# (armsG) and gun both use `rig_graphic`, so their indexed parts ride one shared table --
+		# exactly as retail draws the arms with the GUN's bone matrices, not their own
 		# [orig: Player_RenderFirstPersonViewModel @0x4ded60 reuses one bone_matrices for both
-		# the gfx1 gun and the character-arms submit]. When graphic == adm the model is the same.
+		# the gfx1 gun and the character-arms submit]. Defaulting to THIS graphic keeps a direct
+		# gun build correct; composite callers pass the gun graphic explicitly for both parts.
 		# Origins + parents = the model bone table: the rig sizes from the MODEL and its rest
 		# positions are RECONSTRUCTED from the model pivots + the reset .bad's bind rotations
 		# (NovaSkeletalAnim; the corpus-exact export relation) -- so rigs whose .bad and model
 		# disagree in bone count (AKM_1st: 46 vs 45) and rigs with broken BadBone.position
 		# (12 of 43 JO viewmodels) both render exactly like a healthy-.bad rig.
-		var skel_model := data if adm_name.nocasecmp_to(graphic) == 0 else _load_object_data(adm_name)
+		var rig_name := graphic if rig_graphic.is_empty() else rig_graphic
+		var skel_model := data if rig_name.nocasecmp_to(graphic) == 0 else _load_object_data(rig_name)
 		var skel_origins := skel_model.get_bone_origins() if skel_model != null else PackedVector3Array()
 		var skel_parents := skel_model.get_bone_parents() if skel_model != null else PackedInt32Array()
 		_apply_skeletal_anim_by_name(model, adm_name, skel_origins, skel_parents)
