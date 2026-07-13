@@ -71,6 +71,6 @@ void fragment() {
 	vec3 result = vec3(0.0);
 
 	ALBEDO = result;
-	ALPHA = fd.a;
-	ALPHA_SCISSOR_THRESHOLD = alpha_threshold;
+	// The pass word enables D3D alpha test only. Surviving texels are opaque;
+	// writing Godot ALPHA would incorrectly turn the black cutout translucent.
 }

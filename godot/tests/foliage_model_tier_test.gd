@@ -329,7 +329,7 @@ func test_far_tier_replicates_full_source_mesh_and_bends_each_vertex() -> void:
 	assert_eq(emitted_positions.size(), source_positions.size() * cell_placements.size(),
 		"Every placement in the cell receives the complete authored source vertex array.")
 	assert_eq(emitted_colors.size(), emitted_positions.size(),
-		"Every emitted vertex carries the packed red wind weight.")
+		"Every emitted vertex carries wind weight plus the underlying terrain normal.")
 	assert_eq(emitted_uvs.size(), emitted_positions.size(), "Source UVs are replicated.")
 	assert_eq(emitted_indices.size(), source_indices.size() * cell_placements.size(),
 		"Source topology is replicated for every placement.")
@@ -355,6 +355,26 @@ func test_far_tier_replicates_full_source_mesh_and_bends_each_vertex() -> void:
 			assert_almost_eq(emitted_colors[emitted_index].r,
 				float(wind_byte) / 255.0, 0.00001,
 				"COLOR.r is clamp(trunc(sourceY*128),0,255), not terrain tint.")
+			var ground_normal := Vector3(
+				_sample_height(expected_x - 1.0, expected_z) - _sample_height(expected_x + 1.0, expected_z),
+				2.0,
+				_sample_height(expected_x, expected_z - 1.0) - _sample_height(expected_x, expected_z + 1.0)
+			).normalized()
+			var encoded_normal := ground_normal * 0.5 + Vector3(0.5, 0.5, 0.5)
+			var packed_normal := Vector3(
+				floorf(encoded_normal.x * 255.0) / 255.0,
+				floorf(encoded_normal.y * 255.0) / 255.0,
+				floorf(encoded_normal.z * 255.0) / 255.0
+			)
+			assert_almost_eq(emitted_colors[emitted_index].g,
+				packed_normal.x, 0.00001,
+				"COLOR.g encodes the underlying terrain-normal X channel.")
+			assert_almost_eq(emitted_colors[emitted_index].b,
+				packed_normal.y, 0.00001,
+				"COLOR.b encodes the underlying terrain-normal Y channel.")
+			assert_almost_eq(emitted_colors[emitted_index].a,
+				packed_normal.z, 0.00001,
+				"COLOR.a encodes the underlying terrain-normal Z channel.")
 
 	if not source_indices.is_empty() and cell_placements.size() > 1:
 		var vertex_stride := source_positions.size()

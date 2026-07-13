@@ -3,7 +3,8 @@ render_mode unshaded, cull_disabled, depth_draw_opaque;
 
 // Retail FAR foliage pass. Geometry is the complete replicated source mesh,
 // already bent to terrain per vertex by the CPU emitter. Vertex COLOR.r is
-// the packed source-height wind weight, never a lighting color.
+// the packed source-height wind weight; the host uses otherwise-free COLOR.gba
+// to carry the underlying terrain normal for the patch-cache N.L fold.
 
 #include "res://shaders/nova_color.gdshaderinc"
 
@@ -21,9 +22,9 @@ uniform sampler2D u_fd_texture : filter_linear_mipmap, repeat_enable;
 // receives saturate(N.L) with the CURRENT light direction
 // [orig: PolyTrn_RenderTile @ 0x60dce5 / 0x60e38a; PolyTrn_TileBakeBasePass
 // mode 0x20650; PolyTrn_TileBakeDot3LightPass]. The host binds a colormap-only
-// stand-in, omitting optional composite RGB, and folds through ITS alpha - the
-// same fold input the host ground include uses. Both the omitted composite and
-// exact N.L alpha ride D-FOLIAGE-7.
+// RGB stand-in, omitting optional composite RGB, and reconstructs current-light
+// N.L from the central-difference heightfield normal carried in COLOR.gba.
+// Retail's exact per-texel normal-map sampling remains D-FOLIAGE-7.
 uniform sampler2D u_terrain_light_texture : filter_linear, repeat_enable;
 
 // Foliage_WindSwayVS c24.x. Retail supplies
@@ -51,6 +52,7 @@ instance uniform float u_cell_alpha_ref = 180.0;
 
 global uniform vec3 opennova_sky_ambient;
 global uniform vec3 opennova_sun_light;
+global uniform vec3 opennova_sun_direction;
 global uniform vec3 opennova_fog_color;
 global uniform float opennova_fog_start;
 global uniform float opennova_fog_end;
@@ -58,6 +60,7 @@ global uniform int opennova_fog_type;
 global uniform float opennova_foliage_wave_addend;
 
 varying vec3 v_world_pos;
+varying vec3 v_ground_normal;
 
 
 float fog_factor_for_distance(float dist) {
@@ -100,6 +103,10 @@ void vertex() {
 	world_pos.z -= wind_weight * wave * 0.03;
 
 	v_world_pos = world_pos;
+	// COLOR.r is the packed wind weight. COLOR.gba carries the terrain normal
+	// sampled under this transformed vertex so a 24-bit colormap never turns
+	// the retail patch-cache N.L input into an implicit 1.0.
+	v_ground_normal = normalize(COLOR.gba * 2.0 - 1.0);
 	POSITION = PROJECTION_MATRIX * VIEW_MATRIX * vec4(world_pos, 1.0);
 }
 
@@ -126,8 +133,10 @@ void fragment() {
 	// 4*splat x 2*dp3 AVERAGE instead, so tufts sit at the brightness of the
 	// ground they grow from [orig: Foliage_LightmapBlendPS @ 0x5ff7a0;
 	// avg-detail writer @ PolyTrn_InitTextures 0x60ab00].
+	vec3 ground_normal = normalize(v_ground_normal);
+	float terrain_n_dot_l = clamp(dot(ground_normal, opennova_sun_direction), 0.0, 1.0);
 	vec3 lit = terrain_light.rgb
-		* (terrain_light.a * opennova_sun_light + opennova_sky_ambient);
+		* (terrain_n_dot_l * opennova_sun_light + opennova_sky_ambient);
 	vec3 result = clamp(fd.rgb * lit * u_far_pass_color.rgb * 8.0,
 		vec3(0.0), vec3(1.0));
 
@@ -143,6 +152,7 @@ void fragment() {
 	ALBEDO = nova_gamma_to_linear(result);
 	// c6.a fade multiplies the ":fd" alpha before the alpha test - the retail
 	// dissolve: as fade drops toward the 42.0 edge, fewer texels clear the ref.
-	ALPHA = far_alpha;
-	ALPHA_SCISSOR_THRESHOLD = alpha_threshold;
+	// Do not write Godot ALPHA here. Retail enables binary alpha test, not alpha
+	// blending; surviving fragments are opaque cutouts. Writing ALPHA would mix
+	// them with bright terrain/sky and wash the foliage toward the background.
 }

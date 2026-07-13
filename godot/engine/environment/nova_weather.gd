@@ -209,7 +209,7 @@ func _write_shader_globals(env: Node) -> void:
 	RenderingServer.global_shader_parameter_set(&"opennova_sun_light", get_smooth_sun())
 	RenderingServer.global_shader_parameter_set(&"opennova_sky_ambient", get_smooth_sky())
 	RenderingServer.global_shader_parameter_set(&"opennova_fog_color", get_smooth_fog())
-	RenderingServer.global_shader_parameter_set(&"opennova_sun_direction", env.get_sun_direction())
+	RenderingServer.global_shader_parameter_set(&"opennova_sun_direction", env.get_light_direction())
 	var fog_end: float = float(env.get_fog_level())
 	var fog_start: float = float(env.get_fog_start()) if env.has_method("get_fog_start") else 0.5
 	RenderingServer.global_shader_parameter_set(&"opennova_fog_end", fog_end)

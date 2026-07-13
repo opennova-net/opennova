@@ -1192,7 +1192,27 @@ Ref<Mesh> NovaFoliageDispatcher::_build_far_mesh(
 				out_uvs.push_back(Vector2(vertex.u, vertex.v));
 				const float wind =
 				    static_cast<float>((vertex.color >> 16) & 0xFFu) / 255.0f;
-				out_colors.push_back(Color(wind, 0.0f, 0.0f, 0.0f));
+
+				// Retail's terrain patch-cache T1 stores saturate(N.L) in alpha.
+				// The host binds the base colormap for T1 RGB, so carry the
+				// underlying heightfield normal in COLOR.gba and reconstruct the
+				// current-light fold in the shader. This works for both runtime's
+				// direct terrain data and the editor's live height sampler; relying
+				// on colormap alpha made every 24-bit TGA behave as N.L=1.
+				Vector3 ground_normal(0.0f, 1.0f, 0.0f);
+				const float h_l = _sample_height_world(vertex.x - 1.0f, vertex.z);
+				const float h_r = _sample_height_world(vertex.x + 1.0f, vertex.z);
+				const float h_d = _sample_height_world(vertex.x, vertex.z - 1.0f);
+				const float h_u = _sample_height_world(vertex.x, vertex.z + 1.0f);
+				if (h_l > INVALID_HEIGHT_THRESHOLD && h_r > INVALID_HEIGHT_THRESHOLD &&
+				    h_d > INVALID_HEIGHT_THRESHOLD && h_u > INVALID_HEIGHT_THRESHOLD) {
+					ground_normal = Vector3(h_l - h_r, 2.0f, h_d - h_u).normalized();
+				}
+				out_colors.push_back(Color(
+				    wind,
+				    ground_normal.x * 0.5f + 0.5f,
+				    ground_normal.y * 0.5f + 0.5f,
+				    ground_normal.z * 0.5f + 0.5f));
 			}
 			for (uint32_t index : emitted.indices) {
 				if (index > static_cast<uint32_t>(INT32_MAX) - vertex_base) {
@@ -1533,9 +1553,11 @@ void NovaFoliageDispatcher::_update_slot_material(int slot_index) {
 	// [orig: PolyTrn_RenderTile @ 0x60dce5 / 0x60e38a;
 	// Terrain_FindSectorPatchRT @ 0x6042a0]. This renderer cache is unrelated
 	// to the .til overlay resource; .til entries are only optional bake inputs.
-	// The host binds the colormap as a base-only stand-in; its alpha is the same
-	// fold input the host ground include consumes. Omitted composite RGB and
-	// exact N.L alpha are tracked by D-FOLIAGE-7.
+	// The host binds the colormap as a base-only RGB stand-in. Its 24-bit source
+	// has no usable alpha, so _build_far_mesh carries the central-difference
+	// heightfield normal in COLOR.gba and the shader reconstructs current-light
+	// N.L. Omitted composite RGB and exact per-texel normal-map sampling remain
+	// tracked by D-FOLIAGE-7.
 	Ref<NovaTerrainData> cm_src = terrain_data_.is_valid() ? terrain_data_ : colormap_source_;
 	Ref<Texture2D> terrain_light =
 	    cm_src.is_valid() ? cm_src->get_colormap() : Ref<Texture2D>();

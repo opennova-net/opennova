@@ -39,7 +39,8 @@ class NovaTerrainData;
 //     ONCE into a persistent per-slot pool - up to 36 placements, each a
 //     complete copy of the def source mesh at XZ scale 1/Y scale .5, terrain
 //     sampled under every transformed vertex, source-Y wind weight in
-//     COLOR.r [orig: Foliage_UpdateFarCellSlots @ 0x601b30;
+//     COLOR.r, and a host-carried terrain normal in COLOR.gba for the witnessed
+//     patch-cache N.L light fold [orig: Foliage_UpdateFarCellSlots @ 0x601b30;
 //     generate_foliage_instances_0 @ 0x5ffdd0]. Per frame the pool only
 //     toggles visibility and refreshes the witnessed per-cell draw params:
 //     fade alpha 1 through distance 20 then 1-(d-20)/22, alpha-test ref 180

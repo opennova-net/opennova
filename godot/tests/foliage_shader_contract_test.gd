@@ -6,6 +6,7 @@ extends GutTest
 
 const MODEL_SHADER_PATH := "res://shaders/foliage_model.gdshader"
 const FAR_SHADER_PATH := "res://shaders/foliage_far.gdshader"
+const WEATHER_PATH := "res://engine/environment/nova_weather.gd"
 
 
 func _shader_source(path: String) -> String:
@@ -19,7 +20,10 @@ func test_model_pass_uses_fd_alpha_and_black_diffuse() -> void:
 		"The host supplies the anchor-derived model alpha-test reference.")
 	assert_true(source.contains("if (fd.a <= alpha_threshold)"),
 		"Retail D3DCMP_GREATER rejects :fd alpha exactly equal to the MODEL reference.")
-	assert_true(source.contains("ALPHA = fd.a"), ":fd supplies model alpha.")
+	assert_false(source.contains("ALPHA ="),
+		"Retail MODEL foliage uses binary alpha test without enabling alpha blending.")
+	assert_false(source.contains("ALPHA_SCISSOR_THRESHOLD"),
+		"The explicit D3DCMP_GREATER discard is the complete opaque-cutout test.")
 	assert_true(source.contains("vec3 result = vec3(0.0)"),
 		"GridPlacementVS emits c6=(0,0,0,1), so the model pass starts black.")
 	assert_false(source.contains("u_colormap"),
@@ -53,6 +57,10 @@ func test_far_pass_has_witnessed_wind_and_lighting_contract() -> void:
 		"The far alpha-test input is restricted to the witnessed low/high range.")
 	assert_true(source.contains("float wind_weight = COLOR.r"),
 		"Packed vertex red is wind weight, not terrain lighting.")
+	assert_true(source.contains("global uniform vec3 opennova_sun_direction")
+		and source.contains("COLOR.gba * 2.0 - 1.0")
+		and source.contains("dot(ground_normal, opennova_sun_direction)"),
+		"FAR foliage reconstructs retail patch-cache N dot L from the underlying terrain normal.")
 	assert_true(source.contains("0.159155") and source.contains("6.2831898")
 		and source.contains("-3.1415901") and source.contains("0.25"),
 		"Far wind retains the retail phase-wrap constants.")
@@ -64,14 +72,19 @@ func test_far_pass_has_witnessed_wind_and_lighting_contract() -> void:
 		"Far wind retains the retail tenth-order cosine coefficients.")
 	assert_true(source.contains("world_pos.z -= wind_weight * wave * 0.03"),
 		"Retail render-Z wind maps to negative Godot world Z.")
-	assert_true(source.contains("float far_alpha = fd.a * u_far_pass_color.a * u_cell_fade")
-		and source.contains("ALPHA = far_alpha"),
+	assert_true(source.contains("float far_alpha = fd.a * u_far_pass_color.a * u_cell_fade"),
 		":fd alpha is modulated by the per-cell distance fade in c6.a.")
 	assert_true(source.contains("if (far_alpha <= alpha_threshold)"),
 		"Retail D3DCMP_GREATER rejects faded FAR alpha exactly equal to the pass reference.")
-	assert_true(source.contains("terrain_light.a * opennova_sun_light + opennova_sky_ambient")
+	assert_false(source.contains("ALPHA ="),
+		"Retail FAR foliage uses binary alpha test without enabling alpha blending.")
+	assert_false(source.contains("ALPHA_SCISSOR_THRESHOLD"),
+		"The explicit D3DCMP_GREATER discard is the complete opaque-cutout test.")
+	assert_true(source.contains("terrain_n_dot_l * opennova_sun_light + opennova_sky_ambient")
 		and source.contains("fd.rgb * lit * u_far_pass_color.rgb * 8.0"),
 		"The far fragment keeps the witnessed T0/T1/c0/c1/c6 multiply chain.")
+	assert_false(source.contains("terrain_light.a * opennova_sun_light"),
+		"A 24-bit colormap samples alpha=1; it cannot stand in for patch-cache N dot L.")
 	assert_false(source.contains("u_terrain_tint"),
 		"Far lighting never derives a half-plus-bias v0 from vertex color.")
 	assert_false(source.contains("u_terrain_detail") or source.contains("u_terrain_blend"),
@@ -84,3 +97,13 @@ func test_far_pass_has_witnessed_wind_and_lighting_contract() -> void:
 func test_both_foliage_shaders_parse_as_shader_resources() -> void:
 	assert_not_null(load(MODEL_SHADER_PATH) as Shader)
 	assert_not_null(load(FAR_SHADER_PATH) as Shader)
+
+
+func test_foliage_light_direction_tracks_the_active_sun_or_moon() -> void:
+	var source := _shader_source(WEATHER_PATH)
+	assert_true(source.contains(
+		'global_shader_parameter_set(&"opennova_sun_direction", env.get_light_direction())'),
+		"The foliage N dot L global must use the active sun/moon direction.")
+	assert_false(source.contains(
+		'global_shader_parameter_set(&"opennova_sun_direction", env.get_sun_direction())'),
+		"Weather must not overwrite the active night light with the sun direction.")

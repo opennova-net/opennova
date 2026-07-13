@@ -186,9 +186,10 @@ func _run() -> void:
 						or not model_material.shader.resource_path.ends_with("foliage_model.gdshader"):
 					failures.append("%s: expected the MODEL foliage shader material" % name_str)
 
-	# FAR vertex COLOR is the source-height wind weight. Lighting comes from
-	# the distinct FAR shader's terrain-light texture/c6 inputs; treating the
-	# instance channel as a CPU terrain tint was a false-positive probe.
+	# FAR vertex COLOR.r is the source-height wind weight; COLOR.gba carries the
+	# host's underlying terrain normal for the retail patch-cache N.L fold.
+	# Lighting otherwise comes from the distinct FAR shader's terrain-light/c6
+	# inputs; treating the channel as a CPU terrain tint was a false-positive.
 
 	if failures.is_empty():
 		print("runtime_scene_probe: OK")
