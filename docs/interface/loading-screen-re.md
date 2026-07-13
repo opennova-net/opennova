@@ -17,7 +17,10 @@ Researched 2026-07-12 (engine-research session; port landed the same session).
 | MP session text block (title/mission/game-type band + server message) | **MATCHING** (ported; glyph renderer approximated, D-LOADSCR-2) | layout constants + alignment enum + color tags witnessed; GUT gametype-key + SP/MP-split tests |
 | Progress bar (geometry, colors, smoothing, throttle) | **MATCHING** (ported) | exact integer arithmetic ported; GUT smoothing + fill-span tests |
 | Present pump during the blocking load | host code (force_draw analog of the witnessed pump) | cadence witnessed at `LoadingScreen_UpdateAndPresent @ 0x586be0`; `RenderingServer.force_draw` + `queue_redraw` stand in for BeginScene/Present |
-| SP start-mission splash (`newarow1.tga` + START_MISSION + `LT_Continue`) | **not yet ported** (D-LOADSCR-4) | witnessed at `show_start_mission_splash @ 0x520820`; follow-up |
+| Load-flow case handling (SP / host / success / failure / return) | **MATCHING** (ported) | the case matrix below (`Game_StartMission @ 0x524360`): screen resident through the load, released at the end, failure/abort → menu; GUT `main_game_lifecycle_test.gd` (load, return, reload, failed-load rollback) + `game/loading_screen_test.gd` (SP-vs-session `load_info` split) |
+| Joiner spawn-gate hold | **DIVERGENT** (D-LOADSCR-3) | retail holds through `NapiClient_WaitForDisconnect @ 0x42cb20` + `NapiClient_WaitForGameStart @ 0x42cc10` (spawn gate `g_spawn_success_gate @ 0x24c1928`, S2C 0x1D); our port reveals at local-load — the wire gate is not surfaced above `libs/npwire` |
+| ESC / disconnect abort during load | **DIVERGENT** (D-LOADSCR-7) | `Client_CheckDisconnectOrEscDuringLoad @ 0x520270` aborts to `Post Menu`; our SP/host load is one synchronous call the SceneTree cannot interrupt — no reachable window on the synchronous path |
+| SP start-mission splash (`newarow1.tga` + START_MISSION + `LT_Continue`) | **not yet ported** (D-LOADSCR-4) | witnessed at `show_start_mission_splash @ 0x520820`; the `!is_multiplayer_session && g_loadscreen_has_custom_bg && !is_in_session` gate (decompiler ~1039); follow-up |
 | Boot loading screen (`loading.pcx`) | confirm-only (separate boot-time variant) | `Game_ShowLoadingScreen @ 0x4a5420` (already rowed in `docs/required-resources.md`) |
 
 ## The sidecar rule
@@ -158,6 +161,57 @@ inside the two model-load loops @ 0x524d9c/0x524e09 and 0x524f32/0x524fe0), 26, 
 `render_loading_screen` itself is re-invoked at nine points across the load (each rebuild
 recomposites the text).
 
+### The load-flow case matrix — Game_StartMission @ 0x524360
+
+`Game_StartMission` is the single entry for **single-player and every authority
+(host) load**; the **joiner** enters the same function and diverges into a
+network-wait sub-path. The whole body runs with the loading screen resident —
+`LoadingScreen_UpdateAndPresent @ 0x586be0` is pumped at each progress value and
+`render_loading_screen @ 0x521d10` recomposites at nine points — and the effect
+is released (`LoadingScreen_ReleaseEffect @ 0x586b80`) only at the very end,
+after the optional SP splash. Every case:
+
+- **Single-player / host** (the straight-line path): load terrain, models,
+  weapons, anims, HUD, subsystems, spawn the player, then the final release
+  `@ 0x525d45` (decompiler line ~1045). The world is built entirely behind the
+  loading screen; nothing is presented until the release. Host is a session
+  (`g_napi_np_ctx.is_in_session`), single-player is not.
+- **Joiner** (the `else` sub-path `@ 0x524..`, decompiler lines ~620–654): after
+  the initial present, two blocking network waits bracket the terrain load:
+  1. `NapiClient_WaitForDisconnect @ 0x42cb20` — the connect handshake. Return 1
+     → nav-push `GameLoop`, return ("aborted 1"); return 2/3/4 → `reason = 1`,
+     nav-push `Post Menu` (`scene_entry`), return ("aborted 2").
+  2. `Game_LoadTerrainDuringConnect @ 0x520710` (reports 10, 25), then
+  3. `NapiClient_WaitForGameStart @ 0x42cc10` — the SPAWN gate: pumps net + input
+     and returns 1 only when `g_spawn_success_gate @ 0x24c1928` is set (S2C 0x1D,
+     net-re §5.2), 3 on ESC/`g_loading_cancel_flag`, 4 on
+     `g_loading_timeout_flag`, 0 on reconnect. The caller nav-pushes `GameLoop`
+     on the spawn leg and `Post Menu` (`reason = 1`) on the cancel/timeout legs.
+
+  So the joiner **holds the loading screen through the connect handshake AND the
+  spawn gate**, entering the game only when the server admits the spawn; any
+  disconnect/ESC/timeout at either wait returns to the menu.
+- **ESC or disconnect at any point during the load**:
+  `Client_CheckDisconnectOrEscDuringLoad @ 0x520270` (called at four model/asset
+  points — decompiler "aborted 5..8") pumps window messages, and on `reason == 2`
+  (a recorded disconnect) or a `27`/ESC keypress sets `reason = 1`,
+  `g_loading_cancel_flag = 1`, nav-pushes `Post Menu`, and returns 1 → the load
+  aborts to the menu.
+- **Any load-step failure** (mission too large, missing asset, etc.): the same
+  early return with `reason = 1` / `Post Menu`.
+
+**Port mapping (the case handling in `main_game.gd`)**:
+
+| Case | Original | Port |
+|---|---|---|
+| SP start | `Game_StartMission`, not-in-session, background-only screen | `_on_start_requested` → `load_mission`; `load_info` carries only `mission_file` (no session text) — MATCHING |
+| Host start | `Game_StartMission`, in-session, session text composited | `_on_lan_host_start_requested` / `_on_novaworld_host_requested` → `load_mission_as_host`; `load_info` carries the SERVERNAME/MISSIONNAME/GAMETYPE/CUSTOMTEXT band — MATCHING |
+| Joiner | two-wait hold to the spawn gate, then reveal | `_on_lan_join_requested` → `load_mission_as_joiner`; reveals at LOCAL-load `world_loaded`, wire handshake continues in-world — **D-LOADSCR-3** (the wire spawn gate is not surfaced to this layer) |
+| Load success | release effect at end, reveal game | `_on_world_loaded` drops the screen + reveals — MATCHING (SP/host) |
+| Load failure / abort | `reason = 1`, nav-push `Post Menu` | `_on_world_load_failed` → `_teardown_world_to_menu` — MATCHING |
+| ESC / disconnect DURING load | `Client_CheckDisconnectOrEscDuringLoad` → abort to menu | our SP/host load is a single synchronous call the SceneTree cannot interrupt; ESC is swallowed while `_world_load_pending` — **D-LOADSCR-7** (unreachable window, not a behavioral loss on the synchronous path) |
+| Return to menu (pause → abort) | nav-push `Post Menu` | `_on_return_to_menu` → `_teardown_world_to_menu` — MATCHING |
+
 ### SP start-mission splash — show_start_mission_splash @ 0x520820 (not yet ported)
 
 At the end of a **single-player** load with a custom background
@@ -190,10 +244,11 @@ key (`Input_HandleSpecialKeys @ 0x49c5c0`, key `dword_B3B744`, @ 0x49c887).
 |---|---|---|---|
 | D-LOADSCR-1 | 8 stage-boundary progress values + per-model pulses at the stage constant | ~30 call sites incl. per-subsystem slot++ ticks (62..69) and separate 7/26 loop constants | our load pipeline decomposes differently; the value set and the pump mechanism (constant + creep) match, granularity doesn't. Cosmetic-only. |
 | D-LOADSCR-2 | Godot FontFile view of the .fnt fonts, drawn under the image scale transform; Godot line metrics + word wrap | CGameFont glyph composite into the texture, `sub_674740`/`sub_6741C0` spacing params (120 small / 0 large, semantics unwitnessed) | glyph-exact spacing is the standing CGameFont follow-up shared with [hud-re.md](hud-re.md); positions/alignments/colors/wrap box are witnessed and ported |
-| D-LOADSCR-3 | joiner drops the loading screen when the local load lands; the join handshake continues in-world | retail holds it through the connect/wait loop until the spawn gate (`NapiClient_WaitForGameStart @ 0x42cc10`, S2C 0x1D — net-re §5.2) | follow-up: keep the screen up until the wire spawn gate on the joiner path |
+| D-LOADSCR-3 | joiner drops the loading screen when the local load lands (`world_loaded` → reveal); the join handshake + spawn continue in-world | retail holds through TWO blocking waits after the local load — `NapiClient_WaitForDisconnect @ 0x42cb20` (connect handshake) then `NapiClient_WaitForGameStart @ 0x42cc10` (spawn gate `g_spawn_success_gate @ 0x24c1928`, S2C 0x1D — net-re §5.2) — revealing only on the spawn leg; cancel/timeout/disconnect at either wait returns to `Post Menu` | follow-up needs the wire spawn gate surfaced from `libs/npwire` → `NovaSimulation` → `GameWorld` as a joiner-spawn signal (net-stack work, out of the loading-flow slice). No in-match spawn signal exists at the GDScript layer today (`nova_world_client.joined_game` is the matchmaking-gate join, not the in-match spawn — using it would reveal too early). Inventing a hold from the wrong signal is refused (faithful-port rule). |
 | D-LOADSCR-4 | SP start-mission splash not ported | `show_start_mission_splash @ 0x520820` (arrow + START_MISSION + LT_Continue) | follow-up; the loading screen itself is unaffected |
 | D-LOADSCR-5 | seven-segment numeric percentage not ported | drawn only under the `g_ShowLoadBarCommandLineArg` command-line flag | debug-only surface; revisit if the launch-flag work wants it |
 | D-LOADSCR-6 | background drawn unmodulated | effect draw modulate `0xFF7F7F7F` = MODULATE2X neutral | net-identical color; documented so nobody "fixes" a half-bright that isn't there |
+| D-LOADSCR-7 | ESC / disconnect during the SP/host load cannot abort it — our load is a single synchronous `operation.call()` the SceneTree cannot interrupt; ESC is swallowed while `_world_load_pending` | `Client_CheckDisconnectOrEscDuringLoad @ 0x520270` polls at four asset points and aborts to `Post Menu` (`reason = 1`, `g_loading_cancel_flag = 1`) on ESC/disconnect | no reachable interruption window on a synchronous host load — the original's blocking `.bms`/model load is likewise uninterruptible except at its network-wait points, which are the joiner path (D-LOADSCR-3). Revisit if the load is ever chunked across frames. |
 
 ## Follow-ups / unknowns
 

@@ -532,8 +532,13 @@ func _on_lan_join_requested(server: Dictionary) -> void:
 	# connect stream by load time [orig: parse_server_session_variables
 	# @ 0x5202f0]; our LAN row carries only mission (+ maybe a server name), so
 	# absent vars stay blank and game_type -1 leaves the game-type line empty.
-	# Retail also HOLDS the screen until the wire spawn gate; we drop it when
-	# the local load lands (docs/interface/loading-screen-re.md D-LOADSCR-3).
+	# Retail also HOLDS the screen through TWO blocking waits after the local
+	# load — NapiClient_WaitForDisconnect @ 0x42cb20 (connect handshake) then
+	# NapiClient_WaitForGameStart @ 0x42cc10 (spawn gate g_spawn_success_gate,
+	# S2C 0x1D) — revealing only on the spawn leg; we drop the screen when the
+	# local load lands and run the handshake in-world (the wire spawn gate is
+	# not surfaced above libs/npwire) (docs/interface/loading-screen-re.md
+	# D-LOADSCR-3, the load-flow case matrix).
 	var load_info := {
 		"mission_file": String(server.get("mission", "")),
 		"in_session": true,
@@ -710,11 +715,15 @@ func _on_world_loaded() -> void:
 	# The GAME music context is the world's to open at mission start (GameWorld
 	# calls NovaMusicService.open_game_context — host-neutral, so ONED play gets
 	# the same music); nothing to do here for audio. Drop the loading screen and
-	# reveal the world + HUD [orig: LoadingScreen_ReleaseEffect at the end of
-	# Game_StartMission @ 0x525d52]. The SP start-mission arrow splash
-	# (newarow1.tga + START_MISSION) is a follow-up [orig:
-	# show_start_mission_splash @ 0x520820, called @ 0x525d48]
-	# (docs/interface/loading-screen-re.md D-LOADSCR-4).
+	# reveal the world + HUD — the witnessed release-then-enter-game at the tail
+	# of Game_StartMission [orig: LoadingScreen_ReleaseEffect @ 0x586b80, final
+	# call @ 0x525d45]. For SP/host this fires at true load completion (parity).
+	# For the JOINER it fires at LOCAL-load completion, one wire spawn gate too
+	# early (D-LOADSCR-3). The SP start-mission arrow splash (newarow1.tga +
+	# START_MISSION), gated !is_multiplayer_session && g_loadscreen_has_custom_bg
+	# && !is_in_session, is a follow-up [orig: show_start_mission_splash
+	# @ 0x520820, called @ 0x525d42] (docs/interface/loading-screen-re.md
+	# D-LOADSCR-4, the load-flow case matrix).
 	_world_load_pending = false
 	_dismiss_loading_screen()
 	_world.visible = true
@@ -722,6 +731,12 @@ func _on_world_loaded() -> void:
 
 
 func _on_world_load_failed(reason: String) -> void:
+	# A load-step failure or abort returns to the menu — the witnessed early
+	# return that sets reason=1 and nav-pushes "Post Menu" out of
+	# Game_StartMission [orig: the "Mission loading aborted" legs @ 0x520270
+	# (Client_CheckDisconnectOrEscDuringLoad) and the network-wait failure legs;
+	# scene_entry = "Post Menu"] (docs/interface/loading-screen-re.md, the
+	# load-flow case matrix).
 	_world_load_pending = false
 	push_warning("MainGame: mission load failed: %s" % reason)
 	_teardown_world_to_menu()
@@ -729,7 +744,11 @@ func _on_world_load_failed(reason: String) -> void:
 
 func _on_camera_escape() -> void:
 	# Esc: pause <-> resume while in a world (the armory closes back to play);
-	# ignored in the main menu (EXIT quits).
+	# ignored in the main menu (EXIT quits). During a load Esc is inert: our
+	# SP/host load is a single synchronous call the SceneTree cannot interrupt,
+	# so there is no reachable analog of the original's per-asset ESC/disconnect
+	# abort poll [orig: Client_CheckDisconnectOrEscDuringLoad @ 0x520270]
+	# (docs/interface/loading-screen-re.md D-LOADSCR-7).
 	if _world_load_pending:
 		return
 	if _state == State.WORLD:
