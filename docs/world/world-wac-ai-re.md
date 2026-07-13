@@ -252,8 +252,11 @@ can see it (`Physics_RaycastTerrainAndSectors` watch-check, retry 62); respawn r
     entity[4]; entity[44]/[219] decay. Torso roll entity[183] (`@0x4b5cff-0x4b5d6d`,
     corrected 2026-07-13 — the earlier "prone 48 halves the chase" reading was wrong):
     anim 48 idle_prone → decay toward level `t −= (t+8)>>4` `@0x4b5d0a`; anims 41/42 →
-    frozen `@0x4b5d20`; else chase entity[6] `t += (roll−t+8)>>4` with the LAG clamped to
-    roll ±238609280 (20°) `@0x4b5d2a..6d`. Ported: `AiSystem::infantry_torso_roll_tick`.
+    skipped here but RAMPED −/+0x4000000 (5.625°) per tick at the separate site
+    `@0x4b700e/@0x4b701d` (the FP barrel-roll view); else chase entity[6]
+    `t += (roll−t+8)>>4` with the LAG clamped to roll ±238609280 (20°) `@0x4b5d2a..6d`
+    — the clamp snaps the wrapped post-roll value back once the clip ends. Ported:
+    `AiSystem::infantry_torso_roll_tick`.
 15. **Mounted pose states** (dump 4464–4539, mount/B2 pass): emplaced gunners force 67–75
     (`emplaced_N` by mount config +2156); seat passengers pose from the seat bone and take
     `sit_N` = `atol(bone_name_digits) + 76`; sit_24 (=100) drivers lean 107–110 by steering

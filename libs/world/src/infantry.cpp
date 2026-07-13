@@ -417,10 +417,13 @@ void AiSystem::infantry_lean_tick(AiEntity &e) {
 }
 
 // The torso-roll producer -- see the ai.h declaration. Prone idle decays toward
-// level, the combat rolls freeze the value (the clip owns the whole body), and
-// everything else chases the entity's slope roll a sixteenth-step per tick,
-// clamped to roll +-0x0E38E380 (20 deg).
-// [orig: Entity_UpdateInfantryPlayerBody @0x4b5cff-0x4b5d6d]
+// level; the combat rolls RAMP it +-0x4000000 (5.625 deg) per tick -- the FP
+// barrel-roll view (the chase block skips 41/42; the ramp is a separate site in
+// the same body pass); everything else chases the entity's slope roll a
+// sixteenth-step per tick with the LAG clamped to roll +-0x0E38E380 (20 deg) --
+// the clamp also snaps the wrapped post-roll value back once the clip ends.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4b5cff-0x4b5d6d (decay/skip/chase)
+//  + @0x4b700c-0x4b7025 (the 41/42 ramp)]
 void AiSystem::infantry_torso_roll_tick(AiEntity &e) {
     InfantryState &inf = e.inf;
     if (inf.anim_state == anim_state::kIdleProne) {  // [orig: cmp 0x30 @0x4b5d05]
@@ -428,9 +431,14 @@ void AiSystem::infantry_torso_roll_tick(AiEntity &e) {
             io::bam_sub(inf.torso_roll, io::bam_sar(io::bam_add(inf.torso_roll, 8), 4));
         return;
     }
-    if (inf.anim_state == anim_state::kRollLeft ||
-        inf.anim_state == anim_state::kRollRight)   // [orig: @0x4b5d20-0x4b5d28]
+    if (inf.anim_state == anim_state::kRollLeft) {   // [orig: @0x4b700e]
+        inf.torso_roll = io::bam_add(inf.torso_roll, -0x4000000);
         return;
+    }
+    if (inf.anim_state == anim_state::kRollRight) {  // [orig: @0x4b701d]
+        inf.torso_roll = io::bam_add(inf.torso_roll, 0x4000000);
+        return;
+    }
     inf.torso_roll = io::bam_add(
         inf.torso_roll, io::bam_sar(io::bam_add(io::bam_sub(e.roll, inf.torso_roll), 8), 4));
     const int32_t delta = io::bam_sub(inf.torso_roll, e.roll);

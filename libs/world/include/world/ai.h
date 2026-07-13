@@ -627,11 +627,13 @@ public:
     // (+0x168==1) +-0x1400000 variant and the Flags 0x20/0x100000 gate legs unported]
     void infantry_lean_tick(AiEntity &e);
     // The torso-roll producer (entity+0x2DC), every body tick: prone idle 48 decays it
-    // toward level (torso -= (torso+8)>>4); the combat rolls 41/42 freeze it (the clip
-    // owns the body); otherwise it chases the entity's slope roll (+0x18) a sixteenth-
-    // step per tick, clamped to roll +-0x0E38E380 (20 deg). Consumers: the FP camera
-    // roll = torsoRoll + lean/4 and the section-14 head/spine roll overlay terms.
-    // [orig: Entity_UpdateInfantryPlayerBody @0x4b5cff-0x4b5d6d]
+    // toward level (torso -= (torso+8)>>4); the combat rolls 41/42 RAMP it
+    // -/+0x4000000 (5.625 deg) per tick — the FP barrel-roll view; otherwise it
+    // chases the entity's slope roll (+0x18) a sixteenth-step per tick with the LAG
+    // clamped to roll +-0x0E38E380 (20 deg), which also snaps the wrapped post-roll
+    // value back once the clip ends. Consumers: the FP camera roll = torsoRoll +
+    // lean/4 and the section-14 head/spine roll overlay terms.
+    // [orig: Entity_UpdateInfantryPlayerBody @0x4b5cff-0x4b5d6d + @0x4b700c-0x4b7025]
     void infantry_torso_roll_tick(AiEntity &e);
     // The upper-body weapon channel (the entity's SECONDARY AnimMap channel): per-tick
     // desired-state selection + the locked/emote commit rule + the clip-end deferred

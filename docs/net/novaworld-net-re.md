@@ -3906,15 +3906,21 @@ renamed in the IDB this session (`g_camera_*`; world-wac-ai-re §14.7 lists them
   for cockpit-type parents; itemDef type-3 entities add `CameraOffset` to the eye with
   pitch += 2·pitchBlend and roll = torsoRoll + lean/4 (the FP lean tilt).
 
-**Port (2026-07-08 controller train; corrected 2026-07-13):** `local_player_host.gd` uses the
-witnessed on-foot chase numbers — distance 3.0, orbit pitch **5.625°** (the 07-08 pass carried
-the 22.5° misconversion, which parked the chase camera at knee height looking up), quarter-step
-anchor smoothing toward the HOST-SAMPLED head-bone eye (Position + CameraOffset `@ 0x437b70`;
-the sim receives the sample per frame via `set_local_player_eye`), orientation = the seed
-angles (equal to the witnessed look-at while the collision march is unported) — and the
-third-person body renders with the §14 aim overlay (world-wac-ai-re §14.6, D-INF-11 partial).
-Still deferred: the collision march, orbit keys, the 0.125u look-at nudge, vehicle mode-1
-(no local mounting), the kill-cam distance reel, the weather/impact shake.
+**Port (2026-07-08 controller train; corrected 2026-07-13 ×2):** `local_player_host.gd` uses
+the IN-PLAY chase state — distance **1.0**, orbit yaw/pitch **0**, the round-start reset
+(`Camera_ResetToLocalPlayer @ 0x4a3d30` ← `Game_StartMission @ 0x525c54` /
+`Game_InitNewRound @ 0x4227a2`; the tight over-the-shoulder view). The 3.0 / 5.625°
+`Camera_SetTrackedEntity` pair (the 07-08 pass also carried a 22.5° misconversion of the
+0x4000000 seed) applies only on tracked-entity CHANGES — kill-cam/spectate retargets, incl.
+a respawn retarget (no ResetToLocalPlayer runs then; only round/mission starts call it).
+Zoom keys (view actions 409/410): `dist −/+= max(dist>>6, 0x800)` clamped [0.5, 512]
+`@ 0x49c1c5..0x49c23f`. Anchor: quarter-step toward the HOST-SAMPLED head-bone eye
+(Position + CameraOffset `@ 0x437b70`; the sim receives the sample per frame via
+`set_local_player_eye`); orientation = the seed angles (equal to the witnessed look-at
+while the collision march is unported); the third-person body renders with the §14 aim
+overlay (world-wac-ai-re §14.6, D-INF-11 partial). Still deferred: the collision march,
+orbit/zoom keys, the 0.125u look-at nudge, vehicle mode-1 (no local mounting), the
+kill-cam distance reel, the weather/impact shake.
 
 **2026-07-13 addendum (the controller-parity pass) — lean, stance keys, input bits, the eye.**
 
@@ -3925,9 +3931,11 @@ Still deferred: the collision march, orbit keys, the 0.125u look-at nudge, vehic
   (right) +0x3000000/tick, gated `!(Flags & 0x100020)`, not prone, and `!(Flags & 2)`; a seated
   (`+0x168 == 1`) ±0x1400000 variant `@ 0x4b66b5/@ 0x4b66c3`. Ramp-vs-decay equilibrium
   ≈ ±0x30000000 (67.5°). Consumers: the FP camera roll (`torsoRoll + lean/4` @ 0x437fe6 — torsoRoll's own producer
-  `@ 0x4b5cff..6d` is witnessed+ported 2026-07-13: chase of the slope roll, frozen during
-  rolls 41/42, decayed to level in prone idle 48), the §14 aim-overlay lean term, the remote
-  CameraOffset trig (reads −lean `@ 0x4b699f`), and the prone roll anims 41/42.
+  `@ 0x4b5cff..6d` + `@ 0x4b700c..25` is witnessed+ported 2026-07-13: chase of the slope
+  roll with the ±20° LAG clamp; prone idle 48 decays to level; the combat rolls 41/42 RAMP
+  it −/+0x4000000 (5.625°) per tick — the FP barrel-roll view, snapped back by the clamp
+  when the clip ends), the §14 aim-overlay lean term, the remote CameraOffset trig (reads
+  −lean `@ 0x4b699f`), and the prone roll anims 41/42.
 - **`g_inputFlags` bit map (the key handlers `Input_HandleActionBinding_0 @ 0x4e0420`)**:
   0x2 forward / 0x4 back / 0x8 strafe-left / 0x10 strafe-right (cases 152/151/156/157);
   0x20 look-up (155) / 0x40 look-down; 0x100/0x200 keyboard turn L/R (158/159); 0x1000 jump

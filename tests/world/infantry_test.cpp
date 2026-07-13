@@ -1433,13 +1433,14 @@ int main() {
         run_ticks(ai, w, 200, 201);
         CHECK(e->inf.torso_roll == -0x30000000 + 0x0E38E380);
 
-        // The combat roll freezes the value even while roll differs
-        // [orig: @0x4b5d20-0x4b5d28] (41 is a LOCKED state, so the selection
-        // parks its own target in pending and the state holds).
+        // The combat roll RAMPS torsoRoll -0x4000000 (5.625 deg) per tick — the FP
+        // barrel-roll view [orig: @0x4b700e; the chase block skips 41/42
+        // @0x4b5d20-0x4b5d28] (41 is a LOCKED state, so the selection parks its
+        // own target in pending and the state holds).
         e->inf.anim_state = anim_state::kRollLeft;
-        const int32_t frozen = e->inf.torso_roll;
+        const int32_t at_roll_start = e->inf.torso_roll;
         run_ticks(ai, w, 201, 205);
-        CHECK(e->inf.torso_roll == frozen);
+        CHECK(e->inf.torso_roll == at_roll_start - 4 * 0x4000000);
 
         // Prone idle decays toward level regardless of the slope
         // [orig: @0x4b5d0a-0x4b5d16].

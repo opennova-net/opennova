@@ -24,19 +24,24 @@ const PLAYER_HEAD_BONE_INDEX := 14
 # included) [orig: @0x438001..0x438031 — Math_FixedPointTransformPoint22 of
 # (-0x3000, 0, 0) added onto g_view_pos].
 const PLAYER_EYE_PULLBACK := 0.1875
-# Witnessed chase-camera numbers: distance 3.0 (0x30000) and orbit pitch 5.625 deg
-# (0x4000000 BAM32 = 2^26/2^32*360 — an earlier note misconverted it as 22.5), the
-# on-change defaults [orig: Camera_SetTrackedEntity @0x439213/@0x43921d]; the eye is
-# anchor + R(yaw + orbit_yaw, pitch + orbit_pitch)*(-dist, 0, 0) with the SAME angles
-# as the view rotation (roll 0) [orig: Camera_ComputeThirdPersonView @0x438100..0x438171,
-# offset @0x4383e2]; the anchor chases Position + CameraOffset (the head-bone eye)
-# quarter-step per tick [orig: ThirdPersonCamera_Update @0x437b70/@0x437c8d]. Orbit
-# keys (input flags 0x10/0x40 -> orbit_yaw ±0x1000000/tick @0x437c1b), the bone
-# collision march (dist < 8.0 @0x4381e9), the R*(0x2000,0x2000,0x2000) anchor nudge
-# @0x43818a, and the dead-target 10.0 -> 3.0 distance ease @0x437cc0 are tracked
-# deferrals (net-re section 5.39).
-const PLAYER_TP_DISTANCE := 3.0
-const PLAYER_TP_ORBIT_PITCH_DEG := 5.625
+# Witnessed chase-camera numbers. The in-play state is the ROUND-START RESET —
+# distance 1.0, orbit yaw 0, orbit pitch 0 [orig: Camera_ResetToLocalPlayer
+# @0x4a3d30 (distance 0x10000 @0x4a3d4c, orbit zeroed @0x4a3d56/5b), called from
+# Game_StartMission @0x525c54 and Game_InitNewRound @0x4227a2] — the tight
+# over-the-shoulder view. The 3.0 / 5.625 deg pair is only the tracked-entity-
+# CHANGE seed (kill-cam/spectate retarget) [orig: Camera_SetTrackedEntity
+# @0x439213/@0x43921d]. The eye is anchor + R(yaw + orbit_yaw, pitch +
+# orbit_pitch)*(-dist, 0, 0) with the SAME angles as the view rotation (roll 0)
+# [orig: Camera_ComputeThirdPersonView @0x438100..0x438171, offset @0x4383e2];
+# the anchor chases Position + CameraOffset (the head-bone eye) quarter-step per
+# tick [orig: ThirdPersonCamera_Update @0x437b70/@0x437c8d]. Orbit keys (view
+# bits 0x10/0x40 -> orbit_yaw ±0x1000000/tick @0x437c1b), the zoom keys (view
+# actions 409/410: dist -/+= max(dist>>6, 0x800), clamped [0.5, 512]
+# @0x49c1c5..0x49c23f), the bone collision march (dist < 8.0 @0x4381e9), the
+# R*(0x2000,0x2000,0x2000) anchor nudge @0x43818a, and the dead-target
+# 10.0 -> 3.0 distance ease @0x437cc0 are tracked deferrals (net-re section 5.39).
+const PLAYER_TP_DISTANCE := 1.0          # [orig: the reset 0x10000 @0x4a3d4c]
+const PLAYER_TP_ORBIT_PITCH_DEG := 0.0   # [orig: the reset zero @0x4a3d5b]
 # First-person weapon viewmodel placement, witnessed from weapon.def `pos` (hip) / `tpos` (ADS).
 # The original adds the equipped weapon's view-bias offset to the eye in view-local space, rotated by
 # the view orientation, then draws the gun (gfx1) + character arms at that view root
