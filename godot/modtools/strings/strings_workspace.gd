@@ -404,15 +404,15 @@ func open_strings_table(path: String, key: String) -> Error:
 		var err := open_file(path)
 		if err != OK:
 			return err
-	return focus_reference({"key": key})
+	return focus_reference(FocusPayload.for_key(key))
 
 
-# Cross-jump focus hook (EditorWorkspace.focus_reference): {"key": String} filters
-# the table to the key and selects its entry. Runs before the shell mounts this
+# Cross-jump focus hook (EditorWorkspace.focus_reference): `key` filters the
+# table to the key and selects its entry. Runs before the shell mounts this
 # workspace's viewport, so the search is stashed and applied when mount_viewport
 # builds the view.
-func focus_reference(focus: Dictionary) -> Error:
-	var key := String(focus.get("key", ""))
+func focus_reference(focus: FocusPayload) -> Error:
+	var key := focus.key
 	if key.is_empty():
 		return OK
 	_ensure_editor()

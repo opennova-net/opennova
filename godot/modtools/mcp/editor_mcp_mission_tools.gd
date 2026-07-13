@@ -266,7 +266,7 @@ func _tool_new_mission(args: Dictionary, ctx: McpToolContext) -> Variant:
 		if not resolved["ok"]:
 			return McpToolResult.error("Terrain '%s' not found: %s. List with list_assets(kind=\"terrain\")." % [terrain, String(resolved.get("error", ""))])
 		var target := String(resolved["path"]) if resolved.get("loose", false) else String(resolved["name"])
-		var terr_err: Error = ctx.shell.open_in_workspace("terrain", target, {})
+		var terr_err: Error = ctx.shell.open_in_workspace("terrain", target)
 		if terr_err != OK:
 			return McpToolResult.error("Could not load terrain '%s' (%s)." % [terrain, error_string(terr_err)])
 		await ctx.frames(1)

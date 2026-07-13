@@ -631,7 +631,8 @@ func _tool_open_in_workspace(args: Dictionary, ctx: McpToolContext) -> Variant:
 	if ws != null and ws.has_unsaved_changes() and String(ws.get_current_resource_path()) != target \
 			and not bool(args.get("discard", false)):
 		return McpToolResult.error("The %s workspace has unsaved changes — save in the editor first, or pass discard: true to replace them." % workspace_id)
-	var focus: Dictionary = args.get("focus", {}) if args.get("focus") is Dictionary else {}
+	# The wire focus object is the transport encoding; decode it at this edge.
+	var focus := FocusPayload.from_dict(args.get("focus", {}) if args.get("focus") is Dictionary else {})
 	var err: Error = ctx.shell.open_in_workspace(WORKSPACE_TO_KIND[workspace_id], target, focus)
 	await ctx.frames(1)
 	if err != OK:

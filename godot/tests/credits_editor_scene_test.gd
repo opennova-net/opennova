@@ -35,7 +35,7 @@ class RefShell:
 		# would early-return in _commit and make the commit assertion vacuous.
 		on_pick.call("C:/res/Gunpl27b.fnt")
 
-	func open_in_workspace(kind: String, path: String, _focus: Dictionary = {}) -> Error:
+	func open_in_workspace(kind: String, path: String, _focus: FocusPayload = null) -> Error:
 		jumped.append([kind, path])
 		return OK
 

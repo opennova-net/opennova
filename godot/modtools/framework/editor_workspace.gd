@@ -399,11 +399,11 @@ func open_file(_path: String) -> Error:
 
 
 # Focus an element of the open document after a cross-workspace jump: the shell's
-# open_in_workspace(kind, path, focus) forwards its focus Dictionary here once the
-# target file is open. Keys are workspace-defined (strings: {"key"}, menus:
-# {"screen"}); a workspace documents its keys on the override. Default: nothing
-# to focus.
-func focus_reference(_focus: Dictionary) -> Error:
+# open_in_workspace(kind, path, focus) forwards its FocusPayload here once the
+# target file is open. Each workspace reads only the payload fields it owns
+# (strings: key, menus: screen/variable) and documents them on the override.
+# Default: nothing to focus.
+func focus_reference(_focus: FocusPayload) -> Error:
 	return OK
 
 
