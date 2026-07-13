@@ -703,6 +703,16 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 		if _placer != null and _placer.has_method("get_placed_world_positions"):
 			model_anchors = _placer.get_placed_world_positions()
 		_dispatcher.set_model_anchors(model_anchors)
+		# Retail's candidate set is the sector renderer's per-frame entity wave
+		# (entities of RENDERED sectors — the traversal reaches the terrain
+		# draw distance, i.e. the fog level) [orig:
+		# Terrain_RenderSectorEntitiesBySide @ 0x5c7d50 over the wave list
+		# @ 0x2984890]. The model pass itself draws UNFOGGED black, so anchors
+		# past the fog wash must not dispatch: a fixed range both painted
+		# unfogged silhouettes onto fog-washed ground and blinked whole
+		# clusters as the camera swayed across the cutoff.
+		if _env != null:
+			_dispatcher.model_anchor_range = maxf(_env.get_fog_level(), 64.0)
 		# FAR runs the witnessed 42u near-cell pool around the camera; the
 		# MODEL walk gates on view depth + the view frustum via camera_xform
 		# (retail dispatches only VISIBLE sector entities [orig:

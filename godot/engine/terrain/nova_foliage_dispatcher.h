@@ -91,11 +91,16 @@ public:
 	void set_model_anchors(const PackedVector3Array &p_anchors);
 	PackedVector3Array get_model_anchors() const;
 
-	// Host visibility mapping for the model tier: retail only dispatches
-	// VISIBLE sector entities (sector render + occlusion test); the host
-	// approximates with a view-depth range gate. Anchors beyond this many
-	// world units of view depth are skipped. Default 512 = the distance where
-	// the witnessed alpha-ref curve reaches its floor (4096/512 = 8).
+	// Host visibility mapping for the model tier: retail dispatches the
+	// sector renderer's per-frame entity wave — entities of RENDERED sectors,
+	// which the traversal bounds by the terrain draw distance (the fog
+	// level), plus a per-entity occlusion test [orig:
+	// Terrain_RenderSectorEntitiesBySide @ 0x5c7d50 over the wave list
+	// @ 0x2984890/0x2984888]. The host approximates with this view-depth
+	// range gate; GameWorld wires it to the env fog level each tick (the
+	// model pass draws UNFOGGED black — anchors past the fog wash must not
+	// dispatch). Occlusion stays un-hosted. The default only covers hosts
+	// that never wire an environment.
 	void set_model_anchor_range(float p_range);
 	float get_model_anchor_range() const;
 

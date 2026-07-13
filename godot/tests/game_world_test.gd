@@ -436,6 +436,51 @@ func test_set_foliage_hidden_is_safe_without_a_dispatcher() -> void:
 	assert_true(world.is_foliage_hidden(), "the flag holds even with no dispatcher to act on")
 
 
+class FogEnvStub:
+	extends Node
+	var fog_level := 300.0
+	func get_fog_level() -> float:
+		return fog_level
+
+
+func test_tick_bounds_model_anchors_by_the_terrain_draw_distance() -> void:
+	# Retail dispatches the sector renderer's entity wave — entities of
+	# RENDERED sectors, bounded by the terrain draw distance (the fog level)
+	# [orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7d50 over the wave list
+	# @ 0x2984890]. The model pass draws UNFOGGED black, so a fixed host range
+	# painted silhouettes onto fog-washed ground and blinked clusters at the
+	# cutoff. The host must re-wire the gate to the env fog level every tick.
+	var world := GameWorld.new()
+	var terrain := NovaTerrain.new()
+	terrain.name = "NovaTerrain"
+	var disp := NovaFoliageDispatcher.new()
+	disp.name = "FoliageDispatcher"
+	terrain.add_child(disp)
+	world.add_child(terrain)
+	var env := FogEnvStub.new()
+	env.name = "NovaEnvironment"
+	world.add_child(env)
+	add_child_autofree(world)
+	await get_tree().process_frame  # _ready wires _dispatcher/_env from the named children
+
+	world._loaded = true
+	env.fog_level = 300.0
+	world.tick(Vector3.ZERO)
+	assert_almost_eq(disp.model_anchor_range, 300.0, 0.001,
+		"the model anchor gate tracks the environment's terrain draw distance")
+
+	env.fog_level = 750.0
+	world.tick(Vector3.ZERO)
+	assert_almost_eq(disp.model_anchor_range, 750.0, 0.001,
+		"a fog change re-bounds the gate on the next tick")
+
+	env.fog_level = 1.0
+	world.tick(Vector3.ZERO)
+	assert_almost_eq(disp.model_anchor_range, 64.0, 0.001,
+		"a degenerate fog level clamps to the floor instead of disabling the tier")
+	world._loaded = false
+
+
 func _make_world() -> GameWorld:
 	var world := GameWorld.new()
 	var terrain := NovaTerrain.new()
