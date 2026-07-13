@@ -164,6 +164,15 @@ Write-side / debug outputs (not boot inputs): `SS%0.5d.tga`, `_errlog.txt`,
   (expected from `menu_style.mns`); the specific `.fnt` names were not traced.
 - `menutxt.bin`'s first load-from-archive site was not individually traced
   (witnessed only as lazy lookups).
-- Wave-2 deliverable: the engine-side manifest table (in `libs/`, near
-  `libs/gameprofile`) generated from this record, consumed by the game's boot
-  validation and ONED's diagnostics/new-game scaffold (ENG-6 / ONED-REQ).
+- ~~Wave-2 deliverable: the engine-side manifest table~~ **LANDED (ENG-6,
+  Wave-2 trunk)**: `libs/gameprofile/required_resources.h` instantiates this
+  record (phase-major witnessed order, severity classes, per-row failure text
+  + citation; `required_resources` ctest pins the fatal set and completeness).
+  `NovaResourceRoot.list_missing_boot_resources()` /
+  `boot_resource_failure_text()` probe the individually-fatal file rows
+  against the mounted root (the archive-table trio stays `mount_runtime`'s
+  own gate), and the game shell raises honest missing-resource errors at
+  mount (`main_game.gd`, reported-not-enforced — the picker flow keeps a
+  partial dir inspectable where retail MessageBox-exits). Edits to this
+  record and the table land in the same change. ONED's diagnostics/new-game
+  scaffold conveniences over the same table remain ONED-REQ (Wave 3).

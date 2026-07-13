@@ -240,6 +240,56 @@ const uint8_t *fnt_get_page_data_const(const fnt_font_t *font, uint32_t page_ind
 	return font->pages + ((size_t)page_index * FNT_TEXTURE_SIZE);
 }
 
+fnt_error_t fnt_pack_shelf(const fnt_pack_size_t *sizes, size_t count,
+                           fnt_pack_rect_t *out_rects, uint32_t *out_page_count) {
+	if (!sizes || !out_rects || !out_page_count) {
+		return FNT_ERR_NULL_POINTER;
+	}
+	const uint32_t max_w = FNT_TEXTURE_WIDTH - 2u * FNT_PACK_PAD;
+	const uint32_t max_h = FNT_TEXTURE_HEIGHT - 2u * FNT_PACK_PAD;
+	uint32_t page = 0;
+	uint32_t cx = FNT_PACK_PAD;
+	uint32_t cy = FNT_PACK_PAD;
+	uint32_t shelf_h = 0;
+	for (size_t i = 0; i < count; ++i) {
+		if (sizes[i].width == 0 || sizes[i].height == 0) {
+			out_rects[i].page = 0;
+			out_rects[i].x = 0;
+			out_rects[i].y = 0;
+			out_rects[i].width = 0;
+			out_rects[i].height = 0;
+			continue;
+		}
+		uint32_t w = sizes[i].width < max_w ? sizes[i].width : max_w;
+		uint32_t h = sizes[i].height < max_h ? sizes[i].height : max_h;
+		if (cx + w + FNT_PACK_PAD > FNT_TEXTURE_WIDTH) {
+			cx = FNT_PACK_PAD;
+			cy += shelf_h + FNT_PACK_PAD;
+			shelf_h = 0;
+		}
+		if (cy + h + FNT_PACK_PAD > FNT_TEXTURE_HEIGHT) {
+			page += 1;
+			cx = FNT_PACK_PAD;
+			cy = FNT_PACK_PAD;
+			shelf_h = 0;
+			if (page >= FNT_MAX_PAGES) {
+				return FNT_ERR_INVALID_PAGE_COUNT;
+			}
+		}
+		out_rects[i].page = page;
+		out_rects[i].x = cx;
+		out_rects[i].y = cy;
+		out_rects[i].width = w;
+		out_rects[i].height = h;
+		cx += w + FNT_PACK_PAD;
+		if (h > shelf_h) {
+			shelf_h = h;
+		}
+	}
+	*out_page_count = page + 1;
+	return FNT_OK;
+}
+
 const char *fnt_error_string(fnt_error_t error) {
 	switch (error) {
 		case FNT_OK: return "Success";

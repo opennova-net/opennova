@@ -5,6 +5,7 @@
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/resource.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
+#include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/rect2i.hpp>
 
 #include <fnt/fnt.h>
@@ -18,8 +19,23 @@ protected:
 	static void _bind_methods();
 
 public:
+	// FNT format facts, single-sourced from libs/fnt (ENG-4): editor scripts
+	// alias these instead of re-declaring the numbers.
+	enum {
+		FIRST_CHAR = FNT_FIRST_CHAR,
+		GLYPH_COUNT = FNT_GLYPH_COUNT,
+		TEXTURE_WIDTH = FNT_TEXTURE_WIDTH,
+		TEXTURE_HEIGHT = FNT_TEXTURE_HEIGHT,
+		MAX_PAGES = FNT_MAX_PAGES,
+		PACK_PAD = FNT_PACK_PAD,
+	};
+
 	NovaFntResource();
 	~NovaFntResource();
+
+	// fnt_pack_shelf over (width, height) pairs; returns (page, x, y, w, h)
+	// quintuples per input cell, or an empty array on overflow/bad input.
+	static PackedInt32Array pack_shelf(const PackedInt32Array &p_sizes);
 
 	Error create_blank(int p_page_count, int p_shadow_offset);
 	Error load_from_bytes(const PackedByteArray &p_bytes);

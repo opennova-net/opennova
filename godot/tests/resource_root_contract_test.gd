@@ -111,6 +111,32 @@ func test_runtime_expansion_override_chain() -> void:
 	assert_eq(resources.read_file("baseonly.trn").get_string_from_utf8(), "base trn")
 
 
+func test_boot_manifest_reports_missing_fatal_resources() -> void:
+	# ENG-6: the witnessed boot manifest (libs/gameprofile required_resources,
+	# docs/required-resources.md) probed against the mounted root. Only the
+	# individually-fatal FILE rows are probed; the boot-archive-table trio is
+	# mount_runtime's own gate [orig: fatal check @ 0x4a6f44].
+	var root := _make_flat_root("boot_manifest")
+	_write_pff(root.path_join("resource.pff"), [
+		{"name": "gametext.bin", "bytes": "strings"},
+	])
+
+	var resources := NovaResourceRoot.new()
+	assert_eq(resources.mount_runtime(root), OK)
+	var missing := resources.list_missing_boot_resources()
+	assert_false("gametext.bin" in missing, "A mounted fatal-set file is not reported missing.")
+	assert_true("vmacros.bin" in missing, "Missing fatal-set files are named.")
+	assert_true("keyhelp.bin" in missing, "Missing fatal-set files are named.")
+	assert_true("items.def" in missing, "Missing fatal-set files are named.")
+	assert_true("main.mnu" in missing, "The menu-phase fatal is probed too.")
+	assert_false("resource.pff" in missing, "Archive-table rows are the mount gate's job, never probed per-file.")
+	assert_true(resources.boot_resource_failure_text("gametext.bin").contains("Unable to load game strings"),
+		"Failure text quotes the witnessed retail behavior.")
+	assert_eq(resources.boot_resource_failure_text("nonsense.xyz"), "", "Unknown names have no failure text.")
+	assert_eq(NovaResourceRoot.new().list_missing_boot_resources().size(), 0,
+		"An unmounted root probes nothing.")
+
+
 func test_resource_root_list_expansions() -> void:
 	var root := _make_flat_root("list_expansions")
 	# Two valid expansions (a subdir holding a matching <name>.pff) plus one incomplete

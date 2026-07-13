@@ -100,6 +100,18 @@ public:
 	Ref<Texture2D> load_texture(const String &name) const;
 	Ref<Resource> load_font(const String &name) const;
 
+	// The witnessed boot-required manifest (ENG-6, libs/gameprofile
+	// required_resources; witness source docs/required-resources.md).
+	// list_missing_boot_resources probes the FATAL-class file rows against
+	// this mounted root and returns the missing names (empty = boot-viable).
+	// The boot-archive-table trio is excluded: its all-missing gate is
+	// enforced by mount_runtime itself [orig: PFF_OpenAllArchives @ 0x4a4310;
+	// fatal check @ 0x4a6f44]. boot_resource_failure_text quotes the
+	// witnessed failure behavior for a manifest name ("" for unknown names)
+	// so hosts can raise honest missing-resource errors.
+	PackedStringArray list_missing_boot_resources() const;
+	String boot_resource_failure_text(const String &name) const;
+
 	// C++ siblings only (not bound): direct read access to the underlying index
 	// so NovaReferenceIndex can list entries with their size/mtime stamps
 	// without Variant-boxing the whole listing through GDScript dictionaries.

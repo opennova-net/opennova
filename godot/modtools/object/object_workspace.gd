@@ -16,11 +16,13 @@ enum Workflow { PREVIEW, MATERIALS, PARTS, LIGHTS, LODS, ANIMS }
 
 # Workflow inspectors are declared as typed InspectorDef rows in _build_inspector_defs().
 
-const OED_UPDATE_NONE := 0
-const OED_UPDATE_MTRL := 1
-const OED_UPDATE_LGHT := 2
-const OED_UPDATE_PANM := 4
-const OED_UPDATE_ALL := OED_UPDATE_MTRL | OED_UPDATE_LGHT | OED_UPDATE_PANM
+# Aliases of the NovaObjectData binding, single-sourced from libs/oed
+# (OED_UPDATE_*) — ENG-4.
+const OED_UPDATE_NONE := NovaObjectData.UPDATE_NONE
+const OED_UPDATE_MTRL := NovaObjectData.UPDATE_MTRL
+const OED_UPDATE_LGHT := NovaObjectData.UPDATE_LGHT
+const OED_UPDATE_PANM := NovaObjectData.UPDATE_PANM
+const OED_UPDATE_ALL := NovaObjectData.UPDATE_ALL
 # Maximum value of a 16-bit unsigned field (control registers, light rate).
 const U16_VALUE_MAX := 65535
 

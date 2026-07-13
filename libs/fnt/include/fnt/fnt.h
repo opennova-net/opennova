@@ -105,6 +105,38 @@ static inline void fnt_get_glyph_size(const fnt_glyph_t *glyph,
 	*height = y1 - y0;
 }
 
+/* ---- Authoring-side glyph packing (FntMaker-style; ENG-4) ----
+ * Our from-scratch page layout for generated fonts. This is authoring policy
+ * (not witnessed engine behavior): the engine reads any layout the glyph
+ * table describes; the packer only decides where our writer puts glyphs. */
+
+/* Gutter between packed glyph cells and to the page edges. */
+#define FNT_PACK_PAD 1u
+
+typedef struct {
+	uint32_t width; /* 0 (with height 0) marks an empty cell */
+	uint32_t height;
+} fnt_pack_size_t;
+
+typedef struct {
+	uint32_t page;
+	uint32_t x;
+	uint32_t y;
+	uint32_t width; /* 0 for empty input cells */
+	uint32_t height;
+} fnt_pack_rect_t;
+
+/* Deterministic first-fit shelf packer over the fixed 256x256 pages.
+ * Cells are placed in input order left-to-right along the current shelf; a
+ * cell that would cross the right edge starts a new shelf; a shelf that
+ * would cross the bottom edge starts a new page. Cell sizes clamp to the
+ * maximal packable size (FNT_TEXTURE_WIDTH/HEIGHT - 2*FNT_PACK_PAD). Empty
+ * cells (0x0) receive an all-zero rect and consume no space. Returns
+ * FNT_ERR_INVALID_PAGE_COUNT when the layout would exceed FNT_MAX_PAGES;
+ * out_page_count receives the number of pages used (>= 1). */
+fnt_error_t fnt_pack_shelf(const fnt_pack_size_t *sizes, size_t count,
+                           fnt_pack_rect_t *out_rects, uint32_t *out_page_count);
+
 const char *fnt_error_string(fnt_error_t error);
 
 #ifdef __cplusplus
