@@ -47,17 +47,17 @@ func refresh() -> void:
 	if workspace == null or not workspace.shows_tile_gizmo():
 		return
 	var state := workspace.get_tile_gizmo_state()
-	if state.is_empty():
+	if state == null:
 		return
 
 	var camera: Camera3D = workspace.get_viewport_camera()
 	if camera == null:
 		return
 
-	var anchor_world: Vector3 = state.get("anchor_world", Vector3.ZERO)
+	var anchor_world := state.anchor_world
 	var lane_rect := _viewport_lane.get_global_rect()
 	var lane_end := lane_rect.position + lane_rect.size
-	_label.text = String(state.get("label", ""))
+	_label.text = state.label
 
 	var gizmo_size := _gizmo.get_combined_minimum_size()
 	_gizmo.size = gizmo_size

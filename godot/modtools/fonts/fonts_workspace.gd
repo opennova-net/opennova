@@ -117,7 +117,7 @@ func _make_inspector() -> Control:
 
 	# "Used by" rides the shell's reference index; headless hosts get no strip.
 	var services := get_reference_services()
-	if not services.is_empty():
+	if services != null:
 		var strip := ReferenceStrip.new()
 		strip.name = "UsedByStrip"
 		# Kind filter: referrer buckets are name-keyed, and the bare stem the

@@ -117,7 +117,7 @@ class UsedByShell:
 	func get_reference_index() -> IndexStub:
 		return index
 
-	func open_in_workspace(_kind: String, _path: String, _focus: Dictionary = {}) -> Error:
+	func open_in_workspace(_kind: String, _path: String, _focus: FocusPayload = null) -> Error:
 		return OK
 
 

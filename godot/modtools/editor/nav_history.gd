@@ -2,29 +2,23 @@ class_name EditorNavHistory
 extends RefCounted
 
 ## Browser-style navigation history over shell locations. The shell records a
-## lazy departure snapshot — {workspace_id: int, path: String} — each time the
-## user leaves a location through a navigation entry point, and Back/Forward
-## walk those snapshots as two stacks. The current location is never stored:
+## lazy departure snapshot — an EditorNavLocation — each time the user leaves
+## a location through a navigation entry point, and Back/Forward walk those
+## snapshots as two stacks. The current location is never stored:
 ## go_back/go_forward pass it in at commit time (peek → navigate → commit or
-## drop), so a failed restore can never corrupt the stacks. Entries stay plain
-## Dictionaries so future context (selection, camera) is additive.
+## drop), so a failed restore can never corrupt the stacks.
 
 const MAX_ENTRIES := 50
 
-var _back: Array[Dictionary] = []
-var _forward: Array[Dictionary] = []
-
-
-static func same(a: Dictionary, b: Dictionary) -> bool:
-	return int(a.get("workspace_id", -1)) == int(b.get("workspace_id", -1)) \
-			and String(a.get("path", "")) == String(b.get("path", ""))
+var _back: Array[EditorNavLocation] = []
+var _forward: Array[EditorNavLocation] = []
 
 
 ## Push a departure snapshot. Consecutive duplicates collapse, and any recorded
 ## navigation invalidates the forward stack (browser semantics).
-func record(entry: Dictionary) -> void:
+func record(entry: EditorNavLocation) -> void:
 	_forward.clear()
-	if not _back.is_empty() and same(_back.back(), entry):
+	if not _back.is_empty() and EditorNavLocation.same(_back.back(), entry):
 		return
 	_back.append(entry)
 	while _back.size() > MAX_ENTRIES:
@@ -39,24 +33,24 @@ func can_go_forward() -> bool:
 	return not _forward.is_empty()
 
 
-func peek_back() -> Dictionary:
-	return _back.back() if not _back.is_empty() else {}
+func peek_back() -> EditorNavLocation:
+	return _back.back() if not _back.is_empty() else null
 
 
-func peek_forward() -> Dictionary:
-	return _forward.back() if not _forward.is_empty() else {}
+func peek_forward() -> EditorNavLocation:
+	return _forward.back() if not _forward.is_empty() else null
 
 
 ## Commit a successful Back: the peeked entry leaves the back stack and the
 ## pre-navigation current location becomes the Forward destination.
-func commit_back(current: Dictionary) -> Dictionary:
-	var entry: Dictionary = _back.pop_back()
+func commit_back(current: EditorNavLocation) -> EditorNavLocation:
+	var entry: EditorNavLocation = _back.pop_back()
 	_forward.append(current)
 	return entry
 
 
-func commit_forward(current: Dictionary) -> Dictionary:
-	var entry: Dictionary = _forward.pop_back()
+func commit_forward(current: EditorNavLocation) -> EditorNavLocation:
+	var entry: EditorNavLocation = _forward.pop_back()
 	_back.append(current)
 	return entry
 

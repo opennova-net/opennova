@@ -8,10 +8,8 @@ func _ctx() -> McpToolContext:
 	return McpToolContext.new()
 
 
-func _def(name: String, extra := {}) -> Dictionary:
-	var def := { "name": name, "description": "test tool", "input_schema": { "type": "object" } }
-	def.merge(extra)
-	return def
+func _def(name: String, serial := true, timeout_ms := McpToolDef.DEFAULT_TIMEOUT_MS) -> McpToolDef:
+	return McpToolDef.make(name, "test tool", {}, [], serial, timeout_ms)
 
 
 func test_register_validates() -> void:
@@ -43,13 +41,13 @@ func test_list_tools_descriptor_shape() -> void:
 	var tool: Dictionary = registry.list_tools()[0]
 	assert_eq(tool["name"], "shaped")
 	assert_eq(tool["description"], "test tool")
-	assert_eq(tool["inputSchema"], { "type": "object" })
+	assert_eq(tool["inputSchema"], { "type": "object", "properties": {} })
 
 
 func test_is_serial_default_and_override() -> void:
 	var registry := McpToolRegistry.new()
 	registry.register(_def("locked"), func(_a, _c): return 0)
-	registry.register(_def("free", { "serial": false }), func(_a, _c): return 0)
+	registry.register(_def("free", false), func(_a, _c): return 0)
 	assert_true(registry.is_serial("locked"))
 	assert_false(registry.is_serial("free"))
 	assert_true(registry.is_serial("unknown"), "Unknown names default to serialized.")
@@ -88,7 +86,7 @@ func test_call_coroutine_handler() -> void:
 
 func test_call_timeout_returns_error_not_hang() -> void:
 	var registry := McpToolRegistry.new()
-	registry.register(_def("stuck", { "timeout_ms": 60 }), func(_a, ctx):
+	registry.register(_def("stuck", true, 60), func(_a, ctx):
 		await ctx.frames(100000)
 		return "never")
 	var ctx := _ctx()

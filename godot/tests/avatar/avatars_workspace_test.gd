@@ -119,11 +119,11 @@ func test_focus_reference_selects_avatar_entities() -> void:
 		pending("Avatars.def fixture missing")
 		return
 	assert_eq(_ws.open_file(path), OK)
-	assert_eq(_ws.focus_reference({"part": "JO_BODY_SEAL_1", "kind": NovaAvatarDatabase.PART_BODY}), OK)
+	assert_eq(_ws.focus_reference(FocusPayload.for_part(NovaAvatarDatabase.PART_BODY, "JO_BODY_SEAL_1")), OK)
 	assert_eq(_ws.get_active_workflow_id(), _ws.Workflow.PARTS)
-	assert_eq(_ws.focus_reference({"nat": 0, "div": 0, "combo": 0}), OK)
+	assert_eq(_ws.focus_reference(FocusPayload.for_combo(0, 0, 0)), OK)
 	assert_eq(_ws.get_active_workflow_id(), _ws.Workflow.TREE)
-	assert_eq(_ws.focus_reference({"part": "NO_SUCH_PART", "kind": NovaAvatarDatabase.PART_HEAD}), ERR_DOES_NOT_EXIST)
+	assert_eq(_ws.focus_reference(FocusPayload.for_part(NovaAvatarDatabase.PART_HEAD, "NO_SUCH_PART")), ERR_DOES_NOT_EXIST)
 
 
 func test_selecting_combo_composes_preview() -> void:

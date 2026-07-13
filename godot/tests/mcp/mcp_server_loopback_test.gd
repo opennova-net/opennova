@@ -22,10 +22,8 @@ func _client(port: int) -> RefCounted:
 	return client
 
 
-func _tool_def(name: String, extra := {}) -> Dictionary:
-	var def := { "name": name, "description": "test", "input_schema": { "type": "object" } }
-	def.merge(extra)
-	return def
+func _tool_def(name: String, serial := true) -> McpToolDef:
+	return McpToolDef.make(name, "test", {}, [], serial)
 
 
 # Coroutine helper so tests can run two tool calls concurrently.
@@ -84,7 +82,7 @@ func test_tools_list_shape() -> void:
 	var tools: Array = envelope["result"]["tools"]
 	assert_eq(tools.size(), 1)
 	assert_eq(tools[0]["name"], "echo")
-	assert_eq(tools[0]["inputSchema"], { "type": "object" })
+	assert_eq(tools[0]["inputSchema"], { "type": "object", "properties": {} })
 
 
 func test_tool_call_roundtrip() -> void:
@@ -135,7 +133,7 @@ func test_non_serial_tool_bypasses_queue() -> void:
 		await ctx.frames(10)
 		order.append("slow")
 		return "ok")
-	server.registry.register(_tool_def("monitor", { "serial": false }), func(_args, _ctx):
+	server.registry.register(_tool_def("monitor", false), func(_args, _ctx):
 		order.append("monitor")
 		return "ok")
 	var a: RefCounted = await _client(server.get_port())

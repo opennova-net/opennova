@@ -204,10 +204,10 @@ func test_focus_reference_selects_variable() -> void:
 	var pair := _mounted_workspace()
 	var ws = pair[0]
 	assert_eq(ws.open_file(FIXTURE), OK)
-	assert_eq(ws.focus_reference({"variable": "TRIM_COLOR"}), OK, "known variable focuses")
+	assert_eq(ws.focus_reference(FocusPayload.for_variable("TRIM_COLOR")), OK, "known variable focuses")
 	assert_eq(ws._mns_editor.get_selected_variable(), "TRIM_COLOR", "selection landed")
-	assert_eq(ws.focus_reference({"variable": "NOPE"}), ERR_DOES_NOT_EXIST, "unknown variable reports")
-	assert_eq(ws.focus_reference({}), OK, "empty focus is a no-op")
+	assert_eq(ws.focus_reference(FocusPayload.for_variable("NOPE")), ERR_DOES_NOT_EXIST, "unknown variable reports")
+	assert_eq(ws.focus_reference(FocusPayload.new()), OK, "empty focus is a no-op")
 	ws.release_viewport()
 
 

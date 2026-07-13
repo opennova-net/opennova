@@ -190,7 +190,7 @@ func supports_document_tabs() -> bool:
 	return true
 
 
-func get_document_tabs() -> Array:
+func get_document_tabs() -> Array[DocumentTabRow]:
 	return _tabs.tabs()
 
 
@@ -821,18 +821,18 @@ func open_file(path: String) -> Error:
 
 
 # Cross-jump focus hook (EditorWorkspace.focus_reference):
-#   {"screen": String}   — select the named screen in the active menu tab.
-#   {"variable": String} — activate the Styles tab and select the variable
-#                          (the Mns "Used by" strip stays the same wiring; it
-#                          jumps here on a referrer click).
-func focus_reference(focus: Dictionary) -> Error:
-	var variable := String(focus.get("variable", "")).strip_edges()
+#   screen   — select the named screen in the active menu tab.
+#   variable — activate the Styles tab and select the variable (the Mns
+#              "Used by" strip stays the same wiring; it jumps here on a
+#              referrer click).
+func focus_reference(focus: FocusPayload) -> Error:
+	var variable := focus.variable.strip_edges()
 	if not variable.is_empty():
 		_on_style_jump(variable)
 		return OK if _mns_editor != null and is_instance_valid(_mns_editor) \
 				and _mns_editor.get_selected_variable() == variable \
 			else ERR_DOES_NOT_EXIST
-	return focus_screen_named(String(focus.get("screen", "")))
+	return focus_screen_named(focus.screen)
 
 
 func focus_screen_named(screen_name: String) -> Error:

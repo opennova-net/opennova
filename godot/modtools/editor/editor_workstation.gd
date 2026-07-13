@@ -654,7 +654,7 @@ func get_active_workspace_id() -> int:
 # methods; the font/strings/menu jumps below are forwarders over this, and link
 # widgets call it directly. A path equal to the workspace's current document skips
 # the reopen, so focus-only jumps cannot drop unsaved edits.
-func open_in_workspace(kind: String, path: String, focus: Dictionary = {}) -> Error:
+func open_in_workspace(kind: String, path: String, focus: FocusPayload = null) -> Error:
 	_ensure_workspaces()
 	var workspace_id := _workspace_id_for_resource_kind(kind)
 	if workspace_id == -1:
@@ -676,13 +676,10 @@ func open_in_workspace(kind: String, path: String, focus: Dictionary = {}) -> Er
 		sync_from_editor_state()
 	# A focus miss below still navigated, so the departure records either way.
 	_record_nav_departure(from)
-	if not focus.is_empty():
+	if focus != null and not focus.is_empty():
 		var focus_err: Error = workspace.focus_reference(focus)
 		if focus_err != OK:
-			var parts := PackedStringArray()
-			for value in focus.values():
-				parts.append(str(value))
-			show_status_message("Opened %s; not found: %s" % [clean_path.get_file(), ", ".join(parts)], 0.0, &"warn")
+			show_status_message("Opened %s; not found: %s" % [clean_path.get_file(), focus.describe()], 0.0, &"warn")
 			return focus_err
 	return OK
 
@@ -748,7 +745,7 @@ func open_font_workspace(font_name: String) -> Error:
 # text table in the Strings workspace and focus the given key. table_path is an
 # absolute path (already resolved by the caller).
 func open_strings_workspace(table_path: String, key: String) -> Error:
-	var err := open_in_workspace("strings", table_path, {"key": key})
+	var err := open_in_workspace("strings", table_path, FocusPayload.for_key(key))
 	if err != OK:
 		return err
 	show_status_message("Editing string %s." % (key if not key.is_empty() else table_path.get_file()), 3.0, &"info")
@@ -764,7 +761,7 @@ func open_menu_workspace(file: String, screen: String = "") -> Error:
 		show_status_message("Menu not found: %s" % file.strip_edges(), 0.0, &"error")
 		return ERR_FILE_NOT_FOUND
 	var target := screen.strip_edges()
-	var err := open_in_workspace("menu", path, {"screen": target} if not target.is_empty() else {})
+	var err := open_in_workspace("menu", path, FocusPayload.for_screen(target) if not target.is_empty() else null)
 	if err != OK:
 		return err
 	show_status_message("Opened menu %s%s." % [
@@ -780,17 +777,17 @@ func open_menu_workspace(file: String, screen: String = "") -> Error:
 # open document ("" when none). Captured lazily at departure, so everything
 # beyond the path (selection, tabs, camera) keeps living in the persistent
 # workspace instance itself.
-func _location_snapshot() -> Dictionary:
+func _location_snapshot() -> EditorNavLocation:
 	var workspace := _get_active_workspace()
 	var path := String(workspace.get_current_resource_path()) if workspace != null else ""
-	return {"workspace_id": _active_workspace_id, "path": path}
+	return EditorNavLocation.make(_active_workspace_id, path)
 
 
 # Record `from` if the navigation that just ran actually moved the user.
 # Same-location jumps (focus-only, failed opens, the Environment popup) leave
 # the location unchanged and record nothing.
-func _record_nav_departure(from: Dictionary) -> void:
-	if EditorNavHistory.same(from, _location_snapshot()):
+func _record_nav_departure(from: EditorNavLocation) -> void:
+	if EditorNavLocation.same(from, _location_snapshot()):
 		return
 	_nav_history.record(from)
 	_refresh_nav_buttons()
@@ -805,7 +802,7 @@ func go_back() -> void:
 		_nav_history.commit_back(current)
 	else:
 		_nav_history.drop_back()
-		show_status_message("Could not open %s." % String(entry.get("path", "")).get_file(), 0.0, &"error")
+		show_status_message("Could not open %s." % entry.path.get_file(), 0.0, &"error")
 	_refresh_nav_buttons()
 
 
@@ -818,7 +815,7 @@ func go_forward() -> void:
 		_nav_history.commit_forward(current)
 	else:
 		_nav_history.drop_forward()
-		show_status_message("Could not open %s." % String(entry.get("path", "")).get_file(), 0.0, &"error")
+		show_status_message("Could not open %s." % entry.path.get_file(), 0.0, &"error")
 	_refresh_nav_buttons()
 
 
@@ -828,12 +825,12 @@ func go_forward() -> void:
 # open_in_workspace's same-path skip, so returning to a still-open document
 # keeps selection, tabs, and undo intact — and a failed reopen returns before
 # any workspace switch, leaving the user where they were.
-func _navigate_to(entry: Dictionary) -> Error:
-	var workspace_id := int(entry.get("workspace_id", -1))
+func _navigate_to(entry: EditorNavLocation) -> Error:
+	var workspace_id := entry.workspace_id
 	var workspace := _get_workspace(workspace_id)
 	if workspace == null:
 		return ERR_UNAVAILABLE
-	var entry_path := String(entry.get("path", ""))
+	var entry_path := entry.path
 	if not entry_path.is_empty() and entry_path != String(workspace.get_current_resource_path()):
 		var err: Error = workspace.open_file(entry_path)
 		if err != OK:
@@ -856,14 +853,14 @@ func _refresh_nav_buttons() -> void:
 		_nav_forward_button.tooltip_text = _nav_tooltip("Forward", _nav_history.peek_forward())
 
 
-func _nav_tooltip(verb: String, entry: Dictionary) -> String:
-	if entry.is_empty():
+func _nav_tooltip(verb: String, entry: EditorNavLocation) -> String:
+	if entry == null:
 		return verb
-	var workspace := _get_workspace(int(entry.get("workspace_id", -1)))
+	var workspace := _get_workspace(entry.workspace_id)
 	var label := String(workspace.get_workspace_label()) if workspace != null else ""
 	if label.is_empty():
 		return verb
-	var file := String(entry.get("path", "")).get_file()
+	var file := entry.path.get_file()
 	if file.is_empty():
 		return "%s to %s" % [verb, label]
 	return "%s to %s (%s)" % [verb, label, file]

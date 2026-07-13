@@ -240,29 +240,31 @@ func apply_model(model: Dictionary) -> void:
 	_show_default_combo()
 
 
-func focus_reference(focus: Dictionary) -> Error:
+# Focus fields owned here: part (+ part_kind; -1 = head) selects a part in the
+# Parts workflow; nat/div/combo selects a tree combo.
+func focus_reference(focus: FocusPayload) -> Error:
 	var database = db()
 	if database == null or not database.is_loaded() or focus.is_empty():
 		return OK
-	if focus.has("part"):
-		var kind := int(focus.get("kind", focus.get("part_kind", NovaAvatarDatabase.PART_HEAD)))
-		var name := String(focus.get("part", ""))
-		if name.is_empty() or database.get_part(kind, name).is_empty():
+	if not focus.part.is_empty():
+		var kind := focus.part_kind if focus.part_kind >= 0 else NovaAvatarDatabase.PART_HEAD
+		var name := focus.part
+		if database.get_part(kind, name).is_empty():
 			return ERR_DOES_NOT_EXIST
 		activate_workflow(Workflow.PARTS)
 		var parts := get_workflow_inspector(Workflow.PARTS)
 		if parts != null and parts.has_method("focus_part"):
 			return parts.focus_part(kind, name)
 		return OK
-	if focus.has("nat") and focus.has("div") and focus.has("combo"):
-		var nat := int(focus["nat"])
-		var div := int(focus["div"])
-		var combo := int(focus["combo"])
-		if nat < 0 or nat >= database.get_nationality_count():
+	if focus.nat >= 0 and focus.div >= 0 and focus.combo >= 0:
+		var nat := focus.nat
+		var div := focus.div
+		var combo := focus.combo
+		if nat >= database.get_nationality_count():
 			return ERR_DOES_NOT_EXIST
-		if div < 0 or div >= database.get_division_count(nat):
+		if div >= database.get_division_count(nat):
 			return ERR_DOES_NOT_EXIST
-		if combo < 0 or combo >= database.get_combo_count(nat, div):
+		if combo >= database.get_combo_count(nat, div):
 			return ERR_DOES_NOT_EXIST
 		activate_workflow(Workflow.TREE)
 		var tree := get_workflow_inspector(Workflow.TREE)

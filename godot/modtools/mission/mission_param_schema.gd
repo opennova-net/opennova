@@ -16,12 +16,12 @@ static func _source() -> NovaMissionData:
 	return _mission_schema_source
 
 
-static func trigger_slots(main_type: int, sub_type: int) -> Dictionary:
-	return _source().get_trigger_param_schema(main_type, sub_type)
+static func trigger_slots(main_type: int, sub_type: int) -> MissionParamSpec:
+	return MissionParamSpec.from_dict(_source().get_trigger_param_schema(main_type, sub_type))
 
 
-static func action_slots(action_type: int, sub_type: int = 0) -> Dictionary:
-	return _source().get_action_param_schema(action_type, sub_type)
+static func action_slots(action_type: int, sub_type: int = 0) -> MissionParamSpec:
+	return MissionParamSpec.from_dict(_source().get_action_param_schema(action_type, sub_type))
 
 
 static func is_picker(kind: int) -> bool:

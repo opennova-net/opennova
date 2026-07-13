@@ -173,7 +173,7 @@ class UsedByShell:
 	func get_resource_root() -> NovaResourceRoot:
 		return root
 
-	func open_in_workspace(kind: String, path: String, _focus: Dictionary = {}) -> Error:
+	func open_in_workspace(kind: String, path: String, _focus: FocusPayload = null) -> Error:
 		opened.append([kind, path])
 		return OK
 

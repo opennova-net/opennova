@@ -69,6 +69,11 @@ const WORKSPACE_TO_KIND := {
 	"mnu": "menu", "music": "music", "sound": "sound", "environment": "environment",
 }
 
+## Watchdog budgets for the slow tools: opening a mission loads its terrain
+## and places its objects; screenshots wait on render frames.
+const _OPEN_TIMEOUT_MS := 120000
+const _SCREENSHOT_TIMEOUT_MS := 30000
+
 const EXTRA_API_CLASSES: Array[String] = ["EnvFile", "RtxtStringFile", "CbinCreditsResource", "MnsStyleSheet", "PerfTimeline", "FlyCamera"]
 
 var service: Node
@@ -79,52 +84,52 @@ func _init(mcp_service: Node) -> void:
 
 
 func register_all(registry: McpToolRegistry) -> void:
-	registry.register(_def("get_editor_state",
+	registry.register(McpToolDef.make("get_editor_state",
 			"Deep snapshot of the ONED editor: version, mounted resource root, every workspace (open document, dirty, capabilities), the active workspace, mission/sim status, camera pose, recent perf lines, and a log cursor. Call this first in a session and after any surprising result.",
 			{}), Callable(self, "_tool_editor_state"))
-	registry.register(_def("get_logs",
+	registry.register(McpToolDef.make("get_logs",
 			"Editor log since a cursor: server/status entries plus engine lines (print, push_warning, push_error) tailed from Godot's log file. Omit cursor to resume from this session's last read (first call: recent tail). Use after any failed or surprising operation.",
 			{
 				"cursor": { "type": "integer", "description": "Resume after this seq (from a previous next_cursor or get_editor_state.log_cursor). Omit to resume the session cursor." },
 				"limit": { "type": "integer", "default": 200, "minimum": 1, "maximum": 1000 },
 				"sources": { "type": "array", "items": { "type": "string", "enum": ["server", "script", "status", "engine"] }, "description": "Filter by source; omit for all." },
-			}, [], { "serial": false }), Callable(self, "_tool_get_logs"))
-	registry.register(_def("show_status_message",
+			}, [], false), Callable(self, "_tool_get_logs"))
+	registry.register(McpToolDef.make("show_status_message",
 			"Show a transient message in the editor's status bar — visible to the human at the keyboard. Use it to narrate what you are about to do.",
 			{
 				"text": { "type": "string" },
 				"duration_s": { "type": "number", "default": 4.0 },
 			}, ["text"]), Callable(self, "_tool_show_status"))
-	registry.register(_def("set_fullscreen",
+	registry.register(McpToolDef.make("set_fullscreen",
 			"Put the editor window into (or out of) fullscreen — the core-engine window mode (NovaWindow), the same F11 toggles. Do this before screenshots so the 3D viewport fills the display. Omit `enabled` to toggle. Returns the resulting fullscreen state.",
 			{
 				"enabled": { "type": "boolean", "description": "true = fullscreen, false = windowed; omit to toggle." },
 			}), Callable(self, "_tool_set_fullscreen"))
-	registry.register(_def("set_resource_root",
+	registry.register(McpToolDef.make("set_resource_root",
 			"Mount a different game resource root (loose asset dir or install dir with PFFs) — the same seam as the editor's folder picker. Persists like the UI action; note the previous dir from get_editor_state first if you plan to restore it.",
 			{
 				"dir": { "type": "string", "description": "Absolute directory to mount." },
 			}, ["dir"]), Callable(self, "_tool_set_resource_root"))
-	registry.register(_def("set_node_visible",
+	registry.register(McpToolDef.make("set_node_visible",
 			"Show/hide a live scene node (CanvasItem/Node3D `visible`) — tier/layer isolation while troubleshooting rendering. Path rules match get_node_state. Restore what you hide.",
 			{
 				"path": { "type": "string" },
 				"visible": { "type": "boolean" },
 			}, ["path", "visible"]), Callable(self, "_tool_set_node_visible"))
-	registry.register(_def("get_node_state",
+	registry.register(McpToolDef.make("get_node_state",
 			"Troubleshooting X-ray for a live scene node: resolve it by absolute path or recursive name search, read named properties, and call zero-arg read-only query methods (get_*/is_*/has_* names only). Returns class, script, and child names for orientation. Read-only.",
 			{
 				"path": { "type": "string", "description": "Absolute node path (\"/root/...\"), or a bare node NAME searched recursively from the scene root (first match; e.g. \"FoliageDispatcher\")." },
 				"properties": { "type": "array", "items": { "type": "string" }, "description": "Property names to read." },
 				"call": { "type": "array", "items": { "type": "string" }, "description": "Zero-arg query methods to call — get_*/is_*/has_* names only." },
 			}, ["path"]), Callable(self, "_tool_get_node_state"))
-	registry.register(_def("describe_api",
+	registry.register(McpToolDef.make("describe_api",
 			"Read-only API reference: with no args, lists topics, engine classes (Nova*), and live editor objects. name: methods/properties/constants of a class (\"NovaMissionData\") or live object (\"shell\", \"editor\", \"mission_controller\", \"runtime\", \"sim\", \"camera\", \"resource_root\", \"workspace:strings\") — useful for understanding result shapes. topic: a guide (\"coordinates\", \"camera\", \"workspaces\", \"menus\").",
 			{
 				"name": { "type": "string", "description": "Class or live-object name." },
 				"topic": { "type": "string", "description": "Guide topic." },
 			}), Callable(self, "_tool_describe_api"))
-	registry.register(_def("list_assets",
+	registry.register(McpToolDef.make("list_assets",
 			"List game assets in the mounted resource root by kind: mission, terrain, environment, object (3dp/3di/ase), font, credits, strings, menu, music (banks + scripts), sound — or \"\" for everything. filter is a case-insensitive substring over name and relative path.",
 			{
 				"kind": { "type": "string", "default": "" },
@@ -132,7 +137,7 @@ func register_all(registry: McpToolRegistry) -> void:
 				"limit": { "type": "integer", "default": 200, "minimum": 1, "maximum": 1000 },
 				"offset": { "type": "integer", "default": 0 },
 			}), Callable(self, "_tool_list_assets"))
-	registry.register(_def("read_file",
+	registry.register(McpToolDef.make("read_file",
 			"Read a file by resource name (resolved through loose dirs and PFF archives, with SCR/BFC1 decode) or absolute path. Returns text (lossy for binary) or base64; window large files with offset/max_bytes.",
 			{
 				"path": { "type": "string" },
@@ -140,22 +145,22 @@ func register_all(registry: McpToolRegistry) -> void:
 				"offset": { "type": "integer", "default": 0 },
 				"max_bytes": { "type": "integer", "default": 65536, "maximum": 1048576 },
 			}, ["path"]), Callable(self, "_tool_read_file"))
-	registry.register(_def("describe_asset",
+	registry.register(McpToolDef.make("describe_asset",
 			"Structured JSON summary of a game asset by name/path, dispatched on type: mission (header info, entity counts, waypoints, logic), strings (sections + texts), menu (screen/widget tree), font (pages, glyph metrics), environment (full property set + time-of-day samples), sound profile, 3di (shallow), pff (entry list). depth=\"full\" adds bounded detail.",
 			{
 				"path": { "type": "string" },
 				"depth": { "type": "string", "enum": ["summary", "full"], "default": "summary" },
 				"limit": { "type": "integer", "default": 100, "description": "Per-collection cap in full depth." },
 			}, ["path"]), Callable(self, "_tool_describe_asset"))
-	registry.register(_def("open_in_workspace",
+	registry.register(McpToolDef.make("open_in_workspace",
 			"Open an asset in its workspace and switch to it — the same path the editor's own cross-jumps use. workspace: terrain|object|mission|fonts|credits|strings|mnu|music|sound|environment. Fails if that workspace has unsaved changes unless discard=true. Opening a mission also loads its terrain and places its objects (can take seconds).",
 			{
 				"workspace": { "type": "string" },
 				"path": { "type": "string" },
 				"discard": { "type": "boolean", "default": false, "description": "Allow replacing an unsaved document." },
 				"focus": { "type": "object", "description": "Workspace-defined focus target (e.g. {\"key\": ...} for strings)." },
-			}, ["workspace", "path"], { "timeout_ms": 120000 }), Callable(self, "_tool_open_in_workspace"))
-	registry.register(_def("set_camera",
+			}, ["workspace", "path"], true, _OPEN_TIMEOUT_MS), Callable(self, "_tool_open_in_workspace"))
+	registry.register(McpToolDef.make("set_camera",
 			"Aim the editor's 3D camera, then screenshot to see the result. One mode per call: frame_entity={kind, index} selects and frames a mission entity; frame_point={x, z, radius?, yaw_deg?, pitch_deg?} orbits a world-space terrain point at its ground height (radius is roughly how much terrain stays in view, default 60); position=[x,y,z] with look_at=[x,y,z] sets an exact pose. Works in terrain/mission/object 3D views; object-preview cameras support only position+look_at. Returns the resulting pose.",
 			{
 				"frame_entity": { "type": "object", "properties": { "kind": { "type": "integer" }, "index": { "type": "integer" } } },
@@ -163,26 +168,26 @@ func register_all(registry: McpToolRegistry) -> void:
 				"position": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
 				"look_at": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
 			}), Callable(self, "_tool_set_camera"))
-	registry.register(_def("undo",
+	registry.register(McpToolDef.make("undo",
 			"Undo the last edit in a workspace (default: the active one) — mission edits, terrain strokes, whatever that workspace's history holds. steps repeats it. Mission undo is rejected while the simulation runs (sim_control stop first). Returns what remains undoable.",
 			{
 				"workspace": { "type": "string", "default": "" },
 				"steps": { "type": "integer", "default": 1, "minimum": 1, "maximum": 50 },
 			}), Callable(self, "_tool_undo"))
-	registry.register(_def("redo",
+	registry.register(McpToolDef.make("redo",
 			"Redo previously undone edits in a workspace (default: the active one). steps repeats it.",
 			{
 				"workspace": { "type": "string", "default": "" },
 				"steps": { "type": "integer", "default": 1, "minimum": 1, "maximum": 50 },
 			}), Callable(self, "_tool_redo"))
-	registry.register(_def("screenshot",
+	registry.register(McpToolDef.make("screenshot",
 			"Capture the editor as an image. target=\"viewport\": the 3D view (what the camera sees; falls back to the window in 2D workspaces). target=\"window\": the whole editor UI. Returns the image plus a caption (workspace, document, camera pose). Aim first — see describe_api(topic=\"camera\").",
 			{
 				"target": { "type": "string", "enum": ["viewport", "window"], "default": "viewport" },
 				"max_dim": { "type": "integer", "default": 1280, "minimum": 64, "maximum": 4096 },
 				"format": { "type": "string", "enum": ["webp", "png"], "default": "webp" },
 				"quality": { "type": "number", "default": 0.8 },
-			}, [], { "timeout_ms": 30000 }), Callable(self, "_tool_screenshot"))
+			}, [], true, _SCREENSHOT_TIMEOUT_MS), Callable(self, "_tool_screenshot"))
 
 
 func _tool_set_resource_root(args: Dictionary, ctx: McpToolContext) -> Variant:
@@ -299,15 +304,6 @@ static func _node_state_jsonable(v: Variant, depth: int = 0) -> Variant:
 			return var_to_str(v)
 
 
-static func _def(name: String, description: String, properties := {}, required: Array = [], extra := {}) -> Dictionary:
-	var schema := { "type": "object", "properties": properties }
-	if not required.is_empty():
-		schema["required"] = required
-	var def := { "name": name, "description": description, "input_schema": schema }
-	def.merge(extra)
-	return def
-
-
 func _tool_editor_state(_args: Dictionary, ctx: McpToolContext) -> Variant:
 	var shell := ctx.shell
 	if shell == null:
@@ -362,7 +358,7 @@ func _workspace_state(ws: Variant) -> Dictionary:
 		},
 	}
 	if ws.supports_document_tabs():
-		out["documents"] = { "tabs": ws.get_document_tabs(), "active": ws.get_active_document_index() }
+		out["documents"] = { "tabs": DocumentTabRow.to_dict_rows(ws.get_document_tabs()), "active": ws.get_active_document_index() }
 	return out
 
 
@@ -631,7 +627,8 @@ func _tool_open_in_workspace(args: Dictionary, ctx: McpToolContext) -> Variant:
 	if ws != null and ws.has_unsaved_changes() and String(ws.get_current_resource_path()) != target \
 			and not bool(args.get("discard", false)):
 		return McpToolResult.error("The %s workspace has unsaved changes — save in the editor first, or pass discard: true to replace them." % workspace_id)
-	var focus: Dictionary = args.get("focus", {}) if args.get("focus") is Dictionary else {}
+	# The wire focus object is the transport encoding; decode it at this edge.
+	var focus := FocusPayload.from_dict(args.get("focus", {}) if args.get("focus") is Dictionary else {})
 	var err: Error = ctx.shell.open_in_workspace(WORKSPACE_TO_KIND[workspace_id], target, focus)
 	await ctx.frames(1)
 	if err != OK:

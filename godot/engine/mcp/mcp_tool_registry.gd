@@ -13,23 +13,20 @@ extends RefCounted
 ## awaits) so a stuck tool degrades to an error result instead of wedging the
 ## connection and the serialized tool queue.
 
-const DEFAULT_TIMEOUT_MS := 60000
-
-# name -> { def: Dictionary, handler: Callable, source: String, order: int }
+# name -> { def: McpToolDef, handler: Callable, source: String, order: int }
 var _tools := {}
 var _order_counter := 0
 
 
-## Register a tool. def: { name, description, input_schema (JSON Schema dict),
-## title?, serial? (default true: runs through the server's FIFO queue),
-## timeout_ms? }. handler: func(args: Dictionary, ctx: McpToolContext), may be
-## a coroutine; its return is wrapped via McpToolResult.json unless it already
-## returns a McpToolResult. Re-registering the same name replaces the entry
-## (keeping its list position); a non-builtin may not shadow a builtin.
-func register(def: Dictionary, handler: Callable, source := "builtin") -> Error:
-	var name := String(def.get("name", ""))
-	if name.is_empty() or not handler.is_valid():
+## Register a tool. def: an McpToolDef (name, description, JSON-Schema args,
+## serial/timeout policy). handler: func(args: Dictionary, ctx: McpToolContext),
+## may be a coroutine; its return is wrapped via McpToolResult.json unless it
+## already returns a McpToolResult. Re-registering the same name replaces the
+## entry (keeping its list position); a non-builtin may not shadow a builtin.
+func register(def: McpToolDef, handler: Callable, source := "builtin") -> Error:
+	if def == null or def.name.is_empty() or not handler.is_valid():
 		return ERR_INVALID_PARAMETER
+	var name := def.name
 	if _tools.has(name) and _tools[name]["source"] == "builtin" and source != "builtin":
 		return ERR_ALREADY_EXISTS
 	var order: int = _tools[name]["order"] if _tools.has(name) else _order_counter
@@ -53,7 +50,7 @@ func has_tool(name: String) -> bool:
 func is_serial(name: String) -> bool:
 	if not _tools.has(name):
 		return true
-	return bool(_tools[name]["def"].get("serial", true))
+	return (_tools[name]["def"] as McpToolDef).serial
 
 
 func builtin_names() -> PackedStringArray:
@@ -78,15 +75,7 @@ func list_tools() -> Array:
 		return int(a["order"]) < int(b["order"]))
 	var out := []
 	for entry in entries:
-		var def: Dictionary = entry["def"]
-		var tool := {
-			"name": def.get("name", ""),
-			"description": def.get("description", ""),
-			"inputSchema": def.get("input_schema", { "type": "object" }),
-		}
-		if def.has("title"):
-			tool["title"] = def["title"]
-		out.append(tool)
+		out.append((entry["def"] as McpToolDef).to_list_entry())
 	return out
 
 
@@ -97,18 +86,18 @@ func call_tool(name: String, args: Dictionary, ctx: McpToolContext) -> McpToolRe
 	if not _tools.has(name):
 		return McpToolResult.error("Unknown tool: %s. Call tools/list for the catalog." % name)
 	var entry: Dictionary = _tools[name]
+	var def: McpToolDef = entry["def"]
 	var state := { "done": false, "value": null }
 	_invoke(entry["handler"], args, ctx, state)
 	if not state["done"]:
-		var timeout_ms := int(entry["def"].get("timeout_ms", DEFAULT_TIMEOUT_MS))
-		var deadline := Time.get_ticks_msec() + timeout_ms
+		var deadline := Time.get_ticks_msec() + def.timeout_ms
 		var scene_tree := ctx.main_tree()
 		while not state["done"] and scene_tree != null and Time.get_ticks_msec() < deadline:
 			await scene_tree.process_frame
 	if not state["done"]:
 		ctx.cancelled = true
 		return McpToolResult.error(
-			"Tool '%s' did not finish within its %d ms budget — it timed out or hit a script error mid-await. Check get_logs." % [name, int(entry["def"].get("timeout_ms", DEFAULT_TIMEOUT_MS))])
+			"Tool '%s' did not finish within its %d ms budget — it timed out or hit a script error mid-await. Check get_logs." % [name, def.timeout_ms])
 	var value: Variant = state["value"]
 	var result: McpToolResult = value if value is McpToolResult else McpToolResult.json(value)
 	for attachment in ctx.images:
