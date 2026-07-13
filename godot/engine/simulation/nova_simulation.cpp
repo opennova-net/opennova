@@ -28,6 +28,7 @@
 #include <mission/mission.h>          // kItemIdOffset (wire type id -> items.def id)
 #include <mission/mission_systems.h>
 #include <anim/aim_overlay.h> // the torso-bend overlay blends [orig: @0x4b1290]
+#include <io/bam.h>           // bam_add/bam_sar: the FP roll term composition
 #include <world/angle.h>
 #include <world/player_spawn.h>
 #include <world/spawn_select.h>
@@ -837,6 +838,7 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("clear_local_player_weapon"), &NovaSimulation::clear_local_player_weapon);
 	ClassDB::bind_method(D_METHOD("set_local_player_weapon_input", "fire_held", "fire_pressed", "reload_pressed"), &NovaSimulation::set_local_player_weapon_input);
 	ClassDB::bind_method(D_METHOD("request_local_player_scope_toggle"), &NovaSimulation::request_local_player_scope_toggle);
+	ClassDB::bind_method(D_METHOD("set_local_player_eye", "eye_godot", "valid"), &NovaSimulation::set_local_player_eye);
 	ClassDB::bind_method(D_METHOD("set_local_player_camera_third_person", "third_person"), &NovaSimulation::set_local_player_camera_third_person);
 	ClassDB::bind_method(D_METHOD("get_local_player_view"), &NovaSimulation::get_local_player_view);
 	ClassDB::bind_static_method("NovaSimulation", D_METHOD("fov_vertical_from_horizontal", "fov_h_deg", "aspect"), &NovaSimulation::fov_vertical_from_horizontal);
@@ -1510,12 +1512,16 @@ Dictionary NovaSimulation::get_local_player_aim_overlay() const {
 	// The head-look decay term carries the arms-dip feed (the +0x371 weapon-switch
 	// window drops it 0x2800000/tick; infantry_weapon_channel owns the decay)
 	// [orig: @ 0x4b5cab..0x4b5cd5]. The lean term is the sim's lean angle
-	// (entity+0xB0; ramp/decay in infantry_lean_tick). roll / body_pitch /
-	// torso_roll / pitch_blend stay 0 until their sim sources (recoil, slope roll,
-	// AI head-look) are ported — the formulas carry the terms so those drop in
-	// without touching this seam.
+	// (entity+0xB0; ramp/decay in infantry_lean_tick); roll is the slope-chase
+	// visual roll (entity+0x18) and torso_roll its sixteenth-step chaser
+	// (entity+0x2DC, infantry_torso_roll_tick). body_pitch / pitch_blend stay 0
+	// until their sim sources (slope body pitch on this seam, recoil impulses)
+	// are ported — the formulas carry the terms so those drop in without
+	// touching this seam.
 	in.head_look_decay = p->inf.head_look_decay;
 	in.lean = p->inf.lean_angle;
+	in.roll = p->roll;
+	in.torso_roll = p->inf.torso_roll;
 	in.aim_state = (opennova::world::infantry_anim_flags(p->inf.anim_state) & 0x40u) != 0;
 	in.rolling = (p->inf.anim_state == opennova::world::anim_state::kRollLeft ||
 	              p->inf.anim_state == opennova::world::anim_state::kRollRight);
@@ -1760,10 +1766,24 @@ void NovaSimulation::tick_local_player_view() {
 	}
 	const opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);
 	if (!e) return;
-	// The eye is +1.0 world unit above Position, mission space (Z-up)
-	// [orig: Camera_ComputeThirdPersonView @ 0x437d10 eye = Position + 0x10000].
-	const float eye[3] = {e->position.x, e->position.y, e->position.z + 1.0f};
+	// The anchor-chase target is Position + CameraOffset — the posed head-bone eye
+	// [orig: ThirdPersonCamera_Update @ 0x437b70..76], fed by the host's per-frame
+	// skeleton sample (see local_eye_mission_). Without a sample: Position + 1.0,
+	// the witnessed NON-person bump [orig: @ 0x437e8f].
+	const float eye[3] = {
+		local_eye_valid_ ? local_eye_mission_[0] : e->position.x,
+		local_eye_valid_ ? local_eye_mission_[1] : e->position.y,
+		local_eye_valid_ ? local_eye_mission_[2] : e->position.z + 1.0f,
+	};
 	opennova::world::player_view_tick(player_view_, eye);
+}
+
+void NovaSimulation::set_local_player_eye(const Vector3 &p_eye_godot, bool p_valid) {
+	// Godot (x, y, z) -> mission (x, -z, y), the get_local_player_position inverse.
+	local_eye_mission_[0] = p_eye_godot.x;
+	local_eye_mission_[1] = -p_eye_godot.z;
+	local_eye_mission_[2] = p_eye_godot.y;
+	local_eye_valid_ = p_valid;
 }
 
 Dictionary NovaSimulation::get_local_player_view() const {
@@ -1802,17 +1822,19 @@ Dictionary NovaSimulation::get_local_player_view() const {
 	out["tp_anchor"] = Vector3(player_view_.tp_anchor[0], player_view_.tp_anchor[2],
 			-player_view_.tp_anchor[1]);
 	out["tp_anchor_valid"] = player_view_.tp_anchor_valid;
-	// The lean angle in degrees for the FP camera roll term: roll = torsoRoll + lean/4
-	// (torsoRoll is an unported tail). [orig: the on-foot person leg @ 0x437fcd —
-	// g_view_rot_roll = entity+0x2DC + (entity+0xB0 >> 2)]
+	// The FP camera roll in degrees: roll = torsoRoll + lean/4 [orig: the on-foot
+	// person leg @ 0x437fe6 — g_view_rot_roll = entity+0x2DC + (entity+0xB0 >> 2)].
 	{
-		float lean_deg = 0.0f;
+		float fp_roll_deg = 0.0f;
 		if (world_ && world_->ai && world_->cached.local_player.valid()) {
-			if (const AiEntity *p = world_->ai->for_handle(world_->cached.local_player))
-				lean_deg = static_cast<float>(
-						static_cast<double>(p->inf.lean_angle) * opennova::world::kDegreesPerBam);
+			if (const AiEntity *p = world_->ai->for_handle(world_->cached.local_player)) {
+				const int32_t roll_bam = opennova::io::bam_add(
+						p->inf.torso_roll, opennova::io::bam_sar(p->inf.lean_angle, 2));
+				fp_roll_deg = static_cast<float>(
+						static_cast<double>(roll_bam) * opennova::world::kDegreesPerBam);
+			}
 		}
-		out["lean_deg"] = lean_deg;
+		out["fp_roll_deg"] = fp_roll_deg;
 	}
 	return out;
 }

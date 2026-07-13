@@ -8,23 +8,35 @@ const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer
 # follows the animation (stand/crouch/prone/jump all move it) [orig: the local bone
 # path @0x4b6bb3 stores head−Position into CameraOffset(+0x6C); the on-foot person
 # camera leg adds it @0x437f9c]. +1.0 is the witnessed NON-person fallback bump
-# [orig: @0x437e8f], kept for the no-skeleton case. F4 swaps to a behind+above
-# third person [orig: ThirdPersonCamera_Update @0x437af0]. Mouse look is SIM-owned:
+# [orig: @0x437e8f], kept for the no-skeleton case. F4 swaps to the mode-1 chase
+# camera [orig: ThirdPersonCamera_Update @0x437af0]. Mouse look is SIM-owned:
 # raw pixel deltas feed NovaSimulation.add_local_player_look (the witnessed integer
 # pipeline — sensitivity<<11, scoped zoom reduction, ±80° pitch clamp with the +40°
 # up-limit while prone) [orig: Input_ProcessMouseAxisBindings @0x499680].
 const PLAYER_EYE_HEIGHT := 1.0          # the non-person +0x10000 bump [orig: @0x437e8f]
 const PLAYER_EYE_MIN := 0.125           # CameraOffset.z floor 0x2000 [orig: @0x4b6b98]
-const PLAYER_HEAD_BONE := "BN15"        # bone 14 = the head [world-wac-ai-re §14]
-# Witnessed chase-camera numbers: distance 3.0 (0x30000) and orbit pitch 22.5 deg
-# (0x4000000), the on-change defaults [orig: Camera_SetTrackedEntity @0x4391d0]; the
-# eye is anchor + R(yaw, pitch + orbit)*(-dist) re-aimed at the anchor
-# [orig: Camera_ComputeThirdPersonView @0x437d10]; the anchor eases quarter-step
-# [orig: ThirdPersonCamera_Update @0x437c8d]. Orbit keys, the bone/terrain collision
-# march, and the 0.125u look-at offset are tracked deferrals (net-re section 5.39
-# 2026-07-08 addendum).
+# The head is bone INDEX 14 (.bad row "BN15 Head") — the rig is index-driven and the
+# model bone order IS the BN order [world-wac-ai-re §14.2]; the original reads the
+# head row of its bone-matrix array, never a name [orig: the local bone path @0x4b6bb3].
+const PLAYER_HEAD_BONE_INDEX := 14
+# The witnessed FP eye pull-back: after adding CameraOffset the eye moves -0x3000
+# (0.1875u) along the view FORWARD axis, through the full view rotation (roll
+# included) [orig: @0x438001..0x438031 — Math_FixedPointTransformPoint22 of
+# (-0x3000, 0, 0) added onto g_view_pos].
+const PLAYER_EYE_PULLBACK := 0.1875
+# Witnessed chase-camera numbers: distance 3.0 (0x30000) and orbit pitch 5.625 deg
+# (0x4000000 BAM32 = 2^26/2^32*360 — an earlier note misconverted it as 22.5), the
+# on-change defaults [orig: Camera_SetTrackedEntity @0x439213/@0x43921d]; the eye is
+# anchor + R(yaw + orbit_yaw, pitch + orbit_pitch)*(-dist, 0, 0) with the SAME angles
+# as the view rotation (roll 0) [orig: Camera_ComputeThirdPersonView @0x438100..0x438171,
+# offset @0x4383e2]; the anchor chases Position + CameraOffset (the head-bone eye)
+# quarter-step per tick [orig: ThirdPersonCamera_Update @0x437b70/@0x437c8d]. Orbit
+# keys (input flags 0x10/0x40 -> orbit_yaw ±0x1000000/tick @0x437c1b), the bone
+# collision march (dist < 8.0 @0x4381e9), the R*(0x2000,0x2000,0x2000) anchor nudge
+# @0x43818a, and the dead-target 10.0 -> 3.0 distance ease @0x437cc0 are tracked
+# deferrals (net-re section 5.39).
 const PLAYER_TP_DISTANCE := 3.0
-const PLAYER_TP_ORBIT_PITCH_DEG := 22.5
+const PLAYER_TP_ORBIT_PITCH_DEG := 5.625
 # First-person weapon viewmodel placement, witnessed from weapon.def `pos` (hip) / `tpos` (ADS).
 # The original adds the equipped weapon's view-bias offset to the eye in view-local space, rotated by
 # the view orientation, then draws the gun (gfx1) + character arms at that view root
@@ -272,6 +284,14 @@ func before_world_tick(_delta: float, capture_mouse: bool = false,
 		_bool(state, "lean_left"),
 		_bool(state, "lean_right"),
 		_bool(state, "jump"))
+	# Feed the sim the head-bone eye for the 3P anchor chase [orig: the chase target
+	# is Position + CameraOffset @0x437b70; CameraOffset is the posed head bone,
+	# computed sim-side in the original @0x4b6bb3 — hosted, the render skeleton is
+	# the sample source (D-INF-18)].
+	if _world.has_method("set_local_player_eye"):
+		var head := _avatar_head_world()
+		_world.set_local_player_eye(head if head != Vector3.INF else Vector3.ZERO,
+				head != Vector3.INF)
 	_send_weapon_input()
 
 
@@ -656,12 +676,9 @@ func _avatar_head_world() -> Vector3:
 	if _avatar == null or not is_instance_valid(_avatar):
 		return Vector3.INF
 	var skel := _find_skeleton(_avatar)
-	if skel == null:
+	if skel == null or skel.get_bone_count() <= PLAYER_HEAD_BONE_INDEX:
 		return Vector3.INF
-	var idx := skel.find_bone(PLAYER_HEAD_BONE)
-	if idx < 0:
-		return Vector3.INF
-	return skel.global_transform * skel.get_bone_global_pose(idx).origin
+	return skel.global_transform * skel.get_bone_global_pose(PLAYER_HEAD_BONE_INDEX).origin
 
 
 func _find_skeleton(root: Node) -> Skeleton3D:
@@ -675,12 +692,18 @@ func _find_skeleton(root: Node) -> Skeleton3D:
 
 
 # Place the camera from the player's authoritative pose. First person: eye = the
-# head-bone anchor looking along the facing, rolled by the lean tilt (lean/4)
-# [orig: @0x437f9c/@0x437fcd — roll = torsoRoll + leanAngle/4; torsoRoll unported].
-# Third person (F4): behind + above, looking at the player
-# [orig: Camera_ComputeThirdPersonView @0x437d10; ThirdPersonCamera_Update @0x437af0]. The
-# mission yaw -> Godot forward mirrors the present remap (x,y,z)->(x,z,-y): a mission facing
-# yaw faces (sin yaw, cos yaw) -> Godot (sin yaw, 0, -cos yaw), tilted by pitch.
+# head-bone anchor pulled back 0.1875u along the view, looking along the facing,
+# rolled by torsoRoll + lean/4 [orig: the on-foot person leg @0x437f9c..0x438031 —
+# pitch = entPitch + 2*pitchBlend (pitchBlend = the unported recoil impulse),
+# roll = torsoRoll + lean/4 @0x437fe6, then eye += R*(-0x3000, 0, 0)].
+# Third person (F4): (yaw + orbit_yaw, pitch + orbit_pitch) seeds the R*(-dist,0,0)
+# eye offset from the anchor; the original's FINAL rotation is the atan2 look-at
+# from the (collision-pulled) eye back to the anchor (+ the R*(0.125,..) nudge,
+# deferred) — with no march ported, setting the seed angles directly is exactly
+# equal [orig: Camera_ComputeThirdPersonView @0x438100..0x438171, offset @0x4383e2,
+# the look-at recompute per net-re section 5.39]. The mission yaw -> Godot forward mirrors the
+# present remap (x,y,z)->(x,z,-y): a mission facing yaw faces (sin yaw, cos yaw)
+# -> Godot (sin yaw, 0, -cos yaw), tilted by pitch.
 func _update_player_camera() -> void:
 	if _world == null or _camera == null:
 		return
@@ -690,30 +713,31 @@ func _update_player_camera() -> void:
 	var forward := Vector3(sin(yr) * cos(pr), sin(pr), -cos(yr) * cos(pr))
 	var eye := _eye_position(pos)
 	if _third_person:
-		# Chase camera: the smoothed anchor is SIM state, eased a quarter-step per
-		# 62.5 Hz TICK (render-rate independent) [orig: anchor = Position +
-		# CameraOffset, quarter-step per 62 Hz tick — ThirdPersonCamera_Update
-		# @0x437af0; ported in libs/world player_view]. The eye sits back along the
-		# look direction pitched up by the orbit default and the rotation re-aims
-		# at the anchor [orig: Camera_ComputeThirdPersonView @0x437d10 mode 1].
-		# Until the first 3P tick seeds the chase, the eye stands in.
+		# Chase camera: the smoothed anchor is SIM state — Position + CameraOffset
+		# (the head-bone eye) eased a quarter-step per 62.5 Hz TICK (render-rate
+		# independent) [orig: ThirdPersonCamera_Update @0x437b70/@0x437c8d; ported
+		# in libs/world player_view]. Until the first 3P tick seeds the chase, the
+		# eye stands in. The camera keeps the AIM angles pitched up by the orbit
+		# default; on-foot orbit_yaw stays 0 until the orbit keys port.
 		var anchor := eye
 		if _view != null and _view.tp_anchor_valid:
 			anchor = _view.tp_anchor
 		var opr := pr + deg_to_rad(PLAYER_TP_ORBIT_PITCH_DEG)
-		var back := Vector3(sin(yr) * cos(opr), sin(opr), -cos(yr) * cos(opr))
-		_camera.global_position = anchor - back * PLAYER_TP_DISTANCE
-		_camera.look_at(anchor, Vector3.UP)
+		var tp_forward := Vector3(sin(yr) * cos(opr), sin(opr), -cos(yr) * cos(opr))
+		_camera.global_position = anchor - tp_forward * PLAYER_TP_DISTANCE
+		_camera.global_basis = Basis.looking_at(tp_forward, Vector3.UP)
 	else:
 		_camera.global_position = eye
 		_camera.look_at(eye + forward, Vector3.UP)
-		# The FP lean tilt: roll = leanAngle/4 about the view forward (the torsoRoll
-		# term is an unported tail). Sign pinned host-side: lean right (positive
-		# lean) tilts the view right. [orig: @0x437fcd — g_view_rot_roll =
-		# torsoRoll + lean>>2 on the on-foot person leg]
-		var roll_deg := _view.lean_deg * 0.25 if _view != null else 0.0
+		# The FP roll: torsoRoll + lean/4, composed in the sim (fp_roll_deg). Sign
+		# pinned host-side: lean right (positive lean) tilts the view right.
+		# [orig: @0x437fe6 — g_view_rot_roll = entity+0x2DC + lean>>2]
+		var roll_deg := _view.fp_roll_deg if _view != null else 0.0
 		if absf(roll_deg) > 0.001:
 			_camera.rotate_object_local(Vector3(0, 0, -1), deg_to_rad(roll_deg))
+		# The witnessed eye pull-back: -0x3000 (0.1875u) along the view FORWARD,
+		# after the roll is in the basis [orig: @0x438001..0x438031].
+		_camera.global_position += _camera.global_transform.basis.z * PLAYER_EYE_PULLBACK
 	_update_scope_camera()
 	_update_avatar(pos)
 	_update_viewmodel()

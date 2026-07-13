@@ -249,8 +249,11 @@ can see it (`Physics_RaycastTerrainAndSectors` watch-check, retry 62); respawn r
     (flag&2) seen → alert 25; pick emits 4 relation-matrix marks.
 14. **Recoil/flinch decay** (dump 4430–4462, combat pass): entity[224]/[225] impulses decay by
     sixteenth-steps (floor 768→0) feeding pitch entity[5] and a PRNG-signed heading jitter
-    entity[4]; entity[44]/[219] decay; torso-roll chase entity[183] → entity[6] sixteenth-step
-    clamped ±238609280 (prone 48 halves the chase).
+    entity[4]; entity[44]/[219] decay. Torso roll entity[183] (`@0x4b5cff-0x4b5d6d`,
+    corrected 2026-07-13 — the earlier "prone 48 halves the chase" reading was wrong):
+    anim 48 idle_prone → decay toward level `t −= (t+8)>>4` `@0x4b5d0a`; anims 41/42 →
+    frozen `@0x4b5d20`; else chase entity[6] `t += (roll−t+8)>>4` with the LAG clamped to
+    roll ±238609280 (20°) `@0x4b5d2a..6d`. Ported: `AiSystem::infantry_torso_roll_tick`.
 15. **Mounted pose states** (dump 4464–4539, mount/B2 pass): emplaced gunners force 67–75
     (`emplaced_N` by mount config +2156); seat passengers pose from the seat bone and take
     `sit_N` = `atol(bone_name_digits) + 76`; sit_24 (=100) drivers lean 107–110 by steering
@@ -943,7 +946,7 @@ Ported for the local player, end to end, in the controller train:
   `LocalPlayerHost._update_avatar` builds the per-class deltas via the single-sourced
   `bms_to_godot_basis` and sets the avatar node to the BODY frame →
   `NovaObjectModel.set_aim_overlay` → `NovaSkeletalAnim.eval_pose_overlay`. The 3P camera now
-  uses the witnessed 3.0 / 22.5° / ¼-step-anchor numbers (net-re §5.39 addendum).
+  uses the witnessed 3.0 / 5.625° / ¼-step-anchor numbers (net-re §5.39 addendum; the orbit pitch was misconverted as 22.5° until 2026-07-13).
 - **Verified**: `godot/tests/bend_capture_probe.gd(.tscn)` — boots ONED play-in-editor,
   injects F4 + mouse-look, captures poses; look-down bends the spine/head forward, look-up
   arches back (05TR.bms, JOX root).

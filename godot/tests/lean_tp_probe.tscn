@@ -1,0 +1,4 @@
+[gd_scene load_steps=2 format=3 uid="uid://c8leantpprobe0"]
+[ext_resource type="Script" path="res://tests/lean_tp_probe.gd" id="1_leantp"]
+[node name="LeanTpProbe" type="Node"]
+script = ExtResource("1_leantp")

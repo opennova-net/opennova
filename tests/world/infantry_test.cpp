@@ -1406,6 +1406,49 @@ int main() {
         CHECK(e->inf.anim_state == anim_state::kRollLeft);
     }
 
+    // ---- the torso roll: chases the slope roll (entity+0x18) a sixteenth-step per
+    //      tick clamped to roll +-0x0E38E380 (20 deg); the combat rolls 41/42 freeze
+    //      it; prone idle 48 decays it toward level.
+    //      [orig: Entity_UpdateInfantryPlayerBody @0x4b5cff-0x4b5d6d]
+    {
+        World w;
+        AiSystem ai;
+        TestSource src;
+        src.clips = {anim_state::kIdle, anim_state::kIdleProne, anim_state::kRollLeft};
+        ai.root_motion = &src;
+        AiEntity *e = soldier(ai);
+        e->inf.is_local_player = true;
+        e->health = 100;
+
+        e->roll = 0x04000000; // a slope roll inside the +-20 deg window: pure chase
+        run_ticks(ai, w, 0, 1);
+        CHECK(e->inf.torso_roll == 0x400000); // one sixteenth-step
+        for (int t = 1; t < 200; ++t) run_ticks(ai, w, t, t + 1);
+        CHECK(e->inf.torso_roll > 0x3F00000 && e->inf.torso_roll <= 0x4000000);
+
+        // A slope jump far past the window: the clamp is on the LAG — torsoRoll
+        // snaps to within 20 deg of roll immediately and eases the rest
+        // [orig: delta = newTorso - roll vs +-0x0E38E380 @0x4b5d47/@0x4b5d5a].
+        e->roll = -0x30000000;
+        run_ticks(ai, w, 200, 201);
+        CHECK(e->inf.torso_roll == -0x30000000 + 0x0E38E380);
+
+        // The combat roll freezes the value even while roll differs
+        // [orig: @0x4b5d20-0x4b5d28] (41 is a LOCKED state, so the selection
+        // parks its own target in pending and the state holds).
+        e->inf.anim_state = anim_state::kRollLeft;
+        const int32_t frozen = e->inf.torso_roll;
+        run_ticks(ai, w, 201, 205);
+        CHECK(e->inf.torso_roll == frozen);
+
+        // Prone idle decays toward level regardless of the slope
+        // [orig: @0x4b5d0a-0x4b5d16].
+        e->inf.anim_state = anim_state::kIdleProne;
+        e->inf.stance = InfantryState::Stance::kProne;
+        for (int t = 205; t < 400; ++t) run_ticks(ai, w, t, t + 1);
+        CHECK(e->inf.torso_roll > -0x100000 && e->inf.torso_roll <= 0);
+    }
+
     // ---- stance availability fallback: a model with no crouch/prone clips uses stand siblings ----
     {
         World w;

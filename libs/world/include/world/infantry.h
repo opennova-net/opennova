@@ -215,6 +215,12 @@ struct InfantryState {
     bool lean_left = false;
     bool lean_right = false;
     int32_t lean_angle = 0;
+    // The torso roll (entity+0x2DC, BAM32): chases the entity's slope roll (+0x18)
+    // a sixteenth-step per body tick clamped to roll +-20 deg; prone idle 48 decays
+    // it toward level instead, and the combat rolls 41/42 freeze it. Consumers: the
+    // FP camera roll (torsoRoll + lean/4 [orig: @0x437fe6]) and the section-14
+    // head/spine roll terms. [orig: @0x4b5cff-0x4b5d6d]
+    int32_t torso_roll = 0;
     // The held weapon's run-gait class (weapon.def run_anim -> AdmDefs +0xAC) and its
     // ForceCrouch flag (weapon.def flags 0x40000), mirrored per tick like wpn_hold_kind.
     // run gait: forward-walk promotes to run_2/run_3 by 2 + run_anim [orig: @0x4b729d];

@@ -944,6 +944,14 @@ func set_local_player_camera_third_person(third_person: bool) -> void:
 		sim.set_local_player_camera_third_person(third_person)
 
 
+## The host-sampled head-bone eye (Godot space) — the sim's 3P anchor-chase target
+## [orig: ThirdPersonCamera_Update @0x437b70 target = Position + CameraOffset].
+func set_local_player_eye(eye: Vector3, valid: bool) -> void:
+	var sim := get_sim()
+	if sim != null:
+		sim.set_local_player_eye(eye, valid)
+
+
 ## The 62.5 Hz view state (ADS ease, fov policy, 3P anchor), decoded once at this
 ## edge (ADR 0017); null without a sim.
 func local_player_view() -> PlayerLocalView:

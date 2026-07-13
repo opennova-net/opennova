@@ -416,6 +416,28 @@ void AiSystem::infantry_lean_tick(AiEntity &e) {
     if (inf.lean_right) inf.lean_angle = io::bam_add(inf.lean_angle, 0x3000000);
 }
 
+// The torso-roll producer -- see the ai.h declaration. Prone idle decays toward
+// level, the combat rolls freeze the value (the clip owns the whole body), and
+// everything else chases the entity's slope roll a sixteenth-step per tick,
+// clamped to roll +-0x0E38E380 (20 deg).
+// [orig: Entity_UpdateInfantryPlayerBody @0x4b5cff-0x4b5d6d]
+void AiSystem::infantry_torso_roll_tick(AiEntity &e) {
+    InfantryState &inf = e.inf;
+    if (inf.anim_state == anim_state::kIdleProne) {  // [orig: cmp 0x30 @0x4b5d05]
+        inf.torso_roll =
+            io::bam_sub(inf.torso_roll, io::bam_sar(io::bam_add(inf.torso_roll, 8), 4));
+        return;
+    }
+    if (inf.anim_state == anim_state::kRollLeft ||
+        inf.anim_state == anim_state::kRollRight)   // [orig: @0x4b5d20-0x4b5d28]
+        return;
+    inf.torso_roll = io::bam_add(
+        inf.torso_roll, io::bam_sar(io::bam_add(io::bam_sub(e.roll, inf.torso_roll), 8), 4));
+    const int32_t delta = io::bam_sub(inf.torso_roll, e.roll);
+    if (delta > 0x0E38E380) inf.torso_roll = io::bam_add(e.roll, 0x0E38E380);   // [orig: @0x4b5d4e]
+    if (delta < -0x0E38E380) inf.torso_roll = io::bam_add(e.roll, -0x0E38E380); // [orig: @0x4b5d61]
+}
+
 // ----------------------------------------------------------------------------
 // The upper-body weapon channel — the entity's SECONDARY AnimMap channel.
 // [orig: Entity_UpdateInfantryPlayerBody @0x4b5cab..0x4b5ea9 (selection + commit)
@@ -696,9 +718,13 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     }
 
     // The lean angle decays every body tick (corpse included — the decay sits before
-    // the weapon-channel block in the original) and ramps while a lean key is held.
+    // the weapon-channel block in the original) and ramps while a lean key is held;
+    // the torso roll chases the slope roll in the same pass [orig: @0x4b5cff].
     // [orig: @0x4b5c97 / @0x4b7dbf; see infantry_lean_tick]
-    if (inf.is_local_player) infantry_lean_tick(e);
+    if (inf.is_local_player) {
+        infantry_lean_tick(e);
+        infantry_torso_roll_tick(e);
+    }
 
     // The secondary (weapon) channel and its arms/head-look decay block run on every
     // local-player body tick, including death ticks. The primary death state disables
@@ -1023,8 +1049,10 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
         player_body_select(e);
     }
     // The lean angle runs on the authority for every player body (the wire echoes the
-    // lean BITS, each end integrates the angle). [orig: @0x4b5c97 / @0x4b7dbf]
+    // lean BITS, each end integrates the angle), and the torso roll rides the same
+    // body pass. [orig: @0x4b5c97 / @0x4b7dbf / @0x4b5cff]
     infantry_lean_tick(e);
+    infantry_torso_roll_tick(e);
 
     // Advance the playing clip's channel every tick — the wire ratio source. Uses the real
     // .adm loop rate when the host has anim data; without it the phase self-advances on a

@@ -290,6 +290,14 @@ private:
 	// toggles and reads the state; the FSM's unscope/rescope events flip it here.
 	opennova::world::PlayerViewState player_view_{};
 	void tick_local_player_view();
+	// The host-sampled head-bone eye (mission space), the 3P anchor-chase target
+	// [orig: ThirdPersonCamera_Update @ 0x437b70 target = Position + CameraOffset,
+	//  the posed head bone]. The original computes CameraOffset sim-side from its
+	//  bone matrices (@ 0x4b6bb3); hosted, the render skeleton lives host-side, so
+	//  the host feeds its sample each frame (D-INF-18). Invalid -> Position + 1.0
+	//  (the non-person bump [orig: @ 0x437e8f]).
+	float local_eye_mission_[3] = {0.0f, 0.0f, 0.0f};
+	bool local_eye_valid_ = false;
 
 	// --- P7: the in-match runtime as a THIN ADAPTER over libs/npruntime ----------------
 	// One in-match runtime funnels every path: the host/SP/editor-preview is the §5.0 mode-3
@@ -523,6 +531,9 @@ public:
 	// The host's camera mode, driving the fov suppression + anchor chase
 	// [orig: g_camera_mode @ 0xA890C8].
 	void set_local_player_camera_third_person(bool p_third_person);
+	// The host-sampled head-bone eye (Godot space) for the 3P anchor chase; pass
+	// valid=false when no skeleton sample exists (falls back to Position + 1.0).
+	void set_local_player_eye(const Vector3 &p_eye_godot, bool p_valid);
 	// The view-state snapshot: {scope_engaged, scope_fraction, fov_h_deg,
 	// tp_anchor (Godot space), tp_anchor_valid}. Read-only; ticked at 62.5 Hz.
 	Dictionary get_local_player_view() const;

@@ -3806,7 +3806,10 @@ is the master view placement; the mode-0 branch is FP:
 - **Correction (2026-07-13): the `+0x10000` (+1.0) bump `@ 0x437e8f` is the NON-person leg only**
   (itemDef+0x5C != 3). An on-foot PERSON takes the type-3 leg `@ 0x437f9c`:
   `g_view_pos += CameraOffset(+0x6C)`, `pitch = entPitch + 2·pitchBlend(+0x380)`,
-  `roll = torsoRoll(+0x2DC) + leanAngle(+0xB0)/4` (the FP lean tilt `@ 0x437fcd`). The local
+  `roll = torsoRoll(+0x2DC) + leanAngle(+0xB0)/4` (the FP lean tilt; pitch/roll writes
+  `@ 0x437fc7/@ 0x437fe6`), and the eye then pulls BACK 0.1875u along the FULL view rotation
+  (roll included): `eye += R·(−0x3000, 0, 0)` `@ 0x438001..0x438031` (witnessed 2026-07-13,
+  ported as `PLAYER_EYE_PULLBACK`). The local
   player's `CameraOffset` is produced by the body updater's bone path `@ 0x4b6bb3`:
   `Entity_BuildBoneTransformMatrices` → the POSED HEAD BONE world position, floored to the max of
   4 terrain samples (±0x4000 x/y) + 0x1000 unless Flags & 0x800000 `@ 0x4b6c1c`, stored as
@@ -3867,7 +3870,8 @@ renamed in the IDB this session (`g_camera_*`; world-wac-ai-re §14.7 lists them
   tracked entity: chase distance auto-reels >7.0 → −1.0/tick, then 1/16-step to exactly 3.0.
 - **Eye/orientation** `[orig: Camera_ComputeThirdPersonView @ 0x437d10]` mode 1: on foot
   `eye = anchor + R(entYaw+orbitYaw, entPitch+orbitPitch)·(−dist,0,0)` with defaults dist=3.0,
-  orbit pitch=0x4000000 (22.5°) (reset in `Camera_SetTrackedEntity @ 0x4391d0`); orbit-pitch keys
+  orbit pitch=0x4000000 (**5.625°** — corrected 2026-07-13; the earlier 22.5° was a 4× BAM
+  misconversion) (reset in `Camera_SetTrackedEntity @ 0x4391d0`); orbit-pitch keys
   ±0x800000 (actions 407/408). Seats 2/5: yaw = vehYaw + (lookYaw−vehYaw)/4, pitch fixed −0x8000000
   (11.25° down), **dist = 1.0 + 1.5·boundRadius**; plus ground-slope follow (max ground slope
   toward the anchor × 0.333 raises the eye), a smoothed (1/32) look-ahead point 6.0u along the
@@ -3891,20 +3895,26 @@ renamed in the IDB this session (`g_camera_*`; world-wac-ai-re §14.7 lists them
   option `dword_24D1E34` bit 1; in-session + `dword_24D1E34 & 0x40` → forced 0 (the server
   "force first person" rule). Session setting +0x5CC==2 → `g_cfg_default_camera_mode=1`
   (`[orig: apply_session_settings_to_globals @ 0x5521a8]`), applied via
-  `Camera_ResetToLocalPlayer @ 0x4a3d30`. **Open:** on-foot desired mode never leaves 0 in this
-  build's arbiter — how JO:TR-era on-foot third person persisted (server "allow 3P") is
-  unconfirmed here; the on-foot chase math itself is fully present (above). Verify in-game on a
-  LAN host with the 3P option before porting the on-foot toggle semantics.
+  `Camera_ResetToLocalPlayer @ 0x4a3d30`. **Resolved 2026-07-13:** stock 1.7.5.7 has NO on-foot
+  third person — the arbiter only selects mode 1 when 3P-selected AND parentSlot ∈ {2,5}.
+  The onhook debug tool (opennova-int `debug/camera_control.c`) patches exactly this block
+  (its `PATTERN_CAMERA_DEFAULT_MODE` bytes are the `@ 0x5ca1d2` sequence) plus the mode-1 HUD
+  mount gate to force on-foot 3P; the on-foot chase math itself is fully present (above).
+  Our F4 toggle is that same debug affordance, not stock behavior.
 - **FP mounted refinements** (mode 0): seat-bone eye (`Entity_GetBoneWorldPosition @ 0x545e60`)
   when the parent def sets +84 bit 0x20 (and not 0x40); a per-model camera callback (vtable +372)
   for cockpit-type parents; itemDef type-3 entities add `CameraOffset` to the eye with
   pitch += 2·pitchBlend and roll = torsoRoll + lean/4 (the FP lean tilt).
 
-**Port (2026-07-08, the controller train):** `local_player_host.gd` now uses the witnessed
-on-foot chase numbers — distance 3.0, orbit pitch 22.5°, quarter-step anchor smoothing, rotation
-re-aimed at the anchor — and the third-person body renders with the §14 aim overlay
-(world-wac-ai-re §14.6, D-INF-11 partial). Still deferred: the collision march, orbit keys, the
-0.125u look-at offset, per-stance `CameraOffset`, vehicle mode-1 (no local mounting), FOV.
+**Port (2026-07-08 controller train; corrected 2026-07-13):** `local_player_host.gd` uses the
+witnessed on-foot chase numbers — distance 3.0, orbit pitch **5.625°** (the 07-08 pass carried
+the 22.5° misconversion, which parked the chase camera at knee height looking up), quarter-step
+anchor smoothing toward the HOST-SAMPLED head-bone eye (Position + CameraOffset `@ 0x437b70`;
+the sim receives the sample per frame via `set_local_player_eye`), orientation = the seed
+angles (equal to the witnessed look-at while the collision march is unported) — and the
+third-person body renders with the §14 aim overlay (world-wac-ai-re §14.6, D-INF-11 partial).
+Still deferred: the collision march, orbit keys, the 0.125u look-at nudge, vehicle mode-1
+(no local mounting), the kill-cam distance reel, the weather/impact shake.
 
 **2026-07-13 addendum (the controller-parity pass) — lean, stance keys, input bits, the eye.**
 
@@ -3914,9 +3924,10 @@ re-aimed at the anchor — and the third-person body renders with the §14 aim o
   the on-foot ramp `@ 0x4b7dbf/@ 0x4b7dd6` — MoveOrder bit 6 (left) −0x3000000/tick, bit 7
   (right) +0x3000000/tick, gated `!(Flags & 0x100020)`, not prone, and `!(Flags & 2)`; a seated
   (`+0x168 == 1`) ±0x1400000 variant `@ 0x4b66b5/@ 0x4b66c3`. Ramp-vs-decay equilibrium
-  ≈ ±0x30000000 (67.5°). Consumers: the FP camera roll (`torsoRoll + lean/4` @ 0x437fcd), the
-  §14 aim-overlay lean term, the remote CameraOffset trig (reads −lean `@ 0x4b699f`), and the
-  prone roll anims 41/42.
+  ≈ ±0x30000000 (67.5°). Consumers: the FP camera roll (`torsoRoll + lean/4` @ 0x437fe6 — torsoRoll's own producer
+  `@ 0x4b5cff..6d` is witnessed+ported 2026-07-13: chase of the slope roll, frozen during
+  rolls 41/42, decayed to level in prone idle 48), the §14 aim-overlay lean term, the remote
+  CameraOffset trig (reads −lean `@ 0x4b699f`), and the prone roll anims 41/42.
 - **`g_inputFlags` bit map (the key handlers `Input_HandleActionBinding_0 @ 0x4e0420`)**:
   0x2 forward / 0x4 back / 0x8 strafe-left / 0x10 strafe-right (cases 152/151/156/157);
   0x20 look-up (155) / 0x40 look-down; 0x100/0x200 keyboard turn L/R (158/159); 0x1000 jump
