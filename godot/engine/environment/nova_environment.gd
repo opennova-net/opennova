@@ -59,6 +59,18 @@ var _fog_distance: float = 1000.0
 var _mission_time_fixed24: int = DEFAULT_START_HOUR * FIXED24_ONE_HOUR
 var _mission_advance_per_tick: int = int(
 	TOD_DAY_FIXED24 / (TOD_TICKS_PER_REAL_MINUTE * DEFAULT_MINUTES_PER_DAY))
+# TRUE once a NovaWeather node drives this environment: the weather tick then
+# OWNS the four current render colors + the smoothed fog distance + the shader
+# globals (its per-frame writeback), and _update_tod refreshes only the
+# keyframe TARGETS — the witnessed split [orig: Environment_ComputeTimeOfDayColors
+# @ 0x57de40 refreshes target slots; the smoothers own the currents]. Without
+# this split the mission clock's per-tick TOD writes alternate RAW keyframe
+# colors against the weather's modulated writeback — the whole scene then
+# strobes between the two at the tick/frame beat (the 2026-07-13 "black
+# flicker" regression, introduced when #224's mission clock made _update_tod
+# per-tick). Standalone hosts (the editor env preview without a weather node)
+# keep the direct writes.
+var _weather_driven := false
 
 # Monotonic counter bumped only when a value object materials consume (lighting/fog) actually
 # changes -- via _update_tod (TOD scrub / reload / day_speed advance) or the per-frame weather
@@ -157,7 +169,11 @@ func _update_tod() -> void:
 	_day_phase_blend = float(phase.get("blend", 1.0))
 	_light_dir = _moon_dir if _is_night else _sun_dir
 	_tod = environment_data.interpolate_time_of_day(time_of_day)
-	if not _tod.is_empty():
+	if not _weather_driven and not _tod.is_empty():
+		# Standalone (no weather tick): this node owns the current render
+		# colors directly. Weather-driven, these fields belong to the smoothed
+		# writeback — writing raw keyframes here would fight it (see
+		# _weather_driven).
 		var light_key := "moon" if _is_night else "sun"
 		_sun_light = _tod.get(light_key, _sun_light)
 		_fill_light = _tod.get("ground", _fill_light)
@@ -166,12 +182,25 @@ func _update_tod() -> void:
 		# [orig: Environment_UpdateWeatherTick @ 0x57f17c].
 		var fog_raw: Vector3 = _tod.get("fog", _fog_color_rt * 0.5)
 		_fog_color_rt = _double_vec3(fog_raw)
-	_fog_distance = environment_data.get_fog_level()
-	# A TOD recompute can move any object-consumed value; this path runs only on discrete
-	# changes (scrub / reload / day_speed advance), never per-frame at rest, so an
-	# unconditional bump here costs nothing in steady state.
+	if not _weather_driven:
+		_fog_distance = environment_data.get_fog_level()
+	# A TOD recompute can move any object-consumed value (weather-driven, the
+	# moving targets flow through the smoothers instead); the bump keeps
+	# material restamps tracking either way.
 	_env_generation += 1
-	_write_shader_globals()
+	if not _weather_driven:
+		_write_shader_globals()
+
+
+## NovaWeather marks itself the owner of the current render colors / smoothed
+## scalars / shader globals (see _weather_driven). One-way for the node's life:
+## the weather tick writes back every frame from then on.
+func set_weather_driven(driven: bool) -> void:
+	_weather_driven = driven
+
+
+func is_weather_driven() -> bool:
+	return _weather_driven
 
 
 static func _double_vec3(value: Vector3) -> Vector3:
