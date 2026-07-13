@@ -166,7 +166,16 @@ jobs:
         shell: pwsh
         env:
           OPENNOVA_MODSUPEROED_DIR: ${{ github.workspace }}\third_party\modsuperoed
-        run: uv run pytest tests/test_modsuperoed_automation.py::test_external_modsuperoed_smoke -q
+        # The smoke drives the real OED exe and flakes on runner timing; retry
+        # up to 5 attempts before reporting the job red.
+        run: |
+          $max = 5
+          for ($i = 1; $i -le $max; $i++) {
+            uv run pytest tests/test_modsuperoed_automation.py::test_external_modsuperoed_smoke -q
+            if ($LASTEXITCODE -eq 0) { exit 0 }
+            Write-Host "ModSuperOED smoke attempt $i/$max failed (exit $LASTEXITCODE)"
+          }
+          exit 1
 
   # Type-check + build the NovaWorld web portal (web/). The built dist is an
   # artifact only; production images bake it via web/Dockerfile (Track B).

@@ -66,7 +66,7 @@ func _sync_from_editor() -> void:
 ## index, so only a shell-hosted dock ever receives this). Builds the strip once
 ## into the Properties tab under the terrain-name row, then retargets it from
 ## the editor state on every sync (open / new / save-as move the identity).
-func set_reference_services(services: Dictionary) -> void:
+func set_reference_services(services: ReferenceServices) -> void:
 	if _used_by_strip == null or not is_instance_valid(_used_by_strip):
 		_used_by_strip = ReferenceStrip.new()
 		_used_by_strip.name = "TerrainUsedByStrip"

@@ -60,19 +60,18 @@ func shows_tile_gizmo() -> bool:
 # Non-empty only while the Tile workflow has a placed-tile selection. Leaving
 # TILE_STAMP clears the selection (set_tool), so gating on the active workflow
 # id matches the shell's old workflow check exactly.
-func get_tile_gizmo_state() -> Dictionary:
+func get_tile_gizmo_state() -> TileGizmoState:
 	if terrain_editor == null or get_active_workflow_id() != Workflow.STAMP:
-		return {}
+		return null
 	if not terrain_editor.has_selected_tileinfo_entry():
-		return {}
+		return null
 	var entry: Variant = terrain_editor.get_selected_tileinfo_entry()
 	if entry == null:
-		return {}
-	return {
-		"label": "Editing tile %03d @ (%d, %d)" % [
+		return null
+	return TileGizmoState.make(
+		"Editing tile %03d @ (%d, %d)" % [
 			entry.get_tile_index(), entry.get_cell_x(), entry.get_cell_z()],
-		"anchor_world": terrain_editor.get_selected_tileinfo_world_center() + Vector3(0.0, 2.0, 0.0),
-	}
+		terrain_editor.get_selected_tileinfo_world_center() + Vector3(0.0, 2.0, 0.0))
 
 
 func run_tile_gizmo_action(action: StringName) -> void:
@@ -242,7 +241,7 @@ func set_asset_dock(dock: Control) -> void:
 	# one terrain surface built with the shell seam in scope (the workflow
 	# inspectors receive only the terrain editor).
 	var services := get_reference_services()
-	if not services.is_empty() and _asset_dock.has_method("set_reference_services"):
+	if services != null and _asset_dock.has_method("set_reference_services"):
 		_asset_dock.set_reference_services(services)
 
 
@@ -471,6 +470,24 @@ func get_export_dialog_dir() -> String:
 	if terrain_editor.has_current_project_dir():
 		return terrain_editor.get_current_project_dir()
 	return terrain_editor.get_last_save_dir()
+
+
+# See in game (maturity TER-1): the terrain reaches the game through Export —
+# the baked terrain files must sit in the launch directory for the loose-file
+# override to mount them (the project Save writes authoring sources, not game
+# data). Once exported there, the game shows it through whatever mission sits
+# on it, so the pointer is the mission list.
+func get_game_launch_note(launch_dir: String) -> GameLaunchNote:
+	if terrain_editor == null:
+		return null
+	if GameLaunchNote.same_dir(String(terrain_editor.get_last_export_dir()), launch_dir):
+		var terrain_name := String(terrain_editor.get_terrain_name_value()).strip_edges()
+		if terrain_name.is_empty():
+			terrain_name = "your terrain"
+		return GameLaunchNote.make(true,
+			"Load a mission on \"%s\" to walk your terrain." % terrain_name)
+	return GameLaunchNote.make(false,
+		"Export your terrain into the game folder to see it in game.")
 
 
 func _workflow_for_tool(tool: int) -> int:

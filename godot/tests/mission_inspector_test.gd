@@ -2031,31 +2031,31 @@ func test_scripting_unmapped_type_param_roundtrips_raw() -> void:
 func test_param_schema_marks_unused_slots() -> void:
 	# Described, fixed count: KillGroup (2) uses 1 param -> slot 0 used, 1-3 unused.
 	var kill := MissionParamSchema.action_slots(2)
-	assert_true(bool(kill["params"][0]["used"]), "KillGroup slot 1 is used")
-	assert_false(bool(kill["params"][1]["used"]), "KillGroup slot 2 is unused")
-	assert_false(bool(kill["params"][3]["used"]), "KillGroup slot 4 is unused")
+	assert_true(kill.params[0].used, "KillGroup slot 1 is used")
+	assert_false(kill.params[1].used, "KillGroup slot 2 is unused")
+	assert_false(kill.params[3].used, "KillGroup slot 4 is unused")
 	# Zero params: BlueWin (8) -> every slot unused.
 	var blue := MissionParamSchema.action_slots(8)
 	for i in 4:
-		assert_false(bool(blue["params"][i]["used"]), "BlueWin slot %d is unused" % (i + 1))
+		assert_false(blue.params[i].used, "BlueWin slot %d is unused" % (i + 1))
 	# AI-change family is sub-type-aware: PLAYPARTANIM (34) uses all four (target + ANIMNUM / play / time)...
 	var ai_anim := MissionParamSchema.action_slots(3, 34)
 	for i in 4:
-		assert_true(bool(ai_anim["params"][i]["used"]), "ChangeGroupAI/PlayPartAnim slot %d is used" % (i + 1))
+		assert_true(ai_anim.params[i].used, "ChangeGroupAI/PlayPartAnim slot %d is used" % (i + 1))
 	# ...while a single-value sub-type (ACCURACY 8) uses only the target + one value.
 	var ai_acc := MissionParamSchema.action_slots(3, 8)
-	assert_true(bool(ai_acc["params"][0]["used"]), "ChangeGroupAI target is used")
-	assert_true(bool(ai_acc["params"][1]["used"]), "ChangeGroupAI/Accuracy value is used")
-	assert_false(bool(ai_acc["params"][2]["used"]), "ChangeGroupAI/Accuracy slot 3 is unused")
+	assert_true(ai_acc.params[0].used, "ChangeGroupAI target is used")
+	assert_true(ai_acc.params[1].used, "ChangeGroupAI/Accuracy value is used")
+	assert_false(ai_acc.params[2].used, "ChangeGroupAI/Accuracy slot 3 is unused")
 	# AreaAiRed (12) is now modelled (was raw): a Zone target plus the sub-type's slots.
 	var area := MissionParamSchema.action_slots(12, 34)
-	assert_eq(int(area["params"][0]["kind"]), MissionParamSchema.Kind.ZONE, "AreaAiRed targets a zone")
+	assert_eq(area.params[0].kind, MissionParamSchema.Kind.ZONE, "AreaAiRed targets a zone")
 	for i in 4:
-		assert_true(bool(area["params"][i]["used"]), "AreaAiRed/PlayPartAnim slot %d is used" % (i + 1))
+		assert_true(area.params[i].used, "AreaAiRed/PlayPartAnim slot %d is used" % (i + 1))
 	# Triggers likewise: GroupAtRedAlert (main 1 / sub 3) uses only param1.
 	var trig := MissionParamSchema.trigger_slots(1, 3)
-	assert_true(bool(trig["params"][0]["used"]), "GroupAtRedAlert slot 1 is used")
-	assert_false(bool(trig["params"][1]["used"]), "GroupAtRedAlert slot 2 is unused")
+	assert_true(trig.params[0].used, "GroupAtRedAlert slot 1 is used")
+	assert_false(trig.params[1].used, "GroupAtRedAlert slot 2 is unused")
 
 
 func test_scripting_action_disables_unused_param_slots() -> void:

@@ -16,33 +16,24 @@ func _init(mcp_service: Node) -> void:
 
 
 func register_all(registry: McpToolRegistry) -> void:
-	registry.register(_def("object_load_anims",
+	registry.register(McpToolDef.make("object_load_anims",
 			"Bind a skeletal animation set (.adm) to the model open in the Object workspace and start its first clip, exactly like the Anims inspector's Load. adm defaults to the model's basename + \".adm\" (the stock naming convention). arms optionally loads a second .3di (e.g. \"armsG.3di\") that rides the same skeleton — the first-person arms overlay. Returns the clip list. Requires an open model (open_in_workspace workspace=\"object\") and a mounted resource directory.",
 			{
 				"adm": { "type": "string" },
 				"arms": { "type": "string" },
 			}), Callable(self, "_tool_load_anims"))
-	registry.register(_def("object_play_clip",
+	registry.register(McpToolDef.make("object_play_clip",
 			"Play or scrub one clip of the loaded animation set in the Object workspace preview. playhead (seconds) poses that instant even while paused; playing=false pauses there (a still for screenshots). Load a set with object_load_anims first; clip keys come from its result (or object_rig_state).",
 			{
 				"clip": { "type": "string" },
 				"playhead": { "type": "number" },
 				"playing": { "type": "boolean", "default": true },
 			}, ["clip"]), Callable(self, "_tool_play_clip"))
-	registry.register(_def("object_rig_state",
+	registry.register(McpToolDef.make("object_rig_state",
 			"Read the Object workspace's animation state: the open model, loaded clips with lengths, the current clip and playhead, and (include_bones) the skeleton — per bone name, parent, local rest offset, the accumulated rest-pose world position, and (when a clip is current) the posed world position at the playhead. Read-only; the numeric ground truth screenshots can't give.",
 			{
 				"include_bones": { "type": "boolean", "default": false },
-			}, [], { "serial": false }), Callable(self, "_tool_rig_state"))
-
-
-static func _def(name: String, description: String, properties := {}, required: Array = [], extra := {}) -> Dictionary:
-	var schema := { "type": "object", "properties": properties }
-	if not required.is_empty():
-		schema["required"] = required
-	var def := { "name": name, "description": description, "input_schema": schema }
-	def.merge(extra)
-	return def
+			}, [], false), Callable(self, "_tool_rig_state"))
 
 
 # --- shared guards ----------------------------------------------------------------

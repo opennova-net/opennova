@@ -168,7 +168,7 @@ func supports_document_tabs() -> bool:
 	return true
 
 
-func get_document_tabs() -> Array:
+func get_document_tabs() -> Array[DocumentTabRow]:
 	return _tabs.tabs()
 
 
@@ -225,6 +225,7 @@ func mount_viewport(host: Control) -> void:
 	if _view != null:
 		_view.set_document(strings_editor)
 		_view.set_filter(_search, _section_filter)
+		_view.set_font_service(_preview_font_service())
 
 
 func unmount_viewport(_host: Control) -> void:
@@ -248,6 +249,48 @@ func build_inspector(host: Control) -> void:
 	_inspector.setup(self)
 	host.add_child(_inspector)
 	_inspector.refresh()
+
+
+# --- Game preview fonts (STR-1) ---
+# The detail panel renders the selected entry through the engine draw with a
+# chooseable font. These are the workspace-owned seams the picker consumes;
+# the panel itself is the framework EngineTextPreview (F2).
+
+## .fnt names available in the shell's mounted game folder, sorted; empty when
+## headless or nothing is mounted (strings stays shell-only on purpose — see
+## _resource_root_or_settings's do-not-widen note).
+func get_preview_font_names() -> PackedStringArray:
+	var root := _resource_root()
+	if root == null:
+		return PackedStringArray()
+	var names := PackedStringArray()
+	for path in root.list_files(".fnt"):
+		var file := String(path).get_file()
+		if names.has(file):
+			continue
+		# Sniff the header 4CC (single-sourced from libs/fnt) so a stray
+		# non-font .fnt never reaches the parser — which error-logs — from
+		# plain picker enumeration; the picker then eager-previews only fonts
+		# that can actually load.
+		var bytes := root.read_file(file)
+		if bytes.size() < 4 or bytes.decode_u32(0) != NovaFntResource.MAGIC:
+			continue
+		names.append(file)
+	names.sort()
+	return names
+
+
+## Load one of those fonts the way the runtime does (VFS read ->
+## NovaFntResource -> FontFile). Null when unresolvable.
+func load_preview_font(font_name: String) -> FontFile:
+	return HudText.load_font(_resource_root(), font_name)
+
+
+func _preview_font_service() -> Dictionary:
+	return {
+		"list": get_preview_font_names,
+		"load": load_preview_font,
+	}
 
 
 # --- Coordinator state shared with the views ---
@@ -404,15 +447,15 @@ func open_strings_table(path: String, key: String) -> Error:
 		var err := open_file(path)
 		if err != OK:
 			return err
-	return focus_reference({"key": key})
+	return focus_reference(FocusPayload.for_key(key))
 
 
-# Cross-jump focus hook (EditorWorkspace.focus_reference): {"key": String} filters
-# the table to the key and selects its entry. Runs before the shell mounts this
+# Cross-jump focus hook (EditorWorkspace.focus_reference): `key` filters the
+# table to the key and selects its entry. Runs before the shell mounts this
 # workspace's viewport, so the search is stashed and applied when mount_viewport
 # builds the view.
-func focus_reference(focus: Dictionary) -> Error:
-	var key := String(focus.get("key", ""))
+func focus_reference(focus: FocusPayload) -> Error:
+	var key := focus.key
 	if key.is_empty():
 		return OK
 	_ensure_editor()

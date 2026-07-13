@@ -45,10 +45,10 @@ func test_dirty_badge_isolates_to_the_edited_tab() -> void:
 
 	_dirty_active(ws)  # edits the ACTIVE menu (the second)
 
-	var tabs: Array = ws.get_document_tabs()
+	var tabs: Array[DocumentTabRow] = ws.get_document_tabs()
 	assert_eq(tabs.size(), 2, "each menu gets its own tab")
-	assert_false((tabs[0] as Dictionary).get("dirty"), "the untouched tab stays clean")
-	assert_true((tabs[1] as Dictionary).get("dirty"), "only the edited tab is dirty")
+	assert_false(tabs[0].dirty, "the untouched tab stays clean")
+	assert_true(tabs[1].dirty, "only the edited tab is dirty")
 	assert_true(ws.has_unsaved_changes(), "the workspace reports any dirty tab")
 
 	assert_eq(ws.activate_document(0), OK)
@@ -78,8 +78,8 @@ func test_new_menu_opens_its_own_tab_beside_unsaved_work() -> void:
 	assert_eq(ws.new_current(), OK)
 	assert_eq(ws.get_document_tabs().size(), 2, "New leaves the dirty menu open in its own tab")
 	assert_eq(ws._document.current_path, "", "the new active document is untitled")
-	var tabs: Array = ws.get_document_tabs()
-	assert_true((tabs[0] as Dictionary).get("dirty"), "the unsaved work is intact")
+	var tabs: Array[DocumentTabRow] = ws.get_document_tabs()
+	assert_true(tabs[0].dirty, "the unsaved work is intact")
 
 
 func test_pathless_save_returns_the_shell_save_as_code() -> void:
@@ -141,7 +141,7 @@ func test_session_restore_reopens_all_tabs_and_active_index() -> void:
 
 	var ws2 = autofree(MnuWorkspaceScript.new())
 	ws2.activate()
-	var tabs: Array = ws2.get_document_tabs()
+	var tabs: Array[DocumentTabRow] = ws2.get_document_tabs()
 	assert_eq(tabs.size(), 2, "both menus reopen")
 	assert_eq(ws2.get_active_document_index(), 0, "the active tab is restored")
 	assert_eq(ws2._document.current_path, FIXTURE, "the alias points at the restored active tab")

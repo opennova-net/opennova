@@ -1118,9 +1118,9 @@ func test_tile_gizmo_state_and_actions_ride_the_workspace_hooks() -> void:
 	ws.set_terrain_editor(stub)
 
 	var state := ws.get_tile_gizmo_state()
-	assert_eq(String(state.get("label", "")), "Editing tile 007 @ (3, 4)",
+	assert_eq(state.label, "Editing tile 007 @ (3, 4)",
 		"The workspace formats the gizmo label from the selected tile.")
-	assert_eq(state.get("anchor_world"), Vector3(10, 2, 20),
+	assert_eq(state.anchor_world, Vector3(10, 2, 20),
 		"The anchor floats 2u above the tile's world center.")
 
 	ws.run_tile_gizmo_action(&"rotate")
@@ -1129,7 +1129,7 @@ func test_tile_gizmo_state_and_actions_ride_the_workspace_hooks() -> void:
 	assert_eq(stub.cleared, 1, "Done clears the selection through the hook.")
 
 	stub.current_tool = TerrainEditor.Tool.RAISE
-	assert_true(ws.get_tile_gizmo_state().is_empty(),
+	assert_null(ws.get_tile_gizmo_state(),
 		"Outside the Tile workflow the gizmo reports no state.")
 
 

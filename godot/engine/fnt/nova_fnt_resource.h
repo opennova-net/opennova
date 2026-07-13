@@ -28,6 +28,7 @@ public:
 		TEXTURE_HEIGHT = FNT_TEXTURE_HEIGHT,
 		MAX_PAGES = FNT_MAX_PAGES,
 		PACK_PAD = FNT_PACK_PAD,
+		MAGIC = FNT_MAGIC, /* "FNT0" little-endian — the header 4CC */
 	};
 
 	NovaFntResource();

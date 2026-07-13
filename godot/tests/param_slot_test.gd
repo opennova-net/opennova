@@ -14,9 +14,16 @@ func _make_slot() -> MissionParamSlot:
 	return s
 
 
+func _spec(kind: int, label: String) -> MissionParamSlotSpec:
+	var spec := MissionParamSlotSpec.new()
+	spec.kind = kind
+	spec.label = label
+	return spec
+
+
 func test_fixed_seconds_shows_seconds_and_stores_raw() -> void:
 	var s := _make_slot()
-	s.configure({"kind": Schema.Kind.FIXED_SECONDS, "label": "Time (s)"}, [])
+	s.configure(_spec(Schema.Kind.FIXED_SECONDS, "Time (s)"), [])
 	assert_false(s.is_picker(), "fixed-seconds uses the spin, not a picker")
 	s.set_value(98304)  # 1.5 * 65536
 	assert_almost_eq(s.get_spin().value, 1.5, 0.0001, "spin shows raw / 65536 seconds")
@@ -25,7 +32,7 @@ func test_fixed_seconds_shows_seconds_and_stores_raw() -> void:
 
 func test_fixed_seconds_round_trips_original_granularity() -> void:
 	var s := _make_slot()
-	s.configure({"kind": Schema.Kind.FIXED_SECONDS, "label": "Time (s)"}, [])
+	s.configure(_spec(Schema.Kind.FIXED_SECONDS, "Time (s)"), [])
 	# All multiples of 256 (the original ANIMTIME step), so the seconds<->raw conversion is exact.
 	for raw in [0, 256, 65536, 196608, 327424]:
 		s.set_value(raw)
@@ -34,6 +41,6 @@ func test_fixed_seconds_round_trips_original_granularity() -> void:
 
 func test_non_fixed_seconds_stays_raw_int() -> void:
 	var s := _make_slot()
-	s.configure({"kind": Schema.Kind.RAW, "label": "Value"}, [])
+	s.configure(_spec(Schema.Kind.RAW, "Value"), [])
 	s.set_value(12345)
 	assert_eq(s.read_value(), 12345, "raw kind stores the int verbatim")

@@ -59,12 +59,11 @@ func setup(node_name: String, default_label: String, spin_min: float, spin_max: 
 # Structural reconfigure for the selected type's slot. items: [{value,label}] for picker kinds (ignored for
 # RAW). Does not touch values — call set_value() afterwards. Flipping visibility here is safe: a kind change
 # only follows a type-dropdown selection, which has already moved focus off the param row.
-func configure(slot: Dictionary, items: Array) -> void:
-	_kind = int(slot.get("kind", SchemaScript.Kind.RAW))
+func configure(slot: MissionParamSlotSpec, items: Array) -> void:
+	_kind = slot.kind
 	_items = items
-	var lbl := String(slot.get("label", ""))
-	_label.text = lbl if lbl != "" else _default_label
-	var tip := String(slot.get("tip", ""))
+	_label.text = slot.label if slot.label != "" else _default_label
+	var tip := slot.tip
 	_label.tooltip_text = tip
 	_spin.tooltip_text = tip
 	_option.tooltip_text = tip

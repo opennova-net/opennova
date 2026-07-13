@@ -47,7 +47,7 @@ func test_every_named_trigger_sub_type_has_schema_or_allowlist() -> void:
 			var sub_dict := sub as Dictionary
 			var sub_type := int(sub_dict["value"])
 			var schema := Schema.trigger_slots(main_type, sub_type)
-			if bool(schema.get("known", false)) or allow.has(sub_type):
+			if schema.known or allow.has(sub_type):
 				continue
 			missing.append("trigger main=%d sub=%d (%s)" % [main_type, sub_type, String(sub_dict["name"])])
 	assert_eq(missing, [], "named trigger sub-types missing a schema row or allowlist entry")
@@ -60,7 +60,7 @@ func test_every_named_action_type_has_schema_or_allowlist() -> void:
 		var a_dict := a as Dictionary
 		var action_type := int(a_dict["value"])
 		var schema := Schema.action_slots(action_type)
-		if bool(schema.get("known", false)) or ACTION_RAW_ALLOWLIST.has(action_type):
+		if schema.known or ACTION_RAW_ALLOWLIST.has(action_type):
 			continue
 		missing.append("action=%d (%s)" % [action_type, String(a_dict["name"])])
 	assert_eq(missing, [], "named action types missing a schema row or allowlist entry")

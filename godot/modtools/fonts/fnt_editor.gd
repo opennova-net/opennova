@@ -7,6 +7,7 @@ extends Control
 # set_active_tool/can_undo/undo/redo keep their original signatures (test contract).
 
 const FntEditorDocument = preload("res://modtools/fonts/fnt_editor_document.gd")
+const EngineTextPreviewScript = preload("res://modtools/framework/engine_text_preview.gd")
 const EDITOR_THEME_PATH := "res://modtools/editor/ui/theme/editor_theme.tres"
 const FIRST_CHAR := 32
 const GLYPH_COUNT := 224
@@ -42,7 +43,7 @@ var _move_delta := Vector2i.ZERO
 var _atlas_canvas: Control
 var _glyph_grid: ItemList
 var _glyph_inspector: VBoxContainer
-var _sample_preview: Label
+var _sample_preview: Control  # EngineTextPreview (framework F2 widget)
 var _sample_edit: LineEdit
 var _page_spin: SpinBox
 var _zoom_label: Label
@@ -525,17 +526,27 @@ func _build_ui() -> void:
 	insp_box.add_child(_glyph_inspector)
 	_build_inspector_rows(_glyph_inspector)
 
+	# FNT-1 (maturity program): the type-a-line sample renders through the GAME's
+	# draw path — the F2 EngineTextPreview widget (NovaFntResource.to_font_file +
+	# HudText.draw_text) — beside the glyph canvas, which stays as the paint
+	# surface. The previous Godot Label was an editor-drawn truth-claim. A .fnt
+	# carries a single face (the hi/lo pairing is hudpos.def naming two separate
+	# files), so the panel previews the one edited face.
 	var sample_box := _make_panel_box(right, 10, 6)
-	_add_heading(sample_box, "Preview")
+	_add_heading(sample_box, "Game preview")
 	_sample_edit = LineEdit.new()
+	_sample_edit.name = "SampleEdit"
+	_sample_edit.unique_name_in_owner = true
 	_sample_edit.text = "OpenNova 0123456789"
+	_sample_edit.tooltip_text = "Type a line to see how the game draws it with this font."
 	_sample_edit.text_changed.connect(_on_sample_text_changed)
 	sample_box.add_child(_sample_edit)
-	_sample_preview = Label.new()
+	_sample_preview = EngineTextPreviewScript.new()
 	_sample_preview.name = "SamplePreview"
 	_sample_preview.unique_name_in_owner = true
-	_sample_preview.text = "OpenNova 0123456789"
-	_sample_preview.custom_minimum_size = Vector2(0, 48)
+	_sample_preview.custom_minimum_size = Vector2(0, 56)
+	_sample_preview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_sample_preview.set_sample_text(_sample_edit.text)
 	sample_box.add_child(_sample_preview)
 
 	_assign_owner(root)
@@ -768,13 +779,13 @@ func _refresh_selection() -> void:
 
 
 func _refresh_sample() -> void:
-	if _sample_preview == null or _document == null or _document.resource == null:
+	# Re-adopt the edited document's font through the engine view (a missing
+	# document/resource clears the panel to its load hint).
+	if _sample_preview == null:
 		return
-	var font: FontFile = _document.resource.to_font_file()
-	if font != null:
-		_sample_preview.add_theme_font_override("font", font)
+	_sample_preview.set_font_from_fnt(_document.resource if _document != null else null)
 	if _sample_edit != null:
-		_sample_preview.text = _sample_edit.text
+		_sample_preview.set_sample_text(_sample_edit.text)
 
 
 func _glyph_thumbnail(code: int) -> Texture2D:
@@ -831,7 +842,7 @@ func _on_frame_toggled(pressed: bool) -> void:
 
 func _on_sample_text_changed(text: String) -> void:
 	if _sample_preview != null:
-		_sample_preview.text = text
+		_sample_preview.set_sample_text(text)
 
 
 func _on_zoom_changed(z: float) -> void:

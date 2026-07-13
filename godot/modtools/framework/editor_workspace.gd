@@ -39,7 +39,9 @@ extends RefCounted
 #     export   : can_export / begin_export + get_export_flavors +
 #                get_export_dialog_* + get_export_progress_*
 #     jump     : focus_reference(focus) — focus an element after a cross-workspace
-#                jump (shell open_in_workspace); keys are workspace-defined
+#                jump (shell open_in_workspace); reads its own FocusPayload fields
+#     see in game : get_game_launch_note(launch_dir) — how the authored data
+#                reaches the game the shell's launcher spawns (maturity F3)
 #
 #   Edit + state: override get_editor_document() to return the domain
 #     document/controller owning edit history + dirty state; the base derives
@@ -90,11 +92,10 @@ func shows_tile_gizmo() -> bool:
 
 
 # In-world tile gizmo payload (shows_tile_gizmo() opt-in). The shell polls this
-# each frame and shows the gizmo while it returns a non-empty Dictionary:
-#   {"label": String, "anchor_world": Vector3}
-# Empty means no active selection - gizmo hidden.
-func get_tile_gizmo_state() -> Dictionary:
-	return {}
+# each frame and shows the gizmo while it returns a TileGizmoState.
+# Null means no active selection - gizmo hidden.
+func get_tile_gizmo_state() -> TileGizmoState:
+	return null
 
 
 # Gizmo button actions: &"done", &"rotate", &"flip_x", &"flip_y", &"delete".
@@ -299,9 +300,8 @@ func supports_document_tabs() -> bool:
 	return false
 
 
-## One Dictionary per open document: {"label": String, "dirty": bool,
-## "path": String, "tooltip": String}.
-func get_document_tabs() -> Array:
+## One DocumentTabRow per open document (see framework/document_tab_row.gd).
+func get_document_tabs() -> Array[DocumentTabRow]:
 	return []
 
 
@@ -334,7 +334,7 @@ func has_unsaved_changes() -> bool:
 	# Any open tab with unsaved work counts, not just the active one (B6: the
 	# fold every multi-document workspace used to override for).
 	for row in get_document_tabs():
-		if bool((row as Dictionary).get("dirty", false)):
+		if row.dirty:
 			return true
 	return false
 
@@ -401,11 +401,11 @@ func open_file(_path: String) -> Error:
 
 
 # Focus an element of the open document after a cross-workspace jump: the shell's
-# open_in_workspace(kind, path, focus) forwards its focus Dictionary here once the
-# target file is open. Keys are workspace-defined (strings: {"key"}, menus:
-# {"screen"}); a workspace documents its keys on the override. Default: nothing
-# to focus.
-func focus_reference(_focus: Dictionary) -> Error:
+# open_in_workspace(kind, path, focus) forwards its FocusPayload here once the
+# target file is open. Each workspace reads only the payload fields it owns
+# (strings: key, menus: screen/variable) and documents them on the override.
+# Default: nothing to focus.
+func focus_reference(_focus: FocusPayload) -> Error:
 	return OK
 
 
@@ -502,6 +502,46 @@ func get_export_dialog_dir() -> String:
 	return ""
 
 
+# --- See in game (the maturity program's F3 launcher) ------------------------
+# The shell's one launch gesture (ShellGameLaunch) boots the game over the
+# mounted resource directory with the engine's loose-file override. A workspace
+# whose authored data needs a specific step to reach that directory (terrain's
+# Export, the environment's Save into the game folder) tells the launcher about
+# it through this note, so the gesture's copy stays honest per workspace.
+
+## One "See in game" note (typed record, ADR 0017). `staged` is true when the
+## authored data already sits in the launch directory — the loose-file override
+## reads files beside the packed archives only, never subfolders. `detail` is
+## the artist-facing pointer: what to look at after launching when staged, or
+## what to do first when not.
+class GameLaunchNote:
+	extends RefCounted
+
+	var staged: bool
+	var detail: String
+
+	static func make(note_staged: bool, note_detail: String) -> GameLaunchNote:
+		var note := GameLaunchNote.new()
+		note.staged = note_staged
+		note.detail = note_detail
+		return note
+
+	## True when the two paths name the same directory (separator- and
+	## case-insensitive — resource dirs are Windows paths). Staging checks
+	## compare exact directories because the loose-file override never scans
+	## subfolders.
+	static func same_dir(dir: String, launch_dir: String) -> bool:
+		var a := dir.strip_edges().replace("\\", "/").rstrip("/").to_lower()
+		var b := launch_dir.strip_edges().replace("\\", "/").rstrip("/").to_lower()
+		return not a.is_empty() and a == b
+
+
+## Workspaces with a staging step override this; null keeps the launcher's
+## generic copy. `launch_dir` is the directory the launched game will mount.
+func get_game_launch_note(_launch_dir: String) -> GameLaunchNote:
+	return null
+
+
 func build_inspector(_host: Control) -> void:
 	pass
 
@@ -573,24 +613,13 @@ func _host_under_shell(node: Node) -> void:
 
 
 ## Reference-strip services riding the shell's reference index — the
-## {referrers, is_ready, jump} Callables ReferenceStrip.configure takes; {}
-## when headless or the shell lacks the index (callers then skip the strip).
-## Inspectors ask their workspace for this instead of reaching for the shell.
-func get_reference_services() -> Dictionary:
-	if editor_shell == null or not editor_shell.has_method("get_reference_index") \
-			or not editor_shell.has_method("open_in_workspace"):
-		return {}
-	# Capture the shell into a local so the service lambdas don't hold this
-	# RefCounted workspace through a member access.
-	var shell: Object = editor_shell
-	return {
-		"referrers": func(name: String) -> Array:
-			return shell.get_reference_index().referrers_of(name),
-		"is_ready": func() -> bool:
-			return shell.get_reference_index().is_built(),
-		"jump": func(kind: String, path: String) -> void:
-			shell.open_in_workspace(kind, ReferenceStrip.resolve_source_path(shell, path)),
-	}
+## ReferenceServices record ReferenceStrip.configure takes; null when headless
+## or the shell lacks the index (callers then skip the strip). Inspectors ask
+## their workspace for this instead of reaching for the shell.
+func get_reference_services() -> ReferenceServices:
+	# from_shell receives the shell itself, so the service lambdas never hold
+	# this RefCounted workspace through a member access.
+	return ReferenceServices.from_shell(editor_shell)
 
 
 # --- Resource root (the shared VFS the shell mounts) -----------------------

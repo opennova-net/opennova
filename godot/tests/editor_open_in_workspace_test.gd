@@ -35,7 +35,7 @@ func test_empty_path_is_invalid() -> void:
 
 func test_jump_opens_activates_and_focuses() -> void:
 	var host := _make_host()
-	var err: Error = host.open_in_workspace("strings", STRINGS_FIXTURE, {"key": "BTN_NEW_GAME"})
+	var err: Error = host.open_in_workspace("strings", STRINGS_FIXTURE, FocusPayload.for_key("BTN_NEW_GAME"))
 	assert_eq(err, OK, "the strings fixture should open through the kind-resolved workspace")
 	assert_eq(host.get_active_workspace_id(), EditorWorkstationScript.Workspace.STRINGS,
 		"the jump should activate the Strings workspace")
@@ -52,7 +52,7 @@ func test_same_path_jump_is_focus_only() -> void:
 	var doc: StringsEditor = _strings_workspace(host).get_document()
 	doc.add_entry("OPEN_IN_WS_TMP", "tmp", 0, Vector2i())
 	assert_true(doc.is_dirty, "the added entry should dirty the table")
-	assert_eq(host.open_in_workspace("strings", STRINGS_FIXTURE, {"key": "BTN_NEW_GAME"}), OK)
+	assert_eq(host.open_in_workspace("strings", STRINGS_FIXTURE, FocusPayload.for_key("BTN_NEW_GAME")), OK)
 	assert_true(doc.is_dirty,
 		"a same-path jump must be focus-only, not a destructive reopen")
 
@@ -66,5 +66,5 @@ func test_open_strings_workspace_forwarder_keeps_contract() -> void:
 
 func test_focus_reference_default_is_ok() -> void:
 	var workspace := EditorWorkspace.new()
-	assert_eq(workspace.focus_reference({"anything": "x"}), OK,
+	assert_eq(workspace.focus_reference(FocusPayload.for_key("x")), OK,
 		"the base hook accepts any payload and focuses nothing")

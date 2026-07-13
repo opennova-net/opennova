@@ -101,8 +101,8 @@ func _ready() -> void:
 
 	# "Used by" rides the shell's reference index, asked of the workspace (the
 	# inspector never touches the shell); headless hosts get no strip.
-	var services: Dictionary = _ws.get_reference_services() if _ws != null else {}
-	if not services.is_empty():
+	var services: ReferenceServices = _ws.get_reference_services() if _ws != null else null
+	if services != null:
 		_used_by_strip = ReferenceStrip.new()
 		_used_by_strip.name = "StringsUsedByStrip"
 		# Kind filter: referrer buckets are name-keyed, so the bare-stem query

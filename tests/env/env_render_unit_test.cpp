@@ -688,6 +688,74 @@ int main() {
 		static uint32_t color7[kWaterNoiseSize * kWaterNoiseSize];
 		water_noise_color_pixels(color0, tables, 0);
 		water_noise_color_pixels(color7, tables, 7);
+		if (color0[0] != 0xE17D7D7Du || color0[1] != 0xE7707070u ||
+		    color0[64 * 128 + 64] != 0xE17C7C7Cu) {
+			// Divergence diagnostics (macOS-runner red, env #35 follow-up): dump
+			// the actual words plus a reconstruction of the t=0 intermediate
+			// (animated[i] == sine_lut[field[i]]) so a single CI log separates
+			// wrong-inputs from wrong-kernel.
+			std::fprintf(stderr,
+			             "diag: color0[0]=0x%08X color0[1]=0x%08X color0[center]=0x%08X\n",
+			             color0[0], color0[1], color0[64 * 128 + 64]);
+			uint32_t animated_sum = 0;
+			for (int i = 0; i < kWaterNoiseSize * kWaterNoiseSize; ++i) {
+				animated_sum += tables.sine_lut[tables.field[i]];
+			}
+			std::fprintf(stderr, "diag: t0 animated head =");
+			for (int i = 0; i < 8; ++i) {
+				std::fprintf(stderr, " %02X", tables.sine_lut[tables.field[i]]);
+			}
+			std::fprintf(stderr, " sum=%u\n", animated_sum);
+			uint32_t field_sum_now = 0, lut_sum_now = 0;
+			for (int i = 0; i < kWaterNoiseSize * kWaterNoiseSize; ++i) field_sum_now += tables.field[i];
+			for (int i = 0; i < 256; ++i) lut_sum_now += tables.sine_lut[i];
+			std::fprintf(stderr, "diag: field_sum=%u lut_sum=%u sizeof(tables)=%u\n",
+			             field_sum_now, lut_sum_now,
+			             static_cast<unsigned>(sizeof(WaterNoiseTables)));
+			std::fprintf(stderr, "diag: color0 head words =");
+			for (int i = 0; i < 4; ++i) std::fprintf(stderr, " %08X", color0[i]);
+			std::fprintf(stderr, "\n");
+			// Cross-check: recompute the whole t=0 pass naively here and
+			// report the first mismatching pixels with their taps — separates
+			// a lib miscompile from bad pins in one log.
+			static uint8_t anim_ref[kWaterNoiseSize * kWaterNoiseSize];
+			for (int i = 0; i < kWaterNoiseSize * kWaterNoiseSize; ++i) {
+				anim_ref[i] = tables.sine_lut[tables.field[i]];
+			}
+			int reported = 0;
+			for (int row = 0; row < kWaterNoiseSize && reported < 3; ++row) {
+				for (int col = 0; col < kWaterNoiseSize && reported < 3; ++col) {
+					const auto tap = [&](int r, int c) -> int {
+						return anim_ref[((r & 0x7F) << 7) + (c & 0x7F)];
+					};
+					const int kernel =
+							(3 * (tap(row - 1, col - 1) + tap(row - 1, col + 1) +
+							      tap(row + 1, col - 1) + tap(row + 1, col + 1)) +
+							 4 * (tap(row, col) + tap(row - 1, col) + tap(row + 1, col) +
+							      tap(row, col - 1) + tap(row, col + 1))) >> 5;
+					int inten = 128 - (kernel - 128 < 0 ? 128 - kernel : kernel - 128);
+					if (inten < 0) inten = 0;
+					const int ainv = (inten * inten) >> 9;
+					const uint32_t want =
+							(0x10101u * static_cast<uint32_t>(inten)) |
+							(static_cast<uint32_t>(255 - ainv) << 24);
+					const uint32_t got = color0[(row << 7) + col];
+					if (got != want) {
+						std::fprintf(stderr,
+						             "diag: first mismatch @ (%d,%d) lib=%08X ref=%08X taps=%d %d %d %d / %d %d %d %d %d\n",
+						             row, col, got, want,
+						             tap(row - 1, col - 1), tap(row - 1, col + 1),
+						             tap(row + 1, col - 1), tap(row + 1, col + 1),
+						             tap(row, col), tap(row - 1, col), tap(row + 1, col),
+						             tap(row, col - 1), tap(row, col + 1));
+						++reported;
+					}
+				}
+			}
+			if (reported == 0) {
+				std::fprintf(stderr, "diag: lib output matches the naive reference everywhere — the pins themselves mismatch\n");
+			}
+		}
 		if (!expect(color0[0] == 0xE17D7D7Du && color0[1] == 0xE7707070u &&
 		            color0[64 * 128 + 64] == 0xE17C7C7Cu, "color pixels landmarks (t=0)")) return 1;
 		if (!expect(color7[0] == 0xE17C7C7Cu, "color pixel [0] (t=7)")) return 1;

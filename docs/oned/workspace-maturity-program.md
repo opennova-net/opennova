@@ -1,9 +1,12 @@
 # ONED workspace maturity program (the maturity program's ONED track)
 
 **This document is the ONED track detail of the
-[maturity program](../maturity-program.md)** — the umbrella owns waves,
+[maturity program](../maturity-program.md)** — the umbrella owned waves,
 freeze policy, cross-track ordering, and enforcement; this doc owns the
-editor-side phases. Standing rules this track builds under: ADR 0015 (two
+editor-side phases. **The umbrella program closed 2026-07-12 (freeze
+lifted); this doc survives as the editor's standing roadmap** — phases
+execute as ordinary slices under the standing ADRs, RE gates unchanged.
+Standing rules this track builds under: ADR 0015 (two
 products, serve mode), ADR 0016 (editor over public engine APIs — no
 bypasses), ADR 0017 (typed records, named constants), ADR 0018 (public-API
 testability).
@@ -41,13 +44,13 @@ decision (ADR / RE-record entry) saying why not:
 
 | Workspace | R | W | E | G | Weakest axis today |
 |---|---|---|---|---|---|
-| Terrain | ✓ | ✓ | ✓ (viewport is the renderer) | partial (via mission PIE) | G polish |
-| Environment | ✓ | ✓ | ✓ (runtime nodes shared; water unified) | partial | G polish |
+| Terrain | ✓ | ✓ | ✓ (viewport is the renderer) | ✓ (mission PIE + the F3 launcher's terrain staging note) | at bar — the E/G exemplar (TER-1, 2026-07-12) |
+| Environment | ✓ | ✓ | ✓ (runtime nodes shared; water unified) | ✓ (the F3 launcher carries the .env staging note) | at bar (ENV-1, 2026-07-12) |
 | Object | ✓ (v8/v9; LW v10 on branch) | ✓ (.3dp + .3di export) | partial (isolated preview; env-lit but no world context, no LOD-by-distance) | — | E |
 | Mission | ✓ | ✓ | ✓ (PIE runs the real runtime) | ✓ | data semantics (heading, ANIMNUM) |
-| Credits | ✓ | ✓ | ✓ (`NovaCreditsPlayer` hosted in the editor) | — | G |
-| Fonts | ✓ | ✓ | partial (glyph canvas is editor-drawn; fine for painting, no engine text sample) | — | E |
-| Strings | ✓ | ✓ | partial (no in-context render) | — | E (minor by format) |
+| Credits | ✓ | ✓ | ✓ (`NovaCreditsPlayer` hosted in the editor; play/pause/scrub transport, CRE-1) | — | G (F3 wiring = CRE-2) |
+| Fonts | ✓ | ✓ | ✓ (type-a-line sample through the game's draw path beside the glyph paint canvas, FNT-1 2026-07-12) | — | G (F3 wiring = FNT-3) |
+| Strings | ✓ | ✓ | ✓ (selected entry rendered through the engine path with a font picker, STR-1 2026-07-12; encoding pinned by STR-2, D-FNT-4 minted) | — | G (F3 wiring = STR-3) |
 | Sound | ✓ | ✓ (`write_lwf`) | ✓ (audition rides the runtime set→member→wav path) | — | G |
 | Music | ✓ (headerless form excluded by pinned decision, D-SCR-1/2) | ✓ | ✓ (live director runs the VM) | — | G + usability (see MUS-D) |
 | Menus | ✓ (.mnu/.mns) | ✓ | ✓ (canvas hosts live `NovaMnuMenu`, edit_mode on) | partial (no flow run; actions authored blind) | G |
@@ -191,12 +194,303 @@ the shell left lane (the only one); and a separate Bank mode.
   conformance (workflow picker + inspector like every other workspace); no
   modal map/section swap (both visible or explicitly split); navigation
   honest about the flat machine; Live/Bank mode resolution; responsive-first
-  (post-RSP policy). Ends at a maintainer gate.
+  (post-RSP policy). Ends at a maintainer gate. **The design landed 2026-07-12
+  (the section below); the maintainer gate is the open item.**
 - MUS-I (Wave 3): implementation in shippable slices — decompose the screen
   along its eight concerns, unify the canvas, rework block/expr editing per
   the accepted design. Every slice leaves the workspace usable.
 - Gate: the 46 doc/VM tests unmodified-green throughout; new screen tests;
   FULL GUT; visual pass.
+
+### The MUS-D design (2026-07-12; at the maintainer gate)
+
+Deliverable of the MUS-D design spike (Wave 2). Grounded in the current code:
+the screen `godot/modtools/music/ui/live_mode.gd` (1,951 lines) + `live_mode.tscn`,
+the adapter `music_workspace.gd`, the untouched document layer
+`music_editor_document.gd` (1,315 lines), and the format/VM facts in
+`docs/audio/mus-sbf-re.md`. Ends at the maintainer gate; MUS-I implements it.
+
+The 46 doc/VM tests that stay green unmodified are exactly:
+`godot/tests/modtools/music/music_document_test.gd` (19) +
+`music_document_move_test.gd` (9) + `music_authoring_test.gd` (18) — all three
+exercise `MusicEditorDocument` only, no UI. Everything below changes UI code only.
+
+One copy decision applied throughout: the artist-facing word is **section**
+(the format's own word — `get_section_names`, `add_section`, "Jump to section").
+Today's UI mixes "state" and "section" ("Add State" button, "States" sidebar,
+"Section map" header). The redesign unifies on "section" everywhere
+(rename-misnomers-everywhere applies to copy too).
+
+#### 1. The artist's workflow model
+
+What `.mus` is, per the RE record: a **bank of tracks** (`.sbf`) plus a
+**script** (`.bin`) of sections — a flat, variable-driven state machine. The VM
+sits in one section at a time; it advances **only when the playing track
+finishes** (witnessed pacing: one `play` per track completion,
+`audio_stream_update @ 0x671c60`), so a section is best understood as *a
+playlist with decisions between tracks*, and transitions always land on track
+boundaries. The game drives it by writing **dials** (the 17 shared variables):
+menu screens push their MUSICVAR, missions pump health %, threat distance,
+team, etc. per frame. A per-script discriminator dial picks the path (menumus
+reads dial 2, gamemus dial 1).
+
+The artist's loop, in order — this ordering is what the screen must mirror:
+
+1. **Gather tracks.** Import WAVs into the bank; name them (15 chars); preview.
+   Tracks are the raw material; everything else points into this list by index.
+2. **Sketch sections.** One per musical situation: intro, calm loop, combat,
+   win sting. First section declared = where playback begins.
+3. **Sequence each section.** Play steps top to bottom (`Play combat1 — waits`),
+   repeats, then the decision logic: if / choose-by-value on dials, set/adjust
+   a dial, go to another section.
+4. **Wire the machine.** Transitions between sections; decide which dial
+   selects the mood and name it (the profile sidecar carries friendly names).
+5. **Audition as the game.** Start playback; watch the map light up and the
+   program glow step by step; poke the dials the way the game would; jump
+   straight to sections the dials never reach (retail gamemus' win/lose
+   sections are unreachable dead content — the Jump affordance exists exactly
+   for auditioning those); watch the meter and the activity feed.
+6. **Iterate live.** Edits are parity-gated and undoable while playing; Save;
+   **See in game** (the shell's F3 launcher; MUS-G rides MUS-I's tail).
+
+Two hats, one canvas: *composing* (2–4) and *auditioning* (5) both stare at the
+same map + program; audition just lights them up. That observation drives the
+workflow split below.
+
+#### 2. The screen layout
+
+Today: the adapter opts out of the shell left lane (`uses_left_lane() → false`
+in `music_workspace.gd` — the only workspace), and the whole UI lives in the
+viewport: a private left dock (Tracks + Game Dials), a center column whose
+canvas **swaps** between the section map (`%SectionMap` GraphEdit) and the
+drilled-in program view (`MusicSectionProgramView`), a breadcrumb row, and a
+bottom log strip. The redesign:
+
+```
++--------------------------------------------------------------------------------+
+| Shell top bar (Save / See in game / ...)                                        |
++----------------+---------------------------------------------------+-----------+
+| SHELL LEFT     |  Transport: ▶ Play  ⏹ Stop | PLAYING | ▮▮ meter    | TRACKS    |
+| LANE           |  Now playing: Combat (♪ combat1) | [x] Follow      | (asset    |
+|                +---------------------------------------------------+  dock)    |
+| Workflows      |  Section map — always visible (GraphEdit)         |           |
+|  ● Compose     |   [★ Begin] ──→ [Calm ↻] ──→ [Combat ↻]           | ♪ intro   |
+|  ○ Audition    |        └──⇒ fan-out       ↪ [Win sting ⚠]         | ♪ calm1   |
+| ------------   |                                                   | ♪ combat1 |
+| Sections       +===================== VSplit ======================+ ♪ combat2 |
+|  ★ Begin       |  Section: Combat   ↻ loops · ▶ playing   [＋ Add] | ♪ sting   |
+|  Calm ↻        |  ♪  Play  [combat1 ▾]           (waits)  ✕ ⋮      |           |
+|  ▶ Combat ↻    |  ◇  If  (Threat distance < 10)           ✕ ⋮      | [＋ Add]  |
+|  Win sting ⚠   |  |    →  Go to  [Combat ▾]                        | [Rename]  |
+| [＋ Add]       |  ✎  Set  [Mood ▾]  =  (value…)           ✕ ⋮      | [Replace] |
+| ------------   |  →  Go to  [Calm ▾]                      ✕ ⋮      | [▲][▼][✕] |
+| Combat (detail)|                                                   |           |
+|  name, rename, +---------------------------------------------------+-----------+
+|  delete,       |  Activity  ▸ 12:03:01 section → Combat   [section][sound][…]  |
+|  arrives from /|  (collapsible strip; expands to the full filtered feed)       |
+|  leads to,     |                                                               |
+|  caller inputs |                                                               |
++----------------+---------------------------------------------------------------+
+```
+
+**The canvas is a `VSplitContainer`: the section map on top, the selected
+section's program below — both always visible.** No swap, no drill-in. The map
+is wide-and-shallow (the layered layout runs left to right), the program is a
+vertical block stack; each gets its natural aspect. The split ratio is
+draggable and persisted as a ratio (RSP-conformant: no pixel offsets, no new
+`custom_minimum_size`; everything below is containers + size flags).
+
+Where the eight concerns land:
+
+| Concern (today, in live_mode.gd) | Home in the redesign | Visibility |
+|---|---|---|
+| Transport (Start/Pause/Resume/Stop, state label, now-playing, jump dropdown) | **Transport bar** across the canvas top: ▶ Play (start/resume) · ⏸ Pause · ⏹ Stop, status, now-playing, Follow toggle, mini level meter. The jump *dropdown* dies — jumping is a map/list affordance (§3) | always |
+| Breadcrumbs (`music_nav.gd` trail, rename/delete crumb buttons) | **deleted** — replaced by the selection model (§3); rename/delete move to the Compose inspector + context menus | — |
+| Section map (GraphEdit, layout, badges, add-section, empty state) | **top canvas pane**, unchanged in content (chips, ★/↻/⚠ badges, edge colors, live glow) | always |
+| Program view (`MusicSectionProgramView` block stack) | **bottom canvas pane**, permanently showing the *selected* section; header names the section + its badges | always |
+| Variables (`var_inspector.gd` Game Dials) | **Audition inspector** (left lane) | while Audition workflow active |
+| Volume meter (`volume_meter.gd`) | mini meter in the transport bar; the full L/R meter in the Audition inspector | always (mini) |
+| Event log (typed/coalesced ItemList + filters) | **Activity strip** at the bottom: a one-line ticker showing the latest event, expandable to the full feed with filters | always (ticker); expanded on demand |
+| Follow-live (`_follow_live` flag threading) | one Follow toggle on the transport bar; semantics unchanged (manual selection pins, Start/Stop re-arm) but the flag lives in the selection model, not the screen | always |
+
+**Left-lane conformance.** `uses_left_lane()` returns true; the adapter
+declares two `InspectorDef` rows (the same registry mechanics as
+`terrain_workspace.gd:_build_inspector_defs()`):
+
+- **Compose** (default) — a `ListDetailInspector` over sections. The list *is*
+  today's `%StatesList` sidebar, relocated to where every other workspace puts
+  its index: one row per section with ★ start / ↻ loops / ⚠ unreachable / ▶
+  playing badges, plus **＋ Add section**. The detail pane for the selected
+  section: name + Rename/Delete (today's breadcrumb buttons, re-homed),
+  "arrives from / leads to" transition chips (click one to select that
+  section), and the caller-inputs card (`inputs_card.gd` naming stays).
+- **Audition** — a `WorkflowInspector` hosting the Game Dials
+  (`var_inspector.gd` unchanged), the full volume meter, and the activity-feed
+  filters. This is the "be the game" hat.
+
+Switching workflow swaps only the inspector — the canvas never changes
+(terrain's pattern: Sculpt→Paint doesn't touch the viewport). Playback keeps
+running across the switch.
+
+**Tracks = the shell asset dock.** `uses_asset_dock()` returns true and the
+bank panel mounts there (the right dock terrain/object already use). Tracks
+are the workspace's asset palette: always visible in every workflow, always
+draggable onto the program ("drop a track right where it should play" keeps
+working from any workflow). Import/rename/reorder/replace/delete and per-row
+preview carry over from `bank_mode.gd` unchanged in behavior.
+
+**Empty state** (no project open): the existing centered "＋ New music program
+/ or use Open" prompt fills the canvas area; the inspectors show the shell's
+standard empty-state panel.
+
+#### 3. Navigation model
+
+The machine is flat; the navigation is flat:
+
+- **One selection: the selected section.** Clicking a map node, a list row, a
+  "leads to" chip in the inspector, or a *Go to [section ▾]* row's open ▸
+  selects it; the program pane, the list highlight, and the map highlight all
+  follow the same `music_selection.gd` model (a small RefCounted replacing
+  `music_nav.gd`'s location role). There is no "inside" to drill into and no
+  trail to climb out of.
+- **No breadcrumbs.** The program pane's header is a *name* ("Section: Combat
+  · ↻ loops to itself"), not a path. `music_nav.gd`'s history/trail/crumb
+  rendering and live_mode's `_rebuild_breadcrumb` / `MAX_CRUMBS` / crumb-button
+  block are deleted.
+- **Follow playback** auto-selects the section the VM enters (replace, never a
+  history push — there is no history); clicking anything pins (toggle off);
+  Start/Stop and the toggle re-arm. Same behavior as today's `_follow_live`,
+  minus the trail-flooding workarounds.
+- **Selection ≠ jump.** Today a single map click *jumps the running VM* and
+  flashes a warning when stopped — the click's meaning depends on transport
+  state. Redesigned: click always selects (safe, mode-free); **Play from
+  here** is the explicit jump — a button in the transport bar + the section
+  context menu, enabled while playing (the honest home of today's jump
+  dropdown, which duplicated the map).
+- Alt+Left/Right browser keys: dropped with the trail (open question 1 keeps
+  the door open for plain selection history if missed).
+
+#### 4. Live/Bank resolution
+
+**Dissolve modes entirely.** Today's names are fossils: `MusicLiveMode` is the
+whole screen, `MusicBankMode` is a legacy standalone screen instanced WHOLE
+inside `live_mode.tscn` and reached by recursive `find_child("Bank")`
+(`music_workspace_root.gd`), and the adapter still says "the old Bank / Script
+/ Live modes are coexisting docks". Concretely:
+
+- **Live is a transport state, not a place.** The screen becomes
+  `music_screen.gd` / `MusicScreen`; "live" survives only as
+  PLAYING/PAUSED/STOPPED on the transport bar.
+- **Bank is the Tracks palette, not a mode.** `bank_mode.gd` →
+  `music_tracks_dock.gd` / `MusicTracksDock`, mounted through the framework's
+  asset-dock tier (`set_asset_dock`), killing the find_child reach-through and
+  the nested-legacy-screen arrangement.
+- **The relationship, made explicit in the layout:** tracks are the material,
+  sections consume them by index — so the palette sits permanently beside the
+  canvas, and every *Play* row's track dropdown and chip names resolve against
+  it. One document, one undo stack (already true:
+  `music_editor_document.gd`'s unified history), now visibly one place.
+- Copy sweep: no user-visible "mode", "bank", or "live" as nouns; the dock is
+  "Tracks", the meter is "Level", playback is "playback".
+
+#### 5. Block editing
+
+The block-stack paradigm stays (per the prior-art warning: the node-graph
+*program* editor was built and deleted in PR #67; the block stack is its
+replacement and it works). What changes is where nested values get edited:
+
+- **Rows keep in-place commits.** `stmt_row.gd`'s live sentence — track /
+  section / dial dropdowns that commit a canonical replacement line on pick —
+  is already the right model ("EDITING IS THE ROW") and is untouched.
+- **The floating expression popover is replaced by an inline expression
+  band.** Today a condition/value chip opens `MusicExprPopover`, a
+  manually-positioned floating panel (`z_index`, `reposition()` on scroll,
+  clamp math, 340 px minimum) with hairy survival machinery
+  (`_resolve_popover_after_render`, `_apply_callable_for`,
+  `_find_row_by_key` re-anchoring after every document re-render). Redesigned:
+  clicking the chip **expands an editor band directly under that row, inside
+  the stack** — same two tabs (Build = `expr_row.gd` structured editor with the
+  live ✓/✗ sentence preview; Type it = canonical text with validation), same
+  explicit Apply/Cancel (expressions need validation; atomic picks don't).
+  The band is an ordinary container child: it reflows with the stack
+  (responsive-safe, no floating geometry), and it survives re-renders the way
+  fold state already does — keyed by `{ordinal, slot, branch_key}` like
+  `_unfolded`, re-opened after `show_section` rebuilds. One band open at a
+  time, opening elsewhere moves it (today's popover rule, kept).
+- **If / choose-by-value blocks** (`stmt_if_block.gd`, `stmt_switch_block.gd`)
+  keep their indented lanes, lane ＋ menus, and the regenerate-whole-block
+  write path (`MusStmtText.if_block` → `replace_statement`, one ordinal, one
+  undo step — a document contract we don't touch). Their condition/selector
+  chips open the same inline band, indented into the block.
+- **Section-level editing moves to the inspector**, not into rows: rename,
+  delete, transitions summary, input naming (§2). Row-level editing stays at
+  the row. Nothing edits through a popup except confirmation dialogs.
+
+#### 6. Decomposition plan for MUS-I
+
+`live_mode.gd` (1,951) becomes a thin composition root plus components, one
+shippable slice per move. Every slice ends with: the 46 doc/VM tests green
+**unmodified**, the music screen suite (rewritten per-slice, absorbing the
+TST refit — the umbrella doc already routes "the music suite" through MUS-I's
+rebuild), the canary, and FULL GUT at the end of the phase. Every slice leaves
+the workspace fully usable.
+
+| Slice | Move | New/renamed files | Screen-test impact |
+|---|---|---|---|
+| S1 — shell conformance + Tracks dock | `uses_left_lane()` → true, `uses_asset_dock()` → true; Bank panel out of `live_mode.tscn` into the asset dock; declare Compose/Audition `InspectorDef`s (Compose hosts the relocated section list; Audition hosts the relocated Game Dials + meter); the screen's private LeftDock dies | `music_tracks_dock.gd` (from `bank_mode.gd`), `ui/inspectors/compose_inspector.gd`, `ui/inspectors/audition_inspector.gd` | `music_bank_mode_test` → `music_tracks_dock_test` (path/name only); `music_workspace_test` updated for the new hooks |
+| S2 — unify the canvas | CanvasStack → VSplit (map above, program below, program bound to selection); delete drill-in / chrome-swap / breadcrumb code; introduce `music_selection.gd` (selection + follow pin) | `music_selection.gd`; `music_nav.gd` retired | `music_nav_test` retired with it; new `music_selection_test`; `music_live_mode_test` sheds its swap/crumb cases |
+| S3 — transport extraction | Transport bar component owns buttons, status label + warning flash, now-playing, Follow toggle, mini meter; Play folds start/resume | `ui/transport_bar.gd` | transport cases move to `music_transport_test` |
+| S4 — map panel extraction | GraphEdit build/layout/fit/highlight/context-menu/add-section/empty-state into a component emitting `section_selected` / `play_from_here` / rename/delete/add intents | `ui/section_map_panel.gd` | `music_live_map_test` → `music_section_map_test` |
+| S5 — activity feed extraction | De-spam/idle/coalescing rules into a testable model; the strip widget renders it (ticker + expanded feed + filters) | `music_event_feed.gd` (RefCounted), `ui/activity_strip.gd` | log cases leave `music_live_mode_test` for `music_event_feed_test` |
+| S6 — program pane + inline band | Wrap `MusicSectionProgramView` with the section header; `expr_popover.gd` → inline `ui/expr_band.gd`; delete the re-anchor machinery; keyed reopen after re-render | `ui/program_pane.gd`, `ui/expr_band.gd` | `music_expr_popover_test` → `music_expr_band_test` (same assertions, new host) |
+| S7 — inspector depth | Compose becomes the full `ListDetailInspector` (detail: rename/delete/transitions/inputs); Audition binds feed filters; selection sync across list/map/pane | inspectors from S1 grow | new `music_compose_inspector_test` |
+| S8 — root diet + sweep | `live_mode.gd/tscn` → `music_screen.gd/tscn` (composition root only); state→section copy sweep; README rewrite; screenshot re-baseline; MUS-G (F3 wiring) rides this tail | renames | suite-wide path sweep + GUT silent-drop check |
+
+Ordering rationale: S1 first because it is pure relocation (framework tiers
+absorb existing panels — lowest risk, immediate conformance win); S2 is the
+one behavioral change (the swap dies) and everything after it is extraction
+along seams that already exist as signal boundaries in the code.
+
+#### 7. Constraint compliance table
+
+| Signed constraint | How the design satisfies it |
+|---|---|
+| Document/VM layer untouched; 46 tests green unmodified | Every change is under `modtools/music/ui/`, the adapter, or new UI files. The document's write API (`insert_statement`, `replace_statement`, `add_section`, …) is consumed as-is; `music_document_test` + `music_document_move_test` + `music_authoring_test` (19+9+18=46) are never edited and gate every slice |
+| Shell left-lane conformance (workflow picker + inspector) | `uses_left_lane()` true; two `InspectorDef` rows (Compose, Audition) through the standard `_build_inspector_defs()` / `build_workflow_inspector()` path; the section index lives in the lane like every other workspace's list |
+| No modal map/section swap | The canvas is an explicit VSplit; map and selected-section program are simultaneously visible at all times; no visibility toggling between them anywhere |
+| Navigation honest about the flat machine | Breadcrumb trail deleted; a single selection over an always-visible flat index (list + map); the program header is a name, never a path; follow is selection-replace, not history |
+| Live/Bank mode resolution | Modes dissolved: Bank → Tracks asset dock (framework tier, no find_child seam), Live → transport state; classes/files renamed; copy sweep removes the nouns |
+| Responsive-first | Containers + size flags throughout; split ratios persisted as ratios; the floating popover (fixed 340 px, manual clamp math) becomes an in-flow band; no new `custom_minimum_size` sites; adopts RSP-1 policy when it lands |
+| No node graph (prior art) | The block stack remains the only program-editing surface; the GraphEdit stays what it is today — the *between-sections* map (the paradigm PR #67 shipped), and this design adds no graph-based program authoring |
+
+#### 8. Open questions for the maintainer gate
+
+1. **Selection history:** with drill-in gone, Alt+Left/Right back/forward
+   becomes plain "previous selection". Drop it entirely (lean: yes — the flat
+   index makes it near-redundant), or keep a two-button history?
+2. **Workflow split:** Compose / Audition as proposed, or a single-pane
+   inspector with no picker (also framework-conformant — the Sound/Fonts
+   pattern)? The two-hat split is the recommendation; it keeps the dials from
+   crowding the section detail.
+3. **Tracks placement:** right asset dock (proposed; drag-to-program available
+   from every workflow) vs a third "Tracks" workflow in the left lane
+   (narrower screen, but drag requires that workflow active)?
+4. **Click-to-jump retirement:** OK to change the running-playback map click
+   from "jump the VM" to "select", with **Play from here** as the explicit
+   jump? This removes the transport-dependent click meaning but changes a
+   shipped behavior.
+5. **Map-edge authoring:** should MUS-I add "drag from a section's output pin
+   to create a *Go to*" on the map, or is transition authoring staying in the
+   program rows only? (New authoring surface on a graph — flagging it rather
+   than assuming, given the prior-art warning.)
+6. **Activity strip default:** collapsed ticker (proposed) vs the always-open
+   list of today?
+7. **Test retirement accounting:** `music_nav_test.gd` (12 tests) dies with
+   the trail; the TST ratchet treats the music suite as riding MUS-I's
+   rebuild — confirm the count reduction is acceptable under that rule.
+8. **Copy unification on "section":** confirm the state→section sweep (button
+   labels, tooltips, README) — it touches strings the existing screenshot
+   baseline shows.
 
 ## Per-workspace phases
 
@@ -205,13 +499,42 @@ the shell left lane (the only one); and a separate Bank mode.
 - TER-1: bar audit — confirm all four axes against this doc's definitions,
   wire the F3 launcher entry ("open the exported terrain's mission in game"),
   and record terrain as the E/G exemplar. No new capability. Gate: existing
-  terrain suites; driver overview shot.
+  terrain suites; driver overview shot. **DONE 2026-07-12.** Audit: R ✓
+  (loose `.trn` projects and imported game assets, plus VFS/PFF opens via
+  `open_trn`'s resource-root branch); W ✓ (F4 practiced: from-scratch
+  TrnGen-parity bake + the roundtrip/import-export suites); E ✓ (the editor
+  viewport IS the ported terrain renderer — the E exemplar); G ✓ (mission
+  PIE runs the real runtime on the terrain, and the See-in-game launcher now
+  carries terrain's staging note: exported-into-the-game-folder → "load a
+  mission on it", otherwise an honest export-first pointer). One correction
+  to the phase's wording: terrain's export bakes the terrain data set
+  (`.trn`/`.cpt`/`.til`/maps), not a mission dir — there is no "exported
+  terrain's mission" to boot directly, so the launcher entry points at the
+  game's mission list over the staged terrain instead. The wiring introduced
+  the per-workspace seam every later F3 phase reuses:
+  `EditorWorkspace.get_game_launch_note(launch_dir)` returning a typed
+  `GameLaunchNote` (staged + artist-facing detail), consumed by
+  `ShellGameLaunch` in the tooltip and post-launch status.
 
 ### Environment
 
 - ENV-1: bar audit (E already exemplary — direct runtime-node reuse). Wire F3
   (authored `.env` override → launch; the runtime loads the same file). Gate:
-  environment suite.
+  environment suite. **DONE 2026-07-12.** Audit: R ✓ (loose opens plus
+  VFS/PFF entries via `open_env_from_resource_root`); W ✓ (from-scratch save
+  through libs/env `EnvFile.save_to_path`, roundtrip-pinned by
+  env_file_test); E ✓ re-verified — the exemplar (editor edits drive the SAME
+  `NovaEnvironment`/`NovaSky`/`NovaWater` runtime nodes;
+  editor-runtime-parity.md: water parameterized, not forked); G ✓ (the
+  launcher's env note over TER-1's `GameLaunchNote` seam: the launched game
+  reads `<mission env ref>.env` from the mounted root, so Save into the
+  launch dir IS the staging step — the note stages on a clean save there and
+  un-stages on unsaved edits, since the game reads the disk copy). Because
+  Environment is a popup workspace (never the active one), the shell routes
+  the launcher's note through the open panel: panel open = the environment's
+  note, panel closed = the active workspace's. No LaunchPlan change was
+  needed: "the launch carries the authored .env" resolves to the
+  `/d`-mounted directory carrying it.
 
 ### Object
 
@@ -251,6 +574,19 @@ the shell left lane (the only one); and a separate Bank mode.
   play/pause/scrub transport over the hosted player so the roll (not just the
   layout) previews in-editor. Verify the player's cadence citations while
   there (R5 only if uncited). Gate: credits suites (20 files).
+  **DONE 2026-07-12.** Play/pause/stop + speed already drove the hosted
+  player (since the workspace landed, #22); the missing transport piece was
+  direct scrubbing — a scrub bar under the preview now drives the player's
+  scroll offset over the roll's full extent and follows playback, wheel, and
+  card-selection seeks. Cadence-citation verdict: **UNCITED — R5 is OPEN.**
+  The SCROLL_RATE format side is witnessed
+  ([orig: marquee_load_credits_from_ini @ 0x65c5a0]), but
+  `NovaCreditsPlayer::_process_scroll` converts the per-frame rate to
+  per-second with an assumed 60 fps cadence (`* 60.0f`) and the ~F overlay
+  fade zone is a bare 50 px (`kFadeZonePixels`) — neither carries a witness
+  of `CMarqueeWnd`'s update/render cadence (note: the engine tick elsewhere
+  is 62 Hz, so the 60 is doubly suspect). Marked in the source as
+  do-not-cite-without-a-grill; not invented here.
 - CRE-2: wire F3 (authored `nlist.kda` → game credits screen).
 
 ### Fonts
@@ -362,7 +698,10 @@ with to make a new game"; the Game workspace itself stays out of scope.
 - R3 3di LOD select rule — distance thresholds/CDEP interaction (blocks OBJ-2)
 - R4 hudpos.def consumption semantics — full-field draw behavior incl. the
   objective line/GameText (blocks HUD-1 completeness + HUD-3)
-- R5 credits roll cadence citations (only if CRE-1 finds them uncited)
+- R5 credits roll cadence citations — CRE-1 verdict 2026-07-12: UNCITED, so
+  R5 is OPEN (the 60 fps frame→second conversion in
+  `NovaCreditsPlayer::_process_scroll` and the 50 px ~F fade zone; the
+  witnessed side stops at the SCROLL_RATE parse @ 0x65c5a0)
 - R6 menu action verbs beyond current witness (only if MNU-2 finds gaps)
 - R7 sound attenuation/falloff model (blocks SND-2 if unwitnessed)
 - R8 boot-required resource enumeration — owned by the umbrella's ENG-6;

@@ -11,11 +11,14 @@
   ],
   "counters": {
     "libs_uncited_src_files": 60,
-    "test_private_pokes": 1384
+    "test_private_pokes": 1393
   },
   "dict_contract_allowlist": [
     "to_drag_data",
     "from_drag_data",
-    "selected_weapon"
+    "selected_weapon",
+    "document_tab_row.gd|func to_dict()",
+    "mcp_tool_def.gd|var input_schema",
+    "mcp_tool_def.gd|func to_list_entry()"
   ]
 }

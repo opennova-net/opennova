@@ -103,6 +103,8 @@ private:
 		float trigger_y = 0.0f;  // Y position in content space (determines fade)
 	};
 	Vector<FadeOverlay> fade_overlays_;
+	// Uncited: the original ~F fade behavior/zone is unwitnessed (R5 in
+	// docs/oned/workspace-maturity-program.md). Do not cite without a grill.
 	static constexpr float kFadeZonePixels = 50.0f;
 };
 

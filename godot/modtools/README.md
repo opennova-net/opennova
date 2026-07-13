@@ -53,6 +53,12 @@ packed game data, so your resource directory needs to be a real game install
 (PFFs present); your saved files sit on top of it exactly as they did for the
 original tools.
 
+Workspaces whose files reach the game through a specific step tell the button
+about it: the tooltip and the post-launch message carry the active workspace's
+pointer (Terrain: export into the game folder first, then load a mission on
+it; Environment: save the `.env` into the game folder — the game reads that
+same file), and warn when that step hasn't happened yet.
+
 What to look at, per workspace:
 
 | Workspace | After launching |

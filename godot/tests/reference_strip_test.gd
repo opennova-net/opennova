@@ -12,30 +12,33 @@ const ReferenceStripScript := preload("res://modtools/framework/links/reference_
 static var ROOT_DIR := OS.get_cache_dir().path_join("opennova_test_reference_strip")
 
 
-func _make_strip(services: Dictionary, noun := "font") -> ReferenceStrip:
+func _make_strip(services: ReferenceServices, noun := "font") -> ReferenceStrip:
 	var strip: ReferenceStrip = ReferenceStripScript.new()
 	add_child_autofree(strip)
 	strip.configure(noun, services)
 	return strip
 
 
-# edges_by_key: key -> Array of edge dicts; log["queries"] counts referrers calls.
-func _services(edges_by_key: Dictionary, log: Dictionary, ready := false) -> Dictionary:
-	return {
-		"referrers": func(name: String) -> Array:
+# edges_by_key: key -> Array[ReferenceEdge]; log["queries"] counts referrers calls.
+func _services(edges_by_key: Dictionary, log: Dictionary, ready := false) -> ReferenceServices:
+	return ReferenceServices.make(
+		func(name: String) -> Array:
 			log["queries"] = log.get("queries", []) + [name]
 			return edges_by_key.get(name, []),
-		"is_ready": func() -> bool:
+		func() -> bool:
 			return ready or bool(log.get("force_ready", false)),
-		"jump": func(kind: String, path: String) -> void:
-			log["jump"] = [kind, path],
-	}
+		func(kind: String, path: String) -> void:
+			log["jump"] = [kind, path])
 
 
 func _edge(source_path: String, source_kind: String, site: String,
-		target_kind := "font") -> Dictionary:
-	return {"source_path": source_path, "source_kind": source_kind, "site": site,
-		"target_kind": target_kind}
+		target_kind := "font") -> ReferenceEdge:
+	var edge := ReferenceEdge.new()
+	edge.source_path = source_path
+	edge.source_kind = source_kind
+	edge.site = site
+	edge.target_kind = target_kind
+	return edge
 
 
 # The find press defers its query by one frame (so the busy state actually
@@ -227,11 +230,11 @@ func test_real_index_first_query_builds_and_merges_extension_and_stem_keys() -> 
 	var index := NovaReferenceIndex.new()
 	index.set_resource_root(root)
 
-	var strip := _make_strip({
-		"referrers": func(name: String) -> Array: return index.referrers_of(name),
-		"is_ready": func() -> bool: return index.is_built(),
-		"jump": func(_kind: String, _path: String) -> void: pass,
-	})
+	var strip := _make_strip(ReferenceServices.make(
+		func(name: String) -> Array[ReferenceEdge]:
+			return ReferenceEdge.from_dict_rows(index.referrers_of(name)),
+		func() -> bool: return index.is_built(),
+		func(_kind: String, _path: String) -> void: pass))
 	# Fonts are referenced both with the extension (menus) and bare (credits).
 	strip.set_target(PackedStringArray(["gunpl27b.fnt", "gunpl27b"]))
 	assert_false(index.is_built(), "retargeting must not build the whole-root graph")

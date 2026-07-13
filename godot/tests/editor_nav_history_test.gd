@@ -30,8 +30,8 @@ func after_all() -> void:
 			DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 
 
-func _entry(id: int, path: String) -> Dictionary:
-	return {"workspace_id": id, "path": path}
+func _entry(id: int, path: String) -> EditorNavLocation:
+	return EditorNavLocation.make(id, path)
 
 
 # --- The pure history stacks -------------------------------------------------
@@ -53,11 +53,11 @@ func test_commit_back_returns_entry_and_forward_round_trips() -> void:
 	var nav := EditorNavHistory.new()
 	nav.record(_entry(1, "a.bin"))
 	var entry := nav.commit_back(_entry(2, "b.bin"))
-	assert_eq(int(entry["workspace_id"]), 1, "Back should yield the recorded departure")
-	assert_eq(String(entry["path"]), "a.bin")
+	assert_eq(entry.workspace_id, 1, "Back should yield the recorded departure")
+	assert_eq(entry.path, "a.bin")
 	assert_false(nav.can_go_back())
 	var fwd := nav.commit_forward(_entry(1, "a.bin"))
-	assert_eq(String(fwd["path"]), "b.bin", "Forward should yield the location Back left")
+	assert_eq(fwd.path, "b.bin", "Forward should yield the location Back left")
 	assert_eq(nav.back_count(), 1, "going forward should re-feed the back stack")
 
 
@@ -73,10 +73,10 @@ func test_cap_drops_the_oldest_entry() -> void:
 	for i in range(EditorNavHistory.MAX_ENTRIES + 1):
 		nav.record(_entry(i, "f%d.bin" % i))
 	assert_eq(nav.back_count(), EditorNavHistory.MAX_ENTRIES)
-	var entry := {}
+	var entry: EditorNavLocation = null
 	while nav.can_go_back():
 		entry = nav.commit_back(_entry(99, ""))
-	assert_eq(int(entry["workspace_id"]), 1, "entry 0 should have been dropped, not 1")
+	assert_eq(entry.workspace_id, 1, "entry 0 should have been dropped, not 1")
 
 
 func test_drop_back_discards_without_touching_forward() -> void:
@@ -89,10 +89,10 @@ func test_drop_back_discards_without_touching_forward() -> void:
 	assert_eq(nav.forward_count(), 1, "dropping a back entry should leave forward alone")
 
 
-func test_peeks_return_empty_dictionaries_when_empty() -> void:
+func test_peeks_return_null_when_empty() -> void:
 	var nav := EditorNavHistory.new()
-	assert_true(nav.peek_back().is_empty())
-	assert_true(nav.peek_forward().is_empty())
+	assert_null(nav.peek_back())
+	assert_null(nav.peek_forward())
 
 
 # --- The shell: recording, restoring, buttons, shortcuts ----------------------
@@ -141,7 +141,7 @@ func test_same_location_focus_jump_records_nothing() -> void:
 	var shell := _make_shell()
 	assert_eq(shell.open_in_workspace("strings", STRINGS_FIXTURE), OK)
 	var count: int = shell._nav_history.back_count()
-	assert_eq(shell.open_in_workspace("strings", STRINGS_FIXTURE, {"key": "BTN_NEW_GAME"}), OK)
+	assert_eq(shell.open_in_workspace("strings", STRINGS_FIXTURE, FocusPayload.for_key("BTN_NEW_GAME")), OK)
 	assert_eq(shell._nav_history.back_count(), count,
 		"a focus-only jump does not move the user, so it must not grow history")
 

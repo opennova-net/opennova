@@ -378,14 +378,14 @@ func _sc_summary_text(triggers: Array, actions: Array) -> String:
 func _sc_trigger_phrase(t: Dictionary) -> String:
 	var schema := MissionParamSchema.trigger_slots(int(t.get("main_type", 0)), int(t.get("sub_type", 0)))
 	var params := [int(t.get("param1", 0)), int(t.get("param2", 0)), int(t.get("param3", 0)), int(t.get("param4", 0))]
-	var desc := _fill_desc(String(schema["desc"]), params)
+	var desc := _fill_desc(schema.desc, params)
 	return desc if desc != "" else String(t.get("sub_type_name", t.get("main_type_name", "?")))
 
 
 func _sc_action_phrase(a: Dictionary) -> String:
 	var schema := MissionParamSchema.action_slots(int(a.get("action_type", 0)), int(a.get("action_sub_type", 0)))
 	var params := [int(a.get("param1", 0)), int(a.get("param2", 0)), int(a.get("param3", 0)), int(a.get("param4", 0))]
-	var desc := _fill_desc(String(schema["desc"]), params)
+	var desc := _fill_desc(schema.desc, params)
 	return desc if desc != "" else String(a.get("action_type_name", "?"))
 
 
@@ -418,13 +418,13 @@ func _sc_ref_integrity_lines(triggers: Array, actions: Array) -> Array:
 		var ts := MissionParamSchema.trigger_slots(int(t.get("main_type", 0)), int(t.get("sub_type", 0)))
 		var tp := [int(t.get("param1", 0)), int(t.get("param2", 0)), int(t.get("param3", 0)), int(t.get("param4", 0))]
 		for i in 4:
-			check.call(int((ts["params"][i] as Dictionary)["kind"]), tp[i], "Trigger %d" % ti)
+			check.call(ts.params[i].kind, tp[i], "Trigger %d" % ti)
 	for ai in actions.size():
 		var a := actions[ai] as Dictionary
 		var as_ := MissionParamSchema.action_slots(int(a.get("action_type", 0)), int(a.get("action_sub_type", 0)))
 		var ap := [int(a.get("param1", 0)), int(a.get("param2", 0)), int(a.get("param3", 0)), int(a.get("param4", 0))]
 		for i in 4:
-			check.call(int((as_["params"][i] as Dictionary)["kind"]), ap[i], "Action %d" % ai)
+			check.call(as_.params[i].kind, ap[i], "Action %d" % ai)
 	return lines
 
 
@@ -472,14 +472,14 @@ func _refresh_sc_trigger_section(triggers: Array) -> void:
 	_sc_trigger_xor.button_pressed = bool(trig.get("logic_xor", false))
 	var params := [int(trig.get("param1", 0)), int(trig.get("param2", 0)), int(trig.get("param3", 0)), int(trig.get("param4", 0))]
 	var schema := MissionParamSchema.trigger_slots(main_type, sub_type)
-	_sc_trigger_desc.text = String(schema["desc"]) if String(schema["desc"]) != "" else "No description yet for this trigger type; parameters are raw values."
+	_sc_trigger_desc.text = schema.desc if schema.desc != "" else "No description yet for this trigger type; parameters are raw values."
 	for i in 4:
-		var slot_def := schema["params"][i] as Dictionary
-		_sc_trigger_params[i].configure(slot_def, _sc_param_items(int(slot_def["kind"]), slot_def))
+		var slot_def := schema.params[i]
+		_sc_trigger_params[i].configure(slot_def, _sc_param_items(slot_def.kind, slot_def))
 		_sc_trigger_params[i].set_value(params[i])
 		# Disable slots this trigger type doesn't use (greyed, non-editable). `used` is false only for
 		# described types past their param count; unknown / variable types keep all four editable.
-		_sc_trigger_params[i].set_editable(bool(slot_def.get("used", true)))
+		_sc_trigger_params[i].set_editable(slot_def.used)
 	_sc_trigger_syncing = false
 
 
@@ -518,13 +518,13 @@ func _refresh_sc_action_section(actions: Array) -> void:
 	_populate_sc_option(_sc_action_sub, _inspector._controller.get_action_sub_types(action_type), action_sub)
 	var params := [int(act.get("param1", 0)), int(act.get("param2", 0)), int(act.get("param3", 0)), int(act.get("param4", 0))]
 	var schema := MissionParamSchema.action_slots(action_type, action_sub)
-	_sc_action_desc.text = String(schema["desc"]) if String(schema["desc"]) != "" else "No description yet for this action type; parameters are raw values."
+	_sc_action_desc.text = schema.desc if schema.desc != "" else "No description yet for this action type; parameters are raw values."
 	for i in 4:
-		var slot_def := schema["params"][i] as Dictionary
-		_sc_action_params[i].configure(slot_def, _sc_param_items(int(slot_def["kind"]), slot_def))
+		var slot_def := schema.params[i]
+		_sc_action_params[i].configure(slot_def, _sc_param_items(slot_def.kind, slot_def))
 		_sc_action_params[i].set_value(params[i])
 		# Disable slots this action type doesn't use; AI actions (variable) + raw types stay editable.
-		_sc_action_params[i].set_editable(bool(slot_def.get("used", true)))
+		_sc_action_params[i].set_editable(slot_def.used)
 	_sc_action_syncing = false
 	_refresh_sc_preview(action_type, action_sub)
 
@@ -551,7 +551,7 @@ func _refresh_sc_preview(action_type: int, action_sub: int) -> void:
 
 # Build the dropdown items for a picker-kind param slot from the mission's collections. RAW kinds get [].
 # An out-of-range stored value is handled by MissionParamSlot.set_value (shows it as a raw "Value N" row).
-func _sc_param_items(kind: int, slot_def: Dictionary) -> Array:
+func _sc_param_items(kind: int, slot_def: MissionParamSlotSpec) -> Array:
 	if _inspector._controller == null:
 		return []
 	match kind:
@@ -585,7 +585,7 @@ func _sc_param_items(kind: int, slot_def: Dictionary) -> Array:
 		MissionParamSchema.Kind.BOOL:
 			return [{ "value": 0, "label": "Off (0)" }, { "value": 1, "label": "On (1)" }]
 		MissionParamSchema.Kind.ENUM:
-			return slot_def.get("enum", [])
+			return slot_def.enum_items
 	return []
 
 
