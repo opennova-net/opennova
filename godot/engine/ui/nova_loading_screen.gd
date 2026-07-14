@@ -110,13 +110,19 @@ static func gametype_text_key(game_type: int) -> String:
 	return ""
 
 
-## One smoothing step: the displayed value creeps +1 per draw, allowed up to 10
-## points ahead of the reported progress, capped at 100
-## [orig: if (smooth < progress + 10 && smooth < 100) smooth++ @ 0x586c3f].
+## One smoothing step: catch the displayed value up to the reported progress,
+## then creep +1 per draw up to 10 points ahead as the witnessed liveness lead,
+## capped at 100 [orig: displayed this[9] += 1 up to min(progress+10, 100) per
+## draw, LoadingScreen_UpdateAndPresent @ 0x586c3f]. The original reaches the
+## catch-up for free because it pumps UpdateAndPresent at window-message
+## frequency — hundreds of calls per load (per-model + the per-subsystem slot++
+## 62..69). Our present() is driven by the coarser progress emits (D-LOADSCR-1),
+## so a literal +1-only step never leaves ~10 in 8 calls; the displayed value
+## must track reported here. The +1 lead-ahead past reported is preserved for
+## the per-object pulse phase where multiple draws share one reported value.
 static func step_displayed(displayed: int, reported: int) -> int:
-	if displayed < reported + 10 and displayed < 100:
-		return displayed + 1
-	return displayed
+	var lead_cap := mini(reported + 10, 100)
+	return clampi(maxi(displayed + 1, reported), 0, lead_cap)
 
 
 ## The fill rect's horizontal span (left, right) for a bar whose outer frame
@@ -155,6 +161,7 @@ func setup(root: NovaResourceRoot, info: Dictionary) -> void:
 	_texture = root.load_texture(String(bg["name"])) if root != null else null
 	_in_session = bool(info.get("in_session", false))
 	if not _in_session:
+		queue_redraw()
 		return
 	# MP only: the text overlay and its fonts [orig: fonts loaded only on the
 	# in-session path @ 0x521eec/0x521f5a].
@@ -164,6 +171,7 @@ func setup(root: NovaResourceRoot, info: Dictionary) -> void:
 	_game_type_text = _lookup_loading_text(gametype_text_key(int(info.get("game_type", 0))), "")
 	_font_small = _load_font(root, FONT_SMALL)
 	_font_large = _load_font(root, FONT_LARGE)
+	queue_redraw()
 
 
 ## Report load progress [orig: the per-stage/per-model calls into
@@ -201,8 +209,35 @@ func present(force := false) -> void:
 		RenderingServer.force_draw(true, 0.0)
 
 
+## Give a newly mounted Control one complete SceneTree frame to receive layout
+## and submit its queued draw before the caller enters synchronous mission
+## loading. `process_frame` fires at the start of a frame, so crossing two of
+## those signals is what lets one ordinary render/present finish. The forced
+## present after that frame keeps the window responsive during the block.
+func prepare_for_blocking_load() -> bool:
+	if not is_inside_tree():
+		return false
+	# Seed the smoothed bar before the registration frame so that frame submits
+	# both the background and a non-empty fill to the canvas draw list.
+	present(true)
+	await get_tree().process_frame
+	if not is_inside_tree():
+		return false
+	await get_tree().process_frame
+	if not is_inside_tree():
+		return false
+	present(true)
+	return true
+
+
 func displayed_progress() -> int:
 	return _displayed
+
+
+## Whether setup resolved and decoded loading art. Hosts and tests should not
+## inspect the screen's private texture resource directly (ADR 0018).
+func has_background() -> bool:
+	return _texture != null
 
 
 func _draw() -> void:

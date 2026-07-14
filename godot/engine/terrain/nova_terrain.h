@@ -89,6 +89,7 @@ private:
 	void _clear_tile_overlay_texture();
 	void _clear_terrain();
 	void _clear_collision_bodies();
+	void _hide_visible_patches();
 	void _clear_patch_pool();
 	void _on_terrain_changed();
 	Ref<Shader> _load_terrain_shader();
@@ -138,6 +139,7 @@ public:
 	Dictionary get_traversal_stats() const;
 	PackedInt32Array get_lod_distribution() const;
 	int get_patches_active() const;
+	int get_visible_patch_count() const;
 	PackedVector3Array get_foliage_dispatch_centers() const;
 
 	void set_debug_no_frustum(bool v);

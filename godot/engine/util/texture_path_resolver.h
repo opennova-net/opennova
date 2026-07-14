@@ -22,9 +22,9 @@ godot::String resolve_texture_path(const godot::String &dir, const godot::String
 // and in exported PCKs); absolute/external paths are decoded from raw bytes.
 godot::Ref<godot::Texture2D> load_texture_from_dir(const godot::String &dir, const godot::String &filename);
 
-// Decode a texture from mounted-resource bytes. Supports the formats that can be
-// decoded without a filesystem path: .pcx, .tga, .mdt, and DDS (DXT/BC, detected by
-// magic) so textures resident only inside a .pff still load.
+// Decode a texture from mounted-resource bytes. Supports .pcx, .tga, .mdt, PNG,
+// JPEG, BMP, and DDS (DXT/BC, detected by magic) so archive and loose VFS winners
+// follow one decode path without losing the editor-friendly image formats.
 godot::Ref<godot::Texture2D> load_texture_from_bytes(const godot::String &filename, const godot::PackedByteArray &bytes);
 
 // Case-insensitive lookup of a sidecar file (e.g. a .til) next to `dir`.

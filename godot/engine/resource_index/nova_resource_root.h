@@ -35,13 +35,13 @@ class NovaResourceRoot : public RefCounted {
 	mutable uint64_t resolve_memo_epoch_ = 0;
 	mutable bool resolve_memo_built_ = false;
 
-	// Decoded-texture cache for the packed (PFF) fallback in load_texture. The loose
-	// path already memoizes inside util/texture_path_resolver; PFF-resident textures
-	// used to re-extract + re-decode on every call. Negative results cache too — the
-	// material resolvers probe load_texture for names resolve_file can't see, and a
-	// miss costs the full candidate scan. Same epoch self-clear as the memo above.
-	mutable std::unordered_map<std::string, Ref<Texture2D>> packed_texture_cache_;
-	mutable uint64_t packed_texture_cache_epoch_ = 0;
+	// Decoded-texture cache for VFS-backed load_texture. Both archive and loose winners
+	// resolve through the mounted index so the mount mode owns precedence. Negative
+	// results cache too — material resolvers probe load_texture for names resolve_file
+	// can't see, and a miss costs the full candidate scan. Same epoch self-clear as the
+	// memo above.
+	mutable std::unordered_map<std::string, Ref<Texture2D>> texture_cache_;
+	mutable uint64_t texture_cache_epoch_ = 0;
 
 	static bool has_virtual_scheme(const String &path);
 	static String to_native_path(const String &path);

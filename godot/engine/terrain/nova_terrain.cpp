@@ -79,6 +79,7 @@ void NovaTerrain::_bind_methods() {
 
 	// Debug API
 	ClassDB::bind_method(D_METHOD("get_traversal_stats"), &NovaTerrain::get_traversal_stats);
+	ClassDB::bind_method(D_METHOD("get_visible_patch_count"), &NovaTerrain::get_visible_patch_count);
 	ClassDB::bind_method(D_METHOD("get_lod_distribution"), &NovaTerrain::get_lod_distribution);
 	ClassDB::bind_method(D_METHOD("get_patches_active"), &NovaTerrain::get_patches_active);
 	ClassDB::bind_method(D_METHOD("get_foliage_dispatch_centers"), &NovaTerrain::get_foliage_dispatch_centers);
@@ -199,7 +200,15 @@ uint32_t NovaTerrain::get_collision_mask() const { return collision_mask; }
 // ---------------------------------------------------------------------------
 
 void NovaTerrain::_notification(int p_what) {
-	if (p_what == NOTIFICATION_PROCESS) {
+	if (p_what == NOTIFICATION_VISIBILITY_CHANGED) {
+		if (!is_visible_in_tree()) {
+			_hide_visible_patches();
+		}
+	} else if (p_what == NOTIFICATION_PROCESS) {
+		if (!is_visible_in_tree()) {
+			_hide_visible_patches();
+			return;
+		}
 		if (!built) return;
 
 		const auto& trn = terrain_data->get_trn();
@@ -655,6 +664,20 @@ void NovaTerrain::_clear_collision_bodies() {
 	collision_bodies.clear();
 }
 
+void NovaTerrain::_hide_visible_patches() {
+	foliage_dispatch_centers.clear();
+	RenderingServer* rs = RenderingServer::get_singleton();
+	for (int i = 0; i < PATCH_POOL_SIZE; i++) {
+		if (!patch_visible[i]) {
+			continue;
+		}
+		if (rs && patch_instances[i].is_valid()) {
+			rs->instance_set_visible(patch_instances[i], false);
+		}
+		patch_visible[i] = false;
+	}
+}
+
 void NovaTerrain::_clear_patch_pool() {
 	RenderingServer* rs = RenderingServer::get_singleton();
 	if (!rs) {
@@ -1060,6 +1083,16 @@ PackedInt32Array NovaTerrain::get_lod_distribution() const {
 
 int NovaTerrain::get_patches_active() const {
 	return patches_active;
+}
+
+int NovaTerrain::get_visible_patch_count() const {
+	int visible_count = 0;
+	for (int i = 0; i < PATCH_POOL_SIZE; i++) {
+		if (patch_visible[i]) {
+			visible_count++;
+		}
+	}
+	return visible_count;
 }
 
 PackedVector3Array NovaTerrain::get_foliage_dispatch_centers() const {

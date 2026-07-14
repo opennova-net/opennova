@@ -61,6 +61,22 @@ var _chosen_avatar: Dictionary = {}  # last avatar/name picked on PLAYER_INFO (t
 # [orig: render_loading_screen @ 0x521d10 + LoadingScreen_UpdateAndPresent @ 0x586be0].
 var _loading_screen: NovaLoadingScreen
 var _loading_layer: CanvasLayer
+var _world_load_pending := false
+var _world_load_request_id := 0
+
+
+## True from the menu-to-loading handoff until the world reports success or
+## failure. This is the public shell-level observation seam for load lifecycle
+## tests and rendered probes (ADR 0018).
+func is_world_loading() -> bool:
+	return _world_load_pending
+
+
+## Whether the active loading handoff resolved and decoded its background art.
+## This keeps lifecycle probes on the shell's public surface instead of reaching
+## into the transient NovaLoadingScreen node.
+func has_loading_background() -> bool:
+	return _loading_screen != null and _loading_screen.has_background()
 
 
 func _ready() -> void:
@@ -263,6 +279,9 @@ func _enter_menu(dir: String) -> void:
 			_request_resource_dir()
 			return
 		_root = root
+	# The menu, loading screen, and world are one runtime resource session.
+	# GameWorld must not remount from mutable persisted settings after boot.
+	_world.set_resource_root(_root)
 	_state = State.MENU
 	_world.visible = false
 	_set_hud_visible(false)
@@ -354,11 +373,12 @@ func _on_dir_selected(dir: String) -> void:
 
 
 # Mount `dir` as the runtime resource root (packed PFFs, `/exp` expansion, `/d` loose
-# override). Warns and returns null on failure.
+# override, and `/game` SCR policy). Warns and returns null on failure.
 func _mount_runtime_root(dir: String) -> NovaResourceRoot:
 	var root := NovaResourceRoot.new()
 	var expansion := NovaLaunchFlags.expansion(ResourceDirSettings.get_expansion())
-	if root.mount_runtime(dir, expansion, NovaLaunchFlags.loose_override_enabled()) != OK:
+	var game := NovaLaunchFlags.game(ResourceDirSettings.get_game())
+	if root.mount_runtime(dir, expansion, NovaLaunchFlags.loose_override_enabled(), game) != OK:
 		push_warning("MainGame: %s" % root.get_last_error())
 		return null
 	_report_missing_boot_resources(root)
@@ -437,21 +457,20 @@ func _on_novaworld_host_requested(config: Dictionary) -> void:
 			_novaworld_panel.host_failed("No mission available to host (check the game folder).")
 		return
 	_dismiss_novaworld_panel()
-	config = config.duplicate()
+	config = config.duplicate(true)
 	config["mission"] = mission
 	config["net_transport"] = "lan"
 	config["bind_port"] = 32768
 	config["player_name"] = _resolve_player_callsign()
 	config["server_name"] = String(config.get("server_name", "OpenNova Host"))
-	_begin_world_load({
+	_start_world_load({
 		"mission_file": mission,
 		"in_session": true,
 		"server_name": String(config["server_name"]),
 		"mission_name": _resolve_mission_title(mission),
 		"game_type": int(config.get("gametype", 0)),
 		"custom_text": String(config.get("custom_text", "")),
-	})
-	_world.load_mission_as_host(config)
+	}, Callable(_world, "load_mission_as_host").bind(config))
 
 
 # The NovaWorld panel resolved a join target. Tear down the panel overlay, then enter the match
@@ -482,33 +501,36 @@ func _resolve_default_mission() -> String:
 func _on_start_requested(bms_name: String) -> void:
 	# Single-player: the loading screen is the sidecar image alone — no session
 	# text [orig: the not-in-session path draws only the background @ 0x521ebe].
-	_begin_world_load({"mission_file": bms_name})
-	_world.load_mission(bms_name)
+	_start_world_load(
+		{"mission_file": bms_name},
+		Callable(_world, "load_mission").bind(bms_name))
 
 
 # Host a LAN co-op game: the same menu->world handoff as a single-player start, but the
 # world loads as a listen-server host (ADR 0011) configured from the mp.mnu host screen.
 func _on_lan_host_start_requested(config: Dictionary) -> void:
+	config = config.duplicate(true)
 	var host_mission := String(config.get("mission", ""))
-	_begin_world_load({
+	var load_info := {
 		"mission_file": host_mission,
 		"in_session": true,
 		"server_name": String(config.get("server_name", "")),
 		"mission_name": _resolve_mission_title(host_mission),
 		"game_type": int(config.get("gametype", 0)),
 		"custom_text": String(config.get("custom_text", "")),
-	})
+	}
 	# Make the listen host browsable on the NovaWorld gate (F1) when a gate is
 	# configured: prod injects NW_GATE_HOST (the resolved gate IP); dev sets it to
 	# 127.0.0.1 to test against the local compose. Unset = pure LAN, no registration.
 	var gate_host := OS.get_environment("NW_GATE_HOST")
 	if not gate_host.is_empty():
-		config = config.duplicate()
 		config["nw_gate_host"] = gate_host
 		var gate_port_env := OS.get_environment("NW_GATE_PORT")
 		config["nw_gate_port"] = int(gate_port_env) if gate_port_env.is_valid_int() else NovaWorldSettings.GATE_PORT
 		config["player_name"] = _resolve_player_callsign()
-	_world.load_mission_as_host(config)
+	_start_world_load(
+		load_info,
+		Callable(_world, "load_mission_as_host").bind(config))
 
 
 # The player picked a discovered LAN server to join: dial it as a co-op JOINER. Same
@@ -516,20 +538,28 @@ func _on_lan_host_start_requested(config: Dictionary) -> void:
 # the witnessed in-match JOIN and renders the host + NPCs wire-direct (net-re §5.38b). The
 # server row carries host_ip/port (+ mission, until LAN discovery streams it).
 func _on_lan_join_requested(server: Dictionary) -> void:
+	server = server.duplicate(true)
 	# Joiner: the retail client has the full session-variable set from the
 	# connect stream by load time [orig: parse_server_session_variables
 	# @ 0x5202f0]; our LAN row carries only mission (+ maybe a server name), so
 	# absent vars stay blank and game_type -1 leaves the game-type line empty.
-	# Retail also HOLDS the screen until the wire spawn gate; we drop it when
-	# the local load lands (docs/interface/loading-screen-re.md D-LOADSCR-3).
-	_begin_world_load({
+	# Retail also HOLDS the screen through TWO blocking waits after the local
+	# load — NapiClient_WaitForDisconnect @ 0x42cb20 (connect handshake) then
+	# NapiClient_WaitForGameStart @ 0x42cc10 (spawn gate g_spawn_success_gate,
+	# S2C 0x1D) — revealing only on the spawn leg; we drop the screen when the
+	# local load lands and run the handshake in-world (the wire spawn gate is
+	# not surfaced above libs/npwire) (docs/interface/loading-screen-re.md
+	# D-LOADSCR-3, the load-flow case matrix).
+	var load_info := {
 		"mission_file": String(server.get("mission", "")),
 		"in_session": true,
 		"server_name": String(server.get("server_name", String(server.get("name", "")))),
 		"game_type": int(server.get("gametype", -1)),
-	})
+	}
 	var pname := String(server.get("player_name", _resolve_player_callsign()))
-	_world.load_mission_as_joiner(server, pname)
+	_start_world_load(
+		load_info,
+		Callable(_world, "load_mission_as_joiner").bind(server, pname))
 
 
 # The local player's callsign — rides the ClientHello.co (the host echoes it back so we
@@ -549,6 +579,40 @@ func _resolve_player_callsign() -> String:
 # `load_info` feeds the screen: mission_file, and for a net session the session
 # variables (in_session, server_name, mission_name, game_type, custom_text)
 # [orig: the SERVERNAME/MISSIONNAME/GAMETYPE/CUSTOMTEXT session vars @ 0x5202f0].
+func _start_world_load(load_info: Dictionary, operation: Callable) -> void:
+	if _world_load_pending:
+		return
+	_world_load_pending = true
+	_world_load_request_id += 1
+	var request_id := _world_load_request_id
+	_begin_world_load(load_info.duplicate(true))
+	_run_world_load(request_id, operation)
+
+
+# The loader APIs are synchronous, so mounting a Control and immediately calling
+# one blocks the SceneTree before that Control can finish a frame. Let the screen
+# cross its completed-frame barrier, then enter the load.
+func _run_world_load(request_id: int, operation: Callable) -> void:
+	var screen := _loading_screen
+	if screen != null:
+		var prepared := await screen.prepare_for_blocking_load()
+		if request_id != _world_load_request_id or not _world_load_pending:
+			return
+		if not prepared:
+			_on_world_load_failed("loading screen left the SceneTree before mission load")
+			return
+	else:
+		await get_tree().process_frame
+		if request_id != _world_load_request_id or not _world_load_pending:
+			return
+	var result = operation.call()
+	var err := int(result) if result != null else OK
+	# GameWorld normally emits load_failed before returning an error. Preserve a
+	# deterministic rollback for any implementation that returns without emitting.
+	if err != OK and request_id == _world_load_request_id and _world_load_pending:
+		_on_world_load_failed(error_string(err))
+
+
 func _begin_world_load(load_info: Dictionary = {}) -> void:
 	_menu_host.hide_menu()
 	_world.visible = false
@@ -577,12 +641,14 @@ func _show_loading_screen(load_info: Dictionary) -> void:
 	_loading_screen.name = "LoadingScreen"
 	_loading_layer.add_child(_loading_screen)
 	_loading_screen.setup(_root, load_info)
-	# The load blocks before the layout pass can size the fresh Control; seed it
-	# so the first forced present covers the display.
+	# CanvasLayer is not a Control parent, so full-rect anchors have no layout
+	# rectangle to resolve against. Use top-left anchors before assigning the
+	# viewport size; changing size under full-rect anchors emits a Godot warning.
+	_loading_screen.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	_loading_screen.position = Vector2.ZERO
 	_loading_screen.size = _loading_screen.get_viewport_rect().size
 	if not _world.load_progress.is_connected(_on_load_progress):
 		_world.load_progress.connect(_on_load_progress)
-	_loading_screen.present(true)  # seed the first frame before the load blocks
 
 
 func _on_load_progress(percent: int) -> void:
@@ -660,26 +726,42 @@ func _on_world_loaded() -> void:
 	# The GAME music context is the world's to open at mission start (GameWorld
 	# calls NovaMusicService.open_game_context — host-neutral, so ONED play gets
 	# the same music); nothing to do here for audio. Drop the loading screen and
-	# reveal the world + HUD [orig: LoadingScreen_ReleaseEffect at the end of
-	# Game_StartMission @ 0x525d52]. The SP start-mission arrow splash
-	# (newarow1.tga + START_MISSION) is a follow-up [orig:
-	# show_start_mission_splash @ 0x520820, called @ 0x525d48]
-	# (docs/interface/loading-screen-re.md D-LOADSCR-4).
+	# reveal the world + HUD — the witnessed release-then-enter-game at the tail
+	# of Game_StartMission [orig: LoadingScreen_ReleaseEffect @ 0x586b80, final
+	# call @ 0x525d45]. For SP/host this fires at true load completion (parity).
+	# For the JOINER it fires at LOCAL-load completion, one wire spawn gate too
+	# early (D-LOADSCR-3). The SP start-mission arrow splash (newarow1.tga +
+	# START_MISSION), gated !is_multiplayer_session && g_loadscreen_has_custom_bg
+	# && !is_in_session, is a follow-up [orig: show_start_mission_splash
+	# @ 0x520820, called @ 0x525d42] (docs/interface/loading-screen-re.md
+	# D-LOADSCR-4, the load-flow case matrix).
+	_world_load_pending = false
 	_dismiss_loading_screen()
 	_world.visible = true
 	_set_hud_visible(true)
 
 
 func _on_world_load_failed(reason: String) -> void:
-	_dismiss_loading_screen()
+	# A load-step failure or abort returns to the menu — the witnessed early
+	# return that sets reason=1 and nav-pushes "Post Menu" out of
+	# Game_StartMission [orig: the "Mission loading aborted" legs @ 0x520270
+	# (Client_CheckDisconnectOrEscDuringLoad) and the network-wait failure legs;
+	# scene_entry = "Post Menu"] (docs/interface/loading-screen-re.md, the
+	# load-flow case matrix).
+	_world_load_pending = false
 	push_warning("MainGame: mission load failed: %s" % reason)
-	if _root != null:
-		_enter_menu(_root.get_root_dir())
+	_teardown_world_to_menu()
 
 
 func _on_camera_escape() -> void:
 	# Esc: pause <-> resume while in a world (the armory closes back to play);
-	# ignored in the main menu (EXIT quits).
+	# ignored in the main menu (EXIT quits). During a load Esc is inert: our
+	# SP/host load is a single synchronous call the SceneTree cannot interrupt,
+	# so there is no reachable analog of the original's per-asset ESC/disconnect
+	# abort poll [orig: Client_CheckDisconnectOrEscDuringLoad @ 0x520270]
+	# (docs/interface/loading-screen-re.md D-LOADSCR-7).
+	if _world_load_pending:
+		return
 	if _state == State.WORLD:
 		_pause()
 	elif _state == State.PAUSED or _state == State.ARMORY:
@@ -703,6 +785,15 @@ func _on_resume() -> void:
 
 
 func _on_return_to_menu() -> void:
+	if _world_load_pending:
+		return
+	_teardown_world_to_menu()
+
+
+# One idempotent rollback for a normal return and every load failure. Runtime
+# hosts keep references to the old world/root, so their teardown order is part
+# of the shell boundary rather than a menu-specific detail.
+func _teardown_world_to_menu() -> void:
 	_dismiss_loading_screen()
 	if _player_host != null:
 		_player_host.teardown()

@@ -9,6 +9,14 @@ extends GutTest
 
 const LoadingScreen := preload("res://engine/ui/nova_loading_screen.gd")
 
+var _temp_dirs: Array[String] = []
+
+
+func after_each() -> void:
+	for dir in _temp_dirs:
+		_remove_dir_recursive(dir)
+	_temp_dirs.clear()
+
 
 # --- sidecar image name [orig: 0x521d66/0x521dab] -----------------------------
 
@@ -42,6 +50,21 @@ func test_background_prefers_mission_sidecar_then_falls_back() -> void:
 	assert_false(bool(bg["custom"]))
 
 
+func test_background_decodes_sidecar_from_language_archive_without_loose_mode() -> void:
+	var dir := _make_temp_dir("loadscreen_language_pff")
+	_write_pff(dir.path_join("language.pff"), [{
+		"name": "00trg.pcx",
+		"bytes": _test_pcx_bytes(),
+	}])
+	var root := NovaResourceRoot.new()
+	assert_eq(root.mount_runtime(dir, "", false, "jo"), OK,
+			"the retail archive table mounts with loose lookup disabled")
+	var screen: NovaLoadingScreen = autofree(NovaLoadingScreen.new())
+	screen.setup(root, {"mission_file": "00TRg.bms"})
+	assert_true(screen.has_background(),
+			"setup decodes the mission sidecar found only in language.pff")
+
+
 # --- game-type -> LoadingText key [orig: switch @ 0x51f30b-0x51f3a6] -----------
 
 func test_gametype_keys_match_the_witnessed_switch() -> void:
@@ -69,14 +92,23 @@ func test_unknown_gametype_yields_no_key() -> void:
 
 # --- bar smoothing [orig: 0x586c3f] --------------------------------------------
 
-func test_displayed_value_creeps_one_per_draw() -> void:
-	assert_eq(LoadingScreen.step_displayed(0, 0), 1)
-	assert_eq(LoadingScreen.step_displayed(50, 100), 51)
+func test_displayed_value_catches_up_to_reported() -> void:
+	# Our present() runs at the coarse progress-emit cadence, not the original's
+	# high-frequency pump, so the displayed value must catch up to reported in
+	# one draw or the bar never leaves ~10 (D-LOADSCR-1). A big jump lands ON
+	# reported, not one step past a stale value.
+	assert_eq(LoadingScreen.step_displayed(6, 26), 26, "a reported jump catches the bar up")
+	assert_eq(LoadingScreen.step_displayed(50, 100), 100, "a jump to 100 fills the bar")
 
 
 func test_displayed_value_leads_reported_by_at_most_ten() -> void:
+	# Once caught up, the bar creeps +1 ahead per draw (the witnessed liveness
+	# lead for a grinding stage that pulses one reported value), capped at +10.
+	assert_eq(LoadingScreen.step_displayed(0, 0), 1, "creep ahead of a stalled 0")
+	assert_eq(LoadingScreen.step_displayed(26, 26), 27, "creep one point ahead")
 	assert_eq(LoadingScreen.step_displayed(9, 0), 10)
 	assert_eq(LoadingScreen.step_displayed(10, 0), 10, "cap at reported + 10")
+	assert_eq(LoadingScreen.step_displayed(36, 26), 36, "cap the lead at reported + 10")
 
 
 func test_displayed_value_caps_at_hundred() -> void:
@@ -125,14 +157,56 @@ func test_mp_setup_carries_the_session_variables() -> void:
 	NovaStrings.register_table("gametext", null)
 
 
-func test_present_creeps_toward_reported_progress() -> void:
+func test_present_tracks_reported_progress_then_leads() -> void:
 	var screen := _setup_screen({"mission_file": "00TRg.bms"})
 	screen.set_progress(50)
+	# Unthrottled while the displayed value trails the reported one; the first
+	# present catches the bar up to reported (not one step past a stale 0), so
+	# the bar reflects real progress at our coarse present() cadence.
 	screen.present()
+	assert_eq(screen.displayed_progress(), 50,
+		"the bar catches up to the reported value in one present")
+	# Once caught up, an immediate re-present is throttled (no 100 ms elapsed,
+	# reported unchanged, not trailing) — the bar holds, not double-steps.
 	screen.present()
-	screen.present()
-	assert_eq(screen.displayed_progress(), 3,
-		"unthrottled while the displayed value trails the reported one")
+	assert_eq(screen.displayed_progress(), 50, "an immediate re-present is throttled")
+	# The witnessed liveness lead (+1 past reported while a stage grinds) advances
+	# on a due draw; force one to exercise it without the 100 ms wait.
+	screen.present(true)
+	assert_eq(screen.displayed_progress(), 51, "a due draw leads reported by one")
+
+
+func test_background_availability_is_publicly_observable() -> void:
+	var screen := _setup_screen({"mission_file": "00TRg.bms"})
+	assert_true(screen.has_background(),
+		"tests and hosts can observe whether setup found loading art")
+
+
+func test_prepare_for_blocking_load_waits_for_a_completed_frame() -> void:
+	var screen := _setup_screen({"mission_file": "00TRg.bms"})
+	add_child(screen)
+	var preparable := screen.has_method("prepare_for_blocking_load")
+	assert_true(preparable,
+		"a mounted loading screen exposes the frame-registration handoff")
+	if not preparable:
+		return
+	var frame_before := Engine.get_process_frames()
+	var prepared: bool = bool(await screen.call("prepare_for_blocking_load"))
+	assert_true(prepared)
+	assert_gte(Engine.get_process_frames(), frame_before + 2,
+		"one ordinary frame must complete before the blocking load begins")
+	assert_gt(screen.displayed_progress(), 0,
+		"preparation submits a non-empty progress bar with the registered frame")
+
+
+func test_prepare_for_blocking_load_rejects_an_unmounted_screen() -> void:
+	var screen := _setup_screen({"mission_file": "00TRg.bms"})
+	var preparable := screen.has_method("prepare_for_blocking_load")
+	assert_true(preparable)
+	if not preparable:
+		return
+	assert_false(bool(await screen.call("prepare_for_blocking_load")),
+		"there is no frame to present before the Control enters the SceneTree")
 
 
 # --- helpers -------------------------------------------------------------------
@@ -145,7 +219,7 @@ func _setup_screen(info: Dictionary) -> NovaLoadingScreen:
 	root.set_root_dir(dir)
 	var screen: NovaLoadingScreen = autofree(NovaLoadingScreen.new())
 	screen.setup(root, info)
-	assert_not_null(screen._texture, "the test pcx decodes into a texture")
+	assert_true(screen.has_background(), "the test pcx decodes into a texture")
 	return screen
 
 
@@ -160,6 +234,7 @@ func _register_gametext_fixture() -> void:
 func _make_temp_dir(name: String) -> String:
 	var dir := OS.get_cache_dir().path_join("opennova_%s_%d" % [name, Time.get_ticks_usec()])
 	DirAccess.make_dir_recursive_absolute(dir)
+	_temp_dirs.append(dir)
 	return dir
 
 
@@ -169,9 +244,32 @@ func _touch(path: String) -> void:
 	f.close()
 
 
+func _remove_dir_recursive(path: String) -> void:
+	var dir := DirAccess.open(path)
+	if dir == null:
+		return
+	dir.list_dir_begin()
+	var entry := dir.get_next()
+	while entry != "":
+		var child := path.path_join(entry)
+		if dir.current_is_dir():
+			_remove_dir_recursive(child)
+		else:
+			DirAccess.remove_absolute(child)
+		entry = dir.get_next()
+	dir.list_dir_end()
+	DirAccess.remove_absolute(path)
+
+
 # A minimal valid 8-bit palettized PCX (2x2) so NovaResourceRoot.load_texture
 # has something real to decode.
 func _write_test_pcx(path: String) -> void:
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	f.store_buffer(_test_pcx_bytes())
+	f.close()
+
+
+func _test_pcx_bytes() -> PackedByteArray:
 	var bytes := PackedByteArray()
 	bytes.resize(128)
 	bytes[0] = 0x0A  # manufacturer
@@ -190,6 +288,35 @@ func _write_test_pcx(path: String) -> void:
 		bytes.append(i)  # r
 		bytes.append(i)  # g
 		bytes.append(i)  # b
-	var f := FileAccess.open(path, FileAccess.WRITE)
-	f.store_buffer(bytes)
-	f.close()
+	return bytes
+
+
+# PFF3: 20-byte header, 36-byte entries with 16-byte names, then payloads.
+func _write_pff(path: String, entries: Array) -> void:
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	assert_not_null(file, "the packed loading-art fixture is writable")
+	if file == null:
+		return
+	var header_size := 20
+	var entry_size := 36
+	var next_offset := header_size + entries.size() * entry_size
+	file.store_32(header_size)
+	file.store_32(0x33464650)
+	file.store_32(entries.size())
+	file.store_32(entry_size)
+	file.store_32(header_size)
+	for entry in entries:
+		var bytes: PackedByteArray = entry.bytes
+		var name_bytes := String(entry.name).to_utf8_buffer()
+		assert_true(name_bytes.size() <= 16, "%s fits the PFF name field" % entry.name)
+		file.store_32(0)
+		file.store_32(next_offset)
+		file.store_32(bytes.size())
+		file.store_32(0)
+		for index in range(16):
+			file.store_8(name_bytes[index] if index < name_bytes.size() else 0)
+		file.store_32(0)
+		next_offset += bytes.size()
+	for entry in entries:
+		file.store_buffer(entry.bytes)
+	file.close()
