@@ -358,19 +358,14 @@ Ref<Texture2D> NovaResourceRoot::load_texture(const String &name) const {
 		return Ref<Texture2D>();
 	}
 
-	Ref<Texture2D> loose = opennova::load_texture_from_dir(root_dir_, file);
-	if (loose.is_valid()) {
-		return loose;
-	}
-
 	const uint64_t epoch = opennova::cache_epoch();
-	if (packed_texture_cache_epoch_ != epoch) {
-		packed_texture_cache_.clear();
-		packed_texture_cache_epoch_ = epoch;
+	if (texture_cache_epoch_ != epoch) {
+		texture_cache_.clear();
+		texture_cache_epoch_ = epoch;
 	}
 	const std::string cache_key(file.to_lower().utf8().get_data());
-	const auto cached = packed_texture_cache_.find(cache_key);
-	if (cached != packed_texture_cache_.end()) {
+	const auto cached = texture_cache_.find(cache_key);
+	if (cached != texture_cache_.end()) {
 		return cached->second;
 	}
 
@@ -386,7 +381,7 @@ Ref<Texture2D> NovaResourceRoot::load_texture(const String &name) const {
 			break;
 		}
 	}
-	packed_texture_cache_.emplace(cache_key, result);
+	texture_cache_.emplace(cache_key, result);
 	return result;
 }
 

@@ -307,6 +307,23 @@ godot::Ref<godot::Texture2D> load_texture_from_bytes(const godot::String &filena
 		return texture_from_image(image);
 	}
 
+	if (ext == "png" || ext == "jpg" || ext == "jpeg" || ext == "bmp") {
+		godot::Ref<godot::Image> image;
+		image.instantiate();
+		godot::Error error = godot::FAILED;
+		if (ext == "png") {
+			error = image->load_png_from_buffer(bytes);
+		} else if (ext == "jpg" || ext == "jpeg") {
+			error = image->load_jpg_from_buffer(bytes);
+		} else {
+			error = image->load_bmp_from_buffer(bytes);
+		}
+		if (error != godot::OK) {
+			return godot::Ref<godot::Texture2D>();
+		}
+		return texture_from_image(image);
+	}
+
 	return godot::Ref<godot::Texture2D>();
 }
 

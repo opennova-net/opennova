@@ -81,6 +81,49 @@ func test_runtime_mount_is_packed_with_optional_loose_override() -> void:
 	assert_eq(resources.read_file("Alpha.trn").get_string_from_utf8(), "loose trn", "With /d a loose file overrides the archived entry.")
 
 
+func test_load_texture_obeys_runtime_vfs_precedence() -> void:
+	var root := _make_flat_root("texture_precedence")
+	_write_bytes(root.path_join("mission.pcx"), _solid_test_pcx(Color.BLUE))
+	_write_pff(root.path_join("language.pff"), [
+		{"name": "mission.pcx", "bytes": _solid_test_pcx(Color.RED)},
+	])
+
+	var resources := NovaResourceRoot.new()
+	assert_eq(resources.mount_runtime(root), OK)
+	var packed_texture: Texture2D = resources.load_texture("mission.pcx")
+	assert_not_null(packed_texture, "The packed PCX should decode through load_texture().")
+	if packed_texture != null:
+		assert_true(
+			packed_texture.get_image().get_pixel(0, 0).is_equal_approx(Color.RED),
+			"Packed mode must return the language.pff PCX, not the same-named loose file."
+		)
+
+	assert_eq(resources.mount_runtime(root, "", true), OK)
+	var override_texture: Texture2D = resources.load_texture("mission.pcx")
+	assert_not_null(override_texture, "The /d loose-override PCX should decode through load_texture().")
+	if override_texture != null:
+		assert_true(
+			override_texture.get_image().get_pixel(0, 0).is_equal_approx(Color.BLUE),
+			"PackedWithLooseOverride mode must return the same-named loose PCX."
+		)
+
+
+func test_editor_load_texture_retains_loose_png_support() -> void:
+	var image := Image.create(3, 2, false, Image.FORMAT_RGBA8)
+	image.fill(Color.GREEN)
+	var root := _make_flat_root("loose_png")
+	_write_bytes(root.path_join("swatch.png"), image.save_png_to_buffer())
+
+	var resources := NovaResourceRoot.new()
+	assert_eq(resources.set_root_dir(root), OK)
+	var texture: Texture2D = resources.load_texture("swatch.png")
+	assert_not_null(texture, "A loose editor PNG should still decode through the VFS-backed texture interface.")
+	if texture != null:
+		assert_eq(texture.get_width(), 3)
+		assert_eq(texture.get_height(), 2)
+		assert_true(texture.get_image().get_pixel(0, 0).is_equal_approx(Color.GREEN))
+
+
 func test_runtime_expansion_override_chain() -> void:
 	var root := _make_flat_root("expansion")
 	DirAccess.make_dir_recursive_absolute(root.path_join("expansion/jox01"))
@@ -243,6 +286,41 @@ func _write_file(path: String, text: String) -> void:
 	if file != null:
 		file.store_string(text)
 		file.close()
+
+
+func _write_bytes(path: String, bytes: PackedByteArray) -> void:
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	assert_not_null(file, "Fixture should be writable: %s" % path)
+	if file != null:
+		file.store_buffer(bytes)
+		file.close()
+
+
+func _solid_test_pcx(color: Color) -> PackedByteArray:
+	var bytes := PackedByteArray()
+	bytes.resize(128)
+	bytes[0] = 0x0A  # manufacturer
+	bytes[1] = 5     # version
+	bytes[2] = 1     # RLE
+	bytes[3] = 8     # bits per pixel
+	# xmin/ymin = 0, xmax/ymax = 1 (little-endian u16 pairs at 4..11)
+	bytes[8] = 1
+	bytes[10] = 1
+	bytes[65] = 1    # planes
+	bytes[66] = 2    # bytes per line
+	for _pixel in range(4):
+		bytes.append(1)  # palette index 1; values below 0xC0 are RLE literals
+	bytes.append(0x0C)  # palette marker
+	for index in range(256):
+		if index == 1:
+			bytes.append(int(color.r * 255.0))
+			bytes.append(int(color.g * 255.0))
+			bytes.append(int(color.b * 255.0))
+		else:
+			bytes.append(0)
+			bytes.append(0)
+			bytes.append(0)
+	return bytes
 
 
 func _write_pff(path: String, entries: Array) -> void:

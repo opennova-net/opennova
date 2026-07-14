@@ -1,19 +1,26 @@
 extends GutTest
 
-# Full runtime-shell regression: packed boot resources, public menu intents, and
+# Full runtime-shell regression: retail-shaped packed boot resources, public menu intents, and
 # the real blocking GameWorld load. It never relies on the test process having /d.
 
 const STATE_CONFIG_PATH := "user://terrain_editor_state.cfg"
 const FIXTURE_DIR := "res://../fixtures/minimal/resources"
 const BAKED_TERRAIN_DIR := "res://../fixtures/godot/dvxi5"
 const MAIN_GAME_SCENE := preload("res://game/main_game.tscn")
-const FIXTURE_FILES := [
-	"ammo.def", "gameerr.bin", "gametext.bin", "items.def", "keyhelp.bin",
-	"main.mnu", "menu_style.mns", "menutxt.bin", "mnml.bin", "mnml.bms",
-	"mnml.dbf", "mnml.env", "mnml.lwf", "mnml.pcx", "mnml.trn",
-	"mnml_c.tga", "mnml_dc1.tga", "mnml_dm.tga", "mnml_f.pcx",
-	"mnml_m.pcx", "mnml_t.tga", "mp.mnu", "newarow1.tga",
-	"vmacros.bin", "weapon.def",
+# Witnessed retail placement (fixtures/minimal/README.md): strings plus the
+# mission .bin/.pcx/.lwf family live in language; menus/defs/.bms/.dbf in
+# localres; environment, terrain, and terrain art in resource.
+const LANGUAGE_FILES := [
+	"gameerr.bin", "gametext.bin", "vmacros.bin", "keyhelp.bin",
+	"menutxt.bin", "mnml.bin", "mnml.pcx", "mnml.lwf",
+]
+const LOCALRES_FILES := [
+	"items.def", "weapon.def", "ammo.def", "main.mnu", "mp.mnu",
+	"mnml.bms", "menu_style.mns", "newarow1.tga", "mnml.dbf",
+]
+const RESOURCE_FILES := [
+	"mnml.env", "mnml.trn", "mnml_c.tga", "mnml_dm.tga",
+	"mnml_dc1.tga", "mnml_t.tga", "mnml_m.pcx", "mnml_f.pcx",
 ]
 const BAKED_TERRAIN_FILES := [
 	"Dvxi5.cpt", "Dvxi5_c.tga", "Dvxi5_d1.tga", "Dvxi5_dc1.tga",
@@ -42,7 +49,7 @@ func before_each() -> void:
 
 
 func after_each() -> void:
-	# Explicitly release both archive handles before deleting resource.pff.
+	# Explicitly release the mounted archive handles before deleting the fixture.
 	if is_instance_valid(_shell):
 		var world = _shell.get_node_or_null("World")
 		if world != null:
@@ -82,11 +89,20 @@ func test_mission_return_restores_menu_frame_and_supports_another_load() -> void
 	var menu_host = _shell.get_node("MenuLayer/MenuHost")
 	var boot_clear: Color = world.get_current_frame_clear_color()
 	_assert_clean_menu(world, terrain, menu_host, boot_clear)
+	# Once the shell owns a mounted resource session, later persistence changes
+	# cannot redirect one consumer into a separately remounted VFS.
+	var detached_resource_dir := _temp_dir.path_join("detached")
+	assert_eq(DirAccess.make_dir_recursive_absolute(detached_resource_dir), OK)
+	NovaResourceDirSettings.set_resource_dir(detached_resource_dir)
+	assert_eq(NovaResourceDirSettings.get_resource_dir(), detached_resource_dir,
+			"the persisted directory now points away from the mounted fixture")
 
 	# This is the same public intent emitted by the mission-list ACCEPT command.
 	menu_host.start_requested.emit("mnml.bms")
 	assert_true(_shell.is_world_loading(),
 			"the loading handoff is pending before the blocking load starts")
+	assert_true(_shell.has_loading_background(),
+			"the deferred handoff decodes archive-only mnml.pcx from language.pff")
 	assert_false(world.is_loaded(),
 			"the world cannot finish in the callback that mounts the loading UI")
 	await _wait_for_world_load(world)
@@ -123,29 +139,21 @@ func _make_shell():
 	_temp_dir = OS.get_cache_dir().path_join(
 			"opennova_main_game_lifecycle_%d" % Time.get_ticks_usec())
 	assert_eq(DirAccess.make_dir_recursive_absolute(_temp_dir), OK)
-	assert_eq(FIXTURE_FILES.size(), 25,
-			"the archive contains every minimal fixture resource")
-	var entries: Array = []
-	for filename in FIXTURE_FILES:
-		var source := FIXTURE_DIR.path_join(filename)
-		# mnml.bms names mnml.trn. Substitute a committed render-capable TRN
-		# while retaining that logical archive name.
-		if filename == "mnml.trn":
-			source = BAKED_TERRAIN_DIR.path_join("Dvxi5.trn")
-		var bytes := FileAccess.get_file_as_bytes(source)
-		assert_false(bytes.is_empty(), "%s is available in the committed fixture" % filename)
-		entries.append({
-			"name": filename,
-			"bytes": bytes,
-		})
+	assert_eq(LANGUAGE_FILES.size() + LOCALRES_FILES.size() + RESOURCE_FILES.size(), 25,
+			"the retail-shaped archives contain every minimal fixture resource")
+	var language_entries := _fixture_entries(LANGUAGE_FILES)
+	var localres_entries := _fixture_entries(LOCALRES_FILES)
+	var resource_entries := _fixture_entries(RESOURCE_FILES)
 	# The minimal TRN is intentionally CPT-less and cannot create render RIDs.
 	# Pack the substituted TRN's baked payload + textures so this regression
 	# reaches the exact raw-patch visibility leak.
 	for filename in BAKED_TERRAIN_FILES:
 		var bytes := FileAccess.get_file_as_bytes(BAKED_TERRAIN_DIR.path_join(filename))
 		assert_false(bytes.is_empty(), "%s is available in the baked fixture" % filename)
-		entries.append({"name": filename, "bytes": bytes})
-	_write_pff(_temp_dir.path_join("resource.pff"), entries)
+		resource_entries.append({"name": filename, "bytes": bytes})
+	_write_pff(_temp_dir.path_join("language.pff"), language_entries)
+	_write_pff(_temp_dir.path_join("localres.pff"), localres_entries)
+	_write_pff(_temp_dir.path_join("resource.pff"), resource_entries)
 
 	NovaResourceDirSettings.set_resource_dir(_temp_dir)
 	NovaResourceDirSettings.set_expansion("")
@@ -159,14 +167,21 @@ func _make_shell():
 	var menu_host = shell.get_node("MenuLayer/MenuHost")
 	assert_eq(menu_host.get_current_menu_file().to_lower(),
 			"main.mnu", "the packed fixture boots through the real menu host")
-	# Reuse the root the real shell just mounted. GameWorld otherwise remounts
-	# from the mutable user setting for every load; an independently running
-	# Godot test process can restore that shared setting between our reloads.
-	# Injection is GameWorld's public host seam and keeps every read on this PFF.
-	var packed_root = menu_host.get_menu().get_resource_root()
-	assert_not_null(packed_root, "the live menu exposes its mounted PFF root")
-	shell.get_node("World").set_resource_root(packed_root)
 	return shell
+
+
+func _fixture_entries(filenames: Array) -> Array:
+	var entries: Array = []
+	for filename in filenames:
+		var source := FIXTURE_DIR.path_join(filename)
+		# mnml.bms names mnml.trn. Substitute a committed render-capable TRN
+		# while retaining that logical archive name.
+		if filename == "mnml.trn":
+			source = BAKED_TERRAIN_DIR.path_join("Dvxi5.trn")
+		var bytes := FileAccess.get_file_as_bytes(source)
+		assert_false(bytes.is_empty(), "%s is available in the committed fixture" % filename)
+		entries.append({"name": filename, "bytes": bytes})
+	return entries
 
 
 func _wait_for_world_load(world, frame_limit := 240) -> void:
@@ -193,6 +208,8 @@ func _wait_for_load_to_settle(frame_limit := 240) -> void:
 func _assert_loaded(world, terrain, menu_host) -> void:
 	assert_false(_shell.is_world_loading(), "the loading gate closes after world_loaded")
 	assert_true(world.is_loaded(), "the minimal mission loaded through the full shell")
+	assert_same(world.get_resource_root(), menu_host.get_menu().get_resource_root(),
+			"menu, loading screen, and GameWorld share one mounted resource session")
 	assert_true(world.visible, "the loaded world is presented")
 	assert_false(menu_host.visible, "the main menu stays hidden during play")
 	assert_eq(world.get_loaded_mission_file(), "mnml.bms")

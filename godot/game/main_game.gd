@@ -72,6 +72,13 @@ func is_world_loading() -> bool:
 	return _world_load_pending
 
 
+## Whether the active loading handoff resolved and decoded its background art.
+## This keeps lifecycle probes on the shell's public surface instead of reaching
+## into the transient NovaLoadingScreen node.
+func has_loading_background() -> bool:
+	return _loading_screen != null and _loading_screen.has_background()
+
+
 func _ready() -> void:
 	if _world == null or _camera == null or _menu_host == null:
 		return
@@ -272,6 +279,9 @@ func _enter_menu(dir: String) -> void:
 			_request_resource_dir()
 			return
 		_root = root
+	# The menu, loading screen, and world are one runtime resource session.
+	# GameWorld must not remount from mutable persisted settings after boot.
+	_world.set_resource_root(_root)
 	_state = State.MENU
 	_world.visible = false
 	_set_hud_visible(false)
@@ -363,11 +373,12 @@ func _on_dir_selected(dir: String) -> void:
 
 
 # Mount `dir` as the runtime resource root (packed PFFs, `/exp` expansion, `/d` loose
-# override). Warns and returns null on failure.
+# override, and `/game` SCR policy). Warns and returns null on failure.
 func _mount_runtime_root(dir: String) -> NovaResourceRoot:
 	var root := NovaResourceRoot.new()
 	var expansion := NovaLaunchFlags.expansion(ResourceDirSettings.get_expansion())
-	if root.mount_runtime(dir, expansion, NovaLaunchFlags.loose_override_enabled()) != OK:
+	var game := NovaLaunchFlags.game(ResourceDirSettings.get_game())
+	if root.mount_runtime(dir, expansion, NovaLaunchFlags.loose_override_enabled(), game) != OK:
 		push_warning("MainGame: %s" % root.get_last_error())
 		return null
 	_report_missing_boot_resources(root)
