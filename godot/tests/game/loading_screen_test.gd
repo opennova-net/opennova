@@ -182,7 +182,7 @@ func test_background_availability_is_publicly_observable() -> void:
 		"tests and hosts can observe whether setup found loading art")
 
 
-func test_prepare_for_blocking_load_waits_for_a_registered_frame() -> void:
+func test_prepare_for_blocking_load_waits_for_a_completed_frame() -> void:
 	var screen := _setup_screen({"mission_file": "00TRg.bms"})
 	add_child(screen)
 	var preparable := screen.has_method("prepare_for_blocking_load")
@@ -193,8 +193,8 @@ func test_prepare_for_blocking_load_waits_for_a_registered_frame() -> void:
 	var frame_before := Engine.get_process_frames()
 	var prepared: bool = bool(await screen.call("prepare_for_blocking_load"))
 	assert_true(prepared)
-	assert_gt(Engine.get_process_frames(), frame_before,
-		"the blocking load may not begin in the screen's mounting frame")
+	assert_gte(Engine.get_process_frames(), frame_before + 2,
+		"one ordinary frame must complete before the blocking load begins")
 	assert_gt(screen.displayed_progress(), 0,
 		"preparation submits a non-empty progress bar with the registered frame")
 

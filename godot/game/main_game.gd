@@ -590,8 +590,8 @@ func _start_world_load(load_info: Dictionary, operation: Callable) -> void:
 
 
 # The loader APIs are synchronous, so mounting a Control and immediately calling
-# one blocks the SceneTree before that Control can submit a frame. Yield exactly
-# one process frame, force-present the registered screen, then enter the load.
+# one blocks the SceneTree before that Control can finish a frame. Let the screen
+# cross its completed-frame barrier, then enter the load.
 func _run_world_load(request_id: int, operation: Callable) -> void:
 	var screen := _loading_screen
 	if screen != null:

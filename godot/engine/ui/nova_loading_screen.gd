@@ -209,15 +209,20 @@ func present(force := false) -> void:
 		RenderingServer.force_draw(true, 0.0)
 
 
-## Give a newly mounted Control one SceneTree frame to receive layout and submit
-## its queued draw before the caller enters synchronous mission loading. The
-## forced present after that frame keeps the window responsive during the block.
+## Give a newly mounted Control one complete SceneTree frame to receive layout
+## and submit its queued draw before the caller enters synchronous mission
+## loading. `process_frame` fires at the start of a frame, so crossing two of
+## those signals is what lets one ordinary render/present finish. The forced
+## present after that frame keeps the window responsive during the block.
 func prepare_for_blocking_load() -> bool:
 	if not is_inside_tree():
 		return false
 	# Seed the smoothed bar before the registration frame so that frame submits
 	# both the background and a non-empty fill to the canvas draw list.
 	present(true)
+	await get_tree().process_frame
+	if not is_inside_tree():
+		return false
 	await get_tree().process_frame
 	if not is_inside_tree():
 		return false
