@@ -9,7 +9,9 @@ extends SceneTree
 #   "$GODOT_BIN" --path godot -s res://tests/env_visual_baseline_probe.gd -- <resource_dir> <out_dir> [prefix]
 
 const TOD_GRID: Array[float] = [550.0, 1200.0, 1845.0, 2200.0]
-const SETTLE_FRAMES := 24
+# The iris and scalar channels chase their targets over a 62 Hz tick window;
+# keep captures out of that transient just like mission_visual_probe.
+const SETTLE_FRAMES := 90
 const CAPTURE_WAIT_FRAMES := 4
 
 

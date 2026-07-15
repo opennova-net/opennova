@@ -15,7 +15,8 @@ extends Node3D
 var mesh_instance: MeshInstance3D
 var sky_material: ShaderMaterial
 var built: bool = false
-var clouds_set: bool = false
+var _bound_cloud_tex1: Texture2D = null
+var _bound_cloud_tex2: Texture2D = null
 var _cached_env: Node = null
 var _cached_weather: Node = null
 var _cached_cam: Camera3D = null
@@ -34,7 +35,8 @@ func build() -> void:
 		mesh_instance.queue_free()
 		mesh_instance = null
 	built = false
-	clouds_set = false
+	_bound_cloud_tex1 = null
+	_bound_cloud_tex2 = null
 
 	var sky_shader := load("res://shaders/sky.gdshader") as Shader
 	sky_material = ShaderMaterial.new()
@@ -51,6 +53,11 @@ func build() -> void:
 	mesh.surface_set_material(0, sky_material)
 
 	mesh_instance = MeshInstance3D.new()
+	# Retail submits the sky in each render pass; the shader reanchors to that
+	# pass camera. Keep CPU culling from rejecting reflection-pass relocation
+	# before the vertex stage [orig: render_skybox @ 0x5790d0].
+	mesh_instance.extra_cull_margin = 1.0e6
+	mesh_instance.ignore_occlusion_culling = true
 	mesh_instance.mesh = mesh
 	add_child(mesh_instance)
 	built = true
@@ -81,12 +88,16 @@ func _process(_delta: float) -> void:
 			sky_material.set_shader_parameter("u_flat_color", env.get_cloud_tint())
 		else:
 			sky_material.set_shader_parameter("u_flat_pass", false)
-			sky_material.set_shader_parameter("u_sky_base", env.get_sky_base())
-			sky_material.set_shader_parameter("u_sky_bright", env.get_sky_bright())
-			sky_material.set_shader_parameter("u_sky_highlight", env.get_sky_highlight())
-			sky_material.set_shader_parameter("u_cloud_base", env.get_cloud_base())
-			sky_material.set_shader_parameter("u_cloud_highlight", env.get_cloud_highlight())
-			sky_material.set_shader_parameter("u_cloud_edge", env.get_cloud_edge())
+			# Retail unpacks these six packed ENV blocks at 2/255, without
+			# clamping the uploaded constants [orig: Color_UnpackToFloat4
+			# @ 0x578985; six call sites @ 0x579312..0x57936f]. Fog does not
+			# use this helper: D3DRS_FOGCOLOR consumes its packed byte color.
+			sky_material.set_shader_parameter("u_sky_base", _sky_constant(env.get_sky_base()))
+			sky_material.set_shader_parameter("u_sky_bright", _sky_constant(env.get_sky_bright()))
+			sky_material.set_shader_parameter("u_sky_highlight", _sky_constant(env.get_sky_highlight()))
+			sky_material.set_shader_parameter("u_cloud_base", _sky_constant(env.get_cloud_base()))
+			sky_material.set_shader_parameter("u_cloud_highlight", _sky_constant(env.get_cloud_highlight()))
+			sky_material.set_shader_parameter("u_cloud_edge", _sky_constant(env.get_cloud_edge()))
 
 		# Pass 1 is always sun-driven; the cloud pass follows the active light,
 		# moon at night [orig: render_skybox @ 0x579287 Terrain_GetSunDirectionAsFloat
@@ -102,14 +113,7 @@ func _process(_delta: float) -> void:
 		sky_height = env.get_sky_height()
 		sky_material.set_shader_parameter("u_sky_height", sky_height)
 
-		if not clouds_set and env_data:
-			var tex1: Texture2D = env.get_sky_map1_tex()
-			var tex2: Texture2D = env.get_sky_map2_tex()
-			if tex1 or tex2:
-				sky_material.set_shader_parameter("u_cloud_tex1", tex1 if tex1 else tex2)
-				sky_material.set_shader_parameter("u_cloud_tex2", tex2 if tex2 else tex1)
-				sky_material.set_shader_parameter("u_has_clouds", true)
-				clouds_set = true
+	_update_cloud_textures(env)
 
 	# Cloud scroll [orig: Environment_UpdateWeatherTick rate ramp @ 0x57eecc +
 	# accumulators @ 0x57f1a5..0x57f1d1; consumed render_skybox
@@ -125,6 +129,26 @@ func _process(_delta: float) -> void:
 		cam_z = _cached_cam.global_position.z
 	sky_material.set_shader_parameter("u_scroll_offset1", scroll_source.get_cloud_uv_offset1(cam_x, cam_z))
 	sky_material.set_shader_parameter("u_scroll_offset2", scroll_source.get_cloud_uv_offset2(cam_x, cam_z))
+
+static func _sky_constant(value: Vector3) -> Vector3:
+	return value * 2.0
+
+
+func _update_cloud_textures(env: Node) -> void:
+	var tex1: Texture2D = null
+	var tex2: Texture2D = null
+	if env and env.has_method("is_loaded") and env.is_loaded():
+		tex1 = env.get_sky_map1_tex()
+		tex2 = env.get_sky_map2_tex()
+	if tex1 == _bound_cloud_tex1 and tex2 == _bound_cloud_tex2:
+		return
+	_bound_cloud_tex1 = tex1
+	_bound_cloud_tex2 = tex2
+	var has_clouds := tex1 != null or tex2 != null
+	if has_clouds:
+		sky_material.set_shader_parameter("u_cloud_tex1", tex1 if tex1 else tex2)
+		sky_material.set_shader_parameter("u_cloud_tex2", tex2 if tex2 else tex1)
+	sky_material.set_shader_parameter("u_has_clouds", has_clouds)
 
 
 # The weather node when wired (it ticks the shared core at process priority

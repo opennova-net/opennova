@@ -1095,14 +1095,16 @@ static func environment_values_from(env_node: Node) -> EnvLightValues:
 		v.fog_end = DEFAULT_FOG_END
 		v.fog_type = DEFAULT_FOG_TYPE
 		return v
-	var sun_dir: Vector3 = env_node.call("get_sun_direction")
-	if sun_dir.length() <= 0.001:
-		sun_dir = -DEFAULT_DIR_LIGHT_DIR
+	# Select sun or moon before the object-material normalization seam
+	# [orig: Environment_GetLightDirectionFloat @ 0x57d870].
+	var light_dir: Vector3 = env_node.call("get_light_direction")
+	if light_dir.length() <= 0.001:
+		light_dir = -DEFAULT_DIR_LIGHT_DIR
 	var gain: Vector3 = DEFAULT_COLOR_SRC_GAIN
 	if env_node.has_method("get_color_src_gain"):
 		gain = env_node.call("get_color_src_gain")
 	v.hemi_sky = env_node.call("get_sky_ambient")
-	v.dir = -sun_dir.normalized()
+	v.dir = -light_dir.normalized()
 	v.dir_color = env_node.call("get_sun_light")
 	v.hemi_ground = env_node.call("get_fill_light")
 	v.gain = gain

@@ -69,6 +69,11 @@ uniform vec3 u_water_color = vec3(0.408, 0.314, 0.224);
 // the display-encoded scene, consumed raw exactly like retail's t2 texels.
 uniform sampler2D u_reflection : filter_linear;
 uniform bool u_has_reflection = false;
+// The witnessed texm3x2 rows are normalized against the MAIN viewport, while
+// Godot derives the mirror camera's vertical projection from its square RTT.
+// NovaWater preserves horizontal FOV, so X is already registered and Y needs
+// the source-to-square focal-scale ratio (source height / source width).
+uniform vec2 u_reflection_uv_scale = vec2(1.0);
 // water_murk [orig: SetWaterMurk @ 0x57d4f0] no longer has a uniform: the
 // witnessed angle-weighted murk x distance chain arrives per vertex in
 // COLOR.a now that the strip march is live (env #29) — the former flat
@@ -97,7 +102,8 @@ varying vec3 v_specular;
 // The texm3x2 row registers, reassembled per vertex from CUSTOM2 (the
 // perturbation basis t1.xy / t2.xy — camera right/forward xz under the
 // witnessed rhw scales) and CUSTOM0.zw (screen U / V):
-// u-row = (t1.x, t1.y, screen U), v-row = (t2.x, t2.y, screen V)
+// u-row = (t1.x, t1.y, source-screen U),
+// v-row = (t2.x, t2.y, source-screen V)
 // [orig: rows @ 0x5c2f83..0x5c3067; libs/env WaterStripRows]. The underwater
 // V-flip rides the rows themselves [orig: @ 0x5c306f..0x5c3085].
 varying vec3 v_refl_row_u;
@@ -159,16 +165,18 @@ void fragment() {
 	// the mirror scene RTT render_main_scene @ 0x5c1240]. The DuDv map's
 	// blue byte is the constant 0xFF (libs/env water_noise_normal_pixels),
 	// so _bx2 passes the rows' screen component through at weight 1 while
-	// R/G perturb it. NO host UV compensation: NovaWater's mirror camera is
-	// the up-preserved proper mirror the row math itself pins
-	// (see NovaWater._update_reflection_camera), so the witnessed lookup
-	// samples the RTT verbatim; the clamp is the RTT edge address mode.
+	// R/G perturb it. The dots remain the witnessed lookup verbatim. Their
+	// result is then mapped from the main viewport's normalized projection to
+	// Godot's square mirror projection; without that host-boundary conversion,
+	// the reflected image swims vertically as the view rotates on a widescreen
+	// display. The clamp is the RTT edge address mode.
 	// Reflection-less hosts (headless/tests) keep u_water_color as the
 	// tracked t2 stand-in.
 	vec3 t2_sample = u_water_color;
 	if (u_has_reflection) {
 		vec3 dudv_bx2 = texture(u_noise_normal, uv).rgb * 2.0 - 1.0;
 		vec2 refl_uv = vec2(dot(v_refl_row_u, dudv_bx2), dot(v_refl_row_v, dudv_bx2));
+		refl_uv = vec2(0.5) + (refl_uv - vec2(0.5)) * u_reflection_uv_scale;
 		t2_sample = texture(u_reflection, clamp(refl_uv, vec2(0.0), vec2(1.0))).rgb;
 	}
 

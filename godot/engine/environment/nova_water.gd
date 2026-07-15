@@ -20,6 +20,10 @@ const VISUAL_LAYER_WORLD := 1 << 0  # Godot's default layer: every normal world 
 const VISUAL_LAYER_WATER := 1 << 10  # the water surface itself; mirror-excluded
 const VISUAL_LAYER_VIEWMODEL := 1 << 11  # the FP arms/weapon overlay; mirror-excluded, main-visible
 const VISUAL_LAYER_BODY_REFLECTION_ONLY := 1 << 12  # the FP-mode local body; mirror-visible, main-excluded
+# Retail allocates a square 256 RTT at water detail 2; only detail >= 3 or the
+# capture override selects 512 [orig: sub_5C08B0 @ 0x5c08d1..0x5c0937].
+# The host has no higher-detail/capture selector, so its witnessed mapping is 256.
+const REFLECTION_RTT_SIZE := Vector2i(256, 256)
 
 @export var environment_path: NodePath
 # The weather node owning the cloud-scroll core: the water scroll speed rides
@@ -192,8 +196,8 @@ func build() -> void:
 		# The mirror renders the LIVE world, not a copy.
 		reflection_viewport.own_world_3d = false
 		reflection_viewport.handle_input_locally = false
-		# Placeholder until the first _process sizes it from the live view.
-		reflection_viewport.size = Vector2i(256, 256)
+		# Retail renders through this square RTT, independent of display size.
+		reflection_viewport.size = REFLECTION_RTT_SIZE
 		add_child(reflection_viewport)
 		reflection_camera = Camera3D.new()
 		reflection_camera.name = "WaterReflectionCamera"
@@ -300,8 +304,8 @@ func _process(_delta: float) -> void:
 # backwards); negating the up column restores det +1 (the conjugated rotation
 # = yaw kept, pitch/roll negated) and renders the vertical mirror the rows'
 # vbase - screenV coordinate expects, so the fragment lookup stays the
-# witnessed math verbatim with NO host UV compensation. (Negating any other
-# column would instead need matching flips in the shader.)
+# witnessed row math before a host projection-scale correction. (Negating any
+# other column would instead need matching flips in the shader.)
 func _update_reflection_camera() -> void:
 	if reflection_viewport == null or reflection_camera == null:
 		return
@@ -312,15 +316,10 @@ func _update_reflection_camera() -> void:
 	var viewport := _cached_cam.get_viewport()
 	if viewport == null:
 		return
-	# Half the main viewport per axis: a HOST PERFORMANCE CHOICE — retail
-	# renders the full offscreen scene at Water_ReflectionTexture's own RTT
-	# size [orig: GTexRT_SelectThunk(&Water_ReflectionTexture) in
-	# render_main_scene @ 0x5c1240].
-	var target := Vector2i(viewport.get_visible_rect().size) / 2
-	target.x = maxi(target.x, 1)
-	target.y = maxi(target.y, 1)
-	if reflection_viewport.size != target:
-		reflection_viewport.size = target
+	var source_size := viewport.get_visible_rect().size
+	if source_size.x <= 0.0 or source_size.y <= 0.0:
+		return
+	var source_aspect := source_size.x / source_size.y
 
 	# position' = (x, 2*wh - y, z); each basis column reflects about the
 	# plane normal n = (0, 1, 0) as c' = c - 2*n*dot(c, n) (flip the Y
@@ -336,7 +335,20 @@ func _update_reflection_camera() -> void:
 	var origin := xform.origin
 	origin.y = 2.0 * water_height - origin.y
 	reflection_camera.global_transform = Transform3D(mirrored, origin)
-	reflection_camera.fov = _cached_cam.fov
+	# Retail rebuilds projection for the square RTT while preserving horizontal
+	# FOV [orig: Viewport_BuildProjectionMatrix @ 0x410fb0; bounds @ 0x5c1476].
+	var source_horizontal_fov := rad_to_deg(
+			2.0 * atan(tan(deg_to_rad(_cached_cam.fov) * 0.5) * source_aspect))
+	reflection_camera.keep_aspect = Camera3D.KEEP_HEIGHT
+	reflection_camera.fov = NovaSimulation.fov_vertical_from_horizontal(
+			source_horizontal_fov, 1.0)
+	# The strip rows encode normalized coordinates from the source viewport.
+	# Preserving horizontal FOV makes the square mirror's X focal scale match,
+	# but its Y focal scale is source_height/source_width of the main camera's.
+	# Convert the complete witnessed texm3x2 result at the host boundary so a
+	# fixed reflected world point remains registered while the view rotates.
+	water_material.set_shader_parameter("u_reflection_uv_scale",
+			Vector2(1.0, 1.0 / source_aspect))
 	reflection_camera.near = _cached_cam.near
 	reflection_camera.far = _cached_cam.far
 	# NEAR-PLANE NOTE (TRACKED approximation, env #30 ledger): retail clips

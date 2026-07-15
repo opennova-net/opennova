@@ -71,6 +71,17 @@ int main() {
 	const opennova::env::TodState wrap = opennova::env::interpolate_tod(loaded.keyframes, 100.0f, loaded.envscale);
 	if (!expect(wrap.moon.r > 0.0f, "TOD interpolation should wrap across midnight")) return 1;
 
+	// The float getters expose retail's fixed tuples directly; normalizing here
+	// perturbs the bytes packed later by the terrain and sky lighting paths.
+	{
+		const opennova::env::Vec3 sun = opennova::env::compute_sun_direction(1200.0f);
+		const opennova::env::Vec3 moon = opennova::env::compute_moon_direction(0.0f);
+		if (!expect(near(sun.x, -22414.0f / 65536.0f, 1.0e-7f), "sun fixed x tuple should stay unnormalized")) return 1;
+		if (!expect(near(sun.y, 61583.0f / 65536.0f, 1.0e-7f), "sun fixed magnitude should stay unnormalized")) return 1;
+		if (!expect(near(moon.x, -32768.0f / 65536.0f, 1.0e-7f), "moon fixed x tuple should stay unnormalized")) return 1;
+		if (!expect(near(moon.y, 56755.0f / 65536.0f, 1.0e-7f), "moon fixed magnitude should stay unnormalized")) return 1;
+	}
+
 	// Interpolation runs in HOURS space, not HHMM: 1230 is halfway between 1200
 	// and 1300 (12.5h), not 30% of the way. [orig: Environment_ParseTimeString @ 0x57c500]
 	{

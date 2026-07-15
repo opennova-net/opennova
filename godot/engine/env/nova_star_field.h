@@ -39,7 +39,7 @@ public:
 	// accumulator only inside the visibility branch) and returns stride-6
 	// floats per star: [offset_x, offset_y, offset_z (godot, world units),
 	// scale (world units), brightness (0..1), visible (0/1)].
-	// p_light_dir_godot = the normalized active light direction.
+	// p_light_dir_godot = the direct near-unit active light direction.
 	PackedFloat32Array tick_frame(const Vector3 &p_light_dir_godot);
 };
 

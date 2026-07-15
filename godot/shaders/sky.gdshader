@@ -45,12 +45,20 @@ varying vec2 v_uv1;
 varying vec2 v_uv2;
 
 
+// Godot's reverse-Z depth is the complement of D3D9's forward [0, 1] depth.
+// Convert only the proximity vectors; POSITION must remain native Godot clip.
+vec3 d3d_clip_xyz(vec4 clip) {
+	return vec3(clip.xy, clip.w - clip.z);
+}
+
+
 // Clip-space proximity of this vertex to a direction: the original transforms
-// (eye + dir*2000) through view-proj and dp3's the normalized xyz of both
+// (eye + dir*2000) through view-proj and dp3's the normalized D3D xyz of both
 // [orig: SkyVS dp3 r5, r4, c14; c14 upload @ 0x57960e..0x579641].
-float prox_to(vec3 clip_dir, vec3 eye, vec3 dir, mat4 view_proj) {
+float prox_to(vec4 clip, vec3 eye, vec3 dir, mat4 view_proj) {
 	vec4 ref_clip = view_proj * vec4(eye + dir * 2000.0, 1.0);
-	return max(dot(clip_dir, normalize(ref_clip.xyz)), 0.0);
+	return max(dot(normalize(d3d_clip_xyz(clip)),
+			normalize(d3d_clip_xyz(ref_clip))), 0.0);
 }
 
 
@@ -67,11 +75,13 @@ void vertex() {
 	// The dome never rotates, so the world normal equals the local normal.
 	vec3 dome_normal = normalize(vec3(VERTEX.x, VERTEX.y / height_scale, VERTEX.z));
 
-	vec3 world_pos = (MODEL_MATRIX * vec4(scaled, 1.0)).xyz;
 	vec3 eye = INV_VIEW_MATRIX[3].xyz;
+	// Anchor from THIS render pass: retail re-enters render_skybox for the
+	// mirrored water camera, so the reflection cannot reuse the main-camera
+	// dome transform [orig: @ 0x5790d0; reflection pass @ 0x5c2780].
+	vec3 world_pos = vec3(eye.x, eye.y * 0.5, eye.z) + scaled;
 	mat4 view_proj = PROJECTION_MATRIX * VIEW_MATRIX;
-	vec4 clip = PROJECTION_MATRIX * MODELVIEW_MATRIX * vec4(scaled, 1.0);
-	vec3 clip_dir = normalize(clip.xyz);
+	vec4 clip = view_proj * vec4(world_pos, 1.0);
 
 	// Gradient driver t = 0.5*dot(N_world, dir) + 0.5; pass 1 always uses the
 	// sun, pass 2 the active light [orig: SkyVS m3x3 v3,c4 / dp3 ..,c13 / mad].
@@ -80,16 +90,18 @@ void vertex() {
 	vec3 sky_sun = u_sky_base + (u_sky_bright - u_sky_base) * t_sun;
 	vec3 sky_light = u_sky_base + (u_sky_bright - u_sky_base) * t_light;
 
-	float prox_sun = prox_to(clip_dir, eye, u_sun_dir, view_proj);
-	float prox_light = prox_to(clip_dir, eye, u_light_dir, view_proj);
+	float prox_sun = prox_to(clip, eye, u_sun_dir, view_proj);
+	float prox_light = prox_to(clip, eye, u_light_dir, view_proj);
 	float p4_sun = prox_sun * prox_sun * prox_sun * prox_sun;
 	float p8_sun = p4_sun * p4_sun;
 	float p4_light = prox_light * prox_light * prox_light * prox_light;
 	float p8_light = p4_light * p4_light;
 
-	v_pass1 = mix(sky_sun, u_sky_highlight, p8_sun);
-	v_sky_behind = mix(sky_light, u_cloud_edge, p4_light);
-	v_cloud_ramp = mix(mix(u_cloud_base, u_cloud_edge, p4_light), u_cloud_highlight, p8_light);
+	// vs_1_1 oD0/oD1 are color-register outputs: constants may exceed 1 after
+	// the witnessed 2/255 upload, but the interpolated color inputs saturate.
+	v_pass1 = clamp(mix(sky_sun, u_sky_highlight, p8_sun), vec3(0.0), vec3(1.0));
+	v_sky_behind = clamp(mix(sky_light, u_cloud_edge, p4_light), vec3(0.0), vec3(1.0));
+	v_cloud_ramp = clamp(mix(mix(u_cloud_base, u_cloud_edge, p4_light), u_cloud_highlight, p8_light), vec3(0.0), vec3(1.0));
 
 	// Per-vertex dome fog [orig: SkyVS oFog = 1 - dist(world, eye)/(0.9*fogDist),
 	// c9 upload @ 0x5792c2].
@@ -99,6 +111,7 @@ void vertex() {
 
 	v_uv1 = UV + u_scroll_offset1;
 	v_uv2 = UV2 + u_scroll_offset2;
+	POSITION = clip;
 	VERTEX = scaled;
 }
 
