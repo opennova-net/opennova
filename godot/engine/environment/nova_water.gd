@@ -304,8 +304,8 @@ func _process(_delta: float) -> void:
 # backwards); negating the up column restores det +1 (the conjugated rotation
 # = yaw kept, pitch/roll negated) and renders the vertical mirror the rows'
 # vbase - screenV coordinate expects, so the fragment lookup stays the
-# witnessed math verbatim with NO host UV compensation. (Negating any other
-# column would instead need matching flips in the shader.)
+# witnessed row math before a host projection-scale correction. (Negating any
+# other column would instead need matching flips in the shader.)
 func _update_reflection_camera() -> void:
 	if reflection_viewport == null or reflection_camera == null:
 		return
@@ -342,6 +342,13 @@ func _update_reflection_camera() -> void:
 	reflection_camera.keep_aspect = Camera3D.KEEP_HEIGHT
 	reflection_camera.fov = NovaSimulation.fov_vertical_from_horizontal(
 			source_horizontal_fov, 1.0)
+	# The strip rows encode normalized coordinates from the source viewport.
+	# Preserving horizontal FOV makes the square mirror's X focal scale match,
+	# but its Y focal scale is source_height/source_width of the main camera's.
+	# Convert the complete witnessed texm3x2 result at the host boundary so a
+	# fixed reflected world point remains registered while the view rotates.
+	water_material.set_shader_parameter("u_reflection_uv_scale",
+			Vector2(1.0, 1.0 / source_aspect))
 	reflection_camera.near = _cached_cam.near
 	reflection_camera.far = _cached_cam.far
 	# NEAR-PLANE NOTE (TRACKED approximation, env #30 ledger): retail clips
