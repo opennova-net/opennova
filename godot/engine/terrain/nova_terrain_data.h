@@ -186,6 +186,8 @@ public:
 	bool get_wrap_x() const;
 	void set_wrap_y(bool p_val);
 	bool get_wrap_y() const;
+	void set_quadrant_locks(const PackedInt32Array &p_locks);
+	PackedInt32Array get_quadrant_locks() const;
 	void set_horizon(double p_val);
 	double get_horizon() const;
 
@@ -238,6 +240,12 @@ public:
 	// Shared by runtime NovaFoliageDispatcher wiring and editor paint previews
 	// so the world->sector->source mapping lives in exactly one place.
 	int get_foliage_index_world(float world_x, float world_z) const;
+	// Returns the palette index from the authored surface/charmap at a world
+	// position, or 0 outside the loaded terrain. The detail foliage tier maps
+	// this value through each foliage definition's `match` field.
+	// Engine: Terrain_GetSurfaceTypeAtFixedPoint, consumed by
+	// generate_foliage_instances_0@0x5FFDD0.
+	int get_surface_index_world(float world_x, float world_z) const;
 	// Editor world->atlas coordinate transforms (libs/terrain_query/coords.h). The
 	// editor-mode guards (bounds-reject, sector-id clamp to [0,4], local clamp to
 	// [0, 512-0.001]) reproduce EditorTerrainMesh's GDScript originals so the
@@ -246,6 +254,9 @@ public:
 	// returns Vector2(-1e9,-1e9) for out-of-extent / empty cells (the sentinels the
 	// GDScript callers branch on); get_cell_atlas_rect returns a zero Rect2i.
 	Vector2 world_to_source_coords(double world_x, double world_z) const;
+	// Runtime world->atlas transform: wraps the 16x16 sector grid and preserves
+	// raw sector ids/local offsets like the retail terrain samplers.
+	Vector2 world_to_runtime_source_coords(float world_x, float world_z) const;
 	Vector2 world_to_cell_source_coords(double world_x, double world_z, int row, int col) const;
 	// World -> authored sector-grid cell (row, col), or (-1,-1) outside the
 	// authored extent. Mirrors EditorTerrainMesh's extent-guarded cell lookup:

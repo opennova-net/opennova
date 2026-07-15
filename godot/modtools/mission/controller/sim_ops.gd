@@ -128,9 +128,16 @@ func _ensure_sim_driver() -> bool:
 	# root so soldiers get their .adm/.bad root-motion clips (without them they stand still).
 	var terrain_data = _c.terrain_editor.get_data() if _c.terrain_editor != null and _c.terrain_editor.has_method("get_data") else null
 	var sim_root: NovaResourceRoot = _c._resource_root()
+	var mission_path: String = _c.get_current_path()
+	var mission_file := mission_path.replace("\\", "/").get_file()
+	var mission_name := String(_c.get_mission().get_mission_name()).strip_edges()
+	if mission_name.is_empty() and not mission_file.is_empty():
+		mission_name = mission_file.get_file().get_basename()
 	if int(_c._sim_driver.setup(_c._mission, container, {
 			"self_tick": true,
 			"playable": false,
+			"debug_mission_file": mission_file,
+			"debug_mission_name": mission_name,
 			"terrain": terrain_data,
 			"resource_root": sim_root,
 			"item_db": _c._placement._item_db(),

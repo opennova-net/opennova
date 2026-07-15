@@ -44,7 +44,8 @@ private:
 	                 std::string output_dir,
 	                 std::string terrain_name,
 	                 std::string creator,
-	                 opennova::DepthFormat depth_format = opennova::DepthFormat::CDEP);
+	                 opennova::DepthFormat depth_format,
+	                 opennova::TerrainQuadrantLocks quadrant_locks);
 
 protected:
 	static void _bind_methods();

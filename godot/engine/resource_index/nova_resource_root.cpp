@@ -215,6 +215,14 @@ void NovaResourceRoot::clear() {
 	root_dir_ = String();
 	last_error_ = String();
 	expansion_ = String();
+	// Release Godot resources while RenderingServer is still alive. Waiting for
+	// the next epoch-checked lookup (or this RefCounted's destructor) retains
+	// cached ImageTextures through shutdown and leaks their renderer RIDs.
+	texture_cache_.clear();
+	texture_cache_epoch_ = 0;
+	resolve_memo_.clear();
+	resolve_memo_epoch_ = 0;
+	resolve_memo_built_ = false;
 	opennova::clear_texture_resolver_caches();
 	opennova::bump_cache_epoch();
 	index_.clear();

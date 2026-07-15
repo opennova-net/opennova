@@ -28,6 +28,7 @@ private:
 	                                                  const std::string &output_dir,
 	                                                  const std::string &terrain_name,
 	                                                  const std::string &creator,
+	                                                  const opennova::TerrainQuadrantLocks &quadrant_locks,
 	                                                  opennova::DepthFormat depth_format = opennova::DepthFormat::CDEP,
 	                                                  const opennova::TerrainBuildProgressCallback &progress_callback = {});
 
@@ -45,13 +46,15 @@ public:
 	                      const String &p_output_dir,
 	                      const String &p_terrain_name,
 	                      const String &p_creator,
-	                      int p_depth_format = 1);
+	                      int p_depth_format = 1,
+	                      const PackedInt32Array &p_quadrant_locks = PackedInt32Array());
 
 	Ref<NovaTerrainBuildJob> begin_build_from_data(const PackedByteArray &p_heightmap_raw16,
 	                                               const String &p_output_dir,
 	                                               const String &p_terrain_name,
 	                                               const String &p_creator,
-	                                               int p_depth_format = 1);
+	                                               int p_depth_format = 1,
+	                                               const PackedInt32Array &p_quadrant_locks = PackedInt32Array());
 
 	// Save a Godot Image as an uncompressed 32-bit BGRA TGA (bottom-left origin).
 	static Error save_image_tga(const Ref<Image> &p_image, const String &p_path);

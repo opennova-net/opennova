@@ -12,6 +12,7 @@
 #include <godot_cpp/variant/packed_vector3_array.hpp>
 
 #include "nova_terrain_data.h"
+#include <terrain/foliage_detail_collector.h>
 #include <terrain/quadtree.h>
 
 #include <cstdint>
@@ -20,6 +21,9 @@
 namespace godot {
 
 class NovaTerrainTileInfo;
+class NovaTerrainSurfaceInputs;
+
+using FoliageDetailPatch = opennova::FoliageDetailPatch;
 
 class NovaTerrain : public Node3D {
 	GDCLASS(NovaTerrain, Node3D)
@@ -54,11 +58,13 @@ private:
 	bool patch_visible[PATCH_POOL_SIZE] = {};
 	int patches_active = 0;
 	PackedVector3Array foliage_dispatch_centers;
+	std::vector<FoliageDetailPatch> foliage_detail_patches;
 
 	// Shader
 	Ref<Shader> terrain_shader;
 	Ref<ShaderMaterial> terrain_material;
-	Ref<Texture2D> tile_overlay_texture;
+	Ref<NovaTerrainSurfaceInputs> surface_inputs;
+	Vector3 tile_overlay_tint = Vector3(1.0f, 1.0f, 1.0f);
 
 	bool built = false;
 
@@ -85,6 +91,7 @@ private:
 	void _build_quadtree();
 	void _build_collision();
 	void _load_textures();
+	void _clear_derived_textures();
 	void _rebuild_tile_overlay_texture();
 	void _clear_tile_overlay_texture();
 	void _clear_terrain();
@@ -109,6 +116,10 @@ public:
 
 	void set_terrain_data(const Ref<NovaTerrainData> &p_data);
 	Ref<NovaTerrainData> get_terrain_data() const;
+	Ref<NovaTerrainSurfaceInputs> get_surface_inputs() const;
+	Ref<Texture2D> get_heightfield_normal_texture() const;
+	Ref<Texture2D> get_tile_overlay_texture() const;
+	Vector3 get_tile_overlay_tint() const;
 
 	void set_lod_quality(float p_quality);
 	float get_lod_quality() const;
@@ -141,6 +152,7 @@ public:
 	int get_patches_active() const;
 	int get_visible_patch_count() const;
 	PackedVector3Array get_foliage_dispatch_centers() const;
+	const std::vector<FoliageDetailPatch> &get_foliage_detail_patches_native() const;
 
 	void set_debug_no_frustum(bool v);
 	bool get_debug_no_frustum() const;

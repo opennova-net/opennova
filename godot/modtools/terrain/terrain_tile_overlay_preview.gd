@@ -18,6 +18,8 @@ var _ghost_cell := Vector2i.ZERO
 var _ghost_tile_index: int = 0
 var _ghost_flags: int = 0
 var _dirty: bool = true
+var _base_overlay_visible := true
+var _authoring_outlines_visible := true
 
 # Base overlay + FLAG_OUTLINE perimeter rendering live inside this C++ node.
 # The editor-only authoring layers (ghost/hover/selection/selection-outline)
@@ -43,6 +45,7 @@ func _ready() -> void:
 	# Editor shows the FLAG_OUTLINE perimeter as authoring feedback. The engine's
 	# 3D renderer (sub_5C42B0) ignores this bit — runtime leaves it false.
 	_tile_overlay.draw_outline_flag = true
+	_tile_overlay.visible = _base_overlay_visible or _authoring_outlines_visible
 	add_child(_tile_overlay)
 
 	_selection_material = StandardMaterial3D.new()
@@ -140,6 +143,49 @@ func mark_dirty() -> void:
 	_dirty = true
 
 
+## Show the legacy separate base geometry only when terrain material
+## composition is unavailable. Authoring ghost/hover/selection children are
+## intentionally independent and remain visible in the Terrain workspace.
+func set_base_overlay_visible(value: bool) -> void:
+	if _base_overlay_visible == value:
+		return
+	_base_overlay_visible = value
+	_dirty = true
+
+
+func is_base_overlay_visible() -> bool:
+	return _base_overlay_visible
+
+
+## FLAG_OUTLINE is Terrain authoring feedback, independent from the legacy
+## textured base geometry. Mission context disables it while material
+## composition can still suppress only the duplicate base albedo.
+func set_authoring_outlines_visible(value: bool) -> void:
+	if _authoring_outlines_visible == value:
+		return
+	_authoring_outlines_visible = value
+	_dirty = true
+
+
+func are_authoring_outlines_visible() -> bool:
+	return _authoring_outlines_visible
+
+## User-visible authoring-layer state without exposing owned mesh instances.
+func is_outline_visible() -> bool:
+	if _tile_overlay == null:
+		return false
+	var outline_instance := _tile_overlay.get_node_or_null("OutlineMesh") as MeshInstance3D
+	return outline_instance != null and outline_instance.visible
+
+
+func is_selection_visible() -> bool:
+	return _selection_instance != null and _selection_instance.visible
+
+
+func is_ghost_visible() -> bool:
+	return _ghost_instance != null and _ghost_instance.visible
+
+
 func rebuild_if_needed() -> void:
 	if not _dirty:
 		return
@@ -157,6 +203,11 @@ func rebuild_if_needed() -> void:
 func _rebuild_tile_overlay_node() -> void:
 	if _tile_overlay == null:
 		return
+	_tile_overlay.draw_outline_flag = _authoring_outlines_visible
+	_tile_overlay.visible = _base_overlay_visible or _authoring_outlines_visible
+	if not _tile_overlay.visible:
+		_tile_overlay.clear()
+		return
 	if _terrain_mesh == null or _tileinfo == null or _tilestrip == null:
 		_tile_overlay.clear()
 		return
@@ -164,6 +215,14 @@ func _rebuild_tile_overlay_node() -> void:
 	_tile_overlay.tilestrip = _tilestrip
 	_tile_overlay.height_sampler = Callable(_terrain_mesh, "sample_world_height")
 	_tile_overlay.rebuild()
+	# NovaTerrainTileOverlay owns both native children. Material composition
+	# replaces only OverlayMesh; FLAG_OUTLINE remains a separate authoring layer.
+	var base_instance := _tile_overlay.get_node_or_null("OverlayMesh") as MeshInstance3D
+	if base_instance != null:
+		base_instance.visible = _base_overlay_visible and base_instance.mesh != null
+	var outline_instance := _tile_overlay.get_node_or_null("OutlineMesh") as MeshInstance3D
+	if outline_instance != null:
+		outline_instance.visible = _authoring_outlines_visible and outline_instance.mesh != null
 
 
 static func entry_center_world(entry: NovaTerrainTileEntry, terrain_mesh: EditorTerrainMesh) -> Vector3:

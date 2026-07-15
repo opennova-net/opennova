@@ -302,6 +302,12 @@ func _ready() -> void:
 	if not _resource_library.get_root_dir().is_empty():
 		_scan_resource_root(false)
 	_mount_active_workspace_viewport()
+	# The initial workspace ID is already selected, so routing it back through
+	# set_active_workspace() would hit that method's same-ID early return. Give
+	# startup the same mount-then-activate lifecycle as every later switch.
+	var initial_workspace := _get_active_workspace()
+	if initial_workspace != null:
+		initial_workspace.activate()
 	_settings_panel.apply_view_guides_to_active()
 	_refresh_workspace_surface()
 	sync_from_editor_state()

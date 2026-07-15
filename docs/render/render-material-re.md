@@ -288,7 +288,9 @@ and the framebuffer byte is the displayed value:
   @ 0x677f91..0x678070; GfxDevice_HandleLostDevice @ 0x678374..0x678453;
   CGfxDevice_ApplyRenderStates @ 0x67e3ec..0x67e4f3]`. Device defaults:
   MAG/MIN LINEAR + **MIP POINT** (bilinear with sharp mip cuts), aniso 2,
-  a variable MIPMAPLODBIAS; per-stage filters re-applied from settings by
+  and reset MIPMAPLODBIAS 0.0. The active foliage comparison configuration's
+  `texfilter_level=0` maps to this point-mip mode; per-stage filters are
+  re-applied by
   `CGfxDevice_ApplyRenderStates` (trilinear/aniso are the high-settings
   look, cf. `HLSLEffect_TextureFilterMode @ 0x27e5698`).
 - **No sRGB framebuffer writes.** The SetRenderState immediate sweep (state

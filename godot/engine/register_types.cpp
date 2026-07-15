@@ -10,6 +10,7 @@
 
 #include "terrain/nova_terrain_data.h"
 #include "terrain/nova_terrain.h"
+#include "terrain/nova_terrain_surface_inputs.h"
 #include "terrain/nova_terrain_builder.h"
 #include "terrain/nova_terrain_build_job.h"
 #include "terrain/nova_terrain_foliage_def.h"
@@ -144,6 +145,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 
 	GDREGISTER_CLASS(NovaTerrainData);
 	GDREGISTER_CLASS(NovaTerrain);
+	GDREGISTER_CLASS(NovaTerrainSurfaceInputs);
 	GDREGISTER_CLASS(NovaTerrainBuilder);
 	GDREGISTER_CLASS(NovaTerrainBuildJob);
 	GDREGISTER_CLASS(NovaTerrainFoliageDef);

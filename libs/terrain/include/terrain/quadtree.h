@@ -96,6 +96,10 @@ struct TraversalStats {
 	int lod_fallbacks = 0;
 };
 
+// Select one of the eight terrain mesh families from the recovered 0..15 LOD
+// sublevel. [orig: render_terrain_sector_batch @ 0x6096f0]
+int terrain_lod_family(int lod_sub) noexcept;
+
 // Distance from point to AABB (used for LOD selection).
 float node_distance(const float aabb_min[3], const float aabb_max[3],
                     const float center[3], float px, float py, float pz);

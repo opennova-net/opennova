@@ -7,12 +7,6 @@ render_mode unshaded;
 // Gamma-space output convention (D-RMAT-7): nova_gamma_to_linear().
 #include "res://shaders/nova_color.gdshaderinc"
 
-// Runtime-only extras (the editor shader has its own brush/overlay set instead).
-// Raw sampling per the gamma-space convention (nova_color.gdshaderinc).
-uniform sampler2D u_tile_overlay : filter_linear, repeat_enable;
-uniform bool u_has_tile_overlay = false;
-uniform vec3 u_tile_overlay_tint = vec3(1.0, 1.0, 1.0);
-
 // Debug: 0=off, 1=LOD colors, 2=sector colors, 3=normals, 4=heightmap
 uniform int u_debug_mode = 0;
 
@@ -20,17 +14,20 @@ uniform int u_debug_mode = 0;
 instance uniform float u_instance_lod : hint_range(0.0, 7.0) = 0.0;
 instance uniform float u_instance_sector_x = 0.0;
 instance uniform float u_instance_sector_z = 0.0;
+instance uniform vec2 u_instance_source_quadrant = vec2(0.0);
 
 varying vec2 v_colormap_uv;
 varying vec2 v_detail_uv;
 varying vec3 v_world_pos;
 varying vec3 v_world_normal;
+varying float v_eye_depth;
 
 void vertex() {
 	v_colormap_uv = UV;
 	v_detail_uv = UV * u_detail_density;
 	v_world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	v_world_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
+	v_eye_depth = max(-(MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).z, 0.0);
 }
 
 // LOD level to color — 8 distinct colors from green (high detail) to red (low)
@@ -67,15 +64,16 @@ vec3 sector_color(float sx, float sz) {
 }
 
 void fragment() {
-	vec3 result = terrain_surface_color(v_colormap_uv, v_detail_uv, v_world_pos, CAMERA_POSITION_WORLD);
+	vec2 sampled_colormap_uv = clamp_retail_quadrant_uv(
+		v_colormap_uv, u_instance_source_quadrant, textureSize(u_colormap, 0));
+	vec4 colormap = retail_bare_terrain_tile(
+		texture(u_colormap, sampled_colormap_uv).rgb, v_world_normal,
+		v_colormap_uv, u_instance_source_quadrant);
+	colormap = compose_retail_tile_overlay(colormap, v_world_pos);
+	vec3 result = terrain_surface_color_from_colormap(
+		colormap, v_colormap_uv, v_detail_uv, u_instance_source_quadrant);
 
-	if (u_has_tile_overlay) {
-		vec2 tile_uv = fract(vec2(v_world_pos.x, -v_world_pos.z) * (1.0 / 1024.0));
-		vec4 tile = texture(u_tile_overlay, tile_uv);
-		result = mix(result, tile.rgb * u_tile_overlay_tint, tile.a);
-	}
-
-	result = apply_terrain_fog(result, v_world_pos, CAMERA_POSITION_WORLD);
+	result = apply_terrain_fog(result, v_world_pos, CAMERA_POSITION_WORLD, v_eye_depth);
 
 	// Debug overlays — replace output with diagnostic color
 	if (u_debug_mode == 1) {

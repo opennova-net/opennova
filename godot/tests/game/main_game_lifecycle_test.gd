@@ -135,6 +135,67 @@ func test_mission_return_restores_menu_frame_and_supports_another_load() -> void
 	_assert_clean_menu(world, terrain, menu_host, boot_clear)
 
 
+func test_debug_overlay_suspends_input_without_stopping_the_world() -> void:
+	_shell = await _make_shell()
+	if _shell == null:
+		return
+	var world = _shell.get_node("World")
+	var terrain = world.get_node("NovaTerrain")
+	var menu_host = _shell.get_node("MenuLayer/MenuHost")
+	menu_host.start_requested.emit("mnml.bms")
+	await _wait_for_world_load(world)
+	await _wait_for_visible_terrain(terrain)
+	var runtime = world.get_runtime()
+	assert_not_null(runtime)
+	if runtime == null:
+		return
+
+	assert_true(_shell.is_gameplay_input_active())
+	var tick_before := int(runtime.get_sim().get_logic_tick())
+	_shell.toggle_debug_overlay()
+	for _frame in range(4):
+		await get_tree().process_frame
+	assert_true(_shell.is_debug_overlay_open())
+	assert_false(_shell.is_gameplay_input_active(),
+			"F3 submits neutral player input while its controls own the cursor")
+	assert_eq(Input.get_mouse_mode(), Input.MOUSE_MODE_VISIBLE,
+			"F3 leaves the dump button clickable")
+	assert_gt(int(runtime.get_sim().get_logic_tick()), tick_before,
+			"the live world keeps ticking under the inspector")
+
+	var overlay = _shell.find_child("DebugOverlay", true, false)
+	assert_not_null(overlay)
+	var pose_path := _temp_dir.path_join("f3-player-pose.json")
+	var dumped_path: String = overlay.dump_local_player_pose(pose_path)
+	assert_eq(dumped_path, pose_path)
+	var pose_file := FileAccess.open(dumped_path, FileAccess.READ)
+	assert_not_null(pose_file)
+	var payload_variant: Variant = JSON.parse_string(pose_file.get_as_text()) \
+			if pose_file != null else null
+	if pose_file != null:
+		pose_file.close()
+	var payload: Dictionary = payload_variant if payload_variant is Dictionary else {}
+	var view: Dictionary = payload.get("view", {})
+	var camera_snapshot: Dictionary = view.get("camera", {})
+	assert_false(camera_snapshot.is_empty(),
+			"the game host supplies its actual foliage-dispatch camera")
+	assert_eq(String(camera_snapshot.get("mode", "")), "first_person")
+	var actual_camera := _shell.get_node("Camera3D") as Camera3D
+	var dumped_camera: Dictionary = camera_snapshot.get("position_godot", {})
+	assert_almost_eq(float(dumped_camera.get("x", 0.0)),
+			actual_camera.global_position.x, 0.0001)
+	assert_almost_eq(float(dumped_camera.get("y", 0.0)),
+			actual_camera.global_position.y, 0.0001)
+	assert_almost_eq(float(dumped_camera.get("z", 0.0)),
+			actual_camera.global_position.z, 0.0001)
+
+	_shell.toggle_debug_overlay()
+	await get_tree().process_frame
+	assert_false(_shell.is_debug_overlay_open())
+	assert_true(_shell.is_gameplay_input_active(),
+			"closing F3 restores the gameplay-input policy")
+
+
 func _make_shell():
 	_temp_dir = OS.get_cache_dir().path_join(
 			"opennova_main_game_lifecycle_%d" % Time.get_ticks_usec())

@@ -267,6 +267,12 @@ inline bool til_entry_matches_cell(const TilOverlayEntry &entry, int cell_x, int
 	return cell.x == cell_x && cell.z == cell_z;
 }
 
+// Tests the candidate's square footprint against the mission tile array's
+// inclusive 16x16 world AABBs. Runtime foliage supplies radius 2.0.
+// [orig: Foliage_PathBlockedByPlacedTile @ 0x606490;
+// Terrain_LoadFoliageFile @ 0x60a740]
+bool til_blocks_foliage(const TilFile &file, float world_x, float world_z, float radius);
+
 inline TilOverlayEntry make_til_overlay_entry(int cell_x,
 	                                          int cell_z,
 	                                          uint8_t tile_index,

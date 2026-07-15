@@ -69,6 +69,8 @@ var _dispatcher: NovaFoliageDispatcher
 var _tile_overlay: NovaTerrainTileOverlay
 var _terrain_data: NovaTerrainData
 var _resource_root: NovaResourceRoot
+var _mission_tile_info: NovaTerrainTileInfo
+var _mission_til_bytes := PackedByteArray()
 var _loaded: bool = false
 var _loaded_mission: NovaMissionData
 # The BMS argument that completed the active mission load. This is runtime
@@ -176,6 +178,7 @@ func load_world(dir: String = "") -> int:
 		load_failed.emit("%s not found in %s" % [env_file, resource_root.get_root_dir()])
 		return ERR_FILE_NOT_FOUND
 
+	_clear_mission_tile_info()
 	_resource_root = resource_root
 	if not _load_environment(env_file):
 		load_failed.emit("failed to load %s" % env_file)
@@ -298,6 +301,7 @@ func load_net_session(opts: Dictionary) -> int:
 		resource_root = _resolve_root(dir)
 	if resource_root == null:
 		return ERR_CANT_OPEN
+	_clear_mission_tile_info()
 	_resource_root = resource_root
 
 	# Item database for BOTH the §5.10b wire dispatch-class table and model
@@ -358,6 +362,7 @@ func _on_net_mission(mission_name: String) -> void:
 		push_warning("net session: failed to parse %s: %s" % [mission_name, mission.get_last_error()])
 		return
 	_loaded_mission = mission
+	_load_mission_tile_info(mission_name, _resource_root)
 	var env_name := mission.get_environment_ref() + ".env"
 	if _resource_root.has_file(env_name) and _load_environment(env_name):
 		_apply_mission_environment_overrides(mission)
@@ -386,6 +391,7 @@ func _load_mission_internal(mission: NovaMissionData, bms_name: String, resource
 	# load costs stay comparable (one timeline ring serves both).
 	var timeline := PerfTimeline.begin("Mission load %s" % bms_name)
 	_resource_root = resource_root
+	_load_mission_tile_info(bms_name, resource_root)
 	# Progress values are anchor points from the witnessed schedule (2..100);
 	# our pipeline has fewer stages than the original's ~30 call sites, so each
 	# boundary reports the nearest witnessed value
@@ -518,6 +524,7 @@ func get_mission_stats() -> Dictionary:
 func unload() -> void:
 	_loaded = false
 	_host_config = {}
+	_clear_mission_tile_info()
 	_restore_idle_frame_clear_color()
 	var container := get_node_or_null(NodePath(MissionObjectPlacer.CONTAINER_NAME))
 	if container != null:
@@ -585,21 +592,10 @@ func _load_environment(env_path: String) -> bool:
 		return false
 	# NovaEnvironment's setter reloads + pushes shader globals on assignment.
 	_env.environment_data = env
-	_apply_foliage_tint()
 	var celestial := get_node_or_null("NovaCelestial")
 	if celestial != null and celestial.has_method("set_resource_root"):
 		celestial.set_resource_root(_resource_root)
 	return true
-
-
-## Push the env terrain_rgb onto the foliage dispatcher — the retail analog
-## derives the tint globals once at terrain init from the loaded env
-## [orig: Terrain_Init @ 0x60fc42 -> PolyTrn_SetTerrainTintColors @ 0x605e20].
-## Called from both orders (env-then-terrain and env reload after foliage).
-func _apply_foliage_tint() -> void:
-	if _dispatcher == null or _env == null or _env.environment_data == null:
-		return
-	_dispatcher.terrain_tint = _env.environment_data.get_terrain_tint()
 
 
 ## Apply the mission's attrib-gated water/fog overrides onto the loaded env via
@@ -618,10 +614,50 @@ func _apply_mission_environment_overrides(mission: NovaMissionData) -> void:
 		env_data.apply_mission_overrides(overrides)
 
 
+# Retail loads <mission>.til into one shared g_TerrainTileArray used by
+# terrain overlays/surface overrides, network initial state, and both foliage
+# generators' radius-2 blocker.
+# [orig: Terrain_LoadFoliageFile @ 0x60a740;
+# Terrain_GetSurfaceTypeAtPosition @ 0x606510;
+# Foliage_PathBlockedByPlacedTile @ 0x606490]
+func _load_mission_tile_info(bms_name: String, resource_root: NovaResourceRoot) -> void:
+	_clear_mission_tile_info()
+	if resource_root == null:
+		return
+	var mission_name := bms_name.get_file()
+	if mission_name.is_empty():
+		mission_name = bms_name
+	var til_name := mission_name.get_basename() + ".til"
+	if not resource_root.has_file(til_name):
+		return
+	var til_bytes := resource_root.read_file(til_name)
+	if til_bytes.is_empty():
+		return
+	var tile_info := NovaTerrainTileInfo.new()
+	if tile_info.load_from_bytes(til_bytes) != OK:
+		push_warning("GameWorld: failed to parse mission tile file '%s'." % til_name)
+		return
+	_mission_tile_info = tile_info
+	_mission_til_bytes = til_bytes
+
+
+func _clear_mission_tile_info() -> void:
+	_mission_tile_info = null
+	_mission_til_bytes = PackedByteArray()
+	if _terrain != null:
+		_terrain.tile_info_override = null
+	if _dispatcher != null:
+		_dispatcher.tile_info = null
+
+
 func _load_terrain(trn_path: String) -> bool:
 	var data := NovaTerrainData.new()
 	if data.load_from_resource_root(_resource_root, trn_path) != OK:
 		return false
+	var tile_info := _mission_tile_info
+	if tile_info == null and _tile_overlay != null:
+		tile_info = _tile_overlay.tile_info
+	_terrain.tile_info_override = tile_info
 	_terrain_data = data
 	_terrain.terrain_data = data
 	_terrain.build()
@@ -635,26 +671,42 @@ func _load_terrain(trn_path: String) -> bool:
 	return true
 
 
-# Runtime foliage: feed the dispatcher NovaTerrainData directly (C++ fast path).
-# Gameplay uses the coverage-safe CELL_GRID path until the exact retail
-# engine-center radius/center feed is fully recovered.
+# Runtime foliage: NovaTerrain supplies the retail 16-unit detail-cell set;
+# placed sector entities supply the distant silhouette anchors. Sampling and
+# deterministic candidate generation stay in the fresh native runtime.
 func _configure_foliage() -> void:
 	if _dispatcher == null or _terrain_data == null:
 		return
 	_dispatcher.terrain_data = _terrain_data
-	_dispatcher.dispatch_algorithm = NovaFoliageDispatcher.DISPATCH_ALGORITHM_CELL_GRID
-	_dispatcher.cell_grid_radius = 8
+	_dispatcher.colormap_source = _terrain_data
+	_dispatcher.tile_info = _terrain.tile_info_override
 	var defs: Array = _terrain_data.get_foliage_defs()
-	_dispatcher.foliage_defs = defs
-	_dispatcher.slot_meshes = VegAssets.resolve_slot_meshes(_resource_root, defs)
-	# The ":fd" bake both tiers bind [orig: Foliage_LoadDefAssets @ 0x601260].
-	_dispatcher.slot_fd_textures = VegAssets.resolve_slot_fd_textures(_resource_root, defs)
-	_apply_foliage_tint()
+	_dispatcher.configure_slots(
+		defs,
+		VegAssets.resolve_slot_meshes(_resource_root, defs),
+		VegAssets.resolve_slot_fd_textures(_resource_root, defs)
+	)
+	for diagnostic_value in _dispatcher.get_slot_diagnostics():
+		var diagnostic := diagnostic_value as Dictionary
+		var status := String(diagnostic.get('status', ''))
+		if status == 'missing_mesh' or status == 'invalid_mesh':
+			push_warning(
+				"GameWorld: foliage slot %d graphic '%s' disabled (%s)." % [
+					int(diagnostic.get('slot', -1)),
+					String(diagnostic.get('graphic', '')),
+					status,
+				]
+			)
+		elif status == 'enabled' and not bool(diagnostic.get('fd_texture_loaded', false)):
+			push_warning(
+				"GameWorld: foliage slot %d graphic '%s' has no :fd texture; appearance is degraded." % [
+					int(diagnostic.get('slot', -1)),
+					String(diagnostic.get('graphic', '')),
+				]
+			)
 	if _tile_overlay != null:
 		# NovaTerrain composites the tile overlay into its own material; the scene
-		# TileOverlay node is only an authoring override provider here.
-		if _terrain.tile_info_override == null and _tile_overlay.tile_info != null:
-			_terrain.tile_info_override = _tile_overlay.tile_info
+		# TileOverlay node is only the authoring fallback selected before build.
 		_tile_overlay.clear()
 		_tile_overlay.visible = false
 
@@ -688,27 +740,14 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 	_perf_runtime_us = 0
 	_perf_audio_us = 0
 	if _loaded and _dispatcher != null:
-		# Near-tier anchors: the witnessed driver is per-SECTOR-ENTITY (the
-		# .trn/.bms-placed world models) [orig: Terrain_RenderSectorEntitiesBySide
-		# @ 0x5c7d50]; placed mission objects are the host equivalent (host
-		# mapping). Maps without objects fall back to the visible-patch centers
-		# so terrain content still grows the near tier.
-		var model_anchors := PackedVector3Array()
+		# The silhouette tier is driven only by visible sector entities
+		# [orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7d50]. Terrain-patch
+		# centers are not equivalent anchors, so an object-free map supplies none.
+		var silhouette_anchors := PackedVector3Array()
 		if _placer != null and _placer.has_method("get_placed_world_positions"):
-			model_anchors = _placer.get_placed_world_positions()
-		if model_anchors.is_empty() and _terrain != null:
-			model_anchors = _terrain.get_foliage_dispatch_centers()
-		_dispatcher.set_model_anchors(model_anchors)
-		if _dispatcher.dispatch_algorithm == NovaFoliageDispatcher.DISPATCH_ALGORITHM_CELL_GRID:
-			_dispatcher.dispatch(camera_pos, camera_xform)
-		else:
-			var centers := PackedVector3Array()
-			if _terrain != null:
-				centers = _terrain.get_foliage_dispatch_centers()
-			if centers.is_empty():
-				_dispatcher.dispatch(camera_pos, camera_xform)
-			else:
-				_dispatcher.dispatch_centers(centers, camera_xform)
+			silhouette_anchors = _placer.get_placed_world_positions()
+		_dispatcher.silhouette_anchors = silhouette_anchors
+		_dispatcher.render_frame(camera_xform)
 		_perf_foliage_us = Time.get_ticks_usec() - foliage_start
 	var runtime_start := Time.get_ticks_usec()
 	var runtime_ticks := 0
@@ -753,7 +792,7 @@ func get_runtime_perf_counters() -> Dictionary:
 		"runtime_us": _perf_runtime_us,
 		"audio_us": _perf_audio_us,
 		"runtime": _runtime.get_perf_counters() if _runtime != null and _runtime.has_method("get_perf_counters") else {},
-		"foliage": _dispatcher.get_dispatch_stats() if _dispatcher != null and _dispatcher.has_method("get_dispatch_stats") else {},
+		"foliage": _dispatcher.get_frame_stats() if _dispatcher != null and _dispatcher.has_method("get_frame_stats") else {},
 		"audio": _mission_audio.get_perf_counters() if _mission_audio != null and _mission_audio.has_method("get_perf_counters") else {},
 	}
 
@@ -1183,13 +1222,10 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> void:
 	# Terrain-tile (.til) bytes for the S2C 0x45 terrain-tile load a listen host streams to joiners so
 	# their g_loading_progress climbs 5 -> 6 and terrain finishes loading (net-re §5.37). The tile-overlay
 	# .til is named after the MISSION (localres.pff: ASH_I5A.til), not the terrain tileinfo
-	# [orig: Terrain_LoadTileInfoFile @0x5CA730 loads <mission>.til]. Read it raw from the resource root;
-	# absent when the mission has none.
-	if _resource_root != null:
-		var til_name := mission_file.get_basename() + ".til"
-		var til_bytes: PackedByteArray = _resource_root.read_file(til_name) if _resource_root.has_file(til_name) else PackedByteArray()
-		if til_bytes.size() > 0:
-			opts["terrain_til"] = til_bytes
+	# [orig: Terrain_LoadFoliageFile @ 0x60a740;
+	# serialize_terrain_tiles @ 0x6080f0]. Reuse the payload parsed before terrain build.
+	if not _mission_til_bytes.is_empty():
+		opts["terrain_til"] = _mission_til_bytes
 	opts["playable"] = _playable and not bool(_host_config.get("dedicated", false))
 	# A LAN host start threads its config (server name, mission rotation, player cap, and the
 	# socket transport mode) through to the listen server. A LAN JOINER threads the dial target

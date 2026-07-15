@@ -250,6 +250,9 @@ func test_workstation_starts_with_domain_workspaces() -> void:
 	if workspace_bar != null:
 		assert_true(workspace_bar.is_ancestor_of(workspace_rail), "The workspace rail lives inside the dock bar.")
 	assert_eq(workstation.get_active_workspace_id(), EditorWorkstationScript.Workspace.MISSION, "Mission should be the default workspace.")
+	var mission_workspace = workstation.get_workspace_adapter(EditorWorkstationScript.Workspace.MISSION)
+	assert_true(bool(mission_workspace.get("_mission_preview_context_active")),
+		"The default workspace must receive activate(), just like a workspace selected later.")
 
 	var row_texts := []
 	for child in workspace_rail.get_children():
@@ -1262,7 +1265,7 @@ func test_asset_dock_uses_shared_slot_labels() -> void:
 	var dock = add_child_autofree(TerrainEditorAssetDockScene.instantiate())
 
 	assert_true(_has_label_text(dock, "Detail A"), "Asset dock should use shared detail slot labels.")
-	assert_true(_has_label_text(dock, "Shading 1 / near"), "Asset dock should use shared auxiliary slot labels.")
+	assert_true(_has_label_text(dock, "Detail coefficient source"), "Asset dock should use shared auxiliary slot labels.")
 	assert_true(_has_label_text(dock, "Tile atlas"), "Asset dock should use shared map-data slot labels.")
 
 
@@ -1307,7 +1310,7 @@ func test_asset_dock_slot_card_title_does_not_share_row_with_buttons() -> void:
 	# At the ~360px dock width the title and the Load/Reset buttons cannot share a
 	# horizontal row without squeezing the title into one-token-per-line wrapping.
 	# The title should own a full-width row so multi-word slot labels stay readable.
-	var title := _find_label_by_text(dock, "Shading 1 / near")
+	var title := _find_label_by_text(dock, "Detail coefficient source")
 	assert_not_null(title, "Slot card should expose the slot title label.")
 	if title == null:
 		return

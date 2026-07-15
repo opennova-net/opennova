@@ -76,6 +76,7 @@ func open_mission(bms_path: String) -> Error:
 			return trn_err as Error
 	timeline.end_span()
 
+	_c._load_mission_tile_info(bms_path, resource_root)
 	timeline.span("environment")
 	var env_note := _load_environment(mission, resource_root)
 	timeline.end_span()
@@ -135,6 +136,7 @@ func new_mission() -> Error:
 		_c._last_status = "Could not create a new mission: %s" % mission.get_last_error()
 		return FAILED
 	# Self-describe: adopt the loaded terrain's basename so a later reopen resolves the same world.
+	_c._clear_mission_tile_info()
 	var terrain_ref := trn_path.get_file().get_basename()
 	mission.set_header_string("terrain", terrain_ref)
 
@@ -175,6 +177,7 @@ func clear() -> void:
 	_c._marker_place_armed = false
 	_c._selected_path_index = -1
 	_c._placer = null
+	_c._clear_mission_tile_info()
 	_clear_objects()
 	# Dropping the document drops its undo history + clean baseline with it (they live on the
 	# NovaMissionData), so there is nothing else to reset; is_dirty() reads false once _mission is null.

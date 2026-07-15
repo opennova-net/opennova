@@ -1,315 +1,532 @@
-# Foliage placement — reverse-engineering record
+# Foliage — fresh reverse-engineering record
 
-Structure-mapping record for the original engine's **procedural foliage
-placement** (the deterministic per-cell grass/bush instancing) and its color
-sampling. The reimplementation surface is `libs/foliage` (`placement.cpp` /
-`dispatcher.cpp`) and the Godot host `NovaFoliageDispatcher`
-(`godot/engine/terrain`). Binary: retail **Jointops.exe** (IDB
-`Jointops.exe.kong.i64`). All addresses below are that binary's. This file is
-the committed home for the `D-FOLIAGE-…` divergence catalog. Produced by a
-read-only IDA audit (PAR-R2, 2026-07-05); no IDB renames were made. It converts
-the **Foliage** system from `UNAUDITED` to tracked (divergence-ledger.md).
+**Status:** re-grilled and reimplemented 2026-07-13, with the MODEL blend/depth
+state corrected 2026-07-14 after a renderer capture exposed the missing
+combiner. The same-day follow-up also ported the mission-tile exclusion, near
+secondary LOW submission, and model-own custom `:fd` mip chain. The previous
+host runtime was deleted rather than repaired because it
+inverted the two retail tiers and encoded several disproven geometry and color
+assumptions.
 
-Note on binaries: `libs/foliage/placement.cpp` was originally ported from
-`jodemo.exe` (it cites `sub_5C0240`/`sub_5C6450`/`sub_5C65E0`); this audit
-**re-confirms the placement byte-for-byte against the RETAIL function**
-`generate_foliage_instances_0 @ 0x600197` — identical seed, PRNG, and gates —
-so the port is faithful to the shipped product, not just the demo.
+**Witness:** `Jointops.exe`, IDA database
+`C:/Users/taylor/Development/ida_dbs/Jointops.exe.kong.i64`.
 
-## Verdict table
+**Scope:** runtime collection, deterministic placement, geometry expansion,
+`:fd` preprocessing, render-state/shader behavior, and the Godot adapter. The
+foliage definition and map authoring formats were already sound and remain in
+place.
 
-| Component | Verdict | Evidence |
-| --- | --- | --- |
-| Per-cell placement (seed + PRNG + gates) | **MATCHING** | `libs/foliage/placement.cpp` = retail `generate_foliage_instances_0 @ 0x600197` field-for-field (below) |
-| Foliage instance color | **DIVERGENT (approximation, narrowed 2026-07-08)** | D-FOLIAGE-1 — the half-plus-bias emitter form is derived in-shader PER PIXEL from the tinted colormap sample (supersedes the per-instance average); the exact four-corner emitter form is the residual |
-| Fragment combine (the blend PS) | **MATCHING (ported 2026-07-07)** | D-FOLIAGE-2 FIXED — `foliage_model.gdshader` (both tiers since the far-patch rework; ex `foliage.gdshader`) runs the witnessed `t0 × (t1 × (t1.a·c1 + c0)) × v0 × 8` chain (t1 = planar-projected colormap; c0/c1 = the SKY/LIGHT blocks) `[orig: Foliage_CreateLightmapBlendPS @ 0x5ff7a0]`; witness text in [terrain/terrain-re.md](../terrain/terrain-re.md) §Foliage / sector models |
-| Wind-sway vertex path (quad tier) | **DIVERGENT (unported — stand-in deleted 2026-07-08)** | D-FOLIAGE-3 — the far patches render UNSWAYED since the ground-patch rework (the old unwitnessed X-sway stand-in died with `foliage.gdshader`); `Foliage_WindSwayVS` (Z displaced, weighted by vertex RED) awaits its port. The model tier's own wind IS ported (`foliage_model.gdshader`) |
-| The MODEL tier (sector-entity 3DI stamping) | **MATCHING (ported 2026-07-08)** | D-FOLIAGE-4 FIXED — `libs/foliage` `model_placement`/`model_dispatcher` + the two-tier host stamp the witnessed clusters (±4u around anchors, ≤21/tile, 0.75-XZ/0.5-height, upright, the 8-sample biquadratic fit in `foliage_model.gdshader`); the model-pass COLOR chain is the D-FOLIAGE-6 residual. §The model tier |
-| The `:fd` foliage texture (both tiers) | **MATCHING (ported 2026-07-08)** | D-FOLIAGE-5 FIXED — `bake_fd_rgba` (exact kernel + wrap + `0x808080` fold) via `VegAssets.resolve_slot_fd_textures`; BOTH tiers bind it `[orig: Foliage_LoadDefAssets @ 0x601260]` |
-| The model-pass color chain | **DIVERGENT (needs-RE)** | D-FOLIAGE-6 — the retail model draw's pass object + oD0 = black is unwitnessed; the host runs the quad combine family with the in-shader emitter-form v0. §The draw and the vertex shader |
+## Verdict
 
-## The witnessed placement (`generate_foliage_instances_0 @ 0x600197`)
+| Surface | Retail witness | Host result | Verdict |
+|---|---|---|---|
+| Definition/map authoring | `.trn` foliage defs, charmap, foliagemap | existing authoring code retained | matching |
+| Detail-cell collection | `Terrain_CollectNearFoliagePatches @ 0x603e60` | dedicated 16-unit mip-bound collector, cap 128 | matching |
+| Detail placement | `generate_foliage_instances_0 @ 0x5ffdd0` | fresh `foliage::Runtime` literal vectors | matching |
+| Detail geometry | every surface of every LOD0 submesh expanded and terrain-bent | fresh CPU-expanded aggregate ArrayMesh batches | matching |
+| Detail pass split | high ref 180 / low ref 8 at distance 33 | separate high/low shaders and batches | matching |
+| Distant MODEL placement | `Foliage_GenerateModelTileInstances @ 0x600980` | fresh runtime, four cells, cap 21/cell | matching |
+| Distant ground fit | four corners + four edge midpoints | portable fold vectors + CPU evaluation | matching |
+| Distant MODEL blend/depth | `Foliage_LoadDefAssets @ 0x6015b7`, `Foliage_DrawModelTileSlot @ 0x601d90` | additive black, alpha-tested, depth-writing mask | matching effect/state; D-FOLIAGE-10 records bounded host state/order limits |
+| `:fd` bake/sampling | `Foliage_LoadDefAssets @ 0x601260`, `GTexture_CreateFromPixelDataWithAlphaBlend @ 0x687270`, device sampler init | exact dual-source chain plus linear texels and point-selected retail mips through the 4x4 terminal level | matching; D-FOLIAGE-5 fixed |
+| Detail lightmap input | composed per-tile render target | exact bare tile + hosted static `.til`; retail page/cache and ordered model/depth contributions absent | partial; D-FOLIAGE-7 |
+| Mission-tile exclusion | `Foliage_PathBlockedByPlacedTile @ 0x606490` | shared parsed `<mission>.til`, exact inclusive 16x16 AABB scan | matching; D-FOLIAGE-8 fixed |
+| MODEL-anchor visibility | visible sector entities + retail occlusion | placed objects + camera frustum | partial; D-FOLIAGE-9 |
 
-- **Cell key**: `key & 0x3FF` (x), `HIWORD(key) & 0x3FF` (z) — 10-bit tile
-  coords; the sign bit (`0x80000000`) → empty cell (0 instances).
-- **PRNG seed**: `state = (key & 0x1FF01FF) + ROL32(0xA55B1EED, key & 0x1F)`
-  (`-1520754963` = **0xA55B1EED**; our `PRNG_SEED_CONST`, `int_convert`-verified).
-- **PRNG step**: `state = ROL32(state + ROL32(state, 11), 4)`, value `= (u16)state ^ 1`
-  (our `placement.cpp` `rol32(state + rol32(state, 11), 4) ^ 1`).
-- **Candidates per cell**: **36** (`random_angle < 36`; our `FOLIAGE_CANDIDATES_PER_CELL = 36`,
-  a 6×6 grid).
-- **Surface gate**: an instance is placed only where `(1 << slot) &
-  Terrain_GetSurfaceTypeAtFixedPoint(x, -z) @ 0x6066d0` is set (our port's
-  `(1 << slot) & sub_5C65E0(...)` surface-mask gate).
-- **Proximity/spacing**: a `0x20000` (2.0 world units, 16.16) path/spacing
-  reject via `sub_606490` (our `samplers.path_blocked(x, -z, 0x20000)`), skipped
-  when the foliage-type flag `byte_2C2608C & 1` is set.
-- **Quad geometry**: each accepted instance emits a quad sampled at its 4 corners
-  (`sub_606000` at `±0x10000`) for tangent/normal; our port mirrors the corner
-  geometry.
-- **Patch fold (understood at the far-patch rework, 2026-07-08)**: the four
-  midpoint samples are MIXED points — each takes the x of one corner pair and
-  the z of another (`m0 = (x of c0/c2, z of c0/c1)`, `m1 = (x of c1/c3, z of
-  c2/c3)`, `m2 = (x of c0/c1, z of c1/c2)`, `m3 = (x of c2/c3, z of c0/c3)`;
-  at yaw 0 they degenerate to c0, c3, center, center) — but the HEIGHT fold
-  pairs corners exactly like the model tier's edges (`−A: c0/c2` with m0,
-  `+A: c1/c3` with m1, `−B: c0/c1` with m2, `+B: c2/c3` with m3), and
-  `patch_control` IS the resulting `(E_A, T_A, E_B, T_B)` — the same fold
-  family `Foliage_GenerateModelTileInstances` feeds the grid-placement VS.
-  The placement data describes a GROUND-CONFORMING patch, not a billboard.
-  Pinned by `foliage_quad_fold` (hand-computed positions + fold identity);
-  the far-tier host consumes `patch_control` directly.
-- **Color**: `sample_terrain_colormap_tinted @ 0x606030` at the instance ±0x8000 on both
-  axes (4 samples), 2×2 SWAR average of RGB + alpha (the tint ported for env #19,
-  D-ENV #19); the emitter's per-vertex color is `0xFF000000 | (0x404040 +
-  (avg>>1))` under a 2× draw — since 2026-07-08 the host derives the
-  half-plus-bias form IN-SHADER per pixel from the tinted colormap sample
-  (superseding the 2026-07-07 CPU per-instance average; closer to the
-  witnessed per-VERTEX colors).
+## The correction: two overlapping tiers
 
-## The witnessed fragment combine (ported 2026-07-07)
+The old record and port named the tiers backwards. Fresh decompilation from the
+actual function starts establishes this schedule:
 
-The blend PS `Foliage_LightmapBlendPS @ 0x5ff7a0` (witness text in
-[terrain/terrain-re.md](../terrain/terrain-re.md) §Foliage / sector models):
-`rgb = t0 × (t1 × (t1.a·c1 + c0)) × v0 × 8`, `a = t0.a × v0.a` — t1 is the
-terrain colormap sampled by a planar world-position projection (VS oT1 =
-dp4(world, c7/c8); host: uv = `(x, −z) / texsize`, wrap — identical to the CPU
-sampler `NovaTerrainData::get_colormap_color_world`), c0 = the SKY block and
-c1 = the LIGHT block — the same post-modulator constants the terrain surface
-serves (hosted as the `opennova_sky_ambient` / `opennova_sun_light` globals).
-`foliage.gdshader` previously ran an unwitnessed ratio stand-in
-(`(sun/(ground·0.707+sun))×255/128`, no colormap sample, no SKY term) — the
-gobj-era family the gamma-faithful pipeline (D-RMAT-7) exposed; D-FOLIAGE-2.
+1. **Detail tier, camera distance ≤ 42:**
+   `Terrain_CollectNearFoliagePatches @ 0x603e60` supplies 16-unit terrain
+   leaves to `generate_foliage_instances_0 @ 0x5ffdd0`. This generator expands
+   the complete foliage model once per accepted candidate.
+2. **Distant MODEL/depth-mask tier, view depth ≥ 38:**
+   `Terrain_RenderSectorEntitiesBySide @ 0x5c7d50` drives
+   `Foliage_GenerateModelTileInstances @ 0x600980` around visible sector
+   entities. It renders normalized model geometry fitted to the ground. Its
+   source RGB is black and unfogged, but ONE/ONE additive blending preserves
+   destination color while alpha-tested survivors write depth.
 
-## The model tier (witnessed 2026-07-08; port-time pins closed same day; PORTED same day — the model-tier port slice)
+The 38–42 region is intentional overlap: detail geometry fades toward zero
+while MODEL masks have already begun. There is no retail transition from a near
+ground quad to a far colored model.
 
-The def's `graphic` 3DI is a REAL asset in retail — the earlier "billboards
-only" picture missed a second, model-geometry tier. The 2026-07-08 port-time
-witness leg closed all three pins (fold arithmetic, VS constant packing, `:fd`
-bake) and CORRECTED four claims from the first grill (scale, driver, the "36
-constants" misread, the gate source). IDB renames this leg:
-`Foliage_UploadModelTileVSConstants @ 0x600f00` (ex
-"set_water_pixel_shader_constants" — its only xref is the foliage draw),
-`Foliage_InitModelTileBuffers @ 0x5ffcd0` (ex "CD3DDevice_InitResources"),
-`Foliage_FillModelInstanceBuffersLocked @ 0x5ffc40`,
-`Foliage_FillInstancedModelBuffers @ 0x5ffa20`,
-`Foliage_SampleFoliageMapMask @ 0x606620`, plus the
-`Foliage_DefTable_*` family at `0x3162060` and
-`Foliage_ModelTileCachePerDef @ 0x2C266F0`, `Foliage_ModelPrngState
-@ 0x2C25E70`, `Foliage_ModelWindPhaseCounter @ 0x3162170`,
-`Foliage_UseSWVertexProcessing @ 0x2C25E58`.
+The former `generate_foliage_instances_0 @ 0x600197` anchor was also wrong:
+`0x600197` is an internal colormap-sampling instruction inside the function,
+not its entry point. The correct start is `0x5ffdd0`.
 
-### The driver — models cluster around sector entities
+## Shared deterministic candidate stream
 
-`[orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7d50]` (the ONLY caller,
-4 call sites = def slots 0..3): for each **visible terrain sector entity**
-(the .trn/.bms-placed world models), after the water-side split and occlusion
-test, if the entity's **view-space depth ≥ 38.0** (transform via the view
-matrix `@ 0x2721A00`):
+Both generators derive candidates from the packed 16-unit cell key. Direct
+instruction tracing resolves the key orientation:
 
-- `alphaRef = clamp(int(4096.0 / ((dist_to_camera >> 16) + 1)), 8, 128)`
-  (`flt_7C6F90 = 4096.0`) — near entities get a TIGHT alpha silhouette
-  (ref 128), far ones a fat one (ref 8, compensating mip alpha erosion);
-- `Foliage_UpdateModelTiles(slot, entityPos, 0x40000, alphaRef)` for each
-  def slot — the generator's per-axis candidate radius is the FIXED
-  `0x40000` (±4.0 u) around the ENTITY, not a camera radius.
+- high 15 bits: world X at the cell's left edge;
+- low 15 bits: world Z at the cell's positive-Z edge;
+- bit 31: invalid sentinel;
+- the candidate's local B coordinate subtracts from that Z edge.
 
-There is NO camera-carpet model dispatch: foliage models exist only as
-clusters around sector entities. (The first grill misread the 8..128 value
-as a "distance-derived view radius" — it is the alpha-test ref, and the
-±4 u radius is constant.)
+Each cell evaluates 36 candidates as a 6×6 grid:
 
-### Def-asset load and the `:fd` bake
+- base offset `1.0`;
+- grid step `2.6`;
+- independent X/Z jitter `1.8 × draw / 65536`;
+- yaw `draw × 2π / 65536`.
 
-`[orig: Foliage_LoadDefAssets @ 0x601260]` (ex kong "Terrain_InitSectors"),
-from `Terrain_Init @ 0x60fd16` via the module def copy (`sub_5FF4C0
-@ 0x5ff4c0` → `0x2C25E78`, 4 × 536-byte records; attrib flags at record
-byte +532, bit 0 = `forceon`): per def, `sub_5B6160(graphic)` loads the 3DI
-under load-context `0x30000F`. The def table (`Foliage_DefTable_*`,
-17 dwords per def at `0x3162060`): [0] model handle, [1] vertex array
-(40-byte stride), [2] vertex count, [4] submesh[0] index count (u16 read),
-[5] submesh[0] index data, [6] bound radius, [7] footprint, [8..10] bound
-center (x, 0, z), [11] stampdown texture (record +0x10C, channel
-`0x100001`), [13]/[14] per-def GfxResource objects (image objects over the
-scratch buffers `unk_2560000`/`unk_2460000` — NOT shader blobs; the first
-grill's "blob pair" theory is corrected below), [15] the `:fd` texture,
-[16] the draw's pass object.
+The fresh portable vectors pin the first candidates for key `0x00100030`,
+including `(18.632156, 46.301346)` and yaw `4.831273`. They also pin signed key
+decoding, gate selection, quadrant keys, caps, and stable output order.
 
-- **Bounds**: XZ min/max over the raw 3DI vertices → center `(cx, 0, cz)`;
-  radius = **max(half-extent X, half-extent Z)** (Chebyshev, not Euclidean);
-  **footprint = 0.75 × radius** (`Foliage_DefTable_Footprint @ 0x316207C`).
-- **The `:fd` bake** (shared by BOTH tiers — the model draw binds it too):
-  texture name = the model submesh[0]'s own texture name (+32 in the
-  submesh record), pixels loaded TGA-first, `.dds` fallback
-  (`CTerrainTileData_LoadTGAFromArchive @ 0x56e570`,
-  `decompress_dds_from_pff32 @ 0x56e450`). Alpha channel smoothed by a
-  3×3 kernel — center 4, N/S/E/W edges 1, corners 2, sum/16, power-of-two
-  wraparound at the borders. RGB then FLATTENED to exactly `0x808080`
-  (`out = 0x808080 | (px & 0xFF808080)` — per channel `(c & 0x80) | 0x80 =
-  0x80` always; alpha byte preserved = the smoothed value). Registered as
-  `"%s:fd"` via `Texture_LoadByNameWithChannel` (channel `0x100000`) and
-  filled via `GTexture_CreateFromPixelDataWithAlphaBlend @ 0x687270`. The
-  foliage look's color therefore comes from the lighting/colormap chain,
-  never from the diffuse RGB.
-- **Static instancing buffers**: `[orig: Foliage_InitModelTileBuffers
-  @ 0x5ffcd0]` sizes the per-def draw pair for exactly **21 instances**
-  (VB = 756·vtx_count bytes = 21 × 36-byte stride; IB = 42·idx_count =
-  21 × u16), then `Foliage_FillModelInstanceBuffersLocked @ 0x5ffc40` →
-  `Foliage_FillInstancedModelBuffers @ 0x5ffa20` fills 21 copies of the
-  model ONCE (static):
-  - `pos.x = (x − cx) / (2·radius) + 0.5`, `pos.z = (z − cz) /
-    (2·radius) + 0.5` — XZ **normalized to [0,1] over the bound square**;
-  - `pos.y = y × 0.5` — **the model height is HALVED in the VB**;
-  - diffuse dword = `i × 0x01010101` (instance index in every channel);
-  - uv = source floats [6],[7]; the FVF normal slot carries filler
-    (src[5], src[4], src[5]) the VS never reads;
-  - IB = model indices + `i × vtx_count`.
+For either tier, retail linearly scans the shared mission tile array unless
+foliage attrib bit 0 (`FORCE_ON`) is set. Each 12-byte entry defines an
+inclusive world AABB from its decoded minimum through minimum + 16 units.
+`Foliage_PathBlockedByPlacedTile @ 0x606490` rejects when the candidate's
+axis-aligned radius-2 square overlaps any entry on both axes. Raw
+`z_fixed` is stored negated, but `til_world_z_from_fixed` applies that
+decode before the blocker sees an entry. The resulting AABB is already on the
+terrain/Godot plane, so the dispatcher passes candidate Z unchanged. Mirroring
+it again is a double conversion. Exact `00TRa.til` entry #25
+(`19070976,-26279936`) decodes to `x[291,307], z[401,417]`. The real-asset
+oracle combines entries #25, #27, #747, #753, and #764. At radius 2 it blocks
+the authored spawn `(297.805573,+409.123169)`, the armory-truck center
+`(311.190552,+394.856628)`, and truck-adjacent candidate c8
+`(311.811996,+396.190958)`, while exact candidates c3
+`(313.704367,+398.025046)`, c4 `(316.302939,+397.743686)`, and c5
+`(318.975696,+397.309534)` remain eligible.
+`Terrain_LoadFoliageFile @ 0x60a740` loads the same `<mission>.til` array
+used by `Terrain_GetSurfaceTypeAtPosition @ 0x606510` and streamed by
+`serialize_terrain_tiles @ 0x6080f0`. The host parses it once before terrain
+build and shares the resource with terrain, foliage, and listen-server state.
 
-  **Scale correction (the too-tall-trees root cause)**: the first grill's
-  "no scale field → native 3DI units" was wrong. No per-def scale FIELD
-  exists, but the pipeline bakes constants: with the VS bilinearly mapping
-  normalized XZ onto footprint corners at ±0.75·radius, the effective
-  render scale is **0.75 on XZ and 0.5 on height**.
+The sibling `shadow` attribute is parsed but dead. `forceon` is compared at
+`0x60f591` and ORs bit 0 at `0x60f5a8`; `shadow` is compared at
+`0x60f5bd` and ORs bit 1 at `0x60f5d4`. The only generator reads of the
+definition attribute byte consume bit 0: detail at `0x5fffb6` and silhouette
+at `0x600b5f`. No foliage draw consumes bit 1. The host therefore preserves
+the parsed flag but explicitly disables shadow casting on all three batches.
 
-### The tile walk
+## Detail tier
 
-`[orig: Foliage_UpdateModelTiles @ 0x601f50]`: 4 quadrant tiles = the 16-u
-cells (snap mask `0xFFF00000`) overlapping entity ±0x80000 (±8 u); tile key
-= `(snapX & 0x7FFF0000) | (((snapZ + 0x100000) >> 16) & 0x7FFF)` — the
-+16 u on the Z half compensates the negated local axis (below). Per-def
-1000-entry cache (342-dword entries at `0x2C266F0 + 342935·def` dwords;
-entry: [0] key, [1] last-touch frame stamp, [3] count×vtx, [4] count×idx,
-[5..340] 21 × 16 constant floats, [341] instance count). On hit: touch;
-regenerate only on the 8-frame stagger `(frame + 2·def) & 7 == 0`. On miss:
-evict the max-age entry and generate. Draw only when count > 0.
+### Exact 16-unit collection
 
-### Instance generation — the 8-sample ground fit
+`Terrain_CollectNearFoliagePatches @ 0x603e60` recursively reaches 16-unit
+leaves, rejects a node beyond distance 42, and appends at most 128 keys. Its
+distance combines:
 
-`[orig: Foliage_GenerateModelTileInstances @ 0x600980]`, per tile:
+- X and Z distance to the node AABB, clamped to zero while the camera lies
+  inside that interval;
+- Y distance to the node height-bounds center.
 
-- **PRNG**: `state = (key & 0x1FF01FF) + ROL32(0xA55B1EED, key & 0x1F)`;
-  step `state = ROL32(state + ROL32(state, 11), 4) ^ 1`, value =
-  `(u16)state` — three draws per candidate (jitter A, jitter B, yaw).
-- **Grid**: 36 candidates; local A = `1 + (i % 6)·2.6 + draw·1.8/65536`,
-  local B same with `i / 6` (constants 2.6 `@ 0x7D8E50`, 1.8/65536
-  `@ 0x7DE9CC`, margin 1.0) — the tile spans 16 u. Yaw = `draw · 2π/65536`
-  (`@ 0x7CD4DC`).
-- **Axis form**: candidate world X = `(keyHigh + localA) · 65536`; world Z
-  = `(keyLow − localB) · 65536` — the LOCAL B axis runs NEGATIVE world Z
-  (hence the walk's +16 u key bias; the tile still covers
-  `[snap, snap+16]²`).
-- **Gates**, in order: per-axis range `|world − entity| ≤ 0x40000`; path
-  spacing `sub_606490(x, −z, 0x20000)` skipped on attrib bit 0 `forceon`
-  (`byte_2C2608C`, record +532); **foliage-map mask** `(1 << def) &
-  Foliage_SampleFoliageMapMask(x, z) @ 0x606620` — the model tier gates on
-  the FOLIAGEMAP byte (512-quadrant tile layout, resolution-shift
-  downsample), NOT the quad tier's charmap surface-type fn `@ 0x6066d0`.
-- **Corners**: k = 0..3 at `(A, B) = (k&1 ? +F : −F, k&2 ? +F : −F)`,
-  F = footprint; corner local = `(LA + A·cos − B·sin, LB + A·sin +
-  B·cos)`; heights `h[k] = Terrain_SampleHeightBilinear @ 0x6067b0`
-  (÷65536) at the corner world positions.
-- **Edge midpoints and the fold**: 4 more height samples at the edge
-  midpoints `mid(c0,c2) = −A edge`, `mid(c1,c3) = +A`, `mid(c0,c1) = −B`,
-  `mid(c2,c3) = +B`; per edge the SAG `D_edge = h_mid − (h_cornerA +
-  h_cornerB)/2`; folded to `E_A = (D_−A + D_+A)/2`, `T_A = D_+A − E_A`,
-  `E_B = (D_−B + D_+B)/2`, `T_B = D_+B − E_B`.
-- **The 64-byte constant block** (16 floats per instance, cache entry
-  dwords 5+16i): `[0..3]` corner B-coords (tile-local, render-Z basis),
-  `[4..7]` corner heights, `[8..11]` corner A-coords, `[12..15]`
-  `(E_A, T_A, E_B, T_B)`. Cap: 21 accepted; entry [3]/[4] = count × the
-  def's vertex/index counts — **the full 3DI geometry stamps per
-  instance**.
+The render quadtree in this project correctly bottoms out at the CPT's 64-unit
+mesh leaves and therefore cannot provide these keys. Runtime foliage now uses
+a separate implicit 512→16 traversal over the already-built height mipchain.
+Sector IDs select the same four 512-unit atlas quadrants as terrain rendering;
+the collector never manufactures children from a visible 64-unit render patch.
 
-### The draw and the vertex shader
+### Gate and expansion
 
-`[orig: Foliage_DrawModelTileSlot @ 0x601d90]` (D3D9 device):
-`SetSoftwareVertexProcessing(Foliage_UseSWVertexProcessing)` bracket,
-`Foliage_UploadModelTileVSConstants @ 0x600f00`, bind the def's `:fd`
-texture + pass object (`GfxShader_ApplyPassChecked` — foliage alpha-tests,
-pass bit 0x40000; see
-[render/render-material-re.md](../render/render-material-re.md)),
-`CGfxDevice_SetAlphaTestRef(alphaRef)` (the driver's distance value),
-`SetVertexShader(Foliage_GridPlacementVS)`, `SetFVF(0x152)`
-(XYZ|NORMAL|DIFFUSE|TEX1 = 36-byte stride — **the first grill's "36 VS
-float4 constants per tile" was a misread of `SetStreamSource(..., 36)`**),
-`DrawIndexedPrimitive(TRILIST, verts = count·vtx, prims = count·idx/3)`.
+For every detail candidate:
 
-`[orig: Foliage_UploadModelTileVSConstants @ 0x600f00]` uploads: c0-c3 =
-transposed WVP; c4 = `(1023, 2, 1, 0)`; c5 = fog params; **c6 = oD0 vertex
-color = `(0, 0, 0, 1)` at this call site**; c7/c8 (planar colormap rows)
-SKIPPED — stale from the quad path; c9 = `(sin(counter·0.001)·0.08, 1, 0,
-0)` — the model-tier wind term, counter incremented once per tile draw
-(`Foliage_ModelWindPhaseCounter`); then per instance i:
-`c[12+4i .. 15+4i]` = the constant block with row 0 + `−(snapZ+16)` (the
-render-Z base) and row 2 + `snapX` (the world-X base), heights and fold
-raw.
+- the **foliagemap** palette index selects matching definition slots;
+- the surface/charmap is not consulted;
+- the full source model is yawed and translated without subtracting its bounds
+  center;
+- every output vertex gets
+  `world_y = terrain_height(world_x, world_z) + source_y × 0.5`;
+- the source height becomes the clamped bend byte used by the wind shader.
+The scale audit rules out a hidden foliage-width correction. Raw source X/Z
+feed the yaw/translation path directly at `generate_foliage_instances_0 @
+0x600112..0x60014d`; only source Y is multiplied by
+`flt_7C3B94 = 0.5` at `0x600121..0x60012a`. The bend byte is independently
+`clamp(sourceY × 128,0,255)` at `0x6002db..0x60030a`.
+`Foliage_LoadDefAssets @ 0x6012ec..0x601320` copies the source vertex/index
+pointers and counts directly and derives its X/Z extent from the raw vertices
+at `0x60135f..0x6013b3`; the far draw matrix adds translation without another
+scale. Retail geometry scale is therefore X/Z `1.0`, Y `0.5`, matching the
+host when the imported 3DI positions themselves are faithful.
 
-`Foliage_GridPlacementVS` is created in `[orig:
-Terrain_CreateFoliageVertexShaders @ 0x5ff630]` by `D3DXAssembleShader`
-from an INLINE vs_1_1 assembly text (the second string; the first is the
-quad tier's `Foliage_WindSwayVS`) — the "decode the blobs" pin dissolved:
-`unk_2460000`/`unk_2560000` are texture-image scratch for `sub_679630`
-objects, and the true shader source is plaintext in the binary. The
-witnessed placement math, per vertex:
+The recovered `Terrain_GetSurfaceTypeAtFixedPoint` name on this path is a
+misnomer: its backing buffer is the foliagemap loaded by `sub_605AD0`. This is
+also required by retail data: Dvxi5's charmap is uniformly index 1, while its
+foliage definitions and authored coverage use indices 253 and 254.
 
-- inputs: `v0` = (x_n, y_half, z_n) from the static VB, `v5.x` = instance
-  index/255, `v7` = uv;
-- `a0 = v5.x × 1023` (≈ 4i, exact for i ≤ 21) → constants at `c[a0+12]`;
-- bilinear weights `w = ((1−x_n)(1−z_n), x_n(1−z_n), (1−x_n)z_n,
-  x_n·z_n)` over the 4 corner rows: renderZ = `w·c[a0+12]`, ground height
-  = `w·c[a0+13]`, worldX = `w·c[a0+14]` — **the yaw rotation lives
-  entirely in the corner geometry**;
-- sag: `u = 2x_n − 1`, `v = 2z_n − 1`; height += `(1−v²)(E_A + u·T_A) +
-  (1−u²)(E_B + v·T_B)` via `c[a0+15]` — a biquadratic 8-sample fit
-  (exact at the 4 corners AND reproduces each D_edge exactly at the 4 edge
-  midpoints);
-- vertex rise: `pos += y_half × c9` → height += `y × 0.5` and renderZ
-  (−worldZ) += `y_half × sin·0.08` — height-weighted wind on the world-Z
-  axis only;
-- `oPos = WVP·pos`; `oD0 = c6`; `oT0 = v7`; `oT1 = (dp4 c7, dp4 c8)` =
-  the planar colormap projection; fog from clip-Z vs c5.
+This is the decisive reason the prior quad-oriented runtime could not be
+salvaged. The fresh adapter emits world-space geometry into two ArrayMesh
+batches per definition slot, one for each alpha-test/depth policy.
 
-**Open residual (model-pass color chain — D-FOLIAGE-6)**: the draw sets NO
-pixel shader of its own; pass state comes from the def's pass object
-(`table[16]`, created over a static buffer arg the decompiler folds as
-`dword_440000`) and oD0 is the constant BLACK `(0,0,0,1)` — under the quad
-tier's blend-PS form `t0 × (…) × v0 × 8` that would render black, so the
-model pass's combine must differ (fixed-function TSS or another PS). The
-stage/combine content of that pass object is NOT yet witnessed; the host
-port renders models through the same witnessed foliage combine family
-(`foliage_model.gdshader`) with v0 DERIVED IN-SHADER as the quad-emitter
-half-plus-bias form of the tinted colormap sample (`0x40/255 + tinted_cm/2`)
-— minted as D-FOLIAGE-6 (needs-RE) at the port slice.
+### Fade and pass state
 
-The quad tier (`generate_foliage_instances_0 @ 0x5ffdd0` →
-`foliage_lod_update_texture_slots @ 0x601b30` VB slots) remains the
-byte-exact-ported placement; its quads texture with the same `:fd` bake.
+The per-cell detail fade is:
+
+- `1.0` through distance 20;
+- linear from 20 to zero at 42;
+- rejected beyond 42.
+
+The distance-33 boundary changes submission count, not just state. Below 33,
+retail submits the same resident geometry twice in strict HIGH-then-LOW order.
+At and beyond 33 through 42 it submits only LOW:
+
+| Range | Ordered pass/reference | c6.a / fade | Depth write / compare |
+|---|---|---:|---|
+| `< 33` | HIGH 180/255, then secondary LOW 8/255 | distance fade, then `fade × 0.1` | enabled / `LESSEQUAL`, then disabled / strict `LESS` |
+| `≥ 33` through 42 | primary LOW 8/255 | unscaled distance fade | disabled / `LESSEQUAL` |
+
+The shader alpha test is `:fd alpha × c6.a > reference`. At full distance
+fade, the secondary LOW pass therefore accepts `:fd` alpha above about
+`0.314`, not everything above `0.031`; omitting the 0.1 scale turns transparent
+texture padding into broad foliage sheets. `Foliage_RenderFarPatches` checks
+the secondary-call flag and multiplies only c6.a by `flt_7C69F4 = 0.1` at
+`0x60a497..0x60a4ae`; it then issues the secondary setup/draw at
+`0x60a659..0x60a694`. At and beyond 33, the primary LOW draw retains the normal
+distance fade.
+
+The setup flag is also a depth-comparison toggle, not a wireframe or fill-mode
+toggle. `Foliage_SetupFarSlotDraw @ 0x6007c0` selects value 2 for the
+secondary call at `0x6008fc..0x600912`; wrapper `0x67cac0..0x67caea` applies
+that value to render state `0x17` (`D3DRS_ZFUNC`), so value 2 is
+`D3DCMP_LESS` and the normal value 4 is `D3DCMP_LESSEQUAL`. Both passes are
+double-sided and use terrain fog. HIGH and LOW reuse one cache revision but
+receive distinct submission IDs. Consequently detail residents/hits remain
+cell-based, while submission, intent, batch, and rendered-instance counters
+count both near draws.
+The host ports the ordered submissions, references, fade scale, and write
+policy. Stock Godot's spatial shader API does not expose the `LESS` versus
+`LESSEQUAL` equality toggle, so that bounded state gap remains D-FOLIAGE-10.
+
+### Detail shader
+
+`Terrain_CreateFoliageVertexShaders @ 0x5ff630` creates the wind shader. It
+displaces render Z by a sine of world X plus the frame phase, weighted by the
+source-height bend and scaled by `0.03`.
+
+`Foliage_CreateLightmapBlendPS @ 0x5ff7a0` establishes the fragment combine:
+
+`t0 × (t1 × (t1.a × c1 + c0)) × v0 × 8`
+
+where:
+
+- `t0` is the model's baked `:fd` texture;
+- `t1` is the composed terrain tile-cache render target;
+- `c0/c1` are sky and sun lighting registers;
+- output alpha is `t0.a × v0.a` for the alpha test.
+
+The host implements the exact arithmetic and render states. For bare terrain it
+reconstructs `t1` from raw colormap RGB plus the byte-quantized
+heightfield-normal/light DOT3 alpha. `PolyTrn_RenderTile @ 0x60da70` clears
+authored colormap A in its `0x00808080` base draw, so no colormap sun mask
+survives into this input; `Terrain_GenerateNormalMap @ 0x603210` and
+`PolyTrn_TileBakeDot3LightPass @ 0x60e385..0x60e39e` supply the alpha
+instead. The shared 1024 normal atlas is clamped to the selected quadrant's
+texel-center bounds, matching four retail 512 CLAMP samplers. The detail
+emitter color is not a second dynamic time-of-day input.
+`Foliage_RenderFarPatches @ 0x609efc..0x609f2a` computes c6.rgb as the
+componentwise product
+`0x319F9D0/D4/D8 × 0x319F9E0/E4/E8`. The complete xref set for the second
+vector contains only the render reads plus the writes of literal `1.0` at
+`init_terrain_lighting_color_ramps @ 0x604ffa/0x605004/0x605010`; there is no
+per-frame color writer. Therefore the active multitexture path's c6.rgb is
+exactly the first vector.
+
+`PolyTrn_InitTextures @ 0x60b03c..0x60b065` writes that first vector to
+`(128/255,128/255,128/255)` when `PolyTrn_HasBlendmap` is true and
+`PolyTrn_ShaderTier >= 1`. The constant at `0x7DF2E0` has bytes
+`81 80 00 3F`, the exact float encoding of `128/255`. Only the fallback at
+`0x60b06a..0x60b13e` writes the source terrain texture's average RGB divided
+by 255. The host's fixed `0.5019608` uniform is therefore exact for the top
+splat path, not a visual approximation; the fallback remains a distinct
+non-splat path. c6.a is still the distance/pass fade described above, and
+MODEL masks do not use this emitter factor.
+
+For the analytic t1 reconstruction, EnvFile preserves the direct
+`Environment_GetLightDirectionFloat @ 0x57d870` tuple `g=(g0,g1,g2)`, not a
+Godot/world XYZ vector. PolyTrn's D3DCOLOR pack (`0x60e201..0x60e331`) writes
+GPU diffuse RGB `(g2,g0,g1)`, so the host now packs `(z,x,y)` against the
+normal-map RGB `(grid X slope, grid Y slope, up)`; `FORMAT_RGBA8` preserves
+those channels. The old `(x,z,y)` mapping swapped the horizontal DOT3 axes.
+The 08:00 oracle is light bytes `(231,83,187)`, with slope alphas
+`0.8987774/0.0794002`. Retail foliage itself does not compute this DOT3; its
+blend PS consumes the cached `t1.a`. The hosted static `.til` RGB/tint is also
+composed before lighting. General retail tile-cache projection and ordered
+tile-model/depth-alpha contributions remain open under D-FOLIAGE-7/
+D-TERRAIN-7.
+
+The tile projection is explicitly **pre-wind**. In the
+`Foliage_WindSwayVS` literal (`0x7de648`, copied at `0x5ff691`, assembled
+at `0x5ff6df`), `mad r1.z` applies wind at `0x7de7f1` and
+`m4x4 oPos,r1,c0` consumes it at `0x7de821`; independently,
+`m4x3 r10,v0,c12` at `0x7de835` and the c7/c8 `oT1` projections at
+`0x7de881/0x7de897` still consume the original vertex. The host therefore
+derives overlay UV before displacing render Z. Its
+`fract((world.x,-world.z)/1024)` exactly inverts the hosted 1024 bake and
+matches retail `.til` X/negated-Z axes (`0x60de23/0x60de28`), patch-local
+positioning (`0x60de7c..0x60debb`), and draw (`0x60df1b`).
+
+That closes the supported static `.til` component, not the general retail
+page/cache projection. The RT resolve at `0x60a1de`, c7/c8 construction at
+`0x60a220..0x60a34f`, uploads at `0x6006f0/0x600704`, and ordered
+tile-model/depth-alpha contributions remain part of the bounded D-FOLIAGE-7 /
+D-TERRAIN-7 producer gap.
+
+## Distant MODEL/depth-mask tier
+
+### Driver and cells
+
+The driver is the visible sector-entity walk in
+`Terrain_RenderSectorEntitiesBySide @ 0x5c7d50`. An anchor enters the tier at
+view depth 38. `Foliage_UpdateModelTiles @ 0x601f50` walks four neighboring
+16-unit cells around it.
+
+Within each cell:
+
+- the **foliagemap** palette index selects definition slots;
+- the surface/charmap is not consulted;
+- candidates must lie within ±4 units of the anchor on both X and Z;
+- at most 21 candidates survive per cell;
+- the same path blocker / `FORCE_ON` rule applies.
+
+Runtime anchors are genuine placed world objects. The removed fallback that
+fed terrain-patch centers was not equivalent to sector entities. The host
+frustum-culls anchors, but retail's broader sector visibility/occlusion state
+is not yet reproduced; see D-FOLIAGE-9.
+
+### Normalization and eight-sample ground fit
+
+`Foliage_FillInstancedModelBuffers @ 0x5ffa20` and
+`Foliage_UploadModelTileVSConstants @ 0x600f00` show the model normalization:
+
+- footprint radius is `0.75 × max(halfExtentX, halfExtentZ)`;
+- model height is scaled by `0.5`;
+- yaw is applied once by the generated corner positions.
+
+The generator samples four rotated footprint corners and the four edge
+midpoints. Those eight heights form `(E_A, T_A, E_B, T_B)`, the biquadratic
+correction consumed by `Foliage_GridPlacementVS`. The fresh runtime returns the
+four corners and fold explicitly; the Godot adapter evaluates the same surface
+while expanding the normalized source mesh.
+
+Portable goldens pin the first silhouette for a known quadratic height field:
+candidate identity, four rotated corner positions/heights, all four fold
+coefficients, and the fitted center height.
+
+### MODEL blend/depth draw
+
+`Foliage_DrawModelTileSlot @ 0x601d90` binds `:fd`, disables culling and fog,
+keeps Z test/write enabled, and selects an alpha reference
+`clamp(int(4096 / (distance + 1)), 8, 128)`.
+
+The first 2026-07-13 inspection stopped one state layer too early. The uploaded
+diffuse constant is indeed `(0,0,0,1)`, but it is source color, not final scene
+color. `Foliage_LoadDefAssets @ 0x6015b7..0x601613` enables blending with
+`SRCBLEND=ONE` and `DESTBLEND=ONE`; `RenderState_ApplyToDevice @ 0x681920` and
+`GfxBlend_ApplyToDevice @ 0x6817d0` confirm that descriptor mapping. The fixed-
+function RGB selects the black diffuse value, so the framebuffer equation is:
+
+```text
+0 × ONE + destination × ONE = destination
+```
+
+Alpha remains `:fd.a × diffuse.a`, the pass uses `D3DCMP_GREATER`, and accepted
+texels still write Z. The retail pass is therefore an unlit, unfogged,
+color-invisible depth mask, not an opaque black silhouette. Godot maps the
+color/depth effect to `blend_add + depth_draw_always + fog_disabled`, retains
+the dynamic manual strict-greater alpha discard, and deliberately omits both
+`ALPHA` and `depth_prepass_alpha`. A global alpha prepass would run before
+terrain color and can expose clear-color holes instead of preserving the
+already-rendered scene.
+
+Retail inserts the draw after its initial sector flush and before later entity
+and foliage consumers. Stock Godot's transparent pass cannot reproduce every
+one of those arbitrary opaque insertion points; the remaining ordering limit is
+recorded as D-FOLIAGE-10 rather than hidden inside a state-parity claim.
+
+The grid-placement wind term displaces render Z by the already-halved source
+height times `sin(counter × 0.001) × 0.08`; in this tier it moves depth coverage,
+not black scene color.
+
+## The `:fd` asset bake
+
+Both tiers bind the same per-definition `:fd` texture. The load-time operation
+is a two-source custom mip-chain construction, not a flat-gray replacement:
+
+1. `Foliage_LoadDefAssets @ 0x60162f..0x601650` locates the model's authored
+   diffuse and its `%s:fd` texture object.
+2. `0x6017a2..0x60190d` replaces authored alpha with the wrapped power-of-two
+   kernel
+   `A' = (4C + N+S+E+W + 2(NW+NE+SW+SE)) >> 4`; authored RGB is untouched.
+3. `0x601990..0x6019a6` makes a companion whose RGB is exactly `0x808080`
+   and whose alpha is the same smoothed `A'`.
+4. `0x6019c9..0x6019e4` passes authored-RGB-plus-`A'` as the base and the gray
+   companion as the second source to
+   `GTexture_CreateFromPixelDataWithAlphaBlend @ 0x687270`.
+
+After any device-limit pre-downsample, let `d=min(width,height)` and increment
+`N` while repeatedly shifting `d` right until it is at most 2
+(`0x6873a1..0x6873e8`). For power-of-two square inputs,
+`N=log2(size)-1`. Retail emits levels `i=0..N-1` at dimensions
+`width>>i` by `height>>i`. Before the next level, each source is independently
+box-downsampled per channel with floor division:
+`(p00+p10+p01+p11)>>2` (`GTexture_Downsample2x2_RGBA8 @ 0x687000`). At level
+`i`, the gray weight is `w=min(256, floor(320*i/N))`; each RGB channel is
+`floor(((256-w)*authored + w*128)/256)`. Alpha is copied from the downsampled
+base unchanged. Thus mip 0 retains authored RGB and smoothed alpha; only
+successively smaller mips approach gray. A constant 8×8
+`(240,64,16,173)` source produces mip 0 `(240,64,16,173)` and, with
+`N=2,w=160`, mip 1 `(170,104,86,173)`.
+
+The definition color modes do not restore this color through vertex diffuse.
+The live `color_lower`/`color_upper` fields at `0x2C25F78/0x2C25F7C` are
+selected around the source-Y `0.125` boundary at `0x6001fd..0x6002d8`, but
+`generate_foliage_instances_0` then unconditionally overwrites that packed
+color at `0x6002db..0x60030a` with the source-height bend carrier.
+`Foliage_WindSwayVS` (`0x7DE648`) consumes v5.x only for bend and emits
+`oD0=c6`. Authored leaf color therefore survives through sampled t0, not v0
+or `color_upper`.
+
+The host now builds the complete chain in portable
+`build_fd_rgba_mip_chain`, passes the packed levels directly to Godot, and no
+longer asks Godot to regenerate generic mips. Native and GUT literal vectors
+pin authored mip-0 RGB, the wrapped alpha, the exact 4×4 retail blend, and the
+host-required 2×2/1×1 terminal continuation. This fixes D-FOLIAGE-5 and the
+former flat ground-olive result. `VegAssets`' primary-submesh
+lookup remains only the binding locator: surviving geometry is still the
+aggregate of every surface of every `build_lod_submeshes(0)` result.
+The retail comparison configuration has `texfilter_level=0`. The parser at
+`0x551217..0x551239` maps that value to HLSL filter mode 0
+(`0x58640e..0x586427`), which selects no trilinear or anisotropic macro
+(`0x5ae6d1..0x5ae6f5`). Device initialization/reset at
+`0x679c28..0x679c9c` and `0x677f9e..0x677ff9` then sets MAG/MIN LINEAR,
+MIP POINT, MAXMIPLEVEL 0, and a zero mip bias. The host therefore computes the
+implicit LOD, selects its nearest integer level, samples linearly within that
+level, and clamps at retail's 4x4 terminal mip. It never blends two alpha-test
+masks across a mip boundary or admits Godot's required 2x2/1x1 tail.
+
+## Persistent caches and submission identity
+
+The detail tier uses the persistent slot pool in
+`Foliage_UpdateFarCellSlots @ 0x601b30`, with strict signed-age LRU
+replacement. In `PolyTrn_RenderFrame @ 0x60f0ea..0x60f10f`, cached geometry
+is drawn before the update, so a miss first becomes visible on the next terrain
+render; duplicate misses in one update allocate once. Retail's 16-bit index
+ceiling yields the hosted per-definition capacity
+`min(128, floor(65534 / (36 × sourceVertexCount)))`.
+
+The distant model cache in `Foliage_UpdateModelTiles @ 0x601f50` is a fixed
+1000-entry pool per definition. A hit touches its resident entry and refreshes
+geometry only when `((sceneCounter + 2 × slot) & 7) == 0` (check at
+`0x60209a`); every caller still submits the resident entry.
+
+Retail reaches that cache through one visible sector-entity walk. The host's
+still-approximate placed-object feed can revisit the same `(slot, cell key)`
+through many overlapping anchors in one frame. The portable runtime therefore
+coalesces only the host-created duplicate refresh work: the first visit on the
+exact eight-scene phase regenerates the resident, later visits retain their
+separate submissions, and geometry-identical refreshes keep the resident
+revision. At the exact `00TRe.bms` spawn's worst measured heading this made
+fixed-input MODEL output stable at 1,795 instances / 568 submissions, removed
+all phase mesh uploads, and reduced dispatcher p95 from 55-73 ms to 15.8 ms.
+It does not cap anchors or claim retail visibility membership; that remains
+D-FOLIAGE-9.
+
+The fresh runtime identifies a resident mesh by slot, cell key, and monotonic
+revision, and gives every draw a separate submission ID. The adapter builds all
+same-frame submissions before applying evictions, then clears draw-pool mesh
+references before erasing evicted cache entries. This preserves duplicate
+same-frame draws without stale references. A `terrain_changed` signal also
+resets the runtime when the same `NovaTerrainData` resource mutates in place.
+
+## Host architecture
+
+The fresh implementation deliberately has three layers:
+
+1. `libs/foliage/runtime.{h,cpp}` — Godot-neutral placement, gates, fades,
+   alpha refs, corners/fold, and `:fd` preprocessing.
+2. `NovaTerrain` — exact runtime 16-unit detail-cell collection from terrain
+   height bounds.
+3. `NovaFoliageDispatcher` — definition/mesh adaptation, live samplers, model
+   expansion, persistent slot/key/revision mesh caches, and dynamic
+   per-submission draw pools for detail high, detail low, and silhouette.
+
+The discarded placement, dispatcher, model-dispatcher, and fd-bake clusters
+were deleted. The foliage-map authoring API remains separate and unchanged.
+
+Runtime sampling comes directly from `NovaTerrainData`:
+
+- detail gate: `get_foliage_index_world`;
+- silhouette gate: `get_foliage_index_world`;
+- ground: bilinear terrain height;
+- terrain projection: the shared world-to-source transform.
+- exclusion: the active mission `NovaTerrainTileInfo` inclusive AABB scan.
+
+The editor uses the same adapter with live height and foliage-map Callables.
+Its detail cells are a deterministic preview set; only
+the runtime native collector is claimed as retail-exact. Runtime dispatchers
+also inherit the parent `NovaTerrain` heightfield-normal atlas; the standalone
+editor foliage preview has no such parent and currently falls back to mesh
+normals for bare-tile alpha. That preview-only input is included in
+D-FOLIAGE-7 rather than claimed as tile-light parity.
+
+## Verification
+
+- `foliage_runtime_vectors`: literal detail PRNG positions/yaws, the shared
+  authored-foliage-map gate for detail and silhouette tiers, path/force-on
+  behavior, 20–42 fade, pass switch, near-secondary 0.1 c6.a scale, four silhouette cells, 21 cap,
+  eight-sample fold, distance alpha ref, and `:fd`.
+- `til_foliage_blocker`: inclusive min/max boundaries, stored-negated Z,
+  unsnapped entry positions, and empty-array behavior for the shared mission
+  tile scan.
+- `terrain_foliage_detail_collector`: mip-bound 16-unit keys, distance boundary,
+  quadrant mapping, signed packing, traversal order, and global cap.
+- `foliage_runtime_adapter_test.gd`: fresh public adapter contract, tier map
+  selection, full multi-surface LOD0 aggregation, view-depth gate, no
+  manufactured anchors, cache identity/eviction ordering, reset behavior, and
+  the additive/depth shader-state contract.
+- Adapter regressions pin ordered near HIGH/LOW draw nodes and their depth
+  states, exact `00TRa` entry #25's stored-negated-Z decode directly onto the
+  positive terrain/Godot Z plane, the blocked armory-truck center and uncovered
+  c3/c4/c5 controls, selective rather than blanket blocking, and active-blocker
+  frame diagnostics.
+- `game_world_test.gd`: parses the co-named mission payload before terrain
+  build, shares one parsed resource with terrain/foliage, clears it on unload,
+  and prevents stale blockers on a subsequent no-TIL load.
+
+- `foliage_shader_contract_test.gd`: strict `D3DCMP_GREATER` boundary for the
+  shared detail include and the MODEL shader, plus the point-mip selector,
+  linear-within-mip call sites, and 4x4 terminal clamp.
+- `foliage_black_flicker_regression_probe.gd`: real rasterized destination-color
+  preservation, strict alpha acceptance/rejection, retained late-consumer
+  depth, screenshot-shaped exact-black-component detection, and fixed-input
+  frame stability for both tiers.
+- `foliage_spawn_capture_probe.gd` with `NOVA_FOLIAGE_FLICKER_PROBE=1`: the real
+  `00TRe.bms` player spawn, fixed-input HIGH/automatic coverage with deliberate
+  dropout and fade-response controls. LOW-far is explicitly reported as
+  skipped when it has no pixels in the exact spawn view.
+- `runtime_scene_probe.gd`: runtime scene consumes NovaTerrain's typed native
+  detail-cell vector; the minimal fixture intentionally contains no `.3di`
+  models.
 
 ## D-FOLIAGE divergence catalog
 
-| ID | Class | Disposition | One-liner |
-|---|---|---|---|
-| D-FOLIAGE-1 | A | OPEN (approximation — narrowed again 2026-07-08, the far-patch rework) | Foliage instance color: the engine emits a per-VERTEX quad color (four corner samples at ±0x8000, SWAR-averaged, alpha-premultiplied read). Since 2026-07-08 the host derives the half-plus-bias emitter form (`0x40/255 + tinted_cm/2`) IN-SHADER per pixel from the planar tinted colormap sample (`foliage_model.gdshader`) — superseding the 2026-07-07 CPU per-instance average and sitting closer to the witnessed per-vertex colors. Residual: the exact emitter form (the four ±0x8000 corner samples + SWAR average + the premultiplied read, per vertex not per pixel). Rides the foliage render-emitter parity. |
-| D-FOLIAGE-2 | A | **FIXED (2026-07-07, REN-6 rider)** | The fragment combine was an unwitnessed ratio stand-in (`(sun/(ground·0.707+sun))×255/128` — no terrain-colormap sample, no SKY term; the shader header already carried the correct witness) vs the witnessed `rgb = t0 × (t1 × (t1.a·c1 + c0)) × v0 × 8, a = t0.a × v0.a` `[orig: Foliage_CreateLightmapBlendPS @ 0x5ff7a0; constants terrain_setup_lighting_and_shader @ 0x604420]`. Ported 1:1: planar uv `(x,−z)/texsize` wrap ≡ the CPU sampler; the dispatcher binds the colormap from the CPU-color source chain (runtime terrain → editor colormap source) with a neutral no-terrain fallback (retail never draws foliage without a colormap). |
-| D-FOLIAGE-3 | A | OPEN (unported — the 2026-07-07 stand-in deleted 2026-07-08 with the ground-patch rework) | Quad-tier wind sway: the witnessed VS displaces Z weighted by vertex RED via a polynomial sine of `world.x·c24.y + time` `[orig: Terrain_CreateFoliageVertexShaders @ 0x5ff630; Foliage_WindSwayVS @ 0x2c25e5c]`. The host's old unwitnessed X-sway stand-in (`VERTEX.y/8`, `sin(phase + 0.11x + 0.07z)`) died with `foliage.gdshader`; the far patches now render UNSWAYED (the shared ground-fit shader's model-tier wind term vanishes on the flat patch by construction — commented in `foliage_model.gdshader`). The sway amount/phase state stays live (NovaWeather globals). Route: port `Foliage_WindSwayVS` onto the patch pass. |
-| D-FOLIAGE-4 | B | **FIXED (2026-07-08 — the foliage model-tier port slice)** | The witnessed MODEL tier was unhosted: retail stamps the def graphic's FULL 3DI geometry in clusters around SECTOR ENTITIES (view depth ≥ 38, ±4u candidate radius, ±8u quadrant 16u tiles, ≤21 instances/tile, foliagemap-byte gate) — upright yaw-only, **effective scale 0.75 XZ / 0.5 height** (VB normalization × the 0.75R footprint corners), anchored by the 8-sample biquadratic ground fit (4 rotated corners + 4 edge midpoints → the `(E_A, T_A, E_B, T_B)` sag fold evaluated in `Foliage_GridPlacementVS`), alpha-ref `clamp(4096/(dist+1), 8, 128)`, height-weighted world-Z wind `sin(ctr·0.001)·0.08` `[orig: Foliage_GenerateModelTileInstances @ 0x600980; Foliage_UpdateModelTiles @ 0x601f50; Foliage_DrawModelTileSlot @ 0x601d90; Foliage_UploadModelTileVSConstants @ 0x600f00; Foliage_FillInstancedModelBuffers @ 0x5ffa20; Terrain_CreateFoliageVertexShaders @ 0x5ff630; Terrain_RenderSectorEntitiesBySide @ 0x5c7d50]` — while the host rendered the def's 3DI mesh at EVERY quad placement, slope-tilted, single-point anchored, native scale. Ported: `libs/foliage` `model_placement.{h,cpp}` (generator, pinned by float32-emulated hand vectors) + `model_dispatcher.{h,cpp}` (walk/1000-cache/stagger) + the two-tier `NovaFoliageDispatcher` (`foliage_model.gdshader` runs the fit/wind/alpha curve for BOTH tiers; the slope-tilt path is DELETED). The FAR tier draws GROUND-CONFORMING `:fd` patches bent onto the quad placement's own witnessed corner/midpoint fold (`patch_control` = the same `(E_A, T_A, E_B, T_B)` family, pinned by `foliage_quad_fold`) — the interim upright-billboard mapping (first ported 2026-07-08, same day) is RETRACTED: the mveg grass 3DIs are flat-lying star meshes and the placement data describes a ground patch. Host mappings (commented in code): anchor source = placed world objects (the visible-sector-entity equivalent) with a view-depth range gate standing in for the sector render's visibility cull; the far-patch SIZE stays the `quad_half_width` knob pending the quad-emitter grill; the in-shader alpha-ref argument = instance center distance (retail: the anchor distance, one ref per tile draw); wind phase advanced per frame, not per tile draw (far patches carry no wind — flat y nullifies the model term; the quad tier's own `Foliage_WindSwayVS` is D-FOLIAGE-3's leg); shared tiles emitted once per frame where retail re-draws per entity. Residual: the model-pass COLOR chain → D-FOLIAGE-6. |
-| D-FOLIAGE-5 | B | **FIXED (2026-07-08 — the foliage model-tier port slice)** | The `:fd` texture: retail bakes it from the MODEL submesh[0]'s OWN texture (TGA-first, `.dds` fallback) — alpha smoothed by the 3×3 kernel (center 4, edges 1, corners 2, /16, wrap), RGB flattened to exactly `0x808080` — and binds it for BOTH tiers (the far quads AND the near model draw) `[orig: Foliage_LoadDefAssets @ 0x601260 tail; Foliage_DrawModelTileSlot @ 0x601d90]`. The host previously bound the raw diffuse everywhere. Ported: `libs/foliage/fd_bake.{h,cpp}` (exact kernel + pow2 wrap + the `0x808080` fold, hand-vector ctest) exposed as `NovaFoliageDispatcher.bake_fd_image`; `VegAssets.resolve_slot_fd_textures` bakes per def and BOTH tiers' materials bind it (non-pow2 diffuses fall back to the raw texture with a one-line warning — the retail wrap masks assume pow2). |
-| D-FOLIAGE-6 | C | OPEN (minted 2026-07-08 — the model-tier port slice; NEEDS-RE facet) | The retail model-pass COLOR chain is unwitnessed: the draw sets no PS of its own — pass state comes from the def's pass object (`Foliage_DefTable` [16], created over a static buffer arg folded as `dword_440000`) and oD0 = the constant BLACK `(0,0,0,1)` `[orig: Foliage_UploadModelTileVSConstants @ 0x600f00 c6; Foliage_DrawModelTileSlot @ 0x601d90]` — under the quad blend-PS form that would render black, so the model combine must differ (FF TSS or another PS). The host renders models through the witnessed quad combine family (`foliage_model.gdshader`) with v0 DERIVED IN-SHADER as the quad-emitter half-plus-bias form of the tinted colormap sample (`0x40/255 + tinted_cm/2`). Route: grill the pass object's stage/combine content. |
-
-Placement itself carries **no divergence** — the seed, PRNG, candidate count,
-surface gate, and proximity spacing are byte-exact against retail.
+| ID | Fresh disposition |
+|---|---|
+| D-FOLIAGE-1 | **RETRACTED/FIXED, clarified 2026-07-14.** The prior per-corner colored-emitter premise belonged to the inverted port. Detail vertex diffuse is the recovered bend carrier; the distant MODEL pass uploads black only as the zero-contribution source of an additive depth mask. |
+| D-FOLIAGE-2 | **FIXED.** Exact detail lightmap-blend arithmetic is hosted; the missing composed `t1` producer is separated as D-FOLIAGE-7. |
+| D-FOLIAGE-3 | **FIXED 2026-07-13.** Both recovered Z-wind terms are hosted in their correct tier-specific shaders. |
+| D-FOLIAGE-4 | **SUPERSEDED/FIXED 2026-07-13.** The 2026-07-08 two-tier port was itself inverted and has been deleted. Fresh detail expansion and MODEL ground-fit paths replace it. |
+| D-FOLIAGE-5 | **FIXED 2026-07-14.** The portable custom chain keeps authored RGB at mip 0, blends recursively downsampled later retail mips toward `0x808080` with `w=min(256,floor(320*i/N))`, preserves base-chain alpha, supplies Godot's terminal levels without generic mip regeneration, and point-selects the nearest retail mip with linear texel filtering through the 4x4 terminal level. |
+| D-FOLIAGE-6 | **FIXED 2026-07-14.** The former opaque-black conclusion missed the downstream ONE/ONE blend state. The host now preserves destination color while retaining the recovered strict-alpha-tested MODEL depth write. |
+| D-FOLIAGE-7 | **OPEN, bounded.** Runtime detail reconstructs exact bare-tile RGB/heightfield-DOT3 alpha and composes hosted static `.til` RGB/tint at the exact pre-wind coordinate. Retail's general page/cache c7/c8 projection and ordered tile-model/depth-alpha RT contributions remain absent; standalone editor preview also lacks the parent normal atlas and uses its mesh-normal fallback. |
+| D-FOLIAGE-8 | **FIXED 2026-07-14.** Direct retail inspection resolved the supposed path/spacing substrate as the shared mission `.til` array. `til_blocks_foliage` ports the exact linear inclusive 16x16 AABB scan, GameWorld parses `<mission>.til` before terrain build, and terrain/foliage/network state share that resource/payload; `FORCE_ON` continues to bypass the sampler in the portable runtime. [orig: `Foliage_PathBlockedByPlacedTile @ 0x606490`; `Terrain_LoadFoliageFile @ 0x60a740`; `Terrain_GetSurfaceTypeAtPosition @ 0x606510`] |
+| D-FOLIAGE-9 | **OPEN, host mapping.** Placed objects plus camera frustum approximate retail visible-sector-entity/occlusion membership. No terrain-center fallback remains. Same-frame refreshes of an overlapping host `(slot, cell key)` are coalesced without removing its distinct draw submissions, preventing host-only regeneration/upload storms while this membership gap remains open. |
+| D-FOLIAGE-10 | **OPEN, bounded host state/order.** Retail inserts each immediate MODEL depth-mask draw between its initial sector flush and later entity/foliage consumers, and its near secondary LOW selects strict `LESS` rather than `LESSEQUAL`. Stock Godot hosts the correct color-invisible MODEL depth effect plus ordered HIGH/LOW submissions, exact references/fade, and no LOW depth write, but its spatial shader API cannot choose the equality rule or place the MODEL mask before every later opaque consumer. |
 
 ## Cross-references
 
-- Reimpl: `libs/foliage` (`placement.cpp`/`dispatcher.cpp` — the quad tier;
-  `model_placement.cpp`/`model_dispatcher.cpp`/`fd_bake.cpp` — the model tier
-  and the `:fd` bake), `godot/engine/terrain/nova_foliage_dispatcher.cpp`
-  (the two-tier `MultiMesh` host), `godot/shaders/foliage_model.gdshader`
-  (the grid-placement fit/wind/alpha-curve port),
-  `godot/engine/terrain/veg_assets.gd` (`resolve_slot_fd_textures`).
-- The terrain tint the color path consumes is [env/env-tod-re.md](../env/env-tod-re.md)
-  #19 (`env::foliage_lightmap_tint`).
-- Tiles (`libs/til`, PAR-R3) is jodemo-cited in code but retail-auditable
-  (`PolyTrn_RenderTile @ 0x60df0d`, `serialize_terrain_tiles @ 0x6080F0`), just
-  multi-part; terrain (PAR-R1) is the larger renderer/mesh pipeline. See the
-  divergence-ledger.md UNAUDITED table for the per-audit binary scoping.
+- [Terrain RE record](../terrain/terrain-re.md) — terrain shader inputs, mip
+  bounds, tile composition, and render ordering.
+- [Tile overlay RE record](../tiles/til-re.md) - the shared mission array,
+  world-coordinate decode, and inclusive foliage blocker.
+- [Render lighting record](../render/render-lighting-re.md) — shared sky/sun
+  constants and terrain/foliage lighting blocks.
+- [Correspondence matrix](../correspondence.md) — function-to-host mapping.
+- [Divergence ledger](../divergence-ledger.md) — canonical dispositions.

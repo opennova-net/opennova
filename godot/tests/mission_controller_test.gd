@@ -113,6 +113,69 @@ func _dvxi5_root() -> NovaResourceRoot:
 	return root
 
 
+func _write_single_blocker_til(path: String) -> void:
+	var til_bytes := PackedByteArray()
+	til_bytes.resize(28)
+	til_bytes.encode_u32(0, 0x74696c30)
+	til_bytes.encode_u32(4, 1)
+	# One entry at world [0,16] x [0,16].
+	til_bytes.encode_u32(16, 0)
+	til_bytes.encode_u32(20, 0)
+	til_bytes[24] = 1
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	assert_not_null(file)
+	if file != null:
+		file.store_buffer(til_bytes)
+		file.close()
+
+
+func test_open_mission_loads_conamed_tile_blockers_and_clear_drops_context() -> void:
+	var root_dir := OS.get_cache_dir().path_join("oned_mission_tile_%d" % Time.get_ticks_usec())
+	assert_eq(DirAccess.make_dir_recursive_absolute(root_dir), OK)
+	var trn_path := root_dir.path_join("dvxi5.trn")
+	var trn_file := FileAccess.open(trn_path, FileAccess.WRITE)
+	assert_not_null(trn_file)
+	if trn_file == null:
+		return
+	trn_file.close()
+	var til_path := root_dir.path_join("ash_i5b.reference.til")
+	_write_single_blocker_til(til_path)
+
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(root_dir), OK)
+	var stub := StubTerrainEditor.new()
+	stub.resource_root = root
+	stub.world_root = Node3D.new()
+	add_child_autofree(stub.world_root)
+	add_child_autofree(stub)
+	var controller := MissionController.new(stub)
+	assert_true(controller.has_method("get_mission_tile_info"),
+		"MissionController must expose the parsed Mission blocker resource.")
+	assert_true(controller.has_method("get_placed_world_positions"),
+		"MissionController must expose a stable placed-anchor provider.")
+	if not controller.has_method("get_mission_tile_info") \
+			or not controller.has_method("get_placed_world_positions"):
+		return
+
+	assert_eq(controller.open_mission(_abs(BMS_PATH)), OK)
+	var tile_info = controller.call("get_mission_tile_info")
+	assert_not_null(tile_info, "The co-named mission .til is parsed in ONED just like GameWorld.")
+	if tile_info != null:
+		assert_eq(tile_info.get_entry_count(), 1)
+		assert_true(tile_info.blocks_foliage(8.0, 8.0, 2.0))
+	var anchors: PackedVector3Array = controller.call("get_placed_world_positions")
+	assert_not_null(anchors, "The anchor provider is safe even when every fixture model is unresolved.")
+
+	controller.clear()
+	assert_null(controller.call("get_mission_tile_info"), "Clear must not leave stale Mission blockers.")
+	assert_true((controller.call("get_placed_world_positions") as PackedVector3Array).is_empty(),
+		"Clear must not leave stale placed-object anchors.")
+
+	DirAccess.remove_absolute(til_path)
+	DirAccess.remove_absolute(trn_path)
+	DirAccess.remove_absolute(root_dir)
+
+
 func test_open_mission_without_editor_is_unavailable() -> void:
 	var controller := MissionController.new(null)
 	assert_eq(controller.open_mission(_abs(BMS_PATH)), ERR_UNAVAILABLE)
@@ -516,6 +579,52 @@ func _new_with_item_db() -> MissionController:
 	assert_eq(db.load(_abs(ITEMS_PATH)), OK, "the items.def fixture loads")
 	controller._placer.item_db = db
 	return controller
+
+
+func test_foliage_anchors_follow_live_object_add_and_skip_markers() -> void:
+	var controller := _new_with_item_db()
+	assert_true(controller.place_entity_at_world(102001, Vector3(12.0, 10.0, -34.0)))
+
+	var marker_id := -1
+	for item in controller.get_placeable_items():
+		if NovaMissionData.kind_for_item_type(int(item["type"])) == NovaMissionData.KIND_MARKER:
+			marker_id = int(item["id"])
+			break
+	assert_gt(marker_id, 0, "precondition: the items fixture carries a marker item")
+	assert_true(controller.place_entity_at_world(marker_id, Vector3(90.0, 20.0, -80.0)))
+
+	assert_eq(controller.get_placed_world_positions(),
+		PackedVector3Array([Vector3(12.0, 10.0, -34.0)]),
+		"the live foliage feed contains newly-authored objects in world space, never waypoint markers")
+
+
+func test_foliage_anchors_refresh_after_grounded_move() -> void:
+	var controller := _new_with_item_db()
+	assert_true(controller.place_entity_at_world(102001, Vector3(12.0, 10.0, -34.0)))
+	assert_eq(controller.get_placed_world_positions(),
+		PackedVector3Array([Vector3(12.0, 10.0, -34.0)]),
+		"precondition: the initial foliage anchor is cached")
+
+	controller.select_object(NovaMissionData.KIND_BUILDING, 0)
+	assert_true(controller.move_selected_to_world_grounded(Vector3(80.0, 10.0, -20.0)))
+	assert_eq(controller.get_placed_world_positions(),
+		PackedVector3Array([Vector3(80.0, 10.0, -20.0)]),
+		"a grounded move replaces the cached foliage anchor with the new world position")
+
+
+func test_foliage_anchors_refresh_after_targeted_reground() -> void:
+	var controller := _new_with_item_db()
+	assert_true(controller.place_entity_at_world(102001, Vector3(50.0, 10.0, -50.0)))
+	assert_eq(controller.get_placed_world_positions(),
+		PackedVector3Array([Vector3(50.0, 10.0, -50.0)]),
+		"precondition: the original foliage anchor is cached")
+
+	_stub_drift(controller, 42.0)
+	assert_eq(controller.reconcile_with_terrain(), 1)
+	assert_eq(controller.reground_drifted(), 1)
+	assert_eq(controller.get_placed_world_positions(),
+		PackedVector3Array([Vector3(50.0, 42.0, -50.0)]),
+		"an in-place targeted re-ground refreshes the foliage anchor without requiring a re-bake")
 
 
 # --- Phase: create a mission from scratch (new_mission) -----------------------

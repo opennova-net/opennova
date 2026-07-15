@@ -51,6 +51,124 @@ func test_defaults_without_an_editor() -> void:
 	assert_true(ws.shows_camera_status())
 
 
+class PreviewContextStubEditor:
+	extends Node
+
+	var resource_root: NovaResourceRoot
+	var world_root: Node3D
+	var current_trn_path := ""
+	var is_dirty := false
+	var set_context_calls := 0
+	var clear_context_calls := 0
+	var context_active := false
+	var tile_info: NovaTerrainTileInfo
+	var anchor_provider := Callable()
+	var time_of_day := NAN
+
+	func set_mission_preview_context(
+		value: NovaTerrainTileInfo,
+		provider: Callable,
+		preview_time_of_day: float = NAN
+	) -> void:
+		set_context_calls += 1
+		context_active = true
+		tile_info = value
+		anchor_provider = provider
+		time_of_day = preview_time_of_day
+
+	func clear_mission_preview_context() -> void:
+		clear_context_calls += 1
+		context_active = false
+		tile_info = null
+		anchor_provider = Callable()
+		time_of_day = NAN
+
+	func set_viewport_active(_active: bool, _grab_focus: bool) -> void:
+		pass
+
+	func get_resource_root() -> NovaResourceRoot:
+		return resource_root
+
+	func get_terrain_world_root() -> Node3D:
+		return world_root
+
+	func get_current_trn_path() -> String:
+		return current_trn_path
+
+	func open_trn(path: String, _timeline: PerfTimeline = null) -> Error:
+		current_trn_path = path
+		return OK
+
+
+func test_mission_preview_context_is_scoped_to_workspace_activation() -> void:
+	var first := PreviewContextStubEditor.new()
+	add_child_autofree(first)
+	var ws = MissionWorkspace.new(first)
+	assert_false(first.context_active)
+
+	ws.activate()
+	assert_true(first.context_active,
+		"Mission activation must install blockers and placed-object anchors on the shared terrain preview.")
+	assert_eq(first.set_context_calls, 1)
+	assert_true(first.anchor_provider.is_valid(), "The controller supplies a stable live anchor provider.")
+	assert_eq(first.anchor_provider.get_method(), &"get_placed_world_positions")
+
+	var second := PreviewContextStubEditor.new()
+	add_child_autofree(second)
+	ws.set_terrain_editor(second)
+	assert_false(first.context_active, "Rebinding clears Mission state from the old shared editor.")
+	assert_true(second.context_active, "The active workspace applies Mission state to the new editor.")
+
+	ws.deactivate()
+	assert_false(second.context_active, "Leaving Mission must restore the Terrain workspace's authored context.")
+	assert_eq(second.clear_context_calls, 1)
+
+
+func test_release_viewport_ends_mission_preview_context_before_rebind() -> void:
+	var first := PreviewContextStubEditor.new()
+	add_child_autofree(first)
+	var ws = MissionWorkspace.new(first)
+
+	ws.activate()
+	assert_true(first.context_active, "precondition: Mission installed its preview context")
+	ws.release_viewport()
+	assert_false(first.context_active,
+		"releasing the workspace clears Mission state from the detached editor")
+
+	var second := PreviewContextStubEditor.new()
+	add_child_autofree(second)
+	ws.set_terrain_editor(second)
+	assert_false(second.context_active,
+		"rebinding after release must not resurrect Mission blockers or foliage anchors")
+	assert_eq(second.set_context_calls, 0,
+		"only a later activate may install Mission preview context on the replacement editor")
+
+
+func test_active_mission_context_uses_bms_clock_and_clear_drops_only_the_override() -> void:
+	var editor := PreviewContextStubEditor.new()
+	add_child_autofree(editor)
+	var root := NovaResourceRoot.new()
+	root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/godot/dvxi5"))
+	editor.resource_root = root
+	editor.world_root = Node3D.new()
+	add_child_autofree(editor.world_root)
+	var ws = MissionWorkspace.new(editor)
+	var bms := ProjectSettings.globalize_path("res://../fixtures/bms/ash_i5b.reference.bms")
+	assert_eq(ws.open_file(bms), OK)
+	var controller = ws.get_editor_document()
+	var mission: NovaMissionData = controller.get_mission()
+	mission.set_header_int("start_time", 0x0540) # unsigned Q8.8 = 05:15
+
+	ws.activate()
+	assert_almost_eq(editor.time_of_day, 515.0, 0.001,
+		"Mission activation routes the BMS clock through the preview-context seam.")
+	controller.clear()
+	await get_tree().process_frame
+	assert_true(editor.context_active,
+		"Clearing a document does not deactivate the still-selected Mission workspace.")
+	assert_true(is_nan(editor.time_of_day),
+		"Clearing the loaded mission removes its scoped clock so authored ENV time can render.")
+
 func test_build_inspector_mounts_a_panel() -> void:
 	var ws = MissionWorkspace.new()
 	var host := Control.new()
@@ -269,18 +387,33 @@ class StubDebugController:
 		notify_calls += 1
 
 
+class StubPlayerHost:
+	extends RefCounted
+	var third_person := false
+	func is_third_person() -> bool:
+		return third_person
+
+
 class StubPlayNode:
 	extends Control
 	# Doubles as the play controller AND its world: is_playing()/get_world()
-	# come from MissionPlayController, get_runtime() from NovaWorld.
+	# come from MissionPlayController, get_runtime() from GameWorld.
 	var playing := false
 	var runtime: Object = null
+	var camera := Camera3D.new()
+	var player_host := StubPlayerHost.new()
+	func _init() -> void:
+		add_child(camera)
 	func is_playing() -> bool:
 		return playing
 	func get_world():
 		return self
 	func get_runtime():
 		return runtime
+	func get_play_camera() -> Camera3D:
+		return camera
+	func get_player_host() -> StubPlayerHost:
+		return player_host
 
 
 func _shelled_workspace() -> MissionWorkspace:
@@ -356,11 +489,20 @@ func test_debug_runtime_source_prefers_pie_then_sim() -> void:
 	ws._play_mount = ViewportMount.new(&"MissionPlayViewport", func() -> Control: return stub_play)
 	ws._play_mount.mount(play_host)
 	stub_play.playing = true
+	stub_play.player_host.third_person = true
 	assert_eq(ws._debug_runtime_source(), play_rt,
 		"Play Mission wins while playing (play_mission() sim_stops first, so both can never be live)")
+	var view_context = ws.get_debug_view_context()
+	assert_not_null(view_context)
+	assert_eq(view_context.camera, stub_play.camera,
+			"ONED forwards the exact PIE camera to the shared pose dump")
+	assert_true(view_context.camera_mode_known)
+	assert_true(view_context.third_person, "ONED forwards the active F4 mode")
 
 	stub_play.playing = false
 	assert_eq(ws._debug_runtime_source(), sim_rt, "Stop falls back to the sim driver")
+	assert_null(ws.get_debug_view_context(),
+			"in-place simulation has no gameplay camera to mislabel")
 
 	stub_controller.sim_runtime = null
 	assert_null(ws._debug_runtime_source(),

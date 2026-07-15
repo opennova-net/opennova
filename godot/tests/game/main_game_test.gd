@@ -177,6 +177,10 @@ func test_hud_loads_text_for_the_mission_that_actually_started() -> void:
 	assert_eq(world.mission_file, "", "normal SP/host/join starts do not populate the exported boot option")
 	assert_eq(world.load_mission("mnml.bms"), OK)
 	assert_eq(world.mission_file, "", "the exported boot option remains separate after a normal load")
+	var runtime = world.get_runtime()
+	assert_not_null(runtime)
+	assert_eq(runtime.get_mission_file(), "mnml.bms",
+			"the shared F3 runtime receives the mission that actually loaded")
 
 	# The mission string table selection lives on the shared HUD host now (the
 	# exists-only mission-bin fallback rides its world wiring).

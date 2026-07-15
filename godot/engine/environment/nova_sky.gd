@@ -12,6 +12,10 @@ extends Node3D
 # like NovaTerrain's weather_path; resolved lazily in _process).
 @export var weather_path: NodePath
 
+# Optional host-owned BG_COLOR resource. WorldContextPreview supplies this so
+# the dome's faithful below-rim region clears to skyfog instead of black.
+var frame_clear_environment: Environment = null
+
 var mesh_instance: MeshInstance3D
 var sky_material: ShaderMaterial
 var built: bool = false
@@ -66,7 +70,10 @@ func build() -> void:
 func _process(_delta: float) -> void:
 	if not built or sky_material == null:
 		return
-	if not _cached_cam or not _cached_cam.is_inside_tree():
+	# Camera3D.current changes when ONED switches workspace cameras while the
+	# old camera can remain alive. Re-resolve that transition instead of
+	# continuing to follow a stale, still-in-tree camera.
+	if not _cached_cam or not _cached_cam.is_inside_tree() or not _cached_cam.current:
 		_cached_cam = _find_camera()
 	if _cached_cam and mesh_instance:
 		# The dome follows the camera in xz and rides at HALF the camera height
@@ -76,6 +83,7 @@ func _process(_delta: float) -> void:
 
 	var sky_speed := 15.0
 	var sky_height := 175.0
+	sync_frame_clear_color()
 	var env := _cached_env
 	if env and env.has_method("is_loaded") and env.is_loaded():
 		var env_data: EnvFile = env.get_environment_data()
@@ -149,6 +157,20 @@ func _update_cloud_textures(env: Node) -> void:
 		sky_material.set_shader_parameter("u_cloud_tex1", tex1 if tex1 else tex2)
 		sky_material.set_shader_parameter("u_cloud_tex2", tex2 if tex2 else tex1)
 	sky_material.set_shader_parameter("u_has_clouds", has_clouds)
+
+
+# The faithful sky dome is open below its rim. Retail clears that region to
+# the horizon-blended skyfog block; editor hosts provide the BG_COLOR resource.
+func sync_frame_clear_color() -> void:
+	if frame_clear_environment == null:
+		return
+	if not _cached_env or not _cached_env.is_inside_tree():
+		_cached_env = get_node_or_null(environment_path) if not environment_path.is_empty() else null
+	var env := _cached_env
+	if env == null or not env.has_method("is_loaded") or not env.is_loaded() or not env.has_method("get_frame_clear_color"):
+		return
+	var rgb: Vector3 = env.get_frame_clear_color()
+	frame_clear_environment.background_color = Color(rgb.x, rgb.y, rgb.z)
 
 
 # The weather node when wired (it ticks the shared core at process priority

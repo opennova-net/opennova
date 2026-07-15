@@ -166,9 +166,9 @@ stdio-only clients can bridge via `npx mcp-remote`. Controls:
 Security note: the catalog is fixed and code-execution-free, but any local
 process that can reach the loopback port can still drive the editor's
 documents (non-local `Origin`/`Host` headers are rejected). Disable it in
-Settings on shared machines. Known preview difference vs the game: the
-editor's time-of-day is an authoring control; the game derives it from the
-mission's `start_time`.
+Settings on shared machines. The Environment workspace's time-of-day remains
+an authoring control; while Mission is active, its preview uses the BMS
+`start_time` without mutating the saveable `.env` document.
 
 Code: transport/protocol core in `godot/engine/mcp/` (host-agnostic), ONED
 tool catalog + service in `mcp/` (`editor_mcp_tools.gd` editor-wide,

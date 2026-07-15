@@ -339,6 +339,67 @@ func test_successful_mission_load_exposes_the_loaded_file_until_unload() -> void
 		"an unloaded world no longer reports a stale active mission")
 
 
+func test_mission_til_is_shared_by_terrain_foliage_and_cleared_without_file() -> void:
+	var root_dir := OS.get_cache_dir().path_join(WORLD_TEST_ROOT).path_join(
+		"mission_til_%d" % Time.get_ticks_usec())
+	assert_eq(DirAccess.make_dir_recursive_absolute(root_dir), OK)
+	var source_dir := ProjectSettings.globalize_path("res://../fixtures/minimal/resources")
+	for file_name in DirAccess.get_files_at(source_dir):
+		assert_eq(DirAccess.copy_absolute(
+			source_dir.path_join(file_name), root_dir.path_join(file_name)), OK)
+
+	var til_bytes := PackedByteArray()
+	til_bytes.resize(28)
+	til_bytes.encode_u32(0, 0x74696c30)
+	til_bytes.encode_u32(4, 1)
+	# One entry at world [0,16] x [0,16].
+	til_bytes.encode_u32(16, 0)
+	til_bytes.encode_u32(20, 0)
+	til_bytes[24] = 1
+	var til_file := FileAccess.open(root_dir.path_join("mnml.til"), FileAccess.WRITE)
+	assert_not_null(til_file)
+	if til_file == null:
+		return
+	til_file.store_buffer(til_bytes)
+	til_file.close()
+
+	var resource_root := NovaResourceRoot.new()
+	assert_eq(resource_root.set_root_dir(root_dir), OK)
+	var packed := load("res://engine/world/game_world.tscn") as PackedScene
+	var world := packed.instantiate() as GameWorld
+	add_child_autofree(world)
+	await get_tree().process_frame
+	world.set_playable(false)
+	world.set_resource_root(resource_root)
+	assert_eq(world.load_mission("mnml.bms"), OK)
+
+	var terrain := world.get_node("NovaTerrain") as NovaTerrain
+	var dispatcher := world.get_node("NovaTerrain/FoliageDispatcher") as NovaFoliageDispatcher
+	var tile_info := terrain.tile_info_override as NovaTerrainTileInfo
+	assert_not_null(tile_info)
+	if tile_info != null:
+		assert_eq(tile_info.get_entry_count(), 1)
+		assert_true(tile_info.blocks_foliage(8.0, 8.0, 2.0))
+		assert_same(dispatcher.tile_info, tile_info,
+			"Terrain composition and foliage exclusion must share the parsed mission resource.")
+
+	world.unload()
+	await get_tree().process_frame
+	assert_null(terrain.tile_info_override)
+	assert_null(dispatcher.tile_info)
+
+	assert_eq(DirAccess.remove_absolute(root_dir.path_join("mnml.til")), OK)
+	var no_til_root := NovaResourceRoot.new()
+	assert_eq(no_til_root.set_root_dir(root_dir), OK)
+	world.set_resource_root(no_til_root)
+	assert_eq(world.load_mission("mnml.bms"), OK)
+	assert_null(terrain.tile_info_override,
+		"A subsequent mission without a co-named TIL cannot inherit stale blockers.")
+	assert_null(dispatcher.tile_info)
+	world.unload()
+	await get_tree().process_frame
+
+
 func test_unload_drops_the_previous_entitys_armory_viewmodel_state() -> void:
 	var world := _make_world()
 	add_child_autofree(world)
@@ -403,7 +464,7 @@ func test_skeleton_debug_builds_and_frees_the_view() -> void:
 
 func test_hide_foliage_toggles_dispatcher_visibility() -> void:
 	# The F3 overlay's "Hide foliage" toggle routes here: it hides/shows the foliage
-	# dispatcher node (whose MultiMesh children render the scattered vegetation).
+	# dispatcher node (whose ArrayMesh batches render the scattered vegetation).
 	var world := GameWorld.new()
 	var terrain := NovaTerrain.new()
 	terrain.name = "NovaTerrain"

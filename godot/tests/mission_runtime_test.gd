@@ -104,6 +104,19 @@ func test_setup_promotes_and_counts() -> void:
 	assert_eq(rt.entity_count(), 2)
 
 
+func test_setup_exposes_normalized_diagnostic_mission_identity() -> void:
+	var w := _make_world(Transform3D.IDENTITY)
+	var rt := MissionRuntime.new()
+	add_child_autofree(rt)
+	rt.setup(w.mission, w.container, {
+		"debug_mission_file": "C:\\missions\\00TRe.bms",
+		"debug_mission_name": "Training Grounds",
+	})
+	assert_eq(rt.get_mission_file(), "00TRe.bms",
+			"diagnostics expose a portable basename, never the editor's local path")
+	assert_eq(rt.get_mission_name(), "Training Grounds")
+
+
 func test_tick_presents_sim_position_onto_node() -> void:
 	# The node is authored far from the entity's spawn; after a tick the present pass moves it onto the
 	# sim's computed position (the consolidated path the old game path never did).

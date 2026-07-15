@@ -84,7 +84,8 @@ void NovaTerrainBuildJob::_start_data(std::vector<uint8_t> heightmap_raw16,
                                       std::string output_dir,
                                       std::string terrain_name,
                                       std::string creator,
-                                      opennova::DepthFormat depth_format) {
+                                      opennova::DepthFormat depth_format,
+                                      opennova::TerrainQuadrantLocks quadrant_locks) {
 	_join_thread();
 	{
 		std::lock_guard<std::mutex> lock(_mutex);
@@ -99,7 +100,8 @@ void NovaTerrainBuildJob::_start_data(std::vector<uint8_t> heightmap_raw16,
 	                       output_dir = std::move(output_dir),
 	                       terrain_name = std::move(terrain_name),
 	                       creator = std::move(creator),
-	                       depth_format]() mutable {
+	                       depth_format,
+	                       quadrant_locks]() mutable {
 #ifdef _MSC_VER
 		_set_se_translator(&_seh_to_std);
 #endif
@@ -109,6 +111,7 @@ void NovaTerrainBuildJob::_start_data(std::vector<uint8_t> heightmap_raw16,
 				output_dir,
 				terrain_name,
 				creator,
+				quadrant_locks,
 				depth_format,
 				[this](const opennova::TerrainBuildProgress &progress) {
 					_set_progress(progress.phase, progress.message,

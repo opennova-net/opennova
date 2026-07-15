@@ -48,6 +48,9 @@ var _perf_effects_us: int = 0
 var _perf_did_tick := false
 var _accum := 0.0                    # banked real time (s) not yet consumed by a logic tick
 var _ticks_last_frame := 0           # logic ticks run by the last tick_realtime() call (catch-up signal)
+# Stable mission identity for host-neutral diagnostics such as the F3 overlay.
+var _mission_file := ""
+var _mission_name := ""
 
 
 ## Create + promote the mission, build the shared index over the placed nodes (`container`), and wire
@@ -55,6 +58,17 @@ var _ticks_last_frame := 0           # logic ticks run by the last tick_realtime
 ## entity count, or 0 on load failure (the orphan sim is freed). The sim is held off-tree by this driver.
 func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	_sim = NovaSimulation.new()
+	var mission_path := String(options.get(
+			"debug_mission_file", options.get("mission_file", "")))
+	_mission_file = mission_path.replace("\\", "/").get_file()
+	_mission_name = String(options.get(
+			"debug_mission_name", options.get("mission_name", "")))
+	if _mission_name.is_empty() and mission != null \
+			and mission.has_method("get_mission_name"):
+		_mission_name = String(mission.get_mission_name()).strip_edges()
+	if _mission_name.is_empty() and not _mission_file.is_empty():
+		_mission_name = _mission_file.get_file().get_basename()
+
 	if options.has("loco_scale"):
 		_sim.set_loco_scale(int(options["loco_scale"]))
 	# P7: EVERY play/preview path is the in-process listen server (ADR 0011) — stood up BEFORE load,
@@ -227,6 +241,14 @@ func entity_effect_transform_for_ssn(ssn: int) -> Variant:
 			MissionObjectPlacer.bms_to_godot_basis(
 					state[NovaSimulation.EFFECT_STATE_ROTATION_DEG]),
 			state[NovaSimulation.EFFECT_STATE_POSITION])
+
+
+func get_mission_file() -> String:
+	return _mission_file
+
+
+func get_mission_name() -> String:
+	return _mission_name
 
 
 # --- the local player (Phase 2; ADR 0012). Thin delegates to the sim for the host. ---

@@ -1,6 +1,7 @@
 extends GutTest
 
 const EditorMainScene = preload("res://modtools/editor/editor_main.tscn")
+const TerrainEditorSlots = preload("res://modtools/terrain/terrain_editor_slots.gd")
 
 const DVXI5_FIXTURE_RES_DIR := "res://../fixtures/godot/dvxi5"
 const OUTPUT_DIR_NAME := "terrain_editor_dvxi5_export_parity"
@@ -52,6 +53,42 @@ func test_dvxi5_import_then_export_matches_fixture_bytes() -> void:
 
 	var unexpected := _unexpected_output_files()
 	assert_eq(unexpected, [], "Export should not create extra terrain payload files.")
+
+
+func test_uniformless_authored_slots_export_from_terrain_data() -> void:
+	var document := TerrainEditorDocument.new()
+	document.data = NovaTerrainData.new()
+	document.colormap_image = _solid_image(Color8(1, 2, 3))
+	document.blendmap_image = _solid_image(Color8(4, 5, 6))
+	document.data.reset_pcx_slot_default("charmap", 2, 2)
+	document.data.reset_pcx_slot_default("foliagemap", 2, 2)
+
+	var expected_colors := {
+		"detailmapdist": Color8(12, 34, 56),
+		"detailmap2": Color8(78, 90, 123),
+		"detailmapdist2": Color8(201, 45, 67),
+	}
+	for slot_id in expected_colors:
+		var slot: Dictionary = TerrainEditorSlots.get_slot(String(slot_id))
+		assert_eq(String(slot.get("uniform", "")), "", "%s is authored data, not a top-tier shader input." % slot_id)
+		var texture := ImageTexture.create_from_image(_solid_image(expected_colors[slot_id]))
+		document.data.call(String(slot["setter"]), texture)
+
+	DirAccess.make_dir_recursive_absolute(_output_dir())
+	var material := ShaderMaterial.new()
+	assert_eq(document.save_texture_assets(material, _output_dir(), "Authored"), OK)
+
+	for slot_id in expected_colors:
+		var filename := TerrainEditorSlots.get_export_filename(String(slot_id), "Authored")
+		var output_path := _output_dir().path_join(filename)
+		assert_true(FileAccess.file_exists(output_path), "%s should survive export without a shader uniform." % filename)
+		if not FileAccess.file_exists(output_path):
+			continue
+		var exported := Image.new()
+		assert_eq(exported.load(output_path), OK, "%s should remain a readable TGA." % filename)
+		assert_eq(exported.get_size(), Vector2i(2, 2), "%s should preserve the authored image dimensions." % filename)
+		assert_eq(exported.get_pixel(0, 0).to_html(false), expected_colors[slot_id].to_html(false),
+			"%s should preserve the authored pixel data." % filename)
 
 
 func test_cptless_project_data_does_not_build_render_terrain() -> void:
@@ -120,6 +157,12 @@ func _assert_files_equal(expected_path: String, actual_path: String) -> void:
 			fail_test("%s: first byte mismatch at offset %d (got %d expected %d)" % [label, i, actual[i], expected[i]])
 			return
 	pass_test(label)
+
+
+func _solid_image(color: Color) -> Image:
+	var image := Image.create(2, 2, false, Image.FORMAT_RGBA8)
+	image.fill(color)
+	return image
 
 
 func _resolve_fixture_path(filename: String) -> String:

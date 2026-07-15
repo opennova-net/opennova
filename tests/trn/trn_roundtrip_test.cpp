@@ -40,6 +40,10 @@ int main() {
 	saved.water_height = 42;
 	saved.wrap_x = 1;
 	saved.wrap_y = 1;
+	saved.lock_topleft = {0, 1};
+	saved.lock_topright = {1, 0};
+	saved.lock_bottomleft = {2, 3};
+	saved.lock_bottomright = {4, 5};
 	saved.horizon = 1234.5;
 	saved.charmap = "roundtrip_char.pcx";
 	saved.foliagemap = "roundtrip_foliage.pcx";
@@ -87,6 +91,14 @@ int main() {
 	if (!expect(loaded.detail_density2 == saved.detail_density2, "detail_density2 should round-trip")) return 1;
 	if (!expect(loaded.wrap_x == saved.wrap_x, "wrap_x should round-trip")) return 1;
 	if (!expect(loaded.wrap_y == saved.wrap_y, "wrap_y should round-trip")) return 1;
+	if (!expect(loaded.lock_topleft.x == 0 && loaded.lock_topleft.y == 1,
+			"lock_topleft should round-trip")) return 1;
+	if (!expect(loaded.lock_topright.x == 1 && loaded.lock_topright.y == 0,
+			"lock_topright should round-trip")) return 1;
+	if (!expect(loaded.lock_bottomleft.x == 2 && loaded.lock_bottomleft.y == 3,
+			"lock_bottomleft should round-trip")) return 1;
+	if (!expect(loaded.lock_bottomright.x == 4 && loaded.lock_bottomright.y == 5,
+			"lock_bottomright should round-trip")) return 1;
 	if (!expect(std::abs(loaded.horizon - saved.horizon) < 0.0001, "horizon should round-trip")) return 1;
 	if (!expect(loaded.charmap == saved.charmap, "charmap should round-trip")) return 1;
 	if (!expect(loaded.foliagemap == saved.foliagemap, "foliagemap should round-trip")) return 1;
@@ -104,6 +116,22 @@ int main() {
 	            "explicit sector grid values should round-trip")) return 1;
 	if (!expect(loaded.sector_grid[0][3] == 1, "wrap_x should pad sectors cyclically")) return 1;
 	if (!expect(loaded.sector_grid[2][1] == loaded.sector_grid[0][1], "wrap_y should pad rows cyclically")) return 1;
+
+	opennova::TrnConfig defaults;
+	std::istringstream defaults_input("terrain_name default_locks\n");
+	error.clear();
+	if (!expect(opennova::load_trn(defaults_input, defaults, error),
+			"TRN with omitted lock keys should parse")) return 1;
+	for (const auto &lock : defaults.get_quadrant_locks()) {
+		if (!expect(lock.x == 0 && lock.y == 0,
+				"omitted lock keys should default to zero")) return 1;
+	}
+	std::ostringstream defaults_output;
+	error.clear();
+	if (!expect(opennova::save_trn(defaults_output, defaults, error),
+			"TRN with default locks should save")) return 1;
+	if (!expect(defaults_output.str().find("lock_") == std::string::npos,
+			"default lock keys should remain omitted when saving")) return 1;
 
 	std::printf("OK: trn round-trip preserved terrain metadata\n");
 	return 0;

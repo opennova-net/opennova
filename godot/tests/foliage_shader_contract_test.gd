@@ -1,0 +1,130 @@
+extends GutTest
+
+# D3DCMP_GREATER accepts a texel only when source alpha is strictly greater
+# than ALPHAREF. The equivalent shader discard boundary is therefore <=, not
+# <; equality must fail in both fresh foliage tiers.
+
+
+func _source(path: String) -> String:
+	var file := FileAccess.open(path, FileAccess.READ)
+	assert_not_null(file, "The production foliage shader source must be readable: %s" % path)
+	return file.get_as_text() if file != null else ""
+
+
+func test_alpha_test_rejects_samples_equal_to_reference() -> void:
+	var detail := _source("res://shaders/foliage_detail.gdshaderinc")
+	var silhouette := _source("res://shaders/foliage_silhouette.gdshader")
+
+	assert_true(
+		detail.contains("fd.a * u_fade <= u_alpha_ref"),
+		"Detail must discard alpha == ALPHAREF (retail D3DCMP_GREATER)."
+	)
+	assert_true(
+		silhouette.contains("fd.a <= u_alpha_ref"),
+		"MODEL must discard alpha == ALPHAREF (retail D3DCMP_GREATER)."
+	)
+
+
+func test_fd_sampling_uses_retail_point_mips_and_four_by_four_terminal() -> void:
+	var sampling := _source("res://shaders/foliage_fd_sampling.gdshaderinc")
+	var detail := _source("res://shaders/foliage_detail.gdshaderinc")
+	var silhouette := _source("res://shaders/foliage_silhouette.gdshader")
+
+	assert_true(sampling.contains("floor(log2(max(min(dimensions.x, dimensions.y), 4.0))) - 2.0"),
+		"The terminal LOD must match retail's final 4x4 level.")
+	assert_true(sampling.contains("clamp(\n\t\tfloor(requested_lod + 0.5), 0.0, terminal_lod)"),
+		"Retail texfilter level 0 must point-select the nearest mip instead of trilinearly blending alpha.")
+	assert_true(sampling.contains("textureLod(source, uv, selected_lod)"),
+		"The selected retail mip must still use bilinear sampling within that level.")
+	assert_false(sampling.contains("textureGrad(source, uv"),
+		"Trilinear :fd sampling makes alpha-test coverage shimmer between retail mip boundaries.")
+	assert_true(detail.contains("uniform sampler2D u_fd_texture : filter_linear_mipmap"),
+		"Expanded detail must filter linearly within the point-selected mip.")
+	assert_true(silhouette.contains("uniform sampler2D u_fd_texture : filter_linear_mipmap"),
+		"MODEL foliage must filter linearly within the point-selected mip.")
+	assert_true(detail.contains("sample_retail_foliage_fd(u_fd_texture, UV)"),
+		"Expanded detail must use the retail-capped :fd sampler.")
+	assert_true(silhouette.contains("sample_retail_foliage_fd(u_fd_texture, UV)"),
+		"MODEL depth masks must use the same retail-capped :fd sampler.")
+
+
+func _quantize_retail_signed_vector(value: Vector3) -> Vector3:
+	return Vector3(
+		floorf(clampf((value.x + 1.0) * 127.5, 0.0, 255.0)),
+		floorf(clampf((value.y + 1.0) * 127.5, 0.0, 255.0)),
+		floorf(clampf((value.z + 1.0) * 127.5, 0.0, 255.0))
+	) / 255.0
+
+
+func _gpu_light_byte(retail_getter_direction: Vector3) -> Vector3:
+	# PolyTrn packs the getter tuple into D3DCOLOR diffuse RGB as (z, x, y).
+	var gpu_diffuse_rgb := Vector3(
+		retail_getter_direction.z,
+		retail_getter_direction.x,
+		retail_getter_direction.y
+	)
+	return _quantize_retail_signed_vector(gpu_diffuse_rgb)
+
+
+func _light_alpha(normal_byte: Vector3, retail_getter_direction: Vector3) -> float:
+	var light_byte := _gpu_light_byte(retail_getter_direction)
+	return clampf(4.0 * (normal_byte - Vector3(0.5, 0.5, 0.5)).dot(
+		light_byte - Vector3(0.5, 0.5, 0.5)), 0.0, 1.0)
+
+
+func _flat_ground_light_alpha(retail_getter_direction: Vector3) -> float:
+	var normal_byte := _quantize_retail_signed_vector(Vector3(0.0, 0.0, 1.0))
+	return _light_alpha(normal_byte, retail_getter_direction)
+
+
+func test_detail_light_packs_world_sun_in_heightfield_texture_basis() -> void:
+	var detail := _source("res://shaders/foliage_detail.gdshaderinc")
+	assert_true(
+		detail.contains("vec3 texture_basis_light = vec3("),
+		"Detail must explicitly convert the retail getter tuple to GPU diffuse RGB."
+	)
+	assert_true(
+		detail.contains("opennova_sun_direction.z,\n\t\t\topennova_sun_direction.x,\n\t\t\topennova_sun_direction.y"),
+		"The GPU diffuse RGB order must be retail getter Z, X, Y."
+	)
+	assert_true(
+		detail.contains("(texture_basis_light + 1.0) * 127.5"),
+		"Retail byte packing must consume the converted GPU diffuse vector."
+	)
+	assert_false(
+		detail.contains("(opennova_sun_direction + 1.0) * 127.5"),
+		"The getter tuple must not be packed without the D3DCOLOR permutation."
+	)
+
+	var env := EnvFile.new()
+	var dawn := _flat_ground_light_alpha(env.compute_sun_direction(600.0))
+	var noon := _flat_ground_light_alpha(env.compute_sun_direction(1200.0))
+	var dusk := _flat_ground_light_alpha(env.compute_sun_direction(1800.0))
+	assert_lt(dawn, 0.01, "Flat ground must not receive overhead DOT3 light at dawn.")
+	assert_gt(noon, 0.9, "Flat ground must receive overhead DOT3 light at noon.")
+	assert_lt(dusk, 0.01, "Flat ground must not receive overhead DOT3 light at dusk.")
+
+
+	var morning := env.compute_sun_direction(800.0)
+	assert_eq(_gpu_light_byte(morning), Vector3(231, 83, 187) / 255.0,
+		"08:00 D3DCOLOR diffuse RGB must be the witnessed getter permutation (z, x, y).")
+	assert_almost_eq(_light_alpha(Vector3(217, 127, 217) / 255.0, morning),
+		0.8987774, 0.000001, "08:00 X-ramp normal must receive the witnessed bright DOT3 response.")
+	assert_almost_eq(_light_alpha(Vector3(127, 217, 217) / 255.0, morning),
+		0.0794002, 0.000001, "08:00 Y-ramp normal must receive the witnessed dark DOT3 response.")
+
+func test_detail_fog_consumes_supplied_start_and_honors_disable() -> void:
+	var detail := _source("res://shaders/foliage_detail.gdshaderinc")
+	assert_true(
+		detail.contains("if (opennova_fog_start == opennova_fog_end)"),
+		"The device fog policy disables linear fog when start equals end."
+	)
+	assert_true(
+		detail.contains("float start = opennova_fog_start;"),
+		"The environment already supplies the authored per-type/per-overcast fog start."
+	)
+	assert_false(
+		detail.contains("start = safe_end * 0.5") or
+			detail.contains("start = safe_end * 0.25"),
+		"The foliage shader must not overwrite the supplied type 2/3 fog start."
+	)

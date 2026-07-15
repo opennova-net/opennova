@@ -130,6 +130,10 @@ Mipchain build_mipchain(const std::vector<uint16_t>& heightmap, int atlas_size) 
 // Distance + traversal — port of sub_10032BA6
 // ---------------------------------------------------------------------------
 
+int terrain_lod_family(int lod_sub) noexcept {
+	return std::clamp(lod_sub, 0, 15) / 2;
+}
+
 float node_distance(const float aabb_min[3], const float aabb_max[3],
                     const float center[3], float px, float py, float pz) {
 	float dx = 0, dz = 0;

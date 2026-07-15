@@ -1,7 +1,7 @@
 extends RefCounted
 
 # WorldContextPreview: mounts a workspace's subject into the real world — the
-# same environment / sky / weather / water furniture the game renders with
+# same frame-clear / environment / sky / weather / water furniture the game renders with
 # (docs/oned/editor-runtime-parity.md, "direct runtime-node reuse") — over a
 # caller-provided world root, plus the grounding sampler seam for putting
 # things on the live surface. Extracted verbatim from TerrainEditor (maturity
@@ -17,6 +17,7 @@ extends RefCounted
 # Node names are contract — "EditorEnvironment", "EditorSky", "EditorWeather",
 # "WaterPlane": sky/weather/water resolve the environment through the relative
 # "../EditorEnvironment" path, and tools/tests address the nodes by name.
+# "EditorClearColor" is the faithful below-rim frame-clear consumer.
 #
 # Reference via preload(), not class_name, so it resolves without an editor
 # re-import (same convention as mission_object_placer.gd).
@@ -25,6 +26,7 @@ const NovaEnvironmentScript = preload("res://engine/environment/nova_environment
 const NovaSkyScript = preload("res://engine/environment/nova_sky.gd")
 const NovaWaterScript = preload("res://engine/environment/nova_water.gd")
 const NovaWeatherScript = preload("res://engine/environment/nova_weather.gd")
+const HHMM_DAY := 2400.0
 
 # The bound app-owned environment DOCUMENT (EnvironmentEditor); null until
 # bind_environment_editor. The host keeps its own handle for shell consumers.
@@ -32,9 +34,14 @@ var environment_editor
 
 var _world_root: Node3D
 var _environment_node: Node
+var _clear_color_node: WorldEnvironment
 var _sky_node: Node3D
 var _weather_node: Node3D
 var _water_node: Node3D
+var _time_of_day_override_active := false
+var _time_of_day_override := 0.0
+var _terrain_material_instance_id := 0
+var _terrain_env_generation := -1
 
 # func() -> ShaderMaterial: the host's live surface material receiving the
 # env terrain uniforms (null when no surface is live).
@@ -67,11 +74,20 @@ func init_environment_preview() -> void:
 	_environment_node.name = "EditorEnvironment"
 	_environment_node.set_script(NovaEnvironmentScript)
 	_world_root.add_child(_environment_node)
+	_clear_color_node = WorldEnvironment.new()
+	_clear_color_node.name = "EditorClearColor"
+	var clear_environment := Environment.new()
+	clear_environment.background_mode = Environment.BG_COLOR
+	clear_environment.ambient_light_source = Environment.AMBIENT_SOURCE_DISABLED
+	_clear_color_node.environment = clear_environment
+	_world_root.add_child(_clear_color_node)
+
 
 	_sky_node = Node3D.new()
 	_sky_node.name = "EditorSky"
 	_sky_node.set_script(NovaSkyScript)
 	_sky_node.environment_path = NodePath("../EditorEnvironment")
+	_sky_node.frame_clear_environment = _clear_color_node.environment
 	# The weather node owns the cloud-scroll core; created just below —
 	# NovaSky resolves the path lazily in _process, so order is safe.
 	_sky_node.weather_path = NodePath("../EditorWeather")
@@ -122,7 +138,7 @@ func _on_environment_state_changed() -> void:
 func _on_environment_editor_changed(env_file: EnvFile, preview_time: float) -> void:
 	if _environment_node:
 		_environment_node.environment_data = env_file
-		_environment_node.time_of_day = preview_time
+		_environment_node.time_of_day = _time_of_day_override if _time_of_day_override_active else preview_time
 	# A discrete TOD scrub or document edit must snap the weather smoother,
 	# otherwise the preview lags behind the slider.
 	if _weather_node and _weather_node.has_method("resync_colors"):
@@ -131,19 +147,70 @@ func _on_environment_editor_changed(env_file: EnvFile, preview_time: float) -> v
 	_on_state_changed.call()
 
 
-func apply_environment_to_preview() -> void:
-	if _environment_node == null or not _environment_node.has_method("is_loaded") or not _environment_node.is_loaded():
+## Render Mission at its BMS start time without mutating the shared ENV
+## authoring document. Document changes continue to fan out while this scoped
+## override owns only the world preview's clock.
+func set_time_of_day_override(value: float) -> void:
+	_time_of_day_override_active = true
+	_time_of_day_override = fposmod(value, HHMM_DAY)
+	_apply_time_of_day_override()
+
+
+## Restore the latest authoring time when the Mission workspace releases its
+## preview context.
+func clear_time_of_day_override() -> void:
+	if not _time_of_day_override_active:
 		return
-	var material: ShaderMaterial = _get_material.call()
-	if material:
-		# Same env -> terrain-uniform push the runtime uses (NovaEnvironment owns it).
-		_environment_node.apply_terrain_uniforms(material)
+	_time_of_day_override_active = false
+	_apply_time_of_day_override()
+
+
+func _apply_time_of_day_override() -> void:
+	if _environment_node == null:
+		return
+	if _time_of_day_override_active:
+		_environment_node.time_of_day = _time_of_day_override
+	elif environment_editor != null:
+		_environment_node.time_of_day = float(environment_editor.time_of_day)
+	if _weather_node and _weather_node.has_method("resync_colors"):
+		_weather_node.resync_colors()
+	apply_environment_to_preview()
+
+
+func apply_environment_to_preview() -> void:
+	sync_environment_to_preview(true)
+	if _sky_node and _sky_node.has_method("sync_frame_clear_color"):
+		_sky_node.call(&"sync_frame_clear_color")
 	# Water color/height/murk now come from the NovaWater node (env-driven),
 	# matching the runtime; nothing hardcoded here.
 
 
+## Restamp the live terrain material when weather/TOD moves the environment or
+## the host replaces its surface material. The generation comparison keeps the
+## normal per-frame editor poll O(1) after the weather smoother settles.
+func sync_environment_to_preview(force: bool = false) -> void:
+	if _environment_node == null or not _environment_node.has_method("is_loaded") or not _environment_node.is_loaded():
+		return
+	var material: ShaderMaterial = _get_material.call()
+	var material_id := material.get_instance_id() if material != null else 0
+	var generation := int(_environment_node.get_env_generation()) \
+		if _environment_node.has_method("get_env_generation") else -1
+	if not force and material_id == _terrain_material_instance_id \
+			and generation == _terrain_env_generation:
+		return
+	if material:
+		# Same env -> terrain-uniform push the runtime uses (NovaEnvironment owns it).
+		_environment_node.apply_terrain_uniforms(material)
+	_terrain_material_instance_id = material_id
+	_terrain_env_generation = generation
+
+
 func get_environment_node() -> Node:
 	return _environment_node
+
+
+func get_clear_color_node() -> WorldEnvironment:
+	return _clear_color_node
 
 
 func get_sky_node() -> Node3D:
@@ -186,10 +253,15 @@ func release() -> void:
 		if environment_editor.state_changed.is_connected(_on_environment_state_changed):
 			environment_editor.state_changed.disconnect(_on_environment_state_changed)
 	environment_editor = null
-	for node in [_water_node, _weather_node, _sky_node, _environment_node]:
+	_time_of_day_override_active = false
+	_time_of_day_override = 0.0
+	_terrain_material_instance_id = 0
+	_terrain_env_generation = -1
+	for node in [_water_node, _weather_node, _sky_node, _clear_color_node, _environment_node]:
 		if is_instance_valid(node):
 			node.free()
 	_water_node = null
 	_weather_node = null
 	_sky_node = null
 	_environment_node = null
+	_clear_color_node = null

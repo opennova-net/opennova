@@ -62,8 +62,8 @@ static func list_graphics(resource_root: NovaResourceRoot, force_refresh: bool =
 
 
 ## Resolve each def's `graphic` name to the first Mesh built from its .3di.
-## Returns an Array parallel to `defs`; null entries fall back to BoxMesh inside
-## the C++ dispatcher.
+## Returns an Array parallel to `defs`; a null entry disables that retail slot.
+## The fresh dispatcher never manufactures placeholder geometry.
 static func resolve_slot_meshes(resource_root: NovaResourceRoot, defs: Array) -> Array:
 	var meshes: Array = []
 	for def in defs:
@@ -76,12 +76,12 @@ static func resolve_slot_meshes(resource_root: NovaResourceRoot, defs: Array) ->
 	return meshes
 
 
-## Build the per-def ":fd" textures - the flat-0x808080 + smoothed-alpha bake
-## of each model's OWN diffuse that BOTH foliage tiers bind [orig:
+## Build the per-def ":fd" textures - retail's alpha-filtered, progressively
+## gray mip chain of each model's OWN diffuse that BOTH foliage tiers bind [orig:
 ## Foliage_LoadDefAssets @ 0x601260 tail; bound by Foliage_DrawModelTileSlot
-## @ 0x601d90 and the quad tier alike]. Returns an Array parallel to `defs`;
-## non-power-of-two diffuses fall back to the raw texture (the retail bake's
-## wrap masks assume pow2), null entries stay null.
+## @ 0x601d90 and the expanded detail tier alike]. Returns an Array parallel to `defs`;
+## unsupported diffuses fall back to the raw texture (the retail filter's wrap
+## masks assume pow2 dimensions of at least four), null entries stay null.
 static func resolve_slot_fd_textures(resource_root: NovaResourceRoot, defs: Array) -> Array:
 	var textures: Array = []
 	for def in defs:
@@ -93,8 +93,8 @@ static func resolve_slot_fd_textures(resource_root: NovaResourceRoot, defs: Arra
 	return textures
 
 
-## The ":fd" texture for one graphic: the model's diffuse run through the
-## witnessed bake (NovaFoliageDispatcher.bake_fd_image). Cached per root+model.
+## The ":fd" texture for one graphic: the model diffuse and the witnessed
+## custom mip pipeline (NovaFoliageDispatcher.bake_fd_image), cached per root+model.
 static func load_fd_texture(resource_root: NovaResourceRoot, graphic: String) -> Texture2D:
 	_check_epoch()
 	if resource_root == null or resource_root.get_root_dir().is_empty():
@@ -119,12 +119,9 @@ static func load_fd_texture(resource_root: NovaResourceRoot, graphic: String) ->
 
 	var fd: Texture2D
 	if NovaFoliageDispatcher.bake_fd_image(image):
-		# Mips after the bake so distance sampling smooths the BAKED alpha
-		# (the witnessed alpha-ref curve compensates exactly this erosion).
-		image.generate_mipmaps()
 		fd = ImageTexture.create_from_image(image)
 	else:
-		push_warning("VegAssets: '%s' diffuse is not power-of-two; :fd bake skipped, binding the raw diffuse." % basename)
+		push_warning("VegAssets: '%s' diffuse dimensions are unsupported; :fd bake skipped, binding the raw diffuse." % basename)
 		fd = diffuse
 	_fd_texture_cache[cache_key] = fd
 	return fd
@@ -139,8 +136,9 @@ static func _mesh_albedo_texture(mesh: Mesh) -> Texture2D:
 	return material.albedo_texture
 
 
-## Resolve a graphic name (e.g. "mveg5" or "mveg5.3di") to the first
-## Mesh built from the matching top-level .3di. Returns null if not resolvable.
+## Resolve a graphic name (e.g. "mveg5" or "mveg5.3di") to one Mesh containing
+## every surface of every LOD0 submesh built from the matching top-level .3di.
+## Returns null if not resolvable.
 static func load_mesh(resource_root: NovaResourceRoot, graphic: String) -> Mesh:
 	_check_epoch()
 	if resource_root == null or resource_root.get_root_dir().is_empty():
@@ -160,29 +158,49 @@ static func load_mesh(resource_root: NovaResourceRoot, graphic: String) -> Mesh:
 	var data := NovaObjectData.new()
 	if data.open_from_resource_root(resource_root, model_path) != OK:
 		return null
-	# The surface_set_material below MUTATES the returned mesh - only safe
-	# because this NovaObjectData is private and dropped right after (its
-	# submesh cache dies with it). Never route this through a SHARED data
-	# instance: build_lod_submeshes hands out shared ArrayMesh refs there.
 	var submeshes: Array = data.build_lod_submeshes(0)
-	var mesh: Mesh = null
-	if not submeshes.is_empty():
-		var first: Dictionary = submeshes[0]
-		mesh = first.get("mesh") as Mesh
-		if mesh != null and mesh.get_surface_count() > 0:
-			var diffuse := _load_diffuse_texture(data, int(first.get("material_index", 0)))
-			if diffuse != null:
-				var mat := StandardMaterial3D.new()
-				mat.albedo_texture = diffuse
-				mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
-				mat.alpha_scissor_threshold = 0.33
-				mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-				mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-				mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
-				mesh.surface_set_material(0, mat)
+	var mesh: ArrayMesh = _aggregate_lod0_submeshes(submeshes)
+	if mesh != null and not submeshes.is_empty():
+		# Retail foliage expands the complete LOD0 model, but owns one :fd
+		# binding per definition. Keep the primary submesh's diffuse only as
+		# that binding's locator; it does not decide which geometry survives.
+		var primary: Dictionary = submeshes[0]
+		var diffuse := _load_diffuse_texture(data, int(primary.get("material_index", 0)))
+		if diffuse != null:
+			var mat := StandardMaterial3D.new()
+			mat.albedo_texture = diffuse
+			mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+			mat.alpha_scissor_threshold = 0.33
+			mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+			mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+			mesh.surface_set_material(0, mat)
 	if mesh != null:
 		_mesh_cache[cache_key] = mesh
 	return mesh
+
+
+## Merge all geometry that build_lod_submeshes(0) emits. ArrayMesh surface
+## arrays are copied into a private resource so callers never mutate
+## NovaObjectData's shared submesh cache.
+static func _aggregate_lod0_submeshes(submeshes: Array) -> ArrayMesh:
+	var aggregate := ArrayMesh.new()
+	for entry_value in submeshes:
+		var entry: Dictionary = entry_value
+		var source := entry.get("mesh") as Mesh
+		if source == null:
+			continue
+		for source_surface in range(source.get_surface_count()):
+			var arrays := source.surface_get_arrays(source_surface)
+			if arrays.size() < Mesh.ARRAY_MAX:
+				continue
+			aggregate.add_surface_from_arrays(
+				source.surface_get_primitive_type(source_surface), arrays
+			)
+			var surface_name: String = source.surface_get_name(source_surface)
+			if not surface_name.is_empty():
+				aggregate.surface_set_name(aggregate.get_surface_count() - 1, surface_name)
+	return aggregate if aggregate.get_surface_count() > 0 else null
 
 
 ## Load the diffuse (slot 1, falling back to detail slot 2) texture for a .3di
@@ -233,7 +251,15 @@ static func _find_model_path(resource_root: NovaResourceRoot, basename: String) 
 
 
 static func _root_key(resource_root: NovaResourceRoot) -> String:
-	return resource_root.get_root_dir().replace("\\", "/").rstrip("/").to_lower()
+	# Multiple live VFS mounts may share one physical directory while selecting
+	# different expansion/override chains. The global epoch invalidates remounts,
+	# but it cannot distinguish two roots that remain live in the same epoch.
+	# Include the root object identity so resolved paths, meshes, and :fd textures
+	# never alias between those mounts.
+	return '%s|%d' % [
+		resource_root.get_root_dir().replace('\\', '/').rstrip('/').to_lower(),
+		resource_root.get_instance_id(),
+	]
 
 
 static func _cache_key(root_key: String, basename: String) -> String:

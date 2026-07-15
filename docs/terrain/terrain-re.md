@@ -10,23 +10,28 @@ and retail **Jointops.exe** (lighting/modulation/fog/shading). This file is the
 committed home for the `D-TERRAIN-…` catalog. Produced 2026-07-05 (PAR-R1);
 the runtime shading section landed 2026-07-06 (maturity REN-4); the runtime
 terrain-query section (height samplers + segment raycast) 2026-07-07
-(ENG-3 B0).
+(ENG-3 B0); a fresh retail runtime re-grill on 2026-07-13 closed the live
+LOD-family selector, texture preprocessing, top-tier bindings/math, tile-overlay
+ordering, and fog-distance semantics recorded below.
 
 **Status: PARTIAL.** Terrain is the largest system and the last of the seven
 `UNAUDITED` systems; this record establishes the tracked surface — the module
-map, the mixed-binary witness basis, and the one known deliberate divergence —
-and honestly scopes the deep byte-parity grill (mesh simplification + the CDEP/LOD
-bitstream) as the remaining work, the way [mission/mis-format-re.md](../mission/mis-format-re.md)
-is a partial. It converts terrain from `UNAUDITED` to *tracked (partial)*.
+map and the mixed-binary witness basis. The data/build path is byte-identical,
+and the top-tier base-surface texture derivation and shader math are now closed.
+The bounded runtime gaps are the tile-composition render-target/update details
+and the separate local-light/shadow pass, plus CDEP/traversal documentation
+depth. Like [mission/mis-format-re.md](../mission/mis-format-re.md), this remains
+a partial; it converts terrain from `UNAUDITED` to *tracked (partial)*.
 
 ## Module map (`libs/terrain`) and witness basis
 
 | Module | Role | Witness |
 |---|---|---|
 | `builder` | heightmap → terrain mesh (the build pipeline entry) | the TrnGen byte-identical data path (canonical reference) |
-| `quadtree` / `build_quadtree` / `lod` | quadtree LOD traversal, frustum culling, height mipchain | **jodemo** `Terrain_TraverseQuadTreeNode @ 0x5C89C0`, `Terrain_CollectVisibleSectors @ 0x5C9120`, `Terrain_BuildHeightMipChain @ 0x5C5310` |
+| `quadtree` / `build_quadtree` / `lod` | quadtree LOD traversal, frustum culling, height mipchain, final mesh-family selection | **jodemo** `Terrain_TraverseQuadTreeNode @ 0x5C89C0`, `Terrain_CollectVisibleSectors @ 0x5C9120`, `Terrain_BuildHeightMipChain @ 0x5C5310`; **retail** `render_terrain_sector_batch @ 0x6096f0` (eight families, `clamp(lod_sub, 0, 15) / 2`) |
 | `cdep_constraint` | quantized [min,max] of the 256 pixels of a block (CDEP depth constraint) | documented in-code; full CDEP bitstream grill pending |
 | `lighting` | terrain lighting colors + per-position modulation | **retail** `Terrain_SetLightingColors @ 0x5C4B10`, `Terrain_GetModulatedColorAtPos @ 0x5C5FE0`; fog via `Render_SetFogState @ 0x58a950` → `CD3DDevice_SetFogParameters @ 0x677960` |
+| `texture_preprocess` | byte-faithful detail coefficient map, DBlend normalization, and paired near/far mip chains | **retail** `Texture_GenerateNormalMap @ 0x58c070`, `PolyTrn_InitTextures @ 0x60aaa0`, `GTexture_Downsample2x2_RGBA8 @ 0x687000`, `GTexture_CreateFromPixelDataWithAlphaBlend @ 0x687270` |
 | `mesh_simp` | mesh simplification (edge-collapse) | **BYTE-IDENTICAL — verified**: `dvd4_parity` (canonical `.cpt`) + `parametric_parity` (Sample/Gradient/Checker64/Perlin, 4.6–6.8 MB CPTs each) all produce byte-identical output. The in-code "divergence point / vertex 1223" logging is leftover debug scaffolding from when parity was being achieved, now inert. `parametric_parity` is ctest-`DISABLED` only for CI runtime cost (~5 min), not for any correctness gap |
 | `packing` | word→byte packing | **retail** `pack_words_to_bytes @ 0x403CD0` (low byte of each u16, 3 bytes/group) |
 | `depthmap` | depth/height map storage | in-code |
@@ -34,8 +39,10 @@ is a partial. It converts terrain from `UNAUDITED` to *tracked (partial)*.
 
 The tile overlay and foliage that render over the terrain surface have their own
 now-landed records: [tiles/til-re.md](../tiles/til-re.md) (PAR-R3),
-[foliage/foliage-re.md](../foliage/foliage-re.md) (PAR-R2). The `terrain_rgb`
-tint stack the surface modulates through is [env/env-tod-re.md](../env/env-tod-re.md) #19.
+[foliage/foliage-re.md](../foliage/foliage-re.md) (PAR-R2). Env #19's
+`terrain_rgb` is confined to the dead far-colormap bake described below; the
+live top-tier terrain shader has no terrain-tint multiplier
+([env/env-tod-re.md](../env/env-tod-re.md) #19).
 
 ## Runtime surface shading (REN-4, retail Jointops.exe — witness map)
 
@@ -56,23 +63,131 @@ required; caps bit 10 + ≥2 simultaneous textures → `PolyTrn_ShaderTier
 {80, 73} (an unidentified device/format code — open question in the render
 record).
 
-**Texture build** (`PolyTrn_InitTextures @ 0x60aaa0`): detail textures 1-3
-(tier ≥ 2 with names present) or the single detail; the average detail color
-→ `flt_319F9D0/D4/D8` (0.50196 = 128/255 constants when the blendmap path is
-active); a generated normal map (`Texture_GenerateNormalMap`, scale 1/32);
-the blendmap NORMALIZED per texel so R+G+B sums to 255 (zero-sum → pure R)
-then quadrant-split into `DBlendmap0..3`; the 1024×1024 colormap
-checksummed, quadrant-split into `Colormap0..3` (tier path raw, non-tier
-path alpha-PREMULTIPLIED), with `TrnNMap0..3` quadrants from the global
-normal-map buffer; the 256×256 far colormap (`"PolyTrn colormap2"
+**Texture build — fresh re-grill (2026-07-13)** (`PolyTrn_InitTextures @ 0x60aaa0`):
+Tier ≥ 2 loads authored detail textures c1/c2/c3 plus
+`polytrn_detailmapdist`; the lower tier pairs its single detail with
+`polytrn_detailmapdist2`. The top-tier coefficient texture is generated
+from the authored `polytrn_detailmap` **B channel**, not the terrain
+heightmap: wrapped `(coord ± 1) & (dimension - 1)` neighbor samples form X/Y,
+fixed scale 1/32 is applied, Z is 2, the vector is normalized, and each RGB
+component is packed by `trunc((component + 1) × 127.5)`; the
+source center alpha is preserved [`orig: Texture_GenerateNormalMap @
+0x58c070`; call at `PolyTrn_InitTextures @ 0x60b14d`]. DBlend is normalized
+with the recovered integer path: for a nonzero RGB sum, coefficient =
+`floor(65535 / sum)` and each channel becomes
+`(coefficient × channel) >> 8`; a zero sum becomes pure R and alpha is
+preserved [`orig: PolyTrn_InitTextures @ 0x60b1f0..0x60b24d`]. The result is
+quadrant-split into `DBlendmap0..3`; the authored-detail coefficient texture is
+stored separately at `dword_319F994`. It is **not** `TrnNMap0..3`: those four
+textures are the heightfield-normal quadrants used by the tile-cache alpha bake
+described below.
+
+Each authored c1/c2/c3 texture is independently paired with the same far
+`polytrn_detailmapdist` through the retail custom mip builder
+[`orig: GTexture_CreateFromPixelDataWithAlphaBlend @ 0x687270`]. Base and
+far inputs are independently 2×2 box-downsampled per level with per-channel
+floor averaging [`orig: GTexture_Downsample2x2_RGBA8 @ 0x687000`]. At level
+`i` of `mip_count`, far weight is
+`min(256, floor(320 × i / mip_count))`, base weight is its complement, RGB
+is the fixed-point weighted blend, and alpha is copied from the base mip
+unchanged. Base/far mixing is therefore a mip-chain construction, not a
+camera-distance normal crossfade. Retail stops after the 4×4 level; the Godot
+adapter appends the API-required 2×2/1×1 tail after preserving every
+retail-visible level byte-for-byte, and the shared shader explicitly clamps
+the implicit gradients so that synthetic tail is never selected.
+
+Implemented in `libs/terrain/include/terrain/texture_preprocess.h` and
+`NovaTerrain::_load_textures`;
+`terrain_texture_preprocess_test` pins recovered byte vectors, while
+`terrain_lod_family_test` pins all 16 sublevels against the eight-family
+selector. The same preprocessor now builds the separate heightfield-normal
+atlas from CPT depth and the four parsed quadrant-lock pairs.
+
+The average detail color → `flt_319F9D0/D4/D8` (0.50196 = 128/255 constants
+when the blendmap path is active). The 1024×1024 colormap is checksummed and
+quadrant-split into `Colormap0..3` (tier path raw, non-tier path
+alpha-PREMULTIPLIED). The authored-detail coefficient texture, the
+heightfield-normal quadrants, and the tile-cache render target are three
+different resources; the 256×256 far colormap (`"PolyTrn colormap2"
 @ 0x319f798`) box-downsampled 4×4 from the premultiplied colormap with the
 UNDERWATER TINT baked (texels at/below `Env_WaterHeightFixed >> 15`:
 `color/4 + (48,32,32) BGR`) and multiplied by `PolyTrn_TerrainTintFull
-@ 0x31a1824` `>> 12` — this loop IS env #19's bake site (its READERS are
+@ 0x31a1824` `>> 12` — this loop is env #19's dead bake site, not a live
+top-tier shader multiplier (its readers are
 zero-xref, confirming the record's dead-code disposition); the `"depthspin"`
 256×256 shore texture (4-tap height sums `<< 14` in alpha over white); the
 4×4 `"PolyTrnClip"` pattern (gray, alternating alpha rows); the 128×128
 `"PolyTrnNoise"` detail noise (PRNG ±4 offsets around 0x80 per channel).
+
+**Tile-cache t0 producer — fresh alpha correction (2026-07-13).** The terrain
+pixel shaders do not sample raw colormap RGBA as `t0`; they sample the cached
+tile render target made by `PolyTrn_RenderTile @ 0x60da70`. Its base draw
+(`0x60dcd2..0x60dd5a`) uses diffuse `0x00808080`: RGB `MODULATE2X`
+produces `clamp(rawColormap.rgb × 256/255)`, while alpha `MODULATE` with
+diffuse A=0 clears authored colormap alpha. The bare base therefore leaves
+`t0.a = 0`, not a baked sun mask.
+
+`Terrain_GenerateNormalMap @ 0x603210` then supplies the alpha-lighting
+source. For uint16 height `H`, its loop (`0x603326..0x6034eb`) computes
+`N = normalize(Hwest-Heast, Hnorth-Hsouth, 512)`, packs each component as
+`trunc((N+1) × 127.5)` clamped to a byte (`0x603470..0x6034eb`), and stores
+A=128. Its A8R8G8B8 RGB semantics are `(grid X slope, grid Y slope, up)`, not
+a world-space XYZ normal. The host's `FORMAT_RGBA8` upload preserves those
+semantic RGB channels; there is no upload-time channel swap.
+
+**Hosted light-vector basis correction (D-TERRAIN-10, fixed 2026-07-14).**
+`Environment_GetLightDirectionFloat @ 0x57d870` supplies a direct getter tuple
+`g=(g0,g1,g2)`, which EnvFile preserves unchanged; it is **not** a Godot/world
+XYZ vector. `PolyTrn_RenderTile @ 0x60da70` receives that tuple in stack fields
+`outDir/var_28/var_24`, then its packer (`0x60e201..0x60e331`) writes D3DCOLOR
+`BYTE2←g2`, `BYTE1←g0`, and `BYTE0←g1`. GPU diffuse RGB is therefore
+`(g2,g0,g1)`, so the host shader must quantize the direct tuple as `(z,x,y)`
+before `PolyTrn_TileBakeDot3LightPass @ 0x60e385..0x60e39e`. The old host
+`(x,z,y)` mapping swapped the two horizontal DOT3 axes; flat normals could not
+distinguish that permutation, so the 06:00/12:00/18:00 flat checks all missed
+it. The non-flat 08:00 oracle now pins packed light RGB bytes `(231,83,187)`:
+normal bytes `(217,127,217)` and `(127,217,217)` produce alpha `0.8987774` and
+`0.0794002`, respectively.
+
+The four `.trn` lock pairs control only those neighbor taps. The parser
+`Terrain_ParseConfigCallback @ 0x60f330` recognizes:
+
+- `lock_topleft`: compare `0x60faf7`, stores `0x31be250 @ 0x60fb0c`
+  and `0x31be254 @ 0x60fb1f`, returns at `0x60fb27`;
+- `lock_topright`: compare `0x60fb31`, stores `0x31be258 @ 0x60fb46`
+  and `0x31be25c @ 0x60fb59`, returns at `0x60fb61`;
+- `lock_bottomleft`: compare `0x60fb6b`, stores `0x31be260 @ 0x60fb80`
+  and `0x31be264 @ 0x60fb93`, returns at `0x60fb9b`;
+- `lock_bottomright`: compare `0x60fba5`, stores `0x31be268 @ 0x60fbba`
+  and `0x31be26c @ 0x60fbc8`.
+
+Each component is `atol(argv[1/2])`. Defaults are zero because
+`Terrain_LoadEnvironmentConfig @ 0x610940` clears the containing config
+block at `0x61094c..0x610959`; the runtime pushes the parser callback at
+`0x6109ad`, and `Environment_LoadTimeOfDayConfig` rewrites the extension
+to literal `trn` at `0x57dbb6`; shipped `DVD4.TRN` contains all four
+pairs. For each quadrant/axis, a nonzero component selects mask 511 plus that
+quadrant's base, while zero selects mask 1023/base zero and crosses the internal
+seam (`0x60327a..0x6032ec`). These values are not `polytrn_wrapx/y`.
+`TrnConfig`, TPJ build flow, `NovaTerrainData`, and
+`build_heightfield_normal_map` now preserve and apply all four pairs.
+
+`PolyTrn_InitTextures` splits the 1024 atlas into four 512 textures
+`TrnNMap0..3` (creator calls from `0x60b3fa`; split loop from
+`0x60b3eb`) with flags `0x100001`: CLAMP U/V/W, linear min/mag, and no
+mip filter. The host keeps one shared atlas and reproduces four independent
+CLAMP samplers by restricting each selected quadrant to its texel-center
+bounds.
+
+`Environment_GetLightDirectionFloat @ 0x57d870` returns the direct tuple
+`g=(-fixed[1], fixed[2], fixed[0]) / 65536` (stores
+`0x57d8be..0x57d8cd`). `PolyTrn_RenderTile` does not normalize it; the D3DCOLOR
+packer at `0x60e201..0x60e331` permutes it to GPU RGB `(g2,g0,g1)` while
+applying `trunc((component+1) × 127.5)`. The additive
+`PolyTrn_TileBakeDot3LightPass @ 0x60e385..0x60e39e` preserves RGB and writes
+`t0.a = saturate(4 × dot(normalByte−0.5, lightByte−0.5))`. The authored-detail
+B-channel coefficient remains the separate `t3` input; it does not supply
+tile alpha.
 
 **Terrain pixel shaders** (`compile_terrain_pixel_shaders @ 0x605260`, gate
 caps bit 8 = ps1.1; handles at `PolyTrn_PS*`): all share the lighting shape
@@ -93,22 +208,44 @@ PolyTrn_PSConstC1_Light @ 0x31a182c); values init_terrain_lighting_color_ramps
 @ 0x604ee0 ← Render_TerrainScene @ 0x610c80 (Env_LightBlock/Env_SkyBlock;
 NVG blends the sky arg toward the modulator, the vehicle scope forces
 0x101010/0xF0F0F0)]` — so the shared shape is **terrain light =
-colormapAlpha × light + sky** (colormap alpha = the baked sun mask; the ÷2
-and MODULATE2X cancel). The foliage/sector-model blend PS inherits the same
+tileAlpha × light + sky** (tile alpha is the byte-quantized heightfield/light
+DOT3 term; the ÷2 and MODULATE2X cancel). The foliage/sector-model blend PS inherits the same
 device constants. Ported: `terrain_lighting.gdshaderinc` (the prior
 combined/fill pairing was a gobj-era stand-in) +
 `renderer::terrain_surface_light` (T1 section 5). Full chain:
 [render/render-lighting-re.md](../render/render-lighting-re.md).
+**Top-tier binding/math closure (fresh re-grill, 2026-07-13)**: the recovered
+`t0..t5` contract is now literal in the shared host include. `t0` is
+the cached tile render target described above, not source colormap RGBA; on
+bare ground its RGB is the MODULATE2X colormap result and its alpha is the
+heightfield/light DOT3 result. `t1`, `t4`, and `t5` are
+authored detail c1/c2/c3 sampled with the shared repeating detail UV; `t2` is
+the normalized DBlend RGB sampled with the terrain-map/colormap UV; and `t3`
+is the generated coefficient map sampled with that same terrain-map UV (not
+the repeated detail coordinate).
+The detail splat is `t1×t2.r + t4×t2.g + t5×t2.b`; its single coefficient
+factor is `2×dot(t3.rgb, t2.rgb)`. Lighting starts from
+`(t0.a×c1 + c0)/2`, then follows the witnessed ×2 colormap, ×2 dot-product,
+and ×4 splat stages [`orig: PolyTrn_PS14SplatNormalMap @ 0x7dece0`].
+There is no camera-distance normal mix and no extra terrain tint.
+
+The host composes tile-overlay RGB into the reconstructed t0 base **before**
+that lighting chain while retaining t0 alpha as the heightfield/light DOT3
+term. Fog now follows the
+retail mode split: exponential type 0 uses eye-space Z/depth, while linear
+types 1/2/3 use radial camera distance [`orig: Render_SetFogState @ 0x58a950`
+→ `CD3DDevice_SetFogParameters @ 0x677960`]. Final mesh selection is the
+eight-family mapping `floor(lod_sub × 8 / 16) = lod_sub / 2`, clamped to
+families 0..7 [`orig: render_terrain_sector_batch @ 0x6096f0`].
+
 **Include correction (2026-07-06, D-TERRAIN-2)**: `terrain_lighting.gdshaderinc`
 had stacked TWO ×2 detail-normal factors on the splat (the gobj-era "v23
 dual-normal" chimera; under the gamma-faithful pipeline it clipped regions
-to white) — rewritten to the witnessed top-tier instruction stream, source
-text pinned: `PolyTrn_PS14SplatNormalMap @ 0x7dece0` = `mul/mad ×2 splat`,
-`dp3 r3, r3(normalmap), r2(blendmap)`, `mad_d2 (r0.a·c1 + c0)`, `mul_x2 ×
-colormap`, `mul_x2 × dp3`, `mul_x4 × splat`; `PolyTrn_PS14Splat @ 0x7dee18`
-is the same without the dp3 pair. The witnessed t3 = the heightmap-derived
-generated normal map (scale 1/32); the host's near/far .trn detail-normal
-crossfade is the texture-source stand-in (note-only residual).
+to white). The recovered top-tier path applies exactly one coefficient factor;
+the splat-only variant omits it [`orig: PolyTrn_PS14SplatNormalMap @
+0x7dece0`; `PolyTrn_PS14Splat @ 0x7dee18`]. The fresh re-grill establishes t3
+as the authored-detail B-channel coefficient map and the paired base/far mip
+chain as the only near/far transition.
 
 **Surface materials** (same function): the `"depthspin"` shore material
 (`dword_319f904`, alpha-tested: stage 0 alpha `ADDSIGNED(COMPLEMENT
@@ -129,10 +266,37 @@ sampler params, opaque + additive variants; the four texture slot ids 1-4
 @ 0x609de0` (REN-5), `Terrain_CollectAndRenderTileModels @ 0x60d250`,
 `PolyTrn_RenderTile @ 0x60da70`.
 
+**Bounded runtime gaps after the 2026-07-13 closure**:
+
+- **Tile-composition RT/update gap** — the host currently CPU-bakes one static
+  1024×1024 RGBA overlay through `til_bake_overlay_rgba`; the shader applies
+  its RGB over the now-exact bare t0 reconstruction. It rebuilds on load,
+  toggle/override, and terrain-change notifications. The base colormap draw,
+  TrnNMap generation/split/addressing, coordinate-basis-correct light packing,
+  DOT3 alpha, and
+  supported overlay order are closed. Retail render-target allocation/format,
+  draw and dirty-update cadence, general patch/page c7/c8 projection, ordered
+  tile-model and depth-alpha contributions, and final RT mip generation/use
+  remain unwitnessed
+  [`orig: Terrain_CollectAndRenderTileModels @ 0x60d250`;
+  `PolyTrn_RenderTile @ 0x60da70`].
+- **Local-light/shadow gap (separate)** — the base terrain surface is closed,
+  but the host still lacks retail's per-local-light/shadow terrain pass. Retail
+  has `PolyTrn_PSShadowBasic` / `PolyTrn_PSShadowNormalMap`, a t3 shadow
+  sample with light scale `4×t3²×t0.a`, and
+  `render_terrain_lightmaps @ 0x609de0`. This is not part of tile composition
+  and does not reopen top-tier base-pass parity; the wider record is
+  [render/render-lighting-re.md](../render/render-lighting-re.md).
+
 **Foliage / sector models** (the four terrain-attached model slots):
-`Terrain_InitSectors @ 0x601260` loads the models, smooths each texture's
-alpha by a 9-tap kernel (2× center+cross, 1× corners, `>> 4`) with
-gray-0x808080 mip fill (alpha preserved), and creates TWO materials per
+`Foliage_LoadDefAssets @ 0x601260` loads the models and replaces each source
+alpha with the wrapped 9-tap kernel `(4C + cardinals + 2×diagonals) >> 4`.
+`GTexture_CreateFromPixelDataWithAlphaBlend @ 0x687270` then keeps authored
+RGB at mip 0 and blends each recursively box-downsampled later mip toward
+`0x808080` by `min(256,floor(320×mip/N))`, preserving the downsampled smoothed
+alpha. The host now supplies that complete packed custom chain directly to
+Godot without generic mip regeneration, fixing D-FOLIAGE-5. The loader also
+creates TWO materials per
 model — pass flags 0x2560000 (fog + alpha-test + z-write-OFF + cull-none +
 stage-1 clamp) and 0x2460000 (same, z-write ON) — whose stage tables are
 3-stage on the shader path (s0 `MODULATE(tex, DIFFUSE)` → TEMP; s1
@@ -146,12 +310,17 @@ via c7/c8) and the per-patch GRID-PLACEMENT vs_1_1 (`Foliage_GridPlacementVS
 `Foliage_CreateLightmapBlendPS @ 0x5ff7a0` (`Foliage_LightmapBlendPS
 @ 0x2c25e64`) is the fragment combine `rgb = t0 × (t1 × (t1.a·c1 + c0)) ×
 v0 × 8, a = t0.a × v0.a` (t1 = the planar-projected lightmap).
-`Terrain_SetupSectorModelDraw @ 0x6007c0` (ex-misnomer
+`Foliage_SetupFarSlotDraw @ 0x6007c0` (ex-misnomer
 `terrain_setup_display_adapter`; per model slot 0-3) picks the LOD entry,
 binds the wind VS + FVF 338, fog mode 8 (VS fog) when the wind VS exists,
-and **alpha-test ref 180 (high quality) / 8 (low)** — the host
-`foliage.gdshader` cutoff 0.33 is a tracked stand-in (its header carries
-the witness). The old "0x005BF064 pixel shader" / "sub_5C1790" anchors in
+and **alpha-test ref 180 (high quality) / 8 (low)**. For the near secondary
+LOW draw, caller `Foliage_RenderFarPatches @ 0x60a497..0x60a4ae` scales c6.a
+by 0.1. The setup branch at `0x6008fc..0x600912` passes value 2 to wrapper
+`0x67cac0..0x67caea`, which writes render state 0x17 (`D3DRS_ZFUNC`): this is
+strict `D3DCMP_LESS`, not wireframe/fill mode; the normal value 4 is
+`D3DCMP_LESSEQUAL`. The host shared detail include receives the exact runtime
+alpha reference and fade rather than the former fixed-cutoff stand-in. The old
+"0x005BF064 pixel shader" / "sub_5C1790" anchors in
 that shader were BOGUS (a stale note: 0x5BF064 is inside
 `draw_death_screen_overlay`; 0x5c1790 is not a function) — corrected at
 REN-4.
@@ -298,11 +467,17 @@ rationale (if any) behind HiRes_0's odd skip-refine guard.
 | D-TERRAIN-1 | C | PERMANENT (candidate) | **Terrain-shader edit/runtime split** (the one deliberate divergence): the editor renders terrain with a live-sculpt shader (height edits without rebake), the runtime with the baked shader — the *surface-shading math is shared via an include* so the two cannot drift in look. Tracked, justified by an editing need the runtime path cannot serve, and sharing the fidelity-bearing core ([oned/editor-runtime-parity.md](../oned/editor-runtime-parity.md) §Terrain shaders). Ratify under ADR 0022 to move from candidate to `PERMANENT`. |
 | D-TERRAIN-2 | A | **FIXED (2026-07-06)** | **Doubled detail-normal factor** (the gobj-era chimera): `terrain_lighting.gdshaderinc` stacked TWO ×2 `dp3(normalmap, blendmap)` factors on the 3-way splat; the witnessed top-tier ps.1.4 applies exactly ONE `[orig: PolyTrn_PS14SplatNormalMap source @ 0x7dece0; PolyTrn_PS14Splat @ 0x7dee18; compile_terrain_pixel_shaders @ 0x605260]` (the dual-normal product belongs to the separate non-splat ps.1.1 tier). Post-gamma (D-RMAT-7) the squared factor clipped whole regions to white. See §Include correction above; ledger row carries the full witness. |
 | D-TERRAIN-3 | C | **FIXED (REN-7, 2026-07-07)** | **Below-horizon fill**: retail fills the below-rim region with the frame clear alone — the env #21 horizon-blended skyfog `[orig: Render_ProcessMainSceneFrame @ 0x5ca776..0x5ca792]`; no skirt/ring geometry exists in the frame walk (the sky-pass terrain leg `Terrain_RenderSkyboxPass @ 0x610ac0` → `Terrain_RenderSectorBatchLit @ 0x60c670` is the plain fogged sector batch), the seam hidden by fog convergence at the 1024 fog reference (= the dome rim radius). The host's clear consumer was swallowed by a `BG_SKY`(null-sky) Environment rendering BLACK; fixed to `BG_COLOR` + `AMBIENT_SOURCE_DISABLED` in `game_world.tscn`, GUT-pinned — and `get_frame_clear_color()` corrected to the post-blend DOUBLED skyfog (the modulate2x-path Clear takes it verbatim; the "undoubled" 07-05 reasoning was the non-modulate2x fallback, no host analog). Residual (not a retail-parity surface): the ONED editor preview's far-env adoption rides ONED polish/ENV-1. |
-
 | D-TERRAIN-4 | C | PERMANENT (candidate) | **Raycast editor-host guards** (ENG-3 B1): beyond-extent = no-terrain/no-hit vs retail's clamp-to-edge `[orig: @ 0x31a0010/0x319fc0c]`; no-data = clear/NAN vs retail's return-HIT `[orig: @ 0x60ccf7]`; contiguous-atlas bilinear vs the per-quadrant seam flags `[orig: @ 0x31a17f0..]`. Same class as the ratified `coords_editor_options` guards (ADR 0020); §Runtime terrain queries carries the retail forms for any future runtime-faithful host. |
+| D-TERRAIN-5 | A | **FIXED (2026-07-13)** | **Top-tier texture/shader source mismatch**: the host incorrectly used its heightmap normal as the t3 detail coefficient, camera-crossfaded near/far textures, float-normalized DBlend, and multiplied an extra terrain tint. t3 now comes from the authored-detail B channel; the separate heightfield-normal atlas feeds cached-tile alpha; DBlend, paired mip chains, and literal t0..t5 ps.1.4 math are hosted [`orig: Texture_GenerateNormalMap @ 0x58c070`; `Terrain_GenerateNormalMap @ 0x603210`; `PolyTrn_InitTextures @ 0x60aaa0`; `GTexture_CreateFromPixelDataWithAlphaBlend @ 0x687270`; `PolyTrn_PS14SplatNormalMap @ 0x7dece0`]. |
+| D-TERRAIN-6 | A | **FIXED (2026-07-13)** | **LOD/fog/overlay base-pass semantics**: both raw `lod_sub / 2` sites now use the exact clamped eight-family selector; exponential fog uses eye-space depth while linear types use radial distance; tile-overlay RGB is composed before terrain lighting without replacing the cached heightfield/light DOT3 alpha [`orig: render_terrain_sector_batch @ 0x6096f0`; `Render_SetFogState @ 0x58a950`; `PolyTrn_RenderTile @ 0x60da70`]. |
+| D-TERRAIN-7 | A | **OPEN (bounded)** | **Tile-composition RT/update parity**: the bare t0 producer, quadrant CLAMP behavior, alpha math, and hosted static `.til` composition are closed. Retail allocation/format, draw and dirty-update cadence, general patch/page c7/c8 projection, ordered tile-model/depth-alpha contributions, and final RT mip behavior remain open. |
+| D-TERRAIN-8 | A | **OPEN (bounded)** | **Local-light/shadow terrain pass**: the host has no equivalent of the retail shadow PS variants and `render_terrain_lightmaps @ 0x609de0`. Kept separate from the closed base surface and from D-TERRAIN-7; see [render/render-lighting-re.md](../render/render-lighting-re.md). |
+| D-TERRAIN-9 | B | **OPEN (editor-preview-only)** | **Derived input preprocessing**: runtime binds integer-normalized DBlend and paired base/far C1/C2/C3 mip chains, including an explicit 4x4 terminal-LOD clamp. The live editor preview binds raw DBlend and raw detail textures; its authored-B coefficient fallback is exact, but minified detail/blend can differ from play. |
+| D-TERRAIN-10 | A | **FIXED (2026-07-14)** | **Terrain light-vector coordinate basis**: EnvFile preserves the direct retail getter tuple `g`, not Godot/world XYZ. Retail's D3DCOLOR pack writes GPU diffuse RGB `(g2,g0,g1)`, matching normal-map RGB `(grid X slope, grid Y slope, up)`; the old host `(x,z,y)` pack swapped the horizontal DOT3 axes. Terrain and analytic foliage now pack `(z,x,y)`. Flat 06:00/12:00/18:00 checks could not distinguish the swap, so a non-flat 08:00 oracle pins light bytes `(231,83,187)` and slope alphas `0.8987774/0.0794002` [`orig: Environment_GetLightDirectionFloat @ 0x57d870; Terrain_GenerateNormalMap pack @ 0x603470..0x6034eb; PolyTrn light pack @ 0x60e201..0x60e331; PolyTrn_TileBakeDot3LightPass @ 0x60e385..0x60e39e`]. |
 
-No other terrain divergence is confirmed — the data path is the byte-identical
-TrnGen port. The pending grill (below) may surface facets in mesh_simp / CDEP.
+The fresh pass closes D-TERRAIN-5/6/10 and bounds D-TERRAIN-7/8/9. The terrain
+data path remains the byte-identical TrnGen port; the pending grill below is
+now documentation depth around CDEP/traversal plus those two runtime gaps.
 
 ## Pending (the deep grill, to complete R1)
 
@@ -311,27 +486,30 @@ export chain reproduces the canonical output exactly across 5 fixtures (above),
 so `mesh_simp` needs no further witness (it was the concern; it is closed). What
 remains for a *full* (vs partial) R1 record:
 
-- **CDEP / LOD bitstream** — `cdep_constraint` + the quadtree mip chain: witness
-  the on-disk CDEP block encoding and the LOD selection thresholds against the
-  binary. (`cdep_read`/`cdep_roundtrip` ctests already pin the CDEP header against
-  a `Dvxi5.cpt` capture + the encode/decode round-trip — so this is documenting the
-  witnessed encoding, not discovering it.)
-- **Runtime render pass** — the SURFACE-SHADING half landed at REN-4 (the
-  witness map above: tiers, textures, the eight pixel shaders, the stage
-  tables, the foliage-model shader set) and the LIGHTING half at REN-5 (the
-  c0/c1 constants closed above; the sector-model lightmap-tile pass +
-  mission lightmap TGA chain witnessed in
-  [render/render-lighting-re.md](../render/render-lighting-re.md) — the
-  baked-shadow PS variants + TGA draping stay untracked-hosted, D-RLIT-6);
-  the remaining half is the retail QUADTREE TRAVERSAL re-confirmation (the
-  reimpl LOD/mip cites **jodemo**) plus the draw-time binding walk
-  (`render_terrain_sector_batch @ 0x6092a0` internals).
+- **CDEP / quadtree witness depth** — finish the on-disk block-encoding record
+  and retail traversal/threshold re-confirmation. The final eight-family
+  `lod_sub / 2` selector is closed; this item no longer includes shader
+  binding or final mesh-family selection. `cdep_read` / `cdep_roundtrip`
+  already pin the header and encode/decode round-trip against `Dvxi5.cpt`.
+- **Tile-composition mechanics** — close D-TERRAIN-7 by witnessing retail's
+  render-target lifecycle, update cadence, general patch/page c7/c8 projection,
+  ordered model/depth draws, and the final RT's sampling/edge/mip policy. The
+  bare producer's TrnNMap filter/address behavior, hosted static `.til`
+  composition, and shader binding are closed.
+- **Local-light/shadow terrain pass** — close D-TERRAIN-8 independently by
+  implementing and pinning the retail shadow/lightmap pass described in
+  [render/render-lighting-re.md](../render/render-lighting-re.md).
+- **Editor derived-input parity** — close D-TERRAIN-9 by routing the live
+  preview through the runtime integer DBlend normalization and paired custom
+  mip-chain builder without replacing its live-sculpt geometry path.
 
-Neither is an open *divergence* — they are documentation depth. The one tracked
-terrain divergence remains D-TERRAIN-1 (the deliberate shader split).
+The CDEP/traversal item is documentation depth; D-TERRAIN-7 and D-TERRAIN-8
+are the two bounded open runtime parity surfaces, while D-TERRAIN-9 is limited
+to the editor preview. D-TERRAIN-1 remains the deliberate editor/runtime split.
 
 ## Cross-references
 
 - Reimpl: `libs/terrain`, `libs/terrain_query` (ADR 0020, the world→height seam).
 - The reference data path: the TrnGen byte-identical terrain generator (canonical).
-- Surface consumers with their own records: tiles (R3), foliage (R2), env tint (#19).
+- Surface consumers with their own records: tiles (R3), foliage (R2), env
+  far-colormap bake (#19).

@@ -1,18 +1,19 @@
 class_name TerrainFoliagePreview
 extends Node3D
 
-# Thin editor shell around NovaFoliageDispatcher (GDExtension, C++ hot path).
-# All placement / LRU / MultiMesh work happens in the dispatcher child node;
-# this script just wires editor-specific inputs (camera position, foliagemap,
-# defs, live-sculpt heightmap sampler) and forwards paint/def edits as LRU
-# flushes.
-#
-# Same dispatcher class is used by the runtime scene (main_game.tscn); only
-# the samplers differ (runtime reads from NovaTerrainData directly).
+# Editor wiring for the same fresh native foliage runtime used in play. Both
+# foliage tiers sample the live authored foliage map; detail also samples the
+# live sculpted height field, while silhouettes require placed-object anchors.
 
 const INVALID_HEIGHT := -1000000.0
-
 const VegAssets := preload("res://engine/terrain/veg_assets.gd")
+
+## Narrow host snapshot of the editor-only surface inputs injected into the
+## native foliage dispatcher. The dispatcher's wider frame telemetry remains
+## an implementation detail of this module.
+class SurfaceInputDiagnostics:
+	extends RefCounted
+	var overrides_active: bool = false
 
 var _terrain_mesh: EditorTerrainMesh
 var _camera: Camera3D
@@ -20,26 +21,26 @@ var _terrain_data: NovaTerrainData
 var _resource_root: NovaResourceRoot
 var _foliage_map: NovaTerrainFoliageMap
 var _foliage_defs: Array[NovaTerrainFoliageDef] = []
-# Raw input array reference, retained to do element-wise change detection.
-# Comparing against a freshly-built typed array each frame triggered false
-# positives that flushed the LRU every frame (see plan Step 1).
+var _tile_info: NovaTerrainTileInfo
+var _silhouette_anchor_provider := Callable()
 var _last_raw_foliage_defs: Array = []
-var _selected_index: int = -1
-
 var _dispatcher: NovaFoliageDispatcher
-var _last_camera_cell_key: String = ""
-var _pending_flush: bool = true
+var _pending_reset := true
+var _configuration_dirty := true
+var _surface_override_applied := false
+var _last_heightfield_normal: Texture2D
+var _last_tile_overlay: Texture2D
+var _last_tile_overlay_tint := Vector3(INF, INF, INF)
 
 
 func _ready() -> void:
 	_dispatcher = NovaFoliageDispatcher.new()
 	_dispatcher.name = "Dispatcher"
-	_dispatcher.dispatch_algorithm = NovaFoliageDispatcher.DISPATCH_ALGORITHM_CELL_GRID
-	_dispatcher.cell_grid_radius = 8
 	add_child(_dispatcher)
+	_apply_dispatcher_sources()
 
 
-func _defs_changed_raw(raw: Array) -> bool:
+func _defs_changed(raw: Array) -> bool:
 	if raw.size() != _last_raw_foliage_defs.size():
 		return true
 	for i in range(raw.size()):
@@ -53,30 +54,26 @@ func set_preview_state(
 	camera: Camera3D,
 	foliage_map: NovaTerrainFoliageMap,
 	foliage_defs: Array,
-	selected_index: int,
 	terrain_data: NovaTerrainData = null,
-	resource_root: NovaResourceRoot = null
+	resource_root: NovaResourceRoot = null,
+	tile_info: NovaTerrainTileInfo = null,
+	silhouette_anchor_provider: Callable = Callable()
 ) -> void:
-	var terrain_changed := _terrain_mesh != terrain_mesh
+	var mesh_changed := _terrain_mesh != terrain_mesh
 	var data_changed := _terrain_data != terrain_data
+	var maps_changed := _foliage_map != foliage_map
 	var root_changed := _resource_root != resource_root
-	var map_changed := _foliage_map != foliage_map
-	var defs_changed := _defs_changed_raw(foliage_defs) or root_changed
-	var sel_changed := _selected_index != selected_index
+	var defs_changed := _defs_changed(foliage_defs) or root_changed
+	var tile_info_changed := _tile_info != tile_info
+	var anchors_changed := _silhouette_anchor_provider != silhouette_anchor_provider
 
 	_terrain_mesh = terrain_mesh
 	_camera = camera
 	_terrain_data = terrain_data
 	_resource_root = resource_root
 	_foliage_map = foliage_map
-	_selected_index = selected_index
-
-	if data_changed and _dispatcher != null:
-		# Colormap-only source: the dispatcher tints each foliage instance from the
-		# colormap (sub_5C5FE0 analogue) while placement keeps using the live-sculpt
-		# Callable samplers below. Without this the editor renders foliage white.
-		_dispatcher.colormap_source = _terrain_data
-		_pending_flush = true
+	_tile_info = tile_info
+	_silhouette_anchor_provider = silhouette_anchor_provider
 
 	if defs_changed:
 		var typed_defs: Array[NovaTerrainFoliageDef] = []
@@ -84,97 +81,160 @@ func set_preview_state(
 			if value is NovaTerrainFoliageDef:
 				typed_defs.append(value)
 		_foliage_defs = typed_defs
-		_last_raw_foliage_defs = foliage_defs.duplicate()  # snapshot refs
-		if _dispatcher != null:
-			_dispatcher.foliage_defs = _foliage_defs
-			_dispatcher.slot_meshes = VegAssets.resolve_slot_meshes(_resource_root, _foliage_defs)
-			# The ":fd" bake both tiers bind [orig: Foliage_LoadDefAssets @ 0x601260].
-			_dispatcher.slot_fd_textures = VegAssets.resolve_slot_fd_textures(_resource_root, _foliage_defs)
-		_pending_flush = true
+		_last_raw_foliage_defs = foliage_defs.duplicate()
+		_configuration_dirty = true
 
 	if _dispatcher == null:
 		return
+	_apply_dispatcher_sources()
 
-	if terrain_changed and _terrain_mesh != null:
-		# Height sampler → live-sculpt-aware path (sub_5C6770 analogue).
-		_dispatcher.height_sampler = Callable(self, "_sample_height")
-		# Foliage sampler → world→source_coords→map_pixel→index chain.
-		# Consumer applies polytrn_origin + sector_grid shift (editor has both
-		# via EditorTerrainMesh).
-		_dispatcher.foliage_sampler = Callable(self, "_sample_foliage_index")
-		_pending_flush = true
-
-	if map_changed or sel_changed:
-		_pending_flush = true
+	if mesh_changed or data_changed or maps_changed or defs_changed \
+			or tile_info_changed or anchors_changed:
+		_pending_reset = true
 
 
-# Height sampler bound to EditorTerrainMesh. Returns world Y in world units,
-# or a large negative sentinel when the world point is outside any active sector.
+func _apply_dispatcher_sources() -> void:
+	if _dispatcher == null:
+		return
+	_dispatcher.colormap_source = _terrain_data
+	_dispatcher.height_sampler = Callable(self, "_sample_height")
+	_dispatcher.foliage_sampler = Callable(self, "_sample_foliage_index")
+	_dispatcher.tile_info = _tile_info
+	_sync_surface_input_overrides()
+
+
+func _editor_tile_overlay_tint() -> Vector3:
+	if _terrain_mesh == null:
+		return Vector3.ONE
+	var material: ShaderMaterial = _terrain_mesh.get_material()
+	if material == null:
+		return Vector3.ONE
+	var value: Variant = material.get_shader_parameter("u_tile_overlay_tint")
+	return value if value is Vector3 else Vector3.ONE
+
+
+## A standalone editor dispatcher is parented by TerrainFoliagePreview rather
+## than NovaTerrain, so it cannot discover runtime-derived surface textures by
+## parent cast. Inject EditorTerrainMesh's shared surface inputs explicitly.
+func _sync_surface_input_overrides() -> void:
+	if _dispatcher == null:
+		return
+	var have_editor_inputs := _terrain_mesh != null \
+		and _terrain_mesh.has_method("get_heightfield_normal_texture") \
+		and _terrain_mesh.has_method("get_tile_overlay_texture") \
+		and _dispatcher.has_method("set_surface_input_overrides")
+	if not have_editor_inputs:
+		if _surface_override_applied and _dispatcher.has_method("clear_surface_input_overrides"):
+			_dispatcher.call("clear_surface_input_overrides")
+		_surface_override_applied = false
+		_last_heightfield_normal = null
+		_last_tile_overlay = null
+		_last_tile_overlay_tint = Vector3(INF, INF, INF)
+		return
+
+	var heightfield_normal: Texture2D = _terrain_mesh.call("get_heightfield_normal_texture")
+	var tile_overlay: Texture2D = _terrain_mesh.call("get_tile_overlay_texture")
+	var tile_tint := _editor_tile_overlay_tint()
+	if _surface_override_applied \
+			and _last_heightfield_normal == heightfield_normal \
+			and _last_tile_overlay == tile_overlay \
+			and _last_tile_overlay_tint.is_equal_approx(tile_tint):
+		return
+	_dispatcher.call(
+		"set_surface_input_overrides",
+		heightfield_normal,
+		tile_overlay,
+		tile_tint
+	)
+	_surface_override_applied = true
+	_last_heightfield_normal = heightfield_normal
+	_last_tile_overlay = tile_overlay
+	_last_tile_overlay_tint = tile_tint
+
+
 func _sample_height(world_x: float, world_z: float) -> float:
 	if _terrain_mesh == null:
 		return INVALID_HEIGHT
 	return _terrain_mesh.sample_world_height(world_x, world_z)
 
 
-# Foliagemap sampler: world coords → heightmap-atlas coords → foliage map pixel
-# → palette index. Honors Dvxi5-style polytrn_origin via world_to_source_coords.
 func _sample_foliage_index(world_x: float, world_z: float) -> int:
 	if _terrain_mesh == null or _foliage_map == null:
 		return 0
 	var source := _terrain_mesh.world_to_source_coords(world_x, world_z)
 	if source.x < 0.0:
 		return 0
-	var w := _foliage_map.get_width()
-	var h := _foliage_map.get_height()
-	if w <= 0 or h <= 0:
-		return 0
 	var map_x := _foliage_map.map_x_from_heightmap_x(source.x)
 	var map_y := _foliage_map.map_y_from_heightmap_y(source.y)
-	if map_x < 0 or map_x >= w or map_y < 0 or map_y >= h:
+	if map_x < 0 or map_x >= _foliage_map.get_width():
+		return 0
+	if map_y < 0 or map_y >= _foliage_map.get_height():
 		return 0
 	return int(_foliage_map.get_index(map_x, map_y))
 
 
 func mark_dirty() -> void:
-	# Paint / brush / def edits invalidate the LRU.
-	_pending_flush = true
+	_pending_reset = true
+	# Definition resources are edited in place, so identity comparison cannot
+	# detect match/attrib/graphic changes. Refresh the copied native slot state.
+	_configuration_dirty = true
+
+
+func _configure_slots() -> void:
+	_dispatcher.configure_slots(
+		_foliage_defs,
+		VegAssets.resolve_slot_meshes(_resource_root, _foliage_defs),
+		VegAssets.resolve_slot_fd_textures(_resource_root, _foliage_defs)
+	)
 
 
 func rebuild_if_needed() -> void:
 	if _dispatcher == null or _camera == null:
 		return
-	if _pending_flush:
+	if _configuration_dirty:
+		_configure_slots()
+		_configuration_dirty = false
+		_pending_reset = true
+	if _pending_reset:
 		_dispatcher.reset()
-		_pending_flush = false
-		_last_camera_cell_key = ""  # force dispatch on next frame
+		_pending_reset = false
 
-	# Only re-dispatch when the camera crosses a 16u cell boundary. Within a
-	# cell, the LRU output is unchanged, so calling dispatch() would be pure
-	# cache hits + a no-op MultiMesh check. The model tier rides the same
-	# cadence in the editor (its stagger regen only matters in motion).
-	var base_x := int(floor(_camera.global_position.x / 16.0)) * 16
-	var base_z := int(floor(_camera.global_position.z / 16.0)) * 16
-	var key := "%d,%d" % [base_x, base_z]
-	if key == _last_camera_cell_key:
-		return
-	_last_camera_cell_key = key
-	_dispatcher.set_model_anchors(_collect_model_anchors())
-	_dispatcher.dispatch(_camera.global_position, _camera.global_transform)
+	# Fade, alpha-pass selection, and wind are camera/frame dependent, so the
+	# preview is rendered every frame even while the camera remains in one cell.
+	_dispatcher.silhouette_anchors = get_silhouette_anchors()
+	_dispatcher.render_preview(_camera.global_transform)
 
 
-# Near-tier anchors. The witnessed driver is per-SECTOR-ENTITY (the
-# .trn/.bms-placed world models) [orig: Terrain_RenderSectorEntitiesBySide
-# @ 0x5c7d50]; placed world objects are the host equivalent (host mapping).
-# The terrain workspace carries no placed-object index yet, so probe for one
-# duck-typed, then fall back to terrain-content centers (the visible sector
-# centers - the editor analog of the runtime's patch-centers fallback).
-func _collect_model_anchors() -> PackedVector3Array:
-	if _terrain_mesh == null:
-		return PackedVector3Array()
-	if _terrain_mesh.has_method("get_placed_object_positions"):
-		var placed: PackedVector3Array = _terrain_mesh.get_placed_object_positions()
-		if not placed.is_empty():
-			return placed
-	if _terrain_mesh.has_method("get_visible_sector_centers"):
-		return _terrain_mesh.get_visible_sector_centers()
+## Public host diagnostic for ONED/runtime parity probes.
+func get_surface_input_diagnostics() -> SurfaceInputDiagnostics:
+	var diagnostics := SurfaceInputDiagnostics.new()
+	if _dispatcher == null or not _dispatcher.has_method("get_frame_stats"):
+		return diagnostics
+	var telemetry: Variant = _dispatcher.call("get_frame_stats")
+	if telemetry is Dictionary:
+		diagnostics.overrides_active = bool(telemetry.get("surface_input_overrides", false))
+	return diagnostics
+
+
+## Effective Mission blocker resource, exposed for host diagnostics and tests.
+func get_tile_info() -> NovaTerrainTileInfo:
+	return _tile_info
+
+
+## Resolve the current placed-object anchors at render time. The injected
+## provider wins; retaining the old terrain-mesh duck type as a compatibility
+## fallback keeps standalone preview hosts safe.
+func get_silhouette_anchors() -> PackedVector3Array:
+	if _silhouette_anchor_provider.is_valid():
+		var value: Variant = _silhouette_anchor_provider.call()
+		if value is PackedVector3Array:
+			return value
+		if value is Array:
+			var anchors := PackedVector3Array()
+			for entry in value:
+				if entry is Vector3:
+					anchors.append(entry)
+			return anchors
+	if _terrain_mesh != null and _terrain_mesh.has_method("get_placed_object_positions"):
+		return _terrain_mesh.get_placed_object_positions()
 	return PackedVector3Array()

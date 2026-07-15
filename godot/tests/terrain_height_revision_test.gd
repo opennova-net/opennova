@@ -8,6 +8,13 @@ extends GutTest
 # session suite covers. Surface-only edits must never bump it.
 
 const EditorMainScene = preload("res://modtools/editor/editor_main.tscn")
+func _press_primary(editor: Node) -> void:
+	var event := InputEventMouseButton.new()
+	event.button_index = MOUSE_BUTTON_LEFT
+	event.pressed = true
+	editor.handle_viewport_input(event)
+
+
 
 
 func test_new_terrain_bumps_and_revision_is_monotonic() -> void:
@@ -149,3 +156,86 @@ func test_raycast_world_hits_the_live_surface() -> void:
 		Vector3(0.0, 100.0, 0.0), Vector3(0.0, -100.0, 0.0))
 	assert_true(is_nan(bare_hit.x) and is_nan(bare_hit.y) and is_nan(bare_hit.z),
 		"no terrain data -> the all-NAN miss")
+
+
+func test_viewport_deactivation_finalizes_live_surface_input_fallbacks() -> void:
+	var editor = add_child_autofree(EditorMainScene.instantiate()).get_terrain_editor()
+	await get_tree().process_frame
+	editor.new_terrain()
+	editor.set_viewport_active(true, true)
+	var material: ShaderMaterial = editor.terrain_mesh.get_material()
+
+	editor.set_tool(editor.Tool.RAISE)
+	assert_true(material.get_shader_parameter("u_has_heightfield_normal"))
+	_press_primary(editor)
+	assert_true(editor.brush_active)
+	assert_false(material.get_shader_parameter("u_has_heightfield_normal"),
+		"height sculpt temporarily derives normals from the live heightmap")
+	editor.set_viewport_active(false, false)
+	assert_false(editor.brush_active)
+	assert_true(material.get_shader_parameter("u_has_heightfield_normal"),
+		"workspace deactivation restores the cached retail heightfield normal")
+
+	editor.set_viewport_active(true, true)
+	editor.set_tool(editor.Tool.PAINT_DETAIL)
+	var derived_blend: Texture2D = material.get_shader_parameter("u_blendmap")
+	_press_primary(editor)
+	assert_true(editor.brush_active)
+	var raw_blend: Texture2D = material.get_shader_parameter("u_blendmap")
+	assert_ne(raw_blend, derived_blend,
+		"detail painting temporarily binds the raw live blendmap")
+	editor.set_viewport_active(false, false)
+	assert_false(editor.brush_active)
+	assert_ne(material.get_shader_parameter("u_blendmap"), raw_blend,
+		"workspace deactivation drops the raw live blendmap")
+	assert_same(material.get_shader_parameter("u_blendmap"),
+		editor.terrain_mesh.get_surface_inputs().get_blend_texture(),
+		"workspace deactivation applies the rebuilt normalized retail blendmap")
+
+
+func test_tool_switch_finalizes_active_cross_kind_strokes() -> void:
+	var editor = add_child_autofree(EditorMainScene.instantiate()).get_terrain_editor()
+	await get_tree().process_frame
+	editor.new_terrain()
+	editor.set_viewport_active(true, true)
+	var material: ShaderMaterial = editor.terrain_mesh.get_material()
+	var normalized_blend: Texture2D = editor.terrain_mesh.get_surface_inputs().get_blend_texture()
+
+	editor.set_tool(editor.Tool.RAISE)
+	_press_primary(editor)
+	assert_true(editor.brush_active)
+	assert_eq(editor.current_tool, editor.Tool.RAISE,
+		"the public input seam starts a Raise stroke with the selected tool")
+	assert_false(material.get_shader_parameter("u_has_heightfield_normal"),
+		"Raise temporarily derives normals from the live heightmap")
+
+	editor.set_tool(editor.Tool.PAINT_DETAIL)
+	assert_false(editor.brush_active,
+		"Raise -> Paint Detail closes the active height stroke before changing kind")
+	assert_eq(editor.current_tool, editor.Tool.PAINT_DETAIL,
+		"the public tool state advances after finalizing the Raise stroke")
+	assert_true(material.get_shader_parameter("u_has_heightfield_normal"),
+		"closing Raise restores the cached retail heightfield normal")
+	assert_same(material.get_shader_parameter("u_blendmap"), normalized_blend,
+		"closing Raise leaves the normalized retail blendmap bound")
+
+	_press_primary(editor)
+	assert_true(editor.brush_active)
+	assert_eq(editor.current_tool, editor.Tool.PAINT_DETAIL,
+		"the public input seam starts a Paint Detail stroke with the selected tool")
+	var raw_blend: Texture2D = material.get_shader_parameter("u_blendmap")
+	assert_ne(raw_blend, normalized_blend,
+		"Paint Detail temporarily binds the raw live blendmap")
+
+	editor.set_tool(editor.Tool.RAISE)
+	assert_false(editor.brush_active,
+		"Paint Detail -> Raise closes the active blend stroke before changing kind")
+	assert_eq(editor.current_tool, editor.Tool.RAISE,
+		"the public tool state advances after finalizing the Paint Detail stroke")
+	assert_ne(material.get_shader_parameter("u_blendmap"), raw_blend,
+		"closing Paint Detail drops the raw live blendmap")
+	assert_same(material.get_shader_parameter("u_blendmap"),
+		editor.terrain_mesh.get_surface_inputs().get_blend_texture(),
+		"closing Paint Detail binds the rebuilt normalized retail blendmap")
+	assert_true(material.get_shader_parameter("u_has_heightfield_normal"),
+		"switching back to Raise does not strand the temporary normal fallback")

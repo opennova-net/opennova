@@ -5,6 +5,7 @@ add_library(opennova_terrain STATIC
     src/cdep_constraint.cpp
     src/cpt_export.cpp
     src/depthmap.cpp
+    src/foliage_detail_collector.cpp
     src/lod.cpp
     src/lighting.cpp
     src/mesh_data.cpp
@@ -12,6 +13,7 @@ add_library(opennova_terrain STATIC
     src/packing.cpp
     src/quadtree.cpp
     src/terrain_mesh.cpp
+    src/texture_preprocess.cpp
     src/tristrip.cpp
 )
 

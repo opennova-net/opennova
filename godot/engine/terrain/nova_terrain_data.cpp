@@ -445,7 +445,10 @@ void NovaTerrainData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_modulated_colormap_color_world", "world_x", "world_z", "light_color"),
 	                     &NovaTerrainData::get_modulated_colormap_color_world);
 	ClassDB::bind_method(D_METHOD("get_foliage_index_world", "world_x", "world_z"), &NovaTerrainData::get_foliage_index_world);
+	ClassDB::bind_method(D_METHOD("get_surface_index_world", "world_x", "world_z"), &NovaTerrainData::get_surface_index_world);
 	ClassDB::bind_method(D_METHOD("world_to_source_coords", "world_x", "world_z"), &NovaTerrainData::world_to_source_coords);
+	ClassDB::bind_method(D_METHOD("world_to_runtime_source_coords", "world_x", "world_z"),
+	                     &NovaTerrainData::world_to_runtime_source_coords);
 	ClassDB::bind_method(D_METHOD("world_to_sector_cell", "world_x", "world_z"), &NovaTerrainData::world_to_sector_cell);
 	ClassDB::bind_method(D_METHOD("sample_heights_world_live", "world_xz"), &NovaTerrainData::sample_heights_world_live);
 	ClassDB::bind_method(D_METHOD("sample_height_world_live", "world_x", "world_z"),
@@ -526,6 +529,10 @@ void NovaTerrainData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_wrap_y", "value"), &NovaTerrainData::set_wrap_y);
 	ClassDB::bind_method(D_METHOD("get_wrap_y"), &NovaTerrainData::get_wrap_y);
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "wrap_y"), "set_wrap_y", "get_wrap_y");
+	ClassDB::bind_method(D_METHOD("set_quadrant_locks", "locks"),
+	                     &NovaTerrainData::set_quadrant_locks);
+	ClassDB::bind_method(D_METHOD("get_quadrant_locks"),
+	                     &NovaTerrainData::get_quadrant_locks);
 
 	// Environment
 	ADD_GROUP("Environment", "");
@@ -841,6 +848,26 @@ void NovaTerrainData::set_wrap_x(bool p_val) { wrap_x = p_val; _notify_terrain_c
 bool NovaTerrainData::get_wrap_x() const { return wrap_x; }
 void NovaTerrainData::set_wrap_y(bool p_val) { wrap_y = p_val; _notify_terrain_changed(); }
 bool NovaTerrainData::get_wrap_y() const { return wrap_y; }
+void NovaTerrainData::set_quadrant_locks(const PackedInt32Array &p_locks) {
+	auto value_at = [&](int p_index) {
+		return p_index < p_locks.size() ? p_locks[p_index] : 0;
+	};
+	trn.lock_topleft = {value_at(0), value_at(1)};
+	trn.lock_topright = {value_at(2), value_at(3)};
+	trn.lock_bottomleft = {value_at(4), value_at(5)};
+	trn.lock_bottomright = {value_at(6), value_at(7)};
+	_notify_terrain_changed();
+}
+PackedInt32Array NovaTerrainData::get_quadrant_locks() const {
+	PackedInt32Array locks;
+	locks.resize(8);
+	const opennova::TerrainQuadrantLocks source = trn.get_quadrant_locks();
+	for (int quadrant = 0; quadrant < 4; ++quadrant) {
+		locks.set(quadrant * 2, source[quadrant].x);
+		locks.set(quadrant * 2 + 1, source[quadrant].y);
+	}
+	return locks;
+}
 void NovaTerrainData::set_horizon(double p_val) { horizon = p_val; _notify_terrain_changed(); }
 double NovaTerrainData::get_horizon() const { return horizon; }
 void NovaTerrainData::set_sector_grid(const PackedInt32Array &p_grid) {
@@ -1510,6 +1537,21 @@ Vector2 NovaTerrainData::world_to_source_coords(double world_x, double world_z) 
 	return Vector2(static_cast<real_t>(r.source_x), static_cast<real_t>(r.source_z));
 }
 
+Vector2 NovaTerrainData::world_to_runtime_source_coords(float world_x, float world_z) const {
+	if (sector_grid.size() < 256) {
+		return Vector2(-1.0f, -1.0f);
+	}
+	const opennova::terrain::SectorLayout layout =
+	        editor_layout_from(sector_grid, origin_x, origin_y, sector_count, sector_rows);
+	const opennova::terrain::CoordsResult<float> r =
+	        opennova::terrain::coords_world_to_source<float>(
+	                layout, world_x, world_z, opennova::terrain::coords_runtime_options());
+	if (!r.valid) {
+		return Vector2(-1.0f, -1.0f);
+	}
+	return Vector2(r.source_x, r.source_z);
+}
+
 Vector2i NovaTerrainData::world_to_sector_cell(double world_x, double world_z) const {
 	// World -> authored sector-grid cell. Mirrors EditorTerrainMesh's
 	// extent-guarded cell lookup: floor(world / SECTOR_SIZE) minus the origin,
@@ -1720,6 +1762,25 @@ int NovaTerrainData::get_foliage_index_world(float world_x, float world_z) const
 		return 0;
 	}
 	return static_cast<int>(foliage_map_resource->get_index(map_x, map_y));
+}
+
+int NovaTerrainData::get_surface_index_world(float world_x, float world_z) const {
+	if (!loaded || charmap_width <= 0 || charmap_height <= 0 ||
+	    charmap_indices.size() < static_cast<size_t>(charmap_width * charmap_height)) {
+		return 0;
+	}
+
+	TerrainWorldSample sample;
+	if (!resolve_world_sample(trn, world_x, world_z, sample)) {
+		return 0;
+	}
+
+	const int map_x = opennova::foliage_map_x_from_heightmap_x(sample.source_x, charmap_width);
+	const int map_y = opennova::foliage_map_y_from_heightmap_y(sample.source_z, charmap_height);
+	if (map_x < 0 || map_x >= charmap_width || map_y < 0 || map_y >= charmap_height) {
+		return 0;
+	}
+	return static_cast<int>(charmap_indices[static_cast<size_t>(map_y * charmap_width + map_x)]);
 }
 
 Dictionary NovaTerrainData::load_foliage_indices() const {

@@ -30,16 +30,27 @@ void push_error_message(const std::string &message) {
 	}
 }
 
+opennova::TerrainQuadrantLocks to_quadrant_locks(
+		const PackedInt32Array &values) {
+	opennova::TerrainQuadrantLocks locks{};
+	for (int quadrant = 0; quadrant < 4; ++quadrant) {
+		const int base = quadrant * 2;
+		locks[quadrant].x = base < values.size() ? values[base] : 0;
+		locks[quadrant].y = base + 1 < values.size() ? values[base + 1] : 0;
+	}
+	return locks;
+}
+
 } // namespace
 
 NovaTerrainBuilder::NovaTerrainBuilder() = default;
 NovaTerrainBuilder::~NovaTerrainBuilder() = default;
 
 void NovaTerrainBuilder::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("build_from_data", "heightmap_raw16", "output_dir", "terrain_name", "creator", "depth_format"),
-	                     &NovaTerrainBuilder::build_from_data, DEFVAL(1));
-	ClassDB::bind_method(D_METHOD("begin_build_from_data", "heightmap_raw16", "output_dir", "terrain_name", "creator", "depth_format"),
-	                     &NovaTerrainBuilder::begin_build_from_data, DEFVAL(1));
+	ClassDB::bind_method(D_METHOD("build_from_data", "heightmap_raw16", "output_dir", "terrain_name", "creator", "depth_format", "quadrant_locks"),
+	                     &NovaTerrainBuilder::build_from_data, DEFVAL(1), DEFVAL(PackedInt32Array()));
+	ClassDB::bind_method(D_METHOD("begin_build_from_data", "heightmap_raw16", "output_dir", "terrain_name", "creator", "depth_format", "quadrant_locks"),
+	                     &NovaTerrainBuilder::begin_build_from_data, DEFVAL(1), DEFVAL(PackedInt32Array()));
 	ClassDB::bind_static_method("NovaTerrainBuilder",
 	                            D_METHOD("save_image_tga", "image", "path"),
 	                            &NovaTerrainBuilder::save_image_tga);
@@ -53,6 +64,7 @@ NovaTerrainBuilder::BuildExecutionResult NovaTerrainBuilder::_build_from_data_im
 		const std::string &output_dir,
 		const std::string &terrain_name,
 		const std::string &creator,
+		const opennova::TerrainQuadrantLocks &quadrant_locks,
 		opennova::DepthFormat depth_format,
 		const opennova::TerrainBuildProgressCallback &progress_callback) {
 	constexpr int EXPECTED_SIZE = 1024 * 1024 * 2;
@@ -80,6 +92,10 @@ NovaTerrainBuilder::BuildExecutionResult NovaTerrainBuilder::_build_from_data_im
 	project.path = "";
 	project.depthmap = depthmap_path;
 	project.output = terrain_name.empty() ? "terrain" : terrain_name;
+	project.lock_topleft = quadrant_locks[0];
+	project.lock_topright = quadrant_locks[1];
+	project.lock_bottomleft = quadrant_locks[2];
+	project.lock_bottomright = quadrant_locks[3];
 
 	try {
 		opennova::TerrainBuildOptions options;
@@ -109,12 +125,14 @@ Error NovaTerrainBuilder::build_from_data(const PackedByteArray &p_heightmap_raw
                                           const String &p_output_dir,
                                           const String &p_terrain_name,
                                           const String &p_creator,
-                                          int p_depth_format) {
+                                          int p_depth_format,
+                                          const PackedInt32Array &p_quadrant_locks) {
 	auto result = _build_from_data_impl(
 		to_byte_vector(p_heightmap_raw16),
 		p_output_dir.utf8().get_data(),
 		p_terrain_name.utf8().get_data(),
 		p_creator.utf8().get_data(),
+		to_quadrant_locks(p_quadrant_locks),
 		_depth_format_from_int(p_depth_format));
 	push_error_message(result.message);
 	return result.error;
@@ -125,7 +143,8 @@ Ref<NovaTerrainBuildJob> NovaTerrainBuilder::begin_build_from_data(
 		const String &p_output_dir,
 		const String &p_terrain_name,
 		const String &p_creator,
-		int p_depth_format) {
+		int p_depth_format,
+		const PackedInt32Array &p_quadrant_locks) {
 	Ref<NovaTerrainBuildJob> job;
 	job.instantiate();
 	job->_start_data(
@@ -133,7 +152,8 @@ Ref<NovaTerrainBuildJob> NovaTerrainBuilder::begin_build_from_data(
 		p_output_dir.utf8().get_data(),
 		p_terrain_name.utf8().get_data(),
 		p_creator.utf8().get_data(),
-		_depth_format_from_int(p_depth_format));
+		_depth_format_from_int(p_depth_format),
+		to_quadrant_locks(p_quadrant_locks));
 	return job;
 }
 
