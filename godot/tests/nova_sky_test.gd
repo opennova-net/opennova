@@ -83,20 +83,20 @@ func test_flat_pass_does_not_stuff_keyframed_uniforms() -> void:
 
 func test_cloud_textures_rebind_and_clear_after_environment_edits() -> void:
 	var ctx := _make()
-	ctx.sky._process(0.016)
+	simulate(ctx.sky, 1, 0.016)
 	var mat: ShaderMaterial = ctx.sky.sky_material
 	var before: Texture2D = mat.get_shader_parameter("u_cloud_tex1")
 	assert_not_null(before, "fixture starts with a bound cloud layer")
 
 	ctx.env.set_sky_map1(ctx.env.get_sky_map2())
-	ctx.sky._process(0.016)
+	simulate(ctx.sky, 1, 0.016)
 	var after: Texture2D = mat.get_shader_parameter("u_cloud_tex1")
 	assert_ne(after, before,
 			"editing a cloud map refreshes the live sky binding")
 
 	ctx.env.set_sky_map1("no_such_cloud_a.pcx")
 	ctx.env.set_sky_map2("no_such_cloud_b.pcx")
-	ctx.sky._process(0.016)
+	simulate(ctx.sky, 1, 0.016)
 	assert_eq(mat.get_shader_parameter("u_has_clouds"), false,
 			"removing both maps disables stale cloud sampling")
 
@@ -110,6 +110,15 @@ func test_dome_shader_anchors_to_each_render_pass_camera() -> void:
 			"the pass-relative world point overrides the final clip position")
 	assert_false(code.contains("MODEL_MATRIX * vec4(scaled"),
 			"the reflection pass must not reuse the main-camera model anchor")
+
+
+func test_proximity_uses_d3d_depth_without_changing_godot_position() -> void:
+	var shader := load(SKY_SHADER) as Shader
+	var code := shader.code
+	assert_true(code.contains("return vec3(clip.xy, clip.w - clip.z);"),
+			"proximity converts Godot reverse-Z to the original D3D depth convention")
+	assert_true(code.contains("POSITION = clip;"),
+			"the render position stays in Godot's native clip convention")
 
 
 func test_dome_cannot_be_culled_before_reflection_pass_reanchor() -> void:

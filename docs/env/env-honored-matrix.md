@@ -86,10 +86,10 @@ cloudbase/cloudedge/cloudhighlight lerp chain, blended by `α = (tex0.a·tex1.a�
 with the builder-formula dome normals, Y-only height scale, half-camera-height anchor,
 dp3 clip-space proximity, and VS dome fog against the shared scene fog color. Every
 invented term of the old shader (`pow 64/4/48` glows, `u_cloud_tint·2`, elevation
-smoothsteps, clear-color floor mix) is deleted. Residual caveat (tracked under
-env-tod-re.md divergence #20): the clip-space proximity dot runs in Godot's clip
-conventions rather than D3D's — same construction, slightly different z scale; pending
-a visual A/B against retail. Sun/moon glow no longer comes from the dome shader at all —
+smoothsteps, clear-color floor mix) is deleted. The host preserves Godot reverse-Z for
+the rendered `POSITION`, but converts the proximity vectors to D3D forward depth
+(`z = w - z`) before the witnessed dp3; this closes env #20's residual view-motion
+facet. Sun/moon glow no longer comes from the dome shader at all —
 celestial bodies are `NovaCelestial`'s job, as in the original.
 
 ## BMS mission overrides

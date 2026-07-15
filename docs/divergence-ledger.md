@@ -611,7 +611,7 @@ The Boot-resources row is the R8 audit doing its job: an audit that converts
 unknown unknowns into tracked rows RAISES the count before the burn-down
 lowers it (as PAR-R1..R7 did for their six new domains).
 
-Permanent register size: **19** (below). `UNAUDITED` systems: **0** — the
+Permanent register size: **18** (below). `UNAUDITED` systems: **0** — the
 runtime-render systems reopened the set on 2026-07-05 (the REN audit track
 below, [ADR 0023](adr/0023-render-visual-parity.md)); REN-2 converted the
 materials/state system, REN-3 the draw-order system, and REN-5 the lighting
@@ -634,7 +634,6 @@ one-line rationale for why porting it would be *wrong*.
 
 | ID | Divergence | Why porting it would be wrong |
 |---|---|---|
-| env #20 (residual) | After closing the six-color `2/255` upload, live cloud rebinding, and per-pass dome anchor, the clip-space proximity dot still runs in Godot's reverse-Z conventions rather than D3D's | The remaining z-scale difference is the host graphics API's clip space, not a math error to "fix". |
 | D-3DI-1 | MTRX byte-exact output needs OED's x87 `_PC_24` precision; a 64-bit SSE2 build diverges in low FP bits | Byte-exactness is a property of the original's 24-bit x87 mantissa; a modern SSE2 host cannot match the low bits without the documented `_controlfp(_PC_24)` parity sub-build. |
 | D-MNU-4 | The original truncates each scaled quad rect to int per element; the reimpl applies one float `CanvasItem` scale | A sub-pixel cosmetic difference; reproducing per-element int truncation would fight Godot's scene-graph scale model for no visible gain. |
 | D-PTL-2 | One mesh batch per graphic layer vs the engine's shared vertex/index buffer pooling | A host renderer architecture choice; visually equivalent, and pooling is a performance strategy, not observable behavior. |

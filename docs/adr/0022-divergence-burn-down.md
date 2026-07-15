@@ -72,8 +72,6 @@ prohibited, so deliberately *not* reproducing them is the faithful choice.
 **Platform / host-structural.** The host cannot or should not reproduce the original's
 substrate; the divergence is wire/visually equivalent or host-internal.
 
-- **env #20 (residual)** — the ported sky-dome combine computes its clip-space proximity
-  dot in Godot's reverse-Z clip conventions, not D3D's. Same construction, host z-scale.
 - **D-3DI-1** — byte-exact MTRX output requires OED's x87 `_PC_24` (24-bit) precision; a
   64-bit SSE2 build diverges in low FP bits. The record documents the
   `_controlfp(_PC_24, _MCW_PC)` parity sub-build for when byte-exactness is needed.

@@ -45,12 +45,20 @@ varying vec2 v_uv1;
 varying vec2 v_uv2;
 
 
+// Godot's reverse-Z depth is the complement of D3D9's forward [0, 1] depth.
+// Convert only the proximity vectors; POSITION must remain native Godot clip.
+vec3 d3d_clip_xyz(vec4 clip) {
+	return vec3(clip.xy, clip.w - clip.z);
+}
+
+
 // Clip-space proximity of this vertex to a direction: the original transforms
-// (eye + dir*2000) through view-proj and dp3's the normalized xyz of both
+// (eye + dir*2000) through view-proj and dp3's the normalized D3D xyz of both
 // [orig: SkyVS dp3 r5, r4, c14; c14 upload @ 0x57960e..0x579641].
-float prox_to(vec3 clip_dir, vec3 eye, vec3 dir, mat4 view_proj) {
+float prox_to(vec4 clip, vec3 eye, vec3 dir, mat4 view_proj) {
 	vec4 ref_clip = view_proj * vec4(eye + dir * 2000.0, 1.0);
-	return max(dot(clip_dir, normalize(ref_clip.xyz)), 0.0);
+	return max(dot(normalize(d3d_clip_xyz(clip)),
+			normalize(d3d_clip_xyz(ref_clip))), 0.0);
 }
 
 
@@ -74,7 +82,6 @@ void vertex() {
 	vec3 world_pos = vec3(eye.x, eye.y * 0.5, eye.z) + scaled;
 	mat4 view_proj = PROJECTION_MATRIX * VIEW_MATRIX;
 	vec4 clip = view_proj * vec4(world_pos, 1.0);
-	vec3 clip_dir = normalize(clip.xyz);
 
 	// Gradient driver t = 0.5*dot(N_world, dir) + 0.5; pass 1 always uses the
 	// sun, pass 2 the active light [orig: SkyVS m3x3 v3,c4 / dp3 ..,c13 / mad].
@@ -83,8 +90,8 @@ void vertex() {
 	vec3 sky_sun = u_sky_base + (u_sky_bright - u_sky_base) * t_sun;
 	vec3 sky_light = u_sky_base + (u_sky_bright - u_sky_base) * t_light;
 
-	float prox_sun = prox_to(clip_dir, eye, u_sun_dir, view_proj);
-	float prox_light = prox_to(clip_dir, eye, u_light_dir, view_proj);
+	float prox_sun = prox_to(clip, eye, u_sun_dir, view_proj);
+	float prox_light = prox_to(clip, eye, u_light_dir, view_proj);
 	float p4_sun = prox_sun * prox_sun * prox_sun * prox_sun;
 	float p8_sun = p4_sun * p4_sun;
 	float p4_light = prox_light * prox_light * prox_light * prox_light;

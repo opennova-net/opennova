@@ -254,8 +254,9 @@ func test_weather_publishes_the_active_moon_direction_at_night() -> void:
 	env_node.time_of_day = 2200.0
 
 	var weather := DirectionCaptureWeather.new()
+	weather.environment_path = env_node.get_path()
 	add_child_autofree(weather)
-	weather._write_shader_globals(env_node)
+	simulate(weather, 1, 0.016)
 	assert_true(weather.published_direction.is_equal_approx(env_node.get_light_direction()),
 			"terrain and foliage globals follow Environment_GetLightDirectionFloat")
 	assert_false(weather.published_direction.is_equal_approx(env_node.get_sun_direction()),
