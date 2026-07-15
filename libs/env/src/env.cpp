@@ -543,12 +543,9 @@ Vec3 compute_sun_direction(float tod_time) {
 	dir.x = -22414.0f / 65536.0f;
 	dir.y = -(61583.0f / 65536.0f) * std::cos(angle);
 	dir.z = (61583.0f / 65536.0f) * std::sin(angle);
-	const float len = std::sqrt(dir.x * dir.x + dir.y * dir.y + dir.z * dir.z);
-	if (len > 0.0f) {
-		dir.x /= len;
-		dir.y /= len;
-		dir.z /= len;
-	}
+	// The getter exposes the fixed tuple directly; terrain byte-packs it without
+	// another normalization [orig: Environment_GetLightDirectionFloat @ 0x57d870,
+	// tuple copy @ 0x57d8be..0x57d8cd; PolyTrn_RenderTile @ 0x60e1d9..0x60e331].
 	return dir;
 }
 
@@ -561,12 +558,8 @@ Vec3 compute_moon_direction(float tod_time) {
 	dir.x = -32768.0f / 65536.0f;
 	dir.y = -(56755.0f / 65536.0f) * std::cos(angle);
 	dir.z = (56755.0f / 65536.0f) * std::sin(angle);
-	const float len = std::sqrt(dir.x * dir.x + dir.y * dir.y + dir.z * dir.z);
-	if (len > 0.0f) {
-		dir.x /= len;
-		dir.y /= len;
-		dir.z /= len;
-	}
+	// The active getter copies this selected moon tuple through the same
+	// direct path [orig: Environment_GetLightDirectionFloat @ 0x57d870].
 	return dir;
 }
 

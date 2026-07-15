@@ -5,6 +5,13 @@ extends GutTest
 const FULL_00_ENV_FIXTURE := "res://../fixtures/env/full_00.env"
 
 
+class DirectionCaptureWeather extends NovaWeather:
+	var published_direction := Vector3.ZERO
+
+	func _publish_light_direction(direction: Vector3) -> void:
+		published_direction = direction
+
+
 func _load_full_00() -> EnvFile:
 	var env := EnvFile.new()
 	env.set_source_path(ProjectSettings.globalize_path(FULL_00_ENV_FIXTURE))
@@ -40,7 +47,11 @@ func test_env_interpolation_and_export_round_trip() -> void:
 	var midday := env.interpolate_time_of_day(1200.0)
 	assert_true(midday.has("sun"), "Interpolated TOD state should include sun lighting.")
 	assert_true((midday["sun"] as Vector3).length() > 0.0, "Midday sun lighting should be non-zero.")
-	assert_true(absf(env.compute_sun_direction(1200.0).length() - 1.0) < 0.01, "Sun direction should be normalized.")
+	var sun_dir := env.compute_sun_direction(1200.0)
+	assert_almost_eq(sun_dir.x, -22414.0 / 65536.0, 1.0e-7,
+			"sun x preserves the direct fixed getter tuple")
+	assert_almost_eq(sun_dir.y, 61583.0 / 65536.0, 1.0e-7,
+			"sun magnitude preserves the direct fixed getter tuple")
 
 	env.set_env_name("Round Trip")
 	var output_path := "user://round_trip.env"
@@ -195,6 +206,60 @@ func test_fog_start_follows_engine_policy() -> void:
 	assert_almost_eq(env.get_fog_start(), 500.0, 0.5, "fog_type 2 starts at half the end distance.")
 	env.set_fog_type(3)
 	assert_almost_eq(env.get_fog_start(), 250.0, 0.5, "fog_type 3 starts at quarter the end distance.")
+
+func test_smoothed_fog_start_tracks_current_end_and_invalidates_consumers() -> void:
+	var env_node := NovaEnvironment.new()
+	add_child_autofree(env_node)
+	env_node.environment_data = _load_full_00()
+	env_node.set_weather_driven(true)
+
+	var generation_before := env_node.get_env_generation()
+	env_node.set_smoothed_scalars(640.0, env_node.get_sky_height_target(), 0.0)
+	assert_almost_eq(env_node.get_fog_level(), 640.0, 0.001,
+			"weather consumers read the smoothed fog end")
+	assert_almost_eq(env_node.get_fog_start(), 320.0, 0.001,
+			"type-2 fog start follows half of that same smoothed end")
+	assert_gt(env_node.get_env_generation(), generation_before,
+			"moving fog bounds invalidate cached object and clear-state consumers")
+
+	var fine_step_generation := env_node.get_env_generation()
+	env_node.set_smoothed_scalars(640.001, env_node.get_sky_height_target(), 0.0)
+	assert_gt(env_node.get_env_generation(), fine_step_generation,
+			"sub-epsilon fixed spring steps still invalidate renderer consumers")
+
+	var settled_generation := env_node.get_env_generation()
+	env_node.set_smoothed_scalars(640.001, env_node.get_sky_height_target(), 0.0)
+	assert_eq(env_node.get_env_generation(), settled_generation,
+			"a settled fog spring does not churn renderer generations")
+
+
+func test_object_lighting_uses_the_active_moon_direction_at_night() -> void:
+	var env_node := NovaEnvironment.new()
+	add_child_autofree(env_node)
+	env_node.environment_data = _load_full_00()
+	env_node.time_of_day = 2200.0
+
+	var values = NovaObjectModel.environment_values_from(env_node)
+	var expected := -env_node.get_light_direction().normalized()
+	assert_true(values.dir.is_equal_approx(expected),
+			"object directional light follows Environment_GetLightDirectionFloat")
+	assert_false(values.dir.is_equal_approx(-env_node.get_sun_direction().normalized()),
+			"night objects must not stay pinned to the solar highlight vector")
+
+
+func test_weather_publishes_the_active_moon_direction_at_night() -> void:
+	var env_node := NovaEnvironment.new()
+	add_child_autofree(env_node)
+	env_node.environment_data = _load_full_00()
+	env_node.time_of_day = 2200.0
+
+	var weather := DirectionCaptureWeather.new()
+	add_child_autofree(weather)
+	weather._write_shader_globals(env_node)
+	assert_true(weather.published_direction.is_equal_approx(env_node.get_light_direction()),
+			"terrain and foliage globals follow Environment_GetLightDirectionFloat")
+	assert_false(weather.published_direction.is_equal_approx(env_node.get_sun_direction()),
+			"night shader globals must not stay pinned to the solar highlight vector")
 
 
 func test_day_phase_selects_night_and_day() -> void:

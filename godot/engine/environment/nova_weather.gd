@@ -200,7 +200,10 @@ func _write_shader_globals(env: Node) -> void:
 	RenderingServer.global_shader_parameter_set(&"opennova_sun_light", get_smooth_sun())
 	RenderingServer.global_shader_parameter_set(&"opennova_sky_ambient", get_smooth_sky())
 	RenderingServer.global_shader_parameter_set(&"opennova_fog_color", get_smooth_fog())
-	RenderingServer.global_shader_parameter_set(&"opennova_sun_direction", env.get_sun_direction())
+	# Terrain tile DOT3 and foliage follow the current environment light
+	# (sun by day, moon by night), not the always-solar sky highlight vector.
+	# [orig: Environment_GetLightDirectionFloat @ 0x57d870]
+	_publish_light_direction(env.get_light_direction())
 	var fog_end: float = float(env.get_fog_level())
 	var fog_start: float = float(env.get_fog_start()) if env.has_method("get_fog_start") else 0.5
 	RenderingServer.global_shader_parameter_set(&"opennova_fog_end", fog_end)
@@ -211,3 +214,7 @@ func _write_shader_globals(env: Node) -> void:
 	# The modulator /64 gain (iris exposure) for self-lit/effect shaders
 	# [orig: Render_UnpackModulatorToLightScale @ 0x58db30].
 	RenderingServer.global_shader_parameter_set(&"opennova_color_src_gain", _core.get_color_src_gain())
+
+
+func _publish_light_direction(direction: Vector3) -> void:
+	RenderingServer.global_shader_parameter_set(&"opennova_sun_direction", direction)

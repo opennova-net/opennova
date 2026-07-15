@@ -439,8 +439,8 @@ void generate_star_instances(StarInstance *out, uint32_t &prng_state);
 // (r16 & mask)) >> 1; returns the new brightness [orig: @ 0x5adb45].
 int32_t star_twinkle_tick(StarInstance &star, uint32_t &prng_state);
 
-// The near-light cull: HIDDEN when dot(light_dir_norm, star_dir) > 64225
-// (16.16 ~0.98) [orig: @ 0x5adac4]. light_dir is the normalized active
+// The near-light cull: HIDDEN when dot(light_dir_fixed, star_dir) > 64225
+// (16.16 ~0.98) [orig: @ 0x5adac4]. light_dir is the direct near-unit active
 // light direction in engine axes.
 bool star_visible_fixed(const StarInstance &star, const int32_t light_dir_fp[3]);
 // moon = clamp01((fogDistInt - 400) / 600) * (1 - overcast)  (the no-fog-
@@ -532,8 +532,8 @@ float iris_luminance(const Rgb &c);
 
 // The iris auto-exposure gain. `directional`/`sky`/`ground` are the outdoor
 // light blocks (0..1 per channel; indoors substitutes ceiling/floor for
-// sky/ground and zeroes directional). `dir_x/y/z` is the normalized light
-// direction. Returns the modulator gain, int-truncated and clamped [0,255].
+// sky/ground and zeroes directional). `dir_x/y/z` is the direct near-unit
+// light getter direction. Returns the modulator gain, int-truncated and clamped [0,255].
 int iris_gain(const Rgb &directional, const Rgb &sky, const Rgb &ground,
               float dir_x, float dir_y, float dir_z,
               float iris_center, float iris_percent);

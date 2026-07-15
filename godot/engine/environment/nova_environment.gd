@@ -509,11 +509,9 @@ func get_fog_level_target() -> float:
 
 
 func get_fog_start() -> float:
-	# Policy lives in libs/env env_render [orig: Render_SetFogState @ 0x58a950];
-	# overcast stays 0 until a weather system drives it. The bare-host fallback
-	# runs the SAME libs table (no duplicated policy).
-	if environment_data:
-		return environment_data.get_fog_start(0.0)
+	# Policy lives in libs/env env_render [orig: Render_SetFogState @ 0x58a950].
+	# Consume the smoothed CURRENT end so both bounds stay on the same curve
+	# during the 62 Hz fog spring; overcast remains 0 until weather drives it.
 	return EnvFile.fog_start_for(get_fog_type(), get_fog_level(), 0.0)
 
 
@@ -544,9 +542,12 @@ func get_sky_height_target() -> float:
 ## (the same writeback seam as the smoothed colors), so every scalar
 ## consumer serves the ramped values.
 func set_smoothed_scalars(fog_distance: float, sky_height: float, sun_dim_pct: float = 0.0) -> void:
+	var fog_changed := _fog_dist_smoothed != fog_distance
 	_fog_dist_smoothed = fog_distance
 	_sky_height_smoothed = sky_height
 	_sun_dim_smoothed = sun_dim_pct
+	if fog_changed:
+		_env_generation += 1
 
 
 ## The smoothed Env_SunDimPct channel (0..100; default 0 — nothing writes the

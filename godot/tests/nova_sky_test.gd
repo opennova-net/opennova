@@ -26,10 +26,10 @@ func test_keyframed_path_pushes_spec_uniforms() -> void:
 	ctx.sky._process(0.016)
 	var mat: ShaderMaterial = ctx.sky.sky_material
 	assert_eq(mat.get_shader_parameter("u_flat_pass"), false, "advanced clouds take the keyframed path")
-	assert_eq(mat.get_shader_parameter("u_sky_base"), ctx.env_node.get_sky_base(), "c11 skybase")
-	assert_eq(mat.get_shader_parameter("u_cloud_base"), ctx.env_node.get_cloud_base(), "c24 cloudbase")
-	assert_eq(mat.get_shader_parameter("u_cloud_highlight"), ctx.env_node.get_cloud_highlight(), "c27 cloudhighlight")
-	assert_eq(mat.get_shader_parameter("u_cloud_edge"), ctx.env_node.get_cloud_edge(), "c26 cloudedge")
+	assert_eq(mat.get_shader_parameter("u_sky_base"), ctx.env_node.get_sky_base() * 2.0, "c11 skybase")
+	assert_eq(mat.get_shader_parameter("u_cloud_base"), ctx.env_node.get_cloud_base() * 2.0, "c24 cloudbase")
+	assert_eq(mat.get_shader_parameter("u_cloud_highlight"), ctx.env_node.get_cloud_highlight() * 2.0, "c27 cloudhighlight")
+	assert_eq(mat.get_shader_parameter("u_cloud_edge"), ctx.env_node.get_cloud_edge() * 2.0, "c26 cloudedge")
 	assert_eq(mat.get_shader_parameter("u_sun_dir"), ctx.env_node.get_sun_direction(),
 		"pass 1 is always sun-driven [orig: render_skybox @ 0x579287]")
 	assert_eq(mat.get_shader_parameter("u_light_dir"), ctx.env_node.get_light_direction(),
@@ -37,6 +37,35 @@ func test_keyframed_path_pushes_spec_uniforms() -> void:
 	assert_eq(mat.get_shader_parameter("u_fog_color"), ctx.env_node.get_fog_color(),
 		"the dome fogs with the shared scene fog color [orig: CD3DDevice_SetActiveFogColor @ 0x677040]")
 	assert_eq(float(mat.get_shader_parameter("u_fog_end")), ctx.env_node.get_fog_level(), "dome fog end distance")
+
+
+func test_keyframed_colors_use_retail_upload_scale_without_redoubling_fog() -> void:
+	var ctx := _make()
+	simulate(ctx.sky, 1, 0.016)
+	var mat: ShaderMaterial = ctx.sky.sky_material
+	var actual := [
+		_shader_color_units(mat, "u_sky_base"),
+		_shader_color_units(mat, "u_sky_bright"),
+		_shader_color_units(mat, "u_sky_highlight"),
+		_shader_color_units(mat, "u_cloud_base"),
+		_shader_color_units(mat, "u_cloud_highlight"),
+		_shader_color_units(mat, "u_cloud_edge"),
+		_shader_color_units(mat, "u_fog_color"),
+	]
+	assert_eq(actual, [
+		[114, 154, 276],
+		[38, 38, 62],
+		[292, 324, 294],
+		[274, 274, 274],
+		[38, 46, 18],
+		[308, 316, 330],
+		[154, 182, 255],
+	], "six sky/cloud constants use retail 2/255; active packed fog stays byte/255")
+
+
+func _shader_color_units(material: ShaderMaterial, parameter: StringName) -> Array[int]:
+	var value: Vector3 = material.get_shader_parameter(parameter)
+	return [roundi(value.x * 255.0), roundi(value.y * 255.0), roundi(value.z * 255.0)]
 
 
 func test_flat_pass_does_not_stuff_keyframed_uniforms() -> void:
@@ -51,6 +80,44 @@ func test_flat_pass_does_not_stuff_keyframed_uniforms() -> void:
 		"the flat dome color is cloud_rgb [orig: render_skybox @ 0x579b42]")
 	assert_eq(mat.get_shader_parameter("u_sky_base"), keyframed_base,
 		"the flat pass no longer overwrites the keyframed uniforms")
+
+func test_cloud_textures_rebind_and_clear_after_environment_edits() -> void:
+	var ctx := _make()
+	ctx.sky._process(0.016)
+	var mat: ShaderMaterial = ctx.sky.sky_material
+	var before: Texture2D = mat.get_shader_parameter("u_cloud_tex1")
+	assert_not_null(before, "fixture starts with a bound cloud layer")
+
+	ctx.env.set_sky_map1(ctx.env.get_sky_map2())
+	ctx.sky._process(0.016)
+	var after: Texture2D = mat.get_shader_parameter("u_cloud_tex1")
+	assert_ne(after, before,
+			"editing a cloud map refreshes the live sky binding")
+
+	ctx.env.set_sky_map1("no_such_cloud_a.pcx")
+	ctx.env.set_sky_map2("no_such_cloud_b.pcx")
+	ctx.sky._process(0.016)
+	assert_eq(mat.get_shader_parameter("u_has_clouds"), false,
+			"removing both maps disables stale cloud sampling")
+
+
+func test_dome_shader_anchors_to_each_render_pass_camera() -> void:
+	var shader := load(SKY_SHADER) as Shader
+	var code := shader.code
+	assert_true(code.contains("vec3 world_pos = vec3(eye.x, eye.y * 0.5, eye.z) + scaled;"),
+			"the dome anchor comes from the active render pass camera")
+	assert_true(code.contains("POSITION = clip;"),
+			"the pass-relative world point overrides the final clip position")
+	assert_false(code.contains("MODEL_MATRIX * vec4(scaled"),
+			"the reflection pass must not reuse the main-camera model anchor")
+
+
+func test_dome_cannot_be_culled_before_reflection_pass_reanchor() -> void:
+	var ctx := _make()
+	assert_true(ctx.sky.mesh_instance.extra_cull_margin >= 1.0e5,
+			"the CPU AABB stays conservative while the shader moves the dome per pass")
+	assert_true(ctx.sky.mesh_instance.ignore_occlusion_culling,
+			"reflection-pass sky must reach the vertex shader even when the main view occludes it")
 
 
 func test_cloud_tint_uniform_is_gone_from_the_shader() -> void:

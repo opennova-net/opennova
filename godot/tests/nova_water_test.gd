@@ -33,7 +33,30 @@ func _make_water_fixture() -> Dictionary:
 	strip_vp.add_child(cam)
 	cam.global_position = Vector3(100.3, 27.0, -33.7)
 	cam.make_current()
-	return {"water": water, "camera": cam}
+	return {"water": water, "camera": cam, "viewport": strip_vp}
+
+func test_reflection_rtt_is_retail_square_and_preserves_horizontal_fov() -> void:
+	var fixture := _make_water_fixture()
+	var water: Node = fixture["water"]
+	var strip_vp: SubViewport = fixture["viewport"]
+	var cam: Camera3D = fixture["camera"]
+
+	cam.fov = NovaSimulation.fov_vertical_from_horizontal(
+			72.0, float(strip_vp.size.x) / float(strip_vp.size.y))
+	simulate(water, 1, TICK)
+	assert_eq(water.reflection_viewport.size, Vector2i(256, 256),
+			"retail detail 2 allocates a fixed square RTT [orig: sub_5C08B0 @ 0x5c08d1]")
+	assert_almost_eq(water.reflection_camera.fov, 72.0, 0.001,
+			"square projection preserves the source horizontal FOV")
+
+	strip_vp.size = Vector2i(1600, 900)
+	cam.fov = NovaSimulation.fov_vertical_from_horizontal(
+			72.0, float(strip_vp.size.x) / float(strip_vp.size.y))
+	simulate(water, 1, TICK)
+	assert_eq(water.reflection_viewport.size, Vector2i(256, 256),
+			"display resizing must not resize Water_ReflectionTexture")
+	assert_almost_eq(water.reflection_camera.fov, 72.0, 0.001,
+			"the new source aspect still projects the same horizontal field")
 
 
 func test_above_water_renders_blend_side() -> void:
