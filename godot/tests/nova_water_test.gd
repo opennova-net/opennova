@@ -117,7 +117,7 @@ func _assert_reflection_projection_registered(water: Node, cam: Camera3D,
 			"u_reflection_uv_scale")
 	var sampled_uv := Vector2(0.5, 0.5) + (
 			raw_row_uv - Vector2(0.5, 0.5)) * uv_scale
-	var mirror_uv := (
+	var mirror_uv: Vector2 = (
 			water.reflection_camera.unproject_position(world_point) / mirror_size)
 	var one_rtt_texel := 1.0 / float(water.reflection_viewport.size.x)
 	assert_almost_eq(sampled_uv.x, mirror_uv.x, one_rtt_texel,
@@ -149,7 +149,7 @@ func _assert_reflection_projection_registered(water: Node, cam: Camera3D,
 		var raw_strip_uv := Vector2(custom0[base + 2], custom0[base + 3])
 		var sampled_strip_uv := Vector2(0.5, 0.5) + (
 				raw_strip_uv - Vector2(0.5, 0.5)) * uv_scale
-		var mirror_strip_uv := (
+		var mirror_strip_uv: Vector2 = (
 				water.reflection_camera.unproject_position(positions[vertex_index])
 				/ mirror_size)
 		assert_almost_eq(sampled_strip_uv.x, mirror_strip_uv.x, one_rtt_texel,
