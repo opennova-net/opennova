@@ -32,7 +32,7 @@ func _make_runtime() -> Node:
 	container.add_child(model)
 	var rt: Node = MissionRuntime.new()
 	add_child_autofree(rt)
-	assert_eq(int(rt.setup(md, container, { "tick_mode": NovaSimulation.TICK_EVERY_PROCESS })), 1)
+	assert_eq(int(rt.setup(md, container)), 1)
 	return rt
 
 

@@ -96,7 +96,7 @@ func test_setup_promotes_and_counts() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
-	var count := int(rt.setup(w.mission, w.container, { "tick_mode": NovaSimulation.TICK_EVERY_PROCESS }))
+	var count := int(rt.setup(w.mission, w.container))
 	# P7: every preview is the in-process listen server, so the host player auto-spawns at bring-up —
 	# the world is the one authored organic + the host player.
 	assert_eq(count, 2, "one organic + the auto-spawned host player")
@@ -110,7 +110,7 @@ func test_tick_presents_sim_position_onto_node() -> void:
 	var w := _make_world(Transform3D(Basis(), Vector3(99, 99, 99)))
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
-	rt.setup(w.mission, w.container, { "tick_mode": NovaSimulation.TICK_EVERY_PROCESS })
+	rt.setup(w.mission, w.container)
 	rt.step_once()
 	var sim_pos: Vector3 = rt.get_sim().get_entity_position(0)
 	assert_true((w.model as Node3D).position.is_equal_approx(sim_pos),
@@ -125,19 +125,19 @@ func test_tick_presents_sim_position_onto_node() -> void:
 
 
 
-func test_divided_mode_ticks_and_steps_like_the_game() -> void:
-	# DIVIDED is the game's mode: one logic tick per host frame (the engine's own dividers — WAC
-	# every 62nd tick, BMS quarter-pass every 16th — gate inside the systems). The editor preview
-	# now runs this mode too, so tick() and Step must both advance + present under it.
+func test_tick_and_step_advance_and_present_like_the_game() -> void:
+	# The game and the editor preview share ONE cadence: tick() dispatches exactly one logic tick
+	# (the engine's own dividers — WAC every 62nd tick, BMS quarter-pass every 16th — gate inside
+	# the systems), so tick() and Step must both advance + present.
 	var w := _make_world(Transform3D(Basis(), Vector3(99, 99, 99)))
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
-	rt.setup(w.mission, w.container, { "tick_mode": NovaSimulation.TICK_DIVIDED })
-	assert_true(rt.tick(), "a DIVIDED tick advances one logic tick")
+	rt.setup(w.mission, w.container)
+	assert_true(rt.tick(), "tick() advances one logic tick")
 	rt.step_once()
 	var sim_pos: Vector3 = rt.get_sim().get_entity_position(0)
 	assert_true((w.model as Node3D).position.is_equal_approx(sim_pos),
-		"Step under DIVIDED presents the sim state onto the node")
+		"Step presents the sim state onto the node")
 
 
 func test_effects_drained_signal_fires() -> void:
@@ -152,7 +152,7 @@ func test_effects_drained_signal_fires() -> void:
 
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
-	rt.setup(md, container, { "tick_mode": NovaSimulation.TICK_EVERY_PROCESS })
+	rt.setup(md, container)
 	# GDScript lambdas capture locals by value; mutate the array by reference (append) rather than
 	# reassign, so the outer `drained` sees the signal payload.
 	var drained: Array = []
@@ -171,7 +171,7 @@ func test_tick_realtime_accumulates_fixed_quanta() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
-	rt.setup(w.mission, w.container, { "tick_mode": NovaSimulation.TICK_DIVIDED })
+	rt.setup(w.mission, w.container)
 	rt.play()
 	# 0.1 s of wall-clock at 62.5 Hz = floor(0.1 / 0.016) = 6 ticks.
 	assert_eq(rt.tick_realtime(0.1), 6, "0.1 s banks 6 fixed-step ticks")
@@ -184,7 +184,7 @@ func test_tick_realtime_clamps_catchup() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
-	rt.setup(w.mission, w.container, { "tick_mode": NovaSimulation.TICK_DIVIDED })
+	rt.setup(w.mission, w.container)
 	rt.play()
 	# 1.0 s would be ~62 ticks; the spiral-of-death clamp caps a single frame's catch-up.
 	assert_eq(rt.tick_realtime(1.0), MissionRuntime.MAX_CATCHUP_TICKS, "a long stall is clamped to the catch-up cap")
@@ -196,7 +196,7 @@ func test_tick_realtime_ignored_when_not_playing() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
-	rt.setup(w.mission, w.container, { "tick_mode": NovaSimulation.TICK_DIVIDED })
+	rt.setup(w.mission, w.container)
 	# Not played -> paused -> banks nothing regardless of elapsed wall-clock (no burst on Play).
 	assert_eq(rt.tick_realtime(1.0), 0, "a paused runtime banks nothing")
 	rt.play()
@@ -209,7 +209,7 @@ func test_tick_realtime_presents_latest_state_once() -> void:
 	var w := _make_world(Transform3D(Basis(), Vector3(99, 99, 99)))
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
-	rt.setup(w.mission, w.container, { "tick_mode": NovaSimulation.TICK_DIVIDED })
+	rt.setup(w.mission, w.container)
 	rt.play()
 	assert_gt(rt.tick_realtime(0.1), 0, "the batch ran at least one tick")
 	var sim_pos: Vector3 = rt.get_sim().get_entity_position(0)
@@ -230,7 +230,7 @@ func test_tick_realtime_drains_effects_per_tick() -> void:
 	add_child_autofree(container)
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
-	rt.setup(md, container, { "tick_mode": NovaSimulation.TICK_DIVIDED })
+	rt.setup(md, container)
 	rt.play()
 	var drained: Array = []
 	rt.effects_drained.connect(func(effects): drained.append_array(effects))
@@ -260,7 +260,7 @@ func _run_realtime(step: float, count: int) -> Dictionary:
 	var w := _make_world(Transform3D.IDENTITY)
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
-	rt.setup(w.mission, w.container, { "tick_mode": NovaSimulation.TICK_DIVIDED })
+	rt.setup(w.mission, w.container)
 	rt.play()
 	var ticks := 0
 	for _i in range(count):

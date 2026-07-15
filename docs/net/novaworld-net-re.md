@@ -3509,7 +3509,7 @@ Jointops.exe; behavioral, read-only (no IDB writes).
 
 **Port status — D.2 (joiner `NovaSimulation` mode + wire-direct present, 2026-06-23).** The joiner-side
 runtime is built and green (`godot/tests/net/coop_two_sim_test` — a host listen server + a joiner in one
-process, each on a real loopback `NovaUdpPump`, free-running their own `advance_frame`; asserts the joiner
+process, each on a real loopback `NovaUdpPump`, free-running their own `step`; asserts the joiner
 reaches InMatch, the host admits it, and the two-handle present resolves both ways):
 - `NovaSimulation::enable_join(host_ip, port, name)` mirrors `enable_host_listen`: dial a pump, drive a
   `JoinerSession`, feed the host's S2C `0x0A` into the SAME `NetClientView`/`ClientState` the listen server

@@ -151,7 +151,7 @@ yet witnessed (D-EVT-4).
 | `world`: `TickService` REMOVED (its 62:1 reducer gated the whole world tick — wrong layer; the original divides per system). `World::logic_tick` = the 62 Hz engine tick (`current_tick @0x24c1968`) | @0x5263f0 |
 | `promote`: SSN = authored record id verbatim (PromoteOptions.first_ssn removed); spawn order items→buildings→markers→organics; markers spawn into pool 3 | @0x40e9f0/@0x40f4e0/@0x4f0a20 |
 | `mission_systems.h`: grill-gate comment replaced with the witnessed order | @0x5263f0 |
-| engine: NovaSimulation drops the TickService member; `advance_frame()` = one tick per host frame (both tick modes equivalent pending a fixed-62 Hz accumulator, slice D — **resolved 2026-06-22, see §2a**) | — |
+| engine: NovaSimulation drops the TickService member; `step()` = ONE 62 Hz logic tick — a host frame runs 0..N of them (**accumulator resolved 2026-06-22, see §2a**; the tick-mode enum that once selected between two identical entry points is gone, see §2b) | — |
 
 Tests pinning the above: `tests/mission/event_runtime_test.cpp` (13 tests: cadence,
 delay, signed wrap, cooldown window, reset_after=0 refire, pre-pass exclusivity, cat-3
@@ -162,7 +162,8 @@ GUT `nova_simulation_test.gd` / `mission_runtime_test.gd`.
 ## 2a. Fixed-timestep accumulator landed (2026-06-22, nw-merge)
 
 The slice-D seam is closed. The reimpl previously advanced **one logic tick per rendered
-`_process` frame** (`NovaSimulation.advance_frame()` once per `MissionRuntime.tick()`),
+`_process` frame** (`NovaSimulation.advance_frame()` — since renamed `step()`, §2b — once
+per `MissionRuntime.tick()`),
 discarding the frame `delta` — a divergence from `Game_MainLoop @0x52b630` (§1.6) that coupled
 gameplay speed to the render frame rate (the shared per-tick infantry motor, `tick_infantry`,
 integrates a fixed displacement per tick, so locomotion/animation ran fast at high FPS and slow
@@ -178,6 +179,30 @@ mission preview (`mission_runtime._process` self-tick) both thread real `delta`.
 `libs/world` per-tick motors are unchanged — they were already correct per tick; only the host
 tick **cadence** was wrong. Pinned by `mission_runtime_test.gd`
 (`test_tick_realtime_*`, `test_distance_per_real_second_is_frame_rate_independent`).
+
+## 2b. The tick-mode enum retired (2026-07-14)
+
+Cleanup tail of §2a, no behavior change. `NovaSimulation` carried a `TickMode` enum
+(`TICK_DIVIDED` / `TICK_EVERY_PROCESS`) selecting between `step()` and `advance_frame()` —
+but the two methods had **identical bodies** (same `loaded_` guard, same
+`host_pump`/`joiner_pump`/authoritative-tick branches), differing only in return type. The
+enum therefore chose between two copies of one behavior, and its comment still deferred the
+62 Hz accumulator to "a future" that had already shipped as `MissionRuntime.tick_realtime`
+(§2a). Its stated reason for surviving — "API stability" — is the internal back-compat that
+is not kept pre-1.0 (CLAUDE.md).
+
+Retired: one `bool step()` (false only when no mission is loaded), no enum, no
+`tick_mode` property. The one behavioral wrinkle removed with it: the `TICK_EVERY_PROCESS`
+branch of `MissionRuntime._advance_one_tick_no_present` hard-coded `did_tick = true`, so an
+unloaded sim reported a tick it never ran; the merged path returns the honest `step()`
+result. Editor-preview/game cadence parity is now structural (one path) rather than
+asserted, so `mission_controller_test.gd`'s tick-mode assert is gone and its `loco_scale`
+assert stands.
+
+Naming: `step()` survives over `advance_frame()` because a host frame runs 0..N ticks (§2a)
+— "frame" in our vocabulary is the render frame, not the engine tick. The
+`Game_ProcessMainFrame @0x5263f0` correspondence lives in the `[orig:]` comment at the port
+site, where this repo keeps such citations.
 
 ## 3. Tracked deviations
 

@@ -52,8 +52,10 @@ class NovaTerrainData;
 
 // THE mission runtime binding: a thin host shell over the portable libs/world runtime.
 // Owns one World + the three logic systems (WAC VM, BMS event evaluator, AI) and drives
-// them through World::run_logic_tick — one logic tick per host frame, the original's
-// 62 Hz engine tick (current_tick in Game_ProcessMainFrame @0x5263f0). The per-system
+// them through World::run_logic_tick — one logic tick per step(), the original's
+// 62 Hz engine tick (current_tick in Game_ProcessMainFrame @0x5263f0). A host frame runs
+// 0..N of those: the wall-clock accumulator lives in the driver (MissionRuntime.
+// tick_realtime), faithful to Game_MainLoop @0x52b630. The per-system
 // cadences live INSIDE the systems, as in the original: the WAC VM self-gates to every
 // 62nd tick (sub_4F81A0 @0x4f81b1) and the BMS evaluator quarter-passes every 16th
 // (Server_TickUpdate @0x51d7e0). Both the editor "Play the mission" preview and the game
@@ -67,14 +69,6 @@ class NovaSimulation : public Node3D {
 	GDCLASS(NovaSimulation, Node3D)
 
 public:
-	enum TickMode {
-		// Both modes run one logic tick per process frame today (the 62-divider moved
-		// into WacSystem where the original keeps it); the enum survives for API
-		// stability and for a future fixed-62 Hz accumulator in DIVIDED.
-		TICK_DIVIDED = 0,
-		TICK_EVERY_PROCESS = 1
-	};
-
 	// Field layout of one entity record in get_present_snapshot()'s flat float buffer. ONE batched
 	// PackedFloat32Array call replaces the per-entity scalar getters in the per-tick present loop
 	// (the scalar getters box a Variant each; see feedback_dispatcher_callable_perf). Mirrored on the
@@ -134,7 +128,6 @@ private:
 	bool loaded_ = false;
 	bool playing_ = false;
 	bool have_baseline_ = false;
-	int tick_mode_ = TICK_DIVIDED;
 
 	// --- in-match net runtime (P7, ADR 0009/0011): the SP / LAN host in-process listen server. OFF
 	// by default, so the editor / non-net preview path is the direct AI-pool present, untouched. When
@@ -371,11 +364,15 @@ public:
 	// Transport.
 	void set_playing(bool p_playing) { playing_ = p_playing; }
 	bool is_playing() const { return playing_; }
-	void step();           // advance exactly one logic tick (editor Step)
-	bool advance_frame();  // one host frame = one logic tick (the WAC VM self-gates inside)
+	// Advance exactly ONE 62 Hz logic tick — the original's engine tick. The per-system
+	// dividers gate INSIDE the systems (the WAC VM self-gates to every 62nd tick, the BMS
+	// evaluator quarter-passes every 16th), exactly where the original keeps them. Returns
+	// false when no mission is loaded. Banking wall-clock and dispatching 0..N of these per
+	// host frame is the driver's job (MissionRuntime.tick_realtime, the Game_MainLoop
+	// @0x52b630 accumulator) — a host frame is NOT one tick.
+	// [orig: Game_ProcessMainFrame @0x5263f0 (one current_tick++ @0x24c1968)]
+	bool step();
 	void restart();        // Stop: restore the play-start baseline (rewinds world + AI)
-	void set_tick_mode(int p_mode) { tick_mode_ = p_mode; }
-	int get_tick_mode() const { return tick_mode_; }
 
 	// Turn the sim into an SP in-process listen server (ADR 0011): the host serializes
 	// real entity state onto an in-process loopback (Server_TickUpdate's per-connection S2C
@@ -746,6 +743,5 @@ public:
 
 } // namespace godot
 
-VARIANT_ENUM_CAST(godot::NovaSimulation::TickMode);
 VARIANT_ENUM_CAST(godot::NovaSimulation::PresentField);
 VARIANT_ENUM_CAST(godot::NovaSimulation::EffectStateField);

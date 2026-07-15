@@ -42,7 +42,7 @@ func test_listen_server_present_reads_client_decoded_state() -> void:
 
 	# One host frame: Server_TickUpdate fans the host loopback its whole-world S2C 0x0A; the host's
 	# own ClientRuntime folds it into the ClientState the present pass now reads.
-	sim.advance_frame()
+	sim.step()
 
 	var stride: int = sim.get_present_stride()
 	var snap: PackedFloat32Array = sim.get_present_snapshot()
@@ -90,7 +90,7 @@ func test_listen_server_auto_spawns_and_replicates_local_player() -> void:
 	# Drive forward for several frames (exercises input -> pre-tick hook -> motor -> 0x0A -> present).
 	sim.set_player_input(true, false, false, false, false, false, false)
 	for _i in range(8):
-		sim.advance_frame()
+		sim.step()
 
 	# The player replicates through the wire as one present record, keyed by its WIRE HANDLE.
 	# [D-NET-112: the player carries no SSN (net_id 0); it is identified by its handle, not 0xFFF0.]

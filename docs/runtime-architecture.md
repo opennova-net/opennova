@@ -35,7 +35,7 @@ main_game.gd / editor _process(delta)
        foliage dispatch                             client render pass
        MissionRuntime.tick_realtime(delta)          == the fixed-timestep server tick + entity render:
          bank delta; for each banked 16 ms quantum:   [Game_MainLoop @0x52b630 accumulator, 62.5 Hz]
-           NovaSimulation.advance_frame()               one engine tick; per-system dividers  [Game_ProcessMainFrame @0x5263f0]
+           NovaSimulation.step()                        one engine tick; per-system dividers  [Game_ProcessMainFrame @0x5263f0]
              World.run_logic_tick()                       WAC -> BMS -> AI over one world
            drain effects -> effects_drained             host-presentation side effects (per tick)
          MissionPresentPass.present()                  draw each entity once after the batch (transform/PANM/visibility)
@@ -59,7 +59,7 @@ the MCP, and tests.
   `sub_4F81A0`), BMS events run a 16-tick gate over a quarter cursor, and the AI motor runs every
   tick (witnessed in [bms-event-runtime-re.md](mission/bms-event-runtime-re.md) §1.6/§2).
 - **Binding (C++ GDExtension)** — `NovaSimulation` wraps the World, exposes transport
-  (`step`/`advance_frame`/`restart`), `drain_effects`, and **one batched present snapshot**
+  (`step` = exactly one 62 Hz logic tick, `restart`), `drain_effects`, and **one batched present snapshot**
   (`get_present_snapshot()` → a flat `PackedFloat32Array`, `PF_*` field layout) so the per-tick
   present loop makes one call, not ~10 Variant-boxed scalar getters per entity.
 - **Runtime driver (GDScript)** — `mission_runtime.gd` owns `{sim, present pass, index}` and

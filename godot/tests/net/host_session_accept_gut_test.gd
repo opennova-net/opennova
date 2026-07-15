@@ -34,7 +34,7 @@ func test_enable_host_listen_binds_and_keeps_sp_present() -> void:
 
 	# The host's own listen-server present path replicates the two organics + the auto-spawned host
 	# player (faithful §5.0 mode-3 bring-up) through the loopback wire into the client-decoded present.
-	sim.advance_frame()
+	sim.step()
 	var stride: int = sim.get_present_stride()
 	var records: int = sim.get_present_snapshot().size() / stride
 	assert_eq(records, 3, "host's own client present replicates the two organics + the host player")
@@ -81,7 +81,7 @@ func test_host_receives_joiner_datagrams_without_disturbing_sp() -> void:
 	assert_eq(join.send_to_host(PackedByteArray([0xEE, 0x01, 0x02, 0x03])), OK)
 
 	for _i in range(20):
-		sim.advance_frame()
+		sim.step()
 		OS.delay_msec(2)
 
 	assert_eq(sim.get_host_peer_count(), 0, "garbage datagram registered no JointOperations peer")
