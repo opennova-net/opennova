@@ -49,8 +49,9 @@ system shared and abstract only the data source behind a sampler seam.
 `godot/engine/world/mission_runtime.gd` is THE driver both hosts go through:
 the game (`GameWorld`) drives it with explicit `tick()` calls ordered against
 its other passes; the Mission workspace self-ticks it via `_process`. Both run
-`TICK_DIVIDED` with the sim's default `loco_scale`, so the editor preview is
-the game's pacing. While simulating, editing is locked out (the present pass is
+the one `NovaSimulation.step()` cadence with the sim's default `loco_scale`, so
+the editor preview is the game's pacing — the sim exposes no tick-mode knob to
+diverge on. While simulating, editing is locked out (the present pass is
 the sole transform authority); Stop rewinds the world and restores authored
 transforms.
 

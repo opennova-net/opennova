@@ -2,7 +2,7 @@ extends GutTest
 
 # Co-op LAN bidirectional bring-up (D.2) at the NovaSimulation layer: a HOST listen server
 # (enable_host_listen) and a JOINER (enable_join) run in the same headless process, each on a
-# real loopback UDP socket (NovaUdpPump), and free-run their own advance_frame() — no manual
+# real loopback UDP socket (NovaUdpPump), and free-run their own step() — no manual
 # byte carry. This exercises the full witnessed JOIN end to end: the joiner handshakes
 # (ClientHello/Auth), drives the spawn-gate burst, name-matches the host's S2C 0x0C organic
 # spawn to learn its wire handle H, spawns its local player L, and uplinks C2S 0x0C; the host
@@ -58,8 +58,8 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 	# Free-run both sims (real loopback UDP) until the joiner name-matches into the match.
 	var reached := false
 	for _i in range(800):
-		host.advance_frame()
-		joiner.advance_frame()
+		host.step()
+		joiner.step()
 		if joiner.is_joined_in_match():
 			reached = true
 			break
@@ -74,8 +74,8 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 	# host's S2C 0x0A carries everyone (incl. the host player + the joiner) back to the joiner.
 	joiner.set_player_input(true, false, false, false, false, false, false)
 	for _i in range(30):
-		host.advance_frame()
-		joiner.advance_frame()
+		host.step()
+		joiner.step()
 		OS.delay_msec(2)
 
 	var stride: int = host.get_present_stride()

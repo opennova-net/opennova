@@ -2627,7 +2627,9 @@ func test_deselect_stops_preview() -> void:
 # While the sim runs, the present pass owns the placed nodes' transforms, so every
 # mutating path (viewport gestures, inspector setters via _edit_step, undo/redo,
 # delete/place) is rejected with a status line, and the transform gizmo hides.
-# The sim itself runs the game's options: TICK_DIVIDED + the default loco_scale.
+# The sim itself runs the game's options: the default loco_scale. (Tick cadence needs no
+# assert — there is ONE step() path, so the preview cannot diverge from the game by
+# construction.)
 
 # A loaded controller with one organic added directly to the document (so the sim
 # has an AI entity regardless of the fixture's content), already simulating.
@@ -2642,8 +2644,6 @@ func _simulating_controller() -> MissionController:
 func test_sim_runs_the_game_cadence_options() -> void:
 	var controller := _simulating_controller()
 	var sim: NovaSimulation = controller._sim_driver.get_sim()
-	assert_eq(sim.get_tick_mode(), NovaSimulation.TICK_DIVIDED,
-		"the editor preview runs the game's DIVIDED tick mode")
 	assert_eq(sim.get_loco_scale(), 32768,
 		"no editor loco_scale override: the sim default (the IDA-pinned 32768) applies")
 	controller.sim_stop()

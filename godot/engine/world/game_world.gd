@@ -1166,7 +1166,6 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> void:
 	# Hand the loaded terrain to the runtime so promoted AI grounds on it (entities hug the terrain),
 	# and the resource root so soldiers resolve their .adm/.bad root-motion clips.
 	var opts := {
-		"tick_mode": NovaSimulation.TICK_DIVIDED,
 		"terrain": _terrain_data,
 		"resource_root": _resource_root,
 		"wac_basename": bms_name.get_basename(),

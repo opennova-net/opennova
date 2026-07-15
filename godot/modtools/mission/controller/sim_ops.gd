@@ -120,17 +120,15 @@ func _ensure_sim_driver() -> bool:
 	_c._sim_driver = _c.MissionRuntime.new()
 	_c._sim_driver.name = "MissionRuntime"
 	container.add_child(_c._sim_driver)
-	# TICK_DIVIDED + self_tick + the sim's default loco_scale: the exact options the game's
-	# GameWorld path runs, so the preview IS the game's pacing. The old EVERY_PROCESS +
-	# loco_scale 4096 combo (32768/8, a slowed compensation for uncapped editor fps) was an
-	# editor-only divergence. The driver builds its present index over `container`. Pass the
-	# editor's loaded terrain so the preview grounds AI exactly like the game runtime, and the
-	# resource root so soldiers get their .adm/.bad root-motion clips (without them they stand
-	# still).
+	# self_tick + the sim's default loco_scale: the exact options the game's GameWorld path
+	# runs, so the preview IS the game's pacing. The old every-process tick + loco_scale 4096
+	# combo (32768/8, a slowed compensation for uncapped editor fps) was an editor-only
+	# divergence. The driver builds its present index over `container`. Pass the editor's
+	# loaded terrain so the preview grounds AI exactly like the game runtime, and the resource
+	# root so soldiers get their .adm/.bad root-motion clips (without them they stand still).
 	var terrain_data = _c.terrain_editor.get_data() if _c.terrain_editor != null and _c.terrain_editor.has_method("get_data") else null
 	var sim_root: NovaResourceRoot = _c._resource_root()
 	if int(_c._sim_driver.setup(_c._mission, container, {
-			"tick_mode": NovaSimulation.TICK_DIVIDED,
 			"self_tick": true,
 			"playable": false,
 			"terrain": terrain_data,

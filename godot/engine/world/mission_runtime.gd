@@ -10,13 +10,14 @@ extends Node
 # [orig: sub_4F81A0 runs the logic systems; the client then renders the entities. Terrain/foliage/audio
 #  are host render passes the caller composes around this.]
 #
-# Cadence: both tick modes run ONE logic tick per call (the original's 62 Hz engine tick) — the
+# Cadence: NovaSimulation.step() runs ONE logic tick (the original's 62 Hz engine tick) — the
 # engine's dividers gate INSIDE the systems (the WAC VM fires every 62nd tick, the BMS evaluator
-# quarter-passes every 16th). TICK_DIVIDED is the game mode (advance_frame, the faithful host-frame
-# entry); TICK_EVERY_PROCESS calls step() directly (tests). The game and the editor preview both run
-# DIVIDED with the sim's default loco_scale. The driver can self-tick via _process (editor) or be
-# driven by an explicit tick() call so a host can order it against its other passes (game). Stop
-# rewinds the world (World::restore) AND restores the authored node transforms captured at setup.
+# quarter-passes every 16th). Deciding HOW MANY ticks a host frame runs is this driver's job, not
+# the sim's: tick_realtime() banks wall-clock and dispatches 0..N of them; tick() dispatches exactly
+# one. The game and the editor preview share the sim's default loco_scale. The driver can self-tick
+# via _process (editor) or be driven by an explicit tick() call so a host can order it against its
+# other passes (game). Stop rewinds the world (World::restore) AND restores the authored node
+# transforms captured at setup.
 
 signal effects_drained(effects: Array)
 
@@ -50,11 +51,10 @@ var _ticks_last_frame := 0           # logic ticks run by the last tick_realtime
 
 
 ## Create + promote the mission, build the shared index over the placed nodes (`container`), and wire
-## the present pass. options: { tick_mode, loco_scale, self_tick, present_options }. Returns the AI
+## the present pass. options: { loco_scale, self_tick, present_options }. Returns the AI
 ## entity count, or 0 on load failure (the orphan sim is freed). The sim is held off-tree by this driver.
 func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	_sim = NovaSimulation.new()
-	_sim.set_tick_mode(int(options.get("tick_mode", NovaSimulation.TICK_DIVIDED)))
 	if options.has("loco_scale"):
 		_sim.set_loco_scale(int(options["loco_scale"]))
 	# P7: EVERY play/preview path is the in-process listen server (ADR 0011) — stood up BEFORE load,
@@ -391,12 +391,7 @@ func tick() -> bool:
 # sim/effects perf counters. Returns true when a logic tick fired.
 func _advance_one_tick_no_present() -> bool:
 	var sim_start := Time.get_ticks_usec()
-	var did_tick: bool
-	if _sim.get_tick_mode() == NovaSimulation.TICK_EVERY_PROCESS:
-		_sim.step()
-		did_tick = true
-	else:
-		did_tick = _sim.advance_frame()  # one frame = one 62 Hz logic tick (WAC self-gates inside)
+	var did_tick := _sim.step()  # one 62 Hz logic tick (the WAC VM self-gates inside)
 	_perf_sim_us = Time.get_ticks_usec() - sim_start
 	_perf_effects_us = 0
 	if did_tick:

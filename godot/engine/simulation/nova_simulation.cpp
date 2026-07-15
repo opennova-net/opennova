@@ -800,10 +800,7 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_playing", "playing"), &NovaSimulation::set_playing);
 	ClassDB::bind_method(D_METHOD("is_playing"), &NovaSimulation::is_playing);
 	ClassDB::bind_method(D_METHOD("step"), &NovaSimulation::step);
-	ClassDB::bind_method(D_METHOD("advance_frame"), &NovaSimulation::advance_frame);
 	ClassDB::bind_method(D_METHOD("restart"), &NovaSimulation::restart);
-	ClassDB::bind_method(D_METHOD("set_tick_mode", "mode"), &NovaSimulation::set_tick_mode);
-	ClassDB::bind_method(D_METHOD("get_tick_mode"), &NovaSimulation::get_tick_mode);
 	ClassDB::bind_method(D_METHOD("enable_listen_server", "enable"), &NovaSimulation::enable_listen_server);
 	ClassDB::bind_method(D_METHOD("set_terrain_til_data", "til_bytes"), &NovaSimulation::set_terrain_til_data);
 	ClassDB::bind_method(D_METHOD("is_listen_server"), &NovaSimulation::is_listen_server);
@@ -916,9 +913,6 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_spawned_count"), &NovaSimulation::get_spawned_count);
 	ClassDB::bind_method(D_METHOD("get_brain_count"), &NovaSimulation::get_brain_count);
 
-	BIND_ENUM_CONSTANT(TICK_DIVIDED);
-	BIND_ENUM_CONSTANT(TICK_EVERY_PROCESS);
-
 	// Present-snapshot field layout (single source of truth for the GDScript present pass).
 	BIND_ENUM_CONSTANT(PF_KIND);
 	BIND_ENUM_CONSTANT(PF_INDEX);
@@ -947,17 +941,12 @@ void NovaSimulation::_bind_methods() {
 	BIND_ENUM_CONSTANT(EFFECT_STATE_COUNT);
 
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "playing"), "set_playing", "is_playing");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "tick_mode"), "set_tick_mode", "get_tick_mode");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "loco_scale"), "set_loco_scale", "get_loco_scale");
 }
 
 void NovaSimulation::_notification(int p_what) {
 	if (p_what == NOTIFICATION_PROCESS && playing_ && loaded_) {
-		if (tick_mode_ == TICK_EVERY_PROCESS) {
-			step();
-		} else {
-			advance_frame();
-		}
+		step();
 	}
 }
 
@@ -995,32 +984,13 @@ void NovaSimulation::build_demo_mission() {
 	apply_host_session_mission_header(file);
 }
 
-void NovaSimulation::step() {
-	if (!loaded_) return;
-	const uint64_t sim_start = perf_now_us();
-	if (listen_server_) { // P7 listen server (SP + LAN host) -> the npruntime owner loop
-		host_pump();
-		last_sim_tick_us_ = perf_now_us() - sim_start;
-		return;
-	}
-	if (joiner_) { // P7 co-op joiner -> the npruntime ClientRuntime (non-authority)
-		joiner_pump();
-		last_sim_tick_us_ = perf_now_us() - sim_start;
-		return;
-	}
-	// No-net editor/unit path: one authoritative logic tick, no replication.
-	apply_player_input_pre_tick();
-	world_->run_logic_tick(/*is_authority=*/true);
-	tick_local_player_weapon(); // the equipped-slot FSM pump, after the world tick (net-re §5.62)
-	tick_local_player_view();   // the ADS ease + 3P anchor chase, same cadence
-	last_sim_tick_us_ = perf_now_us() - sim_start;
-}
-
-bool NovaSimulation::advance_frame() {
+bool NovaSimulation::step() {
 	if (!loaded_) return false;
-	// One host frame = one logic tick (the original's 62 Hz engine tick). The WAC VM
-	// self-gates to every 62nd tick and the BMS evaluator quarter-passes every 16th,
-	// inside their systems — exactly where the original keeps those dividers.
+	// ONE logic tick (the original's 62 Hz engine tick). The WAC VM self-gates to every
+	// 62nd tick and the BMS evaluator quarter-passes every 16th, inside their systems —
+	// exactly where the original keeps those dividers. A host frame runs 0..N of these;
+	// the accumulator that decides N lives in MissionRuntime.tick_realtime
+	// [orig: Game_MainLoop @ 0x52b630].
 	//
 	// Listen-server frame order [orig: Game_ProcessMainFrame @ 0x5263f0]:
 	//   input -> net(drain C2S) -> run_logic_tick(WAC/BMS/AI) -> net(emit S2C) -> present.
