@@ -111,7 +111,7 @@ vec3 sample_detail_coefficient(vec2 coefficient_uv, vec2 quadrant) {
 	vec3 coefficient = normalize(vec3(
 		(left - right) * (255.0 / 32.0),
 		(previous - next) * (255.0 / 32.0),
-		2.0));
+		1.0));
 	// Texture_GenerateNormalMap truncates each encoded component to RGBA8
 	// before the ps.1.4 sample. Keep the live editor fallback on that byte grid.
 	ivec3 encoded = ivec3(clamp((coefficient + 1.0) * 127.5, vec3(0.0), vec3(255.0)));

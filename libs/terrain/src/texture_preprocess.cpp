@@ -76,7 +76,11 @@ Rgba8Image build_detail_coefficient_map(const Rgba8Image &detailmap) {
 				(blue_at((x - 1) & x_mask, y) - blue_at((x + 1) & x_mask, y));
 			const double ny = scale *
 				(blue_at(x, (y - 1) & y_mask) - blue_at(x, (y + 1) & y_mask));
-			constexpr double nz = 2.0;
+			// Retail normalizes the paired one-sided diffs against the fld1
+			// unit Z kept on the FPU stack, not 2.0.
+			// [orig: Texture_GenerateNormalMap @ 0x58c1fa (fld1), 0x58c26d..
+			// 0x58c2b0 (paired diffs x bumpScale = 1/32 @ 0x7DBFAC)]
+			constexpr double nz = 1.0;
 			const double inv_length = 1.0 / std::sqrt(nx * nx + ny * ny + nz * nz);
 
 			const size_t dst = (static_cast<size_t>(y) * detailmap.width + x) * 4;
@@ -139,7 +143,11 @@ Rgba8Image build_heightfield_normal_map(
 			const double ny =
 				height_at(x, resolve_y(y - 1)) -
 				height_at(x, resolve_y(y + 1));
-			constexpr double nz = 2.0;
+			// Retail's third component is the fld1 unit Z (@ 0x603248), giving
+			// twice the slope response of a nz=2 normalization.
+			// [orig: Terrain_GenerateNormalMap @ 0x603210; diff scale 1/256
+			// @ 0x7C6950; encode 127.5 @ 0x7D8B48; alpha 0x80 @ 0x6034eb]
+			constexpr double nz = 1.0;
 			const double inverse_length =
 				1.0 / std::sqrt(nx * nx + ny * ny + nz * nz);
 

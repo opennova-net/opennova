@@ -69,10 +69,17 @@ Tier ≥ 2 loads authored detail textures c1/c2/c3 plus
 `polytrn_detailmapdist2`. The top-tier coefficient texture is generated
 from the authored `polytrn_detailmap` **B channel**, not the terrain
 heightmap: wrapped `(coord ± 1) & (dimension - 1)` neighbor samples form X/Y,
-fixed scale 1/32 is applied, Z is 2, the vector is normalized, and each RGB
+fixed scale 1/32 (`bumpScale @ 0x7DBFAC`) is applied, **Z is the retail
+`fld1` unit 1.0** (corrected 2026-07-15; the earlier `Z = 2` reading halved
+every slope response), the vector is normalized, and each RGB
 component is packed by `trunc((component + 1) × 127.5)`; the
 source center alpha is preserved [`orig: Texture_GenerateNormalMap @
-0x58c070`; call at `PolyTrn_InitTextures @ 0x60b14d`]. DBlend is normalized
+0x58c070`, `fld1 @ 0x58c1fa`, paired diffs `@ 0x58c26d..0x58c2b0`; call at
+`PolyTrn_InitTextures @ 0x60b14d`]. The heightfield-normal generator uses the
+same shape: paired one-sided diffs equal to the central difference at scale
+1/256 (`@ 0x7C6950`) per axis, unit Z (`fld1 @ 0x603248`), encode 127.5
+(`@ 0x7D8B48`), and packed alpha `0x80`
+[`orig: Terrain_GenerateNormalMap @ 0x603210, pack @ 0x6034eb`]. DBlend is normalized
 with the recovered integer path: for a nonzero RGB sum, coefficient =
 `floor(65535 / sum)` and each channel becomes
 `(coefficient × channel) >> 8`; a zero sum becomes pure R and alpha is
