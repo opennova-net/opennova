@@ -6,6 +6,8 @@
 
 #include "terrain/height_field.h"
 #include "world/ammo_table.h"
+#include "world/angle.h"
+#include "world/infantry.h"
 #include "world/world.h"
 
 namespace opennova::world {
@@ -274,6 +276,25 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain) {
                     // Publish the processed hit for the AI reaction stamps (wasHit /
                     // lastAttacker / the SM damage event) — drained by AiSystem::tick.
                     hits.push_back(RoundHit{EntityHandle{best_handle}, r.owner, damage});
+                    if (best_target->health <= 0) {
+                        // The kill selects the death anim at DAMAGE time [orig:
+                        // Entity_HandleDamageTrigger @0x407478/@0x407483 — bone from
+                        // the hit record, quadrant from the round's horizontal
+                        // velocity vs the victim's heading, cause 1 bullet]. The
+                        // body-cylinder hit model has no bone zones yet, so the bone
+                        // stands in as 1 (torso) — the same bone the explosive path
+                        // hardcodes for persons [orig: @0x4e6ac7] (D-AI-9).
+                        const int32_t heading_bam =
+                                bam_heading_from_mission_yaw_deg(best_target->yaw);
+                        const int quadrant =
+                                death_quadrant_from_round(heading_bam, r.vel.x, r.vel.y);
+                        best_target->death_anim_state =
+                                compute_death_anim_state(1, quadrant, death_cause::kBullet);
+                        // A member's death stamps its group alert red [orig: the
+                        // type-1 head @0x4073db-0x4073ea SetAlertRed(commandGroup)].
+                        world.relations.group(best_target->group_id).alert =
+                                TriggerRelations::kAlertRed;
+                    }
                     if (best_target->health <= 0) {
                         RoundDeath d;
                         d.victim = EntityHandle{best_handle};

@@ -18,6 +18,7 @@
 //     quarter-step leg, the non-conform decay — and the regression that a standing
 //     local player's camera roll chain stays level on side slopes.
 #include <cmath>
+#include <memory>
 #include <io/bam.h>
 #include <cstdint>
 #include <cstdio>
@@ -838,6 +839,123 @@ void test_slope_pass_org1_selector_and_chase() {
 
 } // namespace
 
+// P1c death presentation (world-wac-ai-re §19). In its own function: a new block
+// inside main() overflows the 1 MB stack on entry (__chkstk touches the whole frame).
+void test_death_presentation() {
+    // ---- the death-anim selector ----
+    // [orig: Entity_ComputeAnimSlotIndex @0x43a690 — cause routing + the 32-entry
+    // bone->group table; world-wac-ai-re §19]
+    {
+        using namespace anim_state;
+        CHECK(compute_death_anim_state(0, 0, death_cause::kBullet) == 180);  // hip fwd
+        CHECK(compute_death_anim_state(1, 2, death_cause::kBullet) == 186);  // torso back
+        CHECK(compute_death_anim_state(14, 1, death_cause::kBullet) == 189); // head right
+        CHECK(compute_death_anim_state(16, 3, death_cause::kBullet) == 211); // rhand left
+        CHECK(compute_death_anim_state(18, 0, death_cause::kBullet) == 236); // lfoot fwd
+        CHECK(compute_death_anim_state(40, 5, death_cause::kBullet) == 180); // clamps -> hip fwd
+        CHECK(compute_death_anim_state(0, 2, death_cause::kExplosive) == 178); // grenade back
+        CHECK(compute_death_anim_state(0, 0, death_cause::kFire) == kDeathFire);
+        CHECK(compute_death_anim_state(0, 0, death_cause::kDrown) == kDeathDrown);
+        CHECK(compute_death_anim_state(0, 0, death_cause::kGeneric) == kDeathPungi);
+        // Quadrant: victim facing +X (heading BAM 0 = mission yaw 90); a round flying
+        // +X (from behind) -> bearing 0 -> (0 - 0 - 0x60000000) >> 30 = 2 (back).
+        CHECK(death_quadrant_from_round(0, 1.0f, 0.0f) == 2);
+        CHECK(death_quadrant_from_round(0, -1.0f, 0.0f) == 0); // head-on -> forward
+    }
+
+    // ---- death edge consumes the damage-time selection (+0x2C0) ----
+    // [orig: @0x4b9cc9 — the staged deathAnimStateId wins over the generic; consumed]
+    {
+        auto w_heap = std::make_unique<World>();
+        World &w = *w_heap;
+        w.registry.configure_pool(0, 4);
+        Entity seed;
+        seed.health = 0;
+        seed.deathtime_ticks = 100;
+        const EntityHandle h = w.registry.spawn(0, seed);
+        Entity *ent = w.registry.get(h);
+        ent->death_anim_state = 189; // death_bullet_head_right, staged by the kill
+        auto ai_heap = std::make_unique<AiSystem>();
+        AiSystem &ai = *ai_heap;
+        TestSource src;
+        src.clips = {189};
+        ai.root_motion = &src;
+        AiEntity *e = soldier(ai);
+        run_ticks(ai, w, 1, 2);
+        CHECK(e->inf.anim_state == 189);
+        CHECK(ent->death_anim_state == 0);   // consumed [orig: +0x2C0 = 0 @0x4b9d38]
+        CHECK(ent->corpse_timer == 100 - 1); // seeded from deathtime, then 1 dead tick
+    }
+
+    // ---- corpse persistence: countdown -> despawn (no local player = no watcher) ----
+    // [orig: @0x4b9e6a decrement / Entity_Destroy @0x4b9f93; our despawn = hidden]
+    {
+        auto w_heap = std::make_unique<World>();
+        World &w = *w_heap;
+        w.registry.configure_pool(0, 4);
+        Entity seed;
+        seed.health = 0;
+        seed.deathtime_ticks = 5;
+        const EntityHandle h = w.registry.spawn(0, seed);
+        auto ai_heap = std::make_unique<AiSystem>();
+        AiSystem &ai = *ai_heap;
+        AiEntity *e = soldier(ai);
+        run_ticks(ai, w, 1, 3); // edge (timer=5, -1) + one more dead tick
+        Entity *ent = w.registry.get(h);
+        CHECK(ent->corpse_timer == 3);
+        CHECK(!ent->hidden);
+        run_ticks(ai, w, 3, 8); // drain to 0 -> despawn
+        CHECK(ent->hidden);
+        CHECK(e->inf.anim_state == anim_state::kDeathPungi); // the corpse pose held
+    }
+
+    // ---- LeaveCorpse (attrib 0x400000): the corpse never expires ----
+    // [orig: the @0x4b9e54 skip]
+    {
+        auto w_heap = std::make_unique<World>();
+        World &w = *w_heap;
+        w.registry.configure_pool(0, 4);
+        Entity seed;
+        seed.health = 0;
+        seed.deathtime_ticks = 2;
+        seed.leave_corpse = true;
+        const EntityHandle h = w.registry.spawn(0, seed);
+        auto ai_heap = std::make_unique<AiSystem>();
+        AiSystem &ai = *ai_heap;
+        soldier(ai);
+        run_ticks(ai, w, 1, 40);
+        Entity *ent = w.registry.get(h);
+        CHECK(!ent->hidden);
+        CHECK(ent->corpse_timer == 2); // the timer never even decrements
+    }
+
+    // ---- the local-player watch: a seen corpse holds at 62-tick retries ----
+    // [orig: @0x4b9f77 Physics_RaycastTerrainAndSectors(corpse, player) CLEAR ->
+    // +0x148 = 62 @0x4b9f83; no terrain/collision wired = clear]
+    {
+        auto w_heap = std::make_unique<World>();
+        World &w = *w_heap;
+        w.registry.configure_pool(0, 4);
+        Entity seed;
+        seed.health = 0;
+        seed.deathtime_ticks = 3;
+        const EntityHandle h = w.registry.spawn(0, seed);
+        Entity player;
+        player.health = 100;
+        player.position = Vec3{10.0f, 0.0f, 0.0f};
+        const EntityHandle ph = w.registry.spawn(0, player);
+        w.cached.local_player = ph;
+        auto ai_heap = std::make_unique<AiSystem>();
+        AiSystem &ai = *ai_heap;
+        soldier(ai);
+        run_ticks(ai, w, 1, 30);
+        Entity *ent = w.registry.get(h);
+        CHECK(!ent->hidden);           // watched: never despawns
+        CHECK(ent->corpse_timer > 0);  // parked on the 62-tick retry clock
+        CHECK(ent->corpse_timer <= 62);
+    }
+}
+
 int main() {
     test_slope_standing_camera_stays_level();
     test_slope_prone_body_conforms_org2();
@@ -1096,17 +1214,18 @@ int main() {
     }
 
     // ---- death edge: one-shot pose pick + freeze ----
-    // [orig: dump 751-913 — death family flags 0x82 gate the re-trigger]
+    // [orig: Entity_UpdateInfantryAI @0x4b9c40 — death family flags 0x82 gate the
+    // re-trigger; no staged +0x2C0 selection -> the generic 174 death_pungi]
     {
         World w;
-        AiSystem ai; // no source: falls back to kDeathFire
+        AiSystem ai; // no source: the witnessed generic selection stands
         AiEntity *e = soldier(ai);
         e->health = 0;
         run_ticks(ai, w, 1, 2);
-        CHECK(e->inf.anim_state == anim_state::kDeathFire);
+        CHECK(e->inf.anim_state == anim_state::kDeathPungi);
         CHECK(e->inf.anim_prev == anim_state::kIdle);
         run_ticks(ai, w, 2, 34); // stable: 0x82 flags block a second death pick
-        CHECK(e->inf.anim_state == anim_state::kDeathFire);
+        CHECK(e->inf.anim_state == anim_state::kDeathPungi);
     }
     {
         World w;
@@ -1804,6 +1923,7 @@ int main() {
     test_player_arms_dip();
     test_player_weapon_channel_ticks_while_dead();
     test_weapon_channel_consumer_gate_and_switch_identity();
+    test_death_presentation();
 
     if (failures == 0) std::printf("infantry_test: OK\n");
     else std::printf("infantry_test: %d FAILED\n", failures);

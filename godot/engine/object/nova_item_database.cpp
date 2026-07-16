@@ -42,6 +42,7 @@ void NovaItemDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_display_name", "id"), &NovaItemDatabase::get_display_name);
 	ClassDB::bind_method(D_METHOD("get_ammo_closeattack", "id"), &NovaItemDatabase::get_ammo_closeattack);
 	ClassDB::bind_method(D_METHOD("get_clipsize", "id"), &NovaItemDatabase::get_clipsize);
+	ClassDB::bind_method(D_METHOD("get_deathtime_ticks", "id"), &NovaItemDatabase::get_deathtime_ticks);
 	ClassDB::bind_method(D_METHOD("get_sound_profile", "id"), &NovaItemDatabase::get_sound_profile);
 	ClassDB::bind_method(D_METHOD("get_sound_loops", "id"), &NovaItemDatabase::get_sound_loops);
 	ClassDB::bind_method(D_METHOD("get_particle_effects", "id"), &NovaItemDatabase::get_particle_effects);
@@ -130,6 +131,7 @@ NovaItemDatabase::Item NovaItemDatabase::item_from_entry(const ::DefItemDef &ent
 	// The person-item anim-fire weapon family (world-wac-ai-re §17.4, D-AI-5).
 	item.ammo_closeattack = String(entry.ammo_closeattack);
 	item.clipsize = entry.clipsize;
+	item.deathtime_ticks = entry.deathtime_ticks;
 	return item;
 }
 
@@ -265,6 +267,14 @@ String NovaItemDatabase::get_ammo_closeattack(int id) const {
 int NovaItemDatabase::get_clipsize(int id) const {
 	const auto it = items.find(id);
 	return it == items.end() ? 0 : it->second.clipsize;
+}
+
+// items.def deathtime in ticks (parse-scaled (62*s or 496) + 62) — the corpse
+// timer's seed. [orig: ItemDef_ParseProperty @ 0x49fa6c -> def+0x890; consumer
+// Entity_UpdateInfantryAI @ 0x4b9c97 -> entity+0x148]
+int NovaItemDatabase::get_deathtime_ticks(int id) const {
+	const auto it = items.find(id);
+	return it == items.end() ? 0 : it->second.deathtime_ticks;
 }
 
 // Entity-attached profile name; the engine composes "<EntityDefName>_<SoundType>"

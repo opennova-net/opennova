@@ -1,10 +1,14 @@
-// Infantry anim-state tables, extracted from Jointops.exe (IDB 2026-06-10).
-// Names: [orig: off_8135F0] (the .adm clip keys, "anim_<name>").
-// Flags: [orig: g_animStateFlagsTable]; bit semantics in infantry.h. All 200 entries
-// dumped index-by-index from the IDB (the tail 173..199 is the uniform
-// death-family value 0x82).
+// Infantry anim-state tables, extracted from Jointops.exe (IDB 2026-06-10;
+// extended to the full 252 entries 2026-07-16 — AnimMap_FindSlotByName @0x40cfa0
+// scans exactly 252).
+// Names: [orig: g_animStateNameTable @0x8135F0] (the .adm clip keys, "anim_<name>").
+// Flags: [orig: g_animStateFlagsTable @0x8139E8]; bit semantics in infantry.h. All
+// entries dumped index-by-index from the IDB (173..239 = the uniform death-family
+// value 0x82; the wpn_* rows 240..251 are 0).
 
 #include "world/infantry.h"
+
+#include <cmath>
 
 namespace opennova::world {
 
@@ -65,6 +69,29 @@ const char *const kInfantryAnimNames[kInfantryAnimStateCount] = {
     /*194 */ "death_bullet_rightshoulder_back", "death_bullet_rightshoulder_left",
     /*196 */ "death_bullet_leftshoulder_forward", "death_bullet_leftshoulder_right",
     /*198 */ "death_bullet_leftshoulder_back", "death_bullet_leftshoulder_left",
+    /*200 */ "death_bullet_rightarm_forward", "death_bullet_rightarm_right",
+    /*202 */ "death_bullet_rightarm_back", "death_bullet_rightarm_left",
+    /*204 */ "death_bullet_leftarm_forward", "death_bullet_leftarm_right",
+    /*206 */ "death_bullet_leftarm_back", "death_bullet_leftarm_left",
+    /*208 */ "death_bullet_righthand_forward", "death_bullet_righthand_right",
+    /*210 */ "death_bullet_righthand_back", "death_bullet_righthand_left",
+    /*212 */ "death_bullet_lefthand_forward", "death_bullet_lefthand_right",
+    /*214 */ "death_bullet_lefthand_back", "death_bullet_lefthand_left",
+    /*216 */ "death_bullet_rightthigh_forward", "death_bullet_rightthigh_right",
+    /*218 */ "death_bullet_rightthigh_back", "death_bullet_rightthigh_left",
+    /*220 */ "death_bullet_leftthigh_forward", "death_bullet_leftthigh_right",
+    /*222 */ "death_bullet_leftthigh_back", "death_bullet_leftthigh_left",
+    /*224 */ "death_bullet_rightcalf_forward", "death_bullet_rightcalf_right",
+    /*226 */ "death_bullet_rightcalf_back", "death_bullet_rightcalf_left",
+    /*228 */ "death_bullet_leftcalf_forward", "death_bullet_leftcalf_right",
+    /*230 */ "death_bullet_leftcalf_back", "death_bullet_leftcalf_left",
+    /*232 */ "death_bullet_rightfoot_forward", "death_bullet_rightfoot_right",
+    /*234 */ "death_bullet_rightfoot_back", "death_bullet_rightfoot_left",
+    /*236 */ "death_bullet_leftfoot_forward", "death_bullet_leftfoot_right",
+    /*238 */ "death_bullet_leftfoot_back", "death_bullet_leftfoot_left",
+    /*240 */ "wpn_reset", "wpn_idle", "wpn_empty_idle", "wpn_fire", "wpn_recoil",
+    /*245 */ "wpn_reload", "wpn_empty", "wpn_switchto", "wpn_switchfrom",
+    /*249 */ "wpn_switchrank", "wpn_scopeup", "wpn_scopedown",
 };
 
 const uint32_t kInfantryAnimFlags[kInfantryAnimStateCount] = {
@@ -102,11 +129,73 @@ const uint32_t kInfantryAnimFlags[kInfantryAnimStateCount] = {
     /* 173 */ 0x082, 0x082, 0x082, 0x082, 0x082, 0x082, 0x082,
     /* 180 */ 0x082, 0x082, 0x082, 0x082, 0x082, 0x082, 0x082, 0x082, 0x082, 0x082,
     /* 190 */ 0x082, 0x082, 0x082, 0x082, 0x082, 0x082, 0x082, 0x082, 0x082, 0x082,
+    /* 200 */ 0x082, 0x082, 0x082, 0x082, 0x082, 0x082, 0x082, 0x082, 0x082, 0x082,
+    /* 210 */ 0x082, 0x082, 0x082, 0x082, 0x082, 0x082, 0x082, 0x082, 0x082, 0x082,
+    /* 220 */ 0x082, 0x082, 0x082, 0x082, 0x082, 0x082, 0x082, 0x082, 0x082, 0x082,
+    /* 230 */ 0x082, 0x082, 0x082, 0x082, 0x082, 0x082, 0x082, 0x082, 0x082, 0x082,
+    /* 240 */ 0x000, 0x000, 0x000, 0x000, 0x000, 0x000, 0x000, 0x000, 0x000, 0x000,
+    /* 250 */ 0x000, 0x000,
 };
 
 uint32_t infantry_anim_flags(int state) {
     if (state < 0 || state >= kInfantryAnimStateCount) return 0;
     return kInfantryAnimFlags[state];
+}
+
+// [orig: Entity_ComputeAnimSlotIndex @0x43a690] Hit-bone index -> bullet death-anim
+// group. Groups index the death_bullet families in table order: 0 hip, 1 torso,
+// 2 head, 3 rightshoulder, 4 leftshoulder, 5 rightarm, 6 leftarm, 7 righthand,
+// 8 lefthand, 9 rightthigh, 10 leftthigh, 11 rightcalf, 12 leftcalf, 13 rightfoot,
+// 14 leftfoot.
+static const int kDeathBoneGroup[32] = {
+    /* 0  hips        */ 0,
+    /* 1-4 spine/torso*/ 1, 1, 1, 1,
+    /* 5  R shoulder  */ 3,
+    /* 6  L shoulder  */ 4,
+    /* 7  R thigh     */ 9,
+    /* 8  L thigh     */ 10,
+    /* 9  R arm       */ 5,
+    /* 10 L arm       */ 6,
+    /* 11 R calf      */ 11,
+    /* 12 L calf      */ 12,
+    /* 13 neck        */ 2,
+    /* 14 head        */ 2,
+    /* 15 L hand      */ 8,
+    /* 16 R hand      */ 7,
+    /* 17 R foot      */ 13,
+    /* 18 L foot      */ 14,
+    /* 19-21 R fingers*/ 7, 7, 7,
+    /* 22-24 L fingers*/ 8, 8, 8,
+    /* 25-26 R hand   */ 7, 7,
+    /* 27-28 L hand   */ 8, 8,
+    /* 29-31 torso    */ 1, 1, 1,
+};
+
+int compute_death_anim_state(int bone_index, int quadrant, int cause) {
+    if (bone_index < 0 || bone_index >= 32) bone_index = 0; // [orig: >=32 -> 0]
+    if (quadrant < 0 || quadrant >= 4) quadrant = 0;        // [orig: >=4 -> 0]
+    switch (cause) {                                        // [orig: switch(entityType)]
+        case death_cause::kBullet:
+            return anim_state::kDeathBulletBase + quadrant + 4 * kDeathBoneGroup[bone_index];
+        case death_cause::kExplosive:
+            return anim_state::kDeathGrenadeBase + quadrant;
+        case death_cause::kFire:
+            return anim_state::kDeathFire;
+        case death_cause::kDrown:
+            return anim_state::kDeathDrown;
+        default:
+            return anim_state::kDeathPungi; // [orig: slotIndex preset 174]
+    }
+}
+
+int death_quadrant_from_round(int32_t victim_heading_bam, float round_vel_x, float round_vel_y) {
+    // BAM bearing of the round's horizontal travel [orig: atan2(vel.y, vel.x) *
+    // 683565275.5764316 @0x407478 — arg scale cancels inside atan2].
+    const double bam = std::atan2(static_cast<double>(round_vel_y),
+                                  static_cast<double>(round_vel_x)) * 683565275.5764316;
+    const uint32_t bearing = static_cast<uint32_t>(static_cast<int64_t>(bam));
+    return static_cast<int>((static_cast<uint32_t>(victim_heading_bam) - bearing -
+                             0x60000000u) >> 30);
 }
 
 } // namespace opennova::world

@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 namespace opennova::world {
 
@@ -572,12 +573,140 @@ void h_ground_combat_tick(AiThinkCtx &ctx) {
         ++ctx.sys->unported_calls;
 }
 
+// The shared alert block every death-family enter runs: alert cur/prev = 2, the command
+// group goes red, allies wake at 100 u, slot move flag 2. [orig: the common head of
+// @0x467650 / @0x467400 / @0x467b20 / @0x467de0]
+void death_alert_block(AiThinkCtx &ctx, AiEntity &e) {
+    AiBrain &b = e.brain;
+    b.f[AiBrain::kAlert] = 2;
+    b.f[AiBrain::kPrevAlert] = 2;
+    if (ctx.world != nullptr) {
+        if (const Entity *se = ctx.world->registry.get(e.handle))
+            ctx.world->relations.group(se->group_id).alert = TriggerRelations::kAlertRed;
+        ctx.sys->alert_nearby_allies(*ctx.world, e, 0x640000); // sets slot+136 = 2 too
+    } else {
+        e.slot.bytes()[AiSlot::kMoveFlagByte] = 2;
+    }
+}
+
+// Queue the DESTROY event (type 4) that lands the brain in GROUND_DEAD 23.
+// [orig: the inline queue tails of @0x467b20 / @0x467cd0 — channel 0, timer 0]
+void queue_destroy_event(AiThinkCtx &ctx, AiEntity &e) {
+    AiEventEntry ev{};
+    ev.f[0] = 4;
+    ev.f[1] = (ctx.sys->index_of(e) << 16);
+    ev.set_timer(0.0f);
+    ctx.sys->events.queue(ev);
+}
+
+// Horizontal speed with the death-velocity saturation clamp.
+// [orig: the fsqrt + flt_7C19E0 min pattern shared by every death leg]
+int32_t death_speed(const AiEntity &e) {
+    double sp = std::sqrt(static_cast<double>(e.vel_x) * e.vel_x +
+                          static_cast<double>(e.vel_z) * e.vel_z);
+    if (sp > kDeathSpeedClamp) sp = kDeathSpeedClamp;
+    return static_cast<int32_t>(sp);
+}
+
+// [orig: AI_TransitionToDeath_GroundVehicle @0x467b20] state-21 (vehicle DYING) enter:
+// death transforms + net notify when not yet husked (Flags&4), the def+1352 mounted-
+// children kill loop, the alert block, moveStep 16, and — already slow (< 1057) — the
+// immediate destroy event. The death-transform leg (savedLivePose snapshot + the
+// unitType death callback's husk swap/death pieces + death sounds
+// [orig: Entity_UpdateDeathTransforms @0x494660]) is presentation the host does not
+// render for vehicles yet — the pose snapshot lands, the rest is a visible stub.
+void h_enter_vehicle_dying(AiThinkCtx &ctx) {
+    AiEntity &e = *ctx.self;
+    AiBrain &b = e.brain;
+    e.net_saved_live_pose[0] = e.pos[0]; // [orig: savedLivePose = Position @0x494684]
+    e.net_saved_live_pose[1] = e.pos[1];
+    e.net_saved_live_pose[2] = e.pos[2];
+    ++ctx.sys->unported_calls; // the husk/death-pieces callback + death sounds + S2C 0x26
+    ++ctx.sys->unported_calls; // the def+1352 kill-mounted-children loop (def byte unparsed)
+    death_alert_block(ctx, e);
+    b.f[AiBrain::kStep] = 16;  // [orig: ai_data[7] = 16 @0x467c02]
+    if (death_speed(e) < 1057) // [orig: @0x467c51 — stopped -> destroy now]
+        queue_destroy_event(ctx, e);
+}
+
+// [orig: AI_TickState_VehicleDying @0x467cd0 (ex kong 'AI_CheckVehicleStuck')] state-21
+// tick: settle the falling death physics, then once slow (< 1057) OR static since the
+// death pose (|pos - savedLivePose| < 1024 per axis) queue the destroy event; while
+// still moving, zero the work pitch/roll, the commanded speed, and the mover output.
+void h_vehicle_dying_tick(AiThinkCtx &ctx) {
+    AiEntity &e = *ctx.self;
+    AiBrain &b = e.brain;
+    ++ctx.sys->unported_calls; // [orig: Entity_ProcessFallingDeathPhysics @0x461d30]
+    const bool stopped = death_speed(e) < 1057;
+    const bool still =
+        std::abs(e.pos[0] - e.net_saved_live_pose[0]) < 1024 &&
+        std::abs(e.pos[1] - e.net_saved_live_pose[1]) < 1024 &&
+        std::abs(e.pos[2] - e.net_saved_live_pose[2]) < 1024;
+    if (stopped || still) {
+        queue_destroy_event(ctx, e); // [orig: @0x467dcb]
+    } else {
+        b.f[AiBrain::kWorkPitch] = 0; // [orig: ai_data[133] @0x467d77]
+        b.f[AiBrain::kWorkRoll] = 0;  // [orig: ai_data[134]]
+        b.f[136] = 0;                 // [orig: ai_data[136] — the commanded speed +544]
+        b.f[AiBrain::kOutSpeed] = 0;  // [orig: ai_data[128]]
+    }
+}
+
+// [orig: AI_HandleEvent_VehicleDying @0x457f50 (ex kong 'AI_HandleRetreatEvent')]
+// state-21 event: only the destroy event (4) lands -> pending GROUND_DEAD 23.
+void h_vehicle_dying_event(AiThinkCtx &ctx) {
+    if (ctx.event == nullptr) return;
+    if (ctx.event->type() != 4) return;
+    ctx.self->brain.set_pend(23);
+}
+
+// [orig: AI_TransitionToDestroyed_Vehicle @0x467de0] state-23 (GROUND_DEAD) enter:
+// the alert block, clear the target word + aim byte, the death transforms when not
+// yet husked, stamp the death tick (entity+428, first write wins — informational, not
+// modeled), clear every entity reference incl. the AI target's +530 refcount, and
+// moveStep 62.
+void h_enter_vehicle_dead(AiThinkCtx &ctx) {
+    AiEntity &e = *ctx.self;
+    AiBrain &b = e.brain;
+    death_alert_block(ctx, e);
+    ++ctx.sys->unported_calls; // the husk/death-pieces + death-sound leg (as in enter 21)
+    if (ctx.world != nullptr) {
+        if (Entity *ent = ctx.world->registry.get(e.handle)) {
+            ent->corpse_timer = 0; // [orig: entity+328 = 0 @0x467e22 — wrecks never expire]
+            ent->team = 0;         // [orig: entity+354 = 0 @0x467e2c — a wreck goes teamless
+                                   //  and drops out of ordinary target scans]
+        }
+        if (b.f[AiBrain::kTargetSlot] != 0)
+            ctx.sys->ai_set_target(*ctx.world, e, EntityHandle{}); // [orig: @0x467e86]
+    }
+    e.team = 0; // the motor-side copy the candidate scan reads
+    b.f[AiBrain::kStep] = 62; // [orig: ai_data[7] = 62 @0x467e8e]
+}
+
+// [orig: AI_TickState_VehicleDead @0x467ea0 (ex kong 'Entity_ProcessMountedInfantryFrame')]
+// state-23 tick: keep settling; the itemDef attrib&0x40 authority RESPAWN watcher
+// (cooldown countdown -> teleport to the spawn pose / bury + Entity_RespawnVehicle) is
+// a visible stub — mission vehicles without the attrib settle forever, the witnessed
+// default.
+void h_vehicle_dead_tick(AiThinkCtx &ctx) {
+    ++ctx.sys->unported_calls; // [orig: Entity_ProcessFallingDeathPhysics + the respawn leg]
+}
+
+// [orig: AI_HandleEvent_ConsumeAll @0x458080] state-23 event: swallow everything —
+// dead entities ignore commands, damage, and further death events.
+void h_vehicle_dead_event(AiThinkCtx &) {}
+
 // The 24-state dispatch table, mirroring off_815238/3C/40/44 @0x815238.
 // Columns: {enter, tick, exit, event}. U = not-yet-ported (visible stub), _ = noop.
 // State 17/18 rows ported 2026-07-16 (world-wac-ai-re §16.1/§17.6:
 // enter17 = AI_EnterState_GroundCombat @0x467650, tick17 = AIEntity_ProcessWeaponFire @0x472e00,
 // enter18 = AI_EnterState_GroundEvade @0x467400, event18 = AI_HandleEvent_GroundEvade @0x4675c0
 // = the shared h_combat_event family).
+// State 21/23 rows (the vehicle death chain) ported 2026-07-16 (world-wac-ai-re §19:
+// enter21 = AI_TransitionToDeath_GroundVehicle @0x467b20, tick21 = AI_TickState_VehicleDying
+// @0x467cd0, event21 = AI_HandleEvent_VehicleDying @0x457f50, enter23 =
+// AI_TransitionToDestroyed_Vehicle @0x467de0, tick23 = AI_TickState_VehicleDead @0x467ea0,
+// event23 = AI_HandleEvent_ConsumeAll @0x458080; the shared exit column is nullsub_70).
 constexpr AiHandler U = h_not_yet_ported;
 constexpr AiHandler _ = h_noop;
 
@@ -604,9 +733,11 @@ const StateRow kTable[kAiStateCount] = {
     /* 18 GROUND_EVADE     */ {h_enter_ground_evade, h_patrol_tick, _, h_combat_event},
     /* 19 GROUND_FORMATION */ {h_full_reset_to_idle, U, _, U},
     /* 20 GROUND_RETURNTOBASE */ {_, _, _, _},
-    /* 21 (transition)     */ {U, U, _, U},
+    /* 21 GROUND_DYING     */ {h_enter_vehicle_dying, h_vehicle_dying_tick, _,
+                               h_vehicle_dying_event},
     /* 22 GROUND_PRETTY    */ {h_full_reset_to_patrol, U, _, U},
-    /* 23 GROUND_DEAD      */ {U, U, _, U},
+    /* 23 GROUND_DEAD      */ {h_enter_vehicle_dead, h_vehicle_dead_tick, _,
+                               h_vehicle_dead_event},
 };
 
 const StateRow kDefaultRow = {h_noop, h_noop, h_noop, h_noop};

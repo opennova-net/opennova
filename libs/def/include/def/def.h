@@ -360,6 +360,12 @@ typedef struct DefItemDef {
        entity+0x35C = itemDef+0x894). [orig: ItemDef_ParseProperty @ 0x49fa1c ->
        def+0x894; consumer Entity_ResetToSpawnState @ 0x4b97a9/0x4b97b5] */
     int clipsize;
+    /* items.def 'deathtime' in TICKS, scaled at parse like the original loader:
+       (62*seconds, an explicit 0 -> 496) + 62 grace. 0 = token absent (the def field's
+       zero init). The corpse timer's seed at the infantry death edge.
+       [orig: ItemDef_ParseProperty @ 0x49fa6c-0x49faa0 -> def+0x890; consumer
+       Entity_UpdateInfantryAI @ 0x4b9c97 -> entity+0x148] */
+    int deathtime_ticks;
 } DefItemDef;
 
 typedef struct DefItemsFile {

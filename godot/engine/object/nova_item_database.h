@@ -80,6 +80,10 @@ private:
 		// def+0x56B / @ 0x49fa1c -> def+0x894]
 		String ammo_closeattack;
 		int clipsize = 0;
+		// items.def deathtime in TICKS ((62*seconds or 496) + 62, scaled at parse);
+		// 0 = none authored. The corpse timer's seed (entity+0x148 at the infantry
+		// death edge). [orig: ItemDef_ParseProperty @ 0x49fa6c -> def+0x890]
+		int deathtime_ticks = 0;
 	};
 	std::unordered_map<int, Item> items;
 	String source_path;
@@ -158,6 +162,10 @@ public:
 	// none authored. [orig: @ 0x49fa1c -> def+0x894; Entity_ResetToSpawnState
 	// @ 0x4b97a9]
 	int get_clipsize(int id) const;
+	// items.def deathtime in ticks (parse-scaled); 0 if none authored. Seeds the
+	// corpse timer at the death edge. [orig: @ 0x49fa6c -> def+0x890;
+	// Entity_UpdateInfantryAI @ 0x4b9c97]
+	int get_deathtime_ticks(int id) const;
 	// items.def sound_profile (a sound-set name resolved against the loaded .lwf
 	// banks at runtime); empty if the item declares none.
 	String get_sound_profile(int id) const;

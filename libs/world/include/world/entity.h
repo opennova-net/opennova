@@ -152,6 +152,24 @@ struct Entity {
     // denominator and the §5.13 vehicle health word.
     int32_t health_max = 0;
     bool alive = true;
+    // The pending death-anim selection (GamePlayerEntity +0x2C0 deathAnimStateId):
+    // written at DAMAGE time by the kill (RoundSim bullet selection [orig:
+    // Entity_HandleDamageTrigger @0x407483]), consumed once by the infantry death
+    // edge into anim_state, then cleared [orig: @0x4b9cc9..0x4b9d38]. 0 = none ->
+    // the edge falls back to 174 death_pungi.
+    int32_t death_anim_state = 0;
+    // The corpse timer (entity +0x148): seeded from the item's deathtime at the
+    // death edge, decremented per dead tick; 0 -> despawn (SP holds while the local
+    // player can see the corpse, 62-tick retries). [orig: @0x4b9c7f / @0x4b9e6a]
+    int32_t corpse_timer = 0;
+    // items.def 'deathtime' in ticks ((62*v or 496) + 62 at parse [orig:
+    // ItemDef_ParseProperty @0x49fa96 -> def+0x890]), stamped by the item-traits
+    // sweep. 0 = no token -> the corpse expires on the first dead tick (watch-check
+    // permitting), matching the original's zero-init def field.
+    int32_t deathtime_ticks = 0;
+    // items.def attrib LeaveCorpse (0x400000): the corpse never despawns.
+    // [orig: the @0x4b9e54 skip of the whole timer/despawn block]
+    bool leave_corpse = false;
     uint32_t ai_flags = 0;    // BmsiAttributeFlags
     int32_t move_speed_kph = 0;
     int32_t engage_min = 0;

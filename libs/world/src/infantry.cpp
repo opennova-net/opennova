@@ -40,6 +40,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <limits>
 
 #include <io/bam.h>
@@ -756,23 +757,79 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     RootMotionFrame frame;
     bool have_clip = false;
 
-    // 1. Death edge: pick a death pose once, then only gravity/ground applies.
-    // [orig: dump 751-913 — full matrix by bone-section + attack quadrant via
-    // Entity_ComputeAnimSlotIndex; without combat integration the generic
-    // torso-forward entry is used (combat pass refines this)]
+    // 1. Death edge (once — the 0x82 death-family flag marks an already-posed corpse):
+    // consume the damage-time anim selection, seed the corpse timer, drop any mount.
+    // Then the per-tick corpse block: LeaveCorpse keeps the body forever, otherwise
+    // the timer drains and the corpse despawns — held while the local player can see
+    // it. [orig: Entity_UpdateInfantryAI @0x4b9c40-0x4b9d55 edge, @0x4b9e4d-0x4ba000
+    // persistence]
     if (e.health <= 0) {
+        Entity *ent = world.registry.get(e.handle);
         if (infantry_anim_flags(inf.anim_state) != 0x82u) {
-            const int death = anim_state::kDeathBulletBase + 4; // death_bullet_torso_forward
+            // A mounted body detaches so the corpse falls with the world, not the
+            // seat [orig: entity+0x16C -> Entity_DetachFromVehicleIfServer @0x4b9c57;
+            // the edge also clears Flags 0x40 @0x4b9d2a].
+            if (ent != nullptr && ent->mounted) world.commands.dismount(ent->net_id);
+            // Corpse timer = the item's deathtime [orig: +0x148 = def+0x890 @0x4b9c97].
+            // Unmodeled edge variants (D-AI-9): the +0x134-bit0 silent cleanup
+            // (timer-61, tickets cleared, no scream @0x4b9c68) and the death scream
+            // itself (def weapon-slot sound 7, or 8 when Bms_AttribFlags & 0x100000
+            // @0x4b9ca3 — rides the unparsed sound_profile tables).
+            if (ent != nullptr) ent->corpse_timer = ent->deathtime_ticks;
+            // Consume the kill's selection; none staged -> the generic death
+            // (cause 4 -> 174 death_pungi) [orig: @0x4b9cc9 fallback + the
+            // deathCallback(entity, 1, 0) dispatch; consumed +0x2C0 clears @0x4b9d38.
+            // The Flags&0x8000 drowning override (175) rides the unmodeled swim flags.]
+            int death = (ent != nullptr && ent->death_anim_state != 0)
+                                ? ent->death_anim_state
+                                : compute_death_anim_state(0, 0, death_cause::kGeneric);
+            if (ent != nullptr) ent->death_anim_state = 0;
+            // Stripped host .adm sets may lack the selected clip; keep the pre-P1c
+            // stand-in ladder (torso-forward, then death_fire) rather than a T-pose.
+            if (root_motion != nullptr && !root_motion->has_clip(inf.adm_id, death)) {
+                const int torso = anim_state::kDeathBulletBase + 4;
+                death = root_motion->has_clip(inf.adm_id, torso) ? torso
+                                                                 : anim_state::kDeathFire;
+            }
             inf.anim_prev = inf.anim_state;
-            inf.anim_state =
-                (root_motion != nullptr && root_motion->has_clip(inf.adm_id, death)) ? death
-                                                                         : anim_state::kDeathFire;
-            inf.anim_pending = 0;
+            inf.anim_state = death;
+            inf.anim_pending = 0; // [orig: +0x2B8 = 0 @0x4b9d1e]
             inf.clip_phase = 0;
-            queue_death_event(e);
             inf.move_mode = 0;
             inf.target_dist = 0;
             inf.player_moving = false;
+        }
+        // The corpse-persistence block, every dead tick (the edge tick included —
+        // the original falls through the same frame). Persons author no
+        // particledeath decay effect and no respawn tickets, so those legs are
+        // omitted [orig: the 186-tick effect spawn @0x4b9e7d and the +0x35E path
+        // @0x4b9fa0]; the SP watch-check gate (!in_session && no decay effect) maps
+        // to "a local player exists" on our host.
+        if (ent != nullptr && !ent->hidden && !ent->leave_corpse && !inf.is_local_player) {
+            if (ent->corpse_timer > 0) --ent->corpse_timer; // [orig: @0x4b9e74]
+            if (ent->corpse_timer <= 0) {
+                bool watched = false;
+                if (const Entity *lp = world.registry.get(world.cached.local_player)) {
+                    // The local-player visibility watch [orig: Physics_RaycastTerrain-
+                    // AndSectors(corpse, player) @0x4b9f77 on the entity origins; ours
+                    // rides line_of_sight_clear's chest-lift endpoints (D-AI-6/-7 —
+                    // ground-hugging feet rays false-block on the heightfield leg)].
+                    const int32_t cpos[3] = {e.pos[0], e.pos[1], e.pos[2]};
+                    const int32_t ppos[3] = {to_fixed(lp->position.x),
+                                             to_fixed(lp->position.y),
+                                             to_fixed(lp->position.z)};
+                    watched = line_of_sight_clear(world, cpos, ppos, e.handle,
+                                                  world.cached.local_player);
+                }
+                if (watched) {
+                    ent->corpse_timer = 62; // seen -> retry in 1 s [orig: @0x4b9f83]
+                } else {
+                    // Despawn [orig: Entity_Destroy @0x4b9f93 frees the slot; our
+                    // registry keeps the slot — hidden ends presentation and the
+                    // health<=0 store already gates every consumer].
+                    ent->hidden = true;
+                }
+            }
         }
     } else if (inf.is_local_player) {
         // 2'. Local player: the player-body input is set from host input each frame

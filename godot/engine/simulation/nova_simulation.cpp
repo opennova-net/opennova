@@ -328,6 +328,12 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 		const uint32_t attrib = p_item_db->get_attrib(def_id);
 		e->is_capture_trigger = (attrib & 0x20000u) != 0;
 		e->is_spawn_point = (attrib & 0x40000u) != 0;
+		// Death-presentation traits: LeaveCorpse (attrib 0x400000) keeps the corpse
+		// forever; deathtime (def+0x890, parse-scaled ticks) seeds the corpse timer at
+		// the death edge. [orig: ItemDef_ParseProperty @0x4a09d3 / @0x49fa6c; consumers
+		// Entity_UpdateInfantryAI @0x4b9e54 / @0x4b9c97; world-wac-ai-re §19]
+		e->leave_corpse = (attrib & 0x400000u) != 0;
+		e->deathtime_ticks = p_item_db->get_deathtime_ticks(def_id);
 		// Vehicle motor traits: the pre-scaled items.def physics block + the PlayerControl
 		// attrib (0x40) gate, keyed by item id in the world table. Fills once per distinct
 		// id; the AI tick's vehicle pass drives pool-1 entities whose traits carry a
@@ -2597,6 +2603,12 @@ Dictionary NovaSimulation::get_entity_debug(int p_index) const {
 	out["clip_size"] = e->profile.clip_size;
 	out["magazine"] = static_cast<int>(e->inf.magazine);
 	out["combat_target_valid"] = e->inf.combat_target.valid();
+	// Death presentation (P1c): the damage-time selection still pending consume,
+	// the live corpse countdown, and the def traits behind them (world-wac-ai-re §19).
+	out["death_anim_state"] = ent ? ent->death_anim_state : 0;
+	out["corpse_timer"] = ent ? ent->corpse_timer : 0;
+	out["deathtime_ticks"] = ent ? ent->deathtime_ticks : 0;
+	out["leave_corpse"] = ent ? ent->leave_corpse : false;
 	return out;
 }
 

@@ -2,6 +2,7 @@
 // AI_BeginUpdate budget gate, the infantry state-machine dispatcher + transitions,
 // and the byte-exact trivial handler ports. Driven by a manual World + tick.
 #include <cstdio>
+#include <memory>
 #include <cstring>
 
 #include "world/ai.h"
@@ -17,6 +18,99 @@ static int failures = 0;
     } while (0)
 
 static bool streq(const char *a, const char *b) { return std::strcmp(a, b) == 0; }
+
+// The vehicle death chain rows (world-wac-ai-re section 19) - own function per the
+// main()-frame __chkstk overflow gotcha.
+void test_vehicle_death_rows() {
+    // ---- the vehicle death chain: rows 21 (DYING) and 23 (GROUND_DEAD) ----
+    // [orig: AI_TransitionToDeath_GroundVehicle @0x467b20 / AI_TickState_VehicleDying
+    // @0x467cd0 / AI_HandleEvent_VehicleDying @0x457f50 / AI_TransitionToDestroyed_
+    // Vehicle @0x467de0 / AI_HandleEvent_ConsumeAll @0x458080; world-wac-ai-re §19]
+    {
+        auto w_heap = std::make_unique<World>();
+        World &w = *w_heap;
+        w.registry.configure_pool(1, 4);
+        Entity seed;
+        seed.team = 1;
+        seed.group_id = 3;
+        seed.health = 0;
+        const EntityHandle h = w.registry.spawn(1, seed);
+        auto sys_heap = std::make_unique<AiSystem>();
+        AiSystem &sys = *sys_heap;
+        sys.is_authority = true;
+        int idx = sys.attach(h);
+        AiEntity &e = *sys.at(idx);
+        e.team = 1;
+        e.health = 0;
+        e.vel_x = 100; e.vel_z = 0; // slow (< 1057): the enter queues the destroy event
+        e.brain.f[AiBrain::kCurState] = 21;
+
+        AiThinkCtx ctx{&sys, &e, &w, nullptr};
+        sys.row(21).enter(ctx);
+        CHECK(e.brain.f[AiBrain::kAlert] == 2);            // the alert block ran
+        CHECK(e.brain.f[AiBrain::kStep] == 16);            // [orig: ai_data[7] = 16]
+        CHECK(w.relations.group(3).alert == TriggerRelations::kAlertRed);
+        bool queued4 = false;
+        for (int i = 0; i < sys.events.count(); ++i)
+            if (sys.events.at(i).type() == 4) queued4 = true;
+        CHECK(queued4);                                    // slow -> destroy event now
+
+        // The dying event handler routes ONLY type 4 -> pending 23.
+        AiEventEntry dmg{}; dmg.f[0] = 1;
+        AiThinkCtx ctx_dmg{&sys, &e, &w, &dmg};
+        sys.row(21).event(ctx_dmg);
+        CHECK(e.brain.f[AiBrain::kPendState] != 23);
+        AiEventEntry destroy{}; destroy.f[0] = 4;
+        AiThinkCtx ctx_dst{&sys, &e, &w, &destroy};
+        sys.row(21).event(ctx_dst);
+        CHECK(e.brain.f[AiBrain::kPendState] == 23);
+
+        // Enter 23: team cleared (a wreck goes teamless), moveStep 62, corpse timer 0.
+        w.registry.get(h)->corpse_timer = 500;
+        sys.row(23).enter(ctx);
+        CHECK(e.brain.f[AiBrain::kStep] == 62);
+        CHECK(e.team == 0);
+        CHECK(w.registry.get(h)->team == 0);
+        CHECK(w.registry.get(h)->corpse_timer == 0);       // wrecks never expire
+
+        // The dead row swallows everything: no pending change from any event.
+        e.brain.f[AiBrain::kPendState] = 0;
+        AiEventEntry late{}; late.f[0] = 3;
+        AiThinkCtx ctx_late{&sys, &e, &w, &late};
+        sys.row(23).event(ctx_late);
+        CHECK(e.brain.f[AiBrain::kPendState] == 0);
+    }
+
+    // ---- the dying tick: still-moving clears the work fields; stopping queues 4 ----
+    // [orig: AI_TickState_VehicleDying @0x467cd0]
+    {
+        auto w_heap = std::make_unique<World>();
+        World &w = *w_heap;
+        auto sys_heap = std::make_unique<AiSystem>();
+        AiSystem &sys = *sys_heap;
+        int idx = sys.attach(EntityHandle::make(1, 0));
+        AiEntity &e = *sys.at(idx);
+        e.brain.f[AiBrain::kCurState] = 21;
+        e.vel_x = 5000; e.vel_z = 0;             // fast
+        e.pos[0] = 100000;                        // far from the (0-init) death pose
+        e.net_saved_live_pose[0] = 0;
+        e.brain.f[AiBrain::kWorkPitch] = 7;
+        e.brain.f[AiBrain::kWorkRoll] = 7;
+        e.brain.f[AiBrain::kOutSpeed] = 7;
+        AiThinkCtx ctx{&sys, &e, &w, nullptr};
+        sys.row(21).tick(ctx);
+        CHECK(sys.events.count() == 0);           // still crashing: no event yet
+        CHECK(e.brain.f[AiBrain::kWorkPitch] == 0);
+        CHECK(e.brain.f[AiBrain::kWorkRoll] == 0);
+        CHECK(e.brain.f[AiBrain::kOutSpeed] == 0);
+        e.vel_x = 100;                            // stopped
+        sys.row(21).tick(ctx);
+        bool queued4 = false;
+        for (int i = 0; i < sys.events.count(); ++i)
+            if (sys.events.at(i).type() == 4) queued4 = true;
+        CHECK(queued4);
+    }
+}
 
 int main() {
     // ---- struct layout (byte-exact strides) ----
@@ -987,7 +1081,16 @@ int main() {
         CHECK(w.relations.single_single(TriggerRelations::kTargeted, 0x11, 0x21));
         CHECK(w.relations.group_group(TriggerRelations::kSees, 1, 2));
         CHECK((w.registry.get(npc_h)->engine_flags & 0x4000u) != 0);
+        // The kill staged the bullet death-anim selection on the victim at damage
+        // time: torso group (the bone stand-in, D-AI-9) = 184..187 by quadrant, and
+        // the victim's group went alert red. [orig: Entity_HandleDamageTrigger
+        // @0x407478/@0x4073ea; world-wac-ai-re §19]
+        const int sel = w.registry.get(player_h)->death_anim_state;
+        CHECK(sel >= 184 && sel <= 187);
+        CHECK(w.relations.group(2).alert == TriggerRelations::kAlertRed);
     }
+
+    test_vehicle_death_rows();
 
     if (failures == 0) std::printf("ai: all tests passed\n");
     return failures ? 1 : 0;

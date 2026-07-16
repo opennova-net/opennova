@@ -1352,6 +1352,15 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
                [orig: @ 0x49fa2e-0x49fa48; Entity_ResetToSpawnState @ 0x4b97a9] */
             current.clipsize = parse_int_n(v, vl);
             parsed = 1;
+        } else if (lower_match_key(lower, ll, "deathtime", 9)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
+            /* seconds -> ticks at parse: 62*v, an explicit 0 -> 496, +62 grace; the
+               corpse timer's seed (entity+0x148 at the death edge @ 0x4b9c97)
+               [orig: ItemDef_ParseProperty @ 0x49fa6c-0x49faa0 -> def+0x890] */
+            int dt = parse_int_n(v, vl) * 62;
+            if (dt == 0) dt = 496;
+            current.deathtime_ticks = dt + 62;
+            parsed = 1;
         /* Vehicle physics-property block, scaled at parse exactly like the original loader
            [orig: ItemDef_ParsePhysicsProperty @0x49d870]. turn_rate2 is matched before
            turn_rate only for clarity — lower_match_key requires a separator after the key. */

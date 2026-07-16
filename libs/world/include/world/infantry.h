@@ -11,12 +11,15 @@
 
 namespace opennova::world {
 
-inline constexpr int kInfantryAnimStateCount = 200;
+// 252 entries: 0..239 body states (180..239 = the 15-group bullet death matrix),
+// 240..251 the wpn_* FP viewmodel states. [orig: AnimMap_FindSlotByName @0x40cfa0
+// scans exactly 252 entries of g_animStateNameTable @0x8135F0]
+inline constexpr int kInfantryAnimStateCount = 252;
 
-// State id -> .adm key without the "anim_" prefix. [orig: off_8135F0]
+// State id -> .adm key without the "anim_" prefix. [orig: g_animStateNameTable @0x8135F0]
 extern const char *const kInfantryAnimNames[kInfantryAnimStateCount];
 
-// Per-state behavior flags. [orig: g_animStateFlagsTable]
+// Per-state behavior flags. [orig: g_animStateFlagsTable @0x8139E8]
 extern const uint32_t kInfantryAnimFlags[kInfantryAnimStateCount];
 
 namespace anim_state {
@@ -91,9 +94,35 @@ enum : int {
     kDeathPungi = 174,
     kDeathDrown = 175,
     kDeathGrenadeBase = 176, // 176..179: death_grenade F/R/B/L
-    kDeathBulletBase = 180,  // 180..199: death_bullet families
+    kDeathBulletBase = 180,  // 180..239: death_bullet, 15 bone groups x F/R/B/L
 };
 } // namespace anim_state
+
+// Death causes routed by the death-anim selector. The original passes these as the
+// selector's 4th argument; any other value falls through to death_pungi 174.
+// [orig: Entity_ComputeAnimSlotIndex @0x43a690 switch]
+namespace death_cause {
+enum : int {
+    kBullet = 1,    // -> 180 + quadrant + 4*bone_group
+    kExplosive = 2, // -> 176 + quadrant (death_grenade_*)
+    kFire = 3,      // -> 173 death_fire
+    kGeneric = 4,   // -> 174 death_pungi (the no-cause fallback the death edge uses)
+    kDrown = 5,     // -> 175 death_drown
+};
+} // namespace death_cause
+
+// The death-anim selector: bone index 0..31 (>=32 -> 0), attack quadrant 0..3
+// (>=4 -> 0), cause -> anim state id. Bullet deaths map the hit bone through the
+// witnessed 32-entry bone->group table (15 groups: hip, torso, head, R/L shoulder,
+// R/L arm, R/L hand, R/L thigh, R/L calf, R/L foot). [orig: Entity_ComputeAnimSlotIndex
+// @0x43a690; the unused outPos arg dropped]
+int compute_death_anim_state(int bone_index, int quadrant, int cause);
+
+// The bullet-death attack quadrant: 0 forward / 1 right / 2 back / 3 left, from the
+// victim's engine heading and the killing round's horizontal velocity.
+// [orig: Entity_HandleDamageTrigger @0x407478 — (yaw - atan2BAM(vel.y, vel.x)
+// - 0x60000000) >> 30; atan2 scale 683565275.5764316 = 2^32/2pi]
+int death_quadrant_from_round(int32_t victim_heading_bam, float round_vel_x, float round_vel_y);
 
 // Map the selected infantry state to the present-pass BodyAnim slot. Directional
 // walk blocks all render through the same canonical walk slot.
