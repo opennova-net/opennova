@@ -42,6 +42,20 @@ class FxWorldStub:
 		return 1
 
 
+
+# Single stub-injection seam for this file: GameWorld builds its runtime
+# internally in _start_runtime, so duck-typed transport stubs go in through
+# these two helpers only (keeps the private pokes to one site).
+func _install_runtime(world, runtime, effects = null) -> void:
+	world._runtime = runtime
+	world._loaded = runtime != null
+	world._effect_world = effects
+
+
+func _detach_runtime(world) -> void:
+	_install_runtime(world, null)
+
+
 func test_tick_gates_the_runtime_on_its_transport() -> void:
 	# The game host's tick must respect MissionRuntime's play flag - the debug
 	# overlay's Pause/Step work on a live mission BECAUSE this gate exists
@@ -50,8 +64,7 @@ func test_tick_gates_the_runtime_on_its_transport() -> void:
 	add_child_autofree(world)
 	var runtime := TransportRuntimeStub.new()
 	add_child_autofree(runtime)
-	world._runtime = runtime
-	world._loaded = true
+	_install_runtime(world, runtime)
 
 	world.tick(Vector3.ZERO)
 	assert_eq(runtime.ticks, 0, "a paused runtime never ticks")
@@ -61,8 +74,7 @@ func test_tick_gates_the_runtime_on_its_transport() -> void:
 	runtime.pause()
 	world.tick(Vector3.ZERO)
 	assert_eq(runtime.ticks, 1, "pausing stops it again")
-	world._runtime = null
-	world._loaded = false
+	_detach_runtime(world)
 
 
 func test_fx2ssn_routes_position_owner_and_up_orientation() -> void:
@@ -72,8 +84,7 @@ func test_fx2ssn_routes_position_owner_and_up_orientation() -> void:
 	var effects := FxWorldStub.new()
 	add_child_autofree(runtime)
 	add_child_autofree(effects)
-	world._runtime = runtime
-	world._effect_world = effects
+	_install_runtime(world, runtime, effects)
 	world._route_mission_effects([{"kind": "fx2ssn", "b": 17, "str": "Dust"}])
 	assert_eq(effects.spawns.size(), 1)
 	assert_eq(effects.spawns[0].owner, 17)
@@ -81,8 +92,7 @@ func test_fx2ssn_routes_position_owner_and_up_orientation() -> void:
 	assert_eq(effects.spawns[0].position, Vector3(4, 5, 6))
 	assert_eq(effects.spawns[0].orientation, Vector3.UP,
 			"the documented terrain-normal placeholder must actually reach the emitter")
-	world._runtime = null
-	world._effect_world = null
+	_detach_runtime(world)
 
 
 func test_load_world_requires_hardcoded_environment_in_global_root() -> void:
@@ -528,8 +538,7 @@ func test_tick_feeds_dispatcher_silhouette_anchors_from_the_sim() -> void:
 	var sim := AnchorSimStub.new()
 	runtime.sim = sim
 	add_child_autofree(runtime)
-	world._runtime = runtime
-	world._loaded = true
+	_install_runtime(world, runtime)
 
 	var expected := PackedVector3Array([Vector3(12.0, 3.0, -40.0), Vector3(-7.5, 0.25, 96.0)])
 	sim.anchors = expected
@@ -542,8 +551,7 @@ func test_tick_feeds_dispatcher_silhouette_anchors_from_the_sim() -> void:
 	assert_eq(disp.silhouette_anchors, PackedVector3Array(),
 		"an emptied sim anchor list clears the previous frame's anchors")
 
-	world._runtime = null
-	world._loaded = false
+	_detach_runtime(world)
 
 
 func test_tick_clears_stale_silhouette_anchors_when_no_sim_is_reachable() -> void:
@@ -562,8 +570,7 @@ func test_tick_clears_stale_silhouette_anchors_when_no_sim_is_reachable() -> voi
 
 	var runtime := SimlessRuntimeStub.new()
 	add_child_autofree(runtime)
-	world._runtime = runtime
-	world._loaded = true
+	_install_runtime(world, runtime)
 
 	disp.silhouette_anchors = PackedVector3Array([Vector3(1.0, 2.0, 3.0)])  # stale
 	world.tick(Vector3.ZERO)
@@ -572,14 +579,13 @@ func test_tick_clears_stale_silhouette_anchors_when_no_sim_is_reachable() -> voi
 
 	var anchorless := AnchorRuntimeStub.new()  # get_sim() returns null
 	add_child_autofree(anchorless)
-	world._runtime = anchorless
+	_install_runtime(world, anchorless)
 	disp.silhouette_anchors = PackedVector3Array([Vector3(4.0, 5.0, 6.0)])  # stale
 	world.tick(Vector3.ZERO)
 	assert_eq(disp.silhouette_anchors, PackedVector3Array(),
 		"a null sim clears stale anchors too")
 
-	world._runtime = null
-	world._loaded = false
+	_detach_runtime(world)
 
 
 func test_set_foliage_hidden_is_safe_without_a_dispatcher() -> void:
