@@ -27,7 +27,7 @@ place.
 | Detail pass split | high ref 180 / low ref 8 at distance 33 | separate high/low shaders and batches | matching |
 | Distant MODEL placement | `Foliage_GenerateModelTileInstances @ 0x600980` | fresh runtime, four cells, cap 21/cell | matching |
 | Distant ground fit | four corners + four edge midpoints | portable fold vectors + CPU evaluation | matching |
-| Distant MODEL blend/depth | `Foliage_LoadDefAssets @ 0x6015b7`, `Foliage_DrawModelTileSlot @ 0x601d90` | additive black, alpha-tested, depth-writing mask | matching effect/state; D-FOLIAGE-10 records bounded host state/order limits |
+| Distant MODEL blend/depth | `Foliage_LoadDefAssets @ 0x6015b7`, `Foliage_DrawModelTileSlot @ 0x601d90` | additive black, alpha-tested, depth-writing mask | matching effect/state; D-FOLIAGE-10 records bounded host order/reflection limits |
 | `:fd` bake/sampling | `Foliage_LoadDefAssets @ 0x601260`, `GTexture_CreateFromPixelDataWithAlphaBlend @ 0x687270`, device sampler init | exact dual-source chain plus linear texels and point-selected retail mips through the 4x4 terminal level | matching; D-FOLIAGE-5 fixed |
 | Detail lightmap input | composed per-tile render target | exact bare tile + hosted static `.til`; retail page/cache and ordered model/depth contributions absent | partial; D-FOLIAGE-7 |
 | Mission-tile exclusion | `Foliage_PathBlockedByPlacedTile @ 0x606490` | shared parsed `<mission>.til`, exact inclusive 16x16 AABB scan | matching; D-FOLIAGE-8 fixed |
@@ -169,17 +169,32 @@ At and beyond 33 through 42 it submits only LOW:
 
 | Range | Ordered pass/reference | c6.a / fade | Depth write / compare |
 |---|---|---:|---|
-| `< 33` | HIGH 180/255, then secondary LOW 8/255 | distance fade, then `fade × 0.1` | enabled / `LESSEQUAL`, then disabled / strict `LESS` |
+| `< 33` | HIGH 180/255, then secondary LOW 8/255 | unscaled distance fade on both | enabled / `LESSEQUAL`, then disabled / strict `LESS` |
 | `≥ 33` through 42 | primary LOW 8/255 | unscaled distance fade | disabled / `LESSEQUAL` |
 
-The shader alpha test is `:fd alpha × c6.a > reference`. At full distance
-fade, the secondary LOW pass therefore accepts `:fd` alpha above about
-`0.314`, not everything above `0.031`; omitting the 0.1 scale turns transparent
-texture padding into broad foliage sheets. `Foliage_RenderFarPatches` checks
-the secondary-call flag and multiplies only c6.a by `flt_7C69F4 = 0.1` at
-`0x60a497..0x60a4ae`; it then issues the secondary setup/draw at
-`0x60a659..0x60a694`. At and beyond 33, the primary LOW draw retains the normal
-distance fade.
+The per-patch fade is computed once, uploaded once, and shared by both near
+draws — there is no constant re-upload between the primary and secondary
+submissions (`0x60a4ca..0x60a55a` upload, secondary setup/draw at
+`0x60a659..0x60a694`). The `flt_7C69F4 = 0.1` fade multiply at
+`0x60a497..0x60a4ae` is gated on the function's third argument, which the
+scene renderer pushes as **reflectionEnabled**
+(`Terrain_RenderSceneWithReflection @ 0x5c95c1/0x5c9661`); the same flag
+forces every patch to LOW (`0x60a193..0x60a19c`). The 0.1 scale is therefore
+the water-REFLECTION scene's dimmed LOW-only foliage, and never applies to
+the main scene. The main scene instead invokes the renderer twice per frame
+split by water side (`formatType` at `0x5c95c3/0x5c9663` versus the
+camera-below-water flag; patch min-height vs `Env_WaterHeightFixed` at
+`0x60a1a2..0x60a1c6`): far-side-of-water foliage before the water surface,
+camera-side foliage after it.
+
+Both detail passes alpha-blend: the technique block enables
+`ALPHABLENDENABLE` with `SRCBLEND=SRCALPHA` and `DESTBLEND=INVSRCALPHA`
+(`Foliage_LoadDefAssets @ 0x60141f..0x601427`), and the PS emits
+`r0.a = t0.a × v0.a` — the tested alpha is also the blended weight. The
+distance fade is a continuous transparency ramp, not just an alpha-test
+threshold shift; rendering these passes opaque turns the low-alpha `:fd`
+fringe into hard sheets and makes cells pop as the fade crosses per-texel
+thresholds.
 
 The setup flag is also a depth-comparison toggle, not a wireframe or fill-mode
 toggle. `Foliage_SetupFarSlotDraw @ 0x6007c0` selects value 2 for the
@@ -190,9 +205,14 @@ double-sided and use terrain fog. HIGH and LOW reuse one cache revision but
 receive distinct submission IDs. Consequently detail residents/hits remain
 cell-based, while submission, intent, batch, and rendered-instance counters
 count both near draws.
-The host ports the ordered submissions, references, fade scale, and write
-policy. Stock Godot's spatial shader API does not expose the `LESS` versus
-`LESSEQUAL` equality toggle, so that bounded state gap remains D-FOLIAGE-10.
+The host ports the ordered submissions, references, shared fade, blending, and
+write policy. The strict-`LESS` secondary is emulated exactly for
+same-geometry resubmission: because HIGH wrote depth precisely where its
+GREATER test passed, the secondary discards texels whose
+`:fd alpha × fade` exceeds the HIGH reference (`u_high_pass_cutoff`),
+landing only where HIGH left no depth. The reflection-scene LOW-only
+`fade × 0.1` variant is not hosted (the host does not yet render foliage
+into water reflections); that gap is noted under D-FOLIAGE-10.
 
 ### Detail shader
 
@@ -470,7 +490,8 @@ D-FOLIAGE-7 rather than claimed as tile-light parity.
 
 - `foliage_runtime_vectors`: literal detail PRNG positions/yaws, the shared
   authored-foliage-map gate for detail and silhouette tiers, path/force-on
-  behavior, 20–42 fade, pass switch, near-secondary 0.1 c6.a scale, four silhouette cells, 21 cap,
+  behavior, 20–42 fade shared by both near submissions, pass switch, the
+  strict-LESS secondary marker, four silhouette cells, 21 cap,
   eight-sample fold, distance alpha ref, and `:fd`.
 - `til_foliage_blocker`: inclusive min/max boundaries, stored-negated Z,
   unsnapped entry positions, and empty-array behavior for the shared mission
@@ -518,7 +539,7 @@ D-FOLIAGE-7 rather than claimed as tile-light parity.
 | D-FOLIAGE-7 | **OPEN, bounded.** Runtime detail reconstructs exact bare-tile RGB/heightfield-DOT3 alpha and composes hosted static `.til` RGB/tint at the exact pre-wind coordinate. Retail's general page/cache c7/c8 projection and ordered tile-model/depth-alpha RT contributions remain absent; standalone editor preview also lacks the parent normal atlas and uses its mesh-normal fallback. |
 | D-FOLIAGE-8 | **FIXED 2026-07-14.** Direct retail inspection resolved the supposed path/spacing substrate as the shared mission `.til` array. `til_blocks_foliage` ports the exact linear inclusive 16x16 AABB scan, GameWorld parses `<mission>.til` before terrain build, and terrain/foliage/network state share that resource/payload; `FORCE_ON` continues to bypass the sampler in the portable runtime. [orig: `Foliage_PathBlockedByPlacedTile @ 0x606490`; `Terrain_LoadFoliageFile @ 0x60a740`; `Terrain_GetSurfaceTypeAtPosition @ 0x606510`] |
 | D-FOLIAGE-9 | **OPEN, host mapping.** Placed objects plus camera frustum approximate retail visible-sector-entity/occlusion membership. No terrain-center fallback remains. Same-frame refreshes of an overlapping host `(slot, cell key)` are coalesced without removing its distinct draw submissions, preventing host-only regeneration/upload storms while this membership gap remains open. |
-| D-FOLIAGE-10 | **OPEN, bounded host state/order.** Retail inserts each immediate MODEL depth-mask draw between its initial sector flush and later entity/foliage consumers, and its near secondary LOW selects strict `LESS` rather than `LESSEQUAL`. Stock Godot hosts the correct color-invisible MODEL depth effect plus ordered HIGH/LOW submissions, exact references/fade, and no LOW depth write, but its spatial shader API cannot choose the equality rule or place the MODEL mask before every later opaque consumer. |
+| D-FOLIAGE-10 | **OPEN, bounded host order.** Retail inserts each immediate MODEL depth-mask draw between its initial sector flush and later entity/foliage consumers; the host's transparent-pass depth sorting reproduces the mask-occludes-farther-detail effect but cannot cull already-drawn farther tufts under a nearer mask, and cannot reproduce every arbitrary insertion point. The near secondary LOW's strict `LESS` is now emulated exactly via the high-pass cutoff discard (the 2026-07-15 grill retired the state half of this entry). The water-REFLECTION scene's LOW-only `fade × 0.1` foliage pass (arg_8 = reflectionEnabled @ `0x5c95c1/0x5c9661`) is not hosted while reflections carry no foliage. |
 
 ## Cross-references
 

@@ -16,13 +16,36 @@ func test_alpha_test_rejects_samples_equal_to_reference() -> void:
 	var silhouette := _source("res://shaders/foliage_silhouette.gdshader")
 
 	assert_true(
-		detail.contains("fd.a * u_fade <= u_alpha_ref"),
+		detail.contains("float retail_alpha = fd.a * u_fade;") and
+			detail.contains("if (retail_alpha <= u_alpha_ref)"),
 		"Detail must discard alpha == ALPHAREF (retail D3DCMP_GREATER)."
 	)
 	assert_true(
 		silhouette.contains("fd.a <= u_alpha_ref"),
 		"MODEL must discard alpha == ALPHAREF (retail D3DCMP_GREATER)."
 	)
+
+
+func test_detail_passes_blend_srcalpha_and_emulate_secondary_less() -> void:
+	# Retail enables ALPHABLENDENABLE with SRCBLEND=SRCALPHA(5) and
+	# DESTBLEND=INVSRCALPHA(6) in the detail technique block, so the blended
+	# weight is exactly the tested alpha (t0.a * v0.a). The near secondary LOW
+	# draw selects strict D3DCMP_LESS; the cutoff discard reproduces its texel
+	# selection. [orig: Foliage_LoadDefAssets @ 0x60141f..0x601427;
+	# Foliage_SetupFarSlotDraw @ 0x6008fc..0x600912]
+	var detail := _source("res://shaders/foliage_detail.gdshaderinc")
+	var high := _source("res://shaders/foliage_detail_high.gdshader")
+	var low := _source("res://shaders/foliage_detail_low.gdshader")
+
+	assert_true(detail.contains("ALPHA = clamp(retail_alpha, 0.0, 1.0);"),
+		"Detail passes must blend at the retail SRCALPHA weight (fd.a * fade).")
+	assert_true(
+		detail.contains("u_high_pass_cutoff > 0.0 && retail_alpha > u_high_pass_cutoff"),
+		"The near secondary LOW must skip texels the HIGH pass accepted (strict LESS).")
+	assert_true(high.contains("blend_mix") and high.contains("depth_draw_always"),
+		"HIGH blends SRCALPHA/INVSRCALPHA while alpha-test survivors write depth.")
+	assert_true(low.contains("blend_mix") and low.contains("depth_draw_never"),
+		"LOW blends SRCALPHA/INVSRCALPHA and never writes depth.")
 
 
 func test_fd_sampling_uses_retail_point_mips_and_four_by_four_terminal() -> void:

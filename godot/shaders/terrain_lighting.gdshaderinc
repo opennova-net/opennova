@@ -56,16 +56,22 @@ uniform float u_fog_end = 1024.0;
 uniform int u_fog_type = 0;
 
 vec4 sample_retail_detail_mips(sampler2D source, vec2 uv) {
-	// Retail stops the paired base/far chain at 4x4. Godot Images require the
-	// synthetic 2x2/1x1 tail, so cap the implicit gradients before sampling.
+	// The reference configuration (texfilter_level 0) sets MAG/MIN LINEAR
+	// with MIPFILTER POINT and zero bias: retail holds each paired mip sharp
+	// and snaps between levels instead of trilinearly pre-blending toward the
+	// far texture. Select the nearest retail level explicitly, and clamp the
+	// selection at the 4x4 terminal level (the 2x2/1x1 tail exists only for
+	// Godot Image completeness).
+	// [orig: device filter setup @ 0x679c28..0x679c9c, 0x677f9e..0x677ff9;
+	// per-stage MIPFILTER select @ 0x67e3f7..0x67e4a7]
 	vec2 dimensions = vec2(textureSize(source, 0));
 	vec2 dx = dFdx(uv);
 	vec2 dy = dFdy(uv);
 	float footprint = max(length(dx * dimensions), length(dy * dimensions));
 	float requested_lod = max(log2(max(footprint, 1.0)), 0.0);
 	float terminal_lod = max(floor(log2(max(min(dimensions.x, dimensions.y), 4.0))) - 2.0, 0.0);
-	float gradient_scale = exp2(min(terminal_lod - requested_lod, 0.0));
-	return textureGrad(source, uv, dx * gradient_scale, dy * gradient_scale);
+	float selected_lod = clamp(floor(requested_lod + 0.5), 0.0, terminal_lod);
+	return textureLod(source, uv, selected_lod);
 }
 
 vec2 clamp_retail_quadrant_uv(vec2 uv, vec2 quadrant, ivec2 dimensions) {

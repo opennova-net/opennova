@@ -1283,6 +1283,12 @@ void NovaFoliageDispatcher::_render_request(
       draw->set_instance_shader_parameter(
           StringName("u_alpha_ref"),
           static_cast<float>(first.alpha_reference) / 255.0f);
+      // The near secondary LOW draw runs under strict D3DCMP_LESS in retail;
+      // the cutoff discard keeps it off every texel the HIGH pass accepted.
+      // [orig: Foliage_SetupFarSlotDraw @ 0x6008fc..0x600912]
+      draw->set_instance_shader_parameter(
+          StringName("u_high_pass_cutoff"),
+          first.near_secondary ? 180.0f / 255.0f : 0.0f);
       draw->set_instance_shader_parameter(StringName("u_wind_phase"),
                                           detail_wind_phase);
       draw->set_visible(true);

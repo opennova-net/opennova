@@ -75,6 +75,20 @@ func test_terrain_tile_light_uses_heightfield_texture_basis() -> void:
 		0.0794002, 0.000001, "08:00 Y-ramp normal must receive the witnessed dark DOT3 response.")
 
 
+func test_detail_mips_point_select_like_texfilter_level_zero() -> void:
+	# The reference configuration (texfilter_level 0) runs MAG/MIN LINEAR with
+	# MIPFILTER POINT: the paired detail chain snaps between levels instead of
+	# trilinearly pre-blending toward the far texture.
+	# [orig: device filter setup @ 0x679c28..0x679c9c, 0x677f9e..0x677ff9]
+	var terrain := _source("res://shaders/terrain_lighting.gdshaderinc")
+	assert_true(terrain.contains("floor(requested_lod + 0.5)"),
+		"Terrain detail must point-select the nearest paired mip level.")
+	assert_true(terrain.contains("textureLod(source, uv, selected_lod)"),
+		"The selected level must still filter linearly within itself.")
+	assert_false(terrain.contains("textureGrad(source, uv"),
+		"Trilinear detail sampling grays mid-distance terrain earlier than retail.")
+
+
 func test_runtime_and_oned_share_tile_overlay_composition() -> void:
 	var shared := _compact(_source("res://shaders/terrain_lighting.gdshaderinc"))
 	var runtime := _compact(_source("res://shaders/terrain.gdshader"))

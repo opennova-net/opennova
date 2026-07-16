@@ -93,8 +93,15 @@ is the fixed-point weighted blend, and alpha is copied from the base mip
 unchanged. Base/far mixing is therefore a mip-chain construction, not a
 camera-distance normal crossfade. Retail stops after the 4×4 level; the Godot
 adapter appends the API-required 2×2/1×1 tail after preserving every
-retail-visible level byte-for-byte, and the shared shader explicitly clamps
-the implicit gradients so that synthetic tail is never selected.
+retail-visible level byte-for-byte. The reference configuration
+(`texfilter_level 0`) samples these chains with `MAG/MIN LINEAR` and
+`MIPFILTER POINT` at zero bias [`orig: device filter setup
+@ 0x679c28..0x679c9c, 0x677f9e..0x677ff9; per-stage MIPFILTER select
+@ 0x67e3f7..0x67e4a7`], so the shared shader point-selects the nearest
+retail level (bilinear within it) and clamps the selection at the 4×4
+terminal — trilinear sampling would pre-blend toward the far texture at
+roughly half the retail distance. `texfilter_level ≥ 2` retail configs map
+MIPFILTER to LINEAR; the host pins the level-0 reference.
 
 Implemented in `libs/terrain/include/terrain/texture_preprocess.h` and
 `NovaTerrain::_load_textures`;

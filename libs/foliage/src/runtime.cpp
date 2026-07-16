@@ -26,7 +26,10 @@ constexpr float kYawScale = 6.28318530717958647692f / 65536.0f;
 constexpr float kPathRange = 2.0f;
 constexpr float kDetailFadeStart = 20.0f;
 constexpr float kDetailPassSwitch = 33.0f;
-constexpr float kDetailSecondaryFadeScale = 0.1f;
+// The witnessed 0.1 c6 fade scale (flt_7C69F4 @ 0x60a4a8) belongs to the
+// water-REFLECTION scene invocation only (arg_8 = reflectionEnabled), which
+// also forces every patch to the LOW pass. The main scene never scales the
+// fade; this runtime models the main scene.
 constexpr float kDetailLimit = 42.0f;
 constexpr float kSilhouetteDepth = 38.0f;
 constexpr int32_t kFixedOne = 0x10000;
@@ -519,7 +522,8 @@ FrameOutput Runtime::render_frame(const FrameRequest &request,
 			const auto append_submission =
 			    [this, &entry, &output](DetailPass pass,
 			                           uint8_t alpha_reference,
-			                           float submission_alpha) {
+			                           float submission_alpha,
+			                           bool near_secondary) {
 				++stats_.detail.submissions;
 				const uint64_t submission_id = ++next_submission_id_;
 				for (const DetailInstance &cached_instance : entry.instances) {
@@ -529,25 +533,29 @@ FrameOutput Runtime::render_frame(const FrameRequest &request,
 					instance.alpha = submission_alpha;
 					instance.alpha_reference = alpha_reference;
 					instance.pass = pass;
+					instance.near_secondary = near_secondary;
 					output.detail.push_back(instance);
 				}
 			};
 
-			// Retail submits the near resident twice: the 180-reference,
-			// depth-writing pass first, followed by the exact same cached
-			// geometry under the 8-reference no-depth-write pass with c6.a
-			// scaled by 0.1. At and beyond the 33-unit switch only the primary
-			// LOW pass is submitted, retaining the normal distance fade.
-			// [orig: Foliage_RenderFarPatches @ 0x60a497..0x60a4ae;
-			// secondary setup/draw @ 0x60a659..0x60a694]
+			// Retail submits the near resident twice in one main-scene pass:
+			// the 180-reference depth-writing HIGH draw first, then the exact
+			// same cached geometry under the 8-reference no-depth-write LOW
+			// draw at the SAME c6 fade with strict D3DCMP_LESS. At and beyond
+			// the 33-unit switch only the primary LOW pass is submitted. The
+			// 0.1 fade scale rides the whole-call reflection flag (arg_8 =
+			// reflectionEnabled, pushed at 0x5c95c1/0x5c9661), which also
+			// forces LOW for every patch; it never applies to the main scene.
+			// [orig: Foliage_RenderFarPatches @ 0x60a171..0x60a19c pass
+			// select, 0x60a497..0x60a4ae reflection fade scale,
+			// 0x60a659..0x60a694 secondary setup/draw;
+			// Terrain_RenderSceneWithReflection @ 0x5c95c5/0x5c9665]
 			if (cell.camera_distance < kDetailPassSwitch) {
-				append_submission(DetailPass::HighAlphaTest, 180u, alpha);
+				append_submission(DetailPass::HighAlphaTest, 180u, alpha, false);
+				append_submission(DetailPass::LowAlphaTest, 8u, alpha, true);
+			} else {
+				append_submission(DetailPass::LowAlphaTest, 8u, alpha, false);
 			}
-			append_submission(
-			    DetailPass::LowAlphaTest, 8u,
-			    cell.camera_distance < kDetailPassSwitch
-			        ? alpha * kDetailSecondaryFadeScale
-			        : alpha);
 		}
 	}
 

@@ -96,8 +96,13 @@ bool detail_vectors_and_gates() {
 		            "near low pass re-submits the exact high-pass geometry")) {
 			return false;
 		}
-		if (!expect(near(high.alpha, 1.0f) && near(low.alpha, 0.1f),
-		            "near secondary low pass scales the c6 alpha/fade by 0.1")) {
+		if (!expect(near(high.alpha, 1.0f) && near(low.alpha, 1.0f),
+		            "near secondary low pass shares the unscaled c6 fade")) {
+			return false;
+		}
+		if (!expect(!high.near_secondary && low.near_secondary,
+		            "only the near low resubmission carries the strict-LESS "
+		            "secondary marker")) {
 			return false;
 		}
 	}
@@ -149,18 +154,20 @@ bool detail_vectors_and_gates() {
 	auto fading = runtime.render_frame(one_detail(31.0f), world);
 	if (!expect(fading.detail.size() == 72 &&
 	                near(fading.detail[0].alpha, 0.5f) &&
-	                near(fading.detail[36].alpha, 0.05f) &&
+	                near(fading.detail[36].alpha, 0.5f) &&
 	                fading.detail[0].pass == DetailPass::HighAlphaTest &&
 	                fading.detail[36].pass == DetailPass::LowAlphaTest &&
+	                fading.detail[36].near_secondary &&
 	                fading.detail[0].alpha_reference == 180,
-	            "detail fade is 1 through 20 then linear to 0 at 42, with "
-	            "the near secondary scaled by 0.1")) return false;
+	            "detail fade is 1 through 20 then linear to 0 at 42, shared "
+	            "by both near submissions")) return false;
 	auto low = runtime.render_frame(one_detail(33.0f), world);
 	if (!expect(low.detail.size() == 36 &&
 	                near(low.detail[0].alpha, 9.0f / 22.0f) &&
 	                low.detail[0].pass == DetailPass::LowAlphaTest &&
+	                !low.detail[0].near_secondary &&
 	                low.detail[0].alpha_reference == 8,
-	            "distance 33 switches to the low alpha-test pass")) return false;
+	            "distance 33 switches to the primary low alpha-test pass")) return false;
 	if (!expect(runtime.render_frame(one_detail(42.01f), world).detail.empty(),
 	            "detail cells beyond 42 units are rejected")) return false;
 	auto invalid = one_detail(10.0f);

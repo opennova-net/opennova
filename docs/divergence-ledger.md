@@ -420,14 +420,18 @@ and the 128-LRU cache are **MATCHING** vs retail `PolyTrn_RenderTile @ 0x60df0d`
 
 ### Foliage — [foliage/foliage-re.md](foliage/foliage-re.md) (D-FOLIAGE catalog; PAR-R2)
 
-The 2026-07-14 LOW-pass audit corrected a host omission without changing the
-resident cache model: below distance 33, retail re-submits the same geometry
-after HIGH with c6.a scaled by 0.1; the primary LOW draw at and beyond 33 keeps
-the unscaled distance fade. The secondary setup selects strict `D3DCMP_LESS`,
-not wireframe/fill mode. [orig: `Foliage_RenderFarPatches @
+The 2026-07-14 LOW-pass audit found the secondary submission; the 2026-07-15
+grill corrected its fade and blend: below distance 33, retail re-submits the
+same geometry after HIGH at the SAME unscaled c6 fade under strict
+`D3DCMP_LESS` (not wireframe/fill mode), and every detail draw alpha-blends
+`SRCALPHA/INVSRCALPHA` with tested alpha `t0.a × v0.a`. The 0.1 fade scale
+rides the whole-call reflection flag (`arg_8 = reflectionEnabled`, pushed at
+`Terrain_RenderSceneWithReflection @ 0x5c95c1/0x5c9661`), which also forces
+LOW for all patches — it is the water-reflection scene's dimmed foliage, not
+a main-scene state. [orig: `Foliage_RenderFarPatches @ 0x60a171..0x60a19c,
 0x60a497..0x60a4ae, 0x60a659..0x60a694`; `Foliage_SetupFarSlotDraw @
-0x6008fc..0x600912`; `SetRenderState` wrapper
-`0x67cac0..0x67caea`]
+0x6008fc..0x600912`; `Foliage_LoadDefAssets @ 0x60141f..0x601427`;
+`SetRenderState` wrapper `0x67cac0..0x67caea`]
 
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
@@ -440,7 +444,7 @@ not wireframe/fill mode. [orig: `Foliage_RenderFarPatches @
 | D-FOLIAGE-7 | Detail t1 is retail's composed per-tile render target. Runtime reconstructs exact bare RGB/heightfield-DOT3 alpha and composes hosted static `.til` RGB/tint at the witnessed pre-wind coordinate; retail's general patch/page c7/c8 projection and ordered tile-model/depth-alpha RT contributions remain absent, while editor foliage preview additionally falls back to mesh normals because it has no parent NovaTerrain atlas | B | OPEN, bounded; shares D-TERRAIN-7 producer | terrain/foliage re-grill |
 | D-FOLIAGE-8 | Retail candidate exclusion linearly scans the shared mission .til array with inclusive 16x16 entry AABBs and a radius-2 candidate square unless attrib bit 0 FORCE_ON; GameWorld now shares the parsed resource with terrain and foliage and reuses its bytes for network initial state | B | **FIXED 2026-07-14** - exact portable scan plus host lifecycle wiring | foliage runtime host mapping |
 | D-FOLIAGE-9 | Silhouette driver membership uses retail visible sector entities/occlusion. Host uses genuine placed objects plus the camera frustum, with no longer any manufactured terrain-center anchors. Overlapping host anchors retain distinct submissions but now coalesce same-frame refreshes of one `(slot, cell key)` and preserve unchanged mesh revisions, preventing host-only regeneration/upload storms without hiding the membership gap | C | OPEN, narrowed host mapping | foliage runtime host mapping |
-| D-FOLIAGE-10 | Retail inserts each immediate MODEL depth-mask draw after the initial sector flush and before later entity/foliage consumers. Its secondary detail LOW also switches `ZFUNC` from `LESSEQUAL` to strict `LESS`; stock Godot's spatial shader API exposes neither that equality toggle nor placement before every later opaque consumer. The host preserves the dominant effects: additive-black MODEL color/depth, ordered HIGH/LOW submissions, no LOW depth write, and the exact secondary 0.1 fade | C | OPEN, bounded render-state/order host mapping | foliage runtime host mapping |
+| D-FOLIAGE-10 | Retail inserts each immediate MODEL depth-mask draw after the initial sector flush and before later entity/foliage consumers; the host's transparent-pass depth sorting cannot cull already-drawn farther detail under a nearer mask or reproduce every insertion point. The secondary LOW's strict `LESS` is now emulated exactly (high-pass cutoff discard on identical geometry), and both detail passes blend `SRCALPHA/INVSRCALPHA` at the shared fade. The reflection-scene LOW-only `fade × 0.1` pass is unhosted while water reflections carry no foliage | C | OPEN, narrowed to order/reflection host mapping (state half retired 2026-07-15) | foliage runtime host mapping |
 
 The fresh core is literal-vector matching for both generators: shared
 0xA55B1EED ROL-hash stream, 36 candidates, high15=X/low15=Z-top keys, the

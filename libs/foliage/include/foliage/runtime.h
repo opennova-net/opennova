@@ -90,6 +90,13 @@ struct DetailInstance {
 	float alpha = 0.0f;
 	uint8_t alpha_reference = 0;
 	DetailPass pass = DetailPass::HighAlphaTest;
+	// True only for the near (<33) LOW resubmission that follows the HIGH
+	// pass. Retail draws it at the same c6 fade under strict D3DCMP_LESS, so
+	// it only lands where the HIGH pass rejected alpha; adapters emulate the
+	// equality rule by discarding texels above the HIGH reference.
+	// [orig: Foliage_RenderFarPatches @ 0x60a659..0x60a694;
+	// Foliage_SetupFarSlotDraw @ 0x6008fc..0x600912]
+	bool near_secondary = false;
 };
 
 struct SilhouetteInstance {

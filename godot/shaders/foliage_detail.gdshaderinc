@@ -17,6 +17,13 @@ uniform vec3 u_emitter_color = vec3(0.5019608);
 instance uniform float u_wind_phase = 0.0;
 instance uniform float u_fade = 1.0;
 instance uniform float u_alpha_ref = 0.0;
+// Nonzero only on the near LOW resubmission: retail selects strict
+// D3DCMP_LESS there, so identical geometry only lands where the preceding
+// HIGH draw rejected alpha and left no depth. Discarding texels the HIGH
+// pass accepted reproduces that selection without a compare-op toggle.
+// [orig: Foliage_SetupFarSlotDraw @ 0x6008fc..0x600912;
+// CGfxDevice ZFUNC wrapper @ 0x67cac0..0x67caea]
+instance uniform float u_high_pass_cutoff = 0.0;
 
 global uniform vec3 opennova_sky_ambient;
 global uniform vec3 opennova_sun_light;
@@ -86,7 +93,15 @@ void fragment() {
 	vec4 fd = u_has_fd_texture
 		? sample_retail_foliage_fd(u_fd_texture, UV)
 		: vec4(0.5, 0.5, 0.5, 1.0);
-	if (fd.a * u_fade <= u_alpha_ref) {
+	// Retail alpha = t0.a * v0.a feeds both the GREATER alpha test and the
+	// SRCALPHA/INVSRCALPHA framebuffer blend enabled in the detail technique
+	// block. [orig: Foliage_LoadDefAssets @ 0x60141f..0x601427;
+	// Foliage_CreateLightmapBlendPS @ 0x5ff7a0 "+mul r0.a, t0.a, v0.a"]
+	float retail_alpha = fd.a * u_fade;
+	if (retail_alpha <= u_alpha_ref) {
+		discard;
+	}
+	if (u_high_pass_cutoff > 0.0 && retail_alpha > u_high_pass_cutoff) {
 		discard;
 	}
 
@@ -138,4 +153,7 @@ void fragment() {
 	vec3 color = clamp(fd.rgb * lit * u_emitter_color * 8.0, vec3(0.0), vec3(1.0));
 	color = mix(opennova_fog_color, color, foliage_fog_factor(v_fog_distance));
 	ALBEDO = nova_gamma_to_linear(color);
+	// D3D fog folds into the source color before blending, so the blended
+	// weight is exactly the retail SRCALPHA term.
+	ALPHA = clamp(retail_alpha, 0.0, 1.0);
 }

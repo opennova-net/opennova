@@ -144,20 +144,21 @@ func test_preview_altitude_distance_drives_detail_alpha_fade() -> void:
 	_dispatcher.render_preview(elevated_camera)
 	_dispatcher.render_preview(elevated_camera)
 
-	var found_half_high_fade := false
-	var found_half_secondary_fade := false
+	var half_fade_draws := 0
+	var found_secondary_cutoff := false
 	for child in _dispatcher.get_children():
 		if not child.name.begins_with("FoliageDetailDraw") or not child.visible:
 			continue
 		var fade := float(child.get_instance_shader_parameter("u_fade"))
 		if is_equal_approx(fade, 0.5):
-			found_half_high_fade = true
-		elif is_equal_approx(fade, 0.05):
-			found_half_secondary_fade = true
-	assert_true(found_half_high_fade,
-		"A 31-unit 3D distance must feed retail's 20-to-42 detail fade.")
-	assert_true(found_half_secondary_fade,
-		"The near LOW secondary must retain the 0.1-scaled 3D fade.")
+			half_fade_draws += 1
+			var cutoff := float(child.get_instance_shader_parameter("u_high_pass_cutoff"))
+			if is_equal_approx(cutoff, 180.0 / 255.0):
+				found_secondary_cutoff = true
+	assert_gt(half_fade_draws, 1,
+		"A 31-unit 3D distance must feed retail's 20-to-42 fade to BOTH near submissions.")
+	assert_true(found_secondary_cutoff,
+		"The near LOW secondary must carry the strict-LESS high-pass cutoff.")
 
 
 func test_near_detail_submits_high_then_exact_low_secondary() -> void:
@@ -186,7 +187,7 @@ func test_near_detail_submits_high_then_exact_low_secondary() -> void:
 		var high_code := high_material.shader.code
 		var low_code := low_material.shader.code
 		if (
-			not high_code.contains("depth_draw_opaque")
+			not high_code.contains("depth_draw_always")
 			or not low_code.contains("depth_draw_never")
 		):
 			continue
@@ -197,8 +198,8 @@ func test_near_detail_submits_high_then_exact_low_secondary() -> void:
 			180.0 / 255.0, 0.000001)
 		assert_almost_eq(float(low.get_instance_shader_parameter("u_alpha_ref")),
 			8.0 / 255.0, 0.000001)
-		assert_true(high_code.contains("depth_draw_opaque"),
-			"The first near pass writes depth.")
+		assert_true(high_code.contains("depth_draw_always"),
+			"The first near pass writes depth for alpha-test survivors.")
 		assert_true(low_code.contains("depth_draw_never"),
 			"The second near pass preserves depth.")
 		break

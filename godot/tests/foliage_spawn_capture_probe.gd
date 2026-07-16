@@ -341,12 +341,18 @@ func _configure_flicker_draws(
 		var fade_value: Variant = draw.get_instance_shader_parameter("u_fade")
 		if fade_value is float or fade_value is int:
 			fade = float(fade_value)
+		var cutoff := 0.0
+		var cutoff_value: Variant = draw.get_instance_shader_parameter("u_high_pass_cutoff")
+		if cutoff_value is float or cutoff_value is int:
+			cutoff = float(cutoff_value)
 		var matches := false
 		if name_text.begins_with("FoliageDetailDraw"):
 			if tier == "detail_high":
 				matches = shader_file == "foliage_detail_high.gdshader"
 			elif tier == "detail_low_far":
-				matches = shader_file == "foliage_detail_low.gdshader" and fade > 0.100001
+				# Primary LOW (>= 33u) carries no strict-LESS cutoff; the near
+				# secondary does. Both share the unscaled distance fade.
+				matches = shader_file == "foliage_detail_low.gdshader" and cutoff <= 0.0
 			elif tier == "detail_auto":
 				matches = true
 		var keep := was_visible and matches
