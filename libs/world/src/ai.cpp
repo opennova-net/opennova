@@ -1403,8 +1403,14 @@ void AiSystem::ai_set_target(World &world, AiEntity &e, EntityHandle target) {
 // No terrain wired -> clear, the headless-test default. Returns true = clear.
 bool AiSystem::line_of_sight_clear(const int32_t a[3], const int32_t b[3]) const {
     if (terrain == nullptr || !terrain->valid()) return true;
-    const double ax = a[0] / 65536.0, ay = a[1] / 65536.0, az = a[2] / 65536.0;
-    const double bx = b[0] / 65536.0, by = b[1] / 65536.0, bz = b[2] / 65536.0;
+    // The original tests the segment between the two FIRE ORIGINS — Entity_CheckMutual-
+    // LineOfSight @0x539be0 feeds two Entity_ComputeWeaponFireOrigin @0x43b4b0 results
+    // into the ray — never the ground-level entity origins (feet-to-feet sampling
+    // false-blocks on the very ground both stand on). Until the bone seam lands, lift
+    // both endpoints by the same 0.9 u chest stand-in the fire pass uses (D-AI-6/-7).
+    constexpr double kChestLift = 0.9; // [orig: the def+1350 muzzle bone; stand-in 0xE666]
+    const double ax = a[0] / 65536.0, ay = a[1] / 65536.0, az = a[2] / 65536.0 + kChestLift;
+    const double bx = b[0] / 65536.0, by = b[1] / 65536.0, bz = b[2] / 65536.0 + kChestLift;
     const double dx = bx - ax, dy = by - ay, dz = bz - az;
     const double len = std::sqrt(dx * dx + dy * dy);
     const int steps = len > 2.0 ? static_cast<int>(len / 2.0) + 1 : 1;

@@ -358,6 +358,39 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 	opennova::world::zone_chain_latch_control(*world_, world_->zone_chain);
 }
 
+// The D-AI-5 host weapon seed. The original resolves the items.def ammo_closeattack/
+// easyrocket/advancedrocket/marker3 names into ammo-def ids on the def and block-copies
+// them onto the entity (+0x358..0x35B; the copy site is the open world-wac-ai-re §17.7
+// item 1 — no per-field writer exists). Until that copy is witnessed, the port carries
+// ONE ammo id + clipsize per NPC (AiProfile — JO riflemen author all four slots to the
+// same rifle round), stamped here from the item database against the loaded ammo table.
+// Also seeds the spawn magazine: word entity+0x35C = itemDef+0x894 clipsize [orig:
+// Entity_ResetToSpawnState @ 0x4b97a9/0x4b97b5]. Consumption stays motor-gated: only
+// the infantry fire pass reads ammo_primary (host-side NPCs; never the local player).
+// [orig: ItemDef_ParseProperty @ 0x4a1823 (-> def+0x56B) / @ 0x49fa1c (-> def+0x894);
+// docs/divergence-ledger.md D-AI-5]
+int NovaSimulation::resolve_ai_weapons(const Ref<NovaItemDatabase> &p_item_db) {
+	if (!world_ || !world_->ai || p_item_db.is_null()) return 0;
+	if (world_->ammo.empty()) return 0; // no ammo.def loaded — NPCs stay unarmed
+	int armed = 0;
+	for (int i = 0; i < world_->ai->count(); ++i) {
+		opennova::world::AiEntity *ae = world_->ai->at(i);
+		if (ae == nullptr) continue;
+		const opennova::world::Entity *e = world_->registry.get(ae->handle);
+		if (e == nullptr) continue;
+		const int def_id = static_cast<int>(e->item_id) + opennova::mission::kItemIdOffset;
+		const String ammo_name = p_item_db->get_ammo_closeattack(def_id);
+		if (ammo_name.is_empty()) continue; // def authors no anim-fire round (e.g. the player)
+		const int ammo = world_->ammo.index_of(ammo_name.utf8().get_data());
+		if (ammo < 0) continue; // name not in this mission's ammo.def — stay unarmed
+		ae->profile.ammo_primary = ammo;
+		ae->profile.clip_size = p_item_db->get_clipsize(def_id);
+		ae->inf.magazine = static_cast<int16_t>(ae->profile.clip_size);
+		++armed;
+	}
+	return armed;
+}
+
 namespace {
 
 // Build the runtime collision model from a parsed .3di collision IR block — the exact
@@ -913,6 +946,7 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_infantry_anim_map", "resource_root", "adm_name"), &NovaSimulation::set_infantry_anim_map);
 	ClassDB::bind_method(D_METHOD("resolve_infantry_adm_ids", "resource_root", "item_db"), &NovaSimulation::resolve_infantry_adm_ids);
 	ClassDB::bind_method(D_METHOD("resolve_item_traits", "item_db"), &NovaSimulation::resolve_item_traits);
+	ClassDB::bind_method(D_METHOD("resolve_ai_weapons", "item_db"), &NovaSimulation::resolve_ai_weapons);
 	ClassDB::bind_method(D_METHOD("resolve_collision_instances", "item_db", "placer"),
 	                     &NovaSimulation::resolve_collision_instances);
 	ClassDB::bind_method(D_METHOD("get_collision_debug"), &NovaSimulation::get_collision_debug);
@@ -2496,6 +2530,16 @@ Dictionary NovaSimulation::get_entity_debug(int p_index) const {
 	out["infantry_move_mode"] = e->inf.move_mode;
 	out["anim_state"] = e->inf.active ? e->inf.anim_state : -1;
 	out["anim_key"] = e->inf.active ? infantry_anim_key(e->inf.anim_state) : String();
+	// Infantry combat diagnostics (the P1 threat-loop bring-up surface): the
+	// perception/attack ranges the scan reads (AiSlot +68/+60, world units), the
+	// D-AI-5 weapon seed (AiProfile ammo index + clip, the live magazine word),
+	// and the current combat target.
+	out["sight_range_u"] = e->slot.f[17] / 65536.0;
+	out["attack_range_u"] = e->slot.f[15] / 65536.0;
+	out["ammo_primary"] = e->profile.ammo_primary;
+	out["clip_size"] = e->profile.clip_size;
+	out["magazine"] = static_cast<int>(e->inf.magazine);
+	out["combat_target_valid"] = e->inf.combat_target.valid();
 	return out;
 }
 

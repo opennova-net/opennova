@@ -1280,6 +1280,18 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
         } else if (lower_match_key(lower, ll, "disk_function", 13)) {
             consume_value_str(trimmed, tlen, 13, current.disk_function, sizeof(current.disk_function));
             parsed = 1;
+        /* The person-item anim-fire weapon family (world-wac-ai-re §17.4, D-AI-5): only the
+           closeattack name is kept — JO riflemen author all four ammo_* slots to the same
+           rifle round. [orig: ItemDef_ParseProperty 'ammo_closeattack' @ 0x4a1823 -> def+0x56B] */
+        } else if (lower_match_key(lower, ll, "ammo_closeattack", 16)) {
+            consume_value_str(trimmed, tlen, 16, current.ammo_closeattack, sizeof(current.ammo_closeattack));
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "clipsize", 8)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 8, &vl);
+            /* plain atol -> def+0x894, the entity+0x35C magazine reseed source
+               [orig: @ 0x49fa2e-0x49fa48; Entity_ResetToSpawnState @ 0x4b97a9] */
+            current.clipsize = parse_int_n(v, vl);
+            parsed = 1;
         /* Vehicle physics-property block, scaled at parse exactly like the original loader
            [orig: ItemDef_ParsePhysicsProperty @0x49d870]. turn_rate2 is matched before
            turn_rate only for clarity — lower_match_key requires a separator after the key. */

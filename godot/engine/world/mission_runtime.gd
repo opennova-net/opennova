@@ -234,6 +234,11 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 		# armory so every adm's fired round binds to its ammo index.
 		if _sim.load_ammo_table(options["resource_root"], "ammo.def") != OK:
 			push_warning("MissionRuntime: ammo.def not loaded — client fire echoes without authoritative rounds")
+		elif options.get("item_db") != null:
+			# Seed each NPC's anim-fire weapon: items.def ammo_closeattack + clipsize
+			# resolved against the ammo table just loaded (the D-AI-5 host seed).
+			# Without it every placed NPC is unarmed — the fire pass skips ammo_primary < 0.
+			_sim.resolve_ai_weapons(options["item_db"])
 	_log_infantry_debug_mounts()
 	# Capture the authored node transforms now (pre-tick) so Stop restores them whether the host
 	# played or only stepped. Cheap; the game never Stops but holding the map costs nothing.
