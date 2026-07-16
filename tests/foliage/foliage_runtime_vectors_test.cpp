@@ -556,6 +556,269 @@ bool model_cache_lru_and_identity_events() {
 	return true;
 }
 
+bool model_path_blocker_gate_and_force_on_bypass() {
+	// The model tier consults the placed-tile path blocker once per candidate
+	// that survives the +-4u anchor box, at the witnessed 2.0u spacing, and a
+	// blocked candidate is dropped. Definition attrib bit 0 skips the gate
+	// entirely (the sampler is never called).
+	// [orig: Foliage_PathBlockedByPlacedTile @ 0x606490;
+	// Foliage_GenerateModelTileInstances @ 0x600980 — the FORCE_ON attribute
+	// gate on the def record's attrib byte]
+	auto world = world_with_foliage_mask(0x1u);
+	int blocked_calls = 0;
+	bool range_is_retail = true;
+	world.path_blocked = [&blocked_calls, &range_is_retail](
+	                         float, float, float range) {
+		++blocked_calls;
+		if (!near(range, 2.0f)) range_is_retail = false;
+		return true;
+	};
+
+	Runtime blocked_runtime;
+	if (!expect(blocked_runtime.render_frame(one_silhouette(38.0f, 63.0f), world)
+	                .silhouettes.empty(),
+	            "a blocking placed tile rejects every model-tier candidate")) {
+		return false;
+	}
+	if (!expect(blocked_calls == 9,
+	            "each of the 9 in-box candidates consults the blocker once")) {
+		return false;
+	}
+	if (!expect(range_is_retail,
+	            "the model tier passes the witnessed 2.0u (0x20000) spacing")) {
+		return false;
+	}
+
+	blocked_calls = 0;
+	Runtime forced_runtime;
+	auto forced = one_silhouette(38.0f, 63.0f);
+	forced.slots[0].attrib_flags = FOLIAGE_ATTRIB_FORCE_ON;
+	if (!expect(forced_runtime.render_frame(forced, world)
+	                    .silhouettes.size() == 9,
+	            "FORCE_ON bypasses the blocker and restores the golden count")) {
+		return false;
+	}
+	if (!expect(blocked_calls == 0,
+	            "FORCE_ON never calls the path sampler")) return false;
+	return true;
+}
+
+bool per_slot_mask_bit_selection_in_both_tiers() {
+	// Both tiers gate candidates on mask & (1u << slot_index). A foliage mask
+	// of 2 carries only slot 1's bit: slot 0 generates nothing while slot 1
+	// generates the full candidate sets, so a regression to `mask & 1u` fails.
+	// [orig: generate_foliage_instances_0 @ 0x5ffdd0;
+	// Foliage_GenerateModelTileInstances @ 0x600980]
+	auto world = world_with_foliage_mask(0x2u);
+
+	Runtime detail_slot0;
+	detail_slot0.render_frame(one_detail(10.0f), world);
+	if (!expect(detail_slot0.render_frame(one_detail(10.0f), world)
+	                .detail.empty(),
+	            "detail slot 0 generates nothing when only bit 1 is set")) {
+		return false;
+	}
+
+	Runtime detail_slot1;
+	FrameRequest detail_request;
+	detail_request.slots[1].enabled = true;
+	detail_request.slots[1].model_radius = 2.0f;
+	detail_request.detail_cells.push_back({0x00100030u, 10.0f});
+	detail_slot1.render_frame(detail_request, world);
+	const auto detail_out = detail_slot1.render_frame(detail_request, world);
+	if (!expect(detail_out.detail.size() == 72,
+	            "detail slot 1 accepts all 36 candidates under mask bit 1")) {
+		return false;
+	}
+	for (const DetailInstance &instance : detail_out.detail) {
+		if (!expect(instance.slot == 1,
+		            "mask-selected detail instances carry slot index 1")) {
+			return false;
+		}
+	}
+
+	Runtime model_slot0;
+	if (!expect(model_slot0.render_frame(one_silhouette(38.0f, 63.0f), world)
+	                .silhouettes.empty(),
+	            "model slot 0 generates nothing when only bit 1 is set")) {
+		return false;
+	}
+
+	Runtime model_slot1;
+	FrameRequest model_request;
+	model_request.slots[1].enabled = true;
+	model_request.slots[1].model_radius = 2.0f;
+	model_request.silhouette_anchors.push_back({{32.0f, 48.0f}, 38.0f, 63.0f});
+	const auto model_out = model_slot1.render_frame(model_request, world);
+	if (!expect(model_out.silhouettes.size() == 9,
+	            "model slot 1 emits the golden 9 under mask bit 1")) return false;
+	for (const SilhouetteInstance &instance : model_out.silhouettes) {
+		if (!expect(instance.slot == 1,
+		            "mask-selected model instances carry slot index 1")) {
+			return false;
+		}
+	}
+	return true;
+}
+
+bool negative_anchor_cell_keys_sign_extend() {
+	// Negative-coordinate cells: the quadrant snap wraps in 32 bits and the
+	// packed key's 15-bit halves sign-extend back to the negative bases, with
+	// X = high15 + localA and Z = low15 - localB (local B runs toward -Z).
+	// [orig: Foliage_UpdateModelTiles @ 0x601f50 — quadrant snap / key form;
+	// Foliage_GenerateModelTileInstances @ 0x600980 — 15-bit decode]
+	Runtime runtime;
+	auto world = world_with_foliage_mask(0x1u);
+	FrameRequest request;
+	request.slots[0].enabled = true;
+	request.slots[0].model_radius = 2.0f;
+	request.silhouette_anchors.push_back({{-32.0f, -48.0f}, 38.0f, 63.0f});
+
+	const auto out = runtime.render_frame(request, world);
+	if (!expect(out.silhouettes.size() == 8,
+	            "the negative anchor emits the golden candidate count")) {
+		return false;
+	}
+
+	// Hand-derived quadrant keys for anchor (-32, -48): snap(anchor +- 8u)
+	// masked to 16u tiles gives x in {-32, -48}, z-top in {-32, -48}.
+	const uint32_t quadrant_keys[4] = {
+	    0x7FE07FE0u, 0x7FD07FE0u, 0x7FE07FD0u, 0x7FD07FD0u,
+	};
+	const int quadrant_counts[4] = {2, 2, 2, 2};
+
+	// Independent 15-bit sign extension (subtraction form, distinct from the
+	// runtime's OR-mask form).
+	const auto sext15 = [](uint32_t value) {
+		const int32_t low = static_cast<int32_t>(value & 0x7FFFu);
+		return (low & 0x4000) != 0 ? low - 0x8000 : low;
+	};
+	std::map<uint32_t, int> counts;
+	for (const SilhouetteInstance &instance : out.silhouettes) {
+		++counts[instance.cell_key];
+		const int32_t base_x = sext15(instance.cell_key >> 16u);
+		const int32_t base_z = sext15(instance.cell_key);
+		if (!expect(base_x < 0 && base_z < 0,
+		            "negative-anchor keys decode to negative 16u bases")) {
+			return false;
+		}
+		const float local_a = instance.center.x - static_cast<float>(base_x);
+		const float local_b = static_cast<float>(base_z) - instance.center.z;
+		if (!expect(local_a >= 1.0f - 1.0e-4f && local_a <= 15.8f + 1.0e-4f,
+		            "X decodes as high15 + localA for negative keys")) {
+			return false;
+		}
+		if (!expect(local_b >= 1.0f - 1.0e-4f && local_b <= 15.8f + 1.0e-4f,
+		            "Z decodes as low15 - localB for negative keys")) {
+			return false;
+		}
+		if (!expect(std::fabs(instance.center.x + 32.0f) <= 4.0f &&
+		                std::fabs(instance.center.z + 48.0f) <= 4.0f,
+		            "negative-key instances stay inside the +-4u anchor box")) {
+			return false;
+		}
+	}
+	for (int q = 0; q < 4; ++q) {
+		if (!expect(counts[quadrant_keys[q]] == quadrant_counts[q],
+		            "negative quadrant key/count matches the literal vector")) {
+			return false;
+		}
+	}
+	return true;
+}
+
+bool detail_cache_lru_evicts_oldest_at_capacity_three() {
+	// Strict signed-age LRU across the persistent detail pool at a capacity
+	// where eviction order is distinguishable: with residents A,B,C and only
+	// A,B re-touched, a new key replaces the OLDEST-stamped entry C — not the
+	// newest and not slot zero.
+	// [orig: Foliage_UpdateFarCellSlots @ 0x601b30;
+	// terrain_tile_init_buffers @ 0x5ff920 — pool sizing]
+	if (!expect(Runtime::detail_cache_capacity(500) == 3,
+	            "source vertex count 500 sizes the pool to three cells")) {
+		return false;
+	}
+
+	Runtime runtime;
+	auto world = world_with_foliage_mask(0x1u);
+	const uint32_t key_a = 0x00100030u;
+	const uint32_t key_b = 0x00200030u;
+	const uint32_t key_c = 0x00300030u;
+	const uint32_t key_d = 0x00400030u;
+	const auto make_request = [](std::initializer_list<uint32_t> keys) {
+		FrameRequest request;
+		request.slots[0].enabled = true;
+		request.slots[0].model_radius = 2.0f;
+		request.slots[0].source_vertex_count = 500;
+		for (uint32_t key : keys) {
+			request.detail_cells.push_back({key, 10.0f});
+		}
+		return request;
+	};
+
+	const auto first = runtime.render_frame(make_request({key_a}), world);
+	if (!expect(first.detail_generated.size() == 1 &&
+	                first.detail_generated[0].key == key_a,
+	            "frame one warms resident A")) return false;
+	const auto second = runtime.render_frame(make_request({key_a, key_b}), world);
+	if (!expect(second.detail_generated.size() == 1 &&
+	                second.detail_generated[0].key == key_b &&
+	                runtime.get_stats().detail.hits == 1,
+	            "frame two touches A and warms resident B")) return false;
+	const auto third = runtime.render_frame(make_request({key_b, key_c}), world);
+	if (!expect(third.detail_generated.size() == 1 &&
+	                third.detail_generated[0].key == key_c &&
+	                runtime.get_stats().detail.residents == 3 &&
+	                runtime.get_stats().detail.evictions == 0,
+	            "frame three fills the pool without evicting")) return false;
+	const uint64_t revision_c = third.detail_generated[0].revision;
+
+	const auto fourth = runtime.render_frame(make_request({key_a, key_b}), world);
+	if (!expect(fourth.detail_generated.empty() &&
+	                runtime.get_stats().detail.hits == 2 &&
+	                runtime.get_stats().detail.misses == 0,
+	            "frame four re-touches A and B, leaving C oldest")) return false;
+
+	const auto fifth = runtime.render_frame(make_request({key_d}), world);
+	if (!expect(fifth.detail_evicted.size() == 1 &&
+	                fifth.detail_evicted[0].key == key_c &&
+	                fifth.detail_evicted[0].revision == revision_c &&
+	                fifth.detail_generated.size() == 1 &&
+	                fifth.detail_generated[0].key == key_d &&
+	                runtime.get_stats().detail.evictions == 1,
+	            "the new key evicts the oldest-stamped resident C, not the "
+	            "newest and not slot zero")) return false;
+
+	// C occupied the last pool slot; a fixed-index policy could fake the
+	// first eviction. Round two leaves the oldest resident (A) in the FIRST
+	// slot: only true oldest-first eviction picks it again.
+	const uint64_t revision_a = first.detail_generated[0].revision;
+	const auto sixth = runtime.render_frame(make_request({key_b, key_d}), world);
+	if (!expect(sixth.detail_generated.empty() &&
+	                runtime.get_stats().detail.hits == 2 &&
+	                runtime.get_stats().detail.misses == 0,
+	            "frame six re-touches B and D, leaving A oldest")) return false;
+	const uint32_t key_e = 0x00500030u;
+	const auto seventh = runtime.render_frame(make_request({key_e}), world);
+	if (!expect(seventh.detail_evicted.size() == 1 &&
+	                seventh.detail_evicted[0].key == key_a &&
+	                seventh.detail_evicted[0].revision == revision_a &&
+	                seventh.detail_generated.size() == 1 &&
+	                seventh.detail_generated[0].key == key_e &&
+	                runtime.get_stats().detail.evictions == 1,
+	            "round two evicts the oldest-stamped resident A from the "
+	            "first pool slot")) return false;
+
+	const auto eighth = runtime.render_frame(make_request({key_b, key_d}), world);
+	if (!expect(eighth.detail.size() == 144 &&
+	                runtime.get_stats().detail.hits == 2 &&
+	                runtime.get_stats().detail.misses == 0,
+	            "the re-touched residents B and D survived both evictions")) {
+		return false;
+	}
+	return true;
+}
+
 bool invalid_anchors_and_reconfigure_stats() {
 	Runtime runtime;
 	auto world = world_with_foliage_mask(0x1u);
@@ -730,6 +993,10 @@ int main() {
 	if (!model_key_lookup_work_is_bounded_by_cell_visits()) return 1;
 	if (!model_definition_stagger()) return 1;
 	if (!model_cache_lru_and_identity_events()) return 1;
+	if (!model_path_blocker_gate_and_force_on_bypass()) return 1;
+	if (!per_slot_mask_bit_selection_in_both_tiers()) return 1;
+	if (!negative_anchor_cell_keys_sign_extend()) return 1;
+	if (!detail_cache_lru_evicts_oldest_at_capacity_three()) return 1;
 	if (!invalid_anchors_and_reconfigure_stats()) return 1;
 	if (!fd_bake_vector()) return 1;
 	std::printf("OK: fresh foliage runtime matches retail vectors\n");

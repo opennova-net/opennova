@@ -57,7 +57,6 @@ private:
 	Transform3D last_transform[PATCH_POOL_SIZE];
 	bool patch_visible[PATCH_POOL_SIZE] = {};
 	int patches_active = 0;
-	PackedVector3Array foliage_dispatch_centers;
 	std::vector<FoliageDetailPatch> foliage_detail_patches;
 
 	// Shader
@@ -151,7 +150,6 @@ public:
 	PackedInt32Array get_lod_distribution() const;
 	int get_patches_active() const;
 	int get_visible_patch_count() const;
-	PackedVector3Array get_foliage_dispatch_centers() const;
 	const std::vector<FoliageDetailPatch> &get_foliage_detail_patches_native() const;
 
 	void set_debug_no_frustum(bool v);

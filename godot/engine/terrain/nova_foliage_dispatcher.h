@@ -70,7 +70,10 @@ public:
   void set_foliage_sampler(const Callable &p_sampler);
   Callable get_foliage_sampler() const;
 
-  // Visible placed-world-object anchors for the distant silhouette tier.
+  // Anchors for the distant silhouette/depth-mask tier: crouched/prone
+  // infantry standing on terrain, supplied per frame by the host (the sim's
+  // stance query in the game; none in the editor preview)
+  // [orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7dc2/0x5c7ded].
   void set_silhouette_anchors(const PackedVector3Array &p_anchors);
   PackedVector3Array get_silhouette_anchors() const;
 

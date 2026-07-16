@@ -288,11 +288,14 @@ and the framebuffer byte is the displayed value:
   @ 0x677f91..0x678070; GfxDevice_HandleLostDevice @ 0x678374..0x678453;
   CGfxDevice_ApplyRenderStates @ 0x67e3ec..0x67e4f3]`. Device defaults:
   MAG/MIN LINEAR + **MIP POINT** (bilinear with sharp mip cuts), aniso 2,
-  and reset MIPMAPLODBIAS 0.0. The active foliage comparison configuration's
-  `texfilter_level=0` maps to this point-mip mode; per-stage filters are
-  re-applied by
-  `CGfxDevice_ApplyRenderStates` (trilinear/aniso are the high-settings
-  look, cf. `HLSLEffect_TextureFilterMode @ 0x27e5698`).
+  and reset MIPMAPLODBIAS 0.0. The comparison configuration's
+  `texfilter_level=0` maps to this point-mip register mode; per-stage filters
+  are re-applied by `CGfxDevice_ApplyRenderStates` (trilinear/aniso = modes
+  2/3-4, cf. `HLSLEffect_TextureFilterMode @ 0x27e5698`). Note: the 2026-07-15
+  terrain/foliage grill adjudicated that the reference machine renders the
+  ANISOTROPIC mode despite the cfg-0 register (driver-forced), so hosted
+  terrain/foliage sampling follows the anisotropic reference
+  (terrain-re.md/foliage-re.md).
 - **No sRGB framebuffer writes.** The SetRenderState immediate sweep (state
   ids at every `[vtbl+0xE4]`-load site) covers the standard FF set (7, 14,
   15, 19/20, 22-29, 34-38, 48, 53-60, 136-148, 168, 171) —

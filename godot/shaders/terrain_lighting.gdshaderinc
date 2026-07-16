@@ -190,16 +190,6 @@ vec3 terrain_surface_color_from_colormap(vec4 cm, vec2 colormap_uv,
 	return lit * detail * 4.0;
 }
 
-vec3 terrain_surface_color(vec2 colormap_uv, vec2 detail_uv,
-		vec3 heightfield_normal, vec2 quadrant) {
-	vec2 sampled_colormap_uv = clamp_retail_quadrant_uv(
-		colormap_uv, quadrant, textureSize(u_colormap, 0));
-	return terrain_surface_color_from_colormap(
-		retail_bare_terrain_tile(texture(u_colormap, sampled_colormap_uv).rgb,
-			heightfield_normal, colormap_uv, quadrant),
-		colormap_uv, detail_uv, quadrant);
-}
-
 float jointops_fog_factor(float dist, float fog_start, float fog_end, int fog_type) {
 	float safe_end = max(fog_end, 1.0);
 	if (fog_type == 0) {

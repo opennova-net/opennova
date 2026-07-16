@@ -2,7 +2,7 @@ shader_type spatial;
 render_mode unshaded, cull_disabled;
 
 // Shared terrain surface shading + fog (uniforms u_colormap/u_detail*/u_blendmap/
-// u_detailmap*/lighting/fog all live here): terrain_surface_color(), apply_terrain_fog().
+// u_detailmap*/lighting/fog all live here): terrain_surface_color_from_colormap(), apply_terrain_fog().
 #include "res://shaders/terrain_lighting.gdshaderinc"
 // Gamma-space output convention (D-RMAT-7): nova_gamma_to_linear().
 #include "res://shaders/nova_color.gdshaderinc"

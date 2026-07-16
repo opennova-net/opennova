@@ -609,11 +609,11 @@ FrameOutput Runtime::render_frame(const FrameRequest &request,
 	// Distant model cache: one fixed 1000-entry pool per definition. Hits touch
 	// the resident entry on the definition's exact eight-scene refresh phase.
 	//
-	// The host's approximate visibility feed can visit one cell through many
-	// overlapping placed-object anchors. Refresh a resident key only on its
-	// first visit this scene frame; later callers retain their distinct draw
-	// submissions while reusing that refreshed resident. Retail's visible
-	// sector-entity/occlusion walk prevents this host-only fanout (D-FOLIAGE-9).
+	// Nearby anchors (clustered crouched/prone infantry) can visit one cell
+	// several times in a frame. Refresh a resident key only on its first visit
+	// this scene frame; later callers retain their distinct draw submissions
+	// while reusing that refreshed resident. Retail's visible
+	// sector-entity/occlusion walk bounds the same fanout (D-FOLIAGE-9).
 	// [orig: Foliage_UpdateModelTiles @ 0x601f50]
 	std::array<std::unordered_set<uint32_t>, FOLIAGE_MAX_DEFS>
 	    refreshed_model_keys;

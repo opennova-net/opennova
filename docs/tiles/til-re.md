@@ -23,7 +23,7 @@ the format and transforms against the **retail** render path
 | Foliage exclusion AABB | **MATCHING** | `Foliage_PathBlockedByPlacedTile @ 0x606490` linearly scans this same array with an inclusive candidate-square/16x16-entry overlap; `til_blocks_foliage` pins boundary and stored-negated-Z vectors |
 | Atlas UV mapping | **MATCHING** | retail `col = tile_index % dword_319F7B8`, `row = tile_index / dword_319F7B8`, `u = col·step_u (flt_319F7C0)`, `v = row·step_v (flt_319F7C4)`; our `til_build_entry_uv_quad` (`tile_index % tiles_x` / `/ tiles_x`, `·step_u`/`·step_v`) |
 | Flip/rotate flags (0x01/0x02/0x04) | **MATCHING (rotate direction corrected 2026-07-15, D-TIL-2)** | `render_water_quad @ 0x604700`: `flags & 1` swaps U (@ 0x604782), `& 2` swaps V (@ 0x6047a9), `& 4` rotates the UV quad 90° **CCW** via the corner cycle `NW←NE, NE←SE, SE←SW, SW←NW` (@ 0x6047d4..0x604806) = per-corner `(u,v) → (1−v, u)`. The host's prior `(v, 1−u)` was the CW transpose — every ROTATE_90 tile drew 180° off (visible as disoriented tire-track tiles on 00TRa) |
-| Half-texel UV shift | **MATCHING** | retail `u += ±0.5·flt_319F7C8`, `v += ±0.5·flt_319F7CC` (sign by corner min/max), like `til_build_entry_render_uv_quad`'s half-texel |
+| Half-texel UV shift | **MATCHING** | retail `u += ±0.5·flt_319F7C8`, `v += ±0.5·flt_319F7CC` (one uniform sign pair from the post-flag corner min/max comparison, applied to all four corners), like `til_build_entry_render_uv_quad`'s half-texel |
 | Z world-convention negation | **MATCHING** | retail stores `z` and reads `-z` (`waterOverlayCount = -*(v20-1)`); our `til_world_z_from_fixed` returns `-z_fixed/…` |
 | 128-entry tile cache (LRU) | **MATCHING** | `dword_319A2E4` 128-slot cache, LRU eviction by `dword_319FC04 - age`, matching the reference note (128-LRU) |
 | OUTLINE flag (0x08) | **FIXED (faithful) 2026-07-05** | D-TIL-1 — retail JO renders no outline; neither do we |
@@ -47,7 +47,9 @@ applies the flip/rotate flags to the UV corners.
   UVs permute `A←B, B←D, D←C, C←A` (@ `0x6047d4..0x604806`), i.e. per corner
   `(u,v) → (1−v, u)` = `TIL_FLAG_ROTATE_90` (host corrected 2026-07-15;
   D-TIL-2).
-- then a ±half-texel bias (`flt_319F7C8`/`flt_319F7CC`), sign chosen per corner.
+- then a ±half-texel bias (`flt_319F7C8`/`flt_319F7CC`): ONE sign pair,
+  chosen from the post-flag corner min/max comparison, applied uniformly to
+  all four corners.
 - draws `GDynamicVB_DrawPrimitive(5 = TRIANGLESTRIP, 4 verts)` with the
   witnessed vertex↔UV pairing `A=(x0,z0)→(u_lo,v_lo)`, `B=(x1,z0)→(u_hi,v_lo)`,
   `C=(x0,z1)→(u_lo,v_hi)`, `D=(x1,z1)→(u_hi,v_hi)` (pre-flag), positions from

@@ -91,11 +91,6 @@ var _ground_baseline: Dictionary = {}
 # decline-then-manual semantics above are untouched.
 var _reground_requests_cache: Array = []
 var _reground_cache_token: Array = []
-# Cached mission-record projection used by the foliage MODEL tier. The C++ raw
-# object-record revision is cheap to compare and moves on add/remove/transform,
-# so unchanged preview frames never marshal the entity set into dictionaries.
-var _placed_world_positions_cache := PackedVector3Array()
-var _placed_world_positions_cache_token: Array = []
 var _last_open_dir: String = ""
 var _stats: Dictionary = {}
 var _last_status: String = ""
@@ -343,29 +338,6 @@ func get_mission_preview_time_of_day() -> float:
 	var info: Dictionary = _mission.get_info()
 	return NovaEnvironment.mission_start_time_hhmm(
 		int(info.get("start_time", 0)))
-
-
-## Stable provider seam for editor foliage MODEL anchors. Projecting from the
-## mission records includes live authoring changes even when an asset could not
-## be resolved for rendering; markers never drive the foliage MODEL tier.
-func get_placed_world_positions() -> PackedVector3Array:
-	if _mission == null:
-		_placed_world_positions_cache = PackedVector3Array()
-		_placed_world_positions_cache_token = []
-		return _placed_world_positions_cache
-	var token := [_mission.get_instance_id(), _mission.object_records_revision()]
-	if token == _placed_world_positions_cache_token:
-		return _placed_world_positions_cache
-	var positions := PackedVector3Array()
-	for raw_entity in _mission.get_all_entities():
-		var entity: Dictionary = raw_entity
-		if int(entity.get("kind", -1)) == NovaMissionData.KIND_MARKER:
-			continue
-		positions.push_back(MissionObjectPlacer.bms_to_godot_position(
-			entity.get("position", Vector3.ZERO)))
-	_placed_world_positions_cache = positions
-	_placed_world_positions_cache_token = token
-	return _placed_world_positions_cache
 
 
 func is_loaded() -> bool:

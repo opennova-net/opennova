@@ -672,8 +672,9 @@ func _load_terrain(trn_path: String) -> bool:
 
 
 # Runtime foliage: NovaTerrain supplies the retail 16-unit detail-cell set;
-# placed sector entities supply the distant silhouette anchors. Sampling and
-# deterministic candidate generation stay in the fresh native runtime.
+# the sim's crouched/prone infantry supply the distant silhouette anchors
+# (see tick()). Sampling and deterministic candidate generation stay in the
+# fresh native runtime.
 func _configure_foliage() -> void:
 	if _dispatcher == null or _terrain_data == null:
 		return

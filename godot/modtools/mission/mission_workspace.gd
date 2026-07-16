@@ -109,9 +109,8 @@ func bind_to_editor(value: Node) -> void:
 	set_terrain_editor(value)
 
 
-## Install the active mission's external terrain tile array plus a stable
-## placed-object anchor provider. The Callable targets the controller rather
-## than its replaceable placer, so undo/re-bake cannot strand stale anchors.
+## Install the active mission's external terrain tile array (and preview
+## time-of-day) onto the shared terrain preview.
 func _sync_mission_preview_context() -> void:
 	if not _mission_preview_context_active or terrain_editor == null \
 			or not terrain_editor.has_method("set_mission_preview_context"):

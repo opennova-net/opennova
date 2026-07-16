@@ -160,7 +160,10 @@ diffuse A=0 clears authored colormap alpha. The bare base therefore leaves
 
 `Terrain_GenerateNormalMap @ 0x603210` then supplies the alpha-lighting
 source. For uint16 height `H`, its loop (`0x603326..0x6034eb`) computes
-`N = normalize(Hwest-Heast, Hnorth-Hsouth, 512)`, packs each component as
+`N = normalize(Hwest-Heast, Hnorth-Hsouth, 256)` (paired one-sided diffs at
+scale 1/256 per axis with the `fld1` unit Z — the 2026-07-15 correction; the
+earlier `..., 512` reading was the retracted `Z = 2` form), packs each
+component as
 `trunc((N+1) × 127.5)` clamped to a byte (`0x603470..0x6034eb`), and stores
 A=128. Its A8R8G8B8 RGB semantics are `(grid X slope, grid Y slope, up)`, not
 a world-space XYZ normal. The host's `FORMAT_RGBA8` upload preserves those
@@ -216,9 +219,10 @@ bounds.
 packer at `0x60e201..0x60e331` permutes it to GPU RGB `(g2,g0,g1)` while
 applying `trunc((component+1) × 127.5)`. The additive
 `PolyTrn_TileBakeDot3LightPass @ 0x60e385..0x60e39e` preserves RGB and writes
-`t0.a = saturate(4 × dot(normalByte−0.5, lightByte−0.5))`. The authored-detail
-B-channel coefficient remains the separate `t3` input; it does not supply
-tile alpha.
+`t0.a = saturate(4 × dot(normalByte−0.5, lightByte−0.5))`. The generated authored-detail
+B-channel coefficient is a separate texture (stage 7, ps.1.1 tiers — see the
+top-tier closure) and does not supply tile alpha; the ps.1.4 `t3` is the
+authored second detail pair.
 
 **Terrain pixel shaders** (`compile_terrain_pixel_shaders @ 0x605260`, gate
 caps bit 8 = ps1.1; handles at `PolyTrn_PS*`): all share the lighting shape
@@ -299,9 +303,10 @@ had stacked TWO ×2 detail-normal factors on the splat (the gobj-era "v23
 dual-normal" chimera; under the gamma-faithful pipeline it clipped regions
 to white). The recovered top-tier path applies exactly one coefficient factor;
 the splat-only variant omits it [`orig: PolyTrn_PS14SplatNormalMap @
-0x7dece0`; `PolyTrn_PS14Splat @ 0x7dee18`]. The fresh re-grill establishes t3
-as the authored-detail B-channel coefficient map and the paired base/far mip
-chain as the only near/far transition.
+0x7dece0`; `PolyTrn_PS14Splat @ 0x7dee18`]. The fresh re-grill establishes the paired
+base/far mip chain as the only near/far transition; its initial reading of t3
+as the authored-detail B-channel coefficient was RETRACTED 2026-07-15 — t3 is
+the authored second detail pair (see the top-tier closure).
 
 **Surface materials** (same function): the `"depthspin"` shore material
 (`dword_319f904`, alpha-tested: stage 0 alpha `ADDSIGNED(COMPLEMENT
@@ -369,9 +374,11 @@ v0 × 8, a = t0.a × v0.a` (t1 = the planar-projected lightmap).
 `Foliage_SetupFarSlotDraw @ 0x6007c0` (ex-misnomer
 `terrain_setup_display_adapter`; per model slot 0-3) picks the LOD entry,
 binds the wind VS + FVF 338, fog mode 8 (VS fog) when the wind VS exists,
-and **alpha-test ref 180 (high quality) / 8 (low)**. For the near secondary
-LOW draw, caller `Foliage_RenderFarPatches @ 0x60a497..0x60a4ae` scales c6.a
-by 0.1. The setup branch at `0x6008fc..0x600912` passes value 2 to wrapper
+and **alpha-test ref 180 (high quality) / 8 (low)**. The c6.a ×0.1 scale in caller
+`Foliage_RenderFarPatches @ 0x60a4a8/0x60a16c` is gated on the
+water-REFLECTION invocation (arg_8 = reflectionEnabled) and never applies to
+the main scene's near secondary LOW, which shares the unscaled fade
+(corrected in the 2026-07-15 grill; foliage-re.md §Fade and pass state). The setup branch at `0x6008fc..0x600912` passes value 2 to wrapper
 `0x67cac0..0x67caea`, which writes render state 0x17 (`D3DRS_ZFUNC`): this is
 strict `D3DCMP_LESS`, not wireframe/fill mode; the normal value 4 is
 `D3DCMP_LESSEQUAL`. The host shared detail include receives the exact runtime
@@ -524,7 +531,7 @@ rationale (if any) behind HiRes_0's odd skip-refine guard.
 | D-TERRAIN-2 | A | **FIXED (2026-07-06)** | **Doubled detail-normal factor** (the gobj-era chimera): `terrain_lighting.gdshaderinc` stacked TWO ×2 `dp3(normalmap, blendmap)` factors on the 3-way splat; the witnessed top-tier ps.1.4 applies exactly ONE `[orig: PolyTrn_PS14SplatNormalMap source @ 0x7dece0; PolyTrn_PS14Splat @ 0x7dee18; compile_terrain_pixel_shaders @ 0x605260]` (the dual-normal product belongs to the separate non-splat ps.1.1 tier). Post-gamma (D-RMAT-7) the squared factor clipped whole regions to white. See §Include correction above; ledger row carries the full witness. |
 | D-TERRAIN-3 | C | **FIXED (REN-7, 2026-07-07)** | **Below-horizon fill**: retail fills the below-rim region with the frame clear alone — the env #21 horizon-blended skyfog `[orig: Render_ProcessMainSceneFrame @ 0x5ca776..0x5ca792]`; no skirt/ring geometry exists in the frame walk (the sky-pass terrain leg `Terrain_RenderSkyboxPass @ 0x610ac0` → `Terrain_RenderSectorBatchLit @ 0x60c670` is the plain fogged sector batch), the seam hidden by fog convergence at the 1024 fog reference (= the dome rim radius). The host's clear consumer was swallowed by a `BG_SKY`(null-sky) Environment rendering BLACK; fixed to `BG_COLOR` + `AMBIENT_SOURCE_DISABLED` in `game_world.tscn`, GUT-pinned — and `get_frame_clear_color()` corrected to the post-blend DOUBLED skyfog (the modulate2x-path Clear takes it verbatim; the "undoubled" 07-05 reasoning was the non-modulate2x fallback, no host analog). Residual (not a retail-parity surface): the ONED editor preview's far-env adoption rides ONED polish/ENV-1. |
 | D-TERRAIN-4 | C | PERMANENT (candidate) | **Raycast editor-host guards** (ENG-3 B1): beyond-extent = no-terrain/no-hit vs retail's clamp-to-edge `[orig: @ 0x31a0010/0x319fc0c]`; no-data = clear/NAN vs retail's return-HIT `[orig: @ 0x60ccf7]`; contiguous-atlas bilinear vs the per-quadrant seam flags `[orig: @ 0x31a17f0..]`. Same class as the ratified `coords_editor_options` guards (ADR 0020); §Runtime terrain queries carries the retail forms for any future runtime-faithful host. |
-| D-TERRAIN-5 | A | **FIXED (2026-07-13)** | **Top-tier texture/shader source mismatch**: the host incorrectly used its heightmap normal as the t3 detail coefficient, camera-crossfaded near/far textures, float-normalized DBlend, and multiplied an extra terrain tint. t3 now comes from the authored-detail B channel; the separate heightfield-normal atlas feeds cached-tile alpha; DBlend, paired mip chains, and literal t0..t5 ps.1.4 math are hosted [`orig: Texture_GenerateNormalMap @ 0x58c070`; `Terrain_GenerateNormalMap @ 0x603210`; `PolyTrn_InitTextures @ 0x60aaa0`; `GTexture_CreateFromPixelDataWithAlphaBlend @ 0x687270`; `PolyTrn_PS14SplatNormalMap @ 0x7dece0`]. |
+| D-TERRAIN-5 | A | **FIXED (2026-07-13)** | **Top-tier texture/shader source mismatch**: the host incorrectly used its heightmap normal as the t3 detail coefficient, camera-crossfaded near/far textures, float-normalized DBlend, and multiplied an extra terrain tint. the separate heightfield-normal atlas feeds cached-tile alpha; DBlend, paired mip chains, and literal t0..t5 ps.1.4 math are hosted. **Corrected 2026-07-15**: the fix's own first reading (t3 = the generated authored-detail B-channel coefficient) was also wrong — t3 is the authored second detail pair (`polytrn_detailmap2` ⊕ `dist2`) at density2; the generated coefficient belongs to the ps.1.1 tiers at stage 7 [`orig: Texture_GenerateNormalMap @ 0x58c070`; `Terrain_GenerateNormalMap @ 0x603210`; `PolyTrn_InitTextures @ 0x60aaa0`; `GTexture_CreateFromPixelDataWithAlphaBlend @ 0x687270`; `PolyTrn_PS14SplatNormalMap @ 0x7dece0`]. |
 | D-TERRAIN-6 | A | **FIXED (2026-07-13)** | **LOD/fog/overlay base-pass semantics**: both raw `lod_sub / 2` sites now use the exact clamped eight-family selector; exponential fog uses eye-space depth while linear types use radial distance; tile-overlay RGB is composed before terrain lighting without replacing the cached heightfield/light DOT3 alpha [`orig: render_terrain_sector_batch @ 0x6096f0`; `Render_SetFogState @ 0x58a950`; `PolyTrn_RenderTile @ 0x60da70`]. |
 | D-TERRAIN-7 | A | **OPEN (bounded)** | **Tile-composition RT/update parity**: the bare t0 producer, quadrant CLAMP behavior, alpha math, and hosted static `.til` composition are closed. Retail allocation/format, draw and dirty-update cadence, general patch/page c7/c8 projection, ordered tile-model/depth-alpha contributions, and final RT mip behavior remain open. |
 | D-TERRAIN-8 | A | **OPEN (bounded)** | **Local-light/shadow terrain pass**: the host has no equivalent of the retail shadow PS variants and `render_terrain_lightmaps @ 0x609de0`. Kept separate from the closed base surface and from D-TERRAIN-7; see [render/render-lighting-re.md](../render/render-lighting-re.md). |

@@ -487,6 +487,101 @@ func test_hide_foliage_toggles_dispatcher_visibility() -> void:
 	assert_true(disp.visible, "showing foliage restores the dispatcher")
 
 
+class AnchorSimStub:
+	extends RefCounted
+	var anchors := PackedVector3Array()
+	func get_foliage_mask_anchor_positions() -> PackedVector3Array:
+		return anchors
+
+
+class AnchorRuntimeStub:
+	extends Node
+	var sim = null
+	func is_playing() -> bool:
+		return false
+	func get_sim():
+		return sim
+
+
+class SimlessRuntimeStub:
+	extends Node
+	func is_playing() -> bool:
+		return false
+
+
+func test_tick_feeds_dispatcher_silhouette_anchors_from_the_sim() -> void:
+	# The hide-in-grass anchor feed: every host tick routes the sim's
+	# crouched/prone infantry positions into the foliage dispatcher's silhouette
+	# tier [orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7dc2/0x5c7ded
+	# (MoveOrder & 0x300), groundEntity gate @ 0x5c7dd5..0x5c7df7].
+	var world := GameWorld.new()
+	var terrain := NovaTerrain.new()
+	terrain.name = "NovaTerrain"
+	var disp := NovaFoliageDispatcher.new()
+	disp.name = "FoliageDispatcher"
+	terrain.add_child(disp)
+	world.add_child(terrain)
+	add_child_autofree(world)
+	await get_tree().process_frame  # _ready wires _dispatcher from the named child
+
+	var runtime := AnchorRuntimeStub.new()
+	var sim := AnchorSimStub.new()
+	runtime.sim = sim
+	add_child_autofree(runtime)
+	world._runtime = runtime
+	world._loaded = true
+
+	var expected := PackedVector3Array([Vector3(12.0, 3.0, -40.0), Vector3(-7.5, 0.25, 96.0)])
+	sim.anchors = expected
+	world.tick(Vector3.ZERO)
+	assert_eq(disp.silhouette_anchors, expected,
+		"tick feeds the sim's anchor positions into the dispatcher's silhouette tier")
+
+	sim.anchors = PackedVector3Array()
+	world.tick(Vector3.ZERO)
+	assert_eq(disp.silhouette_anchors, PackedVector3Array(),
+		"an emptied sim anchor list clears the previous frame's anchors")
+
+	world._runtime = null
+	world._loaded = false
+
+
+func test_tick_clears_stale_silhouette_anchors_when_no_sim_is_reachable() -> void:
+	# The feed assigns unconditionally: a runtime without get_sim() (or a null
+	# sim) must wipe anchors left by an earlier mission, never leave grass
+	# clumps orbiting a despawned player.
+	var world := GameWorld.new()
+	var terrain := NovaTerrain.new()
+	terrain.name = "NovaTerrain"
+	var disp := NovaFoliageDispatcher.new()
+	disp.name = "FoliageDispatcher"
+	terrain.add_child(disp)
+	world.add_child(terrain)
+	add_child_autofree(world)
+	await get_tree().process_frame
+
+	var runtime := SimlessRuntimeStub.new()
+	add_child_autofree(runtime)
+	world._runtime = runtime
+	world._loaded = true
+
+	disp.silhouette_anchors = PackedVector3Array([Vector3(1.0, 2.0, 3.0)])  # stale
+	world.tick(Vector3.ZERO)
+	assert_eq(disp.silhouette_anchors, PackedVector3Array(),
+		"a runtime with no sim seam clears stale anchors on the next tick")
+
+	var anchorless := AnchorRuntimeStub.new()  # get_sim() returns null
+	add_child_autofree(anchorless)
+	world._runtime = anchorless
+	disp.silhouette_anchors = PackedVector3Array([Vector3(4.0, 5.0, 6.0)])  # stale
+	world.tick(Vector3.ZERO)
+	assert_eq(disp.silhouette_anchors, PackedVector3Array(),
+		"a null sim clears stale anchors too")
+
+	world._runtime = null
+	world._loaded = false
+
+
 func test_set_foliage_hidden_is_safe_without_a_dispatcher() -> void:
 	# Before a world loads (or with no foliage), there is no dispatcher; the toggle must
 	# just record intent and never crash.

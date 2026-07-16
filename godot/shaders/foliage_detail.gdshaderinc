@@ -78,9 +78,12 @@ void vertex() {
 	v_tile_uv = UV2;
 	// Retail projects t1 independently from v0, while only oPos consumes the
 	// wind-displaced r1. The hosted 1024 .til bake uses the same world X/-Z
-	// wrap, so preserve the pre-wind position here.
-	v_overlay_uv = fract(
-		vec2(pre_wind_world_pos.x, -pre_wind_world_pos.z) * (1.0 / 1024.0));
+	// wrap, so preserve the pre-wind position here. Wrap in the FRAGMENT
+	// stage: a per-vertex fract() would interpolate ~0.999 -> ~0.001 across a
+	// 1024-unit wrap seam and smear the whole overlay atlas over that
+	// triangle (u_tile_overlay is repeat_enable, so unwrapped UV is exact).
+	v_overlay_uv =
+		vec2(pre_wind_world_pos.x, -pre_wind_world_pos.z) * (1.0 / 1024.0);
 	v_heightfield_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
 	float eye_depth = max(-(VIEW_MATRIX * vec4(world_pos, 1.0)).z, 0.0);
 	v_fog_distance = opennova_fog_type == 0
