@@ -24,9 +24,9 @@
 // (D-RMAT-7) lives in nova_color.gdshaderinc; consumers encode the final
 // color once at their ALBEDO write.
 uniform sampler2D u_colormap : filter_linear, repeat_disable;
-uniform sampler2D u_detail_c1 : filter_linear_mipmap, repeat_enable;
-uniform sampler2D u_detail_c2 : filter_linear_mipmap, repeat_enable;
-uniform sampler2D u_detail_c3 : filter_linear_mipmap, repeat_enable;
+uniform sampler2D u_detail_c1 : filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D u_detail_c2 : filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D u_detail_c3 : filter_linear_mipmap_anisotropic, repeat_enable;
 uniform sampler2D u_blendmap : filter_linear, repeat_disable;
 uniform sampler2D u_detail_coefficient : filter_linear_mipmap, repeat_disable;
 uniform bool u_has_detail_coefficient = false;
@@ -56,22 +56,23 @@ uniform float u_fog_end = 1024.0;
 uniform int u_fog_type = 0;
 
 vec4 sample_retail_detail_mips(sampler2D source, vec2 uv) {
-	// The reference configuration (texfilter_level 0) sets MAG/MIN LINEAR
-	// with MIPFILTER POINT and zero bias: retail holds each paired mip sharp
-	// and snaps between levels instead of trilinearly pre-blending toward the
-	// far texture. Select the nearest retail level explicitly, and clamp the
-	// selection at the 4x4 terminal level (the 2x2/1x1 tail exists only for
-	// Godot Image completeness).
-	// [orig: device filter setup @ 0x679c28..0x679c9c, 0x677f9e..0x677ff9;
-	// per-stage MIPFILTER select @ 0x67e3f7..0x67e4a7]
+	// The witnessed device supports texfilter modes 0-4; modes 3/4 select
+	// MINFILTER=ANISOTROPIC with MAXANISOTROPY [orig: per-stage filter select
+	// @ 0x67e38a..0x67e45b; device init @ 0x679c28..0x679c9c]. The retail
+	// reference captures show minor-axis LOD ground sampling (near-mip-0 grain
+	// at grazing angles, textured distant slopes) — the anisotropic mode —
+	// so the host pins it: anisotropic implicit sampling, with the gradients
+	// scaled down only when the request would pass the 4x4 terminal level
+	// (the 2x2/1x1 tail exists solely for Godot Image completeness and must
+	// never be selected).
 	vec2 dimensions = vec2(textureSize(source, 0));
 	vec2 dx = dFdx(uv);
 	vec2 dy = dFdy(uv);
 	float footprint = max(length(dx * dimensions), length(dy * dimensions));
 	float requested_lod = max(log2(max(footprint, 1.0)), 0.0);
 	float terminal_lod = max(floor(log2(max(min(dimensions.x, dimensions.y), 4.0))) - 2.0, 0.0);
-	float selected_lod = clamp(floor(requested_lod + 0.5), 0.0, terminal_lod);
-	return textureLod(source, uv, selected_lod);
+	float gradient_scale = exp2(min(terminal_lod - requested_lod, 0.0));
+	return textureGrad(source, uv, dx * gradient_scale, dy * gradient_scale);
 }
 
 vec2 clamp_retail_quadrant_uv(vec2 uv, vec2 quadrant, ivec2 dimensions) {

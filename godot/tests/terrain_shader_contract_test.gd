@@ -75,18 +75,23 @@ func test_terrain_tile_light_uses_heightfield_texture_basis() -> void:
 		0.0794002, 0.000001, "08:00 Y-ramp normal must receive the witnessed dark DOT3 response.")
 
 
-func test_detail_mips_point_select_like_texfilter_level_zero() -> void:
-	# The reference configuration (texfilter_level 0) runs MAG/MIN LINEAR with
-	# MIPFILTER POINT: the paired detail chain snaps between levels instead of
-	# trilinearly pre-blending toward the far texture.
-	# [orig: device filter setup @ 0x679c28..0x679c9c, 0x677f9e..0x677ff9]
+func test_detail_mips_sample_anisotropically_with_terminal_clamp() -> void:
+	# The witnessed device's anisotropic texfilter mode (MINFILTER=ANISOTROPIC
+	# + MAXANISOTROPY) matches the retail reference captures: minor-axis LOD
+	# keeps ground detail near mip 0 at grazing angles instead of washing to
+	# the paired far texture. The synthetic 2x2/1x1 Godot tail must stay
+	# unselectable via the terminal gradient clamp.
+	# [orig: per-stage filter select @ 0x67e38a..0x67e45b]
 	var terrain := _source("res://shaders/terrain_lighting.gdshaderinc")
-	assert_true(terrain.contains("floor(requested_lod + 0.5)"),
-		"Terrain detail must point-select the nearest paired mip level.")
-	assert_true(terrain.contains("textureLod(source, uv, selected_lod)"),
-		"The selected level must still filter linearly within itself.")
-	assert_false(terrain.contains("textureGrad(source, uv"),
-		"Trilinear detail sampling grays mid-distance terrain earlier than retail.")
+	assert_true(
+		terrain.contains("u_detail_c1 : filter_linear_mipmap_anisotropic") and
+			terrain.contains("u_detail_c2 : filter_linear_mipmap_anisotropic") and
+			terrain.contains("u_detail_c3 : filter_linear_mipmap_anisotropic"),
+		"Terrain detail layers must sample anisotropically like the retail reference.")
+	assert_true(terrain.contains("float gradient_scale = exp2(min(terminal_lod - requested_lod, 0.0));"),
+		"Requests past the 4x4 retail terminal must scale gradients back onto it.")
+	assert_true(terrain.contains("textureGrad(source, uv, dx * gradient_scale, dy * gradient_scale)"),
+		"Detail sampling must stay implicit/anisotropic within the retail chain.")
 
 
 func test_runtime_and_oned_share_tile_overlay_composition() -> void:
