@@ -7,6 +7,7 @@
 #include <cstdint>
 
 #include "world/body_anim.h"
+#include "world/entity.h" // EntityHandle (the combat-pass target/focus fields)
 
 namespace opennova::world {
 
@@ -72,10 +73,17 @@ enum : int {
     kJogForward = 148,
     kRunForward = 149,
     kPostAttack = 151,
+    kPreAttack = 152,
     kOutOfGround = 153,
     kSwimAttack = 154,
+    kAttack = 155,  // 155..158: the combat-reaction attack anims (world-wac-ai-re §17.3)
+    kAttack2 = 156,
+    kAttack3 = 157,
+    kAttack4 = 158,
     kCoverIdle = 163,
     kCoverRun = 164,
+    kCoverAttack = 165,
+    kCoverAttack2 = 166,
     kRunAttack = 167,
     kRunAway = 168,
     kRun2Crouch = 169,
@@ -257,6 +265,26 @@ struct InfantryState {
     int32_t ground_cache = 0;             // entity+676
     bool ground_cache_valid = false;
     int16_t max_health = 100;
+
+    // ---- The infantry combat pass (org1 riflemen; world-wac-ai-re §17) ----
+    // The 32-tick perception commit + the per-tick behavior/aim/fire state. Handles
+    // stand in for the original entity pointers (container rebase).
+    EntityHandle combat_target;       // AiSlot[3] mirror for the infantry pass [orig: slot+12]
+    EntityHandle ai_focus;            // entity aiFocus (look/attention entity)
+    EntityHandle last_attacker;       // entity lastAttacker (stamped by the damage pass,
+                                      // consumed + cleared by each perception scan)
+    EntityHandle aim_ref0;            // entity+0x2F0 — last fired-at target (accuracy settle)
+    int32_t aim_point[3] = {};        // entity aimPoint (16.16, the led target point)
+    int32_t damage_timer = 0;         // entity damageTimer (alert countdown, +12 on sight)
+    bool was_hit = false;             // entity wasHit (consumed by the hit reactions)
+    int32_t same_target_ticks = 0;    // entity+0x33C — scans-on-the-same-target counter
+    int32_t combat_move_timer = 0;    // entity moveTimer (reaction hold / walking-fire cadence)
+    bool fire_secondary_latch = false;// shouldFireSecondary [orig: the 0x8 event latch +
+                                      // the walking-fire aim gate]
+    int32_t aim_heading = 0;          // the aim solution (BAM; bearing + sawtooth error)
+    int32_t aim_pitch = 0;            // (elevation + error)
+    bool aim_valid = false;           // entity aimFlag
+    int16_t magazine = 0;             // entity+0x35C word (reload at <=0, refill = clipsize)
 };
 
 // The fire-path 3P attack stamp, keyed on the held weapon's attack kind (attack_anim):
