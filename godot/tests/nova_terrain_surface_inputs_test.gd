@@ -13,6 +13,7 @@ func test_full_rebuild_produces_retail_surface_inputs_from_live_data() -> void:
 	assert_true(inputs.rebuild(data))
 	assert_true(inputs.has_normalized_blend())
 	assert_true(inputs.has_detail_coefficient())
+	assert_true(inputs.has_detail2())
 	assert_true(inputs.has_heightfield_normal())
 	for layer in 3:
 		assert_true(inputs.has_paired_detail(layer))
@@ -27,10 +28,13 @@ func test_full_rebuild_produces_retail_surface_inputs_from_live_data() -> void:
 	assert_true(inputs.apply_to_material(material))
 	assert_same(material.get_shader_parameter("u_blendmap"), inputs.get_blend_texture())
 	assert_same(material.get_shader_parameter("u_detail_c1"), inputs.get_detail_c1_texture())
+	assert_same(material.get_shader_parameter("u_colormap"), inputs.get_colormap_texture())
+	assert_same(material.get_shader_parameter("u_detail2"), inputs.get_detail2_texture())
 	assert_same(material.get_shader_parameter("u_heightfield_normal"), inputs.get_heightfield_normal_texture())
-	assert_true(bool(material.get_shader_parameter("u_has_detail_coefficient")))
+	assert_true(bool(material.get_shader_parameter("u_has_detail2")))
 	assert_true(bool(material.get_shader_parameter("u_has_heightfield_normal")))
 	assert_eq(float(material.get_shader_parameter("u_detail_density")), 73.0)
+	assert_eq(float(material.get_shader_parameter("u_detail2_density")), 9.0)
 
 
 func test_partial_rebuilds_replace_only_the_changed_allocation_family() -> void:
@@ -82,11 +86,11 @@ func test_null_terrain_reapply_clears_every_material_input() -> void:
 	for uniform_name in [
 		"u_colormap", "u_detailmap", "u_blendmap",
 		"u_detail_c1", "u_detail_c2", "u_detail_c3",
-		"u_detail_coefficient", "u_heightfield_normal", "u_tile_overlay",
+		"u_detail2", "u_heightfield_normal", "u_tile_overlay",
 	]:
 		assert_null(material.get_shader_parameter(uniform_name),
 			"Detached terrain must clear %s." % uniform_name)
-	assert_false(bool(material.get_shader_parameter("u_has_detail_coefficient")))
+	assert_false(bool(material.get_shader_parameter("u_has_detail2")))
 	assert_false(bool(material.get_shader_parameter("u_has_heightfield_normal")))
 	assert_false(bool(material.get_shader_parameter("u_has_tile_overlay")))
 	assert_eq(float(material.get_shader_parameter("u_detail_density")), 0.0)
@@ -130,6 +134,9 @@ func _make_surface_data() -> NovaTerrainData:
 	data.set_detailmap_c2(_solid_texture(Color8(40, 130, 80, 255), 4))
 	data.set_detailmap_c3(_solid_texture(Color8(80, 40, 130, 255), 4))
 	data.set_detailmapdist(_solid_texture(Color8(70, 75, 80, 255), 4))
+	data.set_detailmap2(_solid_texture(Color8(120, 120, 130, 255), 4))
+	data.set_detailmapdist2(_solid_texture(Color8(100, 100, 100, 255), 4))
+	data.set_detail_density2(9)
 	var blend := _solid_image(Color8(128, 64, 64, 200), 4)
 	data.set_blendmap_image(blend)
 	data.set_detailblendmap(ImageTexture.create_from_image(blend))
@@ -166,8 +173,9 @@ uniform sampler2D u_blendmap;
 uniform sampler2D u_detail_c1;
 uniform sampler2D u_detail_c2;
 uniform sampler2D u_detail_c3;
-uniform sampler2D u_detail_coefficient;
-uniform bool u_has_detail_coefficient = false;
+uniform sampler2D u_detail2;
+uniform bool u_has_detail2 = false;
+uniform float u_detail2_density = 8.0;
 uniform sampler2D u_heightfield_normal;
 uniform bool u_has_heightfield_normal = false;
 uniform sampler2D u_tile_overlay;

@@ -48,23 +48,25 @@ func test_detail_passes_blend_srcalpha_and_emulate_secondary_less() -> void:
 		"LOW blends SRCALPHA/INVSRCALPHA and never writes depth.")
 
 
-func test_fd_sampling_uses_retail_point_mips_and_four_by_four_terminal() -> void:
+func test_fd_sampling_is_anisotropic_with_retail_terminal_clamp() -> void:
+	# The device-global texfilter mode applies to every stage, and the retail
+	# reference machine runs the anisotropic mode; the synthetic Godot 2x2/1x1
+	# tail past retail's 4x4 terminal stays unselectable via the gradient clamp.
+	# [orig: CGfxDevice_ApplyRenderStates per-stage loop @ 0x67e3b5..0x67e50e]
 	var sampling := _source("res://shaders/foliage_fd_sampling.gdshaderinc")
 	var detail := _source("res://shaders/foliage_detail.gdshaderinc")
 	var silhouette := _source("res://shaders/foliage_silhouette.gdshader")
 
 	assert_true(sampling.contains("floor(log2(max(min(dimensions.x, dimensions.y), 4.0))) - 2.0"),
 		"The terminal LOD must match retail's final 4x4 level.")
-	assert_true(sampling.contains("clamp(\n\t\tfloor(requested_lod + 0.5), 0.0, terminal_lod)"),
-		"Retail texfilter level 0 must point-select the nearest mip instead of trilinearly blending alpha.")
-	assert_true(sampling.contains("textureLod(source, uv, selected_lod)"),
-		"The selected retail mip must still use bilinear sampling within that level.")
-	assert_false(sampling.contains("textureGrad(source, uv"),
-		"Trilinear :fd sampling makes alpha-test coverage shimmer between retail mip boundaries.")
-	assert_true(detail.contains("uniform sampler2D u_fd_texture : filter_linear_mipmap"),
-		"Expanded detail must filter linearly within the point-selected mip.")
-	assert_true(silhouette.contains("uniform sampler2D u_fd_texture : filter_linear_mipmap"),
-		"MODEL foliage must filter linearly within the point-selected mip.")
+	assert_true(sampling.contains("float gradient_scale = exp2(min(terminal_lod - requested_lod, 0.0));"),
+		"Requests past the retail terminal must scale gradients back onto it.")
+	assert_true(sampling.contains("textureGrad(source, uv, dx * gradient_scale, dy * gradient_scale)"),
+		":fd sampling must stay implicit/anisotropic within the retail chain.")
+	assert_true(detail.contains("uniform sampler2D u_fd_texture : filter_linear_mipmap_anisotropic"),
+		"Expanded detail must sample :fd anisotropically like the reference device.")
+	assert_true(silhouette.contains("uniform sampler2D u_fd_texture : filter_linear_mipmap_anisotropic"),
+		"MODEL foliage must sample :fd anisotropically like the reference device.")
 	assert_true(detail.contains("sample_retail_foliage_fd(u_fd_texture, UV)"),
 		"Expanded detail must use the retail-capped :fd sampler.")
 	assert_true(silhouette.contains("sample_retail_foliage_fd(u_fd_texture, UV)"),

@@ -7,7 +7,8 @@
 // [orig: PolyTrn_PS14SplatNormalMap source text @ 0x7dece0, assembled by
 // compile_terrain_pixel_shaders @ 0x605260]:
 //   splat = c1*blend.r + c2*blend.g + c3*blend.b        (3-way detail splat)
-//   dp3   = dot(normalmap(t3), blendmap)
+//   dp3   = dot(detail2(t3), blendmap)  — only in the SplatNormalMap variant,
+//           selected when polytrn_detailmap2 exists (PS14Splat otherwise)
 //   light = (tile.a*c1 + c0) / 2                        (c1 = LIGHT, c0 = SKY)
 //   out   = light *2 cm *2 dp3 *4 splat
 // EXACTLY ONE normal term: the dual-normal product belonged to the separate
@@ -23,13 +24,28 @@
 // texel bytes enter the ps.1.4 math as-is. The gamma-space convention
 // (D-RMAT-7) lives in nova_color.gdshaderinc; consumers encode the final
 // color once at their ALBEDO write.
-uniform sampler2D u_colormap : filter_linear, repeat_disable;
+// The device-global texfilter mode applies to EVERY active stage
+// [orig: CGfxDevice_ApplyRenderStates per-stage loop @ 0x67e3b5..0x67e50e],
+// and the reference machine runs the anisotropic mode, so every mipped
+// terrain input samples anisotropically. The colormap here is the box-mipped
+// surrogate for the per-LOD tile-cache RT (D-TERRAIN-7); the DBlendmap
+// quadrants are box-mipped in retail (created with flags 0x100001
+// [orig: PolyTrn_InitTextures @ 0x60b2c9]).
+uniform sampler2D u_colormap : filter_linear_mipmap_anisotropic, repeat_disable;
 uniform sampler2D u_detail_c1 : filter_linear_mipmap_anisotropic, repeat_enable;
 uniform sampler2D u_detail_c2 : filter_linear_mipmap_anisotropic, repeat_enable;
 uniform sampler2D u_detail_c3 : filter_linear_mipmap_anisotropic, repeat_enable;
-uniform sampler2D u_blendmap : filter_linear, repeat_disable;
-uniform sampler2D u_detail_coefficient : filter_linear_mipmap, repeat_disable;
-uniform bool u_has_detail_coefficient = false;
+uniform sampler2D u_blendmap : filter_linear_mipmap_anisotropic, repeat_disable;
+// The ps.1.4 splat's stage-3 dp3 input: the authored SECOND detail pair at
+// its own density, dp3'd with the normalized blend — a blend-weighted
+// scalar modulation x2. It is NOT a normal map; the generated coefficient
+// map belongs to the ps.1.1 tiers at stage 7.
+// [orig: stage bind @ 0x6043ff (dword_319F998); texcoord transform
+// density2/density @ 0x609810 (dword_31A1814 / dword_31A1810);
+// PolyTrn_PS14SplatNormalMap "dp3 r3, r3, r2; mul_x2" @ 0x605260]
+uniform sampler2D u_detail2 : filter_linear_mipmap_anisotropic, repeat_enable;
+uniform bool u_has_detail2 = false;
+uniform float u_detail2_density = 8.0;
 // Retail creates a mip chain but the TileBakeDot3 pass explicitly uses
 // base-level bilinear sampling with quadrant CLAMP.
 uniform sampler2D u_heightfield_normal : filter_linear, repeat_disable;
@@ -39,9 +55,9 @@ uniform bool u_has_heightfield_normal = false;
 uniform sampler2D u_tile_overlay : filter_linear, repeat_enable;
 uniform bool u_has_tile_overlay = false;
 uniform vec3 u_tile_overlay_tint = vec3(1.0, 1.0, 1.0);
-// ONED live-edit fallback only: runtime binds the byte-faithful preprocessed
-// coefficient map above. Keeping this authored source sampler lets the shared
-// editor shader preserve retail semantics without rebaking on every paint.
+// Declared for the ONED authored-slot binding only; the top-tier chain does
+// not consume it (the generated coefficient map belongs to the unported
+// ps.1.1 tiers at stage 7).
 uniform sampler2D u_detailmap : filter_nearest_mipmap, repeat_disable;
 // Un-enved defaults = the retail noon register (full_00.env tod 1200:
 // sun_rgb 170,170,167; sky_rgb 84,88,89 — bytes /255), one register with the
@@ -80,43 +96,6 @@ vec2 clamp_retail_quadrant_uv(vec2 uv, vec2 quadrant, ivec2 dimensions) {
 	vec2 minimum_uv = quadrant * 0.5 + texel * 0.5;
 	vec2 maximum_uv = (quadrant + 1.0) * 0.5 - texel * 0.5;
 	return clamp(uv, minimum_uv, maximum_uv);
-}
-
-vec3 sample_detail_coefficient(vec2 coefficient_uv, vec2 quadrant) {
-	if (u_has_detail_coefficient) {
-		coefficient_uv = clamp_retail_quadrant_uv(
-			coefficient_uv, quadrant, textureSize(u_detail_coefficient, 0));
-		return texture(u_detail_coefficient, coefficient_uv).rgb;
-	}
-
-	// Live-editor fallback for an authored B-channel detailmap. Runtime never
-	// takes this path. Retail assets are power-of-two, so dimension-1 masks
-	// reproduce Texture_GenerateNormalMap's wrapped neighbor taps.
-	ivec2 dimensions = textureSize(u_detailmap, 0);
-	if (dimensions.x <= 0 || dimensions.y <= 0) {
-		return vec3(0.5, 0.5, 1.0);
-	}
-	coefficient_uv = clamp_retail_quadrant_uv(
-		coefficient_uv, quadrant, dimensions);
-	// The coefficient texture itself clamps at terrain-atlas edges. Only the
-	// generator's four neighbor taps wrap inside its power-of-two source.
-	ivec2 center = clamp(
-		ivec2(floor(clamp(coefficient_uv, vec2(0.0), vec2(1.0)) * vec2(dimensions))),
-		ivec2(0), dimensions - ivec2(1));
-	int x_mask = dimensions.x - 1;
-	int y_mask = dimensions.y - 1;
-	float left = texelFetch(u_detailmap, ivec2((center.x - 1) & x_mask, center.y), 0).b;
-	float right = texelFetch(u_detailmap, ivec2((center.x + 1) & x_mask, center.y), 0).b;
-	float previous = texelFetch(u_detailmap, ivec2(center.x, (center.y - 1) & y_mask), 0).b;
-	float next = texelFetch(u_detailmap, ivec2(center.x, (center.y + 1) & y_mask), 0).b;
-	vec3 coefficient = normalize(vec3(
-		(left - right) * (255.0 / 32.0),
-		(previous - next) * (255.0 / 32.0),
-		1.0));
-	// Texture_GenerateNormalMap truncates each encoded component to RGBA8
-	// before the ps.1.4 sample. Keep the live editor fallback on that byte grid.
-	ivec3 encoded = ivec3(clamp((coefficient + 1.0) * 127.5, vec3(0.0), vec3(255.0)));
-	return vec3(encoded) / 255.0;
 }
 
 vec3 quantize_retail_signed_vector(vec3 value) {
@@ -181,12 +160,18 @@ vec3 terrain_surface_color_from_colormap(vec4 cm, vec2 colormap_uv,
 	// mul/mad: splat = c1*R + c2*G + c3*B [orig: @ 0x7dece0 rows 1-3]
 	vec3 detail = c1 * blend.r + c2 * blend.g + c3 * blend.b;
 
-	// The single witnessed coefficient term: t3 is generated from the authored
-	// detailmap B channel at scale 1/32, then dp3'd with DBlend.
-	// [orig: Texture_GenerateNormalMap @ 0x58c070;
-	// PolyTrn_PS14SplatNormalMap @ 0x7dece0]
-	vec3 nmap = sample_detail_coefficient(colormap_uv, quadrant);
-	float normal_factor = dot(nmap, blend) * 2.0;
+	// The witnessed stage-3 term: the second detail pair sampled at its own
+	// authored density, dp3'd with the normalized blend and doubled. Maps
+	// without a second detail run the PS14Splat variant, which has no such
+	// stage — the factor is exactly 1.
+	// [orig: PolyTrn_PS14SplatNormalMap vs PS14Splat @ 0x605260; selection on
+	// detailmap2 presence @ 0x604544/0x6044e8; stage-3 bind @ 0x6043ff]
+	float normal_factor = 1.0;
+	if (u_has_detail2) {
+		vec3 detail2 = sample_retail_detail_mips(
+			u_detail2, colormap_uv * u_detail2_density).rgb;
+		normal_factor = dot(detail2, blend) * 2.0;
+	}
 
 	// mad_d2: light = (tile.a * c1 + c0) / 2 with the WITNESSED constants.
 	// tile.a is the additive, byte-quantized heightfield-normal DOT3 bake; raw

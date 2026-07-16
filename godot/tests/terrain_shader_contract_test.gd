@@ -86,12 +86,32 @@ func test_detail_mips_sample_anisotropically_with_terminal_clamp() -> void:
 	assert_true(
 		terrain.contains("u_detail_c1 : filter_linear_mipmap_anisotropic") and
 			terrain.contains("u_detail_c2 : filter_linear_mipmap_anisotropic") and
-			terrain.contains("u_detail_c3 : filter_linear_mipmap_anisotropic"),
-		"Terrain detail layers must sample anisotropically like the retail reference.")
+			terrain.contains("u_detail_c3 : filter_linear_mipmap_anisotropic") and
+			terrain.contains("u_detail2 : filter_linear_mipmap_anisotropic") and
+			terrain.contains("u_colormap : filter_linear_mipmap_anisotropic") and
+			terrain.contains("u_blendmap : filter_linear_mipmap_anisotropic"),
+		"Every mipped terrain input must sample anisotropically like the retail reference.")
 	assert_true(terrain.contains("float gradient_scale = exp2(min(terminal_lod - requested_lod, 0.0));"),
 		"Requests past the 4x4 retail terminal must scale gradients back onto it.")
 	assert_true(terrain.contains("textureGrad(source, uv, dx * gradient_scale, dy * gradient_scale)"),
 		"Detail sampling must stay implicit/anisotropic within the retail chain.")
+
+
+func test_splat_modulation_is_the_second_detail_dp3() -> void:
+	# The ps.1.4 splat's stage-3 dp3 input is the authored second detail pair
+	# at its own density; maps without one run PS14Splat with no such stage.
+	# The generated coefficient map belongs to the unported ps.1.1 tiers.
+	# [orig: stage bind @ 0x6043ff; PS variant select @ 0x604544/0x6044e8;
+	# texcoord transform density2/density @ 0x609810]
+	var terrain := _source("res://shaders/terrain_lighting.gdshaderinc")
+	assert_true(terrain.contains("u_detail2, colormap_uv * u_detail2_density"),
+		"The second detail must sample at its own authored density.")
+	assert_true(terrain.contains("normal_factor = dot(detail2, blend) * 2.0;"),
+		"The stage-3 modulation is dot(second detail, normalized blend) doubled.")
+	assert_true(terrain.contains("float normal_factor = 1.0;"),
+		"Maps without a second detail must run the PS14Splat variant (factor 1).")
+	assert_false(terrain.contains("sample_detail_coefficient"),
+		"The generated coefficient map must not modulate the ps.1.4 splat.")
 
 
 func test_runtime_and_oned_share_tile_overlay_composition() -> void:

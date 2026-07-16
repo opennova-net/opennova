@@ -20,7 +20,6 @@ func test_editor_mesh_owns_and_applies_shared_surface_inputs() -> void:
 		material.get_shader_parameter("u_heightfield_normal"),
 		inputs.get_heightfield_normal_texture()
 	)
-	assert_true(bool(material.get_shader_parameter("u_has_detail_coefficient")))
 	assert_true(bool(material.get_shader_parameter("u_has_heightfield_normal")))
 	assert_same(
 		material.get_shader_parameter("u_heightmap"),
@@ -54,13 +53,13 @@ func test_partial_refreshes_rebuild_and_reapply_the_changed_input_family() -> vo
 	assert_ne(inputs.get_normalized_blend_texture(), first_blend)
 	assert_same(material.get_shader_parameter("u_blendmap"), inputs.get_blend_texture())
 
-	var first_coefficient: Texture2D = inputs.get_detail_coefficient_texture()
-	data.set_detailmap(_solid_texture(Color8(25, 55, 85, 255), 4))
+	var first_detail2: Texture2D = inputs.get_detail2_texture()
+	data.set_detailmap2(_solid_texture(Color8(25, 55, 85, 255), 4))
 	assert_true(mesh.refresh_surface_inputs_details())
-	assert_ne(inputs.get_detail_coefficient_texture(), first_coefficient)
+	assert_ne(inputs.get_detail2_texture(), first_detail2)
 	assert_same(
-		material.get_shader_parameter("u_detail_coefficient"),
-		inputs.get_detail_coefficient_texture()
+		material.get_shader_parameter("u_detail2"),
+		inputs.get_detail2_texture()
 	)
 
 
@@ -95,6 +94,8 @@ func _make_surface_data() -> NovaTerrainData:
 	data.set_detailmap_c2(_solid_texture(Color8(40, 130, 80, 255), 4))
 	data.set_detailmap_c3(_solid_texture(Color8(80, 40, 130, 255), 4))
 	data.set_detailmapdist(_solid_texture(Color8(70, 75, 80, 255), 4))
+	data.set_detailmap2(_solid_texture(Color8(120, 120, 130, 255), 4))
+	data.set_detailmapdist2(_solid_texture(Color8(100, 100, 100, 255), 4))
 	var blend := _solid_image(Color8(128, 64, 64, 200), 4)
 	data.set_blendmap_image(blend)
 	data.set_detailblendmap(ImageTexture.create_from_image(blend))

@@ -65,10 +65,13 @@ record).
 
 **Texture build — fresh re-grill (2026-07-13)** (`PolyTrn_InitTextures @ 0x60aaa0`):
 Tier ≥ 2 loads authored detail textures c1/c2/c3 plus
-`polytrn_detailmapdist`; the lower tier pairs its single detail with
-`polytrn_detailmapdist2`. The top-tier coefficient texture is generated
-from the authored `polytrn_detailmap` **B channel**, not the terrain
-heightmap: wrapped `(coord ± 1) & (dimension - 1)` neighbor samples form X/Y,
+`polytrn_detailmapdist`; the second detail `polytrn_detailmap2` pairs with
+`polytrn_detailmapdist2` through the same builder and feeds the ps.1.4
+splat's stage 3 (see the top-tier closure below)
+[`orig: PolyTrn_InitTextures @ 0x60af97/0x60aff9`]. A coefficient normal
+texture is additionally generated for the **ps.1.1 tiers** (bound at stage
+7, not consumed by the ps.1.4 splat) from the authored `polytrn_detailmap`
+**B channel**, not the terrain heightmap: wrapped `(coord ± 1) & (dimension - 1)` neighbor samples form X/Y,
 fixed scale 1/32 (`bumpScale @ 0x7DBFAC`) is applied, **Z is the retail
 `fld1` unit 1.0** (corrected 2026-07-15; the earlier `Z = 2` reading halved
 every slope response), the vector is normalized, and each RGB
@@ -100,7 +103,13 @@ is the fixed-point weighted blend, and alpha is copied from the base mip
 unchanged. Base/far mixing is therefore a mip-chain construction, not a
 camera-distance normal crossfade. Retail stops after the 4×4 level; the Godot
 adapter appends the API-required 2×2/1×1 tail after preserving every
-retail-visible level byte-for-byte. The witnessed device supports texfilter
+retail-visible level byte-for-byte. The DBlendmap/Colormap/TrnNMap quadrant
+textures are created with flags `0x100001` — no mip-suppression bit — so
+they carry full box-filtered auto chains
+[`orig: PolyTrn_InitTextures @ 0x60b2c9; GTexture_CreateFromPixelData
+@ 0x6877c7..0x6878be (D3DXFilterTexture BOX)`]; the host box-mips the
+normalized blend and uses a box-mipped colormap as the per-LOD tile-RT
+surrogate. The witnessed device supports texfilter
 modes 0–4: 0/1 = `MAG/MIN LINEAR` + `MIPFILTER POINT`, 2 = trilinear, 3/4 =
 `MINFILTER ANISOTROPIC` + `MAXANISOTROPY` [`orig: per-stage filter select
 @ 0x67e38a..0x67e45b; device init @ 0x679c28..0x679c9c,
@@ -236,20 +245,45 @@ device constants. Ported: `terrain_lighting.gdshaderinc` (the prior
 combined/fill pairing was a gobj-era stand-in) +
 `renderer::terrain_surface_light` (T1 section 5). Full chain:
 [render/render-lighting-re.md](../render/render-lighting-re.md).
-**Top-tier binding/math closure (fresh re-grill, 2026-07-13)**: the recovered
-`t0..t5` contract is now literal in the shared host include. `t0` is
-the cached tile render target described above, not source colormap RGBA; on
-bare ground its RGB is the MODULATE2X colormap result and its alpha is the
-heightfield/light DOT3 result. `t1`, `t4`, and `t5` are
-authored detail c1/c2/c3 sampled with the shared repeating detail UV; `t2` is
-the normalized DBlend RGB sampled with the terrain-map/colormap UV; and `t3`
-is the generated coefficient map sampled with that same terrain-map UV (not
-the repeated detail coordinate).
-The detail splat is `t1×t2.r + t4×t2.g + t5×t2.b`; its single coefficient
-factor is `2×dot(t3.rgb, t2.rgb)`. Lighting starts from
-`(t0.a×c1 + c0)/2`, then follows the witnessed ×2 colormap, ×2 dot-product,
-and ×4 splat stages [`orig: PolyTrn_PS14SplatNormalMap @ 0x7dece0`].
-There is no camera-distance normal mix and no extra terrain tint.
+**Top-tier binding/math closure (fresh re-grill, 2026-07-13; stage-3
+corrected 2026-07-15)**: the recovered `t0..t5` contract is now literal in
+the shared host include. The stage binder
+[`orig: PolyTrn_BindStageTextures @ 0x604330, walk @ 0x604392..0x604415`
+(renamed 2026-07-15 from kong's `CD3DDevice_FindBestTexturePermutation` —
+PolyTrn code that binds stages, not a device search)] resolves: stage 0 = the cached
+per-patch tile render target (not source colormap RGBA; on bare ground its
+RGB is the MODULATE2X colormap result and its alpha is the heightfield/light
+DOT3 result); stages 1/4/5 = the three authored splat layers sampled with
+the shared repeating detail UV; stage 2 = the normalized DBlend quadrant
+(selected by two key bits) at the terrain-map UV; **stage 3 = the authored
+SECOND detail (`polytrn_detailmap2`, paired with `polytrn_detailmapdist2`)
+at its own `polytrn_detaildensity2` coordinate** — the texture-matrix pair
+in the sector batch scales the mesh detail UV by `1/density` for stage 2 and
+`density2/density` for stage 3 [`orig: render_terrain_sector_batch
+@ 0x60976f..0x609810 (dword_31A1810/dword_31A1814, parsed by
+Terrain_ParseConfigCallback @ 0x60f993/0x60f9bf)`]. The earlier reading of
+t3 as the generated detailmap-B coefficient map is RETRACTED for this tier:
+that generated map binds at stage 7 for the ps.1.1 tiers, and on the ps.1.4
+splat it produced blend-weighted darkening spots retail does not render.
+When the shadow pass is active, stage 3 swaps to the projected-shadow
+texture with an `8/density` transform [`orig: 0x6043f2; 0x6097ca`].
+The detail splat is `t1×t2.r + t4×t2.g + t5×t2.b`; the `mul_x2` modulation
+is `2×dot(t3.rgb, t2.rgb)` — with the normalized blend this is a
+blend-weighted scalar of the second detail — and it exists ONLY in
+`PS14SplatNormalMap`, selected when `detailmap2` is present; maps without a
+second detail run `PS14Splat`, which has no such stage (factor exactly 1)
+[`orig: terrain_setup_lighting_and_shader @ 0x604544/0x6044e8`]. Lighting
+starts from `(t0.a×c1 + c0)/2`, then follows the witnessed ×2 colormap,
+×2 dot-product, and ×4 splat stages
+[`orig: PolyTrn_PS14SplatNormalMap @ 0x7dece0, assembled with the full
+eight-variant family @ 0x605260 — PSBasic/PSNormalMap/PSDualNormalMap/
+PS14Splat/PS14SplatNormalMap/PSShadowBasic/PSShadowNormalMap/PSDepthAlpha`].
+There is no camera-distance normal mix and no extra terrain tint, and there
+is **no distance-based tier downgrade**: every sector at every distance
+draws through `terrain_setup_lighting_and_shader(0)`; the quality-1/2
+passes (`0x319F934`, and the ONE/ONE additive `0x319F930`) belong to the
+local-light multi-pass path, not distance
+[`orig: render_terrain_sector_batch @ 0x6092a0`].
 
 The host composes tile-overlay RGB into the reconstructed t0 base **before**
 that lighting chain while retaining t0 alpha as the heightfield/light DOT3

@@ -225,6 +225,12 @@ void NovaTerrainSurfaceInputs::_bind_methods() {
 		&NovaTerrainSurfaceInputs::get_detail_coefficient_texture);
 	ClassDB::bind_method(D_METHOD("get_paired_detail_texture", "layer"),
 		&NovaTerrainSurfaceInputs::get_paired_detail_texture);
+	ClassDB::bind_method(D_METHOD("get_detail2_texture"),
+		&NovaTerrainSurfaceInputs::get_detail2_texture);
+	ClassDB::bind_method(D_METHOD("has_detail2"),
+		&NovaTerrainSurfaceInputs::has_detail2);
+	ClassDB::bind_method(D_METHOD("get_detail2_density"),
+		&NovaTerrainSurfaceInputs::get_detail2_density);
 	ClassDB::bind_method(D_METHOD("get_heightfield_normal_texture"),
 		&NovaTerrainSurfaceInputs::get_heightfield_normal_texture);
 	ClassDB::bind_method(D_METHOD("get_tile_overlay_texture"),
@@ -312,8 +318,12 @@ bool NovaTerrainSurfaceInputs::rebuild_blend() {
 		? image_to_rgba8(live_blend, source)
 		: texture_to_rgba8(terrain_data->get_detailblendmap(), source);
 	if (have_source) {
+		// Retail creates the DBlendmap quadrants with flags 0x100001: no
+		// mip-suppression bit, so they carry the full box-filtered auto chain.
+		// [orig: PolyTrn_InitTextures @ 0x60b2c9..0x60b2dd;
+		// GTexture_CreateFromPixelData @ 0x6877c7..0x6878be]
 		normalized_blend_texture = texture_from_rgba8(
-			opennova::terrain::normalize_detail_blend_map(source), false);
+			opennova::terrain::normalize_detail_blend_map(source), true);
 	}
 	return normalized_blend_texture.is_valid();
 }
@@ -341,6 +351,8 @@ bool NovaTerrainSurfaceInputs::rebuild_detail_textures() {
 	for (auto &texture : paired_detail_textures) {
 		texture.unref();
 	}
+	paired_detail2_texture.unref();
+	mipped_colormap_texture.unref();
 	if (terrain_data.is_null()) {
 		return false;
 	}
@@ -369,10 +381,37 @@ bool NovaTerrainSurfaceInputs::rebuild_detail_textures() {
 			}
 		}
 	}
+
+	// The second detail is the ps.1.4 splat's stage-3 dp3 input, paired with
+	// its own far texture when authored, otherwise carrying plain box mips.
+	// [orig: PolyTrn_InitTextures @ 0x60af97/0x60aff9 (load + optional
+	// create-with-blend); stage bind @ 0x6043ff]
+	opennova::terrain::Rgba8Image detail2_source;
+	if (texture_to_rgba8(terrain_data->get_detailmap2(), detail2_source)) {
+		opennova::terrain::Rgba8Image far2_source;
+		if (texture_to_rgba8(terrain_data->get_detailmapdist2(), far2_source)) {
+			paired_detail2_texture = texture_from_retail_mips(
+				opennova::terrain::build_paired_detail_mip_chain(
+					detail2_source, far2_source));
+		}
+		if (paired_detail2_texture.is_null()) {
+			paired_detail2_texture = texture_from_rgba8(detail2_source, true);
+		}
+	}
+
+	// Retail's t0 is the per-patch tile-cache render target whose resolution
+	// drops with the patch LOD (1024 >> lod per 512u quadrant); a box-mipped
+	// colormap is the byte-closest hosted surrogate while the RT lifecycle
+	// stays open under D-TERRAIN-7.
+	opennova::terrain::Rgba8Image colormap_source;
+	if (texture_to_rgba8(terrain_data->get_colormap(), colormap_source)) {
+		mipped_colormap_texture = texture_from_rgba8(colormap_source, true);
+	}
 	return detail_coefficient_texture.is_valid() ||
 		paired_detail_textures[0].is_valid() ||
 		paired_detail_textures[1].is_valid() ||
-		paired_detail_textures[2].is_valid();
+		paired_detail_textures[2].is_valid() ||
+		paired_detail2_texture.is_valid();
 }
 
 bool NovaTerrainSurfaceInputs::rebuild_tile_overlay() {
@@ -414,6 +453,8 @@ bool NovaTerrainSurfaceInputs::rebuild_tile_overlay() {
 
 void NovaTerrainSurfaceInputs::clear_derived_textures() {
 	detail_coefficient_texture.unref();
+	paired_detail2_texture.unref();
+	mipped_colormap_texture.unref();
 	normalized_blend_texture.unref();
 	heightfield_normal_texture.unref();
 	for (auto &texture : paired_detail_textures) {
@@ -436,10 +477,10 @@ bool NovaTerrainSurfaceInputs::apply_to_material(
 	p_material->set_shader_parameter("u_detail_c1", get_detail_c1_texture());
 	p_material->set_shader_parameter("u_detail_c2", get_detail_c2_texture());
 	p_material->set_shader_parameter("u_detail_c3", get_detail_c3_texture());
-	p_material->set_shader_parameter(
-		"u_detail_coefficient", detail_coefficient_texture);
-	p_material->set_shader_parameter(
-		"u_has_detail_coefficient", has_detail_coefficient());
+	p_material->set_shader_parameter("u_detail2", paired_detail2_texture);
+	p_material->set_shader_parameter("u_has_detail2", has_detail2());
+	p_material->set_shader_parameter("u_detail2_density",
+		static_cast<float>(get_detail2_density()));
 	p_material->set_shader_parameter(
 		"u_heightfield_normal", heightfield_normal_texture);
 	p_material->set_shader_parameter(
@@ -452,6 +493,9 @@ bool NovaTerrainSurfaceInputs::apply_to_material(
 }
 
 Ref<Texture2D> NovaTerrainSurfaceInputs::get_colormap_texture() const {
+	if (mipped_colormap_texture.is_valid()) {
+		return mipped_colormap_texture;
+	}
 	return terrain_data.is_valid() ? terrain_data->get_colormap() : Ref<Texture2D>();
 }
 
@@ -504,6 +548,10 @@ Ref<Texture2D> NovaTerrainSurfaceInputs::get_paired_detail_texture(int p_layer) 
 		? paired_detail_textures[p_layer] : Ref<Texture2D>();
 }
 
+Ref<Texture2D> NovaTerrainSurfaceInputs::get_detail2_texture() const {
+	return paired_detail2_texture;
+}
+
 Ref<Texture2D> NovaTerrainSurfaceInputs::get_heightfield_normal_texture() const {
 	return heightfield_normal_texture;
 }
@@ -516,6 +564,10 @@ int NovaTerrainSurfaceInputs::get_detail_density() const {
 	return terrain_data.is_valid() ? terrain_data->get_detail_density() : 0;
 }
 
+int NovaTerrainSurfaceInputs::get_detail2_density() const {
+	return terrain_data.is_valid() ? terrain_data->get_detail_density2() : 0;
+}
+
 bool NovaTerrainSurfaceInputs::has_normalized_blend() const {
 	return normalized_blend_texture.is_valid();
 }
@@ -526,6 +578,10 @@ bool NovaTerrainSurfaceInputs::has_detail_coefficient() const {
 
 bool NovaTerrainSurfaceInputs::has_paired_detail(int p_layer) const {
 	return p_layer >= 0 && p_layer < 3 && paired_detail_textures[p_layer].is_valid();
+}
+
+bool NovaTerrainSurfaceInputs::has_detail2() const {
+	return paired_detail2_texture.is_valid();
 }
 
 bool NovaTerrainSurfaceInputs::has_heightfield_normal() const {
@@ -544,6 +600,7 @@ Dictionary NovaTerrainSurfaceInputs::get_diagnostics() const {
 	result["paired_detail_c1"] = has_paired_detail(0);
 	result["paired_detail_c2"] = has_paired_detail(1);
 	result["paired_detail_c3"] = has_paired_detail(2);
+	result["paired_detail2"] = has_detail2();
 	result["heightfield_normal"] = has_heightfield_normal();
 	result["tile_overlay_enabled"] = tile_overlay_enabled;
 	result["tile_overlay"] = has_tile_overlay();
