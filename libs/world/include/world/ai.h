@@ -101,14 +101,28 @@ struct AiBrain {
         kWpExtra = 24,     // node payload f[4] (type1) / 0 (type3) [byte +96]
         kAnimFlag = 32,    // cleared on node advance [byte +128]
         kStoredKeyTime = 35, // stored node-val on advance [byte +140]
+        kTargetSlot = 38,  // current target (orig: entity ptr; container rebase stores
+                           // EntityHandle.packed + 1 so 0 keeps the orig null meaning) [byte +152]
         kDamageInfo = 39,  // damage source/info copied from a damage event's extra [byte +156]
         kCombatTimer = 40, // no-target / combat re-acquire timer (>620 re-acquire) [byte +160]
         kFireDelay = 41,   // fire-delay countdown set on engagement [byte +164]
+        kRetargetTimer = 42, // += 16 per processed state-17 tick; >248 rescans [byte +168]
+        kAccuracy = 43,    // scatter accuracy 0..5 (modulus 6 - acc) [byte +172]
         kAlert = 46,       // alert level [byte +184]
         kPrevAlert = 47,   // previous alert level (edge) [byte +188]
         kNoTargetIdle = 48,// set 1 when no target + profile not combat [byte +192]
         kSpeedA = 49,      // move speed A [byte +196]
         kSpeedB = 50,      // move speed B (state 16 GROUND_FOLLOWWP) [byte +200]
+        // ---- the state-17 tick working set (world-wac-ai-re §17.6) ----
+        kTickAccum = 8,    // accumulates kStep; >=16 -> one processed tick [byte +32]
+        kCooldownPair = 52,// PACKED u16 pair (weapon cooldowns A/B): += 0x10001*step per
+                           // tick — one add advances both words, low-word carry included
+                           // [orig: brain[52] += 65537*deltaTime @0x472e00; bytes +208/+210]
+        kAmmoA = 53,       // primary ammo count [byte +212]
+        kAmmoB = 54,       // secondary ammo count [byte +216]
+        kLastWeapon = 106, // 1/2 = which weapon the continuation branches re-fire [byte +424]
+        kSweepPhase = 180, // sweep-fire lateral phase, -196608..196608 step 10918 [byte +720]
+        kBurstWindow = 181,// burst window: armed to 1 on fire, += step while <= 186 [byte +724]
         // ---- part-anim channels (vehicle/emplacement parts; PLAYPARTANIM, 2 channels) ----
         // [orig: Entity_ApplyCommand @0x43ab60 case 0x22 writes comp+436 (direction) /
         // comp+444 (rate). Def defaults: Entity_CopyVehicleDefToAIComp @0x45ddf9 copies
@@ -150,7 +164,11 @@ static_assert(sizeof(AiSlot) == 172, "AiSlot must match unk_A34B90 172-byte stri
 // flag bytes the state machine reads. [orig: AIProfile_LoadOrFind @0x45fd80.]
 struct AiProfile {
     uint8_t flags96 = 0;   // +96: bit1 (&2) combat-capable, bit4 (&0x10) can-fire
-    uint8_t flags100 = 0;  // +100: bit1 (&2) use-fallback-state, bit3 (&8) ignore-stealth gate
+    // +100 mode dword (modeled as the low byte): bit0 (&1) move-while-fighting, bit1 (&2)
+    // use-fallback-state, bit2 (&4) hold-heading, bit3 (&8) ignore-refcount-saturation,
+    // bit5 (&0x20) sweep fire, bit6 (&0x40) burst fire, bit7 (&0x80) stationary fire.
+    // [orig: AIEntity_ProcessWeaponFire @0x472e00 mode dispatch; world-wac-ai-re §17.6]
+    uint8_t flags100 = 0;
     bool has_src148 = false; // +148 target-source gate
     bool has_src180 = false; // +180 target-source gate
     int32_t field216 = 0;  // +216: added into brain working field [131]
@@ -161,6 +179,23 @@ struct AiProfile {
     uint8_t fov_secondary = 0;  // +67:  secondary FOV / turret arc byte (OR'd with 1)
     int16_t range_primary = 0;  // +78:  primary-FOV max engage range (world units, signed i16)
     int16_t range_secondary = 0;// +70:  secondary-FOV max engage range (world units, signed i16)
+    // ---- the SM state-17 tick (vehicles/emplacements; world-wac-ai-re §17.6) ----
+    int32_t fire_interval_a = 0;  // +124: primary fire interval (cooldown word +208 gate)
+    int32_t fire_interval_b = 0;  // +156: secondary fire interval (word +210 gate)
+    uint8_t weapon_a = 0;         // +148 byte: primary ammo-def id
+    uint8_t weapon_b = 0;         // +180 byte: secondary ammo-def id
+    int32_t accuracy = 0;         // brain[43] seed: scatter modulus = 6 - accuracy (0..5)
+                                  // [orig: the ai.def copy block seeds brain[43]; source
+                                  // field unwitnessed — part of Entity_CopyVehicleDefToAIComp]
+    int32_t approach_cap = 0;     // +76: chase range cap (16.16)
+    int32_t min_range = 0;        // +188: minimum engage range (16.16)
+    int32_t match_speed_range = 0;// +184: follow-at-target-speed range (16.16)
+    // ---- the infantry combat pass (org1 riflemen; world-wac-ai-re §17.4, D-AI-5) ----
+    // One ammo id + clip stands in for the four anim-fire weapon bytes (+0x358..0x35B —
+    // JO riflemen author all four = the rifle round) until the block-copy writer is
+    // witnessed. -1 = unarmed (the pass never fires).
+    int32_t ammo_primary = -1;    // world.ammo index [orig: items.def ammo_closeattack family]
+    int32_t clip_size = 0;        // items.def clipsize (magazine reseed)
 };
 
 // AiScheduler — brain[2], the shared per-frame budget accumulator (the +16 field).
@@ -296,6 +331,7 @@ struct AiTarget {
     int32_t relmat_id = 0;       // target+284 (pad6_pre[24], i16) — relation-matrix key
     int32_t net_id = 0;          // target+124 (DcbId)
     bool has_controller = false; // target pad3_pre[48] nonzero -> PRNG branch A (inline) vs B
+    EntityHandle handle;         // container rebase: the world handle (orig: the entity ptr)
 };
 
 // A perception candidate for acquire_target. [orig: AI_FindBestTargetB @0x466f60 scans the
@@ -523,16 +559,21 @@ public:
     // @0x4301bc unread). Damage when landing with vel_z <= -1057*scale: health -= excess>>4
     // @0x4b9910 dump 5152]. 0 disables (the image default until the config source is RE'd).
     int32_t fall_damage_scale = 0;
+    // The AI aim-error difficulty scale [orig: dword_C6EAE8 in the §17.5 error formula
+    // (119304 * dword_C6EAE8 * acc) >> 5; its runtime config source is unwitnessed —
+    // sibling of dword_C6EAE4 above]. Default 1 keeps the error term live.
+    int32_t ai_difficulty = 1;
     int unported_calls = 0;   // coverage counter for not_yet_ported handlers
     int find_target_calls = 0;// coverage: target-acquisition invocations
     std::vector<RelMatCall> relmat_calls; // recorded mover side effects (net layer = P2+)
 
     // ---- P2: GROUND combat + targeting ----
-    std::vector<AiCandidate> candidates;   // injected perception candidates (acquire_target input)
-    std::vector<RelOpCall> rel_ops;        // recorded engagement relation-matrix ops
+    std::vector<RelOpCall> rel_ops;        // recorded engagement relation-matrix ops (trace;
+                                           // the APPLY now writes world.relations — D-AI-3)
     std::vector<int32_t> target_set_calls; // recorded Entity_SetAITarget net-ids (@0x45d760)
     uint32_t prng_a = 0;    // [orig: dword_31BFBB8] engagement fire-delay jitter stream
     uint32_t prng16 = 0;    // [orig: dword_31BFBB0] PRNG_Next16 stream
+    uint16_t fire_shot_seq = 0; // per-shot sequence word [orig: word_B7C670]
 
     // The shared 32-bit rotate LCG: s = rotl(s + rotl(s,11), 4) ^ 1; returns the new state.
     int32_t prng_step_a();  // [orig: inline LCG on dword_31BFBB8]
@@ -544,15 +585,52 @@ public:
     // still(4) AIEvent by horizontal speed (sqrt(vx^2+vz^2), >=1057 -> 3 else 4; channel 0).
     void queue_death_event(AiEntity &e);
 
-    // [orig: AI_FindBestTargetB @0x466f60] scan `candidates` (perception gates + FOV/range/stealth
-    // scoring + LOS + priority bypass); on success fill `out` and return true. Pool scan + team
-    // relation + weapon-slot selection deferred (see AiCandidate). Counts calls.
-    bool acquire_target(AiEntity &e, AiTarget &out);
+    // [orig: AI_FindBestTargetB @0x466f60] the candidate FEED (D-AI-1): scan the registry
+    // pools with the witnessed gates (team/see-all, flags 2/0x8000000, health, +530 refcount
+    // saturation, per-candidate range caps) into a scratch list, then run the scoring core.
+    // Deviations tracked in the ledger: the profile weapon-slot class table (+40+4i, ai.def)
+    // is unparsed -> pools 0 and 1 scan unconditionally; LOS = line_of_sight_clear.
+    bool acquire_target(World &world, AiEntity &e, AiTarget &out);
 
-    // [orig: the engagement block @0x4677b3..0x4678b2] record the 8 relation-matrix ops +
-    // Entity_SetAITarget, reset the combat timer, set the fire-delay (exact PRNG jitter; the
-    // has_controller branch is guarded by base-delay, the other is unconditional), pending = 17.
-    void engage_target(AiEntity &e, const AiTarget &t);
+    // The byte-exact scoring core over an explicit candidate list (the P2 port; tests pin
+    // it directly). [orig: AI_FindBestTargetB @0x466f60 scoring walk]
+    bool acquire_target_from(AiEntity &e, const std::vector<AiCandidate> &candidates,
+                             AiTarget &out);
+
+    // [orig: the engagement block @0x4677b3..0x4678b2] APPLY the sees+targeted quads to
+    // world.relations (D-AI-3 closed) + record the trace, Entity_SetAITarget, reset the
+    // combat timer, set the fire-delay (exact PRNG jitter; the has_controller branch is
+    // guarded by base-delay, the other is unconditional), pending = 17.
+    void engage_target(World &world, AiEntity &e, const AiTarget &t);
+
+    // [orig: Entity_SetAITarget @0x45d760] brain[kTargetSlot] + AiSlot[3] = handle;
+    // maintain the OLD/NEW targets' Entity::ai_target_refcount (dec clamp >=0 / inc).
+    void ai_set_target(World &world, AiEntity &e, EntityHandle target);
+
+    // The 8 relation-matrix writes of acquisition/fire: the sees quad + the targeted quad,
+    // in the witnessed order/keys (group = Entity::group_id +0x11C, single = net_id +0x7C).
+    // [orig: @0x4677b3..0x4678b2 / @0x4b0a6f..0x4b0ae2; matrix identity via the setter
+    // bases g_SeesMatrix*/g_TargetedMatrix* — world-wac-ai-re §16.4/§17.2]
+    void apply_engage_relations(World &world, const Entity &self, const Entity &target);
+
+    // LOS between two 16.16 points: the terrain leg samples the height field along the
+    // segment; the entity/sector leg is deferred (D-AI-7 — Physics_RaycastTerrainAndSectors
+    // @0x539910 internals are the open §16.5 item 6). Returns true = clear (no terrain
+    // wired = clear, the headless-test default). [orig: 0x539910 contract, 1 = clear]
+    bool line_of_sight_clear(const int32_t a[3], const int32_t b[3]) const;
+
+    // [orig: Entity_AlertNearbyAllies @0x4654b0] pool-1 (rebase: + pool-0 organics with
+    // brains) same-team, alive, non-building entities within `radius_units` (16.16):
+    // own AiSlot+136 = 2 and each ally's brain alert = 2.
+    void alert_nearby_allies(World &world, AiEntity &e, int32_t radius);
+
+    // AI fire -> the authoritative round path (the Entity_FireWeaponAndSendPacket @0x42bd80
+    // authority leg): ring append (the S2C 0x0A tag-2 fan-out) + RoundSim spawn — the same
+    // pair the C2S 0x06 player path enters. Host-only (callers are authority-gated).
+    // [orig: WeaponSlot_FireAndSpawnEffects @0x53f440 -> Server_ClientFiredRound @0x50baa0
+    // ring append + RoundData_SpawnRound @0x4ec0d0; net-re §5.60]
+    bool fire_ai_round(World &world, AiEntity &e, const int32_t origin[3], int32_t yaw_bam,
+                       int32_t pitch_bam, int32_t ammo_index);
 
     // [orig: AI_HandleCommand @0x465770] AI command dispatcher (cases 6..0x16). Deferred to the
     // AI-command phase; for damage/death/destroy events (1/3/4) the original returns 0, so this
@@ -605,6 +683,14 @@ public:
     // state selection (every 16, authority) -> body-heading turn -> slope slide (every 8)
     // -> rotate root delta by heading -> integrate + gravity/ground (every 2).
     void tick_infantry(AiEntity &e, World &world, uint32_t logic_tick);
+    // The infantry combat pass (org1 riflemen; world-wac-ai-re §17.1-17.3/17.5, D-AI-4):
+    // 32-tick staged perception -> target commit, then per-tick reactions (the attack
+    // anims), move modes, and the lead+error aim solution. Authority + alive only.
+    void infantry_combat_think(AiEntity &e, World &world, uint32_t key);
+    // The infantry fire pass (§17.4): consume the .bad anim-event trigger bits
+    // (inf.last_events, odd ticks) + the walking-fire latch -> fire_ai_round; magazine
+    // decrement + the reload trigger. Runs AFTER the anim advance refreshed last_events.
+    void infantry_fire_pass(AiEntity &e, World &world, uint32_t logic_tick);
     // AUTHORITY body-anim selection for a net-snapped REMOTE player. The movement motor must
     // not re-simulate a wire-snapped peer (tick_infantry skips it), but the retail authority
     // still runs the player-body ANIM selection for every player, consuming the REPLICATED
@@ -681,6 +767,7 @@ private:
     std::vector<int> handle_to_ai_index_;
     std::vector<EntityHandle> vehicle_pass_handles_; // per-tick scratch for the vehicle
                                                      // motor pass (reused, no realloc)
+    std::vector<AiCandidate> scan_candidates_;       // acquire_target feed scratch (reused)
     bool baseline_captured_ = false;
 };
 

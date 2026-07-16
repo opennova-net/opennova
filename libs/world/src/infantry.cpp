@@ -798,6 +798,13 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         infantry_select(e);
     }
 
+    // 2b. The combat pass (NPCs, authority, alive): perception every 32 ticks, the
+    // reaction/approach/aim layer per tick — its commits override the 16-tick gait pick,
+    // matching the original's later-in-flow targetAnimState overrides.
+    // [orig: Entity_UpdateInfantryAI @0x4b9910 §17.1-17.3/17.5 region]
+    if (!inf.is_local_player && is_authority && e.health > 0)
+        infantry_combat_think(e, world, key);
+
     // The lean angle decays every body tick (corpse included — the decay sits before
     // the weapon-channel block in the original) and ramps while a lean key is held;
     // the torso roll chases the slope roll in the same pass [orig: @0x4b5cff].
@@ -824,6 +831,12 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         inf.prev_capsule_bottom = frame.capsule_bottom;
     }
     inf.last_events = have_clip ? frame.events : 0;
+
+    // 3a. The fire pass: consume the fresh trigger bits + the walking-fire latch into
+    // authoritative rounds (odd ticks). [orig: the @0x4bf15c-0x4bf4b0 fire block runs
+    // after the anim advance refreshed g_animEventTriggerBits; §17.4]
+    if (!inf.is_local_player && is_authority && e.health > 0)
+        infantry_fire_pass(e, world, logic_tick);
 
     // 3b. Deferred promotion when a LOCKED (flag 0x4) playing clip reaches its end —
     // the PRIMARY channel's end-flag path, the same machinery the weapon channel uses.
@@ -1043,6 +1056,318 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     mirror_wire_anim(e, world); // wire-anim bytes for the 0x0A player record (D-NET-159)
 
     advance_part_anim(e); // PANM channels integrate regardless of the motor path
+}
+
+// ----------------------------------------------------------------------------
+// The infantry combat pass. [orig: Entity_UpdateInfantryAI @0x4b9910; witness
+// docs/world/world-wac-ai-re.md §17.1-17.5 (D-AI-4).] Perception every 32 ticks,
+// behavior + aim per authority tick, fire on the .bad anim-event triggers.
+// ----------------------------------------------------------------------------
+
+namespace {
+
+// The infantry threat scan: nearest visible enemy over pools 0/1 within the staged
+// radius. [orig: Entity_FindNearestThreat @0x4b0990 -> Entity_FindTargets @0x53a610,
+// ctx type 7 — the -fwd_dist nearest-first walk; §17.2.] Slice deviations (ledger
+// D-AI-4 status): the fresh-corpse (<=16-tick) inclusion, the drowning/far x2
+// penalties, the forced-target words, and heat/radar signatures are unmodeled; the
+// candidate set is alive enemies, nearest LOS-clear first.
+EntityHandle infantry_scan_nearest_threat(AiSystem &sys, World &world, AiEntity &e,
+                                          int32_t range) {
+    // [orig: @0x4b09a1 — visual radius = min(range/2, 40u); Flags&0x40 -> 0]
+    int32_t radius = range >> 1;
+    if (radius > 0x280000) radius = 0x280000;
+    if (radius <= 0) return EntityHandle{};
+    if ((e.slot.f[1] & 1) != 0) return EntityHandle{}; // [orig: aiSlot byte+4 & 1 -> no scan]
+    // [orig: @0x4b0a02 — teamless scanners pose as team 2 when slot+4 & 8]
+    uint8_t own_team = e.team;
+    if (own_team == 0 && (e.slot.f[1] & 8) != 0) own_team = 2;
+    if (own_team == 0 && !e.see_all) return EntityHandle{};
+
+    EntityHandle best{};
+    int64_t best_d2 = static_cast<int64_t>(radius) * radius;
+    int32_t best_pos[3] = {};
+    for (int pool = 0; pool <= 1; ++pool) {
+        const size_t cap = world.registry.pool_capacity(pool);
+        for (size_t s = 0; s < cap; ++s) {
+            const EntityHandle h = EntityHandle::make(pool, static_cast<int>(s));
+            if (h == e.handle) continue;
+            const Entity *c = world.registry.get(h);
+            if (c == nullptr || c->health <= 0) continue;      // in-use + alive
+            if ((c->engine_flags & 0x8000001u) != 0) continue; // [orig: flags skip]
+            if (c->team == 0 || c->team == own_team) {         // enemies only
+                if (!e.see_all) continue;
+            }
+            const int32_t cpos[3] = {static_cast<int32_t>(c->position.x * 65536.0f),
+                                     static_cast<int32_t>(c->position.y * 65536.0f),
+                                     static_cast<int32_t>(c->position.z * 65536.0f)};
+            const int64_t ddx = static_cast<int64_t>(cpos[0]) - e.pos[0];
+            const int64_t ddy = static_cast<int64_t>(cpos[1]) - e.pos[1];
+            const int64_t d2 = ddx * ddx + ddy * ddy;
+            if (d2 >= best_d2) continue; // nearest-first [orig: -fwd_dist descending sort]
+            if (!sys.line_of_sight_clear(e.pos, cpos)) continue; // LOS last, in order
+            best = h;
+            best_d2 = d2;
+            best_pos[0] = cpos[0]; best_pos[1] = cpos[1]; best_pos[2] = cpos[2];
+        }
+    }
+    (void)best_pos;
+    return best;
+}
+
+} // namespace
+
+void AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
+    InfantryState &inf = e.inf;
+    AiSlot &slot = e.slot;
+    auto avail = [&](int s) {
+        return root_motion != nullptr && root_motion->has_clip(inf.adm_id, s);
+    };
+
+    // damageTimer decays once per tick. [orig: the LABEL_373 block]
+    if (inf.damage_timer > 0) --inf.damage_timer;
+
+    // --- Perception (every 32 ticks). [orig: tick & 0x1F == 0; §17.1] ---
+    if ((key & 0x1Fu) == 0) {
+        int32_t range = slot.f[17]; // sight range, 16.16 [orig: slot+68]
+        const bool calm = inf.damage_timer == 0 &&
+                          slot.bytes()[AiSlot::kMoveFlagByte] == 0 && !inf.was_hit;
+        if (calm) range >>= 1; // calm NPCs see half as far
+        // The 4-phase range schedule by (tick>>5)&3: full / 6u / half / 6u.
+        const uint32_t phase = (key >> 5) & 3u;
+        int32_t staged = std::min(range, 0x60000);
+        if (phase == 0) staged = range;
+        else if (phase == 2) staged = std::max(range >> 1, std::min(range, 0x60000));
+
+        EntityHandle found = infantry_scan_nearest_threat(*this, world, e, staged);
+
+        // Fallback: the last attacker, enemy + LOS-gated; consumed + cleared every scan.
+        // [orig: @0x4bbf20-era block — slot+4 & 1 suppresses retaliation]
+        if (!found.valid() && (phase == 0 || !inf.combat_target.valid()) &&
+            inf.last_attacker.valid() && (slot.f[1] & 1) == 0) {
+            if (const Entity *att = world.registry.get(inf.last_attacker)) {
+                if (att->health > 0 && att->team != e.team) {
+                    const int32_t apos[3] = {static_cast<int32_t>(att->position.x * 65536.0f),
+                                             static_cast<int32_t>(att->position.y * 65536.0f),
+                                             static_cast<int32_t>(att->position.z * 65536.0f)};
+                    if (line_of_sight_clear(e.pos, apos)) found = inf.last_attacker;
+                }
+            }
+        }
+        inf.last_attacker = EntityHandle{};
+
+        if (found.valid()) {
+            const Entity *t = world.registry.get(found);
+            if (t != nullptr) {
+                inf.aim_point[0] = static_cast<int32_t>(t->position.x * 65536.0f);
+                inf.aim_point[1] = static_cast<int32_t>(t->position.y * 65536.0f);
+                inf.aim_point[2] = static_cast<int32_t>(t->position.z * 65536.0f);
+                inf.ai_focus = found;
+                if (inf.damage_timer < 15) inf.damage_timer += 12; // stay alerted on sight
+                if (inf.combat_target == found) ++inf.same_target_ticks;
+                else inf.same_target_ticks = 0;
+                inf.combat_target = found;
+                slot.f[3] = static_cast<int32_t>(found.packed) + 1; // raw slot[3] write
+                                                                    // [orig: @0x4bbf83 —
+                                                                    // no refcount here]
+                // The authority relation quads ride the scan hit [orig: the
+                // Entity_FindNearestThreat authority block @0x4b0a6f..0x4b0ae2].
+                if (is_authority) {
+                    if (const Entity *se = world.registry.get(e.handle))
+                        apply_engage_relations(world, *se, *t);
+                }
+            }
+        } else {
+            inf.same_target_ticks = 0;
+            inf.combat_target = EntityHandle{};
+            slot.f[3] = 0;
+        }
+        // The own priority-target mark decays each scan; firing re-arms it.
+        // [orig: Flags &= ~0x4000 @0x4bbfa4]
+        if (Entity *se = world.registry.get(e.handle)) se->engine_flags &= ~0x4000u;
+    }
+
+    // --- Behavior + aim (per tick with a live target). [orig: §17.3/§17.5] ---
+    Entity *tent =
+        inf.combat_target.valid() ? world.registry.get(inf.combat_target) : nullptr;
+    if (tent != nullptr && tent->health <= 0) {
+        // Target died: play post_attack when close + clear. [orig: anim 151 + focus clear]
+        const int64_t ddx = static_cast<int64_t>(tent->position.x * 65536.0f) - e.pos[0];
+        const int64_t ddy = static_cast<int64_t>(tent->position.y * 65536.0f) - e.pos[1];
+        if (ddx * ddx + ddy * ddy < static_cast<int64_t>(196608) * 196608 &&
+            avail(anim_state::kPostAttack)) {
+            commit_body_state(inf, anim_state::kPostAttack);
+            inf.ai_focus = EntityHandle{};
+        }
+        inf.combat_target = EntityHandle{};
+        slot.f[3] = 0;
+        tent = nullptr;
+    }
+    if (tent == nullptr) {
+        if (inf.combat_move_timer > 0) --inf.combat_move_timer;
+        inf.aim_valid = false;
+        return;
+    }
+
+    const int32_t tpos[3] = {static_cast<int32_t>(tent->position.x * 65536.0f),
+                             static_cast<int32_t>(tent->position.y * 65536.0f),
+                             static_cast<int32_t>(tent->position.z * 65536.0f)};
+    // The witnessed distance metric: sqrt(dx^2 + dy^2 + (dz/2)^2), 16.16.
+    // [orig: outPitch[0] = dZ >> 1 into the fsqrt chain @0x4bd0xx]
+    const double fdx = static_cast<double>(tpos[0]) - e.pos[0];
+    const double fdy = static_cast<double>(tpos[1]) - e.pos[1];
+    const double fdz = (static_cast<double>(tpos[2]) - e.pos[2]) * 0.5;
+    const int32_t dist16 = static_cast<int32_t>(
+        std::min(std::sqrt(fdx * fdx + fdy * fdy + fdz * fdz), 2147418112.0));
+
+    if (dist16 < slot.f[15] && inf.combat_move_timer <= 0) { // inside attack range
+        // The combat reactions ARE the attack anims, availability-gated in the witnessed
+        // order (each later hit overrides). The reaction flag re-derives only when this
+        // region runs [orig: hasCombatReaction is the region's per-tick local -> +875].
+        inf.combat_reaction = false;
+        int reaction = 0;
+        if (avail(anim_state::kAttack)) reaction = anim_state::kAttack;              // 155
+        if (inf.was_hit && avail(anim_state::kCoverAttack)) reaction = anim_state::kCoverAttack; // 165
+        if (e.health <= static_cast<int16_t>(inf.max_health / 2) &&
+            avail(anim_state::kAttack4)) reaction = anim_state::kAttack4;            // 158
+        if (dist16 < 589824 && avail(anim_state::kAttack3)) reaction = anim_state::kAttack3; // 157, 9u
+        if (dist16 < 196608) {                                                       // 3 u
+            if (avail(anim_state::kAttack2)) reaction = anim_state::kAttack2;        // 156
+            if (inf.was_hit && avail(anim_state::kCoverAttack2))
+                reaction = anim_state::kCoverAttack2;                                // 166
+        }
+        if (reaction != 0) {
+            inf.combat_reaction = true;
+            inf.combat_move_timer = slot.f[22] >> 4; // [orig: moveTimer = slot[22]>>4]
+            inf.move_mode = 7;                       // hold + fight
+            inf.target_dist = 0;
+            commit_body_state(inf, infantry_resolve_state(inf.adm_id, reaction));
+        } else if (slot.f[16] < slot.f[17] && dist16 > slot.f[16]) {
+            // Approach the target. [orig: moveMode 1, arrive 10 u]
+            inf.move_mode = 1;
+            inf.target_dist = dist16;
+            inf.arrival_radius = 655360;
+            inf.move_target[0] = tpos[0];
+            inf.move_target[1] = tpos[1];
+            inf.move_target[2] = tpos[2];
+            inf.target_heading = bearing_to(tpos[0] - e.pos[0], tpos[1] - e.pos[1]);
+        } else if (avail(anim_state::kIdle3)) {
+            // Hold in the combat pose. [orig: anim 49 + moveMode 7]
+            inf.move_mode = 7;
+            inf.target_dist = 0;
+            commit_body_state(inf, anim_state::kIdle3);
+        }
+        inf.was_hit = false; // [orig: LABEL_721 wasHit = 0 once the response is chosen]
+    }
+
+    // The reload override: empty magazine + a clipsize + the reload clip -> anim 65;
+    // while 65 plays the magazine refills. [orig: @0x4bc7xx — targetAnimState = 65,
+    // moveMode 0; playing 65 -> word +0x35C = clipsize]
+    if (e.profile.clip_size > 0) {
+        if (inf.anim_state == anim_state::kReload) {
+            inf.magazine = static_cast<int16_t>(e.profile.clip_size);
+        } else if (inf.magazine <= 0 && avail(anim_state::kReload)) {
+            inf.move_mode = 0;
+            inf.target_dist = 0;
+            commit_body_state(inf, anim_state::kReload);
+        }
+    }
+
+    // Hold-timer decay, faster when the enemy is close. [orig: LABEL_499]
+    if (inf.combat_move_timer > 0) {
+        --inf.combat_move_timer;
+        if (dist16 < 196608 && inf.combat_move_timer > 0) --inf.combat_move_timer;
+        if (dist16 < 655360 && inf.combat_move_timer > 0) --inf.combat_move_timer;
+    }
+
+    // --- The aim solution. [orig: §17.5 — lead + sawtooth error] ---
+    // Gate: an aim-capable anim (flag bits 0x8 moving-fire / 0x10 attack stance).
+    const uint32_t sflags = infantry_anim_flags(inf.anim_state);
+    if ((sflags & 0x18u) == 0) {
+        inf.aim_valid = false;
+        return;
+    }
+    // Lead the target by its per-tick delta x (dist/0x81074 + 1). The previous-position
+    // sample lives in aim_point between think ticks [orig: target savedLivePose +0x80..].
+    const int32_t lead = dist16 / 0x81074 + 1;
+    int32_t led[3];
+    led[0] = tpos[0] + lead * (tpos[0] - inf.aim_point[0]);
+    led[1] = tpos[1] + lead * (tpos[1] - inf.aim_point[1]);
+    led[2] = tpos[2] + (lead >> 1) * (tpos[2] - inf.aim_point[2]); // vertical lead halved
+    inf.aim_point[0] = tpos[0];
+    inf.aim_point[1] = tpos[1];
+    inf.aim_point[2] = tpos[2];
+
+    // The sawtooth aim error: accuracy A when this target was already fired at
+    // (aiRef0 == target), else B; scaled by the difficulty global; two phases.
+    // [orig: (119304 * dword_C6EAE8 * acc) >> 5, x (32 - ((tick>>2 [+ tick>>9]) & 0x3F));
+    // the prone-in-foliage +40 concealment term needs the foliage-mask seam — D-AI-6.]
+    const int32_t acc = (inf.aim_ref0 == inf.combat_target) ? slot.f[10] : slot.f[11];
+    const int64_t err_unit = (static_cast<int64_t>(119304) * ai_difficulty * acc) >> 5;
+    const int32_t err_a = static_cast<int32_t>(
+        err_unit * (32 - static_cast<int32_t>(((key >> 2) + (key >> 9)) & 0x3Fu)));
+    const int32_t err_b = static_cast<int32_t>(
+        err_unit * (32 - static_cast<int32_t>((key >> 2) & 0x3Fu)));
+
+    const int32_t eye = 0xE666; // chest/eye lift, 0.9 u — the fire-origin stand-in (D-AI-6)
+    const double adx = static_cast<double>(led[0]) - e.pos[0];
+    const double ady = static_cast<double>(led[1]) - e.pos[1];
+    const double adz = static_cast<double>(led[2]) - (static_cast<double>(e.pos[2]) + eye);
+    const double horiz = std::sqrt(adx * adx + ady * ady);
+    inf.aim_heading = bearing_to(static_cast<int32_t>(adx), static_cast<int32_t>(ady)) + err_a;
+    inf.aim_pitch = static_cast<int32_t>(std::atan2(adz, horiz) * kBamPerRadian) + err_b;
+    inf.aim_valid = true;
+
+    // Body re-face when the aim drifts far off the body. [orig: > 262470208 (~22 deg)]
+    if (abs_bam(opennova::io::bam_sub(inf.aim_heading, inf.target_heading)) > 262470208)
+        inf.target_heading = inf.aim_heading;
+
+    // The walking-fire latch: muzzle within ~5 deg of the solution, inside the attack
+    // range, on the slot[22] cadence. [orig: §17.4 — shouldFireSecondary = 1;
+    // moveTimer = slot[22] >> 4; def attrib & 4 gate unmodeled]
+    if (abs_bam(opennova::io::bam_sub(inf.aim_heading, e.heading)) < 59652320 &&
+        dist16 < slot.f[15] && inf.combat_move_timer < (slot.f[22] >> 5)) {
+        inf.combat_move_timer = slot.f[22] >> 4;
+        inf.fire_secondary_latch = true;
+    }
+}
+
+void AiSystem::infantry_fire_pass(AiEntity &e, World &world, uint32_t logic_tick) {
+    InfantryState &inf = e.inf;
+    // The trigger word is consumed on ODD ticks. [orig: v489 & 1 @0x4bf15c]
+    if ((logic_tick & 1u) == 0) return;
+    if (e.profile.ammo_primary < 0) { // unarmed (the D-AI-5 seed is absent)
+        inf.fire_secondary_latch = false;
+        return;
+    }
+    const uint32_t ev = inf.last_events;
+    const bool fire_primary = (ev & 0x4u) != 0;   // weapon +0x358, bone +0x365
+    const bool fire_c = (ev & 0x10u) != 0;        // weapon +0x35B, bone +0x367
+    if ((ev & 0x8u) != 0) inf.fire_secondary_latch = true;
+    if (!fire_primary && !fire_c && !inf.fire_secondary_latch) return;
+
+    // The muzzle origin: entity pos + the chest lift — a tracked stand-in for the
+    // muzzle-bone transform (D-AI-6). [orig: Entity_GetAttachmentWorldPosition(bone) ->
+    // WeaponSlot_FireAndSpawnEffects @0x53f440]
+    const int32_t origin[3] = {e.pos[0], e.pos[1], e.pos[2] + 0xE666};
+    const int32_t yaw = inf.aim_valid ? inf.aim_heading : e.heading;
+    const int32_t pitch = inf.aim_valid ? inf.aim_pitch : 0;
+
+    if (fire_primary)
+        fire_ai_round(world, e, origin, yaw, pitch, e.profile.ammo_primary);
+    if (fire_c)
+        fire_ai_round(world, e, origin, yaw, pitch, e.profile.ammo_primary);
+    if (inf.fire_secondary_latch) {
+        inf.fire_secondary_latch = false;
+        // Only the secondary path spends the magazine [orig: word +0x35C-- @0x4bf45a];
+        // an empty one holds this leg until the reload refill (§17.3).
+        if (e.profile.clip_size <= 0 || inf.magazine > 0) {
+            if (fire_ai_round(world, e, origin, yaw, pitch, e.profile.ammo_primary) &&
+                e.profile.clip_size > 0)
+                --inf.magazine;
+        }
+    }
+    inf.aim_ref0 = inf.combat_target; // [orig: aiRef0 = slot[3] after the fire block]
 }
 
 // Mirror the motor-selected body-anim state + channel phase onto the world Entity — the store
