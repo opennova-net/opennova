@@ -70,7 +70,7 @@ int main() {
 
 	std::vector<opennova::FoliageDetailPatch> patches;
 	opennova::collect_foliage_detail_patches(
-			ranged, 1, 0, 0, 24.0f, 52.0f, 40.0f, patches);
+			ranged, 1, 0, 0, 0, 0, 512,  24.0f, 52.0f, 40.0f, patches);
 	ok &= expect(patches.size() == 1,
 			"Y-center distance 42 must select exactly the containing 16u cell");
 	if (patches.size() == 1) {
@@ -80,12 +80,12 @@ int main() {
 
 	patches.clear();
 	opennova::collect_foliage_detail_patches(
-			ranged, 1, 0, 0, 24.0f, 52.125f, 40.0f, patches);
+			ranged, 1, 0, 0, 0, 0, 512,  24.0f, 52.125f, 40.0f, patches);
 	ok &= expect(patches.empty(), "distance above 42 must be rejected");
 
 	patches.clear();
 	opennova::collect_foliage_detail_patches(
-			ranged, 1, 0, 0, -42.0f, 10.0f, 8.0f, patches);
+			ranged, 1, 0, 0, 0, 0, 512,  -42.0f, 10.0f, 8.0f, patches);
 	ok &= expect(patches.size() == 1,
 			"X-to-AABB distance 42 must be included");
 	if (patches.size() == 1) {
@@ -110,7 +110,7 @@ int main() {
 	for (const auto &vector : quadrant_vectors) {
 		patches.clear();
 		opennova::collect_foliage_detail_patches(
-				quadrants, vector.sector_id, 0, 0,
+				quadrants, vector.sector_id, 0, 0, 0, 0, 512,
 				24.0f, vector.camera_y, 40.0f, patches);
 		ok &= expect(patches.size() == 1,
 				"sector ID must select its recovered atlas quadrant");
@@ -122,7 +122,7 @@ int main() {
 
 	patches.clear();
 	opennova::collect_foliage_detail_patches(
-			ranged, 1, 512, -512, 536.0f, 52.0f, -472.0f, patches);
+			ranged, 1, 512, -512, 0, 0, 512,  536.0f, 52.0f, -472.0f, patches);
 	ok &= expect(patches.size() == 1,
 			"translated sector must retain the same local 16u selection");
 	if (patches.size() == 1) {
@@ -134,13 +134,38 @@ int main() {
 	// NW leaf observable and proves collection stops exactly at 128.
 	patches.assign(127, opennova::FoliageDetailPatch{0x12345678u, -1.0f});
 	opennova::collect_foliage_detail_patches(
-			ranged, 1, 0, 0, 16.0f, 10.0f, 16.0f, patches);
+			ranged, 1, 0, 0, 0, 0, 512,  16.0f, 10.0f, 16.0f, patches);
 	ok &= expect(patches.size() == 128,
 			"detail collection must stop at the global 128-patch capacity");
 	if (patches.size() == 128) {
 		ok &= expect_patch(patches.back(), 0x00000010u, 0.0f,
 				"NW/NE/SW/SE recursion must visit the northwest leaf first");
 	}
+
+	// Subtree handoff [orig: Terrain_TraverseQuadtreeNode @ 0x60905c..0x60907c]:
+	// a frustum-surviving emitted node hands only ITS rect to the collector.
+	// The 16u cell containing the camera collects alone with distance 0.
+	patches.clear();
+	opennova::collect_foliage_detail_patches(
+			ranged, 1, 0, 0, 16, 32, 16, 24.0f, 10.0f, 40.0f, patches);
+	ok &= expect(patches.size() == 1,
+			"a 16u subtree handoff must collect exactly its own cell");
+	if (patches.size() == 1) {
+		ok &= expect_patch(patches[0], 0x00100030u, 0.0f,
+				"the subtree cell key must match the whole-sector walk's key");
+	}
+
+	patches.clear();
+	opennova::collect_foliage_detail_patches(
+			ranged, 1, 0, 0, 448, 448, 64, 24.0f, 10.0f, 40.0f, patches);
+	ok &= expect(patches.empty(),
+			"a far subtree must prune on its own clamped-AABB distance");
+
+	patches.clear();
+	opennova::collect_foliage_detail_patches(
+			ranged, 1, 0, 0, 8, 0, 64, 24.0f, 10.0f, 40.0f, patches);
+	ok &= expect(patches.empty(),
+			"a misaligned subtree rect must be rejected outright");
 
 	if (!ok) {
 		return 1;

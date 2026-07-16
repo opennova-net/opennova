@@ -451,6 +451,7 @@ a main-scene state. [orig: `Foliage_RenderFarPatches @ 0x60a171..0x60a19c,
 | D-FOLIAGE-8 | Retail candidate exclusion linearly scans the shared mission .til array with inclusive 16x16 entry AABBs and a radius-2 candidate square unless attrib bit 0 FORCE_ON; GameWorld now shares the parsed resource with terrain and foliage and reuses its bytes for network initial state | B | **FIXED 2026-07-14** - exact portable scan plus host lifecycle wiring | foliage runtime host mapping |
 | D-FOLIAGE-9 | Silhouette driver membership: retail walks visible sector entities with `test_sector_entity_occlusion @ 0x5c4610`; the host stands in a camera-frustum test for the surviving stance-gated anchors (class selection itself is closed — D-FOLIAGE-11). Overlapping host anchors retain distinct submissions but coalesce same-frame refreshes of one `(slot, cell key)` | C | OPEN, narrowed to visibility membership (2026-07-16) | foliage runtime host mapping |
 | D-FOLIAGE-11 | The host anchored the MODEL/depth-mask tier on EVERY placed mission object; retail's sector walk generates it only around crouched/prone infantry standing on terrain (`MoveOrder & 0x300`, empty `groundEntity` — the hide-in-grass masks) [`orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7dc2/0x5c7ded/0x5c7dd5`]. Non-retail grass masks around objects + model-cache thrash to 3 FPS on the 03TR airfield vista (212 ms foliage in a 354 ms frame; 0.5 ms after). Anchors = the sim's stance query; the ONED preview feeds none and its `anchor_provider` plumbing is removed | A | **FIXED 2026-07-16** | terrain/foliage re-grill |
+| D-FOLIAGE-13 | Detail-cell collection was a standalone radial 42u-disc walk; retail hands subtrees to the collector only from frustum-surviving traversal nodes (level ≥ 3) [`orig: Terrain_TraverseQuadtreeNode @ 0x60905c..0x60907c`]. Over-collection exceeded the witnessed far-slot pool capacity and its strict-first-max LRU (all-ties per-update stamps) blinked one grass cell at 2-frame period while standing still (user-reported, 00TRa) — retail's frustum wedge never overflows the pool. Re-seated in the traversal handoff: 34→24 cells, steady-state misses 2/frame→0 at the reported pose | A | **FIXED 2026-07-16** | terrain/foliage re-grill |
 | D-FOLIAGE-12 | Two retail gate samplers (detail = flat 1024-wrap `Terrain_GetSurfaceTypeAtFixedPoint @ 0x6066d0`; MODEL = sector-grid-routed `Foliage_SampleFoliageMapMask @ 0x606620`) vs the host's single routed sampler for both tiers — identical on identity-grid maps, divergent on repeat/remapped sector layouts | C | OPEN, host mapping | terrain/foliage re-grill |
 | D-FOLIAGE-10 | Retail inserts each immediate MODEL depth-mask draw after the initial sector flush and before later entity/foliage consumers; the host's transparent-pass depth sorting cannot cull already-drawn farther detail under a nearer mask or reproduce every insertion point. The secondary LOW's strict `LESS` is now emulated exactly (high-pass cutoff discard on identical geometry), and both detail passes blend `SRCALPHA/INVSRCALPHA` at the shared fade. The reflection-scene LOW-only `fade × 0.1` pass is unhosted while water reflections carry no foliage | C | OPEN, narrowed to order/reflection host mapping (state half retired 2026-07-15) | foliage runtime host mapping |
 
@@ -633,13 +634,13 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Credits (CBIN) | 0 | 1 | 0 | 1 | 1 |
 | Terrain | 3 | 0 | 0 | 3 | 7 |
 | Tiles | 0 | 0 | 0 | 0 | 2 |
-| Foliage | 4 | 0 | 0 | 4 | 8 |
+| Foliage | 4 | 0 | 0 | 4 | 9 |
 | Fonts | 1 | 1 | 0 | 2 | 2 |
 | Boot-required resources | 0 | 0 | 0 | 0 | 1 |
 | Render — materials/state | 0 | 0 | 1 | 1 | 1 |
 | Render — draw order | 1 | 0 | 1 | 2 | 3 |
 | Render — lighting | 4 | 0 | 2 | 6 | 0 |
-| **Total** | **52** | **13** | **31** | **96** | 42 |
+| **Total** | **52** | **13** | **31** | **96** | 43 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-NET-136, D-NET-64.
 

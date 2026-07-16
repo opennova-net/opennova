@@ -20,7 +20,7 @@ place.
 | Surface | Retail witness | Host result | Verdict |
 |---|---|---|---|
 | Definition/map authoring | `.trn` foliage defs, charmap, foliagemap | existing authoring code retained | matching |
-| Detail-cell collection | `Terrain_CollectNearFoliagePatches @ 0x603e60` | dedicated 16-unit mip-bound collector, cap 128 | matching |
+| Detail-cell collection | frustum-surviving traversal nodes (level ≥ 3) hand subtrees to `Terrain_CollectNearFoliagePatches @ 0x603e60`, cap 128 | the same handoff from the ported traversal into the 16-unit mip-bound collector | matching (seating corrected 2026-07-16, D-FOLIAGE-13) |
 | Detail placement | `generate_foliage_instances_0 @ 0x5ffdd0` | fresh `foliage::Runtime` literal vectors | matching |
 | Detail geometry | every surface of every LOD0 submesh expanded and terrain-bent | fresh CPU-expanded aggregate ArrayMesh batches | matching |
 | Detail pass split | high ref 180 / low ref 8 at distance 33 | separate high/low shaders and batches | matching |
@@ -109,19 +109,28 @@ the parsed flag but explicitly disables shadow casting on all three batches.
 
 ### Exact 16-unit collection
 
-`Terrain_CollectNearFoliagePatches @ 0x603e60` recursively reaches 16-unit
-leaves, rejects a node beyond distance 42, and appends at most 128 keys. Its
-distance combines:
+Collection is seated INSIDE the frustum-culled render traversal: at each
+frustum-surviving emitted node of LOD level ≥ 3 whose LOD distance minus its
+extent can still reach 42, `Terrain_TraverseQuadtreeNode` tail-hands that
+node's subtree to the collector [`orig: gate + call @ 0x60905c..0x60907c;
+foliage-enabled flag 0x319FB34`]. Cells behind the camera therefore never
+enter the visible-key list (`Foliage_VisibleFarKeyList`, cap 128), which is
+what keeps the far-slot pool's working set below its 16-bit-index capacity
+(D-FOLIAGE-13). `Terrain_CollectNearFoliagePatches @ 0x603e60` then
+recursively reaches 16-unit leaves over the height mipchain, rejects a node
+beyond distance 42, and appends at most 128 keys. Its distance combines:
 
 - X and Z distance to the node AABB, clamped to zero while the camera lies
   inside that interval;
 - Y distance to the node height-bounds center.
 
-The render quadtree in this project correctly bottoms out at the CPT's 64-unit
-mesh leaves and therefore cannot provide these keys. Runtime foliage now uses
-a separate implicit 512→16 traversal over the already-built height mipchain.
-Sector IDs select the same four 512-unit atlas quadrants as terrain rendering;
-the collector never manufactures children from a visible 64-unit render patch.
+The host hands off per frustum-surviving emitted patch (64-unit leaves near
+the camera) into the same 512→16 height-mipchain descent, starting at the
+handoff node's rect; sector IDs select the same four 512-unit atlas quadrants
+as terrain rendering. The 2026-07-16 grill retracted the earlier radial
+whole-disc walk: it over-collected ~34 cells at open-ground poses, exceeding
+the pool capacity and thrashing the witnessed LRU into a two-frame cell
+blink retail does not show (its frustum wedge stays under capacity).
 
 ### Gate and expansion
 
@@ -566,6 +575,7 @@ D-FOLIAGE-7 rather than claimed as tile-light parity.
 | D-FOLIAGE-8 | **FIXED 2026-07-14.** Direct retail inspection resolved the supposed path/spacing substrate as the shared mission `.til` array. `til_blocks_foliage` ports the exact linear inclusive 16x16 AABB scan, GameWorld parses `<mission>.til` before terrain build, and terrain/foliage/network state share that resource/payload; `FORCE_ON` continues to bypass the sampler in the portable runtime. [orig: `Foliage_PathBlockedByPlacedTile @ 0x606490`; `Terrain_LoadFoliageFile @ 0x60a740`; `Terrain_GetSurfaceTypeAtPosition @ 0x606510`] |
 | D-FOLIAGE-9 | **OPEN, host mapping (narrowed 2026-07-16).** The anchor CLASS is now the witnessed stance gate (D-FOLIAGE-11); what remains approximate is visibility membership — camera frustum stands in for retail's visible-sector walk + `test_sector_entity_occlusion @ 0x5c4610`. No terrain-center fallback remains. Same-frame refreshes of an overlapping host `(slot, cell key)` are coalesced without removing its distinct draw submissions, preventing host-only regeneration/upload storms while this membership gap remains open. |
 | D-FOLIAGE-11 | **FIXED 2026-07-16.** The host fed every placed mission object as a MODEL-tier anchor; retail's sector walk generates the tier only for entities with `MoveOrder` stance bits (`0x100` prone / `0x200` crouch) and an empty `groundEntity` — the hide-in-grass masks around infantry [`orig: @ 0x5c7dc2/0x5c7ded/0x5c7dd5`]. Anchors now come from the sim's stance query; the ONED preview feeds none (no infantry exists there), and its placed-object `anchor_provider` plumbing was removed. Placed-object anchoring both drew non-retail grass masks around every object and, on object-dense vistas, thrashed the per-definition model caches into a 3 FPS frame. |
+| D-FOLIAGE-13 | **FIXED 2026-07-16.** The host collected detail cells with a standalone RADIAL walk (the full 42-unit disc, ~34 cells on open ground); retail's collector is invoked only from frustum-surviving traversal nodes of level ≥ 3 [`orig: @ 0x60905c..0x60907c`], so its working set is the frustum wedge. Over-collection pushed the far-slot pool past its witnessed 16-bit-index capacity (`min(128, 65534/(36×V))` ≈ 32 for a ~54-vertex def) and the witnessed strict-first-max LRU (per-update stamps, all-ties) then hammered one slot per frame — a user-visible two-frame grass blink at working-set-over-capacity poses that retail never exhibits. Collection is now seated in the traversal handoff; at the reported 00TRa pose: 34→24 cells, 2 misses+evictions/frame→0, blink gone. |
 | D-FOLIAGE-12 | **OPEN, host mapping.** Retail's two tiers gate through two different foliagemap samplers: the detail generator's flat 1024-wrap lookup (`Terrain_GetSurfaceTypeAtFixedPoint @ 0x6066d0`) vs the MODEL tier's sector-grid-routed lookup (`Foliage_SampleFoliageMapMask @ 0x606620`); both negate Z internally. The host routes BOTH tiers through one sector-grid sampler — identical on identity-grid maps (every retail-shipped map checked), divergent only on repeat/remapped sector layouts. |
 | D-FOLIAGE-10 | **OPEN, bounded host order.** Retail inserts each immediate MODEL depth-mask draw between its initial sector flush and later entity/foliage consumers; the host's transparent-pass depth sorting reproduces the mask-occludes-farther-detail effect but cannot cull already-drawn farther tufts under a nearer mask, and cannot reproduce every arbitrary insertion point. The near secondary LOW's strict `LESS` is now emulated exactly via the high-pass cutoff discard (the 2026-07-15 grill retired the state half of this entry). The water-REFLECTION scene's LOW-only `fade × 0.1` foliage pass (arg_8 = reflectionEnabled @ `0x5c95c1/0x5c9661`) is not hosted while reflections carry no foliage. |
 

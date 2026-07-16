@@ -320,15 +320,6 @@ void NovaTerrain::_notification(int p_what) {
 				int sector_id = trn.sector_grid[gz & 0xF][gx & 0xF];
 				if (sector_id <= 0) continue;
 
-				// Detail foliage has its own implicit 16u mip traversal; it does
-				// not depend on the 64u render quadtree or visible patch set.
-				opennova::collect_foliage_detail_patches(
-					mipchain, sector_id, sx * 512, sz * 512,
-					static_cast<float>(cam_pos.x),
-					static_cast<float>(cam_pos.y),
-					static_cast<float>(cam_pos.z),
-					foliage_detail_patches);
-
 				int child = -1;
 				if (sector_id == 1) child = 0;
 				else if (sector_id == 3) child = 1;
@@ -339,12 +330,45 @@ void NovaTerrain::_notification(int p_what) {
 				float sector_ox = static_cast<float>(sx * 512);
 				float sector_oz = static_cast<float>(sz * 512);
 
+				const size_t sector_patch_begin = visible.size();
 				opennova::traverse_quadtree(
 					quad_nodes, tile_mesh_meta,
 					l1_children[child],
 					frustum, cam_pos.x, cam_pos.y, cam_pos.z,
 					sector_ox, sector_oz,
 					traversal_config, visible, tstats);
+
+				// Detail foliage collection is NOT a radial walk: retail's
+				// frustum-culled traversal hands each frustum-surviving emitted
+				// node of LOD level >= 3 to the 16u cell collector, so cells
+				// behind the camera never enter the visible-key list and the
+				// far-slot pool's working set stays below its 16-bit-index
+				// capacity (over-collection thrashed the witnessed LRU into
+				// per-frame cell blink; D-FOLIAGE-13)
+				// [orig: Terrain_TraverseQuadtreeNode handoff
+				// @ 0x60905c..0x60907c -> Terrain_CollectNearFoliagePatches
+				// @ 0x603e60]. The collector re-tests every cell's clamped
+				// AABB against the 42u limit, so the handoff is a broad phase.
+				for (size_t pi = sector_patch_begin; pi < visible.size(); ++pi) {
+					const opennova::VisiblePatch &vp = visible[pi];
+					if (vp.lod_level < 3 || vp.tile_index < 0 ||
+							vp.tile_index >= (int)tile_mesh_meta.size()) {
+						continue;
+					}
+					const int node_size = 1024 >> vp.lod_level;
+					const auto &tm = tile_mesh_meta[vp.tile_index];
+					const int local_x = (int)std::lround(
+						tm.center[0] - node_size * 0.5f);
+					const int local_z = (int)std::lround(
+						tm.center[2] - node_size * 0.5f);
+					opennova::collect_foliage_detail_patches(
+						mipchain, sector_id, sx * 512, sz * 512,
+						local_x, local_z, node_size,
+						static_cast<float>(cam_pos.x),
+						static_cast<float>(cam_pos.y),
+						static_cast<float>(cam_pos.z),
+						foliage_detail_patches);
+				}
 			}
 		}
 

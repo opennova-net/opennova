@@ -60,9 +60,9 @@ public:
 		  camera_z(p_camera_z),
 		  patches(p_patches) {}
 
-	void collect(int atlas_x, int atlas_z, int world_x, int world_z) {
-		collect_node(atlas_x, atlas_z, world_x, world_z,
-				kSectorSize, kFirstMipLevel);
+	void collect(int atlas_x, int atlas_z, int world_x, int world_z,
+			int size, int mip_level) {
+		collect_node(atlas_x, atlas_z, world_x, world_z, size, mip_level);
 	}
 
 private:
@@ -130,6 +130,9 @@ void collect_foliage_detail_patches(
 		int sector_id,
 		int world_origin_x,
 		int world_origin_z,
+		int node_local_x,
+		int node_local_z,
+		int node_size,
 		float camera_x,
 		float camera_y,
 		float camera_z,
@@ -144,6 +147,23 @@ void collect_foliage_detail_patches(
 		}
 	}
 
+	// The handoff node's sector-local rect selects the collector's start
+	// depth: 512 = the whole-sector root, 64 = one traversal leaf's subtree.
+	if (node_size < kDetailCellSize || node_size > kSectorSize ||
+			(node_size & (node_size - 1)) != 0) {
+		return;
+	}
+	int mip_level = kFirstMipLevel;
+	for (int size = kSectorSize; size > node_size; size /= 2) {
+		++mip_level;
+	}
+	if (node_local_x < 0 || node_local_z < 0 ||
+			node_local_x + node_size > kSectorSize ||
+			node_local_z + node_size > kSectorSize ||
+			(node_local_x % node_size) != 0 || (node_local_z % node_size) != 0) {
+		return;
+	}
+
 	int atlas_x = 0;
 	int atlas_z = 0;
 	if (!sector_atlas_origin(sector_id, atlas_x, atlas_z)) {
@@ -152,7 +172,9 @@ void collect_foliage_detail_patches(
 
 	DetailPatchCollector collector(
 			mipchain, camera_x, camera_y, camera_z, patches);
-	collector.collect(atlas_x, atlas_z, world_origin_x, world_origin_z);
+	collector.collect(atlas_x + node_local_x, atlas_z + node_local_z,
+			world_origin_x + node_local_x, world_origin_z + node_local_z,
+			node_size, mip_level);
 }
 
 } // namespace opennova
