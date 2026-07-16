@@ -9,6 +9,7 @@
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
 #include <godot_cpp/classes/shader.hpp>
+#include <godot_cpp/variant/utility_functions.hpp>
 #include <godot_cpp/classes/shader_material.hpp>
 #include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/variant/packed_color_array.hpp>
@@ -21,8 +22,12 @@
 
 #include "util/texture_path_resolver.h"
 
+#include "renderer/particle_atlas.h"
+#include <renderer/particle_color.h>
+
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <memory>
 #include <vector>
 
@@ -145,6 +150,7 @@ void NovaParticleEmitter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_visual_layer_count"), &NovaParticleEmitter::get_visual_layer_count);
 	ClassDB::bind_method(D_METHOD("get_rendered_instance_count"), &NovaParticleEmitter::get_rendered_instance_count);
 	ClassDB::bind_method(D_METHOD("get_textured_layer_count"), &NovaParticleEmitter::get_textured_layer_count);
+	ClassDB::bind_method(D_METHOD("get_unresolved_texture_names"), &NovaParticleEmitter::get_unresolved_texture_names);
 	ClassDB::bind_method(D_METHOD("get_render_batch_count"), &NovaParticleEmitter::get_render_batch_count);
 	ClassDB::bind_method(D_METHOD("get_sorted_depth_count"), &NovaParticleEmitter::get_sorted_depth_count);
 	ClassDB::bind_method(D_METHOD("get_debug_first_rotation"), &NovaParticleEmitter::get_debug_first_rotation);
@@ -408,24 +414,34 @@ void NovaParticleEmitter::_refresh_emitter() {
 	_clear_meshes();
 }
 
-Ref<NovaParticleTable> NovaParticleEmitter::_find_table(const String &id) const {
+Ref<NovaParticleTable> NovaParticleEmitter::_find_table(
+		const String &id, bool p_modified) const {
 	if (id.is_empty()) {
 		return Ref<NovaParticleTable>();
 	}
+	Ref<NovaParticleTable> matched;
 	for (int i = 0; i < tables.size(); ++i) {
 		Ref<NovaParticleTable> table = tables[i];
-		if (table.is_valid() && table->get_id() == id) {
-			return table;
+		// Case-insensitive to match the engine's _stricmp table resolve
+		// [orig: table find @ 0x5e9540 → _stricmp @ 0x76fdf6].
+		if (table.is_valid() && table->get_id().nocasecmp_to(id) == 0) {
+			matched = table;
+			if (!p_modified) {
+				return matched;
+			}
 		}
 	}
-	return Ref<NovaParticleTable>();
+	// Retail returns the first base for flags=0, but clones the last matching
+	// base for inverse/reverse flags [orig: @ 0x5e95b8..0x5e960b].
+	return matched;
 }
 
 float NovaParticleEmitter::_sample_curve(const Ref<NovaParticleCurveRef> &curve, float t, float fallback) const {
 	if (curve.is_null() || !curve->get_present()) {
 		return fallback;
 	}
-	Ref<NovaParticleTable> table = _find_table(curve->get_name());
+	Ref<NovaParticleTable> table = _find_table(curve->get_name(),
+			curve->get_reverse() || curve->get_inverse());
 	if (table.is_null()) {
 		return fallback;
 	}
@@ -468,6 +484,77 @@ Color NovaParticleEmitter::_layer_color(const Ref<NovaParticleGraphicLayer> &lay
 	return Color(1.0f, 1.0f, 1.0f, 1.0f);
 }
 
+static Ref<Texture2D> load_texture_candidate(const Callable &provider,
+		const String &texture_dir, const String &candidate, String &resolved_path) {
+	Ref<Texture2D> texture;
+	if (provider.is_valid()) texture = provider.call(candidate);
+	if (texture.is_null() && !texture_dir.is_empty()) {
+		texture = opennova::load_texture_from_dir(texture_dir, candidate);
+		if (texture.is_valid()) {
+			resolved_path = opennova::resolve_texture_path(texture_dir, candidate);
+		}
+	}
+	return texture;
+}
+
+// Multi-frame graphics register one texture PER FRAME under the witnessed
+// derived name — lowercase, truncated at the first `.tga`, `_01.tga`.. suffix
+// (the shared registrar, D-PTL-14 FIXED). The preview renderer consumes one
+// horizontal strip, so load every derived frame and assemble that strip.
+// [orig: CParticleDef_ReloadGraphicFrameTextures @ 0x5e4bb0 names the frames;
+// CParticleManager_BuildTextureAtlases @ 0x5e8db0 -> CTextureData_LoadTGA
+// @ 0x5f7b20 loads one entry per frame].
+static Ref<Texture2D> load_flipbook_strip(const Callable &provider,
+		const String &texture_dir, const String &base_name, int frame_count,
+		String &resolved_path) {
+	frame_count = std::clamp(frame_count, 1,
+			opennova::particle::kMaxParticleFlipFrames);
+	if (frame_count <= 1) return Ref<Texture2D>();
+	if (base_name.is_empty()) return Ref<Texture2D>();
+	std::vector<Ref<Image>> frames;
+	frames.reserve(static_cast<std::size_t>(frame_count));
+	int width = 0;
+	int height = 0;
+	String first_path;
+	for (int frame = 1; frame <= frame_count; ++frame) {
+		const String candidate = String::utf8(
+				renderer::retail_particle_frame_name(
+						base_name.utf8().get_data(), frame_count, frame)
+						.c_str());
+		String frame_path;
+		Ref<Texture2D> texture = load_texture_candidate(
+				provider, texture_dir, candidate, frame_path);
+		if (texture.is_null()) return Ref<Texture2D>();
+		Ref<Image> image = texture->get_image();
+		if (image.is_null()) return Ref<Texture2D>();
+		if (frame == 1) {
+			width = image->get_width();
+			height = image->get_height();
+			first_path = frame_path;
+		} else if (image->get_width() != width || image->get_height() != height) {
+			return Ref<Texture2D>();
+		}
+		if (image->get_format() != Image::FORMAT_RGBA8) {
+			image->convert(Image::FORMAT_RGBA8);
+		}
+		frames.push_back(image);
+	}
+	if (width <= 0 || height <= 0 ||
+			width > std::numeric_limits<int>::max() / frame_count) {
+		return Ref<Texture2D>();
+	}
+	const int strip_width = width * frame_count;
+	Ref<Image> strip = Image::create(strip_width, height, false, Image::FORMAT_RGBA8);
+	if (strip.is_null()) return Ref<Texture2D>();
+	for (int frame = 0; frame < frame_count; ++frame) {
+		strip->blit_rect(frames[static_cast<std::size_t>(frame)],
+				Rect2i(Vector2i(0, 0), Vector2i(width, height)),
+				Vector2i(frame * width, 0));
+	}
+	resolved_path = first_path;
+	return ImageTexture::create_from_image(strip);
+}
+
 void NovaParticleEmitter::_refresh_layer_materials(
 		const std::array<Ref<NovaParticleGraphicLayer>, MAX_VISUAL_LAYERS> &layers,
 		const std::array<bool, MAX_VISUAL_LAYERS> &present) {
@@ -487,27 +574,44 @@ void NovaParticleEmitter::_refresh_layer_materials(
 		}
 
 		String texture_name;
+		int texture_frame_count = 1;
 		if (present[i] && layers[i].is_valid()) {
 			texture_name = layers[i]->get_texture();
+			texture_frame_count = std::clamp(layers[i]->get_flip_frames(), 1,
+					opennova::particle::kMaxParticleFlipFrames);
 		}
 
-		if (texture_name != layer_texture_names[i]) {
+		if (texture_name != layer_texture_names[i] ||
+				texture_frame_count != layer_texture_frame_counts[i]) {
 			// The old cache signature only included dimensions and presence. A
 			// different same-sized texture therefore kept stale atlas pixels.
 			// Texture identity changes force a re-blit; UV layout is still cached
 			// across ordinary simulation restarts.
 			atlas_texture.unref();
 			layer_texture_names[i] = texture_name;
+			layer_texture_frame_counts[i] = texture_frame_count;
 			layer_texture_paths[i] = String();
 			layer_textures[i].unref();
-			if (!texture_name.is_empty() && texture_provider.is_valid()) {
-				// Host texture seam first (runtime archives); falls through to
-				// the loose-dir path when the provider returns null.
-				layer_textures[i] = texture_provider.call(texture_name);
-			}
-			if (layer_textures[i].is_null() && !texture_dir.is_empty() && !texture_name.is_empty()) {
-				layer_texture_paths[i] = opennova::resolve_texture_path(texture_dir, texture_name);
-				layer_textures[i] = opennova::load_texture_from_dir(texture_dir, texture_name);
+			if (!texture_name.is_empty()) {
+				// One-frame graphics load the authored literal; multi-frame
+				// graphics load ONLY the derived per-frame names — retail has
+				// no literal-base probe and no variant fallback (D-PTL-14
+				// FIXED) [orig: CParticleDef_ReloadGraphicFrameTextures
+				// @ 0x5e4bb0].
+				if (texture_frame_count > 1) {
+					layer_textures[i] = load_flipbook_strip(texture_provider,
+							texture_dir, texture_name, texture_frame_count,
+							layer_texture_paths[i]);
+				} else {
+					layer_textures[i] = load_texture_candidate(texture_provider,
+							texture_dir, texture_name, layer_texture_paths[i]);
+				}
+				if (layer_textures[i].is_null() && !texture_dir.is_empty()) {
+					// Nothing resolved: keep the pre-probe behavior of
+					// recording where the literal name would live (editor
+					// diagnostics read this).
+					layer_texture_paths[i] = opennova::resolve_texture_path(texture_dir, texture_name);
+				}
 			}
 		}
 	}
@@ -682,9 +786,11 @@ void NovaParticleEmitter::_update_meshes() {
 	Vector3 right(1.0f, 0.0f, 0.0f);
 	Vector3 up(0.0f, 1.0f, 0.0f);
 	Transform3D camera_view;
+	Basis view_basis;
 	if (camera != nullptr) {
 		const Transform3D camera_global = camera->get_global_transform();
 		camera_view = camera_global.affine_inverse();
+		view_basis = camera_view.basis;
 		right = camera_global.basis.get_column(0);
 		up = camera_global.basis.get_column(1);
 		if (right.length_squared() > 0.0f) {
@@ -824,7 +930,8 @@ void NovaParticleEmitter::_update_meshes() {
 		color.a = std::clamp((static_cast<float>(p.alpha) / 255.0f) * alpha_mult, 0.0f, 1.0f);
 
 		const int flip_frames = layer.is_valid() && layer->get_present() ?
-				std::max(1, layer->get_flip_frames()) : 1;
+				std::clamp(layer->get_flip_frames(), 1,
+						opennova::particle::kMaxParticleFlipFrames) : 1;
 		const int flip_rate = layer.is_valid() && layer->get_present() ?
 				std::max(0, layer->get_flip_rate()) : 0;
 		// Flipbook clock [orig: BuildBillboardQuads @ 0x5e6f17 / static path
@@ -866,44 +973,31 @@ void NovaParticleEmitter::_update_meshes() {
 		//      rotation in degrees; flt_7DCB00 = π/180).
 		//   2. Multiply with the emitter's view matrix at emitter+8+664.
 		//   3. `D3DXMatrixTranspose` the composite (= sub_68BF44 @ 0x68bf4a).
-		//   4. Multiply hardcoded light direction (-1/√3, -1/√3, +1/√3)
-		//      (flt_848D34/D38/D3C) by the transposed matrix.
-		//   5. Scale by def.bump_scale and encode per channel:
-		//      `byte = clamp((value + 1) × 0.5, 0, 1) × 255`.
+		//   4. Load raw (-1/√3, -1/√3, +1/√3), negate X/Y, and
+		//      transform the resulting (+1/√3, +1/√3, +1/√3) vector.
+		//   5. Scale by def.bump_scale, truncate `(value+1)*0.5*255`, and
+		//      retain the low byte without saturation.
 		//
-		// Portable matrix form uses the billboard frame as the parent/view
-		// matrix, applies RotationX in that local frame (right axis fixed,
-		// up/forward rotate), then projects the engine light direction by the
-		// transposed composite matrix via dot products.
+		// This convenience preview now shares the production adapter's literal
+		// transpose(Rx * view) operation and byte conversion.
 		if ((p.flags & opennova::particle::particle_runtime_flag::LitColor) != 0) {
 			const float bump_scale = native_def->bump_scale;
 			constexpr float k = 0.5773503f;  // 1/√3 (engine: flt_848D34/D38/D3C)
-			const Vector3 light_world(-k, -k, +k);
-
-			const float rc = std::cos(rp.rotation);
-			const float rs = std::sin(rp.rotation);
-			const Vector3 local_right = right;
-			Vector3 local_forward = right.cross(up);
-			if (local_forward.length_squared() > 0.0f) {
-				local_forward.normalize();
-			} else {
-				local_forward = Vector3(0.0f, 0.0f, 1.0f);
-			}
-			const Vector3 local_up = up * rc + local_forward * rs;
-			local_forward = -up * rs + local_forward * rc;
-
-			const Vector3 light_local(
-					local_right.dot(light_world),
-					local_up.dot(light_world),
-					local_forward.dot(light_world));
-
-			const float lit_r = std::clamp(
-					(bump_scale * light_local.x + 1.0f) * 0.5f, 0.0f, 1.0f);
-			const float lit_g = std::clamp(
-					(bump_scale * light_local.y + 1.0f) * 0.5f, 0.0f, 1.0f);
-			const float lit_b = std::clamp(
-					(bump_scale * light_local.z + 1.0f) * 0.5f, 0.0f, 1.0f);
-			rp.lit_color = Color(lit_r, lit_g, lit_b, color.a);
+			// Raw constants are (-k,-k,+k), then FCHS @ 0x5e73b0 and
+			// @ 0x5e73c4 make the transformed retail seed (+k,+k,+k).
+			const Vector3 seed = bump_scale * Vector3(k, k, k);
+			const Basis rotate_x(Vector3(1.0f, 0.0f, 0.0f), rp.rotation);
+			const Vector3 light_local =
+					(rotate_x * view_basis).transposed().xform(seed);
+			constexpr float inv_byte = 1.0f / 255.0f;
+			rp.lit_color = Color(
+					static_cast<float>(renderer::particle_retail_low_byte(
+							light_local.x)) * inv_byte,
+					static_cast<float>(renderer::particle_retail_low_byte(
+							light_local.y)) * inv_byte,
+					static_cast<float>(renderer::particle_retail_low_byte(
+							light_local.z)) * inv_byte,
+					color.a);
 		} else {
 			rp.lit_color = Color(1.0f, 1.0f, 1.0f, 1.0f);  // neutral (multiply identity)
 		}
@@ -1044,7 +1138,9 @@ void NovaParticleEmitter::_update_meshes() {
 				v1 = rect.v_max - rect.inset;
 			} else {
 				// Fallback for legacy paths where bake hasn't run yet.
-				const float inv_frames = 1.0f / static_cast<float>(std::max(1, rp.flip_frames));
+				const float inv_frames = 1.0f / static_cast<float>(
+						std::clamp(rp.flip_frames, 1,
+								opennova::particle::kMaxParticleFlipFrames));
 				u0 = static_cast<float>(rp.frame) * inv_frames;
 				u1 = static_cast<float>(rp.frame + 1) * inv_frames;
 			}
@@ -1188,6 +1284,7 @@ void NovaParticleEmitter::set_texture_dir(const String &p_dir) {
 	texture_dir = p_dir;
 	for (int i = 0; i < MAX_VISUAL_LAYERS; ++i) {
 		layer_texture_names[i] = String();
+		layer_texture_frame_counts[i] = 0;
 		layer_texture_paths[i] = String();
 		layer_textures[i].unref();
 	}
@@ -1202,6 +1299,7 @@ void NovaParticleEmitter::set_texture_provider(const Callable &p_provider) {
 	texture_provider = p_provider;
 	for (int i = 0; i < MAX_VISUAL_LAYERS; ++i) {
 		layer_texture_names[i] = String();
+		layer_texture_frame_counts[i] = 0;
 		layer_texture_paths[i] = String();
 		layer_textures[i].unref();
 	}
@@ -1373,6 +1471,20 @@ int NovaParticleEmitter::get_textured_layer_count() const {
 		}
 	}
 	return total;
+}
+
+PackedStringArray NovaParticleEmitter::get_unresolved_texture_names() const {
+	// Debug seam for the particle overlay (the D-PTL-14 misses, live):
+	// authored graphic names that resolved to no texture through any source
+	// or candidate derivation. Empty authored names are the deliberate
+	// invisible-layer form, not misses.
+	PackedStringArray out;
+	for (int i = 0; i < MAX_VISUAL_LAYERS; ++i) {
+		if (!layer_texture_names[i].is_empty() && layer_textures[i].is_null()) {
+			out.push_back(layer_texture_names[i]);
+		}
+	}
+	return out;
 }
 
 int NovaParticleEmitter::get_render_batch_count() const {

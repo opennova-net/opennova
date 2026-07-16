@@ -199,6 +199,7 @@ void handler_fire(const WeaponFsmDef &def, const WeaponFsmAction &desc,
         begin_active(desc, slot, in, out); // [orig: @ 0x542db9]
         return;
     }
+    out.fired_clip_before_consume = slot.clip;
     out.fired = true; // Entity_FireWeaponAndSendPacket seam [orig: @ 0x542c5e]
     if (def.clip_capacity >= 0) { // [orig: consume_weapon_ammo @ 0x542c75, clip leg]
         if (slot.clip > 0) --slot.clip;
@@ -240,8 +241,17 @@ void handler_recoil(const WeaponFsmDef &def, const WeaponFsmAction &desc,
         if (desc.delay_start != 0 || desc.delay_end != 0) return; // [orig: @ 0x542eae]
     }
     if (slot.counter != 0) return; // [orig: @ 0x542eb7]
+    // The recoil-row DIRECT effect leg (casing eject / bolt smoke) at the arbiter tick:
+    // emitted when the row authors a particle. For the local player the original's only
+    // extra gate is the FP weapon-view flag (host-side; treated always-on) — NOT the
+    // scope state — and the spawn never records a live handle (param7=0), so it is
+    // never suppressed by a previous casing group still alive.
+    // [orig: WeaponAction_Recoil gate @ 0x542efa -> ActionSlot_SpawnEffect @ 0x542f64]
+    if (in.is_local && desc.particle[0] != '\0')
+        out.action_effect = weapon_action::kRecoil;
     slot.phase = weapon_phase::kDone; // [orig: @ 0x542f74]
-    // (heat-window stamp @ 0x542f8b and the muzzle-effect leg are host seams — D-WPN-4)
+    // (heat-window stamp @ 0x542f8b and the rest of the muzzle-effect leg are host
+    //  seams — D-WPN-4)
     if (!in.is_local) { // [orig: @ 0x542fe9 -> LABEL_59]
         slot.counter = desc.delay_end;
         return;

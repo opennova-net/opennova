@@ -95,8 +95,18 @@ int main() {
     World::Snapshot snap = w.snapshot();
     w.vars.set_mission(1, 99);
     w.commands.kill_ssn(201); // mutate after snapshot
+    w.round_sim.rounds[0].active = true;
+    w.round_sim.active_count = 1;
+    w.round_sim.deaths.push_back({});
+    w.round_sim.impacts.push_back({});
+    w.round_sim.next_impact_order = 9;
     w.restore(snap);
     CHECK(w.vars.get_mission(1) == 7);
+    CHECK(w.round_sim.active_count == 0);
+    CHECK(!w.round_sim.rounds[0].active);
+    CHECK(w.round_sim.deaths.empty());
+    CHECK(w.round_sim.impacts.empty());
+    CHECK(w.round_sim.next_impact_order == 1);
 
     std::printf(failures ? "WORLD TESTS FAILED (%d)\n" : "world tests passed\n", failures);
     return failures ? 1 : 0;

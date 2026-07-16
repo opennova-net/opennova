@@ -250,6 +250,18 @@ typedef enum DefItemType {
     DEF_ITEM_TYPE_EFFECT     = 8
 } DefItemType;
 
+/* One anchored per-item particle-effect slot: the effect spawns at the named
+   model userpoint. Slots that take an optional secondary effect (particlefxs,
+   particlefxw1/w2) fill secondary_effect only when the line carries a third
+   token; particlefx and particlefxw3/w4 never read one. The original copies
+   each name unguarded into 32-char slots of the ItemDef+0x278 block; we
+   truncate safely. [orig: ItemDef_ParseProperty @ 0x49eb00] */
+typedef struct DefItemParticleFx {
+    char effect[32];
+    char userpoint[32];
+    char secondary_effect[32];
+} DefItemParticleFx;
+
 typedef struct DefItemDef {
     char display_name[128];
     int id;
@@ -298,6 +310,30 @@ typedef struct DefItemDef {
     int unit_type;      /* "unit_type" raw — the minimap icon class selector on vehicles
                            (5..8 helo, 3/4 boat, 12 special, else ground)
                            [orig: Entity_ClassifyForMinimap @0x50FA70 reads itemDef->unitType] */
+    /* Per-item particle-effect keys; names copied verbatim. The original copies each
+       token UNGUARDED into slots of irregular width (e.g. slot A's userpoint slot is
+       22 B at +0x298..+0x2AE); our uniform 32-char fields truncate safely — shipped
+       names are all well under either bound [orig: ItemDef_ParseProperty @ 0x49eb00]. */
+    DefItemParticleFx particlefx;   /* 'particlefx <effect> <userpoint>' — effect +0x278,
+                                       userpoint +0x298 [orig: @ 0x4a13ad] */
+    DefItemParticleFx particlefxs;  /* 'particlefxs' + optional secondary — +0x2AE/+0x2EE,
+                                       secondary +0x2CE [orig: @ 0x4a140b] */
+    DefItemParticleFx particlefxw1; /* 'particlefxw1' + optional secondary — +0x304/+0x344,
+                                       secondary +0x324 [orig: @ 0x4a148b] */
+    DefItemParticleFx particlefxw2; /* 'particlefxw2' + optional secondary — +0x35A/+0x39A,
+                                       secondary +0x37A [orig: @ 0x4a150b] */
+    DefItemParticleFx particlefxw3; /* 'particlefxw3 <effect> <userpoint>', NO secondary —
+                                       +0x3AE/+0x3CE [orig: @ 0x4a158b] */
+    DefItemParticleFx particlefxw4; /* 'particlefxw4 <effect> <userpoint>', NO secondary —
+                                       +0x3E2/+0x402 [orig: @ 0x4a15eb] */
+    /* Effect-only keys; their spawn anchors are fixed husk-model userpoint names
+       (Dead/Fire/Other) resolved at runtime, not parsed data. */
+    char particledeath[32];    /* +0x416 [orig: @ 0x4a164b] */
+    char particleh2odeath[32]; /* +0x44A [orig: @ 0x4a168e] */
+    char particlefire[32];     /* +0x47E [orig: @ 0x4a16d0] */
+    char particleother[32];    /* +0x4B2 [orig: @ 0x4a1713] */
+    char particlefinale[32];   /* +0x4E4 [orig: @ 0x4a175b] */
+    char particlespawn[32];    /* +0x506 [orig: @ 0x4a179d] */
     char (*raw_lines)[512];
     size_t raw_lines_count;
 } DefItemDef;

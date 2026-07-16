@@ -290,6 +290,11 @@ func test_table_edit_round_trips() -> void:
 	var rdata: PackedByteArray = rt.get_data()
 	assert_eq(int(rdata[0]), 200, "Edited curve bytes must survive a save/reload.")
 	assert_eq(int(rdata[255]), 33)
+	# Table lookups fold case like the engine's _stricmp resolve
+	# [orig: table find @ 0x5e9540]; shipped data mixes cases
+	# (ambfx.ptl green_func = Table11Alt vs id = table11Alt).
+	var folded: NovaParticleTable = reloaded.find_table(t.id.to_upper())
+	assert_not_null(folded, "find_table must resolve case-insensitively.")
 
 
 func test_table_rename_preserves_curve_and_handle_references() -> void:

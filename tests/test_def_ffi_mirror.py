@@ -25,9 +25,14 @@ from pyopennova import def_ffi as py_def
 
 REPO = Path(__file__).resolve().parent.parent
 WEAPON_DEF = REPO / "fixtures" / "def" / "weapon.def"
+ITEMS_DEF = REPO / "fixtures" / "def" / "items.def"
 # The fixture's first weapon blocks, in file order (the stride bug reads entry 0
 # fine and garbles every later one, so assert well past index zero).
 FIXTURE_HEAD = ["WPN_KNIFE", "WPN_KNIFE2", "WPN_colt45", "WPN_M9Beretta"]
+# items.def stride canary: entry 0 always reads fine; a stale DefItemDef mirror
+# garbles every later display name (this exact desync shipped once — the
+# ai_function..unit_type block landed C-side without the mirrors).
+ITEMS_HEAD = ["Drivable Dune Buggy", "ATV Quad", "Marker Alpha", "Guard Tower"]
 
 
 def _load_blender_def_ffi():
@@ -96,6 +101,21 @@ def test_pyopennova_stride_reads_every_entry():
     finally:
         py_def.free_weapons_def(wf)
     assert names == FIXTURE_HEAD
+
+
+def test_pyopennova_items_stride_reads_every_entry():
+    _skip_without_native()
+    ifl = py_def.parse_items_def(str(ITEMS_DEF))
+    try:
+        names = [ifl.entries[i].display_name.decode() for i in range(len(ITEMS_HEAD))]
+        # The particle keys ride the same stride — the Dune Buggy's authored
+        # slot-A row is the deep-field canary.
+        fx = ifl.entries[0].particlefx
+        assert fx.effect.decode() == "Effect_whiteExhaust"
+        assert fx.userpoint.decode() == "FX00"
+    finally:
+        py_def.free_items_def(ifl)
+    assert names == ITEMS_HEAD
 
 
 def test_blender_stride_reads_every_entry():

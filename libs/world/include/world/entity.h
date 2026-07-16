@@ -56,6 +56,10 @@ enum class SeatType : uint8_t {
     Driver = 5,     // "drvrx"
 };
 
+constexpr bool is_vehicle_control_seat(SeatType type) {
+    return type == SeatType::Controller || type == SeatType::Driver;
+}
+
 // One seat a vehicle/emplacement offers. Mirrors the original split: the slot's
 // seat-bone type lives at model[605+slot] and its occupant handle at
 // vehicle[400+2*slot] (0xFFFF = empty). [orig: Entity_FindBestSeatSlot @0x4351f0 /
@@ -253,11 +257,25 @@ struct Entity {
     // Seats this entity OFFERS as a vehicle/emplacement (mirrors vehicle[400..] + model[605..]).
     // Empty for plain entities; an emplaced gun seeds one Gunner seat.
     std::vector<Seat> seats;
+    // The single tracked FIRST occupant (entity+368 occupantEntity): claimed at attach by
+    // ctrlx/drvrx (empty-or-same) and UseGun (only when empty), never by sitex; cleared only
+    // when THE claimant detaches — a remaining second controller does not inherit it. This
+    // is the retail engine-running latch: the PlayerControl occupancy effect (and the engine
+    // start/stop sounds) key off it, not off any-control-seat occupancy.
+    // [orig: Entity_AttachToVehicleSlot @0x4946d0 writes +368 @0x4947d2/@0x4948d8/@0x49495e;
+    //  Entity_DetachFromVehicle @0x4355f0 stop leg @0x4356e9..0x435759 + clear @0x43577c;
+    //  spawner gate @0x48faad in entity_update_damage_accumulator_and_shadow @0x48fa70]
+    EntityHandle primary_occupant;
     uint8_t emplaced_pose_variant = 0; // model config 1..8 -> anim_emplaced_2..9 when available
     // Occupant side: this entity is RIDING mount_target's seat mount_seat. [orig: occupant+364
     // vehicle ptr / +360 seat index / +36 & 0x40 mounted flag, written by
     // Entity_AttachToVehicleSlot @0x4946d0.] mounted == false => the rest are unset.
     EntityHandle mount_target;          // kInvalid = not mounted
+    // Stable identity of mount_target at attach time. The handle can stop resolving before
+    // occupant teardown; these fields preserve the control-stop notification payload.
+    uint16_t mount_target_net_id = 0;
+    int32_t mount_target_bms_id = 0;
+    uint32_t mount_target_spawn_origin = 0;
     int8_t mount_seat = -1;
     SeatType mount_type = SeatType::None;
     bool mounted = false;

@@ -28,9 +28,104 @@ class FxRuntimeStub:
 		return Vector3(4, 5, 6) if ssn == 17 else null
 
 
+class ItemPoseRuntimeStub:
+	extends Node
+	var has_snapshot := true
+	var pose: Variant = Transform3D(Basis.IDENTITY, Vector3(7, 8, 9))
+	var refs: Array = []
+	func has_current_present_effect_snapshot() -> bool:
+		return has_snapshot
+	func presented_entity_effect_transform(entity_ref: Dictionary) -> Variant:
+		refs.append(entity_ref.duplicate())
+		return pose
+
+
+class ImpactSimStub:
+	extends RefCounted
+	var drain_count := 0
+	var weapon_rows: Array = []
+	var rows: Array = [{
+		'position': Vector3(3, 2, 1),
+		'direction': Vector3.FORWARD,
+		'effect': 'Effect_AmHitDirt',
+		'sound': 'IMP_BULLET_DIRT',
+		'age_ticks': 2,
+		'source_tick': 41,
+		'source_order': 7,
+	}]
+	func drain_round_impacts() -> Array:
+		drain_count += 1
+		var out := rows
+		rows = []
+		return out
+	func drain_local_player_weapon_events() -> Array:
+		var out := weapon_rows
+		weapon_rows = []
+		return out
+
+
+class ImpactRuntimeStub:
+	extends Node
+	var sim := ImpactSimStub.new()
+	func get_sim() -> ImpactSimStub:
+		return sim
+
+
+class ImpactAudioStub:
+	extends NovaMissionAudio
+	var fires: Array = []
+	func fire_soundset(set_name: String, world_pos: Vector3) -> bool:
+		fires.append({'name': set_name, 'position': world_pos})
+		return true
+
+
 class FxWorldStub:
 	extends NovaEffectWorld
 	var spawns: Array = []
+	var attached_spawns: Array = []
+	var request_spawns: Array = []
+	var stopped_groups: Array[int] = []
+	var timeline: Array[String] = []
+	func spawn_effect_request(effect: String, transform: Transform3D,
+			options: Dictionary = {}) -> Dictionary:
+		if are_particles_hidden():
+			return {"spawned": false, "accepted": false, "effect_handle": 0}
+		request_spawns.append({
+			"effect": effect,
+			"transform": transform,
+			"options": options.duplicate(),
+		})
+		return {
+			"spawned": true,
+			"accepted": true,
+			"effect_handle": 1,
+			"group_id": request_spawns.size(),
+		}
+	func spawn_effect(effect: String, position: Vector3,
+			orientation: Vector3 = Vector3.ZERO) -> int:
+		spawns.append({
+			'effect': effect,
+			'position': position,
+			'orientation': orientation,
+		})
+		return 1
+	func spawn_effect_transient(effect: String, position: Vector3,
+			orientation: Vector3 = Vector3.ZERO, initial_age_ticks: int = 0,
+			render_domain: int = RENDER_DOMAIN_WORLD, source_tick: int = 0,
+			source_order: int = 0) -> int:
+		timeline.append("impact")
+		spawns.append({
+			'effect': effect,
+			'position': position,
+			'orientation': orientation,
+			'initial_age_ticks': initial_age_ticks,
+			'render_domain': render_domain,
+			'source_tick': source_tick,
+			'source_order': source_order,
+		})
+		return 1
+	func advance_fixed_tick(_delta: float) -> void:
+		timeline.append("advance")
 	func spawn_effect_owned(owner_key: Variant, effect: String, position: Vector3,
 			orientation: Vector3 = Vector3.ZERO) -> int:
 		spawns.append({
@@ -40,6 +135,123 @@ class FxWorldStub:
 			"orientation": orientation,
 		})
 		return 1
+	func spawn_effect_attached(owner_key: Variant, effect: String,
+			initial_transform: Transform3D, local_pos: Vector3, local_dir: Vector3) -> int:
+		var receipt := spawn_effect_attached_request(
+				owner_key, effect, initial_transform, local_pos, local_dir)
+		return int(receipt.get("effect_handle", 0)) if bool(
+				receipt.get("spawned", false)) else 0
+	func spawn_effect_attached_request(owner_key: Variant, effect: String,
+			initial_transform: Transform3D, local_pos: Vector3,
+			local_dir: Vector3) -> Dictionary:
+		if are_particles_hidden():
+			return {
+				"spawned": false,
+				"accepted": false,
+				"effect_handle": 0,
+				"group_id": 0,
+			}
+		attached_spawns.append({
+			"owner": owner_key,
+			"effect": effect,
+			"transform": initial_transform,
+			"local_pos": local_pos,
+			"local_dir": local_dir,
+		})
+		return {
+			"spawned": true,
+			"accepted": true,
+			"effect_handle": 1,
+			"group_id": attached_spawns.size(),
+		}
+	func stop_group(group_id: int) -> void:
+		stopped_groups.append(group_id)
+
+
+class ItemFxDbStub:
+	extends RefCounted
+	var attribs: Dictionary = {}
+	var effects: Dictionary = {}
+	func get_attrib(item_id: int) -> int:
+		return int(attribs.get(item_id, 0))
+	func get_particle_effects(item_id: int) -> Dictionary:
+		return effects.get(item_id,
+				{"particlefx": {"effect": "Effect_Test", "userpoint": "FX00"}})
+
+
+class ItemFxPlacerStub:
+	extends RefCounted
+	var item_db: ItemFxDbStub
+	var static_sources: Array = []
+	func get_item_db() -> ItemFxDbStub:
+		return item_db
+	func get_static_item_effect_sources() -> Array:
+		return static_sources.duplicate(true)
+
+
+class ItemFxObjectDataStub:
+	extends RefCounted
+	var points: Array = [{
+		"name": "fx00",
+		"position": Vector3(1, 2, 3),
+		"rotation": Vector3(0, 0, -1),
+	}]
+	func _init(initial_points: Array = []) -> void:
+		if not initial_points.is_empty():
+			points = initial_points.duplicate(true)
+	func get_user_point_count() -> int:
+		return points.size()
+	func get_user_point_info(index: int) -> Dictionary:
+		return points[index]
+
+
+class ItemFxModelStub:
+	extends Node3D
+	var data := ItemFxObjectDataStub.new()
+	func get_object_data() -> ItemFxObjectDataStub:
+		return data
+
+
+class ItemFxGameWorldHarness:
+	extends GameWorld
+	func configure_item_fx(effects: NovaEffectWorld, placer: RefCounted) -> void:
+		_effect_world = effects
+		_placer = placer
+	func present_item_fx(node: Node3D, kind: int, item_id: int) -> int:
+		return _attach_item_effect_to_node(node, kind, item_id)
+	func attach_all_item_fx() -> void:
+		_attach_item_effects()
+	func present_static_item_fx(source: Dictionary, source_index: int) -> int:
+		return _attach_item_effect_to_static(source, source_index)
+	func pending_item_fx_count() -> int:
+		return _item_fx_pending_nodes.size()
+	func pending_static_item_fx_count() -> int:
+		return _item_fx_pending_static.size()
+	func deferred_control_item_fx_count() -> int:
+		return _item_fx_control_nodes.size()
+	func active_control_identity_count() -> int:
+		return _item_fx_control_active.size()
+	func consume_runtime_effects(effects: Array) -> void:
+		_on_runtime_effects(effects)
+	func configure_item_owner(runtime: Node, key: String, node: Node3D,
+			entity_ref: Dictionary) -> void:
+		_runtime = runtime
+		_item_fx_nodes[key] = node
+		_item_fx_owner_refs[key] = entity_ref.duplicate()
+	func resolve_item_owner(key: String) -> Variant:
+		return _effect_owner_transform(key)
+
+
+class ImpactGameWorldHarness:
+	extends GameWorld
+	func configure(runtime: Node, effects: NovaEffectWorld, audio: NovaMissionAudio) -> void:
+		_runtime = runtime
+		_effect_world = effects
+		_mission_audio = audio
+	func route_round_impacts() -> void:
+		_route_round_impacts()
+	func fixed_tick() -> void:
+		_on_runtime_fixed_tick(1)
 
 
 
@@ -75,6 +287,65 @@ func test_tick_gates_the_runtime_on_its_transport() -> void:
 	world.tick(Vector3.ZERO)
 	assert_eq(runtime.ticks, 1, "pausing stops it again")
 	_detach_runtime(world)
+
+
+func test_round_impacts_route_generic_transient_and_audio_legs() -> void:
+	var world := ImpactGameWorldHarness.new()
+	var terrain := NovaTerrain.new()
+	terrain.name = 'NovaTerrain'
+	world.add_child(terrain)
+	add_child_autofree(world)
+	var runtime := ImpactRuntimeStub.new()
+	var effects := FxWorldStub.new()
+	var audio := ImpactAudioStub.new(null, null)
+	add_child_autofree(runtime)
+	add_child_autofree(effects)
+	world.configure(runtime, effects, audio)
+
+	world.route_round_impacts()
+
+	assert_eq(runtime.sim.drain_count, 1,
+			'resolved impact rows cannot accumulate between presentation frames')
+	assert_eq(effects.spawns, [{
+		'effect': 'Effect_AmHitDirt',
+		'position': Vector3(3, 2, 1),
+		'orientation': Vector3.FORWARD,
+		'initial_age_ticks': 2,
+		'render_domain': NovaEffectScene.RENDER_DOMAIN_WORLD,
+		'source_tick': 41,
+		'source_order': 7,
+	}], 'impact particles retain their direction, age, and stable source order')
+	assert_eq(audio.fires, [{
+		'name': 'IMP_BULLET_DIRT',
+		'position': Vector3(3, 2, 1),
+	}], 'impact audio shares collision presentation with the visual transient')
+
+
+func test_fixed_tick_orders_weapon_and_impact_before_particle_advance() -> void:
+	var world := ImpactGameWorldHarness.new()
+	var terrain := NovaTerrain.new()
+	terrain.name = "NovaTerrain"
+	world.add_child(terrain)
+	add_child_autofree(world)
+	var runtime := ImpactRuntimeStub.new()
+	var effects := FxWorldStub.new()
+	var audio := ImpactAudioStub.new(null, null)
+	add_child_autofree(runtime)
+	add_child_autofree(effects)
+	world.configure(runtime, effects, audio)
+	runtime.sim.weapon_rows = [{"action_effect": 3}]
+	runtime.sim.rows[0]["age_ticks"] = 0
+	world.set_local_player_weapon_tick_consumer(func(events: Array[PlayerWeaponEvent]) -> void:
+		assert_eq(events.size(), 1, "the source tick drains exactly one weapon batch")
+		effects.timeline.append("weapon")
+	)
+
+	world.fixed_tick()
+
+	assert_eq(effects.timeline, ["weapon", "impact", "advance"],
+			"the source tick is presented chronologically before its particle pass")
+	assert_eq(int(effects.spawns[0].initial_age_ticks), 0,
+			"a physical collision is visible in its production tick without age compensation")
 
 
 func test_fx2ssn_routes_position_owner_and_up_orientation() -> void:
@@ -472,6 +743,28 @@ func test_skeleton_debug_builds_and_frees_the_view() -> void:
 	assert_null(world.get_node_or_null("SkeletonDebug"), "disabling frees it")
 
 
+func test_user_point_debug_builds_frees_and_cleans_up_on_unload() -> void:
+	var world := _make_world()
+	add_child_autofree(world)
+	await get_tree().process_frame
+	assert_false(world.is_user_point_debug(), "off by default")
+	assert_null(world.get_node_or_null("UserPointDebug"), "...with no view node")
+
+	world.set_user_point_debug(true)
+	assert_true(world.is_user_point_debug())
+	assert_not_null(world.get_node_or_null("UserPointDebug"),
+			"enabling builds the world-wide user-point view")
+
+	world.unload()
+	assert_true(world.is_user_point_debug(),
+			"the checked toggle survives teardown so the next load can re-arm it")
+	assert_null(world.get_node_or_null("UserPointDebug"),
+			"teardown detaches the view immediately, before deferred destruction")
+
+	world.set_user_point_debug(false)
+	assert_false(world.is_user_point_debug())
+
+
 func test_hide_foliage_toggles_dispatcher_visibility() -> void:
 	# The F3 overlay's "Hide foliage" toggle routes here: it hides/shows the foliage
 	# dispatcher node (whose ArrayMesh batches render the scattered vegetation).
@@ -596,6 +889,405 @@ func test_set_foliage_hidden_is_safe_without_a_dispatcher() -> void:
 	await get_tree().process_frame
 	world.set_foliage_hidden(true)
 	assert_true(world.is_foliage_hidden(), "the flag holds even with no dispatcher to act on")
+
+
+func test_item_effect_attach_uses_the_original_pool_specific_gates() -> void:
+	# Mission kinds preserve the original pool mapping. Pool 0 is not walked;
+	# pool 1 skips attrib 0x42; pools 2/3 skip only powerup bit 0x2.
+	# [orig: resolve_item_materials_and_spawn_bone_trails @ 0x522ee0,
+	#  gates @ 0x523233 / @ 0x523272 / @ 0x5232af]
+	var world := _make_item_fx_world()
+	add_child_autofree(world)
+	var effects := FxWorldStub.new()
+	world.add_child(effects)
+	var db := ItemFxDbStub.new()
+	db.attribs = {
+		1: 0,
+		2: 0,
+		3: 0x40,
+		4: 0x2,
+		5: 0x40,
+		6: 0,
+		7: 0,
+		8: 0,
+	}
+	var placer := ItemFxPlacerStub.new()
+	placer.item_db = db
+	world.configure_item_fx(effects, placer)
+
+	var cases := [
+		[NovaMissionData.KIND_ORGANIC, 1, 0],
+		[NovaMissionData.KIND_ITEM, 2, 1],
+		[NovaMissionData.KIND_ITEM, 3, 0],
+		[NovaMissionData.KIND_BUILDING, 4, 0],
+		[NovaMissionData.KIND_BUILDING, 5, 1],
+		[NovaMissionData.KIND_MARKER, 6, 1],
+	]
+	var nodes: Array[Node3D] = []
+	for case_v in cases:
+		var case: Array = case_v
+		var model := ItemFxModelStub.new()
+		world.add_child(model)
+		nodes.append(model)
+		assert_eq(world.present_item_fx(model, int(case[0]), int(case[1])),
+				int(case[2]), "kind %d attrib 0x%x" % [int(case[0]), db.get_attrib(int(case[1]))])
+
+	assert_eq(effects.attached_spawns.size(), 3,
+			"only normal pool-1 plus allowed pool-2/3 entities attach")
+	assert_eq(effects.attached_spawns[0].local_pos, Vector3(1, 2, 3))
+	assert_eq(effects.attached_spawns[0].local_dir, Vector3(0, 0, -1))
+	assert_eq(world.present_item_fx(nodes[1], NovaMissionData.KIND_ITEM, 2), 0,
+			"a replayed wire-node callback cannot duplicate an existing attach")
+	assert_eq(effects.attached_spawns.size(), 3)
+
+	# A persistent item first materialized while the retail master switch is off
+	# must attach once when particles are re-enabled; a mission loaded hidden
+	# otherwise loses that effect permanently.
+	world.set_particles_hidden(true)
+	var hidden_model := ItemFxModelStub.new()
+	world.add_child(hidden_model)
+	assert_eq(world.present_item_fx(
+			hidden_model, NovaMissionData.KIND_ITEM, 7), 0)
+	assert_eq(effects.attached_spawns.size(), 3)
+	world.set_particles_hidden(false)
+	assert_eq(effects.attached_spawns.size(), 4,
+			"re-enable retries the hidden-at-load persistent attachment once")
+	world.set_particles_hidden(false)
+	assert_eq(effects.attached_spawns.size(), 4, "steady enabled state cannot duplicate it")
+
+	world.set_particles_hidden(true)
+	var despawned_model := ItemFxModelStub.new()
+	world.add_child(despawned_model)
+	assert_eq(world.present_item_fx(
+			despawned_model, NovaMissionData.KIND_ITEM, 8), 0)
+	despawned_model.free()
+	world.set_particles_hidden(false)
+	assert_eq(effects.attached_spawns.size(), 4,
+			"a wire node freed while hidden is pruned instead of retried")
+	assert_eq(world.pending_item_fx_count(), 0)
+
+
+func test_dbuggy_fx00_follows_controller_lifecycle_with_pre_node_race() -> void:
+	# Shipped DBuggy1.3di: ITEMS.DEF item 101291 is PlayerControl (0x40) and
+	# authors Effect_whiteExhaust at model userpoint FX00. It stays dormant in
+	# the mission-start pool walk, then follows controller occupancy events.
+	const DBUGGY_ITEM := 101291
+	var world := _make_item_fx_world()
+	add_child_autofree(world)
+	var effects := FxWorldStub.new()
+	world.add_child(effects)
+	var db := ItemFxDbStub.new()
+	db.attribs[DBUGGY_ITEM] = 0x40
+	db.effects[DBUGGY_ITEM] = {
+		"particlefx": {
+			"effect": "Effect_whiteExhaust",
+			"userpoint": "FX00",
+		},
+	}
+	var placer := ItemFxPlacerStub.new()
+	placer.item_db = db
+	world.configure_item_fx(effects, placer)
+	watch_signals(world)
+
+	var spawn_origin := (NovaMissionData.KIND_ITEM << 24) | 3
+	var started := {
+		"kind": "vehicle_control_started",
+		"a": 71,
+		"b": 9001,
+		"c": spawn_origin,
+	}
+	var stopped := {
+		"kind": "vehicle_control_stopped",
+		"a": 71,
+		"b": 9001,
+		"c": spawn_origin,
+	}
+
+	# The simulation event can precede the present pass's wire/model callback.
+	world.consume_runtime_effects([started])
+	assert_eq(world.active_control_identity_count(), 3)
+	assert_signal_not_emitted(world, "mission_effects",
+			"render-internal lifecycle events never leak to HUD consumers")
+	var model := ItemFxModelStub.new()
+	model.set_meta("entity_ref", {
+		"kind": NovaMissionData.KIND_ITEM,
+		"index": 3,
+		"bms_id": 9001,
+		"item_id": DBUGGY_ITEM,
+	})
+	world.add_child(model)
+	assert_eq(world.present_item_fx(model, NovaMissionData.KIND_ITEM, DBUGGY_ITEM), 1)
+	assert_eq(world.deferred_control_item_fx_count(), 1)
+	assert_eq(effects.attached_spawns.size(), 1)
+	assert_eq(String(effects.attached_spawns[0].effect), "Effect_whiteExhaust")
+	assert_eq(Vector3(effects.attached_spawns[0].local_pos), Vector3(1, 2, 3))
+	assert_eq(Vector3(effects.attached_spawns[0].local_dir), Vector3(0, 0, -1))
+
+	# Replayed starts are idempotent; a single transition stop detaches the
+	# exact native group id returned by the receipt-bearing facade.
+	world.consume_runtime_effects([started])
+	assert_eq(effects.attached_spawns.size(), 1)
+	world.consume_runtime_effects([stopped])
+	assert_eq(effects.stopped_groups, [1])
+	assert_eq(world.active_control_identity_count(), 0)
+
+	# A later control transition can create a fresh group, and a mixed drain
+	# exposes only the public effect after consuming the lifecycle row.
+	world.consume_runtime_effects([started])
+	assert_eq(effects.attached_spawns.size(), 2)
+	var public_effect := {"kind": "text", "str": "still public"}
+	world.consume_runtime_effects([stopped, public_effect])
+	assert_eq(effects.stopped_groups, [1, 2])
+	assert_signal_emitted_with_parameters(
+			world, "mission_effects", [[public_effect]])
+
+
+func test_dbuggy_hidden_pending_is_cancelled_when_control_stops() -> void:
+	const DBUGGY_ITEM := 101291
+	var world := _make_item_fx_world()
+	add_child_autofree(world)
+	var effects := FxWorldStub.new()
+	world.add_child(effects)
+	var db := ItemFxDbStub.new()
+	db.attribs[DBUGGY_ITEM] = 0x40
+	db.effects[DBUGGY_ITEM] = {
+		"particlefx": {
+			"effect": "Effect_whiteExhaust",
+			"userpoint": "FX00",
+		},
+	}
+	var placer := ItemFxPlacerStub.new()
+	placer.item_db = db
+	world.configure_item_fx(effects, placer)
+	world.set_particles_hidden(true)
+
+	var model := ItemFxModelStub.new()
+	model.set_meta("entity_ref", {
+		"kind": NovaMissionData.KIND_ITEM,
+		"index": 8,
+		"bms_id": 9010,
+		"item_id": DBUGGY_ITEM,
+	})
+	world.add_child(model)
+	assert_eq(world.present_item_fx(model, NovaMissionData.KIND_ITEM, DBUGGY_ITEM), 0,
+			"the unchanged mission-start 0x42 gate keeps PlayerControl dormant")
+	var spawn_origin := (NovaMissionData.KIND_ITEM << 24) | 8
+	world.consume_runtime_effects([{
+		"kind": "vehicle_control_started",
+		"a": 81,
+		"b": 9010,
+		"c": spawn_origin,
+	}])
+	assert_eq(world.pending_item_fx_count(), 1)
+	world.consume_runtime_effects([{
+		"kind": "vehicle_control_stopped",
+		"a": 81,
+		"b": 9010,
+		"c": spawn_origin,
+	}])
+	assert_eq(world.pending_item_fx_count(), 0,
+			"stop cancels a hidden activation before particles are re-enabled")
+	world.set_particles_hidden(false)
+	assert_eq(effects.attached_spawns.size(), 0,
+			"re-enable cannot resurrect a stopped controller attachment")
+
+
+func test_controller_net_id_does_not_alias_a_wire_handle() -> void:
+	const DBUGGY_ITEM := 101291
+	var world := _make_item_fx_world()
+	add_child_autofree(world)
+	var effects := FxWorldStub.new()
+	world.add_child(effects)
+	var db := ItemFxDbStub.new()
+	db.attribs[DBUGGY_ITEM] = 0x40
+	var placer := ItemFxPlacerStub.new()
+	placer.item_db = db
+	world.configure_item_fx(effects, placer)
+
+	world.consume_runtime_effects([{
+		"kind": "vehicle_control_started",
+		"a": 77,
+		"b": 0,
+		"c": 0,
+	}])
+	var model := ItemFxModelStub.new()
+	model.set_meta("entity_ref", {
+		"kind": NovaMissionData.KIND_ITEM,
+		"index": 12,
+		"bms_id": 0,
+		"wire_handle": 77,
+		"item_id": DBUGGY_ITEM,
+	})
+	world.add_child(model)
+	assert_eq(world.present_item_fx(model, NovaMissionData.KIND_ITEM, DBUGGY_ITEM), 0)
+	assert_eq(effects.attached_spawns.size(), 0,
+			"event a is a simulation net id, not the presentation wire handle")
+
+
+func test_static_item_effects_spawn_world_bound_from_value_descriptors() -> void:
+	var world := _make_item_fx_world()
+	add_child_autofree(world)
+	var effects := FxWorldStub.new()
+	world.add_child(effects)
+	var db := ItemFxDbStub.new()
+	db.attribs = {2: 0, 3: 0x40, 9: 0}
+	db.effects[9] = {
+		"particlefx": {"effect": "Effect_Fallback", "userpoint": "FX00"},
+	}
+	var placer := ItemFxPlacerStub.new()
+	placer.item_db = db
+
+	var points: Array = []
+	for i in range(18):
+		points.append({
+			"name": "other",
+			"position": Vector3(i, 0, 0),
+			"rotation": Vector3.FORWARD,
+		})
+	points[0] = {
+		"name": "fx00",
+		"position": Vector3(1, 2, 3),
+		"rotation": Vector3(0, 0, -1),
+	}
+	points[15] = {
+		"name": "FX00",
+		"position": Vector3(-2, 0.5, 4),
+		"rotation": Vector3.RIGHT,
+	}
+	# This authored duplicate is beyond the original 16-bit userpoint mask.
+	var beyond_mask: Dictionary = points[16]
+	beyond_mask["name"] = "FX00"
+	points[16] = beyond_mask
+	var matched_data := ItemFxObjectDataStub.new(points)
+	var fallback_data := ItemFxObjectDataStub.new([{
+		"name": "OTHER",
+		"position": Vector3(99, 99, 99),
+		"rotation": Vector3.UP,
+	}])
+	var entity_transform := Transform3D(
+			Basis(Vector3.UP, PI * 0.5), Vector3(10, 20, 30))
+	var fallback_transform := Transform3D(
+			Basis(Vector3.RIGHT, PI * 0.25), Vector3(-5, 6, 7))
+	placer.static_sources = [{
+		"kind": NovaMissionData.KIND_ITEM,
+		"item_id": 2,
+		"graphic": "StaticVehicle1",
+		"world_transform": entity_transform,
+		"object_data": matched_data,
+	}, {
+		"kind": NovaMissionData.KIND_BUILDING,
+		"item_id": 9,
+		"graphic": "StaticBuilding1",
+		"world_transform": fallback_transform,
+		"object_data": fallback_data,
+	}, {
+		# Pool-1 attrib 0x40 is excluded before any effect request.
+		"kind": NovaMissionData.KIND_ITEM,
+		"item_id": 3,
+		"graphic": "BlockedStatic",
+		"world_transform": Transform3D.IDENTITY,
+		"object_data": matched_data,
+	}]
+	world.configure_item_fx(effects, placer)
+
+	world.attach_all_item_fx()
+
+	assert_eq(effects.request_spawns.size(), 3,
+			"two first-16 matches plus one origin fallback; the gated row is excluded")
+	var first: Dictionary = effects.request_spawns[0]
+	var first_options: Dictionary = first.get("options", {})
+	assert_eq(int(first_options.get("admission", -1)), NovaEffectScene.ADMISSION_ALWAYS)
+	assert_eq(int(first_options.get("binding", -1)), NovaEffectScene.BINDING_WORLD)
+	assert_eq(int(first_options.get("render_domain", -1)),
+			NovaEffectScene.RENDER_DOMAIN_WORLD)
+	assert_false(first_options.has("owner_key"), "static batches never invent follow owners")
+	assert_false(first_options.has("slot_key"), "Always spawns need no synthetic slot identity")
+	var first_transform: Transform3D = first.get("transform", Transform3D.IDENTITY)
+	assert_true(first_transform.origin.is_equal_approx(entity_transform * Vector3(1, 2, 3)))
+	assert_true(first_transform.basis.z.normalized().is_equal_approx(
+			(entity_transform.basis * Vector3(0, 0, -1)).normalized()),
+			"the authored direction composes through the entity basis")
+	var second_transform: Transform3D = effects.request_spawns[1].get(
+			"transform", Transform3D.IDENTITY)
+	assert_true(second_transform.origin.is_equal_approx(
+			entity_transform * Vector3(-2, 0.5, 4)),
+			"the duplicate name at userpoint 15 also spawns")
+	var fallback_request: Dictionary = effects.request_spawns[2]
+	assert_eq(String(fallback_request.get("effect", "")), "Effect_Fallback")
+	var fallback_actual: Transform3D = fallback_request.get(
+			"transform", Transform3D.IDENTITY)
+	assert_true(fallback_actual.is_equal_approx(fallback_transform),
+			"an unmatched userpoint falls back to the entity origin and basis")
+	assert_eq(world.present_static_item_fx(placer.static_sources[0], 0), 0,
+			"revisiting the same descriptor index cannot duplicate its persistent effect")
+	assert_eq(effects.request_spawns.size(), 3)
+
+
+func test_live_item_effect_owner_uses_each_fixed_ticks_value_pose() -> void:
+	var world := _make_item_fx_world()
+	add_child_autofree(world)
+	var node := ItemFxModelStub.new()
+	node.transform = Transform3D(Basis.IDENTITY, Vector3(99, 99, 99))
+	world.add_child(node)
+	var runtime := ItemPoseRuntimeStub.new()
+	add_child_autofree(runtime)
+	var key := "itemfx:42:0"
+	var entity_ref := {"kind": NovaMissionData.KIND_ITEM, "index": 4, "bms_id": 42}
+	world.configure_item_owner(runtime, key, node, entity_ref)
+
+	var resolved: Variant = world.resolve_item_owner(key)
+	assert_true(resolved is Transform3D)
+	assert_true((resolved as Transform3D).origin.is_equal_approx(Vector3(7, 8, 9)),
+			"a fixed tick follows the current client-view value, not the stale presented Node")
+	assert_eq(runtime.refs, [entity_ref], "the copied stable identity crosses the provider seam")
+
+	runtime.has_snapshot = false
+	resolved = world.resolve_item_owner(key)
+	assert_true((resolved as Transform3D).origin.is_equal_approx(Vector3(99, 99, 99)),
+			"before the first sim snapshot, the authored Node remains the safe spawn seed")
+
+	runtime.has_snapshot = true
+	runtime.pose = null
+	assert_null(world.resolve_item_owner(key),
+			"an owner absent from this tick detaches instead of emitting once from stale presentation")
+
+
+func test_static_item_effect_hidden_at_load_retries_once_when_enabled() -> void:
+	var world := _make_item_fx_world()
+	add_child_autofree(world)
+	var effects := FxWorldStub.new()
+	world.add_child(effects)
+	var db := ItemFxDbStub.new()
+	var placer := ItemFxPlacerStub.new()
+	placer.item_db = db
+	placer.static_sources = [{
+		"kind": NovaMissionData.KIND_ITEM,
+		"item_id": 2,
+		"graphic": "StaticVehicle1",
+		"world_transform": Transform3D(Basis.IDENTITY, Vector3(3, 4, 5)),
+		"object_data": ItemFxObjectDataStub.new(),
+	}]
+	world.configure_item_fx(effects, placer)
+
+	world.set_particles_hidden(true)
+	world.attach_all_item_fx()
+	assert_eq(effects.request_spawns.size(), 0)
+	assert_eq(world.pending_static_item_fx_count(), 1,
+			"a world-bound persistent source survives a hidden mission load as values")
+	world.set_particles_hidden(false)
+	assert_eq(effects.request_spawns.size(), 1,
+			"re-enabling submits the deferred static source")
+	assert_eq(world.pending_static_item_fx_count(), 0)
+	world.set_particles_hidden(false)
+	assert_eq(effects.request_spawns.size(), 1, "steady enabled state cannot duplicate it")
+
+
+func _make_item_fx_world() -> ItemFxGameWorldHarness:
+	var world := ItemFxGameWorldHarness.new()
+	var terrain := NovaTerrain.new()
+	terrain.name = "NovaTerrain"
+	world.add_child(terrain)
+	return world
 
 
 func _make_world() -> GameWorld:

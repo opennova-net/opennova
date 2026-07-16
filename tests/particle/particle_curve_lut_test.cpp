@@ -38,6 +38,17 @@ opennova::particle::TableDef ramp_table(const char *id) {
 	return table;
 }
 
+opennova::particle::TableDef constant_table(const char *id,
+		std::uint8_t value) {
+	opennova::particle::TableDef table;
+	table.id = id;
+	table.rows.assign(32, std::array<std::uint8_t, 8>{});
+	for (auto &row : table.rows) {
+		row.fill(value);
+	}
+	return table;
+}
+
 bool test_row_major_flatten() {
 	// rows[r][c] = r*8 + c → flat lut[i] = i. This pins the row-major order
 	// the engine uses (CEffectDef_ResolveTblDefReference @ 0x5e9630 stores
@@ -186,6 +197,72 @@ bool test_def_bake_resolves_named_curves() {
 	return true;
 }
 
+bool test_def_bake_resolves_names_case_insensitively() {
+	// The engine resolves table names with _stricmp [orig:
+	// CEffectDef_ResolveTblDefReference @ 0x5e9630 → table find @ 0x5e9540 →
+	// _stricmp @ 0x76fdf6], and shipped data relies on it: ambfx.ptl's
+	// Wood_AmbFB (the 00TR* fire-barrel flame) authors
+	// `green_func = Table11Alt` against `id = table11Alt`. An exact compare
+	// leaves green unbaked (constant 255) while red/alpha fade with the
+	// resolved table — aging flame sprites tint green.
+	using namespace opennova::particle;
+	std::vector<TableDef> tables;
+	tables.push_back(ramp_table("table11Alt"));
+
+	ParticleDef def;
+	def.id = "Wood_AmbFB";
+	def.red_func.name = "table11Alt";
+	def.red_func.present = true;
+	def.green_func.name = "Table11Alt";
+	def.green_func.present = true;
+	def.blue_func.name = "TABLE11ALT";
+	def.blue_func.present = true;
+
+	bake_particle_def_curves(def, tables);
+
+	if (!expect(def.red_func.baked, "exact-case name resolves")) return false;
+	if (!expect(def.green_func.baked, "mixed-case name resolves (Table11Alt)")) return false;
+	if (!expect(def.blue_func.baked, "upper-case name resolves (TABLE11ALT)")) return false;
+	if (!expect(def.green_func.baked_lut == def.red_func.baked_lut,
+			"case-folded resolve bakes the same LUT")) return false;
+
+	ParticleFile file;
+	file.tables = tables;
+	if (!expect(file.find_table("tAbLe11aLt") != nullptr,
+			"ParticleFile::find_table folds case")) return false;
+	return true;
+}
+
+bool test_duplicate_selection_matches_retail_transform_cache() {
+	// CParticleManager_FindTableDefByName @ 0x5e9540 returns the first base
+	// table for flags=0. For inverse/reverse flags it remembers the last base
+	// match, clones that table, and applies the transform @ 0x5e2700.
+	using namespace opennova::particle;
+	std::vector<TableDef> tables;
+	tables.push_back(constant_table("Duplicate", 17));
+	tables.push_back(ramp_table("duplicate"));
+
+	ParticleDef def;
+	def.alpha_func = {"DUPLICATE", false, false, true};
+	def.red_func = {"Duplicate", true, false, true};
+	def.green_func = {"duplicate", false, true, true};
+	def.blue_func = {"duplicate", true, true, true};
+	bake_particle_def_curves(def, tables);
+
+	if (!expect(def.alpha_func.baked_lut[0] == 17 &&
+			def.alpha_func.baked_lut[255] == 17,
+			"unmodified duplicate resolves the first base table")) return false;
+	if (!expect(def.red_func.baked_lut[0] == 255 &&
+			def.red_func.baked_lut[255] == 0,
+			"reverse duplicate transforms the last base table")) return false;
+	if (!expect(def.green_func.baked_lut[0] == 255 &&
+			def.green_func.baked_lut[255] == 0,
+			"inverse duplicate transforms the last base table")) return false;
+	return expect(def.blue_func.baked_lut[0] == 0 &&
+			def.blue_func.baked_lut[255] == 255,
+			"combined modifiers transform the last base table");
+}
+
 bool test_uv_rect_bake_horizontal_strip_default() {
 	// `bake_graphic_uv_rects` fills `baked_uv_rects` with horizontal-strip
 	// UVs: frame N spans u in [N/count, (N+1)/count], v in [0, 1]. This
@@ -240,6 +317,17 @@ bool test_uv_rect_bake_single_frame_full_quad() {
 	return true;
 }
 
+bool test_uv_rect_bake_caps_programmatic_frame_count() {
+	using namespace opennova::particle;
+	GraphicLayer layer;
+	layer.flip_frames = kMaxParticleFlipFrames + 100;
+	bake_graphic_uv_rects(layer);
+
+	return expect(layer.baked_uv_rects.size() ==
+			static_cast<std::size_t>(kMaxParticleFlipFrames),
+			"UV bake caps programmatic flip_frames at the shared runtime limit");
+}
+
 bool test_uv_rect_bake_called_from_def_bake() {
 	// `bake_particle_def_curves` calls `bake_graphic_uv_rects` for every
 	// graphic layer — verify the rects populate alongside the curve LUTs.
@@ -292,9 +380,12 @@ int main() {
 	if (!test_short_table_zero_pad())           ++failures;
 	if (!test_table_rows_follow_tl_indices_and_last_write_wins()) ++failures;
 	if (!test_def_bake_resolves_named_curves()) ++failures;
+	if (!test_def_bake_resolves_names_case_insensitively()) ++failures;
+	if (!test_duplicate_selection_matches_retail_transform_cache()) ++failures;
 	if (!test_def_bake_handles_graphic_layers()) ++failures;
 	if (!test_uv_rect_bake_horizontal_strip_default()) ++failures;
 	if (!test_uv_rect_bake_single_frame_full_quad())  ++failures;
+	if (!test_uv_rect_bake_caps_programmatic_frame_count()) ++failures;
 	if (!test_uv_rect_bake_called_from_def_bake())    ++failures;
 	if (failures != 0) {
 		std::fprintf(stderr, "%d test(s) failed\n", failures);

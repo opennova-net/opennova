@@ -43,6 +43,50 @@ bool expect(bool cond, const char *msg) {
 	return false;
 }
 
+bool run_client_state_handle_lookup_contract() {
+	ns::ClientState state;
+	for (uint16_t handle = 0; handle < 1024; ++handle) {
+		ns::ClientEntityState &entity = state.upsert(handle);
+		entity.type_id = static_cast<uint16_t>(handle + 100);
+	}
+
+	if (!expect(state.entities.size() == 1024,
+	            "upsert keeps one entity per handle")) return false;
+	for (uint16_t handle = 0; handle < 1024; ++handle) {
+		ns::ClientEntityState *entity = state.find(handle);
+		if (!expect(entity != nullptr && entity->handle == handle &&
+		                    entity->type_id == static_cast<uint16_t>(handle + 100),
+		            "find resolves the original entity")) return false;
+	}
+
+	ns::ClientEntityState &existing = state.upsert(512);
+	existing.x = 1234;
+	if (!expect(state.entities.size() == 1024 && state.entities[512].x == 1234,
+	            "duplicate upsert reuses the original insertion-order slot")) return false;
+	if (!expect(state.find(0xFFFF) == nullptr,
+	            "find preserves the missing-handle result")) return false;
+
+	// `entities` is a public decoded-state surface. Lookup must follow direct
+	// mutations rather than retaining stale indexes into the vector.
+	state.entities.clear();
+	if (!expect(state.find(512) == nullptr,
+	            "find observes a direct vector clear")) return false;
+	state.entities.push_back(ns::ClientEntityState{});
+	state.entities.back().handle = 77;
+	if (!expect(state.find(77) == &state.entities.front(),
+	            "find observes a directly appended entity")) return false;
+	state.entities.front().handle = 88;
+	if (!expect(state.find(77) == nullptr &&
+	                    state.find(88) == &state.entities.front(),
+	            "find observes a direct handle mutation")) return false;
+	state.entities.insert(state.entities.begin(), ns::ClientEntityState{});
+	state.entities.front().handle = 99;
+	if (!expect(state.find(88) == &state.entities[1] &&
+	                    state.find(99) == &state.entities[0],
+	            "find remains correct after direct reordering")) return false;
+	return true;
+}
+
 // The exact value the host's encoder + codec produce for one axis: compress the
 // (wire - anchor) delta, decompress it, add the anchor back. The client must land
 // on precisely this.
@@ -327,7 +371,8 @@ bool run_motor_skips_net_peer() {
 } // namespace
 
 int main() {
-	const bool ok = run() &&
+	const bool ok = run_client_state_handle_lookup_contract() &&
+	                run() &&
 	                run_header_only_records_are_ignored_by_client_view() &&
 	                run_apply_player_intent_stages_remote_peer() &&
 	                run_apply_rejects_own_player() &&

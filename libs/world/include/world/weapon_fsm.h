@@ -204,7 +204,21 @@ struct WeaponFsmEvents {
                                    //  gated on the phase byte being 2 (ACTIVE) at entry;
                                    //  reached from WeaponAction_Fire @ 0x542d1a (per
                                    //  shot) and WeaponAction_Reload @ 0x54316e]
+    int32_t action_effect = -1;    // slot id whose DIRECT effect leg fired this tick —
+                                   // the recoil-row casing/smoke spawn at the arbiter
+                                   // tick (counter reached 0 after delaystart). Emitted
+                                   // only when the row authors a particle; the original
+                                   // spawns it for the local player whenever the FP
+                                   // weapon-view flag is on — NO scope gate and NO
+                                   // live-handle suppression (the spawn passes param7=0,
+                                   // so the handle is never recorded on the slot).
+                                   // [orig: WeaponAction_Recoil @ 0x542dd0 — gate
+                                   //  @ 0x542efa (ActionDef+16 && currentAction==3 &&
+                                   //  g_FpWeaponViewFlags&1), spawn @ 0x542f64]
     bool fired = false;            // Entity_FireWeaponAndSendPacket seam [orig: @ 0x542c5e]
+    int32_t fired_clip_before_consume = 0; // MountSlot+0x10 low u16 sampled for the
+                                           // fire-mode high bits BEFORE ammo consume
+                                           // [orig: @ 0x542c11, consume @ 0x542c75]
     bool dry_fired = false;        // the EMPTY one-shot entered
     bool reload_requested = false; // C2S 0x25 seam [orig: @ 0x5430ff; net-re §5.58]
     bool reload_applied = false;   // authority refill ran (WeaponSlot_ReloadAmmo shape)

@@ -1,10 +1,9 @@
 shader_type spatial;
-// CParticleDefEntry_ParseBlendMode @ 0x5e29f0 → BlendMode::Mod2x (5).
-// Engine D3D state: SrcBlend = DESTCOLOR, DestBlend = SRCCOLOR — modulate2x;
-// Godot has no built-in render_mode for this, so we approximate by using
-// blend_mul with the source pre-multiplied by 2.0. Result over-brightens by
-// design (the engine effect is "darken-or-brighten depending on src around
-// 0.5"); documented as a Bounded Deviation in particle_visual_parity.md.
+// CParticleDefEntry_ParseBlendMode @ 0x5e29f0 -> BlendMode::Mod2x (5).
+// Retail computes source = TEXTURE * DIFFUSE and blends it with
+// SRC=DESTCOLOR, DST=SRCCOLOR, producing 2 * source * framebuffer. Godot has
+// no separate-factor equivalent, so blend_mul with a doubled source preserves
+// the same color equation (subject to the host framebuffer's normal clamp).
 render_mode unshaded, cull_disabled, blend_mul, depth_draw_never;
 
 uniform sampler2D albedo_tex : source_color, filter_linear, repeat_disable;
@@ -17,9 +16,10 @@ void fragment() {
 	} else {
 		vec2 centered = UV - vec2(0.5);
 		float r = length(centered) * 2.0;
-		base.a *= clamp(1.0 - r, 0.0, 1.0);
+		float mask = clamp(1.0 - r, 0.0, 1.0);
+		// Source 0.5 is neutral after the 2x destination modulation.
+		base.rgb = mix(vec3(0.5), base.rgb, mask);
 	}
-	vec3 doubled = clamp(base.rgb * 2.0, vec3(0.0), vec3(2.0));
-	ALBEDO = mix(vec3(1.0), doubled, base.a);
+	ALBEDO = base.rgb * 2.0;
 	ALPHA = 1.0;
 }

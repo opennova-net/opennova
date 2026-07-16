@@ -26,6 +26,9 @@ extends RefCounted
 # coarse yaw, not anim state); a first cut renders them in rest pose, like NetWorldView.
 
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
+# [orig: EntityPool_FindByNetId @ 0x4f0a20]
+const WIRE_HANDLE_POOL_SHIFT := 12
+const WIRE_HANDLE_POOL_MASK := 0xF
 
 var _sim                   # NovaSimulation (snapshot source)
 var _placer                # MissionObjectPlacer (build_player_animated_model -> NovaObjectModel)
@@ -36,6 +39,25 @@ var _defer_index           # MissionEntityRegistry (host only): rows resolving t
 var _nodes := {}           # wire_handle -> Node3D
 var _unresolved := {}      # wire_handle -> true (type didn't resolve; don't retry each tick)
 var _stats: Dictionary = { "spawned": 0, "unresolved": 0, "live": 0 }
+var _node_spawned_callback := Callable()
+
+
+# Runtime handles encode the original entity pool in their high nibble. That
+# pool, not PF_KIND's BMS-origin value, drives the retail item-effect gates; a
+# joiner intentionally has no authoritative BMS origin and therefore receives
+# PF_KIND=-1. [orig: pools 0/1/2/3 = organic/item/building/marker].
+static func _mission_kind_for_wire_handle(handle: int) -> int:
+	match (handle >> WIRE_HANDLE_POOL_SHIFT) & WIRE_HANDLE_POOL_MASK:
+		0:
+			return NovaMissionData.KIND_ORGANIC
+		1:
+			return NovaMissionData.KIND_ITEM
+		2:
+			return NovaMissionData.KIND_BUILDING
+		3:
+			return NovaMissionData.KIND_MARKER
+		_:
+			return -1
 
 
 # defer_index: on the HOST, the MissionEntityRegistry — any wire row that resolves to a placed
@@ -51,6 +73,22 @@ func setup(sim, placer, container: Node3D, env_node = null, defer_index = null) 
 
 func get_stats() -> Dictionary:
 	return _stats.duplicate()
+
+
+## Register the render-host seam for runtime consumers that follow a dynamically
+## materialized wire entity (for example, an ITEMS.DEF attached effect). Existing
+## nodes are replayed so registration is safe after the first present pass.
+func set_node_spawned_callback(callback: Callable) -> void:
+	_node_spawned_callback = callback
+	if not _node_spawned_callback.is_valid():
+		return
+	for node_v in _nodes.values():
+		var node := node_v as Node3D
+		if node == null or not is_instance_valid(node):
+			continue
+		var ref: Dictionary = node.get_meta("entity_ref", {})
+		_node_spawned_callback.call(node, int(ref.get("kind", -1)),
+				int(ref.get("item_id", 0)))
 
 
 ## Spawn newly-seen wire entities, update every live one's transform + visibility, and free
@@ -75,6 +113,7 @@ func present() -> void:
 		# both — on the joiner local_handle is L, which never appears in the wire stream (harmless).
 		if type_id == 0 or handle == 0 or handle == local_handle:
 			continue
+		var runtime_kind := _mission_kind_for_wire_handle(handle)
 		# Host: defer any wire row that resolves to a PLACED mission node to MissionPresentPass,
 		# so a placed NPC isn't drawn twice. The joiner passes no index and renders every row.
 		if _defer_index != null:
@@ -88,6 +127,7 @@ func present() -> void:
 		if _unresolved.has(handle):
 			continue
 		var node = _nodes.get(handle)
+		var spawned_now := false
 		if node == null or not is_instance_valid(node):
 			# build_player_animated_model maps the player runtime type (0x14B9) to its visual
 			# item and passes other organics through to build_animated_model — the SAME chain
@@ -98,8 +138,17 @@ func present() -> void:
 				_stats.unresolved += 1
 				continue
 			node.name = "Wire_%04x" % handle
+			node.set_meta("entity_ref", {
+				"kind": runtime_kind,
+				"origin_kind": int(snap[base + NovaSimulation.PF_KIND]),
+				"index": int(snap[base + NovaSimulation.PF_INDEX]),
+				"bms_id": int(snap[base + NovaSimulation.PF_BMS_ID]),
+				"wire_handle": handle,
+				"item_id": type_id,
+			})
 			_nodes[handle] = node
 			_stats.spawned += 1
+			spawned_now = true
 		# Position is already Godot-space (x, z, -y); yaw is mission-space degrees. Build the
 		# basis through the ONE placement convention so a wire entity sits exactly where a
 		# placed/host-present entity would. Yaw-only (pitch/roll arrive 0 for infantry).
@@ -113,6 +162,8 @@ func present() -> void:
 			snap[base + NovaSimulation.PF_ROLL_DEG])
 		node.transform = Transform3D(MissionObjectPlacer.bms_to_godot_basis(rot), pos)
 		node.visible = int(snap[base + NovaSimulation.PF_ALIVE]) == 1
+		if spawned_now and _node_spawned_callback.is_valid():
+			_node_spawned_callback.call(node, runtime_kind, type_id)
 	_stats.live = live.size()
 	for h in _nodes.keys():
 		if not live.has(h):

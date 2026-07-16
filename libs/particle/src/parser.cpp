@@ -150,30 +150,32 @@ CurveRef parse_curve_ref(const std::string &raw) {
 // Returns true if `key` matches `gN_<remainder>` for N in 1..4, fills out_index
 // (0..3) and out_remainder. False otherwise.
 bool match_graphic_key(const std::string &key, int &out_index, std::string &out_remainder) {
-	if (key.size() < 3 || key[0] != 'g') {
+	const std::string folded_key = lowercase(key);
+	if (folded_key.size() < 3 || folded_key[0] != 'g') {
 		return false;
 	}
-	const char digit = key[1];
+	const char digit = folded_key[1];
 	if (digit < '1' || digit > '4') {
 		return false;
 	}
-	if (key[2] != '_') {
+	if (folded_key[2] != '_') {
 		return false;
 	}
 	out_index = digit - '1';
-	out_remainder = key.substr(3);
+	out_remainder = folded_key.substr(3);
 	return true;
 }
 
 // Returns layer index (0..3) if `key` matches `graphicN`, -1 otherwise.
 int match_graphic_decl(const std::string &key) {
-	if (key.size() != 8) {
+	const std::string folded_key = lowercase(key);
+	if (folded_key.size() != 8) {
 		return -1;
 	}
-	if (key.compare(0, 7, "graphic") != 0) {
+	if (folded_key.compare(0, 7, "graphic") != 0) {
 		return -1;
 	}
-	const char digit = key[7];
+	const char digit = folded_key[7];
 	if (digit < '1' || digit > '4') {
 		return -1;
 	}
@@ -183,7 +185,8 @@ int match_graphic_decl(const std::string &key) {
 bool apply_graphic_field(GraphicLayer &layer, const std::string &key,
 		const std::string &raw_value, const std::vector<std::string> &values) {
 	if (key == "flip_frames") {
-		layer.flip_frames = parse_int(raw_value);
+		layer.flip_frames = std::clamp(
+				parse_int(raw_value), 1, kMaxParticleFlipFrames);
 	} else if (key == "flip_rate") {
 		layer.flip_rate = parse_int(raw_value);
 	} else if (key == "color1") {
@@ -218,9 +221,10 @@ bool apply_graphic_field(GraphicLayer &layer, const std::string &key,
 
 // ------------------------------------------------------------ per-section apply
 
-void apply_effect_key(EffectDef &effect, const std::string &key,
+void apply_effect_key(EffectDef &effect, const std::string &authored_key,
 		const std::string &raw_value, const std::vector<std::string> &values,
 		std::vector<std::pair<std::string, std::string>> &unknown) {
+	const std::string key = lowercase(authored_key);
 	if (key == "id") {
 		effect.id = raw_value;
 	} else if (key == "pdefs") {
@@ -231,7 +235,7 @@ void apply_effect_key(EffectDef &effect, const std::string &key,
 			}
 		}
 	} else {
-		unknown.emplace_back(key, raw_value);
+		unknown.emplace_back(authored_key, raw_value);
 	}
 }
 
@@ -239,8 +243,12 @@ void apply_effect_key(EffectDef &effect, const std::string &key,
 // ParticleEdit confirms: graphic color keys are REMAPPED (g2_color1->color2,
 // g3_color1/2->color3, g4_color1/2->color4); we deliberately map 1:1. See
 // notes/ida_particle_witness.md "ParticleEdit cross-witness grill" D4.
-void apply_particle_key(ParticleDef &particle, const std::string &key,
+void apply_particle_key(ParticleDef &particle, const std::string &authored_key,
 		const std::string &raw_value, const std::vector<std::string> &values) {
+	// JO dispatches every property through _stricmp [orig:
+	// CParticleDef_ParseProperties @ 0x5ea320]. Preserve authored spelling
+	// only for unknown-field round trips.
+	const std::string key = lowercase(authored_key);
 	// Per-graphic header: `graphic1 = mbFlash2.tga, additive;`
 	const int decl_index = match_graphic_decl(key);
 	if (decl_index >= 0) {
@@ -268,7 +276,7 @@ void apply_particle_key(ParticleDef &particle, const std::string &key,
 	if (match_graphic_key(key, graphic_index, graphic_remainder)) {
 		if (!apply_graphic_field(
 				particle.graphics[graphic_index], graphic_remainder, raw_value, values)) {
-			particle.unknown_keys.emplace_back(key, raw_value);
+			particle.unknown_keys.emplace_back(authored_key, raw_value);
 		}
 		return;
 	}
@@ -393,10 +401,10 @@ void apply_particle_key(ParticleDef &particle, const std::string &key,
 		if (slot >= 0 && static_cast<std::size_t>(slot) < particle.collide_sounds.size()) {
 			particle.collide_sounds[static_cast<std::size_t>(slot)] = raw_value;
 		} else {
-			particle.unknown_keys.emplace_back(key, raw_value);
+			particle.unknown_keys.emplace_back(authored_key, raw_value);
 		}
 	} else {
-		particle.unknown_keys.emplace_back(key, raw_value);
+		particle.unknown_keys.emplace_back(authored_key, raw_value);
 	}
 }
 
@@ -433,9 +441,10 @@ void hydrate_particle(ParticleDef &particle,
 	}
 }
 
-void apply_table_key(TableDef &table, const std::string &key,
+void apply_table_key(TableDef &table, const std::string &authored_key,
 		const std::string &raw_value, const std::vector<std::string> &values,
 		std::vector<std::pair<std::string, std::string>> &unknown) {
+	const std::string key = lowercase(authored_key);
 	if (key == "id") {
 		table.id = raw_value;
 		return;
@@ -456,7 +465,7 @@ void apply_table_key(TableDef &table, const std::string &key,
 			}
 		}
 		if (!valid_row_key || row_number < 1 || values.size() < 8) {
-			unknown.emplace_back(key, raw_value);
+			unknown.emplace_back(authored_key, raw_value);
 			return;
 		}
 		// tlN names are indexed config-map fields, not append records. Source
@@ -471,12 +480,13 @@ void apply_table_key(TableDef &table, const std::string &key,
 		table.rows[static_cast<std::size_t>(row_number - 1)] = row;
 		return;
 	}
-	unknown.emplace_back(key, raw_value);
+	unknown.emplace_back(authored_key, raw_value);
 }
 
-void apply_handles_key(TableEditHandles &handles, const std::string &key,
+void apply_handles_key(TableEditHandles &handles, const std::string &authored_key,
 		const std::string &raw_value,
 		std::vector<std::pair<std::string, std::string>> &unknown) {
+	const std::string key = lowercase(authored_key);
 	if (key == "tableid") {
 		handles.table_id = raw_value;
 	} else if (key == "handlecount") {
@@ -484,7 +494,7 @@ void apply_handles_key(TableEditHandles &handles, const std::string &key,
 	} else if (key == "tightness") {
 		handles.tightness = parse_int(raw_value);
 	} else {
-		unknown.emplace_back(key, raw_value);
+		unknown.emplace_back(authored_key, raw_value);
 	}
 }
 
@@ -504,20 +514,23 @@ enum class State {
 	InBlock,
 };
 
-bool match_section(std::string_view line, Section &out) noexcept {
-	if (line == "[effectdef]") {
+bool match_section(std::string_view line, Section &out) {
+	// The top-level dispatcher uses _stricmp for every section token
+	// [orig: CEffectWorld_ParseSectionCallback @ 0x5ecb40].
+	const std::string folded_line = lowercase(line);
+	if (folded_line == "[effectdef]") {
 		out = Section::Effect;
 		return true;
 	}
-	if (line == "[particledef]") {
+	if (folded_line == "[particledef]") {
 		out = Section::Particle;
 		return true;
 	}
-	if (line == "[tabledef]") {
+	if (folded_line == "[tabledef]") {
 		out = Section::Table;
 		return true;
 	}
-	if (line == "[tabledef_edithandles]") {
+	if (folded_line == "[tabledef_edithandles]") {
 		out = Section::Handles;
 		return true;
 	}
@@ -567,9 +580,13 @@ bool load_particles(std::istream &input, ParticleFile &out, ParseError &error) {
 			case State::TopLevel: {
 				Section parsed = Section::None;
 				if (!match_section(line, parsed)) {
-					error.message = "Unexpected token at top level: " + std::string(line);
-					error.line = static_cast<int>(line_number);
-					return false;
+					// Unrecognized top-level lines are IGNORED, never fatal —
+					// retail skips anything its section matcher doesn't claim
+					// (comment dividers like "//====" ship between blocks in
+					// modded .ptl) [orig: CEffectWorld_ParseSectionCallback
+					// @ 0x5ecb40]. Rejecting the file here lost the entire
+					// Effect_AmHit* family to the stockeffect fallback (D-PTL-13).
+					continue;
 				}
 				section = parsed;
 				state = State::ExpectOpen;
@@ -637,9 +654,11 @@ bool load_particles(std::istream &input, ParticleFile &out, ParseError &error) {
 
 				const std::size_t eq = line.find('=');
 				if (eq == std::string_view::npos) {
-					error.message = "Missing '=' in statement: " + std::string(line);
-					error.line = static_cast<int>(line_number);
-					return false;
+					// Same leniency in-block: the witnessed per-section line
+					// parsers skip lines they don't recognize instead of
+					// failing the file [orig: CEffectWorld_ParseSectionCallback
+					// @ 0x5ecb40].
+					continue;
 				}
 
 				std::string key = trim_str(line.substr(0, eq));

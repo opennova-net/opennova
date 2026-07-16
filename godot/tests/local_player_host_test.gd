@@ -1,6 +1,7 @@
 extends GutTest
 
 const LocalPlayerHost := preload("res://engine/world/local_player_host.gd")
+const MissionRuntime := preload("res://engine/world/mission_runtime.gd")
 
 
 class FakeWeaponPart:
@@ -14,8 +15,57 @@ class FakeWeaponPart:
 	func play_body_clip_variant(key: String, variant: int) -> void:
 		plays.append({"key": key, "variant": variant})
 
+	func play_body_clip_variant_at_time(key: String, variant: int,
+			seconds: float) -> void:
+		plays.append({"key": key, "variant": variant})
+		times.append(seconds)
+
 	func set_animation_time(seconds: float) -> void:
 		times.append(seconds)
+
+	func get_object_data():
+		return null
+
+
+class FakeUserPointData:
+	extends RefCounted
+	var info := {
+		"name": "mflash01",
+		"position": Vector3(0.25, 0.0, 0.0),
+		"rotation": Vector3.RIGHT,
+		"subobject": 0,
+	}
+
+	func get_user_point_count() -> int:
+		return 1
+
+	func get_user_point_info(_index: int) -> Dictionary:
+		return info
+
+
+class FakePosedWeaponPart:
+	extends Node3D
+	var data := FakeUserPointData.new()
+	var skeleton: Skeleton3D
+
+	func get_object_data() -> FakeUserPointData:
+		return data
+
+	func get_skeleton() -> Skeleton3D:
+		return skeleton
+
+
+class ActionParticleHostHarness:
+	extends LocalPlayerHost
+
+	func configure_viewmodel_parts(parts: Array) -> void:
+		_vm_parts = parts
+
+	func action_particle_world_position(userpoint: String) -> Vector3:
+		return _action_particle_world_position(userpoint)
+
+	func action_particle_world_forward(userpoint: String) -> Vector3:
+		return _action_particle_world_forward(userpoint)
 
 
 class FakeWorld:
@@ -28,6 +78,9 @@ class FakeWorld:
 	var last_weapon_part: FakeWeaponPart = null
 	var _has_player := true
 	var _loaded := true
+	var player_position := Vector3.ZERO
+	var player_yaw_deg := 0.0
+	var player_pitch_deg := 0.0
 
 	func is_loaded() -> bool:
 		return _loaded
@@ -79,13 +132,13 @@ class FakeWorld:
 		return true
 
 	func local_player_position() -> Vector3:
-		return Vector3.ZERO
+		return player_position
 
 	func local_player_yaw_deg() -> float:
-		return 0.0
+		return player_yaw_deg
 
 	func local_player_pitch_deg() -> float:
-		return 0.0
+		return player_pitch_deg
 
 	func local_player_anim_key() -> String:
 		return ""
@@ -106,6 +159,14 @@ class FakeWorld:
 	# The ordered action-sound + effect-world seams the host drains on the event batch.
 	var mission_audio = null  # FakeMissionAudio
 	var effect_world = null   # FakeEffectWorld
+	var weapon_tick_consumer := Callable()
+	var effect_anchors: Dictionary = {}
+
+	func register_effect_anchor(owner_key: Variant, resolver: Callable) -> void:
+		effect_anchors[owner_key] = resolver
+
+	func unregister_effect_anchor(owner_key: Variant) -> void:
+		effect_anchors.erase(owner_key)
 
 	func get_mission_audio():
 		return mission_audio
@@ -122,6 +183,13 @@ class FakeWorld:
 			drained.append(event)
 		weapon_events.clear()
 		return drained
+
+	func set_local_player_weapon_tick_consumer(consumer: Callable) -> void:
+		weapon_tick_consumer = consumer
+
+	func present_weapon_tick(events: Array[PlayerWeaponEvent]) -> void:
+		if weapon_tick_consumer.is_valid():
+			weapon_tick_consumer.call(events)
 
 	func local_player_view():
 		return view
@@ -458,22 +526,191 @@ class FakeEffectWorld:
 	extends Node
 	var spawns: Array = []
 
-	func spawn_effect_unless_alive(owner_key, effect: String, pos: Vector3,
-			orientation: Vector3 = Vector3.ZERO) -> int:
-		spawns.append({"owner": owner_key, "effect": effect, "pos": pos, "orientation": orientation})
+	func spawn_effect_request(effect: String, transform: Transform3D,
+			options: Dictionary = {}) -> Dictionary:
+		spawns.append({
+			"kind": "request",
+			"effect": effect,
+			"pos": transform.origin,
+			"orientation": transform.basis.z,
+			"owner": options.get("slot_key"),
+			"options": options.duplicate(),
+		})
+		return {"spawned": true, "accepted": true, "effect_handle": 1, "group_id": 1}
+
+	func spawn_effect_transient(effect: String, pos: Vector3, orientation: Vector3,
+			initial_age_ticks: int, render_domain: int,
+			source_tick: int, source_order: int) -> int:
+		spawns.append({
+			"kind": "transient",
+			"effect": effect,
+			"pos": pos,
+			"orientation": orientation,
+			"initial_age_ticks": initial_age_ticks,
+			"render_domain": render_domain,
+			"source_tick": source_tick,
+			"source_order": source_order,
+		})
 		return 1
 
-	func spawn_effect(effect: String, pos: Vector3, orientation: Vector3 = Vector3.ZERO) -> int:
-		spawns.append({"effect": effect, "pos": pos, "orientation": orientation})
-		return 1
 
-
-func _weapon_particle_event(kind: int, effect: String) -> PlayerWeaponEvent:
+func _weapon_particle_event(kind: int, effect: String, scope_settled := false,
+		third_person := false, vehicle_attack_context := false) -> PlayerWeaponEvent:
 	var event := PlayerWeaponEvent.new()
 	event.action_started = kind
 	event.action_particle = effect
 	event.action_particle_userpoint = "muzzle1"
+	event.scope_settled = scope_settled
+	event.third_person = third_person
+	event.vehicle_attack_context = vehicle_attack_context
 	return event
+
+
+func test_action_particle_userpoint_follows_the_live_weapon_bone_pose() -> void:
+	var host := ActionParticleHostHarness.new()
+	add_child_autofree(host)
+	var part := FakePosedWeaponPart.new()
+	part.transform = Transform3D(Basis.from_euler(Vector3(0.0, 0.3, 0.0)), Vector3(4, 2, -3))
+	add_child_autofree(part)
+	var skeleton := Skeleton3D.new()
+	skeleton.add_bone("muzzle")
+	var rest := Transform3D(Basis.from_euler(Vector3(0.0, -0.2, 0.0)),
+			Vector3(-0.4, 0.2, 0.3))
+	skeleton.set_bone_rest(0, rest)
+	skeleton.reset_bone_pose(0)
+	skeleton.set_bone_pose_position(0, Vector3(0.0, 0.1, -1.0))
+	skeleton.set_bone_pose_rotation(0, Quaternion(Vector3.UP, PI * 0.5))
+	part.add_child(skeleton)
+	part.skeleton = skeleton
+	skeleton.force_update_all_bone_transforms()
+	host.configure_viewmodel_parts([part])
+
+	var raw_position: Vector3 = part.data.info["position"]
+	var global_rest := skeleton.get_bone_global_rest(0)
+	var rest_local := global_rest.affine_inverse() * raw_position
+	var rest_local_forward := global_rest.basis.inverse() * Vector3(part.data.info["rotation"])
+	var posed := skeleton.get_bone_global_pose(0)
+	var expected_position := skeleton.global_transform * (posed * rest_local)
+	var expected_forward := (skeleton.global_transform.basis * posed.basis
+			* rest_local_forward).normalized()
+
+	assert_almost_eq(host.action_particle_world_position("mflash01"),
+			expected_position, Vector3(0.0001, 0.0001, 0.0001),
+			"muzzle position follows the fake-skinned weapon bone")
+	assert_almost_eq(host.action_particle_world_forward("mflash01"),
+			expected_forward, Vector3(0.0001, 0.0001, 0.0001),
+			"muzzle direction follows the same live weapon bone")
+
+
+func test_first_tick_muzzle_uses_the_current_viewmodel_root() -> void:
+	# setup() discards only pre-attachment history: a FIRE produced on the first
+	# live tick must place against that tick's camera/viewmodel, not the fresh
+	# model's default transform at the scene origin.
+	var world := FakeWorld.new()
+	var camera := Camera3D.new()
+	var host := LocalPlayerHost.new()
+	var fx := FakeEffectWorld.new()
+	add_child_autofree(world)
+	add_child_autofree(camera)
+	add_child_autofree(host)
+	add_child_autofree(fx)
+	world.player_position = Vector3(17.0, 2.0, -9.0)
+	world.player_yaw_deg = 35.0
+	world.view = PlayerLocalView.new()
+	world.weapon_view = _weapon_view()
+	world.effect_world = fx
+	host.setup(world, camera)
+	host.set_input_source(func() -> Dictionary:
+		return {})
+	world.weapon_events.append(_weapon_particle_event(2, "Effect_FirstTickMF"))
+
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+
+	assert_eq(fx.spawns.size(), 1, "the post-setup first-tick FIRE event remains live")
+	assert_almost_eq(Vector3(fx.spawns[0]["pos"]), world.last_weapon_part.global_position,
+			Vector3(0.0001, 0.0001, 0.0001),
+			"first-tick muzzle placement uses the current viewmodel transform")
+
+
+func test_fixed_tick_weapon_callback_spawns_before_frame_finalization_once() -> void:
+	var world := FakeWorld.new()
+	var camera := Camera3D.new()
+	var host := LocalPlayerHost.new()
+	var fx := FakeEffectWorld.new()
+	add_child_autofree(world)
+	add_child_autofree(camera)
+	add_child_autofree(host)
+	add_child_autofree(fx)
+	world.player_position = Vector3(6.0, 1.0, -4.0)
+	world.view = PlayerLocalView.new()
+	world.weapon_view = _weapon_view()
+	world.effect_world = fx
+	host.setup(world, camera)
+	host.set_input_source(func() -> Dictionary: return {})
+	host.before_world_tick(0.016)
+
+	var event := PlayerWeaponEvent.new()
+	event.action_effect = 3
+	event.effect_particle = "Effect_SameTick"
+	event.effect_particle_userpoint = "mflash01"
+	var events: Array[PlayerWeaponEvent] = [event]
+	world.present_weapon_tick(events)
+
+	assert_eq(fx.spawns.size(), 1,
+			"the production tick presents its direct effect before EffectWorld advances")
+	assert_eq(int(fx.spawns[0].initial_age_ticks), 0,
+			"a current-tick action is not artificially pre-aged")
+	host.after_world_tick()
+	assert_eq(fx.spawns.size(), 1,
+			"render-frame finalization drains no duplicate after the fixed-tick callback")
+	host.teardown()
+	assert_false(world.weapon_tick_consumer.is_valid(),
+			"teardown releases the world-to-host callback")
+
+
+func test_fixed_tick_viewmodel_clip_keeps_its_catchup_position() -> void:
+	var world := FakeWorld.new()
+	var camera := Camera3D.new()
+	var host := LocalPlayerHost.new()
+	add_child_autofree(world)
+	add_child_autofree(camera)
+	add_child_autofree(host)
+	world.view = PlayerLocalView.new()
+	world.weapon_view = _weapon_view()
+	world.weapon_view.play_serial = 1
+	world.weapon_view.anim_key = "anim_wpn_fire"
+	host.setup(world, camera)
+	host.set_input_source(func() -> Dictionary: return {})
+	host.before_world_tick(0.048)
+
+	var early := PlayerWeaponEvent.new()
+	early.anim_key = "anim_wpn_fire"
+	var early_batch: Array[PlayerWeaponEvent] = [early]
+	world.weapon_view.anim_age_ticks = 0
+	world.present_weapon_tick(early_batch)
+	var empty_batch: Array[PlayerWeaponEvent] = []
+	world.weapon_view.anim_age_ticks = 1
+	world.present_weapon_tick(empty_batch)
+	world.weapon_view.anim_age_ticks = 2
+	world.present_weapon_tick(empty_batch)
+
+	assert_not_null(world.last_weapon_part)
+	assert_almost_eq(world.last_weapon_part.times.back(), 2.0 * MissionRuntime.TICK_DT,
+			0.00001,
+			"an early catch-up event reaches the final frame at age two")
+
+	world.weapon_view.play_serial = 2
+	world.weapon_view.anim_age_ticks = 0
+	var late := PlayerWeaponEvent.new()
+	late.anim_key = "anim_wpn_recoil"
+	var late_batch: Array[PlayerWeaponEvent] = [late]
+	world.present_weapon_tick(late_batch)
+	assert_almost_eq(world.last_weapon_part.times.back(), 0.0, 0.00001,
+			"a late catch-up event remains at its production-tick pose")
+	host.after_world_tick()
+	assert_almost_eq(world.last_weapon_part.times.back(), 0.0, 0.00001,
+			"render-frame finalization does not double-advance fixed-tick phase")
 
 
 func test_action_particles_gate_on_fire_and_scope() -> void:
@@ -508,7 +745,9 @@ func test_action_particles_gate_on_fire_and_scope() -> void:
 	assert_eq(fx.spawns.size(), 0, "non-fire local begins spawn no particle [orig: @0x541b17]")
 
 	# FIRE begin unscoped: the muzzle flash spawns through the slot+24-style guard.
-	world.weapon_events.append(_weapon_particle_event(2, "Effect_TestMF"))
+	var fire_event := _weapon_particle_event(2, "Effect_TestMF")
+	fire_event.age_ticks = 2
+	world.weapon_events.append(fire_event)
 	world.weapon_view = _weapon_view()
 	host.before_world_tick(0.016)
 	host.after_world_tick()
@@ -518,35 +757,82 @@ func test_action_particles_gate_on_fire_and_scope() -> void:
 			"the muzzle guard is keyed by action-slot generation, not the host object")
 	assert_almost_eq((fx.spawns[0].orientation as Vector3).length(), 1.0, 0.001,
 			"the user-point/camera direction reaches the particle descriptor")
+	var first_options: Dictionary = fx.spawns[0].options
+	assert_eq(int(first_options.admission), NovaEffectScene.ADMISSION_SUPPRESS_WHILE_OWNED,
+			"FIRE owns the retail slot+24 live handle")
+	assert_eq(int(first_options.render_domain), NovaEffectScene.RENDER_DOMAIN_WORLD,
+			"local FP muzzle particles join retail's global world particle pass")
+	assert_eq(int(first_options.initial_age_ticks), 2,
+			"delayed FIRE effects are pre-aged to their production tick")
+	# The live group is owner-bound and follows the spawning action's userpoint —
+	# retail re-anchors the recorded actionEffectHandle to that action's bone every
+	# pump tick [orig: WeaponAction_ProcessFrame tracker @0x540edf ->
+	# CEffectEmitter_UpdatePositionAndParams @0x5f6810].
+	assert_eq(int(first_options.binding), NovaEffectScene.BINDING_FOLLOW_OWNER,
+			"the muzzle flash follows its anchor, never world-fixed")
+	assert_eq(first_options.owner_key, fx.spawns[0].owner,
+			"the anchor owner is the action-slot key")
+	assert_true(first_options.owner_transform is Transform3D,
+			"the spawn seeds the anchor pose")
+	assert_true(world.effect_anchors.has(first_options.owner_key),
+			"the host registers the live anchor resolver on the world")
+	var resolver: Callable = world.effect_anchors[first_options.owner_key]
+	var live_pose: Variant = resolver.call()
+	assert_true(live_pose is Transform3D, "the anchor resolves the live userpoint pose")
+	assert_almost_eq((live_pose as Transform3D).origin,
+			(first_options.owner_transform as Transform3D).origin, Vector3.ONE * 0.001,
+			"the resolver and the spawn read the same userpoint")
+	host.refresh_viewmodel()
+	assert_true(world.effect_anchors.is_empty(),
+			"a viewmodel re-mount drops the stale anchors [slot generation turnover]")
 
-	# FIRE begin scoped in first person: suppressed.
+	# FIRE begin scoped MID-RAISE: retail's g_weaponScopeActive is promoted to 1 only
+	# when the ADS ease completes (the settle promoter — the only site setting it),
+	# so the flash still spawns during the raise.
+	# [orig: the promoter @0x4de4f7 g_weaponScopeActive = (g_scopeEngaged != 0) on
+	#  fp-interp completion; gate @0x541aba]
 	var scoped_view := PlayerLocalView.new()
 	scoped_view.scope_engaged = true
+	scoped_view.scope_fraction = 0.5
 	world.view = scoped_view
 	world.weapon_events.append(_weapon_particle_event(2, "Effect_TestMF"))
 	world.weapon_view = _weapon_view()
 	host.before_world_tick(0.016)
 	host.after_world_tick()
-	assert_eq(fx.spawns.size(), 1, "scoped FP fire shows no muzzle flash [orig: @0x541aba]")
+	assert_eq(fx.spawns.size(), 2, "mid-raise scoped fire keeps the muzzle flash [orig: promoter @0x4de4f7]")
+
+	# FIRE begin SETTLED-scoped in first person: suppressed.
+	scoped_view.scope_fraction = 1.0
+	world.weapon_events.append(_weapon_particle_event(2, "Effect_TestMF", true))
+	world.weapon_view = _weapon_view()
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+	assert_eq(fx.spawns.size(), 2, "settled-scoped FP fire shows no muzzle flash [orig: @0x541aba]")
 
 	# Mounted local fire uses the vehicle-capable leg and is not hidden by ADS.
 	scoped_view.mounted = true
 	scoped_view.vehicle_attack_context = true
-	world.weapon_events.append(_weapon_particle_event(2, "Effect_TestMF"))
+	world.weapon_events.append(_weapon_particle_event(2, "Effect_TestMF", true, false, true))
 	world.weapon_view = _weapon_view()
 	host.before_world_tick(0.016)
 	host.after_world_tick()
-	assert_eq(fx.spawns.size(), 2, "mounted scoped fire keeps the muzzle flash")
+	assert_eq(fx.spawns.size(), 3, "mounted scoped fire keeps the muzzle flash")
+	assert_eq(int((fx.spawns[2].options as Dictionary).render_domain),
+			NovaEffectScene.RENDER_DOMAIN_WORLD,
+			"mounted weapon particles stay in the world pass")
 	scoped_view.mounted = false
 	scoped_view.vehicle_attack_context = false
 
 	# The same scoped fire in THIRD person spawns (the 3P leg [orig: @0x541a70]).
 	host.set_third_person(true)
-	world.weapon_events.append(_weapon_particle_event(2, "Effect_TestMF"))
+	world.weapon_events.append(_weapon_particle_event(2, "Effect_TestMF", true, true))
 	world.weapon_view = _weapon_view()
 	host.before_world_tick(0.016)
 	host.after_world_tick()
-	assert_eq(fx.spawns.size(), 3, "3P scoped fire keeps the muzzle flash")
+	assert_eq(fx.spawns.size(), 4, "3P scoped fire keeps the muzzle flash")
+	assert_eq(int((fx.spawns[3].options as Dictionary).render_domain),
+			NovaEffectScene.RENDER_DOMAIN_WORLD,
+			"third-person weapon particles stay in the world pass")
 
 	var first_owner: String = fx.spawns[0].owner
 	host.refresh_viewmodel()
@@ -556,8 +842,126 @@ func test_action_particles_gate_on_fire_and_scope() -> void:
 	world.weapon_view = _weapon_view()
 	host.before_world_tick(0.016)
 	host.after_world_tick()
-	assert_ne(String(fx.spawns[3].owner), first_owner,
+	assert_ne(String(fx.spawns[4].owner), first_owner,
 			"a weapon re-mount gets a fresh action-slot effect handle")
+
+
+func test_catch_up_muzzle_events_keep_each_ticks_scope_gate() -> void:
+	# A render frame can drain several fixed ticks. When those ticks cross the
+	# retail settle promoter, the earlier muzzle remains visible and the later
+	# one is suppressed; the final settled view must not suppress both.
+	var world := FakeWorld.new()
+	var camera := Camera3D.new()
+	var host := LocalPlayerHost.new()
+	add_child_autofree(world)
+	add_child_autofree(camera)
+	add_child_autofree(host)
+	var fx := FakeEffectWorld.new()
+	add_child_autofree(fx)
+	world.effect_world = fx
+	host.setup(world, camera)
+	host.set_input_source(func() -> Dictionary:
+		return {})
+	var final_view := PlayerLocalView.new()
+	final_view.scope_engaged = true
+	final_view.scope_fraction = 1.0
+	world.view = final_view
+	world.weapon_view = _weapon_view()
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+
+	world.weapon_events.append(_weapon_particle_event(2, "Effect_Earlier", false))
+	world.weapon_events.append(_weapon_particle_event(2, "Effect_Settled", true))
+	world.weapon_view = _weapon_view()
+	host.before_world_tick(0.032)
+	host.after_world_tick()
+
+	assert_eq(fx.spawns.size(), 1, "only the pre-settle tick spawns a muzzle")
+	assert_eq(String(fx.spawns[0].effect), "Effect_Earlier")
+
+
+func test_recoil_direct_casing_spawns_every_authored_transient() -> void:
+	# Direct rows are generic Always transients even while settled in ADS. Their
+	# user-point name does not classify the effect, and each fixed-tick event
+	# keeps its own catch-up age. Both FP-authored and third-person effects enter
+	# retail's one global EffectWorld render pass.
+	var world := FakeWorld.new()
+	var camera := Camera3D.new()
+	var host := LocalPlayerHost.new()
+	add_child_autofree(world)
+	add_child_autofree(camera)
+	add_child_autofree(host)
+	var fx := FakeEffectWorld.new()
+	add_child_autofree(fx)
+	world.effect_world = fx
+	host.setup(world, camera)
+	host.set_input_source(func() -> Dictionary:
+		return {})
+	var settled := PlayerLocalView.new()
+	settled.scope_engaged = true
+	settled.scope_fraction = 1.0
+	world.view = settled
+	world.weapon_view = _weapon_view()
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+	for shot in range(2):
+		var event := PlayerWeaponEvent.new()
+		event.action_effect = 3
+		event.effect_particle = "Effect_TestCas"
+		event.effect_particle_userpoint = "bcasing"
+		event.age_ticks = shot + 1
+		event.third_person = shot == 1
+		world.weapon_events.append(event)
+		world.weapon_view = _weapon_view()
+		host.before_world_tick(0.016)
+		host.after_world_tick()
+	assert_eq(fx.spawns.size(), 2,
+			"every authored casing event reaches the batched transient path")
+	assert_eq([fx.spawns[0].initial_age_ticks, fx.spawns[1].initial_age_ticks], [1, 2])
+	assert_eq(int(fx.spawns[0].render_domain), NovaEffectScene.RENDER_DOMAIN_WORLD)
+	assert_eq(int(fx.spawns[1].render_domain), NovaEffectScene.RENDER_DOMAIN_WORLD)
+
+
+func test_revx02_recoil_authored_muzzle_effect_is_presented() -> void:
+	# REVX02 WPN_M4AUTO swaps the usual authored roles: FIRE ejects its casing at
+	# BCASING, while RECOIL carries EFFECT_M16MF at MFLASH01. Deferring every
+	# recoil particle therefore removed the weapon's muzzle flash entirely.
+	var world := FakeWorld.new()
+	var camera := Camera3D.new()
+	var host := LocalPlayerHost.new()
+	add_child_autofree(world)
+	add_child_autofree(camera)
+	add_child_autofree(host)
+	var fx := FakeEffectWorld.new()
+	add_child_autofree(fx)
+	world.effect_world = fx
+	host.setup(world, camera)
+	host.set_input_source(func() -> Dictionary:
+		return {})
+	var settled := PlayerLocalView.new()
+	settled.scope_engaged = true
+	settled.scope_fraction = 1.0
+	world.view = settled
+	world.weapon_view = _weapon_view()
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+
+	var event := PlayerWeaponEvent.new()
+	event.action_effect = 3
+	event.effect_particle = "EFFECT_M16MF"
+	event.effect_particle_userpoint = "MFLASH01"
+	world.weapon_events.append(event)
+	world.weapon_events.append(event)
+	world.weapon_view = _weapon_view()
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+
+	assert_eq(fx.spawns.size(), 2,
+			"repeated direct effects are Always transients, not live-slot suppressed")
+	assert_eq(String(fx.spawns[0].effect), "EFFECT_M16MF")
+	assert_eq(String(fx.spawns[1].effect), "EFFECT_M16MF")
+	assert_false(fx.spawns[0].has("owner"),
+			"direct rows never acquire the FIRE action slot's live handle")
 
 
 func test_catch_up_weapon_action_events_are_not_coalesced() -> void:

@@ -77,8 +77,6 @@ substrate; the divergence is wire/visually equivalent or host-internal.
   `_controlfp(_PC_24, _MCW_PC)` parity sub-build for when byte-exactness is needed.
 - **D-MNU-4** — the original truncates each scaled quad rect to int per element; the
   reimpl applies one float `CanvasItem` scale. A sub-pixel cosmetic difference.
-- **D-PTL-2** — one mesh batch per graphic layer vs the engine's shared vertex/index
-  buffer pooling. A host renderer architecture choice, visually equivalent.
 - **D-NET-131** — a dedicated ("serve only") host runs as a mode-3 in-process listen
   server with `serve_and_play=false`, not the original's mode-1 host-only. Wire-equivalent
   to a joiner ([ADR 0011](0011-single-player-in-process-listen-server.md)).

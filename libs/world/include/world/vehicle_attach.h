@@ -47,9 +47,10 @@ bool entity_process_vehicle_attach(World &world, EntityHandle player, EntityHand
                                    uint8_t bone);
 
 // Apply one C2S 0x27 detach: release every seat this occupant holds on its mount target,
-// clear the mount fields + the 0x40 mounted flag + the stance bits.
+// clear the mount fields + the 0x40 mounted flag + the stance bits, and run the
+// +368 primary-occupant release (the engine-stop edge fires only for the claimant).
 // [orig: Entity_DetachFromVehicle @0x4355F0 — MoveOrder &= ~0x300, EquippedSlot restore
-//  (unmodeled), vehicle+0x170 clear (control-seat semantics fold into our seat table),
+//  (unmodeled), the +368/+0x170 claimant leg @0x4356e9..0x43577c,
 //  all matching mountHandles -> 0xFFFF, Flags &= ~0x40, +0x16C/+0x157/+0x168 cleared.]
 // Returns true iff the entity was mounted.
 bool entity_detach_from_vehicle(World &world, EntityHandle player);

@@ -1,10 +1,154 @@
-// Test parsing items.def — spot-check "dbuggy1" and "Player #1" entries.
+// Test parsing items.def — spot-check "dbuggy1" and "Player #1" entries, plus
+// the per-item particle-effect keys over an inline snippet.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "def/def.h"
 #include "common/test_paths.h"
+
+static int expect_str(const char *what, const char *got, const char *want) {
+    if (strcmp(got, want) != 0) {
+        fprintf(stderr, "FAIL: %s mismatch: expected '%s', got '%s'\n", what, want, got);
+        return 1;
+    }
+    return 0;
+}
+
+/* Per-item particle-effect keys [orig: ItemDef_ParseProperty @ 0x49eb00,
+   particlefx chain @ 0x4a13ad..0x4a179d]: anchored slots take
+   <effect> <userpoint> (particlefxs/particlefxw1/particlefxw2 read an optional
+   third <secondary_effect> token; particlefx/particlefxw3/particlefxw4 never
+   do), the death/h2odeath/fire/other/spawn/finale keys take the effect name
+   only, keys match case-insensitively, and extra tokens are ignored. The
+   snippet mirrors the retail "Drivable Dune Buggy" rows (JOX ITEMS.DEF). */
+static int test_particle_keys(void) {
+    static const char snippet[] =
+        "begin \"Drivable Dune Buggy\"\n"
+        "  id 101291\n"
+        "  sid dbuggy1\n"
+        "  type vehicle\n"
+        /* Leading tab + multi-space separator + trailing spaces, exactly as the
+           retail rows are formatted. */
+        "\tparticlefx   Effect_whiteExhaust FX00 stray_token\n"
+        "  ParticleFXW1 Effect_W1 FX03 Effect_W1S\n"
+        "\tparticlefxw2 Effect_DirtWake FX01  \n"
+        "  particlefxw3 Effect_W3 FX02 Effect_IgnoredW3\n"
+        "  particlefxw4 Effect_W4 FX04\n"
+        "  particlefxs Effect_DirtWakeS FX01 Effect_DirtWakeS2\n"
+        "  particledeath Effect_Fuelxp3\n"
+        "  particleh2odeath Effect_H2OVeExp\n"
+        "  particlefire Effect_VehFire extra junk\n"
+        "  particleother Effect_SmkNStemNP\n"
+        "  particlespawn Effect_Spawn\n"
+        "  particlefinale Effect_VehDrtPuftrk\n"
+        "end\n"
+        "begin \"No Particles\"\n"
+        "  id 5\n"
+        "  sid plain1\n"
+        "  type object\n"
+        "end\n"
+        "begin \"FXS Two Arg\"\n"
+        "  id 6\n"
+        "  sid fxs2\n"
+        "  particlefxs Effect_OnlyTwo FX07\n"
+        "end\n";
+
+    DefItemsFile items;
+    memset(&items, 0, sizeof(items));
+    if (def_parse_items_memory((const unsigned char *)snippet, sizeof(snippet) - 1, &items) != 0) {
+        fprintf(stderr, "FAIL: def_parse_items_memory failed for particle snippet\n");
+        return 1;
+    }
+    int fails = 0;
+    if (items.count != 3) {
+        fprintf(stderr, "FAIL: particle snippet: expected 3 entries, got %zu\n", items.count);
+        def_free_items(&items);
+        return 1;
+    }
+
+    const DefItemDef *b = &items.entries[0];
+    if (b->id != 101291) {
+        fprintf(stderr, "FAIL: particle snippet buggy id mismatch: got %d\n", b->id);
+        ++fails;
+    }
+    /* Every line above is a recognized key — none may fall through to raw_lines. */
+    if (b->raw_lines_count != 0) {
+        fprintf(stderr, "FAIL: particle keys fell through to raw_lines (%zu)\n",
+                b->raw_lines_count);
+        ++fails;
+    }
+
+    /* Slot A two-arg; the third token is IGNORED (particlefx has no secondary). */
+    fails += expect_str("particlefx.effect", b->particlefx.effect, "Effect_whiteExhaust");
+    fails += expect_str("particlefx.userpoint", b->particlefx.userpoint, "FX00");
+    fails += expect_str("particlefx.secondary_effect", b->particlefx.secondary_effect, "");
+
+    /* fxw1 with the optional secondary, matched case-insensitively. */
+    fails += expect_str("particlefxw1.effect", b->particlefxw1.effect, "Effect_W1");
+    fails += expect_str("particlefxw1.userpoint", b->particlefxw1.userpoint, "FX03");
+    fails += expect_str("particlefxw1.secondary_effect", b->particlefxw1.secondary_effect,
+                        "Effect_W1S");
+
+    /* fxw2 without the optional secondary. */
+    fails += expect_str("particlefxw2.effect", b->particlefxw2.effect, "Effect_DirtWake");
+    fails += expect_str("particlefxw2.userpoint", b->particlefxw2.userpoint, "FX01");
+    fails += expect_str("particlefxw2.secondary_effect", b->particlefxw2.secondary_effect, "");
+
+    /* fxw3/fxw4 never read a third token [orig: @ 0x4a158b / @ 0x4a15eb]. */
+    fails += expect_str("particlefxw3.effect", b->particlefxw3.effect, "Effect_W3");
+    fails += expect_str("particlefxw3.userpoint", b->particlefxw3.userpoint, "FX02");
+    fails += expect_str("particlefxw3.secondary_effect", b->particlefxw3.secondary_effect, "");
+    fails += expect_str("particlefxw4.effect", b->particlefxw4.effect, "Effect_W4");
+    fails += expect_str("particlefxw4.userpoint", b->particlefxw4.userpoint, "FX04");
+    fails += expect_str("particlefxw4.secondary_effect", b->particlefxw4.secondary_effect, "");
+
+    /* fxs with the third token consumed as the secondary effect. */
+    fails += expect_str("particlefxs.effect", b->particlefxs.effect, "Effect_DirtWakeS");
+    fails += expect_str("particlefxs.userpoint", b->particlefxs.userpoint, "FX01");
+    fails += expect_str("particlefxs.secondary_effect", b->particlefxs.secondary_effect,
+                        "Effect_DirtWakeS2");
+
+    /* Effect-only keys; extra tokens after the effect name are ignored. */
+    fails += expect_str("particledeath", b->particledeath, "Effect_Fuelxp3");
+    fails += expect_str("particleh2odeath", b->particleh2odeath, "Effect_H2OVeExp");
+    fails += expect_str("particlefire", b->particlefire, "Effect_VehFire");
+    fails += expect_str("particleother", b->particleother, "Effect_SmkNStemNP");
+    fails += expect_str("particlespawn", b->particlespawn, "Effect_Spawn");
+    fails += expect_str("particlefinale", b->particlefinale, "Effect_VehDrtPuftrk");
+
+    /* An item without any particle keys leaves every field empty. */
+    const DefItemDef *plain = &items.entries[1];
+    fails += expect_str("plain particlefx.effect", plain->particlefx.effect, "");
+    fails += expect_str("plain particlefx.userpoint", plain->particlefx.userpoint, "");
+    fails += expect_str("plain particlefxs.effect", plain->particlefxs.effect, "");
+    fails += expect_str("plain particlefxs.secondary_effect",
+                        plain->particlefxs.secondary_effect, "");
+    fails += expect_str("plain particlefxw1.effect", plain->particlefxw1.effect, "");
+    fails += expect_str("plain particlefxw2.effect", plain->particlefxw2.effect, "");
+    fails += expect_str("plain particlefxw3.effect", plain->particlefxw3.effect, "");
+    fails += expect_str("plain particlefxw4.effect", plain->particlefxw4.effect, "");
+    fails += expect_str("plain particledeath", plain->particledeath, "");
+    fails += expect_str("plain particleh2odeath", plain->particleh2odeath, "");
+    fails += expect_str("plain particlefire", plain->particlefire, "");
+    fails += expect_str("plain particleother", plain->particleother, "");
+    fails += expect_str("plain particlespawn", plain->particlespawn, "");
+    fails += expect_str("plain particlefinale", plain->particlefinale, "");
+
+    /* fxs with only two args: the secondary stays empty. */
+    const DefItemDef *fxs2 = &items.entries[2];
+    fails += expect_str("fxs2 particlefxs.effect", fxs2->particlefxs.effect, "Effect_OnlyTwo");
+    fails += expect_str("fxs2 particlefxs.userpoint", fxs2->particlefxs.userpoint, "FX07");
+    fails += expect_str("fxs2 particlefxs.secondary_effect",
+                        fxs2->particlefxs.secondary_effect, "");
+
+    def_free_items(&items);
+    if (fails != 0) {
+        fprintf(stderr, "FAIL: %d particle-key check(s) failed\n", fails);
+        return 1;
+    }
+    return 0;
+}
 
 int main(void) {
     const char *repo_root = test_paths_repo_root(__FILE__);
@@ -75,6 +219,22 @@ int main(void) {
 
     if (buggy->id != 101291) {
         fprintf(stderr, "FAIL: buggy id mismatch: expected 101291, got %d\n", buggy->id);
+        def_free_items(&items);
+        return 1;
+    }
+
+    /* Shipped JOX data marks the drivable buggy PlayerControl and anchors its
+       running exhaust at FX00. Keep the fixture chain intact so runtime tests
+       exercise the same startup gate as retail data. */
+    if ((buggy->attrib & 0x40u) == 0) {
+        fprintf(stderr, "FAIL: buggy attrib missing PlayerControl (0x40): got 0x%x\n",
+                buggy->attrib);
+        def_free_items(&items);
+        return 1;
+    }
+    if (expect_str("buggy particlefx.effect", buggy->particlefx.effect,
+                   "Effect_whiteExhaust") != 0 ||
+        expect_str("buggy particlefx.userpoint", buggy->particlefx.userpoint, "FX00") != 0) {
         def_free_items(&items);
         return 1;
     }
@@ -214,6 +374,11 @@ int main(void) {
     }
 
     def_free_items(&items);
+
+    if (test_particle_keys() != 0) {
+        return 1;
+    }
+
     printf("PASS: items parsing OK\n");
     return 0;
 }

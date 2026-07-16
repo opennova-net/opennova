@@ -104,6 +104,34 @@ class World;     // fwd
 class AiSystem;  // fwd (lives in world/ai.h; World holds a non-owning pointer so the
                  // shared command layer can reach an entity's AI component in-engine)
 
+// Host-facing lifecycle for effects that exist only while a vehicle has its single
+// tracked primary occupant (the +368 claimant). Payload fields are the target vehicle's
+// net_id, bms_id, spawn_origin.
+// [orig: occupied spawn in entity_update_damage_accumulator_and_shadow @0x48fa70 gate
+// @0x48faad (attrib&0x40 && occupantEntity(+368)); release in Entity_DetachFromVehicle
+// @0x4355f0 stop leg @0x4356e9..0x435759 — runs ONLY when the detacher IS the claimant.]
+void emit_vehicle_control_started(World &world, const Entity &vehicle);
+void emit_vehicle_control_stopped(World &world, const Entity &vehicle);
+void emit_vehicle_control_stopped(World &world, uint16_t target_net_id,
+                                   int32_t target_bms_id, uint32_t target_spawn_origin);
+// The +368 primary-occupant claim: Controller/Driver seats claim when the slot is empty
+// or already theirs; a Gunner claims only when empty (the emplaced-gun UseGun leg);
+// Passengers never claim. Emits vehicle_control_started on the empty -> claimed edge.
+// Returns true when the occupant holds the claim after the call.
+// [orig: Entity_AttachToVehicleSlot @0x4946d0 — +368 writes @0x4947d2 (ctrlx,
+// empty-or-same), @0x4948d8 (drvrx, empty-or-same), @0x49495e (UseGun, empty only)]
+bool vehicle_claim_primary_occupant(World &world, Entity &vehicle, EntityHandle occupant,
+                                    SeatType seat);
+// Clears the claim and emits vehicle_control_stopped iff `occupant` IS the claimant —
+// a second control-seat occupant staying aboard does NOT keep the engine running.
+// [orig: Entity_DetachFromVehicle @0x4355f0 — `occupantEntity == entity` gate @0x4356e9,
+// emitter release + engine-stop sound @0x435716..0x435759, +368 clear @0x43577c]
+bool vehicle_release_primary_occupant(World &world, Entity &vehicle, EntityHandle occupant);
+// True when at least one Controller/Driver seat has a live, internally consistent
+// occupant link. Motor input only — NOT the effect-lifecycle predicate (that is the
+// primary-occupant claim above).
+bool vehicle_has_valid_control_occupant(const World &world, const Entity &vehicle);
+
 // Snap a mounted occupant onto its seat: occ.position = vehicle.position +
 // rotate(seat.seat_local, -vehicle.yaw); a Gunner faces vehicle.yaw - seat.yaw_offset,
 // others face vehicle.yaw + seat.yaw_offset. Pure geometry (no AI), shared by

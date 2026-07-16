@@ -30,6 +30,8 @@
 #include <npwire/protocol_message.h>
 #include <npwire/replication_model.h>
 
+#include <terrain/height_field.h>
+
 #include <world/ai.h>
 #include <world/player_spawn.h>
 #include <world/world.h>
@@ -179,13 +181,58 @@ int main() {
 		defs[1].max_age_ticks = 186;
 		defs[1].kztype = DEF_AMMO_KZ_C4;
 		defs[1].bullet_radius_fp16 = 182;
+		// The per-surface impact rows (the real AMMO_AK47_556MM shape): the bake maps
+		// tag names to the canonical table slots, keeps the FIRST duplicate, empties
+		// 'none' columns, and discards the count column [orig: effects_table stage
+		// @ 0x40a46a; count discard @ 0x40a587; AmmoDef_InitEffectsTable @ 0x409f20].
+		static DefEffectTableEntry fx_rows[4];
+		std::memset(fx_rows, 0, sizeof(fx_rows));
+		std::snprintf(fx_rows[0].surface_type, sizeof(fx_rows[0].surface_type), "dirt");
+		std::snprintf(fx_rows[0].hit_effect, sizeof(fx_rows[0].hit_effect), "Effect_AmHitDirt");
+		std::snprintf(fx_rows[0].impact_sound, sizeof(fx_rows[0].impact_sound), "IMP_BULLET_DIRT");
+		fx_rows[0].value = 15;
+		std::snprintf(fx_rows[1].surface_type, sizeof(fx_rows[1].surface_type), "Player");
+		std::snprintf(fx_rows[1].hit_effect, sizeof(fx_rows[1].hit_effect), "Effect_AmHitBody");
+		std::snprintf(fx_rows[1].impact_sound, sizeof(fx_rows[1].impact_sound), "IMP_BULLET_PLAYER");
+		fx_rows[1].value = 10;
+		std::snprintf(fx_rows[2].surface_type, sizeof(fx_rows[2].surface_type), "zip");
+		std::snprintf(fx_rows[2].hit_effect, sizeof(fx_rows[2].hit_effect), "none");
+		std::snprintf(fx_rows[2].impact_sound, sizeof(fx_rows[2].impact_sound), "WSH_BULLET_BY");
+		fx_rows[2].value = 10;
+		std::snprintf(fx_rows[3].surface_type, sizeof(fx_rows[3].surface_type), "dirt"); // dup
+		std::snprintf(fx_rows[3].hit_effect, sizeof(fx_rows[3].hit_effect), "Effect_WRONG");
+		std::snprintf(fx_rows[3].impact_sound, sizeof(fx_rows[3].impact_sound), "none");
+		defs[1].effects_table = fx_rows;
+		defs[1].effects_table_count = 4;
 		file.entries = defs;
 		file.count = 2;
 		world.ammo = np::build_ammo_table(file);
+		defs[1].effects_table = nullptr; // static rows; keep def_free-style cleanup moot
+		defs[1].effects_table_count = 0;
 		np::resolve_weapon_round_types(world.weapons, world.ammo);
 	}
 	if (!expect(world.weapons.entries[5].ammo_index == 1, "round_type resolved to ammo 1"))
 		return 1;
+	{
+		// The baked rows land in the canonical tag slots [orig: g_AmmoEffectTagTable
+		// @ 0x813420 — player=2, dirt=5, zip=3].
+		const w::AmmoTableEntry *a = world.ammo.by_index(1);
+		if (!expect(a != nullptr, "ammo 1 valid")) return 1;
+		if (!expect(a->impact_effects[5].effect == "Effect_AmHitDirt" &&
+		                    a->impact_effects[5].sound == "IMP_BULLET_DIRT",
+		            "dirt row baked at tag 5 (first duplicate wins)"))
+			return 1;
+		if (!expect(a->impact_effects[2].effect == "Effect_AmHitBody",
+		            "case-insensitive 'Player' tag baked at 2"))
+			return 1;
+		if (!expect(a->impact_effects[3].effect.empty() &&
+		                    a->impact_effects[3].sound == "WSH_BULLET_BY",
+		            "'none' effect column stays empty; the sound still bakes"))
+			return 1;
+		if (!expect(a->impact_effects[11].effect.empty() && a->impact_effects[11].sound.empty(),
+		            "unauthored tags stay empty"))
+			return 1;
+	}
 
 	ns::LoopbackChannel loop;
 	ns::UdpSessionTransport udp_b(ns::UdpSessionTransport::Role::Host);
@@ -226,6 +273,62 @@ int main() {
 	for (int i = 0; i < 3; ++i) np::Server_TickUpdate(ctx, anchor);
 	if (!expect(world.round_sim.active_count == 0, "round consumed by the hit")) return 1;
 	if (!expect(world.registry.get(hc)->health == 90, "150 - 60 kinetic damage = 90")) return 1;
+	// The hit queued ONE impact for the presenting host: tag 2 'player' (pool-0
+	// organics), direction = the normalized flight ray, position on the hit sphere
+	// short of the victim at x=30 [orig: Projectile_HandleEntityImpact ->
+	// Projectile_SpawnImpactEffect @ 0x4e9b80].
+	if (!expect(world.round_sim.impacts.size() == 1, "one impact queued for the hit")) return 1;
+	{
+		const w::RoundImpact &imp = world.round_sim.impacts[0];
+		if (!expect(imp.effect_tag == 2, "entity hit selects tag 2 'player'")) return 1;
+		if (!expect(imp.ammo_index == 1, "impact carries the round's ammo index")) return 1;
+		if (!expect(std::fabs(imp.direction.x - 1.0f) < 0.01f, "impact direction = +X flight"))
+			return 1;
+		if (!expect(imp.position.x > 27.0f && imp.position.x < 30.5f,
+		            "impact position lands at the victim's hit sphere"))
+			return 1;
+	}
+	world.round_sim.impacts.clear(); // the presenter drain, stubbed
+
+	// --- 2b. Terrain impact: a missed shot stops ON the surface with the dirt tag.
+	// Flat synthetic heightfield (ground = 0 everywhere); the round flies down at
+	// -45 deg from z=+5 on an empty lane (y=50, no entities). The impact-effect tag
+	// is the no-surface-map default (type 1 + 4 = dirt) and the interpolated stop
+	// sits on the plane, not a sub-step under it
+	// [orig: Projectile_HandleTerrainImpact -> Projectile_SpawnImpactEffect
+	//  @ 0x4e9b80; D-WPN-15 carries the remaining tag-selection gaps]. ---
+	{
+		std::vector<uint16_t> flat_hm(512 * 512, 0);
+		std::vector<int> flat_grid(256, 1);
+		opennova::terrain::TerrainHeightField field;
+		field.heightmap = flat_hm.data();
+		field.dim = 512;
+		field.layout.sector_grid = flat_grid.data();
+		field.layout.origin_x = 0;
+		field.layout.origin_y = 0;
+
+		w::RoundSpawnParams params;
+		params.origin = {0.0f, 50.0f, 5.0f};
+		params.dir_yaw_bam = 0;                    // +X
+		params.dir_pitch_bam = int32_t(0xE0000000); // -45 deg
+		params.ammo_index = 1;
+		if (!expect(world.round_sim.spawn(world, params) >= 0, "terrain-leg round spawned"))
+			return 1;
+		for (int i = 0; i < 4 && world.round_sim.active_count > 0; ++i)
+			world.round_sim.tick(world, &field);
+		if (!expect(world.round_sim.active_count == 0, "terrain stopped the round")) return 1;
+		if (!expect(world.round_sim.impacts.size() == 1, "one terrain impact queued")) return 1;
+		const w::RoundImpact &imp = world.round_sim.impacts[0];
+		if (!expect(imp.effect_tag == 1 + 4, "terrain hit takes the no-map dirt tag [orig: @ 0x4e8862]"))
+			return 1;
+		if (!expect(std::fabs(imp.position.z) < 0.02f,
+		            "the interpolated stop sits ON the surface, not a sub-step under it"))
+			return 1;
+		if (!expect(imp.direction.z < -0.5f && imp.direction.x > 0.5f,
+		            "impact direction = the normalized downward flight ray"))
+			return 1;
+		world.round_sim.impacts.clear();
+	}
 
 	// The processed hit also writes the sticky SHOT relations (players carry
 	// group 0, so only the single rows land; rows outside the retail < 0x80

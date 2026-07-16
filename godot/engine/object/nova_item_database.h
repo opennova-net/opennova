@@ -11,6 +11,8 @@
 #include <unordered_map>
 #include <vector>
 
+struct DefItemDef;
+
 namespace godot {
 
 class NovaResourceRoot;
@@ -51,10 +53,34 @@ private:
 		// "snd:"-prefixed `type marker` item (e.g. soundloop_1 LPNV_LIGHT). Time-of-day
 		// slots; the runtime plays the first non-empty one resolvable in the .lwf bank.
 		String soundloops[7];
+		// items.def per-item particle-effect keys, verbatim authored names. Anchored
+		// slots carry {effect, userpoint[, secondary]}; the death/fire/other family is
+		// effect-name-only (their anchors are the fixed husk userpoint names Dead/Fire/
+		// Other, resolved at runtime). [orig: ItemDef_ParseProperty @ 0x49eb00
+		// particlefx family @ 0x4a13ad..0x4a179d; mission-start resolve + slot-A attach
+		// resolve_item_materials_and_spawn_bone_trails @ 0x522ee0]
+		struct ParticleFx {
+			String effect;
+			String userpoint;
+			String secondary_effect;
+		};
+		ParticleFx particlefx;   // slot A — the always-on attached emitter (exhaust)
+		ParticleFx particlefxs;  // slot B — slow/secondary wake tier (movement-driven)
+		ParticleFx particlefxw[4]; // slots C..F — the fxw1..4 wake tiers
+		String particledeath;
+		String particleh2odeath;
+		String particlefire;
+		String particleother;
+		String particlespawn;
+		String particlefinale;
 	};
 	std::unordered_map<int, Item> items;
 	String source_path;
 	String last_error;
+
+	// The one DefItemDef -> Item copy (both load paths adopt through it, so new
+	// items.def fields land in one place).
+	static Item item_from_entry(const ::DefItemDef &entry);
 
 	// Items in a stable display order (by display name, then id), since the backing
 	// store is unordered. Shared by get_item_ids() / get_items().
@@ -122,6 +148,15 @@ public:
 	// items.def soundloop_1..7 as a 7-entry array (empty strings for unused slots).
 	// These are the looping ambient sound-set names for "snd:" marker items.
 	PackedStringArray get_sound_loops(int id) const;
+	// The item's particle-effect keys as authored, keyed by the ITEMS.DEF key names
+	// ("particlefx"/"particlefxs"/"particlefxw1".."particlefxw4" -> {effect, userpoint,
+	// secondary_effect} sub-dictionaries; "particledeath"/"particleh2odeath"/
+	// "particlefire"/"particleother"/"particlespawn"/"particlefinale" -> effect name).
+	// Empty strings = key absent; empty Dictionary = unknown id. [orig:
+	// ItemDef_ParseProperty @ 0x49eb00; slot-A runtime attach witness
+	// resolve_item_materials_and_spawn_bone_trails @ 0x522ee0 ->
+	// Entity_SpawnBoneTrailEffect @ 0x43bef0]
+	Dictionary get_particle_effects(int id) const;
 	Dictionary get_item(int id) const;
 
 	// Enumeration for UI (e.g. the mission editor's place-object palette). Both are

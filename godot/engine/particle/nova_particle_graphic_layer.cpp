@@ -117,7 +117,10 @@ void NovaParticleGraphicLayer::set_blend_mode_raw(const String &v) { blend_mode_
 String NovaParticleGraphicLayer::get_blend_mode_raw() const { return blend_mode_raw; }
 void NovaParticleGraphicLayer::set_blend_mode(int v) { blend_mode = std::clamp(v, 0, 7); emit_changed(); }
 int NovaParticleGraphicLayer::get_blend_mode() const { return blend_mode; }
-void NovaParticleGraphicLayer::set_flip_frames(int v) { flip_frames = v; emit_changed(); }
+void NovaParticleGraphicLayer::set_flip_frames(int v) {
+	flip_frames = std::clamp(v, 1, opennova::particle::kMaxParticleFlipFrames);
+	emit_changed();
+}
 int NovaParticleGraphicLayer::get_flip_frames() const { return flip_frames; }
 void NovaParticleGraphicLayer::set_flip_rate(int v) { flip_rate = v; emit_changed(); }
 int NovaParticleGraphicLayer::get_flip_rate() const { return flip_rate; }
@@ -154,7 +157,8 @@ void NovaParticleGraphicLayer::copy_from_native(const opennova::particle::Graphi
 	texture = String::utf8(layer.texture.c_str());
 	blend_mode_raw = String::utf8(layer.blend_mode_raw.c_str());
 	blend_mode = static_cast<int>(layer.blend_mode);
-	flip_frames = layer.flip_frames;
+	flip_frames = std::clamp(
+			layer.flip_frames, 1, opennova::particle::kMaxParticleFlipFrames);
 	flip_rate = layer.flip_rate;
 	color1 = color3_to_godot(layer.color1);
 	color2 = color3_to_godot(layer.color2);
@@ -183,7 +187,8 @@ opennova::particle::GraphicLayer NovaParticleGraphicLayer::to_native() const {
 	out.texture = texture.utf8().get_data();
 	out.blend_mode_raw = blend_mode_raw.utf8().get_data();
 	out.blend_mode = static_cast<opennova::particle::BlendMode>(std::clamp(blend_mode, 0, 7));
-	out.flip_frames = flip_frames;
+	out.flip_frames = std::clamp(
+			flip_frames, 1, opennova::particle::kMaxParticleFlipFrames);
 	out.flip_rate = flip_rate;
 	out.color1 = godot_to_color3(color1);
 	out.color2 = godot_to_color3(color2);

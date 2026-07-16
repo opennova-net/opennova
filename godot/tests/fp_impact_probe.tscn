@@ -1,0 +1,4 @@
+[gd_scene load_steps=2 format=3 uid="uid://c8fpimpactprb0"]
+[ext_resource type="Script" path="res://tests/fp_impact_probe.gd" id="1_fpimpact"]
+[node name="FpImpactProbe" type="Node"]
+script = ExtResource("1_fpimpact")

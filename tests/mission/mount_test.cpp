@@ -9,6 +9,7 @@
 #include "mission/event_runtime.h"
 #include "mission/bms.h"
 #include "world/ai.h"
+#include "world/vehicle_attach.h"
 #include "world/world.h"
 
 using namespace opennova;
@@ -63,6 +64,28 @@ static Entity make_soldier(uint16_t ssn, float x, float y, float z) {
     return e;
 }
 
+static Entity make_vehicle(uint16_t ssn, SeatType seat_type) {
+    Entity e;
+    e.net_id = ssn;
+    e.bms_id = 77;
+    e.spawn_origin = (1u << 24) | 3u;
+    e.kind = EntityKind::Item;
+    Seat seat;
+    seat.type = seat_type;
+    e.seats.push_back(seat);
+    return e;
+}
+
+static Entity make_dual_control_vehicle(uint16_t ssn) {
+    Entity e = make_vehicle(ssn, SeatType::Controller);
+    e.seats[0].bone_index = 7;
+    Seat driver;
+    driver.type = SeatType::Driver;
+    driver.bone_index = 9;
+    e.seats.push_back(driver);
+    return e;
+}
+
 struct ClipSource : IRootMotionSource {
     int available_state = -1;
 
@@ -106,6 +129,158 @@ int main() {
         CHECK(!gun->seats[0].occupant.valid());
         CHECK(w.commands.find_mounted_on(200) == 0);
         CHECK(!w.commands.dismount(100)); // not mounted -> false
+    }
+
+    // ---- only Controller/Driver seats publish the vehicle-control lifecycle ----
+    {
+        const SeatType control_types[] = {SeatType::Controller, SeatType::Driver};
+        for (SeatType control_type : control_types) {
+            World w;
+            w.registry.configure_pool(0, 16);
+            w.registry.configure_pool(1, 16);
+            w.registry.spawn(1, make_vehicle(200, control_type));
+            w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
+
+            CHECK(w.commands.mount(100, 200));
+            CHECK(w.effects.entries().size() == 1);
+            if (w.effects.entries().size() == 1) {
+                const auto &started = w.effects.entries()[0];
+                CHECK(started.kind == "vehicle_control_started");
+                CHECK(started.a == 200);
+                CHECK(started.b == 77);
+                CHECK(started.c == 0x01000003);
+            }
+
+            CHECK(w.commands.dismount(100));
+            CHECK(w.effects.entries().size() == 2);
+            if (w.effects.entries().size() == 2) {
+                const auto &stopped = w.effects.entries()[1];
+                CHECK(stopped.kind == "vehicle_control_stopped");
+                CHECK(stopped.a == 200);
+                CHECK(stopped.b == 77);
+                CHECK(stopped.c == 0x01000003);
+            }
+        }
+    }
+
+    // A vehicle can expose both Controller and Driver seats. The +368 claim is
+    // single-owner: the second control occupant never claims (no started repeat), the
+    // claimant's departure runs the stop leg even while the other controller remains
+    // seated, and the survivor does not inherit the claim [orig:
+    // Entity_AttachToVehicleSlot @0x4946d0 empty-or-same claim;
+    // Entity_DetachFromVehicle @0x4356e9 claimant-only stop leg].
+    {
+        World w;
+        w.registry.configure_pool(0, 16);
+        w.registry.configure_pool(1, 16);
+        const EntityHandle vh = w.registry.spawn(1, make_dual_control_vehicle(200));
+        const EntityHandle c0 = w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
+        const EntityHandle c1 = w.registry.spawn(0, make_soldier(101, 0.f, 0.f, 0.f));
+
+        CHECK(w.commands.mount(100, 200));
+        CHECK(w.commands.mount(101, 200));
+        CHECK(w.registry.get(c0)->mount_type == SeatType::Controller);
+        CHECK(w.registry.get(c1)->mount_type == SeatType::Driver);
+        CHECK(w.registry.get(vh)->seats[0].occupant == c0);
+        CHECK(w.registry.get(vh)->seats[1].occupant == c1);
+        CHECK(w.effects.entries().size() == 1);
+        if (w.effects.entries().size() == 1)
+            CHECK(w.effects.entries()[0].kind == "vehicle_control_started");
+
+        CHECK(w.commands.dismount(100)); // the claimant departs -> stop, c1 still seated
+        CHECK(w.effects.entries().size() == 2);
+        if (w.effects.entries().size() == 2)
+            CHECK(w.effects.entries()[1].kind == "vehicle_control_stopped");
+        CHECK(w.commands.dismount(101)); // the non-claimant departure is silent
+        CHECK(w.effects.entries().size() == 2);
+    }
+
+    // The accepted wire attach/detach path publishes the same controlling-seat edges.
+    {
+        World w;
+        w.registry.configure_pool(0, 16);
+        w.registry.configure_pool(1, 16);
+        Entity vehicle = make_vehicle(200, SeatType::Driver);
+        vehicle.seats[0].bone_index = 7;
+        const EntityHandle vh = w.registry.spawn(1, vehicle);
+        const EntityHandle sh = w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
+
+        CHECK(entity_process_vehicle_attach(w, sh, vh, 7));
+        CHECK(w.effects.entries().size() == 1);
+        if (w.effects.entries().size() == 1) {
+            const auto &started = w.effects.entries()[0];
+            CHECK(started.kind == "vehicle_control_started");
+            CHECK(started.a == 200 && started.b == 77 && started.c == 0x01000003);
+        }
+        CHECK(entity_detach_from_vehicle(w, sh));
+        CHECK(w.effects.entries().size() == 2);
+        if (w.effects.entries().size() == 2) {
+            const auto &stopped = w.effects.entries()[1];
+            CHECK(stopped.kind == "vehicle_control_stopped");
+            CHECK(stopped.a == 200 && stopped.b == 77 && stopped.c == 0x01000003);
+        }
+    }
+
+    // The wire path obeys the same single-owner claim for dual control seats.
+    {
+        World w;
+        w.registry.configure_pool(0, 16);
+        w.registry.configure_pool(1, 16);
+        const EntityHandle vh = w.registry.spawn(1, make_dual_control_vehicle(200));
+        const EntityHandle c0 = w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
+        const EntityHandle c1 = w.registry.spawn(0, make_soldier(101, 0.f, 0.f, 0.f));
+
+        CHECK(entity_process_vehicle_attach(w, c0, vh, 7));
+        CHECK(entity_process_vehicle_attach(w, c1, vh, 9));
+        CHECK(w.effects.entries().size() == 1);
+        if (w.effects.entries().size() == 1)
+            CHECK(w.effects.entries()[0].kind == "vehicle_control_started");
+
+        CHECK(entity_detach_from_vehicle(w, c0)); // the claimant departs -> stop
+        CHECK(w.effects.entries().size() == 2);
+        if (w.effects.entries().size() == 2)
+            CHECK(w.effects.entries()[1].kind == "vehicle_control_stopped");
+        CHECK(entity_detach_from_vehicle(w, c1)); // the non-claimant departure is silent
+        CHECK(w.effects.entries().size() == 2);
+    }
+
+    // A passenger is occupancy, not vehicle control; mount, dismount, and restore stay silent.
+    {
+        World w;
+        w.registry.configure_pool(0, 16);
+        w.registry.configure_pool(1, 16);
+        w.registry.spawn(1, make_vehicle(200, SeatType::Passenger));
+        w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
+        CHECK(w.commands.mount(100, 200));
+        CHECK(w.effects.entries().empty());
+        const World::Snapshot occupied = w.snapshot();
+        CHECK(w.commands.dismount(100));
+        CHECK(w.effects.entries().empty());
+        w.restore(occupied);
+        CHECK(w.effects.entries().empty());
+    }
+
+    // Teardown can remove the vehicle before the occupant is detached. The occupant's cached
+    // target identity still has to publish the matching stop edge.
+    {
+        World w;
+        w.registry.configure_pool(0, 16);
+        w.registry.configure_pool(1, 16);
+        const EntityHandle vh = w.registry.spawn(1, make_vehicle(200, SeatType::Controller));
+        w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
+        CHECK(w.commands.mount(100, 200));
+        w.effects.clear();
+        w.registry.despawn(vh);
+
+        CHECK(w.commands.dismount(100));
+        CHECK(w.effects.entries().size() == 1);
+        if (w.effects.entries().size() == 1) {
+            const auto &stopped = w.effects.entries()[0];
+            CHECK(stopped.kind == "vehicle_control_stopped");
+            CHECK(stopped.a == 200);
+            CHECK(stopped.b == 77);
+            CHECK(stopped.c == 0x01000003);
+        }
     }
 
     // ---- edges: full seat, already-mounted, seatless target ----
@@ -323,6 +498,36 @@ int main() {
         w.restore(snap);
         CHECK(!w.registry.get(sh)->mounted);            // rewound
         CHECK(!w.registry.get(gh)->seats[0].occupant.valid()); // seat freed
+    }
+
+    // Restoring occupied control seats republishes one per-vehicle lifecycle edge so
+    // hosts can rebuild effects that were cleared with the transient EffectLog.
+    {
+        World w;
+        w.registry.configure_pool(0, 16);
+        w.registry.configure_pool(1, 16);
+        const EntityHandle vh = w.registry.spawn(1, make_dual_control_vehicle(200));
+        const EntityHandle sh0 = w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
+        const EntityHandle sh1 = w.registry.spawn(0, make_soldier(101, 0.f, 0.f, 0.f));
+        CHECK(w.commands.mount(100, 200));
+        CHECK(w.commands.mount(101, 200));
+        const World::Snapshot occupied = w.snapshot();
+        CHECK(w.commands.dismount(100));
+        CHECK(w.commands.dismount(101));
+
+        w.restore(occupied);
+        CHECK(w.registry.get(sh0)->mounted);
+        CHECK(w.registry.get(sh1)->mounted);
+        CHECK(w.registry.get(vh)->seats[0].occupant == sh0);
+        CHECK(w.registry.get(vh)->seats[1].occupant == sh1);
+        CHECK(w.effects.entries().size() == 1);
+        if (w.effects.entries().size() == 1) {
+            const auto &started = w.effects.entries()[0];
+            CHECK(started.kind == "vehicle_control_started");
+            CHECK(started.a == 200);
+            CHECK(started.b == 77);
+            CHECK(started.c == 0x01000003);
+        }
     }
 
     if (failures == 0) std::printf("mount_test: OK\n");

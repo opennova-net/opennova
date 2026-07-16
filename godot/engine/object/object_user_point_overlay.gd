@@ -2,7 +2,8 @@ class_name ObjectUserPointOverlay
 extends Node3D
 
 # Reusable 3D overlay for NovaObjectData userpoints. With a source NovaObjectModel,
-# points are resolved through that model's live part nodes so PANM movement is visible.
+# points are resolved through that model's live skeleton / part nodes so skeletal and
+# PANM movement are visible.
 # Without a source model, the overlay is just model-local and can be transformed as a
 # whole by a mission entity transform.
 
@@ -69,8 +70,14 @@ func refresh_points() -> void:
 	_rebuild()
 
 
-func _process(_delta: float) -> void:
+## Resolve the current source pose immediately. Debug hosts and tests use this
+## instead of reaching through the process callback.
+func refresh_now() -> void:
 	_update_live_marker_positions()
+
+
+func _process(_delta: float) -> void:
+	refresh_now()
 
 
 func _rebuild() -> void:
@@ -170,20 +177,59 @@ func _rest_part_transform(subobject: int):
 
 
 func _update_live_marker_positions() -> void:
-	if _source_model == null or _markers.is_empty():
+	if _source_model == null or not is_instance_valid(_source_model) or _markers.is_empty():
 		return
 	var part_nodes: Dictionary = {}
 	if _source_model.has_method("get_render_part_nodes"):
 		part_nodes = _source_model.get_render_part_nodes()
+	var skeleton: Skeleton3D = null
+	if _source_model.has_method("get_skeleton"):
+		skeleton = _source_model.call("get_skeleton") as Skeleton3D
+	var visual_layers := _source_visual_layers()
 	for entry in _markers:
 		var marker := entry.get("node") as Node3D
 		if marker == null or not is_instance_valid(marker):
 			continue
+		_sync_marker_layers(marker, visual_layers)
 		var subobject := int(entry.get("subobject", -1))
 		var global_pos: Vector3
-		if subobject >= 0 and part_nodes.has(subobject):
+		if skeleton != null and subobject >= 0 and subobject < skeleton.get_bone_count():
+			# Fake-skinned rigid parts carry authored model-space user points by the
+			# same subobject/bone index. Move model space into the bone's rest frame,
+			# then through its live pose -- exactly the action-particle attachment
+			# transform used by LocalPlayerHost.
+			var model_to_world := (skeleton.global_transform
+					* skeleton.get_bone_global_pose(subobject)
+					* skeleton.get_bone_global_rest(subobject).affine_inverse())
+			global_pos = model_to_world * (entry.get("model_position", Vector3.ZERO) as Vector3)
+		elif subobject >= 0 and part_nodes.has(subobject):
 			var part := part_nodes[subobject] as Node3D
 			global_pos = part.global_transform * (entry.get("part_local", Vector3.ZERO) as Vector3)
 		else:
 			global_pos = _source_model.global_transform * (entry.get("model_position", Vector3.ZERO) as Vector3)
 		marker.global_position = global_pos
+
+
+# First-person arms/guns render through the dedicated render-FOV camera on a
+# non-world cull layer. Their debug marker and label must ride the same mask or
+# the world camera projects the point differently and it appears off the muzzle.
+func _source_visual_layers() -> int:
+	var layers := _collect_visual_layers(_source_model)
+	return layers if layers != 0 else 1
+
+
+func _collect_visual_layers(node: Node) -> int:
+	if node == null or not is_instance_valid(node):
+		return 0
+	var layers := int((node as VisualInstance3D).layers) if node is VisualInstance3D else 0
+	for child in node.get_children():
+		layers |= _collect_visual_layers(child)
+	return layers
+
+
+func _sync_marker_layers(marker: Node3D, layers: int) -> void:
+	if marker is VisualInstance3D:
+		(marker as VisualInstance3D).layers = layers
+	for child in marker.get_children():
+		if child is VisualInstance3D:
+			(child as VisualInstance3D).layers = layers

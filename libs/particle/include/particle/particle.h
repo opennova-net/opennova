@@ -9,6 +9,11 @@
 
 namespace opennova::particle {
 
+// Keep authored and programmatic flipbooks within the editor-supported range.
+// Parser, bake, and renderer boundaries all clamp to this shared limit so an
+// untrusted frame count cannot trigger unbounded allocations or texture probes.
+inline constexpr int kMaxParticleFlipFrames = 256;
+
 // Engine: Joint Operations particle effect format (.ptl).
 // IDB: retail Jointops.exe.
 // Section dispatcher: CEffectWorld_ParseSectionCallback @ 0x5ecb40.
@@ -172,7 +177,7 @@ struct GraphicLayer {
 	std::string texture;           // +0..259, e.g. "dirtpuf.tga"; may be empty ("blank" layer)
 	std::string blend_mode_raw;    // +260..323, lowercased input to ParseBlendMode
 	BlendMode blend_mode = BlendMode::Blend;  // +324, result of CParticleDefEntry_ParseBlendMode @ 0x5e29f0
-	int flip_frames = 1;           // +716, default 1
+	int flip_frames = 1;           // +716, default 1; consumers clamp to 1..256
 	int flip_rate = 8;             // +720
 
 	// Per-frame UV rect array (runtime-baked alongside CurveRef LUTs). Engine

@@ -78,6 +78,25 @@ struct RoundDeath {
     uint8_t adm_index = 0;
 };
 
+// A round impact the flight pass resolved this tick — the IMPACT-EFFECT seam. The host
+// drains these and spawns the ammo effects_table row for the tag (effect + sound), with
+// the emitter forward = the flight direction. Retail ballistic rounds select and spawn
+// this row from the physical impact handlers at collision time
+// [orig: Projectile_UpdatePhysics @ 0x4E9D70 -> Projectile_SpawnImpactEffect
+// @ 0x4E9B80]. Weapon_RaycastAndSpawnImpact @ 0x4E8460 is a separate Knife-only
+// instant-kill-zone leaf (flags&0x400, kztype==1) whose ray extent is
+// AmmoDef.kz_maxradius; it is not the bullet path. Terrain surface-map sampling,
+// entity material, and the water plane remain D-WPN-15 (net-re §5.60).
+struct RoundImpact {
+    Vec3 position;
+    Vec3 direction;         // normalized flight direction (the witnessed descriptor dir)
+    int32_t ammo_index = -1;
+    int32_t effect_tag = 0; // canonical effect-tag index [orig: g_AmmoEffectTagTable
+                            //  @ 0x813420; world/ammo_table.h kImpactEffectTagNames]
+    uint32_t tick = 0;      // authoritative presentation tick for catch-up aging
+    uint64_t source_order = 0; // stable order across impacts resolved on the same tick
+};
+
 class RoundSim {
 public:
     static constexpr int kCapacity = 512; // [orig: 128 groups x 4 sub-slots @0xB7E1A8]
@@ -89,6 +108,13 @@ public:
     // every tick (npruntime server tick) and stages the death broadcasts.
     std::vector<RoundDeath> deaths;
 
+    // Impacts resolved this tick, in tick order — drained by the presenting host
+    // every frame (the sim stays render-free). Bounded: a headless server never
+    // drains, so emission stops at the cap instead of growing without bound.
+    static constexpr size_t kMaxPendingImpacts = 256;
+    std::vector<RoundImpact> impacts;
+    uint64_t next_impact_order = 1;
+
     // Spawn one round at fire time [orig: RoundData_SpawnRound @ 0x4EC0D0 default path].
     // Returns the round slot, or -1 (pool full / non-ballistic ammo / null ammo).
     int spawn(World &world, const RoundSpawnParams &params);
@@ -97,6 +123,9 @@ public:
     // -> Projectile_UpdatePhysics @ 0x4E9D70]: advance along velocity, terrain stop,
     // organic hit test, authority damage, death detection.
     void tick(World &world, const terrain::TerrainHeightField *terrain);
+
+    // Mission restart discards all transient projectile/presentation state.
+    void reset() noexcept;
 };
 
 } // namespace opennova::world

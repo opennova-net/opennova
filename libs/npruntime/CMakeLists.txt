@@ -29,8 +29,9 @@ target_include_directories(opennova_npruntime
 # bms::encode_header_blob directly (direct-dependency hygiene). No cycle: neither depends on npruntime.
 # opennova_def: weapon_table_build parses DefWeaponsFile into the world armory table
 # (D-NET-141); def is a leaf C library — no cycle.
+# opennova_io: header-only strutil (ascii iequals) for the ammo effects-table bake.
 target_link_libraries(opennova_npruntime PUBLIC
-    opennova_netsim opennova_npwire opennova_novaworld_session opennova_world opennova_mission_format opennova_def)
+    opennova_netsim opennova_npwire opennova_novaworld_session opennova_world opennova_mission_format opennova_def opennova_io)
 
 target_compile_features(opennova_npruntime PUBLIC cxx_std_17)
 

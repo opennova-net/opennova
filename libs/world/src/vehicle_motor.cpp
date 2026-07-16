@@ -44,18 +44,31 @@ int32_t sin22_of_bam(int32_t bam) {
 // our seat model keys the same relation through Seat::occupant + Entity::mount_*,
 // the wire-bone divergence is tracked in D-NET-157].
 Entity *resolve_controller(World &world, Entity &veh) {
+    Entity *controller = nullptr;
     for (Seat &s : veh.seats) {
-        if (s.type != SeatType::Controller && s.type != SeatType::Driver) continue;
+        if (!is_vehicle_control_seat(s.type)) continue;
         if (!s.occupant.valid()) continue;
         Entity *occ = world.registry.get(s.occupant);
         if (occ == nullptr || !occ->mounted || occ->mount_target != veh.handle ||
-            (occ->mount_type != SeatType::Controller && occ->mount_type != SeatType::Driver)) {
+            !is_vehicle_control_seat(occ->mount_type)) {
             s.occupant = EntityHandle{}; // [orig: stale mountHandles slot -> 0xFFFF]
             continue;
         }
-        return occ;
+        if (controller == nullptr) controller = occ;
     }
-    return nullptr;
+    // Stale claimant (despawned without a detach — the host has no death->detach chain
+    // yet): validate the +368 mirror each tick alongside the seat sweep. The stop edge
+    // fires for THE claimant only, matching the detach leg; a surviving second control
+    // occupant does not inherit the claim (it re-arms only on a fresh attach).
+    // [orig: Entity_DetachFromVehicle @0x4356e9..0x43577c]
+    if (veh.primary_occupant.valid()) {
+        Entity *po = world.registry.get(veh.primary_occupant);
+        if (po == nullptr || !po->mounted || po->mount_target != veh.handle) {
+            veh.primary_occupant = EntityHandle{};
+            emit_vehicle_control_stopped(world, veh);
+        }
+    }
+    return controller;
 }
 
 } // namespace

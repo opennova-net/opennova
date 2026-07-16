@@ -52,6 +52,11 @@ constexpr int kPlayerVisualItemId = 105310; // items.def "Player #1, Single play
 // Canonical definition lives in libs/world/player_spawn.h (shared with the npruntime host).
 constexpr uint16_t kRetailPlayerMinEntitySlot = opennova::world::kRetailPlayerMinEntitySlot;
 
+uint64_t present_effect_origin_key(int kind, int index) {
+	return (static_cast<uint64_t>(static_cast<uint32_t>(kind)) << 32) |
+	       static_cast<uint32_t>(index);
+}
+
 uint64_t perf_now_us() {
 	using Clock = std::chrono::steady_clock;
 	return static_cast<uint64_t>(
@@ -174,7 +179,10 @@ NovaSimulation::NovaSimulation() {
 }
 
 void NovaSimulation::reset_world() {
+	invalidate_present_effect_pose_cache();
 	pending_weapon_events_.clear();
+	weapon_anim_tick_ = 0;
+	local_round_sequence_ = 0;
 	weapon_active_ = false;
 	weapon_fire_held_ = false;
 	weapon_fire_pressed_ = false;
@@ -841,6 +849,7 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_static_method("NovaSimulation", D_METHOD("fov_vertical_from_horizontal", "fov_h_deg", "aspect"), &NovaSimulation::fov_vertical_from_horizontal);
 	ClassDB::bind_method(D_METHOD("get_local_player_weapon_state"), &NovaSimulation::get_local_player_weapon_state);
 	ClassDB::bind_method(D_METHOD("drain_local_player_weapon_events"), &NovaSimulation::drain_local_player_weapon_events);
+	ClassDB::bind_method(D_METHOD("drain_round_impacts"), &NovaSimulation::drain_round_impacts);
 	ClassDB::bind_method(D_METHOD("get_local_player_health"), &NovaSimulation::get_local_player_health);
 	ClassDB::bind_method(D_METHOD("get_local_player_max_health"), &NovaSimulation::get_local_player_max_health);
 	ClassDB::bind_method(D_METHOD("get_local_player_team"), &NovaSimulation::get_local_player_team);
@@ -880,6 +889,14 @@ void NovaSimulation::_bind_methods() {
 			&NovaSimulation::get_foliage_mask_anchor_positions);
 	ClassDB::bind_method(D_METHOD("get_entity_effect_state_for_ssn", "ssn"),
 	                     &NovaSimulation::get_entity_effect_state_for_ssn);
+	ClassDB::bind_method(D_METHOD("get_present_effect_state_for_ssn", "ssn"),
+	                     &NovaSimulation::get_present_effect_state_for_ssn);
+	ClassDB::bind_method(D_METHOD("get_present_effect_state_for_wire_handle", "wire_handle"),
+	                     &NovaSimulation::get_present_effect_state_for_wire_handle);
+	ClassDB::bind_method(D_METHOD("get_present_effect_state_for_bms_id", "bms_id"),
+	                     &NovaSimulation::get_present_effect_state_for_bms_id);
+	ClassDB::bind_method(D_METHOD("get_present_effect_state_for_origin", "kind", "index"),
+	                     &NovaSimulation::get_present_effect_state_for_origin);
 	ClassDB::bind_method(D_METHOD("get_entity_bms_id", "index"), &NovaSimulation::get_entity_bms_id);
 	ClassDB::bind_method(D_METHOD("get_entity_owner_connection_id", "index"),
 	                     &NovaSimulation::get_entity_owner_connection_id);
@@ -1012,8 +1029,8 @@ bool NovaSimulation::step() {
 	// No-net editor/unit path: one authoritative logic tick, no replication.
 	apply_player_input_pre_tick();
 	world_->run_logic_tick(/*is_authority=*/true);
-	tick_local_player_weapon(); // the equipped-slot FSM pump, after the world tick (net-re §5.62)
-	tick_local_player_view();   // the ADS ease + 3P anchor chase, same cadence
+	tick_local_player_view();   // retail promotes the per-frame view before weapon actions
+	tick_local_player_weapon(); // the equipped-slot FSM pump, after the view promoter
 	last_sim_tick_us_ = perf_now_us() - sim_start;
 	return true;
 }
@@ -1166,8 +1183,8 @@ void NovaSimulation::host_pump() {
 	apply_player_input_pre_tick(); // input -> the host player's body input, before logic (ADR 0009/0012)
 	NovaUdpPumpDatagramSocket sock(host_listen_ ? pump_.ptr() : nullptr);
 	np::host_session_pump(host_owner_, sock); // recv-drain -> tick_connections -> Server_TickUpdate -> S2C flush
-	tick_local_player_weapon(); // the equipped-slot FSM pump, after the world tick (net-re §5.62)
-	tick_local_player_view();   // the ADS ease + 3P anchor chase, same cadence
+	tick_local_player_view();   // retail promotes the per-frame view before weapon actions
+	tick_local_player_weapon(); // the equipped-slot FSM pump, after the view promoter
 	if (runtime_) runtime_->Client_ProcessNetworkFrame(now); // fold host_loop_ -> ClientState (HostClient view)
 }
 
@@ -1201,8 +1218,8 @@ void NovaSimulation::joiner_pump() {
 	}
 	apply_player_input_pre_tick();                  // input -> L's body input
 	world_->run_logic_tick(/*is_authority=*/false); // local World tick: moves L's motor ONLY (never Server_TickUpdate)
-	tick_local_player_weapon(); // the equipped-slot FSM pump, after the world tick (net-re §5.62)
-	tick_local_player_view();   // the ADS ease + 3P anchor chase, same cadence
+	tick_local_player_view();   // retail promotes the per-frame view before weapon actions
+	tick_local_player_weapon(); // the equipped-slot FSM pump, after the view promoter
 
 	// Run the client frame: recv-fold (-> ClientState) + connect-drive + the C2S 0x0C uplink (gated
 	// InMatch && deployed inside the runtime). Build the uplink from L once it exists.
@@ -1654,6 +1671,7 @@ void NovaSimulation::set_local_player_weapon(const Dictionary &p_def,
 	weapon_play_serial_ = 0;
 	weapon_anim_key_ = String();
 	weapon_anim_variant_ = 0;
+	weapon_anim_tick_ = 0;
 	weapon_fired_serial_ = weapon_dry_serial_ = weapon_reload_serial_ = 0;
 	weapon_unscope_serial_ = weapon_rescope_serial_ = 0;
 	weapon_action_serial_ = 0;
@@ -1678,6 +1696,7 @@ void NovaSimulation::clear_local_player_weapon() {
 	weapon_reload_pressed_ = false;
 	weapon_clip_rings_.clear();
 	weapon_anim_variant_ = 0;
+	weapon_anim_tick_ = 0;
 	player_view_.scope_engaged = false;
 	player_view_.scope_step = 0;
 	player_view_.ease_steps = opennova::world::kScopeEaseSteps;
@@ -1729,9 +1748,12 @@ void NovaSimulation::set_local_player_camera_third_person(bool p_third_person) {
 	player_view_.third_person = p_third_person; // [orig: g_camera_mode @ 0xA890C8]
 }
 
-// One 62.5 Hz tick of the view state, after the weapon pump: the ADS ease and the
+// One 62.5 Hz tick of the view state, before the weapon pump: the ADS ease and the
 // third-person anchor chase run at the WORLD cadence, so camera lag is identical at
-// any render rate [orig: the 62 Hz frame loop; ThirdPersonCamera_Update @ 0x437af0].
+// any render rate. Retail's Player_UpdatePerFrame call precedes the later
+// WeaponAction_ProcessAllEntities call, so this tick's settle promoter is visible to
+// action routing while an action's unscope/rescope begins easing on the next tick
+// [orig: call sites @ 0x42c18e / @ 0x526786; promoter @ 0x4de4f7].
 void NovaSimulation::tick_local_player_view() {
 	if (!world_ || !world_->cached.local_player.valid()) {
 		player_view_ = opennova::world::PlayerViewState{};
@@ -1831,7 +1853,12 @@ void NovaSimulation::tick_local_player_weapon() {
 	in.is_local = true;
 	in.is_authority = !joiner_; // the joiner defers the refill to the §5.58 round-trip
 	in.auto_reload = true;      // [orig: g_autoReloadEnabled @ 0x24D2118, default on]
-	in.scope_active = player_view_.scope_engaged;
+	// The weapon FSM consumes the promoted/settled scope bit, not the raw
+	// requested-engagement bit. Player_UpdatePerFrame runs before the weapon
+	// pump in retail and only promotes g_weaponScopeActive after the ease has
+	// completed [orig: promoter @ 0x4de4f7; weapon pump @ 0x526786].
+	in.scope_active = player_view_.scope_engaged &&
+			!opennova::world::player_view_scope_ease_active(player_view_);
 	opennova::world::WeaponFsmEvents ev;
 	opennova::world::weapon_fsm_tick(weapon_def_, weapon_slot_, in, ev);
 	weapon_fire_pressed_ = false; // edges consume on the first tick of the frame
@@ -1842,6 +1869,7 @@ void NovaSimulation::tick_local_player_weapon() {
 	if (ev.play_anim) {
 		++weapon_play_serial_;
 		weapon_anim_key_ = String::utf8(ev.anim_key);
+		weapon_anim_tick_ = world_->logic_tick;
 		// The play consumes the slot ring and latches the served variant — the host
 		// plays exactly this variant on every viewmodel part
 		// [orig: AnimMap_PlayAnimBySlot @ 0x40bda0 advances the head and latches
@@ -1879,10 +1907,27 @@ void NovaSimulation::tick_local_player_weapon() {
 		}
 		has_presentation_event = true;
 	}
+	if (ev.action_effect >= 0 && ev.action_effect < opennova::world::weapon_action::kCount) {
+		// The recoil-row DIRECT effect leg — casing eject / bolt smoke at the arbiter
+		// tick. Copied like the begin leg so a weapon switch cannot swap the payload.
+		// [orig: WeaponAction_Recoil @ 0x542dd0 spawn @ 0x542f64]
+		const opennova::world::WeaponFsmAction &act = weapon_def_.actions[ev.action_effect];
+		pending.action_effect = ev.action_effect;
+		pending.effect_particle = String::utf8(act.particle);
+		pending.effect_particle_userpoint = String::utf8(act.particle_userpoint);
+		has_presentation_event = true;
+	}
 	// Preserve the retail call order within one pump: clip start, begin leg, then
 	// finish leg. Records themselves stay in logic-tick order until the host drains.
 	if (has_presentation_event) {
 		pending.world_position = get_local_player_position();
+		pending.scope_settled = player_view_.scope_engaged &&
+				!opennova::world::player_view_scope_ease_active(player_view_);
+		pending.third_person = player_view_.third_person;
+		const opennova::world::Entity *local =
+				world_->registry.get(world_->cached.local_player);
+		pending.vehicle_attack_context =
+				local != nullptr && mount_blocks_weapon_channel(*local);
 		pending_weapon_events_.push_back(std::move(pending));
 	}
 	if (ev.fired) {
@@ -1895,6 +1940,87 @@ void NovaSimulation::tick_local_player_weapon() {
 		AiEntity *p = world_->ai ? world_->ai->for_handle(world_->cached.local_player) : nullptr;
 		if (p && p->inf.active)
 			opennova::world::infantry_weapon_attack_stamp(p->inf, weapon_attack_kind_);
+		// Local/SP fire already passed the same FSM/ammo authority that the remote
+		// C2S 0x06 handler validates. Append the host's round-ring record and spawn
+		// the authoritative projectile here; the loopback server handler correctly
+		// ignores this player because retail's local action has already done both.
+		// [orig: WeaponAction_Fire @ 0x542c5e ->
+		// Entity_FireWeaponAndSendPacket @ 0x42bd80 local re-entry ->
+		// RoundData_AddRound @ 0x4fdb40 inline RoundData_SpawnRound @ 0x4ec0d0]
+		opennova::world::Entity *shooter =
+				world_->registry.get(world_->cached.local_player);
+		if (!joiner_ && shooter != nullptr && p != nullptr) {
+			const uint8_t adm_index = shooter->equipped_adm_index;
+			const opennova::world::WeaponTableEntry *adm =
+					world_->weapons.by_index(adm_index);
+			if (adm != nullptr && adm->ammo_index >= 0) {
+				opennova::world::Vec3 origin = shooter->position;
+				if (local_eye_valid_) {
+					origin.x = local_eye_mission_[0];
+					origin.y = local_eye_mission_[1];
+					origin.z = local_eye_mission_[2];
+				} else {
+					origin.z += 1.0f;
+				}
+				// The round bearing frame IS the engine heading frame: RoundSim's
+				// (cos, sin) mission-axis mapping is wire-validated on the 0x06 yaw
+				// BAM (round_sim.cpp spawn, D-NET-153), and the retail spawner runs
+				// raw descriptor angles through sin/cos [orig: RoundData_SpawnRound
+				// trig @ 0x4ec511..0x4ec5fb]. Applying the (90 - heading)
+				// mission-yaw flip here mirrored every local shot across the NE
+				// diagonal (impacts landed 90 deg off the aim ray - the
+				// fp_impact_probe pin; the same mistake D-NET-153 records for the
+				// wire leg).
+				const int32_t dir_yaw = p->heading;
+				const int32_t dir_pitch = p->pitch;
+				local_round_sequence_ =
+						static_cast<uint16_t>(local_round_sequence_ + 1u);
+				const uint16_t shot_seq = local_round_sequence_;
+
+				opennova::world::RoundEvent round_event;
+				round_event.shooter_handle = world_->cached.local_player.packed;
+				round_event.origin_x = static_cast<int32_t>(
+						std::lround(double(origin.x) * kFixed16));
+				round_event.origin_y = static_cast<int32_t>(
+						std::lround(double(origin.y) * kFixed16));
+				round_event.origin_z = static_cast<int32_t>(
+						std::lround(double(origin.z) * kFixed16));
+				round_event.dir_yaw = dir_yaw;
+				round_event.dir_pitch = dir_pitch;
+				round_event.shot_seq = shot_seq;
+				const uint32_t clip_before_consume = static_cast<uint32_t>(
+						std::max(0, ev.fired_clip_before_consume));
+				round_event.mode_flags = static_cast<uint8_t>(
+						((clip_before_consume & 0x3u) << 4u) | 0x02u);
+				const bool vehicle_attack_context =
+						mount_blocks_weapon_channel(*shooter);
+				const bool scope_settled = player_view_.scope_engaged &&
+						!opennova::world::player_view_scope_ease_active(player_view_);
+				// The ordinary on-foot hip-fire leg is exact: retail passes
+				// Weapon_GetScopeZoomLevel(false, 12), which returns 12, and the
+				// server's bit-6-clearing composite preserves it. The predicate
+				// reads the PROMOTED scope bit, so ADS raise and third-person use
+				// the same 12. Settled-FP/mounted zoom levels remain D-WPN-8.
+				if (player_view_.third_person ||
+						(!scope_settled && !vehicle_attack_context &&
+								(weapon_def_.flags & 0x20000000) == 0)) {
+					round_event.subtype = 12;
+				}
+				round_event.adm_index = adm_index;
+				world_->rounds.add(round_event);
+
+				opennova::world::RoundSpawnParams round;
+				round.owner = world_->cached.local_player;
+				round.shooter_handle = world_->cached.local_player.packed;
+				round.origin = origin;
+				round.dir_yaw_bam = dir_yaw;
+				round.dir_pitch_bam = dir_pitch;
+				round.ammo_index = adm->ammo_index;
+				round.adm_index = adm_index;
+				round.shot_seq = shot_seq;
+				world_->round_sim.spawn(*world_, round);
+			}
+		}
 	}
 	if (ev.dry_fired) ++weapon_dry_serial_;
 	if (ev.reload_requested) ++weapon_reload_serial_;
@@ -1932,6 +2058,9 @@ Dictionary NovaSimulation::get_local_player_weapon_state() const {
 	out["current"] = weapon_slot_.current;
 	out["anim_key"] = weapon_anim_key_;
 	out["anim_variant"] = weapon_anim_variant_;
+	const uint32_t anim_age_ticks = world_ && !weapon_anim_key_.is_empty()
+			? world_->logic_tick - weapon_anim_tick_ : 0;
+	out["anim_age_ticks"] = static_cast<int64_t>(anim_age_ticks);
 	out["play_serial"] = static_cast<int64_t>(weapon_play_serial_);
 	// The last-started action's audio/effect legs remain useful snapshot diagnostics;
 	// ordered delivery uses drain_local_player_weapon_events().
@@ -1971,6 +2100,22 @@ Dictionary NovaSimulation::get_local_player_weapon_state() const {
 	out["clip"] = weapon_slot_.clip;
 	out["reserve"] = weapon_slot_.reserve;
 	out["kick"] = static_cast<int>(weapon_slot_.kick);
+	// Read-only diagnostics for the local FIRE -> RoundData_AddRound seam. The last
+	// row lets parity tests pin the observed tag-2 mode byte without exposing mutable
+	// ring state. [orig: ((MountSlot.clip & 3) << 4) | 2 sampled before consume
+	// @ WeaponAction_Fire 0x542c11 / 0x542c75].
+	out["round_ring_count"] = world_ ? world_->rounds.count : 0;
+	if (world_ && world_->rounds.count > 0) {
+		const int last = world_->rounds.cursor == 0
+				? opennova::world::RoundRing::kCapacity - 1
+				: world_->rounds.cursor - 1;
+		const opennova::world::RoundEvent &round = world_->rounds.records[
+				static_cast<std::size_t>(last)];
+		out["last_round_flags"] = round.mode_flags;
+		out["last_round_subtype"] = round.subtype;
+		out["last_round_slot_byte"] = round.slot_byte;
+		out["last_round_seq"] = round.shot_seq;
+	}
 	// The 3P body's weapon channel (the entity's secondary AnimMap channel): the clip key
 	// + its own playhead for the host's mask-bone override. The key remains populated
 	// when the state id matches the primary because the two playheads are independent.
@@ -2008,11 +2153,51 @@ Array NovaSimulation::drain_local_player_weapon_events() {
 		row["action_soundset"] = event.action_soundset;
 		row["action_particle"] = event.action_particle;
 		row["action_particle_userpoint"] = event.action_particle_userpoint;
+		row["scope_settled"] = event.scope_settled;
+		row["third_person"] = event.third_person;
+		row["vehicle_attack_context"] = event.vehicle_attack_context;
 		row["action_finished"] = event.action_finished;
 		row["action_end_soundset"] = event.action_end_soundset;
+		row["action_effect"] = event.action_effect;
+		row["effect_particle"] = event.effect_particle;
+		row["effect_particle_userpoint"] = event.effect_particle_userpoint;
 		out.push_back(row);
 	}
 	pending_weapon_events_.clear();
+	return out;
+}
+
+// Drain the round impacts the flight sim resolved since the last call, each row already
+// resolved through the ammo effects_table (canonical tag -> {effect, sound}); rows whose
+// tag has neither an effect nor a sound are dropped, matching the original impact
+// presenter [orig: Projectile_SpawnImpactEffect @ 0x4e9b80; selection witness on
+// world/round_sim.h RoundImpact].
+Array NovaSimulation::drain_round_impacts() {
+	Array out;
+	if (!world_) return out;
+	const uint32_t now = world_->logic_tick;
+	for (const opennova::world::RoundImpact &imp : world_->round_sim.impacts) {
+		const opennova::world::AmmoTableEntry *ammo = world_->ammo.by_index(imp.ammo_index);
+		if (ammo == nullptr) continue;
+		if (imp.effect_tag < 0 || imp.effect_tag >= opennova::world::kImpactEffectTagCount)
+			continue;
+		const opennova::world::AmmoImpactEffectRow &row = ammo->impact_effects[imp.effect_tag];
+		if (row.effect.empty() && row.sound.empty()) continue;
+		Dictionary d;
+		// mission (x,y,z) -> Godot (x, z, -y), the get_local_player_position convention.
+		d["position"] = Vector3(imp.position.x, imp.position.z, -imp.position.y);
+		d["direction"] = Vector3(imp.direction.x, imp.direction.z, -imp.direction.y);
+		d["effect"] = String::utf8(row.effect.c_str());
+		d["sound"] = String::utf8(row.sound.c_str());
+		// A lifecycle rewind must never turn a future/stale source tick into an
+		// unsigned multi-billion-tick particle pre-age request.
+		const uint32_t age_ticks = now >= imp.tick ? now - imp.tick : 0u;
+		d["age_ticks"] = static_cast<int64_t>(age_ticks);
+		d["source_tick"] = static_cast<int64_t>(imp.tick);
+		d["source_order"] = static_cast<int64_t>(imp.source_order);
+		out.push_back(d);
+	}
+	world_->round_sim.impacts.clear();
 	return out;
 }
 
@@ -2058,6 +2243,10 @@ void NovaSimulation::restart() {
 	pending_weapon_events_.clear();
 	world_->restore(baseline_); // rewinds registry/vars/env/clock + re-inits systems (incl. AI;
 	                            // WacSystem::on_load also resets its 62-tick accumulator)
+	weapon_anim_tick_ = world_->logic_tick;
+	// The restored world can share a tick number with a previously cached view.
+	// Force the next FollowOwner query to rebuild against the post-restart epoch.
+	invalidate_present_effect_pose_cache();
 }
 
 Array NovaSimulation::drain_effects() {
@@ -2429,6 +2618,139 @@ PackedVector3Array NovaSimulation::get_entity_effect_state_for_ssn(int p_ssn) co
 			static_cast<float>(entity->yaw),
 			static_cast<float>(entity->roll)));
 	return out;
+}
+
+void NovaSimulation::invalidate_present_effect_pose_cache() const {
+	present_effect_pose_cache_valid_ = false;
+	present_effect_pose_cache_runtime_ = nullptr;
+	present_effect_poses_by_handle_.clear();
+	present_effect_handles_by_bms_id_.clear();
+	present_effect_handles_by_ssn_.clear();
+	present_effect_handles_by_origin_.clear();
+}
+
+void NovaSimulation::ensure_present_effect_pose_cache() const {
+	if (!world_ || !runtime_) {
+		if (present_effect_pose_cache_valid_) invalidate_present_effect_pose_cache();
+		return;
+	}
+
+	const opennova::netsim::ClientState &client = runtime_->state();
+	const uint32_t logic_tick = world_->logic_tick;
+	if (present_effect_pose_cache_valid_ &&
+			present_effect_pose_cache_runtime_ == runtime_.get() &&
+			present_effect_pose_cache_logic_tick_ == logic_tick &&
+			present_effect_pose_cache_client_frame_ == client.frames_applied) {
+		return;
+	}
+
+	present_effect_poses_by_handle_.clear();
+	present_effect_handles_by_bms_id_.clear();
+	present_effect_handles_by_ssn_.clear();
+	present_effect_handles_by_origin_.clear();
+	present_effect_poses_by_handle_.reserve(client.entities.size());
+	present_effect_handles_by_bms_id_.reserve(client.entities.size());
+	present_effect_handles_by_ssn_.reserve(client.entities.size());
+	present_effect_handles_by_origin_.reserve(client.entities.size());
+
+	for (const opennova::netsim::ClientEntityState &entity_state : client.entities) {
+		// Match present_snapshot_from_client_view's joiner self-filter: the host's
+		// wire echo H is not drawn and therefore cannot own a presented effect.
+		if (joiner_ && joiner_self_wire_handle_ != 0 &&
+				entity_state.handle == joiner_self_wire_handle_) {
+			continue;
+		}
+
+		const int32_t heading_bam = static_cast<int32_t>(
+				static_cast<uint32_t>(entity_state.yaw_byte) << 24);
+		PresentEffectPose pose;
+		pose.position = Vector3(
+				static_cast<float>(entity_state.x / kFixed16),
+				static_cast<float>(entity_state.z / kFixed16),
+				static_cast<float>(-entity_state.y / kFixed16));
+		pose.rotation_deg = Vector3(
+				0.0f,
+				static_cast<float>(opennova::world::mission_yaw_deg_from_bam_heading(
+						heading_bam)),
+				0.0f);
+		present_effect_poses_by_handle_[entity_state.handle] = pose;
+
+		// A joiner's decoded handles belong to the host, so only wire identity is
+		// meaningful there. Host/listen views can resolve the same registry entity
+		// used by get_present_snapshot() for BMS origin and SSN identity.
+		if (joiner_) continue;
+		const opennova::world::Entity *entity = world_->registry.get(
+				opennova::world::EntityHandle{entity_state.handle});
+		if (!entity) continue;
+		if (entity->bms_id > 0) {
+			present_effect_handles_by_bms_id_[static_cast<int>(entity->bms_id)] =
+					entity_state.handle;
+		}
+		if (entity->net_id > 0) {
+			present_effect_handles_by_ssn_[static_cast<int>(entity->net_id)] =
+					entity_state.handle;
+		}
+		const int kind = static_cast<int>(entity->spawn_origin >> 24);
+		const int index = static_cast<int>(entity->spawn_origin & 0xFFFFFFu);
+		present_effect_handles_by_origin_[present_effect_origin_key(kind, index)] =
+				entity_state.handle;
+	}
+
+	present_effect_pose_cache_logic_tick_ = logic_tick;
+	present_effect_pose_cache_client_frame_ = client.frames_applied;
+	present_effect_pose_cache_runtime_ = runtime_.get();
+	present_effect_pose_cache_valid_ = true;
+}
+
+PackedVector3Array NovaSimulation::cached_present_effect_state_for_handle(
+		uint16_t p_handle) const {
+	PackedVector3Array out;
+	const auto found = present_effect_poses_by_handle_.find(p_handle);
+	if (found == present_effect_poses_by_handle_.end()) return out;
+	out.resize(EFFECT_STATE_COUNT);
+	out.set(EFFECT_STATE_POSITION, found->second.position);
+	out.set(EFFECT_STATE_ROTATION_DEG, found->second.rotation_deg);
+	return out;
+}
+
+PackedVector3Array NovaSimulation::present_effect_state_for_handle(uint16_t p_handle) const {
+	ensure_present_effect_pose_cache();
+	return cached_present_effect_state_for_handle(p_handle);
+}
+
+PackedVector3Array NovaSimulation::get_present_effect_state_for_ssn(int p_ssn) const {
+	if (p_ssn <= 0) return PackedVector3Array();
+	ensure_present_effect_pose_cache();
+	const auto found = present_effect_handles_by_ssn_.find(p_ssn);
+	if (found == present_effect_handles_by_ssn_.end()) return PackedVector3Array();
+	return cached_present_effect_state_for_handle(found->second);
+}
+
+PackedVector3Array NovaSimulation::get_present_effect_state_for_wire_handle(
+		int p_wire_handle) const {
+	if (p_wire_handle <= 0 ||
+			p_wire_handle > static_cast<int>(std::numeric_limits<uint16_t>::max())) {
+		return PackedVector3Array();
+	}
+	return present_effect_state_for_handle(static_cast<uint16_t>(p_wire_handle));
+}
+
+PackedVector3Array NovaSimulation::get_present_effect_state_for_bms_id(int p_bms_id) const {
+	if (p_bms_id <= 0) return PackedVector3Array();
+	ensure_present_effect_pose_cache();
+	const auto found = present_effect_handles_by_bms_id_.find(p_bms_id);
+	if (found == present_effect_handles_by_bms_id_.end()) return PackedVector3Array();
+	return cached_present_effect_state_for_handle(found->second);
+}
+
+PackedVector3Array NovaSimulation::get_present_effect_state_for_origin(
+		int p_kind, int p_index) const {
+	if (p_kind < 0 || p_index < 0) return PackedVector3Array();
+	ensure_present_effect_pose_cache();
+	const auto found = present_effect_handles_by_origin_.find(
+			present_effect_origin_key(p_kind, p_index));
+	if (found == present_effect_handles_by_origin_.end()) return PackedVector3Array();
+	return cached_present_effect_state_for_handle(found->second);
 }
 
 int NovaSimulation::get_entity_bms_id(int p_index) const {

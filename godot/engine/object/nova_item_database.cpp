@@ -42,6 +42,8 @@ void NovaItemDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_display_name", "id"), &NovaItemDatabase::get_display_name);
 	ClassDB::bind_method(D_METHOD("get_sound_profile", "id"), &NovaItemDatabase::get_sound_profile);
 	ClassDB::bind_method(D_METHOD("get_sound_loops", "id"), &NovaItemDatabase::get_sound_loops);
+	ClassDB::bind_method(D_METHOD("get_particle_effects", "id"), &NovaItemDatabase::get_particle_effects);
+	ClassDB::bind_method(D_METHOD("get_attrib", "id"), &NovaItemDatabase::get_attrib);
 	ClassDB::bind_method(D_METHOD("get_item", "id"), &NovaItemDatabase::get_item);
 	ClassDB::bind_method(D_METHOD("get_item_ids"), &NovaItemDatabase::get_item_ids);
 	ClassDB::bind_method(D_METHOD("get_items"), &NovaItemDatabase::get_items);
@@ -76,33 +78,54 @@ Error NovaItemDatabase::load(const String &path) {
 	}
 
 	for (size_t i = 0; i < file.count; ++i) {
-		const DefItemDef &entry = file.entries[i];
-		Item item;
-		item.id = entry.id;
-		item.type = entry.type;
-		item.attrib = static_cast<uint32_t>(entry.attrib);
-		item.display_name = String(entry.display_name);
-		item.graphic = String(entry.graphic);
-		item.anim_def = String(entry.anim_def);
-		item.sound_profile = String(entry.sound_profile);
-		item.ai_function = String(entry.ai_function);
-		item.move_function = String(entry.move_function);
-		item.hp = entry.hp;
-		item.physics = entry.physics;
-		item.acceleration = entry.acceleration;
-		item.deceleration = entry.deceleration;
-		item.player_speed = entry.player_speed;
-		item.turn_rate = entry.turn_rate;
-		item.turn_rate2 = entry.turn_rate2;
-		item.unit_type = entry.unit_type;
-		for (int s = 0; s < 7; ++s) {
-			item.soundloops[s] = String(entry.soundloops[s]);
-		}
-		items[entry.id] = item;
+		items[file.entries[i].id] = item_from_entry(file.entries[i]);
 	}
 
 	def_free_items(&file);
 	return OK;
+}
+
+NovaItemDatabase::Item NovaItemDatabase::item_from_entry(const ::DefItemDef &entry) {
+	Item item;
+	item.id = entry.id;
+	item.type = entry.type;
+	item.attrib = static_cast<uint32_t>(entry.attrib);
+	item.display_name = String(entry.display_name);
+	item.graphic = String(entry.graphic);
+	item.anim_def = String(entry.anim_def);
+	item.sound_profile = String(entry.sound_profile);
+	item.ai_function = String(entry.ai_function);
+	item.move_function = String(entry.move_function);
+	item.hp = entry.hp;
+	item.physics = entry.physics;
+	item.acceleration = entry.acceleration;
+	item.deceleration = entry.deceleration;
+	item.player_speed = entry.player_speed;
+	item.turn_rate = entry.turn_rate;
+	item.turn_rate2 = entry.turn_rate2;
+	item.unit_type = entry.unit_type;
+	for (int s = 0; s < 7; ++s) {
+		item.soundloops[s] = String(entry.soundloops[s]);
+	}
+	// The per-item particle-effect keys [orig: ItemDef_ParseProperty @ 0x49eb00].
+	const auto copy_fx = [](Item::ParticleFx &dst, const DefItemParticleFx &src) {
+		dst.effect = String(src.effect);
+		dst.userpoint = String(src.userpoint);
+		dst.secondary_effect = String(src.secondary_effect);
+	};
+	copy_fx(item.particlefx, entry.particlefx);
+	copy_fx(item.particlefxs, entry.particlefxs);
+	copy_fx(item.particlefxw[0], entry.particlefxw1);
+	copy_fx(item.particlefxw[1], entry.particlefxw2);
+	copy_fx(item.particlefxw[2], entry.particlefxw3);
+	copy_fx(item.particlefxw[3], entry.particlefxw4);
+	item.particledeath = String(entry.particledeath);
+	item.particleh2odeath = String(entry.particleh2odeath);
+	item.particlefire = String(entry.particlefire);
+	item.particleother = String(entry.particleother);
+	item.particlespawn = String(entry.particlespawn);
+	item.particlefinale = String(entry.particlefinale);
+	return item;
 }
 
 Error NovaItemDatabase::load_from_resource_root(const Ref<NovaResourceRoot> &p_resource_root, const String &p_name) {
@@ -130,29 +153,7 @@ Error NovaItemDatabase::load_from_resource_root(const Ref<NovaResourceRoot> &p_r
 	}
 
 	for (size_t i = 0; i < file.count; ++i) {
-		const DefItemDef &entry = file.entries[i];
-		Item item;
-		item.id = entry.id;
-		item.type = entry.type;
-		item.attrib = static_cast<uint32_t>(entry.attrib);
-		item.display_name = String(entry.display_name);
-		item.graphic = String(entry.graphic);
-		item.anim_def = String(entry.anim_def);
-		item.sound_profile = String(entry.sound_profile);
-		item.ai_function = String(entry.ai_function);
-		item.move_function = String(entry.move_function);
-		item.hp = entry.hp;
-		item.physics = entry.physics;
-		item.acceleration = entry.acceleration;
-		item.deceleration = entry.deceleration;
-		item.player_speed = entry.player_speed;
-		item.turn_rate = entry.turn_rate;
-		item.turn_rate2 = entry.turn_rate2;
-		item.unit_type = entry.unit_type;
-		for (int s = 0; s < 7; ++s) {
-			item.soundloops[s] = String(entry.soundloops[s]);
-		}
-		items[entry.id] = item;
+		items[file.entries[i].id] = item_from_entry(file.entries[i]);
 	}
 
 	def_free_items(&file);
@@ -265,6 +266,39 @@ PackedStringArray NovaItemDatabase::get_sound_loops(int id) const {
 			out.set(s, it->second.soundloops[s]);
 		}
 	}
+	return out;
+}
+
+// The particle-effect keys as authored, keyed by the ITEMS.DEF key names — the runtime
+// effect-attach pass consumes slot A ("particlefx"); the rest ride along for future
+// consumers. [orig: ItemDef_ParseProperty @ 0x49eb00; runtime witness
+// resolve_item_materials_and_spawn_bone_trails @ 0x522ee0]
+Dictionary NovaItemDatabase::get_particle_effects(int id) const {
+	Dictionary out;
+	const auto it = items.find(id);
+	if (it == items.end()) {
+		return out;
+	}
+	const Item &item = it->second;
+	const auto fx_dict = [](const Item::ParticleFx &fx) {
+		Dictionary d;
+		d["effect"] = fx.effect;
+		d["userpoint"] = fx.userpoint;
+		d["secondary_effect"] = fx.secondary_effect;
+		return d;
+	};
+	out["particlefx"] = fx_dict(item.particlefx);
+	out["particlefxs"] = fx_dict(item.particlefxs);
+	out["particlefxw1"] = fx_dict(item.particlefxw[0]);
+	out["particlefxw2"] = fx_dict(item.particlefxw[1]);
+	out["particlefxw3"] = fx_dict(item.particlefxw[2]);
+	out["particlefxw4"] = fx_dict(item.particlefxw[3]);
+	out["particledeath"] = item.particledeath;
+	out["particleh2odeath"] = item.particleh2odeath;
+	out["particlefire"] = item.particlefire;
+	out["particleother"] = item.particleother;
+	out["particlespawn"] = item.particlespawn;
+	out["particlefinale"] = item.particlefinale;
 	return out;
 }
 

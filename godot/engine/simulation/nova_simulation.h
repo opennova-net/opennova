@@ -13,6 +13,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <unordered_map>
 #include <vector>
 
 #include <mission/event_runtime.h>
@@ -43,8 +44,6 @@
 #include <npruntime/napi_np_protocol.h>       // HostAcceptEvent + the host owner-loop entry points
 #include <npruntime/client_runtime.h>         // ClientRuntime (HostClient / Joiner roles)
 #include <npruntime/host_session.h>           // HostOwner + host_session_pump (the shared host owner loop)
-
-#include <unordered_map>
 
 namespace godot {
 
@@ -140,6 +139,27 @@ private:
 	mutable uint64_t last_present_snapshot_us_ = 0;
 	mutable int last_present_entity_count_ = 0;
 
+	// FollowOwner consumes the same wire-decoded pose as the present pass, but it
+	// does so once per fixed tick inside a catch-up batch. Keep the identity index
+	// native and generation-bound so GDScript does not rebuild the full PF_* buffer
+	// plus four Dictionary indexes for every catch-up tick.
+	struct PresentEffectPose {
+		Vector3 position;
+		Vector3 rotation_deg;
+	};
+	mutable bool present_effect_pose_cache_valid_ = false;
+	mutable uint32_t present_effect_pose_cache_logic_tick_ = 0;
+	mutable uint32_t present_effect_pose_cache_client_frame_ = 0;
+	mutable const opennova::np::ClientRuntime *present_effect_pose_cache_runtime_ = nullptr;
+	mutable std::unordered_map<uint16_t, PresentEffectPose> present_effect_poses_by_handle_;
+	mutable std::unordered_map<int, uint16_t> present_effect_handles_by_bms_id_;
+	mutable std::unordered_map<int, uint16_t> present_effect_handles_by_ssn_;
+	mutable std::unordered_map<uint64_t, uint16_t> present_effect_handles_by_origin_;
+	void invalidate_present_effect_pose_cache() const;
+	void ensure_present_effect_pose_cache() const;
+	PackedVector3Array cached_present_effect_state_for_handle(uint16_t p_handle) const;
+	PackedVector3Array present_effect_state_for_handle(uint16_t p_handle) const;
+
 	// --- co-op LAN host: a real UDP socket (NovaUdpPump) over the npruntime runtime. enable_host_listen
 	// binds the socket (it implies the listen server); host_pump drives the owner loop, and
 	// dispatch_event/admit_peer admit joiners + stream the named dcb-bearing 0x0C. host_session_config_
@@ -213,6 +233,7 @@ private:
 	bool weapon_reload_pressed_ = false;
 	uint64_t weapon_play_serial_ = 0;
 	String weapon_anim_key_;
+	uint32_t weapon_anim_tick_ = 0;  // authoritative start tick for FP clip phase
 	// The equipped .adm's per-slot VARIANT rings — multi-clip rows rotate round-robin.
 	// The sim owns the ring heads exactly where the original keeps them (the weapon's
 	// animState slot array +72): bake duration reads and play starts both SERVE the
@@ -232,6 +253,10 @@ private:
 	// Serve-then-advance play take; returns the served variant index (0 for ringless).
 	int weapon_ring_take_variant(const String &p_key);
 	uint64_t weapon_fired_serial_ = 0;
+	// Per-shooter tag-2 sequence. Unlike the presentation serial above, this
+	// survives weapon remounts/switches and resets only with the mission/player
+	// world [orig: word_B7C670; capture monotonic across adm changes].
+	uint16_t local_round_sequence_ = 0;
 	uint64_t weapon_dry_serial_ = 0;
 	uint64_t weapon_reload_serial_ = 0;
 	uint64_t weapon_unscope_serial_ = 0;
@@ -258,8 +283,21 @@ private:
 		String action_soundset;
 		String action_particle;
 		String action_particle_userpoint;
+		// The action-routing state after this tick's view promoter and before this
+		// action's own unscope/rescope side effects. A render frame may drain several
+		// ticks, so the final view snapshot cannot make this decision for every event.
+		bool scope_settled = false;
+		bool third_person = false;
+		bool vehicle_attack_context = false;
 		int action_finished = -1;
 		String action_end_soundset;
+		// The recoil-row DIRECT effect leg (casing eject / bolt smoke): the action id
+		// plus its authored particle/userpoint. The host spawns it with no scope gate
+		// and no live-handle suppression [orig: WeaponAction_Recoil @ 0x542dd0 gate
+		// @ 0x542efa -> ActionSlot_SpawnEffect @ 0x542f64, param7=0].
+		int action_effect = -1;
+		String effect_particle;
+		String effect_particle_userpoint;
 	};
 	std::vector<PendingWeaponEvent> pending_weapon_events_;
 	float weapon_scope_max_mag_ = 0.0f; // def scope_max_mag (0 = key absent)
@@ -276,9 +314,10 @@ private:
 	void tick_local_player_weapon();
 
 	// --- the local player's view state (ADS ease + 3P anchor chase) --------------------
-	// Ticked at the world cadence right after the weapon pump, so camera lag and the
-	// ADS swing are render-rate independent [orig: the 62 Hz frame loop runs
-	// CNetPlayerInterp @ 0x4df36e and ThirdPersonCamera_Update @ 0x437af0 per tick].
+	// Ticked at the world cadence immediately before the weapon pump, so camera lag and
+	// the ADS settle promoter are render-rate independent and action effects observe the
+	// same tick's promoted scope state [orig: Player_UpdatePerFrame call @ 0x42c18e
+	// precedes WeaponAction_ProcessAllEntities call @ 0x526786].
 	// The sim OWNS the engaged bit [orig: g_scopeEngaged @ 0x82CE94]: the host requests
 	// toggles and reads the state; the FSM's unscope/rescope events flip it here.
 	opennova::world::PlayerViewState player_view_{};
@@ -544,6 +583,10 @@ public:
 	// Destructively drain the ordered presentation outputs accumulated since the
 	// previous host frame. Each Dictionary encodes one PlayerWeaponEvent.
 	Array drain_local_player_weapon_events();
+	// Destructively drain the flight sim's resolved round impacts, each row already
+	// mapped through the ammo effects_table to {position, direction, effect, sound}
+	// [orig: Projectile_SpawnImpactEffect @ 0x4e9b80; world/round_sim.h RoundImpact].
+	Array drain_round_impacts();
 
 	// --- WAC scripts ------------------------------------------------------
 	// Install a compiled program on the script VM (NovaWacProgram). Applied now if
@@ -617,6 +660,13 @@ public:
 	// Empty when no LIVE registry entity owns p_ssn. Unlike the AI-indexed
 	// getters, this includes non-AI pools and drops immediately on despawn.
 	PackedVector3Array get_entity_effect_state_for_ssn(int p_ssn) const;
+	// Compact client-view attachment lookups. These mirror get_present_snapshot's
+	// self-filter, wire quantization, and yaw conversion exactly; empty means the
+	// identity is absent from this tick's presented view.
+	PackedVector3Array get_present_effect_state_for_ssn(int p_ssn) const;
+	PackedVector3Array get_present_effect_state_for_wire_handle(int p_wire_handle) const;
+	PackedVector3Array get_present_effect_state_for_bms_id(int p_bms_id) const;
+	PackedVector3Array get_present_effect_state_for_origin(int p_kind, int p_index) const;
 	int get_entity_bms_id(int p_index) const;       // file entity id; the host maps this to a placed node
 	int get_entity_owner_connection_id(int p_index) const; // entity+0x78 dcb; the networked-player identity (D-NET-112)
 	int get_entity_wire_handle(int p_index) const;  // (pool<<12)|slot — the per-entity wire identity

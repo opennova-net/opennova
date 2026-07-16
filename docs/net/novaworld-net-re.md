@@ -1500,7 +1500,7 @@ is 17-20 B, variable by `flags` gate bits `0x80` / `0x40`:
 
 | Field | Bytes | Gate | Source (host write @0x504820) → landing (client read @0x42F270) |
 |---|---|---|---|
-| `flags` | u8 | always | ring+30 = the C2S 0x06 fire-mode byte (bit0 alt-fire, bit1 adm-indexed, bits 4-5 weapon-slot combo) `\| 0x40` iff the shooter's live fire target is set [orig: 0x5048c1] `\| 0x80` iff ring+32 non-zero [orig: 0x5048c8]; client: low bits 0x01/0x02 select the projectile vs direct spawn branches [orig: 0x42f2a8] |
+| `flags` | u8 | always | ring+30 = the C2S 0x06 fire-mode byte (bit0 alt-fire, bit1 adm-indexed, bits 4-5 = the pre-consume MountSlot+0x10 magazine count's low two bits) `\| 0x40` iff the shooter's live fire target is set [orig: 0x5048c1] `\| 0x80` iff ring+32 non-zero [orig: 0x5048c8]; client: low bits 0x01/0x02 select the projectile vs direct spawn branches [orig: 0x42f2a8] |
 | `adm_index` | u8 | always | ring+33 → `AdmDef_GetEntryByIndex(adm_index)` resolves the weapon [orig: 0x42f2ca] |
 | `subtype` | u8 | always | ring+31 = the shooter fire-context composite `(extra_byte2 & 0x3F) \| ((extra_byte2>>7)<<7)` [orig: @0x50bd83 / roundParams[4] @0x50c7bd] → `dword_A822E0` (ex `hit_subtype`) [orig: 0x42f2e2] |
 | `slot_byte` | u8 | `flags & 0x80` | ring+32 = weapon-slot id / the uplink `misc_byte` (ex `parent_byte`) [orig: 0x4fdcfc] → `hitDataPtr[5]` low byte [orig: 0x42f30a] |
@@ -1563,8 +1563,9 @@ its own `RoundData_SpawnRound` projectile (impact handlers `Projectile_Handle*Im
 **Cross-witness (capture `host_and_join_game_on_opennovaworld_loopback_threeplayers_more_gameplay.pcapng`,
 2026-06-16d), relabeled 2026-07-03.** 20 round events across 672 0x0A frames, all decoded
 byte-exact, zero walker halts. Observed flag bytes: `{0x02, 0x12, 0x22, 0x32}` — exactly the
-fire-mode byte shape `((slotCombo & 3) << 4) | 2` the fire action builds [orig:
-WeaponAction_Fire @0x542c11], none with 0x80/0x40. Two distinct (`adm_index`, `subtype`)
+fire-mode byte shape `((preConsumeClip & 3) << 4) | 2` the fire action builds from
+MountSlot+0x10 before calling `consume_weapon_ammo` [orig: WeaponAction_Fire
+@0x542c11 / consume @0x542c75], none with 0x80/0x40. Two distinct (`adm_index`, `subtype`)
 tuples now read correctly as the two SHOOTERS and their weapons: `(68, 12)` × 13 rounds by
 `p0/s1`; `(7, 12)` × 7 rounds by `p0/s0`. `shot_seq` increments monotonically per shooter
 (`0x020b…0x0217`, `0x0005…0x0006`) — the per-shot fire counter (= the C2S 0x06 `hit_part`
@@ -2336,7 +2337,7 @@ ammo-tick counter at `playerSlot+0x178D8` by `AdmDef_GetEntryByIndex(adm_index)[
 |---|---|---|---|
 | 0 | 4 | `current_tick` (u32 LE) | tick anchor — compared against `playerSlot+0x178D8` for cooldown gate |
 | 4 | 2 | `shooter_handle` (u16 LE, `pool<<12\|slot`) | pool resolve via `g_pool_list`; `0xFFFF` or `(h&0xF000)>=0x5000` rejects |
-| 6 | 1 | `fire_flags` (u8) | bit 0 = "alt fire" (skips ammo decrement); → `dest[3]` |
+| 6 | 1 | `fire_flags` (u8) | bit 0 = alt fire (skips ammo decrement), bit 1 = AdmDef-indexed primary, bits 4-5 = the pre-consume magazine count's low two bits; → `dest[3]` |
 | 7 | 1 | `adm_index` (u8) | `AdmDef_GetEntryByIndex @ 0x53FC80` key (action-descriptor — same index space as §5.9.1 weapon-hit `adm_index`) |
 | 8 | 4 | `pos_x` (i32 LE, 16.16) | shooter world position at fire moment (entity+4 + map origin); → `dest[4]` |
 | 12 | 4 | `pos_y` | → `dest[5]` |
@@ -2358,7 +2359,7 @@ ammo-tick counter at `playerSlot+0x178D8` by `AdmDef_GetEntryByIndex(adm_index)[
 - f=2057 (adm=7, fire_flags=0x02): `tick=15532061 pos=(-444.8, -413.2, 14.5) hit_part=1025`.
 - f=2061 (adm=7, +7 ticks ≈ 113 ms): `tick=15532068`, hit_part increments to 1026 — a monotonic
   fire-counter / shot-sequence carried in `hit_part`.
-- f=2278: weapon switch → `adm=61, fire_flags=0x32` (alt fire bit set), distinct muzzle-offset
+- f=2278: weapon switch → `adm=61, fire_flags=0x32` (primary + pre-consume clip low bits 3), distinct muzzle-offset
   signature. The byte-witness pin is `tests/novaworld/nw_ingame_c2s_uplink_test::test_client_fired_round`.
 
 **Weapon-variety witness (probe3_again, 2026-06-19).** The richer 2-shooter session exercises the
@@ -5430,12 +5431,13 @@ AddRound builds: origin ptr, target, fire time, adm entry, weapon id, damage typ
 direction/spread words): score-multiplier stamp, tracer interval (the AMMO `tracerRate`
 byte +226), then the
 ammo-class dispatch — driven by the AMMO record's flags dword and kztype word (the
-`ammo.def` field map below): flag 0x400 `instantkillzone` + the IMMEDIATE RAYCAST when the
-ammo kztype (word 22) == 1 `rounds_kz_Knife`
-(`Weapon_RaycastAndSpawnImpact @ 0x4E8460`: euler→matrix ray out to weaponDef+56 range vs
-terrain hi-res heightmap + `Projectile_RaycastProximitySlots @ 0x4E5340` + water, 5-way hit
-class, impact effect from the weapon's 16-B effect table + sound — EFFECTS ONLY, no damage
-call in the hitscan leaf), flag 0x20 `Detonatesatchels`, 0x2000000 `DesignateTarget`
+`ammo.def` field map below): flag 0x400 `instantkillzone` enters the immediate damage leaf;
+when the ammo kztype (word 22) == 1 `rounds_kz_Knife`, it additionally calls
+`Weapon_RaycastAndSpawnImpact @ 0x4E8460`: euler→matrix ray out to that same AmmoDef's
+`+0x38 kz_maxradius` vs terrain hi-res heightmap + `Projectile_RaycastProximitySlots
+@ 0x4E5340` + water, 5-way hit class, impact effect from the AmmoDef `+0x68` 16-B-row
+effects table + sound — EFFECTS ONLY, no damage call in this presenter. Normal bullets do
+not call this leaf. Then flag 0x20 `Detonatesatchels`, 0x2000000 `DesignateTarget`
 guided-tracker register, 0x10000 `shotgun` / 0x20000 `claymore` pellet bursts
 (`Weapon_SpawnProjectileBurst*`, count = ammo `spread_count`), default (kztype 6
 `rounds_kz_Bullets`) =
@@ -5589,6 +5591,45 @@ host respawn snap). MVP deferrals tracked in round_sim.h + here: bone-zone multi
 (body-only 1.0), drag/gravity (no falloff yet), spread, vehicles/statics (armor threshold),
 explosion kill zones, arm-age child swap, 0x52/0x54/0x32 emits, scoring, the shooter-class
 0.9/1.1 bytes.
+
+**Impact effects routed (2026-07-13/14, the PR #237 particle pass).** Ordinary ballistic
+effects are produced at the physical collision, not at fire time:
+`Projectile_UpdatePhysics @ 0x4e9d70` resolves terrain/entity/building/water, and its
+type-specific impact handler
+path calls `Projectile_SpawnImpactEffect @ 0x4e9b80`, and that presenter selects the AmmoDef
+effects-table row for the resolved tag. `Weapon_RaycastAndSpawnImpact @ 0x4e8460` is the
+separate Knife-only instant-kill-zone presenter described above; its `+0x38` input is
+`AmmoDef.kz_maxradius` (2.5 in the rifle fixture), not a weapon trace range. The ammo
+`effects_table` rows stage by tag name
+against `g_AmmoEffectTagTable @ 0x813420` (28 canonical tags, index = tag id), duplicates
+refused (`@ 0x40a502`), `none` columns zeroed, and the authored 4th count column parsed then
+DISCARDED (`@ 0x40a587`) — dead data in retail. NOTE: the block-end bake COMPACTS the
+staging (`AmmoDef_InitEffectsTable @ 0x409f20` allocates `16*(count+1)` and copies authored
+tags in ascending order) while the presenter indexes by tag POSITION — sound only because
+every shipped table authors the full contiguous 1..24 prefix (row index == tag id); the
+port's 28-slot tag-addressed bake is byte-equivalent on shipped data and resolves correctly
+on sparse mod tables where the original would misindex (an intentional bounded divergence,
+noted in `world/ammo_table.h`). Port: authority/listen-host and single-player FIRE now
+append the round ring (including the captured `((preConsumeClip & 3) << 4) | 2` primary mode
+byte and the exact ordinary on-foot hip/ADS-raise/third-person subtype 12) and
+synchronously spawn `world::RoundSim` from the production-tick eye origin and BAM
+direction. Settled-FP and first-person-mounted integer zoom subtypes remain unmodeled
+(D-WPN-8).
+The sim emits bounded `RoundImpact` rows from its own physical hit
+resolution (position, normalized direction, tag) →
+`NovaSimulation::drain_round_impacts` resolves the rows baked by `np::build_ammo_table`
+(`world/ammo_table.h kImpactEffectTagNames`) → `game_world._route_round_impacts`
+destructively drains each row and presents both its generic World-domain particle transient
+and 3D soundset, retaining production tick/order and catch-up age. A joiner still does not
+feed decoded S2C tag-2 round events into a presentation `RoundSim` (D-WPN-8), so the
+impact route is currently host/SP-only. Three ledger rows record the audit:
+**D-WPN-14 is resolved as a false reading** (ballistic arrival timing already matches),
+**D-WPN-15** carries selection legs:
+charmap sampler + `.TIL` overrides unported → terrain always takes the retail no-map dirt
+default; pool-0 organics only → entity hits always tag 2 player; no water plane; and
+**D-WPN-16** tracks the genuinely unported Knife/instant-kill-zone family. Pinned by
+`nova_simulation_test.gd` (the local FIRE→impact route) and `npruntime_round_sim`
+(the bake rules + the tag-2 impact row).
 
 **v29 LIVE (2026-07-03, two retail clients + the host player,
 `.scratch/retail_join_v29_game.pcapng`):** the pipeline worked end-to-end — 35 C 0x06
@@ -6153,13 +6194,17 @@ reload/one-shot forced unscope + the pump's rescope. Live-verified (fp_clean_pro
 recoil clip), reload refill 24→30 with reserve 300→294 (the §5.58 refund math),
 mid-reload RMB refused, ADS engage fraction→1 with cam fov 80h→40h, disengage clean.
 
-**Divergences** (ledger D-WPN-1..13): the FUNCTION registry unported (std-only in all
+**Divergences** (ledger D-WPN-1..15): the FUNCTION registry unported (std-only in all
 shipped data, D-WPN-1); single-pool ammo vs per-class pools (D-WPN-2); CanFire's
 busy-child/underwater/score-lock legs + kick sound gate (D-WPN-3); the heat model
 (`WeaponSlot_CalcAccumulatedHeat @ 0x53f780` internals unwitnessed, D-WPN-4); the
 weapon-switch machinery seams (D-WPN-5); local-player-only pump (D-WPN-6); interim
-ammo seed clipsize/startrounds (D-WPN-7); FSM↔net uplink unwired (C2S 0x06/0x25 from
-events, D-WPN-8); ADS residuals — SIGHTS overlay draw, unscope-on-move site, zoom-level
+ammo seed clipsize/startrounds (D-WPN-7); FSM↔net residual — authority/SP fire now
+appends the primary ring row (including ordinary hip/raise/3P subtype 12) and spawns
+`RoundSim` synchronously, while settled-FP/first-person-mounted zoom subtypes, joiner C2S 0x06/0x25
+uplink, and client S2C tag-2 round presentation remain unwired (D-WPN-8); ADS
+residuals — SIGHTS overlay draw,
+unscope-on-move site, zoom-level
 keys, scope net notify, 7-step interp variant, stance/NVG gates (D-WPN-9);
 **D-WPN-10** [reimpl divergence, FIXED 2026-07-10] the host clip-key lookup
 (`NovaSkeletalAnim::find_clip`) compared case-SENSITIVELY where the original is
@@ -6174,7 +6219,9 @@ branch `@0x53f88b`. **D-WPN-12** [integration divergence, FIXED 2026-07-11] acti
 presentation crossed the sim/host boundary as a latest-value snapshot plus serials;
 several fixed catch-up ticks before one present pass overwrote distinct payloads and
 the host consumed a serial jump as one edge. Replaced by the ordered destructive event
-batch above; snapshot serials remain diagnostic/rebuild state. **D-WPN-13** [reimpl
+batch above, including production-tick settled/third-person/vehicle routing state so a
+catch-up cannot apply its final view state to earlier events; snapshot serials remain
+diagnostic/rebuild state. **D-WPN-13** [reimpl
 divergence, FIXED 2026-07-12] the port ran held auto fire as a per-tick
 `request_fire` re-request where the original sustains the volley through the recoil
 window's rounds-gated deferred re-queue (`@ 0x542e7f..0x542e9d`) — at an empty
@@ -6185,6 +6232,13 @@ flash strobing on a dry gun). Fixed by porting the witnessed chain: a
 `refire_queued` slot latch (the deferred-event queue) written by the recoil window
 and by RequestFire's mid-FIRE re-queue (`@ 0x53effd`), consumed as the fire request
 one tick later.
+
+Recoil direct-effect events and impact rows remain fully transported. Every authored direct
+payload is now submitted as an independent generic `Always` transient through its action
+userpoint—REVX02 `WPN_M4AUTO` works because its actual muzzle is authored there, not because
+the host recognizes `mflash*`. Casing and physical-collision impact rows use the same shared
+EffectScene/atlas/ordered packet path and impact audio remains live. D-PTL-16 is closed; no FSM
+timing workaround remains.
 
 **The delaystart/delayend grill (2026-07-10, PR #219 validation).** Re-witnessed the
 delay pipeline end to end: parse (`delaystart` → +36, `delay`/`delayend` → +40 — the
@@ -6299,16 +6353,34 @@ sound fields and the engine plays them at different phase edges:
 - **Effect (particle) routing** — the local player's begins route through
   `ActionSlot_ExecuteActionTick @ 0x541a70`: only FIRE (`slot+44 == 2`) can take the
   with-effect shim, and only in third person (`g_camera_mode`), from a vehicle-attack
-  seat, or un-scoped FP (`dword_24D20C0 & 1 && !g_weaponScopeActive @ 0x541aba`);
-  every other local begin is the no-effect shim `@ 0x541b17` — casing ejects
-  (`recoil` rows' particles) never spawn in your own FP view. Remote entities always
-  take the with-effect shim `@ 0x541a83` (an MP seam for us). The muzzle spawn is
-  double-spawn-guarded: `@ 0x5418c8` spawns only when `slot+24` is clear;
-  `ActionSlot_SpawnEffect @ 0x401f20` records the emitter handle there with the
-  on-death callback `ActionSlot_ClearEffectHandle @ 0x53f760` riding the 14-dword
-  descriptor. The spawn point is the weapon model's `launchuserpoint` (name `+0x2E8`
+  seat, or un-scoped FP (`g_FpWeaponViewFlags & 1 && !g_weaponScopeActive @ 0x541aba` —
+  the ex-`dword_24D20C0` weapon-view flag, renamed 2026-07-13); every other local begin
+  is the no-effect shim `@ 0x541b17`. **Correction (2026-07-13 grill)**: the earlier
+  reading "casing ejects never spawn in your own FP view" was WRONG — the tick gate only
+  covers the BEGIN leg. `WeaponAction_Recoil @ 0x542dd0` spawns the recoil row's
+  particle DIRECTLY at the arbiter tick (counter reaches 0 after delaystart), gated for
+  the local player on `ActionDef+16 && currentAction==3 && g_FpWeaponViewFlags & 1`
+  (`@ 0x542efa` → `ActionSlot_SpawnEffect @ 0x542f64`) — NO scope condition, so brass
+  ejects in your own FP view even while settled in ADS; the spawn passes param7=0, so
+  no handle records and casings are never suppressed by a live predecessor. The
+  `g_weaponScopeActive` term itself is the SETTLED state: it is promoted to 1 only when
+  the ADS camera ease completes (`Player_UpdatePerFrame @ 0x4de4f7`, the sole 1-writer;
+  the toggle `@ 0x4df0c0` sets `g_scopeEngaged` and leaves it 0), so muzzle flashes
+  still spawn during the raise. Remote entities always take the with-effect shim
+  `@ 0x541a83` (an MP seam for us). The muzzle spawn is double-spawn-guarded:
+  `@ 0x5418c8` spawns only when `slot+24` is clear; `ActionSlot_SpawnEffect @ 0x401f20`
+  records the GROUP handle there; descriptor dwords 12/13 install
+  `ActionSlot_ClearEffectHandle @ 0x53f760` through
+  `CEffectGroup_SetDeathCallback @ 0x5e1940`, and `CEffectGroup_Destroy @ 0x5e3460`
+  invokes it — the suppression
+  window is exactly the whole live group's lifetime. The
+  spawn point is the weapon model's `launchuserpoint` (name `+0x2E8`
   → resolved 1-based index `+0x2D4` on the gfx1 model; per-entity fallback
-  `Entity_GetWeaponSlotByte(entity, clip & 3, 1) @ 0x541912`). Reload begins pass
+  `Entity_GetWeaponSlotByte(entity, clip & 3, 1) @ 0x541912`); the ACTION rows' own
+  `particleuserpoint` names (ActionDef+186) resolve per weapon at mission start to a 1P
+  index (ActionDef+57) and a 3P index (ActionDef+56), stricmp case-insensitive
+  (`WeaponDef_ResolveAllReferences @ 0x540270`, `modelgpm_FindUserpointByName
+  @ 0x5b2170`). Reload begins pass
   effectScale 0.0 (`@ 0x543150`) — reload rows' particles never spawn anywhere.
 - **Cadence refutation** — the June "+20 fire-expiry" note is refuted at both request
   sites: `WeaponSlot_RequestFire @ 0x53efa0` and `WeaponSlot_CanFire @ 0x541ba0` carry
@@ -6321,15 +6393,26 @@ sound fields and the engine plays them at different phase edges:
 Port row: each tick's `WeaponFsmEvents` clip/begin/end payload is copied into
 `NovaSimulation`'s ordered event batch → `GameWorld.drain_local_player_weapon_events`
 types and destructively drains it → `LocalPlayerHost` consumes every record in order.
-Each record carries `age_ticks` and the production-tick position, so a clip emitted early
-in a multi-tick catch-up starts at its correct presentation age and 3D sounds retain their
-tick-local origin. Snapshot serials
+Each record carries `age_ticks`, the production-tick position, and the settled,
+third-person, and vehicle-attack routing flags after that tick's view promoter, so a clip
+emitted early in a multi-tick catch-up starts at its correct presentation age, 3D sounds
+retain their tick-local origin, and effects use the view state that existed when the action
+was produced. Snapshot serials
 remain available for diagnostics and viewmodel rebuild, but are not the event-delivery
 mechanism (D-WPN-12). `action_finished` is still emitted only by `finish_active` on the
 was-ACTIVE edge; the begin-leg SOUND follows `action_started`, except held-ready 0x40
 which replays only the animation (D-WPN-11).
-The particle legs (the `@ 0x541a70` routing gates, `spawn_effect_unless_alive` /
-the slot+24 guard) ride the particles slice with `NovaEffectWorld` itself. ctest
+The muzzle particle leg is ported (2026-07-13/14): the `@ 0x541a70` routing gates with the
+SETTLE-gated scope suppression (`scope_fraction >= 1.0` = the `@ 0x4de4f7` promoter),
+and `spawn_effect_unless_alive` / the slot+24 guard. The recoil direct leg is ported through
+the ordered event boundary (`WeaponFsmEvents.action_effect` at the arbiter tick). Data-authored
+rows render generically as independent unsuppressed `Always` transients through the live action
+bone, including REVX02 `WPN_M4AUTO`'s RECOIL/`MFLASH01` muzzle and FIRE/`BCASING` casing.
+The shared value scene, atlas, packet compiler, and ordered RD renderer close D-PTL-16
+(`weapon_fsm_test.cpp`, `nova_simulation_test.gd`,
+`local_player_host_test.gd`).
+The witness record for the spawn/attach machinery is
+[particles/ptl-format-re.md §4](../particles/ptl-format-re.md). ctest
 `weapon_fsm` pins both legs + the silent abort; GUT `local_player_host_test` pins
 the sound drains.
 
@@ -6416,13 +6499,130 @@ our derived `scope_card_active` cannot represent. Related new witness: weapons
 with **HandGunUp (0x4000000)** auto-follow player flag 0x4000 raise/lower when
 the ease is idle (`@ 0x4de444..0x4de4b7`; the player-flag writer is unwalked).
 
-**Open follow-ups:** who queues OVERHEATED(11);
-the `*_map` scope function variants; `WeaponSlot_CalcAccumulatedHeat @ 0x53f780`;
-`dword_24D20C0` option bits; the `word_B7C670` transition write vs the §5.16 shot-seq;
+**The weapon-particle timing grill (2026-07-15, the "are effects firing at the right
+time" round).** Byte-verified the whole action-effect timing chain and found the port
+faithful on every timing axis — and two positional/system divergences. (1) The pump's
+tick contract confirmed at the instruction level: a `counter > 0` tick ONLY decrements
+and runs the current handler (`@ 0x541417..0x54143d`); the transition to `nextAction`
+runs on the FOLLOWING counter==0 tick (`@ 0x5413b1..0x541412`) — the port's pump tail
+is the same shape, so cadence and effect phase match (the REVX02 `WPN_M4AUTO` corpus
+note: its FIRE row authors the CASING at `BCASING` and its RECOIL row the muzzle flash
+`EFFECT_M16MF @ MFLASH01` with fire `delayend 3` — the flash landing ~4 ticks after
+each bang on that mod's data is AUTHORED, not a port bug; base JO authors flash-on-fire
+/ casing-on-recoil). (2) The `ExecuteActionTick` fork `@ 0x541a70` byte-confirmed: local
+non-FIRE begins take the no-effect shim (`@ 0x541b17`); local FIRE takes with-effect only
+when mounted-parent-3, `g_FpWeaponViewFlags&1 && !g_weaponScopeActive`, camera mode, or
+vehicle-attack (`@ 0x541aba..0x541ac1`); remote entities always with-effect (`@ 0x541a83`).
+(3) **THE LIVE ACTION-EFFECT TRACKER** (new witness): `MountSlot+0x18` (ex-"sndHandle"
+misnomer → `actionEffectHandle`) — the handle `ActionSlot_SpawnEffect` records with its
+anchor action index (`+0x28` → `effectAnchorActionIdx`) — is RE-ANCHORED EVERY PUMP TICK
+to that action's bone (`actionTable[+0x28]` → `Entity_ComputeActionTransform` →
+`CEffectEmitter_UpdatePositionAndParams @ 0x5f6810`, the ex-"Audio_SetListenerAndEffect-
+Positions" kong misnomer: a pure live-emitter position/orientation/attenuation/blend
+update gated on `g_ParticlesDisabled`), and released underwater (`pos.Z <= water` without
+`Flags&4`, `@ 0x540efd`) — retail muzzle flashes are BONE-TRACKED for their whole life
+[orig: the tracker leg @ 0x540edf..0x540fe6]. **D-WPN-17** [reimpl divergence, FIXED
+2026-07-15]: the port spawned the local flash `BINDING_WORLD` at the spawn-time
+userpoint — while strafing/turning the flash trailed the muzzle. Fixed: the host spawns
+owner-bound (`BINDING_FOLLOW_OWNER`) and registers a live anchor resolver
+(`GameWorld.register_effect_anchor` → the spawning action's userpoint through the
+current viewmodel pose) polled by the effect world's owner-pose sync; anchors drop on
+viewmodel-generation turnover. (4) **THE HEAT WINDOW + OVERHEAT GLOW LEG** (new witness):
+`MountSlot+0x14` (ex-"muzzleFlashEndTick" → `heatWindowEndTick`, stamped by the recoil
+heat writers `@ 0x542fa0`/`@ 0x542fdc`) opens a per-tick window in the pump
+(`@ 0x540fed..0x54125f`): `WeaponSlot_CalcAccumulatedHeat` each tick; heat > 0xFFFF
+converts a queued FIRE to EMPTY (`@ 0x541046`, the known overheat deny); heat >
+`Def.heatGlowThreshold` computes a 0..0xFFFF glow fraction, resolves the OVERHEATED row
+(`actionTable[11]`) muzzle bone via `Entity_ComputeWeaponFireTransform`, and spawns
+(`@ 0x54122c` → `+0x1C heatGlowEmitterHandle`) or per-tick moves/re-intensifies
+(descriptor +40/+44 = the fraction) the barrel-glow emitter; released when heat drops,
+the window expires, or underwater. Corpus: the emplaced .50s/miniguns/DShK/turrets author
+`FX_OVERHEAT1 @ HEAT` live; the infantry MG rows ship the keys commented out. UNPORTED —
+the emplaced-gun barrel glow is a §8-class follow-up (extends D-WPN-4's heat family).
+(5) The kick sound-layer leg (`dword_24E0E80` gate: `Def.kickEffectId` + the decaying
+kick intensity → `SoundEmitter_RegisterSetLayers @ 0x54132a`, per tick while kick > 0) —
+an unported AUDIO seam, noted with D-WPN-3's sound family. (6) **D-WPN-18** [reimpl
+divergence, FIXED 2026-07-15]: the LOCAL fire leg fed `RoundSim` a `(90 − heading)`
+mission-yaw bearing where the round bearing frame IS the engine heading frame
+(`RoundSim`'s `(cos, sin)` mission-axis mapping is wire-validated on the 0x06 yaw BAM —
+the same D-NET-153 flip, reintroduced on the local leg): every local shot flew mirrored
+across the NE diagonal, landing impact effects 90° off the aim ray (the `fp_impact_probe`
+pin: aiming due north put impacts 14.75 m due east; post-fix they sit on the ray).
+`dir_yaw = p->heading` directly now; the `nova_simulation_test` fire case moved its
+target onto the true bearing and pins the drained impact position (the old east-side
+target had been passing on the compensating error). IDB this session: the two MountSlot
+field renames above, `+0x1C` → `heatGlowEmitterHandle`, `CEffectEmitter_UpdatePositionAndParams
+@ 0x5f6810` renamed, tracker/glow witness comments at `@ 0x540edf`/`@ 0x540fed`; idb_save run.
+
+**The Barrett/REVVY per-shot particle report (2026-07-15, suppression adjudicated
+2026-07-16).** The reported REVX02 behavior — `WPN_Barret` plume missing on repeated
+shots in the port, casing emission outliving release — motivated a timing A/B. The
+static chain itself is now conclusive: the `@0x5418c8` guard records a GROUP handle;
+`CEffectGroup_SetDeathCallback @0x5e1940` stores `ActionSlot_ClearEffectHandle
+@0x53f760` at group+0x5C/+0x60; `CEffectGroup_Destroy @0x5e3460` invokes it only after
+the child list is empty. `CEffectGroup_AdvanceChildrenAndReap @0x5e59a0` unlinks each
+dead child immediately but does not call the group callback. Therefore those visual
+observations do not establish an early suppression re-arm; the first-child hypothesis
+recorded later in this historical session was disproved by the 2026-07-16 adversarial
+read below. Remaining A/B candidates are emitter-clock/lifetime conversion and the
+separate per-entity effect-slot updater `Entity_UpdateMuzzleFlashAndEffects @0x493149`,
+not the action slot's death callback. Also witnessed, unported: the per-shot muzzle
+LIGHT (`ActionSlot_SpawnEffect` tail `@0x402080`: `AmmoDef+36` gates
+`LightPool_SpawnGlowEffect @0x56c960`, handle at `entity+436`, blend snapped to 1.0).
+
+**The oscarmike adjudication (2026-07-15, session 3 continued).** The maintainer
+pointed at the archived `on-godot-oscarmike` attempt as having better-feeling weapon
+particle timing. Its mechanism: spawn the row's particle at the action FINISH
+(their reading of `sub_53F7B0` -> `sub_401100` as "soundsetend + particle"),
+UNGUARDED, one hand-authored short Godot scene per shot, parented to the weapon.
+Adjudicated against the binary: `ActionSlot_PlayEndSoundAndDupes @ 0x401100` is
+SOUNDS ONLY — the end soundset (`ActionDef+12`) plus the `dupsound` echo scheduler
+(`ActionDef+44/+48` count/interval via `EffectSlot_AllocateAndInit`, local flag 2 /
+remote flag 0) — their finish-leg particle is an invention, and their unguarded
+spawn contradicts the witnessed `@ 0x5418c8` guard. Their muzzle-parenting matches
+the D-WPN-17 tracker port. `WeaponAction_Fire` fully read this round: the
+counter>0/phase-4 holding ticks call the PLAIN `ActionSlot_BeginActivePhase`
+(no effect leg); the with-effect `ExecuteActionTick` runs ONLY on the shot tick with
+`param7 = ActionSlot_ClearEffectHandle` (`@ 0x542cb4`), so the flash spawn is
+per-shot-attempted but handle-guarded, as recorded. **Cross-binary check**: the
+guard (`cmp [esi+18h],0; jnz`) and the handle/anchor record
+(`mov edx,[esi+2Ch]; mov [esi+18h],edi; mov [esi+28h],edx`) byte-match the user's
+JOTAC-era `Jointops.exe` at the same VAs (file 0x1418c8 -> 0x5418c8; 0x208c ->
+0x40208c) — the per-shot-particle contradiction is NOT a binary-version delta.
+A temporary `NOVA_WPNFX_UNGUARDED` host toggle served as the discriminating A/B
+instrument for one round and was removed; the binary's guarded path remains authoritative.
+
+**CORRECTED TO THE WHOLE-GROUP-DEATH WINDOW (2026-07-16 adversarial review).** The
+2026-07-15 A/B result was useful presentation evidence, but it could not identify the
+callback's object lifetime. The complete call chain does: `ActionSlot_ExecuteAction`
+(`@0x4020a0`) calls `ActionSlot_SpawnEffect @0x401f20`; the world/group spawn
+(`@0x5f6df0` → `@0x5ea200`) installs `ActionSlot_ClearEffectHandle @0x53f760` through
+`CEffectGroup_SetDeathCallback @0x5e1940`, which writes group+0x5C/+0x60.
+`CEffectGroup_AdvanceChildrenAndReap @0x5e59a0` removes and destroys each dead child
+immediately, but the callback is invoked by `CEffectGroup_Destroy @0x5e3460` only when
+the GROUP is destroyed. The earlier `CEffectEmitter_OnChildDied @0x5ef9c0` parent-gate
+interpretation was the wrong object/callback chain. Therefore `SuppressWhileOwned`
+and `ReplaceOwned` both retain their slot mapping through the final child; their
+admission behavior differs on a new spawn, not on callback lifetime. The port now
+recycles dead children individually and clears the suppression mapping only at final
+group death. D-WPN-19 records the false-reading correction and the whole-group
+regression replaces the former first-child contract.
+
+**Open follow-ups:** who queues OVERHEATED(11) as an ACTION (its ROW is consumed as
+glow data by the heat window leg above — whether anything transitions TO state 11
+remains unwalked);
+the `*_map` scope function variants; `WeaponSlot_CalcAccumulatedHeat @ 0x53f780`
+internals (the stamp/decay math feeding the heat window);
+the `g_FpWeaponViewFlags` option bits beyond bit 0; the `word_B7C670` transition write vs the §5.16 shot-seq;
 remote-entity action sounds/effects (the `@ 0x541a83` leg) once remote slots pump;
 the RoundData_SpawnRound 0x2000000 test site; the slot Elevation zoom-adjust input;
 the scope tri-state (engaged/active/hipfire) for the movement reversal legs; the
-HandGunUp auto-follow (player flag 0x4000 writer); loose-REVX audio: a loose
+HandGunUp auto-follow (player flag 0x4000 writer); the emplaced-gun overheat glow port
+(the heat window leg above); the kick sound-layer port (`SoundEmitter_RegisterSetLayers`);
+the Barrett/REVVY visual A/B outside the now-closed action-slot suppression question
+(per-entity effect-slot writers `@0x493149`, emission-clock conversion, and the muzzle
+light `@0x56c960`);
+loose-REVX audio: a loose
 extract advertises no expansion, so revx02.LWF (the M82 GS_/GF_ sets) never
 loads — the expansion setting must name it (config, not code).
 

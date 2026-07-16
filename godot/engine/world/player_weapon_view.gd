@@ -18,6 +18,7 @@ var anim_key := ""         # the .adm clip key of the last play event
 # the same latched index. [orig: AnimMap_PlayAnimBySlot @0x40bda0 latches the served
 # ring entry at animState+68 while the head advances]
 var anim_variant := 0
+var anim_age_ticks := 0    # fixed ticks since the last FP clip play
 var play_serial := 0
 # Snapshot diagnostics for the last action begin: `action_serial` bumps when an
 # action's ACTIVE phase begins and the latest ACTION row rides alongside. Presentation
@@ -61,6 +62,7 @@ static func from_state_dict(d: Dictionary) -> PlayerWeaponView:
 	out.current_action = int(d.get("current", 0))
 	out.anim_key = String(d.get("anim_key", ""))
 	out.anim_variant = int(d.get("anim_variant", 0))
+	out.anim_age_ticks = int(d.get("anim_age_ticks", 0))
 	out.play_serial = int(d.get("play_serial", 0))
 	out.action_serial = int(d.get("action_serial", 0))
 	out.action_started = int(d.get("action_started", -1))
