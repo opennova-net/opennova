@@ -38,14 +38,17 @@ int main() {
 	                                      128);
 	if (!expect(rotated.valid, "valid atlas dimensions should produce a UV quad")) return 1;
 
-	if (!expect_close(rotated.corners[0].u, 0.75f, "TL U should honor FLIP_X -> FLIP_Y -> ROTATE_90 ordering")) return 1;
-	if (!expect_close(rotated.corners[0].v, 0.5f, "TL V should honor FLIP_X -> FLIP_Y -> ROTATE_90 ordering")) return 1;
-	if (!expect_close(rotated.corners[1].u, 0.75f, "TR U should honor FLIP_X -> FLIP_Y -> ROTATE_90 ordering")) return 1;
-	if (!expect_close(rotated.corners[1].v, 1.0f, "TR V should honor FLIP_X -> FLIP_Y -> ROTATE_90 ordering")) return 1;
-	if (!expect_close(rotated.corners[2].u, 0.5f, "BL U should honor FLIP_X -> FLIP_Y -> ROTATE_90 ordering")) return 1;
-	if (!expect_close(rotated.corners[2].v, 0.5f, "BL V should honor FLIP_X -> FLIP_Y -> ROTATE_90 ordering")) return 1;
-	if (!expect_close(rotated.corners[3].u, 0.5f, "BR U should honor FLIP_X -> FLIP_Y -> ROTATE_90 ordering")) return 1;
-	if (!expect_close(rotated.corners[3].v, 1.0f, "BR V should honor FLIP_X -> FLIP_Y -> ROTATE_90 ordering")) return 1;
+	// FLIP_X then FLIP_Y then the retail CCW ROTATE_90
+	// [orig: render_water_quad flag order @ 0x604782/0x6047a9/0x6047d4]:
+	// TL (0,0) -> (1,0) -> (1,1) -> (0,1); tile 6 origin (0.5, 0.5).
+	if (!expect_close(rotated.corners[0].u, 0.5f, "TL U should honor FLIP_X -> FLIP_Y -> ROTATE_90 ordering")) return 1;
+	if (!expect_close(rotated.corners[0].v, 1.0f, "TL V should honor FLIP_X -> FLIP_Y -> ROTATE_90 ordering")) return 1;
+	if (!expect_close(rotated.corners[1].u, 0.5f, "TR U should honor FLIP_X -> FLIP_Y -> ROTATE_90 ordering")) return 1;
+	if (!expect_close(rotated.corners[1].v, 0.5f, "TR V should honor FLIP_X -> FLIP_Y -> ROTATE_90 ordering")) return 1;
+	if (!expect_close(rotated.corners[2].u, 0.75f, "BL U should honor FLIP_X -> FLIP_Y -> ROTATE_90 ordering")) return 1;
+	if (!expect_close(rotated.corners[2].v, 1.0f, "BL V should honor FLIP_X -> FLIP_Y -> ROTATE_90 ordering")) return 1;
+	if (!expect_close(rotated.corners[3].u, 0.75f, "BR U should honor FLIP_X -> FLIP_Y -> ROTATE_90 ordering")) return 1;
+	if (!expect_close(rotated.corners[3].v, 0.5f, "BR V should honor FLIP_X -> FLIP_Y -> ROTATE_90 ordering")) return 1;
 
 	const opennova::TilUvQuad clamped =
 	    opennova::til_build_entry_uv_quad(255, opennova::TIL_FLAG_FLIP_X, 128, 64);

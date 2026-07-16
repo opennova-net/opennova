@@ -419,6 +419,7 @@ editor-guard candidate.
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
 | D-TIL-1 | `TIL_FLAG_OUTLINE` (0x08): the LINELIST outline is jodemo-only; retail JO's render (`render_water_quad @ 0x604700`) omits it and so do we (flag preserved for round-trip, no outline drawn) — faithful to retail JO | B | **FIXED (faithful)** | PAR (tiles) |
+| D-TIL-2 | `ROTATE_90` was the CW transpose `(v, 1−u)`; retail rotates CCW `(1−v, u)` (corner cycle @ `render_water_quad 0x6047d4..0x604806`) — rotated tiles drew 180° off, scrambling tire-track tile runs (00TRa) | A | **FIXED 2026-07-15** — one shared helper corrected; bake/ONED preview/GDScript binding inherit | terrain/foliage re-grill |
 
 Overlay entry (12 B), atlas UV, flip/rotate flags, half-texel shift, Z negation,
 and the 128-LRU cache are **MATCHING** vs retail `PolyTrn_RenderTile @ 0x60df0d`.

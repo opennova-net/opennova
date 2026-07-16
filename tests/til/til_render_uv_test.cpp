@@ -38,11 +38,13 @@ int main() {
 	if (!expect_close(flipped.corners[1].u, 0.5f - 0.5f / 128.0f, "FLIP_X right corner should shift inward in reversed direction")) return 1;
 	if (!expect_close(flipped.corners[0].v, 0.5f / 64.0f, "FLIP_X should not reverse V half-texel direction")) return 1;
 
+	// Retail rotate is the CCW corner cycle NW<-NE, NE<-SE, SE<-SW, SW<-NW:
+	// TL local (0,0) -> (1,0) [orig: render_water_quad @ 0x6047d4..0x604806].
 	const opennova::TilUvQuad rotated =
 	    opennova::til_build_entry_render_uv_quad(0, opennova::TIL_FLAG_ROTATE_90, 128, 64);
 	if (!expect(rotated.valid, "valid atlas should produce rotated render UVs")) return 1;
-	if (!expect_close(rotated.corners[0].u, 0.5f / 128.0f, "ROTATE_90 TL U should shift positive after transform")) return 1;
-	if (!expect_close(rotated.corners[0].v, 1.0f - 0.5f / 64.0f, "ROTATE_90 TL V should shift in reversed direction")) return 1;
+	if (!expect_close(rotated.corners[0].u, 0.5f - 0.5f / 128.0f, "ROTATE_90 TL U should land on the cell right edge, biased inward")) return 1;
+	if (!expect_close(rotated.corners[0].v, 0.5f / 64.0f, "ROTATE_90 TL V should stay on the cell top edge, biased positive")) return 1;
 
 	std::printf("OK: tile render UVs include original half-texel correction\n");
 	return 0;

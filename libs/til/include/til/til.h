@@ -134,9 +134,13 @@ inline TilAtlasLayout til_make_atlas_layout(int atlas_width, int atlas_height) {
 }
 
 inline TilUv til_transform_local_uv(TilUv uv, uint8_t flags) {
-	// Engine: jodemo.exe Terrain_DrawTileOverlays2D@0x5C79C0,
-	// sub_5C42B0@0x5C42B0
-	// docs/engine_spec_tiles.md 4.2
+	// [orig: render_water_quad @ 0x604700 — flag blocks @ 0x604782 (U swap),
+	// 0x6047a9 (V swap), 0x6047d4 (rotate)]. Retail's rotate permutes the four
+	// corner UVs as NW<-NE, NE<-SE, SE<-SW, SW<-NW (corner cycle
+	// A<-B, B<-D, D<-C, C<-A @ 0x6047d4..0x604806): per corner (u,v) that is
+	// (1-v, u), a 90-degree CCW image rotation. The prior (v, 1-u) reading was
+	// the CW transpose — every ROTATE_90 tile rendered 180 degrees off
+	// (docs/tiles/til-re.md D-TIL-2, FIXED).
 	if (flags & TIL_FLAG_FLIP_X) {
 		uv.u = 1.0f - uv.u;
 	}
@@ -144,7 +148,7 @@ inline TilUv til_transform_local_uv(TilUv uv, uint8_t flags) {
 		uv.v = 1.0f - uv.v;
 	}
 	if (flags & TIL_FLAG_ROTATE_90) {
-		uv = TilUv{uv.v, 1.0f - uv.u};
+		uv = TilUv{1.0f - uv.v, uv.u};
 	}
 	return uv;
 }
