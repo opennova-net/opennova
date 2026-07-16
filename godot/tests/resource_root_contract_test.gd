@@ -270,6 +270,29 @@ func test_packed_texture_loads_share_one_decode_per_epoch() -> void:
 	assert_not_null(after_bump, "An epoch bump must not lose the texture, only the cache.")
 
 
+func test_clear_releases_cached_texture_before_render_server_shutdown() -> void:
+	var image := Image.create(4, 4, false, Image.FORMAT_RGBA8)
+	image.fill(Color(0.6, 0.3, 0.1, 1.0))
+	var root := _make_flat_root('dds_clear_cache')
+	_write_pff(root.path_join('resource.pff'), [{
+		'name': 'swatch.dds',
+		'bytes': image.save_dds_to_buffer(),
+	}])
+	var resources := NovaResourceRoot.new()
+	assert_eq(resources.mount_runtime(root), OK)
+	var texture: Texture2D = resources.load_texture('swatch.dds')
+	assert_not_null(texture)
+	var weak_texture: WeakRef = weakref(texture)
+	texture = null
+	assert_not_null(weak_texture.get_ref(),
+		'The live resource root owns its decoded texture cache.')
+
+	resources.clear()
+
+	assert_null(weak_texture.get_ref(),
+		'clear() must release cached ImageTextures while RenderingServer is alive.')
+
+
 func after_each() -> void:
 	_remove_dir_recursive(OS.get_cache_dir().path_join("opennova_resource_root_contract"))
 

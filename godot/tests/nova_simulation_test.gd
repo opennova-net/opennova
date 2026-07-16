@@ -436,6 +436,61 @@ func test_command_125_usegun_mount_renders_emplaced_pose() -> void:
 
 
 
+func test_foliage_mask_anchors_track_local_player_stance() -> void:
+	# The hide-in-grass selection: only infantry with a stance bit set
+	# ((net_stance_bits & 0x3) != 0) and no groundEntity anchor the distant
+	# MODEL/depth-mask foliage tier [orig: Terrain_RenderSectorEntitiesBySide
+	# @ 0x5c7dc2/0x5c7ded (MoveOrder & 0x300), groundEntity gate
+	# @ 0x5c7dd5..0x5c7df7]. The local player's SELECT latches are the stance
+	# writer [orig: Player_PackInputStateToEntity @ 0x4df6a7..0x4df6cd].
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	var spawn := Vector3(24.0, 0.0, -12.0)
+	assert_true(sim.spawn_local_player(spawn, 0.0, 1))
+
+	sim.step()
+	assert_eq(sim.get_foliage_mask_anchor_positions().size(), 0,
+		"a STANDING infantry entity never anchors the silhouette tier")
+
+	assert_true(sim.request_local_player_stance(1))  # crouch (SELECT 169)
+	sim.step()
+	var crouched: PackedVector3Array = sim.get_foliage_mask_anchor_positions()
+	assert_eq(crouched.size(), 1, "the crouched local player anchors the silhouette tier")
+	if crouched.size() == 1:
+		var player := sim.get_local_player_position()
+		assert_lt(Vector2(crouched[0].x, crouched[0].z).distance_to(Vector2(player.x, player.z)), 0.1,
+			"the anchor is the entity's own Godot-space ground position")
+
+	assert_true(sim.request_local_player_stance(2))  # prone (SELECT 170)
+	sim.step()
+	assert_eq(sim.get_foliage_mask_anchor_positions().size(), 1,
+		"prone anchors too - both MoveOrder stance bits gate the tier")
+
+	assert_true(sim.request_local_player_stance(0))  # stand (SELECT 172)
+	sim.step()
+	assert_eq(sim.get_foliage_mask_anchor_positions().size(), 0,
+		"standing back up empties the anchor list")
+	sim.free()
+
+
+func test_foliage_mask_anchors_ignore_standing_npcs() -> void:
+	# Routed organics keep net_stance_bits 0 (the mirror only writes the LOCAL
+	# player's SELECT latches; NPC stance never reaches the wire bits here), so
+	# a demo mission full of standing walkers produces no anchors - matching
+	# retail, where placed objects and standing soldiers leave MoveOrder's
+	# stance bits clear [orig: the 0x5c7dc2 (flags & 0x300) reject].
+	var sim := NovaSimulation.new()
+	sim.build_demo_mission()
+	assert_eq(sim.get_entity_count(), 2, "the demo mission has AI infantry to reject")
+	for _i in range(4):
+		sim.step()
+	assert_eq(sim.get_foliage_mask_anchor_positions().size(), 0,
+		"standing NPCs never anchor the hide-in-grass tier")
+	sim.free()
+
+
 func test_transport_play_flag() -> void:
 	var sim := NovaSimulation.new()
 	sim.build_demo_mission()

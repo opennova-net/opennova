@@ -22,6 +22,7 @@ var _bounds := AABB()
 # (NovaTerrainData / libs/terrain_query/coords.h); this node forwards to it so the
 # editor brush paths and the runtime samplers share one implementation.
 var _data: NovaTerrainData = null
+var _surface_inputs: NovaTerrainSurfaceInputs = NovaTerrainSurfaceInputs.new()
 
 
 func _ready() -> void:
@@ -106,6 +107,7 @@ func set_sector_layout(sector_count: int, sector_rows: int, sector_grid: PackedI
 
 func set_terrain_data(data: NovaTerrainData) -> void:
 	_data = data
+	_surface_inputs.set_terrain_data(data)
 
 
 func _ensure_sector_instances(total: int) -> void:
@@ -162,21 +164,83 @@ func get_material() -> ShaderMaterial:
 	return _material
 
 
+## Shared retail-faithful terrain inputs used by both the runtime and ONED.
+## The object is stable for this mesh lifetime so foliage preview consumers
+## can retain it while transaction-boundary refreshes replace its textures.
+func get_surface_inputs() -> NovaTerrainSurfaceInputs:
+	return _surface_inputs
+
+
+## Rebuild every derived input after a terrain document load or Mission context
+## change, then bind the effective inputs to the existing editor material.
+func rebuild_surface_inputs(
+	tile_info: NovaTerrainTileInfo = null,
+	tile_overlay_enabled: bool = true
+) -> bool:
+	if _data == null:
+		return false
+	var rebuilt := _surface_inputs.rebuild(_data, tile_info, tile_overlay_enabled)
+	var applied := apply_surface_inputs()
+	return rebuilt and applied
+
+
+## Rebind cached inputs without allocating replacements. This is useful after
+## a shader/material context change and deliberately leaves u_heightmap alone.
+func apply_surface_inputs() -> bool:
+	if _material == null:
+		return false
+	return _surface_inputs.apply_to_material(_material)
+
+
+## Refresh only the normalized blend allocation after a committed blend stroke.
+func refresh_surface_inputs_blend() -> bool:
+	_surface_inputs.rebuild_blend()
+	return apply_surface_inputs()
+
+
+## Refresh only the live heightfield normal after a committed height stroke.
+func refresh_surface_inputs_heightfield() -> bool:
+	_surface_inputs.rebuild_heightfield()
+	return apply_surface_inputs()
+
+
+## Refresh coefficient and paired retail mip inputs after authored detail maps
+## change. Height/blend editing must not pay this allocation cost.
+func refresh_surface_inputs_details() -> bool:
+	_surface_inputs.rebuild_detail_textures()
+	return apply_surface_inputs()
+
+
+## Rebuild only the baked tile composite for the effective Terrain/Mission TIL.
+## A disabled or empty overlay is a valid refresh and clears the material flag.
+func refresh_surface_inputs_tile_overlay(
+	tile_info: NovaTerrainTileInfo = null,
+	enabled: bool = true
+) -> bool:
+	_surface_inputs.set_tile_info_override(tile_info)
+	_surface_inputs.set_tile_overlay_enabled(enabled)
+	_surface_inputs.rebuild_tile_overlay()
+	return apply_surface_inputs()
+
+
+func get_heightfield_normal_texture() -> Texture2D:
+	return _surface_inputs.get_heightfield_normal_texture()
+
+
+func has_heightfield_normal_texture() -> bool:
+	return _surface_inputs.has_heightfield_normal()
+
+
+func get_tile_overlay_texture() -> Texture2D:
+	return _surface_inputs.get_tile_overlay_texture()
+
+
+func has_tile_overlay_texture() -> bool:
+	return _surface_inputs.has_tile_overlay()
+
+
 func get_world_bounds() -> AABB:
 	return _bounds
-
-
-## Visible sector centers in world space (y = 0; the editor mesh displaces
-## height in-shader, so no CPU height is available here). The terrain
-## workspace's terrain-content anchor fallback for the foliage model tier -
-## the editor analog of the runtime's NovaTerrain.get_foliage_dispatch_centers
-## visible-patch centers.
-func get_visible_sector_centers() -> PackedVector3Array:
-	var centers := PackedVector3Array()
-	for instance in _sector_instances:
-		if instance.visible:
-			centers.push_back(instance.position + Vector3(SECTOR_SIZE * 0.5, 0.0, SECTOR_SIZE * 0.5))
-	return centers
 
 
 func get_sector_count() -> int:

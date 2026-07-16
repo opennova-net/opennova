@@ -1,5 +1,6 @@
 add_library(opennova_til STATIC
     src/til_io.cpp
+    src/til_foliage_blocker.cpp
     src/til_overlay_bake.cpp
 )
 

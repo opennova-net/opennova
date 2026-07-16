@@ -1,45 +1,137 @@
 extends GutTest
 
-# NovaDebugOverlay: the F3 mission debug overlay over a live MissionRuntime.
-# Drives the REAL runtime (real NovaSimulation over a fake placed node, the
-# mission_runtime_test bootstrap) to pin: the re-resolved runtime source
-# (mission reloads recreate the runtime), the entities/sim/vars panes, the
-# transport buttons, the writes gate, and the hidden-pauses-refresh contract.
+# NovaDebugOverlay: the shared F3 mission inspector. Most legacy tests drive
+# its runtime-free panes; the player tests use a small public-contract fake so
+# no listen-server auto-spawn can make the pose/no-player cases nondeterministic.
+# MissionRuntime metadata and game/ONED host wiring are covered separately.
 
 const OverlayScript := preload("res://engine/debug/nova_debug_overlay.gd")
-const MissionRuntime := preload("res://engine/world/mission_runtime.gd")
-const MainGameScript := preload("res://game/main_game.gd")
+const DebugViewContext := preload("res://engine/debug/nova_debug_view_context.gd")
 const COLLISION_TOGGLE_PATH := NodePath(
 	"DebugPanel/DebugContent/DebugTabs/View/ViewCollision")
+const PLAYER_POSITION_PATH := NodePath(
+	"DebugPanel/DebugContent/DebugTabs/Player/PlayerPosition")
+const PLAYER_ORIENTATION_PATH := NodePath(
+	"DebugPanel/DebugContent/DebugTabs/Player/PlayerOrientation")
+const PLAYER_DUMP_PATH := NodePath(
+	"DebugPanel/DebugContent/DebugTabs/Player/DumpPlayerPose")
+const PLAYER_DUMP_STATUS_PATH := NodePath(
+	"DebugPanel/DebugContent/DebugTabs/Player/PlayerDumpStatus")
 
 
-class FakeModel:
-	extends Node3D
-	func play_part_anim(_channel: int, _play_type: int, _time_s: float) -> void:
-		pass
-	func set_part_phase(_channel: int, _phase: int) -> void:
-		pass
+class FakePoseSim:
+	extends Node
+
+	var _has_player := false
+	var _position := Vector3.ZERO
+	var _yaw_deg := 0.0
+	var _pitch_deg := 0.0
+	var _view_roll_deg := 0.0
+
+	func set_player_pose(
+			position: Vector3, yaw_deg: float, pitch_deg: float, view_roll_deg: float) -> void:
+		_has_player = true
+		_position = position
+		_yaw_deg = yaw_deg
+		_pitch_deg = pitch_deg
+		_view_roll_deg = view_roll_deg
+
+	func set_yaw_deg(value: float) -> void:
+		_yaw_deg = value
+
+	func has_local_player() -> bool:
+		return _has_player
+
+	func get_local_player_position() -> Vector3:
+		return _position
+
+	func get_local_player_yaw_deg() -> float:
+		return _yaw_deg
+
+	func get_local_player_pitch_deg() -> float:
+		return _pitch_deg
+
+	func get_local_player_view() -> Dictionary:
+		return {
+			"fov_h_deg": 82.0,
+			"scope_engaged": false,
+			"mounted": false,
+			"fp_roll_deg": _view_roll_deg,
+		}
+
+	func get_logic_tick() -> int:
+		return 4242
+
+	func get_present_snapshot() -> PackedFloat32Array:
+		return PackedFloat32Array()
+
+	func get_present_stride() -> int:
+		return 1
+
+	func get_entity_count() -> int:
+		return 0
+
+	func get_fired_events_snapshot() -> PackedByteArray:
+		return PackedByteArray()
+
+	func get_wac_state() -> Dictionary:
+		return {}
+
+	func get_mission_variables_snapshot() -> PackedInt32Array:
+		return PackedInt32Array()
+
+	func get_global_variables_snapshot() -> PackedInt32Array:
+		return PackedInt32Array()
+
+	func get_music_variables_snapshot() -> PackedInt32Array:
+		return PackedInt32Array()
 
 
-func _make_runtime() -> Node:
-	var md := NovaMissionData.new()
-	assert_eq(md.create_default(), OK)
-	md.add_entity(3, 0, Vector3(10, 0, 0), Vector3.ZERO)  # KIND_ORGANIC
-	var container := Node3D.new()
-	add_child_autofree(container)
-	var model := FakeModel.new()
-	model.set_meta("entity_ref", { "kind": 3, "index": 0, "bms_id": 0, "group": -1 })
-	container.add_child(model)
-	var rt: Node = MissionRuntime.new()
-	add_child_autofree(rt)
-	assert_eq(int(rt.setup(md, container)), 1)
-	return rt
+class FakePoseRuntime:
+	extends Node
+
+	var _sim := FakePoseSim.new()
+	var _mission_file := "00TRe.bms"
+	var _mission_name := "Training Grounds"
+
+	func _init() -> void:
+		add_child(_sim)
+
+	func set_mission_identity(mission_file: String, mission_name: String) -> void:
+		_mission_file = mission_file
+		_mission_name = mission_name
+
+	func get_sim() -> FakePoseSim:
+		return _sim
+
+	func is_playing() -> bool:
+		return true
+
+	func get_mission_file() -> String:
+		return _mission_file
+
+	func get_mission_name() -> String:
+		return _mission_name
+
+
+func _make_pose_runtime() -> FakePoseRuntime:
+	var runtime := FakePoseRuntime.new()
+	add_child_autofree(runtime)
+	return runtime
 
 
 func _make_overlay() -> CanvasLayer:
 	var overlay: CanvasLayer = OverlayScript.new()
 	add_child_autofree(overlay)
 	return overlay
+
+
+func _dictionary_vector3(value: Variant) -> Vector3:
+	var record: Dictionary = value if value is Dictionary else {}
+	return Vector3(
+			float(record.get("x", 0.0)),
+			float(record.get("y", 0.0)),
+			float(record.get("z", 0.0)))
 
 
 
@@ -134,13 +226,205 @@ func test_view_tab_hide_foliage_toggle_emits() -> void:
 
 
 
+func test_player_tab_disables_dump_without_a_local_player() -> void:
+	var overlay := _make_overlay()
+	overlay.set_runtime(_make_pose_runtime())
+	overlay.toggle()
+
+	var position_label := overlay.get_node_or_null(PLAYER_POSITION_PATH) as Label
+	var orientation_label := overlay.get_node_or_null(PLAYER_ORIENTATION_PATH) as Label
+	var dump_button := overlay.get_node_or_null(PLAYER_DUMP_PATH) as Button
+	assert_not_null(position_label)
+	assert_not_null(orientation_label)
+	assert_not_null(dump_button)
+	assert_string_contains(position_label.text, "No local player")
+	assert_eq(orientation_label.text, "")
+	assert_true(dump_button.disabled)
+	watch_signals(overlay)
+	assert_eq(overlay.dump_local_player_pose(), "")
+	assert_signal_not_emitted(overlay, "local_player_pose_dumped")
+
+
+func test_player_dump_reports_an_unwritable_target_without_success_signal() -> void:
+	var runtime := _make_pose_runtime()
+	runtime.get_sim().set_player_pose(Vector3.ZERO, 0.0, 0.0, 0.0)
+	var overlay := _make_overlay()
+	overlay.set_runtime(runtime)
+	overlay.toggle()
+	var status := overlay.get_node_or_null(PLAYER_DUMP_STATUS_PATH) as Label
+	assert_not_null(status)
+
+	var blocker_path := OS.get_cache_dir().path_join(
+			"opennova_pose_blocker_%d.tmp" % Time.get_ticks_usec())
+	var blocker := FileAccess.open(blocker_path, FileAccess.WRITE)
+	assert_not_null(blocker)
+	if blocker == null:
+		return
+	blocker.store_string("regular file, not a directory")
+	blocker.close()
+	_dumped_paths.append(blocker_path)
+
+	watch_signals(overlay)
+	var result: String = overlay.dump_local_player_pose(
+			blocker_path.path_join("pose.json"))
+	assert_eq(result, "")
+	assert_signal_not_emitted(overlay, "local_player_pose_dumped")
+	assert_string_contains(status.text, "Could not")
+
+
+func test_player_tab_displays_and_dumps_a_fresh_authoritative_pose() -> void:
+	var runtime := _make_pose_runtime()
+	var sim := runtime.get_sim()
+	var position_godot := Vector3(123.25, 4.5, -67.75)
+	sim.set_player_pose(position_godot, 270.0, -8.75, 1.25)
+	var camera_rig := Node3D.new()
+	camera_rig.rotation_degrees = Vector3(0.0, 31.0, 0.0)
+	add_child_autofree(camera_rig)
+	var camera := Camera3D.new()
+	camera.rotation_degrees = Vector3(-12.0, 0.0, 7.0)
+	camera.fov = 73.0
+	camera_rig.add_child(camera)
+	var view_context := DebugViewContext.new()
+	view_context.camera = camera
+	view_context.camera_mode_known = true
+	view_context.third_person = true
+	var overlay := _make_overlay()
+	overlay.set_runtime(runtime)
+	overlay.set_view_context_source(func(): return view_context)
+	overlay.toggle()
+
+	var position_label := overlay.get_node_or_null(PLAYER_POSITION_PATH) as Label
+	var orientation_label := overlay.get_node_or_null(PLAYER_ORIENTATION_PATH) as Label
+	var dump_button := overlay.get_node_or_null(PLAYER_DUMP_PATH) as Button
+	var dump_status := overlay.get_node_or_null(PLAYER_DUMP_STATUS_PATH) as Label
+	assert_not_null(position_label)
+	assert_not_null(orientation_label)
+	assert_not_null(dump_button)
+	assert_not_null(dump_status)
+	assert_false(dump_button.disabled)
+	assert_string_contains(position_label.text, "123.250")
+	assert_string_contains(position_label.text, "67.750",
+			"BMS y is the inverse of Godot z")
+	assert_string_contains(position_label.text, "4.500",
+			"BMS z is Godot's up axis")
+	assert_string_contains(orientation_label.text, "270.000")
+	assert_string_contains(orientation_label.text, "-8.750")
+	assert_string_contains(orientation_label.text, "1.250")
+	assert_string_contains(orientation_label.text, "third person")
+
+	# The click must resample NOW rather than serialize the 0.25-Hz label cache.
+	var displayed_yaw := sim.get_local_player_yaw_deg()
+	sim.set_yaw_deg(278.5)
+	var sampled_yaw := sim.get_local_player_yaw_deg()
+	var camera_godot := Vector3(124.0, 6.0, -70.0)
+	camera.global_position = camera_godot
+	assert_ne(sampled_yaw, displayed_yaw)
+	overlay.local_player_pose_dumped.connect(
+			func(path: String): _dumped_paths.append(path))
+	watch_signals(overlay)
+	dump_button.pressed.emit()
+	assert_signal_emitted(overlay, "local_player_pose_dumped")
+	var dumped_path := String(
+			get_signal_parameters(overlay, "local_player_pose_dumped", 0)[0])
+	assert_true(FileAccess.file_exists(dumped_path))
+	assert_string_contains(dumped_path.get_file(), "00TRe")
+
+	var file := FileAccess.open(dumped_path, FileAccess.READ)
+	assert_not_null(file)
+	var payload_variant: Variant = JSON.parse_string(file.get_as_text()) if file != null else null
+	if file != null:
+		file.close()
+	assert_typeof(payload_variant, TYPE_DICTIONARY)
+	var payload: Dictionary = payload_variant if payload_variant is Dictionary else {}
+	assert_eq(String(payload.get("schema", "")), "opennova.player_pose.v1")
+	assert_true(String(payload.get("captured_at_utc", "")).ends_with("Z"))
+	assert_eq(int(payload.get("logic_tick", -1)), 4242)
+	var mission: Dictionary = payload.get("mission", {})
+	assert_eq(String(mission.get("file", "")), "00TRe.bms")
+	assert_eq(String(mission.get("name", "")), "Training Grounds")
+	var player: Dictionary = payload.get("player", {})
+	var godot_position: Dictionary = player.get("position_godot", {})
+	var bms_position: Dictionary = player.get("position_bms", {})
+	var orientation: Dictionary = player.get("orientation_mission_deg", {})
+	assert_almost_eq(float(godot_position.get("x", 0.0)), position_godot.x, 0.0001)
+	assert_almost_eq(float(godot_position.get("y", 0.0)), position_godot.y, 0.0001)
+	assert_almost_eq(float(godot_position.get("z", 0.0)), position_godot.z, 0.0001)
+	assert_almost_eq(float(bms_position.get("x", 0.0)), 123.25, 0.0001)
+	assert_almost_eq(float(bms_position.get("y", 0.0)), 67.75, 0.0001)
+	assert_almost_eq(float(bms_position.get("z", 0.0)), 4.5, 0.0001)
+	assert_almost_eq(float(orientation.get("yaw", 0.0)), sampled_yaw, 0.0001,
+			"the disk snapshot uses the click-time yaw")
+	assert_almost_eq(float(orientation.get("pitch", 0.0)), -8.75, 0.0001)
+	assert_almost_eq(float(orientation.get("view_roll", 0.0)), 1.25, 0.0001)
+	var player_forward := _dictionary_vector3(player.get("forward_godot", {}))
+	assert_almost_eq(player_forward.length(), 1.0, 0.0001)
+
+	var view: Dictionary = payload.get("view", {})
+	assert_almost_eq(float(view.get("fov_horizontal_deg", 0.0)), 82.0, 0.0001)
+	assert_false(bool(view.get("scope_engaged", true)))
+	assert_false(bool(view.get("mounted", true)))
+	var camera_snapshot: Dictionary = view.get("camera", {})
+	assert_eq(String(camera_snapshot.get("mode", "")), "third_person")
+	var dumped_camera_godot := _dictionary_vector3(
+			camera_snapshot.get("position_godot", {}))
+	var dumped_camera_bms := _dictionary_vector3(
+			camera_snapshot.get("position_bms", {}))
+	assert_true(dumped_camera_godot.is_equal_approx(camera_godot),
+			"the camera transform is sampled at click time")
+	assert_true(dumped_camera_bms.is_equal_approx(Vector3(124.0, 70.0, 6.0)))
+	var expected_camera_basis := camera.global_transform.basis.orthonormalized()
+	var camera_forward := _dictionary_vector3(
+			camera_snapshot.get("forward_godot", {}))
+	var camera_up := _dictionary_vector3(camera_snapshot.get("up_godot", {}))
+	assert_true(camera_forward.is_equal_approx(-expected_camera_basis.z),
+			"the dump uses the camera's rotated world basis")
+	assert_true(camera_up.is_equal_approx(expected_camera_basis.y))
+	var quaternion: Dictionary = camera_snapshot.get(
+			"orientation_quaternion_godot", {})
+	var dumped_quaternion := Quaternion(
+			float(quaternion.get("x", 0.0)),
+			float(quaternion.get("y", 0.0)),
+			float(quaternion.get("z", 0.0)),
+			float(quaternion.get("w", 0.0)))
+	var expected_quaternion := expected_camera_basis.get_rotation_quaternion()
+	assert_almost_eq(absf(dumped_quaternion.dot(expected_quaternion)), 1.0, 0.0001)
+	assert_almost_eq(float(camera_snapshot.get("godot_fov_deg", 0.0)), 73.0, 0.0001)
+	var viewport_size: Dictionary = camera_snapshot.get("viewport_size", {})
+	var viewport_width := float(viewport_size.get("x", 0.0))
+	var viewport_height := float(viewport_size.get("y", 0.0))
+	assert_gt(viewport_width, 0.0)
+	assert_gt(viewport_height, 0.0)
+	assert_almost_eq(float(camera_snapshot.get("viewport_aspect", 0.0)),
+			viewport_width / viewport_height, 0.0001)
+
+	var second_path: String = overlay.dump_local_player_pose()
+	assert_ne(second_path, dumped_path, "rapid consecutive snapshots never overwrite")
+	assert_true(FileAccess.file_exists(second_path))
+
+	var next_runtime := _make_pose_runtime()
+	next_runtime.set_mission_identity("00TRa.bms", "Second Training Area")
+	next_runtime.get_sim().set_player_pose(Vector3.ZERO, 0.0, 0.0, 0.0)
+	overlay.set_runtime(next_runtime)
+	assert_string_contains(dump_status.text, "No pose snapshot saved",
+			"a live mission swap clears the previous mission's Saved path")
+	assert_false(dump_status.text.contains(dumped_path))
+
+
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
 var _saved_resource_dir := ""
+var _dumped_paths: Array[String] = []
 
 
 func before_all() -> void:
 	_saved_resource_dir = ResourceDirSettings.get_resource_dir()
 	ResourceDirSettings.set_resource_dir("")
+
+
+func after_each() -> void:
+	for path in _dumped_paths:
+		if FileAccess.file_exists(path):
+			DirAccess.remove_absolute(path)
+	_dumped_paths.clear()
 
 
 func after_all() -> void:

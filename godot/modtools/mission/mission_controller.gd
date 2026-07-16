@@ -54,6 +54,10 @@ enum Mode { OBJECTS, WAYPOINTS, AREA_TRIGGERS, SCRIPTING }
 var terrain_editor: Node
 
 var _mission: NovaMissionData
+# Parsed co-named <mission>.til. This is the editor host's copy of GameWorld's
+# mission-scoped terrain override: the same resource drives tile composition
+# and foliage exclusion while the Mission workspace is active.
+var _mission_tile_info: NovaTerrainTileInfo
 var _current_path: String = ""
 # The resolved .trn path the loaded mission mounted, so a later terrain swap in the
 # Terrain workspace can be detected (see reconcile_with_terrain()).
@@ -319,6 +323,23 @@ func get_mission() -> NovaMissionData:
 	return _mission
 
 
+## The co-named mission tile array, or null when this mission has no .til.
+## MissionWorkspace passes this public fact into TerrainEditor's preview
+## context; callers never need to reach into controller load state.
+func get_mission_tile_info() -> NovaTerrainTileInfo:
+	return _mission_tile_info
+
+
+## Return the loaded BMS clock as the shared HHMM preview value. NAN means no
+## Mission document owns the clock; the Environment author's time then renders.
+func get_mission_preview_time_of_day() -> float:
+	if _mission == null:
+		return NAN
+	var info: Dictionary = _mission.get_info()
+	return NovaEnvironment.mission_start_time_hhmm(
+		int(info.get("start_time", 0)))
+
+
 func is_loaded() -> bool:
 	return _mission != null
 
@@ -493,6 +514,35 @@ func _resource_root() -> NovaResourceRoot:
 	if terrain_editor != null and terrain_editor.has_method("get_resource_root"):
 		return terrain_editor.get_resource_root()
 	return null
+
+
+# Retail loads <mission>.til into one shared terrain tile array used by both
+# terrain composition and foliage's radius-2 blocker. Keep the basename and
+# VFS lookup identical to GameWorld._load_mission_tile_info.
+# [orig: Terrain_LoadFoliageFile @ 0x60a740;
+# Foliage_PathBlockedByPlacedTile @ 0x606490]
+func _load_mission_tile_info(bms_name: String, resource_root: NovaResourceRoot) -> void:
+	_clear_mission_tile_info()
+	if resource_root == null:
+		return
+	var mission_name := bms_name.get_file()
+	if mission_name.is_empty():
+		mission_name = bms_name
+	var til_name := mission_name.get_basename() + ".til"
+	if not resource_root.has_file(til_name):
+		return
+	var til_bytes := resource_root.read_file(til_name)
+	if til_bytes.is_empty():
+		return
+	var tile_info := NovaTerrainTileInfo.new()
+	if tile_info.load_from_bytes(til_bytes) != OK:
+		push_warning("MissionController: failed to parse mission tile file '%s'." % til_name)
+		return
+	_mission_tile_info = tile_info
+
+
+func _clear_mission_tile_info() -> void:
+	_mission_tile_info = null
 
 
 func open_mission(bms_path: String) -> Error:

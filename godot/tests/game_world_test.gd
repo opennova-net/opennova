@@ -42,6 +42,20 @@ class FxWorldStub:
 		return 1
 
 
+
+# Single stub-injection seam for this file: GameWorld builds its runtime
+# internally in _start_runtime, so duck-typed transport stubs go in through
+# these two helpers only (keeps the private pokes to one site).
+func _install_runtime(world, runtime, effects = null) -> void:
+	world._runtime = runtime
+	world._loaded = runtime != null
+	world._effect_world = effects
+
+
+func _detach_runtime(world) -> void:
+	_install_runtime(world, null)
+
+
 func test_tick_gates_the_runtime_on_its_transport() -> void:
 	# The game host's tick must respect MissionRuntime's play flag - the debug
 	# overlay's Pause/Step work on a live mission BECAUSE this gate exists
@@ -50,8 +64,7 @@ func test_tick_gates_the_runtime_on_its_transport() -> void:
 	add_child_autofree(world)
 	var runtime := TransportRuntimeStub.new()
 	add_child_autofree(runtime)
-	world._runtime = runtime
-	world._loaded = true
+	_install_runtime(world, runtime)
 
 	world.tick(Vector3.ZERO)
 	assert_eq(runtime.ticks, 0, "a paused runtime never ticks")
@@ -61,8 +74,7 @@ func test_tick_gates_the_runtime_on_its_transport() -> void:
 	runtime.pause()
 	world.tick(Vector3.ZERO)
 	assert_eq(runtime.ticks, 1, "pausing stops it again")
-	world._runtime = null
-	world._loaded = false
+	_detach_runtime(world)
 
 
 func test_fx2ssn_routes_position_owner_and_up_orientation() -> void:
@@ -72,8 +84,7 @@ func test_fx2ssn_routes_position_owner_and_up_orientation() -> void:
 	var effects := FxWorldStub.new()
 	add_child_autofree(runtime)
 	add_child_autofree(effects)
-	world._runtime = runtime
-	world._effect_world = effects
+	_install_runtime(world, runtime, effects)
 	world._route_mission_effects([{"kind": "fx2ssn", "b": 17, "str": "Dust"}])
 	assert_eq(effects.spawns.size(), 1)
 	assert_eq(effects.spawns[0].owner, 17)
@@ -81,8 +92,7 @@ func test_fx2ssn_routes_position_owner_and_up_orientation() -> void:
 	assert_eq(effects.spawns[0].position, Vector3(4, 5, 6))
 	assert_eq(effects.spawns[0].orientation, Vector3.UP,
 			"the documented terrain-normal placeholder must actually reach the emitter")
-	world._runtime = null
-	world._effect_world = null
+	_detach_runtime(world)
 
 
 func test_load_world_requires_hardcoded_environment_in_global_root() -> void:
@@ -339,6 +349,67 @@ func test_successful_mission_load_exposes_the_loaded_file_until_unload() -> void
 		"an unloaded world no longer reports a stale active mission")
 
 
+func test_mission_til_is_shared_by_terrain_foliage_and_cleared_without_file() -> void:
+	var root_dir := OS.get_cache_dir().path_join(WORLD_TEST_ROOT).path_join(
+		"mission_til_%d" % Time.get_ticks_usec())
+	assert_eq(DirAccess.make_dir_recursive_absolute(root_dir), OK)
+	var source_dir := ProjectSettings.globalize_path("res://../fixtures/minimal/resources")
+	for file_name in DirAccess.get_files_at(source_dir):
+		assert_eq(DirAccess.copy_absolute(
+			source_dir.path_join(file_name), root_dir.path_join(file_name)), OK)
+
+	var til_bytes := PackedByteArray()
+	til_bytes.resize(28)
+	til_bytes.encode_u32(0, 0x74696c30)
+	til_bytes.encode_u32(4, 1)
+	# One entry at world [0,16] x [0,16].
+	til_bytes.encode_u32(16, 0)
+	til_bytes.encode_u32(20, 0)
+	til_bytes[24] = 1
+	var til_file := FileAccess.open(root_dir.path_join("mnml.til"), FileAccess.WRITE)
+	assert_not_null(til_file)
+	if til_file == null:
+		return
+	til_file.store_buffer(til_bytes)
+	til_file.close()
+
+	var resource_root := NovaResourceRoot.new()
+	assert_eq(resource_root.set_root_dir(root_dir), OK)
+	var packed := load("res://engine/world/game_world.tscn") as PackedScene
+	var world := packed.instantiate() as GameWorld
+	add_child_autofree(world)
+	await get_tree().process_frame
+	world.set_playable(false)
+	world.set_resource_root(resource_root)
+	assert_eq(world.load_mission("mnml.bms"), OK)
+
+	var terrain := world.get_node("NovaTerrain") as NovaTerrain
+	var dispatcher := world.get_node("NovaTerrain/FoliageDispatcher") as NovaFoliageDispatcher
+	var tile_info := terrain.tile_info_override as NovaTerrainTileInfo
+	assert_not_null(tile_info)
+	if tile_info != null:
+		assert_eq(tile_info.get_entry_count(), 1)
+		assert_true(tile_info.blocks_foliage(8.0, 8.0, 2.0))
+		assert_same(dispatcher.tile_info, tile_info,
+			"Terrain composition and foliage exclusion must share the parsed mission resource.")
+
+	world.unload()
+	await get_tree().process_frame
+	assert_null(terrain.tile_info_override)
+	assert_null(dispatcher.tile_info)
+
+	assert_eq(DirAccess.remove_absolute(root_dir.path_join("mnml.til")), OK)
+	var no_til_root := NovaResourceRoot.new()
+	assert_eq(no_til_root.set_root_dir(root_dir), OK)
+	world.set_resource_root(no_til_root)
+	assert_eq(world.load_mission("mnml.bms"), OK)
+	assert_null(terrain.tile_info_override,
+		"A subsequent mission without a co-named TIL cannot inherit stale blockers.")
+	assert_null(dispatcher.tile_info)
+	world.unload()
+	await get_tree().process_frame
+
+
 func test_unload_drops_the_previous_entitys_armory_viewmodel_state() -> void:
 	var world := _make_world()
 	add_child_autofree(world)
@@ -403,7 +474,7 @@ func test_skeleton_debug_builds_and_frees_the_view() -> void:
 
 func test_hide_foliage_toggles_dispatcher_visibility() -> void:
 	# The F3 overlay's "Hide foliage" toggle routes here: it hides/shows the foliage
-	# dispatcher node (whose MultiMesh children render the scattered vegetation).
+	# dispatcher node (whose ArrayMesh batches render the scattered vegetation).
 	var world := GameWorld.new()
 	var terrain := NovaTerrain.new()
 	terrain.name = "NovaTerrain"
@@ -424,6 +495,97 @@ func test_hide_foliage_toggles_dispatcher_visibility() -> void:
 	world.set_foliage_hidden(false)
 	assert_false(world.is_foliage_hidden())
 	assert_true(disp.visible, "showing foliage restores the dispatcher")
+
+
+class AnchorSimStub:
+	extends RefCounted
+	var anchors := PackedVector3Array()
+	func get_foliage_mask_anchor_positions() -> PackedVector3Array:
+		return anchors
+
+
+class AnchorRuntimeStub:
+	extends Node
+	var sim = null
+	func is_playing() -> bool:
+		return false
+	func get_sim():
+		return sim
+
+
+class SimlessRuntimeStub:
+	extends Node
+	func is_playing() -> bool:
+		return false
+
+
+func test_tick_feeds_dispatcher_silhouette_anchors_from_the_sim() -> void:
+	# The hide-in-grass anchor feed: every host tick routes the sim's
+	# crouched/prone infantry positions into the foliage dispatcher's silhouette
+	# tier [orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7dc2/0x5c7ded
+	# (MoveOrder & 0x300), groundEntity gate @ 0x5c7dd5..0x5c7df7].
+	var world := GameWorld.new()
+	var terrain := NovaTerrain.new()
+	terrain.name = "NovaTerrain"
+	var disp := NovaFoliageDispatcher.new()
+	disp.name = "FoliageDispatcher"
+	terrain.add_child(disp)
+	world.add_child(terrain)
+	add_child_autofree(world)
+	await get_tree().process_frame  # _ready wires _dispatcher from the named child
+
+	var runtime := AnchorRuntimeStub.new()
+	var sim := AnchorSimStub.new()
+	runtime.sim = sim
+	add_child_autofree(runtime)
+	_install_runtime(world, runtime)
+
+	var expected := PackedVector3Array([Vector3(12.0, 3.0, -40.0), Vector3(-7.5, 0.25, 96.0)])
+	sim.anchors = expected
+	world.tick(Vector3.ZERO)
+	assert_eq(disp.silhouette_anchors, expected,
+		"tick feeds the sim's anchor positions into the dispatcher's silhouette tier")
+
+	sim.anchors = PackedVector3Array()
+	world.tick(Vector3.ZERO)
+	assert_eq(disp.silhouette_anchors, PackedVector3Array(),
+		"an emptied sim anchor list clears the previous frame's anchors")
+
+	_detach_runtime(world)
+
+
+func test_tick_clears_stale_silhouette_anchors_when_no_sim_is_reachable() -> void:
+	# The feed assigns unconditionally: a runtime without get_sim() (or a null
+	# sim) must wipe anchors left by an earlier mission, never leave grass
+	# clumps orbiting a despawned player.
+	var world := GameWorld.new()
+	var terrain := NovaTerrain.new()
+	terrain.name = "NovaTerrain"
+	var disp := NovaFoliageDispatcher.new()
+	disp.name = "FoliageDispatcher"
+	terrain.add_child(disp)
+	world.add_child(terrain)
+	add_child_autofree(world)
+	await get_tree().process_frame
+
+	var runtime := SimlessRuntimeStub.new()
+	add_child_autofree(runtime)
+	_install_runtime(world, runtime)
+
+	disp.silhouette_anchors = PackedVector3Array([Vector3(1.0, 2.0, 3.0)])  # stale
+	world.tick(Vector3.ZERO)
+	assert_eq(disp.silhouette_anchors, PackedVector3Array(),
+		"a runtime with no sim seam clears stale anchors on the next tick")
+
+	var anchorless := AnchorRuntimeStub.new()  # get_sim() returns null
+	add_child_autofree(anchorless)
+	_install_runtime(world, anchorless)
+	disp.silhouette_anchors = PackedVector3Array([Vector3(4.0, 5.0, 6.0)])  # stale
+	world.tick(Vector3.ZERO)
+	assert_eq(disp.silhouette_anchors, PackedVector3Array(),
+		"a null sim clears stale anchors too")
+
+	_detach_runtime(world)
 
 
 func test_set_foliage_hidden_is_safe_without_a_dispatcher() -> void:

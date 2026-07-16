@@ -45,6 +45,10 @@ enabled=PackedStringArray("res://addons/gut/plugin.cfg")
 rendering_device/driver.windows="d3d12"
 textures/vram_compression/import_s3tc_bptc=true
 textures/vram_compression/import_etc2_astc=true
+; Retail reference captures run the witnessed anisotropic texfilter mode
+; (MINFILTER=ANISOTROPIC + MAXANISOTROPY @ 0x67e38a..0x67e45b); 8x matches
+; the era's driver default for the terrain detail samplers.
+textures/default_filters/anisotropic_filtering_level=3
 environment/defaults/default_clear_color=Color(0.08, 0.09, 0.12, 1)
 
 [shader_globals]

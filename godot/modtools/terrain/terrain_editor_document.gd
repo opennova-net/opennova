@@ -780,7 +780,8 @@ func save_texture_assets(material: ShaderMaterial, output_dir: String, terrain_n
 		if String(slot.get("format", "")) == "pcx_paletted":
 			err = data.save_pcx_slot(String(slot_id), output_path)
 		else:
-			var image := TerrainEditorSlots.texture_to_image(material.get_shader_parameter(String(slot["uniform"])))
+			var texture := TerrainEditorSlots.get_slot_texture(data, String(slot_id))
+			var image := TerrainEditorSlots.texture_to_image(texture)
 			if image == null:
 				if TerrainEditorSlots.uses_placeholder_default(String(slot_id)):
 					image = TerrainEditorSlots.create_export_placeholder_image()

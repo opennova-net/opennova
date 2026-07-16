@@ -113,6 +113,61 @@ func _dvxi5_root() -> NovaResourceRoot:
 	return root
 
 
+func _write_single_blocker_til(path: String) -> void:
+	var til_bytes := PackedByteArray()
+	til_bytes.resize(28)
+	til_bytes.encode_u32(0, 0x74696c30)
+	til_bytes.encode_u32(4, 1)
+	# One entry at world [0,16] x [0,16].
+	til_bytes.encode_u32(16, 0)
+	til_bytes.encode_u32(20, 0)
+	til_bytes[24] = 1
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	assert_not_null(file)
+	if file != null:
+		file.store_buffer(til_bytes)
+		file.close()
+
+
+func test_open_mission_loads_conamed_tile_blockers_and_clear_drops_context() -> void:
+	var root_dir := OS.get_cache_dir().path_join("oned_mission_tile_%d" % Time.get_ticks_usec())
+	assert_eq(DirAccess.make_dir_recursive_absolute(root_dir), OK)
+	var trn_path := root_dir.path_join("dvxi5.trn")
+	var trn_file := FileAccess.open(trn_path, FileAccess.WRITE)
+	assert_not_null(trn_file)
+	if trn_file == null:
+		return
+	trn_file.close()
+	var til_path := root_dir.path_join("ash_i5b.reference.til")
+	_write_single_blocker_til(til_path)
+
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(root_dir), OK)
+	var stub := StubTerrainEditor.new()
+	stub.resource_root = root
+	stub.world_root = Node3D.new()
+	add_child_autofree(stub.world_root)
+	add_child_autofree(stub)
+	var controller := MissionController.new(stub)
+	assert_true(controller.has_method("get_mission_tile_info"),
+		"MissionController must expose the parsed Mission blocker resource.")
+	if not controller.has_method("get_mission_tile_info"):
+		return
+
+	assert_eq(controller.open_mission(_abs(BMS_PATH)), OK)
+	var tile_info = controller.call("get_mission_tile_info")
+	assert_not_null(tile_info, "The co-named mission .til is parsed in ONED just like GameWorld.")
+	if tile_info != null:
+		assert_eq(tile_info.get_entry_count(), 1)
+		assert_true(tile_info.blocks_foliage(8.0, 8.0, 2.0))
+	controller.clear()
+	assert_null(controller.call("get_mission_tile_info"), "Clear must not leave stale Mission blockers.")
+
+	DirAccess.remove_absolute(til_path)
+	DirAccess.remove_absolute(trn_path)
+	DirAccess.remove_absolute(root_dir)
+
+
 func test_open_mission_without_editor_is_unavailable() -> void:
 	var controller := MissionController.new(null)
 	assert_eq(controller.open_mission(_abs(BMS_PATH)), ERR_UNAVAILABLE)
@@ -517,8 +572,6 @@ func _new_with_item_db() -> MissionController:
 	controller._placer.item_db = db
 	return controller
 
-
-# --- Phase: create a mission from scratch (new_mission) -----------------------
 
 func test_new_mission_requires_a_loaded_terrain() -> void:
 	var stub := StubTerrainEditor.new()

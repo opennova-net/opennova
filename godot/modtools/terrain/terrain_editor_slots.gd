@@ -74,9 +74,9 @@ const SLOT_DEFS := {
 		"paint_channel": 2,
 	},
 	"detailmap": {
-		"label": "Shading 1 / near",
-		"dialog_title": "Load Bump Layer 1 (near)",
-		"tooltip": "Layer-1 per-material bump response at close range. R=Detail 1 bump, G=Detail 2 bump, B=Detail 3 bump. Dot-producted with the blend map so each material gets its own lighting response.",
+		"label": "Detail coefficient source",
+		"dialog_title": "Load Detail Coefficient Source",
+		"tooltip": "Authored detail source. Retail generates the shader coefficient map from this texture's blue channel at scale 1/32.",
 		"trn_key": "detailmap",
 		"uniform": "u_detailmap",
 		"suffix": "_dm.tga",
@@ -86,11 +86,11 @@ const SLOT_DEFS := {
 		"previewable": true,
 	},
 	"detailmapdist": {
-		"label": "Shading 1 / far",
-		"dialog_title": "Load Bump Layer 1 (far)",
-		"tooltip": "Layer-1 per-material bump response at far distance. Crossfaded with the near map by camera distance (the original game bakes this into the far-distance texture detail).",
+		"label": "Far detail mip target",
+		"dialog_title": "Load Far Detail Mip Target",
+		"tooltip": "Far RGB target blended into Detail A/B/C's custom mip chains. It is not a camera-distance normal map.",
 		"trn_key": "detailmapdist",
-		"uniform": "u_detailmapdist",
+		"uniform": "",
 		"suffix": "_dmd.tga",
 		"bpp": 24,
 		"getter": "get_detailmapdist",
@@ -98,11 +98,11 @@ const SLOT_DEFS := {
 		"previewable": true,
 	},
 	"detailmap2": {
-		"label": "Shading 2 / near",
-		"dialog_title": "Load Bump Layer 2 (near)",
-		"tooltip": "Second independent bump layer at close range. Same R/G/B = per-material packing as Layer 1. Applied as an additional lighting multiplier on top of Layer 1.",
+		"label": "Detail layer 2",
+		"dialog_title": "Load Detail Layer 2",
+		"tooltip": "Second detail texture blended over the splat layers at its own density (Detail density 2).",
 		"trn_key": "detailmap2",
-		"uniform": "u_detailmap2",
+		"uniform": "",
 		"suffix": "_dm2.tga",
 		"bpp": 24,
 		"getter": "get_detailmap2",
@@ -110,11 +110,11 @@ const SLOT_DEFS := {
 		"previewable": true,
 	},
 	"detailmapdist2": {
-		"label": "Shading 2 / far",
-		"dialog_title": "Load Bump Layer 2 (far)",
-		"tooltip": "Layer-2 per-material bump response at far distance.",
+		"label": "Detail layer 2 distance target",
+		"dialog_title": "Load Detail Layer 2 Distance Target",
+		"tooltip": "Far color the second detail layer fades toward with distance.",
 		"trn_key": "detailmapdist2",
-		"uniform": "u_detailmapdist2",
+		"uniform": "",
 		"suffix": "_dmd2.tga",
 		"bpp": 24,
 		"getter": "get_detailmapdist2",
@@ -164,7 +164,7 @@ const DETAIL_PLACEHOLDER_COLORS := [
 	Color(0.5, 0.5, 0.55, 1.0),
 ]
 
-const NORMAL_PLACEHOLDER_COLOR := Color(0.5, 0.5, 0.5, 1.0)
+const FAR_DETAIL_PLACEHOLDER_COLOR := Color(0.5, 0.5, 0.5, 1.0)
 
 
 static func get_slot_ids() -> Array:
@@ -264,13 +264,16 @@ static func get_slot_texture(data, slot_id: String) -> Texture2D:
 
 
 static func apply_slot_texture(material: ShaderMaterial, data, slot_id: String, texture: Texture2D) -> void:
-	if material == null or data == null:
+	if material == null:
 		return
 	var slot: Dictionary = get_slot(slot_id)
 	if slot.is_empty():
 		return
-	material.set_shader_parameter(String(slot["uniform"]), texture)
-	data.call(String(slot["setter"]), texture)
+	var shader_uniform := String(slot.get("uniform", ""))
+	if not shader_uniform.is_empty():
+		material.set_shader_parameter(shader_uniform, texture)
+	if data != null:
+		data.call(String(slot["setter"]), texture)
 
 
 static func apply_slot_image(material: ShaderMaterial, data, slot_id: String, image: Image) -> Texture2D:
@@ -294,18 +297,12 @@ static func apply_default_slots(material: ShaderMaterial, data, sync_data: bool 
 		if sync_data and data != null:
 			data.call(String(get_slot(slot_id)["setter"]), texture)
 	var normal_image := Image.create(4, 4, false, Image.FORMAT_RGBA8)
-	normal_image.fill(NORMAL_PLACEHOLDER_COLOR)
+	normal_image.fill(FAR_DETAIL_PLACEHOLDER_COLOR)
 	var normal_texture := create_texture(normal_image)
-	material.set_shader_parameter(String(get_slot("detailmapdist")["uniform"]), normal_texture)
-	if sync_data and data != null:
-		data.call(String(get_slot("detailmapdist")["setter"]), normal_texture)
-	material.set_shader_parameter(String(get_slot("detailmap")["uniform"]), null)
-	material.set_shader_parameter(String(get_slot("detailmap2")["uniform"]), null)
-	material.set_shader_parameter(String(get_slot("detailmapdist2")["uniform"]), null)
-	if sync_data and data != null:
-		data.call(String(get_slot("detailmap")["setter"]), null)
-		data.call(String(get_slot("detailmap2")["setter"]), null)
-		data.call(String(get_slot("detailmapdist2")["setter"]), null)
+	apply_slot_texture(material, data if sync_data else null, "detailmapdist", normal_texture)
+	apply_slot_texture(material, data if sync_data else null, "detailmap", null)
+	apply_slot_texture(material, data if sync_data else null, "detailmap2", null)
+	apply_slot_texture(material, data if sync_data else null, "detailmapdist2", null)
 	for map_slot_id in MAP_DATA_SLOT_IDS:
 		var map_slot: Dictionary = get_slot(String(map_slot_id))
 		material.set_shader_parameter(String(map_slot["uniform"]), null)
@@ -322,7 +319,7 @@ static func apply_default_slot(material: ShaderMaterial, data, slot_id: String, 
 		return
 	if slot_id == "detailmapdist":
 		var normal_image := Image.create(4, 4, false, Image.FORMAT_RGBA8)
-		normal_image.fill(NORMAL_PLACEHOLDER_COLOR)
+		normal_image.fill(FAR_DETAIL_PLACEHOLDER_COLOR)
 		apply_slot_texture(material, data, slot_id, create_texture(normal_image))
 		return
 	if slot_id == "detailmap" or slot_id == "detailmap2" or slot_id == "detailmapdist2":
@@ -339,5 +336,5 @@ static func uses_placeholder_default(slot_id: String) -> bool:
 
 static func create_export_placeholder_image() -> Image:
 	var image := Image.create(DEFAULT_EXPORT_IMAGE_SIZE, DEFAULT_EXPORT_IMAGE_SIZE, false, Image.FORMAT_RGBA8)
-	image.fill(NORMAL_PLACEHOLDER_COLOR)
+	image.fill(FAR_DETAIL_PLACEHOLDER_COLOR)
 	return image

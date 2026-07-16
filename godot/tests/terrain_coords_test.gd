@@ -98,6 +98,27 @@ func test_world_to_source_local_clamp_at_boundary() -> void:
 	mesh.free()
 
 
+func test_runtime_world_to_source_coords_wraps_and_keeps_raw_sector_ids() -> void:
+	var data := _make_data()
+	# Outside the authored 8x8 editor extent, runtime wraps the 16x16 grid.
+	assert_eq(
+		data.world_to_runtime_source_coords(-5000.0, -2000.0),
+		Vector2(120.0, 48.0)
+	)
+	assert_lt(data.world_to_source_coords(-5000.0, -2000.0).x, 0.0)
+
+	# Cell (0,3) contains raw id 7. Runtime preserves it, so it receives no
+	# quadrant offset; the editor clamps it to id 4 and offsets both axes.
+	assert_eq(
+		data.world_to_runtime_source_coords(-300.0, -2000.0),
+		Vector2(212.0, 48.0)
+	)
+	assert_eq(data.world_to_source_coords(-300.0, -2000.0), Vector2(724.0, 560.0))
+
+	# Empty cells remain invalid in both modes.
+	assert_lt(data.world_to_runtime_source_coords(-800.0, -2000.0).x, 0.0)
+
+
 func test_world_to_cell_source_coords_unclamped() -> void:
 	var mesh := _make_mesh()
 	var data := _make_data()

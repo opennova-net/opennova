@@ -619,6 +619,11 @@ target_link_libraries(til_roundtrip_test PRIVATE opennova_til)
 target_include_directories(til_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME til_roundtrip COMMAND til_roundtrip_test)
 
+add_executable(til_foliage_blocker_test til/til_foliage_blocker_test.cpp)
+target_link_libraries(til_foliage_blocker_test PRIVATE opennova_til)
+target_include_directories(til_foliage_blocker_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME til_foliage_blocker COMMAND til_foliage_blocker_test)
+
 add_executable(til_tile_atlas_test til/til_tile_atlas_test.cpp)
 target_link_libraries(til_tile_atlas_test PRIVATE opennova_til)
 target_include_directories(til_tile_atlas_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -644,18 +649,11 @@ target_link_libraries(foliage_map_remap_indices_test PRIVATE opennova_foliage)
 target_include_directories(foliage_map_remap_indices_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME foliage_map_remap_indices COMMAND foliage_map_remap_indices_test)
 
-# Foliage placement + dispatcher parity tests — exercise sub_5C0240 / sub_5C1940
-# invariants (deterministic PRNG, 21-cap, 4-quadrant walk, 128-LRU, 8-frame
-# stagger, 38.0 near-Z reject). See libs/foliage/include/foliage/placement.h.
-# The model_* group covers the MODEL tier (Foliage_GenerateModelTileInstances
-# @ 0x600980 / Foliage_UpdateModelTiles @ 0x601f50) — see
-# libs/foliage/include/foliage/model_placement.h.
-foreach(name placement_determinism placement_cap placement_midpoints quad_fold dispatcher_quadrants dispatcher_lru dispatcher_stagger dispatcher_near_z dispatcher_frame_progression model_placement_determinism model_placement_cap model_placement_gates model_placement_pins model_placement_fold model_placement_axis model_dispatcher_quadrants model_dispatcher_cache model_dispatcher_evict model_dispatcher_depth fd_bake)
-    add_executable(foliage_${name}_test foliage/foliage_${name}_test.cpp)
-    target_link_libraries(foliage_${name}_test PRIVATE opennova_foliage)
-    target_include_directories(foliage_${name}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-    add_test(NAME foliage_${name} COMMAND foliage_${name}_test)
-endforeach()
+add_executable(foliage_runtime_vectors_test foliage/foliage_runtime_vectors_test.cpp)
+target_link_libraries(foliage_runtime_vectors_test PRIVATE opennova_foliage)
+target_include_directories(foliage_runtime_vectors_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(foliage_runtime_vectors_test PRIVATE cxx_std_17)
+add_test(NAME foliage_runtime_vectors COMMAND foliage_runtime_vectors_test)
 
 add_executable(tpj_roundtrip_test tpj/tpj_roundtrip_test.cpp)
 target_link_libraries(tpj_roundtrip_test PRIVATE opennova_tpj)
@@ -712,6 +710,21 @@ add_executable(terrain_lighting_test terrain/terrain_lighting_test.cpp)
 target_link_libraries(terrain_lighting_test PRIVATE opennova_terrain)
 target_include_directories(terrain_lighting_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME terrain_lighting COMMAND terrain_lighting_test)
+
+add_executable(terrain_texture_preprocess_test terrain/terrain_texture_preprocess_test.cpp)
+target_link_libraries(terrain_texture_preprocess_test PRIVATE opennova_terrain)
+target_include_directories(terrain_texture_preprocess_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME terrain_texture_preprocess COMMAND terrain_texture_preprocess_test)
+
+add_executable(terrain_lod_family_test terrain/terrain_lod_family_test.cpp)
+target_link_libraries(terrain_lod_family_test PRIVATE opennova_terrain)
+target_include_directories(terrain_lod_family_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME terrain_lod_family COMMAND terrain_lod_family_test)
+
+add_executable(terrain_foliage_detail_collector_test terrain/terrain_foliage_detail_collector_test.cpp)
+target_link_libraries(terrain_foliage_detail_collector_test PRIVATE opennova_terrain)
+target_include_directories(terrain_foliage_detail_collector_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME terrain_foliage_detail_collector COMMAND terrain_foliage_detail_collector_test)
 
 # parametric_parity is a long byte-identical fixture parity run and remains
 # disabled until its CI stability/performance cost is addressed.

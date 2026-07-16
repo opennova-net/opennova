@@ -7,10 +7,7 @@
 
 namespace opennova {
 
-struct TpjLockCoord {
-	int x = 0;
-	int y = 0;
-};
+using TpjLockCoord = TerrainLockCoord;
 
 struct TpjProject {
 	using LockCoord = TpjLockCoord;

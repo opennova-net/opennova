@@ -291,7 +291,7 @@ void NovaParticleEmitter::_ensure_fallback_texture() {
 }
 
 String NovaParticleEmitter::_shader_path_for_blend(int p_blend_mode) {
-	// Engine-layer shaders live in godot/shaders/ (like foliage_far/foliage_model):
+	// Engine-layer shaders live in godot/shaders/ (like foliage_detail_high):
 	// the game runtime export excludes modtools/* — a modtools path here would load
 	// null in an exported build and every runtime particle would render nothing.
 	using opennova::particle::BlendMode;

@@ -115,7 +115,15 @@ func configure_mission_clock(start_time_q8_8: int, minutes_per_day: int) -> void
 	_mission_time_fixed24 = (raw << Q8_8_TO_FIXED24_SHIFT) % TOD_DAY_FIXED24
 	var rate := maxi(minutes_per_day, MIN_MINUTES_PER_DAY)
 	_mission_advance_per_tick = int(TOD_DAY_FIXED24 / (TOD_TICKS_PER_REAL_MINUTE * rate))
-	time_of_day = _fixed24_to_hhmm(_mission_time_fixed24)
+	time_of_day = mission_start_time_hhmm(start_time_q8_8)
+
+
+## Convert the unsigned Q8.8 BMS mission header clock to the HHMM value used
+## by NovaEnvironment and editor previews. Keeping this public conversion here
+## prevents runtime and Mission preview clocks from drifting apart.
+static func mission_start_time_hhmm(start_time_q8_8: int) -> float:
+	var raw := start_time_q8_8 & 0xFFFF
+	return _fixed24_to_hhmm((raw << Q8_8_TO_FIXED24_SHIFT) % TOD_DAY_FIXED24)
 
 
 ## Advance by completed logic ticks using the exact integer increment
@@ -280,9 +288,9 @@ func get_terrain_lighting_attenuation() -> Vector3:
 	# written and freed but its three readers (0x606ce0, 0x606c30,
 	# Terrain_GetColorMapBilinear @ 0x606d80) have zero xrefs (full .text
 	# E8/E9 scan), so the GPU terrain textures ship untinted
-	# (docs/env/env-tod-re.md #19). The two LIVE terrain_rgb consumers render
-	# elsewhere: the .til tile overlay (get_tile_overlay_tint below) and the
-	# foliage lightmap sample (NovaFoliageDispatcher.terrain_tint).
+	# (docs/env/env-tod-re.md #19). The live terrain_rgb consumer in this path is
+	# the .til tile overlay (get_tile_overlay_tint below); the re-grilled foliage
+	# lightmap constant is its neutral :fd/detail average, not terrain_rgb.
 	return Vector3.ONE
 
 
@@ -313,7 +321,7 @@ func apply_terrain_uniforms(material: ShaderMaterial) -> void:
 	material.set_shader_parameter("u_sun_light", get_sun_light())
 	material.set_shader_parameter("u_sky_ambient", get_sky_ambient())
 	material.set_shader_parameter("u_sun_direction", get_light_direction())
-	material.set_shader_parameter("u_terrain_tint", get_terrain_lighting_attenuation())
+	material.set_shader_parameter("u_tile_overlay_tint", get_tile_overlay_tint())
 	material.set_shader_parameter("u_fog_color", get_fog_color())
 	material.set_shader_parameter("u_fog_end", get_fog_level())
 	material.set_shader_parameter("u_fog_start", get_fog_start())

@@ -124,6 +124,30 @@ bool load_trn(std::istream &f, TrnConfig &out, std::string &error) {
 			out.wrap_x = std::atoi(val.c_str());
 		} else if (key == "polytrn_wrapy") {
 			out.wrap_y = std::atoi(val.c_str());
+		} else if (key == "lock_topleft") {
+			out.lock_topleft.x = std::atoi(val.c_str());
+			std::string val2;
+			if (iss >> val2) {
+				out.lock_topleft.y = std::atoi(val2.c_str());
+			}
+		} else if (key == "lock_topright") {
+			out.lock_topright.x = std::atoi(val.c_str());
+			std::string val2;
+			if (iss >> val2) {
+				out.lock_topright.y = std::atoi(val2.c_str());
+			}
+		} else if (key == "lock_bottomleft") {
+			out.lock_bottomleft.x = std::atoi(val.c_str());
+			std::string val2;
+			if (iss >> val2) {
+				out.lock_bottomleft.y = std::atoi(val2.c_str());
+			}
+		} else if (key == "lock_bottomright") {
+			out.lock_bottomright.x = std::atoi(val.c_str());
+			std::string val2;
+			if (iss >> val2) {
+				out.lock_bottomright.y = std::atoi(val2.c_str());
+			}
 		} else if (key == "horizon") {
 			out.horizon = std::atof(val.c_str());
 		} else if (key == "polytrn_origin") {
@@ -230,6 +254,17 @@ bool save_trn(std::ostream &f, const TrnConfig &cfg, std::string &error) {
 	f << "polytrn_sectorcount\t\t" << cfg.sector_count << nl;
 	f << "polytrn_wrapx\t\t\t" << cfg.wrap_x << nl;
 	f << "polytrn_wrapy\t\t\t" << cfg.wrap_y << nl;
+	const bool has_quadrant_locks =
+		cfg.lock_topleft.x != 0 || cfg.lock_topleft.y != 0 ||
+		cfg.lock_topright.x != 0 || cfg.lock_topright.y != 0 ||
+		cfg.lock_bottomleft.x != 0 || cfg.lock_bottomleft.y != 0 ||
+		cfg.lock_bottomright.x != 0 || cfg.lock_bottomright.y != 0;
+	if (has_quadrant_locks) {
+		f << "lock_topleft\t\t\t" << cfg.lock_topleft.x << "\t" << cfg.lock_topleft.y << nl;
+		f << "lock_topright\t\t\t" << cfg.lock_topright.x << "\t" << cfg.lock_topright.y << nl;
+		f << "lock_bottomleft\t\t" << cfg.lock_bottomleft.x << "\t" << cfg.lock_bottomleft.y << nl;
+		f << "lock_bottomright\t" << cfg.lock_bottomright.x << "\t" << cfg.lock_bottomright.y << nl;
+	}
 	f << nl;
 	f << "polytrn_origin\t\t\t" << cfg.origin_x << "\t" << cfg.origin_y << nl;
 	f << nl;

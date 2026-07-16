@@ -620,6 +620,13 @@ public:
 	int get_entity_bms_id(int p_index) const;       // file entity id; the host maps this to a placed node
 	int get_entity_owner_connection_id(int p_index) const; // entity+0x78 dcb; the networked-player identity (D-NET-112)
 	int get_entity_wire_handle(int p_index) const;  // (pool<<12)|slot — the per-entity wire identity
+	// Godot-space positions of the entities the distant MODEL/depth-mask foliage
+	// tier generates around: crouched or prone (MoveOrder stance bits 8-9) and
+	// standing on terrain, not on another entity. Retail tests every visible
+	// sector entity, but only infantry ever carry the stance bits.
+	// [orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7dc2/0x5c7ded
+	// (MoveOrder & 0x300), groundEntity gate @ 0x5c7dd5..0x5c7df7]
+	PackedVector3Array get_foliage_mask_anchor_positions() const;
 	// Part-anim channel phase 0..65535 (PLAYPARTANIM); channel is 1 or 2. The host renders the
 	// model part from this (the engine computes it; the host only reads it).
 	int get_entity_part_anim_phase(int p_index, int channel) const;

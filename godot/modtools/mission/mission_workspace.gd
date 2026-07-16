@@ -11,6 +11,7 @@ extends EditorWorkspace
 # adapter is the EditorWorkspace shell binding (capability hooks + inspector).
 
 const TerrainViewportScript = preload("res://modtools/terrain/terrain_viewport.gd")
+const DebugViewContext = preload("res://engine/debug/nova_debug_view_context.gd")
 const MissionControllerScript = preload("res://modtools/mission/mission_controller.gd")
 const MissionInspectorScript = preload("res://modtools/mission/mission_inspector.gd")
 const MissionPlayControllerScript = preload("res://modtools/mission/mission_play_controller.gd")
@@ -40,6 +41,10 @@ var _reground_dialog: ConfirmationDialog
 # active mode per refresh (see _debug_runtime_source).
 var _debug_overlay: NovaDebugOverlay
 
+# Mission-only terrain/foliage inputs are scoped to activation because the
+# Terrain and Mission workspaces share one TerrainEditor scene.
+var _mission_preview_context_active := false
+
 
 func _init(value: Node = null) -> void:
 	terrain_editor = value
@@ -47,6 +52,7 @@ func _init(value: Node = null) -> void:
 	# The controller fires `changed` on load / clear / select / dirty / save; refresh
 	# the shell title + action-button state (Save enables, `*` appears) on each.
 	_controller.changed.connect(_sync_shell)
+	_controller.changed.connect(_sync_mission_preview_context)
 	# Transient action feedback (undo / delete / place / rejected edits) flows through
 	# status_reported; relay it to the shell status bar. Open / save keep their own poll.
 	_controller.status_reported.connect(_on_controller_status)
@@ -81,9 +87,14 @@ func play_controller():
 
 
 func set_terrain_editor(value: Node) -> void:
+	var previous := terrain_editor
+	if _mission_preview_context_active and previous != null and previous != value \
+			and previous.has_method("clear_mission_preview_context"):
+		previous.clear_mission_preview_context()
 	terrain_editor = value
 	if _controller != null:
 		_controller.set_terrain_editor(value)
+	_sync_mission_preview_context()
 	if _mount != null:
 		var viewport := _mount.get_viewport_node()
 		if viewport != null:
@@ -96,6 +107,26 @@ func bind_to_editor(value: Node) -> void:
 	if value != null and value.has_method("get_terrain_editor"):
 		value = value.get_terrain_editor()
 	set_terrain_editor(value)
+
+
+## Install the active mission's external terrain tile array (and preview
+## time-of-day) onto the shared terrain preview.
+func _sync_mission_preview_context() -> void:
+	if not _mission_preview_context_active or terrain_editor == null \
+			or not terrain_editor.has_method("set_mission_preview_context"):
+		return
+	var tile_info: NovaTerrainTileInfo = null
+	if _controller != null and _controller.has_method("get_mission_tile_info"):
+		tile_info = _controller.get_mission_tile_info()
+	var preview_time_of_day := NAN
+	if _controller != null and _controller.has_method("get_mission_preview_time_of_day"):
+		preview_time_of_day = _controller.get_mission_preview_time_of_day()
+	terrain_editor.set_mission_preview_context(tile_info, preview_time_of_day)
+
+
+func _clear_mission_preview_context() -> void:
+	if terrain_editor != null and terrain_editor.has_method("clear_mission_preview_context"):
+		terrain_editor.clear_mission_preview_context()
 
 
 # --- Identity -----------------------------------------------------------------
@@ -140,6 +171,8 @@ func shows_camera_status() -> bool:
 # --- Lifecycle / viewport (shared, read-only terrain viewport) ----------------
 
 func activate() -> void:
+	_mission_preview_context_active = true
+	_sync_mission_preview_context()
 	if _controller != null:
 		# Drop a loaded mission whose terrain was swapped out underneath from the
 		# Terrain workspace before re-showing its objects (else they float over a new
@@ -192,6 +225,8 @@ func _prompt_reground(count: int) -> void:
 
 
 func deactivate() -> void:
+	_mission_preview_context_active = false
+	_clear_mission_preview_context()
 	# Leaving the workspace dismisses the re-ground question without answering it:
 	# the revision is NOT adopted, so the prompt re-poses on the next activate
 	# (unlike the explicit "Leave as-is"). Also keeps the dialog from floating over
@@ -225,6 +260,7 @@ func mount_viewport(host: Control) -> void:
 	if is_playing_mission():
 		_ensure_play_mount().mount(host)
 		return
+	_sync_mission_preview_context()
 	var viewport := _ensure_mount().mount(host)
 	if viewport != null:
 		viewport.set_terrain_editor(terrain_editor)
@@ -247,6 +283,8 @@ func unmount_viewport(_host: Control) -> void:
 
 
 func release_viewport() -> void:
+	_mission_preview_context_active = false
+	_clear_mission_preview_context()
 	if is_playing_mission():
 		stop_play_mission()
 	if _play_mount != null:
@@ -364,6 +402,7 @@ func toggle_debug_overlay() -> void:
 		# through _on_overlay_transport so the controller stays in step.
 		_debug_overlay.lock_writes("Editing is off while simulating from the editor.")
 		_debug_overlay.set_runtime_source(Callable(self, "_debug_runtime_source"))
+		_debug_overlay.set_view_context_source(Callable(self, "get_debug_view_context"))
 		_debug_overlay.transport_used.connect(_on_overlay_transport)
 		_debug_overlay.skeleton_debug_toggled.connect(_on_overlay_skeleton_debug)
 		_debug_overlay.collision_debug_toggled.connect(_on_overlay_collision_debug)
@@ -433,6 +472,24 @@ func _debug_runtime_source():
 		var world = _play_node().get_world()
 		return world.get_runtime() if world != null else null
 	return _controller.get_sim_runtime() if _controller != null else null
+
+
+## Exact PIE camera context consumed by the shared F3 pose dump.
+func get_debug_view_context() -> DebugViewContext:
+	if not is_playing_mission():
+		return null
+	var play = _play_node()
+	if play == null:
+		return null
+	var context := DebugViewContext.new()
+	var camera: Camera3D = play.get_play_camera()
+	if camera != null and is_instance_valid(camera):
+		context.camera = camera
+	var player_host = play.get_player_host()
+	if player_host != null and is_instance_valid(player_host):
+		context.camera_mode_known = true
+		context.third_person = bool(player_host.is_third_person())
+	return context
 
 
 ## The live runtime an external surface (the MCP agent service) should read:

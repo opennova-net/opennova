@@ -32,7 +32,7 @@ scalar function in this record; the GUT env vectors
 | Per-entity sun visibility (effectScale source) | MATCHING (math ported; host raycasts pending) | `renderer::sun_visibility_factor` `[orig: Entity_ComputeSunVisibility @ 0x5c6800; stack write @ 0x5c7fa5]`; the 3-ray host sampling rides the runtime slice (D-RLIT-3) |
 | Dynamic point lights (color × modulator, {1,0,15/r²,1}, ≤4 D3D lights, owner/interior groups) | MATCHING (math ported) / group culling witnessed | `renderer::point_light_color/point_light_attenuation` `[orig: Light_GetPointLightParams @ 0x5a9180; Light_FillD3DPointLight @ 0x5aa450]` — attenuation identical in shape to the OED preview (`build_oed_light_attenuation`, PrepareLightParams @ 0x46A500), range ×1.25; the group/visibility machinery witnessed (D-RLIT-4) |
 | Terrain surface c0/c1 | MATCHING (ported) | c0 = SKY block, c1 = LIGHT block (both [0] ÷255): `renderer::terrain_surface_light`, `terrain_lighting.gdshaderinc` corrected from the gobj-era combined/fill guess `[orig: terrain_setup_lighting_and_shader @ 0x604420; init_terrain_lighting_color_ramps @ 0x604ee0 ← Render_TerrainScene @ 0x610c80]` |
-| Foliage/sector-model lighting constants | MATCHING (witnessed; values pinned) | the blend PS inherits the terrain's device c0/c1 (no foliage-side write) `[orig: Terrain_SetupSectorModelDraw @ 0x6007c0]`; the lightmap-tile pass `[orig: render_terrain_lightmaps @ 0x609de0]`; foliage.gdshader header updated |
+| Foliage/sector-model lighting constants | MATCHING (witnessed; values pinned) | the blend PS inherits the terrain's device c0/c1 (no foliage-side write) `[orig: Foliage_SetupFarSlotDraw @ 0x6007c0]`; the lightmap-tile pass `[orig: render_terrain_lightmaps @ 0x609de0]`; foliage.gdshader header updated |
 | Lighting textures + DOT3 dynamic-light shader | witnessed / host-native equivalent | procedural falloff set + the last embedded PS outside FrameFX `[orig: Lighting_InitTextures @ 0x5a94f0]` — the ps.1.1 DOT3 per-pixel light is the fixed-function era's OmniLight; the host's real per-pixel lights serve the intent (D-RLIT-6 note) |
 | Cubemap sources (CubeEnvironment / CubeRotSpecular / CubeNormalize) | witnessed (the D-RORD-5 specular-cube question CLOSED) | live scene cube re-rendered 6 faces per 128 frames `[orig: update_environment_cubemap @ 0x6106a0]`; the static sun-glint cube (white pow-800 + warm pow-40 along −Z, rotated by MatRotSpecular) `[orig: Render_FillStaticCubemaps @ 0x58f290 → generate_cubemap_lighting @ 0x685bb0]`; normalization cube `[orig: generate_normalmap_cubemap @ 0x685570]`; the analytic 5-light sky fill is caller-less dead code |
 | Render-slot (character shadow) lighting | witnessed / out of REN port scope | dominant-light pick + terrain shadow-anchor march `[orig: RenderSlot_UpdateEntityLight @ 0x5d6a30]`, slot render lighting (D3D light 4, NTSC-weighted negated colors into PS c21-23) `[orig: RenderSlot_SetupNextLighting @ 0x5d7250]` — the Shadow_/Scar_ family exclusion (ADR 0023) |
@@ -160,11 +160,28 @@ and the packed sun/blend ratio `PolyTrn_SunToBlendRatioColor @ 0x849930`
 @ 0x604420` pushes c0/c1 as PS constants and picks the PS variant
 (shadow-map loaded → PSShadow*, tier ≥1 + normal map → NM variants, splat
 textures → PS14Splat*); all eight terrain PS share
-`r0 = ((t0.a·c1 + c0)/2) ×2 …` — **terrain light = colormapAlpha × light +
-sky** (the ÷2 and MODULATE2X cancel; colormap alpha = the baked per-texel
-sun mask). The foliage/sector-model blend PS
+`r0 = ((t0.a·c1 + c0)/2) ×2 …` — **terrain light = tileAlpha × light +
+sky** (the ÷2 and MODULATE2X cancel). `t0` is the cached tile render target,
+not raw colormap RGBA. `PolyTrn_RenderTile @ 0x60da70` clears authored
+colormap A in its `0x00808080` base draw; `Terrain_GenerateNormalMap
+@ 0x603210` supplies A8R8G8B8 RGB `(grid X slope, grid Y slope, up)`/A128
+(`0x603470..0x6034eb`), which the host's `FORMAT_RGBA8` upload preserves
+without a channel swap, and
+`PolyTrn_TileBakeDot3LightPass @ 0x60e385..0x60e39e` writes
+`tileAlpha = saturate(4·dot(normalByte−0.5, lightByte−0.5))`.
+`Environment_GetLightDirectionFloat @ 0x57d870` exposes the direct tuple
+`g=(-fixed[1], fixed[2], fixed[0])/65536`; EnvFile preserves `g` unchanged, not
+as Godot/world XYZ. `PolyTrn_RenderTile` takes stack fields
+`outDir/var_28/var_24` and writes D3DCOLOR `BYTE2←g2`, `BYTE1←g0`,
+`BYTE0←g1` (`0x60e201..0x60e331`), so GPU diffuse RGB is `(g2,g0,g1)`.
+Terrain and the host's analytic foliage t1 reconstruction now pack `(z,x,y)`.
+The old `(x,z,y)` host mapping swapped the horizontal DOT3 axes; flat
+dawn/noon/dusk checks missed it, while the 08:00 non-flat oracle pins light
+bytes `(231,83,187)` and slope alphas `0.8987774/0.0794002`. Retail foliage
+does not repack this light: its blend PS consumes the already-composed cached
+`t1.a`. The foliage/sector-model blend PS
 (`rgb = t0 × (t1 × (t1.a·c1 + c0)) × v0 × 8`) **inherits the same device
-c0/c1** — `Terrain_SetupSectorModelDraw @ 0x6007c0` binds the PS without
+c0/c1** — `Foliage_SetupFarSlotDraw @ 0x6007c0` binds the PS without
 touching the constants. The sector-model lightmap pass
 (`render_terrain_lightmaps @ 0x609de0`) bubble-sorts visible sectors
 back-to-front, sets **D3D light 4 as a pure-ambient injector** (ambient =
@@ -176,10 +193,12 @@ feeds the wind VS's c7/c8 projection). The mission lightmap TGA
 @ 0x319f7b0..) is sampled by `render_foliage_billboards @ 0x607b30` and
 `PolyTrn_RenderTile @ 0x60da70` via the view @ 0x319f7d4. The CPU-side
 1024×1024 premultiplied colormap (`PolyTrn_ColormapPixels @ 0x319f79c`) is
-sampled per foliage instance corner by `sample_terrain_colormap_tinted
-@ 0x606030` (ex-misnomer `sample_terrain_lightmap`): colormap[u, −v] ×
-`PolyTrn_TerrainTintFull` >>7 saturating — the D-FOLIAGE-1 instance-color
-source, witnessed exactly.
+sampled by `sample_terrain_colormap_tinted @ 0x606030`, but the fresh
+2026-07-13 foliage trace follows the generated detail vertex to its final
+write: that sampled packed diffuse is overwritten by the source-height bend
+carrier before emission. It is therefore not a rendered instance-color
+source. See the corrected D-FOLIAGE-1 disposition and
+[foliage-re.md](../foliage/foliage-re.md).
 
 **Lighting textures + the DOT3 light shader.** `Lighting_InitTextures
 @ 0x5a94f0` builds the procedural set: `texlight2d`/`texlightspot2d` (64²
@@ -256,7 +275,10 @@ directional with 0.75 ambient material.
   u_color_src_global_gain` (D-RMAT-5 closed in
   [render-material-re.md](render-material-re.md)).
 - `terrain_lighting.gdshaderinc`: c0/c1 corrected to (sky, light) — the
-  prior combined/fill pairing was a gobj-era stand-in.
+  prior combined/fill pairing was a gobj-era stand-in. Its tile-alpha path also
+  preserves EnvFile's direct retail getter tuple and applies the witnessed
+  D3DCOLOR-to-GPU-RGB permutation `(z,x,y)` before byte quantization; analytic
+  foliage uses the same correction (D-TERRAIN-10).
 
 ## D-RLIT divergence catalog
 

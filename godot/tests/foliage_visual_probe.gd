@@ -1,7 +1,9 @@
 extends SceneTree
 
-# Visual driver for the foliage two-tier port (D-FOLIAGE-4/-5): loads the
-# runtime world from a resource dir, finds a sloped foliage-painted spot,
+const VegAssets := preload("res://engine/terrain/veg_assets.gd")
+
+# Visual driver for the fresh foliage two-tier port: loads the
+# runtime world from a resource dir, finds a dense foliage-painted cell,
 # parks the camera low over it, saves consecutive-frame PNGs (frame-to-frame
 # diffs expose regen/churn flicker) plus side and wide angles, and prints a
 # per-frame dispatcher-stats series to quantify instance churn. Not collected
@@ -13,6 +15,10 @@ extends SceneTree
 const SETTLE_FRAMES := 40
 const CAPTURE_WAIT_FRAMES := 3
 const STATS_FRAMES := 40
+# Use a camera band where the committed non-retail model has frame-stable
+# rendered output. Its unusually large source mesh gives it a smaller retail
+# cache than actual vegetation, so this isolates visible flicker from fixture churn.
+const PROBE_EYE_HEIGHT := 24.0
 
 
 func _initialize() -> void:
@@ -41,6 +47,8 @@ func _run() -> void:
 	var world = scene.get_node_or_null("World")
 	if world == null:
 		push_error("foliage_visual_probe: no World node")
+		scene.queue_free()
+		await process_frame
 		quit(1)
 		return
 	world.load_failed.connect(func(reason: String) -> void:
@@ -69,36 +77,33 @@ func _run() -> void:
 			break
 	if data == null or not data.is_loaded():
 		push_error("foliage_visual_probe: terrain never loaded")
+		await _shutdown(scene, world, dispatcher)
+		VegAssets.clear_cache()
+		loose_root.clear()
+		dispatcher = null
+		world = null
+		scene = null
+		await process_frame
 		quit(1)
 		return
 	if env != null and env.has_method("set"):
 		env.set("time_of_day", 1200.0)
 
-	# Find a sloped, foliage-painted spot: coarse scan of the full terrain
-	# extent for max height gradient where the foliage map has an index.
-	var lo_x := float(data.get_origin_x() * 512)
-	var lo_z := float(data.get_origin_y() * 512)
-	var cx := lo_x + 8.0 * 512.0
-	var cz := lo_z + 8.0 * 512.0
-	var best_pos := Vector3(cx, 0.0, cz)
-	var best_grad := -1.0
-	for gz in range(4, 508, 8):
-		for gx in range(4, 508, 8):
-			var px := lo_x + float(gx) * 16.0
-			var pz := lo_z + float(gz) * 16.0
-			var idx := 0
-			if data.has_method("get_foliage_index_world"):
-				idx = data.get_foliage_index_world(px, pz)
-			if idx <= 0:
-				continue
-			var h0: float = data.get_height_world_bilinear(Vector3(px, 0.0, pz))
-			var hx: float = data.get_height_world_bilinear(Vector3(px + 8.0, 0.0, pz))
-			var hz: float = data.get_height_world_bilinear(Vector3(px, 0.0, pz + 8.0))
-			var grad: float = abs(hx - h0) + abs(hz - h0)
-			if grad > best_grad:
-				best_grad = grad
-				best_pos = Vector3(px, h0, pz)
-	print("foliage_visual_probe: spot=", best_pos, " grad=", best_grad)
+	var foliage_probe := _find_foliage_world_point(data)
+	if not foliage_probe.has("position"):
+		push_error("foliage_visual_probe: no native cell has a foliagemap value matching an authored definition")
+		await _shutdown(scene, world, dispatcher)
+		VegAssets.clear_cache()
+		loose_root.clear()
+		data = null
+		dispatcher = null
+		world = null
+		scene = null
+		await process_frame
+		quit(1)
+		return
+	var best_pos: Vector3 = foliage_probe["position"]
+	print("foliage_visual_probe: probe=", foliage_probe)
 
 	# Down-slope look direction from the local gradient.
 	var h_px: float = data.get_height_world_bilinear(best_pos + Vector3(8, 0, 0))
@@ -108,7 +113,7 @@ func _run() -> void:
 		downhill = Vector3.FORWARD
 	downhill = -downhill.normalized()
 
-	var eye := best_pos + Vector3(0, 2.2, 0) - downhill * 4.0
+	var eye := best_pos + Vector3(0, PROBE_EYE_HEIGHT, 0) - downhill * 4.0
 	var target := best_pos + downhill * 14.0
 	if camera != null:
 		camera.global_position = eye
@@ -121,8 +126,8 @@ func _run() -> void:
 	for _i in range(STATS_FRAMES):
 		await process_frame
 		var stats := {}
-		if dispatcher != null and dispatcher.has_method("get_dispatch_stats"):
-			stats = dispatcher.get_dispatch_stats()
+		if dispatcher != null and dispatcher.has_method("get_frame_stats"):
+			stats = dispatcher.get_frame_stats()
 		var total: int = dispatcher.get_total_instances() if dispatcher != null and dispatcher.has_method("get_total_instances") else -1
 		series.append({"total": total, "stats": stats})
 	print("foliage_visual_probe: stats series (first/last 6):")
@@ -133,6 +138,25 @@ func _run() -> void:
 	var t_min: int = totals.min()
 	var t_max: int = totals.max()
 	print("foliage_visual_probe: total_instances min=%d max=%d churn=%d" % [t_min, t_max, t_max - t_min])
+	var foliage_ok := dispatcher != null
+	if t_min != t_max:
+		foliage_ok = false
+		push_error("foliage_visual_probe: settled instance count changed (visible foliage flicker/churn)")
+	var required_stats := ["runtime_detail_intents", "detail_vertices", "render_batches"]
+	for key in required_stats:
+		var values: Array = series.map(func(s): return int(s["stats"].get(key, 0)))
+		var minimum := int(values.min()) if not values.is_empty() else 0
+		var maximum := int(values.max()) if not values.is_empty() else 0
+		print("foliage_visual_probe: %s min=%d max=%d" % [key, minimum, maximum])
+		if minimum <= 0:
+			foliage_ok = false
+			push_error("foliage_visual_probe: expected %s > 0 in every settled frame" % key)
+		if minimum != maximum:
+			foliage_ok = false
+			push_error("foliage_visual_probe: settled %s changed between frames" % key)
+	if t_min <= 0:
+		foliage_ok = false
+		push_error("foliage_visual_probe: expected resident foliage instances in every settled frame")
 
 	var shots: Array[Dictionary] = []
 	# Four consecutive frames from the same eye - flicker shows as diffs.
@@ -151,9 +175,23 @@ func _run() -> void:
 	print("foliage_visual_probe: shots ok=%d/%d" % [ok, shots.size()])
 	for shot in shots:
 		print("  shot: ", shot)
-	scene.queue_free()
+	var exit_code := 0 if ok == shots.size() and foliage_ok else 1
+	# Drop script-held native resources before the rendering server begins its
+	# exit sequence. The world scene owns the remaining references until the
+	# orderly shutdown below frees it.
+	data = null
+	env = null
+	await _shutdown(scene, world, dispatcher)
+	VegAssets.clear_cache()
+	loose_root.clear()
+	dispatcher = null
+	world = null
+	camera = null
+	scene = null
+	packed = null
+	loose_root = null
 	await process_frame
-	quit(0 if ok == shots.size() else 1)
+	quit(exit_code)
 
 
 func _capture(camera: Camera3D, eye: Vector3, target: Vector3, path: String, wait_frames: int) -> Dictionary:
@@ -167,3 +205,85 @@ func _capture(camera: Camera3D, eye: Vector3, target: Vector3, path: String, wai
 	if image != null:
 		err = image.save_png(path)
 	return {"ok": err == OK, "path": path}
+
+
+func _shutdown(scene: Node, world: Node, dispatcher: Node) -> void:
+	# Stop native cache activity before freeing the large terrain scene. Waiting
+	# through both queued-free frames avoids tearing the GDExtension down while
+	# render resources from the final screenshot are still in flight.
+	if dispatcher != null and dispatcher.has_method("reset"):
+		dispatcher.reset()
+	if world != null and world.has_method("unload"):
+		world.unload()
+	await process_frame
+	if is_instance_valid(scene):
+		scene.queue_free()
+	await process_frame
+	await process_frame
+
+
+func _find_foliage_world_point(data: NovaTerrainData) -> Dictionary:
+	var defs: Array = data.get_foliage_defs()
+	var grid := data.get_sector_grid()
+	var origin_x := data.get_origin_x()
+	var origin_y := data.get_origin_y()
+	var best := {}
+	var best_score := 0
+	var best_gradient := -1.0
+
+	# A 3x3 regular score selects a dense native cell without copying the
+	# runtime's private random candidate sequence into this visual gate.
+	for grid_y in range(16):
+		for grid_x in range(16):
+			var grid_index := grid_y * 16 + grid_x
+			var sector_id := int(grid[grid_index]) if grid_index < grid.size() else 0
+			if sector_id <= 0:
+				continue
+			var sector_x := float((origin_x + grid_x) * 512)
+			var sector_z := float((origin_y + grid_y) * 512)
+			for local_z in range(0, 512, 16):
+				for local_x in range(0, 512, 16):
+					var score := 0
+					var painted := 0
+					for offset_z in [2.0, 8.0, 14.0]:
+						for offset_x in [2.0, 8.0, 14.0]:
+							var sampled := int(data.get_foliage_index_world(
+								sector_x + float(local_x) + offset_x,
+								sector_z + float(local_z) + offset_z
+							))
+							if _has_matching_foliage_def(defs, sampled):
+								score += 1
+								painted = sampled
+					if score <= 0:
+						continue
+					if score < best_score:
+						continue
+					var world_x := sector_x + float(local_x) + 8.0
+					var world_z := sector_z + float(local_z) + 8.0
+					var center := Vector3(world_x, 0.0, world_z)
+					var world_y: float = data.get_height_world_bilinear(center)
+					var hx: float = data.get_height_world_bilinear(center + Vector3(8.0, 0.0, 0.0))
+					var hz: float = data.get_height_world_bilinear(center + Vector3(0.0, 0.0, 8.0))
+					var gradient: float = abs(hx - world_y) + abs(hz - world_y)
+					if score == best_score and gradient <= best_gradient:
+						continue
+					best_score = score
+					best_gradient = gradient
+					best = {
+						"position": Vector3(world_x, world_y, world_z),
+						"painted": painted,
+						"painted_samples": score,
+						"gradient": gradient,
+						"cell": Vector2i(int(sector_x) + local_x, int(sector_z) + local_z),
+						"sector_id": sector_id,
+						"grid_cell": Vector2i(grid_x, grid_y),
+					}
+
+	return best if best_score > 0 else {}
+
+
+func _has_matching_foliage_def(defs: Array, painted: int) -> bool:
+	for value in defs:
+		if value is NovaTerrainFoliageDef and int((value as NovaTerrainFoliageDef).match) == painted:
+			return true
+	return false

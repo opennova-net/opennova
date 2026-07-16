@@ -40,6 +40,10 @@ int main() {
     saved.water_height = 42;
     saved.wrap_x = 1;
     saved.wrap_y = 1;
+    saved.lock_topleft = {0, 1};
+    saved.lock_topright = {1, 0};
+    saved.lock_bottomleft = {0, 1};
+    saved.lock_bottomright = {1, 1};
     saved.horizon = 1234.5;
     saved.charmap = "roundtrip_char.tga";
     saved.foliagemap = "roundtrip_foliage.tga";
@@ -87,6 +91,12 @@ int main() {
     if (!expect(loaded.detail_density2 == saved.detail_density2, "detail_density2 should round-trip")) return 1;
     if (!expect(loaded.wrap_x == saved.wrap_x, "wrap_x should round-trip")) return 1;
     if (!expect(loaded.wrap_y == saved.wrap_y, "wrap_y should round-trip")) return 1;
+    if (!expect(loaded.lock_topleft.x == saved.lock_topleft.x &&
+               loaded.lock_topleft.y == saved.lock_topleft.y,
+               "lock_topleft should round-trip")) return 1;
+    if (!expect(loaded.lock_bottomright.x == saved.lock_bottomright.x &&
+               loaded.lock_bottomright.y == saved.lock_bottomright.y,
+               "lock_bottomright should round-trip")) return 1;
     if (!expect(std::abs(loaded.horizon - saved.horizon) < 0.0001, "horizon should round-trip")) return 1;
     if (!expect(loaded.charmap == saved.charmap, "charmap should round-trip")) return 1;
     if (!expect(loaded.foliagemap == saved.foliagemap, "foliagemap should round-trip")) return 1;

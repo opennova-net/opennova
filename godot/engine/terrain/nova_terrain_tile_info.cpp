@@ -2,11 +2,14 @@
 
 #include "nova_terrain_tile_entry.h"
 
+#include <til/til_io.h>
+
 // Engine: jodemo.exe Terrain_LoadTileInfoFile@0x5CA730
 // docs/engine_spec_tiles.md 4.1
 
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/utility_functions.hpp>
 
 #include <algorithm>
 
@@ -46,6 +49,8 @@ static bool tile_entry_from_variant(const Variant &value, opennova::TilOverlayEn
 } // namespace
 
 void NovaTerrainTileInfo::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("load_from_bytes", "bytes"), &NovaTerrainTileInfo::load_from_bytes);
+	ClassDB::bind_method(D_METHOD("blocks_foliage", "world_x", "world_z", "radius"), &NovaTerrainTileInfo::blocks_foliage);
 	ClassDB::bind_method(D_METHOD("get_entry_count"), &NovaTerrainTileInfo::get_entry_count);
 	ClassDB::bind_method(D_METHOD("get_entries"), &NovaTerrainTileInfo::get_entries);
 	ClassDB::bind_method(D_METHOD("set_entries", "entries"), &NovaTerrainTileInfo::set_entries);
@@ -69,6 +74,30 @@ void NovaTerrainTileInfo::_bind_methods() {
 	BIND_CONSTANT(FLAG_OUTLINE);
 	BIND_CONSTANT(ATLAS_TILE_PIXELS);
 	BIND_CONSTANT(CELL_WORLD_SIZE);
+}
+
+Error NovaTerrainTileInfo::load_from_bytes(const PackedByteArray &p_bytes) {
+	opennova::TilFile parsed;
+	std::string error;
+	const uint8_t *data = p_bytes.size() > 0 ? p_bytes.ptr() : nullptr;
+	if (!opennova::load_til(data, static_cast<size_t>(p_bytes.size()), parsed, error)) {
+		UtilityFunctions::push_error("NovaTerrainTileInfo: failed to parse .til: ", error.c_str());
+		return ERR_PARSE_ERROR;
+	}
+	copy_from_native(parsed);
+	return OK;
+}
+
+bool NovaTerrainTileInfo::blocks_foliage(float world_x,
+                                         float world_z,
+                                         float radius) const {
+	// til_world_z_from_fixed decodes stored-negated z_fixed into the same
+	// terrain/Godot plane used by foliage candidates. This API accepts that
+	// decoded plane directly. The loaded mission .til is the same
+	// g_TerrainTileArray scanned by both foliage generators and surface overrides.
+	// [orig: Foliage_PathBlockedByPlacedTile @ 0x606490;
+	// Terrain_GetSurfaceTypeAtPosition @ 0x606510]
+	return opennova::til_blocks_foliage(til, world_x, world_z, radius);
 }
 
 int NovaTerrainTileInfo::get_entry_count() const {

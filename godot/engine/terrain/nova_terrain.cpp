@@ -1,6 +1,7 @@
 // NovaTerrain — Godot Node3D that builds and renders terrain meshes from CPT data.
 
 #include "nova_terrain.h"
+#include "nova_terrain_surface_inputs.h"
 #include "nova_terrain_tile_info.h"
 
 // Engine: Jointops.exe Terrain_RenderSectorTile@0x5CDAA0,
@@ -10,28 +11,26 @@
 #include <godot_cpp/classes/collision_shape3d.hpp>
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/height_map_shape3d.hpp>
-#include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
 #include <godot_cpp/classes/editor_interface.hpp>
-#include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/project_settings.hpp>
 #include <godot_cpp/classes/sub_viewport.hpp>
 #include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <godot_cpp/variant/projection.hpp>
 
-#include <til/til_overlay_bake.h>
-
 #include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <map>
+#include <utility>
 
 using namespace godot;
 
 void NovaTerrain::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_terrain_data", "data"), &NovaTerrain::set_terrain_data);
 	ClassDB::bind_method(D_METHOD("get_terrain_data"), &NovaTerrain::get_terrain_data);
+	ClassDB::bind_method(D_METHOD("get_surface_inputs"), &NovaTerrain::get_surface_inputs);
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "terrain_data", PROPERTY_HINT_RESOURCE_TYPE, "NovaTerrainData"),
 		"set_terrain_data", "get_terrain_data");
 
@@ -82,7 +81,6 @@ void NovaTerrain::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_visible_patch_count"), &NovaTerrain::get_visible_patch_count);
 	ClassDB::bind_method(D_METHOD("get_lod_distribution"), &NovaTerrain::get_lod_distribution);
 	ClassDB::bind_method(D_METHOD("get_patches_active"), &NovaTerrain::get_patches_active);
-	ClassDB::bind_method(D_METHOD("get_foliage_dispatch_centers"), &NovaTerrain::get_foliage_dispatch_centers);
 
 	ClassDB::bind_method(D_METHOD("set_debug_no_frustum", "enabled"), &NovaTerrain::set_debug_no_frustum);
 	ClassDB::bind_method(D_METHOD("get_debug_no_frustum"), &NovaTerrain::get_debug_no_frustum);
@@ -113,6 +111,7 @@ void NovaTerrain::_bind_methods() {
 }
 
 NovaTerrain::NovaTerrain() {
+	surface_inputs.instantiate();
 }
 
 NovaTerrain::~NovaTerrain() {
@@ -124,6 +123,7 @@ void NovaTerrain::set_terrain_data(const Ref<NovaTerrainData> &p_data) {
 		terrain_data->disconnect("terrain_changed", callable_mp(this, &NovaTerrain::_on_terrain_changed));
 	}
 	terrain_data = p_data;
+	surface_inputs->set_terrain_data(p_data);
 	if (terrain_data.is_valid()) {
 		terrain_data->connect("terrain_changed", callable_mp(this, &NovaTerrain::_on_terrain_changed));
 	}
@@ -131,6 +131,22 @@ void NovaTerrain::set_terrain_data(const Ref<NovaTerrainData> &p_data) {
 
 Ref<NovaTerrainData> NovaTerrain::get_terrain_data() const {
 	return terrain_data;
+}
+
+Ref<NovaTerrainSurfaceInputs> NovaTerrain::get_surface_inputs() const {
+	return surface_inputs;
+}
+
+Ref<Texture2D> NovaTerrain::get_heightfield_normal_texture() const {
+	return surface_inputs->get_heightfield_normal_texture();
+}
+
+Ref<Texture2D> NovaTerrain::get_tile_overlay_texture() const {
+	return surface_inputs->get_tile_overlay_texture();
+}
+
+Vector3 NovaTerrain::get_tile_overlay_tint() const {
+	return tile_overlay_tint;
 }
 
 void NovaTerrain::set_lod_quality(float p_quality) {
@@ -146,6 +162,7 @@ void NovaTerrain::set_tile_overlay_enabled(bool p_enabled) {
 		return;
 	}
 	tile_overlay_enabled = p_enabled;
+	surface_inputs->set_tile_overlay_enabled(p_enabled);
 	if (built) {
 		_rebuild_tile_overlay_texture();
 	}
@@ -157,6 +174,7 @@ bool NovaTerrain::get_tile_overlay_enabled() const {
 
 void NovaTerrain::set_tile_info_override(const Ref<NovaTerrainTileInfo> &p_info) {
 	tile_info_override = p_info;
+	surface_inputs->set_tile_info_override(p_info);
 	if (built) {
 		_rebuild_tile_overlay_texture();
 	}
@@ -210,6 +228,7 @@ void NovaTerrain::_notification(int p_what) {
 			return;
 		}
 		if (!built) return;
+		foliage_detail_patches.clear();
 
 		const auto& trn = terrain_data->get_trn();
 
@@ -226,12 +245,12 @@ void NovaTerrain::_notification(int p_what) {
 			if (vp) cam = vp->get_camera_3d();
 		}
 		if (!cam) {
-			foliage_dispatch_centers.clear();
+			foliage_detail_patches.clear();
 			return;
 		}
 
 		if (!cam->is_inside_tree()) {
-			foliage_dispatch_centers.clear();
+			foliage_detail_patches.clear();
 			return;
 		}
 
@@ -311,12 +330,45 @@ void NovaTerrain::_notification(int p_what) {
 				float sector_ox = static_cast<float>(sx * 512);
 				float sector_oz = static_cast<float>(sz * 512);
 
+				const size_t sector_patch_begin = visible.size();
 				opennova::traverse_quadtree(
 					quad_nodes, tile_mesh_meta,
 					l1_children[child],
 					frustum, cam_pos.x, cam_pos.y, cam_pos.z,
 					sector_ox, sector_oz,
 					traversal_config, visible, tstats);
+
+				// Detail foliage collection is NOT a radial walk: retail's
+				// frustum-culled traversal hands each frustum-surviving emitted
+				// node of LOD level >= 3 to the 16u cell collector, so cells
+				// behind the camera never enter the visible-key list and the
+				// far-slot pool's working set stays below its 16-bit-index
+				// capacity (over-collection thrashed the witnessed LRU into
+				// per-frame cell blink; D-FOLIAGE-13)
+				// [orig: Terrain_TraverseQuadtreeNode handoff
+				// @ 0x60905c..0x60907c -> Terrain_CollectNearFoliagePatches
+				// @ 0x603e60]. The collector re-tests every cell's clamped
+				// AABB against the 42u limit, so the handoff is a broad phase.
+				for (size_t pi = sector_patch_begin; pi < visible.size(); ++pi) {
+					const opennova::VisiblePatch &vp = visible[pi];
+					if (vp.lod_level < 3 || vp.tile_index < 0 ||
+							vp.tile_index >= (int)tile_mesh_meta.size()) {
+						continue;
+					}
+					const int node_size = 1024 >> vp.lod_level;
+					const auto &tm = tile_mesh_meta[vp.tile_index];
+					const int local_x = (int)std::lround(
+						tm.center[0] - node_size * 0.5f);
+					const int local_z = (int)std::lround(
+						tm.center[2] - node_size * 0.5f);
+					opennova::collect_foliage_detail_patches(
+						mipchain, sector_id, sx * 512, sz * 512,
+						local_x, local_z, node_size,
+						static_cast<float>(cam_pos.x),
+						static_cast<float>(cam_pos.y),
+						static_cast<float>(cam_pos.z),
+						foliage_detail_patches);
+				}
 			}
 		}
 
@@ -329,7 +381,6 @@ void NovaTerrain::_notification(int p_what) {
 		// Assign visible patches to pool via RenderingServer
 		RenderingServer* rs = RenderingServer::get_singleton();
 		int count = std::min(static_cast<int>(visible.size()), PATCH_POOL_SIZE);
-		foliage_dispatch_centers.clear();
 
 		for (int i = 0; i < count; i++) {
 			const auto& vp = visible[i];
@@ -345,7 +396,7 @@ void NovaTerrain::_notification(int p_what) {
 			const auto& ti = tile_infos[vp.tile_index];
 
 			// Select LOD level
-			int lod = std::min(vp.lod_sub / 2, 7);
+			int lod = opennova::terrain_lod_family(vp.lod_sub);
 			if (ti.lod_meshes[lod].is_null() && lod != 0) lod = 0;
 			if (ti.lod_meshes[lod].is_null()) {
 				if (patch_visible[i]) {
@@ -355,11 +406,8 @@ void NovaTerrain::_notification(int p_what) {
 				continue;
 			}
 
-			const auto& tm = tile_mesh_meta[vp.tile_index];
-			foliage_dispatch_centers.push_back(Vector3(
-				vp.sector_ox + tm.center[0],
-				tm.center[1],
-				vp.sector_oz + tm.center[2]));
+			const auto& source_tile =
+				terrain_data->get_cpt().tiles[vp.tile_index];
 
 			// Only update mesh if changed
 			RID mesh_rid = ti.lod_meshes[lod]->get_rid();
@@ -374,6 +422,11 @@ void NovaTerrain::_notification(int p_what) {
 				rs->instance_set_transform(patch_instances[i], xform);
 				last_transform[i] = xform;
 			}
+
+			rs->instance_geometry_set_shader_parameter(
+				patch_instances[i], "u_instance_source_quadrant",
+				Vector2(static_cast<float>((source_tile.tile_x >> 9) & 1),
+					static_cast<float>((source_tile.tile_y >> 9) & 1)));
 
 			// Per-instance debug data (only set when a debug mode is active)
 			if (debug_mode > 0) {
@@ -404,7 +457,7 @@ void NovaTerrain::_notification(int p_what) {
 		last_stats = tstats;
 		std::memset(lod_distribution, 0, sizeof(lod_distribution));
 		for (int i = 0; i < count; i++) {
-			int lod = std::min(visible[i].lod_sub / 2, 7);
+			int lod = opennova::terrain_lod_family(visible[i].lod_sub);
 			lod_distribution[lod]++;
 		}
 
@@ -432,10 +485,12 @@ void NovaTerrain::_notification(int p_what) {
 					terrain_material->set_shader_parameter("u_fog_color", cached_weather_node->call("get_smooth_fog"));
 				}
 				// Tile overlay tint: HALF(terrain_rgb) under MODULATE2X folded to
-				// one multiply (the editor shader has no tile overlay)
+				// one multiply; the shared runtime/ONED tile path consumes this uniform.
 				// [orig: PolyTrn_RenderTile @ 0x60df0d].
-				terrain_material->set_shader_parameter("u_tile_overlay_tint",
-					cached_env_node->call("get_tile_overlay_tint"));
+				tile_overlay_tint =
+					cached_env_node->call("get_tile_overlay_tint");
+				terrain_material->set_shader_parameter(
+					"u_tile_overlay_tint", tile_overlay_tint);
 			}
 		}
 
@@ -526,46 +581,26 @@ Ref<Shader> NovaTerrain::_load_terrain_shader() {
 // Texture loading — uses Texture2D resources from NovaTerrainData
 // ---------------------------------------------------------------------------
 
+void NovaTerrain::_clear_derived_textures() {
+	surface_inputs->clear_derived_textures();
+	if (terrain_material.is_valid()) {
+		surface_inputs->apply_to_material(terrain_material);
+	}
+}
+
 void NovaTerrain::_load_textures() {
-	auto set_tex = [&](const char* uniform, const Ref<Texture2D> &tex) {
-		if (tex.is_valid()) {
-			terrain_material->set_shader_parameter(uniform, tex);
-		}
-	};
-
-	set_tex("u_colormap", terrain_data->get_colormap());
-	set_tex("u_detail_c1", terrain_data->get_detailmap_c1());
-	set_tex("u_detail_c2", terrain_data->get_detailmap_c2());
-	set_tex("u_detail_c3", terrain_data->get_detailmap_c3());
-	set_tex("u_blendmap", terrain_data->get_detailblendmap());
-
-	// Distance-LOD detail normals (ps.1.4 t1 crossfade).
-	// If either end is missing, bind the other to both so legacy one-detail maps still render.
-	Ref<Texture2D> near_tex = terrain_data->get_detailmap();
-	Ref<Texture2D> far_tex = terrain_data->get_detailmapdist();
-	if (!near_tex.is_valid()) near_tex = far_tex;
-	if (!far_tex.is_valid()) far_tex = near_tex;
-	set_tex("u_detailmap", near_tex);
-	set_tex("u_detailmapdist", far_tex);
-
-	// Layer-2 normal pair (Jointops sub_60AAA0 LABEL_47 loads both unconditionally).
-	Ref<Texture2D> near_tex2 = terrain_data->get_detailmap2();
-	Ref<Texture2D> far_tex2 = terrain_data->get_detailmapdist2();
-	if (!near_tex2.is_valid()) near_tex2 = far_tex2;
-	if (!far_tex2.is_valid()) far_tex2 = near_tex2;
-	set_tex("u_detailmap2", near_tex2);
-	set_tex("u_detailmapdist2", far_tex2);
-
-	terrain_material->set_shader_parameter("u_detail_density",
-		static_cast<float>(terrain_data->get_detail_density()));
-	_rebuild_tile_overlay_texture();
+	if (terrain_material.is_null() || terrain_data.is_null()) {
+		return;
+	}
+	surface_inputs->rebuild(
+		terrain_data, tile_info_override, tile_overlay_enabled);
+	surface_inputs->apply_to_material(terrain_material);
 }
 
 void NovaTerrain::_clear_tile_overlay_texture() {
-	tile_overlay_texture.unref();
+	surface_inputs->clear_tile_overlay();
 	if (terrain_material.is_valid()) {
-		terrain_material->set_shader_parameter("u_has_tile_overlay", false);
-		terrain_material->set_shader_parameter("u_tile_overlay", Ref<Texture2D>());
+		surface_inputs->apply_to_material(terrain_material);
 	}
 }
 
@@ -573,73 +608,11 @@ void NovaTerrain::_rebuild_tile_overlay_texture() {
 	if (terrain_material.is_null()) {
 		return;
 	}
-	if (!tile_overlay_enabled || terrain_data.is_null() || !terrain_data->is_loaded()) {
-		_clear_tile_overlay_texture();
-		return;
-	}
-
-	Ref<NovaTerrainTileInfo> tile_info = tile_info_override;
-	if (tile_info.is_null()) {
-		tile_info = terrain_data->get_tileinfo_resource();
-	}
-	const Ref<Texture2D> tilestrip = terrain_data->get_tilestrip_tex();
-	if (tile_info.is_null() || tilestrip.is_null() || tile_info->get_entry_count() <= 0) {
-		_clear_tile_overlay_texture();
-		return;
-	}
-
-	Ref<Image> atlas_image = tilestrip->get_image();
-	if (atlas_image.is_null()) {
-		_clear_tile_overlay_texture();
-		return;
-	}
-	if (atlas_image->is_compressed()) {
-		const Error err = atlas_image->decompress();
-		if (err != OK) {
-			_clear_tile_overlay_texture();
-			return;
-		}
-	}
-	atlas_image->convert(Image::FORMAT_RGBA8);
-	const int atlas_w = atlas_image->get_width();
-	const int atlas_h = atlas_image->get_height();
-	PackedByteArray atlas_bytes = atlas_image->get_data();
-	if (atlas_w <= 0 || atlas_h <= 0 || atlas_bytes.size() < atlas_w * atlas_h * 4) {
-		_clear_tile_overlay_texture();
-		return;
-	}
-
-	constexpr int OVERLAY_DIM = 1024;
-	std::vector<uint8_t> overlay_rgba;
-	const opennova::TilFile native = tile_info->to_native();
-	if (!opennova::til_bake_overlay_rgba(native,
-	                                     atlas_bytes.ptr(),
-	                                     atlas_w,
-	                                     atlas_h,
-	                                     OVERLAY_DIM,
-	                                     OVERLAY_DIM,
-	                                     overlay_rgba)) {
-		_clear_tile_overlay_texture();
-		return;
-	}
-
-	PackedByteArray overlay_bytes;
-	overlay_bytes.resize(static_cast<int64_t>(overlay_rgba.size()));
-	if (!overlay_rgba.empty()) {
-		std::memcpy(overlay_bytes.ptrw(), overlay_rgba.data(), overlay_rgba.size());
-	}
-
-	Ref<Image> overlay_image =
-	    Image::create_from_data(OVERLAY_DIM, OVERLAY_DIM, false, Image::FORMAT_RGBA8, overlay_bytes);
-	if (overlay_image.is_null()) {
-		_clear_tile_overlay_texture();
-		return;
-	}
-
-	Ref<ImageTexture> image_texture = ImageTexture::create_from_image(overlay_image);
-	tile_overlay_texture = image_texture;
-	terrain_material->set_shader_parameter("u_tile_overlay", tile_overlay_texture);
-	terrain_material->set_shader_parameter("u_has_tile_overlay", tile_overlay_texture.is_valid());
+	surface_inputs->set_terrain_data(terrain_data);
+	surface_inputs->set_tile_info_override(tile_info_override);
+	surface_inputs->set_tile_overlay_enabled(tile_overlay_enabled);
+	surface_inputs->rebuild_tile_overlay();
+	surface_inputs->apply_to_material(terrain_material);
 }
 
 // ---------------------------------------------------------------------------
@@ -648,7 +621,7 @@ void NovaTerrain::_rebuild_tile_overlay_texture() {
 
 void NovaTerrain::_on_terrain_changed() {
 	if (!built || terrain_data.is_null()) return;
-	// Reload textures and update shader params (cheap)
+	// Rebuild the derived terrain inputs and update shader parameters.
 	_load_textures();
 }
 
@@ -665,7 +638,6 @@ void NovaTerrain::_clear_collision_bodies() {
 }
 
 void NovaTerrain::_hide_visible_patches() {
-	foliage_dispatch_centers.clear();
 	RenderingServer* rs = RenderingServer::get_singleton();
 	for (int i = 0; i < PATCH_POOL_SIZE; i++) {
 		if (!patch_visible[i]) {
@@ -679,6 +651,7 @@ void NovaTerrain::_hide_visible_patches() {
 }
 
 void NovaTerrain::_clear_patch_pool() {
+	foliage_detail_patches.clear();
 	RenderingServer* rs = RenderingServer::get_singleton();
 	if (!rs) {
 		return;
@@ -699,7 +672,8 @@ void NovaTerrain::_clear_terrain() {
 	_clear_collision_bodies();
 	_clear_patch_pool();
 	_clear_tile_overlay_texture();
-	foliage_dispatch_centers.clear();
+	_clear_derived_textures();
+	foliage_detail_patches.clear();
 
 	tile_infos.clear();
 	quad_nodes.clear();
@@ -1095,8 +1069,8 @@ int NovaTerrain::get_visible_patch_count() const {
 	return visible_count;
 }
 
-PackedVector3Array NovaTerrain::get_foliage_dispatch_centers() const {
-	return foliage_dispatch_centers;
+const std::vector<FoliageDetailPatch> &NovaTerrain::get_foliage_detail_patches_native() const {
+	return foliage_detail_patches;
 }
 
 void NovaTerrain::set_debug_no_frustum(bool v) { traversal_config.no_frustum = v; }

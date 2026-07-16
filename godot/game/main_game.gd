@@ -9,6 +9,7 @@ extends Node3D
 
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
 const DebugOverlayScript := preload("res://engine/debug/nova_debug_overlay.gd")
+const DebugViewContext := preload("res://engine/debug/nova_debug_view_context.gd")
 const NetKillFeedScript := preload("res://game/net_killfeed.gd")
 const LocalPlayerHostScript := preload("res://engine/world/local_player_host.gd")
 
@@ -188,7 +189,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 	if key.keycode == DEBUG_OVERLAY_KEY:
-		_toggle_debug_overlay()
+		toggle_debug_overlay()
 		get_viewport().set_input_as_handled()
 		return
 	# The armory key: in-world only, gated on the type-6 armory-volume contact flag the
@@ -206,13 +207,14 @@ func _unhandled_key_input(event: InputEvent) -> void:
 # F3: the mission debug overlay over the live runtime. Built lazily; without a
 # running mission it just reports so (the runtime source re-resolves per
 # refresh, so reloads and menu round-trips never leave it stale).
-func _toggle_debug_overlay() -> void:
+func toggle_debug_overlay() -> void:
 	if _debug_overlay == null:
 		_debug_overlay = DebugOverlayScript.new()
 		_debug_overlay.name = "DebugOverlay"
 		var host: Node = _hud if _hud != null else self
 		host.add_child(_debug_overlay)
 		_debug_overlay.set_runtime_source(_current_runtime)
+		_debug_overlay.set_view_context_source(_current_player_view_context)
 		# The View tab toggles: the overlay only emits intent; we own the world.
 		_debug_overlay.skeleton_debug_toggled.connect(_on_skeleton_debug_toggled)
 		_debug_overlay.collision_debug_toggled.connect(_on_collision_debug_toggled)
@@ -222,8 +224,28 @@ func _toggle_debug_overlay() -> void:
 	_debug_overlay.toggle()
 
 
+func is_debug_overlay_open() -> bool:
+	return _debug_overlay != null and is_instance_valid(_debug_overlay) \
+			and _debug_overlay.visible
+
+
+func is_gameplay_input_active() -> bool:
+	return _state == State.WORLD and not is_debug_overlay_open()
+
+
 func _current_runtime():
 	return _world.get_runtime() if _world != null else null
+
+
+func _current_player_view_context() -> DebugViewContext:
+	var context := DebugViewContext.new()
+	if _camera != null and is_instance_valid(_camera):
+		context.camera = _camera
+	if _player_host != null and is_instance_valid(_player_host) \
+			and _player_host.has_method("is_third_person"):
+		context.camera_mode_known = true
+		context.third_person = bool(_player_host.is_third_person())
+	return context
 
 
 # Mission-effect passthrough + the last-text read seam: the surface lives on the
@@ -831,9 +853,10 @@ func _set_hud_visible(v: bool) -> void:
 # also lets a host that drives load_world() directly (the headless runtime probe,
 # which stays in MENU) keep dispatching foliage.
 func _process(delta: float) -> void:
-	# Release the captured mouse while a menu overlays the world (pause / armory) or
-	# nothing is loaded, so the menus stay usable.
-	if _state == State.PAUSED or _state == State.ARMORY or not _world.is_loaded():
+	var debug_overlay_open := is_debug_overlay_open()
+	# Release the captured mouse while UI overlays the world or nothing is loaded.
+	if _state == State.PAUSED or _state == State.ARMORY or debug_overlay_open \
+			or not _world.is_loaded():
 		if Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
 			Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 	# Only the pause menu freezes the world. The armory runs over LIVE play: the
@@ -843,7 +866,7 @@ func _process(delta: float) -> void:
 	if _state == State.PAUSED or not _world.is_loaded():
 		return
 	if _player_host != null:
-		var player_live := _state == State.WORLD
+		var player_live := is_gameplay_input_active()
 		_player_host.before_world_tick(delta, player_live, player_live)
 	_world.tick(_camera.global_position, _camera.global_transform, delta)
 	if _player_host != null:
