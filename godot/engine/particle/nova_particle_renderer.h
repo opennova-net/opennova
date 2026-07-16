@@ -5,6 +5,7 @@
 
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/core/object_id.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/callable.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
@@ -28,6 +29,7 @@ private:
 	Ref<NovaEffectScene> scene_;
 	Callable texture_provider_;
 	String texture_dir_;
+	ObjectID environment_source_;
 	bool hidden_ = false;
 	bool procedural_fallback_enabled_ = false;
 
@@ -48,6 +50,8 @@ public:
 	Callable get_texture_provider() const;
 	void set_texture_dir(const String &p_texture_dir);
 	String get_texture_dir() const;
+	void set_environment_source(Node *p_source);
+	Node *get_environment_source() const;
 
 	void set_hidden(bool p_hidden);
 	bool get_hidden() const;

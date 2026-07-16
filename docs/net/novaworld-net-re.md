@@ -6369,9 +6369,11 @@ sound fields and the engine plays them at different phase edges:
   still spawn during the raise. Remote entities always take the with-effect shim
   `@ 0x541a83` (an MP seam for us). The muzzle spawn is double-spawn-guarded:
   `@ 0x5418c8` spawns only when `slot+24` is clear; `ActionSlot_SpawnEffect @ 0x401f20`
-  records the emitter handle there with the on-death callback
-  `ActionSlot_ClearEffectHandle @ 0x53f760` riding the 14-dword descriptor (dwords
-  12/13) — the suppression window is exactly the live emitter group's lifetime. The
+  records the GROUP handle there; descriptor dwords 12/13 install
+  `ActionSlot_ClearEffectHandle @ 0x53f760` through
+  `CEffectGroup_SetDeathCallback @ 0x5e1940`, and `CEffectGroup_Destroy @ 0x5e3460`
+  invokes it — the suppression
+  window is exactly the whole live group's lifetime. The
   spawn point is the weapon model's `launchuserpoint` (name `+0x2E8`
   → resolved 1-based index `+0x2D4` on the gfx1 model; per-entity fallback
   `Entity_GetWeaponSlotByte(entity, clip & 3, 1) @ 0x541912`); the ACTION rows' own
@@ -6552,39 +6554,21 @@ target had been passing on the compensating error). IDB this session: the two Mo
 field renames above, `+0x1C` → `heatGlowEmitterHandle`, `CEffectEmitter_UpdatePositionAndParams
 @ 0x5f6810` renamed, tracker/glow witness comments at `@ 0x540edf`/`@ 0x540fed`; idb_save run.
 
-**The Barrett/REVVY per-shot particle round (2026-07-15, session 3 — OPEN).** User
-reports on the REVX02 (TAC/REVVY) mount: the `WPN_Barret` muzzle particle does not
-appear per shot (retail does), and casing particles keep ejecting after fire release
-(retail stops). Byte-verified this round — the whole suppression chain matches our
-port: the with-effect begin guard spawns only when `param7 != 0 && MountSlot+0x18 == 0`
-(`@ 0x5418c8`); the handle records with the death callback (`ActionSlot_ClearEffectHandle
-@ 0x53f760` riding descriptor dwords 12/13, stored group+0x5C/+0x60 by the misnamed
-helper `@ 0x5e1948`); the callback fires at GROUP DESTROY (`CEffectEmitter_Destroy
-@ 0x5e3460` — also clears `entity+460`), reached from the world sweep when the group's
-alive-walk accumulates 0 (`@ 0x5e59a0` family: per child emitter `vtbl+12` =
-`CParticleEmitter_AdvanceFrame @ 0x5e6570`, whose tail delegates to the aliveness leaf
-`@ 0x5e2640` — mis-defined in the IDB as an empty stub; the real bytes: ALIVE while the
-emission clock `+0x110 < 256.0` (or the `+0x104` finite word is 0) OR live particles
-`+0xF8 > 0`) — i.e. retail's suppression window IS the whole group lifetime, exactly
-like the port's `emitter_finished` rule. But the mounted REVVY data makes that model
-predict retail drops too: `WPN_Barret` fire = `Effect_M82_Muz` (~1.0 s group life
-measured through the port sim) with `delayend auto` baking from a 0.200 s fire clip
-(~16-tick cadence), and the REVVY fire rows author ~1 s-emitting casing STREAMS
-(`Effect_556cas_REV_RAPID`) whose last group keeps emitting past release under both
-models. The user's retail observations contradict the model on both counts —
-**something still terminates/re-arms action-spawned groups early in retail, or the
-port's emitter lifetimes run long.** Unwalked levers for the next session: the
-per-entity effect-slot updater `Entity_UpdateMuzzleFlashAndEffects @ 0x493149`
-(3 sets x 4 slots at entity dwords +173..184, per-frame bone-tracked via `@ 0x5f6810`,
-RELEASED when the per-slot state byte drops — the writers of those slots are unwalked;
-if the LOCAL fire path also feeds them, this is the stop-on-release lever), the
-descriptor bit-2 flag threaded into the group spawner (`@ 0x5f6eed` →
-`CEffectEmitter_SpawnBetweenPositions @ 0x5ea0a0`, consumption unwalked), and a
-retail-vs-port A/B of one emitter's emission clock rate (`emitter+0x10C/+0x110` vs the
-port's `emit_dur_remaining` seconds). Also witnessed, unported: the per-shot muzzle
-LIGHT (`ActionSlot_SpawnEffect` tail `@ 0x402080`: `AmmoDef+36` gates
-`LightPool_SpawnGlowEffect @ 0x56c960`, handle at `entity+436`, blend snapped to 1.0
-per shot — the muzzle-flash dynamic light).
+**The Barrett/REVVY per-shot particle report (2026-07-15, suppression adjudicated
+2026-07-16).** The reported REVX02 behavior — `WPN_Barret` plume missing on repeated
+shots in the port, casing emission outliving release — motivated a timing A/B. The
+static chain itself is now conclusive: the `@0x5418c8` guard records a GROUP handle;
+`CEffectGroup_SetDeathCallback @0x5e1940` stores `ActionSlot_ClearEffectHandle
+@0x53f760` at group+0x5C/+0x60; `CEffectGroup_Destroy @0x5e3460` invokes it only after
+the child list is empty. `CEffectGroup_AdvanceChildrenAndReap @0x5e59a0` unlinks each
+dead child immediately but does not call the group callback. Therefore those visual
+observations do not establish an early suppression re-arm; the first-child hypothesis
+recorded later in this historical session was disproved by the 2026-07-16 adversarial
+read below. Remaining A/B candidates are emitter-clock/lifetime conversion and the
+separate per-entity effect-slot updater `Entity_UpdateMuzzleFlashAndEffects @0x493149`,
+not the action slot's death callback. Also witnessed, unported: the per-shot muzzle
+LIGHT (`ActionSlot_SpawnEffect` tail `@0x402080`: `AmmoDef+36` gates
+`LightPool_SpawnGlowEffect @0x56c960`, handle at `entity+436`, blend snapped to 1.0).
 
 **The oscarmike adjudication (2026-07-15, session 3 continued).** The maintainer
 pointed at the archived `on-godot-oscarmike` attempt as having better-feeling weapon
@@ -6606,31 +6590,23 @@ guard (`cmp [esi+18h],0; jnz`) and the handle/anchor record
 JOTAC-era `Jointops.exe` at the same VAs (file 0x1418c8 -> 0x5418c8; 0x208c ->
 0x40208c) — the per-shot-particle contradiction is NOT a binary-version delta.
 A temporary `NOVA_WPNFX_UNGUARDED` host toggle served as the discriminating A/B
-instrument for one round (removed after the adjudication below — the resolved model
-is the unconditional port).
+instrument for one round and was removed; the binary's guarded path remains authoritative.
 
-**RESOLVED AS THE FIRST-CHILD-DEATH WINDOW (2026-07-15, session 3 close).** The
-maintainer's A/B verdict on the unguarded toggle ("parts feel better, but worse on
-shell ejection") discriminated the models: per-shot spawning fixes the Barrett plume
-but multiplies REVX02's stream-authored fire-row casings — so the retail window must
-sit BETWEEN "none" and "whole group". The reconciling witness: the dead-child notify
-(`CEffectEmitter_OnChildDied @ 0x5ef9c0`, invoked from `CParticleEmitter_AdvanceFrame
-@ 0x5e695f` when the aliveness leaf `@ 0x5e2640` reports a child dead) clears the
-PARENT's `+0x11C` — the FIRST gate of that same aliveness leaf — collapsing the
-parent's aliveness to its remaining-particles term. Working model (probable
-confidence — the notify target's object identity rides the decompiler's garbled
-this-chains; one debugger session would pin it): **the suppress-while-owned window
-re-arms when the FIRST child emitter of the guarded group dies, not the last.** On
-the REVVY data this predicts both maintainer observations at once: `Effect_M82_Muz`
-re-arms at ~0.26 s (its flash child dies first) -> the Barrett plume shows per shot
-at any human cadence, while the single-child `Effect_556cas_REV_RAPID` holds its
-~1.4 s window -> one casing stream at a time under auto fire. PORTED: the portable
-`EffectScene` releases the slot binding of a `SuppressWhileOwned` group as soon as
-any child emitter finishes (the group and its draining particles live on);
-`ReplaceOwned` keeps whole-group slot ownership — the WAC/item replacement protocol
-depends on the live mapping. Pinned by
-`suppress_window_rearms_at_first_child_death_contract` in
-`particle_effect_scene_contract_test.cpp` (ledger D-WPN-19).
+**CORRECTED TO THE WHOLE-GROUP-DEATH WINDOW (2026-07-16 adversarial review).** The
+2026-07-15 A/B result was useful presentation evidence, but it could not identify the
+callback's object lifetime. The complete call chain does: `ActionSlot_ExecuteAction`
+(`@0x4020a0`) calls `ActionSlot_SpawnEffect @0x401f20`; the world/group spawn
+(`@0x5f6df0` → `@0x5ea200`) installs `ActionSlot_ClearEffectHandle @0x53f760` through
+`CEffectGroup_SetDeathCallback @0x5e1940`, which writes group+0x5C/+0x60.
+`CEffectGroup_AdvanceChildrenAndReap @0x5e59a0` removes and destroys each dead child
+immediately, but the callback is invoked by `CEffectGroup_Destroy @0x5e3460` only when
+the GROUP is destroyed. The earlier `CEffectEmitter_OnChildDied @0x5ef9c0` parent-gate
+interpretation was the wrong object/callback chain. Therefore `SuppressWhileOwned`
+and `ReplaceOwned` both retain their slot mapping through the final child; their
+admission behavior differs on a new spawn, not on callback lifetime. The port now
+recycles dead children individually and clears the suppression mapping only at final
+group death. D-WPN-19 records the false-reading correction and the whole-group
+regression replaces the former first-child contract.
 
 **Open follow-ups:** who queues OVERHEATED(11) as an ACTION (its ROW is consumed as
 glow data by the heat window leg above — whether anything transitions TO state 11
@@ -6643,9 +6619,9 @@ the RoundData_SpawnRound 0x2000000 test site; the slot Elevation zoom-adjust inp
 the scope tri-state (engaged/active/hipfire) for the movement reversal legs; the
 HandGunUp auto-follow (player flag 0x4000 writer); the emplaced-gun overheat glow port
 (the heat window leg above); the kick sound-layer port (`SoundEmitter_RegisterSetLayers`);
-the Barrett/REVVY per-shot particle contradiction (the session-3 block above — the
-per-entity effect-slot writers `@ 0x493149`, the group-spawn bit-2 flag, the emission
-clock A/B, and the muzzle light `@ 0x56c960`);
+the Barrett/REVVY visual A/B outside the now-closed action-slot suppression question
+(per-entity effect-slot writers `@0x493149`, emission-clock conversion, and the muzzle
+light `@0x56c960`);
 loose-REVX audio: a loose
 extract advertises no expansion, so revx02.LWF (the M82 GS_/GF_ sets) never
 loads — the expansion setting must name it (config, not code).

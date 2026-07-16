@@ -38,6 +38,17 @@ opennova::particle::TableDef ramp_table(const char *id) {
 	return table;
 }
 
+opennova::particle::TableDef constant_table(const char *id,
+		std::uint8_t value) {
+	opennova::particle::TableDef table;
+	table.id = id;
+	table.rows.assign(32, std::array<std::uint8_t, 8>{});
+	for (auto &row : table.rows) {
+		row.fill(value);
+	}
+	return table;
+}
+
 bool test_row_major_flatten() {
 	// rows[r][c] = r*8 + c → flat lut[i] = i. This pins the row-major order
 	// the engine uses (CEffectDef_ResolveTblDefReference @ 0x5e9630 stores
@@ -222,6 +233,36 @@ bool test_def_bake_resolves_names_case_insensitively() {
 	return true;
 }
 
+bool test_duplicate_selection_matches_retail_transform_cache() {
+	// CParticleManager_FindTableDefByName @ 0x5e9540 returns the first base
+	// table for flags=0. For inverse/reverse flags it remembers the last base
+	// match, clones that table, and applies the transform @ 0x5e2700.
+	using namespace opennova::particle;
+	std::vector<TableDef> tables;
+	tables.push_back(constant_table("Duplicate", 17));
+	tables.push_back(ramp_table("duplicate"));
+
+	ParticleDef def;
+	def.alpha_func = {"DUPLICATE", false, false, true};
+	def.red_func = {"Duplicate", true, false, true};
+	def.green_func = {"duplicate", false, true, true};
+	def.blue_func = {"duplicate", true, true, true};
+	bake_particle_def_curves(def, tables);
+
+	if (!expect(def.alpha_func.baked_lut[0] == 17 &&
+			def.alpha_func.baked_lut[255] == 17,
+			"unmodified duplicate resolves the first base table")) return false;
+	if (!expect(def.red_func.baked_lut[0] == 255 &&
+			def.red_func.baked_lut[255] == 0,
+			"reverse duplicate transforms the last base table")) return false;
+	if (!expect(def.green_func.baked_lut[0] == 255 &&
+			def.green_func.baked_lut[255] == 0,
+			"inverse duplicate transforms the last base table")) return false;
+	return expect(def.blue_func.baked_lut[0] == 0 &&
+			def.blue_func.baked_lut[255] == 255,
+			"combined modifiers transform the last base table");
+}
+
 bool test_uv_rect_bake_horizontal_strip_default() {
 	// `bake_graphic_uv_rects` fills `baked_uv_rects` with horizontal-strip
 	// UVs: frame N spans u in [N/count, (N+1)/count], v in [0, 1]. This
@@ -340,6 +381,7 @@ int main() {
 	if (!test_table_rows_follow_tl_indices_and_last_write_wins()) ++failures;
 	if (!test_def_bake_resolves_named_curves()) ++failures;
 	if (!test_def_bake_resolves_names_case_insensitively()) ++failures;
+	if (!test_duplicate_selection_matches_retail_transform_cache()) ++failures;
 	if (!test_def_bake_handles_graphic_layers()) ++failures;
 	if (!test_uv_rect_bake_horizontal_strip_default()) ++failures;
 	if (!test_uv_rect_bake_single_frame_full_quad())  ++failures;

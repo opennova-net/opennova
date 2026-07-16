@@ -8,7 +8,7 @@
 > YAWANDPITCH Euler path witnessed, z_offset re-homed to the render-side camera pull.
 > **Deep-dive grill 2026-07-13 (the PR #237 weapon/vehicle particle pass)**: the recoil-row
 > casing leg, the ADS settle gate (the `g_weaponScopeActive` promoter), the muzzle
-> suppression window (the `ActionSlot_ClearEffectHandle` death callback), the ammo
+> suppression window (the `ActionSlot_ClearEffectHandle` group-death callback), the ammo
 > `effects_table` impact chain, and the ITEMS.DEF per-item userpoint effects (`particlefx*`)
 > witnessed. Their event/resolution pipelines and generic transient presentation are routed;
 > remaining impact-tag fidelity is D-WPN-15 and the Knife-only instant-kill-zone family is
@@ -55,6 +55,12 @@ optional `;` (`boatwake.ptl:45` writes `};`). Blank lines between sections are i
 
 Four tags exist in the binary (string xrefs from the section dispatcher
 `[orig: CEffectWorld_ParseSectionCallback @ 0x5ecb40]`):
+
+The dispatcher compares section tokens with `_stricmp`; the per-section property parsers do
+the same for known keys. Section tags, `graphicN`/`gN_*` keys, table rows, and edit-handle keys
+are therefore ASCII case-insensitive. A scan of the 77-file retail corpus found no mixed-case
+section tags or known keys, so this matters to tolerant/mod-authored input rather than shipped
+content. The reimpl folds known tokens while preserving the authored spelling of unknown keys.
 
 | Tag | Purpose |
 | --- | --- |
@@ -239,9 +245,15 @@ is corpus-derived (`boatwake.ptl:40-45`) and round-trip verified.
   `mod2x`=5, `bumpadd`=6, `distort`=7. Because `bump` matches before `bumpadd`, a literal
   `bumpadd` token resolves to 3 (Bump), not 6. Replicated by the reimpl parser (otherwise the
   corpus diverges).
-- **Curve-ref modifiers** `[orig: CParticleDef_ParseProperties @ 0x5ea320]`: trailing `reverse`
-  sets bit `0x02`, trailing `inverse` sets bit `0x01` on the curve reference (e.g. the
-  `scale_func` site @ `0x5eafdd`).
+- **Curve-ref modifiers** `[orig: CParticleDef_ParseProperties @ 0x5ea320]`: one trailing token
+  is consumed; `reverse` sets bit `0x02`, `inverse` sets bit `0x01` on the curve reference (e.g.
+  the `scale_func` site @ `0x5eafdd`). The reimpl deliberately accepts and composes both trailing
+  modifiers in either order; retail consumes only the last token. Shipped files use at most one
+  modifier, so the difference is a mod-syntax superset (D-PTL-20).
+- **Flip-frame bounds**: retail carries the authored `flip_frames` count into its frame registrar
+  without the host's normalization. The reimpl forces non-positive counts to `1` and caps larger
+  counts at `256` across parse, bake, preview, and runtime seams to bound allocation/work
+  (D-PTL-19). The shipped corpus does not approach the cap.
 - **`gN_colorM` dispatch bug** `[orig: CParticleDef_ParseProperties @ 0x5ea320]`: the engine's
   outer dispatcher remaps `g2_color1`, `g3_color1`, `g3_color2`, `g4_color1`, `g4_color2` into
   higher color slots before they reach the graphic-property handler. The reimpl parser does the
@@ -406,13 +418,13 @@ ported without byte-layout claims; **pending** = not yet decompiled.
 
 | Original | Addr (size) | Behavior witnessed | Reimpl | Verdict |
 | --- | --- | --- | --- | --- |
-| `CEffectWorld_ParseSectionCallback` | `0x5ecb40` (0x101) | references all 4 section strings; branches tag → per-section parser | `libs/particle/src/parser.cpp` collapses dispatch + per-section into one switch | match (witness) |
+| `CEffectWorld_ParseSectionCallback` | `0x5ecb40` (0x101) | references all 4 section strings; `_stricmp` branches tag → per-section parser | `libs/particle/src/parser.cpp` folds all four section tokens before one switch | match (witness; mixed-case contract) |
 | `CEffectTableDef_ParseCallback` | `0x5e4010` (0x1b1) | alternate `[tabledef_edithandles]` path; likely editor-only, not on the runtime load path | — | pending |
-| `CParticleDef_ParseProperties` | `0x5ea320` (0x2525) | stricmp dispatch on ~80 keys; `reverse`/`inverse` bits; edithandles sentinel @ `0x5ea346`; `gN_colorM` remap bug (§1.11) | `parser.cpp::apply_particle_key` | match |
+| `CParticleDef_ParseProperties` | `0x5ea320` (0x2525) | `_stricmp` dispatch on ~80 keys; one trailing `reverse`/`inverse` token; edithandles sentinel @ `0x5ea346`; `gN_colorM` remap bug (§1.11) | `parser.cpp::apply_particle_key`; known keys folded, unknown spelling retained | match except the documented dual-modifier superset (D-PTL-20) |
 | `CParticleDef_ParseFromConfigMap` | `0x5ed210` (0x1da5) | hydrates ~80 named keys → `CParticleEffectDef` (§2.1) | drives the `ParticleDef` field set | match (witness) |
 | `CParticleTableDef_ParseScriptLine` | `0x5e92b0` (0x266) | `[tabledef]` line driver | `parser.cpp::apply_table_key`; 32×8 invariant verified 77/77 via smoke test | pending |
 | `CParticleTableDef_ParseProperties` | `0x5eefc0` (0x228) | companion property reader | — | pending |
-| `CParticleDefEntry_ParseGraphicProperty` | `0x5e3550` (0xabe) | `graphic1` resets idx=0, `graphicN`++ capped at 3; strstr per-key dispatch; reverse/inverse bits per func | graphic decl + `g_*` dispatch in `apply_particle_key` | match |
+| `CParticleDefEntry_ParseGraphicProperty` | `0x5e3550` (0xabe) | `graphic1` resets idx=0, `graphicN`++ capped at 3; case-insensitive key dispatch; reverse/inverse bits per func | folded graphic decl + `g_*` dispatch in `apply_particle_key` | match |
 | `CParticleDefEntry_ParseBlendMode` | `0x5e29f0` (0xc8) | chained strstr; bumpadd→3 quirk (§1.11); `mod` table at `off_7DCBA8` | `particle.cpp::parse_blend_mode` / `blend_mode_name` | match |
 | `CParticleTableDef_ParseTransformFlags` | `0x5e2950` (0x39) | tabledef flag bits | — | pending |
 | `FlagTable_ParseFromString` | `0x5df970` (0x45) | §2.5 | `particle.cpp::parse_flag_table` | match |
@@ -429,9 +441,11 @@ Writers (round-trip verification gold):
 
 ## 4. Runtime witness matrix (simulator)
 
-The portable simulator in `libs/particle/src/emitter.cpp` is **match (semantic)**: it captures
-per-particle behavior (emission, lifetime, integration, RNG resolution) without claiming
-byte-exact parity with the DirectX-bound renderer. The engine `CParticleEmitter` runtime
+The portable simulator in `libs/particle/src/emitter.cpp` is a **faithful core with recorded
+gaps**: it captures the witnessed per-particle behavior (emission, lifetime, integration, curve
+clocks) without claiming complete or byte-exact parity with the DirectX-bound runtime. ORBIT,
+platform RNG/basis construction, capacity bounds, and the other §8/D-PTL rows remain explicit.
+The engine `CParticleEmitter` runtime
 instance is ~252 B (parent pos, orient matrix, AABB, particle buffer ptr + stride, spring/drag/
 damping, force vec); our struct does not mirror byte layout.
 
@@ -445,7 +459,7 @@ damping, force vec); our struct does not mirror byte layout.
 | `CParticleEmitter_TranslatePosition` | `0x5efe90` (0xad) | `delta = newPos − pos`; shifts AABB min/max accumulators. **PositionRelative** (flags bit 19): particles travel with the emitter; default clear = world-space, particles "left behind" | `emitter_translate` + `last_translation_delta`/`cumulative_translation`; Godot wrapper hooks `NOTIFICATION_TRANSFORM_CHANGED`. AABB tracking itself deferred. Pinned by `particle_translate_test.cpp` + GUT tests |
 | `CEffectEmitter_AdvanceEmission` | `0x5e1d30` (0x1dc) | when `emit_rate_func` resolves, emission interval is scaled by `lut[(int)(t*256) & 0xFF] / 128.0` per frame (LUT ptr at def+3700); byte 128 = neutral, 0 = no emission, 255 ≈ 2× | `emitter_advance` emit-rate scaling; `t_norm = age/emit_dur`, FOREVEREMIT loops via `age − floor(age)`. Pinned by 3 LUT-rate ctest cases |
 | `CEffectDef_ResolveTblDefReference` | `0x5e9630` (0x4a) | writes `entry+68 = TableDefByName + 328`; LUT = the tabledef's 32×8 bytes read row-major as a flat 256-byte array; renderer indexes `lut[(int)(t*256) & 0xFF]`, **no interpolation**. On a lookup miss it logs the "not found" format `@ 0x7dd420` (via `@ 0x5df7e0`), writes `entry+0x44 = 0`, and returns 0 — an unresolved curve is a null LUT, i.e. the channel renders un-curved | `bake_curve_lut` + `bake_particle_def_curves`; `reverse` reads source in reverse index order, `inverse` flips values (`255 − src`). Unresolved names leave `baked = false`. Pinned by `particle_curve_lut_test.cpp` |
-| `CParticleManager_FindTableDefByName` (the find-or-clone walk called by `ResolveTblDefReference`; the standing IDB name kept — the clone side effect is carried by the witness comments) | `0x5e9540` (0xf0) | walks the table list at `ctx+0x170`, calling each tabledef's `vtable+0` name getter and comparing with **`_stricmp @ 0x76fdf6`** (`__ascii_stricmp @ 0x76fcee`, A–Z fold both sides) — **table names resolve case-insensitively**, which shipped data relies on (ambfx.ptl authors `green_func = Table11Alt` against `id = table11Alt`; 85 capital-T refs corpus-wide). A stricmp hit whose owner field (`+0x248`) equals the requesting owner returns it directly; a hit with a **null** owner is remembered and CLONED for the requester (0x250-byte alloc → copy ctor `@ 0x5e80f0` → list append `@ 0x5f85c0`); a hit owned by a different owner keeps walking | `ParticleFile::find_table` + `bake_one_curve` use `strutil::iequals`; the Godot `NovaParticleFile::find_table` / `NovaParticleEmitter::_find_table` use `nocasecmp_to`. The per-owner clone protocol is unported (our TableDefs are per-file value copies — no shared mutable list to protect). Case fold pinned by `particle_curve_lut_test.cpp` (`test_def_bake_resolves_names_case_insensitively`) + the authoring GUT lookup |
+| `CParticleManager_FindTableDefByName` (the find-or-transform-cache walk called by `ResolveTblDefReference`) | `0x5e9540` (0xf0) | walks the table list at `ctx+0x170`, compares names with **`_stricmp @ 0x76fdf6`**, and takes transform flags (`inverse=1`, `reverse=2`). **TableDef+0x248 is the applied transform mask, not an owner field.** Flags 0 return the FIRST matching base. Modified lookup returns an already-cached matching transform; otherwise it remembers the LAST matching base, clones it (0x250-byte alloc → copy ctor `@ 0x5e80f0` → list append `@ 0x5f85c0`), applies the transform at `0x5e2700`, and caches that mask at +0x248. Case-insensitive lookup is shipped-visible (`Table11Alt` vs `table11Alt`) | `ParticleFile::find_table` / Godot lookup remain case-insensitive. `bake_one_curve` returns the first base for unmodified refs and transforms the last base for modified refs; immutable baked LUTs need no mutable clone cache. Pinned by case-fold and duplicate-selection `particle_curve_lut` cases. The corpus has 102 duplicate table names and 7 names with differing duplicate data, but none of those 7 is referenced with a modifier, so the corrected duplicate rule is generic/mod fidelity rather than a shipped visual change |
 | `CEffectDef_ResolveAllReferences` | `0x5e9d70` (0x28e) | full resolve pass: 6 particle-level curves (5 color/scale + emit_rate) + 5 curves × ≤4 layers + textures + 20 sound slots | `bake_particle_def_curves` (curves only); texture resolution via the Godot wrapper's `texture_path_resolver`; sound resolution deferred |
 | `CParticleEmitter_BuildOrientationMatrix` | `0x5f3970` (0x267) | builds an orthonormal 4×4 at emitter+352 from `def.orbital_axis`, cross-product fallback when forward is parallel to `(0,1,0)`. **NOT** the parent transform (earlier speculation refuted by the live decomp) — it is the orbital frame for the ORBIT move mode | needed for full ORBIT frame fidelity; not yet ported |
 | `CParticleEmitter_Init` | `0x5419e0` (0x86) | emitter ctor/init (also AnimMap + sound triggers, out of scope) | `emitter_init` |
@@ -456,9 +470,10 @@ damping, force vec); our struct does not mirror byte layout.
 | --- | --- | --- | --- |
 | `CParticleEmitter_BuildBillboardQuads` | `0x5e6d60` (0x7d7) | vertex 28 B (pos 12 + color 4 + lit color 4 + uv 8), 4 verts/quad, indices 0/1/2/1/3/2; roll matrix (labelled `D3DXMatrixRotationX`, a `(M,f)` FLIRT-collision family) x manager camera matrix (+664) through the PSGP multiply; **quad half-extent = `particle.base_size (+0x38) x (ScaleCurve ? lerp(scaleLUT[i], scaleLUT[i+1], frac(phase)) / 128 : 1) x 0.5`** (`flt_7C3DD4` = 1/128, `flt_7C3B94` = 0.5 `@ 0x5f51ab`-analog; the scale LUT LERPS and reads `lut[i+1]` one byte past the LUT at i=255); color/alpha LUTs read the RAW byte at `(int)phase % 256`, channel x byte / 256, no lerp; **quad center += `emitter+0x140` (= `-def.z_offset`) x the per-frame view-axis globals `flt_2C06578/7C/80`** (`CParticleManager_BeginFrame @ 0x5ecfe8`) — the z_offset camera-ward pull `@ 0x5e71c9`; **flipbook clock = `(256/phase_rate) x flip_rate x phase / 64` = 4 x flip_rate x elapsed-seconds** `@ 0x5e6f17`, GFXFLIPRAND adds a particle-ptr-derived start offset; per-frame UV entry at graphic+724 = **6 dwords `{material_ptr, u_min, v_min, u_max, v_max, inset}`** — inset ADDS on min edges, SUBTRACTS on max; material changes flush + rebind via `CParticleBatch_FlushAndBindMaterial @ 0x5e4230`; manager RGB tint at emitter+200..+202, applied `(byte * channel) >> 7` (byte 128 = 1.0); **LOD decimation** `divisor = round(1.0 / *(emitter+8 + 0x3F4))`, render only when `serial % divisor == 0` (render-only; sim untouched) | `renderer::ParticleFrameCompiler` emits a value-owned immutable quad packet with four exact 28-byte vertices per quad and applies size/LUT/z-offset/flipbook/tint/LOD. The Godot scene-to-quad adapter applies the exact bump-color matrix and expands each quad to triangle vertices `0/1/2/1/3/2`; `NovaParticleCompositorEffect` streams those vertices through one persistent growable RD vertex buffer and executes every adjacent state run in packet order. Contracts pin stride, expansion, domain filtering, ordering, bounds, and command runs |
 | `CParticleEmitter_RenderStaticBillboards` | `0x5f4e10` (0x80c) | same vertex layout; selected by `(def.flags & 0x100) == 0 ? rotated : static` (bit 8 = YAWANDPITCH). **NOT rotation-suppressed: the path renders WORLD-ORIENTED quads** — `(yaw, pitch, roll) = (aux+0, aux+8, particle+0x3C) x pi/180` into the `(M,f,f,f)` Euler builder `@ 0x5f5068..0x5f508d` (the `init_D3DXMatrixScaling` import label is a FLIRT prototype collision — scaling by angle-sized factors would collapse the +-half corners fed through the PSGP corner transforms; the semantics are RotationYawPitchRoll), corners `(+-half, +-half, 0)` transformed then translated by the pulled center. Per-particle yaw/pitch live in the parallel array at `emitter+0x150` (SS2.3) | the portable compiler's oriented-quad branch consumes the same per-particle Euler state and writes it into the shared packet; it is no longer a per-emitter mesh path |
-| `CParticleEmitter_ComputeViewDepths` | `0x5e7580` | per-particle camera-space depth before batching, back-to-front sort | deterministic two-stage ordering in `ParticleFrameCompiler`: emitter AABB-center depth with source-index ties, then particle depth with source-index ties inside each emitter; adjacent material/page runs are formed afterward. This is not one global stable particle sort |
-| `CParticleManager_TransformToViewSpace` | `0x5ecc50` (0x31c) | projects each child emitter's bbox to view space via camera basis at this+664/+696/+700/+704, builds sort entries, calls RecursiveSortAndRender | `ParticleFrameCompiler` transforms value-owned emitter AABBs against the active camera and returns both sort values and value-only F3 bounds |
-| `CParticleManager_RecursiveSortAndRender` | `0x5ec980` (0x188) | recursive divide-and-conquer sort over emitter bbox centers, alternating axes (`axisMask` cycles 1→2→4→1), depth-bin splits, falls back to direct `RenderBatch`; semantic = back-to-front by view-space depth | the shared packet uses deterministic emitter-then-particle depth ordering; exact equivalence to the retail alternating-axis/depth-bin recursion remains unproven. The RD compositor draws every command sequentially, so host material sorting cannot reorder packet commands |
+| `CParticleEmitter_ComputeViewDepths` | `0x5e7580` | computes camera-space depth for every particle before a shared batch sort | `ParticleFrameCompiler` computes the rendered-center depth for every visible particle before packet construction |
+| `CParticleManager_TransformToViewSpace` | `0x5ecc50` (0x31c) | projects each child emitter's bbox to view space via camera basis at this+664/+696/+700/+704, builds sort entries, calls `RecursiveSortAndRender` | the adapter derives value-owned emitter bounds for diagnostics and ordering input |
+| `CParticleManager_RecursiveSortAndRender` | `0x5ec980` (0x188) | recursively separates non-overlapping emitter sets using alternating axes (`axisMask` cycles 1→2→4→1); an irreducibly overlapping leaf is sent to `RenderBatch` | the host does not reproduce the recursive leaf partition: it places all selected emitters in one shared depth list (D-PTL-21). Spatially disjoint quads cannot affect one another visually, but exact retail tie/partition order remains an open algorithmic-parity gap |
+| `CParticleManager_RenderBatch` | `0x5e9890` | builds one shared `{depth, emitter_id, particle}` list for every emitter in an overlapping leaf, globally sorts it back-to-front (`@ 0x5e9b63`), then dispatches adjacent emitter-id runs. Overlapping emitters therefore CAN interleave particle-by-particle; emitter contiguity is not guaranteed | `ParticleFrameCompiler` globally sorts all visible particles back-to-front with deterministic emitter/particle source-index ties, then forms adjacent render-state runs. This reproduces the required cross-emitter interleaving and prevents host material sorting from undoing it; only the broader recursive batch partition differs (D-PTL-21) |
 | `CParticleManager_BuildTextureAtlases` | `0x5e8db0` (0x44d) | bakes textures into a shared atlas; the per-graphic array at graphic+724 holds per-frame texture-ENTRY pointers, and the entry's rect floats sit behind its material ptr — `{+0 page/material ptr, +4 u_min, +8 v_min, +12 u_max, +16 v_max, +20 inset = 2.5/side}` (the allocator's success writes `@ 0x5e2d00..0x5e2d3b`; an earlier note here had v_min/v_max swapped); collection takes only probe-sized entries (+288 > 0), placement order is a stable width-descending bubble sort, pages are typed by their first entry (types 0–2 → 1024², 3–7 → 256² `@ 0x5e8f1e`; pages 1/2 shared, others exact `@ 0x5e2bef`), type-1 rows get alpha cleared at blit `@ 0x5e9116`, and the skyline placer (`CParticleAtlas_TryPlaceEntry @ 0x5e2be0`, ex kong `CEffectChannel_TryAssignSlot`) carries a persistent scan minimum and rewrites covered columns to `skyline[best]+height` — it can LOWER taller columns and overlap earlier rects; page finalize (`CParticleTexture_InitTextureAndChannels @ 0x5e8210`) converts type-3/6 pages via `Texture_GenerateNormalMapFromHeight(…, 0.125, 0)` and type-7 via `(…, 0.03125, forceBlue=1)` (the generator's real 5th arg), encoding `(n+1)×127.5` | `renderer::ParticleAtlasBuilder`: shared mission/preview catalog, exact frame registration, type page families, stable width-descending placement, witnessed skyline allocator, exact rects and 2.5-pixel inset, type-1 alpha clear, and whole-page type-3/6/7 normal preprocessing. Every flipbook frame is an independently packed registered entry/rect; frames are not assumed to be horizontal cells. Raw RGBA pages cross one narrow host-upload seam |
 
 ### Godot wrapper correspondence
@@ -475,8 +490,10 @@ damping, force vec); our struct does not mirror byte layout.
 | `nova_particle_emitter.{h,cpp}` | `CParticleEmitter` | legacy single-def authoring/test convenience wrapper; neither GameWorld nor ONED uses it for runtime presentation |
 | `ptl_resource_format.{h,cpp}` | (no engine analogue) | Godot ResourceFormat loader/saver for `.ptl`, round-trips |
 
-All rows verdict **match (semantic)**. The ONED workspace (`godot/modtools/particle/`) mounts the
-blueprint screen (node graph + live preview) over these wrappers.
+These rows map responsibilities; they are not a blanket parity verdict. The ONED workspace
+(`godot/modtools/particle/`) mounts the blueprint screen (node graph + live preview) over these
+wrappers. Behavior-level matches and remaining gaps are recorded in the witness matrices,
+§8, and D-PTL catalog below.
 
 ### Runtime load & spawn chain (game integration, witnessed 2026-07-10)
 
@@ -495,8 +512,9 @@ dedicated host is headless and never draws) + the `game_world.gd` fx routing.
 | `CEffectWorld_SpawnEmitterAtPosition` | `0x5f6df0` (0x182) | spawn descriptor (14 dwords): +0 flags (bit0/1 = orientation-in-descriptor; bit2 inverted into the spawn call), +4 interned handle (≤0 → +8 name ptr), +12 owner/tag (stored at emitter+0), +16..24 fixed-point position and +28..36 fixed-point orientation (both through `Math_FixedPointToFloat3_YNegated @ 0x611210`), +40 attenuation 16.16, +44 blend 16.16, +48/+52 sample params (action-slot coupling); spawns via `sub_5EA200(g_EffectWorld, 0, def, pos, orient, flag)` | `NovaEffectWorld.spawn_effect_request`: one value-owned `EffectScene` group with one pooled emitter value per `pdefs` entry; the mission fixed tick owns lifetime, while the shared renderer consumes immutable draw packets. No emitter renderer Nodes cross the facade |
 | `WacScript_SpawnEffectAtSsnEntity` | `0x4f23a0` (0x13f) | (renamed from kong `WacScript_SpawnSoundAtEntity` — it spawns a particle emitter) WAC `fx2ssn`: resolves the `(pool<<12)\|slot` handle, **detaches any live emitter at entity+460 first**, descriptor at the entity position, orientation = **terrain surface normal** at its grid cell (`outMillis`/`off_849934` tables), new handle → entity+460 | `game_world._route_mission_effects` resolves the live registry SSN, then `spawn_effect_owned`; replacement detaches the previous group, each sweep follows the entity position/forward, and registry removal stops emission while live world-space particles drain. Initial orientation remains up until the terrain-normal read lands (D-PTL-7) |
 | `WacScript_SpawnEffectAtTargetMarker` | `0x4f7fd0` (0x122) | (renamed from kong `WacScript_PlaySoundAtEmitter`) WAC `fx2tgt`: pool-3 walk for `itemDef+80 == 6088` (placed target marker, ids 1..99) with the matching target id; same descriptor + entity+460 handle protocol | unrouted: which `.bms` record field carries the target number is unwitnessed (§8) |
-| `ActionSlot_SpawnEffect` | `0x401f20` (0x17f) | weapon-action effect spawn (the ACTION block `particle` key = ActionDef+16, a 1-based interned handle): resolves the firing entity through vehicle parent chains, `Entity_ComputeActionTransform @ 0x401310` fills descriptor position/orientation from the action bone, descriptor dwords 12/13 couple the emitter back to the action slot, handle stored at slot+24 (`MountSlot+0x18 actionEffectHandle`, with the anchor action index at `+0x28`) **only when dword 12 (the on-death callback) is set: the FIRE path passes `ActionSlot_ClearEffectHandle @ 0x53f760`, the recoil path passes 0 and never records a handle**. While the handle lives, the pump RE-ANCHORS the emitter to the recorded action's bone every tick and releases it underwater [orig: the tracker leg in `WeaponAction_ProcessFrame` @ 0x540edf → `CEffectEmitter_UpdatePositionAndParams` @ 0x5f6810 (ex the kong "Audio_SetListenerAndEffectPositions" misnomer)] — witnessed 2026-07-15, net-re §5.62 | routed by `LocalPlayerHost` for local FIRE: resolve the named viewmodel userpoint through its `subobject`'s live `Skeleton3D` global pose relative to global rest (camera fallback), pass the posed direction, suppress SETTLED scoped first-person flashes except the vehicle-attack proxy, and key the live-group guard by viewmodel generation/action. The group is owner-bound (`BINDING_FOLLOW_OWNER`) with a `GameWorld.register_effect_anchor` live resolver re-reading the spawning action's userpoint each present frame — the pump tracker's host analog (D-WPN-17 FIXED 2026-07-15; the underwater release rides the §8 water plumb). Every witnessed weapon particle enters the global World-domain EffectWorld pass after the viewmodel flush; there is no retail FP particle pass. Exact vehicle-parent capability/transform and third-person model sourcing remain open (§8) |
-| `ActionSlot_ClearEffectHandle` | `0x53f760` (0x16) | the emitter-death callback riding descriptor dwords 12/13: when the dying emitter's handle == slot+24, clears slot+24/+40, re-arming `ActionSlot_ExecuteActionWithEffect`'s `!slot+24` spawn guard `@ 0x5418c8` — the muzzle-flash suppression window is EXACTLY the live emitter group's lifetime (the prior IDB comment was a bogus sun-direction leftover; fixed 2026-07-13) | `NovaEffectWorld.spawn_effect_unless_alive`: the owner-keyed group suppresses re-spawn while alive; the sweep clears the key when every emitter finishes — the same window |
+| `ActionSlot_SpawnEffect` | `0x401f20` (0x17f) | weapon-action effect spawn (the ACTION block `particle` key = ActionDef+16, a 1-based interned handle): resolves the firing entity through vehicle parent chains, `Entity_ComputeActionTransform @ 0x401310` fills descriptor position/orientation from the action bone, and passes descriptor dwords 12/13 to the group spawn. The FIRE path supplies `ActionSlot_ClearEffectHandle @ 0x53f760`; `CEffectGroup_SetDeathCallback @ 0x5e1940` stores it at group+0x5C/+0x60. The recoil path passes 0 and never records a guarded handle. While the group handle lives, the pump re-anchors it to the recorded action bone every tick and releases it underwater [orig: `WeaponAction_ProcessFrame @ 0x540edf` → `CEffectEmitter_UpdatePositionAndParams @ 0x5f6810`] | routed by `LocalPlayerHost` for local FIRE: resolve the live viewmodel userpoint, apply the settled-scope gate, and key the owner-bound live-group guard by viewmodel generation/action. `GameWorld.register_effect_anchor` supplies the pump tracker's host analog. Every witnessed weapon particle enters the global World-domain pass; exact vehicle-parent capability/transform and third-person model sourcing remain open (§8) |
+| `ActionSlot_ClearEffectHandle` / `CEffectGroup_Destroy` | `0x53f760` / `0x5e3460` | `CEffectGroup_Destroy` invokes the callback stored at group+0x5C/+0x60. Only then does `ActionSlot_ClearEffectHandle` compare the dying GROUP handle with slot+24 and clear slot+24/+40, re-arming the `!slot+24` guard `@ 0x5418c8`. The suppression window is the whole group lifetime, not the first child's lifetime; the 2026-07-15 first-child reading was disproved (D-WPN-19) | `spawn_effect_unless_alive` retains its admission mapping until the final child is gone, then releases the group and clears the owner key. Pinned by `child_reaping_and_group_suppression_lifetime_contract` |
+| `CEffectGroup_AdvanceChildrenAndReap` | `0x5e59a0` | advances each child, immediately unlinks and destroys an individually dead child, and destroys the group only after its child list becomes empty. A finished short child therefore neither occupies the 4096-emitter pool nor appears in later snapshots while a forever sibling continues | `EffectScene` reaps finished emitter slots after each fixed tick and releases the group/admission mapping only when no child remains. The same `child_reaping_and_group_suppression_lifetime_contract` pins capacity and snapshots |
 | `WeaponAction_Recoil` (the direct effect leg) | `0x542dd0` (gate `@ 0x542efa`, spawn `@ 0x542f64`) | the recoil-row DIRECT effect spawn at the arbiter tick (counter reaches 0 after delaystart): for the LOCAL player gated on `ActionDef+16 && currentAction==3 && g_FpWeaponViewFlags&1` — NO scope gate and param7=0, so no handle records and no live-predecessor suppression. The payload is data-defined: most rows eject at `bcasing`, but REVX02 `WPN_M4AUTO` authors `EFFECT_M16MF` at `MFLASH01` here while its FIRE row authors the casing. muzzleBone select: def default (WeaponDef+0x2D4), ActionDef+56 (3P index) when slot flags&2, else `Entity_GetWeaponSlotByte` | PORTED generically: `weapon_fsm.cpp handler_recoil` emits ordered `action_effect` values; `LocalPlayerHost` submits every authored payload through the live action-bone transform as an independent `Always` World-domain transient. Casing, muzzle, smoke, and mod-authored names follow the same path—no `mflash*` distinction or direct-row guard. Pinned by `weapon_fsm_test.cpp`, `nova_simulation_test.gd`, and `local_player_host_test.gd` |
 | the FP gates: `g_FpWeaponViewFlags` + the settle promoter | `0x24d20c0` / `0x4de4f7` | `g_FpWeaponViewFlags` (ex `dword_24D20C0`, renamed 2026-07-13) bit 0 = draw the FP weapon AND its FP fire effects (seeded from settings + profile+1484: 0 writes 2, 1 writes 3, 2 selects third-person; toggled by an input binding; readers `Player_RenderFirstPersonViewModel @ 0x4dedd4`, `ActionSlot_ExecuteActionTick @ 0x541aa1`, `WeaponAction_Recoil @ 0x542eef`, `HUD_RenderAllOverlays @ 0x5a820d`). `g_weaponScopeActive` is promoted to 1 ONLY when the ADS camera ease completes (`Player_UpdatePerFrame @ 0x4de4f7`, the settle promoter — the sole 1-writer; `Player_ToggleWeaponScope @ 0x4df0c0` sets `g_scopeEngaged` and leaves it 0), so the muzzle gate `@ 0x541aba` suppresses at FULL RAISE, not from the toggle | the weapon-view bit is treated always-on (§8). `NovaSimulation` runs the view promoter before the weapon pump, then snapshots settled/third-person/vehicle routing state into every presentation event; a multi-tick catch-up cannot apply the final view state retroactively. Pinned by `local_player_host_test.gd` and `nova_simulation_test.gd` |
 | `Weapon_RaycastAndSpawnImpact` | `0x4e8460` (0x520) | Knife-only instant-kill-zone EFFECT presenter: `RoundData_SpawnRound @0x4ec1ed` gates on `AmmoDef.flags & 0x400`, then `@0x4ec216..0x4ec21f` calls this leaf only for `kztype == Knife`; its second argument is the AmmoDef, `+0x38` is `kz_maxradius`, and `+0x68` is the effects-table pointer. Ordinary bullets never call it | NOT PORTED: the non-ballistic Knife/instant-kill-zone family is D-WPN-16. D-WPN-14 records and closes the former false bullet-timing reading |
@@ -511,7 +529,8 @@ dedicated host is headless and never draws) + the `game_world.gd` fx routing.
 functions** — that family is the `.3DI` model-def cache (`sub_5B6160` appends `.3DI` to the name
 before the lookup); a kong naming trap, recorded in §5.5.
 
-Deferred / unported function index (witnessed addresses, no port yet — renderer- or manager-bound):
+Additional witnessed function index (address cross-reference only; port status is stated in the
+behavior rows above):
 
 | Function | Addr | Function | Addr |
 | --- | --- | --- | --- |
@@ -520,7 +539,6 @@ Deferred / unported function index (witnessed addresses, no port yet — rendere
 | `CParticleSystemDef_InitDefaults` | `0x5e14f0` | `CEffectDef_SetTextureName` | `0x5ef8e0` |
 | `CParticleManager_Construct` | `0x5e87f0` | `CEffectEmitter_Initialize` | `0x5e6020` |
 | `CParticleManager_ResolveAllReferences` | `0x5ec850` | `CEffectEmitter_SpawnBetweenPositions` | `0x5ea0a0` |
-| `CParticleManager_RenderBatch` | `0x5e9890` | `CEffectEmitter_Destroy` | `0x5e3460` |
 | `CParticleManager_BeginFrame` | `0x5ecfc0` | `CEffectEmitter_SetOrientationFromDirection` | `0x5e5b00` |
 | `CParticleManager_FindTableDefByName` | `0x5e9540` | `WeatherParticle_UpdateAllEmitters` | `0x5cb100` |
 | `CEffect_UpdateEmitterTransform` | `0x5f7410` | `WeatherParticle_LoadTextures` | `0x5de840` |
@@ -709,8 +727,9 @@ These functions in the particle render path carry misleading kong names; do not 
 
 Renderer alignment against the RE render chain (verdicts per §3/§4 tables):
 
-- **Camera-facing billboards** with per-particle rotation, depth-sorted back-to-front per
-  emitter `[orig: BuildBillboardQuads @ 0x5e6d60; ComputeViewDepths @ 0x5e7580]`.
+- **Camera-facing billboards** with per-particle rotation, submitted to the shared
+  back-to-front particle-depth batch `[orig: BuildBillboardQuads @ 0x5e6d60;
+  ComputeViewDepths @ 0x5e7580; RenderBatch @ 0x5e9890]`.
 - **YAWANDPITCH static billboards** (flags bit 8) — non-rotating quad path
   `[orig: RenderStaticBillboards @ 0x5f4e10]`.
 - **8 blend modes** — parsed values select one of eight RD pipelines in the ordered compositor:
@@ -719,6 +738,15 @@ Renderer alignment against the RE render chain (verdicts per §3/§4 tables):
   pipeline state rather than approximated in a Godot material. A blank or unresolved runtime
   graphic stays invisible-but-simulating like retail; only ONED opts into the diagnostic
   soft-circle fallback `[orig: ParseBlendMode @ 0x5e29f0]`.
+- **Per-material retail fog** - Blend/Bump/Distort converge on the live scene fog color;
+  Additive/Premult/Bumpadd converge on black, Mod on white, and Mod2x on gray 127.
+  Type 0 uses eye depth with `exp(-depth * ln(64) / end)`; types 1-3 use radial
+  distance and the authored start/end linear curve. The compositor snapshots
+  `NovaEnvironment` on the main thread, fogs RGB before fixed-function blending, and
+  leaves alpha unchanged. The Forward+ backend test compiles the shader, executes a live
+  draw, and verifies the supplied fog tint in the framebuffer
+  `[orig: Render_SetFogState @ 0x58a950; CParticleBatch_FlushAndBindMaterial @
+  0x5e4230; CD3DDevice_SetFogAndTextureFactor @ 0x677740]`.
 - **Curve LUT bake** — per-graphic 256-byte LUTs from the 32×8 tabledef, row-major;
   `reverse`/`inverse` baked into the LUT at resolve `[orig: ResolveTblDefReference @ 0x5e9630]`.
   Sampling (re-witnessed 2026-07-12): the per-particle CURVE PHASE (§2.3) indexes
@@ -751,10 +779,12 @@ Renderer alignment against the RE render chain (verdicts per §3/§4 tables):
 - **ORBIT** adjusted-speed Rodrigues approximation around `orbital_axis`; the retail basis/age chain remains open (§4) `[orig: UpdateAllParticles @ 0x5f3be0]`.
 - **Kill-plane** modes (§4): authored `BELOWH20` / `ABOVEH20` bind to the active mission
   water height; plus **LOD decimation** (`serial % divisor`, render-only).
-- **Cross-emitter spatial sort** — one immutable frame packet performs the full back-to-front
-  sort, then records adjacent state runs; the compositor executes those runs sequentially so
-  the host renderer cannot reorder transparent emitters
-  `[orig: TransformToViewSpace @ 0x5ecc50; RecursiveSortAndRender @ 0x5ec980]`.
+- **Cross-emitter shared-depth sort** — retail recursively partitions emitter AABBs, then an
+  overlapping leaf uses one shared particle-depth list and can interleave emitters. The host
+  uses one global list for all selected emitters, records adjacent state runs, and executes
+  them sequentially, reproducing the visible interleaving while retaining the exact recursive
+  partition as D-PTL-21
+  `[orig: RecursiveSortAndRender @ 0x5ec980; RenderBatch @ 0x5e9890]`.
 - **World-space rendering default** (particles left behind when the emitter moves) with
   **PositionRelative** (flags bit 19) opting back into carried particles
   `[orig: TranslatePosition @ 0x5efe90]`.
@@ -774,6 +804,14 @@ Renderer alignment against the RE render chain (verdicts per §3/§4 tables):
 
 ### Bounded deviations
 
+- **Flip-frame count** (D-PTL-19): the host normalizes to `[1,256]`; retail has no witnessed
+  equivalent normalization/cap. This prevents hostile counts from driving unbounded frame-name,
+  atlas, and preview work.
+- **Curve-ref modifier syntax** (D-PTL-20): the host composes both trailing modifiers; retail
+  consumes one. Shipped content uses no combined modifier.
+- **Sort partition** (D-PTL-21): the host globally depth-sorts all selected particles instead of
+  recreating retail's recursive AABB leaf partition. Overlapping-particle order matches the
+  retail batch requirement; exact tie/partition order for spatially disjoint emitters remains open.
 - **Distort scene coordinates** (§5.4): the decoded normal/wave/projective equation and
   immutable pre-particle scene copy match; Godot's render-buffer UV convention supplies the
   host mapping for retail's D3D projective coordinate.
@@ -845,7 +883,8 @@ carried here.
   local FIRE consumes the ACTION
   `particle`/`particleuserpoint` with SETTLE-gated scoped suppression (the
   `g_weaponScopeActive` promoter `@ 0x4de4f7`), and its suppression window is pinned to the
-  emitter-death callback (`ActionSlot_ClearEffectHandle @ 0x53f760`, descriptor dwords 12/13).
+  group-death callback (`CEffectGroup_SetDeathCallback @ 0x5e1940` →
+  `CEffectGroup_Destroy @ 0x5e3460` → `ActionSlot_ClearEffectHandle @ 0x53f760`).
   The recoil arbiter emits the witnessed data-defined direct event (`@ 0x542efa` /
   `@ 0x542f64`), and every payload is submitted as an independent generic `Always`
   transient through its authored action userpoint. REVX02 `WPN_M4AUTO` therefore works when
@@ -921,8 +960,9 @@ carried here.
 - Pending parser decompiles: `CEffectTableDef_ParseCallback @ 0x5e4010`,
   `CParticleTableDef_ParseScriptLine @ 0x5e92b0`, `CParticleTableDef_ParseProperties @ 0x5eefc0`,
   `CParticleTableDef_ParseTransformFlags @ 0x5e2950`.
-- Emitter AABB accumulators (§4, `TranslatePosition`) — unimplemented in the portable simulator;
-  no consumer until a manager-level cross-emitter sort is needed.
+- Retail's persistent emitter AABB accumulator/write/reset lifecycle (§4, `TranslatePosition`) is
+  unported. The host reconstructs bounds from the current particle snapshot for sorting and
+  diagnostics, so empty-emitter and reset-timing details can still differ from retail's manager.
 - `CParticleEmitter_BuildOrientationMatrix @ 0x5f3970` port for full ORBIT frame fidelity.
 - Collision sounds (20 `collide_sound` slots) and `elastic` bounce behavior — resolve pass
   witnessed, runtime unported.
@@ -963,10 +1003,16 @@ witnessed behavior gap stay in §8.
 | D-PTL-16 | Casing-point recoil and ballistic-impact groups were suppressed as a guard against per-emitter Node/material/atlas/upload churn; direct muzzle rows were temporarily name/point classified and guarded, violating retail's generic unsuppressed direct leg | **FIXED 2026-07-14** — every authored direct row and every resolved impact row now enters the same value-owned EffectScene as a generic `Always` transient. One shared atlas and ordered persistent-buffer compositor absorb the churn without changing weapon/FSM timing or creating vehicle render Nodes. [orig: WeaponAction_Recoil @ 0x542dd0; Projectile_SpawnImpactEffect @ 0x4e9b80] |
 | D-PTL-17 | The PlayerControl occupancy effect (`particlefx` on an occupied vehicle) runs class-wide in the port: every `attrib & 0x40` item starts its slot-A effect on the +368 claim and stops on the claimant's departure. Retail reaches the spawner ONLY through the `CHel`/`cpln` class updater — the shipped ctank/cbike/cveh `Effect_heloHeat1`/`Effect_whiteExhaust` authors are dead data in JO retail (§4 occupancy row) | **PERMANENT (intentional, small)** — presenting authored-but-unreachable retail data on ground vehicles is the point of the port's generic routing; the claimant protocol, start/stop edges, and per-vehicle single-claim semantics are the witnessed ones. Revisit only if a retail-parity scene comparison needs helicopter-only behavior. [orig: the class fn table @ 0x82ac00; entity_update_damage_accumulator_and_shadow @ 0x48fa70] |
 | D-PTL-18 | The witnessed skyline placer rewrites covered columns to `skyline[best]+height`, which can LOWER a taller column and let a later rect overlap an earlier one; its 2.5-pixel inset is uncapped and inverts the UV window on rects ≤ 5 px | **PERMANENT (bounded, original-garbage class)** — the port keeps the witnessed allocator verbatim but treats its result as a proposal: an occupied-rect intersection guard retries the next page and covered columns restore via `max()`, and the inset caps at half the rect extent. Reproducing the overlap would manufacture heap-layout-dependent garbage (ADR 0022). [orig: CParticleAtlas_TryPlaceEntry @ 0x5e2be0, ex kong `CEffectChannel_TryAssignSlot`] |
+| D-PTL-19 | Flipbook frame count: retail carries the authored count into frame registration with no witnessed host-style normalization; the port forces non-positive values to 1 and caps counts at 256 | **PERMANENT (bounded safety)** — bounds parse/bake/atlas/preview work and avoids hostile or nonsensical counts. Shipped content is below the cap. [orig: CParticleDef_ReloadGraphicFrameTextures @ 0x5e4bb0] |
+| D-PTL-20 | Curve-ref modifier syntax: retail consumes one trailing `reverse` OR `inverse` token; the port consumes all trailing modifier tokens and composes both in either order | **PERMANENT (bounded compatibility superset)** — shipped content uses at most one modifier; combined modifiers remain useful and deterministic for mods. [orig: CParticleDef_ParseProperties @ 0x5ea320] |
+| D-PTL-21 | Cross-emitter sorting: retail recursively partitions non-overlapping emitter AABBs, then globally particle-sorts each overlapping leaf; the host globally particle-sorts the whole selected domain | **OPEN (exact algorithmic parity)** — overlapping emitter particles now interleave correctly and spatially disjoint differences are normally invisible, but exact retail leaf/tie order is not claimed. [orig: CParticleManager_RecursiveSortAndRender @ 0x5ec980; CParticleManager_RenderBatch @ 0x5e9890] |
+| D-PTL-22 | Section tags and known property keys were compared case-sensitively by the port even though the retail parser family uses `_stricmp` throughout | **FIXED 2026-07-16** — all four tags and effect/particle/graphic/table/edit-handle keys fold ASCII case; unknown keys retain authored spelling. Mixed-case regression in `particle_lenient_lines`; no shipped corpus trigger. |
+| D-PTL-23 | Duplicate table resolution treated TableDef+0x248 as an owner and always chose the first name match. Retail uses +0x248 as the inverse/reverse transform mask: unmodified refs choose the first base; modified refs reuse a cached transform or clone/transform the last base | **FIXED 2026-07-16** — native and legacy Godot lookup reproduce first-unmodified/last-modified selection; duplicate-selection ctest pins it. The 7 differing duplicate-name sets have no modified shipped reference. [orig: CParticleManager_FindTableDefByName @ 0x5e9540; transform @ 0x5e2700] |
 
-WANDER/BUBBLE (engine-vestigial, zero xrefs), the emitter AABB accumulators, the full ORBIT
-orientation-matrix/age-chain port, collision sounds, and the pending parser decompiles remain
-§8 research items.
+WANDER/BUBBLE (engine-vestigial, zero xrefs), persistent emitter-AABB lifecycle, the full ORBIT
+orientation-matrix/age-chain port, exact recursive sort partition (D-PTL-21), collision sounds,
+and the pending parser decompiles remain §8/research items. The fixed rows above establish the
+witnessed slices; they do not make the subsystem a blanket byte-exact retail port.
 
 ## 10. IDB changes (session log)
 
@@ -996,8 +1042,9 @@ orientation-matrix/age-chain port, collision sounds, and the pending parser deco
   `g_ammoFxStageSoundId/g_ammoFxStageZero`; the vehicle damage-effect handles
   `dword_AE0764/dword_AE0760/dword_AE075C/dword_AE0758` → `g_FxHandleSmkSigB/`
   `g_FxHandleVehicleFireLarge/g_FxHandleVehicleFireMed/g_FxHandleVehicleFireSmall`.
-- Witness comments: `0x53f760` (the bogus "sun direction" comment replaced with the
-  emitter-death-callback semantics), `0x402577` (ActionDef+16 particle handle),
+- Witness comments: `0x53f760` (the bogus "sun direction" comment replaced with callback
+  semantics; the 2026-07-16 follow-up below pins it specifically to GROUP death),
+  `0x402577` (ActionDef+16 particle handle),
   `0x4025b3` (ActionDef+186 particleuserpoint name → +57/+56 resolve), `0x4e88c3`
   (impact-table row shape + the canonical tag order + selection rules), `0x40a587`
   (the effects_table count column discarded), `0x522ee0` (the ITEMS.DEF per-item
@@ -1029,9 +1076,11 @@ witnessed by direct disassembly of the on-disk image, the IDA MCP bridge being w
 - Write-backs APPLIED later the same day (the bridge recovered): `0x5e9540` already
   carried the accurate curated name `CParticleManager_FindTableDefByName` — kept (the
   clone side effect lives in the comments); witness comments landed at `0x5e95ac`
-  (`_stricmp` compare — table names are case-insensitive), `0x5e95b8` (owner `+0x248`
-  exact-match / null-owner clone protocol), `0x5e9652` (the resolve-miss log +
-  `entry+0x44 = 0`); idb_save run.
+  (`_stricmp` compare — table names are case-insensitive), `0x5e95b8` (then given the
+  now-disproved ownership interpretation), `0x5e9652` (the resolve-miss log +
+  `entry+0x44 = 0`);
+  idb_save run. **The +0x248 owner label was wrong and is superseded by the 2026-07-16
+  adversarial re-read below.**
 - Port fix landed with the witness: `bake_one_curve` + every `find_table` seam were
   exact-case; ambfx.ptl's `Wood_AmbFB[s]` authors `green_func = Table11Alt` against
   `id = table11Alt`, so green never baked (constant 255) while red/alpha faded with
@@ -1079,6 +1128,26 @@ last §8 case-semantics thread):
   (`effect_resolve_is_all_or_nothing_contract`). Also observed:
   `CEffectWorld_IsNameUnresolved @ 0x5ea150` (tri-table name probe) has
   zero xrefs — dead code in retail.
+
+2026-07-16 adversarial PR #237 follow-up (corrections to prior witness claims):
+
+- `CParticleManager_FindTableDefByName @ 0x5e9540` takes transform flags and
+  TableDef+0x248 stores the applied mask (`inverse=1`, `reverse=2`); it is not ownership.
+  Flags 0 return the first case-insensitive base, while a modified miss clones/transforms the
+  last base unless the matching transformed clone is already cached. The native and legacy
+  Godot lookup paths now reproduce that selection (D-PTL-23). The stale IDB owner comment is
+  recorded here as superseded; this read-only review did not claim another IDB save.
+- The section dispatcher and property parser family compare tags/keys with `_stricmp`.
+  `parser.cpp` now folds all known section/effect/particle/graphic/table/edit-handle tokens and
+  retains unknown authored spelling (D-PTL-22). The retail corpus has no mixed-case trigger.
+- `CParticleManager_RenderBatch @ 0x5e9890` constructs a shared particle-depth list for an
+  overlapping recursive leaf and sorts it at `0x5e9b63`; emitters may interleave. The compiler
+  now uses a shared global depth list. Exact recursive leaf partition remains D-PTL-21.
+- `CEffectGroup_SetDeathCallback @ 0x5e1940` stores the action callback on the GROUP and
+  `CEffectGroup_Destroy @ 0x5e3460` invokes it. `CEffectGroup_AdvanceChildrenAndReap`
+  at `0x5e59a0` destroys dead children individually without firing the group callback. The prior
+  first-child suppression inference is disproved; the port now keeps `SuppressWhileOwned`
+  until the final child is gone and immediately recycles each finished child (D-WPN-19).
 
 ## 11. The retail debug family (witnessed 2026-07-13)
 

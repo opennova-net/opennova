@@ -266,12 +266,26 @@ void bake_one_curve(CurveRef &curve, const std::vector<TableDef> &tables) noexce
 	// ambfx.ptl's Wood_AmbFB authors `green_func = Table11Alt` against
 	// `id = table11Alt` — an exact compare leaves green unbaked (constant 255)
 	// while red/alpha fade, tinting aging fire sprites green.
+	// TableDef+0x248 is the transform mask (inverse=1, reverse=2), not an
+	// owner. An unmodified reference returns the FIRST base match. A modified
+	// reference scans every base match, remembers the LAST one, then clones
+	// and transforms it [orig: @ 0x5e95b8..0x5e960b; transform @ 0x5e2700].
+	const bool modified = curve.reverse || curve.inverse;
+	const TableDef *base_match = nullptr;
 	for (const TableDef &table : tables) {
 		if (strutil::iequals(table.id, curve.name)) {
-			bake_curve_lut(table, curve.reverse, curve.inverse, curve.baked_lut);
-			curve.baked = true;
-			return;
+			if (!modified) {
+				bake_curve_lut(table, false, false, curve.baked_lut);
+				curve.baked = true;
+				return;
+			}
+			base_match = &table;
 		}
+	}
+	if (base_match != nullptr) {
+		bake_curve_lut(*base_match, curve.reverse, curve.inverse,
+				curve.baked_lut);
+		curve.baked = true;
 	}
 }
 

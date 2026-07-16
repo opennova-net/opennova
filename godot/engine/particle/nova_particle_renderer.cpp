@@ -46,6 +46,7 @@
 
 #include <particle/emitter.h>
 #include <renderer/particle_atlas.h>
+#include <renderer/particle_color.h>
 #include <renderer/particle_frame.h>
 
 #include "nova_particle_compositor.h"
@@ -195,7 +196,7 @@ String shader_path_for_pipeline(renderer::ParticlePipeline pipeline) {
 }
 
 std::uint8_t unit_byte(float value) {
-	return static_cast<std::uint8_t>(std::clamp(value, 0.0f, 1.0f) * 255.0f);
+	return renderer::particle_unit_byte(value);
 }
 
 std::uint32_t pack_argb(float red, float green, float blue, float alpha) {
@@ -214,10 +215,7 @@ std::uint32_t pack_argb_bytes(std::uint8_t red, std::uint8_t green,
 }
 
 std::uint8_t retail_low_byte(float value) {
-	// D3DCOLOR low-byte behavior: conversion truncates, then the DWORD pack
-	// observes only the low eight bits. Retail does not saturate this path.
-	return static_cast<std::uint8_t>(
-			static_cast<std::int32_t>((value + 1.0f) * 0.5f * 255.0f));
+	return renderer::particle_retail_low_byte(value);
 }
 
 Color unpack_argb(std::uint32_t value) {
@@ -501,6 +499,13 @@ public:
 	ObjectID attached_camera;
 	bool inherited_world_compositor = false;
 	bool catalog_dirty = true;
+	ObjectID cached_environment_source;
+	std::int64_t cached_environment_generation =
+			std::numeric_limits<std::int64_t>::min();
+	std::array<float, 3> fog_color{0.5f, 0.6f, 0.8f};
+	float fog_start = 30000.0f;
+	float fog_end = 100000.0f;
+	std::int32_t fog_type = 1;
 
 	Impl() {
 		world_effect.instantiate();
@@ -512,6 +517,79 @@ public:
 
 	void invalidate_catalog() {
 		catalog_dirty = true;
+	}
+
+	void invalidate_environment() {
+		cached_environment_source = ObjectID();
+		cached_environment_generation =
+				std::numeric_limits<std::int64_t>::min();
+	}
+
+	void refresh_environment(Node *source) {
+		const ObjectID source_id = source != nullptr ?
+				ObjectID(source->get_instance_id()) : ObjectID();
+		std::int64_t generation =
+				std::numeric_limits<std::int64_t>::min();
+		bool has_generation = false;
+		if (source != nullptr &&
+				source->has_method(StringName("get_env_generation"))) {
+			const Variant value = source->call("get_env_generation");
+			if (value.get_type() == Variant::INT) {
+				generation = static_cast<std::int64_t>(value);
+				has_generation = true;
+			}
+		}
+		if (has_generation && source_id == cached_environment_source &&
+				generation == cached_environment_generation) {
+			return;
+		}
+
+		// Project defaults keep standalone previews useful. Runtime GameWorld
+		// supplies NovaEnvironment explicitly, avoiding RenderingServer global
+		// readback (which Godot rejects outside the editor).
+		fog_color = {0.5f, 0.6f, 0.8f};
+		fog_start = 30000.0f;
+		fog_end = 100000.0f;
+		fog_type = 1;
+		if (source != nullptr) {
+			if (source->has_method(StringName("get_fog_color"))) {
+				const Variant value = source->call("get_fog_color");
+				if (value.get_type() == Variant::VECTOR3) {
+					const Vector3 color = static_cast<Vector3>(value);
+					if (std::isfinite(color.x) && std::isfinite(color.y) &&
+							std::isfinite(color.z)) {
+						fog_color = {color.x, color.y, color.z};
+					}
+				}
+			}
+			auto read_finite_float = [source](const char *method,
+					float fallback) {
+				if (!source->has_method(StringName(method)))
+					return fallback;
+				const Variant value = source->call(method);
+				if (value.get_type() != Variant::FLOAT &&
+						value.get_type() != Variant::INT) {
+					return fallback;
+				}
+				const float converted = static_cast<float>(
+						static_cast<double>(value));
+				return std::isfinite(converted) ? converted : fallback;
+			};
+			fog_start = read_finite_float("get_fog_start", fog_start);
+			fog_end = read_finite_float("get_fog_level", fog_end);
+			if (source->has_method(StringName("get_fog_type"))) {
+				const Variant value = source->call("get_fog_type");
+				if (value.get_type() == Variant::INT) {
+					fog_type = std::clamp<std::int32_t>(
+							static_cast<std::int32_t>(
+									static_cast<std::int64_t>(value)),
+							0, 3);
+				}
+			}
+		}
+		cached_environment_source = source_id;
+		cached_environment_generation = has_generation ? generation :
+				std::numeric_limits<std::int64_t>::min();
 	}
 
 	void detach_compositor() {
@@ -999,11 +1077,22 @@ public:
 		}
 	}
 
-	void publish_world_packet(const renderer::ParticleDrawPacket &packet) {
+	void publish_world_packet(const renderer::ParticleDrawPacket &packet,
+			const Vector3 &camera_position, const Vector3 &camera_forward) {
 		auto submission = std::make_shared<NovaParticleWorldSubmission>();
 		submission->frame_id = packet.frame_id;
 		submission->commands = packet.commands;
 		submission->atlas = atlas_snapshot;
+		for (std::size_t component = 0; component < 3; ++component) {
+			submission->camera_position[component] =
+					camera_position[static_cast<int>(component)];
+			submission->camera_forward[component] =
+					camera_forward[static_cast<int>(component)];
+		}
+		submission->fog_color = fog_color;
+		submission->fog_start = fog_start;
+		submission->fog_end = fog_end;
+		submission->fog_type = fog_type;
 		if (packet.domain != renderer::ParticleRenderDomain::World) {
 			submission->valid = false;
 			submission->validation_error =
@@ -1155,6 +1244,10 @@ void NovaParticleRenderer::_bind_methods() {
 			&NovaParticleRenderer::set_texture_dir);
 	ClassDB::bind_method(D_METHOD("get_texture_dir"),
 			&NovaParticleRenderer::get_texture_dir);
+	ClassDB::bind_method(D_METHOD("set_environment_source", "source"),
+			&NovaParticleRenderer::set_environment_source);
+	ClassDB::bind_method(D_METHOD("get_environment_source"),
+			&NovaParticleRenderer::get_environment_source);
 	ClassDB::bind_method(D_METHOD("set_hidden", "hidden"),
 			&NovaParticleRenderer::set_hidden);
 	ClassDB::bind_method(D_METHOD("get_hidden"),
@@ -1182,6 +1275,9 @@ void NovaParticleRenderer::_bind_methods() {
 			"set_texture_provider", "get_texture_provider");
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "texture_dir", PROPERTY_HINT_DIR),
 			"set_texture_dir", "get_texture_dir");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "environment_source",
+			PROPERTY_HINT_NODE_TYPE, "Node"),
+			"set_environment_source", "get_environment_source");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "hidden"),
 			"set_hidden", "get_hidden");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "procedural_fallback_enabled"),
@@ -1238,6 +1334,23 @@ void NovaParticleRenderer::set_texture_dir(const String &p_texture_dir) {
 
 String NovaParticleRenderer::get_texture_dir() const {
 	return texture_dir_;
+}
+
+void NovaParticleRenderer::set_environment_source(Node *p_source) {
+	const ObjectID next = p_source != nullptr ?
+			ObjectID(p_source->get_instance_id()) : ObjectID();
+	if (environment_source_ == next)
+		return;
+	environment_source_ = next;
+	if (impl_)
+		impl_->invalidate_environment();
+}
+
+Node *NovaParticleRenderer::get_environment_source() const {
+	if (!environment_source_.is_valid())
+		return nullptr;
+	return Object::cast_to<Node>(ObjectDB::get_instance(
+			static_cast<std::uint64_t>(environment_source_)));
 }
 
 void NovaParticleRenderer::set_hidden(bool p_hidden) {
@@ -1323,6 +1436,7 @@ void NovaParticleRenderer::render_now() {
 			camera_forward = Vector3(0.0f, 0.0f, 1.0f);
 	}
 
+	impl_->refresh_environment(get_environment_source());
 	impl_->build_render_snapshot(frame, camera_view_basis);
 	for (std::size_t domain = 0; domain < impl_->compilers.size(); ++domain) {
 		renderer::ParticleViewInput view;
@@ -1336,7 +1450,7 @@ void NovaParticleRenderer::render_now() {
 				impl_->compilers[domain].compile(impl_->render_snapshot, view);
 		capture_packet_diagnostics(impl_->packets[domain], packet);
 		if (domain == 0)
-			impl_->publish_world_packet(packet);
+			impl_->publish_world_packet(packet, camera_position, camera_forward);
 		else
 			impl_->upload_first_person_packet(packet, hidden_);
 	}

@@ -286,6 +286,21 @@ struct EffectScene::Impl {
 		free_emitter_slots.push_back(slot);
 	}
 
+	void reap_finished_emitters(GroupRecord &group) {
+		std::size_t write_index = 0;
+		for (const std::size_t emitter_slot : group.emitter_slots) {
+			const bool keep = emitter_slot < emitter_pool.size() &&
+					emitter_pool[emitter_slot].active &&
+					!emitter_finished(emitter_pool[emitter_slot].emitter);
+			if (keep) {
+				group.emitter_slots[write_index++] = emitter_slot;
+			} else {
+				release_emitter_slot(emitter_slot);
+			}
+		}
+		group.emitter_slots.resize(write_index);
+	}
+
 	GroupRecord *find_group(EffectGroupId id) noexcept {
 		const auto found = group_by_id.find(id.value);
 		if (found == group_by_id.end() || found->second >= group_pool.size()) {
@@ -363,6 +378,22 @@ struct EffectScene::Impl {
 		group_by_id.erase(group.id.value);
 		group.active = false;
 		free_group_slots.push_back(group_slot);
+	}
+
+	void reap_finished_groups() {
+		std::size_t active_index = 0;
+		while (active_index < active_group_slots.size()) {
+			const std::size_t group_slot = active_group_slots[active_index];
+			GroupRecord &group = group_pool[group_slot];
+			reap_finished_emitters(group);
+			if (!group.emitter_slots.empty()) {
+				++active_index;
+				continue;
+			}
+			release_group_slot(group_slot);
+			active_group_slots.erase(active_group_slots.begin() +
+					static_cast<std::ptrdiff_t>(active_index));
+		}
 	}
 
 	std::string interned_name(EffectHandle handle) const {
@@ -651,27 +682,35 @@ EffectSpawnReceipt EffectScene::spawn(const EffectSpawnRequest &request) {
 	const std::uint32_t initial_age_ticks = std::min(
 			request.initial_age_ticks, kEffectInitialAgeTickLimit);
 	for (std::uint32_t tick = 0; tick < initial_age_ticks; ++tick) {
-		bool all_finished = true;
 		for (const std::size_t emitter_slot : group.emitter_slots) {
 			Emitter &emitter = impl_->emitter_pool[emitter_slot].emitter;
 			emitter_advance(emitter,
 					impl_->config.simulation_tick_seconds);
-			all_finished = all_finished && emitter_finished(emitter);
 		}
-		if (all_finished)
+		impl_->reap_finished_emitters(group);
+		if (group.emitter_slots.empty()) {
 			break;
+		}
 	}
 
-	impl_->active_group_slots.push_back(group_slot);
-	impl_->group_by_id.emplace(group.id.value, group_slot);
-	if (group.slot) {
-		impl_->group_by_slot[group.slot.value] = group.id.value;
+	const EffectGroupId spawned_group = group.id;
+	if (group.emitter_slots.empty()) {
+		// Initial-age replay can exhaust every child before the group is
+		// published. Treat it as already destroyed so it consumes neither pool
+		// capacity nor a suppress-while-owned slot.
+		impl_->release_group_slot(group_slot);
+	} else {
+		impl_->active_group_slots.push_back(group_slot);
+		impl_->group_by_id.emplace(group.id.value, group_slot);
+		if (group.slot) {
+			impl_->group_by_slot[group.slot.value] = group.id.value;
+		}
 	}
 
 	EffectSpawnReceipt receipt;
 	receipt.status = EffectSpawnStatus::Spawned;
 	receipt.effect = request.effect;
-	receipt.group = group.id;
+	receipt.group = spawned_group;
 	if (request.admission == EffectAdmission::ReplaceOwned) {
 		receipt.replaced_group = previous_group;
 	}
@@ -769,12 +808,36 @@ void EffectScene::advance_simulation(const EffectAdvanceRequest &request) {
 	if (!std::isfinite(requested_seconds) || requested_seconds < 0.0) {
 		requested_seconds = 0.0;
 	}
-	impl_->pending_simulation_seconds += requested_seconds;
 	const double fixed_step =
 			static_cast<double>(impl_->config.simulation_tick_seconds);
-	bool advanced_fixed_step = false;
-	while (impl_->pending_simulation_seconds + 1.0e-12 >= fixed_step) {
-		advanced_fixed_step = true;
+	constexpr double kStepEpsilon = 1.0e-12;
+	const double accumulated_seconds =
+			impl_->pending_simulation_seconds + requested_seconds;
+	const double available_steps = std::floor(
+			(accumulated_seconds + kStepEpsilon) / fixed_step);
+	std::uint32_t step_count = 0;
+	if (available_steps > static_cast<double>(kEffectAdvanceTickLimit)) {
+		step_count = kEffectAdvanceTickLimit;
+		impl_->pending_simulation_seconds =
+				std::fmod(accumulated_seconds, fixed_step);
+		// fmod can land infinitesimally below the divisor for very large input.
+		// Treat that as the same fixed-step boundary used above, not as deferred
+		// work for a later zero-delta call.
+		if (impl_->pending_simulation_seconds + kStepEpsilon >= fixed_step) {
+			impl_->pending_simulation_seconds = 0.0;
+		}
+	} else if (available_steps > 0.0) {
+		step_count = static_cast<std::uint32_t>(available_steps);
+		impl_->pending_simulation_seconds = accumulated_seconds -
+				static_cast<double>(step_count) * fixed_step;
+	} else {
+		impl_->pending_simulation_seconds = accumulated_seconds;
+	}
+	if (impl_->pending_simulation_seconds < 0.0) {
+		impl_->pending_simulation_seconds = 0.0;
+	}
+
+	for (std::uint32_t step = 0; step < step_count; ++step) {
 		for (const std::size_t group_slot : impl_->active_group_slots) {
 			Impl::GroupRecord &group = impl_->group_pool[group_slot];
 			for (const std::size_t emitter_slot : group.emitter_slots) {
@@ -785,49 +848,11 @@ void EffectScene::advance_simulation(const EffectAdvanceRequest &request) {
 				}
 			}
 		}
-		impl_->pending_simulation_seconds -= fixed_step;
-		if (impl_->pending_simulation_seconds < 0.0) {
-			impl_->pending_simulation_seconds = 0.0;
-		}
+		// Retail advances and destroys dead children individually. The admission
+		// slot remains attached to the group and is cleared only when the final
+		// child is gone (CEffectGroup_Destroy's group death callback).
+		impl_->reap_finished_groups();
 		impl_->simulation_time_seconds += fixed_step;
-	}
-
-	std::size_t active_index = 0;
-	while (advanced_fixed_step &&
-			active_index < impl_->active_group_slots.size()) {
-		const std::size_t group_slot = impl_->active_group_slots[active_index];
-		Impl::GroupRecord &group = impl_->group_pool[group_slot];
-		bool finished = true;
-		bool any_finished = false;
-		for (const std::size_t emitter_slot : group.emitter_slots) {
-			const Impl::EmitterRecord &record = impl_->emitter_pool[emitter_slot];
-			if (record.active && !emitter_finished(record.emitter)) {
-				finished = false;
-			} else {
-				any_finished = true;
-			}
-		}
-		if (!finished) {
-			// The suppress-while-owned window re-arms at the FIRST child
-			// emitter's death, not the group's: the engine's dead-child notify
-			// clears the parent's aliveness gate [orig: CParticleEmitter_
-			// AdvanceFrame @ 0x5e695f -> CEffectEmitter_OnChildDied @ 0x5ef9c0
-			// zeroes parent+0x11C, the first gate of the aliveness leaf
-			// @ 0x5e2640] — the working model for the per-shot muzzle window
-			// (net-re §5.62 session 3; REVX02 flash-child-first authoring
-			// leans on it). ReplaceOwned keeps whole-group slot ownership: the
-			// WAC/item replacement protocol needs the live mapping.
-			if (any_finished &&
-					group.admission == EffectAdmission::SuppressWhileOwned) {
-				impl_->clear_slot_if_owned(group);
-			}
-			++active_index;
-			continue;
-		}
-		impl_->release_group_slot(group_slot);
-		impl_->active_group_slots.erase(
-				impl_->active_group_slots.begin() +
-						static_cast<std::ptrdiff_t>(active_index));
 	}
 	++impl_->frame_index;
 }

@@ -1,7 +1,9 @@
 #include <renderer/particle_frame.h>
+#include <renderer/particle_color.h>
 
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <utility>
 #include <vector>
 
@@ -21,6 +23,39 @@ bool check(bool ok, const char *message) {
 
 bool near(float actual, float expected) {
 	return std::fabs(actual - expected) <= 0.00001f;
+}
+
+bool color_byte_conversion_contract() {
+	using renderer::particle_retail_low_byte;
+	using renderer::particle_unit_byte;
+	const float nan = std::numeric_limits<float>::quiet_NaN();
+	const float inf = std::numeric_limits<float>::infinity();
+	const float huge = std::numeric_limits<float>::max();
+	if (!check(particle_unit_byte(nan) == 0 &&
+			particle_unit_byte(-inf) == 0 &&
+			particle_unit_byte(inf) == 255 &&
+			particle_unit_byte(-huge) == 0 &&
+			particle_unit_byte(huge) == 255,
+			"UNORM byte conversion bounds invalid floats deterministically")) {
+		return false;
+	}
+	if (!check(particle_unit_byte(0.0f) == 0 &&
+			particle_unit_byte(0.5f) == 127 &&
+			particle_unit_byte(1.0f) == 255,
+			"UNORM byte conversion retains finite truncation")) return false;
+	if (!check(particle_retail_low_byte(nan) == 0 &&
+			particle_retail_low_byte(inf) == 0 &&
+			particle_retail_low_byte(-inf) == 0 &&
+			particle_retail_low_byte(huge) == 0 &&
+			particle_retail_low_byte(-huge) == 0,
+			"retail low-byte conversion emulates x86 invalid conversion")) {
+		return false;
+	}
+	return check(particle_retail_low_byte(-2.0f) == 129 &&
+			particle_retail_low_byte(-1.0f) == 0 &&
+			particle_retail_low_byte(1.0f) == 255 &&
+			particle_retail_low_byte(3.0f) == 254,
+			"retail low-byte conversion truncates and wraps finite values");
 }
 
 r::ParticleDrawState state(r::ParticlePipeline pipeline,
@@ -125,6 +160,44 @@ bool domain_sort_and_material_run_contract() {
 			"first-person compile selects only its render domain");
 }
 
+bool overlapping_emitters_interleave_by_particle_depth_contract() {
+	const auto shared = state(r::ParticlePipeline::Blend, 6, 0, 4);
+	r::ParticleFrameSnapshot snapshot;
+	// The manager bounds put A before B. Sorting emitter blocks would produce
+	// A10,A0,B9,B8, but retail's overlapping batch is globally depth sorted.
+	snapshot.emitters.push_back(emitter(101, r::ParticleRenderDomain::World,
+			10.0f, {quad(10.0f, 0xa1u, shared), quad(0.0f, 0xa2u, shared)}));
+	snapshot.emitters.push_back(emitter(202, r::ParticleRenderDomain::World,
+			9.0f, {quad(9.0f, 0xb1u, shared), quad(8.0f, 0xb2u, shared)}));
+
+	r::ParticleFrameCompiler compiler;
+	r::ParticleViewInput view;
+	const auto &packet = compiler.compile(snapshot, view);
+	if (!check(packet.vertices.size() == 16 &&
+			packet.vertices[0].primary_color == 0xa1u &&
+			packet.vertices[4].primary_color == 0xb1u &&
+			packet.vertices[8].primary_color == 0xb2u &&
+			packet.vertices[12].primary_color == 0xa2u,
+			"overlapping emitters interleave far-to-near by particle depth")) {
+		return false;
+	}
+	if (!check(packet.emitter_bounds.size() == 2 &&
+			packet.emitter_bounds[0].emitter_id == 101 &&
+			packet.emitter_bounds[0].first_quad == 0 &&
+			packet.emitter_bounds[0].quad_count == 2 &&
+			packet.emitter_bounds[1].emitter_id == 202 &&
+			packet.emitter_bounds[1].first_quad == 1 &&
+			packet.emitter_bounds[1].quad_count == 2,
+			"interleaved emitter bounds report first occurrence and total count")) {
+		return false;
+	}
+	return check(packet.commands.size() == 1 &&
+			packet.commands[0].first_quad == 0 &&
+			packet.commands[0].quad_count == 4 &&
+			packet.debug.adjacent_state_merges == 3,
+			"globally sorted adjacent particles still coalesce material state");
+}
+
 bool geometry_bounds_and_reuse_contract() {
 	auto draw_state = state(r::ParticlePipeline::Premult, 8, 2, 11);
 	draw_state.atlas.rect = {0.1f, 0.2f, 0.9f, 0.8f};
@@ -202,7 +275,9 @@ bool geometry_bounds_and_reuse_contract() {
 } // namespace
 
 int main() {
+	if (!color_byte_conversion_contract()) return 1;
 	if (!domain_sort_and_material_run_contract()) return 1;
+	if (!overlapping_emitters_interleave_by_particle_depth_contract()) return 1;
 	if (!geometry_bounds_and_reuse_contract()) return 1;
 	return 0;
 }

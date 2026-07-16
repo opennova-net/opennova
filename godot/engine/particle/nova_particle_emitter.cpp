@@ -23,6 +23,7 @@
 #include "util/texture_path_resolver.h"
 
 #include "renderer/particle_atlas.h"
+#include <renderer/particle_color.h>
 
 #include <algorithm>
 #include <cmath>
@@ -413,26 +414,34 @@ void NovaParticleEmitter::_refresh_emitter() {
 	_clear_meshes();
 }
 
-Ref<NovaParticleTable> NovaParticleEmitter::_find_table(const String &id) const {
+Ref<NovaParticleTable> NovaParticleEmitter::_find_table(
+		const String &id, bool p_modified) const {
 	if (id.is_empty()) {
 		return Ref<NovaParticleTable>();
 	}
+	Ref<NovaParticleTable> matched;
 	for (int i = 0; i < tables.size(); ++i) {
 		Ref<NovaParticleTable> table = tables[i];
 		// Case-insensitive to match the engine's _stricmp table resolve
 		// [orig: table find @ 0x5e9540 → _stricmp @ 0x76fdf6].
 		if (table.is_valid() && table->get_id().nocasecmp_to(id) == 0) {
-			return table;
+			matched = table;
+			if (!p_modified) {
+				return matched;
+			}
 		}
 	}
-	return Ref<NovaParticleTable>();
+	// Retail returns the first base for flags=0, but clones the last matching
+	// base for inverse/reverse flags [orig: @ 0x5e95b8..0x5e960b].
+	return matched;
 }
 
 float NovaParticleEmitter::_sample_curve(const Ref<NovaParticleCurveRef> &curve, float t, float fallback) const {
 	if (curve.is_null() || !curve->get_present()) {
 		return fallback;
 	}
-	Ref<NovaParticleTable> table = _find_table(curve->get_name());
+	Ref<NovaParticleTable> table = _find_table(curve->get_name(),
+			curve->get_reverse() || curve->get_inverse());
 	if (table.is_null()) {
 		return fallback;
 	}
@@ -777,9 +786,11 @@ void NovaParticleEmitter::_update_meshes() {
 	Vector3 right(1.0f, 0.0f, 0.0f);
 	Vector3 up(0.0f, 1.0f, 0.0f);
 	Transform3D camera_view;
+	Basis view_basis;
 	if (camera != nullptr) {
 		const Transform3D camera_global = camera->get_global_transform();
 		camera_view = camera_global.affine_inverse();
+		view_basis = camera_view.basis;
 		right = camera_global.basis.get_column(0);
 		up = camera_global.basis.get_column(1);
 		if (right.length_squared() > 0.0f) {
@@ -962,44 +973,31 @@ void NovaParticleEmitter::_update_meshes() {
 		//      rotation in degrees; flt_7DCB00 = π/180).
 		//   2. Multiply with the emitter's view matrix at emitter+8+664.
 		//   3. `D3DXMatrixTranspose` the composite (= sub_68BF44 @ 0x68bf4a).
-		//   4. Multiply hardcoded light direction (-1/√3, -1/√3, +1/√3)
-		//      (flt_848D34/D38/D3C) by the transposed matrix.
-		//   5. Scale by def.bump_scale and encode per channel:
-		//      `byte = clamp((value + 1) × 0.5, 0, 1) × 255`.
+		//   4. Load raw (-1/√3, -1/√3, +1/√3), negate X/Y, and
+		//      transform the resulting (+1/√3, +1/√3, +1/√3) vector.
+		//   5. Scale by def.bump_scale, truncate `(value+1)*0.5*255`, and
+		//      retain the low byte without saturation.
 		//
-		// Portable matrix form uses the billboard frame as the parent/view
-		// matrix, applies RotationX in that local frame (right axis fixed,
-		// up/forward rotate), then projects the engine light direction by the
-		// transposed composite matrix via dot products.
+		// This convenience preview now shares the production adapter's literal
+		// transpose(Rx * view) operation and byte conversion.
 		if ((p.flags & opennova::particle::particle_runtime_flag::LitColor) != 0) {
 			const float bump_scale = native_def->bump_scale;
 			constexpr float k = 0.5773503f;  // 1/√3 (engine: flt_848D34/D38/D3C)
-			const Vector3 light_world(-k, -k, +k);
-
-			const float rc = std::cos(rp.rotation);
-			const float rs = std::sin(rp.rotation);
-			const Vector3 local_right = right;
-			Vector3 local_forward = right.cross(up);
-			if (local_forward.length_squared() > 0.0f) {
-				local_forward.normalize();
-			} else {
-				local_forward = Vector3(0.0f, 0.0f, 1.0f);
-			}
-			const Vector3 local_up = up * rc + local_forward * rs;
-			local_forward = -up * rs + local_forward * rc;
-
-			const Vector3 light_local(
-					local_right.dot(light_world),
-					local_up.dot(light_world),
-					local_forward.dot(light_world));
-
-			const float lit_r = std::clamp(
-					(bump_scale * light_local.x + 1.0f) * 0.5f, 0.0f, 1.0f);
-			const float lit_g = std::clamp(
-					(bump_scale * light_local.y + 1.0f) * 0.5f, 0.0f, 1.0f);
-			const float lit_b = std::clamp(
-					(bump_scale * light_local.z + 1.0f) * 0.5f, 0.0f, 1.0f);
-			rp.lit_color = Color(lit_r, lit_g, lit_b, color.a);
+			// Raw constants are (-k,-k,+k), then FCHS @ 0x5e73b0 and
+			// @ 0x5e73c4 make the transformed retail seed (+k,+k,+k).
+			const Vector3 seed = bump_scale * Vector3(k, k, k);
+			const Basis rotate_x(Vector3(1.0f, 0.0f, 0.0f), rp.rotation);
+			const Vector3 light_local =
+					(rotate_x * view_basis).transposed().xform(seed);
+			constexpr float inv_byte = 1.0f / 255.0f;
+			rp.lit_color = Color(
+					static_cast<float>(renderer::particle_retail_low_byte(
+							light_local.x)) * inv_byte,
+					static_cast<float>(renderer::particle_retail_low_byte(
+							light_local.y)) * inv_byte,
+					static_cast<float>(renderer::particle_retail_low_byte(
+							light_local.z)) * inv_byte,
+					color.a);
 		} else {
 			rp.lit_color = Color(1.0f, 1.0f, 1.0f, 1.0f);  // neutral (multiply identity)
 		}

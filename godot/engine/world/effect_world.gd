@@ -22,6 +22,7 @@ var _renderer: NovaParticleRenderer
 var _root: NovaResourceRoot
 var _texture_provider := Callable()
 var _texture_dir := ""
+var _environment_source: Node
 var _owner_position_provider := Callable()
 var _water_height := 0.0
 var _particles_disabled := false
@@ -55,7 +56,14 @@ func _ensure_renderer() -> void:
 	_renderer.set_scene(_scene)
 	_renderer.set_texture_provider(_texture_provider)
 	_renderer.set_texture_dir(_texture_dir)
+	_renderer.set_environment_source(_environment_source)
 	_renderer.set_hidden(_particles_disabled)
+
+
+func set_environment_source(source: Node) -> void:
+	_environment_source = source
+	_ensure_renderer()
+	_renderer.set_environment_source(source)
 
 
 func file_count() -> int:

@@ -615,9 +615,9 @@ const PARTICLE_FLAG_POSITION_RELATIVE := 1 << 19  # particle_flag::PositionRelat
 
 # CParticleEmitter_BuildBillboardQuads @ 0x5e6d60: lit-color path triggered
 # when particle.flags & 0x80 (LitColor for Bump=3 / Bumpadd=6 blend modes).
-# Engine encodes `bump_scale x M^T x (-1/sqrt(3), -1/sqrt(3), +1/sqrt(3))`
-# per axis into a byte via `clamp((value + 1) x 0.5, 0, 1) x 255`, where M
-# is the particle's composite view + RotationX matrix.
+# Retail negates the raw constants' first two components, then encodes
+# `bump_scale x M^T x (+1/sqrt(3), +1/sqrt(3), +1/sqrt(3))` by truncating
+# `(value + 1) x 0.5 x 255` and retaining the low byte without saturation.
 func test_lit_color_default_neutral_when_not_bump() -> void:
 	# blend mode 0 (Blend) → particle.flags has no LitColor bit → lit_color
 	# stays neutral white in our renderer.
@@ -640,37 +640,30 @@ func test_lit_color_encoded_when_bump_blend_mode() -> void:
 	assert_almost_eq(lit.b, 0.5, 0.02, "bump lit_color.b ≈ 0.5")
 
 
-func test_lit_color_channels_differ_at_nonzero_bump_scale() -> void:
-	# Rotation port (RE 2026-04-28): with bump_scale > 0 the engine's light
-	# direction (-k, -k, +k) projects into the particle's local frame to
-	# give per-axis differences. This test pins the rotation-port behaviour
-	# vs the prior uniform-tint impl which would have made all 3 channels
-	# equal regardless of bump_scale.
+func test_lit_color_channels_match_retail_seed_at_zero_roll() -> void:
+	# Identity view + zero roll leaves the witnessed (+k,+k,+k) seed equal in
+	# all channels: trunc((1+k)*127.5) = 201.
 	var particle := _make_render_test_particle(3)
 	particle.bump_scale = 1.0
 	var emitter := _add_render_test_emitter(particle)
 	var lit: Color = emitter.get_debug_first_lit_color()
-	# Expect a meaningful spread between min and max channels.
-	var lo: float = minf(lit.r, minf(lit.g, lit.b))
-	var hi: float = maxf(lit.r, maxf(lit.g, lit.b))
-	assert_gt(hi - lo, 0.1,
-			"bump_scale=1 should give per-channel spread >0.1 (got lo=%f hi=%f)" % [lo, hi])
+	var expected := 201.0 / 255.0
+	assert_almost_eq(lit.r, expected, 0.01, "retail +k seed packs red byte 201")
+	assert_almost_eq(lit.g, expected, 0.01, "retail +k seed packs green byte 201")
+	assert_almost_eq(lit.b, expected, 0.01, "retail +k seed packs blue byte 201")
 
 
-func test_lit_color_brighter_with_higher_bump_scale() -> void:
-	# bump_scale = 1.0 → with the engine light direction (-k, -k, +k) and
-	# a default-oriented headless camera (right=+X, up=+Y), the projection
-	# gives lit.r ≈ encode(-k) = 0.211 and lit.b ≈ encode(+k) = 0.789. The
-	# B channel is the brightest one. Distance from neutral 0.5 confirms
-	# the bump_scale modulation is wired through.
+func test_lit_color_retains_low_byte_without_saturation() -> void:
+	# bump_scale=3 yields trunc((1+3k)*127.5)=348; retail keeps byte 92
+	# instead of saturating to 255.
 	var particle := _make_render_test_particle(3)
-	particle.bump_scale = 1.0
+	particle.bump_scale = 3.0
 	var emitter := _add_render_test_emitter(particle)
 	var lit: Color = emitter.get_debug_first_lit_color()
-	assert_gt(lit.b, 0.7, "bump_scale=1 → lit.b should be in (+k) bright range")
-	assert_lt(lit.r, 0.3, "bump_scale=1 → lit.r should be in (-k) dim range")
-	assert_gt(absf(lit.b - 0.5), 0.2,
-			"lit.b should be far from neutral 0.5 with bump_scale=1")
+	var expected := 92.0 / 255.0
+	assert_almost_eq(lit.r, expected, 0.01, "red retains low byte 92")
+	assert_almost_eq(lit.g, expected, 0.01, "green retains low byte 92")
+	assert_almost_eq(lit.b, expected, 0.01, "blue retains low byte 92")
 
 
 func test_lit_color_varies_with_particle_rotation() -> void:

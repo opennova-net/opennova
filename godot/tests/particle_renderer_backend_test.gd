@@ -1,6 +1,61 @@
 extends GutTest
 
 
+class FogSource:
+	extends Node
+
+	func get_env_generation() -> int:
+		return 1
+
+	func get_fog_color() -> Vector3:
+		return Vector3(0.2, 0.3, 0.4)
+
+	func get_fog_start() -> float:
+		return 0.0
+
+	func get_fog_level() -> float:
+		return 1.0
+
+	func get_fog_type() -> int:
+		return 1
+
+
+func _live_world_scene() -> NovaEffectScene:
+	var particle := NovaParticleDef.new()
+	particle.id = "GPU particle"
+	particle.emit_dur = 0.1
+	particle.emit_rate = 20.0
+	particle.emit_burst = 1
+	particle.age = 2.0
+	particle.alpha = 1.0
+	particle.scale_value = 1.0
+	var graphics: Array = particle.graphics
+	var layer := graphics[0] as NovaParticleGraphicLayer
+	layer.present = true
+	layer.texture = "gpu_contract_fallback.tga"
+	layer.blend_mode = 0
+	layer.alpha = 1.0
+	layer.scale_value = 1.0
+	particle.graphics = graphics
+
+	var effect := NovaParticleEffect.new()
+	effect.id = "GPU effect"
+	effect.pdefs = PackedStringArray([particle.id])
+	var file := NovaParticleFile.new()
+	file.particles = [particle]
+	file.effects = [effect]
+
+	var scene := NovaEffectScene.new()
+	scene.open([file])
+	var receipt := scene.spawn({
+		"effect_handle": scene.intern(effect.id),
+		"transform": Transform3D.IDENTITY,
+	})
+	assert_eq(int(receipt.get("status", -1)), NovaEffectScene.SPAWN_STATUS_SPAWNED)
+	scene.advance_in_place(0.1)
+	return scene
+
+
 func test_world_particles_use_the_uncapped_rd_compositor_contract() -> void:
 	var renderer := add_child_autofree(NovaParticleRenderer.new()) as NovaParticleRenderer
 	await get_tree().process_frame
@@ -18,7 +73,13 @@ func test_world_particles_use_the_uncapped_rd_compositor_contract() -> void:
 	assert_eq(int(backend.get("packet_commands_dropped", -1)), 0)
 	assert_true(bool(backend.get("immutable_submission_copy", false)))
 	assert_false(bool(backend.get("retains_compiler_packet_pointer", true)))
-	assert_eq(int(backend.get("push_constant_bytes", 0)), 96)
+	assert_eq(int(backend.get("push_constant_bytes", 0)), 128)
+	assert_eq(String(backend.get("fog_source", "")),
+			"immutable_opennova_environment_snapshot")
+	assert_eq(String(backend.get("fog_distance_policy", "")),
+			"type0_eye_depth_else_radial")
+	assert_eq(String(backend.get("fog_material_targets", "")),
+			"scene,black,black,scene,white,gray127,black,scene")
 	assert_eq(String(backend.get("view_projection_source", "")),
 			"render_scene_data_corrected")
 	assert_false(bool(backend.get("adds_view_projection_depth_correction", true)),
@@ -47,6 +108,58 @@ func test_world_particles_use_the_uncapped_rd_compositor_contract() -> void:
 	for descendant in renderer.find_children("*", "MeshInstance3D", true, false):
 		assert_ne(String(descendant.name), "ParticleWorldPacket",
 				"World particles must not regress to command-local ArrayMesh surfaces.")
+
+
+func test_world_backend_executes_a_live_gpu_submission() -> void:
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(64, 64)
+	viewport.own_world_3d = true
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	add_child_autofree(viewport)
+	var camera := Camera3D.new()
+	camera.position = Vector3(0, 0, 5)
+	camera.current = true
+	viewport.add_child(camera)
+	var renderer := NovaParticleRenderer.new()
+	renderer.scene = _live_world_scene()
+	renderer.procedural_fallback_enabled = true
+	var fog_source := FogSource.new()
+	viewport.add_child(fog_source)
+	renderer.environment_source = fog_source
+	viewport.add_child(renderer)
+	renderer.render_now()
+	# Do not await frame_post_draw: headless compatibility renderers may never
+	# emit it. Ordinary process frames still exercise the callback whenever the
+	# RenderingDevice compositor is available.
+	for _frame in 5:
+		await get_tree().process_frame
+
+	var report := renderer.get_debug_packet_report()
+	var world: Dictionary = report.get("world", {})
+	var backend: Dictionary = report.get("world_backend", {})
+	assert_gt(int(world.get("rendered_quad_count", 0)), 0,
+			"the fixture must compile visible world geometry")
+	assert_gt(int(world.get("draw_command_count", 0)), 0,
+			"the fixture must publish at least one material run")
+	if not bool(backend.get("rd_available", false)):
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	assert_true(bool(backend.get("callback_seen", false)),
+			"the post-transparent compositor callback must execute")
+	assert_eq(String(backend.get("status", "")), "drawn",
+			String(backend.get("failure", "live submission failed")))
+	assert_gt(int(backend.get("submitted_commands", 0)), 0)
+	assert_eq(int(backend.get("drawn_commands", -1)),
+			int(backend.get("submitted_commands", 0)))
+	assert_gt(int(backend.get("gpu_draw_calls", 0)), 0)
+	assert_eq(int(backend.get("drawn_frame_id", -1)),
+			int(backend.get("submitted_frame_id", 0)))
+	var center := viewport.get_texture().get_image().get_pixel(32, 32)
+	assert_gt(center.r, 0.05, "the live particle must reach the framebuffer")
+	assert_gt(center.g, center.r + 0.02,
+			"full linear fog must tint the white fallback toward the supplied green")
+	assert_gt(center.b, center.g + 0.02,
+			"full linear fog must tint the white fallback toward the supplied blue")
 
 
 func test_camera_compositor_coordinates_multiple_particle_renderers() -> void:

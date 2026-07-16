@@ -8,18 +8,21 @@ namespace opennova::netsim {
 // ---- ClientState lookup -----------------------------------------------------
 
 ClientEntityState *ClientState::find(uint16_t handle) {
-	const auto found = entity_index_.find(handle);
-	if (found == entity_index_.end()) return nullptr;
-	return &entities[found->second];
+	// `entities` is intentionally public decoded state. Callers may clear,
+	// reorder, append, or edit it directly, so a separate handle-to-index cache
+	// cannot remain valid without changing that API. Keep lookup derived from
+	// the authoritative vector.
+	for (ClientEntityState &entity : entities) {
+		if (entity.handle == handle) return &entity;
+	}
+	return nullptr;
 }
 
 ClientEntityState &ClientState::upsert(uint16_t handle) {
 	if (ClientEntityState *e = find(handle)) return *e;
-	const std::size_t index = entities.size();
 	ClientEntityState e;
 	e.handle = handle;
 	entities.push_back(e);
-	entity_index_.emplace(handle, index);
 	return entities.back();
 }
 

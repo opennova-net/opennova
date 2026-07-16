@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
@@ -442,6 +443,27 @@ bool initial_age_is_bounded_contract() {
 			"initial age is clamped to the bounded catch-up window");
 }
 
+bool initial_age_reaps_exhausted_group_contract() {
+	auto config = one_effect();
+	config.documents[0].file.particles[0].emit_dur = 0.05f;
+	config.documents[0].file.particles[0].age = 0.05f;
+	p::EffectScene scene;
+	scene.open(config);
+	auto request = spawn_request(scene.intern("flash"));
+	request.admission = p::EffectAdmission::SuppressWhileOwned;
+	request.slot = p::EffectSlotToken{71};
+	request.initial_age_ticks = 32;
+	if (!check(scene.spawn(request).spawned(),
+			"fully pre-aged effect is accepted")) return false;
+	if (!check(scene.live_counts().group_count == 0 &&
+			scene.live_counts().emitter_count == 0,
+			"initial-age replay reaps an exhausted group immediately")) {
+		return false;
+	}
+	return check(scene.spawn(request).spawned(),
+			"exhausted pre-aged group never retains its suppression slot");
+}
+
 bool immutable_snapshot_contract() {
 	p::EffectScene scene;
 	scene.open(one_effect("first", "first particle"));
@@ -469,56 +491,135 @@ bool immutable_snapshot_contract() {
 			"new snapshot contains replacement scene values");
 }
 
-bool suppress_window_rearms_at_first_child_death_contract() {
-	// The suppress-while-owned window re-arms when the FIRST child emitter dies,
-	// not the last [orig: the dead-child notify CEffectEmitter_OnChildDied
-	// @ 0x5ef9c0 clears parent+0x11C, the first gate of the aliveness leaf
-	// @ 0x5e2640; net-re §5.62 session-3 working model]. ReplaceOwned keeps
-	// whole-group slot ownership (the WAC/item replacement protocol).
+bool child_reaping_and_group_suppression_lifetime_contract() {
+	// Retail attaches the action-slot clear callback to CEffectGroup
+	// [orig: CEffectGroup_SetDeathCallback @ 0x5e1940] and invokes it from
+	// CEffectGroup_Destroy @ 0x5e3460. Individual dead children are reaped by
+	// CEffectGroup_AdvanceChildrenAndReap @ 0x5e59a0 without clearing the slot.
 	p::ParticleDef quick = particle("quick flash");
 	quick.emit_dur = 0.05f;
 	quick.emit_rate = 20.0f;
 	quick.age = 0.05f;
 	p::ParticleDef slow = particle("slow smoke");
-	slow.emit_dur = 2.0f;
-	slow.age = 2.0f;
+	slow.emit_dur = 0.75f;
+	slow.age = 0.25f;
+	p::ParticleDef spare = particle("spare spark");
+	spare.emit_dur = 0.05f;
+	spare.age = 0.05f;
 	p::EffectSceneConfig config;
+	config.max_live_emitters = 2;
 	config.documents.push_back(document("muzzle.ptl",
-			{quick, slow}, {{"muzzle", {"quick flash", "slow smoke"}}}));
+			{quick, slow, spare},
+			{{"muzzle", {"quick flash", "slow smoke"}},
+					{"single", {"spare spark"}}}));
 	p::EffectScene scene;
 	scene.open(config);
 	const auto effect = scene.intern("muzzle");
+	const auto single = scene.intern("single");
 
 	auto guarded = spawn_request(effect);
 	guarded.admission = p::EffectAdmission::SuppressWhileOwned;
 	guarded.slot = p::EffectSlotToken{7};
-	if (!check(scene.spawn(guarded).spawned(),
+	const auto admitted = scene.spawn(guarded);
+	if (!check(admitted.spawned(),
 			"the first guarded spawn is admitted")) return false;
 	if (!check(scene.spawn(guarded).status == p::EffectSpawnStatus::Suppressed,
 			"a same-tick follow-up is suppressed")) return false;
+	if (!check(scene.spawn(spawn_request(single)).status ==
+			p::EffectSpawnStatus::EmitterCapacityReached,
+			"both live child emitters initially consume capacity")) return false;
 	// Run past the quick child's whole life (emit 0.05 s + particle age 0.05 s)
 	// while the slow child keeps emitting.
 	scene.advance({0.5f});
-	const auto rearmed = scene.spawn(guarded);
-	if (!check(rearmed.spawned(),
-			"the window re-arms once the first child dies")) return false;
-	const auto frame = scene.advance({0.0f});
-	if (!check(frame.groups.size() == 2,
-			"the drained predecessor lives on beside the new group")) return false;
-
-	auto replace = spawn_request(effect);
-	replace.admission = p::EffectAdmission::ReplaceOwned;
-	replace.slot = p::EffectSlotToken{9};
-	const auto placed = scene.spawn(replace);
-	if (!check(placed.spawned(), "the replace-owned spawn is admitted")) return false;
-	scene.advance({0.5f});
-	if (!check(scene.spawn(replace).spawned(),
-			"the replacement spawn is admitted")) return false;
+	const p::EffectLiveCounts partially_drained = scene.live_counts();
 	const auto debug = scene.inspect();
-	const auto *previous = debug_group(debug, placed.group);
-	return check(previous != nullptr && previous->detached,
-			"replace-owned keeps its slot past the first child death "
-			"and the replacement detaches the original");
+	const auto *original = debug_group(debug, admitted.group);
+	if (!check(partially_drained.group_count == 1 &&
+			partially_drained.emitter_count == 1 &&
+			original != nullptr && original->emitters.size() == 1 &&
+			original->emitters[0].definition_name == "slow smoke",
+			"finished child is reaped while its live sibling remains")) return false;
+	const auto still_suppressed = scene.spawn(guarded);
+	if (!check(still_suppressed.status == p::EffectSpawnStatus::Suppressed &&
+			still_suppressed.group == admitted.group,
+			"slot remains suppressed for the complete effect group lifetime")) {
+		return false;
+	}
+	if (!check(scene.spawn(spawn_request(single)).spawned(),
+			"reaping a child immediately returns its emitter capacity")) {
+		return false;
+	}
+
+	scene.advance({2.0f});
+	if (!check(scene.live_counts().group_count == 0 &&
+			scene.live_counts().emitter_count == 0,
+			"groups are destroyed after their final children drain")) return false;
+	return check(scene.spawn(guarded).spawned(),
+			"slot re-arms only after the complete effect group dies");
+}
+
+bool huge_delta_catch_up_is_bounded_contract() {
+	const float huge_deltas[] = {
+		1.0e9f,
+		std::numeric_limits<float>::max(),
+	};
+	for (const float huge_delta : huge_deltas) {
+		p::EffectScene scene;
+		auto config = one_effect();
+		config.simulation_tick_seconds = 1.0f / 62.5f;
+		config.documents[0].file.particles[0].flags =
+				p::particle_flag::ForeverEmit;
+		scene.open(config);
+		if (!check(scene.spawn(spawn_request(scene.intern("flash"))).spawned(),
+				"forever emitter for bounded catch-up spawns")) return false;
+		scene.advance_simulation({huge_delta});
+		p::ParticleFrameSnapshot frame;
+		scene.write_snapshot(frame);
+		const double capped_age =
+				static_cast<double>(p::kEffectAdvanceTickLimit) *
+				static_cast<double>(config.simulation_tick_seconds);
+		if (!check(frame.emitters.size() == 1 &&
+				std::fabs(static_cast<double>(frame.emitters[0].age) -
+						capped_age) < 0.001 &&
+				std::fabs(frame.simulation_time_seconds - capped_age) < 0.001,
+				"huge finite delta advances no more than 256 fixed ticks")) {
+			return false;
+		}
+		const double age_after_huge = frame.emitters[0].age;
+		const double time_after_huge = frame.simulation_time_seconds;
+		scene.advance_simulation({0.0f});
+		scene.write_snapshot(frame);
+		if (!check(std::fabs(static_cast<double>(frame.emitters[0].age) -
+						age_after_huge) < 0.00001 &&
+				std::fabs(frame.simulation_time_seconds - time_after_huge) <
+						0.00001,
+				"discarded whole-step backlog never drains on zero delta")) {
+			return false;
+		}
+	}
+
+	p::EffectScene remainder_scene;
+	auto remainder_config = one_effect();
+	remainder_config.simulation_tick_seconds = 0.25f;
+	remainder_config.documents[0].file.particles[0].flags =
+			p::particle_flag::ForeverEmit;
+	remainder_scene.open(remainder_config);
+	if (!check(remainder_scene.spawn(
+			spawn_request(remainder_scene.intern("flash"))).spawned(),
+			"forever emitter for fractional remainder spawns")) return false;
+	remainder_scene.advance_simulation({1000.125f});
+	p::ParticleFrameSnapshot before_remainder;
+	remainder_scene.write_snapshot(before_remainder);
+	remainder_scene.advance_simulation({0.125f});
+	p::ParticleFrameSnapshot after_remainder;
+	remainder_scene.write_snapshot(after_remainder);
+	return check(before_remainder.emitters.size() == 1 &&
+			after_remainder.emitters.size() == 1 &&
+			std::fabs(static_cast<double>(before_remainder.emitters[0].age) -
+					64.0) < 0.001 &&
+			std::fabs(static_cast<double>(after_remainder.emitters[0].age) -
+					64.25) < 0.001,
+			"bounded catch-up preserves only the fractional fixed-step remainder");
 }
 
 } // namespace
@@ -528,13 +629,15 @@ int main() {
 	if (!pdef_reference_resolution_is_case_insensitive_contract()) return 1;
 	if (!effect_resolve_is_all_or_nothing_contract()) return 1;
 	if (!slot_owner_and_admission_contract()) return 1;
-	if (!suppress_window_rearms_at_first_child_death_contract()) return 1;
+	if (!child_reaping_and_group_suppression_lifetime_contract()) return 1;
 	if (!replace_detach_and_validation_contract()) return 1;
 	if (!fixed_age_and_order_contract()) return 1;
 	if (!capacity_rejection_contract()) return 1;
 	if (!lightweight_debug_contract()) return 1;
 	if (!deferred_snapshot_contract()) return 1;
 	if (!initial_age_is_bounded_contract()) return 1;
+	if (!initial_age_reaps_exhausted_group_contract()) return 1;
+	if (!huge_delta_catch_up_is_bounded_contract()) return 1;
 	if (!immutable_snapshot_contract()) return 1;
 	return 0;
 }

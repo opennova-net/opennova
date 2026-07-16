@@ -50,7 +50,7 @@ namespace {
 constexpr std::uint32_t kRetailVertexStride =
 		static_cast<std::uint32_t>(sizeof(renderer::ParticleVertex));
 constexpr std::uint32_t kTriangleVerticesPerQuad = 6;
-constexpr std::uint32_t kPushConstantBytes = 96;
+constexpr std::uint32_t kPushConstantBytes = 128;
 constexpr std::uint32_t kMinimumVertexCapacity = 4096;
 constexpr std::uint32_t kFallbackSceneTextureSide = 1;
 constexpr std::uint32_t kRgba8BytesPerPixel = 4;
@@ -69,16 +69,16 @@ layout(location = 3) in vec2 a_uv;
 layout(location = 0) out vec4 v_primary;
 layout(location = 1) out vec4 v_secondary;
 layout(location = 2) out vec2 v_uv;
+layout(location = 3) out vec3 v_world_position;
 
 layout(push_constant, std430) uniform ParticlePush {
 	mat4 view_projection;
+	vec4 camera_position_fog_end;
+	vec4 camera_forward_fog_start;
+	vec4 fog_color_type;
 	vec2 viewport_size;
 	float theta;
 	uint mode;
-	uint variant;
-	uint reserved0;
-	uint reserved1;
-	uint reserved2;
 } pc;
 
 void main() {
@@ -86,6 +86,7 @@ void main() {
 	v_primary = a_primary;
 	v_secondary = a_secondary;
 	v_uv = a_uv;
+	v_world_position = a_position;
 }
 )GLSL";
 
@@ -93,22 +94,55 @@ const char *kFragmentShader = R"GLSL(#version 450
 layout(location = 0) in vec4 v_primary;
 layout(location = 1) in vec4 v_secondary;
 layout(location = 2) in vec2 v_uv;
+layout(location = 3) in vec3 v_world_position;
 
 layout(set = 0, binding = 0) uniform sampler2D atlas_texture;
 layout(set = 1, binding = 0) uniform sampler2D scene_texture;
 
 layout(push_constant, std430) uniform ParticlePush {
 	mat4 view_projection;
+	vec4 camera_position_fog_end;
+	vec4 camera_forward_fog_start;
+	vec4 fog_color_type;
 	vec2 viewport_size;
 	float theta;
 	uint mode;
-	uint variant;
-	uint reserved0;
-	uint reserved1;
-	uint reserved2;
 } pc;
 
 layout(location = 0) out vec4 frag_color;
+
+float particle_fog_visibility() {
+	float fog_start = pc.camera_forward_fog_start.w;
+	float fog_end = pc.camera_position_fog_end.w;
+	if (fog_start == fog_end || fog_end <= 0.0) {
+		return 1.0;
+	}
+	vec3 camera_position = pc.camera_position_fog_end.xyz;
+	int fog_type = int(pc.fog_color_type.w);
+	float fog_distance;
+	if (fog_type == 0) {
+		fog_distance = max(dot(v_world_position - camera_position,
+				pc.camera_forward_fog_start.xyz), 0.0);
+		return clamp(exp(-fog_distance *
+				(4.1588830833596715 / fog_end)), 0.0, 1.0);
+	}
+	fog_distance = length(v_world_position - camera_position);
+	return clamp((fog_end - fog_distance) /
+			(fog_end - fog_start), 0.0, 1.0);
+}
+
+vec3 particle_fog_target() {
+	if (pc.mode == 1u || pc.mode == 2u || pc.mode == 6u) {
+		return vec3(0.0);
+	}
+	if (pc.mode == 4u) {
+		return vec3(1.0);
+	}
+	if (pc.mode == 5u) {
+		return vec3(127.0 / 255.0);
+	}
+	return pc.fog_color_type.xyz;
+}
 
 void main() {
 	vec4 texel = texture(atlas_texture, v_uv);
@@ -146,6 +180,11 @@ void main() {
 		frag_color = vec4(texture(scene_texture, scene_uv).rgb,
 				alpha * texel.a);
 	}
+	// Retail changes the fixed-function fog color per particle material:
+	// ordinary Blend/Bump/Distort use scene fog, additive families use black,
+	// Mod uses white, and Mod2x uses mid-gray. Alpha is not fogged.
+	frag_color.rgb = mix(particle_fog_target(), frag_color.rgb,
+			particle_fog_visibility());
 }
 )GLSL";
 
@@ -421,7 +460,7 @@ bool NovaParticleCompositorEffect::Impl::initialize_rd() {
 	}
 	if (rd->limit_get(RenderingDevice::LIMIT_MAX_PUSH_CONSTANT_SIZE) <
 			kPushConstantBytes) {
-		set_failure("RenderingDevice does not support the required 96-byte "
+		set_failure("RenderingDevice does not support the required 128-byte "
 				"particle push constants", "push_constants_unsupported");
 		return false;
 	}
@@ -1155,11 +1194,24 @@ bool NovaParticleCompositorEffect::Impl::draw(
 						static_cast<float>(view_projection[column][row]));
 			}
 		}
-		write_f32(push_constants, 64, static_cast<float>(size.x));
-		write_f32(push_constants, 68, static_cast<float>(size.y));
+		write_f32(push_constants, 64, submission.camera_position[0]);
+		write_f32(push_constants, 68, submission.camera_position[1]);
+		write_f32(push_constants, 72, submission.camera_position[2]);
+		write_f32(push_constants, 76, submission.fog_end);
+		write_f32(push_constants, 80, submission.camera_forward[0]);
+		write_f32(push_constants, 84, submission.camera_forward[1]);
+		write_f32(push_constants, 88, submission.camera_forward[2]);
+		write_f32(push_constants, 92, submission.fog_start);
+		write_f32(push_constants, 96, submission.fog_color[0]);
+		write_f32(push_constants, 100, submission.fog_color[1]);
+		write_f32(push_constants, 104, submission.fog_color[2]);
+		write_f32(push_constants, 108,
+				static_cast<float>(submission.fog_type));
+		write_f32(push_constants, 112, static_cast<float>(size.x));
+		write_f32(push_constants, 116, static_cast<float>(size.y));
 		const std::uint64_t ticks = Time::get_singleton() != nullptr ?
 				Time::get_singleton()->get_ticks_msec() : 0;
-		write_f32(push_constants, 72,
+		write_f32(push_constants, 120,
 				static_cast<float>(static_cast<std::uint32_t>(ticks)) * 0.004f);
 
 		const int64_t draw_list = rd->draw_list_begin(target.framebuffer);
@@ -1178,8 +1230,7 @@ bool NovaParticleCompositorEffect::Impl::draw(
 				continue;
 			}
 			const std::uint32_t mode = static_cast<std::uint32_t>(command.pipeline);
-			write_u32(push_constants, 76, mode);
-			write_u32(push_constants, 80, command.variant);
+			write_u32(push_constants, 124, mode);
 			const RID pipeline = pipeline_for(command, format);
 			const GpuAtlasPage &atlas_page =
 					gpu_atlas_pages[command.atlas_page];
@@ -1244,7 +1295,11 @@ Dictionary NovaParticleCompositorEffect::Impl::report() const {
 	result["retains_compiler_packet_pointer"] = false;
 	result["push_constant_bytes"] = static_cast<int64_t>(kPushConstantBytes);
 	result["push_constant_layout"] =
-			"mat4@0,vec2@64,float@72,uint@76,uint@80,uint@84,uint@88,uint@92";
+			"mat4@0,vec4@64,vec4@80,vec4@96,vec2@112,float@120,uint@124";
+	result["fog_source"] = "immutable_opennova_environment_snapshot";
+	result["fog_distance_policy"] = "type0_eye_depth_else_radial";
+	result["fog_material_targets"] =
+			"scene,black,black,scene,white,gray127,black,scene";
 	result["view_projection_source"] = "render_scene_data_corrected";
 	result["adds_view_projection_depth_correction"] = false;
 	result["scene_color_copy_policy"] = "once_per_distorting_view";

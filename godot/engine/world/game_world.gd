@@ -1534,6 +1534,7 @@ func _start_effect_world() -> void:
 	_effect_world = NovaEffectWorld.new()
 	_effect_world.name = "EffectWorld"
 	add_child(_effect_world)
+	_effect_world.set_environment_source(_env)
 	if _particles_hidden:
 		_effect_world.set_particles_hidden(true)
 	var count := _effect_world.load_from_resource_root(_resource_root)

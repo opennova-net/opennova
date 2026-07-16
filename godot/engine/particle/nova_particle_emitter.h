@@ -119,7 +119,7 @@ private:
 	void _rebuild_atlas_texture(const std::array<bool, MAX_VISUAL_LAYERS> &present);
 	void _update_meshes();
 
-	Ref<NovaParticleTable> _find_table(const String &id) const;
+	Ref<NovaParticleTable> _find_table(const String &id, bool p_modified) const;
 	float _sample_curve(const Ref<NovaParticleCurveRef> &curve, float t, float fallback) const;
 	Color _layer_color(const Ref<NovaParticleGraphicLayer> &layer, std::uint8_t slot) const;
 

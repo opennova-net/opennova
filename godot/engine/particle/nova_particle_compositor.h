@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -37,6 +38,12 @@ struct NovaParticleWorldSubmission {
 	PackedByteArray triangle_vertices;
 	std::vector<renderer::ParticleDrawCommand> commands;
 	std::shared_ptr<const NovaParticleAtlasSnapshot> atlas;
+	std::array<float, 3> camera_position{};
+	std::array<float, 3> camera_forward{0.0f, 0.0f, 1.0f};
+	std::array<float, 3> fog_color{};
+	float fog_start = 0.0f;
+	float fog_end = 0.0f;
+	std::int32_t fog_type = 1;
 	bool valid = true;
 	std::string validation_error;
 };

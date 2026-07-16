@@ -129,6 +129,11 @@ struct EffectLoadReport {
 // corrupted requests that would otherwise advance emitters billions of times.
 inline constexpr std::uint32_t kEffectInitialAgeTickLimit = 256;
 
+// A single public advance call performs at most this many fixed simulation
+// ticks. Excess whole ticks are presentation backlog and are discarded; the
+// sub-tick remainder is retained for deterministic accumulation.
+inline constexpr std::uint32_t kEffectAdvanceTickLimit = 256;
+
 struct EffectSpawnRequest {
 	EffectHandle effect;
 	EffectPose pose;

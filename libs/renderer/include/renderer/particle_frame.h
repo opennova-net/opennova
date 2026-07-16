@@ -148,6 +148,9 @@ struct ParticleDrawCommand {
 struct ParticleEmitterDrawBounds {
 	std::uint64_t emitter_id = 0;
 	ParticleAabb bounds{};
+	// Quads from overlapping emitters can interleave. first_quad is this
+	// emitter's first occurrence in the packet; quad_count is its total.
+	// An emitter with no emitted quads leaves both fields at zero.
 	std::uint32_t first_quad = 0;
 	std::uint32_t quad_count = 0;
 };
@@ -183,9 +186,9 @@ struct ParticleDrawPacket {
 	ParticleFrameDebugCounters debug{};
 };
 
-// Deep in-process module: one call filters a domain, orders emitters and
-// particles, builds quads, forms adjacent state runs, calculates bounds, and
-// accounts for retained allocations.
+// Deep in-process module: one call filters a domain, globally orders visible
+// particles by depth, builds quads, forms adjacent state runs, calculates
+// bounds, and accounts for retained allocations.
 //
 // The returned packet remains valid until the next compile call. Reusing one
 // compiler per render domain makes no-allocation-after-warmup observable.
