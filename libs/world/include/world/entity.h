@@ -133,6 +133,11 @@ struct Entity {
     uint8_t alert_state = 0;  // green/yellow/red
     int32_t ai_state = 0;     // AI component state
     int32_t ai_target = -1;   // net id of current AI target, -1 = none
+    // Targeted-by refcount (entity+530): ++ when an AI acquires this entity, -- (clamp 0)
+    // when it retargets/clears. The target scorer reads it as the anti-pile-on saturation
+    // gate (<=16) and score decay. [orig: Entity_SetAITarget @0x45d760 maintains it;
+    // AI_FindBestTargetB @0x466f60 consumes; world-wac-ai-re §16.3]
+    int16_t ai_target_refcount = 0;
     int32_t health = 100;     // 0 -> dead
     // items.def hp (itemDef+0x17C healthMax), stamped by the host's item-traits sweep
     // (0 = unresolved). The original spawns entities at Health = healthMax

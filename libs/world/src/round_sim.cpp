@@ -238,6 +238,9 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain) {
                         rel.set_single_single(TriggerRelations::kShot, ss, vs);
                     }
                     best_target->health -= damage;
+                    // Publish the processed hit for the AI reaction stamps (wasHit /
+                    // lastAttacker / the SM damage event) — drained by AiSystem::tick.
+                    hits.push_back(RoundHit{EntityHandle{best_handle}, r.owner, damage});
                     if (best_target->health <= 0) {
                         RoundDeath d;
                         d.victim = EntityHandle{best_handle};

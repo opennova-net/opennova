@@ -97,6 +97,15 @@ struct RoundImpact {
     uint64_t source_order = 0; // stable order across impacts resolved on the same tick
 };
 
+// A processed (non-zero) damage hit — drained by AiSystem::tick to stamp the victim's
+// AI reaction state (wasHit / lastAttacker / the SM damage event). [orig: the damage
+// chain writes the victim entity + queues the AI event inline
+// (Projectile_ProcessDamageOnTarget @ 0x4E7FB0); our sim/AI split records instead.]
+struct RoundHit {
+    EntityHandle victim;
+    EntityHandle shooter;
+    int32_t damage = 0;
+};
 class RoundSim {
 public:
     static constexpr int kCapacity = 512; // [orig: 128 groups x 4 sub-slots @0xB7E1A8]
@@ -114,6 +123,10 @@ public:
     static constexpr size_t kMaxPendingImpacts = 256;
     std::vector<RoundImpact> impacts;
     uint64_t next_impact_order = 1;
+
+    // Processed hits (damage > 0), in tick order — drained by AiSystem::tick before the
+    // per-entity updates (wasHit / lastAttacker / SM damage events).
+    std::vector<RoundHit> hits;
 
     // Spawn one round at fire time [orig: RoundData_SpawnRound @ 0x4EC0D0 default path].
     // Returns the round slot, or -1 (pool full / non-ballistic ammo / null ammo).
