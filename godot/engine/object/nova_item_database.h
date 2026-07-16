@@ -51,6 +51,13 @@ private:
 		// "snd:"-prefixed `type marker` item (e.g. soundloop_1 LPNV_LIGHT). Time-of-day
 		// slots; the runtime plays the first non-empty one resolvable in the .lwf bank.
 		String soundloops[7];
+		// Person-item anim-fire weapon family (world-wac-ai-re §17.4): the
+		// ammo_closeattack round NAME (JO riflemen author all four ammo_* slots =
+		// the rifle round) + clipsize (the magazine reseed). Consumed by the sim's
+		// AI weapon seed (D-AI-5). [orig: ItemDef_ParseProperty @ 0x4a1823 ->
+		// def+0x56B / @ 0x49fa1c -> def+0x894]
+		String ammo_closeattack;
+		int clipsize = 0;
 	};
 	std::unordered_map<int, Item> items;
 	String source_path;
@@ -116,6 +123,15 @@ public:
 	// @0x49d870; consumer Entity_UpdateVehiclePhysics @0x48af00]
 	PackedInt32Array get_vehicle_physics(int id) const;
 	String get_display_name(int id) const;
+	// items.def ammo_closeattack — the person-item anim-fire round NAME, resolved
+	// against the ammo table at mission load by the sim's AI weapon seed (D-AI-5);
+	// empty if none authored. [orig: ItemDef_ParseProperty @ 0x4a1823 -> def+0x56B;
+	// world-wac-ai-re §17.4]
+	String get_ammo_closeattack(int id) const;
+	// items.def clipsize — the respawn magazine reseed (word entity+0x35C); 0 if
+	// none authored. [orig: @ 0x49fa1c -> def+0x894; Entity_ResetToSpawnState
+	// @ 0x4b97a9]
+	int get_clipsize(int id) const;
 	// items.def sound_profile (a sound-set name resolved against the loaded .lwf
 	// banks at runtime); empty if the item declares none.
 	String get_sound_profile(int id) const;

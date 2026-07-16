@@ -300,6 +300,18 @@ typedef struct DefItemDef {
                            [orig: Entity_ClassifyForMinimap @0x50FA70 reads itemDef->unitType] */
     char (*raw_lines)[512];
     size_t raw_lines_count;
+    /* The person-item anim-fire weapon family (world-wac-ai-re §17.4, D-AI-5).
+       Appended (FFI mirror stability). Only the closeattack slot is surfaced: JO
+       riflemen author all four ammo_* names to the same rifle round, and the AI
+       port's single-ammo stand-in consumes one. 32 bytes = the witnessed def slot
+       stride (+0x56B..+0x58B). [orig: ItemDef_ParseProperty 'ammo_closeattack'
+       @ 0x4a1823 -> def+0x56B (marker3 +0x58B, easyrocket +0x5AB, advancedrocket
+       +0x5CB, launchups_* +0x5EB/+0x5FB)] */
+    char ammo_closeattack[32];
+    /* items.def 'clipsize', plain atol — the respawn magazine reseed source (word
+       entity+0x35C = itemDef+0x894). [orig: ItemDef_ParseProperty @ 0x49fa1c ->
+       def+0x894; consumer Entity_ResetToSpawnState @ 0x4b97a9/0x4b97b5] */
+    int clipsize;
 } DefItemDef;
 
 typedef struct DefItemsFile {

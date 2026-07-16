@@ -213,7 +213,58 @@ int main(void) {
         return 1;
     }
 
+    /* The anim-fire weapon family + clipsize default: absent keys leave the fields
+       zeroed (the fixture predates the JO character-item authoring). */
+    if (soldier->ammo_closeattack[0] != '\0' || soldier->clipsize != 0) {
+        fprintf(stderr, "FAIL: soldier ammo/clipsize should be unset, got '%s'/%d\n",
+                soldier->ammo_closeattack, soldier->clipsize);
+        def_free_items(&items);
+        return 1;
+    }
+
     def_free_items(&items);
+
+    /* The person-item anim-fire weapon family (world-wac-ai-re §17.4, D-AI-5):
+       'ammo_closeattack' name -> def+0x56B, 'clipsize' atol -> def+0x894
+       [orig: ItemDef_ParseProperty @ 0x4a1823 / @ 0x49fa1c]. The tracked fixture
+       has no character items, so pin the parse on an inline JOX-shaped block
+       (retail "Indonesian Soldier #1 with AK47", id 101798). */
+    static const char rifleman_def[] =
+        "begin \"Indonesian Soldier #1 with AK47\"\n"
+        "  id 101798\n"
+        "  type person\n"
+        "  ai_function org1\n"
+        "  move_function org1\n"
+        "  clipsize 30\n"
+        "  ammo_closeattack    AMMO_AK47_556MM\n"
+        "  ammo_easyrocket     AMMO_AK47_556MM\n"
+        "  ammo_advancedrocket AMMO_AK47_556MM\n"
+        "  ammo_marker3        AMMO_AK47_556MM\n"
+        "  launchups_closeattack    mflash01\n"
+        "end\n";
+    DefItemsFile rifle_items;
+    memset(&rifle_items, 0, sizeof(rifle_items));
+    if (def_parse_items_memory((const uint8_t *)rifleman_def, sizeof(rifleman_def) - 1,
+                               &rifle_items) != 0 ||
+        rifle_items.count != 1) {
+        fprintf(stderr, "FAIL: inline rifleman block did not parse\n");
+        def_free_items(&rifle_items);
+        return 1;
+    }
+    if (strcmp(rifle_items.entries[0].ammo_closeattack, "AMMO_AK47_556MM") != 0) {
+        fprintf(stderr, "FAIL: rifleman ammo_closeattack mismatch: '%s'\n",
+                rifle_items.entries[0].ammo_closeattack);
+        def_free_items(&rifle_items);
+        return 1;
+    }
+    if (rifle_items.entries[0].clipsize != 30) {
+        fprintf(stderr, "FAIL: rifleman clipsize mismatch: expected 30, got %d\n",
+                rifle_items.entries[0].clipsize);
+        def_free_items(&rifle_items);
+        return 1;
+    }
+    def_free_items(&rifle_items);
+
     printf("PASS: items parsing OK\n");
     return 0;
 }

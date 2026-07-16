@@ -681,6 +681,16 @@ public:
 	// spawning the local player).
 	void resolve_item_traits(const Ref<class NovaItemDatabase> &p_item_db);
 
+	// The D-AI-5 host weapon seed: stamp every AI entity's anim-fire round from its
+	// items.def ammo_closeattack + clipsize (AiProfile::ammo_primary/clip_size — the
+	// single-ammo stand-in for the entity+0x358..0x35B family, whose load-time
+	// block-copy writer is unwitnessed; world-wac-ai-re §17.4/§17.7 item 1), and seed
+	// the spawn magazine [orig: Entity_ResetToSpawnState @ 0x4b97a9 — word
+	// entity+0x35C = itemDef+0x894]. Ammo NAMES resolve against the mission ammo
+	// table, so call AFTER load_ammo_table; unresolved/absent leaves the NPC unarmed
+	// (ammo_primary -1, the fire pass skips). Idempotent; returns armed-NPC count.
+	int resolve_ai_weapons(const Ref<class NovaItemDatabase> &p_item_db);
+
 	// World-object collision sweep: for each live entity with an items.def graphic,
 	// load its .3di collision block (BVOL volumes + BPLN planes via the placer's
 	// NovaObjectData cache), register one runtime model per graphic on the sim

@@ -1863,7 +1863,9 @@ record that feeds our `RootMotionFrame`) is consumed on ODD ticks (`tick & 1`)
 
 The secondary latch fires `entity+0x359` from bone `+0x366` and decrements the
 **magazine word `entity+0x35C`** (the reload trigger, §17.3; reseeded to
-`itemDef->clipsize` on respawn `[orig: Entity_ResetToSpawnState @ 0x4b97b5]`), then
+`itemDef->clipsize` on respawn — the def dword `+0x894`, read as a word
+`[orig: Entity_ResetToSpawnState @ 0x4b97a9/0x4b97b5]`; parsed by plain atol
+`[orig: ItemDef_ParseProperty 'clipsize' @ 0x49fa1c-0x49fa48]`), then
 also fires `entity+0x35A` when it differs from `+0x359`. `shouldFireSecondary` is ALSO
 latched by the **walking-fire aim gate**: while moving with the muzzle within ~5°
 (59652320 BAM) of the aim solution, inside `slot[15]`, def `attrib & 4` clear, and
@@ -1880,12 +1882,16 @@ passes targetFlags 0, targetId 1, no clip slot) + ammo-def fire sound/muzzle eff
 **Weapon-byte source**: the four ids `+0x358..0x35B` and bones `+0x365..0x367` are the
 items.def `ammo_closeattack / ammo_easyrocket / ammo_advancedrocket / ammo_marker3` +
 `launchups_*` family (parsed as names into the def `[orig: ItemDef_ParseProperty
-@ 0x4a1843–0x4a1996, def+0x56B/0x58B/0x5AB/0x5CB/0x5EB/0x5FB]`; JO riflemen author all
+@ 0x4a1843–0x4a1996, def+0x56B/0x58B/0x5AB/0x5CB/0x5EB/0x5FB]` — 32-byte name slots,
+compares at `@ 0x4a1823/0x4a186b/0x4a18ae/0x4a18f1`; JO riflemen author all
 four = the rifle round, e.g. `AMMO_AK47_556MM`, `clipsize 30`). The resolved-id
 block-copy onto the entity is the one unwitnessed link (§17.7 item 1; no per-field
 writer exists — it rides a struct copy). `Entity_InitHardpoints @ 0x4417d0` separately
 resolves `ammo_closeattack → entity+0x2B4` and `ammo_marker3 → entity+0x2B8` (dwords,
-the hardpoint/close-attack consumers — NOT the anim-fire bytes).
+the hardpoint/close-attack consumers — NOT the anim-fire bytes). Port note: until the
+block-copy is witnessed, the host seeds ONE ammo id + clipsize per NPC from the def
+names at mission load (`NovaSimulation::resolve_ai_weapons`, after the ammo table
+loads) — the D-AI-5 stand-in.
 
 ### 17.5 The aim model — lead, error, concealment
 
