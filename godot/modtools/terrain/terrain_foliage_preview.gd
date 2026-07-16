@@ -3,7 +3,10 @@ extends Node3D
 
 # Editor wiring for the same fresh native foliage runtime used in play. Both
 # foliage tiers sample the live authored foliage map; detail also samples the
-# live sculpted height field, while silhouettes require placed-object anchors.
+# live sculpted height field. The silhouette tier stays empty here: retail
+# generates it only around crouched/prone infantry (MoveOrder stance bits),
+# which an editor preview does not have [orig:
+# Terrain_RenderSectorEntitiesBySide @ 0x5c7dc2/0x5c7ded (MoveOrder & 0x300)].
 
 const INVALID_HEIGHT := -1000000.0
 const VegAssets := preload("res://engine/terrain/veg_assets.gd")
@@ -22,7 +25,6 @@ var _resource_root: NovaResourceRoot
 var _foliage_map: NovaTerrainFoliageMap
 var _foliage_defs: Array[NovaTerrainFoliageDef] = []
 var _tile_info: NovaTerrainTileInfo
-var _silhouette_anchor_provider := Callable()
 var _last_raw_foliage_defs: Array = []
 var _dispatcher: NovaFoliageDispatcher
 var _pending_reset := true
@@ -56,8 +58,7 @@ func set_preview_state(
 	foliage_defs: Array,
 	terrain_data: NovaTerrainData = null,
 	resource_root: NovaResourceRoot = null,
-	tile_info: NovaTerrainTileInfo = null,
-	silhouette_anchor_provider: Callable = Callable()
+	tile_info: NovaTerrainTileInfo = null
 ) -> void:
 	var mesh_changed := _terrain_mesh != terrain_mesh
 	var data_changed := _terrain_data != terrain_data
@@ -65,7 +66,6 @@ func set_preview_state(
 	var root_changed := _resource_root != resource_root
 	var defs_changed := _defs_changed(foliage_defs) or root_changed
 	var tile_info_changed := _tile_info != tile_info
-	var anchors_changed := _silhouette_anchor_provider != silhouette_anchor_provider
 
 	_terrain_mesh = terrain_mesh
 	_camera = camera
@@ -73,7 +73,6 @@ func set_preview_state(
 	_resource_root = resource_root
 	_foliage_map = foliage_map
 	_tile_info = tile_info
-	_silhouette_anchor_provider = silhouette_anchor_provider
 
 	if defs_changed:
 		var typed_defs: Array[NovaTerrainFoliageDef] = []
@@ -89,7 +88,7 @@ func set_preview_state(
 	_apply_dispatcher_sources()
 
 	if mesh_changed or data_changed or maps_changed or defs_changed \
-			or tile_info_changed or anchors_changed:
+			or tile_info_changed:
 		_pending_reset = true
 
 
@@ -201,7 +200,7 @@ func rebuild_if_needed() -> void:
 
 	# Fade, alpha-pass selection, and wind are camera/frame dependent, so the
 	# preview is rendered every frame even while the camera remains in one cell.
-	_dispatcher.silhouette_anchors = get_silhouette_anchors()
+	_dispatcher.silhouette_anchors = PackedVector3Array()
 	_dispatcher.render_preview(_camera.global_transform)
 
 
@@ -219,22 +218,3 @@ func get_surface_input_diagnostics() -> SurfaceInputDiagnostics:
 ## Effective Mission blocker resource, exposed for host diagnostics and tests.
 func get_tile_info() -> NovaTerrainTileInfo:
 	return _tile_info
-
-
-## Resolve the current placed-object anchors at render time. The injected
-## provider wins; retaining the old terrain-mesh duck type as a compatibility
-## fallback keeps standalone preview hosts safe.
-func get_silhouette_anchors() -> PackedVector3Array:
-	if _silhouette_anchor_provider.is_valid():
-		var value: Variant = _silhouette_anchor_provider.call()
-		if value is PackedVector3Array:
-			return value
-		if value is Array:
-			var anchors := PackedVector3Array()
-			for entry in value:
-				if entry is Vector3:
-					anchors.append(entry)
-			return anchors
-	if _terrain_mesh != null and _terrain_mesh.has_method("get_placed_object_positions"):
-		return _terrain_mesh.get_placed_object_positions()
-	return PackedVector3Array()

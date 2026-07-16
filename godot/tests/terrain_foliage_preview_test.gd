@@ -5,22 +5,8 @@ const EditorMainScene := preload("res://modtools/editor/editor_main.tscn")
 const EditorWorkstationScript := preload("res://modtools/editor/editor_workstation.gd")
 
 
-class AnchorSource:
-	extends Node
-
-	var anchors := PackedVector3Array([
-		Vector3(10.0, 2.0, 30.0),
-		Vector3(40.0, 5.0, 60.0),
-	])
-
-	func get_anchors() -> PackedVector3Array:
-		return anchors
-
-
-func test_preview_accepts_and_clears_injected_tile_and_anchor_context() -> void:
+func test_preview_accepts_and_clears_injected_tile_context_without_anchors() -> void:
 	var preview: TerrainFoliagePreview = add_child_autofree(TerrainFoliagePreviewScript.new())
-	var source := AnchorSource.new()
-	add_child_autofree(source)
 	await get_tree().process_frame
 
 	var diagnostics: TerrainFoliagePreview.SurfaceInputDiagnostics = \
@@ -30,24 +16,20 @@ func test_preview_accepts_and_clears_injected_tile_and_anchor_context() -> void:
 
 	assert_true(preview.has_method("get_tile_info"),
 		"The preview needs a public blocker diagnostic at its host seam.")
-	assert_true(preview.has_method("get_silhouette_anchors"),
-		"The preview needs a public effective-anchor diagnostic at its host seam.")
-	if not preview.has_method("get_tile_info") or not preview.has_method("get_silhouette_anchors"):
+	if not preview.has_method("get_tile_info"):
 		return
 
 	var tile_info := NovaTerrainTileInfo.new()
-	preview.call("set_preview_state", null, null, null, [], null, null,
-		tile_info, Callable(source, "get_anchors"))
+	preview.call("set_preview_state", null, null, null, [], null, null, tile_info)
 	assert_same(preview.call("get_tile_info"), tile_info)
-	var anchors: PackedVector3Array = preview.call("get_silhouette_anchors")
-	assert_eq(anchors, source.anchors,
-		"Mission placed objects, not the terrain mesh, drive MODEL foliage anchors.")
 
-	preview.call("set_preview_state", null, null, null, [], null, null,
-		null, Callable())
+	preview.call("set_preview_state", null, null, null, [], null, null, null)
 	assert_null(preview.call("get_tile_info"), "Clearing context removes stale mission blockers.")
-	assert_true((preview.call("get_silhouette_anchors") as PackedVector3Array).is_empty(),
-		"Clearing context removes stale mission anchors.")
+	# The preview never manufactures silhouette anchors: retail's MODEL tier
+	# generates only around crouched/prone infantry, which a preview lacks
+	# [orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7dc2/0x5c7ded].
+	assert_false(preview.has_method("get_silhouette_anchors"),
+		"The retired placed-object anchor seam must not return.")
 
 
 func test_terrain_editor_uses_mission_tile_override_without_leaking_authoring_overlays() -> void:
@@ -121,7 +103,7 @@ func test_terrain_editor_uses_mission_tile_override_without_leaking_authoring_ov
 	mission_entry.set_tile_index(0)
 	mission_entry.set_flags(NovaTerrainTileInfo.FLAG_OUTLINE)
 	mission_tile_info.add_entry(mission_entry)
-	editor.call("set_mission_preview_context", mission_tile_info, Callable())
+	editor.call("set_mission_preview_context", mission_tile_info)
 	await get_tree().process_frame
 	assert_true(bool(editor.call("is_mission_preview_context_active")))
 	assert_same(editor.call("get_effective_tile_info"), mission_tile_info)

@@ -188,7 +188,6 @@ var _tile_overlay_preview: TerrainTileOverlayPreview
 # Mission is active, then clear atomically on workspace exit.
 var _mission_preview_context_active := false
 var _mission_preview_tile_info: NovaTerrainTileInfo
-var _mission_preview_anchor_provider := Callable()
 var _mission_preview_time_of_day := NAN
 # Identity guard: allocation-heavy full preprocessing runs once per terrain
 # mount; edit transactions call the narrow refresh family below.
@@ -1451,12 +1450,13 @@ func _refresh_surface_inputs_for_texture_slot(slot_id: String) -> void:
 		_refresh_surface_input_details()
 
 
-## Scope the Mission workspace's external tile blockers and live placed-object
-## anchors onto the shared editor preview. This never mutates the Terrain
-## document, so clearing the context restores its authored tile layout and UI.
+## Scope the Mission workspace's external tile blockers onto the shared editor
+## preview. This never mutates the Terrain document, so clearing the context
+## restores its authored tile layout and UI. (Foliage silhouettes take no
+## mission anchors: retail generates them only around crouched/prone infantry
+## [orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7dc2/0x5c7ded].)
 func set_mission_preview_context(
 	tile_info: NovaTerrainTileInfo,
-	anchor_provider: Callable,
 	preview_time_of_day: float = NAN
 ) -> void:
 	var time_changed := is_nan(_mission_preview_time_of_day) != is_nan(preview_time_of_day) \
@@ -1464,11 +1464,9 @@ func set_mission_preview_context(
 		and not is_equal_approx(_mission_preview_time_of_day, preview_time_of_day))
 	var context_changed := not _mission_preview_context_active \
 		or _mission_preview_tile_info != tile_info \
-		or _mission_preview_anchor_provider != anchor_provider \
 		or time_changed
 	_mission_preview_context_active = true
 	_mission_preview_tile_info = tile_info
-	_mission_preview_anchor_provider = anchor_provider
 	_mission_preview_time_of_day = preview_time_of_day
 	_sync_surface_overlay_state(_get_material())
 	if not context_changed:
@@ -1486,12 +1484,10 @@ func set_mission_preview_context(
 func clear_mission_preview_context() -> void:
 	if not _mission_preview_context_active \
 			and _mission_preview_tile_info == null \
-			and _mission_preview_anchor_provider.is_null() \
 			and is_nan(_mission_preview_time_of_day):
 		return
 	_mission_preview_context_active = false
 	_mission_preview_tile_info = null
-	_mission_preview_anchor_provider = Callable()
 	_mission_preview_time_of_day = NAN
 	_sync_surface_overlay_state(_get_material())
 	if _world_preview != null:
@@ -1540,8 +1536,7 @@ func _sync_foliage_preview() -> void:
 		_document.foliage_defs,
 		_data,
 		get_resource_root(),
-		get_effective_tile_info(),
-		_mission_preview_anchor_provider if _mission_preview_context_active else Callable()
+		get_effective_tile_info()
 	)
 	_foliage_preview.rebuild_if_needed()
 

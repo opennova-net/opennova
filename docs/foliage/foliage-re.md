@@ -31,7 +31,7 @@ place.
 | `:fd` bake/sampling | `Foliage_LoadDefAssets @ 0x601260`, `GTexture_CreateFromPixelDataWithAlphaBlend @ 0x687270`, device sampler init | exact dual-source chain plus linear texels and point-selected retail mips through the 4x4 terminal level | matching; D-FOLIAGE-5 fixed |
 | Detail lightmap input | composed per-tile render target | exact bare tile + hosted static `.til`; retail page/cache and ordered model/depth contributions absent | partial; D-FOLIAGE-7 |
 | Mission-tile exclusion | `Foliage_PathBlockedByPlacedTile @ 0x606490` | shared parsed `<mission>.til`, exact inclusive 16x16 AABB scan | matching; D-FOLIAGE-8 fixed |
-| MODEL-anchor visibility | visible sector entities + retail occlusion | placed objects + camera frustum | partial; D-FOLIAGE-9 |
+| MODEL-anchor selection | crouched/prone infantry on terrain (`MoveOrder & 0x300`, empty `groundEntity`) among visible sector entities | sim stance query + camera frustum | matching gate (D-FOLIAGE-11 FIXED 2026-07-16); occlusion membership partial, D-FOLIAGE-9 |
 
 ## The correction: two overlapping tiers
 
@@ -293,9 +293,25 @@ D-TERRAIN-7 producer gap.
 ### Driver and cells
 
 The driver is the visible sector-entity walk in
-`Terrain_RenderSectorEntitiesBySide @ 0x5c7d50`. An anchor enters the tier at
-view depth 38. `Foliage_UpdateModelTiles @ 0x601f50` walks four neighboring
-16-unit cells around it.
+`Terrain_RenderSectorEntitiesBySide @ 0x5c7d50`, and the tier is the
+**hide-in-grass mechanic**: the walk calls the foliage update only for
+entities whose `MoveOrder` dword carries a stance bit — `0x100` prone /
+`0x200` crouch — and whose `groundEntity` is empty (standing on terrain, not
+on a vehicle deck or floor) [`orig: flags test @ 0x5c7dc2/0x5c7ded
+(MoveOrder & 0x300), groundEntity gate @ 0x5c7dd5..0x5c7df7`]. Placed
+objects never write `MoveOrder`, so retail never generates model foliage
+around crates, fences, or buildings; only infantry ever carry the bits
+(local packer `Player_PackInputStateToEntity @ 0x4df6a7..0x4df6cd` from the
+stance latches, remote apply `NapiNPServerMsg_HandleStanceChange @
+0x501c60`, vehicle attach clears `@ 0x435c54/0x43561e`). A passing entity
+also splits on the water side of the pass and enters the tier at view depth
+38 (`Foliage_UpdateModelTiles`'s own `>= 38.0` view-Z gate). The per-entity
+draw parameter is `clamp(4096 / (distance_units + 1), 8, 128)` — the model
+tier's alpha reference, so the mask ring thins with distance but never
+disappears [`orig: fdivr 4096.0 @ 0x5c7ea4..0x5c7eb3, clamp @
+0x5c7eb8..0x5c7ec9`; hosted as `silhouette_alpha_reference`].
+`Foliage_UpdateModelTiles @ 0x601f50` then walks four neighboring 16-unit
+cells around the anchor.
 
 Within each cell:
 
@@ -305,10 +321,17 @@ Within each cell:
 - at most 21 candidates survive per cell;
 - the same path blocker / `FORCE_ON` rule applies.
 
-Runtime anchors are genuine placed world objects. The removed fallback that
-fed terrain-patch centers was not equivalent to sector entities. The host
-frustum-culls anchors, but retail's broader sector visibility/occlusion state
-is not yet reproduced; see D-FOLIAGE-9.
+Host anchors are the sim's crouched/prone infantry standing on terrain
+(`NovaSimulation::get_foliage_mask_anchor_positions`, from the replicated
+`net_stance_bits` + `ground_target`), corrected 2026-07-16 — the earlier
+placed-object anchor feed (D-FOLIAGE-11, FIXED) generated masks retail
+never renders and collapsed frame rate on object-dense vistas (03TR
+airfield: 1143 frustum-passing anchors thrashed the 1000-entry model
+caches at ~7k regenerations per frame, 212 ms of a 354 ms frame; with the
+witnessed gate the tier idles in object-only scenes). The host
+frustum-culls the surviving anchors, but retail's broader
+sector-visibility/occlusion membership is still not reproduced; see
+D-FOLIAGE-9.
 
 ### Normalization and eight-sample ground fit
 
@@ -538,7 +561,8 @@ D-FOLIAGE-7 rather than claimed as tile-light parity.
 | D-FOLIAGE-6 | **FIXED 2026-07-14.** The former opaque-black conclusion missed the downstream ONE/ONE blend state. The host now preserves destination color while retaining the recovered strict-alpha-tested MODEL depth write. |
 | D-FOLIAGE-7 | **OPEN, bounded.** Runtime detail reconstructs exact bare-tile RGB/heightfield-DOT3 alpha and composes hosted static `.til` RGB/tint at the exact pre-wind coordinate. Retail's general page/cache c7/c8 projection and ordered tile-model/depth-alpha RT contributions remain absent; standalone editor preview also lacks the parent normal atlas and uses its mesh-normal fallback. |
 | D-FOLIAGE-8 | **FIXED 2026-07-14.** Direct retail inspection resolved the supposed path/spacing substrate as the shared mission `.til` array. `til_blocks_foliage` ports the exact linear inclusive 16x16 AABB scan, GameWorld parses `<mission>.til` before terrain build, and terrain/foliage/network state share that resource/payload; `FORCE_ON` continues to bypass the sampler in the portable runtime. [orig: `Foliage_PathBlockedByPlacedTile @ 0x606490`; `Terrain_LoadFoliageFile @ 0x60a740`; `Terrain_GetSurfaceTypeAtPosition @ 0x606510`] |
-| D-FOLIAGE-9 | **OPEN, host mapping.** Placed objects plus camera frustum approximate retail visible-sector-entity/occlusion membership. No terrain-center fallback remains. Same-frame refreshes of an overlapping host `(slot, cell key)` are coalesced without removing its distinct draw submissions, preventing host-only regeneration/upload storms while this membership gap remains open. |
+| D-FOLIAGE-9 | **OPEN, host mapping (narrowed 2026-07-16).** The anchor CLASS is now the witnessed stance gate (D-FOLIAGE-11); what remains approximate is visibility membership — camera frustum stands in for retail's visible-sector walk + `test_sector_entity_occlusion @ 0x5c4610`. No terrain-center fallback remains. Same-frame refreshes of an overlapping host `(slot, cell key)` are coalesced without removing its distinct draw submissions, preventing host-only regeneration/upload storms while this membership gap remains open. |
+| D-FOLIAGE-11 | **FIXED 2026-07-16.** The host fed every placed mission object as a MODEL-tier anchor; retail's sector walk generates the tier only for entities with `MoveOrder` stance bits (`0x100` prone / `0x200` crouch) and an empty `groundEntity` — the hide-in-grass masks around infantry [`orig: @ 0x5c7dc2/0x5c7ded/0x5c7dd5`]. Anchors now come from the sim's stance query; the ONED preview feeds none (no infantry exists there), and its placed-object `anchor_provider` plumbing was removed. Placed-object anchoring both drew non-retail grass masks around every object and, on object-dense vistas, thrashed the per-definition model caches into a 3 FPS frame. |
 | D-FOLIAGE-10 | **OPEN, bounded host order.** Retail inserts each immediate MODEL depth-mask draw between its initial sector flush and later entity/foliage consumers; the host's transparent-pass depth sorting reproduces the mask-occludes-farther-detail effect but cannot cull already-drawn farther tufts under a nearer mask, and cannot reproduce every arbitrary insertion point. The near secondary LOW's strict `LESS` is now emulated exactly via the high-pass cutoff discard (the 2026-07-15 grill retired the state half of this entry). The water-REFLECTION scene's LOW-only `fade × 0.1` foliage pass (arg_8 = reflectionEnabled @ `0x5c95c1/0x5c9661`) is not hosted while reflections carry no foliage. |
 
 ## Cross-references

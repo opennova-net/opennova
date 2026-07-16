@@ -740,12 +740,16 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 	_perf_runtime_us = 0
 	_perf_audio_us = 0
 	if _loaded and _dispatcher != null:
-		# The silhouette tier is driven only by visible sector entities
-		# [orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7d50]. Terrain-patch
-		# centers are not equivalent anchors, so an object-free map supplies none.
+		# The silhouette tier is the hide-in-grass mechanic: retail's sector-entity
+		# walk generates model foliage only around CROUCHED/PRONE infantry standing
+		# on terrain — never around placed objects, whose MoveOrder stays 0
+		# [orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7dc2/0x5c7ded
+		# (MoveOrder & 0x300), groundEntity gate @ 0x5c7dd5..0x5c7df7].
 		var silhouette_anchors := PackedVector3Array()
-		if _placer != null and _placer.has_method("get_placed_world_positions"):
-			silhouette_anchors = _placer.get_placed_world_positions()
+		if _runtime != null and _runtime.has_method("get_sim"):
+			var anchor_sim = _runtime.get_sim()
+			if anchor_sim != null and anchor_sim.has_method("get_foliage_mask_anchor_positions"):
+				silhouette_anchors = anchor_sim.get_foliage_mask_anchor_positions()
 		_dispatcher.silhouette_anchors = silhouette_anchors
 		_dispatcher.render_frame(camera_xform)
 		_perf_foliage_us = Time.get_ticks_usec() - foliage_start

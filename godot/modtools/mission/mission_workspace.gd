@@ -119,13 +119,10 @@ func _sync_mission_preview_context() -> void:
 	var tile_info: NovaTerrainTileInfo = null
 	if _controller != null and _controller.has_method("get_mission_tile_info"):
 		tile_info = _controller.get_mission_tile_info()
-	var anchor_provider := Callable()
-	if _controller != null and _controller.has_method("get_placed_world_positions"):
-		anchor_provider = Callable(_controller, "get_placed_world_positions")
 	var preview_time_of_day := NAN
 	if _controller != null and _controller.has_method("get_mission_preview_time_of_day"):
 		preview_time_of_day = _controller.get_mission_preview_time_of_day()
-	terrain_editor.set_mission_preview_context(tile_info, anchor_provider, preview_time_of_day)
+	terrain_editor.set_mission_preview_context(tile_info, preview_time_of_day)
 
 
 func _clear_mission_preview_context() -> void:

@@ -62,25 +62,21 @@ class PreviewContextStubEditor:
 	var clear_context_calls := 0
 	var context_active := false
 	var tile_info: NovaTerrainTileInfo
-	var anchor_provider := Callable()
 	var time_of_day := NAN
 
 	func set_mission_preview_context(
 		value: NovaTerrainTileInfo,
-		provider: Callable,
 		preview_time_of_day: float = NAN
 	) -> void:
 		set_context_calls += 1
 		context_active = true
 		tile_info = value
-		anchor_provider = provider
 		time_of_day = preview_time_of_day
 
 	func clear_mission_preview_context() -> void:
 		clear_context_calls += 1
 		context_active = false
 		tile_info = null
-		anchor_provider = Callable()
 		time_of_day = NAN
 
 	func set_viewport_active(_active: bool, _grab_focus: bool) -> void:
@@ -108,10 +104,8 @@ func test_mission_preview_context_is_scoped_to_workspace_activation() -> void:
 
 	ws.activate()
 	assert_true(first.context_active,
-		"Mission activation must install blockers and placed-object anchors on the shared terrain preview.")
+		"Mission activation must install blockers on the shared terrain preview.")
 	assert_eq(first.set_context_calls, 1)
-	assert_true(first.anchor_provider.is_valid(), "The controller supplies a stable live anchor provider.")
-	assert_eq(first.anchor_provider.get_method(), &"get_placed_world_positions")
 
 	var second := PreviewContextStubEditor.new()
 	add_child_autofree(second)
