@@ -374,7 +374,9 @@ func _build_curve_row(box: VBoxContainer, p: NovaParticleDef, field: String,
 	for j in range(tables.size()):
 		option.add_item(tables[j].id)
 		option.set_item_metadata(j + 1, tables[j].id)
-		if tables[j].id == current_name:
+		# Match the runtime's case-insensitive table resolve so a curve authored
+		# with a case-mixed name still shows its table instead of "(none)".
+		if tables[j].id.nocasecmp_to(current_name) == 0:
 			selected = j + 1
 	option.select(selected)
 	controls.add_child(option)

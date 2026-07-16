@@ -53,6 +53,8 @@ int main() {
 
 	const opennova::particle::ParticleDef &particle = file.particles[0];
 	if (!expect(particle.id == "Buildup dots", "particle id with whitespace parses")) return 1;
+	if (!expect(file.find_particle("bUILDUP DOTS") == &particle,
+			"find_particle folds case [orig: CEffectWorld_FindParticleDefByName @ 0x5e41d0]")) return 1;
 	if (!expect(particle.flags_raw == "TOPALIGN", "flags strip surrounding whitespace")) return 1;
 	if (!expect(particle.move_raw == "GRAVITATE", "move enum parses")) return 1;
 	if (!expect(near(particle.gravity, 600.0f), "gravity parses as float")) return 1;
@@ -86,6 +88,27 @@ int main() {
 	const opennova::particle::ParticleDef *found = file.find_particle("Buildup dots");
 	if (!expect(found != nullptr && found->id == "Buildup dots", "find_particle resolves by id")) return 1;
 	if (!expect(file.find_particle("nope") == nullptr, "find_particle returns null on miss")) return 1;
+
+	constexpr char oversized_flipbook[] =
+			"[particledef]\n"
+			"{\n"
+			"id = Oversized Flipbook;\n"
+			"graphic1 = frame.tga, additive;\n"
+			"g1_flip_frames = 999999;\n"
+			"}\n";
+	opennova::particle::ParticleFile bounded_file;
+	opennova::particle::ParseError bounded_error;
+	if (!opennova::particle::load_particles_from_buffer(oversized_flipbook,
+			sizeof(oversized_flipbook) - 1, bounded_file, bounded_error)) {
+		std::fprintf(stderr, "FAIL: bounded flipbook parse error at line %d: %s\n",
+				bounded_error.line, bounded_error.message.c_str());
+		return 1;
+	}
+	if (!expect(bounded_file.particles.size() == 1,
+			"bounded flipbook fixture has one particledef")) return 1;
+	if (!expect(bounded_file.particles[0].graphics[0].flip_frames ==
+			opennova::particle::kMaxParticleFlipFrames,
+			"authored flip_frames is capped at the shared runtime limit")) return 1;
 
 	return 0;
 }

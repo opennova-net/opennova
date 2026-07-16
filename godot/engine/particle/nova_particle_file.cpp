@@ -114,25 +114,32 @@ Error NovaParticleFile::save_to_file(const String &path) {
 }
 
 Ref<NovaParticleEffect> NovaParticleFile::find_effect(const String &id) const {
+	// Case-insensitive like every by-name walk in the effect system
+	// [orig: CEffectWorld_FindEffectDefByName @ 0x5e34f0 → _stricmp @ 0x5e352c].
 	for (int i = 0; i < effects.size(); ++i) {
 		Ref<NovaParticleEffect> e = effects[i];
-		if (e.is_valid() && e->get_id() == id) return e;
+		if (e.is_valid() && e->get_id().nocasecmp_to(id) == 0) return e;
 	}
 	return Ref<NovaParticleEffect>();
 }
 
 Ref<NovaParticleDef> NovaParticleFile::find_particle(const String &id) const {
+	// Case-insensitive like every by-name walk in the effect system
+	// [orig: CEffectWorld_FindParticleDefByName @ 0x5e41d0 → _stricmp @ 0x5e420c].
 	for (int i = 0; i < particles.size(); ++i) {
 		Ref<NovaParticleDef> p = particles[i];
-		if (p.is_valid() && p->get_id() == id) return p;
+		if (p.is_valid() && p->get_id().nocasecmp_to(id) == 0) return p;
 	}
 	return Ref<NovaParticleDef>();
 }
 
 Ref<NovaParticleTable> NovaParticleFile::find_table(const String &id) const {
+	// Case-insensitive to match the engine's _stricmp table resolve
+	// [orig: table find @ 0x5e9540 → _stricmp @ 0x76fdf6]; shipped data mixes
+	// cases (ambfx.ptl `green_func = Table11Alt` vs `id = table11Alt`).
 	for (int i = 0; i < tables.size(); ++i) {
 		Ref<NovaParticleTable> t = tables[i];
-		if (t.is_valid() && t->get_id() == id) return t;
+		if (t.is_valid() && t->get_id().nocasecmp_to(id) == 0) return t;
 	}
 	return Ref<NovaParticleTable>();
 }

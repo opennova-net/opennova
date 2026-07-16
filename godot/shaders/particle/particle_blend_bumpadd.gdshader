@@ -1,34 +1,23 @@
 shader_type spatial;
-// CParticleDefEntry_ParseBlendMode @ 0x5e29f0 → BlendMode::Bumpadd (6).
-// Engine quirk: chained strstr matches `bump` before `bumpadd` so
-// `bumpadd` resolves to BlendMode::Bump (3) at parse-time per
-// CParticleDefEntry_ParseBlendMode @ 0x5e29f0. We keep this shader for
-// editor-authoring round-trips. Vertex format same as Bump (DIFFUSE +
-// SPECULAR), but we use additive blend on the framebuffer (the engine's
-// combiner mode for Bumpadd is unwitnessed; this shader approximates with
-// `texture × COLOR + CUSTOM0`).
+// CParticleDefEntry_ParseBlendMode @ 0x5e29f0 -> BlendMode::Bumpadd (6).
+// Retail uses the same DOT3 + alpha-restore stages as Bump, then blends with
+// SRCALPHA/ONE. The parser's substring order makes authored `bumpadd` resolve
+// to Bump, but this exact program remains reachable through numeric type 6.
 render_mode unshaded, cull_disabled, blend_add, depth_draw_never;
 
-uniform sampler2D albedo_tex : source_color, filter_linear, repeat_disable;
+uniform sampler2D albedo_tex : filter_linear, repeat_disable;
 uniform bool has_texture = false;
 
-varying vec4 lit_color;
-
-void vertex() {
-	lit_color = CUSTOM0;
-}
-
 void fragment() {
-	vec4 base = COLOR;
+	vec4 texel = vec4(0.5, 0.5, 1.0, 1.0);
 	if (has_texture) {
-		base *= texture(albedo_tex, UV);
+		texel = texture(albedo_tex, UV);
 	} else {
 		vec2 centered = UV - vec2(0.5);
 		float r = length(centered) * 2.0;
-		base.a *= clamp(1.0 - r, 0.0, 1.0);
+		texel.a = clamp(1.0 - r, 0.0, 1.0);
 	}
-	// texture × COLOR + lit (additive combine on top of the additive
-	// framebuffer blend = brighter overall vs Bump).
-	ALBEDO = base.rgb + lit_color.rgb * 0.5;
-	ALPHA = base.a;
+	float dotv = clamp(dot(texel.rgb * 2.0 - 1.0, COLOR.rgb * 2.0 - 1.0), 0.0, 1.0);
+	ALBEDO = vec3(dotv);
+	ALPHA = texel.a * COLOR.a;
 }

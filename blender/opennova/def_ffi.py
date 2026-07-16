@@ -107,6 +107,15 @@ class DefWeaponsFile(ctypes.Structure):
     ]
 
 
+class DefItemParticleFx(ctypes.Structure):
+    # Mirror of def.h DefItemParticleFx (one anchored per-item effect slot).
+    _fields_ = [
+        ("effect", ctypes.c_char * 32),
+        ("userpoint", ctypes.c_char * 32),
+        ("secondary_effect", ctypes.c_char * 32),
+    ]
+
+
 class DefItemDef(ctypes.Structure):
     _fields_ = [
         ("display_name", ctypes.c_char * 128),
@@ -123,6 +132,42 @@ class DefItemDef(ctypes.Structure):
         ("dawnshot", ctypes.c_char * 128),
         ("duskshot", ctypes.c_char * 128),
         ("dayshot", ctypes.c_char * 128),
+        # §5.10b dispatch tags + attrib masks + the vehicle physics block (mirror
+        # def.h — these were added C-side over several slices; entries[] indexing
+        # is stride-sensitive, so every C field must appear here).
+        ("ai_function", ctypes.c_char * 16),
+        ("move_function", ctypes.c_char * 16),
+        ("render_function", ctypes.c_char * 16),
+        ("disk_function", ctypes.c_char * 16),
+        ("attrib", ctypes.c_uint),
+        ("attrib2", ctypes.c_uint),
+        ("physics", ctypes.c_int),
+        ("acceleration", ctypes.c_int),
+        ("deceleration", ctypes.c_int),
+        ("player_speed", ctypes.c_int),
+        ("water_speed", ctypes.c_int),
+        ("slip_speed", ctypes.c_int),
+        ("max_slope", ctypes.c_int),
+        ("slip_slope", ctypes.c_int),
+        ("turn_rate", ctypes.c_int),
+        ("turn_rate2", ctypes.c_int),
+        ("critical_hp", ctypes.c_int),
+        ("critical_drain", ctypes.c_int),
+        ("unit_type", ctypes.c_int),
+        # Per-item particle-effect keys (mirror def.h; ItemDef_ParseProperty
+        # @ 0x49eb00 particlefx family).
+        ("particlefx", DefItemParticleFx),
+        ("particlefxs", DefItemParticleFx),
+        ("particlefxw1", DefItemParticleFx),
+        ("particlefxw2", DefItemParticleFx),
+        ("particlefxw3", DefItemParticleFx),
+        ("particlefxw4", DefItemParticleFx),
+        ("particledeath", ctypes.c_char * 32),
+        ("particleh2odeath", ctypes.c_char * 32),
+        ("particlefire", ctypes.c_char * 32),
+        ("particleother", ctypes.c_char * 32),
+        ("particlefinale", ctypes.c_char * 32),
+        ("particlespawn", ctypes.c_char * 32),
         ("raw_lines", ctypes.c_void_p),
         ("raw_lines_count", ctypes.c_size_t),
     ]

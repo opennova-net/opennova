@@ -199,6 +199,26 @@ func play_body_clip_variant(key: String, variant: int) -> void:
 	_body_pose_dirty = true
 
 
+## Pose a selected clip variant at an authoritative time. Unlike
+## set_animation_time(), this keeps render-frame _process(delta) from advancing
+## the playhead; the fixed-tick weapon presenter supplies every later phase.
+func play_body_clip_variant_at_time(key: String, variant: int, seconds: float) -> void:
+	if _skeletal == null or not _skeletal.has_clip(key):
+		return
+	var same_external := (_anim_external_phase and key == _anim_key
+			and variant == _anim_variant
+			and is_equal_approx(_anim_time, seconds))
+	_anim_key = key
+	_anim_variant = variant
+	_set_body_playhead(seconds)
+	_anim_playing = false
+	_anim_external_phase = true
+	if same_external and not _body_pose_dirty:
+		return
+	_body_pose_dirty = true
+	_advance_body_anim(0.0)
+
+
 ## Pose a main-body clip at the authoritative infantry motor playhead. IDA's
 ## AnimMap phase advances in half-frame ticks, so seconds = ticks / (2 * clip_fps).
 ## The model does not free-run this clip between sim snapshots.
@@ -1176,5 +1196,4 @@ func _set_model_bounds(bounds: AABB) -> void:
 
 func _aabb_equal_approx(a: AABB, b: AABB) -> bool:
 	return a.position.is_equal_approx(b.position) and a.size.is_equal_approx(b.size)
-
 

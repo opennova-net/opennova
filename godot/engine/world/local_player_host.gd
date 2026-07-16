@@ -132,6 +132,9 @@ var _vm_camera: Camera3D = null
 # BOTH viewmodel parts (arms + gun share the animadm), and places nodes.
 var _vm_parts: Array = []           # NovaObjectModel parts under the viewmodel container
 var _viewmodel_generation := 0      # action-slot owner identity across weapon re-mounts
+# Live owner-bound effect anchors registered on the world (slot_key -> true);
+# dropped whenever the viewmodel generation turns over.
+var _registered_effect_anchor_keys: Dictionary = {}
 var _weapon_play_serial := -1
 var _weapon_view: PlayerWeaponView = null  # this tick's FSM view (body channel rides it)
 var _fire_was_held := false
@@ -179,9 +182,14 @@ func setup(world, camera: Camera3D) -> void:
 	# a first-tick shot before the first active snapshot is presented.
 	if _world != null and _world.has_method("drain_local_player_weapon_events"):
 		_world.drain_local_player_weapon_events()
+	if _world != null and _world.has_method("set_local_player_weapon_tick_consumer"):
+		_world.set_local_player_weapon_tick_consumer(
+				Callable(self, "_present_fixed_weapon_tick"))
 
 
 func teardown() -> void:
+	if _world != null and _world.has_method("set_local_player_weapon_tick_consumer"):
+		_world.set_local_player_weapon_tick_consumer(Callable())
 	_set_fly_camera_locked(false)
 	_release_mouse_capture()
 	_clear_models()
@@ -244,9 +252,17 @@ func _free_viewmodel_pass() -> void:
 ## WeaponLoadout_ApplyFromBuffer @0x565cd0 tail -> Player_MountWeaponSlot @0x4dfa40].
 func refresh_viewmodel() -> void:
 	_viewmodel_generation += 1
+	_unregister_effect_anchors()
 	if _viewmodel != null and is_instance_valid(_viewmodel):
 		_viewmodel.queue_free()
 	_viewmodel = null
+
+
+func _unregister_effect_anchors() -> void:
+	if _world != null and _world.has_method("unregister_effect_anchor"):
+		for key in _registered_effect_anchor_keys:
+			_world.unregister_effect_anchor(key)
+	_registered_effect_anchor_keys.clear()
 
 
 # Track the player camera 1:1 and rebuild the witnessed projection: renderfov is a
@@ -354,24 +370,59 @@ func after_world_tick() -> void:
 		_view = null
 		return
 	_view = _world.local_player_view() if _world.has_method("local_player_view") else null
-	_consume_weapon_view()
+	# Place the camera/viewmodel root for THIS tick before consuming one-shot
+	# presentation events. On the first live tick the freshly built model is still
+	# at its default transform; on later ticks it otherwise trails movement/look by
+	# one frame. Pre-adopt the weapon snapshot so the avatar's body channel remains
+	# current while _update_player_camera() stamps all visual roots.
+	var weapon_view: PlayerWeaponView = (_world.local_player_weapon_view()
+			if _world.has_method("local_player_weapon_view") else null)
+	_weapon_view = weapon_view
 	_update_player_camera()
+	_consume_weapon_view(weapon_view)
 
 
-# Drain the FSM's ordered per-tick presentation batch: several 62.5 Hz ticks can
-# run per frame, and every clip/begin/end payload must survive. Clip starts land on
-# BOTH viewmodel parts and resume at their age within the catch-up batch. Scope side effects
+# Present one simulation tick's weapon batch before EffectWorld advances that
+# same tick. Updating only the local camera/avatar/viewmodel here gives action
+# user points their production-tick pose; mission/vehicle Nodes retain the
+# render-frame-batched present path that prevents 00TRa transform flicker.
+func _present_fixed_weapon_tick(events: Array[PlayerWeaponEvent]) -> void:
+	if not _has_player():
+		return
+	var weapon_view: PlayerWeaponView = (_world.local_player_weapon_view()
+			if _world.has_method("local_player_weapon_view") else null)
+	if events.is_empty():
+		# Keep the active clip at this tick's exact pose, but defer the expensive
+		# camera/avatar/viewmodel-root presentation to after the catch-up batch.
+		_consume_weapon_events(weapon_view, events, true)
+		return
+	_view = _world.local_player_view() if _world.has_method("local_player_view") else null
+	_weapon_view = weapon_view
+	_update_player_camera()
+	_consume_weapon_events(weapon_view, events, true)
+
+
+# Drain any ordered presentation events left for hosts that do not install the
+# fixed-tick callback. In the game and ONED, _present_fixed_weapon_tick consumes
+# each 62.5 Hz batch before that tick's particle update. Every clip/begin/end
+# payload survives either route; pre-aged fallback clips resume at their source age.
+# Clip starts land on BOTH viewmodel parts. Scope side effects
 # (forced unscope, rescope-after-reload) flip the SIM's own engaged bit — they
 # arrive here already folded into the view snapshot.
 # [orig: ActionSlot_BeginActivePhase @0x53f830 plays the action clip on the owner's
 # animadm channel; the rescope block @0x54139e]
-func _consume_weapon_view() -> void:
-	if _world == null or not _world.has_method("local_player_weapon_view"):
+func _consume_weapon_view(view: PlayerWeaponView) -> void:
+	if _world == null:
 		return
 	var events: Array[PlayerWeaponEvent] = []
 	if _world.has_method("drain_local_player_weapon_events"):
 		events = _world.drain_local_player_weapon_events()
-	var view: PlayerWeaponView = _world.local_player_weapon_view()
+	_consume_weapon_events(view, events)
+
+
+func _consume_weapon_events(view: PlayerWeaponView,
+		events: Array[PlayerWeaponEvent],
+		authoritative_phase: bool = false) -> void:
 	_weapon_view = view
 	if view == null:
 		_weapon_play_serial = -1
@@ -379,10 +430,21 @@ func _consume_weapon_view() -> void:
 	var batch_started_clip := false
 	for event in events:
 		if not event.anim_key.is_empty():
-			_play_viewmodel_clip(event.anim_key, event.anim_variant, event.age_ticks)
 			batch_started_clip = true
+			break
+	if authoritative_phase and not batch_started_clip:
+		# Advance the already-playing clip before same-tick direct effects sample
+		# an action user point. A clip event below replaces this pose first.
+		_play_viewmodel_clip(view.anim_key, view.anim_variant,
+				view.anim_age_ticks, true)
+	for event in events:
+		if not event.anim_key.is_empty():
+			_play_viewmodel_clip(event.anim_key, event.anim_variant,
+					event.age_ticks, authoritative_phase)
 		if event.action_started >= 0:
 			_fire_action_effects(event)
+		if event.action_effect >= 0:
+			_fire_direct_action_effect(event)
 		if event.action_finished >= 0:
 			_fire_action_end_sound(event)
 	if batch_started_clip:
@@ -391,12 +453,38 @@ func _consume_weapon_view() -> void:
 	# but never replay the snapshot's historical sound/effect payloads.
 	if view.play_serial != _weapon_play_serial:
 		_weapon_play_serial = view.play_serial
-		_play_viewmodel_clip(view.anim_key, view.anim_variant)
+		if not authoritative_phase:
+			_play_viewmodel_clip(view.anim_key, view.anim_variant,
+					view.anim_age_ticks, false)
 
 
 # The FIRE action kind [orig: libs/world weapon_fsm.h weapon_action::kFire = 2] —
 # the only local action-begin that takes the with-effect (muzzle) shim.
 const WEAPON_ACTION_FIRE := 2
+
+
+# Weapon particles always enter the global EffectWorld and render in the later
+# world particle brackets, even when their position came from the first-person
+# gun. Retail flushes the viewmodel mini-scene, restores the world projection,
+# then runs EffectWorld_RenderParticlePass; there is no separate FP particle
+# pass. [orig: Render_ProcessMainSceneFrame @ 0x5ca0f0; particle pass
+# @ 0x5f7240; ActionSlot_SpawnEffect @ 0x401f20]
+const WEAPON_EFFECT_RENDER_DOMAIN := NovaEffectScene.RENDER_DOMAIN_WORLD
+
+
+# EffectPose carries forward in basis column 2 (rather than Godot's camera -Z
+# convention). Build a complete orthonormal frame so every generic producer
+# reaches the same portable spawn contract.
+func _weapon_effect_transform(position: Vector3, forward: Vector3) -> Transform3D:
+	if forward.length_squared() <= 0.0001:
+		return Transform3D(Basis.IDENTITY, position)
+	var z_axis := forward.normalized()
+	var seed_up := Vector3.UP
+	if absf(z_axis.dot(seed_up)) > 0.999:
+		seed_up = Vector3.FORWARD
+	var x_axis := seed_up.cross(z_axis).normalized()
+	var y_axis := z_axis.cross(x_axis).normalized()
+	return Transform3D(Basis(x_axis, y_axis, z_axis), position)
 
 
 # The action-begin SOUND + MUZZLE legs: play the started ACTION's soundset
@@ -425,10 +513,13 @@ func _fire_action_effects(event: PlayerWeaponEvent) -> void:
 		return
 	if event.action_started != WEAPON_ACTION_FIRE:
 		return  # local non-fire begins are the no-effect shim [orig: @0x541b17]
-	var scoped := _view != null and _view.scope_engaged
-	var vehicle_attack_context := _view != null and _view.vehicle_attack_context
-	if scoped and not _third_person and not vehicle_attack_context:
-		return  # scoped FP fire shows no muzzle flash [orig: @0x541aba !g_weaponScopeActive]
+	# The suppression reads the event's SETTLED scope state. Retail promotes
+	# g_weaponScopeActive before weapon actions on every tick; one host frame can
+	# drain several ticks spanning that boundary, so the final render snapshot is
+	# not a valid substitute. [orig: promoter @0x4de4f7 before weapon pump call
+	# @0x526786; gate @0x541aba !g_weaponScopeActive]
+	if event.scope_settled and not event.third_person and not event.vehicle_attack_context:
+		return  # settled-scoped FP fire shows no muzzle flash [orig: @0x541aba]
 	var fx = _world.get_effect_world()
 	if fx == null:
 		return
@@ -436,20 +527,84 @@ func _fire_action_effects(event: PlayerWeaponEvent) -> void:
 	var forward := _action_particle_world_forward(event.action_particle_userpoint)
 	# The live handle belongs to the runtime ACTION slot, not the whole player
 	# host. A weapon re-mount creates a new slot generation.
-	var owner_key := "%d:%d:%d" % [get_instance_id(), _viewmodel_generation, event.action_started]
-	if fx.has_method("spawn_effect_unless_alive"):
-		# One live muzzle group at a time — the witnessed slot+24 guard
-		# [orig: @0x5418c8 spawns only when the recorded handle is clear].
-		fx.spawn_effect_unless_alive(owner_key, event.action_particle, pos, forward)
-	else:
-		fx.spawn_effect(event.action_particle, pos, forward)
+	var slot_key := "%d:%d:%d" % [get_instance_id(), _viewmodel_generation, event.action_started]
+	var anchor_transform := _weapon_effect_transform(pos, forward)
+	# The live group follows the SPAWNING action's userpoint for its whole life:
+	# retail records the handle + action index on the slot and the pump re-anchors
+	# the emitter to that action's bone every tick, releasing it only on death
+	# [orig: ActionSlot_SpawnEffect handle/action record @ 0x40208f/0x402092 ->
+	# the +0x18 tracker leg in WeaponAction_ProcessFrame @ 0x540edf ->
+	# CEffectEmitter_UpdatePositionAndParams @ 0x5f6810]. The host analog is an
+	# owner-bound group whose anchor resolver re-reads the live userpoint pose.
+	if _world.has_method("register_effect_anchor"):
+		_world.register_effect_anchor(slot_key,
+				_weapon_effect_anchor_transform.bind(event.action_particle_userpoint))
+		_registered_effect_anchor_keys[slot_key] = true
+	fx.spawn_effect_request(event.action_particle, anchor_transform, {
+		"admission": NovaEffectScene.ADMISSION_SUPPRESS_WHILE_OWNED,
+		"binding": NovaEffectScene.BINDING_FOLLOW_OWNER,
+		"render_domain": WEAPON_EFFECT_RENDER_DOMAIN,
+		"slot_key": slot_key,
+		"owner_key": slot_key,
+		"owner_transform": anchor_transform,
+		"initial_age_ticks": maxi(event.age_ticks, 0),
+	})
 
 
-# World-space spawn point for an ACTION particle: the named user point on a viewmodel
-# part (the gun carries the muzzle points), through the part's global transform. The
-# static model-space point is used as-is — composing the current bone pose onto it is a
-# tracked deferral (ptl-format-re.md §8). Falls back to the first part's origin, then
-# the player eye.
+# The recoil-row DIRECT effect leg is entirely data-defined. Retail submits
+# every authored particle (muzzle, casing, smoke, or another user point) with
+# param7=0: no scope gate, name/user-point classification, or live-slot handle.
+# Each event is therefore an Always transient in its production tick's render
+# domain, pre-aged when multiple fixed ticks are presented together.
+# [orig: WeaponAction_Recoil @ 0x542dd0, spawn @ 0x542f64 with param7=0]
+func _fire_direct_action_effect(event: PlayerWeaponEvent) -> void:
+	if _world == null or event.effect_particle.is_empty():
+		return
+	if not _world.has_method("get_effect_world"):
+		return
+	var fx = _world.get_effect_world()
+	if fx == null:
+		return
+	var pos := _action_particle_world_position(event.effect_particle_userpoint)
+	var forward := _action_particle_world_forward(event.effect_particle_userpoint)
+	fx.spawn_effect_transient(event.effect_particle, pos, forward,
+			maxi(event.age_ticks, 0), WEAPON_EFFECT_RENDER_DOMAIN, 0, 0)
+
+
+## The live anchor for an owner-bound weapon-effect group: the spawning action's
+## userpoint through the CURRENT viewmodel pose, or null once the viewmodel is
+## gone (the effect world then unpins the group at its last pose)
+## [orig: the actionEffectHandle tracker @ 0x540edf re-reads
+## actionTable[slot+0x28]'s bone until the emitter dies].
+func _weapon_effect_anchor_transform(userpoint: String) -> Variant:
+	if _viewmodel == null or not is_instance_valid(_viewmodel):
+		return null
+	var pos := _action_particle_world_position(userpoint)
+	var forward := _action_particle_world_forward(userpoint)
+	return _weapon_effect_transform(pos, forward)
+
+
+# Map a model-space action userpoint through the live fake-skinned weapon bone.
+# Rigid first-person gun parts ride the .adm skeleton by subobject/bone index, so
+# applying only the model root leaves authored muzzle points in the rest pose (and,
+# for the AK, behind the gameplay camera). Convert model space into the bone's rest
+# frame, then back through its current global pose — the hosted equivalent of the
+# original action-bone transform.
+# [orig: Entity_ComputeActionTransform @0x401310 -> ActionSlot_SpawnEffect @0x401f20]
+func _action_particle_model_to_world(part: Node3D, info: Dictionary) -> Transform3D:
+	if part != null and part.has_method("get_skeleton"):
+		var skeleton := part.call("get_skeleton") as Skeleton3D
+		var subobject := int(info.get("subobject", -1))
+		if skeleton != null and subobject >= 0 and subobject < skeleton.get_bone_count():
+			return (skeleton.global_transform
+					* skeleton.get_bone_global_pose(subobject)
+					* skeleton.get_bone_global_rest(subobject).affine_inverse())
+	return part.global_transform if part != null else Transform3D.IDENTITY
+
+
+# World-space spawn point for an ACTION particle: the named user point on a
+# viewmodel part (the gun carries the muzzle points), composed through its live
+# subobject/bone pose. Falls back to the first part's origin, then the player eye.
 func _action_particle_world_position(userpoint: String) -> Vector3:
 	var fallback := Vector3.INF
 	for part in _vm_parts:
@@ -465,7 +620,8 @@ func _action_particle_world_position(userpoint: String) -> Vector3:
 		for i in range(data.get_user_point_count()):
 			var info: Dictionary = data.get_user_point_info(i)
 			if String(info.get("name", "")).nocasecmp_to(userpoint) == 0:
-				return part.global_transform * Vector3(info.get("position", Vector3.ZERO))
+				var model_to_world := _action_particle_model_to_world(part as Node3D, info)
+				return model_to_world * Vector3(info.get("position", Vector3.ZERO))
 	if fallback != Vector3.INF:
 		return fallback
 	return _eye_position(_world.local_player_position())
@@ -483,7 +639,8 @@ func _action_particle_world_forward(userpoint: String) -> Vector3:
 			if String(info.get("name", "")).nocasecmp_to(userpoint) != 0:
 				continue
 			var direction := Vector3(info.get("rotation", Vector3(0, 0, 1)))
-			var world_direction: Vector3 = part.global_transform.basis * direction
+			var model_to_world := _action_particle_model_to_world(part as Node3D, info)
+			var world_direction: Vector3 = model_to_world.basis * direction
 			if world_direction.length_squared() > 0.000001:
 				return world_direction.normalized()
 	if _camera != null:
@@ -511,18 +668,23 @@ func _fire_action_end_sound(event: PlayerWeaponEvent) -> void:
 # same-key resume. `variant` is the sim ring's latched serve for multi-clip .adm
 # rows — both parts follow the ONE latch, so arms and gun never split variants
 # [orig: AnimMap_PlayAnimBySlot @0x40bda0 latches the served entry at animState+68].
-func _play_viewmodel_clip(key: String, variant: int = 0, age_ticks: int = 0) -> void:
+func _play_viewmodel_clip(key: String, variant: int = 0, age_ticks: int = 0,
+		authoritative_phase: bool = false) -> void:
 	if key.is_empty():
 		return
+	var seconds := float(maxi(age_ticks, 0)) * WEAPON_TICK_DT
 	for part in _vm_parts:
 		if part == null or not is_instance_valid(part):
+			continue
+		if authoritative_phase and part.has_method("play_body_clip_variant_at_time"):
+			part.play_body_clip_variant_at_time(key, variant, seconds)
 			continue
 		if part.has_method("play_body_clip_variant"):
 			part.play_body_clip_variant(key, variant)
 		else:
 			part.play_body_clip(key)
 		if part.has_method("set_animation_time"):
-			part.set_animation_time(float(maxi(age_ticks, 0)) * WEAPON_TICK_DT)
+			part.set_animation_time(seconds)
 
 
 # Edge-triggered gameplay keys. F4 toggles first/third person [orig: g_camera_mode

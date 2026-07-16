@@ -201,9 +201,11 @@ func test_place_single_static_branch_builds_a_single_instance_batch() -> void:
 	var mesh := BoxMesh.new()
 	mesh.size = Vector3(2, 2, 2)
 	var offset := Transform3D(Basis(), Vector3(0, 1, 0))
-	placer._static_batch_cache["StaticCrate1"] = [{
+	var object_data := NovaObjectData.new()
+	assert_true(placer.register_resolved_static_graphic(
+			"StaticCrate1", object_data, [{
 		"mesh": mesh, "material": null, "offset": offset, "submesh": 0,
-	}]
+	}]))
 
 	var record := mission.add_entity(NovaMissionData.KIND_ITEM, 105004, Vector3(3, 4, 5), Vector3.ZERO)
 	var index := int(record["index"])
@@ -232,6 +234,56 @@ func test_place_single_static_branch_builds_a_single_instance_batch() -> void:
 	# record rather than the MultiMesh. Render fidelity is validated against real assets
 	# out-of-band; here the placed entity's position is already pinned by the controller tests.
 	assert_eq(rec["offset"], offset, "the record carries the batch offset the drag path rewrites through")
+
+	# The batch has no per-entity Node3D, but mission-start item effects still
+	# receive one immutable value descriptor for the successfully rendered entity.
+	var effect_sources: Array = placer.get_static_item_effect_sources()
+	assert_eq(effect_sources.size(), 1)
+	var source: Dictionary = effect_sources[0]
+	assert_eq(int(source.get("kind", -1)), NovaMissionData.KIND_ITEM)
+	assert_eq(int(source.get("item_id", 0)), 105004)
+	assert_eq(String(source.get("graphic", "")), "StaticCrate1")
+	assert_eq(source.get("object_data"), object_data)
+	var expected_transform := Placer.entity_transform(Vector3(3, 4, 5), Vector3.ZERO)
+	var actual_transform: Transform3D = source.get("world_transform", Transform3D.IDENTITY)
+	assert_true(actual_transform.is_equal_approx(expected_transform),
+			"the descriptor carries the BASE entity transform, not a submesh offset")
+	# Getter rows are copies; callers cannot rewrite the placer's retained identity.
+	source["item_id"] = 0
+	assert_eq(int(placer.get_static_item_effect_sources()[0].get("item_id", 0)), 105004)
+
+
+func test_place_single_vehicle_without_anim_def_stays_in_static_batch() -> void:
+	var mission := NovaMissionData.new()
+	assert_eq(mission.open_file(_abs(BMS_PATH)), OK)
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
+	assert_eq(item_db.get_item_type(106002), NovaItemDatabase.TYPE_VEHICLE)
+	assert_true(item_db.get_anim_def(106002).is_empty(),
+			"the fixture must exercise the no-anim vehicle policy")
+	var root := NovaResourceRoot.new()
+	root.set_root_dir(_abs("res://../fixtures/def"))
+	var placer := Placer.new(root, item_db)
+	placer.edit_mode = true
+	var parent := Node3D.new()
+	add_child_autofree(parent)
+	placer.place(mission, parent)
+	var container: Node3D = parent.get_node_or_null("MissionObjects")
+
+	var mesh := BoxMesh.new()
+	assert_true(placer.register_resolved_static_graphic(
+			"StaticVehicle1", NovaObjectData.new(), [{
+		"mesh": mesh, "material": null, "offset": Transform3D.IDENTITY, "submesh": 0,
+	}]))
+
+	var record := mission.add_entity(NovaMissionData.KIND_ITEM, 106002, Vector3.ZERO, Vector3.ZERO)
+	var delta: Dictionary = placer.place_single(
+		mission, container, NovaMissionData.KIND_ITEM, int(record["index"]))
+
+	assert_eq(int(delta.get("placed", -1)), 1, "the vehicle is placed")
+	assert_eq(int(delta.get("batched", -1)), 1, "a vehicle without anim_def uses static batching")
+	assert_eq(int(delta.get("animated", -1)), 0, "the vehicle does not enter runtime presentation")
+	assert_false(bool(placer.pickable_records.back()["animated"]))
 
 
 func test_place_single_is_a_noop_on_null_inputs() -> void:

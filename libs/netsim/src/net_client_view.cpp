@@ -8,17 +8,18 @@ namespace opennova::netsim {
 // ---- ClientState lookup -----------------------------------------------------
 
 ClientEntityState *ClientState::find(uint16_t handle) {
-	for (ClientEntityState &e : entities) {
-		if (e.handle == handle) return &e;
-	}
-	return nullptr;
+	const auto found = entity_index_.find(handle);
+	if (found == entity_index_.end()) return nullptr;
+	return &entities[found->second];
 }
 
 ClientEntityState &ClientState::upsert(uint16_t handle) {
 	if (ClientEntityState *e = find(handle)) return *e;
+	const std::size_t index = entities.size();
 	ClientEntityState e;
 	e.handle = handle;
 	entities.push_back(e);
+	entity_index_.emplace(handle, index);
 	return entities.back();
 }
 

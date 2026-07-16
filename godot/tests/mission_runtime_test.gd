@@ -232,6 +232,37 @@ func test_tick_realtime_presents_latest_state_once() -> void:
 		"the node left its authored position")
 
 
+func test_catchup_exposes_each_fixed_ticks_pose_before_batched_presentation() -> void:
+	var authored := Transform3D(Basis.IDENTITY, Vector3(99, 99, 99))
+	var w := _make_world(authored)
+	var rt := MissionRuntime.new()
+	add_child_autofree(rt)
+	rt.setup(w.mission, w.container)
+	var entity_ref := {"kind": 3, "index": 0, "bms_id": 0}
+	var observed: Array = []
+	rt.fixed_tick_completed.connect(func(_logic_tick: int) -> void:
+		observed.append({
+			"effect_pose": rt.presented_entity_effect_transform(entity_ref),
+			"node_pose": (w.model as Node3D).global_transform,
+		})
+	)
+	rt.play()
+	assert_eq(rt.tick_realtime(0.05), 3, "one render frame catches up three fixed ticks")
+	assert_eq(observed.size(), 3, "each fixed tick exposes its own attachment snapshot")
+	for row_v in observed:
+		var row: Dictionary = row_v
+		assert_true(row.effect_pose is Transform3D)
+		assert_false((row.effect_pose as Transform3D).origin.is_equal_approx(authored.origin),
+				"the attachment reads current sim values, not the stale authored Node")
+		assert_true((row.node_pose as Transform3D).origin.is_equal_approx(authored.origin),
+				"scene Nodes still present only once after the catch-up batch")
+	var final_row: Dictionary = observed[observed.size() - 1]
+	var final_effect_pose: Transform3D = final_row["effect_pose"]
+	assert_true((w.model as Node3D).global_position.is_equal_approx(
+			final_effect_pose.origin),
+			"the one final Node presentation matches the last fixed-tick value")
+
+
 func test_tick_realtime_drains_effects_per_tick() -> void:
 	# Effects must drain PER logic tick INSIDE the catch-up batch (not coalesced into one emit at the
 	# end): the BMS quarter-pass one-shot still surfaces when many ticks run in a single real-time frame.

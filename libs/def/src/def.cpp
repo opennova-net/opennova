@@ -1149,6 +1149,22 @@ static int item_type_from_string(const char *s, size_t len) {
     return DEF_ITEM_TYPE_UNSET;
 }
 
+/* Anchored particle-effect slot args: <effect> <userpoint> [<secondary_effect>].
+   The original copies argv[1]/argv[2] unguarded into 32-char slots and reads the
+   third token only when the line carries more than 3 tokens (argc > 3, key
+   included); extra tokens beyond those are ignored. `with_secondary` is 0 for
+   particlefx/particlefxw3/particlefxw4, which never read a third token.
+   [orig: ItemDef_ParseProperty @ 0x49eb00, particlefx chain @ 0x4a13ad..0x4a15eb] */
+static void parse_item_particle_slot(const char *v, size_t vl, DefItemParticleFx *slot,
+                                     int with_secondary) {
+    Token tok[MAX_TOKENS];
+    int n = tokenize(v, vl, tok, MAX_TOKENS);
+    if (n >= 1) safe_copy(slot->effect, sizeof(slot->effect), tok[0].s, tok[0].len);
+    if (n >= 2) safe_copy(slot->userpoint, sizeof(slot->userpoint), tok[1].s, tok[1].len);
+    if (with_secondary && n >= 3)
+        safe_copy(slot->secondary_effect, sizeof(slot->secondary_effect), tok[2].s, tok[2].len);
+}
+
 /* Shared items.def parser over an in-memory buffer. The caller owns `buf` and must have
    zeroed `out` first. Lets both the path loader and the VFS/PFF byte loader share one parser. */
 static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) {
@@ -1339,6 +1355,76 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
                 if (b) { current.attrib |= (unsigned)b; }
                 else { int b2 = lookup_item_attrib2(lo, k); if (b2) current.attrib2 |= (unsigned)b2; }
             }
+            parsed = 1;
+        /* Per-item particle-effect keys, matched in the original's chain order
+           (lower_match_key requires a separator after the key, so the shared
+           'particlefx' prefix cannot shadow the longer keys). All names are
+           copied verbatim as strings [orig: ItemDef_ParseProperty @ 0x49eb00]. */
+        } else if (lower_match_key(lower, ll, "particlefx", 10)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
+            parse_item_particle_slot(v, vl, &current.particlefx, 0); /* +0x278/+0x298 [orig: @ 0x4a13ad] */
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "particlefxs", 11)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 11, &vl);
+            parse_item_particle_slot(v, vl, &current.particlefxs, 1); /* +0x2AE/+0x2EE, 2nd +0x2CE [orig: @ 0x4a140b] */
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "particlefxw1", 12)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
+            parse_item_particle_slot(v, vl, &current.particlefxw1, 1); /* +0x304/+0x344, 2nd +0x324 [orig: @ 0x4a148b] */
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "particlefxw2", 12)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
+            parse_item_particle_slot(v, vl, &current.particlefxw2, 1); /* +0x35A/+0x39A, 2nd +0x37A [orig: @ 0x4a150b] */
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "particlefxw3", 12)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
+            parse_item_particle_slot(v, vl, &current.particlefxw3, 0); /* +0x3AE/+0x3CE, NO secondary [orig: @ 0x4a158b] */
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "particlefxw4", 12)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
+            parse_item_particle_slot(v, vl, &current.particlefxw4, 0); /* +0x3E2/+0x402, NO secondary [orig: @ 0x4a15eb] */
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "particledeath", 13)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 13, &vl);
+            Token tok[1];
+            if (tokenize(v, vl, tok, 1) >= 1)
+                safe_copy(current.particledeath, sizeof(current.particledeath), tok[0].s,
+                          tok[0].len); /* +0x416 [orig: @ 0x4a164b] */
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "particleh2odeath", 16)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 16, &vl);
+            Token tok[1];
+            if (tokenize(v, vl, tok, 1) >= 1)
+                safe_copy(current.particleh2odeath, sizeof(current.particleh2odeath), tok[0].s,
+                          tok[0].len); /* +0x44A [orig: @ 0x4a168e] */
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "particlefire", 12)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
+            Token tok[1];
+            if (tokenize(v, vl, tok, 1) >= 1)
+                safe_copy(current.particlefire, sizeof(current.particlefire), tok[0].s,
+                          tok[0].len); /* +0x47E [orig: @ 0x4a16d0] */
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "particleother", 13)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 13, &vl);
+            Token tok[1];
+            if (tokenize(v, vl, tok, 1) >= 1)
+                safe_copy(current.particleother, sizeof(current.particleother), tok[0].s,
+                          tok[0].len); /* +0x4B2 [orig: @ 0x4a1713] */
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "particlefinale", 14)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 14, &vl);
+            Token tok[1];
+            if (tokenize(v, vl, tok, 1) >= 1)
+                safe_copy(current.particlefinale, sizeof(current.particlefinale), tok[0].s,
+                          tok[0].len); /* +0x4E4 [orig: @ 0x4a175b] */
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "particlespawn", 13)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 13, &vl);
+            Token tok[1];
+            if (tokenize(v, vl, tok, 1) >= 1)
+                safe_copy(current.particlespawn, sizeof(current.particlespawn), tok[0].s,
+                          tok[0].len); /* +0x506 [orig: @ 0x4a179d] */
             parsed = 1;
         }
 

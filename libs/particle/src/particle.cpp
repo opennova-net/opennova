@@ -1,5 +1,7 @@
 #include "particle/particle.h"
 
+#include "io/strutil.h"
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -10,8 +12,12 @@
 namespace opennova::particle {
 
 const ParticleDef *ParticleFile::find_particle(std::string_view id) const noexcept {
+	// Particle-def names resolve case-insensitively like every by-name walk in
+	// the effect system: the EFFDEF→PARDEF member resolve compares with _stricmp
+	// [orig: CEffectWorld_FindParticleDefByName @ 0x5e41d0 → _stricmp @ 0x5e420c,
+	// called from the pdefs resolve @ 0x5e4920].
 	for (const ParticleDef &particle : particles) {
-		if (particle.id == id) {
+		if (strutil::iequals(particle.id, id)) {
 			return &particle;
 		}
 	}
@@ -19,8 +25,12 @@ const ParticleDef *ParticleFile::find_particle(std::string_view id) const noexce
 }
 
 const TableDef *ParticleFile::find_table(std::string_view id) const noexcept {
+	// Table names resolve case-insensitively: the engine's list walk compares
+	// with _stricmp — shipped data relies on it (ambfx.ptl authors
+	// `green_func = Table11Alt` against `id = table11Alt`)
+	// [orig: table find @ 0x5e9540 → _stricmp @ 0x76fdf6].
 	for (const TableDef &table : tables) {
-		if (table.id == id) {
+		if (strutil::iequals(table.id, id)) {
 			return &table;
 		}
 	}
@@ -250,8 +260,14 @@ void bake_one_curve(CurveRef &curve, const std::vector<TableDef> &tables) noexce
 	if (!curve.present || curve.name.empty()) {
 		return;
 	}
+	// The engine's resolve walks the table list comparing names with _stricmp
+	// [orig: CEffectDef_ResolveTblDefReference @ 0x5e9630 → table find
+	// @ 0x5e9540 → _stricmp @ 0x76fdf6]. Shipped data depends on the fold:
+	// ambfx.ptl's Wood_AmbFB authors `green_func = Table11Alt` against
+	// `id = table11Alt` — an exact compare leaves green unbaked (constant 255)
+	// while red/alpha fade, tinting aging fire sprites green.
 	for (const TableDef &table : tables) {
-		if (table.id == curve.name) {
+		if (strutil::iequals(table.id, curve.name)) {
 			bake_curve_lut(table, curve.reverse, curve.inverse, curve.baked_lut);
 			curve.baked = true;
 			return;
@@ -262,7 +278,7 @@ void bake_one_curve(CurveRef &curve, const std::vector<TableDef> &tables) noexce
 } // namespace
 
 void bake_graphic_uv_rects(GraphicLayer &layer) noexcept {
-	const int frames = std::max(layer.flip_frames, 1);
+	const int frames = std::clamp(layer.flip_frames, 1, kMaxParticleFlipFrames);
 	layer.baked_uv_rects.assign(static_cast<std::size_t>(frames), UvRect{});
 	const float inv_frames = 1.0f / static_cast<float>(frames);
 	for (int i = 0; i < frames; ++i) {
@@ -328,7 +344,7 @@ AtlasLayout bake_atlas_layout(ParticleDef &def,
 			continue;
 		}
 
-		const int frames = std::max(layer.flip_frames, 1);
+		const int frames = std::clamp(layer.flip_frames, 1, kMaxParticleFlipFrames);
 		layer.baked_uv_rects.assign(static_cast<std::size_t>(frames), UvRect{});
 
 		const float u_min_layer = static_cast<float>(layout.layer_x_offset[i])

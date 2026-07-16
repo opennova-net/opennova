@@ -138,6 +138,7 @@ void test_fire_chains_recoil() {
     weapon_fsm_tick(def, s, in, ev); // request lands; idle transitions to FIRE
     CHECK(s.current == wa::kFire);
     CHECK(ev.fired);                 // fire ds == 0 -> the shot on the entry tick
+    CHECK(ev.fired_clip_before_consume == 30); // mode byte samples MountSlot+0x10 first
     CHECK(s.clip == 29);             // ammo consumed [orig: consume_weapon_ammo]
     CHECK(s.next == wa::kRecoil);    // [orig: @ 0x542c9e unconditional]
     CHECK(s.kick > 0);
@@ -579,6 +580,8 @@ void test_keep_scope_reload_class() {
 
 void test_non_local_recoil_makes_no_decision() {
     WeaponFsmDef def = make_ak_def();
+    std::snprintf(def.actions[wa::kRecoil].particle,
+                  sizeof(def.actions[wa::kRecoil].particle), "Effect_RemoteCas");
     WeaponSlotState s = make_ak_slot();
     s.clip = 0;
     s.reserve = 300;
@@ -591,6 +594,7 @@ void test_non_local_recoil_makes_no_decision() {
     WeaponFsmEvents ev;
     weapon_fsm_tick(def, s, in, ev);
     CHECK(s.next == wa::kIdle); // no reload/emptyidle decision made
+    CHECK(ev.action_effect < 0); // direct leg is local-player-only [orig: @0x542efa]
 }
 
 // Multi-clip variant rows: each 'auto' field is its OWN consuming ring read --
@@ -648,6 +652,81 @@ void test_bake_ring_read_multiplicity() {
     CHECK(def3.actions[wa::kIdle].delay_end == 4);
 }
 
+void test_recoil_effect_leg() {
+    // The recoil-row DIRECT effect leg (casing eject): emitted exactly once per recoil
+    // arbitration when the row authors a particle — for the AK's zero-length recoil,
+    // one casing per shot at full auto cadence (the leg is NEVER suppressed by a live
+    // previous casing: the original records no handle for it, param7=0).
+    // [orig: WeaponAction_Recoil gate @ 0x542efa -> ActionSlot_SpawnEffect @ 0x542f64]
+    WeaponFsmDef def = make_ak_def();
+    std::snprintf(def.actions[wa::kRecoil].particle,
+                  sizeof(def.actions[wa::kRecoil].particle), "Effect_CAR15Cas");
+    std::snprintf(def.actions[wa::kRecoil].particle_userpoint,
+                  sizeof(def.actions[wa::kRecoil].particle_userpoint), "bcasing");
+    WeaponSlotState s = make_ak_slot();
+    WeaponFsmInputs in;
+    in.fire_pressed = true;
+    in.fire_held = true;
+    int fired = 0, casings = 0;
+    for (int t = 0; t < 120; ++t) {
+        WeaponFsmEvents ev;
+        weapon_fsm_tick(def, s, in, ev);
+        in.fire_pressed = false;
+        if (ev.fired) ++fired;
+        if (ev.action_effect == wa::kRecoil) ++casings;
+    }
+    CHECK(fired >= 3);
+    CHECK(casings == fired); // one casing per shot, none suppressed
+
+    // A recoil row WITHOUT a particle emits no effect leg [orig: the ActionDef+16
+    // zero-handle arm of the gate @ 0x542efa].
+    WeaponFsmDef quiet = make_ak_def();
+    WeaponSlotState qs = make_ak_slot();
+    in.fire_pressed = true;
+    in.fire_held = true;
+    int quiet_effects = 0;
+    for (int t = 0; t < 60; ++t) {
+        WeaponFsmEvents ev;
+        weapon_fsm_tick(quiet, qs, in, ev);
+        in.fire_pressed = false;
+        if (ev.action_effect >= 0) ++quiet_effects;
+    }
+    CHECK(quiet_effects == 0);
+
+    // The delaystart-carried bolt shape (M24: recoil delaystart 60): the casing
+    // ejects at the recoil ARBITER tick — delaystart ticks into the recoil, not at
+    // the shot [orig: the counter gate @ 0x542eb7 in front of the spawn].
+    WeaponFsmActionRow rows[6];
+    set_row(rows[0], "idle", "anim_wpn_idle", 0, -1);
+    set_row(rows[1], "emptyidle", "anim_wpn_idle", 0, -1);
+    set_row(rows[2], "fire", "anim_wpn_fire", 0, -1);
+    set_row(rows[3], "recoil", "anim_wpn_recoil", 60, 0);
+    set_row(rows[4], "reload", "anim_wpn_reload", 0, -1);
+    set_row(rows[5], "empty", "anim_wpn_empty", 0, -1);
+    WeaponFsmDef bolt;
+    weapon_fsm_bake(rows, 6, clip_resolves, clip_seconds, nullptr, bolt);
+    bolt.auto_fire = false;
+    bolt.clip_capacity = 10;
+    std::snprintf(bolt.actions[wa::kRecoil].particle,
+                  sizeof(bolt.actions[wa::kRecoil].particle), "Effect_M24Cas");
+    WeaponSlotState bs;
+    bs.clip = 10;
+    bs.reserve = 40;
+    WeaponFsmInputs bin;
+    bin.fire_pressed = true;
+    int fired_tick = -1, casing_tick = -1;
+    for (int t = 0; t < 200 && casing_tick < 0; ++t) {
+        WeaponFsmEvents ev;
+        weapon_fsm_tick(bolt, bs, bin, ev);
+        bin.fire_pressed = false;
+        if (ev.fired && fired_tick < 0) fired_tick = t;
+        if (ev.action_effect == wa::kRecoil && casing_tick < 0) casing_tick = t;
+    }
+    CHECK(fired_tick >= 0);
+    CHECK(casing_tick >= 0);
+    CHECK(casing_tick - fired_tick >= 60); // the bolt-work delay carried the eject
+}
+
 } // namespace
 
 int main() {
@@ -673,6 +752,7 @@ int main() {
     test_reload_end_leg();
     test_keep_scope_reload_class();
     test_non_local_recoil_makes_no_decision();
+    test_recoil_effect_leg();
     if (failures == 0) std::printf("weapon_fsm_test: all passed\n");
     return failures == 0 ? 0 : 1;
 }

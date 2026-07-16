@@ -165,7 +165,8 @@ func test_weapon_event_batch_preserves_three_undrained_ticks() -> void:
 			{"name": "fire", "anim": "anim_wpn_fire", "delaystart": 0, "delayend": 0,
 				"soundset": "FIRE_BEGIN", "soundsetend": "FIRE_END"},
 			{"name": "recoil", "anim": "anim_wpn_recoil", "delaystart": 0,
-				"delayend": 0, "soundset": "RECOIL_BEGIN"},
+				"delayend": 0, "soundset": "RECOIL_BEGIN",
+				"particle": "Effect_TestCas", "particleuserpoint": "bcasing"},
 		],
 		"flags": 0x100,
 		"clipsize": 30,
@@ -217,7 +218,173 @@ func test_weapon_event_batch_preserves_three_undrained_ticks() -> void:
 			String((events[1] as Dictionary).get("action_end_soundset", "")),
 			String((events[2] as Dictionary).get("action_end_soundset", "")),
 		], ["FIRE_END", "", "FIRE_END"])
+		assert_eq(int((events[1] as Dictionary).get("action_effect", -1)), 3,
+				"the recoil arbiter event survives the catch-up batch")
+		assert_eq(String((events[1] as Dictionary).get("effect_particle", "")),
+				"Effect_TestCas")
+		assert_eq(String((events[1] as Dictionary).get("effect_particle_userpoint", "")),
+				"bcasing")
 	assert_true(sim.drain_local_player_weapon_events().is_empty(), "the drain is destructive")
+	sim.free()
+
+
+func test_weapon_event_batch_snapshots_the_scope_settle_tick() -> void:
+	# Retail promotes the view before weapon actions. Across one catch-up batch,
+	# an auto-fire event before 15/15 remains unsuppressed while the later event
+	# at 15/15 carries the settled gate.
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	var def := {
+		"name": "WPN_SCOPE_BATCH",
+		"actions": [
+			{"name": "idle", "delaystart": 0, "delayend": 0},
+			{"name": "fire", "delaystart": 0, "delayend": 0,
+				"particle": "Effect_TestMF", "particleuserpoint": "muzzle1"},
+			{"name": "recoil", "delaystart": 0, "delayend": 0},
+		],
+		"flags": 0x102, # Auto + Sighted
+		"clipsize": 30,
+		"startrounds": 60,
+	}
+	sim.set_local_player_weapon(def, {})
+	sim.step()
+	sim.drain_local_player_weapon_events()
+	assert_true(sim.request_local_player_scope_toggle())
+	for _i in range(12):
+		sim.step()
+	sim.drain_local_player_weapon_events()
+
+	sim.set_local_player_weapon_input(true, true, false)
+	sim.step() # scope 13/15, FIRE
+	sim.step() # scope 14/15, RECOIL
+	sim.step() # scope 15/15, FIRE
+	var fire_events: Array = sim.drain_local_player_weapon_events().filter(
+			func(event: Dictionary) -> bool: return int(event.get("action_started", -1)) == 2)
+	assert_eq(fire_events.size(), 2)
+	if fire_events.size() == 2:
+		assert_false(bool((fire_events[0] as Dictionary).get("scope_settled", true)),
+				"the earlier catch-up tick still shows its muzzle")
+		assert_true(bool((fire_events[1] as Dictionary).get("scope_settled", false)),
+				"the 15/15 tick alone suppresses its muzzle")
+	sim.free()
+
+
+func test_reload_during_scope_raise_does_not_stash_an_unpromoted_scope() -> void:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	sim.set_local_player_weapon({
+		"name": "WPN_SCOPE_RELOAD",
+		"actions": [
+			{"name": "idle", "delaystart": 0, "delayend": 0},
+			{"name": "fire", "delaystart": 0, "delayend": 0},
+			{"name": "recoil", "delaystart": 0, "delayend": 0},
+			{"name": "reload", "delaystart": 1, "delayend": 1},
+		],
+		"flags": 0x2, "clipsize": 30, "startrounds": 60,
+	}, {})
+	sim.step()
+	sim.set_local_player_weapon_input(false, true, false)
+	for _i in range(6):
+		sim.step()
+	assert_eq(int(sim.get_local_player_weapon_state().get("clip", 0)), 29)
+	assert_true(sim.request_local_player_scope_toggle())
+	sim.step()
+	assert_lt(float(sim.get_local_player_view().get("scope_fraction", 1.0)), 1.0)
+	var before := int(sim.get_local_player_weapon_state().get("unscope_serial", 0))
+	sim.set_local_player_weapon_input(false, false, true)
+	for _i in range(3):
+		sim.step()
+	assert_eq(int(sim.get_local_player_weapon_state().get("unscope_serial", 0)), before)
+	assert_true(bool(sim.get_local_player_view().get("scope_engaged", false)))
+	sim.free()
+
+
+func test_local_fire_spawns_the_authoritative_round_and_impact() -> void:
+	# The listen-server loopback handler skips C2S 0x06 because retail local fire
+	# already appends/spawns synchronously. Pin that local action seam end-to-end:
+	# FSM fired -> RoundSim -> organic tag-2 effects_table row.
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	# Spawn yaw 0 = mission yaw 0 = engine heading 90 BAM-deg, which faces
+	# mission +y (bearing 90). The target sits 8 m along +y so the shot connects
+	# only when the round bearing rides the heading frame directly — the old
+	# (90 - heading) flip flew the shot along +x and only an east-side target
+	# could pass (the compensating-error pair the fp_impact_probe pinned;
+	# ledger D-WPN-18).
+	assert_false(md.add_entity(NovaMissionData.KIND_ORGANIC, 102072,
+			Vector3(0, 8, 0), Vector3.ZERO).is_empty())
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/def")), OK)
+	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
+	assert_eq(sim.load_ammo_table(root, "ammo.def"), OK)
+	assert_eq(sim.get_local_player_weapon_name(), "WPN_M4AUTO")
+	var fire_def := {
+		"name": "WPN_M4AUTO",
+		"actions": [
+			{"name": "idle", "delaystart": 0, "delayend": 0},
+			{"name": "fire", "delaystart": 0, "delayend": 0},
+			{"name": "recoil", "delaystart": 0, "delayend": 0},
+		],
+		"flags": 0,
+		"clipsize": 30,
+		"startrounds": 300,
+	}
+	sim.set_local_player_weapon(fire_def, {})
+	sim.step()
+	sim.drain_local_player_weapon_events()
+	sim.set_local_player_weapon_input(false, true, false)
+	var impacts: Array = []
+	for _i in range(4):
+		sim.step()
+		impacts.append_array(sim.drain_round_impacts())
+
+	var weapon_state := sim.get_local_player_weapon_state()
+	assert_eq(int(weapon_state.get("round_ring_count", 0)), 1,
+			"local FIRE appends exactly one tag-2 fan-out record")
+	# The fixture M4's first shot samples the pre-consume 30-round magazine, so
+	# ((30 & 3) << 4) | 2 produces 0x22, not a hard-coded 0x02 and not the
+	# unrelated category/rank weapon-slot combo.
+	# [orig: WeaponAction_Fire @ 0x542c11; net-re §5.9.1 capture cross-witness]
+	assert_eq(int(weapon_state.get("last_round_flags", 0)), 0x22)
+	assert_eq(int(weapon_state.get("last_round_subtype", 0)), 12,
+			"ordinary on-foot hip fire carries the retail default zoom subtype")
+	assert_eq(int(weapon_state.get("last_round_slot_byte", -1)), 0,
+			"the sole modeled local weapon slot has retail slot id zero")
+	assert_eq(int(weapon_state.get("last_round_seq", 0)), 1)
+	assert_eq(impacts.size(), 1, "one local shot reaches the target and emits one impact")
+	if impacts.size() == 1:
+		assert_eq(String((impacts[0] as Dictionary).get("effect", "")), "Effect_AmHitBody")
+		assert_eq(String((impacts[0] as Dictionary).get("sound", "")), "IMP_BULLET_PLAYER")
+		# The drained position is Godot-space (x, z_up, -y): the +y_m flight lands
+		# near (0, ~eye, -8). Pins the local fire bearing = the engine heading
+		# frame (D-WPN-18; RoundSim's wire-validated (cos, sin) mapping).
+		var impact_pos: Vector3 = (impacts[0] as Dictionary).get("position", Vector3.ZERO)
+		assert_almost_eq(impact_pos.x, 0.0, 0.75,
+				"the shot flies the aim bearing, not its 90-deg mirror")
+		assert_between(-impact_pos.z, 6.0, 8.5,
+				"the impact lands at the north-side target range")
+
+	# Presentation generations reset when the weapon is remounted, but the wire
+	# round sequence belongs to the shooter and stays monotonic across adm/slot
+	# changes. [orig: word_B7C670; net-re §5.9.1 capture 0x020b..0x0217]
+	sim.set_local_player_weapon(fire_def, {})
+	sim.step()
+	sim.drain_local_player_weapon_events()
+	sim.set_local_player_weapon_input(false, true, false)
+	sim.step()
+	weapon_state = sim.get_local_player_weapon_state()
+	assert_eq(int(weapon_state.get("round_ring_count", 0)), 2)
+	assert_eq(int(weapon_state.get("last_round_seq", 0)), 2,
+			"weapon remount does not reset the shooter-lifetime sequence")
 	sim.free()
 
 

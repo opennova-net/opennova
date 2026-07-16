@@ -36,6 +36,19 @@ class DirtyGuardShell:
 	func show_status_message(message: String, _duration := 0.0,
 			_severity: StringName = &"info") -> void:
 		status_messages.append(message)
+
+
+class MipmappedTextureProvider:
+	extends RefCounted
+	var texture: Texture2D
+
+	func _init(value: Texture2D) -> void:
+		texture = value
+
+	func load_texture(_name: String) -> Texture2D:
+		return texture
+
+
 const PARTICLE_SHADER_PATHS := [
 	"res://shaders/particle/particle_blend_blend.gdshader",
 	"res://shaders/particle/particle_blend_additive.gdshader",
@@ -322,6 +335,52 @@ func test_particle_preview_populates_render_instances_after_selection() -> void:
 			"Live particles should populate render instances in the preview particle batches.")
 
 
+func test_particle_preview_uses_value_emitters_and_one_shared_packet_renderer() -> void:
+	var preview := add_child_autofree(ParticlePreview.new()) as ParticlePreview
+	await get_tree().process_frame
+	preview.set_particle_def(_make_render_test_particle())
+	preview.set_paused(true)
+
+	var emitter := preview.get_emitter() as Dictionary
+	assert_false(emitter.is_empty(), "Selected particle should expose value diagnostics.")
+	assert_true(emitter.has("emitter_id"), "Diagnostics should expose the stable emitter id.")
+	assert_true(emitter.has("frame"), "Diagnostics should include the frame value snapshot.")
+	assert_true(emitter.has("render"), "Diagnostics should include joined packet bounds.")
+	for descendant in preview.find_children("*", "", true, false):
+		assert_false(descendant is NovaParticleEmitter,
+				"ONED preview must not create a render node per particle emitter.")
+	assert_gt(preview.get_render_batch_count(), 0,
+			"Shared renderer should expose its world draw-packet diagnostics.")
+
+
+func test_particle_preview_renders_mipmapped_provider_texture() -> void:
+	# Mounted retail textures are normalized with mipmaps before the shared
+	# renderer reads them. The atlas boundary must consume mip 0 without treating
+	# the lower levels as extra pixels and rejecting an otherwise valid texture.
+	var image := Image.create(8, 8, false, Image.FORMAT_RGBA8)
+	image.fill(Color(1.0, 0.35, 0.1, 1.0))
+	image.generate_mipmaps()
+	assert_true(image.has_mipmaps(), "precondition: mounted texture is mipmapped")
+	var texture := ImageTexture.create_from_image(image)
+	assert_true(texture.get_image().has_mipmaps(),
+			"precondition: provider texture preserves its mip levels")
+	var provider := MipmappedTextureProvider.new(texture)
+	var preview := add_child_autofree(ParticlePreview.new()) as ParticlePreview
+	await get_tree().process_frame
+	preview.set_texture_provider(Callable(provider, "load_texture"))
+	preview.set_particle_def(_make_render_test_particle(
+			0, 1, 8, 0.0, 0.0, "mounted_particle.tga"))
+	preview.set_paused(true)
+	await get_tree().process_frame
+
+	assert_gt(preview.get_alive_count(), 0,
+			"Mipmapped provider texture should retain a live preview particle.")
+	assert_gt(preview.get_rendered_instance_count(), 0,
+			"Mipmapped provider texture should produce a visible packet quad.")
+	assert_gt(preview.get_render_batch_count(), 0,
+			"Mipmapped provider texture should produce a shared renderer batch.")
+
+
 func test_particle_renderer_builds_rotated_quads() -> void:
 	# Initial roll seeds from def.orientation.z (+ orientationadj.z * rand01),
 	# in degrees [orig: CParticleEmitter_SpawnParticle @ 0x5e7803 — def+3824
@@ -462,30 +521,43 @@ func test_additive_particle_shaders_do_not_double_apply_alpha() -> void:
 	assert_not_null(bumpadd)
 	if additive != null:
 		var additive_code := String(additive.code)
-		assert_true(additive_code.contains("ALBEDO = base.rgb;"),
-				"Additive color should be passed straight to the alpha-aware blend state.")
-		assert_false(additive_code.contains("ALBEDO = base.rgb * base.a"),
-				"Additive color must not be premultiplied a second time.")
+		# Witnessed additive = ONE/INVSRCALPHA with the type-1 atlas alpha clear:
+		# the fragment alpha is a constant 0 (pure add) and the authored alpha
+		# curve never attenuates an additive layer
+		# [orig: CParticleTexture_InitTextureAndChannels @ 0x5e8380;
+		#  BuildTextureAtlases alpha clear @ 0x5e9116].
+		assert_true(additive_code.contains("blend_premul_alpha"),
+				"Additive must use the witnessed ONE/INVSRCALPHA pair, not blend_add.")
+		assert_true(additive_code.contains("ALPHA = 0.0;"),
+				"Additive fragments carry the cleared type-1 page alpha (pure add).")
+		assert_false(additive_code.contains("* base.a")
+				or additive_code.contains("* COLOR.a"),
+				"Additive color must not be attenuated by any alpha source.")
 	if bumpadd != null:
 		var bumpadd_code := String(bumpadd.code)
-		assert_true(bumpadd_code.contains("ALBEDO = base.rgb + lit_color.rgb * 0.5;"),
-				"Bumpadd should follow the same non-premultiplied additive contract.")
-		assert_false(bumpadd_code.contains("base.rgb * base.a"),
+		assert_true(bumpadd_code.contains("ALBEDO = vec3(dotv);"),
+				"Bumpadd should pass its DOT3 result straight to the additive blend state.")
+		assert_false(bumpadd_code.contains("dotv * texel.a")
+				or bumpadd_code.contains("dotv * COLOR.a"),
 				"Bumpadd color must not be premultiplied a second time.")
 
 
-func test_premult_particle_shader_fades_rgb_with_particle_alpha() -> void:
+func test_premult_particle_shader_keeps_modulate_semantics() -> void:
+	# Witnessed premult = the same MODULATE(TEXTURE, DIFFUSE) program as blend,
+	# under ONE/INVSRCALPHA — DIFFUSE alpha lands in the fragment alpha (the
+	# destination attenuation) and retail never scales the source RGB by it
+	# [orig: CParticleTexture_InitTextureAndChannels @ 0x5e8380 + @ 0x5e85a9].
 	var premult := load(PARTICLE_SHADER_PATHS[2]) as Shader
 	assert_not_null(premult)
 	if premult == null:
 		return
 	var code := String(premult.code)
-	assert_true(code.contains("float opacity = COLOR.a;"),
-			"Particle/curve alpha must contribute to premultiplied source RGB.")
-	assert_true(code.contains("opacity *= radial;"),
-			"The diagnostic fallback must remain premultiplied at its soft edge.")
-	assert_true(code.contains("ALBEDO = base.rgb * opacity;"),
-			"SrcBlend ONE requires RGB to carry non-texture opacity.")
+	assert_true(code.contains("blend_premul_alpha"),
+			"Premult must keep the witnessed ONE/INVSRCALPHA pair.")
+	assert_true(code.contains("ALBEDO = base.rgb;"),
+			"Premult RGB is the plain texture-by-DIFFUSE modulate; no extra opacity factor.")
+	assert_false(code.contains("ALBEDO = base.rgb * opacity"),
+			"Retail premult does not rescale source RGB by particle alpha.")
 
 
 func test_particle_shader_resources_drive_all_render_batches() -> void:
@@ -987,17 +1059,18 @@ func test_short_lived_particle_preview_does_not_auto_repeat_after_selection() ->
 	var preview := _preview_in(lane)
 	assert_not_null(preview, "Viewport lane child should be a ParticlePreview.")
 
-	var emitter := preview.get_emitter()
-	assert_not_null(emitter, "Short-lived preview should have one emitter.")
+	var emitter := preview.get_emitter() as Dictionary
+	assert_false(emitter.is_empty(), "Short-lived preview should have one value emitter.")
+	assert_true(emitter.has("emitter_id"), "Emitter diagnostics should have a stable id.")
 	# Let the preview's own wall-clock playback run the one-shot to completion:
 	# a fixed frame count under-ages on a fast headless runner and over-waits on
-	# a slow one, so pace on the emitter's own finished flag (bounded).
+	# a slow one, so pace on the scene-backed preview's finished flag (bounded).
 	for i in range(600):
-		if emitter.is_finished():
+		if preview.is_finished():
 			break
 		await get_tree().process_frame
-	assert_true(emitter.is_finite(), "Short-lived fixture particle should be finite.")
-	assert_true(emitter.is_finished(), "Finite one-shot preview should finish instead of auto-repeating.")
+	assert_true(preview.is_finite(), "Short-lived fixture particle should be finite.")
+	assert_true(preview.is_finished(), "Finite one-shot preview should finish instead of auto-repeating.")
 	assert_eq(preview.get_alive_count(), 0,
 			"Short-lived finite particle previews should not auto-repeat after all particles expire.")
 	assert_eq(preview.get_rendered_instance_count(), 0,
@@ -1012,8 +1085,8 @@ func test_short_lived_particle_preview_does_not_auto_repeat_after_selection() ->
 	await get_tree().process_frame
 	assert_gt(preview.get_alive_count(), 0,
 			"Manual preview restart should still replay a completed one-shot particle.")
-	assert_false(emitter.is_finished(),
-			"Manual preview restart should reset the one-shot emitter completion state.")
+	assert_false(preview.is_finished(),
+			"Manual preview restart should reset the one-shot scene completion state.")
 
 
 func test_effect_preview_uses_all_referenced_particle_defs() -> void:
@@ -1037,7 +1110,7 @@ func test_effect_preview_uses_all_referenced_particle_defs() -> void:
 	var preview := _preview_in(lane)
 	assert_not_null(preview, "Viewport lane child should be a ParticlePreview.")
 	assert_eq(preview.get_emitter_count(), effect.pdefs.size(),
-			"Effect preview should create one emitter per referenced pdef.")
+			"Effect preview should create one value emitter per referenced pdef.")
 
 
 func test_particle_preview_reports_present_graphic_layers() -> void:
@@ -1059,9 +1132,32 @@ func test_particle_preview_reports_present_graphic_layers() -> void:
 	var lane: Control = workstation.get_node("%ViewportHost")
 	var preview := _preview_in(lane)
 	assert_not_null(preview, "Viewport lane child should be a ParticlePreview.")
-	assert_eq(preview.get_emitter_count(), 1, "Particle preview should use one emitter for a single pdef.")
+	assert_eq(preview.get_emitter_count(), 1,
+			"Particle preview should use one value emitter for a single pdef.")
 	assert_eq(preview.get_visual_layer_count(), expected_layers,
 			"Particle preview should expose all present graphic layers.")
+
+
+func test_particle_preview_layer_stats_read_the_retained_editor_model() -> void:
+	var particle := _make_render_test_particle()
+	var preview := add_child_autofree(ParticlePreview.new()) as ParticlePreview
+	await get_tree().process_frame
+	preview.set_particle_def(particle)
+	preview.set_paused(true)
+	await get_tree().process_frame
+	assert_eq(preview.get_visual_layer_count(), 1)
+
+	# Stats refreshes run continuously. They should read the retained editor
+	# values directly instead of serializing the scene's immutable catalog and
+	# every live particle merely to count four graphic slots.
+	var graphics: Array = particle.get_graphics()
+	var second := graphics[1] as NovaParticleGraphicLayer
+	second.present = true
+	second.index = 2
+	second.texture = "second_layer.tga"
+	particle.set_graphics(graphics)
+	assert_eq(preview.get_visual_layer_count(), 2,
+			"Layer stats should observe the edited model without a scene rebuild.")
 
 
 func test_particle_preview_routes_particles_to_selected_graphic_layer() -> void:
@@ -1103,14 +1199,14 @@ func test_particle_preview_resolves_graphic_textures_from_particle_file_dir() ->
 	preview.set_particle_def(file.find_particle("Buildup dots"))
 	await get_tree().process_frame
 
-	var emitter := preview.get_emitter()
-	assert_not_null(emitter, "Particle preview should create an emitter for the selected pdef.")
-	assert_eq(emitter.get_texture_dir(), texture_dir,
-			"Particle emitters should resolve graphics relative to the particle file source directory.")
-	assert_eq(emitter.get_resolved_texture_path(0).get_file(), "line.png",
-			"Graphic texture lookup should accept alternate texture extensions beside the PTL.")
+	var emitter := preview.get_emitter() as Dictionary
+	assert_false(emitter.is_empty(), "Particle preview should expose the selected pdef emitter.")
+	assert_eq(preview.get_texture_dir(), texture_dir,
+			"Shared renderer should resolve graphics relative to the particle file source directory.")
+	assert_false(preview.get_unresolved_texture_names().has("line.tga"),
+			"Graphic texture lookup should accept the line.png alternate extension beside the PTL.")
 	assert_eq(preview.get_textured_layer_count(), 1,
-			"Resolved particle graphics should bind a texture to the preview layer material.")
+			"Resolved particle graphics should occupy a textured shared-renderer layer.")
 
 
 func test_workflow_swap_mounts_correct_inspector() -> void:

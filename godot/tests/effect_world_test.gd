@@ -7,6 +7,7 @@ extends GutTest
 # @ 0x5f6df0 spawns by handle or name.
 
 const EffectWorldScript = preload("res://engine/world/effect_world.gd")
+const MissionRuntime := preload("res://engine/world/mission_runtime.gd")
 
 var _root_dir := ""
 
@@ -45,6 +46,19 @@ func after_each() -> void:
 func _make_world() -> NovaEffectWorld:
 	var world: NovaEffectWorld = add_child_autofree(EffectWorldScript.new())
 	return world
+
+
+func _single_group(world: NovaEffectWorld, index: int = 0) -> Dictionary:
+	var groups := world.get_debug_group_report()
+	assert_gt(groups.size(), index, "requested debug group exists")
+	return groups[index] as Dictionary
+
+
+func _single_emitter(world: NovaEffectWorld, group_index: int = 0) -> Dictionary:
+	var group := _single_group(world, group_index)
+	var emitters := group.get("emitters", []) as Array
+	assert_eq(emitters.size(), 1, "synthetic effect has one emitter")
+	return emitters[0] as Dictionary
 
 
 func _make_root() -> NovaResourceRoot:
@@ -123,19 +137,33 @@ func test_spawn_by_name_creates_emitters_and_sweep_expires() -> void:
 	var handle := world.spawn_effect("puff", Vector3(1, 2, 3))
 	assert_gt(handle, 0, "spawn returns the interned handle")
 	assert_eq(world.live_group_count(), 1, "one live spawn group")
-	var emitter: NovaParticleEmitter = null
-	for child in world.get_children():
-		if child is NovaParticleEmitter:
-			emitter = child
-			break
-	assert_not_null(emitter, "spawn adds a NovaParticleEmitter child")
-	assert_almost_eq(emitter.global_position, Vector3(1, 2, 3), Vector3(0.01, 0.01, 0.01))
-	# Let the one-shot emit and die, then sweep past the group window.
-	for i in 30:
-		emitter.advance(0.1)
-	assert_eq(emitter.get_alive_count(), 0, "finite one-shot finishes")
-	world.sweep(2.0)
+	assert_almost_eq(_single_emitter(world).position, Vector3(1, 2, 3),
+			Vector3(0.01, 0.01, 0.01))
+	assert_eq(world.get_children().filter(
+			func(child: Node) -> bool: return child is NovaParticleEmitter).size(), 0,
+			"runtime effects remain values; no per-emitter renderer Nodes are created")
+	world.advance_fixed_tick(MissionRuntime.TICK_DT)
+	assert_gt(int(_single_emitter(world).alive), 0,
+			"a production-tick spawn emits during that same fixed particle pass")
+	# Let the one-shot emit and die through the one authoritative scene clock.
+	for _i in 30:
+		world.sweep(0.1)
 	assert_eq(world.live_group_count(), 0, "finished finite group is swept")
+
+
+func test_runtime_reset_preserves_catalog_and_discards_live_admission() -> void:
+	var world := _make_world()
+	world.load_particle_file(_make_short_effect_file())
+	assert_gt(world.spawn_effect_unless_alive("slot", "puff", Vector3.ZERO), 0)
+	assert_eq(world.file_count(), 1)
+	assert_eq(world.live_group_count(), 1)
+
+	world.reset_runtime_state()
+
+	assert_eq(world.file_count(), 1, "restart keeps the mounted particle catalog")
+	assert_eq(world.live_group_count(), 0, "restart discards pre-rewind live groups")
+	assert_gt(world.spawn_effect_unless_alive("slot", "puff", Vector3.ZERO), 0,
+			"restart clears old admission slots for the next play session")
 
 
 func test_pending_delayed_emitter_outlives_the_heuristic_window() -> void:
@@ -155,15 +183,15 @@ func test_unless_alive_owner_mapping_clears_when_group_finishes() -> void:
 	world.load_particle_file(_make_short_effect_file())
 	var owner := "action-slot-generation"
 	assert_gt(world.spawn_effect_unless_alive(owner, "puff", Vector3.ZERO), 0)
-	assert_true(world._owned_groups.has(owner))
-	var emitter := world.get_children().filter(
-			func(child: Node) -> bool: return child is NovaParticleEmitter)[0] as NovaParticleEmitter
+	assert_gt(world.spawn_effect_unless_alive(owner, "puff", Vector3.ONE), 0)
+	assert_eq(world.live_group_count(), 1,
+			"the slot token suppresses a second live group without a private-map assertion")
 	for _i in 30:
-		emitter.advance(0.1)
-	world.sweep(3.0)
+		world.sweep(0.1)
 	assert_eq(world.live_group_count(), 0)
-	assert_false(world._owned_groups.has(owner),
-			"the action-slot death callback equivalent does not leak stale owner keys")
+	assert_gt(world.spawn_effect_unless_alive(owner, "puff", Vector3.ZERO), 0)
+	assert_eq(world.live_group_count(), 1,
+			"the action slot admits a new group after its predecessor is reclaimed")
 
 
 func test_spawn_by_handle_matches_name_spawn() -> void:
@@ -174,6 +202,33 @@ func test_spawn_by_handle_matches_name_spawn() -> void:
 	assert_true(world.spawn_effect_by_handle(handle, Vector3.ZERO), "handle spawn succeeds")
 	assert_eq(world.live_group_count(), 1)
 	assert_false(world.spawn_effect_by_handle(99, Vector3.ZERO), "out-of-range handle refuses")
+
+
+func test_particle_master_switch_suppresses_facades_and_checked_count() -> void:
+	# The retail global disable makes every effect facade a no-op and its debug
+	# active-entry facade return zero [orig: g_ParticlesDisabled /
+	# EffectWorld_GetActiveEntryCountChecked @ 0x5f69c0].
+	var world := _make_world()
+	world.load_particle_file(_make_short_effect_file())
+	assert_gt(world.spawn_effect("puff", Vector3.ZERO), 0)
+	assert_eq(world.active_entry_count(), 1)
+
+	world.set_particles_hidden(true)
+	assert_true(world.are_particles_hidden())
+	assert_eq(world.active_entry_count(), 0, "the checked facade is zero while disabled")
+	assert_true(world.get_debug_group_report().is_empty(), "the debug page lists no active entries")
+	assert_eq(world.spawn_effect("puff", Vector3.ZERO), 0, "named facade no-ops")
+	assert_eq(world.spawn_effect_owned("owner", "puff", Vector3.ZERO), 0, "owned facade no-ops")
+	assert_eq(world.spawn_effect_attached("attached", "puff", Transform3D.IDENTITY,
+			Vector3.ZERO, Vector3.UP), 0, "attached facade no-ops")
+	assert_eq(world.spawn_effect_unless_alive("slot", "puff", Vector3.ZERO), 0,
+			"guarded facade no-ops")
+	assert_false(world.spawn_effect_by_handle(1, Vector3.ZERO), "handle facade no-ops")
+	assert_eq(world.live_group_count(), 1, "disabling does not duplicate or destroy live state")
+
+	world.set_particles_hidden(false)
+	assert_false(world.are_particles_hidden())
+	assert_eq(world.active_entry_count(), 1, "re-enabling exposes the still-live entry")
 
 
 func test_owned_effect_follows_entity_and_detaches_when_owner_disappears() -> void:
@@ -187,31 +242,74 @@ func test_owned_effect_follows_entity_and_detaches_when_owner_disappears() -> vo
 	world.set_owner_position_provider(Callable(positions, "resolve"))
 	assert_gt(world.spawn_effect_owned(17, "puff", positions.state, Vector3.UP), 0)
 
-	var emitter: NovaParticleEmitter = null
-	for child in world.get_children():
-		if child is NovaParticleEmitter:
-			emitter = child
-			break
-	assert_not_null(emitter)
-	assert_false(emitter.is_finite(), "the FOREVEREMIT group begins attached and infinite")
+	assert_true(bool(_single_group(world).forever),
+			"the FOREVEREMIT group begins attached and infinite")
 	positions.state = Vector3(9, 8, 7)
 	world.sweep(0.0)
-	assert_almost_eq(emitter.global_position, positions.state, Vector3(0.001, 0.001, 0.001),
+	var moved_emitter := _single_emitter(world)
+	assert_almost_eq(moved_emitter.position, positions.state, Vector3(0.001, 0.001, 0.001),
 			"CEffect_UpdateEmitterTransform-style follow updates the emitter each sweep")
-	assert_eq(emitter.emission_forward, Vector3.UP,
+	assert_eq(moved_emitter.forward, Vector3.UP,
 			"a position-only provider preserves the descriptor's initial up-vector fallback")
 
 	var attached_transform := Transform3D(Basis(Vector3.UP, PI * 0.5), Vector3(6, 5, 4))
 	positions.state = attached_transform
 	world.sweep(0.0)
-	assert_almost_eq(emitter.global_position, attached_transform.origin, Vector3(0.001, 0.001, 0.001))
-	assert_almost_eq(emitter.emission_forward, attached_transform.basis.z.normalized(),
+	var rotated_emitter := _single_emitter(world)
+	assert_almost_eq(rotated_emitter.position, attached_transform.origin,
+			Vector3(0.001, 0.001, 0.001))
+	assert_almost_eq(rotated_emitter.forward, attached_transform.basis.z.normalized(),
 			Vector3(0.001, 0.001, 0.001),
 			"the attached entity's live forward reaches the simulator frame")
 
 	positions.alive = false
 	world.sweep(0.0)
-	assert_true(emitter.is_finite(), "owner removal detaches and stops FOREVEREMIT emission")
+	var detached_group := _single_group(world)
+	assert_true(bool(detached_group.detached), "owner removal detaches the group")
+	assert_false(bool(detached_group.forever), "detachment stops FOREVEREMIT emission")
+	assert_false(bool((_single_emitter(world)).emitting),
+			"the detached emitter drains without producing new particles")
+
+
+func test_attached_effect_composes_the_local_userpoint_offset() -> void:
+	# The per-item entity-attached emitter (the DBuggy1 exhaust shape): the model-local
+	# userpoint position AND direction compose onto the live owner transform every
+	# sweep, so the plume stays on the tailpipe as the vehicle moves and turns
+	# [orig: Entity_SpawnBoneTrailEffect @ 0x43bef0 — one mode-2 attached emitter per
+	#  masked userpoint, pos = the userpoint, forward = its direction; follow =
+	#  CEffect_UpdateEmitterTransform @ 0x5f7410].
+	var world := _make_world()
+	var file := _make_short_effect_file()
+	file.find_particle("puff dots").flags = 1 << 18  # FOREVEREMIT — the exhaust shape
+	world.load_particle_file(file)
+	var positions := OwnerPositions.new()
+	var start := Transform3D(Basis.IDENTITY, Vector3(10, 0, 0))
+	positions.state = start
+	world.set_owner_position_provider(Callable(positions, "resolve"))
+	var local_pos := Vector3(-0.3, 1.4, -2.6)   # the FX00 rear-pipe point shape
+	var local_dir := Vector3(0, 0.643, -0.766)
+	assert_gt(world.spawn_effect_attached("itemfx:1:0", "puff", start, local_pos, local_dir), 0)
+	var initial_emitter := _single_emitter(world)
+	assert_almost_eq(initial_emitter.position, start * local_pos, Vector3(0.001, 0.001, 0.001),
+			"the spawn seeds at owner-transform * local userpoint")
+	assert_almost_eq(initial_emitter.forward.normalized(), local_dir.normalized(),
+			Vector3(0.001, 0.001, 0.001),
+			"the spawn seeds the userpoint direction before the first sweep")
+	# Drive the owner: the offset rides the basis, the direction re-orients with it.
+	var moved := Transform3D(Basis(Vector3.UP, PI * 0.5), Vector3(20, 3, 5))
+	positions.state = moved
+	world.sweep(0.0)
+	var moved_emitter := _single_emitter(world)
+	assert_almost_eq(moved_emitter.position, moved * local_pos, Vector3(0.001, 0.001, 0.001),
+			"the follow composes the local offset, not the owner origin")
+	assert_almost_eq(moved_emitter.forward, (moved.basis * local_dir).normalized(),
+			Vector3(0.001, 0.001, 0.001),
+			"the userpoint direction re-orients with the owner basis")
+	# Owner gone (vehicle freed) -> detach: emission stops and the group drains.
+	positions.alive = false
+	world.sweep(0.0)
+	assert_true(bool(_single_group(world).detached),
+			"owner removal detaches the attached group")
 
 
 func test_replacing_an_owned_group_detaches_the_old_group_transform() -> void:
@@ -223,22 +321,23 @@ func test_replacing_an_owned_group_detaches_the_old_group_transform() -> void:
 	positions.state = Transform3D(Basis.IDENTITY, Vector3(1, 2, 3))
 	world.set_owner_position_provider(Callable(positions, "resolve"))
 	assert_gt(world.spawn_effect_owned(17, "puff", Vector3(1, 2, 3), Vector3.UP), 0)
-	var old_emitter := world.get_children().filter(
-			func(child: Node) -> bool: return child is NovaParticleEmitter)[0] as NovaParticleEmitter
 
 	assert_gt(world.spawn_effect_owned(17, "puff", Vector3(4, 5, 6), Vector3.UP), 0)
-	var emitters := world.get_children().filter(
-			func(child: Node) -> bool: return child is NovaParticleEmitter)
-	assert_eq(emitters.size(), 2)
-	var new_emitter := emitters[1] as NovaParticleEmitter
-	assert_true(old_emitter.is_finite(), "replacement stops the old FOREVEREMIT group")
-	assert_false(new_emitter.is_finite(), "the replacement remains attached")
+	var groups := world.get_debug_group_report()
+	assert_eq(groups.size(), 2)
+	assert_true(bool((groups[0] as Dictionary).detached),
+			"replacement stops and detaches the old FOREVEREMIT group")
+	assert_false(bool((groups[1] as Dictionary).detached),
+			"the replacement remains attached")
 
 	positions.state = Transform3D(Basis(Vector3.UP, PI * 0.25), Vector3(9, 8, 7))
 	world.sweep(0.0)
-	assert_eq(old_emitter.global_position, Vector3(1, 2, 3),
+	groups = world.get_debug_group_report()
+	var old_emitter := ((groups[0] as Dictionary).emitters as Array)[0] as Dictionary
+	var new_emitter := ((groups[1] as Dictionary).emitters as Array)[0] as Dictionary
+	assert_eq(old_emitter.position, Vector3(1, 2, 3),
 			"the detached old group drains at its last position")
-	assert_eq(new_emitter.global_position, Vector3(9, 8, 7),
+	assert_eq(new_emitter.position, Vector3(9, 8, 7),
 			"only the replacement follows the owner")
 
 
@@ -254,14 +353,9 @@ func test_authored_water_flags_bind_to_the_mission_water_plane() -> void:
 		file.find_particle("puff dots").flags = entry.flag
 		world.load_particle_file(file)
 		world.spawn_effect("puff", Vector3.ZERO)
-		var emitter: NovaParticleEmitter = null
-		for child in world.get_children():
-			if child is NovaParticleEmitter:
-				emitter = child
-				break
-		assert_not_null(emitter)
-		assert_eq(emitter.kill_plane_mode, entry.mode)
-		assert_almost_eq(emitter.kill_plane_y, 12.5, 0.001,
+		var emitter := _single_emitter(world)
+		assert_eq(int(emitter.kill_plane), entry.mode)
+		assert_almost_eq(float(emitter.kill_plane_y), 12.5, 0.001,
 				"authored water culling uses the active mission plane")
 
 
@@ -273,3 +367,40 @@ func test_clear_world_frees_live_groups() -> void:
 	world.clear_world()
 	assert_eq(world.live_group_count(), 0)
 	assert_eq(world.effect_count(), 0)
+
+
+# --- Debug seams (the retail particle debug pages, mimicked; ptl-format-re.md §11) ---
+
+func test_debug_group_report_shapes() -> void:
+	var world := _make_world()
+	world.load_particle_file(_make_short_effect_file())
+	world.spawn_effect("puff", Vector3.ZERO)
+	assert_gt(world.interned_count(), 0, "the spawn interned its handle")
+	var report := world.get_debug_group_report()
+	assert_eq(report.size(), world.live_group_count(), "one report row per live group")
+	var group: Dictionary = report[0]
+	assert_eq(String(group.get("name", "")), "puff", "the group names its interned effect")
+	assert_eq((group.get("emitters", []) as Array).size(), 1, "one emitter row")
+	var emitter: Dictionary = (group.get("emitters", []) as Array)[0]
+	assert_true(emitter.has("alive") and emitter.has("rendered")
+			and emitter.has("bounds") and emitter.has("emitter_id"),
+			"emitter rows carry stable value diagnostics for the box view")
+	assert_false(emitter.has("node"),
+			"debug reports do not leak renderer Nodes")
+	var unresolved_names := world.get_unresolved_texture_names()
+	assert_false(group.has("unresolved"),
+			"catalog-wide missing frames are not falsely attributed to this group")
+	assert_true(unresolved_names is PackedStringArray,
+			"unresolved texture names use the catalog-level value query")
+
+
+func test_set_particles_hidden_toggles_render_visibility() -> void:
+	var world := _make_world()
+	world.load_particle_file(_make_short_effect_file())
+	world.spawn_effect("puff", Vector3.ZERO)
+	assert_false(world.are_particles_hidden(), "visible by default")
+	world.set_particles_hidden(true)
+	assert_true(world.are_particles_hidden())
+	assert_false(world.visible, "the retail master switch hides the render output")
+	world.set_particles_hidden(false)
+	assert_true(world.visible)

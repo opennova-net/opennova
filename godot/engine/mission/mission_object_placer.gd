@@ -53,6 +53,19 @@ var edit_mode: bool = false
 # { kind, index, graphic, node, animated=true } and move the node directly.
 var pickable_records: Array = []
 
+# Grouped source snapshot for the F3 user-point view. Static MultiMesh entities
+# have no per-entity Node3D to discover later, so retain object data and BASE
+# entity transforms only after a graphic successfully reaches a batch.
+var _static_user_point_sources: Array = []
+
+# Value-only source snapshot for mission-start ITEMS.DEF particlefx. Static
+# MultiMesh entities have no Node3D owner after batching, so preserve each
+# successfully rendered entity's item identity, object data, and BASE world
+# transform. GameWorld consumes this through get_static_item_effect_sources()
+# and submits world-bound groups; no renderer or emitter nodes cross this seam.
+var _static_item_effect_sources: Array = []
+
+
 # graphic -> NovaObjectData (or null when unresolvable).
 var _object_data_cache: Dictionary = {}
 # adm name -> NovaSkeletalAnim (or null when it failed to load). Shared read-only across
@@ -190,6 +203,8 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 		"batches": 0,
 	}
 	pickable_records = []
+	_static_user_point_sources = []
+	_static_item_effect_sources = []
 	if mission == null or parent == null or resource_root == null:
 		return stats
 	_ensure_item_db()
@@ -207,6 +222,10 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 	# Bucket entities by graphic, split static vs animated.
 	PerfTimeline.span_on(timeline, "bucket_entities")
 	var static_by_graphic: Dictionary = {}  # graphic -> Array[Transform3D]
+	# Parallel value records retained only when that graphic resolves to a static
+	# batch. Unlike edit-only pick refs, runtime item-effect production needs these
+	# for every placed static entity.
+	var static_effect_sources_by_graphic: Dictionary = {}  # graphic -> Array[Dictionary]
 	# Parallel to static_by_graphic (same slot order); only filled in edit_mode so the
 	# pickable index can map a MultiMesh instance back to its mission entity.
 	var static_refs_by_graphic: Dictionary = {}  # graphic -> Array[{ kind, index }]
@@ -242,7 +261,13 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 			if not static_by_graphic.has(graphic):
 				static_by_graphic[graphic] = []
 				static_refs_by_graphic[graphic] = []
+				static_effect_sources_by_graphic[graphic] = []
 			static_by_graphic[graphic].append(xform)
+			static_effect_sources_by_graphic[graphic].append({
+				"kind": int(entity.get("kind", -1)),
+				"item_id": item_id,
+				"world_transform": xform,
+			})
 			if edit_mode:
 				static_refs_by_graphic[graphic].append({
 					"kind": int(entity.get("kind", -1)),
@@ -263,6 +288,9 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 			stats.unresolved += xforms.size()
 			continue
 		resolved_graphics.append(graphic)
+		_record_static_user_point_group(graphic, xforms)
+		_record_static_item_effect_group(
+				graphic, static_effect_sources_by_graphic.get(graphic, []))
 		stats.graphics += 1
 		for batch in batches:
 			var mm := MultiMesh.new()
@@ -344,6 +372,9 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 			"group": int(a.get("group", -1)),
 			"team": int(a.get("team", -1)),
 			"position": a.get("position", Vector3.ZERO),
+			# The items.def type id, so runtime passes can resolve per-item data
+			# (e.g. the particlefx effect attach) without re-deriving it.
+			"item_id": int(a.get("item_id", 0)),
 		}
 		model.set_meta("entity_ref", ref)
 		if edit_mode:
@@ -499,6 +530,9 @@ func place_single(mission: NovaMissionData, container: Node3D, kind: int, index:
 			"group": int(entity.get("group", -1)),
 			"team": int(entity.get("team", -1)),
 			"position": entity.get("position", Vector3.ZERO),
+			# Same identity as place()'s animated branch — runtime passes (the
+			# particlefx effect attach) resolve per-item data through it.
+			"item_id": item_id,
 		}
 		model.set_meta("entity_ref", ref)
 		pickable_records.append({
@@ -541,12 +575,73 @@ func place_single(mission: NovaMissionData, container: Node3D, kind: int, index:
 		delta.batches += 1
 		_record_static_batch(graphic, refs, mm, mmi, offset, batch["mesh"])
 	add_pick_collider(container, kind, index, graphic, xform)
+	_append_static_user_point_source(graphic, xform)
+	_append_static_item_effect_source(kind, item_id, graphic, xform)
 	delta.placed = 1
 	delta.batched = 1
 	return delta
 
 
 # --- Internals ----------------------------------------------------------------
+
+func _record_static_user_point_group(graphic: String, transforms: Array) -> void:
+	var data := _load_object_data(graphic)
+	if data == null or data.get_user_point_count() <= 0:
+		return
+	_static_user_point_sources.append({
+		"graphic": graphic,
+		"object_data": data,
+		"transforms": transforms.duplicate(),
+	})
+
+
+func _append_static_user_point_source(graphic: String, xform: Transform3D) -> void:
+	var data := _load_object_data(graphic)
+	if data == null or data.get_user_point_count() <= 0:
+		return
+	for source_index in range(_static_user_point_sources.size()):
+		var source: Dictionary = _static_user_point_sources[source_index]
+		if String(source.get("graphic", "")) != graphic:
+			continue
+		var transforms: Array = source.get("transforms", []).duplicate()
+		transforms.append(xform)
+		source["transforms"] = transforms
+		_static_user_point_sources[source_index] = source
+		return
+	_static_user_point_sources.append({
+		"graphic": graphic,
+		"object_data": data,
+		"transforms": [xform],
+	})
+
+
+func _record_static_item_effect_group(graphic: String, sources: Array) -> void:
+	var data := _load_object_data(graphic)
+	if data == null:
+		return
+	for source_v in sources:
+		var source: Dictionary = source_v
+		_static_item_effect_sources.append({
+			"kind": int(source.get("kind", -1)),
+			"item_id": int(source.get("item_id", 0)),
+			"graphic": graphic,
+			"world_transform": source.get("world_transform", Transform3D.IDENTITY),
+			"object_data": data,
+		})
+
+
+func _append_static_item_effect_source(kind: int, item_id: int, graphic: String,
+		xform: Transform3D) -> void:
+	var data := _load_object_data(graphic)
+	if data == null:
+		return
+	_static_item_effect_sources.append({
+		"kind": kind,
+		"item_id": item_id,
+		"graphic": graphic,
+		"world_transform": xform,
+		"object_data": data,
+	})
 
 # Emit one pickable record per entity slot in a freshly-built static batch. Each
 # entity's slot `i` is consistent across every submesh batch of the same graphic
@@ -587,6 +682,42 @@ func get_item_db() -> NovaItemDatabase:
 
 
 
+## Snapshot of successfully rendered static user-point sources for a world debug
+## view. Object data is immutable/shared; transform arrays are duplicated so a
+## consumer cannot mutate the placer's placement record.
+func get_static_user_point_sources() -> Array:
+	_check_epoch()
+	var out: Array = []
+	for row_v in _static_user_point_sources:
+		var row: Dictionary = row_v
+		var transforms: Array = row.get("transforms", [])
+		out.append({
+			"graphic": String(row.get("graphic", "")),
+			"object_data": row.get("object_data"),
+			"transforms": transforms.duplicate(),
+		})
+	return out
+
+
+## Snapshot of successfully rendered static entities for mission-start item
+## effects. Every row is a value descriptor; object_data is immutable/shared and
+## no placed/render Node is exposed. The one-row-per-entity order is placement
+## order within the resolved graphic batches and remains stable for the mission.
+func get_static_item_effect_sources() -> Array:
+	_check_epoch()
+	var out: Array = []
+	for row_v in _static_item_effect_sources:
+		var row: Dictionary = row_v
+		out.append({
+			"kind": int(row.get("kind", -1)),
+			"item_id": int(row.get("item_id", 0)),
+			"graphic": String(row.get("graphic", "")),
+			"world_transform": row.get("world_transform", Transform3D.IDENTITY),
+			"object_data": row.get("object_data"),
+		})
+	return out
+
+
 func _graphic_for(item_id: int) -> String:
 	if item_db == null:
 		return ""
@@ -596,7 +727,8 @@ func _graphic_for(item_id: int) -> String:
 func _is_animated(item_id: int) -> bool:
 	if item_db == null:
 		return false
-	if item_db.get_item_type(item_id) == NovaItemDatabase.TYPE_PERSON:
+	var item_type := item_db.get_item_type(item_id)
+	if item_type == NovaItemDatabase.TYPE_PERSON:
 		return true
 	return not item_db.get_anim_def(item_id).is_empty()
 
@@ -678,6 +810,28 @@ func ground_anchor_godot(graphic: String) -> Vector3:
 func object_data_for(graphic: String) -> NovaObjectData:
 	_check_epoch()
 	return _load_object_data(graphic)
+
+
+## Register an already-resolved object plus its static render batches. This is
+## the construction seam for callers that already own parsed geometry (including
+## asset-free tests); registrations follow the same resource-root epoch as
+## lazily loaded graphics and are copied so caller dictionaries stay isolated.
+func register_resolved_static_graphic(graphic: String, data: NovaObjectData,
+		batches: Array) -> bool:
+	_check_epoch()
+	if graphic.is_empty() or data == null or batches.is_empty():
+		return false
+	var retained_batches: Array = []
+	for batch_v in batches:
+		if not (batch_v is Dictionary):
+			return false
+		var batch: Dictionary = batch_v
+		if not (batch.get("mesh") is Mesh):
+			return false
+		retained_batches.append(batch.duplicate())
+	_object_data_cache[graphic] = data
+	_static_batch_cache[graphic] = retained_batches
+	return true
 
 
 # The model-local ground anchor mapped to mission (BMS) axes, for the engine's

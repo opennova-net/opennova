@@ -1,6 +1,7 @@
 #include "world/world.h"
 
 #include <cmath>
+#include <utility>
 #include <vector>
 
 #include "world/ai.h" // AiSystem / AiEntity / ai_apply_command — the AI-change command target
@@ -11,6 +12,79 @@ namespace opennova::world {
 // proxy for the occupant-model+144 vehicle link the original resolves through the entity
 // hierarchy. A manned-gun soldier is placed on/next to its gun, so this is generous.
 static constexpr double kMountRadius = 20.0;
+
+static void emit_vehicle_control(World &world, const char *kind, uint16_t target_net_id,
+                                 int32_t target_bms_id, uint32_t target_spawn_origin) {
+    Effect effect;
+    effect.kind = kind;
+    effect.a = static_cast<int32_t>(target_net_id);
+    effect.b = target_bms_id;
+    effect.c = static_cast<int32_t>(target_spawn_origin);
+    world.effects.push(std::move(effect));
+}
+
+void emit_vehicle_control_started(World &world, const Entity &vehicle) {
+    emit_vehicle_control(world, "vehicle_control_started", vehicle.net_id, vehicle.bms_id,
+                         vehicle.spawn_origin);
+}
+
+void emit_vehicle_control_stopped(World &world, const Entity &vehicle) {
+    emit_vehicle_control_stopped(world, vehicle.net_id, vehicle.bms_id, vehicle.spawn_origin);
+}
+
+void emit_vehicle_control_stopped(World &world, uint16_t target_net_id,
+                                  int32_t target_bms_id, uint32_t target_spawn_origin) {
+    emit_vehicle_control(world, "vehicle_control_stopped", target_net_id, target_bms_id,
+                         target_spawn_origin);
+}
+
+bool vehicle_claim_primary_occupant(World &world, Entity &vehicle, EntityHandle occupant,
+                                    SeatType seat) {
+    // [orig: Entity_AttachToVehicleSlot @0x4946d0] ctrlx(2)/drvrx(5) claim +368 when it is
+    // empty or already theirs (@0x4947b3..0x4947d2 / @0x4948b9..0x4948d8); UseGun(3) claims
+    // only when empty (@0x494944..0x49495e); sitex passengers never touch +368.
+    const bool was_empty = !vehicle.primary_occupant.valid();
+    switch (seat) {
+        case SeatType::Controller:
+        case SeatType::Driver:
+            if (!was_empty && vehicle.primary_occupant != occupant) return false;
+            break;
+        case SeatType::Gunner:
+            if (!was_empty) return vehicle.primary_occupant == occupant;
+            break;
+        default:
+            return false;
+    }
+    vehicle.primary_occupant = occupant;
+    // The empty -> claimed edge is the retail engine-start edge (the per-tick spawner
+    // fires once its latch sees +368 set) [orig: @0x48faad..0x48fb0c].
+    if (was_empty) emit_vehicle_control_started(world, vehicle);
+    return true;
+}
+
+bool vehicle_release_primary_occupant(World &world, Entity &vehicle, EntityHandle occupant) {
+    // [orig: Entity_DetachFromVehicle @0x4355f0] the stop leg runs ONLY when the detaching
+    // entity IS the claimant (@0x4356e9); anyone else leaving — including a second control
+    // occupant — leaves the latch untouched.
+    if (!vehicle.primary_occupant.valid() || vehicle.primary_occupant != occupant)
+        return false;
+    vehicle.primary_occupant = EntityHandle{};
+    emit_vehicle_control_stopped(world, vehicle);
+    return true;
+}
+
+bool vehicle_has_valid_control_occupant(const World &world, const Entity &vehicle) {
+    for (const Seat &seat : vehicle.seats) {
+        if (!is_vehicle_control_seat(seat.type) || !seat.occupant.valid()) continue;
+        const Entity *occupant = world.registry.get(seat.occupant);
+        if (occupant != nullptr && occupant->mounted &&
+            occupant->mount_target == vehicle.handle &&
+            is_vehicle_control_seat(occupant->mount_type)) {
+            return true;
+        }
+    }
+    return false;
+}
 
 bool seat_allowed_for_mode(SeatType type, SeatSelectionMode mode) {
     switch (mode) {
@@ -321,10 +395,14 @@ bool EntityCommands::mount(uint16_t occupant_ssn, uint16_t target_ssn, SeatSelec
     Seat &s = tgt->seats[seat_idx];
     s.occupant = oh;                                       // [orig: vehicle[400+2*slot] = handle]
     occ->mount_target = th;                                // [orig: occupant+364]
+    occ->mount_target_net_id = tgt->net_id;
+    occ->mount_target_bms_id = tgt->bms_id;
+    occ->mount_target_spawn_origin = tgt->spawn_origin;
     occ->mount_seat = static_cast<int8_t>(seat_idx);       // [orig: occupant+360]
     occ->mount_type = s.type;
     occ->mounted = true;                                   // [orig: occupant+36 |= 0x40]
     pose_mounted_occupant(*occ, *tgt, s);
+    vehicle_claim_primary_occupant(world_, *tgt, oh, s.type); // [orig: +368 claim @0x4946d0]
     return true;
 }
 
@@ -371,13 +449,31 @@ bool EntityCommands::dismount(uint16_t occupant_ssn) {
     // [orig: Entity_DetachFromVehicle @0x4355f0] free the seat + clear the occupant's mount ref.
     Entity *occ = world_.registry.get(world_.registry.find_by_net_id(occupant_ssn));
     if (!occ || !occ->mounted) return false;
+    const bool claim_capable_seat = occ->mount_type != SeatType::Passenger &&
+                                    occ->mount_type != SeatType::None;
+    const uint16_t target_net_id = occ->mount_target_net_id;
+    const int32_t target_bms_id = occ->mount_target_bms_id;
+    const uint32_t target_spawn_origin = occ->mount_target_spawn_origin;
+    const EntityHandle oh = occ->handle;
     Entity *tgt = world_.registry.get(occ->mount_target);
     if (tgt && occ->mount_seat >= 0 && occ->mount_seat < static_cast<int>(tgt->seats.size()))
         tgt->seats[occ->mount_seat].occupant = EntityHandle{}; // [orig: vehicle[400+2*slot]=0xFFFF]
     occ->mounted = false;
     occ->mount_target = EntityHandle{};
+    occ->mount_target_net_id = 0;
+    occ->mount_target_bms_id = 0;
+    occ->mount_target_spawn_origin = 0;
     occ->mount_seat = -1;
     occ->mount_type = SeatType::None;
+    if (tgt != nullptr) {
+        vehicle_release_primary_occupant(world_, *tgt, oh); // [orig: +368 leg @0x4356e9]
+    } else if (claim_capable_seat) {
+        // The vehicle entity is already gone; its stored identity carries the stop so the
+        // host tears the presentation down (host cleanup — the claimant check is
+        // unavailable, and a spurious stop is idempotent downstream).
+        emit_vehicle_control_stopped(world_, target_net_id, target_bms_id,
+                                     target_spawn_origin);
+    }
     return true;
 }
 
@@ -546,7 +642,12 @@ void World::restore(const Snapshot &s) {
     env = s.env;
     logic_tick = s.logic_tick;
     effects.clear();
+    round_sim.reset();
     load_systems(); // systems re-init their per-mission state
+    registry.for_each([&](const Entity &vehicle) {
+        if (vehicle.primary_occupant.valid())
+            emit_vehicle_control_started(*this, vehicle);
+    });
 }
 
 } // namespace opennova::world

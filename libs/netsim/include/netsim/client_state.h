@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
+#include <unordered_map>
 #include <vector>
 
 #include <npwire/ingame_decode.h> // EntityClass
@@ -35,6 +37,12 @@ struct ClientState {
 
 	ClientEntityState *find(uint16_t handle);
 	ClientEntityState &upsert(uint16_t handle);
+
+private:
+	// The wire fold addresses entities by handle for every record in every frame.
+	// Retaining vector indexes keeps that lookup O(1) without changing `entities`
+	// insertion order or upsert's existing vector-reference semantics.
+	std::unordered_map<uint16_t, std::size_t> entity_index_;
 };
 
 } // namespace opennova::netsim

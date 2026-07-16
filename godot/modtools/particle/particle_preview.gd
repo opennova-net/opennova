@@ -1,23 +1,32 @@
 class_name ParticlePreview
 extends Control
-## SubViewport host for the particle editor. Effects are previewed as one
-## NovaParticleEmitter per referenced pdef, while individual particle defs use
-## a single emitter. A bottom overlay adds transport controls (play/pause,
-## restart, time scale, a deterministic frame timeline) plus a live stats
-## readout. Edits in the inspector ask for a debounced live refresh.
+## SubViewport host for the particle editor. The preview owns one value-only
+## NovaEffectScene rendered through one shared NovaParticleRenderer.
+## A bottom overlay adds transport controls (play/pause, restart, time scale, a
+## deterministic fixed-tick timeline) plus a live stats readout. Edits in the
+## inspector ask for a debounced live refresh.
 
 const FlyCameraScript = preload("res://engine/fly_camera.gd")
 
-const STEP_SECONDS := 1.0 / 60.0
+const STEP_SECONDS := 1.0 / 62.5
 const PARTICLE_FLAG_FOREVER_EMIT := 1 << 18
+const PREVIEW_EFFECT_ID := "__oned_particle_preview__"
 
 var _viewport_container: SubViewportContainer
 var _viewport: SubViewport
 var _root: Node3D
 var _camera: Camera3D
-var _emitters_root: Node3D
-var _emitters: Array[NovaParticleEmitter] = []
+var _scene: NovaEffectScene
+var _renderer: NovaParticleRenderer
 var _particle_file: NovaParticleFile
+var _preview_document: NovaParticleFile
+var _preview_effect_name := ""
+var _effect_handle := 0
+var _spawn_receipt: Dictionary = {}
+var _preview_definition_indices: Array[int] = []
+var _preview_definitions: Array[NovaParticleDef] = []
+var _preview_finite := true
+var _texture_provider := Callable()
 var _grid: MeshInstance3D
 var _axes: MeshInstance3D
 var _world_env: WorldEnvironment
@@ -93,9 +102,11 @@ func _build_viewport() -> void:
 	_world_env.environment = env
 	_root.add_child(_world_env)
 
-	_emitters_root = Node3D.new()
-	_emitters_root.name = "ParticleEmitters"
-	_root.add_child(_emitters_root)
+	_renderer = NovaParticleRenderer.new()
+	_renderer.name = "ParticleRenderer"
+	_renderer.set_procedural_fallback_enabled(true)
+	_root.add_child(_renderer)
+	_reset_scene()
 
 	_add_grid()
 	_add_axes()
@@ -252,9 +263,10 @@ func _add_transport_button(parent: Control, text: String, tip: String, cb: Calla
 
 
 func _process(delta: float) -> void:
-	if not _paused and not _emitters.is_empty():
-		_elapsed = minf(_elapsed + clampf(delta, 0.0, 0.1) * _time_scale,
-				_max_seconds)
+	if not _paused and _has_spawn():
+		var step := clampf(delta, 0.0, 0.1) * _time_scale
+		_advance_scene(step, false)
+		_elapsed = minf(_elapsed + step, _max_seconds)
 		if _elapsed >= _max_seconds:
 			set_paused(true)
 	_stats_accum += delta
@@ -267,14 +279,16 @@ func _process(delta: float) -> void:
 
 func set_particle_file(file: NovaParticleFile) -> void:
 	_particle_file = file
-	var tables: Array = []
-	if _particle_file != null:
-		tables = _particle_file.get_tables()
-	var texture_dir := _texture_dir()
-	for emitter in _emitters:
-		if emitter != null:
-			emitter.set_tables(tables)
-			emitter.texture_dir = texture_dir
+	_configure_renderer_textures()
+
+
+func set_texture_provider(provider: Callable) -> void:
+	_texture_provider = provider
+	_configure_renderer_textures()
+
+
+func get_texture_provider() -> Callable:
+	return _texture_provider
 
 
 func set_effect(effect: NovaParticleEffect) -> void:
@@ -286,12 +300,15 @@ func set_effect(effect: NovaParticleEffect) -> void:
 		return
 	var pdefs: PackedStringArray = effect.pdefs
 	var max_seconds := 0.0
-	for i in range(pdefs.size()):
-		var def := _particle_file.find_particle(pdefs[i])
+	_preview_finite = true
+	for pdef_name in pdefs:
+		var def := _particle_file.find_particle(pdef_name)
 		if def != null:
-			_add_emitter(def, i)
 			max_seconds = maxf(max_seconds, _def_window_seconds(def))
+			if (int(def.flags) & PARTICLE_FLAG_FOREVER_EMIT) != 0:
+				_preview_finite = false
 	_max_seconds = maxf(max_seconds, 1.0)
+	_start_preview(_make_preview_document(effect, null))
 	_warm_all()
 	_reset_timeline()
 
@@ -302,46 +319,145 @@ func set_particle_def(def: NovaParticleDef) -> void:
 	_last_def = def
 	_last_effect = null
 	if def != null:
-		_add_emitter(def, 0)
+		_preview_finite = (int(def.flags) & PARTICLE_FLAG_FOREVER_EMIT) == 0
 		_max_seconds = _def_window_seconds(def)
+		_start_preview(_make_preview_document(null, def))
 	_warm_all()
 	_reset_timeline()
 
 
 func clear_preview() -> void:
-	for emitter in _emitters:
-		if emitter == null:
-			continue
-		if emitter.get_parent() != null:
-			emitter.get_parent().remove_child(emitter)
-		emitter.queue_free()
-	_emitters.clear()
 	_last_mode = 0
 	_last_def = null
 	_last_effect = null
+	_preview_document = null
+	_preview_effect_name = ""
+	_effect_handle = 0
+	_spawn_receipt = {}
+	_preview_definition_indices.clear()
+	_preview_definitions.clear()
+	_preview_finite = true
 	_elapsed = 0.0
+	_reset_scene()
 	_update_overlay_readouts()
 
 
-func _add_emitter(def: NovaParticleDef, index: int) -> NovaParticleEmitter:
-	if _emitters_root == null:
-		return null
-	var emitter := NovaParticleEmitter.new()
-	emitter.name = "ParticleEmitter%d" % index
-	# Blank/missing authored graphics are invisible in the runtime. The editor
-	# opts into a soft disc so emission and motion remain diagnosable.
-	emitter.procedural_fallback_enabled = true
-	emitter.auto_advance = not _paused
-	emitter.time_scale = _time_scale
-	emitter.seed = 1 + index * 101
-	emitter.texture_dir = _texture_dir()
+func _make_preview_document(
+		effect: NovaParticleEffect, selected_def: NovaParticleDef) -> NovaParticleFile:
+	var document := NovaParticleFile.new()
 	if _particle_file != null:
-		emitter.set_tables(_particle_file.get_tables())
-	emitter.def = def
-	_emitters_root.add_child(emitter)
-	emitter.play()
-	_emitters.append(emitter)
-	return emitter
+		document.source_path = _particle_file.source_path
+		document.tables = _particle_file.tables
+		document.table_handles = _particle_file.table_handles
+
+	var preview_effect := NovaParticleEffect.new()
+	preview_effect.id = PREVIEW_EFFECT_ID
+	var particles: Array[NovaParticleDef] = []
+	if selected_def != null:
+		var preview_def := selected_def
+		var preview_id := String(selected_def.id)
+		if preview_id.is_empty():
+			preview_def = selected_def.duplicate(true) as NovaParticleDef
+			if preview_def != null:
+				preview_id = "__oned_selected_particle_def__"
+				preview_def.id = preview_id
+			else:
+				preview_def = selected_def
+		particles.append(preview_def)
+		preview_effect.pdefs = PackedStringArray([preview_id])
+	else:
+		preview_effect.pdefs = effect.pdefs if effect != null else PackedStringArray()
+
+	# Keep the rest of the catalog available for child-particle references. The
+	# selected pdef is first so duplicate ids resolve to the value being edited.
+	if _particle_file != null:
+		for entry in _particle_file.particles:
+			var candidate := entry as NovaParticleDef
+			if candidate == null:
+				continue
+			if selected_def != null \
+					and String(candidate.id).nocasecmp_to(String(selected_def.id)) == 0:
+				continue
+			particles.append(candidate)
+	document.particles = particles
+	var effects: Array[NovaParticleEffect] = [preview_effect]
+	document.effects = effects
+	return document
+
+
+func _start_preview(document: NovaParticleFile) -> void:
+	_preview_document = document
+	_preview_effect_name = PREVIEW_EFFECT_ID
+	_preview_definitions.clear()
+	var preview_effect := document.find_effect(_preview_effect_name)
+	if preview_effect != null:
+		for definition_name in preview_effect.pdefs:
+			var preview_def := document.find_particle(definition_name)
+			if preview_def != null:
+				_preview_definitions.append(preview_def)
+	_scene = NovaEffectScene.new()
+	var files: Array[NovaParticleFile] = [document]
+	_scene.open(files, {
+		"simulation_tick_seconds": STEP_SECONDS,
+		"random_seed": 1,
+	})
+	_effect_handle = int(_scene.intern(_preview_effect_name))
+	_spawn_receipt = {}
+	_preview_definition_indices.clear()
+	if _effect_handle > 0:
+		_spawn_receipt = _scene.spawn({
+			"effect_handle": _effect_handle,
+			"transform": Transform3D.IDENTITY,
+		})
+	var initial_inspection := _scene.inspect(false)
+	for group_v in initial_inspection.get("groups", []):
+		for emitter_v in (group_v as Dictionary).get("emitters", []):
+			var emitter := emitter_v as Dictionary
+			_preview_definition_indices.append(
+					int(emitter.get("definition_index", -1)))
+	if _renderer != null:
+		_renderer.set_scene(_scene)
+		_configure_renderer_textures()
+
+
+func _reset_scene() -> void:
+	_scene = NovaEffectScene.new()
+	var files: Array[NovaParticleFile] = []
+	_scene.open(files, {"simulation_tick_seconds": STEP_SECONDS})
+	if _renderer != null:
+		_renderer.set_scene(_scene)
+		_configure_renderer_textures()
+
+
+func _respawn_current() -> void:
+	if _preview_document == null:
+		return
+	_start_preview(_preview_document)
+
+
+func _configure_renderer_textures() -> void:
+	if _renderer == null:
+		return
+	_renderer.set_texture_provider(_texture_provider)
+	_renderer.set_texture_dir(_texture_dir())
+	_renderer.set_procedural_fallback_enabled(true)
+	_renderer.render_now()
+
+
+func _has_preview() -> bool:
+	return _preview_document != null
+
+
+func _has_spawn() -> bool:
+	return _effect_handle > 0 and bool(_spawn_receipt.get("spawned", false))
+
+
+func _advance_scene(seconds: float, render_immediately := true) -> void:
+	if _scene == null:
+		return
+	_scene.advance_in_place(maxf(seconds, 0.0))
+	if render_immediately and _renderer != null:
+		_renderer.render_now()
 
 
 func _texture_dir() -> String:
@@ -353,30 +469,26 @@ func _texture_dir() -> String:
 	return source_path.get_base_dir()
 
 
-# Advance all emitters in lockstep until something is alive (so a freshly
-# selected particle is immediately visible), bounded to ~1.5s of warm-up.
+# Advance the shared scene until something is alive (so a freshly selected
+# particle is immediately visible), bounded to ~1.5s of warm-up.
 func _warm_all() -> void:
-	if _emitters.is_empty():
+	if not _has_spawn():
 		return
 	for i in range(90):
-		var any_alive := false
-		for emitter in _emitters:
-			if emitter != null:
-				emitter.advance(STEP_SECONDS)
-				if emitter.get_alive_count() > 0:
-					any_alive = true
+		_advance_scene(STEP_SECONDS, false)
 		_elapsed += STEP_SECONDS
-		if any_alive:
+		if get_alive_count() > 0:
+			if _renderer != null:
+				_renderer.render_now()
 			return
+	if _renderer != null:
+		_renderer.render_now()
 
 
 # --- Playback API ------------------------------------------------------------
 
 func set_paused(value: bool) -> void:
 	_paused = value
-	for emitter in _emitters:
-		if emitter != null:
-			emitter.auto_advance = not value
 	if _play_button != null:
 		_play_button.text = "▶" if value else "⏸"
 
@@ -387,15 +499,12 @@ func is_paused() -> bool:
 
 func set_time_scale(value: float) -> void:
 	_time_scale = clampf(value, 0.05, 4.0)
-	for emitter in _emitters:
-		if emitter != null:
-			emitter.time_scale = _time_scale
 	if _speed_label != null:
 		_speed_label.text = "%.1fx" % _time_scale
 
 
 func step_frame(direction: int) -> void:
-	if _emitters.is_empty():
+	if not _has_spawn():
 		return
 	set_paused(true)
 	if direction < 0:
@@ -404,9 +513,7 @@ func step_frame(direction: int) -> void:
 	if _elapsed + STEP_SECONDS >= _max_seconds:
 		seek_seconds(_max_seconds)
 		return
-	for emitter in _emitters:
-		if emitter != null:
-			emitter.advance(STEP_SECONDS)
+	_advance_scene(STEP_SECONDS)
 	_elapsed += STEP_SECONDS
 	_update_overlay_readouts()
 
@@ -414,16 +521,13 @@ func step_frame(direction: int) -> void:
 ## Re-simulate from frame 0 to `seconds` (deterministic given the seed). Used by
 ## the timeline scrubber and step-back.
 func seek_seconds(seconds: float) -> void:
-	if _emitters.is_empty():
+	if not _has_spawn():
 		return
 	var target := clampf(seconds, 0.0, _max_seconds)
 	var steps := int(round(target / STEP_SECONDS))
-	for emitter in _emitters:
-		if emitter == null:
-			continue
-		emitter.restart()
-		for i in range(steps):
-			emitter.advance(STEP_SECONDS)
+	_respawn_current()
+	if steps > 0:
+		_advance_scene(float(steps) * STEP_SECONDS)
 	_elapsed = float(steps) * STEP_SECONDS
 	_update_overlay_readouts()
 
@@ -437,10 +541,10 @@ func get_max_frames() -> int:
 
 
 func restart() -> void:
+	if not _has_spawn():
+		return
 	set_paused(false)
-	for emitter in _emitters:
-		if emitter != null:
-			emitter.restart()
+	_respawn_current()
 	_elapsed = 0.0
 	_warm_all()
 	_reset_timeline()
@@ -541,7 +645,7 @@ func _update_overlay_readouts() -> void:
 		_timeline.value = clampf(float(get_current_frame()), _timeline.min_value, _timeline.max_value)
 		_seek_guard = false
 	if _stats_label != null:
-		if _emitters.is_empty():
+		if not _has_preview():
 			_stats_label.text = "No particle selected"
 		else:
 			_stats_label.text = "Alive %d · Instances %d · Layers %d · Batches %d" % [
@@ -571,54 +675,159 @@ func _def_window_seconds(def: NovaParticleDef) -> float:
 # --- Accessors (used by tests + overlay) -------------------------------------
 
 func get_alive_count() -> int:
-	var total := 0
-	for emitter in _emitters:
-		if emitter != null:
-			total += emitter.get_alive_count()
-	return total
+	return int(_scene.get_live_counts().get("particle_count", 0)) \
+			if _scene != null else 0
 
 
 func get_emitter_count() -> int:
-	return _emitters.size()
+	return _preview_definition_indices.size()
 
 
 func get_visual_layer_count() -> int:
+	if _preview_document == null:
+		return 0
 	var total := 0
-	for emitter in _emitters:
-		if emitter != null:
-			total += emitter.get_visual_layer_count()
+	for definition in _preview_definitions:
+		var present := 0
+		var graphics: Array = definition.get_graphics()
+		for graphic_v in graphics:
+			var graphic := graphic_v as NovaParticleGraphicLayer
+			if graphic != null and graphic.get_present():
+				present += 1
+		# The editor deliberately supplies one procedural diagnostic layer when
+		# a pdef has no authored graphics, matching the old preview behavior.
+		total += maxi(1, present)
 	return total
 
 
 func get_rendered_instance_count() -> int:
-	var total := 0
-	for emitter in _emitters:
-		if emitter != null:
-			total += emitter.get_rendered_instance_count()
-	return total
+	return int(_renderer.get_rendered_quad_count()) if _renderer != null else 0
 
 
 func get_render_batch_count() -> int:
-	var total := 0
-	for emitter in _emitters:
-		if emitter != null and emitter.has_method("get_render_batch_count"):
-			total += emitter.get_render_batch_count()
-	return total
+	return int(_renderer.get_draw_command_count()) if _renderer != null else 0
 
 
 func get_textured_layer_count() -> int:
+	if _scene == null or _renderer == null:
+		return 0
+	var unresolved := {}
+	for name in _renderer.get_unresolved_texture_names():
+		unresolved[String(name).to_lower()] = true
+	# Unlike the always-visible layer total, this diagnostic describes the
+	# renderer's last immutable catalog. Read definitions from that same frame so
+	# an inspector edit cannot temporarily pair new authored values with stale
+	# atlas resolution state.
+	var frame := _scene.get_frame_snapshot()
+	var definitions := frame.get("definitions", []) as Array
 	var total := 0
-	for emitter in _emitters:
-		if emitter != null:
-			total += emitter.get_textured_layer_count()
+	for definition_index in _preview_definition_indices:
+		if definition_index < 0 or definition_index >= definitions.size():
+			continue
+		var definition := definitions[definition_index] as Dictionary
+		var graphics := definition.get("graphics", []) as Array
+		for graphic_v in graphics:
+			var graphic := graphic_v as Dictionary
+			if not bool(graphic.get("present", false)):
+				continue
+			var texture_name := String(graphic.get("texture", ""))
+			if texture_name.is_empty():
+				continue
+			var resolved := true
+			for frame_name in _retail_frame_names(
+					texture_name, int(graphic.get("flip_frames", 1))):
+				if unresolved.has(String(frame_name).to_lower()):
+					resolved = false
+					break
+			if resolved:
+				total += 1
 	return total
+
+
+func _retail_frame_names(authored: String, frame_count: int) -> PackedStringArray:
+	var result := PackedStringArray()
+	if frame_count <= 1:
+		result.append(authored)
+		return result
+	var base := authored.to_lower()
+	var extension := base.find(".tga")
+	if extension >= 0:
+		base = base.substr(0, extension)
+	for frame in range(1, frame_count + 1):
+		result.append("%s_%02d.tga" % [base, frame])
+	return result
+
+
+func is_finite() -> bool:
+	return _preview_finite
+
+
+func is_finished() -> bool:
+	if not _has_preview():
+		return true
+	if not _preview_finite:
+		return false
+	return int(_scene.get_live_counts().get("group_count", 0)) == 0
+
+
+## Value-only emitter diagnostics. Entries join the portable scene snapshot,
+## lifetime inspection, and renderer packet bounds by stable emitter id.
+func get_emitter_diagnostics() -> Array:
+	var result: Array = []
+	if _scene == null:
+		return result
+	var frame := _scene.get_frame_snapshot()
+	var frame_by_id := {}
+	var frame_emitters := frame.get("emitters", []) as Array
+	for emitter_v in frame_emitters:
+		var emitter := emitter_v as Dictionary
+		frame_by_id[int(emitter.get("emitter_id", 0))] = emitter
+	var bounds_by_id := {}
+	if _renderer != null:
+		for bounds_v in _renderer.get_debug_emitter_bounds():
+			var bounds := bounds_v as Dictionary
+			bounds_by_id[int(bounds.get("emitter_id", 0))] = bounds
+	var definitions := frame.get("definitions", []) as Array
+	var inspection := _scene.inspect()
+	var groups := inspection.get("groups", []) as Array
+	for group_v in groups:
+		var group := group_v as Dictionary
+		var group_emitters := group.get("emitters", []) as Array
+		for emitter_v in group_emitters:
+			var value := (emitter_v as Dictionary).duplicate(true)
+			var emitter_id := int(value.get("emitter_id", 0))
+			var frame_value := frame_by_id.get(emitter_id, {}) as Dictionary
+			var definition_index := int(frame_value.get("definition_index", -1))
+			var finite := true
+			if definition_index >= 0 and definition_index < definitions.size():
+				var definition := definitions[definition_index] as Dictionary
+				finite = (int(definition.get("flags", 0)) \
+						& PARTICLE_FLAG_FOREVER_EMIT) == 0
+			value["group_id"] = int(group.get("group_id", 0))
+			value["effect_name"] = String(group.get("effect_name", ""))
+			value["render_domain"] = int(group.get("render_domain", 0))
+			value["frame"] = frame_value
+			value["render"] = bounds_by_id.get(emitter_id, {})
+			value["finite"] = finite
+			value["finished"] = not bool(value.get("emitting", false)) \
+					and int(value.get("alive_particle_count", 0)) == 0
+			result.append(value)
+	return result
+
+func get_unresolved_texture_names() -> PackedStringArray:
+	if _renderer == null:
+		return PackedStringArray()
+	return _renderer.get_unresolved_texture_names()
+
+
+func get_texture_dir() -> String:
+	return _renderer.get_texture_dir() if _renderer != null else _texture_dir()
 
 
 func get_preview_camera() -> Camera3D:
 	return _camera
 
 
-func get_emitter() -> NovaParticleEmitter:
-	if _emitters.is_empty():
-		return null
-	return _emitters[0]
+func get_emitter() -> Variant:
+	var emitters := get_emitter_diagnostics()
+	return emitters[0] if not emitters.is_empty() else null

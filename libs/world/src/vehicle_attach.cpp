@@ -92,35 +92,57 @@ bool entity_process_vehicle_attach(World &world, EntityHandle player, EntityHand
     }
     occ->flags = (occ->flags & 0xFFFF5FBFu) | 0x40u; // clear 0x8000|0x2000, set mounted
     occ->mount_target = vehicle;                     // [orig: parentEntity(0x16C) = vehicle]
+    occ->mount_target_net_id = veh->net_id;
+    occ->mount_target_bms_id = veh->bms_id;
+    occ->mount_target_spawn_origin = veh->spawn_origin;
     occ->mount_bone = bone;                          // [orig: attachBoneId(0x157) = bone]
     occ->mount_seat = static_cast<int8_t>(seat_idx); // [orig: parentSlot(0x168) = slotType]
     occ->mounted = true;
     // Success clears the movement stance bits [orig: MoveOrder &= ~0x300 @0x435c42 + the
     // prone/crouch latch clears @0x435c54/@0x435c59].
     occ->net_stance_bits = 0;
+    vehicle_claim_primary_occupant(world, *veh, player, occ->mount_type); // [orig: +368 @0x4946d0]
     return true;
 }
 
 bool entity_detach_from_vehicle(World &world, EntityHandle player) {
     Entity *occ = world.registry.get(player);
     if (occ == nullptr || !occ->mounted) return false;
+    const bool claim_capable_seat = occ->mount_type != SeatType::Passenger &&
+                                    occ->mount_type != SeatType::None;
+    const uint16_t target_net_id = occ->mount_target_net_id;
+    const int32_t target_bms_id = occ->mount_target_bms_id;
+    const uint32_t target_spawn_origin = occ->mount_target_spawn_origin;
+    Entity *veh = world.registry.get(occ->mount_target);
     // [orig: Entity_DetachFromVehicle @0x4355F0] MoveOrder &= ~0x300 (stance clear), then
     // every matching seat handle on the mount target releases (all 10 slots in the
     // original; our seat vector sweeps by occupant), Flags &= ~0x40 and the mount trio
     // clears. The EquippedSlot restore (+0x308) and the ATTR_PlayerControl engine-state 7
     // are unmodeled (no weapon-slot / engine-state model) — tracked in D-NET-157.
     occ->net_stance_bits = 0;
-    if (Entity *veh = world.registry.get(occ->mount_target)) {
+    if (veh != nullptr) {
         for (Seat &s : veh->seats) {
             if (s.occupant == player) s.occupant = EntityHandle{}; // [orig: -> 0xFFFF]
         }
     }
     occ->flags &= ~0x40u;          // [orig: Flags &= ~0x40]
     occ->mount_target = EntityHandle{}; // [orig: +0x16C = 0]
+    occ->mount_target_net_id = 0;
+    occ->mount_target_bms_id = 0;
+    occ->mount_target_spawn_origin = 0;
     occ->mount_bone = 0;           // [orig: +0x157 = 0]
     occ->mount_seat = -1;          // [orig: +0x168 = 0]
     occ->mount_type = SeatType::None;
     occ->mounted = false;
+    if (veh != nullptr) {
+        // [orig: the +368 leg @0x4356e9..0x43577c — runs only for the claimant]
+        vehicle_release_primary_occupant(world, *veh, player);
+    } else if (claim_capable_seat) {
+        // The vehicle is already gone; the stored identity carries the stop (host
+        // cleanup — a spurious stop is idempotent downstream).
+        emit_vehicle_control_stopped(world, target_net_id, target_bms_id,
+                                     target_spawn_origin);
+    }
     return true;
 }
 

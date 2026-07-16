@@ -38,8 +38,9 @@ struct RoundEvent {
     // ring+28 — per-shot sequence word; the C2S 0x06 hit_part fire counter round-trips
     // here via word_B7C670 -> the spawned round's +120 word [orig: @0x50c2ba -> @0x4fdcf5].
     uint16_t shot_seq = 0;
-    // ring+30 — the fire-mode byte (bit0 alt-fire, bit1 adm-indexed, bits 4-5 weapon-slot
-    // combo); becomes the wire flags low bits [orig: @0x4fdcde].
+    // ring+30 — the fire-mode byte (bit0 alt-fire, bit1 adm-indexed, bits 4-5 =
+    // pre-consume MountSlot+0x10 magazine count low two bits); becomes the wire
+    // flags low bits [orig: build @0x542c11 before consume @0x542c75; ring @0x4fdcde].
     uint8_t mode_flags = 0;
     // ring+31 — shooter fire-context composite: (extra_byte2 & 0x3F) | ((extra_byte2>>7)<<7)
     // [orig: @0x50bd75..@0x50bd83 -> roundParams[4] @0x50c7bd; wire byte 3].

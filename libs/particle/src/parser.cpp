@@ -183,7 +183,8 @@ int match_graphic_decl(const std::string &key) {
 bool apply_graphic_field(GraphicLayer &layer, const std::string &key,
 		const std::string &raw_value, const std::vector<std::string> &values) {
 	if (key == "flip_frames") {
-		layer.flip_frames = parse_int(raw_value);
+		layer.flip_frames = std::clamp(
+				parse_int(raw_value), 1, kMaxParticleFlipFrames);
 	} else if (key == "flip_rate") {
 		layer.flip_rate = parse_int(raw_value);
 	} else if (key == "color1") {
@@ -567,9 +568,13 @@ bool load_particles(std::istream &input, ParticleFile &out, ParseError &error) {
 			case State::TopLevel: {
 				Section parsed = Section::None;
 				if (!match_section(line, parsed)) {
-					error.message = "Unexpected token at top level: " + std::string(line);
-					error.line = static_cast<int>(line_number);
-					return false;
+					// Unrecognized top-level lines are IGNORED, never fatal —
+					// retail skips anything its section matcher doesn't claim
+					// (comment dividers like "//====" ship between blocks in
+					// modded .ptl) [orig: CEffectWorld_ParseSectionCallback
+					// @ 0x5ecb40]. Rejecting the file here lost the entire
+					// Effect_AmHit* family to the stockeffect fallback (D-PTL-13).
+					continue;
 				}
 				section = parsed;
 				state = State::ExpectOpen;
@@ -637,9 +642,11 @@ bool load_particles(std::istream &input, ParticleFile &out, ParseError &error) {
 
 				const std::size_t eq = line.find('=');
 				if (eq == std::string_view::npos) {
-					error.message = "Missing '=' in statement: " + std::string(line);
-					error.line = static_cast<int>(line_number);
-					return false;
+					// Same leniency in-block: the witnessed per-section line
+					// parsers skip lines they don't recognize instead of
+					// failing the file [orig: CEffectWorld_ParseSectionCallback
+					// @ 0x5ecb40].
+					continue;
 				}
 
 				std::string key = trim_str(line.substr(0, eq));

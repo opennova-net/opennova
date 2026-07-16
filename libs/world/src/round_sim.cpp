@@ -67,7 +67,23 @@ int32_t calc_impact_damage(const Vec3 &vel, const AmmoTableEntry &ammo) {
     return damage;
 }
 
+// Normalized flight direction for the impact descriptor
+// [orig: Projectile_SpawnImpactEffect @ 0x4e9b80].
+Vec3 flight_direction(const Vec3 &vel) {
+    const float len = std::sqrt(vel.x * vel.x + vel.y * vel.y + vel.z * vel.z);
+    if (len <= 0.0f) return Vec3{0.0f, 0.0f, 1.0f};
+    return Vec3{vel.x / len, vel.y / len, vel.z / len};
+}
+
 } // namespace
+
+void RoundSim::reset() noexcept {
+	rounds = {};
+	active_count = 0;
+	deaths.clear();
+	impacts.clear();
+	next_impact_order = 1;
+}
 
 int RoundSim::spawn(World &world, const RoundSpawnParams &params) {
     const AmmoTableEntry *ammo = world.ammo.by_index(params.ammo_index);
@@ -171,6 +187,9 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain) {
             const float seg_len = std::sqrt(r.vel.x * r.vel.x + r.vel.y * r.vel.y +
                                             r.vel.z * r.vel.z);
             const int steps = seg_len > 2.0f ? static_cast<int>(seg_len / 2.0f) + 1 : 1;
+            float prev_t = 0.0f;
+            float prev_above = terrain::height_field_height_world_bilinear(*terrain, p0.x, -p0.y);
+            prev_above = p0.z - prev_above; // clearance at the segment start
             for (int st = 1; st <= steps; ++st) {
                 const float t = static_cast<float>(st) / static_cast<float>(steps);
                 const float sx = p0.x + r.vel.x * t;
@@ -178,10 +197,21 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain) {
                 const float sz = p0.z + r.vel.z * t;
                 const float ground =
                         terrain::height_field_height_world_bilinear(*terrain, sx, -sy);
-                if (sz <= ground) {
+                const float above = sz - ground;
+                if (above <= 0.0f) {
+                    // Refine the crossing between the last above-ground sample and this
+                    // one, so the stop (and the impact-effect point) sits ON the surface
+                    // rather than up to a whole 2-unit sub-step under it — the original
+                    // stops at the exact heightmap raycast hit
+                    // [orig: Terrain_RaycastHeightmapHiRes @ 0x610890 from
+                    //  Projectile_UpdatePhysics].
                     terrain_t = t;
+                    if (prev_above > 0.0f && prev_above - above > 0.0001f)
+                        terrain_t = prev_t + (t - prev_t) * (prev_above / (prev_above - above));
                     break;
                 }
+                prev_t = t;
+                prev_above = above;
             }
         }
 
@@ -219,6 +249,18 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain) {
                     }
                 }
             }
+            // The entity impact effect: pool-0 organics only at this altitude, so the
+            // tag is always 2 'player' [orig: entity material + 4 selection @ 0x4e8867;
+            // the vehicle/static material plumb waits on that hit-test port].
+            RoundImpact imp;
+            imp.position = Vec3{p0.x + r.vel.x * best_t, p0.y + r.vel.y * best_t,
+                                p0.z + r.vel.z * best_t};
+            imp.direction = flight_direction(r.vel);
+            imp.ammo_index = r.ammo_index;
+            imp.effect_tag = 2; // 'player' [orig: g_AmmoEffectTagTable @ 0x813420]
+            imp.tick = world.logic_tick;
+            imp.source_order = next_impact_order++;
+            if (impacts.size() < kMaxPendingImpacts) impacts.push_back(imp);
             r.active = false;
             --active_count;
             continue;
@@ -226,6 +268,20 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain) {
         if (terrain_t <= 1.0f) {
             // Terrain impact [orig: Projectile_HandleTerrainImpact @0x4e9210 — effects
             // only at this altitude].
+            // The terrain impact effect: surface type + 4. The surface-map (charmap)
+            // sampler is a tracked deferral, so every terrain hit takes the original's
+            // own no-surface-map default (type 1 -> tag 5 'dirt')
+            // [orig: Terrain_GetSurfaceTypeAtPosition @ 0x606510 returns 1 when no map
+            //  is loaded; +4 shift @ 0x4e8862].
+            RoundImpact imp;
+            imp.position = Vec3{p0.x + r.vel.x * terrain_t, p0.y + r.vel.y * terrain_t,
+                                p0.z + r.vel.z * terrain_t};
+            imp.direction = flight_direction(r.vel);
+            imp.ammo_index = r.ammo_index;
+            imp.effect_tag = 1 + 4;
+            imp.tick = world.logic_tick;
+            imp.source_order = next_impact_order++;
+            if (impacts.size() < kMaxPendingImpacts) impacts.push_back(imp);
             r.active = false;
             --active_count;
             continue;

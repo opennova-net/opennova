@@ -15,6 +15,51 @@
 
 namespace opennova::world {
 
+// The canonical effects_table tag order — the array index IS the impact effect id the
+// round-impact selection uses [orig: g_AmmoEffectTagTable @ 0x813420, 28 {name, id}
+// pairs scanned from index 1 ('null' at 0 is never matchable, scan @ 0x40a46a);
+// consumers: Projectile_SpawnImpactEffect @ 0x4e9b80 for ballistic impacts and the
+// Knife-only Weapon_RaycastAndSpawnImpact @ 0x4e8460 leaf — terrain surface + 4,
+// entity/building material + 4 (building material 1 -> 23 flesh), water = 11].
+inline constexpr int kImpactEffectTagCount = 28;
+inline const char *const kImpactEffectTagNames[kImpactEffectTagCount] = {
+    "null", "move", "player", "zip", "obj", "dirt", "grass", "snow", "cement", "sand",
+    "packeddirt", "water", "railroad", "mud", "ice", "quicksand", "stone", "wood",
+    "metal", "glass", "cloth", "foliage", "hmetal", "flesh", "bodyarmor", "uwaterdeep",
+    "uwatershallow", "uwatersurface",
+};
+
+// Case-insensitive tag lookup, matching the original's scan from index 1
+// [orig: @ 0x40a46a..0x40a48e]; -1 = unknown tag.
+inline int impact_effect_tag_index(const char *name) {
+    if (name == nullptr) return -1;
+    for (int i = 1; i < kImpactEffectTagCount; ++i) {
+        const char *t = kImpactEffectTagNames[i];
+        size_t j = 0;
+        while (t[j] != '\0' && name[j] != '\0' &&
+               std::tolower(static_cast<unsigned char>(t[j])) ==
+                       std::tolower(static_cast<unsigned char>(name[j])))
+            ++j;
+        if (t[j] == '\0' && name[j] == '\0') return i;
+    }
+    return -1;
+}
+
+// One baked per-tag impact row: the .ptl effect + soundset spawned on a hit of that
+// class ('' = none / row absent). [orig: the staged row = {tag id, interned effect
+// handle +4, soundset id +8, zeroed word +12} — 16 B stride, COMPACTED into the ammo
+// record's table at block end by AmmoDef_InitEffectsTable @ 0x409f20 (16*(count+1)
+// bytes, authored tags in ascending order), yet consumed by tag POSITION
+// (*(ammoDef+104) + 16*tag @ 0x4e88c3) — sound only because every shipped table
+// authors the full contiguous 1..24 tag prefix (row index == tag id). This 28-slot
+// tag-addressed model is byte-equivalent on shipped data and resolves correctly on
+// sparse tables where the original would misindex — an intentional bounded
+// divergence from an original indexing assumption.]
+struct AmmoImpactEffectRow {
+    std::string effect;
+    std::string sound;
+};
+
 struct AmmoTableEntry {
     std::string name;               // record +144 [orig: AmmoDef_AllocateSlot copy]
     uint32_t flags = 0;             // +0 `flag` OR-bits [orig: name/bit table @0x813500]
@@ -33,6 +78,12 @@ struct AmmoTableEntry {
     int32_t penetration_impact = 0; // +196 — must reach the target itemDef+400 armor threshold
     int32_t tracer_rate = 0;        // byte +226 (`tracerRate`)
     std::string notarmmed_ammo;     // +241 — the not-armed child ammo name
+    // The per-surface impact rows by canonical tag id. Bake rules per the witnessed
+    // parser: 'none' columns stay empty, duplicate tags keep the FIRST row (the
+    // original warns 'redefining the effect' @ 0x40a502), unknown tags are dropped
+    // ('unknown effect tag' @ 0x40a49f), and the authored 4th (count) column is
+    // DISCARDED — the original parses then zeroes it [orig: @ 0x40a587].
+    AmmoImpactEffectRow impact_effects[kImpactEffectTagCount];
     bool valid = false;
 };
 

@@ -14,8 +14,20 @@ var action_started := -1
 var action_soundset := ""
 var action_particle := ""
 var action_particle_userpoint := ""
+## Action-routing state at the production tick, after the retail view promoter.
+## Catch-up frames must not reuse one final view snapshot for every queued event.
+var scope_settled := false
+var third_person := false
+var vehicle_attack_context := false
 var action_finished := -1
 var action_end_soundset := ""
+## The recoil-row DIRECT effect leg at the recoil arbiter tick. Usually casing
+## eject / bolt smoke, but data may author a muzzle effect here (REVX02 M4).
+## Retail spawns it with no scope gate and no live-handle suppression
+## [orig: WeaponAction_Recoil @ 0x542dd0 gate @ 0x542efa, spawn @ 0x542f64].
+var action_effect := -1
+var effect_particle := ""
+var effect_particle_userpoint := ""
 
 
 static func from_event_dict(d: Dictionary) -> PlayerWeaponEvent:
@@ -28,6 +40,12 @@ static func from_event_dict(d: Dictionary) -> PlayerWeaponEvent:
 	out.action_soundset = String(d.get("action_soundset", ""))
 	out.action_particle = String(d.get("action_particle", ""))
 	out.action_particle_userpoint = String(d.get("action_particle_userpoint", ""))
+	out.scope_settled = bool(d.get("scope_settled", false))
+	out.third_person = bool(d.get("third_person", false))
+	out.vehicle_attack_context = bool(d.get("vehicle_attack_context", false))
 	out.action_finished = int(d.get("action_finished", -1))
 	out.action_end_soundset = String(d.get("action_end_soundset", ""))
+	out.action_effect = int(d.get("action_effect", -1))
+	out.effect_particle = String(d.get("effect_particle", ""))
+	out.effect_particle_userpoint = String(d.get("effect_particle_userpoint", ""))
 	return out

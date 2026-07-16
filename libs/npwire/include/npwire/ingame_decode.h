@@ -583,7 +583,8 @@ struct InfantryCompactRecord {
 //   20 B if (flags & 0xC0) — adds both
 struct RoundEventRecord {
 	uint8_t  flags = 0;               // fire-mode byte (ring+30: bit0 alt-fire, bit1 adm-indexed,
-	                                  // bits 4-5 weapon-slot combo) | 0x80 → slot_byte present
+	                                  // bits 4-5 pre-consume magazine count low two bits)
+	                                  // | 0x80 → slot_byte present
 	                                  // [ring+32 != 0 @0x5048bb] | 0x40 → target_handle present
 	                                  // [shooter's live fire target set @0x50485a]
 	uint8_t  adm_index = 0;           // → AdmDef_GetEntryByIndex (action descriptor index)

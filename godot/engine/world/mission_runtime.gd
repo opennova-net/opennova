@@ -20,6 +20,13 @@ extends Node
 # transforms captured at setup.
 
 signal effects_drained(effects: Array)
+## Emitted once after every authoritative 62.5 Hz logic step, after that
+## step's side effects have been delivered. Presentation-only fixed-step
+## systems (particles) subscribe here instead of integrating render delta.
+signal fixed_tick_completed(logic_tick: int)
+## Emitted after Stop rewinds simulation and authored transforms. Host-owned
+## presentation systems use this boundary to discard transient runtime state.
+signal simulation_restarted()
 
 const MissionEntityRegistry := preload("res://engine/world/mission_entity_registry.gd")
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
@@ -52,11 +59,23 @@ var _ticks_last_frame := 0           # logic ticks run by the last tick_realtime
 var _mission_file := ""
 var _mission_name := ""
 
+# Value-only attachment poses for the current authoritative tick. Production
+# lookups stay in NovaSimulation's generation-bound native index; these boxed
+# maps remain only as a compatibility path for snapshot-source test seams.
+var _has_native_present_effect_pose_lookup := false
+var _effect_pose_snapshot_tick := -1
+var _effect_pose_snapshot_ready := false
+var _effect_poses_by_bms_id: Dictionary = {}
+var _effect_poses_by_origin: Dictionary = {}
+var _effect_poses_by_wire_handle: Dictionary = {}
+var _effect_poses_by_ssn: Dictionary = {}
+
 
 ## Create + promote the mission, build the shared index over the placed nodes (`container`), and wire
 ## the present pass. options: { loco_scale, self_tick, present_options }. Returns the AI
 ## entity count, or 0 on load failure (the orphan sim is freed). The sim is held off-tree by this driver.
 func setup(mission, container: Node, options: Dictionary = {}) -> int:
+	_clear_present_effect_poses()
 	_sim = NovaSimulation.new()
 	var mission_path := String(options.get(
 			"debug_mission_file", options.get("mission_file", "")))
@@ -69,6 +88,11 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	if _mission_name.is_empty() and not _mission_file.is_empty():
 		_mission_name = _mission_file.get_file().get_basename()
 
+	_has_native_present_effect_pose_lookup = (
+			_sim.has_method("get_present_effect_state_for_ssn")
+			and _sim.has_method("get_present_effect_state_for_wire_handle")
+			and _sim.has_method("get_present_effect_state_for_bms_id")
+			and _sim.has_method("get_present_effect_state_for_origin"))
 	if options.has("loco_scale"):
 		_sim.set_loco_scale(int(options["loco_scale"]))
 	# P7: EVERY play/preview path is the in-process listen server (ADR 0011) — stood up BEFORE load,
@@ -124,6 +148,7 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	if mission == null or not _sim.load_from_mission_data(mission):
 		_sim.free()  # NovaSimulation is a Node (not RefCounted); free the orphan on load failure
 		_sim = null
+		_has_native_present_effect_pose_lookup = false
 		return 0
 	# Ground the AI on the host's terrain (editor preview + game share this one call). Entities hug
 	# the terrain instead of floating; absent/unloaded terrain leaves their authored Z untouched.
@@ -234,7 +259,65 @@ func entity_position_for_ssn(ssn: int) -> Variant:
 func entity_effect_transform_for_ssn(ssn: int) -> Variant:
 	if _sim == null or ssn <= 0:
 		return null
+	# Once a logic tick has completed, follow the exact client-view pose that the
+	# render pass will present for that tick. Before the first tick there is no
+	# such snapshot, so retain the authoritative registry lookup as the seed.
+	if has_current_present_effect_snapshot():
+		if _has_native_present_effect_pose_lookup:
+			return _effect_transform_from_state(
+					_sim.get_present_effect_state_for_ssn(ssn))
+		_ensure_present_effect_poses()
+		return _effect_poses_by_ssn.get(ssn)
 	var state: PackedVector3Array = _sim.get_entity_effect_state_for_ssn(ssn)
+	return _effect_transform_from_state(state)
+
+
+## True after at least one authoritative logic tick has produced a client-view
+## snapshot. Hosts can use this to distinguish "not presented yet" (fall back to
+## an authored Node seed) from "not present in the current tick" (detach).
+func has_current_present_effect_snapshot() -> bool:
+	return _sim != null and _effect_pose_snapshot_tick >= 0
+
+
+## Resolve one presented entity by its stable value identity. Placed nodes use
+## bms_id first and (kind,index) as the zero-id fallback; wire-spawned nodes use
+## their wire handle. Returns null when the entity is absent this tick.
+func presented_entity_effect_transform(entity_ref: Dictionary) -> Variant:
+	if not has_current_present_effect_snapshot():
+		return null
+	var wire_handle := int(entity_ref.get("wire_handle", 0))
+	if _has_native_present_effect_pose_lookup:
+		var state := PackedVector3Array()
+		if wire_handle > 0:
+			state = _sim.get_present_effect_state_for_wire_handle(wire_handle)
+		else:
+			var native_bms_id := int(entity_ref.get("bms_id", 0))
+			if native_bms_id > 0:
+				state = _sim.get_present_effect_state_for_bms_id(native_bms_id)
+			else:
+				var native_kind := int(entity_ref.get(
+						"kind", entity_ref.get("origin_kind", -1)))
+				var native_index := int(entity_ref.get("index", -1))
+				if native_kind >= 0 and native_index >= 0:
+					state = _sim.get_present_effect_state_for_origin(
+							native_kind, native_index)
+		return _effect_transform_from_state(state)
+
+	# Compatibility path for a snapshot-source test seam without the compact API.
+	_ensure_present_effect_poses()
+	if wire_handle > 0:
+		return _effect_poses_by_wire_handle.get(wire_handle)
+	var bms_id := int(entity_ref.get("bms_id", 0))
+	if bms_id > 0:
+		return _effect_poses_by_bms_id.get(bms_id)
+	var kind := int(entity_ref.get("kind", entity_ref.get("origin_kind", -1)))
+	var index := int(entity_ref.get("index", -1))
+	if kind >= 0 and index >= 0:
+		return _effect_poses_by_origin.get(_effect_origin_key(kind, index))
+	return null
+
+
+func _effect_transform_from_state(state: PackedVector3Array) -> Variant:
 	if state.size() != NovaSimulation.EFFECT_STATE_COUNT:
 		return null
 	return Transform3D(
@@ -249,6 +332,63 @@ func get_mission_file() -> String:
 
 func get_mission_name() -> String:
 	return _mission_name
+
+
+func _effect_origin_key(kind: int, index: int) -> String:
+	return "%d:%d" % [kind, index]
+
+
+func _clear_present_effect_poses() -> void:
+	_effect_pose_snapshot_tick = -1
+	_effect_pose_snapshot_ready = false
+	_effect_poses_by_bms_id.clear()
+	_effect_poses_by_origin.clear()
+	_effect_poses_by_wire_handle.clear()
+	_effect_poses_by_ssn.clear()
+
+
+func _begin_present_effect_tick(logic_tick: int) -> void:
+	_effect_pose_snapshot_tick = logic_tick
+	_effect_pose_snapshot_ready = false
+	_effect_poses_by_bms_id.clear()
+	_effect_poses_by_origin.clear()
+	_effect_poses_by_wire_handle.clear()
+	_effect_poses_by_ssn.clear()
+
+
+func _ensure_present_effect_poses() -> void:
+	if _effect_pose_snapshot_ready or _sim == null or _effect_pose_snapshot_tick < 0:
+		return
+	_effect_pose_snapshot_ready = true
+	var stride := int(_sim.get_present_stride())
+	if stride <= 0:
+		return
+	var snapshot: PackedFloat32Array = _sim.get_present_snapshot()
+	var count: int = snapshot.size() / stride
+	for i in range(count):
+		var base := i * stride
+		var transform := Transform3D(
+				MissionObjectPlacer.bms_to_godot_basis(Vector3(
+					snapshot[base + NovaSimulation.PF_PITCH_DEG],
+					snapshot[base + NovaSimulation.PF_YAW_DEG],
+					snapshot[base + NovaSimulation.PF_ROLL_DEG])),
+				Vector3(
+					snapshot[base + NovaSimulation.PF_POS_X],
+					snapshot[base + NovaSimulation.PF_POS_Y],
+					snapshot[base + NovaSimulation.PF_POS_Z]))
+		var wire_handle := int(snapshot[base + NovaSimulation.PF_WIRE_HANDLE])
+		if wire_handle > 0:
+			_effect_poses_by_wire_handle[wire_handle] = transform
+		var bms_id := int(snapshot[base + NovaSimulation.PF_BMS_ID])
+		if bms_id > 0:
+			_effect_poses_by_bms_id[bms_id] = transform
+		var kind := int(snapshot[base + NovaSimulation.PF_KIND])
+		var index := int(snapshot[base + NovaSimulation.PF_INDEX])
+		if kind >= 0 and index >= 0:
+			_effect_poses_by_origin[_effect_origin_key(kind, index)] = transform
+		var ssn := int(snapshot[base + NovaSimulation.PF_NET_ID])
+		if ssn > 0:
+			_effect_poses_by_ssn[ssn] = transform
 
 
 # --- the local player (Phase 2; ADR 0012). Thin delegates to the sim for the host. ---
@@ -308,6 +448,13 @@ func request_player_stance(stance: int) -> bool:
 
 func get_sim() -> NovaSimulation:
 	return _sim
+
+
+## Register a render-side consumer for models materialized from the replicated
+## wire stream. The pass replays already-live nodes when the callback is set.
+func set_wire_node_spawned_callback(callback: Callable) -> void:
+	if _wire_present != null:
+		_wire_present.set_node_spawned_callback(callback)
 
 
 func get_present_index():
@@ -417,11 +564,17 @@ func _advance_one_tick_no_present() -> bool:
 	_perf_sim_us = Time.get_ticks_usec() - sim_start
 	_perf_effects_us = 0
 	if did_tick:
+		var logic_tick := int(_sim.get_logic_tick())
+		# Invalidate before delivering effects: any owned spawn seeded during
+		# this tick and the fixed-tick particle advance both observe this exact
+		# client-view pose, even inside a multi-tick catch-up batch.
+		_begin_present_effect_tick(logic_tick)
 		var effects_start := Time.get_ticks_usec()
 		var effects := _sim.drain_effects()
 		_perf_effects_us = Time.get_ticks_usec() - effects_start
 		if not effects.is_empty():
 			effects_drained.emit(effects)
+		fixed_tick_completed.emit(logic_tick)
 	return did_tick
 
 
@@ -513,7 +666,9 @@ func stop() -> void:
 	_accum = 0.0  # a Stop -> Play cycle must not replay banked time
 	if _sim != null:
 		_sim.restart()  # World::restore baseline (registry/vars/env/clock) + AI re-seed
+	_clear_present_effect_poses()
 	_restore_transforms()
+	simulation_restarted.emit()
 
 
 func _capture_transforms() -> void:
@@ -551,6 +706,8 @@ func _for_each_present_node(fn: Callable) -> void:
 # The sim is held off-tree, so free it explicitly when this driver leaves the tree (a reload / Stop
 # queue_free()s the driver). [mirrors the old MissionSimDriver._exit_tree.]
 func _exit_tree() -> void:
+	_clear_present_effect_poses()
+	_has_native_present_effect_pose_lookup = false
 	if _sim != null and is_instance_valid(_sim):
 		_sim.free()
 		_sim = null
