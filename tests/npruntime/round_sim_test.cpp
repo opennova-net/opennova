@@ -465,6 +465,51 @@ int main() {
 				return 1;
 	}
 
+	// --- 6. The tracer decision [orig: RoundData_SpawnRound @0x4ec184-0x4ec1e5]:
+	// every tracer_rate-th round per shooter is a tracer (the counter wraps at the
+	// rate; tracer on wrap), rate 0 = never, FORCETRACER (flags 0x8000) = every
+	// round; team is stamped from the shooter [orig: round+0x162 @0x4ec705]. Every
+	// spawn also records a FireEvent for the host present drain (§17.4).
+	{
+		world.ammo.entries[1].tracer_rate = 3;
+		w::Entity *shooter = world.registry.get(hb);
+		shooter->tracer_shot_counter = 0;
+		world.round_sim.fired.clear();
+		w::RoundSpawnParams rp;
+		rp.owner = hb;
+		rp.shooter_handle = hb.packed;
+		rp.origin = {0.0f, 0.0f, 30.0f};
+		rp.ammo_index = 1;
+		for (int shot = 1; shot <= 6; ++shot) {
+			const int slot = world.round_sim.spawn(world, rp);
+			if (!expect(slot >= 0, "tracer-cadence round spawned")) return 1;
+			const bool want = (shot % 3) == 0; // counter wrap = every 3rd shot
+			if (!expect(world.round_sim.rounds[size_t(slot)].tracer == want,
+			            "tracer cadence: tracer exactly on the counter wrap"))
+				return 1;
+			if (!expect(world.round_sim.rounds[size_t(slot)].team == shooter->team,
+			            "tracer round carries the shooter team"))
+				return 1;
+		}
+		world.ammo.entries[1].tracer_rate = 0;
+		int s0 = world.round_sim.spawn(world, rp);
+		if (!expect(s0 >= 0 && !world.round_sim.rounds[size_t(s0)].tracer,
+		            "tracer_rate 0 -> never a tracer"))
+			return 1;
+		world.ammo.entries[1].flags |= 0x8000u; // forcetracer
+		int s1 = world.round_sim.spawn(world, rp);
+		if (!expect(s1 >= 0 && world.round_sim.rounds[size_t(s1)].tracer,
+		            "FORCETRACER overrides rate 0"))
+			return 1;
+		world.ammo.entries[1].flags &= ~0x8000u;
+		if (!expect(world.round_sim.fired.size() == 8 &&
+		                    world.round_sim.fired.back().ammo_index == 1 &&
+		                    world.round_sim.fired.back().shooter_handle == hb.packed,
+		            "every spawn records a FireEvent for the present drain"))
+			return 1;
+		world.round_sim.fired.clear();
+	}
+
 	std::printf("round_sim_test: all green\n");
 	return 0;
 }

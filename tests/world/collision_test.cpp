@@ -633,6 +633,33 @@ void test_platform_latch() {
 
 } // namespace
 
+// ---- raycast_clear: the LOS segment query, TRUE = clear. [orig:
+// Physics_RaycastTerrainAndSectors @0x539910 — terrain leg + pool-2/pool-1 solid
+// clip; the D-AI-7 leg.] A pool-2 solid across the segment blocks; the excluded
+// pair never blocks; a segment crossing the terrain surface blocks.
+void test_raycast_clear_los() {
+    Rig rig(box_model(1, 0, 2.0, 2.0, 3.0), 10.0, 0.0); // 4x4x3 wall at (10, 0)
+
+    // Chest-high segment straight through the wall -> blocked.
+    const int32_t a[3] = {fx(0.0), fx(0.0), fx(1.5)};
+    const int32_t b[3] = {fx(20.0), fx(0.0), fx(1.5)};
+    CHECK(!rig.cw.raycast_clear(rig.world, a, b, rig.soldier, EntityHandle{}));
+
+    // Over the wall (z 4.5 > height 3) -> clear.
+    const int32_t a_hi[3] = {fx(0.0), fx(0.0), fx(4.5)};
+    const int32_t b_hi[3] = {fx(20.0), fx(0.0), fx(4.5)};
+    CHECK(rig.cw.raycast_clear(rig.world, a_hi, b_hi, rig.soldier, EntityHandle{}));
+
+    // The wall itself excluded (the sighting pair never blocks its own ray)
+    // [orig: ctx[17]/[18] @0x538836].
+    CHECK(rig.cw.raycast_clear(rig.world, a, b, rig.soldier, rig.building));
+
+    // Terrain leg: a segment dipping below the ground plane hits the heightmap
+    // march -> blocked [orig: the @0x539958 leg].
+    const int32_t buried[3] = {fx(30.0), fx(0.0), fx(-1.0)};
+    CHECK(!rig.cw.raycast_clear(rig.world, a_hi, buried, rig.soldier, EntityHandle{}));
+}
+
 int main() {
     test_matrix_roundtrip();
     test_blink_query_and_refresh();
@@ -646,6 +673,7 @@ int main() {
     test_pool1_item_is_one_collision_candidate();
     test_platform_latch();
     test_debug_seams();
+    test_raycast_clear_los();
     if (failures == 0) std::printf("collision_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }

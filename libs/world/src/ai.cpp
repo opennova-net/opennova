@@ -1284,7 +1284,7 @@ bool AiSystem::acquire_target(World &world, AiEntity &e, AiTarget &out) {
             cand.net_id = c->net_id;                       // single key (+0x7C SSN)
             cand.has_controller = (c->owner_connection_id != 0);
             cand.is_priority = false;                      // [orig: profile+148 — unmodeled]
-            cand.los_blocked = !line_of_sight_clear(e.pos, cand.pos);
+            cand.los_blocked = !line_of_sight_clear(world, e.pos, cand.pos, e.handle, h);
             scan_candidates_.push_back(cand);
         }
     }
@@ -1396,34 +1396,25 @@ void AiSystem::ai_set_target(World &world, AiEntity &e, EntityHandle target) {
     }
 }
 
-// LOS between two 16.16 points — the terrain leg only: sample the height-field column
-// every ~2 u along the segment (both endpoints lifted by nothing; callers pass fire
-// origins). The entity/sector leg is deferred (ledger D-AI-7; the original's
-// Physics_RaycastTerrainAndSectors @0x539910 internals are the open §16.5 item 6).
-// No terrain wired -> clear, the headless-test default. Returns true = clear.
-bool AiSystem::line_of_sight_clear(const int32_t a[3], const int32_t b[3]) const {
+// LOS between two 16.16 fire-origin points — true = clear. The terrain leg is the
+// ported heightmap segment raycast; the sector leg clips the ray against pool-2 /
+// pool-1 collision models (the D-AI-7 leg). [orig: Entity_CheckMutualLineOfSight
+// @0x539be0 -> Physics_RaycastTerrainAndSectors @0x539910, ray radius 0, 1 = clear.]
+// No terrain wired -> clear, the headless-test default; no collision world wired
+// (terrain-only unit tests) -> terrain leg alone.
+bool AiSystem::line_of_sight_clear(World &world, const int32_t a[3], const int32_t b[3],
+                                   EntityHandle from, EntityHandle to) const {
     if (terrain == nullptr || !terrain->valid()) return true;
     // The original tests the segment between the two FIRE ORIGINS — Entity_CheckMutual-
     // LineOfSight @0x539be0 feeds two Entity_ComputeWeaponFireOrigin @0x43b4b0 results
     // into the ray — never the ground-level entity origins (feet-to-feet sampling
     // false-blocks on the very ground both stand on). Until the bone seam lands, lift
     // both endpoints by the same 0.9 u chest stand-in the fire pass uses (D-AI-6/-7).
-    constexpr double kChestLift = 0.9; // [orig: the def+1350 muzzle bone; stand-in 0xE666]
-    const double ax = a[0] / 65536.0, ay = a[1] / 65536.0, az = a[2] / 65536.0 + kChestLift;
-    const double bx = b[0] / 65536.0, by = b[1] / 65536.0, bz = b[2] / 65536.0 + kChestLift;
-    const double dx = bx - ax, dy = by - ay, dz = bz - az;
-    const double len = std::sqrt(dx * dx + dy * dy);
-    const int steps = len > 2.0 ? static_cast<int>(len / 2.0) + 1 : 1;
-    for (int i = 1; i < steps; ++i) {
-        const double t = static_cast<double>(i) / steps;
-        const float sx = static_cast<float>(ax + dx * t);
-        const float sy = static_cast<float>(ay + dy * t);
-        const float sz = static_cast<float>(az + dz * t);
-        // Engine (X,Y) -> sampler (x, -y), the ai.cpp grounding convention.
-        const float ground = terrain::height_field_height_world_bilinear(*terrain, sx, -sy);
-        if (sz <= ground) return false;
-    }
-    return true;
+    constexpr int32_t kChestLift = 0xE666; // 0.9 u [orig: the def+1350 muzzle bone stand-in]
+    const int32_t la[3] = {a[0], a[1], a[2] + kChestLift};
+    const int32_t lb[3] = {b[0], b[1], b[2] + kChestLift};
+    if (collision != nullptr) return collision->raycast_clear(world, la, lb, from, to);
+    return !los_terrain_blocked(*terrain, la, lb);
 }
 
 // [orig: Entity_AlertNearbyAllies @0x4654b0] same-team, alive, non-building entities

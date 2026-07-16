@@ -92,6 +92,18 @@ typedef struct DefAmmoDef {
     int min_stable_velocity; /* +176 */
     int tracer_rate;         /* byte +226 ('tracerRate') */
     char notarmmed_ammo[64]; /* +241: the not-armed child ammo name ('notarmmedammo') */
+    /* Host fire-presentation fields (world-wac-ai-re §17.4). The original resolves
+     * both names at parse time (+64 = SoundBank_FindSetByNameAnyBank set ptr, +68 =
+     * CEffectWorld_InternEffectHandle handle [orig: AmmoDef_ParseProperty
+     * @0x40a8c8/@0x40a8f6]); we keep the names and resolve in the host at play. */
+    char ai_launch[64];       /* +64: 'ai_launch' fire sound-set name */
+    char ai_launcheffect[64]; /* +68: 'ai_launcheffect' muzzle effect name */
+    int mf_light;             /* +36: 'MF_Light' presence flag [orig: @0x40a81b = 1] */
+    int mf_light_value;       /* +40: 'MF_Light' value (atol) [orig: @0x40a837] */
+    /* Tracer visual styles, 'tracer_type <friendly> [<enemy>]' — witnessed id map in
+     * ammo_tracer_type_from_string; one value copies into both [orig: @0x40a78b-0x40a7fa]. */
+    int tracer_type_friendly; /* +232 */
+    int tracer_type_enemy;    /* +236 */
     DefEffectTableEntry *effects_table;
     size_t effects_table_count;
     char (*raw_lines)[512];

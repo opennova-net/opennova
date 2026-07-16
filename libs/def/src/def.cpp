@@ -447,6 +447,28 @@ static const char *k_ammo_kz_names[8] = {
     "rounds_kz_radiusblast", "rounds_kz_c4", "rounds_kz_bullets", "rounds_kz_slash",
 };
 
+/* `tracer_type` style name -> engine id; unknown names fall back to atol like the
+ * original (note the gap at 8). [orig: AmmoDef_ParseTypeName, called from
+ * AmmoDef_ParseProperty @0x40a7a6/@0x40a7d1] */
+static const struct { const char *name; int id; } k_ammo_tracer_type_names[] = {
+    {"stdred", 1},   {"stdgreen", 2},   {"rocket", 3},      {"at4", 4},
+    {"grenade", 5},  {"rapidred", 6},   {"rapidgreen", 7},  {"sniperred", 9},
+    {"snipergreen", 10}, {"df1red", 11}, {"df1green", 12},
+};
+
+static int ammo_tracer_type_from_name(const char *s, size_t len) {
+    char nm[48];
+    size_t n = len < sizeof(nm) - 1 ? len : sizeof(nm) - 1;
+    to_lower_buf(nm, s, n);
+    for (size_t i = 0; i < sizeof(k_ammo_tracer_type_names) / sizeof(k_ammo_tracer_type_names[0]);
+         ++i) {
+        if (strlen(k_ammo_tracer_type_names[i].name) == n &&
+            memcmp(k_ammo_tracer_type_names[i].name, nm, n) == 0)
+            return k_ammo_tracer_type_names[i].id;
+    }
+    return parse_int_n(s, len); /* atol fallback [orig: AmmoDef_ParseTypeName tail] */
+}
+
 /* Decimal string -> 16.16 fixed point (integer math; matches the values ammo.def uses:
  * "1", "0.5", ".04"). [orig: Math_ParseFixedPoint16 @0x6131f0] */
 static int parse_fixed16_n(const char *s, size_t len) {
@@ -662,6 +684,44 @@ static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out) {
         } else if (lower_starts_with(lower, ll, "tracerrate", 10)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
             current.tracer_rate = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "ai_launcheffect", 15)) {
+            /* Must precede "ai_launch" in this starts_with chain (prefix collision;
+               the original compares exact tokens [orig: @0x40a8fc stricmp]). */
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 15, &vl);
+            Token tok[1];
+            if (tokenize(v, vl, tok, 1) >= 1)
+                safe_copy(current.ai_launcheffect, sizeof(current.ai_launcheffect), tok[0].s,
+                          tok[0].len);
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "ai_launch", 9)) {
+            /* The AI fire sound-set name; the original resolves the set pointer here
+               [orig: @0x40a8c8-0x40a8ef SoundBank_FindSetByNameAnyBank -> +64]. */
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
+            Token tok[1];
+            if (tokenize(v, vl, tok, 1) >= 1)
+                safe_copy(current.ai_launch, sizeof(current.ai_launch), tok[0].s, tok[0].len);
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "mf_light", 8)) {
+            /* Presence sets the +36 flag, the value lands beside it
+               [orig: @0x40a81b dword +36 = 1; @0x40a826-0x40a837 +40 = atol]. */
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 8, &vl);
+            current.mf_light = 1;
+            current.mf_light_value = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "tracer_type", 11)) {
+            /* 1-2 style names; a single value fills both slots
+               [orig: @0x40a79d-0x40a7fa: argc >= 2 -> +232, argc >= 3 -> +236,
+               else +236 = +232]. */
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 11, &vl);
+            Token tok[2];
+            int tn = tokenize(v, vl, tok, 2);
+            if (tn >= 1) {
+                current.tracer_type_friendly = ammo_tracer_type_from_name(tok[0].s, tok[0].len);
+                current.tracer_type_enemy =
+                        tn >= 2 ? ammo_tracer_type_from_name(tok[1].s, tok[1].len)
+                                : current.tracer_type_friendly;
+            }
             parsed = 1;
         } else if (lower_starts_with(lower, ll, "notarmmedammo", 13)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 13, &vl);

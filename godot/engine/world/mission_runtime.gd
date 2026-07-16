@@ -32,6 +32,7 @@ const MissionEntityRegistry := preload("res://engine/world/mission_entity_regist
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
 const MissionPresentPass := preload("res://engine/world/mission_present_pass.gd")
 const WirePresentPass := preload("res://engine/world/wire_present_pass.gd")
+const FirePresentPass := preload("res://engine/world/fire_present_pass.gd")
 const MissionSeatDiagnostics := preload("res://engine/world/mission_seat_diagnostics.gd")
 
 # Fixed-timestep accumulator. The original decouples the simulation from rendering: the master
@@ -44,6 +45,7 @@ const MAX_CATCHUP_TICKS := 31        # spiral-of-death clamp: port of the 500 ms
 var _sim: NovaSimulation
 var _present                          # MissionPresentPass: placed nodes (host/SP/editor); null on a joiner
 var _wire_present                     # WirePresentPass: un-placed remote players (co-op host + joiner); else null
+var _fire_present                     # FirePresentPass: AI/remote fire sound + muzzle + tracers (host); else null
 var _index
 var _self_tick := false              # editor: self-tick via _process while playing; game: host calls tick()
 var _playing := false
@@ -193,6 +195,15 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 		_wire_present = WirePresentPass.new()
 		_wire_present.setup(_sim, options.get("placer"), container, options.get("env_node"),
 			null if is_joiner else _index)
+	# The host fire-presentation pass: AI/remote fire sound + muzzle effect + tracer
+	# streaks off the sim's fired/tracer drains — providers come from the host shell
+	# (game_world). A joiner's presentation seam is its own decode path (net views).
+	if not is_joiner and options.has("fire_audio"):
+		_fire_present = FirePresentPass.new()
+		_fire_present.setup(_sim, container,
+			options.get("fire_audio", Callable()),
+			options.get("fire_fx", Callable()),
+			options.get("fire_listener", Callable()))
 	# Spawn the host's own player as an authoritative pool-0 entity (ADR 0012 / net-re §5.2b).
 	# After load (the spawn needs the AI system wired). The spawn POSE is selected the way the
 	# original engine does — by game type, from the mission's player-START marker FARTHEST from the
@@ -431,6 +442,11 @@ func local_player_max_health() -> int:
 func local_player_team() -> int:
 	return int(_sim.get_local_player_team()) if _sim != null else 0
 
+
+# Fire-presentation counters (probe/diagnostic seam; empty when the pass is absent).
+func get_fire_present_stats() -> Dictionary:
+	return _fire_present.get_stats() if _fire_present != null else {}
+
 func set_player_input(forward: bool, back: bool, left: bool, right: bool, lean_left: bool, lean_right: bool, jump: bool) -> void:
 	if _sim != null:
 		_sim.set_player_input(forward, back, left, right, lean_left, lean_right, jump)
@@ -553,6 +569,8 @@ func tick() -> bool:
 			_present.present()
 		if _wire_present != null:
 			_wire_present.present()
+		if _fire_present != null:
+			_fire_present.present(1)
 		_perf_present_us = Time.get_ticks_usec() - present_start
 	_perf_tick_us = Time.get_ticks_usec() - tick_start
 	_perf_did_tick = did_tick
@@ -614,12 +632,14 @@ func tick_realtime(delta: float) -> int:
 	_perf_sim_us = sim_us
 	_perf_effects_us = effects_us
 	_perf_present_us = 0
-	if _present != null or _wire_present != null:
+	if _present != null or _wire_present != null or _fire_present != null:
 		var present_start := Time.get_ticks_usec()
 		if _present != null:
 			_present.present()
 		if _wire_present != null:
 			_wire_present.present()
+		if _fire_present != null:
+			_fire_present.present(n)
 		_perf_present_us = Time.get_ticks_usec() - present_start
 	_perf_tick_us = Time.get_ticks_usec() - tick_start
 	_perf_did_tick = true
@@ -713,6 +733,9 @@ func _for_each_present_node(fn: Callable) -> void:
 func _exit_tree() -> void:
 	_clear_present_effect_poses()
 	_has_native_present_effect_pose_lookup = false
+	if _fire_present != null:
+		_fire_present.teardown()  # frees the tracer mesh instance under the container
+		_fire_present = null
 	if _sim != null and is_instance_valid(_sim):
 		_sim.free()
 		_sim = null

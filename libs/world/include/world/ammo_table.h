@@ -84,6 +84,15 @@ struct AmmoTableEntry {
     // ('unknown effect tag' @ 0x40a49f), and the authored 4th (count) column is
     // DISCARDED — the original parses then zeroes it [orig: @ 0x40a587].
     AmmoImpactEffectRow impact_effects[kImpactEffectTagCount];
+    // Host fire-presentation fields (world-wac-ai-re §17.4): the original stores the
+    // RESOLVED sound-set pointer / interned effect handle [orig: AmmoDef_ParseProperty
+    // @0x40a8c8/@0x40a8f6]; we carry the names and the host resolves at play time.
+    std::string ai_launch_set;      // +64 `ai_launch` fire sound-set name
+    std::string ai_launch_effect;   // +68 `ai_launcheffect` muzzle effect name
+    int32_t mf_light = 0;           // +36 `MF_Light` presence flag [orig: @0x40a81b]
+    int32_t mf_light_value = 0;     // +40 `MF_Light` value
+    int32_t tracer_type_friendly = 0; // +232 `tracer_type` first style id
+    int32_t tracer_type_enemy = 0;    // +236 second style id (defaults to the first)
     bool valid = false;
 };
 

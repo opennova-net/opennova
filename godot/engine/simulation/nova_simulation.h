@@ -610,6 +610,24 @@ public:
 	// is applied in-engine, never here.
 	Array drain_effects();
 
+	// The host fire-presentation drain: one Dictionary per round spawned since the
+	// last call — {origin: Vector3 (godot), forward: Vector3 (godot, unit),
+	// shooter_handle, is_local_player, ammo_index, sound_set, effect, mf_light} with
+	// the ammo-def 'ai_launch'/'ai_launcheffect' names resolved. The fire present
+	// pass plays/spawns per event, skipping the local player (whose action-slot
+	// presentation is already ported). [orig: WeaponSlot_FireAndSpawnEffects
+	// @0x53F440 — the firing host presents its own rounds inline at fire time;
+	// world-wac-ai-re §17.4]
+	Array drain_fire_presentation_events();
+
+	// Live TRACER rounds, 9 floats each: godot-space position (3), godot-space
+	// per-tick velocity (3), round team, tracer_type friendly id, enemy id — the
+	// fire present pass draws the streaks and picks the style vs the local player's
+	// team. [orig: RoundData_SpawnRound @0x4EC0D0 tracer decision + the +0xE8/+0xEC
+	// 'tracer_type' pair; non-tracer rounds are invisible in flight (graphicModel
+	// zeroed @0x4ec900).]
+	PackedFloat32Array get_tracer_rounds() const;
+
 	// Mission scripting state on the shared world (the dword_C6B240 var store + event gates).
 	void set_mission_variable(int index, int value);
 	int get_mission_variable(int index) const;

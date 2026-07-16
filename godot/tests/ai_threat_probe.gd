@@ -67,6 +67,15 @@ func _run() -> void:
 		push_error("ai_threat_probe: set NW_SP_MISSION=<mission.bms>")
 		quit(1)
 		return
+	# NW_RESOURCE_DIR pins the mount for this run (the persisted user:// dir is
+	# SHARED with ONED and other sessions repoint it — a stale dir/expansion
+	# poisons the runtime mounts and the mission never loads). Applied through
+	# the app's own settings seam; the expansion resets to base alongside it.
+	var res_dir := OS.get_environment("NW_RESOURCE_DIR")
+	if not res_dir.is_empty():
+		var settings := load("res://engine/resource_index/resource_dir_settings.gd")
+		settings.set_resource_dir(res_dir)
+		settings.set_expansion("")
 	Engine.time_scale = TIME_SCALE
 	var packed := load("res://game/main_game.tscn") as PackedScene
 	if packed == null:
@@ -170,16 +179,31 @@ func _run() -> void:
 			print("PROBE DAMAGED t=%ds hp %d -> %d (hostile fire landed)" % [seconds, hp0, hp2])
 		if hp2 <= 0:
 			print("PROBE DEAD t=%ds — NPC fire killed the player" % seconds)
-			print("PROBE PASS: acquire -> fire -> damage -> kill all observed in-game")
+			# The §17.4 presentation legs must have run for the shots that landed:
+			# fire events drained, the ai_launch sound played (immediate or delayed),
+			# the ai_launcheffect muzzle spawned, tracer rounds drawn (rate-gated).
+			var stats: Dictionary = world.get_fire_present_stats()
+			print("PROBE fire-present stats: %s" % str(stats))
+			if int(stats.get("fires", 0)) <= 0 or \
+					int(stats.get("sounds", 0)) + int(stats.get("delayed_sounds", 0)) <= 0:
+				print("PROBE FAIL: NPC fire presented no sound (stats above)")
+				quit(1)
+				return
+			if int(stats.get("effects", 0)) <= 0:
+				print("PROBE WARN: no muzzle effect spawns (ai_launcheffect missing from data?)")
+			if int(stats.get("tracer_peak", 0)) <= 0:
+				print("PROBE WARN: no tracer rounds observed (tracer_rate 0 on this ammo?)")
+			print("PROBE PASS: acquire -> fire (heard+seen) -> damage -> kill all observed in-game")
 			quit(0)
 			return
 		await _mission_wait(1.0)
 		seconds += 1
 		if seconds % 10 == 0:
 			var npc2 := _nearest_npc(sim, world)
-			print("PROBE t=%ds hp=%d nearest=%.1fu state=%d npc_hp=%d" %
+			print("PROBE t=%ds hp=%d nearest=%.1fu state=%d npc_hp=%d fire=%s" %
 					[seconds, hp2, float(npc2.get("distance", INF)),
-					int(npc2.get("state", -1)), int(npc2.get("ai_health", 0))])
+					int(npc2.get("state", -1)), int(npc2.get("ai_health", 0)),
+					str(world.get_fire_present_stats())])
 	print("PROBE FAIL: player hp=%d after %ds (damaged_at=%d) — no kill observed" %
 			[world.local_player_health(), MAX_MISSION_SECONDS, damaged_at])
 	quit(1)

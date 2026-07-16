@@ -128,6 +128,16 @@ struct CollisionMatrix {
 // Per-part animated section transforms are a tracked follow-up (D-COL-1).
 CollisionMatrix collision_matrix_from_heading(int32_t heading_bam, const int32_t pos[3]);
 
+// The terrain leg of the LOS segment query, TRUE = the segment hits terrain
+// (blocked). The ported heightmap raycast over the runtime height field; shared
+// by CollisionWorld::raycast_clear and the collision-less AiSystem fallback.
+// [orig: Terrain_RaycastHeightmapHiRes @ 0x60c760 called with a null out-hit from
+// Physics_RaycastTerrainAndSectors @ 0x539910 — boolean-equivalent to the ported
+// 0x60e710 sibling (terrain_raycast_refined); the sibling's internals delta is a
+// tracked terrain-re open item.]
+bool los_terrain_blocked(const terrain::TerrainHeightField &field, const int32_t a[3],
+                         const int32_t b[3]);
+
 // ----------------------------------------------------------------------------
 // Per-query blink accumulation. [orig: g_BlinkFlagsAccum @ 0xB57C70,
 // g_BlinkHitSlot0..3 @ 0xB57C74, g_BlinkHitCount @ 0x82AE20 — cleared per query
@@ -289,6 +299,19 @@ public:
     int32_t raycast_ground(World &world, EntityHandle source, const int32_t pos[3],
                            int32_t dx, int32_t dy, int32_t z_up, int32_t z_drop,
                            EntityHandle *out_hit_entity);
+
+    // Segment LOS query, TRUE = CLEAR of terrain + sector solids — the AI mutual-LOS
+    // seam. [orig: Physics_RaycastTerrainAndSectors @ 0x539910: terrain leg via
+    // Terrain_RaycastHeightmapHiRes @ 0x60c760 (skipped when BOTH excluded entities
+    // carry Flags & 0x800000 INDOORS — the heightmap has no interiors), then the
+    // sector walk (raycast_against_entity_pool @ 0x538720) over pool 2 statics, then
+    // pool 1 dynamics, excluding both entities; LOS callers pass ray radius 0.]
+    // Tracked D-AI-7 residuals: the +0x28 owner-link exclusion, the Flags&4
+    // destroyed-husk model swap, and the itemDef type-3 person sphere-block
+    // (same-team within 3.0 u exempt) — person-kind residents of the walked pools
+    // don't exist in our world yet (organics are pool 0, unwalked, like retail).
+    bool raycast_clear(World &world, const int32_t a[3], const int32_t b[3],
+                       EntityHandle exclude_a, EntityHandle exclude_b);
 
     // The movement resolver: candidate contact forces + damage/flag dispatch +
     // repulsion + the ground-settle tail. Returns the foot clearance (feet Z -

@@ -65,6 +65,10 @@ struct LiveRound {
     Vec3 vel;            // mission units per TICK [orig: velocity = ammo speed / 62]
     int32_t age_ticks = 0;
     int32_t max_age_ticks = 0;
+    // Tracer presentation state [orig: RoundData_SpawnRound @0x4ec184-0x4ec1e5 decision;
+    // team = round+0x162]: the host present pass draws tracer rounds in flight.
+    bool tracer = false;
+    uint8_t team = 0;
 };
 
 // A death the damage pass detected this tick — drained by the host session, which owns
@@ -106,6 +110,23 @@ struct RoundHit {
     EntityHandle shooter;
     int32_t damage = 0;
 };
+
+// One presented fire — the origin/direction/ammo of a spawned round, drained by the
+// HOST present layer for the fire sound + muzzle effect (+ the MF-light deferral).
+// [orig: WeaponSlot_FireAndSpawnEffects @ 0x53F440 presents inline at fire time on
+// the firing host (ammo-def 'ai_launch' sound +64 via Sound_PlayWithDistanceAttenuation
+// @ 0x528E40, 'ai_launcheffect' muzzle +68 via CEffectWorld_SpawnEmitterAtPosition
+// @ 0x5F6DF0); our libs stay render-free, so the sim records at the same moment and
+// the host drains — the remote-client analog re-fires the ring records (§5.60).]
+struct FireEvent {
+    EntityHandle shooter;
+    uint16_t shooter_handle = 0xFFFF;
+    int32_t ammo_index = -1;
+    Vec3 origin;          // mission units
+    int32_t yaw_bam = 0;  // fire direction (engine-frame BAM32, §5.16)
+    int32_t pitch_bam = 0;
+};
+
 class RoundSim {
 public:
     static constexpr int kCapacity = 512; // [orig: 128 groups x 4 sub-slots @0xB7E1A8]
@@ -127,6 +148,11 @@ public:
     // Processed hits (damage > 0), in tick order — drained by AiSystem::tick before the
     // per-entity updates (wasHit / lastAttacker / SM damage events).
     std::vector<RoundHit> hits;
+
+    // Fires spawned since the last presentation drain (every spawn records one, the
+    // local player's included — the present pass self-filters). Drained by the host
+    // present layer each tick; see FireEvent for the witness map.
+    std::vector<FireEvent> fired;
 
     // Spawn one round at fire time [orig: RoundData_SpawnRound @ 0x4EC0D0 default path].
     // Returns the round slot, or -1 (pool full / non-ballistic ammo / null ammo).

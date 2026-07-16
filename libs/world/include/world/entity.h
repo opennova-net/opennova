@@ -138,6 +138,12 @@ struct Entity {
     // gate (<=16) and score decay. [orig: Entity_SetAITarget @0x45d760 maintains it;
     // AI_FindBestTargetB @0x466f60 consumes; world-wac-ai-re §16.3]
     int16_t ai_target_refcount = 0;
+    // Per-shooter tracer cadence counter: ++ per fired round, wraps at the ammo
+    // tracer_rate, tracer on wrap. Stands in for the original's per-WEAPON-SLOT byte
+    // (weaponSlot+0x80) — one weapon per NPC today, so behavior is identical; the
+    // counter surviving a player weapon swap is the tracked delta.
+    // [orig: RoundData_SpawnRound @0x4ec199-0x4ec1bb]
+    uint8_t tracer_shot_counter = 0;
     int32_t health = 100;     // 0 -> dead
     // items.def hp (itemDef+0x17C healthMax), stamped by the host's item-traits sweep
     // (0 = unresolved). The original spawns entities at Health = healthMax

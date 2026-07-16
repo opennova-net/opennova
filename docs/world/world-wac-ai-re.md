@@ -1720,8 +1720,8 @@ recorded-not-applied rel-ops — plus `AI_UpdateWaypointMovement` / `AI_UpdateMo
    dirZ 0 → 24576}`), each transformed by the entity matrix → yaw/pitch →
    `Weapon_FireProcess`; `equippedAdmIndex` saved/restored around the volley. Rename
    proposal pending (curated name).
-6. `Physics_RaycastTerrainAndSectors @ 0x539910` internals (the LOS seam; terrain leg
-   exists in terrain-re — the sector leg maps onto our `CollisionWorld`).
+6. ~~`Physics_RaycastTerrainAndSectors @ 0x539910` internals~~ CLOSED 2026-07-16 → §18.5
+   (witnessed + ported: `CollisionWorld::raycast_clear`; ledger D-AI-7).
 7. `AI_FindBestTarget @ 0x465a50` (variant A, `profile+16 == 1` classes).
 
 ### 16.6 IDB write-backs (2026-07-16, saved)
@@ -1752,7 +1752,8 @@ PORT (same day): the infantry pass = `AiSystem::infantry_combat_think` /
 `apply_engage_relations` / `ai_set_target`, the SM rows = `h_enter_ground_combat` /
 `h_enter_ground_evade` / `h_ground_combat_tick` (`libs/world/src/ai.cpp`), AI fire →
 ring + RoundSim = `fire_ai_round`. Exit pin: the `ai` ctest's NPC-kills-player block.
-Residual deviations: ledger D-AI-1/2/4 (residuals), D-AI-5/6/7 (open).
+Residual deviations: ledger D-AI-1/2/4 (residuals), D-AI-5/6 (open); the §17.4
+presentation tail and the D-AI-7 LOS collision leg landed 2026-07-16 session 4 (§18).
 
 ### 17.1 Perception — the 32-tick scan `[orig: @ 0x4bbe80–0x4bbf60 region, call @ 0x4bbecc]`
 
@@ -1883,8 +1884,10 @@ cadence). Every fire: muzzle transform via `Entity_GetAttachmentWorldPosition
 `Entity_FireWeaponAndSendPacket @ 0x42bd80` (authority → `Server_ClientFiredRound
 @ 0x50baa0` = ring append + `RoundData_SpawnRound @ 0x4ec0d0`, §5.60/§16.4; the AI call
 passes targetFlags 0, targetId 1, no clip slot) + ammo-def fire sound/muzzle effect
-(`g_ammoDefTable[276·id]` +64/+68), then `Flags |= 0x4000` (priority mark) and
-`aiRef0 (+0x2F0) = slot[3]` (the accuracy-settling memory, §17.5).
+(`g_ammoDefTable[276·id]` +64/+68 — the full presentation-leg witness incl. the
+propagation-delay sound model, the MF_Light glow, and the tracer decision is §18),
+then `Flags |= 0x4000` (priority mark) and `aiRef0 (+0x2F0) = slot[3]` (the
+accuracy-settling memory, §17.5).
 
 **Weapon-byte source**: the four ids `+0x358..0x35B` and bones `+0x365..0x367` are the
 items.def `ammo_closeattack / ammo_easyrocket / ammo_advancedrocket / ammo_marker3` +
@@ -1998,3 +2001,163 @@ Entry/site comments: `@ 0xA2ED08` (trigger-bit map), `@ 0x4b0990` (two callers �
 reseed), `@ 0x4418a5` (+0x2B4/+0x2B8 hardpoint ammo), `@ 0x53f440` (AI fire entry).
 Rename proposal pending maintainer OK (curated name): `Entity_ComputeWeaponFirePositions
 @ 0x455ef0` → `AIEntity_ReleaseFlareCountermeasures`.
+
+## 18. Appendix: fire presentation + the LOS raycast internals (engine-research, 2026-07-16 session 4)
+
+The §17.4 presentation tail (how the firing host makes its own AI rounds audible and
+visible) and the §16.5-item-6 closure (`Physics_RaycastTerrainAndSectors @ 0x539910`
+internals — the D-AI-7 sector leg). All addresses retail `Jointops.exe` (imagebase
+0x400000, IDB `Jointops.exe.kong.i64`).
+
+PORT (same day, worktree play): the ammo.def presentation tokens = `libs/def`
+(`def_parse_ammo` + `ammo_tracer_type_from_name`) → `AmmoTableEntry` (npruntime
+builder); the tracer decision + the per-spawn `FireEvent` record =
+`world::RoundSim::spawn`; the host drains = `NovaSimulation::
+drain_fire_presentation_events` / `get_tracer_rounds`; the presentation itself =
+`godot/engine/world/fire_present_pass.gd` (sound + pending-delay queue + muzzle
+effect + tracer streaks); the LOS legs = `CollisionWorld::raycast_clear` +
+`los_terrain_blocked` (`libs/world/src/collision.cpp`) behind
+`AiSystem::line_of_sight_clear`. Pins: the `def` ctest (token fields), the
+`npruntime_round_sim` ctest (tracer cadence/forcetracer/FireEvent), the `collision`
+ctest (`test_raycast_clear_los`), and the `ai_threat_probe` in-game stats gate.
+
+### 18.1 The ammo-def presentation fields — parse + resolve
+
+`AmmoDef_ParseProperty @ 0x40a2d0` fills four presentation slots per 276-B record
+(all four author on the JO rifle rounds, e.g. `AMMO_AK47_556MM`: `ai_launch
+GS_AK47_2`, `ai_Launcheffect Effect_EnmyMuzz`, `Mf_Light 100`, `tracer_type stdred
+stdgreen`):
+
+| token | record | resolve at parse |
+|---|---|---|
+| `ai_launch <SET>` | +64 | `SoundBank_FindSetByNameAnyBank @ 0x75c000-era` scan of the loaded 204-B sound-profile slots → SET POINTER `[orig: @ 0x40a8c8-0x40a8ef]` |
+| `ai_launcheffect <FX>` | +68 | `CEffectWorld_InternEffectHandle @ 0x5f7310` → 1-based interned handle `[orig: @ 0x40a8f6-0x40a91d]` |
+| `MF_Light <n>` | +36 = 1, +40 = atol | presence flag + value `[orig: @ 0x40a804-0x40a837]` |
+| `tracer_type <f> [<e>]` | +232 / +236 | `AmmoDef_ParseTypeName` name→id (stdred 1, stdgreen 2, rocket 3, at4 4, grenade 5, rapidred 6, rapidgreen 7, sniperred 9, snipergreen 10, df1red 11, df1green 12; atol fallback); one value copies into both `[orig: @ 0x40a78b-0x40a7fa]` |
+
+Two sibling GRAPHIC slots stay unparsed in the reimpl (the tracer round's visible
+item models): +0x10 friendly / +0x14 enemy item ids, resolved through the item list
+with the parse warnings `"couldn't find ammodef frndlyTrcrID"` / `"... type_id"`
+`[orig: @ 0x40a5f8-0x40a68d]` — deferred with the round-graphic leg (D-AI-8). Our
+port stores the two NAMES (+64/+68) instead of resolved pointers/handles and
+resolves in the host at play time — same case-insensitive namespaces (the bank's
+soundsets, the effect world's interned .ptl names).
+
+### 18.2 The fire sound leg — `Sound_PlayWithDistanceAttenuation @ 0x528e40`
+
+Called from `WeaponSlot_FireAndSpawnEffects @ 0x53f440` with (ammoDef+64, fire
+origin, shooter). Gate: `is_mp_session_peer` (`g_napi_np_ctx+0x64` — the is_client
+bit, TRUE in SP mode 3 per net-re §5.0) — i.e. skipped only on a DEDICATED server
+(no local listener; a prior IDB gloss had this inverted — fixed). Then:
+
+- distance = |origin − listener| (`listener_pos @ 0x24D6630`), 16.16 → int units;
+- range gate: distance > soundDef+72 (the set's max range) → silent drop;
+- **propagation delay**: distance ≥ 30 u and `g_SoundSpeedFixed @ 0x24D6660`
+  (= 0x14A0000 = 330.0 u/s 16.16, set by `DialogSystem_Init @ 0x5275fc`) nonzero →
+  a pending slot with countdown `(62·dist/330) >> 2` ticks (the witnessed
+  quarter-compression of physical travel time) `[orig: @ 0x528ed4-0x528ef2]`;
+  else immediate `Entity_PlaySound3D_FullVolume @ 0x528e20` =
+  `Sound_Play3DPositional(set, pos, entity, 255)`.
+
+The pending queue is 128 × 24-B slots `@ 0x24DF678..0x24E0278` (`flags|1`, set ptr,
+pos[3], countdown) allocated by `EffectSlot_AllocateAndInit @ 0x527c30` and drained
+once per tick by `Sound_TickPendingSlots @ 0x529310` (ex `sub_529310`, renamed this
+session): countdown-- → 0 plays `Sound_Play3DPositional(set, pos, null, 255)`
+(flag-2 slots are the dialog-trigger variant). Port: `fire_present_pass.gd`
+`_pending` (per-logic-tick countdown); the range check runs at PLAY time in our
+bank vs fire time in retail — tracked in D-AI-8.
+
+### 18.3 The muzzle effect + MF_Light glow legs
+
+- Muzzle `[orig: @ 0x53f4a9-0x53f583]`: ammoDef+68 nonzero → a zeroed 34-dword
+  spawn transform whose [6..8] receive the fire-direction vector (sin/cos of the
+  aim yaw/pitch, the `>> 22` fixed-point trig noted on the §16.4 row), then
+  `submit_effect_descriptor @ 0x5f6f80` builds the 56-B spawn descriptor
+  {[1] = effect handle, [3] = shooter, [4..6] = fire origin} →
+  `CEffectWorld_SpawnEmitterAtPosition @ 0x5f6df0`. Every fire spawns one (no
+  per-shooter live-handle guard on this leg — unlike the player action-slot's
+  slot+24 guard). Port: `NovaEffectWorld.spawn_effect(name, origin, forward)`.
+- MF_Light `[orig: @ 0x53f58b → Entity_UpdateMuzzleGlowEffect @ 0x56c960]`
+  (ex `sub_56C960`, renamed): ammoDef+36 → a light-pool glow
+  (`LightPool_SpawnGlowEffect @ 0x5a8d50`, radius 98304 = 1.5 u, color table
+  `@ 0xFFE0A0`) cached per shooter at entity+436, repositioned to the muzzle and
+  re-blended to 1.0 every shot (fade params 4/5). DEFERRED — no light-pool port
+  (D-AI-8); the +40 value's consumer is unwitnessed (not passed at this site).
+
+### 18.4 The tracer decision — `RoundData_SpawnRound @ 0x4ec0d0`
+
+`[orig: @ 0x4ec184-0x4ec1e5]` per spawned round: tracer defaults ON; rate byte
++226 == 0 → off; else the shooter's WEAPON-SLOT counter byte (`weaponSlot(+0x68)
++0x80`) increments, wraps to 0 at ≥ rate, and the round is a tracer exactly on the
+wrap (no shooter/slot → every round); ammo flags & 0x8000 FORCETRACER → tracer
+regardless. Round team byte +0x162 = shooter team (slot+4 & 0x200 → 0xFF)
+`[orig: @ 0x4ec705-0x4ec721]`.
+
+Tracer VISUALS (per presenting client, selected against `g_local_player_entity`'s
+team — shooter == local or team match = friendly `[orig: @ 0x4ec740-0x4ec79b]`):
+the `tracer_type` id (+0xE8 friendly / +0xEC enemy) allocates a slot in the
+dedicated tracer/trail emitter pool (`CEffectEmitterPool_AllocSlot @ 0x5db0xx over
+dword_2BF5270`, init `sub_5DB130`) into round+0x2B4; the round's visible MODEL is
+the +0x10/+0x14 item graphic via `Entity_InitFromItemDef @ 0x49e550`; a per-round
+glow light lands in round+0x1B4 `[orig: @ 0x4ec8da]`. The MP `NoTracers` rules bit
+(`dword_24D1E34 & 1`, net-re §6.8 mp_attributes 0x001) kills the visual unless
+forcetracer. **Non-tracer rounds get `graphicModel` (+0x30) zeroed — invisible in
+flight** `[orig: @ 0x4ec900]`. Port: `LiveRound.tracer/team` + the witnessed
+counter on the shooter entity (one weapon per NPC — the per-slot delta in D-AI-8);
+streaks drawn by `fire_present_pass.gd` from `get_tracer_rounds()` (geometry
+stand-in, D-AI-8); the emitter-pool styles, round graphics, and per-round glow are
+the deferred render legs (D-AI-8).
+
+### 18.5 `Physics_RaycastTerrainAndSectors @ 0x539910` — the LOS raycast (closes §16.5 item 6)
+
+Returns TRUE = CLEAR. Arg 5 is a RAY RADIUS (not a flag): the terrain leg lowers
+both endpoint Z by it (thick-ray conservative) and the sector leg inflates every
+bound test by it; LOS callers pass 0 (`Entity_CheckMutualLineOfSight @ 0x539be0`).
+
+1. **Terrain leg** `[orig: @ 0x53993d-0x539968]`: skipped when BOTH entities carry
+   `Flags & 0x800000` INDOORS (the heightmap has no interiors — indoor-to-indoor
+   sight would false-block); the null-entity variant instead skips it when either
+   ENDPOINT is below terrain (`Terrain_GetHeightAtPosition @ 0x606720`). Otherwise
+   `Terrain_RaycastHeightmapHiRes @ 0x60c760` (null out-hit) — hit → BLOCKED.
+   Port: `terrain_raycast_refined` (the ported `@ 0x60e710` sibling —
+   boolean-equivalent with a null out; the sibling's internal delta stays the
+   terrain-re open item) over the runtime height field, engine (X,Y) → field
+   (x, −y).
+2. **Ray context** `[orig: Physics_RaycastIntContext @ 0x5385e0]`: float-normalized
+   16.16 direction, per-axis min/max box, length; segments < 16 raw (1/4096 u)
+   return CLEAR without walking.
+3. **Sector leg** `[orig: raycast_against_entity_pool @ 0x538720; pool 2 statics
+   then pool 1 dynamics @ 0x539a3a]` per entity: in-use (+0x28) with a collision
+   block (`graphicModel+176`, husk model +52 substituted when `Flags & 4`
+   destroyed); skip `Flags & 1`, skip `Flags & 0x8000000` (unless the include
+   flag), skip entityA/B, their collision handles (entity +364/+616 → ctx[19]/[20])
+   and entities whose +0x28 owner-link equals A/B; bound-sphere broad phase
+   (segment box + unclamped closest-approach projection, the shared @ 0x4139a4
+   block); **itemDef type 3 (person)** = bound-sphere-only BLOCK with a same-team
+   < 3.0 u exemption (ray end clamps to the person) `[orig: @ 0x5389b1-0x538a10]`;
+   everything else clips the segment against the model's TYPE-1 volumes in
+   section-local space (inverted section matrix from the model+168 transform
+   callback — the same convex clip core as `Entity_RaycastCollisionModel
+   @ 0x413060`). A hit shortens the ray (ctx[3..5]/[9], hit flag ctx[23], entity
+   ctx[25]) and the walk continues for the nearest point; the boolean result is
+   blocked either way `[orig: miss_result = 0 @ 0x5390e6]`.
+
+Port: `CollisionWorld::raycast_clear` (terrain leg + the two-pass registry walk +
+the owner-link exclusion + the `ray_line_distance` broad phase +
+`collision_raycast_model`), first-hit early-out (boolean-equivalent). Residuals in
+D-AI-7: the husk-model swap (no husk collision instances yet) and the type-3
+person case (person-kind residents of the walked pools don't exist in our world —
+organics are pool 0, unwalked, matching retail residency).
+
+### 18.6 IDB write-backs (2026-07-16 session 4, saved)
+
+Renames (anchored, ex auto-names): `Sound_TickPendingSlots @ 0x529310` (ex
+`sub_529310`), `Entity_UpdateMuzzleGlowEffect @ 0x56c960` (ex `sub_56C960`),
+`g_SoundSpeedFixed @ 0x24d6660` (ex `dword_24D6660`). Entry comments:
+`@ 0x528e40` (the inverted "dedicated server only" gloss corrected — the gate is
+the is_client bit, TRUE in SP; delay formula + speed global), `@ 0x527c30`
+(pending-sound queue shape + drain pointer), `@ 0x24d6660` (330.0 16.16),
+`@ 0x539910` (ray-radius arg semantics, leg order, exclusions, type-3 person
+case, reimpl link), `@ 0x538720` (per-entity walk detail), `@ 0x4ec0d0` (the
+tracer decision + visuals map), appended `@ 0x53f440` (the ammo-def token
+provenance for +64/+68/+36/+40).

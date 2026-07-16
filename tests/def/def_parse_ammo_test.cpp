@@ -59,6 +59,20 @@ int main(void) {
         return 1;
     }
 
+    /* Fire-presentation fields (world-wac-ai-re §17.4): ai_launch sound-set name; a
+       one-value `tracer_type rocket` fills BOTH slots (friendly copies into enemy). */
+    if (strcmp(rocket->ai_launch, "GS_AT4") != 0) {
+        fprintf(stderr, "FAIL: ROCKET ai_launch: got '%s' want 'GS_AT4'\n", rocket->ai_launch);
+        def_free_ammo(&ammo);
+        return 1;
+    }
+    if (rocket->tracer_type_friendly != 3 || rocket->tracer_type_enemy != 3) {
+        fprintf(stderr, "FAIL: ROCKET tracer_type: got %d/%d want 3/3 (one-value copy)\n",
+                rocket->tracer_type_friendly, rocket->tracer_type_enemy);
+        def_free_ammo(&ammo);
+        return 1;
+    }
+
     /* Find the AT_NULL entry — should have 0 velocity */
     const DefAmmoDef *null_ammo = NULL;
     for (size_t i = 0; i < ammo.count; ++i) {
@@ -108,6 +122,12 @@ int main(void) {
         {"tracer_rate", car15->tracer_rate, 3},
         {"bullet_radius_fp16", car15->bullet_radius_fp16, 182},
         {"max_damage", car15->max_damage, 0},
+        /* The presentation fields: `Mf_Light 100` sets flag + value [orig: @0x40a81b/+40];
+           `tracer_type stdred stdgreen` = the witnessed 1/2 ids. */
+        {"mf_light", car15->mf_light, 1},
+        {"mf_light_value", car15->mf_light_value, 100},
+        {"tracer_type_friendly", car15->tracer_type_friendly, 1},
+        {"tracer_type_enemy", car15->tracer_type_enemy, 2},
     };
     for (size_t i = 0; i < sizeof(checks) / sizeof(checks[0]); ++i) {
         if (checks[i].got != checks[i].want) {
@@ -116,6 +136,15 @@ int main(void) {
             def_free_ammo(&ammo);
             return 1;
         }
+    }
+    /* The name tokens land case-preserved; `ai_Launcheffect` in the data is matched
+       case-insensitively and must NOT be eaten by the `ai_launch` prefix branch. */
+    if (strcmp(car15->ai_launch, "GS_M4AI") != 0 ||
+        strcmp(car15->ai_launcheffect, "Effect_CAR15MF") != 0) {
+        fprintf(stderr, "FAIL: AMMO_CAR15_556MM ai_launch/'effect: got '%s'/'%s'\n",
+                car15->ai_launch, car15->ai_launcheffect);
+        def_free_ammo(&ammo);
+        return 1;
     }
 
     /* Flag bits via a LAW-style entry (flag LAWR / NoGravity / forcetracer). */

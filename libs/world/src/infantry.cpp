@@ -1105,7 +1105,8 @@ EntityHandle infantry_scan_nearest_threat(AiSystem &sys, World &world, AiEntity 
             const int64_t ddy = static_cast<int64_t>(cpos[1]) - e.pos[1];
             const int64_t d2 = ddx * ddx + ddy * ddy;
             if (d2 >= best_d2) continue; // nearest-first [orig: -fwd_dist descending sort]
-            if (!sys.line_of_sight_clear(e.pos, cpos)) continue; // LOS last, in order
+            if (!sys.line_of_sight_clear(world, e.pos, cpos, e.handle, h))
+                continue; // LOS last, in order
             best = h;
             best_d2 = d2;
             best_pos[0] = cpos[0]; best_pos[1] = cpos[1]; best_pos[2] = cpos[2];
@@ -1150,7 +1151,8 @@ void AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
                     const int32_t apos[3] = {static_cast<int32_t>(att->position.x * 65536.0f),
                                              static_cast<int32_t>(att->position.y * 65536.0f),
                                              static_cast<int32_t>(att->position.z * 65536.0f)};
-                    if (line_of_sight_clear(e.pos, apos)) found = inf.last_attacker;
+                    if (line_of_sight_clear(world, e.pos, apos, e.handle, inf.last_attacker))
+                        found = inf.last_attacker;
                 }
             }
         }

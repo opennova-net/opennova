@@ -131,6 +131,39 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params) {
     // noage rounds never expire on time [orig: flag 0x4000]; everything else uses the
     // ammo max_age (already in 62 Hz ticks).
     r.max_age_ticks = ((ammo->flags & 0x4000u) != 0) ? INT32_MAX : ammo->max_age_ticks;
+
+    // The tracer decision [orig: RoundData_SpawnRound @0x4ec184-0x4ec1e5]: every
+    // tracer_rate-th round per shooter is a tracer (the counter lives on the weapon
+    // slot +0x80 in the original — ours rides the shooter entity, one weapon per NPC
+    // today); rate 0 = never; no shooter = every round; the FORCETRACER ammo flag
+    // (0x8000) rides every round. Team = the shooter team byte [orig: round+0x162
+    // copy @0x4ec705; the slot+4 & 0x200 0xFF override is unmodeled].
+    bool tracer = true;                    // [orig: var init @0x4ec15a]
+    Entity *owner_ent = world.registry.get(params.owner);
+    if (ammo->tracer_rate == 0) {
+        tracer = false;                    // [orig: @0x4ec18a]
+    } else if (owner_ent != nullptr) {
+        // [orig: @0x4ec199-0x4ec1bb: ++counter, wrap to 0 at >= rate, tracer on wrap]
+        if (++owner_ent->tracer_shot_counter >= ammo->tracer_rate)
+            owner_ent->tracer_shot_counter = 0;
+        tracer = (owner_ent->tracer_shot_counter == 0);
+    }                                      // [orig: @0x4ec1cf no slot + rate != 0 -> stays true]
+    if ((ammo->flags & 0x8000u) != 0) tracer = true; // [orig: forcetracer @0x4ec1db]
+    r.tracer = tracer;
+    r.team = owner_ent != nullptr ? static_cast<uint8_t>(owner_ent->team) : 0;
+
+    // Record the fire for the host present layer (sound + muzzle effect) — the
+    // inline-presentation moment of the original [orig: WeaponSlot_FireAndSpawnEffects
+    // @0x53f440 runs its presentation right after Entity_FireWeaponAndSendPacket].
+    FireEvent fe;
+    fe.shooter = params.owner;
+    fe.shooter_handle = params.shooter_handle;
+    fe.ammo_index = params.ammo_index;
+    fe.origin = params.origin;
+    fe.yaw_bam = params.dir_yaw_bam;
+    fe.pitch_bam = params.dir_pitch_bam;
+    fired.push_back(fe);
+
     ++active_count;
     return slot;
 }

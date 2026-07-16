@@ -889,6 +889,9 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_local_player_class"), &NovaSimulation::get_local_player_class);
 	ClassDB::bind_method(D_METHOD("get_local_player_weapon_name"), &NovaSimulation::get_local_player_weapon_name);
 	ClassDB::bind_method(D_METHOD("drain_effects"), &NovaSimulation::drain_effects);
+	ClassDB::bind_method(D_METHOD("drain_fire_presentation_events"),
+			&NovaSimulation::drain_fire_presentation_events);
+	ClassDB::bind_method(D_METHOD("get_tracer_rounds"), &NovaSimulation::get_tracer_rounds);
 	ClassDB::bind_method(D_METHOD("set_wac_program", "program"), &NovaSimulation::set_wac_program);
 	ClassDB::bind_method(D_METHOD("get_wac_program"), &NovaSimulation::get_wac_program);
 	ClassDB::bind_method(D_METHOD("compile_and_set_wac", "sources"), &NovaSimulation::compile_and_set_wac);
@@ -2297,6 +2300,60 @@ Array NovaSimulation::drain_effects() {
 		out.push_back(d);
 	}
 	world_->effects.clear();
+	return out;
+}
+
+// The host fire-presentation drain — see the header note. Direction math mirrors
+// the round spawn's mission-frame forward (cos yaw * cp, sin yaw * cp, sin pitch)
+// [orig: RoundData_SpawnRound @0x4ec5e9], axis-mapped mission -> godot (x, z, -y).
+Array NovaSimulation::drain_fire_presentation_events() {
+	Array out;
+	if (!loaded_) return out;
+	constexpr double kRadPerBam = (2.0 * 3.14159265358979323846) / 4294967296.0;
+	const bool have_local = world_->cached.local_player.valid();
+	const uint16_t local_packed = have_local ? world_->cached.local_player.packed : 0xFFFF;
+	for (const opennova::world::FireEvent &fe : world_->round_sim.fired) {
+		Dictionary d;
+		d["origin"] = Vector3(fe.origin.x, fe.origin.z, -fe.origin.y);
+		const double bearing = static_cast<double>(fe.yaw_bam) * kRadPerBam;
+		const double pitch = static_cast<double>(fe.pitch_bam) * kRadPerBam;
+		const double cp = std::cos(pitch);
+		d["forward"] = Vector3(static_cast<real_t>(std::cos(bearing) * cp),
+				static_cast<real_t>(std::sin(pitch)),
+				static_cast<real_t>(-std::sin(bearing) * cp));
+		d["shooter_handle"] = static_cast<int>(fe.shooter_handle);
+		d["is_local_player"] = have_local && fe.shooter_handle == local_packed;
+		d["ammo_index"] = fe.ammo_index;
+		const opennova::world::AmmoTableEntry *ammo = world_->ammo.by_index(fe.ammo_index);
+		d["sound_set"] = ammo ? String(ammo->ai_launch_set.c_str()) : String();
+		d["effect"] = ammo ? String(ammo->ai_launch_effect.c_str()) : String();
+		d["mf_light"] = ammo ? ammo->mf_light : 0;
+		out.push_back(d);
+	}
+	world_->round_sim.fired.clear();
+	return out;
+}
+
+// Live tracer rounds for the streak layer — see the header note.
+PackedFloat32Array NovaSimulation::get_tracer_rounds() const {
+	PackedFloat32Array out;
+	if (!loaded_) return out;
+	for (const opennova::world::LiveRound &r : world_->round_sim.rounds) {
+		if (!r.active || !r.tracer) continue;
+		const opennova::world::AmmoTableEntry *ammo = world_->ammo.by_index(r.ammo_index);
+		const int64_t base = out.size();
+		out.resize(base + 9);
+		float *w = out.ptrw() + base;
+		w[0] = r.pos.x;
+		w[1] = r.pos.z;
+		w[2] = -r.pos.y;
+		w[3] = r.vel.x;
+		w[4] = r.vel.z;
+		w[5] = -r.vel.y;
+		w[6] = static_cast<float>(r.team);
+		w[7] = ammo ? static_cast<float>(ammo->tracer_type_friendly) : 0.0f;
+		w[8] = ammo ? static_cast<float>(ammo->tracer_type_enemy) : 0.0f;
+	}
 	return out;
 }
 

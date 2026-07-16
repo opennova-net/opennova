@@ -613,11 +613,15 @@ public:
     // bases g_SeesMatrix*/g_TargetedMatrix* — world-wac-ai-re §16.4/§17.2]
     void apply_engage_relations(World &world, const Entity &self, const Entity &target);
 
-    // LOS between two 16.16 points: the terrain leg samples the height field along the
-    // segment; the entity/sector leg is deferred (D-AI-7 — Physics_RaycastTerrainAndSectors
-    // @0x539910 internals are the open §16.5 item 6). Returns true = clear (no terrain
-    // wired = clear, the headless-test default). [orig: 0x539910 contract, 1 = clear]
-    bool line_of_sight_clear(const int32_t a[3], const int32_t b[3]) const;
+    // LOS between two 16.16 fire-origin points, true = clear: the terrain leg (ported
+    // heightmap raycast) + the sector leg (pool-2/pool-1 collision-model clip via
+    // CollisionWorld::raycast_clear — the D-AI-7 leg). `from`/`to` are the sighting
+    // pair, excluded from the sector walk with anything standing on them. No terrain
+    // wired = clear (the headless-test default); no collision world wired = terrain
+    // leg only. [orig: Entity_CheckMutualLineOfSight @0x539be0 ->
+    // Physics_RaycastTerrainAndSectors @0x539910, ray radius 0, 1 = clear]
+    bool line_of_sight_clear(World &world, const int32_t a[3], const int32_t b[3],
+                             EntityHandle from, EntityHandle to) const;
 
     // [orig: Entity_AlertNearbyAllies @0x4654b0] pool-1 (rebase: + pool-0 organics with
     // brains) same-team, alive, non-building entities within `radius_units` (16.16):
