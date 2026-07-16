@@ -121,18 +121,20 @@ Everything below was decompiled and read this session (pseudocode dumps:
   system (§4.13).
 
 ### 3.4 Animation state machine (the locomotion driver)
-- State id `entity[175]` (prev `entity[178]`); **state→name table `off_8135F0`** (200 entries, names
-  ARE the `.adm` keys: `anim_<name>`): 0 reset, 1–8 walk 8-dir, 9/10 run variants, 11–18 crouch-walk,
+- State id `entity[175]` (prev `entity[178]`); **state→name table `g_animStateNameTable @ 0x8135F0`**
+  (**252** entries — the earlier 200-entry reading stopped short; `AnimMap_FindSlotByName @ 0x40cfa0`
+  scans 252, §19.1 — names ARE the `.adm` keys: `anim_<name>`): 0 reset, 1–8 walk 8-dir, 9/10 run variants, 11–18 crouch-walk,
   19–26 prone-walk, 30/31 jump_start/loop, 32–35 climb, 36–40 swim, 43/44/49 idles, 45/48
   crouch/prone idles, 47 parachute, 65 reload, 67–75 emplaced, 76–110 sit_*, 111–114 burn,
   115–124 emotes, 125–135 scripted idles, 137–139 dragger/draggee, 140–144 guard, 145/146 wounded,
   147 stop, 148 jog, 149 run_forward, 151/152 post/pre_attack, 153 out_of_ground, 154 swim_attack,
   155–158 attack, 159–162 grenade throws, 163–166 cover, 167 run_attack, 168 run_away,
   **169–172 stance transitions** (run2crouch/runl2crouch/runr2crouch/run2prone),
-  173 death_fire, 174 death_pungi, 175 death_drown, **176–199 death matrix** (grenade/bullet ×
-  hip/torso/head/Rshoulder/Lshoulder × F/R/B/L) — picked by
-  `Entity_ComputeAnimSlotIndex(entity, boneSection, relativeDirection, 4)` with
-  `relativeDirection = (heading − atan2(attackerVel) BAM − 0x60000000) >> 30` (2-bit quadrant).
+  173 death_fire, 174 death_pungi, 175 death_drown, **176–239 death matrix** (grenade ×4, then
+  bullet × FIFTEEN bone groups — hip/torso/head/R-L shoulder/arm/hand/thigh/calf/foot × F/R/B/L)
+  — picked by `Entity_ComputeAnimSlotIndex(entity, boneSection, relativeDirection, cause)`,
+  quadrant `(heading − atan2BAM(roundVel) − 0x60000000) >> 30`; **240–251 the `wpn_*` FP viewmodel
+  states**. Full decode + the bone→group table: §19.1/§19.2.
 - **Per-state flag table `g_animStateFlagsTable`** (≥190 dwords; extracted, embed in port as generated table):
   observed semantics — bit0 = movement state (client re-derives from velocity; auto-rebase to idle 43),
   bit1 = low-to-ground → slope-slide/drift participates (prone 0x603, dragger), bit2 = scripted/locked,
@@ -205,10 +207,12 @@ Everything below was decompiled and read this session (pseudocode dumps:
    (1/2/5/7/8/12) — **RE'd to address level, detail pass pending** (dump lines ~1080–1290, 3000–4550).
 
 ### 3.6 Death/corpse/respawn (health ≤ 0 edge)
-Drop/detach, corpse timer `entity[82] = def+2192` (−61 when burning), death anim via
-`Entity_ComputeAnimSlotIndex`, drowning ⇒ state 175; corpse never despawns while the local player
-can see it (`Physics_RaycastTerrainAndSectors` watch-check, retry 62); respawn restores
-`entity[198..205]` snapshot; death-by-fall splash effect via def+1042.
+Drop/detach, corpse timer `entity[82] = def+2192` (−61 in the silent-cleanup variant), death anim
+via `Entity_ComputeAnimSlotIndex`, drowning ⇒ state 175; corpse never despawns while the local
+player can see it (`Physics_RaycastTerrainAndSectors` watch-check, retry 62); respawn restores
+`entity[198..205]` snapshot; death-by-fall splash effect via def+1042. **Superseded at porting
+precision by §19** (the edge decode, the corpse block, `deathtime`/`particledeath`/`LeaveCorpse`,
+and the vehicle rows 21/23) — ported 2026-07-16.
 
 ### 3.7 Port architecture (decided)
 - New infantry system in `libs/world` beside the vehicle SM; promote routes **organics → infantry**,
@@ -2161,3 +2165,218 @@ the is_client bit, TRUE in SP; delay formula + speed global), `@ 0x527c30`
 case, reimpl link), `@ 0x538720` (per-entity walk detail), `@ 0x4ec0d0` (the
 tracer decision + visuals map), appended `@ 0x53f440` (the ammo-def token
 provenance for +64/+68/+36/+40).
+
+## 19. Appendix: death presentation — the kill's anim pick, corpses, and the vehicle death rows (engine-research, 2026-07-16 session 5)
+
+How a death LOOKS: the kill selects a directional death animation at damage time, the
+infantry death edge consumes it into the anim state and seeds a corpse timer, the
+corpse persists (indefinitely under `LeaveCorpse`, else until the timer drains AND the
+local player cannot see it), and the AI-vehicle layer runs its own two-row death chain
+(states 21 → 23). All addresses retail `Jointops.exe` (imagebase 0x400000, IDB
+`Jointops.exe.kong.i64`).
+
+PORT (same day, worktree play): the selector + the full 252-entry state tables =
+`libs/world` (`compute_death_anim_state`, `death_quadrant_from_round`,
+`kInfantryAnimNames/Flags`); the kill-time selection = `world::RoundSim::tick` (the
+organic-kill leg); the death-edge consume + the corpse block = `AiSystem::tick_infantry`
+(`libs/world/src/infantry.cpp`); rows 21/23 = `ai.cpp` (`h_enter_vehicle_dying`,
+`h_vehicle_dying_tick/event`, `h_enter_vehicle_dead`, `h_vehicle_dead_tick/event`);
+`deathtime` parse = `libs/def`; the def traits stamp = `NovaSimulation::
+resolve_item_traits` (`leave_corpse`, `deathtime_ticks`); presentation =
+`mission_present_pass.gd` (dead ORGANICS stay visible; the sim ends the corpse via
+`Entity::hidden`). Pins: the `infantry` ctest (selector matrix, consume, countdown/
+despawn, LeaveCorpse, the watch retry), the `ai` ctest (rows 21/23, the integration
+kill's selection + group alert), the `def` items test.
+
+### 19.1 The selector — `Entity_ComputeAnimSlotIndex @ 0x43a690` and the REAL table size
+
+`(entity, boneIndex 0..31, quadrant 0..3, cause)`; out-of-range bone/quadrant clamp
+to 0. Cause routes the family: `1` bullet → `180 + quadrant + 4*group` through a
+32-entry bone→group table; `2` explosive → `176 + quadrant` (`death_grenade_*`);
+`3` fire → 173 `death_fire`; `5` drown → 175 `death_drown`; anything else → 174
+`death_pungi` (the preset default — the death edge passes 4).
+
+The bullet matrix spans **15 groups × 4 quadrants = states 180..239**, NOT the 20
+states the earlier §3.4 note assumed: `AnimMap_FindSlotByName @ 0x40cfa0` scans
+exactly **252** entries of `g_animStateNameTable @ 0x8135F0`. Groups in table order:
+hip, torso, head, rightshoulder, leftshoulder, rightarm, leftarm, righthand,
+lefthand, rightthigh, leftthigh, rightcalf, leftcalf, rightfoot, leftfoot; quadrant
+suffix order forward/right/back/left. States 240..251 are the FP viewmodel
+`wpn_reset/idle/empty_idle/fire/recoil/reload/empty/switchto/switchfrom/switchrank/
+scopeup/scopedown`. `g_animStateFlagsTable @ 0x8139E8` rows 200..239 = `0x82`
+(the death family), 240..251 = 0. Bone→group (index: group): 0:0, 1-4:1, 5:3, 6:4,
+7:9, 8:10, 9:5, 10:6, 11:11, 12:12, 13-14:2, 15:8, 16:7, 17:13, 18:14, 19-21:7,
+22-24:8, 25-26:7, 27-28:8, 29-31:1.
+
+### 19.2 The bullet kill selects at DAMAGE time — `Entity_HandleDamageTrigger @ 0x407310` type 1
+
+This is the person item's `entity+0x1C8` damage/death callback (`Entity_InitFromItemDef
+@ 0x49e550` installs it). Type 1 (the round kill, reading the global hit record
+`sub_4E7000()`: `[14]` = hit BONE section, `[16]` = the round entity):
+
+- players (`Flags & 0x100`) → `Score_ProcessNetworkKillEvent`; NPCs → aiSlot move
+  byte 2 + `TriggerGroup_SetAlertRed(commandGroup)` — a member's death alerts its
+  group `[orig: @ 0x4073db-0x4073ea]`.
+- quadrant = `(victimYaw − atan2BAM(roundVel.y, roundVel.x) − 0x60000000) >> 30`
+  (BAM scale 683565275.5764316 = 2^32/2π) `[orig: @ 0x407478]`; selection =
+  `ComputeAnimSlotIndex(entity, hitBone, quadrant, 1)` → **`entity+0x2C0`
+  deathAnimStateId** `[orig: @ 0x407483]`.
+- `Entity_ApplyCollisionForce @ 0x4af4a0` with ammo bytes +224/+225 (knockback).
+- ammo dword +72 (a burn effect id) → spawn attached emitter (`entity+0x1CC` handle)
+  and OVERRIDE the selection to 173 `death_fire` `[orig: @ 0x4076d5]` — incendiary
+  kills burn regardless of bone.
+- bodyRoll nudge on torso-region hits (`bone < 5`, not yet dead): quadrant 0 →
+  `bodyRoll = +0x5B00000`, quadrant 2 → `−0x5B00000` `[orig: @ 0x407562]`.
+- DISMEMBERMENT (authority, NPC, bone > 0, `!(attrib & 0x800000 NoDismember)`,
+  `health <= 0`, `health <= healthMax >> 1`, not yet dead): per-section bone MASKS
+  (case 1 `0x1E67C`, 2 `0x1E678`, 3 `0x1E670`, 4 `0x1E668`, 5 `0x10200`, 6 `0x8400`,
+  7 `0x20800`, 8 `0x41000`, 9 `0x10000`, 10 `0x8000`, 11 `0x20000`, 12 `0x40000`,
+  13 `0x4000`), `Entity_CloneFromTemplateByType` spawns the severed-part entity
+  (mask complement at +308, health 0, velocity += roundVel >> 8)
+  `[orig: @ 0x4075f6-0x4076c9]`. JO CP01 soldiers author `nodismember`.
+- Type 4 = reset/re-kill: health = 0 + re-select from the hit record. Any other
+  type (the damage appliers call mode 2) → `entity+0x148 = 62` (a 1 s
+  recently-damaged hold on the same field the corpse timer reuses).
+
+The explosive path (`Entity_ApplyWeaponDamage @ 0x4e6820` person leg `@ 0x4e6a01`)
+selects inline instead: bone hardcoded 1 (torso), quadrant from the IMPACT-to-victim
+position delta, cause 2 — with a 25% fire roll in the 4..8 u band and cause 4 for
+ammo type 7 — then `deathCallback(entity, 2, 0)`.
+
+### 19.3 The infantry death edge — `Entity_UpdateInfantryAI @ 0x4b9c40` (health ≤ 0, once)
+
+Guards: word `entity+0x11E > 0` skips the edge (writer unwalked); `Flags & 2`
+already-dead skips. Then, in order `[orig: @ 0x4b9c40-0x4b9d55]`:
+
+1. mounted (`entity+0x16C`) → `Entity_DetachFromVehicleIfServer @ 0x4359d0` — the
+   corpse drops out of its seat; the edge tail also clears `Flags & 0xC0`.
+2. corpse timer `entity+0x148` = `def+0x890` deathtime. The `byte entity+0x134 & 1`
+   variant instead: respawn tickets `+0x35E` = 0, timer = deathtime − 61, and NO
+   scream (a silent-cleanup mode; the bit's writer is unwalked).
+3. the death scream: `Entity_PlaySound3D_FullVolume(Entity_GetWeaponSlotTableValue(
+   entity, slot))`, slot 8 when `Bms_AttribFlags & 0x100000` else 7 — the def's
+   resolved sound table (the `sound_profile` chain), not ammo sounds.
+4. consume `+0x2C0`: zero → `ComputeAnimSlotIndex(0,0,4)` = 174 + dispatch
+   `deathCallback(entity, 1, 0)`; then **animState `+0x2BC` = the selection**
+   (drowning `Flags & 0x8000` overrides to 175), pending `+0x2B8` = 0, `Flags |= 2`,
+   death tick stamp `+0x1AC = current_tick`, `+0x2C0` = 0 (consumed), authority →
+   `Entity_CheckAndProcessDeath @ 0x51b550` (the §5.60 net/scoring router).
+
+The death clips are non-looping — the anim channel clamps at the last frame, so the
+corpse holds its pose (the port's `InfantryRootMotion` documents the same clamp).
+
+### 19.4 Corpse persistence — the dead leg `@ 0x4b9e4d-0x4ba000`
+
+Per dead tick, after the weapon/drag block:
+
+- **LeaveCorpse** (`attrib & 0x400000`) && `!(byte +0x134 & 1)` → skip everything:
+  the corpse never expires.
+- decrement `+0x148` toward 0. At exactly **186** remaining (~3 s) with a
+  `particledeath` handle (`def+0x412`, word) → release any `+0x1CC` emitter and
+  spawn the decay effect attached at the corpse (persons author none; vehicles do).
+- at 0: respawn tickets `word +0x35E > 0` → the NPC-respawn path (spawn pose
+  `+0x318`, a `+0x354`-linked same-team gate that can set `Flags |= 1` hidden)
+  — unported, mission NPCs author none. Else: in SP (`!is_in_session`) with no
+  decay effect, raycast corpse→local player (`Physics_RaycastTerrainAndSectors`,
+  entity origins); CLEAR = the player can SEE the corpse → `+0x148 = 62` and retry
+  next second `[orig: @ 0x4b9f83]`. Blocked/MP → `Entity_Destroy @ 0x43e810`.
+
+Bonus decode: the `entity+0x350` branch above this block is the MEDIC-DRAG follow —
+a linked dragger's hand-bone world delta moves the corpse each tick and forces anim
+139 `draggee` `[orig: @ 0x4b9d9c-0x4b9e41]`.
+
+The port maps despawn to `Entity::hidden` (our registry keeps the slot; the health
+store already gates every consumer) and runs the watch-check whenever a local player
+exists — our SP listen-server equivalence for the retail `!is_in_session` gate; the
+chest-lift LOS endpoints stand in for the entity-origin ray (D-AI-6/-7 feet-ray
+false-block). Both are D-AI-9 residual notes.
+
+### 19.5 The def side — `deathtime`, `particledeath`
+
+- `deathtime` `[orig: ItemDef_ParseProperty @ 0x49fa5a-0x49faa0]`: `def+0x890 =
+  (v ? 62·v : 496) + 62` ticks — the token is SECONDS at the 62 Hz tick with a
+  one-second grace; an explicit 0 authors 9 s. Absent token = 0 (zero-init) — such
+  a corpse expires on its first dead tick (watch permitting). JO persons author
+  `deathtime 30` → 1922 ticks ≈ 31 s. The port scales at parse, exactly.
+- `particledeath <effect>` `[orig: @ 0x4a164b → def+0x416 name]`, resolved at
+  mission start by `resolve_item_materials_and_spawn_bone_trails @ 0x52310f`:
+  `CEffectWorld_InternEffectHandle` → `def+0x412` (1-based handle; doubles as the
+  vehicle death effect), plus `def+0x414 = ItemDef_GetBoneMaskByName(def, "Dead")`.
+- `LeaveCorpse` = attrib `0x400000`, `NoDie` = `0x40000000`, `nodismember` =
+  `0x800000` `[orig: @ 0x4a09a3-0x4a0a10]` (already in the libs/def attrib table).
+
+### 19.6 The vehicle death chain — dispatch rows 21 and 23
+
+Row dwords `@ 0x815388` / `@ 0x8153A8` (enter/tick/exit/event; shared exit
+`nullsub_70 @ 0x457670`). Only the authority runs the full SM; clients run rows
+21/23 too (`EntityAI_ProcessVehicleStateMachine @ 0x4583c0` — wrecks settle
+everywhere).
+
+- **enter 21** `AI_TransitionToDeath_GroundVehicle @ 0x467b20`: when not yet husked
+  (`!(Flags & 4)`) → `Entity_UpdateDeathTransforms @ 0x494660` (savedLivePose
+  snapshot `+0x80..` = Position/euler, `Entity_DispatchDeathCallback @ 0x493ef0`,
+  `Entity_InitDeathSounds @ 0x4939b0`) + authority-in-session S2C 0x26; `def+1352`
+  → kill each mounted child (health 0 + child `deathCallback(child, 1, 0)`); the
+  §16.1 alert block (alert 2/2, group red, ally wake 100 u); `moveStep = 16`;
+  already slow (horizontal |vel| < 1057) → queue AIEvent **4** now.
+- **tick 21** `AI_TickState_VehicleDying @ 0x467cd0` (ex kong `AI_CheckVehicleStuck`):
+  `Entity_ProcessFallingDeathPhysics @ 0x461d30` settle; |vel| < 1057 OR static vs
+  savedLivePose (< 1024 per axis) → queue event 4; still moving → zero work
+  pitch/roll (`ai[133]/[134]`), the commanded speed (`ai[136]`), the mover output
+  (`ai[128]`).
+- **event 21** `AI_HandleEvent_VehicleDying @ 0x457f50` (ex `AI_HandleRetreatEvent`):
+  ONLY type 4 lands → pending 23.
+- **enter 23** `AI_TransitionToDestroyed_Vehicle @ 0x467de0`: the alert block;
+  `entity+0x148 = 0` (wrecks never run the corpse countdown) and `entity+0x162
+  team byte = 0` (a wreck goes teamless and drops out of target scans); death
+  transforms + 0x26 when not yet husked; death tick `+0x1AC` (first write wins);
+  `Entity_ClearAllReferences @ 0x465670` + `Entity_SetAITarget(0)`; `moveStep = 62`.
+- **tick 23** `AI_TickState_VehicleDead @ 0x467ea0` (ex
+  `Entity_ProcessMountedInfantryFrame` misnomer): keep settling; `itemDef attrib &
+  0x40` + authority = the wreck RESPAWN watcher (`thinkCooldown` countdown after 15
+  ticks → teleport to the `pad_24c` spawn pose — parent-relative if the parent
+  lives — or the `+0x2c`-bit0 bury-at-+5000/−1000 variant → `Entity_RespawnVehicle
+  @ 0x45ff40`). Without the attrib the wreck settles forever.
+- **event 23** `AI_HandleEvent_ConsumeAll @ 0x458080`: swallow everything.
+
+`Entity_DispatchDeathCallback` routes `def unitType` through the table `@ 0x815410`
+(stride 16: {type, flagBits, param, callback}); the DEFAULT (no row) is
+`Entity_SpawnDeathPieces @ 0x493400` + `Flags = Flags & ~0x20006 | 6` — dead (2) +
+**husk swap (4)**: rendering and ray collision switch to the def's husk model
+(`Entity_InitFromItemDef` +52/+56), which is how a wreck LOOKS destroyed. The port
+carries rows 21/23 structurally (falling physics + the respawn watcher + the
+husk/death-pieces presentation are visible `unported_calls` stubs — D-AI-9) and the
+organic infantry edge queues NO SM death event (organics never run the cveh SM
+tick; our earlier bring-up event is removed).
+
+### 19.7 Open follow-ups (this session's unknowns)
+
+1. `entity+0x11E` (the death-edge skip word) and `byte +0x134` bit 0 (the silent
+   cleanup) — writers unwalked.
+2. The scream chain: `Entity_GetWeaponSlotTableValue @ 0x528300` reads def+2148/2152
+   sound tables (slots 7/8 = the death screams; 17-23 = the §3.4 footsteps) —
+   resolved from `sound_profile` by `ItemDef_ResolveAllResources @ 0x49e5f0`;
+   the profile parse chain is unported, so the port has no scream (D-AI-9). What
+   `Bms_AttribFlags & 0x100000` (slot-8 select) authors is unidentified.
+3. The S2C 0x13 client consumer (`NapiNPClientMsg_EntityDeath @ 0x42ebd0` region)
+   also writes `+0x2C0` — the wire carries the death-anim selection to remote
+   clients; walk it when MP corpse parity lands (its IDB gloss "clear ammo/weapon
+   field" is wrong).
+4. `Entity_InitDeathSounds @ 0x4939b0` body (the pad_270 death sound block),
+   `Entity_SpawnDeathPieces @ 0x493400`, the `@ 0x815410` table rows (which
+   unitTypes override the default), and `Entity_ProcessFallingDeathPhysics
+   @ 0x461d30` internals (ties into §4 item 9's death movers `0x461c30/0x461cb0`).
+5. The drowning source (`Flags & 0x8000` → 175) rides the unmodeled swim flags.
+6. The player edge (`Entity_UpdateInfantryPlayerBody @ 0x4b4c72/0x4b61c6/0x4b7d83`
+   sites) shares the same consume; the player-death PRESENTATION (death camera,
+   respawn flow) is the P2b slice.
+
+### 19.8 IDB write-backs (2026-07-16 session 5, saved)
+
+Renames (anchored, ex kong misnomers/auto-names): `AI_TickState_VehicleDying
+@ 0x467cd0` (ex `AI_CheckVehicleStuck`), `AI_TickState_VehicleDead @ 0x467ea0` (ex
+`Entity_ProcessMountedInfantryFrame`), `AI_HandleEvent_VehicleDying @ 0x457f50` (ex
+`AI_HandleRetreatEvent`), `AI_HandleEvent_ConsumeAll @ 0x458080` (ex `sub_458080`).
+Entry comments: the four rows, `@ 0x49fa96` (the deathtime formula), `@ 0x4b9c40`
+(the death edge), `@ 0x4b9e4d` (the corpse block), `@ 0x43a690` (cause routing +
+the 15 groups + the quadrant convention), `@ 0x52310f` (particledeath intern).

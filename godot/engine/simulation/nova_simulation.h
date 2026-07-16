@@ -659,6 +659,9 @@ public:
 	// allocation is fine at selected-entity-only low-Hz use; the per-tick
 	// present loop has get_present_snapshot instead.
 	Dictionary get_entity_debug(int p_index) const;
+	// Probe seam: write an AI entity's health via the scripted-SETHP stores
+	// (registry + motor copy) so in-game probes can shorten a fight.
+	void debug_set_entity_health(int p_index, int p_hp);
 	// Human-readable AI state name, "?" for the id gaps
 	// [orig: Entity_LookupAIStateName @0x455cc0].
 	static String ai_state_name(int p_state);

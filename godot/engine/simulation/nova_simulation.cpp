@@ -917,6 +917,7 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_global_variable", "index"), &NovaSimulation::get_global_variable);
 	ClassDB::bind_method(D_METHOD("get_fired_events_snapshot"), &NovaSimulation::get_fired_events_snapshot);
 	ClassDB::bind_method(D_METHOD("get_entity_debug", "index"), &NovaSimulation::get_entity_debug);
+	ClassDB::bind_method(D_METHOD("debug_set_entity_health", "index", "hp"), &NovaSimulation::debug_set_entity_health);
 	ClassDB::bind_static_method("NovaSimulation", D_METHOD("ai_state_name", "state"), &NovaSimulation::ai_state_name);
 	ClassDB::bind_static_method("NovaSimulation", D_METHOD("infantry_anim_key", "state"), &NovaSimulation::infantry_anim_key);
 	ClassDB::bind_method(D_METHOD("get_entity_count"), &NovaSimulation::get_entity_count);
@@ -2433,6 +2434,21 @@ bool NovaSimulation::is_wac_paused() const {
 
 void NovaSimulation::set_mission_variable(int index, int value) {
 	if (world_) world_->vars.set_mission(index, value);
+}
+
+// Probe/diagnostic seam beside get_entity_debug: write an AI entity's health through
+// the same stores the scripted SETHP path touches (registry + the motor copy)
+// [orig: the WAC SETHP op writes entity+286]. Lets in-game probes shorten a fight
+// without bypassing the damage/death chain under test.
+void NovaSimulation::debug_set_entity_health(int p_index, int p_hp) {
+	if (!ai_ || !world_) return;
+	AiEntity *e = ai_->at(p_index);
+	if (!e) return;
+	e->health = static_cast<int16_t>(p_hp);
+	if (opennova::world::Entity *ent = world_->registry.get(e->handle)) {
+		ent->health = p_hp;
+		ent->alive = p_hp > 0;
+	}
 }
 
 int NovaSimulation::get_mission_variable(int index) const {

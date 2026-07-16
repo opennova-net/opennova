@@ -177,21 +177,31 @@ func test_visibility_from_hidden_and_alive() -> void:
 	var shown := FakeModel.new()
 	var hidden := FakeModel.new()
 	var dead := FakeModel.new()
+	var corpse := FakeModel.new()
+	var despawned := FakeModel.new()
 	add_child_autofree(shown)
 	add_child_autofree(hidden)
 	add_child_autofree(dead)
+	add_child_autofree(corpse)
+	add_child_autofree(despawned)
 	var index := FakeIndex.new()
-	index.by_bms_id = { 1: shown, 2: hidden, 3: dead }
+	index.by_bms_id = { 1: shown, 2: hidden, 3: dead, 4: corpse, 5: despawned }
 	var sim := FakeSim.new()
 	sim.entities = [
 		{ "bms_id": 1, "hidden": 0, "alive": 1 },
 		{ "bms_id": 2, "hidden": 1, "alive": 1 },
 		{ "bms_id": 3, "hidden": 0, "alive": 0 },
+		# A dead ORGANIC keeps rendering as a corpse until the sim despawns it via
+		# PF_HIDDEN (the corpse timer + watch rule; world-wac-ai-re §19.4).
+		{ "bms_id": 4, "hidden": 0, "alive": 0, "kind": 3 },
+		{ "bms_id": 5, "hidden": 1, "alive": 0, "kind": 3 },
 	]
 	_make_pass(index, sim).present()
 	assert_true(shown.visible, "visible entity stays visible")
 	assert_false(hidden.visible, "hidden entity is hidden")
-	assert_false(dead.visible, "dead entity is hidden")
+	assert_false(dead.visible, "dead non-organic hides (the husk-swap stand-in, D-AI-9)")
+	assert_true(corpse.visible, "a dead organic renders as a corpse")
+	assert_false(despawned.visible, "the sim ends the corpse via PF_HIDDEN")
 
 
 func test_options_gate_each_channel() -> void:
