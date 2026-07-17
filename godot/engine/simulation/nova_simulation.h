@@ -351,6 +351,15 @@ private:
 	opennova::bms::File mission_file_;                        // persisted so ctx_.mission outlives the match (the 0x0B burst body)
 	std::string joiner_player_name_;                          // persisted for the Joiner runtime ctor on (re)load
 	uint32_t now_tick_ = 0;                                   // the JOINER's per-frame clock (the host uses host_owner_.now_tick)
+	// wire-id -> §5.10b replication class, built from items.def in resolve_item_traits.
+	// The DECODE-side twin of the per-entity net_class_code stamp: the runtime's client
+	// view sizes each inbound 0x0A tag-1 record by class, exactly as the retail client
+	// dispatches via its own items.def serialize callback [orig: itemDef+356 @0x50f2e2].
+	// Shared into the view's classifier lambda; survives per-load runtime rebuilds.
+	std::shared_ptr<const std::unordered_map<uint16_t, opennova::EntityClass>> item_class_table_;
+	// Install item_class_table_ on runtime_'s view (no-op until both exist). Called from
+	// resolve_item_traits, finish_load (per-load runtime rebuild), and enable_join.
+	void install_item_class_resolver();
 	// Per-load host bring-up: mode 3 -> create_session(&host_loop_) -> configure_session_runtime
 	// -> Server_InitNewRoundState -> the faithful host-player auto-spawn. Mirrors apps/nw_server.
 	void bringup_host_runtime(const opennova::bms::File &file);
