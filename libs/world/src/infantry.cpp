@@ -23,7 +23,8 @@
 //            tail: water (swim transitions). The caller semantics are preserved either
 //            way: return <= 0 lifts the foot out of the floor, return > 0xF000 marks
 //            airborne, small positive clearance is left alone; the airborne edge stamps
-//            jump_loop 31 (ported; the parachute 47 variant rides the unmodeled Flags
+//            jump_loop 31 for the PLAYER only (org1's 47/31 ladder is parachute-gated —
+//            plain NPC falls keep the clip; the 47 variant rides the unmodeled Flags
 //            0x20) [orig: org1 @0x4bf8d4-0x4bf901, org2 @0x4b7e3c-0x4b7e61]. NOTE:
 //            patrol walking has NO
 //            peer/obstacle avoidance in the original — entity separation is the
@@ -1149,25 +1150,34 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         if (foot_clearance > kAirborneGap) {
             if (!inf.airborne) {
                 // The airborne EDGE (was grounded; the already-in-air 0x2000 test
-                // skips it). org2 carries 3/4 of this tick's rotated root step into
-                // the slide velocity — running momentum off a ledge [orig:
-                // @0x4b7e30-0x4b7e73]; org1 has NO carry [orig: @0x4bf8ae-0x4bf8bd].
-                // Both stamp the in-air clip directly, pending cleared; dead and
-                // carried bodies skip the stamp, and the parachute 47 variant
-                // (Flags 0x20) rides docs/world/world-wac-ai-re.md (D-INF-20).
-                // [orig: org1 availability-gated 31 @0x4bf8d4-0x4bf901; org2
-                // straight stamp @0x4b7e3c-0x4b7e61]
+                // skips it). The two motors differ in kind here:
+                //   org2 (player): dead skips the WHOLE edge (gate mask 0x10A002,
+                //   carried is force-cleared, not skipped); otherwise 3/4 of this
+                //   tick's rotated root step carries into the slide velocity —
+                //   running momentum off a ledge — pending clears, and 31 stamps
+                //   STRAIGHT (47 while parachuting rides the unmodeled Flags 0x20;
+                //   the has_clip guard is a host guard the original lacks).
+                //   [orig: @0x4b7e17-0x4b7e73]
+                //   org1 (NPC): NO carry, and NO stamp on a plain fall — the 47/31
+                //   availability ladder runs ONLY while parachuting (`test al,20h`
+                //   @0x4bf8d8), so a live NPC keeps its walk/run clip off a ledge;
+                //   live non-carried bodies just clear any pending anim (dead skips
+                //   the clear too, airborne still sets). [orig: @0x4bf8ae-0x4bf901]
                 if (inf.is_local_player) {
-                    inf.vel[0] += (3 * root_wx) >> 2;
-                    inf.vel[1] += (3 * root_wy) >> 2;
-                }
-                if (e.health > 0 && inf.anim_state != anim_state::kJumpLoop &&
-                    root_motion != nullptr &&
-                    root_motion->has_clip(inf.adm_id, anim_state::kJumpLoop)) {
-                    inf.anim_prev = inf.anim_state;
-                    inf.anim_state = anim_state::kJumpLoop;
-                    inf.anim_pending = 0;
-                    inf.clip_phase = 0;
+                    if (e.health > 0) {
+                        inf.vel[0] += (3 * root_wx) >> 2;
+                        inf.vel[1] += (3 * root_wy) >> 2;
+                        inf.anim_pending = 0; // [orig: @0x4b7e46, before the stamp]
+                        if (inf.anim_state != anim_state::kJumpLoop &&
+                            root_motion != nullptr &&
+                            root_motion->has_clip(inf.adm_id, anim_state::kJumpLoop)) {
+                            inf.anim_prev = inf.anim_state;
+                            inf.anim_state = anim_state::kJumpLoop;
+                            inf.clip_phase = 0;
+                        }
+                    }
+                } else if (e.health > 0) {
+                    inf.anim_pending = 0; // [orig: @0x4bf901]
                 }
             }
             inf.airborne = true;

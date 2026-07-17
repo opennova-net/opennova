@@ -422,6 +422,34 @@ void test_player_body_chase_and_legs() {
     CHECK(std::abs(e->inf.body_heading - e->inf.target_heading) <= 1);
 }
 
+// An org1 (NPC) plain ledge fall keeps its clip: the fall edge's 47/31 stamp
+// ladder is PARACHUTE-gated for the NPC motor (`test al,20h` @0x4bf8d8 — a live
+// walker run-cycles off a roof in retail), so only airborne sets and any pending
+// anim clears; the org2 player is the motor that stamps 31 straight.
+// [orig: org1 @0x4bf8ae-0x4bf901; org2 @0x4b7e17-0x4b7e73] Own function: main's
+// frame is at its MSVC stack-probe limit (see test_remote_player_body_anim).
+void test_npc_ledge_fall_keeps_clip() {
+    Field ground0([](int) { return static_cast<uint16_t>(0); }); // ground at 0
+    World w;
+    AiSystem ai;
+    ai.terrain = &ground0.field;
+    TestSource src;
+    // kJumpLoop is AVAILABLE — proving the no-stamp is the parachute gate, not
+    // clip availability.
+    src.clips = {anim_state::kWalkForward, anim_state::kIdle, anim_state::kJumpLoop};
+    ai.root_motion = &src;
+    AiEntity *e = soldier(ai);
+    e->health = 100;
+    e->inf.is_local_player = false;
+    route(ai, e, {node(fx(500), 0, fx(1))}, 0);
+    e->pos[0] = fx(100); e->pos[1] = fx(100); e->pos[2] = fx(80); // 80u off the floor
+
+    run_ticks(ai, w, 0, 1); // think commits the walk, then the fall edge fires
+    CHECK(e->inf.airborne);
+    CHECK(e->inf.anim_state == anim_state::kWalkForward); // NOT kJumpLoop
+    CHECK(e->inf.anim_pending == 0);                      // [orig: @0x4bf901]
+}
+
 // The upper-body weapon channel (the entity's SECONDARY AnimMap channel), local-player
 // slice: the rifle-mirror default, the 80-tick reload window -> state 65, the locked
 // commit rule (65 = flag 0x84 defers exits to clip end), and the clip-end promotion.
@@ -1949,6 +1977,7 @@ int main() {
     test_registry_max_health_drives_wounded_gait();
     test_player_body_chase_and_legs();
     test_player_body_chase_crosses_the_bam_seam();
+    test_npc_ledge_fall_keeps_clip();
     test_player_weapon_channel();
     test_player_weapon_hold_kinds();
     test_player_weapon_attack_stamp();
