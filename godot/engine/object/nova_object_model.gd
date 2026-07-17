@@ -63,6 +63,13 @@ var native_frame := false
 var _skeletal                       # NovaSkeletalAnim, or null
 var _skeleton: Skeleton3D           # built in rebuild() when skinned + _skeletal loaded
 var _skeleton_skin: Skin
+# The gun-flash muzzle userpoint, resolved for the AI fire-origin seam (D-AI-6):
+# bone = the userpoint's subobject row (the rig is index-driven: row i is bone i),
+# position = the authored model-space point. [orig: the anim-event fire transforms
+# the fire-bone userpoint by the live pose — Entity_GetAttachmentWorldPosition
+# @0x4b2670 over the model userpoint table @model+0xC0]
+var _muzzle_bone := -1
+var _muzzle_model_pos := Vector3.ZERO
 var _anim_key := ""                 # active clip key (ADM key, e.g. "anim_walk")
 var _anim_variant := 0              # same-key variant index (multi-clip .adm rows; the
                                     # sim's ring latch picks it for viewmodel plays
@@ -173,6 +180,58 @@ func get_skeleton() -> Skeleton3D:
 
 func has_skeleton() -> bool:
 	return _skeleton != null
+
+
+## Whether this model resolved a gun-flash muzzle userpoint onto its skeleton
+## (the D-AI-6 fire-origin seam; infantry body models author one — US01
+## "GFlash01", SASBODY1 "MFlash01").
+func has_muzzle() -> bool:
+	return _muzzle_bone >= 0 and _skeleton != null
+
+
+## The POSED muzzle world position: the authored model-space userpoint carried
+## through its bone's live pose — the same rest-to-pose attachment transform the
+## userpoint debug overlay and the action-particle attachments use.
+## [orig: Entity_GetAttachmentWorldPosition @0x4b2670 — userpoint local position
+## x the animated bone matrix]
+func get_muzzle_world_position() -> Vector3:
+	var model_to_world := (_skeleton.global_transform
+			* _skeleton.get_bone_global_pose(_muzzle_bone)
+			* _skeleton.get_bone_global_rest(_muzzle_bone).affine_inverse())
+	return model_to_world * _muzzle_model_pos
+
+
+# Resolve the muzzle userpoint against the built skeleton. Name preference:
+# a "*flash*" userpoint (the gun-flash convention) over "bullet"/"*muzzle*";
+# LOOK/CAMERA/etc never match. The rig is index-driven, so the userpoint's
+# subobject row IS the skeleton bone index; rows past the bone count (padding
+# rows exist in shipped models) disqualify the point.
+func _resolve_muzzle_userpoint() -> void:
+	_muzzle_bone = -1
+	if _skeleton == null or object_data == null \
+			or not object_data.has_method("get_user_point_info"):
+		return
+	var best := -1
+	var best_rank := 99
+	for i in range(int(object_data.get_user_point_count())):
+		var info: Dictionary = object_data.get_user_point_info(i)
+		var n := String(info.get("name", "")).to_lower()
+		var rank := 99
+		if n.contains("flash"):
+			rank = 0
+		elif n == "bullet" or n.contains("muzzle"):
+			rank = 1
+		if rank < best_rank:
+			best_rank = rank
+			best = i
+	if best < 0:
+		return
+	var info2: Dictionary = object_data.get_user_point_info(best)
+	var bone := int(info2.get("subobject", -1))
+	if bone < 0 or bone >= _skeleton.get_bone_count():
+		return
+	_muzzle_bone = bone
+	_muzzle_model_pos = info2.get("position", Vector3.ZERO)
 
 
 ## Play a main-body clip by ADM key (e.g. "anim_walk"). No-op if no skeletal set / unknown.
@@ -556,6 +615,7 @@ func rebuild() -> void:
 	_robj_nodes.clear()
 	_skeleton = null
 	_skeleton_skin = null
+	_muzzle_bone = -1
 	_surface_material_indices.clear()
 	_surface_materials.clear()
 	_alpha_materials.clear()
@@ -582,6 +642,7 @@ func rebuild() -> void:
 	var skeletal_mode: bool = _skeletal != null and _skeletal.is_loaded()
 	if skeletal_mode:
 		_build_skeleton()
+		_resolve_muzzle_userpoint()
 	var bone_count: int = _skeleton.get_bone_count() if skeletal_mode and _skeleton != null else 0
 	var submeshes: Array = object_data.build_lod_submeshes(_active_lod, skeletal_mode, bone_count, native_frame) if object_data.has_method("build_lod_submeshes") else []
 	if submeshes.is_empty():

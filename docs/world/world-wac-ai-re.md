@@ -2671,3 +2671,92 @@ autogain/accuracyspread/CurTOD/auto_item) + `g_stat_bluekills_by_player
 WAC win/lose handlers and the `@ 0x4d31c0` tail fragment. Entry comments on the
 named-value table, the round-end/cine/scoreboard functions, and the two zone-ref
 resolvers.
+
+## 21. Appendix: the fire-origin / userpoint chain — where bullets come FROM (engine-research, 2026-07-16 session 7)
+
+The user-visible P1 residual (D-AI-6): our AI fire origin was `entity pos + 0.9 u`,
+but infantry model origins sit at the PELVIS (US01 mesh spans Y −1.02..+0.97), so the
+lift landed at head height. The original never lifts — it fires from a MODEL
+USERPOINT through the animated skeleton.
+
+### 21.1 The two origin functions
+
+- **`Entity_ComputeWeaponFireOrigin @ 0x43b4b0`** — the aim/LOS/HUD/missile origin
+  (callers: `Entity_FindTargets`/`Entity_CheckMutualLineOfSight`/`Entity_ValidateWeaponTarget`,
+  the guided-missile family, `HUD_DrawCrosshair`, the targeting-line debug). Person
+  leg (def+92 == 3): `pos + (entity+0x6C..0x74 >> 1)` (or `>> 2` on X/Y when bit 7 of
+  the low byte of `&current_tick + 36*entity[+0x7C]` — a per-entity ADDRESS-HASH, not
+  randomness) plus a ±0.06 u jitter from bits 5-6 of the same byte; the +0x6C vector's
+  writer is unwalked (open). Non-person leg: transform **the def muzzle userpoint**
+  (`def+1350`, a 1-based byte index) from the model userpoint table by the entity's
+  euler rotation matrix (entity+0xB4, three builder variants); fallback the entity+0x1FC
+  point or the raw position. `def+1350` resolves at model init from the hardcoded name
+  **"TARGET"** [orig: Entity_InitFromModel @ 0x40dd04] — US01 has no TARGET point, so
+  persons ride the person leg.
+- **`Entity_GetAttachmentWorldPosition @ 0x4b2670`** — the ROUND/EFFECT spawn origin:
+  the userpoint's local position transformed by its bone's **LIVE posed matrix**
+  (`Entity_BuildBoneTransformMatrices @ 0x4b1290`; matrix index = userpoint record
+  +24), orientation out = entity euler. Callers: FIVE sites, all in
+  `Entity_UpdateInfantryAI` — the §17.4 anim-event fire block (bit 0x4 → bone byte
+  entity+0x365 firing weapon +0x358; bit 0x10 → +0x367/+0x35B; the secondary latch →
+  +0x366/+0x359) and the combat-pass aim anchor (+0x366). A mounted occupant whose
+  vehicle def carries attrib 0x20 delegates to `Entity_ComputeUserpointWorldTransform
+  @ 0x545c60` (the VEHICLE's userpoint — D-AI-2 adjacency, unwalked).
+
+### 21.2 The model userpoint table + the authored-name resolution
+
+Model userpoint table @ model+0xC0 (count @ +0xBC): 48-byte records, local position
+at +0, matrix/bone index at +24, NAME at +32; matched case-insensitively
+[orig: modelgpm_FindUserpointByName @ 0x5b2170]; `Entity_FindUserpointIndexByName
+@ 0x545540` returns the 1-based row. At spawn, the item def's TWELVE authored
+userpoint names (16-byte strings at def+0x61B..0x6CB) + the weapon def's own name
+(weaponDef+856) resolve into entity byte clusters, with a groups-of-3 fallback fill
+([3..5]←[0..2], [6..8]←[0..2], [9..11]←[3..5], [12]←[6]) [orig: sub_545940]:
+
+- infantry: `Entity_InitInfantryBoneData @ 0x490160` → entity+0x4D8..0x4E4 (def
+  order shuffled 3,4,5,0,1,2,9,10,11,6,7,8 + the weapon-def name);
+- vehicles/seats: `Entity_InitBoneReferences @ 0x441470` → +0x318 "CAMERA",
+  +0x31A "USEGUN", +0x327..0x333 (same def names + weapon-def name).
+
+The §17.4 FIRE bone bytes entity+0x365..0x367 are a third cluster whose block
+writer remains unwitnessed (the D-AI-5 family, with the weapon-id bytes +0x358..0x35B).
+
+Ground truth (retail JOX models): US01 = `GFlash01`@part15 + `Look`; EIndo01-08 =
+`MFlash01`/`bullet` (+`GFlash01`/`bcasing` on some); CIndo civilians = `LOOK` only
+(no muzzle — civilians never fire).
+
+### 21.3 The port: the host muzzle seam
+
+libs/world carries no skeletal pose, so the posed-muzzle transform runs where the
+pose lives and feeds back (the host-fed input pattern, like the terrain sampler):
+
+- `NovaObjectModel` resolves the gun-flash userpoint at rebuild (name preference
+  `*flash*` > `bullet`/`*muzzle*`; the rig is index-driven so the userpoint's
+  subobject row IS the skeleton bone) and exposes `get_muzzle_world_position()` =
+  `skeleton.global * bone_pose * bone_rest⁻¹ * model_pos` — the same attachment
+  transform the userpoint debug overlay uses.
+- `mission_present_pass._push_muzzle` pushes it per presented row, keyed by
+  **PF_NET_ID** (the authored SSN — the wire handle is 0-ambiguous for pool-0 slot 0,
+  and the present rows render the client WIRE VIEW, whose row order is not the AI
+  index and whose population is replication-range-gated).
+- `NovaSimulation::set_ai_muzzle_world(net_id, pos)` converts Godot→mission 16.16
+  and stamps `AiSystem::set_entity_muzzle(handle, pos, logic_tick)`.
+- `AiSystem::infantry_fire_pass` spawns rounds from the stamp while FRESH
+  (≤ 4 ticks), else the chest-lift stand-in (headless ctests, out-of-view NPCs).
+
+Evidence: `ai` ctest `test_fire_pass_uses_host_fed_muzzle` (stamp used when fresh,
+fallback when absent/stale); in-game `godot/tests/ai_muzzle_probe.gd` on CP01 —
+PASS: a posed EIndo muzzle at +0.51 u up / 0.93 u out from the entity origin
+(chest-height, along the aimed rifle), zero head-height origins.
+
+### 21.4 Divergences + open follow-ups
+
+D-AI-6 (ledger) updated: the FIRE-ORIGIN clause is LANDED via the host seam.
+Residuals: (a) the LOS endpoints and the aim-solution eye point still use the
+chest-lift stand-in (the originals are the muzzle/person-leg vectors above);
+(b) the def-authored userpoint NAMES (def+0x61B..0x6CB) are unplumbed — the
+flash-name preference covers every shipped JO infantry body; (c) the stamp rides
+the RENDER skeleton one frame stale, and out-of-replication-range NPCs fall back
+(the original computes in-sim); (d) entity+0x6C (the person aim vector) and the
++0x358..0x367 block writer are unwalked; (e) the vehicle userpoint path @ 0x545c60
+waits on D-AI-2.

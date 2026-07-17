@@ -112,6 +112,58 @@ void test_vehicle_death_rows() {
     }
 }
 
+// The D-AI-6 muzzle seam: a FRESH host-fed posed muzzle replaces the chest-lift
+// origin for spawned rounds; absent or stale stamps fall back. [orig: the
+// anim-event fire spawns from Entity_GetAttachmentWorldPosition @0x4b2670 —
+// the posed gun-flash userpoint; our host present layer feeds it back.]
+static void test_fire_pass_uses_host_fed_muzzle() {
+    auto w = std::make_unique<World>();
+    w->registry.configure_pool(0, 8);
+    Entity seed{};
+    seed.net_id = 900;
+    seed.alive = true;
+    seed.health = 100;
+    EntityHandle h = w->registry.spawn(0, seed);
+
+    w->ammo.entries.resize(2);
+    w->ammo.entries[1].valid = true;
+    w->ammo.entries[1].velocity = 62; // 1 u/tick; pos is asserted at SPAWN (no tick runs)
+    w->ammo.entries[1].max_age_ticks = 100;
+
+    AiSystem sys;
+    int idx = sys.attach(h);
+    AiEntity &e = *sys.at(idx);
+    e.pos[0] = 10 << 16;
+    e.pos[1] = 20 << 16;
+    e.pos[2] = 5 << 16;
+    e.profile.ammo_primary = 1;
+
+    auto near_f = [](float a, float b) { return a > b - 0.01f && a < b + 0.01f; };
+
+    // No stamp yet -> the chest-lift stand-in (entity pos + 0.9 u).
+    e.inf.last_events = 0x4; // the primary anim-fire event bit
+    sys.infantry_fire_pass(e, *w, /*logic_tick=*/1);
+    CHECK(w->round_sim.active_count == 1);
+    CHECK(near_f(w->round_sim.rounds[0].pos.x, 10.0f));
+    CHECK(near_f(w->round_sim.rounds[0].pos.z, 5.9f));
+
+    // Fresh stamp -> rounds spawn from the posed muzzle.
+    const int32_t muz[3] = {(10 << 16) + 0x8000, (20 << 16) - 0x4000, (5 << 16) + 0x4000};
+    sys.set_entity_muzzle(h, muz, /*logic_tick=*/2);
+    e.inf.last_events = 0x4;
+    sys.infantry_fire_pass(e, *w, 3);
+    CHECK(w->round_sim.active_count == 2);
+    CHECK(near_f(w->round_sim.rounds[1].pos.x, 10.5f));
+    CHECK(near_f(w->round_sim.rounds[1].pos.y, 19.75f));
+    CHECK(near_f(w->round_sim.rounds[1].pos.z, 5.25f));
+
+    // Stale stamp (older than the 4-tick freshness window) -> fallback again.
+    e.inf.last_events = 0x4;
+    sys.infantry_fire_pass(e, *w, 9); // 9 - 2 = 7 ticks stale
+    CHECK(w->round_sim.active_count == 3);
+    CHECK(near_f(w->round_sim.rounds[2].pos.z, 5.9f));
+}
+
 int main() {
     // ---- struct layout (byte-exact strides) ----
     CHECK(sizeof(AiBrain) == 812);
@@ -1091,6 +1143,7 @@ int main() {
     }
 
     test_vehicle_death_rows();
+    test_fire_pass_uses_host_fed_muzzle();
 
     if (failures == 0) std::printf("ai: all tests passed\n");
     return failures ? 1 : 0;
