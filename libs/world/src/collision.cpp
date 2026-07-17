@@ -1043,6 +1043,8 @@ terrain::TerrainRaycastSample los_field_bilinear_cb(void *ctx, int32_t x, int32_
     return los_field_sample(*static_cast<const terrain::TerrainHeightField *>(ctx), x, y, true);
 }
 
+} // namespace
+
 bool los_terrain_blocked(const terrain::TerrainHeightField &field, const int32_t a[3],
                          const int32_t b[3]) {
     terrain::TerrainRaycastSampler sampler;
@@ -1051,6 +1053,8 @@ bool los_terrain_blocked(const terrain::TerrainHeightField &field, const int32_t
     sampler.ctx = const_cast<terrain::TerrainHeightField *>(&field);
     return !terrain::terrain_raycast_los_clear(sampler, a, b);
 }
+
+namespace {
 
 // The radiused segment clip, boolean-only: does any TYPE-1 solid volume of
 // `target` contain a span of [ray.start, ray.end] under the per-plane radius
