@@ -450,6 +450,72 @@ void test_npc_ledge_fall_keeps_clip() {
     CHECK(e->inf.anim_pending == 0);                      // [orig: @0x4bf901]
 }
 
+// The resolver's idle skip-throttle undo must match the CALLER's integrate per
+// motor: x1 for the player body (org2 `pos += vel`, -208/tick) and x2 for the
+// NPC (org1 `pos += 2*vel`). The x2-for-both undo (tuned to the pre-§22 2-tick
+// player cadence) nets +208/tick of climb through the skip band, then the
+// no-reset middle band accumulates the fall back to the floor snap — the
+// standing player's visible rise-and-snap sawtooth (2026-07-17 regression).
+// This drives the REAL motor against the REAL resolver across the throttle's
+// 64-tick windows — the direct-resolver test hand-rolled the caller's cadence
+// and stayed green while the pair diverged.
+// [orig: the skip undo @0x4b2cd9-0x4b2ce9 — `test ecx,100h` picks x1 for the
+//  Flags&0x100 PLAYER body (the "mounted" gloss was a kong misnomer; the kill
+//  router and AI target filters key players on 0x100); gates @0x4b2c3d-0x4b2cba]
+void test_player_idle_skip_throttle_no_bounce() {
+    Field flat([](int) { return static_cast<uint16_t>(0); });
+    World world;
+    world.registry.configure_pool(0, 4);
+    world.registry.configure_pool(2, 4);
+
+    Entity far_building; // presence only: a live instance enables the resolver path
+    far_building.kind = EntityKind::Building;
+    far_building.position = {200.0f, 200.0f, 0.0f};
+    const EntityHandle bh = world.registry.spawn(2, far_building);
+
+    Entity player;
+    player.kind = EntityKind::Organic;
+    // Spawn ON the floor: the skip throttle is the thing under test, not the
+    // drop landing (a >2u drop can outrun the witnessed 2u ground probe — the
+    // quantize-up + 2u down-probe @0x4b3d6e — and tunnel in this bare rig).
+    player.position = {10.0f, 10.0f, 0.05f};
+    player.health = 100;
+    player.health_max = 100;
+    const EntityHandle ph = world.registry.spawn(0, player);
+
+    CollisionWorld collision;
+    collision.terrain = &flat.field;
+    const int32_t model_id = collision.add_model(hurt_box_model());
+    collision.assign_entity(bh, model_id);
+
+    AiSystem ai;
+    ai.terrain = &flat.field;
+    ai.collision = &collision;
+    TestSource source;
+    source.clips = {anim_state::kIdle};
+    source.step = 0;
+    ai.root_motion = &source;
+    AiEntity *e = ai.at(ai.attach(ph));
+    e->inf.active = true;
+    e->inf.is_local_player = true;
+    e->health = 100;
+    e->pos[0] = fx(10.0);
+    e->pos[1] = fx(10.0);
+    e->pos[2] = fx(0.05);
+
+    run_ticks(ai, world, 0, 80); // pin onto the floor + pass the first 64-gate
+    const int32_t settled = e->pos[2];
+    int32_t min_z = settled;
+    int32_t max_z = settled;
+    for (uint32_t t = 80; t < 400; ++t) { // several 64-tick windows + skip bands
+        run_ticks(ai, world, t, t + 1);
+        if (e->pos[2] < min_z) min_z = e->pos[2];
+        if (e->pos[2] > max_z) max_z = e->pos[2];
+    }
+    CHECK(max_z - min_z <= 208); // post-tick z pinned: no rise, no sawtooth
+    CHECK(std::abs(e->pos[2] - settled) <= 208);
+}
+
 // The upper-body weapon channel (the entity's SECONDARY AnimMap channel), local-player
 // slice: the rifle-mirror default, the 80-tick reload window -> state 65, the locked
 // commit rule (65 = flag 0x84 defers exits to clip end), and the clip-end promotion.
@@ -1978,6 +2044,7 @@ int main() {
     test_player_body_chase_and_legs();
     test_player_body_chase_crosses_the_bam_seam();
     test_npc_ledge_fall_keeps_clip();
+    test_player_idle_skip_throttle_no_bounce();
     test_player_weapon_channel();
     test_player_weapon_hold_kinds();
     test_player_weapon_attack_stamp();

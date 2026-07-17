@@ -1469,14 +1469,26 @@ store (details inline below), added D-COL-9, and extended D-COL-5/-8.
 
 ### 15.3 Witness map — the movement resolver `[orig: Entity_ProcessCollisionAndPlatformPhysics @ 0x4b2bd0]`
 
-Closes §4 open item 5 (the 0x11e3-byte internals). Per call (from the motor's
-gravity block, every 2 ticks):
+Closes §4 open item 5 (the 0x11e3-byte internals). Per call (from each motor's
+gravity block, EVERY tick — the "every 2 ticks" first reading died with
+D-INF-10/§22):
 
 1. **Idle skip-throttle**: full update when the anim-state table bit 0 is set,
    velocity/slide non-zero (slide > 0 or < -420), displaced > 200 from
    savedLivePose (X/Y only), swim flag 0x2000, or every 64th tick; otherwise
-   counter 0..10 full, 11..20 skip (revert the caller's gravity displacement
-   `pos.Z -= slide` (x2 non-player), zero it, return 0), reset to 10. A net
+   counter 0..10 full, 11..20 skip (revert the caller's gravity displacement,
+   zero it, return 0), reset to 10. The revert is PER MOTOR — `pos.Z -= slide`
+   x1 for Flags&0x100 PLAYER bodies (matching the org2 `pos += vel` integrate),
+   x2 otherwise (the org1 `pos += 2*vel`) `[orig: test ecx,100h @ 0x4b2cd9 →
+   @ 0x4b2ce9]`; the resolver's "0x100=mounted" comment gloss is a kong
+   misnomer — the kill router (§20) and the AI target filters (§16) key PLAYERS
+   on 0x100. Port history: the reimpl deliberately ran x2-for-both while the
+   player kept the pre-§22 2-tick cadence; when §22 restored the per-tick
+   `-208 + pos += vel` org2 integrate the mismatch leaked +208 per skip tick —
+   the standing player's visible rise-and-snap sawtooth — fixed 2026-07-17 to
+   the witnessed split (pinned by `test_player_idle_skip_throttle_no_bounce`,
+   the motor+resolver coupled seam; the direct-resolver case hand-rolled the
+   caller cadence and could not catch the pair diverging). A net
    push-out later in the resolve resets the counter to 0 `[orig: @ 0x4b3773]`.
 2. **Per-query state**: blink globals cleared; entity Flags &= ~0x00D00800
    (indoors 0x800000, armory 0x400000, platform 0x100000, vehicle-zone 0x800)
@@ -2880,6 +2892,11 @@ the org2 2× local integrate (§22.2). Unported by decision — dev/admin featur
   airborne stand-in branch in favor of the witnessed selection gate.
 - Fall damage now skips dead bodies (the org1 `test dl,2` leg).
 - `InfantryState.jump_cooldown` added (the +0x1A8 reuse gets a dedicated field).
+- (2026-07-17 follow-up, same branch) the resolver's idle-skip gravity undo
+  restored to the witnessed per-motor split — x1 player / x2 NPC, the
+  Flags&0x100 select (§15.3 item 1) — the x2-for-both adaptation depended on
+  the 2-tick player cadence this section deleted, and the mismatch was the
+  standing player's visible rise-and-snap bounce.
 
 ### 22.5 Open follow-ups
 
@@ -2898,6 +2915,14 @@ the org2 2× local integrate (§22.2). Unported by decision — dev/admin featur
 6. `GamePlayerEntity` +0x98/+0x9C/+0xA0 (the slide-velocity triplet the
    integrate/gravity legs write) — +0xA0 is still named `slideDecay` in the IDB,
    a now-visible vel_z misnomer; rename proposal rides the next IDB pass.
+7. Fast-fall ground-probe tunneling (bare-rig observation, 2026-07-17): the
+   witnessed settle probe (quantize Z up + 2u down-probe `@ 0x4b3d6e`) can miss
+   the terrain once the entity is below the surface (the probe start quantizes
+   under the ground and the ray looks only DOWN), so a crossing step larger
+   than the ~6144 sub-surface window sails through — reproduced in a terrain-only
+   test rig with a 2u free fall. Whether retail's
+   `Entity_RaycastGroundHeightAndObject @ 0x414370` terrain leg has an
+   unbounded-height fallback (no tunnel) needs its own witness; rides D-COL/D-INF-3.
 
 ### 22.6 IDB write-backs (2026-07-16 session 8, saved)
 
