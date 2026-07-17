@@ -1,14 +1,19 @@
 # Rendering occlusion / blink-box visibility — reverse-engineering record
 
-Engine-research record (2026-07-16) for the blink-box-driven visibility system:
-the per-frame building section masks, the portal traversal, the occluder culling
-pass, the frame-level indoor gates, and the occlusion model data they all
-consume. Binary: retail **Jointops.exe** (IDB `Jointops.exe.kong.i64`,
-imagebase 0x400000). All addresses below are that binary's. **No reimpl exists
-yet** — every verdict is confirm-only; this record is the port specification
-for the occlusion slice, and the committed home for the `D-OCC-…` catalog. The
-*producer* side (blink volume queries, the indoors bit, per-entity blink hits)
-is §15 of [world-wac-ai-re.md](../world/world-wac-ai-re.md); this record is the
+Engine-research record (2026-07-16, port pass 2026-07-17) for the
+blink-box-driven visibility system: the per-frame building section masks, the
+portal traversal, the occluder culling pass, the frame-level indoor gates, and
+the occlusion model data they all consume. Binary: retail **Jointops.exe**
+(IDB `Jointops.exe.kong.i64`, imagebase 0x400000). All addresses below are
+that binary's. The consumer engine is **PORTED** (2026-07-17):
+`libs/world/occlusion.{h,cpp}` (`OcclusionWorld` + the render-float math),
+the `CollisionWorld` camera blink query, and the host wiring
+(`NovaSimulation::run_occlusion_frame`, `GameWorld._apply_occlusion_frame`,
+the placer de-batch + `NovaObjectModel.set_section_visibility_mask`); ctest
+`occlusion` + GUT `game_world_test` / `nova_object_model_section_mask_test`
+cover it. The *producer* side (blink volume queries, the indoors bit,
+per-entity blink hits) is §15 of
+[world-wac-ai-re.md](../world/world-wac-ai-re.md); this record is the
 *consumer* side that §15 deferred as "REN-scope follow-ups". Sound occlusion is
 witnessed here too (its port target is `godot/engine/world` audio; the catalog
 entry stays [lwf-dbf-sound-re.md](../audio/lwf-dbf-sound-re.md) D-SND-7).
@@ -17,15 +22,15 @@ entry stays [lwf-dbf-sound-re.md](../audio/lwf-dbf-sound-re.md) D-SND-7).
 
 | Component | Verdict | Evidence |
 | --- | --- | --- |
-| Occlusion model data (GPM `OVRT`/`OPLN`/`OFAC`/`OOBJ` chunks → 60 B runtime records) | confirm-only (unported) | `[orig: load_occlusion_model_data @ 0x5b4a00]`, caller `[orig: ThreediGp_LoadFromFile @ 0x5b5c37]`; tag immediates witnessed in disasm |
-| Mission-start portal init (register + weld + per-building flags) | confirm-only (unported) | `[orig: Terrain_InitBuildingPortals @ 0x5c7480 (tail @ 0x5c5860)]` from `[orig: Game_StartMission @ 0x525e11]` |
-| Camera blink query | confirm-only (§15 machinery, camera-side wrapper unported) | `[orig: Entity_QueryBlinkBoxesAtPoint @ 0x4af350]` |
-| Per-frame section-mask build | confirm-only (unported) | `[orig: build_sector_visibility_masks @ 0x5c8610]` |
-| Portal traversal (section expansion, window/viewthru wedges) | confirm-only (unported) | `[orig: render_visibility_portal_traversal @ 0x5c4ae0]` + the two seeders `@ 0x5c73d0 / @ 0x5c7330` |
-| Occluder culling (render_TOC) | confirm-only (unported) | `[orig: test_sector_entity_occlusion @ 0x5c4610]`, planes `[orig: Terrain_BuildPortalOccluderPlanes @ 0x5c44c0 → build_clip_planes_from_collision @ 0x5b34e0]` |
-| Entity-vs-terrain three-ray occlusion latch | confirm-only (unported) | `[orig: terrain_occlusion_check_three_rays @ 0x610ed0]` + the three collectors below |
-| Frame-level indoor gates (terrain/sky/water/foliage) | **PORTED** (2026-07-16, `GameWorld._apply_blink_frame_gates` + the indoor black clear; `g_BlinkWaterVisible`'s straddle/window-latch legs ride the section-mask slice) | gates at `@ 0x5c1353 / @ 0x5d0570 / @ 0x5ca84f / @ 0x5c93cb / @ 0x5c95bf / @ 0x5c9665 / @ 0x5ca1ab`; GUT `game_world_test.gd` blink-gate case |
-| Draw-side mask consumption (hidden-section mask, two-pass open buildings, per-light section masks) | confirm-only (unported) | `[orig: Terrain_RenderSectorModels @ 0x5c5d30]` |
+| Occlusion model data (`OVRT`/`OPLN`/`OFAC`/`OOBJ` chunks → 60 B runtime records) | **PORTED** (2026-07-17: the 3DI3-side promotion `ThreediIROcclusion` → `world::OcclusionModel`; the GPM-path runtime is deliberately unsupported — project decision, no GP runtime/ONED support) | `[orig: load_occlusion_model_data @ 0x5b4a00]`, caller `[orig: ThreediGp_LoadFromFile @ 0x5b5c37]`; tag immediates witnessed in disasm; copy loops re-derived from disasm (OVRT/OPLN identity, OFAC keeps disk field order, OOBJ 36→60 with sequential slice pointers) |
+| Mission-start portal init (register + weld + per-building flags) | **PORTED** (2026-07-17, `OcclusionWorld::init_mission` + `NovaSimulation::occlusion_init_mission`; the weld's type-5 rewrite mutates the SHARED per-graphic record array like retail's model cache) | `[orig: Terrain_InitBuildingPortals @ 0x5c7480 (tail @ 0x5c5860)]` from `[orig: Game_StartMission @ 0x525e11]`; thresholds 0.80000001f / −0.89999998f / 0.2 from decompile |
+| Camera blink query | **PORTED** (2026-07-17, `CollisionWorld::query_blink_boxes_at_point`) | `[orig: Entity_QueryBlinkBoxesAtPoint @ 0x4af350]` |
+| Per-frame section-mask build | **PORTED** (2026-07-17, `OcclusionWorld::build_section_masks`; masks keyed by pool-2 handle slot like `Pool_GetIndexFromPtr`) | `[orig: build_sector_visibility_masks @ 0x5c8610]` |
+| Portal traversal (section expansion, window/viewthru wedges) | **PORTED** (2026-07-17, `OcclusionWorld::traverse` + seeders, in the render float world — see §1a) | `[orig: render_visibility_portal_traversal @ 0x5c4ae0]` + the two seeders `@ 0x5c73d0 / @ 0x5c7330`; recursion args witnessed at `@ 0x5c5619/0x5c57fc` (backface-latch recursion re-uses the CALLER's planes with section 0) |
+| Occluder culling (render_TOC) | **PORTED** (2026-07-17, `OcclusionWorld::toc_occluded` + `build_occluder_planes`) | `[orig: test_sector_entity_occlusion @ 0x5c4610]`, planes `[orig: Terrain_BuildPortalOccluderPlanes @ 0x5c44c0 → build_clip_planes_from_collision @ 0x5b34e0]`; the 8-corner refinement's collision-AABB swizzle witnessed @ 0x5c4920 |
+| Entity-vs-terrain three-ray occlusion latch | **PORTED** (2026-07-17, `OcclusionWorld::three_rays_clear` + the `Entity.occlusion_latch` byte; own `PRNG_Next16_C`-form stream, D-OCC-15) | `[orig: terrain_occlusion_check_three_rays @ 0x610ed0]` + the three collectors below |
+| Frame-level indoor gates (terrain/sky/water/foliage) | **PORTED** (2026-07-16, `GameWorld._apply_blink_frame_gates` + the indoor black clear; 2026-07-17: the `g_BlinkWaterVisible` straddle/window-latch override + the `Bms_AttribFlags & 0x10` force-indoors landed in `_apply_occlusion_frame`) | gates at `@ 0x5c1353 / @ 0x5d0570 / @ 0x5ca84f / @ 0x5c93cb / @ 0x5c95bf / @ 0x5c9665 / @ 0x5ca1ab`; GUT `game_world_test.gd` blink-gate + occlusion-frame cases |
+| Draw-side mask consumption (hidden-section mask, two-pass open buildings, per-light section masks) | **PORTED** (2026-07-17, visibility data only: the union mask + forced def bits drive `NovaObjectModel.set_section_visibility_mask` per-part visibility on de-batched buildings; the two-pass draw order / per-light scoping / mirror clip are renderer-specific legs, D-OCC-13) | `[orig: Terrain_RenderSectorModels @ 0x5c5d30]` |
 | Sound occlusion (distance inflation + LOS legs) | **PORTED** (2026-07-16, closes D-SND-7; residue D-SND-9) | `[orig: Sound_ApplyOcclusionDistance @ 0x529970]` + callees; ported as `CollisionWorld::sound_occlusion_inflate` + `terrain_raycast_los_clear`; `collision` + `terrain_raycast` ctests; see [lwf-dbf-sound-re.md](../audio/lwf-dbf-sound-re.md) |
 | BMS `blink_parent`/`blink_group` (record bytes 84–87) | runtime-unconsumed (probable) | not read by `[orig: Entity_SpawnFromBMSRecord @ 0x40e9f0]`; no other consumer found; matches the net-RE parsed-but-unconsumed note |
 
@@ -47,7 +52,16 @@ The tags were pinned from the push immediates `@ 0x5b4a0c/0x5b4a27/0x5b4a46/0x5b
 auto-comment names (OVRP/ONRM/OCIT) are wrong. This is the same chunk family
 `libs/threedi`'s 3DI3 reader already parses as
 `occlusion_vertices/planes/faces/objects` — the 3DI3-side loader in Jointops
-was not located this session (open item D-OCC-7).
+was not located this session (open item D-OCC-7). Copy-loop details re-derived
+from the disasm (port pass): OVRT/OPLN copy verbatim; OFAC keeps the disk field
+order (`u8 v0,v1,v2, u8 planeIdx, u16 edge[3]`, bytes 10-11 uninitialized pad);
+OOBJ 36 B disk (`type/secA/secB/pad, pos f3 @+4, radius @+16, GLOW SCALE f32
+@+20, vert/plane/face counts @+24/+28/+32`) → the 60 B runtime shape below with
+per-object slice pointers advancing sequentially. The disk +20 float is the
+window-glow scale (runtime +0x2C) — `libs/threedi`'s former `unk1` field,
+renamed `glow_scale` (zero across the JO 3DI3 corpus). The loader stores
+count/array through a `this` alias 4 bytes below the model consumers read
+(loader writes +0xE0/+0xE4; every consumer reads model +0xDC/+0xE0).
 
 **The 60 B runtime record** (the "portal face"; runtime model `+0xDC` = count,
 `+0xE0` = array):
@@ -69,6 +83,31 @@ same bit indices in the render mask below. Ordinal 0 is the exterior: the
 type-8 ordinal counter in the blink query pre-increments, so a packed hit's
 low word is nonzero exactly when the section is a real interior; the mask
 builder decodes a zero low word as an empty slot `[orig: @ 0x5c8840-0x5c88bf]`.
+
+### 1a. The render float world (port-critical)
+
+Every occlusion float test runs in the engine's render float space:
+`(X, Y, Z) = (−mission_y, mission_z, mission_x) / 65536`
+`[orig: Math_FixedPointToFloat3_YNegated @ 0x611210]` — a det = −1 mapping of
+mission axes, so cross-product handedness differs from mission space; the
+authored OFAC winding bits and every wedge cross order are calibrated to it,
+and the port works natively in it (hosts convert at the boundary; Godot space
+is this space with X/Z swapped). The entity pose matrix
+`[orig: Math_BuildFixedPointToFloatMatrix4x4 @ 0x612200]` is row-vector
+convention (`p' = p·M`, translation in the last row), composed
+roll·pitch·yaw about the float Z/X/Y axes, each factor SKIPPED when its BAM
+is exactly 0, with per-axis quantized trig:
+`c = float(ftol(cos(θ)·2²²))/2²²`, `s = float(ftol(sin(θ)·−2²²))/2²²` — the
+sin sign is baked into the constant (`dbl_7C57B0 = −2²²`), and the angle
+scale `dbl_7C3608 = 0x3E19222D9890E4A8` is NOT exactly 2π/2³² (≈ 2.1 ppm
+above; the port carries the exact bits). The TOC corner refinement's
+collision-AABB swizzle (`X = −y, Y = z, Z = x` of the mission-axis bounds
+`[orig: @ 0x5c4920-0x5c49c1]`) and `Entity_ComputeBoundingSphere @ 0x5c69a0`
+(center = AABB midpoints, radius = min(√Σhalf², 0x7FFF0000f)) are consistent
+witnesses of the same frame. The fixed 3x4 transform family the collectors
+use (`Math_FixedPointTransformPoint22 @ 0x615810`) rotates >>22 with a
++0x200000 rounding bias AND translates (rows `[r r r t]`) — an earlier
+collision-record note calling it rotate-only was imprecise.
 
 ## 2. Mission-start portal init
 
@@ -103,14 +142,21 @@ order:
 
 1. **Building batch + portal slots** —
    `[orig: collect_visible_sector_userpoints @ 0x5c6b60]`: walks the static
-   building prefix; distance/def-flag/frustum culls; appends visible buildings
+   building prefix; distance/def-flag/frustum culls (and the §3.4 latch —
+   buildings run it too `@ 0x5c6cd9-0x5c6d0d`); appends visible buildings
    to `g_VisibleBuildingBatch @ 0x2985C90` (20 B stride: entity, depth,
-   screen x/y, depth2, `+16` flag = "has a type-1 record"); collects records
-   with type ∈ {0,1} within 250 u into the 128-cap slot arrays
+   screen x/y, depth2, `+16` flag = "has ANY record with type ≥ 1" — set for
+   window/portal/link records too, not only type 1; witnessed
+   `@ 0x5c6dcd-0x5c6de1`, correcting this record's earlier "has a type-1
+   record" reading — and only stamped within the 250 u slot range); collects
+   records with type ∈ {0,1} within 250 u into the 128-cap slot arrays
    `g_PortalSlots @ 0x2983E88` (5-dword stride: entity, record ptr, glow
    value, viewthru plane ref, viewthru count; count
    `g_PortalSlotCount @ 0x298056C`) — these double as the frame's occluders
-   and the window-glow sources.
+   and the window-glow sources. Slot eligibility per record: the viewport
+   sphere clip plus an angular-size gate `radius²/dist² > 0.01` (collect
+   within 10 radii); the banked glow = `ftol(ratio · glowScale · 2²⁴)`
+   `[orig: @ 0x5c6e48-0x5c6eb1]`.
 2. `[orig: Terrain_SortSectorCacheByDistance @ 0x5c4410]`.
 3. **Occluder planes** — `[orig: Terrain_BuildPortalOccluderPlanes @ 0x5c44c0]`
    per slot calls `[orig: build_clip_planes_from_collision @ 0x5b34e0]`
@@ -316,21 +362,33 @@ keeps the fields for .mis round-trip fidelity only.
 
 ## 8. Divergence / open-item catalog (D-OCC)
 
-No reimpl exists yet; entries opened by this research session are open
-witnesses, not port divergences. The port extends this catalog.
+D-OCC-1..8 opened as research-session witnesses; the 2026-07-17 port pass
+added the host-mapping divergences D-OCC-9..15.
 
 | ID | Status | Summary |
 |---|---|---|
 | D-OCC-1 | OPEN (witness detail) | Blink accum bit 0x4 gates the `sub_58AA80 @ 0x58aa80` float-1.0 device state (`sub_677700(0, 1, &1.0f)`), also skipped underwater — which D3D state that is (and its visual consequence) is unwitnessed. |
-| D-OCC-2 | OPEN (witness detail) | Per-building flag bytes `+0x2CC` (has type-1) and `+0x2CE` (has type-5) are stamped at mission start but no reader was found (single-register modrm scan only; SIB-form reads unscanned). `+0x2CD` (has windows) is the witnessed outdoor-mask input. |
-| D-OCC-3 | OPEN (witness detail) | Record type 0 vs 1 distinction beyond witnessed uses: both collect as occluder/glow slots; type 1 flags the building "open" (outside-in traversal + two-pass draw + occludes only when bit-31-marked, with viewthru exceptions); the authoring-side meaning (door vs window vs destroyed state, and what mutates the byte at runtime besides welding) is unwitnessed. |
-| D-OCC-4 | OPEN (witness detail) | `Terrain_InitBuildingPortals`'s register+weld half is gated on its arg; the sole call site pushes `ebp` (`Game_StartMission @ 0x525e11`) whose value was not traced — structurally assumed nonzero at mission start (the weld machinery is live in retail). |
+| D-OCC-2 | OPEN (witness detail) | Per-building flag bytes `+0x2CC` (has type-1) and `+0x2CE` (has type-5) are stamped at mission start but no reader was found (single-register modrm scan only; SIB-form reads unscanned). `+0x2CD` (has windows) is the witnessed outdoor-mask input. The port stamps all three (`OcclusionWorld::BuildingFlags`). |
+| D-OCC-3 | OPEN (witness detail) | Record type 0 vs 1 distinction beyond witnessed uses: both collect as occluder/glow slots; type 1 flags the building "open" (outside-in traversal + two-pass draw + occludes only when bit-31-marked, with viewthru exceptions); the authoring-side meaning (door vs window vs destroyed state, and what mutates the byte at runtime besides welding) is unwitnessed. The port's test fixtures use the derived side conventions (record normal points a→b; windows author A = interior, B = 0). |
+| D-OCC-4 | OPEN (witness detail) | `Terrain_InitBuildingPortals`'s register+weld half is gated on its arg; the sole call site pushes `ebp` (`Game_StartMission @ 0x525e11`) whose value was not traced — structurally assumed nonzero at mission start (the weld machinery is live in retail; the port defaults `do_register_weld = true`). |
 | D-OCC-5 | OPEN (witness detail) | `g_BuildingSectionVisMask` readers not decompiled: `terrain_render_sector_userpoints @ 0x5cd830` (window glows), `sub_5F6D10 @ 0x5f6d10`, and the `Terrain_RenderSectorEntities`/`BySide` interplay with the collect-time blink-hits gate. |
 | D-OCC-6 | OPEN (witness detail) | `Render_TerrainScene @ 0x610c80` receives the outdoors flag as arg 0; its consumption inside (frameless-callee arg pattern) is unwitnessed. |
-| D-OCC-7 | OPEN (witness detail) | Only the GPM-path occlusion loader is witnessed; the 3DI3-path loader in Jointops (the `OVRT`/`OPLN`/`OFAC`/`OOBJ` chunks exist in 3DI3 files and our parser reads them) was not located. The runtime record shape is assumed shared. |
+| D-OCC-7 | CLOSED-BY-DECISION (2026-07-17) | Only the GPM-path occlusion loader is witnessed; the 3DI3-path loader in Jointops was never located. The port promotes the 3DI3-parsed chunks (`ThreediIROcclusion`, identical disk family) into the witnessed 60 B runtime shape; the GPM/GP runtime path is deliberately unsupported (project decision: no `threedi_gp` runtime or ONED support). |
 | D-OCC-8 | OPEN (exporter inference, carried from §15) | The authored bvol FLAGS letters (V/S/W/L/O clearing bits of init 0x3E) → accum-bit mapping is exporter-side inference; witnessed consumption: bit 0x2 indoors, 0x4 the D-OCC-1 state, 0x8 water suppress, 0x10/0x20 no frame consumer. |
+| D-OCC-9 | PORT DIVERGENCE | The forced-visible def bytes (`itemDef+2193/+2194`, the destruction bone-map bases) are wired through `OcclusionWorld::EntityDefBits` but default 0 — the destruction system is unmodeled (D-COL-2), and their load-time source is unwitnessed. Identical behavior for buildings without destruction bones (retail skips zero bytes too). |
+| D-OCC-10 | PORT DIVERGENCE | `Terrain_SortSectorCacheByDistance @ 0x5c4410` is not ported: it orders retail draw calls/slot iteration only; the mask/TOC results are order-independent per candidate, and Godot owns draw order. |
+| D-OCC-11 | PORT DIVERGENCE (host safety) | Cap semantics: retail's wedge builder writes past 64 planes into adjacent stack after printing "too many planes" (and the viewthru bank writes unguarded, erroring only after 512/2048) — the port clamps the wedge at 64 and guards the viewthru bank like the window bank. Divergence only in the overflow regime where retail corrupts its own memory. Scratch caps (128 edge words / 64 polygon verts / 128 front-face planes) sized above any witnessed record. |
+| D-OCC-12 | PORT DIVERGENCE (host mapping) | View culling: the host builds 5 frustum planes (near + 4 sides, inward normals, render float space) from its camera and tests bound spheres against them + a Q22 forward-row depth cull vs the fog distance — standing in for `Viewport_TransformAndClipPoint @ 0x4115e0`'s project-and-clip (same culling intent; the retail projector's screen-space epsilon behavior is not replicated). The traversal consumes the same host planes where retail passes `g_CameraFrustumPlanes5`. |
+| D-OCC-13 | PORT DIVERGENCE (renderer-specific legs) | Not ported by design: the two-pass open-building draw ORDER (exterior then interiors — Godot's depth buffer replaces the ordering; the visibility UNION is applied), the per-light interior section scoping (`Lighting_SetInteriorLightGroup @ 0x5a90e0` — Godot's light model differs), the water-mirror clip matrix leg (`@ 0x5c5e75`), the reflection-pass collector variant (def-flag 0x2000000 — Godot water reflections), and the window-glow renderer (the slot glow value is computed and banked but unconsumed). |
+| D-OCC-14 | PORT DIVERGENCE (host coverage) | The entity render gates apply to registry-resolvable placed entities (bms_id ≠ 0); pooled MultiMesh statics keep the placer's documented always-drawn batching tradeoff (no per-instance visibility), and wire avatars ride their own present path ungated. Organics without collision instances use a position-centered 1 u bound-sphere stand-in for the graphic bounds `Entity_ComputeBoundingSphere` reads. |
+| D-OCC-15 | PORT DIVERGENCE (state residue) | The three-ray latch re-arm jitter uses its own `PRNG_Next16_C`-form stream seeded from the BSS-zero boot state; retail shares the stream with unrelated consumers, so per-frame re-arm values differ from any given retail run (distribution identical). The TOC candidate radius uses the D-COL-3 collision-AABB derivation for the def bound radius; static entities' `blink_hits` stamp once at placement (they don't move). |
 
 ## 9. IDB changes made during the session (2026-07-16, saved)
+
+Port-pass additions (2026-07-17, saved): corrected the batch `+16` flag
+comment on `collect_visible_sector_userpoints @ 0x5c6b60` (set for ANY record
+type ≥ 1, not only type 1 — witnessed `@ 0x5c6dcd-0x5c6de1`), and reimpl
+pointers on the ported function comments (`opennova: world/occlusion.cpp`).
 
 Renames (ex auto/kong-misnomer, all behavior-witnessed): functions
 `Terrain_InitBuildingPortals @ 0x5c7480` (ex sub_),
