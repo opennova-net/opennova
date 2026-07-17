@@ -495,11 +495,17 @@ runs opposite world y (samplers negate y internally).
   glare-occlusion path `nova_celestial.gd::_glare_ray_clear` stands in for
   (env #14; the stand-in adopts the B1 port).
 - **`Terrain_RaycastHeightmapHiRes @ 0x60c760`** — a SIBLING full
-  implementation with its own inline march (internals **not yet witnessed** —
-  follow-up). Callers: `Physics_RaycastTerrainAndSectors @ 0x539910`,
-  `Physics_CheckTerrainLineOfSight @ 0x53b080`, `HUD_RenderAllOverlays`,
-  `terrain_occlusion_check_three_rays @ 0x610ed0` (the D-RLIT 3-ray
-  sun-visibility source).
+  implementation, **witnessed 2026-07-16** (the occlusion slice) and ported as
+  `terrain_raycast_los_clear`: END-point bilinear precheck, a 2.0u
+  short-segment two-endpoint test, then a 4.0u-per-texel POINT-sample march
+  (0.5u-quantized cache byte, no bilinear confirm, no refine), the height-0
+  null-tile floor, budget CLEAR — the cheap LOS variant
+  ([render-occlusion-re.md](../render/render-occlusion-re.md)). Callers:
+  `Physics_RaycastTerrainAndSectors @ 0x539910` (`CollisionWorld::raycast_clear`,
+  now on this port), `Physics_CheckTerrainLineOfSight @ 0x53b080` (the sound
+  occlusion LOS), `HUD_RenderAllOverlays`, `terrain_occlusion_check_three_rays
+  @ 0x610ed0` (the D-RLIT 3-ray sun-visibility source and the entity
+  visibility latch).
 
 ### B1 port (landed 2026-07-07)
 
@@ -520,8 +526,10 @@ no-data NAN vs retail return-HIT, contiguous-atlas bilinear vs the seam
 flags) are **D-TERRAIN-4** (class C, PERMANENT candidate).
 
 Open follow-ups from this pass: the seam-flag WRITER (load-time adjacency
-derivation), `Terrain_RaycastHeightmapHiRes @ 0x60c760` internals, and the
-rationale (if any) behind HiRes_0's odd skip-refine guard.
+derivation) and the rationale (if any) behind HiRes_0's odd skip-refine guard.
+The `@ 0x60c760` internals follow-up closed 2026-07-16 — witnessed and ported
+as `terrain_raycast_los_clear` on the occlusion slice (the AI LOS
+`los_terrain_blocked` stand-in upgraded to it in the same change).
 
 ## D-TERRAIN divergence catalog
 

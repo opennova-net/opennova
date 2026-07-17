@@ -130,11 +130,12 @@ CollisionMatrix collision_matrix_from_heading(int32_t heading_bam, const int32_t
 
 // The terrain leg of the LOS segment query, TRUE = the segment hits terrain
 // (blocked). The ported heightmap raycast over the runtime height field; shared
-// by CollisionWorld::raycast_clear and the collision-less AiSystem fallback.
-// [orig: Terrain_RaycastHeightmapHiRes @ 0x60c760 called with a null out-hit from
-// Physics_RaycastTerrainAndSectors @ 0x539910 — boolean-equivalent to the ported
-// 0x60e710 sibling (terrain_raycast_refined); the sibling's internals delta is a
-// tracked terrain-re open item.]
+// by CollisionWorld::raycast_clear, the sound-occlusion LOS, and the
+// collision-less AiSystem fallback.
+// [orig: Terrain_RaycastHeightmapHiRes @ 0x60c760, faithfully ported as
+// terrain_raycast_los_clear (the occlusion slice closed the sibling-internals
+// open item): endpoint prechecks + the 4u-texel point-sample march + the
+// height-0 floor; nonzero = clear.]
 bool los_terrain_blocked(const terrain::TerrainHeightField &field, const int32_t a[3],
                          const int32_t b[3]);
 
