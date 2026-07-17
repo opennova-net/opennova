@@ -232,12 +232,12 @@ public:
 	float get_height_world_bilinear(const Vector3 &p_world_pos) const;
 	Color get_colormap_color_world(float world_x, float world_z) const;
 	Color get_modulated_colormap_color_world(float world_x, float world_z, const Color &light_color) const;
-	// Returns the foliagemap palette index at the given world position, or 0
-	// for "outside map / empty".
-	// Engine: jodemo.exe sub_5C65E0@0x5C65E0
-	// docs/engine_spec_foliage.md 4.4.4, docs/engine_spec_stampdown.md 4.5
-	// Shared by runtime NovaFoliageDispatcher wiring and editor paint previews
-	// so the world->sector->source mapping lives in exactly one place.
+	// Detail grass reads the flat, 1024-wrapped foliagemap. The fixed overload
+	// keeps runtime candidates on their original Q16 coordinates; the world
+	// overload is the public/GDScript seam.
+	int get_detail_foliage_index_fixed(int32_t world_x_fixed, int32_t world_z_fixed) const;
+	int get_detail_foliage_index_world(double world_x, double world_z) const;
+	// MODEL masks and gameplay queries use the sector-grid-routed foliagemap.
 	int get_foliage_index_world(float world_x, float world_z) const;
 	// Editor world->atlas coordinate transforms (libs/terrain_query/coords.h). The
 	// editor-mode guards (bounds-reject, sector-id clamp to [0,4], local clamp to

@@ -444,6 +444,8 @@ void NovaTerrainData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_colormap_color_world", "world_x", "world_z"), &NovaTerrainData::get_colormap_color_world);
 	ClassDB::bind_method(D_METHOD("get_modulated_colormap_color_world", "world_x", "world_z", "light_color"),
 	                     &NovaTerrainData::get_modulated_colormap_color_world);
+	ClassDB::bind_method(D_METHOD("get_detail_foliage_index_world", "world_x", "world_z"),
+	                     &NovaTerrainData::get_detail_foliage_index_world);
 	ClassDB::bind_method(D_METHOD("get_foliage_index_world", "world_x", "world_z"), &NovaTerrainData::get_foliage_index_world);
 	ClassDB::bind_method(D_METHOD("world_to_source_coords", "world_x", "world_z"), &NovaTerrainData::world_to_source_coords);
 	ClassDB::bind_method(D_METHOD("world_to_runtime_source_coords", "world_x", "world_z"),
@@ -1722,6 +1724,23 @@ Rect2i NovaTerrainData::get_cell_atlas_rect(int row, int col) const {
 
 int NovaTerrainData::get_tile_count() const {
 	return static_cast<int>(cpt.tiles.size());
+}
+
+int NovaTerrainData::get_detail_foliage_index_fixed(int32_t world_x_fixed,
+                                                    int32_t world_z_fixed) const {
+	// [orig: Terrain_GetSurfaceTypeAtFixedPoint @ 0x6066d0]
+	if (!loaded || foliage_map_resource.is_null()) {
+		return 0;
+	}
+	return static_cast<int>(foliage_map_resource->sample_detail_flat_wrap(
+			world_x_fixed, world_z_fixed));
+}
+
+int NovaTerrainData::get_detail_foliage_index_world(double world_x, double world_z) const {
+	if (!loaded || foliage_map_resource.is_null()) {
+		return 0;
+	}
+	return foliage_map_resource->sample_detail_index_world(world_x, world_z);
 }
 
 int NovaTerrainData::get_foliage_index_world(float world_x, float world_z) const {

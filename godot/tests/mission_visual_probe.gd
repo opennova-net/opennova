@@ -19,7 +19,6 @@ const SETTLE_FRAMES := 90
 const CAPTURE_WAIT_FRAMES := 4
 # Mission loads are seconds-long; a fixed generous wait is fine for a probe.
 const MISSION_LOAD_WAIT_FRAMES := 180
-const INVALID_CELL := Vector2i(-9999, -9999)
 
 
 func _initialize() -> void:
@@ -213,51 +212,66 @@ func _find_terrain_data() -> NovaTerrainData:
 
 
 func _find_painted_world_point(data: NovaTerrainData) -> Dictionary:
-	var foliage_map: NovaTerrainFoliageMap = data.get_foliage_map()
-	if foliage_map == null:
-		return {}
-
 	var defs: Array = data.get_foliage_defs()
 	var grid := data.get_sector_grid()
 	var origin_x := data.get_origin_x()
 	var origin_y := data.get_origin_y()
-	var width := foliage_map.get_width()
-	var height := foliage_map.get_height()
+	var best := {}
+	var best_score := 0
+	var best_gradient := -1.0
 
-	for map_y in range(height):
-		for map_x in range(width):
-			var painted := int(foliage_map.get_index(map_x, map_y))
-			if painted <= 0 or not _has_matching_foliage_def(defs, painted):
+	# DETAIL samples a flat 1024-unit-wrapped map, so search valid terrain
+	# world cells with that oracle instead of reverse-routing map pixels through
+	# the MODEL sector grid. Prefer dense, varied-height cells for a useful shot.
+	for grid_y in range(16):
+		for grid_x in range(16):
+			var grid_index := grid_y * 16 + grid_x
+			var sector_id := int(grid[grid_index]) if grid_index < grid.size() else 0
+			if sector_id <= 0:
 				continue
-
-			var sector_id := int(foliage_map.get_sector_id_at(map_x, map_y))
-			var grid_cell := _find_sector_grid_cell(grid, sector_id)
-			if grid_cell == INVALID_CELL:
-				continue
-
-			var hm_pos := foliage_map.get_heightmap_position(map_x, map_y)
-			var quadrant_x := 512.0 if (sector_id == 3 or sector_id == 4) else 0.0
-			var quadrant_z := 512.0 if (sector_id == 2 or sector_id == 4) else 0.0
-			var local_x := hm_pos.x - quadrant_x
-			var local_z := hm_pos.y - quadrant_z
-			if local_x < 0.0 or local_x >= 512.0 or local_z < 0.0 or local_z >= 512.0:
-				continue
-
-			var world_x := float((origin_x + grid_cell.x) * 512) + local_x
-			var world_z := float((origin_y + grid_cell.y) * 512) + local_z
-			if int(data.get_foliage_index_world(world_x, world_z)) <= 0:
-				continue
-
-			var world_y := data.get_height_world_bilinear(Vector3(world_x, 0.0, world_z))
-			return {
-				"position": Vector3(world_x, world_y, world_z),
-				"painted": painted,
-				"map": Vector2i(map_x, map_y),
-				"sector_id": sector_id,
-				"grid_cell": grid_cell,
-			}
-
-	return {}
+			var sector_x := float((origin_x + grid_x) * 512)
+			var sector_z := float((origin_y + grid_y) * 512)
+			for local_z in range(0, 512, 16):
+				for local_x in range(0, 512, 16):
+					var score := 0
+					var painted := 0
+					for offset_z in [2.0, 8.0, 14.0]:
+						for offset_x in [2.0, 8.0, 14.0]:
+							var sampled := int(data.get_detail_foliage_index_world(
+								sector_x + float(local_x) + offset_x,
+								sector_z + float(local_z) + offset_z
+							))
+							if _has_matching_foliage_def(defs, sampled):
+								score += 1
+								painted = sampled
+					if score <= 0 or score < best_score:
+						continue
+					var world_x := sector_x + float(local_x) + 8.0
+					var world_z := sector_z + float(local_z) + 8.0
+					var center := Vector3(world_x, 0.0, world_z)
+					var world_y: float = data.get_height_world_bilinear(center)
+					var hx: float = data.get_height_world_bilinear(
+						center + Vector3(8.0, 0.0, 0.0))
+					var hz: float = data.get_height_world_bilinear(
+						center + Vector3(0.0, 0.0, 8.0))
+					var gradient: float = abs(hx - world_y) + abs(hz - world_y)
+					if score == best_score and gradient <= best_gradient:
+						continue
+					best_score = score
+					best_gradient = gradient
+					best = {
+						"position": Vector3(world_x, world_y, world_z),
+						"painted": painted,
+						"painted_samples": score,
+						"gradient": gradient,
+						"cell": Vector2i(
+							int(sector_x) + local_x,
+							int(sector_z) + local_z
+						),
+						"sector_id": sector_id,
+						"grid_cell": Vector2i(grid_x, grid_y),
+					}
+	return best
 
 
 func _has_matching_foliage_def(defs: Array, painted: int) -> bool:
@@ -268,14 +282,3 @@ func _has_matching_foliage_def(defs: Array, painted: int) -> bool:
 		if int(def.match) == painted:
 			return true
 	return false
-
-
-func _find_sector_grid_cell(grid: PackedInt32Array, sector_id: int) -> Vector2i:
-	if sector_id <= 0:
-		return INVALID_CELL
-	for gy in range(16):
-		for gx in range(16):
-			var index := gy * 16 + gx
-			if index < grid.size() and int(grid[index]) == sector_id:
-				return Vector2i(gx, gy)
-	return INVALID_CELL

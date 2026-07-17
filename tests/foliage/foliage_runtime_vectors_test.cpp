@@ -30,7 +30,12 @@ float witness_height(float x, float z) {
 
 WorldSamplers world_with_foliage_mask(uint32_t foliage_mask) {
 	WorldSamplers world;
-	world.foliage_mask_at = [foliage_mask](float, float) { return foliage_mask; };
+	world.detail_foliage_mask_at = [foliage_mask](int32_t, int32_t) {
+		return foliage_mask;
+	};
+	world.model_foliage_mask_at = [foliage_mask](int32_t, int32_t) {
+		return foliage_mask;
+	};
 	world.height_at = [](float x, float z) { return witness_height(x, z); };
 	world.path_blocked = [](float, float, float) { return false; };
 	return world;
@@ -129,7 +134,7 @@ bool detail_vectors_and_gates() {
 		            "detail near range uses the high alpha-test pass")) return false;
 	}
 
-	world.foliage_mask_at = [](float, float) { return 0u; };
+	world.detail_foliage_mask_at = [](int32_t, int32_t) { return 0u; };
 	runtime.reset();
 	runtime.render_frame(one_detail(10.0f), world);
 	if (!expect(runtime.render_frame(one_detail(10.0f), world).detail.empty(),
@@ -241,7 +246,7 @@ bool silhouette_vectors_and_tier_role() {
 	if (!expect(near(first.center_height, 92.09294128f, 2.0e-4f),
 	            "silhouette center height uses the eight-sample fit")) return false;
 
-	world.foliage_mask_at = [](float, float) { return 0u; };
+	world.model_foliage_mask_at = [](int32_t, int32_t) { return 0u; };
 	runtime.reset();
 	if (!expect(runtime.render_frame(one_silhouette(38.0f, 63.0f), world)
 	                .silhouettes.empty(),
@@ -249,11 +254,77 @@ bool silhouette_vectors_and_tier_role() {
 	return true;
 }
 
+bool tier_specific_foliage_sampler_routing() {
+	int detail_calls = 0;
+	int model_calls = 0;
+	int32_t sampled_detail_x = 0;
+	int32_t sampled_detail_z = 0;
+	auto world = world_with_foliage_mask(0u);
+	world.detail_foliage_mask_at =
+	    [&](int32_t world_x_fixed, int32_t world_z_fixed) {
+		if (detail_calls == 0) {
+			sampled_detail_x = world_x_fixed;
+			sampled_detail_z = world_z_fixed;
+		}
+		++detail_calls;
+		return 0x1u;
+	};
+	world.model_foliage_mask_at = [&model_calls](int32_t, int32_t) {
+		++model_calls;
+		return 0u;
+	};
+	Runtime detail_runtime;
+	detail_runtime.render_frame(one_detail(10.0f), world);
+	const auto detail_output =
+	    detail_runtime.render_frame(one_detail(10.0f), world);
+	if (!expect(detail_calls > 0 && model_calls == 0 &&
+	                detail_output.detail.size() == 72 &&
+	                sampled_detail_x ==
+	                    static_cast<int32_t>(
+	                        detail_output.detail[0].center.x * 65536.0f) &&
+	                sampled_detail_z ==
+	                    static_cast<int32_t>(
+	                        detail_output.detail[0].center.z * 65536.0f),
+	            "detail generation uses only the flat-map sampler")) {
+		return false;
+	}
+
+	detail_calls = 0;
+	model_calls = 0;
+	int32_t sampled_model_x = 0;
+	int32_t sampled_model_z = 0;
+	world.detail_foliage_mask_at = [&detail_calls](int32_t, int32_t) {
+		++detail_calls;
+		return 0u;
+	};
+	world.model_foliage_mask_at =
+	    [&](int32_t world_x_fixed, int32_t world_z_fixed) {
+		if (model_calls == 0) {
+			sampled_model_x = world_x_fixed;
+			sampled_model_z = world_z_fixed;
+		}
+		++model_calls;
+		return 0x1u;
+	};
+	Runtime model_runtime;
+	const auto model_output =
+	    model_runtime.render_frame(one_silhouette(38.0f, 63.0f), world);
+	return expect(detail_calls == 0 && model_calls > 0 &&
+	                  model_output.silhouettes.size() == 9 &&
+	                  sampled_model_x ==
+	                      static_cast<int32_t>(
+	                          model_output.silhouettes[0].center.x * 65536.0f) &&
+	                  sampled_model_z ==
+	                      static_cast<int32_t>(
+	                          model_output.silhouettes[0].center.z * 65536.0f),
+	              "MODEL generation uses only the sector-routed sampler");
+}
+
 bool detail_cache_temporal_semantics() {
 	Runtime runtime;
 	uint32_t foliage_mask = 0x1u;
 	auto world = world_with_foliage_mask(0x1u);
-	world.foliage_mask_at = [&foliage_mask](float, float) {
+	world.detail_foliage_mask_at = [&foliage_mask](int32_t, int32_t) {
 		return foliage_mask;
 	};
 	auto request = one_detail(10.0f);
@@ -349,7 +420,7 @@ bool model_cache_phase_negative_and_identity() {
 	Runtime runtime;
 	uint32_t foliage_mask = 0x1u;
 	auto world = world_with_foliage_mask(0x1u);
-	world.foliage_mask_at = [&foliage_mask](float, float) {
+	world.model_foliage_mask_at = [&foliage_mask](int32_t, int32_t) {
 		return foliage_mask;
 	};
 	auto request = one_silhouette(38.0f, 63.0f);
@@ -475,7 +546,7 @@ bool model_definition_stagger() {
 	Runtime runtime;
 	uint32_t foliage_mask = 0xFu;
 	auto world = world_with_foliage_mask(foliage_mask);
-	world.foliage_mask_at = [&foliage_mask](float, float) {
+	world.model_foliage_mask_at = [&foliage_mask](int32_t, int32_t) {
 		return foliage_mask;
 	};
 	auto request = one_silhouette(38.0f, 63.0f);
@@ -986,6 +1057,7 @@ bool fd_bake_vector() {
 int main() {
 	if (!detail_vectors_and_gates()) return 1;
 	if (!silhouette_vectors_and_tier_role()) return 1;
+	if (!tier_specific_foliage_sampler_routing()) return 1;
 	if (!detail_cache_temporal_semantics()) return 1;
 	if (!detail_capacity_and_eviction()) return 1;
 	if (!model_cache_phase_negative_and_identity()) return 1;
