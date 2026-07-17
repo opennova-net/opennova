@@ -30,6 +30,7 @@ target_include_directories(opennova_world
 target_link_libraries(opennova_world
     PUBLIC
         opennova_terrain_query
+        opennova_audio
         opennova_io
 )
 

@@ -13,6 +13,8 @@
 #include <string>
 #include <vector>
 
+#include "audio/sound_profile.h"
+#include "terrain/surface_type_map.h"
 #include "world/entity.h"
 #include "world/entity_registry.h"
 #include "world/trigger_relations.h"
@@ -30,6 +32,18 @@ struct TerrainHeightField;
 
 namespace opennova::world {
 
+// One sound-profile slot fire (footstep, foley, landing, death scream),
+// already resolved to the profile's authored sound-set name. The host present
+// layer drains these into full-volume positional one-shots
+// [orig: Entity_PlaySound3D_FullVolume @ 0x528e20 -> Sound_Play3DPositional].
+// An empty-name slot is never emitted (the resolved-id-0 no-op).
+struct SoundSlotEvent {
+    uint16_t source_handle = 0xFFFF; // packed EntityHandle of the body
+    int32_t pos[3] = {0, 0, 0};      // mission-frame 16.16 (feet-level for footsteps)
+    uint8_t slot = 0;                // audio::SoundProfileSlot, for tests/observability
+    char set_name[24] = {};
+};
+
 // ----------------------------------------------------------------------------
 // Environment / weather state (targets of the WAC env commands: fog/sky/rain/
 // tod/sun/...). A clean observable model; the renderer consumes it later.
@@ -37,6 +51,10 @@ namespace opennova::world {
 struct EnvState {
     int32_t time_of_day = 0;   // 16.16 hours
     int32_t fog_type = 0;
+    // Mission water plane, 16.16 (0 = no water). Host-fed from the .env at
+    // load; the infantry footstep water pick and the landing legs read it
+    // sim-side. [orig: Env_WaterHeightFixed @ 0x26C6454]
+    int32_t water_z = 0;
     int32_t fog_dist = 0;      // 16.16 meters
     int32_t sky_speed = 0;
     int32_t rain = 0;
@@ -389,7 +407,9 @@ public:
 
     // The mission header's attribute flags, stamped by the host at mission load
     // (bms::AttribFlags as a raw dword; 0x40 = SinglePlayerRespawn). Read by the
-    // SP auto-lose win-condition leg. [orig: Bms_AttribFlags @0xa76258]
+    // SP auto-lose win-condition leg and by the infantry death scream's night
+    // gate (0x100000 EnableNVG -> slot 8 SSNightDead @ 0x4b9ca3).
+    // [orig: Bms_AttribFlags @0xa76258]
     uint32_t mission_attrib_flags = 0;
 
     // The Advance & Secure zone-slot chain (empty until the host builds it after the
@@ -409,6 +429,20 @@ public:
     // Host-wired terrain sampler for the round sim's ground stop (the AI grounding
     // shares the same field through AiSystem). Null = no terrain impacts.
     const terrain::TerrainHeightField *terrain = nullptr;
+
+    // Host-wired charmap (surface-type) sampler data for the infantry footstep
+    // surface pick (surface 3 = the snow slots) and, later, the ammo impact
+    // table. Null = surface 1 everywhere, the sampler's no-charmap default.
+    // [orig: Terrain_GetSurfaceTypeAtPosition @ 0x606510]
+    terrain::SurfaceTypeMap surface_map;
+
+    // The mission's SndProf.def profile table (parsed once at load; empty on a
+    // headless test world unless a test seeds it) and the per-tick slot-sound
+    // emissions the host present layer drains into positional one-shots.
+    // [orig: SoundProfile_LoadAll @ 0x527490; the infantry consumers
+    // @ 0x4bf15c-0x4bf2b0 (org1) / @ 0x4b76e0-0x4b78a8 (org2)]
+    audio::SoundProfileTable sound_profiles;
+    std::vector<SoundSlotEvent> slot_sounds;
 
     // The engine tick counter: one logic tick per host frame at 62 Hz.
     // [orig: current_tick @0x24c1968, ++ once per Game_ProcessMainFrame @0x5263f0.

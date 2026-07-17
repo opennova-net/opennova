@@ -129,6 +129,7 @@ class DefItemDef(ctypes.Structure):
         ("husk", ctypes.c_char * 128),
         ("hp", ctypes.c_int),
         ("sound_profile", ctypes.c_char * 128),
+        ("sound_profile_female", ctypes.c_char * 128),
         ("soundloops", (ctypes.c_char * 128) * 7),
         ("nightshot", ctypes.c_char * 128),
         ("dawnshot", ctypes.c_char * 128),

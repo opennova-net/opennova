@@ -318,6 +318,37 @@ int main(void) {
         return 1;
     }
 
+    /* The female variant lands in its own slot [orig: "sound_profileFemale"
+       @ 0x49fb76 -> def+0x26C]. */
+    if (strcmp(player1->sound_profile_female, "SP_JO_SP_PlayerF1") != 0) {
+        fprintf(stderr,
+                "FAIL: player1 sound_profile_female mismatch: expected 'SP_JO_SP_PlayerF1', got '%s'\n",
+                player1->sound_profile_female);
+        def_free_items(&items);
+        return 1;
+    }
+
+    /* A def authoring only sound_profile mirrors it into the female slot (both
+       seed to "default" and track the primary until female is authored
+       [orig: the +0x26C == +0x268 rewrite gate @ 0x49fb0f-0x49fb64]). */
+    {
+        const DefItemDef *soldier = NULL;
+        for (size_t i = 0; i < items.count; ++i) {
+            if (strcmp(items.entries[i].sound_profile, "SP_JO_SP_SoldierM1") == 0) {
+                soldier = &items.entries[i];
+                break;
+            }
+        }
+        if (soldier == NULL ||
+            strcmp(soldier->sound_profile_female, "SP_JO_SP_SoldierM1") != 0) {
+            fprintf(stderr,
+                    "FAIL: soldier sound_profile_female should mirror the primary, got '%s'\n",
+                    soldier == NULL ? "(no soldier item)" : soldier->sound_profile_female);
+            def_free_items(&items);
+            return 1;
+        }
+    }
+
     if (player1->hp != 150) {
         fprintf(stderr, "FAIL: player1 hp mismatch: expected 150, got %d\n", player1->hp);
         def_free_items(&items);

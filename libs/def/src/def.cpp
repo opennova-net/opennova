@@ -1297,7 +1297,24 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 3, &vl);
             current.hp = parse_int_n(v, vl);
             parsed = 1;
+        } else if (lower_match_key(lower, ll, "sound_profilefemale", 19)) {
+            /* The female-variant profile [orig: ItemDef_ParseProperty
+               "sound_profileFemale" @ 0x49fb76 -> def+0x26C]. */
+            consume_value_str(trimmed, tlen, 19, current.sound_profile_female,
+                              sizeof(current.sound_profile_female));
+            parsed = 1;
         } else if (lower_match_key(lower, ll, "sound_profile", 13)) {
+            /* "sound_profile" retargets the female slot too while it still
+               tracks the primary (both seed to the "default" profile at alloc;
+               an explicit sound_profileFemale detaches it). The original
+               compares the two resolved profile POINTERS and rewrites +0x26C
+               only when equal [orig: @ 0x49fb0f-0x49fb64 (the +0x26C==+0x268
+               gate); alloc seed @ 0x49e3f5-0x49e408]; the name compare is the
+               same rule over our unresolved names. */
+            if (strcmp(current.sound_profile_female, current.sound_profile) == 0) {
+                consume_value_str(trimmed, tlen, 13, current.sound_profile_female,
+                                  sizeof(current.sound_profile_female));
+            }
             consume_value_str(trimmed, tlen, 13, current.sound_profile, sizeof(current.sound_profile));
             parsed = 1;
         /* [orig: ItemDef_ParseProperty @ 0x49eb00 -- "soundloop_" prefix @ 0x49fec4,
