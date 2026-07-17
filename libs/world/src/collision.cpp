@@ -99,6 +99,27 @@ void CollisionModel::finalize_sections() {
         s.center[2] = s.min_z + hz;
         s.radius = vec_len_ftol(hx, hy, hz);
     }
+    // Model-level bounds = union of the section AABBs — the runtime collision
+    // header min/max the render occlusion consumes (+24..+44).
+    min[0] = min[1] = min[2] = 0;
+    max[0] = max[1] = max[2] = 0;
+    bool first = true;
+    for (const CollisionSection &s : sections) {
+        if (s.volume_count <= 0) continue;
+        if (first) {
+            min[0] = s.min_x; max[0] = s.max_x;
+            min[1] = s.min_y; max[1] = s.max_y;
+            min[2] = s.min_z; max[2] = s.max_z;
+            first = false;
+            continue;
+        }
+        if (s.min_x < min[0]) min[0] = s.min_x;
+        if (s.max_x > max[0]) max[0] = s.max_x;
+        if (s.min_y < min[1]) min[1] = s.min_y;
+        if (s.max_y > max[1]) max[1] = s.max_y;
+        if (s.min_z < min[2]) min[2] = s.min_z;
+        if (s.max_z > max[2]) max[2] = s.max_z;
+    }
 }
 
 // ----------------------------------------------------------------------------
@@ -703,6 +724,24 @@ int32_t CollisionWorld::candidate_count(EntityHandle h) const {
     return it == candidates_.end() ? 0 : it->second.count;
 }
 
+CollisionWorld::StaticSlotView CollisionWorld::static_slot(int32_t i) const {
+    StaticSlotView v;
+    if (i < 0 || i >= static_count_) return v;
+    const StaticSlot &s = statics_[i];
+    v.x = s.x;
+    v.y = s.y;
+    v.z = s.z;
+    v.radius = s.radius;
+    v.h = s.h;
+    return v;
+}
+
+const CollisionModel *CollisionWorld::model_for(EntityHandle h) const {
+    auto it = instances_.find(h.packed);
+    if (it == instances_.end()) return nullptr;
+    return model(it->second.model_id);
+}
+
 namespace {
 
 // Entity position in 16.16 engine units (registry entities store float mission units).
@@ -939,6 +978,34 @@ void CollisionWorld::refresh_blink(World &world, Entity &ent) {
     ent.blink_hits[3] = accum.hits[3];
     if ((accum.flags & kBlinkIndoorsBit) != 0) ent.flags |= kEntityFlagIndoors;
     if (is_local) local_player_blink_flags |= accum.flags;
+}
+
+void CollisionWorld::query_blink_boxes_at_point(World &world, const int32_t pos[3],
+                                                BlinkAccum &accum) {
+    // [orig: Entity_QueryBlinkBoxesAtPoint @ 0x4af350 — clears the blink globals,
+    // walks the building prefix (per-axis then euclid broad phase at
+    // buildingRadius + 0x8000), runs the point query with one point of radius
+    // 0x8000. No self-exclusion: the query point is not an entity.]
+    accum.reset();
+    CollisionPoint pt;
+    pt.x = pos[0];
+    pt.y = pos[1];
+    pt.z = pos[2];
+    const int32_t radius = 0x8000; // [orig: searchRadius = 0x8000 @ 0x4af376]
+    for (int32_t i = 0; i < static_building_count_; ++i) {
+        const StaticSlot &s = statics_[i];
+        const int32_t sx = static_cast<int32_t>(s.x) << 16;
+        const int32_t sy = static_cast<int32_t>(s.y) << 16;
+        const int32_t sz = static_cast<int32_t>(s.z) << 16;
+        const int32_t range = (static_cast<int32_t>(s.radius) << 16) + 0x8000;
+        if (abs32(sx - pt.x) > range || abs32(sy - pt.y) > range || abs32(sz - pt.z) > range)
+            continue;
+        if (vec_len_ftol(sx - pt.x, sy - pt.y, sz - pt.z) > range) continue;
+        CollisionTargetView view;
+        std::vector<CollisionMatrix> mats;
+        if (const CollisionTargetView *tv = target_view(world, s.h, view, mats))
+            collision_test_blink(*tv, &pt, &radius, 1, accum);
+    }
 }
 
 int32_t CollisionWorld::raycast_ground(World &world, EntityHandle source, const int32_t pos[3],

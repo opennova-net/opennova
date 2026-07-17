@@ -92,6 +92,12 @@ struct CollisionModel {
     std::vector<CollisionSection> sections;
     std::vector<CollisionVolume> volumes;
     std::vector<CollisionPlane> planes;
+    // Model-level AABB (union of the section AABBs, mission axes 16.16) — the
+    // runtime collision-header bounds the render occlusion reads. [orig: the
+    // collision block +24..+44 min/max fields, consumed by render_TOC's corner
+    // refinement @ 0x5c4920, the water-straddle checks @ 0x5c8922, and
+    // Entity_ComputeBoundingSphere @ 0x5c69a0]
+    int32_t min[3] = {}, max[3] = {};
     bool valid() const { return !sections.empty(); }
 
     // Derive section AABB/bound-sphere from its volumes (the loader precomputes
@@ -291,6 +297,13 @@ public:
     // [orig: Entity_BuildProximityList @ 0x4b3dc0]
     void refresh_blink(World &world, Entity &ent);
 
+    // Point blink query at an arbitrary position (the camera-side analog of
+    // refresh_blink): walk the building prefix with per-axis + euclid broad
+    // phase at radius + 0x8000, run the point query (one point, radius 0x8000),
+    // return the packed hit set in `accum`. Clears `accum` first.
+    // [orig: Entity_QueryBlinkBoxesAtPoint @ 0x4af350]
+    void query_blink_boxes_at_point(World &world, const int32_t pos[3], BlinkAccum &accum);
+
     // Ground-column probe through terrain + the entity's candidate models.
     // Builds the ray {x+dx, y+dy, z+z_up} down z_drop, clamps to the terrain
     // column, clips against candidate solids; returns the resolved ground Z and
@@ -389,6 +402,18 @@ public:
     int32_t static_count() const { return static_count_; }
     int32_t static_building_count() const { return static_building_count_; }
     int32_t candidate_count(EntityHandle h) const;
+
+    // Static prox-table slot view (quantized u16 coords/radius like the retail
+    // tables) — the render-occlusion engine walks the building prefix through
+    // this. [orig: g_StaticProx{X,Y,Z,Radius,Entity} @ 0xB55558/0xB54BF8/
+    // 0xB54298/0xB55EB8/0xB52FD8]
+    struct StaticSlotView {
+        uint16_t x = 0, y = 0, z = 0, radius = 0;
+        EntityHandle h;
+    };
+    StaticSlotView static_slot(int32_t i) const;
+    // The collision model attached to a live entity (nullptr when none).
+    const CollisionModel *model_for(EntityHandle h) const;
 
     // Read-only world-space geometry snapshot for a host collision debug view.
     // Each instance's volumes are transformed through the SAME target_view /

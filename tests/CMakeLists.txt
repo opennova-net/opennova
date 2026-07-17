@@ -943,6 +943,19 @@ target_include_directories(collision_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(collision_test PRIVATE cxx_std_17)
 add_test(NAME collision COMMAND collision_test)
 
+# Rendering occlusion (Terrain_InitBuildingPortals @0x5c7480 register/weld/flags,
+# build_sector_visibility_masks @0x5c8610 + render_visibility_portal_traversal
+# @0x5c4ae0, test_sector_entity_occlusion @0x5c4610, the entity-collector gates +
+# terrain_occlusion_check_three_rays @0x610ed0, Entity_QueryBlinkBoxesAtPoint
+# @0x4af350): render-float math, the weld pass, outdoor/indoor mask rules,
+# outside-in viewthru banking, TOC shadow-wedge culling, the blink-hits render
+# gate + three-ray latch — over hand-built portal/collision models.
+add_executable(occlusion_test world/occlusion_test.cpp)
+target_link_libraries(occlusion_test PRIVATE opennova_world)
+target_include_directories(occlusion_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(occlusion_test PRIVATE cxx_std_17)
+add_test(NAME occlusion COMMAND occlusion_test)
+
 # The FP weapon action FSM (WeaponAction_ProcessFrame @0x540e60 + Anim_InitActions
 # @0x541fa0, net-re §5.62): the ACTION-row bake (auto delays from clip ticks), the
 # pump phase protocol, and the witnessed handler decisions — the fire->recoil chain,
