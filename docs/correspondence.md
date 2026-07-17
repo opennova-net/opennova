@@ -738,6 +738,13 @@ Death presentation (engine-research 2026-07-16 session 5; world-wac-ai-re §19; 
 | `Server_SendWeaponSlotListToPlayer` | `0x502550` | bogus `__stdcall(WndProc)` proto → cdecl `int(void*)` (plain `retn` proof) | disasm; §5.42 / D-NET-110 | confirm-only |
 | `Server_UpdateCaptureZoneEntities` | `0x519690` | bogus `__stdcall(display)` proto → cdecl `void(void)` (plain `retn` proof) | disasm; §5.42 / D-NET-110 | confirm-only |
 | `Server_CheckWinConditions` | `0x51ad40` | per-gametype win eval → `Server_ProcessRoundEnd`; sig `(int,int*)`→`void(void)` (Tick phantom-arg source) | decompile; §5.42 / D-NET-110 | confirm-only |
+| `Server_ProcessRoundEnd` | `0x5164f0` | `World::process_round_end` (libs/world) — guard/latch/winner + the SP tail as the `round_end` effect; wire legs stubbed | full decompile; world-wac-ai-re §20.2 / D-AI-10 | MATCHING (SP core; MP legs stubbed) |
+| `WacAction_Win` / `WacAction_Lose` | `0x4ed4a0` / `0x4ed3f0` | `libs/wac vm.cpp` win/lose dispatch (banner trio effect + `process_round_end`) | full decompile; world-wac-ai-re §20.1; `wac_behavior` ctest + 04TR probe | MATCHING |
+| `Score_TallyKillByLocalPlayer` / `Score_TallyKillByOthers` | `0x4fd160` / `0x4fd300` | `route_round_deaths` kill tallies -> `MissionKillStats` (counts only) | full decompile; world-wac-ai-re §20.4 / D-AI-10; `npruntime_round_end` ctest | MATCHING (counts; points/difficulty unmodeled) |
+| `WacScript_ResolveParameter` (named-value leg) | `0x4f2940` | `libs/wac` Builtin ids 8-13 + compiler `builtin_id` | decompile; world-wac-ai-re §20.3 | MATCHING (read-only; lvalue writes open) |
+| `EventTrigger_ResolveZoneTriggerRefs` / `EventTrigger_ResolveZoneActionRefs` | `0x453000` / `0x453100` | `BmsEventSystem::resolve_zone_refs` (id->index + neuter) | full decompile; bms-event-runtime-re §7.3; `event_runtime_bms` ctest | MATCHING (action box-inline noted) |
+| `Cinematic_EpilogUpdate` + `epilog_cinematic_state_machine_update` | `0x577950` / `0x576240` | `mission_end_screen.gd` + `main_game.gd` end flow (shell stand-in) | full decompile; world-wac-ai-re §20.6 / D-AI-10 | stand-in (no flyaway/.cne) |
+| `NapiNPClientMsg_0x01D` + `EndRoundScoreboard_SerializeHeader` | `0x430840` / `0x505280` | net track (payload shape documented) | disasm+decompile; world-wac-ai-re §20.5 | documented, unported |
 | `Server_HandleEntitySync` (was `server_handle_entity_sync`) | `0x510990` | net msg handler (table `@0x82b5d8`); sig `()`→`(int ctx,u8*,int)` | decompile; §5.42 / D-NET-110 | confirm-only |
 | `Server_ValidatePlayerJoinRequest` | `0x512100` | join gate (version/ban/expansion/squad/PCID/banned-name/jointicket); names `g_expansion_checksum`/`g_banned_*`/`g_squad_*` | decompile; §5.42 | confirm-only |
 

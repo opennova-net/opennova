@@ -298,6 +298,16 @@ and the vehicle rows 21/23) — ported 2026-07-16.
 
 ## 5. Per-system equivalence verdict (2026-06-10, infantry port complete)
 
+- **Round-outcome loop** (§20, 2026-07-16 session 6: `Server_ProcessRoundEnd @ 0x5164f0`
+  → `World::process_round_end`; WAC win/lose + the named-value builtins; the BMS win
+  actions; the SP auto-lose; the kill tallies; the SP end presentation): **MATCHING at
+  the SP core** with the D-AI-10 stand-ins (counts-only tallies, shell end screens, MP
+  legs stubbed). Evidence: `wac_behavior` (outcome builtins + the verbatim 04TR else-if
+  block), `npruntime_round_end`, `event_runtime_bms` (BlueWin + zone-ref resolution),
+  and the in-game `round_outcome_probe.gd` 04TR PASS (real-round teammate kill →
+  bluekills → Lose(1) → the retail KILLEDBLUE string → round end winner 2 → the
+  FAILED screen → ESC to menu).
+
 - **Infantry ground locomotion** (`Entity_UpdateInfantryAI @ 0x4b9910` → `AiSystem::tick_infantry`,
   libs/world/src/infantry.cpp): **MATCHING**, with the named, cited deviations —
   - **D-INF-1** no blend windows (clip switches reset phase; the original blends 10/15 ticks,
@@ -2380,3 +2390,284 @@ Renames (anchored, ex kong misnomers/auto-names): `AI_TickState_VehicleDying
 Entry comments: the four rows, `@ 0x49fa96` (the deathtime formula), `@ 0x4b9c40`
 (the death edge), `@ 0x4b9e4d` (the corpse block), `@ 0x43a690` (cause routing +
 the 15 groups + the quadrant convention), `@ 0x52310f` (particledeath intern).
+
+## 20. Appendix: the round-outcome loop — WAC/BMS win-lose, round end, SP end presentation (engine-research, 2026-07-16 session 6)
+
+The P2 playability slice: how a mission DECIDES it is over, what the server does
+at round end, and what the SP player then SEES. Port surfaces:
+`libs/wac/src/vm.cpp` (win/lose + the outcome builtins),
+`libs/mission/src/event_runtime.cpp` (the BMS win actions + zone-ref resolution),
+`libs/world/src/world.cpp` (`World::process_round_end`, `EntityCommands::resolve_ssn`),
+`libs/npruntime/src/server_tick.cpp` (kill tallies, `humans`, the win-condition
+check, the respawn hold), `godot/engine/world/game_hud_host.gd` (the lose banner),
+`godot/game/mission_end_screen.gd` + `main_game.gd` (the end screens + exit).
+Evidence ctests: `wac_behavior` (the outcome builtins + the 04TR else-if block),
+`npruntime_round_end`, `event_runtime_bms` (BlueWin + zone-ref resolution);
+in-game: `godot/tests/round_outcome_probe.gd` (04TR.bms PASS 2026-07-16: real-round
+teammate kill → bluekills → `Lose(1)` → KILLEDBLUE banner → round end winner 2 →
+FAILED screen → ESC to menu).
+
+### 20.1 Producers — every caller of the round end
+
+`Server_ProcessRoundEnd @ 0x5164f0` is the single round-end entry. Witnessed
+producers:
+
+- **WAC `win n`** [orig: WacAction_Win @ 0x4ed4a0] — `Server_ProcessRoundEnd(n)`
+  straight through (1 = blue/player win; 0 = green).
+- **WAC `lose n`** [orig: WacAction_Lose @ 0x4ed3f0] — n=0 resolves
+  `Misc/STRMISC_KILLEDGREEN`, n=1 `Misc/STRMISC_KILLEDBLUE`, each through the
+  banner trio (§20.6), then `Server_ProcessRoundEnd(2)` (red wins = the player
+  side loses). Any other n is a NO-OP returning 0. Both handlers were undefined
+  code before this session (define_func'd).
+- **BMS Blue/Red/GreenWin** (actions 8/9/10) [orig: EventAction_Dispatch
+  @ 0x45447b/0x454495/0x4544af] — `Server_ProcessRoundEnd(1/2/0)`; the call sites
+  check the round-over latch first (our latch lives inside `process_round_end`).
+- **The SP auto-lose** [orig: Server_CheckWinConditions @ 0x51ad40, SP leg
+  @ 0x51ad6f] — the ONLY automatic SP condition: local player dead
+  (`Flags & 2`) and the mission does not author `SinglePlayerRespawn`
+  (`Bms_AttribFlags & 0x40`) → `Server_ProcessRoundEnd(2)`. Runs at 1 Hz from
+  the periodic-second block [orig: @ 0x51df5a]; the latch no-ops it
+  [orig: @ 0x51ad4a]. Every other SP outcome comes from the script producers.
+- **MP legs** (unported, net track): the zone-ownership sweep
+  (`ZoneSlotChain_GetWinningTeamIfAllOwned @ 0x4a2920`) and per-game-type
+  score/time/kill-limit checks over the team stat blocks (game types 0,
+  0x10000, 65537, 65540, 65538/589826, 65544, 8, 65552/327696); admin
+  goto/mission commands and a round-end tail fragment `@ 0x4d31c0`
+  (`Server_ProcessRoundEnd` + a 620-tick linger) — defined this session.
+
+### 20.2 `Server_ProcessRoundEnd @ 0x5164f0` (fully decompiled)
+
+Order of operations: double-run guard on `g_spawn_success_gate @ 0x24c1928`
+[orig: @ 0x516502] → `g_round_winning_team @ 0x24c1924 = winner` [orig: @ 0x516528]
+→ the winner-team scoring pass (team games: `GameEvent_ProcessScoring @ 0x52f550`
+per winning-team member, team byte entity+354, gate `g_GameType & 0x10000`)
+[orig: @ 0x516530] → `Server_BuildEndOfRoundScoreboard(1, winner) @ 0x508f30` →
+server tick-phase metrics → phase 4 → **MP-only** `g_endround_linger_timer
+@ 0xc8d820 = 2790` (45 s) [orig: @ 0x5166c4] → per active slot in state 6: slot
+bookkeeping reset, S2C 0x61 round-end marker (4 zero bytes) [orig: @ 0x516790],
+the winner-bonus scoring leg, S2C 0x1D scoreboard header [orig: @ 0x516839],
+`CNetPlayer_SetGameState(11)` [orig: @ 0x516846], slot state 6→7
+[orig: @ 0x51685e] → the per-team round-win counters for game types
+0x10000/65537/65540 [orig: @ 0x5168a0] → **the latch** `g_spawn_success_gate = 1`
+[orig: @ 0x5168e4] → binocular/scope clears → the SP tail (`!is_in_session`)
+[orig: @ 0x51691d]: `DialogAudio_PlayNextChunkOrStop(0) @ 0x44e320` (force-stops
+the dialog channel) + `Dialog_ResetAll @ 0x44dc90` + `sub_5280B0` (parks the
+active music state) + winner==1 ? `Cine_InitPlayback @ 0x578390` +
+`MusicCtx_SelectEndTrack(1)` : `Cine_StartPlayback @ 0x577840` +
+`MusicCtx_SelectEndTrack(2)`.
+
+Port: `World::process_round_end` carries the guard, the winner, the latch, and
+surfaces the SP tail as the `round_end` host effect; the scoring pass, the
+scoreboard block, and every wire leg are cited stubs (net track).
+
+The gate CLEARS at `Game_StartMission @ 0x524a1f` and the client GameReset
+handler [orig: NapiNPClientMsg_GameReset @ 0x422849]; `Cine_StartPlayback` also
+SETS it `@ 0x577848` (the lose cine implies round-over). The SP restart
+[orig: Game_RestartRoundSP @ 0x5263a0, `g_mission_exit_reason == 4`]:
+`Game_DestroyAllEntitiesAndReset` → (authority) the flag-4 event-trigger pass →
+if the SP round was WON copy `dword_24C1960 → dword_24D2500` → round-state init
+(`sub_54D6A0`) → `Server_DisconnectAndResetAllPlayerSlots @ 0x516160` →
+`Game_StartMission(1)`.
+
+### 20.3 The WAC named-value table (the `bluekills` family)
+
+One static table drives every named engine value WAC scripts read:
+**24 records `{char name[16]; u32 param_type; u32 value_ptr}` at `@ 0x82EEF0`,
+count dword at `@ 0x82F130`**, resolved case-insensitively by the third lookup
+leg of `WacScript_ResolveParameter @ 0x4f2940` (`*outType = 1` → pointer).
+Param types seen: 2 = int var, 9 = time (CurTOD), 0xB = entity handle.
+
+| name | value | witnessed semantics |
+|---|---|---|
+| result | `@ 0xC6EB24` | the VM accumulator |
+| ticks | `@ 0xC6EAD8` | script executions; +1 per run [orig: WacScript_AdvanceTick @ 0x4f81d3]; seeded 0 at load |
+| GameOver | `@ 0xC6EB0C` | derived `winner != 0` — a green(0) outcome never raises it [orig: cache pre-pass @ 0x4f57bb] |
+| WinVar | `@ 0xC6EB08` | derived `winner == 1` [orig: @ 0x4f57c9] |
+| LoseVar | `@ 0xC6EB04` | derived `winner == 2` [orig: @ 0x4f57cf] |
+| SquadSSN / SquadWho | `@ 0xC60DCC` / `@ 0xC60DC4` | squad slots (type 0xB / 2) |
+| night / seatbelt / wind | `@ 0x26C645C` / `@ 0xC6EADC` / `@ 0x26C68C0` | env/options mirrors |
+| breathtime / fallmps / accuracyspread | `@ 0xC6EAE0` / `@ 0xC6EAE4` / `@ 0xC6EAE8` | player tuning; **accuracyspread IS the D-AI-6 aim-error global** (read by `Entity_UpdateInfantryAI @ 0x4bc5ea`) — mission scripts can set it |
+| autogain / health / mana | `@ 0xC6EAFC` / `@ 0xC6EB00` / `@ 0xC6EAF8` | health = live player hp mirror (entity+0x11E); mana = entity+0x120 (cached @ 0x4f582e; field semantics open) |
+| bluekills / greenkills | `@ 0xC846F0` / `@ 0xC846F8` | §20.4 |
+| humans | `@ 0xC6EB14` | active human slot count [orig: Server_BuildEntitySlotLists @ 0x4f97c6 zero / @ 0x4f98b1 +1]; ALSO the world-run gate: entities/WAC advance while `humans > 0 \|\| ticks == 0` (empty-dedicated-server sleep) [orig: @ 0x51d8bd / Game_ProcessMainFrame @ 0x52671c] |
+| RND / Player / Item / auto / CurTOD | `@ 0xC6B23C` / `@ 0xC6EC3C` (x3) / `@ 0xC6EB10` | Player/Item/auto share the slot-handle cache; CurTOD = `Env_CurTimeFixed24 / 279620` |
+
+**Correction:** an earlier session read this table phase-shifted by one record
+(name paired with the FOLLOWING record's value) — that mapping (`autogain →
+0xC6EAE8`, `bluekills → 0xC6EAF8`, `GameOver → 0xC6EAD8`, ...) was wrong; the
+resolver decompile pins the true anchors (name @ +0, type @ +0x10, value @ +0x14).
+Port: `Builtin` ids 8-13 in `libs/wac` (`bluekills/greenkills/humans/GameOver/
+WinVar/LoseVar`) reading `World::kill_stats` / `cached.humans` / `round_end`.
+
+### 20.4 The kill tallies (`bluekills`/`greenkills` and the epilog buckets)
+
+`Score_ProcessKillEvent @ 0x4fd400` runs per kill from the damage chain
+(`Entity_ApplyWeaponDamage @ 0x4e6bfe/0x4e6fb4`, `Projectile_ProcessDamageOnTarget
+@ 0x4e8133`, vehicle/collision legs), authority-gated, and **outside net sessions
+only** [orig: the `!is_in_session` gate @ 0x4fd447]. Killer == the local player →
+`Score_TallyKillByLocalPlayer @ 0x4fd160` (ex-`Score_ProcessDamageEvent`
+misnomer); anyone else → `Score_TallyKillByOthers @ 0x4fd300`. Bucket family
+(count @ first addr, score-sum pair at +4):
+
+- by-player: infantry `@ 0xC846D8`, vehicle (types 3/4) `@ 0xC846E0`, aircraft
+  (type 9) `@ 0xC846E8`, **team-1 persons `@ 0xC846F0` = WAC `bluekills`**,
+  **team-0 persons `@ 0xC846F8` = WAC `greenkills`** (person gate itemdef+92==3;
+  blue/green NON-persons tally NOTHING; unit type from def+406, score def+404,
+  difficulty scaling ¾/3⁄2 on `dword_24D2110`).
+- by-others: infantry `@ 0xC846A8`, vehicle `@ 0xC846B0`, heli `@ 0xC846B8`,
+  team `@ 0xC846C0`, friendly `@ 0xC846C8`, human-player victims `@ 0xC846A0`
+  (entity+534 flag).
+
+Team space matches the round-end codes: 0 = green, 1 = blue, 2+ = enemy. The
+epilog count lines sum the pairs (TEAMUNITS = `0xC846F0 + 0xC846C0`, etc.).
+Port: `MissionKillStats` counts only (points/difficulty unmodeled — D-AI-10),
+tallied in `route_round_deaths` from `RoundDeath.victim/killer`; the SP gate is
+`!world.mp_session` because our SP-as-listen-server always runs
+`ctx.is_in_session = 1`.
+
+### 20.5 The outcome state + the client commit (S2C 0x1D)
+
+`@ 0x24c1970` (ex kong `g_scoreGameType` — renamed `g_endround_winner_team`) is
+**the winning team number**, the first dword of the 0xE444-byte end-round
+scoreboard block: memset 0 at mission start [orig: Game_StartMission @ 0x5249df]
+and by `Server_BuildEndOfRoundScoreboard @ 0x508f3f`, then `= winningTeam`
+[orig: @ 0x508f77]. The WAC outcome builtins derive from it each pre-script tick
+[orig: WacScript_CacheLocalPlayerState @ 0x4f5780]. The scoreboard header
+serializer [orig: EndRoundScoreboard_SerializeHeader @ 0x505280, ex
+`WeaponOverlay_SerializeToBuffer` misnomer] writes the SP/team-game form
+`[u8 winner][s16 teamScore0][s16 teamScore1][u8 draw][s8 myEntryIndex]` (7 B;
+non-team MP substitutes 3 winner-name strings + 3 s16). The client commit
+[orig: NapiNPClientMsg_0x01D @ 0x430840]: non-authority latches the gate +
+`linger = INT_MAX`, parses the form, stores winner/scores/draw
+(`g_endround_draw_flag @ 0x24cfdb0`), recalcs scoreboard tiers, MP peers ack 0x2B.
+
+The 2790-tick linger is **MP-only**: `Server_TickUpdate` drains it on the
+authority [orig: @ 0x51d9cc] → mission metrics + `g_mission_exit_reason = 3`
+(4 when replay-chaining); `Client_ProcessNetworkFrame` drains the peer copy
+[orig: @ 0x42c3d1] → `reason = 4` → the "Game Loop" scene. SP never drains it —
+the epilog owns the SP exit (§20.6).
+
+### 20.6 The SP end presentation
+
+The lose banner trio [orig: WacAction_Lose → `GameMsg_AddChatLineAndRelay
+@ 0x5ba170` (chat channel 1 id 930; authority relays the gametext KEY, clients
+re-resolve), `GameMsg_SetBannerText @ 0x5ba200` (`g_banner_text @ 0x28E3DA0`),
+`GameMsg_SetTeamBannerText @ 0x5ba1d0` (`@ 0x28E41A0` + team)] — the banners
+persist until the round-start HUD reset clears them [orig: sub_5B71B0 @ 0x5b72ad].
+
+Per-frame cine dispatch [orig: Cinematic_EpilogUpdate @ 0x577950] on
+`g_cine_mode @ 0x2696dc4` (1 = win set by `Cine_InitPlayback`, 2 = lose set by
+`Cine_StartPlayback`):
+
+- **WIN epilog** [orig: epilog_cinematic_state_machine_update @ 0x576240,
+  `g_epilog_win_state @ 0x2696db4`]: `Cine_InitPlayback` loads `<mission>.cne`
+  if present, else a static player-pose camera + letterbox; states 0-3 = the
+  flyaway (altitude wait, accelerate, steer at the extraction point with
+  distance fades + a proximity sound); state 4 builds the score screen —
+  `jo_Epil.tga` + `Epilog/STREPILOG_OBJECTIVEBONUS,_ENEMYUNITS,_TEAMUNITS,
+  _FRIENDLYUNITS,_KEYINFO` count lines fed by the §20.4 buckets (enemy line
+  capped at `@ 0xC84690`), `g_epilog_screen_active @ 0xa87054 = 1`; state 5
+  fades, 18600-tick timeout → `g_mission_exit_reason = 1`. A FULLER sibling
+  `@ 0x575a90` (adds FAST_PLAY_BONUS + TOTALPOINTS with point values) has
+  ZERO xrefs — dead code in retail Jointops.exe.
+- **LOSE screen** [orig: the mode-2 leg `@ 0x5744fd..`, `g_epilog_lose_state
+  @ 0x2696d9c`]: fade pair + `jo_Epil2.tga` + `Overlays/STROVER_MISSION_FAILED`
+  (y=120) + **the `g_banner_text` line (the WAC lose cause, y=230)** + the
+  saved-game list + `STREPILOG_KEYINFO`/`_KEYINFO2`; state 2 fades 0.01/tick,
+  18600-tick timeout → `reason = 1`.
+
+Exit keys: ESC (0x1B) → `reason = 1` [orig: Input_HandleSpecialKeys @ 0x49c8e2];
+the exit action binding → 1 [orig: Input_HandleActionBinding @ 0x49af26]; the
+death-screen key → 4 (SP restart) [orig: @ 0x49c8ad]. The main loop
+[orig: Game_ProcessMainFrame @ 0x526806..0x526867]: `reason == 4` in SP →
+`Game_RestartRoundSP`; any other nonzero reason → push the **"Post Menu"**
+scene. `MusicCtx_SelectEndTrack @ 0x672fd0` (thunk `@ 0x671ba0`) writes 1|2
+into a stream context byte `@ 0x3245B08` — the end-music selector shape; the
+reader rides the context pointer (unwalked). The SP world keeps ticking through
+the epilog (`humans >= 1` holds the run gate; MP freezes entities on the gate
+instead [orig: @ 0x526742]).
+
+Port: `game_hud_host.gd` resolves the lose KEY against gametext `Misc` (chat
+line + stored banner); `main_game.gd` consumes the `round_end` effect →
+`mission_end_screen.gd` (win = letterbox + jo_Epil.tga + the four count lines;
+lose = jo_Epil2.tga + STROVER_MISSION_FAILED + the banner + KEYINFO), 300 s
+timeout, ESC → teardown to the menu (the Post Menu stand-in). In-game verified
+via `round_outcome_probe.gd` (the retail string "You have killed a teammate."
+resolved from gametext.bin).
+
+### 20.7 Script SSN + zone-ref resolution (fixed during the probe)
+
+Two load/response-time resolutions the probe forced out:
+
+1. **The player SSN**: mission scripts address the local player as SSN 10000
+   (retail player entities carry 10000+slot as their net id, so
+   `EntityPool_FindByNetId @ 0x4f0a20` resolves them like any SSN). Our player
+   entities deliberately carry `net_id 0` (the wire is handle-based), so
+   `EntityCommands::resolve_ssn` restores the mapping at the script seam
+   (10000 → `cached.local_player`); MP joiner SSNs (10001+) wait on the net
+   track.
+2. **Zone refs are IDs in the file, indices at runtime**: see
+   [bms-event-runtime-re §7.3](../mission/bms-event-runtime-re.md) — the
+   mission-start resolvers [orig: EventTrigger_ResolveZoneTriggerRefs
+   @ 0x453000 / EventTrigger_ResolveZoneActionRefs @ 0x453100, both ex-"weapon"
+   misnomers] rewrite trigger/action zone ids to array indices and NEUTER
+   dangling/degenerate refs. Unported, 04TR's negated
+   `SingleIsWithinArea(10000, zone 6)` out-of-bounds watchdog fired RedWin at
+   spawn; ported (`BmsEventSystem::resolve_zone_refs`), the mission plays.
+
+### 20.8 Divergences
+
+| ID | Ours | Original | Why / consequence |
+|---|---|---|---|
+| D-AI-10 | Round-outcome stand-ins: (a) kill tallies are COUNTS only (no def+404 points, no difficulty scaling, no per-type enemy split, no human-player bucket); (b) the SP end presentation is a shell overlay — no flyaway cine / `.cne` playback, no score count-up lines, no saved-game list, no end-music track switch, a 3 s fade lead-in stands in for the cine fades, ESC/300 s stand in for the key/18600-tick exits; (c) the MP legs are cited stubs (0x61/0x1D wire, slot 6→7, `SetGameState(11)`, the 2790 linger, the round-win counters, the scoreboard block, `Server_CheckWinConditions` MP conditions); (d) `sub_5280B0` music-park and the `@ 0x3245B08` end-track selector are noted, unported; (e) the SP-gate reads `world.mp_session` (our listen server always has `ctx.is_in_session = 1`) | the full @ 0x5164f0 flow + the §20.6 cines | SP outcome loop works end-to-end (probe PASS); the omissions are presentation/MP depth, each cited inline for the follow-up slices | 
+
+`D-AI-6` update (ledger): the aim-error global `@ 0xC6EAE8` is the WAC named
+variable **accuracyspread** — its config source is mission scripts (the table
+§20.3); the earlier `autogain` attribution came from the phase-shifted table
+read. Our `AiSystem::ai_difficulty` still stands in; wiring it to the WAC var
+is the remaining tail.
+
+### 20.9 Open follow-ups
+
+1. `mana` (entity+0x120, cached `@ 0x4f582e`) — the field's true semantics
+   (IDB gloss "Armor") and its writers are unwalked.
+2. The end-music selector reader (the `@ 0x3245B08` byte through the stream
+   context `@ 0x3245AE8`) and `sub_5280B0`'s parked global (`@ 0x24D20CC`,
+   IDB gloss "g_SoundVolumeOption" — suspect) are unwalked.
+3. The win epilog's extraction-point source (`@ 0x2696FD8/0x2696FDC`) — who
+   stamps it (the `.cne`? the mission?) is unwalked; our stand-in skips the
+   flyaway entirely.
+4. WAC named vars as WRITE targets (`set(health, ...)` — the original resolver
+   returns pointers, so any table name is an lvalue): our builtins are
+   read-only; extend `WacVm::write` when a mission needs it.
+5. The 0x1D non-team MP string form + `dword_24C1AD4/BB8/C9C` values, the
+   draw/tie semantics (`byte_24CFDB0` beyond the equal-scores case), and the
+   0x2B ack are net-track items.
+6. `Score_ProcessKillEvent`'s killer `itemDef->score` gate (@ 0x4fd422) is
+   unmodeled — verify whether any SP loadout authors score 0.
+
+### 20.10 IDB write-backs (2026-07-16 session 6, saved)
+
+Renames: `WacAction_Win @ 0x4ed4a0`, `WacAction_Lose @ 0x4ed3f0`,
+`WacScript_AdvanceTick @ 0x4f81a0`, `GameMsg_AddChatLineAndRelay @ 0x5ba170`,
+`GameMsg_SetBannerText @ 0x5ba200`, `GameMsg_SetTeamBannerText @ 0x5ba1d0`,
+`Score_TallyKillByLocalPlayer @ 0x4fd160` (ex `Score_ProcessDamageEvent`),
+`Score_TallyKillByOthers @ 0x4fd300` (ex `Score_ClassifyKillByType`),
+`DialogAudio_PlayNextChunkOrStop @ 0x44e320`, `MusicCtx_SelectEndTrack
+@ 0x672fd0`, `EndRoundScoreboard_SerializeHeader @ 0x505280` (ex
+`WeaponOverlay_SerializeToBuffer`), `EventTrigger_ResolveZoneTriggerRefs
+@ 0x453000` (ex `EventTrigger_ResolveWeaponActionRefs`),
+`EventTrigger_ResolveZoneActionRefs @ 0x453100` (ex
+`resolve_weapon_slot_triggers`); globals `g_endround_winner_team @ 0x24c1970`
+(ex `g_scoreGameType`), `g_mission_exit_reason @ 0x24c1918` (ex `reason`),
+`g_endround_linger_timer @ 0xc8d820` (ex `g_mission_metrics_timer`),
+`g_round_time_remaining @ 0x24c1958`, `g_endround_draw_flag @ 0x24cfdb0`,
+`g_banner_text @ 0x28e3da0`, `g_team_banner_text @ 0x28e41a0`,
+`g_cine_mode @ 0x2696dc4`, `g_epilog_win_state @ 0x2696db4`,
+`g_epilog_lose_state @ 0x2696d9c`, `g_epilog_screen_active @ 0xa87054`, and the
+`wac_var_*` cluster (ticks/GameOver/WinVar/LoseVar/humans/result/health/mana/
+autogain/accuracyspread/CurTOD/auto_item) + `g_stat_bluekills_by_player
+@ 0xc846f0` / `g_stat_greenkills_by_player @ 0xc846f8`. `define_func` on the
+WAC win/lose handlers and the `@ 0x4d31c0` tail fragment. Entry comments on the
+named-value table, the round-end/cine/scoreboard functions, and the two zone-ref
+resolvers.
