@@ -1064,9 +1064,26 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
             VehicleDriveCmd cmd;
             if (traits->player_control) {
                 Entity *ctrl = resolve_vehicle_controller(world, *veh);
-                const bool player_ctrl = ctrl != nullptr && ctrl->handle.pool() == 0 &&
+                // A DEAD controller parks the vehicle: retail never sees one (the death
+                // chain detaches the corpse before the physics runs) — treating it as
+                // no-controller is the stand-in for the unported death->detach chain
+                // (D-AI-11 k).
+                const bool ctrl_alive =
+                        ctrl != nullptr && ctrl->alive && ctrl->health > 0;
+                const bool player_ctrl = ctrl_alive && ctrl->handle.pool() == 0 &&
                                          ctrl->player_class != 0;
-                if (!player_ctrl) vehicle_ai_drive(world, *veh, ctrl, *traits, cmd);
+                if (player_ctrl) {
+                    // A player drive freezes the SM mover exactly like the parked leg —
+                    // the route never advances under a human driver [orig: the player
+                    // leg forces SM state 22 too @0x48b993].
+                    if (AiEntity *ve = for_handle(h)) {
+                        ve->brain.f[AiBrain::kCurState] = 22;
+                        ve->brain.f[AiBrain::kPendState] = 22;
+                    }
+                } else {
+                    vehicle_ai_drive(world, *veh, ctrl_alive ? ctrl : nullptr, *traits,
+                                     cmd);
+                }
             }
             tick_vehicle_motor(world, *veh, *traits, &cmd);
             // Mirror the integrated transform back into the brain entity — one struct in
@@ -1110,6 +1127,11 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
                 (e.inf.player_move_dir_index & 7) | (e.inf.player_moving ? 8 : 0) |
                 (e.inf.lean_left ? 0x40 : 0) | (e.inf.lean_right ? 0x80 : 0));
         occ->net_stance_bits = 0; // seated stance stays cleared [orig: @0x435c42]
+        // Drop any pending jump: the input latch is set-only (its consumer is
+        // tick_infantry's jump block, skipped for the whole ride) and the witnessed
+        // mounted carry scrubs the move flags every tick — a seated player cannot
+        // bank a jump for dismount [orig: the mounted-leg flag scrub &= 0xFF8F57DF].
+        e.inf.jump_requested = false;
     }
     // Mirror the world Entity transform into the AiEntity the present snapshot reads (organics are
     // presented from pos[]/heading, not Entity.position; promote seeds them the same way).
@@ -1448,9 +1470,10 @@ void AiSystem::apply_route_order(AiEntity &e, int32_t list, int32_t node) {
     // budget = 32*|Yaw - bearing| / ((speed_param >> 15) + 32)].
     if (ai_waypoint_update_target(b, e.pos, nav) == 0) {
         const int32_t denom = (b.f[AiBrain::kStoredKeyTime] >> 15) + 32;
-        const int64_t err =
-                std::llabs(static_cast<int64_t>(e.heading) - b.f[AiBrain::kWpBearing]);
-        b.f[AiBrain::kAnimFlag] = static_cast<int32_t>(32 * err / denom);
+        // 32-bit wrapping sub like the delta clamp — the short-way angle near the
+        // ±half-turn seam [orig: a plain x86 sub, then cdq/xor/sub abs].
+        const int32_t err = iabs32(e.heading - b.f[AiBrain::kWpBearing]);
+        b.f[AiBrain::kAnimFlag] = static_cast<int32_t>(32LL * err / denom);
     }
 }
 
@@ -1468,12 +1491,18 @@ void AiSystem::vehicle_ai_drive(World &world, Entity &veh, const Entity *control
         // command; the brain drops into the player-mode/parked state. The stuck-state
         // check is unported (D-NET-161). [orig: @0x48c002-0x48c02d — aiComp[132] = Yaw,
         // [136] = 0, [137] = 0, AI_CheckVehicleStuckState, Flags &= ~0x80, state = 22]
+        // The pend mirror is ours: the original has ONE state field; without it the
+        // SM's transition pass reverts the stamp to the pending 16 next tick.
         b.f[AiBrain::kCurState] = 22;
+        b.f[AiBrain::kPendState] = 22;
         return; // out.ai_drive stays false
     }
 
     // An AI controller sits in the ctrl/drvr seat — the autopilot leg.
-    if (b.f[AiBrain::kCurState] == 22) b.f[AiBrain::kCurState] = 16; // [orig: @0x48bc16]
+    if (b.f[AiBrain::kCurState] == 22) { // [orig: @0x48bc16]
+        b.f[AiBrain::kCurState] = 16;
+        b.f[AiBrain::kPendState] = 16;
+    }
 
     const int32_t heading = veh.veh.yaw_seeded
             ? veh.veh.yaw_bam
@@ -1492,8 +1521,10 @@ void AiSystem::vehicle_ai_drive(World &world, Entity &veh, const Entity *control
     if (b.f[AiBrain::kAnimFlag] == 0 && b.f[AiBrain::kWpType] != 0) {
         ai_waypoint_update_target(b, ve->pos, nav);
         const int32_t denom = (b.f[AiBrain::kStoredKeyTime] >> 15) + 32;
-        const int64_t err = std::llabs(static_cast<int64_t>(heading) - b.f[AiBrain::kWpBearing]);
-        b.f[AiBrain::kAnimFlag] = static_cast<int32_t>(32 * err / denom);
+        // 32-bit wrapping sub like the delta clamp below — the short-way angle near
+        // the ±half-turn seam [orig: a plain x86 sub, then cdq/xor/sub abs].
+        const int32_t err = iabs32(heading - b.f[AiBrain::kWpBearing]);
+        b.f[AiBrain::kAnimFlag] = static_cast<int32_t>(32LL * err / denom);
     }
 
     // Bearing delta clamped to the budget (32-bit wrap semantics are load-bearing near

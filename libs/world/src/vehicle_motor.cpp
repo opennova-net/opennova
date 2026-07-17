@@ -94,6 +94,10 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
     // @0x48b949-0x48c034. The authority always runs it; the driver's own client runs
     // it as prediction — we ARE the authority host.]
     Entity *occ = traits.player_control ? resolve_vehicle_controller(world, veh) : nullptr;
+    // A DEAD controller counts as none: retail never sees one (the death chain
+    // detaches the corpse before the physics runs) — the stand-in for the unported
+    // death->detach chain (D-AI-11 k).
+    if (occ != nullptr && (!occ->alive || occ->health <= 0)) occ = nullptr;
     // "Occupant is a player" [orig: `occupant->Flags & 0x100`] — our runtime players
     // are pool-0 organics with a resolved soldier class.
     const bool player_occupant =

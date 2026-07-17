@@ -1119,6 +1119,13 @@ bool NovaSimulation::local_player_toggle_mount() {
 	// armory/vehicle-zone legs of the key don't apply. [orig: Input_ProcessFrame release
 	// edge @0x49d6dc -> Entity_ToggleVehicleMount @0x436950]
 	if (!world_) return false;
+	// Authority-only: the witnessed non-authority path queues C2S 0x26 (attach) /
+	// sends 0x27 (detach) and waits for the 0x0A stream to confirm [orig:
+	// Entity_RequestVehicleAttach @0x4364a0 / Entity_SendDetachPacket @0x435510].
+	// That joiner wire leg is unported (D-AI-11 l) — applying locally on a joiner
+	// would silently desync against the host, so the toggle refuses (the armory
+	// leg's MP stance).
+	if (joiner_) return false;
 	// The weapon-busy gate [orig: @0x436958-0x436977 — no EquippedSlot passes;
 	// currentAction < 2 (idle/emptyidle) or == 5 (the dry click) passes, as does a
 	// pending OVERHEATED (nextAction == 11); an in-flight fire/reload/switch swallows

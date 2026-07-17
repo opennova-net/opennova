@@ -593,6 +593,53 @@ func test_mounted_seat_local_matches_rotated_vehicle_userpoint() -> void:
 	sim.free()
 
 
+# The USE-ITEM toggle's weapon-busy gate at the sim binding [orig: @0x436958-0x436977]:
+# a fire in flight swallows the toggle; back at idle the same toggle mounts.
+func test_local_player_toggle_mount_weapon_busy_gate() -> void:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var vehicle := md.add_entity(NovaMissionData.KIND_ITEM, 101294, Vector3(2, 0, 0), Vector3.ZERO)
+	assert_false(vehicle.is_empty())
+	var sim := NovaSimulation.new()
+	sim.set_item_seat_specs([
+		{
+			"type_id": 1294,
+			"seats": [
+				{"type": 1, "position": Vector3(0, -1, 1), "yaw_offset": 0, "source_name": "sitex00"},
+			],
+		}
+	])
+	assert_true(sim.load_from_mission_data(md), "loaded the one-truck mission")
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	sim.set_local_player_weapon({
+		"name": "WPN_GATE", "animadm": "gate.adm",
+		"actions": [
+			{"name": "idle", "anim": "anim_wpn_idle", "delaystart": 0, "delayend": 0},
+			{"name": "fire", "anim": "anim_wpn_fire", "delaystart": 0, "delayend": 0},
+		],
+		"flags": 0, "clipsize": 30, "startrounds": 60,
+	}, {
+		"anim_wpn_idle": PackedFloat32Array([0.2]),
+		"anim_wpn_fire": PackedFloat32Array([0.2]),
+	})
+	sim.step()
+	# Pull the trigger: the FSM leaves idle this step; the in-flight fire swallows
+	# the toggle.
+	sim.set_local_player_weapon_input(false, true, false)
+	sim.step()
+	assert_false(sim.local_player_toggle_mount(), "a fire in flight swallows the toggle")
+	# Release and settle back to idle: the same toggle now passes the gate and mounts.
+	sim.set_local_player_weapon_input(false, false, false)
+	for _i in range(40):
+		sim.step()
+	assert_true(sim.local_player_toggle_mount(), "the idle toggle mounts")
+	var card: Dictionary = sim.get_world_entity_debug(int(vehicle["bms_id"]))
+	var seats: Array = card.get("seats", [])
+	assert_true(seats.size() == 1 and bool(seats[0]["occupied"]),
+		"the scan took the truck's one sitex seat")
+	sim.free()
+
+
 func test_command_125_usegun_mount_renders_emplaced_pose() -> void:
 	var md := NovaMissionData.new()
 	assert_eq(md.create_default(), OK)

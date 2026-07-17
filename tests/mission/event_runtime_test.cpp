@@ -530,6 +530,61 @@ static void test_player_awol_counter_and_trigger() {
     CHECK(sys2.awol_count() == 0);
 }
 
+// The cat-7 mount-sub dispatch must discriminate the four predicates — the shipped
+// IDB carried PERMUTED names for exactly these, so a permuted case map is the
+// realistic defect and every row below catches one permutation.
+// [orig: EventTrigger_EvaluateCondition cat-7 subs 38-41
+//  -> @0x4f10d0/0x4f1260/0x4f1150/0x4f11e0]
+static void test_player_mount_trigger_dispatch() {
+    const int kAttached = static_cast<int>(bms::PlayerTriggerType::PlayerAttachedToSsn);
+    const int kOn = static_cast<int>(bms::PlayerTriggerType::PlayerOnSsn);
+    const int kDriving = static_cast<int>(bms::PlayerTriggerType::PlayerDrivingSsn);
+    const int kOnGun = static_cast<int>(bms::PlayerTriggerType::PlayerOnGun);
+    enum Pose { kSeatCtrl, kSeatGun, kStanding };
+    struct Case { int sub; Pose pose; bool fires; };
+    const Case cases[] = {
+        {kAttached, kSeatCtrl, true},  {kAttached, kSeatGun, true},
+        {kAttached, kStanding, false},
+        {kOn, kStanding, true},        {kOn, kSeatCtrl, false},
+        {kDriving, kSeatCtrl, true},   {kDriving, kSeatGun, false},
+        {kDriving, kStanding, false},
+        {kOnGun, kSeatGun, true},      {kOnGun, kSeatCtrl, false},
+    };
+    for (const Case &c : cases) {
+        World w;
+        w.registry.configure_pool(0, 4);
+        w.registry.configure_pool(1, 4);
+        world::Entity veh{};
+        veh.kind = world::EntityKind::Item;
+        veh.alive = true;
+        veh.health = 1000;
+        veh.net_id = 11;
+        veh.bms_id = 11;
+        world::EntityHandle vh = w.registry.spawn(1, veh);
+        world::Entity pl{};
+        pl.alive = true;
+        pl.health = 100;
+        pl.player_class = 8;
+        world::EntityHandle ph = w.registry.spawn(0, pl);
+        w.cached.local_player = ph;
+        world::Entity *p = w.registry.get(ph);
+        if (c.pose == kStanding) {
+            p->ground_target = vh;
+        } else {
+            p->mounted = true;
+            p->mount_target = vh;
+            p->mount_type = c.pose == kSeatCtrl ? world::SeatType::Controller
+                                                : world::SeatType::Gunner;
+        }
+        mission::BmsEventSystem sys;
+        load_probe(sys, make_trigger(bms::TriggerMainType::Player, c.sub, /*p1=*/11));
+        w.add_system(&sys);
+        w.load_systems();
+        tick_n(w, kPass);
+        CHECK((w.vars.get_mission(9) == 1) == c.fires);
+    }
+}
+
 // The post pass is a host-called one-shot sweep, never periodic (D-EVT-4)
 // [orig: UpdateAllWithFlag4 @0x454e00, one call per teardown/restart]. Normal
 // ticks must never touch a PostMission-flag entry.
@@ -773,6 +828,7 @@ int main() {
     test_second_time_through_parity();
     test_teammate_triggers();
     test_player_awol_counter_and_trigger();
+    test_player_mount_trigger_dispatch();
     test_post_pass_is_a_one_shot();
     test_trigger_relations_group_records();
     test_trigger_relations_matrices_and_visited();

@@ -99,9 +99,16 @@ void test_toggle_nearest_seat() {
         CHECK(player_toggle_vehicle_mount(r.w, r.player_h));
         CHECK(r.player().mounted);
         CHECK(r.player().mount_target == r.veh_h);
-        // 2u from origin: the sitex seat (0,-2,+1.2 local) sits nearest the player at
-        // +2x? both seats are in the 4u gate; lowest SCORE (horiz + 3D/512) wins.
-        CHECK(r.player().mount_seat >= 0);
+        // Lowest SCORE (horiz + 3D/512) wins [orig: @0x436123]: from +2x the ctrl
+        // bone (+0.5,+1.5 local; horiz 2.12) beats the sitex (0,-2; horiz 2.83).
+        CHECK(r.player().mount_seat == 0);
+    }
+    {
+        // From -2.5x the SITEX (horiz 3.20) outscores the ctrl (3.35): the scan is
+        // score-ranked, not seat-weighted (the deck weights never apply here).
+        Rig r(-2.5f);
+        CHECK(player_toggle_vehicle_mount(r.w, r.player_h));
+        CHECK(r.player().mount_seat == 1);
     }
     {
         Rig r(30.0f); // far outside the 4 u gate
@@ -257,6 +264,9 @@ void test_ai_drive_leg() {
         r.sys.vehicle_ai_drive(r.w, r.veh(), nullptr, t, cmd);
         CHECK(!cmd.ai_drive);
         CHECK(b.f[AiBrain::kCurState] == 22);
+        // The pend mirror keeps the SM's transition pass from reverting the stamp
+        // to the promoted pending 16 next tick (one state word in the original).
+        CHECK(b.f[AiBrain::kPendState] == 22);
         const float x0 = r.veh().position.x;
         tick_vehicle_motor(r.w, r.veh(), t, &cmd);
         CHECK(std::abs(r.veh().position.x - x0) < 0.05f);
@@ -290,6 +300,7 @@ void test_ai_drive_leg() {
     }
     CHECK(drove);
     CHECK(b.f[AiBrain::kCurState] == 16); // the 22 -> 16 hand-back held
+    CHECK(b.f[AiBrain::kPendState] == 16); // both fields hand back (the pend mirror)
     // ~4.8 s of drive: the truck swung from its initial 90-degree heading error onto the
     // +x bearing (a real turn ARC — the speed-coupled steering sweeps y while turning)
     // and covered ground toward the node.
@@ -297,6 +308,19 @@ void test_ai_drive_leg() {
     const int32_t heading_err = r.veh().veh.yaw_bam - b.f[AiBrain::kWpBearing];
     CHECK(std::abs(heading_err) < 60000000); // within ~5 deg of the bearing
     CHECK(std::abs(r.veh().position.y - 200.0f) < 30.0f); // the turn arc, not a runaway
+
+    // A DEAD controller counts as no controller (the death->detach chain stand-in,
+    // D-AI-11 k): the motor's own resolve must not consume the corpse's input.
+    r.w.registry.get(nh)->health = 0;
+    r.w.registry.get(nh)->alive = false;
+    {
+        VehicleDriveCmd cmd; // ai_drive stays false: the staging parks dead drivers
+        r.sys.vehicle_ai_drive(r.w, r.veh(), nullptr, t, cmd);
+        CHECK(!cmd.ai_drive);
+        CHECK(b.f[AiBrain::kCurState] == 22);
+        tick_vehicle_motor(r.w, r.veh(), t, &cmd);
+        CHECK(r.veh().veh.cmd_speed == 0); // the no-controller hold, not the stale drive
+    }
 }
 
 // The redirect order reaches the BRAIN (mode/list/node + budget) and the BMS speed
@@ -316,14 +340,16 @@ void test_redirect_and_speed_commands() {
     r.sys.nav.channels[2].entries[0] = 0;
     r.sys.nav.channels[2].entries[1] = 1;
     r.sys.nav.nodes.resize(2);
-    r.sys.nav.nodes[0] = NavEntry{{1 << 16, 150 << 16, 200 << 16, 10 << 16, 0}};
-    r.sys.nav.nodes[1] = NavEntry{{1 << 16, 500 << 16, 200 << 16, 10 << 16, 0}};
+    r.sys.nav.nodes[0] = NavEntry{{1 << 16, 500 << 16, 200 << 16, 10 << 16, 0}};
+    r.sys.nav.nodes[1] = NavEntry{{1 << 16, 150 << 16, 200 << 16, 10 << 16, 0}};
 
     CHECK(r.w.commands.group_to_waypoint(3, 2) == 1); // RedirectGroupTo(3, list 2)
     AiBrain &b = ve.brain;
     CHECK(b.f[AiBrain::kWpType] == 1);
     CHECK(b.f[AiBrain::kWpChannel] == 2);
-    CHECK(b.f[AiBrain::kWpNode] == 0); // node 0 at x=150 is nearest to x=100
+    // Entry 1 (x=150) is nearest to x=100 — distinct from entry 0, which is also
+    // the scan's fallback initializer, so a broken nearest-node scan fails here.
+    CHECK(b.f[AiBrain::kWpNode] == 1);
 
     // PatrolSpeed 40 -> kSpeedB = trunc(40 * 65536/225) = 11650. CombatSpeed -> kSpeedA.
     CHECK(r.w.commands.apply_group_ai_command(3, 30, 40, 0, 0) == 1);
@@ -344,6 +370,18 @@ void test_redirect_and_speed_commands() {
     CHECK(r.w.registry.get(nh)->mounted);
     r.w.commands.group_to_waypoint(3, 2);
     CHECK(!r.w.registry.get(nh)->mounted);
+
+    // The budget's bearing error is a WRAPPING 32-bit sub [orig: a plain x86 sub,
+    // @0x48bc9a-cf]: heading just short of +half-turn, node bearing just past
+    // -half-turn = a ~0.1 deg true error, not ~360 deg. The unwrapped form cast a
+    // NEGATIVE budget here, inverting the delta clamp.
+    r.sys.nav.nodes[0] =
+            NavEntry{{1 << 16, -300 * 65536, static_cast<int32_t>(199.5 * 65536),
+                      10 << 16, 0}};
+    ve.heading = 2147000000; // the +pi side of the seam
+    r.sys.apply_route_order(ve, 2, 0);
+    CHECK(b.f[AiBrain::kAnimFlag] >= 0);
+    CHECK(b.f[AiBrain::kAnimFlag] < (1 << 22)); // the short-way error stays small
 }
 
 // The SP drive input mirror: a mounted LOCAL player's live move bits reach the wire

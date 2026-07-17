@@ -3093,7 +3093,10 @@ the `attrib & 0x40` (PlayerControl) input staging splits three ways
 
 Port: legs 1 and 3 land as `AiSystem::vehicle_ai_drive` (the brain state
 stamps + the steer/speed math; the motor consumes a `VehicleDriveCmd`) +
-`tick_vehicle_motor`'s AI branch; the SM's kinematic `apply_locomotion`
+`tick_vehicle_motor`'s AI branch; leg 2's SM freeze lands in the staging block
+(a player controller stamps state 22 like the parked leg — the mover never
+advances under a human driver; our cur/pend SPLIT means both fields take every
+stamp, the original has one state word); the SM's kinematic `apply_locomotion`
 RETIRES for motor vehicles (`physics != 0`) — the SM stays the decision layer
 (waypoints, visited bits, states), the motor is the only integrator, matching
 the original split. Deferrals stay under D-NET-161 (updated in
@@ -3196,7 +3199,7 @@ skipped while mounted).
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
-| D-AI-11 | Mount-chain stand-ins: (a) the scan candidate set is a registry sweep (no per-entity proximity lists) and the eye is the +0.9 u chest constant (no CameraOffset), +0.1875 u bias kept; (b) the emplaced-gun carrier LOS/reject legs (attrib 0x20 -> groundEntity) and the armory-point leg are unscanned; (c) the weapon-busy gate lives in the sim binding (World has no weapon slot); (d) the WAC no-dismount global (`dword_C6EADC`) is unmodeled; (e) seat-position keys 0xB6-0xBF (Entity_FindAvailableSeat @ 0x436790, incl. the displace-AI rule) unported; (f) the AI boarding think (walk to E5-E8 entry bones + the 64-tick seat-upgrade sweep) unported — script mounts are immediate; (g) child-vehicle seat traversal (FindBestSeatSlot's carried-gun walk + the 0x2000000 child-sitex weight) unmodeled; (h) sub-39's groundEntity persistence rides our collision's platform contact (retail keeps the stale boarding-time groundEntity while seated) | 23.1/23.4/23.5 above | the toggle covers 00TRa/04TR's gates (probe PASS); each residual cited at its port site |
+| D-AI-11 | Mount-chain stand-ins: (a) the scan candidate set is a registry sweep (no per-entity proximity lists) and the eye is the +0.9 u chest constant (no CameraOffset), +0.1875 u bias kept; (b) the emplaced-gun carrier LOS/reject legs (attrib 0x20 -> groundEntity) and the armory-point leg are unscanned; (c) the weapon-busy gate lives in the sim binding (World has no weapon slot); (d) the WAC no-dismount global (`dword_C6EADC`) is unmodeled; (e) seat-position keys 0xB6-0xBF (Entity_FindAvailableSeat @ 0x436790, incl. the displace-AI rule) unported; (f) the AI boarding think (walk to E5-E8 entry bones + the 64-tick seat-upgrade sweep) unported — script mounts are immediate; (g) child-vehicle seat traversal (FindBestSeatSlot's carried-gun walk + the 0x2000000 child-sitex weight) unmodeled; (h) sub-39's groundEntity persistence rides our collision's platform contact (retail keeps the stale boarding-time groundEntity while seated); (k) a DEAD controller counts as no controller (motor + AI staging) - the stand-in for the unported death->detach chain (retail detaches the corpse before the physics runs); (l) the toggle is AUTHORITY-only - the joiner-side C2S 0x26/0x27 wire leg is unported, `local_player_toggle_mount` refuses on a joiner | 23.1/23.4/23.5 above | the toggle covers 00TRa/04TR's gates (probe PASS); each residual cited at its port site |
 
 Correspondence adds: see the rows appended to the section-2 map this session
 (the toggle chain, the four predicates, `vehicle_ai_drive`, the deploy stamp).

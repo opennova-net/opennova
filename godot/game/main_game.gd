@@ -56,6 +56,7 @@ var _player_host: LocalPlayerHost = null
 var _mp_host  # MpMenuHost: drives the multiplayer (mp.mnu) menu by control name
 var _player_info_host  # PlayerInfoMenuHost: drives the PLAYER_INFO (player.mnu) character screen
 var _armory_host: NovaArmoryHost  # the SHARED in-world armory surface (weapon.mnu WEAPON)
+var _use_latched := false  # USE-ITEM press latch; the mount toggle runs on RELEASE
 var _chosen_avatar: Dictionary = {}  # last avatar/name picked on PLAYER_INFO (the persistence seam)
 # The mission loading screen (per-mission sidecar image / loadscrn.pcx + the red
 # progress bar), mounted over everything for the duration of a world load
@@ -191,7 +192,18 @@ func _input(event: InputEvent) -> void:
 # mission is never yanked out from under a remount; ignored while a picker is open.
 func _unhandled_key_input(event: InputEvent) -> void:
 	var key := event as InputEventKey
-	if key == null or not key.pressed or key.echo:
+	if key == null:
+		return
+	# The USE-ITEM release edge: a latched press runs the mount toggle on RELEASE
+	# [orig: Input_ProcessFrame @0x49d520 consumes the latch on key release
+	# -> Entity_ToggleVehicleMount @0x49d6dc].
+	if not key.pressed and key.keycode == ARMORY_KEY:
+		if _use_latched:
+			_use_latched = false
+			if _state == State.WORLD and _try_toggle_mount():
+				get_viewport().set_input_as_handled()
+		return
+	if not key.pressed or key.echo:
 		return
 	# F11 fullscreen — the core-engine window concept (NovaWindow), shared with ONED.
 	if NovaWindow.is_toggle_event(event):
@@ -215,7 +227,11 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if key.keycode == ARMORY_KEY and _state == State.WORLD:
 		if _try_open_armory():
 			get_viewport().set_input_as_handled()
-		elif _try_toggle_mount():
+		else:
+			# No zone leg consumed the press: latch — the toggle runs on the release
+			# edge [orig: dword_24C18DC set @0x4e0b71; a press consumed by a zone leg
+			# suppresses the release, our latch-only-on-miss].
+			_use_latched = true
 			get_viewport().set_input_as_handled()
 		return
 	# The gameplay keys (F4 first/third person, C/Z stance) live on the shared
