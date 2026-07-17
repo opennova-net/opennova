@@ -147,9 +147,19 @@ void EntityRegistry::in_area(const Aabb &zone, std::vector<EntityHandle> &out) c
     }
 }
 
-int EntityRegistry::register_area(std::string name, const Aabb &bounds, bool active) {
-    areas_.push_back(Area{std::move(name), bounds, active});
+int EntityRegistry::register_area(std::string name, const Aabb &bounds, bool active,
+                                  int32_t zone_id) {
+    areas_.push_back(Area{std::move(name), bounds, active, zone_id});
     return static_cast<int>(areas_.size() - 1);
+}
+
+int EntityRegistry::area_index_by_zone_id(int32_t zone_id) const {
+    // First record whose authored id matches [orig: the linear scan over
+    // record[0] in the load-time zone-ref resolvers @0x453077/@0x453162].
+    for (size_t i = 0; i < areas_.size(); ++i) {
+        if (areas_[i].zone_id == zone_id) return static_cast<int>(i);
+    }
+    return -1;
 }
 
 int EntityRegistry::find_area(std::string_view name) const {

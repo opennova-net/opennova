@@ -93,6 +93,56 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 			}
 		}
 
+		// Kill tallies — the SP mission-stat buckets (the epilog score screen's count
+		// source) and the WAC bluekills/greenkills builtins. SP only [orig:
+		// Score_ProcessKillEvent @0x4fd400 — the !is_in_session gate @0x4fd447].
+		// NB: our SP-as-listen-server always runs with ctx.is_in_session=1 (the
+		// in-process loopback IS a session), so the retail SP discriminator here is
+		// world.mp_session — false for SP, stamped true by real MP hosts.
+		// Killer == the host/local player -> the by-player buckets
+		// [orig: Score_TallyKillByLocalPlayer @0x4fd160], anyone else -> the by-others
+		// family [orig: Score_TallyKillByOthers @0x4fd300]. Blue/green buckets take
+		// only PERSON victims (itemdef class 3 == our Organic kind) by the team byte
+		// [orig: victim+354; 0 = green, 1 = blue]; a blue/green NON-person tallies
+		// nothing (witnessed); any team >= 2 victim tallies as an enemy kill (the
+		// original's infantry/vehicle/aircraft split folds into one count; the epilog
+		// sums the split anyway). Point values (def+404, difficulty-scaled) and the
+		// human-player-victim bucket (victim+534 -> 0xC846A0) are unmodeled — counts
+		// only, which is what the WAC predicates and the epilog columns consume
+		// (D-AI-10; world-wac-ai-re §20.4).
+		if (!world.mp_session) {
+			if (const world::Entity *victim2 = world.registry.get(d.victim)) {
+				bool killer_is_host_player = false;
+				for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
+					if (c.link.owned_entity.valid() &&
+					    c.link.owned_entity.packed == d.killer_handle &&
+					    c.link.mode == netsim::TransportMode::Loopback) {
+						killer_is_host_player = true;
+						break;
+					}
+				}
+				world::MissionKillStats &ks = world.kill_stats;
+				const bool person = victim2->kind == world::EntityKind::Organic;
+				if (killer_is_host_player) {
+					if (victim2->team == 1) {
+						if (person) ++ks.bluekills_by_player;
+					} else if (victim2->team == 0) {
+						if (person) ++ks.greenkills_by_player;
+					} else {
+						++ks.enemy_kills_by_player;
+					}
+				} else {
+					if (victim2->team == 1) {
+						if (person) ++ks.team_kills_by_others;
+					} else if (victim2->team == 0) {
+						if (person) ++ks.friendly_kills_by_others;
+					} else {
+						++ks.enemy_kills_by_others;
+					}
+				}
+			}
+		}
+
 		if (victim_is_host_player) {
 			// [orig: respawn timer floor 3 / g_respawn_timeout / the 620-tick
 			// recent-spawn rule @0x516ec4 — the session respawn setting is unplumbed, so
@@ -106,10 +156,35 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 	world.round_sim.deaths.clear();
 }
 
+// The server win-condition check, on the original's 1 Hz periodic cadence [orig:
+// Server_CheckWinConditions @0x51ad40, called from the periodic-second block in
+// Server_TickUpdate @0x51df5a]. The round-over latch no-ops it [orig: @0x51ad4a].
+// SP carries exactly ONE auto condition: the local player is DEAD and the mission
+// does not allow SP-respawn (attrib 0x40) -> Server_ProcessRoundEnd(2) — every other
+// SP outcome comes from the WAC win/lose handlers or the BMS Blue/Red/GreenWin
+// actions [orig: @0x51ad6f]. The MP legs (zone-ownership sweep, per-game-type
+// score/time/kill limits over the team stat blocks) are unported — net track.
+void check_win_conditions(NapiNPServerCtx &ctx, world::World &world) {
+	(void)ctx;
+	if (world.round_end.ended) return;
+	// MP legs unported; mp_session (not ctx.is_in_session — always 1 on our
+	// listen server) is the retail SP discriminator.
+	if (world.mp_session) return;
+	const world::Entity *local = world.registry.get(world.cached.local_player);
+	if (local == nullptr) return;
+	const bool dead = !local->alive || (local->flags & 2u) != 0;
+	if (dead && (world.mission_attrib_flags & 0x40u) == 0)
+		world.process_round_end(2);
+}
+
 // Release due respawns: back to the spawn point at full health [orig:
 // Server_ProcessPlayerDeath -> Entity_ResetToSpawnState @0x4B9610; the D-NET-66
 // death/respawn teleport — a snap, never motion].
 void release_due_respawns(NapiNPServerCtx &ctx, world::World &world) {
+	// Respawns are gate-blocked once the round has ended — the queue simply holds
+	// [orig: the respawn request path checks g_spawn_success_gate,
+	// Server_ProcessClientRequestRespawn @0x519af6].
+	if (world.round_end.ended) return;
 	for (auto it = ctx.respawn_queue.begin(); it != ctx.respawn_queue.end();) {
 		if (world.logic_tick < it->due_tick) {
 			++it;
@@ -166,6 +241,23 @@ void Server_TickUpdate(NapiNPServerCtx &ctx, const PlayerReplicationState &fallb
 		netsim::drain_connection_c2s(world, conn.link);
 	}
 
+	// (1b) The WAC 'humans' count: active human player slots, rebuilt each server tick
+	// just before the script pass — the original also uses it as the empty-dedicated-
+	// server world-run gate (entities/WAC advance while humans > 0 || ticks == 0); an
+	// SP host always counts its own loopback player. [orig: Server_BuildEntitySlotLists
+	// @0x4f97a0 — zero @0x4f97c6, +1 per active human slot @0x4f98b1; called from
+	// Server_TickUpdate @0x51d89a before the WAC pre-pass]
+	{
+		int32_t humans = 0;
+		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+			// Entity ownership stands in for the original's slot-state-6 check —
+			// the SP host's loopback owns its player from the spawn on, while its
+			// in-match phase flag rides the burst bookkeeping.
+			if (conn.link.owned_entity.valid()) ++humans;
+		}
+		world.cached.humans = humans;
+	}
+
 	// (2) one logic tick (the host is always authority here). WAC/BMS/AI advance the world.
 	// [D-NET-123] Server_TickUpdate OWNS this logic tick — the inverse of the legacy seam, where the
 	// C2S drain ran INSIDE run_logic_tick (a net ISystem, retired P8). A binding driving the runtime
@@ -178,6 +270,11 @@ void Server_TickUpdate(NapiNPServerCtx &ctx, const PlayerReplicationState &fallb
 	// health byte carries the same-frame damage regardless).
 	route_round_deaths(ctx, world);
 	release_due_respawns(ctx, world);
+
+	// (2c) Win conditions at 1 Hz [orig: the g_periodic_second_timer block in
+	// Server_TickUpdate — reload 62 @0x51db93 — calls Server_CheckWinConditions
+	// @0x51df5a once per second].
+	if (world.logic_tick % 62u == 0) check_win_conditions(ctx, world);
 
 	// (2d) The AS capture loop at 1 Hz — slice 2 of the §5.61 witness [orig: the
 	// Server_TickUpdate g_periodic_second_timer block @0x51DF50..0x51DF8C: proximity ->

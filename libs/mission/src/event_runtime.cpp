@@ -23,6 +23,7 @@ void BmsEventSystem::load(const std::vector<bms::Event> &events,
     // restart -> 1, alternating. [orig: dword_815174 ^= 1 at the end of
     // EventTrigger_LoadAllData @0x454029, sole caller Mission_LoadBMSFile @0x40fc85]
     g_second_time_through ^= 1;
+    zone_refs_resolved_ = false; // fresh file params carry zone IDS again
     events_.clear();
     events_.reserve(events.size());
     for (const bms::Event &e : events) {
@@ -42,7 +43,56 @@ void BmsEventSystem::load(const std::vector<bms::Event> &events,
     }
 }
 
+void BmsEventSystem::resolve_zone_refs(World &w) {
+    auto area_degenerate = [&](int idx) {
+        const opennova::world::Area *a = w.registry.area(idx);
+        return a == nullptr || a->bounds.min.x == a->bounds.max.x ||
+               a->bounds.min.y == a->bounds.max.y;
+    };
+    for (ScriptedEvent &se : events_) {
+        for (bms::Trigger &t : se.triggers) {
+            int32_t *zone_param = nullptr;
+            if ((t.main_type == bms::TriggerMainType::Group ||
+                 t.main_type == bms::TriggerMainType::Single) &&
+                t.sub_type == 10) {
+                zone_param = &t.param2; // Group/SingleIsWithinArea [orig: @0x453048]
+            } else if (t.main_type == bms::TriggerMainType::Player && t.sub_type == 37) {
+                zone_param = &t.param1; // PlayerSatchel zone [orig: @0x453058]
+            }
+            if (zone_param == nullptr) continue;
+            const int idx = w.registry.area_index_by_zone_id(*zone_param);
+            if (idx < 0 || area_degenerate(idx)) {
+                // Neuter exactly like the original: main+sub zeroed, flags kept
+                // [orig: @0x45309e/@0x4530b9 — a neutered trigger falls to the
+                // evaluator default (false)].
+                t.main_type = static_cast<bms::TriggerMainType>(0);
+                t.sub_type = 0;
+            } else {
+                *zone_param = idx; // [orig: @0x453095]
+            }
+        }
+        for (bms::Action &a : se.actions) {
+            if (a.action_type != bms::ActionType::AreaAiRed &&
+                a.action_type != bms::ActionType::AreaAiBlue) {
+                continue;
+            }
+            const int idx = w.registry.area_index_by_zone_id(a.param1);
+            if (idx < 0 || area_degenerate(idx)) {
+                a.action_type = static_cast<bms::ActionType>(0); // [orig: @0x4531b1/@0x4531c6]
+            } else {
+                a.param1 = idx; // [orig: @0x453183 + the inline box copy @0x45318d..]
+            }
+        }
+    }
+}
+
 void BmsEventSystem::on_load(World &w) {
+    // File zone IDs -> zone-array indices, once per load() [orig: the mission-start
+    // resolvers @0x453000/@0x453100 run right after EventTrigger_LoadAllData].
+    if (!zone_refs_resolved_) {
+        resolve_zone_refs(w);
+        zone_refs_resolved_ = true;
+    }
     // The sticky relation/visited/group state zeroes once per mission load
     // [orig: EventSystem_FreeAll @ 0x453210].
     w.relations.clear();
@@ -299,9 +349,22 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a) {
         case bms::ActionType::ShowLoseSubgoal:
             w.effects.push({"subgoal_show", a.param1, a.param2, /*lose=*/1, 0, std::string()});
             break;
-        case bms::ActionType::BlueWin: w.effects.push({"win", 1, 0, 0, 0, std::string()}); break;
-        case bms::ActionType::RedWin: w.effects.push({"win", 2, 0, 0, 0, std::string()}); break;
-        case bms::ActionType::GreenWin: w.effects.push({"win", 0, 0, 0, 0, std::string()}); break;
+        // The three win actions end the round in-engine [orig: EventAction_Dispatch
+        // @0x45447b/0x454495/0x4544af -> Server_ProcessRoundEnd(1/2/0); the call
+        // sites gate on g_spawn_success_gate — process_round_end's own latch covers
+        // that]. The "win" effect stays as the host-presentation signal.
+        case bms::ActionType::BlueWin:
+            w.effects.push({"win", 1, 0, 0, 0, std::string()});
+            w.process_round_end(1);
+            break;
+        case bms::ActionType::RedWin:
+            w.effects.push({"win", 2, 0, 0, 0, std::string()});
+            w.process_round_end(2);
+            break;
+        case bms::ActionType::GreenWin:
+            w.effects.push({"win", 0, 0, 0, 0, std::string()});
+            w.process_round_end(0);
+            break;
         case bms::ActionType::SubGoalWon: w.effects.push({"subgoal_won", a.param1, 0, 0, 0, std::string()}); break;
         case bms::ActionType::SubGoalLost: w.effects.push({"subgoal_lost", a.param1, 0, 0, 0, std::string()}); break;
         case bms::ActionType::GroupResetHasVisited:

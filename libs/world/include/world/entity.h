@@ -133,6 +133,17 @@ struct Entity {
     uint8_t alert_state = 0;  // green/yellow/red
     int32_t ai_state = 0;     // AI component state
     int32_t ai_target = -1;   // net id of current AI target, -1 = none
+    // Targeted-by refcount (entity+530): ++ when an AI acquires this entity, -- (clamp 0)
+    // when it retargets/clears. The target scorer reads it as the anti-pile-on saturation
+    // gate (<=16) and score decay. [orig: Entity_SetAITarget @0x45d760 maintains it;
+    // AI_FindBestTargetB @0x466f60 consumes; world-wac-ai-re §16.3]
+    int16_t ai_target_refcount = 0;
+    // Per-shooter tracer cadence counter: ++ per fired round, wraps at the ammo
+    // tracer_rate, tracer on wrap. Stands in for the original's per-WEAPON-SLOT byte
+    // (weaponSlot+0x80) — one weapon per NPC today, so behavior is identical; the
+    // counter surviving a player weapon swap is the tracked delta.
+    // [orig: RoundData_SpawnRound @0x4ec199-0x4ec1bb]
+    uint8_t tracer_shot_counter = 0;
     int32_t health = 100;     // 0 -> dead
     // items.def hp (itemDef+0x17C healthMax), stamped by the host's item-traits sweep
     // (0 = unresolved). The original spawns entities at Health = healthMax
@@ -141,6 +152,24 @@ struct Entity {
     // denominator and the §5.13 vehicle health word.
     int32_t health_max = 0;
     bool alive = true;
+    // The pending death-anim selection (GamePlayerEntity +0x2C0 deathAnimStateId):
+    // written at DAMAGE time by the kill (RoundSim bullet selection [orig:
+    // Entity_HandleDamageTrigger @0x407483]), consumed once by the infantry death
+    // edge into anim_state, then cleared [orig: @0x4b9cc9..0x4b9d38]. 0 = none ->
+    // the edge falls back to 174 death_pungi.
+    int32_t death_anim_state = 0;
+    // The corpse timer (entity +0x148): seeded from the item's deathtime at the
+    // death edge, decremented per dead tick; 0 -> despawn (SP holds while the local
+    // player can see the corpse, 62-tick retries). [orig: @0x4b9c7f / @0x4b9e6a]
+    int32_t corpse_timer = 0;
+    // items.def 'deathtime' in ticks ((62*v or 496) + 62 at parse [orig:
+    // ItemDef_ParseProperty @0x49fa96 -> def+0x890]), stamped by the item-traits
+    // sweep. 0 = no token -> the corpse expires on the first dead tick (watch-check
+    // permitting), matching the original's zero-init def field.
+    int32_t deathtime_ticks = 0;
+    // items.def attrib LeaveCorpse (0x400000): the corpse never despawns.
+    // [orig: the @0x4b9e54 skip of the whole timer/despawn block]
+    bool leave_corpse = false;
     uint32_t ai_flags = 0;    // BmsiAttributeFlags
     int32_t move_speed_kph = 0;
     int32_t engage_min = 0;

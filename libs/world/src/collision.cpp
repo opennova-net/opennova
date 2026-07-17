@@ -10,6 +10,7 @@
 
 #include <io/bam.h>
 #include <terrain/height_field.h>
+#include <terrain/terrain_raycast.h>
 
 #include "world/angle.h"
 #include "world/dir_table.h"
@@ -1008,6 +1009,120 @@ int32_t CollisionWorld::raycast_ground(World &world, EntityHandle source, const 
         }
     }
     return ray.end[2];
+}
+
+// The LOS terrain leg: the ported heightmap segment raycast, both sampler
+// callbacks mapped to the bilinear column (the sampler contract allows it) and
+// every sample kHeight — the runtime height field keeps retail's clamp-to-edge
+// "terrain forever" semantics. Engine (X,Y) -> field (x, -y), the grounding
+// convention every world-side sampler call uses.
+// [orig: Terrain_RaycastHeightmapHiRes @ 0x60c760 with a null out-hit; ported as
+// the 0x60e710 sibling terrain_raycast_refined — boolean-equivalent, the sibling
+// delta is a tracked terrain-re open item.]
+namespace {
+terrain::TerrainRaycastSample los_terrain_sample(void *ctx, int32_t world_x_1616,
+                                                 int32_t world_y_1616) {
+    const auto *field = static_cast<const terrain::TerrainHeightField *>(ctx);
+    terrain::TerrainRaycastSample s;
+    s.kind = terrain::TerrainRaycastSample::kHeight;
+    const float h = terrain::height_field_height_world_bilinear(
+            *field, static_cast<float>(world_x_1616) / 65536.0f,
+            -static_cast<float>(world_y_1616) / 65536.0f);
+    s.height_1616 = static_cast<int32_t>(h * 65536.0f);
+    return s;
+}
+} // namespace
+
+bool los_terrain_blocked(const terrain::TerrainHeightField &field, const int32_t a[3],
+                         const int32_t b[3]) {
+    terrain::TerrainRaycastSampler sampler;
+    sampler.point = &los_terrain_sample;
+    sampler.bilinear = &los_terrain_sample;
+    sampler.ctx = const_cast<terrain::TerrainHeightField *>(&field);
+    return terrain::terrain_raycast_refined(sampler, a, b, nullptr);
+}
+
+bool CollisionWorld::raycast_clear(World &world, const int32_t a[3], const int32_t b[3],
+                                   EntityHandle exclude_a, EntityHandle exclude_b) {
+    // [orig: Physics_RaycastTerrainAndSectors @ 0x539910, TRUE = clear; the LOS
+    // callers pass ray radius 0, so the witnessed thick-ray Z-drop (@ 0x53994e)
+    // and volume inflation are no-ops and are folded out here.]
+    const Entity *ea = world.registry.get(exclude_a);
+    const Entity *eb = world.registry.get(exclude_b);
+
+    // Terrain leg — skipped when BOTH entities are INDOORS (the heightmap has no
+    // interiors) [orig: the Flags & 0x800000 pair gate @ 0x53994c]. The original's
+    // null-entity buried-endpoint variant (@ 0x53999a) has no caller on the LOS
+    // chain and is not modeled.
+    const bool both_indoors = ea != nullptr && eb != nullptr &&
+                              (ea->flags & kEntityFlagIndoors) != 0 &&
+                              (eb->flags & kEntityFlagIndoors) != 0;
+    if (!both_indoors && terrain != nullptr && terrain->valid() &&
+        los_terrain_blocked(*terrain, a, b))
+        return false; // [orig: heightmap hit -> return 0 @ 0x539968]
+
+    // Sector leg [orig: raycast_against_entity_pool @ 0x538720, pool 2 then pool 1
+    // @ 0x539a3a]. Degenerate segments (< 1 u) skip the walk entirely
+    // [orig: Physics_RaycastIntContext @ 0x5385e0 returns 1 -> clear on len < 16].
+    const int64_t sdx = static_cast<int64_t>(b[0]) - a[0];
+    const int64_t sdy = static_cast<int64_t>(b[1]) - a[1];
+    const int64_t sdz = static_cast<int64_t>(b[2]) - a[2];
+    const double seg_len = std::sqrt(static_cast<double>(sdx) * sdx +
+                                     static_cast<double>(sdy) * sdy +
+                                     static_cast<double>(sdz) * sdz);
+    if (static_cast<int64_t>(seg_len) < 16) return true; // < 16 raw 16.16 (1/4096 u)
+
+    CollisionRay ray;
+    ray.start[0] = a[0];
+    ray.start[1] = a[1];
+    ray.start[2] = a[2];
+    ray.end[0] = b[0];
+    ray.end[1] = b[1];
+    ray.end[2] = b[2];
+    ray.refresh();
+
+    // Per candidate [orig: the @ 0x538720 walk]: in-use with a collision model,
+    // skip flags & 1 (@ 0x538792), skip engine_flags & 0x8000000 (@ 0x5387b4),
+    // skip the excluded entities and anything standing on them (the +0x28
+    // owner-link pair test @ 0x538836-0x538877), bound-sphere broad phase (the
+    // segment box + line-distance fold of @ 0x5387c4-0x5389a4), then the TYPE-1
+    // volume convex clip (the shared @ 0x413060 core). A hit blocks — the
+    // original keeps walking to clip the nearest point; the boolean result is
+    // identical (@ 0x5390e6 miss_result = 0).
+    auto blocked_by = [&](const Entity &e) -> bool {
+        if ((e.flags & 1u) != 0) return false;
+        if ((e.engine_flags & 0x8000000u) != 0) return false;
+        if (e.handle == exclude_a || e.handle == exclude_b) return false;
+        if (e.ground_target.valid() &&
+            (e.ground_target == exclude_a || e.ground_target == exclude_b))
+            return false;
+        CollisionTargetView view;
+        std::vector<CollisionMatrix> mats;
+        const CollisionTargetView *tv = target_view(world, e.handle, view, mats);
+        if (tv == nullptr) return false;
+        if (abs32(ray.mid[0] - tv->pos[0]) >
+                    tv->bound_radius + static_cast<int32_t>(ray.half[0]) ||
+            abs32(ray.mid[1] - tv->pos[1]) >
+                    tv->bound_radius + static_cast<int32_t>(ray.half[1]) ||
+            abs32(ray.mid[2] - tv->pos[2]) >
+                    tv->bound_radius + static_cast<int32_t>(ray.half[2]))
+            return false;
+        if (ray_line_distance(ray.start, ray.dir, tv->pos) > tv->bound_radius) return false;
+        CollisionRay probe = ray; // model clip clips end in place; keep the walk ray whole
+        return collision_raycast_model(*tv, probe);
+    };
+
+    bool blocked = false;
+    world.registry.for_each([&](const Entity &e) { // pass 1: pool-2 statics
+        if (blocked || e.handle.pool() != 2) return;
+        if (blocked_by(e)) blocked = true;
+    });
+    if (blocked) return false;
+    world.registry.for_each([&](const Entity &e) { // pass 2: dynamics (Item kind off pool 2)
+        if (blocked || e.handle.pool() == 2 || e.kind != EntityKind::Item) return;
+        if (blocked_by(e)) blocked = true;
+    });
+    return !blocked;
 }
 
 int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, ResolveState &state,

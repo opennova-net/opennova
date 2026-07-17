@@ -509,14 +509,39 @@ Event byte +23 is likewise never read → reserved; byte +20 is the runtime latc
 | DIALOG / WAYPOINT (−1 = nearest) | indices |
 | COUNT / THRESHOLD / DISTANCE_M / SECONDS / SPEED_KPH / BOOL / TEXT / BIT | scalars; distances evaluate as `param<<16` → the file holds whole meters |
 
-### 7.3 ZONE refs are indices (`Entity_IsTeamInTriggerBounds @0x43c730`)
+### 7.3 ZONE refs: ids in the FILE, indices at RUNTIME (resolved at mission start)
 
-`bbox = &unk_A32D10 + 32 * param2` → param2 is the 0-based zone **array index**; the
-zone record's id u32 @0 is never read by the bounds test (`Entity_IsBmsRefInTriggerBounds
-@0x43e510` likewise). Zone-record layout confirmed: x_min@4 x_max@8 y_min@12 y_max@16
-z_min@20 z_max@24 flags@28 (bit 0x02 = constrain-Z; else Z tested ±16384). Editor
-consequence: deleting a zone can auto-repair higher param2 refs by decrement; an exact
-hit dangles.
+`bbox = &unk_A32D10 + 32 * param2` → at EVALUATION time param2 is the 0-based zone
+**array index**; the zone record's id u32 @0 is never read by the bounds test
+(`Entity_IsBmsRefInTriggerBounds @0x43e510` likewise). Zone-record layout confirmed:
+x_min@4 x_max@8 y_min@12 y_max@16 z_min@20 z_max@24 flags@28 (bit 0x02 = constrain-Z;
+else Z tested ±16384).
+
+**Witnessed 2026-07-16 (session 6): the FILE carries zone IDS, remapped at load.**
+Two mission-start resolvers walk every event's triggers/actions right after
+`EventTrigger_LoadAllData`:
+
+- `EventTrigger_ResolveZoneTriggerRefs @0x453000` (ex the IDB's
+  `EventTrigger_ResolveWeaponActionRefs` misnomer): for triggers (main 1 Group /
+  2 Single, sub 10 IsWithinArea → param2) and (main 7 Player, sub 37
+  PlayerSatchel → param1), scans `unk_A32D10` for `record[0] == id` and rewrites
+  the param to the array INDEX; a missing id or a degenerate box
+  (x_min==x_max || y_min==y_max) NEUTERS the trigger (main_type=0 + sub_type=0,
+  flags kept → the evaluator default, false — a negated dangling ref therefore
+  reads TRUE, retail behavior).
+- `EventTrigger_ResolveZoneActionRefs @0x453100` (ex `resolve_weapon_slot_triggers`):
+  the same for actions 12/13 AreaAiRed/Blue (param1), additionally inlining the
+  zone box into the action params (+12 x_min, +20 y_min, +24 x_max, +28 y_max);
+  dangling refs zero the action_type.
+
+Port: `BmsEventSystem::resolve_zone_refs` (one-shot per `load()`, run from
+`on_load`; areas carry their authored id via `EntityRegistry::register_area`).
+Our area-AI dispatch resolves boxes at dispatch time, so the index rewrite alone
+preserves behavior (the inline copy is a noted non-port). Discovered via the
+04TR.bms probe: its negated `SingleIsWithinArea(10000, zone 6)` out-of-bounds
+watchdog fired RedWin at spawn while the refs were treated as indices. Editor
+consequence stands: deleting a zone whose id others reference dangles them —
+now with the witnessed neuter semantics rather than an OOB read.
 
 ### 7.4 Triggers (`EventTrigger_EvaluateCondition @0x453620`)
 
@@ -609,7 +634,7 @@ display as raw values and round-trip.
 | 5 | MisvarChange | `dword_C6B240[p1] op p2` | MISSION_VAR | value | — | 1=Set 2=Add 3=Sub 4=Inc 5=Dec |
 | 6 | OutputText | `HUD_DisplayTriggeredText(p1)` | TEXT id | — | — | — |
 | 7 | PlayWavList | `Dialog_PlayByIndex(p1)` gated p2 | DIALOG/wav | BOOL (1=always) | — | — |
-| 8/9/10 | Blue/Red/GreenWin | `Server_ProcessRoundEnd(1/2/0)` | — | — | — | — |
+| 8/9/10 | Blue/Red/GreenWin | `Server_ProcessRoundEnd(1/2/0)` — the shared round-end entry (the WAC win/lose handlers call the same; full decode + the SP end presentation in [world-wac-ai-re §20](../world/world-wac-ai-re.md)) | — | — | — | — |
 | 11 | GroupVelocity | `Entity_SetMoveSpeedKPH(p1,p2)` | GROUP | SPEED_KPH | — | — |
 | 12/13 | AreaAiRed/Blue | `Entity_KillTeamInBounds(block)` | AREA_ID | — | — | AI sub-type |
 | 14/15 | SubGoalWon/Lost | win/lose subgoal p1 | SUBGOAL 1..8 | — | — | — |

@@ -46,6 +46,12 @@ world::AmmoTable build_ammo_table(const DefAmmoFile &ammo) {
 			if (!opennova::strutil::iequals(src.hit_effect, "none")) dst.effect = src.hit_effect;
 			if (!opennova::strutil::iequals(src.impact_sound, "none")) dst.sound = src.impact_sound;
 		}
+		e.ai_launch_set = d.ai_launch;
+		e.ai_launch_effect = d.ai_launcheffect;
+		e.mf_light = d.mf_light;
+		e.mf_light_value = d.mf_light_value;
+		e.tracer_type_friendly = d.tracer_type_friendly;
+		e.tracer_type_enemy = d.tracer_type_enemy;
 		table.entries.push_back(std::move(e));
 	}
 	return table;

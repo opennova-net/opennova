@@ -328,6 +328,12 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 		const uint32_t attrib = p_item_db->get_attrib(def_id);
 		e->is_capture_trigger = (attrib & 0x20000u) != 0;
 		e->is_spawn_point = (attrib & 0x40000u) != 0;
+		// Death-presentation traits: LeaveCorpse (attrib 0x400000) keeps the corpse
+		// forever; deathtime (def+0x890, parse-scaled ticks) seeds the corpse timer at
+		// the death edge. [orig: ItemDef_ParseProperty @0x4a09d3 / @0x49fa6c; consumers
+		// Entity_UpdateInfantryAI @0x4b9e54 / @0x4b9c97; world-wac-ai-re §19]
+		e->leave_corpse = (attrib & 0x400000u) != 0;
+		e->deathtime_ticks = p_item_db->get_deathtime_ticks(def_id);
 		// Vehicle motor traits: the pre-scaled items.def physics block + the PlayerControl
 		// attrib (0x40) gate, keyed by item id in the world table. Fills once per distinct
 		// id; the AI tick's vehicle pass drives pool-1 entities whose traits carry a
@@ -356,6 +362,39 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 	// the latch is Server_UpdateCaptureZoneEntities' first act @0x519764; net-re §5.61]
 	opennova::world::zone_chain_build_from_mission(*world_, world_->zone_chain);
 	opennova::world::zone_chain_latch_control(*world_, world_->zone_chain);
+}
+
+// The D-AI-5 host weapon seed. The original resolves the items.def ammo_closeattack/
+// easyrocket/advancedrocket/marker3 names into ammo-def ids on the def and block-copies
+// them onto the entity (+0x358..0x35B; the copy site is the open world-wac-ai-re §17.7
+// item 1 — no per-field writer exists). Until that copy is witnessed, the port carries
+// ONE ammo id + clipsize per NPC (AiProfile — JO riflemen author all four slots to the
+// same rifle round), stamped here from the item database against the loaded ammo table.
+// Also seeds the spawn magazine: word entity+0x35C = itemDef+0x894 clipsize [orig:
+// Entity_ResetToSpawnState @ 0x4b97a9/0x4b97b5]. Consumption stays motor-gated: only
+// the infantry fire pass reads ammo_primary (host-side NPCs; never the local player).
+// [orig: ItemDef_ParseProperty @ 0x4a1823 (-> def+0x56B) / @ 0x49fa1c (-> def+0x894);
+// docs/divergence-ledger.md D-AI-5]
+int NovaSimulation::resolve_ai_weapons(const Ref<NovaItemDatabase> &p_item_db) {
+	if (!world_ || !world_->ai || p_item_db.is_null()) return 0;
+	if (world_->ammo.empty()) return 0; // no ammo.def loaded — NPCs stay unarmed
+	int armed = 0;
+	for (int i = 0; i < world_->ai->count(); ++i) {
+		opennova::world::AiEntity *ae = world_->ai->at(i);
+		if (ae == nullptr) continue;
+		const opennova::world::Entity *e = world_->registry.get(ae->handle);
+		if (e == nullptr) continue;
+		const int def_id = static_cast<int>(e->item_id) + opennova::mission::kItemIdOffset;
+		const String ammo_name = p_item_db->get_ammo_closeattack(def_id);
+		if (ammo_name.is_empty()) continue; // def authors no anim-fire round (e.g. the player)
+		const int ammo = world_->ammo.index_of(ammo_name.utf8().get_data());
+		if (ammo < 0) continue; // name not in this mission's ammo.def — stay unarmed
+		ae->profile.ammo_primary = ammo;
+		ae->profile.clip_size = p_item_db->get_clipsize(def_id);
+		ae->inf.magazine = static_cast<int16_t>(ae->profile.clip_size);
+		++armed;
+	}
+	return armed;
 }
 
 namespace {
@@ -744,6 +783,10 @@ void NovaSimulation::finish_load(const opennova::bms::File &file) {
 	// One world, three systems, the faithful tick order. The AI-change action family reaches
 	// brains through World::ai; wire it before registering so the pre-mission pass can dispatch.
 	bms_->load(file.events, file.triggers, file.actions);
+	// Mission attribute flags -> the world (0x40 = SinglePlayerRespawn gates the SP
+	// death auto-lose in check_win_conditions). [orig: Bms_AttribFlags @0xa76258,
+	// read by Server_CheckWinConditions @0x51ad6f]
+	world_->mission_attrib_flags = static_cast<uint32_t>(file.header.attrib_flags);
 	world_->ai = ai_.get();
 	// P7 listen server (SP + LAN host): stand up the npruntime in-match runtime (mode-3 HostClient
 	// over an in-process loopback, the faithful §5.0 path). Server_TickUpdate owns the logic tick +
@@ -856,6 +899,9 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_local_player_class"), &NovaSimulation::get_local_player_class);
 	ClassDB::bind_method(D_METHOD("get_local_player_weapon_name"), &NovaSimulation::get_local_player_weapon_name);
 	ClassDB::bind_method(D_METHOD("drain_effects"), &NovaSimulation::drain_effects);
+	ClassDB::bind_method(D_METHOD("drain_fire_presentation_events"),
+			&NovaSimulation::drain_fire_presentation_events);
+	ClassDB::bind_method(D_METHOD("get_tracer_rounds"), &NovaSimulation::get_tracer_rounds);
 	ClassDB::bind_method(D_METHOD("set_wac_program", "program"), &NovaSimulation::set_wac_program);
 	ClassDB::bind_method(D_METHOD("get_wac_program"), &NovaSimulation::get_wac_program);
 	ClassDB::bind_method(D_METHOD("compile_and_set_wac", "sources"), &NovaSimulation::compile_and_set_wac);
@@ -875,6 +921,9 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_global_variable", "index"), &NovaSimulation::get_global_variable);
 	ClassDB::bind_method(D_METHOD("get_fired_events_snapshot"), &NovaSimulation::get_fired_events_snapshot);
 	ClassDB::bind_method(D_METHOD("get_entity_debug", "index"), &NovaSimulation::get_entity_debug);
+	ClassDB::bind_method(D_METHOD("debug_set_entity_health", "index", "hp"), &NovaSimulation::debug_set_entity_health);
+	ClassDB::bind_method(D_METHOD("debug_set_entity_position", "index", "mission_pos"), &NovaSimulation::debug_set_entity_position);
+	ClassDB::bind_method(D_METHOD("get_round_outcome_debug"), &NovaSimulation::get_round_outcome_debug);
 	ClassDB::bind_static_method("NovaSimulation", D_METHOD("ai_state_name", "state"), &NovaSimulation::ai_state_name);
 	ClassDB::bind_static_method("NovaSimulation", D_METHOD("infantry_anim_key", "state"), &NovaSimulation::infantry_anim_key);
 	ClassDB::bind_method(D_METHOD("get_entity_count"), &NovaSimulation::get_entity_count);
@@ -913,6 +962,7 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_infantry_anim_map", "resource_root", "adm_name"), &NovaSimulation::set_infantry_anim_map);
 	ClassDB::bind_method(D_METHOD("resolve_infantry_adm_ids", "resource_root", "item_db"), &NovaSimulation::resolve_infantry_adm_ids);
 	ClassDB::bind_method(D_METHOD("resolve_item_traits", "item_db"), &NovaSimulation::resolve_item_traits);
+	ClassDB::bind_method(D_METHOD("resolve_ai_weapons", "item_db"), &NovaSimulation::resolve_ai_weapons);
 	ClassDB::bind_method(D_METHOD("resolve_collision_instances", "item_db", "placer"),
 	                     &NovaSimulation::resolve_collision_instances);
 	ClassDB::bind_method(D_METHOD("get_collision_debug"), &NovaSimulation::get_collision_debug);
@@ -2266,6 +2316,60 @@ Array NovaSimulation::drain_effects() {
 	return out;
 }
 
+// The host fire-presentation drain — see the header note. Direction math mirrors
+// the round spawn's mission-frame forward (cos yaw * cp, sin yaw * cp, sin pitch)
+// [orig: RoundData_SpawnRound @0x4ec5e9], axis-mapped mission -> godot (x, z, -y).
+Array NovaSimulation::drain_fire_presentation_events() {
+	Array out;
+	if (!loaded_) return out;
+	constexpr double kRadPerBam = (2.0 * 3.14159265358979323846) / 4294967296.0;
+	const bool have_local = world_->cached.local_player.valid();
+	const uint16_t local_packed = have_local ? world_->cached.local_player.packed : 0xFFFF;
+	for (const opennova::world::FireEvent &fe : world_->round_sim.fired) {
+		Dictionary d;
+		d["origin"] = Vector3(fe.origin.x, fe.origin.z, -fe.origin.y);
+		const double bearing = static_cast<double>(fe.yaw_bam) * kRadPerBam;
+		const double pitch = static_cast<double>(fe.pitch_bam) * kRadPerBam;
+		const double cp = std::cos(pitch);
+		d["forward"] = Vector3(static_cast<real_t>(std::cos(bearing) * cp),
+				static_cast<real_t>(std::sin(pitch)),
+				static_cast<real_t>(-std::sin(bearing) * cp));
+		d["shooter_handle"] = static_cast<int>(fe.shooter_handle);
+		d["is_local_player"] = have_local && fe.shooter_handle == local_packed;
+		d["ammo_index"] = fe.ammo_index;
+		const opennova::world::AmmoTableEntry *ammo = world_->ammo.by_index(fe.ammo_index);
+		d["sound_set"] = ammo ? String(ammo->ai_launch_set.c_str()) : String();
+		d["effect"] = ammo ? String(ammo->ai_launch_effect.c_str()) : String();
+		d["mf_light"] = ammo ? ammo->mf_light : 0;
+		out.push_back(d);
+	}
+	world_->round_sim.fired.clear();
+	return out;
+}
+
+// Live tracer rounds for the streak layer — see the header note.
+PackedFloat32Array NovaSimulation::get_tracer_rounds() const {
+	PackedFloat32Array out;
+	if (!loaded_) return out;
+	for (const opennova::world::LiveRound &r : world_->round_sim.rounds) {
+		if (!r.active || !r.tracer) continue;
+		const opennova::world::AmmoTableEntry *ammo = world_->ammo.by_index(r.ammo_index);
+		const int64_t base = out.size();
+		out.resize(base + 9);
+		float *w = out.ptrw() + base;
+		w[0] = r.pos.x;
+		w[1] = r.pos.z;
+		w[2] = -r.pos.y;
+		w[3] = r.vel.x;
+		w[4] = r.vel.z;
+		w[5] = -r.vel.y;
+		w[6] = static_cast<float>(r.team);
+		w[7] = ammo ? static_cast<float>(ammo->tracer_type_friendly) : 0.0f;
+		w[8] = ammo ? static_cast<float>(ammo->tracer_type_enemy) : 0.0f;
+	}
+	return out;
+}
+
 void NovaSimulation::set_wac_program(const Ref<NovaWacProgram> &p_program) {
 	wac_program_ = p_program;
 	if (!loaded_ || !wac_) {
@@ -2338,8 +2442,57 @@ void NovaSimulation::set_mission_variable(int index, int value) {
 	if (world_) world_->vars.set_mission(index, value);
 }
 
+// Probe/diagnostic seam beside get_entity_debug: write an AI entity's health through
+// the same stores the scripted SETHP path touches (registry + the motor copy)
+// [orig: the WAC SETHP op writes entity+286]. Lets in-game probes shorten a fight
+// without bypassing the damage/death chain under test.
+void NovaSimulation::debug_set_entity_health(int p_index, int p_hp) {
+	if (!ai_ || !world_) return;
+	AiEntity *e = ai_->at(p_index);
+	if (!e) return;
+	e->health = static_cast<int16_t>(p_hp);
+	if (opennova::world::Entity *ent = world_->registry.get(e->handle)) {
+		ent->health = p_hp;
+		ent->alive = p_hp > 0;
+	}
+}
+
+// Probe seam beside debug_set_entity_health: teleport an AI entity through both
+// position stores (registry + motor copy) — mission-space coordinates. Lets
+// in-game probes bring a reachable victim to the player when the mission
+// geography (interiors, fences) defeats straight-line navigation.
+void NovaSimulation::debug_set_entity_position(int p_index, const Vector3 &p_mission_pos) {
+	if (!ai_ || !world_) return;
+	AiEntity *e = ai_->at(p_index);
+	if (!e) return;
+	e->pos[0] = static_cast<int32_t>(p_mission_pos.x * 65536.0f);
+	e->pos[1] = static_cast<int32_t>(p_mission_pos.y * 65536.0f);
+	e->pos[2] = static_cast<int32_t>(p_mission_pos.z * 65536.0f);
+	if (opennova::world::Entity *ent = world_->registry.get(e->handle)) {
+		ent->position.x = p_mission_pos.x;
+		ent->position.y = p_mission_pos.y;
+		ent->position.z = p_mission_pos.z;
+	}
+}
+
 int NovaSimulation::get_mission_variable(int index) const {
 	return world_ ? world_->vars.get_mission(index) : 0;
+}
+
+Dictionary NovaSimulation::get_round_outcome_debug() const {
+	Dictionary out;
+	if (!world_) return out;
+	out["ended"] = world_->round_end.ended;
+	out["winner_team"] = world_->round_end.winner_team;
+	out["bluekills"] = world_->kill_stats.bluekills_by_player;
+	out["greenkills"] = world_->kill_stats.greenkills_by_player;
+	out["enemy_kills"] = world_->kill_stats.enemy_kills_by_player;
+	out["team_kills_by_others"] = world_->kill_stats.team_kills_by_others;
+	out["friendly_kills_by_others"] = world_->kill_stats.friendly_kills_by_others;
+	out["enemy_kills_by_others"] = world_->kill_stats.enemy_kills_by_others;
+	out["humans"] = world_->cached.humans;
+	out["mp_session"] = world_->mp_session;
+	return out;
 }
 
 bool NovaSimulation::has_event_fired(int index) const {
@@ -2424,6 +2577,9 @@ Dictionary NovaSimulation::get_entity_debug(int p_index) const {
 	// invalid UTF-8 here. Names are ASCII in practice; revisit if mojibake shows.
 	out["name"] = ent ? String(ent->name.c_str()) : String();
 	out["group_id"] = ent ? static_cast<int>(ent->group_id) : 0;
+	out["team"] = ent ? static_cast<int>(ent->team) : -1;
+	out["pool"] = ent ? ent->handle.pool() : -1;
+	out["engine_flags"] = ent ? static_cast<int64_t>(ent->engine_flags) : 0;
 	out["waypoint_id"] = ent ? static_cast<int>(ent->waypoint_id) : 0;
 	out["wp_number"] = ent ? ent->wp_number : 0;
 	out["health"] = ent ? ent->health : 0;
@@ -2496,6 +2652,22 @@ Dictionary NovaSimulation::get_entity_debug(int p_index) const {
 	out["infantry_move_mode"] = e->inf.move_mode;
 	out["anim_state"] = e->inf.active ? e->inf.anim_state : -1;
 	out["anim_key"] = e->inf.active ? infantry_anim_key(e->inf.anim_state) : String();
+	// Infantry combat diagnostics (the P1 threat-loop bring-up surface): the
+	// perception/attack ranges the scan reads (AiSlot +68/+60, world units), the
+	// D-AI-5 weapon seed (AiProfile ammo index + clip, the live magazine word),
+	// and the current combat target.
+	out["sight_range_u"] = e->slot.f[17] / 65536.0;
+	out["attack_range_u"] = e->slot.f[15] / 65536.0;
+	out["ammo_primary"] = e->profile.ammo_primary;
+	out["clip_size"] = e->profile.clip_size;
+	out["magazine"] = static_cast<int>(e->inf.magazine);
+	out["combat_target_valid"] = e->inf.combat_target.valid();
+	// Death presentation (P1c): the damage-time selection still pending consume,
+	// the live corpse countdown, and the def traits behind them (world-wac-ai-re §19).
+	out["death_anim_state"] = ent ? ent->death_anim_state : 0;
+	out["corpse_timer"] = ent ? ent->corpse_timer : 0;
+	out["deathtime_ticks"] = ent ? ent->deathtime_ticks : 0;
+	out["leave_corpse"] = ent ? ent->leave_corpse : false;
 	return out;
 }
 

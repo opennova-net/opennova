@@ -366,6 +366,23 @@ func test_fx2ssn_routes_position_owner_and_up_orientation() -> void:
 	_detach_runtime(world)
 
 
+func test_round_outcome_effects_pass_through_to_hud_consumers() -> void:
+	# The round-outcome trio (win/lose/round_end) is produced sim-side [orig: the WAC
+	# win/lose handlers @0x4ed4a0/@0x4ed3f0 + Server_ProcessRoundEnd @0x5164f0] and is
+	# host presentation on this side: the router must pass every row through to
+	# mission_effects (the HUD banner + the shell's end-of-mission flow consume there).
+	var world := _make_world()
+	add_child_autofree(world)
+	watch_signals(world)
+	var rows := [
+		{"kind": "lose", "a": 0, "str": "STRMISC_KILLEDGREEN"},
+		{"kind": "win", "a": 1},
+		{"kind": "round_end", "a": 2},
+	]
+	world._on_runtime_effects(rows)
+	assert_signal_emitted_with_parameters(world, "mission_effects", [rows])
+
+
 func test_load_world_requires_hardcoded_environment_in_global_root() -> void:
 	var root := OS.get_cache_dir().path_join(WORLD_TEST_ROOT).path_join("missing_env_%d" % Time.get_ticks_usec())
 	DirAccess.make_dir_recursive_absolute(root)

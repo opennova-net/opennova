@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 namespace opennova::world {
 
@@ -267,7 +268,8 @@ void h_ground_followwp_tick(AiThinkCtx &ctx) {
 
     // Target acquisition is skipped when profile+100 & 2 (use-fallback). [orig: 0x46775c]
     AiTarget tgt{};
-    bool has_target = ((e.profile.flags100 & 2) != 0) ? false : ctx.sys->acquire_target(e, tgt);
+    bool has_target =
+        ((e.profile.flags100 & 2) != 0) ? false : ctx.sys->acquire_target(*ctx.world, e, tgt);
 
     if ((e.profile.flags96 & 0x10) != 0) { // can-fire
         if (b.f[AiBrain::kFireTimer] <= 0)
@@ -282,7 +284,7 @@ void h_ground_followwp_tick(AiThinkCtx &ctx) {
         b.f[AiBrain::kFireTimer] = ft - b.f[AiBrain::kStep];
 
     if (has_target)
-        ctx.sys->engage_target(e, tgt);       // [orig: relation matrices + SetAITarget + pending=17]
+        ctx.sys->engage_target(*ctx.world, e, tgt); // [orig: rel quads + SetAITarget + pending=17]
     else
         ctx.sys->update_waypoint_movement(e); // [orig: AI_UpdateWaypointMovement @0x457bd0]
 }
@@ -346,8 +348,365 @@ void h_combat_event(AiThinkCtx &ctx) {
     }
 }
 
+// [orig: AI_EnterState_GroundCombat @0x467650] state-17 enter: AiSlot+136 = 2, brain
+// alert cur/pend = 2, TriggerGroup_SetAlertRed(commandGroup) [orig: @0x40d630], ally
+// wake at 100 u (0x640000), brain moveStep = 1. (world-wac-ai-re §16.1)
+void h_enter_ground_combat(AiThinkCtx &ctx) {
+    AiEntity &e = *ctx.self;
+    AiBrain &b = e.brain;
+    b.f[AiBrain::kAlert] = 2;
+    b.f[AiBrain::kPrevAlert] = 2;
+    if (ctx.world != nullptr) {
+        if (const Entity *se = ctx.world->registry.get(e.handle))
+            ctx.world->relations.group(se->group_id).alert = TriggerRelations::kAlertRed;
+        ctx.sys->alert_nearby_allies(*ctx.world, e, 0x640000); // sets slot+136 = 2 too
+    } else {
+        e.slot.bytes()[AiSlot::kMoveFlagByte] = 2;
+    }
+    b.f[AiBrain::kStep] = 1;
+}
+
+// [orig: AI_EnterState_GroundEvade @0x467400] state-18 enter: the same alert block, then
+// route by def class flags (profile+96): bit0 organic -> pending 17 when brain[38] holds a
+// target else 16, TAIL-CALLING that state's enter (apply_transition re-reads kPendState
+// after enter, so the re-route commits — the witnessed off_815238[4*state] tail call);
+// bit2 tracked -> 17; else wheeled-alive -> the flee waypoint (controller triple
+// {1, 0x7FFFFFFF, 1}, freeze work transform, moveStep 16); dead -> death event 3|4.
+void h_enter_ground_evade(AiThinkCtx &ctx) {
+    AiEntity &e = *ctx.self;
+    AiBrain &b = e.brain;
+    b.f[AiBrain::kAlert] = 2;
+    b.f[AiBrain::kPrevAlert] = 2;
+    if (ctx.world != nullptr) {
+        if (const Entity *se = ctx.world->registry.get(e.handle))
+            ctx.world->relations.group(se->group_id).alert = TriggerRelations::kAlertRed;
+        ctx.sys->alert_nearby_allies(*ctx.world, e, 0x640000);
+    } else {
+        e.slot.bytes()[AiSlot::kMoveFlagByte] = 2;
+    }
+    if ((e.profile.flags96 & 1) != 0) {        // organic class
+        const int32_t next = (b.f[AiBrain::kTargetSlot] != 0) ? kAiGroundCombat
+                                                              : kAiGroundFollowWp;
+        b.set_pend(next);
+        ctx.sys->row(next).enter(ctx);          // tail-call the routed enter
+        return;
+    }
+    if ((e.profile.flags96 & 4) != 0) {        // tracked class
+        b.set_pend(kAiGroundCombat);
+        ctx.sys->row(kAiGroundCombat).enter(ctx);
+        return;
+    }
+    if (e.health > 0) {                        // wheeled, alive: flee waypoint
+        e.patrol_f0 = 1;                       // [orig: controller triple {1, 0x7FFFFFFF, 1}]
+        e.patrol_delta = 0x7FFFFFFF;
+        e.patrol_goal = 1;
+        b.f[AiBrain::kWorkPosX] = e.pos[0];    // freeze the work transform at self
+        b.f[AiBrain::kWorkPosY] = e.pos[1];
+        b.f[AiBrain::kWorkPosZ] = e.pos[2];
+        b.f[AiBrain::kWorkHeading] = e.heading;
+        b.f[AiBrain::kStep] = 16;
+        return;
+    }
+    ctx.sys->queue_death_event(e);             // dead: crash(3)/still(4) by |vel|
+}
+
+// [orig: AIEntity_ProcessWeaponFire @0x472e00] the state-17 GROUND_COMBAT tick — the
+// vehicle/emplacement fire+combat routine (full digest world-wac-ai-re §17.6). Ported
+// structurally; the fire-transform solver (Entity_ComputeWeaponFireTransform_0
+// @0x455b30, §17.7 item 2) is a visible stub, so no SM-layer round spawns yet — the
+// D-AI-2 residual. Riflemen fire through the infantry pass instead (§17.4).
+void h_ground_combat_tick(AiThinkCtx &ctx) {
+    AiEntity &e = *ctx.self;
+    AiBrain &b = e.brain;
+    World &world = *ctx.world;
+
+    if (e.health <= 0) { // [orig: the death leg — event 3/4 by horizontal speed]
+        ctx.sys->queue_death_event(e);
+        return;
+    }
+
+    const int32_t step = b.f[AiBrain::kStep];
+    // The PACKED cooldown pair: one add advances both u16 words (+208/+210) by step,
+    // low-word carry included. [orig: brain[52] += 65537 * deltaTime]
+    b.f[AiBrain::kCooldownPair] = static_cast<int32_t>(
+        static_cast<uint32_t>(b.f[AiBrain::kCooldownPair]) +
+        0x10001u * static_cast<uint32_t>(step));
+    b.f[AiBrain::kTickAccum] += step;
+    // The burst window: += step while armed and <= 186, else reset. [orig: brain[181]]
+    if ((e.profile.flags100 & 0x40) != 0 && b.f[AiBrain::kBurstWindow] != 0 &&
+        static_cast<uint32_t>(b.f[AiBrain::kBurstWindow]) <= 0xBAu)
+        b.f[AiBrain::kBurstWindow] += step;
+    else
+        b.f[AiBrain::kBurstWindow] = 0;
+
+    bool processed = false;
+    if (b.f[AiBrain::kTickAccum] >= 16) { // one processed tick per accumulated 16
+        b.f[AiBrain::kCombatTimer] += 16;
+        b.f[AiBrain::kTickAccum] = 0;
+        processed = true;
+        if ((e.profile.flags96 & 0x10) != 0 && b.f[AiBrain::kFireTimer] > 0)
+            ++ctx.sys->unported_calls; // the flare dispenser [orig: 0x455ef0; §16.5 item 5]
+        b.f[AiBrain::kFireTimer] = std::max(0, b.f[AiBrain::kFireTimer] - 16);
+        b.f[AiBrain::kFireDelay] = std::max(0, b.f[AiBrain::kFireDelay] - 16);
+        b.f[AiBrain::kRetargetTimer] += 16; // the §16.3 retarget cadence incrementer
+    }
+
+    // Stationary mode (profile+100 & 0x80): fire rides the turret solver's aligned flag —
+    // unported (the D-AI-2 residual), so only the give-up + bookkeeping run.
+    if ((e.profile.flags100 & 0x80) != 0) {
+        ++ctx.sys->unported_calls;
+        if (b.f[AiBrain::kCombatTimer] > 620)
+            b.set_pend(b.f[AiBrain::kFallback]); // [orig: pending = fallback past 620]
+        if (processed) {
+            ctx.sys->ai_set_target(world, e, EntityHandle{}); // [orig: SetAITarget(0)/tick]
+            if ((e.profile.flags100 & 1) != 0) ++ctx.sys->unported_calls; // AI_UpdateMovementTarget
+        }
+        return;
+    }
+
+    const int32_t tgt_packed = b.f[AiBrain::kTargetSlot];
+    Entity *tent = (tgt_packed != 0)
+                       ? world.registry.get(EntityHandle{static_cast<uint16_t>(tgt_packed - 1)})
+                       : nullptr;
+
+    if (tent == nullptr) { // no target: sweep-search + acquire [orig: the brain[38]==0 leg]
+        b.f[AiBrain::kSweepPhase] = -196608;
+        b.f[AiBrain::kWorkPosX] = e.pos[0]; // [orig: brain[129]/[130] = 0 — work-relative;
+        b.f[AiBrain::kWorkPosY] = e.pos[1]; //  rebase freezes the absolute work pos instead]
+        if ((e.profile.flags100 & 1) != 0) {
+            ctx.sys->update_waypoint_movement(e); // moves while searching
+        } else if ((e.profile.flags100 & 4) != 0) {
+            b.f[AiBrain::kWorkHeading] = e.heading; // hold heading
+        } else {
+            // The turret search sweep: yaw +- ~90 deg by the no-target timer phase.
+            // [orig: <=124 or >434 -> yaw + 1073741760; else yaw]
+            const int32_t t = b.f[AiBrain::kCombatTimer];
+            b.f[AiBrain::kWorkHeading] =
+                (t <= 124 || t > 434) ? e.heading + 1073741760 : e.heading;
+            b.f[AiBrain::kWorkPitch] = 0;
+            b.f[AiBrain::kWorkRoll] = 0;
+            b.f[AiBrain::kOutSpeed] = b.f[AiBrain::kSpeedB];
+            AiTarget found{};
+            if (ctx.sys->acquire_target(world, e, found)) {
+                // This site's engage: both branches jitter via the inline LCG, guarded by
+                // base-delay != 0 (unlike the state-16 engage's A/B split — §17.6 NOTE).
+                const Entity *se = world.registry.get(e.handle);
+                const Entity *te = found.handle.valid() ? world.registry.get(found.handle)
+                                                        : nullptr;
+                if (se != nullptr && te != nullptr)
+                    ctx.sys->apply_engage_relations(world, *se, *te); // sees + targeted quads
+                ctx.sys->ai_set_target(world, e, found.handle);
+                ctx.sys->target_set_calls.push_back(found.net_id);
+                b.f[AiBrain::kCombatTimer] = 0;
+                b.f[AiBrain::kFireDelay] = e.profile.field104;
+                if (e.profile.field104 != 0)
+                    b.f[AiBrain::kFireDelay] += static_cast<int32_t>(
+                        static_cast<uint16_t>(ctx.sys->prng_step_a()) % 62);
+                return;
+            }
+        }
+        if (b.f[AiBrain::kCombatTimer] > 620) { // give up -> fallback state
+            ctx.sys->ai_set_target(world, e, EntityHandle{});
+            b.set_pend(b.f[AiBrain::kFallback]);
+        }
+        return;
+    }
+
+    if (tent->health <= 0) { // target dead -> clear [orig: SetAITarget(0), return]
+        ctx.sys->ai_set_target(world, e, EntityHandle{});
+        return;
+    }
+
+    if (!processed) return; // continuation volleys ride the solver — stubbed (D-AI-2)
+
+    if (b.f[AiBrain::kFireDelay] != 0) { // the engage fire delay: move only
+        if ((e.profile.flags100 & 1) != 0) ctx.sys->update_waypoint_movement(e);
+        return;
+    }
+
+    // Retarget cadence [orig: AIEntity_TryAcquireTarget @0x4716b0 — brain[42] > 248].
+    if (b.f[AiBrain::kRetargetTimer] > 248) {
+        b.f[AiBrain::kRetargetTimer] = 0;
+        AiTarget fresh{};
+        if (ctx.sys->acquire_target(world, e, fresh) && fresh.handle.valid()) {
+            ctx.sys->ai_set_target(world, e, fresh.handle);
+            tent = world.registry.get(fresh.handle);
+            if (tent == nullptr) return;
+        }
+    }
+
+    // Chase movement [orig: the mobile leg]: face the target; within the approach cap
+    // chase at speedA (min range / match-speed refinements ride the solver witness);
+    // beyond it for > 620 ticks, give up to the fallback state.
+    const int32_t tpos[3] = {static_cast<int32_t>(tent->position.x * 65536.0f),
+                             static_cast<int32_t>(tent->position.y * 65536.0f),
+                             static_cast<int32_t>(tent->position.z * 65536.0f)};
+    const int32_t bearing = bearing_bam(tpos[1] - e.pos[1], tpos[0] - e.pos[0]);
+    if ((e.profile.flags100 & 1) != 0) {
+        ctx.sys->update_waypoint_movement(e);
+    } else if ((e.profile.flags100 & 4) != 0) {
+        b.f[AiBrain::kWorkHeading] = bearing + 2147483520; // [orig: +0x7FFFFF80 half-turn]
+    } else {
+        b.f[AiBrain::kWorkHeading] = bearing;
+        const int32_t dist = dist3d_units(tpos, e.pos);
+        const int32_t cap_units = e.profile.approach_cap >> 16;
+        if (cap_units > 0 && dist > cap_units) {
+            if (b.f[AiBrain::kCombatTimer] > 620) {
+                b.set_pend(b.f[AiBrain::kFallback]);
+                ctx.sys->ai_set_target(world, e, EntityHandle{});
+                return;
+            }
+        } else {
+            b.f[AiBrain::kCombatTimer] = 0; // in range: the give-up timer rests
+        }
+        b.f[AiBrain::kWorkPosX] = tpos[0];
+        b.f[AiBrain::kWorkPosY] = tpos[1];
+        b.f[AiBrain::kOutSpeed] = b.f[AiBrain::kSpeedA];
+    }
+
+    // The fire gate + weapon legs [orig: heading delta <= (profile+67|1|2)>>1, then the
+    // per-weapon cooldown/ammo/transform/scatter chain] ride the fire-transform solver —
+    // the visible D-AI-2 stub until Entity_ComputeWeaponFireTransform_0 is witnessed.
+    const uint32_t hd = static_cast<uint32_t>(bearing - e.heading) >> 24;
+    const uint32_t folded = hd >= 0x80 ? 256 - hd : hd;
+    if (folded <= static_cast<uint32_t>(((e.profile.fov_secondary | 1) | 2) >> 1))
+        ++ctx.sys->unported_calls;
+}
+
+// The shared alert block every death-family enter runs: alert cur/prev = 2, the command
+// group goes red, allies wake at 100 u, slot move flag 2. [orig: the common head of
+// @0x467650 / @0x467400 / @0x467b20 / @0x467de0]
+void death_alert_block(AiThinkCtx &ctx, AiEntity &e) {
+    AiBrain &b = e.brain;
+    b.f[AiBrain::kAlert] = 2;
+    b.f[AiBrain::kPrevAlert] = 2;
+    if (ctx.world != nullptr) {
+        if (const Entity *se = ctx.world->registry.get(e.handle))
+            ctx.world->relations.group(se->group_id).alert = TriggerRelations::kAlertRed;
+        ctx.sys->alert_nearby_allies(*ctx.world, e, 0x640000); // sets slot+136 = 2 too
+    } else {
+        e.slot.bytes()[AiSlot::kMoveFlagByte] = 2;
+    }
+}
+
+// Queue the DESTROY event (type 4) that lands the brain in GROUND_DEAD 23.
+// [orig: the inline queue tails of @0x467b20 / @0x467cd0 — channel 0, timer 0]
+void queue_destroy_event(AiThinkCtx &ctx, AiEntity &e) {
+    AiEventEntry ev{};
+    ev.f[0] = 4;
+    ev.f[1] = (ctx.sys->index_of(e) << 16);
+    ev.set_timer(0.0f);
+    ctx.sys->events.queue(ev);
+}
+
+// Horizontal speed with the death-velocity saturation clamp.
+// [orig: the fsqrt + flt_7C19E0 min pattern shared by every death leg]
+int32_t death_speed(const AiEntity &e) {
+    double sp = std::sqrt(static_cast<double>(e.vel_x) * e.vel_x +
+                          static_cast<double>(e.vel_z) * e.vel_z);
+    if (sp > kDeathSpeedClamp) sp = kDeathSpeedClamp;
+    return static_cast<int32_t>(sp);
+}
+
+// [orig: AI_TransitionToDeath_GroundVehicle @0x467b20] state-21 (vehicle DYING) enter:
+// death transforms + net notify when not yet husked (Flags&4), the def+1352 mounted-
+// children kill loop, the alert block, moveStep 16, and — already slow (< 1057) — the
+// immediate destroy event. The death-transform leg (savedLivePose snapshot + the
+// unitType death callback's husk swap/death pieces + death sounds
+// [orig: Entity_UpdateDeathTransforms @0x494660]) is presentation the host does not
+// render for vehicles yet — the pose snapshot lands, the rest is a visible stub.
+void h_enter_vehicle_dying(AiThinkCtx &ctx) {
+    AiEntity &e = *ctx.self;
+    AiBrain &b = e.brain;
+    e.net_saved_live_pose[0] = e.pos[0]; // [orig: savedLivePose = Position @0x494684]
+    e.net_saved_live_pose[1] = e.pos[1];
+    e.net_saved_live_pose[2] = e.pos[2];
+    ++ctx.sys->unported_calls; // the husk/death-pieces callback + death sounds + S2C 0x26
+    ++ctx.sys->unported_calls; // the def+1352 kill-mounted-children loop (def byte unparsed)
+    death_alert_block(ctx, e);
+    b.f[AiBrain::kStep] = 16;  // [orig: ai_data[7] = 16 @0x467c02]
+    if (death_speed(e) < 1057) // [orig: @0x467c51 — stopped -> destroy now]
+        queue_destroy_event(ctx, e);
+}
+
+// [orig: AI_TickState_VehicleDying @0x467cd0 (ex kong 'AI_CheckVehicleStuck')] state-21
+// tick: settle the falling death physics, then once slow (< 1057) OR static since the
+// death pose (|pos - savedLivePose| < 1024 per axis) queue the destroy event; while
+// still moving, zero the work pitch/roll, the commanded speed, and the mover output.
+void h_vehicle_dying_tick(AiThinkCtx &ctx) {
+    AiEntity &e = *ctx.self;
+    AiBrain &b = e.brain;
+    ++ctx.sys->unported_calls; // [orig: Entity_ProcessFallingDeathPhysics @0x461d30]
+    const bool stopped = death_speed(e) < 1057;
+    const bool still =
+        std::abs(e.pos[0] - e.net_saved_live_pose[0]) < 1024 &&
+        std::abs(e.pos[1] - e.net_saved_live_pose[1]) < 1024 &&
+        std::abs(e.pos[2] - e.net_saved_live_pose[2]) < 1024;
+    if (stopped || still) {
+        queue_destroy_event(ctx, e); // [orig: @0x467dcb]
+    } else {
+        b.f[AiBrain::kWorkPitch] = 0; // [orig: ai_data[133] @0x467d77]
+        b.f[AiBrain::kWorkRoll] = 0;  // [orig: ai_data[134]]
+        b.f[136] = 0;                 // [orig: ai_data[136] — the commanded speed +544]
+        b.f[AiBrain::kOutSpeed] = 0;  // [orig: ai_data[128]]
+    }
+}
+
+// [orig: AI_HandleEvent_VehicleDying @0x457f50 (ex kong 'AI_HandleRetreatEvent')]
+// state-21 event: only the destroy event (4) lands -> pending GROUND_DEAD 23.
+void h_vehicle_dying_event(AiThinkCtx &ctx) {
+    if (ctx.event == nullptr) return;
+    if (ctx.event->type() != 4) return;
+    ctx.self->brain.set_pend(23);
+}
+
+// [orig: AI_TransitionToDestroyed_Vehicle @0x467de0] state-23 (GROUND_DEAD) enter:
+// the alert block, clear the target word + aim byte, the death transforms when not
+// yet husked, stamp the death tick (entity+428, first write wins — informational, not
+// modeled), clear every entity reference incl. the AI target's +530 refcount, and
+// moveStep 62.
+void h_enter_vehicle_dead(AiThinkCtx &ctx) {
+    AiEntity &e = *ctx.self;
+    AiBrain &b = e.brain;
+    death_alert_block(ctx, e);
+    ++ctx.sys->unported_calls; // the husk/death-pieces + death-sound leg (as in enter 21)
+    if (ctx.world != nullptr) {
+        if (Entity *ent = ctx.world->registry.get(e.handle)) {
+            ent->corpse_timer = 0; // [orig: entity+328 = 0 @0x467e22 — wrecks never expire]
+            ent->team = 0;         // [orig: entity+354 = 0 @0x467e2c — a wreck goes teamless
+                                   //  and drops out of ordinary target scans]
+        }
+        if (b.f[AiBrain::kTargetSlot] != 0)
+            ctx.sys->ai_set_target(*ctx.world, e, EntityHandle{}); // [orig: @0x467e86]
+    }
+    e.team = 0; // the motor-side copy the candidate scan reads
+    b.f[AiBrain::kStep] = 62; // [orig: ai_data[7] = 62 @0x467e8e]
+}
+
+// [orig: AI_TickState_VehicleDead @0x467ea0 (ex kong 'Entity_ProcessMountedInfantryFrame')]
+// state-23 tick: keep settling; the itemDef attrib&0x40 authority RESPAWN watcher
+// (cooldown countdown -> teleport to the spawn pose / bury + Entity_RespawnVehicle) is
+// a visible stub — mission vehicles without the attrib settle forever, the witnessed
+// default.
+void h_vehicle_dead_tick(AiThinkCtx &ctx) {
+    ++ctx.sys->unported_calls; // [orig: Entity_ProcessFallingDeathPhysics + the respawn leg]
+}
+
+// [orig: AI_HandleEvent_ConsumeAll @0x458080] state-23 event: swallow everything —
+// dead entities ignore commands, damage, and further death events.
+void h_vehicle_dead_event(AiThinkCtx &) {}
+
 // The 24-state dispatch table, mirroring off_815238/3C/40/44 @0x815238.
 // Columns: {enter, tick, exit, event}. U = not-yet-ported (visible stub), _ = noop.
+// State 17/18 rows ported 2026-07-16 (world-wac-ai-re §16.1/§17.6:
+// enter17 = AI_EnterState_GroundCombat @0x467650, tick17 = AIEntity_ProcessWeaponFire @0x472e00,
+// enter18 = AI_EnterState_GroundEvade @0x467400, event18 = AI_HandleEvent_GroundEvade @0x4675c0
+// = the shared h_combat_event family).
+// State 21/23 rows (the vehicle death chain) ported 2026-07-16 (world-wac-ai-re §19:
+// enter21 = AI_TransitionToDeath_GroundVehicle @0x467b20, tick21 = AI_TickState_VehicleDying
+// @0x467cd0, event21 = AI_HandleEvent_VehicleDying @0x457f50, enter23 =
+// AI_TransitionToDestroyed_Vehicle @0x467de0, tick23 = AI_TickState_VehicleDead @0x467ea0,
+// event23 = AI_HandleEvent_ConsumeAll @0x458080; the shared exit column is nullsub_70).
 constexpr AiHandler U = h_not_yet_ported;
 constexpr AiHandler _ = h_noop;
 
@@ -369,13 +728,16 @@ const StateRow kTable[kAiStateCount] = {
     /* 14 HELO_PRETTY      */ {h_reset_to_patrol, U, _, U},
     /* 15 HELO_DEAD        */ {U, U, _, U},
     /* 16 GROUND_FOLLOWWP  */ {h_set_state_idle, h_ground_followwp_tick, _, h_combat_event},
-    /* 17 GROUND_COMBAT    */ {U, U, h_clear_bone_flag, h_combat_event},
-    /* 18 GROUND_EVADE     */ {U, h_patrol_tick, _, h_combat_event},
+    /* 17 GROUND_COMBAT    */ {h_enter_ground_combat, h_ground_combat_tick, h_clear_bone_flag,
+                               h_combat_event},
+    /* 18 GROUND_EVADE     */ {h_enter_ground_evade, h_patrol_tick, _, h_combat_event},
     /* 19 GROUND_FORMATION */ {h_full_reset_to_idle, U, _, U},
     /* 20 GROUND_RETURNTOBASE */ {_, _, _, _},
-    /* 21 (transition)     */ {U, U, _, U},
+    /* 21 GROUND_DYING     */ {h_enter_vehicle_dying, h_vehicle_dying_tick, _,
+                               h_vehicle_dying_event},
     /* 22 GROUND_PRETTY    */ {h_full_reset_to_patrol, U, _, U},
-    /* 23 GROUND_DEAD      */ {U, U, _, U},
+    /* 23 GROUND_DEAD      */ {h_enter_vehicle_dead, h_vehicle_dead_tick, _,
+                               h_vehicle_dead_event},
 };
 
 const StateRow kDefaultRow = {h_noop, h_noop, h_noop, h_noop};
@@ -411,7 +773,10 @@ void AiEventQueue::process_timed(AiSystem &sys, World &world) {
                     if (pend != cur) {
                         sys.row(cur).exit(ctx);   // off_815240
                         sys.row(pend).enter(ctx); // off_815238
-                        e->brain.f[AiBrain::kCurState] = pend;
+                        // Re-read: the evade enter re-routes by rewriting the pending
+                        // state and tail-calling the routed enter [orig: @0x467400 —
+                        // the original reads the brain field, not a saved copy].
+                        e->brain.f[AiBrain::kCurState] = e->brain.f[AiBrain::kPendState];
                     }
                 }
             }
@@ -583,6 +948,27 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
     if (ctx.pre_mission) return;
     is_authority = ctx.is_authority;
     scheduler.budget = 0; // per-frame budget reset (the staggering accumulator)
+    // Drain the round sim's processed hits into the AI reaction stamps BEFORE any brain
+    // updates: infantry get wasHit/lastAttacker (consumed by the §17.1 scan + §17.3 hit
+    // reactions), SM brains get the type-1 damage AIEvent (h_combat_event -> evade).
+    // [orig: the damage chain writes the victim entity + queues the event inline —
+    // Projectile_ProcessDamageOnTarget @0x4e7fb0; our sim/AI split drains a record.]
+    for (const RoundHit &hit : world.round_sim.hits) {
+        AiEntity *victim = for_handle(hit.victim);
+        if (victim == nullptr) continue;
+        if (victim->inf.active) {
+            victim->inf.was_hit = true;
+            victim->inf.last_attacker = hit.shooter;
+        } else {
+            AiEventEntry ev{};
+            ev.f[0] = 1; // damage
+            ev.f[1] = (index_of(*victim) << 16);
+            ev.f[3] = hit.damage; // -> brain[39] kDamageInfo via h_combat_event
+            ev.set_timer(0.0f);
+            events.queue(ev);
+        }
+    }
+    world.round_sim.hits.clear();
     // Rebuild the collision proximity tables once per tick, before any entity update.
     // [orig: Entity_UpdateAllEntities @0x4c2100 -> Entity_BuildAllProximityLists
     // @0x4c20f0 (pool-2 statics + pool-0/1 snapshots) + Entity_BuildProximityListsFromPools
@@ -759,8 +1145,10 @@ void AiSystem::on_load(World &) {
     relmat_calls.clear();
     rel_ops.clear();
     target_set_calls.clear();
+    scan_candidates_.clear();
     unported_calls = 0;
     find_target_calls = 0;
+    fire_shot_seq = 0;
 }
 
 // [orig: Entity_CalcAverageGroundHeight @0x457230] 5-tap weighted ground height (16.16 fixed).
@@ -987,14 +1375,61 @@ void AiSystem::queue_death_event(AiEntity &e) {
     events.queue(ev);
 }
 
-// [orig: AI_FindBestTargetB @0x466f60] scan the injected candidate list. Per-candidate perception
-// gates (team, flags, health, self, visibility) then FOV/range/stealth scoring + mutual LOS; the
-// priority target (profile+148) bypasses scoring and returns immediately on LOS. Tracked deviation:
-// the original iterates 4 weapon slots -> g_pool_list pools with a vehicle/building sub-filter;
-// that pool selection + the relation-matrix team filter + Entity_CheckMutualLineOfSight are
-// deferred (candidates are injected pre-filtered; LOS is the per-candidate los_blocked flag).
-bool AiSystem::acquire_target(AiEntity &e, AiTarget &out) {
+// The candidate FEED (D-AI-1, witnessed world-wac-ai-re §16.2): build the eligible list
+// from the registry pools with the witnessed gates, then run the byte-exact scoring core.
+// [orig: AI_FindBestTargetB @0x466f60 iterates g_pool_list in-function per profile
+// weapon-slot class (+40+4i -> pools 0/1/2 with the building sub-filter).] Tracked
+// deviations (ledger D-AI-1): the class table comes from the unparsed ai.def profile, so
+// pools 0 and 1 scan unconditionally; the priority target (profile+148) and the building
+// class remain unmodeled; LOS = line_of_sight_clear (terrain leg, D-AI-7).
+bool AiSystem::acquire_target(World &world, AiEntity &e, AiTarget &out) {
+    scan_candidates_.clear();
+    // The teamless entry gate lives in the scoring core (it is part of @0x466f60);
+    // mirrored here only to skip the wasted pool walk.
+    if (e.team == 0 && !e.see_all) return acquire_target_from(e, scan_candidates_, out);
+    for (int pool = 0; pool <= 1; ++pool) {
+        const size_t cap = world.registry.pool_capacity(pool);
+        for (size_t s = 0; s < cap; ++s) {
+            const EntityHandle h = EntityHandle::make(pool, static_cast<int>(s));
+            const Entity *c = world.registry.get(h);
+            if (c == nullptr) continue;                    // [orig: +28 in-use]
+            if (h == e.handle) continue;                   // not self
+            if (c->health <= 0) continue;                  // [orig: +286 > 0]
+            // Team gate [orig: teamless candidates need the attacker's 0x200; same-team
+            // skipped unless 0x200].
+            if ((c->team == 0 || c->team == e.team) && !e.see_all) continue;
+            AiCandidate cand;
+            cand.handle = h;
+            cand.pos[0] = static_cast<int32_t>(c->position.x * 65536.0f);
+            cand.pos[1] = static_cast<int32_t>(c->position.y * 65536.0f);
+            cand.pos[2] = static_cast<int32_t>(c->position.z * 65536.0f);
+            cand.team = c->team;
+            cand.flags = static_cast<int32_t>(c->engine_flags); // &2/&0x8000000 skip, &0x4000 prio x6
+            cand.health = static_cast<int16_t>(std::min<int32_t>(c->health, INT16_MAX));
+            cand.visibility = c->ai_target_refcount;       // [orig: +530 refcount saturation]
+            // Per-candidate engage-range caps [orig: words +422/+420] — def fields, not yet
+            // modeled on Entity: uncapped (the profile's own range still gates).
+            cand.range_primary = INT32_MAX / 2;
+            cand.range_secondary = INT32_MAX / 2;
+            cand.relmat_id = c->group_id;                  // group key (+0x11C commandGroup)
+            cand.net_id = c->net_id;                       // single key (+0x7C SSN)
+            cand.has_controller = (c->owner_connection_id != 0);
+            cand.is_priority = false;                      // [orig: profile+148 — unmodeled]
+            cand.los_blocked = !line_of_sight_clear(world, e.pos, cand.pos, e.handle, h);
+            scan_candidates_.push_back(cand);
+        }
+    }
+    return acquire_target_from(e, scan_candidates_, out);
+}
+
+// [orig: AI_FindBestTargetB @0x466f60 scoring walk] over an explicit candidate list.
+// Per-candidate perception gates (team, flags, health, self, refcount saturation) then
+// FOV/range/stealth scoring + LOS; the priority target bypasses scoring on clear LOS.
+bool AiSystem::acquire_target_from(AiEntity &e, const std::vector<AiCandidate> &candidates,
+                                   AiTarget &out) {
     ++find_target_calls;
+    // Entry gate [orig: 0x466f60 head]: teamless scanners need the 0x200 see-all flag.
+    if (e.team == 0 && !e.see_all) return false;
     const int primary_fov = e.profile.fov_primary | 1;     // [orig: (def+75)|1]
     const int secondary_fov = e.profile.fov_secondary | 1; // [orig: (def+67)|1]
     const AiCandidate *best = nullptr;
@@ -1025,7 +1460,7 @@ bool AiSystem::acquire_target(AiEntity &e, AiTarget &out) {
 
         if (c.is_priority) { // [orig: 0x467350 — reached only past the gate] priority -> LOS-only bypass
             if (!c.los_blocked) { // Entity_CheckMutualLineOfSight @0x539be0
-                out = AiTarget{c.relmat_id, c.net_id, c.has_controller};
+                out = AiTarget{c.relmat_id, c.net_id, c.has_controller, c.handle};
                 return true;
             }
             continue; // priority but LOS blocked -> skip (no best-of, matches the orig else-if)
@@ -1036,28 +1471,165 @@ bool AiSystem::acquire_target(AiEntity &e, AiTarget &out) {
         }
     }
     if (best) {
-        out = AiTarget{best->relmat_id, best->net_id, best->has_controller};
+        out = AiTarget{best->relmat_id, best->net_id, best->has_controller, best->handle};
         return true;
     }
     return false;
 }
 
-// [orig: the engagement block @0x4677b3..0x4678b2] 4 relation ops, Entity_SetAITarget, reset the
-// combat timer, set the fire-delay with the exact PRNG jitter, pending = 17, then 4 more ops.
-// The has_controller branch guards the jitter by base-delay and uses the inline LCG (prng_a); the
-// other branch always jitters and uses PRNG_Next16 (prng16). Both record the same 8 ops + target.
-void AiSystem::engage_target(AiEntity &e, const AiTarget &t) {
+// The acquisition/fire relation quads, APPLIED (D-AI-3 closed 2026-07-16). Keys:
+// group = commandGroup (entity+0x11C -> Entity::group_id), single = the authored SSN
+// (entity+0x7C DcbId -> Entity::net_id). Witnessed order + arg orientation from the raw
+// call block: sees {GG[selfG][tgtG], SG[selfSsn][tgtG], GS[tgtSsn][selfG] (transposed),
+// SS[selfSsn][tgtSsn]} then targeted the same; setter->matrix identity pinned via the
+// g_SeesMatrix*/g_TargetedMatrix* bases. [orig: @0x4677b3..0x4678b2 / @0x4b0a6f..0x4b0ae2;
+// world-wac-ai-re §16.4/§17.2; matrix map docs/mission/bms-event-runtime-re.md §3a]
+void AiSystem::apply_engage_relations(World &world, const Entity &self, const Entity &target) {
+    TriggerRelations &rel = world.relations;
+    const int sg = self.group_id, ss = self.net_id;
+    const int tg = target.group_id, ts = target.net_id;
+    rel.set_group_group(TriggerRelations::kSees, sg, tg);       // [orig: @0x452a40 GG]
+    rel.set_single_group(TriggerRelations::kSees, ss, tg);      // [orig: @0x452ad0 SG]
+    rel.set_group_single(TriggerRelations::kSees, sg, ts);      // [orig: @0x452b60 GS]
+    rel.set_single_single(TriggerRelations::kSees, ss, ts);     // [orig: @0x452bf0 SS]
+    rel.set_group_group(TriggerRelations::kTargeted, sg, tg);   // [orig: @0x452aa0 GG]
+    rel.set_single_group(TriggerRelations::kTargeted, ss, tg);  // [orig: @0x452b30 SG]
+    rel.set_group_single(TriggerRelations::kTargeted, sg, ts);  // [orig: @0x452bc0 GS]
+    rel.set_single_single(TriggerRelations::kTargeted, ss, ts); // [orig: @0x452c70 SS]
+}
+
+// [orig: Entity_SetAITarget @0x45d760] target -> brain[kTargetSlot] + AiSlot[3]; the OLD
+// target's Entity::ai_target_refcount decrements (clamp >= 0), the NEW one's increments —
+// the +530 anti-pile-on gate the scorer consumes (world-wac-ai-re §16.3).
+void AiSystem::ai_set_target(World &world, AiEntity &e, EntityHandle target) {
+    AiBrain &b = e.brain;
+    const int32_t old_packed = b.f[AiBrain::kTargetSlot];
+    if (old_packed != 0) {
+        const EntityHandle old{static_cast<uint16_t>(old_packed - 1)};
+        if (Entity *oe = world.registry.get(old)) {
+            if (oe->ai_target_refcount > 0) --oe->ai_target_refcount; // dec, clamp >= 0
+        }
+    }
+    if (target.valid()) {
+        if (Entity *ne = world.registry.get(target)) {
+            ++ne->ai_target_refcount;
+            ne->ai_target = -1; // scripts read the victim side via relations; id mirror below
+        }
+        b.f[AiBrain::kTargetSlot] = static_cast<int32_t>(target.packed) + 1;
+        e.slot.f[3] = static_cast<int32_t>(target.packed) + 1; // AiSlot[3] mirror
+        if (Entity *se = world.registry.get(e.handle)) {
+            if (const Entity *ne = world.registry.get(target)) se->ai_target = ne->net_id;
+        }
+    } else {
+        b.f[AiBrain::kTargetSlot] = 0;
+        e.slot.f[3] = 0;
+        if (Entity *se = world.registry.get(e.handle)) se->ai_target = -1;
+    }
+}
+
+// LOS between two 16.16 fire-origin points — true = clear. The terrain leg is the
+// ported heightmap segment raycast; the sector leg clips the ray against pool-2 /
+// pool-1 collision models (the D-AI-7 leg). [orig: Entity_CheckMutualLineOfSight
+// @0x539be0 -> Physics_RaycastTerrainAndSectors @0x539910, ray radius 0, 1 = clear.]
+// No terrain wired -> clear, the headless-test default; no collision world wired
+// (terrain-only unit tests) -> terrain leg alone.
+bool AiSystem::line_of_sight_clear(World &world, const int32_t a[3], const int32_t b[3],
+                                   EntityHandle from, EntityHandle to) const {
+    if (terrain == nullptr || !terrain->valid()) return true;
+    // The original tests the segment between the two FIRE ORIGINS — Entity_CheckMutual-
+    // LineOfSight @0x539be0 feeds two Entity_ComputeWeaponFireOrigin @0x43b4b0 results
+    // into the ray — never the ground-level entity origins (feet-to-feet sampling
+    // false-blocks on the very ground both stand on). Until the bone seam lands, lift
+    // both endpoints by the same 0.9 u chest stand-in the fire pass uses (D-AI-6/-7).
+    constexpr int32_t kChestLift = 0xE666; // 0.9 u [orig: the def+1350 muzzle bone stand-in]
+    const int32_t la[3] = {a[0], a[1], a[2] + kChestLift};
+    const int32_t lb[3] = {b[0], b[1], b[2] + kChestLift};
+    if (collision != nullptr) return collision->raycast_clear(world, la, lb, from, to);
+    return !los_terrain_blocked(*terrain, la, lb);
+}
+
+// [orig: Entity_AlertNearbyAllies @0x4654b0] same-team, alive, non-building entities
+// within `radius` (16.16): own AiSlot+136 = 2 and each ally's brain alert = 2. Container
+// rebase: the original scans pool 1; our brains live on the AiEntity list, so the walk
+// covers every brained entity (pool 0 organics included) — values written are identical.
+void AiSystem::alert_nearby_allies(World &world, AiEntity &e, int32_t radius) {
+    (void)world;
+    e.slot.bytes()[AiSlot::kMoveFlagByte] = 2;
+    const int64_t r = radius;
+    for (AiEntity &ally : entities_) {
+        if (&ally == &e || ally.team != e.team || ally.health <= 0) continue;
+        const int64_t ddx = static_cast<int64_t>(ally.pos[0]) - e.pos[0];
+        const int64_t ddy = static_cast<int64_t>(ally.pos[1]) - e.pos[1];
+        if (ddx * ddx + ddy * ddy > r * r) continue;
+        ally.brain.f[AiBrain::kAlert] = 2;
+    }
+}
+
+// AI fire -> the same authoritative round pair the C2S 0x06 player path enters: ring
+// append (the S2C 0x0A tag-2 fan-out every remote client re-simulates the round from)
+// + the RoundSim spawn. [orig: WeaponSlot_FireAndSpawnEffects @0x53f440 ->
+// Entity_FireWeaponAndSendPacket @0x42bd80 authority leg -> Server_ClientFiredRound
+// @0x50baa0 (RoundData_AddRound @0x4fdb40 + RoundData_SpawnRound @0x4ec0d0); §5.60.
+// The ammo id rides the ring's adm byte as in the retail fire_cmd; fire sound/muzzle
+// effect (g_ammoDefTable +64/+68) are host-presentation, deferred.]
+bool AiSystem::fire_ai_round(World &world, AiEntity &e, const int32_t origin[3],
+                             int32_t yaw_bam, int32_t pitch_bam, int32_t ammo_index) {
+    if (world.ammo.by_index(ammo_index) == nullptr) return false;
+    ++fire_shot_seq; // [orig: word_B7C670 round-trips into the ring +28 word]
+
+    RoundEvent ev;
+    ev.shooter_handle = e.handle.packed;
+    ev.origin_x = origin[0];
+    ev.origin_y = origin[1];
+    ev.origin_z = origin[2];
+    ev.dir_yaw = yaw_bam;
+    ev.dir_pitch = pitch_bam;
+    ev.shot_seq = fire_shot_seq;
+    ev.adm_index = static_cast<uint8_t>(ammo_index & 0xFF);
+    world.rounds.add(ev);
+
+    RoundSpawnParams rp;
+    rp.owner = e.handle;
+    rp.shooter_handle = e.handle.packed;
+    rp.origin.x = static_cast<float>(origin[0]) / 65536.0f;
+    rp.origin.y = static_cast<float>(origin[1]) / 65536.0f;
+    rp.origin.z = static_cast<float>(origin[2]) / 65536.0f;
+    rp.dir_yaw_bam = yaw_bam;
+    rp.dir_pitch_bam = pitch_bam;
+    rp.ammo_index = ammo_index;
+    rp.adm_index = static_cast<uint8_t>(ammo_index & 0xFF);
+    rp.shot_seq = fire_shot_seq;
+    world.round_sim.spawn(world, rp);
+
+    // Firing marks the shooter a priority target until the next perception scan clears
+    // it [orig: Flags |= 0x4000 after every fire @0x4bf370; the §16.2 x6 scoring flag].
+    if (Entity *se = world.registry.get(e.handle)) se->engine_flags |= 0x4000u;
+    return true;
+}
+
+// The engagement block [orig: @0x4677b3..0x4678b2]: the sees quad, Entity_SetAITarget,
+// reset the combat timer, set the fire-delay with the exact PRNG jitter (the
+// has_controller branch guards the jitter by base-delay and uses the inline LCG; the
+// other branch always jitters via PRNG_Next16), pending = 17, then the targeted quad.
+// The rel_ops trace keeps the recorded shape the tests pin; the APPLY is D-AI-3.
+void AiSystem::engage_target(World &world, AiEntity &e, const AiTarget &t) {
     AiBrain &b = e.brain;
     const int32_t self_rm = static_cast<int32_t>(static_cast<int16_t>(e.relmat_id)); // movsx entity+284
     const int32_t tgt_rm = static_cast<int32_t>(static_cast<int16_t>(t.relmat_id));  // movsx target+284
 
-    // [orig: 0x4677b3..0x4677e2] the 4 ops before the controller branch.
+    // [orig: 0x4677b3..0x4677e2] the sees quad before the controller branch.
     rel_ops.push_back({kRelEventSpecial, self_rm, tgt_rm});
     rel_ops.push_back({kRelSharedMem, e.net_id, tgt_rm});
     rel_ops.push_back({kRelProximity, self_rm, t.net_id});
     rel_ops.push_back({kRelEnemy, e.net_id, t.net_id});
+    {
+        const Entity *se = world.registry.get(e.handle);
+        const Entity *te = t.handle.valid() ? world.registry.get(t.handle) : nullptr;
+        if (se != nullptr && te != nullptr) apply_engage_relations(world, *se, *te);
+    }
 
     target_set_calls.push_back(t.net_id); // [orig: Entity_SetAITarget(entity, best_target) @0x45d760]
+    ai_set_target(world, e, t.handle);
     b.f[AiBrain::kCombatTimer] = 0;        // [orig: ai_comp[40] = 0]
     b.f[AiBrain::kFireDelay] = e.profile.field104; // [orig: ai_comp[41] = *(profile+104)]
     if (t.has_controller) {
@@ -1070,7 +1642,7 @@ void AiSystem::engage_target(AiEntity &e, const AiTarget &t) {
     }
     b.set_pend(kAiGroundCombat); // [orig: ai_comp[5] = 17]
 
-    // [orig: 0x467883..0x4678b2] the 4 ops after pending = 17.
+    // [orig: 0x467883..0x4678b2] the targeted quad after pending = 17.
     rel_ops.push_back({kRelAllied, self_rm, tgt_rm});
     rel_ops.push_back({kRel452B30, e.net_id, tgt_rm});
     rel_ops.push_back({kRelDamaged, self_rm, t.net_id});

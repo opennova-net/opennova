@@ -28,6 +28,10 @@ var _hud_weapon_name := ""  # equipped-weapon cache (re-resolves WepDes on chang
 # the public ADR 0018 read seam used by parity tests and future HUD consumers.
 var _hud_objective := ""
 var _pending_hud_messages: Array[Dictionary] = []
+# The end-of-round banner line (the WAC Lose cause). Persists until teardown so the
+# MISSION FAILED screen can compose it. [orig: g_banner_text @0x28E3DA0, written by
+# GameMsg_SetBannerText @0x5ba200, cleared by the round-start HUD reset @0x5b71b0]
+var _endround_banner := ""
 
 
 func setup(world, player_host, ui_parent: Node) -> void:
@@ -50,6 +54,7 @@ func teardown() -> void:
 		_game_hud = null
 	_hud_weapon_name = ""
 	_hud_objective = ""
+	_endround_banner = ""
 	_pending_hud_messages.clear()
 	NovaStrings.register_table("mission", null)
 	_warned_no_player = false
@@ -251,7 +256,10 @@ func _resolve_weapon_display_name(weapon_name: String) -> String:
 # table exist. Public with hud_objective_line() as the ADR 0018 read seam.
 func apply_mission_effects(effects: Array) -> void:
 	for e in effects:
-		if e is Dictionary and String(e.get("kind", "")) == "text":
+		if not (e is Dictionary):
+			continue
+		var kind := String(e.get("kind", ""))
+		if kind == "text":
 			var t := String(e.get("str", ""))
 			if not t.is_empty():
 				_hud_objective = t
@@ -260,10 +268,28 @@ func apply_mission_effects(effects: Array) -> void:
 				var text_id := int(e.get("a", 0))
 				if text_id != 0:
 					_queue_hud_message("", text_id)
+		elif kind == "lose":
+			# The WAC Lose banner trio [orig: WacAction_Lose @0x4ed3f0 ->
+			# GameMsg_AddChatLineAndRelay @0x5ba170 (the chat-feed line; the KEY rides
+			# the wire and each client re-resolves it) + GameMsg_SetBannerText @0x5ba200
+			# / GameMsg_SetTeamBannerText @0x5ba1d0 (the persistent banner buffers the
+			# MISSION FAILED screen composes, cleared at the next round start
+			# @0x5b71b0)]. The effect carries the gametext key; resolve against the
+			# 'Misc' section like the original.
+			var key := String(e.get("str", ""))
+			if not key.is_empty():
+				var line := NovaStrings.lookup_display("gametext", "Misc", key)
+				_endround_banner = line
+				_queue_hud_message(line, 0)
 
 
 func hud_objective_line() -> String:
 	return _hud_objective
+
+
+## The stored end-of-round banner (the WAC Lose cause line), for the end screen.
+func endround_banner_line() -> String:
+	return _endround_banner
 
 
 func _queue_hud_message(text: String, text_id: int) -> void:

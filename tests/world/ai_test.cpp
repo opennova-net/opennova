@@ -2,6 +2,7 @@
 // AI_BeginUpdate budget gate, the infantry state-machine dispatcher + transitions,
 // and the byte-exact trivial handler ports. Driven by a manual World + tick.
 #include <cstdio>
+#include <memory>
 #include <cstring>
 
 #include "world/ai.h"
@@ -17,6 +18,99 @@ static int failures = 0;
     } while (0)
 
 static bool streq(const char *a, const char *b) { return std::strcmp(a, b) == 0; }
+
+// The vehicle death chain rows (world-wac-ai-re section 19) - own function per the
+// main()-frame __chkstk overflow gotcha.
+void test_vehicle_death_rows() {
+    // ---- the vehicle death chain: rows 21 (DYING) and 23 (GROUND_DEAD) ----
+    // [orig: AI_TransitionToDeath_GroundVehicle @0x467b20 / AI_TickState_VehicleDying
+    // @0x467cd0 / AI_HandleEvent_VehicleDying @0x457f50 / AI_TransitionToDestroyed_
+    // Vehicle @0x467de0 / AI_HandleEvent_ConsumeAll @0x458080; world-wac-ai-re §19]
+    {
+        auto w_heap = std::make_unique<World>();
+        World &w = *w_heap;
+        w.registry.configure_pool(1, 4);
+        Entity seed;
+        seed.team = 1;
+        seed.group_id = 3;
+        seed.health = 0;
+        const EntityHandle h = w.registry.spawn(1, seed);
+        auto sys_heap = std::make_unique<AiSystem>();
+        AiSystem &sys = *sys_heap;
+        sys.is_authority = true;
+        int idx = sys.attach(h);
+        AiEntity &e = *sys.at(idx);
+        e.team = 1;
+        e.health = 0;
+        e.vel_x = 100; e.vel_z = 0; // slow (< 1057): the enter queues the destroy event
+        e.brain.f[AiBrain::kCurState] = 21;
+
+        AiThinkCtx ctx{&sys, &e, &w, nullptr};
+        sys.row(21).enter(ctx);
+        CHECK(e.brain.f[AiBrain::kAlert] == 2);            // the alert block ran
+        CHECK(e.brain.f[AiBrain::kStep] == 16);            // [orig: ai_data[7] = 16]
+        CHECK(w.relations.group(3).alert == TriggerRelations::kAlertRed);
+        bool queued4 = false;
+        for (int i = 0; i < sys.events.count(); ++i)
+            if (sys.events.at(i).type() == 4) queued4 = true;
+        CHECK(queued4);                                    // slow -> destroy event now
+
+        // The dying event handler routes ONLY type 4 -> pending 23.
+        AiEventEntry dmg{}; dmg.f[0] = 1;
+        AiThinkCtx ctx_dmg{&sys, &e, &w, &dmg};
+        sys.row(21).event(ctx_dmg);
+        CHECK(e.brain.f[AiBrain::kPendState] != 23);
+        AiEventEntry destroy{}; destroy.f[0] = 4;
+        AiThinkCtx ctx_dst{&sys, &e, &w, &destroy};
+        sys.row(21).event(ctx_dst);
+        CHECK(e.brain.f[AiBrain::kPendState] == 23);
+
+        // Enter 23: team cleared (a wreck goes teamless), moveStep 62, corpse timer 0.
+        w.registry.get(h)->corpse_timer = 500;
+        sys.row(23).enter(ctx);
+        CHECK(e.brain.f[AiBrain::kStep] == 62);
+        CHECK(e.team == 0);
+        CHECK(w.registry.get(h)->team == 0);
+        CHECK(w.registry.get(h)->corpse_timer == 0);       // wrecks never expire
+
+        // The dead row swallows everything: no pending change from any event.
+        e.brain.f[AiBrain::kPendState] = 0;
+        AiEventEntry late{}; late.f[0] = 3;
+        AiThinkCtx ctx_late{&sys, &e, &w, &late};
+        sys.row(23).event(ctx_late);
+        CHECK(e.brain.f[AiBrain::kPendState] == 0);
+    }
+
+    // ---- the dying tick: still-moving clears the work fields; stopping queues 4 ----
+    // [orig: AI_TickState_VehicleDying @0x467cd0]
+    {
+        auto w_heap = std::make_unique<World>();
+        World &w = *w_heap;
+        auto sys_heap = std::make_unique<AiSystem>();
+        AiSystem &sys = *sys_heap;
+        int idx = sys.attach(EntityHandle::make(1, 0));
+        AiEntity &e = *sys.at(idx);
+        e.brain.f[AiBrain::kCurState] = 21;
+        e.vel_x = 5000; e.vel_z = 0;             // fast
+        e.pos[0] = 100000;                        // far from the (0-init) death pose
+        e.net_saved_live_pose[0] = 0;
+        e.brain.f[AiBrain::kWorkPitch] = 7;
+        e.brain.f[AiBrain::kWorkRoll] = 7;
+        e.brain.f[AiBrain::kOutSpeed] = 7;
+        AiThinkCtx ctx{&sys, &e, &w, nullptr};
+        sys.row(21).tick(ctx);
+        CHECK(sys.events.count() == 0);           // still crashing: no event yet
+        CHECK(e.brain.f[AiBrain::kWorkPitch] == 0);
+        CHECK(e.brain.f[AiBrain::kWorkRoll] == 0);
+        CHECK(e.brain.f[AiBrain::kOutSpeed] == 0);
+        e.vel_x = 100;                            // stopped
+        sys.row(21).tick(ctx);
+        bool queued4 = false;
+        for (int i = 0; i < sys.events.count(); ++i)
+            if (sys.events.at(i).type() == 4) queued4 = true;
+        CHECK(queued4);
+    }
+}
 
 int main() {
     // ---- struct layout (byte-exact strides) ----
@@ -159,13 +253,13 @@ int main() {
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
         e.has_physics = false;
-        e.brain.f[AiBrain::kCurState] = kAiGroundCombat; // 17, tick handler = not_yet_ported
-        e.brain.f[AiBrain::kPendState] = kAiGroundCombat;
+        e.brain.f[AiBrain::kCurState] = kAiHeloLand; // 6 — a still-unported tick row
+        e.brain.f[AiBrain::kPendState] = kAiHeloLand;
         TickContext ctx;
         ctx.world = &w;
         ctx.is_authority = true;
         sys.tick(w, ctx);
-        CHECK(sys.unported_calls >= 1); // state-17 tick routed through the stub
+        CHECK(sys.unported_calls >= 1); // the HELO tick routed through the stub
     }
 
     // ---- body-anim slot selection from movement (update_body_anim_slot) ----
@@ -189,10 +283,10 @@ int main() {
         int idx = sys.attach(h);
         AiEntity &e = *sys.at(idx);
         e.has_physics = false;
-        // State 17's tick/enter are no-op stubs, so they don't clobber kOutSpeed -- isolating the
+        // State 20's row is all no-ops, so nothing clobbers kOutSpeed -- isolating the
         // movement->slot mapping (which keys off kOutSpeed + kAlert, not the state id).
-        e.brain.f[AiBrain::kCurState] = kAiGroundCombat;  // 17
-        e.brain.f[AiBrain::kPendState] = kAiGroundCombat;
+        e.brain.f[AiBrain::kCurState] = kAiGroundReturnToBase;  // 20
+        e.brain.f[AiBrain::kPendState] = kAiGroundReturnToBase;
 
         // Moving, not alert -> walk_forward.
         e.brain.f[AiBrain::kOutSpeed] = 10;
@@ -584,28 +678,27 @@ int main() {
         near.team = 2; near.pos[0] = 100 << 16; near.health = 100;
         near.range_primary = 1000; near.range_secondary = 1000;
         near.relmat_id = 0x22; near.net_id = 0x222; near.has_controller = true;
-        sys.candidates = {far, near};
 
         AiTarget out{};
-        CHECK(sys.acquire_target(e, out) == true);
+        CHECK(sys.acquire_target_from(e, {far, near}, out) == true);
         CHECK(sys.find_target_calls == 1);
         CHECK(out.net_id == 0x222);          // nearer -> higher range_score -> chosen
         CHECK(out.relmat_id == 0x22);
         CHECK(out.has_controller == true);
 
         // Same-team candidate is filtered out -> no target.
-        sys.candidates = {AiCandidate{}};
-        sys.candidates[0].handle = EntityHandle::make(1, 7);
-        sys.candidates[0].team = 1;          // same team as e
-        sys.candidates[0].pos[0] = 100 << 16; sys.candidates[0].health = 100;
-        sys.candidates[0].range_primary = 1000; sys.candidates[0].range_secondary = 1000;
+        AiCandidate same{};
+        same.handle = EntityHandle::make(1, 7);
+        same.team = 1;          // same team as e
+        same.pos[0] = 100 << 16; same.health = 100;
+        same.range_primary = 1000; same.range_secondary = 1000;
         AiTarget none{};
-        CHECK(sys.acquire_target(e, none) == false);
+        CHECK(sys.acquire_target_from(e, {same}, none) == false);
 
         // LOS blocked on the only enemy -> no target.
-        sys.candidates = {near};
-        sys.candidates[0].los_blocked = true;
-        CHECK(sys.acquire_target(e, none) == false);
+        AiCandidate blocked = near;
+        blocked.los_blocked = true;
+        CHECK(sys.acquire_target_from(e, {blocked}, none) == false);
 
         // Priority target (in-gate) bypasses scoring and returns immediately on LOS.
         AiCandidate prio = near;
@@ -613,9 +706,8 @@ int main() {
         prio.pos[0] = 900 << 16; // would score worse than a closer one, but priority wins
         AiCandidate closer = near;
         closer.net_id = 0x444; closer.pos[0] = 50 << 16;
-        sys.candidates = {closer, prio};
         AiTarget pout{};
-        CHECK(sys.acquire_target(e, pout) == true);
+        CHECK(sys.acquire_target_from(e, {closer, prio}, pout) == true);
         CHECK(pout.net_id == 0x333);         // priority bypass beats the closer non-priority
 
         // [grill fix: priority bypass @0x467350 is reached only PAST the FOV/range gate]
@@ -630,9 +722,8 @@ int main() {
         inrange.team = 2; inrange.pos[0] = 100 << 16; inrange.health = 100;
         inrange.range_primary = 1000; inrange.range_secondary = 1000;
         inrange.net_id = 0x999;
-        sys.candidates = {prio_far, inrange};
         AiTarget gout{};
-        CHECK(sys.acquire_target(e, gout) == true);
+        CHECK(sys.acquire_target_from(e, {prio_far, inrange}, gout) == true);
         CHECK(gout.net_id == 0x999);         // out-of-gate priority skipped; in-range enemy chosen
     }
 
@@ -661,6 +752,7 @@ int main() {
 
     // ---- engage_target: 8 relation ops in order, target set, fire-delay jitter, pending 17 ----
     {
+        World w;
         AiSystem sys;
         sys.prng16 = 1;
         int idx = sys.attach(EntityHandle::make(0, 0));
@@ -670,7 +762,7 @@ int main() {
         e.profile.field104 = 0;
         AiTarget t{0x55, 0x66, /*has_controller=*/false};
 
-        sys.engage_target(e, t);
+        sys.engage_target(w, e, t);
 
         CHECK(e.brain.f[AiBrain::kPendState] == 17);   // GROUND_COMBAT
         CHECK(e.brain.f[AiBrain::kCombatTimer] == 0);
@@ -690,6 +782,7 @@ int main() {
 
     // ---- engage_target: branch A (has_controller) guards jitter by base-delay; sign-extends relmat ----
     {
+        World w;
         AiSystem sys;
         sys.prng_a = 1;
         int idx = sys.attach(EntityHandle::make(0, 0));
@@ -697,7 +790,7 @@ int main() {
         e.relmat_id = 0x8000;             // high bit set -> (int16) sign-extends to -32768
         e.profile.field104 = 0;           // base delay 0 -> branch A skips jitter entirely
         AiTarget t{0x55, 0x66, /*has_controller=*/true};
-        sys.engage_target(e, t);
+        sys.engage_target(w, e, t);
         CHECK(e.brain.f[AiBrain::kFireDelay] == 0);     // no jitter when base_delay == 0
         CHECK(sys.prng_a == 1);                          // stream A untouched (jitter skipped)
         CHECK(sys.rel_ops[0].a == -32768);               // movsx of 0x8000
@@ -709,16 +802,32 @@ int main() {
         AiEntity &e2 = *sys2.at(i2);
         e2.profile.field104 = 100;
         AiTarget t2{1, 2, /*has_controller=*/true};
-        sys2.engage_target(e2, t2);
+        sys2.engage_target(w, e2, t2);
         CHECK(e2.brain.f[AiBrain::kFireDelay] == 149);   // 100 + 49
         CHECK(sys2.prng_a == 0x8011u);                   // stream A advanced
     }
 
     // ---- state-16 tick: a visible enemy -> engage (pending 17) instead of walking ----
+    // The feed now scans the registry (D-AI-1): spawn a real pool-1 enemy.
     {
         World w;
+        w.registry.configure_pool(0, 8);
+        w.registry.configure_pool(1, 16);
+        Entity self_seed;
+        self_seed.team = 1;
+        self_seed.health = 100;
+        EntityHandle self_h = w.registry.spawn(0, self_seed);
+        Entity enemy_seed;
+        enemy_seed.team = 2;
+        enemy_seed.health = 100;
+        enemy_seed.position = Vec3{100.0f, 0.0f, 0.0f};
+        enemy_seed.net_id = 0x77; // single key (SSN)
+        enemy_seed.group_id = 3;
+        EntityHandle enemy_h = w.registry.spawn(1, enemy_seed);
+        CHECK(enemy_h.valid());
+
         AiSystem sys;
-        int idx = sys.attach(EntityHandle::make(0, 0));
+        int idx = sys.attach(self_h);
         AiEntity &e = *sys.at(idx);
         e.team = 1;
         e.brain.f[AiBrain::kCurState] = kAiGroundFollowWp;
@@ -726,18 +835,18 @@ int main() {
         e.profile.fov_secondary = 0x40;
         e.profile.range_primary = 1000;
         e.profile.range_secondary = 1000;
-        AiCandidate enemy{};
-        enemy.handle = EntityHandle::make(1, 9);
-        enemy.team = 2; enemy.pos[0] = 100 << 16; enemy.health = 100;
-        enemy.range_primary = 1000; enemy.range_secondary = 1000;
-        enemy.net_id = 0x777; enemy.relmat_id = 0x77;
-        sys.candidates = {enemy};
         AiThinkCtx ctx{&sys, &e, &w, nullptr};
         sys.row(kAiGroundFollowWp).tick(ctx);
         CHECK(e.brain.f[AiBrain::kPendState] == 17);     // engaged
         CHECK(sys.rel_ops.size() == 8);
-        CHECK(sys.target_set_calls.size() == 1 && sys.target_set_calls[0] == 0x777);
+        CHECK(sys.target_set_calls.size() == 1 && sys.target_set_calls[0] == 0x77);
         CHECK(e.brain.f[AiBrain::kOutSpeed] != 10);      // mover did NOT run (no walk)
+        // D-AI-3 closed: the engage APPLIED the sees+targeted quads (keys: group/SSN).
+        const Entity *self_e = w.registry.get(self_h);
+        CHECK(w.relations.single_single(TriggerRelations::kSees, self_e->net_id, 0x77));
+        CHECK(w.relations.single_single(TriggerRelations::kTargeted, self_e->net_id, 0x77));
+        // Entity_SetAITarget maintained the target's +530 refcount.
+        CHECK(w.registry.get(enemy_h)->ai_target_refcount == 1);
     }
 
     // ---- state-18 patrol tick: arrival clears the goal; otherwise fallback vs engage ----
@@ -872,6 +981,116 @@ int main() {
         sys.apply_locomotion(e);
         CHECK(e.pos[0] == 42);
     }
+
+    // ---- slice-1 exit: an NPC rifleman kills the player through the authoritative
+    // round path (perception -> attack anim -> .bad fire events -> ring + RoundSim ->
+    // damage -> death), on the listen-server tick shape (AI tick + round tick). ----
+    // [witness: world-wac-ai-re §17; net-re §5.60]
+    {
+        // A root-motion double whose attack clip carries the .bad fire trigger (bit 0x4)
+        // every frame; idle carries none. [orig: g_animEventTriggerBits @0xA2ED08]
+        struct FiringSource : IRootMotionSource {
+            bool has_clip(int, int id) const override {
+                return id == anim_state::kIdle || id == anim_state::kAttack;
+            }
+            int32_t clip_length_ticks(int, int) const override { return -1; }
+            bool advance(int, int id, int32_t &phase, RootMotionFrame &out) override {
+                if (!has_clip(0, id)) return false;
+                ++phase;
+                out = RootMotionFrame{};
+                if (id == anim_state::kAttack) out.events = 0x4; // trigger-pull frames
+                return true;
+            }
+        };
+        static FiringSource fire_src;
+
+        World w;
+        w.registry.configure_pool(0, 8);
+        w.registry.configure_pool(1, 8);
+        // One rifle round in the ammo table (index 0 is the null entry by convention;
+        // use index 1). Velocity 800 u/s, heavy enough to kill in a few hits.
+        w.ammo.entries.resize(2);
+        w.ammo.entries[1].name = "AMMO_TEST_556";
+        w.ammo.entries[1].velocity = 800;
+        w.ammo.entries[1].max_age_ticks = 124;
+        w.ammo.entries[1].weight_in_grains = 875; // damage = speed_scaled (clamped 1219)
+        w.ammo.entries[1].min_damage = 10;
+        w.ammo.entries[1].max_damage = 40;
+        w.ammo.entries[1].valid = true;
+
+        // The player: pool 0, team 2, 20 u east of the NPC, at ground height 0.
+        Entity player_seed;
+        player_seed.team = 2;
+        player_seed.health = 100;
+        player_seed.net_id = 0x21;
+        player_seed.group_id = 2;
+        player_seed.position = Vec3{20.0f, 0.0f, 0.0f};
+        EntityHandle player_h = w.registry.spawn(0, player_seed);
+        CHECK(player_h.valid());
+
+        // The NPC rifleman: pool 0, team 1, armed via the D-AI-5 profile seed.
+        Entity npc_seed;
+        npc_seed.team = 1;
+        npc_seed.health = 100;
+        npc_seed.net_id = 0x11;
+        npc_seed.group_id = 1;
+        npc_seed.position = Vec3{0.0f, 0.0f, 0.0f};
+        EntityHandle npc_h = w.registry.spawn(0, npc_seed);
+        CHECK(npc_h.valid());
+
+        AiSystem sys;
+        sys.is_authority = true;
+        sys.root_motion = &fire_src;
+        int idx = sys.attach(npc_h);
+        AiEntity &npc = *sys.at(idx);
+        npc.inf.active = true;
+        npc.team = 1;
+        npc.net_id = 0x11;
+        npc.pos[0] = 0; npc.pos[1] = 0; npc.pos[2] = 0;
+        npc.profile.ammo_primary = 1;          // -> w.ammo[1]
+        npc.profile.clip_size = 30;
+        npc.inf.magazine = 30;
+        npc.slot.f[10] = 0;                    // perfect accuracy (w_accuracy 100)
+        npc.slot.f[11] = 0;
+        npc.slot.f[15] = 60 << 16;             // attack range 60 u
+        npc.slot.f[16] = 10 << 16;             // approach range
+        npc.slot.f[17] = 100 << 16;            // sight range 100 u
+        npc.slot.f[22] = 62;                   // cooldown base (~1 s)
+
+        TickContext tctx;
+        tctx.world = &w;
+        tctx.is_authority = true;
+        bool acquired = false, fired = false, killed = false;
+        for (uint32_t t = 0; t < 2000 && !killed; ++t) {
+            tctx.logic_tick = t;
+            sys.tick(w, tctx);
+            w.round_sim.tick(w, nullptr);
+            if (npc.inf.combat_target == player_h) acquired = true;
+            if (w.rounds.count > 0) fired = true;
+            for (const RoundDeath &d : w.round_sim.deaths)
+                if (d.victim == player_h && d.killer == npc_h) killed = true;
+        }
+        CHECK(acquired);                        // the 32-tick perception found the player
+        CHECK(fired);                           // rounds entered the ring (the 0x0A fan-out)
+        CHECK(w.round_sim.deaths.size() >= 1);  // the damage pass detected the death
+        CHECK(killed);                          // ...credited NPC -> player
+        CHECK(w.registry.get(player_h)->health <= 0);
+        // The engagement left the witnessed side effects: the sees+targeted quads
+        // (group/SSN keys) and the shooter's priority mark from firing.
+        CHECK(w.relations.single_single(TriggerRelations::kSees, 0x11, 0x21));
+        CHECK(w.relations.single_single(TriggerRelations::kTargeted, 0x11, 0x21));
+        CHECK(w.relations.group_group(TriggerRelations::kSees, 1, 2));
+        CHECK((w.registry.get(npc_h)->engine_flags & 0x4000u) != 0);
+        // The kill staged the bullet death-anim selection on the victim at damage
+        // time: torso group (the bone stand-in, D-AI-9) = 184..187 by quadrant, and
+        // the victim's group went alert red. [orig: Entity_HandleDamageTrigger
+        // @0x407478/@0x4073ea; world-wac-ai-re §19]
+        const int sel = w.registry.get(player_h)->death_anim_state;
+        CHECK(sel >= 184 && sel <= 187);
+        CHECK(w.relations.group(2).alert == TriggerRelations::kAlertRed);
+    }
+
+    test_vehicle_death_rows();
 
     if (failures == 0) std::printf("ai: all tests passed\n");
     return failures ? 1 : 0;

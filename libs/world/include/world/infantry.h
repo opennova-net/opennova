@@ -7,15 +7,19 @@
 #include <cstdint>
 
 #include "world/body_anim.h"
+#include "world/entity.h" // EntityHandle (the combat-pass target/focus fields)
 
 namespace opennova::world {
 
-inline constexpr int kInfantryAnimStateCount = 200;
+// 252 entries: 0..239 body states (180..239 = the 15-group bullet death matrix),
+// 240..251 the wpn_* FP viewmodel states. [orig: AnimMap_FindSlotByName @0x40cfa0
+// scans exactly 252 entries of g_animStateNameTable @0x8135F0]
+inline constexpr int kInfantryAnimStateCount = 252;
 
-// State id -> .adm key without the "anim_" prefix. [orig: off_8135F0]
+// State id -> .adm key without the "anim_" prefix. [orig: g_animStateNameTable @0x8135F0]
 extern const char *const kInfantryAnimNames[kInfantryAnimStateCount];
 
-// Per-state behavior flags. [orig: g_animStateFlagsTable]
+// Per-state behavior flags. [orig: g_animStateFlagsTable @0x8139E8]
 extern const uint32_t kInfantryAnimFlags[kInfantryAnimStateCount];
 
 namespace anim_state {
@@ -72,10 +76,17 @@ enum : int {
     kJogForward = 148,
     kRunForward = 149,
     kPostAttack = 151,
+    kPreAttack = 152,
     kOutOfGround = 153,
     kSwimAttack = 154,
+    kAttack = 155,  // 155..158: the combat-reaction attack anims (world-wac-ai-re §17.3)
+    kAttack2 = 156,
+    kAttack3 = 157,
+    kAttack4 = 158,
     kCoverIdle = 163,
     kCoverRun = 164,
+    kCoverAttack = 165,
+    kCoverAttack2 = 166,
     kRunAttack = 167,
     kRunAway = 168,
     kRun2Crouch = 169,
@@ -83,9 +94,35 @@ enum : int {
     kDeathPungi = 174,
     kDeathDrown = 175,
     kDeathGrenadeBase = 176, // 176..179: death_grenade F/R/B/L
-    kDeathBulletBase = 180,  // 180..199: death_bullet families
+    kDeathBulletBase = 180,  // 180..239: death_bullet, 15 bone groups x F/R/B/L
 };
 } // namespace anim_state
+
+// Death causes routed by the death-anim selector. The original passes these as the
+// selector's 4th argument; any other value falls through to death_pungi 174.
+// [orig: Entity_ComputeAnimSlotIndex @0x43a690 switch]
+namespace death_cause {
+enum : int {
+    kBullet = 1,    // -> 180 + quadrant + 4*bone_group
+    kExplosive = 2, // -> 176 + quadrant (death_grenade_*)
+    kFire = 3,      // -> 173 death_fire
+    kGeneric = 4,   // -> 174 death_pungi (the no-cause fallback the death edge uses)
+    kDrown = 5,     // -> 175 death_drown
+};
+} // namespace death_cause
+
+// The death-anim selector: bone index 0..31 (>=32 -> 0), attack quadrant 0..3
+// (>=4 -> 0), cause -> anim state id. Bullet deaths map the hit bone through the
+// witnessed 32-entry bone->group table (15 groups: hip, torso, head, R/L shoulder,
+// R/L arm, R/L hand, R/L thigh, R/L calf, R/L foot). [orig: Entity_ComputeAnimSlotIndex
+// @0x43a690; the unused outPos arg dropped]
+int compute_death_anim_state(int bone_index, int quadrant, int cause);
+
+// The bullet-death attack quadrant: 0 forward / 1 right / 2 back / 3 left, from the
+// victim's engine heading and the killing round's horizontal velocity.
+// [orig: Entity_HandleDamageTrigger @0x407478 — (yaw - atan2BAM(vel.y, vel.x)
+// - 0x60000000) >> 30; atan2 scale 683565275.5764316 = 2^32/2pi]
+int death_quadrant_from_round(int32_t victim_heading_bam, float round_vel_x, float round_vel_y);
 
 // Map the selected infantry state to the present-pass BodyAnim slot. Directional
 // walk blocks all render through the same canonical walk slot.
@@ -257,6 +294,26 @@ struct InfantryState {
     int32_t ground_cache = 0;             // entity+676
     bool ground_cache_valid = false;
     int16_t max_health = 100;
+
+    // ---- The infantry combat pass (org1 riflemen; world-wac-ai-re §17) ----
+    // The 32-tick perception commit + the per-tick behavior/aim/fire state. Handles
+    // stand in for the original entity pointers (container rebase).
+    EntityHandle combat_target;       // AiSlot[3] mirror for the infantry pass [orig: slot+12]
+    EntityHandle ai_focus;            // entity aiFocus (look/attention entity)
+    EntityHandle last_attacker;       // entity lastAttacker (stamped by the damage pass,
+                                      // consumed + cleared by each perception scan)
+    EntityHandle aim_ref0;            // entity+0x2F0 — last fired-at target (accuracy settle)
+    int32_t aim_point[3] = {};        // entity aimPoint (16.16, the led target point)
+    int32_t damage_timer = 0;         // entity damageTimer (alert countdown, +12 on sight)
+    bool was_hit = false;             // entity wasHit (consumed by the hit reactions)
+    int32_t same_target_ticks = 0;    // entity+0x33C — scans-on-the-same-target counter
+    int32_t combat_move_timer = 0;    // entity moveTimer (reaction hold / walking-fire cadence)
+    bool fire_secondary_latch = false;// shouldFireSecondary [orig: the 0x8 event latch +
+                                      // the walking-fire aim gate]
+    int32_t aim_heading = 0;          // the aim solution (BAM; bearing + sawtooth error)
+    int32_t aim_pitch = 0;            // (elevation + error)
+    bool aim_valid = false;           // entity aimFlag
+    int16_t magazine = 0;             // entity+0x35C word (reload at <=0, refill = clipsize)
 };
 
 // The fire-path 3P attack stamp, keyed on the held weapon's attack kind (attack_anim):

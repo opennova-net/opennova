@@ -610,6 +610,24 @@ public:
 	// is applied in-engine, never here.
 	Array drain_effects();
 
+	// The host fire-presentation drain: one Dictionary per round spawned since the
+	// last call — {origin: Vector3 (godot), forward: Vector3 (godot, unit),
+	// shooter_handle, is_local_player, ammo_index, sound_set, effect, mf_light} with
+	// the ammo-def 'ai_launch'/'ai_launcheffect' names resolved. The fire present
+	// pass plays/spawns per event, skipping the local player (whose action-slot
+	// presentation is already ported). [orig: WeaponSlot_FireAndSpawnEffects
+	// @0x53F440 — the firing host presents its own rounds inline at fire time;
+	// world-wac-ai-re §17.4]
+	Array drain_fire_presentation_events();
+
+	// Live TRACER rounds, 9 floats each: godot-space position (3), godot-space
+	// per-tick velocity (3), round team, tracer_type friendly id, enemy id — the
+	// fire present pass draws the streaks and picks the style vs the local player's
+	// team. [orig: RoundData_SpawnRound @0x4EC0D0 tracer decision + the +0xE8/+0xEC
+	// 'tracer_type' pair; non-tracer rounds are invisible in flight (graphicModel
+	// zeroed @0x4ec900).]
+	PackedFloat32Array get_tracer_rounds() const;
+
 	// Mission scripting state on the shared world (the dword_C6B240 var store + event gates).
 	void set_mission_variable(int index, int value);
 	int get_mission_variable(int index) const;
@@ -641,6 +659,19 @@ public:
 	// allocation is fine at selected-entity-only low-Hz use; the per-tick
 	// present loop has get_present_snapshot instead.
 	Dictionary get_entity_debug(int p_index) const;
+	// Probe seam: write an AI entity's health via the scripted-SETHP stores
+	// (registry + motor copy) so in-game probes can shorten a fight.
+	void debug_set_entity_health(int p_index, int p_hp);
+	// Probe seam: teleport an AI entity (mission-space coords) through both
+	// position stores, for probes defeated by mission geography.
+	void debug_set_entity_position(int p_index, const Vector3 &p_mission_pos);
+	// Round-outcome card: {ended, winner_team, bluekills, greenkills, enemy_kills,
+	// team_kills_by_others, friendly_kills_by_others, enemy_kills_by_others, humans}.
+	// The sim-side end-of-round state + the SP kill-stat buckets the epilog score
+	// screen and the WAC bluekills/greenkills builtins read (probe + HUD source).
+	// [orig: g_spawn_success_gate @0x24c1928 / g_round_winning_team @0x24c1924 /
+	// the 0xC846xx buckets]
+	Dictionary get_round_outcome_debug() const;
 	// Human-readable AI state name, "?" for the id gaps
 	// [orig: Entity_LookupAIStateName @0x455cc0].
 	static String ai_state_name(int p_state);
@@ -730,6 +761,16 @@ public:
 	// [orig: Entity_InitFromItemDef @0x49e550]). Idempotent; call after load (and again after
 	// spawning the local player).
 	void resolve_item_traits(const Ref<class NovaItemDatabase> &p_item_db);
+
+	// The D-AI-5 host weapon seed: stamp every AI entity's anim-fire round from its
+	// items.def ammo_closeattack + clipsize (AiProfile::ammo_primary/clip_size — the
+	// single-ammo stand-in for the entity+0x358..0x35B family, whose load-time
+	// block-copy writer is unwitnessed; world-wac-ai-re §17.4/§17.7 item 1), and seed
+	// the spawn magazine [orig: Entity_ResetToSpawnState @ 0x4b97a9 — word
+	// entity+0x35C = itemDef+0x894]. Ammo NAMES resolve against the mission ammo
+	// table, so call AFTER load_ammo_table; unresolved/absent leaves the NPC unarmed
+	// (ammo_primary -1, the fire pass skips). Idempotent; returns armed-NPC count.
+	int resolve_ai_weapons(const Ref<class NovaItemDatabase> &p_item_db);
 
 	// World-object collision sweep: for each live entity with an items.def graphic,
 	// load its .3di collision block (BVOL volumes + BPLN planes via the placer's

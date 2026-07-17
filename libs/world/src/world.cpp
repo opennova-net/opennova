@@ -123,8 +123,21 @@ void pose_mounted_occupant(Entity &occ, const Entity &vehicle, const Seat &seat)
 // makes single-player run everything locally.)
 // ----------------------------------------------------------------------------
 
+// Script SSN -> entity handle, with the retail PLAYER mapping. Mission scripts
+// (WAC SSN* commands + BMS Single triggers/actions) address the local player as
+// SSN 10000 — retail player entities carry 10000+slot as their net id, so
+// EntityPool_FindByNetId @0x4f0a20 resolves them like any SSN. Our player
+// entities deliberately carry net_id 0 (the wire is handle-based), so this
+// script seam restores the mapping; MP joiner SSNs (10001+) wait on the net
+// track. [orig: dfx2med player-slot SSN convention; EntityPool_FindByNetId]
+EntityHandle EntityCommands::resolve_ssn(uint16_t ssn) const {
+    if (ssn == kLocalPlayerSsn && world_.cached.local_player.valid())
+        return world_.cached.local_player;
+    return world_.registry.find_by_net_id(ssn);
+}
+
 bool EntityCommands::kill_ssn(uint16_t ssn) {
-    Entity *e = world_.registry.get(world_.registry.find_by_net_id(ssn));
+    Entity *e = world_.registry.get(resolve_ssn(ssn));
     if (!e) return false;
     e->alive = false;
     e->health = 0;
@@ -132,14 +145,14 @@ bool EntityCommands::kill_ssn(uint16_t ssn) {
 }
 
 bool EntityCommands::remove_ssn(uint16_t ssn) {
-    EntityHandle h = world_.registry.find_by_net_id(ssn);
+    EntityHandle h = resolve_ssn(ssn);
     if (!world_.registry.get(h)) return false;
     world_.registry.despawn(h);
     return true;
 }
 
 bool EntityCommands::set_ssn_hp(uint16_t ssn, int32_t hp) {
-    Entity *e = world_.registry.get(world_.registry.find_by_net_id(ssn));
+    Entity *e = world_.registry.get(resolve_ssn(ssn));
     if (!e) return false;
     e->health = hp;
     e->alive = hp > 0;
@@ -147,7 +160,7 @@ bool EntityCommands::set_ssn_hp(uint16_t ssn, int32_t hp) {
 }
 
 bool EntityCommands::add_ssn_hp(uint16_t ssn, int32_t delta) {
-    Entity *e = world_.registry.get(world_.registry.find_by_net_id(ssn));
+    Entity *e = world_.registry.get(resolve_ssn(ssn));
     if (!e) return false;
     e->health += delta;
     if (e->health < 0) e->health = 0;
@@ -156,7 +169,7 @@ bool EntityCommands::add_ssn_hp(uint16_t ssn, int32_t delta) {
 }
 
 bool EntityCommands::set_ssn_waypoint(uint16_t ssn, int32_t wp) {
-    Entity *e = world_.registry.get(world_.registry.find_by_net_id(ssn));
+    Entity *e = world_.registry.get(resolve_ssn(ssn));
     if (!e) return false;
     e->waypoint_id = static_cast<uint8_t>(wp);
     e->wp_number = 0;
@@ -164,91 +177,91 @@ bool EntityCommands::set_ssn_waypoint(uint16_t ssn, int32_t wp) {
 }
 
 bool EntityCommands::set_ssn_alert(uint16_t ssn, int32_t state) {
-    Entity *e = world_.registry.get(world_.registry.find_by_net_id(ssn));
+    Entity *e = world_.registry.get(resolve_ssn(ssn));
     if (!e) return false;
     e->alert_state = static_cast<uint8_t>(state);
     return true;
 }
 
 bool EntityCommands::set_ssn_target(uint16_t ssn, uint16_t target) {
-    Entity *e = world_.registry.get(world_.registry.find_by_net_id(ssn));
+    Entity *e = world_.registry.get(resolve_ssn(ssn));
     if (!e) return false;
     e->ai_target = target;
     return true;
 }
 
 bool EntityCommands::set_ssn_move_speed(uint16_t ssn, int32_t kph) {
-    Entity *e = world_.registry.get(world_.registry.find_by_net_id(ssn));
+    Entity *e = world_.registry.get(resolve_ssn(ssn));
     if (!e) return false;
     e->move_speed_kph = kph;
     return true;
 }
 
 bool EntityCommands::set_ssn_engage_min(uint16_t ssn, int32_t v) {
-    Entity *e = world_.registry.get(world_.registry.find_by_net_id(ssn));
+    Entity *e = world_.registry.get(resolve_ssn(ssn));
     if (!e) return false;
     e->engage_min = v;
     return true;
 }
 
 bool EntityCommands::set_ssn_engage_max(uint16_t ssn, int32_t v) {
-    Entity *e = world_.registry.get(world_.registry.find_by_net_id(ssn));
+    Entity *e = world_.registry.get(resolve_ssn(ssn));
     if (!e) return false;
     e->engage_max = v;
     return true;
 }
 
 bool EntityCommands::set_ssn_attack_max(uint16_t ssn, int32_t v) {
-    Entity *e = world_.registry.get(world_.registry.find_by_net_id(ssn));
+    Entity *e = world_.registry.get(resolve_ssn(ssn));
     if (!e) return false;
     e->attack_max = v;
     return true;
 }
 
 bool EntityCommands::set_ssn_anim(uint16_t ssn, int32_t anim_slot) {
-    Entity *e = world_.registry.get(world_.registry.find_by_net_id(ssn));
+    Entity *e = world_.registry.get(resolve_ssn(ssn));
     if (!e) return false;
     e->body_anim_slot = anim_slot; // the present-pass clip channel (not the +0x374 selector)
     return true;
 }
 
 bool EntityCommands::set_ssn_hidden(uint16_t ssn, bool hidden) {
-    Entity *e = world_.registry.get(world_.registry.find_by_net_id(ssn));
+    Entity *e = world_.registry.get(resolve_ssn(ssn));
     if (!e) return false;
     e->hidden = hidden;
     return true;
 }
 
 bool EntityCommands::set_ssn_held(uint16_t ssn, bool held) {
-    Entity *e = world_.registry.get(world_.registry.find_by_net_id(ssn));
+    Entity *e = world_.registry.get(resolve_ssn(ssn));
     if (!e) return false;
     e->held = held;
     return true;
 }
 
 bool EntityCommands::set_ssn_disabled(uint16_t ssn, bool disabled) {
-    Entity *e = world_.registry.get(world_.registry.find_by_net_id(ssn));
+    Entity *e = world_.registry.get(resolve_ssn(ssn));
     if (!e) return false;
     e->disabled = disabled;
     return true;
 }
 
 bool EntityCommands::ssn_exists(uint16_t ssn) const {
-    return world_.registry.get(world_.registry.find_by_net_id(ssn)) != nullptr;
+    return world_.registry.get(resolve_ssn(ssn)) != nullptr;
 }
 
 bool EntityCommands::ssn_alive(uint16_t ssn) const {
-    const Entity *e = world_.registry.get(world_.registry.find_by_net_id(ssn));
+    const Entity *e = world_.registry.get(resolve_ssn(ssn));
     return e != nullptr && e->alive;
 }
 
 bool EntityCommands::ssn_dead(uint16_t ssn) const {
-    const Entity *e = world_.registry.get(world_.registry.find_by_net_id(ssn));
+    const Entity *e = world_.registry.get(resolve_ssn(ssn));
     return e != nullptr && !e->alive;
 }
 
 bool EntityCommands::ssn_in_area(uint16_t ssn, int area_id) const {
-    const Entity *e = world_.registry.get(world_.registry.find_by_net_id(ssn));
+    const Entity *e = world_.registry.get(resolve_ssn(ssn));
     const Area *a = world_.registry.area(area_id);
     if (!e || !a) return false;
     return a->bounds.contains(e->position);
@@ -383,8 +396,8 @@ int EntityCommands::find_best_seat(const Entity &target, EntityHandle occupant,
 bool EntityCommands::mount(uint16_t occupant_ssn, uint16_t target_ssn, SeatSelectionMode mode) {
     // [orig: WacScript_TryMountEntityToVehicle @0x4f70f0] resolve both; reject already-mounted /
     // seatless; pick the best seat; write both sides; pose now.
-    EntityHandle oh = world_.registry.find_by_net_id(occupant_ssn);
-    EntityHandle th = world_.registry.find_by_net_id(target_ssn);
+    EntityHandle oh = resolve_ssn(occupant_ssn);
+    EntityHandle th = resolve_ssn(target_ssn);
     Entity *occ = world_.registry.get(oh);
     Entity *tgt = world_.registry.get(th);
     if (!occ || !tgt) return false;
@@ -427,7 +440,7 @@ bool EntityCommands::mount_boarding_command(uint16_t occupant_ssn, uint16_t targ
 bool EntityCommands::mount_best(uint16_t occupant_ssn) {
     // [orig: EventAction_Dispatch case 0x25 @0x4542e0 -> the vehicle is occupant-model+144.]
     // Proximity proxy: the nearest entity offering a free seat within kMountRadius.
-    EntityHandle oh = world_.registry.find_by_net_id(occupant_ssn);
+    EntityHandle oh = resolve_ssn(occupant_ssn);
     const Entity *occ = world_.registry.get(oh);
     if (!occ || occ->mounted) return false;
     const Vec3 p = occ->position;
@@ -447,7 +460,7 @@ bool EntityCommands::mount_best(uint16_t occupant_ssn) {
 
 bool EntityCommands::dismount(uint16_t occupant_ssn) {
     // [orig: Entity_DetachFromVehicle @0x4355f0] free the seat + clear the occupant's mount ref.
-    Entity *occ = world_.registry.get(world_.registry.find_by_net_id(occupant_ssn));
+    Entity *occ = world_.registry.get(resolve_ssn(occupant_ssn));
     if (!occ || !occ->mounted) return false;
     const bool claim_capable_seat = occ->mount_type != SeatType::Passenger &&
                                     occ->mount_type != SeatType::None;
@@ -479,7 +492,7 @@ bool EntityCommands::dismount(uint16_t occupant_ssn) {
 
 uint16_t EntityCommands::find_mounted_on(uint16_t target_ssn) const {
     // [orig: Vehicle_HasEnemyOccupant @0x4359f0] first occupant riding target_ssn, else 0.
-    EntityHandle th = world_.registry.find_by_net_id(target_ssn);
+    EntityHandle th = resolve_ssn(target_ssn);
     if (!th.valid()) return 0;
     uint16_t result = 0;
     world_.registry.for_each([&](const Entity &e) {
@@ -494,7 +507,7 @@ uint16_t EntityCommands::find_mounted_on(uint16_t target_ssn) const {
 
 bool EntityCommands::apply_ai_command(uint16_t ssn, int sub_type, int32_t p2, int32_t p3, int32_t p4) {
     if (!world_.ai) return false;
-    AiEntity *ae = world_.ai->for_handle(world_.registry.find_by_net_id(ssn));
+    AiEntity *ae = world_.ai->for_handle(resolve_ssn(ssn));
     if (!ae) return false;
     ai_apply_command(ae->brain, sub_type, p2, p3, p4);
     return true;
@@ -592,6 +605,34 @@ void World::run_logic_tick(bool is_authority, bool pre_mission) {
     ++logic_tick; // [orig: current_tick @0x24c1968 advances once per frame tick]
 }
 
+// Structural translation of Server_ProcessRoundEnd @0x5164f0 at SP altitude.
+void World::process_round_end(int32_t winning_team) {
+    if (round_end.ended) return;          // the double-run guard [orig: @0x516502]
+    round_end.winner_team = winning_team; // [orig: g_round_winning_team @0x516528]
+    // Unmodeled MP score surfaces, in original order: the winner-team scoring pass
+    // (GameEvent_ProcessScoring @0x52f550 per winning-team member @0x516530), the
+    // end-of-round scoreboard block build (Server_BuildEndOfRoundScoreboard @0x508f30
+    // — round_end.winner_team stands for its winner dword @0x24c1970), and the
+    // top-scorer bonus on non-team draws. Net-track wire legs, per active slot in
+    // state 6: S2C 0x61 round-end marker (4 zero bytes) @0x516790, S2C 0x1D
+    // scoreboard header [u8 winner][s16 score0][s16 score1][u8 draw][s8 myEntryIndex]
+    // (EndRoundScoreboard_SerializeHeader @0x505280) @0x516839, CNetPlayer_SetGameState(11)
+    // @0x516846, slot state 6->7 @0x51685e; then the per-team round-win counters for
+    // game types 0x10000/65537/65540 @0x5168a0 and the MP-only 2790-tick linger
+    // @0x5166c4 (drained by Server_TickUpdate -> exit reason 3 / the client frame ->
+    // reason 4; SP never drains it — the epilog owns the SP exit).
+    round_end.ended = true; // [orig: g_spawn_success_gate latch @0x5168e4]
+    // The SP tail [orig: @0x51691d..0x51698f]: stop the dialog audio channel
+    // (DialogAudio_PlayNextChunkOrStop(0) @0x51694b) + Dialog_ResetAll + park the
+    // mission music, then winner==1 -> the WIN epilog (Cine_InitPlayback @0x578390:
+    // <mission>.cne if present, else a static camera; the flyaway + jo_Epil.tga
+    // score screen) + end music track 1; anything else -> the LOSE cine
+    // (Cine_StartPlayback @0x577840 letterbox/fade + the jo_Epil2.tga MISSION FAILED
+    // screen) + end track 2 (MusicCtx_SelectEndTrack @0x672fd0). All host
+    // presentation: the effect carries the winner, the host selects the flow.
+    effects.push({"round_end", winning_team, 0, 0, 0, std::string()});
+}
+
 // Count alive members per commandGroup over the actor pools; group 0 is
 // forced to zero [orig: EntityPool_RecountByType @ 0x40e7e0 /
 // EntityPool_RecountLiveByGroup @ 0x40e8d0 — !(flags & 2) && health > 0].
@@ -643,6 +684,11 @@ void World::restore(const Snapshot &s) {
     logic_tick = s.logic_tick;
     effects.clear();
     round_sim.reset();
+    // Round outcome + kill stats reset with the mission [orig: Game_StartMission —
+    // gate clear @0x524a1f + the scoreboard-block memset @0x5249df; the stat buckets
+    // clear in the round-start state init].
+    round_end = RoundEndState{};
+    kill_stats = MissionKillStats{};
     load_systems(); // systems re-init their per-mission state
     registry.for_each([&](const Entity &vehicle) {
         if (vehicle.primary_occupant.valid())

@@ -772,6 +772,7 @@ func get_current_frame_clear_color() -> Color:
 ## effects), then the audio render pass. Effects come back through MissionRuntime.effects_drained.
 func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta: float = TICK_DT) -> void:
 	var tick_start := Time.get_ticks_usec()
+	_last_tick_camera_pos = camera_pos  # the fire present pass's listener (audio-tick source)
 	var foliage_start := tick_start
 	_perf_foliage_us = 0
 	_perf_runtime_us = 0
@@ -836,6 +837,20 @@ func get_runtime_perf_counters() -> Dictionary:
 		"foliage": _dispatcher.get_frame_stats() if _dispatcher != null and _dispatcher.has_method("get_frame_stats") else {},
 		"audio": _mission_audio.get_perf_counters() if _mission_audio != null and _mission_audio.has_method("get_perf_counters") else {},
 	}
+
+
+# Listener position for the fire present pass — the same camera position the audio
+# render pass ticks with (INF until the first tick).
+var _last_tick_camera_pos := Vector3.INF
+
+
+func _fire_listener_position() -> Vector3:
+	return _last_tick_camera_pos
+
+
+# Fire-presentation counters (probe/diagnostic seam; empty until a mission runs).
+func get_fire_present_stats() -> Dictionary:
+	return _runtime.get_fire_present_stats() if _runtime != null and _runtime.has_method("get_fire_present_stats") else {}
 
 
 # --- the local player (Phase 2; ADR 0012). Host delegates to the mission runtime. ---
@@ -1390,6 +1405,12 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> void:
 	# remote-entity avatars (build_player_animated_model); unused by the host present path.
 	opts["placer"] = _placer
 	opts["env_node"] = _env
+	# The fire present pass's providers (AI/remote fire sound + muzzle + tracers): audio
+	# and effect world resolve lazily (mission audio is set up after the runtime), the
+	# listener is the same camera position the audio render pass ticks with.
+	opts["fire_audio"] = Callable(self, "get_mission_audio")
+	opts["fire_fx"] = Callable(self, "get_effect_world")
+	opts["fire_listener"] = Callable(self, "_fire_listener_position")
 	_runtime.setup(mission, container, opts)
 	if _runtime.get_sim() == null:
 		push_warning("GameWorld: failed to start mission runtime")
