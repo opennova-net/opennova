@@ -17,9 +17,10 @@ in-source (ALPHAFADE atof, positional 4-field parse, stance frame-0 shared
 scale + gates, capacity-1 reserve fold, triggered-text white, mission-bin
 exists-gate, divisor byte wrap) and minted D-HUD-9/-10. No raw decompilation
 is committed; behavior is summarized and cited. The 2026-07-11 session applied
-two auto-name renames + two comments to the IDB (logged at the end); the
-D-HUD-1 rename of the curated `draw_minimap_compass_overlay` name remains a
-held **proposal**.
+two auto-name renames + two comments to the IDB (logged at the end); the held
+curated-name proposals (D-HUD-1 `HUD_DrawStanceIndicator` and the crosshair
+globals comment) were applied 2026-07-16, along with the scope-circle rename
+`Hud_DrawScopeCircleMask @0x5d17a0` (logged at the end).
 
 ## Verdict table
 
@@ -492,13 +493,19 @@ comments; IDB saved):
 - **Comment** at `0x51f1c8`: the `dword_24C1930 & 0x10000` → `"&"` replacement
   quirk (writer unwitnessed).
 
-Still held as **proposals** (curated-name changes, for the maintainer):
+Applied 2026-07-16 (repo hygiene pass — the maintainer's apply-the-held-IDB-updates
+call; IDB saved):
 
 - **Rename** `draw_minimap_compass_overlay @0x599f10` → `HUD_DrawStanceIndicator`
   (anchored: indexes `HUDSTANCE` frames by `byte_27235C0 = hudInfo+568` stance
-  index; D-HUD-1).
-- **Comment** at `0x599f10` recording the misnomer + the stance-index keying and
-  the real radar at `0x599700` (the text is in D-HUD-1 above).
+  index; D-HUD-1), with the misnomer + stance-keying comment at `0x599f10`.
+- **Rename** `draw_minimap_compass_ring @0x5d17a0` → `Hud_DrawScopeCircleMask` —
+  the 64-segment circular scope mask drawn for Scoped weapons that author no
+  SIGHTS rows (net-re §5.62). Re-witnessed at rename time: both callers are the
+  SIGHTS-card gates (`Render_ProcessMainSceneFrame @0x5cab15`,
+  `render_hud_overlay @0x5d82f2`). The sibling reticle drawer
+  `draw_minimap_crosshair_and_grid @0x5d1160` keeps its name (second caller
+  unwitnessed) and carries a candidate-rename comment for the next HUD grill.
 - **Comment** at `0x59e3d6` noting `dword_25510DC` = the user crosshair-style
   index (`cross%02d.tga`), `dword_25510E0` = the user crosshair color, and
   `dword_25510E4` = the `mp_CrossHairSpread` enable.

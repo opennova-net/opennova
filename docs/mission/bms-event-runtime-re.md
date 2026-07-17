@@ -772,9 +772,13 @@ Option bits share the SAME dword: 0x1 water, 0x40 SP-respawn, 0x100000 NVG,
 
 ## 9. Appendix: IDA write-backs (2026-06-10)
 
-Status: **proposed, NOT applied** (propose-first rule on the shared IDB
-`Jointops.exe.kong.i64`); renames dry-run validated 13/13. This is the formal record
-of §5 with the orig→reimpl correspondence made explicit.
+Status: **applied 2026-07-16** (repo hygiene pass, maintainer's apply-the-held-IDB-updates
+call) with three dispositions: `0x452ce0` and `0x4f81a0` had already been renamed by later
+sessions to sharper names (`EventTrigger_MarkLinkedSpawnPoints`, `WacScript_AdvanceTick`) —
+those two proposals below are superseded; `dword_815174` no longer exists as a standalone
+symbol (re-adjudicate at the next event grill). Every other row landed in
+`Jointops.exe.kong.i64`. This is the formal record of §5 with the orig→reimpl
+correspondence made explicit.
 
 ### 9.1 Renames
 

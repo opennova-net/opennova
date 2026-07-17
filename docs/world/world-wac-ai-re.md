@@ -1012,11 +1012,11 @@ ledgered as **D-INF-12**.
 `g_camera_third_person_selected @ 0xA860DF`, `g_cfg_default_camera_mode @ 0x24D20C4`);
 entry comments on `0x4b1290` (the bone map), `0x4b25c0` (case table off-by-one), `0x437af0`,
 `0x437d10`, `0x4391d0` (+ its real 2-arg signature note), `0x49c073` (view actions),
-`0x5ca1d2` (mode arbiter), `0x4b4942` (vehicle-3P pitch halving). **Proposed, NOT applied**
-(curated-name policy): `torsoYaw/torsoPitch → legChaseYawR/L`, `headLookYaw/headLookPitch →
-legTargetYawR/L`, `output_matrix @ 0xA890C0 → g_camera_anchor_z`, `world_x_1616 @ 0xA890EC →
-g_spectator_cam_x`, `outPos @ 0xA89110 → g_camera_lerp_from_x`, `outMillis @ 0x31BFBC0 →
-g_bam_sin_table_q22`.
+`0x5ca1d2` (mode arbiter), `0x4b4942` (vehicle-3P pitch halving). **Applied 2026-07-16**
+(repo hygiene pass): `output_matrix @ 0xA890C0 → g_camera_anchor_z`, `world_x_1616 @
+0xA890EC → g_spectator_cam_x`, `outPos @ 0xA89110 → g_camera_lerp_from_x`, `outMillis @
+0x31BFBC0 → g_bam_sin_table_q22`. Still held (struct members, needs struct tooling):
+`torsoYaw/torsoPitch → legChaseYawR/L`, `headLookYaw/headLookPitch → legTargetYawR/L`.
 
 ## 14.8 Appendix: the upper-body weapon channel — producer half (engine-research, 2026-07-09)
 
@@ -1586,6 +1586,13 @@ proximity tables (`g_StaticProx* / g_DynProx* / g_PersonProx*`, counts
 and the screen latches (`g_WeaponScreenOpen @ 0x24C1884`, `g_VehicleScreenOpen
 @ 0x24C1890`, `g_CmapScreenOpen @ 0x24C188C`). Entry comments on the ground
 probes, pool builders, blink query, action-218 gate, the ACCEPT handler, the
-WEAPON registration, and the type-6/11 dispatch sites. Proposed, NOT applied
-(curated-name policy): `collisionModel @ 0xB52FD8 -> g_StaticProxEntity`,
+WEAPON registration, and the type-6/11 dispatch sites. Applied 2026-07-16
+(repo hygiene pass): `collisionModel @ 0xB52FD8 -> g_StaticProxEntity`,
 `result @ 0xB5AB78 -> g_PlatformContactX`.
+
+IDB addendum (2026-07-16 hygiene pass): `Entity_ComputeWeaponFirePositions @ 0x455ef0`
+renamed `AIEntity_ReleaseFlareCountermeasures` — re-witnessed this session: it swaps the
+entity's ammo index to `FLARE`/`GROUND_FLARE` (renderInstance type 2 selects the ground
+variant), fires one round per AI fire slot via `Weapon_FireProcess @ 0x53f5b0`, then
+restores the original ammo; a countermeasure dispenser, not a generic fire-position
+helper. The two `libs/world/src/ai.cpp` citations updated in the same commit.
