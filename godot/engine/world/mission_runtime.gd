@@ -479,8 +479,10 @@ func get_fire_present_stats() -> Dictionary:
 	return _fire_present.get_stats() if _fire_present != null else {}
 
 
-func get_destruction_present_stats() -> Dictionary:
-	return _destruction_present.get_stats() if _destruction_present != null else {}
+func get_destruction_present_stats() -> RefCounted:
+	# DestructionPresentPass.Stats (typed counters, ADR 0017); null until a
+	# host mission runs with the pass.
+	return _destruction_present.get_stats() if _destruction_present != null else null
 
 func set_player_input(forward: bool, back: bool, left: bool, right: bool, lean_left: bool, lean_right: bool, jump: bool) -> void:
 	if _sim != null:

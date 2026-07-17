@@ -920,9 +920,10 @@ func get_fire_present_stats() -> Dictionary:
 	return _runtime.get_fire_present_stats() if _runtime != null and _runtime.has_method("get_fire_present_stats") else {}
 
 
-# Destruction-presentation counters (probe/diagnostic seam; empty until a mission runs).
-func get_destruction_present_stats() -> Dictionary:
-	return _runtime.get_destruction_present_stats() if _runtime != null and _runtime.has_method("get_destruction_present_stats") else {}
+# Destruction-presentation counters (DestructionPresentPass.Stats, typed per
+# ADR 0017; null until a host mission runs with the pass).
+func get_destruction_present_stats() -> RefCounted:
+	return _runtime.get_destruction_present_stats() if _runtime != null and _runtime.has_method("get_destruction_present_stats") else null
 
 
 # --- the local player (Phase 2; ADR 0012). Host delegates to the mission runtime. ---

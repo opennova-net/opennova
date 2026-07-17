@@ -66,14 +66,27 @@ var _burning: Dictionary = {}     # bms_id -> {node, fire} — the crackle roll 
 var _piece_pos: Dictionary = {}   # piece slot -> Vector3 (anchor resolver source)
 var _piece_live: Dictionary = {}  # piece slot -> true (trail spawned)
 var _rng := RandomNumberGenerator.new()
-var _stats := {
-	"husk_swaps": 0, "no_husk": 0, "pieces_peak": 0, "bursts": 0,
-	"effects": 0, "sounds": 0, "glass": 0, "crackles": 0,
-}
 
 
-func get_stats() -> Dictionary:
-	return _stats.duplicate()
+## Typed diagnostic counters (ADR 0017: cross-object contracts are typed
+## records) — probes assert the presentation legs actually ran.
+class Stats:
+	extends RefCounted
+	var husk_swaps := 0
+	var no_husk := 0
+	var pieces_peak := 0
+	var bursts := 0
+	var effects := 0
+	var sounds := 0
+	var glass := 0
+	var crackles := 0
+
+
+var _stats := Stats.new()
+
+
+func get_stats() -> Stats:
+	return _stats
 
 
 func setup(sim, index, placer, item_db, game_world, audio_provider: Callable,
@@ -115,7 +128,7 @@ func present() -> void:
 			_apply_effect(eff_v as Dictionary)
 		for snd_v in events.get("sounds", []):
 			_apply_sound(snd_v as Dictionary)
-		_stats.glass += int((events.get("glass_breaks", []) as Array).size())
+		_stats.glass += (events.get("glass_breaks", []) as Array).size()
 	_present_pieces()
 	_tick_wreck_fires()
 
@@ -238,7 +251,7 @@ func _present_pieces() -> void:
 		return
 	var fx = _fx_provider.call() if _fx_provider.is_valid() else null
 	var pieces: Array = _sim.get_death_pieces()
-	_stats.pieces_peak = maxi(int(_stats.pieces_peak), pieces.size())
+	_stats.pieces_peak = maxi(_stats.pieces_peak, pieces.size())
 	var seen: Dictionary = {}
 	for piece_v in pieces:
 		var piece: Dictionary = piece_v
