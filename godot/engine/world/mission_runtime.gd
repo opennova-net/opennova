@@ -675,7 +675,7 @@ func tick_realtime(delta: float) -> int:
 	_perf_sim_us = sim_us
 	_perf_effects_us = effects_us
 	_perf_present_us = 0
-	if _present != null or _wire_present != null or _fire_present != null 			or _destruction_present != null:
+	if _present != null or _wire_present != null or _fire_present != null or _destruction_present != null:
 		var present_start := Time.get_ticks_usec()
 		if _present != null:
 			_present.present()
