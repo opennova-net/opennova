@@ -3023,7 +3023,7 @@ carried children (child qualifies when it IS the vehicle or its groundEntity
 is); per free-or-own seat, weight by type — **ctrl/drvr 0x2000 < UseGun/default
 0x20000 < sitex-on-vehicle 0x200000 < sitex-on-child 0x2000000; LOWEST wins**
 (the driver seat wins a deck board). AI boarding modes constrain it: aiComp
-mode 123 takes only `sitex`, mode 124 refuses `ctrlx` (see 22.4).
+mode 123 takes only `sitex`, mode 124 refuses `ctrlx` (see 23.4).
 
 Seat-position keys: actions 0xB6-0xBF -> `Entity_FindAvailableSeat(player,
 0..9)` [orig: @ 0x436790] — seat N of the CURRENT mount's slot list (weapon
@@ -3100,9 +3100,10 @@ the original split. Deferrals stay under D-NET-161 (updated in
 [novaworld-net-re.md](../net/novaworld-net-re.md)).
 
 Consequences pinned for the training missions: 00TRa's truck ride is
-**player-driven** (the player takes drvrx; the mission-authored PatrolSpeed
-actions only matter to leg 3), the tour dialogs are `Group 1 IsWithinArea X`
-triggers riding the PLAYER's group — the deploy leg stamps every (re)spawned
+**instructor-driven** (the command-mounted instructor holds ctrlx from spawn,
+so the ride runs leg 3 — the authored RedirectGroupTo + PatrolSpeed feed the
+AI-driver leg while the player boards a sitex; probe-verified), the tour
+dialogs are `Group 1 IsWithinArea X` triggers riding the PLAYER's group — the deploy leg stamps every (re)spawned
 player `commandGroup = 1` [orig: @ 0x519fd0, the same block that writes team
 +0x162 and clears the movement gate]. Ported into `spawn_player_entity`.
 04TR's waves are infantry-led; its lone-vehicle groups need crews (leg 3) or
@@ -3195,7 +3196,7 @@ skipped while mounted).
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
-| D-AI-11 | Mount-chain stand-ins: (a) the scan candidate set is a registry sweep (no per-entity proximity lists) and the eye is the +0.9 u chest constant (no CameraOffset), +0.1875 u bias kept; (b) the emplaced-gun carrier LOS/reject legs (attrib 0x20 -> groundEntity) and the armory-point leg are unscanned; (c) the weapon-busy gate lives in the sim binding (World has no weapon slot); (d) the WAC no-dismount global (`dword_C6EADC`) is unmodeled; (e) seat-position keys 0xB6-0xBF (Entity_FindAvailableSeat @ 0x436790, incl. the displace-AI rule) unported; (f) the AI boarding think (walk to E5-E8 entry bones + the 64-tick seat-upgrade sweep) unported — script mounts are immediate; (g) child-vehicle seat traversal (FindBestSeatSlot's carried-gun walk + the 0x2000000 child-sitex weight) unmodeled; (h) sub-39's groundEntity persistence rides our collision's platform contact (retail keeps the stale boarding-time groundEntity while seated) | 22.1/22.4/22.5 above | the toggle covers 00TRa/04TR's gates (probe PASS); each residual cited at its port site |
+| D-AI-11 | Mount-chain stand-ins: (a) the scan candidate set is a registry sweep (no per-entity proximity lists) and the eye is the +0.9 u chest constant (no CameraOffset), +0.1875 u bias kept; (b) the emplaced-gun carrier LOS/reject legs (attrib 0x20 -> groundEntity) and the armory-point leg are unscanned; (c) the weapon-busy gate lives in the sim binding (World has no weapon slot); (d) the WAC no-dismount global (`dword_C6EADC`) is unmodeled; (e) seat-position keys 0xB6-0xBF (Entity_FindAvailableSeat @ 0x436790, incl. the displace-AI rule) unported; (f) the AI boarding think (walk to E5-E8 entry bones + the 64-tick seat-upgrade sweep) unported — script mounts are immediate; (g) child-vehicle seat traversal (FindBestSeatSlot's carried-gun walk + the 0x2000000 child-sitex weight) unmodeled; (h) sub-39's groundEntity persistence rides our collision's platform contact (retail keeps the stale boarding-time groundEntity while seated) | 23.1/23.4/23.5 above | the toggle covers 00TRa/04TR's gates (probe PASS); each residual cited at its port site |
 
 Correspondence adds: see the rows appended to the section-2 map this session
 (the toggle chain, the four predicates, `vehicle_ai_drive`, the deploy stamp).

@@ -1450,7 +1450,7 @@ void AiSystem::apply_route_order(AiEntity &e, int32_t list, int32_t node) {
         const int32_t denom = (b.f[AiBrain::kStoredKeyTime] >> 15) + 32;
         const int64_t err =
                 std::llabs(static_cast<int64_t>(e.heading) - b.f[AiBrain::kWpBearing]);
-        b.f[AiBrain::kAnimFlag] = static_cast<int32_t>(32 * (err / denom));
+        b.f[AiBrain::kAnimFlag] = static_cast<int32_t>(32 * err / denom);
     }
 }
 
@@ -1493,7 +1493,7 @@ void AiSystem::vehicle_ai_drive(World &world, Entity &veh, const Entity *control
         ai_waypoint_update_target(b, ve->pos, nav);
         const int32_t denom = (b.f[AiBrain::kStoredKeyTime] >> 15) + 32;
         const int64_t err = std::llabs(static_cast<int64_t>(heading) - b.f[AiBrain::kWpBearing]);
-        b.f[AiBrain::kAnimFlag] = static_cast<int32_t>(32 * (err / denom));
+        b.f[AiBrain::kAnimFlag] = static_cast<int32_t>(32 * err / denom);
     }
 
     // Bearing delta clamped to the budget (32-bit wrap semantics are load-bearing near
