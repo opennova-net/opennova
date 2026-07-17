@@ -247,7 +247,7 @@ func _find_foliage_world_point(data: NovaTerrainData) -> Dictionary:
 					var painted := 0
 					for offset_z in [2.0, 8.0, 14.0]:
 						for offset_x in [2.0, 8.0, 14.0]:
-							var sampled := int(data.get_foliage_index_world(
+							var sampled := int(data.get_detail_foliage_index_world(
 								sector_x + float(local_x) + offset_x,
 								sector_z + float(local_z) + offset_z
 							))

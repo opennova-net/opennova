@@ -16,8 +16,14 @@ extends RefCounted
 #     culling is traded away for that batching (the whole batch shares one AABB),
 #     which is the right call for dense, always-on-screen scenery.
 #   - Animated / skinned models (items.def type == Person, or carrying a skeletal
-#     anim_def) get an individual NovaObjectModel so each animates independently;
-#     MultiMesh cannot carry per-instance skeleton/PANM state.
+#     anim_def) and portal-carrying buildings get an individual NovaObjectModel;
+#     MultiMesh cannot carry per-instance skeleton/PANM state or section masks.
+#     The same rule applies to any graphic whose .3di carries live PANM tracks
+#     (free-running wave/spin
+#     decorations like pump jacks, and SET/register-posed parts): the original
+#     engine re-poses those from the global clock every rendered frame, so they
+#     must stay live models even when items.def calls them plain decorations
+#     (see _graphic_needs_live_panm).
 #
 # Models are resolved exactly as veg_assets.gd does: items.def `graphic` -> first
 # top-level "<graphic>.3di" through the VFS via NovaObjectData.open_from_resource_root.
@@ -73,6 +79,9 @@ var _object_data_cache: Dictionary = {}
 var _skeletal_cache: Dictionary = {}
 # graphic -> Array[{ mesh, material, offset, submesh }] harvested from a template.
 var _static_batch_cache: Dictionary = {}
+# Per-graphic verdict of _graphic_needs_live_panm (graphic -> bool); epoch-cleared
+# with the other caches.
+var _graphic_panm_cache: Dictionary = {}
 # Every unique harvested batch ShaderMaterial (the throwaway template model's
 # materials outlive it on the MultiMesh batches) — update_environment()
 # re-stamps these from the live env so static objects relight with TOD.
@@ -111,6 +120,7 @@ func _check_epoch() -> void:
 	_object_data_cache.clear()
 	_skeletal_cache.clear()
 	_static_batch_cache.clear()
+	_graphic_panm_cache.clear()
 	_batch_materials.clear()
 	_last_batch_env_gen = -1
 	_last_batch_env_values = null
@@ -247,7 +257,7 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 		var xform := entity_transform(
 			entity.get("position", Vector3.ZERO),
 			entity.get("rotation_deg", Vector3.ZERO))
-		if _needs_individual_node(item_id):
+		if _needs_individual_node(item_id) or _graphic_needs_live_panm(graphic):
 			# Always capture identity (not just edit_mode): the runtime needs it to tag the node so
 			# MissionEntityRegistry can resolve SSN/group/zone host-action targets to this live model.
 			animated.append({
@@ -512,7 +522,7 @@ func place_single(mission: NovaMissionData, container: Node3D, kind: int, index:
 		entity.get("position", Vector3.ZERO),
 		entity.get("rotation_deg", Vector3.ZERO))
 
-	if _needs_individual_node(item_id):
+	if _needs_individual_node(item_id) or _graphic_needs_live_panm(graphic):
 		var data := _load_object_data(graphic)
 		if data == null:
 			delta.unresolved = 1
@@ -756,6 +766,54 @@ func _has_occlusion_records(item_id: int) -> bool:
 			has_occ = data.has_occlusion()
 	_occlusion_cache[item_id] = has_occ
 	return has_occ
+
+
+# A graphic whose model carries a live PANM track must not be frozen into a MultiMesh
+# batch: the batch harvest captures the rest pose and never evaluates PANM again, while
+# the original engine rebuilds PANM node matrices from the global millisecond clock for
+# every rendered object, every frame — free-running decorations (pump jacks, radar
+# dishes) animate with no mission action involved, and SET/register-driven tracks pose
+# parts away from rest. Inert PANM blocks (no family flags or every control idle) keep
+# static batching. Mirrors the evaluator's own gates: the entry-level animated check and
+# the per-track idle check. [orig: PANM_BuildNodeMatrices track gates + PANM_SampleTrack
+# (sub_4354B0) idle gate (control & 0xF0), clock dword_18B42A4 — ported in
+# libs/threedi/src/threedi_panm_matrices.cpp / threedi_panm_runtime.cpp]
+func _graphic_needs_live_panm(graphic: String) -> bool:
+	if _graphic_panm_cache.has(graphic):
+		return bool(_graphic_panm_cache[graphic])
+	var result := false
+	var data := _load_object_data(graphic)
+	if data != null and data.has_method("get_part_anim_count") and data.has_method("get_part_anim_info"):
+		var lod_count := int(data.get_summary().get("lod_count", 0))
+		for lod in range(lod_count):
+			for i in range(int(data.get_part_anim_count(lod))):
+				if part_anim_entry_is_live(data.get_part_anim_info(lod, i)):
+					result = true
+					break
+			if result:
+				break
+	_graphic_panm_cache[graphic] = result
+	return result
+
+
+# One PANM entry can move/pose its part iff its family flags declare animation AND at
+# least one track carries a non-idle control function (the sampler treats a zero high
+# nibble as inactive). Public static: the pure, testable form of the gate — it takes a
+# get_part_anim_info() dictionary, holds no placer state, and is the seam the sampler
+# regression tests exercise directly.
+static func part_anim_entry_is_live(info: Dictionary) -> bool:
+	var animated := int(info.get("rotation_type", 0)) != 0 \
+			or int(info.get("scale_type", 0)) != 0 \
+			or int(info.get("translate_type", 0)) != 0 \
+			or bool(info.get("rotation_reversed", false))
+	if not animated:
+		return false
+	for track in ["rotation_x", "rotation_y", "rotation_z",
+			"scale_x", "scale_y", "scale_z", "translation"]:
+		var t: Dictionary = info.get(track, {})
+		if (int(t.get("control", 0)) & 0xF0) != 0:
+			return true
+	return false
 
 
 func _model_name_for(graphic: String) -> String:

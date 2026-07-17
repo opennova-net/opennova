@@ -126,6 +126,10 @@ void NovaFoliageDispatcher::_bind_methods() {
                        &NovaFoliageDispatcher::set_height_sampler);
   ClassDB::bind_method(D_METHOD("get_height_sampler"),
                        &NovaFoliageDispatcher::get_height_sampler);
+  ClassDB::bind_method(D_METHOD("set_detail_foliage_sampler", "sampler"),
+                       &NovaFoliageDispatcher::set_detail_foliage_sampler);
+  ClassDB::bind_method(D_METHOD("get_detail_foliage_sampler"),
+                       &NovaFoliageDispatcher::get_detail_foliage_sampler);
   ClassDB::bind_method(D_METHOD("set_foliage_sampler", "sampler"),
                        &NovaFoliageDispatcher::set_foliage_sampler);
   ClassDB::bind_method(D_METHOD("get_foliage_sampler"),
@@ -166,6 +170,8 @@ void NovaFoliageDispatcher::_bind_methods() {
                "set_colormap_source", "get_colormap_source");
   ADD_PROPERTY(PropertyInfo(Variant::CALLABLE, "height_sampler"),
                "set_height_sampler", "get_height_sampler");
+  ADD_PROPERTY(PropertyInfo(Variant::CALLABLE, "detail_foliage_sampler"),
+               "set_detail_foliage_sampler", "get_detail_foliage_sampler");
   ADD_PROPERTY(PropertyInfo(Variant::CALLABLE, "foliage_sampler"),
                "set_foliage_sampler", "get_foliage_sampler");
   ADD_PROPERTY(
@@ -335,6 +341,19 @@ void NovaFoliageDispatcher::set_height_sampler(const Callable &p_sampler) {
 
 Callable NovaFoliageDispatcher::get_height_sampler() const {
   return height_sampler_;
+}
+
+void NovaFoliageDispatcher::set_detail_foliage_sampler(
+    const Callable &p_sampler) {
+  if (detail_foliage_sampler_ == p_sampler) {
+    return;
+  }
+  detail_foliage_sampler_ = p_sampler;
+  reset();
+}
+
+Callable NovaFoliageDispatcher::get_detail_foliage_sampler() const {
+  return detail_foliage_sampler_;
 }
 
 void NovaFoliageDispatcher::set_foliage_sampler(const Callable &p_sampler) {
@@ -893,8 +912,15 @@ opennova::foliage::WorldSamplers NovaFoliageDispatcher::_world_samplers() {
   world.height_at = [this](float p_world_x, float p_world_z) {
     return _sample_height(p_world_x, p_world_z);
   };
-  world.foliage_mask_at = [this](float p_world_x, float p_world_z) {
-    return _mask_for_palette_index(_sample_foliage_index(p_world_x, p_world_z));
+  world.detail_foliage_mask_at = [this](int32_t p_world_x_fixed,
+                                        int32_t p_world_z_fixed) {
+    return _mask_for_palette_index(
+        _sample_detail_foliage_index(p_world_x_fixed, p_world_z_fixed));
+  };
+  world.model_foliage_mask_at = [this](int32_t p_world_x_fixed,
+                                       int32_t p_world_z_fixed) {
+    return _mask_for_palette_index(
+        _sample_model_foliage_index(p_world_x_fixed, p_world_z_fixed));
   };
   frame_stats_.path_blocker_available = tile_info_.is_valid();
   world.path_blocked = [this](float p_world_x, float p_world_z, float p_radius) {
@@ -927,19 +953,46 @@ float NovaFoliageDispatcher::_sample_height(float p_world_x,
   return static_cast<float>(static_cast<double>(result));
 }
 
-int NovaFoliageDispatcher::_sample_foliage_index(float p_world_x,
-                                                 float p_world_z) const {
+int NovaFoliageDispatcher::_sample_detail_foliage_index(
+    int32_t p_world_x_fixed, int32_t p_world_z_fixed) const {
   if (terrain_data_.is_valid()) {
-    return terrain_data_->get_foliage_index_world(p_world_x, p_world_z);
+    return terrain_data_->get_detail_foliage_index_fixed(
+        p_world_x_fixed, p_world_z_fixed);
+  }
+  if (detail_foliage_sampler_.is_valid()) {
+    Array arguments;
+    arguments.push_back(static_cast<double>(p_world_x_fixed) / 65536.0);
+    arguments.push_back(static_cast<double>(p_world_z_fixed) / 65536.0);
+    return static_cast<int>(detail_foliage_sampler_.callv(arguments));
   }
   if (foliage_sampler_.is_valid()) {
     Array arguments;
-    arguments.push_back(p_world_x);
-    arguments.push_back(p_world_z);
+    arguments.push_back(static_cast<double>(p_world_x_fixed) / 65536.0);
+    arguments.push_back(static_cast<double>(p_world_z_fixed) / 65536.0);
     return static_cast<int>(foliage_sampler_.callv(arguments));
   }
   if (colormap_source_.is_valid()) {
-    return colormap_source_->get_foliage_index_world(p_world_x, p_world_z);
+    return colormap_source_->get_detail_foliage_index_fixed(
+        p_world_x_fixed, p_world_z_fixed);
+  }
+  return 0;
+}
+
+int NovaFoliageDispatcher::_sample_model_foliage_index(
+    int32_t p_world_x_fixed, int32_t p_world_z_fixed) const {
+  const float world_x = static_cast<float>(p_world_x_fixed) / 65536.0f;
+  const float world_z = static_cast<float>(p_world_z_fixed) / 65536.0f;
+  if (terrain_data_.is_valid()) {
+    return terrain_data_->get_foliage_index_world(world_x, world_z);
+  }
+  if (foliage_sampler_.is_valid()) {
+    Array arguments;
+    arguments.push_back(static_cast<double>(p_world_x_fixed) / 65536.0);
+    arguments.push_back(static_cast<double>(p_world_z_fixed) / 65536.0);
+    return static_cast<int>(foliage_sampler_.callv(arguments));
+  }
+  if (colormap_source_.is_valid()) {
+    return colormap_source_->get_foliage_index_world(world_x, world_z);
   }
   return 0;
 }

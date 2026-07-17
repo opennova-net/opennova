@@ -406,11 +406,12 @@ void test_idle_skip_throttle() {
     CHECK(vel[2] == 0);
     CHECK(pos[2] == sunk + 2 * 400); // [orig: pos.Z -= 2*slideDecay on the skip path]
 
-    // The PLAYER skip band nets ZERO drift under our motor's gravity form
-    // (pos += 2*vel on the 2-tick cadence, infantry.cpp / D-INF-10). The
-    // original's x1 player revert pairs with ITS x1-per-tick integration; a x1
-    // revert against OUR x2 integration leaked -vel per gravity tick — the
-    // idle sink-and-pop sawtooth this pins against.
+    // The PLAYER skip band nets ZERO drift under the org2 motor's witnessed
+    // per-tick gravity (`vel -= 208; pos += vel` — infantry.cpp, D-INF-10/§22):
+    // the skip undo is x1 for the player, matching the original's Flags&0x100
+    // select [orig: @ 0x4b2cd9-0x4b2ce9]. The x2-for-both undo (tuned to the
+    // pre-§22 2-tick reimpl cadence) leaked +208 per skip tick — the standing
+    // rise-and-snap sawtooth this pins against.
     {
         Rig prig(box_model(1, 0, 2.0, 2.0, 3.0));
         prig.move_soldier(30.0, 30.0, 1.0);
@@ -423,14 +424,13 @@ void test_idle_skip_throttle() {
                                    fx(1.8), 0, 0, /*is_player=*/true, true, t, 43, 0u, phealth);
         const int32_t before_z = ppos[2];
         for (uint32_t t = 12; t <= 21; ++t) { // the 10-tick skip band
-            if ((t & 1u) == 0) { // the player motor's 2-tick gravity cadence
-                pvel[2] -= 416;
-                ppos[2] += 2 * pvel[2];
-            }
+            pvel[2] -= 208;      // the org2 per-tick gravity...
+            ppos[2] += pvel[2];  // ...and the x1 integrate [orig: @0x4b7acf/@0x4b7cef]
             const int32_t r = prig.cw.resolve_entity(prig.world, prig.soldier, pstate, ppos,
                                                      pvel, pvel[2], 0, fx(1.8), 0, 0, true,
                                                      true, t, 43, 0u, phealth);
-            CHECK(r == 0); // every band tick skips
+            CHECK(r == 0);       // every band tick skips
+            CHECK(pvel[2] == 0); // the skip zeroes vel_z each tick
         }
         CHECK(ppos[2] == before_z); // net zero — no idle sawtooth
     }

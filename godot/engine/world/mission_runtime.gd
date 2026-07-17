@@ -225,6 +225,9 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	# Stamp each entity's items.def wire traits: AI-capability (0x0D AI-trailer gate, D-NET-97),
 	# the §5.10b replication class (0x0A serialize dispatch — an ewep emplacement must not ride
 	# the vehicle record), and hp -> health/health_max (vehicles spawn at full health on the wire).
+	# Also installs the same class table on the local client view's 0x0A DECODE (the retail
+	# client sizes records from its own items.def), so both sides of the in-process wire agree —
+	# a mis-sized record desyncs the frame and scatters entities around the player.
 	if options.get("item_db") != null:
 		_sim.resolve_item_traits(options["item_db"])
 	# World-object collision: register each placed graphic's .3di collision block (BVOL

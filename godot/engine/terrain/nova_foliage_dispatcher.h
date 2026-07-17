@@ -65,8 +65,12 @@ public:
   Ref<NovaTerrainData> get_colormap_source() const;
 
   // Editor samplers: (world_x, world_z) -> height / foliage palette index.
+  // Detail uses retail's flat wrapped map lookup; foliage_sampler retains the
+  // sector-routed MODEL lookup and is the compatibility fallback for detail.
   void set_height_sampler(const Callable &p_sampler);
   Callable get_height_sampler() const;
+  void set_detail_foliage_sampler(const Callable &p_sampler);
+  Callable get_detail_foliage_sampler() const;
   void set_foliage_sampler(const Callable &p_sampler);
   Callable get_foliage_sampler() const;
 
@@ -205,6 +209,7 @@ private:
   Ref<NovaTerrainTileInfo> tile_info_;
   Ref<NovaTerrainData> colormap_source_;
   Callable height_sampler_;
+  Callable detail_foliage_sampler_;
   Callable foliage_sampler_;
   PackedVector3Array silhouette_anchors_;
   bool surface_input_overrides_ = false;
@@ -257,7 +262,10 @@ private:
 
   opennova::foliage::WorldSamplers _world_samplers();
   float _sample_height(float p_world_x, float p_world_z) const;
-  int _sample_foliage_index(float p_world_x, float p_world_z) const;
+  int _sample_detail_foliage_index(int32_t p_world_x_fixed,
+                                   int32_t p_world_z_fixed) const;
+  int _sample_model_foliage_index(int32_t p_world_x_fixed,
+                                  int32_t p_world_z_fixed) const;
   uint32_t _mask_for_palette_index(int p_index) const;
   Vector2 _terrain_uv(float p_world_x, float p_world_z) const;
 
