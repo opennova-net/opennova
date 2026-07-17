@@ -18,6 +18,10 @@ extends RefCounted
 ## set+72] (every JOX set carries one; the field rename is a tracked
 ## follow-up). See docs/audio/lwf-dbf-sound-re.md.
 
+# The engine volume byte ceiling (member/clamp volumes, emitter fire volume)
+# [orig: e.g. the full-volume emitter fire path passes 255 @ 0x528e20].
+const VOLUME_BYTE_MAX := 255
+
 # Mirrors NovaLwfData / opennova::audio::SelectionMode selection-mode constants.
 const SELECTION_FIRST := 0
 const SELECTION_RANDOM := 1
@@ -135,8 +139,8 @@ func play_oneshot_3d(parent: Node3D, world_pos: Vector3, name: String, bus: Stri
 		# then euclidean, all <= range<<16 (equality passes); the euclidean
 		# test subsumes the axis ones [orig: Sound_Play3DPositional
 		# @ 0x527cd1-0x527d83].
-		var cull_u := int(set_d.get("target_id", 0))
-		if dist_q16 > maxi(cull_u, 0) << 16:
+		var cull_q16 := maxi(int(set_d.get("target_id", 0)), 0) << 16
+		if dist_q16 > cull_q16:
 			return false
 		# Occlusion inflates the fire distance between the euclidean cull and
 		# the recheck, and the INFLATED distance feeds the once-at-fire volume
@@ -145,7 +149,7 @@ func play_oneshot_3d(parent: Node3D, world_pos: Vector3, name: String, bus: Stri
 		if occlusion_provider != null:
 			dist_q16 = int(occlusion_provider.sound_occlusion_distance_q16(
 				listener_pos, world_pos, dist_q16))
-			if dist_q16 > maxi(cull_u, 0) << 16:
+			if dist_q16 > cull_q16:
 				return false
 	var played := false
 	for li in layers.size():

@@ -427,8 +427,8 @@ func tick(camera_pos: Vector3) -> void:
 					var lp: Dictionary = player.get_meta("layer_params")
 					var falloff := int(lp.get("falloff_radius", 0))
 					var min_d := int(lp.get("min_distance", 0))
-					var member_vol := int(lp.get("volume", 255))
-					var clamp_vol := int(lp.get("clamp_volume", 255))
+					var member_vol := int(lp.get("volume", NovaSoundBank.VOLUME_BYTE_MAX))
+					var clamp_vol := int(lp.get("clamp_volume", NovaSoundBank.VOLUME_BYTE_MAX))
 					vol = NovaSoundBank.emitter_layer_volume(
 						dist_q16, falloff, min_d, vol_byte, member_vol, clamp_vol)
 					if vol > 0 and _simulation != null:
