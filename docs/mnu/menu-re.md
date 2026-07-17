@@ -203,6 +203,80 @@ fixed: the popup background (`%COLOR_BLACK%`/`%SEMIOPAQUE_BLACK%` color appearan
 resolving (the `%VAR%` color change above), and the popup geometry being recomputed below
 the combo instead of using the authored rect — see **D-MNU-7** and **D-MNU-8**.
 
+### Dropdown input routing (2026-07-16 grill)
+
+While a dropdown is open, the original gives it **exclusive ownership of the mouse**
+through three scene-wide globals (renamed in the IDB this session):
+
+- `g_ui_open_popup_wnd @ 0x31C16D8` — the shown popup widget. `CWnd_SetShown @ 0x6480e0`
+  writes the widget's shown flag (`+224`) and, for popup-flagged widgets (`+660` — the
+  combo's embedded `CListWnd` is one), registers/unregisters it here; `CUIElement_Draw
+  @ 0x64a8a0` re-registers a drawn popup-flagged widget. While it is set:
+  - the WM-message dispatch routes every mouse event ONLY to the open popup's
+    dispatcher — the rest of the widget tree never sees the event
+    `[orig: dispatch_mouse_event @ 0x63ab00, gate @ 0x63abb5; WM 0x200..0x20A map to
+    event ids 0x1000001..0x100000B, screen coords scaled into design space]`;
+  - the per-frame hover/press/click/sound pump runs ONLY on the popup
+    `[orig: scene_end_frame @ 0x63e600, gate @ 0x63e691]`;
+  - visible-in-hierarchy holds only for the popup and its descendants (a parent walk
+    that reaches the root without passing the popup returns 0)
+    `[orig: CWnd_IsVisibleInHierarchy @ 0x646290, gate @ 0x646299]`.
+- `g_ui_active_combo_wnd @ 0x31C16D0` — the combo owning the open dropdown
+  (`UI_SetActiveComboWnd @ 0x6463e0` / `UI_ClearActiveComboWnd @ 0x646400`). The
+  dispatcher gives it a priority peek of every event `[orig:
+  dispatch_mouse_event_to_children @ 0x647900, peek @ 0x647917]`, which drives the
+  combo's outside-close check.
+- `g_ui_mouse_capture_wnd @ 0x31C16CC` — transient press-capture: a button press sets
+  it, release clears it, and while set the dispatch bypasses hit-testing entirely
+  `[orig: CButtonWnd_HandleNamedEvent @ 0x658340 (set @ 0x65839c, clear @ 0x6583ed);
+  bypass @ 0x647932]`. Capture set mid-iteration is also what gives the front-most hit
+  widget priority among overlapping siblings in the frame pump.
+
+The combo protocol `[orig: combobox_handle_event @ 0x65c190]` (vtable+32, fed by the
+anonymous sink `CWnd_EmitEventToNamedHandlerAndCallbacks @ 0x646970` re-dispatching with
+the widget's own name):
+
+- **Toggle** (event `0x3000001`, produced by the closed-cell click): opening first sends
+  the currently active combo its own toggle — **at most one dropdown open per scene**
+  (`@ 0x65c210`) — then sets the active combo and shows the list; closing hides the list
+  and clears the active combo (`@ 0x65c251`).
+- **Outside press** (events `0x1000002`/`0x1000004` — L-down/dbl-click — via the priority
+  peek): if the point is outside BOTH the closed cell and the list rect (children
+  included), the combo sends itself the toggle — close — and since routing was exclusive,
+  the press reaches nothing else: **the dismissing click is consumed** (`@ 0x65c261..0x65c2bc`).
+  A press on the (input-dead) closed cell is inside-combo, so it neither closes nor
+  re-toggles: clicking the open combo's own cell does nothing.
+- **Row pick** (`"LISTBOX_WND"` event `0x5000001`): forward the selection, hide the list,
+  clear the active combo (`@ 0x65c2fd..0x65c319`).
+- **Screen switch** clears both the popup and capture globals — navigation kills an open
+  dropdown `[orig: CUIScene_SelectNodeByName @ 0x63b6b0 (@ 0x63b6b8 / 0x63b7c4)]`;
+  scripted window/url/form actions clear press-capture (`CUIWidget_HandleScriptedAction
+  @ 0x6497f0, @ 0x6498ce/0x6499ea/0x649a51`) and track the popup global only when the
+  action's target is itself popup-flagged (`@ 0x64993a / 0x64997b`).
+
+Draw order has **no overlay pass**: the open list renders at its tree position
+(`CComboWnd_Render @ 0x65bfd0` renders the closed cell, then children in array order —
+the embedded list is attached as a child by `CWnd_SetParentAndAttach @ 0x6480a0` during
+parse — and `CListWnd_DrawItems @ 0x643f30` early-outs on hidden). The shipped menus are
+authored so this is unobservable: all three `player.mnu` combos (NATIONALITY / DIVISION /
+COMBO_LIST) author their LIST_BOX rects to the SAME parent-space region `(0,65)-(214,306)`,
+below every closed cell — dropdowns cover background art, never interactive siblings.
+
+Reimpl: the exclusivity is hosted as a full-menu transparent catcher overlay
+(`ComboPopupOverlay`) added as the owning `NovaMnuMenu`'s **last child** on open, with the
+styled popup box inside it — last-in-tree wins Godot mouse picking and draw order, which
+Godot's z_index does not affect (the pre-fix popup was a z-lifted child of the combo:
+drawn on top but siblings stole its clicks, and nothing closed on outside press, so
+`player.mnu`'s stacked-rect dropdowns could pile open on top of each other). The catcher
+implements the witnessed outside-press close/consume + dead-cell rule; `NovaMnuMenu`
+tracks the single active combo (`register_open_combo`/`close_active_combo_popup`) and
+closes it on every screen change; a combo leaving the tree or losing tree visibility
+closes its own popup. Bare host-built combos with no owning menu (a case the original
+does not have) keep the legacy child-of-combo popup. See **D-MNU-11** (fixed) and
+**D-MNU-12** (kept). Pinned by `mnu_combo_test.gd::test_combo_popup_overlay_hosts_exclusive_input`,
+`::test_combo_single_open_per_menu`, `::test_combo_outside_press_closes_and_nothing_else_opens`,
+`::test_combo_press_on_own_cell_keeps_popup_open`, and `::test_screen_change_closes_popup`.
+
 ## Marquee / credits `[orig: CMarqueeWnd @ 0x65c430; marquee_load_credits_from_ini @ 0x65c5a0]`
 
 A `marquee_wnd`'s `<DATASOURCE>` (e.g. `nlist.kda`) is a CBIN-encrypted credits config,
@@ -406,6 +480,19 @@ NATIONALITY list over the sibling DIVISION/COMBO_LIST combos (text bled through)
 (D-MNU-8). Pinned by `mnu_combo_test.gd::test_combo_popup_uses_authored_listbox_rect` and
 `::test_combo_popup_fallback_when_no_listbox_rect`.
 
+**matching** (2026-07-16 dropdown-input grill): while a dropdown is open the original
+routes mouse input exclusively to the open list (three gates: `dispatch_mouse_event
+@ 0x63ab00`, `scene_end_frame @ 0x63e600`, `CWnd_IsVisibleInHierarchy @ 0x646290` over
+`g_ui_open_popup_wnd @ 0x31C16D8`), keeps at most one dropdown open per scene
+(`combobox_handle_event @ 0x65c190 @ 0x65c210` over `g_ui_active_combo_wnd @ 0x31C16D0`),
+closes on an outside press with the press consumed (`@ 0x65c261`, closed cell dead while
+open), and clears the dropdown on screen switches (`CUIScene_SelectNodeByName @ 0x63b6b0`).
+Ported as the menu-top catcher overlay + NovaMnuMenu single-open registry (D-MNU-11; the
+pre-fix reimpl let overlapped siblings steal popup clicks and stack dropdowns open). Draw
+order stays tree-positional in the original with no overlay pass; the reimpl's menu-top
+draw is a recorded host divergence, unobservable in shipped menus (D-MNU-12). Pinned by
+the five input-routing tests in `mnu_combo_test.gd` (see the section above).
+
 **matching** (2026-06-23b controls grill): the CONTROL_MAPPING population (the action catalog +
 Class-id->name table + per-device row build), the byte-exact default keyboard bindings, the Control
 column format (key-name decode + `Ctrl-`/`Shift-`/`OR`), and the three table-render fixes (header
@@ -470,6 +557,32 @@ Accepted/divergent (each a documented decision, not a defect):
   else the item font line height, else 16. The shipped `player.mnu` lists author
   MIN_ITEM_HEIGHT=20, so they were already correct; the default fallback is the latent
   divergence this closes.
+- **D-MNU-11 (dropdown input exclusivity) — FIXED 2026-07-16:** while a dropdown is open
+  the original routes mouse input exclusively to the open list and closes it on an
+  outside press, consumed; only one dropdown opens per scene; screen switches clear it
+  (full witness map in "Dropdown input routing" above: `@ 0x63ab00 / 0x63e600 / 0x646290 /
+  0x65c190 / 0x63b6b0` over the three `0x31C16CC/D0/D8` globals). The reimpl had NONE of
+  this: the popup was a z-lifted child of its combo — Godot picking ignores z_index, so a
+  sibling combo built later swallowed hover and clicks anywhere it overlapped the open
+  popup (clicking a row there opened the sibling's dropdown instead), there was no
+  outside-press close, and popups stacked open — with `player.mnu`'s three combos
+  authoring the SAME list rect, several translucent lists could pile onto one region (the
+  user-visible "dropdowns overlap" bug). Fixed: full-menu catcher overlay as the menu's
+  last child hosting the popup box (picking + draw priority by tree order), the witnessed
+  outside-press close/consume + dead-cell rule on the catcher, the NovaMnuMenu single-open
+  registry, and close-on-screen-change/exit/hide. `godot/engine/mnu/nova_mnu_combo.cpp`,
+  `nova_mnu_menu.cpp`.
+- **D-MNU-12 (popup draw order — host mapping):** the original has NO overlay draw pass —
+  the open list draws at its tree position (`CComboWnd_Render @ 0x65bfd0` child walk ->
+  `CListWnd_DrawItems @ 0x643f30`), so a later sibling would paint over an open list; the
+  shipped menus author every dropdown rect into empty space below/beside the widgets
+  (all three `player.mnu` lists share `(0,65)-(214,306)` parent-space), which makes draw
+  order unobservable in retail content. The reimpl draws the popup in the menu-top
+  overlay because that same node is the input-exclusivity host — for retail menus the
+  result is pixel-equivalent; only a hypothetical mod authoring a dropdown rect over a
+  later sibling would see the list above it in the reimpl but below in retail. Kept: the
+  overlay is the correct Godot host for the witnessed input model, which is the
+  observable contract.
 
 Deferred (unwitnessed or out of bar; backlog, not blocking):
 
@@ -525,6 +638,16 @@ applied (the IDB is shared state — apply manually via `set_comments`, reversib
 | `CSpinListWnd_Render @ 0x64b220` + `CUISpinList_ParseXMLDefinition @ 0x64bd10` | `resolve_item` + `mnu_render_item_cell` (`mnu_item_cell.{h,cpp}`) + `build_spinlist` |
 | `CSpinListWnd_CreateUpDownChildren @ 0x64b8b0` | `add_spin_button` (parent-relative SPINUP/SPINDOWN) — `nova_mnu_builder.cpp` |
 | `CComboWnd_Construct @ 0x65be40` + `CComboWnd_Render @ 0x65bfd0` | `NovaMnuCombo` — `godot/engine/mnu/nova_mnu_combo.cpp` (dropdown geometry from authored LIST_BOX POSITION, D-MNU-7) |
+| `dispatch_mouse_event @ 0x63ab00` (WM `0x200..0x20A` -> ids `0x1000001..0x100000B`; exclusive route to `g_ui_open_popup_wnd` `@ 0x63abb5`) | the catcher overlay owning all input while a dropdown is open — `NovaMnuCombo::open_popup` (D-MNU-11) |
+| `scene_end_frame @ 0x63e600` (frame pump only the open popup `@ 0x63e691`; clears the per-frame mouse claim `scene+16` `@ 0x63e67e`) | overlay `MOUSE_FILTER_STOP` coverage (the Godot host has no per-frame pump) |
+| `CWnd_IsVisibleInHierarchy @ 0x646290` (popup-subtree-only while a popup is open `@ 0x646299`) | the overlay makes non-popup widgets unpickable; `NovaMnuCombo` closes on lost tree visibility |
+| `combobox_handle_event @ 0x65c190` (toggle `0x3000001`; single-open `@ 0x65c210`; outside-press close `@ 0x65c261`; `LISTBOX_WND` `0x5000001` pick `@ 0x65c2fd`) | `NovaMnuCombo::on_overlay_gui_input` + `on_row_pressed` + `NovaMnuMenu::register_open_combo` (D-MNU-11) |
+| `CWnd_SetShown @ 0x6480e0` (shown flag `+224`; popup flag `+660` registers `g_ui_open_popup_wnd`; was `sub_6480E0`) | popup lifecycle = overlay spawn/free in `open_popup`/`close_popup` |
+| `CUIScene_SelectNodeByName @ 0x63b6b0` (screen switch clears the popup + capture globals `@ 0x63b6b8/0x63b7c4`) | `NovaMnuMenu::show_screen`/`set_current_screen`/`clear` -> `close_active_combo_popup` |
+| `dispatch_mouse_event_to_children @ 0x647900` (active-combo priority peek `@ 0x647917`; press-capture bypass `@ 0x647932`) + `widget_process_mouse_event @ 0x647a00` (reverse child walk; per-frame claim `scene+16`) | Godot viewport GUI picking (reverse tree order) — host code / not grillable |
+| `CButtonWnd_HandleNamedEvent @ 0x658340` (press sets `g_ui_mouse_capture_wnd` `@ 0x65839c`, release clears `@ 0x6583ed`; pressed-texture swap; was `sub_658340`) | Godot `BaseButton` press capture — host code / not grillable |
+| `CWnd_EmitEventToNamedHandlerAndCallbacks @ 0x646970` (+28 sink -> +32 with own name + callback chain by `1<<HIBYTE(event)`; was `sub_646970`) | Godot signals (`pressed`/`gui_input`) replace the named-event plumbing — host code / not grillable |
+| `CWnd_SetParentAndAttach @ 0x6480a0` (parent ptr `+252` + child-array attach; was `sub_6480A0`) | Godot `add_child` — host code / not grillable |
 | `CMarqueeWnd_Construct @ 0x65c430` + `CMarqueeWnd_ParseXMLDefinition @ 0x65ceb0` + `marquee_load_credits_from_ini @ 0x65c5a0` | `build_marquee` -> `NovaCreditsPlayer` + `CbinCreditsResource::from_cbin_bytes` (CBIN datasource); `NovaMnuMarquee` (plain text) |
 | `CUIWidget_HandleScriptedAction @ 0x649790` | `NovaMnuMenu::dispatch_action` — `godot/engine/mnu/nova_mnu_menu.cpp` |
 | `UI_PopulateControlMappingList @ 0x55c0c0` + `refresh_control_mapping_list @ 0x55b320` | `opennova::controls::build_rows` (`libs/controls/src/controls.cpp`) + `menu_shell.gd::_fill_control_mapping` |
@@ -557,6 +680,21 @@ Comments added and `idb_save` done: `0x644070` (row height = `this+201` / font-W
 `0x644060` (`row_rect = this+13` from `<LIST_BOX>` POSITION), `0x65c16e` (combo parse feeds
 the embedded `CListWnd` `this+384`). `CListWnd_DrawItems @ 0x643f30` and `CListWnd_Construct
 @ 0x643bb0` were already curated-named and left as-is.
+
+IDB state note (2026-07-16 dropdown-input grill): renamed, all anchored —
+`sub_6463C0 -> UI_SetMouseCaptureWnd`, `sub_6463D0 -> UI_ClearMouseCaptureWnd`,
+`sub_6463E0 -> UI_SetActiveComboWnd`, `sub_646400 -> UI_ClearActiveComboWnd`,
+`sub_6463F0 -> UI_SetOpenPopupWnd`, `sub_646410 -> UI_ClearOpenPopupWnd`,
+`sub_6480E0 -> CWnd_SetShown`, the FLIRT-misnamed
+`UMSSchedulerProxy::GetTransferListEvent -> CWnd_IsShown` (`0x646280`, returns `this[56]`),
+`sub_6480A0 -> CWnd_SetParentAndAttach`, `sub_658340 -> CButtonWnd_HandleNamedEvent`,
+`sub_64AB80 -> CCheckboxWnd_HandleNamedEvent`, `sub_646970 ->
+CWnd_EmitEventToNamedHandlerAndCallbacks`, `sub_6471C0 -> CWnd_MarkDirtyWithChildren`;
+data `dword_31C16CC -> g_ui_mouse_capture_wnd`, `dword_31C16D0 -> g_ui_active_combo_wnd`,
+`dword_31C16D8 -> g_ui_open_popup_wnd`. Witness comments at `0x65c190`, `0x63ab00`,
+`0x63e691`, `0x646299`, `0x647917`, `0x647932`, `0x63b6b0`, `0x6480e0`; `idb_save` done.
+Open: `dword_31C16D4` / `dword_31C16DC` (cleared alongside capture by scripted actions
+`@ 0x6498c8/0x6498d4`) remain unnamed — likely the focus/edit pair, unwitnessed.
 
 ### Element struct fields (witnessed offsets)
 

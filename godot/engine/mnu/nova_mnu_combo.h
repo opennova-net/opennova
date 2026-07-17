@@ -1,10 +1,12 @@
 #pragma once
 
 #include <godot_cpp/classes/font.hpp>
+#include <godot_cpp/classes/input_event.hpp>
 #include <godot_cpp/classes/label.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/classes/texture_button.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/core/object_id.hpp>
 #include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/rect2.hpp>
 
@@ -22,6 +24,20 @@ class NovaMnuMenu;
 // popup is an in-tree layered Control (not a native Popup/Window) so it stays
 // inside the menu's CanvasLayer transform, which matters in the ONED editor canvas
 // that renders the menu at a fixed scaled 640x480; a native popup would escape it.
+//
+// While open, the original engine routes mouse input EXCLUSIVELY to the dropdown
+// list: the WM-message dispatch sends events only to the open list [orig:
+// dispatch_mouse_event @ 0x63ab00], the per-frame hover/press pump runs only on it
+// [orig: scene_end_frame @ 0x63e600], and visible-in-hierarchy fails for every
+// widget outside the popup subtree [orig: CWnd_IsVisibleInHierarchy @ 0x646290].
+// Only one dropdown can be open per scene [orig: g_ui_active_combo_wnd @
+// 0x31C16D0], and a press outside both the closed cell and the list closes it,
+// consumed [orig: combobox_handle_event @ 0x65c190]. The reimpl hosts those
+// semantics as a full-menu modal overlay added as the owning NovaMnuMenu's last
+// child (top of tree = wins Godot picking and draw): the transparent catcher makes
+// every other widget mouse-dead and implements the outside-press close, the menu
+// tracks the single active combo, and screen navigation closes the popup [orig:
+// CUIScene_SelectNodeByName @ 0x63b6b0]. docs/mnu/menu-re.md D-MNU-11/12.
 //
 // The .mnu is a template: options may be seeded from LIST_BOX/ITEMS or populated at
 // runtime via set_items()/add_item() (server browsers, option lists). Selection
@@ -41,6 +57,11 @@ private:
 	int selected_index_ = -1;
 
 	Label *selected_label_ = nullptr;
+	// The spawned popup root: the full-menu overlay (menu-built combos) or the
+	// popup box itself (bare/host combos with no owning menu). Tracked by id so
+	// close stays safe across menu teardown ordering; popup_ is the styled box
+	// with the rows, valid only while popup_root() resolves.
+	ObjectID popup_root_id_;
 	Control *popup_ = nullptr;
 
 	// Popup styling resolved at build time.
@@ -67,13 +88,19 @@ private:
 	void on_sound_mouse_entered();
 	void on_sound_mouse_exited();
 	void on_row_pressed(int p_index);
+	// The modal catcher's input: a left press outside both the closed cell and the
+	// popup box closes the dropdown; everything else is swallowed (exclusivity).
+	void on_overlay_gui_input(const Ref<InputEvent> &p_event);
 	void update_selected_label();
+	// Resolve the live popup root (overlay or box), or null when closed/freed.
+	Control *popup_root() const;
 	// Per-row height: the authored MIN_ITEM_HEIGHT when present, else the item
 	// font's line height (the original measures a "W" glyph), else the 16px default.
 	int effective_item_height() const;
 
 protected:
 	static void _bind_methods();
+	void _notification(int p_what);
 
 public:
 	void _ready() override;
@@ -127,7 +154,10 @@ public:
 
 	void open_popup();
 	void close_popup();
-	bool is_popup_open() const { return popup_ != nullptr; }
+	bool is_popup_open() const;
+	// The styled popup box holding the rows (null while closed). Script-visible so
+	// hosts/tests can reach the rows wherever the box is parented.
+	Control *get_popup() const;
 };
 
 } // namespace godot
