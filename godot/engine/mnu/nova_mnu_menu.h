@@ -20,6 +20,7 @@
 namespace godot {
 
 class NovaMnuScreen;
+class NovaMnuCombo;
 class NovaMusicDirector;
 class AudioStreamPlayer;
 class InputEventKey;
@@ -95,6 +96,13 @@ private:
 	// rapid hover/click stream does not cut itself off. Survives rebuilds.
 	Vector<AudioStreamPlayer *> sound_players_;
 	int next_sound_player_ = 0;
+
+	// The combo whose dropdown is currently open -- at most one per menu, the
+	// scene-scoped analog of the original's active-combo/open-popup globals
+	// [orig: g_ui_active_combo_wnd @ 0x31C16D0, g_ui_open_popup_wnd @ 0x31C16D8].
+	// The combo registers on open (closing any previous one) and unregisters on
+	// close; screen navigation closes it (docs/mnu/menu-re.md D-MNU-11).
+	NovaMnuCombo *active_combo_ = nullptr;
 
 	void apply_screen_visibility();
 	NovaMnuScreen *find_screen(const String &p_name) const;
@@ -225,6 +233,18 @@ public:
 	// sound bank is set, resolves an entry (by trigger name, else the file stem)
 	// and plays it through the pool.
 	void play_widget_sound(const String &p_trigger, const String &p_file);
+
+	// --- Combo dropdown exclusivity ---
+	// One dropdown open per menu [orig: single-open toggle in combobox_handle_event
+	// @ 0x65c190 (@ 0x65c210); the open list owns all mouse input via
+	// g_ui_open_popup_wnd]. register closes the previously active combo's popup;
+	// unregister is identity-checked so stale closes are harmless.
+	void register_open_combo(NovaMnuCombo *p_combo);
+	void unregister_open_combo(NovaMnuCombo *p_combo);
+	// Close the open dropdown, if any. Screen navigation calls this the way the
+	// original clears the popup/capture globals on a screen switch
+	// [orig: CUIScene_SelectNodeByName @ 0x63b6b0]. Returns true if one closed.
+	bool close_active_combo_popup();
 
 	// --- Aggregate widget value/selection relay (M9) ---
 	// Interactive data widgets (list/combo/spinlist/table/edit/...) call this from

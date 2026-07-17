@@ -2,6 +2,7 @@
 
 #include "nova_mnu_builder.h"
 #include "nova_mnu_button.h"
+#include "nova_mnu_combo.h"
 #include "nova_mnu_goto.h"
 #include "nova_mnu_screen.h"
 #include "resource_index/nova_resource_root.h"
@@ -89,8 +90,38 @@ void NovaMnuMenu::on_director_exiting() {
 }
 
 void NovaMnuMenu::set_current_screen(const String &p_name) {
+	// A screen switch closes an open dropdown, like the original clearing the
+	// popup/capture globals [orig: CUIScene_SelectNodeByName @ 0x63b6b0].
+	close_active_combo_popup();
 	current_screen_ = p_name;
 	apply_screen_visibility();
+}
+
+void NovaMnuMenu::register_open_combo(NovaMnuCombo *p_combo) {
+	if (active_combo_ != nullptr && active_combo_ != p_combo) {
+		// Single-open: the original sends the active combo its toggle event before
+		// opening the new one [orig: combobox_handle_event @ 0x65c210].
+		NovaMnuCombo *previous = active_combo_;
+		active_combo_ = nullptr;
+		previous->close_popup();
+	}
+	active_combo_ = p_combo;
+}
+
+void NovaMnuMenu::unregister_open_combo(NovaMnuCombo *p_combo) {
+	if (active_combo_ == p_combo) {
+		active_combo_ = nullptr;
+	}
+}
+
+bool NovaMnuMenu::close_active_combo_popup() {
+	if (active_combo_ == nullptr) {
+		return false;
+	}
+	NovaMnuCombo *combo = active_combo_;
+	active_combo_ = nullptr;
+	combo->close_popup();
+	return true;
 }
 
 void NovaMnuMenu::set_edit_mode(bool p_edit) {
@@ -114,6 +145,9 @@ void NovaMnuMenu::set_interactive(bool p_on) {
 }
 
 void NovaMnuMenu::clear() {
+	// Close an open dropdown first: its overlay is parked directly on this menu
+	// (not inside a screen), so the screen sweep below would otherwise strand it.
+	close_active_combo_popup();
 	// Remove only screen nodes; the lazily created sound-player pool persists
 	// across rebuilds (so a rebuild does not leave sound_players_ dangling).
 	for (int i = get_child_count() - 1; i >= 0; --i) {
@@ -245,6 +279,9 @@ bool NovaMnuMenu::show_screen(const String &p_name) {
 	if (!has_screen(p_name)) {
 		return false;
 	}
+	// [orig: CUIScene_SelectNodeByName @ 0x63b6b0 clears the open-popup and
+	// mouse-capture globals on every screen switch]
+	close_active_combo_popup();
 	current_screen_ = p_name;
 	apply_screen_visibility();
 	on_screen_shown(p_name);
@@ -722,6 +759,7 @@ void NovaMnuMenu::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("handle_hotkey", "vk"), &NovaMnuMenu::handle_hotkey);
 	ClassDB::bind_method(D_METHOD("handle_key_input", "key"), &NovaMnuMenu::handle_key_input);
 	ClassDB::bind_method(D_METHOD("clear_navigation_stack"), &NovaMnuMenu::clear_navigation_stack);
+	ClassDB::bind_method(D_METHOD("close_active_combo_popup"), &NovaMnuMenu::close_active_combo_popup);
 	ClassDB::bind_method(D_METHOD("play_widget_sound", "trigger", "file"), &NovaMnuMenu::play_widget_sound);
 	ClassDB::bind_method(D_METHOD("set_master_volume", "volume"), &NovaMnuMenu::set_master_volume);
 	ClassDB::bind_method(D_METHOD("get_master_volume"), &NovaMnuMenu::get_master_volume);

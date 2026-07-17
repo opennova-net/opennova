@@ -1,16 +1,20 @@
 #include "nova_mnu_combo.h"
 
 #include "mnu_outline.h"
+#include "nova_mnu_menu.h"
 
 #include <godot_cpp/classes/button.hpp>
 #include <godot_cpp/classes/color_rect.hpp>
+#include <godot_cpp/classes/input_event_mouse_button.hpp>
 #include <godot_cpp/classes/scroll_container.hpp>
 #include <godot_cpp/classes/style_box_flat.hpp>
 #include <godot_cpp/classes/texture_rect.hpp>
 #include <godot_cpp/classes/v_box_container.hpp>
+#include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/callable.hpp>
 #include <godot_cpp/variant/callable_method_pointer.hpp>
 #include <godot_cpp/variant/node_path.hpp>
+#include <godot_cpp/variant/transform2d.hpp>
 
 using namespace godot;
 
@@ -139,19 +143,90 @@ int NovaMnuCombo::effective_item_height() const {
 	return min_item_height_;
 }
 
+Control *NovaMnuCombo::popup_root() const {
+	if (popup_root_id_.is_null()) {
+		return nullptr;
+	}
+	return Object::cast_to<Control>(ObjectDB::get_instance(popup_root_id_));
+}
+
+bool NovaMnuCombo::is_popup_open() const {
+	return popup_root() != nullptr;
+}
+
+Control *NovaMnuCombo::get_popup() const {
+	return popup_root() != nullptr ? popup_ : nullptr;
+}
+
 // [orig: CComboWnd @ 0x65be40 (embedded CListWnd at this+1536); CComboWnd_Render
 // @ 0x65bfd0; the popup is the CListWnd's own window rect (this+13) set from the
-// authored <LIST_BOX> POSITION, drawn over whatever sits beneath it.]
+// authored <LIST_BOX> POSITION.]
+//
+// While open, the dropdown owns the mouse: the original routes every mouse event
+// exclusively to the open CListWnd and pumps hover/press only on it, so every
+// other widget is input-dead until the list closes [orig: dispatch_mouse_event
+// @ 0x63ab00 (g_ui_open_popup_wnd gate @ 0x63abb5); scene_end_frame @ 0x63e600
+// (@ 0x63e691); CWnd_IsVisibleInHierarchy @ 0x646290 (@ 0x646299)]. The reimpl
+// hosts that exclusivity as a full-menu transparent catcher (the overlay) added
+// as the owning menu's LAST child, with the popup box inside it: last-in-tree
+// wins Godot mouse picking and draw order, the catcher swallows everything that
+// misses the box, and the menu enforces the one-open-dropdown invariant
+// [orig: g_ui_active_combo_wnd, single-open toggle @ 0x65c210]. A combo without
+// an owning menu (bare host/test builds; the original has no such case — every
+// CComboWnd lives in a scene) keeps the legacy child-of-combo popup, which gets
+// draw-on-top via z but no input exclusivity. docs/mnu/menu-re.md D-MNU-11/12.
 void NovaMnuCombo::open_popup() {
 	if (behavior_.edit_mode) {
 		return;
 	}
 	close_popup();
 
+	NovaMnuMenu *menu = behavior_.menu;
+	const bool overlay_mode = menu != nullptr && is_inside_tree() &&
+			menu->is_inside_tree() && menu->is_ancestor_of(this);
+
 	popup_ = memnew(Control);
 	popup_->set_name("Popup");
-	popup_->set_z_as_relative(false);
-	popup_->set_z_index(4096); // lift above sibling widgets in the same CanvasLayer
+	popup_->set_mouse_filter(Control::MOUSE_FILTER_STOP); // in-box presses never reach the catcher
+	if (!overlay_mode) {
+		popup_->set_z_as_relative(false);
+		popup_->set_z_index(4096); // legacy path: lift above siblings in the same CanvasLayer
+	}
+	Control *host = this;
+	Vector2 combo_origin; // the combo's origin expressed in host space
+	if (overlay_mode) {
+		// One dropdown per menu: opening this one closes the active one first
+		// [orig: combobox_handle_event @ 0x65c210 sends the active combo 0x3000001].
+		menu->register_open_combo(this);
+
+		Control *overlay = memnew(Control);
+		overlay->set_name("ComboPopupOverlay");
+		overlay->set_mouse_filter(Control::MOUSE_FILTER_STOP);
+		overlay->connect("gui_input", callable_mp(this, &NovaMnuCombo::on_overlay_gui_input));
+		menu->add_child(overlay); // last child of the menu: wins picking and draws on top
+		// Cover the menu rect explicitly (anchor presets lay out deferred; the rect
+		// is needed now for the popup placement below). Menus are fixed-size in both
+		// hosts (the shell pins 800x600 design space). A degenerate menu rect (bare
+		// test hosts) falls back to covering the viewport.
+		const Vector2 cover = menu->get_size();
+		if (cover.x < 1.0f || cover.y < 1.0f) {
+			const Transform2D vp_to_menu = menu->get_global_transform().affine_inverse();
+			const Rect2 vp = menu->get_viewport_rect();
+			overlay->set_position(vp_to_menu.xform(vp.position));
+			overlay->set_size(vp.size);
+		} else {
+			overlay->set_position(Vector2());
+			overlay->set_size(cover);
+		}
+		popup_root_id_ = overlay->get_instance_id();
+		host = overlay;
+		const Transform2D combo_to_overlay =
+				overlay->get_global_transform().affine_inverse() * get_global_transform();
+		combo_origin = combo_to_overlay.xform(Vector2());
+	} else {
+		popup_root_id_ = popup_->get_instance_id();
+	}
+
 	const int item_height = effective_item_height();
 	float pos_x;
 	float pos_y;
@@ -170,12 +245,17 @@ void NovaMnuCombo::open_popup() {
 		height = popup_rect_.size.y;
 	} else {
 		// Fallback for combos with no authored LIST_BOX rect (e.g. host-built browsers):
-		// drop below the combo, clamped to the window so a long list scrolls instead of
-		// running off-canvas. The popup only opens at runtime (edit_mode suppresses it),
-		// so get_viewport_rect() is the game window extent.
+		// drop below the combo, clamped so a long list scrolls instead of running
+		// off-canvas. In overlay mode the clamp is against the overlay (menu design
+		// space, scale-correct); the legacy path keeps the raw window extent.
 		width = get_size().x;
 		const float natural = static_cast<float>(items_.size() * item_height);
-		float avail = get_viewport_rect().size.y - (get_global_position().y + get_size().y);
+		float avail;
+		if (overlay_mode) {
+			avail = host->get_size().y - (combo_origin.y + get_size().y);
+		} else {
+			avail = get_viewport_rect().size.y - (get_global_position().y + get_size().y);
+		}
 		if (avail < static_cast<float>(item_height)) {
 			avail = static_cast<float>(item_height); // never collapse to nothing
 		}
@@ -183,7 +263,7 @@ void NovaMnuCombo::open_popup() {
 		pos_y = get_size().y;
 		height = natural < avail ? natural : avail;
 	}
-	popup_->set_position(Vector2(pos_x, pos_y));
+	popup_->set_position(combo_origin + Vector2(pos_x, pos_y));
 	popup_->set_size(Vector2(width, height));
 
 	if (popup_bg_tex_.is_valid()) {
@@ -248,17 +328,74 @@ void NovaMnuCombo::open_popup() {
 		mnu_add_outline(popup_, popup_outline_color_, 1);
 	}
 
-	add_child(popup_);
+	host->add_child(popup_);
 	emit_signal("popup_opened");
 }
 
 void NovaMnuCombo::close_popup() {
-	if (popup_ == nullptr) {
+	Control *root = popup_root();
+	popup_root_id_ = ObjectID();
+	popup_ = nullptr;
+	if (root == nullptr) {
 		return;
 	}
-	popup_->queue_free();
-	popup_ = nullptr;
+	if (behavior_.menu != nullptr) {
+		// [orig: UI_ClearActiveComboWnd @ 0x646400 on every close path]
+		behavior_.menu->unregister_open_combo(this);
+	}
+	// Detach before the deferred free so the dying catcher neither draws, eats
+	// input, nor squats on the node name for the remainder of the frame
+	// (single-open swaps spawn the replacement overlay in the same frame).
+	if (root->get_parent() != nullptr) {
+		root->get_parent()->remove_child(root);
+	}
+	root->queue_free();
 	emit_signal("popup_closed");
+}
+
+// A left press that reaches the catcher missed the popup box. The original closes
+// the dropdown only when the point is outside BOTH the closed cell and the list
+// rect; a press on the (input-dead) closed cell does nothing while the list is
+// open. Either way nothing beneath the overlay ever sees the press -- the
+// dismissing click is consumed, exactly like the original's exclusive routing.
+// [orig: combobox_handle_event @ 0x65c190, outside check @ 0x65c290 on events
+// 0x1000002/0x1000004]
+void NovaMnuCombo::on_overlay_gui_input(const Ref<InputEvent> &p_event) {
+	Ref<InputEventMouseButton> mb = p_event;
+	if (mb.is_null() || !mb->is_pressed() || mb->get_button_index() != MOUSE_BUTTON_LEFT) {
+		return;
+	}
+	Control *overlay = popup_root();
+	if (overlay == nullptr) {
+		return;
+	}
+	const Transform2D combo_to_overlay =
+			overlay->get_global_transform().affine_inverse() * get_global_transform();
+	const Rect2 combo_rect(combo_to_overlay.xform(Vector2()), get_size());
+	if (!combo_rect.has_point(mb->get_position())) {
+		close_popup();
+	}
+}
+
+void NovaMnuCombo::_notification(int p_what) {
+	switch (p_what) {
+		case NOTIFICATION_EXIT_TREE: {
+			// The overlay is parked on the menu, not under this combo -- never leave
+			// it behind. [orig: CWnd_Destructor clears the popup/capture globals
+			// @ 0x6474a2..0x6474bc]
+			close_popup();
+		} break;
+		case NOTIFICATION_VISIBILITY_CHANGED: {
+			// A hidden dropdown owner would leave an unreachable exclusive overlay
+			// (the original's equivalent widget fails CWnd_IsVisibleInHierarchy
+			// @ 0x646290 and self-heals on the next outside press); close eagerly.
+			if (!is_visible_in_tree() && is_popup_open()) {
+				close_popup();
+			}
+		} break;
+		default:
+			break;
+	}
 }
 
 void NovaMnuCombo::_bind_methods() {
@@ -276,6 +413,7 @@ void NovaMnuCombo::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("open_popup"), &NovaMnuCombo::open_popup);
 	ClassDB::bind_method(D_METHOD("close_popup"), &NovaMnuCombo::close_popup);
 	ClassDB::bind_method(D_METHOD("is_popup_open"), &NovaMnuCombo::is_popup_open);
+	ClassDB::bind_method(D_METHOD("get_popup"), &NovaMnuCombo::get_popup);
 
 	ADD_SIGNAL(MethodInfo("item_selected", PropertyInfo(Variant::INT, "index"),
 			PropertyInfo(Variant::STRING, "value")));
