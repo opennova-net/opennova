@@ -1187,8 +1187,8 @@ static int parse_oobj(const ThreediChunk *chunk, ThreediOcclusionObject **out_ob
         objs[i].position[1] = read_f32_le(base + 8);
         objs[i].position[2] = read_f32_le(base + 12);
         objs[i].radius = read_f32_le(base + 16);
-        objs[i].unk1 = read_s32_le(base + 20);
-        assert(objs[i].unk1 == 0);
+        objs[i].glow_scale = read_f32_le(base + 20);
+        assert(objs[i].glow_scale == 0.0f); /* zero across the corpus */
         objs[i].num_vertices = read_s32_le(base + 24);
         objs[i].num_planes = read_s32_le(base + 28);
         objs[i].face_count = read_s32_le(base + 32);
@@ -2298,7 +2298,7 @@ static int build_oobj_chunk(const Threedi3di3 *model, ChunkBuilder *out)
             buffer_append_f32_le(&out->payload, o->position[1]) != 0 ||
             buffer_append_f32_le(&out->payload, o->position[2]) != 0 ||
             buffer_append_f32_le(&out->payload, o->radius) != 0 ||
-            buffer_append_s32_le(&out->payload, o->unk1) != 0 ||
+            buffer_append_f32_le(&out->payload, o->glow_scale) != 0 ||
             buffer_append_s32_le(&out->payload, o->num_vertices) != 0 ||
             buffer_append_s32_le(&out->payload, o->num_planes) != 0 ||
             buffer_append_s32_le(&out->payload, o->face_count) != 0) {

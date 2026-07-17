@@ -161,6 +161,10 @@ public:
 	Dictionary get_user_point_info(int p_index) const;
 	Vector3 get_ground_anchor(int p_lod_index = 0) const;
 	bool has_collision() const;
+	// The model carries GPM-family occlusion/portal records (OVRT/OPLN/OFAC/OOBJ)
+	// — the placer de-batches such buildings so their sections can be masked
+	// per frame [orig: the model +0xDC/+0xE0 record gate all consumers use].
+	bool has_occlusion() const;
 	Array get_collision_volumes() const;
 	int get_part_anim_count(int p_lod_index) const;
 	Array get_part_animations(int p_lod_index) const;

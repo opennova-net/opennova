@@ -1318,7 +1318,7 @@ static void append_occlusion(const Collision &src, detail::OcclusionBuffers &out
   obj.position[1] = src.center.z;
   obj.position[2] = src.center.x;
   obj.radius = src.radius;
-  obj.unk1 = 0;
+  obj.glow_scale = 0.0f;
   obj.num_vertices = static_cast<int32_t>(src.vertCount);
   obj.num_planes = static_cast<int32_t>(src.planeCount);
   obj.face_count = static_cast<int32_t>(src.faceCount);

@@ -202,6 +202,10 @@ void NovaSimulation::reset_world() {
 	// Collision models/instances are mission-scoped: drop them with the world (the
 	// sweep re-registers on the next load) and re-point the fresh ai_ at the container.
 	collision_world_ = opennova::world::CollisionWorld{};
+	// Occlusion models too — retail reloads the model cache per mission, so the
+	// weld pass's shared-record type-5 rewrites never leak across loads.
+	occlusion_world_ = opennova::world::OcclusionWorld{};
+	occlusion_culled_bms_.clear();
 	apply_terrain_to_ai(); // re-point the fresh ai_ at the persisted terrain field (if any)
 	apply_root_motion_to_ai(); // ...and at the persisted infantry clip set (if any)
 	apply_collision_to_ai();
@@ -462,6 +466,77 @@ bool collision_model_from_ir(const ThreediIRCollision *col,
 	return true;
 }
 
+// Build the runtime occlusion model from the parsed occlusion IR — the 60 B
+// portal-face records with their sequential slices (the IR conversion already
+// mirrors the arena assignment of [orig: load_occlusion_model_data @ 0x5b4a00]).
+// The IR face dwords decode as the 12 B OFAC record: bytes 0-2 = vertex
+// indices, byte 3 = plane index, then the 3 edge words (bit 15 = winding).
+bool occlusion_model_from_ir(const ThreediIROcclusion *occ,
+                             opennova::world::OcclusionModel &out) {
+	if (occ == nullptr || occ->object_count == 0) return false;
+	out.vertices.reserve(occ->vertex_count);
+	for (size_t i = 0; i < occ->vertex_count; ++i) {
+		opennova::world::OcclusionVertex v;
+		v.p[0] = occ->vertices[i].position[0];
+		v.p[1] = occ->vertices[i].position[1];
+		v.p[2] = occ->vertices[i].position[2];
+		out.vertices.push_back(v);
+	}
+	out.planes.reserve(occ->plane_count);
+	for (size_t i = 0; i < occ->plane_count; ++i) {
+		opennova::world::OcclusionPlane p;
+		p.normal[0] = occ->planes[i].normal[0];
+		p.normal[1] = occ->planes[i].normal[1];
+		p.normal[2] = occ->planes[i].normal[2];
+		p.d = occ->planes[i].radius;
+		out.planes.push_back(p);
+	}
+	out.faces.reserve(occ->face_count);
+	for (size_t i = 0; i < occ->face_count; ++i) {
+		const ThreediIROcclusionFace &sf = occ->faces[i];
+		opennova::world::OcclusionFaceRec f;
+		f.v[0] = static_cast<uint8_t>(sf.raw_indices & 0xFF);
+		f.v[1] = static_cast<uint8_t>((sf.raw_indices >> 8) & 0xFF);
+		f.v[2] = static_cast<uint8_t>((sf.raw_indices >> 16) & 0xFF);
+		f.plane = static_cast<uint8_t>((sf.raw_indices >> 24) & 0xFF);
+		f.edge[0] = static_cast<uint16_t>(sf.edge_data & 0xFFFF);
+		f.edge[1] = static_cast<uint16_t>(sf.edge_data >> 16);
+		f.edge[2] = static_cast<uint16_t>(sf.other_edge_data & 0xFFFF);
+		out.faces.push_back(f);
+	}
+	out.records.reserve(occ->object_count);
+	for (size_t i = 0; i < occ->object_count; ++i) {
+		const ThreediIROcclusionObject &so = occ->objects[i];
+		opennova::world::OcclusionPortalFace rec;
+		rec.type = static_cast<uint8_t>(so.type);
+		rec.section_a = static_cast<uint8_t>(so.parent_subobject_index);
+		rec.section_b = static_cast<uint8_t>(so.connecting_subobject);
+		rec.pos[0] = so.position[0];
+		rec.pos[1] = so.position[1];
+		rec.pos[2] = so.position[2];
+		rec.radius = so.radius;
+		rec.vert_start = so.vertex_start;
+		rec.vert_count = so.num_vertices;
+		rec.plane_start = so.plane_start;
+		rec.plane_count = so.num_planes;
+		rec.face_start = so.face_start;
+		rec.face_count = so.face_count;
+		rec.glow_scale = so.glow_scale;
+		out.records.push_back(rec);
+	}
+	// Slice sanity: reject models whose records point past their arrays.
+	for (const opennova::world::OcclusionPortalFace &rec : out.records) {
+		if (rec.vert_start < 0 || rec.vert_count < 0 ||
+		    rec.vert_start + rec.vert_count > static_cast<int32_t>(out.vertices.size()) ||
+		    rec.plane_start < 0 || rec.plane_count < 0 ||
+		    rec.plane_start + rec.plane_count > static_cast<int32_t>(out.planes.size()) ||
+		    rec.face_start < 0 || rec.face_count < 0 ||
+		    rec.face_start + rec.face_count > static_cast<int32_t>(out.faces.size()))
+			return false;
+	}
+	return true;
+}
+
 } // namespace
 
 void NovaSimulation::apply_collision_to_ai() {
@@ -473,7 +548,8 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
                                                 Object *p_placer) {
 	if (!world_ || p_item_db.is_null() || p_placer == nullptr) return 0;
 	apply_collision_to_ai();
-	std::unordered_map<std::string, int32_t> model_by_graphic; // -1 = no collision block
+	std::unordered_map<std::string, int32_t> model_by_graphic;     // -1 = no collision block
+	std::unordered_map<std::string, int32_t> occlusion_by_graphic; // -1 = no occlusion records
 	std::vector<opennova::world::EntityHandle> handles;
 	world_->registry.for_each(
 			[&](const opennova::world::Entity &e) { handles.push_back(e.handle); });
@@ -490,6 +566,7 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 		auto it = model_by_graphic.find(key);
 		if (it == model_by_graphic.end()) {
 			int32_t model_id = -1;
+			int32_t occlusion_id = -1;
 			// Duck-typed MissionObjectPlacer.object_data_for(graphic) — the placer's
 			// per-graphic NovaObjectData cache (the render path loads the same object).
 			Ref<NovaObjectData> data = p_placer->call("object_data_for", graphic);
@@ -497,15 +574,160 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 				opennova::world::CollisionModel model;
 				if (collision_model_from_ir(data->native_ir().collision, model))
 					model_id = collision_world_.add_model(std::move(model));
+				opennova::world::OcclusionModel occ;
+				if (occlusion_model_from_ir(data->native_ir().occlusion, occ))
+					occlusion_id = occlusion_world_.add_model(std::move(occ));
 			}
 			it = model_by_graphic.emplace(key, model_id).first;
+			occlusion_by_graphic.emplace(key, occlusion_id);
 		}
 		if (it->second >= 0) {
 			collision_world_.assign_entity(h, it->second);
 			++attached;
 		}
+		const int32_t occ_id = occlusion_by_graphic[key];
+		if (occ_id >= 0 && e->kind == opennova::world::EntityKind::Building) {
+			// The def bits the occlusion engine reads: attrib2 bit 6 "weldable"
+			// [orig: itemDef+88 >> 6 @ 0x5c5cce], attrib bit 27 recurse-windows
+			// [orig: itemDef+84 >> 27 @ 0x5c7456]; the destruction bone-map
+			// bytes (+2193/+2194) stay 0 until the destruction system lands
+			// (D-COL-2 / D-OCC-9).
+			opennova::world::OcclusionWorld::EntityDefBits bits;
+			bits.weldable = (p_item_db->get_attrib2(def_id) & (1u << 6)) != 0;
+			bits.recurse_windows = (p_item_db->get_attrib(def_id) & (1u << 27)) != 0;
+			occlusion_world_.assign_entity(h, occ_id, bits);
+		}
 	}
 	return attached;
+}
+
+void NovaSimulation::occlusion_init_mission() {
+	// [orig: Terrain_InitBuildingPortals @ 0x5c7480 from Game_StartMission
+	// @ 0x525e11 — runs over the static prox tables, so make sure they exist
+	// before the register pass walks the building prefix.]
+	if (!world_) return;
+	collision_world_.build_tick_tables(*world_);
+	occlusion_world_.init_mission(*world_, collision_world_);
+}
+
+void NovaSimulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_y_deg,
+                                         double p_aspect, double p_near,
+                                         double p_fog_dist_units, double p_water_z_units,
+                                         bool p_force_indoors) {
+	if (!world_) return;
+	using opennova::world::to_fixed;
+	opennova::world::OcclusionFrameCamera cam;
+
+	// Godot world (x, up, z) -> mission fixed (x, -z, up) 16.16.
+	const Vector3 gp = p_camera.origin;
+	cam.pos_fixed[0] = to_fixed(gp.x);
+	cam.pos_fixed[1] = to_fixed(-gp.z);
+	cam.pos_fixed[2] = to_fixed(gp.y);
+	opennova::world::render_float_from_fixed(cam.pos_fixed, cam.pos_float);
+
+	// Camera axes. Godot camera looks -Z; render float = Godot with X/Z swapped
+	// ((-my, mz, mx)/65536 == (gz, gy, gx)); mission dirs = (x, -z, y) of Godot.
+	const Vector3 fwd_g = -p_camera.basis.get_column(2).normalized();
+	const Vector3 right_g = p_camera.basis.get_column(0).normalized();
+	const Vector3 up_g = p_camera.basis.get_column(1).normalized();
+	auto render_dir = [](const Vector3 &v) {
+		return Vector3(v.z, v.y, v.x);
+	};
+	const Vector3 f = render_dir(fwd_g);
+	const Vector3 r = render_dir(right_g);
+	const Vector3 u = render_dir(up_g);
+	const Vector3 c(cam.pos_float[0], cam.pos_float[1], cam.pos_float[2]);
+
+	// The 5-plane view frustum (near + 4 sides), inward normals, in render
+	// float space — the host stand-in for the retail viewport projector
+	// [orig: g_CameraFrustumPlanes5 @ 0xA7849C; D-OCC-12].
+	const double half_v = Math::deg_to_rad(p_fov_y_deg) * 0.5;
+	const double tan_v = std::tan(half_v);
+	const double tan_h = tan_v * (p_aspect > 0.0 ? p_aspect : 1.0);
+	Vector3 normals[5];
+	normals[0] = f;
+	normals[1] = (f * static_cast<real_t>(tan_h) + r).normalized();  // left
+	normals[2] = (f * static_cast<real_t>(tan_h) - r).normalized();  // right
+	normals[3] = (f * static_cast<real_t>(tan_v) + u).normalized();  // bottom
+	normals[4] = (f * static_cast<real_t>(tan_v) - u).normalized();  // top
+	cam.frustum_count = 5;
+	for (int i = 0; i < 5; ++i) {
+		const Vector3 anchor = (i == 0) ? c + f * static_cast<real_t>(p_near) : c;
+		cam.frustum[i][0] = normals[i].x;
+		cam.frustum[i][1] = normals[i].y;
+		cam.frustum[i][2] = normals[i].z;
+		cam.frustum[i][3] = -normals[i].dot(anchor);
+	}
+
+	// World->view rotation rows (mission axes, Q22): row 0 = forward (the depth
+	// cull axis), rows 1/2 = the lateral axes the three-ray probe offsets along.
+	// [orig: the fixed view matrix @ 0xA7841C]
+	auto mission_dir_q22 = [](const Vector3 &v, int32_t out[3]) {
+		out[0] = static_cast<int32_t>(std::lround(v.x * 4194304.0));
+		out[1] = static_cast<int32_t>(std::lround(-v.z * 4194304.0));
+		out[2] = static_cast<int32_t>(std::lround(v.y * 4194304.0));
+	};
+	mission_dir_q22(fwd_g, cam.view_rows_q22[0]);
+	mission_dir_q22(right_g, cam.view_rows_q22[1]);
+	mission_dir_q22(up_g, cam.view_rows_q22[2]);
+
+	cam.fog_dist = to_fixed(p_fog_dist_units);
+	cam.water_z = to_fixed(p_water_z_units);
+	// The mission-attribute force-indoors override ORs the indoors bit into the
+	// frame's accum view. [orig: Bms_AttribFlags & 0x10 @ 0x5ca1c8 -> |= 2]
+	cam.local_blink_flags =
+			collision_world_.local_player_blink_flags | (p_force_indoors ? 0x2u : 0u);
+
+	occlusion_world_.build_frame(*world_, collision_world_, cam);
+
+	// The entity collectors' render gates over the non-building entities the
+	// host draws. [orig: Terrain_CollectVisibleEntities_0 @ 0x5c6f20 /
+	// collect_visible_entities_for_terrain @ 0x5c8c60]
+	occlusion_culled_bms_.clear();
+	std::vector<opennova::world::EntityHandle> handles;
+	world_->registry.for_each([&](const opennova::world::Entity &e) {
+		if (e.kind == opennova::world::EntityKind::Building ||
+		    e.kind == opennova::world::EntityKind::Marker)
+			return;
+		if (e.bms_id == 0) return; // wire avatars ride their own present path
+		handles.push_back(e.handle);
+	});
+	for (const opennova::world::EntityHandle h : handles) {
+		opennova::world::Entity *e = world_->registry.get(h);
+		if (e == nullptr) continue;
+		if (!occlusion_world_.entity_render_visible(*world_, collision_world_, *e, cam))
+			occlusion_culled_bms_.push_back(e->bms_id);
+	}
+}
+
+PackedInt64Array NovaSimulation::get_building_visibility() const {
+	PackedInt64Array out;
+	if (!world_) return out;
+	// Pairs [bms_id, visible<<32 | mask] for every building with an occlusion
+	// instance or a batch entry; the host applies mask bit N to render part N.
+	world_->registry.for_each([&](const opennova::world::Entity &e) {
+		if (e.kind != opennova::world::EntityKind::Building || e.bms_id == 0) return;
+		if (!collision_world_.has_instance(e.handle)) return;
+		const bool visible = occlusion_world_.building_visible(e.handle);
+		const uint32_t mask = occlusion_world_.section_mask(e.handle);
+		out.push_back(e.bms_id);
+		out.push_back(static_cast<int64_t>(mask) | (visible ? (int64_t(1) << 32) : 0));
+	});
+	return out;
+}
+
+PackedInt32Array NovaSimulation::get_render_culled_bms_ids() const {
+	PackedInt32Array out;
+	for (const int32_t id : occlusion_culled_bms_) out.push_back(id);
+	return out;
+}
+
+bool NovaSimulation::occlusion_water_visible() const {
+	return occlusion_world_.water_visible();
+}
+
+bool NovaSimulation::occlusion_camera_indoors() const {
+	return occlusion_world_.camera_indoors();
 }
 
 bool NovaSimulation::local_player_indoors() const {
@@ -985,6 +1207,19 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("resolve_ai_weapons", "item_db"), &NovaSimulation::resolve_ai_weapons);
 	ClassDB::bind_method(D_METHOD("resolve_collision_instances", "item_db", "placer"),
 	                     &NovaSimulation::resolve_collision_instances);
+	ClassDB::bind_method(D_METHOD("occlusion_init_mission"),
+	                     &NovaSimulation::occlusion_init_mission);
+	ClassDB::bind_method(D_METHOD("run_occlusion_frame", "camera", "fov_y_deg", "aspect",
+	                              "near", "fog_dist_units", "water_z_units", "force_indoors"),
+	                     &NovaSimulation::run_occlusion_frame);
+	ClassDB::bind_method(D_METHOD("get_building_visibility"),
+	                     &NovaSimulation::get_building_visibility);
+	ClassDB::bind_method(D_METHOD("get_render_culled_bms_ids"),
+	                     &NovaSimulation::get_render_culled_bms_ids);
+	ClassDB::bind_method(D_METHOD("occlusion_water_visible"),
+	                     &NovaSimulation::occlusion_water_visible);
+	ClassDB::bind_method(D_METHOD("occlusion_camera_indoors"),
+	                     &NovaSimulation::occlusion_camera_indoors);
 	ClassDB::bind_method(D_METHOD("get_collision_debug"), &NovaSimulation::get_collision_debug);
 	ClassDB::bind_method(D_METHOD("local_player_indoors"), &NovaSimulation::local_player_indoors);
 	ClassDB::bind_method(D_METHOD("local_player_blink_flags"), &NovaSimulation::local_player_blink_flags);

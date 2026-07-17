@@ -85,6 +85,9 @@ var _anchor_cache: Dictionary = {}
 # graphic -> Array[ConvexPolygonShape3D] collision hulls in model-local space (the
 # editor's pickable bodies; see collision_shapes_for). Computed once per graphic.
 var _collision_shapes_cache: Dictionary = {}
+# item_id -> bool: the item's graphic carries occlusion/portal records (the
+# de-batch predicate; see _has_occlusion_records). Computed once per item.
+var _occlusion_cache: Dictionary = {}
 
 # The global cache epoch (NovaResourceRoot.cache_epoch) the caches above were built
 # under. Any root mount/rescan/clear bumps the epoch; the next cache access then
@@ -113,6 +116,7 @@ func _check_epoch() -> void:
 	_last_batch_env_values = null
 	_anchor_cache.clear()
 	_collision_shapes_cache.clear()
+	_occlusion_cache.clear()
 
 
 # Re-stamp every harvested static-batch material from the live environment.
@@ -730,7 +734,28 @@ func _is_animated(item_id: int) -> bool:
 	var item_type := item_db.get_item_type(item_id)
 	if item_type == NovaItemDatabase.TYPE_PERSON:
 		return true
-	return not item_db.get_anim_def(item_id).is_empty()
+	if not item_db.get_anim_def(item_id).is_empty():
+		return true
+	# Portal-carrying buildings need an individual NovaObjectModel so the
+	# render-occlusion frame can drive per-section (Robj) visibility masks —
+	# a pooled MultiMesh batch has no per-instance section handle. The graphic
+	# resolves through the same per-graphic cache the render path uses.
+	# [orig: g_BuildingSectionVisMask consumption, Terrain_RenderSectorModels
+	# @ 0x5c5d30; docs/render/render-occlusion-re.md §5]
+	return _has_occlusion_records(item_id)
+
+
+func _has_occlusion_records(item_id: int) -> bool:
+	if _occlusion_cache.has(item_id):
+		return _occlusion_cache[item_id]
+	var has_occ := false
+	var graphic := _graphic_for(item_id)
+	if not graphic.is_empty():
+		var data := _load_object_data(graphic)
+		if data != null and data.has_method("has_occlusion"):
+			has_occ = data.has_occlusion()
+	_occlusion_cache[item_id] = has_occ
+	return has_occ
 
 
 func _model_name_for(graphic: String) -> String:

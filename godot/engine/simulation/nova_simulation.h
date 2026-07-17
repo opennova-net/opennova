@@ -7,6 +7,8 @@
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
+#include <godot_cpp/variant/packed_int64_array.hpp>
+#include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/vector3.hpp>
@@ -23,6 +25,7 @@
 
 #include "wac/nova_wac_program.h"
 #include <world/ai.h>
+#include <world/occlusion.h>
 #include <world/player_input.h>
 #include <world/player_look.h>
 #include <world/player_spawn.h>
@@ -117,6 +120,14 @@ private:
 	// by resolve_collision_instances. ai_->collision points here (apply_collision_to_ai).
 	opennova::world::CollisionWorld collision_world_;
 	void apply_collision_to_ai();
+	// Rendering occlusion: the portal/section-mask engine (world/occlusion.h) —
+	// models attached alongside collision by resolve_collision_instances, the
+	// portal weld run by occlusion_init_mission, per-frame masks/gates by
+	// run_occlusion_frame. [docs/render/render-occlusion-re.md]
+	opennova::world::OcclusionWorld occlusion_world_;
+	// Per-frame entity render-gate verdicts (bms_id -> culled), rebuilt by
+	// run_occlusion_frame; consumed via get_render_culled_bms_ids.
+	std::vector<int32_t> occlusion_culled_bms_;
 	std::unique_ptr<opennova::mission::BmsEventSystem> bms_;
 	std::unique_ptr<opennova::wac::WacSystem> wac_;
 	// The installed script program. Held as a Ref so it survives reset_world();
@@ -784,9 +795,36 @@ public:
 	// hurt/ladder volumes, blink-box indoors [orig: Entity_ProcessCollisionAndPlatform-
 	// Physics @0x4b2bd0 + the query set; docs/world/world-wac-ai-re.md §15; D-INF-3].
 	// p_placer duck-types MissionObjectPlacer (object_data_for(graphic)). Returns the
-	// instance count. Idempotent per load.
+	// instance count. Also attaches the render-occlusion portal models (buildings
+	// whose graphic carries OVRT/OPLN/OFAC/OOBJ records) with their def bits.
+	// Idempotent per load.
 	int resolve_collision_instances(const Ref<class NovaItemDatabase> &p_item_db,
 	                                Object *p_placer);
+
+	// Mission-start portal init: register + weld + per-building flag stamp over
+	// the attached occlusion models. Call once after resolve_collision_instances.
+	// [orig: Terrain_InitBuildingPortals @ 0x5c7480 from Game_StartMission @ 0x525e11]
+	void occlusion_init_mission();
+
+	// The per-render-frame occlusion pipeline: building batch + portal slots +
+	// occluder planes + the section-mask build + the per-entity render gates
+	// (blink-hits + the outdoors three-ray latch). Camera in Godot space; fov_y in
+	// degrees; fog/water in mission units; force_indoors mirrors the mission
+	// attribute override [orig: Bms_AttribFlags & 0x10 @ 0x5ca1c8 -> accum |= 2].
+	// [orig: Terrain_CollectVisibleEntities @ 0x5c9160 steps 1-4 + the collector
+	// gates]
+	void run_occlusion_frame(const Transform3D &p_camera, double p_fov_y_deg,
+	                         double p_aspect, double p_near, double p_fog_dist_units,
+	                         double p_water_z_units, bool p_force_indoors);
+
+	// Frame results: [bms_id, visible<<32 | mask] pairs for every building the
+	// occlusion frame touched (mask = section bits with forced-visible def bits
+	// applied; bit N = COBJ section / render part N; bit 0 = exterior).
+	PackedInt64Array get_building_visibility() const;
+	// bms_ids of non-building entities the collector gates culled this frame.
+	PackedInt32Array get_render_culled_bms_ids() const;
+	bool occlusion_water_visible() const;
+	bool occlusion_camera_indoors() const;
 
 	// Read-only collision-world geometry for the F3 "Show collision" debug view:
 	// { instances: [ { entity_handle, pos (Godot space), heading (mission yaw deg),
