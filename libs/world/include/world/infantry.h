@@ -278,9 +278,10 @@ struct InfantryState {
     // motors differ in kind (D-INF-12 closure): the NPC's legs chase re-plant targets
     // seeded from the body/target midpoint and the body quarter-chases its target;
     // the PLAYER's legs chase the mouse yaw directly and body_heading is written as
-    // the leg midpoint. [orig: entity +0x2d4/+0x2d8 (IDB "torsoYaw/torsoPitch" --
-    // misnomers) chasing +0x2e4/+0x2e8; org1 @0x4be8fd-0x4beb18, org2
-    // @0x4b4945-0x4b4ac1; witness docs/world/world-wac-ai-re.md s3.3 + s14]
+    // the leg midpoint. [orig: entity +0x2d4/+0x2d8 (IDB legChaseYawR/L, renamed ex
+    // the torsoYaw/torsoPitch misnomers) chasing +0x2e4/+0x2e8 (legReplantYawR/L);
+    // org1 @0x4be8fd-0x4beb18, org2 @0x4b4945-0x4b4ac1; witness
+    // docs/world/world-wac-ai-re.md s3.3 + s14]
     int32_t leg_yaw[2] = {};              // 0 = right chain, 1 = left chain
     int32_t leg_target[2] = {};
     int32_t vel[3] = {};                  // entity+152/+156/+160

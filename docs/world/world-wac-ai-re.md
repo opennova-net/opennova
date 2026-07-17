@@ -109,9 +109,10 @@ Everything below was decompiled and read this session (pseudocode dumps:
   Non-aim: eighth-step, clamp ±14680064 (cap 234881024). Per-tick sanity clamp vs prev: ±0x40000000.
 - Legs (**CORRECTED 2026-07-08** — previously misread as "torso chases head-look";
   **RE-CORRECTED at byte level 2026-07-16, session 8 — see §22**):
-  `entity[181]/[182]` (+0x2d4/+0x2d8; IDB names `torsoYaw`/`torsoPitch` are misnomers) are the
+  `entity[181]/[182]` (+0x2d4/+0x2d8; IDB `GamePlayerEntity.legChaseYawR/L`, renamed 2026-07-16
+  ex the `torsoYaw`/`torsoPitch` misnomers) are the
   **right/left leg-chain chase yaws**; each chases its re-plant target `entity[185]/[186]`
-  (+0x2e4/+0x2e8; IDB `headLookYaw`/`headLookPitch`, same misnomer family) quarter-step (1/16 when
+  (+0x2e4/+0x2e8; IDB `legReplantYawR/L`, renamed ex `headLookYaw`/`headLookPitch`) quarter-step (1/16 when
   def+84&0x200), rate clamp ±83886080, twist limit ±0x20000000 (45°) from body
   [orig: `@ 0x4bea11-0x4beb12`]. Re-plant (idle bodies): the target VALUE is the
   **midpoint of (bodyHeading, targetHeading)** [orig: `@ 0x4be969-0x4be975`] — not the body
@@ -477,7 +478,8 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     proposed] and, while set, the local player's horizontal root-motion integrate runs at
     2× [orig: `@0x4b7c8d-0x4b7cb7`]. Normal play (mode 0) takes the same 1× integrate as
     org1 [orig: `@0x4b7cbf-0x4b7cd9`], which is what the port implements — a dev/admin
-    feature, not a gameplay path.
+    feature, not a gameplay path. (The handler is renamed `NetMsg_HandlePoofToggle`,
+    ex the `NetPacket_HandleWeaponSwitch` misnomer.)
   Everything else is structurally translated with per-mechanic dump citations and byte-pinned
   constants, unit-tested in tests/world/infantry_test.cpp and end-to-end in promote_test.
 - **Root-motion data path** (`AnimMap_UpdateEntity @ 0x40b5f0` → engine `InfantryRootMotion`):
@@ -2851,9 +2853,8 @@ the gravity-cadence case, and the player-jump case in
 
 `g_localPlayerPoofMode @ 0xA82298` (renamed this session): set 1/0 by the
 0x70-byte net-message handler at `[orig: @ 0x42d450]` (payload byte, debug-chat
-`!Poof!` on enable; the IDB's `NetPacket_HandleWeaponSwitch` name is a misnomer
-for this body — rename proposed, pending maintainer OK since the name is
-human-curated), serialized into the world-sync state
+`!Poof!` on enable; renamed `NetMsg_HandlePoofToggle` this session, ex the
+`NetPacket_HandleWeaponSwitch` misnomer), serialized into the world-sync state
 (`NetPacket_WriteWorldSyncState`), queried by dev-command senders
 (msg 0x36 family `@ 0x42d340/@ 0x42d3e0`). Its one physics consumer is the
 org2 2× local integrate (§22.2). Unported by decision — dev/admin feature.
@@ -2890,10 +2891,11 @@ org2 2× local integrate (§22.2). Unported by decision — dev/admin feature.
 
 ### 22.6 IDB write-backs (2026-07-16 session 8, saved)
 
-Renames: `g_localPlayerPoofMode @ 0xA82298` (ex `dword_A82298`). Proposed (human-curated,
-not applied): `NetPacket_HandleWeaponSwitch @ 0x42d450` → a poof-toggle name; the
-`headLookYaw`/`headLookPitch` +0x2E4/+0x2E8 member misnomers (→ leg re-plant targets) and
-`torsoYaw`/`torsoPitch` +0x2D4/+0x2D8 (→ leg chase yaws). Truth comments at
+Renames: `g_localPlayerPoofMode @ 0xA82298` (ex `dword_A82298`);
+`NetMsg_HandlePoofToggle @ 0x42d450` (ex the `NetPacket_HandleWeaponSwitch` misnomer);
+`GamePlayerEntity` members `legChaseYawR/L` +0x2D4/+0x2D8 (ex `torsoYaw`/`torsoPitch`)
+and `legReplantYawR/L` +0x2E4/+0x2E8 (ex `headLookYaw`/`headLookPitch`) — the §3.3
+misnomer family, applied on maintainer OK. Truth comments at
 `@ 0x42d450` (func), `@ 0x4b4945`, `@ 0x4b4984`, `@ 0x4b4ab5`, `@ 0x4be969`, `@ 0x4be9d4`,
 `@ 0x4b7de0`, `@ 0x4b7ec3`, `@ 0x4b7c8d`, `@ 0x4bf8d4`, `@ 0x4b70b8`, `@ 0x4b7aef`,
 `@ 0x4b7ac8` — each carrying the reimpl pointer.
