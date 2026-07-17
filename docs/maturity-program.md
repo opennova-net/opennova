@@ -641,13 +641,33 @@ hatch (a baseline bump, logged in this doc).
 | New Dictionary contracts | diff-scoped lint over modtools/engine signatures, allowlist for transport edges | Wave 0 soft | hard-fail at Wave-2 boundary |
 | [orig] citation coverage | ratchet: libs/*/src files with zero citations (infra libs allowlisted), fail-on-increase | Wave 1 | hard on increase; semantic coverage stays a review concern |
 | Magic numbers | diff-scoped advisory in the CI summary | Wave 2 | advisory permanently |
-| Link-graph edges | forbidden-edge script (npwire !→ sqlite; wac/mission/net !→ terrain-format libs post-seam) | Wave 1 | hard-fail forever |
+| Link-graph edges | forbidden-edge script (npwire !→ sqlite; wac/mission/net !→ terrain-format libs post-seam; libs/ + the GDExtension !→ apps/, via defining-directory rules so new libs are covered without a spec edit) | Wave 1 | hard-fail forever |
 | Ledger scoreboard sync | `scripts/lint/ledger_check.py` — the count-to-zero block is generated from the per-domain tables (`--write`), CI checks the equality | Wave 2 | hard-fail forever (ratchet-class: a mismatch is never a false positive, `--write` IS the fix) |
 | GUT silent-drop greps | existing | exists | unchanged |
 | C-ABI export identity + net-family ban | `abi_export_identity` ctest (`abi_exports_check.py` vs the committed baseline; a baseline bump is same-commit and logged here; the net-family check is never bypassable) | Wave 1 (NET-4) | hard-fail forever |
+| Product-boundary res:// references | `product_boundary_check.py` full scan: engine/ references neither product tree; game/ and modtools/ never reference each other (ADR 0015/0016). Allowlist for sanctioned non-load mentions (standing entry: the See-in-game launcher's spawn argument) | post-close 2026-07-16 | hard-fail forever |
 
 Home: `scripts/lint/` + baseline JSON; one small step in existing CI jobs
 (no new workflow).
+
+**Post-close instrument additions** (2026-07-16, the architecture-review lint
+pack): the product-boundary check above; app-layering dir rules in
+`forbidden_edges.json` (with `set()` variable resolution in the files walk, so
+the variable-named GDExtension target is no longer invisible to it); the
+export-preset exclude_filters pinned by `godot/tests/export_presets_test.gd`;
+and the packaging boot smoke gained its macOS leg (`boot_smoke` in
+`package_godot_macos.sh`, mirroring `Test-GodotAppBoot` — previously
+Windows-only).
+
+**Logged ratchet baseline bumps** (the same-commit escape hatch):
+
+- 2026-07-16, `test_private_pokes` 1385 → 1389: #250 (ai ground combat)
+  landed four pokes without a bump, leaving the gate red on master — the
+  `_pending_hud_messages` assert in `game/main_game_test.gd`, the
+  `_on_runtime_effects` drive in `game_world_test.gd`, and
+  `._hud_host`/`._on_camera_escape()` in `round_outcome_probe.gd`. Bumped to
+  restore the gate; all four are ONED-TST claw-back seams (ADR 0018
+  categories: contract getter, public verb).
 
 **Logged C-ABI baseline bumps** (the same-commit escape hatch):
 

@@ -11,7 +11,7 @@
   ],
   "counters": {
     "libs_uncited_src_files": 59,
-    "test_private_pokes": 1385
+    "test_private_pokes": 1389
   },
   "dict_contract_allowlist": [
     "to_drag_data",
@@ -20,5 +20,8 @@
     "document_tab_row.gd|func to_dict()",
     "mcp_tool_def.gd|var input_schema",
     "mcp_tool_def.gd|func to_list_entry()"
+  ],
+  "product_boundary_allowlist": [
+    "godot/modtools/editor/shell/shell_game_launch.gd"
   ]
 }

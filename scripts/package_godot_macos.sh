@@ -152,8 +152,34 @@ done
 [[ "$ok" == "1" ]] || { echo "error: Godot import did not complete after 3 attempts" >&2; exit 1; }
 
 # ---------------------------------------------------------------------------
-# 5. Export, ad-hoc sign, and zip each app.
+# 5. Export, ad-hoc sign, boot-smoke, and zip each app.
 # ---------------------------------------------------------------------------
+
+# Boot the exported .app headless for a few frames — the same guard as
+# Test-GodotAppBoot in package_godot_windows.ps1: the export step only
+# validates export-time logs, so a package whose main scene cannot load
+# (e.g. a missing per-product run/main_scene feature override, or a
+# cross-product res:// load surviving the exclude_filter) would still ship
+# and crash on first launch. The universal dylib is already inside the
+# bundle, so what boots here is exactly the zip layout that ships.
+boot_smoke() {
+  local package_name="$1" app_path="$2"
+  echo "=== Boot smoke: $package_name ==="
+  local app_bin
+  app_bin="$(find "$app_path/Contents/MacOS" -type f -perm +111 2>/dev/null | head -n1)"
+  [[ -n "$app_bin" ]] || { echo "error: no executable under $app_path/Contents/MacOS" >&2; exit 1; }
+  local log; log="$(mktemp)"
+  if ! "$app_bin" --headless --quit-after 120 --verbose >"$log" 2>&1; then
+    cat "$log"
+    echo "error: boot smoke for '$package_name' exited nonzero" >&2; exit 1
+  fi
+  if grep -Eq "Failed loading scene|Cannot open file 'res://|SCRIPT ERROR|GDExtension dynamic library not found|Failed to load script" "$log"; then
+    cat "$log"
+    echo "error: boot smoke for '$package_name' logged load errors" >&2; exit 1
+  fi
+  rm -f "$log"
+}
+
 export_app() {
   local preset="$1" app_path="$2" zip_path="$3"
   echo "=== Exporting $preset -> $app_path ==="
@@ -174,6 +200,8 @@ export_app() {
   echo "=== Ad-hoc signing $(basename "$app_path") ==="
   codesign --force --deep --sign - "$app_path"
   codesign --verify --deep --strict "$app_path" || echo "::warning::codesign verify reported issues"
+
+  boot_smoke "$(basename "$app_path" .app)" "$app_path"
 
   # ditto preserves bundle structure + signatures inside the zip.
   rm -f "$zip_path"

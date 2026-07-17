@@ -56,15 +56,19 @@ jobs:
       # dict-contract lint fails on new class-level Dictionary contracts
       # (magic numbers stay advisory); the ledger check fails if the
       # divergence scoreboard drifts from its tables (--write regenerates).
-      # The link-graph check (LIBS-1, ADR 0020) has no configured build tree
-      # at this point in the job, so it walks the CMake files transitively;
-      # local runs against build/ use `cmake --graphviz` ground truth.
+      # The link-graph check (LIBS-1, ADR 0020; app layering, ADR 0016) has
+      # no configured build tree at this point in the job, so it walks the
+      # CMake files transitively; local runs against build/ use
+      # `cmake --graphviz` ground truth. The product-boundary check fails on
+      # cross-product res:// references (ADR 0015/0016: engine/ references
+      # neither product tree; game/ and modtools/ never reference each other).
       - name: Maturity gates (STD-1, enforced)
         shell: bash
         run: |
           python scripts/lint/ratchet_counts.py --enforce
           python scripts/lint/maturity_lint.py --enforce
           python scripts/lint/link_graph_check.py --enforce
+          python scripts/lint/product_boundary_check.py --enforce
           python scripts/lint/ledger_check.py
 
       - name: Build and test

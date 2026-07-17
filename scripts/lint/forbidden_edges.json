@@ -31,6 +31,16 @@
       "to": [
         "opennova_sqlite"
       ]
+    },
+    {
+      "reason": "app layering (ADR 0016 dependency direction): the engine core in libs/ and the GDExtension host adapter never link app-layer code; apps consume the core, never the reverse",
+      "from_dirs": [
+        "libs",
+        "godot/engine"
+      ],
+      "to_dirs": [
+        "apps"
+      ]
     }
   ]
 }
