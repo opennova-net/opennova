@@ -6,6 +6,7 @@
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/vector2.hpp>
+#include <godot_cpp/variant/vector2i.hpp>
 
 #include <foliage/foliage.h>
 
@@ -37,6 +38,8 @@ public:
 	uint8_t get_index(int x, int y) const;
 	void set_index(int x, int y, int index);
 	bool paint_circle(int center_x, int center_y, int radius, double hardness, double strength, int index);
+	bool paint_detail_circle_wrap(int center_x, int center_y, int radius,
+	                              double hardness, double strength, int index);
 	int count_index(int index) const;
 	int remap_index(int from_index, int to_index);
 	int remap_indices(const Dictionary &from_to);
@@ -52,6 +55,10 @@ public:
 
 	int map_x_from_heightmap_x(double hm_x) const;
 	int map_y_from_heightmap_y(double hm_y) const;
+	uint8_t sample_detail_flat_wrap(int32_t world_x_fixed, int32_t world_z_fixed) const;
+	int sample_detail_index_world(double world_x, double world_z) const;
+	Vector2i get_detail_map_position_world(double world_x, double world_z) const;
+	int get_detail_sample_resolution() const;
 	double heightmap_x_from_map_x(int map_x) const;
 	double heightmap_y_from_map_y(int map_y) const;
 	int get_sector_id_at(int map_x, int map_y) const;

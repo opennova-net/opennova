@@ -6,10 +6,14 @@ extends GutTest
 
 var _dispatcher: NovaFoliageDispatcher
 var _foliage_index := 1
+var _detail_sampler_calls := 0
+var _model_sampler_calls := 0
 
 
 func before_each() -> void:
 	_foliage_index = 1
+	_detail_sampler_calls = 0
+	_model_sampler_calls = 0
 	_dispatcher = NovaFoliageDispatcher.new()
 	add_child_autofree(_dispatcher)
 
@@ -36,9 +40,64 @@ func _sample_foliage(_world_x: float, _world_z: float) -> int:
 	return _foliage_index
 
 
+func _sample_detail_only(_world_x: float, _world_z: float) -> int:
+	_detail_sampler_calls += 1
+	return 1
+
+
+func _sample_model_only(_world_x: float, _world_z: float) -> int:
+	_model_sampler_calls += 1
+	return 1
+
+
 func _camera_xform() -> Transform3D:
 	# Identity basis looks down Godot -Z.
 	return Transform3D(Basis(), Vector3(0.0, 10.0, 0.0))
+
+
+func test_detail_authoring_brush_wraps_effective_resolution() -> void:
+	var foliage_map := NovaTerrainFoliageMap.new()
+	foliage_map.set_size(300, 300)
+	assert_eq(foliage_map.get_detail_sample_resolution(), 256)
+	assert_true(foliage_map.paint_detail_circle_wrap(
+		255, 255, 2, 1.0, 1.0, 19))
+	for point in [
+		Vector2i(255, 255),
+		Vector2i(0, 255),
+		Vector2i(1, 255),
+		Vector2i(255, 0),
+		Vector2i(255, 1),
+	]:
+		assert_eq(int(foliage_map.get_index(point.x, point.y)), 19,
+			"DETAIL brush coverage must stay continuous across the wrap seam.")
+	assert_eq(int(foliage_map.get_index(256, 255)), 0,
+		"Unused non-power-of-two stride columns must remain untouched.")
+	assert_eq(int(foliage_map.get_index(255, 256)), 0,
+		"Unused non-power-of-two stride rows must remain untouched.")
+
+
+func test_render_tiers_use_distinct_foliage_sampler_callbacks() -> void:
+	_dispatcher.detail_foliage_sampler = Callable(self, "_sample_detail_only")
+	_dispatcher.foliage_sampler = Callable(self, "_sample_model_only")
+
+	_dispatcher.render_preview(_camera_xform())
+	_dispatcher.render_preview(_camera_xform())
+	assert_gt(_detail_sampler_calls, 0,
+		"DETAIL candidates must use the flat-map callback.")
+	assert_eq(_model_sampler_calls, 0,
+		"DETAIL preview must not route through the MODEL callback.")
+
+	_dispatcher.reset()
+	_detail_sampler_calls = 0
+	_model_sampler_calls = 0
+	_dispatcher.silhouette_anchors = PackedVector3Array([
+		Vector3(0.0, 0.0, -64.0),
+	])
+	_dispatcher.render_frame(_camera_xform())
+	assert_eq(_detail_sampler_calls, 0,
+		"MODEL-only rendering must not invoke the DETAIL callback.")
+	assert_gt(_model_sampler_calls, 0,
+		"MODEL anchors must use the sector-routed callback.")
 
 
 func test_detail_preview_uses_foliage_map() -> void:

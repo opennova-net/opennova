@@ -1,9 +1,10 @@
 class_name TerrainFoliagePreview
 extends Node3D
 
-# Editor wiring for the same fresh native foliage runtime used in play. Both
-# foliage tiers sample the live authored foliage map; detail also samples the
-# live sculpted height field. The silhouette tier stays empty here: retail
+# Editor wiring for the same fresh native foliage runtime used in play. DETAIL
+# samples the live authored map with retail's flat wrapped lookup; MODEL uses
+# the routed terrain lookup. Detail also samples the live sculpted height field.
+# The silhouette tier stays empty here: retail
 # generates it only around crouched/prone infantry (MoveOrder stance bits),
 # which an editor preview does not have [orig:
 # Terrain_RenderSectorEntitiesBySide @ 0x5c7dc2/0x5c7ded (MoveOrder & 0x300)].
@@ -97,6 +98,7 @@ func _apply_dispatcher_sources() -> void:
 		return
 	_dispatcher.colormap_source = _terrain_data
 	_dispatcher.height_sampler = Callable(self, "_sample_height")
+	_dispatcher.detail_foliage_sampler = Callable(self, "_sample_detail_foliage_index")
 	_dispatcher.foliage_sampler = Callable(self, "_sample_foliage_index")
 	_dispatcher.tile_info = _tile_info
 	_sync_surface_input_overrides()
@@ -155,6 +157,12 @@ func _sample_height(world_x: float, world_z: float) -> float:
 	if _terrain_mesh == null:
 		return INVALID_HEIGHT
 	return _terrain_mesh.sample_world_height(world_x, world_z)
+
+
+func _sample_detail_foliage_index(world_x: float, world_z: float) -> int:
+	if _foliage_map == null:
+		return 0
+	return int(_foliage_map.sample_detail_index_world(world_x, world_z))
 
 
 func _sample_foliage_index(world_x: float, world_z: float) -> int:

@@ -62,10 +62,15 @@ struct FrameRequest {
 };
 
 struct WorldSamplers {
-	// Both tiers gate through the authored foliage map remapped to definition
-	// slots. The recovered Terrain_GetSurfaceTypeAtFixedPoint name used by the
-	// detail generator is a misnomer; its backing buffer is the foliage map.
-	std::function<uint32_t(float world_x, float world_z)> foliage_mask_at;
+	// Detail grass samples the flat, 1024-unit-wrapped foliage map. The
+	// recovered Terrain_GetSurfaceTypeAtFixedPoint name is a misnomer; its
+	// backing buffer is the authored foliage map remapped to definition slots.
+	std::function<uint32_t(int32_t world_x_fixed, int32_t world_z_fixed)>
+	    detail_foliage_mask_at;
+	// MODEL silhouettes use the sector-routed foliage-map sampler before the
+	// same definition-slot bit gate.
+	std::function<uint32_t(int32_t world_x_fixed, int32_t world_z_fixed)>
+	    model_foliage_mask_at;
 	std::function<float(float world_x, float world_z)> height_at;
 	std::function<bool(float world_x, float world_z, float range)> path_blocked;
 };
