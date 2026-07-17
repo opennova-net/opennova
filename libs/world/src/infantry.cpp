@@ -1405,10 +1405,19 @@ void AiSystem::infantry_fire_pass(AiEntity &e, World &world, uint32_t logic_tick
     if ((ev & 0x8u) != 0) inf.fire_secondary_latch = true;
     if (!fire_primary && !fire_c && !inf.fire_secondary_latch) return;
 
-    // The muzzle origin: entity pos + the chest lift — a tracked stand-in for the
-    // muzzle-bone transform (D-AI-6). [orig: Entity_GetAttachmentWorldPosition(bone) ->
-    // WeaponSlot_FireAndSpawnEffects @0x53f440]
-    const int32_t origin[3] = {e.pos[0], e.pos[1], e.pos[2] + 0xE666};
+    // The muzzle origin: the host-fed posed gun-flash userpoint when FRESH (the
+    // D-AI-6 seam — [orig: Entity_GetAttachmentWorldPosition @0x4b2670 transforms
+    // the fire-bone userpoint's local position by the ANIMATED bone matrix, called
+    // from the anim-event fire block @0x4bf326..0x4bf425]); the chest-lift stand-in
+    // remains the fallback (no host pose pushed yet — headless ctests, the spawn
+    // frame, a render-skipped entity). Freshness window 4 ticks: the present layer
+    // stamps every rendered frame, so a stale stamp means the pose stopped flowing.
+    int32_t origin[3] = {e.pos[0], e.pos[1], e.pos[2] + 0xE666};
+    if (e.muzzle_valid && logic_tick - e.muzzle_tick <= 4u) {
+        origin[0] = e.muzzle_world[0];
+        origin[1] = e.muzzle_world[1];
+        origin[2] = e.muzzle_world[2];
+    }
     const int32_t yaw = inf.aim_valid ? inf.aim_heading : e.heading;
     const int32_t pitch = inf.aim_valid ? inf.aim_pitch : 0;
 

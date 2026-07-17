@@ -665,6 +665,10 @@ public:
 	// Probe seam: teleport an AI entity (mission-space coords) through both
 	// position stores, for probes defeated by mission geography.
 	void debug_set_entity_position(int p_index, const Vector3 &p_mission_pos);
+	// The D-AI-6 muzzle seam: per-frame posed gun-flash userpoint push from the
+	// present layer, keyed by the row's PF_NET_ID / authored SSN (Godot-space
+	// position; converted + stamped with the logic tick).
+	void set_ai_muzzle_world(int p_net_id, const Vector3 &p_godot_pos);
 	// Round-outcome card: {ended, winner_team, bluekills, greenkills, enemy_kills,
 	// team_kills_by_others, friendly_kills_by_others, enemy_kills_by_others, humans}.
 	// The sim-side end-of-round state + the SP kill-stat buckets the epilog score

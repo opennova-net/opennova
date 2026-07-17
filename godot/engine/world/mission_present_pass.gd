@@ -34,7 +34,7 @@ var _index                  # MissionEntityRegistry: resolve(bms_id, kind, index
 var _drive_transform := true
 var _drive_part_anim := true
 var _drive_visibility := true
-var _stats: Dictionary = { "moved": 0, "posed": 0, "hidden": 0 }
+var _stats: Dictionary = { "moved": 0, "posed": 0, "hidden": 0, "muzzles": 0 }
 
 
 ## options: { drive_transform, drive_part_anim, drive_visibility } (all default true). The editor
@@ -88,6 +88,25 @@ func present() -> void:
 			if not visible:
 				_stats.hidden += 1
 		_apply_body_anim(node, snap, base)
+		_push_muzzle(node, int(snap[base + NovaSimulation.PF_NET_ID]))
+
+
+# The D-AI-6 muzzle seam: feed each posed model's gun-flash userpoint world position
+# back to the sim so AI rounds/effects leave the GUN, not the chest-lift stand-in.
+# Keyed by PF_NET_ID (the authored SSN): the present rows render the client wire
+# view, whose row order is NOT the AI index, and whose wire handle is 0-ambiguous
+# (pool-0 slot 0 packs to the "none" sentinel). Placed NPCs always carry an SSN;
+# players carry net_id 0 and are never AI-fired. The skeleton pose applied this
+# frame is read next frame (one-frame staleness, ledgered D-AI-6). [orig: the
+# anim-event fire computes this inline — Entity_GetAttachmentWorldPosition
+# @0x4b2670; our sim has no skeletal pose, so the present layer pushes it back]
+func _push_muzzle(node, net_id: int) -> void:
+	if net_id <= 0:
+		return
+	if not node.has_method("has_muzzle") or not node.has_muzzle():
+		return
+	_sim.set_ai_muzzle_world(net_id, node.get_muzzle_world_position())
+	_stats.muzzles += 1
 
 
 # Position is already Godot-space (x, z, -y); rotation is mission-space degrees. Build the basis

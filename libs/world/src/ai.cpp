@@ -832,6 +832,16 @@ AiEntity *AiSystem::for_handle(EntityHandle h) {
     return e.handle == h ? &e : nullptr;
 }
 
+void AiSystem::set_entity_muzzle(EntityHandle h, const int32_t pos[3], uint32_t logic_tick) {
+    AiEntity *e = for_handle(h);
+    if (e == nullptr || pos == nullptr) return;
+    e->muzzle_world[0] = pos[0];
+    e->muzzle_world[1] = pos[1];
+    e->muzzle_world[2] = pos[2];
+    e->muzzle_tick = logic_tick;
+    e->muzzle_valid = true;
+}
+
 // [orig: AI_BeginUpdate @0x457b40] copy working fields, then the shared-budget gate.
 bool AiSystem::begin_update(AiEntity &e) {
     AiBrain &b = e.brain;
