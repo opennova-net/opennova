@@ -49,6 +49,7 @@ public:
 	          VfsMountMode mode = VfsMountMode::PackedWithLooseOverride,
 	          VfsArchiveDiscovery discovery = VfsArchiveDiscovery::ScanAll);
 	void clear();
+	bool has_mounted_archive() const;
 
 	// Choose how read_file keys SCR payloads (forwards to the underlying Vfs). Pass a
 	// gameprofile ScrPolicy / VfsScrPolicy value; defaults to version-detect and persists
@@ -56,7 +57,12 @@ public:
 	void set_scr_policy(int scr_policy);
 
 	std::vector<ResourceFileEntry> resource_files(const std::string &kind) const;
+	// Default overloads use the session policy selected by scan(); policy overloads
+	// let retail consumers force one lookup without mutating that session default.
+	bool has_file(const std::string &name) const;
+	bool has_file(const std::string &name, VfsLookupPolicy policy) const;
 	bool read_file(const std::string &name, std::vector<uint8_t> &out) const;
+	bool read_file(const std::string &name, std::vector<uint8_t> &out, VfsLookupPolicy policy) const;
 	const std::string &root_dir() const;
 	const std::string &last_error() const;
 

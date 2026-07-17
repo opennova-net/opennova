@@ -46,12 +46,16 @@ void NovaResourceRoot::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("resolve_file", "name"), &NovaResourceRoot::resolve_file);
 	ClassDB::bind_method(D_METHOD("list_files", "suffix"), &NovaResourceRoot::list_files, DEFVAL(String()));
 	ClassDB::bind_method(D_METHOD("list_file_entries", "suffix"), &NovaResourceRoot::list_file_entries, DEFVAL(String()));
-	ClassDB::bind_method(D_METHOD("has_file", "name"), &NovaResourceRoot::has_file);
-	ClassDB::bind_method(D_METHOD("read_file", "name"), &NovaResourceRoot::read_file);
-	ClassDB::bind_method(D_METHOD("load_texture", "name"), &NovaResourceRoot::load_texture);
+	ClassDB::bind_method(D_METHOD("has_file", "name", "policy"), &NovaResourceRoot::has_file, DEFVAL(LOOKUP_SESSION_DEFAULT));
+	ClassDB::bind_method(D_METHOD("read_file", "name", "policy"), &NovaResourceRoot::read_file, DEFVAL(LOOKUP_SESSION_DEFAULT));
+	ClassDB::bind_method(D_METHOD("load_texture", "name", "policy"), &NovaResourceRoot::load_texture, DEFVAL(LOOKUP_SESSION_DEFAULT));
 	ClassDB::bind_method(D_METHOD("load_font", "name"), &NovaResourceRoot::load_font);
 	ClassDB::bind_method(D_METHOD("list_missing_boot_resources"), &NovaResourceRoot::list_missing_boot_resources);
 	ClassDB::bind_method(D_METHOD("boot_resource_failure_text", "name"), &NovaResourceRoot::boot_resource_failure_text);
+
+	BIND_ENUM_CONSTANT(LOOKUP_SESSION_DEFAULT);
+	BIND_ENUM_CONSTANT(LOOKUP_FORCE_LOOSE_FIRST);
+	BIND_ENUM_CONSTANT(LOOKUP_FORCE_ARCHIVE_ONLY);
 }
 
 PackedStringArray NovaResourceRoot::list_missing_boot_resources() const {
@@ -122,6 +126,18 @@ Dictionary NovaResourceRoot::file_entry_to_dictionary(const opennova::ResourceFi
 	return out;
 }
 
+opennova::VfsLookupPolicy NovaResourceRoot::to_vfs_lookup_policy(LookupPolicy policy) {
+	switch (policy) {
+		case LOOKUP_FORCE_LOOSE_FIRST:
+			return opennova::VfsLookupPolicy::ForceLooseFirst;
+		case LOOKUP_FORCE_ARCHIVE_ONLY:
+			return opennova::VfsLookupPolicy::ForceArchiveOnly;
+		case LOOKUP_SESSION_DEFAULT:
+		default:
+			return opennova::VfsLookupPolicy::SessionDefault;
+	}
+}
+
 bool NovaResourceRoot::is_valid_root(const String &path) {
 	const String clean = normalize_dir(path);
 	if (clean.is_empty()) {
@@ -141,13 +157,19 @@ Error NovaResourceRoot::set_root_dir(const String &path) {
 	// Editor / authoring: loose files only, never the PFF archives. Loose files aren't SCR-wrapped,
 	// so the JO default (version-detect) is correct here.
 	expansion_ = String();
-	return mount_with_mode(path, String(), opennova::VfsMountMode::LooseOnly, "jo",
+	mount_kind_ = MountKind::None;
+	const Error err = mount_with_mode(path, String(), opennova::VfsMountMode::LooseOnly, "jo",
 			opennova::VfsArchiveDiscovery::ScanAll);
+	if (err == OK) {
+		mount_kind_ = MountKind::EditorLoose;
+	}
+	return err;
 }
 
 Error NovaResourceRoot::mount_runtime(const String &path, const String &expansion, bool allow_loose_override,
 		const String &game_code) {
 	// Runtime: the packed PFFs are the game data; loose files only shadow them under `/d`.
+	mount_kind_ = MountKind::None;
 	const opennova::VfsMountMode mode = allow_loose_override
 			? opennova::VfsMountMode::PackedWithLooseOverride
 			: opennova::VfsMountMode::Packed;
@@ -155,8 +177,20 @@ Error NovaResourceRoot::mount_runtime(const String &path, const String &expansio
 	// root never mount in retail (docs/vfs/vfs-pff-mount-re.md D-VFS-2).
 	const Error err = mount_with_mode(path, expansion, mode, game_code,
 			opennova::VfsArchiveDiscovery::RetailTable);
-	expansion_ = (err == OK) ? expansion : String();
-	return err;
+	if (err != OK) {
+		expansion_ = String();
+		return err;
+	}
+	// Retail aborts subsystem initialization when the fixed boot table opens no archives.
+	// [orig: PFF_OpenAllArchives @ 0x4a4310; Game_InitSubsystems @ 0x4a6f44]
+	if (!index_.has_mounted_archive()) {
+		clear();
+		last_error_ = "No game data archives could be opened";
+		return ERR_FILE_NOT_FOUND;
+	}
+	expansion_ = expansion;
+	mount_kind_ = MountKind::Runtime;
+	return OK;
 }
 
 Error NovaResourceRoot::mount_with_mode(const String &path, const String &expansion, opennova::VfsMountMode mode,
@@ -215,6 +249,7 @@ void NovaResourceRoot::clear() {
 	root_dir_ = String();
 	last_error_ = String();
 	expansion_ = String();
+	mount_kind_ = MountKind::None;
 	// Release Godot resources while RenderingServer is still alive. Waiting for
 	// the next epoch-checked lookup (or this RefCounted's destructor) retains
 	// cached ImageTextures through shutdown and leaks their renderer RIDs.
@@ -333,21 +368,47 @@ Array NovaResourceRoot::list_file_entries(const String &suffix) const {
 	return out;
 }
 
-bool NovaResourceRoot::has_file(const String &name) const {
-	if (root_dir_.is_empty() || name.strip_edges().is_empty() || !is_flat_filename(name.strip_edges())) {
+bool NovaResourceRoot::has_file(const String &name, LookupPolicy policy) const {
+	if (root_dir_.is_empty()) {
 		return false;
 	}
-	std::vector<uint8_t> bytes;
-	return index_.read_file(lookup_name(name).utf8().get_data(), bytes);
+	if (mount_kind_ == MountKind::Runtime) {
+		if (name.is_empty()) {
+			return false;
+		}
+		// Retail receives the caller's complete relative query. In particular, a
+		// qualified loose query must not alias a flat archive entry (D-VFS-3).
+		return index_.has_file(
+				std::string(name.utf8().get_data()), to_vfs_lookup_policy(policy));
+	}
+	const String clean = name.strip_edges();
+	if (clean.is_empty() || !is_flat_filename(clean)) {
+		return false;
+	}
+	return index_.has_file(std::string(lookup_name(name).utf8().get_data()));
 }
 
-PackedByteArray NovaResourceRoot::read_file(const String &name) const {
+PackedByteArray NovaResourceRoot::read_file(const String &name, LookupPolicy policy) const {
 	PackedByteArray out;
-	if (root_dir_.is_empty() || name.strip_edges().is_empty() || !is_flat_filename(name.strip_edges())) {
+	if (root_dir_.is_empty()) {
 		return out;
 	}
 	std::vector<uint8_t> bytes;
-	if (!index_.read_file(lookup_name(name).utf8().get_data(), bytes)) {
+	bool found = false;
+	if (mount_kind_ == MountKind::Runtime) {
+		if (name.is_empty()) {
+			return out;
+		}
+		found = index_.read_file(
+				std::string(name.utf8().get_data()), bytes, to_vfs_lookup_policy(policy));
+	} else {
+		const String clean = name.strip_edges();
+		if (clean.is_empty() || !is_flat_filename(clean)) {
+			return out;
+		}
+		found = index_.read_file(std::string(lookup_name(name).utf8().get_data()), bytes);
+	}
+	if (!found) {
 		return out;
 	}
 	out.resize(static_cast<int64_t>(bytes.size()));
@@ -357,8 +418,8 @@ PackedByteArray NovaResourceRoot::read_file(const String &name) const {
 	return out;
 }
 
-Ref<Texture2D> NovaResourceRoot::load_texture(const String &name) const {
-	if (root_dir_.is_empty()) {
+Ref<Texture2D> NovaResourceRoot::load_texture(const String &name, LookupPolicy policy) const {
+	if (root_dir_.is_empty() || name.is_empty()) {
 		return Ref<Texture2D>();
 	}
 	const String file = lookup_name(name);
@@ -371,15 +432,27 @@ Ref<Texture2D> NovaResourceRoot::load_texture(const String &name) const {
 		texture_cache_.clear();
 		texture_cache_epoch_ = epoch;
 	}
-	const std::string cache_key(file.to_lower().utf8().get_data());
+	// Source policy and the normalized qualified texture query are part of texture identity.
+	// A prior archive/default decode must never poison a later forced-loose lookup (or vice versa).
+	const String cache_query = name.strip_edges().to_lower();
+	const std::string cache_key = std::to_string(static_cast<int>(policy)) + ":" +
+			std::string(cache_query.utf8().get_data());
 	const auto cached = texture_cache_.find(cache_key);
 	if (cached != texture_cache_.end()) {
 		return cached->second;
 	}
 
 	Ref<Texture2D> result;
+	// texture_candidate_filenames intentionally returns basenames. Reattach a runtime
+	// query's directory so every candidate keeps the retail path-qualified lookup.
+	const String runtime_dir = mount_kind_ == MountKind::Runtime
+			? name.replace("\\", "/").get_base_dir()
+			: String();
 	for (const String &candidate : opennova::texture_candidate_filenames(file)) {
-		const PackedByteArray bytes = read_file(candidate);
+		const String query = runtime_dir.is_empty()
+				? candidate
+				: runtime_dir.path_join(candidate);
+		const PackedByteArray bytes = read_file(query, policy);
 		if (bytes.is_empty()) {
 			continue;
 		}

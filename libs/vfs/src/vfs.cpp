@@ -36,6 +36,142 @@ std::string pff_entry_name(const PffEntry &e) {
     return std::string(e.filename, e.filename + len);
 }
 
+char ascii_upper(char c) {
+    return (c >= 'a' && c <= 'z') ? static_cast<char>(c - ('a' - 'A')) : c;
+}
+
+bool ascii_case_equal(const std::string &a, const std::string &b) {
+    if (a.size() != b.size()) return false;
+    for (size_t i = 0; i < a.size(); ++i) {
+        if (ascii_upper(a[i]) != ascii_upper(b[i])) return false;
+    }
+    return true;
+}
+
+// Retail copies the query into a 32-byte local buffer, uppercases it, and compares it
+// against the uppercased raw directory name. The apparent trailing-space trim begins on
+// the terminating NUL and is dead, so spaces remain significant.
+// [orig: PFF_FindEntry @ 0x7685d0]
+bool retail_archive_query_key(const std::string &name, std::string &key) {
+    constexpr size_t kRetailQueryCapacity = 31;
+    key.clear();
+    if (name.empty()) return false;
+    key.assign(name.data(), std::min(name.size(), kRetailQueryCapacity));
+    for (char &c : key) c = ascii_upper(c);
+    return true;
+}
+
+std::string retail_archive_entry_key(const PffEntry &entry) {
+    size_t len = 0;
+    while (len < PFF_NAME_SIZE && entry.filename[len] != '\0') ++len;
+    std::string key(entry.filename, entry.filename + len);
+    for (char &c : key) c = ascii_upper(c);
+    return key;
+}
+
+// Validate once before either loose or archive resolution. Both slash styles are separators
+// for loose probes, but the original spelling is retained for exact archive comparison.
+// Retail's shared front doors concatenate the unchecked query; rejecting host-root syntax and
+// traversal here is our mounted-root safety boundary.
+// [orig: FileSystem_OpenFile @ 0x75b1c0; FileSystem_FileExists @ 0x75aa50]
+bool split_retail_query(const std::string &name, std::vector<std::string> &components) {
+    components.clear();
+    if (name.empty() || name.find('\0') != std::string::npos) return false;
+    if (name.front() == '/' || name.front() == '\\') return false;
+    // A terminal separator or dot denotes a directory-shaped query. Do not silently
+    // normalize it into the preceding regular file; Win32's file open would fail it.
+    if (name.back() == '/' || name.back() == '\\') return false;
+    // Reject drive-relative/absolute paths and NTFS alternate data streams. Loose lookups
+    // are confined to a mounted search root and never interpret caller-supplied root syntax.
+    if (name.find(':') != std::string::npos) return false;
+
+    size_t begin = 0;
+    for (size_t i = 0; i <= name.size(); ++i) {
+        const bool separator = i == name.size() || name[i] == '/' || name[i] == '\\';
+        if (!separator) continue;
+        if (i > begin) {
+            std::string component = name.substr(begin, i - begin);
+            if (component == "..") return false;
+            if (component == ".") {
+                if (i == name.size()) return false;
+            } else {
+                components.push_back(std::move(component));
+            }
+        }
+        begin = i + 1;
+    }
+    return !components.empty();
+}
+
+bool path_is_within(const fs::path &root, const fs::path &candidate) {
+    auto root_it = root.begin();
+    auto candidate_it = candidate.begin();
+    for (; root_it != root.end(); ++root_it, ++candidate_it) {
+        if (candidate_it == candidate.end()) return false;
+#ifdef _WIN32
+        const bool same_component = ascii_case_equal(root_it->string(), candidate_it->string());
+#else
+        // Canonical POSIX paths are case-sensitive. Treating sibling roots that differ only
+        // by case as equal would let an in-root symlink bypass the containment check.
+        const bool same_component = root_it->string() == candidate_it->string();
+#endif
+        if (!same_component) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// FileSystem_OpenFile passes the complete query to each loose probe; the basename-strip
+// setter exists but is dead. Walk one component at a time to reproduce Win32-insensitive
+// matching on every host, canonicalizing each match so symlinks cannot escape the root.
+// [orig: FileSystem_OpenFile @ 0x75b1c0; dead setter @ 0x75a590]
+bool resolve_retail_loose_file(const std::string &search_root,
+                               const std::vector<std::string> &components,
+                               fs::path &resolved_file) {
+    std::error_code ec;
+    const fs::path canonical_root = fs::canonical(fs::path(search_root), ec);
+    if (ec || !fs::is_directory(canonical_root, ec)) return false;
+
+    fs::path current = canonical_root;
+    for (size_t component_index = 0; component_index < components.size(); ++component_index) {
+        const std::string &wanted = components[component_index];
+        fs::path selected;
+
+        // Prefer the exact spelling (and let Windows perform its native case-insensitive
+        // probe); the directory walk supplies the same ASCII-insensitive behavior elsewhere.
+        const fs::path direct = current / fs::path(wanted);
+        const fs::file_status direct_status = fs::symlink_status(direct, ec);
+        if (!ec && fs::exists(direct_status)) selected = direct;
+        ec.clear();
+
+        if (selected.empty()) {
+            fs::directory_iterator it(current, fs::directory_options::skip_permission_denied, ec);
+            const fs::directory_iterator end;
+            if (ec) return false;
+            for (; it != end; it.increment(ec)) {
+                if (ec) return false;
+                if (ascii_case_equal(it->path().filename().string(), wanted)) {
+                    selected = it->path();
+                    break;
+                }
+            }
+            if (ec) return false;
+        }
+        if (selected.empty()) return false;
+
+        current = fs::canonical(selected, ec);
+        if (ec || !path_is_within(canonical_root, current)) return false;
+        if (component_index + 1 < components.size() && !fs::is_directory(current, ec)) {
+            return false;
+        }
+    }
+
+    if (!fs::is_regular_file(current, ec)) return false;
+    resolved_file = current;
+    return true;
+}
+
 bool read_whole_file(const fs::path &path, std::vector<uint8_t> &out) {
     out.clear();
     std::ifstream f(path, std::ios::binary | std::ios::ate);
@@ -60,10 +196,20 @@ bool has_pff_ext(const fs::path &p) {
 struct ArchiveMount {
     std::string path;
     PffArchive ar;
+    std::unordered_map<std::string, const PffEntry *> retail_entries;
     ArchiveMount() { std::memset(&ar, 0, sizeof(ar)); }
     ~ArchiveMount() { pff_close(&ar); }
     ArchiveMount(const ArchiveMount &) = delete;
     ArchiveMount &operator=(const ArchiveMount &) = delete;
+
+    void build_retail_index() {
+        retail_entries.clear();
+        retail_entries.reserve(ar.entry_count);
+        for (uint32_t i = 0; i < ar.entry_count; ++i) {
+            const std::string key = retail_archive_entry_key(ar.entries[i]);
+            if (!key.empty()) retail_entries.emplace(key, &ar.entries[i]);
+        }
+    }
 };
 
 struct ResolvedEntry {
@@ -78,11 +224,16 @@ struct ResolvedEntry {
 
 struct Vfs::Impl {
     std::vector<std::string> search_paths;                 // add order (highest precedence)
+    // mount_game retains these even in Packed mode. Retail callers such as foliage/UI can
+    // force one loose-first lookup without making loose data visible to the legacy index.
+    // [orig: Terrain_LoadFoliageFile @ 0x60a74e; FileSystem_OpenFile @ 0x75b1c0]
+    std::vector<std::string> retail_loose_probe_paths;
     std::unique_ptr<ArchiveMount> primary;
     std::vector<std::unique_ptr<ArchiveMount>> secondaries; // add order
     std::string game_root;
     std::string last_error;
     int scr_policy = VFS_SCR_VERSION_DETECT; // how read_file keys SCR payloads (game-driven)
+    VfsMountMode session_mount_mode = VfsMountMode::PackedWithLooseOverride;
 
     mutable bool index_valid = false;
     mutable std::unordered_map<std::string, ResolvedEntry> index;
@@ -97,6 +248,7 @@ struct Vfs::Impl {
             last_error = "Failed to open PFF archive: " + path;
             return nullptr;
         }
+        m->build_retail_index();
         return m;
     }
 
@@ -164,6 +316,83 @@ struct Vfs::Impl {
         auto it = index.find(key);
         return it == index.end() ? nullptr : &it->second;
     }
+
+    bool find_retail_loose(const std::vector<std::string> &components,
+                           ResolvedEntry &resolved) const {
+        int precedence = 0;
+        for (const std::string &dir : retail_loose_probe_paths) {
+            fs::path loose_file;
+            if (resolve_retail_loose_file(dir, components, loose_file)) {
+                resolved = ResolvedEntry{};
+                resolved.source = VfsSource::LooseDir;
+                resolved.logical_name = loose_file.filename().string();
+                resolved.source_path = dir;
+                resolved.precedence = precedence;
+                resolved.loose_full_path = loose_file.string();
+                return true;
+            }
+            ++precedence;
+        }
+        return false;
+    }
+
+    bool find_retail_archive(const std::string &name, ResolvedEntry &resolved) const {
+        std::string key;
+        if (!retail_archive_query_key(name, key)) return false;
+
+        int precedence = static_cast<int>(retail_loose_probe_paths.size());
+        const auto find_in_mount = [&](ArchiveMount *mount, int mount_precedence) {
+            if (!mount) return false;
+            const auto found = mount->retail_entries.find(key);
+            if (found == mount->retail_entries.end()) return false;
+            resolved = ResolvedEntry{};
+            resolved.source = VfsSource::Archive;
+            resolved.logical_name = name;
+            resolved.source_path = mount->path;
+            resolved.precedence = mount_precedence;
+            resolved.archive = mount;
+            resolved.entry = found->second;
+            return true;
+        };
+
+        if (find_in_mount(primary.get(), precedence++)) return true;
+        for (const std::unique_ptr<ArchiveMount> &secondary : secondaries) {
+            if (find_in_mount(secondary.get(), precedence++)) return true;
+        }
+        return false;
+    }
+
+    bool find_retail(const std::string &name, VfsLookupPolicy policy,
+                     ResolvedEntry &resolved) const {
+        std::vector<std::string> components;
+        if (!split_retail_query(name, components)) return false;
+
+        switch (policy) {
+        case VfsLookupPolicy::ForceLooseFirst:
+            return find_retail_loose(components, resolved)
+                || find_retail_archive(name, resolved);
+        case VfsLookupPolicy::ForceArchiveOnly:
+            return find_retail_archive(name, resolved);
+        case VfsLookupPolicy::SessionDefault:
+            switch (session_mount_mode) {
+            case VfsMountMode::LooseOnly:
+                return find_retail_loose(components, resolved);
+            case VfsMountMode::Packed:
+                // The archive-only branch is gated by an archive actually being online;
+                // otherwise retail falls through to the ordinary loose-first skeleton.
+                // [orig: FileSystem_OpenFile @ 0x75b1c0]
+                if (primary || !secondaries.empty()) {
+                    return find_retail_archive(name, resolved);
+                }
+                return find_retail_loose(components, resolved);
+            case VfsMountMode::PackedWithLooseOverride:
+                return find_retail_loose(components, resolved)
+                    || find_retail_archive(name, resolved);
+            }
+            break;
+        }
+        return false;
+    }
 };
 
 Vfs::Vfs() : impl_(new Impl()) {}
@@ -174,6 +403,7 @@ Vfs &Vfs::operator=(Vfs &&) noexcept = default;
 bool Vfs::add_search_path(const std::string &dir) {
     if (dir.empty()) { impl_->last_error = "Empty search path"; return false; }
     impl_->search_paths.push_back(dir);
+    impl_->retail_loose_probe_paths.push_back(dir);
     impl_->invalidate();
     return true;
 }
@@ -205,9 +435,17 @@ bool Vfs::mount_game(const std::string &game_root, const std::string &expansion,
         return false;
     }
     impl_->game_root = root.string();
+    impl_->session_mount_mode = mode;
 
     const bool mount_loose = mode != VfsMountMode::Packed;
     const bool mount_archives = mode != VfsMountMode::LooseOnly;
+    const auto retain_loose_probe = [&](const fs::path &dir) {
+        if (mount_loose) {
+            add_search_path(dir.string());
+        } else {
+            impl_->retail_loose_probe_paths.push_back(dir.string());
+        }
+    };
 
     bool have_expansion = false;
     fs::path exp_dir;
@@ -220,17 +458,15 @@ bool Vfs::mount_game(const std::string &game_root, const std::string &expansion,
     }
 
     if (have_expansion) {
-        if (mount_loose) {
-            add_search_path(exp_dir.string());          // loose expansion files: highest
-            add_search_path(root.string());             // engine CWD probe: base loose files
-        }
+        retain_loose_probe(exp_dir);                    // loose expansion files: highest
+        retain_loose_probe(root);                       // engine CWD probe: base loose files
         if (mount_archives) {
             const fs::path local = exp_dir / (expansion + "L.pff");
             if (fs::exists(local, ec)) set_primary_archive(local.string());
             add_secondary_archive((exp_dir / (expansion + ".pff")).string());
         }
-    } else if (mount_loose) {
-        add_search_path(root.string());
+    } else {
+        retain_loose_probe(root);
     }
 
     if (!mount_archives) {
@@ -290,17 +526,28 @@ bool Vfs::mount_game(const std::string &game_root, const std::string &expansion,
 
 void Vfs::clear() {
     impl_->search_paths.clear();
+    impl_->retail_loose_probe_paths.clear();
     impl_->primary.reset();
     impl_->secondaries.clear();
     impl_->game_root.clear();
     impl_->last_error.clear();
+    impl_->session_mount_mode = VfsMountMode::PackedWithLooseOverride;
     impl_->index.clear();
     impl_->ordered.clear();
     impl_->index_valid = false;
 }
 
+bool Vfs::has_mounted_archive() const {
+    return impl_->primary != nullptr || !impl_->secondaries.empty();
+}
+
 bool Vfs::has_file(const std::string &name) const {
     return impl_->find(name) != nullptr;
+}
+
+bool Vfs::has_file(const std::string &name, VfsLookupPolicy policy) const {
+    ResolvedEntry resolved;
+    return impl_->find_retail(name, policy, resolved);
 }
 
 bool Vfs::read_file_raw(const std::string &name, std::vector<uint8_t> &out) const {
@@ -325,8 +572,47 @@ bool Vfs::read_file_raw(const std::string &name, std::vector<uint8_t> &out) cons
     return true;
 }
 
+bool Vfs::read_file_raw(const std::string &name, std::vector<uint8_t> &out,
+                        VfsLookupPolicy policy) const {
+    out.clear();
+    ResolvedEntry resolved;
+    if (!impl_->find_retail(name, policy, resolved)) {
+        impl_->last_error = "File not found: " + name;
+        return false;
+    }
+
+    if (resolved.source == VfsSource::LooseDir) {
+        if (!read_whole_file(resolved.loose_full_path, out)) {
+            impl_->last_error = "Failed to read loose file: " + resolved.loose_full_path;
+            return false;
+        }
+        return true;
+    }
+
+    // Archive extraction retains the legacy read_file_raw contract: PFF container
+    // encryption is removed, while SCR/BFC1 payload decoding is left to read_file.
+    out.resize(resolved.entry->size);
+    if (pff_extract(&resolved.archive->ar, resolved.entry,
+                    out.empty() ? nullptr : out.data(), out.size()) != 0) {
+        out.clear();
+        impl_->last_error = "Failed to extract from archive: " + resolved.source_path;
+        return false;
+    }
+    return true;
+}
+
 bool Vfs::read_file(const std::string &name, std::vector<uint8_t> &out) const {
     if (!read_file_raw(name, out)) return false;
+    if (!vfs_decode_payload(out, impl_->scr_policy)) {
+        impl_->last_error = "Failed to decode payload (SCR/BFC1): " + name;
+        return false;
+    }
+    return true;
+}
+
+bool Vfs::read_file(const std::string &name, std::vector<uint8_t> &out,
+                    VfsLookupPolicy policy) const {
+    if (!read_file_raw(name, out, policy)) return false;
     if (!vfs_decode_payload(out, impl_->scr_policy)) {
         impl_->last_error = "Failed to decode payload (SCR/BFC1): " + name;
         return false;

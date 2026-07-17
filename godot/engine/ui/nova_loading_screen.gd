@@ -142,7 +142,10 @@ static func bar_fill_span(x: int, w: int, displayed: int) -> Vector2i:
 ## @ 0x521e20]. Returns { "name": String, "custom": bool }.
 static func resolve_background(root: NovaResourceRoot, mission_file: String) -> Dictionary:
 	var sidecar := sidecar_image_name(mission_file)
-	if root != null and not sidecar.is_empty() and root.has_file(sidecar):
+	# UI image probes force loose-first for this lookup, independent of /d.
+	# [orig: CUIImage_LoadTextureFromFile @ 0x6541ba]
+	if root != null and not sidecar.is_empty() and root.has_file(
+			sidecar, NovaResourceRoot.LOOKUP_FORCE_LOOSE_FIRST):
 		return {"name": sidecar, "custom": true}
 	return {"name": FALLBACK_IMAGE, "custom": false}
 
@@ -158,7 +161,10 @@ func setup(root: NovaResourceRoot, info: Dictionary) -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	var bg := resolve_background(root, String(info.get("mission_file", "")))
 	_has_custom_bg = bool(bg["custom"])
-	_texture = root.load_texture(String(bg["name"])) if root != null else null
+	_texture = null
+	if root != null:
+		_texture = root.load_texture(
+				String(bg["name"]), NovaResourceRoot.LOOKUP_FORCE_LOOSE_FIRST)
 	_in_session = bool(info.get("in_session", false))
 	if not _in_session:
 		queue_redraw()

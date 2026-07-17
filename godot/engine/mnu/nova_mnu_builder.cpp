@@ -187,7 +187,9 @@ Ref<Texture2D> resolve_texture(MnuBuildContext &ctx, const std::string &name) {
 	}
 	Ref<Texture2D> tex;
 	if (ctx.root != nullptr) {
-		tex = ctx.root->load_texture(gname);
+		// Retail UI image loads force loose-first for this lookup, independent of /d.
+		// [orig: CUIImage_LoadTextureFromFile @ 0x6541ba]
+		tex = ctx.root->load_texture(gname, NovaResourceRoot::LOOKUP_FORCE_LOOSE_FIRST);
 	}
 	if (tex.is_null()) {
 		ctx.unresolved_assets.insert(name);

@@ -15,6 +15,7 @@
 
 namespace fs = std::filesystem;
 using opennova::Vfs;
+using opennova::VfsLookupPolicy;
 using opennova::VfsSource;
 
 // SCR keys (mirror libs/scr/include/scr/scr.h; vfs_test doesn't link opennova_scr).
@@ -68,6 +69,12 @@ static void write_loose(const fs::path &path, const std::string &bytes) {
 static std::string read_vfs(const Vfs &v, const char *name) {
     std::vector<uint8_t> out;
     if (!v.read_file(name, out)) return std::string("<none>");
+    return std::string(out.begin(), out.end());
+}
+
+static std::string read_vfs(const Vfs &v, const char *name, VfsLookupPolicy policy) {
+    std::vector<uint8_t> out;
+    if (!v.read_file(name, out, policy)) return std::string("<none>");
     return std::string(out.begin(), out.end());
 }
 
@@ -210,6 +217,124 @@ static int test_mount_game_modes() {
         CHECK(read_vfs(v, "shared.txt") == "LOOSE", "loose overrides archive under /d");
         CHECK(read_vfs(v, "packed.txt") == "PACKED_ONLY", "archive entry still reachable under /d");
     }
+    return 1;
+}
+
+// D-VFS-1: retail keeps one session default (/d) but selected consumers save/set/restore
+// the loose-first flag around a single lookup. A normal packed mount is archive-first;
+// foliage/UI callers can force loose-first, and BMS-from-PFF can force archive-only even
+// when /d made loose-first the session default. [orig: FileSystem_OpenFile @ 0x75b1c0;
+// Terrain_LoadFoliageFile @ 0x60a74e; Mission_LoadBMSFromPFF @ 0x40d43c]
+static int test_per_call_resolution_policy() {
+    using opennova::VfsMountMode;
+    fs::path root = fresh_dir("per_call_policy");
+    write_loose(root / "shared.dat", "LOOSE");
+    write_loose(root / "loose_only.dat", "LOOSE_ONLY");
+    {
+        PffTestEntry es[2] = {
+            { "shared.dat", reinterpret_cast<const uint8_t *>("ARCHIVE"), 7, 0 },
+            { "packed_only.dat", reinterpret_cast<const uint8_t *>("PACKED_ONLY"), 11, 0 },
+        };
+        pff_test_write_modern((root / "resource.pff").string().c_str(), es, 2);
+    }
+
+    Vfs v;
+    CHECK(v.mount_game(root.string(), "", VfsMountMode::Packed), "mount normal packed runtime");
+    CHECK(read_vfs(v, "shared.dat") == "ARCHIVE", "packed session default remains archive-only");
+    CHECK(read_vfs(v, "shared.dat", VfsLookupPolicy::ForceLooseFirst) == "LOOSE",
+          "one caller can force loose-first without remounting");
+    CHECK(read_vfs(v, "shared.dat", VfsLookupPolicy::ForceArchiveOnly) == "ARCHIVE",
+          "archive-only force reads the packed winner");
+    CHECK(v.has_file("loose_only.dat", VfsLookupPolicy::ForceLooseFirst),
+          "forced loose-first can reach a loose-only file");
+    CHECK(!v.has_file("loose_only.dat", VfsLookupPolicy::ForceArchiveOnly),
+          "archive-only force never falls through after an archive miss");
+
+    CHECK(v.mount_game(root.string(), "", VfsMountMode::PackedWithLooseOverride),
+          "mount /d runtime");
+    CHECK(read_vfs(v, "shared.dat") == "LOOSE", "/d session default remains loose-first");
+    CHECK(read_vfs(v, "shared.dat", VfsLookupPolicy::ForceArchiveOnly) == "ARCHIVE",
+          "BMS-style force bypasses /d loose override");
+    CHECK(read_vfs(v, "packed_only.dat", VfsLookupPolicy::ForceLooseFirst) == "PACKED_ONLY",
+          "loose-first force still falls back to archives");
+    return 1;
+}
+
+// D-VFS-3: the basename-strip switch is dead in retail. Loose probes receive the path
+// verbatim (and therefore reach subdirectories), while the same qualified query does not
+// alias a flat archive entry. Component matching is Win32-case-insensitive on every host.
+// [orig: FileSystem_OpenFile @ 0x75b1c0; dead setter @ 0x75a590]
+static int test_path_qualified_lookup_is_verbatim() {
+    fs::path root = fresh_dir("qualified_lookup");
+    write_loose(root / "MixedCase.DAT", "TOP");
+    write_loose(root / "SubDir" / "MixedCase.DAT", "NESTED");
+    write_pff1(root / "data.pff", "mixedcase.dat", "ARCHIVE");
+
+    Vfs v;
+    CHECK(v.add_search_path(root.string()), "add root search path");
+    CHECK(v.add_secondary_archive((root / "data.pff").string()), "add flat archive entry");
+    CHECK(read_vfs(v, "mixedcase.dat") == "TOP", "flat query resolves the top-level loose file");
+    CHECK(read_vfs(v, "subdir\\mixedcase.dat", VfsLookupPolicy::SessionDefault) == "NESTED",
+          "backslash-qualified query reaches the nested loose file case-insensitively");
+    CHECK(read_vfs(v, "SUBDIR/MIXEDCASE.DAT", VfsLookupPolicy::SessionDefault) == "NESTED",
+          "slash-qualified query has the same host-independent Win32 semantics");
+    CHECK(read_vfs(v, "subdir\\mixedcase.dat", VfsLookupPolicy::ForceArchiveOnly) == "<none>",
+          "qualified query never aliases a flat archive basename");
+    return 1;
+}
+
+// D-VFS-10: unlike retail's unchecked path concatenation, the host confines every loose
+// query to its mounted root. Root syntax, ADS/drive syntax, traversal, directory-shaped
+// terminal syntax, and symlinks out of the root must all miss consistently in has/read.
+// [orig: FileSystem_OpenFile @ 0x75b1c0; FileSystem_FileExists @ 0x75aa50]
+static int test_retail_query_stays_inside_mounted_root() {
+    fs::path root = fresh_dir("query_containment");
+    fs::path outside = fresh_dir("query_outside");
+    write_loose(root / "safe.dat", "SAFE");
+    write_loose(outside / "secret.dat", "SECRET");
+
+    Vfs v;
+    CHECK(v.add_search_path(root.string()), "add contained search root");
+    const auto rejected_by_has_and_read = [&](const std::string &query) {
+        std::vector<uint8_t> bytes = { 0xA5u };
+        const bool absent = !v.has_file(query, VfsLookupPolicy::SessionDefault);
+        const bool unreadable = !v.read_file(query, bytes, VfsLookupPolicy::SessionDefault);
+        return absent && unreadable && bytes.empty();
+    };
+
+    CHECK(read_vfs(v, "./safe.dat", VfsLookupPolicy::SessionDefault) == "SAFE",
+          "an in-root relative dot component remains valid");
+    CHECK(rejected_by_has_and_read((outside / "secret.dat").string()),
+          "an absolute path cannot bypass the mounted root");
+    CHECK(rejected_by_has_and_read("/secret.dat"), "a slash-rooted query is rejected");
+    CHECK(rejected_by_has_and_read("\\secret.dat"), "a backslash-rooted query is rejected");
+    CHECK(rejected_by_has_and_read("safe.dat:stream"), "colon/ADS syntax is rejected");
+    CHECK(rejected_by_has_and_read("../query_outside/secret.dat"), "parent traversal is rejected");
+    CHECK(rejected_by_has_and_read("safe.dat/"), "a terminal separator is not normalized to a file");
+    CHECK(rejected_by_has_and_read("safe.dat/."), "a terminal dot component is not normalized to a file");
+
+    std::error_code symlink_ec;
+    fs::create_directory_symlink(outside, root / "escape", symlink_ec);
+    if (!symlink_ec) {
+        CHECK(rejected_by_has_and_read("escape/secret.dat"),
+              "a directory symlink cannot escape the mounted root");
+    }
+    return 1;
+}
+
+// D-VFS-7: archive entries are uppercased in-place but otherwise compared exactly. The
+// apparent trailing-space trim in PFF_FindEntry starts on the NUL and is dead as compiled;
+// therefore a stored trailing space remains significant. [orig: PFF_FindEntry @ 0x7685d0]
+static int test_archive_names_keep_trailing_spaces() {
+    fs::path root = fresh_dir("archive_name_normalization");
+    write_pff1(root / "resource.pff", "pad.dat ", "SPACED");
+
+    Vfs v;
+    CHECK(v.add_secondary_archive((root / "resource.pff").string()), "add archive");
+    CHECK(read_vfs(v, "PAD.DAT ", VfsLookupPolicy::SessionDefault) == "SPACED",
+          "case folds but the exact trailing space matches");
+    CHECK(read_vfs(v, "pad.dat", VfsLookupPolicy::SessionDefault) == "<none>",
+          "query without the stored space does not match");
     return 1;
 }
 
@@ -367,6 +492,10 @@ int main() {
     RUN_TEST(test_mount_game_expansion);
     RUN_TEST(test_mount_game_no_expansion);
     RUN_TEST(test_mount_game_modes);
+    RUN_TEST(test_per_call_resolution_policy);
+    RUN_TEST(test_path_qualified_lookup_is_verbatim);
+    RUN_TEST(test_retail_query_stays_inside_mounted_root);
+    RUN_TEST(test_archive_names_keep_trailing_spaces);
     RUN_TEST(test_mount_game_retail_table);
     RUN_TEST(test_scr_decode_on_read);
     RUN_TEST(test_scr_decode_policy);

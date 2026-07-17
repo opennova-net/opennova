@@ -220,11 +220,15 @@ func load_mission(bms_name: String, dir: String = "") -> int:
 	var resource_root := _resolve_root(dir)
 	if resource_root == null:
 		return ERR_CANT_OPEN
-	if not resource_root.has_file(bms_name):
+	# The runtime BMS path bypasses loose overrides even under /d.
+	# [orig: Mission_LoadBMSFromPFF @ 0x40d43c]
+	if not resource_root.has_file(
+			bms_name, NovaResourceRoot.LOOKUP_FORCE_ARCHIVE_ONLY):
 		load_failed.emit("%s not found in %s" % [bms_name, resource_root.get_root_dir()])
 		return ERR_FILE_NOT_FOUND
 	var mission := NovaMissionData.new()
-	if mission.open_from_resource_root(resource_root, bms_name) != OK:
+	if mission.open_from_resource_root(
+			resource_root, bms_name, NovaResourceRoot.LOOKUP_FORCE_ARCHIVE_ONLY) != OK:
 		load_failed.emit("failed to parse %s: %s" % [bms_name, mission.get_last_error()])
 		return ERR_CANT_OPEN
 	return _load_mission_internal(mission, bms_name, resource_root)
@@ -376,11 +380,15 @@ func load_net_session(opts: Dictionary) -> int:
 func _on_net_mission(mission_name: String) -> void:
 	if _loaded_mission != null or _resource_root == null:
 		return
-	if not _resource_root.has_file(mission_name):
+	# Wire-selected missions use the same witnessed archive-only BMS path.
+	# [orig: Mission_LoadBMSFromPFF @ 0x40d43c]
+	if not _resource_root.has_file(
+			mission_name, NovaResourceRoot.LOOKUP_FORCE_ARCHIVE_ONLY):
 		push_warning("net session: map '%s' (from the wire) not in %s" % [mission_name, _resource_root.get_root_dir()])
 		return
 	var mission := NovaMissionData.new()
-	if mission.open_from_resource_root(_resource_root, mission_name) != OK:
+	if mission.open_from_resource_root(
+			_resource_root, mission_name, NovaResourceRoot.LOOKUP_FORCE_ARCHIVE_ONLY) != OK:
 		push_warning("net session: failed to parse %s: %s" % [mission_name, mission.get_last_error()])
 		return
 	_loaded_mission = mission
@@ -653,7 +661,8 @@ func _apply_mission_environment_overrides(mission: NovaMissionData) -> void:
 # Retail loads <mission>.til into one shared g_TerrainTileArray used by
 # terrain overlays/surface overrides, network initial state, and both foliage
 # generators' radius-2 blocker.
-# [orig: Terrain_LoadFoliageFile @ 0x60a740;
+# Its file probe/read force loose-first around this one load.
+# [orig: Terrain_LoadFoliageFile @ 0x60a740, policy force @ 0x60a74e;
 # Terrain_GetSurfaceTypeAtPosition @ 0x606510;
 # Foliage_PathBlockedByPlacedTile @ 0x606490]
 func _load_mission_tile_info(bms_name: String, resource_root: NovaResourceRoot) -> void:
@@ -664,9 +673,11 @@ func _load_mission_tile_info(bms_name: String, resource_root: NovaResourceRoot) 
 	if mission_name.is_empty():
 		mission_name = bms_name
 	var til_name := mission_name.get_basename() + ".til"
-	if not resource_root.has_file(til_name):
+	if not resource_root.has_file(
+			til_name, NovaResourceRoot.LOOKUP_FORCE_LOOSE_FIRST):
 		return
-	var til_bytes := resource_root.read_file(til_name)
+	var til_bytes := resource_root.read_file(
+			til_name, NovaResourceRoot.LOOKUP_FORCE_LOOSE_FIRST)
 	if til_bytes.is_empty():
 		return
 	var tile_info := NovaTerrainTileInfo.new()

@@ -65,6 +65,27 @@ func test_background_decodes_sidecar_from_language_archive_without_loose_mode() 
 			"setup decodes the mission sidecar found only in language.pff")
 
 
+func test_background_setup_forces_loose_image_over_archive_in_packed_mode() -> void:
+	var dir := _make_temp_dir("loadscreen_loose_first")
+	_write_bytes(dir.path_join("00trg.pcx"), _solid_test_pcx(Color.BLUE))
+	_write_pff(dir.path_join("language.pff"), [{
+		"name": "00trg.pcx",
+		"bytes": _solid_test_pcx(Color.RED),
+	}])
+	var root := NovaResourceRoot.new()
+	assert_eq(root.mount_runtime(dir), OK,
+		"packed-default mode would normally select the archived PCX")
+	var screen: NovaLoadingScreen = autofree(NovaLoadingScreen.new())
+	screen.setup(root, {"mission_file": "00TRg.bms"})
+
+	assert_true(screen.has_background())
+	var texture: Texture2D = screen._texture
+	assert_not_null(texture)
+	if texture != null:
+		assert_true(texture.get_image().get_pixel(0, 0).is_equal_approx(Color.BLUE),
+			"the loading-screen caller forwards the witnessed loose-first policy")
+
+
 # --- game-type -> LoadingText key [orig: switch @ 0x51f30b-0x51f3a6] -----------
 
 func test_gametype_keys_match_the_witnessed_switch() -> void:
@@ -269,6 +290,14 @@ func _write_test_pcx(path: String) -> void:
 	f.close()
 
 
+func _write_bytes(path: String, bytes: PackedByteArray) -> void:
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	assert_not_null(file, "the loading-art fixture is writable")
+	if file != null:
+		file.store_buffer(bytes)
+		file.close()
+
+
 func _test_pcx_bytes() -> PackedByteArray:
 	var bytes := PackedByteArray()
 	bytes.resize(128)
@@ -288,6 +317,32 @@ func _test_pcx_bytes() -> PackedByteArray:
 		bytes.append(i)  # r
 		bytes.append(i)  # g
 		bytes.append(i)  # b
+	return bytes
+
+
+func _solid_test_pcx(color: Color) -> PackedByteArray:
+	var bytes := PackedByteArray()
+	bytes.resize(128)
+	bytes[0] = 0x0A
+	bytes[1] = 5
+	bytes[2] = 1
+	bytes[3] = 8
+	bytes[8] = 1
+	bytes[10] = 1
+	bytes[65] = 1
+	bytes[66] = 2
+	for _pixel in range(4):
+		bytes.append(1)
+	bytes.append(0x0C)
+	for index in range(256):
+		if index == 1:
+			bytes.append(int(color.r * 255.0))
+			bytes.append(int(color.g * 255.0))
+			bytes.append(int(color.b * 255.0))
+		else:
+			bytes.append(0)
+			bytes.append(0)
+			bytes.append(0)
 	return bytes
 
 
