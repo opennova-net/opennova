@@ -170,6 +170,11 @@ class DefItemDef(ctypes.Structure):
         ("particlespawn", ctypes.c_char * 32),
         ("raw_lines", ctypes.c_void_p),
         ("raw_lines_count", ctypes.c_size_t),
+        # Person-item firing and lifetime fields appended C-side after the raw
+        # source lines; keep them here so entries[] retains the native stride.
+        ("ammo_closeattack", ctypes.c_char * 32),
+        ("clipsize", ctypes.c_int),
+        ("deathtime_ticks", ctypes.c_int),
     ]
 
 
