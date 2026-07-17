@@ -19,6 +19,12 @@ const PLAYER_DUMP_STATUS_PATH := NodePath(
 	"DebugPanel/DebugContent/DebugTabs/Player/PlayerDumpStatus")
 const USER_POINTS_TOGGLE_PATH := NodePath(
 	"DebugPanel/DebugContent/DebugTabs/View/ViewUserPoints")
+const OCCLUSION_TOGGLE_PATH := NodePath(
+	"DebugPanel/DebugContent/DebugTabs/Occlusion/OcclusionShowPortals")
+const OCCLUSION_STATUS_PATH := NodePath(
+	"DebugPanel/DebugContent/DebugTabs/Occlusion/OcclusionStatus")
+const OCCLUSION_LIST_PATH := NodePath(
+	"DebugPanel/DebugContent/DebugTabs/Occlusion/OcclusionBuildings")
 
 
 class FakePoseSim:
@@ -114,6 +120,30 @@ class FakePoseRuntime:
 
 	func get_mission_name() -> String:
 		return _mission_name
+
+
+# A pose sim that also carries the occlusion debug surface, so the Occlusion
+# tab has state to render while every other pane keeps its pose-fake behavior.
+class FakeOcclusionSim:
+	extends FakePoseSim
+	var occlusion: Dictionary = {}
+	func get_occlusion_debug() -> Dictionary:
+		return occlusion
+
+
+class FakeOcclusionRuntime:
+	extends Node
+	var sim := FakeOcclusionSim.new()
+	func _init() -> void:
+		add_child(sim)
+	func get_sim() -> FakeOcclusionSim:
+		return sim
+	func is_playing() -> bool:
+		return true
+	func get_mission_file() -> String:
+		return "00TRe.bms"
+	func get_mission_name() -> String:
+		return "Training Grounds"
 
 
 func _make_pose_runtime() -> FakePoseRuntime:
@@ -225,6 +255,80 @@ func test_view_tab_collision_toggle_emits() -> void:
 	assert_signal_emitted_with_parameters(overlay, "collision_debug_toggled", [true])
 	collision_check.toggled.emit(false)
 	assert_signal_emitted_with_parameters(overlay, "collision_debug_toggled", [false])
+
+
+func test_occlusion_tab_portal_toggle_emits() -> void:
+	# The Occlusion tab's "Show portal faces" checkbox: the collision-toggle
+	# contract — it only emits intent; the host builds/frees the 3D view.
+	var overlay := _make_overlay()
+	overlay.toggle()
+	var portals_check := overlay.get_node_or_null(OCCLUSION_TOGGLE_PATH) as CheckBox
+	assert_not_null(portals_check, "the portal checkbox has a stable public node path")
+	assert_false(portals_check.button_pressed, "it defaults off")
+
+	watch_signals(overlay)
+	portals_check.toggled.emit(true)
+	assert_signal_emitted_with_parameters(overlay, "occlusion_debug_toggled", [true])
+	portals_check.toggled.emit(false)
+	assert_signal_emitted_with_parameters(overlay, "occlusion_debug_toggled", [false])
+
+
+func test_occlusion_tab_reports_frame_state() -> void:
+	# The Occlusion tab renders the sim's get_occlusion_debug() snapshot: the
+	# camera line, the frame counts, one row per building with its section mask
+	# and culling stage, and the weld rows.
+	var runtime := FakeOcclusionRuntime.new()
+	add_child_autofree(runtime)
+	runtime.sim.occlusion = {
+		"active": true,
+		"camera_indoors": true,
+		"exterior_visible": false,
+		"water_visible": false,
+		"local_blink_flags": 0x2,
+		"counts": {
+			"instances": 2, "batched": 2, "visible": 1, "toc_culled": 1,
+			"slots": 3, "window_groups": 1, "viewthru_groups": 0,
+			"welds": 1, "culled_entities": 4,
+		},
+		"buildings": [
+			{ "bms_id": 42, "batched": true, "visible": true, "open_flagged": false,
+				"mask": 0xB, "has_open": false, "has_windows": true, "has_links": false,
+				"records": 6, "windows": 2, "portals": 1, "links": 0 },
+			{ "bms_id": 43, "batched": true, "visible": false, "open_flagged": false,
+				"mask": 0, "has_open": false, "has_windows": false, "has_links": true,
+				"records": 4, "windows": 0, "portals": 0, "links": 1 },
+		],
+		"welds": [
+			{ "own_bms": 42, "own_section": 1, "other_bms": 43, "other_section": 2 },
+		],
+	}
+	var overlay := _make_overlay()
+	overlay.set_runtime(runtime)
+	overlay.toggle()
+
+	var status := overlay.get_node(OCCLUSION_STATUS_PATH) as Label
+	assert_string_contains(status.text, "indoors", "the camera line reports the blink state")
+	assert_string_contains(status.text, "1 drawn", "the batch split totals surface")
+	assert_string_contains(status.text, "1 occluder-culled")
+	assert_string_contains(status.text, "entities hidden 4")
+	var list := overlay.get_node(OCCLUSION_LIST_PATH) as ItemList
+	assert_eq(list.item_count, 3, "two building rows + one weld row")
+	assert_string_contains(list.get_item_text(0), "mask 0000000B")
+	assert_string_contains(list.get_item_text(0), "[W]")
+	assert_string_contains(list.get_item_text(1), "occluder-culled")
+	assert_string_contains(list.get_item_text(2), "weld  #42 s1 <-> #43 s2")
+
+
+func test_occlusion_tab_without_debug_surface_shows_empty_state() -> void:
+	# Harness sims without get_occlusion_debug (every pose fake) leave the tab
+	# in its empty state instead of erroring.
+	var runtime := _make_pose_runtime()
+	var overlay := _make_overlay()
+	overlay.set_runtime(runtime)
+	overlay.toggle()
+	var status := overlay.get_node(OCCLUSION_STATUS_PATH) as Label
+	assert_string_contains(status.text, "No occlusion data")
+	assert_eq((overlay.get_node(OCCLUSION_LIST_PATH) as ItemList).item_count, 0)
 
 
 func test_view_tab_hide_foliage_toggle_emits() -> void:

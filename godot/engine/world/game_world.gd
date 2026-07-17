@@ -31,12 +31,14 @@ const NetEventView := preload("res://engine/world/net_event_view.gd")
 const SkeletonDebugView := preload("res://engine/debug/skeleton_debug_view.gd")
 const UserPointDebugView := preload("res://engine/debug/user_point_debug_view.gd")
 const CollisionDebugView := preload("res://engine/debug/collision_debug_view.gd")
+const OcclusionDebugView := preload("res://engine/debug/occlusion_debug_view.gd")
 const ParticleDebugView := preload("res://engine/debug/particle_debug_view.gd")
 const NET_CONTAINER_NAME := "NetObjects"
 const SKELETON_DEBUG_NAME := "SkeletonDebug"
 const USER_POINT_DEBUG_NAME := "UserPointDebug"
 const COLLISION_DEBUG_NAME := "CollisionDebug"
 const PARTICLE_DEBUG_NAME := "ParticleDebug"
+const OCCLUSION_DEBUG_NAME := "OcclusionDebug"
 const TICK_DT := 1.0 / 62.5  # mirrors MissionRuntime.TICK_DT; default for tick()'s delta param
 # [orig: ItemDef_GetBoneMaskByName @ 0x49ea40 scans the first 16 points.]
 const ITEM_EFFECT_USER_POINT_SCAN_LIMIT := 16
@@ -130,6 +132,7 @@ var _skeleton_debug := false
 var _user_point_debug := false
 # Debug: draw the collision volumes + player capsule (F3 overlay's "Show collision"). Off by default.
 var _collision_debug := false
+var _occlusion_debug := false
 # Debug: hide the scattered foliage (F3 overlay's "Hide foliage"). Off by default.
 var _foliage_hidden := false
 # Debug: hide every particle effect (F3 overlay's "Hide particles" — the retail
@@ -599,13 +602,16 @@ func unload() -> void:
 	_item_fx_control_instances.clear()
 	# The user-point view retains its toggle and re-arms on the next successful load.
 	_remove_user_point_debug_view()
-	# Skeleton/collision overlays are also freed for a clean teardown.
+	# Skeleton/collision/occlusion overlays are also freed for a clean teardown.
 	var skel_debug := get_node_or_null(NodePath(SKELETON_DEBUG_NAME))
 	if skel_debug != null:
 		skel_debug.queue_free()
 	var col_debug := get_node_or_null(NodePath(COLLISION_DEBUG_NAME))
 	if col_debug != null:
 		col_debug.queue_free()
+	var occ_debug := get_node_or_null(NodePath(OCCLUSION_DEBUG_NAME))
+	if occ_debug != null:
+		occ_debug.queue_free()
 	# Net session teardown (no-ops for a normal mission).
 	if _net_event_view != null:
 		_net_event_view.queue_free()
@@ -1315,6 +1321,28 @@ func _refresh_collision_debug() -> void:
 	view.name = COLLISION_DEBUG_NAME
 	add_child(view)
 	view.setup(self)  # duck-typed get_sim(), re-resolved per frame
+
+
+# --- Occlusion debug view (F3 overlay's "Show portal faces") -----------------
+# Build / free a child OcclusionDebugView drawing the render-occlusion portal
+# faces (type-colored outlines + section labels) over the world — the
+# collision-view contract: the view re-resolves the sim through this GameWorld
+# every frame, so mission reloads never leave it stale.
+
+func set_occlusion_debug(enabled: bool) -> void:
+	_occlusion_debug = enabled
+	var existing := get_node_or_null(NodePath(OCCLUSION_DEBUG_NAME))
+	if existing != null:
+		existing.queue_free()
+	if not enabled:
+		return
+	var view := OcclusionDebugView.new()
+	view.name = OCCLUSION_DEBUG_NAME
+	add_child(view)
+	view.setup(self)  # duck-typed get_sim(), re-resolved per frame
+
+func is_occlusion_debug() -> bool:
+	return _occlusion_debug
 
 
 # --- Hide foliage (F3 overlay's "Hide foliage") ------------------------------

@@ -1651,6 +1651,22 @@ func test_occlusion_frame_drives_masks_gates_and_water_override() -> void:
 	assert_true(npc.visible, "unload restores gated entities")
 
 
+func test_occlusion_debug_view_builds_and_frees() -> void:
+	# The F3 overlay's "Show portal faces" toggle: GameWorld builds/frees the
+	# OcclusionDebugView child (the collision-view contract). Without a sim the
+	# built view clears instead of erroring.
+	var world := _make_world()
+	add_child_autofree(world)
+	world.set_occlusion_debug(true)
+	var view := world.get_node_or_null(NodePath("OcclusionDebug"))
+	assert_not_null(view, "enabling builds the occlusion debug child")
+	assert_true(world.is_occlusion_debug())
+	view.refresh_now()  # no sim resolved: clears, no error
+	world.set_occlusion_debug(false)
+	assert_false(world.is_occlusion_debug())
+	assert_true(view.is_queued_for_deletion(), "disabling frees the view")
+
+
 func _make_world() -> GameWorld:
 	var world := GameWorld.new()
 	var terrain := NovaTerrain.new()

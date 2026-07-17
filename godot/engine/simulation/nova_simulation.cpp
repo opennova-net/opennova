@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <string>
@@ -845,6 +846,187 @@ Dictionary NovaSimulation::get_collision_debug() const {
 	return out;
 }
 
+namespace {
+// Render float world -> Godot world: the render frame is Godot with X/Z
+// swapped ((-my, mz, mx)/65536 == (gz, gy, gx)), so the inverse is the same swap.
+inline Vector3 godot_from_render_float3(const float p[3]) {
+	return Vector3(p[2], p[1], p[0]);
+}
+} // namespace
+
+Dictionary NovaSimulation::get_occlusion_debug() const {
+	Dictionary out;
+	Array buildings;
+	Array welds;
+	Dictionary counts;
+	out["active"] = false;
+	out["camera_indoors"] = occlusion_world_.camera_indoors();
+	out["exterior_visible"] = occlusion_world_.exterior_visible();
+	out["water_visible"] = occlusion_world_.water_visible();
+	out["local_blink_flags"] = static_cast<int>(collision_world_.local_player_blink_flags);
+	out["counts"] = counts;
+	out["buildings"] = buildings;
+	out["welds"] = welds;
+	if (!world_) return out;
+
+	int instances = 0, batched = 0, visible = 0;
+	world_->registry.for_each([&](const opennova::world::Entity &e) {
+		if (e.kind != opennova::world::EntityKind::Building) return;
+		if (!occlusion_world_.has_instance(e.handle)) return;
+		++instances;
+		const bool is_batched = occlusion_world_.building_batched(e.handle);
+		const bool is_visible = occlusion_world_.building_visible(e.handle);
+		if (is_batched) ++batched;
+		if (is_visible) ++visible;
+		if (buildings.size() >= 256) return;
+		Dictionary b;
+		b["bms_id"] = e.bms_id;
+		const int32_t pos_fixed[3] = {opennova::world::to_fixed(e.position.x),
+		                              opennova::world::to_fixed(e.position.y),
+		                              opennova::world::to_fixed(e.position.z)};
+		b["pos"] = godot_from_fixed3(pos_fixed);
+		b["batched"] = is_batched;
+		b["visible"] = is_visible;
+		b["open_flagged"] = occlusion_world_.building_open_flagged(e.handle);
+		b["mask"] = static_cast<int64_t>(occlusion_world_.section_mask(e.handle));
+		const opennova::world::OcclusionWorld::BuildingFlags flags =
+		    occlusion_world_.building_flags(e.handle);
+		b["has_open"] = flags.has_open;
+		b["has_windows"] = flags.has_windows;
+		b["has_links"] = flags.has_links;
+		// Record-type census off the (possibly weld-retyped) shared model.
+		int windows = 0, portals = 0, links = 0, records = 0;
+		const opennova::world::OcclusionModel *m =
+		    occlusion_world_.model(occlusion_world_.instance_model_id(e.handle));
+		if (m != nullptr) {
+			records = static_cast<int>(m->records.size());
+			for (const opennova::world::OcclusionPortalFace &rec : m->records) {
+				if (rec.type == opennova::world::kOccRecWindow)
+					++windows;
+				else if (rec.type == opennova::world::kOccRecPortal)
+					++portals;
+				else if (rec.type == opennova::world::kOccRecWeldedLink)
+					++links;
+			}
+		}
+		b["records"] = records;
+		b["windows"] = windows;
+		b["portals"] = portals;
+		b["links"] = links;
+		buildings.push_back(b);
+	});
+
+	for (const opennova::world::OcclusionWorld::WeldRecord &wr : occlusion_world_.weld_records()) {
+		if (welds.size() >= 64) break;
+		Dictionary w;
+		const opennova::world::Entity *own = world_->registry.get(wr.own_entity);
+		const opennova::world::Entity *other = world_->registry.get(wr.other_entity);
+		w["own_bms"] = own != nullptr ? own->bms_id : 0;
+		w["own_section"] = wr.own_section;
+		w["other_bms"] = other != nullptr ? other->bms_id : 0;
+		w["other_section"] = wr.other_section;
+		welds.push_back(w);
+	}
+
+	counts["instances"] = instances;
+	counts["batched"] = batched;
+	counts["visible"] = visible;
+	counts["toc_culled"] = batched - visible;
+	counts["slots"] = occlusion_world_.slot_count();
+	counts["window_groups"] = occlusion_world_.window_frustum_group_count();
+	counts["viewthru_groups"] = occlusion_world_.viewthru_group_count();
+	counts["welds"] = static_cast<int>(occlusion_world_.weld_records().size());
+	counts["culled_entities"] = static_cast<int>(occlusion_culled_bms_.size());
+	out["active"] = instances > 0;
+	return out;
+}
+
+Dictionary NovaSimulation::get_occlusion_portal_debug(const Vector3 &p_anchor,
+                                                      double p_range_units) const {
+	Dictionary out;
+	Array buildings;
+	out["buildings"] = buildings;
+	if (!world_) return out;
+	// Godot world (x, up, z) -> mission fixed (x, -z, up) 16.16.
+	const int64_t anchor_x = opennova::world::to_fixed(p_anchor.x);
+	const int64_t anchor_y = opennova::world::to_fixed(-p_anchor.z);
+	const int64_t range =
+	    p_range_units > 0.0 ? static_cast<int64_t>(p_range_units * kFixed16) : -1;
+	world_->registry.for_each([&](const opennova::world::Entity &e) {
+		if (e.kind != opennova::world::EntityKind::Building) return;
+		if (buildings.size() >= 128) return;
+		const opennova::world::OcclusionModel *m =
+		    occlusion_world_.model(occlusion_world_.instance_model_id(e.handle));
+		if (m == nullptr) return;
+		const int32_t pos_fixed[3] = {opennova::world::to_fixed(e.position.x),
+		                              opennova::world::to_fixed(e.position.y),
+		                              opennova::world::to_fixed(e.position.z)};
+		if (range >= 0 && (std::abs(pos_fixed[0] - anchor_x) > range ||
+		                   std::abs(pos_fixed[1] - anchor_y) > range))
+			return;
+		// The same building pose path the engine's frame uses (yaw only —
+		// statics carry no pitch/roll).
+		const opennova::world::RenderMatrix mat = opennova::world::render_matrix_from_pose(
+		    pos_fixed, opennova::world::bam_heading_from_mission_yaw_deg(e.yaw), 0, 0);
+		Dictionary b;
+		b["bms_id"] = e.bms_id;
+		b["pos"] = godot_from_fixed3(pos_fixed);
+		b["visible"] = occlusion_world_.building_visible(e.handle);
+		Array records;
+		for (const opennova::world::OcclusionPortalFace &rec : m->records) {
+			Dictionary rd;
+			rd["type"] = static_cast<int>(rec.type);
+			rd["section_a"] = static_cast<int>(rec.section_a);
+			rd["section_b"] = static_cast<int>(rec.section_b);
+			float wp[3];
+			mat.transform_point(rec.pos, wp);
+			rd["pos"] = godot_from_render_float3(wp);
+			rd["radius"] = rec.radius;
+			rd["glow"] = rec.glow_scale;
+			// The record's boundary outline: OFAC edge words whose low-15-bit
+			// identity appears once (shared interior edges pair up and drop —
+			// the same cancellation identity the occluder pass uses).
+			std::vector<uint16_t> edges;
+			std::vector<int32_t> hits;
+			for (int32_t f = 0; f < rec.face_count; ++f) {
+				const opennova::world::OcclusionFaceRec &face = m->faces[rec.face_start + f];
+				for (int k = 0; k < 3; ++k) {
+					const uint16_t w = face.edge[k];
+					bool found = false;
+					for (size_t x = 0; x < edges.size(); ++x) {
+						if ((edges[x] & 0x7FFF) == (w & 0x7FFF)) {
+							++hits[x];
+							found = true;
+							break;
+						}
+					}
+					if (!found) {
+						edges.push_back(w);
+						hits.push_back(1);
+					}
+				}
+			}
+			PackedVector3Array segments;
+			for (size_t x = 0; x < edges.size(); ++x) {
+				if (hits[x] != 1) continue;
+				const int32_t va = edges[x] & 0xFF;
+				const int32_t vb = (edges[x] >> 8) & 0x7F;
+				if (va >= rec.vert_count || vb >= rec.vert_count) continue;
+				float aw[3], bw[3];
+				mat.transform_point(m->vertices[rec.vert_start + va].p, aw);
+				mat.transform_point(m->vertices[rec.vert_start + vb].p, bw);
+				segments.push_back(godot_from_render_float3(aw));
+				segments.push_back(godot_from_render_float3(bw));
+			}
+			rd["segments"] = segments;
+			records.push_back(rd);
+		}
+		b["records"] = records;
+		buildings.push_back(b);
+	});
+	return out;
+}
+
 bool NovaSimulation::local_player_in_armory_zone() const {
 	if (!world_) return false;
 	const opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);
@@ -1221,6 +1403,9 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("occlusion_camera_indoors"),
 	                     &NovaSimulation::occlusion_camera_indoors);
 	ClassDB::bind_method(D_METHOD("get_collision_debug"), &NovaSimulation::get_collision_debug);
+	ClassDB::bind_method(D_METHOD("get_occlusion_debug"), &NovaSimulation::get_occlusion_debug);
+	ClassDB::bind_method(D_METHOD("get_occlusion_portal_debug", "anchor", "range_units"),
+	                     &NovaSimulation::get_occlusion_portal_debug);
 	ClassDB::bind_method(D_METHOD("local_player_indoors"), &NovaSimulation::local_player_indoors);
 	ClassDB::bind_method(D_METHOD("local_player_blink_flags"), &NovaSimulation::local_player_blink_flags);
 	ClassDB::bind_method(D_METHOD("sound_occlusion_distance_q16", "listener_pos", "source_pos", "distance_q16"),

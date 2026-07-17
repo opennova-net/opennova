@@ -200,7 +200,7 @@ public:
     bool exterior_visible() const { return exterior_visible_; }  // [orig: g_PortalExteriorVisible @ 0x29ACE20]
     bool camera_indoors() const { return camera_indoors_; }
 
-    // --- introspection (tests) ---
+    // --- introspection (tests + debug hosts) ---
     struct WeldRecord { // [orig: the 24 B g_PortalWeldRecords @ 0x2967250 rows]
         EntityHandle own_entity;
         int32_t own_section = 0;
@@ -217,6 +217,13 @@ public:
         bool has_links = false;   // +0x2CE (type-5 present; unread in retail, D-OCC-2)
     };
     BuildingFlags building_flags(EntityHandle h) const;
+    // The instance's occlusion model id (-1 when the entity carries none), and
+    // the batch-membership split building_visible() collapses: batched = entered
+    // the frame's visible batch BEFORE render_TOC, so batched && !visible =
+    // TOC-culled. Debug-host reads (the F3 occlusion view); no engine consumer.
+    int32_t instance_model_id(EntityHandle h) const;
+    bool building_batched(EntityHandle h) const;
+    int32_t instance_count() const { return static_cast<int32_t>(instances_.size()); }
     int32_t batch_count() const { return static_cast<int32_t>(batch_.size()); }
     int32_t slot_count() const { return static_cast<int32_t>(slots_.size()); }
     int32_t window_frustum_group_count() const { return static_cast<int32_t>(window_groups_.size()); }
@@ -257,6 +264,10 @@ private:
         EntityHandle entity;
         bool open_flag = false; // +16: ANY record with type >= 1 (not only type 1)
         bool culled = false;    // render_TOC zeroed the entry
+        // Set at batch push and NEVER zeroed: the introspection key that keeps
+        // identifying the row after render_TOC faithfully zeroes `entity`.
+        // Engine legs read only `entity`; building_batched() reads this.
+        EntityHandle debug_entity;
     };
 
     struct PlaneGroup {

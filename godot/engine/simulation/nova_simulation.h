@@ -840,6 +840,29 @@ public:
 	// player (or the first 128 instances when no player is spawned).
 	Dictionary get_collision_debug() const;
 
+	// Read-only render-occlusion state for the F3 "Occlusion" debug tab:
+	// { active, camera_indoors, exterior_visible, water_visible, local_blink_flags,
+	//   counts: { instances, batched, visible, toc_culled, slots, window_groups,
+	//   viewthru_groups, welds, culled_entities },
+	//   buildings: [ { bms_id, pos (Godot), batched, visible, open_flagged,
+	//   mask, has_open, has_windows, has_links, records, windows, portals,
+	//   links } ] (capped 256),
+	//   welds: [ { own_bms, own_section, other_bms, other_section } ] (capped 64) }.
+	// Frame fields reflect the LAST run_occlusion_frame; before one runs the
+	// batch is empty and masks default open.
+	Dictionary get_occlusion_debug() const;
+
+	// World-space portal-face geometry for the F3 "Show portal faces" 3D view:
+	// { buildings: [ { bms_id, pos, visible, records: [ { type, section_a,
+	//   section_b, pos, radius, glow, segments (PackedVector3Array a,b pairs) } ] } ] }.
+	// Segments are each record's boundary outline — the OFAC edge words whose
+	// low-15-bit shared-edge identity appears once (interior edges pair up and
+	// drop, the same cancellation identity the occluder pass uses) — transformed
+	// through the SAME render_matrix_from_pose path the engine's frame runs, then
+	// mapped to Godot space. p_anchor (Godot) + p_range_units bound the sweep
+	// per horizontal axis (range <= 0 = everything), capped at 128 buildings.
+	Dictionary get_occlusion_portal_debug(const Vector3 &p_anchor, double p_range_units) const;
+
 	// Local-player blink state [orig: g_LocalPlayerBlinkFlags @0x24C1934; entity Flags
 	// 0x800000]. The render/audio hosts gate interior behavior on these.
 	bool local_player_indoors() const;

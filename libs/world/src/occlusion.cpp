@@ -499,6 +499,7 @@ void OcclusionWorld::collect_buildings(World &world, CollisionWorld &collision,
 
         BatchEntry entry;
         entry.entity = slot.h;
+        entry.debug_entity = slot.h;
         batch_.push_back(entry);
         BatchEntry &appended = batch_.back();
 
@@ -1422,6 +1423,19 @@ uint32_t OcclusionWorld::section_mask(EntityHandle h) const {
             mask |= 0xFFFFFFFFu << (inst->def_bits.forced_hi & 31);
     }
     return mask;
+}
+
+int32_t OcclusionWorld::instance_model_id(EntityHandle h) const {
+    const Instance *inst = instance(h);
+    return inst == nullptr ? -1 : inst->model_id;
+}
+
+bool OcclusionWorld::building_batched(EntityHandle h) const {
+    // Keyed by the never-zeroed debug handle: render_TOC faithfully zeroes a
+    // culled row's live `entity`, which would otherwise hide the row here.
+    for (const BatchEntry &b : batch_)
+        if (b.debug_entity == h) return true;
+    return false;
 }
 
 bool OcclusionWorld::building_open_flagged(EntityHandle h) const {

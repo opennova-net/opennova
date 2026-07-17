@@ -529,6 +529,7 @@ void test_indoor_masks_and_gate() {
     cam2.fog_dist = fx(50.0);
     rig.ow.build_frame(rig.world, rig.cw, cam2);
     CHECK(!rig.ow.building_visible(building));
+    CHECK(!rig.ow.building_batched(building)); // fog-culled = never entered the batch
     CHECK(rig.ow.section_mask(building) == 0u ||
           (rig.ow.section_mask(building) & 0x2u) == 0);
     CHECK(!rig.ow.entity_render_visible(rig.world, rig.cw, *n, cam2));
@@ -618,6 +619,12 @@ void test_toc_occlusion() {
     // [orig: test_sector_entity_occlusion @ 0x5c4610]
     CHECK(!rig.ow.building_visible(candidate));
     CHECK(rig.ow.section_mask(candidate) == 0u);
+    // The debug introspection split: TOC-culled = batched but not visible; the
+    // model id resolves only for occlusion-carrying buildings.
+    CHECK(rig.ow.building_batched(candidate));
+    CHECK(rig.ow.instance_model_id(occluder) >= 0);
+    CHECK(rig.ow.instance_model_id(candidate) == -1);
+    CHECK(rig.ow.instance_count() == 1);
 
     // A candidate beside the slab (outside the wedge) stays visible.
     Rig rig2;

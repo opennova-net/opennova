@@ -412,6 +412,7 @@ func toggle_debug_overlay() -> void:
 		_debug_overlay.body_in_first_person_toggled.connect(_on_overlay_body_in_first_person)
 		_debug_overlay.particles_hidden_toggled.connect(_on_overlay_particles_hidden)
 		_debug_overlay.particle_boxes_toggled.connect(_on_overlay_particle_boxes)
+		_debug_overlay.occlusion_debug_toggled.connect(_on_overlay_occlusion_debug)
 		_debug_overlay.set_effect_world_source(Callable(self, "_debug_effect_world_source"))
 		_host_under_shell(_debug_overlay)
 	_debug_overlay.toggle()
@@ -482,6 +483,13 @@ func _on_overlay_particle_boxes(enabled: bool) -> void:
 		var world = _play_node().get_world()
 		if world != null:
 			world.set_particle_debug(enabled)
+
+
+func _on_overlay_occlusion_debug(enabled: bool) -> void:
+	if is_playing_mission():
+		var world = _play_node().get_world()
+		if world != null:
+			world.set_occlusion_debug(enabled)
 
 
 # The Particles tab's data source: only Play Mission has a GameWorld (and so
