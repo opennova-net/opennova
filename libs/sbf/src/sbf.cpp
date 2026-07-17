@@ -146,6 +146,9 @@ extern "C" int sbf_decode_chunk(const uint8_t *chunk_bytes, size_t chunk_size,
 
     SbfChunkHeader h;
     memcpy(&h, chunk_bytes, SBF_CHUNK_HEADER);
+    if (h.scale_a > 7 || h.scale_b > 7) {
+        return -4;
+    }
 
     uint32_t want = h.valid_samples;
     if (want > chunk_size - SBF_CHUNK_HEADER) want = (uint32_t)(chunk_size - SBF_CHUNK_HEADER);

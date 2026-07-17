@@ -22,7 +22,7 @@ class ByteReader {
 public:
     ByteReader(const uint8_t *data, size_t size) : data_(data), size_(size), pos_(0) {}
 
-    bool has_bytes(size_t count) const { return pos_ + count <= size_; }
+    bool has_bytes(size_t count) const { return count <= size_ - pos_; }
     size_t position() const { return pos_; }
     size_t remaining() const { return size_ - pos_; }
 
@@ -88,7 +88,7 @@ public:
 
     void skip(size_t count)
     {
-        if (pos_ + count > size_) {
+        if (count > size_ - pos_) {
             pos_ = size_;
         } else {
             pos_ += count;

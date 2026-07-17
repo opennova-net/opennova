@@ -48,6 +48,18 @@ int main() {
 	const std::vector<uint8_t> buf = build_pcap_udp(dgrams);
 	EXPECT(!buf.empty());
 
+	// An IPv4 total length shorter than its own header plus UDP header is
+	// malformed. It must not underflow the captured-payload calculation and
+	// surface a datagram.
+	std::vector<uint8_t> malformed = build_pcap_udp({dgrams.front()});
+	constexpr size_t kFirstIpOffset = 24 + 16;
+	EXPECT(malformed.size() >= kFirstIpOffset + 20);
+	malformed[kFirstIpOffset + 2] = 0;
+	malformed[kFirstIpOffset + 3] = 20;
+	std::vector<PcapDatagram> malformed_batch;
+	EXPECT(read_pcap_udp(malformed.data(), malformed.size(), malformed_batch));
+	EXPECT(malformed_batch.empty());
+
 	const std::string tmp = "nw_pcap_stream_test.tmp.pcap";
 	{
 		std::ofstream f(tmp, std::ios::binary);

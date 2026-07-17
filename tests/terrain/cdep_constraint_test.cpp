@@ -68,6 +68,18 @@ int main() {
     check(cdep_height_to_raw16(256.0) == 65535, "256.0 -> clamped 65535");
     check(cdep_height_to_raw16(-1.0) == 0, "negative -> 0");
 
+    // Invalid grids are safe no-ops across the public constraint entry points.
+    CdepRect one_block{0, 0, CDEP_BLOCK_WIDTH, 1};
+    float dummy = 0.0f;
+    check(cdep_clamp_blocks_in_rect(&dummy, CDEP_BLOCK_WIDTH, 0, one_block) == 0,
+          "zero-height rect clamp is a no-op");
+    check(cdep_clamp_blocks_in_rect(nullptr, CDEP_BLOCK_WIDTH, 1, one_block) == 0,
+          "null rect clamp is a no-op");
+    check(cdep_count_violations(nullptr, CDEP_BLOCK_WIDTH, 1) == 0,
+          "null violation count is zero");
+    check(cdep_clamp_all_violations(nullptr, CDEP_BLOCK_WIDTH, 1) == 0,
+          "null whole-grid clamp is a no-op");
+
     const int W = 512;  // 2 blocks per row
     const int H = 4;
     std::vector<float> grid(static_cast<size_t>(W) * H, 0.0f);

@@ -1,6 +1,7 @@
 // opennova::io unit tests: LE primitives, fixed-point, bounds-checked byte
 // cursors, LSB-first bit streams, and the ASCII string helpers.
 
+#include <cstdint>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -76,6 +77,13 @@ static int test_byte_reader_bounds()
     TEST_EXPECT(r2.position() == 0);
     r2.skip(100);
     TEST_EXPECT(r2.position() == 3 && r2.remaining() == 0);
+
+    io::ByteReader r3(bytes, sizeof(bytes));
+    r3.skip(1);
+    TEST_EXPECT(!r3.has_bytes(SIZE_MAX));
+    r3.skip(SIZE_MAX);
+    TEST_EXPECT(r3.position() == sizeof(bytes));
+    TEST_EXPECT(r3.remaining() == 0);
     return 0;
 }
 

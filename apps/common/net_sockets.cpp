@@ -9,6 +9,7 @@
 #include <ws2tcpip.h>
 #pragma comment(lib, "Ws2_32.lib")
 using socklen_t_compat = int;
+using native_socket_t = SOCKET;
 #else
 #include <arpa/inet.h>
 #include <errno.h>
@@ -18,6 +19,7 @@ using socklen_t_compat = int;
 #include <sys/types.h>
 #include <unistd.h>
 using socklen_t_compat = socklen_t;
+using native_socket_t = int;
 constexpr int INVALID_SOCKET = -1;
 constexpr int SOCKET_ERROR = -1;
 #endif
@@ -28,11 +30,24 @@ namespace {
 
 bool g_started = false;
 
+inline native_socket_t native_socket(intptr_t fd) {
+	return static_cast<native_socket_t>(fd);
+}
+
+inline int select_nfds(intptr_t fd) {
+#if defined(_WIN32)
+	(void)fd; // Winsock ignores nfds.
+	return 0;
+#else
+	return native_socket(fd) + 1;
+#endif
+}
+
 inline int close_fd(intptr_t fd) {
 #if defined(_WIN32)
-	return ::closesocket(static_cast<SOCKET>(fd));
+	return ::closesocket(native_socket(fd));
 #else
-	return ::close(static_cast<int>(fd));
+	return ::close(native_socket(fd));
 #endif
 }
 
@@ -72,22 +87,23 @@ std::string endpoint_to_string(const Endpoint &ep) {
 
 Socket udp_bind(uint16_t port, uint16_t *out_bound) {
 	Socket s{};
-	const intptr_t fd = static_cast<intptr_t>(::socket(AF_INET, SOCK_DGRAM, 0));
-	if (fd == INVALID_SOCKET) {
+	const native_socket_t native_fd = ::socket(AF_INET, SOCK_DGRAM, 0);
+	if (native_fd == INVALID_SOCKET) {
 		return s;
 	}
+	const intptr_t fd = static_cast<intptr_t>(native_fd);
 	sockaddr_in addr{};
 	addr.sin_family = AF_INET;
 	addr.sin_addr.s_addr = htonl(INADDR_ANY);
 	addr.sin_port = htons(port);
-	if (::bind(static_cast<int>(fd), reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) == SOCKET_ERROR) {
+	if (::bind(native_socket(fd), reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) == SOCKET_ERROR) {
 		close_fd(fd);
 		return s;
 	}
 	if (out_bound) {
 		sockaddr_in bound{};
 		socklen_t_compat len = sizeof(bound);
-		if (::getsockname(static_cast<int>(fd), reinterpret_cast<sockaddr *>(&bound), &len) == 0) {
+		if (::getsockname(native_socket(fd), reinterpret_cast<sockaddr *>(&bound), &len) == 0) {
 			*out_bound = ntohs(bound.sin_port);
 		} else {
 			*out_bound = port;
@@ -108,7 +124,7 @@ int udp_send_to(Socket &s, const Endpoint &to, const uint8_t *data, size_t len) 
 			(static_cast<uint32_t>(to.ip[1]) << 8) |
 			(static_cast<uint32_t>(to.ip[2]) << 16) |
 			(static_cast<uint32_t>(to.ip[3]) << 24);
-	const int sent = ::sendto(static_cast<int>(s.fd),
+	const int sent = ::sendto(native_socket(s.fd),
 			reinterpret_cast<const char *>(data),
 			static_cast<int>(len), 0,
 			reinterpret_cast<const sockaddr *>(&addr), sizeof(addr));
@@ -121,17 +137,17 @@ int udp_recv_from(Socket &s, uint8_t *buf, size_t buf_cap, Endpoint &from, int t
 	}
 	fd_set rfds;
 	FD_ZERO(&rfds);
-	FD_SET(static_cast<int>(s.fd), &rfds);
+	FD_SET(native_socket(s.fd), &rfds);
 	timeval tv{};
 	tv.tv_sec = timeout_ms / 1000;
 	tv.tv_usec = (timeout_ms % 1000) * 1000;
-	const int ready = ::select(static_cast<int>(s.fd) + 1, &rfds, nullptr, nullptr, &tv);
+	const int ready = ::select(select_nfds(s.fd), &rfds, nullptr, nullptr, &tv);
 	if (ready <= 0) {
 		return ready; // 0=timeout, <0=error
 	}
 	sockaddr_in src{};
 	socklen_t_compat slen = sizeof(src);
-	const int n = ::recvfrom(static_cast<int>(s.fd),
+	const int n = ::recvfrom(native_socket(s.fd),
 			reinterpret_cast<char *>(buf),
 			static_cast<int>(buf_cap), 0,
 			reinterpret_cast<sockaddr *>(&src), &slen);
@@ -156,22 +172,23 @@ void close_socket(Socket &s) {
 
 Socket tcp_listen(uint16_t port) {
 	Socket s{};
-	const intptr_t fd = static_cast<intptr_t>(::socket(AF_INET, SOCK_STREAM, 0));
-	if (fd == INVALID_SOCKET) {
+	const native_socket_t native_fd = ::socket(AF_INET, SOCK_STREAM, 0);
+	if (native_fd == INVALID_SOCKET) {
 		return s;
 	}
+	const intptr_t fd = static_cast<intptr_t>(native_fd);
 	int yes = 1;
-	::setsockopt(static_cast<int>(fd), SOL_SOCKET, SO_REUSEADDR,
+	::setsockopt(native_socket(fd), SOL_SOCKET, SO_REUSEADDR,
 			reinterpret_cast<const char *>(&yes), sizeof(yes));
 	sockaddr_in addr{};
 	addr.sin_family = AF_INET;
 	addr.sin_addr.s_addr = htonl(INADDR_ANY);
 	addr.sin_port = htons(port);
-	if (::bind(static_cast<int>(fd), reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) == SOCKET_ERROR) {
+	if (::bind(native_socket(fd), reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) == SOCKET_ERROR) {
 		close_fd(fd);
 		return s;
 	}
-	if (::listen(static_cast<int>(fd), 8) == SOCKET_ERROR) {
+	if (::listen(native_socket(fd), 8) == SOCKET_ERROR) {
 		close_fd(fd);
 		return s;
 	}
@@ -186,21 +203,22 @@ Socket tcp_accept(Socket &listener, Endpoint &from, int timeout_ms) {
 	}
 	fd_set rfds;
 	FD_ZERO(&rfds);
-	FD_SET(static_cast<int>(listener.fd), &rfds);
+	FD_SET(native_socket(listener.fd), &rfds);
 	timeval tv{};
 	tv.tv_sec = timeout_ms / 1000;
 	tv.tv_usec = (timeout_ms % 1000) * 1000;
-	const int ready = ::select(static_cast<int>(listener.fd) + 1, &rfds, nullptr, nullptr, &tv);
+	const int ready = ::select(select_nfds(listener.fd), &rfds, nullptr, nullptr, &tv);
 	if (ready <= 0) {
 		return accepted;
 	}
 	sockaddr_in src{};
 	socklen_t_compat slen = sizeof(src);
-	const intptr_t fd = static_cast<intptr_t>(::accept(static_cast<int>(listener.fd),
-			reinterpret_cast<sockaddr *>(&src), &slen));
-	if (fd == INVALID_SOCKET) {
+	const native_socket_t native_fd = ::accept(native_socket(listener.fd),
+			reinterpret_cast<sockaddr *>(&src), &slen);
+	if (native_fd == INVALID_SOCKET) {
 		return accepted;
 	}
+	const intptr_t fd = static_cast<intptr_t>(native_fd);
 	from.port = ntohs(src.sin_port);
 	const uint32_t raw = static_cast<uint32_t>(src.sin_addr.s_addr);
 	from.ip[0] = static_cast<uint8_t>(raw & 0xFFu);
@@ -217,15 +235,15 @@ int tcp_recv(Socket &s, uint8_t *buf, size_t buf_cap, int timeout_ms) {
 	}
 	fd_set rfds;
 	FD_ZERO(&rfds);
-	FD_SET(static_cast<int>(s.fd), &rfds);
+	FD_SET(native_socket(s.fd), &rfds);
 	timeval tv{};
 	tv.tv_sec = timeout_ms / 1000;
 	tv.tv_usec = (timeout_ms % 1000) * 1000;
-	const int ready = ::select(static_cast<int>(s.fd) + 1, &rfds, nullptr, nullptr, &tv);
+	const int ready = ::select(select_nfds(s.fd), &rfds, nullptr, nullptr, &tv);
 	if (ready <= 0) {
 		return ready;
 	}
-	return ::recv(static_cast<int>(s.fd), reinterpret_cast<char *>(buf),
+	return ::recv(native_socket(s.fd), reinterpret_cast<char *>(buf),
 			static_cast<int>(buf_cap), 0);
 }
 
@@ -233,7 +251,7 @@ int tcp_send(Socket &s, const uint8_t *data, size_t len) {
 	if (!s.is_valid() || !data || len == 0) {
 		return -1;
 	}
-	return ::send(static_cast<int>(s.fd), reinterpret_cast<const char *>(data),
+	return ::send(native_socket(s.fd), reinterpret_cast<const char *>(data),
 			static_cast<int>(len), 0);
 }
 

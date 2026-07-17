@@ -33,6 +33,21 @@ static int test_encode_inverts_decode(void) {
     return 1;
 }
 
+/* Public sample helpers accept caller-provided scales. Out-of-range values
+   clamp to the narrowest supported scale instead of entering undefined
+   signed-shift behavior. */
+static int test_sample_helpers_bound_invalid_scales(void) {
+    CHECK(sbf_decode_sample(0x00, UINT8_MAX) == -128,
+          "decode clamps invalid scale to 7");
+    CHECK(sbf_decode_sample(0xFF, UINT8_MAX) == 127,
+          "decode high rail stays bounded");
+    CHECK(sbf_encode_sample(-128, UINT8_MAX) == 0,
+          "encode clamps invalid scale to 7");
+    CHECK(sbf_encode_sample(127, UINT8_MAX) == 255,
+          "encode high rail stays bounded");
+    return 1;
+}
+
 /* Silence has zero amplitude; every scale fits, so pick_scale returns the
    largest (7), giving maximum quiet-sample precision. */
 static int test_pick_scale_silence(void) {
@@ -134,6 +149,7 @@ static int test_encode_file_zero_entries(void) {
 
 int main(void) {
     RUN_TEST(test_encode_inverts_decode);
+    RUN_TEST(test_sample_helpers_bound_invalid_scales);
     RUN_TEST(test_pick_scale_silence);
     RUN_TEST(test_pick_scale_loud);
     RUN_TEST(test_pick_scale_monotonic);

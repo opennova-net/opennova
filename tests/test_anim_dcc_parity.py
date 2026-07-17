@@ -22,10 +22,27 @@ from pathlib import Path
 
 import pytest
 
-from opennova_jobs import ImportOptions, ImportRequest
+from opennova_jobs import ImportOptions, ImportRequest, validate_import_request
 
 ROOT = Path(__file__).resolve().parents[1]
 ITEM_NAME = os.environ.get("OPENNOVA_PARITY_WEAPON", "WPN_MP5SD")
+_BPY_UNAVAILABLE_EXIT = 5
+_BLENDER_CHILD_CODE = f"""
+import importlib.util
+import runpy
+import sys
+from pathlib import Path
+
+if importlib.util.find_spec("bpy") is None:
+    raise SystemExit({_BPY_UNAVAILABLE_EXIT})
+
+namespace = runpy.run_path(sys.argv[1])
+namespace["_export_blender_in_child"](
+    Path(sys.argv[2]),
+    Path(sys.argv[3]),
+    sys.argv[4],
+)
+"""
 
 
 def _assets_dir():
@@ -36,6 +53,47 @@ def _assets_dir():
     if not (p / "weapon.def").is_file():
         pytest.skip(f"weapon.def not found under OPENNOVA_JO_ASSETS={base}")
     return p
+
+
+def test_blender_animation_request_writes_real_scene(tmp_path):
+    request = _blender_import_request(tmp_path / "assets", tmp_path / "out", ITEM_NAME)
+
+    assert request.options.write_blend
+    assert request.options.writes_any_output_file()
+    assert validate_import_request(request, check_paths=False) == []
+
+
+def test_blender_animation_export_runs_in_subprocess(monkeypatch, tmp_path):
+    calls = []
+    real_importorskip = pytest.importorskip
+    compile(_BLENDER_CHILD_CODE, "<blender-animation-child>", "exec")
+
+    def fail_parent_bpy_import(name, *args, **kwargs):
+        if name == "bpy":
+            raise AssertionError("bpy must not be imported in the pytest parent")
+        return real_importorskip(name, *args, **kwargs)
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.delitem(sys.modules, "bpy", raising=False)
+    monkeypatch.setattr(pytest, "importorskip", fail_parent_bpy_import)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    _export_blender(tmp_path / "assets", tmp_path / "out")
+
+    assert "bpy" not in sys.modules
+    assert len(calls) == 1
+    command, kwargs = calls[0]
+    assert command[0] == sys.executable
+    assert command[1] == "-c"
+    assert command[-3:] == [
+        str(tmp_path / "assets"),
+        str(tmp_path / "out"),
+        ITEM_NAME,
+    ]
+    assert kwargs["cwd"] == ROOT
 
 
 # ---------------------------------------------------------------------------
@@ -132,30 +190,82 @@ def _compare(blender_dir: Path, max_dir: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Blender driver (in-process bpy)
+# Blender driver (isolated bpy subprocess)
 # ---------------------------------------------------------------------------
 
 
-def _export_blender(assets: Path, out_dir: Path) -> None:
-    pytest.importorskip("bpy")
-    import bpy  # noqa: F401
-    from apps.importer.import_runner import _setup_blender_package, execute_import_request
-
-    _setup_blender_package()
-    req = ImportRequest.for_definition(
+def _blender_import_request(
+    assets: Path,
+    out_dir: Path,
+    item_name: str,
+) -> ImportRequest:
+    return ImportRequest.for_definition(
         base_dir=str(assets),
-        item_name=ITEM_NAME,
+        item_name=item_name,
         item_type="weapon",
         output_root=str(out_dir),
         options=ImportOptions(
             import_animations=True, import_arms=False,
             import_collisions=False, import_occlusion=False, import_lights=False,
-            write_blend=False, write_ase=False, write_3dp=False,
+            write_blend=True, write_ase=False, write_3dp=False,
         ),
     )
-    result = execute_import_request(req)
+
+
+def _export_blender(assets: Path, out_dir: Path) -> None:
+    command = [
+        sys.executable,
+        "-c",
+        _BLENDER_CHILD_CODE,
+        str(Path(__file__).resolve()),
+        str(assets),
+        str(out_dir),
+        ITEM_NAME,
+    ]
+    proc = subprocess.run(
+        command,
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=1800,
+    )
+    if proc.returncode == _BPY_UNAVAILABLE_EXIT:
+        pytest.skip("bpy is not importable; install the standalone Blender module")
+    if proc.returncode != 0:
+        raise AssertionError(
+            "Blender anim export subprocess failed\n"
+            f"stdout:\n{proc.stdout[-4000:]}\n"
+            f"stderr:\n{proc.stderr[-4000:]}"
+        )
+
+
+def _export_blender_in_child(
+    assets: Path,
+    out_dir: Path,
+    item_name: str,
+) -> None:
+    """Import the scene and export animations inside the dedicated child only."""
+    from apps.importer.dispatcher import ImportDispatcher
+    from apps.importer.import_runner import _setup_blender_package
+
+    request = _blender_import_request(assets, out_dir, item_name)
+    with ImportDispatcher(max_workers=1) as dispatcher:
+        result = dispatcher.submit(request).result()
     assert result.ok, f"Blender import failed: {result.error}"
 
+    blend_files = [
+        Path(path)
+        for path in result.written_files
+        if Path(path).suffix.lower() == ".blend"
+    ]
+    assert len(blend_files) == 1, (
+        f"expected one Blender scene output, got {result.written_files}"
+    )
+
+    _setup_blender_package()
+    import bpy
+
+    bpy.ops.wm.open_mainfile(filepath=str(blend_files[0]))
     from blender.anim_exporter import (  # type: ignore[import]
         NovalogicAnimExporter, _ClipData, _collect_unique_actions_from_nla,
         _get_active_armature, _sanitize_name,
@@ -187,7 +297,7 @@ def _export_blender(assets: Path, out_dir: Path) -> None:
     exporter.configure_from_reset_clip(reset_clip)
     for clip in clips:
         exporter.write_bad(str(out_dir / (clip.bad_name + ".bad")), clip)
-    exporter.write_adm(str(out_dir / f"{Path(ITEM_NAME).stem}.adm"), clips)
+    exporter.write_adm(str(out_dir / f"{Path(item_name).stem}.adm"), clips)
 
 
 # ---------------------------------------------------------------------------
