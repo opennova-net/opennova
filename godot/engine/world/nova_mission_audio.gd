@@ -253,6 +253,17 @@ func fire_soundset(name: String, world_pos: Vector3, source_bms_id: int = 0) -> 
 		_audio_root, world_pos, name, SFX_BUS, _last_camera_pos, source_bms_id)
 
 
+## A body slot sound (footstep/foley/landing/scream) from the sim's per-tick
+## drain: the same full-volume positional one-shot as fire_soundset [orig:
+## Entity_PlaySound3D_FullVolume @ 0x528e20 — emitter volume 255], with an
+## optional exclusive key for the every-tick refire slots (chute flap/freefall).
+func slot_soundset(name: String, world_pos: Vector3, exclusive_key: String = "") -> bool:
+	if _bank == null or _audio_root == null:
+		return false
+	return _bank.play_oneshot_3d(
+		_audio_root, world_pos, name, SFX_BUS, _last_camera_pos, 0, exclusive_key)
+
+
 ## Enqueue a mission dialog by its PlayWavList id (param1). Resolution, faithful
 ## first: dialog id "dlg%03d" -> co-named .DBF -> def_id set name(s); then direct
 ## set-name fallbacks. Playback is SERIALIZED: the original plays one dialog audio

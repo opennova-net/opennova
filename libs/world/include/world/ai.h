@@ -196,6 +196,11 @@ struct AiProfile {
     // witnessed. -1 = unarmed (the pass never fires).
     int32_t ammo_primary = -1;    // world.ammo index [orig: items.def ammo_closeattack family]
     int32_t clip_size = 0;        // items.def clipsize (magazine reseed)
+    // Index into world.sound_profiles (the def's sound_profile, resolved at the
+    // host's item-traits sweep; -1 = unresolved -> the table's "default"
+    // fallback at emit). The female-variant select (def+2152 via the character
+    // entity's female byte [orig: @ 0x52831c]) is unmodeled — primary always.
+    int16_t sound_profile = -1;
 };
 
 // AiScheduler — brain[2], the shared per-frame budget accumulator (the +16 field).
@@ -735,6 +740,20 @@ public:
     // 32-tick staged perception -> target commit, then per-tick reactions (the attack
     // anims), move modes, and the lead+error aim solution. Authority + alive only.
     void infantry_combat_think(AiEntity &e, World &world, uint32_t key);
+    // The anim-event sound pass (§17.4 sounds): the six SSAudio foley bits
+    // (0x20..0x400 -> slots 24-29) then the two footstep bits (0x1/0x2 -> the
+    // surface-picked slots 17-23, position dipped to foot level by the frame's
+    // capsule bottom). NPC body on ODD ticks, player body on EVEN — the two
+    // updaters run opposite halves of the 62 Hz tick.
+    // [orig: Entity_UpdateInfantryAI @0x4bf169-0x4bf2b0 (gate @0x4bf144);
+    //  Entity_UpdateInfantryPlayerBody @0x4b76f1-0x4b78a8 (gate @0x4b76e6)]
+    void infantry_anim_sound_pass(AiEntity &e, World &world, uint32_t logic_tick,
+                                  int32_t capsule_bottom);
+    // Resolve the entity's sound profile slot to its authored set name and queue
+    // the world SoundSlotEvent (empty slot = the id-0 no-op, nothing queued).
+    // [orig: Entity_GetProfileSlotSound @0x528300 ->
+    //  Entity_PlaySound3D_FullVolume @0x528e20]
+    void emit_slot_sound(World &world, const AiEntity &e, int slot, const int32_t pos[3]);
     // The infantry fire pass (§17.4): consume the .bad anim-event trigger bits
     // (inf.last_events, odd ticks) + the walking-fire latch -> fire_ai_round; magazine
     // decrement + the reload trigger. Runs AFTER the anim advance refreshed last_events.

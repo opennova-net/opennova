@@ -97,8 +97,40 @@ func present(ticks: int = 1) -> void:
 	if _sim == null:
 		return
 	_drain_fires()
+	_drain_slot_sounds()
 	_tick_pending_sounds(ticks)
 	_draw_tracers()
+
+
+# The body slot-sound drain (footsteps/foley/landing thumps/death screams): the
+# sim resolves each entity's SndProf.def profile slot to its authored set name
+# and emits the (foot-level) position; this plays them full-volume positional
+# with NO propagation-delay leg — footsteps play immediately, unlike fire
+# [orig: the odd/even-tick consumers call Entity_PlaySound3D_FullVolume
+# @ 0x528e20 directly]. The local player's own body sounds DO play (retail
+# plays your own steps; only fire has an action-slot presentation to defer to).
+# Slots 43/44 (chute flap / freefall) refire every body tick by design; the
+# exclusive key folds the refires into one continuous voice (D-SND-10).
+func _drain_slot_sounds() -> void:
+	if not _sim.has_method("drain_slot_sounds"):
+		return  # stale native DLL — presentation degrades silently, sim unaffected
+	var events: Array = _sim.drain_slot_sounds()
+	if events.is_empty():
+		return
+	var audio = _audio_provider.call() if _audio_provider.is_valid() else null
+	if audio == null or not audio.has_method("slot_soundset"):
+		return
+	for ev_v in events:
+		var ev: Dictionary = ev_v
+		var set_name := String(ev.get("set", ""))
+		if set_name.is_empty():
+			continue
+		var slot := int(ev.get("slot", 0))
+		var key := ""
+		if slot == 43 or slot == 44:
+			key = "%d:%d" % [int(ev.get("handle", 0)), slot]
+		if audio.slot_soundset(set_name, ev.get("pos", Vector3.ZERO), key):
+			_stats.sounds += 1
 
 
 func _drain_fires() -> void:

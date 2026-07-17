@@ -16,6 +16,14 @@ namespace {
 
 constexpr double kBamPerRadian = 683565275.5764316; // 2^32 / 2pi
 
+// The environment water plane (env.water_z, 16.16 — the #265 sound-profile
+// home; 0 = no water authored) as float units [orig: Env_WaterHeightFixed
+// @0x26c6454].
+float world_water_z(const World &world) {
+    return world.env.water_z != 0 ? static_cast<float>(world.env.water_z) / 65536.0f
+                                  : -1.0e9f;
+}
+
 // The witnessed rol-xor PRNG stream the death paths roll [orig: the inline
 // dword_31BFBB8 form — v = rol4(state + rol11(state)); state = v ^ 1; the
 // low 16 bits are the draw. PRNG_Next16/_B/_C @ 0x6130a0/0x6130f0/0x6131b0 are
@@ -397,7 +405,7 @@ void emit_death_sounds_and_effects(World &world, Entity &target, bool silent) {
     // bone-attached 4-slot banks on the husk (the present pass owns the bones)
     // [orig: the boundRadius + Z < water gate @ 0x493a88].
     const bool submerged =
-            target.position.z + target.bound_radius < world.water_height;
+            target.position.z + target.bound_radius < world_water_z(world);
     const std::string &family =
             submerged ? traits->particleh2odeath : traits->particledeath;
     if (!family.empty())
@@ -480,7 +488,7 @@ uint32_t spawn_death_pieces(World &world, Entity &target) {
     const ItemDeathTraits *traits = world.item_death_traits.get(target.item_id);
     if (traits == nullptr || !traits->has_husk) return 0;
     if ((target.engine_flags & kEntityFlagHusk) != 0) return 0;
-    if (target.position.z + target.bound_radius < world.water_height) return 0;
+    if (target.position.z + target.bound_radius < world_water_z(world)) return 0;
     // The explosion glow light (LightPool_SpawnGlowEffect @ 0x49351a, 2x model
     // radius, non-decorations) — no light-pool port (tracked, the D-AI-8d
     // family).

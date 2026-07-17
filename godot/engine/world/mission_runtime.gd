@@ -158,6 +158,15 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	# the terrain instead of floating; absent/unloaded terrain leaves their authored Z untouched.
 	if options.get("terrain") != null:
 		_sim.set_terrain_height_field(options["terrain"])
+	# The sound-profile chain: SndProf.def feeds the sim's footstep/foley/landing/
+	# scream slot table (retail loads it once at boot; ours rides the mission's
+	# resource root — same file either way). The night gate the death scream
+	# reads is the BMS attrib dword finish_load already stamps.
+	# [orig: SoundProfile_LoadAll @ 0x527490 from Game_InitSubsystems]
+	if _sim.has_method("set_sound_profiles") and options.get("resource_root") != null:
+		var sound_rr = options["resource_root"]
+		if sound_rr.has_file("SndProf.def"):
+			_sim.set_sound_profiles(sound_rr.read_file("SndProf.def"))
 	# Anim-driven soldiers: resolve the infantry clip set (.adm -> .bad root-motion tracks) through
 	# the host's resource root. Without it soldiers stand still — their motion comes from clips.
 	if options.get("resource_root") != null:

@@ -181,9 +181,9 @@ Everything below was decompiled and read this session (pseudocode dumps:
   first-update fallback `vel[1]·32768`), `out[3] = capsule_bottom·65536`,
   `out[4] = 0x2000 + capsule_top·65536` (flt_7C32B8 = −65536) — the per-frame **collision capsule**
   (crouch/prone shrink; resolver input, not motor input); **`dword_A2ED08` = trigger** (.bad
-  per-frame events): bit0/bit1 = footstep L/R (surface-typed sounds via weapon-slot table
-  17–23, `Terrain_GetSurfaceTypeAtPosition`, water/platform variants, on odd ticks), 0x20..0x400 =
-  cloth/gear sounds (24–29), bit2 = attachment event.
+  per-frame events): bit0/bit1 = footstep L/R (surface-typed sound-profile slots
+  17–23, §17.4b — NPC body odd ticks, player body even ticks), 0x20..0x400 =
+  the SSAudio foley sounds (24–29), bit2 = attachment event.
 
 ### 3.5 Integration (per tick, the motor core)
 1. Rotate anim root delta by heading: `sin/cos(entity[4]) · 2^22` (FPU, dbl_7C3608 = π/2^31,
@@ -1945,11 +1945,11 @@ record that feeds our `RootMotionFrame`) is consumed on ODD ticks (`tick & 1`)
 
 | bit | action |
 |---|---|
-| 0x1 / 0x2 | footstep L/R — weapon-slot-table sound by surface (water 23, platform 21/22, surface-3 19/20, else 17/18), position Z-dipped by the water offset |
+| 0x1 / 0x2 | footstep L/R — sound-profile slot by surface (water 23 `SSFootWater`, on-entity 21/22 `SS*FootOBJ`, surface-3 19/20 `SS*FootSnow`, else 17/18 `SS*FootGND`), position Z-dipped to FOOT level by the frame's `out[3]` capsule bottom (§17.4b — the earlier "water offset" reading was wrong) |
 | 0x4 | **FIRE** weapon byte `entity+0x358` from muzzle bone `entity+0x365` |
 | 0x8 | latch `shouldFireSecondary` (fired at the block tail) |
 | 0x10 | FIRE weapon byte `entity+0x35B` from bone `entity+0x367` |
-| 0x20–0x400 | six more weapon-slot-table sounds (24–29) |
+| 0x20–0x400 | the six SSAudio foley slots (24–29) |
 
 The secondary latch fires `entity+0x359` from bone `+0x366` and decrements the
 **magazine word `entity+0x35C`** (the reload trigger, §17.3; reseeded to
@@ -1984,6 +1984,62 @@ the hardpoint/close-attack consumers — NOT the anim-fire bytes). Port note: un
 block-copy is witnessed, the host seeds ONE ammo id + clipsize per NPC from the def
 names at mission load (`NovaSimulation::resolve_ai_weapons`, after the ammo table
 loads) — the D-AI-5 stand-in.
+
+### 17.4b The sound legs — footsteps, foley, landing, screams (witnessed + ported 2026-07-17)
+
+The trigger word's SOUND consumers, fully witnessed in both bodies and ported
+(`AiSystem::infantry_anim_sound_pass` / `emit_slot_sound` -> `World::slot_sounds`
+-> `NovaSimulation::drain_slot_sounds` -> `fire_present_pass._drain_slot_sounds`;
+ctest `slot_sound`). The slot table and its SndProf.def source are the audio
+record's §sound-profile ([lwf-dbf-sound-re.md](../audio/lwf-dbf-sound-re.md),
+D-SND-10..15). All plays go through `Entity_GetProfileSlotSound @ 0x528300`
+-> `Entity_PlaySound3D_FullVolume @ 0x528e20` (`Sound_Play3DPositional(id,
+&entity->pos, entity, 255)`).
+
+- **Tick parity**: the NPC body consumes on ODD ticks (`v & 1; jz skip`
+  `[orig: @ 0x4bf144-0x4bf156]`), the PLAYER body on EVEN ticks
+  (`test current_tick, 1; jnz skip` `[orig: @ 0x4b76e6; the var is
+  current_tick @ 0x4b4147]`) — the two updaters split the 62 Hz tick.
+- **Block order** (org1 `@ 0x4bf169-0x4bf2b0`, org2 `@ 0x4b76f1-0x4b78a8`,
+  before the org1 fire bits `@ 0x4bf322`): the six SSAudio bits 0x20..0x400 ->
+  slots 24-29 at the entity origin, then feet. org1 additionally skips the
+  whole block when the trigger word is 0 (`@ 0x4bf161`); the latch-fire tail
+  still runs.
+- **Feet** (bit 0x1 L `@ 0x4bf23e`/`@ 0x4b77c6`, 0x2 R `@ 0x4bf2b0`/
+  `@ 0x4b7837`): `pos.z -= out[3]` (the AnimMap out-array's capsule-bottom
+  stack cell — both bodies pass the array to `AnimMap_UpdateDualChannels`, so
+  the "dip" is TO FOOT LEVEL, not a water constant; restored after the play).
+  Slot pick in order: `Env_WaterHeightFixed != 0 && dipped z < it` -> 23; the
+  `entity+0x28 groundEntity` link -> 21/22; `Terrain_GetSurfaceTypeAtPosition
+  @ 0x606510 == 3` -> 19/20 (snow); else 17/18.
+- **Landing** (org1 `@ 0x4bf87f-0x4bf89f`, org2 `@ 0x4b7f7c-0x4b7fa1`): on the
+  airborne-flag(0x2000)-clear edge, dead (Flags&2) -> slot 15 `SSFallDead`
+  else 16 `SSFallAlive`, at the entity origin — the pair the earlier
+  "water-exit sounds (15/16)" note misread; then vel_z zeroes (org1) and the
+  flag clears. Runs for corpses (a thrown body lands with 15).
+- **Death scream** (the org1 death edge `@ 0x4b9ca3-0x4b9cc1`): slot 8
+  `SSNightDead` when `Bms_AttribFlags & 0x100000` else 7 `sounddeath` — the
+  bit is the mission **EnableNVG** attribute (libs/mission `AttribFlags`; the
+  §19.7 "what authors 0x100000" open item closes: the dfx2med encoder writes
+  it as the NVG checkbox, and the runtime reuses it as the night gate). The
+  `byte+0x134`-bit0 silent-cleanup variant skips the scream (unchanged,
+  D-AI-9). The org2 player edge instead plays the composite
+  `SoundProfile_FindByEntityAndType(def, night ? 5 : 0)` name
+  `@ 0x4b4c4a-0x4b4c6a` — unported (D-SND-14).
+- **The org2 airborne family** (outside the tick-parity gate — every body
+  tick): the chute edge on `Flags & 0x20` vs its `+0x2C` mirror bit
+  (`@ 0x4b7b1e-0x4b7b75`): open -> slot 41 `ChuteOpen` + zero the two
+  accumulator words `+0x378/+0x37A`; close -> 42 `ChuteClose`. While OPEN
+  (`@ 0x4b7b78-0x4b7c08`): accumulators ramp +0x300/+0x200 to 0x7FFF, anim
+  state 47, slot 43 `ChuteFlap` refires every tick, and the chute BRAKE
+  `vel_z += 0x29C while < -0x1C00` (`@ 0x4b7bfd`). While CLOSED
+  (`@ 0x4b7c0d-0x4b7c8d`): accumulators decay -0x40/-0x280 to 0, slot 44
+  `FreeFall` refires while `vel_z < -0x3000`, vel floor -0x8000. Both plays
+  gate on the `smoothTargetPos - savedLivePose` delta being zero (`var_10A8`
+  `@ 0x4b42c1-0x4b42cd`) — net-pulled remote bodies stay silent, matching our
+  net-peer motor skip. Ported: the freefall leg (the chute flag is unmodeled;
+  chute 41-43 + the brake ride the parachute slice); the accumulator pair's
+  consumer is unwalked (likely the canopy flap visual).
 
 ### 17.5 The aim model — lead, error, concealment
 
@@ -2331,9 +2387,10 @@ already-dead skips. Then, in order `[orig: @ 0x4b9c40-0x4b9d55]`:
 2. corpse timer `entity+0x148` = `def+0x890` deathtime. The `byte entity+0x134 & 1`
    variant instead: respawn tickets `+0x35E` = 0, timer = deathtime − 61, and NO
    scream (a silent-cleanup mode; the bit's writer is unwalked).
-3. the death scream: `Entity_PlaySound3D_FullVolume(Entity_GetWeaponSlotTableValue(
-   entity, slot))`, slot 8 when `Bms_AttribFlags & 0x100000` else 7 — the def's
-   resolved sound table (the `sound_profile` chain), not ammo sounds.
+3. the death scream: `Entity_PlaySound3D_FullVolume(Entity_GetProfileSlotSound(
+   entity, slot))`, slot 8 `SSNightDead` when `Bms_AttribFlags & 0x100000`
+   (EnableNVG = night) else 7 `sounddeath` — the def's resolved sound-profile
+   table, not ammo sounds. PORTED 2026-07-17 (§17.4b).
 4. consume `+0x2C0`: zero → `ComputeAnimSlotIndex(0,0,4)` = 174 + dispatch
    `deathCallback(entity, 1, 0)`; then **animState `+0x2BC` = the selection**
    (drowning `Flags & 0x8000` overrides to 175), pending `+0x2B8` = 0, `Flags |= 2`,
@@ -2431,11 +2488,11 @@ tick; our earlier bring-up event is removed).
 
 1. `entity+0x11E` (the death-edge skip word) and `byte +0x134` bit 0 (the silent
    cleanup) — writers unwalked.
-2. The scream chain: `Entity_GetWeaponSlotTableValue @ 0x528300` reads def+2148/2152
-   sound tables (slots 7/8 = the death screams; 17-23 = the §3.4 footsteps) —
-   resolved from `sound_profile` by `ItemDef_ResolveAllResources @ 0x49e5f0`;
-   the profile parse chain is unported, so the port has no scream (D-AI-9). What
-   `Bms_AttribFlags & 0x100000` (slot-8 select) authors is unidentified.
+2. ~~The scream chain~~ CLOSED 2026-07-17: the SndProf.def profile system is
+   witnessed + ported (§17.4b; the audio record's §sound-profile) — the scream
+   plays (slot 7, or 8 `SSNightDead` on `Bms_AttribFlags & 0x100000` =
+   the mission **EnableNVG** attribute, the formerly-unidentified author). The
+   org2 player edge's composite-name variant stays open (D-SND-14).
 3. The S2C 0x13 client consumer (`NapiNPClientMsg_EntityDeath @ 0x42ebd0` region)
    also writes `+0x2C0` — the wire carries the death-anim selection to remote
    clients; walk it when MP corpse parity lands (its IDB gloss "clear ammo/weapon

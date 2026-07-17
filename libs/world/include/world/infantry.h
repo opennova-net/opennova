@@ -290,6 +290,12 @@ struct InfantryState {
     // [orig: entity+0x12C prone bit 0x100, crouch bit 0x200; player body @0x4b40e0]
     enum class Stance : uint8_t { kStand = 0, kCrouch = 1, kProne = 2 };
     Stance stance = Stance::kStand;
+    // Standing on another entity (the +0x28 groundEntity link, written by the
+    // ground probes [orig: Entity_RaycastGroundHeightAndObject @0x525fd0]).
+    // Unwired until the platform slice lands — the footstep pass reads it for
+    // the SS*FootOBJ slots and falls through to the terrain surface meanwhile
+    // (the world sound D-entry).
+    bool standing_on_entity = false;
     bool airborne = false;
     bool jump_requested = false;
     // The player body's jump cooldown/edge latch. The original REUSES entity+0x1A8

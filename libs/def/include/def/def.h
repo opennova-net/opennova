@@ -304,6 +304,12 @@ typedef struct DefItemDef {
     char husk[128];
     int hp;
     char sound_profile[128];
+    /* The female-variant profile name; tracks sound_profile until authored
+       explicitly (both resolve to "default" when empty) [orig:
+       "sound_profileFemale" @ 0x49fb76 -> def+0x26C; the runtime selects it
+       via the character entity's female byte in Entity_GetProfileSlotSound
+       @ 0x52831c]. */
+    char sound_profile_female[128];
     char soundloops[7][128];
     char nightshot[128];
     char dawnshot[128];

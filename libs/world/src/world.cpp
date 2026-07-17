@@ -673,10 +673,15 @@ void World::run_logic_tick(bool is_authority, bool pre_mission) {
         // [orig: the Entity_UpdateStaticDeathPhysics / _UpdateFallingDeathPhysics
         // update callbacks] and the death-piece pool advances
         // [orig: DeathPiece_TickAll @0x57b900].
+        // The water plane: env.water_z (16.16, the #265 sound-profile home) —
+        // zero means "no water authored", the same read the wreck gates use
+        // [orig: Env_WaterHeightFixed @0x26c6454].
+        const float water_z =
+                env.water_z != 0 ? static_cast<float>(env.water_z) / 65536.0f : -1.0e9f;
         explosions.process(*this, ai != nullptr ? ai->collision : nullptr, terrain,
-                           water_height, destruction);
-        destruction_tick_dead_items(*this, terrain, water_height, destruction);
-        death_pieces.tick(*this, terrain, water_height, destruction);
+                           water_z, destruction);
+        destruction_tick_dead_items(*this, terrain, water_z, destruction);
+        death_pieces.tick(*this, terrain, water_z, destruction);
     }
     if (is_authority) {
         if (pre_mission) {

@@ -632,9 +632,8 @@ func test_kind_for_item_type_matches_shipping_data() -> void:
 
 func test_get_placeable_items_includes_markers() -> void:
 	# Markers are general placeable entities (player start, insertion, waypoint, ...), so the
-	# palette offers them alongside meshes; the fixture (one of them the marker) yields every
-	# entry. 15 = the fixture's current block count — the "Static Vehicle" (106002) addition
-	# left this hard count one behind (pre-existing red before the husk PR touched the file).
+	# palette offers them alongside meshes; the 15-item fixture (one of them the marker) yields 15.
+	# (#264 grew the fixture by the emplaced-50cal armory asset without bumping this count.)
 	var controller := _loaded_with_item_db()
 	var items := controller.get_placeable_items()
 	assert_eq(items.size(), 15, "every items.def entry is placeable, markers included")

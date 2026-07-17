@@ -218,11 +218,32 @@ void NovaSimulation::reset_world() {
 void NovaSimulation::apply_terrain_to_ai() {
 	// The round sim's ground stop shares the same field (world.terrain; §5.60).
 	if (world_) world_->terrain = terrain_field_.valid() ? &terrain_field_ : nullptr;
+	if (world_) {
+		// The footstep surface pick reads the charmap through this view; the
+		// zero-initialized map is the sampler's "no charmap -> surface 1" leg.
+		world_->surface_map =
+			surface_indices_.empty() ? opennova::terrain::SurfaceTypeMap{} : surface_map_;
+	}
+	apply_sound_state_to_world();
 	if (!ai_) return;
 	ai_->terrain = terrain_field_.valid() ? &terrain_field_ : nullptr;
 	ai_->ground_clearance = opennova::world::GroundClearance{};
 	// The collision ground probe shares the same field.
 	collision_world_.terrain = terrain_field_.valid() ? &terrain_field_ : nullptr;
+}
+
+// (Re)apply the persisted sound-profile chain state to the current world: the parsed
+// SndProf.def table and the water plane. Runs from apply_terrain_to_ai
+// (reset_world / load) and from the setters when live. (The mission attrib
+// dword the scream's night gate reads is stamped by finish_load from the BMS
+// header — not re-applied here.)
+void NovaSimulation::apply_sound_state_to_world() {
+	if (!world_) return;
+	world_->sound_profiles.clear();
+	if (!sndprof_text_.empty())
+		world_->sound_profiles.parse(reinterpret_cast<const char *>(sndprof_text_.data()),
+		                             sndprof_text_.size());
+	world_->env.water_z = env_water_z_q16_;
 }
 
 // Re-point the (possibly just-rebuilt) AI system at the owned infantry root-motion source.
@@ -457,8 +478,26 @@ void NovaSimulation::install_item_class_resolver() {
 // docs/divergence-ledger.md D-AI-5]
 int NovaSimulation::resolve_ai_weapons(const Ref<NovaItemDatabase> &p_item_db) {
 	if (!world_ || !world_->ai || p_item_db.is_null()) return 0;
-	if (world_->ammo.empty()) return 0; // no ammo.def loaded — NPCs stay unarmed
 	int armed = 0;
+	// Bind every body's sound profile first — persons AND vehicles carry one
+	// (e.g. DBuggy01 -> SP_DuneBuggy), and unarmed defs (the player) must not
+	// skip it. An unauthored key resolves to "default" via the emit-side
+	// fallback (index stays -1). [orig: the def+0x268 parse binding
+	// @ 0x49fb0f-0x49fb64; alloc seed @ 0x49e3f5]
+	if (!world_->sound_profiles.empty()) {
+		for (int i = 0; i < world_->ai->count(); ++i) {
+			opennova::world::AiEntity *ae = world_->ai->at(i);
+			if (ae == nullptr) continue;
+			const opennova::world::Entity *e = world_->registry.get(ae->handle);
+			if (e == nullptr) continue;
+			const int def_id = static_cast<int>(e->item_id) + opennova::mission::kItemIdOffset;
+			const String prof = p_item_db->get_sound_profile(def_id);
+			if (prof.is_empty()) continue;
+			ae->profile.sound_profile = static_cast<int16_t>(
+				world_->sound_profiles.index_of(prof.utf8().get_data()));
+		}
+	}
+	if (world_->ammo.empty()) return 0; // no ammo.def loaded — NPCs stay unarmed
 	for (int i = 0; i < world_->ai->count(); ++i) {
 		opennova::world::AiEntity *ae = world_->ai->at(i);
 		if (ae == nullptr) continue;
@@ -1407,6 +1446,9 @@ void NovaSimulation::set_terrain_height_field(const Ref<NovaTerrainData> &p_terr
 	terrain_sector_grid_.clear();
 	terrain_field_ = opennova::terrain::TerrainHeightField{};
 
+	surface_indices_.clear();
+	surface_map_ = opennova::terrain::SurfaceTypeMap{};
+
 	if (p_terrain.is_valid() && p_terrain->is_loaded()) {
 		const opennova::CptFile &cpt = p_terrain->get_cpt();
 		const opennova::TrnConfig &trn = p_terrain->get_trn();
@@ -1425,9 +1467,51 @@ void NovaSimulation::set_terrain_height_field(const Ref<NovaTerrainData> &p_terr
 			// compares) are not yet verified, so leave has_water off rather than float entities onto
 			// a wrong plane. The ground-following path (the Phase 1 goal) does not need it.
 			terrain_field_.has_water = false;
+
+			// The charmap surface raster for the footstep surface pick (own a
+			// copy like the depth buffer; shares the sector grid + origins)
+			// [orig: Terrain_GetSurfaceTypeAtPosition @ 0x606510].
+			const std::vector<uint8_t> &charmap = p_terrain->get_charmap_indices();
+			if (!charmap.empty() && p_terrain->get_charmap_width() > 0) {
+				surface_indices_ = charmap;
+				surface_map_.data = surface_indices_.data();
+				surface_map_.width = p_terrain->get_charmap_width();
+				surface_map_.height = p_terrain->get_charmap_height();
+				surface_map_.sector_grid = terrain_sector_grid_.data();
+				surface_map_.origin_x = trn.origin_x;
+				surface_map_.origin_y = trn.origin_y;
+			}
 		}
 	}
 	apply_terrain_to_ai();
+}
+
+void NovaSimulation::set_sound_profiles(const PackedByteArray &p_sndprof_text) {
+	sndprof_text_.assign(p_sndprof_text.ptr(), p_sndprof_text.ptr() + p_sndprof_text.size());
+	apply_sound_state_to_world();
+}
+
+void NovaSimulation::set_water_z(double p_water_y) {
+	env_water_z_q16_ = static_cast<int32_t>(p_water_y * 65536.0);
+	if (world_) world_->env.water_z = env_water_z_q16_;
+}
+
+Array NovaSimulation::drain_slot_sounds() {
+	Array out;
+	if (!loaded_) return out;
+	for (const opennova::world::SoundSlotEvent &ev : world_->slot_sounds) {
+		Dictionary d;
+		d["set"] = String(ev.set_name);
+		// Mission-frame 16.16 -> godot (x, z, -y), same mapping as the fire drain.
+		d["pos"] = Vector3(static_cast<float>(ev.pos[0]) / 65536.0f,
+		                   static_cast<float>(ev.pos[2]) / 65536.0f,
+		                   static_cast<float>(-ev.pos[1]) / 65536.0f);
+		d["handle"] = ev.source_handle;
+		d["slot"] = ev.slot;
+		out.push_back(d);
+	}
+	world_->slot_sounds.clear();
+	return out;
 }
 
 void NovaSimulation::finish_load(const opennova::bms::File &file) {
@@ -1559,8 +1643,10 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("drain_destruction_events"),
 			&NovaSimulation::drain_destruction_events);
 	ClassDB::bind_method(D_METHOD("get_death_pieces"), &NovaSimulation::get_death_pieces);
-	ClassDB::bind_method(D_METHOD("set_water_height", "water_z_units"),
-			&NovaSimulation::set_water_height);
+	ClassDB::bind_method(D_METHOD("set_sound_profiles", "sndprof_text"),
+			&NovaSimulation::set_sound_profiles);
+	ClassDB::bind_method(D_METHOD("set_water_z", "water_y"), &NovaSimulation::set_water_z);
+	ClassDB::bind_method(D_METHOD("drain_slot_sounds"), &NovaSimulation::drain_slot_sounds);
 	ClassDB::bind_method(D_METHOD("set_wac_program", "program"), &NovaSimulation::set_wac_program);
 	ClassDB::bind_method(D_METHOD("get_wac_program"), &NovaSimulation::get_wac_program);
 	ClassDB::bind_method(D_METHOD("compile_and_set_wac", "sources"), &NovaSimulation::compile_and_set_wac);
@@ -3129,9 +3215,6 @@ Array NovaSimulation::get_death_pieces() const {
 	return out;
 }
 
-void NovaSimulation::set_water_height(double p_water_z_units) {
-	if (world_) world_->water_height = static_cast<float>(p_water_z_units);
-}
 
 // Live tracer rounds for the streak layer — see the header note.
 PackedFloat32Array NovaSimulation::get_tracer_rounds() const {

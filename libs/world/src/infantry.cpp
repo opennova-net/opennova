@@ -779,11 +779,19 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             // the edge also clears Flags 0x40 @0x4b9d2a].
             if (ent != nullptr && ent->mounted) world.commands.dismount(ent->net_id);
             // Corpse timer = the item's deathtime [orig: +0x148 = def+0x890 @0x4b9c97].
-            // Unmodeled edge variants (D-AI-9): the +0x134-bit0 silent cleanup
-            // (timer-61, tickets cleared, no scream @0x4b9c68) and the death scream
-            // itself (def weapon-slot sound 7, or 8 when Bms_AttribFlags & 0x100000
-            // @0x4b9ca3 — rides the unparsed sound_profile tables).
+            // Unmodeled edge variant (D-AI-9): the +0x134-bit0 silent cleanup
+            // (timer-61, tickets cleared, no scream @0x4b9c68) — JO persons never
+            // author the bit.
             if (ent != nullptr) ent->corpse_timer = ent->deathtime_ticks;
+            // The death scream: profile slot 7 (sounddeath), or 8 (SSNightDead)
+            // on a night mission — the runtime reads the mission's EnableNVG
+            // attribute as the night gate. [orig: @0x4b9ca3-0x4b9cc1
+            // Bms_AttribFlags & 0x100000 pick; play at &entity->pos]
+            emit_slot_sound(world, e,
+                            (world.mission_attrib_flags & 0x100000u) != 0
+                                ? audio::kSlotNightDeath
+                                : audio::kSlotDeath,
+                            e.pos);
             // Consume the kill's selection; none staged -> the generic death
             // (cause 4 -> 174 death_pungi) [orig: @0x4b9cc9 fallback + the
             // deathCallback(entity, 1, 0) dispatch; consumed +0x2C0 clears @0x4b9d38.
@@ -895,7 +903,13 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     }
     inf.last_events = have_clip ? frame.events : 0;
 
-    // 3a. The fire pass: consume the fresh trigger bits + the walking-fire latch into
+    // 3a. The anim-event consumers, in the witnessed order: the sound block
+    // (foley + footsteps) precedes the fire bits inside the same consume
+    // [orig: @0x4bf169-0x4bf2b0 before the 0x4 test @0x4bf322]. The sound pass
+    // runs for BOTH bodies (its tick-parity gate differs per body) and for
+    // corpses — the landing/foley legs are not health-gated in the original.
+    infantry_anim_sound_pass(e, world, logic_tick, frame.capsule_bottom);
+    // The fire pass: consume the fresh trigger bits + the walking-fire latch into
     // authoritative rounds (odd ticks). [orig: the @0x4bf15c-0x4bf4b0 fire block runs
     // after the anim advance refreshed g_animEventTriggerBits; §17.4]
     if (!inf.is_local_player && is_authority && e.health > 0)
@@ -1125,6 +1139,16 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             inf.vel[2] -= kGravityStepPlayer;
             if (inf.vel[2] < kTerminalVelZ) inf.vel[2] = kTerminalVelZ;
             e.pos[2] += inf.vel[2];
+            // The freefall rush while dropping fast without a parachute (the
+            // chute flag 0x20 is unmodeled, so the "chute closed" leg always
+            // applies): profile slot 44, refired every body tick — the engine's
+            // finite channel pool folds the refires into a continuous rush; our
+            // host instead declines to restart the set while its voice still
+            // plays. The chute family (slots 41-43 + the vel brake @0x4b7bfd)
+            // rides the parachute slice. [orig: @0x4b7c4c-0x4b7c74; vel gate
+            // < -0x3000 @0x4b7c52; the smoothTargetPos-delta gate skips
+            // net-pulled bodies — our net peers skip the whole motor]
+            if (inf.vel[2] < -0x3000) emit_slot_sound(world, e, audio::kSlotFreeFall, e.pos);
         } else {
             inf.vel[2] -= kGravityStep;
             if (inf.vel[2] < kTerminalVelZ) inf.vel[2] = kTerminalVelZ;
@@ -1189,10 +1213,9 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             // Landing. Fall damage skips DEAD bodies [orig: org1 `test dl,2`
             // @0x4bf843 — without it a hard-landing corpse would round its health
             // back toward 0 through the clamp]; a damaging landing also stages the
-            // fall death-anim selection (+0x2C0, cause 4 -> 174) and plays the
-            // landing sound (weapon slot 16, 15 when dead) [orig: @0x4bf85d-0x4bf89c
-            // — the staged selector matches our generic-death fallback; the sound
-            // rides the sound slice].
+            // fall death-anim selection (+0x2C0, cause 4 -> 174) [orig:
+            // @0x4bf85d-0x4bf879 — the staged selector matches our generic-death
+            // fallback].
             if (inf.airborne && e.health > 0 && fall_damage_scale > 0 &&
                 inf.vel[2] <= -1057 * fall_damage_scale) {
                 int32_t excess = (-1057 * fall_damage_scale) - inf.vel[2];
@@ -1200,6 +1223,15 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                 if (dmg > e.health) dmg = e.health;
                 e.health = static_cast<int16_t>(e.health - dmg);
             }
+            // The landing thump on the airborne-clear edge, dead bodies included
+            // (a corpse thrown airborne lands with SSFallDead): profile slot 16
+            // SSFallAlive, 15 SSFallDead when dead, at the entity origin.
+            // [orig: org1 @0x4bf87f-0x4bf89c (Flags&2 pick) before the 0x2000
+            // clear @0x4bf89f; org2 @0x4b7f7c-0x4b7f9e]
+            if (inf.airborne)
+                emit_slot_sound(world, e,
+                                e.health > 0 ? audio::kSlotFallAlive : audio::kSlotFallDead,
+                                e.pos);
             e.pos[2] -= foot_clearance;
             inf.vel[2] = 0;
             inf.airborne = false;
@@ -1566,6 +1598,76 @@ void AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
         dist16 < slot.f[15] && inf.combat_move_timer < (slot.f[22] >> 5)) {
         inf.combat_move_timer = slot.f[22] >> 4;
         inf.fire_secondary_latch = true;
+    }
+}
+
+void AiSystem::emit_slot_sound(World &world, const AiEntity &e, int slot, const int32_t pos[3]) {
+    if (slot < 0 || slot >= audio::kSoundProfileSlotCount) return;
+    const auto &entries = world.sound_profiles.entries();
+    if (entries.empty()) return;
+    // An unresolved binding falls back to the "default" profile, which itself
+    // falls back to the first profile when no "default" exists — the alloc-time
+    // seed + the find-miss base return [orig: ItemDef_AllocateWithDefaults
+    // @0x49e3f5 seeds FindSlotByName("default"); @0x526e30 miss -> base].
+    const audio::SoundProfile *p =
+        (e.profile.sound_profile >= 0 &&
+         static_cast<size_t>(e.profile.sound_profile) < entries.size())
+            ? &entries[e.profile.sound_profile]
+            : world.sound_profiles.find("default");
+    if (p == nullptr) return;
+    const std::string &set = p->set_names[slot];
+    if (set.empty()) return; // the resolved-id-0 no-op [orig: table[slot] == 0]
+    SoundSlotEvent ev;
+    ev.source_handle = e.handle.packed;
+    ev.pos[0] = pos[0];
+    ev.pos[1] = pos[1];
+    ev.pos[2] = pos[2];
+    ev.slot = static_cast<uint8_t>(slot);
+    std::snprintf(ev.set_name, sizeof(ev.set_name), "%s", set.c_str());
+    world.slot_sounds.push_back(ev);
+}
+
+void AiSystem::infantry_anim_sound_pass(AiEntity &e, World &world, uint32_t logic_tick,
+                                        int32_t capsule_bottom) {
+    InfantryState &inf = e.inf;
+    // Opposite tick halves: the NPC updater consumes on ODD ticks, the player
+    // body on EVEN [orig: org1 `and eax,1; jz skip` @0x4bf144-0x4bf156; org2
+    // `test current_tick,1; jnz skip` @0x4b76e6 (var = current_tick @0x4b4147)].
+    if (inf.is_local_player ? ((logic_tick & 1u) != 0) : ((logic_tick & 1u) == 0)) return;
+    const uint32_t ev = inf.last_events;
+    if (ev == 0) return; // [orig: org1 whole-block skip @0x4bf161-0x4bf163]
+
+    // The six anim-driven foley sounds, bit order 0x20..0x400 -> SSAudio1..6
+    // (JO persons author prone rolls, swim strokes, gear rustle here), at the
+    // entity origin [orig: org1 @0x4bf169-0x4bf23e; org2 @0x4b76f1-0x4b77c6].
+    for (int i = 0; i < 6; ++i) {
+        if ((ev & (0x20u << i)) != 0)
+            emit_slot_sound(world, e, audio::kSlotAudio1 + i, e.pos);
+    }
+
+    // Footsteps: bit 0x1 = left, 0x2 = right. The sound fires at FOOT level —
+    // pos.z dipped by the root-motion frame's capsule bottom (the same value
+    // the collision capsule uses; the original subtracts it in place, plays,
+    // and restores) — and the slot picks by, in order: feet under the water
+    // plane -> standing on an entity -> terrain surface 3 (snow) -> ground.
+    // [orig: org1 @0x4bf23e-0x4bf2b0; org2 @0x4b77c6-0x4b78a8; the dip slot is
+    // the AnimMap out[3] stack cell both bodies pass to the anim update]
+    for (int foot = 0; foot < 2; ++foot) {
+        if ((ev & (foot == 0 ? 0x1u : 0x2u)) == 0) continue;
+        const int32_t pos[3] = {e.pos[0], e.pos[1], e.pos[2] - capsule_bottom};
+        int slot;
+        if (world.env.water_z != 0 && pos[2] < world.env.water_z) {
+            slot = audio::kSlotFootWater; // one slot for both feet
+        } else if (inf.standing_on_entity) {
+            // [orig: the entity+0x28 groundEntity test — written by the ground
+            // probe variant Entity_RaycastGroundHeightAndObject @0x525fd0]
+            slot = foot == 0 ? audio::kSlotFootLObject : audio::kSlotFootRObject;
+        } else if (terrain::surface_type_at_fixed(world.surface_map, pos[0], pos[1]) == 3) {
+            slot = foot == 0 ? audio::kSlotFootLSnow : audio::kSlotFootRSnow;
+        } else {
+            slot = foot == 0 ? audio::kSlotFootLGround : audio::kSlotFootRGround;
+        }
+        emit_slot_sound(world, e, slot, pos);
     }
 }
 
