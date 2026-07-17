@@ -70,12 +70,31 @@ private:
     std::unordered_map<int32_t, VehicleTraits> by_item_;
 };
 
+// The controlling occupant of a PlayerControl vehicle: the first live, internally
+// consistent Controller/Driver seat occupant, with the per-tick stale-slot sweep and the
+// +368 claimant validation. [orig: the occupant sweep @0x48b8a1-0x48b944 in
+// Entity_UpdateVehiclePhysics @0x48af00]
+Entity *resolve_vehicle_controller(World &world, Entity &veh);
+
+// The AI-driver command block, computed by the AI system from the vehicle's brain (the
+// witnessed leg lives inside the vehicle physics; our brain state is AiSystem-owned, so
+// the math runs there and the motor consumes the result — a structural seam, not a
+// behavioral one). [orig: Entity_UpdateVehiclePhysics @0x48af00 — parked stamp
+// @0x48c002-0x48c02d, AI-driver leg @0x48bc12-0x48c034]
+struct VehicleDriveCmd {
+    bool ai_drive = false;        // an AI controller is seated: consume the fields below
+    int32_t steer_target_bam = 0; // [orig: aiComp[132] = Yaw + delta + (delta >> 3)]
+    int32_t cmd_speed = 0;        // [orig: aiComp[136] = min(brain outSpeed, playerSpeed)]
+};
+
 // One authority tick of the ground-vehicle motor for `veh` (a pool-1 entity whose
 // traits carry a non-zero `physics` selector). Consumes the controlling occupant's
-// replicated input, advances Entity::position / Entity::yaw and the persistent
-// Entity::veh motor state. [orig: Entity_UpdateVehiclePhysics @0x48af00 — the
-// authority drive core; block-level cites inline]
-void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits);
+// replicated input (or the AI-driver command when the controller is an NPC), advances
+// Entity::position / Entity::yaw and the persistent Entity::veh motor state.
+// [orig: Entity_UpdateVehiclePhysics @0x48af00 — the authority drive core;
+// block-level cites inline]
+void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
+                        const VehicleDriveCmd *ai_cmd = nullptr);
 
 } // namespace opennova::world
 

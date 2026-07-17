@@ -33,6 +33,7 @@
 #include <world/angle.h>
 #include <world/player_spawn.h>
 #include <world/spawn_select.h>
+#include <world/vehicle_attach.h> // player_toggle_vehicle_mount (the USE-ITEM toggle)
 
 #include "object/nova_item_database.h"
 #include "object/nova_object_data.h" // resolve_collision_instances: the .3di collision IR source
@@ -1113,6 +1114,23 @@ bool NovaSimulation::local_player_in_vehicle_loadout_zone() const {
 	       (e->flags & opennova::world::kEntityFlagVehicleLoadoutZone) != 0;
 }
 
+bool NovaSimulation::local_player_toggle_mount() {
+	// The USE-ITEM mount toggle for the local player — the shell calls this when the
+	// armory/vehicle-zone legs of the key don't apply. [orig: Input_ProcessFrame release
+	// edge @0x49d6dc -> Entity_ToggleVehicleMount @0x436950]
+	if (!world_) return false;
+	// The weapon-busy gate [orig: @0x436958-0x436977 — no EquippedSlot passes;
+	// currentAction < 2 (idle/emptyidle) or == 5 (the dry click) passes, as does a
+	// pending OVERHEATED (nextAction == 11); an in-flight fire/reload/switch swallows
+	// the toggle].
+	const int32_t cur = weapon_slot_.current;
+	const int32_t next = weapon_slot_.next;
+	if (!(cur < 2 || cur == opennova::world::weapon_action::kEmpty ||
+	      next == opennova::world::weapon_action::kOverheated))
+		return false;
+	return opennova::world::player_toggle_vehicle_mount(*world_, world_->cached.local_player);
+}
+
 bool NovaSimulation::apply_local_player_loadout(const String &p_weapon_name,
                                                 int p_player_class) {
 	if (!world_) return false;
@@ -1486,6 +1504,7 @@ void NovaSimulation::_bind_methods() {
 	                     &NovaSimulation::sound_occlusion_distance_q16, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("local_player_in_armory_zone"), &NovaSimulation::local_player_in_armory_zone);
 	ClassDB::bind_method(D_METHOD("local_player_in_vehicle_loadout_zone"), &NovaSimulation::local_player_in_vehicle_loadout_zone);
+	ClassDB::bind_method(D_METHOD("local_player_toggle_mount"), &NovaSimulation::local_player_toggle_mount);
 	ClassDB::bind_method(D_METHOD("apply_local_player_loadout", "weapon_name", "player_class"),
 	                     &NovaSimulation::apply_local_player_loadout);
 	ClassDB::bind_method(D_METHOD("load_weapon_table", "resource_root", "name"),

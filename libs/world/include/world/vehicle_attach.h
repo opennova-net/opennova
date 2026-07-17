@@ -55,6 +55,38 @@ bool entity_process_vehicle_attach(World &world, EntityHandle player, EntityHand
 // Returns true iff the entity was mounted.
 bool entity_detach_from_vehicle(World &world, EntityHandle player);
 
+// One free seat found by the use-key proximity scan.
+struct NearestSeatHit {
+    EntityHandle vehicle;
+    int seat_index = -1;
+    SeatType type = SeatType::None;
+};
+
+// The use-key nearest-seat scan [orig: Entity_FindNearestSeatOrArmory @0x435d50, the
+// searchMode-0 seat leg]: for every live seat-bearing entity, test each FREE seat's world
+// position against the player eye: horizontal distance <= 4.0 u (0x40000 16.16) and 3D
+// distance <= 16384 u unmounted / 910.2 u while seat-swapping (0x3FFFFFC0 / 0x38E38E0),
+// LOS-gated, score = horiz + dist3d/512, lowest wins. Enemy-occupied vehicles are skipped
+// [orig: Vehicle_HasEnemyOccupant reject @0x435e58]. Tracked deviations (D-AI-11): the
+// candidate set is a registry sweep (the original walks the player's proximity list), the
+// eye is the +0.9 u chest stand-in + the witnessed +0.1875 u bias (CameraOffset unmodeled),
+// the armory-point leg (searchMode 1 / seatType 4) is not scanned (armory rides the volume
+// flags), and the emplaced-gun carrier LOS/reject legs (def attrib 0x20 -> groundEntity)
+// are unmodeled.
+bool find_nearest_free_seat(World &world, const Entity &player, NearestSeatHit &out);
+
+// The use-key mount toggle [orig: Entity_ToggleVehicleMount @0x436950 +
+// Entity_TryEnterNearestVehicle @0x4368c0]:
+//  - unmounted, standing ON a seat-bearing carrier (our platform contact ground_target
+//    stands in for the Flags 0x200 deck latch) -> best free seat on the carrier
+//    [orig: Entity_FindBestSeatSlot @0x4351f0];
+//  - unmounted otherwise -> the nearest-seat scan;
+//  - mounted -> a seat in scan reach swaps [orig: @0x4369ac], else detach.
+// The weapon-busy gate (EquippedSlot currentAction @0x436958) and the WAC no-dismount
+// global (dword_C6EADC @0x43698b) are the caller's/session's concern (D-AI-11).
+// Returns true iff a mount/swap/detach was applied.
+bool player_toggle_vehicle_mount(World &world, EntityHandle player);
+
 } // namespace opennova::world
 
 #endif // OPENNOVA_WORLD_VEHICLE_ATTACH_H

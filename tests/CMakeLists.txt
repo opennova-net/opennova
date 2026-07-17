@@ -1043,6 +1043,16 @@ target_include_directories(vehicle_motor_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR
 target_compile_features(vehicle_motor_test PRIVATE cxx_std_17)
 add_test(NAME vehicle_motor COMMAND vehicle_motor_test)
 
+# The USE-ITEM mount chain (Entity_ToggleVehicleMount @0x436950 + the nearest-seat scan
+# @0x435d50 + the deck best-seat @0x4351f0), the BMS Player mount triggers (subs 38-41),
+# the vehicle AI-driver/parked leg (@0x48bc12-0x48c034), and the player deploy group
+# stamp (@0x519fd0).
+add_executable(vehicle_mount_test world/vehicle_mount_test.cpp)
+target_link_libraries(vehicle_mount_test PRIVATE opennova_world)
+target_include_directories(vehicle_mount_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(vehicle_mount_test PRIVATE cxx_std_17)
+add_test(NAME vehicle_mount COMMAND vehicle_mount_test)
+
 # Root-motion track grill vs real JO clips (AnimMap_UpdateEntity @0x40b5f0): the .bad
 # events array is the per-frame root record; rec[3] = cumulative forward distance whose
 # 16.16 delta drives the infantry motor. Asset-gated: absent files skip (CI-safe).

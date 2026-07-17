@@ -892,6 +892,12 @@ public:
 	bool local_player_in_armory_zone() const;
 	bool local_player_in_vehicle_loadout_zone() const;
 
+	// The USE-ITEM mount toggle: weapon-busy gate + the witnessed toggle
+	// (deck best-seat / nearest-seat scan / seat-swap-or-detach). Returns true when a
+	// mount, swap or dismount applied. [orig: Input_ProcessFrame @0x49d6dc ->
+	// Entity_ToggleVehicleMount @0x436950]
+	bool local_player_toggle_mount();
+
 	// The armory ACCEPT apply for the local player: resolve the weapon name in the
 	// armory table and stamp equipped_adm_index (+ player_class 5..9 when given).
 	// The FP viewmodel + action-FSM rebuild is the host's move (GameWorld). Returns

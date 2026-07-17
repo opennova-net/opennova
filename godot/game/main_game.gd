@@ -206,10 +206,16 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		toggle_debug_overlay()
 		get_viewport().set_input_as_handled()
 		return
-	# The armory key: in-world only, gated on the type-6 armory-volume contact flag the
-	# collision resolver maintains [orig: useitem action 177, Flags & 0x400000 @0x4e0b4d].
+	# The USE-ITEM key: in-world only. Zone legs first — the armory volume opens
+	# weapon.mnu [orig: useitem action 177, Flags & 0x400000 @0x4e0b4d] — otherwise the
+	# key is the vehicle mount/dismount toggle on the same witnessed action [orig: the
+	# LABEL_121 latch @0x4e0b71 -> Input_ProcessFrame release edge @0x49d6dc ->
+	# Entity_ToggleVehicleMount @0x436950]. (The vehicle-loadout-volume vehicle.mnu leg
+	# @0x4e0bfe awaits that screen's port.)
 	if key.keycode == ARMORY_KEY and _state == State.WORLD:
 		if _try_open_armory():
+			get_viewport().set_input_as_handled()
+		elif _try_toggle_mount():
 			get_viewport().set_input_as_handled()
 		return
 	# The gameplay keys (F4 first/third person, C/Z stance) live on the shared
@@ -459,6 +465,18 @@ func _try_open_armory() -> bool:
 		return false
 	_armory_host.set_player_team(int(_chosen_avatar.get("team", 0)))
 	return _armory_host.try_open()
+
+
+# The USE-ITEM mount toggle: outside the armory volume the same key enters/exits
+# vehicles (deck best-seat, nearest-seat scan, seat-swap-or-detach — all sim-side).
+# [orig: Entity_ToggleVehicleMount @0x436950 via the useitem release edge @0x49d6dc]
+func _try_toggle_mount() -> bool:
+	if _current_runtime == null:
+		return false
+	var sim: NovaSimulation = _current_runtime.get_sim()
+	if sim == null:
+		return false
+	return sim.local_player_toggle_mount()
 
 
 # --- Resource dir picker (first launch) ---------------------------------------

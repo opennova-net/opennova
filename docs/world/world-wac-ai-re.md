@@ -67,6 +67,16 @@ controller(brain[2])+16 phase += brain[7]/tick, thresholds 372/744, workZ = grou
 | `InfantryRootMotion` (engine host) | `AnimMap_UpdateEntity` out-transform | 0x40b5f0 (+0x40b230, 0x40b140) | scales pinned by disasm + real-clip grill (tests/anim/root_motion_test.cpp: I_walkf 1.82 u/s, E_RUNF 5.28 u/s) | **matching** (playhead dt = open item 16) |
 | `AiSystem::apply_ground_clamp` | per-motor ground sampling | 0x457230 + motors | 5-tap port matches; the infantry motor resamples on the faithful every-8 cadence (cache `inf.ground_cache`); the vehicle path still clamps per tick | matching-core (infantry aligned; vehicle cadence with its slice) |
 | WAC VM (`libs/wac`) | `Script_Compile`/`WacScript_ExecuteBytecode` | 0x4f31f0/0x4f58b0 | oracle-extracted ISA + corpus | **matching** (165-cmd table, 0x7A7A7A7A) |
+| `player_toggle_vehicle_mount` | `Entity_ToggleVehicleMount` (+ `Entity_TryEnterNearestVehicle`) | 0x436950 / 0x4368c0 | §23.1 witness; ctest `vehicle_mount` | **matching** w/ D-AI-11 (weapon gate at the sim binding) |
+| `find_nearest_free_seat` | `Entity_FindNearestSeatOrArmory` (seat leg) | 0x435d50 | §23.1 — 4.0 u gate, score `horiz + d3/512`, enemy-occupant reject, LOS-last | **matching** w/ D-AI-11 a/b |
+| `EntityCommands::find_best_seat` | `Entity_FindBestSeatSlot` | 0x4351f0 | §23.1 weights re-verified (ctrl 0x2000 < gun 0x20000 < sitex 0x200000) | **matching** (child walk = D-AI-11 g) |
+| `entity_process_vehicle_attach` yaw pre-snap | `Entity_RequestVehicleAttach` | 0x4364a0 | §23.1 (authority direct-apply; UseGun yaw = veh.Yaw − stored offset) | matching-core (pre-snap unmodeled — the pose overwrites next tick) |
+| `EntityCommands::local_player_attached_to_ssn` | `Entity_IsLocalPlayerSeatedOnSsn` (renamed) | 0x4f10d0 | §23.2; ctest `vehicle_mount` | **matching** |
+| `EntityCommands::local_player_standing_on_ssn` | `Entity_IsLocalPlayerStandingOnSsn` (renamed) | 0x4f1260 | §23.2 | **matching** (persistence nuance D-AI-11 h) |
+| `EntityCommands::local_player_driving_ssn` | `Entity_IsLocalPlayerDrivingSsn` (renamed) | 0x4f1150 | §23.2 | **matching** |
+| `EntityCommands::local_player_on_gun_of_ssn` | `Entity_IsLocalPlayerOnGunOfSsn` (renamed) | 0x4f11e0 | §23.2 | **matching** |
+| `AiSystem::vehicle_ai_drive` + motor AI branch | `Entity_UpdateVehiclePhysics` parked/AI-driver legs | 0x48c002 / 0x48bc12 | §23.3 — state 22 stamp, 22→16 hand-back, turn budget, 0.75x damps, steer `Yaw+Δ+Δ/8`; ctest `vehicle_mount` | **matching** core (avoid/boarders-wait/handbrake/minAI = D-NET-161) |
+| `spawn_player_entity` group stamp | the deploy leg (`commandGroup = 1`) | 0x519fd0 | §23.3; ctest `vehicle_mount` | **matching** |
 
 ## 3. Infantry motor spec — `Entity_UpdateInfantryAI @ 0x4b9910` (port blueprint)
 
@@ -2939,3 +2949,215 @@ misnomer family, applied on maintainer OK. Truth comments at
 `@ 0x42d450` (func), `@ 0x4b4945`, `@ 0x4b4984`, `@ 0x4b4ab5`, `@ 0x4be969`, `@ 0x4be9d4`,
 `@ 0x4b7de0`, `@ 0x4b7ec3`, `@ 0x4b7c8d`, `@ 0x4bf8d4`, `@ 0x4b70b8`, `@ 0x4b7aef`,
 `@ 0x4b7ac8` — each carrying the reimpl pointer.
+
+## 23. Appendix: the vehicle pass — mount input chain, mount triggers, drive-authority legs, AI boarding (engine-research, 2026-07-16 session 9)
+
+Question: why do vehicle-gated training missions (00TRa "Training: Basics /
+Armory", 04TR "Training: Base Defense") not progress? Witnessed end to end:
+the USE-ITEM mount chain, the BMS Player mount triggers, the three drive
+classes inside the vehicle physics, the AI boarding machinery, and the player
+deploy group stamp. Ported same session: `libs/world/src/vehicle_attach.cpp`
+(the toggle + scan), the four trigger predicates (`world.cpp` +
+`event_runtime.cpp`), the vehicle motor's parked/AI-driver staging
+(`ai.cpp::vehicle_ai_drive` + `vehicle_motor.cpp`), `player_spawn.cpp`
+(group 1). Evidence: ctest `vehicle_mount` (7 blocks), in-game
+`godot/tests/vehicle_ride_probe.gd` on retail 00TRa.
+
+### 23.1 The USE-ITEM mount input chain
+
+One input action (id 0xB1 = 177 "useitem") serves armory, vehicle screen and
+mount toggle, in that witnessed order [orig: Input_HandleActionBinding_0
+@ 0x4e0420 case 0xB1]:
+
+1. seated (`parentSlot != 0`) -> fall through to the toggle latch;
+2. standing in a type-6 armory volume (`Flags & 0x400000`) -> weapon.mnu
+   (previously grilled);
+3. standing in a vehicle-loadout volume (`Flags & 0x800`) -> vehicle.mnu
+   VEHICLE, team-gated on the volume's groundEntity team [orig: @ 0x4e0b8x];
+4. otherwise -> the latch: `dword_24C18DC = 1` (+ `dword_24C18E4 = 0` when
+   fresh). `Input_ProcessFrame @ 0x49d520` consumes it on key RELEASE
+   (`!dword_24C18DC && dword_24C18E0`, suppressed by `dword_24C18E4`) ->
+   `Entity_ToggleVehicleMount(g_local_player_entity)` [orig: @ 0x49d6dc].
+
+`Entity_ToggleVehicleMount @ 0x436950`: gated on the equipped weapon action
+(`!EquippedSlot || currentAction < 2 || currentAction == 5 ||
+slot.nextAction == 11` — idle/emptyidle/dry-click/pending-overheat pass);
+unmounted -> `Entity_TryEnterNearestVehicle @ 0x4368c0`; mounted -> a fresh
+`Entity_FindNearestSeatOrArmory` hit re-enters (seat SWAP), else
+`Entity_SendDetachPacket @ 0x435510` (wire 0x27; the authority applies through
+the same server leg). A WAC-settable global `dword_C6EADC` (reset by
+`WacScript_FreeAll @ 0x4f637b`) blocks the local player's dismount when set.
+
+`Entity_TryEnterNearestVehicle @ 0x4368c0`: standing ON a vehicle
+(`Flags & 0x200`) -> `Entity_FindBestSeatSlot(player, groundEntity)`
+[orig: @ 0x4351f0]; else the proximity scan. Either result feeds
+`Entity_RequestVehicleAttach @ 0x4364A0` — which pre-snaps the requester yaw
+from the seat bone (UseGun seats: `vehicle->Yaw - (HIWORD(SpawnOrigin.Z) << 16)`;
+others: the bone euler yaw), then applies directly on the authority
+(`Entity_ProcessVehicleAttach`) or queues C2S 0x26.
+
+`Entity_FindNearestSeatOrArmory @ 0x435d50` (searchMode 0, the seat leg): walks
+the player's proximity list; per candidate — dead skip, vehicles with a live
+ENEMY occupant rejected [orig: Vehicle_HasEnemyOccupant @ 0x4359F0], emplaced
+guns (attrib 0x20, not 0x40) LOS-resolve through their carrier; per FREE seat
+bone (`sitex`->1, `ctrlx`->2, `drvrx`->5, `UseGun`->3 by name prefix; occupancy
+`mountHandles[slot] == 0xFFFF`): the posed bone world position vs the player
+eye (`Position + CameraOffset`, +0.1875 u bias) must sit within **4.0 u
+horizontal** (0x40000) and the 3D cap (0x3FFFFFC0 unmounted / 0x38E38E0 = 910.2 u
+while seat-swapping); LOS last
+[orig: Entity_CheckLineOfSightTerrainAndEntities @ 0x53b130]; score =
+`horiz + (dist3d >> 9)`, lowest wins. The armory leg (attrib 0x80000, bone
+prefix "armory", seatType 4) shares the math. Angle terms are computed and
+capped but feed nothing measurable (vestigial).
+
+`Entity_FindBestSeatSlot @ 0x4351f0` (deck/board pick): walks the vehicle +
+carried children (child qualifies when it IS the vehicle or its groundEntity
+is); per free-or-own seat, weight by type — **ctrl/drvr 0x2000 < UseGun/default
+0x20000 < sitex-on-vehicle 0x200000 < sitex-on-child 0x2000000; LOWEST wins**
+(the driver seat wins a deck board). AI boarding modes constrain it: aiComp
+mode 123 takes only `sitex`, mode 124 refuses `ctrlx` (see 22.4).
+
+Seat-position keys: actions 0xB6-0xBF -> `Entity_FindAvailableSeat(player,
+0..9)` [orig: @ 0x436790] — seat N of the CURRENT mount's slot list (weapon
+idle-gated; a seat occupied by an AI can be displaced by a player —
+`occupant.Flags & 0x100` check). Unported (follow-up; the toggle covers the
+missions).
+
+Port notes (`vehicle_attach.cpp`): `player_toggle_vehicle_mount` +
+`find_nearest_free_seat` + `attach_to_seat_index` over our seat model; the
+witnessed constants verbatim; deviations ledgered as D-AI-11. The sim binding
+is `NovaSimulation::local_player_toggle_mount` (the weapon gate reads the
+ported weapon FSM slot), the shell key is main_game.gd's USE-ITEM handler
+(armory leg first, faithful order).
+
+### 23.2 The BMS Player mount triggers (cat 7 subs 38-41)
+
+`EventTrigger_EvaluateCondition @ 0x453620` cat-7 resolves param1 by SSN
+(`EntityPool_FindByNetId`) and calls four predicates — all requiring a live
+local player (`Flags & 2` clear), all walking ONE carrier link:
+
+| sub | editor name | original (renamed this session) | true test |
+|---|---|---|---|
+| 38 | PLYRATTACHED | `Entity_IsLocalPlayerSeatedOnSsn @ 0x4f10d0` | seated: `parentEntity == E` or `parentEntity->groundEntity == E`, any seat |
+| 39 | PLYRONSSN | `Entity_IsLocalPlayerStandingOnSsn @ 0x4f1260` | STANDING: `groundEntity == E` or `groundEntity->groundEntity == E` |
+| 40 | PLYRDRIVING | `Entity_IsLocalPlayerDrivingSsn @ 0x4f1150` | sub-38 chain AND `parentSlot in {2, 5}` |
+| 41 | PLYRONGUN | `Entity_IsLocalPlayerOnGunOfSsn @ 0x4f11e0` | sub-38 chain AND `parentSlot == 3` |
+
+The shipped IDB names were PERMUTED misnomers (the "Driver" name sat on the
+on-gun test); renamed + commented in the IDB this session. Ported as four
+`EntityCommands::local_player_*` predicates consumed by
+`BmsEventSystem::evaluate_trigger`. 00TRa's ride gate is exactly these: event 2
+(PLYRATTACHED 11) kicks the ride off; events 46/47 mix GroupIsWithinArea with
+PLYRONSSN.
+
+### 23.3 The three drive classes in the vehicle physics
+
+`Entity_UpdateVehiclePhysics @ 0x48af00` (all `move_function cveh` vehicles via
+`Entity_DispatchPhysics_cveh @ 0x48efc0`, `physics != 0`): after the per-tick
+occupant sweep (stale ctrl/drvr slots cleared; `occupantEntity` = the validated
+ctrl/drvr occupant only — sitex NEVER claims it [orig: @ 0x48b8a1-0x48b944]),
+the `attrib & 0x40` (PlayerControl) input staging splits three ways
+[orig: @ 0x48b949]:
+
+1. **No controller (or dead/locked vehicle)** [orig: @ 0x48b978 ->
+   0x48c002-0x48c02d]: steer holds `Yaw`, command speed/ramp zero,
+   `AI_CheckVehicleStuckState`, `Flags &= ~0x80`, **SM state forced 22** — a
+   driverless PlayerControl vehicle CANNOT drive, whatever its waypoints say.
+2. **A PLAYER controller above water** [orig: @ 0x48b993]: the occupant leg
+   (ported 2026-07-04, net-re 5.13; SM state forced 22 too — the SM's mover
+   never advances for player-driven vehicles).
+3. **An AI controller** [orig: @ 0x48bc12-0x48c034]: state 22 hands back to 16
+   [@ 0x48bc16]; `cmd = min(brain[128] outSpeed, playerSpeed)`
+   [@ 0x48bc23-48]; the minAI crew clamp (crew count < def minai -> health
+   capped at criticalHp) [@ 0x48bc4e-94]; when the per-leg turn budget
+   `brain[32]` is spent and a waypoint is live, re-resolve
+   (`AIWaypoint_UpdateTarget(brain+13)`) and recompute
+   `budget = 32*|Yaw - bearing| / ((brain[35] >> 15) + 32)` [@ 0x48bc9a-cf];
+   `delta = clamp(bearing - Yaw, +-budget)`; sharp legs on slow steerers damp
+   speed x0.75 per ~30/60 deg residual (`turnRate2 << 6 < budget`, thresholds
+   357913920/715827840) [@ 0x48bcfb-0x48bd51]; **steer = Yaw + delta +
+   delta/8** [@ 0x48bd7f]; then the pool-1 collision-avoid damping (heading-
+   aware ellipse, pseudo-random 0.25-0.75 factor off DcbId+tick)
+   [@ 0x48bd8f-0x48bf26] and the wait-for-boarders stop (any pool-0 person
+   with aiComp mode 125 targeting this vehicle's DcbId and not yet mounted ->
+   hold) [@ 0x48bf6f-0x48bff9]. A handbrake latch (entity byte 973 = +0x3CD,
+   def handBrake) and an aim-lock stop byte follow [@ 0x48c03a/0x48c086].
+
+Port: legs 1 and 3 land as `AiSystem::vehicle_ai_drive` (the brain state
+stamps + the steer/speed math; the motor consumes a `VehicleDriveCmd`) +
+`tick_vehicle_motor`'s AI branch; the SM's kinematic `apply_locomotion`
+RETIRES for motor vehicles (`physics != 0`) — the SM stays the decision layer
+(waypoints, visited bits, states), the motor is the only integrator, matching
+the original split. Deferrals stay under D-NET-161 (updated in
+[novaworld-net-re.md](../net/novaworld-net-re.md)).
+
+Consequences pinned for the training missions: 00TRa's truck ride is
+**player-driven** (the player takes drvrx; the mission-authored PatrolSpeed
+actions only matter to leg 3), the tour dialogs are `Group 1 IsWithinArea X`
+triggers riding the PLAYER's group — the deploy leg stamps every (re)spawned
+player `commandGroup = 1` [orig: @ 0x519fd0, the same block that writes team
++0x162 and clears the movement gate]. Ported into `spawn_player_entity`.
+04TR's waves are infantry-led; its lone-vehicle groups need crews (leg 3) or
+stay parked exactly as retail parks them.
+
+### 23.4 The AI boarding chain (witnessed, port pending)
+
+aiComp (+0x68 component) fields: **+148 (dword 37) = the waypoint-list slot,
+OVERLOADED as the boarding mode when 123/124/125**; +152 (dword 38) = the
+target vehicle id (DcbId) in boarding modes (waypoint node index otherwise);
++144 (dword 36) = the resolved carrier pointer.
+
+- Setters: WAC `ssn2ssn` [orig: sub_4F7330 @ 0x4f7330, reached via the
+  command table @ 0x82dd4c — defined + witnessed this session: detach if
+  mounted, mode 125 + target id + carrier ptr, move order reset] and
+  `ssnrelease` [orig: sub_4F7420 @ 0x4f7420 — detach + mode clear];
+  `HeliLift_SpawnPickup @ 0x452668` (mode 125). No shipped-mission BMS action
+  sets 123/124 (register-form writers only).
+- The think consumes them [orig: Entity_UpdateInfantryAI]: mode present ->
+  resolve the target by DcbId across pools 0-3 [@ 0x4baeb5-0x4baf88], walk to
+  the nearest `E8`->`E7`->`E6`->`E5` entry bone [@ 0x4baf9b-0x4bb026]; on
+  arrival with `attrib & 0x60` -> `Entity_FindBestSeatSlot` +
+  `Entity_RequestVehicleAttach` [@ 0x4bbda6-0x4bbe07]; every 64 ticks a seated
+  boarder re-runs the pick and UPGRADES seats when a better one freed (ctrl
+  over sitex) [@ 0x4ba9d8-0x4baa4e].
+- `Entity_SetWaypointByTeam @ 0x43cdb4` (the RedirectGroupTo/SingleTo
+  implementation, both pools, matched by commandGroup): **auto-detaches a
+  mounted non-player** [orig: Entity_DetachFromVehicleIfServer @ 0x4359d0],
+  writes mode 1 + list + node (nearest trigger when -1
+  [orig: Entity_FindNearestTriggerByType @ 0x407ea0]), seeds the brain wp
+  slots + the turn budget.
+- Spawn-time crews: BMS attribute bit 1 ("Guarding") -> `Flags |= 0x40` at
+  spawn [orig: Entity_SpawnFromBMSRecord @ 0x40e9f0] (neither training mission
+  authors it); the MP deploy-into-vehicle leg latches `Flags |= 0x200` +
+  the carrier into +364/+384 when the spawn target is a vehicle
+  [orig: Server_PositionPlayerForSpawn @ 0x50d44d], consumed by the body
+  update's 0x200-toggle [orig: Entity_UpdateInfantryPlayerBody @ 0x4b426a].
+- Our runtime already carries the script-side equivalents
+  (`EntityCommands::mount_boarding_command` 123/124/125, `mount`, `dismount`);
+  the walk-to-entry-bone think and the seat-upgrade sweep are the unported
+  halves (D-AI-11).
+
+### 23.5 The mounted seat carry (the ride)
+
+The body update's mounted leg [orig: Entity_UpdateInfantryPlayerBody, the
+parentEntity block]: every tick, flags scrubbed (`&= 0xFF8F57DF`, fire-bone
+bytes cleared), then per seat class — `parentSlot == 3` (UseGun) ->
+`Entity_AttachToBoneAndUpdateTransform` + anim state 67 (+ def config variants
+68-75); other seats -> `Entity_GetBoneTransformAndOrientation @ 0x4b0c50` on the
+seat bone -> **Position = bone world pos, bodyHeading/headLook = bone yaw, Roll,
+bodyPitch** (the entity Yaw — the LOOK — stays player-owned), and the seated
+anim = `atol(bone-name digits) + 76` (a `sitex24` names anim 100; +-0x4444440
+roll on the carrier flips 109/110). Our `pose_if_mounted` +
+`pose_mounted_occupant` carry this; the local player's yaw preserves the look
+(the drive motor's mouse-steer source) and mirrors the live move-order bits
+into the wire input fields the motor consumes (tick_infantry's mirror is
+skipped while mounted).
+
+### 23.6 Divergences
+
+| ID | Ours | Original | Why / consequence |
+|---|---|---|---|
+| D-AI-11 | Mount-chain stand-ins: (a) the scan candidate set is a registry sweep (no per-entity proximity lists) and the eye is the +0.9 u chest constant (no CameraOffset), +0.1875 u bias kept; (b) the emplaced-gun carrier LOS/reject legs (attrib 0x20 -> groundEntity) and the armory-point leg are unscanned; (c) the weapon-busy gate lives in the sim binding (World has no weapon slot); (d) the WAC no-dismount global (`dword_C6EADC`) is unmodeled; (e) seat-position keys 0xB6-0xBF (Entity_FindAvailableSeat @ 0x436790, incl. the displace-AI rule) unported; (f) the AI boarding think (walk to E5-E8 entry bones + the 64-tick seat-upgrade sweep) unported — script mounts are immediate; (g) child-vehicle seat traversal (FindBestSeatSlot's carried-gun walk + the 0x2000000 child-sitex weight) unmodeled; (h) sub-39's groundEntity persistence rides our collision's platform contact (retail keeps the stale boarding-time groundEntity while seated) | 22.1/22.4/22.5 above | the toggle covers 00TRa/04TR's gates (probe PASS); each residual cited at its port site |
+
+Correspondence adds: see the rows appended to the section-2 map this session
+(the toggle chain, the four predicates, `vehicle_ai_drive`, the deploy stamp).

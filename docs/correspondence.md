@@ -557,6 +557,23 @@ Vehicle-board AI command (`waypoint_id` 123–127 = Goto SSN/Group/Player; world
 | `Entity_FindBestSeatSlot` | `0x4351f0` | seat search by bone-name class (sitex=1/ctrlx=2/UseGun=3/drvrx=5) with priority weights | decompile; world-wac-ai-re §9.1 (paired to `EntityCommands::find_best_seat`) | confirm-only |
 | `Entity_RequestVehicleAttach` | `0x4364a0` | seats the occupant on the chosen bone slot | decompile; world-wac-ai-re §9.1 (paired to `EntityCommands::mount`) | confirm-only |
 
+The USE-ITEM mount chain + mount triggers + drive legs (world-wac-ai-re §23; witnessed + ported 2026-07-16 session 9):
+
+| original | addr | role | evidence | status |
+|---|---|---|---|---|
+| `Entity_ToggleVehicleMount` | `0x436950` | the USE-ITEM mount/swap/dismount toggle (weapon-idle gated; `dword_C6EADC` WAC no-dismount) | decompile; §23.1 (paired to `world::player_toggle_vehicle_mount`) | ported (D-AI-11) |
+| `Entity_TryEnterNearestVehicle` | `0x4368c0` | deck board (`Flags & 0x200` → best seat on groundEntity) else the proximity scan | decompile; §23.1 | ported |
+| `Entity_FindNearestSeatOrArmory` | `0x435d50` | the 4.0 u seat/armory scan — free-seat bones, enemy-occupant reject, LOS-last, score `horiz + d3/512` | decompile; §23.1 (paired to `world::find_nearest_free_seat`) | ported (seat leg; armory leg D-AI-11) |
+| `Entity_FindAvailableSeat` | `0x436790` | seat-position keys 0xB6-0xBF: seat N of the current mount, AI-displace rule | decompile; §23.1 | witnessed, unported (D-AI-11 e) |
+| `Entity_IsLocalPlayerSeatedOnSsn` (renamed) | `0x4f10d0` | BMS Player sub 38 PLYRATTACHED — seated on the SSN chain, any seat | decompile; §23.2 (paired to `EntityCommands::local_player_attached_to_ssn`) | ported |
+| `Entity_IsLocalPlayerStandingOnSsn` (renamed) | `0x4f1260` | sub 39 PLYRONSSN — standing on the SSN chain | decompile; §23.2 | ported |
+| `Entity_IsLocalPlayerDrivingSsn` (renamed) | `0x4f1150` | sub 40 PLYRDRIVING — seated + `parentSlot ∈ {2,5}` | decompile; §23.2 | ported |
+| `Entity_IsLocalPlayerOnGunOfSsn` (renamed) | `0x4f11e0` | sub 41 PLYRONGUN — seated + `parentSlot == 3` | decompile; §23.2 | ported |
+| `Entity_UpdateVehiclePhysics` (parked + AI-driver legs) | `0x48c002` / `0x48bc12` | no-controller park (SM 22) / AI-driver autopilot (22→16, turn budget, ×0.75 damps, steer `Yaw+Δ+Δ/8`) | decompile; §23.3 (paired to `AiSystem::vehicle_ai_drive` + the motor AI branch) | ported (avoid/boarders/handbrake/minAI = D-NET-161) |
+| `sub_4F7330` / `sub_4F7420` | `0x4f7330` / `0x4f7420` | WAC `ssn2ssn` / `ssnrelease` — the boarding-mode 125 setter / clearer (command table `@ 0x82dd4c`; functions DEFINED this session) | disasm; §23.4 | confirm-only (script side ported as `mount_boarding_command`) |
+| `Entity_SetWaypointByTeam` | `0x43cdb4` | RedirectGroupTo/SingleTo: commandGroup match both pools, AUTO-DETACH of mounted non-players, mode/list/node + turn-budget seed | decompile; §23.4 | witnessed (redirect port pre-dates; detach-on-redirect noted) |
+| the deploy group stamp | `0x519fd0` | every (re)spawned player gets `commandGroup = 1` (00TRa's "group 1" tour dialogs track the player) | disasm; §23.3 (paired to `spawn_player_entity`) | ported |
+
 On-foot ground settle (D-INF-6, world-wac-ai-re; re-witnessed 2026-06-20):
 
 | original | addr | role | evidence | status |
