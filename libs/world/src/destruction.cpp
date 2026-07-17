@@ -566,10 +566,15 @@ void entity_update_death_transforms(World &world, Entity &target, bool silent) {
     // clears 0x20000 [orig: Flags & ~0x20006 | 6 @ 0x493f4b].
     switch (unit_type) {
     case 5: case 6: case 7: case 8:
-        if (traits == nullptr || !traits->has_husk) return; // [orig: @ 0x49442c]
-        mask = spawn_death_pieces(world, target);
-        world.destruction.sounds.push_back(
-                DestructionSoundEvent{"EXPLO_SHIP_TINY", target.position});
+        // The building callback no-ops without a husk model, but the dispatch
+        // still ORs the death flags after it [orig: the huskFinal||husk gate
+        // @ 0x49442c wraps ONLY the callback body; Flags |= table flagBits
+        // @ 0x493f63 runs regardless].
+        if (traits != nullptr && traits->has_husk) {
+            mask = spawn_death_pieces(world, target);
+            world.destruction.sounds.push_back(
+                    DestructionSoundEvent{"EXPLO_SHIP_TINY", target.position});
+        }
         break;
     case 11:
         mask = spawn_death_pieces(world, target);
