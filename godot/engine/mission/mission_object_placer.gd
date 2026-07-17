@@ -761,7 +761,7 @@ func _graphic_needs_live_panm(graphic: String) -> bool:
 		var lod_count := int(data.get_summary().get("lod_count", 0))
 		for lod in range(lod_count):
 			for i in range(int(data.get_part_anim_count(lod))):
-				if _part_anim_entry_is_live(data.get_part_anim_info(lod, i)):
+				if part_anim_entry_is_live(data.get_part_anim_info(lod, i)):
 					result = true
 					break
 			if result:
@@ -772,8 +772,10 @@ func _graphic_needs_live_panm(graphic: String) -> bool:
 
 # One PANM entry can move/pose its part iff its family flags declare animation AND at
 # least one track carries a non-idle control function (the sampler treats a zero high
-# nibble as inactive).
-static func _part_anim_entry_is_live(info: Dictionary) -> bool:
+# nibble as inactive). Public static: the pure, testable form of the gate — it takes a
+# get_part_anim_info() dictionary, holds no placer state, and is the seam the sampler
+# regression tests exercise directly.
+static func part_anim_entry_is_live(info: Dictionary) -> bool:
 	var animated := int(info.get("rotation_type", 0)) != 0 \
 			or int(info.get("scale_type", 0)) != 0 \
 			or int(info.get("translate_type", 0)) != 0 \

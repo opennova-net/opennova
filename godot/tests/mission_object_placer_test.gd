@@ -354,7 +354,7 @@ class PanmDataPlacer:
 	func _load_object_data(graphic: String) -> NovaObjectData:
 		if graphic == panm_graphic:
 			return panm_data
-		return super._load_object_data(graphic)
+		return super(graphic)
 
 
 const ARMRY_3DI := "res://../fixtures/3dp/armry01/Armry01.3di"
@@ -473,23 +473,23 @@ func test_place_single_routes_live_panm_graphic_to_a_live_model() -> void:
 func test_part_anim_entry_is_live_mirrors_the_sampler_gates() -> void:
 	# Entry-level: family flags must declare animation; track-level: a control with a
 	# zero high nibble is idle. Mirrors PANM_BuildNodeMatrices + PANM_SampleTrack.
-	assert_false(Placer._part_anim_entry_is_live({}), "no flags, no tracks -> inert")
-	assert_false(Placer._part_anim_entry_is_live({
+	assert_false(Placer.part_anim_entry_is_live({}), "no flags, no tracks -> inert")
+	assert_false(Placer.part_anim_entry_is_live({
 		"rotation_type": 2,
 		"rotation_z": { "control": 0x00 },
 	}), "declared track with an idle control function stays inert")
-	assert_false(Placer._part_anim_entry_is_live({
+	assert_false(Placer.part_anim_entry_is_live({
 		"rotation_x": { "control": 0x32 },
 	}), "an active control without its family flag is never sampled")
-	assert_true(Placer._part_anim_entry_is_live({
+	assert_true(Placer.part_anim_entry_is_live({
 		"rotation_type": 2,
 		"rotation_z": { "control": 0x32 },
 	}), "set-wave-sine rotation (the Pmpjk01 case) is live")
-	assert_true(Placer._part_anim_entry_is_live({
+	assert_true(Placer.part_anim_entry_is_live({
 		"translate_type": 3,
 		"translation": { "control": 0x71 },
 	}), "a control-register-bound translation is live")
-	assert_true(Placer._part_anim_entry_is_live({
+	assert_true(Placer.part_anim_entry_is_live({
 		"scale_type": 1,
 		"scale_x": { "control": 0x18 },
 	}), "a SET pose is live (rest-pose batches would render it unposed)")
