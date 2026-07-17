@@ -913,6 +913,16 @@ target_include_directories(ai_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(ai_test PRIVATE cxx_std_17)
 add_test(NAME ai COMMAND ai_test)
 
+# Item destruction: the explosion queue + AoE gates, the bullet armor gates, the
+# destructible death chain (husk flags + events + the kz chain blast), the
+# death-piece pool, and the dead-item settle (world/destruction.h;
+# docs/world/world-wac-ai-re.md §24).
+add_executable(destruction_test world/destruction_test.cpp)
+target_link_libraries(destruction_test PRIVATE opennova_world)
+target_include_directories(destruction_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(destruction_test PRIVATE cxx_std_17)
+add_test(NAME destruction COMMAND destruction_test)
+
 # Terrain-grounded movement: the shared height_field samplers, the 5-tap
 # calc_average_ground_height port (Entity_CalcAverageGroundHeight @0x457230) by hand
 # math, and the AiSystem ground clamp over a synthetic ramp atlas.

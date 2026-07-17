@@ -665,6 +665,19 @@ void World::run_logic_tick(bool is_authority, bool pre_mission) {
     // Weapon_UpdateAllProjectiles @0x4ec020; damage is authority-gated end-to-end,
     // §5.60]. Terrain is the host-wired sampler (AI grounding shares it).
     if (is_authority && !pre_mission) round_sim.tick(*this, terrain);
+    if (is_authority && !pre_mission) {
+        // The explosion-queue drain runs once per frame after the projectile
+        // update [orig: Projectile_ProcessExplosionQueue @0x4ead80]; entries the
+        // damage callbacks push (the kz death chain) land next tick, exactly like
+        // the original's post-reset writes. Dead non-AI items then settle
+        // [orig: the Entity_UpdateStaticDeathPhysics / _UpdateFallingDeathPhysics
+        // update callbacks] and the death-piece pool advances
+        // [orig: DeathPiece_TickAll @0x57b900].
+        explosions.process(*this, ai != nullptr ? ai->collision : nullptr, terrain,
+                           water_height, destruction);
+        destruction_tick_dead_items(*this, terrain, water_height, destruction);
+        death_pieces.tick(*this, terrain, water_height, destruction);
+    }
     if (is_authority) {
         if (pre_mission) {
             // The one-shot initial group recount, ordered right after the pre

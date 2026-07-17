@@ -648,6 +648,20 @@ public:
 	// zeroed @0x4ec900).]
 	PackedFloat32Array get_tracer_rounds() const;
 
+	// The destruction presentation drain (world/destruction.h; world-wac-ai-re
+	// §24): {effects[], sounds[], husk_swaps[], debris_bursts[], glass_breaks[],
+	// explosions_processed, items_destroyed}, godot-space positions, cleared on
+	// read. Once per present, beside the fire drain.
+	Dictionary drain_destruction_events();
+	// The live death-piece pool as dictionaries {item_id, section, type_index,
+	// scale, pos, heading, pitch, settled} — each piece renders as its single
+	// husk-model section. [orig: DeathPiece_TickAll @0x57b900; §24]
+	Array get_death_pieces() const;
+	// The environment water plane in mission units — the death paths' submerged
+	// gates [orig: Env_WaterHeightFixed @0x26c6454]. Stamp beside the effect
+	// world's water height at mission load.
+	void set_water_height(double p_water_z_units);
+
 	// Mission scripting state on the shared world (the dword_C6B240 var store + event gates).
 	void set_mission_variable(int index, int value);
 	int get_mission_variable(int index) const;

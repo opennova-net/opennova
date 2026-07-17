@@ -60,6 +60,28 @@ struct AmmoImpactEffectRow {
     std::string sound;
 };
 
+// Kill-zone classes (record word +44) and the item-class damage exclusions the
+// explosion sweep gates its pool walks on — libs/world stays def-parser-free,
+// so the witnessed values live here beside their consumer. [orig: the kztype
+// 8-name table @0x8133E0; the flag OR-bit table @0x813500 — NoOItems 0x80000
+// (no organic/pool-0 damage), NoMItems 0x100000 (movable/pool-1), NoDItems
+// 0x200000 (dumb-static/pool-2); gates @0x4eaece/@0x4eb378/@0x4eb5b8]
+namespace ammo_kz {
+enum : int32_t {
+    kNull = 0,
+    kKnife = 1,
+    kStandard = 2,
+    kMedic = 3,
+    kRadiusBlast = 4,
+    kC4 = 5,
+    kBullets = 6,
+    kSlash = 7,
+};
+}
+inline constexpr uint32_t kAmmoFlagNoOItems = 0x80000u;
+inline constexpr uint32_t kAmmoFlagNoMItems = 0x100000u;
+inline constexpr uint32_t kAmmoFlagNoDItems = 0x200000u;
+
 struct AmmoTableEntry {
     std::string name;               // record +144 [orig: AmmoDef_AllocateSlot copy]
     uint32_t flags = 0;             // +0 `flag` OR-bits [orig: name/bit table @0x813500]
@@ -76,6 +98,11 @@ struct AmmoTableEntry {
     int32_t min_damage = 0;         // +188 damage floor [orig: @0x4ecb3a]
     int32_t max_damage = 0;         // +192 damage cap when > 0 [orig: @0x4ecb42]
     int32_t penetration_impact = 0; // +196 — must reach the target itemDef+400 armor threshold
+    int32_t penetration_kz = 0;     // +200 — must reach the target's blast armor (def+0x192)
+    float kz_minradius = 0.0f;      // +52 (fp16 -> units) — linear-falloff start
+    float kz_maxradius = 0.0f;      // +56 (fp16 -> units) — the blast radius when the
+                                    // queue entry carries no float override
+    int32_t kz_pieslice_bam = 0;    // +60 (deg -> BAM) — nonzero = cone blast
     int32_t tracer_rate = 0;        // byte +226 (`tracerRate`)
     std::string notarmmed_ammo;     // +241 — the not-armed child ammo name
     // The per-surface impact rows by canonical tag id. Bake rules per the witnessed

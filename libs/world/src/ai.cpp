@@ -612,17 +612,23 @@ int32_t death_speed(const AiEntity &e) {
 // [orig: AI_TransitionToDeath_GroundVehicle @0x467b20] state-21 (vehicle DYING) enter:
 // death transforms + net notify when not yet husked (Flags&4), the def+1352 mounted-
 // children kill loop, the alert block, moveStep 16, and — already slow (< 1057) — the
-// immediate destroy event. The death-transform leg (savedLivePose snapshot + the
-// unitType death callback's husk swap/death pieces + death sounds
-// [orig: Entity_UpdateDeathTransforms @0x494660]) is presentation the host does not
-// render for vehicles yet — the pose snapshot lands, the rest is a visible stub.
+// immediate destroy event. The death-transform leg runs the witnessed order
+// [orig: Entity_UpdateDeathTransforms @0x494660]: pose snapshot, the unitType death
+// dispatch (husk swap Flags|=6 + death pieces), the death sounds/effects + kz blasts —
+// entity_update_death_transforms (world/destruction.cpp). The S2C 0x26 emit stays a
+// net-track stub (§24).
 void h_enter_vehicle_dying(AiThinkCtx &ctx) {
     AiEntity &e = *ctx.self;
     AiBrain &b = e.brain;
     e.net_saved_live_pose[0] = e.pos[0]; // [orig: savedLivePose = Position @0x494684]
     e.net_saved_live_pose[1] = e.pos[1];
     e.net_saved_live_pose[2] = e.pos[2];
-    ++ctx.sys->unported_calls; // the husk/death-pieces callback + death sounds + S2C 0x26
+    if (ctx.world != nullptr) {
+        if (Entity *ent = ctx.world->registry.get(e.handle)) {
+            if ((ent->engine_flags & kEntityFlagHusk) == 0) // [orig: the Flags&4 gate @0x467b4e]
+                entity_update_death_transforms(*ctx.world, *ent, /*silent=*/false);
+        }
+    }
     ++ctx.sys->unported_calls; // the def+1352 kill-mounted-children loop (def byte unparsed)
     death_alert_block(ctx, e);
     b.f[AiBrain::kStep] = 16;  // [orig: ai_data[7] = 16 @0x467c02]
@@ -670,12 +676,15 @@ void h_enter_vehicle_dead(AiThinkCtx &ctx) {
     AiEntity &e = *ctx.self;
     AiBrain &b = e.brain;
     death_alert_block(ctx, e);
-    ++ctx.sys->unported_calls; // the husk/death-pieces + death-sound leg (as in enter 21)
     if (ctx.world != nullptr) {
         if (Entity *ent = ctx.world->registry.get(e.handle)) {
+            if ((ent->engine_flags & kEntityFlagHusk) == 0) // [orig: the Flags&4 gate]
+                entity_update_death_transforms(*ctx.world, *ent, /*silent=*/false);
             ent->corpse_timer = 0; // [orig: entity+328 = 0 @0x467e22 — wrecks never expire]
             ent->team = 0;         // [orig: entity+354 = 0 @0x467e2c — a wreck goes teamless
                                    //  and drops out of ordinary target scans]
+            if (ent->death_tick == 0) // [orig: +0x1AC first write wins @0x467e4a]
+                ent->death_tick = ctx.world->logic_tick;
         }
         if (b.f[AiBrain::kTargetSlot] != 0)
             ctx.sys->ai_set_target(*ctx.world, e, EntityHandle{}); // [orig: @0x467e86]

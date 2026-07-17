@@ -3203,3 +3203,225 @@ skipped while mounted).
 
 Correspondence adds: see the rows appended to the section-2 map this session
 (the toggle chain, the four predicates, `vehicle_ai_drive`, the deploy stamp).
+
+## 24. Appendix: item destruction — the explosion queue, the destructible death chain, husks, death pieces (engine-research, 2026-07-17)
+
+Question: how does the original destroy ITEMS — damage application (bullet +
+blast), the destroyed/husk model swap, and the explosion/pieces/sounds at
+death. Witnessed on retail `Jointops.exe` (`Jointops.exe.kong.i64`, imagebase
+0x400000). Port: `libs/world/destruction.{h,cpp}` + the round_sim item leg +
+the collision husk swap + `godot/engine/world/destruction_present_pass.gd`;
+pinned by the `destruction` ctest and the def-parse additions in
+`tests/def/def_parse_items_test.cpp` (ctest `def_parse_items`).
+
+### 24.1 The explosion queue
+
+`WeaponEffect_QueueExplosion @ 0x4e8330` pushes 52-B entries into the 64-slot
+authority queue `g_explosion_queue @ 0xB7C688` (count `@ 0xB7C680`; renamed
+this session from the `positionRef` kong label): `{+0 pos xyz, +12 dir BAM,
++24 type = the AMMO kztype word (+44), +28 ammoDef ptr, +32 owner entity, +40
+hit word, +44 radius-override float}`. A zero override means "the ammo's own
+`kz_maxradius` (+56)". `Projectile_ProcessExplosionQueue @ 0x4ead80` drains it
+once per frame and resets the count; the type dispatch `@ 0x4eadc6` routes
+2/5/6/7 (Standard/C4/Bullets/Slash) to `Entity_ApplyWeaponDamage @ 0x4e6820`,
+3 (Medic) to the heal handler, 1 to the vehicle-ram applicator, 4 (RadiusBlast)
+to weapon damage with the direct-hit legs (no falloff `@ 0x4e695a`, no LOS
+`@ 0x4eb0e0`).
+
+The three pool sweeps ARE the O/M/D item classes: the ammo `flag` bits
+NoOItems 0x80000 / NoMItems 0x100000 / NoDItems 0x200000 skip pool 0 / 1 / 2
+respectively (`@ 0x4eaece / @ 0x4eb378 / @ 0x4eb5b8`). Per pool: organics get
+a 2x-radius reaction band (flinch `Entity_OnDamageReceived @ 0x4eb05c`,
+knockback `Entity_ApplyCollisionForce @ 0x4eb1d2`, the victim-attached hit
+emitter into entity+0x1CC `@ 0x4eb292`, the hit sound), an LOS ray gates the
+damage (`Entity_CheckLineOfSightTerrainAndEntities @ 0x4eb162`; pool 1 lifts
+both endpoints +0x4000 `@ 0x4eb4ca`), the cone gate compares atan2(dy,dx) BAM
+against the entry dir plus/minus the ammo `kz_pieslice` (+60) `@ 0x4eaffa`, and
+pool-2 statics take an AABB-face distance refinement over the model bounds
+(`@ 0x4eb700`) plus the GLASS1..GLASS4 user-point window-shatter spawns
+(`@ 0x4eb814-0x4eb85d`). Kill credit resolves the owner up its own
+lastAttacker (+0x178) chain while dead and not player-flagged (Flags & 0x100)
+(`@ 0x4eae95`), and the sweep stamps an EMPTY victim +0x178 with the resolved
+attacker (`@ 0x4eb319/@ 0x4eb593`). Destructible-class victims (deathCallback
+== `Entity_HandleDestructibleDeathEvent @ 0x440210`) get the blast center
+written into +0x80 — the debris launch origin (`@ 0x4eb553-0x4eb569`).
+
+`Entity_ApplyWeaponDamage @ 0x4e6820` order: dead flag; in-session building
+gate (`g_destroy_buildings @ 0x24d2164`); same-team immunity when the target
+def authors attrib 0x8000 (`@ 0x4e688d`); indestructible Flags 0x4000000 /
+blast-armor word 0xFFFF (`@ 0x4e68aa`); base = ammo `kz_damage` (+46,
+authority else 0); linear falloff from `kz_minradius` (+52) to the blast
+radius (`@ 0x4e695a-0x4e699c`); blast armor gate ammo `penetration_kz` (+200)
+below def+0x192; dying gate (+0x124); occupant scale for vehicles
+(`Entity_ApplyOccupantDamageScale @ 0x4e5a50`); NoDie (attrib 0x40000000)
+clamps to health-1. Persons then run the death-anim pick at damage time (bone
+hardcoded 1 `@ 0x4e6ac7`, quadrant from the blast direction, cause 2/3 by a
+~25% PRNG roll `@ 0x4e6a84`, 4 when the source kz is Slash) + the tag-23
+impact effect; non-persons run the breakable-section sweep (collision sections
+with byte flag & 2 inside the blast OR into the entity sectionMask
+`@ 0x4e6e48`) and the health drain + deathCallback(2) + kill scoring.
+
+Queue producers witnessed: the round-class kz dispatch (grenades/rockets),
+`Entity_SpawnExplosionEffects @ 0x4399c0` (kz_M406HE + SP shrapnel),
+`Entity_QueueKzBlastAtUserPoints @ 0x4eabf0` (renamed from the
+`Projectile_SpawnEffectAtBoneOrDefault` misnomer — it queues DAMAGE at each
+named user point r=5.0, else at the entity with r = def `kz` (+0x198) else
+boundRadius), the crane/water-tower special (`@ 0x43fc70`, "scrane"),
+`DeathPiece_PhysicsUpdate @ 0x48f500`, `Entity_InitDeathState @ 0x48f7c0`,
+`Entity_UpdateFallingDeathPhysics @ 0x493f70` (the landing blast), and the
+water physics `@ 0x4a92e0`. The kz ammo entries are interned by
+`WeaponDef_ResolveAllReferences @ 0x540270`: `g_ammo_kz_OrganicBlast
+@ 0x24E7DBC`, `g_ammo_kz_MItemBlast @ 0x24E7DB8`, `g_ammo_kz_DebrisBlast
+@ 0x24E7DB4`, `g_ammo_kz_M406HE @ 0x24E7DB0` (all renamed this session; the
+store-lags-the-push interning order was verified instruction-level).
+
+### 24.2 Bullet damage to items
+
+`Projectile_ProcessDamageOnTarget @ 0x4e7fb0` (the net-re §5.60 chain) zeroes
+on: the indestructible flag (`@ 0x4e7ff6`), the def impact-armor word +0x190
+== 0xFFFF (`@ 0x4e8019`) or greater than the ammo `penetration_impact` (+196)
+(`@ 0x4e802a`), the dying marker +0x124 (`@ 0x4e8032`); clamps to remaining
+health (`@ 0x4e8064`) and NoDie pins at health-1 (`@ 0x4e8074`). The entity
+damage callback (+0x1C8) fires with phase 1 on every processed bullet hit and
+phase 4 on the player-flag (0x100) kill leg. items.def `armor A [B]` writes
++0x190 = A then B, +0x192 = A (`@ 0x4a00e7-0x4a0147`) — one value fills both
+words.
+
+### 24.3 The destructible death chain
+
+`Entity_HandleDestructibleDeathEvent @ 0x440210` (the destructible-class
+deathCallback): phase 0 = the ambient time-of-day shot leg
+(`Entity_SpawnRegionalEffect @ 0x408290` — dawnShot/dayShot/duskShot/nightShot
++ the interval reschedule into the entity timer); on the authority, already
+husked resends S2C 0x26, else health <= 0 sends 0x26
+(`Server_SendEntityStatePacket @ 0x509d70`) and runs
+`Entity_ProcessDestructibleDeath @ 0x43fbc0`; a non-authority client destroys
+on phase 4. The destruction: per-collision-section
+`Entity_SpawnSectionDebris @ 0x43f580`, the scar clear
+(`Scar_ClearEntriesByEntity @ 0x5ccec0`, ex `sub_5CCEC0`), Flags |= 6 (dead
+2 + husk 4), the death tick +0x1AC (first write wins), the 992-tick re-notify
+timer, and a shrunk-bbox invalidation call.
+
+`Entity_SpawnSectionDebris @ 0x43f580`: samples the model's collision faces at
+stride `(scale<<8)/150`, transforms each sampled triangle centroid by the
+section bone matrix, launches AWAY from the +0x80 blast center (else radially
+at pitch ~63.3 deg), and spawns `g_fx_TreeFoliageExp` for material-17
+triangles else `g_fx_TreeWoodExp` (the built-in effect-name pair table
+@ 0x849150).
+
+### 24.4 The unitType death dispatch + death pieces
+
+`Entity_DispatchDeathCallback @ 0x493ef0` (from `Entity_UpdateDeathTransforms
+@ 0x494660`: child cleanup, savedLivePose+euler snapshot, dispatch, then
+`Entity_InitDeathSounds @ 0x4939b0`) scar-clears, matches def `unitType`
+(+0x196, the items.def `unit_type` token) against the table `@ 0x815410`
+(stride 16: {type, flagBits=6, arg, callback}), calls `callback(entity, arg,
+phase)` and ORs Flags 6; no row = `Entity_SpawnDeathPieces @ 0x493400` +
+`Flags = Flags & ~0x20006 | 6`. Rows: 1/2/10/12 (vehicle families) = pieces
+with post-death update := `Entity_UpdateFallingDeathPhysics @ 0x493f70`; 3
+(person) = pieces + `DeathPiece_PhysicsUpdate @ 0x48f500`; 5/6/7/8 (building
+families) = `Entity_ProcessBuildingDeath @ 0x494420` (ex `sub_494420`:
+requires a husk model, pieces + the `g_snd_EXPLO_SHIP_TINY` collapse sound +
+update := `Entity_UpdateStaticDeathPhysics @ 0x494230`); 11 (bridge) =
+`Entity_SpawnDeathEffectsAtBones @ 0x4944c0` (pieces + KZ + an
+`Effect_ShockWaterBrdg` at every "DEAD" user point at water height).
+
+`Entity_SpawnDeathPieces @ 0x493400`: gate = husk model present (huskFinal
++0x38 else husk +0x34), not already husked, not fully underwater. The
+explosion glow light (`LightPool_SpawnGlowEffect @ 0x49351a`, 2x model radius,
+non-decorations), then per husk section 1..N (section 0 — the hull — never
+leaves): the def `huskSubPartTypes[i]` byte (+0x101, clamped at 16) indexes
+the 80-B debris-type table `g_death_piece_types @ 0x8404f0` (13 rows: HULL,
+WHEEL, CHUNK_S/M/L, ROCK_S/M/L, CHUNKNP_S/M/L, CACTUS_, CHUNKSF_M — the
+`DeathPieceType` mirror in libs/world carries the full decoded constants and
+resolved effect/sound names), rolls the row probability, allocates from the
+256x180-B ring `g_death_piece_pool @ 0x26BAC58`
+(`DeathPiece_AllocSlot @ 0x57b4f0`, ex `SoundEmitter_AllocSlot`), renders ONLY
+its own section (mask piece[31] excludes every other), launches from the
+wreck motion (x2.0) + random spread scaled by the row velocity (z x1.25),
+spins random-in-range, budgets `rand % lifetime + 1` bounces (floor
+lifetime/8), attaches the row trail effect + looped sound, and stamps the
+spawned-section mask into entity+0x138. The vertical kick: def type 2 =
+slideDecay -= 16182 (helicopters drop), else += (rand>>4) + 4096.
+`DeathPiece_TickAll @ 0x57b900` (ex `sub_57B900`) invokes each piece's
+callback `Entity_ProcessDeathPiecePhysics @ 0x492dd0`: gravity, ground bounce
+(spin halves, velocity x0.95, vertical negates through the row bounce factor,
+dust effect + speed-gated sound), water splash + sink, and on exhaustion the
+final effect/sound then persist-as-ground-debris (row flags bit 0: wheels and
+large chunks stay) or free.
+
+### 24.5 Death sounds + the wreck effect banks
+
+`Entity_InitDeathSounds @ 0x4939b0` (phase bit 0 = the silent variant): plays
+the def `soundDeath` (+0x6DB name resolved to +0x860; items.def token
+`sounddeath`), releases the +0x1CC burn emitter, then fills three
+bone-attached 4-slot banks: fully submerged = the def +0x446 water-death pair,
+else the `particledeath` pair (+0x412 handle / +0x414 "Dead" bone mask);
+always the fire family (+0x47A, the "Fire" bones) and the third family
+(+0x4AE, "Other"); and queues a `g_ammo_kz_OrganicBlast` blast (r=5.0) at
+every husk "KZ" user point via `Entity_QueueKzBlastAtUserPoints @ 0x4eabf0` —
+THE death explosion. `Entity_UpdateDeadWreckEffects @ 0x493140` (renamed from
+the `Entity_UpdateMuzzleFlashAndEffects` misnomer) follows the husk bones per
+tick, rolls the fire crackle (PRNG < 16/65536 = `g_fx_BoatExpSec` +
+`g_snd_EXPLO_SHIP_SM_b`), and steams a bone out when it dips underwater
+(`g_fx_Boat01Steam`). Ground contact (`Entity_TransitionToGroundDeath
+@ 0x493080`) spawns the def +0x4E0 ground-impact pair, clears the piece pool
+entries by entity, and installs the settle physics; the vehicle fall
+(`Entity_UpdateFallingDeathPhysics @ 0x493f70`) adds the water-crossing splash
+(`Effect_MedSplash`-family slot @ 0x2C25C64 / `g_snd_IMP_DEBLRG_WATER` or the
+profile), the `g_snd_IMP_VCL_DROP` landing thud, and the authority landing
+blast r = def `kz` else boundRadius. The AI-SM settle
+(`Entity_ProcessFallingDeathPhysics @ 0x461d30`, rows 21/23) restores the
+saved pose below ground and never queues a landing blast; attrib2 0x100
+freezes the wreck in place.
+
+### 24.6 The husk swap (render + collision)
+
+Flags bit 2 (4) is THE husk swap: the ray pick substitutes entity+52 huskModel
+when set (`Entity_RaycastCollisionModel @ 0x413086`), the contact query picks
+the same (`@ 0x4ae233`), the pool raycast walk substitutes +52
+(`raycast_against_entity_pool @ 0x538720`), and a def with NO husk keeps its
+graphic serving — the witnessed fallback. Ported: `CollisionWorld` husk
+instances (assign_entity_husk; every query resolves through the one
+`target_view` seam), the present-pass model swap
+(`destruction_present_pass.gd`), and dead non-organics now RENDER instead of
+hiding (the old D-AI-9 stand-in). items.def: `huskfinal` (+0x80),
+`husk_sub_parts` (+0x100), `husk_sub_part_types NN_NAME` (split at the FIRST
+underscore, slot NN-1 in 0..15, name matched by `DeathPieceType_FindByName
+@ 0x57b310` — renamed from the `MinimapSlot_FindByEntityPtr` misnomer),
+`husk_swap_at` (+0x19C) / `husk_swap_at_sec` (+0x1A0) with the witnessed
+dual-unit parse (percent x0.01 while +0x1A0 is 0, else seconds x62; scales
+dbl 62.0 @ 0x7c88c0 / flt 0.01 @ 0x7c56a8), `debris_scale` (+0x1BC), `kz`
+(+0x198), `armor` (+0x190/+0x192) — all parsed in libs/def and mirrored in
+the FFI structs.
+
+### 24.7 Divergences
+
+| ID | Ours | Original | Why / consequence |
+|---|---|---|---|
+| D-ITEM-1 | The bullet item hit-test is a bound-sphere segment test over pools 1/2 (model-less entities excluded as the proximity-residency equivalence); the blast pool-2 leg uses the bound sphere, not the AABB-face refinement; item hit effects take tag 4 'obj' (no entity-material plumb) | the proximity-list walk + per-volume convex clips `@ 0x4ea263`; the AABB refinement `@ 0x4eb700`; material + 4 `@ 0x4e8867` | rounds stop on wrecks/items and damage flows with the witnessed gates; precision rides the collision-instance ray (already used for LOS) — tracked |
+| D-ITEM-2 | `husk_swap_at`/`_sec` parsed for format fidelity only — the runtime consumer is unwitnessed (no +0x19C/+0x1A0 reader found this session) | fields written `@ 0x49f1ce-0x49f2c2` | no behavior port yet; find the reader (a progressive damage-stage swap is the hypothesis) |
+| D-ITEM-3 | The mid-life breakable-section sweep (a blast marks collision sections with byte flag & 2 into sectionMask) is a cited stub — our CollisionModel carries no per-section flag byte | `@ 0x4e6c5e-0x4e6e6b` | partial visual damage (windows/panels before death) missing; needs the section-flag plumb in the collision build |
+| D-ITEM-4 | Death pieces present as their row's TRAIL effect following the sim piece; the single-section husk MESH chunk, the glow light, and the piece render spin are presentation stand-ins; one PRNG stream stands in for the three retail streams | pieces render one husk section w/ spin `@ 0x493400`; `LightPool_SpawnGlowEffect @ 0x49351a`; PRNG_Next16/_B/_C | the debris reads as flying burning chunks; mesh pieces need per-part render instancing (the CollisionSection.part_index seam exists) |
+| D-ITEM-5 | The kz death blast queues ONCE at the entity with r = def kz else boundRadius; the per-"KZ"-user-point multi-blast (r=5.0 each) and the wreck-bank Dead/Fire/Other user-point anchors ride the entity origin | `Entity_QueueKzBlastAtUserPoints @ 0x4eabf0`; the bone banks `@ 0x493140` | single-blast radii match the def author's kz; multi-point husks (big ships/buildings) under-blast — feed `ItemDeathTraits.kz_points` from the husk model user points |
+| D-ITEM-6 | Blast presentation stubs: organic knockback (`Entity_ApplyCollisionForce`), the victim-attached burn emitter + hit sound (the ammo +72/+76 pair — field source unwitnessed), the glass user-point shatter (counted, not drawn), medic (type 3) + vehicle-ram (type 1) queue legs, the occupant damage scale, `g_destroy_buildings` (an MP rules seam), and the S2C 0x26/0x2F/0x21 wire emits | `@ 0x4eb1d2 / @ 0x4eb292 / @ 0x4eb814 / @ 0x4eadc6 / @ 0x4e5a50 / @ 0x4e6860`; net-re §5.60 | each cited at its port site; the wire legs stage with the npruntime death broadcasts |
+| D-ITEM-7 | Which items take the destructible death path is routed by KIND (non-organic, non-AI-capable) + unit_type; retail routes via the def class resolve (`EntityDef_LoadModelsAndCallbacks @ 0x439f50` callback columns, unwitnessed per class) | deathCallback (+0x1C8) authored per def class | same observable for shipped JO data (destructibles author no ai/move function); witness the class-to-callback table to close |
+| D-ITEM-8 | The crane/water-tower special death (the "scrane" pool walk + the double kz queue `@ 0x43fc70`) and `Entity_ProcessCraneDestruction @ 0x43eee0` are unported; the destructible 992-tick spawnPhase re-notify and the ambient phase-0 shot leg (`Entity_SpawnRegionalEffect @ 0x408290`) are unported | as cited | special-cased content (shipyard cranes, water towers); the ambient shot leg is a separate feature (items firing scheduled time-of-day sounds) |
+
+### 24.8 IDB write-backs (2026-07-17, saved)
+
+Renames: `DeathPiece_AllocSlot @ 0x57b4f0` (ex `SoundEmitter_AllocSlot`),
+`DeathPiece_ClearByEntity @ 0x57b3e0`, `DeathPiece_TickAll @ 0x57b900`,
+`DeathPiece_GetTypeDef @ 0x57b350`, `DeathPieceType_FindByName @ 0x57b310` (ex
+`MinimapSlot_FindByEntityPtr`), `PeriodicSound_TickAll @ 0x57b450`,
+`Entity_ProcessBuildingDeath @ 0x494420` (+ the t6/t7/t8 thunks),
+`Scar_ClearEntriesByEntity @ 0x5ccec0` (+ thunk),
+`Entity_UpdateDeadWreckEffects @ 0x493140` (ex
+`Entity_UpdateMuzzleFlashAndEffects`), `Entity_QueueKzBlastAtUserPoints
+@ 0x4eabf0` (ex `Projectile_SpawnEffectAtBoneOrDefault`); data:
+`g_explosion_queue @ 0xB7C688` (+count), `g_death_piece_pool @ 0x26BAC58`
+(+cursor), `g_death_piece_types @ 0x8404f0`, the four `g_ammo_kz_*` slots, the
+`g_fx_TreeWoodExp/TreeFoliageExp/Boat01Steam/BoatExpSec` and
+`g_snd_EXPLO_SHIP_TINY/EXPLO_SHIP_SM_b/IMP_VCL_DROP/IMP_DEBLRG_WATER` slots.
+Functions defined over unexplored code: `@ 0x494420`, `@ 0x494480/90/A0`.
+Entry comments on the whole chain.

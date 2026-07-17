@@ -278,6 +278,8 @@ public:
     const CollisionModel *model(int32_t id) const;
     // Attach a model instance to a live entity (net_id keyed like the traits sweep).
     void assign_entity(EntityHandle h, int32_t model_id);
+    // Attach the husk-stage collision model (swapped in while Flags & 4).
+    void assign_entity_husk(EntityHandle h, int32_t husk_model_id);
     bool has_instance(EntityHandle h) const;
     size_t instance_count() const { return instances_.size(); }
 
@@ -444,6 +446,14 @@ private:
 
     struct Instance {
         int32_t model_id = -1;
+        // The husk-stage collision model — substituted for every query once the
+        // entity carries the destroyed flag (Flags & 4): rays, contacts, and
+        // ground probes collide with the wreck, not the intact model. -1 = the
+        // def authors no husk (the intact model keeps serving, the witnessed
+        // fallback). [orig: the +52 huskModel substitution in the pool walk
+        // raycast_against_entity_pool @ 0x538720 and the ray/contact picks
+        // @ 0x413086 / @ 0x4ae233; D-AI-7 residual closed §24]
+        int32_t husk_model_id = -1;
     };
     struct StaticSlot { // [orig: g_StaticProx* u16 tables + entity ptr array]
         uint16_t x = 0, y = 0, z = 0, radius = 0;

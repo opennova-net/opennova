@@ -340,6 +340,45 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 		// Entity_UpdateInfantryAI @0x4b9e54 / @0x4b9c97; world-wac-ai-re §19]
 		e->leave_corpse = (attrib & 0x400000u) != 0;
 		e->deathtime_ticks = p_item_db->get_deathtime_ticks(def_id);
+		// Destruction traits (world/destruction.h; world-wac-ai-re §24): the death
+		// chain's def fields, keyed by item id. Fills once per distinct id.
+		// [orig: the ItemDef fields Entity_ApplyWeaponDamage / the death dispatch /
+		// Entity_InitDeathSounds read — armor +0x190/+0x192, unitType +0x196, kz
+		// +0x198, huskSubPart* +0x100.., debrisScale +0x1BC, soundDeath +0x860,
+		// the particledeath family +0x412..]
+		if (world_->item_death_traits.get(e->item_id) == nullptr &&
+		    p_item_db->has_item(def_id)) {
+			const Dictionary dt = p_item_db->get_death_traits(def_id);
+			if (!dt.is_empty()) {
+				opennova::world::ItemDeathTraits t;
+				t.unit_type = int(dt.get("unit_type", 0));
+				t.kz = float(double(dt.get("kz", 0.0)));
+				t.armor_impact = int(dt.get("armor_impact", 0));
+				t.armor_blast = int(dt.get("armor_blast", 0));
+				t.team_protect = (attrib & 0x8000u) != 0;
+				t.no_die = (attrib & 0x40000000u) != 0;
+				t.has_husk = bool(dt.get("has_husk", false));
+				t.is_decoration =
+						p_item_db->get_item_type(def_id) == NovaItemDatabase::TYPE_DECORATION;
+				t.husk_sub_part_count =
+						static_cast<uint8_t>(std::clamp(int(dt.get("husk_sub_parts", 0)), 0, 255));
+				const PackedInt32Array types = dt.get("husk_sub_part_types", PackedInt32Array());
+				for (int s = 0; s < 16 && s < types.size(); ++s)
+					t.husk_sub_part_types[s] = static_cast<uint8_t>(types[s]);
+				t.debris_scale = float(double(dt.get("debris_scale", 0.0)));
+				t.sound_death = String(dt.get("sounddeath", String())).utf8().get_data();
+				const Dictionary fx = p_item_db->get_particle_effects(def_id);
+				t.particledeath = String(fx.get("particledeath", String())).utf8().get_data();
+				t.particleh2odeath =
+						String(fx.get("particleh2odeath", String())).utf8().get_data();
+				t.particlefire = String(fx.get("particlefire", String())).utf8().get_data();
+				t.particleother = String(fx.get("particleother", String())).utf8().get_data();
+				// kz_points: the husk-model KZ user-point multi-blast is a tracked
+				// refinement (§24) — the fallback single blast at the entity with
+				// r = kz ?: boundRadius carries the witnessed gameplay.
+				world_->item_death_traits.set(e->item_id, std::move(t));
+			}
+		}
 		// Vehicle motor traits: the pre-scaled items.def physics block + the PlayerControl
 		// attrib (0x40) gate, keyed by item id in the world table. Fills once per distinct
 		// id; the AI tick's vehicle pass drives pool-1 entities whose traits carry a
@@ -635,6 +674,41 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 		if (it->second >= 0) {
 			collision_world_.assign_entity(h, it->second);
 			++attached;
+			// The bound-sphere radius (entity+0 boundRadius) from the model AABB —
+			// the blast-range and kz-fallback source [orig: Entity_InitFromModel
+			// writes it from the model header; §24].
+			if (const opennova::world::CollisionModel *cm =
+						collision_world_.model(it->second)) {
+				float r = 0.0f;
+				for (int a = 0; a < 3; ++a) {
+					r = std::max(r, std::abs(cm->min[a] / 65536.0f));
+					r = std::max(r, std::abs(cm->max[a] / 65536.0f));
+				}
+				if (r > 0.0f) e->bound_radius = r;
+			}
+		}
+		// The husk-stage collision model: attached beside the graphic instance so
+		// every query swaps to the wreck once Flags & 4 sets. The collision pick
+		// is the FIRST husk stage (entity+52 huskModel), not huskFinal [orig: the
+		// +52 substitution @ 0x538720 / @ 0x413086; D-AI-7 residual closed].
+		const String husk_name_s = p_item_db->get_husk(def_id).is_empty()
+				? p_item_db->get_huskfinal(def_id)
+				: p_item_db->get_husk(def_id);
+		if (!husk_name_s.is_empty() && it->second >= 0) {
+			const std::string husk_key(husk_name_s.utf8().get_data());
+			auto hit = model_by_graphic.find(husk_key);
+			if (hit == model_by_graphic.end()) {
+				int32_t husk_model_id = -1;
+				Ref<NovaObjectData> hdata = p_placer->call("object_data_for", husk_name_s);
+				if (hdata.is_valid()) {
+					opennova::world::CollisionModel hmodel;
+					if (collision_model_from_ir(hdata->native_ir().collision, hmodel))
+						husk_model_id = collision_world_.add_model(std::move(hmodel));
+				}
+				hit = model_by_graphic.emplace(husk_key, husk_model_id).first;
+				occlusion_by_graphic.emplace(husk_key, -1);
+			}
+			if (hit->second >= 0) collision_world_.assign_entity_husk(h, hit->second);
 		}
 		const int32_t occ_id = occlusion_by_graphic[key];
 		if (occ_id >= 0 && e->kind == opennova::world::EntityKind::Building) {
@@ -1482,6 +1556,11 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("drain_fire_presentation_events"),
 			&NovaSimulation::drain_fire_presentation_events);
 	ClassDB::bind_method(D_METHOD("get_tracer_rounds"), &NovaSimulation::get_tracer_rounds);
+	ClassDB::bind_method(D_METHOD("drain_destruction_events"),
+			&NovaSimulation::drain_destruction_events);
+	ClassDB::bind_method(D_METHOD("get_death_pieces"), &NovaSimulation::get_death_pieces);
+	ClassDB::bind_method(D_METHOD("set_water_height", "water_z_units"),
+			&NovaSimulation::set_water_height);
 	ClassDB::bind_method(D_METHOD("set_wac_program", "program"), &NovaSimulation::set_wac_program);
 	ClassDB::bind_method(D_METHOD("get_wac_program"), &NovaSimulation::get_wac_program);
 	ClassDB::bind_method(D_METHOD("compile_and_set_wac", "sources"), &NovaSimulation::compile_and_set_wac);
@@ -2953,6 +3032,105 @@ Array NovaSimulation::drain_fire_presentation_events() {
 	}
 	world_->round_sim.fired.clear();
 	return out;
+}
+
+// The destruction presentation drain (world/destruction.h; §24): one call per
+// present, converting the sim's events into godot-space dictionaries. Mission
+// (x, y, z-up) -> Godot (x, z, -y), the drain_fire_presentation_events rule.
+Dictionary NovaSimulation::drain_destruction_events() {
+	Dictionary out;
+	if (!loaded_) return out;
+	opennova::world::DestructionEvents &ev = world_->destruction;
+	auto to_godot = [](const opennova::world::Vec3 &v) {
+		return Vector3(v.x, v.z, -v.y);
+	};
+	Array effects;
+	for (const opennova::world::DestructionEffectEvent &e : ev.effects) {
+		Dictionary d;
+		d["effect"] = String(e.effect.c_str());
+		d["pos"] = to_godot(e.pos);
+		d["dir"] = to_godot(e.dir);
+		d["attach_net_id"] = static_cast<int>(e.attach_net_id);
+		d["attach_bms_id"] = e.attach_bms_id;
+		d["family"] = static_cast<int>(e.family);
+		effects.push_back(d);
+	}
+	Array sounds;
+	for (const opennova::world::DestructionSoundEvent &s : ev.sounds) {
+		Dictionary d;
+		d["sound"] = String(s.sound.c_str());
+		d["pos"] = to_godot(s.pos);
+		sounds.push_back(d);
+	}
+	Array husks;
+	for (const opennova::world::HuskSwapEvent &h : ev.husk_swaps) {
+		Dictionary d;
+		d["net_id"] = static_cast<int>(h.net_id);
+		d["bms_id"] = h.bms_id;
+		d["spawn_origin"] = static_cast<int64_t>(h.spawn_origin);
+		d["item_id"] = h.item_id;
+		d["spawned_piece_mask"] = static_cast<int64_t>(h.spawned_piece_mask);
+		husks.push_back(d);
+	}
+	Array bursts;
+	for (const opennova::world::SectionDebrisEvent &b : ev.debris_bursts) {
+		Dictionary d;
+		d["net_id"] = static_cast<int>(b.net_id);
+		d["bms_id"] = b.bms_id;
+		d["spawn_origin"] = static_cast<int64_t>(b.spawn_origin);
+		d["item_id"] = b.item_id;
+		d["blast_center"] = to_godot(b.blast_center);
+		d["has_blast_center"] = b.blast_center.x != 0.0f || b.blast_center.y != 0.0f ||
+				b.blast_center.z != 0.0f;
+		bursts.push_back(d);
+	}
+	Array glass;
+	for (const opennova::world::GlassBreakEvent &g : ev.glass_breaks) {
+		Dictionary d;
+		d["net_id"] = static_cast<int>(g.net_id);
+		d["bms_id"] = g.bms_id;
+		d["spawn_origin"] = static_cast<int64_t>(g.spawn_origin);
+		d["item_id"] = g.item_id;
+		d["blast_pos"] = to_godot(g.blast_pos);
+		d["radius"] = g.radius;
+		glass.push_back(d);
+	}
+	out["effects"] = effects;
+	out["sounds"] = sounds;
+	out["husk_swaps"] = husks;
+	out["debris_bursts"] = bursts;
+	out["glass_breaks"] = glass;
+	out["explosions_processed"] = ev.explosions_processed;
+	out["items_destroyed"] = ev.items_destroyed;
+	ev.clear();
+	return out;
+}
+
+// The live death-piece pool snapshot — the present pass renders each piece as
+// its single husk-model section [orig: the piece render mask piece[31]; §24].
+Array NovaSimulation::get_death_pieces() const {
+	Array out;
+	if (!loaded_) return out;
+	for (size_t slot = 0; slot < world_->death_pieces.pieces.size(); ++slot) {
+		const opennova::world::DeathPiece &p = world_->death_pieces.pieces[slot];
+		if (!p.active) continue;
+		Dictionary d;
+		d["slot"] = static_cast<int>(slot);
+		d["item_id"] = p.item_id;
+		d["section"] = static_cast<int>(p.section);
+		d["type_index"] = static_cast<int>(p.type_index);
+		d["scale"] = p.render_scale;
+		d["pos"] = Vector3(p.pos.x, p.pos.z, -p.pos.y);
+		d["heading"] = p.heading;
+		d["pitch"] = p.pitch;
+		d["settled"] = p.settled;
+		out.push_back(d);
+	}
+	return out;
+}
+
+void NovaSimulation::set_water_height(double p_water_z_units) {
+	if (world_) world_->water_height = static_cast<float>(p_water_z_units);
 }
 
 // Live tracer rounds for the streak layer — see the header note.

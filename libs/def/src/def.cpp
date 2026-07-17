@@ -135,6 +135,29 @@ static int tokenize(const char *s, size_t len, Token *tokens, int max_tok) {
     return n;
 }
 
+/* The engine debris-type table row names, in table order — index = the byte
+   items.def 'husk_sub_part_types' stores per husk sub-part. Mirrors the 13 named
+   rows of the 80-B static table; the full row data (velocities/effects/sounds)
+   lives in libs/world/destruction.cpp, both citing the same original.
+   [orig: g_death_piece_types @ 0x8404f0; DeathPieceType_FindByName @ 0x57b310] */
+static const char *const k_death_piece_type_names[13] = {
+    "HULL",      "WHEEL",     "CHUNK_S",   "CHUNK_M",   "CHUNK_L",
+    "ROCK_S",    "ROCK_M",    "ROCK_L",    "CHUNKNP_S", "CHUNKNP_M",
+    "CHUNKNP_L", "CACTUS_",   "CHUNKSF_M",
+};
+
+static int death_piece_type_index(const char *name, size_t len) {
+    for (int i = 0; i < 13; ++i) {
+        const char *t = k_death_piece_type_names[i];
+        size_t j = 0;
+        while (j < len && t[j] != '\0' &&
+               tolower((unsigned char)t[j]) == tolower((unsigned char)name[j]))
+            ++j;
+        if (j == len && t[j] == '\0') return i;
+    }
+    return 0; /* unknown -> HULL, the engine's zero-init read */
+}
+
 /* Split on commas and/or whitespace */
 static int split_values(const char *s, size_t len, Token *tokens, int max_tok) {
     int n = 0;
@@ -672,6 +695,18 @@ static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out) {
         } else if (lower_starts_with(lower, ll, "kz_damage", 9)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
             current.kz_damage = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "kz_minradius", 12)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
+            current.kz_minradius_fp16 = parse_fixed16_n(v, vl); /* +52 [orig: §5.60 map] */
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "kz_maxradius", 12)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
+            current.kz_maxradius_fp16 = parse_fixed16_n(v, vl); /* +56 */
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "kz_pieslice", 11)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 11, &vl);
+            current.kz_pieslice_bam = parse_int_n(v, vl) * 11930464; /* deg -> BAM (+60) */
             parsed = 1;
         } else if (lower_starts_with(lower, ll, "min_stable_velocity", 19)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 19, &vl);
@@ -1432,7 +1467,87 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
             parsed = 1;
         } else if (lower_match_key(lower, ll, "unit_type", 9)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
-            current.unit_type = parse_int_n(v, vl); /* minimap icon class [orig: @0x50FA70] */
+            current.unit_type = parse_int_n(v, vl); /* minimap icon class [orig: @0x50FA70]
+                                                       + the death-dispatch row key
+                                                       [orig: Entity_DispatchDeathCallback
+                                                       @0x493f23 vs table @0x815410] */
+            parsed = 1;
+        /* --- the destruction/husk block [orig: ItemDef_ParseProperty @ 0x49eb00] --- */
+        } else if (lower_match_key(lower, ll, "huskfinal", 9)) {
+            consume_value_str(trimmed, tlen, 9, current.huskfinal, sizeof(current.huskfinal));
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "sounddeath", 10)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
+            size_t end = 0;
+            while (end < vl && !isspace((unsigned char)v[end])) ++end;
+            safe_copy(current.sounddeath, sizeof(current.sounddeath), v, end);
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "armor", 5)) {
+            /* 'armor A [B]': +0x190 impact = A then overwritten by B; +0x192 blast = A.
+               -1 = the 0xFFFF invulnerable word. [orig: @ 0x4a00e7-0x4a0147] */
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 5, &vl);
+            Token tok[MAX_TOKENS];
+            int ntok = split_values(v, vl, tok, MAX_TOKENS);
+            if (ntok >= 1) {
+                int a = parse_int_n(tok[0].s, tok[0].len);
+                current.armor_impact = a;
+                current.armor_blast = a;
+                if (ntok >= 2)
+                    current.armor_impact = parse_int_n(tok[1].s, tok[1].len);
+            }
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "kz", 2)) {
+            /* Death-blast radius in units, plain float -> def+0x198. */
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 2, &vl);
+            current.kz = (float)parse_float_n(v, vl);
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "husk_swap_at_sec", 16)) {
+            /* seconds*62 ticks; an authored 0 stores 1.0. [orig: @ 0x49f1ce-0x49f228] */
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 16, &vl);
+            float sec = (float)(parse_float_n(v, vl) * 62.0);
+            current.husk_swap_at_sec = (sec == 0.0f) ? 1.0f : sec;
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "husk_swap_at", 12)) {
+            /* Dual-unit: while +0x1A0 is still 0 the value is a PERCENT (atol*0.01),
+               else seconds*62 — the witnessed parse-order dependence.
+               [orig: @ 0x49f242-0x49f2c2] */
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
+            if (current.husk_swap_at_sec == 0.0f)
+                current.husk_swap_at = (float)(parse_int_n(v, vl) * 0.01);
+            else
+                current.husk_swap_at = (float)(parse_float_n(v, vl) * 62.0);
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "debris_scale", 12)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
+            current.debris_scale = (float)parse_float_n(v, vl); /* -> def+0x1BC */
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "husk_sub_parts", 14)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 14, &vl);
+            current.husk_sub_parts = parse_int_n(v, vl); /* -> +0x100 count byte */
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "husk_sub_part_types", 19)) {
+            /* Each value 'NN_NAME': split at the FIRST '_', slot = NN-1 (0..15), the
+               remainder (internal underscores kept) resolved case-insensitively against
+               the engine debris-type table names; at most 16 values processed.
+               [orig: @ 0x49f314-0x49f396; DeathPieceType_FindByName @ 0x57b310] */
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 19, &vl);
+            Token tok[MAX_TOKENS];
+            int ntok = split_values(v, vl, tok, MAX_TOKENS);
+            int processed = 0;
+            for (int ti = 0; ti < ntok && processed < 16; ++ti) {
+                const char *us = NULL;
+                for (size_t k = 0; k < tok[ti].len; ++k) {
+                    if (tok[ti].s[k] == '_') { us = tok[ti].s + k; break; }
+                }
+                if (us == NULL) continue;
+                int slot = parse_int_n(tok[ti].s, (size_t)(us - tok[ti].s)) - 1;
+                if (slot < 0 || slot > 15) continue;
+                ++processed;
+                const char *nm = us + 1;
+                size_t nl = tok[ti].len - (size_t)(nm - tok[ti].s);
+                current.husk_sub_part_types[slot] =
+                        (unsigned char)death_piece_type_index(nm, nl);
+            }
             parsed = 1;
         } else if (lower_starts_with(lower, ll, "attrib:", 7)) {
             /* Space-separated capability tokens -> ItemDefAttrib/Attrib2 bits. Unknown tokens

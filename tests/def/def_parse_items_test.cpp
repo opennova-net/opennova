@@ -267,6 +267,76 @@ int main(void) {
         return 1;
     }
 
+    /* The destruction/husk block on the Barrel (world-wac-ai-re §24) */
+    const DefItemDef *barrel = NULL;
+    for (size_t i = 0; i < items.count; ++i) {
+        if (items.entries[i].id == 105002) {
+            barrel = &items.entries[i];
+            break;
+        }
+    }
+    if (!barrel) {
+        fprintf(stderr, "FAIL: could not find Barrel (id 105002)\n");
+        def_free_items(&items);
+        return 1;
+    }
+    if (strcmp(barrel->huskfinal, "Barrel1XF") != 0) {
+        fprintf(stderr, "FAIL: barrel huskfinal mismatch: '%s'\n", barrel->huskfinal);
+        def_free_items(&items);
+        return 1;
+    }
+    /* 'armor 12 4': blast word (+0x192) = 12, impact word (+0x190) = the second
+       value 4 [orig: the parse order @ 0x4a00e7-0x4a0147] */
+    if (barrel->armor_blast != 12 || barrel->armor_impact != 4) {
+        fprintf(stderr, "FAIL: barrel armor mismatch: blast %d impact %d\n",
+                barrel->armor_blast, barrel->armor_impact);
+        def_free_items(&items);
+        return 1;
+    }
+    if (barrel->kz < 3.99f || barrel->kz > 4.01f) {
+        fprintf(stderr, "FAIL: barrel kz mismatch: %f\n", (double)barrel->kz);
+        def_free_items(&items);
+        return 1;
+    }
+    if (strcmp(barrel->sounddeath, "EXPLO_BARREL") != 0) {
+        fprintf(stderr, "FAIL: barrel sounddeath mismatch: '%s'\n", barrel->sounddeath);
+        def_free_items(&items);
+        return 1;
+    }
+    if (barrel->unit_type != 6 || barrel->husk_sub_parts != 4) {
+        fprintf(stderr, "FAIL: barrel unit_type/husk_sub_parts mismatch: %d/%d\n",
+                barrel->unit_type, barrel->husk_sub_parts);
+        def_free_items(&items);
+        return 1;
+    }
+    /* '02_CHUNK_M 03_CHUNK_S 04_wheel' -> slots 1..3 = CHUNK_M(3), CHUNK_S(2),
+       WHEEL(1) case-insensitively; slot 0 stays 0 = HULL (the zero-init read)
+       [orig: the strstr '_' split @ 0x49f33d + DeathPieceType_FindByName @ 0x57b310] */
+    if (barrel->husk_sub_part_types[0] != 0 || barrel->husk_sub_part_types[1] != 3 ||
+        barrel->husk_sub_part_types[2] != 2 || barrel->husk_sub_part_types[3] != 1) {
+        fprintf(stderr, "FAIL: barrel husk_sub_part_types mismatch: %d %d %d %d\n",
+                barrel->husk_sub_part_types[0], barrel->husk_sub_part_types[1],
+                barrel->husk_sub_part_types[2], barrel->husk_sub_part_types[3]);
+        def_free_items(&items);
+        return 1;
+    }
+    /* husk_swap_at_sec 2.0 -> 124 ticks; husk_swap_at AFTER _sec parses as
+       seconds too (the witnessed dual-unit order): 3.0 -> 186
+       [orig: @ 0x49f1ce-0x49f2c2; scales 62.0 @ 0x7c88c0 / 0.01 @ 0x7c56a8] */
+    if (barrel->husk_swap_at_sec < 123.9f || barrel->husk_swap_at_sec > 124.1f ||
+        barrel->husk_swap_at < 185.9f || barrel->husk_swap_at > 186.1f) {
+        fprintf(stderr, "FAIL: barrel husk_swap mismatch: %f / %f\n",
+                (double)barrel->husk_swap_at, (double)barrel->husk_swap_at_sec);
+        def_free_items(&items);
+        return 1;
+    }
+    if (barrel->debris_scale < 1.49f || barrel->debris_scale > 1.51f) {
+        fprintf(stderr, "FAIL: barrel debris_scale mismatch: %f\n",
+                (double)barrel->debris_scale);
+        def_free_items(&items);
+        return 1;
+    }
+
     /* Find "Player #1, Single player" by id */
     const DefItemDef *player1 = NULL;
     for (size_t i = 0; i < items.count; ++i) {

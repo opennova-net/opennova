@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include "world/destruction.h"
 #include "world/entity.h"
 #include "world/entity_registry.h"
 #include "world/trigger_relations.h"
@@ -382,6 +383,21 @@ public:
     // drained by the host session. [orig: RoundData_SpawnRound @0x4ec0d0 inline from
     // RoundData_AddRound; Weapon_UpdateAllProjectiles @0x4ec020; §5.60]
     RoundSim round_sim;
+
+    // The explosion queue + AoE damage, the death-piece pool, the per-item death
+    // traits, and the destruction presentation events (world/destruction.h;
+    // world-wac-ai-re §24). Explosions queued this tick drain inside
+    // run_logic_tick right after the round sim [orig: Projectile_ProcessExplosionQueue
+    // @0x4ead80 runs once per frame after the projectile update]; the host drains
+    // `destruction` (present) and feeds `item_death_traits` (item-traits sweep).
+    ExplosionSim explosions;
+    DeathPieceSim death_pieces;
+    ItemDeathTraitsTable item_death_traits;
+    DestructionEvents destruction;
+    // The environment water plane (16.16-truthful float), host-stamped at mission
+    // load — the death paths' submerged gates [orig: Env_WaterHeightFixed @0x26c6454].
+    // Very-negative default = no water.
+    float water_height = -1.0e9f;
 
     // End-of-round outcome + the SP kill-stat buckets (see the struct docs above).
     RoundEndState round_end;

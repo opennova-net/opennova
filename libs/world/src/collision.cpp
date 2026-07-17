@@ -712,7 +712,17 @@ const CollisionModel *CollisionWorld::model(int32_t id) const {
 
 void CollisionWorld::assign_entity(EntityHandle h, int32_t model_id) {
     if (!h.valid() || model_id < 0 || model_id >= static_cast<int32_t>(models_.size())) return;
-    instances_[h.packed] = Instance{model_id};
+    const int32_t husk = has_instance(h) ? instances_[h.packed].husk_model_id : -1;
+    instances_[h.packed] = Instance{model_id, husk};
+}
+
+void CollisionWorld::assign_entity_husk(EntityHandle h, int32_t husk_model_id) {
+    if (!h.valid() || husk_model_id < 0 ||
+        husk_model_id >= static_cast<int32_t>(models_.size()))
+        return;
+    auto it = instances_.find(h.packed);
+    if (it == instances_.end()) return; // husk stages ride an existing instance
+    it->second.husk_model_id = husk_model_id;
 }
 
 bool CollisionWorld::has_instance(EntityHandle h) const {
@@ -896,7 +906,15 @@ const CollisionTargetView *CollisionWorld::target_view(World &world, EntityHandl
     if (it == instances_.end()) return nullptr;
     const Entity *e = world.registry.get(h);
     if (e == nullptr) return nullptr;
-    const CollisionModel *m = model(it->second.model_id);
+    // The husk collision swap: a destroyed entity (Flags & 4) collides with its
+    // husk-stage model when one is attached; no husk -> the intact model keeps
+    // serving, the witnessed fallback [orig: Flags & 4 && huskModel picks
+    // entity+52 in Entity_RaycastCollisionModel @ 0x413086 and the pool walk
+    // @ 0x538720; the contact pick @ 0x4ae233].
+    int32_t model_id = it->second.model_id;
+    if ((e->engine_flags & 0x4u) != 0 && it->second.husk_model_id >= 0)
+        model_id = it->second.husk_model_id;
+    const CollisionModel *m = model(model_id);
     if (m == nullptr || !m->valid()) return nullptr;
 
     int32_t p[3];

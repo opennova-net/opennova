@@ -920,6 +920,11 @@ func get_fire_present_stats() -> Dictionary:
 	return _runtime.get_fire_present_stats() if _runtime != null and _runtime.has_method("get_fire_present_stats") else {}
 
 
+# Destruction-presentation counters (probe/diagnostic seam; empty until a mission runs).
+func get_destruction_present_stats() -> Dictionary:
+	return _runtime.get_destruction_present_stats() if _runtime != null and _runtime.has_method("get_destruction_present_stats") else {}
+
+
 # --- the local player (Phase 2; ADR 0012). Host delegates to the mission runtime. ---
 func has_local_player() -> bool:
 	return _runtime != null and _runtime.has_player()
@@ -1500,6 +1505,9 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> void:
 	opts["fire_audio"] = Callable(self, "get_mission_audio")
 	opts["fire_fx"] = Callable(self, "get_effect_world")
 	opts["fire_listener"] = Callable(self, "_fire_listener_position")
+	# The destruction present pass anchors its wreck/piece effect groups through
+	# register_effect_anchor and swaps husk models via the placer.
+	opts["game_world"] = self
 	_runtime.setup(mission, container, opts)
 	if _runtime.get_sim() == null:
 		push_warning("GameWorld: failed to start mission runtime")
@@ -1654,6 +1662,12 @@ func _start_effect_world() -> void:
 	var count := _effect_world.load_from_resource_root(_resource_root)
 	if _water != null:
 		_effect_world.set_water_height(float(_water.water_height))
+		# The sim's death paths gate on the same plane (submerged wrecks skip
+		# pieces, the wreck fire steams out) [orig: Env_WaterHeightFixed
+		# @0x26c6454; world-wac-ai-re §24].
+		var sim = _runtime.get_sim() if _runtime != null else null
+		if sim != null and sim.has_method("set_water_height"):
+			sim.set_water_height(float(_water.water_height))
 	# One provider for every owned/attached group: int keys are WAC fx2ssn SSNs
 	# (resolved through the runtime), String keys are the per-item effect attaches
 	# (resolved to the placed node's live transform).

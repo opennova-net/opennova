@@ -33,6 +33,9 @@ void NovaItemDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("has_item", "id"), &NovaItemDatabase::has_item);
 	ClassDB::bind_method(D_METHOD("get_vehicle_physics", "id"), &NovaItemDatabase::get_vehicle_physics);
 	ClassDB::bind_method(D_METHOD("get_graphic", "id"), &NovaItemDatabase::get_graphic);
+	ClassDB::bind_method(D_METHOD("get_husk", "id"), &NovaItemDatabase::get_husk);
+	ClassDB::bind_method(D_METHOD("get_huskfinal", "id"), &NovaItemDatabase::get_huskfinal);
+	ClassDB::bind_method(D_METHOD("get_death_traits", "id"), &NovaItemDatabase::get_death_traits);
 	ClassDB::bind_method(D_METHOD("get_anim_def", "id"), &NovaItemDatabase::get_anim_def);
 	ClassDB::bind_method(D_METHOD("get_ai_function", "id"), &NovaItemDatabase::get_ai_function);
 	ClassDB::bind_method(D_METHOD("get_hp", "id"), &NovaItemDatabase::get_hp);
@@ -136,6 +139,18 @@ NovaItemDatabase::Item NovaItemDatabase::item_from_entry(const ::DefItemDef &ent
 	item.clipsize = entry.clipsize;
 	item.deathtime_ticks = entry.deathtime_ticks;
 	item.primary_weapon = String(entry.primary_weapon);
+	// The destruction/husk block (world-wac-ai-re §24).
+	item.husk = String(entry.husk);
+	item.huskfinal = String(entry.huskfinal);
+	item.sounddeath = String(entry.sounddeath);
+	item.armor_impact = entry.armor_impact;
+	item.armor_blast = entry.armor_blast;
+	item.kz = entry.kz;
+	item.debris_scale = entry.debris_scale;
+	item.husk_sub_parts = entry.husk_sub_parts;
+	for (int s = 0; s < 16; ++s) {
+		item.husk_sub_part_types[s] = entry.husk_sub_part_types[s];
+	}
 	return item;
 }
 
@@ -296,6 +311,42 @@ String NovaItemDatabase::get_primary_weapon(int id) const {
 String NovaItemDatabase::get_sound_profile(int id) const {
 	const auto it = items.find(id);
 	return it == items.end() ? String() : it->second.sound_profile;
+}
+
+String NovaItemDatabase::get_husk(int id) const {
+	const auto it = items.find(id);
+	return it == items.end() ? String() : it->second.husk;
+}
+
+String NovaItemDatabase::get_huskfinal(int id) const {
+	const auto it = items.find(id);
+	return it == items.end() ? String() : it->second.huskfinal;
+}
+
+// The destruction traits bundle (world-wac-ai-re §24), consumed by the sim's
+// item-traits sweep into world::ItemDeathTraits.
+Dictionary NovaItemDatabase::get_death_traits(int id) const {
+	Dictionary out;
+	const auto it = items.find(id);
+	if (it == items.end()) {
+		return out;
+	}
+	const Item &item = it->second;
+	out["unit_type"] = item.unit_type;
+	out["kz"] = item.kz;
+	out["armor_impact"] = item.armor_impact;
+	out["armor_blast"] = item.armor_blast;
+	out["sounddeath"] = item.sounddeath;
+	out["debris_scale"] = item.debris_scale;
+	out["husk_sub_parts"] = item.husk_sub_parts;
+	PackedInt32Array types;
+	types.resize(16);
+	for (int s = 0; s < 16; ++s) {
+		types.set(s, item.husk_sub_part_types[s]);
+	}
+	out["husk_sub_part_types"] = types;
+	out["has_husk"] = !item.husk.is_empty() || !item.huskfinal.is_empty();
+	return out;
 }
 
 // items.def soundloop_1..7 looping ambient set names for "snd:" marker items

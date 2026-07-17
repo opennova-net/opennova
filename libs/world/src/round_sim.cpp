@@ -18,6 +18,28 @@ constexpr double kPi = 3.14159265358979323846;
 // BAM32 -> radians (full turn = 2^32) [orig: engine-wide BAM convention, angle.h].
 constexpr double kRadPerBam = (2.0 * kPi) / 4294967296.0;
 
+// Queue the round's kill zone at its stop [orig: the ammo-class dispatch —
+// kz-carrying classes push the 52-B explosion queue (WeaponEffect_QueueExplosion
+// @0x4e8330) with themselves as the ammo; type = the kztype word, radius = the
+// entry's kz_maxradius (no override). Knife/medic/bullet classes never do;
+// §24.]
+void detonate_round(World &world, const LiveRound &r, const Vec3 &at,
+                    const AmmoTableEntry &ammo) {
+    if (ammo.kz_maxradius <= 0.0f || ammo.kz_damage == 0) return;
+    if (ammo.kztype != ammo_kz::kStandard && ammo.kztype != ammo_kz::kRadiusBlast &&
+        ammo.kztype != ammo_kz::kC4 && ammo.kztype != ammo_kz::kSlash)
+        return;
+    ExplosionEntry e;
+    e.pos = at;
+    e.dir_bam = 0;
+    e.type = ammo.kztype;
+    e.ammo_index = r.ammo_index;
+    e.owner = r.owner;
+    e.hit_word = r.shot_seq;
+    e.radius_override = 0.0f;
+    world.explosions.queue_explosion(world, e);
+}
+
 // The MVP organic hit shape: a sphere over the torso. The witnessed hit test is the
 // proximity list + bone-section collision (Projectile_RaycastProximitySlots @ 0x4E5340,
 // Entity_ComputeBoneCollisionBounds) — this stands in until the collision-model port
@@ -179,8 +201,14 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain) {
         LiveRound &r = rounds[static_cast<size_t>(i)];
         if (!r.active) continue;
 
-        // Lifetime [orig: projectile+684 remaining-age check @0x4e9dae].
+        // Lifetime [orig: projectile+684 remaining-age check @0x4e9dae]. An
+        // explosive round expiring in flight detonates where it dies — the
+        // timed-fuze leg (hand grenades author max_age as the fuze)
+        // [orig: the ammo-class kz dispatch, RoundData_SpawnRound @0x4ec0d0 /
+        // WeaponEffect_QueueExplosion @0x4e8330; §24].
         if (++r.age_ticks > r.max_age_ticks) {
+            const AmmoTableEntry *fuze_ammo = world.ammo.by_index(r.ammo_index);
+            if (fuze_ammo != nullptr) detonate_round(world, r, r.pos, *fuze_ammo);
             r.active = false;
             --active_count;
             continue;
@@ -189,11 +217,15 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain) {
         const Vec3 p0 = r.pos;
         Vec3 p1{p0.x + r.vel.x, p0.y + r.vel.y, p0.z + r.vel.z};
 
-        // Earliest organic hit along this tick's segment [orig: proximity-list raycast
-        // @0x4ea263..; pool-0 only at this altitude — §5.60 deferrals].
+        // Earliest hit along this tick's segment: pool-0 organics against the
+        // body cylinder stand-in, then pool-1/2 items against their bound
+        // spheres [orig: the proximity-list raycast @0x4ea263 walks all three
+        // pools; the item leg's convex-clip precision rides the collision-model
+        // instances — bound spheres stand in until then (tracked §24)].
         float best_t = 2.0f;
         Entity *best_target = nullptr;
         uint16_t best_handle = 0xFFFF;
+        bool best_is_item = false;
         const AmmoTableEntry *ammo = world.ammo.by_index(r.ammo_index);
         const float radius = kOrganicRadius + (ammo != nullptr ? ammo->bullet_radius : 0.0f);
         for (size_t s = 0; s < pool0; ++s) {
@@ -210,6 +242,32 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain) {
                 best_t = hit.t;
                 best_target = e;
                 best_handle = packed;
+                best_is_item = false;
+            }
+        }
+        for (int pool = 1; pool <= 2; ++pool) {
+            const size_t cap = world.registry.pool_capacity(pool);
+            for (size_t s = 0; s < cap; ++s) {
+                const EntityHandle h = EntityHandle::make(pool, static_cast<int>(s));
+                if (r.owner.valid() && h.packed == r.owner.packed) continue;
+                Entity *e = world.registry.get(h);
+                if (e == nullptr || e->hidden) continue;
+                if ((e->engine_flags & 0x1u) != 0) continue; // [orig: the pool-walk
+                // Flags&1 skip @0x4eaf15-family] — dead husks still STOP rounds
+                // (the husk collision swap keeps wrecks solid [orig: the +52
+                // model substitution in raycast_against_entity_pool @0x538720]).
+                // bound_radius == 0 = no placed model (markers, trigger volumes) —
+                // the proximity-list-residency equivalence: model-less entities
+                // never enter the walked slices.
+                const float bound = e->bound_radius;
+                if (bound <= 0.0f) continue;
+                const SegHit hit = segment_vs_sphere(p0, p1, e->position, bound);
+                if (hit.hit && hit.t < best_t) {
+                    best_t = hit.t;
+                    best_target = e;
+                    best_handle = h.packed;
+                    best_is_item = true;
+                }
             }
         }
 
@@ -251,7 +309,61 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain) {
         }
 
         if (best_target != nullptr && best_t <= terrain_t) {
-            // Entity impact -> authority damage [orig: Projectile_HandleEntityImpact
+            const Vec3 impact_pos{p0.x + r.vel.x * best_t, p0.y + r.vel.y * best_t,
+                                  p0.z + r.vel.z * best_t};
+            if (best_is_item) {
+                // Item impact [orig: the same Projectile_ProcessDamageOnTarget
+                // @0x4e7fb0 chain — the zeroing gates ride the armor words].
+                if (ammo != nullptr) {
+                    int32_t damage = calc_impact_damage(r.vel, *ammo);
+                    damage = item_bullet_damage_gate(world, *best_target, damage,
+                                                     ammo->penetration_impact);
+                    if (damage > 0) {
+                        if (const Entity *shooter = world.registry.get(r.owner)) {
+                            auto &rel = world.relations;
+                            const int sg = shooter->group_id, ss = shooter->net_id;
+                            const int vg = best_target->group_id, vs = best_target->net_id;
+                            rel.set_group_group(TriggerRelations::kShot, sg, vg);
+                            rel.set_single_group(TriggerRelations::kShot, ss, vg);
+                            rel.set_group_single(TriggerRelations::kShot, sg, vs);
+                            rel.set_single_single(TriggerRelations::kShot, ss, vs);
+                        }
+                        best_target->health -= damage;
+                        best_target->last_attacker = r.owner; // [orig: +0x178 @0x4e8186]
+                        hits.push_back(RoundHit{EntityHandle{best_handle}, r.owner, damage});
+                        // deathCallback(entity, 1, 0) — the bullet-hit notify;
+                        // authority + health<=0 destroys [orig:
+                        // Entity_HandleDestructibleDeathEvent @0x440210].
+                        destruction_notify_item_damage(world, *best_target, 1);
+                        if (best_target->health <= 0) {
+                            RoundDeath d;
+                            d.victim = EntityHandle{best_handle};
+                            d.killer = r.owner;
+                            d.victim_handle = best_handle;
+                            d.killer_handle = r.shooter_handle;
+                            d.adm_index = r.adm_index;
+                            deaths.push_back(d);
+                        }
+                    }
+                    // An explosive round detonates on the hit [orig: the kz
+                    // dispatch; the blast center stamps the debris origin via
+                    // the queue sweep @0x4eb553].
+                    detonate_round(world, r, impact_pos, *ammo);
+                }
+                RoundImpact imp;
+                imp.position = impact_pos;
+                imp.direction = flight_direction(r.vel);
+                imp.ammo_index = r.ammo_index;
+                imp.effect_tag = 4; // 'obj' — the entity-material plumb is the
+                                    // tracked §5.60 deferral (material + 4)
+                imp.tick = world.logic_tick;
+                imp.source_order = next_impact_order++;
+                if (impacts.size() < kMaxPendingImpacts) impacts.push_back(imp);
+                r.active = false;
+                --active_count;
+                continue;
+            }
+            // Organic impact -> authority damage [orig: Projectile_HandleEntityImpact
             // @0x4e9390 -> Projectile_ProcessDamageOnTarget @0x4e7fb0]. Damage clamps to
             // the remaining health [orig: @0x4e8064]; health<=0 raises the death event
             // the host session routes [orig: Entity_CheckAndProcessDeath @0x51b550].
@@ -306,12 +418,13 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain) {
                     }
                 }
             }
-            // The entity impact effect: pool-0 organics only at this altitude, so the
-            // tag is always 2 'player' [orig: entity material + 4 selection @ 0x4e8867;
-            // the vehicle/static material plumb waits on that hit-test port].
+            // An explosive round detonates on the body hit too [orig: the kz
+            // dispatch runs for any stop].
+            if (ammo != nullptr) detonate_round(world, r, impact_pos, *ammo);
+            // The organic impact effect — tag 2 'player' [orig: entity material + 4
+            // selection @ 0x4e8867].
             RoundImpact imp;
-            imp.position = Vec3{p0.x + r.vel.x * best_t, p0.y + r.vel.y * best_t,
-                                p0.z + r.vel.z * best_t};
+            imp.position = impact_pos;
             imp.direction = flight_direction(r.vel);
             imp.ammo_index = r.ammo_index;
             imp.effect_tag = 2; // 'player' [orig: g_AmmoEffectTagTable @ 0x813420]
@@ -339,6 +452,9 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain) {
             imp.tick = world.logic_tick;
             imp.source_order = next_impact_order++;
             if (impacts.size() < kMaxPendingImpacts) impacts.push_back(imp);
+            // An explosive round detonates on the terrain stop [orig: the kz
+            // dispatch from Projectile_HandleTerrainImpact @0x4e9210 family].
+            if (ammo != nullptr) detonate_round(world, r, imp.position, *ammo);
             r.active = false;
             --active_count;
             continue;

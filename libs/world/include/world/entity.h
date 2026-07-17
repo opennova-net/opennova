@@ -241,6 +241,29 @@ struct Entity {
     bool held = false;
     bool disabled = false;
 
+    // --- destruction state (world/destruction.h; world-wac-ai-re §24) ---
+    // Bound-sphere radius (entity+0 boundRadius), host-stamped from the placed
+    // model's collision bounds (0 = unstamped; the damage sweeps substitute the
+    // organic stand-in radius). Feeds the blast range tests and the kz fallback
+    // radius. [orig: entity+0, read throughout the explosion sweep @ 0x4ead80]
+    float bound_radius = 0.0f;
+    // Kill-credit attacker (entity+0x178 lastAttacker): stamped by the damage
+    // paths; the explosion sweep only fills an EMPTY slot with its resolved
+    // attacker [orig: @ 0x4eb319/@ 0x4eb593; the dead-attacker chain walk
+    // @ 0x4eae95..0x4eaece].
+    EntityHandle last_attacker;
+    // The blast center a queued explosion stamped before this entity died — the
+    // section-debris launch origin (entity+0x80 savedLivePose reuse; only
+    // destructible-class entities receive it) [orig: @ 0x4eb553-0x4eb569].
+    Vec3 death_blast_center;
+    // The death tick (entity+0x1AC, first write wins) [orig:
+    // Entity_ProcessDestructibleDeath @ 0x43fc0c / AI_TransitionToDestroyed_Vehicle].
+    uint32_t death_tick = 0;
+    // Husk sections that left as death pieces (entity+0x138): the husk renders
+    // and collides WITHOUT these sections. Bit 0 (the hull) never sets.
+    // [orig: Entity_SpawnDeathPieces @ 0x493983]
+    uint32_t spawned_piece_mask = 0;
+
     // The retail entity Flags dword (entity+36) as composed at spawn — the 0x10 static record
     // streams it RAW as its flag-0x20 i32 (the field the early RE misread as "parentSlot",
     // D-NET-147/150). Composed from mission attributes + item-def traits:
