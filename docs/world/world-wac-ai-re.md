@@ -2960,8 +2960,11 @@ deploy group stamp. Ported same session: `libs/world/src/vehicle_attach.cpp`
 (the toggle + scan), the four trigger predicates (`world.cpp` +
 `event_runtime.cpp`), the vehicle motor's parked/AI-driver staging
 (`ai.cpp::vehicle_ai_drive` + `vehicle_motor.cpp`), `player_spawn.cpp`
-(group 1). Evidence: ctest `vehicle_mount` (7 blocks), in-game
-`godot/tests/vehicle_ride_probe.gd` on retail 00TRa.
+(group 1). Evidence: ctest `vehicle_mount` (9 blocks: toggle/deck/swap/enemy-gate/predicates/
+AI-drive/redirect+speed/drive-mirror/group-stamp), in-game
+`godot/tests/vehicle_ride_probe.gd` on retail 00TRa — PASS: toggle-mount into the
+truck, event 2 fires, the command-mounted instructor DRIVES the redirected truck
+11 u+ along list 2 with the player carried at the seat.
 
 ### 23.1 The USE-ITEM mount input chain
 
@@ -2985,7 +2988,12 @@ slot.nextAction == 11` — idle/emptyidle/dry-click/pending-overheat pass);
 unmounted -> `Entity_TryEnterNearestVehicle @ 0x4368c0`; mounted -> a fresh
 `Entity_FindNearestSeatOrArmory` hit re-enters (seat SWAP), else
 `Entity_SendDetachPacket @ 0x435510` (wire 0x27; the authority applies through
-the same server leg). A WAC-settable global `dword_C6EADC` (reset by
+the same server leg). NOTE the dismount mechanism: from INSIDE a multi-seat
+vehicle the scan's other-seat candidates are killed by the vehicle's OWN hull
+(the LOS leg walks pool-1 collision models) — that is why the use key EXITS in
+retail rather than cycling seats. Our pool-1 vehicles carry no collision
+instances yet, so the toggle swaps on multi-seat vehicles (single-seat detaches
+correctly) — D-AI-11 j, lands with the vehicle-collision slice. A WAC-settable global `dword_C6EADC` (reset by
 `WacScript_FreeAll @ 0x4f637b`) blocks the local player's dismount when set.
 
 `Entity_TryEnterNearestVehicle @ 0x4368c0`: standing ON a vehicle

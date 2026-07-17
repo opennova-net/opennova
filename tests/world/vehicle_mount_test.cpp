@@ -346,6 +346,43 @@ void test_redirect_and_speed_commands() {
     CHECK(!r.w.registry.get(nh)->mounted);
 }
 
+// The SP drive input mirror: a mounted LOCAL player's live move bits reach the wire
+// input fields the motor consumes (pose_if_mounted mirrors them while tick_infantry is
+// skipped), and the occupant leg drives the vehicle from them.
+// [orig: one entity struct — MoveOrder feeds Entity_UpdateVehiclePhysics directly]
+void test_local_player_drive_mirror() {
+    Rig r(30.0f);
+    const VehicleTraits t = truck_traits();
+    r.w.vehicle_traits.set(r.veh().item_id, t);
+
+    // The local player as an infantry-active AI entity in the ctrl seat.
+    const int ai_idx = r.sys.attach(r.player_h);
+    AiEntity &pe = *r.sys.at(ai_idx);
+    pe.inf.active = true;
+    pe.inf.is_local_player = true;
+    pe.health = 150;
+    r.player().ground_target = r.veh_h;
+    CHECK(player_toggle_vehicle_mount(r.w, r.player_h)); // deck path -> ctrl seat
+    CHECK(is_vehicle_control_seat(r.player().mount_type));
+
+    // Live input: forward held, looking along +x (mission yaw 90).
+    pe.inf.player_moving = true;
+    pe.inf.player_move_dir_index = 0;
+    pe.inf.target_heading = bam_heading_from_mission_yaw_deg(90.0);
+
+    const float x0 = r.veh().position.x;
+    for (int i = 0; i < 124; ++i) {
+        CHECK(r.sys.pose_if_mounted(pe, r.w)); // the mirror + seat carry
+        tick_vehicle_motor(r.w, r.veh(), t);   // occupant leg reads the mirrored input
+    }
+    CHECK((r.player().net_move_input & 0x08u) != 0); // moving bit mirrored
+    CHECK(r.veh().position.x - x0 > 1.0f);           // the truck drove
+    // The seat carry kept the driver aboard.
+    const float dx = r.player().position.x - r.veh().position.x;
+    const float dy = r.player().position.y - r.veh().position.y;
+    CHECK(std::sqrt(dx * dx + dy * dy) < 4.0f);
+}
+
 // spawn_player stamps commandGroup 1 [orig: the deploy leg @0x519fd0] — 00TRa's tour
 // dialogs ("group 1 enters area X") track the player through it.
 void test_player_spawn_group() {
@@ -376,6 +413,7 @@ int main() {
     test_bms_mount_predicates();
     test_ai_drive_leg();
     test_redirect_and_speed_commands();
+    test_local_player_drive_mirror();
     test_player_spawn_group();
     if (failures == 0) std::printf("vehicle_mount_test: all checks passed\n");
     return failures == 0 ? 0 : 1;

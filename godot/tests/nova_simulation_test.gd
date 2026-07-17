@@ -518,14 +518,16 @@ func test_item_seat_specs_mount_command_125_spawn() -> void:
 		}
 	])
 	assert_true(sim.load_from_mission_data(md), "loaded command-125 mission with seat specs")
-	var pos := sim.get_entity_position(0)
+	var soldier_idx := _first_organic_ai_index(sim)
+	assert_true(soldier_idx >= 0, "found the soldier's AI row")
+	var pos := sim.get_entity_position(soldier_idx)
 	assert_true(pos.is_equal_approx(Vector3(10, 2, -1)),
 		"command-125 soldier uses the IDA-priority ctrlx seat, converted to Godot axes")
-	assert_almost_eq(sim.get_entity_yaw_deg(0), 45.0, 0.01,
+	assert_almost_eq(sim.get_entity_yaw_deg(soldier_idx), 45.0, 0.01,
 		"non-gunner mounted seats carry their local yaw offset")
 	# The mounted anim state (100 = anim_sit_24) is asserted via the debug card below; the present
 	# snapshot is the listen-server ClientState now (covered by nova_listen_server_test).
-	var card: Dictionary = sim.get_entity_debug(0)
+	var card: Dictionary = sim.get_entity_debug(soldier_idx)
 	assert_true(bool(card["mounted"]), "debug card marks mounted occupants")
 	assert_eq(int(card["mount_target_net_id"]), int(vehicle["bms_id"]))
 	assert_eq(int(card["mount_seat"]), 1, "ctrlx seat was selected by original priority")
@@ -545,6 +547,18 @@ func test_item_seat_specs_mount_command_125_spawn() -> void:
 	assert_eq(String(card["anim_key"]), "anim_sit_24")
 	sim.free()
 
+
+
+# Drivable items (control-seat specs) attach AI brains at promote since the vehicle
+# pass, so organics no longer sit at AI index 0 — resolve the first pool-0 row.
+func _first_organic_ai_index(sim: NovaSimulation) -> int:
+	for i in 64:
+		var d: Dictionary = sim.get_entity_debug(i)
+		if d.is_empty():
+			break
+		if int(d.get("pool", -1)) == 0:
+			return i
+	return -1
 
 func test_mounted_seat_local_matches_rotated_vehicle_userpoint() -> void:
 	var md := NovaMissionData.new()
@@ -570,7 +584,9 @@ func test_mounted_seat_local_matches_rotated_vehicle_userpoint() -> void:
 		}
 	])
 	assert_true(sim.load_from_mission_data(md), "loaded rotated command-125 mount")
-	var pos := sim.get_entity_position(0)
+	var soldier_idx := _first_organic_ai_index(sim)
+	assert_true(soldier_idx >= 0, "found the soldier's AI row")
+	var pos := sim.get_entity_position(soldier_idx)
 	var expected := Vector3(10.1189880, 2.1048889, 0.7148895)
 	assert_lt(pos.distance_to(expected), 0.001,
 		"mounted seat local follows the same rotated side as the selected model userpoint")
