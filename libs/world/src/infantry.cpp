@@ -961,7 +961,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                 inf.leg_target[0] = yaw;
         }
         for (int leg = 0; leg < 2; ++leg) {
-            // Quarter-step, rate clamp ±0x3000000 (~4.2 deg/tick — HALF the org1
+            // Quarter-step, rate clamp ±0x3000000 (~4.2 deg/tick — 3/5 the org1
             // rate), twist limit ±0x30000000 (67.5 deg) vs the YAW, not the body.
             // [orig: R @0x4b49e9-0x4b4a43; L @0x4b4a49-0x4b4aa9]
             const int32_t ldiff = io::bam_sub(inf.leg_target[leg], inf.leg_yaw[leg]);
@@ -1148,7 +1148,13 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             foot_clearance = e.pos[2] - frame.capsule_bottom - inf.ground_cache;
         }
         if (foot_clearance > kAirborneGap) {
-            if (!inf.airborne) {
+            // org2 includes DEAD in the gate that owns the airborne-bit write;
+            // a dead player that was not already airborne stays that way. org1's
+            // corresponding gate omits DEAD and sets airborne before its later
+            // dead/carried animation gates. [orig: org2 test 0x10A002
+            // @0x4b7e22-0x4b7e3c; org1 test 0x10A000 + write @0x4bf8b5-0x4bf8cf]
+            const bool fall_edge_allowed = !inf.is_local_player || e.health > 0;
+            if (fall_edge_allowed && !inf.airborne) {
                 // The airborne EDGE (was grounded; the already-in-air 0x2000 test
                 // skips it). The two motors differ in kind here:
                 //   org2 (player): dead skips the WHOLE edge (gate mask 0x10A002,
@@ -1164,23 +1170,21 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                 //   live non-carried bodies just clear any pending anim (dead skips
                 //   the clear too, airborne still sets). [orig: @0x4bf8ae-0x4bf901]
                 if (inf.is_local_player) {
-                    if (e.health > 0) {
-                        inf.vel[0] += (3 * root_wx) >> 2;
-                        inf.vel[1] += (3 * root_wy) >> 2;
-                        inf.anim_pending = 0; // [orig: @0x4b7e46, before the stamp]
-                        if (inf.anim_state != anim_state::kJumpLoop &&
-                            root_motion != nullptr &&
-                            root_motion->has_clip(inf.adm_id, anim_state::kJumpLoop)) {
-                            inf.anim_prev = inf.anim_state;
-                            inf.anim_state = anim_state::kJumpLoop;
-                            inf.clip_phase = 0;
-                        }
+                    inf.vel[0] += (3 * root_wx) >> 2;
+                    inf.vel[1] += (3 * root_wy) >> 2;
+                    inf.anim_pending = 0; // [orig: @0x4b7e46, before the stamp]
+                    if (inf.anim_state != anim_state::kJumpLoop &&
+                        root_motion != nullptr &&
+                        root_motion->has_clip(inf.adm_id, anim_state::kJumpLoop)) {
+                        inf.anim_prev = inf.anim_state;
+                        inf.anim_state = anim_state::kJumpLoop;
+                        inf.clip_phase = 0;
                     }
                 } else if (e.health > 0) {
                     inf.anim_pending = 0; // [orig: @0x4bf901]
                 }
             }
-            inf.airborne = true;
+            if (fall_edge_allowed) inf.airborne = true;
         } else if (foot_clearance <= 0) {
             // Landing. Fall damage skips DEAD bodies [orig: org1 `test dl,2`
             // @0x4bf843 — without it a hard-landing corpse would round its health

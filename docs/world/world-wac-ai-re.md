@@ -2889,7 +2889,10 @@ the org2 2× local integrate (§22.2). Unported by decision — dev/admin featur
   momentum carry (the `has_clip` guard is a host guard the original lacks); org1
   keeps its clip on a plain fall — its 47→31 ladder is parachute-gated
   (`@ 0x4bf8d8`) — and clears pending only. `player_body_select` lost its
-  airborne stand-in branch in favor of the witnessed selection gate.
+  airborne stand-in branch in favor of the witnessed selection gate. Review
+  follow-up: the org2 dead gate now suppresses the entire edge, including the
+  airborne-bit write (`test 0x10A002 @ 0x4b7e22`); pinned by
+  `test_dead_player_ledge_fall_edge_is_suppressed`.
 - Fall damage now skips dead bodies (the org1 `test dl,2` leg).
 - `InfantryState.jump_cooldown` added (the +0x1A8 reuse gets a dedicated field).
 - (2026-07-17 follow-up, same branch) the resolver's idle-skip gravity undo

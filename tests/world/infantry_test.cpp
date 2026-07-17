@@ -448,6 +448,36 @@ void test_npc_ledge_fall_keeps_clip() {
     CHECK(e->inf.airborne);
     CHECK(e->inf.anim_state == anim_state::kWalkForward); // NOT kJumpLoop
     CHECK(e->inf.anim_pending == 0);                      // [orig: @0x4bf901]
+    CHECK(e->inf.vel[0] == 0 && e->inf.vel[1] == 0);      // no org2 momentum carry
+}
+
+// Unlike org1, org2 includes DEAD in the gate around the whole ledge-fall edge:
+// a dead player that was grounded does not gain the airborne bit, clear pending,
+// or stamp jump_loop merely because the resolver returns >0xF000.
+// [orig: `test eax,10A002h; jnz` @0x4b7e22-0x4b7e2a, before the airborne write
+//  @0x4b7e3c; compare org1's 0x10A000 gate + pre-dead-test write @0x4bf8b5-0x4bf8cf]
+void test_dead_player_ledge_fall_edge_is_suppressed() {
+    Field ground0([](int) { return static_cast<uint16_t>(0); });
+    World w;
+    AiSystem ai;
+    ai.terrain = &ground0.field;
+    TestSource src;
+    src.clips = {anim_state::kDeathFire, anim_state::kJumpLoop};
+    ai.root_motion = &src;
+    AiEntity *e = soldier(ai);
+    e->health = 0;
+    e->inf.is_local_player = true;
+    e->inf.anim_state = anim_state::kDeathFire; // already on the death-family path
+    e->inf.anim_pending = 123;
+    e->pos[0] = fx(100);
+    e->pos[1] = fx(100);
+    e->pos[2] = fx(80);
+
+    run_ticks(ai, w, 0, 1);
+
+    CHECK(!e->inf.airborne); // org2's dead gate owns the airborne-bit write
+    CHECK(e->inf.anim_state == anim_state::kDeathFire);
+    CHECK(e->inf.anim_pending == 123); // the whole fall edge was skipped
 }
 
 // The resolver's idle skip-throttle undo must match the CALLER's integrate per
@@ -1866,6 +1896,7 @@ int main() {
         e->health = 100;
         e->pos[0] = fx(100); e->pos[1] = fx(100); e->pos[2] = floor_z;
 
+        e->inf.player_moving = true;           // running jump: root step carries 3/4
         run_ticks(ai, w, 0, 2);               // settle on the ground first
         CHECK(!e->inf.airborne);
         CHECK(e->pos[2] == floor_z);
@@ -1876,21 +1907,28 @@ int main() {
         CHECK(e->inf.vel[2] == 0x1600);       // the raw impulse; gravity bites next tick
         CHECK(e->inf.jump_cooldown == 32);    // reloaded [orig: @0x4b7f06]
         CHECK(e->inf.anim_state == anim_state::kJumpLoop); // stamped at the jump (no 30 clip)
+        CHECK(e->inf.vel[0] == (3 * src.step) / 4); // rotated root-step momentum carry
         run_ticks(ai, w, 3, 4);
         CHECK(e->inf.vel[2] == 0x1600 - 208); // org2 per-tick gravity
         CHECK(e->pos[2] > floor_z);           // rising
 
-        // A held key while airborne neither re-jumps nor drains the cooldown below 1.
-        e->inf.jump_requested = true;
-        run_ticks(ai, w, 4, 100);             // arcs up and lands (jump_requested is
-        CHECK(!e->inf.airborne);              // consumed each tick; not re-set -> release)
+        // Model a genuinely HELD key: the host reapplies the level input before every
+        // motor tick. The cooldown parks at 1 and the grounded player never auto-repeats.
+        for (uint32_t t = 4; t < 100; ++t) {
+            e->inf.jump_requested = true;
+            run_ticks(ai, w, t, t + 1);
+        }
+        CHECK(!e->inf.airborne);
         CHECK(e->pos[2] == floor_z);
-        CHECK(e->inf.jump_cooldown == 0);     // released -> the 1 -> 0 edge fired
+        CHECK(e->inf.jump_cooldown == 1);     // held-at-1 latch: no auto-repeat
+
+        run_ticks(ai, w, 100, 101);           // release edge
+        CHECK(e->inf.jump_cooldown == 0);
 
         // Prone bodies never jump. [orig: the var_10AC gate @0x4b7e99]
         e->inf.stance = InfantryState::Stance::kProne;
         e->inf.jump_requested = true;
-        run_ticks(ai, w, 100, 101);
+        run_ticks(ai, w, 101, 102);
         CHECK(!e->inf.airborne);
         e->inf.stance = InfantryState::Stance::kStand;
     }
@@ -2044,6 +2082,7 @@ int main() {
     test_player_body_chase_and_legs();
     test_player_body_chase_crosses_the_bam_seam();
     test_npc_ledge_fall_keeps_clip();
+    test_dead_player_ledge_fall_edge_is_suppressed();
     test_player_idle_skip_throttle_no_bounce();
     test_player_weapon_channel();
     test_player_weapon_hold_kinds();
