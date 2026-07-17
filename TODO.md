@@ -34,23 +34,6 @@
       against the wire witness and re-pin. All other gated tests pass with data
       (117/117 corpus, JO sweeps, LAN-join goldens, golden client).
 
-- [ ] `opennova_python_pytest` FAILS 15 tests on any machine with a working `bpy`
-      (diagnosed 2026-07-05 at the Wave-2 boundary; CI stays green because
-      `importorskip("bpy")` skips there — same skip-as-green trap as the gated tests).
-      Two roots, both in the DCC parity tests (`tests/test_anim_dcc_parity.py`,
-      `test_ase_dcc_parity.py`, landed #59): (1) they build an animations-only request
-      (`write_blend/ase/3dp=False`) that `validate_import_request` rejects
-      ("Select at least one file to write." — `writes_any_output_file()` predates
-      animation export and does not count it; `_request_for_blender` in
-      `opennova_blender/backend.py` likewise returns None for it); (2) their in-process
-      `import bpy` poisons the pytest parent, and the spawn-context worker pool inherits
-      the corrupted `sys.path`, so the 13 `test_importer_integration` tests die with
-      `No module named '_bpy'` — all 13 pass in isolation. `bpy_session.py`'s docstring
-      forbids exactly this parent-process import. Fix shape: decide whether
-      animations-only is a valid import request (count animation exports in
-      `writes_any_output_file()` + give the blender leg the work) or fix the tests to
-      request a scene output — and either way run the parity exports in a subprocess.
-
 - [ ] Terrain native `[orig]` citation pass: sweep `godot/engine/terrain/` + `libs/terrain` for the remaining uncited chains — `docs/terrain/terrain-re.md` now exists (partial, PAR-R1) and `libs/terrain` carries inline citations after the 2026-07 re-grills (#245); narrow or close this entry after the sweep
 - [ ] Present-pass / entity-reconcile citation pass: `engine/world/mission_present_pass.gd`, `mission_entity_registry.gd`, `wire_present_pass.gd` document design but carry no `[orig]` anchors; engine-research the original present/tick chain and cite into `docs/runtime-architecture.md` + `docs/correspondence.md`
 - [ ] Two-net-stack convergence: the NovaNetClient replay/spectate path vs the NovaWorldClient/NovaSimulation listen-server path (see godot/engine/CLAUDE.md); decide convergence once the net workstream stabilizes
@@ -58,6 +41,20 @@
 - [ ] `opennova::io` adoption continuation: migrate remaining per-lib byte readers on-touch (policy in libs/CLAUDE.md); excluded: mus/wac VM cursors (faithful-port surface)
 - [ ] `mission_controller.gd` full decomposition (beyond what the inspector split needed): extract selection/gizmo/placement concerns
 - [ ] Mission workspace rail conversion: with the inspector decomposed into section components, moving Mission onto `_build_inspector_defs()` workflow rows is a small step, but it swaps the in-panel mode tabs for the shell's workflow rail (visible layout change) - needs a deliberate UX pass
+- [ ] Failed replay-boot rollback (owner: `godot/game/main_game.gd`): route an immediate `load_net_session()` error through the same idempotent menu teardown as emitted load failures. Acceptance (`godot/tests/game/main_game_lifecycle_test.gd`): a replay boot rejected before connecting restores `State.MENU`, menu visibility, hidden world/HUD, and no kill feed.
+- [ ] NovaWorld disconnect-state reset (owner: `godot/game/novaworld_panel.gd`): clear all connection-derived rows, login/join state, pending mission/player data, and disable Host/Join/Login on disconnect or error. Acceptance (`godot/tests/novaworld_panel_test.gd`): a populated, logged-in, pending-join panel returns to a clean disconnected state and cannot submit a stale row.
+- [ ] Flavored-export initiator preservation (owner: `godot/modtools/editor/shell/save_export_flow.gd`): retain the workspace that opened the flavor dialog instead of resolving whichever workspace is active at confirmation. Acceptance (`godot/tests/terrain_editor_workstation_test.gd`): switching tabs while the dialog is open exports the initiating workspace exactly once and never the newly active one.
+- [ ] Idempotent browser-pane wiring (owner: `godot/modtools/editor/shell/layout_persistence.gd`): guard the browser toggle connection just like the split signal. Acceptance (`godot/tests/terrain_editor_workstation_test.gd`): calling `wire_browser_pane()` twice raises no signal-connect error and one toggle produces one visibility/persistence update.
+- [ ] Defined bitstream dword access (owners: `libs/io/include/io/bit_stream.h`, `libs/cpt/src/cpt_io.cpp`): replace the unaligned `reinterpret_cast<uint32_t *>` stores with byte-safe little-endian loads/stores and converge CPT on the shared primitive. Acceptance (`tests/io/io_test.cpp`, `tests/cpt/cpt_roundtrip_test.cpp`): fields crossing 1-, 2-, and 3-byte offsets retain golden bytes and run clean under UBSan alignment checks.
+- [ ] Bound malformed CPT declarations before allocation (owner: `libs/cpt/src/cpt_io.cpp`): validate CDEP block-count/width products and remaining bit budget before resizing decoded buffers. Acceptance (`tests/cpt/cpt_roundtrip_test.cpp`): a tiny CDEP declaring `0xffff * 0xffff` pixels and a truncated large-count POLY both return `false` with stable errors, without large allocation or ASan findings.
+- [ ] Reject backward RTXT text ranges (owner: `libs/rtxt/src/rtxt.cpp`): require `text_data_end` to be at or after the entry table before treating it as section metadata. Acceptance (`tests/rtxt/roundtrip_test.cpp`): a one-entry file whose `text_data_end` points inside the entry table is rejected with a stable parse error.
+- [ ] Harden replay numeric input and playback I/O (owner: `apps/nw_replay/nw_replay.cpp`): reject non-finite or partially parsed numeric arguments and propagate capture-read / UDP-send failures instead of reporting playback complete. Acceptance (new `tests/novaworld/nw_replay_cli_test.cpp`): `--speed nan`, `inf`, junk, and overflow fail parsing, while injected stream/read and send failures produce a non-zero playback result.
+
+## Project health follow-ups
+
+- [ ] Release-gate parity: make tag releases run the same required quality gates as PR/master CI, or reject release tags whose commit is not on `master`. Acceptance: an off-master tag cannot publish, and a valid release commit passes the shared maturity, native, Python, and Godot gates.
+- [ ] Full Linux core tests: add an Ubuntu leg for the complete native/Python suite after triaging any platform-only failures. Acceptance: the full CTest and Python suites run on Linux for every PR without relying on the net-only or packaging jobs.
+- [ ] Incremental conventional linting: establish project-owned editor/format settings, then add per-language lint checks in advisory or changed-file mode before enforcing them. Acceptance: CI checks new changes without requiring a repository-wide reformat, with documented local commands for each enabled linter.
 
 ## Player info (player.mnu / PLAYER_INFO)
 

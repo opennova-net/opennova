@@ -82,6 +82,7 @@ void extract_ipv4_udp(const uint8_t *pkt, size_t len, uint32_t linktype,
 		return;
 	}
 	const uint16_t ip_total_len = read_u16_be(ip + 2);
+	if (ip_total_len < ihl + 8) return;
 	const size_t udp_off = size_t(ip_off) + ihl;
 	if (udp_off + 8 > len) return;
 	const uint8_t *udp = pkt + udp_off;

@@ -246,7 +246,10 @@ func load_mission_as_host(config: Dictionary) -> int:
 		_host_config = {}
 		load_failed.emit("host start: no mission selected")
 		return ERR_INVALID_PARAMETER
-	return load_mission(bms, String(config.get("dir", "")))
+	var err := load_mission(bms, String(config.get("dir", "")))
+	if err != OK:
+		_host_config = {}
+	return err
 
 
 ## Load a mission as a LAN co-op JOINER (a non-authority client). Same load path as a host
@@ -275,7 +278,10 @@ func load_mission_as_joiner(server: Dictionary, player_name: String) -> int:
 	# extension pass through unchanged.
 	if not bms.to_lower().ends_with(".bms"):
 		bms += ".bms"
-	return load_mission(bms, String(server.get("dir", "")))
+	var err := load_mission(bms, String(server.get("dir", "")))
+	if err != OK:
+		_host_config = {}
+	return err
 
 
 # True between load_mission_as_joiner and _start_runtime's config consume: this load is a
@@ -424,6 +430,7 @@ func _load_mission_internal(mission: NovaMissionData, bms_name: String, resource
 	timeline.span("environment")
 	if not _load_environment(env_name):
 		load_failed.emit("failed to load %s" % env_name)
+		timeline.finish()
 		return ERR_CANT_OPEN
 	_apply_mission_environment_overrides(mission)
 	timeline.end_span()
@@ -431,6 +438,7 @@ func _load_mission_internal(mission: NovaMissionData, bms_name: String, resource
 	timeline.span("terrain")
 	if not _load_terrain(trn):
 		load_failed.emit("failed to load %s" % trn)
+		timeline.finish()
 		return ERR_CANT_OPEN
 	timeline.end_span()
 	load_progress.emit(26)

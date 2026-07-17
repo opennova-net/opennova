@@ -91,7 +91,8 @@ inline int coords_quadrant_offset_z(int sector_id) {
 // 0) outside the authored rows/cols, otherwise clamp to [0,4].
 // Mirrors EditorTerrainMesh.get_sector_cell_value.
 inline int coords_sector_id_at_cell(const SectorLayout &layout, int row, int col) {
-	if (row < 0 || row >= layout.sector_rows || col < 0 || col >= layout.sector_count) {
+	if (!layout.sector_grid || row < 0 || row >= layout.sector_rows ||
+	    col < 0 || col >= layout.sector_count) {
 		return 0;
 	}
 	return coords_clampi(layout.sector_grid[row * COORDS_SECTOR_GRID_DIM + col], 0, COORDS_SECTOR_ID_MAX);
@@ -105,6 +106,9 @@ template <typename Real>
 CoordsResult<Real> coords_world_to_source(const SectorLayout &layout, Real world_x, Real world_z,
                                           const CoordsOptions &opts) {
 	CoordsResult<Real> out;
+	if (!layout.sector_grid) {
+		return out;
+	}
 	const int sector_sx = static_cast<int>(std::floor(world_x / static_cast<Real>(COORDS_SECTOR_SIZE)));
 	const int sector_sz = static_cast<int>(std::floor(world_z / static_cast<Real>(COORDS_SECTOR_SIZE)));
 	out.sector_sx = sector_sx;

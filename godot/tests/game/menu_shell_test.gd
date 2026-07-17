@@ -143,6 +143,21 @@ func test_cross_mnu_jump_and_back_stack() -> void:
 	_cleanup(dir)
 
 
+func test_failed_cross_mnu_jump_does_not_change_back_stack() -> void:
+	var dir := _make_dir()
+	var host = _make_host(dir)
+	if host == null:
+		pass_test("temp resource root unavailable")
+		_cleanup(dir)
+		return
+	host.get_menu().navigate_to_menu("missing.mnu", "")
+	assert_eq(host.get_current_menu_file(), "main.mnu",
+		"a rejected cross-menu jump keeps the current menu")
+	assert_eq(host.get_menu_stack_depth(), 0,
+		"a rejected cross-menu jump cannot add a no-op Back step")
+	_cleanup(dir)
+
+
 func test_top_level_quit_requests_exit() -> void:
 	var dir := _make_dir()
 	var host = _make_host(dir)

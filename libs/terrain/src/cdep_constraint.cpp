@@ -44,7 +44,8 @@ bool clamp_block(float *heights, int width, int bx, int z) {
 }  // namespace
 
 int cdep_clamp_blocks_in_rect(float *heights, int width, int height, const CdepRect &rect) {
-    if (rect.x1 - rect.x0 <= 0 || rect.z1 - rect.z0 <= 0)
+    if (!heights || width < CDEP_BLOCK_WIDTH || height <= 0 ||
+        rect.x1 - rect.x0 <= 0 || rect.z1 - rect.z0 <= 0)
         return 0;
     int blocks_per_row = width / CDEP_BLOCK_WIDTH;
     if (blocks_per_row <= 0)
@@ -62,6 +63,8 @@ int cdep_clamp_blocks_in_rect(float *heights, int width, int height, const CdepR
 }
 
 int cdep_count_violations(const float *heights, int width, int height) {
+    if (!heights || width < CDEP_BLOCK_WIDTH || height <= 0)
+        return 0;
     int blocks_per_row = width / CDEP_BLOCK_WIDTH;
     int count = 0;
     for (int z = 0; z < height; ++z)
@@ -75,6 +78,8 @@ int cdep_count_violations(const float *heights, int width, int height) {
 }
 
 int cdep_clamp_all_violations(float *heights, int width, int height) {
+    if (!heights || width < CDEP_BLOCK_WIDTH || height <= 0)
+        return 0;
     int blocks_per_row = width / CDEP_BLOCK_WIDTH;
     int clamped = 0;
     for (int z = 0; z < height; ++z)

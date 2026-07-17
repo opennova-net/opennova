@@ -33,6 +33,25 @@ static int test_decode_sample_extremes(void) {
     return 1;
 }
 
+static int test_decode_chunk_rejects_invalid_scales(void) {
+    uint8_t chunk[SBF_CHUNK_HEADER + 2] = {0};
+    int16_t decoded[2] = {0};
+    SbfChunkHeader h = {};
+    h.valid_samples = 2;
+
+    h.scale_a = 8;
+    memcpy(chunk, &h, SBF_CHUNK_HEADER);
+    CHECK(sbf_decode_chunk(chunk, sizeof(chunk), decoded, 2) < 0,
+          "scale_a above 7 is rejected");
+
+    h.scale_a = 0;
+    h.scale_b = 255;
+    memcpy(chunk, &h, SBF_CHUNK_HEADER);
+    CHECK(sbf_decode_chunk(chunk, sizeof(chunk), decoded, 2) < 0,
+          "scale_b above 7 is rejected");
+    return 1;
+}
+
 /* TODO golden WAV compare once apps/sbf_cli (deferred) lands.
    Phase B fallback: sanity-decode + first-byte hand check verifies the
    decoder produces reasonable output without an external reference. */
@@ -127,6 +146,7 @@ static int test_decode_all_bhd_menu101_multichunk(void) {
 int main(void) {
     RUN_TEST(test_decode_sample_silence);
     RUN_TEST(test_decode_sample_extremes);
+    RUN_TEST(test_decode_chunk_rejects_invalid_scales);
     RUN_TEST(test_decode_chunk_bhd_menu101);
     RUN_TEST(test_decode_chunk_jo_nulls_partial);
     RUN_TEST(test_decode_all_jo_nulls);

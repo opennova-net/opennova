@@ -48,6 +48,9 @@ func owns_menu(menu: Node) -> bool:
 
 # Provide the LAN discovery/advertise session (Phase 3). Optional in Phase 1.
 func set_lan_session(session) -> void:
+	if _lan_session != null and _lan_session.has_signal("servers_changed") \
+			and _lan_session.servers_changed.is_connected(_on_servers_changed):
+		_lan_session.servers_changed.disconnect(_on_servers_changed)
 	_lan_session = session
 	if _lan_session != null and _lan_session.has_signal("servers_changed") \
 			and not _lan_session.servers_changed.is_connected(_on_servers_changed):
@@ -92,6 +95,7 @@ func _on_lan_search() -> void:
 
 func _on_servers_changed(servers: Array) -> void:
 	_servers = servers
+	_selected_server = -1
 	_refresh_lan_list()
 
 

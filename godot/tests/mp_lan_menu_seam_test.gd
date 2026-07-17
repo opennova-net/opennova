@@ -9,6 +9,17 @@ extends GutTest
 const MenuShell := preload("res://game/menu_shell.gd")
 
 
+class _LanSessionStub extends RefCounted:
+	signal servers_changed(servers: Array)
+
+	func publish(servers: Array) -> void:
+		servers_changed.emit(servers)
+
+
+class _LanMenuStub extends Node:
+	signal widget_value_changed(widget_name: String, kind: String, index: int, value: String)
+
+
 # A stand-in for the built mp.mnu host-settings screen: a plain Node (the companion only
 # needs find_child + the optional widget_value_changed signal) with the named NovaMnu*
 # controls as children, exactly as the menu builder would name them from the .mnu.
@@ -33,6 +44,20 @@ func _make_host_menu() -> Node:
 		var b := Button.new()
 		b.name = n
 		menu.add_child(b)
+	return menu
+
+
+func _make_lan_menu() -> Node:
+	var menu := _LanMenuStub.new()
+	menu.name = "Menu"
+	add_child_autofree(menu)
+	var server_list := NovaMnuList.new()
+	server_list.name = "LAN_GAME_LIST"
+	menu.add_child(server_list)
+	for control_name in ["LAN_SEARCH", "LAN_JOINGAME"]:
+		var button := Button.new()
+		button.name = control_name
+		menu.add_child(button)
 	return menu
 
 
@@ -120,6 +145,39 @@ func test_lan_join_emits_selected_server() -> void:
 	var server: Dictionary = get_signal_parameters(mp, "lan_join_requested")[0]
 	assert_eq(server.get("host_ip"), "192.168.1.10")
 	assert_eq(server.get("port"), 32768)
+
+
+func test_refreshed_lan_rows_require_a_fresh_selection() -> void:
+	var mp := MpMenuHost.new()
+	watch_signals(mp)
+	var menu := _make_lan_menu()
+	mp.on_menu_built(menu, "jo_mp.mnu", "LAN_MULTI_PLAYER", null)
+	var session := _LanSessionStub.new()
+	mp.set_lan_session(session)
+	session.publish([{"name": "old", "host_ip": "192.168.1.10", "port": 32768}])
+	menu.emit_signal("widget_value_changed", "LAN_GAME_LIST", "list", 0, "old")
+
+	session.publish([{"name": "replacement", "host_ip": "192.168.1.11", "port": 32769}])
+	_press(menu, "LAN_JOINGAME")
+	assert_signal_not_emitted(mp, "lan_join_requested",
+		"refreshed rows invalidate the selection from the previous result set")
+
+
+func test_swapping_lan_sessions_disconnects_the_previous_discovery_source() -> void:
+	var mp := MpMenuHost.new()
+	var menu := _make_lan_menu()
+	mp.on_menu_built(menu, "jo_mp.mnu", "LAN_MULTI_PLAYER", null)
+	var previous := _LanSessionStub.new()
+	var current := _LanSessionStub.new()
+	mp.set_lan_session(previous)
+	mp.set_lan_session(current)
+	current.publish([{"name": "current", "players": 1, "max_players": 4, "mission": "new.bms"}])
+	previous.publish([{"name": "stale", "players": 4, "max_players": 4, "mission": "old.bms"}])
+
+	var server_list := menu.find_child("LAN_GAME_LIST", true, false) as NovaMnuList
+	assert_eq(server_list.get_item_count(), 1)
+	assert_true(server_list.get_item_text(0).contains("current"),
+		"events from a replaced discovery session cannot overwrite the current rows")
 
 
 func test_shell_accepts_companion() -> void:

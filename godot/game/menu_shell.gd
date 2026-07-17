@@ -495,8 +495,9 @@ func _current_expansion() -> String:
 
 func _on_menu_requested(file: String, target_screen: String) -> void:
 	# Cross-.mnu forward jump: remember where we are so the back stack can return.
-	_menu_stack.push_back({"file": _current_file, "screen": _menu.current_screen})
-	open_menu(file, target_screen)
+	var previous := {"file": _current_file, "screen": _menu.current_screen}
+	if open_menu(file, target_screen):
+		_menu_stack.push_back(previous)
 
 
 func _on_quit_requested() -> void:

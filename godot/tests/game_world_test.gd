@@ -615,6 +615,119 @@ func test_injected_root_bypasses_settings_mount() -> void:
 		"the error names the injected root's directory, proving no settings mount ran")
 
 
+func test_failed_host_load_does_not_arm_the_next_mission_as_a_lan_host() -> void:
+	var world := _make_world()
+	add_child_autofree(world)
+	await get_tree().process_frame
+	world.set_playable(false)
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path("res://../fixtures/minimal/resources")), OK)
+	world.set_resource_root(root)
+
+	assert_eq(world.load_mission_as_host({
+		"mission": "missing.bms",
+		"net_transport": "lan",
+		"bind_port": 0,
+	}), ERR_FILE_NOT_FOUND)
+	assert_eq(world.load_mission("mnml.bms"), OK)
+	var sim: NovaSimulation = world.get_sim()
+	assert_not_null(sim)
+	if sim != null:
+		assert_false(sim.is_host_listening(),
+			"a rejected host request cannot turn a later ordinary mission into a LAN host")
+	world.unload()
+
+
+func test_failed_join_load_does_not_make_the_next_mission_wire_only() -> void:
+	var world := _make_world()
+	add_child_autofree(world)
+	await get_tree().process_frame
+	world.set_playable(false)
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path("res://../fixtures/minimal/resources")), OK)
+	world.set_resource_root(root)
+
+	assert_eq(world.load_mission_as_joiner({
+		"mission": "missing.bms",
+		"host_ip": "127.0.0.1",
+		"port": 9,
+	}, "Joiner"), ERR_FILE_NOT_FOUND)
+	assert_eq(world.load_mission("mnml.bms"), OK)
+	assert_gt(int(world.get_mission_stats().get("markers", 0)), 0,
+		"a rejected join request cannot make a later ordinary mission wire-only")
+	world.unload()
+
+
+func test_environment_load_failure_finishes_its_perf_timeline() -> void:
+	var root_dir := OS.get_cache_dir().path_join(WORLD_TEST_ROOT).path_join(
+		"timeline_env_%d" % Time.get_ticks_usec())
+	assert_eq(DirAccess.make_dir_recursive_absolute(root_dir), OK)
+	var bms_name := "timeline_env_fail_%d.bms" % Time.get_ticks_usec()
+	assert_eq(DirAccess.copy_absolute(
+		ProjectSettings.globalize_path("res://../fixtures/minimal/resources/mnml.bms"),
+		root_dir.path_join(bms_name)), OK)
+	_write_fixture_file(root_dir.path_join("mnml.env"), "")
+	_write_fixture_file(root_dir.path_join("mnml.trn"), "terrain_name \"mnml\"\n")
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(root_dir), OK)
+
+	var packed := load("res://engine/world/game_world.tscn") as PackedScene
+	var world := packed.instantiate() as GameWorld
+	add_child_autofree(world)
+	await get_tree().process_frame
+	world.set_playable(false)
+	world.set_resource_root(root)
+	assert_eq(world.load_mission(bms_name), ERR_CANT_OPEN)
+
+	var timeline: PerfTimeline = PerfTimeline.latest()
+	assert_not_null(timeline, "a failed environment stage still retains its timeline")
+	if timeline == null:
+		return
+	assert_eq(timeline.label, "Mission load %s" % bms_name)
+	var spans := timeline.spans()
+	assert_eq(spans.size(), 1)
+	if spans.size() == 1:
+		assert_eq(String(spans[0].get("name", "")), "environment")
+		assert_gt(int(spans[0].get("end_us", 0)), 0,
+			"finish closes the environment span left open by the early return")
+
+
+func test_terrain_load_failure_finishes_its_perf_timeline() -> void:
+	var root_dir := OS.get_cache_dir().path_join(WORLD_TEST_ROOT).path_join(
+		"timeline_terrain_%d" % Time.get_ticks_usec())
+	assert_eq(DirAccess.make_dir_recursive_absolute(root_dir), OK)
+	var bms_name := "timeline_terrain_fail_%d.bms" % Time.get_ticks_usec()
+	assert_eq(DirAccess.copy_absolute(
+		ProjectSettings.globalize_path("res://../fixtures/minimal/resources/mnml.bms"),
+		root_dir.path_join(bms_name)), OK)
+	_write_fixture_file(root_dir.path_join("mnml.env"), "")
+	_write_fixture_file(root_dir.path_join("mnml.trn"), "")
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(root_dir), OK)
+
+	var world := _make_world()
+	add_child_autofree(world)
+	await get_tree().process_frame
+	world.set_playable(false)
+	world.set_resource_root(root)
+	assert_eq(world.load_mission(bms_name), ERR_CANT_OPEN)
+
+	var timeline: PerfTimeline = PerfTimeline.latest()
+	assert_not_null(timeline, "a failed terrain stage still retains its timeline")
+	if timeline == null:
+		return
+	assert_eq(timeline.label, "Mission load %s" % bms_name)
+	var spans := timeline.spans()
+	assert_eq(spans.size(), 2)
+	if spans.size() == 2:
+		assert_eq(String(spans[0].get("name", "")), "environment")
+		assert_eq(String(spans[1].get("name", "")), "terrain")
+		assert_gt(int(spans[1].get("end_us", 0)), 0,
+			"finish closes the terrain span left open by the early return")
+
+
 func test_successful_mission_load_exposes_the_loaded_file_until_unload() -> void:
 	var world := _make_world()
 	add_child_autofree(world)

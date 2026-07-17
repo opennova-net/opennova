@@ -98,11 +98,12 @@ int sbf_read_chunk(const SbfArchive *arc, const SbfRawEntry *entry,
    in audio_channel_compute_mix_coefficients @ 0x007BD4B0; we collapse the
    shift into the sample-value domain since libs/sbf's output target is int16
    PCM rather than the engine's 8-bit mix buffer. Caller passes scale_a for
-   even bytes (L) and scale_b for odd bytes (R). */
+   even bytes (L) and scale_b for odd bytes (R). Scales above the format's
+   supported 0..7 range clamp to 7. */
 static inline int16_t sbf_decode_sample(uint8_t byte, uint8_t scale) {
-    int32_t s = (int32_t)byte - 128;
-    s = (s * 256) >> scale;
-    return (int16_t)(s >> 1);
+    if (scale > 7) scale = 7;
+    const int32_t s = (int32_t)byte - 128;
+    return (int16_t)(s * (int32_t)(128u >> scale));
 }
 
 /* Decode one chunk to int16 PCM. Returns sample count (== chunk header
@@ -123,9 +124,10 @@ int sbf_decode_all(const uint8_t *raw_bytes, size_t raw_size,
 
 /* Encode one int16 PCM sample to offset-binary u8 at the given mix-coeff
    shift. Saturates rather than wrapping when the post-scale value would
-   overflow [0, 255]. */
+   overflow [0, 255]. Scales above 7 clamp to 7. */
 static inline uint8_t sbf_encode_sample(int16_t sample, uint8_t scale) {
-    int32_t v = ((int32_t)sample << 1) << scale;
+    if (scale > 7) scale = 7;
+    int32_t v = (int32_t)sample * (int32_t)(2u << scale);
     v = (v / 256) + 128;
     if (v < 0)   return 0;
     if (v > 255) return 255;

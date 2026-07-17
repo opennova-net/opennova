@@ -91,6 +91,21 @@ int main() {
     layout.sector_count = 8;
     layout.sector_rows = 8;
 
+    // Missing sector storage is an empty layout across every public lookup.
+    SectorLayout missing;
+    missing.sector_count = 1;
+    missing.sector_rows = 1;
+    check(coords_sector_id_at_cell(missing, 0, 0) == 0,
+          "null sector grid cell lookup is empty");
+    check(!coords_world_to_source<float>(missing, 0.0f, 0.0f,
+                                         coords_runtime_options()).valid,
+          "null sector grid world lookup is invalid");
+    check(!coords_world_to_cell_source<float>(missing, 0.0f, 0.0f, 0, 0).valid,
+          "null sector grid explicit-cell lookup is invalid");
+    CoordsRect missing_rect = coords_cell_atlas_rect(missing, 0, 0);
+    check(missing_rect.w == 0 && missing_rect.h == 0,
+          "null sector grid atlas rect is empty");
+
     // --- Runtime mode equals the verbatim resolve_world_sample oracle ---
     struct Pt { float x, z; const char *name; };
     const Pt pts[] = {

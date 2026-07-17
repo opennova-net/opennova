@@ -4,12 +4,11 @@ on:
   push:
     branches: [master]
   pull_request:
-    # Include unified-edit-history so PRs stacked on the Mission Workspace branch
-    # (e.g. the .lwf sound PR) get CI before that branch lands on master.
-    # web-nw-for-real-master is the NovaWorld integration trunk (see plan/);
-    # PRs for that effort target it instead of master until it lands.
-    branches: [master, unified-edit-history, web-nw-for-real-master]
+    branches: [master]
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 # On a PR, github.head_ref is the source branch, so a new push cancels the older
 # run (and prevents two runs racing to post the build-links comment). On push to
@@ -48,7 +47,7 @@ jobs:
 
       - name: Install uv
         shell: bash
-        run: python -m pip install --upgrade uv
+        run: python -m pip install uv==0.11.17
 
       # Maturity-program guards (docs/maturity-program.md, STD-1), enforced
       # since the Wave-2 boundary (STD-3): the ratchet fails on any counter
@@ -148,7 +147,7 @@ jobs:
 
       - name: Install uv
         shell: bash
-        run: python -m pip install --upgrade uv
+        run: python -m pip install uv==0.11.17
 
       - name: Build ModSuperOED hook
         shell: pwsh
