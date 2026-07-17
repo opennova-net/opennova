@@ -39,6 +39,19 @@ func _mission_wait(seconds: float) -> void:
 		await process_frame
 
 
+func _tap_key(keycode: Key) -> void:
+	var down := InputEventKey.new()
+	down.keycode = keycode
+	down.physical_keycode = keycode
+	down.pressed = true
+	Input.parse_input_event(down)
+	var up := InputEventKey.new()
+	up.keycode = keycode
+	up.physical_keycode = keycode
+	up.pressed = false
+	Input.parse_input_event(up)
+
+
 var _blacklist: Array[int] = []
 
 
@@ -318,14 +331,25 @@ func _run() -> void:
 		print("PROBE FAIL: MissionEndScreen never mounted after the round end")
 		quit(1)
 		return
-	var banner: String = game._hud_host.endround_banner_line()
+	var strings := root.get_node_or_null("NovaStrings")
+	if strings == null:
+		print("PROBE FAIL: NovaStrings autoload is unavailable")
+		quit(1)
+		return
+	var banner: String = strings.lookup_display("gametext", "Misc", expected_key)
+	var banner_visible := false
+	for node in screen.find_children("*", "Label", true, false):
+		var label := node as Label
+		if label != null and label.text == banner:
+			banner_visible = true
+			break
 	print("PROBE end screen up; banner='%s'" % banner)
-	if banner.is_empty():
-		print("PROBE FAIL: the endround banner line is empty on the lose screen")
+	if not banner_visible:
+		print("PROBE FAIL: the expected endround banner is absent from the lose screen")
 		quit(1)
 		return
 
-	game._on_camera_escape() # [orig: ESC -> g_mission_exit_reason=1 -> Post Menu]
+	_tap_key(KEY_ESCAPE) # [orig: ESC -> g_mission_exit_reason=1 -> Post Menu]
 	await _mission_wait(1.0)
 	if world.is_loaded():
 		print("PROBE FAIL: ESC did not tear the world down to the menu")

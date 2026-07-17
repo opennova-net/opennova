@@ -371,7 +371,7 @@ func test_round_outcome_effects_pass_through_to_hud_consumers() -> void:
 	# win/lose handlers @0x4ed4a0/@0x4ed3f0 + Server_ProcessRoundEnd @0x5164f0] and is
 	# host presentation on this side: the router must pass every row through to
 	# mission_effects (the HUD banner + the shell's end-of-mission flow consume there).
-	var world := _make_world()
+	var world := _make_item_fx_world()
 	add_child_autofree(world)
 	watch_signals(world)
 	var rows := [
@@ -379,7 +379,7 @@ func test_round_outcome_effects_pass_through_to_hud_consumers() -> void:
 		{"kind": "win", "a": 1},
 		{"kind": "round_end", "a": 2},
 	]
-	world._on_runtime_effects(rows)
+	world.consume_runtime_effects(rows)
 	assert_signal_emitted_with_parameters(world, "mission_effects", [rows])
 
 

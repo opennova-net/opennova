@@ -164,7 +164,7 @@ func test_lose_effect_sets_endround_banner_and_message() -> void:
 	])
 	assert_string_contains(host.endround_banner_line(), "STRMISC_KILLEDGREEN",
 			"the lose banner resolves (or marks) the Misc gametext key")
-	assert_eq(host._pending_hud_messages.size(), 1,
+	assert_eq(host.pending_hud_message_count(), 1,
 			"the lose banner also lands one chat-feed line [orig: Chat_AddMessageChannel1]")
 	host.teardown()
 	assert_eq(host.endround_banner_line(), "",

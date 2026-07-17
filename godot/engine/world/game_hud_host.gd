@@ -292,6 +292,12 @@ func endround_banner_line() -> String:
 	return _endround_banner
 
 
+## Number of player-facing messages waiting for the lazy HUD to mount.
+## This is the ADR 0018 read seam for host tests and diagnostics.
+func pending_hud_message_count() -> int:
+	return _pending_hud_messages.size()
+
+
 func _queue_hud_message(text: String, text_id: int) -> void:
 	_pending_hud_messages.append({"text": text, "text_id": text_id})
 	while _pending_hud_messages.size() > MAX_PENDING_HUD_MESSAGES:
