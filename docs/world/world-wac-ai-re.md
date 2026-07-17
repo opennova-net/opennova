@@ -107,13 +107,25 @@ Everything below was decompiled and read this session (pseudocode dumps:
 - Aiming (`byte entity+864`): render yaw chases aim heading `entity[187]` quarter-step,
   clamp [−31457280, +503316480]; pitch `entity[5]` chases `entity[180]` likewise.
   Non-aim: eighth-step, clamp ±14680064 (cap 234881024). Per-tick sanity clamp vs prev: ±0x40000000.
-- Legs (**CORRECTED 2026-07-08** — previously misread as "torso chases head-look"):
-  `entity[181]/[182]` (+0x2d4/+0x2d8; IDB names `torsoYaw`/`torsoPitch` are misnomers) are the
+- Legs (**CORRECTED 2026-07-08** — previously misread as "torso chases head-look";
+  **RE-CORRECTED at byte level 2026-07-16, session 8 — see §22**):
+  `entity[181]/[182]` (+0x2d4/+0x2d8; IDB `GamePlayerEntity.legChaseYawR/L`, renamed 2026-07-16
+  ex the `torsoYaw`/`torsoPitch` misnomers) are the
   **right/left leg-chain chase yaws**; each chases its re-plant target `entity[185]/[186]`
-  (+0x2e4/+0x2e8; IDB `headLookYaw`/`headLookPitch`, same misnomer family) quarter-step (1/16 when
-  def+84&0x200), rate clamp ±83886080, twist limit ±0x20000000 (45°) from body. Re-plant hysteresis:
-  re-target only when |Δ| > 59652320 (~5°) and (|Δ| > 357913920 (~30°) or the per-entity 64-tick
-  window hits) — the feet shuffle around to catch up once the body has twisted far enough.
+  (+0x2e4/+0x2e8; IDB `legReplantYawR/L`, renamed ex `headLookYaw`/`headLookPitch`) quarter-step (1/16 when
+  def+84&0x200), rate clamp ±83886080, twist limit ±0x20000000 (45°) from body
+  [orig: `@ 0x4bea11-0x4beb12`]. Re-plant (idle bodies): the target VALUE is the
+  **midpoint of (bodyHeading, targetHeading)** [orig: `@ 0x4be969-0x4be975`] — not the body
+  itself (the 2026-06 dump reading) — re-targeted only when |Δ vs the current target| >
+  59652320 (~5°) and (|Δ| > 357913920 (~30°) or the leg's 64-tick window hits), the LEFT
+  window running 32 ticks behind the right (`(tick−32)&0x3F` vs `tick&0x3F`
+  [orig: `@ 0x4be991` / `@ 0x4be9bb`]). A MOVING state (flag-table bit 0) or a
+  def+84&0x200 body takes the walk path instead: legYawR half-snaps toward the target,
+  legYawL += (target − newLegYawR)>>2, both targets = target — the alternating foot
+  shuffle [orig: `@ 0x4be9d4-0x4bea0b`]; carried (Flags 0x40) snaps both legs to the body
+  [orig: `@ 0x4beb0c`]. The feet shuffle around to catch up once the body has twisted far
+  enough. **The org2 player body runs a DIFFERENT model** — no body chase at all: its legs
+  chase the render yaw and `bodyHeading` is written as their midpoint (§22, D-INF-12 closure).
   Proof of the leg reading: the render bone-overlay switch consumes [181]/[182] as the **yaw** of the
   R/L thigh/calf/foot bone chains (with bodyPitch), §14 `[orig: Entity_BuildBoneTransformMatrices @ 0x4b1290]`.
   `entity[183]` (+0x2dc `torsoRoll`) genuinely is a torso roll (recoil/flinch chase, §4.14). Head-look
@@ -169,8 +181,10 @@ Everything below was decompiled and read this session (pseudocode dumps:
    State 31 (jump_loop) forces fwd = 1024.
 2. **`pos.xy += rotated_delta + vel(entity[38..39])`; `pos.z += vertical_delta`.**
    Flag 0x8000 (drowning) zeroes vertical; 0x100000 (deep water) zeroes horizontal root motion.
-3. Every 2 ticks: **gravity `vel_z(entity[40]) −= 416`** (terminal −32768; ladder/climb chases
-   `entity[193]` target at 1/16-step, cap 0x4000); `pos.z += 2·vel_z`;
+3. Every tick (the "every 2 ticks" first reading corrected by D-INF-10; both legs
+   byte-witnessed 2026-07-16 §22): **gravity `vel_z(entity[40]) −= 416`** skipped while
+   `Flags & 0x108000` (platform/drowning) [orig: `@ 0x4bf7b8`] (terminal −32768; ladder/climb
+   chases `entity[193]` target at 1/16-step, cap 0x4000); `pos.z += 2·vel_z`;
    `Entity_ProcessCollisionAndPlatformPhysics @ 0x4b2bd0 (entity, root_drop, height)`:
    ≤0 ⇒ ground push-out (`pos.z -= ret`), vel_z = 0, water-exit sounds (15/16),
    **fall damage** when `vel_z ≤ −1057·dword_C6EAE4`: `health −= (excess)>>4`;
@@ -369,17 +383,19 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     player-slide case in `tests/world/infantry_test.cpp`. (Our `inf.airborne` here reads last tick's
     value — the vertical resolve updates it after — a negligible 1-tick lag vs the original reading
     the flag set in the same physics pass.)
-  - **D-INF-10** per-tick gravity, asymmetric by motor. Neither infantry mover gates the vertical step
-    on tick parity. The NPC (org1) falls `vel_z -= 416` EVERY tick then `pos.z += 2·vel_z` [orig:
+  - **D-INF-10** per-tick gravity, asymmetric by motor — **CLOSED for both legs 2026-07-16
+    (§22)**. Neither infantry mover gates the vertical step on tick parity. The NPC (org1)
+    falls `vel_z -= 416` EVERY tick then `pos.z += 2·vel_z` [orig:
     `Entity_UpdateInfantryAI @0x4bf7bf` (`add … 0xFFFFFE60`) / `@0x4bf7ec` (`add edx,edx`; `add
-    [esi+0Ch],edx`)]; the player (org2) falls `vel_z -= 208` EVERY tick then `pos.z += vel_z` (once)
-    [orig: `Entity_UpdateInfantryPlayerBody @0x4b7acf` (`add … 0xFFFFFF30`) / `@0x4b7cef`]; both clamp
-    to terminal −32768. A prior pass applied one `−416 every 2 ticks` + `pos += 2·vel` to BOTH, which
-    nets to the player's −208/tick + vel/tick (org2) but left the NPC at HALF the org1 fall rate.
-    FIXED for the NPC (faithful per-tick `−416` + `2·vel`); the player keeps the 2-tick discretization
-    (net-equivalent to org2 — its jump/fall tuning + tests pin the `−416`-per-application step, so
-    making it per-tick `−208` is deferred to a dedicated player-physics grill). `libs/world/src/
-    infantry.cpp`; guarded by the gravity-cadence case in `tests/world/infantry_test.cpp`.
+    [esi+0Ch],edx`)]; the player (org2) falls `vel_z -= 208` EVERY tick then `pos.z += vel_z` (once,
+    folded into the root-dz store) [orig: `Entity_UpdateInfantryPlayerBody @0x4b7acf`
+    (`add … 0xFFFFFF30`), gate `@0x4b7ac8`, clamp `@0x4b7c77`, pos `@0x4b7cef`]; both clamp
+    to terminal −32768 and skip the step while `Flags & 0x108000` (platform/drowning — those
+    flag legs ride their slices). A prior pass applied one `−416 every 2 ticks` + `pos += 2·vel`
+    to BOTH; the NPC was fixed to the faithful per-tick `−416` + `2·vel` first, and the player's
+    deferred 2-tick discretization is now the faithful per-tick `−208` + `vel` (the dedicated
+    player-physics grill this entry waited on = §22). `libs/world/src/infantry.cpp`; guarded by
+    the gravity-cadence + player-jump cases in `tests/world/infantry_test.cpp`.
   - **D-INF-11** third-person body aim overlay (the torso bend) — **LOCAL PLAYER LANDED
     2026-07-08** (§14.6: `libs/anim/aim_overlay`, the leg-chase sim fields, the
     `NovaSkeletalAnim.eval_pose_overlay` path, the witnessed 3P camera numbers; verified
@@ -388,16 +404,24 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     (rides D-INF-1), mounted/seated branches, attachment matrices, and the
     pitchBlend/headLookDecay/lean/torsoRoll sources. `[orig: Entity_BuildBoneTransformMatrices
     @ 0x4b1290]`, witness §14.
-  - **D-INF-12** player (org2) chase sources approximated by org1 math. The bone builder's
-    inputs for the local player — the `bodyHeading` chase and the leg re-plant TARGET
-    writes — live in `Entity_UpdateInfantryPlayerBody @ 0x4b40e0` (0x42d3 B) and are
-    unwitnessed (the section-scoped re-verify was cut by tooling limits; displacement
-    scanning is unavailable on this MCP). Ours applies the witnessed org1 §3.3 quarter-step
-    to the player's body heading (render yaw stays mouse-instant, witnessed) and gives BOTH
-    legs one shared re-plant target on the shared 64-tick window — the original carries two
-    target fields (+0x2e4/+0x2e8) whose per-leg divergence/stagger is unknown. Consequence:
-    twist/shuffle timing may differ from retail by small constants. Closes with an org2
-    grill of @0x4b40e0's writes to +0x8c/+0x2e4/+0x2e8.
+  - **D-INF-12** player (org2) chase sources approximated by org1 math — **CLOSED
+    2026-07-16 (§22)**: the org2 writes to +0x8C/+0x2E4/+0x2E8 were displacement-scanned
+    (the tooling limit that cut the earlier re-verify is gone) and byte-read. The witnessed
+    model is different in kind and now ported: on foot the player has NO body chase — the
+    LEGS chase the render yaw (+0x10, mouse-instant) at a quarter-step with rate clamp
+    ±0x3000000 (~4.2°, 3/5 the org1 rate) and twist limit ±0x30000000 (67.5°) vs the YAW
+    [orig: `@0x4b49e9-0x4b4aa9`]; re-plant targets = the yaw itself — every tick in a
+    movement state [orig: `@0x4b4984→@0x4b49dd`], else per-leg 5°/30° hysteresis measured
+    vs the CURRENT LEG YAW with the L window 32 ticks behind the R [orig:
+    `@0x4b4993-0x4b49e3`; ebp = tick&0x3F `@0x4b4680`]; then **bodyHeading = the leg
+    midpoint** [orig: `@0x4b4aa9-0x4b4abb`] — the legs lead, the body follows, and the §14
+    torso twist is (yaw − midpoint), which is why small aim moves twist the torso without
+    moving the feet. Ported in `tick_infantry` step 5 (player leg); pinned by the rewritten
+    `test_player_body_chase_and_legs` / `test_player_body_chase_crosses_the_bam_seam`.
+    Residual branches ride their slices: parachute (Flags 0x20) sixteenth-step body chase
+    [orig: `@0x4b494d`] (D-INF-20), the carried/platform ±0x55555500 (120°) yaw clamp
+    [orig: `@0x4b4afb-0x4b4b5f`] and the seat-bone follow [orig: `@0x4b654e`] (D-INF-2 /
+    mount).
   - **D-INF-16** the run promotion's pitch-tier term ported as the constant 2. The
     original reads `entity+0x37C` (`>0x430000 or <0 → 0; ≥0x210000 → 1; else 2` before
     adding `run_anim` [orig: `@0x4b72aa-0x4b72cf`]), but the field has NO writer anywhere
@@ -438,6 +462,26 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     Guarded by `test_slope_standing_camera_stays_level` / `test_slope_prone_body_conforms_org2`
     / `test_slope_pass_org1_selector_and_chase` + the motor-level standing case in
     `tests/world/infantry_test.cpp`.
+  - **D-INF-20** the parachute system is unmodeled (Flags 0x20 = parachute deployed).
+    Witnessed legs (§22): auto-deploy on the authority when alive, `vel_z ≤ −14336`, and
+    aux `+0x2C & 0x10` [orig: `@0x4b7aef-0x4b7afa`]; the in-air anim while set: org2 adds
+    0x10 to its straight 31 stamp (the `(Flags&0x20)?0x10:0 + 0x1F` trick
+    `@0x4b7e3f-0x4b7e61`), and org1's ENTIRE 47→31 availability ladder is parachute-gated
+    (`test al,20h` `@0x4bf8d8` — a plain NPC fall stamps nothing) [orig:
+    `@0x4bf8d4-0x4bf8f7`]; the org2 heading model
+    sixteenth-chases the yaw + snaps the leg targets while set [orig: `@0x4b494d-0x4b496c`];
+    gravity skips while drowning/platform but NOT while parachuting — the descent physics
+    live in the `@0x4b7b18+` swim/parachute block (unread). Ours never sets the flag; the
+    player's jump and fall stamp 31 (NPC falls keep the clip, as witnessed).
+  - **D-INF-21** the "!Poof!" ghost mode is deliberately unported: `g_localPlayerPoofMode
+    @ 0xA82298` (renamed this session, ex `dword_A82298`) is toggled by a net-message
+    handler that debug-prints `!Poof!` [orig: `@0x42d450` — the IDB's
+    `NetPacket_HandleWeaponSwitch` name is a misnomer for this 0x70-byte body, rename
+    proposed] and, while set, the local player's horizontal root-motion integrate runs at
+    2× [orig: `@0x4b7c8d-0x4b7cb7`]. Normal play (mode 0) takes the same 1× integrate as
+    org1 [orig: `@0x4b7cbf-0x4b7cd9`], which is what the port implements — a dev/admin
+    feature, not a gameplay path. (The handler is renamed `NetMsg_HandlePoofToggle`,
+    ex the `NetPacket_HandleWeaponSwitch` misnomer.)
   Everything else is structurally translated with per-mechanic dump citations and byte-pinned
   constants, unit-tested in tests/world/infantry_test.cpp and end-to-end in promote_test.
 - **Root-motion data path** (`AnimMap_UpdateEntity @ 0x40b5f0` → engine `InfantryRootMotion`):
@@ -1425,14 +1469,26 @@ store (details inline below), added D-COL-9, and extended D-COL-5/-8.
 
 ### 15.3 Witness map — the movement resolver `[orig: Entity_ProcessCollisionAndPlatformPhysics @ 0x4b2bd0]`
 
-Closes §4 open item 5 (the 0x11e3-byte internals). Per call (from the motor's
-gravity block, every 2 ticks):
+Closes §4 open item 5 (the 0x11e3-byte internals). Per call (from each motor's
+gravity block, EVERY tick — the "every 2 ticks" first reading died with
+D-INF-10/§22):
 
 1. **Idle skip-throttle**: full update when the anim-state table bit 0 is set,
    velocity/slide non-zero (slide > 0 or < -420), displaced > 200 from
    savedLivePose (X/Y only), swim flag 0x2000, or every 64th tick; otherwise
-   counter 0..10 full, 11..20 skip (revert the caller's gravity displacement
-   `pos.Z -= slide` (x2 non-player), zero it, return 0), reset to 10. A net
+   counter 0..10 full, 11..20 skip (revert the caller's gravity displacement,
+   zero it, return 0), reset to 10. The revert is PER MOTOR — `pos.Z -= slide`
+   x1 for Flags&0x100 PLAYER bodies (matching the org2 `pos += vel` integrate),
+   x2 otherwise (the org1 `pos += 2*vel`) `[orig: test ecx,100h @ 0x4b2cd9 →
+   @ 0x4b2ce9]`; the resolver's "0x100=mounted" comment gloss is a kong
+   misnomer — the kill router (§20) and the AI target filters (§16) key PLAYERS
+   on 0x100. Port history: the reimpl deliberately ran x2-for-both while the
+   player kept the pre-§22 2-tick cadence; when §22 restored the per-tick
+   `-208 + pos += vel` org2 integrate the mismatch leaked +208 per skip tick —
+   the standing player's visible rise-and-snap sawtooth — fixed 2026-07-17 to
+   the witnessed split (pinned by `test_player_idle_skip_throttle_no_bounce`,
+   the motor+resolver coupled seam; the direct-resolver case hand-rolled the
+   caller cadence and could not catch the pair diverging). A net
    push-out later in the resolve resets the counter to 0 `[orig: @ 0x4b3773]`.
 2. **Per-query state**: blink globals cleared; entity Flags &= ~0x00D00800
    (indoors 0x800000, armory 0x400000, platform 0x100000, vehicle-zone 0x800)
@@ -2760,3 +2816,124 @@ the RENDER skeleton one frame stale, and out-of-replication-range NPCs fall back
 (the original computes in-sim); (d) entity+0x6C (the person aim vector) and the
 +0x358..0x367 block writer are unwalked; (e) the vehicle userpoint path @ 0x545c60
 waits on D-AI-2.
+
+## 22. Appendix: the org2 player-body physics grill (grill-ida, 2026-07-16 session 8)
+
+The dedicated player-physics grill D-INF-10/D-INF-12 deferred to. Scope: the
+player (org2) heading/leg model, gravity, jump, the airborne/landing edges, and
+the org1 leg block re-read at the same precision. Method: `py_eval` displacement
+scans over `Entity_UpdateInfantryPlayerBody @ 0x4b40e0` (0x42d3 B) and
+`Entity_UpdateInfantryAI @ 0x4b9910` for every instruction touching
++0x8C/+0x2D4/+0x2D8/+0x2E4/+0x2E8, then byte-reads of each hit cluster — the
+"displacement scanning unavailable" tooling limit that cut the earlier attempt
+is gone. Port: `libs/world/src/infantry.cpp` `tick_infantry` (heading/legs step
+5, gravity/edges/jump step 9), `player_body_select` (airborne gate),
+`InfantryState.jump_cooldown`; pinned by the rewritten
+`test_player_body_chase_and_legs`, `test_player_body_chase_crosses_the_bam_seam`,
+the gravity-cadence case, and the player-jump case in
+`tests/world/infantry_test.cpp`.
+
+### 22.1 The org2 heading model (closes D-INF-12; §3.3 carries the org1 half)
+
+| Finding | Witness |
+|---|---|
+| Parachute (Flags 0x20): bodyHeading(+0x8C) sixteenth-steps toward the render yaw(+0x10) `(yaw−body+8)>>4`, both leg re-plant targets snap to the result | `[orig: @ 0x4b494d-0x4b496c]` |
+| Any of Flags 0x100060 (parachute/carried/platform): the yaw is clamped to ±0x55555500 (120°) of bodyHeading (mount seat-cfg 3 and an active-parent carried byte skip the clamp), the local player's camera-yaw mirror `dword_B75FCC` moves with it, legs snap to the body | `[orig: @ 0x4b4ac6-0x4b4b6b]` |
+| ON FOOT — movement state (flag-table bit 0): both leg targets = the yaw EVERY tick | `[orig: @ 0x4b4984 → @ 0x4b49dd/@ 0x4b49e3]` |
+| ON FOOT — idle: per-leg re-plant, drift measured vs the CURRENT LEG YAW (org1 measures vs the target), 5°/30° hysteresis, 64-tick windows staggered 32 apart (L `(tick−32)&0x3F`, R `tick&0x3F` via ebp set at function head) | `[orig: L @ 0x4b4993/@ 0x4b49ad-0x4b49bc; R @ 0x4b499b/@ 0x4b49d0-0x4b49e3; ebp @ 0x4b4680]` |
+| Leg chase: quarter-step `(Δ+2)>>2`, rate clamp ±0x3000000 (~4.2°/tick — 3/5 the org1 0x5000000), twist limit ±0x30000000 (67.5°) measured vs the YAW (org1: ±0x20000000 vs the body); no def+84&0x200 1/16 variant in the org2 block | `[orig: R @ 0x4b49e9-0x4b4a43; L @ 0x4b4a49-0x4b4aa9]` |
+| **bodyHeading = legYawL + (legYawR − legYawL)/2** — the body follows the FEET; the §14 torso twist is (yaw − midpoint), so small aim moves twist the torso while the feet and body hold | `[orig: @ 0x4b4aa9-0x4b4abb]` |
+| Seat-bone follow: while mounted the pose block writes pos from the seat bone and +0x8C/both leg targets = the bone yaw, bodyPitch/Roll = the bone pitch/roll (rides D-INF-2) | `[orig: Entity_GetBoneTransformAndOrientation → @ 0x4b654e-0x4b6575]` |
+| Platform yaw-carry: a deck rotation adds one delta to +0x8C, both leg yaws, both leg targets (+ the yaw and `dword_B75FCC` unless the def's +0x58 & 0x1000) — rides D-COL-5 | `[orig: @ 0x4b5690-0x4b56d9]` |
+
+### 22.2 Gravity / jump / edges (closes D-INF-10's player leg)
+
+| Finding | Witness |
+|---|---|
+| org2 gravity: `vel_z −= 208` EVERY tick, skipped while Flags 0x108000 (platform/drowning); terminal clamp −32768; `pos.z += vel_z + root_dz` in ONE store (ours splits the two adds, same net) | `[orig: gate @ 0x4b7ac8; step @ 0x4b7acf; clamp @ 0x4b7c77; pos @ 0x4b7cef]` |
+| org1 gravity re-pinned with the same gate shape: skip on 0x108000, `−416`, clamp, `pos.z += 2·vel_z` | `[orig: @ 0x4bf7b8-0x4bf7ee]` |
+| The horizontal integrate is 1× (rotated root delta + vel) for BOTH motors in normal play; the org2 local-player 2× branch is gated on `g_localPlayerPoofMode` — see D-INF-21 | `[orig: org1 @ 0x4bf684-0x4bf6a2; org2 1× @ 0x4b7cbf-0x4b7cd9; 2× gate @ 0x4b7c8d]` |
+| Jump cooldown lives in the REUSED +0x1A8 slot (org1's targetHeading): clamp [0,32], >1 counts down, parks at 1 while the jump key (MoveOrder bit 5) is held, key release → 0 — no auto-repeat on a held key | `[orig: @ 0x4b7de0-0x4b7e15; release edge @ 0x4b7e78-0x4b7e82]` |
+| Jump gates: cooldown 0 + key held + not prone (the cached prone local, also the freelook-pitch-halving and lean-skip selector) + `!(Flags & 0x1A002)` (in-air/dead/the water pair) + not carried (0x40) | `[orig: @ 0x4b7e8c-0x4b7ebd]` |
+| Jump impulse: `vel.xy += 3/4 · (this tick's ROTATED root step)` — running momentum — then `vel_z = 0x1600`, Flags |= 0x2000 (no 0x40 clear here — carried was gated out @0x4b7ebb), anim 30 jump_start NOW + 31 jump_loop PENDING (straight stamps, no availability check), cooldown = 32; on-platform jumps additionally take a sincos platform-exit leg (D-COL-5) | `[orig: @ 0x4b7ec3-0x4b7f0c]` |
+| The ledge-fall edge, org2 (resolver return > 0xF000; gate `!(Flags & 0x10A002)` — the 0x2000 bit is the was-grounded test and DEAD skips the whole edge, carry included): carried 0x40 is force-CLEARED (not skipped), Flags |= 0x2000, the 3/4 momentum carry, pending cleared, then anim = 31 (+0x10 while parachuting) stamped STRAIGHT — no availability check. org1 (gate `!(Flags & 0x10A000)`, no dead bit): NO carry; 0x2000 sets and pending clears for live non-carried bodies (dead skips the stamp AND the pending-clear, carried skips the stamp only), and the 47→31 availability ladder (`animMap[id] != animMap[0]`) runs ONLY while parachuting — a plain NPC ledge fall keeps its current clip | `[orig: org2 @ 0x4b7e17-0x4b7e73; org1 @ 0x4bf8ae-0x4bf901, parachute gate @ 0x4bf8d8]` |
+| The 4th-tick org2 body-anim SELECTION is skipped while airborne(0x2000)/dead(0x2)/carried(0x40) — the jump/fall edges own the in-air clip; selection resumes on landing | `[orig: @ 0x4b70b8-0x4b70d3]` |
+| org1 landing: fall damage gates on WAS-airborne + authority + !0x4000000 + NOT DEAD (`test dl,2` — ours previously lacked the dead skip: a hard-landing corpse's health rounded back toward 0 through the clamp; fixed), damage `(threshold − vel_z) >> 4` clamped to health, a damaging landing STAGES the fall death-anim (+0x2C0 ← selector cause 4 → 174, equal to our generic-death fallback), landing sound = weapon slot 16 (15 when dead), then Flags &= ~0x2000 | `[orig: @ 0x4bf802-0x4bf89f]` |
+| org2's OWN landing block (2026-07-17 validation read): authority + !0x4000000 gates, the same −1057·scale threshold and `(threshold − vel_z) >> 4` damage clamped to health, the cause-4 death-anim stage (+0x2C0), plus a local-player red-flash call (`Player_OnDamageReceived`) even off-authority — but NO dead gate (the org1 `test dl,2` has no org2 twin) and no explicit was-airborne test (vel_z zeroes every grounded tick, net-equivalent). The port's shared `health > 0` landing gate is org1-witnessed, org2-EXTENDED | `[orig: @ 0x4b7d0a-0x4b7d91]` |
+| Fast-fall sound leg: `vel_z < −12288` plays weapon-slot 0x2C (falling wind/scream), gated on the once-per-64-ticks window (`var_10A8 == 0`) — sound slice | `[orig: @ 0x4b7c4c-0x4b7c74]` |
+| Auto-parachute: authority + alive + `vel_z ≤ −14336` + aux `+0x2C & 0x10` → Flags |= 0x20 (D-INF-20) | `[orig: @ 0x4b7aef-0x4b7afa]` |
+| The client no-authority selection leg rebases movement states to idle 43 (the flag-table bit-0 "client re-derives" semantic, at address precision) | `[orig: @ 0x4b4655-0x4b4670]` |
+
+### 22.3 The "!Poof!" ghost mode (D-INF-21)
+
+`g_localPlayerPoofMode @ 0xA82298` (renamed this session): set 1/0 by the
+0x70-byte net-message handler at `[orig: @ 0x42d450]` (payload byte, debug-chat
+`!Poof!` on enable; renamed `NetMsg_HandlePoofToggle` this session, ex the
+`NetPacket_HandleWeaponSwitch` misnomer), serialized into the world-sync state
+(`NetPacket_WriteWorldSyncState`), queried by dev-command senders
+(msg 0x36 family `@ 0x42d340/@ 0x42d3e0`). Disable prints `!Unpoof!` and clears
+the local player's Flags bit 0 `[orig: @ 0x42d4a5]`. Its one physics consumer is
+the org2 2× local integrate (§22.2). Unported by decision — dev/admin feature.
+
+### 22.4 Port deltas landed this session (libs/world)
+
+- Player heading/legs rewritten to the §22.1 model (was the org1 approximation);
+  NPC legs corrected to the midpoint re-plant value, staggered windows, and the
+  walk half-snap path (§3.3).
+- Player gravity per-tick −208 + `pos += vel` (was −416 every 2 ticks);
+  NPC unchanged.
+- Player jump: the 32-tick cooldown + release edge, the prone gate, the 3/4
+  momentum carry, the 30→pending-31 stamp, ordered after the vertical resolve.
+- The airborne edge is per motor (corrected by the 2026-07-17 validation grill —
+  a first cut stamped both motors): the PLAYER stamps 31 straight with the 3/4
+  momentum carry (the `has_clip` guard is a host guard the original lacks); org1
+  keeps its clip on a plain fall — its 47→31 ladder is parachute-gated
+  (`@ 0x4bf8d8`) — and clears pending only. `player_body_select` lost its
+  airborne stand-in branch in favor of the witnessed selection gate. Review
+  follow-up: the org2 dead gate now suppresses the entire edge, including the
+  airborne-bit write (`test 0x10A002 @ 0x4b7e22`); pinned by
+  `test_dead_player_ledge_fall_edge_is_suppressed`.
+- Fall damage now skips dead bodies (the org1 `test dl,2` leg).
+- `InfantryState.jump_cooldown` added (the +0x1A8 reuse gets a dedicated field).
+- (2026-07-17 follow-up, same branch) the resolver's idle-skip gravity undo
+  restored to the witnessed per-motor split — x1 player / x2 NPC, the
+  Flags&0x100 select (§15.3 item 1) — the x2-for-both adaptation depended on
+  the 2-tick player cadence this section deleted, and the mismatch was the
+  standing player's visible rise-and-snap bounce.
+
+### 22.5 Open follow-ups
+
+1. The org2 swim/parachute physics block `@ 0x4b7b18+` (descent, water
+   transitions) — unread; rides D-INF-3 (water) + D-INF-20 (parachute).
+2. The mounted heading branch (±120° clamp, seat-bone follow) and the platform
+   yaw-carry/exit legs — ride D-INF-2 / D-COL-5.
+3. `remote_player_body_anim` (the authority's wire-snapped peer selection) has
+   no airborne gate — the wire does not carry the peer's in-air flag to the
+   host today; rides the D-NET-159 anim-byte work.
+4. Landing sounds (slots 15/16), the fast-fall slot 0x2C, and the jump/land
+   effect legs — sound slice.
+5. org2's tick counter identity (`var_10BC` vs the org1 `tick + 36·net_id`
+   stagger) is unverified — only the window PHASE depends on it; ours uses the
+   entity-salted key for both motors.
+6. `GamePlayerEntity` +0x98/+0x9C/+0xA0 (the slide-velocity triplet the
+   integrate/gravity legs write) — +0xA0 is still named `slideDecay` in the IDB,
+   a now-visible vel_z misnomer; rename proposal rides the next IDB pass.
+7. Fast-fall ground-probe tunneling (bare-rig observation, 2026-07-17): the
+   witnessed settle probe (quantize Z up + 2u down-probe `@ 0x4b3d6e`) can miss
+   the terrain once the entity is below the surface (the probe start quantizes
+   under the ground and the ray looks only DOWN), so a crossing step larger
+   than the ~6144 sub-surface window sails through — reproduced in a terrain-only
+   test rig with a 2u free fall. Whether retail's
+   `Entity_RaycastGroundHeightAndObject @ 0x414370` terrain leg has an
+   unbounded-height fallback (no tunnel) needs its own witness; rides D-COL/D-INF-3.
+
+### 22.6 IDB write-backs (2026-07-16 session 8, saved)
+
+Renames: `g_localPlayerPoofMode @ 0xA82298` (ex `dword_A82298`);
+`NetMsg_HandlePoofToggle @ 0x42d450` (ex the `NetPacket_HandleWeaponSwitch` misnomer);
+`GamePlayerEntity` members `legChaseYawR/L` +0x2D4/+0x2D8 (ex `torsoYaw`/`torsoPitch`)
+and `legReplantYawR/L` +0x2E4/+0x2E8 (ex `headLookYaw`/`headLookPitch`) — the §3.3
+misnomer family, applied on maintainer OK. Truth comments at
+`@ 0x42d450` (func), `@ 0x4b4945`, `@ 0x4b4984`, `@ 0x4b4ab5`, `@ 0x4be969`, `@ 0x4be9d4`,
+`@ 0x4b7de0`, `@ 0x4b7ec3`, `@ 0x4b7c8d`, `@ 0x4bf8d4`, `@ 0x4b70b8`, `@ 0x4b7aef`,
+`@ 0x4b7ac8` — each carrying the reimpl pointer.

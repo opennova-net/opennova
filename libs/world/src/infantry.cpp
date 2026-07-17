@@ -22,9 +22,11 @@
 //            (headless tests) the terrain-cache clearance stands. Remaining D-INF-3
 //            tail: water (swim transitions). The caller semantics are preserved either
 //            way: return <= 0 lifts the foot out of the floor, return > 0xF000 marks
-//            airborne, small positive clearance is left alone; the airborne anim overlay
-//            (entity+36 flags 0x2000/0x20 set, 0x40 clear -> parachute 47 else jump_loop
-//            31; dump 3679) waits on those flags. NOTE: patrol walking has NO
+//            airborne, small positive clearance is left alone; the airborne edge stamps
+//            jump_loop 31 for the PLAYER only (org1's 47/31 ladder is parachute-gated —
+//            plain NPC falls keep the clip; the 47 variant rides the unmodeled Flags
+//            0x20) [orig: org1 @0x4bf8d4-0x4bf901, org2 @0x4b7e3c-0x4b7e61]. NOTE:
+//            patrol walking has NO
 //            peer/obstacle avoidance in the original — entity separation is the
 //            resolver's push-out, not a steering behavior (dump survey).
 //   D-INF-4  CLOSED: the direction table generator is witnessed and ported —
@@ -57,20 +59,28 @@ namespace {
 
 // [orig: 0x4b9910 — body turn clamp ±69273360/tick (~5.8 deg)]
 constexpr int32_t kBodyTurnClamp = 69273360;
-// Leg-chain chase constants [orig: §3.3 — +0x2d4/+0x2d8 chase +0x2e4/+0x2e8 quarter-step,
-// rate clamp ±83886080/tick (~7 deg), twist limit ±0x20000000 (45 deg) from the body;
-// re-plant hysteresis |Δ| > 59652320 (~5 deg) and (|Δ| > 357913920 (~30 deg) or the
-// per-entity 64-tick window). The 1/16-step def+84&0x200 variant is unused for persons.]
-constexpr int32_t kLegChaseClamp = 83886080;
-constexpr int32_t kLegTwistLimit = 0x20000000;
+// Leg-chain chase constants, per motor (D-INF-12 closure, byte-witnessed 2026-07-16).
+// org1 (NPC) [orig: @0x4bea11-0x4beb12]: quarter-step (sixteenth when def+84&0x200),
+// rate clamp ±0x5000000 (~7 deg), twist limit ±0x20000000 (45 deg) from the BODY.
+// org2 (player) [orig: @0x4b49e9-0x4b4aa9]: quarter-step, rate clamp ±0x3000000
+// (~4.2 deg), twist limit ±0x30000000 (67.5 deg) from the render YAW.
+// Shared re-plant hysteresis [orig: @0x4be977-0x4be9cc / @0x4b4991-0x4b49e3]:
+// |Δ| > 59652320 (~5 deg) and (|Δ| > 357913920 (~30 deg) or the leg's 64-tick
+// window) — the LEFT leg's window runs 32 ticks behind the right's ((tick-32)&0x3F
+// vs tick&0x3F [orig: @0x4be991/@0x4be9bb; org2 ebp = tick&0x3F @0x4b4680]).
+constexpr int32_t kLegChaseClamp = 83886080;        // 0x5000000, org1
+constexpr int32_t kLegTwistLimit = 0x20000000;      // org1, vs body
+constexpr int32_t kLegChaseClampOrg2 = 0x3000000;   // org2 [orig: @0x4b49fb]
+constexpr int32_t kLegTwistLimitOrg2 = 0x30000000;  // org2, vs yaw [orig: @0x4b4a23]
 constexpr int32_t kLegReplantMin = 59652320;
 constexpr int32_t kLegReplantSnap = 357913920;
-// [orig: gravity vel_z step 416; terminal -32768. Witnessed cadence: NPC org1 -416 EVERY tick
-// (@0x4bf7bf) then pos.z += 2*vel (@0x4bf7ec); player org2 -208 EVERY tick (@0x4b7acf) then
-// pos.z += vel (@0x4b7cef) — neither gates on tick parity. The player keeps a 2-tick
-// discretization (-416 every 2 ticks + 2*vel, net -208/tick + vel/tick = org2) that its jump/fall
-// tuning + tests pin; the NPC runs the faithful per-tick path. See the gravity block. D-INF-10]
+// [orig: gravity, witnessed per tick with the platform/drowning skip (Flags 0x108000,
+// unmodeled) and terminal -32768. NPC org1: vel_z -= 416 (@0x4bf7bf) then pos.z +=
+// 2*vel (@0x4bf7ec). Player org2: vel_z -= 208 (@0x4b7acf, gate @0x4b7ac8) then
+// pos.z += vel once, folded into the root-dz store (@0x4b7cef); clamp @0x4b7c77.
+// D-INF-10 CLOSED for both legs 2026-07-16.]
 constexpr int32_t kGravityStep = 416;
+constexpr int32_t kGravityStepPlayer = 208;
 constexpr int32_t kTerminalVelZ = -32768;
 // Foot-above-floor gap (16.16): the collision caller marks airborne only when the
 // returned positive clearance exceeds this value. [orig: org1 @0x4b9910 / org2
@@ -354,13 +364,11 @@ void AiSystem::player_body_select(AiEntity &e) {
         return root_motion != nullptr && root_motion->has_clip(inf.adm_id, s);
     };
 
+    // No in-air branch here: the original SKIPS this selection while airborne
+    // (@0x4b70b8) — the jump block stamps 30/31 and the fall edge stamps 31 (47
+    // parachute rides the unmodeled Flags 0x20) directly [orig: @0x4b7ef2/@0x4b7e5c].
     int target;
-    if (inf.airborne) {
-        // The in-air overlay wins over ground selection (jump arc / falling); the
-        // parachute 47 variant rides the unported 0x40 flag. [orig: the 0x2000 in-air
-        // flag path @0x4b7e22-0x4b7e3f; overlay states 31/47 dump 3679]
-        target = anim_state::kJumpLoop;
-    } else if (inf.player_moving) {
+    if (inf.player_moving) {
         inf.idle_counter = 0;                        // [orig: @0x4b719b]
         int base = anim_state::kWalkForward;         // [orig: @0x4b7196]
         if (inf.stance == InfantryState::Stance::kProne)
@@ -839,16 +847,14 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         // player takes the motor's simulate branch on host (is_authority) and on a
         // client (entity==local) alike. [orig: Entity_UpdateInfantryPlayerBody
         // @0x4b40e0; 4th-tick gate @0x4b70ce; net-re §5.38]
-        // Player jump: a grounded jump request launches the vertical impulse and enters the
-        // jump arc; gravity (step 9) brings it back down. [orig: Entity_UpdateInfantryPlayerBody
-        // @0x4b7ee5 sets entity+0xA0 (vel_z) = 0x1600 and entity+0x24 |= 0x2000 (in-air) on the
-        // jump input bit; gravity @0x4b7acf decrements vel_z each tick.]
-        if (inf.jump_requested && !inf.airborne && e.health > 0) {
-            inf.vel[2] = kJumpImpulseVelZ;
-            inf.airborne = true;
-        }
-        inf.jump_requested = false;
-        if ((logic_tick & 3u) == 0) player_body_select(e);
+        // The 4th-tick selection is SKIPPED while airborne (and for dead/carried
+        // bodies — dead is the branch above; carried rides the mount slice): the
+        // jump/fall edges own the in-air clip, and the selection resumes on landing.
+        // [orig: Entity_UpdateInfantryPlayerBody @0x4b70b8 `test Flags,2000h` /
+        // @0x4b70c6 `test al,42h` / @0x4b70ce `test tick,3` — any set skips]
+        // The jump itself runs AFTER the vertical resolve (step 9b), as the original
+        // orders it (integrate -> resolver -> edges -> jump @0x4b7e8c).
+        if ((logic_tick & 3u) == 0 && !inf.airborne) player_body_select(e);
     } else if (is_authority && (key & 15u) == 0) {
         // 2. Think + selection (every 16 ticks). [orig: gate (tick & 0xF) | !authority]
         infantry_think(e, world);
@@ -920,48 +926,117 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         inf.ground_cache_valid = true;
     }
 
-    // 5. Body heading: quarter-step toward the target, clamped. [orig: dump 4600-4611 —
-    // step = (diff + 2) >> 2 clamped ±69273360; body and render yaw move together]
+    // 5. Heading + leg-chain chase, per motor (D-INF-12 CLOSED 2026-07-16: the org2
+    // write sites to +0x8C/+0x2E4/+0x2E8 are displacement-scanned and byte-read; the
+    // org1 block re-read at the same precision). The legs are consumed as the R/L
+    // leg-chain bone yaw by Entity_BuildBoneTransformMatrices @0x4b1290 (§14).
     if (inf.is_local_player) {
-        // The player's render/aim yaw is the mouse, instant [orig: Input_HandleActionBinding
-        // @0x49ad40 cases 0xA6/0xA7 write entity Yaw directly]; only the BODY lags behind it,
-        // which is what the third-person overlay renders as the torso twist. The org2 chase
-        // math is unwitnessed — the org1 quarter-step is applied per D-INF-12.
-        const int32_t diff = io::bam_sub(inf.target_heading, inf.body_heading);
-        int32_t step = io::bam_sar(io::bam_add(diff, 2), 2);
-        if (step > kBodyTurnClamp) step = kBodyTurnClamp;
-        if (step < -kBodyTurnClamp) step = -kBodyTurnClamp;
-        inf.body_heading = io::bam_add(inf.body_heading, step);
-        e.heading = inf.target_heading;
+        // org2 on-foot [orig: Entity_UpdateInfantryPlayerBody @0x4b4945-0x4b4ac1].
+        // There is NO body chase: the LEGS chase the mouse yaw (+0x10) directly and
+        // the body heading is written as their midpoint — the legs lead, the body
+        // follows, and the §14 torso twist is (yaw − leg midpoint). The parachute
+        // (Flags 0x20) sixteenth-step body chase @0x4b494d, the carried/platform
+        // ±120-deg yaw clamp @0x4b4afb-0x4b4b5f, and the seat-bone follow @0x4b654e
+        // ride the parachute/mount/platform slices.
+        e.heading = inf.target_heading; // mouse-instant render/aim yaw [orig:
+                                        // Input_HandleActionBinding @0x49ad40 writes +0x10]
+        const int32_t yaw = e.heading;
+        if ((infantry_anim_flags(inf.anim_state) & 0x1u) != 0) {
+            // A movement state re-plants both feet on the yaw every tick.
+            // [orig: @0x4b4984 flag-table bit0 -> @0x4b49dd/@0x4b49e3]
+            inf.leg_target[1] = yaw;
+            inf.leg_target[0] = yaw;
+        } else {
+            // Idle: per-leg re-plant measured vs the CURRENT LEG YAW (org1 measures
+            // vs the target), left window 32 ticks behind the right.
+            // [orig: L @0x4b4993/@0x4b49ad-0x4b49bc ((tick-32)&0x3F);
+            //  R @0x4b499b/@0x4b49d0-0x4b49e3 (ebp = tick&0x3F @0x4b4680)]
+            const int32_t dl = io::bam_sub(yaw, inf.leg_yaw[1]);
+            if (abs_bam(dl) > kLegReplantMin &&
+                (abs_bam(dl) > kLegReplantSnap || ((key - 32) & 63u) == 0))
+                inf.leg_target[1] = yaw;
+            const int32_t dr = io::bam_sub(yaw, inf.leg_yaw[0]);
+            if (abs_bam(dr) > kLegReplantMin &&
+                (abs_bam(dr) > kLegReplantSnap || (key & 63u) == 0))
+                inf.leg_target[0] = yaw;
+        }
+        for (int leg = 0; leg < 2; ++leg) {
+            // Quarter-step, rate clamp ±0x3000000 (~4.2 deg/tick — 3/5 the org1
+            // rate), twist limit ±0x30000000 (67.5 deg) vs the YAW, not the body.
+            // [orig: R @0x4b49e9-0x4b4a43; L @0x4b4a49-0x4b4aa9]
+            const int32_t ldiff = io::bam_sub(inf.leg_target[leg], inf.leg_yaw[leg]);
+            int32_t lstep = io::bam_sar(io::bam_add(ldiff, 2), 2);
+            if (lstep > kLegChaseClampOrg2) lstep = kLegChaseClampOrg2;
+            if (lstep < -kLegChaseClampOrg2) lstep = -kLegChaseClampOrg2;
+            inf.leg_yaw[leg] = io::bam_add(inf.leg_yaw[leg], lstep);
+            const int32_t twist = io::bam_sub(inf.leg_yaw[leg], yaw);
+            if (twist > kLegTwistLimitOrg2)
+                inf.leg_yaw[leg] = io::bam_add(yaw, kLegTwistLimitOrg2);
+            else if (twist < -kLegTwistLimitOrg2)
+                inf.leg_yaw[leg] = io::bam_sub(yaw, kLegTwistLimitOrg2);
+        }
+        // bodyHeading = legL + (legR - legL)/2. [orig: @0x4b4aa9-0x4b4abb]
+        inf.body_heading = io::bam_add(
+            inf.leg_yaw[1], io::bam_sar(io::bam_sub(inf.leg_yaw[0], inf.leg_yaw[1]), 1));
     } else {
+        // org1 [orig: Entity_UpdateInfantryAI @0x4be8fd-0x4beb18]. Body: quarter-step
+        // toward the target, clamped ±69273360; the render yaw moves by the SAME step
+        // (ours pins them equal — they never diverge). [orig: @0x4be8fd-0x4be931]
         const int32_t diff = io::bam_sub(inf.target_heading, inf.body_heading);
         int32_t step = io::bam_sar(io::bam_add(diff, 2), 2);
         if (step > kBodyTurnClamp) step = kBodyTurnClamp;
         if (step < -kBodyTurnClamp) step = -kBodyTurnClamp;
         inf.body_heading = io::bam_add(inf.body_heading, step);
         e.heading = inf.body_heading;
-    }
 
-    // 5b. Leg-chain chase + re-plant (per tick, both motors). The feet hold their planted
-    // yaw until the body has twisted past the hysteresis, then shuffle after it at a
-    // clamped quarter-step, never more than 45 deg from the body. [orig: §3.3 chase of
-    // +0x2d4/+0x2d8 toward +0x2e4/+0x2e8; consumed as the R/L leg-chain bone yaw by
-    // Entity_BuildBoneTransformMatrices @0x4b1290 — world-wac-ai-re.md §14. The re-plant
-    // TARGET source is unwitnessed for org2 and both legs share one target here: D-INF-12.]
-    for (int leg = 0; leg < 2; ++leg) {
-        const int32_t drift = io::bam_sub(inf.body_heading, inf.leg_target[leg]);
-        if (abs_bam(drift) > kLegReplantMin &&
-            (abs_bam(drift) > kLegReplantSnap || (key & 63u) == 0)) {
-            inf.leg_target[leg] = inf.body_heading;
+        // 5b. Legs. The carried (Flags 0x40) body-snap rides the mount slice. A
+        // movement state or a def+84&0x200 body takes the WALK path: the right foot
+        // half-snaps to the target, the left pulls a quarter of the residual, both
+        // targets = target — the alternating shuffle while walking/turning.
+        // [orig: selector @0x4be944-0x4be967; walk path @0x4be9d4-0x4bea0b]
+        if ((infantry_anim_flags(inf.anim_state) & 0x1u) != 0 ||
+            (e.def_attrib & 0x200u) != 0) {
+            const int32_t tgt = inf.target_heading;
+            inf.leg_yaw[0] = io::bam_add(
+                inf.leg_yaw[0], io::bam_sar(io::bam_sub(tgt, inf.leg_yaw[0]), 1));
+            inf.leg_yaw[1] = io::bam_add(
+                inf.leg_yaw[1], io::bam_sar(io::bam_sub(tgt, inf.leg_yaw[0]), 2));
+            inf.leg_target[0] = tgt;
+            inf.leg_target[1] = tgt;
+        } else {
+            // Idle: re-plant targets toward the MIDPOINT of (body, target), measured
+            // vs the current TARGET, left window 32 ticks behind the right.
+            // [orig: midpoint @0x4be969-0x4be975; L @0x4be977/@0x4be991-0x4be9a7;
+            //  R @0x4be97f/@0x4be9bb-0x4be9cc]
+            const int32_t mid = io::bam_add(
+                inf.target_heading,
+                io::bam_sar(io::bam_sub(inf.body_heading, inf.target_heading), 1));
+            const int32_t dl = io::bam_sub(mid, inf.leg_target[1]);
+            if (abs_bam(dl) > kLegReplantMin &&
+                (abs_bam(dl) > kLegReplantSnap || ((key - 32) & 63u) == 0))
+                inf.leg_target[1] = mid;
+            const int32_t dr = io::bam_sub(mid, inf.leg_target[0]);
+            if (abs_bam(dr) > kLegReplantMin &&
+                (abs_bam(dr) > kLegReplantSnap || (key & 63u) == 0))
+                inf.leg_target[0] = mid;
         }
-        const int32_t ldiff = io::bam_sub(inf.leg_target[leg], inf.leg_yaw[leg]);
-        int32_t lstep = io::bam_sar(io::bam_add(ldiff, 2), 2);
-        if (lstep > kLegChaseClamp) lstep = kLegChaseClamp;
-        if (lstep < -kLegChaseClamp) lstep = -kLegChaseClamp;
-        inf.leg_yaw[leg] = io::bam_add(inf.leg_yaw[leg], lstep);
-        const int32_t twist = io::bam_sub(inf.leg_yaw[leg], inf.body_heading);
-        if (twist > kLegTwistLimit) inf.leg_yaw[leg] = io::bam_add(inf.body_heading, kLegTwistLimit);
-        else if (twist < -kLegTwistLimit) inf.leg_yaw[leg] = io::bam_sub(inf.body_heading, kLegTwistLimit);
+        for (int leg = 0; leg < 2; ++leg) {
+            // Quarter-step (sixteenth for def+84&0x200 bodies), clamp ±0x5000000
+            // (~7 deg/tick), twist limit ±0x20000000 (45 deg) vs the BODY.
+            // [orig: R @0x4bea11-0x4bea8d; L @0x4bea8d-0x4beb12; step pick @0x4bea1d]
+            const int32_t ldiff = io::bam_sub(inf.leg_target[leg], inf.leg_yaw[leg]);
+            int32_t lstep = (e.def_attrib & 0x200u) != 0
+                                ? io::bam_sar(io::bam_add(ldiff, 8), 4)
+                                : io::bam_sar(io::bam_add(ldiff, 2), 2);
+            if (lstep > kLegChaseClamp) lstep = kLegChaseClamp;
+            if (lstep < -kLegChaseClamp) lstep = -kLegChaseClamp;
+            inf.leg_yaw[leg] = io::bam_add(inf.leg_yaw[leg], lstep);
+            const int32_t twist = io::bam_sub(inf.leg_yaw[leg], inf.body_heading);
+            if (twist > kLegTwistLimit)
+                inf.leg_yaw[leg] = io::bam_add(inf.body_heading, kLegTwistLimit);
+            else if (twist < -kLegTwistLimit)
+                inf.leg_yaw[leg] = io::bam_sub(inf.body_heading, kLegTwistLimit);
+        }
     }
 
     // 6. The slope pass: conform-or-decay body_pitch/roll + the steep-ground slide.
@@ -995,8 +1070,16 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         e.pitch = inf.look_pitch;
     }
 
-    // 7-8. Rotate the root delta into world axes and integrate. [orig: dump 4758-4779,
-    // 5083-5086 — full-precision sin/cos at 2^22, pos += rotated + velocity]
+    // 7-8. Rotate the root delta into world axes and integrate. [orig: full-precision
+    // sin/cos at 2^22; org1 pos += rotated + velocity @0x4bf684-0x4bf6a2 (the
+    // drowning-0x8000/platform-0x100000 zeroing @0x4bf667-0x4bf680 rides those
+    // slices); org2 identical 1× @0x4b7cbf-0x4b7cd9 — its 2× local-player branch
+    // @0x4b7c8d-0x4b7cb7 is gated on g_localPlayerPoofMode, the "!Poof!" ghost-mode
+    // toggle (@0x42d450), NOT normal play, and stays unported:
+    // docs/world/world-wac-ai-re.md (D-INF-21).]
+    // The rotated deltas outlive the block: the org2 jump/fall edges carry 3/4 of
+    // this tick's step into the slide velocity [orig: @0x4b7d97 keeps them live].
+    int32_t root_wx = 0, root_wy = 0;
     {
         int32_t fwd = frame.dx, lat = frame.dy;
         // Root TRANSLATION is integrated for EVERY state, not just movement states. The original
@@ -1022,6 +1105,8 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         e.pos[0] += wx + inf.vel[0];
         e.pos[1] += wy + inf.vel[1];
         e.pos[2] += frame.dz;
+        root_wx = wx;
+        root_wy = wy;
     }
 
     // 9. Vertical resolve. The original caller passes entityRadius = AnimMap bottom
@@ -1030,11 +1115,17 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // clearance is left as-is. [orig: Entity_UpdateInfantryAI @0x4b9910 and
     // Entity_UpdateInfantryPlayerBody @0x4b40e0 callers; resolver @0x4b2bd0]
     if (terrain != nullptr && inf.ground_cache_valid && inf.ground_cache != INT32_MIN) {
-        // Gravity. Witnessed: neither motor gates on tick parity. The NPC (org1) falls EVERY tick
-        // (-416, then pos.z += 2*vel) [orig: @0x4bf7bf / @0x4bf7ec]; the player (org2) keeps its
-        // 2-tick discretization (-416 every 2 ticks + 2*vel nets to org2's -208/tick + vel/tick),
-        // which the jump/fall tuning + tests pin. [D-INF-10]
-        if (inf.is_local_player ? ((key & 1u) == 0) : true) {
+        // Gravity, per tick, asymmetric by motor (D-INF-10 CLOSED for both legs).
+        // NPC org1: vel_z -= 416 then pos.z += 2*vel [orig: gate @0x4bf7b8 (the
+        // platform/drowning 0x108000 skip, unmodeled), step @0x4bf7bf, clamp
+        // @0x4bf7c9, pos @0x4bf7ec]. Player org2: vel_z -= 208 then pos.z += vel
+        // once [orig: gate @0x4b7ac8, step @0x4b7acf, clamp @0x4b7c77, pos @0x4b7cef
+        // — folded into the root-dz store there; split here like org1's shape].
+        if (inf.is_local_player) {
+            inf.vel[2] -= kGravityStepPlayer;
+            if (inf.vel[2] < kTerminalVelZ) inf.vel[2] = kTerminalVelZ;
+            e.pos[2] += inf.vel[2];
+        } else {
             inf.vel[2] -= kGravityStep;
             if (inf.vel[2] < kTerminalVelZ) inf.vel[2] = kTerminalVelZ;
             e.pos[2] += 2 * inf.vel[2];
@@ -1057,9 +1148,52 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             foot_clearance = e.pos[2] - frame.capsule_bottom - inf.ground_cache;
         }
         if (foot_clearance > kAirborneGap) {
-            inf.airborne = true;
+            // org2 includes DEAD in the gate that owns the airborne-bit write;
+            // a dead player that was not already airborne stays that way. org1's
+            // corresponding gate omits DEAD and sets airborne before its later
+            // dead/carried animation gates. [orig: org2 test 0x10A002
+            // @0x4b7e22-0x4b7e3c; org1 test 0x10A000 + write @0x4bf8b5-0x4bf8cf]
+            const bool fall_edge_allowed = !inf.is_local_player || e.health > 0;
+            if (fall_edge_allowed && !inf.airborne) {
+                // The airborne EDGE (was grounded; the already-in-air 0x2000 test
+                // skips it). The two motors differ in kind here:
+                //   org2 (player): dead skips the WHOLE edge (gate mask 0x10A002,
+                //   carried is force-cleared, not skipped); otherwise 3/4 of this
+                //   tick's rotated root step carries into the slide velocity —
+                //   running momentum off a ledge — pending clears, and 31 stamps
+                //   STRAIGHT (47 while parachuting rides the unmodeled Flags 0x20;
+                //   the has_clip guard is a host guard the original lacks).
+                //   [orig: @0x4b7e17-0x4b7e73]
+                //   org1 (NPC): NO carry, and NO stamp on a plain fall — the 47/31
+                //   availability ladder runs ONLY while parachuting (`test al,20h`
+                //   @0x4bf8d8), so a live NPC keeps its walk/run clip off a ledge;
+                //   live non-carried bodies just clear any pending anim (dead skips
+                //   the clear too, airborne still sets). [orig: @0x4bf8ae-0x4bf901]
+                if (inf.is_local_player) {
+                    inf.vel[0] += (3 * root_wx) >> 2;
+                    inf.vel[1] += (3 * root_wy) >> 2;
+                    inf.anim_pending = 0; // [orig: @0x4b7e46, before the stamp]
+                    if (inf.anim_state != anim_state::kJumpLoop &&
+                        root_motion != nullptr &&
+                        root_motion->has_clip(inf.adm_id, anim_state::kJumpLoop)) {
+                        inf.anim_prev = inf.anim_state;
+                        inf.anim_state = anim_state::kJumpLoop;
+                        inf.clip_phase = 0;
+                    }
+                } else if (e.health > 0) {
+                    inf.anim_pending = 0; // [orig: @0x4bf901]
+                }
+            }
+            if (fall_edge_allowed) inf.airborne = true;
         } else if (foot_clearance <= 0) {
-            if (inf.airborne && fall_damage_scale > 0 &&
+            // Landing. Fall damage skips DEAD bodies [orig: org1 `test dl,2`
+            // @0x4bf843 — without it a hard-landing corpse would round its health
+            // back toward 0 through the clamp]; a damaging landing also stages the
+            // fall death-anim selection (+0x2C0, cause 4 -> 174) and plays the
+            // landing sound (weapon slot 16, 15 when dead) [orig: @0x4bf85d-0x4bf89c
+            // — the staged selector matches our generic-death fallback; the sound
+            // rides the sound slice].
+            if (inf.airborne && e.health > 0 && fall_damage_scale > 0 &&
                 inf.vel[2] <= -1057 * fall_damage_scale) {
                 int32_t excess = (-1057 * fall_damage_scale) - inf.vel[2];
                 int32_t dmg = excess >> 4;
@@ -1069,6 +1203,50 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             e.pos[2] -= foot_clearance;
             inf.vel[2] = 0;
             inf.airborne = false;
+        }
+
+        // 9b. Player jump — witnessed org2 order: integrate -> resolver -> edges ->
+        // the jump block [orig: @0x4b7de0-0x4b7f0c]. The cooldown lives in the
+        // REUSED +0x1A8 field there (org1's targetHeading slot): clamp [0,32], >1
+        // counts down, held-at-1 until the key releases (no auto-repeat while held),
+        // jump only from 0 [orig: maintenance @0x4b7de0-0x4b7e15, release edge
+        // @0x4b7e78-0x4b7e82]. Gates [orig: @0x4b7e8c-0x4b7ebd]: cooldown 0, not
+        // prone (the var_10AC selection local), !(Flags & 0x1A002) — in-air, dead,
+        // and the water pair (unmodeled) — the key held (MoveOrder bit 5), not
+        // carried (0x40, unmodeled). The impulse: 3/4 of the rotated root step into
+        // the slide velocity, vel_z = 0x1600, in-air set, anim 30 jump_start now
+        // with 31 jump_loop queued, cooldown reloaded to 32; the platform-exit
+        // sincos leg @0x4b7f0c rides the platform slice (D-COL-5).
+        if (inf.is_local_player) {
+            if (inf.jump_cooldown < 0) inf.jump_cooldown = 0;   // [orig: @0x4b7de0]
+            if (inf.jump_cooldown > 32) inf.jump_cooldown = 32; // [orig: @0x4b7dee]
+            if (inf.jump_cooldown > 1) {
+                --inf.jump_cooldown;                            // [orig: @0x4b7e0c]
+            } else if (inf.jump_cooldown == 1 && !inf.jump_requested) {
+                inf.jump_cooldown = 0;                          // [orig: @0x4b7e7a-0x4b7e82]
+            }
+            if (inf.jump_cooldown == 0 && inf.jump_requested && !inf.airborne &&
+                e.health > 0 && inf.stance != InfantryState::Stance::kProne) {
+                inf.vel[0] += (3 * root_wx) >> 2; // [orig: @0x4b7ec3-0x4b7ed5]
+                inf.vel[1] += (3 * root_wy) >> 2;
+                inf.vel[2] = kJumpImpulseVelZ;    // [orig: @0x4b7ee5]
+                inf.airborne = true;              // Flags |= 0x2000 [orig: @0x4b7edb]
+                inf.jump_cooldown = 32;           // [orig: @0x4b7f06]
+                if (root_motion != nullptr &&
+                    root_motion->has_clip(inf.adm_id, anim_state::kJumpStart)) {
+                    inf.anim_prev = inf.anim_state;
+                    inf.anim_state = anim_state::kJumpStart;   // [orig: @0x4b7ef2]
+                    inf.anim_pending = anim_state::kJumpLoop;  // [orig: @0x4b7efc]
+                    inf.clip_phase = 0;
+                } else if (root_motion != nullptr &&
+                           root_motion->has_clip(inf.adm_id, anim_state::kJumpLoop)) {
+                    inf.anim_prev = inf.anim_state;
+                    inf.anim_state = anim_state::kJumpLoop;
+                    inf.anim_pending = 0;
+                    inf.clip_phase = 0;
+                }
+            }
+            inf.jump_requested = false;
         }
     }
 

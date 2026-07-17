@@ -11,8 +11,9 @@
 //   * state-commit rules straight off the real flag table (burn 111 = locked 0x004
 //     queues; emote_1 115 = 0x020 yields only to movement-flagged targets),
 //   * kJumpLoop forced forward delta 1024,
-//   * gravity -416/2t to terminal -32768, landing snap + fall damage excess>>4 with the
-//     injectable scale [orig: dword_C6EAE4],
+//   * per-tick gravity (org1 -416 + pos += 2*vel; org2 -208 + pos += vel) to terminal
+//     -32768, landing snap + fall damage excess>>4 with the injectable scale
+//     [orig: dword_C6EAE4], the player jump (cooldown 32 / no auto-repeat / prone gate),
 //   * the slope pass: the conform selector (prone family / corpse / def attrib), the
 //     org1 2048/8-tick slide + eighth-step body_pitch/roll chase, the org2 atan2
 //     quarter-step leg, the non-conform decay — and the regression that a standing
@@ -320,16 +321,19 @@ void test_remote_player_body_anim() {
     CHECK(ent->net_anim_state == anim_state::kIdle2);
 }
 
-// Local-player body chase + leg-chain re-plant [orig: §3.3; consumed by the render
-// overlay, Entity_BuildBoneTransformMatrices @0x4b1290 / world-wac-ai-re.md §14; the
-// org2 chase source is unwitnessed — org1 math applied under D-INF-12]. Own function:
+// Local-player leg chase + body midpoint — the witnessed org2 model (D-INF-12
+// closure): the LEGS chase the mouse yaw (quarter-step, rate clamp ±0x3000000,
+// twist ±0x30000000 vs the yaw, per-leg staggered re-plant windows) and the body
+// heading is written as their midpoint. Consumed by the render overlay,
+// Entity_BuildBoneTransformMatrices @0x4b1290 / world-wac-ai-re.md §14.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4b4945-0x4b4ac1] Own function:
 // main's frame is at its MSVC stack-probe limit (see test_remote_player_body_anim).
 
 void test_player_body_chase_crosses_the_bam_seam() {
-    // The chase near +/-180 deg: the wrapping (diff + 2) >> 2 quarter-step takes the
-    // SHORT arc across the seam (io/bam.h wrap semantics — signed overflow would be
-    // UB), so a body at ~+180 deg chasing a target just past -180 deg crosses the
-    // seam instead of sweeping the long way around.
+    // The leg chase near +/-180 deg: the wrapping (diff + 2) >> 2 quarter-step takes
+    // the SHORT arc across the seam (io/bam.h wrap semantics — signed overflow would
+    // be UB), so legs planted at ~+157 deg chasing a yaw at ~-157 deg cross the seam
+    // instead of sweeping the long way around; the body midpoint crosses with them.
     World w;
     AiSystem ai;
     TestSource src;
@@ -340,28 +344,31 @@ void test_player_body_chase_crosses_the_bam_seam() {
     e->inf.is_local_player = true;
     e->health = 100;
 
-    const int32_t start = 0x7FFF0000;             // ~ +180 deg, just below the seam
-    const int32_t target = (int32_t)0x80020000u;  // just past -180: +0x30000 the short way
+    const int32_t start = 0x70000000;             // +157.5 deg
+    const int32_t target = (int32_t)0x90000000u;  // -157.5: +45 deg the short way
     e->inf.body_heading = start;
     e->inf.target_heading = target;
     e->inf.leg_yaw[0] = e->inf.leg_yaw[1] = start;
     e->inf.leg_target[0] = e->inf.leg_target[1] = start;
 
     run_ticks(ai, w, 1, 2);
-    // One quarter-step of the short arc, still on the positive side of the seam.
-    CHECK(e->inf.body_heading == start + 0xC000);
-    CHECK(e->heading == target);  // player aim yaw is instant
+    CHECK(e->heading == target); // player render/aim yaw is instant [orig: +0x10]
+    // 45 deg > the 30-deg snap: both legs re-plant on the yaw and step the clamped
+    // +0x3000000 along the SHORT arc — still on the positive side of the seam.
+    CHECK(e->inf.leg_yaw[0] == start + 0x3000000);
+    CHECK(e->inf.leg_yaw[1] == start + 0x3000000);
+    CHECK(e->inf.body_heading == start + 0x3000000); // midpoint of equal legs
 
     run_ticks(ai, w, 2, 400);
-    // Settled ACROSS the seam at the target (the chase stalls within one BAM unit),
-    // legs re-planted and settled with it.
+    // Settled ACROSS the seam at the yaw (the chase stalls within one BAM unit);
+    // the body midpoint crossed with the legs.
+    CHECK(opennova::io::bam_abs(opennova::io::bam_sub(e->inf.leg_yaw[0], target)) <= 1);
     CHECK(opennova::io::bam_abs(opennova::io::bam_sub(e->inf.body_heading, target)) <= 1);
-    CHECK(opennova::io::bam_abs(opennova::io::bam_sub(e->inf.leg_yaw[0], e->inf.body_heading)) < 0x20000000);
 }
 
 void test_player_body_chase_and_legs() {
-    constexpr int32_t kClampL = 69273360;     // body turn clamp
-    constexpr int32_t kLegTwist = 0x20000000; // 45 deg
+    constexpr int32_t kLegClamp2 = 0x3000000;  // org2 rate clamp [orig: @0x4b49fb]
+    constexpr int32_t kLegTwist2 = 0x30000000; // 67.5 deg vs the yaw [orig: @0x4b4a23]
 
     World w;
     AiSystem ai;
@@ -376,41 +383,167 @@ void test_player_body_chase_and_legs() {
     // Spawn-aligned: everything at heading 0; swing the aim 90 deg right.
     e->inf.target_heading = 0x40000000;
     run_ticks(ai, w, 1, 2);
-    // Aim/render yaw is INSTANT for the player; the body lags at the clamped quarter-step.
+    // Aim/render yaw is INSTANT for the player; 90 deg > the 30-deg snap re-plants
+    // both legs at once, the chase steps the clamp, and the 67.5-deg twist limit
+    // (measured vs the YAW) snaps them the rest of the way in the same tick.
     CHECK(e->heading == 0x40000000);
-    CHECK(e->inf.body_heading == kClampL);
-    // Legs: the body has only moved ~5.8 deg — under the ~30 deg snap and off the 64-tick
-    // window, the re-plant holds and the legs stay planted at 0.
-    CHECK(e->inf.leg_yaw[0] == 0 && e->inf.leg_yaw[1] == 0);
+    CHECK(e->inf.leg_yaw[0] == 0x40000000 - kLegTwist2);
+    CHECK(e->inf.leg_yaw[1] == 0x40000000 - kLegTwist2);
+    // The body IS the leg midpoint — it moved with the legs, no chase of its own.
+    CHECK(e->inf.body_heading == 0x40000000 - kLegTwist2);
 
-    // Keep turning: once the body outruns the 45-deg twist limit the legs clamp to
-    // body - 45 deg even before a re-plant fires.
-    run_ticks(ai, w, 2, 12);
-    const int32_t body = e->inf.body_heading;
-    CHECK(body > kLegTwist); // the body has swung past 45 deg by now
-    CHECK(e->inf.leg_yaw[0] >= body - kLegTwist);
-    CHECK(e->inf.leg_yaw[1] >= body - kLegTwist);
-
-    // Long settle: the body reaches the aim (the (diff + 2) >> 2 chase stalls one BAM
-    // unit short — step rounds to 0 at |diff| <= 1) and the legs re-plant + chase to
-    // within the ~5 deg hysteresis FLOOR of the body: sub-floor drift never re-plants
-    // (the witnessed rest state), so the legs settle near, not on, the body heading.
-    run_ticks(ai, w, 12, 400);
+    // Settle: the legs chase the clamped quarter-step onto the yaw (stalling within
+    // one BAM unit), and the body midpoint lands with them.
+    run_ticks(ai, w, 2, 160);
+    CHECK(std::abs(e->inf.leg_yaw[0] - 0x40000000) <= 1);
+    CHECK(std::abs(e->inf.leg_yaw[1] - 0x40000000) <= 1);
     CHECK(std::abs(e->inf.body_heading - 0x40000000) <= 1);
-    CHECK(std::abs(e->inf.leg_target[0] - e->inf.body_heading) < 59652320);
-    CHECK(std::abs(e->inf.leg_target[1] - e->inf.body_heading) < 59652320);
-    CHECK(std::abs(e->inf.leg_yaw[0] - e->inf.leg_target[0]) <= 1); // chase settled
-    CHECK(std::abs(e->inf.leg_yaw[1] - e->inf.leg_target[1]) <= 1);
+    (void)kLegClamp2;
 
-    // Small look-around (< 5 deg drift once the body follows): the legs never budge —
-    // the re-plant hysteresis floor. 4 deg = 47721856 BAM.
+    // Small look-around (4 deg < the 5-deg hysteresis floor): the legs never budge,
+    // and because the body is their midpoint it does NOT follow the aim — the §14
+    // torso twist absorbs small aim moves entirely. 4 deg = 47721856 BAM.
     const int32_t planted_r = e->inf.leg_yaw[0];
     const int32_t planted_l = e->inf.leg_yaw[1];
     e->inf.target_heading = 0x40000000 + 47721856;
-    run_ticks(ai, w, 400, 500);
-    CHECK(std::abs(e->inf.body_heading - e->inf.target_heading) <= 1);
+    run_ticks(ai, w, 160, 260);
+    CHECK(e->heading == e->inf.target_heading);
     CHECK(e->inf.leg_yaw[0] == planted_r);
     CHECK(e->inf.leg_yaw[1] == planted_l);
+    CHECK(std::abs(e->inf.body_heading - 0x40000000) <= 1); // body held by the feet
+
+    // A 10-deg move (> 5, < 30 deg): the re-plant waits for each leg's 64-tick
+    // window, right first, LEFT 32 ticks later — the staggered shuffle. After both
+    // windows pass, the feet have followed onto the yaw. 10 deg = 119304647 BAM.
+    e->inf.target_heading = 0x40000000 + 119304640;
+    run_ticks(ai, w, 260, 460);
+    CHECK(std::abs(e->inf.leg_yaw[0] - e->inf.target_heading) <= 1);
+    CHECK(std::abs(e->inf.leg_yaw[1] - e->inf.target_heading) <= 1);
+    CHECK(std::abs(e->inf.body_heading - e->inf.target_heading) <= 1);
+}
+
+// An org1 (NPC) plain ledge fall keeps its clip: the fall edge's 47/31 stamp
+// ladder is PARACHUTE-gated for the NPC motor (`test al,20h` @0x4bf8d8 — a live
+// walker run-cycles off a roof in retail), so only airborne sets and any pending
+// anim clears; the org2 player is the motor that stamps 31 straight.
+// [orig: org1 @0x4bf8ae-0x4bf901; org2 @0x4b7e17-0x4b7e73] Own function: main's
+// frame is at its MSVC stack-probe limit (see test_remote_player_body_anim).
+void test_npc_ledge_fall_keeps_clip() {
+    Field ground0([](int) { return static_cast<uint16_t>(0); }); // ground at 0
+    World w;
+    AiSystem ai;
+    ai.terrain = &ground0.field;
+    TestSource src;
+    // kJumpLoop is AVAILABLE — proving the no-stamp is the parachute gate, not
+    // clip availability.
+    src.clips = {anim_state::kWalkForward, anim_state::kIdle, anim_state::kJumpLoop};
+    ai.root_motion = &src;
+    AiEntity *e = soldier(ai);
+    e->health = 100;
+    e->inf.is_local_player = false;
+    route(ai, e, {node(fx(500), 0, fx(1))}, 0);
+    e->pos[0] = fx(100); e->pos[1] = fx(100); e->pos[2] = fx(80); // 80u off the floor
+
+    run_ticks(ai, w, 0, 1); // think commits the walk, then the fall edge fires
+    CHECK(e->inf.airborne);
+    CHECK(e->inf.anim_state == anim_state::kWalkForward); // NOT kJumpLoop
+    CHECK(e->inf.anim_pending == 0);                      // [orig: @0x4bf901]
+    CHECK(e->inf.vel[0] == 0 && e->inf.vel[1] == 0);      // no org2 momentum carry
+}
+
+// Unlike org1, org2 includes DEAD in the gate around the whole ledge-fall edge:
+// a dead player that was grounded does not gain the airborne bit, clear pending,
+// or stamp jump_loop merely because the resolver returns >0xF000.
+// [orig: `test eax,10A002h; jnz` @0x4b7e22-0x4b7e2a, before the airborne write
+//  @0x4b7e3c; compare org1's 0x10A000 gate + pre-dead-test write @0x4bf8b5-0x4bf8cf]
+void test_dead_player_ledge_fall_edge_is_suppressed() {
+    Field ground0([](int) { return static_cast<uint16_t>(0); });
+    World w;
+    AiSystem ai;
+    ai.terrain = &ground0.field;
+    TestSource src;
+    src.clips = {anim_state::kDeathFire, anim_state::kJumpLoop};
+    ai.root_motion = &src;
+    AiEntity *e = soldier(ai);
+    e->health = 0;
+    e->inf.is_local_player = true;
+    e->inf.anim_state = anim_state::kDeathFire; // already on the death-family path
+    e->inf.anim_pending = 123;
+    e->pos[0] = fx(100);
+    e->pos[1] = fx(100);
+    e->pos[2] = fx(80);
+
+    run_ticks(ai, w, 0, 1);
+
+    CHECK(!e->inf.airborne); // org2's dead gate owns the airborne-bit write
+    CHECK(e->inf.anim_state == anim_state::kDeathFire);
+    CHECK(e->inf.anim_pending == 123); // the whole fall edge was skipped
+}
+
+// The resolver's idle skip-throttle undo must match the CALLER's integrate per
+// motor: x1 for the player body (org2 `pos += vel`, -208/tick) and x2 for the
+// NPC (org1 `pos += 2*vel`). The x2-for-both undo (tuned to the pre-§22 2-tick
+// player cadence) nets +208/tick of climb through the skip band, then the
+// no-reset middle band accumulates the fall back to the floor snap — the
+// standing player's visible rise-and-snap sawtooth (2026-07-17 regression).
+// This drives the REAL motor against the REAL resolver across the throttle's
+// 64-tick windows — the direct-resolver test hand-rolled the caller's cadence
+// and stayed green while the pair diverged.
+// [orig: the skip undo @0x4b2cd9-0x4b2ce9 — `test ecx,100h` picks x1 for the
+//  Flags&0x100 PLAYER body (the "mounted" gloss was a kong misnomer; the kill
+//  router and AI target filters key players on 0x100); gates @0x4b2c3d-0x4b2cba]
+void test_player_idle_skip_throttle_no_bounce() {
+    Field flat([](int) { return static_cast<uint16_t>(0); });
+    World world;
+    world.registry.configure_pool(0, 4);
+    world.registry.configure_pool(2, 4);
+
+    Entity far_building; // presence only: a live instance enables the resolver path
+    far_building.kind = EntityKind::Building;
+    far_building.position = {200.0f, 200.0f, 0.0f};
+    const EntityHandle bh = world.registry.spawn(2, far_building);
+
+    Entity player;
+    player.kind = EntityKind::Organic;
+    // Spawn ON the floor: the skip throttle is the thing under test, not the
+    // drop landing (a >2u drop can outrun the witnessed 2u ground probe — the
+    // quantize-up + 2u down-probe @0x4b3d6e — and tunnel in this bare rig).
+    player.position = {10.0f, 10.0f, 0.05f};
+    player.health = 100;
+    player.health_max = 100;
+    const EntityHandle ph = world.registry.spawn(0, player);
+
+    CollisionWorld collision;
+    collision.terrain = &flat.field;
+    const int32_t model_id = collision.add_model(hurt_box_model());
+    collision.assign_entity(bh, model_id);
+
+    AiSystem ai;
+    ai.terrain = &flat.field;
+    ai.collision = &collision;
+    TestSource source;
+    source.clips = {anim_state::kIdle};
+    source.step = 0;
+    ai.root_motion = &source;
+    AiEntity *e = ai.at(ai.attach(ph));
+    e->inf.active = true;
+    e->inf.is_local_player = true;
+    e->health = 100;
+    e->pos[0] = fx(10.0);
+    e->pos[1] = fx(10.0);
+    e->pos[2] = fx(0.05);
+
+    run_ticks(ai, world, 0, 80); // pin onto the floor + pass the first 64-gate
+    const int32_t settled = e->pos[2];
+    int32_t min_z = settled;
+    int32_t max_z = settled;
+    for (uint32_t t = 80; t < 400; ++t) { // several 64-tick windows + skip bands
+        run_ticks(ai, world, t, t + 1);
+        if (e->pos[2] < min_z) min_z = e->pos[2];
+        if (e->pos[2] > max_z) max_z = e->pos[2];
+    }
+    CHECK(max_z - min_z <= 208); // post-tick z pinned: no rise, no sawtooth
+    CHECK(std::abs(e->pos[2] - settled) <= 208);
 }
 
 // The upper-body weapon channel (the entity's SECONDARY AnimMap channel), local-player
@@ -1329,8 +1462,10 @@ int main() {
         CHECK(e->health == 100);
     }
 
-    // ---- gravity cadence: the NPC (org1) falls EVERY tick; the player (org2) keeps the 2-tick
-    //      discretization. [orig: NPC -416/tick @0x4bf7bf; player -416 every 2 ticks; D-INF-10]
+    // ---- gravity cadence: BOTH motors fall EVERY tick, asymmetric steps — the NPC
+    //      (org1) at -416 with pos.z += 2*vel, the player (org2) at -208 with
+    //      pos.z += vel. [orig: NPC @0x4bf7bf/@0x4bf7ec; player @0x4b7acf/@0x4b7cef;
+    //      D-INF-10 closed for both legs]
     {
         Field ground0([](int) { return static_cast<uint16_t>(0); }); // ground at 0
         World w;
@@ -1345,9 +1480,16 @@ int main() {
         ai.at(1)->inf.is_local_player = true;
         ai.at(1)->pos[0] = fx(120); ai.at(1)->pos[1] = fx(120); ai.at(1)->pos[2] = fx(100);
 
-        run_ticks(ai, w, 0, 2); // ticks 0 (even) and 1 (odd); both stay airborne (100u up)
-        CHECK(ai.at(0)->inf.vel[2] == -2 * 416); // NPC: two gravity steps -> per-tick fall
-        CHECK(ai.at(1)->inf.vel[2] == -416);     // player: one gravity step -> 2-tick discretization
+        run_ticks(ai, w, 0, 1); // both stay airborne (100u up)
+        CHECK(ai.at(0)->inf.vel[2] == -416); // NPC: one per-tick step
+        CHECK(ai.at(1)->inf.vel[2] == -208); // player: the org2 half-step, same tick
+        const int32_t npc_z = ai.at(0)->pos[2];
+        const int32_t ply_z = ai.at(1)->pos[2];
+        run_ticks(ai, w, 1, 2);
+        CHECK(ai.at(0)->inf.vel[2] == -2 * 416);
+        CHECK(ai.at(1)->inf.vel[2] == -2 * 208);
+        CHECK(ai.at(0)->pos[2] == npc_z + 2 * (-2 * 416)); // pos.z += 2*vel (org1)
+        CHECK(ai.at(1)->pos[2] == ply_z + (-2 * 208));     // pos.z += vel (org2)
     }
 
     // ---- slope pass through the motor: a live STANDING soldier holds steep ground —
@@ -1735,9 +1877,11 @@ int main() {
         CHECK(e->inf.anim_state == anim_state::kWalkForward); // NPC stance is not player input
     }
 
-    // ---- player jump: a grounded jump request launches the vel_z impulse + jump-loop clip,
-    //      then gravity brings it back to the floor. [orig: @0x4b7ee5 vel_z=0x1600 + in-air;
-    //      jump_loop 31; gravity -416/2t] ----
+    // ---- player jump: witnessed org2 — the jump block runs AFTER the vertical
+    //      resolve, stamps jump_start 30 with jump_loop 31 queued (31 straight when
+    //      the model has no 30), reloads the 32-tick cooldown, and holding the key
+    //      never auto-repeats (the cooldown parks at 1 until release). [orig: gates
+    //      @0x4b7e8c-0x4b7ebd; impulse @0x4b7ec3-0x4b7f06; cooldown @0x4b7de0-0x4b7e15]
     {
         Field flat([](int) { return static_cast<uint16_t>(50 * 256); });
         const int32_t floor_z = fx(50);
@@ -1752,21 +1896,41 @@ int main() {
         e->health = 100;
         e->pos[0] = fx(100); e->pos[1] = fx(100); e->pos[2] = floor_z;
 
+        e->inf.player_moving = true;           // running jump: root step carries 3/4
         run_ticks(ai, w, 0, 2);               // settle on the ground first
         CHECK(!e->inf.airborne);
         CHECK(e->pos[2] == floor_z);
 
         e->inf.jump_requested = true;
-        run_ticks(ai, w, 2, 3);               // the jump tick: physics is immediate
+        run_ticks(ai, w, 2, 3);               // the jump tick: impulse after the resolve
         CHECK(e->inf.airborne);
-        CHECK(e->inf.vel[2] == 0x1600 - 416); // launch impulse minus one gravity step
-        CHECK(e->pos[2] > floor_z);           // rose off the ground
-        run_ticks(ai, w, 3, 5);               // the jump_loop CLIP lands on the next
-        CHECK(e->inf.anim_state == anim_state::kJumpLoop); // 4th-tick selection pass
+        CHECK(e->inf.vel[2] == 0x1600);       // the raw impulse; gravity bites next tick
+        CHECK(e->inf.jump_cooldown == 32);    // reloaded [orig: @0x4b7f06]
+        CHECK(e->inf.anim_state == anim_state::kJumpLoop); // stamped at the jump (no 30 clip)
+        CHECK(e->inf.vel[0] == (3 * src.step) / 4); // rotated root-step momentum carry
+        run_ticks(ai, w, 3, 4);
+        CHECK(e->inf.vel[2] == 0x1600 - 208); // org2 per-tick gravity
+        CHECK(e->pos[2] > floor_z);           // rising
 
-        run_ticks(ai, w, 5, 400);             // ...arcs up and lands
+        // Model a genuinely HELD key: the host reapplies the level input before every
+        // motor tick. The cooldown parks at 1 and the grounded player never auto-repeats.
+        for (uint32_t t = 4; t < 100; ++t) {
+            e->inf.jump_requested = true;
+            run_ticks(ai, w, t, t + 1);
+        }
         CHECK(!e->inf.airborne);
         CHECK(e->pos[2] == floor_z);
+        CHECK(e->inf.jump_cooldown == 1);     // held-at-1 latch: no auto-repeat
+
+        run_ticks(ai, w, 100, 101);           // release edge
+        CHECK(e->inf.jump_cooldown == 0);
+
+        // Prone bodies never jump. [orig: the var_10AC gate @0x4b7e99]
+        e->inf.stance = InfantryState::Stance::kProne;
+        e->inf.jump_requested = true;
+        run_ticks(ai, w, 101, 102);
+        CHECK(!e->inf.airborne);
+        e->inf.stance = InfantryState::Stance::kStand;
     }
 
     // ---- idle root output is still entity root motion: the movement flag gates state commits,
@@ -1917,6 +2081,9 @@ int main() {
     test_registry_max_health_drives_wounded_gait();
     test_player_body_chase_and_legs();
     test_player_body_chase_crosses_the_bam_seam();
+    test_npc_ledge_fall_keeps_clip();
+    test_dead_player_ledge_fall_edge_is_suppressed();
+    test_player_idle_skip_throttle_no_bounce();
     test_player_weapon_channel();
     test_player_weapon_hold_kinds();
     test_player_weapon_attack_stamp();

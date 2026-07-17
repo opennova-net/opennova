@@ -273,10 +273,15 @@ struct InfantryState {
     int32_t body_heading = 0;
     int32_t target_heading = 0;
     // Leg-chain chase yaws + their re-plant targets (BAM32): the feet keep pointing
-    // where they were planted and shuffle after the body under the section-3.3
-    // hysteresis; the render bone overlay consumes them as the R/L leg yaw.
-    // [orig: entity +0x2d4/+0x2d8 (IDB "torsoYaw/torsoPitch" -- misnomers) chasing
-    //  +0x2e4/+0x2e8; witness docs/world/world-wac-ai-re.md s3.3 + s14]
+    // where they were planted and shuffle after the heading under the witnessed
+    // hysteresis; the render bone overlay consumes them as the R/L leg yaw. The two
+    // motors differ in kind (D-INF-12 closure): the NPC's legs chase re-plant targets
+    // seeded from the body/target midpoint and the body quarter-chases its target;
+    // the PLAYER's legs chase the mouse yaw directly and body_heading is written as
+    // the leg midpoint. [orig: entity +0x2d4/+0x2d8 (IDB legChaseYawR/L, renamed ex
+    // the torsoYaw/torsoPitch misnomers) chasing +0x2e4/+0x2e8 (legReplantYawR/L);
+    // org1 @0x4be8fd-0x4beb18, org2 @0x4b4945-0x4b4ac1; witness
+    // docs/world/world-wac-ai-re.md s3.3 + s14]
     int32_t leg_yaw[2] = {};              // 0 = right chain, 1 = left chain
     int32_t leg_target[2] = {};
     int32_t vel[3] = {};                  // entity+152/+156/+160
@@ -287,6 +292,11 @@ struct InfantryState {
     Stance stance = Stance::kStand;
     bool airborne = false;
     bool jump_requested = false;
+    // The player body's jump cooldown/edge latch. The original REUSES entity+0x1A8
+    // (org1's targetHeading slot) for this on the org2 body: clamp [0,32], >1 counts
+    // down, held-at-1 until the jump key releases, jump only from 0; a jump reloads
+    // 32. [orig: Entity_UpdateInfantryPlayerBody @0x4b7de0-0x4b7e15 + @0x4b7f06]
+    int32_t jump_cooldown = 0;
 
     int32_t wait_cooldown = 0;            // entity[74]
     int32_t alert_timer = 0;              // entity[190]
