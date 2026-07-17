@@ -12,14 +12,14 @@ assumptions.
 
 **Scope:** runtime collection, deterministic placement, geometry expansion,
 `:fd` preprocessing, render-state/shader behavior, and the Godot adapter. The
-foliage definition and map authoring formats were already sound and remain in
-place.
+foliage definition and map formats remain in place; this closure also aligns
+world-space paint and eyedropper tools with the DETAIL consumer's flat map.
 
 ## Verdict
 
 | Surface | Retail witness | Host result | Verdict |
 |---|---|---|---|
-| Definition/map authoring | `.trn` foliage defs, charmap, foliagemap | existing authoring code retained | matching |
+| Definition/map authoring | `.trn` foliage defs, charmap, foliagemap | formats retained; foliage paint/eyedrop share DETAIL's flat wrapped coordinate policy | matching format; DETAIL editing is WYSIWYG |
 | Detail-cell collection | frustum-surviving traversal nodes (level ≥ 3) hand subtrees to `Terrain_CollectNearFoliagePatches @ 0x603e60`, cap 128 | the same handoff from the ported traversal into the 16-unit mip-bound collector | matching (seating corrected 2026-07-16, D-FOLIAGE-13) |
 | Detail placement | `generate_foliage_instances_0 @ 0x5ffdd0` | fresh `foliage::Runtime` literal vectors | matching |
 | Detail geometry | every surface of every LOD0 submesh expanded and terrain-bent | fresh CPU-expanded aggregate ArrayMesh batches | matching |
@@ -503,18 +503,24 @@ The fresh implementation deliberately has three layers:
    per-submission draw pools for detail high, detail low, and silhouette.
 
 The discarded placement, dispatcher, model-dispatcher, and fd-bake clusters
-were deleted. The foliage-map authoring API remains separate and unchanged.
+were deleted. The live foliage-map resource now single-sources DETAIL sampling,
+world-to-map coordinates, and effective resolution for runtime and authoring.
 
 Runtime sampling comes directly from `NovaTerrainData`:
 
-- detail gate: `get_foliage_index_world`;
-- silhouette gate: `get_foliage_index_world`;
+- detail gate: flat-wrap `get_detail_foliage_index_fixed` on the candidate's
+  original Q16 coordinates;
+- MODEL gate: sector-routed `get_foliage_index_world`;
 - ground: bilinear terrain height;
 - terrain projection: the shared world-to-source transform.
 - exclusion: the active mission `NovaTerrainTileInfo` inclusive AABB scan.
 
-The editor uses the same adapter with live height and foliage-map Callables.
-Its detail cells are a deterministic preview set; only
+The editor uses the same adapter with separate live foliage-map Callables:
+DETAIL reads the flat wrapped map resource, while MODEL keeps the routed
+terrain projection. Foliage paint and eyedropper target that same flat DETAIL
+pixel, including the loader's floor-log2 resolution for brush scale and a
+wrapped footprint at the 1024-world seam. Its detail cells are a deterministic
+preview set; only
 the runtime native collector is claimed as retail-exact. Runtime dispatchers
 also inherit the parent `NovaTerrain` heightfield-normal atlas; the standalone
 editor foliage preview has no such parent and currently falls back to mesh
@@ -523,8 +529,12 @@ D-FOLIAGE-7 rather than claimed as tile-light parity.
 
 ## Verification
 
-- `foliage_runtime_vectors`: literal detail PRNG positions/yaws, the shared
-  authored-foliage-map gate for detail and silhouette tiers, path/force-on
+- `foliage_map_test`: negative/fractional Q16 wrapping, integer boundaries,
+  non-power-of-two widths, exponent-10 actual-width stride, and shared
+  runtime/authoring coordinates, including wrapped brush seams that do not
+  touch unused non-power-of-two stride cells.
+- `foliage_runtime_vectors`: literal detail PRNG positions/yaws, separate Q16
+  flat-detail and routed-MODEL gate callbacks with disjoint routing, path/force-on
   behavior, 20–42 fade shared by both near submissions, pass switch, the
   strict-LESS secondary marker, four silhouette cells, 21 cap,
   eight-sample fold, distance alpha ref, and `:fd`.
@@ -533,8 +543,9 @@ D-FOLIAGE-7 rather than claimed as tile-light parity.
   tile scan.
 - `terrain_foliage_detail_collector`: mip-bound 16-unit keys, distance boundary,
   quadrant mapping, signed packing, traversal order, and global cap.
-- `foliage_runtime_adapter_test.gd`: fresh public adapter contract, tier map
-  selection, full multi-surface LOD0 aggregation, view-depth gate, no
+- `foliage_runtime_adapter_test.gd`: fresh public adapter contract, disjoint
+  DETAIL/MODEL callback routing, tier map selection, full multi-surface LOD0
+  aggregation, view-depth gate, no
   manufactured anchors, cache identity/eviction ordering, reset behavior, and
   the additive/depth shader-state contract.
 - Adapter regressions pin ordered near HIGH/LOW draw nodes and their depth
@@ -557,9 +568,10 @@ D-FOLIAGE-7 rather than claimed as tile-light parity.
   `00TRe.bms` player spawn, fixed-input HIGH/automatic coverage with deliberate
   dropout and fade-response controls. LOW-far is explicitly reported as
   skipped when it has no pixels in the exact spawn view.
-- `runtime_scene_probe.gd`: runtime scene consumes NovaTerrain's typed native
-  detail-cell vector; the minimal fixture intentionally contains no `.3di`
-  models.
+- `runtime_scene_probe.gd` and the visual probes: detail camera selection uses
+  the flat gate oracle; the runtime scene consumes NovaTerrain's typed native
+  detail-cell vector, while its minimal fixture intentionally contains no
+  `.3di` models.
 
 ## D-FOLIAGE divergence catalog
 
@@ -576,7 +588,7 @@ D-FOLIAGE-7 rather than claimed as tile-light parity.
 | D-FOLIAGE-9 | **OPEN, host mapping (narrowed 2026-07-16).** The anchor CLASS is now the witnessed stance gate (D-FOLIAGE-11); what remains approximate is visibility membership — camera frustum stands in for retail's visible-sector walk + `test_sector_entity_occlusion @ 0x5c4610`. No terrain-center fallback remains. Same-frame refreshes of an overlapping host `(slot, cell key)` are coalesced without removing its distinct draw submissions, preventing host-only regeneration/upload storms while this membership gap remains open. |
 | D-FOLIAGE-11 | **FIXED 2026-07-16.** The host fed every placed mission object as a MODEL-tier anchor; retail's sector walk generates the tier only for entities with `MoveOrder` stance bits (`0x100` prone / `0x200` crouch) and an empty `groundEntity` — the hide-in-grass masks around infantry [`orig: @ 0x5c7dc2/0x5c7ded/0x5c7dd5`]. Anchors now come from the sim's stance query; the ONED preview feeds none (no infantry exists there), and its placed-object `anchor_provider` plumbing was removed. Placed-object anchoring both drew non-retail grass masks around every object and, on object-dense vistas, thrashed the per-definition model caches into a 3 FPS frame. |
 | D-FOLIAGE-13 | **FIXED 2026-07-16.** The host collected detail cells with a standalone RADIAL walk (the full 42-unit disc, ~34 cells on open ground); retail's collector is invoked only from frustum-surviving traversal nodes of level ≥ 3 [`orig: @ 0x60905c..0x60907c`], so its working set is the frustum wedge. Over-collection pushed the far-slot pool past its witnessed 16-bit-index capacity (`min(128, 65534/(36×V))` ≈ 32 for a ~54-vertex def) and the witnessed strict-first-max LRU (per-update stamps, all-ties) then hammered one slot per frame — a user-visible two-frame grass blink at working-set-over-capacity poses that retail never exhibits. Collection is now seated in the traversal handoff; at the reported 00TRa pose: 34→24 cells, 2 misses+evictions/frame→0, blink gone. |
-| D-FOLIAGE-12 | **OPEN, host mapping.** Retail's two tiers gate through two different foliagemap samplers: the detail generator's flat 1024-wrap lookup (`Terrain_GetSurfaceTypeAtFixedPoint @ 0x6066d0`) vs the MODEL tier's sector-grid-routed lookup (`Foliage_SampleFoliageMapMask @ 0x606620`); both negate Z internally. The host routes BOTH tiers through one sector-grid sampler — identical on identity-grid maps (every retail-shipped map checked), divergent only on repeat/remapped sector layouts. |
+| D-FOLIAGE-12 | **FIXED 2026-07-17.** The portable runtime now carries separate Q16 gate callbacks: detail consumes the flat 1024-wrap lookup while MODEL retains the sector-grid-routed lookup. `foliage_sample_detail_flat_wrap` ports the loader's actual-width stride, width-derived `floor(log2(width))`, low-10-bit coordinate wrap, and host-plane Z convention without a float round-trip [`orig: Foliage_LoadFoliageMapPCX @ 0x605ad0`; `Terrain_GetSurfaceTypeAtFixedPoint @ 0x6066d0`; `Foliage_SampleFoliageMapMask @ 0x606620`]. ONED preview, foliage paint/eyedropper, and capture probes share the flat DETAIL coordinate API. The Dvxi5 GameWorld fixture pins disjoint flat-positive/routed-negative and routed-positive/flat-negative authored-map witnesses, including the world-to-pixel mapping, then requires production detail output at the flat-positive point. |
 | D-FOLIAGE-10 | **OPEN, bounded host order.** Retail inserts each immediate MODEL depth-mask draw between its initial sector flush and later entity/foliage consumers; the host's transparent-pass depth sorting reproduces the mask-occludes-farther-detail effect but cannot cull already-drawn farther tufts under a nearer mask, and cannot reproduce every arbitrary insertion point. The near secondary LOW's strict `LESS` is now emulated exactly via the high-pass cutoff discard (the 2026-07-15 grill retired the state half of this entry). The water-REFLECTION scene's LOW-only `fade × 0.1` foliage pass (arg_8 = reflectionEnabled @ `0x5c95c1/0x5c9661`) is not hosted while reflections carry no foliage. |
 
 ## Cross-references

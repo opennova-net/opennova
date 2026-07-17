@@ -1558,20 +1558,22 @@ func _apply_foliage_paint_stroke(delta: float) -> bool:
 	var dab_count := _brush_session.get_stroke_dab_count(start_hit, end_hit)
 	var map_width := maxi(_document.foliage_map.get_width(), 1)
 	var map_height := maxi(_document.foliage_map.get_height(), 1)
-	var radius_pixels := maxi(1, int(round(brush_radius * float(map_width) / float(HM_SIZE))))
+	var detail_resolution := maxi(
+		_document.foliage_map.get_detail_sample_resolution(), 1)
+	var radius_pixels := maxi(1, int(round(
+		brush_radius * float(detail_resolution) / float(HM_SIZE))))
 	var changed := false
 
 	for dab_idx in range(dab_count):
 		var t: float = 1.0 if dab_count == 1 else float(dab_idx + 1) / float(dab_count)
 		var dab_hit := start_hit.lerp(end_hit, t)
-		var source := terrain_mesh.world_to_source_coords(dab_hit.x, dab_hit.z)
-		if source.x < 0.0 or source.y < 0.0:
-			continue
-		var center_x := _document.foliage_map.map_x_from_heightmap_x(source.x)
-		var center_y := _document.foliage_map.map_y_from_heightmap_y(source.y)
+		var center := _document.foliage_map.get_detail_map_position_world(
+			dab_hit.x, dab_hit.z)
+		var center_x := center.x
+		var center_y := center.y
 		if center_x < 0 or center_y < 0 or center_x >= map_width or center_y >= map_height:
 			continue
-		changed = _document.foliage_map.paint_circle(
+		changed = _document.foliage_map.paint_detail_circle_wrap(
 			center_x,
 			center_y,
 			radius_pixels,
@@ -1589,12 +1591,12 @@ func _apply_foliage_paint_stroke(delta: float) -> bool:
 func _eyedrop_foliage_at_hover() -> bool:
 	if _document.foliage_map == null or not _hover_hit_valid:
 		return false
-	var source := terrain_mesh.world_to_source_coords(_hover_hit.x, _hover_hit.z)
-	if source.x < 0.0 or source.y < 0.0:
+	var map_position := _document.foliage_map.get_detail_map_position_world(
+		_hover_hit.x, _hover_hit.z)
+	if map_position.x < 0 or map_position.y < 0:
 		return false
-	var map_x := _document.foliage_map.map_x_from_heightmap_x(source.x)
-	var map_y := _document.foliage_map.map_y_from_heightmap_y(source.y)
-	var match_index := int(_document.foliage_map.get_index(map_x, map_y))
+	var match_index := int(_document.foliage_map.get_index(
+		map_position.x, map_position.y))
 	var def_index := _document.find_foliage_def_index_by_match(match_index)
 	if def_index < 0:
 		return false

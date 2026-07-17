@@ -201,10 +201,10 @@ std::vector<DetailInstance> generate_detail_cell(
 	for (int index = 0; index < kCandidates; ++index) {
 		const Candidate candidate = next_candidate(cell_key, index, state);
 		if (candidate_is_blocked(slot, world, candidate)) continue;
-		const uint32_t mask = world.foliage_mask_at
-		                        ? world.foliage_mask_at(
-		                              from_fixed(candidate.x_fixed),
-		                              from_fixed(candidate.z_fixed))
+		const uint32_t mask = world.detail_foliage_mask_at
+		                        ? world.detail_foliage_mask_at(
+		                              candidate.x_fixed,
+		                              candidate.z_fixed)
 		                        : 0u;
 		if ((mask & (1u << slot_index)) == 0u) continue;
 
@@ -335,10 +335,10 @@ std::vector<SilhouetteInstance> generate_silhouette_cell(
 			continue;
 		}
 		if (candidate_is_blocked(slot, world, candidate)) continue;
-		const uint32_t mask = world.foliage_mask_at
-		                        ? world.foliage_mask_at(
-		                              from_fixed(candidate.x_fixed),
-		                              from_fixed(candidate.z_fixed))
+		const uint32_t mask = world.model_foliage_mask_at
+		                        ? world.model_foliage_mask_at(
+		                              candidate.x_fixed,
+		                              candidate.z_fixed)
 		                        : 0u;
 		if ((mask & (1u << slot_index)) == 0u) continue;
 

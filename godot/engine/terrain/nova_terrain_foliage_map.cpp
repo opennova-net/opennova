@@ -6,7 +6,9 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstring>
+#include <limits>
 
 using namespace godot;
 
@@ -17,6 +19,27 @@ static opennova::FoliageMap ensure_valid_map(const opennova::FoliageMap &map) {
 		return map;
 	}
 	return opennova::foliage_make_default_map(opennova::FOLIAGE_HEIGHTMAP_SIZE, opennova::FOLIAGE_HEIGHTMAP_SIZE, 0);
+}
+
+static bool world_position_to_fixed(double world_x, double world_z,
+                                    int32_t &world_x_fixed,
+                                    int32_t &world_z_fixed) {
+	if (!std::isfinite(world_x) || !std::isfinite(world_z)) {
+		return false;
+	}
+	const double x_scaled = std::trunc(world_x * 65536.0);
+	const double z_scaled = std::trunc(world_z * 65536.0);
+	const double fixed_min =
+			static_cast<double>(std::numeric_limits<int32_t>::min());
+	const double fixed_max =
+			static_cast<double>(std::numeric_limits<int32_t>::max());
+	if (x_scaled < fixed_min || x_scaled > fixed_max ||
+	    z_scaled < fixed_min || z_scaled > fixed_max) {
+		return false;
+	}
+	world_x_fixed = static_cast<int32_t>(x_scaled);
+	world_z_fixed = static_cast<int32_t>(z_scaled);
+	return true;
 }
 
 } // namespace
@@ -30,6 +53,8 @@ void NovaTerrainFoliageMap::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_index", "x", "y", "index"), &NovaTerrainFoliageMap::set_index);
 	ClassDB::bind_method(D_METHOD("paint_circle", "center_x", "center_y", "radius", "hardness", "strength", "index"),
 	                     &NovaTerrainFoliageMap::paint_circle);
+	ClassDB::bind_method(D_METHOD("paint_detail_circle_wrap", "center_x", "center_y", "radius", "hardness", "strength", "index"),
+	                     &NovaTerrainFoliageMap::paint_detail_circle_wrap);
 	ClassDB::bind_method(D_METHOD("count_index", "index"), &NovaTerrainFoliageMap::count_index);
 	ClassDB::bind_method(D_METHOD("remap_index", "from_index", "to_index"), &NovaTerrainFoliageMap::remap_index);
 	ClassDB::bind_method(D_METHOD("remap_indices", "from_to"), &NovaTerrainFoliageMap::remap_indices);
@@ -41,6 +66,12 @@ void NovaTerrainFoliageMap::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_preview_texture"), &NovaTerrainFoliageMap::get_preview_texture);
 	ClassDB::bind_method(D_METHOD("map_x_from_heightmap_x", "heightmap_x"), &NovaTerrainFoliageMap::map_x_from_heightmap_x);
 	ClassDB::bind_method(D_METHOD("map_y_from_heightmap_y", "heightmap_y"), &NovaTerrainFoliageMap::map_y_from_heightmap_y);
+	ClassDB::bind_method(D_METHOD("sample_detail_index_world", "world_x", "world_z"),
+	                     &NovaTerrainFoliageMap::sample_detail_index_world);
+	ClassDB::bind_method(D_METHOD("get_detail_map_position_world", "world_x", "world_z"),
+	                     &NovaTerrainFoliageMap::get_detail_map_position_world);
+	ClassDB::bind_method(D_METHOD("get_detail_sample_resolution"),
+	                     &NovaTerrainFoliageMap::get_detail_sample_resolution);
 	ClassDB::bind_method(D_METHOD("heightmap_x_from_map_x", "map_x"), &NovaTerrainFoliageMap::heightmap_x_from_map_x);
 	ClassDB::bind_method(D_METHOD("heightmap_y_from_map_y", "map_y"), &NovaTerrainFoliageMap::heightmap_y_from_map_y);
 	ClassDB::bind_method(D_METHOD("get_sector_id_at", "map_x", "map_y"), &NovaTerrainFoliageMap::get_sector_id_at);
@@ -107,6 +138,24 @@ bool NovaTerrainFoliageMap::paint_circle(int center_x, int center_y, int radius,
 	                                                    static_cast<float>(hardness),
 	                                                    static_cast<float>(strength),
 	                                                    static_cast<uint8_t>(std::clamp(index, 0, 255)));
+	if (changed) {
+		_refresh_preview_texture();
+		emit_changed();
+	}
+	return changed;
+}
+
+bool NovaTerrainFoliageMap::paint_detail_circle_wrap(
+		int center_x, int center_y, int radius, double hardness,
+		double strength, int index) {
+	const bool changed = opennova::foliage_paint_detail_circle_wrap(
+			foliage_map,
+			center_x,
+			center_y,
+			radius,
+			static_cast<float>(hardness),
+			static_cast<float>(strength),
+			static_cast<uint8_t>(std::clamp(index, 0, 255)));
 	if (changed) {
 		_refresh_preview_texture();
 		emit_changed();
@@ -202,6 +251,45 @@ int NovaTerrainFoliageMap::map_x_from_heightmap_x(double hm_x) const {
 
 int NovaTerrainFoliageMap::map_y_from_heightmap_y(double hm_y) const {
 	return opennova::foliage_map_y_from_heightmap_y(static_cast<float>(hm_y), foliage_map.height);
+}
+
+uint8_t NovaTerrainFoliageMap::sample_detail_flat_wrap(int32_t world_x_fixed,
+                                                       int32_t world_z_fixed) const {
+	return opennova::foliage_sample_detail_flat_wrap(
+			foliage_map, world_x_fixed, world_z_fixed);
+}
+
+int NovaTerrainFoliageMap::sample_detail_index_world(double world_x,
+                                                     double world_z) const {
+	int32_t world_x_fixed = 0;
+	int32_t world_z_fixed = 0;
+	if (!world_position_to_fixed(
+	        world_x, world_z, world_x_fixed, world_z_fixed)) {
+		return 0;
+	}
+	return static_cast<int>(sample_detail_flat_wrap(
+			world_x_fixed, world_z_fixed));
+}
+
+Vector2i NovaTerrainFoliageMap::get_detail_map_position_world(
+		double world_x, double world_z) const {
+	int32_t world_x_fixed = 0;
+	int32_t world_z_fixed = 0;
+	if (!world_position_to_fixed(
+	        world_x, world_z, world_x_fixed, world_z_fixed)) {
+		return Vector2i(-1, -1);
+	}
+	int map_x = -1;
+	int map_y = -1;
+	if (!opennova::foliage_detail_flat_wrap_position(
+	        foliage_map, world_x_fixed, world_z_fixed, map_x, map_y)) {
+		return Vector2i(-1, -1);
+	}
+	return Vector2i(map_x, map_y);
+}
+
+int NovaTerrainFoliageMap::get_detail_sample_resolution() const {
+	return opennova::foliage_detail_sample_resolution(foliage_map);
 }
 
 double NovaTerrainFoliageMap::heightmap_x_from_map_x(int map_x) const {
