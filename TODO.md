@@ -51,7 +51,7 @@
       `writes_any_output_file()` + give the blender leg the work) or fix the tests to
       request a scene output — and either way run the parity exports in a subprocess.
 
-- [ ] Terrain native `[orig]` citation pass: `godot/engine/terrain/` + `libs/terrain` carry no inline citations; grill-ida the mesh build / sampler / lighting chain and land a `docs/terrain/*-re.md` record (docs/README.md lists terrain as record-less)
+- [ ] Terrain native `[orig]` citation pass: sweep `godot/engine/terrain/` + `libs/terrain` for the remaining uncited chains — `docs/terrain/terrain-re.md` now exists (partial, PAR-R1) and `libs/terrain` carries inline citations after the 2026-07 re-grills (#245); narrow or close this entry after the sweep
 - [ ] Present-pass / entity-reconcile citation pass: `engine/world/mission_present_pass.gd`, `mission_entity_registry.gd`, `wire_present_pass.gd` document design but carry no `[orig]` anchors; engine-research the original present/tick chain and cite into `docs/runtime-architecture.md` + `docs/correspondence.md`
 - [ ] Two-net-stack convergence: the NovaNetClient replay/spectate path vs the NovaWorldClient/NovaSimulation listen-server path (see godot/engine/CLAUDE.md); decide convergence once the net workstream stabilizes
 - [ ] `engine/mcp/` relocation (optional): all 11 files are class_name-referenced with zero `res://engine/mcp` literals, so it can move (e.g. next to `modtools/mcp/`) without path edits if engine/ layering ever needs it

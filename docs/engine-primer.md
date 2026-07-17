@@ -155,12 +155,12 @@ is authoritative, and each record owns the rationale and the stable `D-…` dive
 | Skeletal animation (`.bad`/`.adm`) | `libs/anim`, NovaSkeletalAnim | [ADR 0007](adr/0007-skeletal-runtime-and-entity-visual.md) | implemented (deferrals listed there) |
 | Models (`.3di`: 3DI3 + GP) | `libs/threedi` | [threedi/3di-gp-format-re.md](threedi/3di-gp-format-re.md) | landed format record |
 | Models (Land Warrior `.3di`) | — | [threedi/3di-lw-format-re.md](threedi/3di-lw-format-re.md) | unlanded (PR #45 closed) |
-| Particles (`.ptl`) | — | [particles/ptl-format-re.md](particles/ptl-format-re.md) | redesign in flight |
+| Particles (`.ptl`) | `libs/particle`, `libs/renderer` particle path, `godot/engine/particle` (NovaEffectScene / NovaParticleFile) | [particles/ptl-format-re.md](particles/ptl-format-re.md) | landed (#237); D-PTL catalog in the ledger |
 | NovaWorld networking | `libs/npwire`, `libs/novaworld`, `libs/napi`, `libs/novacrypto`, `libs/netsim`, `apps/novaworld_server`, `godot/engine/network` | [net/novaworld-net-re.md](net/novaworld-net-re.md) | landed + maturing (backend + SP listen server; in-match decode byte-witnessed, encode in progress) |
-| Boot-required resources | boot literals scattered in `godot/game/` today; ENG-6 manifest pending | [required-resources.md](required-resources.md) | witnessed (R8): the fatal set, per-resource failure behavior, boot order, D-BOOT catalog |
+| Boot-required resources | `libs/gameprofile` `required_resources` manifest (ENG-6), consumed via `NovaResourceRoot.list_missing_boot_resources` | [required-resources.md](required-resources.md) | witnessed (R8) + manifest landed: the fatal set, per-resource failure behavior, boot order, D-BOOT catalog |
 | VFS / PFF mount stack | `libs/vfs`, `libs/pff`, `NovaResourceRoot` | [vfs/vfs-pff-mount-re.md](vfs/vfs-pff-mount-re.md) | witnessed (PAR-R7): mount, precedence, /d gate; D-VFS-1..9 |
-| Terrain (TRN + runtime queries) | `libs/terrain`, `libs/terrain_query` | [terrain/terrain-re.md](terrain/terrain-re.md) | partial record (PAR-R1; runtime queries witnessed ENG-3 B0, port pending B1) |
-| Foliage | `libs/foliage`, `NovaFoliageDispatcher` | [foliage/foliage-re.md](foliage/foliage-re.md) | matching incl. the model tier (PAR-R2; D-FOLIAGE-6 open) |
+| Terrain (TRN + runtime queries) | `libs/terrain`, `libs/terrain_query` | [terrain/terrain-re.md](terrain/terrain-re.md) | partial record (PAR-R1; runtime queries ported, ENG-3; rendering parity re-grilled on #245) |
+| Foliage | `libs/foliage`, `NovaFoliageDispatcher` | [foliage/foliage-re.md](foliage/foliage-re.md) | matching incl. the model tier (runtime rebuilt on #245; D-FOLIAGE-7/9/10/12 open) |
 | Tiles (`.til` overlay) | `libs/til` | [tiles/til-re.md](tiles/til-re.md) | landed (PAR-R3; D-TIL-1) |
 | Fonts (`.fnt`) | `libs/fnt` | [fonts/fnt-re.md](fonts/fnt-re.md) | landed (PAR-R4; D-FNT-1..3) |
 | Credits (CBIN) | `libs/cbin` | [credits/cbin-re.md](credits/cbin-re.md) | partial (PAR-R5: codec matching; markup NEEDS-RE) |

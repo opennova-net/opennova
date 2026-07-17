@@ -273,7 +273,7 @@ void h_ground_followwp_tick(AiThinkCtx &ctx) {
         if (b.f[AiBrain::kFireTimer] <= 0)
             b.f[AiBrain::kFireTimer] = 0;
         else
-            ++ctx.sys->unported_calls; // [orig: Entity_ComputeWeaponFirePositions @0x455ef0] -> weapon phase
+            ++ctx.sys->unported_calls; // [orig: AIEntity_ReleaseFlareCountermeasures @0x455ef0] -> flare countermeasures (unported)
     }
     int32_t ft = b.f[AiBrain::kFireTimer];
     if (ft <= 0)
@@ -303,7 +303,7 @@ void h_patrol_tick(AiThinkCtx &ctx) {
         if (b.f[AiBrain::kFireTimer] <= 0)
             b.f[AiBrain::kFireTimer] = 0;
         else
-            ++ctx.sys->unported_calls; // [orig: Entity_ComputeWeaponFirePositions @0x455ef0] -> weapon phase
+            ++ctx.sys->unported_calls; // [orig: AIEntity_ReleaseFlareCountermeasures @0x455ef0] -> flare countermeasures (unported)
     }
     int32_t ft = b.f[AiBrain::kFireTimer];
     if (ft <= 0)
