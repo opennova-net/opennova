@@ -363,11 +363,10 @@ private:
     // The weld-link track list [orig: g_PortalLinkTrackList @ 0x29BEE54, cap 32]
     std::vector<int32_t> link_track_;
 
-    // Per-static-slot section masks [orig: g_BuildingSectionVisMask @ 0x297F250,
-    // 1200 dwords]. Keyed by the CollisionWorld static-table index (the pool-2
-    // prox order retail indexes by).
+    // Per-building section masks [orig: g_BuildingSectionVisMask @ 0x297F250,
+    // 1200 dwords, indexed by the pool-2 entity index]. Keyed here by the
+    // pool-2 handle slot masked into the array size.
     std::vector<uint32_t> masks_;
-    std::unordered_map<uint16_t, int32_t> static_index_; // handle -> static slot
 
     // The exterior latch [orig: g_PortalExteriorPlaneSet @ 0x29ACE24 + the plane
     // point/normal @ 0x29ACE28..3C]

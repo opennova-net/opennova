@@ -525,7 +525,10 @@ bool occlusion_model_from_ir(const ThreediIROcclusion *occ,
 		rec.glow_scale = so.glow_scale;
 		out.records.push_back(rec);
 	}
-	// Slice sanity: reject models whose records point past their arrays.
+	// Slice sanity: reject models whose records point past their arrays, and
+	// whose OFAC bytes index outside their record's slice — the engine's hot
+	// loops (traverse/build_occluder_planes) read face vertex/plane/edge
+	// indices unchecked, so malformed or modded data is rejected here once.
 	for (const opennova::world::OcclusionPortalFace &rec : out.records) {
 		if (rec.vert_start < 0 || rec.vert_count < 0 ||
 		    rec.vert_start + rec.vert_count > static_cast<int32_t>(out.vertices.size()) ||
@@ -534,6 +537,17 @@ bool occlusion_model_from_ir(const ThreediIROcclusion *occ,
 		    rec.face_start < 0 || rec.face_count < 0 ||
 		    rec.face_start + rec.face_count > static_cast<int32_t>(out.faces.size()))
 			return false;
+		for (int32_t f = 0; f < rec.face_count; ++f) {
+			const opennova::world::OcclusionFaceRec &face = out.faces[rec.face_start + f];
+			if (face.v[0] >= rec.vert_count || face.v[1] >= rec.vert_count ||
+			    face.v[2] >= rec.vert_count || face.plane >= rec.plane_count)
+				return false;
+			for (int k = 0; k < 3; ++k) {
+				if ((face.edge[k] & 0xFF) >= rec.vert_count ||
+				    ((face.edge[k] >> 8) & 0x7F) >= rec.vert_count)
+					return false;
+			}
+		}
 	}
 	return true;
 }
@@ -704,11 +718,15 @@ void NovaSimulation::run_occlusion_frame(const Transform3D &p_camera, double p_f
 PackedInt64Array NovaSimulation::get_building_visibility() const {
 	PackedInt64Array out;
 	if (!world_) return out;
-	// Pairs [bms_id, visible<<32 | mask] for every building with an occlusion
-	// instance or a batch entry; the host applies mask bit N to render part N.
+	// Pairs [bms_id, visible<<32 | mask] for every building with an OCCLUSION
+	// instance; the host applies mask bit N to render part N. Buildings without
+	// portal records are excluded: the only occlusion-less nodes the registry
+	// can resolve are the animated de-batched buildings, and driving them from
+	// the windowless outdoor mask (= 1) would strip their moving parts — their
+	// retail visibility rides the entity collectors, not the sector-model mask.
 	world_->registry.for_each([&](const opennova::world::Entity &e) {
 		if (e.kind != opennova::world::EntityKind::Building || e.bms_id == 0) return;
-		if (!collision_world_.has_instance(e.handle)) return;
+		if (!occlusion_world_.has_instance(e.handle)) return;
 		const bool visible = occlusion_world_.building_visible(e.handle);
 		const uint32_t mask = occlusion_world_.section_mask(e.handle);
 		out.push_back(e.bms_id);

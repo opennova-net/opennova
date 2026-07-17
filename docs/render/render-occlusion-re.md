@@ -78,11 +78,16 @@ count/array through a `this` alias 4 bytes below the model consumers read
 ```
 
 Section ordinals are the §15 COBJ section indices — the same values the blink
-query packs into hit slots (`(section & 0x1F) << 12 | pool2 << 20`), and the
-same bit indices in the render mask below. Ordinal 0 is the exterior: the
-type-8 ordinal counter in the blink query pre-increments, so a packed hit's
-low word is nonzero exactly when the section is a real interior; the mask
-builder decodes a zero low word as an empty slot `[orig: @ 0x5c8840-0x5c88bf]`.
+query packs into hit slots (`(section & 0x1F) << 12 | pool2 << 20` — the
+section LOOP INDEX; the pre-incremented type-8 ordinal counter only feeds the
+`< 16` pack cap `[orig: @ 0x4af294-0x4af2bb]`), and the same bit indices in
+the render mask below. Ordinal 0 is the exterior: interior blink volumes live
+in nonzero COBJ sections, so a packed hit's low word is nonzero for real
+interiors. The mask builder resolves a slot's ENTITY only when that slot's
+low word is nonzero `[orig: @ 0x5c8840-0x5c88bf]`, but the camera-inside
+branch itself tests hit slot 0's WHOLE dword `[orig: the hit_results branch
+@ 0x5c86c9-0x5c86d5]` — a section-0 hit (packed = pool2 << 20) enters the
+inside branch with a null slot entity.
 
 ### 1a. The render float world (port-critical)
 

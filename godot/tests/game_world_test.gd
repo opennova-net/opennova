@@ -1573,9 +1573,14 @@ class OcclusionRuntimeStub:
 	extends Node
 	var sim := OcclusionSimStub.new()
 	var registry := OcclusionRegistryStub.new()
+	# Present-pass stand-in: a node the "sim" hides during the runtime tick,
+	# AFTER GameWorld's pre-tick occlusion restore — the real present ordering.
+	var hide_on_tick: Node3D = null
 	func is_playing() -> bool:
 		return true
 	func tick() -> bool:
+		if hide_on_tick != null:
+			hide_on_tick.visible = false
 		return true
 	func get_sim():
 		return sim
@@ -1649,6 +1654,38 @@ func test_occlusion_frame_drives_masks_gates_and_water_override() -> void:
 	assert_true(building.visible, "unload restores building visibility")
 	assert_eq(building.applied_mask, -1, "unload resets the section mask")
 	assert_true(npc.visible, "unload restores gated entities")
+
+
+func test_occlusion_never_resurrects_sim_hidden_nodes() -> void:
+	# The visibility-write ordering contract: occlusion's restore runs BEFORE
+	# the runtime tick (the present pass), so a node the sim hides during the
+	# tick stays hidden even if occlusion culled it earlier and now releases
+	# it — occlusion only ever HIDES on top of the present pass's base state.
+	var world := _make_world()
+	add_child_autofree(world)
+	var runtime := OcclusionRuntimeStub.new()
+	add_child_autofree(runtime)
+	var npc := Node3D.new()
+	world.add_child(npc)
+	runtime.registry.nodes[7] = npc
+	runtime.sim.culled = PackedInt32Array([7])
+	_install_runtime(world, runtime)
+
+	world.tick(Vector3.ZERO)
+	assert_false(npc.visible, "occlusion culls the visible npc")
+
+	# The sim now hides the npc (corpse despawn / WAC hide) while occlusion
+	# releases it: the present-analog hide happens after the restore.
+	runtime.hide_on_tick = npc
+	runtime.sim.culled = PackedInt32Array()
+	world.tick(Vector3.ZERO)
+	assert_false(npc.visible, "the sim's hide is not overridden by the occlusion restore")
+
+	# The sim shows it again (stops hiding): the release becomes visible.
+	runtime.hide_on_tick = null
+	npc.visible = true
+	world.tick(Vector3.ZERO)
+	assert_true(npc.visible, "an un-culled, un-hidden npc stays visible")
 
 
 func test_occlusion_debug_view_builds_and_frees() -> void:

@@ -319,10 +319,13 @@ void OcclusionWorld::weld_opposite_faces() {
         fb.type = kOccRecWeldedLink; // [orig: @ 0x5c5abb]
 
         // Swap-with-last removal: inner first, then outer; outer re-tested.
-        // [orig: @ 0x5c5ac9-0x5c5b1f]
+        // Both refills read the CURRENT last valid entry — the second one is
+        // count-1 after the first decrement (retail's registry[new_count] with
+        // new_count = count-2), not the stale just-moved slot. [orig:
+        // @ 0x5c5ac9-0x5c5b1f]
         if (match != count - 1) registry_[match] = registry_[count - 1];
         --count;
-        if (i != count) registry_[i] = registry_[count];
+        if (i != count - 1) registry_[i] = registry_[count - 1];
         --count;
         registry_.resize(count);
         --i;
@@ -452,7 +455,6 @@ void OcclusionWorld::collect_buildings(World &world, CollisionWorld &collision,
                                        const OcclusionFrameCamera &cam) {
     batch_.clear();
     slots_.clear();
-    static_index_.clear();
     // 1 when the local player is outdoors. [orig: (~g_LocalPlayerBlinkFlags & 2) >> 1
     // @ 0x5c6b92]
     const bool outdoors = (~cam.local_blink_flags & 0x2u) != 0;
@@ -460,7 +462,6 @@ void OcclusionWorld::collect_buildings(World &world, CollisionWorld &collision,
     const int32_t buildings = collision.static_building_count();
     for (int32_t i = 0; i < buildings; ++i) {
         const CollisionWorld::StaticSlotView slot = collision.static_slot(i);
-        static_index_[slot.h.packed] = i;
         // Per-axis XY cull against the fog distance on the quantized prox
         // coords. [orig: @ 0x5c6bcb-0x5c6bff]
         const int32_t limit = (static_cast<int32_t>(slot.radius) << 16) + cam.fog_dist;
@@ -765,14 +766,17 @@ void OcclusionWorld::traverse(TraverseCtx &ctx, int32_t current_section,
                 fully_out = true;
                 break;
             }
-            if (below > 0) clip_mask |= 1u << p;
+            // p can reach 63 on a recursed wedge plane set; & 31 reproduces the
+            // x86 masked shift retail executes there instead of C++ UB.
+            if (below > 0) clip_mask |= 1u << (p & 31);
         }
         if (fully_out) continue;
 
-        // The expansion. [orig: @ 0x5c4e13-0x5c4e31]
+        // The expansion. [orig: @ 0x5c4e13-0x5c4e31 — the & 31 is the x86
+        // masked shift retail executes for out-of-range authored ordinals]
         int32_t far_section = rec.section_a;
         if (far_section == current_section) far_section = rec.section_b;
-        ctx.section_mask |= 1u << far_section;
+        ctx.section_mask |= 1u << (far_section & 31);
 
         // Boundary edges (low-15 cancellation). [orig: @ 0x5c4e3a-0x5c4ed9]
         uint16_t edges[128];
@@ -837,7 +841,7 @@ void OcclusionWorld::traverse(TraverseCtx &ctx, int32_t current_section,
             ++wedge_count;
         }
         for (int32_t p = 0; p < plane_count && wedge_count < kWedgePlaneCap - 1; ++p) {
-            if ((clip_mask & (1u << p)) == 0) continue;
+            if ((clip_mask & (1u << (p & 31))) == 0) continue;
             wedge[wedge_count][0] = planes[p][0];
             wedge[wedge_count][1] = planes[p][1];
             wedge[wedge_count][2] = planes[p][2];
@@ -1220,10 +1224,12 @@ void OcclusionWorld::build_section_masks(World &world, CollisionWorld &collision
         return p[2] + cm->max[2] > cam.water_z && p[2] + cm->min[2] < cam.water_z;
     };
 
-    // A hit slot is occupied when its LOW WORD is nonzero (the pre-incremented
-    // type-8 section ordinals guarantee interiors pack nonzero there).
-    // [orig: @ 0x5c8840-0x5c88bf]
-    const bool camera_inside = (hits.hits[0] & 0xFFFF) != 0;
+    // The camera-inside branch tests hit slot 0's WHOLE dword; the per-slot
+    // entity resolution below tests the LOW WORD (nonzero section bits) — a
+    // section-0 blink hit (packed = pool << 20) enters the inside branch with
+    // a null slot entity, exactly like retail. [orig: the `if (hit_results)`
+    // branch @ 0x5c86cf vs the (_WORD) slot gates @ 0x5c8840-0x5c88bf]
+    const bool camera_inside = hits.hits[0] != 0;
     camera_indoors_ = camera_inside;
 
     if (camera_inside) {

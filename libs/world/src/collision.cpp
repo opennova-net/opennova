@@ -1212,7 +1212,7 @@ bool CollisionWorld::raycast_clear(World &world, const int32_t a[3], const int32
     const Entity *ea = world.registry.get(exclude_a);
     const Entity *eb = world.registry.get(exclude_b);
 
-    // Terrain leg â€” skipped when BOTH entities are INDOORS (the heightmap has no
+    // Terrain leg — skipped when BOTH entities are INDOORS (the heightmap has no
     // interiors) [orig: the Flags & 0x800000 pair gate @ 0x53994c]. The original's
     // null-entity buried-endpoint variant (@ 0x53999a) has no caller on the LOS
     // chain and is not modeled.
@@ -1248,7 +1248,7 @@ bool CollisionWorld::raycast_clear(World &world, const int32_t a[3], const int32
     // skip the excluded entities and anything standing on them (the +0x28
     // owner-link pair test @ 0x538836-0x538877), bound-sphere broad phase (the
     // segment box + line-distance fold of @ 0x5387c4-0x5389a4), then the TYPE-1
-    // volume convex clip (the shared @ 0x413060 core). A hit blocks â€” the
+    // volume convex clip (the shared @ 0x413060 core). A hit blocks — the
     // original keeps walking to clip the nearest point; the boolean result is
     // identical (@ 0x5390e6 miss_result = 0).
     auto blocked_by = [&](const Entity &e) -> bool {

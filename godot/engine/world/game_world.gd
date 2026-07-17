@@ -108,6 +108,9 @@ var _blink_water_suppressed := false
 # --- Render-occlusion frame state (the section-mask/portal slice) ---
 # Nodes the entity render gates hid last frame (restored before re-applying).
 var _occlusion_culled_nodes: Array = []
+# bms_id -> building node THIS system set invisible (batch-culled); restored
+# before each present pass so the sim's own hidden drive is never overridden.
+var _occlusion_hidden_buildings: Dictionary = {}
 # bms_id -> building node the frame has driven (reset on unload).
 var _occlusion_masked_nodes: Dictionary = {}
 # The mission attribute that forces the indoors accum bit every frame.
@@ -840,6 +843,14 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 		_perf_foliage_us = Time.get_ticks_usec() - foliage_start
 	var runtime_start := Time.get_ticks_usec()
 	var runtime_ticks := 0
+	# Undo LAST frame's occlusion visibility writes BEFORE the present pass, so
+	# present's hidden drive (corpse despawn, WAC hides) is the base state this
+	# frame's occlusion re-culls from — occlusion only ever HIDES on top of
+	# present, it never force-shows a node the sim wants hidden. Safe while
+	# paused too: the culled/hidden sets only ever contain nodes occlusion
+	# itself hid while they were visible.
+	if _loaded:
+		_restore_occlusion_overrides()
 	# Gate on the runtime transport so MissionRuntime._playing is THE play flag
 	# in both hosts: the debug overlay's Pause/Step work in the game too, not
 	# just the editor preview. _start_runtime calls play(), so normal missions
@@ -2180,7 +2191,10 @@ func _apply_blink_frame_gates() -> void:
 	var sim = _runtime.get_sim()
 	if sim == null or not sim.has_method("local_player_blink_flags"):
 		return
-	var flags := int(sim.local_player_blink_flags())
+	# The mission force-indoors attribute ORs the indoors letter into the frame
+	# view for BOTH consumers, matching run_occlusion_frame's camera input
+	# [orig: Bms_AttribFlags & 0x10 @ 0x5ca1c8 -> accum |= 2].
+	var flags := int(sim.local_player_blink_flags()) | (0x2 if _mission_forces_indoors else 0)
 	# Accum bit 0x2 (indoors): the terrain render is skipped entirely — the
 	# near-detail and far-foliage tiers are terrain children here, matching
 	# retail where the detail cells ride the skipped terrain traversal and the
@@ -2250,7 +2264,9 @@ func _apply_occlusion_frame(camera_xform: Transform3D) -> void:
 			_mission_forces_indoors)
 
 	# Building batch visibility + per-section masks (bit N = render part N,
-	# forced-visible def bits already merged by the sim).
+	# forced-visible def bits already merged by the sim). Hide-only: a building
+	# occlusion hid is restored by _restore_occlusion_overrides before the next
+	# present pass, so a sim/host hide is never force-shown from here.
 	# [orig: Terrain_RenderSectorModels @ 0x5c5d30]
 	var vis: PackedInt64Array = sim.get_building_visibility()
 	for i in range(0, vis.size(), 2):
@@ -2260,18 +2276,16 @@ func _apply_occlusion_frame(camera_xform: Transform3D) -> void:
 			continue
 		var packed := int(vis[i + 1])
 		var batch_visible := ((packed >> 32) & 1) == 1
-		(node as Node3D).visible = batch_visible
+		if not batch_visible and (node as Node3D).visible:
+			(node as Node3D).visible = false
+			_occlusion_hidden_buildings[bms_id] = node
 		if node.has_method("set_section_visibility_mask"):
 			node.set_section_visibility_mask(packed & 0xFFFFFFFF)
 		_occlusion_masked_nodes[bms_id] = node
 
 	# Entity render gates (the blink-hits gate + the outdoors three-ray latch):
-	# restore last frame's culled set, hide this frame's.
+	# hide this frame's culled set (last frame's was restored pre-present).
 	# [orig: the collector gates @ 0x5c7022-0x5c708a / §3.4]
-	for n in _occlusion_culled_nodes:
-		if is_instance_valid(n):
-			(n as Node3D).visible = true
-	_occlusion_culled_nodes.clear()
 	var culled: PackedInt32Array = sim.get_render_culled_bms_ids()
 	for id in culled:
 		var node: Node = registry.resolve_single(int(id))
@@ -2288,11 +2302,23 @@ func _apply_occlusion_frame(camera_xform: Transform3D) -> void:
 		_water.visible = not _blink_water_suppressed or bool(sim.occlusion_water_visible())
 
 
-func _reset_occlusion_frame() -> void:
+# Undo the previous occlusion frame's visibility writes: last frame's gated
+# entities and batch-hidden buildings become visible again, leaving the present
+# pass to assert the sim's own hidden state right after.
+func _restore_occlusion_overrides() -> void:
 	for n in _occlusion_culled_nodes:
 		if is_instance_valid(n):
 			(n as Node3D).visible = true
 	_occlusion_culled_nodes.clear()
+	for bms_id in _occlusion_hidden_buildings:
+		var node = _occlusion_hidden_buildings[bms_id]
+		if is_instance_valid(node):
+			(node as Node3D).visible = true
+	_occlusion_hidden_buildings.clear()
+
+
+func _reset_occlusion_frame() -> void:
+	_restore_occlusion_overrides()
 	for bms_id in _occlusion_masked_nodes:
 		var node = _occlusion_masked_nodes[bms_id]
 		if is_instance_valid(node):

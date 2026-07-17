@@ -247,7 +247,7 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 		var xform := entity_transform(
 			entity.get("position", Vector3.ZERO),
 			entity.get("rotation_deg", Vector3.ZERO))
-		if _is_animated(item_id):
+		if _needs_individual_node(item_id):
 			# Always capture identity (not just edit_mode): the runtime needs it to tag the node so
 			# MissionEntityRegistry can resolve SSN/group/zone host-action targets to this live model.
 			animated.append({
@@ -512,7 +512,7 @@ func place_single(mission: NovaMissionData, container: Node3D, kind: int, index:
 		entity.get("position", Vector3.ZERO),
 		entity.get("rotation_deg", Vector3.ZERO))
 
-	if _is_animated(item_id):
+	if _needs_individual_node(item_id):
 		var data := _load_object_data(graphic)
 		if data == null:
 			delta.unresolved = 1
@@ -728,7 +728,13 @@ func _graphic_for(item_id: int) -> String:
 	return item_db.get_graphic(item_id)
 
 
-func _is_animated(item_id: int) -> bool:
+# An item that cannot ride the pooled MultiMesh batch and needs its own
+# NovaObjectModel: animated items (persons, anim-def carriers), plus
+# portal-carrying buildings — the render-occlusion frame drives per-section
+# (Robj) visibility masks, and a pooled batch has no per-instance section
+# handle. [orig: g_BuildingSectionVisMask consumption,
+# Terrain_RenderSectorModels @ 0x5c5d30; docs/render/render-occlusion-re.md §5]
+func _needs_individual_node(item_id: int) -> bool:
 	if item_db == null:
 		return false
 	var item_type := item_db.get_item_type(item_id)
@@ -736,12 +742,6 @@ func _is_animated(item_id: int) -> bool:
 		return true
 	if not item_db.get_anim_def(item_id).is_empty():
 		return true
-	# Portal-carrying buildings need an individual NovaObjectModel so the
-	# render-occlusion frame can drive per-section (Robj) visibility masks —
-	# a pooled MultiMesh batch has no per-instance section handle. The graphic
-	# resolves through the same per-graphic cache the render path uses.
-	# [orig: g_BuildingSectionVisMask consumption, Terrain_RenderSectorModels
-	# @ 0x5c5d30; docs/render/render-occlusion-re.md §5]
 	return _has_occlusion_records(item_id)
 
 

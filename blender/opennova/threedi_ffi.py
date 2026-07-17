@@ -299,7 +299,7 @@ class ThreediIROcclusionObject(ctypes.Structure):
         ("connecting_subobject",    ctypes.c_int32),
         ("position",                ctypes.c_float * 3),
         ("radius",                  ctypes.c_float),
-        ("unk1",                    ctypes.c_int32),
+        ("glow_scale",              ctypes.c_float),
         ("num_vertices",            ctypes.c_int32),
         ("num_planes",              ctypes.c_int32),
         ("face_count",              ctypes.c_int32),
