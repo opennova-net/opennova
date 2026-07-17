@@ -242,6 +242,10 @@ int main() {
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
+	// This scenario is an MP session (three players over transports): stamp the
+	// world-side flag too, or the SP-only round-outcome legs (kill tallies + the
+	// death auto-lose in check_win_conditions) run and hold the respawn queue.
+	world.mp_session = true;
 	auto &roster = ctx.np_protocol.connection_list;
 	roster.push_back(make_conn(1, 2, &loop, ns::TransportMode::Loopback, ha, true));
 	roster.push_back(make_conn(3, 1, &udp_b, ns::TransportMode::Client, hb, true));

@@ -70,6 +70,16 @@ int32_t WacVm::read(opennova::world::World &w, uint32_t ref) const {
                 case Builtin::NearId: return w.cached.near_id;
                 case Builtin::Wind: return 0;
                 case Builtin::Mana: return 0;
+                case Builtin::Bluekills: return w.kill_stats.bluekills_by_player;   // [orig: 0xC846F0]
+                case Builtin::Greenkills: return w.kill_stats.greenkills_by_player; // [orig: 0xC846F8]
+                case Builtin::Humans: return w.cached.humans;                       // [orig: 0xC6EB14]
+                // GameOver/WinVar/LoseVar derive from the round winner (0 until the
+                // round ends, like the scoreboard winner dword the original derives
+                // them from each pre-tick cache pass — a green/0 outcome never raises
+                // GameOver). [orig: WacScript_CacheLocalPlayerState @0x4f57bb/c9/cf]
+                case Builtin::GameOver: return w.round_end.winner_team != 0 ? 1 : 0;
+                case Builtin::WinVar: return w.round_end.winner_team == 1 ? 1 : 0;
+                case Builtin::LoseVar: return w.round_end.winner_team == 2 ? 1 : 0;
             }
             return 0;
         }
@@ -186,8 +196,29 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     if (ieq(n, "fog") || ieq(n, "fogcolor")) { w.env.fog_rgb = static_cast<uint32_t>(A(0)); ++w.env.generation; return 0; }
 
     // ---- objective ----
-    if (ieq(n, "win")) { w.effects.push({"win", A(0), 0, 0, 0, std::string()}); return 0; }
-    if (ieq(n, "lose")) { w.effects.push({"lose", A(0), 0, 0, 0, std::string()}); return 0; }
+    // [orig: WacAction_Win @0x4ed4a0 — Server_ProcessRoundEnd(team) straight through.]
+    if (ieq(n, "win")) {
+        w.effects.push({"win", A(0), 0, 0, 0, std::string()});
+        w.process_round_end(A(0));
+        return 0;
+    }
+    // [orig: WacAction_Lose @0x4ed3f0 — team 0 resolves Misc/STRMISC_KILLEDGREEN,
+    // team 1 Misc/STRMISC_KILLEDBLUE, each through the banner trio
+    // (GameMsg_AddChatLineAndRelay @0x5ba170 — the KEY rides the wire, clients
+    // re-resolve locally / GameMsg_SetBannerText @0x5ba200 / GameMsg_SetTeamBannerText
+    // @0x5ba1d0), then Server_ProcessRoundEnd(2): red wins, the player side loses.
+    // Any other team id is a NO-OP returning 0. The banner trio is host
+    // presentation — the effect carries the gametext key, the host resolves it
+    // against the 'Misc' section; the banners persist until the next round start
+    // (cleared by the round-start HUD reset @0x5b71b0).]
+    if (ieq(n, "lose")) {
+        const int32_t team = A(0);
+        if (team != 0 && team != 1) return 0;
+        w.effects.push({"lose", team, 0, 0, 0,
+                        std::string(team == 1 ? "STRMISC_KILLEDBLUE" : "STRMISC_KILLEDGREEN")});
+        w.process_round_end(2);
+        return 1;
+    }
 
     // ---- player text / debug console ----
     // text/ptext feed the player message channel [orig: WAC text @ 0x4EDB50

@@ -151,6 +151,68 @@ func test_console_debug_text_does_not_reach_hud_objective() -> void:
 		"debug_text stays off the player-facing HUD mission-text channel")
 
 
+func test_lose_effect_sets_endround_banner_and_message() -> void:
+	# The WAC Lose banner trio is host presentation [orig: WacAction_Lose @0x4ed3f0 ->
+	# GameMsg_AddChatLineAndRelay/SetBannerText/SetTeamBannerText]: the effect carries
+	# the gametext KEY; the host resolves it against 'Misc' (the miss-format marker
+	# stands in when no gametext table is registered) and keeps the banner line for
+	# the MISSION FAILED screen.
+	var host := NovaGameHudHost.new()
+	autofree(host)
+	host.apply_mission_effects([
+		{"kind": "lose", "a": 0, "str": "STRMISC_KILLEDGREEN"},
+	])
+	assert_string_contains(host.endround_banner_line(), "STRMISC_KILLEDGREEN",
+			"the lose banner resolves (or marks) the Misc gametext key")
+	assert_eq(host._pending_hud_messages.size(), 1,
+			"the lose banner also lands one chat-feed line [orig: Chat_AddMessageChannel1]")
+	host.teardown()
+	assert_eq(host.endround_banner_line(), "",
+			"teardown clears the banner [orig: the round-start HUD reset @0x5b71b0]")
+
+
+func test_mission_end_screen_lose_form_and_exit() -> void:
+	# The MISSION FAILED form composes the failed line + the WAC Lose banner and
+	# exits over exit_requested [orig: the Cinematic_EpilogUpdate mode-2 leg; ESC ->
+	# g_mission_exit_reason=1].
+	var screen := MissionEndScreen.new()
+	add_child_autofree(screen)
+	watch_signals(screen)
+	screen.setup({"ended": true, "winner_team": 2}, "You shot a friendly unit!", null)
+	assert_true(_screen_has_label_containing(screen, "You shot a friendly unit!"),
+			"the lose form shows the stored banner line")
+	screen.request_exit()
+	assert_signal_emit_count(screen, "exit_requested", 1)
+	screen.request_exit()
+	assert_signal_emit_count(screen, "exit_requested", 1,
+			"the exit is one-shot (the shell tears the world down once)")
+
+
+func test_mission_end_screen_win_form_counts() -> void:
+	# The win form's count lines follow the witnessed sums [orig:
+	# epilog_cinematic_state_machine_update @0x576240 case 4 — TEAMUNITS =
+	# by-player + by-others, FRIENDLYUNITS likewise].
+	var screen := MissionEndScreen.new()
+	add_child_autofree(screen)
+	screen.setup({
+		"ended": true, "winner_team": 1,
+		"enemy_kills": 3, "enemy_kills_by_others": 2,
+		"bluekills": 1, "team_kills_by_others": 1,
+		"greenkills": 0, "friendly_kills_by_others": 0,
+	}, "", null)
+	assert_true(_screen_has_label_containing(screen, "5"), "enemy units = 3 + 2")
+	assert_true(_screen_has_label_containing(screen, "2"), "team units = 1 + 1")
+
+
+func _screen_has_label_containing(node: Node, text: String) -> bool:
+	if node is Label and (node as Label).text.contains(text):
+		return true
+	for child in node.get_children():
+		if _screen_has_label_containing(child, text):
+			return true
+	return false
+
+
 func test_crosshair_option_updates_an_existing_hud() -> void:
 	# The Options signal reaches the built HUD through the shared host's public
 	# set_crosshair_style (main_game delegates its _on_crosshair_style_changed there).

@@ -1665,6 +1665,15 @@ target_link_libraries(npruntime_round_sim_test
     PRIVATE opennova_npruntime opennova_netsim opennova_novaworld opennova_world)
 add_test(NAME npruntime_round_sim COMMAND npruntime_round_sim_test)
 
+# The SP round-outcome loop (world-wac-ai-re §20): kill tallies -> the WAC
+# bluekills/greenkills source, the humans count, the SP auto-lose condition
+# [orig: Server_CheckWinConditions @0x51ad40], the round-end latch + host effect
+# [orig: Server_ProcessRoundEnd @0x5164f0], and the post-round respawn hold.
+add_executable(npruntime_round_end_test npruntime/round_end_test.cpp)
+target_link_libraries(npruntime_round_end_test
+    PRIVATE opennova_npruntime opennova_netsim opennova_novaworld opennova_world)
+add_test(NAME npruntime_round_end COMMAND npruntime_round_end_test)
+
 # P2: the per-connection handshake — the server legs over the np free functions + the reactive §5.1
 # reply path (handshake_server), and the golden 0x81/0x82 byte-parity. (The old World-less
 # joiner_connection_test, which drove the client mirror through the retired game_runtime spawn-gate

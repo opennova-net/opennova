@@ -64,6 +64,15 @@ var _loading_screen: NovaLoadingScreen
 var _loading_layer: CanvasLayer
 var _world_load_pending := false
 var _world_load_request_id := 0
+# End-of-mission flow (SP): set by the sim's "round_end" effect [orig:
+# Server_ProcessRoundEnd @0x5164f0 SP tail]. The world keeps ticking underneath
+# (the SP world runs through the epilog — humans >= 1 keeps the run gate open);
+# player input idles once the round is over [orig: the post-round input gate —
+# the client input uplinks stop against g_spawn_success_gate @0x42c410].
+var _round_ended := false
+var _end_winner := 0
+var _end_screen_delay := 0.0
+var _end_screen: MissionEndScreen = null
 
 
 ## True from the menu-to-loading handoff until the world reports success or
@@ -108,6 +117,11 @@ func _ready() -> void:
 	_hud_host.name = "GameHudHost"
 	add_child(_hud_host)
 	_hud_host.setup(_world, _player_host, _hud if _hud != null else self)
+	# The shell's own round-outcome tap (the HUD host keeps its separate connection
+	# for text/banner presentation): "round_end" starts the end-of-mission flow.
+	if _world.has_signal("mission_effects") \
+			and not _world.mission_effects.is_connected(_on_shell_mission_effects):
+		_world.mission_effects.connect(_on_shell_mission_effects)
 	# Net-replay connect mode: when NW_REPLAY is set (the env all F5/F6 instances
 	# inherit from the editor), skip the menu and dial the replay tool / server
 	# directly — each instance gets slotted into a role on connect.
@@ -234,7 +248,58 @@ func is_debug_overlay_open() -> bool:
 
 
 func is_gameplay_input_active() -> bool:
-	return _state == State.WORLD and not is_debug_overlay_open()
+	return _state == State.WORLD and not is_debug_overlay_open() and not _round_ended
+
+
+# --- End of mission (SP) -------------------------------------------------------
+
+func _on_shell_mission_effects(effects: Array) -> void:
+	for e in effects:
+		if e is Dictionary and String(e.get("kind", "")) == "round_end":
+			_begin_end_of_mission(int(e.get("a", 0)))
+
+
+func _begin_end_of_mission(winner: int) -> void:
+	if _round_ended:
+		return
+	# The end screen is the SP presentation; the MP post-round flow (scoreboard
+	# broadcast + the 2790-tick linger + round cycling) is the net track.
+	var sim = _world.get_sim() if _world != null and _world.has_method("get_sim") else null
+	if sim != null and bool(sim.get_round_outcome_debug().get("mp_session", false)):
+		return
+	_round_ended = true
+	_end_winner = winner
+	# The short beat between the round end and the score/failed screen stands in for
+	# the cine lead-in (the lose letterbox+fade, the win flyaway — D-AI-10).
+	# [orig: Cine_StartPlayback @0x577840 / Cine_InitPlayback @0x578390]
+	_end_screen_delay = 3.0
+
+
+func _show_end_screen() -> void:
+	if _end_screen != null:
+		return
+	var outcome: Dictionary = {}
+	var sim = _world.get_sim() if _world != null and _world.has_method("get_sim") else null
+	if sim != null:
+		outcome = sim.get_round_outcome_debug()
+	if outcome.is_empty():
+		outcome = {"ended": true, "winner_team": _end_winner}
+	_end_screen = MissionEndScreen.new()
+	_end_screen.name = "MissionEndScreen"
+	var banner := _hud_host.endround_banner_line() if _hud_host != null else ""
+	_end_screen.setup(outcome, banner, _root)
+	var host: Node = _hud if _hud != null else self
+	host.add_child(_end_screen)
+	_end_screen.exit_requested.connect(_on_end_screen_exit)
+	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+
+
+# [orig: g_mission_exit_reason = 1 (ESC / the epilog timeout) -> the main loop pushes
+# the "Post Menu" scene @0x526867 — our post-mission menu is the main menu.]
+func _on_end_screen_exit() -> void:
+	if _world_load_pending:
+		return
+	_teardown_world_to_menu()
 
 
 func _current_runtime():
@@ -807,6 +872,14 @@ func _on_camera_escape() -> void:
 	# (docs/interface/loading-screen-re.md D-LOADSCR-7).
 	if _world_load_pending:
 		return
+	# Round over: ESC leaves the mission instead of pausing [orig: ESC (0x1B) sets
+	# g_mission_exit_reason = 1 during the epilog, Input_HandleSpecialKeys @0x49c8e2].
+	if _round_ended:
+		if _end_screen != null:
+			_end_screen.request_exit()
+		else:
+			_on_end_screen_exit()
+		return
 	if _state == State.WORLD:
 		_pause()
 	elif _state == State.PAUSED or _state == State.ARMORY:
@@ -840,6 +913,12 @@ func _on_return_to_menu() -> void:
 # of the shell boundary rather than a menu-specific detail.
 func _teardown_world_to_menu() -> void:
 	_dismiss_loading_screen()
+	_round_ended = false
+	_end_winner = 0
+	_end_screen_delay = 0.0
+	if _end_screen != null:
+		_end_screen.queue_free()
+		_end_screen = null
 	if _player_host != null:
 		_player_host.teardown()
 	if _armory_host != null:
@@ -879,9 +958,15 @@ func _process(delta: float) -> void:
 	var debug_overlay_open := is_debug_overlay_open()
 	# Release the captured mouse while UI overlays the world or nothing is loaded.
 	if _state == State.PAUSED or _state == State.ARMORY or debug_overlay_open \
-			or not _world.is_loaded():
+			or _end_screen != null or not _world.is_loaded():
 		if Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
 			Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+	# The end-of-mission lead-in: the world keeps ticking; the score/failed screen
+	# mounts after the short beat [orig: the SP world runs through the epilog cine].
+	if _round_ended and _end_screen == null and _world.is_loaded():
+		_end_screen_delay -= delta
+		if _end_screen_delay <= 0.0:
+			_show_end_screen()
 	# Only the pause menu freezes the world. The armory runs over LIVE play: the
 	# match keeps simulating around the player while the WEAPON screen is up
 	# [orig: the useitem armory leg @0x4e0b3f has no world-stop leg; input idles

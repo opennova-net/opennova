@@ -101,6 +101,22 @@ private:
     int normal_gate_ = 0;    // every-16th-tick gate [orig: dword_C8D808 in Server_TickUpdate]
     int quarter_cursor_ = 0; // round-robin quarter index 0..3 [orig: dword_AE06FC]
     int32_t awol_64tick_count_ = 0; // [orig: dword_A89160] (D-EVT-2)
+    // One-shot: file zone IDs rewrite to zone-array INDICES on the first on_load
+    // after load() (the params then HOLD indices — re-resolving would corrupt).
+    bool zone_refs_resolved_ = false;
+
+    // Load-time zone-ref resolution [orig: the two post-load resolvers called from
+    // mission start — @0x453000 (trigger refs; the IDB carried a 'WeaponActionRefs'
+    // misnomer) and @0x453100 (action refs)]. Trigger records carry the authored
+    // zone ID; the resolver rewrites it to the zone ARRAY INDEX by matching the
+    // record id, and NEUTERS the trigger (main_type=0, sub_type=0, flags kept)
+    // when the id is missing or the zone box is degenerate (x_min==x_max ||
+    // y_min==y_max). Covers Group/Single IsWithinArea (sub 10, param2) and
+    // PlayerSatchel (main 7 sub 37, param1); the action sibling covers
+    // AreaAiRed/Blue (types 12/13, param1 — retail also inlines the zone box into
+    // the action params; our runtime resolves boxes at dispatch, so the index
+    // rewrite alone preserves behavior).
+    void resolve_zone_refs(opennova::world::World &w);
 
     void update_entry(opennova::world::World &w, ScriptedEvent &se);
     void fire(opennova::world::World &w, ScriptedEvent &se);

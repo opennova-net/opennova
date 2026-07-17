@@ -54,6 +54,14 @@ int builtin_id(const std::string &name) {
     if (ieq(name, "neartype")) return static_cast<int>(Builtin::NearType);
     if (ieq(name, "neardist")) return static_cast<int>(Builtin::NearDist);
     if (ieq(name, "nearid")) return static_cast<int>(Builtin::NearId);
+    // Round-outcome names from the named-value table @0x82EEF0 (case-insensitive,
+    // like every entry — the resolver walks the table with stricmp).
+    if (ieq(name, "bluekills")) return static_cast<int>(Builtin::Bluekills);
+    if (ieq(name, "greenkills")) return static_cast<int>(Builtin::Greenkills);
+    if (ieq(name, "humans")) return static_cast<int>(Builtin::Humans);
+    if (ieq(name, "GameOver")) return static_cast<int>(Builtin::GameOver);
+    if (ieq(name, "WinVar")) return static_cast<int>(Builtin::WinVar);
+    if (ieq(name, "LoseVar")) return static_cast<int>(Builtin::LoseVar);
     return -1;
 }
 

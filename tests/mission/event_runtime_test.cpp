@@ -662,6 +662,100 @@ static void test_trigger_relations_matrices_and_visited() {
     CHECK(!sys.evaluate_trigger_for_test(w, group_trigger(bms::GroupTriggerType::GroupSeesGroup, 2, 5)));
 }
 
+// Zone refs in the FILE carry the authored zone ID; the load-time resolver
+// rewrites them to the zone-array INDEX (dangling/degenerate refs neuter the
+// trigger). The 04TR shape: a NEGATED not-in-area trigger -> RedWin must stay
+// quiet while the player stands inside the id-referenced zone.
+// [orig: the mission-start resolvers @0x453000/@0x453100 over record[0]]
+static void test_zone_refs_resolve_by_id() {
+    World w;
+    w.registry.configure_pool(0, 4);
+    world::Aabb inner;
+    inner.min = {0.0f, 0.0f, -16384.0f};
+    inner.max = {100.0f, 100.0f, 16384.0f};
+    // Zone IDs deliberately out of order and nowhere near the array indices.
+    w.registry.register_area("", inner, true, /*zone_id=*/9);
+    w.registry.register_area("", inner, true, /*zone_id=*/6);
+
+    world::Entity seed{};
+    seed.alive = true;
+    seed.net_id = 10000; // resolve_ssn maps 10000 -> the local player anyway
+    seed.position = {50.0f, 50.0f, 0.0f};
+    world::EntityHandle player = w.registry.spawn(0, seed);
+    w.cached.local_player = player;
+
+    bms::Event e = simple_event(bms::EventFlags::None, 0);
+    e.trigger_count = 1;
+    e.action_count = 1;
+    bms::Trigger not_in_area{};
+    not_in_area.condition_flags = 1; // negated
+    not_in_area.main_type = bms::TriggerMainType::Single;
+    not_in_area.sub_type = static_cast<int32_t>(bms::SingleTriggerType::SingleIsWithinArea);
+    not_in_area.param1 = 10000;   // the player SSN
+    not_in_area.param2 = 6;       // zone ID 6 == array index 1
+    bms::Action rw{};
+    rw.action_type = bms::ActionType::RedWin;
+    mission::BmsEventSystem sys;
+    sys.load({e}, {not_in_area}, {rw});
+    w.add_system(&sys);
+    w.load_systems();
+
+    tick_n(w, kCycle);
+    CHECK(!w.round_end.ended); // inside zone-id 6 -> the negated trigger is false
+
+    w.registry.get(player)->position = {500.0f, 500.0f, 0.0f}; // leave the zone
+    tick_n(w, kCycle);
+    CHECK(w.round_end.ended); // out of bounds -> RedWin
+    CHECK(w.round_end.winner_team == 2);
+}
+
+// A dangling zone id NEUTERS the trigger (main/sub zeroed, flags kept): the
+// negated not-in-area chain then reads false->negate->true, firing the event —
+// exactly the original's dangling-ref behavior. [orig: @0x45309e/@0x4530b9]
+static void test_dangling_zone_ref_neuters_trigger() {
+    World w;
+    w.registry.configure_pool(0, 4);
+    bms::Event e = simple_event(bms::EventFlags::None, 0);
+    e.trigger_count = 1;
+    e.action_count = 1;
+    bms::Trigger t{};
+    t.main_type = bms::TriggerMainType::Single;
+    t.sub_type = static_cast<int32_t>(bms::SingleTriggerType::SingleIsWithinArea);
+    t.param1 = 10000;
+    t.param2 = 42; // no such zone id
+    bms::Action act{};
+    act.action_type = bms::ActionType::OutputText;
+    act.param1 = 7;
+    mission::BmsEventSystem sys;
+    sys.load({e}, {t}, {act});
+    w.add_system(&sys);
+    w.load_systems();
+    tick_n(w, kPass);
+    CHECK(w.effects.count("text") == 0); // neutered trigger evaluates false
+}
+
+// The BMS win actions end the round through the SAME entry the WAC win/lose
+// handlers use [orig: EventAction_Dispatch BlueWin @0x45447b ->
+// Server_ProcessRoundEnd(1), one shared round end for both script front-ends].
+static void test_bluewin_ends_round() {
+    World w;
+    w.registry.configure_pool(0, 4);
+    bms::Event e = simple_event(bms::EventFlags::None, 0);
+    e.action_count = 1;
+    bms::Action bw{};
+    bw.action_type = bms::ActionType::BlueWin;
+    mission::BmsEventSystem sys;
+    sys.load({e}, {}, {bw});
+    w.add_system(&sys);
+    w.load_systems();
+
+    tick_n(w, kPass);
+    CHECK(w.round_end.ended);
+    CHECK(w.round_end.winner_team == 1);
+    CHECK(w.effects.count("win") == 1);
+    CHECK(w.effects.count("round_end") == 1);
+}
+
 int main() {
     test_bms_to_wac_shared_var();
     test_wac_to_bms_shared_var();
@@ -682,6 +776,9 @@ int main() {
     test_post_pass_is_a_one_shot();
     test_trigger_relations_group_records();
     test_trigger_relations_matrices_and_visited();
+    test_zone_refs_resolve_by_id();
+    test_dangling_zone_ref_neuters_trigger();
+    test_bluewin_ends_round();
     std::printf(failures ? "EVENT RUNTIME TESTS FAILED (%d)\n" : "event runtime tests passed\n", failures);
     return failures ? 1 : 0;
 }

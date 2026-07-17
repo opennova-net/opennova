@@ -81,6 +81,44 @@ struct CachedFrameState {
     int32_t near_type = 0;
     int32_t near_dist = 0;
     int32_t near_id = 0;
+    // Active human player slot count — the WAC 'humans' builtin, rebuilt by the host
+    // server tick just before the script pre-pass. Doubles in the original as the
+    // empty-dedicated-server world-run gate (entities/WAC advance while humans > 0
+    // || ticks == 0); an SP host always counts its own player. [orig: wac_var_humans
+    // @0xC6EB14 — Server_BuildEntitySlotLists @0x4f97a0: zero @0x4f97c6, +1 per
+    // active human slot @0x4f98b1]
+    int32_t humans = 0;
+};
+
+// End-of-round outcome state. `ended` is the double-run latch every round-end
+// consumer keys on; `winner_team` is the winning-team value the WAC outcome
+// builtins and the presentation layer derive from (0 = none/green, 1 = blue,
+// 2 = red, 3/4 = the extra MP teams). It stays 0 until the round ends, exactly
+// like the original's scoreboard winner dword (memset 0 at mission start).
+// [orig: g_spawn_success_gate @0x24c1928 (latched by Server_ProcessRoundEnd
+// @0x5168e4, cleared by Game_StartMission @0x524a1f), g_round_winning_team
+// @0x24c1924, the scoreboard winner @0x24c1970 (= S2C 0x1D payload byte 0).]
+struct RoundEndState {
+    bool ended = false;
+    int32_t winner_team = 0;
+};
+
+// SP mission kill tallies — the 0xC846xx stat-bucket family the epilog score
+// screen counts from and the WAC bluekills/greenkills builtins read. By-player
+// = kills by the local/host player; by-others = every other killer. Only
+// person-class victims (itemdef class 3) tally the blue/green buckets; the
+// original's per-type enemy split (infantry/vehicle/aircraft) and the point
+// values (def+404, difficulty-scaled) fold into plain counts here — the WAC
+// predicates and the epilog count columns read counts. [orig:
+// Score_TallyKillByLocalPlayer @0x4fd160 / Score_TallyKillByOthers @0x4fd300,
+// dispatched per kill by Score_ProcessKillEvent @0x4fd400 (SP only).]
+struct MissionKillStats {
+    int32_t bluekills_by_player = 0;      // team-1 persons [orig: 0xC846F0 — WAC 'bluekills']
+    int32_t greenkills_by_player = 0;     // team-0 persons [orig: 0xC846F8 — WAC 'greenkills']
+    int32_t enemy_kills_by_player = 0;    // team >= 2, any kind [orig: 0xC846D8/E0/E8 folded]
+    int32_t team_kills_by_others = 0;     // [orig: 0xC846C0]
+    int32_t friendly_kills_by_others = 0; // [orig: 0xC846C8]
+    int32_t enemy_kills_by_others = 0;    // [orig: 0xC846A8/B0/B8 folded]
 };
 
 // ----------------------------------------------------------------------------
@@ -155,6 +193,16 @@ enum class SeatSelectionMode : uint8_t {
 class EntityCommands {
 public:
     explicit EntityCommands(World &world) : world_(world) {}
+
+    // The script-facing local-player SSN [orig: the dfx2med player-slot
+    // convention — the SP player entity carries 10000 as its net id].
+    static constexpr uint16_t kLocalPlayerSsn = 10000;
+
+    // Script SSN -> entity handle (the WAC SSN*/BMS Single resolve), including
+    // the retail player mapping: SSN 10000 = the local player. Our player
+    // entities carry net_id 0 (the wire is handle-based), so the mapping lives
+    // here at the script seam. [orig: EntityPool_FindByNetId @0x4f0a20]
+    EntityHandle resolve_ssn(uint16_t ssn) const;
 
     // --- entity (by net id) ---
     bool kill_ssn(uint16_t ssn);
@@ -320,6 +368,15 @@ public:
     // RoundData_AddRound; Weapon_UpdateAllProjectiles @0x4ec020; §5.60]
     RoundSim round_sim;
 
+    // End-of-round outcome + the SP kill-stat buckets (see the struct docs above).
+    RoundEndState round_end;
+    MissionKillStats kill_stats;
+
+    // The mission header's attribute flags, stamped by the host at mission load
+    // (bms::AttribFlags as a raw dword; 0x40 = SinglePlayerRespawn). Read by the
+    // SP auto-lose win-condition leg. [orig: Bms_AttribFlags @0xa76258]
+    uint32_t mission_attrib_flags = 0;
+
     // The Advance & Secure zone-slot chain (empty until the host builds it after the
     // item-traits sweep — zone registration needs Entity::is_capture_trigger). Feeds
     // the 0x0F owned-zone mask, the 0x0E deploy gates, and the 0x1E frontier hint.
@@ -351,6 +408,12 @@ public:
     // One authoritative logic tick: cache transient state, tick all systems,
     // advance the tick counter (post-execution, faithful to sub_4F81A0 @0x4f81d3).
     void run_logic_tick(bool is_authority = true, bool pre_mission = false);
+
+    // End the round: the double-run latch, the winning team, and the SP presentation
+    // tail surfaced as the "round_end" host effect. Callers are the witnessed
+    // producers — the WAC win/lose handlers, the BMS Blue/Red/GreenWin actions, and
+    // the server win-condition check. [orig: Server_ProcessRoundEnd @0x5164f0]
+    void process_round_end(int32_t winning_team);
 
     // Group population counts for the trigger records. Initial: once per
     // mission start, right after the pre pass, live copied from it and group 0

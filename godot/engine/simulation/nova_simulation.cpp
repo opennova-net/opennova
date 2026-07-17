@@ -783,6 +783,10 @@ void NovaSimulation::finish_load(const opennova::bms::File &file) {
 	// One world, three systems, the faithful tick order. The AI-change action family reaches
 	// brains through World::ai; wire it before registering so the pre-mission pass can dispatch.
 	bms_->load(file.events, file.triggers, file.actions);
+	// Mission attribute flags -> the world (0x40 = SinglePlayerRespawn gates the SP
+	// death auto-lose in check_win_conditions). [orig: Bms_AttribFlags @0xa76258,
+	// read by Server_CheckWinConditions @0x51ad6f]
+	world_->mission_attrib_flags = static_cast<uint32_t>(file.header.attrib_flags);
 	world_->ai = ai_.get();
 	// P7 listen server (SP + LAN host): stand up the npruntime in-match runtime (mode-3 HostClient
 	// over an in-process loopback, the faithful §5.0 path). Server_TickUpdate owns the logic tick +
@@ -918,6 +922,8 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_fired_events_snapshot"), &NovaSimulation::get_fired_events_snapshot);
 	ClassDB::bind_method(D_METHOD("get_entity_debug", "index"), &NovaSimulation::get_entity_debug);
 	ClassDB::bind_method(D_METHOD("debug_set_entity_health", "index", "hp"), &NovaSimulation::debug_set_entity_health);
+	ClassDB::bind_method(D_METHOD("debug_set_entity_position", "index", "mission_pos"), &NovaSimulation::debug_set_entity_position);
+	ClassDB::bind_method(D_METHOD("get_round_outcome_debug"), &NovaSimulation::get_round_outcome_debug);
 	ClassDB::bind_static_method("NovaSimulation", D_METHOD("ai_state_name", "state"), &NovaSimulation::ai_state_name);
 	ClassDB::bind_static_method("NovaSimulation", D_METHOD("infantry_anim_key", "state"), &NovaSimulation::infantry_anim_key);
 	ClassDB::bind_method(D_METHOD("get_entity_count"), &NovaSimulation::get_entity_count);
@@ -2451,8 +2457,42 @@ void NovaSimulation::debug_set_entity_health(int p_index, int p_hp) {
 	}
 }
 
+// Probe seam beside debug_set_entity_health: teleport an AI entity through both
+// position stores (registry + motor copy) — mission-space coordinates. Lets
+// in-game probes bring a reachable victim to the player when the mission
+// geography (interiors, fences) defeats straight-line navigation.
+void NovaSimulation::debug_set_entity_position(int p_index, const Vector3 &p_mission_pos) {
+	if (!ai_ || !world_) return;
+	AiEntity *e = ai_->at(p_index);
+	if (!e) return;
+	e->pos[0] = static_cast<int32_t>(p_mission_pos.x * 65536.0f);
+	e->pos[1] = static_cast<int32_t>(p_mission_pos.y * 65536.0f);
+	e->pos[2] = static_cast<int32_t>(p_mission_pos.z * 65536.0f);
+	if (opennova::world::Entity *ent = world_->registry.get(e->handle)) {
+		ent->position.x = p_mission_pos.x;
+		ent->position.y = p_mission_pos.y;
+		ent->position.z = p_mission_pos.z;
+	}
+}
+
 int NovaSimulation::get_mission_variable(int index) const {
 	return world_ ? world_->vars.get_mission(index) : 0;
+}
+
+Dictionary NovaSimulation::get_round_outcome_debug() const {
+	Dictionary out;
+	if (!world_) return out;
+	out["ended"] = world_->round_end.ended;
+	out["winner_team"] = world_->round_end.winner_team;
+	out["bluekills"] = world_->kill_stats.bluekills_by_player;
+	out["greenkills"] = world_->kill_stats.greenkills_by_player;
+	out["enemy_kills"] = world_->kill_stats.enemy_kills_by_player;
+	out["team_kills_by_others"] = world_->kill_stats.team_kills_by_others;
+	out["friendly_kills_by_others"] = world_->kill_stats.friendly_kills_by_others;
+	out["enemy_kills_by_others"] = world_->kill_stats.enemy_kills_by_others;
+	out["humans"] = world_->cached.humans;
+	out["mp_session"] = world_->mp_session;
+	return out;
 }
 
 bool NovaSimulation::has_event_fired(int index) const {
@@ -2537,6 +2577,9 @@ Dictionary NovaSimulation::get_entity_debug(int p_index) const {
 	// invalid UTF-8 here. Names are ASCII in practice; revisit if mojibake shows.
 	out["name"] = ent ? String(ent->name.c_str()) : String();
 	out["group_id"] = ent ? static_cast<int>(ent->group_id) : 0;
+	out["team"] = ent ? static_cast<int>(ent->team) : -1;
+	out["pool"] = ent ? ent->handle.pool() : -1;
+	out["engine_flags"] = ent ? static_cast<int64_t>(ent->engine_flags) : 0;
 	out["waypoint_id"] = ent ? static_cast<int>(ent->waypoint_id) : 0;
 	out["wp_number"] = ent ? ent->wp_number : 0;
 	out["health"] = ent ? ent->health : 0;

@@ -662,6 +662,16 @@ public:
 	// Probe seam: write an AI entity's health via the scripted-SETHP stores
 	// (registry + motor copy) so in-game probes can shorten a fight.
 	void debug_set_entity_health(int p_index, int p_hp);
+	// Probe seam: teleport an AI entity (mission-space coords) through both
+	// position stores, for probes defeated by mission geography.
+	void debug_set_entity_position(int p_index, const Vector3 &p_mission_pos);
+	// Round-outcome card: {ended, winner_team, bluekills, greenkills, enemy_kills,
+	// team_kills_by_others, friendly_kills_by_others, enemy_kills_by_others, humans}.
+	// The sim-side end-of-round state + the SP kill-stat buckets the epilog score
+	// screen and the WAC bluekills/greenkills builtins read (probe + HUD source).
+	// [orig: g_spawn_success_gate @0x24c1928 / g_round_winning_team @0x24c1924 /
+	// the 0xC846xx buckets]
+	Dictionary get_round_outcome_debug() const;
 	// Human-readable AI state name, "?" for the id gaps
 	// [orig: Entity_LookupAIStateName @0x455cc0].
 	static String ai_state_name(int p_state);

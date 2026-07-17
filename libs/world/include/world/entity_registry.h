@@ -22,6 +22,10 @@ struct Area {
     // counts only active zones [orig: Entity_IsLocalPlayerOutOfBounds @0x439d40
     // walks records with flags bit0 set].
     bool active = true;
+    // The authored zone id (record dword @0). Trigger/action zone refs carry
+    // THIS id in the file and are rewritten to the array index at load
+    // [orig: the load-time resolvers @0x453000/@0x453100 match record[0]].
+    int32_t zone_id = -1;
 };
 
 struct Route {
@@ -54,7 +58,13 @@ public:
     void in_area(const Aabb &zone, std::vector<EntityHandle> &out) const;
 
     // Named, first-class non-entity addressables.
-    int register_area(std::string name, const Aabb &bounds, bool active = true); // returns area id
+    // Returns the area INDEX (the id space zone-resolved refs use). zone_id is the
+    // authored record id [orig: zone record dword @0].
+    int register_area(std::string name, const Aabb &bounds, bool active = true,
+                      int32_t zone_id = -1);
+    // The load-time id -> index resolve [orig: the @0x453000/@0x453100 scan over
+    // record[0]]; -1 when no record carries the id.
+    int area_index_by_zone_id(int32_t zone_id) const;
     int find_area(std::string_view name) const;              // -1 if absent
     const Area *area(int id) const;
 
