@@ -698,6 +698,28 @@ public:
     // [orig: Entity_SerializeVehicleState @0x460560 runs per tick for mounted entities.]
     bool pose_if_mounted(AiEntity &e, World &world);
 
+    // The brain half of a waypoint REDIRECT (RedirectGroupTo/RedirectSingleTo): mode 1 +
+    // list + node (nearest of the list when node < 0) + the per-leg turn-budget seed.
+    // [orig: Entity_SetWaypointByTeam @0x43cdb4; nearest = Entity_FindNearestTriggerByType
+    // @0x407ea0]
+    void apply_route_order(AiEntity &e, int32_t list, int32_t node);
+
+    // The vehicle-physics input staging for a PlayerControl vehicle without a live PLAYER
+    // controller [orig: Entity_UpdateVehiclePhysics @0x48af00 — the parked stamp
+    // @0x48c002-0x48c02d and the AI-driver leg @0x48bc12-0x48c034 (2026-07-16 witness)]:
+    //  - controller == nullptr (or dead vehicle): hold heading + zero speed and stamp the
+    //    brain into state 22 (the parked/player-mode state);
+    //  - an AI controller: hand state 22 back to 16, cmd speed = min(brain outSpeed,
+    //    player_speed), re-resolve the waypoint target when the per-leg turn budget
+    //    (brain[32]) is spent, clamp the bearing delta to the budget, damp speed 0.75x
+    //    per ~30/60 deg of residual turn when turn_rate2<<6 < budget, steer = heading +
+    //    delta + delta/8, and fill `out` (ai_drive = true).
+    // Tracked deferrals (D-NET-161): the minAI crew health clamp, the pool-1
+    // collision-avoid damping, the wait-for-boarders stop, the handbrake byte-973 latch
+    // and the aim-lock stop.
+    void vehicle_ai_drive(World &world, Entity &veh, const Entity *controller,
+                          const VehicleTraits &traits, VehicleDriveCmd &out);
+
     // Integrate the part-anim channel phases: phase[slot] += rate[slot] * dir[slot], clamped to
     // [0,65535] (one-shot door/turret sweep). The per-frame consumer of PLAYPARTANIM, which writes
     // only direction + rate (ai_apply_command case 0x22). Runs regardless of the AI budget gate.

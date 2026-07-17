@@ -37,13 +37,15 @@ int32_t sin22_of_bam(int32_t bam) {
     return static_cast<int32_t>(std::sin(a) * 4194304.0);
 }
 
+} // namespace
+
 // The controlling occupant: the Controller/Driver seat's occupant, stale-validated
 // against the occupant's own mount fields (the original walks its mountHandles and
-// clears mismatches every tick) [orig: @0x48b154-0x48b1e0 — occupant must satisfy
+// clears mismatches every tick) [orig: @0x48b8a1-0x48b944 — occupant must satisfy
 // `parentEntity == vehicle && parentSlot in {2,5} && attachBoneId == controlBone`;
 // our seat model keys the same relation through Seat::occupant + Entity::mount_*,
 // the wire-bone divergence is tracked in D-NET-157].
-Entity *resolve_controller(World &world, Entity &veh) {
+Entity *resolve_vehicle_controller(World &world, Entity &veh) {
     Entity *controller = nullptr;
     for (Seat &s : veh.seats) {
         if (!is_vehicle_control_seat(s.type)) continue;
@@ -71,9 +73,8 @@ Entity *resolve_controller(World &world, Entity &veh) {
     return controller;
 }
 
-} // namespace
-
-void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits) {
+void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
+                        const VehicleDriveCmd *ai_cmd) {
     if (traits.physics == 0) return; // no vehicle physics selected [orig: @0x48efc7]
 
     Entity::VehicleMotorState &m = veh.veh;
@@ -90,9 +91,13 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits) 
 
     // ------------------------------------------------------------------ input block
     // [orig: Entity_UpdateVehiclePhysics @0x48af00, the `attrib & 0x40` occupant block
-    // @0x48b0ff-0x48b7e0. The authority always runs it; the driver's own client runs
+    // @0x48b949-0x48c034. The authority always runs it; the driver's own client runs
     // it as prediction — we ARE the authority host.]
-    Entity *occ = traits.player_control ? resolve_controller(world, veh) : nullptr;
+    Entity *occ = traits.player_control ? resolve_vehicle_controller(world, veh) : nullptr;
+    // A DEAD controller counts as none: retail never sees one (the death chain
+    // detaches the corpse before the physics runs) — the stand-in for the unported
+    // death->detach chain (D-AI-11 k).
+    if (occ != nullptr && (!occ->alive || occ->health <= 0)) occ = nullptr;
     // "Occupant is a player" [orig: `occupant->Flags & 0x100`] — our runtime players
     // are pool-0 organics with a resolved soldier class.
     const bool player_occupant =
@@ -189,8 +194,18 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits) 
                 default: break;
             }
         }
-        // Non-player occupants (AI drivers) take the autopilot/waypoint leg — unported
-        // (D-NET-161; [orig: @0x48b800-0x48b9a0]).
+        else if (ai_cmd != nullptr && ai_cmd->ai_drive) {
+            // An AI controller drives: consume the brain-computed command block
+            // (AiSystem::vehicle_ai_drive — the witnessed leg's steer/speed outputs).
+            // [orig: the AI-driver leg @0x48bc12-0x48c034 writes aiComp[132]/[136];
+            //  the ramp/dir state is the player path's only]
+            m.steer_target_bam = ai_cmd->steer_target_bam;
+            m.cmd_speed = ai_cmd->cmd_speed;
+            m.steer_ramp_bam = 0;
+        }
+        // A live NON-player controller with no drive command holds the previous
+        // steer/speed targets (the deferral tail of D-NET-161: boarding-wait, the
+        // handbrake byte-973 latch and the aim-lock stop are unmodeled).
     }
 
     // ------------------------------------------------------------- steering chase

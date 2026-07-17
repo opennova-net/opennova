@@ -38,6 +38,8 @@ void seed_authored_seats(Entity &entity, const PromoteOptions &opts) {
     const ItemSeatSpec *spec = seat_spec_for_type(opts, entity.item_id);
     if (spec == nullptr) return;
     entity.emplaced_pose_variant = spec->emplaced_pose_variant;
+    entity.armory_points = spec->armory_points;
+    entity.primary_weapon = spec->primary_weapon;
     if (spec->seats.empty()) return;
     entity.seats = spec->seats;
     for (Seat &seat : entity.seats) {
@@ -124,7 +126,8 @@ Entity make_seed(const bms::Entity &e, EntityKind kind, uint16_t ssn, uint32_t o
 // @0x460200 (geometry copy from entity+4.., initial state 0, idle move-step); the profile/speed
 // mapping is from the mission AI fields (tracked deviation: the real items.def AIProfile_LoadOrFind
 // @0x45fd80 + the state-0 -> 16 transition are unmodeled).
-void init_brain(AiEntity &ae, const bms::Entity &e, const PromoteOptions &opts, const AiSystem &ai) {
+void init_brain(AiEntity &ae, const bms::Entity &e, const PromoteOptions &opts, const AiSystem &ai,
+                EntityKind kind) {
     AiBrain &b = ae.brain;
 
     // Geometry (entity+4/+8/+12 = x/y/z, all 16.16; entity+16 heading = BAM). The engine heading is
@@ -164,6 +167,23 @@ void init_brain(AiEntity &ae, const bms::Entity &e, const PromoteOptions &opts, 
             b.f[AiBrain::kCurState] = 16; // GROUND_FOLLOWWP (tracked deviation: orig inits 0)
             b.f[AiBrain::kPendState] = 16;
         }
+    }
+
+    // A drivable VEHICLE brain (kind Item, attached through the control-seat gate below)
+    // starts in GROUND_FOLLOWWP whether or not a route is authored — the shipped ground
+    // .aip profiles all author `default_state GROUND_FOLLOWWP` and the profile parse is
+    // unported (D-AI-11); without the state the SM mover never feeds the AI-driver leg.
+    // [orig: AIProfile_LoadOrFind @0x45fd80 -> the default_state field; d_5ton.aip etc.]
+    if (kind == EntityKind::Item) {
+        b.f[AiBrain::kCurState] = 16;
+        b.f[AiBrain::kPendState] = 16;
+        // No target acquisition for transport brains: the shipped drivable-transport
+        // profiles author zero target priorities (d_5ton/d_buggy/G_Jeep priority_air/
+        // ground/organics 0), and the D-AI-1 feed scans unconditionally where retail's
+        // class table would reject — 13 per-tick pool scans + LOS rays stall the mission
+        // load. flags100 bit1 is the witnessed acquire skip in the state-16 tick
+        // [orig: the profile+100 & 2 gate @0x46775c]; lift with the .aip parse (D-AI-11).
+        ae.profile.flags100 |= 2;
     }
 }
 
@@ -293,7 +313,21 @@ PromoteResult promote_mission(const bms::File &m, World &world, AiSystem &ai,
     // seed copies e.id verbatim (no load-time assignment). Spawn order mirrors the file
     // order in Mission_LoadBMSFile @0x40f4e0: items -> buildings -> markers -> organics.
     std::vector<PendingCommandMount> command_mounts;
-    auto promote_vec = [&](const std::vector<bms::Entity> &vec, EntityKind kind, bool ai_capable) {
+    // A pool-1 item gets an AI brain when its type authors a CONTROL seat (ctrlx/drvrx
+    // userpoints = a drivable vehicle) — the stand-in for the def AIData attrib gate
+    // until the item-def AI classes are plumbed to promote (D-AI-11). Pure-gunner
+    // emplacements stay brainless (their SM slice is D-AI-2). [orig: every AIData item
+    // gets the 812-byte component at spawn; Entity_SpawnFromBMSRecord @0x40e9f0]
+    auto item_is_drivable = [&](int32_t type_id) {
+        for (const ItemSeatSpec &spec : opts.item_seat_specs) {
+            if (spec.type_id != type_id) continue;
+            for (const Seat &s : spec.seats) {
+                if (is_vehicle_control_seat(s.type)) return true;
+            }
+        }
+        return false;
+    };
+    auto promote_vec = [&](const std::vector<bms::Entity> &vec, EntityKind kind, bool ai_capable_default) {
         uint32_t idx = 0;
         for (const bms::Entity &e : vec) {
             uint32_t origin = (static_cast<uint32_t>(kind) << 24) | (idx & 0xFFFFFF);
@@ -305,10 +339,13 @@ PromoteResult promote_mission(const bms::File &m, World &world, AiSystem &ai,
             if (Entity *spawned = world.registry.get(h)) {
                 seed_authored_seats(*spawned, opts);
             }
+            const bool ai_capable =
+                    ai_capable_default ||
+                    (kind == EntityKind::Item && item_is_drivable(e.type_id));
             if (ai_capable) {
                 int ai_idx = ai.attach(h);
                 AiEntity &ae = *ai.at(ai_idx);
-                init_brain(ae, e, opts, ai);
+                init_brain(ae, e, opts, ai, kind);
                 if (kind == EntityKind::Organic) {
                     // Soldiers run the infantry motor, not the vehicle SM.
                     // [orig: g_EntityClassPhysicsTable "org1" -> Entity_UpdateInfantryAI]

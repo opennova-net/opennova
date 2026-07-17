@@ -275,6 +275,7 @@ func _draw() -> void:
 
 	_draw_stance(surface, ticks)
 	_draw_weapon_cluster(surface, ticks)
+	_draw_attach_labels()
 
 	# Objective / status line (the MP objective element's anchor; SP mission text goes
 	# through the message feed below). [orig: draw_objective_status_text @0x59aa30]
@@ -352,6 +353,27 @@ func _draw_weapon_cluster(surface: Vector2, ticks: int) -> void:
 		_clip_tex, _round_tex, clip, reserve, tint, _alpha_fade, ticks, surface)
 
 	_draw_crosshair(surface)
+
+
+# The floating seat/armory attach labels, host-projected to screen pixels: each entry
+# {screen: Vector2, text: String, nearest: bool}. The nearest candidate draws the full
+# HUD text color; every other label the witnessed dim transform. Distance/LOS/occupancy
+# selection happened sim-side; the host dropped behind-camera points at projection.
+# [orig: draw_vehicle_seat_and_armory_labels @0x5a3290 — called unconditionally by
+#  HUD_RenderOverlays @0x5a7daa; nearest full `alpha` color @0x5a362d, others
+#  ((rgb & 0xFEFEFE) | 0xFE000001) >> 1 @0x5a364e]
+func _draw_attach_labels() -> void:
+	var labels: Array = _info.get("attach_labels", [])
+	if labels.is_empty() or _font == null:
+		return
+	var base: Color = _colors.get("hud_textcolor", Color(0.98, 0.84, 0.02))
+	for raw in labels:
+		var l: Dictionary = raw
+		var screen: Vector2 = l.get("screen", Vector2.INF)
+		if screen == Vector2.INF:
+			continue
+		var color := base if bool(l.get("nearest", false)) else HudAttachLabels.dim(base)
+		HudAttachLabels.draw(self, _font, screen, String(l.get("text", "")), color)
 
 
 # The spreading crosshair. Witnessed visibility: it draws when an aimed shot is NOT

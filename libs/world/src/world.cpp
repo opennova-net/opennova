@@ -168,11 +168,29 @@ bool EntityCommands::add_ssn_hp(uint16_t ssn, int32_t delta) {
     return true;
 }
 
+namespace {
+
+// The per-entity leg of a waypoint REDIRECT [orig: Entity_SetWaypointByTeam @0x43cdb4]:
+// a mounted NON-player auto-detaches [orig: Entity_DetachFromVehicleIfServer @0x4359d0],
+// the entity route fields update, and the brain (when the entity carries one) takes the
+// mode/list/node order + the turn-budget seed.
+void apply_waypoint_order(World &world, Entity &e, int32_t list) {
+    const bool is_player = e.handle.pool() == 0 && e.player_class != 0;
+    if (e.mounted && !is_player) world.commands.dismount(e.net_id);
+    e.waypoint_id = static_cast<uint8_t>(list);
+    e.wp_number = 0;
+    if (world.ai != nullptr) {
+        if (AiEntity *ae = world.ai->for_handle(e.handle))
+            world.ai->apply_route_order(*ae, list, /*node=*/-1);
+    }
+}
+
+} // namespace
+
 bool EntityCommands::set_ssn_waypoint(uint16_t ssn, int32_t wp) {
     Entity *e = world_.registry.get(resolve_ssn(ssn));
     if (!e) return false;
-    e->waypoint_id = static_cast<uint8_t>(wp);
-    e->wp_number = 0;
+    apply_waypoint_order(world_, *e, wp);
     return true;
 }
 
@@ -299,12 +317,13 @@ int EntityCommands::kill_group(int group) {
 }
 
 int EntityCommands::group_to_waypoint(int group, int32_t wp) {
+    // [orig: Entity_SetWaypointByTeam @0x43cdb4 — commandGroup match over pools 0..1]
     std::vector<EntityHandle> members;
     world_.registry.by_group(static_cast<uint8_t>(group), members);
     int n = 0;
     for (EntityHandle h : members) {
         Entity *e = world_.registry.get(h);
-        if (e) { e->waypoint_id = static_cast<uint8_t>(wp); e->wp_number = 0; ++n; }
+        if (e) { apply_waypoint_order(world_, *e, wp); ++n; }
     }
     return n;
 }
@@ -499,6 +518,63 @@ uint16_t EntityCommands::find_mounted_on(uint16_t target_ssn) const {
         if (result == 0 && e.mounted && e.mount_target == th) result = e.net_id;
     });
     return result;
+}
+
+namespace {
+
+// The shared frame of the four Player mount triggers: resolve the SSN entity + a live
+// local player. [orig: the common head of @0x4f10d0/0x4f1260/0x4f1150/0x4f11e0 — handle
+// resolve, ItemTypeIndex != 0, local player set, !(Flags & 2)]
+const Entity *mount_trigger_ssn(const World &w, const EntityCommands &cmds, uint16_t ssn,
+                                const Entity **local_out) {
+    const Entity *local = w.registry.get(w.cached.local_player);
+    if (local == nullptr || !local->alive || local->health <= 0 || (local->flags & 2u) != 0)
+        return nullptr;
+    const Entity *target = w.registry.get(cmds.resolve_ssn(ssn));
+    if (target == nullptr) return nullptr;
+    *local_out = local;
+    return target;
+}
+
+// entity == candidate OR entity's standing-carrier == candidate (one link deep).
+// [orig: `vehicle == entity || vehicle->groundEntity == entity` @0x4f113d]
+bool is_or_carried_by(const World &w, EntityHandle chain_head, const Entity &candidate) {
+    const Entity *head = w.registry.get(chain_head);
+    if (head == nullptr) return false;
+    if (head->handle == candidate.handle) return true;
+    return head->ground_target == candidate.handle;
+}
+
+} // namespace
+
+bool EntityCommands::local_player_attached_to_ssn(uint16_t ssn) const {
+    // [orig: Entity_IsLocalPlayerSeatedOnSsn @0x4f10d0 — parentEntity chain, any seat]
+    const Entity *local = nullptr;
+    const Entity *target = mount_trigger_ssn(world_, *this, ssn, &local);
+    if (target == nullptr) return false;
+    return local->mounted && is_or_carried_by(world_, local->mount_target, *target);
+}
+
+bool EntityCommands::local_player_standing_on_ssn(uint16_t ssn) const {
+    // [orig: Entity_IsLocalPlayerStandingOnSsn @0x4f1260 — groundEntity chain]
+    const Entity *local = nullptr;
+    const Entity *target = mount_trigger_ssn(world_, *this, ssn, &local);
+    if (target == nullptr) return false;
+    return is_or_carried_by(world_, local->ground_target, *target);
+}
+
+bool EntityCommands::local_player_driving_ssn(uint16_t ssn) const {
+    // [orig: Entity_IsLocalPlayerDrivingSsn @0x4f1150 — the seat chain + parentSlot 2/5]
+    if (!local_player_attached_to_ssn(ssn)) return false;
+    const Entity *local = world_.registry.get(world_.cached.local_player);
+    return local != nullptr && is_vehicle_control_seat(local->mount_type);
+}
+
+bool EntityCommands::local_player_on_gun_of_ssn(uint16_t ssn) const {
+    // [orig: Entity_IsLocalPlayerOnGunOfSsn @0x4f11e0 — the seat chain + parentSlot 3]
+    if (!local_player_attached_to_ssn(ssn)) return false;
+    const Entity *local = world_.registry.get(world_.cached.local_player);
+    return local != nullptr && local->mount_type == SeatType::Gunner;
 }
 
 // --- AI command (the AI-change action family) ---

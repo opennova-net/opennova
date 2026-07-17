@@ -55,6 +55,72 @@ bool entity_process_vehicle_attach(World &world, EntityHandle player, EntityHand
 // Returns true iff the entity was mounted.
 bool entity_detach_from_vehicle(World &world, EntityHandle player);
 
+// One free seat (or armory point) found by the use-key/label proximity scan.
+struct NearestSeatHit {
+    EntityHandle vehicle;
+    int seat_index = -1; // seat index, or the armory_points index in armory mode
+    SeatType type = SeatType::None;
+};
+
+// The use-key nearest-seat scan [orig: Entity_FindNearestSeatOrArmory @0x435d50]: for
+// every live seat-bearing entity, test each FREE seat's world position against the player
+// eye: horizontal distance <= 4.0 u (0x40000 16.16) and 3D distance <= 16384 u unmounted /
+// 910.2 u while seat-swapping (0x3FFFFFC0 / 0x38E38E0), LOS-gated, score =
+// horiz + dist3d/512, lowest wins. Enemy-occupied vehicles are skipped
+// [orig: Vehicle_HasEnemyOccupant reject @0x435e58]. armory_mode = the original's
+// searchMode != 0 [orig: @0x435f12]: instead of seats, "armory*" points of Armory-attrib
+// items are scanned with the same math (no occupancy), reporting SeatType::ArmoryPoint
+// [orig: the attrib 0x80000 walk @0x4361ee, seatType 4 @0x436417] — the label highlight
+// pick while the player stands in the armory volume; the mount toggle always scans seats.
+// Tracked deviations (D-AI-11): the candidate set is a registry sweep (the original walks
+// the player's proximity list), the eye is the +0.9 u chest stand-in + the witnessed
+// +0.1875 u bias (CameraOffset unmodeled), and the emplaced-gun carrier LOS/reject legs
+// (def attrib 0x20 -> groundEntity) are unmodeled.
+bool find_nearest_free_seat(World &world, const Entity &player, NearestSeatHit &out,
+                            bool armory_mode);
+
+// One floating attach label [orig: draw_vehicle_seat_and_armory_labels @0x5a3290 — the
+// selection half; projection and drawing stay host-side]. world_pos carries the witnessed
+// +0.1875 u label lift [orig: point.z = boneZ + 12288 @0x5a3585].
+struct AttachLabel {
+    EntityHandle entity;
+    int seat_index = -1;              // seat index; armory-point index when armory
+    SeatType type = SeatType::None;   // Passenger/Controller/Driver -> Sit/Control text,
+                                      // Gunner -> the weapon attachtextid, ArmoryPoint -> Armory
+    bool armory = false;
+    bool nearest = false;             // the full-bright highlight; others draw half-bright
+    Vec3 world_pos;
+};
+
+// The floating seat/armory label list for the local player, a structural translation of
+// the selection half of [orig: draw_vehicle_seat_and_armory_labels @0x5a3290]:
+//  - no nearest scan hit -> no labels at all [orig: the Entity_FindNearestSeatOrArmory
+//    gate @0x5a32e2];
+//  - can_fire limits labels to the nearest entity; when the player cannot fire, every
+//    in-range candidate labels [orig: !Player_CanFireWeapon() || entity == nearest
+//    @0x5a3354];
+//  - per entity: dead/destroyed skip, enemy-occupant reject [orig: @0x5a3373/@0x5a3395];
+//  - armory_mode false: every FREE seat within 4.0 u 3D of the player position
+//    (point lifted +0.1875 u) with clear LOS labels [orig: the seat loop @0x5a3464,
+//    occupancy skip @0x5a348f, distance @0x5a35f0, raycast @0x5a3609];
+//  - armory_mode true: the "armory*" points of Armory-attrib items label instead
+//    [orig: @0x5a36f5..@0x5a38e2].
+// Labels append to out in scan order; nearest marks the scan winner's own label.
+void collect_attach_labels(World &world, const Entity &player, bool armory_mode,
+                           bool can_fire, std::vector<AttachLabel> &out);
+
+// The use-key mount toggle [orig: Entity_ToggleVehicleMount @0x436950 +
+// Entity_TryEnterNearestVehicle @0x4368c0]:
+//  - unmounted, standing ON a seat-bearing carrier (our platform contact ground_target
+//    stands in for the Flags 0x200 deck latch) -> best free seat on the carrier
+//    [orig: Entity_FindBestSeatSlot @0x4351f0];
+//  - unmounted otherwise -> the nearest-seat scan;
+//  - mounted -> a seat in scan reach swaps [orig: @0x4369ac], else detach.
+// The weapon-busy gate (EquippedSlot currentAction @0x436958) and the WAC no-dismount
+// global (dword_C6EADC @0x43698b) are the caller's/session's concern (D-AI-11).
+// Returns true iff a mount/swap/detach was applied.
+bool player_toggle_vehicle_mount(World &world, EntityHandle player);
+
 } // namespace opennova::world
 
 #endif // OPENNOVA_WORLD_VEHICLE_ATTACH_H

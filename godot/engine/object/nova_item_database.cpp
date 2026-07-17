@@ -43,6 +43,7 @@ void NovaItemDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_ammo_closeattack", "id"), &NovaItemDatabase::get_ammo_closeattack);
 	ClassDB::bind_method(D_METHOD("get_clipsize", "id"), &NovaItemDatabase::get_clipsize);
 	ClassDB::bind_method(D_METHOD("get_deathtime_ticks", "id"), &NovaItemDatabase::get_deathtime_ticks);
+	ClassDB::bind_method(D_METHOD("get_primary_weapon", "id"), &NovaItemDatabase::get_primary_weapon);
 	ClassDB::bind_method(D_METHOD("get_sound_profile", "id"), &NovaItemDatabase::get_sound_profile);
 	ClassDB::bind_method(D_METHOD("get_sound_loops", "id"), &NovaItemDatabase::get_sound_loops);
 	ClassDB::bind_method(D_METHOD("get_particle_effects", "id"), &NovaItemDatabase::get_particle_effects);
@@ -134,6 +135,7 @@ NovaItemDatabase::Item NovaItemDatabase::item_from_entry(const ::DefItemDef &ent
 	item.ammo_closeattack = String(entry.ammo_closeattack);
 	item.clipsize = entry.clipsize;
 	item.deathtime_ticks = entry.deathtime_ticks;
+	item.primary_weapon = String(entry.primary_weapon);
 	return item;
 }
 
@@ -282,6 +284,11 @@ int NovaItemDatabase::get_clipsize(int id) const {
 int NovaItemDatabase::get_deathtime_ticks(int id) const {
 	const auto it = items.find(id);
 	return it == items.end() ? 0 : it->second.deathtime_ticks;
+}
+
+String NovaItemDatabase::get_primary_weapon(int id) const {
+	const auto it = items.find(id);
+	return it == items.end() ? String() : it->second.primary_weapon;
 }
 
 // Entity-attached profile name; the engine composes "<EntityDefName>_<SoundType>"

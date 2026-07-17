@@ -258,14 +258,27 @@ bool BmsEventSystem::evaluate_trigger(World &w, const bms::Trigger &t) {
             return false; // [orig: sub-type range check @0x453b3c]
         }
         case bms::TriggerMainType::Player: {
-            if (static_cast<bms::PlayerTriggerType>(t.sub_type) ==
-                bms::PlayerTriggerType::PlayerAwol) {
-                // AWOL quanta (once per 64 ticks, ~1.02 s each) vs the authored
-                // threshold. [orig: @0x453d40 — getter @0x439de0 >= param1] (D-EVT-2)
-                return awol_64tick_count_ >= t.param1;
+            switch (static_cast<bms::PlayerTriggerType>(t.sub_type)) {
+                case bms::PlayerTriggerType::PlayerAwol:
+                    // AWOL quanta (once per 64 ticks, ~1.02 s each) vs the authored
+                    // threshold. [orig: @0x453d40 — getter @0x439de0 >= param1] (D-EVT-2)
+                    return awol_64tick_count_ >= t.param1;
+                // The four mount subs resolve param1 as an SSN and test the LOCAL player's
+                // mount/stand state, one carrier link deep. [orig: EventTrigger_
+                // EvaluateCondition cat-7 subs 38-41 -> @0x4f10d0/0x4f1260/0x4f1150/0x4f11e0]
+                case bms::PlayerTriggerType::PlayerAttachedToSsn: // 38 PLYRATTACHED
+                    return cmds.local_player_attached_to_ssn(static_cast<uint16_t>(t.param1));
+                case bms::PlayerTriggerType::PlayerOnSsn:         // 39 PLYRONSSN
+                    return cmds.local_player_standing_on_ssn(static_cast<uint16_t>(t.param1));
+                case bms::PlayerTriggerType::PlayerDrivingSsn:    // 40 PLYRDRIVING
+                    return cmds.local_player_driving_ssn(static_cast<uint16_t>(t.param1));
+                case bms::PlayerTriggerType::PlayerOnGun:         // 41 PLYRONGUN
+                    return cmds.local_player_on_gun_of_ssn(static_cast<uint16_t>(t.param1));
+                default:
+                    break;
             }
-            // The remaining Player subs (view modes, dialog, satchel, mounts)
-            // ride their host subsystems' ports; false until witnessed-wired.
+            // The remaining Player subs (view modes, dialog, satchel) ride their host
+            // subsystems' ports; false until witnessed-wired.
             return false;
         }
         default:

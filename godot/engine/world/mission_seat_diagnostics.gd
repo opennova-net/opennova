@@ -32,7 +32,8 @@ static func build_item_seat_specs(mission, resource_root, item_db, include_raw :
 			continue
 		seen_types[type_id] = true
 		var resolved := seat_specs_for_item(resource_root, item_db, item_id, type_id, include_raw)
-		if not (resolved.get("seats", []) as Array).is_empty():
+		if not (resolved.get("seats", []) as Array).is_empty() \
+				or not (resolved.get("armory_points", []) as Array).is_empty():
 			specs.append(resolved)
 	return specs
 
@@ -45,6 +46,8 @@ static func seat_specs_for_item(resource_root, item_db, item_id: int, type_id :=
 		"graphic": "",
 		"model": "",
 		"seats": [],
+		"armory_points": [],
+		"primary_weapon": "",
 		"error": "",
 	}
 	if resource_root == null or item_db == null:
@@ -54,6 +57,8 @@ static func seat_specs_for_item(resource_root, item_db, item_id: int, type_id :=
 		out["error"] = "item_not_found"
 		return out
 	out["display_name"] = String(item_db.get_display_name(item_id)) if item_db.has_method("get_display_name") else ""
+	if item_db.has_method("get_primary_weapon"):
+		out["primary_weapon"] = String(item_db.get_primary_weapon(item_id))
 	var graphic := String(item_db.get_graphic(item_id))
 	out["graphic"] = graphic
 	if graphic.is_empty():
@@ -69,6 +74,11 @@ static func seat_specs_for_item(resource_root, item_db, item_id: int, type_id :=
 		out["error"] = "model_not_found"
 		return out
 	out["seats"] = seat_specs_from_model(data, include_raw)
+	# "armory*" userpoints label/scan only on Armory-attrib items — the same attrib
+	# gate the original applies before its userpoint walk
+	# [orig: itemDef->attrib & 0x80000 @0x4361ee/@0x5a36f5; walk @0x436226/@0x5a372b].
+	if item_db.has_method("get_attrib") and (int(item_db.get_attrib(item_id)) & 0x80000) != 0:
+		out["armory_points"] = armory_points_from_model(data)
 	return out
 
 
@@ -105,6 +115,22 @@ static func seat_specs_from_model(data: NovaObjectData, include_raw := false) ->
 static func seat_local_from_user_point_position(pos: Vector3) -> Vector3:
 	return MissionObjectPlacer.godot_to_bms_position(
 			MissionObjectPlacer.bms_to_godot_basis(Vector3.ZERO) * pos)
+
+
+# The "armory*" userpoint locals (prefix match, first 6 chars case-insensitive) —
+# the floating armory-label anchors on Armory-attrib items.
+# [orig: strnicmp(name, "armory", 6) @0x436226/@0x5a372b]
+static func armory_points_from_model(data: NovaObjectData) -> Array:
+	var points: Array = []
+	if data == null:
+		return points
+	for i in range(data.get_user_point_count()):
+		var up: Dictionary = data.get_user_point_info(i)
+		var source_name := String(up.get("name", "")).strip_edges().to_lower()
+		if not source_name.begins_with("armory"):
+			continue
+		points.append(seat_local_from_user_point_position(up.get("position", Vector3.ZERO)))
+	return points
 
 
 static func seat_yaw_offset_from_user_point_rotation(direction: Vector3) -> int:

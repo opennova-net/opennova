@@ -43,6 +43,20 @@ func test_health_thresholds() -> void:
 	assert_almost_eq(HudHealthBar.MID_THRESHOLD, 0.4374, 0.001)
 
 
+func test_attach_label_dim() -> void:
+	# The non-nearest label transform: RGB halved, alpha forced to 0x7F.
+	# [orig: ((rgb & 0xFEFEFE) | 0xFE000001) >> 1 @0x5a364e]
+	var d := HudAttachLabels.dim(Color(1, 1, 1, 1))
+	assert_almost_eq(d.r, 0.5, 0.001)
+	assert_almost_eq(d.g, 0.5, 0.001)
+	assert_almost_eq(d.b, 0.5, 0.001)
+	assert_almost_eq(d.a, 127.0 / 255.0, 0.001, "Dim forces the 0x7F alpha byte.")
+	var e := HudAttachLabels.dim(Color(0.8, 0.4, 0.2, 1.0))
+	assert_almost_eq(e.r, 0.4, 0.001)
+	assert_almost_eq(e.g, 0.2, 0.001)
+	assert_almost_eq(e.b, 0.1, 0.001)
+
+
 func test_draw_helpers_null_safe() -> void:
 	# All draw helpers guard null inputs and must not crash.
 	HudCrosshair.draw(null, null, Vector2.ZERO, Vector2.ONE)

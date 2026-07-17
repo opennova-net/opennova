@@ -268,6 +268,21 @@ public:
     // [orig: Vehicle_HasEnemyOccupant @0x4359f0] SSN of an entity riding target_ssn, else 0.
     uint16_t find_mounted_on(uint16_t target_ssn) const;
 
+    // --- the BMS Player mount triggers (main type 7 subs 38-41) ---
+    // All four resolve ssn, require a live local player, and test its mount/stand state
+    // against the SSN entity, one carrier link deep. [orig: EventTrigger_EvaluateCondition
+    // @0x453620 cat-7 subs 38-41 -> the four predicates @0x4f10d0/0x4f1260/0x4f1150/0x4f11e0
+    // (renamed 2026-07-16: Entity_IsLocalPlayerSeatedOnSsn / StandingOnSsn / DrivingSsn /
+    // OnGunOfSsn — the shipped IDB names were permuted misnomers).]
+    // PLYRATTACHED: seated in ANY seat of the SSN (or of something the SSN carries).
+    bool local_player_attached_to_ssn(uint16_t ssn) const;   // sub 38 @0x4f10d0
+    // PLYRONSSN: STANDING on the SSN (platform contact), not seated.
+    bool local_player_standing_on_ssn(uint16_t ssn) const;   // sub 39 @0x4f1260
+    // PLYRDRIVING: seated on the SSN chain in a ctrlx/drvrx seat.
+    bool local_player_driving_ssn(uint16_t ssn) const;       // sub 40 @0x4f1150
+    // PLYRONGUN: seated on the SSN chain in the UseGun seat.
+    bool local_player_on_gun_of_ssn(uint16_t ssn) const;     // sub 41 @0x4f11e0
+
     // --- AI command (the AI-change action family) ---
     // [orig: Entity_ApplyCommand @0x43ab60, reached from EventAction_Dispatch @0x4542e0
     // via Entity_HandleAlertStateEvent @0x43dee0.] Apply an AI sub-type command to the

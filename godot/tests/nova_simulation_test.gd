@@ -518,14 +518,16 @@ func test_item_seat_specs_mount_command_125_spawn() -> void:
 		}
 	])
 	assert_true(sim.load_from_mission_data(md), "loaded command-125 mission with seat specs")
-	var pos := sim.get_entity_position(0)
+	var soldier_idx := _first_organic_ai_index(sim)
+	assert_true(soldier_idx >= 0, "found the soldier's AI row")
+	var pos := sim.get_entity_position(soldier_idx)
 	assert_true(pos.is_equal_approx(Vector3(10, 2, -1)),
 		"command-125 soldier uses the IDA-priority ctrlx seat, converted to Godot axes")
-	assert_almost_eq(sim.get_entity_yaw_deg(0), 45.0, 0.01,
+	assert_almost_eq(sim.get_entity_yaw_deg(soldier_idx), 45.0, 0.01,
 		"non-gunner mounted seats carry their local yaw offset")
 	# The mounted anim state (100 = anim_sit_24) is asserted via the debug card below; the present
 	# snapshot is the listen-server ClientState now (covered by nova_listen_server_test).
-	var card: Dictionary = sim.get_entity_debug(0)
+	var card: Dictionary = sim.get_entity_debug(soldier_idx)
 	assert_true(bool(card["mounted"]), "debug card marks mounted occupants")
 	assert_eq(int(card["mount_target_net_id"]), int(vehicle["bms_id"]))
 	assert_eq(int(card["mount_seat"]), 1, "ctrlx seat was selected by original priority")
@@ -545,6 +547,106 @@ func test_item_seat_specs_mount_command_125_spawn() -> void:
 	assert_eq(String(card["anim_key"]), "anim_sit_24")
 	sim.free()
 
+
+
+# The floating attach labels [orig: draw_vehicle_seat_and_armory_labels @0x5a3290
+# selection half]: free seats in the 4.0 u radius label with exactly one nearest
+# highlight; the unarmed local player sees every candidate; the armory zone flag is
+# absent here so seat mode applies and no armory labels appear.
+func test_attach_labels_seats() -> void:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var vehicle := md.add_entity(NovaMissionData.KIND_ITEM, 101294, Vector3(10, 0, 0), Vector3.ZERO)
+	assert_false(vehicle.is_empty())
+	var sim := NovaSimulation.new()
+	sim.set_item_seat_specs([
+		{
+			"type_id": 1294,
+			"seats": [
+				{"type": 1, "position": Vector3(0, 2, 0), "source_name": "sitex00"},
+				{"type": 3, "position": Vector3(0, -1, 1), "source_name": "UseGun"},
+			],
+			"armory_points": [Vector3(0, 0, 1.5)],
+			"primary_weapon": "WPN_EMPLCD50",
+		}
+	])
+	assert_true(sim.load_from_mission_data(md), "loaded the labels mission")
+	assert_true(sim.spawn_local_player(Vector3(12, 0, 0), 0.0, 1), "spawned the local player")
+	var labels: Array = sim.get_attach_labels()
+	assert_eq(labels.size(), 2, "both free seats label inside 4.0 u (armory points stay out of seat mode)")
+	var nearest_count := 0
+	var seat_types: Array = []
+	for raw in labels:
+		var l: Dictionary = raw
+		seat_types.append(int(l["seat_type"]))
+		if bool(l["nearest"]):
+			nearest_count += 1
+		assert_false(bool(l["armory"]), "no armory labels out of the zone")
+		# WPN_EMPLCD50 is not in a loaded weapon table here -> the key stays absent
+		# and the HUD falls to the STROVER_USEGUN default.
+		assert_eq(String(l["attach_text_key"]), "")
+	assert_eq(nearest_count, 1, "exactly the scan winner is highlighted")
+	assert_true(seat_types.has(1) and seat_types.has(3), "sit + UseGun seats both reported")
+	sim.free()
+
+
+func test_attach_labels_hide_occupied_and_out_of_range() -> void:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var vehicle := md.add_entity(NovaMissionData.KIND_ITEM, 101294, Vector3(10, 0, 0), Vector3.ZERO)
+	var soldier := md.add_entity(NovaMissionData.KIND_ORGANIC, 102072, Vector3(11, 0, 0), Vector3.ZERO)
+	assert_false(vehicle.is_empty())
+	assert_false(soldier.is_empty())
+	# Command-125 mounts the soldier into the best seat at promote — that seat must not label.
+	assert_true(md.set_entity_property_int(NovaMissionData.KIND_ORGANIC, int(soldier["index"]), "waypoint_id", 125))
+	assert_true(md.set_entity_property_int(NovaMissionData.KIND_ORGANIC, int(soldier["index"]), "wp_number", int(vehicle["bms_id"])))
+	# Same team as the local player: a live ENEMY occupant would reject the whole
+	# vehicle instead [orig: Vehicle_HasEnemyOccupant @0x4359f0].
+	assert_true(md.set_entity_property_int(NovaMissionData.KIND_ORGANIC, int(soldier["index"]), "team", 1))
+	var sim := NovaSimulation.new()
+	sim.set_item_seat_specs([
+		{
+			"type_id": 1294,
+			"seats": [
+				{"type": 2, "position": Vector3(0, 1, 1), "source_name": "ctrlx00"},
+				{"type": 1, "position": Vector3(0, -2, 1), "source_name": "sitex00"},
+			],
+		}
+	])
+	assert_true(sim.load_from_mission_data(md))
+	assert_true(sim.spawn_local_player(Vector3(12, 0, 0), 0.0, 1))
+	var labels: Array = sim.get_attach_labels()
+	assert_eq(labels.size(), 1, "the AI-occupied ctrlx seat never labels [orig: @0x5a348f]")
+	assert_eq(int((labels[0] as Dictionary)["seat_type"]), 1, "the free sitex remains")
+	sim.free()
+
+
+func test_attach_labels_empty_out_of_range() -> void:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var vehicle := md.add_entity(NovaMissionData.KIND_ITEM, 101294, Vector3(10, 0, 0), Vector3.ZERO)
+	assert_false(vehicle.is_empty())
+	var sim := NovaSimulation.new()
+	sim.set_item_seat_specs([
+		{"type_id": 1294, "seats": [{"type": 1, "position": Vector3.ZERO, "source_name": "sitex00"}]}
+	])
+	assert_true(sim.load_from_mission_data(md))
+	assert_true(sim.spawn_local_player(Vector3(40, 0, 0), 0.0, 1), "spawned far away")
+	assert_eq(sim.get_attach_labels().size(), 0,
+		"outside the 4.0 u gate the nearest scan fails and no labels emit [orig: @0x5a32e2]")
+	sim.free()
+
+
+# Drivable items (control-seat specs) attach AI brains at promote since the vehicle
+# pass, so organics no longer sit at AI index 0 — resolve the first pool-0 row.
+func _first_organic_ai_index(sim: NovaSimulation) -> int:
+	for i in 64:
+		var d: Dictionary = sim.get_entity_debug(i)
+		if d.is_empty():
+			break
+		if int(d.get("pool", -1)) == 0:
+			return i
+	return -1
 
 func test_mounted_seat_local_matches_rotated_vehicle_userpoint() -> void:
 	var md := NovaMissionData.new()
@@ -570,10 +672,59 @@ func test_mounted_seat_local_matches_rotated_vehicle_userpoint() -> void:
 		}
 	])
 	assert_true(sim.load_from_mission_data(md), "loaded rotated command-125 mount")
-	var pos := sim.get_entity_position(0)
+	var soldier_idx := _first_organic_ai_index(sim)
+	assert_true(soldier_idx >= 0, "found the soldier's AI row")
+	var pos := sim.get_entity_position(soldier_idx)
 	var expected := Vector3(10.1189880, 2.1048889, 0.7148895)
 	assert_lt(pos.distance_to(expected), 0.001,
 		"mounted seat local follows the same rotated side as the selected model userpoint")
+	sim.free()
+
+
+# The USE-ITEM toggle's weapon-busy gate at the sim binding [orig: @0x436958-0x436977]:
+# a fire in flight swallows the toggle; back at idle the same toggle mounts.
+func test_local_player_toggle_mount_weapon_busy_gate() -> void:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var vehicle := md.add_entity(NovaMissionData.KIND_ITEM, 101294, Vector3(2, 0, 0), Vector3.ZERO)
+	assert_false(vehicle.is_empty())
+	var sim := NovaSimulation.new()
+	sim.set_item_seat_specs([
+		{
+			"type_id": 1294,
+			"seats": [
+				{"type": 1, "position": Vector3(0, -1, 1), "yaw_offset": 0, "source_name": "sitex00"},
+			],
+		}
+	])
+	assert_true(sim.load_from_mission_data(md), "loaded the one-truck mission")
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	sim.set_local_player_weapon({
+		"name": "WPN_GATE", "animadm": "gate.adm",
+		"actions": [
+			{"name": "idle", "anim": "anim_wpn_idle", "delaystart": 0, "delayend": 0},
+			{"name": "fire", "anim": "anim_wpn_fire", "delaystart": 0, "delayend": 0},
+		],
+		"flags": 0, "clipsize": 30, "startrounds": 60,
+	}, {
+		"anim_wpn_idle": PackedFloat32Array([0.2]),
+		"anim_wpn_fire": PackedFloat32Array([0.2]),
+	})
+	sim.step()
+	# Pull the trigger: the FSM leaves idle this step; the in-flight fire swallows
+	# the toggle.
+	sim.set_local_player_weapon_input(false, true, false)
+	sim.step()
+	assert_false(sim.local_player_toggle_mount(), "a fire in flight swallows the toggle")
+	# Release and settle back to idle: the same toggle now passes the gate and mounts.
+	sim.set_local_player_weapon_input(false, false, false)
+	for _i in range(40):
+		sim.step()
+	assert_true(sim.local_player_toggle_mount(), "the idle toggle mounts")
+	var card: Dictionary = sim.get_world_entity_debug(int(vehicle["bms_id"]))
+	var seats: Array = card.get("seats", [])
+	assert_true(seats.size() == 1 and bool(seats[0]["occupied"]),
+		"the scan took the truck's one sitex seat")
 	sim.free()
 
 

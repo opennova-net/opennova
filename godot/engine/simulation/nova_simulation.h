@@ -685,6 +685,10 @@ public:
 	// Probe seam: teleport an AI entity (mission-space coords) through both
 	// position stores, for probes defeated by mission geography.
 	void debug_set_entity_position(int p_index, const Vector3 &p_mission_pos);
+	// World-registry probe seams by SSN (pool-1 vehicles carry no AI brain and are
+	// invisible to the AI-index seams): entity card + mission-space teleport.
+	Dictionary get_world_entity_debug(int p_net_id) const;
+	void debug_set_world_entity_position(int p_net_id, const Vector3 &p_mission_pos);
 	// The D-AI-6 muzzle seam: per-frame posed gun-flash userpoint push from the
 	// present layer, keyed by the row's PF_NET_ID / authored SSN (Godot-space
 	// position; converted + stamped with the logic tick).
@@ -891,6 +895,23 @@ public:
 	// Input_HandleActionBinding @0x49b848/@0x49b858].
 	bool local_player_in_armory_zone() const;
 	bool local_player_in_vehicle_loadout_zone() const;
+
+	// The USE-ITEM mount toggle: weapon-busy gate + the witnessed toggle
+	// (deck best-seat / nearest-seat scan / seat-swap-or-detach). Returns true when a
+	// mount, swap or dismount applied. [orig: Input_ProcessFrame @0x49d6dc ->
+	// Entity_ToggleVehicleMount @0x436950]
+	bool local_player_toggle_mount();
+
+	// The floating attach labels around the local player, one Dictionary per label:
+	// position (mission space, +0.1875 u lift applied), seat_type (world::SeatType,
+	// 4 = armory point), armory (bool), nearest (bool, the full-bright highlight),
+	// attach_text_key (the USEGUN weapon's attachtextid Overlays key, "" = absent ->
+	// the STROVER_USEGUN default). Armory mode rides the zone flag; the can-fire
+	// nearest-only gate models EquippedSlot presence + the ctrl/drvr seat reject.
+	// [orig: draw_vehicle_seat_and_armory_labels @0x5a3290 selection half;
+	//  Player_CanFireWeapon @0x5cf780 — its camera/underwater legs are host state,
+	//  unmodeled here: docs/interface/hud-re.md (D-HUD-11)]
+	TypedArray<Dictionary> get_attach_labels() const;
 
 	// The armory ACCEPT apply for the local player: resolve the weapon name in the
 	// armory table and stamp equipped_adm_index (+ player_class 5..9 when given).

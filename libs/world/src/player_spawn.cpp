@@ -50,6 +50,10 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     // @0x51d0b1 / slot+440; D-NET-146]
     seed.anim_slot = spawn.anim_slot;
     seed.minimap_net_id = spawn.minimap_net_id;
+    // Players carry commandGroup 1: the SP deploy leg stamps it on every (re)spawn, and
+    // shipped missions script against it (00TRa's tour dialogs are all "group 1 enters
+    // area X"). [orig: the deploy leg @0x519fd0 — word entity+0x11C = 1]
+    seed.group_id = 1;
     seed.alive = true;
     seed.flags = 2u;            // the movement gate starts SET; the spawn reset clears it
     // entity+0x78: the owning connection's dcb (host loopback dcb / a joiner's 0x48-ack dcb). The

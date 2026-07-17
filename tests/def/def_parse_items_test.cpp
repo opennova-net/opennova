@@ -430,6 +430,32 @@ int main(void) {
     }
     def_free_items(&rifle_items);
 
+    /* 'primary_weapon' — the ewep emplacement's mounted weapon.def entry (the attach
+       label's text source) [orig: -> ItemDef+0x54B primaryWeapon, itemdef-re.md]. The
+       fixture carries the retail "NON-Armored Emplaced 50cal for FAV" block (id 101419). */
+    {
+        DefItemsFile items2;
+        memset(&items2, 0, sizeof(items2));
+        snprintf(path, sizeof(path), "%s/fixtures/def/items.def", repo_root);
+        if (def_parse_items(path, &items2) != 0) {
+            fprintf(stderr, "FAIL: reparse for primary_weapon failed\n");
+            return 1;
+        }
+        const DefItemDef *ewep = NULL;
+        for (size_t i = 0; i < items2.count; ++i) {
+            if (items2.entries[i].id == 101419) { ewep = &items2.entries[i]; break; }
+        }
+        if (!ewep || strcmp(ewep->primary_weapon, "WPN_EMPLCD50NA") != 0 ||
+            strcmp(ewep->ai_function, "ewep") != 0) {
+            fprintf(stderr, "FAIL: ewep primary_weapon: '%s' ai='%s' (found=%d)\n",
+                    ewep ? ewep->primary_weapon : "", ewep ? ewep->ai_function : "",
+                    ewep != NULL);
+            def_free_items(&items2);
+            return 1;
+        }
+        def_free_items(&items2);
+    }
+
     printf("PASS: items parsing OK\n");
     return 0;
 }

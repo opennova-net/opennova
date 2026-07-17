@@ -33,6 +33,7 @@
 #include <world/angle.h>
 #include <world/player_spawn.h>
 #include <world/spawn_select.h>
+#include <world/vehicle_attach.h> // player_toggle_vehicle_mount (the USE-ITEM toggle)
 
 #include "object/nova_item_database.h"
 #include "object/nova_object_data.h" // resolve_collision_instances: the .3di collision IR source
@@ -1113,6 +1114,71 @@ bool NovaSimulation::local_player_in_vehicle_loadout_zone() const {
 	       (e->flags & opennova::world::kEntityFlagVehicleLoadoutZone) != 0;
 }
 
+bool NovaSimulation::local_player_toggle_mount() {
+	// The USE-ITEM mount toggle for the local player — the shell calls this when the
+	// armory/vehicle-zone legs of the key don't apply. [orig: Input_ProcessFrame release
+	// edge @0x49d6dc -> Entity_ToggleVehicleMount @0x436950]
+	if (!world_) return false;
+	// Authority-only: the witnessed non-authority path queues C2S 0x26 (attach) /
+	// sends 0x27 (detach) and waits for the 0x0A stream to confirm [orig:
+	// Entity_RequestVehicleAttach @0x4364a0 / Entity_SendDetachPacket @0x435510].
+	// That joiner wire leg is unported (D-AI-11 l) — applying locally on a joiner
+	// would silently desync against the host, so the toggle refuses (the armory
+	// leg's MP stance).
+	if (joiner_) return false;
+	// The weapon-busy gate [orig: @0x436958-0x436977 — no EquippedSlot passes;
+	// currentAction < 2 (idle/emptyidle) or == 5 (the dry click) passes, as does a
+	// pending OVERHEATED (nextAction == 11); an in-flight fire/reload/switch swallows
+	// the toggle].
+	const int32_t cur = weapon_slot_.current;
+	const int32_t next = weapon_slot_.next;
+	if (!(cur < 2 || cur == opennova::world::weapon_action::kEmpty ||
+	      next == opennova::world::weapon_action::kOverheated))
+		return false;
+	return opennova::world::player_toggle_vehicle_mount(*world_, world_->cached.local_player);
+}
+
+TypedArray<Dictionary> NovaSimulation::get_attach_labels() const {
+	TypedArray<Dictionary> out;
+	if (!world_) return out;
+	const opennova::world::Entity *player = world_->registry.get(world_->cached.local_player);
+	if (player == nullptr || !player->alive || player->health <= 0) return out;
+	// Armory mode = standing in the type-6 armory volume; the label pass reads the raw
+	// flag [orig: is_armory_mode = entity Flags & 0x400000 @0x5a32c4].
+	const bool armory_mode =
+	    (player->flags & opennova::world::kEntityFlagArmoryZone) != 0;
+	// The nearest-only gate [orig: Player_CanFireWeapon @0x5cf780 — EquippedSlot present
+	// and parentSlot not 2/5 (ctrl/drvr); the camera-mode/underwater/scope legs live
+	// host-side and are unmodeled here: docs/interface/hud-re.md (D-HUD-11)].
+	const bool can_fire =
+	    player->equipped_adm_index != 0xFF &&
+	    !(player->mounted && opennova::world::is_vehicle_control_seat(player->mount_type));
+	std::vector<opennova::world::AttachLabel> labels;
+	opennova::world::collect_attach_labels(*world_, *player, armory_mode, can_fire, labels);
+	for (const opennova::world::AttachLabel &l : labels) {
+		Dictionary d;
+		d["position"] = Vector3(l.world_pos.x, l.world_pos.y, l.world_pos.z);
+		d["seat_type"] = static_cast<int>(l.type);
+		d["armory"] = l.armory;
+		d["nearest"] = l.nearest;
+		String key;
+		if (l.type == opennova::world::SeatType::Gunner) {
+			// The USEGUN label text: the gun entity's primary weapon -> its weapon.def
+			// attachtextid key [orig: Entity_GetWeaponSlots slot0 -> def+0x3A0 @0x5a351d].
+			const opennova::world::Entity *cand = world_->registry.get(l.entity);
+			if (cand != nullptr && !cand->primary_weapon.empty()) {
+				const int wi = world_->weapons.index_of(cand->primary_weapon.c_str());
+				if (wi >= 0)
+					key = String(world_->weapons.entries[static_cast<size_t>(wi)]
+					                     .attach_text_id.c_str());
+			}
+		}
+		d["attach_text_key"] = key;
+		out.push_back(d);
+	}
+	return out;
+}
+
 bool NovaSimulation::apply_local_player_loadout(const String &p_weapon_name,
                                                 int p_player_class) {
 	if (!world_) return false;
@@ -1239,7 +1305,25 @@ void NovaSimulation::set_item_seat_specs(const Array &p_specs) {
 			    std::clamp(static_cast<int>(seat_d.get("yaw_offset", 0)), -32768, 32767));
 			spec.seats.push_back(seat);
 		}
-		if (!spec.seats.empty()) item_seat_specs_.push_back(std::move(spec));
+		// The attach-label sources: "armory*" userpoint locals (Armory-attrib items
+		// only — the host gates on itemdef attrib 0x80000) + the ewep primary_weapon
+		// link [orig: @0x4361ee/@0x5a36f5; ItemDef+0x54B].
+		const Variant armory_v = spec_d.get("armory_points", Array());
+		if (armory_v.get_type() == Variant::ARRAY) {
+			const Array armory_a = armory_v;
+			for (int64_t j = 0; j < armory_a.size(); ++j) {
+				if (armory_a[j].get_type() != Variant::VECTOR3) continue;
+				const Vector3 p = armory_a[j];
+				spec.armory_points.push_back({static_cast<float>(p.x),
+				                              static_cast<float>(p.y),
+				                              static_cast<float>(p.z)});
+			}
+		}
+		spec.primary_weapon =
+		    String(spec_d.get("primary_weapon", String())).utf8().get_data();
+		if (!spec.seats.empty() || !spec.armory_points.empty() ||
+		    !spec.primary_weapon.empty())
+			item_seat_specs_.push_back(std::move(spec));
 	}
 }
 
@@ -1419,6 +1503,8 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_entity_debug", "index"), &NovaSimulation::get_entity_debug);
 	ClassDB::bind_method(D_METHOD("debug_set_entity_health", "index", "hp"), &NovaSimulation::debug_set_entity_health);
 	ClassDB::bind_method(D_METHOD("debug_set_entity_position", "index", "mission_pos"), &NovaSimulation::debug_set_entity_position);
+	ClassDB::bind_method(D_METHOD("get_world_entity_debug", "net_id"), &NovaSimulation::get_world_entity_debug);
+	ClassDB::bind_method(D_METHOD("debug_set_world_entity_position", "net_id", "mission_pos"), &NovaSimulation::debug_set_world_entity_position);
 	ClassDB::bind_method(D_METHOD("set_ai_muzzle_world", "net_id", "godot_pos"), &NovaSimulation::set_ai_muzzle_world);
 	ClassDB::bind_method(D_METHOD("get_round_outcome_debug"), &NovaSimulation::get_round_outcome_debug);
 	ClassDB::bind_static_method("NovaSimulation", D_METHOD("ai_state_name", "state"), &NovaSimulation::ai_state_name);
@@ -1486,6 +1572,8 @@ void NovaSimulation::_bind_methods() {
 	                     &NovaSimulation::sound_occlusion_distance_q16, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("local_player_in_armory_zone"), &NovaSimulation::local_player_in_armory_zone);
 	ClassDB::bind_method(D_METHOD("local_player_in_vehicle_loadout_zone"), &NovaSimulation::local_player_in_vehicle_loadout_zone);
+	ClassDB::bind_method(D_METHOD("local_player_toggle_mount"), &NovaSimulation::local_player_toggle_mount);
+	ClassDB::bind_method(D_METHOD("get_attach_labels"), &NovaSimulation::get_attach_labels);
 	ClassDB::bind_method(D_METHOD("apply_local_player_loadout", "weapon_name", "player_class"),
 	                     &NovaSimulation::apply_local_player_loadout);
 	ClassDB::bind_method(D_METHOD("load_weapon_table", "resource_root", "name"),
@@ -3015,6 +3103,59 @@ void NovaSimulation::debug_set_entity_position(int p_index, const Vector3 &p_mis
 		ent->position.x = p_mission_pos.x;
 		ent->position.y = p_mission_pos.y;
 		ent->position.z = p_mission_pos.z;
+	}
+}
+
+// World-registry probe seams keyed by SSN — pool-1 vehicles (and anything else
+// without an AI brain) are invisible to the AI-index seams above; vehicle probes
+// need to find and place them. Mission-space coordinates, same convention as
+// debug_set_entity_position.
+Dictionary NovaSimulation::get_world_entity_debug(int p_net_id) const {
+	Dictionary out;
+	if (!world_ || p_net_id <= 0 || p_net_id > 0xFFFF) return out;
+	const opennova::world::EntityHandle h =
+			world_->registry.find_by_net_id(static_cast<uint16_t>(p_net_id));
+	const opennova::world::Entity *ent = world_->registry.get(h);
+	if (!ent) return out;
+	out["net_id"] = static_cast<int>(ent->net_id);
+	out["bms_id"] = ent->bms_id;
+	out["pool"] = h.pool();
+	out["alive"] = ent->alive;
+	out["health"] = ent->health;
+	out["mission_position"] = Vector3(ent->position.x, ent->position.y, ent->position.z);
+	out["position"] = Vector3(ent->position.x, ent->position.z, -ent->position.y);
+	out["yaw"] = static_cast<int>(ent->yaw);
+	out["seat_count"] = static_cast<int>(ent->seats.size());
+	Array seats;
+	for (const opennova::world::Seat &s : ent->seats) {
+		Dictionary sd;
+		sd["type"] = static_cast<int>(s.type);
+		sd["occupied"] = s.occupant.valid();
+		sd["local"] = Vector3(s.seat_local.x, s.seat_local.y, s.seat_local.z);
+		sd["name"] = String(s.source_name.c_str());
+		seats.push_back(sd);
+	}
+	out["seats"] = seats;
+	return out;
+}
+
+void NovaSimulation::debug_set_world_entity_position(int p_net_id,
+                                                     const Vector3 &p_mission_pos) {
+	if (!world_ || p_net_id <= 0 || p_net_id > 0xFFFF) return;
+	const opennova::world::EntityHandle h =
+			world_->registry.find_by_net_id(static_cast<uint16_t>(p_net_id));
+	opennova::world::Entity *ent = world_->registry.get(h);
+	if (!ent) return;
+	ent->position.x = p_mission_pos.x;
+	ent->position.y = p_mission_pos.y;
+	ent->position.z = p_mission_pos.z;
+	// Keep the AI mirror in step when the entity carries a brain (harmless otherwise).
+	if (ai_) {
+		if (AiEntity *ae = ai_->for_handle(h)) {
+			ae->pos[0] = static_cast<int32_t>(p_mission_pos.x * 65536.0f);
+			ae->pos[1] = static_cast<int32_t>(p_mission_pos.y * 65536.0f);
+			ae->pos[2] = static_cast<int32_t>(p_mission_pos.z * 65536.0f);
+		}
 	}
 }
 

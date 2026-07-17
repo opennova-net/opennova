@@ -46,14 +46,16 @@ struct EntityHandle {
 
 // Seat class for vehicle/emplacement mounting. The enum values are the original
 // seatType codes. [orig: Entity_FindBestSeatSlot @0x4351f0 classifies the seat
-// bone name: "sitex"->1, "ctrlx"->2, "UseGun"->3, "drvrx"->5.] An emplaced gun
-// offers a single Gunner seat.
+// bone name: "sitex"->1, "ctrlx"->2, "UseGun"->3, "drvrx"->5; the armory-point
+// leg of the nearest scan reports 4 @0x436417.] An emplaced gun offers a single
+// Gunner seat. ArmoryPoint is a scan/label result code, never a mountable seat.
 enum class SeatType : uint8_t {
     None = 0,
-    Passenger = 1,  // "sitex"
-    Controller = 2, // "ctrlx"
-    Gunner = 3,     // "UseGun"
-    Driver = 5,     // "drvrx"
+    Passenger = 1,   // "sitex"
+    Controller = 2,  // "ctrlx"
+    Gunner = 3,      // "UseGun"
+    ArmoryPoint = 4, // "armory*" userpoint on an Armory-attrib item (labels only)
+    Driver = 5,      // "drvrx"
 };
 
 constexpr bool is_vehicle_control_seat(SeatType type) {
@@ -286,6 +288,17 @@ struct Entity {
     // Seats this entity OFFERS as a vehicle/emplacement (mirrors vehicle[400..] + model[605..]).
     // Empty for plain entities; an emplaced gun seeds one Gunner seat.
     std::vector<Seat> seats;
+    // "armory*" userpoint locals of an Armory-attrib item (items.def attrib 0x80000) —
+    // the floating armory-label anchors and the armory leg of the nearest scan. Non-empty
+    // ONLY for armory sources (the host feeds points only when the attrib is set, matching
+    // the original's attrib gate). [orig: the attrib & 0x80000 gate @0x4361ee/@0x5a36f5 +
+    // the "armory" userpoint walk @0x436226/@0x5a372b]
+    std::vector<Vec3> armory_points;
+    // items.def 'primary_weapon' — the weapon.def entry this ewep emplacement mounts (the
+    // gun entity's slot-0 weapon; the USEGUN attach label resolves its attachtextid).
+    // Empty for non-emplacements. [orig: ItemDef+0x54B primaryWeapon; label consumer
+    // draw_vehicle_seat_and_armory_labels @0x5a351d via Entity_GetWeaponSlots slot0]
+    std::string primary_weapon;
     // The single tracked FIRST occupant (entity+368 occupantEntity): claimed at attach by
     // ctrlx/drvrx (empty-or-same) and UseGun (only when empty), never by sitex; cleared only
     // when THE claimant detaches — a remaining second controller does not inherit it. This

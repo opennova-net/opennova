@@ -35,6 +35,8 @@ globals comment) were applied 2026-07-16, along with the scope-circle rename
 | Clip + rounds indicator (HUDCLIPGFX/HUDRNDGFX) | **ported** (`hud_clip_indicator.gd`, D-HUD-5) | `[orig: draw_hud_ammo_indicator @0x599a30]`; parse `[orig: @0x5442fc]`; `hud_helpers_test.gd` round_icon_count + flash |
 | Crosshair / reticle + spread | **ported** (`hud_crosshair.gd`, D-HUD-7/8/9/10; target cursor / aim-point quad / lock brackets unported) | `[orig: HUD_DrawCrosshair @0x592640]` + `[orig: HUD_DrawCrosshairCornerQuad @0x590f50]`; spread math `hud_helpers_test.gd` |
 | ALPHAFADE semantics | **ported** (`hud_fade.gd`) | `[orig: parse @0x5a086c]` ×2.55/×2.55/×62; flash curve `[orig: @0x599af9]`; `hud_helpers_test.gd` |
+| Attach labels (seat/armory floats) | **ported** (`world::collect_attach_labels` + `hud_attach_labels.gd` + `game_hud_host.gd`, D-HUD-11/12/13) | `[orig: draw_vehicle_seat_and_armory_labels @0x5a3290]` full witness; label strings `[orig: HUD_InitOverlaySystem @0x5a479c..0x5a481e]`; `attachtextid` parse `[orig: @0x544d6c]`; ctest `vehicle_mount` + `def_parse_weapons`/`def_parse_items`; GUT `nova_simulation_test.gd`/`hud_helpers_test.gd` |
+| Armory/vehicle-bay/FARP bottom prompts | witnessed — deferred with their systems (D-HUD-14) | `[orig: HUD_DrawGameplayOverlays @0x5bde60]` — preround/0x0A armory prompt, Flags 0x800 bay prompt, FARP wait/reload |
 | Mission triggered text (WAC/BMS `text`) | **ported** (`hud_messages.gd` + `main_game.gd`, D-HUD-6) | `[orig: HUD_DisplayTriggeredText @0x51f190]` → `[orig: Chat_AddDebugMessage @0x4987f0]`; `hud_helpers_test.gd` expiry |
 | `hudpos.def` parser token map + 4-field positions | ported (`libs/def`) | `[orig: loc_59F370; AMMOCOUNTPOS @0x59fc3d]`; ctest `def_parse_hudpos` |
 | Parachute / armor status icons | confirm-only — port pending (needs entity flags) | `[orig: sub_5925C0 @0x5925c0]` entity-flag gated |
@@ -401,6 +403,118 @@ section keys `strcli19/05/06/17/18/01` with per-state colors; KOTH appends
 `strcli20/21` by flag-carrier state; the death screen shifts the draw up by the
 measured text height. Not an SP element; ported later with the MP HUD.
 
+### Attach labels — `draw_vehicle_seat_and_armory_labels @0x5a3290` (ported 2026-07-17)
+
+The floating "indicator near where you attach": a wireframe box + centered text
+drawn at the **screen projection** of every eligible seat/armory userpoint on
+nearby entities. Called **unconditionally** by `HUD_RenderOverlays`
+`[orig: @0x5a7daa]` — no hudpos enable flag; its own gates decide visibility.
+
+**Label strings** — resolved once at `[orig: HUD_InitOverlaySystem
+@0x5a479c..0x5a481e]` from the gametext **Overlays** section via
+`GameText_GetStringWithFallback` (fallbacks are the `!`-marked literals):
+
+| Global (renamed this session) | Key | Retail text | Fallback |
+|---|---|---|---|
+| `g_hudLabelTextSit @0x2723860` | `STROVER_SIT` | "Sit" | `!sit` |
+| `g_hudLabelTextControl @0x2723864` | `STROVER_CONTROL` | "Control" | `!Control` |
+| `g_hudLabelTextUseGun @0x2723868` | `STROVER_USEGUN` | "UseGun" | `!UseGun` |
+| `g_hudLabelTextUseArmory @0x272386C` | `STROVER_USEARMORY` | "Armory" | `!UseArmory` |
+| `g_hudLabelFmtArmoryDelay @0x2723870` | `STROVER_USEARMORYD` | "Armory in %d Seconds" | `!ArmoryDelay %d` |
+
+**Selection** (the ported half — `world::collect_attach_labels`,
+`libs/world/src/vehicle_attach.cpp`):
+
+- Bracket gate: no `Entity_FindNearestSeatOrArmory` hit → no labels at all
+  `[orig: @0x5a32e2]`. The searchMode is the player's **armory-zone flag**
+  (`Flags & 0x400000`) `[orig: @0x5a32c4]` — in the zone the pass switches to
+  armory labels; the armory leg of the scan (`seatType 4 @0x436417`) exists
+  ONLY for this highlight (both mount-toggle callers pass searchMode 0).
+- Per-entity: iterate the player's proximity list (`entity+0x1BC/+0x1C0`,
+  read through `entityA @0x27234e8` — the current-entity POINTER, spectator-
+  aware) `[orig: @0x5a32a9]`; a ready weapon limits labels to the **nearest
+  entity** — `!Player_CanFireWeapon() || entity == nearest` `[orig: @0x5a3354;
+  Player_CanFireWeapon @0x5cf780]`; dead/destroyed skip, enemy-occupied
+  vehicles reject (`Vehicle_HasEnemyOccupant @0x4359f0`), carrier rules
+  `[orig: @0x5a33d9]` (unmodeled — D-AI-11 b).
+- Seat labels (not armory mode): per `itemDef->seatBoneIndex[0..9]` slot —
+  occupied seats (`mountHandles[slot] != 0xFFFF`) never label
+  `[orig: @0x5a348f]`; name prefixes `sitex`/`ctrlx`/`drvrx` (strnicmp 5) pick
+  Sit/Control/Control, exact `USEGUN` (stricmp) reads the gun's weapon slot0
+  def `+0x3A0` attach text via `Entity_GetWeaponSlots @0x5460e0`
+  (vehicle +1140 / infantry +692 / parent's when mounted), null → the UseGun
+  default `[orig: @0x5a350c..0x5a3544]`.
+- Armory labels (armory mode): items with **attrib 0x80000 Armory** walk ALL
+  model userpoints for the `armory` prefix (strnicmp 6) `[orig: @0x5a36f5,
+  @0x5a372b]`; with `dword_A85B6C` nonzero the label is
+  `sprintf(g_hudLabelFmtArmoryDelay, A85B6C)` `[orig: @0x5a377f]` (the MP
+  armory-delay state; SP always 0 → plain "Armory").
+- Per point: world pos = the posed userpoint through the entity basis
+  (`build_bone_attachment_matrix @0x56c630`) **+ 12288 (0.1875 u) Z lift**
+  `[orig: @0x5a3585]`; distance gate = full 3D from the **entity position**
+  (not the eye) `< 0x40000` (4.0 u) `[orig: @0x5a35f0]`; LOS raycast from the
+  player position to the lifted point, the gun's carrier substituted as the
+  ignored entity (`Physics_RaycastTerrainAndSectors @0x5a3609`).
+
+**Draw** (the host half — `game_hud_host.gd _build_attach_labels` projects +
+resolves text, `hud_attach_labels.gd` draws):
+
+- Project world→screen (`Math_FixedPointTransformPoint22 @0x5a3628` +
+  `clip_point_to_frustum_and_project @0x5a3655` — behind-frustum points skip).
+  The label geometry is **raw screen pixels**, not the 1024×768 design space.
+- Color: the nearest (entity, bone) pair draws the master overlay color
+  (`alpha @0x24c1868` = `overlayCtx+0x448`); every other label draws
+  `((rgb & 0xFEFEFE) | 0xFE000001) >> 1` — RGB halved, alpha forced 0x7F
+  `[orig: @0x5a3640..0x5a364e]`.
+- Geometry: measure w/h (`HUD_MeasureTextWH @0x580ab0` →
+  `CGameFont_MeasureText @0x674e70` with the fontObj scale pair); box
+  `(x−w/2, y−2)..(x+w/2+5, y+h+1)` (`Render_DrawWireframeRect @0x5a36ad`);
+  text centered through the half-bright text path
+  (`HUD_DrawTextCentered_HalfBright @0x5a36c1`).
+
+**Data chain** (ported end to end): weapon.def `attachtextid <key>` →
+`[orig: WeaponDefs_ParseLineCallback @0x544d6c]` resolves
+`GameText_GetString("overlays", key)` AT PARSE into `AdmDef+0x3A0` (a missing
+key stores "" — the label then draws an empty box; an absent line stores null
+→ the UseGun default). Retail JO ships 28 `attachtextid` rows, all emplaced
+guns/turrets (`attach_50cal` ".50 Cal", `attach_minigun` "Minigun",
+`attach_mk19` "Grenade Launcher", …). items.def `primary_weapon` links the
+ewep item to its weapon.def entry (`ItemDef+0x54B`). Our split keeps the KEY
+through `DefWeaponDef.attach_text_id` → `WeaponTableEntry.attach_text_id` and
+resolves in the HUD host against the same Overlays section with the same
+miss semantics. (`Gametext.bin` also carries `STRMISC_USEGUNMSG` "Press '$A'
+to attach to the $B" — **unreferenced by this binary**; no code cites it.)
+
+### Gameplay prompts — `HUD_DrawGameplayOverlays @0x5bde60` (witnessed, deferred)
+
+The bottom/top-center "Press …" prompt cluster, drawn at virtual x=512 via
+`HUD_DrawTextAtVirtualPos @0x5d3ec0` (the inline `(x*w+512)/1024` scale),
+master-gated on `dword_840B18` and skipped while `layerIndex == 3`:
+
+- **Armory prompt** — `dword_A85B64` (the preround/deploy timer, an S2C 0x0A
+  header field; net-re §5.47) nonzero → `STROVER_ARMORY_INFO` "Press '%s' to
+  access armory menu", `%s` = `KeyBinding_FormatDisplayString @0x496bd0` over
+  `g_bindingRow_useitem @0x81A454` (binding row 44 `useitem`, retail SHIFT);
+  suppressed while a menu is open (`sub_54B970` → the active-menu index
+  `dword_255110C`). The `STROVER_ARMORY_WAIT` "Armory available again in %d
+  seconds" leg `[orig: @0x5bdf61]` is **dead code** in this build: the
+  A85B64==0 recheck `@0x5bdef8` cannot pass inside the A85B64!=0 branch
+  (`sub_54DF60` between the reads is a return-0 stub). SP never streams the
+  0x0A header, so retail SP never shows this prompt.
+- **Vehicle-bay prompt** — preround inactive and `Flags & 0x800` (type-11
+  vehicle-loadout volume) with a groundEntity whose team is 0 or the player's
+  → `STROVER_VEHICLEBAY_INFO` "Press '%s' to activate vehicle bay menu"
+  `[orig: @0x5bdf69..0x5bdfc9]`.
+- **FARP overlays** — seated (parentSlot 2/5) on a vehicle whose groundEntity
+  is FARP-capable (`itemDef attrib2 & 0x2000`, pad flag 0x40, the
+  `weaponByte` unlock-group vs `dword_A85BBC`, team/game-type gates) →
+  `STROVER_FARP_WAIT` "Reload available in %d seconds" (`dword_A85B70`) /
+  `STROVER_FARP_RELOADING` "Reloading" (`!dword_A85B74`)
+  `[orig: @0x5bdff8..0x5be10e]`.
+
+All three legs ride systems we haven't ported (MP preround state, vehicle.mnu,
+FARP rearm) — recorded as D-HUD-14 and deferred with them.
+
 ## `hudpos.def` parser token → global map — `loc_59F370`
 
 A `_stricmp` token-dispatch; each token reads decimal fields via `atof → ftol`
@@ -436,6 +550,10 @@ A `_stricmp` token-dispatch; each token reads decimal fields via `atof → ftol`
 | D-HUD-8 | crosshair color multiplies the texture (canvas modulate); default white | the strip writes the color to the **specular** channel with `diffuse = 1.0` `[orig: @0x5914d7]`; the blend-stage setup lives in the HUD shader pass (`GfxShader_ApplyPassChecked @0x677020`, unwitnessed); color source = user config `dword_25510E0` | Identical for the default white; witness the texture-stage state (and the config default) before modeling the user crosshair color. |
 | D-HUD-9 | the crosshair hides the instant the scope engages (`scope_engaged`) | it draws while an aimed shot is NOT available — `!Player_CanFireWeapon() @0x5cf780`, which requires the **settled** sight view (`Player_IsEquippedWeaponScoped @0x4dcc80` = `g_weaponScopeActive`, promoted only at ease completion `@0x4de4f7`) — so it stays up through the whole ADS ease and yields only once fully sighted `[orig: gate @0x592afa]` | FIXED 2026-07-11 (weapon round): the hide is `scope_engaged && scope_fraction >= 1`; the row select stays hip — `+3` keys on `Player_CanFireWeapon()` itself (`@0x592b87`), unreachable on foot while the crosshair draws. |
 | D-HUD-10 | the crosshair anchors at the fixed design center (512, 384) | the anchor is the projected aim point through `Viewport_ScreenToVirtual`: the literal screen center only for the on-foot local player with no camera mode `[orig: @0x5928a0]`; spectate / `g_camera_mode` (external/3P) project `Entity_BuildCameraView` (far point 65536000 q16 = 1000.0) `[orig: @0x592910..0x59295e]` | FIXED 2026-07-11 (weapon round): `LocalPlayerHost.aim_screen_point()` — `Vector2.INF` in first person (the HUD pins the exact center, matching `@0x5928a0`), the projected aim in third person; `NovaGameHudHost` feeds it to both shells. |
+| D-HUD-11 | the label nearest-only gate models `equipped_adm_index != 0xFF` + not-in-a-ctrl/drvr-seat (`NovaSimulation::get_attach_labels`) | `Player_CanFireWeapon @0x5cf780` additionally requires no camera mode (`g_camera_mode`), not underwater (`Position.Z + CameraOffset.Z < Env_WaterHeightFixed` with the 0x8000 flag), and the settled-scope legs | The extra legs are host/render state the sim doesn't carry; on foot with a weapon the observable difference is the underwater/camera cases. Wire when those states reach the sim. |
+| D-HUD-12 | label text metrics ride the `.fnt` fixed size through Godot layout (`hud_attach_labels.gd`) | `HUD_MeasureTextWH @0x580ab0` measures through the fontObj `{handle, scale_x, scale_y}` pair (`CGameFont_MeasureText @0x674e70`); labels draw at raw screen pixels | Same glyph source; exact per-glyph spacing is the standing CGameFont follow-up. Box arithmetic `(x−w/2,y−2)..(x+w/2+5,y+h+1)` is ported verbatim. |
+| D-HUD-13 | the label color base is the hudpos `hud_textcolor` | the master overlay color `alpha @0x24c1868` (`overlayCtx+0x448`; writer unwalked) | The dim transform `((rgb & 0xFEFEFE) \| 0xFE000001) >> 1` is ported exactly (`HudAttachLabels.dim`, `hud_helpers_test.gd`); swap the base once the overlay-color writer is witnessed. |
+| D-HUD-14 | no bottom prompts | `HUD_DrawGameplayOverlays @0x5bde60`: the preround armory prompt (`STROVER_ARMORY_INFO`, S2C-0x0A-fed `dword_A85B64`; SP never draws it), the vehicle-bay prompt (`Flags & 0x800` + team-gated groundEntity), the FARP wait/reload overlays (`attrib2 & 0x2000` + unlock mask) | Witnessed, deferred: each rides an unported system (MP preround state / vehicle.mnu / FARP rearm). The `STROVER_ARMORY_WAIT` leg is dead code in retail (the impossible `@0x5bdef8` recheck). |
 
 ## Follow-ups (not yet witnessed / deferred)
 
@@ -476,6 +594,12 @@ A `_stricmp` token-dispatch; each token reads decimal fields via `atof → ftol`
   (`draw_objective_status_text @0x59aa30`, `@0x59a0cb`); port with the MP HUD.
 - **Parachute/armor icons** — witnessed (`sub_5925C0`); needs the runtime to
   surface the entity flag bits (`+36 & 0x10/0x8`).
+- **Armory-delay label leg** — the `g_hudLabelFmtArmoryDelay % dword_A85B6C`
+  variant of the floating armory label and the bottom-prompt cluster
+  (D-HUD-14) key off the S2C 0x0A header armory/preround state; wire when the
+  net views surface it.
+- **`alpha @0x24c1868` writer** — the master overlay color (`overlayCtx+0x448`)
+  every HUD text draw reads; unwalked (D-HUD-13).
 
 ## IDB changes
 
@@ -509,3 +633,24 @@ call; IDB saved):
 - **Comment** at `0x59e3d6` noting `dword_25510DC` = the user crosshair-style
   index (`cross%02d.tga`), `dword_25510E0` = the user crosshair color, and
   `dword_25510E4` = the `mp_CrossHairSpread` enable.
+
+Applied 2026-07-17 (the attach-label grill; auto-name renames at anchored
+confidence; IDB saved):
+
+- **Rename** `sub_5460E0` → `Entity_GetWeaponSlots` (anchored: def+84 flag
+  routing to vehicle +1140 / infantry +692 / parent +1140 slot arrays;
+  callers `WeaponSlot_ReloadAmmo`/`Server_ClientFiredRound`/the label draw).
+- **Rename** `sub_5D3EC0` → `HUD_DrawTextAtVirtualPos` (anchored: the inline
+  `(x*w+512)/1024` / `(y*h+384)/768` virtual-space scale + text dispatch).
+- **Rename** `sub_580AB0` → `HUD_MeasureTextWH` (anchored: the
+  `CGameFont_MeasureText` wrapper returning the w/h pair).
+- **Rename** `dword_2723860/64/68/6C/70` → `g_hudLabelTextSit` /
+  `g_hudLabelTextControl` / `g_hudLabelTextUseGun` / `g_hudLabelTextUseArmory`
+  / `g_hudLabelFmtArmoryDelay` (anchored: the `HUD_InitOverlaySystem`
+  STROVER_* writers + the label-draw readers).
+- **Rename** `byte_81A454` → `g_bindingRow_useitem` (anchored: the row whose
+  +0x14/+0x16 runtime keys are the armory grill's
+  `g_useItemBindingKey0/1 @0x81A468/6A`; both prompt legs format it).
+- **Comments** at `0x5a3290` (label sources/gates summary), `0x5bdee2`
+  (preround gate + the dead ARMORY_WAIT leg), `0x435d50` (the armory
+  searchMode's only consumer), `0x5a479c` (the label-string resolve block).

@@ -8407,15 +8407,26 @@ turn-in-place holds a standing buggy; the steer chase toward the driver yaw; coa
 the dead gate; the `physics` selector gate) + `netsim_two_peer_fanout`
 (vehicle_drive_authority: a remote driver's 0x08 move input spins the host vehicle to
 speed 861+60·61 in 62 ticks and the streamed 0x0A vehicle record pose goes LIVE).
+2026-07-16 update (the vehicle pass, world-wac-ai-re §23.3): the **AI-driver leg**
+(`@ 0x48bc12-0x48c034`) and the **no-controller parked stamp** (`@ 0x48c002-0x48c02d`,
+SM state 22 + the 22→16 hand-back) are PORTED — `AiSystem::vehicle_ai_drive` stages a
+`VehicleDriveCmd` the motor consumes (turn budget `32·|Yaw−bearing|/((brain[35]>>15)+32)`,
+±budget delta clamp, the ×0.75 sharp-leg damps at 357913920/715827840 when
+`turnRate2<<6 < budget`, steer `Yaw+Δ+Δ/8`, cmd speed `min(brain outSpeed, playerSpeed)`);
+the SM's kinematic `apply_locomotion` retires for `physics != 0` vehicles (the motor is
+the only integrator, matching the original split). Pinned by ctest `vehicle_mount`.
+
 Tracked deferrals: the air/helicopter family (`move_function chel` — Super Pumas stay
 parked; the buggy-family ground core is what landed), the skid/tire-slip model, pool-1
-vehicle-vs-vehicle collision + the collision-avoid damping, water drag/drowning drain, the
-AI autopilot/waypoint drive (states 16/18) + `EntityAI_ProcessVehicleStateMachine
-@ 0x4583c0`'s non-drive states, the engine sound state machine, husk/section damage, the
-wheel-contact pitch/roll solver (`Entity_ProcessTrackedVehiclePhysics` — substituted by the
-shared 5-tap bilinear terrain clamp), the above-water drive gate, the platform-follow
-grounded-on-entity block, and the driver-yaw analog write-back for remote drivers (their
-yaw is wire-owned on our host).
+vehicle-vs-vehicle collision + the collision-avoid damping (`@ 0x48bd8f-0x48bf26` incl.
+the DcbId-seeded 0.25–0.75 yield factor), water drag/drowning drain, the wait-for-boarders
+stop (`@ 0x48bf6f-0x48bff9`, aiComp mode 125), the minAI crew health clamp
+(`@ 0x48bc4e-94`), the handbrake byte-973 latch + aim-lock stop (`@ 0x48c03a/0x48c086`),
+`EntityAI_ProcessVehicleStateMachine @ 0x4583c0`'s non-drive states, the engine sound
+state machine, husk/section damage, the wheel-contact pitch/roll solver
+(`Entity_ProcessTrackedVehiclePhysics` — substituted by the shared 5-tap bilinear terrain
+clamp), the above-water drive gate, the platform-follow grounded-on-entity block, and the
+driver-yaw analog write-back for remote drivers (their yaw is wire-owned on our host).
 
 **D-NET-160** [reimpl gap, FIXED 2026-07-03 (ported; verify v34)] **A killed client never
 learned it died — no death screen, no redeploy (v33: 2 kills routed, 0x13 + 0x1E on the wire
