@@ -1177,8 +1177,22 @@ void ai_apply_command(AiBrain &comp, int sub_type, int32_t p2, int32_t p3, int32
             comp.f[AiBrain::kPartAnimRate0 + slot] = rate;      // comp+444+4*slot (rate)
             break;
         }
+        case 29:   // COMBATSPEED -> kSpeedA (brain +196)
+        case 30: { // PATROLSPEED -> kSpeedB (brain +200)
+            // [orig: Entity_ApplyCommand @0x43ab60 cases 0x1D/0x1E queue AIEvent types
+            // 10/11 -> AI_HandleCommand @0x465770 cases 0xA/0xB — km/h to 16.16 u/tick:
+            // fild(value) (+2^32 when negative = the unsigned reinterpret) * 1000
+            // * (1/225000) * 65536 = x65536/225 (the exact 62.5 Hz conversion; the
+            // items.def parse's x293 is its integer approximation).]
+            double v = static_cast<double>(p2);
+            if (v < 0.0) v += 4294967296.0; // flt_7C3288 add on negative [orig: @0x465974]
+            const int32_t scaled =
+                    static_cast<int32_t>(v * 1000.0 * 4.444444584805751e-06 * 65536.0);
+            comp.f[sub_type == 29 ? AiBrain::kSpeedA : AiBrain::kSpeedB] = scaled;
+            break;
+        }
         default:
-            // Tracked-TODO: alert(5/6/0x16), accuracy(8), AISETSTATE(0x1C), speed(0x1D/0x1E),
+            // Tracked-TODO: alert(5/6/0x16), accuracy(8), AISETSTATE(0x1C),
             // etc. (notes/mission/anim-ai-grill-2026-06-07.md). No-op so an unported sub-type
             // can't corrupt the AI component.
             break;
@@ -1403,6 +1417,41 @@ int AiSystem::update_waypoint_movement(AiEntity &e) {
     b.f[AiBrain::kWorkHeading] = result;
     b.f[AiBrain::kOutSpeed] = moveSpeed;
     return result;
+}
+
+// The brain half of a waypoint REDIRECT order [orig: Entity_SetWaypointByTeam @0x43cdb4
+// per-entity block — aiComp[35]=1 mode, [37]=list, [38]=node (nearest of the list when
+// unresolved [orig: Entity_FindNearestTriggerByType @0x407ea0]), think cooldown 0,
+// carrier ref cleared, then the brain wp slots + the per-leg turn budget seed].
+void AiSystem::apply_route_order(AiEntity &e, int32_t list, int32_t node) {
+    AiBrain &b = e.brain;
+    const NavChannel *ch = nav.channel(list);
+    if (ch == nullptr || ch->count <= 0) return; // dangling list: no order lands
+    if (node < 0) {
+        // Nearest node of THIS list [orig: @0x407ea0 — min 2D distance].
+        int best = 0;
+        int64_t best_d2 = INT64_MAX;
+        for (int i = 0; i < ch->count && i < 32; ++i) {
+            const NavEntry *ne = nav.entry(ch->entries[i]);
+            if (ne == nullptr) continue;
+            const int64_t dx = static_cast<int64_t>(ne->f[1]) - e.pos[0];
+            const int64_t dy = static_cast<int64_t>(ne->f[2]) - e.pos[1];
+            const int64_t d2 = dx * dx + dy * dy;
+            if (d2 < best_d2) { best_d2 = d2; best = i; }
+        }
+        node = best;
+    }
+    b.f[AiBrain::kWpType] = 1;                                     // [orig: aiComp[35] = 1]
+    b.f[AiBrain::kWpChannel] = list;                               // [orig: aiComp[37]]
+    b.f[AiBrain::kWpNode] = std::min<int32_t>(node, ch->count - 1); // [orig: aiComp[38]]
+    // The turn-budget seed [orig: the tail block @0x43cdb4 — AIWaypoint_UpdateTarget +
+    // budget = 32*|Yaw - bearing| / ((speed_param >> 15) + 32)].
+    if (ai_waypoint_update_target(b, e.pos, nav) == 0) {
+        const int32_t denom = (b.f[AiBrain::kStoredKeyTime] >> 15) + 32;
+        const int64_t err =
+                std::llabs(static_cast<int64_t>(e.heading) - b.f[AiBrain::kWpBearing]);
+        b.f[AiBrain::kAnimFlag] = static_cast<int32_t>(32 * (err / denom));
+    }
 }
 
 // See ai.h — the vehicle-physics AI/parked input staging. [orig: Entity_UpdateVehiclePhysics

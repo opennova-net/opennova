@@ -471,9 +471,10 @@ func _try_open_armory() -> bool:
 # vehicles (deck best-seat, nearest-seat scan, seat-swap-or-detach — all sim-side).
 # [orig: Entity_ToggleVehicleMount @0x436950 via the useitem release edge @0x49d6dc]
 func _try_toggle_mount() -> bool:
-	if _current_runtime == null:
+	var runtime = _current_runtime()
+	if runtime == null:
 		return false
-	var sim: NovaSimulation = _current_runtime.get_sim()
+	var sim: NovaSimulation = runtime.get_sim()
 	if sim == null:
 		return false
 	return sim.local_player_toggle_mount()

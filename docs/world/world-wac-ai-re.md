@@ -3137,6 +3137,36 @@ target vehicle id (DcbId) in boarding modes (waypoint node index otherwise);
   the walk-to-entry-bone think and the seat-upgrade sweep are the unported
   halves (D-AI-11).
 
+Ported same session (the second wave, after the 00TRa probe forced them out):
+
+- **Redirects reach brains**: `set_ssn_waypoint`/`group_to_waypoint` now run the
+  witnessed per-entity order — mounted non-players auto-detach, the entity route
+  fields update, and `AiSystem::apply_route_order` writes mode 1 + list +
+  nearest-node + the turn-budget seed into the brain
+  [orig: Entity_SetWaypointByTeam @ 0x43cdb4 / Entity_FindNearestTriggerByType
+  @ 0x407ea0]. Before this the redirect actions only touched entity fields and a
+  vehicle's SM never saw its new route.
+- **The speed commands**: BMS ChangeGroup/SingleAI subs 29 COMBATSPEED /
+  30 PATROLSPEED land in `ai_apply_command` as the kSpeedA/kSpeedB writes with
+  the exact scale — km/h x 1000 x (1/225000) x 65536 = x65536/225 (~291.27; the
+  items.def x293 is its integer approximation)
+  [orig: Entity_ApplyCommand @ 0x43ab60 cases 0x1D/0x1E -> AIEvent types 10/11 ->
+  AI_HandleCommand @ 0x465770 cases 0xA/0xB].
+- **Vehicle brains**: promote attaches an AI brain to pool-1 items whose type
+  authors a CONTROL seat (ctrlx/drvrx spec — the drivable class; the stand-in
+  for the def AIData gate, D-AI-11), initialized into state 16 GROUND_FOLLOWWP
+  (the shipped ground .aip `default_state`; the profile parse is unported).
+  Pure-gunner emplacements stay brainless (D-AI-2's slice). Item brains also
+  spawn with the flags100-bit1 ACQUIRE SKIP [orig: the profile+100 & 2 gate
+  @ 0x46775c]: the shipped transport .aip profiles author zero target
+  priorities, and the D-AI-1 feed scans unconditionally where retail's class
+  table rejects — without the skip, 13 per-tick pool scans + LOS raycasts
+  spiraled the 00TRa load. Lifts with the .aip parse (D-AI-11 i). With the SM mover
+  feeding `kOutSpeed` and the AI-driver leg consuming it, a crewed truck now
+  drives its authored route: 00TRa's instructor (command-mounted into ctrlx at
+  spawn via waypoint_id 123-125) drives the ride the moment event 2 redirects
+  group 3.
+
 ### 23.5 The mounted seat carry (the ride)
 
 The body update's mounted leg [orig: Entity_UpdateInfantryPlayerBody, the

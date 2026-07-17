@@ -1437,6 +1437,8 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_entity_debug", "index"), &NovaSimulation::get_entity_debug);
 	ClassDB::bind_method(D_METHOD("debug_set_entity_health", "index", "hp"), &NovaSimulation::debug_set_entity_health);
 	ClassDB::bind_method(D_METHOD("debug_set_entity_position", "index", "mission_pos"), &NovaSimulation::debug_set_entity_position);
+	ClassDB::bind_method(D_METHOD("get_world_entity_debug", "net_id"), &NovaSimulation::get_world_entity_debug);
+	ClassDB::bind_method(D_METHOD("debug_set_world_entity_position", "net_id", "mission_pos"), &NovaSimulation::debug_set_world_entity_position);
 	ClassDB::bind_method(D_METHOD("set_ai_muzzle_world", "net_id", "godot_pos"), &NovaSimulation::set_ai_muzzle_world);
 	ClassDB::bind_method(D_METHOD("get_round_outcome_debug"), &NovaSimulation::get_round_outcome_debug);
 	ClassDB::bind_static_method("NovaSimulation", D_METHOD("ai_state_name", "state"), &NovaSimulation::ai_state_name);
@@ -3034,6 +3036,59 @@ void NovaSimulation::debug_set_entity_position(int p_index, const Vector3 &p_mis
 		ent->position.x = p_mission_pos.x;
 		ent->position.y = p_mission_pos.y;
 		ent->position.z = p_mission_pos.z;
+	}
+}
+
+// World-registry probe seams keyed by SSN — pool-1 vehicles (and anything else
+// without an AI brain) are invisible to the AI-index seams above; vehicle probes
+// need to find and place them. Mission-space coordinates, same convention as
+// debug_set_entity_position.
+Dictionary NovaSimulation::get_world_entity_debug(int p_net_id) const {
+	Dictionary out;
+	if (!world_ || p_net_id <= 0 || p_net_id > 0xFFFF) return out;
+	const opennova::world::EntityHandle h =
+			world_->registry.find_by_net_id(static_cast<uint16_t>(p_net_id));
+	const opennova::world::Entity *ent = world_->registry.get(h);
+	if (!ent) return out;
+	out["net_id"] = static_cast<int>(ent->net_id);
+	out["bms_id"] = ent->bms_id;
+	out["pool"] = h.pool();
+	out["alive"] = ent->alive;
+	out["health"] = ent->health;
+	out["mission_position"] = Vector3(ent->position.x, ent->position.y, ent->position.z);
+	out["position"] = Vector3(ent->position.x, ent->position.z, -ent->position.y);
+	out["yaw"] = static_cast<int>(ent->yaw);
+	out["seat_count"] = static_cast<int>(ent->seats.size());
+	Array seats;
+	for (const opennova::world::Seat &s : ent->seats) {
+		Dictionary sd;
+		sd["type"] = static_cast<int>(s.type);
+		sd["occupied"] = s.occupant.valid();
+		sd["local"] = Vector3(s.seat_local.x, s.seat_local.y, s.seat_local.z);
+		sd["name"] = String(s.source_name.c_str());
+		seats.push_back(sd);
+	}
+	out["seats"] = seats;
+	return out;
+}
+
+void NovaSimulation::debug_set_world_entity_position(int p_net_id,
+                                                     const Vector3 &p_mission_pos) {
+	if (!world_ || p_net_id <= 0 || p_net_id > 0xFFFF) return;
+	const opennova::world::EntityHandle h =
+			world_->registry.find_by_net_id(static_cast<uint16_t>(p_net_id));
+	opennova::world::Entity *ent = world_->registry.get(h);
+	if (!ent) return;
+	ent->position.x = p_mission_pos.x;
+	ent->position.y = p_mission_pos.y;
+	ent->position.z = p_mission_pos.z;
+	// Keep the AI mirror in step when the entity carries a brain (harmless otherwise).
+	if (ai_) {
+		if (AiEntity *ae = ai_->for_handle(h)) {
+			ae->pos[0] = static_cast<int32_t>(p_mission_pos.x * 65536.0f);
+			ae->pos[1] = static_cast<int32_t>(p_mission_pos.y * 65536.0f);
+			ae->pos[2] = static_cast<int32_t>(p_mission_pos.z * 65536.0f);
+		}
 	}
 }
 

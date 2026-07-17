@@ -299,6 +299,53 @@ void test_ai_drive_leg() {
     CHECK(std::abs(r.veh().position.y - 200.0f) < 30.0f); // the turn arc, not a runaway
 }
 
+// The redirect order reaches the BRAIN (mode/list/node + budget) and the BMS speed
+// commands write kSpeedA/kSpeedB at the witnessed x65536/225 scale.
+// [orig: Entity_SetWaypointByTeam @0x43cdb4; Entity_ApplyCommand @0x43ab60 0x1D/0x1E ->
+//  AI_HandleCommand @0x465770 0xA/0xB]
+void test_redirect_and_speed_commands() {
+    Rig r(30.0f);
+    r.veh().group_id = 3; // 00TRa's truck group
+    const int ai_idx = r.sys.attach(r.veh_h);
+    AiEntity &ve = *r.sys.at(ai_idx);
+    ve.pos[0] = 100 << 16;
+    ve.pos[1] = 200 << 16;
+    ve.net_id = 11;
+    r.sys.nav.channels.resize(3);
+    r.sys.nav.channels[2].count = 2;
+    r.sys.nav.channels[2].entries[0] = 0;
+    r.sys.nav.channels[2].entries[1] = 1;
+    r.sys.nav.nodes.resize(2);
+    r.sys.nav.nodes[0] = NavEntry{{1 << 16, 150 << 16, 200 << 16, 10 << 16, 0}};
+    r.sys.nav.nodes[1] = NavEntry{{1 << 16, 500 << 16, 200 << 16, 10 << 16, 0}};
+
+    CHECK(r.w.commands.group_to_waypoint(3, 2) == 1); // RedirectGroupTo(3, list 2)
+    AiBrain &b = ve.brain;
+    CHECK(b.f[AiBrain::kWpType] == 1);
+    CHECK(b.f[AiBrain::kWpChannel] == 2);
+    CHECK(b.f[AiBrain::kWpNode] == 0); // node 0 at x=150 is nearest to x=100
+
+    // PatrolSpeed 40 -> kSpeedB = trunc(40 * 65536/225) = 11650. CombatSpeed -> kSpeedA.
+    CHECK(r.w.commands.apply_group_ai_command(3, 30, 40, 0, 0) == 1);
+    CHECK(b.f[AiBrain::kSpeedB] == 11650);
+    CHECK(r.w.commands.apply_group_ai_command(3, 29, 55, 0, 0) == 1);
+    CHECK(b.f[AiBrain::kSpeedA] == 16019); // trunc(55 * 1000 * 4.4444446e-6 * 65536)
+
+    // A mounted NON-player in the group auto-detaches on redirect [orig: @0x43cdb4].
+    Entity npc;
+    npc.net_id = 900;
+    npc.kind = EntityKind::Organic;
+    npc.item_id = 2072;
+    npc.health = 150;
+    npc.alive = true;
+    npc.group_id = 3;
+    EntityHandle nh = r.w.registry.spawn(0, npc);
+    CHECK(entity_process_vehicle_attach(r.w, nh, r.veh_h, 1));
+    CHECK(r.w.registry.get(nh)->mounted);
+    r.w.commands.group_to_waypoint(3, 2);
+    CHECK(!r.w.registry.get(nh)->mounted);
+}
+
 // spawn_player stamps commandGroup 1 [orig: the deploy leg @0x519fd0] — 00TRa's tour
 // dialogs ("group 1 enters area X") track the player through it.
 void test_player_spawn_group() {
@@ -328,6 +375,7 @@ int main() {
     test_enemy_occupant_blocks_scan();
     test_bms_mount_predicates();
     test_ai_drive_leg();
+    test_redirect_and_speed_commands();
     test_player_spawn_group();
     if (failures == 0) std::printf("vehicle_mount_test: all checks passed\n");
     return failures == 0 ? 0 : 1;

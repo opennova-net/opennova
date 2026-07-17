@@ -168,11 +168,29 @@ bool EntityCommands::add_ssn_hp(uint16_t ssn, int32_t delta) {
     return true;
 }
 
+namespace {
+
+// The per-entity leg of a waypoint REDIRECT [orig: Entity_SetWaypointByTeam @0x43cdb4]:
+// a mounted NON-player auto-detaches [orig: Entity_DetachFromVehicleIfServer @0x4359d0],
+// the entity route fields update, and the brain (when the entity carries one) takes the
+// mode/list/node order + the turn-budget seed.
+void apply_waypoint_order(World &world, Entity &e, int32_t list) {
+    const bool is_player = e.handle.pool() == 0 && e.player_class != 0;
+    if (e.mounted && !is_player) world.commands.dismount(e.net_id);
+    e.waypoint_id = static_cast<uint8_t>(list);
+    e.wp_number = 0;
+    if (world.ai != nullptr) {
+        if (AiEntity *ae = world.ai->for_handle(e.handle))
+            world.ai->apply_route_order(*ae, list, /*node=*/-1);
+    }
+}
+
+} // namespace
+
 bool EntityCommands::set_ssn_waypoint(uint16_t ssn, int32_t wp) {
     Entity *e = world_.registry.get(resolve_ssn(ssn));
     if (!e) return false;
-    e->waypoint_id = static_cast<uint8_t>(wp);
-    e->wp_number = 0;
+    apply_waypoint_order(world_, *e, wp);
     return true;
 }
 
@@ -299,12 +317,13 @@ int EntityCommands::kill_group(int group) {
 }
 
 int EntityCommands::group_to_waypoint(int group, int32_t wp) {
+    // [orig: Entity_SetWaypointByTeam @0x43cdb4 — commandGroup match over pools 0..1]
     std::vector<EntityHandle> members;
     world_.registry.by_group(static_cast<uint8_t>(group), members);
     int n = 0;
     for (EntityHandle h : members) {
         Entity *e = world_.registry.get(h);
-        if (e) { e->waypoint_id = static_cast<uint8_t>(wp); e->wp_number = 0; ++n; }
+        if (e) { apply_waypoint_order(world_, *e, wp); ++n; }
     }
     return n;
 }

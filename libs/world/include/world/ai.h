@@ -698,6 +698,12 @@ public:
     // [orig: Entity_SerializeVehicleState @0x460560 runs per tick for mounted entities.]
     bool pose_if_mounted(AiEntity &e, World &world);
 
+    // The brain half of a waypoint REDIRECT (RedirectGroupTo/RedirectSingleTo): mode 1 +
+    // list + node (nearest of the list when node < 0) + the per-leg turn-budget seed.
+    // [orig: Entity_SetWaypointByTeam @0x43cdb4; nearest = Entity_FindNearestTriggerByType
+    // @0x407ea0]
+    void apply_route_order(AiEntity &e, int32_t list, int32_t node);
+
     // The vehicle-physics input staging for a PlayerControl vehicle without a live PLAYER
     // controller [orig: Entity_UpdateVehiclePhysics @0x48af00 — the parked stamp
     // @0x48c002-0x48c02d and the AI-driver leg @0x48bc12-0x48c034 (2026-07-16 witness)]:
