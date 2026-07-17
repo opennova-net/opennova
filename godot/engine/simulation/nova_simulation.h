@@ -803,6 +803,13 @@ public:
 	bool local_player_indoors() const;
 	int local_player_blink_flags() const;
 
+	// Sound-occlusion distance inflation for the audio host [orig:
+	// Sound_ApplyOcclusionDistance @0x529970 — two LOS rays through terrain +
+	// building solids; occluded sources sound farther]. Positions in Godot
+	// world space; distance in/out 16.16.
+	int64_t sound_occlusion_distance_q16(const Vector3 &listener_pos,
+	                                     const Vector3 &source_pos, int64_t distance_q16);
+
 	// Loadout-zone gates for the host's armory key [orig: input action 218 opens
 	// weapon.mnu WEAPON only while entity Flags & 0x400000 (a type-6 armory volume
 	// contact), vehicle.mnu VEHICLE on Flags & 0x800 (type-11);

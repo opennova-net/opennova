@@ -568,7 +568,32 @@ groundEntity store corrected in the port; world-wac-ai-re §15):
 | `world::CollisionWorld::refresh_blink` (collision.cpp) | `Entity_BuildProximityList` | `0x4b3dc0` | position-only blink refresh (radius 0x8000 vs the building prefix); indoors 0x800000 | decompile | ported |
 | `world::CollisionMatrix` helpers (collision.cpp) | `Math_TransformPointWithTranslation22` / `Math_TransformPointFixedPoint22` / `Math_FixedPointTransformPoint22` / `Matrix_Transpose3x3WithNegateCol3` | `0x412f60` / `0x412e90` / `0x615810` / `0x6136d0` | Q22 row-major 3x4 fixed transforms + rigid inverse | decompile | ported |
 | — | `Entity_FindNearestByRay` | `0x413af0` | projectile-side ray over the global static+dyn tables | decompile | confirm-only (round_sim follow-up) |
-| — | `terrain_sector_compute_lighting` (blink read) | `0x5c7550` | per-sample blink query; INDOOR keyed on hit-slot presence -> interior light group | decompile | confirm-only (REN scope) |
+| — | `terrain_sector_compute_lighting` (blink read) | `0x5c7550` | per-sample blink query; INDOOR keyed on hit-slot presence -> interior light group | decompile | confirm-only (corroborated by the per-light section masks in `Terrain_RenderSectorModels @ 0x5c5d30`) |
+
+Rendering occlusion / blink-box visibility (engine-research 2026-07-16 — the §15
+consumer side; the record is render/render-occlusion-re.md, port pending — all
+rows confirm-only, IDA renames noted in the record's §9):
+
+| reimpl symbol (file) | original | addr | signature / role | evidence | status |
+|---|---|---|---|---|---|
+| — | `load_occlusion_model_data` | `0x5b4a00` | GPM `OVRT`/`OPLN`/`OFAC`/`OOBJ` chunks -> the 60 B portal-face records (model +0xDC/+0xE0) | decompile + tag disasm | confirm-only |
+| — | `Terrain_InitBuildingPortals` (ex sub_5C7480; tail 0x5c5860) | `0x5c7480` | mission-start: register type-2 faces + weld opposite pairs -> type 5 + stamp per-building +0x2CC/2CD/2CE flags | decompile + disasm (tail) | confirm-only |
+| — | `Terrain_RegisterExteriorPortalFaces` (ex "collect_userpoint_effect_slots") | `0x5c5b80` | registers every building's type-2 faces (world pos + OPLN plane; itemDef attrib bit 6 = weldable) | decompile | confirm-only |
+| — | `Terrain_WeldOppositePortalFaces` (ex "find_and_merge_opposite_terrain_decals") | `0x5c5910` | welds coincident opposite faces of different buildings (<=0.8u, dot<=-0.9, coplanar 0.2u) into `g_PortalWeldRecords @ 0x2967250` | decompile | confirm-only |
+| — | `Entity_QueryBlinkBoxesAtPoint` (ex "Entity_FindEntitiesInRadius") | `0x4af350` | camera-side blink query: building prefix walk -> §15 point query -> packed 4-slot hits | decompile | confirm-only |
+| — | `build_sector_visibility_masks` | `0x5c8610` | per-frame `g_BuildingSectionVisMask @ 0x297F250` build (1200 dwords; bit N = COBJ section N renders; bit 0 = exterior) | decompile | confirm-only |
+| — | `render_visibility_portal_traversal` | `0x5c4ae0` | recursive portal traversal (stack args: section, frustum planes, count); window/viewthru wedge banking; depth cap 10 | decompile + disasm (frameless args) | confirm-only |
+| — | `Terrain_TraversePortalsFromSection` (ex "Terrain_RenderEntityAtLodLevel") | `0x5c73d0` | seeds 1<<cameraSection + camera frustum (`g_CameraFrustumPlanes5 @ 0xA7849C` x5) into the traversal | decompile + disasm | confirm-only |
+| — | `Terrain_TraversePortalsFromExterior` (ex sub_5C7330) | `0x5c7330` | outside-in traversal (seed mask 1, section 0); banks viewthru wedges | decompile | confirm-only |
+| — | `Terrain_BuildPortalOccluderPlanes` (ex sub_5C44C0) + `build_clip_planes_from_collision` | `0x5c44c0` / `0x5b34e0` | per-slot camera-silhouette occluder plane sets (`g_PortalOccluder* @ 0x2983D70..80`) | decompile | confirm-only |
+| — | `test_sector_entity_occlusion` ("render_TOC()") | `0x5c4610` | candidate vs occluder wedges (8-corner AABB refinement) + window-frustum requirement when camera indoors + viewthru exceptions | decompile | confirm-only |
+| — | `terrain_occlusion_check_three_rays` | `0x610ed0` | 3 heightfield rays camera->sphere top/sides; nonzero = clear; drives the entity+342 visibility latch ((rand&7)+16 frames), outdoors only | decompile | confirm-only |
+| — | `Terrain_RenderSectorModels` (mask consumption) | `0x5c5d30` | `g_HiddenSectionMask @ 0xB7965C` = ~mask (bits >= itemDef+2193/2194 forced visible); two-pass open buildings; per-light section masks from the light's blink quad | decompile | confirm-only |
+| `GameWorld._apply_blink_frame_gates` + `_update_frame_clear_color` (godot/engine/world/game_world.gd) | frame gates: `render_main_scene` / `terrain_scene_render` / `Render_ProcessMainSceneFrame` / `Terrain_RenderSceneWithReflection` | `0x5c1240` / `0x5d04c0` / `0x5ca0f0` / `0x5c93a0` | blink bit 0x2: terrain+near/far-foliage hidden, sky dome + celestials hidden, frame clears black; 0x8: water hidden | decompile; GUT `game_world_test.gd` | ported (bit 0x4 = D-OCC-1 open; `g_BlinkWaterVisible` straddle/window legs + the collector ray latch + `Bms_AttribFlags & 0x10` ride the section-mask slice) |
+| `mission::bms::Entity.blink_parent/blink_group` (libs/mission) | — (runtime-unconsumed) | `0x40e9f0` (non-reader) | BMS record bytes 84–87 parsed for .mis round-trip; `Entity_SpawnFromBMSRecord` never reads them | decompile (bounded absence) | parse-only |
+| `world::CollisionWorld::sound_occlusion_inflate` (libs/world/src/collision.cpp) | `Sound_ApplyOcclusionDistance` | `0x529970` | compounding two-ray distance inflation: base=min(d/8,10u), ray-1 block doubles+5u, one final add | decompile + disasm (pushes); `collision` ctest sound cases | ported (D-SND-9 residue) |
+| `world::CollisionWorld::sound_los_clear` (collision.cpp) | `Entity_CheckLineOfSightTerrainAndEntities` / `Physics_CheckTerrainLineOfSight` / `raycast_find_collision_entity` + `raycast_against_entity_pool` | `0x53b130` / `0x53b080` / `0x539a70` / `0x538720` | terrain leg (both-indoors skip, no-entity above-ground prechecks) + building-only radiused type-1 clip from the listener's slice | decompile + disasm | ported (D-SND-9 residue) |
+| `terrain::terrain_raycast_los_clear` (libs/terrain_query/src/terrain_raycast.cpp) | `Terrain_RaycastHeightmapHiRes` | `0x60c760` | the LOS heightfield ray: endpoint prechecks, 2.0u short-segment test, 4u-texel point-sample march, height-0 floor; nonzero = clear | decompile; `terrain_raycast` ctest LOS cases | ported |
 
 In-game armory sim seams (engine-research 2026-07-09; re-grilled 2026-07-11 with the
 armory slice — the WEAPON-screen UI host, protocol, and divergences live in

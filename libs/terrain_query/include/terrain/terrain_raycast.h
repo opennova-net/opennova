@@ -132,4 +132,24 @@ bool terrain_raycast_refined(const TerrainRaycastSampler &sampler,
                              const int32_t start[3], const int32_t end[3],
                              int32_t out_hit[3]);
 
+// The LOS variant [orig: Terrain_RaycastHeightmapHiRes @ 0x60c760] — the
+// cheaper line-of-sight ray the sound-occlusion and entity-visibility probes
+// use (a distinct retail function from the grounding raycast @ 0x60e710
+// above). Shape: END-point precheck first (bilinear height above the END z =
+// HIT immediately [orig: @ 0x60c7f8]); segments with both |dx| and |dy| under
+// 2.0u (0x20000) reduce to a START-point bilinear check [orig: @ 0x60c82e];
+// otherwise a POINT-sample march at one 4.0-unit heightmap texel per step —
+// scale = 2^34 / maxDelta, per-axis step (scale * delta + 0x8000) >> 16,
+// budget 0x10000 minus scale per sample [orig: @ 0x60c872-0x60c8fd] — testing
+// pointHeight >= rayZ with NO bilinear confirm and NO refine. Empty samples
+// apply the height-0 floor (hit when the ray z <= 0 [orig: the null-tile loop
+// @ 0x60ca71-0x60ca77]); kOutOfExtent marches on untested (the editor guard,
+// as above). Retail's point sample reads its render tile cache's
+// 0.5-unit-quantized height byte (`sample << 15` [orig: @ 0x60c9c7]); the
+// host sampler returns the unquantized column height — a sub-0.5u sampling
+// difference tracked in docs/render/render-occlusion-re.md.
+// Returns true = CLEAR (retail 1), false = HIT (retail 0).
+bool terrain_raycast_los_clear(const TerrainRaycastSampler &sampler,
+                               const int32_t start[3], const int32_t end[3]);
+
 } // namespace opennova::terrain

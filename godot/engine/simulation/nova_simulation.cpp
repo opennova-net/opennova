@@ -518,6 +518,25 @@ int NovaSimulation::local_player_blink_flags() const {
 	return static_cast<int>(collision_world_.local_player_blink_flags);
 }
 
+int64_t NovaSimulation::sound_occlusion_distance_q16(const Vector3 &listener_pos,
+                                                     const Vector3 &source_pos,
+                                                     int64_t distance_q16) {
+	// [orig: Sound_ApplyOcclusionDistance @ 0x529970] — the audio layer feeds
+	// the AUDIO listener (camera) and the emitter/one-shot position; markers
+	// carry no source entity (the no-entity terrain path). Godot world
+	// (x, up, z) -> mission fixed (x, -z, up) 16.16.
+	if (!world_) return distance_q16;
+	const int32_t lp[3] = {opennova::world::to_fixed(listener_pos.x),
+	                       opennova::world::to_fixed(-listener_pos.z),
+	                       opennova::world::to_fixed(listener_pos.y)};
+	const int32_t sp[3] = {opennova::world::to_fixed(source_pos.x),
+	                       opennova::world::to_fixed(-source_pos.z),
+	                       opennova::world::to_fixed(source_pos.y)};
+	return collision_world_.sound_occlusion_inflate(*world_, world_->cached.local_player,
+	                                                opennova::world::EntityHandle{}, lp, sp,
+	                                                static_cast<int32_t>(distance_q16));
+}
+
 namespace {
 // Mission-space 16.16 triple -> Godot world space: (x, y, z) -> (x, z, -y) units.
 inline Vector3 godot_from_fixed3(const int32_t p[3]) {
@@ -968,6 +987,8 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_collision_debug"), &NovaSimulation::get_collision_debug);
 	ClassDB::bind_method(D_METHOD("local_player_indoors"), &NovaSimulation::local_player_indoors);
 	ClassDB::bind_method(D_METHOD("local_player_blink_flags"), &NovaSimulation::local_player_blink_flags);
+	ClassDB::bind_method(D_METHOD("sound_occlusion_distance_q16", "listener_pos", "source_pos", "distance_q16"),
+	                     &NovaSimulation::sound_occlusion_distance_q16);
 	ClassDB::bind_method(D_METHOD("local_player_in_armory_zone"), &NovaSimulation::local_player_in_armory_zone);
 	ClassDB::bind_method(D_METHOD("local_player_in_vehicle_loadout_zone"), &NovaSimulation::local_player_in_vehicle_loadout_zone);
 	ClassDB::bind_method(D_METHOD("apply_local_player_loadout", "weapon_name", "player_class"),
