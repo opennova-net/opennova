@@ -150,6 +150,14 @@ static func resolve_background(root: NovaResourceRoot, mission_file: String) -> 
 	return {"name": FALLBACK_IMAGE, "custom": false}
 
 
+## Public texture-load seam for hosts/tests; avoids private-state inspection (ADR 0018).
+## [orig: CUIImage_LoadTextureFromFile @ 0x6541ba]
+static func load_background_texture(root: NovaResourceRoot, image_name: String) -> Texture2D:
+	if root == null or image_name.is_empty():
+		return null
+	return root.load_texture(image_name, NovaResourceRoot.LOOKUP_FORCE_LOOSE_FIRST)
+
+
 ## Build the screen for a mission load. `info`:
 ##   mission_file: String — the .bms name driving the sidecar lookup
 ##   in_session: bool — MP session: draw the text overlay [orig: gate @ 0x521ebe]
@@ -161,10 +169,7 @@ func setup(root: NovaResourceRoot, info: Dictionary) -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	var bg := resolve_background(root, String(info.get("mission_file", "")))
 	_has_custom_bg = bool(bg["custom"])
-	_texture = null
-	if root != null:
-		_texture = root.load_texture(
-				String(bg["name"]), NovaResourceRoot.LOOKUP_FORCE_LOOSE_FIRST)
+	_texture = load_background_texture(root, String(bg["name"]))
 	_in_session = bool(info.get("in_session", false))
 	if not _in_session:
 		queue_redraw()
@@ -238,6 +243,17 @@ func prepare_for_blocking_load() -> bool:
 
 func displayed_progress() -> int:
 	return _displayed
+
+
+## Public ADR-0018 read seam for whether the visible session overlay is enabled.
+func has_session_overlay() -> bool:
+	return _in_session
+
+
+## Public ADR-0018 read seam for the visible composed strings, ordered as server
+## title, mission, game-type label, and custom message.
+func session_overlay_lines() -> PackedStringArray:
+	return PackedStringArray([_title, _mission_name, _game_type_text, _custom_text])
 
 
 ## Whether setup resolved and decoded loading art. Hosts and tests should not

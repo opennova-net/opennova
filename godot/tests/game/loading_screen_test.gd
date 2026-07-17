@@ -79,7 +79,7 @@ func test_background_setup_forces_loose_image_over_archive_in_packed_mode() -> v
 	screen.setup(root, {"mission_file": "00TRg.bms"})
 
 	assert_true(screen.has_background())
-	var texture: Texture2D = screen._texture
+	var texture := LoadingScreen.load_background_texture(root, "00trg.pcx")
 	assert_not_null(texture)
 	if texture != null:
 		assert_true(texture.get_image().get_pixel(0, 0).is_equal_approx(Color.BLUE),
@@ -155,9 +155,8 @@ func test_bar_fill_span_matches_the_original_arithmetic() -> void:
 
 func test_sp_setup_loads_image_only() -> void:
 	var screen := _setup_screen({"mission_file": "00TRg.bms"})
-	assert_false(screen._in_session)
-	assert_eq(screen._title, "")
-	assert_eq(screen._mission_name, "")
+	assert_false(screen.has_session_overlay())
+	assert_eq(screen.session_overlay_lines(), PackedStringArray(["", "", "", ""]))
 
 
 func test_mp_setup_carries_the_session_variables() -> void:
@@ -170,11 +169,12 @@ func test_mp_setup_carries_the_session_variables() -> void:
 		"game_type": 0x10010,
 		"custom_text": "Welcome aboard",
 	})
-	assert_true(screen._in_session)
-	assert_eq(screen._title, "DEMOHOST")
-	assert_eq(screen._mission_name, "Trainingsmission")
-	assert_eq(screen._custom_text, "Welcome aboard")
-	assert_ne(screen._game_type_text, "", "LTGT_AAS resolves from the gametext table")
+	assert_true(screen.has_session_overlay())
+	var lines := screen.session_overlay_lines()
+	assert_eq(lines[0], "DEMOHOST")
+	assert_eq(lines[1], "Trainingsmission")
+	assert_ne(lines[2], "", "LTGT_AAS resolves from the gametext table")
+	assert_eq(lines[3], "Welcome aboard")
 	NovaStrings.register_table("gametext", null)
 
 
