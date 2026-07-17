@@ -346,15 +346,19 @@ func test_ground_anchor_bms_is_the_axis_remap() -> void:
 
 class PanmDataPlacer:
 	extends Placer
-	# Injected object data for one graphic, so classification sees PANM without any
-	# resource-root asset (same override-the-seam style as PartAnimModel elsewhere).
+	# Injected object data for one graphic, so PANM classification can be tested
+	# independently of the fixture's separate portal/occlusion classification.
 	var panm_graphic := ""
 	var panm_data: NovaObjectData = null
+	var expose_occlusion := false
 
 	func _load_object_data(graphic: String) -> NovaObjectData:
 		if graphic == panm_graphic:
 			return panm_data
 		return super(graphic)
+
+	func _has_occlusion_records(_item_id: int) -> bool:
+		return expose_occlusion and panm_data != null and panm_data.has_occlusion()
 
 
 const ARMRY_3DI := "res://../fixtures/3dp/armry01/Armry01.3di"
@@ -418,8 +422,9 @@ func test_place_routes_live_panm_graphic_to_a_live_model() -> void:
 
 
 func test_place_keeps_inert_panm_graphic_in_static_batches() -> void:
-	# Armry01 as shipped: PANM entries exist but every control is idle. The
-	# perf-tier batching must keep applying to it.
+	# Armry01 as shipped has idle PANM plus an independent OOBJ portal payload.
+	# The harness suppresses that second classifier here so this test isolates
+	# the rule that inert PANM alone does not defeat static batching.
 	var placer := _panm_placer(false)
 	assert_not_null(placer.panm_data, "fixture data loads")
 	if placer.panm_data == null:
@@ -443,6 +448,29 @@ func test_place_keeps_inert_panm_graphic_in_static_batches() -> void:
 		"inert PANM keeps the static MultiMesh batching")
 	assert_eq(int(stats.get("animated", -1)), 0,
 		"and does not force a live model")
+
+
+func test_occlusion_records_take_precedence_over_inert_panm_batching() -> void:
+	var placer := _panm_placer(false)
+	assert_not_null(placer.panm_data, "fixture data loads")
+	if placer.panm_data == null:
+		return
+	assert_true(placer.panm_data.has_occlusion(),
+		"fixture carries the portal payload that requires per-section visibility")
+	placer.expose_occlusion = true
+	var mission := NovaMissionData.new()
+	assert_eq(mission.create_default(), OK)
+	assert_false(mission.add_entity(
+		NovaMissionData.KIND_ITEM, 105004, Vector3(1, 2, 3), Vector3.ZERO).is_empty())
+	var parent := Node3D.new()
+	add_child_autofree(parent)
+
+	var stats: Dictionary = placer.place(mission, parent)
+
+	assert_eq(int(stats.get("animated", -1)), 1,
+		"portal sections require an individual model even when PANM is inert")
+	assert_eq(int(stats.get("batched", -1)), 0,
+		"the per-instance section mask cannot be represented by a MultiMesh batch")
 
 
 func test_place_single_routes_live_panm_graphic_to_a_live_model() -> void:

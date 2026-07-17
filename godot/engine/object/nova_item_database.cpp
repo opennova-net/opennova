@@ -47,6 +47,7 @@ void NovaItemDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_sound_loops", "id"), &NovaItemDatabase::get_sound_loops);
 	ClassDB::bind_method(D_METHOD("get_particle_effects", "id"), &NovaItemDatabase::get_particle_effects);
 	ClassDB::bind_method(D_METHOD("get_attrib", "id"), &NovaItemDatabase::get_attrib);
+	ClassDB::bind_method(D_METHOD("get_attrib2", "id"), &NovaItemDatabase::get_attrib2);
 	ClassDB::bind_method(D_METHOD("get_item", "id"), &NovaItemDatabase::get_item);
 	ClassDB::bind_method(D_METHOD("get_item_ids"), &NovaItemDatabase::get_item_ids);
 	ClassDB::bind_method(D_METHOD("get_items"), &NovaItemDatabase::get_items);
@@ -93,6 +94,7 @@ NovaItemDatabase::Item NovaItemDatabase::item_from_entry(const ::DefItemDef &ent
 	item.id = entry.id;
 	item.type = entry.type;
 	item.attrib = static_cast<uint32_t>(entry.attrib);
+	item.attrib2 = static_cast<uint32_t>(entry.attrib2);
 	item.display_name = String(entry.display_name);
 	item.graphic = String(entry.graphic);
 	item.anim_def = String(entry.anim_def);
@@ -232,6 +234,11 @@ bool NovaItemDatabase::is_ai_capable(int id) const {
 uint32_t NovaItemDatabase::get_attrib(int id) const {
 	const auto it = items.find(id);
 	return it == items.end() ? 0u : it->second.attrib;
+}
+
+uint32_t NovaItemDatabase::get_attrib2(int id) const {
+	const auto it = items.find(id);
+	return it == items.end() ? 0u : it->second.attrib2;
 }
 
 PackedInt32Array NovaItemDatabase::get_vehicle_physics(int id) const {

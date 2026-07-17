@@ -29,6 +29,7 @@ private:
 		int id = 0;
 		int type = 0;
 		uint32_t attrib = 0; // items.def ItemDefAttrib (+0x54); 0x100000 = AIData (AI class)
+		uint32_t attrib2 = 0; // items.def ItemDefAttrib2 (+0x58); bit 6 = portal-weldable
 		String display_name;
 		String graphic;
 		String anim_def;
@@ -147,6 +148,10 @@ public:
 	// The raw items.def ItemDefAttrib dword (itemDef+0x54); 0 for unknown ids. AS zone traits
 	// read 0x20000 "ChangeTeam" / 0x40000 "SpawnPoint". [net-re §5.61]
 	uint32_t get_attrib(int id) const;
+	// The raw items.def ItemDefAttrib2 dword (itemDef+0x58); 0 for unknown ids. The
+	// render-occlusion weld pass reads bit 6 ("weldable") [orig: the +88 >> 6 read in
+	// Terrain_RegisterExteriorPortalFaces @ 0x5c5cce].
+	uint32_t get_attrib2(int id) const;
 	// The pre-scaled vehicle physics block as [physics, player_speed, acceleration,
 	// deceleration, turn_rate, turn_rate2, unit_type]; empty for unknown ids. Feeds the sim's
 	// world::VehicleTraits table (resolve_item_traits). [orig: ItemDef_ParsePhysicsProperty

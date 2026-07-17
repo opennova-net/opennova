@@ -3,6 +3,7 @@ add_library(opennova_world STATIC
     src/world.cpp
     src/ai.cpp
     src/collision.cpp
+    src/occlusion.cpp
     src/infantry.cpp
     src/infantry_tables.cpp
     src/entity_spawn.cpp

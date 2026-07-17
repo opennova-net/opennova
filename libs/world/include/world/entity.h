@@ -323,6 +323,13 @@ struct Entity {
     // @ 0x4b36f0 from g_BlinkHitSlot0..3 @ 0xB57C74]
     uint32_t blink_hits[4] = {};
 
+    // Render-occlusion three-ray latch countdown (entity+342): while nonzero the
+    // entity renders and the byte counts down per render frame; at 0 the outdoors
+    // three-ray terrain probe re-decides and re-arms it to (rand16 & 7) + 16.
+    // [orig: the latch bytes in the visible-entity collectors @ 0x5c7125-0x5c7162 /
+    // 0x5c6cd9-0x5c6d0d; docs/render/render-occlusion-re.md §3.4]
+    uint8_t occlusion_latch = 0;
+
     // Standing-on carrier (entity+0x28 groundEntity): the entity this one stands ON — a
     // building floor, a vehicle deck — any pool. Retail's platform physics maintains it
     // every tick (Flags |= 0x100000 + groundEntity = platform

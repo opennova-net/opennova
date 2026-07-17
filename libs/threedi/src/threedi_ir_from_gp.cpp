@@ -717,7 +717,7 @@ int threedi_ir_from_gp(const ThreediGpFile *gp, ThreediModelIR *out) {
                 d->connecting_subobject = (int32_t)so->connecting_subobject;
                 memcpy(d->position, so->center, sizeof(float) * 3);
                 d->radius = so->radius;
-                d->unk1 = 0;
+                d->glow_scale = 0.0f;
                 d->num_vertices = so->num_vertices;
                 d->num_planes = so->num_planes;
                 d->face_count = so->num_faces;

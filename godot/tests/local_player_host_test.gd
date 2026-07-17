@@ -497,8 +497,8 @@ class FakeMissionAudio:
 	extends Node
 	var oneshots: Array = []
 
-	func fire_soundset(set_name: String, world_pos: Vector3) -> bool:
-		oneshots.append({"set": set_name, "pos": world_pos})
+	func fire_soundset(set_name: String, world_pos: Vector3, source_bms_id: int = 0) -> bool:
+		oneshots.append({"set": set_name, "pos": world_pos, "source_bms_id": source_bms_id})
 		return true
 
 
@@ -1038,6 +1038,8 @@ func test_action_sound_legs_drain_to_mission_audio() -> void:
 	if audio.oneshots.size() == 1:
 		assert_eq(String(audio.oneshots[0]["set"]), "GS_TEST",
 			"the END leg plays the finished action's soundsetend [orig: ActionDef+12]")
+		assert_eq(int(audio.oneshots[0]["source_bms_id"]), -1,
+			"local action sounds retain the local-player source identity")
 
 	# Begin leg: its soundset plays too.
 	world.weapon_events.append(_weapon_begin_event("GF_RL_TEST"))
@@ -1048,6 +1050,7 @@ func test_action_sound_legs_drain_to_mission_audio() -> void:
 	if audio.oneshots.size() == 2:
 		assert_eq(String(audio.oneshots[1]["set"]), "GF_RL_TEST",
 			"the begin leg plays the started action's soundset [orig: ActionDef+8]")
+		assert_eq(int(audio.oneshots[1]["source_bms_id"]), -1)
 
 
 func test_weapon_event_attachment_discards_backlog_but_keeps_first_live_batch() -> void:

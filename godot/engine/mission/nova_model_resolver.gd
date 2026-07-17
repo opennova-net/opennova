@@ -7,8 +7,9 @@ extends RefCounted
 # the net replay runtime can spawn entities by type without depending on the
 # placer's .bms-record-shaped internals.
 #
-# (Follow-up: fold MissionObjectPlacer's private _load_object_data / _is_animated /
-# _apply_skeletal_anim onto this resolver so the .bms and net paths share one copy.)
+# (Follow-up: fold MissionObjectPlacer's private _load_object_data /
+# _needs_individual_node / _apply_skeletal_anim onto this resolver so the .bms
+# and net paths share one copy.)
 
 const NovaObjectModelScript := preload("res://engine/object/nova_object_model.gd")
 

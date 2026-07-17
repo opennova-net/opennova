@@ -20,7 +20,7 @@ tracked files. Capture files default to `${CMAKE_SOURCE_DIR}/.scratch/…`
 |---|---|---|---|
 | `OPENNOVA_JO_DIR` | ctest `rtxt_jo_install_sweep`, `jo_env_sweep` | retail JO install dir (packed `.pff`) | never (copyright, ~1.5 GB) |
 | `OPENNOVA_MISSION_CORPUS` | ctest `mission_corpus`; GUT `mission_corpus_binding_test.gd` | dir of retail `.bms` missions | never (copyright) |
-| `OPENNOVA_JO_ASSETS` (+ opt `OPENNOVA_PARITY_WEAPON`) | pytest `test_anim_dcc_parity.py`, `test_bad_pos_derivation.py` (corpus legs; its synthetic tests run ungated) | extracted retail assets with `weapon.def` + models | never (copyright) |
+| `OPENNOVA_JO_ASSETS` (+ opt `OPENNOVA_PARITY_WEAPON`) | ctest `occlusion_armry`; pytest `test_anim_dcc_parity.py`, `test_bad_pos_derivation.py` (corpus legs; its synthetic tests run ungated) | extracted retail assets with `weapon.def` + models | never (copyright) |
 | `NW_INGAME_HEXCAP` | ctest `nw_ingame_histogram`, `nw_ingame_pool_records` | focused in-match hexcap dump | possible: policy allows a small *sanitized* `.hexcap` via LFS (user-gated follow-up) |
 | `NW_PROFILE_SPH_DIR` | ctest `nw_serverlog_decode` | dir with `host.sph` + `client.sph` `/profile` recordings | never (retail run output; can embed account identity) |
 | `NW_DVXI5_PCAP` / `NW_DVXI3_PCAP` / `NW_DVXC1_PCAP` | ctest `nw_pool_groundtruth`, `nw_dvxi3_groundtruth`, `nw_dvxc1_groundtruth` | authored probe captures (`.pcapng`) | never (raw-capture policy) |

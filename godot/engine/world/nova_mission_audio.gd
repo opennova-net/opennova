@@ -66,6 +66,7 @@ const REGION_BLEND_H := 5460.0 / 65536.0
 
 var _resource_root  # NovaResourceRoot
 var _item_db  # NovaItemDatabase
+var _simulation: Object = null  # NovaSimulation (occlusion LOS); optional
 var _bank: NovaSoundBank
 var _dbf  # NovaDbfData (mission co-named dialog bank; null if absent)
 var _audio_root: Node3D
@@ -111,6 +112,7 @@ func setup(mission, mission_name: String, container: Node3D) -> Dictionary:
 	var mission_info: Dictionary = mission.get_info()
 
 	_bank = NovaSoundBank.new(_resource_root)
+	_bank.occlusion_provider = _simulation
 	_load_bank(mission_name.get_file().get_basename() + ".LWF")
 	# Expansion bank slots 0/1 ahead of the static banks, engine slot order
 	# [orig: Expansion_LoadAssets @ 0x4a4989 (<exp>L.lwf) / @ 0x4a495e
@@ -180,6 +182,7 @@ func setup(mission, mission_name: String, container: Node3D) -> Dictionary:
 		_markers.append({
 			"node": marker_node,
 			"pos": pos,
+			"source_bms_id": int(entity.get("bms_id", 0)),
 			"slot_sets": slot_sets,
 			# De-sync marker crossfades like the engine's per-entity clock
 			# stagger [orig: @ 0x408158 (poolHandle & 0xF) << 11 Q16 hours].
@@ -243,10 +246,11 @@ func get_bank() -> NovaSoundBank:
 ## @0x528e20). One-shot volume snapshots the listener distance at fire time, and
 ## the set's cull range gates the fire entirely [orig: Sound_Play3DPositional
 ## @ 0x527cb0; cull @ 0x527cd1].
-func fire_soundset(name: String, world_pos: Vector3) -> bool:
+func fire_soundset(name: String, world_pos: Vector3, source_bms_id: int = 0) -> bool:
 	if _bank == null or _audio_root == null:
 		return false
-	return _bank.play_oneshot_3d(_audio_root, world_pos, name, SFX_BUS, _last_camera_pos)
+	return _bank.play_oneshot_3d(
+		_audio_root, world_pos, name, SFX_BUS, _last_camera_pos, source_bms_id)
 
 
 ## Enqueue a mission dialog by its PlayWavList id (param1). Resolution, faithful
@@ -366,14 +370,29 @@ func set_time_of_day_hhmm(hhmm: float) -> void:
 	_time_of_day_hhmm = hhmm
 
 
+## Occlusion provider (the NovaSimulation) — emitter/one-shot distances inflate
+## through the witnessed two-ray LOS so occluded sources sound farther [orig:
+## Sound_ApplyOcclusionDistance @ 0x529970]. Optional: tests and the menu run
+## without a sim and mix unoccluded.
+func set_simulation(sim: Object) -> void:
+	_simulation = sim
+	if _bank != null:
+		_bank.occlusion_provider = sim
+
+
 ## The per-frame ambient emitter mix [orig: SoundEmitter_UpdateAndMixTop8
 ## @ 0x5284a0]: every marker voice computes its witnessed distance volume for
 ## the CURRENT time-of-day slot, the loudest MIX_CHANNELS play, everything else
 ## pauses. Volume = member volume x the region crossfade blend through the
 ## two-radius curve; a voice at or beyond its falloff radius is hard silent
 ## (which is also the cull [orig: @ 0x5285da]). Persistent paused voices stand
-## in for the original's transient re-registered slots, and occlusion is not
-## yet applied — docs/audio/lwf-dbf-sound-re.md (D-SND-6, D-SND-7, D-SND-8).
+## in for the original's transient re-registered slots —
+## docs/audio/lwf-dbf-sound-re.md (D-SND-6, D-SND-8). Occlusion inflates the
+## mixed distance through the sim's two-ray LOS [orig: the
+## Sound_ApplyOcclusionDistance call @ 0x528659, after the range cull]; rays
+## run only for markers whose raw distance already yields audible volume — the
+## original culls before raycasting [orig: @ 0x5285da], and inflation only
+## ever reduces volume, so a raw-silent marker stays silent either way.
 func tick(camera_pos: Vector3) -> void:
 	var start := Time.get_ticks_usec()
 	_last_camera_pos = camera_pos
@@ -397,6 +416,7 @@ func tick(camera_pos: Vector3) -> void:
 			blend = 1.0
 		var vol_byte := crossfade_volume_byte(blend)
 		var dist_q16 := int((m.pos as Vector3).distance_to(camera_pos) * 65536.0)
+		var dist_occluded_q16 := -1  # lazy: at most one two-ray LOS per marker per tick
 		var voices: Dictionary = m.voices
 		for set_name in voices.keys():
 			var players: Array = voices[set_name]
@@ -407,10 +427,20 @@ func tick(camera_pos: Vector3) -> void:
 				var vol := 0
 				if is_active and player.has_meta("layer_params"):
 					var lp: Dictionary = player.get_meta("layer_params")
+					var falloff := int(lp.get("falloff_radius", 0))
+					var min_d := int(lp.get("min_distance", 0))
+					var member_vol := int(lp.get("volume", NovaSoundBank.VOLUME_BYTE_MAX))
+					var clamp_vol := int(lp.get("clamp_volume", NovaSoundBank.VOLUME_BYTE_MAX))
 					vol = NovaSoundBank.emitter_layer_volume(
-						dist_q16,
-						int(lp.get("falloff_radius", 0)), int(lp.get("min_distance", 0)),
-						vol_byte, int(lp.get("volume", 255)), int(lp.get("clamp_volume", 255)))
+						dist_q16, falloff, min_d, vol_byte, member_vol, clamp_vol)
+					if vol > 0 and _simulation != null:
+						if dist_occluded_q16 < 0:
+							dist_occluded_q16 = int(_simulation.sound_occlusion_distance_q16(
+								camera_pos, m.pos, dist_q16,
+								int(m.get("source_bms_id", 0))))
+						if dist_occluded_q16 != dist_q16:
+							vol = NovaSoundBank.emitter_layer_volume(
+								dist_occluded_q16, falloff, min_d, vol_byte, member_vol, clamp_vol)
 				if vol > 0:
 					candidates.append({"player": player, "vol": vol})
 				else:

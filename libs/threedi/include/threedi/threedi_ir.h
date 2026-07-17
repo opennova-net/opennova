@@ -328,7 +328,7 @@ typedef struct ThreediIROcclusionObject {
     int32_t connecting_subobject;
     float position[3];
     float radius;
-    int32_t unk1;
+    float glow_scale;   // [orig: OOBJ disk +20 -> runtime +0x2C window-glow scale]
     int32_t num_vertices;
     int32_t num_planes;
     int32_t face_count;

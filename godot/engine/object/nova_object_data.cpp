@@ -1305,6 +1305,7 @@ void NovaObjectData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_user_point_info", "index"), &NovaObjectData::get_user_point_info);
 	ClassDB::bind_method(D_METHOD("get_ground_anchor", "lod_index"), &NovaObjectData::get_ground_anchor, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("has_collision"), &NovaObjectData::has_collision);
+	ClassDB::bind_method(D_METHOD("has_occlusion"), &NovaObjectData::has_occlusion);
 	ClassDB::bind_method(D_METHOD("get_collision_volumes"), &NovaObjectData::get_collision_volumes);
 	ClassDB::bind_method(D_METHOD("get_part_anim_count", "lod_index"), &NovaObjectData::get_part_anim_count);
 	ClassDB::bind_method(D_METHOD("get_part_animations", "lod_index"), &NovaObjectData::get_part_animations);
@@ -2488,6 +2489,10 @@ int NovaObjectData::get_part_anim_count(int p_lod_index) const {
 
 bool NovaObjectData::has_collision() const {
 	return has_ir && ir.collision != nullptr && ir.collision->volume_count > 0;
+}
+
+bool NovaObjectData::has_occlusion() const {
+	return has_ir && ir.occlusion != nullptr && ir.occlusion->object_count > 0;
 }
 
 Array NovaObjectData::get_collision_volumes() const {

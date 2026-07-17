@@ -1567,10 +1567,12 @@ presence, hit slot -> pool-2 entity (>>20) + section ((>>12)&0x1F) ->
 `Lighting_SetInteriorLightGroup @ 0x5a90e0` `[orig:
 terrain_sector_compute_lighting @ 0x5c7550 — its "0x8000" is the query RADIUS]`.
 Local-player accumulated flags (`g_LocalPlayerBlinkFlags @ 0x24C1934`) are
-consumed by the render collectors (`render_main_scene @ 0x5c1240`,
-`Terrain_CollectVisibleEntities_0 @ 0x5c6f20`, `collect_visible_entities_for_terrain
-@ 0x5c8c60`, `Render_ProcessMainSceneFrame @ 0x5ca0f0`, `terrain_scene_render
-@ 0x5d04c0`) — REN-scope follow-ups. Projectiles refresh blink state per tick
+consumed by the render collectors and frame gates — witnessed 2026-07-16 and
+recorded in [render-occlusion-re.md](../render/render-occlusion-re.md) (the
+consumer-side record: section masks, portal traversal, occluder culling, the
+indoor terrain/sky/water/foliage skips, and the camera-side blink query
+`Entity_QueryBlinkBoxesAtPoint @ 0x4af350` over this section's machinery).
+Projectiles refresh blink state per tick
 (`Projectile_UpdatePhysics @ 0x4e9d70, call @ 0x4e9f21`) and indoor rays skip the
 terrain clamp (the `@ 0x413785` gate).
 

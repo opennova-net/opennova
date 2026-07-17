@@ -16,9 +16,10 @@ extends RefCounted
 #     culling is traded away for that batching (the whole batch shares one AABB),
 #     which is the right call for dense, always-on-screen scenery.
 #   - Animated / skinned models (items.def type == Person, or carrying a skeletal
-#     anim_def) get an individual NovaObjectModel so each animates independently;
-#     MultiMesh cannot carry per-instance skeleton/PANM state. The same applies to
-#     any graphic whose .3di carries live PANM tracks (free-running wave/spin
+#     anim_def) and portal-carrying buildings get an individual NovaObjectModel;
+#     MultiMesh cannot carry per-instance skeleton/PANM state or section masks.
+#     The same rule applies to any graphic whose .3di carries live PANM tracks
+#     (free-running wave/spin
 #     decorations like pump jacks, and SET/register-posed parts): the original
 #     engine re-poses those from the global clock every rendered frame, so they
 #     must stay live models even when items.def calls them plain decorations
@@ -93,6 +94,9 @@ var _anchor_cache: Dictionary = {}
 # graphic -> Array[ConvexPolygonShape3D] collision hulls in model-local space (the
 # editor's pickable bodies; see collision_shapes_for). Computed once per graphic.
 var _collision_shapes_cache: Dictionary = {}
+# item_id -> bool: the item's graphic carries occlusion/portal records (the
+# de-batch predicate; see _has_occlusion_records). Computed once per item.
+var _occlusion_cache: Dictionary = {}
 
 # The global cache epoch (NovaResourceRoot.cache_epoch) the caches above were built
 # under. Any root mount/rescan/clear bumps the epoch; the next cache access then
@@ -122,6 +126,7 @@ func _check_epoch() -> void:
 	_last_batch_env_values = null
 	_anchor_cache.clear()
 	_collision_shapes_cache.clear()
+	_occlusion_cache.clear()
 
 
 # Re-stamp every harvested static-batch material from the live environment.
@@ -252,7 +257,7 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 		var xform := entity_transform(
 			entity.get("position", Vector3.ZERO),
 			entity.get("rotation_deg", Vector3.ZERO))
-		if _is_animated(item_id) or _graphic_needs_live_panm(graphic):
+		if _needs_individual_node(item_id) or _graphic_needs_live_panm(graphic):
 			# Always capture identity (not just edit_mode): the runtime needs it to tag the node so
 			# MissionEntityRegistry can resolve SSN/group/zone host-action targets to this live model.
 			animated.append({
@@ -517,7 +522,7 @@ func place_single(mission: NovaMissionData, container: Node3D, kind: int, index:
 		entity.get("position", Vector3.ZERO),
 		entity.get("rotation_deg", Vector3.ZERO))
 
-	if _is_animated(item_id) or _graphic_needs_live_panm(graphic):
+	if _needs_individual_node(item_id) or _graphic_needs_live_panm(graphic):
 		var data := _load_object_data(graphic)
 		if data == null:
 			delta.unresolved = 1
@@ -733,13 +738,34 @@ func _graphic_for(item_id: int) -> String:
 	return item_db.get_graphic(item_id)
 
 
-func _is_animated(item_id: int) -> bool:
+# An item that cannot ride the pooled MultiMesh batch and needs its own
+# NovaObjectModel: animated items (persons, anim-def carriers), plus
+# portal-carrying buildings — the render-occlusion frame drives per-section
+# (Robj) visibility masks, and a pooled batch has no per-instance section
+# handle. [orig: g_BuildingSectionVisMask consumption,
+# Terrain_RenderSectorModels @ 0x5c5d30; docs/render/render-occlusion-re.md §5]
+func _needs_individual_node(item_id: int) -> bool:
 	if item_db == null:
 		return false
 	var item_type := item_db.get_item_type(item_id)
 	if item_type == NovaItemDatabase.TYPE_PERSON:
 		return true
-	return not item_db.get_anim_def(item_id).is_empty()
+	if not item_db.get_anim_def(item_id).is_empty():
+		return true
+	return _has_occlusion_records(item_id)
+
+
+func _has_occlusion_records(item_id: int) -> bool:
+	if _occlusion_cache.has(item_id):
+		return _occlusion_cache[item_id]
+	var has_occ := false
+	var graphic := _graphic_for(item_id)
+	if not graphic.is_empty():
+		var data := _load_object_data(graphic)
+		if data != null and data.has_method("has_occlusion"):
+			has_occ = data.has_occlusion()
+	_occlusion_cache[item_id] = has_occ
+	return has_occ
 
 
 # A graphic whose model carries a live PANM track must not be frozen into a MultiMesh

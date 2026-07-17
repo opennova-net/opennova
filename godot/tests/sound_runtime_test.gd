@@ -19,6 +19,26 @@ class ResourceRootStub:
 		return files.get(name.to_lower(), PackedByteArray())
 
 
+# Public NovaSoundBank dependency seam: the live NovaSimulation implements this
+# method; the value-only stand-in lets the test pin what the bank does with the
+# returned retail occlusion distance without fabricating collision internals.
+class OcclusionProviderStub:
+	extends RefCounted
+	var distance_q16 := -1
+	var calls := 0
+	var source_bms_ids: Array[int] = []
+
+	func _init(p_distance_q16: int = -1) -> void:
+		distance_q16 = p_distance_q16
+
+	func sound_occlusion_distance_q16(
+			_listener_pos: Vector3, _source_pos: Vector3, raw_distance_q16: int,
+			source_bms_id: int = 0) -> int:
+		calls += 1
+		source_bms_ids.append(source_bms_id)
+		return raw_distance_q16 if distance_q16 < 0 else distance_q16
+
+
 func _profile_with_set(set_name: String, wav: String) -> NovaLwfData:
 	var d := NovaLwfData.new()
 	d.create_empty()
@@ -168,6 +188,57 @@ func test_zero_range_oneshot_only_fires_at_the_exact_source() -> void:
 		"retail's dist <= range gate rejects every nonzero distance when range is zero")
 	assert_true(bank.play_oneshot_3d(parent, Vector3.ZERO, "POINT_ONLY", StringName(), Vector3.ZERO),
 		"equality passes, so a zero-range set can still fire at its exact source")
+
+
+func test_oneshot_occlusion_distance_drives_fire_volume() -> void:
+	# Raw distance is 50u, but the witnessed two-ray result inflates it to 100u.
+	# With a 200u falloff, that is the pinned half-range volume byte 63.
+	var root := ResourceRootStub.new()
+	var samples := PackedByteArray()
+	samples.resize(32)
+	root.files["tone.wav"] = _build_wav(samples, 1, 22050, 16)
+	var profile := _profile_with_set("OCCLUDED", "tone.wav")
+	profile.set_set_field(0, "target_id", 200)
+	profile.set_layer_field(0, 0, "falloff_radius", 200)
+	var provider := OcclusionProviderStub.new(100 << 16)
+	var bank = NovaSoundBankScript.new(root)
+	bank.occlusion_provider = provider
+	bank.add_bank(profile)
+	var parent := Node3D.new()
+	add_child_autofree(parent)
+
+	assert_true(bank.play_oneshot_3d(
+		parent, Vector3(50, 0, 0), "OCCLUDED", StringName(), Vector3.ZERO, 321))
+	assert_eq(provider.calls, 1, "one fire asks for one occluded distance")
+	assert_eq(provider.source_bms_ids, [321], "one-shot occlusion keeps source identity")
+	var voice := parent.get_child(0) as AudioStreamPlayer3D
+	assert_not_null(voice)
+	if voice != null:
+		assert_almost_eq(voice.volume_db, -12.14399, 0.001,
+			"the inflated distance, not raw 50u, feeds fire-time volume")
+
+
+func test_oneshot_occlusion_distance_rechecks_set_cull_range() -> void:
+	# Raw 100u passes the set's 120u cull. Occlusion inflates it to 130u,
+	# so the witnessed post-LOS range recheck rejects the voice.
+	var root := ResourceRootStub.new()
+	var samples := PackedByteArray()
+	samples.resize(32)
+	root.files["tone.wav"] = _build_wav(samples, 1, 22050, 16)
+	var profile := _profile_with_set("OCCLUDED_CULL", "tone.wav")
+	profile.set_set_field(0, "target_id", 120)
+	profile.set_layer_field(0, 0, "falloff_radius", 200)
+	var provider := OcclusionProviderStub.new(130 << 16)
+	var bank = NovaSoundBankScript.new(root)
+	bank.occlusion_provider = provider
+	bank.add_bank(profile)
+	var parent := Node3D.new()
+	add_child_autofree(parent)
+
+	assert_false(bank.play_oneshot_3d(
+		parent, Vector3(100, 0, 0), "OCCLUDED_CULL", StringName(), Vector3.ZERO))
+	assert_eq(provider.calls, 1, "raw-in-range fire reaches the occlusion query")
+	assert_eq(parent.get_child_count(), 0, "inflation beyond set range spawns no voice")
 
 
 func test_crossfade_volume_byte_rounding() -> void:

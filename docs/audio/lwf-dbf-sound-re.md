@@ -338,10 +338,18 @@ The one-shot path (`Sound_Play3DPositional @ 0x527cb0` -> `SoundBank_PlayTrigger
   is unity across ALL 5950 JOX sets (pitch_base 0xFFFF/0x10000, jitter 0 everywhere), so
   the host's member-only pitch is data-exact.
 
-**Occlusion (`Sound_ApplyOcclusionDistance @ 0x529970`).** Two LOS raycasts listener->source
-(z +0x2000 and a -0x8000 offset); each clear ray adds `min(d/8, 10u)` and each blocked ray
-`2x that + 5u` to the effective distance — occluded sources sound farther. Applied in both
-the emitter mix and the positional one-shot path.
+**Occlusion (`Sound_ApplyOcclusionDistance @ 0x529970`; full witness re-pulled 2026-07-16 —
+[render-occlusion-re.md](../render/render-occlusion-re.md) §6).** Two LOS raycasts
+listener->source, target z lifted +0x2000 for both; ray 2 runs with a -0x8000 height offset
+(the whole segment raised 0.5u). The inflation COMPOUNDS through one final add — `base =
+min(d/8, 10u)`; ray 1 blocked -> `base = 2*base + 5u`; then `d += base` (ray 2 clear) or
+`d += 2*base + 5u` (ray 2 blocked). Net: both clear `+base0`, exactly one blocked
+`+2*base0+5u`, both blocked `+4*base0+15u` (the pre-2026-07-16 "each ray adds" reading was a
+simplification). The LOS legs: terrain heightfield ray, skipped as clear when BOTH entities
+are indoors (Flags 0x800000) `@ 0x53b0a0`; then the entity leg over the LISTENER's proximity
+candidate slice where only def-type-5 (building-kind) candidates block (`allowAllTypes = 0`
+pushed at both sound sites `@ 0x52999e/0x5299c3`). Applied in both the emitter mix
+(`@ 0x528659`) and the positional one-shot path (`@ 0x527d95`).
 
 Host port (2026-07-10, `NovaSoundBank` + `NovaMissionAudio`; re-grilled 2026-07-11): the
 witnessed curve, the two-radius model, member-0 selection, the time-of-day
@@ -364,7 +372,8 @@ slots / crossfade), and the `dialog_vs_ambient_probe.gd` bed-vs-dialog gate.
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
 | D-SND-6 | persistent per-marker `AudioStreamPlayer3D`s, paused/volume-driven by `NovaMissionAudio.tick`; a voice re-entering the mix RESUMES its loop position | transient emitter slots re-registered per tick; a drop-out's channel is STOPPED and a re-entrant reopens from the wave start (`AudioChannel_ResetByHandle @ 0x767160` / `AudioChannel_OpenSlotChecked @ 0x767060`) | host architecture: Godot voices are cheap to keep; resume-vs-restart on a looping bed is inaudible. Whether a retail channel loops natively (AUD1 descriptor flag) or restarts per registration is an open follow-up (the DirectSound service layer was not walked). |
-| D-SND-7 | no sound occlusion | two-LOS-ray distance inflation (`Sound_ApplyOcclusionDistance @ 0x529970`) in both the emitter mix and positional one-shots | follow-up: needs listener->marker raycasts through `CollisionWorld` (available since the D-COL port); until then indoor/outdoor beds mix slightly louder than retail through walls. |
+| D-SND-7 | **PORTED 2026-07-16** (reviewed 2026-07-17): `CollisionWorld::sound_occlusion_inflate` (libs/world/collision.cpp) + `terrain_raycast_los_clear` (libs/terrain_query) implement the compounding two-ray form; `NovaSimulation.sound_occlusion_distance_q16` feeds the emitter mix (`NovaMissionAudio.tick`, rays only for markers already audible at the raw distance) and the one-shot cull recheck + volume snapshot (`NovaSoundBank.play_oneshot_3d`). Authored marker ids, remote-fire ids, and the local-player sentinel now preserve source exclusion and the both-indoors terrain bypass; static emitters refresh blink state at this boundary. | compounding two-LOS-ray distance inflation (`Sound_ApplyOcclusionDistance @ 0x529970` — the corrected form above; terrain leg + building-only entity leg with the -0x8000 radius-slot reuse on ray 2) in both the emitter mix and positional one-shots | evidence: `collision` ctest sound-occlusion cases (both-blocked/one-blocked/clear/clamp), `collision` nearest-point bias, `terrain_raycast` LOS cases, and GUT ambient/one-shot provider wiring; residue = D-SND-9. |
+| D-SND-9 | the entity-leg clip applies the raw radius to EVERY plane | flagged planes (BPLN flags byte nonzero) clamp the clip radius at 0 (`@ 0x538bd8-0x538e1b` — only flag-0 planes read 0.5u thin on ray 2) | plane flags aren't plumbed through the collision feed yet; the remaining difference is sub-0.5u in the ray-2 entity clip. The LOS terrain callback now reads the witnessed nearest 0.5u-quantized texel. |
 | D-SND-8 | master fade ramp, underwater vol/pan halving, options SFX volume, and the bearing-byte pan map to host territory (Ambient bus volume, Godot's spatial panner); doppler (emitter/listener velocity feed) unported | `g_SoundMasterFadeQ24 @ 0x85A3E4` (255/256 steady), `g_SoundListenerUnderwater @ 0x33429A8` halving @ 0x75ca7d, `g_SoundVolumeOption @ 0x24D20CC` per channel write, atan2 bearing pan @ 0x5289c0, `calculate_3d_sound_attenuation @ 0x527f60` doppler | host playback/bus routing (not grillable address-by-address); the underwater duck and doppler are candidates once an underwater/vehicle pass needs them. |
 
 **IDB changes (2026-07-10 session):** renamed `Entity_SpawnBoneEffect -> Entity_UpdateEnvSoundEmitter @ 0x4a8080`,
@@ -417,7 +426,8 @@ semantics, and the global bank-slot order are all engine-witnessed and implement
   `^ 0xFFFF` inverse and the 64-bit `>> 32`). The re-grill fixed four port forms (Q16
   proximity subtraction, rounded crossfade byte, open-low region cuts, one-shot
   no-falloff/set-cull) and removed the unwitnessed `sound_profile` fallback; divergences
-  D-SND-6 (host voice lifecycle), D-SND-7 (occlusion unported), D-SND-8 (host-mapped
+  D-SND-6 (host voice lifecycle), D-SND-7 (ported occlusion; D-SND-9 plane-flag residue),
+  D-SND-8 (host-mapped
   globals/pan/doppler — now explicitly including the wave channel's
   `(voiceVolume * 0xD2 + 0x80) >> 8` option fold and the dead-in-retail
   `g_SoundEmitterMixScale`).

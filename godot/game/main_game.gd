@@ -238,6 +238,7 @@ func toggle_debug_overlay() -> void:
 		_debug_overlay.body_in_first_person_toggled.connect(_on_body_in_first_person_toggled)
 		_debug_overlay.particles_hidden_toggled.connect(_on_particles_hidden_toggled)
 		_debug_overlay.particle_boxes_toggled.connect(_on_particle_boxes_toggled)
+		_debug_overlay.occlusion_debug_toggled.connect(_on_occlusion_debug_toggled)
 		_debug_overlay.set_effect_world_source(_current_effect_world)
 	_debug_overlay.toggle()
 
@@ -371,6 +372,11 @@ func _on_particles_hidden_toggled(hidden: bool) -> void:
 func _on_particle_boxes_toggled(enabled: bool) -> void:
 	if _world != null:
 		_world.set_particle_debug(enabled)
+
+
+func _on_occlusion_debug_toggled(enabled: bool) -> void:
+	if _world != null:
+		_world.set_occlusion_debug(enabled)
 
 
 # Whether the folder picker may be summoned right now: only from the menu front-end

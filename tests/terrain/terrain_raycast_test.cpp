@@ -69,6 +69,38 @@ static TerrainRaycastSampler uniform_sampler(UniformField &f) {
     return s;
 }
 
+// A ridge field for the LOS march: height 6u over x in [16u, 32u), else 0 —
+// terrain that rises BETWEEN endpoints, invisible to the endpoint prechecks.
+struct RidgeField {
+    int point_calls = 0;
+    int bilinear_calls = 0;
+};
+
+static TerrainRaycastSample ridge_sample(int32_t x) {
+    TerrainRaycastSample s;
+    s.kind = TerrainRaycastSample::kHeight;
+    s.height_1616 = (x >= 16 * 0x10000 && x < 32 * 0x10000) ? 6 * 0x10000 : 0;
+    return s;
+}
+
+static TerrainRaycastSample ridge_point(void *ctx, int32_t x, int32_t) {
+    ++static_cast<RidgeField *>(ctx)->point_calls;
+    return ridge_sample(x);
+}
+
+static TerrainRaycastSample ridge_bilinear(void *ctx, int32_t x, int32_t) {
+    ++static_cast<RidgeField *>(ctx)->bilinear_calls;
+    return ridge_sample(x);
+}
+
+static TerrainRaycastSampler ridge_sampler(RidgeField &f) {
+    TerrainRaycastSampler s;
+    s.point = &ridge_point;
+    s.bilinear = &ridge_bilinear;
+    s.ctx = &f;
+    return s;
+}
+
 // Reference step normalization, written independently of the implementation:
 // inv = floor(2^32 / max_delta) (unsigned 64-bit divide), per-axis step =
 // (inv * delta + 0x8000) >> 16 on the signed 64-bit product
@@ -440,6 +472,67 @@ int main() {
         const int32_t err = refined2[2] - kPlane;
         check(err <= 65 && err >= -65, "(g) x!=0 refined z converges to the plane");
         check(fr2.bilinear_calls > fm2.bilinear_calls, "(g) x!=0 refine sampled");
+    }
+
+    // --- terrain_raycast_los_clear [orig: Terrain_RaycastHeightmapHiRes @ 0x60c760] ---
+    {
+        // (h) END under the bilinear surface -> immediate HIT, no march.
+        // [orig: @ 0x60c7f8]
+        UniformField f;
+        f.height = 4 * U;
+        TerrainRaycastSampler s = uniform_sampler(f);
+        const int32_t start[3] = { 0, 0, 8 * U };
+        const int32_t end[3] = { 64 * U, 0, 2 * U };
+        check(!terrain_raycast_los_clear(s, start, end), "(h) end under surface hits");
+        check(f.point_calls == 0, "(h) no march ran");
+    }
+    {
+        // (i) Short segment (both axes under 2.0u): the START point decides.
+        // [orig: @ 0x60c82e-0x60c86f]
+        UniformField f;
+        f.height = 4 * U;
+        TerrainRaycastSampler s = uniform_sampler(f);
+        const int32_t above_a[3] = { 0, 0, 8 * U };
+        const int32_t above_b[3] = { U, U, 8 * U };
+        check(terrain_raycast_los_clear(s, above_a, above_b), "(i) short both-above clear");
+        check(f.point_calls == 0, "(i) short path never point-samples");
+        const int32_t below_a[3] = { 0, 0, 2 * U };
+        check(!terrain_raycast_los_clear(s, below_a, above_b), "(i) short start-under hits");
+    }
+    {
+        // (j) The march sees terrain that rises BETWEEN clear endpoints: a
+        // level 2u ray across the 6u ridge hits; an 8u ray clears. The march
+        // uses POINT samples only [orig: @ 0x60c9c7 — no bilinear confirm].
+        RidgeField f;
+        TerrainRaycastSampler s = ridge_sampler(f);
+        const int32_t lo_a[3] = { 0, 0, 2 * U };
+        const int32_t lo_b[3] = { 64 * U, 0, 2 * U };
+        const int bilinear_before = 0;
+        check(!terrain_raycast_los_clear(s, lo_a, lo_b), "(j) ridge blocks the low ray");
+        check(f.point_calls > 0, "(j) the march point-sampled");
+        check(f.bilinear_calls - bilinear_before == 1, "(j) bilinear only at the END precheck");
+        RidgeField f2;
+        TerrainRaycastSampler s2 = ridge_sampler(f2);
+        const int32_t hi_a[3] = { 0, 0, 8 * U };
+        const int32_t hi_b[3] = { 64 * U, 0, 8 * U };
+        check(terrain_raycast_los_clear(s2, hi_a, hi_b), "(j) high ray clears the ridge");
+    }
+    {
+        // (k) The witnessed asymmetry: the long-march path never prechecks the
+        // START — a start under the kEmpty height-0 floor hits at the first
+        // sample [orig: the null-tile loop @ 0x60ca71-0x60ca77], while the END
+        // precheck resolves kEmpty as the height-0 plane.
+        UniformField f;
+        f.kind = TerrainRaycastSample::kEmpty;
+        TerrainRaycastSampler s = uniform_sampler(f);
+        const int32_t start[3] = { 0, 0, -U };
+        const int32_t end[3] = { 64 * U, 0, 8 * U };
+        check(!terrain_raycast_los_clear(s, start, end), "(k) start under the empty floor hits");
+        UniformField f2;
+        f2.kind = TerrainRaycastSample::kEmpty;
+        TerrainRaycastSampler s2 = uniform_sampler(f2);
+        const int32_t start2[3] = { 0, 0, U };
+        check(terrain_raycast_los_clear(s2, start2, end), "(k) above the empty floor clears");
     }
 
     if (g_fail) {

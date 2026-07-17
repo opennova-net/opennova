@@ -832,3 +832,10 @@ then-existing text. Later evidence passes have extended the particle catalog thr
 - [mission/mis-format-re.md](mission/mis-format-re.md) → **D-MIS-1..5** (the
   writer-subset gaps + the full `dfx2med.exe` grill as a `NEEDS-RE` row;
   D-MIS-4/-5 minted-and-FIXED at the 2026-07-07 Nile parity pass).
+- [render/render-occlusion-re.md](render/render-occlusion-re.md) → **D-OCC-1..8**
+  (the blink-box visibility consumer witness, 2026-07-16 — open witness details,
+  not port divergences: the record's own §8 catalog; the section-mask/portal
+  engine port mints its D-rows when it lands. The slice's ported halves: sound
+  occlusion closed **D-SND-7** and minted **D-SND-9** in the audio record's
+  catalog; the indoor frame gates ride `GameWorld` with their deferred override
+  legs pointed at the record).

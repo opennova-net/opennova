@@ -92,6 +92,12 @@ struct CollisionModel {
     std::vector<CollisionSection> sections;
     std::vector<CollisionVolume> volumes;
     std::vector<CollisionPlane> planes;
+    // Model-level AABB (union of the section AABBs, mission axes 16.16) — the
+    // runtime collision-header bounds the render occlusion reads. [orig: the
+    // collision block +24..+44 min/max fields, consumed by render_TOC's corner
+    // refinement @ 0x5c4920, the water-straddle checks @ 0x5c8922, and
+    // Entity_ComputeBoundingSphere @ 0x5c69a0]
+    int32_t min[3] = {}, max[3] = {};
     bool valid() const { return !sections.empty(); }
 
     // Derive section AABB/bound-sphere from its volumes (the loader precomputes
@@ -130,11 +136,12 @@ CollisionMatrix collision_matrix_from_heading(int32_t heading_bam, const int32_t
 
 // The terrain leg of the LOS segment query, TRUE = the segment hits terrain
 // (blocked). The ported heightmap raycast over the runtime height field; shared
-// by CollisionWorld::raycast_clear and the collision-less AiSystem fallback.
-// [orig: Terrain_RaycastHeightmapHiRes @ 0x60c760 called with a null out-hit from
-// Physics_RaycastTerrainAndSectors @ 0x539910 — boolean-equivalent to the ported
-// 0x60e710 sibling (terrain_raycast_refined); the sibling's internals delta is a
-// tracked terrain-re open item.]
+// by CollisionWorld::raycast_clear, the sound-occlusion LOS, and the
+// collision-less AiSystem fallback.
+// [orig: Terrain_RaycastHeightmapHiRes @ 0x60c760, faithfully ported as
+// terrain_raycast_los_clear (the occlusion slice closed the sibling-internals
+// open item): endpoint prechecks + the 4u-texel point-sample march + the
+// height-0 floor; nonzero = clear.]
 bool los_terrain_blocked(const terrain::TerrainHeightField &field, const int32_t a[3],
                          const int32_t b[3]);
 
@@ -290,6 +297,13 @@ public:
     // [orig: Entity_BuildProximityList @ 0x4b3dc0]
     void refresh_blink(World &world, Entity &ent);
 
+    // Point blink query at an arbitrary position (the camera-side analog of
+    // refresh_blink): walk the building prefix with per-axis + euclid broad
+    // phase at radius + 0x8000, run the point query (one point, radius 0x8000),
+    // return the packed hit set in `accum`. Clears `accum` first.
+    // [orig: Entity_QueryBlinkBoxesAtPoint @ 0x4af350]
+    void query_blink_boxes_at_point(World &world, const int32_t pos[3], BlinkAccum &accum);
+
     // Ground-column probe through terrain + the entity's candidate models.
     // Builds the ray {x+dx, y+dy, z+z_up} down z_drop, clamps to the terrain
     // column, clips against candidate solids; returns the resolved ground Z and
@@ -312,6 +326,34 @@ public:
     // don't exist in our world yet (organics are pool 0, unwalked, like retail).
     bool raycast_clear(World &world, const int32_t a[3], const int32_t b[3],
                        EntityHandle exclude_a, EntityHandle exclude_b);
+
+    // Sound-occlusion distance inflation [orig: Sound_ApplyOcclusionDistance
+    // @ 0x529970]: base = min(d/8, 10u); two LOS rays listener -> source
+    // (source z lifted +0x2000 for both; ray 2's segment raised 0.5u); a
+    // blocked ray 1 compounds base = 2*base + 5u; the single final add is
+    // base (ray 2 clear) or 2*base + 5u (ray 2 blocked). LOS per ray =
+    // terrain leg [orig: Physics_CheckTerrainLineOfSight @ 0x53b080 —
+    // skipped as clear when both entities are indoors; either-entity-null
+    // paths precheck both endpoints above the bilinear surface, an
+    // under-surface endpoint reading as clear] then entity leg [orig:
+    // Entity_CheckLineOfSightTerrainAndEntities @ 0x53b130 ->
+    // raycast_find_collision_entity @ 0x539a70 with allowAllTypes = 0 —
+    // only building-kind candidates from the LISTENER's slice block, via the
+    // type-1 solid clip]. `source` may be invalid when the host has no emitter
+    // identity; identified ambient/fire sources preserve exclusion and the
+    // both-indoors terrain bypass. listener_pos is the AUDIO listener [orig:
+    // listener_pos @ 0x24D6630], not the entity position.
+    // Returns the inflated effective distance (16.16). Ray 2's -0x8000
+    // height offset doubles as the entity-leg clip radius (the witnessed
+    // arg-slot reuse): its planes read 0.5u thinner, which is what lets the
+    // second ray clear walls the first grazes — ported; the per-plane
+    // flag-byte branch (flagged planes clamp the radius at 0) is the D-SND-9
+    // residue (docs/audio/lwf-dbf-sound-re.md).
+    int32_t sound_occlusion_inflate(World &world, EntityHandle listener,
+                                    EntityHandle source,
+                                    const int32_t listener_pos[3],
+                                    const int32_t source_pos[3],
+                                    int32_t distance_q16);
 
     // The movement resolver: candidate contact forces + damage/flag dispatch +
     // repulsion + the ground-settle tail. Returns the foot clearance (feet Z -
@@ -360,6 +402,18 @@ public:
     int32_t static_count() const { return static_count_; }
     int32_t static_building_count() const { return static_building_count_; }
     int32_t candidate_count(EntityHandle h) const;
+
+    // Static prox-table slot view (quantized u16 coords/radius like the retail
+    // tables) — the render-occlusion engine walks the building prefix through
+    // this. [orig: g_StaticProx{X,Y,Z,Radius,Entity} @ 0xB55558/0xB54BF8/
+    // 0xB54298/0xB55EB8/0xB52FD8]
+    struct StaticSlotView {
+        uint16_t x = 0, y = 0, z = 0, radius = 0;
+        EntityHandle h;
+    };
+    StaticSlotView static_slot(int32_t i) const;
+    // The collision model attached to a live entity (nullptr when none).
+    const CollisionModel *model_for(EntityHandle h) const;
 
     // Read-only world-space geometry snapshot for a host collision debug view.
     // Each instance's volumes are transformed through the SAME target_view /
@@ -411,6 +465,12 @@ private:
     const CollisionTargetView *target_view(World &world, EntityHandle h,
                                            CollisionTargetView &scratch,
                                            std::vector<CollisionMatrix> &mat_scratch) const;
+
+    // One sound-occlusion LOS ray (terrain + building legs); true = clear.
+    // [orig: Entity_CheckLineOfSightTerrainAndEntities @ 0x53b130]
+    bool sound_los_clear(World &world, EntityHandle listener, EntityHandle source,
+                         const int32_t start[3], const int32_t end[3],
+                         int32_t height_offset);
 
     std::vector<CollisionModel> models_;
     std::unordered_map<uint16_t, Instance> instances_; // key: EntityHandle.packed

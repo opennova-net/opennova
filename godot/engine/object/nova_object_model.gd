@@ -39,6 +39,9 @@ var _material_cache: Dictionary = {}
 var _alpha_materials: Array[ShaderMaterial] = []
 var _material_defs: Dictionary = {}
 var _robj_nodes: Dictionary = {}
+# The applied per-section render mask (-1 = everything visible); see
+# set_section_visibility_mask.
+var _section_visibility_mask: int = -1
 var _surface_material_indices: PackedInt32Array = PackedInt32Array()
 var _surface_materials: Array[ShaderMaterial] = []
 var _anim_frames_by_mat: Dictionary = {}
@@ -125,6 +128,24 @@ func get_model_bounds() -> AABB:
 
 func get_render_part_nodes() -> Dictionary:
 	return _robj_nodes
+
+
+# Per-section render mask: bit N visible = render part (COBJ section) N draws.
+# The render-occlusion frame drives this on portal-carrying buildings — bit 0 is
+# the exterior, interior sections occupy the low part indices, and the sim has
+# already merged the forced-visible def bits. -1 restores everything.
+# [orig: g_HiddenSectionMask @ 0xB7965C consumption in Terrain_RenderSectorModels
+# @ 0x5c5d30 — the per-draw hidden mask is ~mask; the two-pass open-building
+# draw order and the per-light section scoping are renderer-specific legs the
+# Godot depth buffer / light model replace (D-OCC-13)]
+func set_section_visibility_mask(mask: int) -> void:
+	if _section_visibility_mask == mask:
+		return
+	_section_visibility_mask = mask
+	for robj_index in _robj_nodes:
+		var node: Node3D = _robj_nodes[robj_index]
+		if node != null:
+			node.visible = mask == -1 or (mask >> int(robj_index)) & 1 == 1
 
 
 func get_surface_material_indices() -> PackedInt32Array:
@@ -807,6 +828,9 @@ func _get_or_create_robj_node(robj_index: int) -> Node3D:
 		return _robj_nodes[robj_index]
 	var node := Node3D.new()
 	node.name = "Robj_%d" % robj_index
+	# Rebuilds honor the applied section mask (see set_section_visibility_mask).
+	if _section_visibility_mask != -1:
+		node.visible = (_section_visibility_mask >> robj_index) & 1 == 1
 	add_child(node)
 	_robj_nodes[robj_index] = node
 	return node

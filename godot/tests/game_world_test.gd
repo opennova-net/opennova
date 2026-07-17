@@ -74,7 +74,7 @@ class ImpactRuntimeStub:
 class ImpactAudioStub:
 	extends NovaMissionAudio
 	var fires: Array = []
-	func fire_soundset(set_name: String, world_pos: Vector3) -> bool:
+	func fire_soundset(set_name: String, world_pos: Vector3, _source_bms_id: int = 0) -> bool:
 		fires.append({'name': set_name, 'position': world_pos})
 		return true
 
@@ -1481,6 +1481,227 @@ func _make_item_fx_world() -> ItemFxGameWorldHarness:
 	terrain.name = "NovaTerrain"
 	world.add_child(terrain)
 	return world
+
+
+class BlinkSimStub:
+	var blink_flags := 0
+	func local_player_blink_flags() -> int:
+		return blink_flags
+
+
+class BlinkRuntimeStub:
+	extends Node
+	var sim := BlinkSimStub.new()
+	func is_playing() -> bool:
+		return true
+	func tick() -> bool:
+		return true
+	func get_sim():
+		return sim
+
+
+func test_blink_frame_gates_toggle_render_passes() -> void:
+	# The blink letter gates (docs/render/render-occlusion-re.md §4): indoors
+	# (accum bit 0x2) hides the terrain render — near detail + far foliage ride
+	# the terrain node — and the sky dome + celestials; the water letter (bit
+	# 0x8) hides the water passes; leaving the boxes restores everything
+	# [orig: render_main_scene @ 0x5c1353 (PolyTrn skip), the skybox skip
+	# @ 0x5ca84f, the water skips @ 0x5c93cb].
+	var world := _make_world()
+	var sky := Node3D.new()
+	sky.name = "NovaSky"
+	world.add_child(sky)
+	var water := Node3D.new()
+	water.name = "NovaWater"
+	world.add_child(water)
+	add_child_autofree(world)
+	var runtime := BlinkRuntimeStub.new()
+	add_child_autofree(runtime)
+	_install_runtime(world, runtime)
+
+	runtime.sim.blink_flags = 0x2
+	world.tick(Vector3.ZERO)
+	assert_false(world.get_node("NovaTerrain").visible, "indoors hides the terrain render")
+	assert_false(sky.visible, "indoors skips the skybox pass")
+	assert_true(water.visible, "the indoors bit alone leaves water on")
+
+	runtime.sim.blink_flags = 0x2 | 0x8
+	world.tick(Vector3.ZERO)
+	assert_false(water.visible, "the water letter suppresses the water passes")
+
+	runtime.sim.blink_flags = 0
+	world.tick(Vector3.ZERO)
+	assert_true(world.get_node("NovaTerrain").visible, "outdoors restores the terrain")
+	assert_true(sky.visible, "outdoors restores the sky")
+	assert_true(water.visible, "outdoors restores the water")
+
+	# An unload while indoors must not leach into the next mission.
+	runtime.sim.blink_flags = 0x2
+	world.tick(Vector3.ZERO)
+	assert_false(sky.visible, "back indoors before the unload")
+	world.unload()
+	assert_true(world.get_node("NovaTerrain").visible, "unload restores the terrain gate")
+	assert_true(sky.visible, "unload restores the sky gate")
+
+
+class OcclusionSimStub:
+	var blink_flags := 0
+	var building_vis := PackedInt64Array()
+	var culled := PackedInt32Array()
+	var water_visible := true
+	var frame_calls := 0
+	func local_player_blink_flags() -> int:
+		return blink_flags
+	func run_occlusion_frame(_camera: Transform3D, _fov_y: float, _aspect: float,
+			_near: float, _fog: float, _water_z: float, _force_indoors: bool) -> void:
+		frame_calls += 1
+	func get_building_visibility() -> PackedInt64Array:
+		return building_vis
+	func get_render_culled_bms_ids() -> PackedInt32Array:
+		return culled
+	func occlusion_water_visible() -> bool:
+		return water_visible
+
+
+class OcclusionRegistryStub:
+	var nodes := {}
+	func resolve_single(bms_id: int) -> Node:
+		return nodes.get(bms_id)
+
+
+class OcclusionRuntimeStub:
+	extends Node
+	var sim := OcclusionSimStub.new()
+	var registry := OcclusionRegistryStub.new()
+	# Present-pass stand-in: a node the "sim" hides during the runtime tick,
+	# AFTER GameWorld's pre-tick occlusion restore — the real present ordering.
+	var hide_on_tick: Node3D = null
+	func is_playing() -> bool:
+		return true
+	func tick() -> bool:
+		if hide_on_tick != null:
+			hide_on_tick.visible = false
+		return true
+	func get_sim():
+		return sim
+	func get_registry():
+		return registry
+
+
+class MaskedBuildingStub:
+	extends Node3D
+	var applied_mask := -1
+	func set_section_visibility_mask(mask: int) -> void:
+		applied_mask = mask
+
+
+func test_occlusion_frame_drives_masks_gates_and_water_override() -> void:
+	# The section-mask/portal frame (docs/render/render-occlusion-re.md §3/§5):
+	# building batch visibility + per-section masks land on the de-batched
+	# building nodes, the entity render gates hide/restore collected entities,
+	# and the g_BlinkWaterVisible override keeps water on while the authored
+	# letter suppresses it [orig: Terrain_RenderSectorModels @ 0x5c5d30, the
+	# collector gates @ 0x5c7022-0x5c708a, the water override @ 0x5c93cb].
+	var world := _make_world()
+	var water := Node3D.new()
+	water.name = "NovaWater"
+	world.add_child(water)
+	add_child_autofree(world)
+	var runtime := OcclusionRuntimeStub.new()
+	add_child_autofree(runtime)
+	var building := MaskedBuildingStub.new()
+	world.add_child(building)
+	var npc := Node3D.new()
+	world.add_child(npc)
+	runtime.registry.nodes[42] = building
+	runtime.registry.nodes[7] = npc
+	runtime.sim.building_vis = PackedInt64Array([42, (1 << 32) | 0x5])
+	runtime.sim.culled = PackedInt32Array([7])
+	_install_runtime(world, runtime)
+
+	world.tick(Vector3.ZERO)
+	assert_gt(runtime.sim.frame_calls, 0, "the occlusion frame runs each tick")
+	assert_true(building.visible, "a batched building stays visible")
+	assert_eq(building.applied_mask, 0x5, "the section mask lands on the node")
+	assert_false(npc.visible, "the render gate hides the culled entity")
+
+	runtime.sim.culled = PackedInt32Array()
+	world.tick(Vector3.ZERO)
+	assert_true(npc.visible, "an un-culled entity is restored next frame")
+
+	runtime.sim.building_vis = PackedInt64Array([42, 0x0])
+	world.tick(Vector3.ZERO)
+	assert_false(building.visible, "a TOC-culled building is hidden whole")
+	assert_eq(building.applied_mask, 0, "its mask carries the zeroed sections")
+
+	# Water: the authored letter suppresses (bit 0x8), the frame override
+	# restores while a straddle/window latch keeps g_BlinkWaterVisible set.
+	runtime.sim.blink_flags = 0x8
+	runtime.sim.water_visible = false
+	world.tick(Vector3.ZERO)
+	assert_false(water.visible, "letter suppression with no override hides water")
+	runtime.sim.water_visible = true
+	world.tick(Vector3.ZERO)
+	assert_true(water.visible, "the g_BlinkWaterVisible override keeps water on")
+
+	# Unload restores the driven nodes for the next mission.
+	runtime.sim.building_vis = PackedInt64Array([42, 0x0])
+	runtime.sim.culled = PackedInt32Array([7])
+	world.tick(Vector3.ZERO)
+	assert_false(building.visible)
+	assert_false(npc.visible)
+	world.unload()
+	assert_true(building.visible, "unload restores building visibility")
+	assert_eq(building.applied_mask, -1, "unload resets the section mask")
+	assert_true(npc.visible, "unload restores gated entities")
+
+
+func test_occlusion_never_resurrects_sim_hidden_nodes() -> void:
+	# The visibility-write ordering contract: occlusion's restore runs BEFORE
+	# the runtime tick (the present pass), so a node the sim hides during the
+	# tick stays hidden even if occlusion culled it earlier and now releases
+	# it — occlusion only ever HIDES on top of the present pass's base state.
+	var world := _make_world()
+	add_child_autofree(world)
+	var runtime := OcclusionRuntimeStub.new()
+	add_child_autofree(runtime)
+	var npc := Node3D.new()
+	world.add_child(npc)
+	runtime.registry.nodes[7] = npc
+	runtime.sim.culled = PackedInt32Array([7])
+	_install_runtime(world, runtime)
+
+	world.tick(Vector3.ZERO)
+	assert_false(npc.visible, "occlusion culls the visible npc")
+
+	# The sim now hides the npc (corpse despawn / WAC hide) while occlusion
+	# releases it: the present-analog hide happens after the restore.
+	runtime.hide_on_tick = npc
+	runtime.sim.culled = PackedInt32Array()
+	world.tick(Vector3.ZERO)
+	assert_false(npc.visible, "the sim's hide is not overridden by the occlusion restore")
+
+	# The sim shows it again (stops hiding): the release becomes visible.
+	runtime.hide_on_tick = null
+	npc.visible = true
+	world.tick(Vector3.ZERO)
+	assert_true(npc.visible, "an un-culled, un-hidden npc stays visible")
+
+
+func test_occlusion_debug_view_builds_and_frees() -> void:
+	# The F3 overlay's "Show portal faces" toggle: GameWorld builds/frees the
+	# OcclusionDebugView child (the collision-view contract). Without a sim the
+	# built view clears instead of erroring.
+	var world := _make_world()
+	add_child_autofree(world)
+	world.set_occlusion_debug(true)
+	var view := world.get_node_or_null(NodePath("OcclusionDebug"))
+	assert_not_null(view, "enabling builds the occlusion debug child")
+	assert_true(world.is_occlusion_debug())
+	view.refresh_now()  # no sim resolved: clears, no error
+	world.set_occlusion_debug(false)
+	assert_false(world.is_occlusion_debug())
+	assert_true(view.is_queued_for_deletion(), "disabling frees the view")
 
 
 func _make_world() -> GameWorld:

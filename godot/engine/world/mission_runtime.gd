@@ -237,6 +237,13 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	# docs/world/world-wac-ai-re.md §15; D-INF-3 burn-down]
 	if options.get("item_db") != null and options.get("placer") != null:
 		_sim.resolve_collision_instances(options["item_db"], options["placer"])
+		# Mission-start portal init over the occlusion models just attached:
+		# register the exterior window faces, weld coincident opposite pairs of
+		# adjacent buildings into cross-building links, stamp the per-building
+		# flag bytes. [orig: Terrain_InitBuildingPortals @ 0x5c7480 from
+		# Game_StartMission @ 0x525e11]
+		if _sim.has_method("occlusion_init_mission"):
+			_sim.occlusion_init_mission()
 	# Armory table (weapon.def) onto the sim world — the 0x5A ammo resolve + 0x2F filter source
 	# and the uplink equipped-weapon gate (D-NET-141/143). Missing root/file leaves the table
 	# empty; the loadout reply then degrades to the tracked request-echo fallback.
@@ -472,6 +479,12 @@ func request_player_stance(stance: int) -> bool:
 
 func get_sim() -> NovaSimulation:
 	return _sim
+
+
+## The placed-node registry (bms_id/kind/group -> live node). The render-occlusion
+## frame resolves building masks and entity render gates through it.
+func get_registry():
+	return _index
 
 
 ## Register a render-side consumer for models materialized from the replicated

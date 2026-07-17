@@ -31,12 +31,14 @@ const NetEventView := preload("res://engine/world/net_event_view.gd")
 const SkeletonDebugView := preload("res://engine/debug/skeleton_debug_view.gd")
 const UserPointDebugView := preload("res://engine/debug/user_point_debug_view.gd")
 const CollisionDebugView := preload("res://engine/debug/collision_debug_view.gd")
+const OcclusionDebugView := preload("res://engine/debug/occlusion_debug_view.gd")
 const ParticleDebugView := preload("res://engine/debug/particle_debug_view.gd")
 const NET_CONTAINER_NAME := "NetObjects"
 const SKELETON_DEBUG_NAME := "SkeletonDebug"
 const USER_POINT_DEBUG_NAME := "UserPointDebug"
 const COLLISION_DEBUG_NAME := "CollisionDebug"
 const PARTICLE_DEBUG_NAME := "ParticleDebug"
+const OCCLUSION_DEBUG_NAME := "OcclusionDebug"
 const TICK_DT := 1.0 / 62.5  # mirrors MissionRuntime.TICK_DT; default for tick()'s delta param
 # [orig: ItemDef_GetBoneMaskByName @ 0x49ea40 scans the first 16 points.]
 const ITEM_EFFECT_USER_POINT_SCAN_LIMIT := 16
@@ -98,6 +100,22 @@ var _local_player_weapon_tick_consumer := Callable()
 # moves or the camera crosses the water plane.
 var _clear_env_generation: int = -1
 var _clear_above_water := true
+# The local player's applied blink letter gates (render-occlusion-re.md §4):
+# accum bit 0x2 hides the terrain render (near detail + far foliage ride the
+# terrain node) and the sky dome + celestials; bit 0x8 hides the water passes.
+var _blink_indoors := false
+var _blink_water_suppressed := false
+# --- Render-occlusion frame state (the section-mask/portal slice) ---
+# Nodes the entity render gates hid last frame (restored before re-applying).
+var _occlusion_culled_nodes: Array = []
+# bms_id -> building node THIS system set invisible (batch-culled); restored
+# before each present pass so the sim's own hidden drive is never overridden.
+var _occlusion_hidden_buildings: Dictionary = {}
+# bms_id -> building node the frame has driven (reset on unload).
+var _occlusion_masked_nodes: Dictionary = {}
+# The mission attribute that forces the indoors accum bit every frame.
+# [orig: Bms_AttribFlags & 0x10 @ 0x5ca1c8-0x5ca1cd]
+var _mission_forces_indoors := false
 var _idle_frame_clear_color := Color.BLACK
 var _net_client     # NovaNetClient: the in-match wire client (replay or live)
 var _net_view       # NetWorldView: spawns + drives models from the decoded world
@@ -117,6 +135,7 @@ var _skeleton_debug := false
 var _user_point_debug := false
 # Debug: draw the collision volumes + player capsule (F3 overlay's "Show collision"). Off by default.
 var _collision_debug := false
+var _occlusion_debug := false
 # Debug: hide the scattered foliage (F3 overlay's "Hide foliage"). Off by default.
 var _foliage_hidden := false
 # Debug: hide every particle effect (F3 overlay's "Hide particles" — the retail
@@ -398,6 +417,7 @@ func _on_net_mission(mission_name: String) -> void:
 		push_warning("net session: failed to parse %s: %s" % [mission_name, mission.get_last_error()])
 		return
 	_loaded_mission = mission
+	_mission_forces_indoors = (int(mission.get_info().get("attrib_flags", 0)) & 0x10) != 0
 	_load_mission_tile_info(mission_name, _resource_root)
 	var env_name := mission.get_environment_ref() + ".env"
 	if _resource_root.has_file(env_name) and _load_environment(env_name):
@@ -452,6 +472,9 @@ func _load_mission_internal(mission: NovaMissionData, bms_name: String, resource
 	load_progress.emit(26)
 
 	_loaded_mission = mission
+	# The mission attribute that forces the indoors accum bit every frame.
+	# [orig: Bms_AttribFlags & 0x10 @ 0x5ca1c8]
+	_mission_forces_indoors = (int(mission.get_info().get("attrib_flags", 0)) & 0x10) != 0
 	timeline.span("objects")
 	_place_mission_objects(mission, timeline)
 	timeline.end_span()
@@ -582,13 +605,16 @@ func unload() -> void:
 	_item_fx_control_instances.clear()
 	# The user-point view retains its toggle and re-arms on the next successful load.
 	_remove_user_point_debug_view()
-	# Skeleton/collision overlays are also freed for a clean teardown.
+	# Skeleton/collision/occlusion overlays are also freed for a clean teardown.
 	var skel_debug := get_node_or_null(NodePath(SKELETON_DEBUG_NAME))
 	if skel_debug != null:
 		skel_debug.queue_free()
 	var col_debug := get_node_or_null(NodePath(COLLISION_DEBUG_NAME))
 	if col_debug != null:
 		col_debug.queue_free()
+	var occ_debug := get_node_or_null(NodePath(OCCLUSION_DEBUG_NAME))
+	if occ_debug != null:
+		occ_debug.queue_free()
 	# Net session teardown (no-ops for a normal mission).
 	if _net_event_view != null:
 		_net_event_view.queue_free()
@@ -613,6 +639,11 @@ func unload() -> void:
 	# Tear down the game music context [orig: AudioVM_StopMusicContext @ 0x671e00].
 	# The game shell re-opens menu music on its return to the front end.
 	NovaMusicService.stop_context()
+	# Blink frame gates reset with the mission [orig: the letter-bit clear
+	# @ 0x525c45 at mission start] — an unload while indoors must not leave the
+	# next mission's terrain/sky/water hidden.
+	_reset_blink_frame_gates()
+	_reset_occlusion_frame()
 	if _env != null and _env.environment_data != null:
 		_env.environment_data.clear_mission_overrides()
 	_loaded_mission = null
@@ -812,6 +843,14 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 		_perf_foliage_us = Time.get_ticks_usec() - foliage_start
 	var runtime_start := Time.get_ticks_usec()
 	var runtime_ticks := 0
+	# Undo LAST frame's occlusion visibility writes BEFORE the present pass, so
+	# present's hidden drive (corpse despawn, WAC hides) is the base state this
+	# frame's occlusion re-culls from — occlusion only ever HIDES on top of
+	# present, it never force-shows a node the sim wants hidden. Safe while
+	# paused too: the culled/hidden sets only ever contain nodes occlusion
+	# itself hid while they were visible.
+	if _loaded:
+		_restore_occlusion_overrides()
 	# Gate on the runtime transport so MissionRuntime._playing is THE play flag
 	# in both hosts: the debug overlay's Pause/Step work in the game too, not
 	# just the editor preview. _start_runtime calls play(), so normal missions
@@ -834,6 +873,15 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 	# simulation ticks [orig: Environment_SetTodAdvanceRate @ 0x57d170].
 	if _loaded and runtime_ticks > 0 and _env != null:
 		_env.advance_mission_clock(runtime_ticks)
+	# Blink flags only change on sim ticks; re-apply the frame gates then.
+	if _loaded and runtime_ticks > 0:
+		_apply_blink_frame_gates()
+	# The render-occlusion frame is camera-driven: it runs every render frame
+	# (retail collects visible entities per scene render, not per sim tick).
+	# [orig: Terrain_CollectVisibleEntities @ 0x5c9160 from
+	# Terrain_RenderSceneWithReflection @ 0x5c94f0]
+	if _loaded:
+		_apply_occlusion_frame(camera_xform)
 	var audio_start := Time.get_ticks_usec()
 	if _loaded and _mission_audio != null:
 		# Ambient soundloop regions read that same clock [orig:
@@ -1286,6 +1334,28 @@ func _refresh_collision_debug() -> void:
 	view.setup(self)  # duck-typed get_sim(), re-resolved per frame
 
 
+# --- Occlusion debug view (F3 overlay's "Show portal faces") -----------------
+# Build / free a child OcclusionDebugView drawing the render-occlusion portal
+# faces (type-colored outlines + section labels) over the world — the
+# collision-view contract: the view re-resolves the sim through this GameWorld
+# every frame, so mission reloads never leave it stale.
+
+func set_occlusion_debug(enabled: bool) -> void:
+	_occlusion_debug = enabled
+	var existing := get_node_or_null(NodePath(OCCLUSION_DEBUG_NAME))
+	if existing != null:
+		existing.queue_free()
+	if not enabled:
+		return
+	var view := OcclusionDebugView.new()
+	view.name = OCCLUSION_DEBUG_NAME
+	add_child(view)
+	view.setup(self)  # duck-typed get_sim(), re-resolved per frame
+
+func is_occlusion_debug() -> bool:
+	return _occlusion_debug
+
+
 # --- Hide foliage (F3 overlay's "Hide foliage") ------------------------------
 # The dispatcher renders the scattered vegetation through child MultiMeshInstance3D slots,
 # so hiding the dispatcher node hides all foliage at once -- without touching the placement
@@ -1549,6 +1619,10 @@ func _start_mission_audio(mission: NovaMissionData, bms_name: String) -> void:
 			int(mission_info.get("start_time", 0)),
 			int(mission_info.get("minutes_per_day", NovaEnvironment.DEFAULT_MINUTES_PER_DAY)))
 	_mission_audio = NovaMissionAudio.new(_resource_root, item_db)
+	# Sound occlusion runs LOS through the sim's collision world + terrain
+	# [orig: Sound_ApplyOcclusionDistance @ 0x529970]; PIE/menu hosts without a
+	# sim mix unoccluded.
+	_mission_audio.set_simulation(get_sim())
 	var stats := _mission_audio.setup(mission, bms_name, self)
 	if _env != null and _env.get("time_of_day") != null:
 		_mission_audio.set_time_of_day_hhmm(float(_env.get("time_of_day")))
@@ -2102,6 +2176,175 @@ func _music_var_pump() -> void:
 	NovaMusicService.set_var(NovaMusicService.VAR_TEAM, local_player_team())
 
 
+# --- Blink frame gates (docs/render/render-occlusion-re.md §4) -----------------
+# The local player's accumulated blink letters gate whole render passes. The
+# letters are authored PER BOX (init 0x3E; letters clear bits), so windowed
+# buildings simply don't carry the indoors letter and keep the outside world
+# rendering — no portal special-casing at the gate level. The per-section
+# interior visibility masks (the portal traversal) are the next occlusion slice.
+
+func _apply_blink_frame_gates() -> void:
+	# Duck-typed like the silhouette-anchor pull above: harness runtimes supply
+	# value-only sims without weakening get_sim()'s NovaSimulation contract.
+	if _runtime == null or not _runtime.has_method("get_sim"):
+		return
+	var sim = _runtime.get_sim()
+	if sim == null or not sim.has_method("local_player_blink_flags"):
+		return
+	# The mission force-indoors attribute ORs the indoors letter into the frame
+	# view for BOTH consumers, matching run_occlusion_frame's camera input
+	# [orig: Bms_AttribFlags & 0x10 @ 0x5ca1c8 -> accum |= 2].
+	var flags := int(sim.local_player_blink_flags()) | (0x2 if _mission_forces_indoors else 0)
+	# Accum bit 0x2 (indoors): the terrain render is skipped entirely — the
+	# near-detail and far-foliage tiers are terrain children here, matching
+	# retail where the detail cells ride the skipped terrain traversal and the
+	# far patches carry their own bit-2 gate — and the skybox pass (dome +
+	# celestials) is skipped [orig: render_main_scene @ 0x5c1353 (PolyTrn
+	# skip), terrain_scene_render @ 0x5d0570, Terrain_RenderSkyboxPass skip
+	# @ 0x5ca84f, Foliage_RenderFarPatchesPass skips @ 0x5c95bf/0x5c9665].
+	var indoors := (flags & 0x2) != 0
+	if indoors != _blink_indoors:
+		_blink_indoors = indoors
+		if _terrain != null:
+			_terrain.visible = not indoors
+		var sky := get_node_or_null("NovaSky")
+		if sky != null:
+			sky.visible = not indoors
+		var celestial := get_node_or_null("NovaCelestial")
+		if celestial != null:
+			celestial.visible = not indoors
+	# Accum bit 0x8 (the authored water letter): both water passes skipped.
+	# Letter bits only accumulate while inside a box, so the outdoors leg of
+	# retail's override is implicit; the remaining g_BlinkWaterVisible legs
+	# (a camera building straddling the water plane, the window latch) ride
+	# the section-mask slice [orig: Terrain_RenderSceneWithReflection
+	# @ 0x5c93cb / @ 0x5c95d2-0x5c95ea].
+	var water_off := (flags & 0x8) != 0
+	if water_off != _blink_water_suppressed:
+		_blink_water_suppressed = water_off
+		if _water != null:
+			_water.visible = not water_off
+
+
+# --- The render-occlusion frame (docs/render/render-occlusion-re.md §3/§5) -----
+# Per render frame: run the sim's occlusion pipeline (camera blink query ->
+# portal traversal -> section masks + TOC occluder culling + the entity render
+# gates), then drive the de-batched building nodes' per-section masks and the
+# gated entities' visibility. Runs after the present pass (inside tick_realtime)
+# so present's base visibility is re-asserted first each frame.
+func _apply_occlusion_frame(camera_xform: Transform3D) -> void:
+	if _runtime == null or not _runtime.has_method("get_sim"):
+		return
+	var sim = _runtime.get_sim()
+	if sim == null or not sim.has_method("run_occlusion_frame"):
+		return
+	var registry = _runtime.get_registry() if _runtime.has_method("get_registry") else null
+	if registry == null:
+		return
+	var fov_y := 70.0
+	var near := 0.05
+	var aspect := 16.0 / 9.0
+	if is_inside_tree():
+		var cam := get_viewport().get_camera_3d()
+		if cam != null:
+			fov_y = cam.fov
+			near = cam.near
+		var vs := get_viewport().get_visible_rect().size
+		if vs.y > 0.0:
+			aspect = vs.x / vs.y
+	var fog := 1000.0
+	if _env != null and _env.has_method("get_fog_distance"):
+		fog = float(_env.get_fog_distance())
+	var water_z := -100000.0
+	if _water != null:
+		var wh = _water.get("water_height")
+		if wh != null:
+			water_z = float(wh)
+	sim.run_occlusion_frame(camera_xform, fov_y, aspect, near, fog, water_z,
+			_mission_forces_indoors)
+
+	# Building batch visibility + per-section masks (bit N = render part N,
+	# forced-visible def bits already merged by the sim). Hide-only: a building
+	# occlusion hid is restored by _restore_occlusion_overrides before the next
+	# present pass, so a sim/host hide is never force-shown from here.
+	# [orig: Terrain_RenderSectorModels @ 0x5c5d30]
+	var vis: PackedInt64Array = sim.get_building_visibility()
+	for i in range(0, vis.size(), 2):
+		var bms_id := int(vis[i])
+		var node: Node = registry.resolve_single(bms_id)
+		if node == null or not (node is Node3D):
+			continue
+		var packed := int(vis[i + 1])
+		var batch_visible := ((packed >> 32) & 1) == 1
+		if not batch_visible and (node as Node3D).visible:
+			(node as Node3D).visible = false
+			_occlusion_hidden_buildings[bms_id] = node
+		if node.has_method("set_section_visibility_mask"):
+			node.set_section_visibility_mask(packed & 0xFFFFFFFF)
+		_occlusion_masked_nodes[bms_id] = node
+
+	# Entity render gates (the blink-hits gate + the outdoors three-ray latch):
+	# hide this frame's culled set (last frame's was restored pre-present).
+	# [orig: the collector gates @ 0x5c7022-0x5c708a / §3.4]
+	var culled: PackedInt32Array = sim.get_render_culled_bms_ids()
+	for id in culled:
+		var node: Node = registry.resolve_single(int(id))
+		if node is Node3D and (node as Node3D).visible:
+			(node as Node3D).visible = false
+			_occlusion_culled_nodes.append(node)
+
+	# The g_BlinkWaterVisible override legs the slice-1 gate deferred: with the
+	# authored water letter suppressing (accum bit 0x8), the water still renders
+	# when the frame latched the exterior or a camera building straddles the
+	# water plane. [orig: @ 0x5c93cb / @ 0x5c95d2 + g_BlinkWaterVisible
+	# @ 0x29ACE40]
+	if _water != null and sim.has_method("occlusion_water_visible"):
+		_water.visible = not _blink_water_suppressed or bool(sim.occlusion_water_visible())
+
+
+# Undo the previous occlusion frame's visibility writes: last frame's gated
+# entities and batch-hidden buildings become visible again, leaving the present
+# pass to assert the sim's own hidden state right after.
+func _restore_occlusion_overrides() -> void:
+	for n in _occlusion_culled_nodes:
+		if is_instance_valid(n):
+			(n as Node3D).visible = true
+	_occlusion_culled_nodes.clear()
+	for bms_id in _occlusion_hidden_buildings:
+		var node = _occlusion_hidden_buildings[bms_id]
+		if is_instance_valid(node):
+			(node as Node3D).visible = true
+	_occlusion_hidden_buildings.clear()
+
+
+func _reset_occlusion_frame() -> void:
+	_restore_occlusion_overrides()
+	for bms_id in _occlusion_masked_nodes:
+		var node = _occlusion_masked_nodes[bms_id]
+		if is_instance_valid(node):
+			(node as Node3D).visible = true
+			if node.has_method("set_section_visibility_mask"):
+				node.set_section_visibility_mask(-1)
+	_occlusion_masked_nodes.clear()
+	_mission_forces_indoors = false
+
+
+func _reset_blink_frame_gates() -> void:
+	if _blink_indoors:
+		if _terrain != null:
+			_terrain.visible = true
+		var sky := get_node_or_null("NovaSky")
+		if sky != null:
+			sky.visible = true
+		var celestial := get_node_or_null("NovaCelestial")
+		if celestial != null:
+			celestial.visible = true
+	if _blink_water_suppressed and _water != null:
+		_water.visible = true
+	_blink_indoors = false
+	_blink_water_suppressed = false
+
+
 # --- Frame clear color (env divergence #21, closed) ----------------------------
 
 func _process(_delta: float) -> void:
@@ -2133,6 +2376,14 @@ func _update_frame_clear_color() -> void:
 	if _clear_color == null or _clear_color.environment == null or _env == null:
 		return
 	if not _env.has_method("get_frame_clear_color"):
+		return
+	# Indoors the frame clears BLACK, not skyfog [orig: render_main_scene
+	# @ 0x5c1597 — the Env_SkyfogBlock clear runs only when the blink indoors
+	# bit is clear; the sentinel generation forces a recompute on exit].
+	if _blink_indoors:
+		if _clear_env_generation != -2:
+			_clear_env_generation = -2
+			_clear_color.environment.background_color = Color.BLACK
 		return
 	var above := true
 	var cam := get_viewport().get_camera_3d() if is_inside_tree() else null

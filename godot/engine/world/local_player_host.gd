@@ -508,7 +508,7 @@ func _fire_action_effects(event: PlayerWeaponEvent) -> void:
 	if not event.action_soundset.is_empty() and _world.has_method("get_mission_audio"):
 		var audio = _world.get_mission_audio()
 		if audio != null:
-			audio.fire_soundset(event.action_soundset, event.world_position)
+			audio.fire_soundset(event.action_soundset, event.world_position, -1)
 	if event.action_particle.is_empty() or not _world.has_method("get_effect_world"):
 		return
 	if event.action_started != WEAPON_ACTION_FIRE:
@@ -660,7 +660,7 @@ func _fire_action_end_sound(event: PlayerWeaponEvent) -> void:
 		return
 	var audio = _world.get_mission_audio()
 	if audio != null:
-		audio.fire_soundset(event.action_end_soundset, event.world_position)
+		audio.fire_soundset(event.action_end_soundset, event.world_position, -1)
 
 
 # Start an FSM clip on every viewmodel part (arms + gun share the animadm) - a replay

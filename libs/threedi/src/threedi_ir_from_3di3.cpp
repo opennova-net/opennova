@@ -863,7 +863,7 @@ static int convert_occlusion(const Threedi3di3 *model, ThreediModelIR *ir) {
             doj->connecting_subobject = (int32_t)so->connecting_subobject;
             memcpy(doj->position, so->position, sizeof(float) * 3);
             doj->radius = so->radius;
-            doj->unk1 = so->unk1;
+            doj->glow_scale = so->glow_scale;
             doj->num_vertices = so->num_vertices;
             doj->num_planes = so->num_planes;
             doj->face_count = so->face_count;

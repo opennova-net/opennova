@@ -18,6 +18,10 @@ extends RefCounted
 ## set+72] (every JOX set carries one; the field rename is a tracked
 ## follow-up). See docs/audio/lwf-dbf-sound-re.md.
 
+# The engine volume byte ceiling (member/clamp volumes, emitter fire volume)
+# [orig: e.g. the full-volume emitter fire path passes 255 @ 0x528e20].
+const VOLUME_BYTE_MAX := 255
+
 # Mirrors NovaLwfData / opennova::audio::SelectionMode selection-mode constants.
 const SELECTION_FIRST := 0
 const SELECTION_RANDOM := 1
@@ -25,6 +29,11 @@ const SELECTION_SEQUENTIAL := 2
 const SELECTION_RANDOM_SEQ := 3
 
 var _resource_root  # NovaResourceRoot
+# Occlusion provider (the NovaSimulation, or null): one-shot fire distances
+# inflate through the witnessed two-ray LOS so occluded sources fire quieter /
+# cull farther [orig: Sound_ApplyOcclusionDistance @ 0x529970, applied in
+# Sound_Play3DPositional @ 0x527d95]. Null (tests/menu) fires unoccluded.
+var occlusion_provider: Object = null
 var _banks: Array = []  # Array[NovaLwfData]
 # name(lower) -> Array[{bank:int, set:int}]
 var _index: Dictionary = {}
@@ -114,7 +123,8 @@ func spawn_ambient(parent: Node3D, world_pos: Vector3, name: String, bus: String
 ## @ 0x527cb0 -> SoundBank_PlayTriggerEntries @ 0x75ccd0 compute vol/pan at
 ## play, no per-frame update]; pass Vector3.INF to play distance-flat (menu /
 ## tests). Auto-frees when finished. Returns true if anything played.
-func play_oneshot_3d(parent: Node3D, world_pos: Vector3, name: String, bus: StringName, listener_pos: Vector3 = Vector3.INF) -> bool:
+func play_oneshot_3d(parent: Node3D, world_pos: Vector3, name: String, bus: StringName,
+		listener_pos: Vector3 = Vector3.INF, source_bms_id: int = 0) -> bool:
 	var loc := _find_set(name)
 	if loc.is_empty():
 		return false
@@ -129,11 +139,19 @@ func play_oneshot_3d(parent: Node3D, world_pos: Vector3, name: String, bus: Stri
 		# in-memory set+72) the one-shot does not fire at all — axis checks,
 		# then euclidean, all <= range<<16 (equality passes); the euclidean
 		# test subsumes the axis ones [orig: Sound_Play3DPositional
-		# @ 0x527cd1-0x527d83]. Retail also inflates the distance by occlusion
-		# before the last recheck — unported (D-SND-7).
-		var cull_u := int(set_d.get("target_id", 0))
-		if dist_q16 > maxi(cull_u, 0) << 16:
+		# @ 0x527cd1-0x527d83].
+		var cull_q16 := maxi(int(set_d.get("target_id", 0)), 0) << 16
+		if dist_q16 > cull_q16:
 			return false
+		# Occlusion inflates the fire distance between the euclidean cull and
+		# the recheck, and the INFLATED distance feeds the once-at-fire volume
+		# snapshot [orig: the Sound_ApplyOcclusionDistance call @ 0x527d95 and
+		# the <= range recheck @ 0x527da1].
+		if occlusion_provider != null:
+			dist_q16 = int(occlusion_provider.sound_occlusion_distance_q16(
+				listener_pos, world_pos, dist_q16, source_bms_id))
+			if dist_q16 > cull_q16:
+				return false
 	var played := false
 	for li in layers.size():
 		var layer_d: Dictionary = layers[li]

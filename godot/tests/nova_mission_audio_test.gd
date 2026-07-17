@@ -10,10 +10,26 @@ const NovaMissionAudioScript = preload("res://engine/world/nova_mission_audio.gd
 const SILENT_DB := -80.0
 
 
-func _marker(holder: Node3D, pos: Vector3, slot_sets: PackedStringArray, players_by_set: Dictionary, stagger := 0.0) -> Dictionary:
+# Public NovaMissionAudio dependency seam implemented by NovaSimulation.
+class OcclusionProviderStub:
+	extends RefCounted
+	var calls := 0
+	var source_bms_ids: Array[int] = []
+
+	func sound_occlusion_distance_q16(
+			_listener_pos: Vector3, _source_pos: Vector3, raw_distance_q16: int,
+			source_bms_id: int = 0) -> int:
+		calls += 1
+		source_bms_ids.append(source_bms_id)
+		return raw_distance_q16
+
+
+func _marker(holder: Node3D, pos: Vector3, slot_sets: PackedStringArray,
+		players_by_set: Dictionary, stagger := 0.0, source_bms_id := 0) -> Dictionary:
 	return {
 		"node": holder,
 		"pos": pos,
+		"source_bms_id": source_bms_id,
 		"slot_sets": slot_sets,
 		"stagger_h": stagger,
 		"voices": players_by_set,
@@ -63,6 +79,34 @@ func test_beyond_falloff_radius_is_hard_silent() -> void:
 	audio.set_markers([_marker(holder, Vector3(150, 0, 0), ["amb", "amb", "amb", "amb"], {"amb": [p]})])
 	audio.tick(Vector3.ZERO)
 	assert_eq(p.volume_db, SILENT_DB, "a voice at d >= falloff_radius is silent [orig: 0x75ca31]")
+
+
+func test_ambient_queries_occlusion_once_per_raw_audible_marker() -> void:
+	# Two active layers on one audible marker share one two-ray result. A second
+	# active marker is already silent by raw falloff and must not spend a query.
+	var audio = NovaMissionAudioScript.new(null, null)
+	var provider := OcclusionProviderStub.new()
+	audio.set_simulation(provider)
+	var holder := Node3D.new()
+	add_child_autofree(holder)
+	var near_a := _voice(holder, 100)
+	var near_b := _voice(holder, 100)
+	var far := _voice(holder, 100)
+	audio.set_markers([
+		_marker(holder, Vector3(10, 0, 0), ["amb", "amb", "amb", "amb"],
+			{"amb": [near_a, near_b]}, 0.0, 123),
+		_marker(holder, Vector3(150, 0, 0), ["amb", "amb", "amb", "amb"],
+			{"amb": [far]}, 0.0, 456),
+	])
+
+	audio.tick(Vector3.ZERO)
+
+	assert_eq(provider.calls, 1,
+		"only the raw-audible marker queries once despite carrying two voices")
+	assert_eq(provider.source_bms_ids, [123], "the audible marker keeps its source identity")
+	assert_gt(near_a.volume_db, SILENT_DB)
+	assert_gt(near_b.volume_db, SILENT_DB)
+	assert_eq(far.volume_db, SILENT_DB, "raw-silent marker remains outside the mix")
 
 
 func test_time_of_day_slot_selects_the_active_set() -> void:
@@ -182,11 +226,14 @@ end
 	assert_eq(item_db.load_from_resource_root(root, "items.def"), OK)
 	var mission := NovaMissionData.new()
 	mission.create_default()
-	mission.add_entity(NovaMissionData.KIND_BUILDING, 100001, Vector3(10, 0, 0), Vector3.ZERO)
+	var env_building := mission.add_entity(
+		NovaMissionData.KIND_BUILDING, 100001, Vector3(10, 0, 0), Vector3.ZERO)
 	mission.add_entity(NovaMissionData.KIND_MARKER, 100002, Vector3(20, 0, 0), Vector3.ZERO)
 	var container := Node3D.new()
 	add_child_autofree(container)
 	var audio = NovaMissionAudioScript.new(root, item_db)
+	var provider := OcclusionProviderStub.new()
+	audio.set_simulation(provider)
 	var stats: Dictionary = audio.setup(mission, "probe.bms", container)
 
 	assert_eq(int(stats.get("markers_total", 0)), 1,
@@ -194,6 +241,9 @@ end
 	assert_eq(int(stats.get("markers_resolved", 0)), 1,
 		"an envs decoration/building resolves its ambient soundloop")
 	assert_gt(int(stats.get("voices", 0)), 0)
+	audio.tick(Vector3.ZERO)
+	assert_eq(provider.source_bms_ids, [int(env_building.get("bms_id", 0))],
+		"setup retains the authored emitter identity through the ambient LOS call")
 	audio.teardown()
 	_remove_dir_recursive(fixture_dir)
 
