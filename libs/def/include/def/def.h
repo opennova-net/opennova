@@ -323,6 +323,9 @@ typedef struct DefItemDef {
     int slip_slope;     /* +0x8F8 = deg token * 11930464 [orig: @0x49d960] */
     int turn_rate;      /* +0x924 = deg/s token * 192426 [orig: @0x49d89a] */
     int turn_rate2;     /* +0x928 = deg/s token * 192426 [orig: @0x49d8dc] */
+    int torque;         /* +0x91C raw ("torque") — the collision speed-decay shift count:
+                           severity 1/3 decay speed >> (torque+2), severity 2 >> (torque+1)
+                           [orig: parse @0x49dcca; consumers @0x47cc13-0x47ccc1] */
     int critical_hp;    /* +0x180 i16 raw ("criticalhp") — the burn threshold the vehicle
                            health state machine reads [docs/world/itemdef-re.md +0x180] */
     int critical_drain; /* +0x182 i16 raw ("criticaldrain") — burn drain per 64 ticks */

@@ -574,6 +574,8 @@ The USE-ITEM mount chain + mount triggers + drive legs (world-wac-ai-re §23; wi
 | `sub_4F7330` / `sub_4F7420` | `0x4f7330` / `0x4f7420` | WAC `ssn2ssn` / `ssnrelease` — the boarding-mode 125 setter / clearer (command table `@ 0x82dd4c`; functions DEFINED this session) | disasm; §23.4 | confirm-only (script side ported as `mount_boarding_command`) |
 | `Entity_SetWaypointByTeam` | `0x43cdb4` | RedirectGroupTo/SingleTo: commandGroup match both pools, AUTO-DETACH of mounted non-players, mode/list/node + turn-budget seed | decompile; §23.4 | witnessed (redirect port pre-dates; detach-on-redirect noted) |
 | the deploy group stamp | `0x519fd0` | every (re)spawned player gets `commandGroup = 1` (00TRa's "group 1" tour dialogs track the player) | disasm; §23.3 (paired to `spawn_player_entity`) | ported |
+| `Entity_CheckCollisionState` | `0x462a30` | per-wheel terrain + entity collision: contact query per point, force-verticality severity classes, size-class crush leg | decompile; §23.3 hull-collision addendum (paired to `CollisionWorld::resolve_vehicle_hull` + the motor push/decay leg) | ported (wall class; wheel array/graded bands/crush/damage = D-NET-161) |
+| `ItemDef` "torque" parse | `0x49dcca` | +0x91C raw shift count — the collision speed-decay `speed -= speed >> (torque+1..2)` @ 0x47cc13-0x47ccc1 | decompile; §23.3 addendum (paired to `DefItem::torque` → `VehicleTraits::torque`) | ported |
 
 On-foot ground settle (D-INF-6, world-wac-ai-re; re-witnessed 2026-06-20):
 

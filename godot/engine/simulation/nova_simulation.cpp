@@ -348,7 +348,7 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 		if (e->handle.pool() == 1 &&
 		    world_->vehicle_traits.get(e->item_id) == nullptr) {
 			const PackedInt32Array vp = p_item_db->get_vehicle_physics(def_id);
-			if (vp.size() == 7 && vp[0] != 0) {
+			if (vp.size() == 8 && vp[0] != 0) {
 				opennova::world::VehicleTraits vt;
 				vt.physics = vp[0];
 				vt.player_speed = vp[1];
@@ -357,6 +357,7 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 				vt.turn_rate = vp[4];
 				vt.turn_rate2 = vp[5];
 				vt.unit_type = vp[6];
+				vt.torque = vp[7];
 				vt.player_control = (attrib & 0x40u) != 0;
 				world_->vehicle_traits.set(e->item_id, vt);
 			}

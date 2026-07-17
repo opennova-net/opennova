@@ -374,6 +374,21 @@ public:
                            bool is_authority, uint32_t tick, int32_t anim_state_id,
                            uint32_t anim_state_flags, int16_t &health);
 
+    // Hull-vs-world contact for the vehicle motor [orig: Entity_CheckCollisionState
+    // @ 0x462a30, called per tick from the vehicle physics @ 0x47cb8c/0x47d213 —
+    // walks the source's proximity candidates and runs the contact-force query
+    // (Entity_ComputeBoneCollisionForce @ 0x4ae150 = collision_contact_force) per
+    // wheel point; a horizontal-dominant push (|fz|<<22/|f| under the slope
+    // thresholds) applies in FULL at severity 3, vertical-dominant contacts take
+    // the graded bands]. Our wheel-less stand-in queries ONE hull-center point
+    // (radius 1.5 u, +0.5 u lift — the wheel array + per-wheel radii + the
+    // v84/v85 slope-threshold grading ride the unported wheel solver, D-NET-161)
+    // and keeps only the wall-like full-force class: vertical-dominant force is
+    // dropped (the motor's terrain column owns the vertical). Returns severity
+    // (0 or 3) and the XY push in out_force (16.16).
+    int32_t resolve_vehicle_hull(World &world, EntityHandle source, const int32_t pos[3],
+                                 const int32_t prev_pos[3], int32_t out_force[2]);
+
     // World-level blink state for the local player.
     // [orig: g_LocalPlayerBlinkFlags @ 0x24C1934]
     uint32_t local_player_blink_flags = 0;

@@ -109,6 +109,7 @@ NovaItemDatabase::Item NovaItemDatabase::item_from_entry(const ::DefItemDef &ent
 	item.player_speed = entry.player_speed;
 	item.turn_rate = entry.turn_rate;
 	item.turn_rate2 = entry.turn_rate2;
+	item.torque = entry.torque;
 	item.unit_type = entry.unit_type;
 	for (int s = 0; s < 7; ++s) {
 		item.soundloops[s] = String(entry.soundloops[s]);
@@ -255,6 +256,7 @@ PackedInt32Array NovaItemDatabase::get_vehicle_physics(int id) const {
 	out.push_back(item.turn_rate);
 	out.push_back(item.turn_rate2);
 	out.push_back(item.unit_type);
+	out.push_back(item.torque);
 	return out;
 }
 

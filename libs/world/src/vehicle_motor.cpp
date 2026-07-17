@@ -107,7 +107,7 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
         if (occ == nullptr || wrecked || (veh.flags & 0x2u) != 0) {
             // No controller (or dead/locked vehicle): steer holds the current heading,
             // commanded speed decays to zero through the decel clamps below.
-            // [orig: @0x48b2ec-0x48b31c — `+528 = entity->Yaw; [136] = 0; [137] = 0;
+            // [orig: @0x48c002-0x48c02d — `+528 = entity->Yaw; [136] = 0; [137] = 0;
             //  Flags &= ~0x80; state = 22`; AI_CheckVehicleStuckState unported]
             m.steer_target_bam = m.yaw_bam;
             m.cmd_speed = 0;
@@ -115,8 +115,8 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
             veh.flags &= ~0x80u;
         } else if (player_occupant) {
             // The above-water gate (`occ->Position.Z + CameraOffset.Z > waterHeight`
-            // [orig: @0x48b34a]) is unmodeled — no world water height; divergence noted
-            // in D-NET-161.
+            // [orig: the player-leg head @0x48b993]) is unmodeled — no world water
+            // height; divergence noted in D-NET-161.
             const uint32_t move_order = static_cast<uint32_t>(occ->net_move_input) |
                                         (static_cast<uint32_t>(occ->net_stance_bits) << 8);
             const int dir = static_cast<int>(move_order & 7u);
@@ -311,14 +311,35 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
         // The in-water 25% drag + authority drown-drain block is unmodeled
         // (no world water height; D-NET-161) [orig: @0x48d6a4-0x48d6f8].
 
-        int32_t px = to_fixed(veh.position.x) + m.vel_x;
-        int32_t py = to_fixed(veh.position.y) + m.vel_y;
-        int32_t pz = to_fixed(veh.position.z) + m.slide_z;
+        const int32_t prev[3] = {to_fixed(veh.position.x), to_fixed(veh.position.y),
+                                 to_fixed(veh.position.z)};
+        int32_t px = prev[0] + m.vel_x;
+        int32_t py = prev[1] + m.vel_y;
+        int32_t pz = prev[2] + m.slide_z;
+
+        // Hull-vs-world contact [orig: Entity_CheckCollisionState @0x462a30 from the
+        // vehicle physics @0x47cb8c/0x47d213]: wall-like pushes move the hull out and
+        // the collision severity decays speed through the def torque shifts
+        // [orig: @0x47cc13-0x47ccc1 — sev 1/3: speed -= speed >> (torque+2),
+        //  sev 2: speed -= speed >> (torque+1); `sar cl` masks the count mod 32].
+        // Our stand-in reports severity 0/3 only (collision.h; D-NET-161).
+        if (world.ai != nullptr && world.ai->collision != nullptr) {
+            const int32_t moved[3] = {px, py, pz};
+            int32_t push[2];
+            const int32_t sev =
+                    world.ai->collision->resolve_vehicle_hull(world, veh.handle, moved,
+                                                              prev, push);
+            if (sev == 3) {
+                px += push[0];
+                py += push[1];
+                m.speed -= m.speed >> ((traits.torque + 2) & 31);
+            }
+        }
 
         // Ground contact: the original resolves per-wheel contact + entity collision in
-        // Entity_ProcessTrackedVehiclePhysics [orig: call @0x48d71d]; our substitute is
-        // the shared 5-tap bilinear terrain column (the AI grounding sampler) — a
-        // tracked divergence (D-NET-161).
+        // Entity_ProcessTrackedVehiclePhysics [orig: the physics tick @0x47c1c0; our
+        // ground substitute is the shared 5-tap bilinear terrain column (the AI
+        // grounding sampler) — a tracked divergence (D-NET-161)].
         if (world.terrain != nullptr) {
             const int32_t pos3[3] = {px, py, pz};
             const GroundClearance clearance{};

@@ -49,6 +49,7 @@ private:
 		int player_speed = 0; // +0x8E8 (16.16 u/tick)
 		int turn_rate = 0;    // +0x924 (BAM/tick)
 		int turn_rate2 = 0;   // +0x928
+		int torque = 0;       // +0x91C raw — collision speed-decay shift [orig: @0x49dcca]
 		int unit_type = 0;    // minimap icon class [orig: Entity_ClassifyForMinimap @0x50FA70]
 		// items.def soundloop_1..7 — the looping ambient sound-set names for a
 		// "snd:"-prefixed `type marker` item (e.g. soundloop_1 LPNV_LIGHT). Time-of-day
