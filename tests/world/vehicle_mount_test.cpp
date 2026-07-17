@@ -423,6 +423,16 @@ void test_local_player_drive_mirror() {
     const float dx = r.player().position.x - r.veh().position.x;
     const float dy = r.player().position.y - r.veh().position.y;
     CHECK(std::sqrt(dx * dx + dy * dy) < 4.0f);
+
+    // The seated LOOK stays mouse-instant at FULL precision on the AiEntity mirrors
+    // the camera reads — a mid-ride look change lands the same tick, both axes
+    // (tick_infantry's own mirrors are skipped for the whole ride)
+    // [orig: Input_HandleActionBinding_0 @0x4e1330 -> entity+0x10/+0x14].
+    pe.inf.target_heading = bam_heading_from_mission_yaw_deg(137.25);
+    pe.inf.look_pitch = 12345678;
+    CHECK(r.sys.pose_if_mounted(pe, r.w));
+    CHECK(pe.heading == pe.inf.target_heading); // full precision, not the deg roundtrip
+    CHECK(pe.pitch == 12345678);
 }
 
 // spawn_player stamps commandGroup 1 [orig: the deploy leg @0x519fd0] — 00TRa's tour

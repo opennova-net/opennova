@@ -3220,7 +3220,12 @@ roll on the carrier flips 109/110). Our `pose_if_mounted` +
 `pose_mounted_occupant` carry this; the local player's yaw preserves the look
 (the drive motor's mouse-steer source) and mirrors the live move-order bits
 into the wire input fields the motor consumes (tick_infantry's mirror is
-skipped while mounted).
+skipped while mounted). The seated CAMERA mirrors stay mouse-instant at full
+precision: the AiEntity heading/pitch the camera getters read take
+`target_heading`/`look_pitch` directly for the mounted local player — the
+degree-rounded entity-yaw wire mirror must not quantize (yaw) or freeze
+(pitch) the look [orig: Input_HandleActionBinding_0 @ 0x4e1330 writes entity
++0x10/+0x14 straight from input, mount or not].
 
 ### 23.6 Divergences
 
