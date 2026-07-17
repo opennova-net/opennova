@@ -332,3 +332,164 @@ func test_ground_anchor_bms_is_the_axis_remap() -> void:
 	# ground_anchor_bms is godot_to_bms_position applied to the anchor offset — linear,
 	# so valid on offset vectors. Pin the remap so the facade's anchor input stays correct.
 	assert_eq(Placer.godot_to_bms_position(Vector3(1, 2, 3)), Vector3(1, -3, 2))
+
+
+# --- Live-PANM graphics must not freeze into static batches ----------------------
+# A decoration whose .3di carries a live PANM track (free-running wave/spin, SET pose,
+# or a control-register binding) must place as an individual NovaObjectModel even
+# though items.def gives it no anim_def: a MultiMesh batch captures the rest pose once
+# and never evaluates PANM again, while the engine re-poses PANM from the global clock
+# every rendered frame [orig: PANM_SampleTrack (sub_4354B0) idle gate, clock
+# dword_18B42A4]. DFX2's "Oil Pump" (graphic Pmpjk01, type decoration, control 0x32
+# sine tracks) is the witnessed case. Inert PANM blocks (Armry01 as shipped: entries
+# present, every control idle) must keep the perf-tier static batching.
+
+class PanmDataPlacer:
+	extends Placer
+	# Injected object data for one graphic, so classification sees PANM without any
+	# resource-root asset (same override-the-seam style as PartAnimModel elsewhere).
+	var panm_graphic := ""
+	var panm_data: NovaObjectData = null
+
+	func _load_object_data(graphic: String) -> NovaObjectData:
+		if graphic == panm_graphic:
+			return panm_data
+		return super(graphic)
+
+
+const ARMRY_3DI := "res://../fixtures/3dp/armry01/Armry01.3di"
+
+
+func _armry_data(with_live_rotation: bool) -> NovaObjectData:
+	var data := NovaObjectData.new()
+	if data.open_file(_abs(ARMRY_3DI)) != OK:
+		return null
+	if with_live_rotation:
+		# Author one live track the way the object workspace does. Armry01 ships all
+		# PANM controls idle; "slide" maps to an active control function.
+		if not data.set_part_anim_channel_enabled(0, 0, "rotation", true):
+			return null
+		if not data.set_part_anim_channel_mode(0, 0, "rotation", "x", "slide", -1):
+			return null
+		if not data.set_part_anim_channel_values(0, 0, "rotation", "x", 0.0, 90.0, 1.0):
+			return null
+	return data
+
+
+func _panm_placer(live: bool) -> PanmDataPlacer:
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
+	var root := NovaResourceRoot.new()
+	root.set_root_dir(_abs("res://../fixtures/def"))
+	var placer := PanmDataPlacer.new(root, item_db)
+	placer.edit_mode = true
+	placer.panm_graphic = "StaticCrate1"  # item 105004: type object, no anim_def
+	placer.panm_data = _armry_data(live)
+	return placer
+
+
+func test_place_routes_live_panm_graphic_to_a_live_model() -> void:
+	var placer := _panm_placer(true)
+	assert_not_null(placer.panm_data, "fixture data authored with one live PANM track")
+	if placer.panm_data == null:
+		return
+	var mission := NovaMissionData.new()
+	assert_eq(mission.create_default(), OK)
+	assert_false(mission.add_entity(
+		NovaMissionData.KIND_ITEM, 105004, Vector3(1, 2, 3), Vector3.ZERO).is_empty())
+	var parent := Node3D.new()
+	add_child_autofree(parent)
+
+	var stats: Dictionary = placer.place(mission, parent)
+
+	assert_eq(int(stats.get("animated", -1)), 1,
+		"a live-PANM graphic places as an individual animated model")
+	assert_eq(int(stats.get("batched", -1)), 0,
+		"and never enters a static MultiMesh batch")
+	var container: Node3D = parent.get_node_or_null("MissionObjects")
+	assert_not_null(container)
+	if container == null:
+		return
+	var live_model: Node3D = null
+	for child in container.get_children():
+		if String(child.name).begins_with("Anim_"):
+			live_model = child as Node3D
+	assert_not_null(live_model, "the placed node is a live Anim_ model")
+
+
+func test_place_keeps_inert_panm_graphic_in_static_batches() -> void:
+	# Armry01 as shipped: PANM entries exist but every control is idle. The
+	# perf-tier batching must keep applying to it.
+	var placer := _panm_placer(false)
+	assert_not_null(placer.panm_data, "fixture data loads")
+	if placer.panm_data == null:
+		return
+	var mission := NovaMissionData.new()
+	assert_eq(mission.create_default(), OK)
+	assert_false(mission.add_entity(
+		NovaMissionData.KIND_ITEM, 105004, Vector3(1, 2, 3), Vector3.ZERO).is_empty())
+	# Seed batch geometry so the static branch can render without a resource-root .3di.
+	assert_true(placer.register_resolved_static_graphic(
+			"StaticCrate1", placer.panm_data, [{
+		"mesh": BoxMesh.new(), "material": null,
+		"offset": Transform3D.IDENTITY, "submesh": 0,
+	}]))
+	var parent := Node3D.new()
+	add_child_autofree(parent)
+
+	var stats: Dictionary = placer.place(mission, parent)
+
+	assert_eq(int(stats.get("batched", -1)), 1,
+		"inert PANM keeps the static MultiMesh batching")
+	assert_eq(int(stats.get("animated", -1)), 0,
+		"and does not force a live model")
+
+
+func test_place_single_routes_live_panm_graphic_to_a_live_model() -> void:
+	var placer := _panm_placer(true)
+	assert_not_null(placer.panm_data, "fixture data authored with one live PANM track")
+	if placer.panm_data == null:
+		return
+	var mission := NovaMissionData.new()
+	assert_eq(mission.create_default(), OK)
+	var parent := Node3D.new()
+	add_child_autofree(parent)
+	placer.place(mission, parent)  # builds the MissionObjects container
+	var container: Node3D = parent.get_node_or_null("MissionObjects")
+	assert_not_null(container)
+	if container == null:
+		return
+
+	var record := mission.add_entity(
+		NovaMissionData.KIND_ITEM, 105004, Vector3(3, 4, 5), Vector3.ZERO)
+	var delta: Dictionary = placer.place_single(
+		mission, container, NovaMissionData.KIND_ITEM, int(record["index"]))
+
+	assert_eq(int(delta.get("animated", -1)), 1,
+		"place_single routes a live-PANM graphic to a live model")
+	assert_eq(int(delta.get("batched", -1)), 0, "not to a single-instance batch")
+
+
+func test_part_anim_entry_is_live_mirrors_the_sampler_gates() -> void:
+	# Entry-level: family flags must declare animation; track-level: a control with a
+	# zero high nibble is idle. Mirrors PANM_BuildNodeMatrices + PANM_SampleTrack.
+	assert_false(Placer.part_anim_entry_is_live({}), "no flags, no tracks -> inert")
+	assert_false(Placer.part_anim_entry_is_live({
+		"rotation_type": 2,
+		"rotation_z": { "control": 0x00 },
+	}), "declared track with an idle control function stays inert")
+	assert_false(Placer.part_anim_entry_is_live({
+		"rotation_x": { "control": 0x32 },
+	}), "an active control without its family flag is never sampled")
+	assert_true(Placer.part_anim_entry_is_live({
+		"rotation_type": 2,
+		"rotation_z": { "control": 0x32 },
+	}), "set-wave-sine rotation (the Pmpjk01 case) is live")
+	assert_true(Placer.part_anim_entry_is_live({
+		"translate_type": 3,
+		"translation": { "control": 0x71 },
+	}), "a control-register-bound translation is live")
+	assert_true(Placer.part_anim_entry_is_live({
+		"scale_type": 1,
+		"scale_x": { "control": 0x18 },
+	}), "a SET pose is live (rest-pose batches would render it unposed)")

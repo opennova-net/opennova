@@ -1600,6 +1600,14 @@ add_executable(netsim_build_player_uplink_test netsim/build_player_uplink_test.c
 target_link_libraries(netsim_build_player_uplink_test PRIVATE opennova_netsim)
 add_test(NAME netsim_build_player_uplink COMMAND netsim_build_player_uplink_test)
 
+# The §5.10b decode-dispatch guard: the client view's items.def class resolver sizes
+# 0x0A tag-1 records (header-only no-callback vs vehicle/infantry compacts) and
+# outranks the 0x0D pool-blanket learner — a mis-sized record desyncs the frame and
+# scatters every later record around the recipient anchor.
+add_executable(netsim_client_view_class_resolver_test netsim/client_view_class_resolver_test.cpp)
+target_link_libraries(netsim_client_view_class_resolver_test PRIVATE opennova_netsim)
+add_test(NAME netsim_client_view_class_resolver COMMAND netsim_client_view_class_resolver_test)
+
 add_executable(netsim_world_stream_extractors_test netsim/world_stream_extractors_test.cpp)
 target_link_libraries(netsim_world_stream_extractors_test PRIVATE opennova_netsim)
 add_test(NAME netsim_world_stream_extractors COMMAND netsim_world_stream_extractors_test)

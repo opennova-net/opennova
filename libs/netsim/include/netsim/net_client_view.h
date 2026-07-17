@@ -38,6 +38,16 @@ public:
 	std::uint32_t frames_applied() const { return state_.frames_applied; }
 	std::size_t unknown_tags() const { return unknown_tags_; }
 
+	// Install the items.def-derived per-type classifier — the table the retail client
+	// itself dispatches 0x0A records through (each type's serialize callback, seeded
+	// from the *_function class tag at items.def load [orig: itemDef+356 dispatch
+	// @0x50f2e2 / ItemList_FindIndexByTypeId]). When it resolves a type (non-Unknown)
+	// it OUTRANKS the learned/heuristic chain in classify(): the 0x0D pool blanket
+	// brands every pool-1 type Vehicle, which mis-sizes a no-callback item's
+	// header-only record (e.g. an `ewep` emplacement) and desyncs the rest of the
+	// frame. Unknown falls through to the learned map, then the phase-1 resolver.
+	void set_item_class_resolver(std::function<EntityClass(uint16_t)> resolver);
+
 private:
 	void apply_frame_update(const std::vector<uint8_t> &body);
 	// Load-time world-stream spawn/static batches (§5.2a) -> ClientState upsert. Each carries
@@ -48,17 +58,20 @@ private:
 	void apply_static_batch(const std::vector<uint8_t> &body);  // 0x10 pool-2
 	void apply_pool3_batch(const std::vector<uint8_t> &body);   // 0x20 pool-3
 
-	// Effective record classifier for the 0x0A event loop: the class LEARNED from the world
-	// spawn stream wins, then the injected resolver. The retail client classifies via each
-	// type's items.def serialize callback [orig: itemDef+356 dispatch @0x50f2e2 /
-	// ItemList_FindIndexByTypeId]; without an items table, a 0x0D pool-1 spawn is the
-	// witnessed signal that a type replicates as a VEHICLE (pool 1 = the vehicle pool), so
-	// the view records type->Vehicle there and decodes the 15/21-B vehicle compact body for
-	// those types (a Player/Infantry misparse would desync the whole record chain).
+	// Effective record classifier for the 0x0A event loop: the items.def table (when
+	// installed) wins, then the class LEARNED from the world spawn stream, then the
+	// injected resolver. The retail client classifies via each type's items.def
+	// serialize callback [orig: itemDef+356 dispatch @0x50f2e2 /
+	// ItemList_FindIndexByTypeId] — that is item_resolver_. Without an items table,
+	// a 0x0D pool-1 spawn is the witnessed signal that a type replicates as a VEHICLE
+	// (pool 1 = the vehicle pool), so the view records type->Vehicle there and decodes
+	// the 15/21-B vehicle compact body for those types (a Player/Infantry misparse
+	// would desync the whole record chain).
 	EntityClass classify(uint16_t type_id) const;
 
 	ClientState state_;
-	std::function<EntityClass(uint16_t)> resolver_;
+	std::function<EntityClass(uint16_t)> item_resolver_; // items.def table (authoritative)
+	std::function<EntityClass(uint16_t)> resolver_;      // phase-1 heuristic fallback
 	std::unordered_map<uint16_t, EntityClass> learned_classes_;
 	std::size_t unknown_tags_ = 0;
 };

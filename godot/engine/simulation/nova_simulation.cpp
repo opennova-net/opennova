@@ -362,6 +362,41 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 	// the latch is Server_UpdateCaptureZoneEntities' first act @0x519764; net-re §5.61]
 	opennova::world::zone_chain_build_from_mission(*world_, world_->zone_chain);
 	opennova::world::zone_chain_latch_control(*world_, world_->zone_chain);
+
+	// Decode-side twin of the net_class_code stamp above: the full wire-id ->
+	// replication-class table for the LOCAL CLIENT VIEW. The retail client sizes each
+	// inbound 0x0A tag-1 record via its OWN items.def serialize callback [orig:
+	// itemDef+356 dispatch @0x50f2e2 / ItemList_FindIndexByTypeId]; without this table
+	// the view's phase-1 heuristic walks vehicle (15/21 B) and no-callback (0 B)
+	// records at the wrong width and desyncs the rest of the frame — every junk record
+	// after the desync lands anchor-relative, i.e. scattered around the local player.
+	// Same tag rule as the encoder stamp (ai_function, else move_function) so both
+	// sides of the in-process wire agree by construction.
+	auto table = std::make_shared<std::unordered_map<uint16_t, opennova::EntityClass>>();
+	const PackedInt32Array ids = p_item_db->get_item_ids();
+	for (int i = 0; i < ids.size(); ++i) {
+		const int def_id = ids[i];
+		const int wire_id = def_id - opennova::mission::kItemIdOffset;
+		if (wire_id < 0 || wire_id > 0xFFFF) continue;
+		const String ai_fn = p_item_db->get_ai_function(def_id);
+		const String tag = ai_fn.is_empty() ? p_item_db->get_move_function(def_id) : ai_fn;
+		const opennova::EntityClass cls =
+				opennova::class_from_tag(tag.utf8().get_data());
+		if (cls != opennova::EntityClass::Unknown) {
+			(*table)[static_cast<uint16_t>(wire_id)] = cls;
+		}
+	}
+	item_class_table_ = std::move(table);
+	install_item_class_resolver();
+}
+
+void NovaSimulation::install_item_class_resolver() {
+	if (!runtime_ || !item_class_table_) return;
+	runtime_->view().set_item_class_resolver(
+			[table = item_class_table_](uint16_t type_id) {
+				const auto it = table->find(type_id);
+				return it != table->end() ? it->second : opennova::EntityClass::Unknown;
+			});
 }
 
 // The D-AI-5 host weapon seed. The original resolves the items.def ammo_closeattack/
@@ -806,6 +841,9 @@ void NovaSimulation::finish_load(const opennova::bms::File &file) {
 		joiner_local_spawned_ = false;
 		joiner_self_wire_handle_ = 0;
 	}
+	// Re-arm the fresh runtime's decode view with the items.def class table (built by a
+	// prior resolve_item_traits; the shell also re-resolves per load, which re-installs).
+	install_item_class_resolver();
 	opennova::mission::register_mission_systems(*world_, *wac_, *bms_, *ai_);
 	// Re-install the held script program onto the fresh WacSystem (reset_world
 	// recreated it). The 62-tick execution divider stays inside the system
@@ -3159,6 +3197,7 @@ bool NovaSimulation::enable_join(const String &p_host_ip, int p_port, const Stri
 	// the legacy joiner_session_ held); finish_load rebuilds it fresh on each (re)load.
 	runtime_ = std::make_unique<opennova::np::ClientRuntime>(
 			opennova::ClientSession::Config::jointoperations(), joiner_player_name_);
+	install_item_class_resolver();
 	joiner_ = true;
 	joiner_started_ = false;
 	joiner_local_spawned_ = false;

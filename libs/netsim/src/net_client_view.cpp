@@ -34,7 +34,19 @@ NetClientView::NetClientView()
 NetClientView::NetClientView(std::function<EntityClass(uint16_t)> resolver)
 		: resolver_(std::move(resolver)) {}
 
+void NetClientView::set_item_class_resolver(std::function<EntityClass(uint16_t)> resolver) {
+	item_resolver_ = std::move(resolver);
+}
+
 EntityClass NetClientView::classify(uint16_t type_id) const {
+	// items.def first — the retail client's own dispatch source [orig: itemDef+356
+	// @0x50f2e2]. It must outrank the 0x0D pool blanket: pool-1 holds no-callback
+	// types too (an `ewep` emplacement), and sizing their header-only records as a
+	// vehicle compact desyncs the whole frame after them.
+	if (item_resolver_) {
+		const EntityClass cls = item_resolver_(type_id);
+		if (cls != EntityClass::Unknown) return cls;
+	}
 	const auto it = learned_classes_.find(type_id);
 	if (it != learned_classes_.end()) return it->second;
 	return resolver_(type_id);
