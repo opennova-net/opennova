@@ -32,6 +32,72 @@ int main() {
 	if (!expect(opennova::foliage_remap_index(map, 254, 0) > 0, "remap_index should support erase-to-zero")) return 1;
 	if (!expect(opennova::foliage_count_index(map, 254) == 0, "erase remap should clear the canonical index")) return 1;
 
+	opennova::FoliageMap flat_map = opennova::foliage_make_default_map(256, 256, 255);
+	opennova::foliage_set_index(flat_map, 226, 250, 37);
+	int detail_map_x = -1;
+	int detail_map_y = -1;
+	if (!expect(opennova::foliage_detail_sample_resolution(flat_map) == 256 &&
+	                opennova::foliage_detail_flat_wrap_position(
+	                    flat_map, -120 * 65536, -24 * 65536,
+	                    detail_map_x, detail_map_y) &&
+	                detail_map_x == 226 && detail_map_y == 250,
+	            "detail authoring coordinates should share the runtime flat-map policy"))
+		return 1;
+	if (!expect(opennova::foliage_sample_detail_flat_wrap(
+	                    flat_map, -120 * 65536, -24 * 65536) == 37,
+	            "detail lookup should use the retail flat negative-coordinate witness"))
+		return 1;
+	if (!expect(opennova::foliage_sample_detail_flat_wrap(
+	                    flat_map, 904 * 65536, 1000 * 65536) == 37,
+	            "detail lookup should repeat every 1024 world units"))
+		return 1;
+	if (!expect(opennova::foliage_sample_detail_flat_wrap(
+	                    flat_map, -(119 * 65536 + 16384), -(23 * 65536 + 16384)) == 37,
+	            "detail lookup should retain retail Q16 negative-fraction semantics"))
+		return 1;
+
+	opennova::FoliageMap boundary_map = opennova::foliage_make_default_map(256, 256, 0);
+	opennova::foliage_set_index(boundary_map, 124, 0, 73);
+	if (!expect(opennova::foliage_sample_detail_flat_wrap(
+	                    boundary_map, 500 * 65536 - 1, 0) == 73,
+	            "detail lookup should preserve fixed-point precision at integer boundaries"))
+		return 1;
+
+	opennova::FoliageMap non_power_of_two = opennova::foliage_make_default_map(300, 300, 0);
+	opennova::foliage_set_index(non_power_of_two, 226, 250, 91);
+	if (!expect(opennova::foliage_detail_sample_resolution(non_power_of_two) == 256 &&
+	                opennova::foliage_sample_detail_flat_wrap(
+	                    non_power_of_two, -120 * 65536, -24 * 65536) == 91,
+	            "detail lookup should derive floor(log2(width)) exactly like the retail loader"))
+		return 1;
+	opennova::FoliageMap wrapped_paint =
+	    opennova::foliage_make_default_map(300, 300, 0);
+	if (!expect(opennova::foliage_paint_detail_circle_wrap(
+	                    wrapped_paint, 255, 255, 2, 1.0f, 1.0f, 19) &&
+	                opennova::foliage_get_index(wrapped_paint, 255, 255) == 19 &&
+	                opennova::foliage_get_index(wrapped_paint, 0, 255) == 19 &&
+	                opennova::foliage_get_index(wrapped_paint, 1, 255) == 19 &&
+	                opennova::foliage_get_index(wrapped_paint, 255, 0) == 19 &&
+	                opennova::foliage_get_index(wrapped_paint, 255, 1) == 19 &&
+	                opennova::foliage_get_index(wrapped_paint, 256, 255) == 0 &&
+	                opennova::foliage_get_index(wrapped_paint, 255, 256) == 0,
+	            "detail painting should wrap at the effective-resolution seam without touching unused stride cells"))
+		return 1;
+
+	opennova::FoliageMap wide_stride = opennova::foliage_make_default_map(1025, 1025, 0);
+	opennova::foliage_set_index(wide_stride, 904, 1000, 117);
+	if (!expect(opennova::foliage_detail_sample_resolution(wide_stride) == 1024 &&
+	                opennova::foliage_sample_detail_flat_wrap(
+	                    wide_stride, -120 * 65536, -24 * 65536) == 117,
+	            "detail lookup should retain valid exponent-10 maps and their actual-width stride"))
+		return 1;
+
+	opennova::FoliageMap oversized_map = opennova::foliage_make_default_map(2048, 1, 99);
+	if (!expect(opennova::foliage_detail_sample_resolution(oversized_map) == 0 &&
+	                opennova::foliage_sample_detail_flat_wrap(oversized_map, 0, 0) == 0,
+	            "detail lookup should reject dimensions that make retail's shift invalid"))
+		return 1;
+
 	const int map_x = opennova::foliage_map_x_from_heightmap_x(512.0f, 256);
 	const int map_y = opennova::foliage_map_y_from_heightmap_y(768.0f, 256);
 	if (!expect(map_x == 128, "heightmap -> foliage map X conversion should match the authored grid")) return 1;

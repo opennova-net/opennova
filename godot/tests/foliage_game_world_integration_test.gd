@@ -10,9 +10,13 @@ const ENV_FIXTURE := "res://../fixtures/env/full_00.env"
 const MODEL_FIXTURE := "res://../fixtures/3dp/CmpFireN/CmpFireN.3di"
 const ROUTED_WITNESS_WORLD := Vector2(-120.0, -24.0)
 const ROUTED_WITNESS_MAP := Vector2i(98, 122)
-const FLAT_WITNESS_MAP := Vector2i(226, 250)
-const MIRRORED_WITNESS_MAP := Vector2i(98, 134)
-const ROUTED_WITNESS_MATCH := 254
+const ROUTED_WITNESS_FLAT_MAP := Vector2i(226, 250)
+const ROUTED_WITNESS_MIRRORED_MAP := Vector2i(98, 134)
+const DETAIL_WITNESS_WORLD := Vector2(120.0, 428.0)
+const DETAIL_WITNESS_FLAT_MAP := Vector2i(30, 107)
+const DETAIL_WITNESS_ROUTED_MAP := Vector2i(158, 235)
+const DETAIL_WITNESS_MIRRORED_MAP := Vector2i(30, 149)
+const FOLIAGE_MATCH := 254
 
 
 func before_each() -> void:
@@ -55,23 +59,51 @@ func test_game_world_resolves_both_dvxi5_models_and_emits_foliage() -> void:
 		world.unload()
 		return
 
-	# Raw coordinates independently distinguish the routed source transform from
-	# the flat and mirrored alternatives before the public world sample is used.
+	# Two disjoint witnesses prove the authored foliagemap is interpreted with
+	# the retail policy for each consumer: flat wrapping for detail grass and
+	# sector routing for MODEL masks.
 	var foliage_map: NovaTerrainFoliageMap = data.get_foliage_map()
 	assert_not_null(foliage_map)
 	if foliage_map == null:
 		world.unload()
 		return
 	assert_eq(int(foliage_map.get_index(ROUTED_WITNESS_MAP.x, ROUTED_WITNESS_MAP.y)),
-		ROUTED_WITNESS_MATCH,
+		FOLIAGE_MATCH,
 		"The routed raw map coordinate should retain the authored foliage match.")
-	assert_eq(int(foliage_map.get_index(FLAT_WITNESS_MAP.x, FLAT_WITNESS_MAP.y)), 255,
-		"The flat-map coordinate should remain an independent negative witness.")
-	assert_eq(int(foliage_map.get_index(MIRRORED_WITNESS_MAP.x, MIRRORED_WITNESS_MAP.y)), 255,
-		"The mirrored-map coordinate should remain an independent negative witness.")
+	assert_eq(int(foliage_map.get_index(
+		ROUTED_WITNESS_FLAT_MAP.x, ROUTED_WITNESS_FLAT_MAP.y)), 255,
+		"The routed witness's flat coordinate should remain a negative witness.")
+	assert_eq(int(foliage_map.get_index(
+		ROUTED_WITNESS_MIRRORED_MAP.x, ROUTED_WITNESS_MIRRORED_MAP.y)), 255,
+		"The routed witness's mirrored coordinate should remain negative.")
+	assert_eq(int(foliage_map.get_index(
+		DETAIL_WITNESS_FLAT_MAP.x, DETAIL_WITNESS_FLAT_MAP.y)), FOLIAGE_MATCH,
+		"The flat detail coordinate should retain the authored foliage match.")
+	assert_eq(int(foliage_map.get_index(
+		DETAIL_WITNESS_ROUTED_MAP.x, DETAIL_WITNESS_ROUTED_MAP.y)), 255,
+		"The detail witness's routed coordinate should remain negative.")
+	assert_eq(int(foliage_map.get_index(
+		DETAIL_WITNESS_MIRRORED_MAP.x, DETAIL_WITNESS_MIRRORED_MAP.y)), 255,
+		"The detail witness's mirrored coordinate should remain negative.")
+	assert_eq(foliage_map.get_detail_map_position_world(
+		DETAIL_WITNESS_WORLD.x, DETAIL_WITNESS_WORLD.y),
+		DETAIL_WITNESS_FLAT_MAP,
+		"Runtime preview and authoring tools must resolve the same flat detail pixel.")
+	assert_eq(foliage_map.get_detail_sample_resolution(), 256,
+		"Dvxi5's 256-wide map should expose the retail detail sample resolution.")
+
 	assert_eq(int(data.get_foliage_index_world(
-		ROUTED_WITNESS_WORLD.x, ROUTED_WITNESS_WORLD.y)), ROUTED_WITNESS_MATCH,
-		"World foliage sampling must use the routed authored-map coordinate.")
+		ROUTED_WITNESS_WORLD.x, ROUTED_WITNESS_WORLD.y)), FOLIAGE_MATCH,
+		"MODEL sampling must use the routed authored-map coordinate.")
+	assert_eq(int(data.get_detail_foliage_index_world(
+		ROUTED_WITNESS_WORLD.x, ROUTED_WITNESS_WORLD.y)), 255,
+		"Detail sampling must not inherit MODEL's sector-routed match.")
+	assert_eq(int(data.get_detail_foliage_index_world(
+		DETAIL_WITNESS_WORLD.x, DETAIL_WITNESS_WORLD.y)), FOLIAGE_MATCH,
+		"Detail sampling must use the flat wrapped authored-map coordinate.")
+	assert_eq(int(data.get_foliage_index_world(
+		DETAIL_WITNESS_WORLD.x, DETAIL_WITNESS_WORLD.y)), 255,
+		"MODEL sampling must not inherit detail's flat wrapped match.")
 
 	var defs: Array = data.get_foliage_defs()
 	assert_eq(defs.size(), 2, "Dvxi5 should retain both authored foliage definitions.")
@@ -83,10 +115,10 @@ func test_game_world_resolves_both_dvxi5_models_and_emits_foliage() -> void:
 		if mesh != null:
 			assert_gt(mesh.get_surface_count(), 0)
 
-	# Render from the routed witness itself so collection, placement, and output
-	# all exercise the independently pinned world-to-map transform.
+	# Render from the flat-positive detail witness so the production dispatcher
+	# must choose the correct data policy to produce visible grass.
 	dispatcher.reset()
-	var position := Vector3(ROUTED_WITNESS_WORLD.x, 0.0, ROUTED_WITNESS_WORLD.y)
+	var position := Vector3(DETAIL_WITNESS_WORLD.x, 0.0, DETAIL_WITNESS_WORLD.y)
 	position.y = data.get_height_world_bilinear(position)
 	camera.global_position = position + Vector3(0.0, 2.2, 0.0)
 	camera.look_at(position + Vector3(0.0, 0.5, -12.0), Vector3.UP)
@@ -102,15 +134,15 @@ func test_game_world_resolves_both_dvxi5_models_and_emits_foliage() -> void:
 	assert_true(bool(stats.get("native_detail_source", false)),
 		"GameWorld foliage must consume NovaTerrain native detail cells.")
 	assert_gt(int(stats.get("detail_cells", 0)), 0,
-		"The routed camera witness should collect native 16-unit detail cells: %s" % stats)
+		"The detail camera witness should collect native 16-unit detail cells: %s" % stats)
 	assert_gt(int(stats.get("runtime_detail_intents", 0)), 0,
-		"Foliage match %d should emit detail intents: %s" % [ROUTED_WITNESS_MATCH, stats])
+		"Foliage match %d should emit detail intents: %s" % [FOLIAGE_MATCH, stats])
 	assert_gt(int(stats.get("detail_vertices", 0)), 0,
-		"Foliage match %d should expand real 3DI vertices: %s" % [ROUTED_WITNESS_MATCH, stats])
+		"Foliage match %d should expand real 3DI vertices: %s" % [FOLIAGE_MATCH, stats])
 	assert_gt(int(stats.get("render_batches", 0)), 0,
-		"Foliage match %d should submit render batches: %s" % [ROUTED_WITNESS_MATCH, stats])
+		"Foliage match %d should submit render batches: %s" % [FOLIAGE_MATCH, stats])
 	assert_gt(dispatcher.get_total_instances(), 0,
-		"Foliage match %d should retain visible instances: %s" % [ROUTED_WITNESS_MATCH, stats])
+		"Foliage match %d should retain visible instances: %s" % [FOLIAGE_MATCH, stats])
 
 	dispatcher.reset()
 	world.unload()

@@ -160,7 +160,7 @@ is authoritative, and each record owns the rationale and the stable `D-…` dive
 | Boot-required resources | `libs/gameprofile` `required_resources` manifest (ENG-6), consumed via `NovaResourceRoot.list_missing_boot_resources` | [required-resources.md](required-resources.md) | witnessed (R8) + manifest landed: the fatal set, per-resource failure behavior, boot order, D-BOOT catalog |
 | VFS / PFF mount stack | `libs/vfs`, `libs/pff`, `NovaResourceRoot` | [vfs/vfs-pff-mount-re.md](vfs/vfs-pff-mount-re.md) | witnessed (PAR-R7): mount, precedence, /d gate; D-VFS-1..9 |
 | Terrain (TRN + runtime queries) | `libs/terrain`, `libs/terrain_query` | [terrain/terrain-re.md](terrain/terrain-re.md) | partial record (PAR-R1; runtime queries ported, ENG-3; rendering parity re-grilled on #245) |
-| Foliage | `libs/foliage`, `NovaFoliageDispatcher` | [foliage/foliage-re.md](foliage/foliage-re.md) | matching incl. the model tier (runtime rebuilt on #245; D-FOLIAGE-7/9/10/12 open) |
+| Foliage | `libs/foliage`, `NovaFoliageDispatcher` | [foliage/foliage-re.md](foliage/foliage-re.md) | matching incl. the model tier (runtime rebuilt on #245; D-FOLIAGE-7/9/10 open) |
 | Tiles (`.til` overlay) | `libs/til` | [tiles/til-re.md](tiles/til-re.md) | landed (PAR-R3; D-TIL-1) |
 | Fonts (`.fnt`) | `libs/fnt` | [fonts/fnt-re.md](fonts/fnt-re.md) | landed (PAR-R4; D-FNT-1..3) |
 | Credits (CBIN) | `libs/cbin` | [credits/cbin-re.md](credits/cbin-re.md) | partial (PAR-R5: codec matching; markup NEEDS-RE) |
