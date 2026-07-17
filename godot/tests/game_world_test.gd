@@ -1483,6 +1483,67 @@ func _make_item_fx_world() -> ItemFxGameWorldHarness:
 	return world
 
 
+class BlinkSimStub:
+	var blink_flags := 0
+	func local_player_blink_flags() -> int:
+		return blink_flags
+
+
+class BlinkRuntimeStub:
+	extends Node
+	var sim := BlinkSimStub.new()
+	func is_playing() -> bool:
+		return true
+	func tick() -> bool:
+		return true
+	func get_sim():
+		return sim
+
+
+func test_blink_frame_gates_toggle_render_passes() -> void:
+	# The blink letter gates (docs/render/render-occlusion-re.md §4): indoors
+	# (accum bit 0x2) hides the terrain render — near detail + far foliage ride
+	# the terrain node — and the sky dome + celestials; the water letter (bit
+	# 0x8) hides the water passes; leaving the boxes restores everything
+	# [orig: render_main_scene @ 0x5c1353 (PolyTrn skip), the skybox skip
+	# @ 0x5ca84f, the water skips @ 0x5c93cb].
+	var world := _make_world()
+	var sky := Node3D.new()
+	sky.name = "NovaSky"
+	world.add_child(sky)
+	var water := Node3D.new()
+	water.name = "NovaWater"
+	world.add_child(water)
+	add_child_autofree(world)
+	var runtime := BlinkRuntimeStub.new()
+	add_child_autofree(runtime)
+	_install_runtime(world, runtime)
+
+	runtime.sim.blink_flags = 0x2
+	world.tick(Vector3.ZERO)
+	assert_false(world.get_node("NovaTerrain").visible, "indoors hides the terrain render")
+	assert_false(sky.visible, "indoors skips the skybox pass")
+	assert_true(water.visible, "the indoors bit alone leaves water on")
+
+	runtime.sim.blink_flags = 0x2 | 0x8
+	world.tick(Vector3.ZERO)
+	assert_false(water.visible, "the water letter suppresses the water passes")
+
+	runtime.sim.blink_flags = 0
+	world.tick(Vector3.ZERO)
+	assert_true(world.get_node("NovaTerrain").visible, "outdoors restores the terrain")
+	assert_true(sky.visible, "outdoors restores the sky")
+	assert_true(water.visible, "outdoors restores the water")
+
+	# An unload while indoors must not leach into the next mission.
+	runtime.sim.blink_flags = 0x2
+	world.tick(Vector3.ZERO)
+	assert_false(sky.visible, "back indoors before the unload")
+	world.unload()
+	assert_true(world.get_node("NovaTerrain").visible, "unload restores the terrain gate")
+	assert_true(sky.visible, "unload restores the sky gate")
+
+
 func _make_world() -> GameWorld:
 	var world := GameWorld.new()
 	var terrain := NovaTerrain.new()

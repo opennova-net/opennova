@@ -25,6 +25,11 @@ const SELECTION_SEQUENTIAL := 2
 const SELECTION_RANDOM_SEQ := 3
 
 var _resource_root  # NovaResourceRoot
+# Occlusion provider (the NovaSimulation, or null): one-shot fire distances
+# inflate through the witnessed two-ray LOS so occluded sources fire quieter /
+# cull farther [orig: Sound_ApplyOcclusionDistance @ 0x529970, applied in
+# Sound_Play3DPositional @ 0x527d95]. Null (tests/menu) fires unoccluded.
+var occlusion_provider: Object = null
 var _banks: Array = []  # Array[NovaLwfData]
 # name(lower) -> Array[{bank:int, set:int}]
 var _index: Dictionary = {}
@@ -129,11 +134,19 @@ func play_oneshot_3d(parent: Node3D, world_pos: Vector3, name: String, bus: Stri
 		# in-memory set+72) the one-shot does not fire at all — axis checks,
 		# then euclidean, all <= range<<16 (equality passes); the euclidean
 		# test subsumes the axis ones [orig: Sound_Play3DPositional
-		# @ 0x527cd1-0x527d83]. Retail also inflates the distance by occlusion
-		# before the last recheck — unported (D-SND-7).
+		# @ 0x527cd1-0x527d83].
 		var cull_u := int(set_d.get("target_id", 0))
 		if dist_q16 > maxi(cull_u, 0) << 16:
 			return false
+		# Occlusion inflates the fire distance between the euclidean cull and
+		# the recheck, and the INFLATED distance feeds the once-at-fire volume
+		# snapshot [orig: the Sound_ApplyOcclusionDistance call @ 0x527d95 and
+		# the <= range recheck @ 0x527da1].
+		if occlusion_provider != null:
+			dist_q16 = int(occlusion_provider.sound_occlusion_distance_q16(
+				listener_pos, world_pos, dist_q16))
+			if dist_q16 > maxi(cull_u, 0) << 16:
+				return false
 	var played := false
 	for li in layers.size():
 		var layer_d: Dictionary = layers[li]

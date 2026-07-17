@@ -320,4 +320,65 @@ bool terrain_raycast_refined(const TerrainRaycastSampler &sampler,
 	return true;
 }
 
+// [orig: Terrain_RaycastHeightmapHiRes @ 0x60c760] — the LOS variant; see the
+// header note for the shape and the tile-cache quantization difference. The
+// hit-point/step outs the original optionally writes are dropped: every LOS
+// caller (sound occlusion @ 0x53b0bc/0x53b110, the three-ray visibility probe
+// @ 0x610f1f) passes a null hit out and consumes only the boolean.
+bool terrain_raycast_los_clear(const TerrainRaycastSampler &sampler,
+                               const int32_t start[3], const int32_t end[3]) {
+	// END-point precheck: the bilinear surface above the END z is an immediate
+	// HIT [orig: @ 0x60c7f8 via Terrain_GetHeightAtPosition @ 0x606720].
+	int32_t h = 0;
+	if (resolve_surface_bilinear(sampler, end[0], end[1], &h) && h > end[2]) {
+		return false;
+	}
+
+	const int32_t dx = end[0] - start[0];
+	const int32_t dy = end[1] - start[1];
+	const int32_t dz = end[2] - start[2];
+	const int32_t abs_dx = abs32(dx);
+	const int32_t abs_dy = abs32(dy);
+
+	// Short segment (both axes under 2.0u): the START point decides
+	// [orig: @ 0x60c82e-0x60c86f].
+	if (abs_dx < 0x20000 && abs_dy < 0x20000) {
+		return !(resolve_surface_bilinear(sampler, start[0], start[1], &h) && h > start[2]);
+	}
+
+	// The texel march: one 4.0-unit heightmap texel per step along the major
+	// axis [orig: @ 0x60c872-0x60c8fd — scale = 2^34 / maxDelta, per-axis step
+	// (scale * delta + 0x8000) >> 16 on the signed product, budget 0x10000
+	// losing scale per sample].
+	const int32_t max_delta = abs_dx > abs_dy ? abs_dx : abs_dy;
+	const int32_t scale = static_cast<int32_t>(0x400000000LL / max_delta);
+	const int32_t step_x = static_cast<int32_t>(
+			(static_cast<int64_t>(scale) * dx + TERRAIN_RAYCAST_STEP_ROUND_BIAS) >> 16);
+	const int32_t step_y = static_cast<int32_t>(
+			(static_cast<int64_t>(scale) * dy + TERRAIN_RAYCAST_STEP_ROUND_BIAS) >> 16);
+	const int32_t step_z = static_cast<int32_t>(
+			(static_cast<int64_t>(scale) * dz + TERRAIN_RAYCAST_STEP_ROUND_BIAS) >> 16);
+
+	int32_t x = start[0];
+	int32_t y = start[1];
+	int32_t z = start[2];
+	int32_t remaining = TERRAIN_RAYCAST_MARCH_BUDGET;
+	for (;;) {
+		const TerrainRaycastSample s = sampler.point(sampler.ctx, x, y);
+		if (s.kind == TerrainRaycastSample::kHeight) {
+			// pointHeight >= rayZ is the hit [orig: @ 0x60c9c7].
+			if (s.height_1616 >= z) return false;
+		} else if (s.kind == TerrainRaycastSample::kEmpty) {
+			// The null-tile height-0 floor [orig: @ 0x60ca71-0x60ca77].
+			if (z <= 0) return false;
+		}
+		// kOutOfExtent: no terrain, no floor (editor guard) — march on.
+		remaining -= scale;
+		x += step_x;
+		y += step_y;
+		z += step_z;
+		if (remaining <= 0) return true; // budget CLEAR [orig: @ 0x60c9e7]
+	}
+}
+
 } // namespace opennova::terrain

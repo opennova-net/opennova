@@ -98,6 +98,11 @@ var _local_player_weapon_tick_consumer := Callable()
 # moves or the camera crosses the water plane.
 var _clear_env_generation: int = -1
 var _clear_above_water := true
+# The local player's applied blink letter gates (render-occlusion-re.md §4):
+# accum bit 0x2 hides the terrain render (near detail + far foliage ride the
+# terrain node) and the sky dome + celestials; bit 0x8 hides the water passes.
+var _blink_indoors := false
+var _blink_water_suppressed := false
 var _idle_frame_clear_color := Color.BLACK
 var _net_client     # NovaNetClient: the in-match wire client (replay or live)
 var _net_view       # NetWorldView: spawns + drives models from the decoded world
@@ -613,6 +618,10 @@ func unload() -> void:
 	# Tear down the game music context [orig: AudioVM_StopMusicContext @ 0x671e00].
 	# The game shell re-opens menu music on its return to the front end.
 	NovaMusicService.stop_context()
+	# Blink frame gates reset with the mission [orig: the letter-bit clear
+	# @ 0x525c45 at mission start] — an unload while indoors must not leave the
+	# next mission's terrain/sky/water hidden.
+	_reset_blink_frame_gates()
 	if _env != null and _env.environment_data != null:
 		_env.environment_data.clear_mission_overrides()
 	_loaded_mission = null
@@ -834,6 +843,9 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 	# simulation ticks [orig: Environment_SetTodAdvanceRate @ 0x57d170].
 	if _loaded and runtime_ticks > 0 and _env != null:
 		_env.advance_mission_clock(runtime_ticks)
+	# Blink flags only change on sim ticks; re-apply the frame gates then.
+	if _loaded and runtime_ticks > 0:
+		_apply_blink_frame_gates()
 	var audio_start := Time.get_ticks_usec()
 	if _loaded and _mission_audio != null:
 		# Ambient soundloop regions read that same clock [orig:
@@ -1549,6 +1561,10 @@ func _start_mission_audio(mission: NovaMissionData, bms_name: String) -> void:
 			int(mission_info.get("start_time", 0)),
 			int(mission_info.get("minutes_per_day", NovaEnvironment.DEFAULT_MINUTES_PER_DAY)))
 	_mission_audio = NovaMissionAudio.new(_resource_root, item_db)
+	# Sound occlusion runs LOS through the sim's collision world + terrain
+	# [orig: Sound_ApplyOcclusionDistance @ 0x529970]; PIE/menu hosts without a
+	# sim mix unoccluded.
+	_mission_audio.set_simulation(get_sim())
 	var stats := _mission_audio.setup(mission, bms_name, self)
 	if _env != null and _env.get("time_of_day") != null:
 		_mission_audio.set_time_of_day_hhmm(float(_env.get("time_of_day")))
@@ -2102,6 +2118,69 @@ func _music_var_pump() -> void:
 	NovaMusicService.set_var(NovaMusicService.VAR_TEAM, local_player_team())
 
 
+# --- Blink frame gates (docs/render/render-occlusion-re.md §4) -----------------
+# The local player's accumulated blink letters gate whole render passes. The
+# letters are authored PER BOX (init 0x3E; letters clear bits), so windowed
+# buildings simply don't carry the indoors letter and keep the outside world
+# rendering — no portal special-casing at the gate level. The per-section
+# interior visibility masks (the portal traversal) are the next occlusion slice.
+
+func _apply_blink_frame_gates() -> void:
+	# Duck-typed like the silhouette-anchor pull above: harness runtimes supply
+	# value-only sims without weakening get_sim()'s NovaSimulation contract.
+	if _runtime == null or not _runtime.has_method("get_sim"):
+		return
+	var sim = _runtime.get_sim()
+	if sim == null or not sim.has_method("local_player_blink_flags"):
+		return
+	var flags := int(sim.local_player_blink_flags())
+	# Accum bit 0x2 (indoors): the terrain render is skipped entirely — the
+	# near-detail and far-foliage tiers are terrain children here, matching
+	# retail where the detail cells ride the skipped terrain traversal and the
+	# far patches carry their own bit-2 gate — and the skybox pass (dome +
+	# celestials) is skipped [orig: render_main_scene @ 0x5c1353 (PolyTrn
+	# skip), terrain_scene_render @ 0x5d0570, Terrain_RenderSkyboxPass skip
+	# @ 0x5ca84f, Foliage_RenderFarPatchesPass skips @ 0x5c95bf/0x5c9665].
+	var indoors := (flags & 0x2) != 0
+	if indoors != _blink_indoors:
+		_blink_indoors = indoors
+		if _terrain != null:
+			_terrain.visible = not indoors
+		var sky := get_node_or_null("NovaSky")
+		if sky != null:
+			sky.visible = not indoors
+		var celestial := get_node_or_null("NovaCelestial")
+		if celestial != null:
+			celestial.visible = not indoors
+	# Accum bit 0x8 (the authored water letter): both water passes skipped.
+	# Letter bits only accumulate while inside a box, so the outdoors leg of
+	# retail's override is implicit; the remaining g_BlinkWaterVisible legs
+	# (a camera building straddling the water plane, the window latch) ride
+	# the section-mask slice [orig: Terrain_RenderSceneWithReflection
+	# @ 0x5c93cb / @ 0x5c95d2-0x5c95ea].
+	var water_off := (flags & 0x8) != 0
+	if water_off != _blink_water_suppressed:
+		_blink_water_suppressed = water_off
+		if _water != null:
+			_water.visible = not water_off
+
+
+func _reset_blink_frame_gates() -> void:
+	if _blink_indoors:
+		if _terrain != null:
+			_terrain.visible = true
+		var sky := get_node_or_null("NovaSky")
+		if sky != null:
+			sky.visible = true
+		var celestial := get_node_or_null("NovaCelestial")
+		if celestial != null:
+			celestial.visible = true
+	if _blink_water_suppressed and _water != null:
+		_water.visible = true
+	_blink_indoors = false
+	_blink_water_suppressed = false
+
+
 # --- Frame clear color (env divergence #21, closed) ----------------------------
 
 func _process(_delta: float) -> void:
@@ -2133,6 +2212,14 @@ func _update_frame_clear_color() -> void:
 	if _clear_color == null or _clear_color.environment == null or _env == null:
 		return
 	if not _env.has_method("get_frame_clear_color"):
+		return
+	# Indoors the frame clears BLACK, not skyfog [orig: render_main_scene
+	# @ 0x5c1597 — the Env_SkyfogBlock clear runs only when the blink indoors
+	# bit is clear; the sentinel generation forces a recompute on exit].
+	if _blink_indoors:
+		if _clear_env_generation != -2:
+			_clear_env_generation = -2
+			_clear_color.environment.background_color = Color.BLACK
 		return
 	var above := true
 	var cam := get_viewport().get_camera_3d() if is_inside_tree() else null

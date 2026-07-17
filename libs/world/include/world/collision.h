@@ -313,6 +313,34 @@ public:
     bool raycast_clear(World &world, const int32_t a[3], const int32_t b[3],
                        EntityHandle exclude_a, EntityHandle exclude_b);
 
+    // Sound-occlusion distance inflation [orig: Sound_ApplyOcclusionDistance
+    // @ 0x529970]: base = min(d/8, 10u); two LOS rays listener -> source
+    // (source z lifted +0x2000 for both; ray 2's segment raised 0.5u); a
+    // blocked ray 1 compounds base = 2*base + 5u; the single final add is
+    // base (ray 2 clear) or 2*base + 5u (ray 2 blocked). LOS per ray =
+    // terrain leg [orig: Physics_CheckTerrainLineOfSight @ 0x53b080 —
+    // skipped as clear when both entities are indoors; either-entity-null
+    // paths precheck both endpoints above the bilinear surface, an
+    // under-surface endpoint reading as clear] then entity leg [orig:
+    // Entity_CheckLineOfSightTerrainAndEntities @ 0x53b130 ->
+    // raycast_find_collision_entity @ 0x539a70 with allowAllTypes = 0 —
+    // only building-kind candidates from the LISTENER's slice block, via the
+    // type-1 solid clip]. `source` may be invalid (ambient markers /
+    // one-shots take the no-entity terrain path). listener_pos is the AUDIO
+    // listener [orig: listener_pos @ 0x24D6630], not the entity position.
+    // Returns the inflated effective distance (16.16). Ray 2's -0x8000
+    // height offset doubles as the entity-leg clip radius (the witnessed
+    // arg-slot reuse): its planes read 0.5u thinner, which is what lets the
+    // second ray clear walls the first grazes — ported; the per-plane
+    // flag-byte branch (flagged planes clamp the radius at 0) and the
+    // terrain march's 0.5u-quantized cache byte are the D-SND-9 residue
+    // (docs/audio/lwf-dbf-sound-re.md).
+    int32_t sound_occlusion_inflate(World &world, EntityHandle listener,
+                                    EntityHandle source,
+                                    const int32_t listener_pos[3],
+                                    const int32_t source_pos[3],
+                                    int32_t distance_q16);
+
     // The movement resolver: candidate contact forces + damage/flag dispatch +
     // repulsion + the ground-settle tail. Returns the foot clearance (feet Z -
     // resolved ground Z): <= 0 grounded (caller lifts by the return), > 0xF000
@@ -411,6 +439,12 @@ private:
     const CollisionTargetView *target_view(World &world, EntityHandle h,
                                            CollisionTargetView &scratch,
                                            std::vector<CollisionMatrix> &mat_scratch) const;
+
+    // One sound-occlusion LOS ray (terrain + building legs); true = clear.
+    // [orig: Entity_CheckLineOfSightTerrainAndEntities @ 0x53b130]
+    bool sound_los_clear(World &world, EntityHandle listener, EntityHandle source,
+                         const int32_t start[3], const int32_t end[3],
+                         int32_t height_offset);
 
     std::vector<CollisionModel> models_;
     std::unordered_map<uint16_t, Instance> instances_; // key: EntityHandle.packed
