@@ -50,7 +50,7 @@ var _fx_provider := Callable()        # -> NovaEffectWorld (or null)
 var _listener_provider := Callable()  # -> Vector3 listener position (camera)
 var _mesh: ImmediateMesh
 var _mesh_instance: MeshInstance3D
-var _pending: Array = []        # [{ticks, set, pos}] — the pending-sound queue
+var _pending: Array = []        # [{ticks, set, pos, source_bms_id}] pending sounds
 # Probe/diagnostic counters (ai_threat_probe asserts the presentation actually ran).
 var _stats := {"fires": 0, "sounds": 0, "delayed_sounds": 0, "effects": 0, "tracer_peak": 0}
 
@@ -120,6 +120,7 @@ func _drain_fires() -> void:
 		_stats.fires += 1
 		var origin: Vector3 = ev.get("origin", Vector3.ZERO)
 		var sound_set := String(ev.get("sound_set", ""))
+		var source_bms_id := int(ev.get("source_bms_id", 0))
 		if audio != null and not sound_set.is_empty():
 			# Propagation delay for far shots [orig: @ 0x528ed4-0x528ef2:
 			# >= 30 u -> pending slot, (62*dist/330)>>2 ticks; else immediate].
@@ -127,13 +128,18 @@ func _drain_fires() -> void:
 			if dist >= SOUND_DELAY_MIN_DIST:
 				var delay_ticks := int(62.0 * dist / SOUND_SPEED) >> 2
 				if delay_ticks > 0:
-					_pending.append({"ticks": delay_ticks, "set": sound_set, "pos": origin})
+					_pending.append({
+						"ticks": delay_ticks,
+						"set": sound_set,
+						"pos": origin,
+						"source_bms_id": source_bms_id,
+					})
 					_stats.delayed_sounds += 1
 				else:
-					audio.fire_soundset(sound_set, origin)
+					audio.fire_soundset(sound_set, origin, source_bms_id)
 					_stats.sounds += 1
 			else:
-				audio.fire_soundset(sound_set, origin)
+				audio.fire_soundset(sound_set, origin, source_bms_id)
 				_stats.sounds += 1
 		var effect := String(ev.get("effect", ""))
 		if fx != null and not effect.is_empty():
@@ -158,7 +164,8 @@ func _tick_pending_sounds(ticks: int) -> void:
 		if int(p["ticks"]) > 0:
 			still.append(p)
 		elif audio != null:
-			audio.fire_soundset(String(p["set"]), p["pos"])
+			audio.fire_soundset(
+				String(p["set"]), p["pos"], int(p.get("source_bms_id", 0)))
 	_pending = still
 
 

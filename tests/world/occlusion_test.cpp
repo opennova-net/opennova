@@ -395,6 +395,20 @@ void test_render_math() {
     CHECK(std::fabs(std::fabs(r[2]) - 1.0f) < 1e-3f);
     CHECK(std::fabs(r[0]) < 1e-3f);
     CHECK(std::fabs(r[1]) < 1e-6f);
+
+    // The entity wrapper must retain all three authored angles. These are the
+    // live fields consumed by every float-space portal and TOC transform.
+    Entity e;
+    e.position = {3.0f, 5.0f, 7.0f};
+    e.yaw = 90;
+    e.pitch = 45;
+    e.roll = -30;
+    const RenderMatrix from_entity = render_matrix_from_entity_pose(e);
+    const RenderMatrix expected =
+        render_matrix_from_pose(p, 0, static_cast<int32_t>(0x20000000u),
+                                static_cast<int32_t>(0xEAAAAAAAu));
+    for (int i = 0; i < 16; ++i)
+        CHECK(std::fabs(from_entity.m[i] - expected.m[i]) < 1e-6f);
 }
 
 // ---------------------------------------------------------------------------
@@ -406,9 +420,38 @@ void test_weld_and_flags() {
     // the coplanarity term measures along A's normal: |dot(nA, pB - pA)| =
     // 0.5 > 0.2 fails!). Put B at 14.1 so the gap is 0.1 u.
     OcclusionModel occ_a = one_room_window();
+    // An inward-facing authored window in section 2 is deliberately invisible
+    // from the camera's section 1. If a welded type-5 face incorrectly takes
+    // the bit-27 same-building recursion, the exterior seed walk reaches it
+    // and leaks bit 2 into A's mask.
+    QuadSpec hidden;
+    hidden.type = kOccRecWindow;
+    hidden.section_a = 2;
+    hidden.section_b = 0;
+    const double ch[4][3] = {
+        {2.0, -1.0, 1.0}, {2.0, 1.0, 1.0}, {2.0, 1.0, 2.5}, {2.0, -1.0, 2.5}};
+    std::memcpy(hidden.corners, ch, sizeof(ch));
+    hidden.normal[0] = -1.0;
+    OcclusionModel hidden_model = occ_model({hidden});
+    {
+        const int32_t vbase = static_cast<int32_t>(occ_a.vertices.size());
+        const int32_t pbase = static_cast<int32_t>(occ_a.planes.size());
+        const int32_t fbase = static_cast<int32_t>(occ_a.faces.size());
+        occ_a.vertices.insert(occ_a.vertices.end(), hidden_model.vertices.begin(),
+                              hidden_model.vertices.end());
+        occ_a.planes.insert(occ_a.planes.end(), hidden_model.planes.begin(),
+                            hidden_model.planes.end());
+        occ_a.faces.insert(occ_a.faces.end(), hidden_model.faces.begin(),
+                           hidden_model.faces.end());
+        OcclusionPortalFace rec = hidden_model.records[0];
+        rec.vert_start += vbase;
+        rec.plane_start += pbase;
+        rec.face_start += fbase;
+        occ_a.records.push_back(rec);
+    }
     QuadSpec qb;
     qb.type = kOccRecWindow;
-    qb.section_a = 1;
+    qb.section_a = 33; // x86 shifts mask the authored ordinal to bit 1
     qb.section_b = 0;
     const double cb[4][3] = {
         {-2.0, -1.0, 1.0}, {-2.0, 1.0, 1.0}, {-2.0, 1.0, 2.5}, {-2.0, -1.0, 2.5}};
@@ -418,10 +461,14 @@ void test_weld_and_flags() {
     qb.normal[2] = 0.0;
     OcclusionModel occ_b = occ_model({qb});
 
+    OcclusionWorld::EntityDefBits recurse_weldable;
+    recurse_weldable.weldable = true;
+    recurse_weldable.recurse_windows = true;
     OcclusionWorld::EntityDefBits weldable;
     weldable.weldable = true;
     const EntityHandle a =
-        rig.add_building(10.0, 10.0, building_collision(2, 2, 3), std::move(occ_a), weldable);
+        rig.add_building(10.0, 10.0, building_collision(2, 2, 3), std::move(occ_a),
+                         recurse_weldable);
     const EntityHandle b =
         rig.add_building(14.1, 10.0, building_collision(2, 2, 3), std::move(occ_b), weldable);
     rig.rebuild();
@@ -434,13 +481,25 @@ void test_weld_and_flags() {
         CHECK(w0.own_entity == a || w0.own_entity == b);
         CHECK(w0.other_entity == w1.own_entity);
         CHECK(w1.other_entity == w0.own_entity);
-        CHECK(w0.own_section == 1 && w0.other_section == 1);
+        const OcclusionWorld::WeldRecord &wa = w0.own_entity == a ? w0 : w1;
+        const OcclusionWorld::WeldRecord &wb = w0.own_entity == b ? w0 : w1;
+        CHECK(wa.own_section == 1 && wa.other_section == 33);
+        CHECK(wb.own_section == 33 && wb.other_section == 1);
     }
-    // Both records rewrote to type 5 -> the flag stamp sees links, no windows.
+    // The welded records rewrote to type 5. A retains its separate section-2
+    // window; B has links only.
     const OcclusionWorld::BuildingFlags fa = rig.ow.building_flags(a);
+    const OcclusionWorld::BuildingFlags fb = rig.ow.building_flags(b);
     CHECK(fa.has_links);
-    CHECK(!fa.has_windows);
+    CHECK(fa.has_windows);
     CHECK(!fa.has_open);
+    CHECK(fb.has_links);
+    CHECK(!fb.has_windows);
+
+    const OcclusionFrameCamera cam = rig.camera(10.0, 10.0, 1.0, 0x2);
+    rig.ow.build_frame(rig.world, rig.cw, cam);
+    CHECK((rig.ow.section_mask(a) & (1u << 2)) == 0);
+    CHECK((rig.ow.section_mask(b) & (1u << 1)) != 0);
 
     // Distance gate: a third building far away does not weld.
     Rig rig2;
@@ -452,6 +511,35 @@ void test_weld_and_flags() {
     rig2.ow.init_mission(rig2.world, rig2.cw);
     CHECK(rig2.ow.weld_records().empty());
     CHECK(rig2.ow.building_flags(EntityHandle{}).has_links == false);
+}
+
+// ---------------------------------------------------------------------------
+void test_tilted_pose_weld() {
+    Rig rig;
+    OcclusionWorld::EntityDefBits weldable;
+    weldable.weldable = true;
+    const EntityHandle a =
+        rig.add_building(10.0, 10.0, building_collision(2, 2, 3), one_room_window(), weldable);
+    const EntityHandle b =
+        rig.add_building(14.0, 10.0, building_collision(2, 2, 3), one_room_window(), weldable);
+    // A 180-degree authored pitch reverses B's +X face. Raising its origin by
+    // 3.5u mirrors the 1..2.5u vertex range back onto A's face, so the two
+    // records are coincident and opposite only when the full pose is honored.
+    Entity *tilted = rig.world.registry.get(b);
+    CHECK(tilted != nullptr);
+    if (tilted != nullptr) {
+        tilted->position.z = 3.5f;
+        tilted->pitch = 180;
+    }
+    rig.rebuild();
+    rig.ow.init_mission(rig.world, rig.cw);
+    CHECK(rig.ow.weld_records().size() == 2);
+    if (rig.ow.weld_records().size() == 2) {
+        CHECK(rig.ow.weld_records()[0].own_entity == a ||
+              rig.ow.weld_records()[1].own_entity == a);
+        CHECK(rig.ow.weld_records()[0].own_entity == b ||
+              rig.ow.weld_records()[1].own_entity == b);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -643,10 +731,11 @@ void test_toc_occlusion() {
 void test_three_ray_latch() {
     Rig rig;
     // A ridge between the camera and the target: raise a terrain wall column.
-    // Field is 512x512 at raw16 0; raise x = 30..32 (raw16 = units * 256).
+    // The retail LOS marcher advances in roughly four-unit steps, so keep the
+    // ridge wider than one stride (raw16 = units * 256).
     Rig *r = &rig;
     for (int y = 0; y < Field::kDim; ++y)
-        for (int x = 30; x <= 32; ++x)
+        for (int x = 29; x <= 33; ++x)
             r->field.heightmap[y * Field::kDim + x] = 20 * 256; // 20 u wall
 
     Entity npc;
@@ -737,6 +826,7 @@ void test_forced_visible_bits() {
 int main() {
     test_render_math();
     test_weld_and_flags();
+    test_tilted_pose_weld();
     test_outdoor_masks();
     test_indoor_masks_and_gate();
     test_outside_in_viewthru();

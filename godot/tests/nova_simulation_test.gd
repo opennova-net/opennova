@@ -16,6 +16,17 @@ func test_demo_mission_promotes() -> void:
 
 const ANIM_FIXTURES := "res://../fixtures/anim"
 
+
+class ObjectDataPlacerStub:
+	extends RefCounted
+	var data: NovaObjectData
+
+	func _init(p_data: NovaObjectData) -> void:
+		data = p_data
+
+	func object_data_for(_graphic: String) -> NovaObjectData:
+		return data
+
 func _anim_root() -> NovaResourceRoot:
 	var root := NovaResourceRoot.new()
 	root.set_root_dir(ProjectSettings.globalize_path(ANIM_FIXTURES))
@@ -794,6 +805,38 @@ func test_effect_state_lookup_uses_the_live_registry_not_the_ai_pool() -> void:
 	assert_true(sim.get_entity_effect_state_for_ssn(0).is_empty(), "SSN zero is invalid")
 	assert_true(sim.get_entity_effect_state_for_ssn(65536).is_empty(),
 			"out-of-range SSNs must not wrap onto a different registry entity")
+	sim.free()
+
+
+func test_collision_backed_building_without_oobj_keeps_batch_visibility() -> void:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var placed := md.add_entity(
+		NovaMissionData.KIND_BUILDING, 102001, Vector3(0, 20, 0), Vector3.ZERO)
+	assert_false(placed.is_empty())
+
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load(ProjectSettings.globalize_path("res://../fixtures/def/items.def")), OK)
+	var data := NovaObjectData.new()
+	assert_eq(data.open_file(
+		ProjectSettings.globalize_path("res://../fixtures/threedi/3di3/House.3di")), OK)
+	assert_true(data.has_collision())
+	assert_false(data.has_occlusion(), "fixture must exercise collision without OOBJ")
+	var placer := ObjectDataPlacerStub.new(data)
+
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	assert_eq(sim.resolve_collision_instances(item_db, placer), 1)
+	sim.occlusion_init_mission()
+	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 0.05, 500.0, -100.0, false)
+	var visibility: PackedInt64Array = sim.get_building_visibility()
+	assert_eq(visibility.size(), 2, "collision-backed no-OOBJ building stays in the host batch")
+	if visibility.size() == 2:
+		assert_eq(int(visibility[0]), int(placed.get("bms_id", 0)))
+		var packed := int(visibility[1])
+		assert_eq(packed & 0xFFFFFFFF, 0xFFFFFFFF,
+			"without a section map the host preserves every de-batched render part")
+		assert_ne(packed & (1 << 32), 0, "the in-frustum building is visible")
 	sim.free()
 
 

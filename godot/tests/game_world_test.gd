@@ -74,7 +74,7 @@ class ImpactRuntimeStub:
 class ImpactAudioStub:
 	extends NovaMissionAudio
 	var fires: Array = []
-	func fire_soundset(set_name: String, world_pos: Vector3) -> bool:
+	func fire_soundset(set_name: String, world_pos: Vector3, _source_bms_id: int = 0) -> bool:
 		fires.append({'name': set_name, 'position': world_pos})
 		return true
 

@@ -77,6 +77,54 @@ static int roundtrip(const char *path) {
     return same;
 }
 
+// OOBJ +20 is an authored float consumed by the occlusion renderer. The retail
+// corpus happens to contain zeros, but the format and writer permit nonzero
+// window glow scales.
+static int roundtrip_nonzero_glow(const char *path) {
+    Threedi3di3 source;
+    Threedi3di3 reread;
+    char tmp[4096];
+    int same;
+    size_t expected_count;
+
+    memset(&source, 0, sizeof(source));
+    memset(&reread, 0, sizeof(reread));
+    if (threedi_3di3_read(path, &source) != 0) return -1;
+    if (source.occlusion_object_record_size == 0) {
+        threedi_3di3_free(&source);
+        return 0;
+    }
+    if (source.occlusion_object_count == 0) {
+        // The compact fixtures carry empty OOBJ tables. Add a valid type-0
+        // occluder so both serialization and parsing exercise disk +20.
+        source.occlusion_objects = (ThreediOcclusionObject *)calloc(
+            1, sizeof(*source.occlusion_objects));
+        if (!source.occlusion_objects) {
+            threedi_3di3_free(&source);
+            return -1;
+        }
+        source.occlusion_object_count = 1;
+        source.occlusion_object_record_size = 36;
+    }
+    source.occlusion_objects[0].glow_scale = 1.25f;
+    expected_count = source.occlusion_object_count;
+    snprintf(tmp, sizeof(tmp), "%s.glow-roundtrip", path);
+    if (threedi_3di3_write(tmp, &source) != 0) {
+        threedi_3di3_free(&source);
+        return -1;
+    }
+    threedi_3di3_free(&source);
+    if (threedi_3di3_read(tmp, &reread) != 0) {
+        remove(tmp);
+        return -1;
+    }
+    same = reread.occlusion_object_count == expected_count &&
+           reread.occlusion_objects[0].glow_scale == 1.25f;
+    threedi_3di3_free(&reread);
+    remove(tmp);
+    return same ? 1 : -1;
+}
+
 int main(void) {
     const char *repo_root = test_paths_repo_root(__FILE__);
     char fixtures_dir[4096];
@@ -129,6 +177,29 @@ int main(void) {
         printf("OK\n");
     }
     printf("All roundtrip tests passed.\n");
+
+    {
+        int glow_tested = 0;
+        for (i = 0; i < file_count; ++i) {
+            const int result = roundtrip_nonzero_glow(files[i]);
+            if (result < 0) {
+                fprintf(stderr, "Nonzero OOBJ glow roundtrip failed for %s\n", files[i]);
+                for (i = 0; i < file_count; ++i) free(files[i]);
+                free(files);
+                return EXIT_FAILURE;
+            }
+            if (result > 0) {
+                glow_tested = 1;
+                break;
+            }
+        }
+        if (!glow_tested) {
+            fprintf(stderr, "No OOBJ fixture available for the glow roundtrip\n");
+            for (i = 0; i < file_count; ++i) free(files[i]);
+            free(files);
+            return EXIT_FAILURE;
+        }
+    }
 
     for (i = 0; i < file_count; ++i) free(files[i]);
     free(files);

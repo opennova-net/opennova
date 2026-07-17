@@ -719,16 +719,17 @@ PackedInt64Array NovaSimulation::get_building_visibility() const {
 	PackedInt64Array out;
 	if (!world_) return out;
 	// Pairs [bms_id, visible<<32 | mask] for every building with an OCCLUSION
-	// instance; the host applies mask bit N to render part N. Buildings without
-	// portal records are excluded: the only occlusion-less nodes the registry
-	// can resolve are the animated de-batched buildings, and driving them from
-	// the windowless outdoor mask (= 1) would strip their moving parts — their
-	// retail visibility rides the entity collectors, not the sector-model mask.
+	// instance, plus collision-backed de-batched buildings that still entered
+	// the retail building batch. OOBJ instances apply their section mask.
+	// Without OOBJ there is no safe host part-to-section map, so those buildings
+	// keep all render parts while still receiving batch/frustum/TOC visibility.
 	world_->registry.for_each([&](const opennova::world::Entity &e) {
 		if (e.kind != opennova::world::EntityKind::Building || e.bms_id == 0) return;
-		if (!occlusion_world_.has_instance(e.handle)) return;
+		const bool has_occlusion = occlusion_world_.has_instance(e.handle);
+		if (!has_occlusion && collision_world_.model_for(e.handle) == nullptr) return;
 		const bool visible = occlusion_world_.building_visible(e.handle);
-		const uint32_t mask = occlusion_world_.section_mask(e.handle);
+		const uint32_t mask =
+		    has_occlusion ? occlusion_world_.section_mask(e.handle) : 0xFFFFFFFFu;
 		out.push_back(e.bms_id);
 		out.push_back(static_cast<int64_t>(mask) | (visible ? (int64_t(1) << 32) : 0));
 	});
@@ -761,10 +762,12 @@ int NovaSimulation::local_player_blink_flags() const {
 
 int64_t NovaSimulation::sound_occlusion_distance_q16(const Vector3 &listener_pos,
                                                      const Vector3 &source_pos,
-                                                     int64_t distance_q16) {
+                                                     int64_t distance_q16,
+                                                     int source_bms_id) {
 	// [orig: Sound_ApplyOcclusionDistance @ 0x529970] — the audio layer feeds
-	// the AUDIO listener (camera) and the emitter/one-shot position; markers
-	// carry no source entity (the no-entity terrain path). Godot world
+	// the AUDIO listener (camera), emitter/one-shot position, and source
+	// identity when known. -1 denotes the local player, positive values are
+	// authored BMS ids, and zero keeps the no-entity path. Godot world
 	// (x, up, z) -> mission fixed (x, -z, up) 16.16.
 	if (!world_) return distance_q16;
 	const int32_t lp[3] = {opennova::world::to_fixed(listener_pos.x),
@@ -773,8 +776,23 @@ int64_t NovaSimulation::sound_occlusion_distance_q16(const Vector3 &listener_pos
 	const int32_t sp[3] = {opennova::world::to_fixed(source_pos.x),
 	                       opennova::world::to_fixed(-source_pos.z),
 	                       opennova::world::to_fixed(source_pos.y)};
+	opennova::world::EntityHandle source;
+	if (source_bms_id < 0) {
+		source = world_->cached.local_player;
+	} else if (source_bms_id > 0) {
+		world_->registry.for_each([&](const opennova::world::Entity &e) {
+			if (!source.valid() && e.bms_id == source_bms_id) source = e.handle;
+		});
+	}
+	// Static/env emitters do not ride the moving-entity collision resolver.
+	// Refresh their blink/indoors state at the audio query boundary so the
+	// both-indoors terrain bypass sees the source state retail registered.
+	if (source.valid() && source != world_->cached.local_player) {
+		if (opennova::world::Entity *source_entity = world_->registry.get(source))
+			collision_world_.refresh_blink(*world_, *source_entity);
+	}
 	return collision_world_.sound_occlusion_inflate(*world_, world_->cached.local_player,
-	                                                opennova::world::EntityHandle{}, lp, sp,
+	                                                source, lp, sp,
 	                                                static_cast<int32_t>(distance_q16));
 }
 
@@ -982,10 +1000,9 @@ Dictionary NovaSimulation::get_occlusion_portal_debug(const Vector3 &p_anchor,
 		if (range >= 0 && (std::abs(pos_fixed[0] - anchor_x) > range ||
 		                   std::abs(pos_fixed[1] - anchor_y) > range))
 			return;
-		// The same building pose path the engine's frame uses (yaw only —
-		// statics carry no pitch/roll).
-		const opennova::world::RenderMatrix mat = opennova::world::render_matrix_from_pose(
-		    pos_fixed, opennova::world::bam_heading_from_mission_yaw_deg(e.yaw), 0, 0);
+		// The same full authored building-pose path the engine's frame uses.
+		const opennova::world::RenderMatrix mat =
+		    opennova::world::render_matrix_from_entity_pose(e);
 		Dictionary b;
 		b["bms_id"] = e.bms_id;
 		b["pos"] = godot_from_fixed3(pos_fixed);
@@ -1426,8 +1443,9 @@ void NovaSimulation::_bind_methods() {
 	                     &NovaSimulation::get_occlusion_portal_debug);
 	ClassDB::bind_method(D_METHOD("local_player_indoors"), &NovaSimulation::local_player_indoors);
 	ClassDB::bind_method(D_METHOD("local_player_blink_flags"), &NovaSimulation::local_player_blink_flags);
-	ClassDB::bind_method(D_METHOD("sound_occlusion_distance_q16", "listener_pos", "source_pos", "distance_q16"),
-	                     &NovaSimulation::sound_occlusion_distance_q16);
+	ClassDB::bind_method(D_METHOD("sound_occlusion_distance_q16", "listener_pos", "source_pos",
+	                              "distance_q16", "source_bms_id"),
+	                     &NovaSimulation::sound_occlusion_distance_q16, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("local_player_in_armory_zone"), &NovaSimulation::local_player_in_armory_zone);
 	ClassDB::bind_method(D_METHOD("local_player_in_vehicle_loadout_zone"), &NovaSimulation::local_player_in_vehicle_loadout_zone);
 	ClassDB::bind_method(D_METHOD("apply_local_player_loadout", "weapon_name", "player_class"),
@@ -2795,6 +2813,10 @@ Array NovaSimulation::drain_fire_presentation_events() {
 				static_cast<real_t>(std::sin(pitch)),
 				static_cast<real_t>(-std::sin(bearing) * cp));
 		d["shooter_handle"] = static_cast<int>(fe.shooter_handle);
+		opennova::world::EntityHandle shooter_handle;
+		shooter_handle.packed = fe.shooter_handle;
+		const opennova::world::Entity *shooter = world_->registry.get(shooter_handle);
+		d["source_bms_id"] = shooter != nullptr ? shooter->bms_id : 0;
 		d["is_local_player"] = have_local && fe.shooter_handle == local_packed;
 		d["ammo_index"] = fe.ammo_index;
 		const opennova::world::AmmoTableEntry *ammo = world_->ammo.by_index(fe.ammo_index);

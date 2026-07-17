@@ -182,6 +182,7 @@ func setup(mission, mission_name: String, container: Node3D) -> Dictionary:
 		_markers.append({
 			"node": marker_node,
 			"pos": pos,
+			"source_bms_id": int(entity.get("bms_id", 0)),
 			"slot_sets": slot_sets,
 			# De-sync marker crossfades like the engine's per-entity clock
 			# stagger [orig: @ 0x408158 (poolHandle & 0xF) << 11 Q16 hours].
@@ -245,10 +246,11 @@ func get_bank() -> NovaSoundBank:
 ## @0x528e20). One-shot volume snapshots the listener distance at fire time, and
 ## the set's cull range gates the fire entirely [orig: Sound_Play3DPositional
 ## @ 0x527cb0; cull @ 0x527cd1].
-func fire_soundset(name: String, world_pos: Vector3) -> bool:
+func fire_soundset(name: String, world_pos: Vector3, source_bms_id: int = 0) -> bool:
 	if _bank == null or _audio_root == null:
 		return false
-	return _bank.play_oneshot_3d(_audio_root, world_pos, name, SFX_BUS, _last_camera_pos)
+	return _bank.play_oneshot_3d(
+		_audio_root, world_pos, name, SFX_BUS, _last_camera_pos, source_bms_id)
 
 
 ## Enqueue a mission dialog by its PlayWavList id (param1). Resolution, faithful
@@ -434,7 +436,8 @@ func tick(camera_pos: Vector3) -> void:
 					if vol > 0 and _simulation != null:
 						if dist_occluded_q16 < 0:
 							dist_occluded_q16 = int(_simulation.sound_occlusion_distance_q16(
-								camera_pos, m.pos, dist_q16))
+								camera_pos, m.pos, dist_q16,
+								int(m.get("source_bms_id", 0))))
 						if dist_occluded_q16 != dist_q16:
 							vol = NovaSoundBank.emitter_layer_volume(
 								dist_occluded_q16, falloff, min_d, vol_byte, member_vol, clamp_vol)

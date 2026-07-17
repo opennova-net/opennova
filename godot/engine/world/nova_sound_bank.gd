@@ -123,7 +123,8 @@ func spawn_ambient(parent: Node3D, world_pos: Vector3, name: String, bus: String
 ## @ 0x527cb0 -> SoundBank_PlayTriggerEntries @ 0x75ccd0 compute vol/pan at
 ## play, no per-frame update]; pass Vector3.INF to play distance-flat (menu /
 ## tests). Auto-frees when finished. Returns true if anything played.
-func play_oneshot_3d(parent: Node3D, world_pos: Vector3, name: String, bus: StringName, listener_pos: Vector3 = Vector3.INF) -> bool:
+func play_oneshot_3d(parent: Node3D, world_pos: Vector3, name: String, bus: StringName,
+		listener_pos: Vector3 = Vector3.INF, source_bms_id: int = 0) -> bool:
 	var loc := _find_set(name)
 	if loc.is_empty():
 		return false
@@ -148,7 +149,7 @@ func play_oneshot_3d(parent: Node3D, world_pos: Vector3, name: String, bus: Stri
 		# the <= range recheck @ 0x527da1].
 		if occlusion_provider != null:
 			dist_q16 = int(occlusion_provider.sound_occlusion_distance_q16(
-				listener_pos, world_pos, dist_q16))
+				listener_pos, world_pos, dist_q16, source_bms_id))
 			if dist_q16 > cull_q16:
 				return false
 	var played := false

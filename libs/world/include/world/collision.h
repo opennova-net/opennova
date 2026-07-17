@@ -339,16 +339,16 @@ public:
     // Entity_CheckLineOfSightTerrainAndEntities @ 0x53b130 ->
     // raycast_find_collision_entity @ 0x539a70 with allowAllTypes = 0 —
     // only building-kind candidates from the LISTENER's slice block, via the
-    // type-1 solid clip]. `source` may be invalid (ambient markers /
-    // one-shots take the no-entity terrain path). listener_pos is the AUDIO
-    // listener [orig: listener_pos @ 0x24D6630], not the entity position.
+    // type-1 solid clip]. `source` may be invalid when the host has no emitter
+    // identity; identified ambient/fire sources preserve exclusion and the
+    // both-indoors terrain bypass. listener_pos is the AUDIO listener [orig:
+    // listener_pos @ 0x24D6630], not the entity position.
     // Returns the inflated effective distance (16.16). Ray 2's -0x8000
     // height offset doubles as the entity-leg clip radius (the witnessed
     // arg-slot reuse): its planes read 0.5u thinner, which is what lets the
     // second ray clear walls the first grazes — ported; the per-plane
-    // flag-byte branch (flagged planes clamp the radius at 0) and the
-    // terrain march's 0.5u-quantized cache byte are the D-SND-9 residue
-    // (docs/audio/lwf-dbf-sound-re.md).
+    // flag-byte branch (flagged planes clamp the radius at 0) is the D-SND-9
+    // residue (docs/audio/lwf-dbf-sound-re.md).
     int32_t sound_occlusion_inflate(World &world, EntityHandle listener,
                                     EntityHandle source,
                                     const int32_t listener_pos[3],

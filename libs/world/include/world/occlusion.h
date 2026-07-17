@@ -114,6 +114,11 @@ void render_float_from_fixed(const int32_t p[3], float out[3]);
 RenderMatrix render_matrix_from_pose(const int32_t pos[3], int32_t yaw_bam, int32_t pitch_bam,
                                      int32_t roll_bam);
 
+// Live entity -> the same full retail render pose. Mission yaw uses the
+// canonical heading conversion; authored pitch/roll are direct wrapped BAMs.
+// [orig: the entity+4 call sites of Math_BuildFixedPointToFloatMatrix4x4]
+RenderMatrix render_matrix_from_entity_pose(const Entity &entity);
+
 // ----------------------------------------------------------------------------
 // Per-frame camera input (host-fed). The original reads these from the render
 // globals; the host derives them from its camera each frame.
@@ -271,7 +276,7 @@ private:
     };
 
     struct PlaneGroup {
-        int32_t start = 0; // run into group_planes_
+        int32_t start = 0; // run into the owning wedge-plane bank
         int32_t count = 0;
     };
 
@@ -323,8 +328,9 @@ private:
     bool toc_occluded(World &world, CollisionWorld &collision, BatchEntry &entry,
                       const OcclusionFrameCamera &cam);
     // [orig: Terrain_TestSphereInPlaneGroups @ 0x5c4580]
-    bool sphere_in_plane_groups(const float pos[3], float radius, const PlaneGroup *groups,
-                                int32_t group_count) const;
+    bool sphere_in_plane_groups(const float pos[3], float radius,
+                                const std::vector<float> &plane_bank,
+                                const PlaneGroup *groups, int32_t group_count) const;
     // [orig: terrain_occlusion_check_three_rays @ 0x610ed0; TRUE = some ray clear]
     bool three_rays_clear(const CollisionWorld &collision, const OcclusionFrameCamera &cam,
                           const int32_t target[3], int32_t radius) const;
@@ -359,7 +365,8 @@ private:
     // Window-frustum / viewthru wedge banks [orig: g_WindowFrustum* / g_Viewthru*]
     std::vector<PlaneGroup> window_groups_;
     std::vector<PlaneGroup> viewthru_groups_;
-    std::vector<float> group_planes_; // 4 floats per plane, shared arena
+    std::vector<float> window_group_planes_;  // 4 floats per plane
+    std::vector<float> viewthru_group_planes_;  // separate retail arena
     // The weld-link track list [orig: g_PortalLinkTrackList @ 0x29BEE54, cap 32]
     std::vector<int32_t> link_track_;
 

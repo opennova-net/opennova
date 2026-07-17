@@ -145,9 +145,8 @@ bool terrain_raycast_refined(const TerrainRaycastSampler &sampler,
 // apply the height-0 floor (hit when the ray z <= 0 [orig: the null-tile loop
 // @ 0x60ca71-0x60ca77]); kOutOfExtent marches on untested (the editor guard,
 // as above). Retail's point sample reads its render tile cache's
-// 0.5-unit-quantized height byte (`sample << 15` [orig: @ 0x60c9c7]); the
-// host sampler returns the unquantized column height — a sub-0.5u sampling
-// difference tracked in docs/render/render-occlusion-re.md.
+// 0.5-unit-quantized height byte (`sample << 15` [orig: @ 0x60c9c7]); world
+// adapters feeding a raw16 height field must quantize that point callback.
 // Returns true = CLEAR (retail 1), false = HIT (retail 0).
 bool terrain_raycast_los_clear(const TerrainRaycastSampler &sampler,
                                const int32_t start[3], const int32_t end[3]);

@@ -60,7 +60,7 @@ constexpr int32_t kSlotCap = 128;        // [orig: the 128-cap slot arrays @ 0x5
 constexpr int32_t kLinkTrackCap = 32;    // [orig: g_PortalLinkTrackList cap @ 0x5c54fb]
 constexpr int32_t kWedgePlaneCap = 64;   // [orig: "render_VPT() : too many planes" @ 0x5c5477]
 constexpr int32_t kGroupCap = 512;       // [orig: window/viewthru group caps]
-constexpr int32_t kGroupPlaneCap = 2048; // [orig: the shared plane-arena caps]
+constexpr int32_t kGroupPlaneCap = 2048; // [orig: each plane-arena cap]
 constexpr int32_t kMaskSlots = 0x1000;   // pool-2 handle-slot space (retail array = 1200)
 constexpr int32_t kSlotDistFixed = 250 << 16; // [orig: the 0xFA0000 slot range @ 0x5c6d7f]
 
@@ -152,20 +152,17 @@ RenderMatrix render_matrix_from_pose(const int32_t pos[3], int32_t yaw_bam, int3
     return render_matrix_multiply(acc, t);
 }
 
-namespace {
-
-// The static-placement pose matrix every occlusion float test uses: heading yaw
-// only, like the collision instance transform (per-part animated transforms are
-// the tracked D-COL-1 follow-up). [orig: the originals build the full entity
-// pose via Math_BuildFixedPointToFloatMatrix4x4(entity+4)]
-RenderMatrix building_render_matrix(const Entity &e) {
+// The float-space occlusion consumers use the full authored entity pose. The
+// fixed collision/blink matrices remain on their separately tracked yaw-only
+// D-COL-1 seam. [orig: Math_BuildFixedPointToFloatMatrix4x4(entity+4)]
+RenderMatrix render_matrix_from_entity_pose(const Entity &e) {
     int32_t pos[3];
     entity_pos_fixed(e, pos);
     const int32_t heading = bam_heading_from_mission_yaw_deg(static_cast<double>(e.yaw));
-    return render_matrix_from_pose(pos, heading, 0, 0);
+    const int32_t pitch = bam_from_degrees_wrapped(static_cast<double>(e.pitch));
+    const int32_t roll = bam_from_degrees_wrapped(static_cast<double>(e.roll));
+    return render_matrix_from_pose(pos, heading, pitch, roll);
 }
-
-} // namespace
 
 // ----------------------------------------------------------------------------
 // Registry
@@ -235,7 +232,7 @@ void OcclusionWorld::register_exterior_faces(World &world, CollisionWorld &colli
         if (inst == nullptr) continue;
         const OcclusionModel *m = model(inst->model_id);
         if (m == nullptr || m->records.empty()) continue;
-        const RenderMatrix world_mat = building_render_matrix(*e);
+        const RenderMatrix world_mat = render_matrix_from_entity_pose(*e);
         for (int32_t r = 0; r < static_cast<int32_t>(m->records.size()); ++r) {
             const OcclusionPortalFace &rec = m->records[r];
             if (rec.type != kOccRecWindow) continue;
@@ -512,7 +509,7 @@ void OcclusionWorld::collect_buildings(World &world, CollisionWorld &collision,
         if (inst == nullptr) continue;
         const OcclusionModel *m = model(inst->model_id);
         if (m == nullptr || m->records.empty()) continue;
-        const RenderMatrix world_mat = building_render_matrix(*e);
+        const RenderMatrix world_mat = render_matrix_from_entity_pose(*e);
         for (int32_t r = 0; r < static_cast<int32_t>(m->records.size()); ++r) {
             const OcclusionPortalFace &rec = m->records[r];
             // type 0 collects; ANY type >= 1 sets the batch open flag (the RE
@@ -580,7 +577,7 @@ void OcclusionWorld::build_occluder_planes(World &world, const OcclusionFrameCam
         const OcclusionModel *m = model(inst->model_id);
         if (m == nullptr) continue;
         const OcclusionPortalFace &rec = m->records[slot.record_index];
-        const RenderMatrix world_mat = building_render_matrix(*e);
+        const RenderMatrix world_mat = render_matrix_from_entity_pose(*e);
 
         uint16_t edges[128];
         int32_t edge_count = 0;
@@ -885,18 +882,18 @@ void OcclusionWorld::traverse(TraverseCtx &ctx, int32_t current_section,
                     // frustum. [orig: @ 0x5c5528-0x5c55b4]
                     exterior_visible_ = true;
                     if (static_cast<int32_t>(window_groups_.size()) < kGroupCap &&
-                        wedge_count + static_cast<int32_t>(group_planes_.size()) / 4 <
+                        wedge_count + static_cast<int32_t>(window_group_planes_.size()) / 4 <
                             kGroupPlaneCap) {
                         PlaneGroup g;
-                        g.start = static_cast<int32_t>(group_planes_.size()) / 4;
+                        g.start = static_cast<int32_t>(window_group_planes_.size()) / 4;
                         g.count = wedge_count;
                         for (int32_t k = 0; k < wedge_count; ++k)
                             for (int32_t c = 0; c < 4; ++c)
-                                group_planes_.push_back(wedge[k][c]);
+                                window_group_planes_.push_back(wedge[k][c]);
                         window_groups_.push_back(g);
                     }
                 }
-                if (ctx.recurse_windows) {
+                if (rec.type == kOccRecWindow && ctx.recurse_windows) {
                     ++ctx.depth;
                     traverse(ctx, far_section, wedge, wedge_count);
                     --ctx.depth;
@@ -908,14 +905,14 @@ void OcclusionWorld::traverse(TraverseCtx &ctx, int32_t current_section,
                 // retail corrupts its own arrays — D-OCC-11).
                 // [orig: @ 0x5c565a-0x5c56c9]
                 if (static_cast<int32_t>(viewthru_groups_.size()) < kGroupCap &&
-                    wedge_count + static_cast<int32_t>(group_planes_.size()) / 4 <
+                    wedge_count + static_cast<int32_t>(viewthru_group_planes_.size()) / 4 <
                         kGroupPlaneCap) {
                     PlaneGroup g;
-                    g.start = static_cast<int32_t>(group_planes_.size()) / 4;
+                    g.start = static_cast<int32_t>(viewthru_group_planes_.size()) / 4;
                     g.count = wedge_count;
                     for (int32_t k = 0; k < wedge_count; ++k)
                         for (int32_t c = 0; c < 4; ++c)
-                            group_planes_.push_back(wedge[k][c]);
+                            viewthru_group_planes_.push_back(wedge[k][c]);
                     viewthru_groups_.push_back(g);
                 }
             }
@@ -939,22 +936,22 @@ uint32_t OcclusionWorld::traverse_from_section(World &world, EntityHandle h, int
     // [orig: render_VPT loops model+0xDC = 0 times]
     if (e == nullptr || inst == nullptr) {
         camera_inside_mode_ = true;
-        return 1u << section;
+        return 1u << (section & 31);
     }
     const OcclusionModel *m = model(inst->model_id);
     if (m == nullptr) {
         camera_inside_mode_ = true;
-        return 1u << section;
+        return 1u << (section & 31);
     }
     TraverseCtx ctx;
     ctx.model = m;
     ctx.entity = h;
-    ctx.entity_matrix = building_render_matrix(*e);
+    ctx.entity_matrix = render_matrix_from_entity_pose(*e);
     ctx.camera[0] = cam.pos_float[0];
     ctx.camera[1] = cam.pos_float[1];
     ctx.camera[2] = cam.pos_float[2];
     ctx.depth = 0;
-    ctx.section_mask = 1u << section;
+    ctx.section_mask = 1u << (section & 31);
     ctx.camera_section = section;
     ctx.exterior_seed = false;
     ctx.recurse_windows = inst->def_bits.recurse_windows; // [orig: attrib bit 27 @ 0x5c7456]
@@ -983,7 +980,7 @@ uint32_t OcclusionWorld::traverse_from_exterior(World &world, EntityHandle h,
     TraverseCtx ctx;
     ctx.model = m;
     ctx.entity = h;
-    ctx.entity_matrix = building_render_matrix(*e);
+    ctx.entity_matrix = render_matrix_from_entity_pose(*e);
     ctx.camera[0] = cam.pos_float[0];
     ctx.camera[1] = cam.pos_float[1];
     ctx.camera[2] = cam.pos_float[2];
@@ -1005,12 +1002,13 @@ uint32_t OcclusionWorld::traverse_from_exterior(World &world, EntityHandle h,
 // every plane at dot + d >= -radius; an EMPTY group returns TRUE (the retail
 // early break with inside = 1).]
 bool OcclusionWorld::sphere_in_plane_groups(const float pos[3], float radius,
+                                            const std::vector<float> &plane_bank,
                                             const PlaneGroup *groups,
                                             int32_t group_count) const {
     for (int32_t g = 0; g < group_count; ++g) {
         if (groups[g].count <= 0) return true;
         bool inside = true;
-        const float *pl = group_planes_.data() + 4 * groups[g].start;
+        const float *pl = plane_bank.data() + 4 * groups[g].start;
         for (int32_t p = 0; p < groups[g].count; ++p, pl += 4) {
             if (pos[0] * pl[0] + pos[1] * pl[1] + pos[2] * pl[2] + pl[3] < -radius) {
                 inside = false;
@@ -1052,7 +1050,8 @@ bool OcclusionWorld::toc_occluded(World &world, CollisionWorld &collision, Batch
     const int32_t window_groups = static_cast<int32_t>(window_groups_.size());
     bool run_slots = false;
     if (window_groups != 0 && !exterior_plane_set_) {
-        if (!sphere_in_plane_groups(pos, radius, window_groups_.data(), window_groups)) {
+        if (!sphere_in_plane_groups(pos, radius, window_group_planes_, window_groups_.data(),
+                                    window_groups)) {
             entry.culled = true;
             entry.entity = EntityHandle{};
             return true;
@@ -1075,7 +1074,8 @@ bool OcclusionWorld::toc_occluded(World &world, CollisionWorld &collision, Batch
                             (exterior_plane_point_[2] - pos[2]) * exterior_plane_normal_[2];
             if (d > radius) {
                 if (window_groups == 0 ||
-                    !sphere_in_plane_groups(pos, radius, window_groups_.data(), window_groups)) {
+                    !sphere_in_plane_groups(pos, radius, window_group_planes_,
+                                            window_groups_.data(), window_groups)) {
                     entry.culled = true;
                     entry.entity = EntityHandle{};
                     return true;
@@ -1146,7 +1146,7 @@ bool OcclusionWorld::toc_occluded(World &world, CollisionWorld &collision, Batch
             const float max_y = static_cast<float>(cand_cm->max[2]) * (1.0f / 65536.0f);
             const float min_z = static_cast<float>(cand_cm->min[0]) * (1.0f / 65536.0f);
             const float max_z = static_cast<float>(cand_cm->max[0]) * (1.0f / 65536.0f);
-            const RenderMatrix cand_mat = building_render_matrix(*cand);
+            const RenderMatrix cand_mat = render_matrix_from_entity_pose(*cand);
             bool all_corners_inside = true;
             for (int32_t corner = 0; corner < 8 && all_corners_inside; ++corner) {
                 const float local[3] = {(corner & 1) ? min_x : max_x,
@@ -1169,7 +1169,8 @@ bool OcclusionWorld::toc_occluded(World &world, CollisionWorld &collision, Batch
         if (occluded) {
             // The viewthru rescue. [orig: @ 0x5c48cc / 0x5c4a76]
             if (slot.viewthru_count > 0 &&
-                sphere_in_plane_groups(pos, radius, viewthru_groups_.data() + slot.viewthru_start,
+                sphere_in_plane_groups(pos, radius, viewthru_group_planes_,
+                                       viewthru_groups_.data() + slot.viewthru_start,
                                        slot.viewthru_count))
                 continue;
             entry.culled = true;
@@ -1207,7 +1208,8 @@ void OcclusionWorld::build_section_masks(World &world, CollisionWorld &collision
     exterior_plane_set_ = false;
     window_groups_.clear();
     viewthru_groups_.clear();
-    group_planes_.clear();
+    window_group_planes_.clear();
+    viewthru_group_planes_.clear();
     bank_viewthru_ = false;
     link_track_.clear();
     water_visible_ = false;

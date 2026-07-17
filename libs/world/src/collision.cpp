@@ -1094,11 +1094,29 @@ terrain::TerrainRaycastSample los_field_sample(const terrain::TerrainHeightField
                                                int32_t x, int32_t y, bool bilinear) {
     const float wx = static_cast<float>(x) / 65536.0f;
     const float wz = -static_cast<float>(y) / 65536.0f; // engine Y -> sampler z
-    const float h = bilinear ? terrain::height_field_height_world_bilinear(f, wx, wz)
-                             : terrain::height_field_height_world(f, wx, wz);
+    int32_t height_1616 = 0;
+    if (bilinear) {
+        const float h = terrain::height_field_height_world_bilinear(f, wx, wz);
+        height_1616 = static_cast<int32_t>(h * 65536.0f);
+    } else {
+        // This LOS variant reads the nearest render-cache texel and expands its
+        // half-unit byte (raw16 >> 7, then sample << 15), not the generic
+        // floor-sampled full-precision height-field point contract.
+        // [orig: Terrain_RaycastHeightmapHiRes @ 0x60c760 point callback]
+        const terrain::CoordsResult<float> r = terrain::coords_world_to_source<float>(
+            f.layout, wx, wz, terrain::coords_runtime_options());
+        if (r.valid && f.valid()) {
+            const int mask = f.dim - 1;
+            const int hx = static_cast<int>(std::floor(r.source_x + 0.5f)) & mask;
+            const int hz = static_cast<int>(std::floor(r.source_z + 0.5f)) & mask;
+            const uint8_t cache_height =
+                static_cast<uint8_t>(f.heightmap[hz * f.dim + hx] >> 7);
+            height_1616 = static_cast<int32_t>(cache_height) << 15;
+        }
+    }
     terrain::TerrainRaycastSample s;
     s.kind = terrain::TerrainRaycastSample::kHeight;
-    s.height_1616 = static_cast<int32_t>(h * 65536.0f);
+    s.height_1616 = height_1616;
     return s;
 }
 

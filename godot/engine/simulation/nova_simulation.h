@@ -873,7 +873,8 @@ public:
 	// building solids; occluded sources sound farther]. Positions in Godot
 	// world space; distance in/out 16.16.
 	int64_t sound_occlusion_distance_q16(const Vector3 &listener_pos,
-	                                     const Vector3 &source_pos, int64_t distance_q16);
+	                                     const Vector3 &source_pos, int64_t distance_q16,
+	                                     int source_bms_id = 0);
 
 	// Loadout-zone gates for the host's armory key [orig: input action 218 opens
 	// weapon.mnu WEAPON only while entity Flags & 0x400000 (a type-6 armory volume

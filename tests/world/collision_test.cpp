@@ -707,6 +707,24 @@ void test_raycast_clear_los() {
     CHECK(!rig.cw.raycast_clear(rig.world, a_hi, buried, rig.soldier, EntityHandle{}));
 }
 
+// The 0x60c760 LOS marcher point callback rounds to the nearest render-cache
+// texel. A floor sample would miss the isolated x=1 column at the first step.
+void test_los_point_bias() {
+    Field f(0);
+    f.heightmap[1] = 2 * 256;
+    const int32_t a[3] = {fx(0.75), 0, fx(1.0)};
+    const int32_t b[3] = {fx(8.75), 0, fx(1.0)};
+    CHECK(los_terrain_blocked(f.field, a, b));
+
+    // That cache stores floor(raw16 / 128) as a byte and expands it in
+    // half-unit steps. A 1.25u source column therefore reads as 1.0u and does
+    // not block a 1.125u ray; returning the full-precision height would block.
+    f.heightmap[1] = 320;
+    const int32_t q_a[3] = {fx(0.75), 0, fx(1.125)};
+    const int32_t q_b[3] = {fx(8.75), 0, fx(1.125)};
+    CHECK(!los_terrain_blocked(f.field, q_a, q_b));
+}
+
 int main() {
     test_matrix_roundtrip();
     test_blink_query_and_refresh();
@@ -722,6 +740,7 @@ int main() {
     test_platform_latch();
     test_debug_seams();
     test_raycast_clear_los();
+    test_los_point_bias();
     if (failures == 0) std::printf("collision_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }
