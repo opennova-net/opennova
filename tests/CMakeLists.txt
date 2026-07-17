@@ -186,6 +186,13 @@ target_include_directories(sound_selector_test PRIVATE ${CMAKE_CURRENT_SOURCE_DI
 target_compile_features(sound_selector_test PRIVATE cxx_std_17)
 add_test(NAME sound_selector COMMAND sound_selector_test)
 
+# SndProf.def sound-profile parse + lookup (asset-gated retail spot check via JO_ASSETS).
+add_executable(sound_profile_test audio/sound_profile_test.cpp)
+target_link_libraries(sound_profile_test PRIVATE opennova_audio)
+target_include_directories(sound_profile_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(sound_profile_test PRIVATE cxx_std_17)
+add_test(NAME sound_profile COMMAND sound_profile_test)
+
 # PFF tests
 add_executable(pff_unit_test pff/pff_unit_test.cpp)
 target_link_libraries(pff_unit_test PRIVATE opennova_pff)
@@ -931,6 +938,13 @@ target_link_libraries(infantry_test PRIVATE opennova_world)
 target_include_directories(infantry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(infantry_test PRIVATE cxx_std_17)
 add_test(NAME infantry COMMAND infantry_test)
+
+# The infantry slot-sound emissions (footsteps/foley/landing/screams).
+add_executable(slot_sound_test world/slot_sound_test.cpp)
+target_link_libraries(slot_sound_test PRIVATE opennova_world)
+target_include_directories(slot_sound_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(slot_sound_test PRIVATE cxx_std_17)
+add_test(NAME slot_sound COMMAND slot_sound_test)
 
 # World-object collision (Entity_TestCollisionSections @0x4aef90 / _RaycastCollisionModel
 # @0x413060 / _ComputeBoneCollisionForce @0x4ae150 / _ProcessCollisionAndPlatformPhysics

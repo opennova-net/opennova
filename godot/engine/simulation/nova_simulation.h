@@ -21,6 +21,7 @@
 #include <mission/event_runtime.h>
 #include <mission/promote.h>
 #include <terrain/height_field.h>
+#include <terrain/surface_type_map.h>
 #include <wac/wac_system.h>
 
 #include "wac/nova_wac_program.h"
@@ -387,7 +388,16 @@ private:
 	std::vector<uint16_t> terrain_heightmap_;
 	std::vector<int> terrain_sector_grid_;
 	opennova::terrain::TerrainHeightField terrain_field_;
+	// Charmap (surface-type) raster copy + the sampler view the footstep pass
+	// reads through world.surface_map [orig: Terrain_GetSurfaceTypeAtPosition
+	// @ 0x606510]. Shares terrain_sector_grid_/origins with the height field.
+	std::vector<uint8_t> surface_indices_;
+	opennova::terrain::SurfaceTypeMap surface_map_;
+	// SndProf.def text + water plane held for (re)application on reset_world.
+	std::vector<uint8_t> sndprof_text_;
+	int32_t env_water_z_q16_ = 0;
 	void apply_terrain_to_ai();
+	void apply_sound_state_to_world();
 
 	// Anim-driven soldier locomotion: the .adm/.bad-backed root-motion source the infantry
 	// motor integrates (world/infantry.h). Owned here so it survives reset_world; the fresh
@@ -639,6 +649,20 @@ public:
 	// @0x53F440 — the firing host presents its own rounds inline at fire time;
 	// world-wac-ai-re §17.4]
 	Array drain_fire_presentation_events();
+
+	// The sound-profile chain [orig: SoundProfile_LoadAll @ 0x527490 /
+	// Entity_GetProfileSlotSound @ 0x528300]: feed SndProf.def text (VFS
+	// bytes) — parsed into world.sound_profiles now and re-applied on
+	// reset_world; per-entity bindings resolve in resolve_ai_weapons.
+	void set_sound_profiles(const PackedByteArray &p_sndprof_text);
+	// The mission water plane (godot Y units) the footstep water pick and the
+	// landing legs compare feet against [orig: Env_WaterHeightFixed @ 0x26C6454].
+	void set_water_z(double p_water_y);
+	// Drain the per-tick slot-sound emissions (footsteps/foley/landing/screams):
+	// one Dictionary per event — {set: String, pos: Vector3 (godot), handle,
+	// slot} — played by the fire present pass at full volume
+	// [orig: Entity_PlaySound3D_FullVolume @ 0x528e20].
+	Array drain_slot_sounds();
 
 	// Live TRACER rounds, 9 floats each: godot-space position (3), godot-space
 	// per-tick velocity (3), round team, tracer_type friendly id, enemy id — the

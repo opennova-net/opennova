@@ -24,6 +24,7 @@ bool extract_items_def(const std::string& source_path, const uint8_t* data, size
         sink.add(item.husk, "object_model", prefix + "husk");
         sink.add(item.anim_def, "anim_def", prefix + "anim_def");
         sink.add(item.sound_profile, "sound_profile", prefix + "sound_profile");
+        sink.add(item.sound_profile_female, "sound_profile", prefix + "sound_profileFemale");
         for (size_t j = 0; j < 7; ++j) {
             sink.add(item.soundloops[j], "sound_profile", prefix + "soundloop[" + std::to_string(j) + "]");
         }

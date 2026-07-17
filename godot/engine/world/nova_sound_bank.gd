@@ -41,6 +41,9 @@ var _index: Dictionary = {}
 var _selector := NovaSoundSelector.new()
 # wav basename(lower) -> AudioStreamWAV (or null if it failed to resolve/decode)
 var _wav_cache: Dictionary = {}
+# exclusive_key -> the gating voice of an exclusive one-shot (see play_oneshot_3d);
+# entries go stale harmlessly (checked with is_instance_valid before use).
+var _exclusive: Dictionary = {}
 
 
 func _init(resource_root) -> void:
@@ -124,10 +127,19 @@ func spawn_ambient(parent: Node3D, world_pos: Vector3, name: String, bus: String
 ## play, no per-frame update]; pass Vector3.INF to play distance-flat (menu /
 ## tests). Auto-frees when finished. Returns true if anything played.
 func play_oneshot_3d(parent: Node3D, world_pos: Vector3, name: String, bus: StringName,
-		listener_pos: Vector3 = Vector3.INF, source_bms_id: int = 0) -> bool:
+		listener_pos: Vector3 = Vector3.INF, source_bms_id: int = 0,
+		exclusive_key: String = "") -> bool:
 	var loc := _find_set(name)
 	if loc.is_empty():
 		return false
+	# Exclusive one-shots: a non-empty key declines to RESTART the set while its
+	# previous voice still plays. Host stand-in for the engine folding every-tick
+	# refires (chute flap / freefall retrigger each body tick) into its finite
+	# channel pool — audibly one continuous sound either way (audio doc D-SND-10).
+	if not exclusive_key.is_empty():
+		var prev = _exclusive.get(exclusive_key)
+		if prev != null and is_instance_valid(prev) and prev.playing:
+			return false
 	var lwf = _banks[loc.bank]
 	var set_d: Dictionary = lwf.get_set(loc.set)
 	var layers: Array = set_d.get("layers", [])
@@ -171,6 +183,8 @@ func play_oneshot_3d(parent: Node3D, world_pos: Vector3, name: String, bus: Stri
 		parent.add_child(player)
 		player.finished.connect(player.queue_free)
 		player.play()
+		if not exclusive_key.is_empty() and not played:
+			_exclusive[exclusive_key] = player  # first layer's voice gates the refire
 		played = true
 	return played
 

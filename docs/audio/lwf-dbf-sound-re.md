@@ -221,6 +221,100 @@ driver reads 1..4 (`Entity_ProcessMovementSoundEffects @ 0x5294a0`). Entity-atta
 use a separate composite-name path (`SoundProfile_FindByEntityAndType @ 0x528180`,
 `"<EntityDefName>_<SoundType>"`).
 
+## The sound-profile system — SndProf.def (witnessed + ported 2026-07-17)
+
+The per-item slot-sound layer the footsteps/screams/foley ride. Port surfaces:
+`libs/audio/sound_profile.{h,cpp}` (`SoundProfileTable`), `libs/def` (the two
+profile keys), `libs/world/src/infantry.cpp` (`AiSystem::infantry_anim_sound_pass`
+/ `emit_slot_sound`), `NovaSimulation::set_sound_profiles`/`drain_slot_sounds`,
+`fire_present_pass.gd` `_drain_slot_sounds`. Evidence ctests: `sound_profile`
+(parse + lookup + the asset-gated 49-profile retail sweep), `slot_sound`
+(emission semantics).
+
+**Load.** `SoundProfile_LoadAll @ 0x527490` allocates 128 slots x 2152 bytes
+(grow-on-demand via `SoundProfile_AllocSlot @ 0x526f80`) and parses
+**`SndProf.def`** through the shared ASCII-file tokenizer with
+`sound_profile_xml_callback @ 0x526fc0` per line. Called at boot
+(`Game_InitSubsystems @ 0x4a7141`, after `SoundProfile_ResetState @ 0x526de0` —
+whose real body resets the profile globals + `g_SoundEmitterMixScale = 255`;
+its old "Bink" IDB gloss was wrong) and from the three expansion-reload paths
+(`@ 0x5527de/0x568425/0x5689e2`).
+
+**Entry layout** (2152 bytes, all witnessed from the callback stores):
+`+0` name[64] (a >=64-char `begin` name truncates `@ 0x527043`); `+64`
+id[51] — the resolved per-slot sound-set pointers; `+268/+472` param2/param3[51]
+(float columns x 65536 `@ 0x527122-0x527169`); `+676` param4[51] (atol);
+`+880` the 12 med/crs loop fade/pitch percents x 655 (`@ 0x5270a9-0x527481`);
+`+928` name24[51][24] — the authored set names. 928 + 51x24 = 2152 exactly.
+
+**The 51-slot keyword table** (`@ 0x82F3B0-0x82F54C`; index == slot, the
+authoritative slot map — mirrored as `audio::SoundProfileSlot` +
+`kSlotKeywords`): 0-6 `Soundloop_1..7`, 7 `sounddeath`, 8 `SSNightDead`,
+9/10 `door_open/close_sound_id`, 11-14 `dawnshot/dayshot/duskshot/nightshot`,
+15 `SSFallDead`, 16 `SSFallAlive`, 17/18 `SSLFootGND`/`SSRFootGND`,
+19/20 `SS*FootSnow`, 21/22 `SS*FootOBJ`, 23 `SSFootWater`, 24-29 `SSAudio1..6`,
+30-33 engine start/stop/reverse/highrev, 34 `warning`, 35-40 the impact family
++ `rotor_impact`, 41-44 `ChuteOpen/ChuteClose/ChuteFlap/FreeFall`, 45
+`drive_repeat`, 46 `swivel_shift`, 47-50 the tumble family. JO ships 49
+profiles; the SP player pair authors dirt/OBJ/water feet, the chute family,
+and `BM1_DEATH`/`BM1_DEATH_K`.
+
+**Resolve.** At mission start (`Game_StartMission @ 0x525468`)
+`resolve_sound_profile_triggers @ 0x528210` fills id[slot] =
+`SoundBank_FindTriggerByName(name24[slot])` across the active banks
+(first bank wins; empty name -> 0). Our host resolves by NAME at play time
+(NovaSoundBank is name-keyed), so the port's "id" IS the authored set name and
+an empty slot is the id-0 no-op.
+
+**Item binding.** `ItemDef_AllocateWithDefaults @ 0x49e3f5` seeds BOTH def
+profile pointers (+0x268 primary / +0x26C female) to
+`SoundProfile_FindSlotByName("default")`; `SoundProfile_FindSlotByName
+@ 0x526e30` is a first-stricmp-match scan whose MISS returns the array base
+(the first profile). `ItemDef_ParseProperty` binds `sound_profile`
+(`@ 0x49fafd`: writes +0x268, and rewrites +0x26C only while it still equals
++0x268) and `sound_profileFemale` (`@ 0x49fb76`: writes +0x26C) — JOX authors
+the female key exactly on the two SP/MP player defs.
+`ItemDef_ResolveAllResources @ 0x49e5f0` then copies profile ids into the def's
+own sound fields (soundLoopId[0..6] = id[0..6], death = id[7], doors =
+id[9]/id[10], shots = id[11..14] when nonzero, + the shot param2/3 pairs) with
+the per-item name overrides (soundloop_/doorsound/xshot/sounddeath keys)
+re-resolving over them, and stores the slot-table base pointers
+def+2148/+2152 = profile+64.
+
+**Runtime accessor + play.** `Entity_GetProfileSlotSound @ 0x528300` (renamed
+2026-07-17; the kong name `Entity_GetWeaponSlotTableValue` was a misnomer —
+the table is the sound-profile slot array, not the weapon loadout): def+2148, or
+def+2152 when the entity's character entity carries the female byte
+(`CharacterEntity[12]` `@ 0x52831c`); returns id[slot]. Consumers play through
+`Entity_PlaySound3D_FullVolume @ 0x528e20` = `Sound_Play3DPositional(id, &pos,
+entity, 255)`. The complete accessor xref set is the two infantry body
+updaters (all slots 7-29 + 15/16, witnessed in
+[world-wac-ai-re.md](../world/world-wac-ai-re.md) §17.4b) — the vehicle slots
+30-50 are read by the vehicle-physics family through def+0x864 directly
+(`Entity_ProcessVehicleSuspension`, air/wheeled/light/tracked physics,
+`Entity_ProcessInfantryPhysics` tumble legs) and ride the vehicle-sound grill.
+`SoundProfile_FindByEntityAndType @ 0x528180` (the `"<DefName>_<Type>"`
+composite path, §items.def above) is a SEPARATE mechanism; the org2 player
+death edge uses it with type 5 (night) / 0 `@ 0x4b4c4a-0x4b4c6a` — unported
+(D-SND-14).
+
+### Divergences
+
+| ID | Ours | Original | Why / consequence |
+|---|---|---|---|
+| D-SND-10 | slots 43/44 (ChuteFlap/FreeFall) refire every body tick; the host bank declines to RESTART the set while its previous voice still plays (`play_oneshot_3d` exclusive key) | the refires land in a finite channel pool and steal their own channels — audibly one continuous rush | host voice model (AudioStreamPlayer3D per fire); audibly equivalent, no 62-voice pileup |
+| D-SND-11 | footstep OBJ slots 21/22 never picked — the pick falls through to the terrain surface | `entity+0x28 groundEntity` (written by the ground probes, e.g. `Entity_RaycastGroundHeightAndObject @ 0x525fd0`) selects `SS*FootOBJ` when standing on an entity | the platform link is unmodeled in the sim (`InfantryState::standing_on_entity` is wired but never set); lands with the platform slice |
+| D-SND-12 | the female profile (def+2152) is never selected — primary always | the character entity's female byte picks it `@ 0x52831c` | avatar gender is unmodeled sim-side; JO NPC female defs author their own `sound_profile`, so only the shared player defs are affected |
+| D-SND-13 | SndProf.def parses per mission load off the mission resource root | one boot-time load + expansion reloads | same file, same table; no observable difference |
+| D-SND-14 | the local player's death scream rides the NPC slot-7/8 leg | org2 plays the composite `SoundProfile_FindByEntityAndType(def, 5/0)` name `@ 0x4b4c61` | the composite-name chain is unported (P2b player-death presentation); the profile scream is the same authored voice family |
+| D-SND-15 | `Terrain_GetSurfaceTypeAtPosition`'s placed-tile override leg is not modeled (`terrain/surface_type_map.h` samples the charmap only) | `.til` placements remap the surface through `byte_319F7D8` `@ 0x6065ca-0x60660c` | placed-tile data is not sim-plumbed; feet on roads/runways read the underlying charmap class |
+
+Follow-ups: the vehicle slot consumers (30-50; the direct def+0x864 readers)
+ride the vehicle-sound grill; remote-client footstep presentation rides the
+client anim path (net seam — the host never emits for net-snapped peers, same
+as retail's per-client body updaters); the chute family 41-43 + the chute
+brake physics ride the parachute slice (witness in world-wac-ai-re §17.4b).
+
 ## Placed ambient markers — the envsnd emitter system (grilled 2026-07-10)
 
 How a placed "snd:" marker actually sounds: a per-tick class update registers transient
@@ -444,6 +538,12 @@ semantics, and the global bank-slot order are all engine-witnessed and implement
   unwalked; folded into D-SND-6.
 - unknown: `Entity_ProcessMovementSoundEffects @ 0x5294a0` gear/pitch interpolation details
   and the `Soundloop_5..7` consumers — vehicle-sound grill scope.
+- the sound-profile system (witnessed + ported 2026-07-17): SndProf.def parse,
+  the 51-slot table, item binding (incl. `sound_profileFemale`), the slot
+  accessor, and the infantry consumers (footsteps by surface, SSAudio foley,
+  landing pair, death scream night gate) are engine-witnessed and ported
+  (D-SND-10..15; ctests `sound_profile` + `slot_sound`); the vehicle slots
+  30-50 and the composite entity-type path remain vehicle/P2b scope.
 - follow-up: rename the `libs/lwf` `Multi.target_id` field (and its NovaLwfData/ONED
   exposures) to its witnessed one-shot-cull-range meaning; the ONED sound workspace shows
   it as "(id N)" today.

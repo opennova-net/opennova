@@ -314,6 +314,12 @@ public:
 
 	const opennova::CptFile& get_cpt() const { return cpt; }
 	const opennova::TrnConfig& get_trn() const { return trn; }
+	// C++-side raster access for the sim's surface-type sampler (the charmap
+	// indices ARE the engine's surface classes; [orig: the runtime buffer
+	// Terrain_GetSurfaceTypeAtPosition samples @ 0x6065c6]).
+	const std::vector<uint8_t> &get_charmap_indices() const { return charmap_indices; }
+	int get_charmap_width() const { return charmap_width; }
+	int get_charmap_height() const { return charmap_height; }
 };
 
 } // namespace godot

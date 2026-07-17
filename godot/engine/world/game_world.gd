@@ -1503,6 +1503,10 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> void:
 	_runtime.setup(mission, container, opts)
 	if _runtime.get_sim() == null:
 		push_warning("GameWorld: failed to start mission runtime")
+	elif _water != null and _runtime.get_sim().has_method("set_water_z"):
+		# Water may have been built before the runtime existed — re-push the
+		# sim-side plane the footstep/landing legs compare feet against.
+		_runtime.get_sim().set_water_z(float(_water.water_height))
 	_runtime.effects_drained.connect(_on_runtime_effects)
 	_runtime.fixed_tick_completed.connect(_on_runtime_fixed_tick)
 	_runtime.simulation_restarted.connect(_on_runtime_simulation_restarted)
@@ -1654,6 +1658,13 @@ func _start_effect_world() -> void:
 	var count := _effect_world.load_from_resource_root(_resource_root)
 	if _water != null:
 		_effect_world.set_water_height(float(_water.water_height))
+		# The sim-side water plane: the footstep water pick and the landing legs
+		# compare feet against it on logic ticks [orig: Env_WaterHeightFixed
+		# @ 0x26C6454]. Idempotent; re-pushed after runtime start too (either
+		# side may come up first).
+		var water_sim := get_sim()
+		if water_sim != null and water_sim.has_method("set_water_z"):
+			water_sim.set_water_z(float(_water.water_height))
 	# One provider for every owned/attached group: int keys are WAC fx2ssn SSNs
 	# (resolved through the runtime), String keys are the per-item effect attaches
 	# (resolved to the placed node's live transform).
