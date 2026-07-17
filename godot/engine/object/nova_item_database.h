@@ -85,6 +85,10 @@ private:
 		// 0 = none authored. The corpse timer's seed (entity+0x148 at the infantry
 		// death edge). [orig: ItemDef_ParseProperty @ 0x49fa6c -> def+0x890]
 		int deathtime_ticks = 0;
+		// items.def primary_weapon — the weapon.def entry an ewep emplacement mounts
+		// (the attach label's text source); empty if none authored.
+		// [orig: -> ItemDef+0x54B primaryWeapon; docs/world/itemdef-re.md]
+		String primary_weapon;
 	};
 	std::unordered_map<int, Item> items;
 	String source_path;
@@ -171,6 +175,10 @@ public:
 	// corpse timer at the death edge. [orig: @ 0x49fa6c -> def+0x890;
 	// Entity_UpdateInfantryAI @ 0x4b9c97]
 	int get_deathtime_ticks(int id) const;
+	// items.def primary_weapon — the ewep emplacement's mounted weapon.def entry
+	// (the USEGUN attach label resolves its attachtextid); empty if none authored.
+	// [orig: -> ItemDef+0x54B; consumer draw_vehicle_seat_and_armory_labels @ 0x5a351d]
+	String get_primary_weapon(int id) const;
 	// items.def sound_profile (a sound-set name resolved against the loaded .lwf
 	// banks at runtime); empty if the item declares none.
 	String get_sound_profile(int id) const;

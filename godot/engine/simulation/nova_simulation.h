@@ -902,6 +902,17 @@ public:
 	// Entity_ToggleVehicleMount @0x436950]
 	bool local_player_toggle_mount();
 
+	// The floating attach labels around the local player, one Dictionary per label:
+	// position (mission space, +0.1875 u lift applied), seat_type (world::SeatType,
+	// 4 = armory point), armory (bool), nearest (bool, the full-bright highlight),
+	// attach_text_key (the USEGUN weapon's attachtextid Overlays key, "" = absent ->
+	// the STROVER_USEGUN default). Armory mode rides the zone flag; the can-fire
+	// nearest-only gate models EquippedSlot presence + the ctrl/drvr seat reject.
+	// [orig: draw_vehicle_seat_and_armory_labels @0x5a3290 selection half;
+	//  Player_CanFireWeapon @0x5cf780 — its camera/underwater legs are host state,
+	//  unmodeled here: docs/interface/hud-re.md (D-HUD-11)]
+	TypedArray<Dictionary> get_attach_labels() const;
+
 	// The armory ACCEPT apply for the local player: resolve the weapon name in the
 	// armory table and stamp equipped_adm_index (+ player_class 5..9 when given).
 	// The FP viewmodel + action-FSM rebuild is the host's move (GameWorld). Returns

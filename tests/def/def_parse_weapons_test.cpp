@@ -299,6 +299,31 @@ int main(void) {
     }
     printf("M4AUTO/M4 armory fields OK\n");
 
+    /* attachtextid — the attach-label Overlays key on emplaced guns; absent
+       everywhere else [orig: WeaponDefs_ParseLineCallback @ 0x544d6c -> AdmDef+0x3A0] */
+    {
+        const DefWeaponDef *empl = NULL;
+        for (size_t i = 0; i < wf.count; ++i) {
+            if (strcmp(wf.entries[i].weapon_name, "WPN_EMPLCD50") == 0) {
+                empl = &wf.entries[i];
+                break;
+            }
+        }
+        if (!empl || strcmp(empl->attach_text_id, "attach_50cal") != 0) {
+            fprintf(stderr, "FAIL: EMPLCD50 attach_text_id: '%s' (found=%d)\n",
+                    empl ? empl->attach_text_id : "", empl != NULL);
+            def_free_weapons(&wf);
+            return 1;
+        }
+        if (m4->attach_text_id[0] != '\0') {
+            fprintf(stderr, "FAIL: M4AUTO attach_text_id should be empty: '%s'\n",
+                    m4->attach_text_id);
+            def_free_weapons(&wf);
+            return 1;
+        }
+    }
+    printf("attachtextid OK\n");
+
     /* Weapon flags — the FULL witnessed token table, both dwords [orig: the
        16-B-stride {name, 0, flags1, flags2} table @ 0x830bf0]: auto = 0x100,
        Sighted = 0x2, WhileSwimming = 0x1000000 (the old 7-entry table aliased it

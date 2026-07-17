@@ -29,6 +29,10 @@ struct ItemSeatSpec {
     int32_t type_id = 0; // raw BMS/items.def id stored in bms::Entity::type_id
     uint8_t emplaced_pose_variant = 0;
     std::vector<world::Seat> seats;
+    // "armory*" userpoint locals (host feeds them only for items.def Armory-attrib
+    // 0x80000 items) + the ewep 'primary_weapon' link — the attach-label sources.
+    std::vector<world::Vec3> armory_points;
+    std::string primary_weapon;
 };
 
 struct PromoteOptions {

@@ -1138,6 +1138,47 @@ bool NovaSimulation::local_player_toggle_mount() {
 	return opennova::world::player_toggle_vehicle_mount(*world_, world_->cached.local_player);
 }
 
+TypedArray<Dictionary> NovaSimulation::get_attach_labels() const {
+	TypedArray<Dictionary> out;
+	if (!world_) return out;
+	const opennova::world::Entity *player = world_->registry.get(world_->cached.local_player);
+	if (player == nullptr || !player->alive || player->health <= 0) return out;
+	// Armory mode = standing in the type-6 armory volume; the label pass reads the raw
+	// flag [orig: is_armory_mode = entity Flags & 0x400000 @0x5a32c4].
+	const bool armory_mode =
+	    (player->flags & opennova::world::kEntityFlagArmoryZone) != 0;
+	// The nearest-only gate [orig: Player_CanFireWeapon @0x5cf780 — EquippedSlot present
+	// and parentSlot not 2/5 (ctrl/drvr); the camera-mode/underwater/scope legs live
+	// host-side and are unmodeled here: docs/interface/hud-re.md (D-HUD-11)].
+	const bool can_fire =
+	    player->equipped_adm_index != 0xFF &&
+	    !(player->mounted && opennova::world::is_vehicle_control_seat(player->mount_type));
+	std::vector<opennova::world::AttachLabel> labels;
+	opennova::world::collect_attach_labels(*world_, *player, armory_mode, can_fire, labels);
+	for (const opennova::world::AttachLabel &l : labels) {
+		Dictionary d;
+		d["position"] = Vector3(l.world_pos.x, l.world_pos.y, l.world_pos.z);
+		d["seat_type"] = static_cast<int>(l.type);
+		d["armory"] = l.armory;
+		d["nearest"] = l.nearest;
+		String key;
+		if (l.type == opennova::world::SeatType::Gunner) {
+			// The USEGUN label text: the gun entity's primary weapon -> its weapon.def
+			// attachtextid key [orig: Entity_GetWeaponSlots slot0 -> def+0x3A0 @0x5a351d].
+			const opennova::world::Entity *cand = world_->registry.get(l.entity);
+			if (cand != nullptr && !cand->primary_weapon.empty()) {
+				const int wi = world_->weapons.index_of(cand->primary_weapon.c_str());
+				if (wi >= 0)
+					key = String(world_->weapons.entries[static_cast<size_t>(wi)]
+					                     .attach_text_id.c_str());
+			}
+		}
+		d["attach_text_key"] = key;
+		out.push_back(d);
+	}
+	return out;
+}
+
 bool NovaSimulation::apply_local_player_loadout(const String &p_weapon_name,
                                                 int p_player_class) {
 	if (!world_) return false;
@@ -1264,7 +1305,25 @@ void NovaSimulation::set_item_seat_specs(const Array &p_specs) {
 			    std::clamp(static_cast<int>(seat_d.get("yaw_offset", 0)), -32768, 32767));
 			spec.seats.push_back(seat);
 		}
-		if (!spec.seats.empty()) item_seat_specs_.push_back(std::move(spec));
+		// The attach-label sources: "armory*" userpoint locals (Armory-attrib items
+		// only — the host gates on itemdef attrib 0x80000) + the ewep primary_weapon
+		// link [orig: @0x4361ee/@0x5a36f5; ItemDef+0x54B].
+		const Variant armory_v = spec_d.get("armory_points", Array());
+		if (armory_v.get_type() == Variant::ARRAY) {
+			const Array armory_a = armory_v;
+			for (int64_t j = 0; j < armory_a.size(); ++j) {
+				if (armory_a[j].get_type() != Variant::VECTOR3) continue;
+				const Vector3 p = armory_a[j];
+				spec.armory_points.push_back({static_cast<float>(p.x),
+				                              static_cast<float>(p.y),
+				                              static_cast<float>(p.z)});
+			}
+		}
+		spec.primary_weapon =
+		    String(spec_d.get("primary_weapon", String())).utf8().get_data();
+		if (!spec.seats.empty() || !spec.armory_points.empty() ||
+		    !spec.primary_weapon.empty())
+			item_seat_specs_.push_back(std::move(spec));
 	}
 }
 
@@ -1514,6 +1573,7 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("local_player_in_armory_zone"), &NovaSimulation::local_player_in_armory_zone);
 	ClassDB::bind_method(D_METHOD("local_player_in_vehicle_loadout_zone"), &NovaSimulation::local_player_in_vehicle_loadout_zone);
 	ClassDB::bind_method(D_METHOD("local_player_toggle_mount"), &NovaSimulation::local_player_toggle_mount);
+	ClassDB::bind_method(D_METHOD("get_attach_labels"), &NovaSimulation::get_attach_labels);
 	ClassDB::bind_method(D_METHOD("apply_local_player_loadout", "weapon_name", "player_class"),
 	                     &NovaSimulation::apply_local_player_loadout);
 	ClassDB::bind_method(D_METHOD("load_weapon_table", "resource_root", "name"),

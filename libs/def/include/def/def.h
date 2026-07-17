@@ -231,6 +231,13 @@ typedef struct DefWeaponDef {
        constant 2 — JO data ships only run_anim 0/1, both landing on run_3.
        [orig: parser key 'run_anim' @ 0x543d15 -> +0xAC; promotion @ 0x4b729d-0x4b731b]. */
     int run_anim;
+    /* The floating attach-label text key ('attachtextid attach_50cal', emplaced
+       guns/turrets only). The original resolves it against the Gametext "Overlays"
+       section AT PARSE and stores the char* at AdmDef+0x3A0; we keep the key and the
+       HUD resolves at draw. Empty = key absent -> the STROVER_USEGUN default label.
+       [orig: WeaponDefs_ParseLineCallback @ 0x544d6c -> GameText_GetString("overlays",
+       key) -> +0x3A0; consumer draw_vehicle_seat_and_armory_labels @ 0x5a3538]. */
+    char attach_text_id[32];
 } DefWeaponDef;
 
 typedef struct DefWeaponsFile {
@@ -366,6 +373,12 @@ typedef struct DefItemDef {
        [orig: ItemDef_ParseProperty @ 0x49fa6c-0x49faa0 -> def+0x890; consumer
        Entity_UpdateInfantryAI @ 0x4b9c97 -> entity+0x148] */
     int deathtime_ticks;
+    /* items.def 'primary_weapon' — the weapon.def entry an ewep emplacement mounts
+       (the gun entity's slot-0 weapon; the attach label's text source). Appended
+       (FFI mirror stability). [orig: ItemDef_ParseProperty -> def+0x54B primaryWeapon
+       char[32] (docs/world/itemdef-re.md); consumers: the spawn weapon-slot build and
+       draw_vehicle_seat_and_armory_labels @ 0x5a351d via slot0->def+0x3A0] */
+    char primary_weapon[32];
 } DefItemDef;
 
 typedef struct DefItemsFile {

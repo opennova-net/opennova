@@ -441,6 +441,103 @@ void test_player_spawn_group() {
     CHECK(e != nullptr && e->group_id == 1);
 }
 
+// The floating attach-label list [orig: draw_vehicle_seat_and_armory_labels @0x5a3290
+// selection half]: free seats within the 4.0 u 3D radius label, occupied seats never
+// label, the scan winner alone carries `nearest`, and a ready weapon limits labels to
+// the nearest entity [orig: @0x5a3354].
+void test_attach_labels_seats() {
+    Rig r(2.0f);
+    std::vector<AttachLabel> labels;
+    collect_attach_labels(r.w, r.player(), /*armory_mode=*/false, /*can_fire=*/false, labels);
+    CHECK(labels.size() == 2); // both free seats are inside 4.0 u
+    int nearest_count = 0;
+    for (const AttachLabel &l : labels) {
+        CHECK(l.entity == r.veh_h);
+        CHECK(!l.armory);
+        CHECK(l.world_pos.z > r.veh().position.z); // the +0.1875 u lift applied
+        if (l.nearest) ++nearest_count;
+    }
+    CHECK(nearest_count == 1); // exactly the scan winner [orig: the nearest compare @0x5a3640]
+
+    // Occupied seats never label [orig: mountHandles != 0xFFFF skip @0x5a348f].
+    r.veh().seats[1].occupant = r.player_h;
+    labels.clear();
+    collect_attach_labels(r.w, r.player(), false, false, labels);
+    CHECK(labels.size() == 1);
+    CHECK(labels[0].seat_index == 0);
+
+    // Out of the 4.0 u label radius -> the gate empties the list via the nearest scan
+    // [orig: the Entity_FindNearestSeatOrArmory bracket @0x5a32e2].
+    Rig far(30.0f);
+    labels.clear();
+    collect_attach_labels(far.w, far.player(), false, false, labels);
+    CHECK(labels.empty());
+}
+
+// can_fire keeps only the nearest ENTITY's labels: a second in-range vehicle labels only
+// when the player cannot fire [orig: !Player_CanFireWeapon() || entity == nearest @0x5a3354].
+void test_attach_labels_can_fire_gate() {
+    Rig r(1.0f);
+    Entity veh2;
+    veh2.net_id = 12;
+    veh2.kind = EntityKind::Item;
+    veh2.item_id = 1295;
+    veh2.position = {103.0f, 200.0f, 10.0f}; // ~2 u from the player at 101,200
+    veh2.health = 500;
+    veh2.health_max = 500;
+    veh2.alive = true;
+    Seat s;
+    s.type = SeatType::Passenger;
+    s.bone_index = 1;
+    s.source_name = "sitex00";
+    s.seat_local = {0.0f, 0.0f, 0.5f};
+    veh2.seats.push_back(s);
+    const EntityHandle veh2_h = r.w.registry.spawn(1, veh2);
+
+    std::vector<AttachLabel> all;
+    collect_attach_labels(r.w, r.player(), false, /*can_fire=*/false, all);
+    bool saw_veh2 = false;
+    for (const AttachLabel &l : all) saw_veh2 = saw_veh2 || l.entity == veh2_h;
+    CHECK(all.size() >= 3); // both trucks' free seats
+    CHECK(saw_veh2);
+
+    std::vector<AttachLabel> armed;
+    collect_attach_labels(r.w, r.player(), false, /*can_fire=*/true, armed);
+    CHECK(!armed.empty());
+    EntityHandle only = armed[0].entity;
+    for (const AttachLabel &l : armed) CHECK(l.entity == only); // one entity's labels
+}
+
+// Armory mode: "armory*" points of Armory-attrib items label (SeatType::ArmoryPoint),
+// seats do not; the same scan math picks the nearest [orig: the armory legs @0x4361ee /
+// @0x5a36f5; searchMode = Flags & 0x400000 @0x5a32c4].
+void test_attach_labels_armory_mode() {
+    Rig r(2.0f);
+    Entity crate;
+    crate.net_id = 21;
+    crate.kind = EntityKind::Item;
+    crate.item_id = 1125; // "Armory Version #1"
+    crate.position = {99.0f, 199.0f, 10.0f};
+    crate.health = 100;
+    crate.health_max = 100;
+    crate.alive = true;
+    crate.armory_points.push_back({0.0f, 0.0f, 1.0f});
+    const EntityHandle crate_h = r.w.registry.spawn(1, crate);
+
+    std::vector<AttachLabel> labels;
+    collect_attach_labels(r.w, r.player(), /*armory_mode=*/true, false, labels);
+    CHECK(labels.size() == 1); // the truck's seats do NOT label in armory mode
+    CHECK(labels[0].entity == crate_h);
+    CHECK(labels[0].armory);
+    CHECK(labels[0].type == SeatType::ArmoryPoint);
+    CHECK(labels[0].nearest);
+
+    // Seat mode ignores armory points.
+    labels.clear();
+    collect_attach_labels(r.w, r.player(), false, false, labels);
+    for (const AttachLabel &l : labels) CHECK(!l.armory);
+}
+
 } // namespace
 
 int main() {
@@ -453,6 +550,9 @@ int main() {
     test_redirect_and_speed_commands();
     test_local_player_drive_mirror();
     test_player_spawn_group();
+    test_attach_labels_seats();
+    test_attach_labels_can_fire_gate();
+    test_attach_labels_armory_mode();
     if (failures == 0) std::printf("vehicle_mount_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }

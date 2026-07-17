@@ -36,6 +36,12 @@ struct WeaponTableEntry {
     // adm dword 21) [orig: §5.60; resolve = AmmoDef_LookupByName]. -1 = unresolved.
     std::string round_type;
     int16_t ammo_index = -1;
+    // The floating attach-label text key (emplaced guns/turrets). The original resolves
+    // it against the Gametext "Overlays" section at parse and keeps the char* at
+    // AdmDef+0x3A0; we keep the key and the HUD resolves at draw. Empty = key absent ->
+    // the STROVER_USEGUN default label. [orig: @0x544d6c parse; consumer
+    // draw_vehicle_seat_and_armory_labels @0x5a3538]
+    std::string attach_text_id;
     bool valid = false;
 };
 

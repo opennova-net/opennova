@@ -38,6 +38,8 @@ void seed_authored_seats(Entity &entity, const PromoteOptions &opts) {
     const ItemSeatSpec *spec = seat_spec_for_type(opts, entity.item_id);
     if (spec == nullptr) return;
     entity.emplaced_pose_variant = spec->emplaced_pose_variant;
+    entity.armory_points = spec->armory_points;
+    entity.primary_weapon = spec->primary_weapon;
     if (spec->seats.empty()) return;
     entity.seats = spec->seats;
     for (Seat &seat : entity.seats) {

@@ -850,6 +850,13 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 if (n >= 1) safe_copy(cw.ammo_class, sizeof(cw.ammo_class), tok[0].s, tok[0].len);
                 if (n >= 2) cw.ammo_class_count = parse_int_n(tok[1].s, tok[1].len);
                 parsed = 1;
+            } else if (lower_match_key(lower, ll, "attachtextid", 12)) {
+                /* The attach-label text key; the original resolves it against the
+                   Gametext "Overlays" section at parse and stores the char* at
+                   AdmDef+0x3A0 [orig: @ 0x544d6c]. We keep the key for the HUD. */
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
+                safe_copy(cw.attach_text_id, sizeof(cw.attach_text_id), v, vl);
+                parsed = 1;
             } else if (lower_match_key(lower, ll, "loadout_selectable", 18)) {
                 size_t vl; const char *v = consume_value_span(trimmed, tlen, 18, &vl);
                 cw.loadout_selectable = parse_int_n(v, vl);
@@ -1345,6 +1352,12 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
            rifle round. [orig: ItemDef_ParseProperty 'ammo_closeattack' @ 0x4a1823 -> def+0x56B] */
         } else if (lower_match_key(lower, ll, "ammo_closeattack", 16)) {
             consume_value_str(trimmed, tlen, 16, current.ammo_closeattack, sizeof(current.ammo_closeattack));
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "primary_weapon", 14)) {
+            /* The ewep emplacement's mounted weapon.def entry (the gun entity's slot-0
+               weapon; the attach label's text source) [orig: -> def+0x54B primaryWeapon,
+               docs/world/itemdef-re.md +0x54b] */
+            consume_value_str(trimmed, tlen, 14, current.primary_weapon, sizeof(current.primary_weapon));
             parsed = 1;
         } else if (lower_match_key(lower, ll, "clipsize", 8)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 8, &vl);

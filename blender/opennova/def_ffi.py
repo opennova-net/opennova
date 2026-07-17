@@ -95,6 +95,8 @@ class DefWeaponDef(ctypes.Structure):
         ("flags2", ctypes.c_int),
         # Run-gait class ('run_anim'; 0 = key absent; mirror def.h).
         ("run_anim", ctypes.c_int),
+        # Attach-label text key ('attachtextid'; empty = key absent; mirror def.h).
+        ("attach_text_id", ctypes.c_char * 32),
     ]
 
 
@@ -175,6 +177,8 @@ class DefItemDef(ctypes.Structure):
         ("ammo_closeattack", ctypes.c_char * 32),
         ("clipsize", ctypes.c_int),
         ("deathtime_ticks", ctypes.c_int),
+        # Emplacement weapon link ('primary_weapon'; empty = key absent; mirror def.h).
+        ("primary_weapon", ctypes.c_char * 32),
     ]
 
 

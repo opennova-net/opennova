@@ -12,6 +12,7 @@ extends Node
 
 const GameHudScript := preload("res://engine/world/game_hud.gd")
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
+const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
 
 var _world = null           # GameWorld
 var _player_host = null     # LocalPlayerHost (reserved for the weapon-round anchors)
@@ -224,6 +225,7 @@ func tick() -> void:
 				else Vector2.INF,
 		"fov_deg": fov_deg,
 		"ticks": _hud_ticks(),
+		"attach_labels": _build_attach_labels(),
 	})
 	# Effects drain synchronously during _world.tick(), before this HUD update.
 	# Flush afterward so GameHud.push_message stamps the current 62 Hz tick.
@@ -234,6 +236,73 @@ func tick() -> void:
 # [orig: current_tick @0x24c1968]
 func _hud_ticks() -> int:
 	return int(Time.get_ticks_msec() * 0.062)
+
+
+# The floating attach labels: the sim's selection (distance/LOS/occupancy/nearest,
+# armory-zone mode) projected through the play camera to screen pixels, each with its
+# resolved label text. Behind-camera points drop at projection, mirroring the frustum
+# clip. [orig: draw_vehicle_seat_and_armory_labels @0x5a3290 — the projection
+#  Math_FixedPointTransformPoint22 + clip_point_to_frustum_and_project @0x5a3655]
+func _build_attach_labels() -> Array:
+	var out: Array = []
+	if _game_hud == null or _world == null:
+		return out
+	var sim = _world.get_sim() if _world.has_method("get_sim") else null
+	if sim == null or not sim.has_method("get_attach_labels"):
+		return out
+	var labels: Array = sim.get_attach_labels()
+	if labels.is_empty():
+		return out
+	var camera: Camera3D = _game_hud.get_viewport().get_camera_3d()
+	if camera == null:
+		return out
+	for raw in labels:
+		var l: Dictionary = raw
+		var world_pos := MissionObjectPlacer.bms_to_godot_position(
+				Vector3(l.get("position", Vector3.ZERO)))
+		if camera.is_position_behind(world_pos):
+			continue # [orig: clip_point_to_frustum_and_project nonzero = clipped @0x5a3655]
+		out.append({
+			"screen": camera.unproject_position(world_pos),
+			"text": _attach_label_text(int(l.get("seat_type", 0)),
+					String(l.get("attach_text_key", ""))),
+			"nearest": bool(l.get("nearest", false)),
+		})
+	return out
+
+
+# The label text per seat type, resolved in the gametext table's Overlays section with
+# the witnessed missing-string fallbacks. The Gunner label prefers the weapon's
+# attachtextid key: a PRESENT key resolves even to an empty string (the original stores
+# the parse-time GameText_GetString result, "" on a miss, and draws it) — only an
+# ABSENT key falls to the STROVER_USEGUN default.
+# [orig: HUD_InitOverlaySystem @0x5a479c..0x5a481e — STROVER_SIT "!sit" /
+#  STROVER_CONTROL "!Control" / STROVER_USEGUN "!UseGun" / STROVER_USEARMORY
+#  "!UseArmory"; the USEGUN def-text pick @0x5a350c..0x5a3544; the parse resolve
+#  @0x544d87. The STROVER_USEARMORYD "Armory in %d Seconds" delay variant is the MP
+#  armory-delay state — deferred with it: docs/interface/hud-re.md (D-HUD-14).]
+func _attach_label_text(seat_type: int, attach_text_key: String) -> String:
+	var t: RtxtStringFile = NovaStrings.get_table("gametext")
+	match seat_type:
+		1: # sitex [orig: dword_2723860]
+			return _overlays_string(t, "STROVER_SIT", "!sit")
+		2, 5: # ctrlx/drvrx share the Control label [orig: dword_2723864 @0x5a34db/0x5a34fb]
+			return _overlays_string(t, "STROVER_CONTROL", "!Control")
+		3: # UseGun [orig: def+0x3A0 else dword_2723868]
+			if attach_text_key.is_empty():
+				return _overlays_string(t, "STROVER_USEGUN", "!UseGun")
+			if t != null and t.has_string_in_section("Overlays", attach_text_key):
+				return t.get_string_in_section("Overlays", attach_text_key)
+			return "" # the witnessed empty-label quirk (parse-miss stores "")
+		4: # armory [orig: dword_272386C]
+			return _overlays_string(t, "STROVER_USEARMORY", "!UseArmory")
+	return ""
+
+
+func _overlays_string(t: RtxtStringFile, key: String, fallback: String) -> String:
+	if t != null and t.has_string_in_section("Overlays", key):
+		return t.get_string_in_section("Overlays", key)
+	return fallback
 
 
 # The weapon's HUD display name: the raw weapon id resolved in the gametext table's

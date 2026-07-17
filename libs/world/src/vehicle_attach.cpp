@@ -65,18 +65,22 @@ void attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t 
     vehicle_claim_primary_occupant(world, veh, occ.handle, occ.mount_type); // [orig: +368 @0x4946d0]
 }
 
-// Seat world position: the same seat-local rotate the per-tick pose applies
-// (pose_mounted_occupant), our stand-in for the posed seat-bone transform
+// Local-point world position: the same local rotate the per-tick pose applies
+// (pose_mounted_occupant), our stand-in for the posed bone transform
 // [orig: build_bone_attachment_matrix @0x56c630 in the scan @0x435fe7].
-Vec3 seat_world_pos(const Entity &veh, const Seat &s) {
+Vec3 local_point_world_pos(const Entity &veh, const Vec3 &local) {
     constexpr double kDeg2Rad = 3.14159265358979323846 / 180.0;
     const double a = static_cast<double>(-veh.yaw) * kDeg2Rad;
     const double ca = std::cos(a), sa = std::sin(a);
     Vec3 p;
-    p.x = veh.position.x + static_cast<float>(s.seat_local.x * ca - s.seat_local.y * sa);
-    p.y = veh.position.y + static_cast<float>(s.seat_local.x * sa + s.seat_local.y * ca);
-    p.z = veh.position.z + s.seat_local.z;
+    p.x = veh.position.x + static_cast<float>(local.x * ca - local.y * sa);
+    p.y = veh.position.y + static_cast<float>(local.x * sa + local.y * ca);
+    p.z = veh.position.z + local.z;
     return p;
+}
+
+Vec3 seat_world_pos(const Entity &veh, const Seat &s) {
+    return local_point_world_pos(veh, s.seat_local);
 }
 
 // Precise-seat attach for the local toggle (the seat is already picked; the wire path keeps
@@ -189,7 +193,36 @@ bool entity_detach_from_vehicle(World &world, EntityHandle player) {
     return true;
 }
 
-bool find_nearest_free_seat(World &world, const Entity &player, NearestSeatHit &out) {
+namespace {
+
+// LOS between the player position and a candidate point, excluding both entities
+// [orig: Entity_CheckLineOfSightTerrainAndEntities @0x436183 in the scan; the label draw's
+// Physics_RaycastTerrainAndSectors @0x5a3609 — both cast from the player POSITION].
+bool point_los_clear(World &world, const Entity &player, const Entity &cand, const Vec3 &sp) {
+    if (world.ai == nullptr) return true;
+    const int32_t a[3] = {static_cast<int32_t>(player.position.x * 65536.0f),
+                          static_cast<int32_t>(player.position.y * 65536.0f),
+                          static_cast<int32_t>(player.position.z * 65536.0f)};
+    const int32_t b[3] = {static_cast<int32_t>(sp.x * 65536.0f),
+                          static_cast<int32_t>(sp.y * 65536.0f),
+                          static_cast<int32_t>(sp.z * 65536.0f)};
+    return world.ai->line_of_sight_clear(world, a, b, player.handle, cand.handle);
+}
+
+// The shared per-entity reject set of the scan and the label pass
+// [orig: @0x435e28..0x435eae / @0x5a335a..0x5a3395 — dead/destroyed skip, itemDef/model
+// presence, enemy-occupant reject; the carrier legs are unmodeled (D-AI-11)].
+bool scan_entity_rejected(World &world, const Entity &cand, const Entity &player) {
+    if (cand.handle == player.handle) return true;
+    if (!cand.alive || cand.health <= 0) return true; // [orig: Flags & 2 skip]
+    if ((cand.flags & 2u) != 0) return true;
+    return vehicle_has_enemy_occupant(world, cand, player);
+}
+
+} // namespace
+
+bool find_nearest_free_seat(World &world, const Entity &player, NearestSeatHit &out,
+                            bool armory_mode) {
     // Range caps, verbatim 16.16 [orig: @0x435d90 maxDistance = 0x3FFFFFC0, the mounted
     // override @0x435d9a = 0x38E38E0].
     const int32_t max_dist3d = player.mounted ? 59652320 : 1073741760;
@@ -203,54 +236,104 @@ bool find_nearest_free_seat(World &world, const Entity &player, NearestSeatHit &
     int32_t best_score = 0x7FFFFFFF; // [orig: v60 init]
     bool found = false;
 
+    // One candidate point [orig: the shared score/gate block @0x435fe7..0x4361c2 (seats) =
+    // @0x43624d..0x436417 (armory points)]. Returns true when it becomes the best hit.
+    const auto consider = [&](const Entity &cand, const Vec3 &sp, int index, SeatType type) {
+        const double dx = static_cast<double>(sp.x) - eye_x;
+        const double dy = static_cast<double>(sp.y) - eye_y;
+        const double dz = static_cast<double>(sp.z) - eye_z + 0.1875;
+        const double horiz = std::sqrt(dx * dx + dy * dy);
+        const double d3 = std::sqrt(dx * dx + dy * dy + dz * dz);
+        const int32_t horiz_fx = static_cast<int32_t>(horiz * 65536.0);
+        const int32_t d3_fx = static_cast<int32_t>(d3 * 65536.0);
+        // [orig: @0x436123 — v66 <= 0x40000 && v24 <= maxDistance]
+        if (horiz_fx > 0x40000 || d3_fx > max_dist3d) return;
+        // Score = horizontal + 3D/512 [orig: candidateScore = v66 + (v24 >> 9)].
+        const int32_t score = horiz_fx + (d3_fx >> 9);
+        if (score >= best_score) return;
+        // LOS gate LAST [orig: @0x436183].
+        if (!point_los_clear(world, player, cand, sp)) return;
+        best_score = score;
+        out.vehicle = cand.handle;
+        out.seat_index = index;
+        out.type = type;
+        found = true;
+    };
+
     // The original walks the player's proximity list [orig: entity+444/448 @0x435d60]; the
     // registry sweep is the container rebase — behavior-equal inside the 4.0 u gate.
     world.registry.for_each([&](const Entity &cand) {
-        if (cand.handle == player.handle) return;
-        if (cand.seats.empty()) return;                     // no seat bones
-        if (!cand.alive || cand.health <= 0) return;        // [orig: Flags & 2 skip @0x435e28]
-        if ((cand.flags & 2u) != 0) return;
-        // A live enemy occupant rejects the whole vehicle [orig: Vehicle_HasEnemyOccupant
-        // @0x435e58]. (The emplaced-gun carrier legs are unmodeled — D-AI-11.)
-        if (vehicle_has_enemy_occupant(world, cand, player)) return;
-
-        for (int i = 0; i < static_cast<int>(cand.seats.size()); ++i) {
-            const Seat &s = cand.seats[i];
-            if (s.type == SeatType::None) continue;          // [orig: boneIdx == 0 skip]
-            if (s.occupant.valid()) continue;                // [orig: mountHandles != 0xFFFF]
-            const Vec3 sp = seat_world_pos(cand, s);
-            const double dx = static_cast<double>(sp.x) - eye_x;
-            const double dy = static_cast<double>(sp.y) - eye_y;
-            const double dz = static_cast<double>(sp.z) - eye_z + 0.1875;
-            const double horiz = std::sqrt(dx * dx + dy * dy);
-            const double d3 = std::sqrt(dx * dx + dy * dy + dz * dz);
-            const int32_t horiz_fx = static_cast<int32_t>(horiz * 65536.0);
-            const int32_t d3_fx = static_cast<int32_t>(d3 * 65536.0);
-            // [orig: @0x436123 — v66 <= 0x40000 && v24 <= maxDistance]
-            if (horiz_fx > 0x40000 || d3_fx > max_dist3d) continue;
-            // Score = horizontal + 3D/512 [orig: candidateScore = v66 + (v24 >> 9)].
-            const int32_t score = horiz_fx + (d3_fx >> 9);
-            if (score >= best_score) continue;
-            // LOS gate LAST [orig: Entity_CheckLineOfSightTerrainAndEntities @0x436183];
-            // excludes the requester and the seat's carrier.
-            if (world.ai != nullptr) {
-                const int32_t a[3] = {static_cast<int32_t>(player.position.x * 65536.0f),
-                                      static_cast<int32_t>(player.position.y * 65536.0f),
-                                      static_cast<int32_t>(player.position.z * 65536.0f)};
-                const int32_t b[3] = {static_cast<int32_t>(sp.x * 65536.0f),
-                                      static_cast<int32_t>(sp.y * 65536.0f),
-                                      static_cast<int32_t>(sp.z * 65536.0f)};
-                if (!world.ai->line_of_sight_clear(world, a, b, player.handle, cand.handle))
-                    continue;
+        if (scan_entity_rejected(world, cand, player)) return;
+        if (!armory_mode) {
+            // [orig: the searchMode-0 seat loop @0x435f1e]
+            for (int i = 0; i < static_cast<int>(cand.seats.size()); ++i) {
+                const Seat &s = cand.seats[i];
+                if (s.type == SeatType::None) continue; // [orig: boneIdx == 0 skip]
+                if (s.occupant.valid()) continue;       // [orig: mountHandles != 0xFFFF]
+                consider(cand, seat_world_pos(cand, s), i, s.type);
             }
-            best_score = score;
-            out.vehicle = cand.handle;
-            out.seat_index = i;
-            out.type = s.type;
-            found = true;
+            return;
         }
+        // [orig: the armory leg @0x4361ee — attrib 0x80000 + "armory*" points, no
+        // occupancy, seatType 4]. armory_points is non-empty only for Armory-attrib items.
+        for (int i = 0; i < static_cast<int>(cand.armory_points.size()); ++i)
+            consider(cand, local_point_world_pos(cand, cand.armory_points[i]), i,
+                     SeatType::ArmoryPoint);
     });
     return found;
+}
+
+void collect_attach_labels(World &world, const Entity &player, bool armory_mode,
+                           bool can_fire, std::vector<AttachLabel> &out) {
+    // No nearest hit -> no labels at all [orig: the Entity_FindNearestSeatOrArmory gate
+    // @0x5a32e2 brackets the whole pass].
+    NearestSeatHit nearest;
+    if (!find_nearest_free_seat(world, player, nearest, armory_mode)) return;
+
+    // One label point [orig: the shared draw block @0x5a3553..0x5a36c9 — the +0.1875 u
+    // lift, the 4.0 u 3D gate from the player POSITION, LOS, then the draw].
+    const auto emit = [&](const Entity &cand, const Vec3 &point, int index, SeatType type,
+                          bool armory) {
+        Vec3 lifted = point;
+        lifted.z += 0.1875f; // [orig: point.z = boneZ + 12288 @0x5a3585]
+        const double dx = static_cast<double>(lifted.x) - static_cast<double>(player.position.x);
+        const double dy = static_cast<double>(lifted.y) - static_cast<double>(player.position.y);
+        const double dz = static_cast<double>(lifted.z) - static_cast<double>(player.position.z);
+        const double d3 = std::sqrt(dx * dx + dy * dy + dz * dz);
+        // [orig: the label radius @0x5a35f0 — dist < 0x40000 (4.0 u), FULL 3D, from the
+        // entity position (not the eye)]
+        if (static_cast<int32_t>(d3 * 65536.0) >= 0x40000) return;
+        if (!point_los_clear(world, player, cand, lifted)) return;
+        AttachLabel label;
+        label.entity = cand.handle;
+        label.seat_index = index;
+        label.type = type;
+        label.armory = armory;
+        label.nearest = cand.handle == nearest.vehicle && index == nearest.seat_index;
+        label.world_pos = lifted;
+        out.push_back(label);
+    };
+
+    world.registry.for_each([&](const Entity &cand) {
+        // A ready weapon limits labels to the nearest entity [orig: !Player_CanFireWeapon()
+        // || entity == nearest_entity @0x5a3354].
+        if (can_fire && cand.handle != nearest.vehicle) return;
+        if (scan_entity_rejected(world, cand, player)) return;
+        if (!armory_mode) {
+            // [orig: the seat-label loop @0x5a3464; occupied seats never label @0x5a348f]
+            for (int i = 0; i < static_cast<int>(cand.seats.size()); ++i) {
+                const Seat &s = cand.seats[i];
+                if (s.type == SeatType::None) continue;
+                if (s.occupant.valid()) continue;
+                emit(cand, seat_world_pos(cand, s), i, s.type, false);
+            }
+            return;
+        }
+        // [orig: the armory-label walk @0x5a36f5..@0x5a38e2]
+        for (int i = 0; i < static_cast<int>(cand.armory_points.size()); ++i)
+            emit(cand, local_point_world_pos(cand, cand.armory_points[i]), i,
+                 SeatType::ArmoryPoint, true);
+    });
 }
 
 bool player_toggle_vehicle_mount(World &world, EntityHandle player) {
@@ -267,7 +350,7 @@ bool player_toggle_vehicle_mount(World &world, EntityHandle player) {
             if (si >= 0 && attach_to_seat_index(world, player, g->handle, si)) return true;
         }
         NearestSeatHit hit;
-        if (find_nearest_free_seat(world, *p, hit))
+        if (find_nearest_free_seat(world, *p, hit, false))
             return attach_to_seat_index(world, player, hit.vehicle, hit.seat_index);
         return false;
     }
@@ -276,7 +359,7 @@ bool player_toggle_vehicle_mount(World &world, EntityHandle player) {
     // else detach [orig: Entity_SendDetachPacket @0x4369c7 — the authority applies
     // directly through the same server leg].
     NearestSeatHit hit;
-    if (find_nearest_free_seat(world, *p, hit))
+    if (find_nearest_free_seat(world, *p, hit, false))
         return attach_to_seat_index(world, player, hit.vehicle, hit.seat_index);
     return entity_detach_from_vehicle(world, player);
 }
