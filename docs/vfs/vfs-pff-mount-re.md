@@ -26,7 +26,7 @@ stands confirmed.
 | The by-name front door (6 functions, ~190 callsites) | **witnessed** | FileSystem_FileExists @ 0x75aa50 / OpenFile @ 0x75b1c0 / GetFileSize @ 0x75b390 / File_LoadResource @ 0x75b540 / ReadFileWithSearchPaths @ 0x75b700 / ReadFileEx @ 0x75b870 — one shared skeleton |
 | PFF container open + entry lookup | **witnessed** | PFF_Open @ 0x7682e0; PFF_SortEntries @ 0x768280 (in-place `strupr` + qsort); PFF_FindEntry @ 0x7685d0 (bsearch); no header validation at all |
 | Read disciplines (streaming vs whole-file; XOR entries) | **witnessed** | FileSystem_Read @ 0x75abe0 (raw, no decrypt); PFF_ReadFile @ 0x768a30 / PFF_LoadFileToMemory @ 0x768920 (XOR-decrypt on entry flags bit0 via Buffer_XorDecrypt @ 0x768760, seed 0x0312A4CE, ROL 7/byte) |
-| Ours vs retail | **5 open rows + 4 permanent candidates** | the D-VFS catalog below |
+| Ours vs retail | **1 research-gated row + 5 permanent decisions** | the D-VFS catalog below |
 
 ## The witnessed pipeline
 
@@ -69,11 +69,14 @@ stands confirmed.
    @ 0x58b52c reads the flag directly (a loose TGA under /d skips the .dds
    substitution probe).
 5. **Entry lookup** (`PFF_FindEntry @ 0x7685d0`): query strncpy'd to 32
-   (truncates at 31 chars), uppercased, trailing-space-trimmed (query only),
-   bsearch over the sorted table (plain strcmp). Case-insensitivity: PFF via
-   both-sides-uppercase, loose via Win32. Duplicates across archives: lowest
-   slot wins; within one archive: unstable qsort + bsearch = unspecified.
-   Misses are silent (the +184 report gate is never set).
+   (truncates at 31 chars) and uppercased. The apparent trailing-space trim is
+   dead as compiled: it begins at `upper_name[strlen]`, tests the terminating
+   NUL first, and never enters the loop, so trailing spaces remain significant.
+   The result is bsearched over the sorted table (plain strcmp).
+   Case-insensitivity: PFF via both-sides-uppercase, loose via Win32.
+   Duplicates across archives: lowest slot wins; within one archive: unstable
+   qsort + bsearch = unspecified. Misses are silent (the +184 report gate is
+   never set).
 6. **Reads.** Streaming (FileSystem_Read @ 0x75abe0 / Seek @ 0x75ac40):
    raw `_lread` at the shared handle, cursor at +168, no bounds clamp, NO
    decryption; close is a no-op for archive opens. Whole-file
@@ -108,19 +111,22 @@ paths (16×16 B) · `0x33428C0` /FRISK gate · `0x829F90` name table[6][260] ·
 
 | ID | Class | Disposition | One-liner |
 |---|---|---|---|
-| D-VFS-1 | A | OPEN | Loose gating is session-global in ours (`/d` → PackedWithLooseOverride) vs retail's per-call forces: saves/foliage/gt.ssc/UI-images/minimap force loose-first regardless of /d [orig: @ 0x4395a2, 0x60a74e, 0x4cdcf4, 0x6541ba, 0x59b13a]; BMS-from-PFF forces archive-only even under /d [orig: @ 0x40d43c] |
+| D-VFS-1 | A | FIXED (2026-07-17) | `VfsLookupPolicy` now separates the session default from `ForceLooseFirst` and `ForceArchiveOnly` per query; `ResourceIndex` and runtime-mounted `NovaResourceRoot` carry it without mutating the session, and the texture cache keys policy + normalized qualified texture query. Implemented consumers force mission `.til`, MNU/loading/end-screen UI art loose-first and local/network BMS validation + reads archive-only. `test_per_call_resolution_policy` pins packed and `/d` behavior; `resource_root_contract_test` pins has/read parity and policy-separated texture caching; `game_world_test` discriminates loose/archive BMS + TIL conflicts, and `loading_screen_test` the loose/archive image conflict. Savegame, `gt.ssc`, and minimap consumers remain unimplemented rather than incorrectly session-bound [orig: @ 0x4395a2, 0x60a74e, 0x4cdcf4, 0x6541ba, 0x59b13a, 0x40d43c] |
 | D-VFS-2 | A | FIXED (2026-07-05) | Fixed 6-slot archive name table ported: `Vfs::mount_game` defaults to `VfsArchiveDiscovery::RetailTable` (language/localres/resource.pff probed by name, slot order = precedence, extra .pff never mounts; pinned by `test_mount_game_retail_table`) [orig: @ 0x829f90 + @ 0x4a4310]. **Recorded decision**: the editor's browse index (`ResourceIndex::scan` → `NovaResourceRoot::set_root_dir`) AND the C ABI (`opennova_vfs_mount_game`, the importer/Python `AssetResolver`) deliberately keep `ScanAll` — authoring/extraction tools must index arbitrary archives; ONLY the game runtime (`mount_runtime`) passes `RetailTable` |
-| D-VFS-3 | A | OPEN | Path-qualified names: retail passes queries verbatim (loose probes reach subdirs; archive lookups with a path never match — the basename-strip mode is DEAD, setter @ 0x75a590 unreferenced); our flat_key() strips paths everywhere |
+| D-VFS-3 | A | FIXED (2026-07-17) | Retail-policy lookups now pass the full relative query: a component-wise, ASCII-case-insensitive loose walk reaches subdirectories, while archive matching retains the full spelling and therefore never aliases a flat basename. Runtime `NovaResourceRoot` forwards that query; editor `set_root_dir` deliberately retains its legacy flat authoring contract. Pinned by `test_path_qualified_lookup_is_verbatim` and `test_runtime_qualified_query_reaches_loose_file_without_aliasing_flat_archive` [orig: dead basename-strip setter @ 0x75a590] |
 | D-VFS-5 | B | NEEDS-RE | Encrypted-entry (bit0) streaming: retail decrypts ONLY whole-file reads; streaming + partial reads return ciphertext; ours always decrypts — needs the corpus check (does any retail JO pff carry bit0, ever streamed?) |
-| D-VFS-7 | A | OPEN (minor) | Name normalization asymmetry: retail trims/truncates the QUERY only (31 chars); ours normalizes both sides — diverges only on pathological names. **Enriched 2026-07-05**: `PFF_FindEntry @ 0x7685d0` copies the query into a 32-byte buffer (`strncpy` 0x20 + forced NUL at [31]), `strupr`s it, and bsearches with plain `strcmp` against entries `strupr`'d IN PLACE at open (`PFF_CompareSearchNameToEntry @ 0x768240`, entry name at +16) — so archive matching is case-insensitive via double-uppercase, exact on the full string. The decompiled trailing-space trim loop tests `upper_name[strlen]` (the NUL) first, so it never executes — the "trim" facet is dead as compiled. The 31-cap can never CREATE a match (PFF names are ≤16 bytes), so the divergence stays pathological-only. Loose probes are verbatim `sprintf("%s\%s", dir, query)` with zero normalization (`FileSystem_FileExists @ 0x75aa50`) — that facet is D-VFS-3's |
+| D-VFS-7 | A | FIXED (2026-07-17) | Retail archive lookup now has a dedicated query key: at most 31 bytes, ASCII-uppercase, compared exactly against the entry name uppercased at mount. No trimming occurs—the apparent trim starts on the NUL and is dead—so stored/query trailing spaces remain significant; overlength queries cannot match the format's ≤16-byte entry names. `test_archive_names_keep_trailing_spaces` pins the distinction [orig: `PFF_FindEntry @ 0x7685d0`; `PFF_CompareSearchNameToEntry @ 0x768240`] |
+| D-VFS-10 | C | PERMANENT (2026-07-17) | The retail loose path is built from an unchecked query; the host rejects rooted/drive-qualified/ADS/`..` queries and canonicalizes every component so symlinks cannot escape a mounted search root. This is a ratified mount-sandbox boundary: legitimate relative, case-insensitive in-root queries retain retail behavior, while exposing arbitrary host files through an asset name would be wrong. Pinned by `test_retail_query_stays_inside_mounted_root` [orig: FileSystem_OpenFile @ 0x75b1c0 / FileSystem_FileExists @ 0x75aa50] |
 
-**Permanent candidates** (in the ledger's register, awaiting ratification):
-D-VFS-4 (snapshot index vs live per-call resolution — host cache),
+**Ratified permanent decisions** (in the ledger's register):
+D-VFS-4 (raw runtime reads now probe live while editor listings and decoded
+caches remain epoch snapshots — host cache),
 D-VFS-6 (retail's zero container validation + two write-after-free bugs —
 reproducing manufactures garbage, ADR 0003 class), D-VFS-8 (retail's
 16-path/16-byte/16-slot caps incl. the >5-char expansion-name overflow —
 capacity supersets), D-VFS-9 (`<exp>L.pff` as our persistent primary vs
-retail's secondary slot 0 — identical effective precedence, model note).
+retail's secondary slot 0 — identical effective precedence, model note), and
+D-VFS-10 (mounted-root containment — host safety boundary).
 
 ## Not witnessed
 

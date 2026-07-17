@@ -65,7 +65,8 @@ Dictionary param_spec_to_dictionary(const opennova::mission::MissionParamSpec &s
 void NovaMissionData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("open_file", "path"), &NovaMissionData::open_file);
 	ClassDB::bind_method(D_METHOD("create_default"), &NovaMissionData::create_default);
-	ClassDB::bind_method(D_METHOD("open_from_resource_root", "resource_root", "name"), &NovaMissionData::open_from_resource_root);
+	ClassDB::bind_method(D_METHOD("open_from_resource_root", "resource_root", "name", "lookup_policy"),
+			&NovaMissionData::open_from_resource_root, DEFVAL(NovaResourceRoot::LOOKUP_SESSION_DEFAULT));
 	ClassDB::bind_method(D_METHOD("is_loaded"), &NovaMissionData::is_loaded);
 	ClassDB::bind_method(D_METHOD("get_source_path"), &NovaMissionData::get_source_path);
 	ClassDB::bind_method(D_METHOD("get_last_error"), &NovaMissionData::get_last_error);
@@ -219,7 +220,8 @@ Error NovaMissionData::create_default() {
 	return OK;
 }
 
-Error NovaMissionData::open_from_resource_root(const Ref<NovaResourceRoot> &p_resource_root, const String &p_name) {
+Error NovaMissionData::open_from_resource_root(const Ref<NovaResourceRoot> &p_resource_root,
+		const String &p_name, int p_lookup_policy) {
 	last_error = String();
 	if (p_resource_root.is_null() || p_resource_root->get_root_dir().is_empty()) {
 		last_error = "Resource root is not configured";
@@ -230,7 +232,8 @@ Error NovaMissionData::open_from_resource_root(const Ref<NovaResourceRoot> &p_re
 		last_error = "Mission filename is empty";
 		return ERR_INVALID_PARAMETER;
 	}
-	const PackedByteArray bytes = p_resource_root->read_file(file);
+	const PackedByteArray bytes = p_resource_root->read_file(
+			file, static_cast<NovaResourceRoot::LookupPolicy>(p_lookup_policy));
 	if (bytes.is_empty()) {
 		last_error = "Mission file not found in resource root: " + file;
 		return ERR_FILE_NOT_FOUND;

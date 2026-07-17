@@ -118,8 +118,10 @@ public:
 	// Always returns OK.
 	Error create_default();
 	// Load a .bms/.mis by flat name through the mounted resource root (VFS), so missions packed in
-	// PFF archives load at runtime. Mirrors NovaObjectData::open_from_resource_root.
-	Error open_from_resource_root(const Ref<NovaResourceRoot> &p_resource_root, const String &p_name);
+	// PFF archives load at runtime. p_lookup_policy uses NovaResourceRoot::LookupPolicy ordinals;
+	// its default preserves the mounted session policy for every existing caller.
+	Error open_from_resource_root(const Ref<NovaResourceRoot> &p_resource_root, const String &p_name,
+			int p_lookup_policy = 0);
 	bool is_loaded() const;
 	String get_source_path() const;
 	String get_last_error() const;

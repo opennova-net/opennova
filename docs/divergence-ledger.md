@@ -371,12 +371,13 @@ the container-detection seam.
 
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
-| D-VFS-1 | Loose gating session-global vs retail's per-call forces (saves/foliage/gt.ssc/UI force loose-first sans /d; BMS-from-PFF forces archive-only under /d) | A | OPEN | PAR (vfs) |
-| D-VFS-3 | Path-qualified names passed verbatim in retail (loose subdir probes; flat archive names); our flat_key strips everywhere | A | OPEN | PAR (vfs) |
+| D-VFS-1 | Per-query `VfsLookupPolicy` now preserves the session default while implemented foliage/UI consumers force loose-first and local/network BMS probes + reads force archive-only; VFS + Godot contracts pin packed, `/d`, has/read, and texture-cache isolation | A | FIXED (2026-07-17) | fidelity 2026-07-17 |
+| D-VFS-3 | Runtime retail lookups preserve the full relative query (case-insensitive loose subdir walk; no flat-archive basename alias); editor roots retain their deliberate flat authoring contract, pinned at both VFS and `NovaResourceRoot` seams | A | FIXED (2026-07-17) | fidelity 2026-07-17 |
 | D-VFS-5 | Encrypted-entry streaming: retail decrypts whole-file reads only; ours always — corpus check needed | B | NEEDS-RE | PAR (vfs) |
-| D-VFS-7 | Query-only normalization (31-char truncation, trailing-space trim) vs our both-sides — pathological names only | A | OPEN (minor) | PAR (vfs) |
+| D-VFS-7 | Archive lookup now mirrors the 31-byte query cap + both-sides ASCII uppercase and exact trailing-space significance; the apparent retail trim starts on the terminating NUL and is dead, pinned by `test_archive_names_keep_trailing_spaces` | A | FIXED (2026-07-17) | fidelity 2026-07-17 |
+| D-VFS-10 | Host rejects rooted/drive-qualified/ADS/`..` queries and symlink escapes from a mounted loose root, where retail constructs an unchecked path; pinned by `test_retail_query_stays_inside_mounted_root` [orig: FileSystem_OpenFile @ 0x75b1c0 / FileSystem_FileExists @ 0x75aa50] | C | PERMANENT (2026-07-17) | mounted-root safety |
 
-D-VFS-4/6/8/9 are permanent candidates (register below). Closed 2026-07-05:
+D-VFS-4/6/8/9/10 are ratified permanent decisions (register below). Closed 2026-07-05:
 **D-VFS-2** -> `FIXED` — `Vfs::mount_game` defaults to the witnessed fixed boot
 table (`VfsArchiveDiscovery::RetailTable`: language/localres/resource.pff in
 slot order, extra archives never mount, pinned by
@@ -384,6 +385,10 @@ slot order, extra archives never mount, pinned by
 @ 0x829f90]`); the editor's browse index deliberately keeps `ScanAll`
 (recorded in the record's D-VFS-2 row — an authoring tool indexes arbitrary
 modder archives), and `NovaResourceRoot::mount_runtime` passes `RetailTable`.
+Closed 2026-07-17: **D-VFS-1**, **D-VFS-3**, and **D-VFS-7** — per-call source
+policy, verbatim relative runtime queries, and exact archive-name comparison are
+live and pinned at the VFS/Godot seams; **D-VFS-10** records the ratified safety
+boundary around those newly live loose probes.
 
 ### Credits (CBIN) — [credits/cbin-re.md](credits/cbin-re.md) (D-CBIN catalog; PAR-R5, PARTIAL)
 
@@ -659,7 +664,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Mission `.mis` | 0 | 2 | 1 | 3 | 0 |
 | LW `.3di` | 0 | 2 | 1 | 3 | 0 |
 | Particles `.ptl` | 2 | 0 | 0 | 2 | 15 |
-| VFS / PFF mount stack | 3 | 1 | 0 | 4 | 0 |
+| VFS / PFF mount stack | 0 | 1 | 0 | 1 | 4 |
 | Credits (CBIN) | 0 | 1 | 0 | 1 | 1 |
 | Terrain | 3 | 0 | 0 | 3 | 7 |
 | Tiles | 0 | 0 | 0 | 0 | 2 |
@@ -669,7 +674,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Render — materials/state | 0 | 0 | 1 | 1 | 1 |
 | Render — draw order | 2 | 0 | 1 | 3 | 3 |
 | Render — lighting | 4 | 0 | 2 | 6 | 0 |
-| **Total** | **63** | **11** | **31** | **105** | 63 |
+| **Total** | **60** | **11** | **31** | **102** | 67 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-NET-136, D-NET-64.
 
@@ -679,7 +684,7 @@ The Boot-resources row is the R8 audit doing its job: an audit that converts
 unknown unknowns into tracked rows RAISES the count before the burn-down
 lowers it (as PAR-R1..R7 did for their six new domains).
 
-Permanent register size: **18** (below). `UNAUDITED` systems: **0** — the
+Permanent register size: **25 IDs across 24 rows** (below). `UNAUDITED` systems: **0** — the
 runtime-render systems reopened the set on 2026-07-05 (the REN audit track
 below, [ADR 0023](adr/0023-render-visual-parity.md)); REN-2 converted the
 materials/state system, REN-3 the draw-order system, and REN-5 the lighting
@@ -690,7 +695,7 @@ in the World table above.)
 
 ---
 
-## Permanent-candidate register (feeds [ADR 0022](adr/0022-divergence-burn-down.md))
+## Permanent register (feeds [ADR 0022](adr/0022-divergence-burn-down.md))
 
 Ratified deliberate divergences — each verified against its record. Two classes:
 **platform/host-structural** (the host cannot or should not reproduce the original's
@@ -710,9 +715,10 @@ one-line rationale for why porting it would be *wrong*.
 | D-PTL-19 | Flipbook frame counts are normalized to 1..256 while retail has no witnessed equivalent bound | A finite shared cap prevents malformed/mod-authored counts from causing unbounded frame-name, atlas, and preview work; shipped content is unaffected. |
 | D-PTL-20 | The parser accepts and composes both curve modifiers while retail consumes one trailing modifier | A deterministic syntax superset improves mod tolerance; no shipped file combines modifiers, so strict emulation would only reject an otherwise well-defined extension. |
 | D-NET-131 | A dedicated ("serve only") host runs as a mode-3 in-process listen server (`serve_and_play=false`), not the original's mode-1 host-only | Wire-equivalent from a joiner's view ([ADR 0011](adr/0011-single-player-in-process-listen-server.md)); the difference is host-internal bookkeeping that never reaches a connected client. |
-| D-VFS-4 | Snapshot resource index vs retail's live per-call resolution | A host cache; our hosts remount on change — re-resolving every open would fight the indexed host model for no observable gain (mid-session loose drops are a dev workflow, not gameplay). |
+| D-VFS-4 | Raw runtime reads now probe live like retail, while editor listings and decoded caches remain epoch snapshots | The gameplay byte-read seam no longer carries this divergence. Rebuilding editor-facing indexes and decoded Godot resources on every open would fight the host cache model; explicit remount/epoch invalidation exposes authoring changes without stale raw runtime reads. |
 | D-VFS-8 | Retail's 16-search-path x 16-byte / 16-slot / 6-name caps (incl. the >5-char expansion-name strcpy overflow) | Capacity supersets; reproducing the caps (and the overflow) would manufacture the original's buffer bugs. |
 | D-VFS-9 | `<exp>L.pff` mounted as our persistent primary vs retail's secondary slot 0 | Effective lookup precedence is identical; the slot bookkeeping is host-internal. |
+| D-VFS-10 | Mounted loose lookups reject rooted/drive-qualified/ADS/`..` queries and symlink escapes, unlike retail's unchecked path construction [orig: FileSystem_OpenFile @ 0x75b1c0 / FileSystem_FileExists @ 0x75aa50] | A resource name must stay inside the explicitly mounted root. Preserving legitimate relative, case-insensitive lookup while refusing arbitrary host-file access is a host safety boundary, not a gameplay fidelity loss. |
 | D-NET-140 | The listen host's own loopback connection receives the full 0x0A record set; retail sends its local player header-only frames | The full-record loopback is how serve-and-play renders its local view ([ADR 0011](adr/0011-single-player-in-process-listen-server.md)); that frame never leaves the process, so retail interop is unaffected. |
 | D-RORD-2 | Retail's per-frame CPU quicksort of opaque batch entries (alpha-test bit → 256-unit depth slabs → effect index → fine depth) vs the host renderer's internal opaque ordering | The sort is a device-era draw-call-batching strategy, not observable behavior for z-buffered opaques; reproducing it would fight the host pipeline for zero visual difference. The key semantics survive as T1-pinned functions (`renderer::opaque_sort_key`) so any future host that CAN consume them has the witnessed spec ([render/render-order-re.md](render/render-order-re.md)). |
 
@@ -748,7 +754,7 @@ unknowns.
 
 | System | Slice | Result |
 |---|---|---|
-| VFS / PFF | PAR-R7 | full record — [vfs/vfs-pff-mount-re.md](vfs/vfs-pff-mount-re.md) (D-VFS-1..9) |
+| VFS / PFF | PAR-R7 | full record — [vfs/vfs-pff-mount-re.md](vfs/vfs-pff-mount-re.md) (D-VFS-1..10) |
 | Fonts | PAR-R4 | full record — [fonts/fnt-re.md](fonts/fnt-re.md) (D-FNT-1..4) |
 | Foliage | PAR-R2 | fresh full record 2026-07-13 plus MODEL and near-secondary LOW corrections 2026-07-14 — [foliage/foliage-re.md](foliage/foliage-re.md); both tier cores MATCHING, D-FOLIAGE-7/-9/-10 bounded host gaps |
 | Tiles | PAR-R3 | full record — [tiles/til-re.md](tiles/til-re.md), overlay/atlas/flip-rotate MATCHING vs retail `@0x60df0d`/`@0x604700` |

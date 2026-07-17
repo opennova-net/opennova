@@ -81,6 +81,104 @@ func test_runtime_mount_is_packed_with_optional_loose_override() -> void:
 	assert_eq(resources.read_file("Alpha.trn").get_string_from_utf8(), "loose trn", "With /d a loose file overrides the archived entry.")
 
 
+func test_runtime_mount_rejects_loose_only_root_even_with_dev_override() -> void:
+	var root := _make_flat_root("runtime_requires_archive")
+	_write_file(root.path_join("Alpha.TRN"), "loose trn")
+
+	var resources := NovaResourceRoot.new()
+	assert_eq(resources.mount_runtime(root, "", true), ERR_FILE_NOT_FOUND)
+	assert_eq(resources.get_root_dir(), "", "A failed runtime mount must clear the partial loose state.")
+	assert_eq(resources.get_expansion(), "")
+	assert_eq(resources.get_last_error(), "No game data archives could be opened")
+	assert_false(resources.has_file("Alpha.TRN", NovaResourceRoot.LOOKUP_FORCE_LOOSE_FIRST))
+
+
+func test_packed_runtime_caller_can_force_loose_first() -> void:
+	var root := _make_flat_root("packed_force_loose")
+	_write_file(root.path_join("Shared.dat"), "loose")
+	_write_file(root.path_join("LooseOnly.dat"), "loose only")
+	_write_pff(root.path_join("resource.pff"), [
+		{"name": "Shared.dat", "bytes": "archive"},
+	])
+
+	var resources := NovaResourceRoot.new()
+	assert_eq(resources.mount_runtime(root), OK)
+	assert_eq(resources.read_file("Shared.dat").get_string_from_utf8(), "archive")
+	assert_true(resources.has_file("LooseOnly.dat", NovaResourceRoot.LOOKUP_FORCE_LOOSE_FIRST))
+	assert_eq(
+		resources.read_file("LooseOnly.dat", NovaResourceRoot.LOOKUP_FORCE_LOOSE_FIRST).get_string_from_utf8(),
+		"loose only",
+		"Policy-aware has_file and read_file must agree on a loose-only winner."
+	)
+	assert_eq(
+		resources.read_file("Shared.dat", NovaResourceRoot.LOOKUP_FORCE_LOOSE_FIRST).get_string_from_utf8(),
+		"loose",
+		"A packed session remains archive-first by default, but a retail caller can force loose-first."
+	)
+
+
+func test_dev_runtime_caller_can_force_archive_only() -> void:
+	var root := _make_flat_root("dev_force_archive")
+	_write_file(root.path_join("Shared.dat"), "loose")
+	_write_file(root.path_join("LooseOnly.dat"), "loose only")
+	_write_pff(root.path_join("resource.pff"), [
+		{"name": "Shared.dat", "bytes": "archive"},
+	])
+
+	var resources := NovaResourceRoot.new()
+	assert_eq(resources.mount_runtime(root, "", true), OK)
+	assert_eq(resources.read_file("Shared.dat").get_string_from_utf8(), "loose")
+	assert_true(resources.has_file("Shared.dat", NovaResourceRoot.LOOKUP_FORCE_ARCHIVE_ONLY))
+	assert_eq(
+		resources.read_file("Shared.dat", NovaResourceRoot.LOOKUP_FORCE_ARCHIVE_ONLY).get_string_from_utf8(),
+		"archive",
+		"An archive-only retail caller bypasses the /d session loose override."
+	)
+	assert_false(resources.has_file("LooseOnly.dat", NovaResourceRoot.LOOKUP_FORCE_ARCHIVE_ONLY))
+	assert_true(
+		resources.read_file("LooseOnly.dat", NovaResourceRoot.LOOKUP_FORCE_ARCHIVE_ONLY).is_empty(),
+		"Archive-only has_file and read_file must agree that a loose-only file is absent."
+	)
+
+
+func test_runtime_qualified_query_reaches_loose_file_without_aliasing_flat_archive() -> void:
+	var root := _make_flat_root("qualified_runtime")
+	DirAccess.make_dir_recursive_absolute(root.path_join("Nested"))
+	_write_file(root.path_join("Nested/MixedCase.dat"), "nested loose")
+	_write_pff(root.path_join("resource.pff"), [
+		{"name": "MixedCase.dat", "bytes": "flat archive"},
+	])
+
+	var resources := NovaResourceRoot.new()
+	assert_eq(resources.mount_runtime(root), OK)
+	assert_false(resources.has_file("nested/mixedcase.dat"))
+	assert_true(
+		resources.read_file("nested/mixedcase.dat").is_empty(),
+		"A qualified packed-default query must not alias a flat archive entry."
+	)
+	assert_true(resources.has_file(
+		"NESTED\\MIXEDCASE.DAT",
+		NovaResourceRoot.LOOKUP_FORCE_LOOSE_FIRST
+	))
+	assert_eq(
+		resources.read_file(
+			"nested/mixedcase.dat",
+			NovaResourceRoot.LOOKUP_FORCE_LOOSE_FIRST
+		).get_string_from_utf8(),
+		"nested loose"
+	)
+
+	assert_eq(resources.set_root_dir(root), OK)
+	assert_false(resources.has_file(
+		"nested/mixedcase.dat",
+		NovaResourceRoot.LOOKUP_FORCE_LOOSE_FIRST
+	), "Editor roots keep the legacy flat-name contract for every policy value.")
+	assert_true(resources.read_file(
+		"nested/mixedcase.dat",
+		NovaResourceRoot.LOOKUP_FORCE_LOOSE_FIRST
+	).is_empty())
+
+
 func test_load_texture_obeys_runtime_vfs_precedence() -> void:
 	var root := _make_flat_root("texture_precedence")
 	_write_bytes(root.path_join("mission.pcx"), _solid_test_pcx(Color.BLUE))
@@ -105,6 +203,38 @@ func test_load_texture_obeys_runtime_vfs_precedence() -> void:
 		assert_true(
 			override_texture.get_image().get_pixel(0, 0).is_equal_approx(Color.BLUE),
 			"PackedWithLooseOverride mode must return the same-named loose PCX."
+		)
+
+
+func test_texture_cache_separates_policy_and_full_query() -> void:
+	var root := _make_flat_root("texture_policy_cache")
+	DirAccess.make_dir_recursive_absolute(root.path_join("Nested"))
+	_write_bytes(root.path_join("swatch.pcx"), _solid_test_pcx(Color.BLUE))
+	_write_bytes(root.path_join("Nested/swatch.pcx"), _solid_test_pcx(Color.GREEN))
+	_write_pff(root.path_join("resource.pff"), [
+		{"name": "swatch.pcx", "bytes": _solid_test_pcx(Color.RED)},
+	])
+
+	var resources := NovaResourceRoot.new()
+	assert_eq(resources.mount_runtime(root), OK)
+	var packed: Texture2D = resources.load_texture("swatch.pcx")
+	var forced_loose: Texture2D = resources.load_texture(
+		"swatch.pcx",
+		NovaResourceRoot.LOOKUP_FORCE_LOOSE_FIRST
+	)
+	var nested_loose: Texture2D = resources.load_texture(
+		"nested/swatch.pcx",
+		NovaResourceRoot.LOOKUP_FORCE_LOOSE_FIRST
+	)
+	assert_not_null(packed)
+	assert_not_null(forced_loose)
+	assert_not_null(nested_loose)
+	if packed != null and forced_loose != null and nested_loose != null:
+		assert_true(packed.get_image().get_pixel(0, 0).is_equal_approx(Color.RED))
+		assert_true(forced_loose.get_image().get_pixel(0, 0).is_equal_approx(Color.BLUE))
+		assert_true(
+			nested_loose.get_image().get_pixel(0, 0).is_equal_approx(Color.GREEN),
+			"The cache key includes the complete qualified query, not only its basename."
 		)
 
 

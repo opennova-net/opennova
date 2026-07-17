@@ -13,11 +13,20 @@ enum class VfsSource { LooseDir, Archive };
 // Which layers mount_game brings online.
 //   LooseOnly              - loose search paths only; archives ignored. The editor authors
 //                            loose files and never reads PFFs.
-//   Packed                 - PFF archives only; loose search paths ignored. The shipping
-//                            runtime: the packed game data is the sole source.
+//   Packed                 - archives back the session default and legacy index while any are
+//                            online. Loose roots remain latent for explicit ForceLooseFirst
+//                            calls; standalone no-archive sessions fall back loose, while the
+//                            game host rejects that state via has_mounted_archive().
 //   PackedWithLooseOverride - both, loose shadowing archives. The runtime under the `/d`
 //                            dev flag, where loose files override the packed data.
 enum class VfsMountMode { LooseOnly, Packed, PackedWithLooseOverride };
+
+// Per-query resolution order for the retail-faithful lookup overloads. Retail keeps a
+// session default (/d selects loose-first) but selected callers temporarily force the
+// loose or archive path for one open without changing that default.
+// [orig: FileSystem_OpenFile @ 0x75b1c0; Terrain_LoadFoliageFile @ 0x60a74e;
+// Mission_LoadBMSFromPFF @ 0x40d43c]
+enum class VfsLookupPolicy { SessionDefault, ForceLooseFirst, ForceArchiveOnly };
 
 // How mount_game discovers base-root archives.
 //   RetailTable - the witnessed fixed boot table: language.pff, localres.pff,
@@ -38,11 +47,14 @@ struct VfsFileLocation {
     int precedence = 0;                       // 0 = highest priority; grows down the stack
 };
 
-// Engine-faithful virtual file system. Resolution precedence (HIGH -> LOW) mirrors
-// Jointops.exe FileSystem_OpenFile @ 0x75b1c0: ordered loose search paths, then the primary
-// archive, then ordered secondary archives. Loose files always shadow archived ones; among
-// archives the primary wins, then secondaries in mount order. Lookup is by flat (basename),
-// case-insensitive filename. See notes/vfs/phase0_ida_verification.md.
+// Engine-faithful virtual file system. The legacy overloads preserve the authoring/importer
+// model: a flat (basename), case-insensitive index where mounted loose paths shadow the
+// primary archive and then ordered secondaries. The policy overloads mirror retail
+// FileSystem_OpenFile @ 0x75b1c0: they retain the full relative query and choose loose/archive
+// order per call. Packed mode is archive-default while an archive is online and keeps loose
+// roots available for ForceLooseFirst; its standalone no-archive default falls back loose, while
+// the game host rejects that state via has_mounted_archive(). See
+// notes/vfs/phase0_ida_verification.md.
 class Vfs {
 public:
     Vfs();
@@ -66,22 +78,36 @@ public:
     // table by default). Mirrors Expansion_LoadAssets @ 0x4a4730 +
     // PFF_OpenAllArchives @ 0x4a4310. Returns false only on a bad root; a
     // missing/unknown expansion gracefully falls back to base-game mounting. `mode` selects
-    // which layers are mounted (loose, archives, or both) — see VfsMountMode.
+    // which layers are mounted (loose, archives, or both) — see VfsMountMode. Use
+    // has_mounted_archive() when the caller must reject an otherwise valid loose-only root.
     bool mount_game(const std::string &game_root, const std::string &expansion = std::string(),
                     VfsMountMode mode = VfsMountMode::PackedWithLooseOverride,
                     VfsArchiveDiscovery discovery = VfsArchiveDiscovery::RetailTable);
 
     void clear();
 
+    // True when at least one primary or secondary archive opened successfully.
+    bool has_mounted_archive() const;
+
     // Choose how read_file keys SCR payloads. Pass a VfsScrPolicy / gameprofile ScrPolicy value
     // (they share ordinals). Defaults to version-detect; persists across mounts. The game-aware
     // caller (runtime launch flag, importer) sets this so demo-vs-retail keying is correct.
     void set_scr_policy(int scr_policy);
 
-    // --- Resolution (flat, case-insensitive filename) ---
+    // --- Legacy resolution (flat, case-insensitive filename) ---
+    // These overloads intentionally retain the authoring/importer compatibility model.
     bool has_file(const std::string &name) const;
     bool read_file(const std::string &name, std::vector<uint8_t> &out) const;      // + SCR/BFC1 decode
     bool read_file_raw(const std::string &name, std::vector<uint8_t> &out) const;  // stored bytes only
+
+    // --- Retail per-query resolution ---
+    // The full relative query is used for loose probes and archive comparison. Policy changes
+    // only this call's search order; it never mutates the session default or legacy index.
+    bool has_file(const std::string &name, VfsLookupPolicy policy) const;
+    bool read_file(const std::string &name, std::vector<uint8_t> &out,
+                   VfsLookupPolicy policy) const;      // + SCR/BFC1 decode
+    bool read_file_raw(const std::string &name, std::vector<uint8_t> &out,
+                       VfsLookupPolicy policy) const;  // stored bytes only
 
     // Every resolvable logical name with its winning source, sorted by name.
     std::vector<VfsFileLocation> list_files() const;

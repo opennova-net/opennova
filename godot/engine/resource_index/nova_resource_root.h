@@ -21,9 +21,24 @@ namespace godot {
 class NovaResourceRoot : public RefCounted {
 	GDCLASS(NovaResourceRoot, RefCounted)
 
+public:
+	enum LookupPolicy {
+		LOOKUP_SESSION_DEFAULT = 0,
+		LOOKUP_FORCE_LOOSE_FIRST,
+		LOOKUP_FORCE_ARCHIVE_ONLY,
+	};
+
+private:
+	enum class MountKind {
+		None,
+		EditorLoose,
+		Runtime,
+	};
+
 	String root_dir_;
 	String last_error_;
 	opennova::ResourceIndex index_;
+	MountKind mount_kind_ = MountKind::None;
 
 	// resolve_file memo: lowercased flat name -> on-disk path (empty = case-variant
 	// duplicates, an error per the resolve contract). Built from ONE directory walk
@@ -48,6 +63,7 @@ class NovaResourceRoot : public RefCounted {
 	static String normalize_dir(const String &path);
 	static String lookup_name(const String &name);
 	static Dictionary file_entry_to_dictionary(const opennova::ResourceFileEntry &entry);
+	static opennova::VfsLookupPolicy to_vfs_lookup_policy(LookupPolicy policy);
 
 	// Shared validate-and-scan body for both mount entry points. `game_code` selects the SCR
 	// decode policy (gameprofile code, e.g. "jo"/"jodemo"); an empty/unknown code is the JO default.
@@ -67,11 +83,12 @@ public:
 	// Editor / authoring mount: loose files only, PFF archives ignored. This is the path the
 	// editor and the test fixtures use, so authoring always targets loose files.
 	Error set_root_dir(const String &path);
-	// Runtime mount: the PFF archives are the packed game data. `expansion` (e.g. "jox01")
-	// layers the expansion's archives over the base game. When `allow_loose_override` is true
-	// (the engine's `/d` dev flag) loose files next to the archives shadow the packed entries;
-	// otherwise the runtime reads from PFFs exclusively. `game_code` (the `/game <code>` launch
-	// flag, default "jo") selects the SCR decode key so demo data decodes correctly.
+	// Runtime mount: the PFF archives are the packed game data. At least one fixed-table archive
+	// must open; a loose-only directory is not a viable install, including under `/d`. `expansion`
+	// (e.g. "jox01") layers the expansion's archives over the base game. `/d` makes loose-first
+	// the session default; without it, retained loose roots are visible only to explicit retail
+	// force-loose-first calls. `game_code` (the `/game <code>` launch flag, default "jo") selects
+	// the SCR decode key so demo data decodes correctly.
 	Error mount_runtime(const String &path, const String &expansion = String(),
 	                    bool allow_loose_override = false, const String &game_code = "jo");
 	// Global cache epoch (see util/engine_caches.h): bumped by every mount/clear on ANY
@@ -95,9 +112,11 @@ public:
 	String resolve_file(const String &name);
 	PackedStringArray list_files(const String &suffix = String()) const;
 	Array list_file_entries(const String &suffix = String()) const;
-	bool has_file(const String &name) const;
-	PackedByteArray read_file(const String &name) const;
-	Ref<Texture2D> load_texture(const String &name) const;
+	// Runtime roots honor the retail per-call source policy. Editor roots deliberately
+	// retain their legacy loose-only flat lookup for every policy value.
+	bool has_file(const String &name, LookupPolicy policy = LOOKUP_SESSION_DEFAULT) const;
+	PackedByteArray read_file(const String &name, LookupPolicy policy = LOOKUP_SESSION_DEFAULT) const;
+	Ref<Texture2D> load_texture(const String &name, LookupPolicy policy = LOOKUP_SESSION_DEFAULT) const;
 	Ref<Resource> load_font(const String &name) const;
 
 	// The witnessed boot-required manifest (ENG-6, libs/gameprofile
@@ -119,3 +138,5 @@ public:
 };
 
 } // namespace godot
+
+VARIANT_ENUM_CAST(godot::NovaResourceRoot::LookupPolicy);

@@ -296,6 +296,10 @@ void ResourceIndex::clear() {
 	impl_->records.clear();
 }
 
+bool ResourceIndex::has_mounted_archive() const {
+	return impl_->vfs.has_mounted_archive();
+}
+
 std::vector<ResourceFileEntry> ResourceIndex::resource_files(const std::string &kind) const {
 	const std::string filter = normalize_kind(kind);
 	std::vector<ResourceFileEntry> out;
@@ -314,8 +318,21 @@ void ResourceIndex::set_scr_policy(int scr_policy) {
 	impl_->vfs.set_scr_policy(scr_policy);
 }
 
+bool ResourceIndex::has_file(const std::string &name) const {
+	return impl_->vfs.has_file(name);
+}
+
+bool ResourceIndex::has_file(const std::string &name, VfsLookupPolicy policy) const {
+	return impl_->vfs.has_file(name, policy);
+}
+
 bool ResourceIndex::read_file(const std::string &name, std::vector<uint8_t> &out) const {
 	return impl_->vfs.read_file(name, out);
+}
+
+bool ResourceIndex::read_file(const std::string &name, std::vector<uint8_t> &out,
+                              VfsLookupPolicy policy) const {
+	return impl_->vfs.read_file(name, out, policy);
 }
 
 const std::string &ResourceIndex::root_dir() const {

@@ -91,12 +91,15 @@ func _add_line(column: VBoxContainer, text: String, value: String, size: int) ->
 	column.add_child(label)
 
 
-# The witnessed backdrop art, from the mounted resource root (PFF). A missing or
-# unparsable image degrades to the plain dim — never a load failure.
+# The witnessed backdrop art, from the mounted resource root. Retail UI images
+# force loose-first for this lookup; a missing/unparsable image degrades to the
+# plain dim, never a load failure.
+# [orig: CUIImage_LoadTextureFromFile @ 0x6541ba]
 func _add_backdrop(root, image_name: String) -> void:
 	if root == null or not root.has_method("read_file"):
 		return
-	var bytes: PackedByteArray = root.read_file(image_name)
+	var bytes: PackedByteArray = root.read_file(
+			image_name, NovaResourceRoot.LOOKUP_FORCE_LOOSE_FIRST)
 	if bytes.is_empty():
 		return
 	var img := Image.new()

@@ -386,6 +386,8 @@ func test_round_outcome_effects_pass_through_to_hud_consumers() -> void:
 func test_load_world_requires_hardcoded_environment_in_global_root() -> void:
 	var root := OS.get_cache_dir().path_join(WORLD_TEST_ROOT).path_join("missing_env_%d" % Time.get_ticks_usec())
 	DirAccess.make_dir_recursive_absolute(root)
+	# Pass the runtime archive gate so this fixture reaches the missing-environment contract.
+	_write_pff(root.path_join("resource.pff"), [])
 	_write_fixture_file(root.path_join("Dvxi5.trn"), "terrain_name \"Dvxi5\"\n")
 
 	var world := _make_world()
@@ -635,6 +637,67 @@ func test_successful_mission_load_exposes_the_loaded_file_until_unload() -> void
 	world.unload()
 	assert_eq(world.get_loaded_mission_file(), "",
 		"an unloaded world no longer reports a stale active mission")
+
+
+func test_runtime_dev_mount_still_loads_bms_from_archive() -> void:
+	var root_dir := _stage_minimal_fixture("archive_only_bms")
+	var archived_bms := FileAccess.get_file_as_bytes(root_dir.path_join("mnml.bms"))
+	_write_pff(root_dir.path_join("resource.pff"), [{
+		"name": "mnml.bms",
+		"bytes": archived_bms,
+	}])
+	_write_bytes(root_dir.path_join("mnml.bms"), "not a mission".to_utf8_buffer())
+
+	var resource_root := NovaResourceRoot.new()
+	assert_eq(resource_root.mount_runtime(root_dir, "", true), OK,
+		"the runtime fixture mounts with /d loose overrides enabled")
+	var world := _make_world()
+	add_child_autofree(world)
+	await get_tree().process_frame
+	world.set_playable(false)
+	world.set_resource_root(resource_root)
+
+	assert_eq(world.load_mission("mnml.bms"), OK,
+		"the witnessed BMS caller bypasses the corrupt loose override")
+	assert_eq(world.get_loaded_mission_file(), "mnml.bms")
+	world.unload()
+
+
+func test_runtime_mission_til_forces_loose_first_in_packed_mode() -> void:
+	var root_dir := _make_fixture_root("loose_first_til")
+	var source_dir := ProjectSettings.globalize_path("res://../fixtures/minimal/resources")
+	var archive_entries: Array = []
+	for file_name in DirAccess.get_files_at(source_dir):
+		archive_entries.append({
+			"name": file_name,
+			"bytes": FileAccess.get_file_as_bytes(source_dir.path_join(file_name)),
+		})
+	archive_entries.append({
+		"name": "mnml.til",
+		"bytes": _til_bytes_for_cell(0),
+	})
+	_write_pff(root_dir.path_join("resource.pff"), archive_entries)
+	_write_bytes(root_dir.path_join("mnml.til"), _til_bytes_for_cell(4))
+
+	var resource_root := NovaResourceRoot.new()
+	assert_eq(resource_root.mount_runtime(root_dir), OK,
+		"packed-default mode makes the archive win unless the caller forces loose-first")
+	var world := _make_world()
+	add_child_autofree(world)
+	await get_tree().process_frame
+	world.set_playable(false)
+	world.set_resource_root(resource_root)
+	assert_eq(world.load_mission("mnml.bms"), OK)
+
+	var terrain := world.get_node("NovaTerrain") as NovaTerrain
+	var tile_info := terrain.tile_info_override as NovaTerrainTileInfo
+	assert_not_null(tile_info)
+	if tile_info != null:
+		assert_true(tile_info.blocks_foliage(72.0, 8.0, 2.0),
+			"the loose TIL blocker at cell 4 reaches terrain composition")
+		assert_false(tile_info.blocks_foliage(8.0, 8.0, 2.0),
+			"the conflicting archived TIL at cell 0 does not win")
+	world.unload()
 
 
 func test_mission_til_is_shared_by_terrain_foliage_and_cleared_without_file() -> void:
@@ -1321,6 +1384,72 @@ func _write_fixture_file(path: String, text: String) -> void:
 	if file != null:
 		file.store_string(text)
 		file.close()
+
+
+func _make_fixture_root(name: String) -> String:
+	var root_dir := OS.get_cache_dir().path_join(WORLD_TEST_ROOT).path_join(
+		"%s_%d" % [name, Time.get_ticks_usec()])
+	assert_eq(DirAccess.make_dir_recursive_absolute(root_dir), OK)
+	return root_dir
+
+
+func _stage_minimal_fixture(name: String) -> String:
+	var root_dir := _make_fixture_root(name)
+	var source_dir := ProjectSettings.globalize_path("res://../fixtures/minimal/resources")
+	for file_name in DirAccess.get_files_at(source_dir):
+		assert_eq(DirAccess.copy_absolute(
+			source_dir.path_join(file_name), root_dir.path_join(file_name)), OK)
+	return root_dir
+
+
+func _write_bytes(path: String, bytes: PackedByteArray) -> void:
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	assert_not_null(file, "Fixture file should be writable: %s" % path)
+	if file != null:
+		file.store_buffer(bytes)
+		file.close()
+
+
+func _til_bytes_for_cell(cell_x: int) -> PackedByteArray:
+	var bytes := PackedByteArray()
+	bytes.resize(28)
+	bytes.encode_u32(0, 0x74696c30)
+	bytes.encode_u32(4, 1)
+	bytes.encode_u32(16, cell_x * (16 << 16))
+	bytes.encode_u32(20, 0)
+	bytes[24] = 1
+	return bytes
+
+
+# PFF3: 20-byte header, 36-byte entries with 16-byte names, then payloads.
+func _write_pff(path: String, entries: Array) -> void:
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	assert_not_null(file, "PFF fixture should be writable: %s" % path)
+	if file == null:
+		return
+	var header_size := 20
+	var entry_size := 36
+	var next_offset := header_size + entries.size() * entry_size
+	file.store_32(header_size)
+	file.store_32(0x33464650)
+	file.store_32(entries.size())
+	file.store_32(entry_size)
+	file.store_32(header_size)
+	for entry in entries:
+		var bytes: PackedByteArray = entry.bytes
+		var name_bytes := String(entry.name).to_utf8_buffer()
+		assert_true(name_bytes.size() <= 16, "%s fits the PFF name field" % entry.name)
+		file.store_32(0)
+		file.store_32(next_offset)
+		file.store_32(bytes.size())
+		file.store_32(0)
+		for index in range(16):
+			file.store_8(name_bytes[index] if index < name_bytes.size() else 0)
+		file.store_32(0)
+		next_offset += bytes.size()
+	for entry in entries:
+		file.store_buffer(entry.bytes)
+	file.close()
 
 
 func _remove_dir_recursive(path: String) -> void:
