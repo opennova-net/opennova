@@ -35,6 +35,7 @@
 #include <world/spawn_select.h>
 #include <world/vehicle_attach.h> // player_toggle_vehicle_mount (the USE-ITEM toggle)
 
+#include "env/nova_weather_core.h" // kIrisSample* classification codes
 #include "object/nova_item_database.h"
 #include "object/nova_object_data.h" // resolve_collision_instances: the .3di collision IR source
 #include "resource_index/nova_resource_root.h"
@@ -871,6 +872,77 @@ int64_t NovaSimulation::sound_occlusion_distance_q16(const Vector3 &listener_pos
 	                                                static_cast<int32_t>(distance_q16));
 }
 
+PackedInt32Array NovaSimulation::compute_iris_samples(const Vector3 &p_cam_pos,
+                                                      const Vector3 &p_cam_forward,
+                                                      const Vector3 &p_light_dir) {
+	PackedInt32Array out;
+	if (!world_) return out;
+
+	// Godot world (x, up, z) -> mission fixed (x, -z, up) 16.16.
+	const int32_t cam[3] = {opennova::world::to_fixed(p_cam_pos.x),
+	                        opennova::world::to_fixed(-p_cam_pos.z),
+	                        opennova::world::to_fixed(p_cam_pos.y)};
+	// end = camera + forward * 8.0 [orig: the (0x80000, 0, 0) forward vector
+	// rotated through the camera matrix @ 0x5c7a56..0x5c7a6f].
+	int32_t end[3] = {cam[0] + opennova::world::to_fixed(p_cam_forward.x * 8.0f),
+	                  cam[1] + opennova::world::to_fixed(-p_cam_forward.z * 8.0f),
+	                  cam[2] + opennova::world::to_fixed(p_cam_forward.y * 8.0f)};
+
+	// Terrain clip of the camera ray [orig: raycast_entity_collision @ 0x413760
+	// -> Terrain_RaycastHeightmapHiRes_0 @ 0x60e710, end clipped in place; the
+	// entity nearest-hit clip is a tracked D-RLIT-2 residual].
+	if (terrain_field_.valid()) {
+		int32_t hit[3];
+		if (opennova::world::terrain_clip_segment(terrain_field_, cam, end, hit)) {
+			end[0] = hit[0];
+			end[1] = hit[1];
+			end[2] = hit[2];
+		}
+	}
+
+	// Sun-ray direction in mission fixed: light_dir * 200 u
+	// [orig: end = sample + 200 * light_dir @ 0x5c776c..0x5c7780].
+	const int32_t sun[3] = {opennova::world::to_fixed(p_light_dir.x * 200.0f),
+	                        opennova::world::to_fixed(-p_light_dir.z * 200.0f),
+	                        opennova::world::to_fixed(p_light_dir.y * 200.0f)};
+	// The three ray clip radii [orig: the -0x2000/-0x5000/-0x8000 pushes
+	// @ 0x5c7767/0x5c7792/0x5c77ac].
+	static const int32_t kSunRayRadii[3] = {-0x2000, -0x5000, -0x8000};
+
+	// Samples at end, end + (cam-end)/3, end + 2(cam-end)/3 [orig: the thirds
+	// march @ 0x5c7ad8..0x5c7b30].
+	const int32_t step[3] = {(cam[0] - end[0]) / 3, (cam[1] - end[1]) / 3,
+	                         (cam[2] - end[2]) / 3};
+	for (int s = 0; s < 3; ++s) {
+		const int32_t p[3] = {end[0] + step[0] * s, end[1] + step[1] * s, end[2] + step[2] * s};
+		opennova::world::BlinkAccum blink;
+		collision_world_.query_blink_boxes_at_point(*world_, p, blink);
+		if (blink.hits[0] != 0) {
+			// Indoor sample: the hit's pool-2 entity carries interior data or
+			// the curve runs on all-zero inputs (gain 255)
+			// [orig: Pool_GetEntryUnchecked(2, hit >> 20) @ 0x5c7646; the
+			//  pool_entry[12] == 0 skip @ 0x5c7652].
+			const opennova::world::EntityHandle h = opennova::world::EntityHandle::make(
+					2, static_cast<int32_t>(blink.hits[0] >> 20));
+			out.append(occlusion_world_.has_instance(h)
+							? NovaWeatherCore::kIrisSampleIndoor
+							: NovaWeatherCore::kIrisSampleIndoorNoData);
+			continue;
+		}
+		// Outdoor sample: level = 8 minus one per blocked sun ray
+		// [orig: @ 0x5c7784..0x5c77d7; the player-sector entity-count ray gate
+		//  is a tracked D-RLIT-2 residual — with no statics the rays cannot hit].
+		int32_t level = 8;
+		const int32_t ray_end[3] = {p[0] + sun[0], p[1] + sun[1], p[2] + sun[2]};
+		for (int r = 0; r < 3; ++r) {
+			if (collision_world_.segment_hits_static(*world_, p, ray_end, kSunRayRadii[r]))
+				--level;
+		}
+		out.append(level);
+	}
+	return out;
+}
+
 namespace {
 // Mission-space 16.16 triple -> Godot world space: (x, y, z) -> (x, z, -y) units.
 inline Vector3 godot_from_fixed3(const int32_t p[3]) {
@@ -1655,6 +1727,8 @@ void NovaSimulation::_bind_methods() {
 	                     &NovaSimulation::get_occlusion_portal_debug);
 	ClassDB::bind_method(D_METHOD("local_player_indoors"), &NovaSimulation::local_player_indoors);
 	ClassDB::bind_method(D_METHOD("local_player_blink_flags"), &NovaSimulation::local_player_blink_flags);
+	ClassDB::bind_method(D_METHOD("compute_iris_samples", "cam_pos", "cam_forward", "light_dir"),
+	                     &NovaSimulation::compute_iris_samples);
 	ClassDB::bind_method(D_METHOD("sound_occlusion_distance_q16", "listener_pos", "source_pos",
 	                              "distance_q16", "source_bms_id"),
 	                     &NovaSimulation::sound_occlusion_distance_q16, DEFVAL(0));

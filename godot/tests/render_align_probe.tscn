@@ -1,0 +1,4 @@
+[gd_scene load_steps=2 format=3 uid="uid://crenderalignpb0"]
+[ext_resource type="Script" path="res://tests/render_align_probe.gd" id="1_rendercmp"]
+[node name="RenderAlignProbe" type="Node"]
+script = ExtResource("1_rendercmp")

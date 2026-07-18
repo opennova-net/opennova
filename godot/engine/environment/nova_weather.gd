@@ -21,6 +21,13 @@ var _core := NovaWeatherCore.new()
 var _cached_env: Node = null
 var _colors_synced := false
 
+# The marched iris-exposure samples (D-RLIT-2): the in-world host stamps
+# three per-sample classification codes each frame (NovaSimulation.
+# compute_iris_samples — indoor / indoor-no-data / outdoor sun level); empty
+# keeps the outdoor fallback sample (editor previews with no world)
+# [orig: compute_ambient_light_along_direction @ 0x5c7a00].
+var iris_samples := PackedInt32Array()
+
 # 100 = the witnessed retail constant (Env_WindScale 256, always on — the
 # ambient foliage sway every retail map has), which is also the default.
 @export_range(0, 100, 1) var wind_strength: float = 100.0:
@@ -67,13 +74,18 @@ func _process(_delta: float) -> void:
 	var lightning := Color.WHITE
 	if env_data:
 		lightning = env_data.get_lightning_color()
-		# The iris auto-exposure target (env #17): the outdoor gain from the
-		# current smoothed colors, chased by the modulator over 62 ticks —
-		# retail re-targets every render pass, i.e. every tick
+		# The iris auto-exposure target (env #17): the marched in-world gain
+		# when the host stamps samples, else the outdoor fallback — chased by
+		# the modulator over 62 ticks; retail re-targets every render pass,
+		# i.e. every tick
 		# [orig: Environment_ApplyFogAndAmbient @ 0x57e512..0x57e538;
+		#  compute_ambient_light_along_direction @ 0x5c7a00;
 		#  curve terrain_sector_compute_lighting @ 0x5c7550].
-		_core.set_exposure_from_iris(
+		_core.set_exposure_from_iris_samples(
+			iris_samples,
 			env.get_sun_direction(),
+			env_data.get_ceiling_color(),
+			env_data.get_floor_color(),
 			env_data.get_iris_percent(),
 			env_data.get_iris_center())
 	# The smoothers chase the TOD keyframe targets, never their own written-

@@ -463,6 +463,24 @@ srcAlpha/invSrcAlpha, capability-gated at effect build (@ 0x5789e0):
   `s1 color = current, alpha = tex1.a·current.a` — texture *colors* unused, alphas drive
   the blend.
 
+**Cloud texture load + the synthesized alpha (witnessed 2026-07-18, the
+renderer-alignment session):** the sky maps load through the dedicated
+render-texture loader `load_texture_from_archive @ 0x58b980`
+(`terrain_init_rendering_resources @ 0x578a97/0x578aa5`, flags `0x100000`;
+`Env_SkyMap1Path @ 0x26c63e8` / `Env_SkyMap2Path @ 0x26c63f8`, parse-coerced to
+`.pcx`). For a PCX the loader decodes 32-bit RGB, re-reads the SAME file 8-bit,
+builds a 256-entry palette-luminance table `A[i] = (85·(r+g+b)) >> 8`
+(@ 0x58bc35..0x58bca9), and writes each pixel's alpha byte from its palette
+entry (@ 0x58bcee) — **the cloud combine's alpha chain
+(`a1 = tex0.a·tex1.a·2`, `a2 = a1²·2`) runs entirely on this synthesized
+luminance alpha**. The `.env` comment "square rooted (bright gamma)" describes
+the AUTHORED asset convention, not an engine transform — no sqrt exists in the
+load path. A plain opaque decode (alpha = 1 everywhere) makes the cloud pass
+cover the whole dome and the pass-1 gradient never shows through (divergence
+row #36). Reimpl: `opennova::build_pcx_luminance_alpha_texture`
+(pcx_texture_bridge) consumed by `EnvFile::_load_sky_map_texture*`; non-PCX
+names keep the generic decode like retail's DDS-first path.
+
 **`advanced_clouds 0`** renders a single fixed-function pass with the cloud block color in
 the dome **material's ambient** slot against `SetRenderState(D3DRS_AMBIENT, 0xFFFFFF)`
 (@ 0x579b42..0x579bb6) — and that is the **only** render path that reads `cloud_rgb`
@@ -924,6 +942,7 @@ In a network session the server-synced time + TOD rate replace the local start T
 | 33 | Star field: retail renders 256 camera-anchored billboard instances with per-star twinkle (rol4/rol11 PRNG) and a hide-near-the-light dot cull `[orig: render_star_field @ 0x5ad9c0]`; the reimpl renders the star 3DI as ONE body. The instance-table generator is unfound | **FIXED (2026-07-06, the REN-6 port leg)**: the generator witnessed (`Star_GenerateInstanceTable @ 0x5ac850`, ex `init_weather_particles` — per-star math in §Celestial bodies; sole caller `EffectWorld_LoadCelestialModels @ 0x5add40`) and PORTED — `env::generate_star_instances`/`star_twinkle_tick`/`star_visible_fixed` (ctest-pinned: the PRNG draws from seed 1, star[0] offsets, the 256-star invariants) hosted by `NovaStarField` + a 256-instance camera-anchored billboard MultiMesh in `nova_celestial.gd` (per-star twinkle via instance color, the 0.98 near-light cull against the active light, regenerate-per-celestial-load, the sky-stars ladder rung). The single-body stand-in and its `0x2000` dead-variant opacity are deleted. Note: the brightness accumulator's exact scale/color application inside `Matrix_BuildTransformFromParts` is Hex-Rays-mangled (x87 handoff) — brightness-as-color-modulation is the structural reading |
 | 34 | Water surface framebuffer blend + far cutoff: the reimpl used standard alpha blending (`blend_mix` — src·α + dst·(1−α), water opaque near / transparent far) and no alpha test; witnessed retail draws the above-water surface with **SrcBlend ONE + DestBlend SRCALPHA** (out = src + dst·α — transparent near, surface-dominant far) `[orig: Water_InitSurfaceShaders @ 0x5c19b0; decode_blend_mode_to_d3d_states @ 0x680f00 mode 11]` | **FIXED (minted-and-closed at REN-4; the alpha-test half RE-GRADED 2026-07-07)**: `water.gdshader` re-expresses the blend exactly via `blend_premul_alpha` with `ALPHA = 1 − a` and stays two-sided (pass flags 0x400000). The REN-4 "alpha-test ref 32 GREATER far-fade cutoff" half was a MISREAD: `CGfxDevice_SetAlphaTestRef(0x20) @ 0x5c3419/@ 0x5c3484` latches ALPHAFUNC/ALPHAREF only `[orig: @ 0x6770a0]`; D3DRS_ALPHATESTENABLE rides pass-flag bit 0x40000 `[orig: CGfxShader_ApplyPass @ 0x68326b]`, which the water passes (0x30000/0x20000) never set — the misported `discard` amputated the far water (the user-reported short draw distance) and is deleted; the witnessed far fade is the fog convergence, not a cutoff. Residuals live in their own rows: tessellation/murk-angle chain #29, reflection RTT #30 (the underwater OPAQUE swap hosted at the 2026-07-07 facet, see #29) |
 | 35 | Water sine LUT provenance: the reimpl built the 256-entry LUT at init from runtime `std::sin`; the original builds once from x87 fsin (`trunc(sin(i·2π/256)·−64)`, stored `0x80 − v` `[orig: Water_InitNoiseFieldAndSineLut @ 0x5c0308..0x5c0334]`) — ONE deterministic instance. Last-ulp libm variance (first seen on the GitHub `macos-26-arm64` runner image, 2026-07-10) flips the truncation at non-landmark indices; the flipped byte survives the LUT landmark+symmetry-sum checks but forks every downstream noise color/DuDv pixel, failing `env_render_unit`'s pinned checksums on that platform only | **Tracked decision (2026-07-10)**: the LUT is a committed 256-byte constant in `water_init_noise_tables` — the deterministic instance every existing ctest/GUT pin was generated from (formula-identical on MSVC/UCRT x64; landmarks `0x80/0xAD/0xBF/0x80/0x41` and the 32768 symmetry sum unchanged). Runtime libm no longer participates, so all platforms render the same witnessed-faithful instance. Whether this instance byte-matches the retail x87 build at every index is unverified (needs a retail memory dump) — the same "pinned-current instance" caveat the noise FIELD already carries via the PRNG call-history quirk (§Water surface, Init tables) |
+| 36 | Cloud-map alpha: the reimpl's shared texture resolver decoded the sky-map PCX as opaque RGB (alpha = 1 everywhere), so the cloud pass's alpha chain saturated and the cloud layer fully covered the dome — the pass-1 sky gradient never showed through (found at the 2026-07-18 sniper/aircraft retail A/B: our 08:00/06:32 skies read as all-cloud-ramp) | **FIXED (2026-07-18)**: the sky maps load through the witnessed per-pixel palette-luminance alpha synthesis `A[i] = (85·(r+g+b)) >> 8` `[orig: load_texture_from_archive @ 0x58b980 — table @ 0x58bc35..0x58bca9, per-pixel A @ 0x58bcee]` via `build_pcx_luminance_alpha_texture` + `EnvFile::_load_sky_map_texture*`; non-PCX cloud names keep the generic decode (retail's DDS-first path has no alpha synthesis). See §Sky dome, "Cloud texture load + the synthesized alpha" |
 
 ## Corpus sweep (retail JO:CA install, 2026-06-09)
 

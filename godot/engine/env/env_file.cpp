@@ -5,6 +5,7 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include "util/nova_data_format.h"
+#include "util/pcx_texture_bridge.h"
 #include "util/texture_path_resolver.h"
 
 #include <env/env_render.h>
@@ -350,16 +351,49 @@ void EnvFile::_load_sky_textures() {
 	sky_map1_tex.unref();
 	sky_map2_tex.unref();
 	if (resource_root.is_valid()) {
-		sky_map1_tex = resource_root->load_texture(sky_map1);
-		sky_map2_tex = resource_root->load_texture(sky_map2);
+		sky_map1_tex = _load_sky_map_texture(sky_map1);
+		sky_map2_tex = _load_sky_map_texture(sky_map2);
 		return;
 	}
 	if (source_path.is_empty()) {
 		return;
 	}
 	const String dir = source_path.get_base_dir();
-	sky_map1_tex = opennova::load_texture_from_dir(dir, sky_map1);
-	sky_map2_tex = opennova::load_texture_from_dir(dir, sky_map2);
+	sky_map1_tex = _load_sky_map_texture_from_dir(dir, sky_map1);
+	sky_map2_tex = _load_sky_map_texture_from_dir(dir, sky_map2);
+}
+
+// The sky maps load through the dedicated render-texture loader, which
+// synthesizes the PCX alpha channel from the image's own palette luminance —
+// the cloud combine's alpha (a1 = t0.a*t1.a*2) rides it, so a plain opaque
+// decode makes the cloud pass cover the whole dome
+// [orig: terrain_init_rendering_resources @ 0x578a97/0x578aa5 ->
+// load_texture_from_archive @ 0x58b980, PCX alpha loop @ 0x58bc35..0x58bcee].
+// Non-PCX names (DDS/TGA) keep the generic decode like retail's DDS-first path.
+Ref<Texture2D> EnvFile::_load_sky_map_texture(const String &name) {
+	if (name.get_extension().to_lower() == "pcx") {
+		const PackedByteArray bytes = resource_root->read_file(name);
+		if (!bytes.is_empty()) {
+			Ref<Texture2D> tex = opennova::build_pcx_luminance_alpha_texture(bytes);
+			if (tex.is_valid()) {
+				return tex;
+			}
+		}
+	}
+	return resource_root->load_texture(name);
+}
+
+Ref<Texture2D> EnvFile::_load_sky_map_texture_from_dir(const String &dir, const String &name) {
+	if (name.get_extension().to_lower() == "pcx") {
+		PackedByteArray bytes;
+		if (read_nova_payload_file(dir.path_join(name), bytes) && !bytes.is_empty()) {
+			Ref<Texture2D> tex = opennova::build_pcx_luminance_alpha_texture(bytes);
+			if (tex.is_valid()) {
+				return tex;
+			}
+		}
+	}
+	return opennova::load_texture_from_dir(dir, name);
 }
 
 Error EnvFile::load() {
