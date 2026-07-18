@@ -53,24 +53,58 @@ struct SegHit {
     float t = 1.0e9f;
 };
 
-// Earliest intersection parameter of segment p0->p1 with a sphere.
+// Earliest intersection parameter of segment p0->p1 with a sphere. A segment
+// STARTING inside the sphere hits at t = 0 (the round is already in contact),
+// not at the exit point — the exit-t reading made point-blank stand-in hits
+// land on the far side.
 SegHit segment_vs_sphere(const Vec3 &p0, const Vec3 &p1, const Vec3 &c, float r) {
     SegHit out;
     const float dx = p1.x - p0.x, dy = p1.y - p0.y, dz = p1.z - p0.z;
     const float fx = p0.x - c.x, fy = p0.y - c.y, fz = p0.z - c.z;
     const float a = dx * dx + dy * dy + dz * dz;
     if (a <= 0.0f) return out;
-    const float b = 2.0f * (fx * dx + fy * dy + fz * dz);
     const float cc = fx * fx + fy * fy + fz * fz - r * r;
+    if (cc <= 0.0f) { // started inside
+        out.hit = true;
+        out.t = 0.0f;
+        return out;
+    }
+    const float b = 2.0f * (fx * dx + fy * dy + fz * dz);
     const float disc = b * b - 4.0f * a * cc;
     if (disc < 0.0f) return out;
     const float sq = std::sqrt(disc);
-    float t = (-b - sq) / (2.0f * a);
-    if (t < 0.0f) t = (-b + sq) / (2.0f * a); // started inside
+    const float t = (-b - sq) / (2.0f * a);
     if (t < 0.0f || t > 1.0f) return out;
     out.hit = true;
     out.t = t;
     return out;
+}
+
+// The witnessed round broad phase [orig: the per-slot gates in
+// Projectile_RaycastProximitySlots @0x4e53d4-0x4e554a]: per-axis
+// |center − rayBoxCenter| ≤ radius + halfExtent, then the UNCLAMPED
+// perpendicular distance from the sphere center to the ray LINE ≤ radius.
+// A tick segment lying entirely INSIDE the bound sphere passes trivially —
+// the previous segment-vs-sphere gate required a boundary crossing within
+// the tick, so standing inside a big building's bound sphere skipped the
+// building entirely and rounds crossed its walls with no face test (the
+// shoot-through-walls report; D-ITEM-13d closed).
+bool round_broad_phase(const Vec3 &p0, const Vec3 &p1, const Vec3 &c, float r) {
+    const float hx = std::fabs(p1.x - p0.x) * 0.5f;
+    const float hy = std::fabs(p1.y - p0.y) * 0.5f;
+    const float hz = std::fabs(p1.z - p0.z) * 0.5f;
+    if (std::fabs((p0.x + p1.x) * 0.5f - c.x) > r + hx) return false;
+    if (std::fabs((p0.y + p1.y) * 0.5f - c.y) > r + hy) return false;
+    if (std::fabs((p0.z + p1.z) * 0.5f - c.z) > r + hz) return false;
+    const float dx = p1.x - p0.x, dy = p1.y - p0.y, dz = p1.z - p0.z;
+    const float len2 = dx * dx + dy * dy + dz * dz;
+    if (len2 <= 0.0f)
+        return true; // zero-length segment inside the AABB gate: the axis test decided
+    const float t = ((c.x - p0.x) * dx + (c.y - p0.y) * dy + (c.z - p0.z) * dz) / len2;
+    const float px = p0.x + dx * t - c.x;
+    const float py = p0.y + dy * t - c.y;
+    const float pz = p0.z + dz * t - c.z;
+    return px * px + py * py + pz * pz <= r * r;
 }
 
 // The kinetic damage number [orig: Weapon_CalcImpactDamage @ 0x4EC920]. `vel` is
@@ -312,14 +346,17 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                 // never enter the walked slices.
                 const float bound = e->bound_radius;
                 if (bound <= 0.0f) continue;
-                const SegHit hit = segment_vs_sphere(p0, p1, e->position, bound);
-                if (!hit.hit || hit.t >= best_t) continue;
+                // The witnessed AABB + line-distance gate — NOT a segment-
+                // sphere crossing test, so segments entirely inside the bound
+                // sphere still reach the face walk [orig: @0x4e53d4-0x4e554a].
+                if (!round_broad_phase(p0, p1, e->position, bound)) continue;
                 // The face narrow phase (husk-aware) — a sphere graze that
                 // misses every face lets the round FLY ON, and the face hit
                 // carries the material for the impact tag [orig:
                 // Physics_RaycastAgainstBoneCollision @0x4e4cb0]. No face mesh
-                // on the model -> the sphere hit stands in (D-ITEM-1).
-                float item_t = hit.t;
+                // on the model -> the sphere stand-in decides (D-ITEM-1),
+                // hitting at t=0 when the segment starts inside it.
+                float item_t = 2.0f;
                 uint8_t item_material = 0;
                 int16_t item_section = -1;
                 int32_t item_face = -1;
@@ -336,7 +373,17 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                             world, h, s16, e16, ammo != nullptr ? ammo->flags : 0u, fh);
                     if (res == CollisionWorld::FaceRaycast::kMiss) {
                         // The graze that flew on — the top "why didn't that
-                        // register" answer, so it lands in the debug ring.
+                        // register" answer, so it lands in the debug ring. The
+                        // marker sits at the segment's closest approach.
+                        float gt = 0.5f;
+                        const float glen2 = r.vel.x * r.vel.x + r.vel.y * r.vel.y +
+                                            r.vel.z * r.vel.z;
+                        if (glen2 > 0.0f) {
+                            gt = ((e->position.x - p0.x) * r.vel.x +
+                                  (e->position.y - p0.y) * r.vel.y +
+                                  (e->position.z - p0.z) * r.vel.z) / glen2;
+                            gt = gt < 0.0f ? 0.0f : (gt > 1.0f ? 1.0f : gt);
+                        }
                         RoundDebugEvent ev;
                         ev.tick = world.logic_tick;
                         ev.kind = RoundDebugEvent::kFaceMiss;
@@ -344,11 +391,11 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                         ev.shooter = r.owner.packed;
                         ev.ammo_index = r.ammo_index;
                         ev.husk = (e->engine_flags & 0x4u) != 0;
-                        ev.t = hit.t;
+                        ev.t = gt;
                         ev.p0 = p0;
                         ev.p1 = p1;
-                        ev.hit = Vec3{p0.x + r.vel.x * hit.t, p0.y + r.vel.y * hit.t,
-                                      p0.z + r.vel.z * hit.t};
+                        ev.hit = Vec3{p0.x + r.vel.x * gt, p0.y + r.vel.y * gt,
+                                      p0.z + r.vel.z * gt};
                         push_round_debug(*this, ev);
                         continue;
                     }
@@ -363,6 +410,14 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                         item_face = fh.face;
                         item_had_faces = true;
                     }
+                }
+                if (!item_had_faces) {
+                    // The face-less sphere stand-in (or a null collision
+                    // world): the segment must actually reach the sphere this
+                    // tick; a start inside it hits at t = 0.
+                    const SegHit hit = segment_vs_sphere(p0, p1, e->position, bound);
+                    if (!hit.hit) continue;
+                    item_t = hit.t;
                 }
                 if (item_t < best_t) {
                     best_t = item_t;

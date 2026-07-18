@@ -853,6 +853,48 @@ void test_face_raycast_husk_swap() {
     CHECK(fh.material == 5);
 }
 
+void test_round_inside_bound_sphere_hits_wall() {
+    // The shoot-through-walls regression: a tick segment lying entirely INSIDE
+    // a big bound sphere must still reach the face walk — the witnessed broad
+    // phase is an UNCLAMPED perpendicular line-distance gate [orig:
+    // Projectile_RaycastProximitySlots @ 0x4e5492], with no boundary-crossing
+    // requirement. The old segment-vs-sphere gate returned no-hit for
+    // inside-sphere segments, so standing inside a building's bound sphere let
+    // rounds cross its walls untested.
+    Rig rig(face_quad_model(14, 0));
+    Entity *b = rig.world.registry.get(rig.building);
+    b->bound_radius = 3.0f;
+
+    RoundSim &rs = rig.world.round_sim;
+    LiveRound &r = rs.rounds[0];
+    r.active = true;
+    rs.active_count = 1;
+    r.owner = EntityHandle{};              // no shooter entity in this rig
+    r.ammo_index = -1;                     // no ammo table: flight/stop only
+    r.pos = Vec3{10.0f, 10.0f, 2.5f};      // 2.5 u from center: inside the sphere
+    r.vel = Vec3{0.0f, 0.0f, -4.0f};       // ends at z -1.5: still inside
+    r.max_age_ticks = 100;
+    rs.tick(rig.world, nullptr, &rig.cw);
+    CHECK(!r.active); // the round stopped on the quad instead of flying through
+    CHECK(rs.impacts.size() == 1);
+    CHECK(rs.impacts[0].effect_tag == 4 + 14); // the face material tag
+    CHECK(rs.impacts[0].position.z > 0.95f && rs.impacts[0].position.z < 1.05f);
+
+    // Inside the sphere but past the quad's edge: the face walk misses and the
+    // round flies on — the fixed gate must not reintroduce midair sphere stops.
+    LiveRound &r2 = rs.rounds[1];
+    r2.active = true;
+    rs.active_count = 1;
+    r2.owner = EntityHandle{};
+    r2.ammo_index = -1;
+    r2.pos = Vec3{11.5f, 10.0f, 2.0f};     // dist 2.5 < 3: inside; x past the quad
+    r2.vel = Vec3{0.0f, 0.0f, -4.0f};
+    r2.max_age_ticks = 100;
+    rs.tick(rig.world, nullptr, &rig.cw);
+    CHECK(r2.active);              // flew on
+    CHECK(rs.impacts.size() == 1); // no new impact
+}
+
 int main() {
     test_matrix_roundtrip();
     test_blink_query_and_refresh();
@@ -872,6 +914,7 @@ int main() {
     test_face_raycast();
     test_face_raycast_flags_and_materials();
     test_face_raycast_husk_swap();
+    test_round_inside_bound_sphere_hits_wall();
     if (failures == 0) std::printf("collision_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }
