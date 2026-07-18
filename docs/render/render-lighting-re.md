@@ -25,7 +25,7 @@ scalar function in this record; the GUT env vectors
 |---|---|---|
 | Modulator → shader gain unpack (÷64, 64 = identity) | MATCHING | `renderer::unpack_modulator_scale` `[orig: Render_UnpackModulatorToLightScale @ 0x58db30 → Render_LightScaleR/G/B @ 0x8409f4..fc; EffectWorld_UnpackModulatorToAmbientScale @ 0x5aaef0 → @ 0x840b24..2c]`; `renderer_state_vectors` section 5 (identity 0x404040 → exactly 1.0, 0xFF → 255/64) |
 | The modulator chain (modulator2 → modulator → every color block, same tick) | MATCHING (ported; env #17 CLOSED) | `env::ModulatorChain` + the witnessed block order `[orig: Environment_UpdateWeatherTick block sequence @ 0x57ef97..0x57f03c]`; 62-tick target chase `[orig: @ 0x57e512..0x57e538; ColorBlock_SetStepDeltas @ 0x57d940]`; env vectors re-dumped surgically (exactly the 8 weather checkpoint rows; hand-check wb/k064 `0x31·61/64 = 0x2E`) |
-| Iris auto-exposure sampling | MATCHING (outdoor sample) / interior residual | the curve was already ported (env record §Iris); the OUTDOOR target now drives the chain per tick (`NovaWeatherCore::set_exposure_from_iris`); the 3-point camera-ray march + interior/occlusion sampling `[orig: compute_ambient_light_along_direction @ 0x5c7a00]` rides the unhosted interior system (D-RLIT-2) |
+| Iris auto-exposure sampling | MATCHING (marched port, bounded residuals) | the curve was already ported (env record §Iris); the 3-point camera-ray march is PORTED (2026-07-18): `NovaSimulation::compute_iris_samples` (terrain-clipped 8 u camera ray, thirds march, per-sample blink/indoor classification + 3 sun-occlusion rays) → `NovaWeatherCore::set_exposure_from_iris_samples` (per-sample curve vs ceiling/floor indoors, ×level/8 sun outdoors, INT /3 average) `[orig: compute_ambient_light_along_direction @ 0x5c7a00; terrain_sector_compute_lighting @ 0x5c7550]`; the outdoor sample stays the no-world editor fallback; residuals on D-RLIT-2 |
 | World lighting block (per-pass build + ctx store) | MATCHING (math ported) | `renderer::build_world_lighting` `[orig: CTerrainRenderer_BuildLightingShaderConstants @ 0x5c8090; RenderBatchCtx_StoreLightingConstants @ 0x5d89e0]` incl. the NVG hemi rewrite, vehicle-scope grey, NVG world dim, and the two hemisphere averages; `renderer_state_vectors` section 5 |
 | Per-entity uniforms (slots 227-230) + interior daylight lerp | MATCHING (math ported) | `renderer::compute_entity_lighting` `[orig: setup_entity_lighting_and_shader_constants @ 0x5d98a0]`; the aux float = the parent interior's daylight openness (model+536), NOT a dual-LOD fade — the REN-4 erratum corrected in render-material-re.md |
 | FF vertex lighting (ambient + dir + hemisphere delta lights, saturate, ×2) | MATCHING (composed) | `renderer::ff_vertex_light` + the composer rewrite `[orig: Lighting_SetHemisphereD3DLights @ 0x5d8cb0; D3D light 0 @ 0x5d9ce2..0x5d9d76; _FFP.fx TSSColor MODULATE2X]`; D-RMAT-5 FIXED; T2 swatch: 116/120 cells moved, the 4 VS_TRACER (unlit, MODULATE 1×) cells byte-identical |
@@ -53,17 +53,47 @@ The modulator's target is the iris sample replicated to gray
 `|target_byte<<20 + frames/2 − current| / frames`
 `[orig: Environment_ApplyFogAndAmbient @ 0x57e512..0x57e538]` — retail
 re-targets every render pass, i.e. every tick. `compute_ambient_light_along_direction
-@ 0x5c7a00` produces the gain: a camera ray is cast 8 units forward
-(`raycast_entity_collision @ 0x413760`), then `terrain_sector_compute_lighting
-@ 0x5c7550` is sampled at the hit and at two points marched back toward the
-camera, averaged `(s0+s1+s2)/3`. Each sample: indoor detection (sector
-entities of type 5 via `Entity_TestCollisionSections @ 0x4aef90`, flags
-0x8000), directional = light block [1] × visibleRays/8 (3 sun-occlusion
-raycasts, zeroed indoors), sky/ground = sky/ground [1] outdoors,
-ceiling/floor [1] indoors, then the iris curve (already recorded in
-[env-tod-re.md](../env/env-tod-re.md) §Iris auto-exposure; luminance weights
-0.25/0.5/0.25). The sample also selects the interior LIGHT GROUP
-(`Lighting_SetInteriorLightGroup @ 0x5a90e0`, pair @ 0x272ED84/0x272ED80).
+@ 0x5c7a00` produces the gain (fully pinned 2026-07-18, ported at the marched-iris
+slice):
+
+- **Ray**: end = camera + camera-forward × 8.0 — the `(0x80000, 0, 0)` vector
+  rotated through the camera Euler matrix (camera globals @ 0xA78364..78)
+  `[orig: @ 0x5c7a56..0x5c7a6f]`, then `raycast_entity_collision @ 0x413760`
+  clips the end IN PLACE: terrain first (`Terrain_RaycastHeightmapHiRes_0
+  @ 0x60e710`, called `(start, end, end)`), then the entity collision-model
+  nearest hit `[orig: the Flags & 0x800000 indoors gate skips the terrain leg
+  @ 0x413785]`.
+- **March**: samples at end, end + (cam−end)/3, end + 2(cam−end)/3 (truncating
+  integer thirds) `[orig: @ 0x5c7ad8..0x5c7b30]`; the iris curve runs
+  PER SAMPLE and the three INT gains average `(s0+s1+s2)/3`
+  `[orig: @ 0x5c7b45]`.
+- **Per sample** (`terrain_sector_compute_lighting @ 0x5c7550`): blink-section
+  test at the point against the sector's type-5 entities
+  (`Entity_TestCollisionSections @ 0x4aef90`, flags 0x8000). INDOOR (hit slot 0
+  nonzero): pool-2 entity = `hit >> 20`; **no interior data (`pool_entry[12]`
+  == 0) short-circuits to the curve with ALL inputs zero — the ÷2m limb
+  diverges and the clamp serves gain 255** `[orig: @ 0x5c7652]`; else
+  directional = 0, sky/ground ← the CEILING/FLOOR blocks' [1] slots
+  (@ 0x26C6474 / @ 0x26C64DC), interior light group = `(hit >> 12) & 0x1F`
+  (`Lighting_SetInteriorLightGroup @ 0x5a90e0`, pair @ 0x272ED84/0x272ED80).
+  OUTDOOR: sun level = 8 − one per BLOCKED sun ray — three entity-only
+  raycasts (`raycast_find_collision_entity @ 0x539a70` with allowAllTypes = 1,
+  hit → `neg/sbb/add 1` → −1) from the sample to sample + 200 × light_dir,
+  clip radii −0x2000/−0x5000/−0x8000 `[orig: @ 0x5c7765..0x5c77d7]`, gated on
+  the CALLER's sector having entities (`sector[112] @ 0x5c7707` — an
+  optimization: with no entities the rays cannot hit); directional = light
+  block [1] × level/8 (`light_scale = level × 1/2040 @ 0x5c77e9`), sky/ground
+  = sky/ground [1]; light group cleared (0, 0). Then the iris curve
+  ([env-tod-re.md](../env/env-tod-re.md) §Iris auto-exposure; luminance
+  weights 0.25/0.5/0.25).
+
+Reimpl: `NovaSimulation::compute_iris_samples` (sampling; Godot camera →
+mission fixed) + `CollisionWorld::segment_hits_static` /
+`world::terrain_clip_segment` (the ray primitives) +
+`NovaWeatherCore::set_exposure_from_iris_samples` (per-sample curve + /3
+average), stamped per render frame by `GameWorld._stamp_iris_samples` and
+consumed by `NovaWeather`'s per-tick re-target; the pure outdoor sample
+remains the no-world editor fallback.
 
 **The gain unpacks.** `Render_UnpackModulatorToLightScale @ 0x58db30` writes
 `Render_LightScaleR/G/B @ 0x8409f4..fc` = modulator bytes ÷ 64; its SOLE
@@ -285,7 +315,7 @@ directional with 0.75 ambient material.
 | ID | Ours | Original | Disposition |
 |---|---|---|---|
 | D-RLIT-1 | Hosted weather runs 4 color blocks (fill/sun/fog/sky) through the modulator | 16 blocks modulate (incl. skyfog, cloud set, statics) `[orig: @ 0x57ef97..0x57f03c]` | OPEN (partial) — the hosted subset is the set the hosts render; the remaining blocks join as their consumers are hosted (skyfog rides the frame-clear/horizon work) |
-| D-RLIT-2 | Iris exposure targets the OUTDOOR sample (full sun visibility, no cover) each tick | 3-point average marched back from the camera-ray hit, with per-sample interior detection + 3 sun-occlusion raycasts `[orig: compute_ambient_light_along_direction @ 0x5c7a00; terrain_sector_compute_lighting @ 0x5c7550]` | OPEN (partial) — the curve, chase, and chain are exact; the sampling geometry rides the unhosted interior system + host raycast wiring |
+| D-RLIT-2 | Iris exposure targets the OUTDOOR sample (full sun visibility, no cover) each tick | 3-point average marched back from the camera-ray hit, with per-sample interior detection + 3 sun-occlusion raycasts `[orig: compute_ambient_light_along_direction @ 0x5c7a00; terrain_sector_compute_lighting @ 0x5c7550]` | **PORTED (2026-07-18, the marched-iris slice)** — the march, per-sample indoor/no-data classification (ceiling/floor blocks, gain-255 no-data short-circuit), sun level 8−hits (radii −0x2000/−0x5000/−0x8000), and INT /3 average are live in-world (`compute_iris_samples` → `set_exposure_from_iris_samples`; the sniper/aircraft retail A/B was the trigger — the retail hangar frame runs the indoor-dilated gain ≈ 71/64 vs the old outdoor 59/64). Bounded residuals: the camera-ray ENTITY nearest-hit clip (terrain clip only), pool-1 dynamics in the sun rays (statics walk only), the caller-sector entity-count ray gate (rays always run; identical when no statics exist), and the per-sample interior LIGHT-GROUP side effect (`Lighting_SetInteriorLightGroup @ 0x5a90e0` — rides D-RLIT-4's group hosting) |
 | D-RLIT-3 | Object materials light at full sun visibility (effectScale = 1.0) | per-entity 3-ray sun occlusion dims DirLightColor to 0.75/0.5/0.25 under cover `[orig: Entity_ComputeSunVisibility @ 0x5c6800]`; interior-parented entities lerp to floor/ceiling ambience by the interior's daylight openness (model+536) `[orig: @ 0x5d98a0]` | WITNESSED-READY-DEFERRED — the math is ported and T1-pinned (`compute_entity_lighting`, `sun_visibility_factor`); the host wiring (raycasts + interior data) rides the runtime/interior slices |
 | D-RLIT-4 | Local lights: the host's single-light LGHT preview (editor) + Godot's own light path | ≤4 concurrent D3D point lights culled by owner/interior groups, colors × the modulator scale × optional RgbGen animation, atten {1,0,15/r²,1} `[orig: @ 0x5a9180; @ 0x5abc50; @ 0x5a9120]` | WITNESSED-READY-DEFERRED — color/attenuation math ported; the dynamic-light hosting (effect-spawned lights) rides the EffectWorld/particle track |
 | D-RLIT-5 | Glass/env reflection = the hemisphere sampled along the reflected view; phong specular = a pow-16 lobe in the witnessed light color | glass GLOW samples CubeRotSpecular (the static sun-glint cube) via MatRotSpecular; NORMAL techniques sample the LIVE CubeEnvironment scene cube; VS_PHONG* samples the PhongMap texture `[orig: @ 0x58f290; @ 0x6106a0; Glass.fx]` | OPEN (approximation) — the cube CONTENTS are witnessed (this record); hosting a live scene cube / the glint cube is the D-RORD-5 bloom-wiring residual's substrate |

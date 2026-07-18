@@ -918,6 +918,24 @@ public:
 	                                     const Vector3 &source_pos, int64_t distance_q16,
 	                                     int source_bms_id = 0);
 
+	// The marched iris-exposure sampling (D-RLIT-2): three classification codes
+	// for NovaWeatherCore.set_exposure_from_iris_samples — the camera ray runs
+	// 8 units forward, clips against terrain, and samples at the end point and
+	// two points marched back toward the camera in thirds. Per sample: a blink
+	// hit classifies indoor (-1; -2 when the building carries no interior
+	// data), else the outdoor sun level 8 minus one per blocked sun-occlusion
+	// ray (three entity-only rays, 200 u toward the light, clip radii
+	// -0x2000/-0x5000/-0x8000). Positions/directions in Godot world space.
+	// Empty when no world is loaded (the caller falls back to the outdoor
+	// sample). Residuals tracked on D-RLIT-2: the entity nearest-hit clip of
+	// the camera ray, pool-1 dynamics in the sun rays, and the player-sector
+	// entity-count ray gate.
+	// [orig: compute_ambient_light_along_direction @ 0x5c7a00;
+	//  terrain_sector_compute_lighting @ 0x5c7550;
+	//  raycast_entity_collision @ 0x413760]
+	PackedInt32Array compute_iris_samples(const Vector3 &cam_pos, const Vector3 &cam_forward,
+	                                      const Vector3 &light_dir);
+
 	// Loadout-zone gates for the host's armory key [orig: input action 218 opens
 	// weapon.mnu WEAPON only while entity Flags & 0x400000 (a type-6 armory volume
 	// contact), vehicle.mnu VEHICLE on Flags & 0x800 (type-11);

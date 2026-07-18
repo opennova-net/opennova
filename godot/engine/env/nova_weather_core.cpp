@@ -51,6 +51,9 @@ void NovaWeatherCore::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("trigger_lightning_long"), &NovaWeatherCore::trigger_lightning_long);
 	ClassDB::bind_method(D_METHOD("set_exposure_from_iris", "light_dir", "iris_percent", "iris_center"),
 			&NovaWeatherCore::set_exposure_from_iris);
+	ClassDB::bind_method(
+			D_METHOD("set_exposure_from_iris_samples", "samples", "light_dir", "ceiling", "floor", "iris_percent", "iris_center"),
+			&NovaWeatherCore::set_exposure_from_iris_samples);
 	ClassDB::bind_method(D_METHOD("get_color_src_gain"), &NovaWeatherCore::get_color_src_gain);
 	ClassDB::bind_method(D_METHOD("get_fill"), &NovaWeatherCore::get_fill);
 	ClassDB::bind_method(D_METHOD("get_sun"), &NovaWeatherCore::get_sun);
@@ -156,27 +159,95 @@ void NovaWeatherCore::trigger_lightning_long() {
 	lightning.trigger_long();
 }
 
+namespace {
+
+opennova::env::Rgb packed_to_rgb01(uint32_t packed) {
+	opennova::env::Rgb c;
+	c.r = static_cast<float>((packed >> 16) & 0xFF) / 255.0f;
+	c.g = static_cast<float>((packed >> 8) & 0xFF) / 255.0f;
+	c.b = static_cast<float>(packed & 0xFF) / 255.0f;
+	return c;
+}
+
+} // namespace
+
 void NovaWeatherCore::set_exposure_from_iris(const Vector3 &p_light_dir, float p_iris_percent, float p_iris_center) {
 	// The iris inputs are the blocks' [1] slots (step + lightning additive,
 	// pre modulation) / 255 [orig: terrain_sector_compute_lighting @ 0x5c7550
 	// reads Env_LightBlock[1]/Env_SkyBlock[1]/Env_GroundBlock[1]]; the outdoor
 	// directional term keeps full sun visibility (8/8 rays).
-	const auto to_rgb = [](uint32_t packed) {
-		opennova::env::Rgb c;
-		c.r = static_cast<float>((packed >> 16) & 0xFF) / 255.0f;
-		c.g = static_cast<float>((packed >> 8) & 0xFF) / 255.0f;
-		c.b = static_cast<float>(packed & 0xFF) / 255.0f;
-		return c;
-	};
 	const int gain = opennova::env::iris_gain(
-			to_rgb(sun_block.pre_mod_color),
-			to_rgb(sky_block.pre_mod_color),
-			to_rgb(fill_block.pre_mod_color),
+			packed_to_rgb01(sun_block.pre_mod_color),
+			packed_to_rgb01(sky_block.pre_mod_color),
+			packed_to_rgb01(fill_block.pre_mod_color),
 			p_light_dir.x, p_light_dir.y, p_light_dir.z,
 			p_iris_center, p_iris_percent);
 	// target = 0x10101 * gain, chased over 62 ticks (1 s)
 	// [orig: @ 0x57e512..0x57e538 -> ColorBlock_SetStepDeltas @ 0x57d940].
 	modulator_chain.set_exposure_target(gain);
+}
+
+void NovaWeatherCore::set_exposure_from_iris_samples(const PackedInt32Array &p_samples,
+		const Vector3 &p_light_dir, const Color &p_ceiling, const Color &p_floor,
+		float p_iris_percent, float p_iris_center) {
+	// The in-world marched exposure: three samples along the clipped 8-unit
+	// camera ray, each classified by the host (indoor / indoor-without-interior-
+	// data / outdoor sun level 0..8), each run through the iris curve, the INT
+	// gains averaged /3 [orig: compute_ambient_light_along_direction @ 0x5c7a00 —
+	// samples at hit, hit+(cam-hit)/3, hit+2(cam-hit)/3; (s0+s1+s2)/3 @ 0x5c7b45].
+	if (p_samples.is_empty()) {
+		set_exposure_from_iris(p_light_dir, p_iris_percent, p_iris_center);
+		return;
+	}
+	opennova::env::Rgb ceiling_rgb;
+	ceiling_rgb.r = p_ceiling.r;
+	ceiling_rgb.g = p_ceiling.g;
+	ceiling_rgb.b = p_ceiling.b;
+	opennova::env::Rgb floor_rgb;
+	floor_rgb.r = p_floor.r;
+	floor_rgb.g = p_floor.g;
+	floor_rgb.b = p_floor.b;
+	const opennova::env::Rgb zero_rgb{};
+	int sum = 0;
+	int count = 0;
+	for (int i = 0; i < p_samples.size(); ++i) {
+		const int32_t sample = p_samples[i];
+		int gain;
+		if (sample == kIrisSampleIndoorNoData) {
+			// Indoor hit on an entity with no interior data: every input stays
+			// zero, the curve's base/(2m) limb diverges, the clamp serves 255
+			// [orig: the pool_entry[12]==0 skip to the curve @ 0x5c7652].
+			gain = 255;
+		} else if (sample == kIrisSampleIndoor) {
+			// Indoors: directional zeroed, sky/ground replaced by the static
+			// ceiling/floor indoor ambient blocks
+			// [orig: @ 0x5c7660..0x5c76fe — Env_CeilingBlock/Env_FloorBlock].
+			gain = opennova::env::iris_gain(
+					zero_rgb, ceiling_rgb, floor_rgb,
+					p_light_dir.x, p_light_dir.y, p_light_dir.z,
+					p_iris_center, p_iris_percent);
+		} else {
+			// Outdoors: the directional block scaled by the sun-occlusion level
+			// (8 minus one per blocked ray, 3 rays -> 5..8)
+			// [orig: @ 0x5c7784..0x5c77d7 -> light_scale = level/8/255 @ 0x5c77e9].
+			const int level = std::clamp(static_cast<int>(sample), 0, 8);
+			opennova::env::Rgb dir = packed_to_rgb01(sun_block.pre_mod_color);
+			const float scale = static_cast<float>(level) / 8.0f;
+			dir.r *= scale;
+			dir.g *= scale;
+			dir.b *= scale;
+			gain = opennova::env::iris_gain(
+					dir,
+					packed_to_rgb01(sky_block.pre_mod_color),
+					packed_to_rgb01(fill_block.pre_mod_color),
+					p_light_dir.x, p_light_dir.y, p_light_dir.z,
+					p_iris_center, p_iris_percent);
+		}
+		sum += gain;
+		++count;
+	}
+	// (s0 + s1 + s2) / 3 in integer form [orig: @ 0x5c7b45].
+	modulator_chain.set_exposure_target(sum / std::max(count, 1));
 }
 
 Vector3 NovaWeatherCore::get_color_src_gain() const {

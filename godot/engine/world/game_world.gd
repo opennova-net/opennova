@@ -882,6 +882,7 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 	# Terrain_RenderSceneWithReflection @ 0x5c94f0]
 	if _loaded:
 		_apply_occlusion_frame(camera_xform)
+		_stamp_iris_samples(camera_xform)
 	var audio_start := Time.get_ticks_usec()
 	if _loaded and _mission_audio != null:
 		# Ambient soundloop regions read that same clock [orig:
@@ -2243,6 +2244,25 @@ func _apply_blink_frame_gates() -> void:
 # gates), then drive the de-batched building nodes' per-section masks and the
 # gated entities' visibility. Runs after the present pass (inside tick_realtime)
 # so present's base visibility is re-asserted first each frame.
+# The marched iris-exposure feed (D-RLIT-2): three camera-ray samples from the
+# sim each render frame, consumed by NovaWeather's exposure re-target on its
+# next tick [orig: Environment_ApplyFogAndAmbient @ 0x57e512 ->
+# compute_ambient_light_along_direction @ 0x5c7a00 — retail re-targets from the
+# local player's view every render pass].
+func _stamp_iris_samples(camera_xform: Transform3D) -> void:
+	var weather := get_node_or_null("NovaWeather")
+	if weather == null or _runtime == null or not _runtime.has_method("get_sim"):
+		return
+	var sim = _runtime.get_sim()
+	if sim == null or not sim.has_method("compute_iris_samples"):
+		return
+	var light_dir := Vector3.UP
+	if _env != null and _env.has_method("get_light_direction"):
+		light_dir = _env.get_light_direction()
+	weather.iris_samples = sim.compute_iris_samples(
+			camera_xform.origin, -camera_xform.basis.z, light_dir)
+
+
 func _apply_occlusion_frame(camera_xform: Transform3D) -> void:
 	if _runtime == null or not _runtime.has_method("get_sim"):
 		return

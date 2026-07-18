@@ -145,6 +145,14 @@ CollisionMatrix collision_matrix_from_heading(int32_t heading_bam, const int32_t
 bool los_terrain_blocked(const terrain::TerrainHeightField &field, const int32_t a[3],
                          const int32_t b[3]);
 
+// Terrain clip of a segment: on a hit writes the refined hit point to out_hit
+// and returns true; on clear out_hit is untouched. The iris camera-ray clip's
+// terrain leg [orig: raycast_entity_collision @ 0x413760 ->
+// Terrain_RaycastHeightmapHiRes_0 @ 0x60e710 — called (start, end, end), the
+// ray end clipping in place].
+bool terrain_clip_segment(const terrain::TerrainHeightField &field, const int32_t a[3],
+                          const int32_t b[3], int32_t out_hit[3]);
+
 // ----------------------------------------------------------------------------
 // Per-query blink accumulation. [orig: g_BlinkFlagsAccum @ 0xB57C70,
 // g_BlinkHitSlot0..3 @ 0xB57C74, g_BlinkHitCount @ 0x82AE20 — cleared per query
@@ -303,6 +311,16 @@ public:
     // return the packed hit set in `accum`. Clears `accum` first.
     // [orig: Entity_QueryBlinkBoxesAtPoint @ 0x4af350]
     void query_blink_boxes_at_point(World &world, const int32_t pos[3], BlinkAccum &accum);
+
+    // Entity-only radiused segment test over the static collision prefix:
+    // TRUE = some static's type-1 solid clips the segment at `radius`
+    // (negative radius reads the planes thinner). The iris sun-occlusion ray
+    // primitive — the caller passes allowAllTypes = 1, so no building-kind
+    // gate. [orig: raycast_find_collision_entity @ 0x539a70 (the iris caller
+    // @ 0x5c7784 pushes allowAllTypes 1) -> raycast_against_entity_pool
+    // @ 0x538720; pool-1 dynamics are a tracked D-RLIT-2 residual.]
+    bool segment_hits_static(World &world, const int32_t a[3], const int32_t b[3],
+                             int32_t radius);
 
     // Ground-column probe through terrain + the entity's candidate models.
     // Builds the ray {x+dx, y+dy, z+z_up} down z_drop, clamps to the terrain

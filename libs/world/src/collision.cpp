@@ -1139,6 +1139,17 @@ bool los_terrain_blocked(const terrain::TerrainHeightField &field, const int32_t
     return !terrain::terrain_raycast_los_clear(sampler, a, b);
 }
 
+bool terrain_clip_segment(const terrain::TerrainHeightField &field, const int32_t a[3],
+                          const int32_t b[3], int32_t out_hit[3]) {
+    // [orig: raycast_entity_collision @ 0x413760 -> Terrain_RaycastHeightmapHiRes_0
+    // @ 0x60e710, called (start, end, end) so the ray end clips in place]
+    terrain::TerrainRaycastSampler sampler;
+    sampler.point = &los_field_point_cb;
+    sampler.bilinear = &los_field_bilinear_cb;
+    sampler.ctx = const_cast<terrain::TerrainHeightField *>(&field);
+    return terrain::terrain_raycast_refined(sampler, a, b, out_hit);
+}
+
 namespace {
 
 // The radiused segment clip, boolean-only: does any TYPE-1 solid volume of
@@ -1394,6 +1405,44 @@ bool CollisionWorld::sound_los_clear(World &world, EntityHandle listener, Entity
         }
     }
     return true;
+}
+
+bool CollisionWorld::segment_hits_static(World &world, const int32_t a[3], const int32_t b[3],
+                                         int32_t radius) {
+    // [orig: raycast_find_collision_entity @ 0x539a70 with allowAllTypes = 1
+    // (the iris sun-ray caller @ 0x5c7784) -> raycast_against_entity_pool
+    // @ 0x538720 — the pool-2 statics walk with the same broad phase and
+    // radiused segment clip the sound leg ports; no building-kind gate.]
+    CollisionRay ray;
+    ray.start[0] = a[0];
+    ray.start[1] = a[1];
+    ray.start[2] = a[2];
+    ray.end[0] = b[0];
+    ray.end[1] = b[1];
+    ray.end[2] = b[2];
+    ray.refresh();
+    const int32_t broad_r = radius > 0 ? radius : 0; // [orig: @ 0x538752 clamp]
+
+    for (int32_t i = 0; i < static_count_; ++i) {
+        const StaticSlot &s = statics_[i];
+        CollisionTargetView view;
+        std::vector<CollisionMatrix> mats;
+        const CollisionTargetView *tv = target_view(world, s.h, view, mats);
+        if (tv == nullptr) continue;
+        // Broad phase vs the ray box + line distance, radius-padded.
+        // [orig: @ 0x5387c4-0x5389a4]
+        if (abs32(ray.mid[1] - tv->pos[1]) >
+                tv->bound_radius + broad_r + static_cast<int32_t>(ray.half[1]) ||
+            abs32(ray.mid[0] - tv->pos[0]) >
+                tv->bound_radius + broad_r + static_cast<int32_t>(ray.half[0]) ||
+            abs32(ray.mid[2] - tv->pos[2]) >
+                tv->bound_radius + broad_r + static_cast<int32_t>(ray.half[2]))
+            continue;
+        if (ray_line_distance(ray.start, ray.dir, tv->pos) > tv->bound_radius + broad_r)
+            continue;
+        if (sound_segment_blocked(*tv, ray, radius)) return true;
+    }
+    return false;
 }
 
 int32_t CollisionWorld::sound_occlusion_inflate(World &world, EntityHandle listener,

@@ -79,6 +79,45 @@ godot::Ref<godot::Image> decode_pcx_image(const uint8_t *data, size_t size) {
 	return godot::Ref<godot::Image>();
 }
 
+godot::Ref<godot::Texture2D> build_pcx_luminance_alpha_texture(const godot::PackedByteArray &bytes) {
+	IndexedImage8 indexed;
+	std::string error;
+	if (!decode_pcx_indexed(bytes.ptr(), static_cast<size_t>(bytes.size()), indexed, error)) {
+		return godot::Ref<godot::Texture2D>();
+	}
+
+	// Palette luminance table: A[i] = (85 * (r + g + b)) >> 8 per entry, then
+	// each pixel's alpha byte is its palette entry's luminance — the sky/effect
+	// texture loader's PCX alpha synthesis [orig: load_texture_from_archive
+	// @ 0x58b980 — table build @ 0x58bc35..0x58bca9, per-pixel A @ 0x58bcee].
+	uint8_t lum[256];
+	for (int i = 0; i < 256; ++i) {
+		const uint16_t sum = static_cast<uint16_t>(indexed.palette[i][0]) +
+				static_cast<uint16_t>(indexed.palette[i][1]) +
+				static_cast<uint16_t>(indexed.palette[i][2]);
+		lum[i] = static_cast<uint8_t>(static_cast<uint16_t>(85u * sum) >> 8);
+	}
+
+	godot::PackedByteArray pixels;
+	pixels.resize(indexed.width * indexed.height * 4);
+	uint8_t *dst = pixels.ptrw();
+	for (int i = 0; i < indexed.width * indexed.height; ++i) {
+		const uint8_t idx = indexed.indices[static_cast<size_t>(i)];
+		dst[i * 4 + 0] = indexed.palette[idx][0];
+		dst[i * 4 + 1] = indexed.palette[idx][1];
+		dst[i * 4 + 2] = indexed.palette[idx][2];
+		dst[i * 4 + 3] = lum[idx];
+	}
+
+	godot::Ref<godot::Image> image = godot::Image::create_from_data(
+			indexed.width, indexed.height, false, godot::Image::FORMAT_RGBA8, pixels);
+	if (image.is_null()) {
+		return godot::Ref<godot::Texture2D>();
+	}
+	image->generate_mipmaps();
+	return godot::ImageTexture::create_from_image(image);
+}
+
 bool decode_pcx_with_palette(const uint8_t *data,
                              size_t size,
                              std::vector<uint8_t> &out_indices,
