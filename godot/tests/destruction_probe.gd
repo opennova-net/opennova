@@ -53,8 +53,8 @@ func _ready() -> void:
 
 	# Plant the destructible in front of the player start (the 60xx start-family
 	# marker the spawn selector uses), facing the spawn look direction.
-	var controller = ws._controller
-	var mission = controller._mission if controller != null else null
+	var controller = ws.get_editor_document()
+	var mission: NovaMissionData = controller.get_mission() if controller != null else null
 	if mission == null:
 		push_error("[dp] no mission document")
 		get_tree().quit(1)
@@ -80,10 +80,11 @@ func _ready() -> void:
 	var item_def_id := int(OS.get_environment("NOVA_DP_ITEM").to_int())
 	if item_def_id == 0:
 		item_def_id = 104301  # Group of metal barrels: hp 155, armor 10 10, husk mbarel2x
-	var kind := NovaMissionData.kind_for_item_type(
-			controller._placer.item_db.get_item_type(item_def_id)
-			if controller._placer != null and controller._placer.item_db != null
-			else NovaItemDatabase.TYPE_DECORATION)
+	# The default barrel group is a decoration; NOVA_DP_KIND overrides the
+	# entity kind for non-decoration NOVA_DP_ITEM picks.
+	var kind := int(OS.get_environment("NOVA_DP_KIND").to_int())
+	if kind == 0:
+		kind = NovaMissionData.kind_for_item_type(NovaItemDatabase.TYPE_DECORATION)
 	var planted_ids: Array[int] = []
 	for offset in [Vector3(4, 0, 0), Vector3(-4, 0, 0), Vector3(0, 4, 0), Vector3(0, -4, 0)]:
 		var rec: Dictionary = mission.add_entity(kind, item_def_id, start_pos + offset, Vector3.ZERO)
@@ -113,12 +114,6 @@ func _ready() -> void:
 	if sim.has_method("get_destruction_debug") and planted_bms_id != 0:
 		dbg = sim.get_destruction_debug(planted_bms_id)
 	print("[dp] target sim state: ", dbg if not dbg.is_empty() else "<entity not found!>")
-	var track_ids: Array[int] = planted_ids.duplicate()
-	var db = controller._placer.item_db if controller._placer != null else null
-	if db != null:
-		print("[dp] def: husk=%s huskfinal=%s traits=%s" % [
-				db.get_husk(item_def_id), db.get_huskfinal(item_def_id),
-				str(db.get_death_traits(item_def_id))])
 	await _capture("00_before.png")
 
 	# --- Fire on it: level the look slightly down, hold LMB. ---
