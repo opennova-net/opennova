@@ -75,7 +75,7 @@ controller(brain[2])+16 phase += brain[7]/tick, thresholds 372/744, workZ = grou
 | `EntityCommands::local_player_standing_on_ssn` | `Entity_IsLocalPlayerStandingOnSsn` (renamed) | 0x4f1260 | §23.2 | **matching** (persistence nuance D-AI-11 h) |
 | `EntityCommands::local_player_driving_ssn` | `Entity_IsLocalPlayerDrivingSsn` (renamed) | 0x4f1150 | §23.2 | **matching** |
 | `EntityCommands::local_player_on_gun_of_ssn` | `Entity_IsLocalPlayerOnGunOfSsn` (renamed) | 0x4f11e0 | §23.2 | **matching** |
-| `AiSystem::vehicle_ai_drive` + motor AI branch | `Entity_UpdateVehiclePhysics` parked/AI-driver legs | 0x48c002 / 0x48bc12 | §23.3 — state 22 stamp, 22→16 hand-back, turn budget, 0.75x damps, steer `Yaw+Δ+Δ/8`; ctest `vehicle_mount` | **matching** core (avoid/boarders-wait/handbrake/minAI = D-NET-161) |
+| `AiSystem::vehicle_ai_drive` + motor AI branch | `Entity_UpdateVehiclePhysics` parked/AI-driver legs | 0x48c002 / 0x48bc12 | §23.3 — state 22 stamp, 22→16 hand-back, turn budget, 0.75x damps, steer `Yaw+Δ+Δ/8`, the pool-1 avoid brake (heading-aware ellipse + the 0.25-0.75 id/frame damp @ 0x48bd8f); ctest `vehicle_mount` | **matching** core (boarders-wait/handbrake/aim-lock/minAI = D-NET-161) |
 | `spawn_player_entity` group stamp | the deploy leg (`commandGroup = 1`) | 0x519fd0 | §23.3; ctest `vehicle_mount` | **matching** |
 
 ## 3. Infantry motor spec — `Entity_UpdateInfantryAI @ 0x4b9910` (port blueprint)
@@ -3206,7 +3206,28 @@ stamps + the steer/speed math; the motor consumes a `VehicleDriveCmd`) +
 `tick_vehicle_motor`'s AI branch; leg 2's SM freeze lands in the staging block
 (a player controller stamps state 22 like the parked leg — the mover never
 advances under a human driver; our cur/pend SPLIT means both fields take every
-stamp, the original has one state word);
+stamp, the original has one state word).
+
+The avoid BRAKE (witnessed in full + ported 2026-07-18 — the 00TRa
+trucks-off-path fix): per pool-1 neighbor, reach = both bounds + 1.0 u with a
+DOUBLED z term (`|2dz|`), carrier chains skipped both ways
+[@ 0x48be1d-0x48be25]; bearing other->self = `fpatan(dy, dx) * 2^32/2pi` (dbl
+@ 0x7C19D8); the trigger ellipse compares dist against the DIRECTIONAL
+footprints `r/2 + (r/2)*|cos(yaw - ang)|` of both entities + 1.0 u (the
+1024-entry cos table `off_849934`); a neighbor within ~30 deg of dead ahead
+(`|Yaw - ang - 0x7FFFFF80| <= 357913920`) multiplies the command speed by
+`((DcbId + (frame << 8)) & 0x7FFF) + 0x4000` >> 16 — a 0.25..0.75 stochastic
+brake per tick, compounding per neighbor (the frame counter is
+`dword_24C1948`; our net id + logic tick stand in). Without it, redirected
+convoys drove full-speed into parked neighbors and the (ported) hull contact
+DEFLECTED them off their routes — braking behind obstacles, not deflection, is
+the retail path-follow behavior. ctest `vehicle_mount`
+(`test_ai_drive_avoid_brake` — exact factor ahead, no damp behind).
+The wait-for-boarders stop stays deferred WITH its witness: it only fires for
+a live unmounted pool-0 entity whose brain runs the boarding think (mode
+`f[37] == 125` keyed to this vehicle's DcbId in `f[38]`) — moot until the
+boarding think (D-AI-11) lands. The handbrake byte-973 latch and the aim-lock
+stop stay deferred (D-NET-161).
 
 **Hull-vs-world collision (witnessed 2026-07-17, ported the same session).**
 The physics tick runs `Entity_CheckCollisionState @ 0x462a30` (twice — the

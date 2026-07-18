@@ -327,6 +327,82 @@ void test_ai_drive_leg() {
     }
 }
 
+// The pool-1 avoid BRAKE: a neighbor whose footprint ellipse overlaps ours and
+// sits within ~30 deg of dead ahead damps the command speed by the id/frame
+// factor ((id + (tick<<8)) & 0x7FFF) + 0x4000 per tick; a neighbor BEHIND does
+// not [orig: @0x48bd8f-0x48bf26].
+void test_ai_drive_avoid_brake() {
+    Rig r(30.0f);
+    const VehicleTraits t = truck_traits();
+    r.w.vehicle_traits.set(r.veh().item_id, t);
+    const int ai_idx = r.sys.attach(r.veh_h);
+    AiEntity &ve = *r.sys.at(ai_idx);
+    ve.pos[0] = 100 << 16;
+    ve.pos[1] = 200 << 16;
+    ve.pos[2] = 10 << 16;
+    r.sys.nav.channels.resize(3);
+    r.sys.nav.channels[2].count = 1;
+    r.sys.nav.channels[2].entries[0] = 0;
+    r.sys.nav.nodes.resize(1);
+    r.sys.nav.nodes[0] = NavEntry{{2 << 16, 300 << 16, 200 << 16, 10 << 16, 0}};
+    AiBrain &b = ve.brain;
+    b.f[AiBrain::kCurState] = 16;
+    b.f[AiBrain::kWpType] = 1;
+    b.f[AiBrain::kWpChannel] = 2;
+    b.f[AiBrain::kWpNode] = 0;
+    b.f[AiBrain::kOutSpeed] = 40 * 293;
+    // Face +x (engine BAM 0) with no bearing error -> the sharp-leg damps stay out.
+    r.veh().position = Vec3{100.0f, 200.0f, 10.0f};
+    r.veh().veh.yaw_bam = bam_heading_from_mission_yaw_deg(90.0);
+    r.veh().veh.yaw_seeded = true;
+    ve.heading = r.veh().veh.yaw_bam;
+    r.veh().bound_radius = 3.0f;
+
+    Entity npc;
+    npc.kind = EntityKind::Organic;
+    npc.item_id = 2072;
+    npc.health = 150;
+    npc.alive = true;
+    npc.team = 1;
+    const EntityHandle nh = r.w.registry.spawn(0, npc);
+    CHECK(entity_process_vehicle_attach(r.w, nh, r.veh_h, 1));
+    Entity *ctrl = resolve_vehicle_controller(r.w, r.veh());
+    CHECK(ctrl != nullptr);
+
+    // Baseline: open road, undamped.
+    VehicleDriveCmd cmd0;
+    r.sys.vehicle_ai_drive(r.w, r.veh(), ctrl, t, cmd0);
+    CHECK(cmd0.ai_drive);
+    CHECK(cmd0.cmd_speed > 0);
+
+    // A parked prop dead AHEAD (+x), footprints overlapping.
+    Entity prop;
+    prop.kind = EntityKind::Item;
+    prop.item_id = 999;
+    prop.position = Vec3{104.0f, 200.0f, 10.0f};
+    prop.bound_radius = 3.0f;
+    const EntityHandle ph = r.w.registry.spawn(1, prop);
+
+    VehicleDriveCmd cmd1;
+    r.sys.vehicle_ai_drive(r.w, r.veh(), ctrl, t, cmd1);
+    CHECK(cmd1.ai_drive);
+    const int32_t f = static_cast<int32_t>(
+            ((static_cast<uint32_t>(r.veh().net_id) +
+              (static_cast<uint32_t>(r.w.logic_tick) << 8)) &
+             0x7FFFu) +
+            0x4000u);
+    const int32_t expect = static_cast<int32_t>(
+            (static_cast<int64_t>(f) * cmd0.cmd_speed + 0x8000) >> 16);
+    CHECK(cmd1.cmd_speed == expect);
+    CHECK(cmd1.cmd_speed < cmd0.cmd_speed);
+
+    // The same prop BEHIND: inside reach, but the dead-ahead gate rejects.
+    r.w.registry.get(ph)->position = Vec3{96.0f, 200.0f, 10.0f};
+    VehicleDriveCmd cmd2;
+    r.sys.vehicle_ai_drive(r.w, r.veh(), ctrl, t, cmd2);
+    CHECK(cmd2.cmd_speed == cmd0.cmd_speed);
+}
+
 // The redirect order reaches the BRAIN (mode/list/node + budget) and the BMS speed
 // commands write kSpeedA/kSpeedB at the witnessed x65536/225 scale.
 // [orig: Entity_SetWaypointByTeam @0x43cdb4; Entity_ApplyCommand @0x43ab60 0x1D/0x1E ->
@@ -700,6 +776,7 @@ int main() {
     test_enemy_occupant_blocks_scan();
     test_bms_mount_predicates();
     test_ai_drive_leg();
+    test_ai_drive_avoid_brake();
     test_redirect_and_speed_commands();
     test_local_player_drive_mirror();
     test_player_spawn_group();

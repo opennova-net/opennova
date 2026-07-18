@@ -1499,6 +1499,13 @@ void AiSystem::apply_route_order(AiEntity &e, int32_t list, int32_t node) {
     }
 }
 
+// The 1024-entry engine cos table at 2^22, computed form (the D-INF-4
+// equivalence) [orig: off_849934, idx = (bam + 0x200000) >> 22].
+static int32_t avoid_cos22(int32_t bam) {
+    const double a = static_cast<double>(bam) * (3.14159265358979323846 / 2147483648.0);
+    return static_cast<int32_t>(std::cos(a) * 4194304.0);
+}
+
 // See ai.h — the vehicle-physics AI/parked input staging. [orig: Entity_UpdateVehiclePhysics
 // @0x48af00: parked @0x48c002-0x48c02d, AI-driver leg @0x48bc12-0x48c034]
 void AiSystem::vehicle_ai_drive(World &world, Entity &veh, const Entity *controller,
@@ -1567,13 +1574,82 @@ void AiSystem::vehicle_ai_drive(World &world, Entity &veh, const Entity *control
             cmd_speed = static_cast<int32_t>((49152LL * cmd_speed + 0x8000) >> 16);
     }
 
+    // The pool-1 avoid BRAKE [orig: @0x48bd8f-0x48bf26]: for every pool-1
+    // neighbor whose heading-aware footprint ellipse overlaps ours (+1.0 u)
+    // AND that sits within ~30 deg of dead ahead, the command speed multiplies
+    // by an id/frame-keyed factor in [0.25, 0.75) per tick — vehicles brake
+    // behind obstacles; deflecting off them through the hull contact was never
+    // the retail path-follow behavior.
+    {
+        const int32_t self_bound = to_fixed(veh.bound_radius);
+        const int32_t sx = to_fixed(veh.position.x);
+        const int32_t sy = to_fixed(veh.position.y);
+        const int32_t sz = to_fixed(veh.position.z);
+        const size_t cap = world.registry.pool_capacity(1);
+        for (size_t si = 0; si < cap; ++si) {
+            const Entity *o =
+                    world.registry.get(EntityHandle::make(1, static_cast<int>(si)));
+            if (o == nullptr || o->handle == veh.handle) continue; // [orig: @0x48be19]
+            const int32_t ob = to_fixed(o->bound_radius);
+            if (ob <= 0) continue; // [orig: the pool-walk live gate @0x48bdd9]
+            const int32_t reach = ob + self_bound + 0x10000; // [orig: @0x48bdf2]
+            const int32_t dx = sx - to_fixed(o->position.x);
+            if (iabs32(dx) > reach) continue;
+            const int32_t dy = sy - to_fixed(o->position.y);
+            if (iabs32(dy) > reach) continue;
+            // Carrier chains never brake for each other [orig: @0x48be1d-0x48be25].
+            if (o->ground_target == veh.handle || veh.ground_target == o->handle)
+                continue;
+            const int32_t dz2 = 2 * (sz - to_fixed(o->position.z)); // [orig: @0x48be2d]
+            if (iabs32(dz2) > reach) continue;
+            const double fdx = static_cast<double>(dx);
+            const double fdy = static_cast<double>(dy);
+            const double fdz = static_cast<double>(dz2);
+            const int32_t dist =
+                    static_cast<int32_t>(std::sqrt(fdx * fdx + fdy * fdy + fdz * fdz));
+            if (dist > reach) continue;
+            // Bearing other->self in BAM [orig: fpatan(dy, dx) x 2^32/2pi
+            // (dbl @0x7C19D8) @0x48be7a-0x48be89].
+            const int32_t ang = static_cast<int32_t>(
+                    std::llround(std::atan2(fdy, fdx) * 683565275.5764316));
+            // Directional footprints: r/2 + (r/2)*|cos(yaw - ang)| — an end-on
+            // vehicle projects its full bound along the axis, side-on half
+            // [orig: the 1024-entry cos table off_849934 @0x48be8f-0x48bef1].
+            const int32_t oyaw = o->veh.yaw_seeded
+                    ? o->veh.yaw_bam
+                    : bam_heading_from_mission_yaw_deg(static_cast<double>(o->yaw));
+            const int32_t other_r =
+                    static_cast<int32_t>((static_cast<int64_t>(ob >> 1) *
+                                          iabs32(avoid_cos22(oyaw - ang))) >> 22) +
+                    (ob >> 1);
+            const int32_t self_r =
+                    static_cast<int32_t>((static_cast<int64_t>(self_bound >> 1) *
+                                          iabs32(avoid_cos22(heading - ang))) >> 22) +
+                    (self_bound >> 1);
+            if (dist > self_r + other_r + 0x10000) continue; // [orig: @0x48bef8]
+            // Dead-ahead gate: the other within ~30 deg of the nose
+            // [orig: |Yaw - ang - 0x7FFFFF80| <= 357913920 @0x48bf05-0x48bf0f].
+            if (iabs32(heading - ang - 0x7FFFFF80) > 357913920) continue;
+            // The brake factor ((id + (frame << 8)) & 0x7FFF) + 0x4000 — keyed
+            // off DcbId + the global frame counter dword_24C1948 (our net id +
+            // logic tick stand in) [orig: @0x48bf17-0x48bf26].
+            const int32_t f = static_cast<int32_t>(
+                    ((static_cast<uint32_t>(veh.net_id) +
+                      (static_cast<uint32_t>(world.logic_tick) << 8)) &
+                     0x7FFFu) +
+                    0x4000u);
+            cmd_speed = static_cast<int32_t>(
+                    (static_cast<int64_t>(f) * cmd_speed + 0x8000) >> 16);
+        }
+    }
     out.ai_drive = true;
     out.cmd_speed = cmd_speed;
     out.steer_target_bam = heading + delta + (delta >> 3); // [orig: @0x48bd7f]
-    // The pool-1 collision-avoid damping @0x48bd8f-0x48bf26, the wait-for-boarders stop
-    // @0x48bf6f-0x48bff9, the handbrake byte-973 latch @0x48c03a and the aim-lock stop
-    // @0x48c086 are tracked deferrals (D-NET-161).
-    (void)world;
+    // The wait-for-boarders stop @0x48bf6f-0x48bff9 (a full stop while any live
+    // unmounted pool-0 entity runs the boarding think toward THIS vehicle —
+    // brain mode 125 + the vehicle id; moot until the AI boarding think lands),
+    // the handbrake byte-973 latch @0x48c03a and the aim-lock stop @0x48c086
+    // stay tracked deferrals (D-NET-161).
 }
 
 // ----------------------------------------------------------------------------
