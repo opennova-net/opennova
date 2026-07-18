@@ -1616,7 +1616,7 @@ bit-1-cleared box) IS the indoors trigger (entity Flags 0x800000).
 |---|---|---|---|
 | D-COL-1 | one yaw-only world matrix shared by every section | per-section matrices from the model callback (animated parts: doors) | animated-part collision (doors) pending; static buildings match |
 | D-COL-2 | building destroyed/animated section skip not modeled | itemDef+2192/2193 bone map + the `dword_A8A418` state table skips sections (gated !player) | destroyed-wall pass-through pending the destruction system |
-| D-COL-3 | bound radius derived from the collision AABB (statics; persons 1.0u) | entity+0 boundRadius stamped at model load | broad-phase margins differ slightly; conservative |
+| D-COL-3 | bound radius recomputed as the .3di LOD-0 part-bound-sphere union (primitive boxes as the degenerate fallback), raised to the husk model's bound, +0.0625 pad (persons 1.0u) | entity+0 boundRadius = max(model gpm[5], husk gpm[5]) × def scale + 0x1000, stamped only when the model carries collision data [orig: `Entity_InitFromModel @ 0x40dc30`] | the recomputed union tracks the stored header bound; the authored def `scale` factor is not applied (unparsed), and we stamp collision-less models too so every item stays hittable — conservative |
 | D-COL-4 | eye test point reuses the head column | eye point = pos + CameraOffset | CameraOffset unmodeled; head/eye share a column until the camera entity fields land |
 | D-COL-5 | platform standing sets flags/groundEntity (any source, on plain contact) | full deck carry (anchor/yaw/pitch chase, step-up +20480/+39936/+60416, deck velocity), the entry gates (not Flags 2; was-platform OR player OR MoveOrder 0x400), the on-platform 2-point capsule mode, the platform-EXIT nudge (24576·sincos(bodyHeading)>>22) + local pitch-restore chase, pool-1 source slices | infantry-on-buildings unaffected; riders of MOVING vehicles slide until the vehicle pass wires it |
 | D-COL-6 | capture-zone touch (0x200) not forwarded | `Server_OnPlayerTouchCaptureZone @ 0x500ba0` | zone capture rides its own radius path today (zone_capture.cpp); reconcile when contact-driven capture lands |
@@ -3386,8 +3386,10 @@ update := `Entity_UpdateStaticDeathPhysics @ 0x494230`); 11 (bridge) =
 `Entity_SpawnDeathPieces @ 0x493400`: gate = husk model present (huskFinal
 +0x38 else husk +0x34), not already husked, not fully underwater. The
 explosion glow light (`LightPool_SpawnGlowEffect @ 0x49351a`, 2x model radius,
-non-decorations), then per husk section 1..N (section 0 — the hull — never
-leaves): the def `huskSubPartTypes[i]` byte (+0x101, clamped at 16) indexes
+non-decorations), then per husk section 1..N — N = the husk RENDER object's
+own section count (`renderObj[8]+52`, read `@ 0x49361a`), NOT the items.def
+`husk_sub_parts` token (most retail defs author none; section 0 — the hull —
+never leaves): the def `huskSubPartTypes[i]` byte (+0x101, clamped at 16) indexes
 the 80-B debris-type table `g_death_piece_types @ 0x8404f0` (13 rows: HULL,
 WHEEL, CHUNK_S/M/L, ROCK_S/M/L, CHUNKNP_S/M/L, CACTUS_, CHUNKSF_M — the
 `DeathPieceType` mirror in libs/world carries the full decoded constants and

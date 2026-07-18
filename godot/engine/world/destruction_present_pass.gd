@@ -55,6 +55,7 @@ const PIECE_TRAIL_BY_TYPE: Array[String] = [
 ]
 
 var _sim                          # NovaSimulation
+var _container: Node3D = null     # mission container (node-less husk grafts land here)
 var _index                        # MissionEntityRegistry
 var _placer                       # MissionObjectPlacer (husk model builds)
 var _item_db                      # NovaItemDatabase (husk graphic names)
@@ -89,9 +90,10 @@ func get_stats() -> Stats:
 	return _stats
 
 
-func setup(sim, index, placer, item_db, game_world, audio_provider: Callable,
-		fx_provider: Callable) -> void:
+func setup(sim, container: Node3D, index, placer, item_db, game_world,
+		audio_provider: Callable, fx_provider: Callable) -> void:
 	_sim = sim
+	_container = container
 	_index = index
 	_placer = placer
 	_item_db = item_db
@@ -133,21 +135,18 @@ func present() -> void:
 	_tick_wreck_fires()
 
 
-# The husk model swap: hide the intact node's visual children and graft the husk
-# model as a child (it inherits the node transform, so settling wrecks keep
-# moving with the present pass). No husk authored -> the intact graphic keeps
-# standing, dead — the witnessed render-pick fallback.
+# The husk model swap: on a per-entity node, hide the intact node's visual
+# children and graft the husk model as a child (it inherits the node transform,
+# so settling wrecks keep moving with the present pass). Batched statics have no
+# node: the instance is carved out of its graphic's MultiMesh batches and the
+# husk grafts into the mission container at the placed transform. No husk
+# authored -> the intact graphic keeps standing, dead — the witnessed
+# render-pick fallback (batched statics stay in their batches).
 func _apply_husk_swap(husk: Dictionary) -> void:
 	var bms_id := int(husk.get("bms_id", 0))
 	if _husked.has(bms_id):
 		return
 	_stats.husk_swaps += 1
-	var node: Node3D = null
-	if _index != null:
-		node = _index.resolve_single(bms_id)
-	if node == null or not is_instance_valid(node):
-		_husked[bms_id] = null
-		return
 	var item_id := int(husk.get("item_id", 0))
 	var def_id := item_id + 100000  # mission::kItemIdOffset (item DB keys)
 	var husk_graphic := ""
@@ -160,13 +159,33 @@ func _apply_husk_swap(husk: Dictionary) -> void:
 		_husked[bms_id] = null
 		_stats.no_husk += 1
 		return
-	for child in node.get_children():
-		if child is Node3D:
-			(child as Node3D).visible = false
-	var model: Node3D = _placer.build_model_from_graphic(husk_graphic, "", node)
-	if model != null:
-		model.name = "HuskModel"
-	_husked[bms_id] = model
+	var node: Node3D = null
+	if _index != null:
+		node = _index.resolve_single(bms_id)
+	if node != null and is_instance_valid(node):
+		for child in node.get_children():
+			if child is Node3D:
+				(child as Node3D).visible = false
+		var model: Node3D = _placer.build_model_from_graphic(husk_graphic, "", node)
+		if model != null:
+			model.name = "HuskModel"
+		_husked[bms_id] = model
+		return
+	# Batched static (world-wac-ai-re §24.6): carve the instance, graft at its
+	# placed transform. An unknown bms_id (individual entity whose node is gone)
+	# grafts nothing.
+	var xform_v: Variant = null
+	if _placer.has_method("hide_static_instance"):
+		xform_v = _placer.hide_static_instance(bms_id)
+	if not (xform_v is Transform3D) or _container == null \
+			or not is_instance_valid(_container):
+		_husked[bms_id] = null
+		return
+	var graft: Node3D = _placer.build_model_from_graphic(husk_graphic, "", _container)
+	if graft != null:
+		graft.name = "HuskModel_%d" % bms_id
+		graft.transform = xform_v as Transform3D
+	_husked[bms_id] = graft
 
 
 # The section-debris burst [orig: Entity_SpawnSectionDebris @ 0x43f580].
@@ -180,10 +199,15 @@ func _apply_debris_burst(burst: Dictionary) -> void:
 	var node: Node3D = null
 	if _index != null:
 		node = _index.resolve_single(int(burst.get("bms_id", 0)))
-	if node == null or not is_instance_valid(node):
-		return
+	var origin: Vector3
+	if node != null and is_instance_valid(node):
+		origin = node.global_position
+	else:
+		# Batched statics carry the position on the event.
+		origin = burst.get("pos", Vector3.ZERO)
+		if origin == Vector3.ZERO:
+			return
 	_stats.bursts += 1
-	var origin := node.global_position
 	var blast: Vector3 = burst.get("blast_center", Vector3.ZERO)
 	var away := Vector3.UP
 	if bool(burst.get("has_blast_center", false)):
@@ -230,6 +254,14 @@ func _apply_effect(eff: Dictionary) -> void:
 				return node.global_transform if is_instance_valid(node) else null)
 			if family == 2:
 				_burning[net_id] = {"node": node}
+		else:
+			# Batched-static wreck: no node — anchor the bank at the (static)
+			# event position so the owner-pose sync keeps the group alive.
+			var fixed := Transform3D(Basis.IDENTITY, pos)
+			_game_world.register_effect_anchor(key, func() -> Variant:
+				return fixed)
+			if family == 2:
+				_burning[net_id] = {"pos": pos}
 
 
 func _apply_sound(snd: Dictionary) -> void:
@@ -300,13 +332,20 @@ func _tick_wreck_fires() -> void:
 	var audio = _audio_provider.call() if _audio_provider.is_valid() else null
 	for net_id in _burning.keys():
 		var entry: Dictionary = _burning[net_id]
+		var pos: Vector3
 		var node: Variant = entry.get("node")
-		if not (node is Node3D) or not is_instance_valid(node):
+		if node is Node3D:
+			if not is_instance_valid(node):
+				_burning.erase(net_id)
+				continue
+			pos = (node as Node3D).global_position
+		elif entry.has("pos"):
+			pos = entry["pos"]
+		else:
 			_burning.erase(net_id)
 			continue
 		if _rng.randf() < FIRE_CRACKLE_CHANCE:
 			_stats.crackles += 1
-			var pos := (node as Node3D).global_position
 			if fx != null:
 				fx.spawn_effect(FIRE_CRACKLE_EFFECT, pos, Vector3.UP)
 			if audio != null:

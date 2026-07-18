@@ -681,6 +681,11 @@ public:
 	// scale, pos, heading, pitch, settled} — each piece renders as its single
 	// husk-model section. [orig: DeathPiece_TickAll @0x57b900; §24]
 	Array get_death_pieces() const;
+	// Per-entity destruction diagnostics by bms_id (probe/F3 seam): health,
+	// bound_radius, flags, traits presence — the damage chain's gate inputs.
+	// (get_entity_debug is the AI-pool-index detail card; this one resolves by
+	// the placed bms_id and carries the §24 gate fields.)
+	Dictionary get_destruction_debug(int p_bms_id) const;
 
 	// Mission scripting state on the shared world (the dword_C6B240 var store + event gates).
 	void set_mission_variable(int index, int value);

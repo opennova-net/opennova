@@ -217,6 +217,8 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 		"batches": 0,
 	}
 	pickable_records = []
+	_destruction_batches = {}
+	_destruction_instances = {}
 	_static_user_point_sources = []
 	_static_item_effect_sources = []
 	if mission == null or parent == null or resource_root == null:
@@ -243,6 +245,10 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 	# Parallel to static_by_graphic (same slot order); only filled in edit_mode so the
 	# pickable index can map a MultiMesh instance back to its mission entity.
 	var static_refs_by_graphic: Dictionary = {}  # graphic -> Array[{ kind, index }]
+	# Parallel to static_by_graphic (same slot order), ALWAYS filled: the runtime
+	# destruction pass carves a destroyed instance out of its batches by bms_id
+	# (world-wac-ai-re §24.6 — the husk swap on batched statics).
+	var static_ids_by_graphic: Dictionary = {}  # graphic -> Array[int bms_id]
 	var animated: Array = []  # [{ graphic, xform, (kind, index in edit_mode) }]
 	for e in mission.get_all_entities():
 		var entity: Dictionary = e
@@ -276,7 +282,9 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 				static_by_graphic[graphic] = []
 				static_refs_by_graphic[graphic] = []
 				static_effect_sources_by_graphic[graphic] = []
+				static_ids_by_graphic[graphic] = []
 			static_by_graphic[graphic].append(xform)
+			static_ids_by_graphic[graphic].append(int(entity.get("bms_id", 0)))
 			static_effect_sources_by_graphic[graphic].append({
 				"kind": int(entity.get("kind", -1)),
 				"item_id": item_id,
@@ -321,10 +329,19 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 			mmi.name = "Batch_%s_%d" % [graphic, int(batch.get("submesh", 0))]
 			container.add_child(mmi)
 			stats.batches += 1
+			_destruction_batches.get_or_add(graphic, []).append(mm)
 			if edit_mode:
 				_record_static_batch(graphic, static_refs_by_graphic.get(graphic, []), mm, mmi, offset, batch["mesh"])
 		stats.batched += xforms.size()
 		stats.placed += xforms.size()
+		var inst_ids: Array = static_ids_by_graphic.get(graphic, [])
+		for i in range(mini(inst_ids.size(), xforms.size())):
+			var iid := int(inst_ids[i])
+			if iid != 0:
+				_destruction_instances[iid] = {
+					"graphic": graphic, "index": i,
+					"xform": xforms[i] as Transform3D,
+				}
 	PerfTimeline.end_on(timeline)
 
 	# Align every harvested batch material with the env AS OF placement end —
@@ -893,6 +910,31 @@ func ground_anchor_godot(graphic: String) -> Vector3:
 func object_data_for(graphic: String) -> NovaObjectData:
 	_check_epoch()
 	return _load_object_data(graphic)
+
+
+# --- destruction support (world-wac-ai-re §24.6) -------------------------------
+# Batched statics have no per-entity node; a destroyed one is carved out of its
+# graphic's MultiMesh batches (zero-scale at its own origin — the batch keeps its
+# instance count) and the caller grafts the husk model at the returned transform.
+var _destruction_batches: Dictionary = {}   # graphic -> Array[MultiMesh]
+var _destruction_instances: Dictionary = {} # bms_id -> { graphic, index, xform }
+
+
+## Hide a destroyed batched static in every batch of its graphic. Returns the
+## instance's placed transform (for the husk graft), or null when unknown.
+func hide_static_instance(bms_id: int) -> Variant:
+	var rec: Variant = _destruction_instances.get(bms_id)
+	if not (rec is Dictionary):
+		return null
+	var graphic := String(rec["graphic"])
+	var index := int(rec["index"])
+	var xform: Transform3D = rec["xform"]
+	var carved := Transform3D(Basis().scaled(Vector3.ZERO), xform.origin)
+	for mm_v in _destruction_batches.get(graphic, []):
+		var mm := mm_v as MultiMesh
+		if mm != null and index >= 0 and index < mm.instance_count:
+			mm.set_instance_transform(index, carved)
+	return xform
 
 
 ## Register an already-resolved object plus its static render batches. This is

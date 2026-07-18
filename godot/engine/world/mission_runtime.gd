@@ -221,7 +221,7 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	# audio/fx providers.
 	if not is_joiner and options.has("fire_audio"):
 		_destruction_present = DestructionPresentPass.new()
-		_destruction_present.setup(_sim, _index, options.get("placer"),
+		_destruction_present.setup(_sim, container, _index, options.get("placer"),
 			options.get("item_db"), options.get("game_world"),
 			options.get("fire_audio", Callable()),
 			options.get("fire_fx", Callable()))

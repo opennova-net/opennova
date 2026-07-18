@@ -52,6 +52,11 @@ struct ItemDeathTraits {
     bool no_die = false;        // attrib & 0x40000000 — damage clamps to health-1
     bool has_husk = false;      // husk/huskfinal authored (the building-death gate
                                 // [orig: Entity_ProcessBuildingDeath @ 0x49442c])
+    // The husk MODEL's section count — the death-piece loop bound. Retail
+    // reads it off the husk RENDER object (renderObj[8]+52 @ 0x49361a), NOT
+    // the items.def husk_sub_parts token (most defs author none) — the host
+    // feeds it from the loaded husk model. 0 = unknown -> the authored count.
+    int32_t husk_section_count = 0;
     bool is_decoration = false; // def type 2 — no death glow light [orig: @ 0x4934f2]
     uint8_t husk_sub_part_count = 0;      // def+0x100
     uint8_t husk_sub_part_types[16] = {}; // def+0x101[] — debris-type table indexes
@@ -80,6 +85,11 @@ struct ItemDeathTraitsTable {
         for (auto &r : rows)
             if (r.first == item_id) { r.second = std::move(t); return; }
         rows.emplace_back(item_id, std::move(t));
+    }
+    ItemDeathTraits *get_mutable(int32_t item_id) {
+        for (auto &r : rows)
+            if (r.first == item_id) return &r.second;
+        return nullptr;
     }
     void clear() { rows.clear(); }
 };
@@ -158,6 +168,8 @@ struct HuskSwapEvent {
     uint32_t spawn_origin = 0;
     int32_t item_id = 0;
     uint32_t spawned_piece_mask = 0; // sections that left as pieces [entity+0x138]
+    Vec3 pos;                        // the wreck position (batched statics resolve
+                                     // no node — the present pass grafts here)
 };
 
 // A section-debris burst [orig: Entity_SpawnSectionDebris @ 0x43f580] — the
@@ -168,6 +180,7 @@ struct SectionDebrisEvent {
     int32_t bms_id = 0;
     uint32_t spawn_origin = 0;
     int32_t item_id = 0;
+    Vec3 pos;                  // the dying entity position (node-less fallback)
     Vec3 blast_center;         // entity+0x80 (zero = radial fallback pitch 63.3°)
 };
 

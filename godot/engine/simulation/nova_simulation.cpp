@@ -581,6 +581,36 @@ bool collision_model_from_ir(const ThreediIRCollision *col,
 	return true;
 }
 
+// The model bound-sphere radius from the .3di itself — the union of the LOD-0
+// part bounding spheres seen from the model origin, with the primitive boxes as
+// the degenerate-sphere fallback. This is the entity+0 boundRadius source: the
+// original reads it off the MODEL header (gpm[5]) for every placed item,
+// collision block or not, and the proximity/hit tests and blast ranges all
+// consume it [orig: Entity_InitFromModel @ 0x40dc30; world-wac-ai-re §24].
+float model_bound_radius_from_ir(const ThreediModelIR &ir) {
+	if (ir.lod_count == 0 || ir.lods == nullptr) return 0.0f;
+	const ThreediIRLod &lod = ir.lods[0];
+	float r = 0.0f;
+	for (size_t i = 0; lod.parts != nullptr && i < lod.part_count; ++i) {
+		const ThreediIRPart &p = lod.parts[i];
+		const float cx = p.abs_position[0] + p.bounding_center[0];
+		const float cy = p.abs_position[1] + p.bounding_center[1];
+		const float cz = p.abs_position[2] + p.bounding_center[2];
+		const float c = std::sqrt(cx * cx + cy * cy + cz * cz);
+		if (c + p.bounding_radius > r) r = c + p.bounding_radius;
+	}
+	if (r <= 0.0f) {
+		for (size_t i = 0; lod.primitives != nullptr && i < lod.primitive_count; ++i) {
+			const ThreediIRPrimitive &pr = lod.primitives[i];
+			for (int a = 0; a < 3; ++a) {
+				r = std::max(r, std::abs(pr.min[a]));
+				r = std::max(r, std::abs(pr.max[a]));
+			}
+		}
+	}
+	return r;
+}
+
 // Build the runtime occlusion model from the parsed occlusion IR — the 60 B
 // portal-face records with their sequential slices (the IR conversion already
 // mirrors the arena assignment of [orig: load_occlusion_model_data @ 0x5b4a00]).
@@ -679,6 +709,8 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 	apply_collision_to_ai();
 	std::unordered_map<std::string, int32_t> model_by_graphic;     // -1 = no collision block
 	std::unordered_map<std::string, int32_t> occlusion_by_graphic; // -1 = no occlusion records
+	std::unordered_map<std::string, float> radius_by_graphic;      // .3di bound radius (units)
+	std::unordered_map<std::string, int32_t> husk_sections_by_graphic; // husk section counts
 	std::vector<opennova::world::EntityHandle> handles;
 	world_->registry.for_each(
 			[&](const opennova::world::Entity &e) { handles.push_back(e.handle); });
@@ -696,6 +728,7 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 		if (it == model_by_graphic.end()) {
 			int32_t model_id = -1;
 			int32_t occlusion_id = -1;
+			float bound_radius = 0.0f;
 			// Duck-typed MissionObjectPlacer.object_data_for(graphic) — the placer's
 			// per-graphic NovaObjectData cache (the render path loads the same object).
 			Ref<NovaObjectData> data = p_placer->call("object_data_for", graphic);
@@ -706,25 +739,23 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 				opennova::world::OcclusionModel occ;
 				if (occlusion_model_from_ir(data->native_ir().occlusion, occ))
 					occlusion_id = occlusion_world_.add_model(std::move(occ));
+				bound_radius = model_bound_radius_from_ir(data->native_ir());
 			}
 			it = model_by_graphic.emplace(key, model_id).first;
 			occlusion_by_graphic.emplace(key, occlusion_id);
+			radius_by_graphic.emplace(key, bound_radius);
 		}
+		// The bound-sphere radius (entity+0 boundRadius) comes from the .3di
+		// MODEL header bound, not the collision block — every placed item
+		// carries one, so collision-less props are still hittable by rounds and
+		// reachable by blasts. Raised to the husk model's bound below, then
+		// padded +0.0625 [orig: Entity_InitFromModel @ 0x40dc30 — boundRadius =
+		// max(gpm[5], husk gpm[5]) + 0x1000; the authored def scale factor is
+		// not yet applied (tracked, D-COL-3)].
+		float entity_bound = radius_by_graphic[key];
 		if (it->second >= 0) {
 			collision_world_.assign_entity(h, it->second);
 			++attached;
-			// The bound-sphere radius (entity+0 boundRadius) from the model AABB —
-			// the blast-range and kz-fallback source [orig: Entity_InitFromModel
-			// writes it from the model header; §24].
-			if (const opennova::world::CollisionModel *cm =
-						collision_world_.model(it->second)) {
-				float r = 0.0f;
-				for (int a = 0; a < 3; ++a) {
-					r = std::max(r, std::abs(cm->min[a] / 65536.0f));
-					r = std::max(r, std::abs(cm->max[a] / 65536.0f));
-				}
-				if (r > 0.0f) e->bound_radius = r;
-			}
 		}
 		// The husk-stage collision model: attached beside the graphic instance so
 		// every query swaps to the wreck once Flags & 4 sets. The collision pick
@@ -733,7 +764,7 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 		const String husk_name_s = p_item_db->get_husk(def_id).is_empty()
 				? p_item_db->get_huskfinal(def_id)
 				: p_item_db->get_husk(def_id);
-		if (!husk_name_s.is_empty() && it->second >= 0) {
+		if (!husk_name_s.is_empty()) {
 			const std::string husk_key(husk_name_s.utf8().get_data());
 			auto hit = model_by_graphic.find(husk_key);
 			if (hit == model_by_graphic.end()) {
@@ -747,8 +778,37 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 				hit = model_by_graphic.emplace(husk_key, husk_model_id).first;
 				occlusion_by_graphic.emplace(husk_key, -1);
 			}
-			if (hit->second >= 0) collision_world_.assign_entity_husk(h, hit->second);
+			if (hit->second >= 0 && it->second >= 0)
+				collision_world_.assign_entity_husk(h, hit->second);
+			// The husk RENDER model's section count = the death-piece loop
+			// bound [orig: renderObj[8]+52 @ 0x49361a] — most defs author no
+			// husk_sub_parts token. Its own cache, independent of the collision
+			// cache: a husk graphic can double as some entity's main graphic,
+			// which would leave the joint cache without a sections entry.
+			auto hs = husk_sections_by_graphic.find(husk_key);
+			if (hs == husk_sections_by_graphic.end()) {
+				int32_t husk_sections = 0;
+				Ref<NovaObjectData> hdata = p_placer->call("object_data_for", husk_name_s);
+				if (hdata.is_valid() && hdata->native_ir().lod_count > 0 &&
+				    hdata->native_ir().lods != nullptr)
+					husk_sections = static_cast<int32_t>(
+							hdata->native_ir().lods[0].part_count);
+				hs = husk_sections_by_graphic.emplace(husk_key, husk_sections).first;
+				if (hdata.is_valid())
+					radius_by_graphic.emplace(husk_key,
+							model_bound_radius_from_ir(hdata->native_ir()));
+			}
+			if (opennova::world::ItemDeathTraits *t =
+						world_->item_death_traits.get_mutable(e->item_id)) {
+				if (t->husk_section_count == 0 && hs->second > 0)
+					t->husk_section_count = hs->second;
+			}
+			// The husk model's bound joins the entity bound max [orig:
+			// Entity_InitFromModel @ 0x40dc30, the huskModel[5] compare].
+			entity_bound = std::max(entity_bound, radius_by_graphic[husk_key]);
 		}
+		if (entity_bound > 0.0f && e->bound_radius <= 0.0f)
+			e->bound_radius = entity_bound + 0.0625f;  // the +0x1000 16.16 pad
 		const int32_t occ_id = occlusion_by_graphic[key];
 		if (occ_id >= 0 && e->kind == opennova::world::EntityKind::Building) {
 			// The def bits the occlusion engine reads: attrib2 bit 6 "weldable"
@@ -1643,6 +1703,8 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("drain_destruction_events"),
 			&NovaSimulation::drain_destruction_events);
 	ClassDB::bind_method(D_METHOD("get_death_pieces"), &NovaSimulation::get_death_pieces);
+	ClassDB::bind_method(D_METHOD("get_destruction_debug", "bms_id"),
+			&NovaSimulation::get_destruction_debug);
 	ClassDB::bind_method(D_METHOD("set_sound_profiles", "sndprof_text"),
 			&NovaSimulation::set_sound_profiles);
 	ClassDB::bind_method(D_METHOD("set_water_z", "water_y"), &NovaSimulation::set_water_z);
@@ -3156,6 +3218,7 @@ Dictionary NovaSimulation::drain_destruction_events() {
 		d["spawn_origin"] = static_cast<int64_t>(h.spawn_origin);
 		d["item_id"] = h.item_id;
 		d["spawned_piece_mask"] = static_cast<int64_t>(h.spawned_piece_mask);
+		d["pos"] = to_godot(h.pos);
 		husks.push_back(d);
 	}
 	Array bursts;
@@ -3165,6 +3228,7 @@ Dictionary NovaSimulation::drain_destruction_events() {
 		d["bms_id"] = b.bms_id;
 		d["spawn_origin"] = static_cast<int64_t>(b.spawn_origin);
 		d["item_id"] = b.item_id;
+		d["pos"] = to_godot(b.pos);
 		d["blast_center"] = to_godot(b.blast_center);
 		d["has_blast_center"] = b.blast_center.x != 0.0f || b.blast_center.y != 0.0f ||
 				b.blast_center.z != 0.0f;
@@ -3215,6 +3279,42 @@ Array NovaSimulation::get_death_pieces() const {
 	return out;
 }
 
+
+// Per-entity destruction diagnostics (probe/F3 seam): the gate inputs the
+// damage chain reads, resolved by bms_id. {} = no such entity.
+Dictionary NovaSimulation::get_destruction_debug(int p_bms_id) const {
+	Dictionary out;
+	if (!world_) return out;
+	const opennova::world::Entity *found = nullptr;
+	world_->registry.for_each([&](const opennova::world::Entity &e) {
+		if (found == nullptr && e.bms_id == p_bms_id) found = &e;
+	});
+	if (found == nullptr) return out;
+	out["bms_id"] = found->bms_id;
+	out["net_id"] = static_cast<int>(found->net_id);
+	out["kind"] = static_cast<int>(found->kind);
+	out["pool"] = found->handle.pool();
+	out["item_id"] = found->item_id;
+	out["health"] = found->health;
+	out["health_max"] = found->health_max;
+	out["alive"] = found->alive;
+	out["bound_radius"] = found->bound_radius;
+	out["engine_flags"] = static_cast<int64_t>(found->engine_flags);
+	out["is_ai_capable"] = found->is_ai_capable;
+	out["has_collision_instance"] = collision_world_.has_instance(found->handle);
+	const opennova::world::ItemDeathTraits *t =
+			world_->item_death_traits.get(found->item_id);
+	out["has_death_traits"] = t != nullptr;
+	if (t != nullptr) {
+		out["armor_impact"] = t->armor_impact;
+		out["armor_blast"] = t->armor_blast;
+		out["unit_type"] = t->unit_type;
+		out["kz"] = t->kz;
+		out["has_husk"] = t->has_husk;
+	}
+	out["pos"] = Vector3(found->position.x, found->position.z, -found->position.y);
+	return out;
+}
 
 // Live tracer rounds for the streak layer — see the header note.
 PackedFloat32Array NovaSimulation::get_tracer_rounds() const {

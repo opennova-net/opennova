@@ -465,6 +465,7 @@ void process_destructible_death(World &world, Entity &target) {
     // collision faces [orig: the Entity_SpawnSectionDebris loop @ 0x43fbd9].
     ev.debris_bursts.push_back(SectionDebrisEvent{target.net_id, target.bms_id,
                                                   target.spawn_origin, target.item_id,
+                                                  target.position,
                                                   target.death_blast_center});
     // Scar/decal clear (Scar_ClearEntriesByEntity @ 0x5ccec0) — no decal
     // system yet; tracked §24.
@@ -475,7 +476,7 @@ void process_destructible_death(World &world, Entity &target) {
     ++ev.items_destroyed;
     ev.husk_swaps.push_back(HuskSwapEvent{target.net_id, target.bms_id,
                                           target.spawn_origin, target.item_id,
-                                          target.spawned_piece_mask});
+                                          target.spawned_piece_mask, target.position});
     // The S2C 0x26 entity-state broadcast (Server_SendEntityStatePacket
     // @ 0x509d70) is the net track's emit — staged with the other MP legs
     // (tracked §24).
@@ -493,7 +494,12 @@ uint32_t spawn_death_pieces(World &world, Entity &target) {
     // radius, non-decorations) — no light-pool port (tracked, the D-AI-8d
     // family).
     uint32_t mask = 0;
-    const int sections = traits->husk_sub_part_count;
+    // The loop bound is the HUSK MODEL's section count [orig: renderObj[8]+52
+    // @ 0x49361a]; the items.def husk_sub_parts token is only the authored hint
+    // (most retail defs author none).
+    const int sections = traits->husk_section_count > 0
+            ? traits->husk_section_count
+            : static_cast<int>(traits->husk_sub_part_count);
     // The wreck's own motion carries into the launch base at 2x
     // [orig: the velocity fold @ 0x493589-0x4935ff, scale flt 2.0 @ 0x7C3B90].
     const Vec3 base{target.veh.vel_x / 65536.0f * 2.0f,
@@ -601,7 +607,7 @@ void entity_update_death_transforms(World &world, Entity &target, bool silent) {
     if (!was_husked) {
         world.destruction.husk_swaps.push_back(
                 HuskSwapEvent{target.net_id, target.bms_id, target.spawn_origin,
-                              target.item_id, mask});
+                              target.item_id, mask, target.position});
         ++world.destruction.items_destroyed;
     }
     // The death vertical kick [orig: @ 0x493969 — def type 2 (helicopter
