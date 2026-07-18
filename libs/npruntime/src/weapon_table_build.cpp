@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <cstring>
 
 namespace opennova::np {
@@ -106,12 +107,40 @@ LoadoutAmmoBytes resolve_loadout_ammo(const world::WeaponTable &table, uint8_t a
 world::WeaponTable build_weapon_table(const DefWeaponsFile &weapons) {
 	world::WeaponTable table;
 
+	// The ammo-class registry: id 0 is the empty class — the original's default
+	// ammoclass byte is 0 for defs that never author `ammoclass`, and the pool
+	// arithmetic (seeding, eligibility) runs for them too [orig: AdmDef+0xD8
+	// memset default; pool reads @0x5406e0 take the byte unconditionally].
+	table.ammo_class_names.emplace_back("");
+	table.ammo_class_caps.push_back(0);
+	auto ammo_class_register = [&table](const char *name) -> int {
+		if (name == nullptr) name = "";
+		int id = table.ammo_class_id_of(name);
+		if (id >= 0) return id;
+		table.ammo_class_names.emplace_back(name);
+		table.ammo_class_caps.push_back(0);
+		return static_cast<int>(table.ammo_class_names.size()) - 1;
+	};
+
+	// Top-level `ammoclass_max_carry <class> <n>` -> the per-class carry caps
+	// [orig: parse @0x543873 -> the cap table @0x24E7DE0; clamp use @0x540b26].
+	for (size_t i = 0; i < weapons.ammo_class_lines_count; ++i) {
+		const char *line = weapons.ammo_class_lines[i];
+		char cls[64] = {};
+		int cap = 0;
+		if (std::sscanf(line, "%*s %63s %d", cls, &cap) == 2) {
+			int id = ammo_class_register(cls);
+			table.ammo_class_caps[static_cast<size_t>(id)] = cap;
+		}
+	}
+
 	// Entry 0: the engine-created "null" def — AnimDef_InitAll wipes the 255-entry table and
 	// names slot 0 right before weapon.def parses [orig: @0x543615; Game_StartMission
 	// @0x5254b3/@0x5254bd]. Its fields keep the InitEntryDefaults values.
 	world::WeaponTableEntry null_entry;
 	null_entry.name = "null";
 	null_entry.valid = true;
+	null_entry.ammo_class_id = 0;
 	table.entries.push_back(std::move(null_entry));
 
 	for (size_t i = 0; i < weapons.count; ++i) {
@@ -140,6 +169,13 @@ world::WeaponTable build_weapon_table(const DefWeaponsFile &weapons) {
 		e.round_type = d.round_type; // resolved to an AmmoTable index by
 		                             // resolve_weapon_round_types (§5.60)
 		e.attach_text_id = d.attach_text_id; // the attach-label Overlays key [orig: +0x3A0]
+		e.flags = d.flags;
+		e.flags2 = d.flags2;
+		e.weapon_class_slot = d.weapon_class_slot;
+		for (int k = 0; k < 7; ++k) e.classrounds[k] = d.classrounds[k];
+		e.switchcategory = d.switchcategory;
+		e.has_switchcategory = d.has_switchcategory != 0;
+		e.ammo_class_id = static_cast<int16_t>(ammo_class_register(d.ammo_class));
 
 		// Allocation rule [orig: WeaponDefs_ParseLineCallback @0x5436e1]: reuse an existing
 		// same-name entry (re-parse override), else the LOWEST free slot [orig:

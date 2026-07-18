@@ -239,6 +239,13 @@ void weapon_fsm_request_reload(WeaponSlotState &slot);
 // phase is {0,4} and the state isn't already current; else queue idle.
 void weapon_fsm_queue_scope_up(WeaponSlotState &slot);
 void weapon_fsm_queue_scope_down(WeaponSlotState &slot);
+// The manual-switch writers [orig: WeaponSlot_ForceQueueSwitchFrom @ 0x53f170 /
+// WeaponSlot_TryQueueSwitchRank @ 0x53f1c0]: queue SWITCHFROM (cross-category holster)
+// or SWITCHRANK (same-category flip) on the OUTGOING weapon's slot when its phase is
+// complete ({0, 4, 0x40}); an in-flight action forces idle instead. The caller commits
+// pending -> equipped when the queued action's active phase finishes.
+void weapon_fsm_queue_switch_from(WeaponSlotState &slot);
+void weapon_fsm_queue_switch_rank(WeaponSlotState &slot);
 
 // The input-dispatcher gates in front of the requests
 // [orig: Input_HandleActionBinding_0 @ 0x4e0420]:

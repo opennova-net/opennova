@@ -19,16 +19,18 @@ extends RefCounted
 # the parallel action 218 @0x49b8e3 ships with no binding row] — the shell owns that
 # key + gate and the ACCEPT apply (sim + FP viewmodel rebuild).
 #
-# Slot population is the witnessed class/team filter of the WEAPON-screen populate
-# [orig: populate_three_category_lists @0x566db0 via NovaWeaponDatabase
-# .get_slot_weapons], rows sorted case-insensitively ascending [orig:
-# ListWidget_SortRows -> cmp @0x6448a0, mode (string, asc)] under NONE at row 0.
-# Deferred (tracked in the armory RE notes): the per-weapon availability table
-# [orig: g_armoryWeaponAvailability @0x24D5600 — mission/S2C/host-authored], the
-# per-class 2048-byte loadout buffers + reselect [orig: g_armoryLoadoutBufferByClass
-# @0x25DD740 -> populate_ammo_type_combo_boxes @0x564930], the icon swaps
-# [orig: @0x565640 tail, icon table @0x2540D70], the exact ammo row model
-# [orig: (row+1) clips @0x565490], and the *_AMMO1_TYPE round-type cascade.
+# Slot population is the witnessed class/team/availability filter of the
+# WEAPON-screen populate [orig: populate_three_category_lists @0x566db0 via
+# NovaWeaponDatabase.get_slot_weapons + the g_armoryWeaponAvailability term
+# @0x566e6b — value semantics in net-re §5.63], rows sorted case-insensitively
+# ascending [orig: ListWidget_SortRows -> cmp @0x6448a0, mode (string, asc)]
+# under NONE at row 0; every slot reselects from the live kit.
+# Deferred (tracked in the armory RE notes): the per-class 2048-byte loadout
+# buffer MEMORY (save-on-flip + remembered counts) [orig:
+# g_armoryLoadoutBufferByClass @0x25DD740 -> populate_ammo_type_combo_boxes
+# @0x564930], the icon swaps [orig: @0x565640 tail, icon table @0x2540D70], the
+# exact ammo row model [orig: (row+1) clips @0x565490], and the *_AMMO1_TYPE
+# round-type cascade.
 
 var _menu: Node                      # the built NovaMnuMenu
 var _root: NovaResourceRoot
@@ -43,10 +45,15 @@ var _class_allow_mask := 0x3FF
 # PLAYER_CLASS spin (and its label) outside one [orig: the is_in_session branch of
 # the WEAPON on-show handler @0x567370]. SP/PIE shells leave this false.
 var _class_selection_enabled := false
-# The currently equipped primary (weapon.def id); stands in for the per-class loadout
-# buffer's reselect until that buffer is ported [orig: select-by-adm-index
-# sub_645240 in populate_ammo_type_combo_boxes @0x564930].
+# The current kit (weapon.def ids) from the sim's slot pool; each slot reselects
+# its row [orig: select-by-adm-index sub_645240 in populate_ammo_type_combo_boxes
+# @0x564930]. The per-class buffer MEMORY stays deferred (see the header).
 var _current_primary := ""
+var _current_secondary := ""
+var _current_accessory := ""
+# Availability lookup (name -> value); banned (0) weapons drop from the lists
+# [orig: the g_armoryWeaponAvailability term @0x566e6b]. Invalid = allow all.
+var _availability_lookup := Callable()
 var _populating := false
 # Selected weapon dicts per slot control name ("" row 0 = NONE).
 var _slot_rows := {}                 # control name -> Array[Dictionary] (row-1 aligned)
@@ -79,10 +86,23 @@ func set_player_class(player_class: int) -> void:
 	_player_class = player_class
 
 
-## The currently equipped primary; PRIMARY pre-selects its row on populate (the
-## per-class loadout-buffer reselect stands deferred; see the header).
-func set_current_loadout(primary: String) -> void:
+## The current kit from the sim's slot pool; each slot pre-selects its row on
+## populate. The per-class loadout-buffer MEMORY (remembered ammo counts,
+## save-on-class-flip) stands deferred — the reselect itself now reads the live
+## inventory [orig: populate_ammo_type_combo_boxes @0x564930 select-by-adm-index].
+func set_current_loadout(primary: String, secondary: String = "",
+		accessory: String = "") -> void:
 	_current_primary = primary
+	_current_secondary = secondary
+	_current_accessory = accessory
+
+
+## Availability lookup (weapon name -> 0 banned / 1 allowed / 2 armory-zone-only /
+## 3 mission-allowed); banned weapons drop from every slot list
+## [orig: the g_armoryWeaponAvailability term of populate_three_category_lists
+## @0x566e6b — any nonzero value lists]. Unset = everything allowed.
+func set_availability_lookup(lookup: Callable) -> void:
+	_availability_lookup = lookup
 
 
 ## MP hosts enable the class spin; SP/PIE leave it disabled like the original
@@ -210,6 +230,12 @@ func _fill_slot(control: String, slot: int, team_mask: int) -> void:
 	if combo == null:
 		return
 	var dicts: Array = _weapons.get_slot_weapons(slot, _class_mask(), team_mask)
+	# The map availability term: banned (0) weapons never list; every nonzero value
+	# (allowed / armory-zone-only / mission-allowed) does
+	# [orig: the !g_armoryWeaponAvailability[i] skip @0x566e6b].
+	if _availability_lookup.is_valid():
+		dicts = dicts.filter(func(w):
+			return int(_availability_lookup.call(String(w.get("name", "")))) != 0)
 	# Rows are sorted case-insensitively ascending by display label before NONE is
 	# prepended at row 0 [orig: ListWidget_SortRows -> cmp @0x6448a0 with (string, asc);
 	# NONE inserted at 0 @0x566f15].
@@ -225,12 +251,16 @@ func _fill_slot(control: String, slot: int, team_mask: int) -> void:
 		dicts.append(pair[1])
 	_slot_rows[control] = dicts
 	_set_combo_items(combo, rows)
-	# PRIMARY re-selects the equipped weapon's row — the loadout-buffer reselect's
-	# stand-in [orig: sub_645240 select-by-adm-index in @0x564930]; the other slots
-	# stay on NONE until the per-class buffer (and multi-slot inventory) lands.
-	if control == "PRIMARY" and not _current_primary.is_empty():
+	# Each slot re-selects its row from the live kit [orig: sub_645240
+	# select-by-adm-index in @0x564930]; the per-class buffer MEMORY stays deferred.
+	var current := ""
+	match control:
+		"PRIMARY": current = _current_primary
+		"SECONDARY": current = _current_secondary
+		"ACCESSORY": current = _current_accessory
+	if not current.is_empty():
 		for i in dicts.size():
-			if String(dicts[i].get("name", "")).nocasecmp_to(_current_primary) == 0:
+			if String(dicts[i].get("name", "")).nocasecmp_to(current) == 0:
 				combo.select_silent(i + 1)
 				break
 

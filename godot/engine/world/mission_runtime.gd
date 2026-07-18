@@ -259,6 +259,29 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	if options.get("resource_root") != null:
 		if _sim.load_weapon_table(options["resource_root"], "weapon.def") != OK:
 			push_warning("MissionRuntime: weapon.def not loaded — 0x5A ammo resolve degraded to echo")
+		# The map loadout rules, promoted AFTER the weapon table (name resolution +
+		# sub-weapon inheritance need it): the .bms item_availability chunk becomes
+		# the availability table, then the .bms loadout chunk becomes the spawn kit
+		# (availability-filtered, knife fallback), and the slot pool respawns from it.
+		# [orig: Game_StartMission availability build @0x5246e8 over the boot-time
+		#  catalog + Mission_LoadBMSFile's filtered restrictionData write @0x40f961;
+		#  the sim's interim default-kit rebuild inside load_weapon_table converges
+		#  onto this kit.]
+		if mission != null:
+			if mission.has_method("get_item_availability"):
+				_sim.set_weapon_availability(mission.get_item_availability())
+			if mission.has_method("get_weapon_loadout"):
+				var kit: Array[Dictionary] = []
+				for row in mission.get_weapon_loadout():
+					kit.append({
+						"name": String(row.get("name", "")),
+						"ammo_primary": int(String(row.get("value1", "-1")).to_int()),
+						"ammo_secondary": int(String(row.get("value2", "-1")).to_int()),
+						"flags": -1,
+					})
+				if not kit.is_empty():
+					_sim.set_spawn_loadout(kit, true)
+					_sim.respawn_local_player_loadout()
 		# Ballistics table (ammo.def) + the round_type resolve — the authoritative round
 		# sim's data feed (fire -> flight -> damage -> death; net-re §5.60). After the
 		# armory so every adm's fired round binds to its ammo index.
