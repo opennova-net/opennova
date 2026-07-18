@@ -163,6 +163,14 @@ struct CollisionMatrix {
 // Per-part animated section transforms are a tracked follow-up (D-COL-1).
 CollisionMatrix collision_matrix_from_heading(int32_t heading_bam, const int32_t pos[3]);
 
+// The FULL placement matrix Rz(heading)·Ry(pitch)·Rx(roll) for statics authored
+// with pitch/roll (rocks rolled onto slopes, tilted wrecks) — the collision
+// shell must lean WITH the visual or rounds thread past its edge where the
+// model still looks solid. [orig: Math_BuildFixedPointMatrixFromEulerAngles
+// @ 0x613f40; the spawn euler pack @ 0x40eb66.]
+CollisionMatrix collision_matrix_from_euler(int32_t heading_bam, int32_t pitch_bam,
+                                            int32_t roll_bam, const int32_t pos[3]);
+
 // The terrain leg of the LOS segment query, TRUE = the segment hits terrain
 // (blocked). The ported heightmap raycast over the runtime height field; shared
 // by CollisionWorld::raycast_clear, the sound-occlusion LOS, and the

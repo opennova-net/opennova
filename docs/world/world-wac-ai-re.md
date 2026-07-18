@@ -1614,7 +1614,7 @@ bit-1-cleared box) IS the indoors trigger (entity Flags 0x800000).
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
-| D-COL-1 | one yaw-only world matrix shared by every section | per-section matrices from the model callback (animated parts: doors) | animated-part collision (doors) pending; static buildings match |
+| D-COL-1 | ~~one yaw-only world matrix shared by every section~~ 2026-07-18c: statics authored with pitch/roll now take the FULL placement matrix `Rz(90−yaw)·Ry(pitch)·Rx(roll)` (`collision_matrix_from_euler` — the Q22 per-product >>22 composition of `Math_BuildFixedPointMatrixFromEulerAngles @ 0x613f40`, fed by the spawn euler pack `@ 0x40eb66-0x40eba6`); pure-yaw placements keep the quantized-table path. Still ONE matrix shared by every section | per-section matrices from the model callback (animated parts: doors) | tilted rocks/wrecks now collide where they RENDER (the 00TRg RckS07 through-shot root cause — a roll-19° rock's shell stood upright); animated-part collision (doors) pending; ctest `collision` test_face_raycast_rolled_entity |
 | D-COL-2 | building destroyed/animated section skip not modeled | itemDef+2192/2193 bone map + the `dword_A8A418` state table skips sections (gated !player) | destroyed-wall pass-through pending the destruction system |
 | D-COL-3 | bound radius recomputed as the .3di LOD-0 part-bound-sphere union (primitive boxes as the degenerate fallback), raised to the husk model's bound, +0.0625 pad (persons 1.0u) | entity+0 boundRadius = max(model gpm[5], husk gpm[5]) × def scale + 0x1000, stamped only when the model carries collision data [orig: `Entity_InitFromModel @ 0x40dc30`] | the recomputed union tracks the stored header bound; the authored def `scale` factor is not applied (unparsed), and we stamp collision-less models too so every item stays hittable — conservative |
 | D-COL-4 | eye test point reuses the head column | eye point = pos + CameraOffset | CameraOffset unmodeled; head/eye share a column until the camera entity fields land |
@@ -1797,6 +1797,27 @@ from inside. D-ITEM-13(d) closed; ctest `collision`
 ruled out data-level transparency: 951 models, 618k faces, dominate_axis
 always ∈ {1,2,4}, zero misaligned vert runs, 27 zero-normal faces that cannot
 straddle in retail either.)
+
+Session 3 (same day, from a user pose dump on 00TRg): the pose-replay probe
+(`godot/tests/pose_replay_probe.gd` + `NovaSimulation.debug_spawn_round`, a
+diagnostic injector through the real `RoundSim::spawn`) reproduced a
+deterministic through-shot — a 2° aim change at a rock formation (RckS07,
+bms 1484) flipped a stone face hit into a clean pass-through. Root cause:
+the placement authors **pitch −355 / roll 19**, the visual leans with it, but
+the collision matrix was yaw-only (D-COL-1) — the shell stood upright ~2.5 u
+off the visible surface. Ported the full placement matrix
+`[orig: Math_BuildFixedPointMatrixFromEulerAngles @ 0x613f40 — Rz(90−yaw)·
+Ry(pitch)·Rx(roll), Q22 rows with per-product >>22 truncations and exact-zero
+stage skips; the spawn euler pack (90−yaw, +pitch, +roll) @ 0x40eb66-0x40eba6]`
+as `collision_matrix_from_euler`, used by `target_view` whenever a static
+authors pitch or roll (pure-yaw keeps the table path bit-for-bit). D-COL-1's
+tilted-static clause closed; ctest `collision` `test_face_raycast_rolled_entity`.
+The residual near-silhouette pass-throughs are AUTHORED: the CFAC bullet mesh
+is a deliberately coarser bake than the render mesh (RckS07: 146 collision
+verts vs 268 render), and with the witnessed enter-front backface rule a ray
+threading the mesh's open underside or a silhouette gap exits without a front
+face — retail-identical behavior, visible as red graze rings in the F3 Rounds
+view.
 
 IDB write-backs (2026-07-18, saved): rename `g_ProjectileDragTable @ 0xB7B300`
 (ex `dword_B7B300`); comments at `@ 0x4ea291` (the exclusion-set build map)

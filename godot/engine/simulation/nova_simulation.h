@@ -905,6 +905,15 @@ public:
 	// including face-miss fly-ons (the "why didn't that register" case).
 	Dictionary get_round_debug() const;
 
+	// Diagnostic round injector: spawns one live round through the REAL
+	// RoundSim::spawn (production velocity/tracer/trail path; owner = the local
+	// player) from a Godot-space origin along a Godot-space direction, firing
+	// the named ammo ("AMMO_556", "AMMO_M203_40MM_NADE", ...). The world tick
+	// flies it and the F3 Rounds ring records the outcome — the pose-replay
+	// probe's seam. Returns the round slot, -1 on bad ammo/full pool.
+	int debug_spawn_round(const Vector3 &p_from_godot, const Vector3 &p_dir_godot,
+	                      const String &p_ammo_name);
+
 	// Read-only render-occlusion state for the F3 "Occlusion" debug tab:
 	// { active, camera_indoors, exterior_visible, water_visible, local_blink_flags,
 	//   counts: { instances, batched, visible, toc_culled, slots, window_groups,

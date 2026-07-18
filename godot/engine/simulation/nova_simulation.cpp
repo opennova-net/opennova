@@ -1221,6 +1221,34 @@ inline Vector3 godot_from_mission_vec3(const opennova::world::Vec3 &p) {
 }
 } // namespace
 
+int NovaSimulation::debug_spawn_round(const Vector3 &p_from_godot, const Vector3 &p_dir_godot,
+                                      const String &p_ammo_name) {
+	if (!world_) return -1;
+	const int ammo_index = world_->ammo.index_of(p_ammo_name.utf8().get_data());
+	if (ammo_index < 0) return -1;
+	// Godot world (x, up, z) -> mission (x, -z, up); direction -> the spawn's
+	// yaw/pitch BAM (the §5.16 mission bearing: vel = (cos yaw, sin yaw, sin
+	// pitch) x speed — round_sim.cpp spawn).
+	const double dx = p_dir_godot.x;
+	const double dy = -static_cast<double>(p_dir_godot.z);
+	const double dz = p_dir_godot.y;
+	const double len = std::sqrt(dx * dx + dy * dy + dz * dz);
+	if (len <= 0.0) return -1;
+	double sz = dz / len;
+	if (sz > 1.0) sz = 1.0;
+	if (sz < -1.0) sz = -1.0;
+	constexpr double kBamPerRad = 4294967296.0 / (2.0 * 3.14159265358979323846);
+	opennova::world::RoundSpawnParams params;
+	params.owner = world_->cached.local_player;
+	params.shooter_handle = params.owner.valid() ? params.owner.packed : 0xFFFF;
+	params.ammo_index = ammo_index;
+	params.origin = opennova::world::Vec3{p_from_godot.x, -p_from_godot.z, p_from_godot.y};
+	params.dir_yaw_bam =
+	    static_cast<int32_t>(std::llround(std::atan2(dy, dx) * kBamPerRad));
+	params.dir_pitch_bam = static_cast<int32_t>(std::llround(std::asin(sz) * kBamPerRad));
+	return world_->round_sim.spawn(*world_, params);
+}
+
 Dictionary NovaSimulation::get_round_debug() const {
 	Dictionary out;
 	Array events;
@@ -1970,6 +1998,8 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_collision_debug"), &NovaSimulation::get_collision_debug);
 	ClassDB::bind_method(D_METHOD("get_occlusion_debug"), &NovaSimulation::get_occlusion_debug);
 	ClassDB::bind_method(D_METHOD("get_round_debug"), &NovaSimulation::get_round_debug);
+	ClassDB::bind_method(D_METHOD("debug_spawn_round", "from_godot", "dir_godot", "ammo_name"),
+	                     &NovaSimulation::debug_spawn_round);
 	ClassDB::bind_method(D_METHOD("get_occlusion_portal_debug", "anchor", "range_units"),
 	                     &NovaSimulation::get_occlusion_portal_debug);
 	ClassDB::bind_method(D_METHOD("local_player_indoors"), &NovaSimulation::local_player_indoors);

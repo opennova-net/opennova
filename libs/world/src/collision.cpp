@@ -191,6 +191,73 @@ CollisionMatrix collision_matrix_from_heading(int32_t heading_bam, const int32_t
     return out;
 }
 
+// The full placement matrix — Rz(heading)·Ry(pitch)·Rx(roll), Q22 rows composed
+// with the original's per-product >>22 truncations and exact-zero stage skips.
+// [orig: Math_BuildFixedPointMatrixFromEulerAngles @ 0x613f40, fed by the spawn
+// euler pack {[3] = (90 − yaw) BAM, [4] = pitch BAM, [5] = roll BAM}
+// (Entity_SpawnFromBMSRecord @ 0x40eb66); the entity's collision/bone matrices
+// carry this same orientation, so a rolled rock's collision shell leans WITH
+// its visual — the 00TRg through-shot root cause once statics kept yaw only.]
+CollisionMatrix collision_matrix_from_euler(int32_t heading_bam, int32_t pitch_bam,
+                                            int32_t roll_bam, const int32_t pos[3]) {
+    static constexpr double kRadPerBam = 6.283185307179586 / 4294967296.0;
+    static constexpr double kQ22 = 4194304.0;
+    const auto trig = [](int32_t bam, int32_t &s, int32_t &c) {
+        const double a = static_cast<double>(bam) * kRadPerBam;
+        s = static_cast<int32_t>(std::sin(a) * kQ22); // trunc [orig: _ftol2_sse]
+        c = static_cast<int32_t>(std::cos(a) * kQ22);
+    };
+    const auto q = [](int64_t v) { return static_cast<int32_t>(v >> 22); };
+
+    int32_t t[12] = {0}; // stage 1: RotX(roll) [orig: @ 0x613f7b-0x613fc9]
+    if (roll_bam != 0) {
+        int32_t sr, cr;
+        trig(roll_bam, sr, cr);
+        t[0] = 1 << 22;
+        t[5] = cr; t[6] = -sr;
+        t[9] = sr; t[10] = cr;
+    } else {
+        t[0] = t[5] = t[10] = 1 << 22;
+    }
+
+    int32_t p2[12]; // stage 2: RotY(pitch) applied [orig: @ 0x613fd7-0x614099]
+    const int32_t *cur = t;
+    if (pitch_bam != 0) {
+        int32_t sp, cp;
+        trig(pitch_bam, sp, cp);
+        p2[0] = cp;
+        p2[1] = q(static_cast<int64_t>(t[9]) * -sp);
+        p2[2] = q(static_cast<int64_t>(t[10]) * -sp);
+        p2[3] = 0;
+        p2[4] = t[4]; p2[5] = t[5]; p2[6] = t[6]; p2[7] = 0;
+        p2[8] = sp;
+        p2[9] = q(static_cast<int64_t>(t[9]) * cp);
+        p2[10] = q(static_cast<int64_t>(t[10]) * cp);
+        p2[11] = 0;
+        cur = p2;
+    }
+
+    CollisionMatrix out; // stage 3: Rz(heading) applied [orig: @ 0x6140b2-0x6141da]
+    if (heading_bam != 0) {
+        int32_t sz, cz;
+        trig(heading_bam, sz, cz);
+        out.m[0] = q(static_cast<int64_t>(cur[0]) * cz);
+        out.m[1] = q(static_cast<int64_t>(cur[1]) * cz) + q(static_cast<int64_t>(cur[5]) * -sz);
+        out.m[2] = q(static_cast<int64_t>(cur[2]) * cz) + q(static_cast<int64_t>(cur[6]) * -sz);
+        out.m[4] = q(static_cast<int64_t>(cur[0]) * sz);
+        out.m[5] = q(static_cast<int64_t>(cur[1]) * sz) + q(static_cast<int64_t>(cur[5]) * cz);
+        out.m[6] = q(static_cast<int64_t>(cur[2]) * sz) + q(static_cast<int64_t>(cur[6]) * cz);
+        out.m[8] = cur[8]; out.m[9] = cur[9]; out.m[10] = cur[10];
+    } else {
+        out.m[0] = cur[0]; out.m[1] = cur[1]; out.m[2] = cur[2];
+        out.m[4] = cur[4]; out.m[5] = cur[5]; out.m[6] = cur[6];
+        out.m[8] = cur[8]; out.m[9] = cur[9]; out.m[10] = cur[10];
+    }
+    out.m[3] = pos[0]; out.m[7] = pos[1]; out.m[11] = pos[2];
+    out.m[12] = out.m[13] = out.m[14] = out.m[15] = 0;
+    return out;
+}
+
 // ----------------------------------------------------------------------------
 // Point-vs-blink query. [orig: Entity_TestCollisionSections @ 0x4aef90]
 // ----------------------------------------------------------------------------
@@ -1100,8 +1167,18 @@ const CollisionTargetView *CollisionWorld::target_view(World &world, EntityHandl
     int32_t p[3];
     entity_pos_fixed(*e, p);
     const int32_t heading = bam_heading_from_mission_yaw_deg(static_cast<double>(e->yaw));
-    const CollisionMatrix world_mat = collision_matrix_from_heading(heading, p);
-    mats.assign(m->sections.size(), world_mat); // yaw-only, shared per section (D-COL-1)
+    // Statics authored with pitch/roll (rocks seated on slopes) take the full
+    // euler matrix so the shell leans with the visual [orig: the entity
+    // orientation matrix @ 0x613f40 serves every collision query]; pure-yaw
+    // placements keep the quantized-table heading path bit-for-bit.
+    const CollisionMatrix world_mat =
+            (e->pitch != 0 || e->roll != 0)
+                    ? collision_matrix_from_euler(
+                              heading,
+                              bam_from_degrees_wrapped(static_cast<double>(e->pitch)),
+                              bam_from_degrees_wrapped(static_cast<double>(e->roll)), p)
+                    : collision_matrix_from_heading(heading, p);
+    mats.assign(m->sections.size(), world_mat); // shared per section (D-COL-1)
 
     scratch.model = m;
     scratch.matrices = mats.data();

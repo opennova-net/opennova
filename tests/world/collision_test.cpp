@@ -853,6 +853,37 @@ void test_face_raycast_husk_swap() {
     CHECK(fh.material == 5);
 }
 
+void test_face_raycast_rolled_entity() {
+    // A static authored with roll must lean its collision shell WITH the
+    // visual [orig: the spawn orientation matrix Rz(90-yaw)*Ry(pitch)*Rx(roll)
+    // @ 0x613f40 serves every collision query] — the yaw-only stand-in left
+    // tilted rocks' shells upright, and rays threaded past them where the
+    // model still looked solid (the 00TRg RckS07 through-shot).
+    Rig rig(face_quad_model(14, 0));
+    Entity *b = rig.world.registry.get(rig.building);
+    b->bound_radius = 3.0f;
+
+    // Control: yaw-only (roll 0), the straight-down ray hits the z=1 quad.
+    const int32_t s_dn[3] = {fx(10.0), fx(10.0), fx(3.0)};
+    const int32_t e_dn[3] = {fx(10.0), fx(10.0), fx(-1.0)};
+    RayFaceHit fh;
+    CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, s_dn, e_dn, 0, fh) ==
+          CollisionWorld::FaceRaycast::kHit);
+
+    // Roll the entity 90 deg: the quad plane stands up at world y = 9 facing -y.
+    b->roll = 90;
+    CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, s_dn, e_dn, 0, fh) ==
+          CollisionWorld::FaceRaycast::kMiss); // the old plane position is empty air now
+    const int32_t s_fw[3] = {fx(10.0), fx(7.0), fx(0.0)};
+    const int32_t e_fw[3] = {fx(10.0), fx(11.0), fx(0.0)};
+    CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, s_fw, e_fw, 0, fh) ==
+          CollisionWorld::FaceRaycast::kHit); // the rolled plane catches the level ray
+    CHECK(fh.material == 14);
+    // dist = 2.0 of the 4.0 u segment (plane at world y = 9).
+    CHECK(fh.dist > fx(1.9) && fh.dist < fx(2.1));
+    b->roll = 0;
+}
+
 void test_round_inside_bound_sphere_hits_wall() {
     // The shoot-through-walls regression: a tick segment lying entirely INSIDE
     // a big bound sphere must still reach the face walk — the witnessed broad
@@ -914,6 +945,7 @@ int main() {
     test_face_raycast();
     test_face_raycast_flags_and_materials();
     test_face_raycast_husk_swap();
+    test_face_raycast_rolled_entity();
     test_round_inside_bound_sphere_hits_wall();
     if (failures == 0) std::printf("collision_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
