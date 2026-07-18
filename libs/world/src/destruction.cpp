@@ -39,6 +39,15 @@ uint16_t death_rand16() {
     return static_cast<uint16_t>(v ^ 1u);
 }
 
+// Piece spin rate: max * (rand % 100)/100, floored at min — NOT uniform in
+// [min, max]; a quarter of WHEEL rolls land exactly on the floor. Degrees per
+// tick (retail stores deg * 2^32/360 as BAM32/tick). [orig: @ 0x57b940]
+float spin_rate_roll(const DeathPieceType &tp) {
+    const float t = static_cast<float>(death_rand16() % 100) * 0.01f;
+    const float v = tp.spin_max * t;
+    return v < tp.spin_min ? tp.spin_min : v;
+}
+
 // [orig: g_death_piece_types @ 0x8404f0 — the 13 named rows, effect/sound slots
 // resolved to their interning names ({name, slot} pair tables @ 0x849150 /
 // @ 0x82F640). Field decode in world/destruction.h.]
@@ -500,13 +509,42 @@ uint32_t spawn_death_pieces(World &world, Entity &target) {
     const int sections = traits->husk_section_count > 0
             ? traits->husk_section_count
             : static_cast<int>(traits->husk_sub_part_count);
-    // The wreck's own motion carries into the launch base at 2x
-    // [orig: the velocity fold @ 0x493589-0x4935ff, scale flt 2.0 @ 0x7C3B90].
-    const Vec3 base{target.veh.vel_x / 65536.0f * 2.0f,
-                    target.veh.vel_y / 65536.0f * 2.0f, 0.0f};
-    for (int s = 1; s < sections && s <= 16; ++s) {
-        const int type_idx =
-                traits->husk_sub_part_types[s <= 15 ? s : 15]; // [orig: clamp @ 0x49362f]
+    // The wreck's own motion folds into the spread base at 2x once it moves
+    // faster than 0.1 u/tick; at rest the base is zero [orig: the velocity fold
+    // @ 0x493589-0x4935ff — normalize2D(vel) * (|vel| * 2.0); eps 0.1
+    // @ 0x7C69F4, scale flt 2.0 @ 0x7C3B90].
+    const float wreck_vx = target.veh.vel_x / 65536.0f;
+    const float wreck_vy = target.veh.vel_y / 65536.0f;
+    const float wreck_speed = std::sqrt(wreck_vx * wreck_vx + wreck_vy * wreck_vy);
+    float base_x = 0.0f, base_y = 0.0f;
+    if (wreck_speed > 0.1f) {
+        base_x = wreck_vx * 2.0f;
+        base_y = wreck_vy * 2.0f;
+    }
+    // The launch_add multiplier is the AI row's normalized 3D motion direction
+    // (zero for brainless items) [orig: aiRuntime+0x64..0x6C normalize
+    // @ 0x49353c-0x49355d].
+    float dir_ai_x = 0.0f, dir_ai_y = 0.0f;
+    if (target.is_ai_capable) {
+        const float az = target.veh.slide_z / 65536.0f;
+        const float alen =
+                std::sqrt(wreck_vx * wreck_vx + wreck_vy * wreck_vy + az * az);
+        if (alen > 1.0e-6f) {
+            dir_ai_x = wreck_vx / alen;
+            dir_ai_y = wreck_vy / alen;
+        }
+    }
+    // Section centers rotate through the entity yaw (mission frame), the same
+    // 90-minus-yaw bake the kz points use [orig: Math_TransformPointFixedPoint22
+    // (orientationMatrix) @ 0x4938e6].
+    const double yaw_rad =
+            (90.0 - static_cast<double>(target.yaw)) * (3.14159265358979 / 180.0);
+    const float cy = static_cast<float>(std::cos(yaw_rad));
+    const float sy = static_cast<float>(std::sin(yaw_rad));
+    for (int s = 1; s < sections; ++s) {
+        // Every section spawns; only the TYPE lookup clamps at slot 16
+        // [orig: the loop bound @ 0x493918 vs the index clamp @ 0x49362f].
+        const int type_idx = traits->husk_sub_part_types[s <= 16 ? s : 16];
         const DeathPieceType &tp = death_piece_type(type_idx);
         if (tp.probability < 1.0f) {
             // [orig: the probability roll @ 0x49365f — rand16 vs prob*65536]
@@ -519,28 +557,43 @@ uint32_t spawn_death_pieces(World &world, Entity &target) {
         p.section = static_cast<uint8_t>(s);
         p.type_index = static_cast<uint8_t>(type_idx);
         p.render_scale = traits->debris_scale > 0.0f ? traits->debris_scale : 1.0f;
-        p.pos = target.position; // + the section center, applied by the present
-                                 // pass from the husk model [orig: @ 0x4938bf]
-        // Launch direction: the wreck-motion base plus a +-0.5 random spread,
-        // normalized, scaled by the type velocity with the 1.25 vertical lift
-        // [orig: @ 0x493718-0x49380e; flt 1.25 @ 0x7C6F18].
-        Vec3 dir{base.x + tp.launch_add +
-                         (static_cast<int32_t>(death_rand16()) - 0x8000) / 65536.0f,
-                 base.y + tp.launch_add +
-                         (static_cast<int32_t>(death_rand16()) - 0x8000) / 65536.0f,
-                 static_cast<int32_t>(death_rand16()) / 65536.0f};
-        const float len = vec_len(dir);
-        if (len > 1.0e-6f) {
-            dir.x /= len; dir.y /= len; dir.z /= len;
-        } else {
-            dir = Vec3{0.0f, 0.0f, 1.0f};
+        p.pos = target.position;
+        if (static_cast<size_t>(s) < traits->husk_section_centers.size()) {
+            // The piece starts at its section's center, not the entity origin
+            // [orig: the section-row center add @ 0x4938bf-0x493900].
+            const Vec3 &c = traits->husk_section_centers[static_cast<size_t>(s)];
+            p.pos.x += c.x * cy - c.y * sy;
+            p.pos.y += c.x * sy + c.y * cy;
+            p.pos.z += c.z;
         }
-        p.vel = Vec3{dir.x * tp.vel_scale, dir.y * tp.vel_scale,
-                     dir.z * tp.vel_scale * 1.25f};
-        // Spin rates random-in-range [orig: the sub_57B940 pair @ 0x4937b0].
-        const float spin_span = tp.spin_max - tp.spin_min;
-        p.spin_a = tp.spin_min + spin_span * (death_rand16() / 65536.0f);
-        p.spin_b = tp.spin_min + spin_span * (death_rand16() / 65536.0f);
+        // Launch direction, the witnessed two-stage build [orig: @ 0x493718-
+        // 0x49380e]: (1) 2D-normalize the +-0.5 random spread around the wreck
+        // base; (2) add launch_add along the AI motion direction and 2D-normalize
+        // again; the vertical is an INDEPENDENT rand [0,1) with the 1.25 lift
+        // [orig: flt 1.25 @ 0x7C6F18] — so the horizontal launch speed is always
+        // exactly vel_scale, only the direction varies.
+        float hx = base_x + (static_cast<int32_t>(death_rand16()) - 0x8000) / 65536.0f;
+        float hy = base_y + (static_cast<int32_t>(death_rand16()) - 0x8000) / 65536.0f;
+        float hlen = std::sqrt(hx * hx + hy * hy);
+        if (hlen > 1.0e-6f) {
+            hx /= hlen;
+            hy /= hlen;
+        }
+        hx += tp.launch_add * dir_ai_x;
+        hy += tp.launch_add * dir_ai_y;
+        hlen = std::sqrt(hx * hx + hy * hy);
+        if (hlen > 1.0e-6f) {
+            hx /= hlen;
+            hy /= hlen;
+        }
+        const float vz = static_cast<int32_t>(death_rand16()) / 65536.0f;
+        p.vel = Vec3{hx * tp.vel_scale, hy * tp.vel_scale,
+                     vz * tp.vel_scale * 1.25f};
+        // Spin rates: max*(rand%100)/100 floored at min, DEGREES PER TICK
+        // [orig: the sub pair @ 0x4937b0 -> @ 0x57b940 — deg * 2^32/360 BAM32
+        // per tick, uniform{0..99}/100 of max clamped up to min].
+        p.spin_a = spin_rate_roll(tp);
+        p.spin_b = spin_rate_roll(tp);
         p.heading = 0.0f;
         p.pitch = 0.0f;
         // Bounce budget: rand % lifetime + 1, floored at lifetime/8
@@ -554,7 +607,7 @@ uint32_t spawn_death_pieces(World &world, Entity &target) {
         p.settled = false;
         // The per-piece trail effect/looped sound attach [orig: @ 0x493813] is
         // presented by the host from the type row (trail_fx).
-        mask |= (1u << s);
+        mask |= (1u << (s & 31)); // x86 shl wraps the count mod 32 [orig: @ 0x493698]
     }
     target.spawned_piece_mask = mask; // [orig: entity+0x138 @ 0x493983]
     // The post-death update-callback swap (falling/static physics) is the
@@ -610,10 +663,12 @@ void entity_update_death_transforms(World &world, Entity &target, bool silent) {
                               target.item_id, mask, target.position});
         ++world.destruction.items_destroyed;
     }
-    // The death vertical kick [orig: @ 0x493969 — def type 2 (helicopter
-    // family) drops, others pop].
+    // The death vertical kick [orig: @ 0x493969 — the key is the def TYPE word
+    // (+0x5C) == 2 = DECORATION (the same field the glow-light skip tests
+    // @ 0x4934ee), NOT the unitType dispatch word: decorations drop (-0.247),
+    // everything else pops (+0.0625 + rand/16)].
     if (traits != nullptr) {
-        if (unit_type == 2)
+        if (traits->is_decoration)
             target.veh.slide_z -= 16182;
         else
             target.veh.slide_z += (death_rand16() >> 4) + 4096;
@@ -653,8 +708,10 @@ void destruction_tick_dead_items(World &world,
             if (e == nullptr || e->is_ai_capable) continue;
             if ((e->engine_flags & kEntityFlagHusk) == 0) continue;
             if (e->veh.slide_z == 0 && e->veh.vel_x == 0 && e->veh.vel_y == 0) continue;
-            // Gravity [orig: -334/tick above water, terminal -4096 + halved
-            // horizontal below @ 0x493fe5/@ 0x461ddf].
+            const ItemDeathTraits *traits = world.item_death_traits.get(e->item_id);
+            // Gravity [orig: -334/tick above water; below water the horizontal
+            // halves per tick and the fall pins at -4096
+            // @ 0x493fe5/@ 0x461ddf].
             if (e->position.z + e->bound_radius >= water_height) {
                 e->veh.slide_z -= 334;
             } else {
@@ -666,28 +723,50 @@ void destruction_tick_dead_items(World &world,
             if (terrain != nullptr && terrain->valid())
                 ground = terrain::height_field_height_world_bilinear(
                         *terrain, e->position.x, -e->position.y);
+            // The wreck rests with section 0's lowest extent on the ground
+            // [orig: ground -= |sec0 z min| @ 0x461e23-0x461e4b; the inverted
+            // += |z max| leg is unreachable here — sim wrecks stay upright].
+            // Ground is terrain-only; retail raycasts objects too (mask
+            // 0x200000 @ 0x461e1a) — a wreck dying on a roof diverges
+            // (world-wac-ai-re.md D-ITEM-9).
+            if (traits != nullptr) ground -= std::abs(traits->husk_rest_min_z);
+            const float old_top = e->position.z + e->bound_radius;
             const float new_z = e->position.z + e->veh.slide_z / 65536.0f;
             e->position.x += e->veh.vel_x / 65536.0f;
             e->position.y += e->veh.vel_y / 65536.0f;
-            // Horizontal damp x0.97, zero under 8/65536 [orig: @ 0x4942f7-0x494336].
-            e->veh.vel_x = static_cast<int32_t>(e->veh.vel_x * 0.97f);
-            e->veh.vel_y = static_cast<int32_t>(e->veh.vel_y * 0.97f);
-            if (std::abs(e->veh.vel_x) < 8) e->veh.vel_x = 0;
-            if (std::abs(e->veh.vel_y) < 8) e->veh.vel_y = 0;
+            // No per-tick horizontal damp: the falling legs keep velocity until
+            // water or ground [orig: 0x461d30/0x493f70 — the 0.97 damp belongs
+            // to the static-death leg @ 0x4942f7, which items never run].
+            // The water-crossing splash [orig: @ 0x49409f-0x494100 — the def
+            // water-impact sound slot (+156) is unported, the fallback plays;
+            // the splash effect slot (dword_2C25C64) is unresolved —
+            // world-wac-ai-re.md D-ITEM-10].
+            if (new_z + e->bound_radius < water_height && old_top > water_height) {
+                world.destruction.sounds.push_back(DestructionSoundEvent{
+                        "IMP_DEBLRG_WATER",
+                        Vec3{e->position.x, e->position.y, water_height}});
+            }
             if (new_z <= ground) {
                 // Ground contact [orig: Entity_TransitionToGroundDeath
-                // @ 0x493080 + the landing legs @ 0x494113-0x494209].
+                // @ 0x493080 + the landing legs @ 0x494113-0x494209]. Motion
+                // ends here — the generic leg restores the pre-move pose every
+                // tick after contact [orig: @ 0x461e71-0x461ea2], observable as
+                // a dead stop.
                 e->position.z = ground;
                 e->veh.slide_z = 0;
-                world.destruction.sounds.push_back(
-                        DestructionSoundEvent{"IMP_VCL_DROP", e->position});
-                // The landing kz blast for vehicle-family wrecks
-                // [orig: @ 0x4941be — r = def kz ?: boundRadius].
-                const ItemDeathTraits *traits =
-                        world.item_death_traits.get(e->item_id);
+                e->veh.vel_x = 0;
+                e->veh.vel_y = 0;
+                // The landing clunk + kz blast ride the unitType-routed falling
+                // leg only [orig: 0x493f70 — the sound @ 0x4941af (the def
+                // landing slot +140 unported, the fallback plays —
+                // world-wac-ai-re.md D-ITEM-10) and the authority kz
+                // @ 0x4941be, r = def kz ?: boundRadius]; generic items
+                // (0x461d30) land silently.
                 const int unit_type = traits != nullptr ? traits->unit_type : 0;
                 if (unit_type == 1 || unit_type == 2 || unit_type == 10 ||
                     unit_type == 12) {
+                    world.destruction.sounds.push_back(
+                            DestructionSoundEvent{"IMP_VCL_DROP", e->position});
                     const int kz_ammo = world.ammo.index_of(kAmmoKzOrganicBlast);
                     if (kz_ammo >= 0) {
                         ExplosionEntry blast;
@@ -734,12 +813,24 @@ void DeathPieceSim::tick(World &world, const terrain::TerrainHeightField *terrai
     for (DeathPiece &p : pieces) {
         if (!p.active || p.settled) continue;
         const DeathPieceType &tp = death_piece_type(p.type_index);
-        p.vel.z -= kGravity;
+        // Gravity or the underwater sink, keyed on the PRE-move position
+        // [orig: Entity_ApplyGravitySimple @ 0x492d80 — above water
+        // vel.z -= 334; below it the horizontal halves per tick and the fall
+        // pins at -4096].
+        if (p.pos.z >= water_height) {
+            p.vel.z -= kGravity;
+        } else {
+            p.vel.x *= 0.5f;
+            p.vel.y *= 0.5f;
+            p.vel.z = -4096.0f / 65536.0f;
+        }
         p.pos.x += p.vel.x;
         p.pos.y += p.vel.y;
         p.pos.z += p.vel.z;
-        p.heading += p.spin_a / 62.0f;
-        p.pitch += p.spin_b / 62.0f;
+        // Spin integrates per tick, no scaling — the rates ARE degrees/tick
+        // [orig: Yaw += spin_a / Pitch += spin_b @ 0x492db9/0x492dc2].
+        p.heading += p.spin_a;
+        p.pitch += p.spin_b;
         float ground = -1.0e9f;
         if (terrain != nullptr && terrain->valid())
             ground = terrain::height_field_height_world_bilinear(*terrain, p.pos.x,
@@ -748,7 +839,7 @@ void DeathPieceSim::tick(World &world, const terrain::TerrainHeightField *terrai
         if (p.pos.z < water_height) {
             // Water: splash at the surface crossing, sink, free at ground
             // [orig: @ 0x492e1b-0x492ebe].
-            if (p.pos.z - p.vel.z >= water_height) {
+            if (p.pos.z - p.vel.z > water_height) { // strict [orig: @ 0x492e20]
                 const Vec3 at{p.pos.x, p.pos.y, water_height};
                 if (tp.splash_fx != nullptr)
                     events.effects.push_back(

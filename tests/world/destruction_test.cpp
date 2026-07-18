@@ -2,15 +2,19 @@
 // §24): the explosion queue + AoE gates, the bullet armor gates, the
 // destructible death chain (husk flags + events + the kz chain blast), the
 // death-piece pool, and the dead-item settle. Driven by a manual World.
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <vector>
 
+#include "terrain/height_field.h"
 #include "world/angle.h"
 #include "world/destruction.h"
 #include "world/world.h"
 
 using namespace opennova::world;
+using opennova::terrain::TerrainHeightField;
 
 static int failures = 0;
 #define CHECK(c)                                                              \
@@ -239,6 +243,107 @@ void test_death_pieces() {
         if (p.active) { CHECK(p.pos.z != z_before); break; }
 }
 
+// The witnessed launch build [orig: @0x493718-0x49380e]: the horizontal launch
+// speed is EXACTLY vel_scale (two 2D normalizes; the vertical is an independent
+// rand in [0, 1.25*vel)), and the spin rates are max*(rand%100)/100 floored at
+// min, integrated 1:1 per tick as degrees [orig: @0x57b940 / @0x492db9].
+void test_death_piece_launch_and_spin() {
+    auto w_heap = std::make_unique<World>();
+    World &w = *w_heap;
+    seed_ammo(w);
+    w.registry.configure_pool(1, 4);
+    Entity seed;
+    seed.kind = EntityKind::Item;
+    seed.item_id = 700;
+    seed.health = 0;
+    seed.position = Vec3{0.0f, 0.0f, 10.0f};
+    seed.bound_radius = 2.0f;
+    const EntityHandle h = w.registry.spawn(1, seed);
+    w.item_death_traits.set(700, barrel_traits());
+    Entity *e = w.registry.get(h);
+    spawn_death_pieces(w, *e);
+    int live = 0;
+    const DeathPiece *first = nullptr;
+    for (const DeathPiece &p : w.death_pieces.pieces) {
+        if (!p.active) continue;
+        ++live;
+        if (first == nullptr) first = &p;
+        const DeathPieceType &tp = death_piece_type(p.type_index);
+        const float hspeed = std::sqrt(p.vel.x * p.vel.x + p.vel.y * p.vel.y);
+        CHECK(std::abs(hspeed - tp.vel_scale) < 1.0e-4f);
+        CHECK(p.vel.z >= 0.0f);
+        CHECK(p.vel.z <= tp.vel_scale * 1.25f);
+        CHECK(p.spin_a >= tp.spin_min && p.spin_a <= tp.spin_max);
+        CHECK(p.spin_b >= tp.spin_min && p.spin_b <= tp.spin_max);
+    }
+    CHECK(live == 3);
+    CHECK(first != nullptr);
+    if (first != nullptr) {
+        const float spin = first->spin_a;
+        const float h0 = first->heading;
+        w.death_pieces.tick(w, nullptr, -1.0e9f, w.destruction);
+        CHECK(std::abs((first->heading - h0) - spin) < 1.0e-4f);
+    }
+}
+
+// The piece spawns at its section's center, rotated through the entity yaw
+// [orig: @0x4938bf-0x493900]. Mission yaw 90 bakes the identity rotation.
+void test_death_piece_section_center() {
+    auto w_heap = std::make_unique<World>();
+    World &w = *w_heap;
+    seed_ammo(w);
+    w.registry.configure_pool(1, 4);
+    Entity seed;
+    seed.kind = EntityKind::Item;
+    seed.item_id = 700;
+    seed.health = 0;
+    seed.position = Vec3{4.0f, 6.0f, 10.0f};
+    seed.bound_radius = 2.0f;
+    seed.yaw = 90;
+    const EntityHandle h = w.registry.spawn(1, seed);
+    ItemDeathTraits t = barrel_traits();
+    t.husk_section_count = 2; // sections 0..1 -> one piece from section 1
+    t.husk_section_centers = {Vec3{0.0f, 0.0f, 0.0f}, Vec3{1.5f, -0.5f, 0.75f}};
+    w.item_death_traits.set(700, t);
+    Entity *e = w.registry.get(h);
+    spawn_death_pieces(w, *e);
+    const DeathPiece *p = nullptr;
+    for (const DeathPiece &q : w.death_pieces.pieces)
+        if (q.active) { p = &q; break; }
+    CHECK(p != nullptr);
+    if (p != nullptr) {
+        CHECK(std::abs(p->pos.x - 5.5f) < 1.0e-4f);
+        CHECK(std::abs(p->pos.y - 5.5f) < 1.0e-4f);
+        CHECK(std::abs(p->pos.z - 10.75f) < 1.0e-4f);
+    }
+}
+
+// Underwater pieces: the horizontal halves per tick and the fall pins at
+// -4096; the surface crossing splashes once [orig: Entity_ApplyGravitySimple
+// @0x492d80 / the water leg @0x492e1b-0x492ebe].
+void test_death_piece_water() {
+    auto w_heap = std::make_unique<World>();
+    World &w = *w_heap;
+    DeathPiece &p = w.death_pieces.alloc();
+    p.active = true;
+    p.type_index = 2; // CHUNK_M — authors splash slots
+    p.pos = Vec3{0.0f, 0.0f, 0.05f};
+    p.vel = Vec3{0.8f, 0.0f, -0.2f};
+    p.bounces_left = 3;
+    // Tick 1: starts above water 0 -> gravity leg, integrates below, splashes.
+    w.death_pieces.tick(w, nullptr, 0.0f, w.destruction);
+    bool splashed = false;
+    for (const DestructionSoundEvent &s : w.destruction.sounds)
+        if (s.sound == "IMP_DEBSML_WATER" || s.sound == "IMP_DEBMED_WATER")
+            splashed = true;
+    CHECK(splashed);
+    // Tick 2: below water -> horizontal halves, vertical pins at -4096.
+    const float vx = p.vel.x;
+    w.death_pieces.tick(w, nullptr, 0.0f, w.destruction);
+    CHECK(std::abs(p.vel.x - vx * 0.5f) < 1.0e-5f);
+    CHECK(std::abs(p.vel.z + 4096.0f / 65536.0f) < 1.0e-6f);
+}
+
 // The bullet armor gates [orig: Projectile_ProcessDamageOnTarget @0x4e7fb0].
 void test_bullet_gates() {
     auto w_heap = std::make_unique<World>();
@@ -292,6 +397,138 @@ void test_dead_item_settle() {
     destruction_tick_dead_items(w, nullptr, -1.0e9f, w.destruction);
     CHECK(e->veh.slide_z == sz0 - 334);
     CHECK(e->position.z < 5.0f);
+}
+
+// A flat 512x512 height field (constant raw16) — the same wiring as
+// tests/world/infantry_test.cpp.
+struct FlatField {
+    static constexpr int kDim = 512;
+    std::vector<uint16_t> heightmap;
+    std::vector<int> sector_grid;
+    TerrainHeightField field;
+    explicit FlatField(uint16_t raw16)
+            : heightmap(kDim * kDim, raw16), sector_grid(256, 1) {
+        field.heightmap = heightmap.data();
+        field.dim = kDim;
+        field.layout.sector_grid = sector_grid.data();
+        field.layout.origin_x = 0;
+        field.layout.origin_y = 0;
+    }
+};
+
+// The landing split [orig: the generic leg 0x461d30 lands silently with motion
+// dead-stopped; the unitType-routed leg 0x493f70 adds the clunk @0x4941af and
+// the authority kz @0x4941be], and the section-0 ground-rest offset
+// [orig: ground -= |sec0 z min| @0x461e23-0x461e4b].
+void test_dead_item_landing_split() {
+    FlatField flat(0x4000);
+    auto w_heap = std::make_unique<World>();
+    World &w = *w_heap;
+    seed_ammo(w);
+    w.registry.configure_pool(1, 8);
+    const float ground = opennova::terrain::height_field_height_world_bilinear(
+            flat.field, 8.0f, -8.0f);
+    auto drop = [&](int32_t id, const ItemDeathTraits &traits) {
+        w.item_death_traits.set(id, traits);
+        Entity seed;
+        seed.kind = EntityKind::Item;
+        seed.item_id = id;
+        seed.health = 0;
+        seed.position = Vec3{8.0f, 8.0f, ground + 0.5f};
+        seed.bound_radius = 2.0f;
+        const EntityHandle h = w.registry.spawn(1, seed);
+        Entity *e = w.registry.get(h);
+        e->engine_flags |= (kEntityFlagDead | kEntityFlagHusk);
+        e->alive = false;
+        e->veh.slide_z = -65536; // 1 u/tick down -> lands this tick
+        e->veh.vel_x = 3277;     // sliding sideways
+        return e;
+    };
+    // Generic item (unit_type 0): silent landing, motion zeroed, rest offset.
+    ItemDeathTraits t = barrel_traits();
+    t.husk_rest_min_z = -0.25f;
+    Entity *item = drop(700, t);
+    destruction_tick_dead_items(w, &flat.field, -1.0e9f, w.destruction);
+    CHECK(std::abs(item->position.z - (ground - 0.25f)) < 1.0e-3f);
+    CHECK(item->veh.slide_z == 0);
+    CHECK(item->veh.vel_x == 0);
+    bool clunked = false;
+    for (const DestructionSoundEvent &s : w.destruction.sounds)
+        if (s.sound == "IMP_VCL_DROP") clunked = true;
+    CHECK(!clunked);
+    CHECK(w.explosions.queue.empty()); // no landing kz for the generic leg
+    item->engine_flags &= ~kEntityFlagHusk; // retire from the pass
+    // A unitType-routed row (1): the clunk + the landing kz.
+    ItemDeathTraits tv = barrel_traits();
+    tv.unit_type = 1;
+    Entity *wreck = drop(701, tv);
+    (void)wreck;
+    destruction_tick_dead_items(w, &flat.field, -1.0e9f, w.destruction);
+    for (const DestructionSoundEvent &s : w.destruction.sounds)
+        if (s.sound == "IMP_VCL_DROP") clunked = true;
+    CHECK(clunked);
+    CHECK(!w.explosions.queue.empty());
+}
+
+// The falling wreck splashes crossing the water line (the bound top passes
+// below) [orig: 0x493f70 @0x49409f-0x494100 — the fallback IMP_DEBLRG_WATER].
+void test_dead_item_water_splash() {
+    FlatField flat(0x4000);
+    auto w_heap = std::make_unique<World>();
+    World &w = *w_heap;
+    seed_ammo(w);
+    w.registry.configure_pool(1, 4);
+    const float ground = opennova::terrain::height_field_height_world_bilinear(
+            flat.field, 8.0f, -8.0f);
+    const float water = ground + 20.0f;
+    ItemDeathTraits t = barrel_traits();
+    w.item_death_traits.set(700, t);
+    Entity seed;
+    seed.kind = EntityKind::Item;
+    seed.item_id = 700;
+    seed.health = 0;
+    seed.position = Vec3{8.0f, 8.0f, water + 4.0f};
+    seed.bound_radius = 2.0f;
+    const EntityHandle h = w.registry.spawn(1, seed);
+    Entity *e = w.registry.get(h);
+    e->engine_flags |= (kEntityFlagDead | kEntityFlagHusk);
+    e->alive = false;
+    e->veh.slide_z = -8 * 65536; // 8 u/tick: the bound top crosses in one tick
+    destruction_tick_dead_items(w, &flat.field, water, w.destruction);
+    bool splashed = false;
+    for (const DestructionSoundEvent &s : w.destruction.sounds)
+        if (s.sound == "IMP_DEBLRG_WATER") splashed = true;
+    CHECK(splashed);
+    CHECK(e->position.z > ground); // still sinking, not landed
+}
+
+// The death kick keys the def TYPE word (+0x5C == 2 = decoration), NOT the
+// unitType dispatch word [orig: @0x493969 vs the glow gate @0x4934ee]: a
+// unitType-2 (helicopter-row) non-decoration still POPS; a decoration DROPS.
+void test_death_kick_field() {
+    auto w_heap = std::make_unique<World>();
+    World &w = *w_heap;
+    seed_ammo(w);
+    w.registry.configure_pool(1, 8);
+    auto kill = [&](int32_t id, const ItemDeathTraits &traits) {
+        w.item_death_traits.set(id, traits);
+        Entity seed;
+        seed.kind = EntityKind::Item;
+        seed.item_id = id;
+        seed.health = 0;
+        seed.position = Vec3{0.0f, 0.0f, 5.0f};
+        seed.bound_radius = 2.0f;
+        const EntityHandle h = w.registry.spawn(1, seed);
+        Entity *e = w.registry.get(h);
+        entity_update_death_transforms(w, *e, /*silent=*/true);
+        return e;
+    };
+    ItemDeathTraits heli = barrel_traits();
+    heli.unit_type = 2;
+    CHECK(kill(700, heli)->veh.slide_z >= 4096); // pops [orig: @0x493977]
+    ItemDeathTraits deco = barrel_traits();
+    deco.is_decoration = true;
+    CHECK(kill(701, deco)->veh.slide_z == -16182); // drops [orig: @0x493993]
 }
 
 // End to end: a fired round crosses the barrel's bound sphere inside one tick,
@@ -359,8 +596,14 @@ int main() {
     test_explosion_damage_gates();
     test_destructible_death_chain();
     test_death_pieces();
+    test_death_piece_launch_and_spin();
+    test_death_piece_section_center();
+    test_death_piece_water();
     test_bullet_gates();
     test_dead_item_settle();
+    test_dead_item_landing_split();
+    test_dead_item_water_splash();
+    test_death_kick_field();
     test_round_destroys_item();
     if (failures == 0) std::printf("destruction_test: all checks passed\n");
     return failures == 0 ? 0 : 1;

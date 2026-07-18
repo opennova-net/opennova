@@ -3225,13 +3225,19 @@ severity 3 on the authority additionally runs a wreck-damage block
 (29300-magnitude gates, unitType 3 leg zeroes health @ 0x47cd5d). Also
 witnessed: a big-vs-small size-class crush leg (`itemDef->mass` vs 2× the
 other model bound @ +2312 → flag 0x40 stamp, no force @ 0x462e94-0x462ec2).
+The vehicle's contact mask is 8 (the damage-volume pass — vehicles collide
+breakable/damage boxes), or 24 when the def attrib2 low byte has bit 7 set
+(adds type-12 volumes) [@ 0x462a91-0x462a9f].
 Ported: pool-1 candidate slices (+6.0 u [orig: @ 0x4b902f]) +
 `CollisionWorld::resolve_vehicle_hull` (one mid-hull point, radius 1.5 u,
-wall-class-only) + the motor's push/decay leg; ctest `vehicle_mount`
+wall-class-only, mask 8) + the motor's push/decay leg; ctest `vehicle_mount`
 (`test_vehicle_hull_stops_at_building` — a driving truck grinds to a stop at
-a wall square). Deferred (D-NET-161): the per-wheel point array/radii, the
+a wall square). Deferred (D-NET-161): the mask-24 attrib2 leg (attrib2 is not
+fed to the sim), the per-wheel point array/radii, the
 v84/v85 slope-threshold derivation (caller locals, unwitnessed), the graded
-bands, the crush leg, the severity-3 damage block, the second averaged pass. the SM's kinematic `apply_locomotion`
+bands, the crush leg, the severity-3 damage block, the second averaged pass
+with its pushable-other mass-ratio force split (`otherMass/(otherMass+mass)`
+@ 0x463037-0x46324d / @ 0x47d24a). the SM's kinematic `apply_locomotion`
 RETIRES for motor vehicles (`physics != 0`) — the SM stays the decision layer
 (waypoints, visited bits, states), the motor is the only integrator, matching
 the original split. Deferrals stay under D-NET-161 (updated in
@@ -3479,18 +3485,41 @@ WHEEL, CHUNK_S/M/L, ROCK_S/M/L, CHUNKNP_S/M/L, CACTUS_, CHUNKSF_M — the
 resolved effect/sound names), rolls the row probability, allocates from the
 256x180-B ring `g_death_piece_pool @ 0x26BAC58`
 (`DeathPiece_AllocSlot @ 0x57b4f0`, ex `SoundEmitter_AllocSlot`), renders ONLY
-its own section (mask piece[31] excludes every other), launches from the
-wreck motion (x2.0) + random spread scaled by the row velocity (z x1.25),
-spins random-in-range, budgets `rand % lifetime + 1` bounces (floor
+its own section (mask piece[31] excludes every other), spawns AT the section's
+center (the render section-row dwords 14..16 through the entity orientation
+matrix `@ 0x4938bf-0x493900`), budgets `rand % lifetime + 1` bounces (floor
 lifetime/8), attaches the row trail effect + looped sound, and stamps the
-spawned-section mask into entity+0x138. The vertical kick: def type 2 =
-slideDecay -= 16182 (helicopters drop), else += (rand>>4) + 4096.
+spawned-section mask into entity+0x138 (`1 << section`, an x86 `shl` that
+wraps the count mod 32).
+
+The launch build `@ 0x493718-0x49380e` is two-stage and HORIZONTAL: (1)
+2D-normalize the +-0.5 random spread summed with the wreck fold — the fold
+`@ 0x493589-0x4935ff` is `normalize2D(vel) * |vel| * 2.0` once the wreck moves
+faster than 0.1 u/tick (flt 2.0 @ 0x7C3B90, eps @ 0x7C69F4), zero at rest; (2)
+add the row `launch_add` ALONG the AI row's normalized 3D motion direction
+(aiRuntime +0x64..0x6C — zero for brainless items, so launch_add contributes
+nothing to a static barrel) and 2D-normalize again. The vertical is an
+INDEPENDENT `rand[0,1) * 1.25 * velScale` (flt 1.25 @ 0x7C6F18) — the
+horizontal launch speed is always EXACTLY the row velocity; only the direction
+varies. Spins: `Death_RandomSpinRateBam @ 0x57b940` (ex `sub_57B940`) =
+`max_deg * (rand%100)/100` floored at `min_deg`, in BAM32 per tick
+(deg x 2^32/360 = 11930464.0 @ 0x7D76D0) — NOT uniform in [min, max]; a
+quarter of WHEEL's 3.5..14 rolls land exactly on the floor. The vertical kick:
+the def TYPE word (+0x5C) == 2 = DECORATION (the same field the glow-light
+skip tests `@ 0x4934ee`) drops `slideDecay -= 16182`; everything else pops
+`+= (rand>>4) + 4096` (`@ 0x493969` — NOT the unitType dispatch word).
+
 `DeathPiece_TickAll @ 0x57b900` (ex `sub_57B900`) invokes each piece's
-callback `Entity_ProcessDeathPiecePhysics @ 0x492dd0`: gravity, ground bounce
-(spin halves, velocity x0.95, vertical negates through the row bounce factor,
-dust effect + speed-gated sound), water splash + sink, and on exhaustion the
-final effect/sound then persist-as-ground-debris (row flags bit 0: wheels and
-large chunks stay) or free.
+callback `Entity_ProcessDeathPiecePhysics @ 0x492dd0`:
+`Entity_ApplyGravitySimple @ 0x492d80` (above water `velZ -= 334`/tick; BELOW
+water `velXY >>= 1` per tick and `velZ` pinned at -4096, then `pos += vel`,
+`Yaw += spinA`, `Pitch += spinB`), ground rest at `terrain + 1024`
+(`@ 0x492e0d`), ground bounce (spin halves, velocity x0.95 @ 0x7C6FB8,
+vertical negates through the row bounce factor, dust effect + the
+speed>20480-gated sound), the water-surface splash (strict `preZ > water`
+`@ 0x492e20`) + sink-to-free, and on exhaustion the final effect/sound then
+persist-as-ground-debris (row flags bit 0: wheels and large chunks stay) or
+free.
 
 ### 24.5 Death sounds + the wreck effect banks
 
@@ -3508,14 +3537,30 @@ tick, rolls the fire crackle (PRNG < 16/65536 = `g_fx_BoatExpSec` +
 `g_snd_EXPLO_SHIP_SM_b`), and steams a bone out when it dips underwater
 (`g_fx_Boat01Steam`). Ground contact (`Entity_TransitionToGroundDeath
 @ 0x493080`) spawns the def +0x4E0 ground-impact pair, clears the piece pool
-entries by entity, and installs the settle physics; the vehicle fall
-(`Entity_UpdateFallingDeathPhysics @ 0x493f70`) adds the water-crossing splash
-(`Effect_MedSplash`-family slot @ 0x2C25C64 / `g_snd_IMP_DEBLRG_WATER` or the
-profile), the `g_snd_IMP_VCL_DROP` landing thud, and the authority landing
-blast r = def `kz` else boundRadius. The AI-SM settle
-(`Entity_ProcessFallingDeathPhysics @ 0x461d30`, rows 21/23) restores the
-saved pose below ground and never queues a landing blast; attrib2 0x100
-freezes the wreck in place.
+entries by entity, and installs the settle physics.
+
+The dead-wreck settle is a THREE-callback family, all sharing the falling
+gravity (-334/tick above water; below it `velXY >>= 1` per tick and the fall
+pins at -4096) and the ground line = `Entity_RaycastGroundHeightAndObject
+@ 0x414320` (terrain AND objects, mask 0x200000) minus `|husk sec0 z min|`
+upright / plus `|sec0 z max|` inverted (the section-row +84/+88 extents — the
+wreck rests its lowest geometry on the ground):
+
+- `Entity_UpdateFallingDeathPhysics @ 0x493f70` — the unitType-routed rows'
+  falling leg: adds the water-crossing splash when the bound top passes below
+  (`@ 0x49409f` — the effect slot @ 0x2C25C64 + the def water slot +156 else
+  `g_snd_IMP_DEBLRG_WATER`), and on landing snaps to the ground line, plays
+  the def landing slot +140 else `g_snd_IMP_VCL_DROP`, queues the authority
+  landing blast (r = def `kz` else boundRadius `@ 0x4941be`), and swaps to:
+- `Entity_ProcessFallingDeathPhysics @ 0x461d30` — the GENERIC falling leg
+  (SpawnDeathPieces' default install, the post-landing state, and the AI-SM
+  rows 21/23): on contact it RESTORES the pre-move pose every tick — no snap,
+  no sound, no blast; observable as a dead stop. `attrib2 & 0x100` freezes the
+  wreck in place (zeroes all velocity).
+- `Entity_UpdateStaticDeathPhysics @ 0x494230` — the building/static rows:
+  `pos += vel` with a 0.97/tick horizontal damp (zeroed under 8), slideDecay
+  -= 167 (half rate) only once horizontal motion stops, snap +
+  TransitionToGroundDeath below ground. Items never run this leg.
 
 ### 24.6 The husk swap (render + collision)
 
@@ -3549,6 +3594,8 @@ the FFI structs.
 | D-ITEM-6 | Blast presentation stubs: organic knockback (`Entity_ApplyCollisionForce`), the victim-attached burn emitter + hit sound (the ammo +72/+76 pair — field source unwitnessed), the glass user-point shatter (counted, not drawn), medic (type 3) + vehicle-ram (type 1) queue legs, the occupant damage scale, `g_destroy_buildings` (an MP rules seam), and the S2C 0x26/0x2F/0x21 wire emits | `@ 0x4eb1d2 / @ 0x4eb292 / @ 0x4eb814 / @ 0x4eadc6 / @ 0x4e5a50 / @ 0x4e6860`; net-re §5.60 | each cited at its port site; the wire legs stage with the npruntime death broadcasts |
 | D-ITEM-7 | Which items take the destructible death path is routed by KIND (non-organic, non-AI-capable) + unit_type; retail routes via the def class resolve (`EntityDef_LoadModelsAndCallbacks @ 0x439f50` callback columns, unwitnessed per class) | deathCallback (+0x1C8) authored per def class | same observable for shipped JO data (destructibles author no ai/move function); witness the class-to-callback table to close |
 | D-ITEM-8 | The crane/water-tower special death (the "scrane" pool walk + the double kz queue `@ 0x43fc70`) and `Entity_ProcessCraneDestruction @ 0x43eee0` are unported; the destructible 992-tick spawnPhase re-notify and the ambient phase-0 shot leg (`Entity_SpawnRegionalEffect @ 0x408290`) are unported | as cited | special-cased content (shipyard cranes, water towers); the ambient shot leg is a separate feature (items firing scheduled time-of-day sounds) |
+| D-ITEM-9 | The dead-wreck settle grounds on the TERRAIN height only, and the ported ground-rest offset uses the sec0 z extents synthesized from the piece model's LOD-0 primitive bounds (upright leg only) | `Entity_RaycastGroundHeightAndObject @ 0x414320` (terrain + objects, mask 0x200000); the section-row +84/+88 extents `@ 0x461e23-0x461e4b` | a wreck dying on a roof sinks to the terrain below; the runtime section-row field provenance (+84/+88 = the section bbox z) is probable, not row-walked — verify against the render-model builder to close |
+| D-ITEM-10 | The settle's water-crossing splash and landing sounds play the witnessed FALLBACKS only (`IMP_DEBLRG_WATER` / `IMP_VCL_DROP`); the def per-item landing (+140) and water (+156) sound slots and the splash effect slot (@ 0x2C25C64) are unported | `@ 0x4940c6-0x494100 / @ 0x49417c-0x4941af` | items authoring custom impact sounds play the generic pair; the splash draws no effect (sound only) |
 
 ### 24.8 IDB write-backs (2026-07-17, saved)
 
@@ -3567,3 +3614,12 @@ Renames: `DeathPiece_AllocSlot @ 0x57b4f0` (ex `SoundEmitter_AllocSlot`),
 `g_snd_EXPLO_SHIP_TINY/EXPLO_SHIP_SM_b/IMP_VCL_DROP/IMP_DEBLRG_WATER` slots.
 Functions defined over unexplored code: `@ 0x494420`, `@ 0x494480/90/A0`.
 Entry comments on the whole chain.
+
+2026-07-18 (the piece/settle physics grill, saved): rename
+`Death_RandomSpinRateBam @ 0x57b940` (ex `sub_57B940`); comments pinning the
+spin distribution (`@ 0x57b940`), the decoration kick key (`@ 0x493969` — the
++0x5C TYPE word, correcting the earlier "helicopter" gloss), the
+huskFinal-first piece model (`@ 0x4934af`), the two-stage launch build
+(`@ 0x493718`), the piece gravity/water legs (`@ 0x492d80`), the three settle
+callbacks (`@ 0x461d30 / @ 0x493f70 / @ 0x494230`), and the vehicle contact
+mask (`@ 0x462a95`).

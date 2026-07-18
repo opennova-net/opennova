@@ -384,7 +384,7 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 				t.husk_sub_part_count =
 						static_cast<uint8_t>(std::clamp(int(dt.get("husk_sub_parts", 0)), 0, 255));
 				const PackedInt32Array types = dt.get("husk_sub_part_types", PackedInt32Array());
-				for (int s = 0; s < 16 && s < types.size(); ++s)
+				for (int s = 0; s < 17 && s < types.size(); ++s)
 					t.husk_sub_part_types[s] = static_cast<uint8_t>(types[s]);
 				t.debris_scale = float(double(dt.get("debris_scale", 0.0)));
 				t.sound_death = String(dt.get("sounddeath", String())).utf8().get_data();
@@ -783,7 +783,15 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 	std::unordered_map<std::string, int32_t> model_by_graphic;     // -1 = no collision block
 	std::unordered_map<std::string, int32_t> occlusion_by_graphic; // -1 = no occlusion records
 	std::unordered_map<std::string, float> radius_by_graphic;      // .3di bound radius (units)
-	std::unordered_map<std::string, int32_t> husk_sections_by_graphic; // husk section counts
+	// Piece-model info per graphic: section count, per-section centers, and
+	// section 0's z extents (see the piece-model pick below).
+	struct HuskPieceInfo {
+		int32_t sections = 0;
+		std::vector<opennova::world::Vec3> centers;
+		float rest_min_z = 0.0f;
+		float rest_max_z = 0.0f;
+	};
+	std::unordered_map<std::string, HuskPieceInfo> husk_pieces_by_graphic;
 	std::vector<opennova::world::EntityHandle> handles;
 	world_->registry.for_each(
 			[&](const opennova::world::Entity &e) { handles.push_back(e.handle); });
@@ -847,34 +855,76 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 					opennova::world::CollisionModel hmodel;
 					if (collision_model_from_ir(hdata->native_ir().collision, hmodel))
 						husk_model_id = collision_world_.add_model(std::move(hmodel));
+					radius_by_graphic.emplace(husk_key,
+							model_bound_radius_from_ir(hdata->native_ir()));
 				}
 				hit = model_by_graphic.emplace(husk_key, husk_model_id).first;
 				occlusion_by_graphic.emplace(husk_key, -1);
 			}
 			if (hit->second >= 0 && it->second >= 0)
 				collision_world_.assign_entity_husk(h, hit->second);
-			// The husk RENDER model's section count = the death-piece loop
-			// bound [orig: renderObj[8]+52 @ 0x49361a] — most defs author no
-			// husk_sub_parts token. Its own cache, independent of the collision
-			// cache: a husk graphic can double as some entity's main graphic,
-			// which would leave the joint cache without a sections entry.
-			auto hs = husk_sections_by_graphic.find(husk_key);
-			if (hs == husk_sections_by_graphic.end()) {
-				int32_t husk_sections = 0;
-				Ref<NovaObjectData> hdata = p_placer->call("object_data_for", husk_name_s);
+			// The PIECE model is huskFINAL first [orig: @ 0x4934af
+			// huskFinalModel ?: huskModel] — the opposite preference from the
+			// collision husk pick above. Its LOD-0 part table feeds the
+			// death-piece loop bound [orig: renderObj[8]+52 @ 0x49361a], the
+			// per-section centers [orig: the section-row center @ 0x4938bf],
+			// and section 0's z extents (the wreck ground-rest offset
+			// [orig: @ 0x461e23-0x461e4b]). Its own cache, independent of the
+			// collision cache: a husk graphic can double as some entity's main
+			// graphic, which would leave the joint cache without an entry.
+			const String piece_name_s = p_item_db->get_huskfinal(def_id).is_empty()
+					? p_item_db->get_husk(def_id)
+					: p_item_db->get_huskfinal(def_id);
+			const std::string piece_key(piece_name_s.utf8().get_data());
+			auto hs = husk_pieces_by_graphic.find(piece_key);
+			if (hs == husk_pieces_by_graphic.end()) {
+				HuskPieceInfo info;
+				Ref<NovaObjectData> hdata = p_placer->call("object_data_for", piece_name_s);
 				if (hdata.is_valid() && hdata->native_ir().lod_count > 0 &&
-				    hdata->native_ir().lods != nullptr)
-					husk_sections = static_cast<int32_t>(
-							hdata->native_ir().lods[0].part_count);
-				hs = husk_sections_by_graphic.emplace(husk_key, husk_sections).first;
+				    hdata->native_ir().lods != nullptr) {
+					const ThreediIRLod &lod = hdata->native_ir().lods[0];
+					info.sections = static_cast<int32_t>(lod.part_count);
+					for (size_t pi = 0; lod.parts != nullptr && pi < lod.part_count;
+							++pi) {
+						const ThreediIRPart &part = lod.parts[pi];
+						info.centers.push_back(opennova::world::Vec3{
+								part.abs_position[0] + part.bounding_center[0],
+								part.abs_position[1] + part.bounding_center[1],
+								part.abs_position[2] + part.bounding_center[2]});
+					}
+					if (lod.parts != nullptr && lod.part_count > 0 &&
+					    lod.primitives != nullptr) {
+						const ThreediIRPart &p0 = lod.parts[0];
+						bool any = false;
+						for (int32_t pr = 0; pr < p0.primitive_count; ++pr) {
+							const size_t idx =
+									static_cast<size_t>(p0.primitive_start) + pr;
+							if (idx >= lod.primitive_count) break;
+							const ThreediIRPrimitive &prim = lod.primitives[idx];
+							info.rest_min_z =
+									any ? std::min(info.rest_min_z, prim.min[2])
+									    : prim.min[2];
+							info.rest_max_z =
+									any ? std::max(info.rest_max_z, prim.max[2])
+									    : prim.max[2];
+							any = true;
+						}
+					}
+				}
+				hs = husk_pieces_by_graphic.emplace(piece_key, std::move(info)).first;
 				if (hdata.is_valid())
-					radius_by_graphic.emplace(husk_key,
+					radius_by_graphic.emplace(piece_key,
 							model_bound_radius_from_ir(hdata->native_ir()));
 			}
 			if (opennova::world::ItemDeathTraits *t =
 						world_->item_death_traits.get_mutable(e->item_id)) {
-				if (t->husk_section_count == 0 && hs->second > 0)
-					t->husk_section_count = hs->second;
+				const HuskPieceInfo &info = hs->second;
+				if (t->husk_section_count == 0 && info.sections > 0)
+					t->husk_section_count = info.sections;
+				if (t->husk_section_centers.empty() && !info.centers.empty())
+					t->husk_section_centers = info.centers;
+				t->husk_rest_min_z = info.rest_min_z;
+				t->husk_rest_max_z = info.rest_max_z;
 			}
 			// The husk model's bound joins the entity bound max [orig:
 			// Entity_InitFromModel @ 0x40dc30, the huskModel[5] compare].

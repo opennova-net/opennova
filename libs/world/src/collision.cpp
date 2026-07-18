@@ -1640,7 +1640,11 @@ int32_t CollisionWorld::resolve_vehicle_hull(World &world, EntityHandle source,
     q.prev_pos[1] = prev_pos[1];
     q.prev_pos[2] = prev_pos[2] + 0x18000;
     q.source_bound_radius = radius;
-    q.mask = 0;
+    // The vehicle contact mask is 8 (the damage-volume pass) — 24 when the def
+    // attrib2 low byte has bit 7 set, adding type-12 volumes [orig: @ 0x462a91-
+    // 0x462a9f — collisionMask = 8; attrib2 sign byte -> 24]. attrib2 is not
+    // fed to the sim yet, so the 24 leg is a tracked residual (D-NET-161).
+    q.mask = 8;
     q.query_is_player = false;
 
     BlinkAccum blink;         // vehicles accumulate no blink state

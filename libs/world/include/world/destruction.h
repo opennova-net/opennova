@@ -56,10 +56,26 @@ struct ItemDeathTraits {
     // reads it off the husk RENDER object (renderObj[8]+52 @ 0x49361a), NOT
     // the items.def husk_sub_parts token (most defs author none) — the host
     // feeds it from the loaded husk model. 0 = unknown -> the authored count.
+    // The piece model is huskFINAL first [orig: @ 0x4934af huskFinalModel ?:
+    // huskModel], unlike the collision husk pick (@ 0x538720 husk first).
     int32_t husk_section_count = 0;
-    bool is_decoration = false; // def type 2 — no death glow light [orig: @ 0x4934f2]
+    // Per-section centers of the piece model (model-local, mission axes) —
+    // baked into the piece spawn position through the entity yaw
+    // [orig: the section-row center @ 0x4938bf-0x493900].
+    std::vector<Vec3> husk_section_centers;
+    // Section 0's z extents (units) — the dead-wreck ground rest offset
+    // [orig: ground -= |sec0 z min| upright / += |sec0 z max| inverted
+    // @ 0x461e23-0x461e4b / @ 0x494034-0x49405e].
+    float husk_rest_min_z = 0.0f;
+    float husk_rest_max_z = 0.0f;
+    bool is_decoration = false; // def type 2 (+0x5C) — no death glow light
+                                // [orig: @ 0x4934ee], and the death kick DROPS
+                                // instead of popping [orig: @ 0x493969]
     uint8_t husk_sub_part_count = 0;      // def+0x100
-    uint8_t husk_sub_part_types[16] = {}; // def+0x101[] — debris-type table indexes
+    // def+0x101[] — debris-type table indexes. Retail's array holds 23 bytes
+    // and the piece loop clamps its index at 16 [orig: @ 0x49362f]; slot 16 is
+    // the reachable clamp target (unauthored slots read 0 = WHEEL).
+    uint8_t husk_sub_part_types[17] = {};
     float debris_scale = 0.0f;  // def+0x1BC (0 -> pieces render at 1.0)
     std::string sound_death;    // def soundDeath name ('sounddeath')
     std::string particledeath;      // +0x416 name — the Dead-bone family (above water)
@@ -104,8 +120,9 @@ struct DeathPieceType {
     const char *name;
     float vel_scale;      // +0x10 — launch velocity scale
     float launch_add;     // +0x14 — base-direction contribution
-    float spin_min;       // +0x18
-    float spin_max;       // +0x1C — piece spin rate range (rad/s-ish, raw)
+    float spin_min;       // +0x18 — spin floor, degrees per tick
+    float spin_max;       // +0x1C — spin cap, degrees per tick (retail stores
+                          // deg * 2^32/360 = BAM32/tick [orig: @ 0x57b940])
     float probability;    // +0x20 — spawn chance (>= 1.0 = always)
     int32_t lifetime;     // +0x24 — bounce-count range (piece rolls rand%life+1)
     float bounce;         // +0x28 — ground restitution on the vertical axis
@@ -229,10 +246,11 @@ struct DeathPiece {
     float render_scale = 1.0f; // def debrisScale ?: 1.0 [piece+136]
     Vec3 pos;                  // [piece+4..12]
     Vec3 vel;                  // units/tick [piece+28..36]
-    float spin_a = 0.0f;       // [piece+40] random-in-range spin rates
-    float spin_b = 0.0f;       // [piece+44]
-    float heading = 0.0f;      // integrated orientation (radians)
-    float pitch = 0.0f;
+    float spin_a = 0.0f;       // [piece+40] spin rates, degrees per tick
+    float spin_b = 0.0f;       // [piece+44] (max*(rand%100)/100 clamped >= min
+                               // [orig: sub @ 0x57b940])
+    float heading = 0.0f;      // integrated orientation (degrees; += spin/tick
+    float pitch = 0.0f;        //  [orig: Yaw/Pitch += spin @ 0x492db9/0x492dc2])
     int32_t bounces_left = 0;  // [piece+117] — decremented per ground contact
     uint32_t flags = 0;        // debris-type flags byte [piece+119]
     bool settled = false;      // exhausted with flags bit0: persistent ground debris
