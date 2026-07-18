@@ -1113,6 +1113,28 @@ func set_local_player_weapon_input(fire_held: bool, fire_pressed: bool, reload_p
 		sim.set_local_player_weapon_input(fire_held, fire_pressed, reload_pressed)
 
 
+## The category keys 1..9 [orig: input actions 201-209 -> Player_SwitchToWeaponByHandle
+## ((action-200)*65) @ 0x4e1144]; the sim runs the witnessed walk and answers through
+## the event drain.
+func request_local_player_weapon_category(category: int) -> void:
+	var sim := get_sim()
+	if sim != null:
+		sim.request_local_player_weapon_category(category)
+
+
+## Next/previous weapon [orig: input cases 212/214 -> Player_CycleWeaponSlot @ 0x4dfe70].
+func request_local_player_weapon_cycle(direction: int) -> void:
+	var sim := get_sim()
+	if sim != null:
+		sim.request_local_player_weapon_cycle(direction)
+
+
+## The installed FP weapon dict's name (empty when none) — the switch-event guard
+## against redundant viewmodel reinstalls.
+func local_player_weapon_name() -> String:
+	return String(_local_weapon_dict.get("name", ""))
+
+
 ## The ADS toggle request; the sim applies the dispatcher gates and owns the engaged
 ## state [orig: input case 6 @0x4e0420; Player_ToggleWeaponScope @0x4df0c0].
 func request_local_player_scope_toggle() -> bool:

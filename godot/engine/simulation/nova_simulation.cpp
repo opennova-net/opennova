@@ -30,6 +30,7 @@
 #include <mission/mission_systems.h>
 #include <anim/aim_overlay.h> // the torso-bend overlay blends [orig: @0x4b1290]
 #include <io/bam.h>           // bam_add/bam_sar: the FP roll term composition
+#include <io/strutil.h>       // iequals: the loadout sub-variant ammo-class compare
 #include <world/angle.h>
 #include <world/player_spawn.h>
 #include <world/spawn_select.h>
@@ -190,6 +191,14 @@ void NovaSimulation::reset_world() {
 	weapon_fire_held_ = false;
 	weapon_fire_pressed_ = false;
 	weapon_reload_pressed_ = false;
+	// Mission-scoped loadout state [orig: Game_StartMission rebuilds restrictionData +
+	// g_armoryWeaponAvailability per mission @ 0x5246c3/@ 0x5246e8].
+	local_inventory_valid_ = false;
+	spawn_kit_.clear();
+	spawn_kit_set_ = false;
+	weapon_availability_.reset();
+	weapon_switch_in_flight_ = false;
+	weapon_start_in_switchto_ = false;
 	world_ = std::make_unique<World>();
 	ai_ = std::make_unique<AiSystem>();
 	bms_ = std::make_unique<opennova::mission::BmsEventSystem>();
@@ -1290,23 +1299,320 @@ TypedArray<Dictionary> NovaSimulation::get_attach_labels() const {
 	return out;
 }
 
-bool NovaSimulation::apply_local_player_loadout(const String &p_weapon_name,
+// --- the local player's loadout: slot pool, spawn kit, map rules -----------------------
+// (the 2026-07-18 loadout grill; witness map in docs/net/novaworld-net-re.md §5.57)
+
+namespace {
+
+opennova::world::WeaponKitEntry kit_entry_from_dict(const Dictionary &d) {
+	opennova::world::WeaponKitEntry e;
+	e.name = dictionary_string(d, "name", std::string());
+	e.ammo_primary = int(int64_t(d.get("ammo_primary", -1)));
+	e.ammo_secondary = int(int64_t(d.get("ammo_secondary", -1)));
+	e.flags = int(int64_t(d.get("flags", -1)));
+	return e;
+}
+
+} // namespace
+
+void NovaSimulation::set_spawn_loadout(const TypedArray<Dictionary> &p_kit,
+                                       bool p_filter_by_availability) {
+	std::vector<opennova::world::WeaponKitEntry> kit;
+	for (int i = 0; i < p_kit.size(); ++i) {
+		opennova::world::WeaponKitEntry e = kit_entry_from_dict(p_kit[i]);
+		if (!e.name.empty()) kit.push_back(std::move(e));
+	}
+	if (p_filter_by_availability && world_ != nullptr && !kit.empty()) {
+		// The SP .bms promote leg: availability-filter with the knife fallback
+		// [orig: Mission_LoadBMSFile @ 0x40f7ae..0x40f95c].
+		kit = opennova::world::weapon_kit_filter_by_availability(kit, world_->weapons,
+		                                                         weapon_availability_);
+	}
+	spawn_kit_set_ = !kit.empty();
+	spawn_kit_ = std::move(kit);
+}
+
+void NovaSimulation::set_weapon_availability(const TypedArray<Dictionary> &p_pairs) {
+	weapon_availability_.reset(); // [orig: the all-1 default @ 0x551c86]
+	if (!world_ || p_pairs.is_empty()) return;
+	std::vector<std::pair<std::string, int32_t>> pairs;
+	for (int i = 0; i < p_pairs.size(); ++i) {
+		const Dictionary d = p_pairs[i];
+		std::string name = dictionary_string(d, "name", std::string());
+		if (name.empty()) continue;
+		pairs.emplace_back(std::move(name), int32_t(int64_t(d.get("value", 1))));
+	}
+	opennova::world::weapon_availability_apply_pairs(weapon_availability_, world_->weapons,
+	                                                 pairs);
+}
+
+int NovaSimulation::get_weapon_availability(const String &p_weapon_name) const {
+	if (!world_) return opennova::world::weapon_availability_value::kAllowed;
+	const int idx = world_->weapons.index_of(p_weapon_name.utf8().get_data());
+	if (idx < 0) return opennova::world::weapon_availability_value::kAllowed;
+	return weapon_availability_.value_for(idx);
+}
+
+bool NovaSimulation::apply_local_player_loadout(const TypedArray<Dictionary> &p_kit,
                                                 int p_player_class) {
+	// The armory ACCEPT apply [orig: WeaponLoadout_ApplyFromBuffer @ 0x565cd0 offline
+	// leg: parse the tuples, expand sub-weapons, reset + refill the slot table, apply
+	// the requested ammo, re-select the equipped slot].
 	if (!world_) return false;
 	opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);
 	if (e == nullptr) return false;
-	if (p_weapon_name.is_empty()) {
-		e->equipped_adm_index = 0xFF;
-		if (p_player_class >= 5 && p_player_class <= 9)
-			e->player_class = static_cast<uint8_t>(p_player_class);
-		return true;
-	}
-	const int idx = world_->weapons.index_of(p_weapon_name.utf8().get_data());
-	if (idx < 0) return false;
-	e->equipped_adm_index = static_cast<uint8_t>(idx);
 	if (p_player_class >= 5 && p_player_class <= 9)
 		e->player_class = static_cast<uint8_t>(p_player_class);
+	std::vector<opennova::world::WeaponKitEntry> kit;
+	for (int i = 0; i < p_kit.size(); ++i) {
+		opennova::world::WeaponKitEntry entry = kit_entry_from_dict(p_kit[i]);
+		if (entry.name.empty()) continue;
+		const int idx = world_->weapons.index_of(entry.name.c_str());
+		if (idx < 0) continue;
+		// The per-entry availability validation [orig: the server 0x2F gate
+		// @ 0x515a3f — 0 drops the entry; 2 requires the armory zone, which the
+		// ACCEPT flow is already gated on host-side].
+		if (weapon_availability_.value_for(idx) ==
+		    opennova::world::weapon_availability_value::kBanned)
+			continue;
+		kit.push_back(std::move(entry));
+	}
+	// The accepted loadout becomes the respawn kit [orig: the S2C 0x5A apply writes
+	// restrictionData @ 0x4293e4; SP shares the buffer]. An explicit empty kit stays
+	// empty (the armory all-NONE accept leaves the table bare).
+	spawn_kit_set_ = true;
+	spawn_kit_ = std::move(kit);
+	rebuild_local_player_loadout(/*p_select_spawn_default=*/true);
+	// The ACCEPT leg applies the REQUESTED ammo over the default seed: pool =
+	// min(req, maxclips) * clipsize when requested, else startrounds RAW on the main
+	// leg; the first different-class sub-variant takes ammo_secondary with the
+	// x clipsize fallback [orig: @ 0x566166 vs @ 0x566209; WeaponSlot_SetAmmoCount
+	// @ 0x540b50].
+	const opennova::world::WeaponTable &table = world_->weapons;
+	for (const opennova::world::WeaponKitEntry &entry : spawn_kit_) {
+		const int adm = table.index_of(entry.name.c_str());
+		if (adm < 0) continue;
+		const opennova::world::WeaponTableEntry *def =
+				table.by_index(static_cast<uint8_t>(adm));
+		if (def == nullptr) continue;
+		if (def->clipsize != -1) {
+			int32_t total = entry.ammo_primary >= 0
+					? std::min<int32_t>(entry.ammo_primary, def->maxclips) * def->clipsize
+					: def->startrounds;
+			opennova::world::weapon_pool_set(table, local_inventory_, def->ammo_class_id,
+			                                 total);
+		}
+		for (int k = 1; k <= def->loadout_subclasses; ++k) {
+			const opennova::world::WeaponTableEntry *sub =
+					(adm + k < 256) ? table.by_index(static_cast<uint8_t>(adm + k))
+					                : nullptr;
+			if (sub == nullptr) continue;
+			if (opennova::strutil::iequals(sub->ammo_class, def->ammo_class)) continue;
+			int32_t total = entry.ammo_secondary >= 0
+					? std::min<int32_t>(entry.ammo_secondary, sub->maxclips) * sub->clipsize
+					: static_cast<int32_t>(sub->startrounds) * sub->clipsize;
+			opennova::world::weapon_pool_set(table, local_inventory_, sub->ammo_class_id,
+			                                 total);
+			break; // the FIRST different-class sub-variant [orig: @ 0x5027c8 shape]
+		}
+	}
+	opennova::world::weapon_inventory_recalc_clips(table, local_inventory_);
 	return true;
+}
+
+void NovaSimulation::respawn_local_player_loadout() {
+	rebuild_local_player_loadout(/*p_select_spawn_default=*/true);
+}
+
+void NovaSimulation::rebuild_local_player_loadout(bool p_select_spawn_default) {
+	// The Player_InitPlayer weapon leg [orig: @ 0x4e15f0: AvatarDef_BuildDisplayList
+	// (restrictionData) -> WeaponSlotPool_ResetAllEntries -> WeaponSlotTable_
+	// LoadAllFromDefs -> WeaponSlots_SeedAmmoPoolsFromDefs -> WeaponSlots_
+	// RecalculateAmmoFromCapacity -> Player_SelectWeaponSlot(195) ->
+	// Player_SwitchToWeaponByHandle(195)].
+	if (!world_) return;
+	opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);
+	if (e == nullptr) return;
+	const opennova::world::WeaponTable &table = world_->weapons;
+	if (table.empty()) return;
+	const std::vector<opennova::world::WeaponKitEntry> kit =
+			spawn_kit_set_ ? spawn_kit_ : opennova::world::weapon_kit_default();
+	local_inventory_.reset(table);
+	const std::vector<std::string> display =
+			opennova::world::weapon_kit_expand_display_list(kit, table);
+	const opennova::world::WeaponFillResult fill =
+			opennova::world::weapon_inventory_load_from_display(table, display,
+			                                                    local_inventory_);
+	for (const std::string &w : fill.warnings)
+		print_verbose(String::utf8(w.c_str())); // [orig: ErrorLog_WriteTimestamped]
+	opennova::world::weapon_inventory_seed_pools(table, local_inventory_,
+	                                             e->player_class);
+	opennova::world::weapon_inventory_recalc_clips(table, local_inventory_);
+	local_inventory_valid_ = true;
+	weapon_switch_in_flight_ = false;
+	if (!p_select_spawn_default) return;
+	const opennova::world::WeaponSwitchGates gates = local_weapon_switch_gates();
+	if (!opennova::world::weapon_select_slot(
+	            table, local_inventory_,
+	            opennova::world::weapon_combo::kDefaultSpawnCombo,
+	            !gates.equip_blocked)) {
+		// An empty table (the armory all-NONE kit) equips nothing.
+		e->equipped_adm_index = 0xFF;
+		return;
+	}
+	// Player_InitPlayer follows the select with SwitchToWeaponByHandle(195)
+	// [orig: @ 0x4e1995/@ 0x4e19a1], but the switch's mount walk rides the entity's
+	// AI-slot binding gate [orig: entity+0x68 test @ 0x4e023a; writer
+	// Entity_AllocateAISlot @ 0x40d2f4] — modeled here as not-yet-bound during the
+	// spawn rebuild (the motor/presentation bind after load), so the spawn equips
+	// exactly the selected slot and plays no switch actions. The gate's init-time
+	// value is an open question (D-WPN-21, docs/divergence-ledger.md).
+	local_inventory_.pending_combo = local_inventory_.equipped_combo;
+	commit_pending_weapon_switch();
+	weapon_start_in_switchto_ = false;
+}
+
+opennova::world::WeaponSwitchGates NovaSimulation::local_weapon_switch_gates() const {
+	opennova::world::WeaponSwitchGates gates;
+	const opennova::world::Entity *e =
+			world_ ? world_->registry.get(world_->cached.local_player) : nullptr;
+	if (e != nullptr && e->mounted) {
+		// [orig: the parentSlot {2,3,5} stance gate @ 0x4e0192 — our SeatType enum
+		//  carries the original's raw values: Controller=2, Gunner=3, Driver=5;
+		//  passengers (1) keep switching. The equip-commit defer gates {2,3} only
+		//  @ 0x4dd6fc.]
+		const auto t = e->mount_type;
+		gates.seat_blocked = t == opennova::world::SeatType::Controller ||
+		                     t == opennova::world::SeatType::Gunner ||
+		                     t == opennova::world::SeatType::Driver;
+		gates.equip_blocked = t == opennova::world::SeatType::Controller ||
+		                      t == opennova::world::SeatType::Gunner;
+	}
+	gates.equipped_valid =
+			local_inventory_.equipped_combo >= 0 &&
+			local_inventory_.slot(local_inventory_.equipped_combo) != nullptr &&
+			local_inventory_.slot(local_inventory_.equipped_combo)->adm_index >= 0;
+	gates.equipped_action = weapon_active_ ? weapon_slot_.current
+	                                       : opennova::world::weapon_action::kIdle;
+	return gates;
+}
+
+void NovaSimulation::commit_pending_weapon_switch() {
+	// The pending -> equipped commit [orig: the switchfrom/switchrank completion
+	// consumes g_pendingWeaponSlot; EquippedSlot swap + the equippedAdmIndex stamp
+	// @ 0x4dd727; the FP model re-resolve runs host-side off the event].
+	weapon_switch_in_flight_ = false;
+	if (!world_ || !local_inventory_valid_) return;
+	opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);
+	if (e == nullptr) return;
+	const int32_t combo = local_inventory_.pending_combo;
+	const opennova::world::WeaponInventorySlot *slot = local_inventory_.slot(combo);
+	if (slot == nullptr || slot->adm_index < 0) return;
+	local_inventory_.equipped_combo = combo;
+	e->equipped_adm_index = static_cast<uint8_t>(slot->adm_index);
+	const opennova::world::WeaponTableEntry *def =
+			world_->weapons.by_index(static_cast<uint8_t>(slot->adm_index));
+	weapon_start_in_switchto_ = true;
+	PendingWeaponEvent event;
+	event.tick = world_->logic_tick;
+	event.world_position = get_local_player_position();
+	event.switch_to_weapon =
+			def != nullptr ? String::utf8(def->name.c_str()) : String();
+	pending_weapon_events_.push_back(std::move(event));
+}
+
+void NovaSimulation::request_local_player_weapon_category(int p_category) {
+	// [orig: input cases 200-210 @ 0x4e1144 -> Player_SwitchToWeaponByHandle
+	//  ((action-200)*65). The binoculars-view and fire-charge input gates have no
+	//  sim mechanics yet — record note.]
+	if (!world_ || !local_inventory_valid_) return;
+	if (p_category < 0 || p_category >= opennova::world::weapon_combo::kCategories)
+		return;
+	const opennova::world::WeaponSwitchOutcome out = opennova::world::weapon_switch_to_handle(
+			world_->weapons, local_inventory_,
+			p_category * opennova::world::weapon_combo::kRanksPerCategory,
+			local_weapon_switch_gates());
+	handle_weapon_switch_outcome(out);
+}
+
+void NovaSimulation::request_local_player_weapon_cycle(int p_direction) {
+	// [orig: input cases 212/214 -> Player_CycleWeaponSlot @ 0x4dfe70; the mounted-gun
+	//  elevation dual-purpose leg belongs to the vehicle channel, not this walk]
+	if (!world_ || !local_inventory_valid_) return;
+	const opennova::world::WeaponSwitchOutcome out = opennova::world::weapon_cycle_slot(
+			world_->weapons, local_inventory_, p_direction, local_weapon_switch_gates());
+	handle_weapon_switch_outcome(out);
+}
+
+void NovaSimulation::handle_weapon_switch_outcome(
+		const opennova::world::WeaponSwitchOutcome &p_out) {
+	switch (p_out.kind) {
+		case opennova::world::WeaponSwitchOutcome::kDeny: {
+			// [orig: PlaySoundOnDedicatedServer(dword_24E08C4) @ 0x4e0354]
+			PendingWeaponEvent event;
+			event.tick = world_ ? world_->logic_tick : 0;
+			event.world_position = get_local_player_position();
+			event.switch_denied = true;
+			pending_weapon_events_.push_back(std::move(event));
+			break;
+		}
+		case opennova::world::WeaponSwitchOutcome::kMount: {
+			// [orig: Player_MountWeaponSlot @ 0x4dfa40 — pending already stamped by
+			//  the walk; the OUTGOING slot's FSM plays SWITCHRANK (same category) or
+			//  SWITCHFROM (cross category) and its completion commits]
+			if (!weapon_active_) {
+				commit_pending_weapon_switch();
+				break;
+			}
+			weapon_switch_in_flight_ = true;
+			if (p_out.same_category)
+				opennova::world::weapon_fsm_queue_switch_rank(weapon_slot_);
+			else
+				opennova::world::weapon_fsm_queue_switch_from(weapon_slot_);
+			break;
+		}
+		default:
+			break;
+	}
+}
+
+Dictionary NovaSimulation::get_local_player_inventory() const {
+	Dictionary out;
+	out["valid"] = local_inventory_valid_;
+	out["equipped_combo"] = local_inventory_.equipped_combo;
+	out["carry_flags"] = int64_t(local_inventory_.carry_flags);
+	String equipped_name;
+	Array slots;
+	Dictionary pools;
+	if (world_ != nullptr) {
+		const opennova::world::WeaponTable &table = world_->weapons;
+		for (int32_t combo = 0; combo < opennova::world::weapon_combo::kSlotCount;
+		     ++combo) {
+			const opennova::world::WeaponInventorySlot *s = local_inventory_.slot(combo);
+			if (s == nullptr || s->adm_index < 0) continue;
+			const opennova::world::WeaponTableEntry *def =
+					table.by_index(static_cast<uint8_t>(s->adm_index));
+			if (def == nullptr) continue;
+			Dictionary row;
+			row["combo"] = combo;
+			row["name"] = String::utf8(def->name.c_str());
+			row["clip"] = s->clip;
+			slots.push_back(row);
+			if (combo == local_inventory_.equipped_combo)
+				equipped_name = String::utf8(def->name.c_str());
+		}
+		for (size_t i = 0; i < table.ammo_class_names.size() &&
+		                   i < local_inventory_.pools.size();
+		     ++i) {
+			if (table.ammo_class_names[i].empty()) continue;
+			pools[String::utf8(table.ammo_class_names[i].c_str())] =
+					local_inventory_.pools[i];
+		}
+	}
+	out["equipped_name"] = equipped_name;
+	out["slots"] = slots;
+	out["pools"] = pools;
+	return out;
 }
 
 // weapon.def -> the sim world's armory table. Mirrors the retail load site (Game_StartMission
@@ -1346,6 +1652,12 @@ Error NovaSimulation::load_weapon_table(const Ref<NovaResourceRoot> &p_resource_
 				e->equipped_adm_index = static_cast<uint8_t>(m4);
 		}
 	}
+	// The LOCAL player's slot pool builds from the spawn kit (the mission/armory
+	// loadout when one was promoted, else the WPN_M4AUTO default kit) and selects the
+	// spawn default — the Player_InitPlayer weapon leg [orig: @ 0x4e15f0; the default
+	// kit literal @ 0x5246be]. This subsumes the bare adm-index stamp above for the
+	// local player.
+	rebuild_local_player_loadout(/*p_select_spawn_default=*/true);
 	return OK;
 }
 
@@ -1736,8 +2048,22 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("local_player_in_vehicle_loadout_zone"), &NovaSimulation::local_player_in_vehicle_loadout_zone);
 	ClassDB::bind_method(D_METHOD("local_player_toggle_mount"), &NovaSimulation::local_player_toggle_mount);
 	ClassDB::bind_method(D_METHOD("get_attach_labels"), &NovaSimulation::get_attach_labels);
-	ClassDB::bind_method(D_METHOD("apply_local_player_loadout", "weapon_name", "player_class"),
+	ClassDB::bind_method(D_METHOD("apply_local_player_loadout", "kit", "player_class"),
 	                     &NovaSimulation::apply_local_player_loadout);
+	ClassDB::bind_method(D_METHOD("set_spawn_loadout", "kit", "filter_by_availability"),
+	                     &NovaSimulation::set_spawn_loadout);
+	ClassDB::bind_method(D_METHOD("set_weapon_availability", "pairs"),
+	                     &NovaSimulation::set_weapon_availability);
+	ClassDB::bind_method(D_METHOD("get_weapon_availability", "weapon_name"),
+	                     &NovaSimulation::get_weapon_availability);
+	ClassDB::bind_method(D_METHOD("respawn_local_player_loadout"),
+	                     &NovaSimulation::respawn_local_player_loadout);
+	ClassDB::bind_method(D_METHOD("request_local_player_weapon_category", "category"),
+	                     &NovaSimulation::request_local_player_weapon_category);
+	ClassDB::bind_method(D_METHOD("request_local_player_weapon_cycle", "direction"),
+	                     &NovaSimulation::request_local_player_weapon_cycle);
+	ClassDB::bind_method(D_METHOD("get_local_player_inventory"),
+	                     &NovaSimulation::get_local_player_inventory);
 	ClassDB::bind_method(D_METHOD("load_weapon_table", "resource_root", "name"),
 	                     &NovaSimulation::load_weapon_table, DEFVAL(String("weapon.def")));
 	ClassDB::bind_method(D_METHOD("load_ammo_table", "resource_root", "name"),
@@ -2479,11 +2805,46 @@ void NovaSimulation::set_local_player_weapon(const Dictionary &p_def,
 	}
 	const int clipsize = int(p_def.get("clipsize", 0));
 	weapon_def_.clip_capacity = clipsize > 0 ? clipsize : -1; // no clipsize key = no clip tracking
-	// Fresh slot: full magazine + the def's carried reserve (the interim ammo default
-	// until PLAYER_INFO loadout resolution lands — D-WPN-7).
+	// A queued or in-flight SWITCHTO survives the per-equip reset — the switch flow
+	// installs twice (dict-only, then with the rebuilt viewmodel's clip lengths) and
+	// the draw-in must reach the second install (D-WPN-6 family artifact).
+	const bool carry_switchto = weapon_active_ &&
+			(weapon_slot_.next == opennova::world::weapon_action::kSwitchTo ||
+			 weapon_slot_.current == opennova::world::weapon_action::kSwitchTo);
 	weapon_slot_ = opennova::world::WeaponSlotState{};
-	weapon_slot_.clip = clipsize > 0 ? clipsize : 0;
-	weapon_slot_.reserve = int(p_def.get("startrounds", 0));
+	// Ammo comes from the slot pool when the installed def IS the equipped inventory
+	// slot: clip = the slot's loaded rounds, reserve = the def's ammo-class pool
+	// [orig: MountSlot+0x10 + Entity_GetScoreValueBySlotType @ 0x5406e0 — closes the
+	// D-WPN-7 interim default for pool-backed equips].
+	bool ammo_from_inventory = false;
+	if (local_inventory_valid_ && world_ != nullptr) {
+		const opennova::world::WeaponInventorySlot *eq =
+				local_inventory_.slot(local_inventory_.equipped_combo);
+		const opennova::world::WeaponTableEntry *def =
+				(eq != nullptr && eq->adm_index >= 0)
+						? world_->weapons.by_index(static_cast<uint8_t>(eq->adm_index))
+						: nullptr;
+		const String def_name = p_def.get("name", String());
+		if (def != nullptr && def_name.nocasecmp_to(String::utf8(def->name.c_str())) == 0) {
+			weapon_slot_.clip = eq->clip;
+			weapon_slot_.reserve =
+					opennova::world::weapon_pool_get(local_inventory_, def->ammo_class_id);
+			ammo_from_inventory = true;
+		}
+	}
+	if (!ammo_from_inventory) {
+		// Fresh slot: full magazine + the def's carried reserve (the interim ammo
+		// default for inventory-less installs — D-WPN-7).
+		weapon_slot_.clip = clipsize > 0 ? clipsize : 0;
+		weapon_slot_.reserve = int(p_def.get("startrounds", 0));
+	}
+	// A commit-driven install starts the FSM in SWITCHTO — the draw-in the original
+	// plays after the switchfrom completes [orig: the switch chain's mount ->
+	// switchto ordering; ForceQueueSwitchFrom @ 0x53f170 -> the completion handler].
+	if (weapon_start_in_switchto_ || carry_switchto) {
+		weapon_slot_.next = opennova::world::weapon_action::kSwitchTo;
+		weapon_start_in_switchto_ = false;
+	}
 	weapon_play_serial_ = 0;
 	weapon_anim_key_ = String();
 	weapon_anim_variant_ = 0;
@@ -2849,6 +3210,53 @@ void NovaSimulation::tick_local_player_weapon() {
 		AiEntity *p = world_->ai ? world_->ai->for_handle(world_->cached.local_player) : nullptr;
 		if (p && p->inf.active) p->inf.reload_anim_ticks = 80;
 	}
+	// --- the slot-pool bridge: the pool model is authoritative for ammo -------------
+	// [orig: the FSM's clip lives on the MountSlot (+0x10) and the reserve is the
+	//  per-ammo-class pool — one storage, two views; this port mirrors between the
+	//  single-slot FSM state and the inventory]
+	if (local_inventory_valid_ && world_ != nullptr) {
+		opennova::world::WeaponInventorySlot *eq =
+				local_inventory_.slot(local_inventory_.equipped_combo);
+		const opennova::world::WeaponTableEntry *eq_def =
+				(eq != nullptr && eq->adm_index >= 0)
+						? world_->weapons.by_index(static_cast<uint8_t>(eq->adm_index))
+						: nullptr;
+		if (eq != nullptr && eq_def != nullptr) {
+			if (ev.reload_applied) {
+				// The witnessed refill: refund the remaining clip to the pool, draw a
+				// full clip clamped by it [orig: WeaponSlot_ReloadAmmo @ 0x541720,
+				// §5.58] — overriding the FSM's single-class transfer (D-WPN-2).
+				// eq->clip still holds the pre-reload remaining rounds (mirrored on
+				// the previous tick); the refund below consumes it.
+				opennova::world::weapon_inventory_reload_slot(world_->weapons,
+				                                              local_inventory_,
+				                                              local_inventory_.equipped_combo);
+				weapon_slot_.clip = eq->clip;
+			} else {
+				eq->clip = weapon_slot_.clip; // fire consume mirrors down
+			}
+			weapon_slot_.reserve =
+					opennova::world::weapon_pool_get(local_inventory_, eq_def->ammo_class_id);
+			// The post-recoil auto-switch [orig: WeaponAction_Recoil tail @ 0x543062:
+			// def+0x168 -> Player_SwitchToWeaponByHandle(def[+0x164]*65) — the
+			// grenade/LAW switchback, unconditional per throw].
+			if (ev.action_finished == opennova::world::weapon_action::kRecoil &&
+			    eq_def->has_switchcategory) {
+				handle_weapon_switch_outcome(opennova::world::weapon_switch_to_handle(
+						world_->weapons, local_inventory_,
+						eq_def->switchcategory *
+								opennova::world::weapon_combo::kRanksPerCategory,
+						local_weapon_switch_gates()));
+			}
+		}
+		// A queued manual switch commits when the outgoing SWITCHFROM/SWITCHRANK
+		// completes [orig: the completion consumes g_pendingWeaponSlot].
+		if (weapon_switch_in_flight_ &&
+		    (ev.action_finished == opennova::world::weapon_action::kSwitchFrom ||
+		     ev.action_finished == opennova::world::weapon_action::kSwitchRank)) {
+			commit_pending_weapon_switch();
+		}
+	}
 	// The FSM's scope side effects land on the sim-owned engaged bit: forced
 	// unscope (one-shot / reload stash) and the pump's rescope-after-reload
 	// [orig: g_weaponScopeActive writes; the rescope block @ 0x54139e].
@@ -2977,6 +3385,8 @@ Array NovaSimulation::drain_local_player_weapon_events() {
 		row["action_effect"] = event.action_effect;
 		row["effect_particle"] = event.effect_particle;
 		row["effect_particle_userpoint"] = event.effect_particle_userpoint;
+		row["switch_to_weapon"] = event.switch_to_weapon;
+		row["switch_denied"] = event.switch_denied;
 		out.push_back(row);
 	}
 	pending_weapon_events_.clear();

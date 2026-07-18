@@ -27,8 +27,18 @@ class FakeSim:
 	func get_local_player_weapon_name() -> String:
 		return weapon
 
-	func apply_local_player_loadout(primary: String, selected_class: int) -> bool:
-		applies.append({"primary": primary, "player_class": selected_class})
+	# The ACCEPT now carries the full multi-slot kit (Array[Dictionary] rows
+	# {name, ammo_primary, ammo_secondary, flags}); the first row is the primary
+	# [orig: WeaponLoadout_ApplyFromBuffer @0x565cd0 tuple parse].
+	func apply_local_player_loadout(kit: Array, selected_class: int) -> bool:
+		var primary := ""
+		if kit.size() > 0:
+			primary = String((kit[0] as Dictionary).get("name", ""))
+		applies.append({
+			"kit": kit.duplicate(true),
+			"primary": primary,
+			"player_class": selected_class,
+		})
 		weapon = primary
 		player_class = selected_class
 		return true

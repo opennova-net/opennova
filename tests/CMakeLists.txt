@@ -991,6 +991,17 @@ target_include_directories(weapon_fsm_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(weapon_fsm_test PRIVATE cxx_std_17)
 add_test(NAME weapon_fsm COMMAND weapon_fsm_test)
 
+# The per-player weapon slot pool, spawn-kit chain, and map availability rules
+# (the 2026-07-18 loadout grill): the .bms kit filter + knife fallback, display
+# expansion, the 780-slot fill, pool seeding (classrounds overrides) + clip
+# recalc, and the three switching walks (select / category-key / cycle) with
+# their witnessed gates.
+add_executable(weapon_inventory_test world/weapon_inventory_test.cpp)
+target_link_libraries(weapon_inventory_test PRIVATE opennova_world)
+target_include_directories(weapon_inventory_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(weapon_inventory_test PRIVATE cxx_std_17)
+add_test(NAME weapon_inventory COMMAND weapon_inventory_test)
+
 # Local player view state (the ADS scope ease, the 3P anchor chase, the fov
 # policy) at the fixed 62.5 Hz tick — render-cadence invariance — plus the
 # input-dispatch gates in front of the FSM requests.

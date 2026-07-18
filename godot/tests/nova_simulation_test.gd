@@ -445,9 +445,13 @@ func test_armory_reads_and_clears_authoritative_local_loadout() -> void:
 	assert_eq(sim.get_local_player_weapon_name(), "WPN_M4AUTO",
 		"weapon-table load exposes the entity's stamped default instead of the FP fallback")
 
-	assert_true(sim.apply_local_player_loadout("WPN_M4AUTO", 6))
+	assert_true(sim.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 6))
 	assert_eq(sim.get_local_player_class(), 6, "accepted class is authoritative on reopen")
-	assert_true(sim.apply_local_player_loadout("", 9), "the authored NONE row is a valid apply")
+	var inv: Dictionary = sim.get_local_player_inventory()
+	assert_true(bool(inv.get("valid", false)), "the ACCEPT rebuilt the slot pool")
+	assert_eq(String(inv.get("equipped_name", "")), "WPN_M4AUTO",
+		"the ACCEPT re-selected the accepted weapon")
+	assert_true(sim.apply_local_player_loadout([], 9), "the all-NONE kit is a valid apply")
 	assert_eq(sim.get_local_player_class(), 9, "NONE still commits the selected class")
 	assert_eq(sim.get_local_player_weapon_name(), "", "NONE clears the equipped AdmDef")
 	sim.free()

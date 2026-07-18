@@ -28,6 +28,13 @@ var action_end_soundset := ""
 var action_effect := -1
 var effect_particle := ""
 var effect_particle_userpoint := ""
+## A committed weapon switch: the newly equipped weapon.def name — the host
+## reinstalls the FP viewmodel/FSM for it [orig: the mount's model re-resolve;
+## equippedAdmIndex stamp @ 0x4dd727]. Empty = no switch this tick.
+var switch_to_weapon := ""
+## The switch-walk wrap-around refusal — the deny sound seam
+## [orig: PlaySoundOnDedicatedServer(dword_24E08C4) @ 0x4e0354].
+var switch_denied := false
 
 
 static func from_event_dict(d: Dictionary) -> PlayerWeaponEvent:
@@ -48,4 +55,6 @@ static func from_event_dict(d: Dictionary) -> PlayerWeaponEvent:
 	out.action_effect = int(d.get("action_effect", -1))
 	out.effect_particle = String(d.get("effect_particle", ""))
 	out.effect_particle_userpoint = String(d.get("effect_particle_userpoint", ""))
+	out.switch_to_weapon = String(d.get("switch_to_weapon", ""))
+	out.switch_denied = bool(d.get("switch_denied", false))
 	return out

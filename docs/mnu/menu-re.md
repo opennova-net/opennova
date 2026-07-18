@@ -833,28 +833,37 @@ to adm[83]; −1 -> **adm[23] used RAW as the total on the main leg but
 `entity+44 |= 8/0x10` from adm[2]&0x1000 / adm[3]&2), then re-selects the
 equipped slot `[orig: Player_SelectWeaponSlot @ 0x4dd680 /
 Player_MountWeaponSlot @ 0x4dfa40 — camera/scope/switch-queue state only: the
-mount never consults the FP render model]`. Our SP apply stamps
-`equipped_adm_index` + `player_class` and re-mounts the FP viewmodel/action FSM
-(the sim's multi-slot inventory is the tracked runtime gap).
+mount never consults the FP render model]`. Our SP apply (2026-07-18, the
+loadout grill) parses the full multi-slot kit into the sim's slot pool
+(`libs/world/weapon_inventory` — sub-weapon expansion, requested-ammo pool
+fills, the witnessed re-select), stamps `player_class`, and the commit event
+re-mounts the FP viewmodel/action FSM; the accepted kit becomes the respawn
+spawn kit (net-re §5.63).
 
-**Reimpl status (2026-07-11 re-grill).** Ported and matching: the zone-gated
-open on the use-item key (SHIFT), including its not-seated gate, the live-overlay
-(no world-stop) state, the CHARCLASS_* class rows + resolve rule in offline play, sorted rows
-under NONE, the equipped-primary reselect, the witnessed weight format, and the
-offline ACCEPT collect/apply seam. Kept divergence: **D-MNU-9**. Deferred (unported
-sub-elements, tracked here + in `ArmoryMenuHost`'s header): the per-class
-loadout buffers (save-on-flip + reselect + remembered ammo counts), live MP
-C2S 0x2F / S2C 0x5A submission (the UI stays gated in a network session until
-that authoritative path is exposed), MP class selection, the
-`g_armoryWeaponAvailability` table (mission/S2C/admin-authored), the
-`*_AMMO1_TYPE` round-type cascade + per-ammo-def weight, `*_AMMO2` /
-GRENADE_AMMO1..3, the icon swaps, the MP scoreboard overlay, and the use-item
-key's non-armory leg (the ACCEPT hotkeys landed with the weapon round —
-see the on-show section above). Open questions: the SP-time
-value/writer of `g_hostClassAllowMask` (unwalked); the runtime site that stamps
-the shipped default keys into the binding rows (default.key ships in no JO PFF;
-the KeyChart is the defaults witness); the entity Team {1,3}->mask 2 else 1
-convention vs our avatar team ids.
+**Reimpl status (2026-07-11 re-grill; refreshed 2026-07-18, the loadout grill).**
+Ported and matching: the zone-gated open on the use-item key (SHIFT), including
+its not-seated gate, the live-overlay (no world-stop) state, the CHARCLASS_*
+class rows + resolve rule in offline play, sorted rows under NONE, the live-kit
+reselect on ALL THREE slot combos (backed by the sim's slot pool), the
+`g_armoryWeaponAvailability` filter term (mission-authored via the .bms
+item_availability promote; values in net-re §5.63), the witnessed weight
+format, and the offline ACCEPT collect/apply seam — now the full multi-slot
+kit into the sim's slot pool with requested-ammo pool fills (net-re §5.63).
+Kept divergence: **D-MNU-9**. Deferred (unported sub-elements, tracked here +
+in `ArmoryMenuHost`'s header): the per-class loadout buffer MEMORY
+(save-on-flip + remembered ammo counts), live MP C2S 0x2F / S2C 0x5A
+submission (the UI stays gated in a network session until that authoritative
+path is exposed; the S2C 0x66/admin availability writers ride it), MP class
+selection, the `*_AMMO1_TYPE` round-type cascade + per-ammo-def weight,
+`*_AMMO2` / GRENADE_AMMO1..3, the icon swaps, the MP scoreboard overlay, and
+the use-item key's non-armory leg (the ACCEPT hotkeys landed with the weapon
+round — see the on-show section above). Open questions: ~~the SP-time
+value/writer of `g_hostClassAllowMask`~~ (CLOSED 2026-07-18: MP = the per-class
+host settings vs the mission entry's class word, SP = the mission entry word
+directly — net-re §5.63); the runtime site that stamps the shipped default keys
+into the binding rows (default.key ships in no JO PFF; the KeyChart is the
+defaults witness); the entity Team {1,3}->mask 2 else 1 convention vs our
+avatar team ids.
 
 **IDB changes (2026-07-11):** renamed `sub_5642F0 ->
 Armory_ResolveSelectedClass`, `sub_424390 -> UI_OpenWeaponScreenSinglePlayer`,

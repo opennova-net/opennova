@@ -121,7 +121,33 @@ func try_open() -> bool:
 	var current_primary := vmdef.weapon_name if vmdef != null else ""
 	if sim.has_method("get_local_player_weapon_name"):
 		current_primary = String(sim.get_local_player_weapon_name())
-	_armory.set_current_loadout(current_primary)
+	# The live kit from the sim's slot pool re-selects every slot row; the map
+	# availability rules filter the lists [orig: populate_three_category_lists
+	# @0x566db0 — the g_armoryWeaponAvailability term + the per-class reselect].
+	var current_secondary := ""
+	var current_accessory := ""
+	if sim.has_method("get_local_player_inventory") \
+			and _world.has_method("get_weapon_database"):
+		var weapon_db: NovaWeaponDatabase = _world.get_weapon_database()
+		var inv: Dictionary = sim.get_local_player_inventory()
+		for row in inv.get("slots", []):
+			var weapon_name := String(row.get("name", ""))
+			var index: int = weapon_db.find_weapon(weapon_name) \
+					if weapon_db != null and weapon_db.is_loaded() else -1
+			if index < 0:
+				continue
+			match int(weapon_db.get_weapon(index).get("slot", -1)):
+				NovaWeaponDatabase.SLOT_SECONDARY:
+					if current_secondary.is_empty():
+						current_secondary = weapon_name
+				NovaWeaponDatabase.SLOT_ACCESSORY:
+					if current_accessory.is_empty():
+						current_accessory = weapon_name
+	_armory.set_current_loadout(current_primary, current_secondary, current_accessory)
+	if sim.has_method("get_weapon_availability"):
+		_armory.set_availability_lookup(
+				func(weapon_name: String) -> int:
+					return int(sim.get_weapon_availability(weapon_name)))
 	_armory.on_menu_built(_menu, MENU_FILE, MENU_SCREEN, _menu_root)
 	# The menu draws over every HUD element (the lazily built GameHud may have been
 	# added after us) [orig: the UI scene renders after HUD_DrawGameplayOverlays in
@@ -208,32 +234,57 @@ func _ensure_menu() -> bool:
 	return true
 
 
-# Armory ACCEPT: stamp the sim entity (equipped_adm_index + player_class), rebuild
-# the FP viewmodel + action FSM around the new primary, and resume play. SP-local
-# apply — the MP client path rides the 0x2F/0x5A loadout service instead.
-# [orig: WeaponLoadout_ApplyFromBuffer @0x565cd0 -> WeaponSlot rebuild chain +
-#  Player_SelectWeaponSlot @0x4dd680 / Player_MountWeaponSlot @0x4dfa40]
+# Armory ACCEPT: the full multi-slot kit (primary/secondary/accessory + clip
+# requests) rebuilds the sim's slot pool and becomes the respawn kit; the sim's
+# commit event then reinstalls the FP viewmodel/FSM around the re-selected equipped
+# weapon. SP-local apply — the MP client path rides the 0x2F/0x5A loadout service.
+# [orig: WeaponLoadout_ApplyFromBuffer @0x565cd0 -> the tuple parse + sub-weapon
+#  expansion + WeaponSlot rebuild chain + Player_SelectWeaponSlot @0x4dd680 /
+#  Player_MountWeaponSlot @0x4dfa40]
 func _on_loadout_accepted(loadout: Dictionary) -> void:
 	var primary := String(loadout.get("primary", ""))
 	_player_class = int(loadout.get("player_class", _player_class))
 	if _world != null:
 		var sim = _world.get_sim() if _world.has_method("get_sim") else null
+		var kit: Array[Dictionary] = []
+		for slot_key in ["primary", "secondary", "accessory"]:
+			var weapon_name := String(loadout.get(slot_key, ""))
+			if weapon_name.is_empty():
+				continue
+			kit.append({
+				"name": weapon_name,
+				"ammo_primary": int(loadout.get(slot_key + "_clips", -1)),
+				"ammo_secondary": -1,
+				"flags": -1,
+			})
 		var applied := false
 		if sim != null and sim.has_method("apply_local_player_loadout"):
 			applied = bool(sim.apply_local_player_loadout(
-					primary, int(loadout.get("player_class", 0))))
+					kit, int(loadout.get("player_class", 0))))
 		if not applied:
 			close()
 			return
-		if primary.is_empty():
+		if kit.is_empty():
+			# The all-NONE kit: no slots, nothing equipped [orig: an empty buffer
+			# leaves the table bare; the knife fallback is the MISSION loader's rule,
+			# not the armory's].
 			if _world.has_method("clear_local_player_weapon"):
 				_world.clear_local_player_weapon()
 				if _player_host != null:
 					_player_host.refresh_viewmodel()
 			close()
 			return
-		if _world.has_method("set_local_player_weapon_by_name") \
-				and _world.set_local_player_weapon_by_name(primary) \
+		# The sim re-selected + committed the equipped slot during the apply; install
+		# the viewmodel for it now (the commit event would also catch up next tick).
+		var equipped := primary
+		if sim != null and sim.has_method("get_local_player_inventory"):
+			var inv: Dictionary = sim.get_local_player_inventory()
+			var equipped_name := String(inv.get("equipped_name", ""))
+			if not equipped_name.is_empty():
+				equipped = equipped_name
+		if not equipped.is_empty() \
+				and _world.has_method("set_local_player_weapon_by_name") \
+				and _world.set_local_player_weapon_by_name(equipped) \
 				and _player_host != null:
 			_player_host.refresh_viewmodel()
 	close()

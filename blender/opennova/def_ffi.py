@@ -97,6 +97,12 @@ class DefWeaponDef(ctypes.Structure):
         ("run_anim", ctypes.c_int),
         # Attach-label text key ('attachtextid'; empty = key absent; mirror def.h).
         ("attach_text_id", ctypes.c_char * 32),
+        # Per-class startrounds overrides ('classrounds'; raw value-table indices
+        # medic=1 sniper=2 gunner=3 rifleman=5 engineer=6; mirror def.h).
+        ("classrounds", ctypes.c_int * 7),
+        # Post-recoil auto-switch category ('switchcategory'; mirror def.h).
+        ("switchcategory", ctypes.c_int),
+        ("has_switchcategory", ctypes.c_int),
     ]
 
 

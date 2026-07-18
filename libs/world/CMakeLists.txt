@@ -17,6 +17,7 @@ add_library(opennova_world STATIC
     src/vehicle_attach.cpp
     src/vehicle_motor.cpp
     src/weapon_fsm.cpp
+    src/weapon_inventory.cpp
     src/zone_capture.cpp
     src/zone_chain.cpp
 )

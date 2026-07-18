@@ -2858,6 +2858,20 @@ std::vector<WeaponLoadoutEntry> MissionDocument::weapon_loadout() const {
 	return out;
 }
 
+std::vector<ItemAvailabilityEntry> MissionDocument::item_availability() const {
+	std::vector<ItemAvailabilityEntry> out;
+	if (!impl_->loaded) {
+		return out;
+	}
+	out.reserve(impl_->file.item_availability.size());
+	for (const bms::ItemAvailabilityEntry &entry : impl_->file.item_availability) {
+		// The status byte is signed in the original's read (a -1 pair value maps to
+		// 3 mission-allowed at apply) [orig: @0x54de3f..0x54de49].
+		out.push_back({entry.name, static_cast<int>(static_cast<int8_t>(entry.status))});
+	}
+	return out;
+}
+
 bool MissionDocument::set_weapon_loadout(const std::vector<WeaponLoadoutEntry> &entries) {
 	if (!impl_->loaded) {
 		impl_->last_error = "No mission loaded";
