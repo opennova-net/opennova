@@ -310,7 +310,7 @@ Sources: [mnu/menu-re.md](mnu/menu-re.md), [audio/lwf-dbf-sound-re.md](audio/lwf
 | D-PLAYERINFO-11 | Loadout ammo combos + weight readout remaining (weapon lists implemented; the weight-calc CORE now ported to `libs/def` `def_loadout_weight`/`def_encumbrance_class` `[orig: @ 0x55f1f0; @ 0x55f480]`, unit-tested — the residual is the ammo combos + the UI host wiring, which need the Godot runtime) | A | OPEN (partial) | PAR-UI |
 | D-PLAYERINFO-12 | Per-(slot, team) selection-state globals host wiring is the next phase | A | WITNESSED-READY-DEFERRED | PAR-UI |
 | D-HUD-1 | Stance indicator = discrete cross-faded `HUDSTANCE` frames (IDB was `draw_minimap_compass_overlay` + oscarmike model it as a compass) — the cross-fade ported 2026-07-09 (`hud_stance.gd`/`hud_fade.gd`); the IDB rename to `HUD_DrawStanceIndicator` applied 2026-07-16 | A | FIXED (2026-07-09 port; IDB rename applied 2026-07-16) | PAR-UI |
-| D-HUD-2 | Stance widget = frame-swap + fade; heading/north is a *separate* top-down radar (do not port a rotating ring) | A | NEEDS-RE (the radar; the stance leg is fixed by the 2026-07-09 port) | PAR-UI / research starter |
+| D-HUD-2 | Stance widget = frame-swap + fade; do not port a rotating compass ring — 2026-07-18 resolution: JO:CA has NO in-HUD radar/compass at all (the old "radar `@ 0x599700`" pointer is the weapon HEAT BAR `HUD_DrawWeaponHeatBar`; the compass strip `@ 0x595470` and the in-world waypoint labels `@ 0x593820` are dead code); heading/map display lives only in the map overlay (`HUD_DrawMapOverlay @ 0x5a5f40`, its own follow-up) | A | FIXED (2026-07-18 witness: no radar element exists to port; the stance leg was fixed by the 2026-07-09 port) | PAR-UI |
 | D-HUD-3 | HUD design space is fixed 1024×768, scaled round-to-nearest (`Viewport_ScaleToVirtualCoords`) | A | FIXED (`hud_layout.gd`) | PAR-UI |
 | D-HUD-4 | Health-bar fill WIDTH uses the capped `+92` ratio; fill COLOR uses an uncapped recomputed ratio — the port matches both reads | A | FIXED | PAR-UI |
 | D-HUD-5 | Clip-indicator flash restamp keys on (`round_type`, reserve) — the original keys (ammo class `def+220`, reserve, pool id `def+216`); same transitions under the single-pool weapon model (D-WPN-2) | A | OPEN (revisit with per-class pools) | PAR-UI |
@@ -319,6 +319,14 @@ Sources: [mnu/menu-re.md](mnu/menu-re.md), [audio/lwf-dbf-sound-re.md](audio/lwf
 | D-HUD-8 | Crosshair color modulates the texture — the original writes it to the strip's specular channel (blend stage in the unwitnessed HUD shader pass); identical for the default white | B | OPEN (witness the texture-stage state) | PAR-UI |
 | D-HUD-9 | Crosshair hides the instant the scope engages — the original draws while an aimed shot is unavailable (`!Player_CanFireWeapon @ 0x5cf780`, which needs the SETTLED sight view), i.e. through the whole ADS ease; the row select stays hip (`+3` keys on CanFire, not the scope toggle, `@ 0x592b87`) | A | FIXED 2026-07-11 (weapon round: the hide is `scope_engaged && scope_fraction >= 1`; `NovaGameHudHost` plumbs `scope_fraction`) | PAR-UI |
 | D-HUD-10 | Crosshair anchors at the fixed design center — the original anchors at the projected aim point (screen center only on-foot first-person `@ 0x5928a0`; spectate/`g_camera_mode` project `Entity_BuildCameraView` `@ 0x592910`) | A | FIXED 2026-07-11 (weapon round: `aim_screen_point()` = INF in 1P -> the HUD pins the exact center; the 3P projection uses the witnessed 1000.0 far point) | PAR-UI |
+| D-HUD-11 | Attach-label nearest-only gate models `equipped_adm_index != 0xFF` + not-in-a-ctrl/drvr-seat — the original `Player_CanFireWeapon @ 0x5cf780` adds camera-mode/underwater/settled-scope legs the sim doesn't carry | A | OPEN (wire when those states reach the sim) | PAR-UI |
+| D-HUD-12 | Attach-label text metrics ride the `.fnt` size through Godot layout — the original measures via the fontObj scale pair (`HUD_MeasureTextWH @ 0x580ab0`); box arithmetic ported verbatim | B | OPEN (CGameFont glyph-layout follow-up) | PAR-UI |
+| D-HUD-13 | Attach-label color base = hudpos `hud_textcolor` — the original reads the master overlay color (`alpha @ 0x24c1868`, writer unwalked); the dim transform is ported exactly | B | OPEN (witness the overlay-color writer) | PAR-UI |
+| D-HUD-14 | Bottom prompts (preround armory / vehicle-bay / FARP wait+reload, `HUD_DrawGameplayOverlays @ 0x5bde60`) unported — each rides an unported system (MP preround / vehicle.mnu / FARP rearm); the ARMORY_WAIT leg is dead code in retail | A | WITNESSED-READY-DEFERRED | PAR-UI |
+| D-HUD-15 | Weapon heat bar (`HUD_DrawWeaponHeatBar @ 0x599700`, ex "minimap" misnomer) drawer ported — our weapon FSM accumulates no heat, so the info feed supplies 0 and the bar self-hides exactly like the original at zero heat; the per-slot accumulator (`WeaponSlot_CalcAccumulatedHeat @ 0x53f780` write side) is unwitnessed | A | OPEN (needs the heat-accumulator witness; drives emplacement/vehicle guns) | PAR-UI |
+| D-HUD-16 | SP waypoint track is built sim-side at mission load from the BMS nav channel (`flags & 2`) + pool-3 markers — retail routes the same data through the S2C 0x0F apply even in SP mode 3 (net-re §5.29); same selection rule, no wire round-trip | A | OPEN (the MP-join 0x0F waypoint leg is the npwire follow-up) | PAR-UI |
+| D-HUD-17 | Waypoint advance ports the proximity/last-entry/skip-done/event-link legs; `SpawnPoint_CheckWeaponRestrictions @ 0x4dbe80` modeled always-pass, and the MP POI list (`Entity_BuildMapPoiLists @ 0x42de40`) + spectate-cycle reuse are unported | A | WITNESSED-READY-DEFERRED (AAS/MP HUD phase) | PAR-UI |
+| D-HUD-18 | Objectives panel (`HUD_DrawWinConditions @ 0x5ba940`) — the subgoal state machine, row walk, gray completed fold, and chat/banner announcements are exact; residuals = Godot-rect checkbox/box stand-ins (the ten-line geometry decompiles with elided operands), full-alpha toggle, the win-score add `@ 0x454526`, the "New Objective" toast, the header unknown5[2]/[3] team-banner masks, and the KEY_O host mapping (binding row = the unported input layer) | A | OPEN (presentation polish + the unported score/toast/binding systems) | PAR-UI |
 
 ### Format ports — mission `.mis`, LW `.3di`, particles `.ptl`
 
@@ -669,8 +677,8 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 |---|---|---|---|---|---|
 | Net | 11 | 1 | 11 | 23 | 0 |
 | Environment | 0 | 0 | 3 | 3 | 4 |
-| World / AI + events | 26 | 1 | 6 | 33 | 15 |
-| UI (menu/ctrl/sound/playerinfo/HUD) | 8 | 2 | 5 | 15 | 5 |
+| World / AI + events | 27 | 1 | 6 | 34 | 15 |
+| UI (menu/ctrl/sound/playerinfo/HUD) | 14 | 1 | 7 | 22 | 6 |
 | Mission `.mis` | 0 | 2 | 1 | 3 | 0 |
 | LW `.3di` | 0 | 2 | 1 | 3 | 0 |
 | Particles `.ptl` | 2 | 0 | 0 | 2 | 15 |
@@ -684,7 +692,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Render — materials/state | 0 | 0 | 1 | 1 | 1 |
 | Render — draw order | 2 | 0 | 1 | 3 | 3 |
 | Render — lighting | 4 | 0 | 2 | 6 | 0 |
-| **Total** | **60** | **11** | **31** | **102** | 70 |
+| **Total** | **67** | **10** | **33** | **110** | 71 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-INF-20, D-NET-136, D-NET-64.
 

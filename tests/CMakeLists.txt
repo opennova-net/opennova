@@ -911,6 +911,13 @@ target_include_directories(world_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(world_test PRIVATE cxx_std_17)
 add_test(NAME world COMMAND world_test)
 
+# The player waypoint track (HUD waypoint label backing state).
+add_executable(waypoint_track_test world/waypoint_track_test.cpp)
+target_link_libraries(waypoint_track_test PRIVATE opennova_world)
+target_include_directories(waypoint_track_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(waypoint_track_test PRIVATE cxx_std_17)
+add_test(NAME waypoint_track COMMAND waypoint_track_test)
+
 # AI subsystem (byte-exact foundation): state enum + struct layout, AIEvent ring,
 # budget gate (AI_BeginUpdate), the infantry state-machine dispatcher + transitions,
 # and the trivial enter/exit/event handler ports.

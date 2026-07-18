@@ -17,6 +17,11 @@ const LocalPlayerHostScript := preload("res://engine/world/local_player_host.gd"
 # control (the game *is* its install folder); this is an OpenNova convenience so a
 # wrong / menu-less folder can be re-picked without restarting. Front-end only.
 const CHANGE_DIR_KEY := KEY_F9
+# The objectives-panel toggle. The retail action toggles the panel's alpha byte
+# in co-op [orig: Input_HandleActionBinding case @0x49b68b — dword_24C18CC ^=
+# 0xFF]; the authored default binding rides the unported input-binding layer
+# (D-CTRL-3), so the key itself is a host mapping.
+const OBJECTIVES_KEY := KEY_O
 # The armory key — the USE-ITEM key (input action 177 "useitem"; retail default =
 # SHIFT on the shipped KeyChart, labeled "USE ITEM/ATTACH/ARMORY"). Zone-gated: it
 # opens weapon.mnu's WEAPON screen only while the player stands inside a type-6
@@ -216,6 +221,12 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		return
 	if key.keycode == DEBUG_OVERLAY_KEY:
 		toggle_debug_overlay()
+		get_viewport().set_input_as_handled()
+		return
+	# The MISSION OBJECTIVES panel toggle, in-world only.
+	# [orig: the co-op action toggle @0x49b68b -> HUD_DrawWinConditions @0x5be163]
+	if key.keycode == OBJECTIVES_KEY and _state == State.WORLD and _hud_host != null:
+		_hud_host.toggle_objectives()
 		get_viewport().set_input_as_handled()
 		return
 	# The USE-ITEM key: in-world only. Zone legs first — the armory volume opens

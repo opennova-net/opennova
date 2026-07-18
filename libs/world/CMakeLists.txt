@@ -1,6 +1,7 @@
 add_library(opennova_world STATIC
     src/entity_registry.cpp
     src/world.cpp
+    src/waypoint_track.cpp
     src/ai.cpp
     src/collision.cpp
     src/occlusion.cpp

@@ -351,15 +351,29 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a) {
             w.effects.push({"dialog", a.param1, a.param2, 0, 0, std::string()});
             break;
         case bms::ActionType::ShowWaypoints:
+            // The engine flag the waypoint HUD label + SP cycle key gate on
+            // (init 1 at HUD bring-up); the effect stays as the host log.
+            // [orig: action 40 -> Game_SetShowWaypoints @0x58fb50 ->
+            //  g_showWaypoints @0x27238BC, init @0x5a4913]
+            w.waypoints.show = (a.param1 != 0);
             w.effects.push({"show_waypoints", a.param1, 0, 0, 0, std::string()});
             break;
         case bms::ActionType::SetLightState:
             w.effects.push({"set_light", a.param1, a.param2, 0, 0, std::string()});
             break;
         case bms::ActionType::ShowWinSubgoal:
+            // Set/clear the show-win bit — the RAW slot shift is the original's
+            // (slot 1..8 -> bits 1..8). The "New Objective" toast rides the
+            // effect. [orig: case 35 @0x4546af — bit @0x4546bf/@0x4546d0;
+            //  HUD_ShowObjectiveNotification @0x4546e2]
+            if (a.param2 != 0) w.subgoals.show_win |= (1u << a.param1);
+            else w.subgoals.show_win &= ~(1u << a.param1);
             w.effects.push({"subgoal_show", a.param1, a.param2, /*lose=*/0, 0, std::string()});
             break;
         case bms::ActionType::ShowLoseSubgoal:
+            // [orig: case 36 @0x454724 — the show-lose mirror @0x454734/@0x454745]
+            if (a.param2 != 0) w.subgoals.show_lose |= (1u << a.param1);
+            else w.subgoals.show_lose &= ~(1u << a.param1);
             w.effects.push({"subgoal_show", a.param1, a.param2, /*lose=*/1, 0, std::string()});
             break;
         // The three win actions end the round in-engine [orig: EventAction_Dispatch
@@ -378,8 +392,40 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a) {
             w.effects.push({"win", 0, 0, 0, 0, std::string()});
             w.process_round_end(0);
             break;
-        case bms::ActionType::SubGoalWon: w.effects.push({"subgoal_won", a.param1, 0, 0, 0, std::string()}); break;
-        case bms::ActionType::SubGoalLost: w.effects.push({"subgoal_lost", a.param1, 0, 0, 0, std::string()}); break;
+        case bms::ActionType::SubGoalWon: {
+            // The already-won guard skips the WHOLE case — no re-announce, no
+            // effect. Then the mask set + the STRWINMSG chat line, announce
+            // gated on the round still running. Effect fields: a = slot,
+            // b = the header WinConditions text id, c = announce. Deferred with
+            // cites: the win_scores[slot]*100 score add [orig: @0x454526 —
+            // byte_A763FB = header win_scores; the "Score_AccumulateBandwidth"
+            // callee name is a kong misnomer] and the header unknown5[2]-masked
+            // team-banner leg [orig: @0x45458d byte_A762D6].
+            // [orig: case 14 @0x454500 — guard @0x45450a, set @0x45451d,
+            //  round-running gate @0x45453a, STRWINMSG resolve @0x45456f]
+            const uint32_t bit = 1u << a.param1;
+            if ((w.subgoals.won & bit) != 0) break;
+            w.subgoals.won |= bit;
+            const int32_t text_id = (a.param1 >= 1 && a.param1 <= 8)
+                    ? w.subgoals.win_text_ids[a.param1] : 0;
+            const int32_t announce = w.round_end.ended ? 0 : 1;
+            w.effects.push({"subgoal_won", a.param1, text_id, announce, 0, std::string()});
+            break;
+        }
+        case bms::ActionType::SubGoalLost: {
+            // No already-set guard (unlike won). The chat line AND the
+            // persistent banner ride the same round-running gate; the
+            // unknown5[3]-masked team-banner leg is deferred with its win
+            // sibling. [orig: case 15 @0x4545e0 — set @0x4545ea, gate
+            //  @0x4545f0, STRLOSEMSG chat @0x454632 + SetBannerText @0x454647;
+            //  byte_A762D7 leg @0x45465c]
+            w.subgoals.lost |= (1u << a.param1);
+            const int32_t text_id = (a.param1 >= 1 && a.param1 <= 8)
+                    ? w.subgoals.lose_text_ids[a.param1] : 0;
+            const int32_t announce = w.round_end.ended ? 0 : 1;
+            w.effects.push({"subgoal_lost", a.param1, text_id, announce, 0, std::string()});
+            break;
+        }
         case bms::ActionType::GroupResetHasVisited:
             // Clears ONE group row of the visited matrix — only lists 0..31,
             // the witnessed 0x80-byte memset quirk
@@ -421,10 +467,16 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a) {
 void BmsEventSystem::fire(World &w, ScriptedEvent &se) {
     // [orig: the dispatch loops @0x454ca6/@0x454d0e — every action entry in order.
     //  The g_InputActionBits/g_EventInputBitsMirror commit around the dispatch
-    //  (input-trigger bit consumption) and the linked-spawn-point activation hook
-    //  (@0x452ce0 -> SpawnPoint_SkipBlocked) are host subsystems not ported here;
-    //  both are recorded in docs/mission/bms-event-runtime-re.md.]
+    //  (input-trigger bit consumption) is a host input subsystem not ported here;
+    //  recorded in docs/mission/bms-event-runtime-re.md.]
     for (const bms::Action &a : se.actions) dispatch_action(w, a);
+    // The waypoint completion hook: a fired event completes every route marker
+    // linked to its index (the original computes the index from the record's
+    // position in g_Events; events_ mirrors that array order).
+    // [orig: EventTrigger_MarkLinkedSpawnPoints @0x452ce0, called right after
+    //  both dispatch loops @0x454cbd/@0x454d25]
+    if (!events_.empty() && &se >= events_.data() && &se < events_.data() + events_.size())
+        w.waypoints.on_event_fired(static_cast<int32_t>(&se - events_.data()));
 }
 
 void BmsEventSystem::update_entry(World &w, ScriptedEvent &se) {

@@ -14,6 +14,38 @@ func test_demo_mission_promotes() -> void:
 	assert_eq(sim.get_entity_state(0), 16, "a routed organic starts in GROUND_FOLLOWWP (16)")
 	sim.free()
 
+
+# The HUD waypoint track: the demo mission's BLUE route becomes the player track;
+# a spawned local player latches waypoint 0 on the first tick and walking into the
+# radius advances. [orig chain: NetPacket_WriteWorldStateLoad0x0F @0x502e41 list ->
+# Player_UpdatePerFrame @0x4de5f7 advance; docs/interface/hud-re.md §Waypoint HUD]
+func test_waypoint_hud_view_tracks_the_demo_route() -> void:
+	var sim := NovaSimulation.new()
+	sim.build_demo_mission()
+	var wp: Dictionary = sim.get_waypoint_hud_view()
+	assert_true(bool(wp.get("show", false)), "waypoints visible by default")
+	assert_eq(int(wp.get("count", 0)), 3, "the blue route's three markers")
+	assert_eq(int(wp.get("current", 0)), -1, "no selection before a player tick")
+
+	# Spawn the local player far from marker 0 (demo marker 0 = mission (100,0,0)
+	# = Godot (100, 0, 0); radius 25). The first tick latches entry 0.
+	assert_true(sim.spawn_local_player(Vector3(0, 0, 0), 0.0, 1))
+	sim.step()
+	wp = sim.get_waypoint_hud_view()
+	assert_eq(int(wp.get("current", -1)), 0, "first tick latches waypoint 0")
+	assert_eq(int(wp.get("number", 0)), 1, "1-based display number")
+	assert_eq(int(wp.get("name_id", -1)), 1, "marker 0's authored name id")
+	var pos: Vector3 = wp.get("position", Vector3.ZERO)
+	assert_almost_eq(pos.x, 100.0, 0.01, "marker 0 world X")
+
+	# Teleport inside the 25 u radius (mission space; the player is AI index 2,
+	# after the demo's two organics): the next tick advances to waypoint 1.
+	sim.debug_set_entity_position(2, Vector3(95, 0, 0))
+	sim.step()
+	wp = sim.get_waypoint_hud_view()
+	assert_eq(int(wp.get("current", -1)), 1, "proximity advance onto waypoint 1")
+	sim.free()
+
 const ANIM_FIXTURES := "res://../fixtures/anim"
 
 

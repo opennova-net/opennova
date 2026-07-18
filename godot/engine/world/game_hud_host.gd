@@ -33,6 +33,10 @@ var _pending_hud_messages: Array[Dictionary] = []
 # MISSION FAILED screen can compose it. [orig: g_banner_text @0x28E3DA0, written by
 # GameMsg_SetBannerText @0x5ba200, cleared by the round-start HUD reset @0x5b71b0]
 var _endround_banner := ""
+# The objectives-panel toggle (the shell's objectives key flips it; retail toggles
+# an alpha byte 0<->255). [orig: input action case @0x49b68b — dword_24C18CC ^= 0xFF
+# in co-op; the binding row itself is the unported input-binding layer]
+var _objectives_visible := false
 
 
 func setup(world, player_host, ui_parent: Node) -> void:
@@ -56,6 +60,7 @@ func teardown() -> void:
 	_hud_weapon_name = ""
 	_hud_objective = ""
 	_endround_banner = ""
+	_objectives_visible = false
 	_pending_hud_messages.clear()
 	NovaStrings.register_table("mission", null)
 	_warned_no_player = false
@@ -226,6 +231,12 @@ func tick() -> void:
 		"fov_deg": fov_deg,
 		"ticks": _hud_ticks(),
 		"attach_labels": _build_attach_labels(),
+		# Weapon heat 0..0xFFFF; the drawer self-hides at 0. Always 0 until the
+		# per-slot heat accumulator is ported (D-HUD-15).
+		# [orig: hudInfo+60 = WeaponSlot_CalcAccumulatedHeat @0x53f780, @0x4b8533]
+		"heat": 0,
+		"waypoint": _build_waypoint_info(),
+		"objectives": _build_objectives() if _objectives_visible else [],
 	})
 	# Effects drain synchronously during _world.tick(), before this HUD update.
 	# Flush afterward so GameHud.push_message stamps the current 62 Hz tick.
@@ -236,6 +247,55 @@ func tick() -> void:
 # [orig: current_tick @0x24c1968]
 func _hud_ticks() -> int:
 	return int(Time.get_ticks_msec() * 0.062)
+
+
+# The waypoint label's info slice: the sim's current track entry with its display
+# name resolved and the 2D ground distance in meters. Empty dictionary = the label
+# hides (no track, ShowWaypoints off, or no current selection) — the drawer treats
+# absence as the original's null-current / flag-off gates.
+# [orig: HUD_DrawWaypointNameAndDistance @0x5947a0 gates @0x5a7daf (g_showWaypoints
+#  + a current present in the list); distance @0x5947e5..0x594836 = 2D fixed sqrt
+#  >> 16; name get_waypoint_name @0x594630]
+func _build_waypoint_info() -> Dictionary:
+	if _world == null:
+		return {}
+	var sim = _world.get_sim() if _world.has_method("get_sim") else null
+	if sim == null or not sim.has_method("get_waypoint_hud_view"):
+		return {}
+	var wp: Dictionary = sim.get_waypoint_hud_view()
+	if not bool(wp.get("show", false)) or int(wp.get("current", -1)) < 0:
+		return {}
+	var pos: Vector3 = wp.get("position", Vector3.ZERO)
+	var player: Vector3 = sim.get_local_player_position() \
+			if sim.has_method("get_local_player_position") else Vector3.ZERO
+	# The original distance is horizontal-only (mission X/Y deltas = the Godot
+	# ground plane), fixed sqrt truncated to whole meters. [orig: @0x594836 sar 16]
+	var dist := int(Vector2(pos.x - player.x, pos.z - player.z).length())
+	return {
+		"name": _resolve_waypoint_name(int(wp.get("name_id", 0))),
+		"distance_m": dist,
+	}
+
+
+# The waypoint display name. Our SP runtime is the co-op session shape (gametype
+# 0x30020), whose `& 0x20000` branch keys STRWPNAME by the RAW authored id — the
+# +1 remap belongs to the non-co-op MP gametypes, unported with them. The
+# armory/target/flag specials key off MP POI entity types, not SP route markers.
+# [orig: get_waypoint_name @0x594630 — index remap @0x594678; mission-table
+#  fallback @0x59473d ("STRWPNAME%03i" in WPNames); empty or "null" ->
+#  gametext WPNames/STRWPNAMEDEFAULT @0x59477b]
+func _resolve_waypoint_name(name_id: int) -> String:
+	var key := "STRWPNAME%03d" % name_id
+	var mission_table: RtxtStringFile = NovaStrings.get_table("mission")
+	var name := ""
+	if mission_table != null and mission_table.has_string_in_section("WPNames", key):
+		name = mission_table.get_string_in_section("WPNames", key)
+	if name.is_empty() or name.nocasecmp_to("null") == 0:
+		var gametext: RtxtStringFile = NovaStrings.get_table("gametext")
+		if gametext != null and gametext.has_string_in_section("WPNames", "STRWPNAMEDEFAULT"):
+			return gametext.get_string_in_section("WPNames", "STRWPNAMEDEFAULT")
+		return ""
+	return name
 
 
 # The floating attach labels: the sim's selection (distance/LOS/occupancy/nearest,
@@ -350,6 +410,24 @@ func apply_mission_effects(effects: Array) -> void:
 				var line := NovaStrings.lookup_display("gametext", "Misc", key)
 				_endround_banner = line
 				_queue_hud_message(line, 0)
+		elif kind == "subgoal_won" or kind == "subgoal_lost":
+			# A subgoal resolved: the mission-text announcement rides the chat
+			# feed (b = the header text id, c = the round-still-running gate);
+			# a LOST subgoal also stamps the persistent banner. [orig: case 14
+			# @0x454543 STRWINMSG chat; case 15 @0x454612 STRLOSEMSG chat +
+			# GameMsg_SetBannerText @0x454647]
+			if int(e.get("c", 0)) != 0:
+				var lost := kind == "subgoal_lost"
+				var msg_key := ("STRLOSEMSG%03d" if lost else "STRWINMSG%03d") \
+						% int(e.get("b", 0))
+				var section := "LoseConditions" if lost else "WinConditions"
+				var t: RtxtStringFile = NovaStrings.get_table("mission")
+				if t != null and t.has_string_in_section(section, msg_key):
+					var line := t.get_string_in_section(section, msg_key)
+					if not line.is_empty():
+						if lost:
+							_endround_banner = line
+						_queue_hud_message(line, 0)
 
 
 func hud_objective_line() -> String:
@@ -359,6 +437,45 @@ func hud_objective_line() -> String:
 ## The stored end-of-round banner (the WAC Lose cause line), for the end screen.
 func endround_banner_line() -> String:
 	return _endround_banner
+
+
+## The waypoint label's current entry ({name, distance_m}; empty = label hidden)
+## — the ADR 0018 public read seam for probes and diagnostics.
+func waypoint_hud_entry() -> Dictionary:
+	return _build_waypoint_info()
+
+
+## The objectives-panel toggle, flipped by the shell's objectives key.
+## [orig: the co-op action toggle @0x49b68b]
+func toggle_objectives() -> void:
+	_objectives_visible = not _objectives_visible
+
+
+func objectives_visible() -> bool:
+	return _objectives_visible
+
+
+# The panel's resolved rows: shown win-condition slots with mission-text lines
+# and their completed state. [orig: HUD_DrawWinConditions @0x5ba940 — rows from
+# the header table walk, text = mission WinConditions/STRWINCOND%03i]
+func _build_objectives() -> Array:
+	var out: Array = []
+	if _world == null:
+		return out
+	var sim = _world.get_sim() if _world.has_method("get_sim") else null
+	if sim == null or not sim.has_method("get_objectives_view"):
+		return out
+	var table: RtxtStringFile = NovaStrings.get_table("mission")
+	for raw in sim.get_objectives_view():
+		var row: Dictionary = raw
+		if not bool(row.get("shown", false)):
+			continue
+		var key := "STRWINCOND%03d" % int(row.get("text_id", 0))
+		var text := ""
+		if table != null and table.has_string_in_section("WinConditions", key):
+			text = table.get_string_in_section("WinConditions", key)
+		out.append({"text": text, "done": bool(row.get("done", false))})
+	return out
 
 
 ## Number of player-facing messages waiting for the lazy HUD to mount.
