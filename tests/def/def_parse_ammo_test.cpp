@@ -72,6 +72,24 @@ int main(void) {
         def_free_ammo(&ammo);
         return 1;
     }
+    /* The tracer round's item graphic id (raw type id kept, host resolves) and the
+       in-flight glow: `frndlyTrcrID 4502`, `light_move 6.0 128 120 80`
+       [orig: AmmoDef_ParseProperty @0x40a5f8 -> +16; light_move -> +120 fp16 /
+       +124 = ((r<<8)+g)<<8 + b]. */
+    if (rocket->frndly_trcr_type_id != 4502 || rocket->foe_trcr_type_id != 0) {
+        fprintf(stderr, "FAIL: ROCKET frndlyTrcrID/foeTrcrID: got %d/%d want 4502/0\n",
+                rocket->frndly_trcr_type_id, rocket->foe_trcr_type_id);
+        def_free_ammo(&ammo);
+        return 1;
+    }
+    if (rocket->light_move_radius_fp16 != 6 * 65536 ||
+        rocket->light_move_color != ((128 << 16) | (120 << 8) | 80)) {
+        fprintf(stderr, "FAIL: ROCKET light_move: got %d/0x%X want %d/0x%X\n",
+                rocket->light_move_radius_fp16, rocket->light_move_color, 6 * 65536,
+                (128 << 16) | (120 << 8) | 80);
+        def_free_ammo(&ammo);
+        return 1;
+    }
 
     /* Find the AT_NULL entry — should have 0 velocity */
     const DefAmmoDef *null_ammo = NULL;
