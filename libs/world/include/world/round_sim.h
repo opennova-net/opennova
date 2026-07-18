@@ -9,12 +9,14 @@
 // AUTHORITY-ONLY. docs/net/novaworld-net-re.md §5.60.]
 //
 // Reimpl altitude — tracked deferrals (§5.60 port follow-ups):
-//  * hit test = per-tick segment vs a fixed organic cylinder (the witnessed proximity
-//    list + bone-section collision needs the collision-model port). Hit ZONE resolution
-//    is therefore body-only (zone multiplier 1.0; head 1.25 / limbs 0.5 / 13-14 3.0 wait
-//    on bone hits).
-//  * pool-0 organics only (vehicle/static hits need the itemDef+400 armor threshold and
-//    section model).
+//  * ORGANIC hit test = per-tick segment vs a fixed organic cylinder (the witnessed
+//    person bone-section collision is unported). Hit ZONE resolution is therefore
+//    body-only (zone multiplier 1.0; head 1.25 / limbs 0.5 / 13-14 3.0 wait on bone
+//    hits). ITEM hits (pools 1/2) run the witnessed bound-sphere broad phase + the
+//    collision-model FACE narrow phase with the material-tagged impact
+//    [orig: Projectile_RaycastProximitySlots @ 0x4E5340 ->
+//    Physics_RaycastAgainstBoneCollision @ 0x4E4CB0]; models with no face mesh keep
+//    the bound-sphere stand-in (D-ITEM-1's bounded fallback).
 //  * no drag/gravity yet (Projectile_ApplyDragDeceleration internals unwitnessed) — the
 //    round flies straight at muzzle speed, so kinetic damage does not yet fall off.
 //  * no weapon spread on the sim round (the 0x06 carries the claimed pre-spread pose;
@@ -37,6 +39,8 @@ struct TerrainHeightField;
 }
 
 namespace opennova::world {
+
+class CollisionWorld;
 
 class World;
 
@@ -160,8 +164,11 @@ public:
 
     // One 62 Hz step for every live round [orig: Weapon_UpdateAllProjectiles @ 0x4EC020
     // -> Projectile_UpdatePhysics @ 0x4E9D70]: advance along velocity, terrain stop,
-    // organic hit test, authority damage, death detection.
-    void tick(World &world, const terrain::TerrainHeightField *terrain);
+    // organic hit test, the item bound-sphere broad phase + the collision-model
+    // face narrow phase (through `collision`, husk-aware; null = sphere-only),
+    // authority damage, death detection.
+    void tick(World &world, const terrain::TerrainHeightField *terrain,
+              CollisionWorld *collision);
 
     // Mission restart discards all transient projectile/presentation state.
     void reset() noexcept;

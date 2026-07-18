@@ -387,6 +387,177 @@ bool collision_raycast_model(const CollisionTargetView &target, CollisionRay &ra
     return hit_found;
 }
 
+namespace {
+
+// The odd-even point-in-triangle on the normal's projection plane.
+// [orig: Math_PointInTriangle2D @ 0x414050 — the Q8 int16 vertex table << 8
+// (16.16), the axis flag picking the coordinate pair (1=XY, 2=XZ, 4=YZ), the
+// three edges v0->v1->v2->v0 walked with the crossing count capped at 2;
+// inside == exactly ONE crossing of the +u ray from the test point.]
+bool point_in_triangle_2d(const int32_t p[3], const CollisionFace &face,
+                          const CollisionFaceVertex *verts) {
+    int32_t tu, tv;
+    int32_t u[3], v[3];
+    switch (face.axis) {
+        case 1:
+            tu = p[0]; tv = p[1];
+            for (int i = 0; i < 3; ++i) {
+                const CollisionFaceVertex &vt = verts[face.v[i]];
+                u[i] = static_cast<int32_t>(vt.x) << 8;
+                v[i] = static_cast<int32_t>(vt.y) << 8;
+            }
+            break;
+        case 2:
+            tu = p[0]; tv = p[2];
+            for (int i = 0; i < 3; ++i) {
+                const CollisionFaceVertex &vt = verts[face.v[i]];
+                u[i] = static_cast<int32_t>(vt.x) << 8;
+                v[i] = static_cast<int32_t>(vt.z) << 8;
+            }
+            break;
+        case 4:
+            tu = p[1]; tv = p[2];
+            for (int i = 0; i < 3; ++i) {
+                const CollisionFaceVertex &vt = verts[face.v[i]];
+                u[i] = static_cast<int32_t>(vt.y) << 8;
+                v[i] = static_cast<int32_t>(vt.z) << 8;
+            }
+            break;
+        default: // [orig: no-flag falls through with stale locals — never authored]
+            return false;
+    }
+    int crossings = 0;
+    bool prev_above = v[0] >= tv;
+    for (int e = 0; e < 3 && crossings < 2; ++e) {
+        const int32_t su = u[e], sv = v[e];
+        const int32_t nu = u[(e + 1) % 3], nv = v[(e + 1) % 3];
+        if (prev_above != (nv >= tv)) {
+            // quadrant bits: 1 = edge start left of the point, 2 = edge end left.
+            const int quadrant = (su < tu ? 1 : 0) | (nu >= tu ? 0 : 2);
+            if (quadrant != 3 &&
+                (quadrant == 0 ||
+                 static_cast<int32_t>(static_cast<int64_t>(nu - su) * (tv - sv) / (nv - sv)) +
+                                 su >=
+                         tu))
+                ++crossings;
+        }
+        prev_above = nv >= tv;
+    }
+    return crossings == 1;
+}
+
+} // namespace
+
+// ----------------------------------------------------------------------------
+// The projectile face-mesh raycast. [orig: Physics_RaycastAgainstBoneCollision
+// @ 0x4e4cb0 — see the header note for the witnessed gate-by-gate map.]
+// ----------------------------------------------------------------------------
+bool collision_raycast_faces(const CollisionTargetView &target, const int32_t start[3],
+                             const int32_t end[3], uint32_t ammo_flags, RayFaceHit &out) {
+    if (target.model == nullptr || target.matrices == nullptr) return false;
+    const CollisionModel &model = *target.model;
+    if (model.faces.empty()) return false;
+
+    // Segment length + float-normalized direction — the caller's rayState[6..9]
+    // [orig: the velocityMagnitude sqrt + flt_7C32BC normalize @ 0x4ea0fc].
+    int32_t d[3], ndir[3];
+    for (int i = 0; i < 3; ++i) d[i] = end[i] - start[i];
+    const double dlen = std::sqrt(static_cast<double>(d[0]) * d[0] +
+                                  static_cast<double>(d[1]) * d[1] +
+                                  static_cast<double>(d[2]) * d[2]);
+    if (dlen <= 0.0) return false;
+    const int32_t seg_len = static_cast<int32_t>(dlen);
+    const double ninv = 65536.0 / dlen;
+    for (int i = 0; i < 3; ++i) ndir[i] = static_cast<int32_t>(d[i] * ninv);
+
+    int32_t best = seg_len; // [orig: rayState[29] preseeded with rayState[9] @ 0x4e534f]
+    bool hit = false;
+
+    for (size_t si = 0; si < model.sections.size(); ++si) {
+        const CollisionSection &sec = model.sections[si];
+        if (sec.face_count <= 0) continue;
+        const CollisionMatrix &mat = target.matrices[si];
+        if (mat.disabled()) continue; // [orig: the (boneMatrix+60 & 3) skip @ 0x4e4f12]
+
+        CollisionMatrix inv;
+        mat.invert_into(inv); // [orig: Matrix_Transpose3x3WithNegateCol3 @ 0x4e4f41]
+        int32_t ls[3], le[3], ldir[3];
+        transform_translate_then_rotate(inv.m, start, ls); // [orig: @ 0x4e4f57]
+        transform_translate_then_rotate(inv.m, end, le);   // [orig: @ 0x4e4f6d]
+        inv.rotate_point(ndir, ldir);                      // [orig: @ 0x4e4f86]
+
+        int32_t smin[3], smax[3];
+        for (int i = 0; i < 3; ++i) {
+            smin[i] = ls[i] < le[i] ? ls[i] : le[i]; // [orig: @ 0x4e4f98-0x4e4fe4]
+            smax[i] = ls[i] < le[i] ? le[i] : ls[i];
+        }
+
+        const CollisionFaceVertex *verts = model.face_vertices.data() + sec.face_vertex_start;
+        for (int32_t fi = 0; fi < sec.face_count; ++fi) {
+            const CollisionFace &face = model.faces[sec.face_start + fi];
+            // Face AABB reject + the never-hit and foliage gates. [orig: @ 0x4e5073]
+            if (smin[0] > face.max[0] || smax[0] < face.min[0] || smin[1] > face.max[1] ||
+                smax[1] < face.min[1] || smin[2] > face.max[2] || smax[2] < face.min[2])
+                continue;
+            if ((face.flags & 0x100u) != 0) continue;
+            if (face.material == 17 && (ammo_flags & 0x4000000u) != 0) continue;
+            // Plane side at both endpoints (Q14 dot, signed >> 14). [orig: @ 0x4e50b6 shrd]
+            const int32_t d0 =
+                    static_cast<int32_t>((static_cast<int64_t>(ls[0]) * face.normal[0] +
+                                          static_cast<int64_t>(ls[1]) * face.normal[1] +
+                                          static_cast<int64_t>(ls[2]) * face.normal[2]) >>
+                                         14) +
+                    face.plane_dist;
+            const int32_t d1 =
+                    static_cast<int32_t>((static_cast<int64_t>(le[0]) * face.normal[0] +
+                                          static_cast<int64_t>(le[1]) * face.normal[1] +
+                                          static_cast<int64_t>(le[2]) * face.normal[2]) >>
+                                         14) +
+                    face.plane_dist;
+            if (d0 > 0 ? d1 > 0 : d1 <= 0) continue; // both on one side [orig: @ 0x4e5101]
+            // Direction rule [orig: @ 0x4e5115 — flag 1 always; the double-sided
+            // 0x800 branch rides the witnessed nonzero stack-residue arg; else
+            // enter-front only].
+            if ((face.flags & 1u) == 0) {
+                if ((face.flags & 0x800u) == 0 && !(d0 > 0 && d1 <= 0)) continue;
+            }
+            const int32_t a0 = abs32(d0);
+            const int32_t total = a0 + abs32(d1);
+            int32_t dist;
+            if (a0 <= total)
+                dist = static_cast<int32_t>(static_cast<int64_t>(seg_len) * a0 / total);
+            else
+                dist = 0x40000000; // [orig: the "Rounds Divide Error" clamp @ 0x4e5194]
+            if (dist > best) continue; // [orig: <= rayState[29] accept @ 0x4e51c1]
+            int32_t hp[3];
+            for (int i = 0; i < 3; ++i)
+                hp[i] = ls[i] + static_cast<int32_t>(
+                                        (static_cast<int64_t>(ldir[i]) * dist + 0x8000) >> 16);
+            if (!point_in_triangle_2d(hp, face, verts)) continue;
+            best = dist; // [orig: the rayState[21/22/28..33] stamp @ 0x4e5254]
+            out.dist = dist;
+            out.face_flags = face.flags;
+            out.material = face.material;
+            out.section = static_cast<int32_t>(si);
+            out.face = fi;
+            hit = true;
+        }
+    }
+    return hit;
+}
+
+CollisionWorld::FaceRaycast CollisionWorld::raycast_entity_faces(
+        World &world, EntityHandle h, const int32_t start[3], const int32_t end[3],
+        uint32_t ammo_flags, RayFaceHit &out) {
+    CollisionTargetView scratch;
+    std::vector<CollisionMatrix> mats;
+    const CollisionTargetView *view = target_view(world, h, scratch, mats);
+    if (view == nullptr || view->model == nullptr || view->model->faces.empty())
+        return FaceRaycast::kNoFaceMesh;
+    return collision_raycast_faces(*view, start, end, ammo_flags, out) ? FaceRaycast::kHit
+                                                                       : FaceRaycast::kMiss;
+}
+
 // ----------------------------------------------------------------------------
 // Contact force. [orig: Entity_ComputeBoneCollisionForce @ 0x4ae150]
 // ----------------------------------------------------------------------------

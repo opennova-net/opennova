@@ -1679,6 +1679,57 @@ variant), fires one round per AI fire slot via `Weapon_FireProcess @ 0x53f5b0`, 
 restores the original ammo; a countermeasure dispenser, not a generic fire-position
 helper. The two `libs/world/src/ai.cpp` citations updated in the same commit.
 
+### 15.8 The projectile face raycast — the CFAC "bullet LOD" (engine-research 2026-07-17)
+
+Rounds do NOT hit the BVOL volume solids the movement/LOS queries walk — they hit the
+collision block's **CFAC triangle mesh**, per section. Ported as
+`collision_raycast_faces` + `CollisionWorld::raycast_entity_faces`
+(libs/world/src/collision.cpp), consumed by the RoundSim item leg; ctest `collision`
+(`test_face_raycast*`).
+
+- **Dispatch** `[orig: Projectile_UpdatePhysics @ 0x4e9d70]`: the 5-way closest-hit
+  switch — terrain (`Terrain_RaycastHeightmapHiRes_Thunk`), water
+  (`Projectile_CheckWaterIntersection @ 0x4e59d0`), pool 2 then pool 1 via
+  `Projectile_RaycastProximitySlots @ 0x4e5340` (hit types 1/2 →
+  `Projectile_HandleEntityImpact @ 0x4e9390`), and the pool-0/3 proximity list
+  (`Physics_RaycastAgainstProximityList @ 0x4e4a30`, min radius 0.1u `@ 0x4ea263`,
+  the `g_FatBullets` 0.1u floor for remote players).
+- **Broad phase** `[orig: Projectile_RaycastProximitySlots @ 0x4e5340]`: per prox slot,
+  per-axis |center − rayCenter| ≤ radius + halfExtent, then perpendicular
+  line-distance ≤ radius; skip Flags & 0x2000001, the shooter chain (ray[17..20]), and
+  the `+533` refNum self-hit group; survivors run the face walk.
+- **The face walk** `[orig: Physics_RaycastAgainstBoneCollision @ 0x4e4cb0]`: model =
+  `(Flags & 4 && huskModel) ? huskModel : graphicModel` (the husk swap again); per
+  COBJ section — skip `(boneMatrix+60) & 3`, invert the section matrix
+  (`Matrix_Transpose3x3WithNegateCol3 @ 0x6136d0`), transform the segment + unit dir
+  into bone-local space; per 44-B face — AABB reject, flags & 0x100 never-hit,
+  material 17 skip when the ammo carries flag 0x4000000, plane sides
+  d = (v·n_Q14 >> 14) + dist at both endpoints (straddle required), direction rule
+  (flag 1 = both sides; 0x800 = double-sided — enabled by a witnessed UNINITIALIZED
+  stack-slot read `[esp+12Ch]` that is nonzero in practice; else enter-front
+  d0>0 ∧ d1≤0), hitDist = |d0|·len/(|d0|+|d1|) (`"Rounds Divide Error"` log +
+  0x40000000 clamp on the overflow guard), accept at ≤ best, and the odd-even
+  point-in-triangle (`Math_PointInTriangle2D @ 0x414050`: Q8 int16 vertex table << 8,
+  the CNRM projection-axis flag 1=XY/2=XZ/4=YZ, crossings capped at 2, inside == 1).
+  The hit record: ray[21] = face flags, ray[22] = face MATERIAL byte, ray[28..33] =
+  hit/dist/entity/bone/face.
+- **The impact effect** `[orig: Projectile_HandleEntityImpact @ 0x4e9390 →
+  AmmoDef_ProcessImpactEffect @ 0x40a170]`: effect index = face material + 4
+  (`ray[22] + 4 @ 0x4e982b`; the ammo effects_table of §17.4), plus the slot-2
+  local-player-hit feedback when the victim is `g_local_player_entity`. JO data:
+  metal props author material 14 → tag 18 `metal` (Mbarel1X: 20×14 + 8×1 faces).
+- **The runtime arrays** `[orig: Threedi_BuildCollisionModelFromChunks @ 0x5b3bf0 —
+  ex ThreediGp_BuildCollisionModel, renamed (the chunked form is 3DI3)]`: one arena;
+  8-B Q8 int16 vertex records, 8-B Q14 normal records keeping the dominate-axis
+  word, 44-B faces — the CFAC copy PERMUTES the disk AABB (sequential min_xyz/max_xyz
+  at +12..+32) into the runtime per-axis interleave (minX@+12, maxX@+16, minY@+20,
+  maxY@+24, minZ@+28, maxZ@+32); BVOL AABBs permute the same way. COBJ dword 3 =
+  the per-object CNRM run count (the parse-struct `num_planes` misnomer renamed
+  `num_normals`; faces' `normal_index` is local to that run).
+
+Residuals live as D-ITEM-1 (§24.7): the sphere stand-in for face-less models, the
+`+533` refNum exclusion, and the prox-slot tables themselves (we scan the pools).
+
 ## 16. Appendix: ground-AI combat chain — SM layer + shared targeting/fire primitives (engine-research, 2026-07-16)
 
 Slice-1 witness pass for the mission-playability track: how AI acquires live targets and
@@ -3458,7 +3509,7 @@ the FFI structs.
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
-| D-ITEM-1 | The bullet item hit-test is a bound-sphere segment test over pools 1/2 (model-less entities excluded as the proximity-residency equivalence); the blast pool-2 leg uses the bound sphere, not the AABB-face refinement; item hit effects take tag 4 'obj' (no entity-material plumb) | the proximity-list walk + per-volume convex clips `@ 0x4ea263`; the AABB refinement `@ 0x4eb700`; material + 4 `@ 0x4e8867` | rounds stop on wrecks/items and damage flows with the witnessed gates; precision rides the collision-instance ray (already used for LOS) — tracked |
+| D-ITEM-1 | The bullet item hit-test now runs the witnessed shape: bound-sphere broad phase over pools 1/2 (model-less entities excluded as the proximity-residency equivalence) + the collision-model CFAC FACE narrow phase (husk-aware; a sphere graze that misses every face lets the round fly on) with the face material feeding the impact tag (material + 4; building material 1 → 23 flesh). Residuals: models with no face mesh keep the bound-sphere stand-in with tag 4 'obj'; the `+533` refNum self-hit exclusion and the retail prox-slot tables (we scan the pools directly) are unmodeled; the blast pool-2 leg still uses the bound sphere, not the AABB-face refinement | `Projectile_RaycastProximitySlots @ 0x4e5340` → `Physics_RaycastAgainstBoneCollision @ 0x4e4cb0` (see §15.8); the AABB refinement `@ 0x4eb700`; material + 4 `@ 0x4e982b` / `@ 0x4e9b80` | shots beside a prop no longer stop midair on the invisible bound sphere, impact effects pick the surface material row (metal barrels spark as metal), and hit points land on real faces; ctest `collision` face-raycast set |
 | D-ITEM-2 | `husk_swap_at`/`_sec` parsed for format fidelity only — the runtime consumer is unwitnessed (no +0x19C/+0x1A0 reader found this session) | fields written `@ 0x49f1ce-0x49f2c2` | no behavior port yet; find the reader (a progressive damage-stage swap is the hypothesis) |
 | D-ITEM-3 | The mid-life breakable-section sweep (a blast marks collision sections with byte flag & 2 into sectionMask) is a cited stub — our CollisionModel carries no per-section flag byte | `@ 0x4e6c5e-0x4e6e6b` | partial visual damage (windows/panels before death) missing; needs the section-flag plumb in the collision build |
 | D-ITEM-4 | Death pieces present as their row's TRAIL effect following the sim piece; the single-section husk MESH chunk, the glow light, and the piece render spin are presentation stand-ins; one PRNG stream stands in for the three retail streams | pieces render one husk section w/ spin `@ 0x493400`; `LightPool_SpawnGlowEffect @ 0x49351a`; PRNG_Next16/_B/_C | the debris reads as flying burning chunks; mesh pieces need per-part render instancing (the CollisionSection.part_index seam exists) |

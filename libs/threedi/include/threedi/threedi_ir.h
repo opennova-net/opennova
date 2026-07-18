@@ -261,6 +261,16 @@ typedef struct ThreediIRCollisionFace {
     int16_t vert_index[3];      // Local vertex indices (within subobject)
     uint32_t material_flags;    // CFAC material_flags (for material reverse-mapping)
     uint8_t poly_type;          // CFAC poly_type (for material reverse-mapping)
+    // Round-raycast fields, carried as authored. The CNRM normal is resolved
+    // from the face's object-local index at conversion time [orig: the 44-B
+    // runtime CFAC record + the per-COBJ normal-run fixup in the collision
+    // builder @ 0x5b3bf0; walked by Physics_RaycastAgainstBoneCollision
+    // @ 0x4e4cb0].
+    int16_t normal[3];          // Q14 face normal (0,0,0 = unresolved)
+    int16_t dominate_axis;      // CNRM projection-plane flag: 1=XY, 2=XZ, 4=YZ
+    int32_t plane_dist_fp16;    // 16.16 plane distance ((v.n >> 14) + dist = side)
+    int32_t min_fp16[3];        // face AABB, subobject-local 16.16
+    int32_t max_fp16[3];
 } ThreediIRCollisionFace;
 
 typedef struct ThreediIRCollisionObject {

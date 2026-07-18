@@ -560,8 +560,11 @@ bool collision_model_from_ir(const ThreediIRCollision *col,
 		if (sv.object_index > max_object) max_object = sv.object_index;
 	}
 
-	// One section per collision object; object_index -1 (no COBJ) folds into section 0.
-	const int32_t section_count = max_object + 1;
+	// One section per collision object; object_index -1 (no COBJ) folds into
+	// section 0. Objects carrying only a face mesh (no volumes) still get a
+	// section so the round raycast can walk their faces.
+	const int32_t section_count =
+			std::max<int32_t>(max_object + 1, static_cast<int32_t>(col->object_count));
 	out.sections.assign(static_cast<size_t>(section_count), {});
 	// Volumes are contiguous per object; derive the runs.
 	int32_t cursor = 0;
@@ -577,6 +580,75 @@ bool collision_model_from_ir(const ThreediIRCollision *col,
 		}
 		if (s < static_cast<int32_t>(col->object_count))
 			sec.part_index = col->objects[s].parent_subobject_index;
+	}
+
+	// The face mesh (the bullet LOD): Q8 int16 vertices + the 44-B-equivalent
+	// face records, in per-object runs [orig: the runtime CVRT/CNRM/CFAC arrays
+	// hung off each COBJ by the collision builder @ 0x5b3bf0; the projectile
+	// raycast Physics_RaycastAgainstBoneCollision @ 0x4e4cb0 walks them].
+	if (col->face_count > 0 && col->faces != nullptr && col->vertex_count > 0 &&
+	    col->vertices != nullptr && col->object_count > 0 && col->objects != nullptr) {
+		out.face_vertices.reserve(col->vertex_count);
+		for (size_t i = 0; i < col->vertex_count; ++i) {
+			opennova::world::CollisionFaceVertex v;
+			// The parse divides the disk Q8 int16 by 256 — requantize losslessly.
+			v.x = static_cast<int16_t>(std::lround(col->vertices[i].position[0] * 256.0f));
+			v.y = static_cast<int16_t>(std::lround(col->vertices[i].position[1] * 256.0f));
+			v.z = static_cast<int16_t>(std::lround(col->vertices[i].position[2] * 256.0f));
+			out.face_vertices.push_back(v);
+		}
+		out.faces.reserve(col->face_count);
+		for (size_t i = 0; i < col->face_count; ++i) {
+			const ThreediIRCollisionFace &sf = col->faces[i];
+			opennova::world::CollisionFace f;
+			f.v[0] = sf.vert_index[0];
+			f.v[1] = sf.vert_index[1];
+			f.v[2] = sf.vert_index[2];
+			f.normal[0] = sf.normal[0];
+			f.normal[1] = sf.normal[1];
+			f.normal[2] = sf.normal[2];
+			f.axis = sf.dominate_axis;
+			f.plane_dist = sf.plane_dist_fp16;
+			for (int a = 0; a < 3; ++a) {
+				f.min[a] = sf.min_fp16[a];
+				f.max[a] = sf.max_fp16[a];
+			}
+			f.flags = sf.material_flags;
+			f.material = sf.poly_type;
+			out.faces.push_back(f);
+		}
+		// Per-object runs; clamp malformed indices to never-hit rather than
+		// letting the walk read out of range.
+		int32_t vcur = 0, fcur = 0;
+		for (int32_t s = 0; s < static_cast<int32_t>(col->object_count); ++s) {
+			opennova::world::CollisionSection &sec = out.sections[s];
+			const ThreediIRCollisionObject &obj = col->objects[s];
+			sec.face_vertex_start = vcur;
+			sec.face_vertex_count = obj.num_vertices;
+			sec.face_start = fcur;
+			sec.face_count = obj.num_faces;
+			for (int32_t fi = 0; fi < sec.face_count &&
+					fcur + fi < static_cast<int32_t>(out.faces.size()); ++fi) {
+				opennova::world::CollisionFace &f = out.faces[fcur + fi];
+				if (f.v[0] < 0 || f.v[0] >= obj.num_vertices || f.v[1] < 0 ||
+				    f.v[1] >= obj.num_vertices || f.v[2] < 0 || f.v[2] >= obj.num_vertices)
+					f.flags |= 0x100u;
+			}
+			vcur += obj.num_vertices;
+			fcur += obj.num_faces;
+			if (vcur > static_cast<int32_t>(out.face_vertices.size()) ||
+			    fcur > static_cast<int32_t>(out.faces.size())) {
+				// Malformed runs — drop the whole face mesh rather than serve
+				// a scrambled walk.
+				out.face_vertices.clear();
+				out.faces.clear();
+				for (auto &sc : out.sections) {
+					sc.face_start = sc.face_count = 0;
+					sc.face_vertex_start = sc.face_vertex_count = 0;
+				}
+				break;
+			}
+		}
 	}
 	return true;
 }

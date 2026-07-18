@@ -664,7 +664,8 @@ void World::run_logic_tick(bool is_authority, bool pre_mission) {
     // round re-sim is not modeled here [orig: Entity_UpdateAllEntities ->
     // Weapon_UpdateAllProjectiles @0x4ec020; damage is authority-gated end-to-end,
     // §5.60]. Terrain is the host-wired sampler (AI grounding shares it).
-    if (is_authority && !pre_mission) round_sim.tick(*this, terrain);
+    if (is_authority && !pre_mission)
+        round_sim.tick(*this, terrain, ai != nullptr ? ai->collision : nullptr);
     if (is_authority && !pre_mission) {
         // The explosion-queue drain runs once per frame after the projectile
         // update [orig: Projectile_ProcessExplosionQueue @0x4ead80]; entries the

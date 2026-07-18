@@ -79,6 +79,10 @@ struct CollisionVolume {
 struct CollisionSection {
     int32_t volume_start = 0;       // run into CollisionModel::volumes
     int32_t volume_count = 0;
+    int32_t face_start = 0;         // run into CollisionModel::faces [orig: COBJ+16]
+    int32_t face_count = 0;         // [orig: COBJ+12]
+    int32_t face_vertex_start = 0;  // run into CollisionModel::face_vertices [orig: COBJ+8]
+    int32_t face_vertex_count = 0;  // [orig: COBJ+4]
     int32_t damage_start = -1;      // first damage volume index (-1 = none) [orig: +32]
     int32_t min_x = 0, max_x = 0;   // section-local 16.16 AABB
     int32_t min_y = 0, max_y = 0;
@@ -88,10 +92,35 @@ struct CollisionSection {
     int32_t part_index = -1;        // source render part (animated-part transforms later)
 };
 
+// ----------------------------------------------------------------------------
+// The round-raycast face mesh (the "bullet LOD"): per-section runs of Q8 int16
+// vertices, Q14 face normals with the projection-axis flag, and 44-B-equivalent
+// face records. [orig: the runtime CVRT/CNRM/CFAC arrays hung off each COBJ by
+// the collision builder @ 0x5b3bf0; walked ONLY by the projectile ray
+// Physics_RaycastAgainstBoneCollision @ 0x4e4cb0 — movement/LOS queries walk
+// the BVOL volumes instead.]
+// ----------------------------------------------------------------------------
+struct CollisionFaceVertex {
+    int16_t x = 0, y = 0, z = 0; // section-local Q8 (16.16 >> 8); <<8 to 16.16
+};
+
+struct CollisionFace {
+    int16_t v[3] = {};      // indices into the SECTION's vertex run
+    int16_t normal[3] = {}; // Q14 unit normal [orig: the 8-B CNRM record]
+    int16_t axis = 0;       // projection-plane flag: 1=XY, 2=XZ, 4=YZ
+    int32_t plane_dist = 0; // 16.16; side = (v.n >> 14) + plane_dist
+    int32_t min[3] = {}, max[3] = {}; // face AABB (section-local 16.16)
+    uint32_t flags = 0;     // CFAC material_flags: 1 = hit from both sides,
+                            // 0x100 = never hit, 0x800 = double-sided
+    uint8_t material = 0;   // CFAC poly_type -> the impact tag (material + 4)
+};
+
 struct CollisionModel {
     std::vector<CollisionSection> sections;
     std::vector<CollisionVolume> volumes;
     std::vector<CollisionPlane> planes;
+    std::vector<CollisionFaceVertex> face_vertices; // per-section runs
+    std::vector<CollisionFace> faces;               // per-section runs
     // Model-level AABB (union of the section AABBs, mission axes 16.16) — the
     // runtime collision-header bounds the render occlusion reads. [orig: the
     // collision block +24..+44 min/max fields, consumed by render_TOC's corner
@@ -225,6 +254,30 @@ struct CollisionRay {
 bool collision_raycast_model(const CollisionTargetView &target, CollisionRay &ray);
 
 // ----------------------------------------------------------------------------
+// Segment-vs-face-mesh query — the PROJECTILE hit test. Closest accepted face
+// across every enabled section; the sphere broad phase is the caller's.
+// [orig: Physics_RaycastAgainstBoneCollision @ 0x4e4cb0 — per-bone inverse
+// transform of the segment, face AABB reject, flags & 0x100 skip, the
+// material-17 foliage skip when the ammo carries flag 0x4000000, the
+// plane-straddle test ((v.n >> 14) + dist on both endpoints), the direction
+// rule (face flag 1 = both sides; 0x800 = double-sided via the witnessed
+// nonzero stack-residue arg; else enter-front d0>0 && d1<=0), the distance
+// split |d0| * len / (|d0| + |d1|) with the "Rounds Divide Error"
+// 0x40000000 clamp, accept at <= best, and the odd-even point-in-triangle on
+// the normal's projection plane (Math_PointInTriangle2D @ 0x414050, Q8
+// vertices << 8).]
+// ----------------------------------------------------------------------------
+struct RayFaceHit {
+    int32_t dist = 0;       // 16.16 distance along the segment at the hit
+    uint32_t face_flags = 0;
+    uint8_t material = 0;   // -> the impact effect tag (material + 4)
+    int32_t section = -1;
+    int32_t face = -1;
+};
+bool collision_raycast_faces(const CollisionTargetView &target, const int32_t start[3],
+                             const int32_t end[3], uint32_t ammo_flags, RayFaceHit &out);
+
+// ----------------------------------------------------------------------------
 // Contact force query: capsule test points vs every volume of the target model.
 // Faithful port of Entity_ComputeBoneCollisionForce @ 0x4ae150 (the SAT push-out
 // over the plane run with prev-position gating, second-plane assist, per-type
@@ -305,6 +358,17 @@ public:
     // return the packed hit set in `accum`. Clears `accum` first.
     // [orig: Entity_QueryBlinkBoxesAtPoint @ 0x4af350]
     void query_blink_boxes_at_point(World &world, const int32_t pos[3], BlinkAccum &accum);
+
+    // Projectile face raycast against ONE entity's collision instance (the
+    // husk-aware target view). kNoFaceMesh = no instance or the model carries
+    // no face mesh — the caller's bound-sphere stand-in applies (the D-ITEM-1
+    // bounded fallback); kMiss = a face mesh exists and the segment misses it
+    // (the round flies on); kHit fills `out`. [orig: each pool-walk candidate
+    // runs Physics_RaycastAgainstBoneCollision @ 0x4e4cb0]
+    enum class FaceRaycast { kNoFaceMesh, kMiss, kHit };
+    FaceRaycast raycast_entity_faces(World &world, EntityHandle h, const int32_t start[3],
+                                     const int32_t end[3], uint32_t ammo_flags,
+                                     RayFaceHit &out);
 
     // Ground-column probe through terrain + the entity's candidate models.
     // Builds the ray {x+dx, y+dy, z+z_up} down z_drop, clamps to the terrain

@@ -2,6 +2,7 @@
 
 #include "threedi/threedi_ir.h"
 #include "threedi/threedi_3di3.h"
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -736,7 +737,11 @@ static int convert_collision(const Threedi3di3 *model, ThreediModelIR *ir) {
         }
     }
 
-    // Convert faces (for BulletLOD reconstruction)
+    // Convert faces (BulletLOD reconstruction + the round-raycast fields).
+    // Faces/normals are sequential per object; the face's normal_index is
+    // local to its object's CNRM run, resolved here so the IR face is
+    // self-contained [orig: the per-COBJ normal-run fixup in the collision
+    // builder @ 0x5b3bf0].
     ir->collision->face_count = col->face_count;
     if (col->face_count > 0 && col->faces) {
         ir->collision->faces = (ThreediIRCollisionFace *)calloc(
@@ -751,6 +756,32 @@ static int convert_collision(const Threedi3di3 *model, ThreediModelIR *ir) {
             df->vert_index[2] = sf->vert_index[2];
             df->material_flags = sf->material_flags;
             df->poly_type = sf->poly_type;
+            df->plane_dist_fp16 = sf->plane_dist_fp16;
+            df->min_fp16[0] = sf->min_x_fp16;
+            df->min_fp16[1] = sf->min_y_fp16;
+            df->min_fp16[2] = sf->min_z_fp16;
+            df->max_fp16[0] = sf->max_x_fp16;
+            df->max_fp16[1] = sf->max_y_fp16;
+            df->max_fp16[2] = sf->max_z_fp16;
+        }
+        size_t face_cursor = 0;
+        size_t normal_base = 0;
+        for (size_t obj_idx = 0; obj_idx < col->object_count; ++obj_idx) {
+            const ThreediCollisionObject *obj = &col->objects[obj_idx];
+            for (int32_t f = 0; f < obj->num_faces && face_cursor < col->face_count;
+                 ++f, ++face_cursor) {
+                const ThreediCollisionFace *sf = &col->faces[face_cursor];
+                ThreediIRCollisionFace *df = &ir->collision->faces[face_cursor];
+                const size_t ni = normal_base + (size_t)sf->normal_index;
+                if (sf->normal_index >= 0 && ni < col->normal_count) {
+                    const ThreediCollisionNormal *sn = &col->normals[ni];
+                    df->normal[0] = (int16_t)lroundf(sn->normal[0] * 16384.0f);
+                    df->normal[1] = (int16_t)lroundf(sn->normal[1] * 16384.0f);
+                    df->normal[2] = (int16_t)lroundf(sn->normal[2] * 16384.0f);
+                    df->dominate_axis = sn->dominate_axis;
+                }
+            }
+            normal_base += (size_t)obj->num_normals;
         }
     }
 

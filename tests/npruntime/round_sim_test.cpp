@@ -319,7 +319,7 @@ int main() {
 		if (!expect(world.round_sim.spawn(world, params) >= 0, "terrain-leg round spawned"))
 			return 1;
 		for (int i = 0; i < 4 && world.round_sim.active_count > 0; ++i)
-			world.round_sim.tick(world, &field);
+			world.round_sim.tick(world, &field, nullptr);
 		if (!expect(world.round_sim.active_count == 0, "terrain stopped the round")) return 1;
 		if (!expect(world.round_sim.impacts.size() == 1, "one terrain impact queued")) return 1;
 		const w::RoundImpact &imp = world.round_sim.impacts[0];

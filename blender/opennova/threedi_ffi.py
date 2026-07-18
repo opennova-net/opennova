@@ -235,6 +235,11 @@ class ThreediIRCollisionFace(ctypes.Structure):
         ("vert_index",      ctypes.c_int16 * 3),
         ("material_flags",  ctypes.c_uint32),
         ("poly_type",       ctypes.c_uint8),
+        ("normal",          ctypes.c_int16 * 3),
+        ("dominate_axis",   ctypes.c_int16),
+        ("plane_dist_fp16", ctypes.c_int32),
+        ("min_fp16",        ctypes.c_int32 * 3),
+        ("max_fp16",        ctypes.c_int32 * 3),
     ]
 
 

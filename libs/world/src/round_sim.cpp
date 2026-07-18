@@ -7,6 +7,7 @@
 #include "terrain/height_field.h"
 #include "world/ammo_table.h"
 #include "world/angle.h"
+#include "world/collision.h"
 #include "world/infantry.h"
 #include "world/world.h"
 
@@ -192,7 +193,8 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params) {
     return slot;
 }
 
-void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain) {
+void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
+                    CollisionWorld *collision) {
     if (active_count <= 0) return;
 
     const size_t pool0 = world.registry.pool_capacity(0);
@@ -218,14 +220,17 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain) {
         Vec3 p1{p0.x + r.vel.x, p0.y + r.vel.y, p0.z + r.vel.z};
 
         // Earliest hit along this tick's segment: pool-0 organics against the
-        // body cylinder stand-in, then pool-1/2 items against their bound
-        // spheres [orig: the proximity-list raycast @0x4ea263 walks all three
-        // pools; the item leg's convex-clip precision rides the collision-model
-        // instances — bound spheres stand in until then (tracked §24)].
+        // body cylinder stand-in, then pool-1/2 items — bound-sphere broad
+        // phase + the collision-model FACE narrow phase [orig:
+        // Projectile_RaycastProximitySlots @0x4e5340 (pools 2 then 1: per-slot
+        // AABB + perpendicular-distance sphere gates) ->
+        // Physics_RaycastAgainstBoneCollision @0x4e4cb0 per candidate; the hit
+        // record carries the face material for the impact-effect pick].
         float best_t = 2.0f;
         Entity *best_target = nullptr;
         uint16_t best_handle = 0xFFFF;
         bool best_is_item = false;
+        uint8_t best_material = 0; // face material byte; 0 with the sphere stand-in
         const AmmoTableEntry *ammo = world.ammo.by_index(r.ammo_index);
         const float radius = kOrganicRadius + (ammo != nullptr ? ammo->bullet_radius : 0.0f);
         for (size_t s = 0; s < pool0; ++s) {
@@ -262,11 +267,40 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain) {
                 const float bound = e->bound_radius;
                 if (bound <= 0.0f) continue;
                 const SegHit hit = segment_vs_sphere(p0, p1, e->position, bound);
-                if (hit.hit && hit.t < best_t) {
-                    best_t = hit.t;
+                if (!hit.hit || hit.t >= best_t) continue;
+                // The face narrow phase (husk-aware) — a sphere graze that
+                // misses every face lets the round FLY ON, and the face hit
+                // carries the material for the impact tag [orig:
+                // Physics_RaycastAgainstBoneCollision @0x4e4cb0]. No face mesh
+                // on the model -> the sphere hit stands in (D-ITEM-1).
+                float item_t = hit.t;
+                uint8_t item_material = 0;
+                if (collision != nullptr) {
+                    const int32_t s16[3] = {static_cast<int32_t>(p0.x * 65536.0f),
+                                            static_cast<int32_t>(p0.y * 65536.0f),
+                                            static_cast<int32_t>(p0.z * 65536.0f)};
+                    const int32_t e16[3] = {static_cast<int32_t>(p1.x * 65536.0f),
+                                            static_cast<int32_t>(p1.y * 65536.0f),
+                                            static_cast<int32_t>(p1.z * 65536.0f)};
+                    RayFaceHit fh;
+                    const CollisionWorld::FaceRaycast res = collision->raycast_entity_faces(
+                            world, h, s16, e16, ammo != nullptr ? ammo->flags : 0u, fh);
+                    if (res == CollisionWorld::FaceRaycast::kMiss) continue;
+                    if (res == CollisionWorld::FaceRaycast::kHit) {
+                        const float seg_len = std::sqrt(r.vel.x * r.vel.x +
+                                                        r.vel.y * r.vel.y +
+                                                        r.vel.z * r.vel.z);
+                        if (seg_len > 0.0f)
+                            item_t = static_cast<float>(fh.dist) / 65536.0f / seg_len;
+                        item_material = fh.material;
+                    }
+                }
+                if (item_t < best_t) {
+                    best_t = item_t;
                     best_target = e;
                     best_handle = h.packed;
                     best_is_item = true;
+                    best_material = item_material;
                 }
             }
         }
@@ -354,8 +388,16 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain) {
                 imp.position = impact_pos;
                 imp.direction = flight_direction(r.vel);
                 imp.ammo_index = r.ammo_index;
-                imp.effect_tag = 4; // 'obj' — the entity-material plumb is the
-                                    // tracked §5.60 deferral (material + 4)
+                // The impact effect: face material + 4, with the building
+                // material-1 flesh remap; a face-less sphere stand-in carries
+                // material 0 -> tag 4 'obj' [orig: the entity/building
+                // material+4 selection in Projectile_SpawnImpactEffect
+                // @0x4e9b80, fed from the hit record ray[22] @0x4e982b].
+                int tag = 4 + static_cast<int>(best_material);
+                if (best_target->kind == EntityKind::Building && best_material == 1)
+                    tag = 23; // 'flesh'
+                if (tag < 0 || tag >= kImpactEffectTagCount) tag = 4;
+                imp.effect_tag = tag;
                 imp.tick = world.logic_tick;
                 imp.source_order = next_impact_order++;
                 if (impacts.size() < kMaxPendingImpacts) impacts.push_back(imp);

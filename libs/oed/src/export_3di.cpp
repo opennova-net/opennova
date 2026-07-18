@@ -1073,7 +1073,7 @@ static void build_collision_model(const LodBucketWorkspace &workspace,
     obj.unk0 = 0;
     obj.num_vertices = so.vertCount;
     obj.num_faces = so.faceCount;
-    obj.num_planes = static_cast<int32_t>(per_sub_normals[static_cast<size_t>(si)].normals.size());
+    obj.num_normals = static_cast<int32_t>(per_sub_normals[static_cast<size_t>(si)].normals.size());
     const uint32_t sub_collisions =
         (si < bpln_lod.subobjectCount)
             ? bpln_lod.subobjects[si].collisionCount

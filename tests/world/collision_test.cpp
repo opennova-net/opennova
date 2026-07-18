@@ -725,6 +725,134 @@ void test_los_point_bias() {
     CHECK(!los_terrain_blocked(f.field, q_a, q_b));
 }
 
+// ----------------------------------------------------------------------------
+// The projectile face raycast [orig: Physics_RaycastAgainstBoneCollision
+// @ 0x4e4cb0 + Math_PointInTriangle2D @ 0x414050].
+// ----------------------------------------------------------------------------
+
+// A one-section face mesh: a 2x2 u quad (two triangles) at section-local z = 1,
+// normal +z (Q14), projection plane XY (axis 1).
+CollisionModel face_quad_model(uint8_t material, uint32_t flags) {
+    CollisionModel m;
+    m.face_vertices = {{-256, -256, 256}, {256, -256, 256}, {256, 256, 256},
+                       {-256, 256, 256}}; // Q8: (+-1, +-1, 1)
+    auto face = [&](int a, int b, int c) {
+        CollisionFace f;
+        f.v[0] = static_cast<int16_t>(a);
+        f.v[1] = static_cast<int16_t>(b);
+        f.v[2] = static_cast<int16_t>(c);
+        f.normal[0] = 0;
+        f.normal[1] = 0;
+        f.normal[2] = 16384;
+        f.axis = 1;
+        // side = (v.n >> 14) + dist: on-plane at z=1 -> dist = -fx(1).
+        f.plane_dist = -fx(1.0);
+        f.min[0] = fx(-1.0); f.max[0] = fx(1.0);
+        f.min[1] = fx(-1.0); f.max[1] = fx(1.0);
+        f.min[2] = fx(1.0);  f.max[2] = fx(1.0);
+        f.flags = flags;
+        f.material = material;
+        m.faces.push_back(f);
+    };
+    face(0, 1, 2);
+    face(0, 2, 3);
+    m.sections.assign(1, {});
+    m.sections[0].face_start = 0;
+    m.sections[0].face_count = 2;
+    m.sections[0].face_vertex_start = 0;
+    m.sections[0].face_vertex_count = 4;
+    return m;
+}
+
+void test_face_raycast() {
+    // The quad sits at entity (10, 10, 0) -> world plane z = 1.
+    Rig rig(face_quad_model(14, 0)); // material 14 -> impact tag 18 'metal'
+    Entity *b = rig.world.registry.get(rig.building);
+    b->bound_radius = 3.0f;
+
+    // Straight down through the quad center: hit at half the segment.
+    const int32_t s_hit[3] = {fx(10.0), fx(10.0), fx(3.0)};
+    const int32_t e_hit[3] = {fx(10.0), fx(10.0), fx(-1.0)};
+    RayFaceHit fh;
+    CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, s_hit, e_hit, 0, fh) ==
+          CollisionWorld::FaceRaycast::kHit);
+    CHECK(fh.material == 14);
+    CHECK(fh.section == 0);
+    // dist = |d0| * len / (|d0|+|d1|) = 2.0 u of the 4.0 u segment.
+    CHECK(fh.dist > fx(1.95) && fh.dist < fx(2.05));
+
+    // THE angle case: inside the bound sphere, past the quad edge — the round
+    // must fly on (a sphere test alone would stop it midair).
+    const int32_t s_graze[3] = {fx(12.5), fx(10.0), fx(3.0)};
+    const int32_t e_graze[3] = {fx(12.5), fx(10.0), fx(-1.0)};
+    CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, s_graze, e_graze, 0, fh) ==
+          CollisionWorld::FaceRaycast::kMiss);
+
+    // Enter-front only: from below, the +z-facing quad is a backface -> miss.
+    const int32_t s_up[3] = {fx(10.0), fx(10.0), fx(-1.0)};
+    const int32_t e_up[3] = {fx(10.0), fx(10.0), fx(3.0)};
+    CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, s_up, e_up, 0, fh) ==
+          CollisionWorld::FaceRaycast::kMiss);
+
+    // No instance on the soldier -> the sphere stand-in verdict.
+    CHECK(rig.cw.raycast_entity_faces(rig.world, rig.soldier, s_hit, e_hit, 0, fh) ==
+          CollisionWorld::FaceRaycast::kNoFaceMesh);
+}
+
+void test_face_raycast_flags_and_materials() {
+    RayFaceHit fh;
+    const int32_t s_dn[3] = {fx(10.0), fx(10.0), fx(3.0)};
+    const int32_t e_dn[3] = {fx(10.0), fx(10.0), fx(-1.0)};
+    const int32_t s_up[3] = {fx(10.0), fx(10.0), fx(-1.0)};
+    const int32_t e_up[3] = {fx(10.0), fx(10.0), fx(3.0)};
+
+    {
+        // flags 0x100 = never hit.
+        Rig rig(face_quad_model(14, 0x100));
+        CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, s_dn, e_dn, 0, fh) ==
+              CollisionWorld::FaceRaycast::kMiss);
+    }
+    {
+        // Material 17 foliage vs the ammo 0x4000000 flag; hits without it.
+        Rig rig(face_quad_model(17, 0));
+        CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, s_dn, e_dn,
+                                          0x4000000u, fh) ==
+              CollisionWorld::FaceRaycast::kMiss);
+        CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, s_dn, e_dn, 0, fh) ==
+              CollisionWorld::FaceRaycast::kHit);
+        CHECK(fh.material == 17);
+    }
+    {
+        // 0x800 double-sided accepts the from-below ray; flag 1 does too.
+        Rig rig(face_quad_model(14, 0x800));
+        CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, s_up, e_up, 0, fh) ==
+              CollisionWorld::FaceRaycast::kHit);
+    }
+    {
+        Rig rig(face_quad_model(14, 1));
+        CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, s_up, e_up, 0, fh) ==
+              CollisionWorld::FaceRaycast::kHit);
+    }
+}
+
+void test_face_raycast_husk_swap() {
+    // Intact model material 14; husk model material 5. Flags & 4 must swap the
+    // face set the ray walks [orig: the (Flags & 4) huskModel pick @ 0x4e4d68].
+    Rig rig(face_quad_model(14, 0));
+    const int32_t husk_id = rig.cw.add_model(face_quad_model(5, 0));
+    rig.cw.assign_entity_husk(rig.building, husk_id);
+    const int32_t s_dn[3] = {fx(10.0), fx(10.0), fx(3.0)};
+    const int32_t e_dn[3] = {fx(10.0), fx(10.0), fx(-1.0)};
+    RayFaceHit fh;
+    CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, s_dn, e_dn, 0, fh) ==
+          CollisionWorld::FaceRaycast::kHit);
+    CHECK(fh.material == 14);
+    rig.world.registry.get(rig.building)->engine_flags |= 0x4u;
+    CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, s_dn, e_dn, 0, fh) ==
+          CollisionWorld::FaceRaycast::kHit);
+    CHECK(fh.material == 5);
+}
+
 int main() {
     test_matrix_roundtrip();
     test_blink_query_and_refresh();
@@ -741,6 +869,9 @@ int main() {
     test_debug_seams();
     test_raycast_clear_los();
     test_los_point_bias();
+    test_face_raycast();
+    test_face_raycast_flags_and_materials();
+    test_face_raycast_husk_swap();
     if (failures == 0) std::printf("collision_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }
