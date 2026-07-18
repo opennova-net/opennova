@@ -76,6 +76,8 @@ private:
 	void _connect_keyframes();
 	void _disconnect_keyframes();
 	void _load_sky_textures();
+	godot::Ref<godot::Texture2D> _load_sky_map_texture(const godot::String &name);
+	godot::Ref<godot::Texture2D> _load_sky_map_texture_from_dir(const godot::String &dir, const godot::String &name);
 
 protected:
 	static void _bind_methods();

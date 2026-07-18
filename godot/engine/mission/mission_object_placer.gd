@@ -219,6 +219,7 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 	pickable_records = []
 	_destruction_batches = {}
 	_destruction_instances = {}
+	_hidden_destruction_instances = {}
 	_static_user_point_sources = []
 	_static_item_effect_sources = []
 	if mission == null or parent == null or resource_root == null:
@@ -918,6 +919,17 @@ func object_data_for(graphic: String) -> NovaObjectData:
 # instance count) and the caller grafts the husk model at the returned transform.
 var _destruction_batches: Dictionary = {}   # graphic -> Array[MultiMesh]
 var _destruction_instances: Dictionary = {} # bms_id -> { graphic, index, xform }
+var _hidden_destruction_instances: Dictionary = {} # bms_id -> exact per-batch transforms
+
+
+## Read-only world transform for a batched static, used by diagnostics that
+## compare its visual placement with the simulation collision instance.
+## Returns null when the bms_id is unknown.
+func get_static_instance_transform(bms_id: int) -> Variant:
+	var rec: Variant = _destruction_instances.get(bms_id)
+	if not (rec is Dictionary):
+		return null
+	return (rec as Dictionary).xform
 
 
 ## Hide a destroyed batched static in every batch of its graphic. Returns the
@@ -926,15 +938,45 @@ func hide_static_instance(bms_id: int) -> Variant:
 	var rec: Variant = _destruction_instances.get(bms_id)
 	if not (rec is Dictionary):
 		return null
-	var graphic := String(rec["graphic"])
-	var index := int(rec["index"])
-	var xform: Transform3D = rec["xform"]
+	var graphic := String(rec['graphic'])
+	var index := int(rec['index'])
+	var xform: Transform3D = rec['xform']
+	if _hidden_destruction_instances.has(bms_id):
+		return xform
 	var carved := Transform3D(Basis().scaled(Vector3.ZERO), xform.origin)
+	var originals: Array = []
 	for mm_v in _destruction_batches.get(graphic, []):
 		var mm := mm_v as MultiMesh
 		if mm != null and index >= 0 and index < mm.instance_count:
+			originals.append({
+				'multimesh': mm,
+				'transform': mm.get_instance_transform(index),
+				'index': index,
+			})
 			mm.set_instance_transform(index, carved)
+	_hidden_destruction_instances[bms_id] = originals
 	return xform
+
+
+## Restore a static carved by hide_static_instance(). The placer owns the
+## MultiMeshes, so it also owns the exact per-batch transforms needed to undo a
+## destruction presentation reset. Returns false when the instance was not
+## hidden (including unknown bms_ids); repeated reset calls are therefore safe.
+func show_static_instance(bms_id: int) -> bool:
+	var originals_v: Variant = _hidden_destruction_instances.get(bms_id)
+	if not (originals_v is Array):
+		return false
+	for saved_v in originals_v as Array:
+		if not (saved_v is Dictionary):
+			continue
+		var saved: Dictionary = saved_v
+		var mm: Variant = saved.get('multimesh')
+		var index := int(saved.get('index', -1))
+		if mm is MultiMesh and index >= 0 and index < (mm as MultiMesh).instance_count:
+			(mm as MultiMesh).set_instance_transform(
+					index, saved.get('transform', Transform3D.IDENTITY))
+	_hidden_destruction_instances.erase(bms_id)
+	return true
 
 
 ## Register an already-resolved object plus its static render batches. This is

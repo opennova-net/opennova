@@ -553,6 +553,72 @@ void test_slice_cadence_and_invuln() {
 }
 
 // ---------------------------------------------------------------------------
+void test_proximity_tables_use_host_bound_radius() {
+    // Both placed objects carry a tiny intact collision shell, but the host has
+    // stamped entity+0 with the max intact/husk model bound. At 12u from the
+    // organic source, retail's +4u source range admits each 8u hull; deriving
+    // the table radius from the 1u intact shell would drop both candidates.
+    World world;
+    CollisionWorld cw;
+    world.registry.configure_pool(0, 4);
+    world.registry.configure_pool(1, 4);
+    world.registry.configure_pool(2, 4);
+
+    Entity source_seed;
+    source_seed.kind = EntityKind::Organic;
+    source_seed.alive = true;
+    const EntityHandle source = world.registry.spawn(0, source_seed);
+
+    Entity dynamic_seed;
+    dynamic_seed.kind = EntityKind::Item;
+    dynamic_seed.position = {0.0f, 12.0f, 0.0f};
+    dynamic_seed.bound_radius = 8.0f;
+    dynamic_seed.alive = true;
+    const EntityHandle dynamic = world.registry.spawn(1, dynamic_seed);
+
+    Entity static_seed = dynamic_seed;
+    static_seed.kind = EntityKind::Building;
+    static_seed.position = {12.0f, 0.0f, 0.0f};
+    const EntityHandle statik = world.registry.spawn(2, static_seed);
+    CHECK(source.valid() && dynamic.valid() && statik.valid());
+
+    const int32_t tiny_model = cw.add_model(box_model(1, 0, 1.0, 1.0, 1.0));
+    cw.assign_entity(dynamic, tiny_model);
+    cw.assign_entity(statik, tiny_model);
+    for (int i = 0; i < 17; ++i) cw.build_tick_tables(world);
+
+    CHECK(cw.candidate_count(source) == 2);
+
+    // Pool-1 vehicle sources use their own host-stamped bound too. With the
+    // witnessed +6u vehicle pad, an 8u hull reaches this 1u static at 15u;
+    // the old hard-coded 1u source radius incorrectly dropped it.
+    Entity vehicle_seed;
+    vehicle_seed.kind = EntityKind::Item;
+    vehicle_seed.item_id = 900;
+    vehicle_seed.position = {40.0f, 40.0f, 0.0f};
+    vehicle_seed.bound_radius = 8.0f;
+    vehicle_seed.alive = true;
+    const EntityHandle vehicle = world.registry.spawn(1, vehicle_seed);
+
+    Entity near_static_seed;
+    near_static_seed.kind = EntityKind::Building;
+    near_static_seed.position = {55.0f, 40.0f, 0.0f};
+    near_static_seed.bound_radius = 1.0f;
+    near_static_seed.alive = true;
+    const EntityHandle near_static = world.registry.spawn(2, near_static_seed);
+    CHECK(vehicle.valid() && near_static.valid());
+
+    VehicleTraits vehicle_traits;
+    vehicle_traits.physics = 1;
+    world.vehicle_traits.set(vehicle_seed.item_id, vehicle_traits);
+    cw.assign_entity(vehicle, tiny_model);
+    cw.assign_entity(near_static, tiny_model);
+    for (int i = 0; i < 17; ++i) cw.build_tick_tables(world);
+
+    CHECK(cw.candidate_count(vehicle) == 1);
+}
+
+// ---------------------------------------------------------------------------
 void test_pool1_item_is_one_collision_candidate() {
     World world;
     CollisionWorld cw;
@@ -764,6 +830,51 @@ CollisionModel face_quad_model(uint8_t material, uint32_t flags) {
     return m;
 }
 
+// Two spatially separate husk sections: the root quad is centered at local
+// x=-3, while section 1 is centered at x=+3. Each face's vertex indices are
+// relative to its section's own vertex run, matching the retail face walker.
+CollisionModel two_section_face_model(uint8_t root_material, uint8_t piece_material) {
+    CollisionModel m;
+    auto append_quad = [&](int center_x, uint8_t material) {
+        const int32_t vertex_start = static_cast<int32_t>(m.face_vertices.size());
+        const int32_t face_start = static_cast<int32_t>(m.faces.size());
+        const int16_t x0 = static_cast<int16_t>((center_x - 1) * 256);
+        const int16_t x1 = static_cast<int16_t>((center_x + 1) * 256);
+        m.face_vertices.push_back({x0, -256, 256});
+        m.face_vertices.push_back({x1, -256, 256});
+        m.face_vertices.push_back({x1, 256, 256});
+        m.face_vertices.push_back({x0, 256, 256});
+
+        auto append_face = [&](int a, int b, int c) {
+            CollisionFace f;
+            f.v[0] = static_cast<int16_t>(a);
+            f.v[1] = static_cast<int16_t>(b);
+            f.v[2] = static_cast<int16_t>(c);
+            f.normal[2] = 16384;
+            f.axis = 1;
+            f.plane_dist = -fx(1.0);
+            f.min[0] = fx(center_x - 1.0);
+            f.max[0] = fx(center_x + 1.0);
+            f.min[1] = fx(-1.0); f.max[1] = fx(1.0);
+            f.min[2] = fx(1.0);  f.max[2] = fx(1.0);
+            f.material = material;
+            m.faces.push_back(f);
+        };
+        append_face(0, 1, 2);
+        append_face(0, 2, 3);
+
+        CollisionSection section;
+        section.face_start = face_start;
+        section.face_count = 2;
+        section.face_vertex_start = vertex_start;
+        section.face_vertex_count = 4;
+        m.sections.push_back(section);
+    };
+    append_quad(-3, root_material);
+    append_quad(3, piece_material);
+    return m;
+}
+
 void test_face_raycast() {
     // The quad sits at entity (10, 10, 0) -> world plane z = 1.
     Rig rig(face_quad_model(14, 0)); // material 14 -> impact tag 18 'metal'
@@ -853,6 +964,35 @@ void test_face_raycast_husk_swap() {
     CHECK(fh.material == 5);
 }
 
+void test_face_raycast_husk_omits_spawned_piece_sections() {
+    // Death-piece bits describe sections that left the wreck. Once bit 1 is
+    // stamped, rays must pass through that part's old location while the hull
+    // section (bit 0 never sets in retail) remains solid.
+    Rig rig(face_quad_model(14, 0));
+    const int32_t husk_id = rig.cw.add_model(two_section_face_model(5, 6));
+    rig.cw.assign_entity_husk(rig.building, husk_id);
+    Entity *building = rig.world.registry.get(rig.building);
+    building->engine_flags |= 0x4u;
+    building->bound_radius = 8.0f;
+
+    const int32_t root_start[3] = {fx(7.0), fx(10.0), fx(3.0)};
+    const int32_t root_end[3] = {fx(7.0), fx(10.0), fx(-1.0)};
+    const int32_t piece_start[3] = {fx(13.0), fx(10.0), fx(3.0)};
+    const int32_t piece_end[3] = {fx(13.0), fx(10.0), fx(-1.0)};
+    RayFaceHit fh;
+
+    CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, piece_start, piece_end, 0, fh) ==
+          CollisionWorld::FaceRaycast::kHit);
+    CHECK(fh.section == 1 && fh.material == 6);
+
+    building->spawned_piece_mask = 1u << 1;
+    CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, piece_start, piece_end, 0, fh) ==
+          CollisionWorld::FaceRaycast::kMiss);
+    CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, root_start, root_end, 0, fh) ==
+          CollisionWorld::FaceRaycast::kHit);
+    CHECK(fh.section == 0 && fh.material == 5);
+}
+
 void test_face_raycast_rolled_entity() {
     // A static authored with roll must lean its collision shell WITH the
     // visual [orig: the spawn orientation matrix Rz(90-yaw)*Ry(pitch)*Rx(roll)
@@ -926,6 +1066,111 @@ void test_round_inside_bound_sphere_hits_wall() {
     CHECK(rs.impacts.size() == 1); // no new impact
 }
 
+// Equal-distance entity hits keep the first retail dispatch winner: pool 2
+// statics before pool 1 dynamics, before the later organic list.
+void test_round_equal_distance_uses_retail_pool_order() {
+    World world;
+    world.registry.configure_pool(0, 4);
+    world.registry.configure_pool(1, 4);
+    world.registry.configure_pool(2, 4);
+
+    Entity seed;
+    seed.kind = EntityKind::Item;
+    seed.health = 100;
+    seed.position = Vec3{5.0f, 0.0f, 0.9f};
+    seed.bound_radius = kOrganicStandInRadius;
+    const EntityHandle dynamic = world.registry.spawn(1, seed);
+    const EntityHandle statik = world.registry.spawn(2, seed);
+    Entity organic_seed = seed;
+    organic_seed.kind = EntityKind::Organic;
+    organic_seed.position.z = 0.0f; // torso center is +0.9, identical to the items
+    const EntityHandle organic = world.registry.spawn(0, organic_seed);
+    CHECK(dynamic.valid() && statik.valid() && organic.valid());
+
+    LiveRound &round = world.round_sim.rounds[0];
+    round.active = true;
+    world.round_sim.active_count = 1;
+    round.pos = Vec3{0.0f, 0.0f, 0.9f};
+    round.vel = Vec3{10.0f, 0.0f, 0.0f};
+    round.max_age_ticks = 100;
+    world.round_sim.tick(world, nullptr, nullptr);
+
+    CHECK(world.round_sim.debug_trail_count == 1);
+    CHECK(world.round_sim.debug_trail[0].entity == statik.packed);
+}
+
+// Projectile_RaycastProximitySlots excludes the complete witnessed
+// Flags&0x02000001 mask. A bit-25 target must not stop the round; the eligible
+// item behind it becomes the winner.
+void test_round_item_skip_mask() {
+    World world;
+    world.registry.configure_pool(1, 4);
+
+    Entity skipped_seed;
+    skipped_seed.kind = EntityKind::Item;
+    skipped_seed.health = 100;
+    skipped_seed.position = Vec3{4.0f, 0.0f, 0.0f};
+    skipped_seed.bound_radius = 1.0f;
+    skipped_seed.engine_flags = 0x02000000u;
+    const EntityHandle skipped = world.registry.spawn(1, skipped_seed);
+
+    Entity hit_seed = skipped_seed;
+    hit_seed.position = Vec3{8.0f, 0.0f, 0.0f};
+    hit_seed.engine_flags = 0;
+    const EntityHandle eligible = world.registry.spawn(1, hit_seed);
+    CHECK(skipped.valid() && eligible.valid());
+
+    LiveRound &round = world.round_sim.rounds[0];
+    round.active = true;
+    world.round_sim.active_count = 1;
+    round.pos = Vec3{};
+    round.vel = Vec3{12.0f, 0.0f, 0.0f};
+    round.max_age_ticks = 100;
+    world.round_sim.tick(world, nullptr, nullptr);
+
+    CHECK(world.round_sim.debug_trail_count == 1);
+    CHECK(world.round_sim.debug_trail[0].entity == eligible.packed);
+}
+
+// Indestructible is a damage-zeroing gate, not a collision filter. The front
+// organic still stops the round and protects a vulnerable target behind it.
+void test_round_indestructible_organic_still_collides() {
+    World world;
+    world.registry.configure_pool(0, 4);
+
+    Entity front_seed;
+    front_seed.kind = EntityKind::Organic;
+    front_seed.health = 100;
+    front_seed.position = Vec3{4.0f, 0.0f, 0.0f};
+    front_seed.engine_flags = kEntityFlagIndestructible;
+    const EntityHandle front = world.registry.spawn(0, front_seed);
+
+    Entity rear_seed = front_seed;
+    rear_seed.position.x = 8.0f;
+    rear_seed.engine_flags = 0;
+    const EntityHandle rear = world.registry.spawn(0, rear_seed);
+    CHECK(front.valid() && rear.valid());
+
+    AmmoTableEntry ammo;
+    ammo.valid = true;
+    ammo.weight_in_grains = 875;
+    world.ammo.entries.push_back(ammo);
+
+    LiveRound &round = world.round_sim.rounds[0];
+    round.active = true;
+    world.round_sim.active_count = 1;
+    round.pos = Vec3{0.0f, 0.0f, kOrganicStandInCenterZ};
+    round.vel = Vec3{12.0f, 0.0f, 0.0f};
+    round.ammo_index = 0;
+    round.max_age_ticks = 100;
+    world.round_sim.tick(world, nullptr, nullptr);
+
+    CHECK(world.round_sim.debug_trail_count == 1);
+    CHECK(world.round_sim.debug_trail[0].entity == front.packed);
+    CHECK(world.registry.get(front)->health == 100);
+    CHECK(world.registry.get(rear)->health == 100);
+}
+
 int main() {
     test_matrix_roundtrip();
     test_blink_query_and_refresh();
@@ -942,11 +1187,16 @@ int main() {
     test_debug_seams();
     test_raycast_clear_los();
     test_los_point_bias();
+    test_proximity_tables_use_host_bound_radius();
     test_face_raycast();
     test_face_raycast_flags_and_materials();
     test_face_raycast_husk_swap();
+    test_face_raycast_husk_omits_spawned_piece_sections();
     test_face_raycast_rolled_entity();
     test_round_inside_bound_sphere_hits_wall();
+    test_round_equal_distance_uses_retail_pool_order();
+    test_round_item_skip_mask();
+    test_round_indestructible_organic_still_collides();
     if (failures == 0) std::printf("collision_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }

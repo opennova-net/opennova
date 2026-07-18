@@ -6626,6 +6626,191 @@ loose-REVX audio: a loose
 extract advertises no expansion, so revx02.LWF (the M82 GS_/GF_ sets) never
 loads — the expansion setting must name it (config, not code).
 
+### 5.63 The spawn-kit chain, the per-player slot pool, map availability rules, and manual switching (the loadout grill, 2026-07-18)
+
+Reimpl: `libs/world/weapon_inventory.{h,cpp}` (the pool/kit/walk translations, ctest
+`weapon_inventory`), `NovaSimulation` (`rebuild_local_player_loadout` + the switch/commit
+seams), `local_player_host.gd` (keys 1..9, `[`/`]`), `armory_host.gd`/`armory_menu_host.gd`
+(availability filter + multi-slot ACCEPT), `mission_runtime.gd` (the .bms promote), GUT
+`nova_simulation_test.gd` / `armory_host_test.gd`.
+
+**The spawn-kit buffer.** `restrictionData @ 0x24D4E00` (IDB comment proposes
+`g_spawnLoadoutBuffer` — the name is a misnomer; the availability table is separate) is a
+2048-B `{name\0 ammoPri\0 ammoSec\0 flags\0}*` tuple buffer — the SAME format as the
+armory per-class buffers `[orig: g_armoryLoadoutBufferByClass @ 0x25DD740]`. Writers:
+`Mission_LoadBMSFile @ 0x40f4e0` (SP: the .bms loadout chunk, sanitized via
+`AIProfile_SanitizeConfigData @ 0x40cfe0`, each tuple availability-filtered by catalog
+index `@ 0x40f834`, and a synthesized `{"WPN_KNIFE","-1","-1","-1"}` when everything
+filters out `@ 0x40f899`; in a NET session both chunks are seek-skipped `@ 0x40f6a1`);
+`Game_StartMission` + `apply_session_settings_to_globals @ 0x551500` (SP priority:
+mission-list entry+1308 buffer → profile offline loadout `byte_256113C` → the literal
+`"WPN_M4AUTO"` `@ 0x5246be/@ 0x5519e4` — the shipped default-kit rule the reimpl's
+D-NET-143 default now rides); `NapiNPClientMsg_0x050` team assign + the Game_StartMission
+MP leg (the profile per-class buffer at `classBlock+6+2048*(class-5)` `@ 0x431a70/
+@ 0x5257d1`, immediately re-submitted as C2S 0x2F via `NetPacket_SendWeaponRestrictionMask
+@ 0x42cdc0` with weaponSlotIndex 195); the S2C 0x5A apply `@ 0x4293e4`. Readers:
+`Player_InitPlayer`, `Server_InitAllPlayerEntitiesForRound @ 0x516aa0` (the default for
+players with no submitted loadout), `Server_SendWeaponSlotListToPlayer @ 0x502622`,
+`Armory_StageLoadoutBuffers @ 0x564290` (armory open staging).
+
+**Player_InitPlayer @ 0x4e15f0 — the spawn weapon leg.** `g_currentWeaponSlot = 195`
+(category 3 = the Primary key, rank 0) `@ 0x4e17ff`; class/avatar from
+`g_charClassTeam1/2 @ 0x24D20E0/E4` + `g_avatarTeam1/2` by entity Team (1/3 vs 2/4);
+`AvatarDef_BuildDisplayList @ 0x54b9e0` expands the kit tuples into 255×40-B name entries
+(each def's `loadout_subclasses` sub-variants append by name `@ 0x54bb07`);
+`WeaponSlotPool_ResetAllEntries @ 0x53f240` → `WeaponSlotTable_LoadAllFromDefs @ 0x5414e0`
+(slot = table + 100·(rank + 65·category) `@ 0x5415d3`; a DIFFERENT def on an occupied
+combo logs "overloading" and the incumbent stays `@ 0x5415d6`; carry bits entity+44 |= 8
+(flags&0x1000) / 0x10 (flags2&2) `@ 0x5415aa`) → `WeaponSlots_SeedAmmoPoolsFromDefs
+@ 0x541690` (renamed this session from the `WeaponOverlay_BuildTypeLookup` misnomer:
+pools[def ammoclass byte +0xD8] = the per-class `classrounds` override else `startrounds`)
+→ `WeaponSlots_RecalculateAmmoFromCapacity @ 0x542280` (return the clip to the pool, then
+draw min(clipsize·units, pool) — the −1-startrounds degeneration §5.57 notes is literal)
+→ `Player_SelectWeaponSlot(195)` + `Player_SwitchToWeaponByHandle(195)`
+`@ 0x4e1995/@ 0x4e19a1`. Host weapon slots = the server per-player table via
+`Entity_GetWeaponSlotsPtr @ 0x510010`; a client falls back to the local array
+`unk_B62F18` (log "not using net weapon slots"). `g_weaponRestoreFlag @ 0x24D4DFA`
+(renamed from byte_24D4DFA) == 1 short-circuits the fill into
+`WeaponOverlay_RestoreFromBackup @ 0x4ddc80` (mid-mission restore).
+
+**weapon.def keywords closed this session.** `classrounds <class> <n>` `[orig: handler
+@ 0x543ab0]`: the class token resolves through the char-class VALUE table `@ 0x830EE8`
+(medic=1, sniper=2, gunner=3, rifleman=5, engineer=6; ≤6 enforced; 4 never ships) and
+stores at AdmDef+0x60+value·4 — the per-class startrounds override the pool seeder
+consumes `@ 0x5416c4`. `switchcategory <N>` `[orig: handler @ 0x5445a8]`: +0x168 flag=1,
++0x164=N; consumed by the `WeaponAction_Recoil` tail `@ 0x543062` —
+`Player_SwitchToWeaponByHandle(N*65)` after every recoil completion (the grenade/LAW
+auto-switchback). Both parse into `DefWeaponDef` (`classrounds[7]` at the raw table
+indices, `switchcategory`/`has_switchcategory`) and ride `WeaponTableEntry`.
+
+**The ammo pools.** Per-ammo-class carried pools: class 1 lives at entity+288 (u16),
+every other class in `g_localAmmoPools @ 0xB75FE8` (renamed from `outTable`) locally or
+`serverPlayer+88664+4*class` on the authority; caps = the `ammoclass_max_carry` table
+`@ 0x24E7DE0` (class-1 cap `@ 0x24E7DE4`) applied on every set/add `[orig:
+WeaponSlot_SetAmmoCount @ 0x540b50 / WeaponSlot_AddAmmo @ 0x540a20 /
+Entity_GetScoreValueBySlotType @ 0x5406e0 pool leg]`. The reimpl folds both storages into
+one per-entity array keyed by a build-time ammo-class registry (D-WPN-24).
+
+**The three switching walks.**
+- `Player_SelectWeaponSlot @ 0x4dd680` — CATEGORY-level select. Stages entity+0x308
+  (pending) and commits to EquippedSlot +0x118 unless seated (`parentEntity && parentSlot
+  ∈ {2,3}` `@ 0x4dd6fc`); stamps `equippedAdmIndex` entity+0x2B0 `@ 0x4dd727`. The exact
+  requested slot is taken ONLY when its def has flags2&1 NoSelect (the parachute-style
+  forced equips, `@ 0x4dd6d8` — the bit polarity is INVERTED vs the scans); otherwise the
+  first populated non-NoSelect slot of the category (rank order `@ 0x4dd749`), else
+  global (`@ 0x4dd76d`); −1 = the global scan directly.
+- `Player_SwitchToWeaponByHandle @ 0x4e0170` — the category-key walk (input actions
+  200–210 pass `(action-200)*65` `@ 0x4e1144`). Gates: `parentSlot ∉ {2,3,5}` (the raw
+  SeatType values — Controller/Gunner/Driver; passengers switch freely), entity
+  Flags&3 clear, the equipped FSM (blocked while FIRE; RELOAD blocks same-category
+  presses only; RECOIL blocks cross-category only `@ 0x4e0192`), and the entity+0x68
+  AI-slot binding (writer `Entity_AllocateAISlot @ 0x40d2f4`) gating the whole mount
+  walk `@ 0x4e023a`. No equipped slot → Select(handle) else Select(−1) first. Same
+  category = rank cycle: advance-first `(rank+1) % 65` from the equipped rank; different
+  category = exact-slot check then the rank scan from 0. Eligibility `@ 0x4e02c3`:
+  weapon_class (+0x3A4) ∈ {1,2} OR nonzero ammo score (`calculate_kill_score @ 0x5407e0`
+  as the slot predicate = class pool + loaded clip), AND !(flags2&1). A full wrap plays
+  the deny sound `PlaySoundOnDedicatedServer(dword_24E08C4)` `@ 0x4e0354` (set name
+  unwitnessed — D-WPN-22).
+- `Player_CycleWeaponSlot @ 0x4dfe70` — next/previous (input cases 212/214, ±1) over ALL
+  780 combos with wraparound; EVERY candidate needs the ammo score (no weapon_class
+  exemption `@ 0x4dff39`); reaching the start again returns silently (no deny). Cases
+  212/214 dual-purpose to `Player_AdjustWeaponElevation(±2)` when manning a can-fire
+  elevatable gun; 222/223 = `Player_AdjustWeaponZoomLevel(±1)`.
+
+**The mount + commit.** `Player_MountWeaponSlot @ 0x4dfa40`: stamps `g_pendingWeaponSlot
+@ 0xB75FD0`, queues SWITCHRANK on the equipped slot when the new def shares its category
+(`WeaponSlot_TryQueueSwitchRank @ 0x53f1c0`: phase ∈ {0,4,0x40} → counter=0, next=8) else
+SWITCHFROM (`WeaponSlot_ForceQueueSwitchFrom @ 0x53f170`: refused while 6/7 current;
+complete phase → full reset + next=7, else next=idle — the request drops); scope state
+(flags 0x20000000 → scope on + def fov; cross-category → fov 80.0), view-bias zeroing
+`@ 0x4dfbcf`, camera update; the completion consumes the pending slot (the equip swap +
+the FP model re-resolve `count_weapon_effects_and_update_viewmodel @ 0x4dc9e0`). The
+reimpl commits on the FSM's switchfrom/switchrank `action_finished`, re-installing the
+viewmodel through the host event drain (`switch_to_weapon`).
+
+**The binoculars hold-swap (input case 220, unported — D-WPN-23).**
+`g_binocularsWeaponSlot @ 0xB75FE0` (renamed) = the slot whose def carries flags
+bit 0x8000000, found at table load `@ 0x54165a`; the key press stashes the equipped slot
+in `g_binocularsStashedSlot @ 0xB75FE4` and equips it via `Player_EquipWeaponByEntity
+@ 0x4e0370`; the release (runtime keys `g_binocularsBindingKey0/1 @ 0x81B68C/E`)
+re-equips the stash. Msg 0x38 (`handle_weapon_switch_packet @ 0x4260b0`) is the
+server-confirmed weapon-entity swap against the tracked pickup entity at
+localPlayer+0x140 — also unported.
+
+**Map availability rules.** `g_armoryWeaponAvailability @ 0x24D5600`, 255 ints indexed by
+catalog/adm index. Values: 0 banned, 1 allowed (default), 2 ARMORY-ZONE-ONLY (the server
+0x2F gate `@ 0x515a4a` additionally requires the requester's entity Flags&0x400000),
+3 mission-allowed; the armory populate lists any nonzero `@ 0x566e6b`; the SP mission
+loadout filter drops zeros `@ 0x40f834`. Builder `build_item_restriction_table
+@ 0x54ddb0`: name-list mode consumes `{name\0 statusByte}` pairs (the .bms
+item_availability chunk — the pair value is the RAW byte, −1 → 3), template mode copies
+255 ints (−1 → 3), sub-variants INHERIT the parent's value through the
+`loadout_subclasses` skip walk, no list = all-1. Writers: `Game_StartMission @ 0x5246e8`
+(SP: the mission-list entry+3356 template else all-1; class word entry+4376 →
+`g_hostClassAllowMask`), `apply_session_settings_to_globals @ 0x551831` (MP host: the
+per-weapon session settings ints `@ 0x2550CA8` with 3 = defer-to-mission),
+`CAdminServer_HandleWeaponCommand @ 0x4045a0` (live admin), the mission-list scanners
+(`Mission_BuildMapListFromPFF @ 0x562910` / `MissionList_ScanAndBuildFromFiles
+@ 0x563170` — they compile each .mis item_availability chunk into the 4584-B mission-list
+entry: +1308 the 2048-B loadout buffer, +3356 the 255-int availability template, +4376
+the class-allow word). The second weapon.def parse `WeaponDef_LoadAll @ 0x54dd10` fills
+the 255×192 loadout catalog `g_weaponDefTable @ 0x2540ce0` ("None"@0; +36
+loadout_subclasses, +40 display-name ptr, +108 weapon_class routing, +112/+116 the
+char/team masks, +144 icon) — same index space as AdmDefs for a fresh parse.
+
+**The wire messages.** S2C 0x66 weapon restrictions: `[u8 count]{[u8 idx][u8 value]}*`,
+only values 0/2 travel, the client resets to all-1 first `[orig:
+NapiNPClientMsg_HandleWeaponRestrictions @ 0x42d4c0; serializer
+NetPacket_SerializeWeaponRestrictionTable @ 0x5102c0, sent from
+Server_SendInitialGameStateToPlayer @ 0x51c0ca]`. S2C 0x76 class-allow mask:
+`[u16 mask]` `[orig: NapiNPClientMsg_HandleClassAllowMask @ 0x42d540 (renamed from
+_0x076); serializer NetPacket_WriteClassAllowMask @ 0x510350 (renamed from the
+NetPacket_WriteServerTick16 misnomer)]`. `g_hostClassAllowMask @ 0x24D59FC` writers
+closed the §menu-re open question: MP = per-class host settings ints `@ 0x25510A4+`
+(1 = always, 2 = allow iff the mission entry's class-word bit, else never — 10 bits
+`@ 0x551887..0x551996`); SP = the mission entry word `@ 0x551a1d`. The armory-open key
+gate reads `g_hostWeaponsRule @ 0xA85B6C` (renamed; SP or 0 = armory allowed
+`@ 0x4e0b29`; S2C 0x0A copies it to clients `@ 0x4300e3`; the WPN_ARMORY/NEVER/MISSION
+radio values remain unwalked).
+
+**Server round init.** `Server_InitAllPlayerEntitiesForRound @ 0x516aa0` per-player-slot
+offsets (stride 100584): +416 team, +464 the 780×100 weapon table, +78464 the 255×40
+display list, +94408 the per-player 2048-B loadout buffer (defaulted from restrictionData
+when the +5/+96483 flags say no submitted loadout), then the same
+display→fill chain as the local leg.
+
+**Reimpl mapping.** `libs/world/weapon_inventory.{h,cpp}` carries the structural
+translations (each function cites its original); `libs/npruntime/weapon_table_build.cpp`
+fills the new `WeaponTableEntry` fields + the ammo-class registry/caps;
+`weapon_fsm_queue_switch_from/rank` land beside the other request writers;
+`NovaSimulation.rebuild_local_player_loadout` is the Player_InitPlayer weapon leg,
+`request_local_player_weapon_category/cycle` the input dispatch, the commit rides the
+FSM `action_finished` seam. Evidence: ctest `weapon_inventory`; GUT
+`nova_simulation_test.gd` (`test_armory_reads_and_clears_authoritative_local_loadout`,
+`test_local_fire_spawns_the_authoritative_round_and_impact`), `armory_host_test.gd`.
+
+**IDB changes (2026-07-18):** renamed `NetPacket_WriteServerTick16 →
+NetPacket_WriteClassAllowMask`, `NapiNPClientMsg_0x076 →
+NapiNPClientMsg_HandleClassAllowMask`, `sub_564290 → Armory_StageLoadoutBuffers`,
+`WeaponOverlay_BuildTypeLookup → WeaponSlots_SeedAmmoPoolsFromDefs`, `outTable →
+g_localAmmoPools`, `dword_B75FE0/4 → g_binocularsWeaponSlot/g_binocularsStashedSlot`,
+`word_81B68C/E → g_binocularsBindingKey0/1`, `dword_A85B6C → g_hostWeaponsRule`,
+`word_A76412/6 → g_bmsLoadoutChunkLen/g_bmsAvailabilityChunkLen`, `byte_24D4DFA →
+g_weaponRestoreFlag`; rename proposal left as a comment: `restrictionData →
+g_spawnLoadoutBuffer` (human-curated name, proposal-first policy).
+
+**Open follow-ups:** the entity+0x68 AI-binding value DURING Player_InitPlayer (decides
+whether the spawn switch's mount walk runs — D-WPN-21 models it as not-yet-bound); the
+deny sound set behind `dword_24E08C4` (loader unwalked); the WPN_ARMORY/NEVER/MISSION
+radio values of `g_hostWeaponsRule`; the retail ammo-class builtin id table `@ 0x830F10`;
+the def+0xDC ammo pass-type path (`sub_5405F0`/`sub_540670`) for shared-pool "clip"
+weapons; the armory per-class buffer indexing quirk (`Armory_StageLoadoutBuffers` copies
+0x5800 B into `g_armoryLoadoutBufferByClass[5]` — 11 slots of a 16-slot profile block);
+the mission-list scanners' class-word source inside the .mis.
+
+New divergences this session: D-WPN-20..24 (docs/divergence-ledger.md).
+
 ## 6. Struct reference
 
 All structs typed in the IDB during the 2026-04-26 per-class typing pass (Stage 5 of the

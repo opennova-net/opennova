@@ -292,6 +292,10 @@ public:
 	// Dirty on success.
 	Array get_weapon_loadout() const;
 	bool set_weapon_loadout(const Array &entries);
+	// The .bms secondary chunk's per-map weapon rules: [{name, value}] pairs for
+	// NovaSimulation.set_weapon_availability [orig: the item_availability chunk ->
+	// build_item_restriction_table @0x54DDB0 name-list mode].
+	Array get_item_availability() const;
 	// Groups: 64 fixed records; field0 is flags, field8 is value, field12 is the canonical constant.
 	// A group dictionary is { index, field0, field8, field12 }.
 	int get_group_count() const;

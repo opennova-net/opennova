@@ -690,6 +690,16 @@ void World::run_logic_tick(bool is_authority, bool pre_mission) {
         destruction_tick_dead_items(*this, terrain, water_z, destruction);
         death_pieces.tick(*this, terrain, water_z, destruction);
     }
+    // The waypoint current-selection pass, from the local player's position (the
+    // original runs it in the client frame beside the player update; our SP host
+    // is that client — the pure-client view is D-HUD-16). Position converts to
+    // the original's 16.16 fixed compare space. [orig: Player_UpdatePerFrame
+    // @0x4de5f7]
+    if (is_authority && !pre_mission && !waypoints.empty()) {
+        if (const Entity *lp = registry.get(cached.local_player))
+            waypoints.tick_advance(static_cast<int32_t>(lp->position.x * 65536.0f),
+                                   static_cast<int32_t>(lp->position.y * 65536.0f));
+    }
     if (is_authority) {
         if (pre_mission) {
             // The one-shot initial group recount, ordered right after the pre
@@ -785,6 +795,10 @@ void World::restore(const Snapshot &s) {
     logic_tick = s.logic_tick;
     effects.clear();
     round_sim.reset();
+    explosions.reset();
+    death_pieces.reset();
+    destruction_rng.reset();
+    destruction = DestructionEvents{};
     // Round outcome + kill stats reset with the mission [orig: Game_StartMission —
     // gate clear @0x524a1f + the scoreboard-block memset @0x5249df; the stat buckets
     // clear in the round-start state init].

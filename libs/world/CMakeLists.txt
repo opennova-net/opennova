@@ -1,6 +1,7 @@
 add_library(opennova_world STATIC
     src/entity_registry.cpp
     src/world.cpp
+    src/waypoint_track.cpp
     src/ai.cpp
     src/collision.cpp
     src/occlusion.cpp
@@ -18,6 +19,7 @@ add_library(opennova_world STATIC
     src/vehicle_attach.cpp
     src/vehicle_motor.cpp
     src/weapon_fsm.cpp
+    src/weapon_inventory.cpp
     src/zone_capture.cpp
     src/zone_chain.cpp
 )

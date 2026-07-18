@@ -1,5 +1,7 @@
 extends RefCounted
 
+const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
+
 # THE host destruction-presentation pass: presents the sim's item destruction on
 # the viewing host — the husk model swap on destroyed items, the death-piece
 # debris (trail effects riding the sim's piece pool), the section-debris bursts,
@@ -35,6 +37,11 @@ const BURST_COUNT := 6                            # sampling stand-in (see heade
 const FIRE_CRACKLE_EFFECT := "Effect_BoatExpSec"  # [orig: g_fx_BoatExpSec @ 0x2C25CB8]
 const FIRE_CRACKLE_SOUND := "EXPLO_SHIP_SM"       # [orig: g_snd_EXPLO_SHIP_SM_b @ 0x24E08F4]
 const FIRE_CRACKLE_CHANCE := 16.0 / 65536.0       # [orig: PRNG_Next16_C() < 16 @ 0x4932bf]
+# Mirrors NovaSimulation.EffectStateField without making this script fail to
+# parse against an older extension DLL; the method itself remains capability-checked.
+const PRESENT_EFFECT_POSITION := 0
+const PRESENT_EFFECT_ROTATION_DEG := 1
+const PRESENT_EFFECT_STATE_COUNT := 2
 
 # The debris-type trail effects by table index [orig: g_death_piece_types
 # @ 0x8404f0 +0x2C column; "" = the type authors no trail (NP rows)].
@@ -60,12 +67,15 @@ var _index                        # MissionEntityRegistry
 var _placer                       # MissionObjectPlacer (husk model builds)
 var _item_db                      # NovaItemDatabase (husk graphic names)
 var _game_world                   # GameWorld (effect anchors) or null
+var _env_node: Node = null        # live mission environment for model materials
 var _audio_provider := Callable() # -> NovaMissionAudio (or null)
 var _fx_provider := Callable()    # -> NovaEffectWorld (or null)
-var _husked: Dictionary = {}      # bms_id -> husk model Node3D (or null for no-husk)
+var _husked: Dictionary = {}      # canonical mission identity -> husk Node3D/null
+var _husk_restore: Dictionary = {} # canonical mission identity -> original state
 var _burning: Dictionary = {}     # bms_id -> {node, fire} — the crackle roll set
+var _wreck_anchor_keys: Dictionary = {} # registered wreck owner keys
 var _piece_pos: Dictionary = {}   # piece slot -> Vector3 (anchor resolver source)
-var _piece_live: Dictionary = {}  # piece slot -> true (trail spawned)
+var _piece_generation: Dictionary = {}  # piece slot -> presented allocation generation
 var _rng := RandomNumberGenerator.new()
 
 
@@ -91,29 +101,68 @@ func get_stats() -> Stats:
 
 
 func setup(sim, container: Node3D, index, placer, item_db, game_world,
-		audio_provider: Callable, fx_provider: Callable) -> void:
+		audio_provider: Callable, fx_provider: Callable, env_node: Node = null) -> void:
 	_sim = sim
 	_container = container
 	_index = index
 	_placer = placer
 	_item_db = item_db
 	_game_world = game_world
+	_env_node = env_node
 	_audio_provider = audio_provider
 	_fx_provider = fx_provider
 	_rng.randomize()
 
 
 func teardown() -> void:
-	for slot in _piece_live.keys():
+	reset_runtime_state()
+
+
+## Discard mission-run presentation state without discarding setup dependencies.
+## This is the Stop -> Play boundary as well as the teardown primitive: restore
+## intact visuals, remove transient husk grafts, and retire every anchor whose
+## resolver points into the prior simulation incarnation.
+func reset_runtime_state() -> void:
+	for slot in _piece_generation.keys():
 		_unregister_piece_anchor(int(slot))
-	_piece_live.clear()
+	_piece_generation.clear()
 	_piece_pos.clear()
-	for bms_id in _husked.keys():
-		var husk: Variant = _husked[bms_id]
+
+	for key in _wreck_anchor_keys.keys():
+		_unregister_effect_anchor(key)
+	_wreck_anchor_keys.clear()
+	_burning.clear()
+
+	for husk_key in _husk_restore.keys():
+		var restore_v: Variant = _husk_restore[husk_key]
+		if not (restore_v is Dictionary):
+			continue
+		var restore: Dictionary = restore_v
+		if String(restore.get('kind', '')) == 'static':
+			var bms_id := int(restore.get('bms_id', 0))
+			if _placer != null and is_instance_valid(_placer) \
+					and _placer.has_method('show_static_instance'):
+				_placer.show_static_instance(bms_id)
+			continue
+		var children_v: Variant = restore.get('children', [])
+		if not (children_v is Array):
+			continue
+		var children: Array = children_v
+		for saved_v in children:
+			if not (saved_v is Dictionary):
+				continue
+			var saved: Dictionary = saved_v
+			var child: Variant = saved.get('node')
+			if child is Node3D and is_instance_valid(child):
+				(child as Node3D).visible = bool(saved.get('visible', true))
+	_husk_restore.clear()
+
+	for husk_key in _husked.keys():
+		var husk: Variant = _husked[husk_key]
 		if husk is Node3D and is_instance_valid(husk):
+			(husk as Node3D).visible = false
 			(husk as Node3D).queue_free()
 	_husked.clear()
-	_burning.clear()
 
 
 ## Once per present, after the sim advanced (beside the fire pass).
@@ -131,8 +180,35 @@ func present() -> void:
 		for snd_v in events.get("sounds", []):
 			_apply_sound(snd_v as Dictionary)
 		_stats.glass += (events.get("glass_breaks", []) as Array).size()
+	_sync_static_husks()
 	_present_pieces()
 	_tick_wreck_fires()
+
+
+# Destruction events carry the same value identity used by the mission present
+# pass: file BMS id plus packed (kind,index), with the origin as the zero-id leg.
+func _spawn_origin_parts(spawn_origin_v: Variant) -> Vector2i:
+	if spawn_origin_v == null:
+		return Vector2i(-1, -1)
+	var spawn_origin := int(spawn_origin_v)
+	return Vector2i((spawn_origin >> 24) & 0xff, spawn_origin & 0xffffff)
+
+
+func _husk_identity_key(bms_id: int, spawn_origin_v: Variant) -> String:
+	var origin := _spawn_origin_parts(spawn_origin_v)
+	return '%d:%d:%d' % [bms_id, origin.x, origin.y]
+
+
+func _resolve_entity_node(bms_id: int, spawn_origin_v: Variant = null) -> Node3D:
+	if _index == null:
+		return null
+	var node_v: Variant = null
+	if _index.has_method('resolve'):
+		var origin := _spawn_origin_parts(spawn_origin_v)
+		node_v = _index.resolve(bms_id, origin.x, origin.y)
+	elif _index.has_method('resolve_single'):
+		node_v = _index.resolve_single(bms_id)
+	return node_v as Node3D if node_v is Node3D and is_instance_valid(node_v) else null
 
 
 # The husk model swap: on a per-entity node, hide the intact node's visual
@@ -144,7 +220,9 @@ func present() -> void:
 # render-pick fallback (batched statics stay in their batches).
 func _apply_husk_swap(husk: Dictionary) -> void:
 	var bms_id := int(husk.get("bms_id", 0))
-	if _husked.has(bms_id):
+	var spawn_origin_v: Variant = husk.get('spawn_origin')
+	var husk_key := _husk_identity_key(bms_id, spawn_origin_v)
+	if _husked.has(husk_key):
 		return
 	_stats.husk_swaps += 1
 	var item_id := int(husk.get("item_id", 0))
@@ -156,36 +234,100 @@ func _apply_husk_swap(husk: Dictionary) -> void:
 			husk_graphic = String(_item_db.get_huskfinal(def_id))
 	if husk_graphic.is_empty() or _placer == null \
 			or not _placer.has_method("build_model_from_graphic"):
-		_husked[bms_id] = null
+		_husked[husk_key] = null
 		_stats.no_husk += 1
 		return
-	var node: Node3D = null
-	if _index != null:
-		node = _index.resolve_single(bms_id)
+	var node := _resolve_entity_node(bms_id, spawn_origin_v)
 	if node != null and is_instance_valid(node):
+		var model: Node3D = _placer.build_model_from_graphic(
+				husk_graphic, "", node, "", _env_node)
+		if model == null:
+			_husked[husk_key] = null
+			_stats.no_husk += 1
+			return
+		model.name = "HuskModel"
+		var child_visibility: Array = []
 		for child in node.get_children():
-			if child is Node3D:
+			if child is Node3D and child != model:
+				child_visibility.append({
+					'node': child,
+					'visible': (child as Node3D).visible,
+				})
 				(child as Node3D).visible = false
-		var model: Node3D = _placer.build_model_from_graphic(husk_graphic, "", node)
-		if model != null:
-			model.name = "HuskModel"
-		_husked[bms_id] = model
+		_husk_restore[husk_key] = {
+			'kind': 'individual',
+			'bms_id': bms_id,
+			'spawn_origin': spawn_origin_v,
+			'children': child_visibility,
+		}
+		_husked[husk_key] = model
 		return
 	# Batched static (world-wac-ai-re §24.6): carve the instance, graft at its
 	# placed transform. An unknown bms_id (individual entity whose node is gone)
 	# grafts nothing.
-	var xform_v: Variant = null
-	if _placer.has_method("hide_static_instance"):
-		xform_v = _placer.hide_static_instance(bms_id)
-	if not (xform_v is Transform3D) or _container == null \
-			or not is_instance_valid(_container):
-		_husked[bms_id] = null
+	if _container == null or not is_instance_valid(_container) \
+			or not _placer.has_method("hide_static_instance"):
+		_husked[husk_key] = null
 		return
-	var graft: Node3D = _placer.build_model_from_graphic(husk_graphic, "", _container)
-	if graft != null:
-		graft.name = "HuskModel_%d" % bms_id
-		graft.transform = xform_v as Transform3D
-	_husked[bms_id] = graft
+	var graft: Node3D = _placer.build_model_from_graphic(
+			husk_graphic, "", _container, "", _env_node)
+	if graft == null:
+		_husked[husk_key] = null
+		_stats.no_husk += 1
+		return
+	# The placer owns its static lookup by raw BMS id; canonical ownership above
+	# must not change the key used to carve and later restore this batch slot.
+	var xform_v: Variant = _placer.hide_static_instance(bms_id)
+	if not (xform_v is Transform3D):
+		graft.visible = false
+		graft.queue_free()
+		_husked[husk_key] = null
+		return
+	_husk_restore[husk_key] = {
+		'kind': 'static',
+		'bms_id': bms_id,
+		'spawn_origin': spawn_origin_v,
+	}
+	graft.name = "HuskModel_%d" % bms_id
+	graft.transform = xform_v as Transform3D
+	_husked[husk_key] = graft
+
+
+# Node-less wrecks still move while death physics settles them. Resolve the
+# same compact present pose consumed by the other host presentation paths.
+func _present_transform_for_identity(bms_id: int,
+		spawn_origin_v: Variant = null) -> Variant:
+	if _sim == null:
+		return null
+	var state := PackedVector3Array()
+	if bms_id > 0 and _sim.has_method('get_present_effect_state_for_bms_id'):
+		state = _sim.get_present_effect_state_for_bms_id(bms_id)
+	if state.size() != PRESENT_EFFECT_STATE_COUNT and spawn_origin_v != null \
+			and _sim.has_method('get_present_effect_state_for_origin'):
+		var spawn_origin := int(spawn_origin_v)
+		state = _sim.get_present_effect_state_for_origin(
+				(spawn_origin >> 24) & 0xff, spawn_origin & 0xffffff)
+	if state.size() != PRESENT_EFFECT_STATE_COUNT:
+		return null
+	return Transform3D(MissionObjectPlacer.bms_to_godot_basis(
+			state[PRESENT_EFFECT_ROTATION_DEG]), state[PRESENT_EFFECT_POSITION])
+
+
+func _sync_static_husks() -> void:
+	for husk_key in _husk_restore.keys():
+		var restore_v: Variant = _husk_restore[husk_key]
+		if not (restore_v is Dictionary):
+			continue
+		var restore: Dictionary = restore_v
+		if String(restore.get('kind', '')) != 'static':
+			continue
+		var graft_v: Variant = _husked.get(husk_key)
+		if not (graft_v is Node3D) or not is_instance_valid(graft_v):
+			continue
+		var live_v: Variant = _present_transform_for_identity(
+				int(restore.get('bms_id', 0)), restore.get('spawn_origin'))
+		if live_v is Transform3D:
+			(graft_v as Node3D).transform = live_v as Transform3D
 
 
 # The section-debris burst [orig: Entity_SpawnSectionDebris @ 0x43f580].
@@ -205,8 +347,6 @@ func _apply_debris_burst(burst: Dictionary) -> void:
 	else:
 		# Batched statics carry the position on the event.
 		origin = burst.get("pos", Vector3.ZERO)
-		if origin == Vector3.ZERO:
-			return
 	_stats.bursts += 1
 	var blast: Vector3 = burst.get("blast_center", Vector3.ZERO)
 	var away := Vector3.UP
@@ -255,13 +395,15 @@ func _apply_effect(eff: Dictionary) -> void:
 			if family == 2:
 				_burning[net_id] = {"node": node}
 		else:
-			# Batched-static wreck: no node — anchor the bank at the (static)
-			# event position so the owner-pose sync keeps the group alive.
+			# Batched-static wreck: no node. Resolve the authoritative present
+			# pose while it settles, with the event pose as an identity fallback.
 			var fixed := Transform3D(Basis.IDENTITY, pos)
 			_game_world.register_effect_anchor(key, func() -> Variant:
-				return fixed)
+				var live_v: Variant = _present_transform_for_identity(bms_id)
+				return live_v if live_v is Transform3D else fixed)
 			if family == 2:
-				_burning[net_id] = {"pos": pos}
+				_burning[net_id] = {"bms_id": bms_id, "pos": pos}
+		_wreck_anchor_keys[key] = true
 
 
 func _apply_sound(snd: Dictionary) -> void:
@@ -293,21 +435,26 @@ func _present_pieces() -> void:
 		seen[slot] = true
 		var pos: Vector3 = piece.get("pos", Vector3.ZERO)
 		_piece_pos[slot] = pos
+		var generation := int(piece.get("generation", 0))
+		var is_new_generation := int(_piece_generation.get(slot, -1)) != generation
+		if is_new_generation:
+			if _piece_generation.has(slot):
+				_unregister_piece_anchor(slot)
+			_piece_generation[slot] = generation
 		if bool(piece.get("settled", false)):
 			continue
-		if not _piece_live.has(slot):
-			_piece_live[slot] = true
+		if is_new_generation:
 			var trail := _piece_trail(int(piece.get("type_index", 0)))
 			if fx != null and not trail.is_empty():
 				var key := "piece:%d" % slot
 				fx.spawn_effect_owned(key, trail, pos, Vector3.UP)
 				if _game_world != null and _game_world.has_method("register_effect_anchor"):
 					_game_world.register_effect_anchor(key, func() -> Variant:
-						return _piece_pos.get(slot) if _piece_live.has(slot) else null)
-	for slot in _piece_live.keys():
+						return _piece_pos.get(slot) if _piece_generation.has(slot) else null)
+	for slot in _piece_generation.keys():
 		if not seen.has(int(slot)):
 			_unregister_piece_anchor(int(slot))
-			_piece_live.erase(slot)
+			_piece_generation.erase(slot)
 			_piece_pos.erase(slot)
 
 
@@ -318,8 +465,13 @@ func _piece_trail(type_index: int) -> String:
 
 
 func _unregister_piece_anchor(slot: int) -> void:
-	if _game_world != null and _game_world.has_method("unregister_effect_anchor"):
-		_game_world.unregister_effect_anchor("piece:%d" % slot)
+	_unregister_effect_anchor('piece:%d' % slot)
+
+
+func _unregister_effect_anchor(key: Variant) -> void:
+	if _game_world != null and is_instance_valid(_game_world) \
+			and _game_world.has_method('unregister_effect_anchor'):
+		_game_world.unregister_effect_anchor(key)
 
 
 # The wreck-fire random crackle [orig: Entity_UpdateDeadWreckEffects @ 0x493140
@@ -339,6 +491,16 @@ func _tick_wreck_fires() -> void:
 				_burning.erase(net_id)
 				continue
 			pos = (node as Node3D).global_position
+		elif entry.has("bms_id"):
+			var live_v: Variant = _present_transform_for_identity(
+					int(entry.get("bms_id", 0)))
+			if live_v is Transform3D:
+				pos = (live_v as Transform3D).origin
+			elif entry.has("pos"):
+				pos = entry["pos"]
+			else:
+				_burning.erase(net_id)
+				continue
 		elif entry.has("pos"):
 			pos = entry["pos"]
 		else:

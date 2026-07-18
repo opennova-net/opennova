@@ -151,6 +151,15 @@ struct WeaponLoadoutEntry {
 	std::string value2;
 };
 
+// Public view of one item-availability record from the .bms secondary chunk — the
+// per-map weapon rules ({name, status} pairs) the mission-list scanners compile into
+// the availability template [orig: build_item_restriction_table @0x54DDB0 name-list
+// mode over the chunk; status -1 maps to 3 mission-allowed at apply].
+struct ItemAvailabilityEntry {
+	std::string name;
+	int status = 1;
+};
+
 // Typed view of a 32-byte group record. ABI field names are retained for compatibility:
 // field0 = 2-bit flags, field8 = value, field12 = writer-confirmed constant 10.
 struct GroupFields {
@@ -323,6 +332,9 @@ public:
 	// set_weapon_loadout() writes canonical four-field BMS records and refreshes weapon_loadout_chunk_len.
 	std::vector<WeaponLoadoutEntry> weapon_loadout() const;
 	bool set_weapon_loadout(const std::vector<WeaponLoadoutEntry> &entries);
+	// The .bms secondary chunk's per-map weapon rules; read-only runtime view (the
+	// editor round-trips the chunk bytes through the writer unchanged).
+	std::vector<ItemAvailabilityEntry> item_availability() const;
 	// Groups: a fixed array of 64 modeled records. field0 is the 2-bit flags value, field8 is the editable
 	// value, and field12 must be the canonical constant 10.
 	size_t group_count() const;

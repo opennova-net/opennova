@@ -1023,14 +1023,22 @@ func _clear_occlusion_pane(message: String) -> void:
 
 # Kind colors mirror RoundDebugView.kind_color so the list rows and the world
 # markers read as one system.
-const ROUND_KIND_COLORS := {
-	0: Color(0.2, 0.9, 1.0),    # organic
-	1: Color(0.3, 1.0, 0.45),   # item FACE hit
-	2: Color(1.0, 0.75, 0.2),   # item sphere stand-in
-	3: Color(0.75, 0.6, 0.4),   # terrain
-	4: Color(0.55, 0.55, 0.55), # expired
-	5: Color(1.0, 0.25, 0.2),   # face-miss fly-on
-}
+static func _round_kind_color(kind: int) -> Color:
+	match kind:
+		0:
+			return Color(0.2, 0.9, 1.0)    # organic
+		1:
+			return Color(0.3, 1.0, 0.45)   # item FACE hit
+		2:
+			return Color(1.0, 0.75, 0.2)   # item sphere stand-in
+		3:
+			return Color(0.75, 0.6, 0.4)   # terrain
+		4:
+			return Color(0.55, 0.55, 0.55) # expired
+		5:
+			return Color(1.0, 0.25, 0.2)   # face-miss fly-on
+		_:
+			return Color.MAGENTA
 
 func _refresh_rounds(sim: Object) -> void:
 	if sim == null or not sim.has_method("get_round_debug"):
@@ -1081,7 +1089,7 @@ func _refresh_rounds(sim: Object) -> void:
 			_:
 				pass
 		var idx := _rnd_list.add_item(row, null, false)
-		_rnd_list.set_item_custom_fg_color(idx, ROUND_KIND_COLORS.get(kind, Color.MAGENTA))
+		_rnd_list.set_item_custom_fg_color(idx, _round_kind_color(kind))
 
 
 func _clear_rounds_pane(message: String) -> void:

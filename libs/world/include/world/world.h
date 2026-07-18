@@ -24,6 +24,7 @@
 #include "world/ammo_table.h"
 #include "world/round_sim.h"
 #include "world/vehicle_motor.h"
+#include "world/waypoint_track.h"
 #include "world/weapon_table.h"
 #include "world/zone_chain.h"
 
@@ -410,6 +411,7 @@ public:
     // `destruction` (present) and feeds `item_death_traits` (item-traits sweep).
     ExplosionSim explosions;
     DeathPieceSim death_pieces;
+    DestructionRng destruction_rng;
     ItemDeathTraitsTable item_death_traits;
     DestructionEvents destruction;
 
@@ -430,6 +432,32 @@ public:
     // [orig: the inline manager @0x24D1EBC, ZoneSlotChain_BuildFromMission @0x4a2de0
     // from Game_StartMission; net-re §5.61]
     ZoneChain zone_chain;
+
+    // The player waypoint track (built by mission promotion from the blue-route
+    // nav channel; empty when the mission authors none). Advanced per logic tick
+    // from the local player's position; the BMS event system completes linked
+    // entries and ShowWaypoints toggles `show`. See waypoint_track.h for the
+    // original anchors. (docs/interface/hud-re.md §Waypoint HUD)
+    WaypointTrack waypoints;
+
+    // The mission-objectives (subgoal) state the SP objectives panel reads:
+    // per-slot bit masks written by the SubGoal/ShowSubgoal actions — the bit is
+    // the RAW 1-based slot (bits 1..8) — plus the mission header's per-slot
+    // WinConditions/LoseConditions text-id tables (index 1..8; 0/255 terminate
+    // the panel's row walk). [orig: won @0xAC86F4 / lost @0xAC86F0 (readers
+    // EventSystem_GetEntityCounts @0x452e10), show-win @0xAC86EC / show-lose
+    // @0xAC86E8 (EventSystem_GetTeamCounts @0x452e30); the id tables
+    // byte_A7628B/byte_A76293 = the BMS header win_conditions/lose_conditions;
+    // panel HUD_DrawWinConditions @0x5ba940]
+    struct SubgoalState {
+        uint32_t won = 0;
+        uint32_t lost = 0;
+        uint32_t show_win = 0;
+        uint32_t show_lose = 0;
+        uint8_t win_text_ids[9] = {};
+        uint8_t lose_text_ids[9] = {};
+    };
+    SubgoalState subgoals;
 
     // Per-item vehicle physics traits (empty until the host's item-traits sweep feeds
     // it — NovaSimulation::resolve_item_traits). The AI tick's vehicle pass runs the

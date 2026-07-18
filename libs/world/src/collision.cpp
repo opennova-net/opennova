@@ -999,10 +999,9 @@ void entity_pos_fixed(const Entity &e, int32_t out[3]) {
     out[2] = to_fixed(e.position.z);
 }
 
-// The bound radius the proximity tables use. The item-traits sweep does not carry
-// the model bound yet, so derive from the collision model when instanced
-// (max |AABB corner|), else a 1-unit default. Tracked deviation (D-COL-3): the
-// original reads entity+0 boundRadius stamped at model load.
+// Collision-model fallback for hosts/tests that have not stamped entity+0.
+// The real proximity-table radius is the model-header bound on Entity; deriving
+// max |collision AABB corner| is only the best available fallback.
 int32_t entity_bound_radius(const CollisionWorld &cw, const CollisionModel *model) {
     (void)cw;
     if (model == nullptr) return 0x10000;
@@ -1014,6 +1013,12 @@ int32_t entity_bound_radius(const CollisionWorld &cw, const CollisionModel *mode
             if (corners[i] > r) r = corners[i];
     }
     return r;
+}
+
+int32_t entity_proximity_radius(const CollisionWorld &cw, const Entity &e,
+                                const CollisionModel *fallback_model) {
+    if (e.bound_radius > 0.0f) return to_fixed(e.bound_radius);
+    return entity_bound_radius(cw, fallback_model);
 }
 
 } // namespace
@@ -1033,7 +1038,7 @@ void CollisionWorld::build_tick_tables(World &world) {
         int32_t p[3];
         entity_pos_fixed(e, p);
         const int32_t radius =
-            entity_bound_radius(*this, model(it->second.model_id)) + 111876; // [orig: pad]
+            entity_proximity_radius(*this, e, model(it->second.model_id)) + 111876;
         s.x = static_cast<uint16_t>((static_cast<uint32_t>(p[0]) + 0x8000u) >> 16);
         s.y = static_cast<uint16_t>((static_cast<uint32_t>(p[1]) + 0x8000u) >> 16);
         s.z = static_cast<uint16_t>((static_cast<uint32_t>(p[2]) + 0x8000u) >> 16);
@@ -1076,7 +1081,7 @@ void CollisionWorld::build_tick_tables(World &world) {
         int32_t pf[3];
         entity_pos_fixed(e, pf);
         d.x = pf[0]; d.y = pf[1]; d.z = pf[2];
-        d.radius = entity_bound_radius(*this, model(it->second.model_id));
+        d.radius = entity_proximity_radius(*this, e, model(it->second.model_id));
         d.h = e.handle;
         dynamics_.push_back(d);
     });
@@ -1097,7 +1102,9 @@ void CollisionWorld::build_tick_tables(World &world) {
     auto build_for = [&](const Entity &e, int32_t pad) {
         int32_t p[3];
         entity_pos_fixed(e, p);
-        const int32_t range = 0x10000 + pad; // bound radius + pad (D-COL-3)
+        const int32_t source_radius =
+                e.bound_radius > 0.0f ? to_fixed(e.bound_radius) : 0x10000;
+        const int32_t range = source_radius + pad;
         CandidateSlice slice;
         slice.start = static_cast<int32_t>(arena_.size());
         slice.count = 0;
@@ -1158,9 +1165,9 @@ const CollisionTargetView *CollisionWorld::target_view(World &world, EntityHandl
     // serving, the witnessed fallback [orig: Flags & 4 && huskModel picks
     // entity+52 in Entity_RaycastCollisionModel @ 0x413086 and the pool walk
     // @ 0x538720; the contact pick @ 0x4ae233].
-    int32_t model_id = it->second.model_id;
-    if ((e->engine_flags & 0x4u) != 0 && it->second.husk_model_id >= 0)
-        model_id = it->second.husk_model_id;
+    const bool using_husk =
+            (e->engine_flags & 0x4u) != 0 && it->second.husk_model_id >= 0;
+    int32_t model_id = using_husk ? it->second.husk_model_id : it->second.model_id;
     const CollisionModel *m = model(model_id);
     if (m == nullptr || !m->valid()) return nullptr;
 
@@ -1179,6 +1186,15 @@ const CollisionTargetView *CollisionWorld::target_view(World &world, EntityHandl
                               bam_from_degrees_wrapped(static_cast<double>(e->roll)), p)
                     : collision_matrix_from_heading(heading, p);
     mats.assign(m->sections.size(), world_mat); // shared per section (D-COL-1)
+    if (using_husk && e->spawned_piece_mask != 0) {
+        // Sections that launched as death pieces no longer belong to the wreck.
+        // The retail piece mask wraps section indices at 32, and collision's
+        // existing matrix+60 low-bit gate removes the section from every walk.
+        for (size_t si = 0; si < mats.size(); ++si) {
+            const uint32_t bit = 1u << (static_cast<uint32_t>(si) & 31u);
+            if ((e->spawned_piece_mask & bit) != 0) mats[si].m[15] |= 1;
+        }
+    }
 
     scratch.model = m;
     scratch.matrices = mats.data();
@@ -1412,6 +1428,17 @@ bool los_terrain_blocked(const terrain::TerrainHeightField &field, const int32_t
     sampler.bilinear = &los_field_bilinear_cb;
     sampler.ctx = const_cast<terrain::TerrainHeightField *>(&field);
     return !terrain::terrain_raycast_los_clear(sampler, a, b);
+}
+
+bool terrain_clip_segment(const terrain::TerrainHeightField &field, const int32_t a[3],
+                          const int32_t b[3], int32_t out_hit[3]) {
+    // [orig: raycast_entity_collision @ 0x413760 -> Terrain_RaycastHeightmapHiRes_0
+    // @ 0x60e710, called (start, end, end) so the ray end clips in place]
+    terrain::TerrainRaycastSampler sampler;
+    sampler.point = &los_field_point_cb;
+    sampler.bilinear = &los_field_bilinear_cb;
+    sampler.ctx = const_cast<terrain::TerrainHeightField *>(&field);
+    return terrain::terrain_raycast_refined(sampler, a, b, out_hit);
 }
 
 namespace {
@@ -1669,6 +1696,44 @@ bool CollisionWorld::sound_los_clear(World &world, EntityHandle listener, Entity
         }
     }
     return true;
+}
+
+bool CollisionWorld::segment_hits_static(World &world, const int32_t a[3], const int32_t b[3],
+                                         int32_t radius) {
+    // [orig: raycast_find_collision_entity @ 0x539a70 with allowAllTypes = 1
+    // (the iris sun-ray caller @ 0x5c7784) -> raycast_against_entity_pool
+    // @ 0x538720 — the pool-2 statics walk with the same broad phase and
+    // radiused segment clip the sound leg ports; no building-kind gate.]
+    CollisionRay ray;
+    ray.start[0] = a[0];
+    ray.start[1] = a[1];
+    ray.start[2] = a[2];
+    ray.end[0] = b[0];
+    ray.end[1] = b[1];
+    ray.end[2] = b[2];
+    ray.refresh();
+    const int32_t broad_r = radius > 0 ? radius : 0; // [orig: @ 0x538752 clamp]
+
+    for (int32_t i = 0; i < static_count_; ++i) {
+        const StaticSlot &s = statics_[i];
+        CollisionTargetView view;
+        std::vector<CollisionMatrix> mats;
+        const CollisionTargetView *tv = target_view(world, s.h, view, mats);
+        if (tv == nullptr) continue;
+        // Broad phase vs the ray box + line distance, radius-padded.
+        // [orig: @ 0x5387c4-0x5389a4]
+        if (abs32(ray.mid[1] - tv->pos[1]) >
+                tv->bound_radius + broad_r + static_cast<int32_t>(ray.half[1]) ||
+            abs32(ray.mid[0] - tv->pos[0]) >
+                tv->bound_radius + broad_r + static_cast<int32_t>(ray.half[0]) ||
+            abs32(ray.mid[2] - tv->pos[2]) >
+                tv->bound_radius + broad_r + static_cast<int32_t>(ray.half[2]))
+            continue;
+        if (ray_line_distance(ray.start, ray.dir, tv->pos) > tv->bound_radius + broad_r)
+            continue;
+        if (sound_segment_blocked(*tv, ray, radius)) return true;
+    }
+    return false;
 }
 
 int32_t CollisionWorld::sound_occlusion_inflate(World &world, EntityHandle listener,

@@ -893,6 +893,34 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 size_t vl; const char *v = consume_value_span(trimmed, tlen, 11, &vl);
                 cw.startrounds = parse_int_n(v, vl);
                 parsed = 1;
+            } else if (lower_match_key(lower, ll, "classrounds", 11)) {
+                /* classrounds <class> <n> — the class token resolves through the
+                   char-class VALUE table (medic=1 sniper=2 gunner=3 rifleman=5
+                   engineer=6, must be <= 6) and stores at the value's index
+                   [orig: handler @ 0x543ab0 -> AdmDef+0x60+value*4, table @ 0x830EE8]. */
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 11, &vl);
+                Token tok[MAX_TOKENS];
+                int n = tokenize(v, vl, tok, MAX_TOKENS);
+                if (n >= 2) {
+                    char cb[16]; size_t cbl = tok[0].len < 15 ? tok[0].len : 15;
+                    to_lower_buf(cb, tok[0].s, cbl);
+                    int value = -1;
+                    if (cbl == 5 && memcmp(cb, "medic", 5) == 0) value = 1;
+                    else if (cbl == 6 && memcmp(cb, "sniper", 6) == 0) value = 2;
+                    else if (cbl == 6 && memcmp(cb, "gunner", 6) == 0) value = 3;
+                    else if (cbl == 8 && memcmp(cb, "rifleman", 8) == 0) value = 5;
+                    else if (cbl == 8 && memcmp(cb, "engineer", 8) == 0) value = 6;
+                    if (value >= 0 && value <= 6)
+                        cw.classrounds[value] = parse_int_n(tok[1].s, tok[1].len);
+                }
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "switchcategory", 14)) {
+                /* switchcategory <N> — post-recoil auto-switch target category
+                   [orig: handler @ 0x5445a8 -> +0x168 flag, +0x164 category]. */
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 14, &vl);
+                cw.has_switchcategory = 1;
+                cw.switchcategory = parse_int_n(v, vl);
+                parsed = 1;
             } else if (lower_match_key(lower, ll, "statid", 6)) {
                 size_t vl; const char *v = consume_value_span(trimmed, tlen, 6, &vl);
                 cw.statid = parse_int_n(v, vl);

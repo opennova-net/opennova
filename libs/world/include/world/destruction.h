@@ -44,6 +44,7 @@ class CollisionWorld;
 // (NovaSimulation::resolve_item_traits) — the def fields the death chain reads.
 // ----------------------------------------------------------------------------
 struct ItemDeathTraits {
+    bool static_death = false;  // attrib2 & 0x100; generic death motion freezes
     int32_t unit_type = 0;      // def+0x196 — the death-dispatch row key
     float kz = 0.0f;            // def+0x198 — death-blast radius (units); 0 = none
     int32_t armor_impact = 0;   // def+0x190 word (-1 = invulnerable 0xFFFF)
@@ -232,6 +233,26 @@ struct DestructionEvents {
     }
 };
 
+// World-local stand-in for the destruction paths' witnessed rol-xor PRNG
+// streams. Keeping the state on World makes independent simulations and
+// mission restores deterministic instead of coupling them through process
+// global state.
+struct DestructionRng {
+    static constexpr uint32_t kInitialState = 0x01234567u;
+    uint32_t state = kInitialState;
+
+    uint16_t next16() noexcept {
+        auto rol32 = [](uint32_t value, int bits) {
+            return (value << bits) | (value >> (32 - bits));
+        };
+        const uint32_t value = rol32(state + rol32(state, 11), 4);
+        state = value ^ 1u;
+        return static_cast<uint16_t>(state);
+    }
+
+    void reset() noexcept { state = kInitialState; }
+};
+
 // ----------------------------------------------------------------------------
 // The death-piece pool. [orig: g_death_piece_pool @ 0x26BAC58 — 256 x 180-B ring
 // (DeathPiece_AllocSlot @ 0x57b4f0), ticked by DeathPiece_TickAll @ 0x57b900 ->
@@ -240,6 +261,10 @@ struct DestructionEvents {
 // ----------------------------------------------------------------------------
 struct DeathPiece {
     bool active = false;
+    // Reimplementation-only allocation incarnation. The retail pool embeds its
+    // effect handle in the slot; our polled present pass needs (slot,generation)
+    // to distinguish a blind ring overwrite from the same live piece.
+    uint64_t generation = 0;
     int32_t item_id = 0;       // husk model source (the present pass resolves it)
     uint8_t section = 0;       // the ONE section this piece renders [piece+116]
     uint8_t type_index = 0;    // debris-type table row
@@ -323,10 +348,10 @@ void entity_update_death_transforms(World &world, Entity &target, bool silent);
 // the spawned-section mask on the entity. Returns the mask.
 uint32_t spawn_death_pieces(World &world, Entity &target);
 
-// Per-tick settle for dead non-AI items [orig: Entity_UpdateStaticDeathPhysics
-// @ 0x494230 (buildings) / Entity_UpdateFallingDeathPhysics @ 0x493f70
-// (vehicles, incl. the landing kz blast)]. AI vehicles keep their SM settle
-// (ai.cpp rows 21/23).
+// Per-tick settle for entities with an installed death-motion callback [orig:
+// Entity_UpdateStaticDeathPhysics @ 0x494230 (buildings) /
+// Entity_UpdateFallingDeathPhysics @ 0x493f70 (vehicles, incl. the landing kz
+// blast)]. This includes AI-capable pool-1 entities after death dispatch.
 void destruction_tick_dead_items(World &world,
                                  const terrain::TerrainHeightField *terrain,
                                  float water_height, DestructionEvents &events);

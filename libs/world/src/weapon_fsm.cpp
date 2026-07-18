@@ -599,6 +599,39 @@ void weapon_fsm_queue_scope_down(WeaponSlotState &slot) {
         slot.next = weapon_action::kIdle;
 }
 
+void weapon_fsm_queue_switch_from(WeaponSlotState &slot) {
+    // [orig: WeaponSlot_ForceQueueSwitchFrom @ 0x53f170 — refused while SWITCHFROM
+    //  or SWITCHTO is current; a complete phase resets the slot and queues
+    //  SWITCHFROM, otherwise the action is forced back to idle first]
+    if (slot.current == weapon_action::kSwitchFrom ||
+        slot.current == weapon_action::kSwitchTo)
+        return;
+    if (slot.phase == weapon_phase::kDone || slot.phase == weapon_phase::kHeld ||
+        slot.phase == weapon_phase::kNone) {
+        slot.counter = 0;       // [orig: *(slot+0) = 0]
+        slot.burst = 0;         // [orig: slot+98 = 0]
+        slot.switch_timer = 0;  // [orig: slot+88 = 0]
+        slot.next = weapon_action::kSwitchFrom;
+        slot.prev = weapon_action::kIdle; // [orig: slot+52 = 0]
+        slot.current = weapon_action::kIdle; // [orig: slot+44 = 0]
+    } else {
+        slot.next = weapon_action::kIdle;
+    }
+}
+
+void weapon_fsm_queue_switch_rank(WeaponSlotState &slot) {
+    // [orig: WeaponSlot_TryQueueSwitchRank @ 0x53f1c0 — refused while SWITCHRANK is
+    //  current; a complete phase queues it, otherwise idle]
+    if (slot.current == weapon_action::kSwitchRank) return;
+    if (slot.phase == weapon_phase::kDone || slot.phase == weapon_phase::kHeld ||
+        slot.phase == weapon_phase::kNone) {
+        slot.counter = 0; // [orig: *(slot+0) = 0]
+        slot.next = weapon_action::kSwitchRank;
+    } else {
+        slot.next = weapon_action::kIdle;
+    }
+}
+
 void weapon_fsm_tick(const WeaponFsmDef &def, WeaponSlotState &slot,
                      const WeaponFsmInputs &in, WeaponFsmEvents &out) {
     out = WeaponFsmEvents{};

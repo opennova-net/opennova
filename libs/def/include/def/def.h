@@ -261,6 +261,22 @@ typedef struct DefWeaponDef {
        [orig: WeaponDefs_ParseLineCallback @ 0x544d6c -> GameText_GetString("overlays",
        key) -> +0x3A0; consumer draw_vehicle_seat_and_armory_labels @ 0x5a3538]. */
     char attach_text_id[32];
+    /* Per-char-class STARTROUNDS overrides ('classrounds <class> <n>', repeatable).
+       Kept at the original's raw table indices: the class token resolves through the
+       char-class value table (medic=1, sniper=2, gunner=3, rifleman=5, engineer=6;
+       4 unused) and the value stores at AdmDef+0x60 + value*4 — so classrounds[1] is
+       the medic override and index 0/4 never ship. 0 = absent (the entry memset).
+       Consumer: the spawn pool seeder picks classrounds[value(playerClass)] else
+       startrounds. [orig: handler @ 0x543ab0 -> +0x60+value*4; class table
+       @ 0x830EE8; consumer WeaponSlots_SeedAmmoPoolsFromDefs @ 0x5416c4]. */
+    int classrounds[7];
+    /* 'switchcategory <N>': after the RECOIL action completes, auto-switch to weapon
+       category N rank 0 (grenade/LAW switchback). Two fields exactly as stored:
+       the flag dword and the category. [orig: handler @ 0x5445a8 -> +0x168 flag = 1,
+       +0x164 category; consumer WeaponAction_Recoil tail @ 0x543062 ->
+       Player_SwitchToWeaponByHandle(category*65)]. */
+    int switchcategory;
+    int has_switchcategory;
 } DefWeaponDef;
 
 typedef struct DefWeaponsFile {

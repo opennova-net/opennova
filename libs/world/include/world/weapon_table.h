@@ -42,6 +42,33 @@ struct WeaponTableEntry {
     // the STROVER_USEGUN default label. [orig: @0x544d6c parse; consumer
     // draw_vehicle_seat_and_armory_labels @0x5a3538]
     std::string attach_text_id;
+    // The two FLAGS dwords [orig: AdmDef+8 / AdmDef+12; token table @0x830bf0].
+    // The switch/select paths read: flags bit 0x8000000 = the binoculars slot marker
+    // [orig: WeaponSlotTable_LoadAllFromDefs tail @0x54165a]; flags2 bit 1 = NoSelect
+    // (excluded from manual switching, but the ONLY defs the exact-slot select leg
+    // takes — the parachute-style forced equips) [orig: Player_SwitchToWeaponByHandle
+    // @0x4e02c3; Player_SelectWeaponSlot @0x4dd6d8].
+    int32_t flags = 0;
+    int32_t flags2 = 0;
+    // weapon_class routing slot (0=accessory 1=primary 2=secondary 3=grenade). The
+    // switch eligibility exempts 1/2 from the has-ammo requirement [orig: AdmDef+0x3A4
+    // read @0x4e0294; keyword 'weapon_class' -> +0x3A4].
+    int32_t weapon_class_slot = 0;
+    // Per-char-class startrounds overrides at the original's raw value-table indices
+    // (medic=1 sniper=2 gunner=3 rifleman=5 engineer=6; 0/4 unused; 0 = absent)
+    // [orig: 'classrounds' handler @0x543ab0 -> AdmDef+0x60+value*4].
+    int32_t classrounds[7] = {0, 0, 0, 0, 0, 0, 0};
+    // Post-recoil auto-switch: when has_switchcategory, the RECOIL action's completion
+    // switches to switchcategory*65 [orig: AdmDef+0x164/+0x168; consumer @0x543062].
+    int32_t switchcategory = 0;
+    bool has_switchcategory = false;
+    // The resolved ammo-class id for the per-class carried pools. The original resolves
+    // the 'ammoclass' name to a byte id at parse (builtins @0x830F10) and keys the pool
+    // arrays by it [orig: AdmDef+0xD8; pools g_localAmmoPools @0xB75FE8 / serverPlayer
+    // +88664]. We assign ids by first-appearance registry order at table build — the
+    // arithmetic is identical; only the id VALUES may differ from retail bytes (never
+    // wire-visible; pools are entity-local).
+    int16_t ammo_class_id = -1;
     bool valid = false;
 };
 
@@ -55,8 +82,30 @@ struct WeaponTableEntry {
 // [orig: @0x5027c8].
 struct WeaponTable {
     std::vector<WeaponTableEntry> entries;
+    // Ammo-class registry backing WeaponTableEntry::ammo_class_id: names in
+    // first-appearance order, and the per-class carry caps from the top-level
+    // `ammoclass_max_carry <class> <n>` weapon.def lines (0 = no cap line; the
+    // original defaults the table to 0 and clamps pools against it)
+    // [orig: cap table @0x24E7DE0, parse @0x543873; clamp @0x540b26].
+    std::vector<std::string> ammo_class_names;
+    std::vector<int32_t> ammo_class_caps;
 
     bool empty() const { return entries.empty(); }
+
+    // Case-insensitive registry lookup; -1 when absent.
+    int ammo_class_id_of(const char *name) const {
+        if (name == nullptr || *name == '\0') return -1;
+        for (size_t i = 0; i < ammo_class_names.size(); ++i) {
+            const std::string &n = ammo_class_names[i];
+            size_t j = 0;
+            while (j < n.size() && name[j] != '\0' &&
+                   std::tolower(static_cast<unsigned char>(n[j])) ==
+                           std::tolower(static_cast<unsigned char>(name[j])))
+                ++j;
+            if (j == n.size() && name[j] == '\0') return static_cast<int>(i);
+        }
+        return -1;
+    }
 
     const WeaponTableEntry *by_index(uint8_t idx) const {
         return (idx < entries.size() && entries[idx].valid) ? &entries[idx] : nullptr;

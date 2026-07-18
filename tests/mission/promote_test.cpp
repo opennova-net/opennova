@@ -147,6 +147,48 @@ int main() {
         CHECK(!wz.commands.ssn_in_area(2, 0));   // organic at x=100 is outside
     }
 
+    // ---- the player waypoint track: the BLUE-flagged route + the marker fields ----
+    // [orig: NetPacket_WriteWorldStateLoad0x0F @0x502e41 picks the first flags&2
+    //  channel; Entity_SpawnFromBMSRecord @0x40f0aa seeds radius/name/link/chain]
+    {
+        bms::File wm{};
+        wm.markers.push_back(marker(100 << 16, 0, 0));
+        wm.markers.push_back(marker(200 << 16, 0, 0));
+        wm.markers.push_back(marker(300 << 16, 0, 0));
+        wm.markers[0].wp_distance = 25;             // authored radius -> 25<<16
+        wm.markers[0].ttool_index = 4;              // STRWPNAME004
+        wm.markers[1].wp_adv_trigger = 3;           // completes when event 3 fires
+        wm.markers[1].bmsi_attributes = 1u << 22;   // chain-back
+        // Record 0: an AI patrol route (unflagged) — must NOT become the track.
+        bms::WaypointRecord ai_route{};
+        ai_route.flags = bms::WaypointFlags::None;
+        ai_route.marker_count = 1;
+        ai_route.waypoint_numbers = {2};
+        wm.waypoint_records.push_back(ai_route);
+        // Record 1: the blue player route.
+        bms::WaypointRecord blue{};
+        blue.flags = bms::WaypointFlags::BlueTeam;
+        blue.marker_count = 2;
+        blue.waypoint_numbers = {0, 1};
+        wm.waypoint_records.push_back(blue);
+
+        World ww;
+        AiSystem wai;
+        mission::promote_mission(wm, ww, wai);
+        CHECK(ww.waypoints.entries.size() == 2);    // the blue route only
+        CHECK(ww.waypoints.show);                    // visible by default
+        CHECK(ww.waypoints.current == -1);           // no selection until the tick
+        CHECK(ww.waypoints.entries[0].x == (100 << 16));
+        CHECK(ww.waypoints.entries[0].radius == (25 << 16)); // authored wp_distance
+        CHECK(ww.waypoints.entries[0].name_id == 4);
+        CHECK(ww.waypoints.entries[1].radius == 0x8000);     // default 0.5 u
+        CHECK(ww.waypoints.entries[1].linked_event == 3);
+        CHECK(ww.waypoints.entries[1].chain_back);
+        // The raw route-flags word rides the nav channel (bit1 = the blue mark).
+        CHECK((wai.nav.channel(2)->loopflag &
+               static_cast<int32_t>(bms::WaypointFlags::BlueTeam)) != 0);
+    }
+
     // a non-routed entity option: with patrol_on_spawn=false the brain stays in state 0.
     {
         World w2;

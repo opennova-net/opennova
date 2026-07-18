@@ -119,9 +119,9 @@ func _ready() -> void:
 	# heading + world volume corners — the same-entity two-shell comparison.
 	var probe_bms := int(OS.get_environment("NOVA_PR_BMS").to_int())
 	if probe_bms != 0:
-		var placer = _find_by_method(get_tree().root, "hide_static_instance")
+		var placer = _find_by_method(get_tree().root, "get_static_instance_transform")
 		if placer != null:
-			var rec: Variant = placer._destruction_instances.get(probe_bms)
+			var rec: Variant = placer.get_static_instance_transform(probe_bms)
 			print("[pr] visual instance bms %d: %s" % [probe_bms, str(rec)])
 		var cd: Dictionary = sim.get_collision_debug()
 		for inst_v in cd.get("instances", []):

@@ -1,3 +1,4 @@
+#include <cstddef>
 #include <cstdio>
 
 #include "threedi/threedi_ir.h"
@@ -12,6 +13,23 @@ static void check(bool condition, const char *message) {
 }
 
 int main() {
+    check(sizeof(ThreediIRCollisionFace) == 52,
+          "collision face ABI stride includes the round-raycast fields");
+    check(offsetof(ThreediIRCollisionFace, material_flags) == 8,
+          "collision face material_flags offset is stable");
+    check(offsetof(ThreediIRCollisionFace, poly_type) == 12,
+          "collision face poly_type offset is stable");
+    check(offsetof(ThreediIRCollisionFace, normal) == 14,
+          "collision face normal offset is stable");
+    check(offsetof(ThreediIRCollisionFace, dominate_axis) == 20,
+          "collision face dominate_axis offset is stable");
+    check(offsetof(ThreediIRCollisionFace, plane_dist_fp16) == 24,
+          "collision face plane distance offset is stable");
+    check(offsetof(ThreediIRCollisionFace, min_fp16) == 28,
+          "collision face min AABB offset is stable");
+    check(offsetof(ThreediIRCollisionFace, max_fp16) == 40,
+          "collision face max AABB offset is stable");
+
     ThreediIRCollisionPlane planes[2] = {};
     ThreediIRCollisionVolume volume = {};
     volume.plane_count = 2;

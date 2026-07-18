@@ -911,6 +911,13 @@ target_include_directories(world_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(world_test PRIVATE cxx_std_17)
 add_test(NAME world COMMAND world_test)
 
+# The player waypoint track (HUD waypoint label backing state).
+add_executable(waypoint_track_test world/waypoint_track_test.cpp)
+target_link_libraries(waypoint_track_test PRIVATE opennova_world)
+target_include_directories(waypoint_track_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(waypoint_track_test PRIVATE cxx_std_17)
+add_test(NAME waypoint_track COMMAND waypoint_track_test)
+
 # AI subsystem (byte-exact foundation): state enum + struct layout, AIEvent ring,
 # budget gate (AI_BeginUpdate), the infantry state-machine dispatcher + transitions,
 # and the trivial enter/exit/event handler ports.
@@ -1000,6 +1007,17 @@ target_link_libraries(weapon_fsm_test PRIVATE opennova_world)
 target_include_directories(weapon_fsm_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(weapon_fsm_test PRIVATE cxx_std_17)
 add_test(NAME weapon_fsm COMMAND weapon_fsm_test)
+
+# The per-player weapon slot pool, spawn-kit chain, and map availability rules
+# (the 2026-07-18 loadout grill): the .bms kit filter + knife fallback, display
+# expansion, the 780-slot fill, pool seeding (classrounds overrides) + clip
+# recalc, and the three switching walks (select / category-key / cycle) with
+# their witnessed gates.
+add_executable(weapon_inventory_test world/weapon_inventory_test.cpp)
+target_link_libraries(weapon_inventory_test PRIVATE opennova_world)
+target_include_directories(weapon_inventory_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(weapon_inventory_test PRIVATE cxx_std_17)
+add_test(NAME weapon_inventory COMMAND weapon_inventory_test)
 
 # Local player view state (the ADS scope ease, the 3P anchor chase, the fov
 # policy) at the fixed 62.5 Hz tick — render-cadence invariance — plus the

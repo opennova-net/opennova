@@ -11,6 +11,10 @@
 namespace opennova {
 
 godot::Ref<godot::Image> decode_pcx_image(const uint8_t *data, size_t size);
+// PCX texture with the retail sky/effect-loader alpha: RGB from the palette,
+// per-pixel A = the palette entry's (85*(r+g+b))>>8 luminance
+// [orig: load_texture_from_archive @ 0x58b980, alpha loop @ 0x58bc35..0x58bcee].
+godot::Ref<godot::Texture2D> build_pcx_luminance_alpha_texture(const godot::PackedByteArray &bytes);
 bool decode_pcx_with_palette(const uint8_t *data,
                              size_t size,
                              std::vector<uint8_t> &out_indices,

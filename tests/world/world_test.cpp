@@ -92,6 +92,14 @@ int main() {
 
     // snapshot / restore (editor play).
     w.vars.set_mission(1, 7);
+    Entity blast_target;
+    blast_target.kind = EntityKind::Organic;
+    blast_target.health = 100;
+    blast_target.health_max = 100;
+    blast_target.alive = true;
+    blast_target.position = Vec3{20.0f, 20.0f, 1.0f};
+    blast_target.bound_radius = 0.6f;
+    const EntityHandle blast_victim = w.registry.spawn(0, blast_target);
     World::Snapshot snap = w.snapshot();
     w.vars.set_mission(1, 99);
     w.commands.kill_ssn(201); // mutate after snapshot
@@ -100,6 +108,27 @@ int main() {
     w.round_sim.deaths.push_back({});
     w.round_sim.impacts.push_back({});
     w.round_sim.next_impact_order = 9;
+    AmmoTableEntry blast;
+    blast.valid = true;
+    blast.kztype = ammo_kz::kStandard;
+    blast.kz_damage = 25;
+    blast.kz_maxradius = 4.0f;
+    w.ammo.entries.push_back(blast);
+    ExplosionEntry queued;
+    queued.pos = w.registry.get(blast_victim)->position;
+    queued.type = ammo_kz::kStandard;
+    queued.ammo_index = 0;
+    w.explosions.queue_explosion(w, queued);
+    DeathPiece &piece = w.death_pieces.alloc();
+    piece.active = true;
+    piece.settled = true;
+    w.destruction.effects.push_back({});
+    w.destruction.sounds.push_back({});
+    w.destruction.husk_swaps.push_back({});
+    w.destruction.debris_bursts.push_back({});
+    w.destruction.glass_breaks.push_back({});
+    w.destruction.explosions_processed = 7;
+    w.destruction.items_destroyed = 3;
     w.restore(snap);
     CHECK(w.vars.get_mission(1) == 7);
     CHECK(w.round_sim.active_count == 0);
@@ -107,6 +136,20 @@ int main() {
     CHECK(w.round_sim.deaths.empty());
     CHECK(w.round_sim.impacts.empty());
     CHECK(w.round_sim.next_impact_order == 1);
+    CHECK(w.explosions.queue.empty());
+    CHECK(w.death_pieces.cursor == 0);
+    for (const DeathPiece &restored_piece : w.death_pieces.pieces)
+        CHECK(!restored_piece.active && !restored_piece.settled);
+    CHECK(w.destruction.effects.empty());
+    CHECK(w.destruction.sounds.empty());
+    CHECK(w.destruction.husk_swaps.empty());
+    CHECK(w.destruction.debris_bursts.empty());
+    CHECK(w.destruction.glass_breaks.empty());
+    CHECK(w.destruction.explosions_processed == 0);
+    CHECK(w.destruction.items_destroyed == 0);
+    const int32_t restored_health = w.registry.get(blast_victim)->health;
+    w.run_logic_tick(true, false);
+    CHECK(w.registry.get(blast_victim)->health == restored_health);
 
     std::printf(failures ? "WORLD TESTS FAILED (%d)\n" : "world tests passed\n", failures);
     return failures ? 1 : 0;

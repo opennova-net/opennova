@@ -76,6 +76,18 @@ struct Seat {
     EntityHandle occupant;      // [orig: vehicle[400+2*slot]] kInvalid = empty
 };
 
+// Post-death update callback installed by the retail unitType dispatch. Keeping
+// it explicit prevents a husk flag or unitType alone from starting motion when
+// Entity_SpawnDeathPieces rejected the death (no husk, already husked, or fully
+// submerged).
+enum class DeathMotionMode : uint8_t {
+    None = 0,
+    Generic = 1,
+    Falling = 2,
+    Static = 3,
+    PiecePhysics = 4,
+};
+
 // Minimal live-entity state the scripting evaluators read and mutate. This is a
 // clean model over the original 172-byte bms record + the pool record's net id;
 // the renderer/AI's full entity layout is a separate, deferred concern.
@@ -263,6 +275,7 @@ struct Entity {
     // and collides WITHOUT these sections. Bit 0 (the hull) never sets.
     // [orig: Entity_SpawnDeathPieces @ 0x493983]
     uint32_t spawned_piece_mask = 0;
+    DeathMotionMode death_motion = DeathMotionMode::None;
 
     // The retail entity Flags dword (entity+36) as composed at spawn — the 0x10 static record
     // streams it RAW as its flag-0x20 i32 (the field the early RE misread as "parentSlot",

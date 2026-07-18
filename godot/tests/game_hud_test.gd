@@ -61,7 +61,7 @@ func _load_temp_layout(lines: PackedStringArray, textures: PackedStringArray,
 	assert_eq(layout.load(dir_path.path_join("hudpos.def")), OK)
 	var root := NovaResourceRoot.new()
 	assert_eq(root.set_root_dir(dir_path), OK)
-	return {"layout": layout, "root": root}
+	return {"layout": layout, "root": root, "dir": dir_path}
 
 
 func test_draws_with_layout() -> void:
@@ -252,3 +252,60 @@ func test_message_feed_smoke() -> void:
 	hud.push_message("Move to the extraction point")
 	await get_tree().process_frame
 	assert_true(is_instance_valid(hud), "A pushed triggered-text line draws safely.")
+
+
+# The weapon heat bar draws at nonzero heat inside the HUDHEAT rect and stays
+# hidden (draw-safe) at zero — the original's hudInfo+60 gate.
+# [orig: HUD_DrawWeaponHeatBar @0x599700 gate @0x59970a]
+func test_heat_bar_draws_at_nonzero_heat() -> void:
+	var fixture := _load_temp_layout(PackedStringArray([
+		"HUDHEAT 10 579 133 598",
+		"HUDHEATBORDER 90,200,200,200",
+		"stancecolor_bad 200,175,009,009",
+	]), PackedStringArray())
+	var hud := GameHud.new()
+	hud.size = Vector2(1024, 768)
+	add_child_autofree(hud)
+	hud.set_layout(fixture["layout"], fixture["root"])
+	hud.update_info({"health_fraction": 1.0, "heat": 0})
+	await get_tree().process_frame
+	hud.update_info({"health_fraction": 1.0, "heat": 0x8000})
+	await get_tree().process_frame
+	hud.update_info({"health_fraction": 1.0, "heat": 0x20000}) # above the clamp
+	await get_tree().process_frame
+	assert_true(is_instance_valid(hud), "The heat bar draws at any heat value.")
+
+
+# The waypoint label draws name + distance at the HUDWPDINFO anchor for every
+# alignment form (with a REAL .fnt so the draw math runs), and hides cleanly
+# when the host omits the entry.
+# [orig: HUD_DrawWaypointNameAndDistance @0x5947a0; retail authors align "right"]
+func test_waypoint_label_draws_each_alignment() -> void:
+	for align in ["right", "center", "left"]:
+		var fixture := _load_temp_layout(PackedStringArray([
+			"fonthud1_hi Gunpl22b.fnt",
+			"HUDWPDINFO 1013,448,0,%s" % align,
+		]), PackedStringArray())
+		# A real font in the temp root so _font resolves and the label really draws.
+		var fnt_bytes := FileAccess.get_file_as_bytes("res://../fixtures/fnt/Gunpl22b.fnt")
+		assert_true(fnt_bytes.size() > 0, "font fixture present")
+		var fnt := FileAccess.open(String(fixture["dir"]).path_join("Gunpl22b.fnt"), FileAccess.WRITE)
+		fnt.store_buffer(fnt_bytes)
+		fnt.close()
+		var root := NovaResourceRoot.new()
+		assert_eq(root.set_root_dir(fixture["dir"]), OK)
+		var hud := GameHud.new()
+		hud.size = Vector2(1024, 768)
+		add_child_autofree(hud)
+		hud.set_layout(fixture["layout"], root)
+		# No waypoint entry: the label hides.
+		hud.update_info({"health_fraction": 1.0})
+		await get_tree().process_frame
+		hud.update_info({"health_fraction": 1.0,
+			"waypoint": {"name": "North Sea Village", "distance_m": 143}})
+		await get_tree().process_frame
+		# The box-hidden form (field 3) still draws the texts.
+		hud.update_info({"health_fraction": 1.0,
+			"waypoint": {"name": "", "distance_m": 9}})
+		await get_tree().process_frame
+		assert_true(is_instance_valid(hud), "waypoint label draws for align %s" % align)

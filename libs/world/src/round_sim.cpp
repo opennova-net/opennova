@@ -353,24 +353,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                     exclude_carrier = m->ground_target;
             }
         }
-        for (size_t s = 0; s < pool0; ++s) {
-            const uint16_t packed = static_cast<uint16_t>(s); // pool 0 -> high nibble 0
-            const EntityHandle h{packed};
-            if (r.owner.valid() && h.packed == r.owner.packed) continue; // own rounds
-            Entity *e = world.registry.get(h);
-            if (e == nullptr || e->health <= 0) continue;
-            // Indestructible entities take no damage [orig: Flags & 0x4000000 @0x4e7ff6].
-            if ((e->engine_flags & 0x4000000u) != 0) continue;
-            const Vec3 center{e->position.x, e->position.y, e->position.z + kOrganicCenterZ};
-            const SegHit hit = segment_vs_sphere(p0, p1, center, radius);
-            if (hit.hit && hit.t < best_t) {
-                best_t = hit.t;
-                best_target = e;
-                best_handle = packed;
-                best_is_item = false;
-            }
-        }
-        for (int pool = 1; pool <= 2; ++pool) {
+        for (int pool = 2; pool >= 1; --pool) {
             const size_t cap = world.registry.pool_capacity(pool);
             for (size_t s = 0; s < cap; ++s) {
                 const EntityHandle h = EntityHandle::make(pool, static_cast<int>(s));
@@ -379,7 +362,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                 if (exclude_carrier.valid() && h.packed == exclude_carrier.packed) continue;
                 Entity *e = world.registry.get(h);
                 if (e == nullptr || e->hidden) continue;
-                if ((e->engine_flags & 0x1u) != 0) continue; // [orig: the pool-walk
+                if ((e->engine_flags & 0x02000001u) != 0) continue; // [orig: the pool-walk
                 // Flags&1 skip @0x4eaf15-family] — dead husks still STOP rounds
                 // (the husk collision swap keeps wrecks solid [orig: the +52
                 // model substitution in raycast_against_entity_pool @0x538720]).
@@ -471,6 +454,25 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                     best_face = item_face;
                     best_had_faces = item_had_faces;
                 }
+            }
+        }
+
+        // Retail's pool-0/3 proximity-list leg runs after the pool-2 and pool-1
+        // face walks. Strict-closer replacement therefore leaves an exact-tie
+        // item winner in place.
+        for (size_t s = 0; s < pool0; ++s) {
+            const uint16_t packed = static_cast<uint16_t>(s); // pool 0 -> high nibble 0
+            const EntityHandle h{packed};
+            if (r.owner.valid() && h.packed == r.owner.packed) continue; // own rounds
+            Entity *e = world.registry.get(h);
+            if (e == nullptr || (e->engine_flags & 0x02000001u) != 0) continue;
+            const Vec3 center{e->position.x, e->position.y, e->position.z + kOrganicCenterZ};
+            const SegHit hit = segment_vs_sphere(p0, p1, center, radius);
+            if (hit.hit && hit.t < best_t) {
+                best_t = hit.t;
+                best_target = e;
+                best_handle = packed;
+                best_is_item = false;
             }
         }
 
@@ -610,6 +612,10 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             // the host session routes [orig: Entity_CheckAndProcessDeath @0x51b550].
             if (ammo != nullptr) {
                 int32_t damage = calc_impact_damage(r.vel, *ammo);
+                // Indestructible bodies still collide and present the impact;
+                // the flag zeroes damage later in the retail hit chain.
+                if ((best_target->engine_flags & kEntityFlagIndestructible) != 0)
+                    damage = 0;
                 if (damage > best_target->health) damage = best_target->health;
                 if (damage > 0) {
                     // Sticky SHOT relations, written only when damage is actually

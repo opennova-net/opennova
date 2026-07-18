@@ -3,6 +3,7 @@
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/color.hpp>
+#include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/vector4.hpp>
 
@@ -88,13 +89,31 @@ public:
 	// current smoothed colors: gain = iris_gain(light[1], sky[1], ground[1],
 	// light_dir, iris params), target = 0x10101 * gain chased over 62 ticks.
 	// The outdoor sample assumes full sun visibility (8/8 rays) and no cover —
-	// the interior/occlusion sampling of the original's 3-point camera-ray
-	// march rides the unhosted interior system (docs/render/
-	// render-lighting-re.md D-RLIT-2).
+	// the no-world editor-preview fallback for the marched form below.
 	// [orig: Environment_ApplyFogAndAmbient @ 0x57e512..0x57e538;
 	//  compute_ambient_light_along_direction @ 0x5c7a00;
 	//  terrain_sector_compute_lighting @ 0x5c7550]
 	void set_exposure_from_iris(const Vector3 &p_light_dir, float p_iris_percent, float p_iris_center);
+
+	// Per-sample classification codes for set_exposure_from_iris_samples.
+	// Outdoor samples carry their sun-occlusion level 0..8 directly.
+	static constexpr int32_t kIrisSampleIndoor = -1;
+	static constexpr int32_t kIrisSampleIndoorNoData = -2;
+
+	// The in-world marched exposure (D-RLIT-2's sampling geometry): the host
+	// supplies one classification per marched sample (kIrisSampleIndoor /
+	// kIrisSampleIndoorNoData / outdoor sun level 0..8); each runs the iris
+	// curve — indoors against the static ceiling/floor indoor-ambient colors
+	// with a zeroed directional, outdoors against light[1]*level/8, sky[1],
+	// ground[1] — and the INT gains average /3 into the modulator target.
+	// An empty array falls back to the outdoor sample above.
+	// [orig: compute_ambient_light_along_direction @ 0x5c7a00;
+	//  terrain_sector_compute_lighting @ 0x5c7550 — indoor swap @ 0x5c7660..,
+	//  no-interior-data 255 @ 0x5c7652, sun level @ 0x5c7784..0x5c77e9;
+	//  average @ 0x5c7b45]
+	void set_exposure_from_iris_samples(const PackedInt32Array &p_samples,
+			const Vector3 &p_light_dir, const Color &p_ceiling, const Color &p_floor,
+			float p_iris_percent, float p_iris_center);
 
 	// The modulator's render color / 64 — ColorSrcGlobalGain and the
 	// effects/foliage ambient scale [orig: Render_UnpackModulatorToLightScale

@@ -140,6 +140,18 @@ var _weapon_view: PlayerWeaponView = null  # this tick's FSM view (body channel 
 var _fire_was_held := false
 var _reload_was_down := false
 var _scope_was_down := false
+# The manual weapon-switch keys — the retail defaults from the shipped binding
+# catalog: rows 28-36 Knife '1' / Secondary '2' / Primary '3' / Flashbang '4' /
+# FragGrenade '5' / SmokeGrenade '6' / Accessory '7' / Detonator '8' / medpack '9'
+# fire the category actions 201-209 (categories 1..9), rows 39/40 cycleweaponP '['
+# / cycleweaponN ']' cycle prev/next [orig: input cases 200-210 @ 0x4e1144 ->
+# Player_SwitchToWeaponByHandle((action-200)*65); cases 212/214 ->
+# Player_CycleWeaponSlot @ 0x4dfe70; libs/controls k_catalog rows].
+const _WEAPON_CATEGORY_KEYS: Array[Key] = [KEY_1, KEY_2, KEY_3, KEY_4, KEY_5,
+		KEY_6, KEY_7, KEY_8, KEY_9]
+var _category_was_down := 0
+var _cycle_prev_was_down := false
+var _cycle_next_was_down := false
 var _view: PlayerLocalView = null   # the sim's per-tick view snapshot (null = no sim)
 var _camera_saved_fov := -1.0
 # Debug experiments (the F3 overlay's View tab): keep the FP arms drawn in every
@@ -245,6 +257,22 @@ func _free_viewmodel_pass() -> void:
 	_vm_pass_layer = null
 	_vm_viewport = null
 	_vm_camera = null
+
+
+## A committed weapon switch from the sim: reinstall the FP viewmodel/FSM for the
+## newly equipped def [orig: the mount's model re-resolve — the FP render model
+## follows the equipped slot, count_weapon_effects_and_update_viewmodel @ 0x4dc9e0].
+## Redundant reinstalls (the installed def already IS the target and its viewmodel
+## exists) are skipped so the queued SWITCHTO draw-in survives.
+func _apply_weapon_switch(weapon_name: String) -> void:
+	if _world == null or not _world.has_method("set_local_player_weapon_by_name"):
+		return
+	if (_world.has_method("local_player_weapon_name")
+			and String(_world.local_player_weapon_name()).nocasecmp_to(weapon_name) == 0
+			and _viewmodel != null and is_instance_valid(_viewmodel)):
+		return
+	if _world.set_local_player_weapon_by_name(weapon_name):
+		refresh_viewmodel()
 
 
 ## Drop the built FP viewmodel so the next update pass rebuilds gun/arms/FSM from the
@@ -356,6 +384,30 @@ func _send_weapon_input() -> void:
 		_world.request_local_player_scope_toggle()
 	_scope_was_down = scope_down
 	_world.set_local_player_weapon_input(fire_held, fire_edge, reload_edge)
+	_send_weapon_switch_input(captured)
+
+
+# The category keys (1..9) and the cycle pair ('['/']'): edge-triggered requests
+# into the sim's switch walks; the sim applies the witnessed stance/FSM gates and
+# answers through the event drain (switch_to_weapon / switch_denied).
+func _send_weapon_switch_input(captured: bool) -> void:
+	if _world == null or not _world.has_method("request_local_player_weapon_category"):
+		return
+	var down_mask := 0
+	for i in _WEAPON_CATEGORY_KEYS.size():
+		if captured and Input.is_physical_key_pressed(_WEAPON_CATEGORY_KEYS[i]):
+			down_mask |= 1 << i
+			if (_category_was_down & (1 << i)) == 0:
+				_world.request_local_player_weapon_category(i + 1)
+	_category_was_down = down_mask
+	var prev_down := captured and Input.is_physical_key_pressed(KEY_BRACKETLEFT)
+	if prev_down and not _cycle_prev_was_down:
+		_world.request_local_player_weapon_cycle(-1)
+	_cycle_prev_was_down = prev_down
+	var next_down := captured and Input.is_physical_key_pressed(KEY_BRACKETRIGHT)
+	if next_down and not _cycle_next_was_down:
+		_world.request_local_player_weapon_cycle(1)
+	_cycle_next_was_down = next_down
 
 
 func after_world_tick() -> void:
@@ -447,6 +499,10 @@ func _consume_weapon_events(view: PlayerWeaponView,
 			_fire_direct_action_effect(event)
 		if event.action_finished >= 0:
 			_fire_action_end_sound(event)
+		if not event.switch_to_weapon.is_empty():
+			_apply_weapon_switch(event.switch_to_weapon)
+		# event.switch_denied is the deny-sound seam [orig: PlaySoundOnDedicatedServer
+		# (dword_24E08C4) @ 0x4e0354] — the shipped set name is unwitnessed (D-WPN-22).
 	if batch_started_clip:
 		_weapon_play_serial = view.play_serial
 	# First adoption and a fresh viewmodel both synchronize to the latest snapshot,

@@ -224,7 +224,9 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 		_destruction_present.setup(_sim, container, _index, options.get("placer"),
 			options.get("item_db"), options.get("game_world"),
 			options.get("fire_audio", Callable()),
-			options.get("fire_fx", Callable()))
+			options.get("fire_fx", Callable()), options.get("env_node"))
+		simulation_restarted.connect(
+				Callable(_destruction_present, 'reset_runtime_state'))
 	# Spawn the host's own player as an authoritative pool-0 entity (ADR 0012 / net-re §5.2b).
 	# After load (the spawn needs the AI system wired). The spawn POSE is selected the way the
 	# original engine does — by game type, from the mission's player-START marker FARTHEST from the
@@ -271,6 +273,29 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	if options.get("resource_root") != null:
 		if _sim.load_weapon_table(options["resource_root"], "weapon.def") != OK:
 			push_warning("MissionRuntime: weapon.def not loaded — 0x5A ammo resolve degraded to echo")
+		# The map loadout rules, promoted AFTER the weapon table (name resolution +
+		# sub-weapon inheritance need it): the .bms item_availability chunk becomes
+		# the availability table, then the .bms loadout chunk becomes the spawn kit
+		# (availability-filtered, knife fallback), and the slot pool respawns from it.
+		# [orig: Game_StartMission availability build @0x5246e8 over the boot-time
+		#  catalog + Mission_LoadBMSFile's filtered restrictionData write @0x40f961;
+		#  the sim's interim default-kit rebuild inside load_weapon_table converges
+		#  onto this kit.]
+		if mission != null:
+			if mission.has_method("get_item_availability"):
+				_sim.set_weapon_availability(mission.get_item_availability())
+			if mission.has_method("get_weapon_loadout"):
+				var kit: Array[Dictionary] = []
+				for row in mission.get_weapon_loadout():
+					kit.append({
+						"name": String(row.get("name", "")),
+						"ammo_primary": int(String(row.get("value1", "-1")).to_int()),
+						"ammo_secondary": int(String(row.get("value2", "-1")).to_int()),
+						"flags": -1,
+					})
+				if not kit.is_empty():
+					_sim.set_spawn_loadout(kit, true)
+					_sim.respawn_local_player_loadout()
 		# Ballistics table (ammo.def) + the round_type resolve — the authoritative round
 		# sim's data feed (fire -> flight -> damage -> death; net-re §5.60). After the
 		# armory so every adm's fired round binds to its ammo index.
@@ -784,6 +809,9 @@ func _exit_tree() -> void:
 		_fire_present.teardown()  # frees the tracer mesh instance under the container
 		_fire_present = null
 	if _destruction_present != null:
+		var reset_destruction := Callable(_destruction_present, 'reset_runtime_state')
+		if simulation_restarted.is_connected(reset_destruction):
+			simulation_restarted.disconnect(reset_destruction)
 		_destruction_present.teardown()  # frees husk models + effect anchors
 		_destruction_present = null
 	if _sim != null and is_instance_valid(_sim):

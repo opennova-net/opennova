@@ -391,8 +391,11 @@ int main() {
 	if (!expect(ctx.respawn_queue.empty(), "a client-owned victim does NOT auto-respawn"))
 		return 1;
 
-	// --- 4. Kill the HOST player (loopback-owned, past the dead victim on the same
-	// line): it queues for respawn and releases at spawn health/position. ---
+	// --- 4. Kill the HOST player (loopback-owned): it queues for respawn and
+	// releases at spawn health/position. Retail corpses remain ballistic
+	// colliders (the proximity walk does not skip Flags bit 1 / dead), so move
+	// the already-verified client corpse off this unrelated line-of-fire fixture.
+	world.registry.get(hc)->position.y = 10.0f;
 	for (int shot = 0; shot < 3; ++shot) {
 		dispatch_fire(roster[1], roster, world,
 		              fire_body(hb.packed, 5, 0, 0, muzzle_z, 0, 0));

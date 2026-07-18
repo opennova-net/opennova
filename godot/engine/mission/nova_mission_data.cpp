@@ -116,6 +116,7 @@ void NovaMissionData::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("get_weapon_loadout"), &NovaMissionData::get_weapon_loadout);
 	ClassDB::bind_method(D_METHOD("set_weapon_loadout", "entries"), &NovaMissionData::set_weapon_loadout);
+	ClassDB::bind_method(D_METHOD("get_item_availability"), &NovaMissionData::get_item_availability);
 	ClassDB::bind_method(D_METHOD("get_group_count"), &NovaMissionData::get_group_count);
 	ClassDB::bind_method(D_METHOD("get_groups"), &NovaMissionData::get_groups);
 	ClassDB::bind_method(D_METHOD("get_group", "index"), &NovaMissionData::get_group);
@@ -860,6 +861,21 @@ Array NovaMissionData::get_weapon_loadout() const {
 	const std::vector<opennova::mission::WeaponLoadoutEntry> entries = document.weapon_loadout();
 	for (size_t i = 0; i < entries.size(); ++i) {
 		out.push_back(weapon_loadout_to_dictionary(entries[i], static_cast<int>(i)));
+	}
+	return out;
+}
+
+Array NovaMissionData::get_item_availability() const {
+	// The .bms secondary chunk's per-map weapon rules ({name, status} pairs); the
+	// runtime feeds these to NovaSimulation.set_weapon_availability
+	// [orig: build_item_restriction_table @0x54DDB0 name-list mode].
+	Array out;
+	for (const opennova::mission::ItemAvailabilityEntry &entry :
+	     document.item_availability()) {
+		Dictionary d;
+		d["name"] = String::utf8(entry.name.c_str());
+		d["value"] = entry.status;
+		out.push_back(d);
 	}
 	return out;
 }

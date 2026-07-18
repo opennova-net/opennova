@@ -32,6 +32,7 @@
 #include <world/player_spawn.h>
 #include <world/player_view.h>
 #include <world/weapon_fsm.h>
+#include <world/weapon_inventory.h>
 #include <world/world.h>
 
 #include "mission/nova_mission_data.h"
@@ -310,6 +311,13 @@ private:
 		int action_effect = -1;
 		String effect_particle;
 		String effect_particle_userpoint;
+		// A committed weapon switch: the newly equipped def's name — the host
+		// reinstalls the viewmodel/FSM for it [orig: the mount's model re-resolve;
+		// the equippedAdmIndex stamp @ 0x4dd727]. Empty = no switch this tick.
+		String switch_to_weapon;
+		// The switch-walk wrap-around deny [orig: PlaySoundOnDedicatedServer
+		// (dword_24E08C4) @ 0x4e0354 — the deny sound seam].
+		bool switch_denied = false;
 	};
 	std::vector<PendingWeaponEvent> pending_weapon_events_;
 	float weapon_scope_max_mag_ = 0.0f; // def scope_max_mag (0 = key absent)
@@ -324,6 +332,38 @@ private:
 	String weapon_anim_map_;
 	uint64_t weapon_anim_map_serial_ = 0;
 	void tick_local_player_weapon();
+
+	// --- the local player's weapon slot pool + spawn kit + map rules -------------------
+	// [orig: weaponSlotArrayBase @ 0xB75FD4 (780 x 100 B) + g_localAmmoPools @ 0xB75FE8 +
+	//  restrictionData @ 0x24D4E00 + g_armoryWeaponAvailability @ 0x24D5600; the loadout
+	//  grill 2026-07-18]
+	opennova::world::WeaponInventory local_inventory_;
+	bool local_inventory_valid_ = false;
+	std::vector<opennova::world::WeaponKitEntry> spawn_kit_;
+	// Distinguishes an EXPLICIT kit (even the armory's all-NONE empty one, which
+	// leaves the table bare) from the never-set state that takes the WPN_M4AUTO
+	// default [orig: the default literal @ 0x5246be applies only when neither the
+	// mission entry nor the profile authored a buffer].
+	bool spawn_kit_set_ = false;
+	opennova::world::WeaponAvailability weapon_availability_;
+	// A queued manual switch: the FSM plays SWITCHFROM/SWITCHRANK on the outgoing
+	// weapon; its completion commits pending -> equipped [orig: MountWeaponSlot
+	// @ 0x4dfa40 stamps g_pendingWeaponSlot + queues the action; the handler's
+	// completion consumes it].
+	bool weapon_switch_in_flight_ = false;
+	// The next viewmodel install starts the FSM in SWITCHTO (the draw-in) instead of
+	// idle — set by every switch commit and by the spawn mount
+	// [orig: the switch chain runs switchfrom -> mount -> switchto].
+	bool weapon_start_in_switchto_ = false;
+	void commit_pending_weapon_switch();
+	// Shared mount/deny routing for the category, cycle, and switchcategory walks
+	// [orig: Player_MountWeaponSlot @ 0x4dfa40 / the deny play @ 0x4e0354].
+	void handle_weapon_switch_outcome(const opennova::world::WeaponSwitchOutcome &p_out);
+	// The witnessed input/stance gates packaged for the switch walks.
+	opennova::world::WeaponSwitchGates local_weapon_switch_gates() const;
+	// Player_InitPlayer's weapon leg [orig: @ 0x4e15f0]; shared by table load,
+	// respawn, and the ACCEPT apply (which passes the freshly stored kit).
+	void rebuild_local_player_loadout(bool p_select_spawn_default);
 
 	// --- the local player's view state (ADS ease + 3P anchor chase) --------------------
 	// Ticked at the world cadence immediately before the weapon pump, so camera lag and
@@ -606,6 +646,17 @@ public:
 	// Horizontal -> vertical projection fov (degrees) through the aspect — the
 	// ONE conversion both cameras use [orig: @ 0x58d900].
 	static float fov_vertical_from_horizontal(float p_fov_h_deg, float p_aspect);
+	// The waypoint-track snapshot for the HUD label: {show, count, current,
+	// number, name_id, position (Godot space), done}. current is -1 with no
+	// selection; number is the 1-based display index [orig: hudInfo+373 =
+	// list index + 1 @ 0x4b88e8]. Read-only; the track advances in the world
+	// tick. (docs/interface/hud-re.md §Waypoint HUD)
+	Dictionary get_waypoint_hud_view() const;
+	// The objectives-panel rows: an Array of {slot, text_id, shown, done} for
+	// header slots 1..8, terminated at the first 0/255 win-condition id —
+	// exactly the panel's row walk [orig: HUD_DrawWinConditions @0x5ba9e0..;
+	// shown = show-win bit, done = won bit].
+	Array get_objectives_view() const;
 	// The FSM snapshot for the host: latest clip/action payloads, diagnostic serials,
 	// ammo, kick, and the 3P body channel. Ordered presentation events drain through
 	// drain_local_player_weapon_events(); the snapshot alone is not an event queue.
@@ -617,6 +668,49 @@ public:
 	// mapped through the ammo effects_table to {position, direction, effect, sound}
 	// [orig: Projectile_SpawnImpactEffect @ 0x4e9b80; world/round_sim.h RoundImpact].
 	Array drain_round_impacts();
+
+	// --- the local player's loadout: slot pool, spawn kit, map rules -------------------
+	// (the 2026-07-18 loadout grill; witness map in docs/net/novaworld-net-re.md §5.57)
+	// The spawn kit [orig: the 2048-B tuple buffer 'restrictionData' @ 0x24D4E00]:
+	// rows {name, ammo_primary, ammo_secondary, flags} (values default -1). When
+	// p_filter_by_availability, the kit is filtered through the availability table
+	// with the knife fallback — the SP .bms promote leg [orig: Mission_LoadBMSFile
+	// @ 0x40f7ae]; the armory/profile legs store unfiltered (the server validates).
+	// An empty kit resets to the engine default {WPN_M4AUTO} [orig: @ 0x5246be].
+	void set_spawn_loadout(const TypedArray<Dictionary> &p_kit, bool p_filter_by_availability);
+	// The map weapon-availability rules [orig: g_armoryWeaponAvailability @ 0x24D5600]:
+	// reset to all-allowed, then apply {name, value} pairs (the .mis item_availability
+	// chunk shape; -1 maps to 3, sub-weapons inherit the parent's value)
+	// [orig: build_item_restriction_table @ 0x54DDB0 name-list mode].
+	void set_weapon_availability(const TypedArray<Dictionary> &p_pairs);
+	// Availability by weapon name: 0 banned / 1 allowed / 2 armory-zone-only /
+	// 3 mission-allowed; unknown names read 1. The armory UI filter term
+	// [orig: populate_three_category_lists @ 0x566e6b nonzero test].
+	int get_weapon_availability(const String &p_weapon_name) const;
+	// The armory ACCEPT apply [orig: WeaponLoadout_ApplyFromBuffer @ 0x565cd0 offline
+	// leg]: the accepted kit becomes the spawn kit, the slot pool refills from it
+	// (sub-weapons expanded), pools reseed + clips recalc, and the equipped slot
+	// re-selects. Rows whose weapon is availability-banned are refused (the server
+	// 0x2F validation shape, availability 2 requires the armory zone the ACCEPT is
+	// gated on anyway [orig: @ 0x515a4a]). Also stamps player_class when 5..9.
+	bool apply_local_player_loadout(const TypedArray<Dictionary> &p_kit, int p_player_class);
+	// Rebuild the local player's slot pool from the spawn kit and select the spawn
+	// default — the Player_InitPlayer weapon leg [orig: @ 0x4e15f0: display list ->
+	// table fill -> pool seed -> clip recalc -> SelectWeaponSlot(195) ->
+	// SwitchToWeaponByHandle(195)]. Runs automatically after load_weapon_table; call
+	// again on respawn.
+	void respawn_local_player_loadout();
+	// The category keys [orig: input actions 200-210 @ 0x4e1144 ->
+	// Player_SwitchToWeaponByHandle((action-200)*65) @ 0x4e0170]. Category 1..9 =
+	// the retail Knife/Sidearm/Primary/Flashbang/Frag/Smoke/Accessory/Detonator/
+	// Medpack keys ('1'..'9').
+	void request_local_player_weapon_category(int p_category);
+	// Next/previous weapon [orig: input cases 212/214 -> Player_CycleWeaponSlot
+	// @ 0x4dfe70, direction +1/-1].
+	void request_local_player_weapon_cycle(int p_direction);
+	// Inventory snapshot for hosts/tests: {equipped_combo, equipped_name, slots:
+	// [{combo, name, clip}], pools: {class_name: rounds}, carry_flags}.
+	Dictionary get_local_player_inventory() const;
 
 	// --- WAC scripts ------------------------------------------------------
 	// Install a compiled program on the script VM (NovaWacProgram). Applied now if
@@ -682,8 +776,8 @@ public:
 	// explosions_processed, items_destroyed}, godot-space positions, cleared on
 	// read. Once per present, beside the fire drain.
 	Dictionary drain_destruction_events();
-	// The live death-piece pool as dictionaries {item_id, section, type_index,
-	// scale, pos, heading, pitch, settled} — each piece renders as its single
+	// The live death-piece pool as dictionaries {slot, generation, item_id,
+	// section, type_index, scale, pos, heading, pitch, settled} — each piece renders as its single
 	// husk-model section. [orig: DeathPiece_TickAll @0x57b900; §24]
 	Array get_death_pieces() const;
 	// Per-entity destruction diagnostics by bms_id (probe/F3 seam): health,
@@ -961,6 +1055,24 @@ public:
 	                                     const Vector3 &source_pos, int64_t distance_q16,
 	                                     int source_bms_id = 0);
 
+	// The marched iris-exposure sampling (D-RLIT-2): three classification codes
+	// for NovaWeatherCore.set_exposure_from_iris_samples — the camera ray runs
+	// 8 units forward, clips against terrain, and samples at the end point and
+	// two points marched back toward the camera in thirds. Per sample: a blink
+	// hit classifies indoor (-1; -2 when the building carries no interior
+	// data), else the outdoor sun level 8 minus one per blocked sun-occlusion
+	// ray (three entity-only rays, 200 u toward the light, clip radii
+	// -0x2000/-0x5000/-0x8000). Positions/directions in Godot world space.
+	// Empty when no world is loaded (the caller falls back to the outdoor
+	// sample). Residuals tracked on D-RLIT-2: the entity nearest-hit clip of
+	// the camera ray, pool-1 dynamics in the sun rays, and the player-sector
+	// entity-count ray gate.
+	// [orig: compute_ambient_light_along_direction @ 0x5c7a00;
+	//  terrain_sector_compute_lighting @ 0x5c7550;
+	//  raycast_entity_collision @ 0x413760]
+	PackedInt32Array compute_iris_samples(const Vector3 &cam_pos, const Vector3 &cam_forward,
+	                                      const Vector3 &light_dir);
+
 	// Loadout-zone gates for the host's armory key [orig: input action 218 opens
 	// weapon.mnu WEAPON only while entity Flags & 0x400000 (a type-6 armory volume
 	// contact), vehicle.mnu VEHICLE on Flags & 0x800 (type-11);
@@ -984,16 +1096,6 @@ public:
 	//  Player_CanFireWeapon @0x5cf780 — its camera/underwater legs are host state,
 	//  unmodeled here: docs/interface/hud-re.md (D-HUD-11)]
 	TypedArray<Dictionary> get_attach_labels() const;
-
-	// The armory ACCEPT apply for the local player: resolve the weapon name in the
-	// armory table and stamp equipped_adm_index (+ player_class 5..9 when given).
-	// The FP viewmodel + action-FSM rebuild is the host's move (GameWorld). Returns
-	// An empty name is the authored NONE row: clear equipped_adm_index while still
-	// applying a valid class. Returns false when a non-empty name is not in the table.
-	// [orig: WeaponLoadout_ApplyFromBuffer
-	// @0x565cd0 tail -> Player_SelectWeaponSlot/Player_MountWeaponSlot; the MP client
-	// path rides the C2S 0x2F / S2C 0x5A service instead (npruntime, D-NET-141/143)]
-	bool apply_local_player_loadout(const String &p_weapon_name, int p_player_class);
 
 	// Parse weapon.def from the resource root and install the armory table on the sim world
 	// (world::World::weapons) — the server-side source for the 0x2F/0x5A loadout service, the

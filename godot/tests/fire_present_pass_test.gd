@@ -123,7 +123,7 @@ func test_tracer_trails_build_ribbon_strip() -> void:
 
 	presenter.present()
 
-	var mesh: ImmediateMesh = presenter._mesh
+	var mesh: ImmediateMesh = presenter.ribbon_mesh()
 	assert_eq(mesh.get_surface_count(), 1, "one additive strip surface, no smoke surface")
 	if mesh.get_surface_count() == 1:
 		var arrays := mesh.surface_get_arrays(0)
@@ -155,7 +155,7 @@ func test_tracer_smoke_style_lands_on_the_alpha_surface() -> void:
 
 	presenter.present()
 
-	var mesh: ImmediateMesh = presenter._mesh
+	var mesh: ImmediateMesh = presenter.ribbon_mesh()
 	assert_eq(mesh.get_surface_count(), 1, "one smoke strip surface")
 	if mesh.get_surface_count() == 1:
 		var cols: PackedColorArray = mesh.surface_get_arrays(0)[Mesh.ARRAY_COLOR]
