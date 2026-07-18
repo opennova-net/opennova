@@ -19,6 +19,7 @@
     "selected_weapon",
     "document_tab_row.gd|func to_dict()",
     "mcp_tool_def.gd|var input_schema",
-    "mcp_tool_def.gd|func to_list_entry()"
+    "mcp_tool_def.gd|func to_list_entry()",
+    "waypoint_hud_entry.gd|func to_info_dict()"
   ]
 }
