@@ -1215,6 +1215,62 @@ Dictionary NovaSimulation::get_collision_debug() const {
 }
 
 namespace {
+// Mission float Vec3 -> Godot world space: (x, y, z) -> (x, z, -y).
+inline Vector3 godot_from_mission_vec3(const opennova::world::Vec3 &p) {
+	return Vector3(p.x, p.z, -p.y);
+}
+} // namespace
+
+Dictionary NovaSimulation::get_round_debug() const {
+	Dictionary out;
+	Array events;
+	out["events"] = events;
+	if (!world_) return out;
+	const opennova::world::RoundSim &rs = world_->round_sim;
+	static const char *const kKindNames[] = {"organic", "item face", "item sphere",
+	                                         "terrain",  "expired",   "face miss"};
+	// Oldest -> newest so the view can draw newest-last (brightest).
+	const int count = rs.debug_trail_count;
+	int idx = (rs.debug_trail_next - count + opennova::world::RoundSim::kDebugTrailCap *
+	          2) % opennova::world::RoundSim::kDebugTrailCap;
+	for (int i = 0; i < count; ++i, idx = (idx + 1) % opennova::world::RoundSim::kDebugTrailCap) {
+		const opennova::world::RoundDebugEvent &ev =
+		    rs.debug_trail[static_cast<size_t>(idx)];
+		Dictionary d;
+		d["tick"] = static_cast<int64_t>(ev.tick);
+		d["kind"] = static_cast<int>(ev.kind);
+		d["kind_name"] = String(ev.kind <= 5 ? kKindNames[ev.kind] : "?");
+		d["material"] = static_cast<int>(ev.material);
+		d["section"] = static_cast<int>(ev.section);
+		d["face"] = static_cast<int>(ev.face);
+		d["effect_tag"] = ev.effect_tag;
+		d["effect_tag_name"] =
+		    (ev.effect_tag >= 0 && ev.effect_tag < opennova::world::kImpactEffectTagCount)
+		        ? String(opennova::world::kImpactEffectTagNames[ev.effect_tag])
+		        : String("");
+		d["entity_handle"] = static_cast<int>(ev.entity);
+		d["shooter_handle"] = static_cast<int>(ev.shooter);
+		d["ammo_index"] = ev.ammo_index;
+		d["husk"] = ev.husk;
+		d["t"] = ev.t;
+		d["p0"] = godot_from_mission_vec3(ev.p0);
+		d["p1"] = godot_from_mission_vec3(ev.p1);
+		d["hit"] = godot_from_mission_vec3(ev.hit);
+		// The struck entity's item name when it still resolves (wrecks keep
+		// their slot until cleanup) — display sugar for the F3 list.
+		String label;
+		const opennova::world::Entity *te =
+		    world_->registry.get(opennova::world::EntityHandle{ev.entity});
+		if (te != nullptr && !te->name.empty())
+			label = String(te->name.c_str());
+		d["entity_name"] = label;
+		events.push_back(d);
+	}
+	out["tick"] = static_cast<int64_t>(world_->logic_tick);
+	return out;
+}
+
+namespace {
 // Render float world -> Godot world: the render frame is Godot with X/Z
 // swapped ((-my, mz, mx)/65536 == (gz, gy, gx)), so the inverse is the same swap.
 inline Vector3 godot_from_render_float3(const float p[3]) {
@@ -1913,6 +1969,7 @@ void NovaSimulation::_bind_methods() {
 	                     &NovaSimulation::occlusion_camera_indoors);
 	ClassDB::bind_method(D_METHOD("get_collision_debug"), &NovaSimulation::get_collision_debug);
 	ClassDB::bind_method(D_METHOD("get_occlusion_debug"), &NovaSimulation::get_occlusion_debug);
+	ClassDB::bind_method(D_METHOD("get_round_debug"), &NovaSimulation::get_round_debug);
 	ClassDB::bind_method(D_METHOD("get_occlusion_portal_debug", "anchor", "range_units"),
 	                     &NovaSimulation::get_occlusion_portal_debug);
 	ClassDB::bind_method(D_METHOD("local_player_indoors"), &NovaSimulation::local_player_indoors);

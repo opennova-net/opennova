@@ -131,6 +131,34 @@ struct FireEvent {
     int32_t pitch_bam = 0;
 };
 
+// One resolved hit-test outcome, kept in a persistent ring for the F3 Rounds
+// debug view (developer tooling over our port — not retail-mimicked UI). The
+// ring is never drained: hosts snapshot it read-only, so a headless server
+// pays only the ring writes.
+struct RoundDebugEvent {
+    enum Kind : uint8_t {
+        kOrganic = 0,      // pool-0 body stand-in hit
+        kItemFace = 1,     // pool-1/2 CFAC face hit (section/face/material valid)
+        kItemSphere = 2,   // pool-1/2 bound-sphere stand-in (no face mesh)
+        kTerrain = 3,      // terrain column stop
+        kExpired = 4,      // max-age expiry / timed fuze
+        kFaceMiss = 5,     // bound-sphere graze whose face walk missed — round flew on
+    };
+    uint32_t tick = 0;
+    uint8_t kind = kExpired;
+    uint8_t material = 0;    // CFAC face material byte (kItemFace)
+    int16_t section = -1;    // COBJ section index (kItemFace / kFaceMiss)
+    int32_t face = -1;       // face index within the section (kItemFace)
+    int32_t effect_tag = -1; // impact tag handed to the present pass
+    uint16_t entity = 0xFFFF;   // packed EntityHandle of the struck entity
+    uint16_t shooter = 0xFFFF;  // packed EntityHandle of the round's owner
+    int32_t ammo_index = -1;
+    bool husk = false;       // target was in the husk-swapped (destroyed) state
+    float t = 0.0f;          // hit parameter along the tick segment
+    Vec3 p0, p1;             // the tick's flight segment (mission units)
+    Vec3 hit;                // resolved stop / graze point (mission units)
+};
+
 class RoundSim {
 public:
     static constexpr int kCapacity = 512; // [orig: 128 groups x 4 sub-slots @0xB7E1A8]
@@ -157,6 +185,14 @@ public:
     // local player's included — the present pass self-filters). Drained by the host
     // present layer each tick; see FireEvent for the witness map.
     std::vector<FireEvent> fired;
+
+    // The F3 Rounds debug ring: the last kDebugTrailCap resolved outcomes
+    // (hits, terrain stops, expiries, AND face-miss fly-ons), newest replacing
+    // oldest. Read-only snapshots; reset() clears it.
+    static constexpr int kDebugTrailCap = 48;
+    std::array<RoundDebugEvent, kDebugTrailCap> debug_trail{};
+    int debug_trail_next = 0;  // ring cursor (next write slot)
+    int debug_trail_count = 0; // valid entries, saturates at the cap
 
     // Spawn one round at fire time [orig: RoundData_SpawnRound @ 0x4EC0D0 default path].
     // Returns the round slot, or -1 (pool full / non-ballistic ammo / null ammo).

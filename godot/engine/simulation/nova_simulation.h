@@ -892,6 +892,14 @@ public:
 	// player (or the first 128 instances when no player is spawned).
 	Dictionary get_collision_debug() const;
 
+	// Read-only snapshot of the RoundSim debug ring for the F3 "Rounds" tab:
+	// { tick, events: [ { tick, kind, kind_name, material, section, face,
+	//   effect_tag, effect_tag_name, entity_handle, shooter_handle, ammo_index,
+	//   husk, t, p0, p1, hit (Godot-space Vector3), entity_name } ] } — oldest
+	// first, capped at RoundSim::kDebugTrailCap. Covers every resolved outcome
+	// including face-miss fly-ons (the "why didn't that register" case).
+	Dictionary get_round_debug() const;
+
 	// Read-only render-occlusion state for the F3 "Occlusion" debug tab:
 	// { active, camera_indoors, exterior_visible, water_visible, local_blink_flags,
 	//   counts: { instances, batched, visible, toc_culled, slots, window_groups,

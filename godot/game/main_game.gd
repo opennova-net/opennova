@@ -261,6 +261,7 @@ func toggle_debug_overlay() -> void:
 		_debug_overlay.particles_hidden_toggled.connect(_on_particles_hidden_toggled)
 		_debug_overlay.particle_boxes_toggled.connect(_on_particle_boxes_toggled)
 		_debug_overlay.occlusion_debug_toggled.connect(_on_occlusion_debug_toggled)
+		_debug_overlay.round_debug_toggled.connect(_on_round_debug_toggled)
 		_debug_overlay.set_effect_world_source(_current_effect_world)
 	_debug_overlay.toggle()
 
@@ -369,6 +370,11 @@ func _on_user_points_toggled(enabled: bool) -> void:
 func _on_collision_debug_toggled(enabled: bool) -> void:
 	if _world != null:
 		_world.set_collision_debug(enabled)
+
+
+func _on_round_debug_toggled(enabled: bool) -> void:
+	if _world != null:
+		_world.set_round_debug(enabled)
 
 
 func _on_foliage_hidden_toggled(hidden: bool) -> void:

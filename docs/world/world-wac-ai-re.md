@@ -1730,6 +1730,65 @@ collision block's **CFAC triangle mesh**, per section. Ported as
 Residuals live as D-ITEM-1 (§24.7): the sphere stand-in for face-less models, the
 `+533` refNum exclusion, and the prox-slot tables themselves (we scan the pools).
 
+### 15.8a The hit-chain re-grill (grill-ida 2026-07-18)
+
+Full-chain verification pass over the §15.8 port after an in-play "hit detection
+seems weird" report. Format layer CLEARED: the OED writer stores CVRT/CFAC in
+internal space with NO per-COBJ rebase, the runtime builder copies them
+unmodified (the AABB interleave is layout-only), the COBJ `offset`/CXLT pivot
+fields are copied but never read by the raycast `[orig:
+Threedi_BuildCollisionModelFromChunks @ 0x5b3bf0]`, and a JOX data probe
+(Chair03X/Cbunker1: every COBJ's CVRT run centroid lands ON its header offset)
+proves the vertex runs are MODEL-space — so the shared entity matrix per
+section is structurally right for statics, and our IR consumption
+(`collision_model_from_ir`, disk `dominate_axis` word kept) is faithful.
+
+Face-walk axes re-verified MATCHING against `[orig:
+Physics_RaycastAgainstBoneCollision @ 0x4e4cb0]`: the AABB interleave order,
+flags 0x100 never-hit, material-17 vs ammo 0x4000000, Q14 plane sides with the
+strict straddle, the flag-1/0x800/enter-front direction rule (the witnessed
+uninitialized `backfaceCullFlag` arg), `|d0|·len/(|d0|+|d1|)` with the
+`"Rounds Divide Error"` 0x40000000 clamp, accept `<=` best, the rounded
+hit-point stepping, and the odd-even point-in-triangle on the CNRM
+dominate-axis plane. The husk model pick (`Flags & 4` + fallback) and the
+transform chain match (the scaled-entity `Math_BuildInverseFixedPointMatrix3x3
+@ 0x613e10` leg rides D-COL-1's shared yaw-only matrix).
+
+Divergences found and FIXED this session (libs/world/src/round_sim.cpp):
+
+- **The exclusion set** `[orig: the ray[17..20] build @ 0x4ea2a5-0x4ea2f8]`:
+  beyond the shooter, the original skips the shooter's MOUNT when the seat
+  class is Controller(2)/Gunner(3)/Driver(5) — a Passenger(1) fills no slot,
+  so a passenger's rounds CAN hit their own vehicle — and for a Gunner also
+  the mount's standing-on carrier (`mount+40` groundEntity). Ported; the
+  fourth slot (`projectile+388` ← the fire request's +40, an uninitialized
+  extra on the client path `[orig: RoundData_SpawnRound @ 0x4ec0d0 [97]]`)
+  stays an open witness (D-ITEM-11).
+- **The terrain tie-break** `[orig: @ 0x4ea50e/@ 0x4ea54e]`: pool hits accept
+  only STRICTLY closer than the terrain/water winner — ours let entities win
+  ties; flipped to `<`.
+
+Divergences found and LEDGERED (new §24.7 rows): D-ITEM-12 — the round
+ballistics layer is absent (gravity −167/tick `@ 0x4eaa5a`; the
+`g_ProjectileDragTable @ 0xB7B300` power-law drag `[orig:
+Entity_ApplyDragAndBounceForce @ 0x4e5ec0 / Projectile_InitDragTable
+@ 0x4e78d0]` with wind, the 25× underwater multiplier, the reversal clamp and
+the low-speed tumble kick; the water hitType-4 leg + the underwater slow-kill
+`@ 0x4ea13e`). D-ITEM-13 — hit-resolution residuals (the terrain sub-stepping
+stand-in, the ±2048/+4096 stop offsets, the person bone-SECTION narrow phase
+`[orig: Physics_RaycastAgainstBoneSections @ 0x4e4670]` with its
+first-hit-terminates scan vs our body cylinder).
+
+Tooling landed with the grill (developer window, not witnessed behavior): the
+F3 **Rounds** tab + "Show round trails" world view over a new persistent
+`RoundSim` debug ring (`RoundDebugEvent`, cap 48) recording every resolved
+outcome — including face-miss fly-ons — exposed via
+`NovaSimulation.get_round_debug()`.
+
+IDB write-backs (2026-07-18, saved): rename `g_ProjectileDragTable @ 0xB7B300`
+(ex `dword_B7B300`); comments at `@ 0x4ea291` (the exclusion-set build map)
+and `@ 0x4e78d0` (the drag-table generator).
+
 ## 16. Appendix: ground-AI combat chain — SM layer + shared targeting/fire primitives (engine-research, 2026-07-16)
 
 Slice-1 witness pass for the mission-playability track: how AI acquires live targets and
@@ -3617,6 +3676,9 @@ the FFI structs.
 | D-ITEM-8 | The crane/water-tower special death (the "scrane" pool walk + the double kz queue `@ 0x43fc70`) and `Entity_ProcessCraneDestruction @ 0x43eee0` are unported; the destructible 992-tick spawnPhase re-notify and the ambient phase-0 shot leg (`Entity_SpawnRegionalEffect @ 0x408290`) are unported | as cited | special-cased content (shipyard cranes, water towers); the ambient shot leg is a separate feature (items firing scheduled time-of-day sounds) |
 | D-ITEM-9 | The dead-wreck settle grounds on the TERRAIN height only, and the ported ground-rest offset uses the sec0 z extents synthesized from the piece model's LOD-0 primitive bounds (upright leg only) | `Entity_RaycastGroundHeightAndObject @ 0x414320` (terrain + objects, mask 0x200000); the section-row +84/+88 extents `@ 0x461e23-0x461e4b` | a wreck dying on a roof sinks to the terrain below; the runtime section-row field provenance (+84/+88 = the section bbox z) is probable, not row-walked — verify against the render-model builder to close |
 | D-ITEM-10 | The settle's water-crossing splash and landing sounds play the witnessed FALLBACKS only (`IMP_DEBLRG_WATER` / `IMP_VCL_DROP`); the def per-item landing (+140) and water (+156) sound slots and the splash effect slot (@ 0x2C25C64) are unported | `@ 0x4940c6-0x494100 / @ 0x49417c-0x4941af` | items authoring custom impact sounds play the generic pair; the splash draws no effect (sound only) |
+| D-ITEM-11 | The round exclusion set skips shooter + mount (Controller/Gunner/Driver seats only — a Passenger's rounds can hit their own vehicle) + the Gunner mount's standing-on carrier, PORTED 2026-07-18 (§15.8a); the FOURTH slot — `projectile+388` ← the fire request's dword +40 — is consumed by every prox walk but its fill is an uninitialized extra on the client fire path, provenance OPEN (the server path `Server_ClientFiredRound @ 0x50baa0` unwalked) | `ray[17..20] @ 0x4ea2a5-0x4ea2f8`; `RoundData_SpawnRound @ 0x4ec0d0` ([97] ← hitData+40); compares `@ 0x4e5572/@ 0x4e5782/@ 0x4e5983/@ 0x4e4c4e` | firing from Controller/Gunner/Driver seats no longer self-hits the hull; walk 0x50baa0's cmd[21]→spawn plumbing to close the +388 slot |
+| D-ITEM-12 | Round BALLISTICS are absent: no gravity, drag, wind, water. Original: velZ −= 167/tick for non-thruster rounds without ammo flag 0x100 (`@ 0x4eaa5a`; the 0x100 class takes −167 inside the slow regime instead `@ 0x4e6329`); per-tick drag force = `g_ProjectileDragTable[62·speed>>16, clamp 1219]` scaled by ammo drag (+28) — the 4000-entry table is generated at init by a piecewise power-law over ~40 speed regimes (transonic bands 1025..1360 ft/s) — direction −vel normalized, WIND-relative (`@ 0x2C059E4..EC`), 25× underwater, a velocity-reversal zero clamp, and a one-shot random TUMBLE kick when the speed index first drops below ammo+176 (spread ammo+180, seeded by ownerConnectionId); water: hitType-4 splash at the plane + rounds continue submerged, killed when speed < 0x4000 below water (`@ 0x4ea13e`) | `Entity_ApplyDragAndBounceForce @ 0x4e5ec0`; `Projectile_InitDragTable @ 0x4e78d0`; `g_ProjectileDragTable @ 0xB7B300`; gravity `@ 0x4eaa5a`; water `@ 0x4ea4e0` | our rounds fly straight forever — no drop, no slowdown, crosshair-perfect at any range, no water interaction; port = extract the ~40 (exponent, scale) double pairs + the two scale constants off 0x4e78d0 and the wind source |
+| D-ITEM-13 | Hit-resolution residuals: (a) the terrain leg sub-steps the bilinear column at 2-u intervals with a crossing refinement — the original raycasts the hi-res heightmap (`Terrain_RaycastHeightmapHiRes_Thunk @ 0x610890`) with a proportional end-below-ground fallback (`@ 0x4ea42b-0x4ea4af`), so thin crests can tunnel in ours (the strict-less tie-break itself was FIXED 2026-07-18); (b) our stop parks the round AT the hit — the original backs the impact effect off by 2048 and parks at hit+2048 (+victim boundRadius for persons) `@ 0x4ea603-0x4ea7d5`; (c) the pool-0 person narrow phase is the per-bone SECTION walk `Physics_RaycastAgainstBoneSections @ 0x4e4670` (extraRadius = projectile+672, min 0.1u under `g_FatBullets` for remote building-flag shooters `@ 0x4ea58d`) whose scan TERMINATES on first hit — ours is the body cylinder (rides D-AI-9's bone-zone deferral); (d) our sphere gate is segment-vs-sphere (inside-start returns the EXIT t) vs the original's unclamped perpendicular line distance | as cited; the dispatch order `@ 0x4ea3b4-0x4ea5f2` | long shots can clip ridge crests; effect points sit a hair deeper than retail's; limb/headshot zones impossible until (c) lands |
 
 ### 24.8 IDB write-backs (2026-07-17, saved)
 

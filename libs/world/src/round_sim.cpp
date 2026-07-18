@@ -108,6 +108,9 @@ void RoundSim::reset() noexcept {
 	deaths.clear();
 	impacts.clear();
 	next_impact_order = 1;
+	debug_trail = {};
+	debug_trail_next = 0;
+	debug_trail_count = 0;
 }
 
 int RoundSim::spawn(World &world, const RoundSpawnParams &params) {
@@ -193,6 +196,13 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params) {
     return slot;
 }
 
+// Ring write for the F3 Rounds view — every resolved outcome lands here.
+static void push_round_debug(RoundSim &sim, const RoundDebugEvent &ev) {
+    sim.debug_trail[static_cast<size_t>(sim.debug_trail_next)] = ev;
+    sim.debug_trail_next = (sim.debug_trail_next + 1) % RoundSim::kDebugTrailCap;
+    if (sim.debug_trail_count < RoundSim::kDebugTrailCap) ++sim.debug_trail_count;
+}
+
 void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                     CollisionWorld *collision) {
     if (active_count <= 0) return;
@@ -211,6 +221,17 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         if (++r.age_ticks > r.max_age_ticks) {
             const AmmoTableEntry *fuze_ammo = world.ammo.by_index(r.ammo_index);
             if (fuze_ammo != nullptr) detonate_round(world, r, r.pos, *fuze_ammo);
+            {
+                RoundDebugEvent ev;
+                ev.tick = world.logic_tick;
+                ev.kind = RoundDebugEvent::kExpired;
+                ev.shooter = r.owner.packed;
+                ev.ammo_index = r.ammo_index;
+                ev.p0 = r.pos;
+                ev.p1 = r.pos;
+                ev.hit = r.pos;
+                push_round_debug(*this, ev);
+            }
             r.active = false;
             --active_count;
             continue;
@@ -231,8 +252,31 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         uint16_t best_handle = 0xFFFF;
         bool best_is_item = false;
         uint8_t best_material = 0; // face material byte; 0 with the sphere stand-in
+        int16_t best_section = -1; // COBJ section + face of the winning CFAC hit
+        int32_t best_face = -1;    // (-1 = sphere stand-in) — the F3 Rounds view
+        bool best_had_faces = false;
         const AmmoTableEntry *ammo = world.ammo.by_index(r.ammo_index);
         const float radius = kOrganicRadius + (ammo != nullptr ? ammo->bullet_radius : 0.0f);
+        // The exclusion set beyond the shooter [orig: the ray[17..20] build in
+        // Projectile_UpdatePhysics @0x4ea2a5-0x4ea2f8, compared by every pool
+        // walk @0x4e5572/@0x4e5782/@0x4e5983/@0x4e4c4e]: a Controller/Gunner/
+        // Driver occupant never hits their own mount (a PASSENGER's rounds
+        // still can — seat type 1 fills no slot), and a Gunner also skips the
+        // mount's standing-on carrier (mount+40 groundEntity). The fourth slot
+        // (+388 <- the fire request's +40) is an open witness
+        // (docs/world/world-wac-ai-re.md D-ITEM-11).
+        EntityHandle exclude_mount;
+        EntityHandle exclude_carrier;
+        if (const Entity *sh = world.registry.get(r.owner);
+            sh != nullptr && sh->mounted &&
+            (sh->mount_type == SeatType::Controller ||
+             sh->mount_type == SeatType::Gunner || sh->mount_type == SeatType::Driver)) {
+            exclude_mount = sh->mount_target;
+            if (sh->mount_type == SeatType::Gunner) {
+                if (const Entity *m = world.registry.get(sh->mount_target))
+                    exclude_carrier = m->ground_target;
+            }
+        }
         for (size_t s = 0; s < pool0; ++s) {
             const uint16_t packed = static_cast<uint16_t>(s); // pool 0 -> high nibble 0
             const EntityHandle h{packed};
@@ -255,6 +299,8 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             for (size_t s = 0; s < cap; ++s) {
                 const EntityHandle h = EntityHandle::make(pool, static_cast<int>(s));
                 if (r.owner.valid() && h.packed == r.owner.packed) continue;
+                if (exclude_mount.valid() && h.packed == exclude_mount.packed) continue;
+                if (exclude_carrier.valid() && h.packed == exclude_carrier.packed) continue;
                 Entity *e = world.registry.get(h);
                 if (e == nullptr || e->hidden) continue;
                 if ((e->engine_flags & 0x1u) != 0) continue; // [orig: the pool-walk
@@ -275,6 +321,9 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                 // on the model -> the sphere hit stands in (D-ITEM-1).
                 float item_t = hit.t;
                 uint8_t item_material = 0;
+                int16_t item_section = -1;
+                int32_t item_face = -1;
+                bool item_had_faces = false;
                 if (collision != nullptr) {
                     const int32_t s16[3] = {static_cast<int32_t>(p0.x * 65536.0f),
                                             static_cast<int32_t>(p0.y * 65536.0f),
@@ -285,7 +334,24 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                     RayFaceHit fh;
                     const CollisionWorld::FaceRaycast res = collision->raycast_entity_faces(
                             world, h, s16, e16, ammo != nullptr ? ammo->flags : 0u, fh);
-                    if (res == CollisionWorld::FaceRaycast::kMiss) continue;
+                    if (res == CollisionWorld::FaceRaycast::kMiss) {
+                        // The graze that flew on — the top "why didn't that
+                        // register" answer, so it lands in the debug ring.
+                        RoundDebugEvent ev;
+                        ev.tick = world.logic_tick;
+                        ev.kind = RoundDebugEvent::kFaceMiss;
+                        ev.entity = h.packed;
+                        ev.shooter = r.owner.packed;
+                        ev.ammo_index = r.ammo_index;
+                        ev.husk = (e->engine_flags & 0x4u) != 0;
+                        ev.t = hit.t;
+                        ev.p0 = p0;
+                        ev.p1 = p1;
+                        ev.hit = Vec3{p0.x + r.vel.x * hit.t, p0.y + r.vel.y * hit.t,
+                                      p0.z + r.vel.z * hit.t};
+                        push_round_debug(*this, ev);
+                        continue;
+                    }
                     if (res == CollisionWorld::FaceRaycast::kHit) {
                         const float seg_len = std::sqrt(r.vel.x * r.vel.x +
                                                         r.vel.y * r.vel.y +
@@ -293,6 +359,9 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                         if (seg_len > 0.0f)
                             item_t = static_cast<float>(fh.dist) / 65536.0f / seg_len;
                         item_material = fh.material;
+                        item_section = static_cast<int16_t>(fh.section);
+                        item_face = fh.face;
+                        item_had_faces = true;
                     }
                 }
                 if (item_t < best_t) {
@@ -301,6 +370,9 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                     best_handle = h.packed;
                     best_is_item = true;
                     best_material = item_material;
+                    best_section = item_section;
+                    best_face = item_face;
+                    best_had_faces = item_had_faces;
                 }
             }
         }
@@ -309,6 +381,8 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         // [orig: Terrain_RaycastHeightmapHiRes segment test in Projectile_UpdatePhysics;
         // bilinear column sampling is the tracked heightfield altitude]. Mission (x, y)
         // maps to the sampler as (x, -y) — the ai.cpp grounding convention.
+        // The 2-u sub-stepping is a stand-in for the hi-res heightmap raycast
+        // (docs/world/world-wac-ai-re.md D-ITEM-13a).
         float terrain_t = 2.0f;
         if (terrain != nullptr && terrain->valid()) {
             const float seg_len = std::sqrt(r.vel.x * r.vel.x + r.vel.y * r.vel.y +
@@ -342,7 +416,10 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             }
         }
 
-        if (best_target != nullptr && best_t <= terrain_t) {
+        // Entities win over the terrain stop only when STRICTLY closer — the
+        // original's pool legs accept ray[29] < closestHitDist, ties stay with
+        // the terrain/water winner [orig: @0x4ea50e/@0x4ea54e].
+        if (best_target != nullptr && best_t < terrain_t) {
             const Vec3 impact_pos{p0.x + r.vel.x * best_t, p0.y + r.vel.y * best_t,
                                   p0.z + r.vel.z * best_t};
             if (best_is_item) {
@@ -401,6 +478,25 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                 imp.tick = world.logic_tick;
                 imp.source_order = next_impact_order++;
                 if (impacts.size() < kMaxPendingImpacts) impacts.push_back(imp);
+                {
+                    RoundDebugEvent ev;
+                    ev.tick = world.logic_tick;
+                    ev.kind = best_had_faces ? RoundDebugEvent::kItemFace
+                                             : RoundDebugEvent::kItemSphere;
+                    ev.material = best_material;
+                    ev.section = best_section;
+                    ev.face = best_face;
+                    ev.effect_tag = tag;
+                    ev.entity = best_handle;
+                    ev.shooter = r.owner.packed;
+                    ev.ammo_index = r.ammo_index;
+                    ev.husk = (best_target->engine_flags & 0x4u) != 0;
+                    ev.t = best_t;
+                    ev.p0 = p0;
+                    ev.p1 = p1;
+                    ev.hit = impact_pos;
+                    push_round_debug(*this, ev);
+                }
                 r.active = false;
                 --active_count;
                 continue;
@@ -473,6 +569,20 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             imp.tick = world.logic_tick;
             imp.source_order = next_impact_order++;
             if (impacts.size() < kMaxPendingImpacts) impacts.push_back(imp);
+            {
+                RoundDebugEvent ev;
+                ev.tick = world.logic_tick;
+                ev.kind = RoundDebugEvent::kOrganic;
+                ev.effect_tag = 2;
+                ev.entity = best_handle;
+                ev.shooter = r.owner.packed;
+                ev.ammo_index = r.ammo_index;
+                ev.t = best_t;
+                ev.p0 = p0;
+                ev.p1 = p1;
+                ev.hit = impact_pos;
+                push_round_debug(*this, ev);
+            }
             r.active = false;
             --active_count;
             continue;
@@ -497,11 +607,28 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             // An explosive round detonates on the terrain stop [orig: the kz
             // dispatch from Projectile_HandleTerrainImpact @0x4e9210 family].
             if (ammo != nullptr) detonate_round(world, r, imp.position, *ammo);
+            {
+                RoundDebugEvent ev;
+                ev.tick = world.logic_tick;
+                ev.kind = RoundDebugEvent::kTerrain;
+                ev.effect_tag = imp.effect_tag;
+                ev.shooter = r.owner.packed;
+                ev.ammo_index = r.ammo_index;
+                ev.t = terrain_t;
+                ev.p0 = p0;
+                ev.p1 = p1;
+                ev.hit = imp.position;
+                push_round_debug(*this, ev);
+            }
             r.active = false;
             --active_count;
             continue;
         }
 
+        // Straight-line flight: the retail per-tick gravity (velZ -= 167
+        // [orig: @0x4eaa5a]) and the drag/wind/water/tumble layer
+        // (Entity_ApplyDragAndBounceForce @0x4e5ec0) are the tracked
+        // ballistics deferral (docs/world/world-wac-ai-re.md D-ITEM-12).
         r.pos = p1;
     }
 }
