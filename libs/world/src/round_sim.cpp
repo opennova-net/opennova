@@ -44,9 +44,10 @@ void detonate_round(World &world, const LiveRound &r, const Vec3 &at,
 // The MVP organic hit shape: a sphere over the torso. The witnessed hit test is the
 // proximity list + bone-section collision (Projectile_RaycastProximitySlots @ 0x4E5340,
 // Entity_ComputeBoneCollisionBounds) — this stands in until the collision-model port
-// (tracked, §5.60), so every hit is a BODY hit (zone multiplier 1.0).
-constexpr float kOrganicCenterZ = 0.9f;
-constexpr float kOrganicRadius = 0.6f;
+// (tracked, §5.60), so every hit is a BODY hit (zone multiplier 1.0). The values are
+// the round_sim.h kOrganicStandIn* exports, shared with the F3 hitbox view.
+constexpr float kOrganicCenterZ = kOrganicStandInCenterZ;
+constexpr float kOrganicRadius = kOrganicStandInRadius;
 
 struct SegHit {
     bool hit = false;

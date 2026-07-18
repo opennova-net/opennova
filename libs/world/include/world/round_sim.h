@@ -164,6 +164,12 @@ struct RoundDebugEvent {
     Vec3 hit;                // resolved stop / graze point (mission units)
 };
 
+// The MVP organic hit stand-in: one sphere over the torso (the witnessed model
+// is the per-bone section walk, D-ITEM-13c). Exported so the F3 hitbox view
+// draws the SAME shape the round test uses.
+inline constexpr float kOrganicStandInCenterZ = 0.9f;
+inline constexpr float kOrganicStandInRadius = 0.6f;
+
 class RoundSim {
 public:
     static constexpr int kCapacity = 512; // [orig: 128 groups x 4 sub-slots @0xB7E1A8]

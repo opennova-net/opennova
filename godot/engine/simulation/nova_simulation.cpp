@@ -1221,6 +1221,76 @@ inline Vector3 godot_from_mission_vec3(const opennova::world::Vec3 &p) {
 }
 } // namespace
 
+Dictionary NovaSimulation::get_hitbox_debug() const {
+	Dictionary out;
+	Array entities;
+	Array organics;
+	out["entities"] = entities;
+	out["organics"] = organics;
+	if (!world_) return out;
+
+	// Anchor on the local player like the volume view; a preview with no
+	// player sweeps up to the caps.
+	int32_t anchor[3] = {0, 0, 0};
+	int32_t range = -1;
+	const opennova::world::Entity *lp =
+	    world_->cached.local_player.valid() ? world_->registry.get(world_->cached.local_player)
+	                                        : nullptr;
+	if (lp != nullptr) {
+		anchor[0] = opennova::world::to_fixed(lp->position.x);
+		anchor[1] = opennova::world::to_fixed(lp->position.y);
+		anchor[2] = opennova::world::to_fixed(lp->position.z);
+		range = 80 << 16;
+	}
+	const std::vector<opennova::world::CollisionWorld::DebugHitboxEntity> ents =
+	    collision_world_.debug_hitboxes(*world_, anchor, range, 96, 24000);
+	for (const opennova::world::CollisionWorld::DebugHitboxEntity &ent : ents) {
+		Dictionary d;
+		d["entity_handle"] = static_cast<int>(ent.handle.packed);
+		d["pos"] = godot_from_fixed3(ent.pos);
+		d["bound_radius"] = static_cast<float>(ent.bound_radius / kFixed16);
+		d["husk"] = ent.husk;
+		d["has_faces"] = ent.has_faces;
+		d["face_total"] = ent.face_total;
+		PackedVector3Array tris;
+		PackedByteArray materials;
+		PackedInt32Array flags;
+		tris.resize(static_cast<int64_t>(ent.faces.size()) * 3);
+		materials.resize(static_cast<int64_t>(ent.faces.size()));
+		flags.resize(static_cast<int64_t>(ent.faces.size()));
+		Vector3 *tw = tris.ptrw();
+		uint8_t *mw = materials.ptrw();
+		int32_t *fw = flags.ptrw();
+		for (size_t i = 0; i < ent.faces.size(); ++i) {
+			const opennova::world::CollisionWorld::DebugHitboxFace &f = ent.faces[i];
+			for (int k = 0; k < 3; ++k) tw[i * 3 + k] = godot_from_fixed3(f.v[k]);
+			mw[i] = f.material;
+			fw[i] = static_cast<int32_t>(f.flags);
+		}
+		d["tris"] = tris;
+		d["materials"] = materials;
+		d["flags"] = flags;
+		entities.push_back(d);
+	}
+
+	// The pool-0 organic stand-in spheres — the shape the round test actually
+	// uses for people (round_sim.h kOrganicStandIn*; D-ITEM-13c).
+	const size_t pool0 = world_->registry.pool_capacity(0);
+	for (size_t s = 0; s < pool0; ++s) {
+		const opennova::world::Entity *e =
+		    world_->registry.get(opennova::world::EntityHandle{static_cast<uint16_t>(s)});
+		if (e == nullptr || e->health <= 0) continue;
+		Dictionary d;
+		d["entity_handle"] = static_cast<int>(s);
+		d["pos"] = Vector3(e->position.x,
+		                   e->position.z + opennova::world::kOrganicStandInCenterZ,
+		                   -e->position.y);
+		d["radius"] = opennova::world::kOrganicStandInRadius;
+		organics.push_back(d);
+	}
+	return out;
+}
+
 int NovaSimulation::debug_spawn_round(const Vector3 &p_from_godot, const Vector3 &p_dir_godot,
                                       const String &p_ammo_name) {
 	if (!world_) return -1;
@@ -2000,6 +2070,7 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_round_debug"), &NovaSimulation::get_round_debug);
 	ClassDB::bind_method(D_METHOD("debug_spawn_round", "from_godot", "dir_godot", "ammo_name"),
 	                     &NovaSimulation::debug_spawn_round);
+	ClassDB::bind_method(D_METHOD("get_hitbox_debug"), &NovaSimulation::get_hitbox_debug);
 	ClassDB::bind_method(D_METHOD("get_occlusion_portal_debug", "anchor", "range_units"),
 	                     &NovaSimulation::get_occlusion_portal_debug);
 	ClassDB::bind_method(D_METHOD("local_player_indoors"), &NovaSimulation::local_player_indoors);

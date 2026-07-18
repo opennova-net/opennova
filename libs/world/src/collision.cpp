@@ -2110,6 +2110,71 @@ std::vector<CollisionWorld::DebugInstance> CollisionWorld::debug_instances(
     return out;
 }
 
+std::vector<CollisionWorld::DebugHitboxEntity> CollisionWorld::debug_hitboxes(
+    World &world, const int32_t anchor[3], int32_t range, int32_t max_entities,
+    int32_t max_faces) const {
+    std::vector<DebugHitboxEntity> out;
+    int32_t face_budget = max_faces > 0 ? max_faces : INT32_MAX;
+    for (const auto &kv : instances_) {
+        if (max_entities > 0 && static_cast<int32_t>(out.size()) >= max_entities) break;
+        EntityHandle h;
+        h.packed = kv.first;
+        CollisionTargetView view;
+        std::vector<CollisionMatrix> mats;
+        // The SAME husk-aware view + full-euler placement matrices the
+        // projectile raycast walks — the drawn mesh IS the tested mesh.
+        const CollisionTargetView *tv = target_view(world, h, view, mats);
+        if (tv == nullptr) continue;
+        if (range > 0 && anchor != nullptr &&
+            (abs32(tv->pos[0] - anchor[0]) > range || abs32(tv->pos[1] - anchor[1]) > range ||
+             abs32(tv->pos[2] - anchor[2]) > range))
+            continue;
+
+        DebugHitboxEntity ent;
+        ent.handle = h;
+        ent.pos[0] = tv->pos[0];
+        ent.pos[1] = tv->pos[1];
+        ent.pos[2] = tv->pos[2];
+        ent.bound_radius = tv->bound_radius;
+        if (const Entity *e = world.registry.get(h)) {
+            ent.husk = (e->engine_flags & 0x4u) != 0 &&
+                       instances_.at(h.packed).husk_model_id >= 0;
+            if (e->bound_radius > 0.0f) ent.bound_radius = to_fixed(e->bound_radius);
+        }
+
+        const CollisionModel &m = *tv->model;
+        ent.has_faces = !m.faces.empty();
+        for (size_t si = 0; si < m.sections.size() && face_budget > 0; ++si) {
+            const CollisionSection &sec = m.sections[si];
+            if (sec.face_count <= 0) continue;
+            const CollisionMatrix &mat = tv->matrices[si];
+            if (mat.disabled()) continue; // mirrors the raycast skip
+            const CollisionFaceVertex *verts =
+                m.face_vertices.data() + sec.face_vertex_start;
+            ent.face_total += sec.face_count;
+            for (int32_t fi = 0; fi < sec.face_count && face_budget > 0; ++fi) {
+                const CollisionFace &face = m.faces[sec.face_start + fi];
+                DebugHitboxFace df;
+                df.material = face.material;
+                df.flags = face.flags;
+                for (int k = 0; k < 3; ++k) {
+                    const CollisionFaceVertex &vt = verts[face.v[k]];
+                    // Q8 int16 -> 16.16 (<< 8), then the section world matrix —
+                    // the raycast's own vertex scale and transform.
+                    const int32_t local[3] = {static_cast<int32_t>(vt.x) << 8,
+                                              static_cast<int32_t>(vt.y) << 8,
+                                              static_cast<int32_t>(vt.z) << 8};
+                    mat.transform_point(local, df.v[k]);
+                }
+                ent.faces.push_back(df);
+                --face_budget;
+            }
+        }
+        out.push_back(std::move(ent));
+    }
+    return out;
+}
+
 // Contact-flag side effects shared by both passes. [orig: the flag dispatch inside
 // the resolver loop @ 0x4b30b7-0x4b351e]
 void CollisionWorld::apply_touch_flags(Entity *ent, uint32_t flags, int16_t &health,

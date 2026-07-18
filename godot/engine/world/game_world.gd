@@ -34,6 +34,7 @@ const CollisionDebugView := preload("res://engine/debug/collision_debug_view.gd"
 const OcclusionDebugView := preload("res://engine/debug/occlusion_debug_view.gd")
 const ParticleDebugView := preload("res://engine/debug/particle_debug_view.gd")
 const RoundDebugView := preload("res://engine/debug/round_debug_view.gd")
+const HitboxDebugView := preload("res://engine/debug/hitbox_debug_view.gd")
 const NET_CONTAINER_NAME := "NetObjects"
 const SKELETON_DEBUG_NAME := "SkeletonDebug"
 const USER_POINT_DEBUG_NAME := "UserPointDebug"
@@ -41,6 +42,7 @@ const COLLISION_DEBUG_NAME := "CollisionDebug"
 const PARTICLE_DEBUG_NAME := "ParticleDebug"
 const OCCLUSION_DEBUG_NAME := "OcclusionDebug"
 const ROUND_DEBUG_NAME := "RoundDebug"
+const HITBOX_DEBUG_NAME := "HitboxDebug"
 const TICK_DT := 1.0 / 62.5  # mirrors MissionRuntime.TICK_DT; default for tick()'s delta param
 # [orig: ItemDef_GetBoneMaskByName @ 0x49ea40 scans the first 16 points.]
 const ITEM_EFFECT_USER_POINT_SCAN_LIMIT := 16
@@ -620,6 +622,9 @@ func unload() -> void:
 	var rnd_debug := get_node_or_null(NodePath(ROUND_DEBUG_NAME))
 	if rnd_debug != null:
 		rnd_debug.queue_free()
+	var hb_debug := get_node_or_null(NodePath(HITBOX_DEBUG_NAME))
+	if hb_debug != null:
+		hb_debug.queue_free()
 	# Net session teardown (no-ops for a normal mission).
 	if _net_event_view != null:
 		_net_event_view.queue_free()
@@ -1359,6 +1364,21 @@ func set_round_debug(enabled: bool) -> void:
 		return
 	var view := RoundDebugView.new()
 	view.name = ROUND_DEBUG_NAME
+	add_child(view)
+	view.setup(self)  # duck-typed get_sim(), re-resolved per frame
+
+
+# Build / free a child HitboxDebugView drawing the round hit-detection reality
+# (bullet-mesh wireframes + bound spheres + organic stand-ins) — the
+# collision-view contract, on the overlay's "Show hit meshes" toggle.
+func set_hitbox_debug(enabled: bool) -> void:
+	var existing := get_node_or_null(NodePath(HITBOX_DEBUG_NAME))
+	if existing != null:
+		existing.queue_free()
+	if not enabled:
+		return
+	var view := HitboxDebugView.new()
+	view.name = HITBOX_DEBUG_NAME
 	add_child(view)
 	view.setup(self)  # duck-typed get_sim(), re-resolved per frame
 

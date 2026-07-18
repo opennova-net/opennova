@@ -135,6 +135,37 @@ func _ready() -> void:
 					(inst.get("volumes", []) as Array).size(),
 					str(corners0.slice(0, 2))])
 
+	# NOVA_PR_HITBOXES=1: build the hitbox view (the CFAC wireframes rounds
+	# test) and park an orbit camera at the DUMPED pose for a screenshot —
+	# the visual-vs-collision eyeball check at the reported spot.
+	if OS.get_environment("NOVA_PR_HITBOXES").to_int() == 1:
+		var world_node = _find_by_method(get_tree().root, "set_hitbox_debug")
+		if world_node != null:
+			world_node.set_hitbox_debug(true)
+			await _settle(30)
+			var vp: Viewport = null
+			for n in get_tree().root.find_children("HitboxDebug", "", true, false):
+				vp = (n as Node3D).get_viewport()
+				break
+			if vp != null:
+				var prev := vp.get_camera_3d()
+				var shot_cam := Camera3D.new()
+				vp.add_child(shot_cam)
+				shot_cam.global_position = from_g
+				shot_cam.look_at(from_g + fwd_g, Vector3.UP)
+				shot_cam.current = true
+				await _settle(20)
+				await RenderingServer.frame_post_draw
+				var img: Image = vp.get_texture().get_image()
+				if img != null:
+					img.save_png(_out_abs.path_join("hitboxes.png"))
+					print("[pr] wrote hitboxes.png")
+				if prev != null:
+					prev.current = true
+				shot_cam.queue_free()
+		else:
+			print("[pr] no world with set_hitbox_debug found")
+
 	var ammo := OS.get_environment("NOVA_PR_AMMO").strip_edges()
 	if ammo.is_empty():
 		ammo = "AMMO_556"

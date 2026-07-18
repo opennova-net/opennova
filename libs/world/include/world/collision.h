@@ -526,6 +526,33 @@ public:
     std::vector<DebugInstance> debug_instances(World &world, const int32_t anchor[3],
                                                int32_t range, int32_t max_instances) const;
 
+    // The round hit-detection reality for a host hitbox view: per entity, the
+    // CFAC bullet-mesh triangles in WORLD space, transformed through the SAME
+    // husk-aware target_view + full-euler placement path the projectile
+    // raycast walks (what is drawn IS what rounds test), each face carrying
+    // its material byte + flags; plus the broad-phase bound sphere and
+    // whether the entity has a face mesh at all (none = the bound-sphere
+    // stand-in decides hits, D-ITEM-1). `max_faces` is a total triangle
+    // budget; face_total still reports each entity's authored count so a
+    // truncated draw is visible as such.
+    struct DebugHitboxFace {
+        int32_t v[3][3] = {}; // world-space triangle corners (mission 16.16)
+        uint8_t material = 0;
+        uint32_t flags = 0;
+    };
+    struct DebugHitboxEntity {
+        EntityHandle handle;
+        int32_t pos[3] = {};
+        int32_t bound_radius = 0; // 16.16 (the round broad-phase sphere)
+        bool husk = false;        // the shell is the husk-swapped model
+        bool has_faces = false;   // false = sphere stand-in resolves hits
+        int32_t face_total = 0;   // authored faces (before the budget cap)
+        std::vector<DebugHitboxFace> faces;
+    };
+    std::vector<DebugHitboxEntity> debug_hitboxes(World &world, const int32_t anchor[3],
+                                                  int32_t range, int32_t max_entities,
+                                                  int32_t max_faces) const;
+
 private:
     // Contact-flag side effects shared by both resolver passes (damage tiers +
     // the type-6/type-11 entity flags). [orig: the dispatch @ 0x4b30b7-0x4b351e]

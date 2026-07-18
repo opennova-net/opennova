@@ -74,6 +74,12 @@ signal occlusion_debug_toggled(enabled: bool)
 ## detail labels over the world), the collision-view contract.
 signal round_debug_toggled(enabled: bool)
 
+## Fired when the Rounds tab's "Show hit meshes" checkbox is toggled. The host
+## builds/frees the HitboxDebugView (the CFAC bullet-mesh wireframes rounds
+## actually test, bound spheres, organic stand-ins), the collision-view
+## contract.
+signal hitbox_debug_toggled(enabled: bool)
+
 const REFRESH_INTERVAL := 0.25
 const PANEL_WIDTH := 380.0
 const PLAYER_POSE_DUMP_DIR := "user://debug/player_locations"
@@ -154,6 +160,7 @@ var _occ_portals_check: CheckBox
 var _rnd_status_label: Label
 var _rnd_list: ItemList
 var _rnd_trails_check: CheckBox
+var _rnd_hitbox_check: CheckBox
 
 
 # Player pane: the authoritative local-player pose plus a one-click disk dump.
@@ -424,6 +431,14 @@ func _build_rounds_tab() -> void:
 	_rnd_trails_check.button_pressed = false
 	_rnd_trails_check.toggled.connect(_on_round_debug_toggled)
 	tab.add_child(_rnd_trails_check)
+
+	_rnd_hitbox_check = CheckBox.new()
+	_rnd_hitbox_check.name = "RoundsShowHitMeshes"
+	_rnd_hitbox_check.text = "Show hit meshes"
+	_rnd_hitbox_check.tooltip_text = "Draw what rounds actually test against: every nearby object's bullet-mesh wireframe (colored by surface material, dark red = authored never-hit), its broad-phase sphere (amber = no face mesh, the sphere alone decides), and the cyan body spheres people use."
+	_rnd_hitbox_check.button_pressed = false
+	_rnd_hitbox_check.toggled.connect(_on_hitbox_debug_toggled)
+	tab.add_child(_rnd_hitbox_check)
 
 
 # Render-debug toggles. Unlike the other tabs these don't read the sim: the checkbox holds
@@ -1077,6 +1092,10 @@ func _clear_rounds_pane(message: String) -> void:
 
 func _on_round_debug_toggled(pressed: bool) -> void:
 	round_debug_toggled.emit(pressed)
+
+
+func _on_hitbox_debug_toggled(pressed: bool) -> void:
+	hitbox_debug_toggled.emit(pressed)
 
 
 func _on_occlusion_debug_toggled(pressed: bool) -> void:

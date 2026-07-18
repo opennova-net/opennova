@@ -905,6 +905,17 @@ public:
 	// including face-miss fly-ons (the "why didn't that register" case).
 	Dictionary get_round_debug() const;
 
+	// The round hit-detection reality for the F3 hitbox view:
+	// { entities: [ { entity_handle, pos, bound_radius, husk, has_faces,
+	//   face_total, tris (PackedVector3Array, triangle list, Godot world),
+	//   materials (PackedByteArray per tri), flags (PackedInt32Array per tri) } ],
+	//   organics: [ { entity_handle, pos (sphere center, Godot), radius } ] }.
+	// Triangles are transformed in C++ through the SAME husk-aware
+	// target_view + full-euler matrices the projectile raycast uses — the
+	// drawn mesh IS the tested mesh. Capped: 96 entities / 24000 faces within
+	// 80 u of the local player (face_total exposes per-entity truncation).
+	Dictionary get_hitbox_debug() const;
+
 	// Diagnostic round injector: spawns one live round through the REAL
 	// RoundSim::spawn (production velocity/tracer/trail path; owner = the local
 	// player) from a Godot-space origin along a Godot-space direction, firing
