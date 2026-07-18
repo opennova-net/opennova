@@ -765,6 +765,35 @@ static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out) {
                 safe_copy(current.notarmmed_ammo, sizeof(current.notarmmed_ammo), tok[0].s,
                           tok[0].len);
             parsed = 1;
+        } else if (lower_starts_with(lower, ll, "frndlytrcrid", 12)) {
+            /* The tracer round's friendly item model, by ITEMS.DEF type id. The
+               original resolves to an item index here (name fallback, warning on
+               miss) [orig: @0x40a5f8-0x40a63f -> +16]; we keep the raw type id. */
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
+            current.frndly_trcr_type_id = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "foetrcrid", 9)) {
+            /* [orig: @0x40a646-0x40a68d -> +20] */
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
+            current.foe_trcr_type_id = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "light_move", 10)) {
+            /* The in-flight round glow: radius (16.16) + packed RGB
+               [orig: @0x40a2d0 'light_move' -> +120 = ParseFixedPoint16,
+               +124 = (atol(r) << 16) | (atol(g) << 8) | atol(b)]. */
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
+            Token tok[4];
+            int tn = tokenize(v, vl, tok, 4);
+            if (tn >= 1) current.light_move_radius_fp16 = parse_fixed16_n(tok[0].s, tok[0].len);
+            if (tn >= 4) {
+                /* No range clamps — the original's shifted adds bleed out-of-range
+                   components upward [orig: ((r<<8)+g)<<8 + b @0x40a2d0]. */
+                current.light_move_color =
+                        ((parse_int_n(tok[1].s, tok[1].len) << 8) +
+                         parse_int_n(tok[2].s, tok[2].len)) * 256 +
+                        parse_int_n(tok[3].s, tok[3].len);
+            }
+            parsed = 1;
         }
 
         if (!parsed) {

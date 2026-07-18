@@ -514,6 +514,104 @@ int main() {
 		world.round_sim.fired.clear();
 	}
 
+	// --- 7. The tracer trail channels [orig: g_TracerEmitterPool @ 0x2BF5270 — alloc
+	// at spawn with the friendly/enemy style vs the local team @ 0x4ec740, one
+	// pre-move point per tick (Projectile_UpdatePhysics @ 0x4ea97a), ring-capped at
+	// the style count, death append + drain (Projectile_ReleaseEffects @ 0x4e8280 ->
+	// CEffectEmitterPool_Tick @ 0x5db830: cap-length grace, then one pop per tick)].
+	{
+		auto &sim = world.round_sim;
+		auto &ammo1 = world.ammo.entries[1];
+		ammo1.tracer_rate = 1; // every round a tracer
+		ammo1.tracer_type_friendly = 1;
+		ammo1.tracer_type_enemy = 2;
+		w::Entity *shooter = world.registry.get(hb);
+		shooter->tracer_shot_counter = 0;
+		sim.local_player = hb; // shooter == the presenting player -> friendly
+		sim.local_team = static_cast<uint8_t>(shooter->team);
+		w::RoundSpawnParams rp;
+		rp.owner = hb;
+		rp.shooter_handle = hb.packed;
+		rp.ammo_index = 1;
+		rp.origin = {0.0f, 0.0f, 500.0f}; // high above every organic + no terrain
+		const int slot = sim.spawn(world, rp);
+		if (!expect(slot >= 0 && sim.rounds[size_t(slot)].trail_slot >= 0,
+		            "a tracer round allocates a trail channel at spawn"))
+			return 1;
+		const int ch_i = sim.rounds[size_t(slot)].trail_slot;
+		auto &ch = sim.trails.channels[size_t(ch_i)];
+		if (!expect(ch.style_id == 1, "shooter == local player selects the friendly style"))
+			return 1;
+		if (!expect(ch.cap == 12, "stdred ring cap = the witnessed 12-entry table"))
+			return 1;
+		for (int t = 0; t < 5; ++t) sim.tick(world, nullptr, nullptr);
+		if (!expect(ch.count == 5, "one trail point per tick while alive")) return 1;
+		if (!expect(ch.pts[0].pos.x == 0.0f && ch.pts[0].pos.z == 500.0f,
+		            "the first point is the PRE-move spawn origin"))
+			return 1;
+		if (!expect(ch.pts[0].w == 1.0f, "std styles carry no width jitter")) return 1;
+		if (!expect(ch.age == 1, "a live channel's age re-arms every append")) return 1;
+		// Death by age-out: final point + kill request, then the drain timeline.
+		sim.rounds[size_t(slot)].max_age_ticks = sim.rounds[size_t(slot)].age_ticks;
+		sim.tick(world, nullptr, nullptr);
+		if (!expect(!sim.rounds[size_t(slot)].active && ch.kill && ch.count == 6,
+		            "round death appends the final point and requests the drain"))
+			return 1;
+		for (int t = 0; t < 11; ++t) sim.tick(world, nullptr, nullptr);
+		if (!expect(ch.active && ch.count == 6,
+		            "the dead trail holds shape through the cap-length grace"))
+			return 1;
+		for (int t = 0; t < 30; ++t) sim.tick(world, nullptr, nullptr);
+		if (!expect(!ch.active, "the drained channel frees its slot")) return 1;
+
+		// Enemy select: a presenting client on another team gets the enemy style.
+		sim.local_player = w::EntityHandle{};
+		sim.local_team = 99;
+		const int slot_e = sim.spawn(world, rp);
+		if (!expect(slot_e >= 0 && sim.rounds[size_t(slot_e)].trail_slot >= 0 &&
+		                    sim.trails.channels[size_t(sim.rounds[size_t(slot_e)].trail_slot)]
+		                                    .style_id == 2,
+		            "a team mismatch selects the enemy style"))
+			return 1;
+		sim.rounds[size_t(slot_e)].active = false;
+		--sim.active_count;
+
+		// Ring cap: a long flight tops out at the style's point count.
+		sim.local_team = static_cast<uint8_t>(shooter->team);
+		const int slot_r = sim.spawn(world, rp);
+		if (!expect(slot_r >= 0 && sim.rounds[size_t(slot_r)].trail_slot >= 0,
+		            "ring-cap round spawned"))
+			return 1;
+		auto &ch_r = sim.trails.channels[size_t(sim.rounds[size_t(slot_r)].trail_slot)];
+		for (int t = 0; t < 20; ++t) sim.tick(world, nullptr, nullptr);
+		if (!expect(ch_r.count == 12, "the ring caps at the style count (oldest drops)"))
+			return 1;
+		sim.rounds[size_t(slot_r)].active = false;
+		--sim.active_count;
+
+		// The MP NoTracers rules bit kills the visual unless FORCETRACER
+		// [orig: dword_24D1E34 & 1 gate @ 0x4ec740 / forcetracer bypass].
+		sim.no_tracers_rule = true;
+		const int slot_n = sim.spawn(world, rp);
+		if (!expect(slot_n >= 0 && sim.rounds[size_t(slot_n)].trail_slot < 0 &&
+		                    sim.rounds[size_t(slot_n)].tracer,
+		            "NoTracers keeps the sim tracer flag but spawns no channel"))
+			return 1;
+		sim.rounds[size_t(slot_n)].active = false;
+		--sim.active_count;
+		ammo1.flags |= 0x8000u; // forcetracer
+		const int slot_f = sim.spawn(world, rp);
+		if (!expect(slot_f >= 0 && sim.rounds[size_t(slot_f)].trail_slot >= 0,
+		            "FORCETRACER bypasses NoTracers for the visual"))
+			return 1;
+		ammo1.flags &= ~0x8000u;
+		sim.no_tracers_rule = false;
+		sim.rounds[size_t(slot_f)].active = false;
+		--sim.active_count;
+		sim.trails.reset();
+		sim.fired.clear();
+	}
+
 	std::printf("round_sim_test: all green\n");
 	return 0;
 }

@@ -141,10 +141,14 @@ void RoundSim::reset() noexcept {
 	active_count = 0;
 	deaths.clear();
 	impacts.clear();
+	hits.clear();
+	fired.clear();
 	next_impact_order = 1;
 	debug_trail = {};
 	debug_trail_next = 0;
 	debug_trail_count = 0;
+	trails.reset(); // [orig: the pool memset in CEffectEmitterPool_ResetAndBuildStyles
+	                //  @ 0x5db3b0, run from Game_StartMission]
 }
 
 int RoundSim::spawn(World &world, const RoundSpawnParams &params) {
@@ -212,7 +216,24 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params) {
     }                                      // [orig: @0x4ec1cf no slot + rate != 0 -> stays true]
     if ((ammo->flags & 0x8000u) != 0) tracer = true; // [orig: forcetracer @0x4ec1db]
     r.tracer = tracer;
-    r.team = owner_ent != nullptr ? static_cast<uint8_t>(owner_ent->team) : 0;
+    // No shooter -> team 0xFF (always the ENEMY style on every client) [orig: the
+    // !sourceEntity arm @ 0x4ec721; the slot+4 & 0x200 0xFF override is unmodeled].
+    r.team = owner_ent != nullptr ? static_cast<uint8_t>(owner_ent->team) : 0xFF;
+
+    // The tracer VISUAL — a trail channel allocated at spawn, styled friendly/enemy
+    // against the presenting client's team [orig: RoundData_SpawnRound @ 0x4ec740:
+    // gate (tracer && !(NoTracers rules & 1)) || FORCETRACER; style id = ammo
+    // tracer_type friendly (+232) when round team == local team or shooter == local
+    // player, else enemy (+236); id 0 = no channel; -> round+0x2B4].
+    r.trail_slot = -1;
+    const bool forcetracer = (ammo->flags & 0x8000u) != 0;
+    if ((tracer && !no_tracers_rule) || forcetracer) {
+        const bool friendly = (local_player.valid() && params.owner.valid() &&
+                               params.owner.packed == local_player.packed) ||
+                              r.team == local_team;
+        const int32_t style = friendly ? ammo->tracer_type_friendly : ammo->tracer_type_enemy;
+        if (style != 0) r.trail_slot = trails.alloc(style);
+    }
 
     // Record the fire for the host present layer (sound + muzzle effect) — the
     // inline-presentation moment of the original [orig: WeaponSlot_FireAndSpawnEffects
@@ -239,7 +260,13 @@ static void push_round_debug(RoundSim &sim, const RoundDebugEvent &ev) {
 
 void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                     CollisionWorld *collision) {
-    if (active_count <= 0) return;
+    // The trail pool drains once per logic tick even with no live rounds — dead
+    // rounds' streaks fade out over cap + count ticks [orig: CEffectEmitterPool_Tick
+    // runs unconditionally per frame from Game_ProcessMainFrame @ 0x526758].
+    if (active_count <= 0) {
+        trails.tick();
+        return;
+    }
 
     const size_t pool0 = world.registry.pool_capacity(0);
 
@@ -255,6 +282,13 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         if (++r.age_ticks > r.max_age_ticks) {
             const AmmoTableEntry *fuze_ammo = world.ammo.by_index(r.ammo_index);
             if (fuze_ammo != nullptr) detonate_round(world, r, r.pos, *fuze_ammo);
+            // Round death: final trail point + drain request [orig:
+            // Projectile_ReleaseEffects @ 0x4e8280 — append the current anchor,
+            // CEffectChannel_RequestKill].
+            if (r.trail_slot >= 0) {
+                trails.append(r.trail_slot, r.pos);
+                trails.request_kill(r.trail_slot);
+            }
             {
                 RoundDebugEvent ev;
                 ev.tick = world.logic_tick;
@@ -270,6 +304,13 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             --active_count;
             continue;
         }
+
+        // One trail point per tick at the PRE-move position — the streak head trails
+        // one tick behind the round [orig: Projectile_UpdatePhysics appends via
+        // Projectile_GetTrailAnchorPos before the position update, guided @ 0x4ea04f
+        // and ballistic @ 0x4ea97a; the rocket-spiral anchor offset (+0x2AC block)
+        // waits on the guided-round port].
+        if (r.trail_slot >= 0) trails.append(r.trail_slot, r.pos);
 
         const Vec3 p0 = r.pos;
         Vec3 p1{p0.x + r.vel.x, p0.y + r.vel.y, p0.z + r.vel.z};
@@ -552,6 +593,12 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                     ev.hit = impact_pos;
                     push_round_debug(*this, ev);
                 }
+                // [orig: Projectile_ReleaseEffects @ 0x4e8280 from the impact
+                // handlers — the item stop ends the streak like any other.]
+                if (r.trail_slot >= 0) {
+                    trails.append(r.trail_slot, r.pos);
+                    trails.request_kill(r.trail_slot);
+                }
                 r.active = false;
                 --active_count;
                 continue;
@@ -624,6 +671,14 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             imp.tick = world.logic_tick;
             imp.source_order = next_impact_order++;
             if (impacts.size() < kMaxPendingImpacts) impacts.push_back(imp);
+            // [orig: the impact handlers run Projectile_ReleaseEffects @ 0x4e8280 —
+            // the trail's final point is the PRE-move anchor (position updates after
+            // the handlers @ 0x4eaa3f), so the streak ends a tick short of the hit
+            // and the impact flash covers the gap.]
+            if (r.trail_slot >= 0) {
+                trails.append(r.trail_slot, r.pos);
+                trails.request_kill(r.trail_slot);
+            }
             {
                 RoundDebugEvent ev;
                 ev.tick = world.logic_tick;
@@ -662,6 +717,10 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             // An explosive round detonates on the terrain stop [orig: the kz
             // dispatch from Projectile_HandleTerrainImpact @0x4e9210 family].
             if (ammo != nullptr) detonate_round(world, r, imp.position, *ammo);
+            if (r.trail_slot >= 0) { // [orig: Projectile_ReleaseEffects @ 0x4e8280]
+                trails.append(r.trail_slot, r.pos);
+                trails.request_kill(r.trail_slot);
+            }
             {
                 RoundDebugEvent ev;
                 ev.tick = world.logic_tick;
@@ -686,6 +745,11 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         // ballistics deferral (docs/world/world-wac-ai-re.md D-ITEM-12).
         r.pos = p1;
     }
+
+    // Pool drain after the round updates: appends this tick reset their channels'
+    // age, so live streaks hold shape and only dead ones shrink
+    // [orig: CEffectEmitterPool_Tick @ 0x5db830, once per 62 Hz frame].
+    trails.tick();
 }
 
 } // namespace opennova::world

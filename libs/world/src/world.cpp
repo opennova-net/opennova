@@ -651,6 +651,12 @@ void World::run_logic_tick(bool is_authority, bool pre_mission) {
     ctx.logic_tick = logic_tick;
     ctx.is_authority = is_authority;
     ctx.pre_mission = pre_mission;
+    // The presenting-client identity for the spawn-time tracer style select — stamped
+    // before the system loop so rounds spawned THIS tick (AI fire, local fire) select
+    // against fresh values [orig: g_local_player_entity->Team read @ 0x4ec740].
+    round_sim.local_player = cached.local_player;
+    if (const Entity *lp = registry.get(cached.local_player))
+        round_sim.local_team = static_cast<uint8_t>(lp->team);
     // The system loop runs on BOTH the authoritative host and a non-authority client
     // (the original client also runs a tick): each system self-gates on
     // ctx.is_authority. WacSystem / BmsEventSystem early-out on a client (scripting is

@@ -1878,7 +1878,7 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("drain_effects"), &NovaSimulation::drain_effects);
 	ClassDB::bind_method(D_METHOD("drain_fire_presentation_events"),
 			&NovaSimulation::drain_fire_presentation_events);
-	ClassDB::bind_method(D_METHOD("get_tracer_rounds"), &NovaSimulation::get_tracer_rounds);
+	ClassDB::bind_method(D_METHOD("get_tracer_trails"), &NovaSimulation::get_tracer_trails);
 	ClassDB::bind_method(D_METHOD("drain_destruction_events"),
 			&NovaSimulation::drain_destruction_events);
 	ClassDB::bind_method(D_METHOD("get_death_pieces"), &NovaSimulation::get_death_pieces);
@@ -3496,25 +3496,27 @@ Dictionary NovaSimulation::get_destruction_debug(int p_bms_id) const {
 	return out;
 }
 
-// Live tracer rounds for the streak layer — see the header note.
-PackedFloat32Array NovaSimulation::get_tracer_rounds() const {
+// The live tracer trail channels for the ribbon layer — see the header note.
+// Mission -> godot axis map (x, z, -y), matching the other presentation drains.
+PackedFloat32Array NovaSimulation::get_tracer_trails() const {
 	PackedFloat32Array out;
 	if (!loaded_) return out;
-	for (const opennova::world::LiveRound &r : world_->round_sim.rounds) {
-		if (!r.active || !r.tracer) continue;
-		const opennova::world::AmmoTableEntry *ammo = world_->ammo.by_index(r.ammo_index);
+	for (const opennova::world::TracerTrailChannel &c : world_->round_sim.trails.channels) {
+		if (!c.active || c.count <= 0) continue;
 		const int64_t base = out.size();
-		out.resize(base + 9);
+		out.resize(base + 3 + static_cast<int64_t>(c.count) * 4);
 		float *w = out.ptrw() + base;
-		w[0] = r.pos.x;
-		w[1] = r.pos.z;
-		w[2] = -r.pos.y;
-		w[3] = r.vel.x;
-		w[4] = r.vel.z;
-		w[5] = -r.vel.y;
-		w[6] = static_cast<float>(r.team);
-		w[7] = ammo ? static_cast<float>(ammo->tracer_type_friendly) : 0.0f;
-		w[8] = ammo ? static_cast<float>(ammo->tracer_type_enemy) : 0.0f;
+		w[0] = static_cast<float>(c.style_id);
+		w[1] = static_cast<float>(c.age);
+		w[2] = static_cast<float>(c.count);
+		float *pw = w + 3;
+		for (int i = 0; i < c.count; ++i, pw += 4) {
+			const opennova::world::TracerTrailPoint &p = c.pts[static_cast<size_t>(i)];
+			pw[0] = p.pos.x;
+			pw[1] = p.pos.z;
+			pw[2] = -p.pos.y;
+			pw[3] = p.w;
+		}
 	}
 	return out;
 }

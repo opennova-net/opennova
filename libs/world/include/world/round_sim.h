@@ -33,6 +33,7 @@
 
 #include "world/entity.h"
 #include "world/geom.h"
+#include "world/tracer_trails.h"
 
 namespace opennova::terrain {
 struct TerrainHeightField;
@@ -70,9 +71,13 @@ struct LiveRound {
     int32_t age_ticks = 0;
     int32_t max_age_ticks = 0;
     // Tracer presentation state [orig: RoundData_SpawnRound @0x4ec184-0x4ec1e5 decision;
-    // team = round+0x162]: the host present pass draws tracer rounds in flight.
+    // team = round+0x162, 0xFF when there is no shooter]: the host present pass draws
+    // the trail channels in flight.
     bool tracer = false;
-    uint8_t team = 0;
+    uint8_t team = 0xFF;
+    // The round's trail channel [orig: round+0x2B4 <- CEffectEmitterPool_AllocSlot
+    // @ 0x4ec774]; -1 = no visual (non-tracer, NoTracers rules, or pool full).
+    int32_t trail_slot = -1;
 };
 
 // A death the damage pass detected this tick — drained by the host session, which owns
@@ -193,6 +198,21 @@ public:
     std::array<RoundDebugEvent, kDebugTrailCap> debug_trail{};
     int debug_trail_next = 0;  // ring cursor (next write slot)
     int debug_trail_count = 0; // valid entries, saturates at the cap
+
+    // The tracer trail channels — appended per round tick, drained per pool tick,
+    // styled and drawn by the host present pass (world/tracer_trails.h witness map).
+    TracerTrailPool trails;
+
+    // The presenting client's identity, for the friendly/enemy style select AT SPAWN
+    // [orig: RoundData_SpawnRound @ 0x4ec740 compares the round team byte to
+    // g_local_player_entity->Team, shooter == local player counts friendly]. The host
+    // stamps these before ticking (SP listen-server: the local avatar); remote-client
+    // presentation re-runs its own select when it re-fires ring records (net-re §5.60).
+    EntityHandle local_player;
+    uint8_t local_team = 0;
+    // The MP NoTracers rules bit [orig: dword_24D1E34 & 1] — kills the tracer visual
+    // unless FORCETRACER. SP hosts leave it false; the net seam wires it later.
+    bool no_tracers_rule = false;
 
     // Spawn one round at fire time [orig: RoundData_SpawnRound @ 0x4EC0D0 default path].
     // Returns the round slot, or -1 (pool full / non-ballistic ammo / null ammo).

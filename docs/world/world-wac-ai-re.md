@@ -2274,13 +2274,15 @@ PORT (same day, worktree play): the ammo.def presentation tokens = `libs/def`
 (`def_parse_ammo` + `ammo_tracer_type_from_name`) → `AmmoTableEntry` (npruntime
 builder); the tracer decision + the per-spawn `FireEvent` record =
 `world::RoundSim::spawn`; the host drains = `NovaSimulation::
-drain_fire_presentation_events` / `get_tracer_rounds`; the presentation itself =
+drain_fire_presentation_events` / `get_tracer_trails` (ex `get_tracer_rounds` —
+replaced by the witnessed trail channels, §24); the presentation itself =
 `godot/engine/world/fire_present_pass.gd` (sound + pending-delay queue + muzzle
-effect + tracer streaks); the LOS legs = `CollisionWorld::raycast_clear` +
+effect + the §24 tracer ribbons); the LOS legs = `CollisionWorld::raycast_clear` +
 `los_terrain_blocked` (`libs/world/src/collision.cpp`) behind
 `AiSystem::line_of_sight_clear`. Pins: the `def` ctest (token fields), the
-`npruntime_round_sim` ctest (tracer cadence/forcetracer/FireEvent), the `collision`
-ctest (`test_raycast_clear_los`), and the `ai_threat_probe` in-game stats gate.
+`npruntime_round_sim` ctest (tracer cadence/forcetracer/FireEvent + the trail
+channels), the `collision` ctest (`test_raycast_clear_los`), and the
+`ai_threat_probe` in-game stats gate.
 
 ### 18.1 The ammo-def presentation fields — parse + resolve
 
@@ -2296,13 +2298,14 @@ stdgreen`):
 | `MF_Light <n>` | +36 = 1, +40 = atol | presence flag + value `[orig: @ 0x40a804-0x40a837]` |
 | `tracer_type <f> [<e>]` | +232 / +236 | `AmmoDef_ParseTypeName` name→id (stdred 1, stdgreen 2, rocket 3, at4 4, grenade 5, rapidred 6, rapidgreen 7, sniperred 9, snipergreen 10, df1red 11, df1green 12; atol fallback); one value copies into both `[orig: @ 0x40a78b-0x40a7fa]` |
 
-Two sibling GRAPHIC slots stay unparsed in the reimpl (the tracer round's visible
-item models): +0x10 friendly / +0x14 enemy item ids, resolved through the item list
-with the parse warnings `"couldn't find ammodef frndlyTrcrID"` / `"... type_id"`
-`[orig: @ 0x40a5f8-0x40a68d]` — deferred with the round-graphic leg (D-AI-8). Our
-port stores the two NAMES (+64/+68) instead of resolved pointers/handles and
-resolves in the host at play time — same case-insensitive namespaces (the bank's
-soundsets, the effect world's interned .ptl names).
+The two sibling GRAPHIC slots (the tracer round's visible item models): +0x10
+friendly / +0x14 enemy item ids, resolved through the item list with the parse
+warnings `"couldn't find ammodef frndlyTrcrID"` / `"... type_id"`
+`[orig: @ 0x40a5f8-0x40a68d]` — PARSED 2026-07-18 (`frndlyTrcrID`/`foeTrcrID` in
+libs/def, raw type ids in the ammo table; the model leg itself rides D-AI-12d,
+§24.4). Our port stores names/ids instead of resolved pointers/handles and
+resolves in the host at use time — same case-insensitive namespaces (the bank's
+soundsets, the effect world's interned .ptl names, the item list).
 
 ### 18.2 The fire sound leg — `Sound_PlayWithDistanceAttenuation @ 0x528e40`
 
@@ -2357,17 +2360,20 @@ regardless. Round team byte +0x162 = shooter team (slot+4 & 0x200 → 0xFF)
 Tracer VISUALS (per presenting client, selected against `g_local_player_entity`'s
 team — shooter == local or team match = friendly `[orig: @ 0x4ec740-0x4ec79b]`):
 the `tracer_type` id (+0xE8 friendly / +0xEC enemy) allocates a slot in the
-dedicated tracer/trail emitter pool (`CEffectEmitterPool_AllocSlot @ 0x5db0xx over
-dword_2BF5270`, init `sub_5DB130`) into round+0x2B4; the round's visible MODEL is
-the +0x10/+0x14 item graphic via `Entity_InitFromItemDef @ 0x49e550`; a per-round
-glow light lands in round+0x1B4 `[orig: @ 0x4ec8da]`. The MP `NoTracers` rules bit
-(`dword_24D1E34 & 1`, net-re §6.8 mp_attributes 0x001) kills the visual unless
-forcetracer. **Non-tracer rounds get `graphicModel` (+0x30) zeroed — invisible in
-flight** `[orig: @ 0x4ec900]`. Port: `LiveRound.tracer/team` + the witnessed
-counter on the shooter entity (one weapon per NPC — the per-slot delta in D-AI-8);
-streaks drawn by `fire_present_pass.gd` from `get_tracer_rounds()` (geometry
-stand-in, D-AI-8); the emitter-pool styles, round graphics, and per-round glow are
-the deferred render legs (D-AI-8).
+dedicated tracer/trail emitter pool (`CEffectEmitterPool_AllocSlot @ 0x5db7a0`
+over `g_TracerEmitterPool @ 0x2BF5270`, channel init `CEffectChannel_Init
+@ 0x5db130`) into round+0x2B4; the round's visible MODEL is the +0x10/+0x14 item
+graphic via `Entity_InitFromItemDef @ 0x49e550`; a per-round glow light lands in
+round+0x1B4 `[orig: @ 0x4ec8da]`. The MP `NoTracers` rules bit (`dword_24D1E34 &
+1`, net-re §6.8 mp_attributes 0x001) kills the visual unless forcetracer.
+**Non-tracer rounds get `graphicModel` (+0x30) zeroed — invisible in flight**
+`[orig: @ 0x4ec900]`. Port (fully witnessed + rebuilt 2026-07-18, §24):
+`LiveRound.tracer/team/trail_slot` + the witnessed counter on the shooter entity
+(one weapon per NPC — the per-slot delta in D-AI-8a); the trail pool =
+`world/tracer_trails.{h,cpp}`, the spawn-time style select + NoTracers gate =
+`RoundSim::spawn`, the ribbons = `fire_present_pass.gd` via
+`get_tracer_trails()`; the round graphic / glow / smoke-anim residuals are
+D-AI-12.
 
 ### 18.5 `Physics_RaycastTerrainAndSectors @ 0x539910` — the LOS raycast (closes §16.5 item 6)
 
@@ -3719,3 +3725,202 @@ huskFinal-first piece model (`@ 0x4934af`), the two-stage launch build
 (`@ 0x493718`), the piece gravity/water legs (`@ 0x492d80`), the three settle
 callbacks (`@ 0x461d30 / @ 0x493f70 / @ 0x494230`), and the vehicle contact
 mask (`@ 0x462a95`).
+
+## 25. Appendix: the tracer visual system — the trail emitter pool, style tables, and the ribbon renderer (grill-ida, 2026-07-18)
+
+What a tracer LOOKS like in flight: `RoundData_SpawnRound` allocates a channel in a
+dedicated 256-slot trail pool, the projectile tick appends one point per tick, and a
+camera-facing ribbon renderer draws each channel through a per-`tracer_type` style
+block (color ramp + width curve). The same pool renders rocket/AT4/grenade smoke
+trails and the NVG IR laser. All addresses retail `Jointops.exe` (imagebase
+0x400000, IDB `Jointops.exe.kong.i64`). Port (same session): the point rings =
+`libs/world` `tracer_trails.{h,cpp}` (`TracerTrailPool`, fed by `RoundSim`), the
+styles + ribbons = `fire_present_pass.gd`; pinned by the `npruntime_round_sim`
+ctest section 7 and the `fire_present_pass_test.gd` ribbon tests.
+
+### 25.1 The pool — `g_TracerEmitterPool @ 0x2BF5270`
+
+256 channels x 44 B + 256 alloc flags (+0x2C00), reset + style rebuild at every
+mission start `[orig: CEffectEmitterPool_ResetAndBuildStyles @ 0x5db3a0, thiscall
+from Game_StartMission @ 0x525df7]`. Channel fields (dword idx): [2] point buffer
+(16 B verts `{x,y,z fixed, w float}`, alloc tag literally "Tracer"), [3] cap =
+the style's table count, [4] count, [5] age, [6] style id, [7] style desc ptr,
+[8]/[9] normal/distortion shader handles, [10] kill flag.
+
+- **Alloc** `[orig: CEffectEmitterPool_AllocSlot @ 0x5db7a0]`: first-free scan;
+  arg = the `tracer_type` id itself; NULL when all 256 busy. Channel init
+  `[orig: CEffectChannel_Init @ 0x5db130]` binds the style block per id (case
+  map 25.2) and the shader: stock device slot 6 for the tracer families
+  `[orig: CD3DDevice_GetRenderStateByIndex(dev, 6) @ 0x5db1cf]`, pool+0x3004/8
+  for smoke/NVG, pool+0x300C for the distortion pass (writers unwitnessed).
+- **Append** `[orig: CEffectChannel_AppendPoint @ 0x5db290 — ex kong
+  "CNetRateSampler_RecordSample", renamed]`: ring append (full -> drop oldest);
+  `w = 1.0 + PRNG_Next16() * 1e-5` on jitter styles (desc+4: smoke/sniper/NVG),
+  else exactly 1.0; every append resets the channel age.
+- **Tick** `[orig: CEffectEmitterPool_Tick @ 0x5db830, once per 62 Hz frame from
+  Game_ProcessMainFrame @ 0x526758]`: per active channel `age < cap -> age++`,
+  else pop the oldest point; kill + empty frees the slot. Because appends re-arm
+  the age, a live trail holds shape; after the round dies the streak survives a
+  cap-length grace then evaporates one point per tick.
+- **Round integration** `[orig: Projectile_UpdatePhysics @ 0x4e9d70]`: one append
+  per tick at the PRE-move anchor (guided @ 0x4ea04f, ballistic @ 0x4ea97a) —
+  the streak head trails the round by a tick; the anchor is
+  `Projectile_GetTrailAnchorPos @ 0x4e64e0` (ex kong "Entity_GetRecoilOffset",
+  renamed): position, or position + a rotated `{0, ampY sin, ampZ sin}` spiral
+  offset when round+0x2AC carries the oscillation block (the rocket corkscrew;
+  its writer is unwalked). Death `[orig: Projectile_ReleaseEffects @ 0x4e8280,
+  ex sub_4E8280]`: append the final (still pre-move) anchor + kill-request —
+  the streak ends a tick short of the wall and the impact flash covers the gap;
+  the glow handle (+0x1B4) clears, the loop-sound emitter (+0x1CC) detaches.
+
+### 25.2 The style blocks — 12 `tracer_type` ids, stride 0x830
+
+Layout: +0 additive flag (fog family), +4 jitter/anim flag, +8/+0xC unwitnessed
+words (0x10000000/0x8000000 and 0x400/0x4000/0x1000/0x100/0 — no consumer found
+in the walked functions), +0x10 count (= ring cap = color-table length), +0x14
+base ARGB (the oldest vertex pair), +0x18 ARGB[256] ramp, +0x418 size count,
++0x41C float size[256] (half-widths), +0x81C/+0x820/+0x824 wave params (the
+B=1 anim), +0x828 distortion-pass flag. Static `.data` blocks: stdred
+`@ 0x8437F0` (also the default for unknown ids `[orig: CEffectChannel_Init
+default case @ 0x5db1c8]`), stdgreen `@ 0x844020`, rapidred `@ 0x844850`,
+rapidgreen `@ 0x845080`, sniperred `@ 0x8458B0`, snipergreen `@ 0x8460E0`;
+runtime-built in `CEffectEmitterPool_ResetAndBuildStyles @ 0x5db3a0`: rocket
+`@ 0x2BF4A40`, at4 `@ 0x2BF4210`, grenade `@ 0x2BF39E0`, NVG laser (numeric id
+8, no ammo name) `@ 0x2BF31B0`, df1red `@ 0x2BF2980`, df1green `@ 0x2BF2150`
+(all renamed `g_TracerStyle_*` this session).
+
+| id | style | count | colors (head -> tail, ARGB) | sizes | flags |
+|---|---|---|---|---|---|
+| 1 | stdred | 12 | 0, E08080, C08080, A04040, 802020, 601010, 200000, 100000 x3, 080000, 0 | [0.02] | additive |
+| 2 | stdgreen | 12 | 0, 80A080, 808880, 407040, 205820, 104010, 001400, 000800 x3, 000400, 0 | [0.02] | additive |
+| 3 | rocket | 112 | gray C0C0C0, alpha ((255-2i)^2)>>8 | 32: i*0.0625 | alpha smoke, jitter, distortion |
+| 4 | at4 | 112 | same quadratic gray fade | 32: i*0.03125 | alpha smoke, jitter, distortion |
+| 5 | grenade | 64 | gray, alpha (192*(255-3i)^3)>>24 | 32: i*0.0078125 | alpha smoke, jitter |
+| 6 | rapidred | 6 | 0, E08080, A04040, 200000, 100000, 0 | [0.02] | additive |
+| 7 | rapidgreen | 6 | 0, 80A080, 407040, 001400, 000800, 0 | [0.02] | additive |
+| 8 | NVG laser | 32 | FF2020, alpha ramps UP 6*i (base C04040) | [0.01] | additive, jitter |
+| 9 | sniperred | 20 | FF180000 x4 then dim-red high-alpha fade to 0 | 10: 0.04..0.1 | additive, jitter, distortion |
+| 10 | snipergreen | 20 | green mirror of 9 | 10: 0.04..0.1 | additive, jitter, distortion |
+| 11 | df1red | 32 | red ramp R=(32-i)*8>>1, G=B=(32-i)*8>>2, [0]=0 | [0.006] | additive |
+| 12 | df1green | 32 | green mirror of 11 | [0.006] | additive |
+
+### 25.3 The ribbon renderer — `CEffectChannel_RenderRibbon @ 0x5db8a0`
+
+Main pass per channel `[orig: CEffectEmitterPool_RenderMainPass @ 0x5dcaf0]`,
+distortion pass over +0x828-flagged channels only `[orig:
+CEffectEmitterPool_RenderDistortionPass @ 0x5dcb40, gated by
+CEffectEmitterPool_HasDistortionChannels @ 0x5db7f0 behind a backbuffer-capture
+FrameFX leg]`. The normal-pass geometry:
+
+- One +/- right vertex pair per point over points [0..count-2] — the newest
+  point steers direction only (the visible head is the second-newest point);
+  `right = normalize(cross(dir_to_next, camera - point))`.
+- Half-width = `max(size[idx] * point.w, dist * ~1.83e-8 fixed / proj)` — the
+  distance term is the minimum-screen-width clamp (`flt_7DC69C = 1.83e-8`
+  against the 16.16 camera distance; the projection divisor operand is an open
+  item — ported as 0.0012/u).
+- Table index = `(count - i) + age - 1`, clamped per table — one expression
+  makes the ramp BOTH the along-trail gradient and the post-death fade (the
+  whole trail slides down the ramp as age grows). The oldest pair takes the
+  style base color (+0x14). Colors are used RAW in the normal pass; the cubic
+  alpha boost `255 - ((255-a)^3 >> 16)` belongs to the DISTORTION pass only.
+- B=0 styles: 36-B FVF verts (pos + packed color; UV dwords left UNWRITTEN in
+  the shared scratch `g_TrailStripVertexScratch @ 0x2BED830` — the stock trail
+  shader cannot be sampling a texture), one D3DPT_TRIANGLESTRIP draw
+  `[orig: Render_DrawDynamicPrimitive @ 0x56be90]`.
+- B=1 styles (smoke/sniper/NVG): 4 verts per point (a 3-quad-wide ribbon),
+  indexed triangle-list draw, `GetTickCount`-driven wave animation from the
+  style +0x81C/+0x820/+0x824 params (x 0.3 / 0.2 / 4e-4 consts) and animated
+  UVs; the distortion pass widens x1.2 (`flt_7D8FB4`).
+- Fog: additive styles force the fog COLOR to black
+  `[orig: CD3DDevice_SetFogAndBlendMode(dev, 2) @ 0x677740 — a fog-color
+  select, NOT a blend set]` so distance fog fades an additive streak out
+  instead of tinting it; smoke styles keep scene fog (mode 0). Shader pass id
+  0x10520000 via `CGfxShader_ApplyPass @ 0x683190`.
+- `Render_DrawTrailOrBeamSegments @ 0x5dcb80` is the immediate-points sibling
+  (caller-supplied point array, same style machinery) — the NVG laser draws
+  through it with style 8 `[orig: Entity_RenderNVGLaserBeam @ 0x5c6090, ex kong
+  "Entity_BuildProjectileTrailRay", renamed: gate = weapon def+8 flag
+  0x40000000 + g_NVGActive + not the local player; aim ray clipped by the
+  vehicle/infantry proximity raycasts, max 8.0 u, one sample per 0.25 u]`.
+
+### 25.4 The round graphic + glow legs (witness completed)
+
+- Item graphic: `frndlyTrcrID <type_id>` / `foeTrcrID <type_id>` resolve through
+  `ItemList_FindIndexByTypeId` (fallback `ItemList_FindIndexByPrimaryName`,
+  warnings "couldn't find ammodef frndlyTrcrID"/"... type_id") into ammo +16/+20
+  `[orig: AmmoDef_ParseProperty @ 0x40a5f8-0x40a68d]`; the spawn picks the enemy
+  id when round team != local team, `Entity_InitFromItemDef @ 0x49e550` loads
+  the model `[orig: @ 0x4ec79b-0x4ec7c8]`, and non-tracer rounds get the model
+  zeroed `[orig: @ 0x4ec900]`. The tracer item models carry TRACER_SCALE /
+  TRACER_WIDTH nodes — entries of the 0x20-stride .3di node-name procedural
+  channel table `@ 0x83e428/0x83e448` (WEAP_GUNYAW/HELO_*/VEHICLE_* family);
+  the channel evaluator (the 0x41bxxx region) is unwalked.
+- Glow: `light_move <radius> <r> <g> <b>` -> ammo +120 (16.16) / +124 (packed
+  RGB) `[orig: parse @ 0x40a2d0]`; per-round
+  `LightPool_SpawnGlowEffect({x, y, z + radius/2}, radius, color, 1, -1)` ->
+  WORD handle round+0x1B4 + render flag 1024 `[orig: @ 0x4ec8a9-0x4ec8f1]`,
+  repositioned every tick `[orig: CEffectInstance_SetPositionAndBounds
+  @ 0x4eaa9f]`, cleared on death `[orig: Projectile_ReleaseEffects @ 0x4e8308]`.
+- Adjacent legs witnessed in the same walk: ammo dword+28 (+112) is a lazily
+  spawned attached .ptl emitter (the rocket smoke .ptl beside the pool trail)
+  `[orig: @ 0x4e9f58 / @ 0x4ea8ae]`; the whiz-by leg fires
+  `Projectile_SpawnTracerScarEffect @ 0x4e5ac0` when the tick's path passes
+  within ammo dword+35 (+140) of the listener on X AND Y `[orig: @ 0x4ea998]`.
+
+### 25.5 Port map + verdicts
+
+| Component | Verdict | Evidence |
+|---|---|---|
+| Tracer decision (cadence/forcetracer/team) | MATCHING (re-verified this session; the per-slot counter delta stays D-AI-8a) | `round_sim.cpp` spawn; `npruntime_round_sim` section 6 |
+| Trail channel lifecycle (alloc/append/drain/free) | MATCHING | `TracerTrailPool` [orig cites inline]; `npruntime_round_sim` section 7 |
+| Spawn-time friendly/enemy style select + NoTracers gate | MATCHING (the rules bit itself = the D-AI-8e net seam, sim field `no_tracers_rule`) | `round_sim.cpp` spawn at the 0x4ec740 cite; ctest section 7 |
+| Per-tick pre-move append + death append | MATCHING | `RoundSim::tick`; ctest section 7 |
+| Style tables (12 ids: colors/sizes/caps/base/flags) | MATCHING (data transcribed from the six static blocks + the builder) | `fire_present_pass.gd _build_styles`; caps in `tracer_trails.h` |
+| Ribbon geometry (pairs, facing, widths, ramp index) | MATCHING (structural; min-width proj divisor approximated 0.0012/u) | `_append_channel_ribbon`; `fire_present_pass_test.gd` |
+| Blend/fog (additive fog-black vs alpha smoke) | MATCHING (family-level; Godot `disable_fog` stands in for fog-to-black — D-AI-12c) | materials in `fire_present_pass.gd` |
+| B=1 wave anim + 4-wide cross-section + anim UVs | divergent (single-ribbon stand-in; params recorded 25.3) | D-AI-12a |
+| Distortion pass (+0x828 channels) | not ported (witnessed structurally) | D-AI-12b |
+| Round item graphic + TRACER_SCALE/WIDTH channels | not ported (parse landed: `frndlyTrcrID`/`foeTrcrID` in libs/def + the ammo table) | D-AI-12d |
+| light_move glow | not ported (parse landed; light-pool port pending with the D-AI-8d muzzle glow) | D-AI-12e |
+| NVG laser beam | not ported (witnessed; needs NVG mode) | D-AI-12f |
+
+### 25.6 Divergences
+
+| ID | Ours | Original | Why / consequence |
+|---|---|---|---|
+| D-AI-12 | Tracer ribbon residuals: (a) jitter/anim styles (smoke 3/4/5, sniper 9/10, NVG 8) draw the same single camera-facing ribbon as the tracer styles — the witnessed 4-verts-per-point 3-quad cross-section, the GetTickCount wave (+0x81C/+0x820/+0x824 x 0.3/0.2/4e-4), and the animated UVs are unported (params recorded 25.3); (b) the distortion pass (+0x828 styles: rocket/at4/sniper — backbuffer-capture shimmer behind `CEffectEmitterPool_RenderDistortionPass @ 0x5dcb40`) is unported; (c) additive fog-to-black (`SetFogAndBlendMode(dev, 2) @ 0x677740`) approximated by `disable_fog` on the Godot material — an additive streak neither fades nor tints with distance until our fog model lands; (d) the round's visible item model (`frndlyTrcrID`/`foeTrcrID` -> `Entity_InitFromItemDef @ 0x49e550`) and its TRACER_SCALE/TRACER_WIDTH procedural node channels (table `@ 0x83e428`, evaluator in the 0x41bxxx region, unwalked) are unported — parse landed to the ammo table; (e) the `light_move` per-round glow (round+0x1B4) is parsed but not presented (no light-pool port — rides with D-AI-8d); (f) the NVG laser beam (`Entity_RenderNVGLaserBeam @ 0x5c6090`, style 8) waits on an NVG mode; (g) the min-screen-width projection divisor (the `fdiv` operand feeding `flt_7DC69C = 1.83e-8`) is unresolved — ported as 0.0012 x distance; (h) the per-point W jitter uses a local LCG, not the shared effect PRNG (`PRNG_Next16_B @ 0x6130f0` stream unwitnessed) — presentation-only randomness; (i) the style blocks' +8/+0xC words have no witnessed consumer; (j) the POOL drain runs per logic tick in our sim — retail drains per FRAME (`Game_ProcessMainFrame`); identical at 62 Hz presentation, faster evaporation during catch-up bursts | 25.1-25.4 above | the in-flight tracer look (colors/widths/ramp/drain) is the witnessed one; the residuals are secondary dressing, each with its witness recorded |
+
+### 25.7 IDB write-backs (2026-07-18 session, saved)
+
+Renames (anchored): `CEffectChannel_AppendPoint @ 0x5db290` (ex kong
+`CNetRateSampler_RecordSample` — provably wrong), `Projectile_GetTrailAnchorPos
+@ 0x4e64e0` (ex `Entity_GetRecoilOffset`), `Projectile_ReleaseEffects @ 0x4e8280`
+(ex `sub_4E8280`), `CEffectChannel_RequestKill @ 0x5db380` (ex `sub_5DB380`),
+`CEffectEmitterPool_Tick @ 0x5db830` (ex `sub_5DB830`),
+`CEffectEmitterPool_HasDistortionChannels @ 0x5db7f0` (ex `sub_5DB7F0`),
+`CEffectEmitterPool_RenderDistortionPass @ 0x5dcb40` (ex `sub_5DCB40`),
+`CEffectEmitterPool_ResetAndBuildStyles @ 0x5db3a0` (ex
+`init_default_effect_channel_slots`), `CEffectEmitterPool_RenderMainPass
+@ 0x5dcaf0` (ex `render_all_trail_strips`), `CEffectChannel_RenderRibbon
+@ 0x5db8a0` (ex `render_trail_strip`), `Entity_RenderNVGLaserBeam @ 0x5c6090`
+(ex kong `Entity_BuildProjectileTrailRay` — provably wrong). Data:
+`g_TracerEmitterPool @ 0x2BF5270`, the twelve `g_TracerStyle_*` blocks
+(25.2 addresses), `g_TracerPool_SmokeTrailShader/NVGLaserShader/
+DistortionShader @ 0x2BF8274/78/7C`, `g_TrailStripVertexScratch @ 0x2BED830`.
+Entry comments on `@ 0x5db290 / 0x4e64e0 / 0x4e8280 / 0x5db830 / 0x5db3a0 /
+0x5db8a0 / 0x4ec740 / 0x4ec8a9 / 0x5c6090 / 0x83e428`. IDB saved.
+
+### 25.8 Open follow-ups
+
+1. The stock shader in device slot 6 (`this[41]`,
+   `CD3DDevice_GetRenderStateByIndex(dev, 6)`) — its loader/technique (blend
+   states) is unwalked; the pool+0x3004/8/C smoke/NVG/distortion shader writers
+   likewise.
+2. The `fdiv` projection operand in the min-width clamp (25.3) — resolve and
+   replace the 0.0012 approximation.
+3. The TRACER_SCALE/TRACER_WIDTH node-channel evaluator (the 0x41bxxx undefined
+   region) — define + walk when the round item graphic ports.
+4. The round+0x2AC spiral-offset writer (the rocket corkscrew source).
+5. The style blocks' +8/+0xC words — find the consumer (possibly the distortion
+   or an unwalked LOD path).
