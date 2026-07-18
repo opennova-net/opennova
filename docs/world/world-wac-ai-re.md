@@ -3100,8 +3100,10 @@ the same server leg). NOTE the dismount mechanism: from INSIDE a multi-seat
 vehicle the scan's other-seat candidates are killed by the vehicle's OWN hull
 (the LOS leg walks pool-1 collision models) — that is why the use key EXITS in
 retail rather than cycling seats. Our pool-1 vehicles carry no collision
-instances yet, so the toggle swaps on multi-seat vehicles (single-seat detaches
-correctly) — D-AI-11 j, lands with the vehicle-collision slice. A WAC-settable global `dword_C6EADC` (reset by
+instances yet, so the own-hull occlusion is modeled as a candidate skip of the
+CURRENT mount vehicle — same observable (USE exits; a different vehicle in
+reach still swaps); the ray-accurate form lands with the vehicle-collision
+slice (D-AI-11 j). A WAC-settable global `dword_C6EADC` (reset by
 `WacScript_FreeAll @ 0x4f637b`) blocks the local player's dismount when set.
 
 `Entity_TryEnterNearestVehicle @ 0x4368c0`: standing ON a vehicle
@@ -3204,7 +3206,32 @@ stamps + the steer/speed math; the motor consumes a `VehicleDriveCmd`) +
 `tick_vehicle_motor`'s AI branch; leg 2's SM freeze lands in the staging block
 (a player controller stamps state 22 like the parked leg — the mover never
 advances under a human driver; our cur/pend SPLIT means both fields take every
-stamp, the original has one state word); the SM's kinematic `apply_locomotion`
+stamp, the original has one state word);
+
+**Hull-vs-world collision (witnessed 2026-07-17, ported the same session).**
+The physics tick runs `Entity_CheckCollisionState @ 0x462a30` (twice — the
+second pass at averaged suspension heights) [orig: calls @ 0x47cb8c / 0x47d213
+inside `Entity_ProcessTrackedVehiclePhysics @ 0x47c1c0`]: per wheel point it
+4-tap samples terrain and, over the proximity candidates, runs the SAME contact
+query the person resolver uses (`Entity_ComputeBoneCollisionForce @ 0x4ae150`
+= our `collision_contact_force`). The response classifies by force VERTICALITY
+(`|fz|<<22 / |force|` vs caller slope thresholds @ 0x462fc2-0x462fcb): a
+wall-like (horizontal-dominant) push applies IN FULL at severity 3
+[@ 0x46322d-0x463240]; vertical-dominant contacts take graded ¼/⅛ bands. The
+caller decays speed by the def `torque` (+0x91C raw, parse @ 0x49dcca):
+severity 1/3 → `speed -= speed >> (torque+2)`, severity 2 →
+`>> (torque+1)` [@ 0x47cc13-0x47ccc1; `sar cl` masks the count mod 32];
+severity 3 on the authority additionally runs a wreck-damage block
+(29300-magnitude gates, unitType 3 leg zeroes health @ 0x47cd5d). Also
+witnessed: a big-vs-small size-class crush leg (`itemDef->mass` vs 2× the
+other model bound @ +2312 → flag 0x40 stamp, no force @ 0x462e94-0x462ec2).
+Ported: pool-1 candidate slices (+6.0 u [orig: @ 0x4b902f]) +
+`CollisionWorld::resolve_vehicle_hull` (one mid-hull point, radius 1.5 u,
+wall-class-only) + the motor's push/decay leg; ctest `vehicle_mount`
+(`test_vehicle_hull_stops_at_building` — a driving truck grinds to a stop at
+a wall square). Deferred (D-NET-161): the per-wheel point array/radii, the
+v84/v85 slope-threshold derivation (caller locals, unwitnessed), the graded
+bands, the crush leg, the severity-3 damage block, the second averaged pass. the SM's kinematic `apply_locomotion`
 RETIRES for motor vehicles (`physics != 0`) — the SM stays the decision layer
 (waypoints, visited bits, states), the motor is the only integrator, matching
 the original split. Deferrals stay under D-NET-161 (updated in
@@ -3301,7 +3328,12 @@ roll on the carrier flips 109/110). Our `pose_if_mounted` +
 `pose_mounted_occupant` carry this; the local player's yaw preserves the look
 (the drive motor's mouse-steer source) and mirrors the live move-order bits
 into the wire input fields the motor consumes (tick_infantry's mirror is
-skipped while mounted).
+skipped while mounted). The seated CAMERA mirrors stay mouse-instant at full
+precision: the AiEntity heading/pitch the camera getters read take
+`target_heading`/`look_pitch` directly for the mounted local player — the
+degree-rounded entity-yaw wire mirror must not quantize (yaw) or freeze
+(pitch) the look [orig: Input_HandleActionBinding_0 @ 0x4e1330 writes entity
++0x10/+0x14 straight from input, mount or not].
 
 ### 23.6 Divergences
 

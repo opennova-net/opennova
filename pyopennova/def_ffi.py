@@ -154,6 +154,8 @@ class DefItemDef(ctypes.Structure):
         ("slip_slope", ctypes.c_int),
         ("turn_rate", ctypes.c_int),
         ("turn_rate2", ctypes.c_int),
+        # Collision speed-decay shift count ('torque', raw; mirror def.h).
+        ("torque", ctypes.c_int),
         ("critical_hp", ctypes.c_int),
         ("critical_drain", ctypes.c_int),
         ("unit_type", ctypes.c_int),

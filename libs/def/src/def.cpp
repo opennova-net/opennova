@@ -1437,6 +1437,10 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
             current.turn_rate = parse_int_n(v, vl) * 192426; /* deg/s -> BAM/tick [orig: @0x49d89a] */
             parsed = 1;
+        } else if (lower_match_key(lower, ll, "torque", 6)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 6, &vl);
+            current.torque = parse_int_n(v, vl); /* raw shift count [orig: @0x49dcca] */
+            parsed = 1;
         } else if (lower_match_key(lower, ll, "max_slope", 9)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
             current.max_slope = parse_int_n(v, vl) * 11930464; /* deg -> BAM [orig: @0x49d91e] */

@@ -120,6 +120,7 @@ void test_def_physics_scaling() {
             "    slip_slope\t50\n"
             "    max_slope\t60\n"
             "    physics     1\n"
+            "    torque 3\n"
             "end\n";
     DefItemsFile file;
     std::memset(&file, 0, sizeof(file));
@@ -129,6 +130,7 @@ void test_def_physics_scaling() {
     if (file.count == 1) {
         const DefItemDef &d = file.entries[0];
         CHECK(d.physics == 1);
+        CHECK(d.torque == 3); // raw shift count [orig: @0x49dcca]
         CHECK(d.turn_rate == 65 * 192426);
         CHECK(d.turn_rate2 == 41 * 192426);
         CHECK(d.acceleration == 15 * 4);

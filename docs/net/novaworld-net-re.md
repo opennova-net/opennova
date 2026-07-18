@@ -8424,9 +8424,17 @@ stop (`@ 0x48bf6f-0x48bff9`, aiComp mode 125), the minAI crew health clamp
 (`@ 0x48bc4e-94`), the handbrake byte-973 latch + aim-lock stop (`@ 0x48c03a/0x48c086`),
 `EntityAI_ProcessVehicleStateMachine @ 0x4583c0`'s non-drive states, the engine sound
 state machine, husk/section damage, the wheel-contact pitch/roll solver
-(`Entity_ProcessTrackedVehiclePhysics` — substituted by the shared 5-tap bilinear terrain
-clamp), the above-water drive gate, the platform-follow grounded-on-entity block, and the
-driver-yaw analog write-back for remote drivers (their yaw is wire-owned on our host).
+(`Entity_ProcessTrackedVehiclePhysics @ 0x47c1c0` — substituted by the shared 5-tap
+bilinear terrain clamp), the above-water drive gate, the platform-follow
+grounded-on-entity block, and the driver-yaw analog write-back for remote drivers
+(their yaw is wire-owned on our host). 2026-07-17 update: the hull-vs-WORLD collision
+half of `Entity_CheckCollisionState @ 0x462a30` is PORTED (world-wac-ai-re §23.3
+addendum — `CollisionWorld::resolve_vehicle_hull`, one mid-hull point, the wall-like
+full-force severity-3 class + the def-torque speed decay `@ 0x47cc13-0x47ccc1`);
+still deferred here: the per-wheel point array/radii, the v84/v85 slope-threshold
+grading (caller locals, unwitnessed), the graded ¼/⅛ bands, the size-class crush leg
+(`@ 0x462e94`), the severity-3 authority damage block (`@ 0x47cd00`), and the second
+averaged-suspension pass (`@ 0x47d213`).
 
 **D-NET-160** [reimpl gap, FIXED 2026-07-03 (ported; verify v34)] **A killed client never
 learned it died — no death screen, no redeploy (v33: 2 kills routed, 0x13 + 0x1E on the wire

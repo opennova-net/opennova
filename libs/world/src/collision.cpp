@@ -1068,6 +1068,15 @@ void CollisionWorld::build_tick_tables(World &world) {
         if (e.kind == EntityKind::Organic && (e.flags & 1u) == 0)
             build_for(e, 0x40000); // [orig: pool-0 +4.0u]
     });
+    // Pool-1 SOURCE slices for motor-driven vehicles (the hull contact query's
+    // candidate set). [orig: Entity_BuildProximityListsFromPools @ 0x4b8eb0 — the
+    // pool-1 leg, radius +6.0u @ 0x4b902f]
+    world.registry.for_each([&](const Entity &e) {
+        if (e.handle.pool() != 1 || (e.flags & 1u) != 0) return;
+        const VehicleTraits *vt = world.vehicle_traits.get(e.item_id);
+        if (vt == nullptr || vt->physics == 0) return;
+        build_for(e, 0x60000);
+    });
 }
 
 const CollisionTargetView *CollisionWorld::target_view(World &world, EntityHandle h,
@@ -1600,6 +1609,67 @@ int32_t CollisionWorld::sound_occlusion_inflate(World &world, EntityHandle liste
     const bool ray2_clear = sound_los_clear(world, listener, source, listener_pos, end, -0x8000);
     // The single final add. [orig: @ 0x5299e6-0x5299f3]
     return distance_q16 + (ray2_clear ? base : 2 * base + 0x50000);
+}
+
+// See collision.h — the vehicle hull contact. [orig: Entity_CheckCollisionState
+// @ 0x462a30, the entity-collision half; the per-wheel terrain half rides the
+// motor's terrain column (D-NET-161).]
+int32_t CollisionWorld::resolve_vehicle_hull(World &world, EntityHandle source,
+                                             const int32_t pos[3], const int32_t prev_pos[3],
+                                             int32_t out_force[2]) {
+    out_force[0] = 0;
+    out_force[1] = 0;
+    auto it = candidates_.find(source.packed);
+    if (it == candidates_.end()) return 0;
+    const CandidateSlice slice = it->second;
+    if (slice.count <= 0) return 0;
+
+    const Entity *ent = world.registry.get(source);
+
+    // The hull-center test point: +1.5 u lift (mid-hull, so a wall's bottom face
+    // is never the cheapest SAT exit), radius 1.5 u — the wheel-point array and
+    // per-wheel radii ride the unported wheel solver (D-NET-161).
+    CollisionPoint point{pos[0], pos[1], pos[2] + 0x18000, 0};
+    int32_t radius = 0x18000;
+
+    ContactQuery q;
+    q.points = &point;
+    q.radii = &radius;
+    q.num_points = 1;
+    q.prev_pos[0] = prev_pos[0];
+    q.prev_pos[1] = prev_pos[1];
+    q.prev_pos[2] = prev_pos[2] + 0x18000;
+    q.source_bound_radius = radius;
+    q.mask = 0;
+    q.query_is_player = false;
+
+    BlinkAccum blink;         // vehicles accumulate no blink state
+    PlatformContact platform; // nor platform anchors
+    int32_t severity = 0;
+
+    for (int32_t i = 0; i < slice.count; ++i) {
+        const EntityHandle ch = arena_[slice.start + i];
+        if (ch == source) continue;
+        // Skip the carrier chain like the original's groundEntity walk
+        // [orig: @ 0x462e3d-0x462e4f].
+        if (ent != nullptr && ent->ground_target == ch) continue;
+        CollisionTargetView view;
+        std::vector<CollisionMatrix> mats;
+        const CollisionTargetView *tv = target_view(world, ch, view, mats);
+        if (tv == nullptr) continue;
+        ContactResult res;
+        if (!collision_contact_force(*tv, q, blink, platform, res)) continue;
+        // Verticality split [orig: @ 0x462fc2-0x462fcb — |fz|<<22 / |force| vs the
+        // caller's slope thresholds]: a wall-like (horizontal-dominant) push lands
+        // in FULL at severity 3 [orig: @ 0x46322d-0x463240]; vertical-dominant
+        // force is the ground's — dropped here, the terrain column owns it (the
+        // graded ¼/⅛ bands ride the wheel solver, D-NET-161).
+        if (abs32(res.force[0]) + abs32(res.force[1]) < abs32(res.force[2])) continue;
+        out_force[0] -= res.force[0];
+        out_force[1] -= res.force[1];
+        severity = 3;
+    }
+    return severity;
 }
 
 int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, ResolveState &state,

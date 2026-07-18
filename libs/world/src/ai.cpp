@@ -1150,6 +1150,19 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
     // Engine-frame heading (90 - mission yaw), matching the spawn seed + the mover; the present
     // converts back to mission yaw for the basis. [orig: entity heading = (90 - yaw) @0x40e9f0.]
     e.heading = static_cast<int32_t>(static_cast<int64_t>(90 - occ->yaw) * kBamPerDegreeInt);
+    if (e.inf.active && e.inf.is_local_player) {
+        // The seated LOOK stays mouse-instant at FULL precision: retail drives entity
+        // Yaw/Pitch straight from input regardless of mount (the mounted body leg
+        // writes bodyHeading/headLook from the bone, never the look) — the camera
+        // reads these mirrors, and the whole-degree occ->yaw roundtrip above (the
+        // wire/motor mirror) must not quantize or freeze it. tick_infantry's own
+        // mirrors (its lines `e.heading = inf.target_heading` / `e.pitch =
+        // inf.look_pitch`) are skipped for the whole ride.
+        // [orig: Input_HandleActionBinding_0 @0x4e1330 writes entity+0x10/+0x14;
+        //  §23.5 — the entity Yaw is the LOOK, player-owned while seated]
+        e.heading = e.inf.target_heading;
+        e.pitch = e.inf.look_pitch;
+    }
     if (e.inf.active) {
         const int mounted_state = mounted_anim_state_for_seat(*veh, seat, e.inf, root_motion);
         if (e.inf.anim_state != mounted_state) {
