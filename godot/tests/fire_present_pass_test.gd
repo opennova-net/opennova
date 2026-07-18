@@ -18,8 +18,12 @@ class SimStub:
 		slot_events = []
 		return out
 
-	func get_tracer_rounds() -> PackedFloat32Array:
-		return PackedFloat32Array()
+	# Trail channels framed [style_id, age, count, count x (x, y, z, w)] — the
+	# tracer_trails.h witness map.
+	var trails := PackedFloat32Array()
+
+	func get_tracer_trails() -> PackedFloat32Array:
+		return trails
 
 
 class AudioStub:
@@ -95,6 +99,69 @@ func test_delayed_fire_keeps_source_identity_until_playback() -> void:
 	assert_eq(audio.calls.size(), 1)
 	if audio.calls.size() == 1:
 		assert_eq(int(audio.calls[0]["source_bms_id"]), 88)
+	presenter.teardown()
+
+
+func test_tracer_trails_build_ribbon_strip() -> void:
+	# A live stdred channel (style 1, 4 points along +X) must produce ONE additive
+	# triangle-strip surface: pairs at points 0..count-2 (the newest point steers
+	# direction only), 2 verts per pair [orig: CEffectChannel_RenderRibbon @ 0x5DB8A0].
+	var sim := SimStub.new()
+	var audio := AudioStub.new()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var presenter = FirePresentPass.new()
+	presenter.setup(sim, container, func(): return audio, Callable(),
+			func(): return Vector3(0, 5, 10))
+	sim.trails = PackedFloat32Array([
+		1.0, 1.0, 4.0,  # style stdred, age 1, count 4
+		0.0, 1.0, 0.0, 1.0,
+		2.0, 1.0, 0.0, 1.0,
+		4.0, 1.0, 0.0, 1.0,
+		6.0, 1.0, 0.0, 1.0,
+	])
+
+	presenter.present()
+
+	var mesh: ImmediateMesh = presenter._mesh
+	assert_eq(mesh.get_surface_count(), 1, "one additive strip surface, no smoke surface")
+	if mesh.get_surface_count() == 1:
+		var arrays := mesh.surface_get_arrays(0)
+		var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+		assert_eq(verts.size(), 6, "3 drawn pairs (points 0..2), 2 verts each")
+		var cols: PackedColorArray = arrays[Mesh.ARRAY_COLOR]
+		assert_almost_eq(cols[0].r, 0.0, 0.01, "oldest pair rides the base color (black)")
+		assert_gt(cols[4].r, 0.5, "newer pairs ride the red ramp")
+	assert_eq(int(presenter.get_stats()["tracer_peak"]), 1)
+	presenter.teardown()
+
+
+func test_tracer_smoke_style_lands_on_the_alpha_surface() -> void:
+	# A rocket channel (style 3) draws on the smoke surface: alpha blend + scene fog
+	# [orig: style +0 additive flag 0 -> SetFogAndBlendMode mode 0].
+	var sim := SimStub.new()
+	var audio := AudioStub.new()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var presenter = FirePresentPass.new()
+	presenter.setup(sim, container, func(): return audio, Callable(),
+			func(): return Vector3(0, 5, 10))
+	sim.trails = PackedFloat32Array([
+		3.0, 1.0, 3.0,
+		0.0, 1.0, 0.0, 1.0,
+		2.0, 1.0, 0.0, 1.02,
+		4.0, 1.0, 0.0, 0.98,
+	])
+
+	presenter.present()
+
+	var mesh: ImmediateMesh = presenter._mesh
+	assert_eq(mesh.get_surface_count(), 1, "one smoke strip surface")
+	if mesh.get_surface_count() == 1:
+		var cols: PackedColorArray = mesh.surface_get_arrays(0)[Mesh.ARRAY_COLOR]
+		# Smoke keeps its authored alpha fade (base gray pair alpha 1.0 is the
+		# +0x14 base color; ramp entries carry the quadratic fade).
+		assert_almost_eq(cols[2].r, 0.75, 0.01, "0xC0 gray ramp")
 	presenter.teardown()
 
 

@@ -104,6 +104,19 @@ typedef struct DefAmmoDef {
      * ammo_tracer_type_from_string; one value copies into both [orig: @0x40a78b-0x40a7fa]. */
     int tracer_type_friendly; /* +232 */
     int tracer_type_enemy;    /* +236 */
+    /* The tracer round's visible item models, 'frndlyTrcrID <type_id>' /
+     * 'foeTrcrID <type_id>'. The original resolves the ITEMS.DEF type id to an item
+     * INDEX at parse (ItemList_FindIndexByTypeId, name fallback, warning on miss)
+     * [orig: AmmoDef_ParseProperty @0x40a5f8-0x40a68d -> +16/+20]; we keep the raw
+     * type id and the host resolves at use. 0 = none. */
+    int frndly_trcr_type_id; /* +16 (pre-resolve) */
+    int foe_trcr_type_id;    /* +20 (pre-resolve) */
+    /* The in-flight round glow, 'light_move <radius> <r> <g> <b>' — spawned per round
+     * into the light pool, follows the round, cleared on death [orig: parse
+     * @0x40a2d0 'light_move' -> +120 radius 16.16 / +124 (r<<16)|(g<<8)|b; consumer
+     * RoundData_SpawnRound @0x4ec8a9 -> LightPool_SpawnGlowEffect, handle round+0x1B4]. */
+    int light_move_radius_fp16; /* +120 */
+    int light_move_color;       /* +124: packed 0xRRGGBB */
     DefEffectTableEntry *effects_table;
     size_t effects_table_count;
     char (*raw_lines)[512];
