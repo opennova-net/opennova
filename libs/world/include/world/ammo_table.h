@@ -93,6 +93,14 @@ struct AmmoTableEntry {
     int32_t mf_light_value = 0;     // +40 `MF_Light` value
     int32_t tracer_type_friendly = 0; // +232 `tracer_type` first style id
     int32_t tracer_type_enemy = 0;    // +236 second style id (defaults to the first)
+    // The tracer round's visible item models (`frndlyTrcrID`/`foeTrcrID`, ITEMS.DEF
+    // type ids; the original resolves to item indexes at parse [orig: @0x40a5f8 ->
+    // +16/+20], we resolve at use) and the in-flight glow (`light_move` [orig:
+    // +120 radius / +124 RGB -> LightPool_SpawnGlowEffect @0x4ec8da, round+0x1B4]).
+    int32_t tracer_item_friendly = 0; // +16 (raw type id; 0 = none)
+    int32_t tracer_item_enemy = 0;    // +20 (raw type id; 0 = none)
+    float light_move_radius = 0.0f;   // +120 (16.16 -> float units; 0 = no glow)
+    uint32_t light_move_color = 0;    // +124 packed 0xRRGGBB
     bool valid = false;
 };
 

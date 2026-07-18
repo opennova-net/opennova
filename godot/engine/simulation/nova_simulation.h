@@ -664,13 +664,18 @@ public:
 	// [orig: Entity_PlaySound3D_FullVolume @ 0x528e20].
 	Array drain_slot_sounds();
 
-	// Live TRACER rounds, 9 floats each: godot-space position (3), godot-space
-	// per-tick velocity (3), round team, tracer_type friendly id, enemy id — the
-	// fire present pass draws the streaks and picks the style vs the local player's
-	// team. [orig: RoundData_SpawnRound @0x4EC0D0 tracer decision + the +0xE8/+0xEC
-	// 'tracer_type' pair; non-tracer rounds are invisible in flight (graphicModel
-	// zeroed @0x4ec900).]
-	PackedFloat32Array get_tracer_rounds() const;
+	// The live tracer TRAIL channels — the per-round point rings behind every streak,
+	// framed per channel as [style_id, age, count, then count x (x, y, z, w)] in
+	// godot space; the friendly/enemy style is already selected at spawn vs the local
+	// team, and killed rounds' channels keep draining until empty. The fire present
+	// pass builds the camera-facing ribbons from these.
+	// [orig: the 256-channel pool g_TracerEmitterPool @ 0x2BF5270 — alloc
+	// RoundData_SpawnRound @0x4ec774, append Projectile_UpdatePhysics (pre-move,
+	// 1/tick), drain CEffectEmitterPool_Tick @0x5db830, draw
+	// CEffectChannel_RenderRibbon @0x5db8a0; non-tracer rounds have no channel and
+	// are invisible in flight (graphicModel zeroed @0x4ec900). The witness map lives
+	// in world/tracer_trails.h.]
+	PackedFloat32Array get_tracer_trails() const;
 
 	// Mission scripting state on the shared world (the dword_C6B240 var store + event gates).
 	void set_mission_variable(int index, int value);
