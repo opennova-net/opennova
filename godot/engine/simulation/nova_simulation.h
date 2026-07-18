@@ -646,6 +646,17 @@ public:
 	// Horizontal -> vertical projection fov (degrees) through the aspect — the
 	// ONE conversion both cameras use [orig: @ 0x58d900].
 	static float fov_vertical_from_horizontal(float p_fov_h_deg, float p_aspect);
+	// The waypoint-track snapshot for the HUD label: {show, count, current,
+	// number, name_id, position (Godot space), done}. current is -1 with no
+	// selection; number is the 1-based display index [orig: hudInfo+373 =
+	// list index + 1 @ 0x4b88e8]. Read-only; the track advances in the world
+	// tick. (docs/interface/hud-re.md §Waypoint HUD)
+	Dictionary get_waypoint_hud_view() const;
+	// The objectives-panel rows: an Array of {slot, text_id, shown, done} for
+	// header slots 1..8, terminated at the first 0/255 win-condition id —
+	// exactly the panel's row walk [orig: HUD_DrawWinConditions @0x5ba9e0..;
+	// shown = show-win bit, done = won bit].
+	Array get_objectives_view() const;
 	// The FSM snapshot for the host: latest clip/action payloads, diagnostic serials,
 	// ammo, kick, and the 3P body channel. Ordered presentation events drain through
 	// drain_local_player_weapon_events(); the snapshot alone is not an event queue.

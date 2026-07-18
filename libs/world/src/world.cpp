@@ -671,6 +671,16 @@ void World::run_logic_tick(bool is_authority, bool pre_mission) {
     // Weapon_UpdateAllProjectiles @0x4ec020; damage is authority-gated end-to-end,
     // §5.60]. Terrain is the host-wired sampler (AI grounding shares it).
     if (is_authority && !pre_mission) round_sim.tick(*this, terrain);
+    // The waypoint current-selection pass, from the local player's position (the
+    // original runs it in the client frame beside the player update; our SP host
+    // is that client — the pure-client view is D-HUD-16). Position converts to
+    // the original's 16.16 fixed compare space. [orig: Player_UpdatePerFrame
+    // @0x4de5f7]
+    if (is_authority && !pre_mission && !waypoints.empty()) {
+        if (const Entity *lp = registry.get(cached.local_player))
+            waypoints.tick_advance(static_cast<int32_t>(lp->position.x * 65536.0f),
+                                   static_cast<int32_t>(lp->position.y * 65536.0f));
+    }
     if (is_authority) {
         if (pre_mission) {
             // The one-shot initial group recount, ordered right after the pre

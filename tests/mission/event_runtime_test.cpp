@@ -329,6 +329,98 @@ static void test_presentation_effects() {
     CHECK(w.effects.count("dialog") == 1);
     CHECK(w.effects.count("show_waypoints") == 1);
     CHECK(w.effects.count("unported_action") == 0);
+    // ShowWaypoints(1) with param1=1 keeps the flag on; the engine-side gate
+    // lives on the world track. [orig: Game_SetShowWaypoints @0x58fb50]
+    CHECK(w.waypoints.show);
+}
+
+// A fired event completes the waypoint-track entries linked to its index (the HUD
+// waypoint chain), and ShowWaypoints(0) drops the track's show gate. Linked
+// indices are > 0 only — the original's `linkedTrigger > 0` gate reserves 0 as
+// "no link" (BMS wp_adv_trigger 0), so event 0 can never complete a waypoint.
+// [orig: EventTrigger_MarkLinkedSpawnPoints @0x452ce0 (the @0x452d34 > 0 gate)
+//  after the dispatch loops @0x454cbd; Game_SetShowWaypoints @0x58fb50]
+static void test_waypoint_track_integration() {
+    World w;
+    w.registry.configure_pool(0, 4);
+    // The mission's waypoint track: entry 1 completes when EVENT 1 fires.
+    world::WaypointEntry a;
+    a.x = 0; a.y = 0;
+    world::WaypointEntry b;
+    b.x = 100 << 16; b.y = 0;
+    b.linked_event = 1;
+    w.waypoints.entries = {a, b};
+    w.waypoints.current = 1;
+
+    // Event 0: inert filler (its OutputText is irrelevant); event 1: the linked
+    // one, whose action also hides the waypoints.
+    bms::Event filler = simple_event(bms::EventFlags::None, 0);
+    bms::Event linked = simple_event(bms::EventFlags::None, 1);
+    bms::Action txt{};
+    txt.action_type = bms::ActionType::OutputText;
+    txt.param1 = 1;
+    bms::Action wps{};
+    wps.action_type = bms::ActionType::ShowWaypoints;
+    wps.param1 = 0; // hide
+    mission::BmsEventSystem sys;
+    sys.load({filler, linked}, {}, {txt, wps});
+    w.add_system(&sys);
+    w.load_systems();
+
+    CHECK(w.waypoints.show);
+    tick_n(w, kCycle); // a full quarter cycle: both events process + fire
+    CHECK(!w.waypoints.show);            // ShowWaypoints(0) applied
+    CHECK(w.waypoints.entries[1].done);  // the linked entry completed
+    CHECK(w.waypoints.current == 0);     // skip_done cycled off the done entry
+    CHECK(!w.waypoints.entries[0].done); // no chain_back: entry 0 untouched
+}
+
+// The subgoal actions drive the objectives-panel state: ShowWinSubgoal sets the
+// RAW-slot show bit, SubGoalWon sets the won bit once (the already-won guard
+// silences a refire), SubGoalLost accumulates without a guard. Effects carry
+// the header text id + the round-running announce flag.
+// [orig: EventAction_Dispatch cases 14 @0x454500 / 15 @0x4545e0 / 35 @0x4546af]
+static void test_subgoal_state() {
+    World w;
+    w.registry.configure_pool(0, 4);
+    w.subgoals.win_text_ids[2] = 7;   // header WinConditions slot 2 -> STRWINCOND007
+    w.subgoals.lose_text_ids[3] = 4;
+
+    bms::Event show_e = simple_event(bms::EventFlags::None, 0);
+    bms::Event won_e = simple_event(bms::EventFlags::None, 1);
+    // Refire the SAME SubGoalWon from a later event: the guard must silence it.
+    bms::Event won_again_e = simple_event(bms::EventFlags::None, 2);
+    bms::Event lost_e = simple_event(bms::EventFlags::None, 3);
+    bms::Action show{};
+    show.action_type = bms::ActionType::ShowWinSubgoal;
+    show.param1 = 2;
+    show.param2 = 1;
+    bms::Action won{};
+    won.action_type = bms::ActionType::SubGoalWon;
+    won.param1 = 2;
+    bms::Action lost{};
+    lost.action_type = bms::ActionType::SubGoalLost;
+    lost.param1 = 3;
+    mission::BmsEventSystem sys;
+    sys.load({show_e, won_e, won_again_e, lost_e}, {}, {show, won, won, lost});
+    w.add_system(&sys);
+    w.load_systems();
+
+    tick_n(w, kCycle);
+    CHECK((w.subgoals.show_win & (1u << 2)) != 0);   // raw-slot bit
+    CHECK((w.subgoals.won & (1u << 2)) != 0);
+    CHECK((w.subgoals.lost & (1u << 3)) != 0);
+    CHECK(w.effects.count("subgoal_won") == 1);       // the refire was guarded
+    CHECK(w.effects.count("subgoal_lost") == 1);
+    bool saw_won = false;
+    for (const auto &e : w.effects.entries()) {
+        if (e.kind != "subgoal_won") continue;
+        saw_won = true;
+        CHECK(e.a == 2);
+        CHECK(e.b == 7); // the header text id resolved into the effect
+        CHECK(e.c == 1); // round still running -> announce
+    }
+    CHECK(saw_won);
 }
 
 // OutputText surfaces a "text" effect; ResetEvent clears the target's active latch
@@ -822,6 +914,8 @@ int main() {
     test_pre_mission_pass();
     test_playpartanim_mutates_brain();
     test_presentation_effects();
+    test_waypoint_track_integration();
+    test_subgoal_state();
     test_output_text_and_reset_event();
     test_event_trigger_reads_window();
     test_playpartanim_zero_time_saturates();

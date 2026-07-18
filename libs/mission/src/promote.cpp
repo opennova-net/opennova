@@ -276,8 +276,12 @@ PromoteResult promote_mission(const bms::File &m, World &world, AiSystem &ai,
     ai.nav.channels.emplace_back(); // channel 0 = empty "no route" sentinel
     for (const bms::WaypointRecord &wr : m.waypoint_records) {
         NavChannel ch;
-        ch.loopflag = (static_cast<uint32_t>(wr.flags) &
-                       static_cast<uint32_t>(bms::WaypointFlags::DoesNotLoop)) ? 1 : 0;
+        // The channel's dword 0 is the RAW route-flags word: bit0 = one-shot
+        // (the only bit the movers mask), bit1/bit2 = the blue/red team-route
+        // marks the waypoint-track pick below reads. [orig: Buffer[34*ch] —
+        // the mover masks bit0 @0x457c3d-adjacent; the 0x0F waypoint writer
+        // tests bit1 on the same dword @0x502e53]
+        ch.loopflag = static_cast<int32_t>(static_cast<uint32_t>(wr.flags));
         int count = std::min<int>(static_cast<int>(wr.marker_count), 32);
         count = std::min<int>(count, static_cast<int>(wr.waypoint_numbers.size()));
         ch.count = count;
@@ -286,6 +290,54 @@ PromoteResult promote_mission(const bms::File &m, World &world, AiSystem &ai,
         ai.nav.channels.push_back(ch);
     }
     r.nav_channels = static_cast<int>(m.waypoint_records.size());
+
+    // The player waypoint track: the FIRST blue-route channel (flags bit 1 —
+    // the same pick the 0x0F world-state writer serializes for a team-1
+    // recipient) over the pool-3 markers, with the marker waypoint fields.
+    // [orig: NetPacket_WriteWorldStateLoad0x0F @0x502e41 (channel scan) +
+    //  Entity_SpawnFromBMSRecord @0x40f0aa (the marker fields); ≤128 entries]
+    world.waypoints.clear();
+    for (const bms::WaypointRecord &wr : m.waypoint_records) {
+        if ((static_cast<uint32_t>(wr.flags) &
+             static_cast<uint32_t>(bms::WaypointFlags::BlueTeam)) == 0)
+            continue;
+        const int count = std::min<int>({static_cast<int>(wr.marker_count),
+                                         static_cast<int>(wr.waypoint_numbers.size()), 128});
+        for (int k = 0; k < count; ++k) {
+            const int idx = static_cast<int>(wr.waypoint_numbers[k]);
+            if (idx < 0 || idx >= static_cast<int>(m.markers.size())) continue;
+            const bms::Entity &mk = m.markers[static_cast<size_t>(idx)];
+            WaypointEntry e;
+            e.node = idx;
+            e.x = mk.x;
+            e.y = mk.y;
+            e.z = mk.z;
+            // [orig: entity+0 = wp_distance<<16, default 0x8000 @0x40f09b]
+            e.radius = (mk.wp_distance != 0) ? (mk.wp_distance << 16) : opts.arrival_radius;
+            // [orig: entity+672 = the record's ttool_index @0x40f0ad — the
+            //  WPNames STRWPNAME%03i id]
+            e.name_id = mk.ttool_index;
+            // [orig: entity+528 = word rec 'wp_adv_trigger' @0x40f0b7; the
+            //  fired-event index that completes this waypoint]
+            e.linked_event = mk.wp_adv_trigger;
+            // [orig: entity+535 = attributes bit 22 @0x40f123-0x40f129]
+            e.chain_back = (mk.bmsi_attributes & (1u << 22)) != 0;
+            world.waypoints.entries.push_back(e);
+        }
+        break; // first flagged channel only [orig: the @0x502e53 scan stops on the first hit]
+    }
+
+    // The objectives panel's per-slot text-id tables, from the mission header.
+    // The engine indexes them 1-based off a byte pointer one BELOW the first
+    // header byte (byte_A7628B[1] = win_conditions[0]); mirror that shift so
+    // slot arithmetic stays the witnessed form. [orig: byte_A7628B/byte_A76293
+    //  = header +0xBC win_conditions / +0xC4 lose_conditions; readers
+    //  EventAction_Dispatch @0x454546/@0x454600, HUD_DrawWinConditions @0x5ba9e0]
+    world.subgoals = World::SubgoalState{};
+    for (int slot = 1; slot <= 8; ++slot) {
+        world.subgoals.win_text_ids[slot] = m.header.win_conditions[slot - 1];
+        world.subgoals.lose_text_ids[slot] = m.header.lose_conditions[slot - 1];
+    }
 
     // Area-trigger zones -> the registry's area table, registered in array order so the area id ==
     // the area-trigger array index (the value SingleIsWithinArea/GroupIsWithinArea param2 references;

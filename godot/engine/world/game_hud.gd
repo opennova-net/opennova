@@ -30,6 +30,7 @@ var _crosshair_style := MIN_CROSSHAIR_STYLE
 var _stance_textures: Array[Texture2D] = []
 var _stance_offsets: Array[Vector2] = []
 var _positions: Dictionary = {}
+var _rects: Dictionary = {}
 var _colors: Dictionary = {}
 var _alpha_fade := Vector3.ZERO
 var _chat_lines := DEFAULT_CHAT_LINES
@@ -100,6 +101,7 @@ func set_layout(hudpos: NovaHudPos, root: NovaResourceRoot) -> void:
 	_stance_textures.clear()
 	_stance_offsets.clear()
 	_positions = {}
+	_rects = {}
 	_colors = {}
 	_alpha_fade = Vector3.ZERO
 	_chat_lines = DEFAULT_CHAT_LINES
@@ -206,6 +208,7 @@ func _load_assets() -> void:
 	_font = HudText.load_font(_root, font_name)
 	var dict := _hudpos.to_dictionary()
 	_positions = dict.get("positions", {})
+	_rects = dict.get("rects", {})
 	_colors = _hudpos.get_colors()
 	var misc: Dictionary = dict.get("misc", {})
 	_alpha_fade = misc.get("alpha_fade", Vector3.ZERO)
@@ -275,6 +278,9 @@ func _draw() -> void:
 
 	_draw_stance(surface, ticks)
 	_draw_weapon_cluster(surface, ticks)
+	_draw_heat_bar(surface)
+	_draw_waypoint_info(surface)
+	_draw_objectives_panel(surface)
 	_draw_attach_labels()
 
 	# Objective / status line (the MP objective element's anchor; SP mission text goes
@@ -353,6 +359,154 @@ func _draw_weapon_cluster(surface: Vector2, ticks: int) -> void:
 		_clip_tex, _round_tex, clip, reserve, tint, _alpha_fade, ticks, surface)
 
 	_draw_crosshair(surface)
+
+
+# The weapon heat bar: hidden at zero heat, else the HUDHEATBORDER wireframe around
+# the HUDHEAT rect plus a stancecolor_bad fill proportional to heat/0x10000 —
+# left-to-right for a wide rect, bottom-up for a tall one, inset 1px, with the
+# original's +0x8000 round-to-nearest span math. Heat arrives 0..0xFFFF in the
+# per-frame info (0 until the weapon heat accumulator is ported — D-HUD-15).
+# [orig: HUD_DrawWeaponHeatBar @0x599700 (ex kong "draw_minimap_overlay" misnomer);
+#  gate hudInfo+60 @0x59970a; border @0x599787; spans @0x5997a1..0x59981f]
+func _draw_heat_bar(surface: Vector2) -> void:
+	var heat := int(_info.get("heat", 0))
+	if heat <= 0:
+		return
+	var design: Rect2 = _rects.get("heat", Rect2())
+	if design.size.x <= 0.0 and design.size.y <= 0.0:
+		return
+	var r := HudLayout.scale_rect(design, surface)
+	var border: Color = _colors.get("heat_border", Color.WHITE)
+	var fill: Color = _colors.get("stancecolor_bad", Color(0.69, 0.04, 0.04))
+	draw_rect(r, border, false)
+	heat = mini(heat, 0xFFFF)
+	if r.size.y <= r.size.x:
+		# Horizontal: fill left -> right. [orig: @0x5997f0..0x59981f]
+		var span := (int(r.size.x) * heat + 0x8000) >> 16
+		draw_rect(Rect2(r.position + Vector2.ONE, Vector2(maxf(span - 2.0, 0.0), r.size.y - 2.0)), fill)
+	else:
+		# Vertical: fill bottom -> up. [orig: @0x5997b0..0x5997df]
+		var vspan := (int(r.size.y) * heat + 0x8000) >> 16
+		var top := r.position.y + r.size.y - vspan + 1.0
+		draw_rect(Rect2(Vector2(r.position.x + 1.0, top),
+			Vector2(r.size.x - 2.0, maxf(r.position.y + r.size.y - 1.0 - top, 0.0))), fill)
+
+
+# The waypoint name + distance label at the HUDWPDINFO anchor. Gates: the mission
+# ShowWaypoints flag and a live current waypoint (the host omits the entry
+# otherwise). Field 3 of the token hides only the wireframe BOX (which frames the
+# distance number); the element itself has no hide field. Align: 0 = name to the
+# right of the distance, 1 = name right-aligned at the anchor with the distance
+# shifted left, 2 = name ending left of the anchor. The distance always draws
+# right-aligned at its anchor. Color base = hud_textcolor (the original reads the
+# master overlay color — the D-HUD-13 base swap applies here too).
+# [orig: HUD_DrawWaypointNameAndDistance @0x5947a0; gates @0x5a7daf; box @0x594b0c]
+func _draw_waypoint_info(surface: Vector2) -> void:
+	var wp: Dictionary = _info.get("waypoint", {})
+	if wp.is_empty() or _font == null:
+		return
+	var name_text := String(wp.get("name", ""))
+	var dist_str := "%d" % int(wp.get("distance_m", 0))
+	var gp := _pos_of("wpd_info", Vector4i.ZERO)
+	if gp == Vector4i.ZERO:
+		return
+	var anchor := Vector2(gp.x, gp.y)
+	var hide_box := gp.z != 0
+	var align := gp.w
+	var color: Color = _colors.get("hud_textcolor", Color(0.98, 0.84, 0.02))
+	var fs := 16
+	if _font is FontFile:
+		fs = (_font as FontFile).get_fixed_size()
+	var dist_w := _font.get_string_size(dist_str, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x \
+			* HudLayout.DESIGN_WIDTH / maxf(surface.x, 1.0)
+	var text_h := _font.get_string_size(dist_str, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).y \
+			* HudLayout.DESIGN_HEIGHT / maxf(surface.y, 1.0)
+	# The distance anchor in design space; the name draws around it per align.
+	var dist_anchor := anchor
+	var box_left := anchor.x
+	var box_right := anchor.x + dist_w + 4.0
+	if not name_text.is_empty():
+		match align:
+			1: # name right-aligned at the anchor; distance shifts left of it
+				HudText.draw_text(self, _font, anchor, surface, name_text, color, HudText.Align.RIGHT)
+				var name_w := _font.get_string_size(name_text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x \
+						* HudLayout.DESIGN_WIDTH / maxf(surface.x, 1.0)
+				dist_anchor.x = anchor.x - 4.0 - name_w
+				box_left = dist_anchor.x - dist_w
+				box_right = dist_anchor.x + 4.0
+			2: # name left-aligned at the anchor; distance right-aligned just left of it
+				HudText.draw_text(self, _font, anchor, surface, name_text, color, HudText.Align.LEFT)
+				dist_anchor.x = anchor.x - 4.0
+				box_left = dist_anchor.x - dist_w
+				box_right = dist_anchor.x + 4.0
+			_: # 0: name to the right of the distance number
+				HudText.draw_text(self, _font, Vector2(anchor.x + dist_w + 4.0, anchor.y),
+					surface, name_text, color, HudText.Align.LEFT)
+	if not hide_box:
+		var p0 := HudLayout.scale_point(Vector2(box_left, anchor.y - 2.0), surface)
+		var p1 := HudLayout.scale_point(Vector2(box_right, anchor.y + text_h - 1.0), surface)
+		draw_rect(Rect2(p0, p1 - p0), color, false)
+	HudText.draw_text(self, _font, dist_anchor, surface, dist_str, color, HudText.Align.RIGHT)
+
+
+# The toggled MISSION OBJECTIVES panel: a backing box at the witnessed anchor
+# (x=15, y=240 design), the gametext header, then one row per shown win
+# condition — a checkbox that gains a checkmark when the subgoal is won, the
+# row text dimming to gray on completion (the witnessed +0xFF808081 color fold
+# collapses white -> 0x808080 gray at full alpha). Host feeds resolved rows
+# ({text, done}); an empty array hides the panel (the retail toggle's off
+# state). Stand-ins recorded as D-HUD-18: the exact checkbox line geometry
+# (the ten draw_clipped_2d_line calls decompile with elided operands) and the
+# retail label-box texture ride Godot rects.
+# [orig: HUD_DrawWinConditions @0x5ba940 — gate @0x5be14a (dword_24C18CC),
+#  anchor @0x5be153 (x=15, y=+0xF0), header STROVER_MISSIONOBJECTIVES
+#  @0x5ba986, box HUD_DrawLabelBox @0x5baaba, gray fold @0x5bac86]
+func _draw_objectives_panel(surface: Vector2) -> void:
+	var rows: Array = _info.get("objectives", [])
+	if rows.is_empty() or _font == null:
+		return
+	var header := "MISSION OBJECTIVES"
+	var t: RtxtStringFile = NovaStrings.get_table("gametext")
+	if t != null and t.has_string_in_section("Overlays", "STROVER_MISSIONOBJECTIVES"):
+		header = t.get_string_in_section("Overlays", "STROVER_MISSIONOBJECTIVES")
+	var fs := 16
+	if _font is FontFile:
+		fs = (_font as FontFile).get_fixed_size()
+	var row_h := _font.get_string_size("M", HORIZONTAL_ALIGNMENT_LEFT, -1, fs).y \
+			* HudLayout.DESIGN_HEIGHT / maxf(surface.y, 1.0)
+	var x := 15.0
+	var y := 240.0
+	# Panel width tracks the widest line, like the original's measure pass.
+	var max_w := _font.get_string_size(header, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x \
+			* HudLayout.DESIGN_WIDTH / maxf(surface.x, 1.0)
+	for raw in rows:
+		var w := _font.get_string_size(String((raw as Dictionary).get("text", "")),
+				HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x * HudLayout.DESIGN_WIDTH / maxf(surface.x, 1.0)
+		max_w = maxf(max_w, w)
+	var panel := Rect2(Vector2(x, y - 6.0),
+			Vector2(max_w + 72.0, (rows.size() + 1) * (row_h + 4.0) + 48.0))
+	var p0 := HudLayout.scale_point(panel.position, surface)
+	var p1 := HudLayout.scale_point(panel.position + panel.size, surface)
+	draw_rect(Rect2(p0, p1 - p0), Color(0, 0, 0, 0.5))
+	draw_rect(Rect2(p0, p1 - p0), Color.WHITE, false)
+	HudText.draw_text(self, _font, Vector2(x + 24.0, y), surface, header, Color.WHITE)
+	var row_y := y + row_h + 10.0
+	for raw in rows:
+		var row: Dictionary = raw
+		var done := bool(row.get("done", false))
+		# The checkbox at the row head; the checkmark only when won.
+		var b0 := HudLayout.scale_point(Vector2(x + 26.0, row_y + 2.0), surface)
+		var b1 := HudLayout.scale_point(Vector2(x + 26.0 + 12.0, row_y + 14.0), surface)
+		draw_rect(Rect2(b0, b1 - b0), Color.WHITE, false)
+		if done:
+			var m0 := HudLayout.scale_point(Vector2(x + 28.0, row_y + 8.0), surface)
+			var m1 := HudLayout.scale_point(Vector2(x + 31.0, row_y + 12.0), surface)
+			var m2 := HudLayout.scale_point(Vector2(x + 40.0, row_y + 2.0), surface)
+			draw_polyline(PackedVector2Array([m0, m1, m2]), Color.WHITE, 2.0)
+		var color := Color(0.5, 0.5, 0.5) if done else Color.WHITE
+		HudText.draw_text(self, _font, Vector2(x + 48.0, row_y - 2.0), surface,
+			String(row.get("text", "")), color)
+		row_y += row_h + 4.0
 
 
 # The floating seat/armory attach labels, host-projected to screen pixels: each entry

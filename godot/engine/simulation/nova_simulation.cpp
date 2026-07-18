@@ -157,6 +157,17 @@ opennova::bms::File make_demo_mission() {
 	wr.waypoint_numbers = {0, 1, 2};
 	m.waypoint_records.push_back(wr);
 
+	// A BLUE-flagged player route over the same markers: promotion builds the
+	// HUD waypoint track from the first such record (marker 0 authors a wide
+	// radius + a name id so the view surfaces meaningful fields).
+	m.markers[0].wp_distance = 25;
+	m.markers[0].ttool_index = 1;
+	opennova::bms::WaypointRecord player_route{};
+	player_route.flags = opennova::bms::WaypointFlags::BlueTeam;
+	player_route.marker_count = 3;
+	player_route.waypoint_numbers = {0, 1, 2};
+	m.waypoint_records.push_back(player_route);
+
 	m.organics.push_back(organic(0, 0, 0, /*team=*/1, /*wp_id=*/1));
 	m.organics.push_back(organic(50 << 16, 0, 0, /*team=*/2, /*wp_id=*/1));
 
@@ -1924,6 +1935,8 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_local_player_mouse", "sensitivity", "invert_y"), &NovaSimulation::set_local_player_mouse);
 	ClassDB::bind_method(D_METHOD("request_local_player_stance", "stance"), &NovaSimulation::request_local_player_stance);
 	ClassDB::bind_method(D_METHOD("get_local_player_position"), &NovaSimulation::get_local_player_position);
+	ClassDB::bind_method(D_METHOD("get_waypoint_hud_view"), &NovaSimulation::get_waypoint_hud_view);
+	ClassDB::bind_method(D_METHOD("get_objectives_view"), &NovaSimulation::get_objectives_view);
 	ClassDB::bind_method(D_METHOD("get_local_player_yaw_deg"), &NovaSimulation::get_local_player_yaw_deg);
 	ClassDB::bind_method(D_METHOD("get_local_player_pitch_deg"), &NovaSimulation::get_local_player_pitch_deg);
 	ClassDB::bind_method(D_METHOD("get_local_player_body_anim_slot"), &NovaSimulation::get_local_player_body_anim_slot);
@@ -2569,6 +2582,45 @@ bool NovaSimulation::request_local_player_stance(int p_stance) {
 	player_input_.crouch = (stance_latch_ == 1);
 	player_input_.prone = (stance_latch_ == 2);
 	return true;
+}
+
+Dictionary NovaSimulation::get_waypoint_hud_view() const {
+	// The current-waypoint slice of the per-frame HUD info rebuild, plus the
+	// mission-scripted show gate. [orig: HUD_BuildEntityInfo @ 0x4b88b7..0x4b8914
+	// (hudInfo+373 number, +400/404/408 position) + g_showWaypoints @ 0x27238BC]
+	Dictionary out;
+	const opennova::world::WaypointTrack *track = world_ ? &world_->waypoints : nullptr;
+	out["show"] = track != nullptr && track->show;
+	out["count"] = track ? static_cast<int>(track->entries.size()) : 0;
+	const opennova::world::WaypointEntry *cur = track ? track->current_entry() : nullptr;
+	out["current"] = cur ? track->current : -1;
+	out["number"] = cur ? track->current + 1 : 0;
+	out["name_id"] = cur ? cur->name_id : 0;
+	// Fixed 16.16 mission (x,y,z) -> Godot (x, z, -y), like every entity read.
+	out["position"] = cur ? Vector3(cur->x / 65536.0f, cur->z / 65536.0f, -(cur->y / 65536.0f))
+						  : Vector3();
+	out["done"] = cur != nullptr && cur->done;
+	return out;
+}
+
+Array NovaSimulation::get_objectives_view() const {
+	// The SP objectives panel's row walk: slots 1..8 until a 0/255 win id.
+	// [orig: HUD_DrawWinConditions @0x5ba9e0 — byte_A7628B[slot] 0/255 break;
+	//  row gate = show-win bit @0x5ba9ff; checkmark = won bit @0x5bab35]
+	Array out;
+	if (!world_) return out;
+	const auto &sg = world_->subgoals;
+	for (int slot = 1; slot <= 8; ++slot) {
+		const uint8_t id = sg.win_text_ids[slot];
+		if (id == 0 || id == 255) break;
+		Dictionary row;
+		row["slot"] = slot;
+		row["text_id"] = static_cast<int>(id);
+		row["shown"] = (sg.show_win & (1u << slot)) != 0;
+		row["done"] = (sg.won & (1u << slot)) != 0;
+		out.push_back(row);
+	}
+	return out;
 }
 
 Vector3 NovaSimulation::get_local_player_position() const {
