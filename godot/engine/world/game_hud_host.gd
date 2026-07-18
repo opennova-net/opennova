@@ -235,7 +235,7 @@ func tick() -> void:
 		# per-slot heat accumulator is ported (D-HUD-15).
 		# [orig: hudInfo+60 = WeaponSlot_CalcAccumulatedHeat @0x53f780, @0x4b8533]
 		"heat": 0,
-		"waypoint": _build_waypoint_info(),
+		"waypoint": _waypoint_info_dict(),
 		"objectives": _build_objectives() if _objectives_visible else [],
 	})
 	# Effects drain synchronously during _world.tick(), before this HUD update.
@@ -249,32 +249,37 @@ func _hud_ticks() -> int:
 	return int(Time.get_ticks_msec() * 0.062)
 
 
-# The waypoint label's info slice: the sim's current track entry with its display
-# name resolved and the 2D ground distance in meters. Empty dictionary = the label
-# hides (no track, ShowWaypoints off, or no current selection) — the drawer treats
+# The waypoint label's entry: the sim's current track entry with its display
+# name resolved and the 2D ground distance in meters. Null = the label hides
+# (no track, ShowWaypoints off, or no current selection) — the drawer treats
 # absence as the original's null-current / flag-off gates.
 # [orig: HUD_DrawWaypointNameAndDistance @0x5947a0 gates @0x5a7daf (g_showWaypoints
 #  + a current present in the list); distance @0x5947e5..0x594836 = 2D fixed sqrt
 #  >> 16; name get_waypoint_name @0x594630]
-func _build_waypoint_info() -> Dictionary:
+# The record's transport form at the per-frame update_info edge.
+func _waypoint_info_dict() -> Dictionary:
+	var entry := _build_waypoint_entry()
+	return entry.to_info_dict() if entry != null else {}
+
+
+func _build_waypoint_entry() -> WaypointHudEntry:
 	if _world == null:
-		return {}
+		return null
 	var sim = _world.get_sim() if _world.has_method("get_sim") else null
 	if sim == null or not sim.has_method("get_waypoint_hud_view"):
-		return {}
+		return null
 	var wp: Dictionary = sim.get_waypoint_hud_view()
 	if not bool(wp.get("show", false)) or int(wp.get("current", -1)) < 0:
-		return {}
+		return null
 	var pos: Vector3 = wp.get("position", Vector3.ZERO)
 	var player: Vector3 = sim.get_local_player_position() \
 			if sim.has_method("get_local_player_position") else Vector3.ZERO
+	var entry := WaypointHudEntry.new()
+	entry.text_name = _resolve_waypoint_name(int(wp.get("name_id", 0)))
 	# The original distance is horizontal-only (mission X/Y deltas = the Godot
 	# ground plane), fixed sqrt truncated to whole meters. [orig: @0x594836 sar 16]
-	var dist := int(Vector2(pos.x - player.x, pos.z - player.z).length())
-	return {
-		"name": _resolve_waypoint_name(int(wp.get("name_id", 0))),
-		"distance_m": dist,
-	}
+	entry.distance_m = int(Vector2(pos.x - player.x, pos.z - player.z).length())
+	return entry
 
 
 # The waypoint display name. Our SP runtime is the co-op session shape (gametype
@@ -439,10 +444,10 @@ func endround_banner_line() -> String:
 	return _endround_banner
 
 
-## The waypoint label's current entry ({name, distance_m}; empty = label hidden)
-## — the ADR 0018 public read seam for probes and diagnostics.
-func waypoint_hud_entry() -> Dictionary:
-	return _build_waypoint_info()
+## The waypoint label's current entry (null = label hidden) — the ADR 0018
+## public read seam for probes and diagnostics, as the ADR 0017 typed record.
+func waypoint_hud_entry() -> WaypointHudEntry:
+	return _build_waypoint_entry()
 
 
 ## The objectives-panel toggle, flipped by the shell's objectives key.

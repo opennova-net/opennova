@@ -242,7 +242,7 @@ the ref-32 discard was a misport, now deleted (env-tod-re.md #34).
 | D-WPN-21 | The spawn rebuild commits the SELECTED slot and skips `Player_SwitchToWeaponByHandle`'s mount walk: the walk rides the entity+0x68 AI-slot binding gate (`@0x4e023a`, writer `Entity_AllocateAISlot @0x40d2f4`) whose value DURING `Player_InitPlayer` is unwitnessed — modeled as not-yet-bound, which matches the retail-observed spawn weapon (the walk would advance-first rank-cycle onto a sub-variant when one is loaded) (net-re §5.63) | A | OPEN (witness the gate's init-time value; flip the spawn to the full walk if it reads bound) | loadout grill (2026-07-18) |
 | D-WPN-22 | The switch deny sound: the sim emits the `switch_denied` event but no host audio plays — `dword_24E08C4`'s sound-set loader is unwalked (`PlaySoundOnDedicatedServer @0x4e0354`) (net-re §5.63) | A | OPEN (walk the set loader, wire the host play) | loadout grill (2026-07-18) |
 | D-WPN-23 | The binoculars hold-swap (input case 220: `g_binocularsWeaponSlot`/`g_binocularsStashedSlot` stash-equip-restore) and the msg-0x38 server-confirmed pickup swap (`handle_weapon_switch_packet @0x4260b0`) are unported (net-re §5.63) | A | OPEN (rides the binoculars/pickup features) | loadout grill (2026-07-18) |
-| D-WPN-24 | Ammo-class pool ids are assigned by first-appearance registry order at table build and both storages (entity+288 class 1 / the pool array) fold into one per-entity array — the retail builtin id table `@0x830F10` is unwitnessed; the arithmetic (caps, seeding, transfers) is identical and ids are never wire-visible (net-re §5.63) | A | KEPT (structural simplification; revisit only if the builtin table becomes load-bearing) | loadout grill (2026-07-18) |
+| D-WPN-24 | Ammo-class pool ids are assigned by first-appearance registry order at table build and both storages (entity+288 class 1 / the pool array) fold into one per-entity array — the retail builtin id table `@0x830F10` is unwitnessed; the arithmetic (caps, seeding, transfers) is identical and ids are never wire-visible (net-re §5.63) | A | RESOLVED — kept structural simplification (revisit only if the builtin table becomes load-bearing) | loadout grill (2026-07-18) |
 | D-EVT-1 | Spawn-point activation on fire: fully witnessed (POI/deploy list `0xB76570`, marker @0x452ce0, +0x210/+0x217/+0x218 authoring) — rides the deploy/POI subsystem port | A | WITNESSED-READY-DEFERRED | PAR-WORLD |
 | D-EVT-3 | Residual after the TriggerRelations port (state + evaluators + recounts + alert stamps + damage-site SHOT writes landed): the acquisition/fire-time write quads ride the combat pass, motor visited marks ride D-INF-2, sub 11 needs the held-object link; cat-2 alert/count + 42-45 subs unwitnessed | A | WITNESSED-READY-DEFERRED (write-sites) + NEEDS-RE (cat-2 subs) | PAR-WORLD |
 | D-AI-1 | The candidate FEED is ported (2026-07-16): `acquire_target` scans registry pools 0/1 with the witnessed gates (team/0x200 see-all incl. the teamless head gate, flags 2/0x8000000, health, `+530` refcount saturation via `Entity::ai_target_refcount`, LOS-last) into the byte-exact scoring core (`acquire_target_from`). Residual deviations: the profile weapon-slot CLASS table (`+40+4i`, ai.def — pools 0/1 scan unconditionally instead), the priority target (`profile+148`), the building 0x100 sub-filter, and the per-candidate range-cap words (`+422/+420`, def fields) are unmodeled (`AI_FindBestTargetB @ 0x466f60`, world-wac-ai-re §16.2) | A | OPEN (feed live 2026-07-16; residuals = the class table / priority / range caps, riding the ai.def parse) | playability P1 |
@@ -677,7 +677,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 |---|---|---|---|---|---|
 | Net | 11 | 1 | 11 | 23 | 0 |
 | Environment | 0 | 0 | 3 | 3 | 4 |
-| World / AI + events | 27 | 1 | 6 | 34 | 15 |
+| World / AI + events | 31 | 1 | 6 | 38 | 16 |
 | UI (menu/ctrl/sound/playerinfo/HUD) | 14 | 1 | 7 | 22 | 6 |
 | Mission `.mis` | 0 | 2 | 1 | 3 | 0 |
 | LW `.3di` | 0 | 2 | 1 | 3 | 0 |
@@ -692,7 +692,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Render — materials/state | 0 | 0 | 1 | 1 | 1 |
 | Render — draw order | 2 | 0 | 1 | 3 | 3 |
 | Render — lighting | 4 | 0 | 2 | 6 | 0 |
-| **Total** | **67** | **10** | **33** | **110** | 71 |
+| **Total** | **71** | **10** | **33** | **114** | 72 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-INF-20, D-NET-136, D-NET-64.
 

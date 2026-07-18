@@ -183,6 +183,12 @@ func get_stats() -> Dictionary:
 	return _stats.duplicate()
 
 
+## The ribbon geometry surface — the ADR 0018 read seam for tests asserting the
+## rebuilt tracer strips (surface count, vertex layout) without private reach-ins.
+func ribbon_mesh() -> ImmediateMesh:
+	return _mesh
+
+
 func setup(sim, container: Node3D, audio_provider: Callable, fx_provider: Callable,
 		listener_provider: Callable) -> void:
 	_sim = sim

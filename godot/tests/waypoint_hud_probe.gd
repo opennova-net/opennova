@@ -80,16 +80,15 @@ func _run() -> void:
 
 	# The host's HUD entry: the game HUD host must resolve a name + distance.
 	var hud_host = game.get_node_or_null("GameHudHost")
-	var info: Dictionary = {}
+	var entry: WaypointHudEntry = null
 	if hud_host != null and hud_host.has_method("waypoint_hud_entry"):
-		info = hud_host.waypoint_hud_entry()
-	print("PROBE label: name=\"%s\" distance=%dm number=%d" %
-			[String(info.get("name", "?")), int(info.get("distance_m", -1)),
-			int(wp.get("number", 0))])
-	if info.is_empty():
+		entry = hud_host.waypoint_hud_entry()
+	if entry == null:
 		push_error("waypoint_hud_probe: the HUD host built no waypoint entry")
 		quit(1)
 		return
+	print("PROBE label: name=\"%s\" distance=%dm number=%d" %
+			[entry.text_name, entry.distance_m, int(wp.get("number", 0))])
 
 	# Teleport ONTO the current waypoint (mission space) and verify the advance
 	# (the LAST entry never proximity-advances — verify the hold instead).
