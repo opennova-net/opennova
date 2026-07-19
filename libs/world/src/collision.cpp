@@ -2475,19 +2475,26 @@ std::vector<CollisionWorld::DebugHitboxEntity> CollisionWorld::debug_hitboxes(
         if (max_entities > 0 && static_cast<int32_t>(out.size()) >= max_entities) break;
         EntityHandle h;
         h.packed = kv.first;
+        // Persons have their own posed sphere query. Range-reject every other
+        // instance from the same fixed entity position target_view uses before
+        // asking the animation provider for section matrices.
+        const Entity *world_entity = world.registry.get(h);
+        if (world_entity == nullptr || world_entity->kind == EntityKind::Organic)
+            continue;
+        if (range > 0 && anchor != nullptr) {
+            int32_t entity_pos[3];
+            entity_pos_fixed(*world_entity, entity_pos);
+            if (abs32(entity_pos[0] - anchor[0]) > range ||
+                abs32(entity_pos[1] - anchor[1]) > range ||
+                abs32(entity_pos[2] - anchor[2]) > range)
+                continue;
+        }
         CollisionTargetView view;
         std::vector<CollisionMatrix> mats;
         // The SAME husk-aware view + full-euler placement matrices the
         // projectile raycast walks — the drawn mesh IS the tested mesh.
         const CollisionTargetView *tv = target_view(world, h, view, mats);
         if (tv == nullptr) continue;
-        const Entity *world_entity = world.registry.get(h);
-        if (world_entity != nullptr && world_entity->kind == EntityKind::Organic)
-            continue; // persons use DebugPersonSection, never the CFAC walker
-        if (range > 0 && anchor != nullptr &&
-            (abs32(tv->pos[0] - anchor[0]) > range || abs32(tv->pos[1] - anchor[1]) > range ||
-             abs32(tv->pos[2] - anchor[2]) > range))
-            continue;
 
         DebugHitboxEntity ent;
         ent.handle = h;

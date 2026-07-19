@@ -1025,6 +1025,27 @@ struct PosedHeadMatrixProvider final : ICollisionSectionMatrixProvider {
     }
 };
 
+struct CountingMatrixProvider final : ICollisionSectionMatrixProvider {
+    std::vector<EntityHandle> build_handles;
+
+    bool build_section_matrices(World &, EntityHandle entity, int32_t,
+                                const CollisionMatrix &entity_world,
+                                const CollisionModel &model,
+                                std::vector<CollisionMatrix> &out) override {
+        build_handles.push_back(entity);
+        out.assign(model.sections.size(), entity_world);
+        return true;
+    }
+
+    int calls_for(EntityHandle entity) const {
+        int count = 0;
+        for (const EntityHandle built : build_handles) {
+            if (built == entity) ++count;
+        }
+        return count;
+    }
+};
+
 struct DemandPersonProvider final : ICollisionSectionMatrixProvider {
     CollisionWorld *collision = nullptr;
     int32_t model_id = -1;
@@ -1096,6 +1117,68 @@ void test_person_section_raycast_uses_posed_bone_matrix() {
     const int32_t stale_end[3] = {fx(0.0545959473), fx(1.0), fx(0.8296356201)};
     CHECK(!rig.cw.raycast_person_sections(rig.world, rig.soldier,
                                           stale_start, stale_end, 0, hit));
+}
+
+void test_f3_debug_prefilters_before_building_section_matrices() {
+    World world;
+    world.registry.configure_pool(0, 4);
+    world.registry.configure_pool(2, 4);
+
+    auto spawn = [&](int pool, EntityKind kind, double x) {
+        Entity seed;
+        seed.kind = kind;
+        seed.alive = true;
+        seed.position = Vec3{static_cast<float>(x), 0.0f, 0.0f};
+        seed.yaw = 90; // engine heading 0: section center stays axis-aligned
+        return world.registry.spawn(pool, seed);
+    };
+    const EntityHandle near_person = spawn(0, EntityKind::Organic, 1.0);
+    const EntityHandle far_person = spawn(0, EntityKind::Organic, 100.0);
+    const EntityHandle near_static = spawn(2, EntityKind::Building, 2.0);
+    const EntityHandle far_static = spawn(2, EntityKind::Building, 100.0);
+    CHECK(near_person.valid() && far_person.valid() &&
+          near_static.valid() && far_static.valid());
+
+    CollisionModel model;
+    model.sections.resize(1);
+    model.sections[0].center[0] = fx(0.25);
+    model.sections[0].center[2] = fx(1.0);
+    model.sections[0].radius = fx(0.5);
+    CollisionWorld collision;
+    const int32_t model_id = collision.add_model(std::move(model));
+    collision.assign_entity(near_person, model_id);
+    collision.assign_entity(far_person, model_id);
+    collision.assign_entity(near_static, model_id);
+    collision.assign_entity(far_static, model_id);
+    CountingMatrixProvider provider;
+    collision.set_section_matrix_provider(&provider);
+
+    const int32_t anchor[3] = {};
+    const auto statics = collision.debug_hitboxes(
+            world, anchor, fx(10.0), 8, 100);
+    CHECK(statics.size() == 1);
+    if (!statics.empty()) CHECK(statics[0].handle == near_static);
+    CHECK(provider.calls_for(near_static) == 1);
+    CHECK(provider.calls_for(near_person) == 0);
+    CHECK(provider.calls_for(far_person) == 0);
+    CHECK(provider.calls_for(far_static) == 0);
+
+    provider.build_handles.clear();
+    const auto people = collision.debug_person_sections(
+            world, anchor, fx(10.0), 8);
+    CHECK(people.size() == 1);
+    if (!people.empty()) {
+        CHECK(people[0].handle == near_person);
+        CHECK(people[0].section == 0);
+        CHECK(people[0].center[0] == fx(1.25));
+        CHECK(people[0].center[1] == 0);
+        CHECK(people[0].center[2] == fx(1.0));
+        CHECK(people[0].authored_radius == fx(0.5));
+    }
+    CHECK(provider.calls_for(near_person) == 1);
+    CHECK(provider.calls_for(far_person) == 0);
+    CHECK(provider.calls_for(near_static) == 0);
+    CHECK(provider.calls_for(far_static) == 0);
 }
 
 void test_late_person_instance_is_demand_resolved_for_rounds_and_debug() {
@@ -1745,6 +1828,7 @@ int main() {
     test_face_raycast_husk_omits_spawned_piece_sections();
     test_face_raycast_uses_callback_matrix_per_section();
     test_person_section_raycast_uses_posed_bone_matrix();
+    test_f3_debug_prefilters_before_building_section_matrices();
     test_late_person_instance_is_demand_resolved_for_rounds_and_debug();
     test_reused_registry_slot_rejects_old_collision_identity();
     test_person_section_reverse_scan_and_mask();
