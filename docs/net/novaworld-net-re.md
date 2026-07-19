@@ -5484,9 +5484,12 @@ weapon-type-15 bone/section damage via `Entity_ComputeBoneCollisionBounds`; kine
 
 **The damage model is kinetic.** `Weapon_CalcImpactDamage @ 0x4EC920`: damage scales with
 the round's REMAINING SPEED — `(62 · |vel|) >> 16`, clamped to 1219 (`@0x4ecad6`) — times
-a hit-zone multiplier (infantry zone switch `@0x4ec9bf`: zones 0-4 = HEAD, sets flag 0x100
-on target+44; 5-8 = body ×1.0; 9-12/15-18 = limbs; 13-14 = special, flag 0x800; vehicle
-path when itemDef+84 has 0x200: seat types 2/3/6/7 get the special multiplier + 0x800);
+a hit-zone multiplier. Normal infantry reads the final/lowest overlapping section from
+`ray[32]` (`hitZoneData+0x80 @0x4ec9a1`): zones 0-4 x1.25, 5-8 x1.0,
+9-12/15-18 x0.5, and 13-14 x3.0; the float product truncates toward zero before
+the min/max clamps. The separate first/highest `ray[31]` is copied to the damage-trigger
+hit record and drives reaction/death animation. The itemDef+84 `&0x200` seat branch
+instead reads `ray[31]`; seat types 2/3/6/7 get x6.0 and target+44 `|=0x800`.
 `g_OneShotKill` → flat 2000; clamp to ammoDef max (dword 48). Distance falloff EMERGES
 from drag — there is no range table. Zeroing gates in
 `Projectile_ProcessDamageOnTarget`: indestructible entity flags 0x4000000, itemDef+400

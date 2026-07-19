@@ -1,6 +1,7 @@
 #pragma once
 
 #include <godot_cpp/classes/node3d.hpp>
+#include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
@@ -15,6 +16,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -55,6 +57,8 @@ namespace godot {
 
 class NovaTerrainData;
 class NovaObjectData;
+class NovaSkeletalAnim;
+class NovaItemDatabase;
 
 // THE mission runtime binding: a thin host shell over the portable libs/world runtime.
 // Owns one World + the three logic systems (WAC VM, BMS event evaluator, AI) and drives
@@ -125,12 +129,50 @@ private:
 	// by resolve_collision_instances. ai_->collision points here (apply_collision_to_ai).
 	opennova::world::CollisionWorld collision_world_;
 	void apply_collision_to_ai();
+	// Mission-lifetime collision graphic cache and host inputs. The initial
+	// mission sweep and demand resolution for late-spawned players share these
+	// exact model ids; repeated sweeps only attach instances and never duplicate
+	// the model registry. MissionObjectPlacer is RefCounted, so retaining it also
+	// keeps its object/ADM caches alive for a later RoundSim or F3 query.
+	struct CollisionHuskPieceInfo {
+		int32_t sections = 0;
+		std::vector<opennova::world::Vec3> centers;
+		float rest_min_z = 0.0f;
+		float rest_max_z = 0.0f;
+	};
+	Ref<NovaItemDatabase> collision_item_db_;
+	Ref<RefCounted> collision_placer_;
+	std::unordered_map<std::string, int32_t> collision_model_by_graphic_;
+	std::unordered_map<std::string, int32_t> collision_occlusion_by_graphic_;
+	std::unordered_map<std::string, float> collision_radius_by_graphic_;
+	std::unordered_map<std::string, CollisionHuskPieceInfo>
+			collision_husk_pieces_by_graphic_;
+	// Negative demand cache: one unresolved entity is attempted at most once per
+	// mission unless the host explicitly asks for another full resolve sweep.
+	std::unordered_map<uint16_t, uint64_t> collision_resolution_attempted_;
 	// Only models with a sampler-live PANM track enter the Generic callback
 	// path. Inert PANM rows remain on CollisionWorld's bit-exact Simple path.
 	std::unordered_map<int32_t, Ref<NovaObjectData>> collision_pose_data_;
+	// Organic/person collision is driven by the same ADM + canonical model-bone
+	// table as rendering, but sampled synchronously from simulation state so
+	// headless authority and F3 see the exact current pose. One source per entity:
+	// different actors sharing a graphic can be on different clips/playheads.
+	struct SkeletalCollisionSource {
+		// Exact intact/main collision model this living ADM rig was built for.
+		// A husk or alternate model on the same entity must use its own callback.
+		int32_t model_id = -1;
+		uint64_t registry_spawn_id = 0;
+		Ref<NovaSkeletalAnim> anim;
+		std::vector<int32_t> parents;
+		std::vector<Transform3D> rest_global;
+		PackedInt32Array overlay_classes;
+	};
+	std::unordered_map<uint16_t, SkeletalCollisionSource> collision_skeletal_sources_;
 	// A non-negative value is the host's once-per-frame retail presentation
 	// DWORD. Direct/headless simulations use deterministic logic time.
 	int64_t panm_time_override_ms_ = -1;
+	bool ensure_collision_instance(opennova::world::World &p_world,
+			opennova::world::EntityHandle p_entity) override;
 	bool build_section_matrices(opennova::world::World &p_world,
 			opennova::world::EntityHandle p_entity, int32_t p_model_id,
 			const opennova::world::CollisionMatrix &p_entity_world,
@@ -1010,7 +1052,8 @@ public:
 
 	// Read-only snapshot of the RoundSim debug ring for the F3 "Rounds" tab:
 	// { tick, events: [ { tick, kind, kind_name, material, section, face,
-	//   effect_tag, effect_tag_name, entity_handle, shooter_handle, ammo_index,
+	//   secondary_section, fallback, effect_tag, effect_tag_name, entity_handle,
+	//   shooter_handle, ammo_index,
 	//   husk, t, p0, p1, hit (Godot-space Vector3), entity_name } ] } — oldest
 	// first, capped at RoundSim::kDebugTrailCap. Covers every resolved outcome
 	// including face-miss fly-ons (the "why didn't that register" case).
@@ -1020,12 +1063,15 @@ public:
 	// { entities: [ { entity_handle, pos, bound_radius, husk, has_faces,
 	//   face_total, tris (PackedVector3Array, triangle list, Godot world),
 	//   materials (PackedByteArray per tri), flags (PackedInt32Array per tri) } ],
-	//   organics: [ { entity_handle, pos (sphere center, Godot), radius } ] }.
+	//   organics: [ { entity_handle, section, pos (sphere center, Godot),
+	//   radius, authored_radius, masked, fallback } ] }.
 	// Triangles are transformed in C++ through the SAME husk-aware
 	// target_view + full-euler matrices the projectile raycast uses — the
 	// drawn mesh IS the tested mesh. Capped: 96 entities / 24000 faces within
 	// 80 u of the local player (face_total exposes per-entity truncation).
-	Dictionary get_hitbox_debug() const;
+	// F3 hit geometry: item CFAC meshes plus organic posed per-bone spheres
+	// from the exact CollisionWorld target matrices used by RoundSim.
+	Dictionary get_hitbox_debug();
 
 	// Diagnostic round injector: spawns one live round through the REAL
 	// RoundSim::spawn (production velocity/tracer/trail path; owner = the local

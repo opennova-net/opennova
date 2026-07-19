@@ -55,6 +55,20 @@ NPCs select a body anim from AI state: `libs/world` `body_anim.h` maps `Entity.a
 `.adm` key; `MissionObjectPlacer` auto-loads each animated entity's `.adm`. No churn to the registry /
 selection / drag / undo (ADR 0006 invariant).
 
+**Authoritative skeletal collision consumer.** Organic bullet collision samples this runtime directly from
+simulation state, not from a presentation-node snapshot. `NovaSimulation` keeps one ADM/rest source per
+entity so actors sharing a graphic may occupy different clips/playheads, evaluates the primary pose plus
+aim/body overlay (and the authoritative secondary weapon channel when live), resolves FK/rest deformation,
+and emits FINAL world-space fixed matrices through `ICollisionSectionMatrixProvider`. The entity placement
+is composed exactly once. `Physics_RaycastAgainstBoneSections @0x4e4670` then pairs `COBJ[i]` strictly with
+matrix `i`; COBJ parent/offset and CXLT metadata do not select or further transform organic sections. This
+matches `BoneCallback_org0_Bone @0x4e34b0` → `Entity_BuildBoneTransformMatrices @0x4b1290` →
+`Math_FloatMatrixToFixedPoint22 @0x611140` and keeps headless authority, live bullets, and F3 on one pose.
+Late-spawn attachment reuses the same mission-lifetime graphic/ADM caches. Because packed pool handles are
+recycled, collision instances and per-entity skeletal sources are also keyed by a monotonic registry spawn
+identity (whose high-water mark survives editor snapshot restore), preventing a new occupant from inheriting
+an old model, husk, failed-resolution result, or animation source.
+
 **Grill verdict (`Jointops.exe.kong`): DIVERGENT (core matches).** Confirmed faithful: quat layout, slerp
 (with the small-angle nlerp fast path), the keyframe-duration walk, the bind matrix, the shared-rest FK, the
 `(-x,y,z)` handedness, no animation root motion, no standalone 180° flip, and the fixed-point separation.
@@ -76,18 +90,20 @@ The single correctness fix the grill produced is convention #3 (per-bone keyfram
 
 Skinned organics and rigid view-model weapons animate from one path; mission NPCs walk/idle from AI state;
 the object workspace has an `.adm` preview (the smoke-test gate). Dense clips (e.g. US01) are byte-unchanged
-by convention #3; compressed clips (C4* etc.) that previously collapsed now pose correctly.
+by convention #3; compressed clips (C4* etc.) that previously collapsed now pose correctly. Organic
+collision spheres follow that same current pose per section, including in headless simulation, so the bone
+reported to damage/death selection and the F3 hit-mesh view cannot drift from the authoritative animation.
 
 ## Deferred seams (feature gaps, IDA-cited)
 
 - Two-channel **upper/lower-body blend** (`AnimChannel_BlendTwoChannels @0x410740`) — for aim/walk
   separation; single clip is fine for AI walk cycles.
 - Body-segment **aim/lean overlays** (`Entity_BuildBoneTransformMatrices @0x4b1290` bone-index switch +
-  `Math_BuildFixedPointToFloatMatrix4x4 @0x612200`) — **WITNESSED IN FULL 2026-07-08**
-  (docs/world/world-wac-ai-re.md §14: the bone→overlay map, the seven blend matrices, the pivot
-  recomposition — the "3DI bone-def pivot table" is the modelDef+56 table, pivot @+0x24, and our
-  `.bad` rest positions carry the same data). Port still pending: D-INF-11 (ledger; closes
-  D-NET-117). Beware: Hex-Rays renders the switch labels shifted −1 (bone 0 = default).
+  `Math_BuildFixedPointToFloatMatrix4x4 @0x612200`) — **WITNESSED IN FULL 2026-07-08** and ported for
+  the local render path plus the synchronous organic-collision pose (docs/world/world-wac-ai-re.md
+  §14/§15.8b: the bone→overlay map, seven blend matrices, and pivot recomposition). Remaining D-INF-11
+  scope is NPC/remote secondary-weapon threading, mounted/seated branches, attachments, and blend windows;
+  Hex-Rays renders the switch labels shifted −1 (bone 0 = default).
 - Full **anim-slot table** (`Entity_ComputeAnimSlotIndex @0x43a690`, base 180 + 4·variant) and the
   player-avatar `off_8135F0` table — current selector is walk/run/idle by speed+alert.
 - **Cross-fade** on slot change (currently a hard cut); needs the two-channel blend first.
@@ -101,5 +117,9 @@ by convention #3; compressed clips (C4* etc.) that previously collapsed now pose
 `tests/anim/anim_sample_test` (native conventions, world↔local self-consistency, shared-rest regression,
 and a synthetic compressed-clip regression: a sparsely-keyed bone holds its keyframe, never identity),
 `tests/world/ai_test` (state → `anim_slot`), GUT `skeletal_anim_test`/`object_editor_test`/
-`mission_present_pass_test`. Headless dump confirms US01 and C4Ground (40+ clips, compressed) pose as
-humanoids with no collapse. User-validated US01 walk/idle in the object preview.
+`mission_present_pass_test`. Native `collision_test` additionally pins a moved posed head (section 14),
+strict reverse-scan/mask and radius rules, propagation of the primary/reaction bone into the directional
+death animation, and the independent secondary normal-infantry damage-zone multiplier; GUT
+`hitbox_debug_view_test` pins the F3 person-section roles. Headless dump confirms US01 and
+C4Ground (40+ clips, compressed) pose as humanoids with no collapse. User-validated US01 walk/idle in the
+object preview.

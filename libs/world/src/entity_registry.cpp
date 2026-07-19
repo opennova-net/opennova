@@ -40,6 +40,8 @@ EntityHandle EntityRegistry::spawn_from(int pool, size_t first_slot, const Entit
             EntityHandle h = EntityHandle::make(pool, static_cast<int>(s));
             p.slots[s] = seed;
             p.slots[s].handle = h;
+            p.slots[s].registry_spawn_id = next_spawn_id_++;
+            if (next_spawn_id_ == 0) next_spawn_id_ = 1;
             p.used[s] = 1;
             ++p.live;
             return h;
@@ -75,6 +77,12 @@ Entity *EntityRegistry::get(EntityHandle h) {
 
 const Entity *EntityRegistry::get(EntityHandle h) const {
     return const_cast<EntityRegistry *>(this)->get(h);
+}
+
+void EntityRegistry::restore_from(const EntityRegistry &snapshot) {
+    const uint64_t live_high_water = next_spawn_id_;
+    *this = snapshot;
+    if (next_spawn_id_ < live_high_water) next_spawn_id_ = live_high_water;
 }
 
 EntityHandle EntityRegistry::find_by_net_id(uint16_t net_id) const {

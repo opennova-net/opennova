@@ -94,6 +94,49 @@ static void test_cxlt_is_preserved_metadata_not_a_vertex_offset() {
     threedi_3di3_free(&model);
 }
 
+static void test_charmodel_cobj_preserves_exact_bone_sphere() {
+    // Retail's organic/skeletal broad phase reads these authored COBJ values
+    // directly as signed 16.16 integers. CharModel COBJ 14 is the head and is
+    // a useful fidelity witness because it owns no CFAC/CVRT run of its own.
+    char path[4096];
+    std::snprintf(path, sizeof(path), "%s/fixtures/threedi/3di3/CharModel.3di",
+                  test_paths_repo_root(__FILE__));
+
+    Threedi3di3 model = {};
+    const int read_rc = threedi_3di3_read(path, &model);
+    check(read_rc == 0, "CharModel COBJ sphere fixture parses");
+    if (read_rc != 0) return;
+
+    ThreediModelIR ir = {};
+    const int ir_rc = threedi_ir_from_3di3(&model, &ir);
+    check(ir_rc == 0, "CharModel converts to collision IR");
+    if (ir_rc != 0) {
+        threedi_3di3_free(&model);
+        return;
+    }
+
+    const ThreediIRCollision *collision = ir.collision;
+    check(collision != nullptr, "CharModel carries collision IR");
+    if (collision != nullptr) {
+        check(collision->object_count == 19, "CharModel keeps all 19 COBJ records");
+        if (collision->object_count > 14) {
+            const ThreediIRCollisionObject &head = collision->objects[14];
+            check(head.parent_subobject_index == 13,
+                  "CharModel head COBJ keeps its parent bone");
+            check(head.num_vertices == 0 && head.num_faces == 0,
+                  "CharModel head COBJ is a sphere-only skeletal section");
+            check(head.center_fp16[0] == 3578 && head.center_fp16[1] == 65 &&
+                          head.center_fp16[2] == 54371,
+                  "CharModel head COBJ center remains exact signed 16.16 data");
+            check(head.radius_fp16 == 10345,
+                  "CharModel head COBJ radius remains exact signed 16.16 data");
+        }
+    }
+
+    threedi_ir_free(&ir);
+    threedi_3di3_free(&model);
+}
+
 int main() {
     check(sizeof(ThreediIRCollisionFace) == 52,
           "collision face ABI stride includes the round-raycast fields");
@@ -111,6 +154,12 @@ int main() {
           "collision face min AABB offset is stable");
     check(offsetof(ThreediIRCollisionFace, max_fp16) == 40,
           "collision face max AABB offset is stable");
+    check(sizeof(ThreediIRCollisionObject) == 40,
+          "collision object ABI stride includes exact COBJ sphere fields");
+    check(offsetof(ThreediIRCollisionObject, center_fp16) == 24,
+          "collision object exact center offset is stable");
+    check(offsetof(ThreediIRCollisionObject, radius_fp16) == 36,
+          "collision object exact radius offset is stable");
 
     ThreediIRCollisionPlane planes[2] = {};
     ThreediIRCollisionVolume volume = {};
@@ -151,6 +200,7 @@ int main() {
           "null collision block is rejected");
 
     test_cxlt_is_preserved_metadata_not_a_vertex_offset();
+    test_charmodel_cobj_preserves_exact_bone_sphere();
 
     ThreediIRCollisionPlane grouped_planes[4] = {};
     ThreediIRCollisionVolume grouped_volumes[2] = {};

@@ -3,7 +3,7 @@ extends Node3D
 # Draws the round hit-detection reality over the scene: every nearby entity's
 # CFAC bullet-mesh wireframe (the triangles Physics_RaycastAgainstBoneCollision
 # walks), colored by face material, plus the broad-phase bound sphere, the
-# husk state, and the pool-0 organic stand-in spheres. The 3D face of the F3
+# husk state, and the pool-0 organic posed bone spheres. The 3D face of the F3
 # Rounds tab's "Show hit meshes" toggle.
 #
 # Geometry comes from NovaSimulation.get_hitbox_debug(): triangles are
@@ -11,13 +11,23 @@ extends Node3D
 # placement matrices the projectile raycast uses, so the drawn mesh IS what
 # rounds resolve against. Amber spheres mark entities with NO face mesh —
 # there the bound sphere alone decides hits (D-ITEM-1's stand-in). Cyan
-# spheres are the organic torso stand-in (D-ITEM-13c). Built / freed by
+# organic spheres show the exact per-section narrow phase and normal-infantry
+# damage table: orange x1.25 (0-4), cyan x1.0 (5-8), lime x0.5
+# (9-12/15-18), magenta x3.0 head (13-14), dark red masked sections, and
+# amber only for the unresolved neutral-damage fallback. Built / freed by
 # GameWorld on the overlay toggle, the collision-view contract.
 
 const MissionOverlayUtil := preload("res://engine/mission/mission_overlay_util.gd")
 
 const LABEL_NEAREST := 12       # detail labels on this many nearest entities
 const SPHERE_SEGMENTS := 20
+
+const ORGANIC_BODY_COLOR := Color(0.2, 0.9, 1.0, 0.9)
+const ORGANIC_HEAVY_COLOR := Color(1.0, 0.58, 0.18, 0.95)
+const ORGANIC_HEAD_COLOR := Color(1.0, 0.25, 0.85, 1.0)
+const ORGANIC_LIMB_COLOR := Color(0.45, 1.0, 0.25, 0.95)
+const ORGANIC_MASKED_COLOR := Color(0.45, 0.08, 0.08, 0.8)
+const ORGANIC_FALLBACK_COLOR := Color(1.0, 0.65, 0.15, 0.95)
 
 # Face flags that change the read of a triangle.
 const FLAG_NEVER_HIT := 0x100   # authored never-hit — rounds ignore it
@@ -26,7 +36,7 @@ const FLAG_BOTH_SIDES := 0x1
 
 var _world: Node                # duck-typed host (get_sim()); re-resolved every frame
 var _mesh: ImmediateMesh        # static entities: rebuilt only on set/pose/husk change
-var _dyn_mesh: ImmediateMesh    # organic stand-ins: tiny, rebuilt every refresh
+var _dyn_mesh: ImmediateMesh    # posed organic bone spheres: rebuilt every refresh
 var _labels: Array[Label3D] = []
 var _signature := 0
 
@@ -35,6 +45,32 @@ var _signature := 0
 # adjacent material bytes read as clearly different families.
 static func material_color(mat: int) -> Color:
 	return Color.from_hsv(fposmod(float(mat) * 0.618033988749895, 1.0), 0.75, 1.0)
+
+
+## Color contract for the organic section spheres. Masked sections win so an
+## authored exclusion can never be mistaken for a live hit volume.
+static func organic_section_color(section: int, masked: bool, fallback: bool) -> Color:
+	if masked:
+		return ORGANIC_MASKED_COLOR
+	if fallback:
+		return ORGANIC_FALLBACK_COLOR
+	if section == 13 or section == 14:
+		return ORGANIC_HEAD_COLOR
+	if section >= 0 and section <= 4:
+		return ORGANIC_HEAVY_COLOR
+	if (section >= 9 and section <= 12) or (section >= 15 and section <= 18):
+		return ORGANIC_LIMB_COLOR
+	return ORGANIC_BODY_COLOR
+
+
+static func organic_damage_multiplier(section: int) -> float:
+	if section >= 0 and section <= 4:
+		return 1.25
+	if (section >= 9 and section <= 12) or (section >= 15 and section <= 18):
+		return 0.5
+	if section == 13 or section == 14:
+		return 3.0
+	return 1.0
 
 
 func setup(world: Node) -> void:
@@ -111,14 +147,18 @@ func _clear_all() -> void:
 
 
 func _update(entities: Array, organics: Array) -> void:
-	# The organic stand-ins are tiny and move constantly — their own mesh,
+	# The posed organic bone spheres move constantly — their own mesh,
 	# rebuilt every refresh.
 	_dyn_mesh.clear_surfaces()
 	var dyn_segments: Array = []
 	for o_v in organics:
 		var o: Dictionary = o_v
-		_wire_sphere(dyn_segments, o.get("pos", Vector3.ZERO), float(o.get("radius", 0.6)),
-				Color(0.2, 0.9, 1.0, 0.9))
+		var radius := float(o.get("radius", 0.0))
+		if radius <= 0.0:
+			continue
+		_wire_sphere(dyn_segments, o.get("pos", Vector3.ZERO), radius,
+				organic_section_color(int(o.get("section", -1)),
+						bool(o.get("masked", false)), bool(o.get("fallback", false))))
 	if not dyn_segments.is_empty():
 		MissionOverlayUtil.emit_line_segments(_dyn_mesh, dyn_segments)
 
@@ -129,8 +169,18 @@ func _update(entities: Array, organics: Array) -> void:
 		sig_parts.append(e.get("entity_handle", -1))
 		sig_parts.append(e.get("pos", Vector3.ZERO))
 		sig_parts.append(e.get("husk", false))
+		sig_parts.append(e.get("bound_radius", 0.0))
+		sig_parts.append(e.get("has_faces", true))
+		# Generic/PANM section matrices can move the transformed CFAC triangles
+		# while the entity origin and husk state stay unchanged. Model swaps can
+		# also change face style without moving vertices. Hash every emitted mesh
+		# input so the cached F3 view follows the authoritative query payload.
+		sig_parts.append(hash(e.get("tris", PackedVector3Array())))
+		sig_parts.append(hash(e.get("materials", PackedByteArray())))
+		sig_parts.append(hash(e.get("flags", PackedInt32Array())))
 	var sig := hash(sig_parts)
 	if sig == _signature:
+		_update_labels(entities, organics)
 		return
 	_signature = sig
 
@@ -168,20 +218,58 @@ func _update(entities: Array, organics: Array) -> void:
 			_wire_sphere(segments, pos, r, sphere_color)
 	if not segments.is_empty():
 		MissionOverlayUtil.emit_line_segments(_mesh, segments)
+	_update_labels(entities, organics)
 
-	# Labels on the nearest entities to the camera.
+
+func _update_labels(entities: Array, organics: Array) -> void:
+	for lb in _labels:
+		lb.visible = false
+	# Labels on the nearest static entities and person bone spheres to the camera.
 	var cam := get_viewport().get_camera_3d() if get_viewport() != null else null
 	var cam_pos := cam.global_position if cam != null else Vector3.ZERO
 	var order: Array = []
 	for e_v in entities:
 		var e2: Dictionary = e_v
-		order.append([cam_pos.distance_to(e2.get("pos", Vector3.ZERO)), e2])
+		order.append([cam_pos.distance_to(e2.get("pos", Vector3.ZERO)), false, e2])
+	for o_v in organics:
+		var o: Dictionary = o_v
+		if float(o.get("radius", 0.0)) <= 0.0:
+			continue
+		order.append([cam_pos.distance_to(o.get("pos", Vector3.ZERO)), true, o])
 	order.sort_custom(func(x, y): return x[0] < y[0])
 	for i in range(mini(order.size(), _labels.size())):
-		var e3: Dictionary = order[i][1]
 		var lb := _labels[i]
+		var is_organic: bool = order[i][1]
+		var e3: Dictionary = order[i][2]
 		var ent := int(e3.get("entity_handle", 0xFFFF))
 		var text := "%d/%d" % [(ent >> 12) & 0xF, ent & 0xFFF]
+		if is_organic:
+			var section := int(e3.get("section", -1))
+			var radius := float(e3.get("radius", 0.0))
+			text += "  bone %d" % section
+			if bool(e3.get("fallback", false)):
+				text += "  damage neutral"
+			else:
+				text += "  damage x%.2f" % organic_damage_multiplier(section)
+			if section == 13 or section == 14:
+				text += " HEAD"
+			elif (section >= 9 and section <= 12) or (section >= 15 and section <= 18):
+				text += " LIMB"
+			text += "  r %.2f" % radius
+			if bool(e3.get("masked", false)):
+				text += "  MASKED"
+			elif bool(e3.get("fallback", false)):
+				text += "  FALLBACK"
+			else:
+				var authored := float(e3.get("authored_radius", radius))
+				text += "  authored %.2f" % authored
+			lb.text = text
+			lb.position = (e3.get("pos", Vector3.ZERO) as Vector3) \
+					+ Vector3(0.0, radius + 0.08, 0.0)
+			lb.modulate = organic_section_color(section, bool(e3.get("masked", false)),
+					bool(e3.get("fallback", false)))
+			lb.visible = true
+			continue
 		var total := int(e3.get("face_total", 0))
 		var drawn: int = (e3.get("materials", PackedByteArray()) as PackedByteArray).size()
 		if not bool(e3.get("has_faces", true)):

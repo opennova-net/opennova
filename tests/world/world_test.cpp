@@ -101,6 +101,10 @@ int main() {
     blast_target.bound_radius = 0.6f;
     const EntityHandle blast_victim = w.registry.spawn(0, blast_target);
     World::Snapshot snap = w.snapshot();
+    const EntityHandle post_snapshot = w.registry.spawn(0, blast_target);
+    CHECK(post_snapshot.valid());
+    const uint64_t post_snapshot_spawn_id =
+            w.registry.get(post_snapshot)->registry_spawn_id;
     w.vars.set_mission(1, 99);
     w.commands.kill_ssn(201); // mutate after snapshot
     w.round_sim.rounds[0].active = true;
@@ -147,6 +151,10 @@ int main() {
     CHECK(w.destruction.glass_breaks.empty());
     CHECK(w.destruction.explosions_processed == 0);
     CHECK(w.destruction.items_destroyed == 0);
+    const EntityHandle post_restore = w.registry.spawn(0, blast_target);
+    CHECK(post_restore == post_snapshot);
+    CHECK(w.registry.get(post_restore)->registry_spawn_id >
+          post_snapshot_spawn_id);
     const int32_t restored_health = w.registry.get(blast_victim)->health;
     w.run_logic_tick(true, false);
     CHECK(w.registry.get(blast_victim)->health == restored_health);

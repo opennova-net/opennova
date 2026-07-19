@@ -801,6 +801,10 @@ static int convert_collision(const Threedi3di3 *model, ThreediModelIR *ir) {
             d->offset[0] = so->offset[0];
             d->offset[1] = so->offset[1];
             d->offset[2] = so->offset[2];
+            d->center_fp16[0] = static_cast<int32_t>(so->med[0]);
+            d->center_fp16[1] = static_cast<int32_t>(so->med[1]);
+            d->center_fp16[2] = static_cast<int32_t>(so->med[2]);
+            d->radius_fp16 = static_cast<int32_t>(so->radius);
         }
     }
 

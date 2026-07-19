@@ -1403,7 +1403,7 @@ func set_round_debug(enabled: bool) -> void:
 
 
 # Build / free a child HitboxDebugView drawing the round hit-detection reality
-# (bullet-mesh wireframes + bound spheres + organic stand-ins) — the
+# (bullet-mesh wireframes + bound spheres + posed organic bone spheres) — the
 # collision-view contract, on the overlay's "Show hit meshes" toggle.
 func set_hitbox_debug(enabled: bool) -> void:
 	var existing := get_node_or_null(NodePath(HITBOX_DEBUG_NAME))

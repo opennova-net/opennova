@@ -96,6 +96,10 @@ struct Entity {
     int32_t bms_id = 0;       // file entity id (bms::Entity::id); the host keys placed nodes by this
                               // (MissionEntityRegistry), distinct from the runtime net_id/SSN.
     EntityHandle handle;      // self-handle (assigned at spawn)
+    // Monotonic registry lifetime identity. Packed handles intentionally reuse
+    // fixed pool slots; this host-only serial distinguishes two entities that
+    // occupied the same slot, even when all authored/net fields are identical.
+    uint64_t registry_spawn_id = 0;
 
     // The owning connection's ConnectionId/dcb (GamePlayerEntity entity+0x78). The joining client's
     // self-scan matches it against its own ConnectionId; a host/dedicated-server reserves dcb 0. This
@@ -271,6 +275,10 @@ struct Entity {
     // The death tick (entity+0x1AC, first write wins) [orig:
     // Entity_ProcessDestructibleDeath @ 0x43fc0c / AI_TransitionToDestroyed_Vehicle].
     uint32_t death_tick = 0;
+    // Hidden/dismembered skeletal sections (entity+0x134): a set bit removes
+    // the matching ordinal bone from person collision and presentation.
+    // Distinct from spawned_piece_mask at +0x138.
+    uint32_t section_mask = 0;
     // Husk sections that left as death pieces (entity+0x138): the husk renders
     // and collides WITHOUT these sections. Bit 0 (the hull) never sets.
     // [orig: Entity_SpawnDeathPieces @ 0x493983]

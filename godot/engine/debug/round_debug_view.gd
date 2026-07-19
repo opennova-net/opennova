@@ -3,9 +3,9 @@ extends Node3D
 # Draws the RoundSim debug ring over the scene: every recently resolved round
 # outcome as its flight segment + hit marker, color-coded by outcome kind, with
 # a detail label on the newest events. The 3D face of the F3 overlay's Rounds
-# tab -- a developer window into OUR hit-detection port (the CFAC face narrow
-# phase, the sphere stand-ins, terrain stops, and the face-miss fly-ons), not
-# retail-mimicked UI.
+# tab -- a developer window into OUR hit-detection port (the item CFAC face
+# narrow phase, posed person bone spheres, sphere fallbacks, terrain stops,
+# and the face-miss fly-ons), not retail-mimicked UI.
 #
 # Data comes from NovaSimulation.get_round_debug(): positions are already in
 # Godot space, sections/faces/materials are the exact values the narrow phase
@@ -162,6 +162,18 @@ static func _describe(ev: Dictionary) -> String:
 	if bool(ev.get("husk", false)):
 		line += "  HUSK"
 	match kind:
+		0:
+			var primary := int(ev.get("section", -1))
+			var secondary := int(ev.get("secondary_section", -1))
+			if bool(ev.get("fallback", false)):
+				line += "\nneutral fallback sphere  reaction stand-in %d  mat %d -> %s" % [
+						primary, int(ev.get("material", 0)),
+						String(ev.get("effect_tag_name", ""))]
+			else:
+				var secondary_text := "-" if secondary < 0 else str(secondary)
+				line += "\nreaction bone %d  damage zone %s  mat %d -> %s" % [
+						primary, secondary_text, int(ev.get("material", 0)),
+						String(ev.get("effect_tag_name", ""))]
 		1:
 			line += "\nsec %d face %d  mat %d -> %s" % [int(ev.get("section", -1)),
 					int(ev.get("face", -1)), int(ev.get("material", 0)),

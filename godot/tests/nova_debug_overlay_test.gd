@@ -25,6 +25,10 @@ const OCCLUSION_STATUS_PATH := NodePath(
 	"DebugPanel/DebugContent/DebugTabs/Occlusion/OcclusionStatus")
 const OCCLUSION_LIST_PATH := NodePath(
 	"DebugPanel/DebugContent/DebugTabs/Occlusion/OcclusionBuildings")
+const ROUNDS_STATUS_PATH := NodePath(
+	"DebugPanel/DebugContent/DebugTabs/Rounds/RoundsStatus")
+const ROUNDS_LIST_PATH := NodePath(
+	"DebugPanel/DebugContent/DebugTabs/Rounds/RoundEvents")
 
 
 class FakePoseSim:
@@ -35,6 +39,7 @@ class FakePoseSim:
 	var _yaw_deg := 0.0
 	var _pitch_deg := 0.0
 	var _view_roll_deg := 0.0
+	var round_debug := { "events": [] }
 
 	func set_player_pose(
 			position: Vector3, yaw_deg: float, pitch_deg: float, view_roll_deg: float) -> void:
@@ -69,6 +74,9 @@ class FakePoseSim:
 
 	func get_logic_tick() -> int:
 		return 4242
+
+	func get_round_debug() -> Dictionary:
+		return round_debug
 
 	func get_present_snapshot() -> PackedFloat32Array:
 		return PackedFloat32Array()
@@ -164,6 +172,65 @@ func _dictionary_vector3(value: Variant) -> Vector3:
 			float(record.get("x", 0.0)),
 			float(record.get("y", 0.0)),
 			float(record.get("z", 0.0)))
+
+
+func test_rounds_tab_exposes_both_person_bone_sections() -> void:
+	var runtime := _make_pose_runtime()
+	runtime._sim.round_debug = {
+		"events": [{
+			"tick": 42,
+			"kind": 0,
+			"kind_name": "organic",
+			"entity_handle": 7,
+			"entity_name": "Target",
+			"husk": false,
+			"section": 14,
+			"secondary_section": 3,
+			"material": 19,
+			"effect_tag_name": "flesh",
+		}],
+	}
+	var overlay := _make_overlay()
+	overlay.set_runtime(runtime)
+	overlay.toggle()
+
+	var status := overlay.get_node(ROUNDS_STATUS_PATH) as Label
+	assert_string_contains(status.text, "1 person bone hits")
+	var list := overlay.get_node(ROUNDS_LIST_PATH) as ItemList
+	assert_eq(list.item_count, 1)
+	var row := list.get_item_text(0)
+	assert_string_contains(row, "reaction bone 14")
+	assert_string_contains(row, "damage zone 3")
+	assert_string_contains(row, "mat 19 -> flesh")
+
+
+func test_rounds_tab_names_unresolved_person_fallback() -> void:
+	var runtime := _make_pose_runtime()
+	runtime._sim.round_debug = {
+		"events": [{
+			"tick": 43,
+			"kind": 0,
+			"kind_name": "organic",
+			"entity_handle": 8,
+			"section": 1,
+			"secondary_section": 1,
+			"fallback": true,
+			"material": 19,
+			"effect_tag_name": "player",
+		}],
+	}
+	var overlay := _make_overlay()
+	overlay.set_runtime(runtime)
+	overlay.toggle()
+
+	var status := overlay.get_node(ROUNDS_STATUS_PATH) as Label
+	assert_string_contains(status.text, "0 person bone hits")
+	assert_string_contains(status.text, "1 organic fallbacks")
+	var list := overlay.get_node(ROUNDS_LIST_PATH) as ItemList
+	var row := list.get_item_text(0)
+	assert_string_contains(row, "neutral fallback sphere")
+	assert_string_contains(row, "reaction stand-in 1")
+	assert_false(row.contains("damage zone 1"))
 
 
 

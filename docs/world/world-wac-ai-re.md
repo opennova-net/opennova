@@ -1367,7 +1367,7 @@ store (details inline below), added D-COL-9, and extended D-COL-5/-8.
 | Per-tick proximity tables + candidate slices | MATCHING (structural) | `[orig: Entity_BuildProximityLists_Pool2 @ 0x4b9430 / _Pool01 @ 0x4b9340 / FromPools @ 0x4b8eb0]` |
 | The movement resolver (`CollisionWorld::resolve_entity`) | MATCHING (core; deferrals D-COL-5/6/8) | `[orig: Entity_ProcessCollisionAndPlatformPhysics @ 0x4b2bd0]` — the §4 open item 5 internals now decoded |
 | Blink boxes -> indoors | MATCHING | `[orig: @ 0x4aef90 / @ 0x4aea68-0x4aeae8 / Entity_BuildProximityList @ 0x4b3dc0]`; `collision` ctest blink cases |
-| Projectile FACE per-section callback matrices | MATCHING for non-organic effective LOD-0 ordinary/spinner PANM; camera-derived modes are D-COL-10, person/skeletal sections remain D-ITEM-13c / D-AI-9 | `[orig: Physics_RaycastAgainstBoneCollision @ 0x4e4cb0; BoneCallback_Generic @ 0x4e26d0]`; strict COBJ ordinal provider, shared DWORD presentation clock, x87-PC53 float sandwich; native + GUT source/clock/ordinal cases |
+| Projectile per-section callback matrices | MATCHING for non-organic effective LOD-0 ordinary/spinner PANM and for pool-0 person current-pose skeletal spheres; camera-derived generic modes remain D-COL-10 | `[orig: Physics_RaycastAgainstBoneCollision @ 0x4e4cb0; Physics_RaycastAgainstBoneSections @ 0x4e4670; BoneCallback_Generic @ 0x4e26d0; BoneCallback_org0_Bone @ 0x4e34b0]`; strict COBJ ordinal providers, generic shared-DWORD PANM vs per-entity organic sim pose, one final-world composition; native + GUT source/clock/ordinal/person cases |
 | Armory/vehicle loadout-zone gates | MATCHING (read-only grill) | `[orig: Input_HandleActionBinding @ 0x49b83d case 218]`; menu side in [menu-re.md](../mnu/menu-re.md) §In-game armory |
 
 ### 15.2 Witness map — the query set
@@ -1631,7 +1631,7 @@ bit-1-cleared box) IS the indoors trigger (entity Flags 0x800000).
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
-| D-COL-1 | ~~one yaw-only world matrix shared by every section~~ CLOSED for full-Euler statics and non-organic effective-LOD0 ordinary/spinner PANM. `CollisionWorld::target_view` requests the final array from `ICollisionSectionMatrixProvider`; `NovaSimulation` uses canonical LOD0 only (a nonempty local PANM block wins, otherwise model-level PANM is inherited), scopes liveness to the active transform family, applies current AI controls, and defaults untouched slots to the Simple entity matrix. `PanmClock` samples one full 32-bit process-uptime value per rendered frame for models/materials/collision; direct/headless sims use deterministic `logic_tick * 16`. The fixed→render, pose × entity, render→Q22/16.16 sandwich preserves retail x87 PC53 add order and final truncation. Missing, inert, invalid, or count-mismatched data retains the exact Simple fallback | Generic loads the canonical first RLOD rather than the render-selected/first-live LOD; callback returns one final matrix per COBJ and `callback_matrix[i]` ↔ `COBJ[i]` by `+64`/`+108` pointer lockstep. COBJ parent/offset and CXLT are not selectors or additive transforms; render and collision consume the same GetTickCount-derived DWORD | tilted statics and ordinary/spinner parts collide at their rendered pose. Covered by `collision`, `threedi_panm_runtime`, `nova_simulation_test.gd`, `panm_clock_test.gd`, `mission_runtime_test.gd`. Camera-derived types 3/4 are D-COL-10; pool-0 skeletal zones remain D-ITEM-13c / D-AI-9 |
+| D-COL-1 | ~~one yaw-only world matrix shared by every section~~ CLOSED for full-Euler statics and non-organic effective-LOD0 ordinary/spinner PANM. `CollisionWorld::target_view` requests the final array from `ICollisionSectionMatrixProvider`; `NovaSimulation` uses canonical LOD0 only (a nonempty local PANM block wins, otherwise model-level PANM is inherited), scopes liveness to the active transform family, applies current AI controls, and defaults untouched slots to the Simple entity matrix. `PanmClock` samples one full 32-bit process-uptime value per rendered frame for models/materials/collision; direct/headless sims use deterministic `logic_tick * 16`. The fixed→render, pose × entity, render→Q22/16.16 sandwich preserves retail x87 PC53 add order and final truncation. Missing, inert, invalid, or count-mismatched data retains the exact Simple fallback | Generic loads the canonical first RLOD rather than the render-selected/first-live LOD; callback returns one final matrix per COBJ and `callback_matrix[i]` ↔ `COBJ[i]` by `+64`/`+108` pointer lockstep. COBJ parent/offset and CXLT are not selectors or additive transforms; render and collision consume the same GetTickCount-derived DWORD | tilted statics and ordinary/spinner parts collide at their rendered pose. Covered by `collision`, `threedi_panm_runtime`, `nova_simulation_test.gd`, `panm_clock_test.gd`, `mission_runtime_test.gd`. Camera-derived types 3/4 are D-COL-10; pool-0 skeletal zones now use the separately ported per-entity current-pose path (§15.8b), not Generic PANM |
 | D-COL-2 | building destroyed/animated section skip not modeled | itemDef+2192/2193 bone map + the `dword_A8A418` state table skips sections (gated !player) | destroyed-wall pass-through pending the destruction system |
 | D-COL-3 | bound radius recomputed as the .3di LOD-0 part-bound-sphere union (primitive boxes as the degenerate fallback), raised to the husk model's bound, +0.0625 pad (persons 1.0u) | entity+0 boundRadius = max(model gpm[5], husk gpm[5]) × def scale + 0x1000, stamped only when the model carries collision data [orig: `Entity_InitFromModel @ 0x40dc30`] | the recomputed union tracks the stored header bound; the authored def `scale` factor is not applied (unparsed), and we stamp collision-less models too so every item stays hittable — conservative |
 | D-COL-4 | eye test point reuses the head column | eye point = pos + CameraOffset | CameraOffset unmodeled; head/eye share a column until the camera entity fields land |
@@ -1791,8 +1791,10 @@ Q22/16.16 `@ 0x611140`) through `ICollisionSectionMatrixProvider`
 and the production `NovaSimulation` host. Local LOD0 PANM suppresses
 the model-level fallback even when inert; LOD1+ never drives COBJ. The visual
 model and collision provider consume one frame-sampled 32-bit presentation
-clock. Pool-0 person/skeletal bone sections remain the separate, open
-`Physics_RaycastAgainstBoneSections @ 0x4e4670` path (D-ITEM-13c / D-AI-9).
+clock. Pool-0 persons use the separate
+`Physics_RaycastAgainstBoneSections @ 0x4e4670` sphere walk, now ported through
+the same section-matrix provider; its organic callback is current-pose and
+per-entity rather than the generic PANM clock described above (see §15.8b).
 
 Divergences found and FIXED this session (libs/world/src/round_sim.cpp):
 
@@ -1814,10 +1816,8 @@ ballistics layer is absent (gravity −167/tick `@ 0x4eaa5a`; the
 Entity_ApplyDragAndBounceForce @ 0x4e5ec0 / Projectile_InitDragTable
 @ 0x4e78d0]` with wind, the 25× underwater multiplier, the reversal clamp and
 the low-speed tumble kick; the water hitType-4 leg + the underwater slow-kill
-`@ 0x4ea13e`). D-ITEM-13 — hit-resolution residuals (the terrain sub-stepping
-stand-in, the ±2048/+4096 stop offsets, the person bone-SECTION narrow phase
-`[orig: Physics_RaycastAgainstBoneSections @ 0x4e4670]` with its
-first-hit-terminates scan vs our body cylinder).
+`@ 0x4ea13e`). D-ITEM-13 retains the terrain sub-stepping and non-person round
+parking/offset residuals; its person bone-SECTION leg closed in §15.8b.
 
 Tooling landed with the grill (developer window, not witnessed behavior): the
 F3 **Rounds** tab + "Show round trails" world view over a new persistent
@@ -1858,6 +1858,88 @@ verts vs 268 render), and with the witnessed enter-front backface rule a ray
 threading the mesh's open underside or a silhouette gap exits without a front
 face — retail-identical behavior, visible as red graze rings in the F3 Rounds
 view.
+
+### 15.8b Organic/person posed bone sections (engine-research + port 2026-07-18)
+
+The pool-0 person path is not the CFAC face walker and does not use an organic
+body cylinder. `Physics_RaycastAgainstProximityList @ 0x4e4a30` sends each
+surviving person to `Physics_RaycastAgainstBoneSections @ 0x4e4670`. Its
+`BoneCallback_org0_Bone @ 0x4e34b0` calls
+`Entity_BuildBoneTransformMatrices @ 0x4b1290`, then
+`Math_FloatMatrixToFixedPoint22 @ 0x611140`; the callback output is already the
+FINAL world-space pose, including the current primary animation, body/aim
+overlays, any live secondary weapon channel, pivots, and entity placement.
+The port mirrors that boundary in `NovaSimulation::build_section_matrices`:
+each organic entity owns its ADM source and playhead, the pose is sampled
+synchronously from simulation state (including headless authority), FK is
+resolved against the canonical shared rest, and the entity transform is
+applied exactly once.
+
+The pairing rule is strictly ordinal: `COBJ[i]` consumes `boneMatrix[i]`.
+COBJ's parent/offset fields and CXLT are ignored by this organic person path;
+they are neither selectors nor additional transforms. This is the same
+lockstep discipline as the generic face path but a separate retail callback.
+The COBJ center and authored radius therefore remain meaningful even when a
+skeletal row has no BVOL or CFAC payload.
+
+The fixed-point section walk is now reproduced by
+`collision_raycast_person_sections`:
+
+- Walk COBJ sections from highest ordinal to zero, skipping a bit set in the
+  entity section mask. Transform the authored center by that section's current
+  final matrix. Projection onto the finite fixed16 ray is unclamped and
+  unrounded; reject only projections outside `[0, rayLength]`. The Q22 center
+  transform rounds with `+0x200000` before `>>22`, each closest-point axis uses
+  `+0x8000` before `>>16`, and the Euclidean distance truncates toward zero.
+- Effective radius is `extraRadius + 0xCCC + authoredRadius * scale / 100`,
+  with scale 65 for head section 14 and 45 otherwise. Sections 15/16 cap the
+  final effective radius at `0x3000`. `extraRadius` is the ammo bullet-radius
+  feed (the retail fat-bullet floor is a separate caller policy).
+- The first accepted section in the reverse walk — therefore the highest
+  overlapping ordinal — sets primary `ray[31]`, material 19, and
+  `ray[29] = projection - (authoredRadius >> 1)`. Every accepted overlap
+  overwrites secondary `ray[32]`, so it ends as the lowest overlapping
+  ordinal. The walk deliberately does NOT stop after its first bone. These
+  are independent retail channels: `Projectile_ProcessDamageOnTarget` copies
+  `ray[31]` to the hit record used by reactions/death, while
+  `Weapon_CalcImpactDamage` reads `ray[32]` for normal-infantry damage.
+- The outer PERSON candidate walk does stop at the first entity whose section
+  walk hits. That person replaces an existing terrain/item winner only when
+  `ray[29]` is strictly closer. Its impact point uses `ray[29] - 0x800`
+  without clamping.
+
+`RoundSim` carries both ordinals. The primary/reaction bone feeds `RoundHit`
+and the existing `compute_death_anim_state(bone, incoming quadrant, bullet)`
+table, so head/limb/torso hits select the matching directional death animation.
+The secondary/damage zone feeds the normal-infantry retail multiplier before
+the ammo min/max clamps: sections 0-4 x1.25, 5-8 x1.0, 9-12 and 15-18 x0.5,
+and 13-14 x3.0. The old bounded torso sphere survives only as a compatibility
+fallback when graphic resolution cannot supply a usable COBJ model; it keeps
+neutral damage and is never the normal retail path.
+
+The mission-start graphic sweep is not a lifetime assumption. `NovaSimulation`
+retains the item database and placer caches, and both RoundSim and F3 request an
+idempotent collision attach when a player or scripted organic appears later.
+Packed pool handles can be reused, so registry entities carry a host-only
+monotonic spawn identity; collision instances, skeletal sources, and negative
+resolution attempts all validate that identity before reuse. Editor snapshot
+restore preserves the live identity high-water mark. Thus a failed lookup for
+one slot occupant cannot suppress or inherit the model/husk/pose of the next
+occupant.
+
+F3 exposes the same collision truth rather than reconstructing a display-only
+approximation. **Rounds → Show hit meshes** draws every current-pose person
+section at its effective projectile-zero radius, color-coded by the damage
+table (0-4 orange, 5-8 cyan, 9-12/15-18 lime, 13-14 magenta; masked dark red,
+unresolved fallback amber), and labels entity/bone/radii/multiplier. The Rounds
+event list names the independent reaction bone and damage zone. Both views consume
+`CollisionWorld::debug_person_sections` / `NovaSimulation.get_hitbox_debug()`
+and the same matrix provider used by live bullets. Native `collision` tests pin
+the moved-head pose, reverse-scan/mask behavior, radius rules, primary-bone
+propagation into a directional death animation, and a primary-14/secondary-2
+775-damage vector. GUT pins the late-spawn/recycled-slot attach, F3's 80-unit
+range/96-entity budget/dead-body fallback, the zone colors and sphere payload,
+and animated CFAC cache invalidation when only transformed triangles move.
 
 IDB write-backs (2026-07-18, saved): rename `g_ProjectileDragTable @ 0xB7B300`
 (ex `dword_B7B300`); comments at `@ 0x4ea291` (the exclusion-set build map)
@@ -3816,7 +3898,7 @@ the FFI structs.
 | D-ITEM-10 | The settle's water-crossing splash and landing sounds play the witnessed FALLBACKS only (`IMP_DEBLRG_WATER` / `IMP_VCL_DROP`); the def per-item landing (+140) and water (+156) sound slots and the splash effect slot (@ 0x2C25C64) are unported | `@ 0x4940c6-0x494100 / @ 0x49417c-0x4941af` | items authoring custom impact sounds play the generic pair; the splash draws no effect (sound only) |
 | D-ITEM-11 | The round exclusion set skips shooter + mount (Controller/Gunner/Driver seats only — a Passenger's rounds can hit their own vehicle) + the Gunner mount's standing-on carrier, PORTED 2026-07-18 (§15.8a); the FOURTH slot — `projectile+388` ← the fire request's dword +40 — is consumed by every prox walk but its fill is an uninitialized extra on the client fire path, provenance OPEN (the server path `Server_ClientFiredRound @ 0x50baa0` unwalked) | `ray[17..20] @ 0x4ea2a5-0x4ea2f8`; `RoundData_SpawnRound @ 0x4ec0d0` ([97] ← hitData+40); compares `@ 0x4e5572/@ 0x4e5782/@ 0x4e5983/@ 0x4e4c4e` | firing from Controller/Gunner/Driver seats no longer self-hits the hull; walk 0x50baa0's cmd[21]→spawn plumbing to close the +388 slot |
 | D-ITEM-12 | Round BALLISTICS are absent: no gravity, drag, wind, water. Original: velZ −= 167/tick for non-thruster rounds without ammo flag 0x100 (`@ 0x4eaa5a`; the 0x100 class takes −167 inside the slow regime instead `@ 0x4e6329`); per-tick drag force = `g_ProjectileDragTable[62·speed>>16, clamp 1219]` scaled by ammo drag (+28) — the 4000-entry table is generated at init by a piecewise power-law over ~40 speed regimes (transonic bands 1025..1360 ft/s) — direction −vel normalized, WIND-relative (`@ 0x2C059E4..EC`), 25× underwater, a velocity-reversal zero clamp, and a one-shot random TUMBLE kick when the speed index first drops below ammo+176 (spread ammo+180, seeded by ownerConnectionId); water: hitType-4 splash at the plane + rounds continue submerged, killed when speed < 0x4000 below water (`@ 0x4ea13e`) | `Entity_ApplyDragAndBounceForce @ 0x4e5ec0`; `Projectile_InitDragTable @ 0x4e78d0`; `g_ProjectileDragTable @ 0xB7B300`; gravity `@ 0x4eaa5a`; water `@ 0x4ea4e0` | our rounds fly straight forever — no drop, no slowdown, crosshair-perfect at any range, no water interaction; port = extract the ~40 (exponent, scale) double pairs + the two scale constants off 0x4e78d0 and the wind source |
-| D-ITEM-13 | Hit-resolution residuals: (a) the terrain leg sub-steps the bilinear column at 2-u intervals with a crossing refinement — the original raycasts the hi-res heightmap (`Terrain_RaycastHeightmapHiRes_Thunk @ 0x610890`) with a proportional end-below-ground fallback (`@ 0x4ea42b-0x4ea4af`), so thin crests can tunnel in ours (the strict-less tie-break itself was FIXED 2026-07-18); (b) our stop parks the round AT the hit — the original backs the impact effect off by 2048 and parks at hit+2048 (+victim boundRadius for persons) `@ 0x4ea603-0x4ea7d5`; (c) the pool-0 person narrow phase is the per-bone SECTION walk `Physics_RaycastAgainstBoneSections @ 0x4e4670` (extraRadius = projectile+672, min 0.1u under `g_FatBullets` for remote building-flag shooters `@ 0x4ea58d`) whose scan TERMINATES on first hit — ours is the body cylinder (rides D-AI-9's bone-zone deferral); (d) ~~our sphere gate was segment-vs-sphere (a boundary-crossing requirement: a tick segment entirely INSIDE a big bound sphere skipped the entity — the in-play shoot-through-building-walls report)~~ FIXED 2026-07-18b: the item-leg gate is now the witnessed per-axis AABB + UNCLAMPED perpendicular line distance (`round_broad_phase`, round_sim.cpp), the face-less stand-in hits at t=0 from inside, and the ctest `collision` `test_round_inside_bound_sphere_hits_wall` pins both the inside-sphere wall stop and the past-the-edge fly-on | as cited; the gate `@ 0x4e53d4-0x4e554a` / `@ 0x4e5492`; the dispatch order `@ 0x4ea3b4-0x4ea5f2` | long shots can clip ridge crests; effect points sit a hair deeper than retail's; limb/headshot zones impossible until (c) lands |
+| D-ITEM-13 | Hit-resolution residuals: (a) the terrain leg sub-steps the bilinear column at 2-u intervals with a crossing refinement — the original raycasts the hi-res heightmap (`Terrain_RaycastHeightmapHiRes_Thunk @ 0x610890`) with a proportional end-below-ground fallback (`@ 0x4ea42b-0x4ea4af`), so thin crests can tunnel in ours (the strict-less tie-break itself was FIXED 2026-07-18); (b) the person effect point is FIXED 2026-07-18 (`ray[29] - 0x800`), but generic item/terrain effect backoff and retail's post-hit round parking at hit+0x800 (+victim boundRadius for persons) remain absent `@ 0x4ea603-0x4ea7d5`; (c) ~~the pool-0 person path used one body cylinder~~ FIXED 2026-07-18: `Physics_RaycastAgainstBoneSections @ 0x4e4670` now walks the current posed COBJ spheres with strict `COBJ[i]` ↔ `boneMatrix[i]` pairing (COBJ parent/offset/CXLT ignored), exact radius scaling/caps, section mask, split `ray[31]` reaction/death and `ray[32]` normal-infantry damage semantics, ammo bullet radius, and first-person-entity termination; the bounded torso sphere is only used when graphic resolution cannot supply a usable COBJ model; (d) ~~our sphere gate was segment-vs-sphere (a boundary-crossing requirement: a tick segment entirely INSIDE a big bound sphere skipped the entity — the in-play shoot-through-building-walls report)~~ FIXED 2026-07-18b: the item-leg gate is now the witnessed per-axis AABB + UNCLAMPED perpendicular line distance (`round_broad_phase`, round_sim.cpp), the face-less stand-in hits at t=0 from inside, and the ctest `collision` `test_round_inside_bound_sphere_hits_wall` pins both the inside-sphere wall stop and the past-the-edge fly-on | as cited; person path §15.8b; the gate `@ 0x4e53d4-0x4e554a` / `@ 0x4e5492`; the dispatch order `@ 0x4ea3b4-0x4ea5f2` | posed reaction/death bones and normal-infantry damage zones are live; remaining drift is thin terrain crests, generic effect/parking offsets, the optional FatBullets floor, and the attrib-0x200 seat x6 branch |
 | D-ITEM-14 | Ground contact enters the correct settle leg, but emits no authored +0x4E0 ground-impact pair and does not clear the matching periodic-sound slots. DeathPiece slots remain ownerless and untouched, matching retail | `Entity_TransitionToGroundDeath @ 0x493080`; `PeriodicSound_ClearByEntity @ 0x57b3e0` scans 256x20-B slots at `0x26B8050`; the separate DeathPiece pool is 256x180 B at `0x26BAC58` | periodic wreck sounds can outlive ground transition, and the authored final ground effect is absent |
 | D-ITEM-15 | Wreck effects are one origin-anchored group per authored family plus one fire-crackle roll per wreck; there are no four-slot Dead/water/Fire/Other bone banks, per-slot bone follow, or underwater `g_fx_Boat01Steam` transition. The effect kill plane is particle culling only and cannot substitute for spawning steam | `Entity_InitDeathSounds @ 0x4939b0`; `Entity_UpdateDeadWreckEffects @ 0x493140` | large/multi-bone wreck effects originate and roll at one point, and burning bones entering water neither steam nor retire like retail |
 | D-ITEM-16 | Section debris is six randomized radial `TreeWoodExp` spawns at the entity; the presenter never walks collision faces, samples triangle centroids at `(scale<<8)/150`, transforms them by section bones, or switches material 17 to `TreeFoliageExp` | `Entity_SpawnSectionDebris @ 0x43f580` | the burst is readable but its count, positions, directions, and material family are presentation stand-ins rather than triangle-faithful |

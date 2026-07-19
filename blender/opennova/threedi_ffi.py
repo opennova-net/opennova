@@ -249,6 +249,8 @@ class ThreediIRCollisionObject(ctypes.Structure):
         ("num_faces",               ctypes.c_int32),
         ("parent_subobject_index",  ctypes.c_int32),
         ("offset",                  ctypes.c_float * 3),
+        ("center_fp16",             ctypes.c_int32 * 3),
+        ("radius_fp16",             ctypes.c_int32),
     ]
 
 

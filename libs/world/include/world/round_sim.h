@@ -9,10 +9,11 @@
 // AUTHORITY-ONLY. docs/net/novaworld-net-re.md §5.60.]
 //
 // Reimpl altitude — tracked deferrals (§5.60 port follow-ups):
-//  * ORGANIC hit test = per-tick segment vs a fixed organic cylinder (the witnessed
-//    person bone-section collision is unported). Hit ZONE resolution is therefore
-//    body-only (zone multiplier 1.0; head 1.25 / limbs 0.5 / 13-14 3.0 wait on bone
-//    hits). ITEM hits (pools 1/2) run the witnessed bound-sphere broad phase + the
+//  * ORGANIC hit test = the posed per-COBJ sphere walk from
+//    Physics_RaycastAgainstBoneSections; ray[31] drives reactions/death while
+//    ray[32] drives normal-infantry damage, and F3 exposes both. Unresolved graphics retain
+//    the bounded torso fallback. ITEM hits (pools 1/2) run the witnessed
+//    bound-sphere broad phase + the
 //    collision-model FACE narrow phase with the material-tagged impact
 //    [orig: Projectile_RaycastProximitySlots @ 0x4E5340 ->
 //    Physics_RaycastAgainstBoneCollision @ 0x4E4CB0]; models with no face mesh keep
@@ -118,6 +119,8 @@ struct RoundHit {
     EntityHandle victim;
     EntityHandle shooter;
     int32_t damage = 0;
+    int16_t primary_section = -1;
+    int16_t secondary_section = -1;
 };
 
 // One presented fire — the origin/direction/ammo of a spawned round, drained by the
@@ -142,7 +145,7 @@ struct FireEvent {
 // pays only the ring writes.
 struct RoundDebugEvent {
     enum Kind : uint8_t {
-        kOrganic = 0,      // pool-0 body stand-in hit
+        kOrganic = 0,      // pool-0 posed person-section hit (or unresolved fallback)
         kItemFace = 1,     // pool-1/2 CFAC face hit (section/face/material valid)
         kItemSphere = 2,   // pool-1/2 bound-sphere stand-in (no face mesh)
         kTerrain = 3,      // terrain column stop
@@ -151,8 +154,10 @@ struct RoundDebugEvent {
     };
     uint32_t tick = 0;
     uint8_t kind = kExpired;
-    uint8_t material = 0;    // CFAC face material byte (kItemFace)
-    int16_t section = -1;    // COBJ section index (kItemFace / kFaceMiss)
+    uint8_t material = 0;    // CFAC byte (kItemFace), fixed 19 for organic
+    int16_t section = -1;    // primary COBJ section (item face / organic bone)
+    int16_t secondary_section = -1; // organic ray[32], lowest overlapping bone
+    bool organic_fallback = false; // synthetic torso sphere, not authored COBJ
     int32_t face = -1;       // face index within the section (kItemFace)
     int32_t effect_tag = -1; // impact tag handed to the present pass
     uint16_t entity = 0xFFFF;   // packed EntityHandle of the struck entity
@@ -164,9 +169,8 @@ struct RoundDebugEvent {
     Vec3 hit;                // resolved stop / graze point (mission units)
 };
 
-// The MVP organic hit stand-in: one sphere over the torso (the witnessed model
-// is the per-bone section walk, D-ITEM-13c). Exported so the F3 hitbox view
-// draws the SAME shape the round test uses.
+// Compatibility fallback for an organic whose graphic/COBJ block could not be
+// resolved. Normal organic collision uses posed per-section spheres.
 inline constexpr float kOrganicStandInCenterZ = 0.9f;
 inline constexpr float kOrganicStandInRadius = 0.6f;
 

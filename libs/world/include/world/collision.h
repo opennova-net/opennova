@@ -312,6 +312,24 @@ struct RayFaceHit {
 bool collision_raycast_faces(const CollisionTargetView &target, const int32_t start[3],
                              const int32_t end[3], uint32_t ammo_flags, RayFaceHit &out);
 
+// Person/organic projectile narrow phase: one authored COBJ bound sphere per
+// skeletal section, transformed by the callback matrix with the same strict
+// ordinal pairing as the face walker. primary_section is the first accepted
+// section in retail's reverse scan (the reaction/death-animation bone), while
+// secondary_section is the final overlap and normal-infantry damage zone.
+// [orig: Physics_RaycastAgainstBoneSections @ 0x4e4670]
+struct PersonSectionHit {
+    int32_t dist = 0;               // ray[29]: projected distance - authored radius / 2
+    int32_t projected_dist = 0;     // ray-line projection for the primary section
+    int32_t primary_section = -1;   // ray[31]: highest accepted section ordinal
+    int32_t secondary_section = -1; // ray[32]: lowest accepted section ordinal
+    uint8_t material = 19;          // fixed retail organic material
+};
+bool collision_raycast_person_sections(const CollisionTargetView &target,
+                                       const int32_t start[3], const int32_t end[3],
+                                       int32_t extra_radius, uint32_t section_mask,
+                                       PersonSectionHit &out);
+
 // ----------------------------------------------------------------------------
 // Contact force query: capsule test points vs every volume of the target model.
 // Faithful port of Entity_ComputeBoneCollisionForce @ 0x4ae150 (the SAT push-out
@@ -360,6 +378,15 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
 class ICollisionSectionMatrixProvider {
 public:
     virtual ~ICollisionSectionMatrixProvider() = default;
+    // A host may learn about dynamic entities after its mission-start model
+    // sweep (notably the local player deploy). Give query callers one shared,
+    // idempotent way to attach that entity before choosing an unresolved
+    // fallback. Returning true means the provider attached a usable instance.
+    virtual bool ensure_collision_instance(World &world, EntityHandle entity) {
+        (void)world;
+        (void)entity;
+        return false;
+    }
     virtual bool build_section_matrices(World &world, EntityHandle entity,
                                         int32_t model_id,
                                         const CollisionMatrix &entity_world,
@@ -380,7 +407,11 @@ public:
     int32_t add_model(CollisionModel model); // returns model id
     const CollisionModel *model(int32_t id) const;
     // Attach a model instance to a live entity (net_id keyed like the traits sweep).
-    void assign_entity(EntityHandle h, int32_t model_id);
+    void assign_entity(EntityHandle h, int32_t model_id,
+                       uint64_t registry_spawn_id = 0);
+    // Drop both intact and husk bindings for one packed slot. Hosts use this
+    // when the registry serial proves the slot now belongs to another entity.
+    void remove_entity_instance(EntityHandle h);
     // Attach the husk-stage collision model (swapped in while Flags & 4).
     void assign_entity_husk(EntityHandle h, int32_t husk_model_id);
     // Install the model-animation callback that supplies final per-section
@@ -388,7 +419,10 @@ public:
     void set_section_matrix_provider(ICollisionSectionMatrixProvider *provider) {
         section_matrix_provider_ = provider;
     }
-    bool has_instance(EntityHandle h) const;
+    // Resolve a host-owned late-spawn instance on demand. Existing instances
+    // never call the provider, so repeated round/F3 queries are idempotent.
+    bool ensure_entity_instance(World &world, EntityHandle h);
+    bool has_instance(const World &world, EntityHandle h) const;
     size_t instance_count() const { return instances_.size(); }
 
     // --- per-tick snapshots ---
@@ -424,6 +458,12 @@ public:
     FaceRaycast raycast_entity_faces(World &world, EntityHandle h, const int32_t start[3],
                                      const int32_t end[3], uint32_t ammo_flags,
                                      RayFaceHit &out);
+
+    // Retail organic/person narrow phase over the entity's posed COBJ spheres.
+    // A set section-mask bit removes that bone from collision.
+    bool raycast_person_sections(World &world, EntityHandle h, const int32_t start[3],
+                                 const int32_t end[3], int32_t extra_radius,
+                                 PersonSectionHit &out);
 
     // Entity-only radiused segment test over the static collision prefix:
     // TRUE = some static's type-1 solid clips the segment at `radius`
@@ -558,8 +598,9 @@ public:
         EntityHandle h;
     };
     StaticSlotView static_slot(int32_t i) const;
-    // The collision model attached to a live entity (nullptr when none).
-    const CollisionModel *model_for(EntityHandle h) const;
+    // The collision model attached to this exact live registry identity
+    // (nullptr for an absent or recycled packed slot).
+    const CollisionModel *model_for(const World &world, EntityHandle h) const;
 
     // Read-only world-space geometry snapshot for a host collision debug view.
     // Each instance's volumes are transformed through the SAME target_view /
@@ -610,6 +651,22 @@ public:
                                                   int32_t range, int32_t max_entities,
                                                   int32_t max_faces) const;
 
+    // The organic/person narrow-phase reality for F3: every authored COBJ
+    // sphere after the SAME posed target_view matrix used by
+    // raycast_person_sections. Radius is the retail effective projectile-zero
+    // radius (+0xCCC padding and per-bone scale/cap), not the authored radius.
+    struct DebugPersonSection {
+        EntityHandle handle;
+        int32_t section = -1;
+        int32_t center[3] = {};
+        int32_t radius = 0;
+        int32_t authored_radius = 0;
+        bool masked = false;
+    };
+    std::vector<DebugPersonSection> debug_person_sections(
+            World &world, const int32_t anchor[3], int32_t range,
+            int32_t max_entities);
+
 private:
     // Contact-flag side effects shared by both resolver passes (damage tiers +
     // the type-6/type-11 entity flags). [orig: the dispatch @ 0x4b30b7-0x4b351e]
@@ -625,7 +682,11 @@ private:
         // raycast_against_entity_pool @ 0x538720 and the ray/contact picks
         // @ 0x413086 / @ 0x4ae233; D-AI-7 residual closed §24]
         int32_t husk_model_id = -1;
+        // Entity::registry_spawn_id at assignment. Zero preserves the legacy
+        // handle-only behavior for portable callers/tests that do not stamp it.
+        uint64_t registry_spawn_id = 0;
     };
+    const Instance *live_instance(const World &world, EntityHandle h) const;
     struct StaticSlot { // [orig: g_StaticProx* u16 tables + entity ptr array]
         uint16_t x = 0, y = 0, z = 0, radius = 0;
         EntityHandle h;

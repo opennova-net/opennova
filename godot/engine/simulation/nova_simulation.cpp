@@ -39,6 +39,7 @@
 #include "env/nova_weather_core.h" // kIrisSample* classification codes
 #include "object/nova_item_database.h"
 #include "object/nova_object_data.h" // resolve_collision_instances: the .3di collision IR source
+#include "object/nova_skeletal_anim.h"
 #include "resource_index/nova_resource_root.h"
 #include "terrain/nova_terrain_data.h"
 
@@ -94,7 +95,56 @@ int visual_item_id_for_runtime_type(int item_id, const Ref<NovaItemDatabase> &it
 	    item_db->has_item(kPlayerVisualItemId)) {
 		return kPlayerVisualItemId;
 	}
-	return item_id;
+	return item_id + opennova::mission::kItemIdOffset;
+}
+
+opennova::anim::AimOverlayInputs aim_overlay_inputs_for(const AiEntity &entity) {
+	opennova::anim::AimOverlayInputs in;
+	in.aim_yaw = entity.heading;
+	in.aim_pitch = entity.pitch;
+	in.body_yaw = entity.inf.body_heading;
+	in.leg_yaw_r = entity.inf.leg_yaw[0];
+	in.leg_yaw_l = entity.inf.leg_yaw[1];
+	in.head_look_decay = entity.inf.head_look_decay;
+	in.lean = entity.inf.lean_angle;
+	in.roll = entity.roll;
+	in.body_pitch = entity.body_pitch;
+	in.torso_roll = entity.inf.torso_roll;
+	in.aim_state =
+			(opennova::world::infantry_anim_flags(entity.inf.anim_state) & 0x40u) != 0;
+	in.rolling =
+			entity.inf.anim_state == opennova::world::anim_state::kRollLeft ||
+			entity.inf.anim_state == opennova::world::anim_state::kRollRight;
+	return in;
+}
+
+double bam_to_radians(int32_t value) {
+	return static_cast<double>(value) *
+			(6.28318530717958647692 / 4294967296.0);
+}
+
+Basis godot_model_basis_from_overlay(
+		const opennova::anim::AimOverlayAngles &angles) {
+	// C++ twin of MissionObjectPlacer.bms_to_godot_basis. The first yaw
+	// simplifies to the BAM heading itself; the final +90 degree term is the
+	// .3di model-forward correction.
+	return Basis(Vector3(0.0, 1.0, 0.0), bam_to_radians(angles.yaw)) *
+			Basis(Vector3(0.0, 0.0, 1.0), bam_to_radians(angles.pitch)) *
+			Basis(Vector3(1.0, 0.0, 0.0), bam_to_radians(angles.roll)) *
+			Basis(Vector3(0.0, 1.0, 0.0), 1.57079632679489661923);
+}
+
+Array aim_overlay_deltas_for(
+		const opennova::anim::AimOverlayAngles
+				angles[opennova::anim::kOverlayClassCount]) {
+	Array deltas;
+	deltas.resize(opennova::anim::kOverlayClassCount);
+	const Basis inverse_body =
+			godot_model_basis_from_overlay(
+					angles[opennova::anim::kOverlayBody]).inverse();
+	for (int i = 0; i < opennova::anim::kOverlayClassCount; ++i)
+		deltas[i] = inverse_body * godot_model_basis_from_overlay(angles[i]);
+	return deltas;
 }
 
 std::string dictionary_string(const Dictionary &d, const char *key, const std::string &fallback) {
@@ -224,7 +274,15 @@ void NovaSimulation::reset_world() {
 	last_present_entity_count_ = 0;
 	// Collision models/instances are mission-scoped: drop them with the world (the
 	// sweep re-registers on the next load) and re-point the fresh ai_ at the container.
+	collision_item_db_.unref();
+	collision_placer_.unref();
+	collision_model_by_graphic_.clear();
+	collision_occlusion_by_graphic_.clear();
+	collision_radius_by_graphic_.clear();
+	collision_husk_pieces_by_graphic_.clear();
+	collision_resolution_attempted_.clear();
 	collision_pose_data_.clear();
+	collision_skeletal_sources_.clear();
 	panm_time_override_ms_ = -1;
 	collision_world_ = opennova::world::CollisionWorld{};
 	// Occlusion models too — retail reloads the model cache per mission, so the
@@ -549,12 +607,23 @@ namespace {
 // grouping (volumes are sequential per object in the IR conversion). Retail permits a
 // face-only collision model: CFAC raycasts do not depend on BVOL.
 bool collision_model_from_ir(const ThreediIRCollision *col,
-	                             opennova::world::CollisionModel &out) {
+	                             opennova::world::CollisionModel &out,
+	                             bool allow_sphere_only = false) {
 	if (col == nullptr || !threedi_ir_collision_is_runtime_safe(col)) return false;
 	const bool has_face_mesh =
 			col->face_count > 0 && col->faces != nullptr && col->vertex_count > 0 &&
 			col->vertices != nullptr && col->object_count > 0 && col->objects != nullptr;
-	if (col->volume_count == 0 && !has_face_mesh) return false;
+	bool has_person_spheres = false;
+	if (allow_sphere_only && col->objects != nullptr) {
+		for (size_t i = 0; i < col->object_count; ++i) {
+			if (col->objects[i].radius_fp16 > 0) {
+				has_person_spheres = true;
+				break;
+			}
+		}
+	}
+	if (col->volume_count == 0 && !has_face_mesh && !has_person_spheres)
+		return false;
 	auto fx = [](float v) { return static_cast<int32_t>(std::lround(v * 65536.0)); };
 
 	out.planes.reserve(col->plane_count);
@@ -605,8 +674,12 @@ bool collision_model_from_ir(const ThreediIRCollision *col,
 			++sec.volume_count;
 			++cursor;
 		}
-		if (s < static_cast<int32_t>(col->object_count))
-			sec.parent_part_index = col->objects[s].parent_subobject_index;
+		if (s < static_cast<int32_t>(col->object_count)) {
+			const ThreediIRCollisionObject &obj = col->objects[s];
+			sec.parent_part_index = obj.parent_subobject_index;
+			for (int axis = 0; axis < 3; ++axis) sec.center[axis] = obj.center_fp16[axis];
+			sec.radius = obj.radius_fp16;
+		}
 	}
 
 	// The face mesh (the bullet LOD): Q8 int16 vertices + the 44-B-equivalent
@@ -822,11 +895,128 @@ void NovaSimulation::apply_collision_to_ai() {
 	if (ai_) ai_->collision = &collision_world_;
 }
 
+bool NovaSimulation::ensure_collision_instance(
+		opennova::world::World &p_world,
+		opennova::world::EntityHandle p_entity) {
+	if (!world_ || &p_world != world_.get() ||
+			collision_item_db_.is_null() || collision_placer_.is_null())
+		return false;
+	const opennova::world::Entity *entity = p_world.registry.get(p_entity);
+	if (entity == nullptr) {
+		collision_world_.remove_entity_instance(p_entity);
+		collision_skeletal_sources_.erase(p_entity.packed);
+		collision_resolution_attempted_.erase(p_entity.packed);
+		return false;
+	}
+	const auto attempted =
+			collision_resolution_attempted_.find(p_entity.packed);
+	if (attempted != collision_resolution_attempted_.end()) {
+		if (attempted->second == entity->registry_spawn_id)
+			return collision_world_.has_instance(p_world, p_entity);
+		collision_world_.remove_entity_instance(p_entity);
+		collision_skeletal_sources_.erase(p_entity.packed);
+		collision_resolution_attempted_.erase(attempted);
+	}
+
+	// Re-run the idempotent attach sweep against the retained mission caches.
+	// It resolves every entity that appeared since the previous sweep, including
+	// a player deployed after load, without registering another graphic model.
+	resolve_collision_instances(collision_item_db_, collision_placer_.ptr());
+	return collision_world_.has_instance(p_world, p_entity);
+}
+
 bool NovaSimulation::build_section_matrices(opennova::world::World &p_world,
 		opennova::world::EntityHandle p_entity, int32_t p_model_id,
 		const opennova::world::CollisionMatrix &p_entity_world,
 		const opennova::world::CollisionModel &p_model,
 		std::vector<opennova::world::CollisionMatrix> &r_out) {
+	const auto skeletal_found =
+			collision_skeletal_sources_.find(p_entity.packed);
+	const opennova::world::Entity *entity =
+			p_world.registry.get(p_entity);
+	if (skeletal_found != collision_skeletal_sources_.end() &&
+			skeletal_found->second.model_id == p_model_id &&
+			entity != nullptr && skeletal_found->second.registry_spawn_id ==
+					entity->registry_spawn_id) {
+		const SkeletalCollisionSource &source = skeletal_found->second;
+		AiEntity *ai_entity = ai_ ? ai_->for_handle(p_entity) : nullptr;
+		const size_t section_count = p_model.sections.size();
+		if (source.anim.is_null() || ai_entity == nullptr || entity == nullptr ||
+				source.parents.size() < section_count ||
+				source.rest_global.size() < section_count ||
+				source.overlay_classes.size() < static_cast<int64_t>(section_count))
+			return false;
+
+		const String primary_key = infantry_anim_key(ai_entity->inf.anim_state);
+		if (primary_key.is_empty()) return false;
+		const float primary_fps = source.anim->get_clip_fps(primary_key, 0);
+		const double primary_seconds = primary_fps > 0.0f
+				? static_cast<double>(std::max(ai_entity->inf.clip_phase, 0)) /
+						(2.0 * primary_fps)
+				: 0.0;
+
+		const opennova::anim::AimOverlayInputs inputs =
+				aim_overlay_inputs_for(*ai_entity);
+		opennova::anim::AimOverlayAngles
+				angles[opennova::anim::kOverlayClassCount];
+		opennova::anim::compute_aim_overlay_angles(inputs, angles);
+		const Array deltas = aim_overlay_deltas_for(angles);
+
+		String weapon_key;
+		double weapon_seconds = 0.0;
+		if (p_world.cached.local_player.valid() &&
+				p_entity.packed == p_world.cached.local_player.packed &&
+				opennova::world::infantry_weapon_channel_visible(
+						ai_entity->inf, weapon_active_,
+						mount_blocks_weapon_channel(*entity))) {
+			weapon_key = infantry_anim_key(ai_entity->inf.wpn_state);
+			const float weapon_fps = source.anim->get_clip_fps(weapon_key, 0);
+			if (weapon_fps > 0.0f)
+				weapon_seconds =
+						static_cast<double>(
+								std::max(ai_entity->inf.wpn_clip_phase, 0)) /
+						(2.0 * weapon_fps);
+		}
+
+		const Array pose = source.anim->eval_pose_overlay(
+				primary_key, primary_seconds, source.overlay_classes, deltas,
+				weapon_key, weapon_seconds);
+		if (pose.size() < static_cast<int64_t>(section_count)) return false;
+
+		// The callback result is FINAL world-space. Build the body placement from
+		// the overlay's body class (not the aim heading), then apply the skinned
+		// deformation exactly once. At bind pose pose_global*rest_global^-1 is
+		// identity, which guards against both double-rest and double-entity
+		// translation. COBJ parent/offset/CXLT are deliberately not selectors:
+		// COBJ[i] pairs strictly with this output slot i.
+		const int32_t position[3] = {
+				p_entity_world.m[3], p_entity_world.m[7], p_entity_world.m[11]};
+		const opennova::world::CollisionMatrix body_world =
+				opennova::world::collision_matrix_from_euler(
+						angles[opennova::anim::kOverlayBody].yaw,
+						angles[opennova::anim::kOverlayBody].pitch,
+						angles[opennova::anim::kOverlayBody].roll, position);
+		std::vector<Transform3D> pose_global(section_count);
+		r_out.resize(section_count);
+		for (size_t i = 0; i < section_count; ++i) {
+			const Variant value = pose[static_cast<int64_t>(i)];
+			if (value.get_type() != Variant::TRANSFORM3D) return false;
+			const Transform3D local = static_cast<Transform3D>(value);
+			const int32_t parent = source.parents[i];
+			pose_global[i] = parent >= 0
+					? pose_global[static_cast<size_t>(parent)] * local
+					: local;
+			const Transform3D deformation =
+					pose_global[i] * source.rest_global[i].affine_inverse();
+			float render_pose[16];
+			panm_render_matrix_from_godot(deformation, render_pose);
+			if (!opennova::world::collision_matrix_apply_render_pose(
+						body_world, render_pose, r_out[i]))
+				return false;
+		}
+		return true;
+	}
+
 	const auto found = collision_pose_data_.find(p_model_id);
 	if (found == collision_pose_data_.end() || found->second.is_null()) return false;
 	const Ref<NovaObjectData> &data = found->second;
@@ -886,34 +1076,38 @@ bool NovaSimulation::build_section_matrices(opennova::world::World &p_world,
 int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_item_db,
                                                 Object *p_placer) {
 	if (!world_ || p_item_db.is_null() || p_placer == nullptr) return 0;
+	RefCounted *placer_ref = Object::cast_to<RefCounted>(p_placer);
+	if (placer_ref == nullptr) return 0;
+	collision_item_db_ = p_item_db;
+	collision_placer_ = placer_ref;
 	apply_collision_to_ai();
-	std::unordered_map<std::string, int32_t> model_by_graphic;     // -1 = no collision block
-	std::unordered_map<std::string, int32_t> occlusion_by_graphic; // -1 = no occlusion records
-	std::unordered_map<std::string, float> radius_by_graphic;      // .3di bound radius (units)
-	// Piece-model info per graphic: section count, per-section centers, and
-	// section 0's z extents (see the piece-model pick below).
-	struct HuskPieceInfo {
-		int32_t sections = 0;
-		std::vector<opennova::world::Vec3> centers;
-		float rest_min_z = 0.0f;
-		float rest_max_z = 0.0f;
-	};
-	std::unordered_map<std::string, HuskPieceInfo> husk_pieces_by_graphic;
 	std::vector<opennova::world::EntityHandle> handles;
 	world_->registry.for_each(
 			[&](const opennova::world::Entity &e) { handles.push_back(e.handle); });
 	int attached = 0;
 	for (const opennova::world::EntityHandle h : handles) {
 		opennova::world::Entity *e = world_->registry.get(h);
-		if (!e || e->kind == opennova::world::EntityKind::Organic ||
-		    e->kind == opennova::world::EntityKind::Marker)
+		if (!e || e->kind == opennova::world::EntityKind::Marker)
 			continue;
-		const int def_id = static_cast<int>(e->item_id) + opennova::mission::kItemIdOffset;
+		const auto previous_attempt =
+				collision_resolution_attempted_.find(h.packed);
+		if (previous_attempt != collision_resolution_attempted_.end() &&
+				previous_attempt->second != e->registry_spawn_id) {
+			collision_world_.remove_entity_instance(h);
+			collision_skeletal_sources_.erase(h.packed);
+		}
+		collision_resolution_attempted_[h.packed] = e->registry_spawn_id;
+		const bool is_organic =
+				e->kind == opennova::world::EntityKind::Organic;
+		const int def_id = is_organic
+				? visual_item_id_for_runtime_type(e->item_id, p_item_db)
+				: static_cast<int>(e->item_id) +
+						opennova::mission::kItemIdOffset;
 		const String graphic = p_item_db->get_graphic(def_id);
 		if (graphic.is_empty()) continue;
 		const std::string key(graphic.utf8().get_data());
-		auto it = model_by_graphic.find(key);
-		if (it == model_by_graphic.end()) {
+		auto it = collision_model_by_graphic_.find(key);
+		if (it == collision_model_by_graphic_.end()) {
 			int32_t model_id = -1;
 			int32_t occlusion_id = -1;
 			float bound_radius = 0.0f;
@@ -922,7 +1116,8 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 			Ref<NovaObjectData> data = p_placer->call("object_data_for", graphic);
 			if (data.is_valid()) {
 				opennova::world::CollisionModel model;
-				if (collision_model_from_ir(data->native_ir().collision, model)) {
+				if (collision_model_from_ir(
+						data->native_ir().collision, model, data->has_collision())) {
 					model_id = collision_world_.add_model(std::move(model));
 					if (data->has_live_panm_for_lod(0))
 						collision_pose_data_[model_id] = data;
@@ -932,9 +1127,9 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 					occlusion_id = occlusion_world_.add_model(std::move(occ));
 				bound_radius = model_bound_radius_from_ir(data->native_ir());
 			}
-			it = model_by_graphic.emplace(key, model_id).first;
-			occlusion_by_graphic.emplace(key, occlusion_id);
-			radius_by_graphic.emplace(key, bound_radius);
+			it = collision_model_by_graphic_.emplace(key, model_id).first;
+			collision_occlusion_by_graphic_.emplace(key, occlusion_id);
+			collision_radius_by_graphic_.emplace(key, bound_radius);
 		}
 		// The bound-sphere radius (entity+0 boundRadius) comes from the .3di
 		// MODEL header bound, not the collision block — every placed item
@@ -943,10 +1138,66 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 		// padded +0.0625 [orig: Entity_InitFromModel @ 0x40dc30 — boundRadius =
 		// max(gpm[5], husk gpm[5]) + 0x1000; the authored def scale factor is
 		// not yet applied (tracked, D-COL-3)].
-		float entity_bound = radius_by_graphic[key];
+		float entity_bound = collision_radius_by_graphic_[key];
 		if (it->second >= 0) {
-			collision_world_.assign_entity(h, it->second);
+			collision_world_.assign_entity(
+					h, it->second, e->registry_spawn_id);
 			++attached;
+			if (is_organic) {
+				collision_skeletal_sources_.erase(h.packed);
+				Ref<NovaSkeletalAnim> skeletal =
+						p_placer->call("skeletal_anim_for", def_id, graphic);
+				const opennova::world::CollisionModel *person_model =
+						collision_world_.model(it->second);
+				if (skeletal.is_valid() && skeletal->is_loaded() &&
+						person_model != nullptr) {
+					const Array bones = skeletal->get_skeleton_bones();
+					const size_t section_count = person_model->sections.size();
+					if (bones.size() >= static_cast<int64_t>(section_count)) {
+						SkeletalCollisionSource source;
+						source.model_id = it->second;
+						source.registry_spawn_id = e->registry_spawn_id;
+						source.anim = skeletal;
+						source.overlay_classes =
+								skeletal->get_overlay_classes();
+						source.parents.resize(section_count, -1);
+						source.rest_global.resize(section_count);
+						bool valid_rig =
+								source.overlay_classes.size() >=
+								static_cast<int64_t>(section_count);
+						for (size_t i = 0; valid_rig && i < section_count; ++i) {
+							const Variant bone_value =
+									bones[static_cast<int64_t>(i)];
+							if (bone_value.get_type() != Variant::DICTIONARY) {
+								valid_rig = false;
+								break;
+							}
+							const Dictionary bone = bone_value;
+							const int32_t parent =
+									static_cast<int32_t>(bone.get(
+											"parent_index", -1));
+							const Variant rest_value =
+									bone.get("rest", Transform3D());
+							if (parent < -1 ||
+									parent >= static_cast<int32_t>(i) ||
+									rest_value.get_type() != Variant::TRANSFORM3D) {
+								valid_rig = false;
+								break;
+							}
+							const Transform3D rest =
+									static_cast<Transform3D>(rest_value);
+							source.parents[i] = parent;
+							source.rest_global[i] = parent >= 0
+									? source.rest_global[
+											static_cast<size_t>(parent)] * rest
+									: rest;
+						}
+						if (valid_rig)
+							collision_skeletal_sources_[h.packed] =
+									std::move(source);
+					}
+				}
+			}
 		}
 		// The husk-stage collision model: attached beside the graphic instance so
 		// every query swaps to the wreck once Flags & 4 sets. The collision pick
@@ -957,22 +1208,25 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 				: p_item_db->get_husk(def_id);
 		if (!husk_name_s.is_empty()) {
 			const std::string husk_key(husk_name_s.utf8().get_data());
-			auto hit = model_by_graphic.find(husk_key);
-			if (hit == model_by_graphic.end()) {
+			auto hit = collision_model_by_graphic_.find(husk_key);
+			if (hit == collision_model_by_graphic_.end()) {
 				int32_t husk_model_id = -1;
 				Ref<NovaObjectData> hdata = p_placer->call("object_data_for", husk_name_s);
 				if (hdata.is_valid()) {
 					opennova::world::CollisionModel hmodel;
-					if (collision_model_from_ir(hdata->native_ir().collision, hmodel)) {
+					if (collision_model_from_ir(
+							hdata->native_ir().collision, hmodel,
+							hdata->has_collision())) {
 						husk_model_id = collision_world_.add_model(std::move(hmodel));
 						if (hdata->has_live_panm_for_lod(0))
 							collision_pose_data_[husk_model_id] = hdata;
 					}
-					radius_by_graphic.emplace(husk_key,
+					collision_radius_by_graphic_.emplace(husk_key,
 							model_bound_radius_from_ir(hdata->native_ir()));
 				}
-				hit = model_by_graphic.emplace(husk_key, husk_model_id).first;
-				occlusion_by_graphic.emplace(husk_key, -1);
+				hit = collision_model_by_graphic_.emplace(
+						husk_key, husk_model_id).first;
+				collision_occlusion_by_graphic_.emplace(husk_key, -1);
 			}
 			if (hit->second >= 0 && it->second >= 0)
 				collision_world_.assign_entity_husk(h, hit->second);
@@ -989,9 +1243,9 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 					? p_item_db->get_husk(def_id)
 					: p_item_db->get_huskfinal(def_id);
 			const std::string piece_key(piece_name_s.utf8().get_data());
-			auto hs = husk_pieces_by_graphic.find(piece_key);
-			if (hs == husk_pieces_by_graphic.end()) {
-				HuskPieceInfo info;
+			auto hs = collision_husk_pieces_by_graphic_.find(piece_key);
+			if (hs == collision_husk_pieces_by_graphic_.end()) {
+				CollisionHuskPieceInfo info;
 				Ref<NovaObjectData> hdata = p_placer->call("object_data_for", piece_name_s);
 				if (hdata.is_valid() && hdata->native_ir().lod_count > 0 &&
 				    hdata->native_ir().lods != nullptr) {
@@ -1024,14 +1278,15 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 						}
 					}
 				}
-				hs = husk_pieces_by_graphic.emplace(piece_key, std::move(info)).first;
+				hs = collision_husk_pieces_by_graphic_.emplace(
+						piece_key, std::move(info)).first;
 				if (hdata.is_valid())
-					radius_by_graphic.emplace(piece_key,
+					collision_radius_by_graphic_.emplace(piece_key,
 							model_bound_radius_from_ir(hdata->native_ir()));
 			}
 			if (opennova::world::ItemDeathTraits *t =
 						world_->item_death_traits.get_mutable(e->item_id)) {
-				const HuskPieceInfo &info = hs->second;
+				const CollisionHuskPieceInfo &info = hs->second;
 				if (t->husk_section_count == 0 && info.sections > 0)
 					t->husk_section_count = info.sections;
 				if (t->husk_section_centers.empty() && !info.centers.empty())
@@ -1041,11 +1296,12 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 			}
 			// The husk model's bound joins the entity bound max [orig:
 			// Entity_InitFromModel @ 0x40dc30, the huskModel[5] compare].
-			entity_bound = std::max(entity_bound, radius_by_graphic[husk_key]);
+			entity_bound = std::max(
+					entity_bound, collision_radius_by_graphic_[husk_key]);
 		}
 		if (entity_bound > 0.0f && e->bound_radius <= 0.0f)
 			e->bound_radius = entity_bound + 0.0625f;  // the +0x1000 16.16 pad
-		const int32_t occ_id = occlusion_by_graphic[key];
+		const int32_t occ_id = collision_occlusion_by_graphic_[key];
 		if (occ_id >= 0 && e->kind == opennova::world::EntityKind::Building) {
 			// The def bits the occlusion engine reads: attrib2 bit 6 "weldable"
 			// [orig: itemDef+88 >> 6 @ 0x5c5cce], attrib bit 27 recurse-windows
@@ -1171,7 +1427,9 @@ PackedInt64Array NovaSimulation::get_building_visibility() const {
 	world_->registry.for_each([&](const opennova::world::Entity &e) {
 		if (e.kind != opennova::world::EntityKind::Building || e.bms_id == 0) return;
 		const bool has_occlusion = occlusion_world_.has_instance(e.handle);
-		if (!has_occlusion && collision_world_.model_for(e.handle) == nullptr) return;
+		if (!has_occlusion &&
+				collision_world_.model_for(*world_, e.handle) == nullptr)
+			return;
 		const bool visible = occlusion_world_.building_visible(e.handle);
 		const uint32_t mask =
 		    has_occlusion ? occlusion_world_.section_mask(e.handle) : 0xFFFFFFFFu;
@@ -1405,7 +1663,7 @@ inline Vector3 godot_from_mission_vec3(const opennova::world::Vec3 &p) {
 }
 } // namespace
 
-Dictionary NovaSimulation::get_hitbox_debug() const {
+Dictionary NovaSimulation::get_hitbox_debug() {
 	Dictionary out;
 	Array entities;
 	Array organics;
@@ -1457,20 +1715,56 @@ Dictionary NovaSimulation::get_hitbox_debug() const {
 		entities.push_back(d);
 	}
 
-	// The pool-0 organic stand-in spheres — the shape the round test actually
-	// uses for people (round_sim.h kOrganicStandIn*; D-ITEM-13c).
+	// Posed pool-0 COBJ spheres from the exact person narrow phase. Entities
+	// whose graphic cannot supply usable authored sections are appended below
+	// with the bounded compatibility fallback used by RoundSim.
+	std::unordered_map<uint16_t, bool> posed_handles;
+	const std::vector<opennova::world::CollisionWorld::DebugPersonSection> people =
+	    collision_world_.debug_person_sections(*world_, anchor, range, 96);
+	for (const opennova::world::CollisionWorld::DebugPersonSection &person : people) {
+		Dictionary d;
+		d["entity_handle"] = static_cast<int>(person.handle.packed);
+		d["section"] = person.section;
+		d["pos"] = godot_from_fixed3(person.center);
+		d["radius"] = static_cast<float>(person.radius / kFixed16);
+		d["authored_radius"] =
+		    static_cast<float>(person.authored_radius / kFixed16);
+		d["masked"] = person.masked;
+		d["fallback"] = false;
+		organics.push_back(d);
+		posed_handles[person.handle.packed] = true;
+	}
 	const size_t pool0 = world_->registry.pool_capacity(0);
+	int fallback_entity_count = static_cast<int>(posed_handles.size());
 	for (size_t s = 0; s < pool0; ++s) {
+		if (fallback_entity_count >= 96) break;
 		const opennova::world::Entity *e =
 		    world_->registry.get(opennova::world::EntityHandle{static_cast<uint16_t>(s)});
-		if (e == nullptr || e->health <= 0) continue;
+		if (e == nullptr || (e->engine_flags & 0x02000001u) != 0 ||
+		    posed_handles.find(static_cast<uint16_t>(s)) != posed_handles.end())
+			continue;
+		if (range >= 0) {
+			const int32_t ep[3] = {
+			    opennova::world::to_fixed(e->position.x),
+			    opennova::world::to_fixed(e->position.y),
+			    opennova::world::to_fixed(e->position.z)};
+			if (std::llabs(static_cast<int64_t>(ep[0]) - anchor[0]) > range ||
+			    std::llabs(static_cast<int64_t>(ep[1]) - anchor[1]) > range ||
+			    std::llabs(static_cast<int64_t>(ep[2]) - anchor[2]) > range)
+				continue;
+		}
 		Dictionary d;
 		d["entity_handle"] = static_cast<int>(s);
+		d["section"] = 1;
 		d["pos"] = Vector3(e->position.x,
 		                   e->position.z + opennova::world::kOrganicStandInCenterZ,
 		                   -e->position.y);
 		d["radius"] = opennova::world::kOrganicStandInRadius;
+		d["authored_radius"] = opennova::world::kOrganicStandInRadius;
+		d["masked"] = false;
+		d["fallback"] = true;
 		organics.push_back(d);
+		++fallback_entity_count;
 	}
 	return out;
 }
@@ -1524,6 +1818,8 @@ Dictionary NovaSimulation::get_round_debug() const {
 		d["kind_name"] = String(ev.kind <= 5 ? kKindNames[ev.kind] : "?");
 		d["material"] = static_cast<int>(ev.material);
 		d["section"] = static_cast<int>(ev.section);
+		d["secondary_section"] = static_cast<int>(ev.secondary_section);
+		d["fallback"] = ev.organic_fallback;
 		d["face"] = static_cast<int>(ev.face);
 		d["effect_tag"] = ev.effect_tag;
 		d["effect_tag_name"] =
@@ -3205,12 +3501,7 @@ Dictionary NovaSimulation::get_local_player_aim_overlay() const {
 	const AiEntity *p = world_->ai->for_handle(world_->cached.local_player);
 	if (!p) return out;
 
-	opennova::anim::AimOverlayInputs in;
-	in.aim_yaw = p->heading;
-	in.aim_pitch = p->pitch;
-	in.body_yaw = p->inf.body_heading;
-	in.leg_yaw_r = p->inf.leg_yaw[0];
-	in.leg_yaw_l = p->inf.leg_yaw[1];
+	opennova::anim::AimOverlayInputs in = aim_overlay_inputs_for(*p);
 	// The head-look decay term carries the arms-dip feed (the +0x371 weapon-switch
 	// window drops it 0x2800000/tick; infantry_weapon_channel owns the decay)
 	// [orig: @ 0x4b5cab..0x4b5cd5]. The lean term is the sim's lean angle
@@ -3220,15 +3511,6 @@ Dictionary NovaSimulation::get_local_player_aim_overlay() const {
 	// body pitch (entity+0x90; both fed by infantry_slope_pass). pitch_blend
 	// stays 0 until its sim source (recoil impulses) is ported — the formulas
 	// carry the term so it drops in without touching this seam.
-	in.head_look_decay = p->inf.head_look_decay;
-	in.lean = p->inf.lean_angle;
-	in.roll = p->roll;
-	in.body_pitch = p->body_pitch;
-	in.torso_roll = p->inf.torso_roll;
-	in.aim_state = (opennova::world::infantry_anim_flags(p->inf.anim_state) & 0x40u) != 0;
-	in.rolling = (p->inf.anim_state == opennova::world::anim_state::kRollLeft ||
-	              p->inf.anim_state == opennova::world::anim_state::kRollRight);
-
 	opennova::anim::AimOverlayAngles angles[opennova::anim::kOverlayClassCount];
 	opennova::anim::compute_aim_overlay_angles(in, angles);
 
@@ -4040,6 +4322,8 @@ void NovaSimulation::restart() {
 	pending_weapon_events_.clear();
 	world_->restore(baseline_); // rewinds registry/vars/env/clock + re-inits systems (incl. AI;
 	                            // WacSystem::on_load also resets its 62-tick accumulator)
+	if (collision_item_db_.is_valid() && collision_placer_.is_valid())
+		resolve_collision_instances(collision_item_db_, collision_placer_.ptr());
 	weapon_anim_tick_ = world_->logic_tick;
 	// The restored world can share a tick number with a previously cached view.
 	// Force the next FollowOwner query to rebuild against the post-restart epoch.
@@ -4218,7 +4502,8 @@ Dictionary NovaSimulation::get_destruction_debug(int p_bms_id) const {
 	out["bound_radius"] = found->bound_radius;
 	out["engine_flags"] = static_cast<int64_t>(found->engine_flags);
 	out["is_ai_capable"] = found->is_ai_capable;
-	out["has_collision_instance"] = collision_world_.has_instance(found->handle);
+	out["has_collision_instance"] =
+			collision_world_.has_instance(*world_, found->handle);
 	const opennova::world::ItemDeathTraits *t =
 			world_->item_death_traits.get(found->item_id);
 	out["has_death_traits"] = t != nullptr;

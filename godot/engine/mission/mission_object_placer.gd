@@ -396,7 +396,8 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 		# the ONE skeletal-keyed mesh build - the old order built a static-keyed
 		# set first and threw it away, doubling every animated entity's cost.
 		# Rigid weapon parts fake-skin; no anim_def -> stays static.
-		_apply_skeletal_anim(model, int(a.get("item_id", 0)), data.get_bone_origins())
+		_apply_skeletal_anim(model, int(a.get("item_id", 0)),
+				data.get_bone_origins(), data.get_bone_parents())
 		# Drive the build explicitly (not via _ready) so it is independent of when
 		# place() runs relative to the main loop; matches the static template path.
 		model.set_object_data(data)
@@ -450,7 +451,7 @@ func build_animated_model(item_id: int, parent: Node3D, env_node: Node = null) -
 	parent.add_child(model)
 	if env_node != null and model.has_method("set_environment_node"):
 		model.set_environment_node(env_node)
-	_apply_skeletal_anim(model, item_id, data.get_bone_origins())
+	_apply_skeletal_anim(model, item_id, data.get_bone_origins(), data.get_bone_parents())
 	model.set_object_data(data)
 	return model
 
@@ -562,7 +563,8 @@ func place_single(mission: NovaMissionData, container: Node3D, kind: int, index:
 			model.set_environment_node(env_node)
 		# Skeletal set first = no-op rebuild; set_object_data does the one
 		# skeletal-keyed build (same ordering rationale as place()).
-		_apply_skeletal_anim(model, item_id, data.get_bone_origins())
+		_apply_skeletal_anim(model, item_id,
+				data.get_bone_origins(), data.get_bone_parents())
 		model.set_object_data(data)
 		var ref := {
 			"kind": kind,
@@ -824,14 +826,18 @@ func _model_name_for(graphic: String) -> String:
 # Resolve an animated entity's body-animation set from its item def's anim_def and attach it to
 # the model so its Skeleton3D builds. Cached per .adm (shared read-only across entities). A model
 # with an empty anim_def, or whose .adm fails to load, is left static (unchanged behaviour).
-func _apply_skeletal_anim(model: Node3D, item_id: int, model_bone_origins := PackedVector3Array()) -> void:
+func _apply_skeletal_anim(model: Node3D, item_id: int,
+		model_bone_origins := PackedVector3Array(),
+		model_bone_parents := PackedInt32Array()) -> void:
 	if model == null or resource_root == null or item_db == null:
 		return
 	var anim_def := item_db.get_anim_def(item_id)
 	if anim_def.is_empty():
 		return
 	var adm_name := anim_def if anim_def.to_lower().ends_with(".adm") else anim_def + ".adm"
-	_apply_skeletal_from_adm(model, adm_name, model_bone_origins)
+	var skeletal = _skeletal_from_adm(adm_name, model_bone_origins, model_bone_parents)
+	if skeletal != null and model.has_method("set_skeletal_anim"):
+		model.set_skeletal_anim(skeletal)
 
 
 # Attach a skeletal set from a resolved .adm name, feeding the .3di model's bone table
@@ -842,6 +848,13 @@ func _apply_skeletal_anim(model: Node3D, item_id: int, model_bone_origins := Pac
 # cache key folds in the table: two models can share one .adm (the FP arms + gun both use
 # ak47_1st.adm) yet carry different .3di pivots, so they must not alias. See NovaSkeletalAnim.
 func _apply_skeletal_from_adm(model: Node3D, adm_name: String, model_bone_origins: PackedVector3Array, model_bone_parents := PackedInt32Array()) -> void:
+	var skeletal = _skeletal_from_adm(adm_name, model_bone_origins, model_bone_parents)
+	if skeletal != null and model.has_method("set_skeletal_anim"):
+		model.set_skeletal_anim(skeletal)
+
+
+func _skeletal_from_adm(adm_name: String, model_bone_origins: PackedVector3Array,
+		model_bone_parents := PackedInt32Array()):
 	var cache_key := adm_name + "#" + str(hash(model_bone_origins)) + "#" + str(hash(model_bone_parents))
 	var skeletal
 	if _skeletal_cache.has(cache_key):
@@ -851,8 +864,7 @@ func _apply_skeletal_from_adm(model: Node3D, adm_name: String, model_bone_origin
 		if not skeletal.load_from_resource_root(resource_root, adm_name, model_bone_origins, model_bone_parents):
 			skeletal = null
 		_skeletal_cache[cache_key] = skeletal
-	if skeletal != null and model.has_method("set_skeletal_anim"):
-		model.set_skeletal_anim(skeletal)
+	return skeletal
 
 
 func _load_object_data(graphic: String) -> NovaObjectData:
@@ -893,6 +905,24 @@ func ground_anchor_godot(graphic: String) -> Vector3:
 func object_data_for(graphic: String) -> NovaObjectData:
 	_check_epoch()
 	return _load_object_data(graphic)
+
+
+## Authoritative read-only skeletal set for simulation collision. Uses the same
+## ADM + canonical model bone-table cache as the rendered NovaObjectModel, so
+## headless per-bone collision cannot drift onto lossy BAD parents/pivots.
+func skeletal_anim_for(item_id: int, graphic: String):
+	_check_epoch()
+	if resource_root == null or item_db == null:
+		return null
+	var data := _load_object_data(graphic)
+	if data == null:
+		return null
+	var anim_def := item_db.get_anim_def(item_id)
+	if anim_def.is_empty():
+		return null
+	var adm_name := anim_def if anim_def.to_lower().ends_with(".adm") else anim_def + ".adm"
+	return _skeletal_from_adm(
+			adm_name, data.get_bone_origins(), data.get_bone_parents())
 
 
 # --- destruction support (world-wac-ai-re §24.6) -------------------------------

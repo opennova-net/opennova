@@ -789,7 +789,7 @@ World::Snapshot World::snapshot() const {
 }
 
 void World::restore(const Snapshot &s) {
-    registry = s.registry;
+    registry.restore_from(s.registry);
     vars = s.vars;
     env = s.env;
     logic_tick = s.logic_tick;

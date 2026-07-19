@@ -41,11 +41,10 @@ void detonate_round(World &world, const LiveRound &r, const Vec3 &at,
     world.explosions.queue_explosion(world, e);
 }
 
-// The MVP organic hit shape: a sphere over the torso. The witnessed hit test is the
-// proximity list + bone-section collision (Projectile_RaycastProximitySlots @ 0x4E5340,
-// Entity_ComputeBoneCollisionBounds) — this stands in until the collision-model port
-// (tracked, §5.60), so every hit is a BODY hit (zone multiplier 1.0). The values are
-// the round_sim.h kOrganicStandIn* exports, shared with the F3 hitbox view.
+// Bounded compatibility shape for a person whose graphic cannot supply a
+// usable authored COBJ model. Normal organic hits use the posed section walk;
+// this fallback retains neutral damage and a synthetic torso reaction bone.
+// The values are exported from round_sim.h and shared with the F3 hitbox view.
 constexpr float kOrganicCenterZ = kOrganicStandInCenterZ;
 constexpr float kOrganicRadius = kOrganicStandInRadius;
 
@@ -110,18 +109,31 @@ bool round_broad_phase(const Vec3 &p0, const Vec3 &p1, const Vec3 &c, float r) {
 
 // The kinetic damage number [orig: Weapon_CalcImpactDamage @ 0x4EC920]. `vel` is
 // units/tick; the original computes (62 * |vel|_16.16) >> 16 = units/second, clamps to
-// 1219 (@0x4ecad6), scales by weight_in_grains / 875 (@0x4ecb1a), applies the hit-zone
-// multiplier (body = 1.0 — bone zones deferred) and the shooter-class byte (0.9 / 1.1 —
+// 1219 (@0x4ecad6), scales by weight_in_grains / 875 (@0x4ecb1a), applies the person
+// hit-zone multiplier selected by ray[32] and the shooter-class byte (0.9 / 1.1 —
 // the slot+89688 per-ammo class table, unported), floors at min_damage (@0x4ecb3a) and
 // caps at max_damage when > 0 (@0x4ecb42). Authority-only by construction: only the host
 // runs this sim at all (the original returns 0 for non-authority peers @0x4ec933).
-int32_t calc_impact_damage(const Vec3 &vel, const AmmoTableEntry &ammo) {
+int32_t calc_impact_damage(const Vec3 &vel, const AmmoTableEntry &ammo,
+                           int32_t person_section = -1) {
     const double speed_per_tick =
             std::sqrt(double(vel.x) * vel.x + double(vel.y) * vel.y + double(vel.z) * vel.z);
     int32_t speed_scaled = static_cast<int32_t>(62.0 * speed_per_tick);
     if (speed_scaled >= 1219) speed_scaled = 1219;
     int32_t damage = speed_scaled * ammo.weight_in_grains / 875;
-    // Zone multiplier 1.0 (body); class multiplier absent — tracked deferrals.
+    // [orig: Weapon_CalcImpactDamage @0x4ec9a1..0x4ec9f3] Person damage reads
+    // ray[32], the FINAL/lowest overlap from the reverse section walk. ray[31]
+    // independently drives reactions/death selection and must not be substituted.
+    float zone_multiplier = 1.0f;
+    if (person_section >= 0 && person_section <= 4)
+        zone_multiplier = 1.25f;
+    else if ((person_section >= 9 && person_section <= 12) ||
+             (person_section >= 15 && person_section <= 18))
+        zone_multiplier = 0.5f;
+    else if (person_section == 13 || person_section == 14)
+        zone_multiplier = 3.0f;
+    damage = static_cast<int32_t>(static_cast<float>(damage) * zone_multiplier);
+    // Shooter-class multiplier remains a tracked deferral.
     if (damage <= ammo.min_damage) damage = ammo.min_damage;
     if (ammo.max_damage > 0 && damage >= ammo.max_damage) damage = ammo.max_damage;
     return damage;
@@ -316,9 +328,9 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         const Vec3 p0 = r.pos;
         Vec3 p1{p0.x + r.vel.x, p0.y + r.vel.y, p0.z + r.vel.z};
 
-        // Earliest hit along this tick's segment: pool-0 organics against the
-        // body cylinder stand-in, then pool-1/2 items — bound-sphere broad
-        // phase + the collision-model FACE narrow phase [orig:
+        // Earliest hit along this tick's segment: pool-1/2 items through the
+        // bound-sphere broad phase + CFAC narrow phase, then pool-0 organics
+        // through the posed COBJ sphere walk [orig:
         // Projectile_RaycastProximitySlots @0x4e5340 (pools 2 then 1: per-slot
         // AABB + perpendicular-distance sphere gates) ->
         // Physics_RaycastAgainstBoneCollision @0x4e4cb0 per candidate; the hit
@@ -327,12 +339,15 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         Entity *best_target = nullptr;
         uint16_t best_handle = 0xFFFF;
         bool best_is_item = false;
-        uint8_t best_material = 0; // face material byte; 0 with the sphere stand-in
-        int16_t best_section = -1; // COBJ section + face of the winning CFAC hit
+        uint8_t best_material = 0; // CFAC byte or fixed organic material 19
+        int16_t best_section = -1; // item section or organic reaction bone
+        int16_t best_secondary_section = -1; // organic ray[32]
+        int16_t best_damage_section = -1; // organic ray[32], posed-model hits only
+        bool best_organic_fallback = false;
         int32_t best_face = -1;    // (-1 = sphere stand-in) — the F3 Rounds view
         bool best_had_faces = false;
+        float best_impact_t = 2.0f; // person effect point backs off by 0x800
         const AmmoTableEntry *ammo = world.ammo.by_index(r.ammo_index);
-        const float radius = kOrganicRadius + (ammo != nullptr ? ammo->bullet_radius : 0.0f);
         // The exclusion set beyond the shooter [orig: the ray[17..20] build in
         // Projectile_UpdatePhysics @0x4ea2a5-0x4ea2f8, compared by every pool
         // walk @0x4e5572/@0x4e5782/@0x4e5983/@0x4e4c4e]: a Controller/Gunner/
@@ -446,6 +461,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                 }
                 if (item_t < best_t) {
                     best_t = item_t;
+                    best_impact_t = item_t;
                     best_target = e;
                     best_handle = h.packed;
                     best_is_item = true;
@@ -466,14 +482,99 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             if (r.owner.valid() && h.packed == r.owner.packed) continue; // own rounds
             Entity *e = world.registry.get(h);
             if (e == nullptr || (e->engine_flags & 0x02000001u) != 0) continue;
-            const Vec3 center{e->position.x, e->position.y, e->position.z + kOrganicCenterZ};
-            const SegHit hit = segment_vs_sphere(p0, p1, center, radius);
-            if (hit.hit && hit.t < best_t) {
-                best_t = hit.t;
+
+            bool has_authored_sections = false;
+            if (collision != nullptr) {
+                // The player can deploy after the mission-start collision
+                // sweep. Ask the host to attach that late entity before the
+                // unresolved torso fallback becomes authoritative.
+                collision->ensure_entity_instance(world, h);
+            }
+            if (collision != nullptr && collision->has_instance(world, h)) {
+                if (const CollisionModel *person_model =
+                            collision->model_for(world, h)) {
+                    for (const CollisionSection &section : person_model->sections) {
+                        if (section.radius > 0) {
+                            has_authored_sections = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            bool person_hit = false;
+            float person_t = 2.0f;
+            float person_impact_t = 2.0f;
+            int16_t person_primary = -1;
+            int16_t person_secondary = -1;
+            int16_t person_damage_section = -1;
+            bool person_fallback = false;
+            if (has_authored_sections) {
+                const int32_t start16[3] = {
+                        static_cast<int32_t>(p0.x * 65536.0f),
+                        static_cast<int32_t>(p0.y * 65536.0f),
+                        static_cast<int32_t>(p0.z * 65536.0f)};
+                const int32_t end16[3] = {
+                        static_cast<int32_t>(p1.x * 65536.0f),
+                        static_cast<int32_t>(p1.y * 65536.0f),
+                        static_cast<int32_t>(p1.z * 65536.0f)};
+                PersonSectionHit person;
+                const int32_t extra_radius = ammo != nullptr
+                        ? static_cast<int32_t>(ammo->bullet_radius * 65536.0f)
+                        : 0;
+                if (collision->raycast_person_sections(
+                            world, h, start16, end16, extra_radius, person)) {
+                    const double dx = static_cast<double>(end16[0]) - start16[0];
+                    const double dy = static_cast<double>(end16[1]) - start16[1];
+                    const double dz = static_cast<double>(end16[2]) - start16[2];
+                    const double length16 = std::sqrt(dx * dx + dy * dy + dz * dz);
+                    if (length16 > 0.0) {
+                        person_t = static_cast<float>(person.dist / length16);
+                        person_impact_t =
+                                static_cast<float>((person.dist - 0x800) / length16);
+                        person_primary =
+                                static_cast<int16_t>(person.primary_section);
+                        person_secondary =
+                                static_cast<int16_t>(person.secondary_section);
+                        person_damage_section = person_secondary;
+                        person_hit = true;
+                    }
+                }
+            } else {
+                // Missing/unusable person model only: retain a bounded fallback
+                // so headless or modded missions do not make actors intangible.
+                const float radius =
+                        kOrganicRadius +
+                        (ammo != nullptr ? ammo->bullet_radius : 0.0f);
+                const Vec3 center{e->position.x, e->position.y,
+                                  e->position.z + kOrganicCenterZ};
+                const SegHit fallback = segment_vs_sphere(p0, p1, center, radius);
+                if (fallback.hit) {
+                    person_hit = true;
+                    person_t = fallback.t;
+                    person_impact_t = fallback.t;
+                    person_primary = 1;
+                    person_secondary = 1;
+                    person_fallback = true;
+                }
+            }
+            if (!person_hit) continue;
+
+            if (person_t < best_t) {
+                best_t = person_t;
+                best_impact_t = person_impact_t;
                 best_target = e;
                 best_handle = packed;
                 best_is_item = false;
+                best_material = 19;
+                best_section = person_primary;
+                best_secondary_section = person_secondary;
+                best_damage_section = person_damage_section;
+                best_organic_fallback = person_fallback;
+                best_face = -1;
+                best_had_faces = false;
             }
+            break;
         }
 
         // Terrain stop: first sub-step whose column height swallows the round
@@ -519,8 +620,9 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         // original's pool legs accept ray[29] < closestHitDist, ties stay with
         // the terrain/water winner [orig: @0x4ea50e/@0x4ea54e].
         if (best_target != nullptr && best_t < terrain_t) {
-            const Vec3 impact_pos{p0.x + r.vel.x * best_t, p0.y + r.vel.y * best_t,
-                                  p0.z + r.vel.z * best_t};
+            const Vec3 impact_pos{p0.x + r.vel.x * best_impact_t,
+                                  p0.y + r.vel.y * best_impact_t,
+                                  p0.z + r.vel.z * best_impact_t};
             if (best_is_item) {
                 // Item impact [orig: the same Projectile_ProcessDamageOnTarget
                 // @0x4e7fb0 chain — the zeroing gates ride the armor words].
@@ -611,7 +713,8 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             // the remaining health [orig: @0x4e8064]; health<=0 raises the death event
             // the host session routes [orig: Entity_CheckAndProcessDeath @0x51b550].
             if (ammo != nullptr) {
-                int32_t damage = calc_impact_damage(r.vel, *ammo);
+                int32_t damage = calc_impact_damage(
+                        r.vel, *ammo, best_damage_section);
                 // Indestructible bodies still collide and present the impact;
                 // the flag zeroes damage later in the retail hit chain.
                 if ((best_target->engine_flags & kEntityFlagIndestructible) != 0)
@@ -634,21 +737,23 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                     best_target->health -= damage;
                     // Publish the processed hit for the AI reaction stamps (wasHit /
                     // lastAttacker / the SM damage event) — drained by AiSystem::tick.
-                    hits.push_back(RoundHit{EntityHandle{best_handle}, r.owner, damage});
+                    hits.push_back(RoundHit{EntityHandle{best_handle}, r.owner, damage,
+                                            best_section, best_secondary_section});
                     if (best_target->health <= 0) {
                         // The kill selects the death anim at DAMAGE time [orig:
                         // Entity_HandleDamageTrigger @0x407478/@0x407483 — bone from
                         // the hit record, quadrant from the round's horizontal
                         // velocity vs the victim's heading, cause 1 bullet]. The
-                        // body-cylinder hit model has no bone zones yet, so the bone
-                        // stands in as 1 (torso) — the same bone the explosive path
-                        // hardcodes for persons [orig: @0x4e6ac7] (D-AI-9).
+                        // posed-person hit record supplies the bone; only an
+                        // unresolved-graphic fallback stands in as section 1 (torso).
                         const int32_t heading_bam =
                                 bam_heading_from_mission_yaw_deg(best_target->yaw);
                         const int quadrant =
                                 death_quadrant_from_round(heading_bam, r.vel.x, r.vel.y);
                         best_target->death_anim_state =
-                                compute_death_anim_state(1, quadrant, death_cause::kBullet);
+                                compute_death_anim_state(
+                                        best_section >= 0 ? best_section : 1,
+                                        quadrant, death_cause::kBullet);
                         // A member's death stamps its group alert red [orig: the
                         // type-1 head @0x4073db-0x4073ea SetAlertRed(commandGroup)].
                         world.relations.group(best_target->group_id).alert =
@@ -690,6 +795,10 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                 RoundDebugEvent ev;
                 ev.tick = world.logic_tick;
                 ev.kind = RoundDebugEvent::kOrganic;
+                ev.material = best_material;
+                ev.section = best_section;
+                ev.secondary_section = best_secondary_section;
+                ev.organic_fallback = best_organic_fallback;
                 ev.effect_tag = 2;
                 ev.entity = best_handle;
                 ev.shooter = r.owner.packed;

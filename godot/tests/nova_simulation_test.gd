@@ -59,6 +59,40 @@ class ObjectDataPlacerStub:
 	func object_data_for(_graphic: String) -> NovaObjectData:
 		return data
 
+
+class SkeletalDataPlacerStub:
+	extends RefCounted
+	var data: NovaObjectData
+	var skeletal: NovaSkeletalAnim
+
+	func _init(p_data: NovaObjectData, p_skeletal: NovaSkeletalAnim) -> void:
+		data = p_data
+		skeletal = p_skeletal
+
+	func object_data_for(_graphic: String) -> NovaObjectData:
+		return data
+
+	func skeletal_anim_for(
+			_item_id: int, _graphic: String) -> NovaSkeletalAnim:
+		return skeletal
+
+
+class PlayerOnlySkeletalPlacerStub:
+	extends RefCounted
+	var data: NovaObjectData
+	var skeletal: NovaSkeletalAnim
+
+	func _init(p_data: NovaObjectData, p_skeletal: NovaSkeletalAnim) -> void:
+		data = p_data
+		skeletal = p_skeletal
+
+	func object_data_for(graphic: String) -> NovaObjectData:
+		return data if graphic.nocasecmp_to("US01") == 0 else null
+
+	func skeletal_anim_for(
+			_item_id: int, graphic: String) -> NovaSkeletalAnim:
+		return skeletal if graphic.nocasecmp_to("US01") == 0 else null
+
 func _anim_root() -> NovaResourceRoot:
 	var root := NovaResourceRoot.new()
 	root.set_root_dir(ProjectSettings.globalize_path(ANIM_FIXTURES))
@@ -1252,6 +1286,298 @@ func test_animated_collision_uses_retail_section_ordinal_headlessly() -> void:
 	assert_eq(moved, 639, "only ordinal 1 moves")
 	assert_eq(stayed, 111)
 	assert_eq(partial, 0)
+	sim.free()
+
+
+func test_organic_collision_samples_current_skeletal_pose_headlessly() -> void:
+	# BINOC is a committed 19-bone, three-frame BAD. Pair it with CharModel's
+	# canonical 19-row model table/COBJ block so the real NovaSkeletalAnim ->
+	# NovaSimulation -> CollisionWorld path can be tested without retail assets.
+	var tmp := ProjectSettings.globalize_path(
+			"res://.godot/person_collision_pose_test")
+	assert_eq(DirAccess.make_dir_recursive_absolute(tmp), OK)
+	var bad_out := FileAccess.open(tmp.path_join("BINOC.bad"), FileAccess.WRITE)
+	assert_not_null(bad_out)
+	if bad_out == null:
+		return
+	bad_out.store_buffer(FileAccess.get_file_as_bytes(
+			"res://../fixtures/bad/BINOC.bad"))
+	bad_out.close()
+	# BINOC is a static three-frame clip. Turn BN15/head frame 1 into an
+	# identity quaternion at its parser-pinned rotation offset (1324 + 16)
+	# to make a deterministic moving-bone fixture while retaining its real
+	# 19-bone hierarchy and every other shipped byte.
+	var moving_bad := FileAccess.open(
+			tmp.path_join("BINOC.bad"), FileAccess.READ_WRITE)
+	assert_not_null(moving_bad)
+	if moving_bad == null:
+		return
+	moving_bad.seek(1340)
+	moving_bad.store_float(0.0)
+	moving_bad.store_float(0.0)
+	moving_bad.store_float(0.0)
+	moving_bad.store_float(1.0)
+	moving_bad.close()
+	var adm_out := FileAccess.open(
+			tmp.path_join("person_collision.adm"), FileAccess.WRITE)
+	assert_not_null(adm_out)
+	if adm_out == null:
+		return
+	var quote := String.chr(34)
+	adm_out.store_string(
+			"anim_reset %sBINOC.bad%s\n" % [quote, quote] +
+			"anim_idle %sBINOC.bad%s\n" % [quote, quote] +
+			"anim_idle_2 %sBINOC.bad%s\n" % [quote, quote])
+	adm_out.close()
+
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(tmp), OK)
+	var data := NovaObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(
+			"res://../fixtures/threedi/3di3/CharModel.3di")), OK)
+	assert_true(data.has_collision())
+	var skeletal := NovaSkeletalAnim.new()
+	assert_true(skeletal.load_from_bad_files(
+			root, "BINOC.bad", {"anim_idle": "BINOC.bad"},
+			data.get_bone_origins(), data.get_bone_parents()),
+			"19-bone collision rig loads: %s" % skeletal.get_last_error())
+	assert_eq(skeletal.get_bone_count(), 19)
+	var direct_a: Array = skeletal.eval_pose("anim_idle", 0.0)
+	var direct_b: Array = skeletal.eval_pose("anim_idle", 1.0 / 30.0)
+	var fixture_moved := 0
+	for i in mini(direct_a.size(), direct_b.size()):
+		if not (direct_a[i] as Transform3D).is_equal_approx(
+				direct_b[i] as Transform3D):
+			fixture_moved += 1
+	assert_gt(fixture_moved, 0, "fixture must contain an animated bone")
+
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	assert_false(md.add_entity(
+			NovaMissionData.KIND_ORGANIC, 105311,
+			Vector3(10, 0, 0), Vector3.ZERO).is_empty())
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/items.def")), OK)
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	assert_gt(sim.set_infantry_anim_map(root, "person_collision.adm"), 0)
+	assert_eq(sim.resolve_collision_instances(
+			item_db, SkeletalDataPlacerStub.new(data, skeletal)), 1)
+
+	var before: Array = sim.get_hitbox_debug().get("organics", [])
+	assert_eq(before.size(), 19, "one posed sphere per CharModel COBJ/bone")
+	var before_by_section := {}
+	for value in before:
+		var row: Dictionary = value
+		assert_false(bool(row.get("fallback", true)))
+		var pos := row.get("pos", Vector3.ZERO) as Vector3
+		assert_lt(pos.distance_to(Vector3(10, 0, 0)), 3.0,
+				"bind pose applies entity translation exactly once")
+		before_by_section[int(row.get("section", -1))] = pos
+	assert_true(before_by_section.has(14), "head COBJ/bone is present")
+
+	# No presentation node or Skeleton3D is involved: advancing authoritative
+	# clip_phase must move the CollisionWorld/F3 matrices directly.
+	for _tick in 2:
+		sim.step()
+	var after: Array = sim.get_hitbox_debug().get("organics", [])
+	assert_eq(after.size(), 19)
+	var moved_sections := 0
+	for value in after:
+		var row: Dictionary = value
+		var section := int(row.get("section", -1))
+		if before_by_section.has(section) and (
+				before_by_section[section] as Vector3).distance_to(
+						row.get("pos", Vector3.ZERO) as Vector3) > 0.0001:
+			moved_sections += 1
+	assert_gt(moved_sections, 0,
+			"current BAD pose, not bind/entity-only matrices, drives collision")
+	sim.free()
+
+	DirAccess.remove_absolute(tmp.path_join("BINOC.bad"))
+	DirAccess.remove_absolute(tmp.path_join("person_collision.adm"))
+	DirAccess.remove_absolute(tmp)
+
+
+func test_late_spawned_player_resolves_posed_collision_on_demand() -> void:
+	# Mission collision is resolved before deploy in production. A player added
+	# afterward must demand the same authored COBJ + ADM source instead of
+	# becoming the one-sphere fallback until the next explicit sweep.
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/items.def")), OK)
+	var data := NovaObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(
+			"res://../fixtures/threedi/3di3/CharModel.3di")), OK)
+	var bad_root := NovaResourceRoot.new()
+	assert_eq(bad_root.set_root_dir(ProjectSettings.globalize_path(
+			"res://../fixtures/bad")), OK)
+	var skeletal := NovaSkeletalAnim.new()
+	assert_true(skeletal.load_from_bad_files(
+			bad_root, "BINOC.bad", {"anim_idle": "BINOC.bad"},
+			data.get_bone_origins(), data.get_bone_parents()),
+			"late-spawn rig loads: %s" % skeletal.get_last_error())
+
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	assert_eq(sim.resolve_collision_instances(
+			item_db, SkeletalDataPlacerStub.new(data, skeletal)), 0,
+			"the initial pre-deploy sweep has no player to attach")
+	assert_true(sim.spawn_local_player(Vector3(10, 0, 0), 0.0, 1))
+
+	# F3 and live rounds share CollisionWorld's demand provider. Reading F3 is
+	# enough to resolve this newly spawned player exactly once.
+	var rows: Array = sim.get_hitbox_debug().get("organics", [])
+	assert_eq(rows.size(), 19, "late player gets every CharModel COBJ section")
+	var sections := {}
+	for value in rows:
+		var row: Dictionary = value
+		assert_false(bool(row.get("fallback", true)))
+		sections[int(row.get("section", -1))] = true
+	assert_true(sections.has(14), "late player exposes the authored head section")
+
+	# A later explicit sweep remains idempotent: no duplicate model/section rows.
+	assert_eq(sim.resolve_collision_instances(
+			item_db, SkeletalDataPlacerStub.new(data, skeletal)), 1)
+	assert_eq((sim.get_hitbox_debug().get("organics", []) as Array).size(), 19)
+	sim.free()
+
+
+func test_reused_player_slot_invalidates_old_collision_attempt_identity() -> void:
+	# US02 intentionally cannot resolve through this provider, so the mission
+	# soldier leaves a negative collision attempt on pool-0 slot 0. After WAC
+	# removes it, the local US01 player reuses that exact packed handle. The new
+	# registry spawn identity must invalidate the negative cache and resolve all
+	# authored person sections on demand.
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	assert_false(md.add_entity(
+			NovaMissionData.KIND_ORGANIC, 105311,
+			Vector3.ZERO, Vector3.ZERO).is_empty())
+	var probe := NovaSimulation.new()
+	assert_true(probe.load_from_mission_data(md))
+	var old_ssn := probe.get_entity_net_id(0)
+	probe.free()
+	assert_false(md.add_event(0, 0, 0).is_empty())
+	assert_false(md.add_event_action(
+			0, {"action_type": 22, "param1": old_ssn}).is_empty())
+
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/items.def")), OK)
+	var data := NovaObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(
+			"res://../fixtures/threedi/3di3/CharModel.3di")), OK)
+	var bad_root := NovaResourceRoot.new()
+	assert_eq(bad_root.set_root_dir(ProjectSettings.globalize_path(
+			"res://../fixtures/bad")), OK)
+	var skeletal := NovaSkeletalAnim.new()
+	assert_true(skeletal.load_from_bad_files(
+			bad_root, "BINOC.bad", {"anim_idle": "BINOC.bad"},
+			data.get_bone_origins(), data.get_bone_parents()))
+	var placer := PlayerOnlySkeletalPlacerStub.new(data, skeletal)
+
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	assert_eq(sim.resolve_collision_instances(item_db, placer), 0,
+			"US02 records one unresolved attempt on slot 0")
+	for _tick in 16:
+		sim.step()
+	assert_true(sim.get_entity_effect_state_for_ssn(old_ssn).is_empty(),
+			"the original slot occupant was removed")
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1),
+			"US01 reuses the freed pool-0 slot")
+
+	var rows: Array = sim.get_hitbox_debug().get("organics", [])
+	assert_eq(rows.size(), 19,
+			"the old negative attempt cannot suppress the new slot identity")
+	for value in rows:
+		var row: Dictionary = value
+		assert_eq(int(row.get("entity_handle", -1)), 0)
+		assert_false(bool(row.get("fallback", true)))
+	sim.free()
+
+
+func test_restart_re_resolves_the_restored_collision_identity() -> void:
+	# Collision caches live outside World::Snapshot. Reusing slot 0 during play
+	# must not leave the restored baseline actor unbound after Stop/Restart.
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var placed := md.add_entity(
+			NovaMissionData.KIND_ORGANIC, 105311,
+			Vector3.ZERO, Vector3.ZERO)
+	assert_false(placed.is_empty())
+	var bms_id := int(placed.get("bms_id", 0))
+	var probe := NovaSimulation.new()
+	assert_true(probe.load_from_mission_data(md))
+	var old_ssn := probe.get_entity_net_id(0)
+	probe.free()
+	assert_false(md.add_event(0, 0, 0).is_empty())
+	assert_false(md.add_event_action(
+			0, {"action_type": 22, "param1": old_ssn}).is_empty())
+
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/items.def")), OK)
+	var data := NovaObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(
+			"res://../fixtures/threedi/3di3/CharModel.3di")), OK)
+	var bad_root := NovaResourceRoot.new()
+	assert_eq(bad_root.set_root_dir(ProjectSettings.globalize_path(
+			"res://../fixtures/bad")), OK)
+	var skeletal := NovaSkeletalAnim.new()
+	assert_true(skeletal.load_from_bad_files(
+			bad_root, "BINOC.bad", {"anim_idle": "BINOC.bad"},
+			data.get_bone_origins(), data.get_bone_parents()))
+	var placer := SkeletalDataPlacerStub.new(data, skeletal)
+
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	assert_eq(sim.resolve_collision_instances(item_db, placer), 1)
+	assert_true(bool(sim.get_destruction_debug(
+			bms_id).get("has_collision_instance", false)))
+	for _tick in 16:
+		sim.step()
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	assert_eq((sim.get_hitbox_debug().get("organics", []) as Array).size(), 19,
+			"the replacement occupant receives the cached graphic")
+
+	sim.restart()
+	var restored := sim.get_destruction_debug(bms_id)
+	assert_true(bool(restored.get("has_collision_instance", false)),
+			"restart rebinds the baseline before any F3 or round demand query")
+	sim.free()
+
+
+func test_f3_organic_fallbacks_match_live_filtering_bounds() -> void:
+	# F3 must describe the same unresolved pool-0 actors RoundSim can hit:
+	# engine-flag filtering only (dead bodies remain solid), bounded to the
+	# local 80-unit view and the shared 96-entity debug budget.
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	for i in range(101):
+		var pos := Vector3(200, 0, 0) if i == 0 else Vector3(i % 10, 0, i % 7)
+		assert_false(md.add_entity(
+				NovaMissionData.KIND_ORGANIC, 105311, pos,
+				Vector3.ZERO).is_empty())
+
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	sim.debug_set_entity_health(1, 0)
+
+	var rows: Array = sim.get_hitbox_debug().get("organics", [])
+	assert_eq(rows.size(), 96, "posed plus fallback entities share the F3 cap")
+	var handles := {}
+	for value in rows:
+		var row: Dictionary = value
+		assert_true(bool(row.get("fallback", false)))
+		handles[int(row.get("entity_handle", -1))] = true
+	assert_false(handles.has(0), "the 200-unit actor is outside the local F3 range")
+	assert_true(handles.has(1), "a zero-health corpse retains its bullet fallback")
 	sim.free()
 
 

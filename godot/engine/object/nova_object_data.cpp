@@ -2581,7 +2581,20 @@ int NovaObjectData::get_part_anim_count(int p_lod_index) const {
 }
 
 bool NovaObjectData::has_collision() const {
-	return has_ir && ir.collision != nullptr && ir.collision->volume_count > 0;
+	if (!has_ir || ir.collision == nullptr) return false;
+	const ThreediIRCollision *collision = ir.collision;
+	if (collision->volume_count > 0) return true;
+	if (!is_skinned(0)) return false;
+	if (collision->face_count > 0 && collision->faces != nullptr &&
+			collision->vertex_count > 0 && collision->vertices != nullptr &&
+			collision->object_count > 0 && collision->objects != nullptr)
+		return true;
+	if (collision->objects != nullptr) {
+		for (size_t i = 0; i < collision->object_count; ++i) {
+			if (collision->objects[i].radius_fp16 > 0) return true;
+		}
+	}
+	return false;
 }
 
 bool NovaObjectData::has_occlusion() const {

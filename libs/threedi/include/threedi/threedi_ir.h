@@ -278,6 +278,8 @@ typedef struct ThreediIRCollisionObject {
     int32_t num_faces;          // Face count for this subobject
     int32_t parent_subobject_index;  // Part hierarchy parent
     float offset[3];            // Center point position (raw fp16.16 stored as float)
+    int32_t center_fp16[3];     // Authored COBJ bounding-sphere center, exact 16.16
+    int32_t radius_fp16;        // Authored COBJ bounding-sphere radius, exact 16.16
 } ThreediIRCollisionObject;
 
 typedef struct ThreediIRCollisionTranslation {

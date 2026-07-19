@@ -113,6 +113,13 @@ func test_model_without_collision_has_no_volumes() -> void:
 	assert_eq(data.get_collision_volumes().size(), 0, "and none are exposed")
 
 
+func test_skinned_person_reports_face_and_sphere_collision_without_volumes() -> void:
+	var data := _model("CharModel")
+	assert_true(data.is_skinned(0), "CharModel is the skeletal collision fixture")
+	assert_eq(data.get_collision_volumes().size(), 0, "CharModel has no BVOL collision")
+	assert_true(data.has_collision(), "CharModel still reports its CFAC/COBJ collision")
+
+
 func test_placer_collision_shapes_for_loads_and_caches() -> void:
 	# Integration: the placer resolves a model through a resource root and builds its
 	# pick shapes (the same shapes the controller attaches to bodies), cached per graphic.

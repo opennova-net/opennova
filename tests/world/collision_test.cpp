@@ -1000,6 +1000,294 @@ struct TwoSectionMatrixProvider final : ICollisionSectionMatrixProvider {
     }
 };
 
+CollisionModel person_section_model() {
+    CollisionModel model;
+    model.sections.resize(19);
+    // CharModel.3di COBJ 14 (head), preserved here as exact 16.16 authored data.
+    CollisionSection &head = model.sections[14];
+    head.center[0] = 3578;
+    head.center[1] = 65;
+    head.center[2] = 54371;
+    head.radius = 10345;
+    return model;
+}
+
+struct PosedHeadMatrixProvider final : ICollisionSectionMatrixProvider {
+    bool build_section_matrices(World &, EntityHandle, int32_t,
+                                const CollisionMatrix &entity_world,
+                                const CollisionModel &model,
+                                std::vector<CollisionMatrix> &out) override {
+        out.assign(model.sections.size(), entity_world);
+        // Move only COBJ/bone 14 one unit in +X. The narrow phase must consume
+        // callback slot 14, not the entity matrix or COBJ parent metadata.
+        out[14].m[3] += fx(1.0);
+        return true;
+    }
+};
+
+struct DemandPersonProvider final : ICollisionSectionMatrixProvider {
+    CollisionWorld *collision = nullptr;
+    int32_t model_id = -1;
+    EntityHandle expected;
+    int ensure_calls = 0;
+
+    bool ensure_collision_instance(World &, EntityHandle entity) override {
+        ++ensure_calls;
+        if (collision == nullptr || entity != expected || model_id < 0) return false;
+        collision->assign_entity(entity, model_id);
+        return true;
+    }
+
+    bool build_section_matrices(World &, EntityHandle, int32_t,
+                                const CollisionMatrix &entity_world,
+                                const CollisionModel &model,
+                                std::vector<CollisionMatrix> &out) override {
+        out.assign(model.sections.size(), entity_world);
+        return true;
+    }
+};
+
+struct ReusedSlotPersonProvider final : ICollisionSectionMatrixProvider {
+    CollisionWorld *collision = nullptr;
+    int32_t replacement_model_id = -1;
+    uint64_t expected_spawn_id = 0;
+    int ensure_calls = 0;
+
+    bool ensure_collision_instance(World &world, EntityHandle entity) override {
+        ++ensure_calls;
+        const Entity *current = world.registry.get(entity);
+        if (collision == nullptr || current == nullptr ||
+            current->registry_spawn_id != expected_spawn_id)
+            return false;
+        collision->assign_entity(entity, replacement_model_id,
+                                 current->registry_spawn_id);
+        return true;
+    }
+
+    bool build_section_matrices(World &, EntityHandle, int32_t,
+                                const CollisionMatrix &entity_world,
+                                const CollisionModel &model,
+                                std::vector<CollisionMatrix> &out) override {
+        out.assign(model.sections.size(), entity_world);
+        return true;
+    }
+};
+
+void test_person_section_raycast_uses_posed_bone_matrix() {
+    Rig rig(person_section_model());
+    rig.cw.assign_entity(rig.soldier, 0);
+    rig.world.registry.get(rig.soldier)->yaw = 90;
+    PosedHeadMatrixProvider provider;
+    rig.cw.set_section_matrix_provider(&provider);
+
+    // The soldier is at the origin and its posed head center is near
+    // (1.055, 0.001, 0.830). A Y-axis segment through that moved center must
+    // hit bone 14; the same segment through the stale rest center must miss.
+    PersonSectionHit hit;
+    const int32_t moved_start[3] = {fx(1.0545959473), fx(-1.0), fx(0.8296356201)};
+    const int32_t moved_end[3] = {fx(1.0545959473), fx(1.0), fx(0.8296356201)};
+    CHECK(rig.cw.raycast_person_sections(rig.world, rig.soldier,
+                                         moved_start, moved_end, 0, hit));
+    CHECK(hit.primary_section == 14);
+    CHECK(hit.secondary_section == 14);
+    CHECK(hit.material == 19);
+
+    const int32_t stale_start[3] = {fx(0.0545959473), fx(-1.0), fx(0.8296356201)};
+    const int32_t stale_end[3] = {fx(0.0545959473), fx(1.0), fx(0.8296356201)};
+    CHECK(!rig.cw.raycast_person_sections(rig.world, rig.soldier,
+                                          stale_start, stale_end, 0, hit));
+}
+
+void test_late_person_instance_is_demand_resolved_for_rounds_and_debug() {
+    World world;
+    world.registry.configure_pool(0, 4);
+    Entity seed;
+    seed.kind = EntityKind::Organic;
+    seed.health = 100;
+    seed.alive = true;
+    seed.position = Vec3{5.0f, 0.0f, 0.0f};
+    const EntityHandle victim = world.registry.spawn(0, seed);
+    CHECK(victim.valid());
+
+    CollisionModel person;
+    person.sections.resize(15);
+    person.sections[14].radius = fx(1.0);
+    CollisionWorld collision;
+    const int32_t model_id = collision.add_model(std::move(person));
+    DemandPersonProvider provider;
+    provider.collision = &collision;
+    provider.model_id = model_id;
+    provider.expected = victim;
+    collision.set_section_matrix_provider(&provider);
+
+    // No instance was assigned by a mission-start sweep. RoundSim must invoke
+    // the provider before choosing the torso sphere; this z=0 ray hits authored
+    // head section 14 while missing the fallback centered at z=0.9.
+    LiveRound &round = world.round_sim.rounds[0];
+    round.active = true;
+    world.round_sim.active_count = 1;
+    round.pos = Vec3{0.0f, 0.0f, 0.0f};
+    round.vel = Vec3{10.0f, 0.0f, 0.0f};
+    round.max_age_ticks = 100;
+    world.round_sim.tick(world, nullptr, &collision);
+    CHECK(provider.ensure_calls == 1);
+    CHECK(collision.has_instance(world, victim));
+    CHECK(world.round_sim.debug_trail_count == 1);
+    if (world.round_sim.debug_trail_count == 1)
+        CHECK(world.round_sim.debug_trail[0].section == 14);
+
+    // F3's posed-section snapshot shares the same ensure seam and does not
+    // re-enter it once an instance exists.
+    const int32_t anchor[3] = {};
+    const auto rows = collision.debug_person_sections(world, anchor, -1, 4);
+    CHECK(rows.size() == 1);
+    if (!rows.empty()) CHECK(rows[0].section == 14);
+    CHECK(provider.ensure_calls == 1);
+}
+
+void test_reused_registry_slot_rejects_old_collision_identity() {
+    World world;
+    world.registry.configure_pool(0, 2);
+    Entity seed;
+    seed.kind = EntityKind::Organic;
+    seed.health = 100;
+    seed.position = Vec3{5.0f, 0.0f, 0.0f};
+    const EntityHandle first = world.registry.spawn(0, seed);
+    CHECK(first.valid());
+    const uint64_t first_spawn_id =
+            world.registry.get(first)->registry_spawn_id;
+
+    CollisionWorld collision;
+    CollisionModel old_main;
+    old_main.sections.resize(4);
+    old_main.sections[3].radius = fx(1.0);
+    const int32_t old_main_id = collision.add_model(std::move(old_main));
+    CollisionModel old_husk;
+    old_husk.sections.resize(3);
+    old_husk.sections[2].radius = fx(1.0);
+    const int32_t old_husk_id = collision.add_model(std::move(old_husk));
+    collision.assign_entity(first, old_main_id, first_spawn_id);
+    collision.assign_entity_husk(first, old_husk_id);
+
+    world.registry.despawn(first);
+    seed.engine_flags = 0x4u; // would select the old husk if it leaked
+    const EntityHandle reused = world.registry.spawn(0, seed);
+    CHECK(reused == first);
+    const uint64_t reused_spawn_id =
+            world.registry.get(reused)->registry_spawn_id;
+    CHECK(reused_spawn_id != first_spawn_id);
+    CHECK(!collision.has_instance(world, reused));
+    CHECK(collision.model_for(world, reused) == nullptr);
+    collision.build_tick_tables(world);
+    CHECK(collision.instance_count() == 0);
+
+    CollisionModel replacement;
+    replacement.sections.resize(15);
+    replacement.sections[14].radius = fx(1.0);
+    const int32_t replacement_id = collision.add_model(std::move(replacement));
+    ReusedSlotPersonProvider provider;
+    provider.collision = &collision;
+    provider.replacement_model_id = replacement_id;
+    provider.expected_spawn_id = reused_spawn_id;
+    collision.set_section_matrix_provider(&provider);
+
+    const int32_t start[3] = {fx(0.0), 0, 0};
+    const int32_t end[3] = {fx(10.0), 0, 0};
+    PersonSectionHit hit;
+    CHECK(!collision.raycast_person_sections(
+            world, reused, start, end, 0, hit));
+    CHECK(collision.ensure_entity_instance(world, reused));
+    CHECK(provider.ensure_calls == 1);
+    CHECK(collision.raycast_person_sections(
+            world, reused, start, end, 0, hit));
+    CHECK(hit.primary_section == 14);
+    CHECK(collision.ensure_entity_instance(world, reused));
+    CHECK(provider.ensure_calls == 1);
+}
+
+struct PersonSectionsFixture {
+    CollisionModel model;
+    std::vector<CollisionMatrix> matrices;
+    CollisionTargetView target;
+
+    explicit PersonSectionsFixture(int section_count) {
+        model.sections.resize(static_cast<size_t>(section_count));
+        const int32_t origin[3] = {0, 0, 0};
+        matrices.assign(static_cast<size_t>(section_count),
+                        collision_matrix_from_heading(0, origin));
+        target.model = &model;
+        target.matrices = matrices.data();
+    }
+
+    void set_section(int section, double x, double y, double z, double radius) {
+        CollisionSection &s = model.sections[static_cast<size_t>(section)];
+        s.center[0] = fx(x);
+        s.center[1] = fx(y);
+        s.center[2] = fx(z);
+        s.radius = fx(radius);
+    }
+};
+
+void test_person_section_reverse_scan_and_mask() {
+    PersonSectionsFixture rig(6);
+    rig.set_section(1, 5.0, 0.0, 0.0, 1.0);
+    rig.set_section(5, 5.0, 0.0, 0.0, 1.0);
+    const int32_t start[3] = {0, 0, 0};
+    const int32_t end[3] = {fx(10.0), 0, 0};
+
+    PersonSectionHit hit;
+    CHECK(collision_raycast_person_sections(rig.target, start, end, 0, 0, hit));
+    CHECK(hit.primary_section == 5);   // first accepted in the high-to-low walk
+    CHECK(hit.secondary_section == 1); // final accepted overlap
+    CHECK(hit.projected_dist == fx(5.0));
+    CHECK(hit.dist == fx(4.5));
+    CHECK(hit.material == 19);
+
+    // entity+0x134 removes a section before the overlap test. Masking the high
+    // section promotes the lower overlap to both retail ray outputs.
+    CHECK(collision_raycast_person_sections(
+            rig.target, start, end, 0, 1u << 5, hit));
+    CHECK(hit.primary_section == 1);
+    CHECK(hit.secondary_section == 1);
+    CHECK(!collision_raycast_person_sections(
+            rig.target, start, end, 0, (1u << 5) | (1u << 1), hit));
+    CHECK(hit.primary_section == -1);
+    CHECK(hit.secondary_section == -1);
+}
+
+void test_person_section_retail_radius_rules() {
+    const int32_t start[3] = {0, 0, 0};
+    const int32_t end[3] = {fx(10.0), 0, 0};
+    PersonSectionHit hit;
+
+    // With authored radius 1u, the normal 45% rule plus 0xCCC padding reaches
+    // only ~0.50u. Head section 14 uses 65% and reaches ~0.70u.
+    PersonSectionsFixture head(15);
+    head.set_section(13, 5.0, 0.6, 0.0, 1.0);
+    head.set_section(14, 5.0, 0.6, 0.0, 1.0);
+    CHECK(collision_raycast_person_sections(head.target, start, end, 0, 0, hit));
+    CHECK(hit.primary_section == 14);
+    CHECK(hit.secondary_section == 14);
+    CHECK(!collision_raycast_person_sections(
+            head.target, start, end, 0, 1u << 14, hit));
+
+    // Hand sections 15 and 16 cap the FINAL effective radius at 0x3000
+    // (0.1875u), even though a 2u authored radius would otherwise be ~0.95u.
+    PersonSectionsFixture inside_cap(17);
+    inside_cap.set_section(15, 5.0, 0.18, 0.0, 2.0);
+    inside_cap.set_section(16, 5.0, 0.18, 0.0, 2.0);
+    CHECK(collision_raycast_person_sections(
+            inside_cap.target, start, end, 0, 0, hit));
+    CHECK(hit.primary_section == 16);
+    CHECK(hit.secondary_section == 15);
+
+    PersonSectionsFixture outside_cap(17);
+    outside_cap.set_section(15, 5.0, 0.19, 0.0, 2.0);
+    outside_cap.set_section(16, 5.0, 0.19, 0.0, 2.0);
+    CHECK(!collision_raycast_person_sections(
+            outside_cap.target, start, end, 0, 0, hit));
+}
+
 void test_face_raycast() {
     // The quad sits at entity (10, 10, 0) -> world plane z = 1.
     Rig rig(face_quad_model(14, 0)); // material 14 -> impact tag 18 'metal'
@@ -1360,8 +1648,76 @@ void test_round_indestructible_organic_still_collides() {
 
     CHECK(world.round_sim.debug_trail_count == 1);
     CHECK(world.round_sim.debug_trail[0].entity == front.packed);
+    CHECK(world.round_sim.debug_trail[0].organic_fallback);
+    CHECK(world.round_sim.debug_trail[0].section == 1);
+    CHECK(world.round_sim.debug_trail[0].secondary_section == 1);
     CHECK(world.registry.get(front)->health == 100);
     CHECK(world.registry.get(rear)->health == 100);
+}
+
+void test_round_person_sections_drive_hit_and_death_animation() {
+    World world;
+    world.registry.configure_pool(0, 4);
+
+    Entity victim_seed;
+    victim_seed.kind = EntityKind::Organic;
+    victim_seed.health = 775;
+    victim_seed.alive = true;
+    victim_seed.position = Vec3{5.0f, 0.0f, 0.0f};
+    victim_seed.yaw = 90; // engine heading 0: +X round is the back quadrant
+    const EntityHandle victim = world.registry.spawn(0, victim_seed);
+    CHECK(victim.valid());
+
+    // Both spheres overlap. Retail's reverse walk publishes head 14 as the
+    // primary reaction/death bone and section 2 as the secondary damage zone.
+    CollisionModel model;
+    model.sections.resize(15);
+    model.sections[2].radius = fx(1.0);
+    model.sections[14].radius = fx(1.0);
+    CollisionWorld collision;
+    const int32_t model_id = collision.add_model(std::move(model));
+    collision.assign_entity(victim, model_id);
+
+    AmmoTableEntry ammo;
+    ammo.valid = true;
+    ammo.weight_in_grains = 875;
+    world.ammo.entries.push_back(ammo);
+
+    LiveRound &round = world.round_sim.rounds[0];
+    round.active = true;
+    world.round_sim.active_count = 1;
+    round.pos = Vec3{0.0f, 0.0f, 0.0f};
+    round.vel = Vec3{10.0f, 0.0f, 0.0f};
+    round.ammo_index = 0;
+    round.max_age_ticks = 100;
+    world.round_sim.tick(world, nullptr, &collision);
+
+    CHECK(!round.active);
+    CHECK(world.registry.get(victim)->health == 0);
+    CHECK(world.round_sim.hits.size() == 1);
+    if (!world.round_sim.hits.empty()) {
+        CHECK(world.round_sim.hits[0].victim == victim);
+        // speed 10 * 62, grains 875 => base 620; damage reads ray[32]=2,
+        // whose retail multiplier is 1.25. Using primary head 14 would be 1860.
+        CHECK(world.round_sim.hits[0].damage == 775);
+        CHECK(world.round_sim.hits[0].primary_section == 14);
+        CHECK(world.round_sim.hits[0].secondary_section == 2);
+    }
+    // Head group (base + 8) plus back quadrant 2. The former torso stand-in
+    // would select 186, so this exact 190 assertion catches lost bone routing.
+    CHECK(world.registry.get(victim)->death_anim_state == 190);
+
+    CHECK(world.round_sim.debug_trail_count == 1);
+    if (world.round_sim.debug_trail_count == 1) {
+        const RoundDebugEvent &event = world.round_sim.debug_trail[0];
+        CHECK(event.kind == RoundDebugEvent::kOrganic);
+        CHECK(event.entity == victim.packed);
+        CHECK(event.material == 19);
+        CHECK(event.section == 14);
+        CHECK(event.secondary_section == 2);
+        CHECK(!event.organic_fallback);
+        CHECK(event.hit.x > 4.46f && event.hit.x < 4.48f);
+    }
 }
 
 int main() {
@@ -1388,12 +1744,18 @@ int main() {
     test_face_raycast_husk_swap();
     test_face_raycast_husk_omits_spawned_piece_sections();
     test_face_raycast_uses_callback_matrix_per_section();
+    test_person_section_raycast_uses_posed_bone_matrix();
+    test_late_person_instance_is_demand_resolved_for_rounds_and_debug();
+    test_reused_registry_slot_rejects_old_collision_identity();
+    test_person_section_reverse_scan_and_mask();
+    test_person_section_retail_radius_rules();
     test_face_raycast_rolled_entity();
     test_face_raycast_pitched_entity();
     test_round_inside_bound_sphere_hits_wall();
     test_round_equal_distance_uses_retail_pool_order();
     test_round_item_skip_mask();
     test_round_indestructible_organic_still_collides();
+    test_round_person_sections_drive_hit_and_death_animation();
     if (failures == 0) std::printf("collision_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }

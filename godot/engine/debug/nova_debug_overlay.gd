@@ -76,7 +76,7 @@ signal round_debug_toggled(enabled: bool)
 
 ## Fired when the Rounds tab's "Show hit meshes" checkbox is toggled. The host
 ## builds/frees the HitboxDebugView (the CFAC bullet-mesh wireframes rounds
-## actually test, bound spheres, organic stand-ins), the collision-view
+## actually test, bound spheres, posed organic bone spheres), the collision-view
 ## contract.
 signal hitbox_debug_toggled(enabled: bool)
 
@@ -155,8 +155,9 @@ var _occ_portals_check: CheckBox
 
 # Rounds pane: the RoundSim debug ring (libs/world round_sim.cpp) — every
 # recently resolved hit-test outcome including the face-miss fly-ons, read off
-# NovaSimulation.get_round_debug() each refresh. Developer window into our
-# CFAC hit-detection port, not a mimicked retail page.
+# NovaSimulation.get_round_debug() each refresh. Developer window into both
+# retail narrow phases (item CFAC faces and person bone spheres), not a
+# mimicked retail page.
 var _rnd_status_label: Label
 var _rnd_list: ItemList
 var _rnd_trails_check: CheckBox
@@ -403,9 +404,10 @@ func _build_occlusion_tab() -> void:
 
 # The round hit-test inspector: the RoundSim debug ring, newest first — what
 # each recently resolved round actually did (which entity, which COBJ
-# section/face, which material -> impact tag, husk state), with the face-miss
-# fly-ons called out. The "Show round trails" toggle draws the same ring over
-# the world (RoundDebugView, the collision-view contract).
+# section/face or reaction-bone/damage-zone pair, which material -> impact tag,
+# husk state), with the face-miss fly-ons called out. The "Show round trails"
+# toggle draws the same ring over the world (RoundDebugView, the
+# collision-view contract).
 func _build_rounds_tab() -> void:
 	var tab := VBoxContainer.new()
 	tab.name = "Rounds"
@@ -435,7 +437,7 @@ func _build_rounds_tab() -> void:
 	_rnd_hitbox_check = CheckBox.new()
 	_rnd_hitbox_check.name = "RoundsShowHitMeshes"
 	_rnd_hitbox_check.text = "Show hit meshes"
-	_rnd_hitbox_check.tooltip_text = "Draw what rounds actually test against: every nearby object's bullet-mesh wireframe (colored by surface material, dark red = authored never-hit), its broad-phase sphere (amber = no face mesh, the sphere alone decides), and the cyan body spheres people use."
+	_rnd_hitbox_check.tooltip_text = "Draw what rounds actually test against: object bullet meshes and broad-phase spheres, plus each posed person bone sphere. Person colors show normal-infantry damage zones: orange = x1.25 (0-4), cyan = x1.0 (5-8), lime = x0.5 (9-12/15-18), magenta = x3.0 head (13-14), dark red = masked, amber = unresolved fallback."
 	_rnd_hitbox_check.button_pressed = false
 	_rnd_hitbox_check.toggled.connect(_on_hitbox_debug_toggled)
 	tab.add_child(_rnd_hitbox_check)
@@ -1040,6 +1042,15 @@ static func _round_kind_color(kind: int) -> Color:
 		_:
 			return Color.MAGENTA
 
+
+static func _round_bone_pair(ev: Dictionary) -> String:
+	var primary := int(ev.get("section", -1))
+	if bool(ev.get("fallback", false)):
+		return "neutral fallback sphere  reaction stand-in %d" % primary
+	var secondary := int(ev.get("secondary_section", -1))
+	var secondary_text := "-" if secondary < 0 else str(secondary)
+	return "reaction bone %d  damage zone %s" % [primary, secondary_text]
+
 func _refresh_rounds(sim: Object) -> void:
 	if sim == null or not sim.has_method("get_round_debug"):
 		_clear_rounds_pane("No round data.")
@@ -1050,18 +1061,25 @@ func _refresh_rounds(sim: Object) -> void:
 		_clear_rounds_pane("No rounds resolved yet.")
 		return
 	var face_hits := 0
+	var person_hits := 0
+	var person_fallbacks := 0
 	var sphere_hits := 0
 	var misses := 0
 	for ev_v in events:
 		match int((ev_v as Dictionary).get("kind", 4)):
+			0:
+				if bool((ev_v as Dictionary).get("fallback", false)):
+					person_fallbacks += 1
+				else:
+					person_hits += 1
 			1:
 				face_hits += 1
 			2:
 				sphere_hits += 1
 			5:
 				misses += 1
-	_rnd_status_label.text = "Last %d outcomes:  %d face hits   %d sphere stand-ins   %d face-miss fly-ons" % [
-		events.size(), face_hits, sphere_hits, misses]
+	_rnd_status_label.text = "Last %d outcomes:  %d person bone hits   %d organic fallbacks   %d face hits   %d item sphere stand-ins   %d face-miss fly-ons" % [
+		events.size(), person_hits, person_fallbacks, face_hits, sphere_hits, misses]
 
 	_rnd_list.clear()
 	# Newest first — the row you just shot is the row on top.
@@ -1078,6 +1096,10 @@ func _refresh_rounds(sim: Object) -> void:
 		if bool(ev.get("husk", false)):
 			row += "  HUSK"
 		match kind:
+			0:
+				row += "  %s  mat %d -> %s" % [_round_bone_pair(ev),
+						int(ev.get("material", 0)),
+						String(ev.get("effect_tag_name", ""))]
 			1:
 				row += "  sec %d face %d mat %d -> %s" % [int(ev.get("section", -1)),
 						int(ev.get("face", -1)), int(ev.get("material", 0)),
