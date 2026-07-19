@@ -546,7 +546,7 @@ shadow-off is matching rather than a divergence.
 | D-FNT-1 | Offset +4 is the design-width scale reference, not a version; our reader rejected `!= 800` | A | **FIXED** (no equality gate; non-800 parses, `fnt_roundtrip`) | PAR (fonts) |
 | D-FNT-2 | The per-font design scale `800/designWidth` was not retained | A | **FIXED** (`design_width` carried; `fnt_design_scale`) | PAR (fonts) |
 | D-FNT-3 | Offset +12 (`hdr3`) named `shadow_offset` but only STORED by the loader — the shadow semantics are unconfirmed | B | NEEDS-RE | PAR (fonts) |
-| D-FNT-4 | cp1252 specials (0x80–0x9F): `to_font_file` keys glyphs at raw bytes while the display decode maps to Unicode, so the FontFile misses and Godot's default `allow_system_fallback` silently draws a SYSTEM font glyph where retail draws the font's own slot (glyph = byte−32) | A | **OPEN** — pinned as-is (`strings_encoding_test`); fix = key glyphs at decoded codepoints or disable fallback (tracked decision) | STR-2 audit (2026-07-12) |
+| D-FNT-4 | cp1252 specials: `to_font_file` keyed glyphs at raw bytes while display text was Unicode, so Godot substituted a SYSTEM font where retail selected the `.fnt` slot by byte | A | **FIXED (2026-07-19)** — shared cp1252 mapping keys printable slots at decoded codepoints, retail controls 0x7F–0x81 stay absent, and host fallback is disabled (`strings_encoding_test`) `[orig: CGameFont_MeasureText @ 0x674e70; CGameFont_DrawText @ 0x6752c0]` | fidelity backlog (D-FNT-4) |
 
 ### Boot-required resources — [required-resources.md](required-resources.md) (D-BOOT catalog; R8/ENG-6)
 
@@ -707,12 +707,12 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Terrain | 3 | 0 | 0 | 3 | 7 |
 | Tiles | 0 | 0 | 0 | 0 | 2 |
 | Foliage | 3 | 0 | 0 | 3 | 10 |
-| Fonts | 1 | 1 | 0 | 2 | 2 |
+| Fonts | 0 | 1 | 0 | 1 | 3 |
 | Boot-required resources | 0 | 0 | 0 | 0 | 1 |
 | Render — materials/state | 0 | 0 | 1 | 1 | 1 |
 | Render — draw order | 2 | 0 | 1 | 3 | 3 |
 | Render — lighting | 4 | 0 | 2 | 6 | 0 |
-| **Total** | **88** | **13** | **33** | **134** | 72 |
+| **Total** | **87** | **13** | **33** | **133** | 73 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-INF-20, D-NET-136, D-NET-64.
 
