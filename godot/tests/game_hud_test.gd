@@ -4,6 +4,7 @@ extends GutTest
 # and a per-frame info dict, with and without art (no VFS root -> placeholders).
 
 const HUDPOS_PATH := "res://../fixtures/def/hudpos.def"
+const WEAPON_PATH := "res://../fixtures/def/weapon.def"
 
 var _temp_dirs: Array[String] = []
 
@@ -62,6 +63,74 @@ func _load_temp_layout(lines: PackedStringArray, textures: PackedStringArray,
 	var root := NovaResourceRoot.new()
 	assert_eq(root.set_root_dir(dir_path), OK)
 	return {"layout": layout, "root": root, "dir": dir_path}
+
+
+func _load_weapon(name: String) -> Dictionary:
+	var weapons := NovaWeaponDatabase.new()
+	assert_eq(weapons.load(ProjectSettings.globalize_path(WEAPON_PATH)), OK,
+		"weapon.def fixture loads")
+	var index := weapons.find_weapon(name)
+	assert_gte(index, 0, "%s exists in the weapon.def fixture" % name)
+	return weapons.get_weapon(index) if index >= 0 else {}
+
+
+func test_sighted_m4_draws_all_authored_sight_card_rows() -> void:
+	var weapon := _load_weapon("WPN_M4AUTO")
+	assert_false(weapon.is_empty())
+	if weapon.is_empty():
+		return
+	assert_eq(int(weapon.get("flags", 0)) & 0x02000003, 0x2,
+		"M4AUTO is Sighted and has neither Scoped nor NoCardSwitch")
+	var sights: Array = weapon.get("sights", [])
+	assert_eq(sights.size(), 3, "M4AUTO retains all three authored SIGHTS rows")
+	var textures := PackedStringArray()
+	for entry in sights:
+		var sight: Dictionary = entry
+		textures.append(String(sight.get("texture", "")))
+	assert_eq(textures, PackedStringArray([
+		"car15aim.tga", "car15gls.tga", "reddot1.tga",
+	]), "The final authored row is the committed M4 red-dot analogue")
+	var reticle: Dictionary = sights[2]
+	assert_eq(int(reticle.get("blend", -1)), 1, "The red-dot row keeps additive blend")
+	assert_true(bool(reticle.get("scale", false)), "The red-dot row keeps its scale flag")
+
+	var fixture := _load_temp_layout(PackedStringArray([
+		"ALPHAFADE 30 50 3",
+	]), textures)
+	var hud := GameHud.new()
+	hud.size = Vector2(1024, 768)
+	add_child_autofree(hud)
+	hud.set_layout(fixture["layout"], fixture["root"])
+	hud.set_weapon(PlayerHudWeaponDef.from_weapon_dict(weapon), "M4")
+	hud.update_info({"scope_card": true})
+	await get_tree().process_frame
+
+	assert_eq(hud.get_child_count(), 3,
+		"Settled ADS constructs every authored M4AUTO sight-card row")
+	if hud.get_child_count() != 3:
+		return
+	var scale_v := hud.get_viewport_rect().size / Vector2(1024, 768)
+	for i in range(sights.size()):
+		var row := hud.get_child(i) as Control
+		assert_not_null(row, "SIGHTS row %d is a drawable Control" % i)
+		assert_true(row.visible, "SIGHTS row %d is visible while the card is up" % i)
+		RenderingServer.canvas_item_set_custom_rect(row.get_canvas_item(), false)
+		var sight: Dictionary = sights[i]
+		var x1 := float(sight.get("x1", 0))
+		var y1 := float(sight.get("y1", 0))
+		var expected := Rect2(
+			Vector2(x1, y1) * scale_v,
+			Vector2(float(sight.get("x2", 0)) - x1,
+				float(sight.get("y2", 0)) - y1) * scale_v)
+		assert_eq(RenderingServer.debug_canvas_item_get_rect(row.get_canvas_item()), expected,
+			"SIGHTS row %d emits its authored draw rectangle" % i)
+	var reticle_row := hud.get_child(2) as Control
+	var reticle_material := reticle_row.material as CanvasItemMaterial
+	assert_not_null(reticle_material, "The red-dot row gets a canvas material")
+	if reticle_material != null:
+		assert_eq(reticle_material.blend_mode, CanvasItemMaterial.BLEND_MODE_ADD,
+			"The M4 red-dot layer renders additively")
+	hud.free()
 
 
 func test_draws_with_layout() -> void:

@@ -315,6 +315,40 @@ func test_weapon_event_batch_snapshots_the_scope_settle_tick() -> void:
 	sim.free()
 
 
+func test_nocardswitch_controls_settled_sights_card_for_sighted_weapon() -> void:
+	# Retail-derived flag vectors: M4 EOTech is Sighted and has no NoCardSwitch;
+	# Remington is Sighted plus NoCardSwitch. The original's suppression predicate
+	# exempts ForceScoped. Parser-to-HUD coverage lives in game_hud_test.gd.
+	for case in [
+		{"name": "WPN_M4AUTO_EOTECH", "flags": 0x01000902, "expected_card": true},
+		{"name": "WPN_RemmingtonSG", "flags": 0x02000002, "expected_card": false},
+		{"name": "WPN_SCOPED_CONTROL", "flags": 0x1, "expected_card": true},
+		{"name": "WPN_FORCE_SCOPED_OVERRIDE", "flags": 0x22000002, "expected_card": true},
+	]:
+		var md := NovaMissionData.new()
+		assert_eq(md.create_default(), OK)
+		var sim := NovaSimulation.new()
+		assert_true(sim.load_from_mission_data(md))
+		assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+		sim.set_local_player_weapon({
+			"name": String(case["name"]),
+			"actions": [{"name": "idle", "delaystart": 0, "delayend": 0}],
+			"flags": int(case["flags"]),
+			"clipsize": 30,
+			"startrounds": 60,
+		}, {})
+		sim.step()
+		assert_true(sim.request_local_player_scope_toggle())
+		for _i in range(15):
+			sim.step()
+		var view: Dictionary = sim.get_local_player_view()
+		assert_almost_eq(float(view.get("scope_fraction", 0.0)), 1.0, 0.001,
+			"the ADS ease settled before checking the card switch")
+		assert_eq(bool(view.get("scope_card_active", false)), bool(case["expected_card"]),
+			"Scoped/Sighted and NoCardSwitch select the card for %s" % case["name"])
+		sim.free()
+
+
 func test_reload_during_scope_raise_does_not_stash_an_unpromoted_scope() -> void:
 	var md := NovaMissionData.new()
 	assert_eq(md.create_default(), OK)

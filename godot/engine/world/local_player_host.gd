@@ -1118,8 +1118,8 @@ func _update_viewmodel() -> void:
 	# only by the pass camera (and excluded by the mirror camera's cull_mask).
 	_set_visual_layers(_viewmodel, NovaWater.VISUAL_LAYER_VIEWMODEL)
 	# The card switch: while the SIGHTS card is up, the FP model does not draw —
-	# the frame shows one or the other [orig: the FP model call @0x5d822c requires
-	# the scope gates clear @0x5d8212; the card path is draw_weapon_sight_overlays].
+	# the frame shows one or the other [orig: selectors/clear @0x5ca299..0x5ca304;
+	# the card path @0x5caaf3..0x5cab15 and the viewmodel candidate @0x5ca32c].
 	var carded := _view != null and _view.scope_card_active
 	_viewmodel.visible = ((not _third_person) and not carded) or debug_force_viewmodel
 	_update_viewmodel_pass()

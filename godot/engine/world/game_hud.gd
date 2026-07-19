@@ -42,7 +42,7 @@ var _weapon_display_name := ""
 var _clip_tex: Texture2D
 var _round_tex: Texture2D
 
-# The scoped-ADS SIGHTS card: one child control per authored row (order preserved,
+# The standard SIGHTS card: one child control per authored row (order preserved,
 # per-row blend mode), drawn BEHIND this control's own elements so the HUD text/bars
 # stay readable over the card — the original draws the card at scene end and the HUD
 # overlays after [orig: draw_weapon_sight_overlays @0x4dce00 from render_hud_overlay
@@ -139,7 +139,7 @@ func _rebuild_sights_card() -> void:
 		if is_instance_valid(row):
 			row.queue_free()
 	_card_rows.clear()
-	if _weapon == null or not _weapon.scoped:
+	if _weapon == null:
 		return
 	for entry in _weapon.sights:
 		var e: Dictionary = entry
@@ -163,9 +163,10 @@ func _rebuild_sights_card() -> void:
 		_card_rows.append(row)
 
 
-# The card switch: visible only while the sim reports the scope fully raised on a
-# Scoped weapon in first person (the FP viewmodel hides on the same bit)
-# [orig: Player_IsEquippedWeaponScoped @0x4dcc80 -> draw_weapon_sight_overlays].
+# The simulation reports the original's dynamic selector: Scoped or Sighted at
+# settled first-person ADS, with NoCardSwitch suppressing both unless ForceScoped
+# overrides it. The FP viewmodel hides on the same bit. [orig:
+# Render_ProcessMainSceneFrame @0x5ca299..0x5ca304 / @0x5caaf3..0x5cab15]
 func _sync_sights_card() -> void:
 	var up: bool = bool(_info.get("scope_card", false)) and not _card_rows.is_empty()
 	for row in _card_rows:

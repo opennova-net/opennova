@@ -119,9 +119,11 @@ void NovaWeaponDatabase::append_entry(const DefWeaponDef &e) {
 	for (int k = 0; k < 3; ++k) {
 		w.hudrndgfx_layout[k] = e.hudrndgfx_layout[k];
 	}
-	// The SIGHTS card rows (the scoped-ADS overlay), authored draw order preserved
+	// The standard SIGHTS card rows, authored draw order preserved. The frame's
+	// dynamic Scoped/Sighted/NoCardSwitch selector lives in the simulation; row
+	// presence supplies card contents rather than selecting the card.
 	// [orig: rows at the weapon record +0x1C8 (stride 36, count +0x258) drawn by
-	// draw_weapon_sight_overlays @ 0x4dce00 when Scoped + scope raised].
+	// draw_weapon_sight_overlays @ 0x4dce00]
 	w.sights.clear();
 	for (size_t si = 0; si < e.sights_count; ++si) {
 		const DefSightEntry &se = e.sights[si];

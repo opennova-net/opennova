@@ -40,6 +40,24 @@ enum : int32_t {
 };
 } // namespace weapon_action
 
+// WeaponDef flag bits consumed by the portable weapon/view runtime. The format
+// parser owns the full token table; these names are the runtime slice.
+// [orig: 16-byte flag rows @ 0x830BF0]
+namespace weapon_flag {
+enum : int32_t {
+    kScoped = 0x00000001,
+    kSighted = 0x00000002,
+    kNoCardSwitch = 0x02000000,
+    kForceScoped = 0x20000000,
+};
+} // namespace weapon_flag
+
+namespace weapon_flag2 {
+enum : int32_t {
+    kInset = 0x00000200,
+};
+} // namespace weapon_flag2
+
 // The 12 action-name suffixes, index == action id. [orig: strings @ 0x7C2FB4 etc.,
 // paired in the default table @ 0x830B90]
 extern const char *const kWeaponActionSuffixes[weapon_action::kCount];
@@ -170,6 +188,15 @@ struct WeaponSlotState {
     // [orig: Input_QueueDeferredEvent @ 0x4993e0; writers @ 0x542e9d / @ 0x53effd]
     bool refire_queued = false;
 };
+
+// Whether this definition/action pair selects the standard 2D SIGHTS card after
+// the frame's outer CanFire/view gates pass. Scoped and Sighted are asymmetric
+// selectors; NoCardSwitch clears both unless ForceScoped overrides it. Callers
+// still own active-player, camera, seat, water, movement, and settle policy.
+// [orig: Render_ProcessMainSceneFrame @ 0x5CA299..0x5CA304 and
+//  @0x5CAAF3..0x5CAB15; NoCardSwitch predicate @ 0x4DCCE0]
+bool weapon_sights_card_eligible(const WeaponFsmDef &def,
+                                 const WeaponSlotState &slot);
 
 // Per-tick inputs (the input-dispatcher writers run before the pump).
 struct WeaponFsmInputs {

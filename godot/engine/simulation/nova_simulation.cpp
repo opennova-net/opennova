@@ -3030,13 +3030,14 @@ Dictionary NovaSimulation::get_local_player_view() const {
 	//  "Player_IsDriverInVehicle"), whose one caller refuses fire @ 0x5cf7be]
 	out["suppress_view_bias"] = weapon_active_ &&
 			weapon_slot_.current == opennova::world::weapon_action::kReload &&
-			(weapon_def_.flags & 0x2000000) == 0;
-	// The scope-card switch: a Scoped (flags 0x1) weapon at FULL raise in first person
-	// draws the SIGHTS card INSTEAD of the FP viewmodel — the frame draws one or the
-	// other, never both. [orig: Player_IsEquippedWeaponScoped @ 0x4dcc80 (Flags & 1 &&
-	// g_weaponScopeActive) routes the frame to draw_weapon_sight_overlays @ 0x4dce00;
-	// the FP model call @ 0x5d822c requires both scope gates CLEAR @ 0x5d8212..0x5d8218]
-	out["scope_card_active"] = weapon_active_ && (weapon_def_.flags & 1) != 0 &&
+			(weapon_def_.flags & opennova::world::weapon_flag::kNoCardSwitch) == 0;
+	// On the supported on-foot first-person path, the standard SIGHTS card replaces
+	// the FP viewmodel once ADS settles. Scoped and Sighted are asymmetric selectors;
+	// NoCardSwitch clears both unless ForceScoped overrides it. The frame draws the
+	// card or the FP viewmodel, never both. [orig: Render_ProcessMainSceneFrame
+	// @0x5ca299..0x5ca304 / @0x5caaf3..0x5cab15; suppression @0x4dcce0]
+	out["scope_card_active"] = weapon_active_ &&
+			opennova::world::weapon_sights_card_eligible(weapon_def_, weapon_slot_) &&
 			player_view_.scope_engaged && !player_view_.third_person &&
 			!opennova::world::player_view_scope_ease_active(player_view_);
 	out["fov_h_deg"] = opennova::world::player_view_fov_h_deg(player_view_,
