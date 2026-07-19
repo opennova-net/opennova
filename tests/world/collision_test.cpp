@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "terrain/height_field.h"
+#include "world/angle.h"
 #include "world/collision.h"
 #include "world/world.h"
 
@@ -169,6 +170,19 @@ void test_matrix_roundtrip() {
     CHECK(std::abs(lp[1] - local[1]) <= 4);
     CHECK(std::abs(lp[2] - local[2]) <= 4);
     (void)back;
+
+    // Retail composes Rz(heading) * Ry(-pitch) * Rx(roll). Positive authored
+    // pitch therefore turns local +X toward world +Z. RckS05 at 00TRg entity
+    // 650 authors -173 degrees; using +pitch instead displaces corresponding
+    // render/CFAC vertices by up to 0.62u.
+    const int32_t origin[3] = {0, 0, 0};
+    const CollisionMatrix pitched =
+        collision_matrix_from_euler(0, 0x40000000, 0, origin);
+    int32_t pitched_x[3];
+    pitched.rotate_point(local, pitched_x);
+    CHECK(std::abs(pitched_x[0]) <= 4);
+    CHECK(std::abs(pitched_x[1]) <= 4);
+    CHECK(std::abs(pitched_x[2] - fx(1.0)) <= 4);
 }
 
 // ---------------------------------------------------------------------------
@@ -343,6 +357,39 @@ void test_secondary_vertical_force_is_full_strength() {
     CHECK(result.force[0] < 0);
     CHECK(result.force[2] < 0);
     CHECK(std::abs(result.force[2] - result.force[0]) <= 1);
+}
+
+// ---------------------------------------------------------------------------
+void test_platform_contact_uses_positive_authored_pitch() {
+    CollisionModel model = box_model(4, 0, 2.0, 2.0, 2.0);
+    model.finalize_sections();
+    const int32_t target_pos[3] = {0, 0, 0};
+    const CollisionMatrix matrix = collision_matrix_from_heading(0, target_pos);
+
+    CollisionTargetView target;
+    target.model = &model;
+    target.matrices = &matrix;
+    target.bound_radius = fx(4.0);
+    target.pitch_bam = bam_from_degrees_wrapped(30.0);
+
+    const CollisionPoint point{0, 0, fx(1.0), 0};
+    const int32_t radius = 0;
+    ContactQuery query;
+    query.points = &point;
+    query.radii = &radius;
+    query.num_points = 1;
+    query.source_bound_radius = fx(1.0);
+    query.mask = 0x1;
+
+    BlinkAccum blink;
+    PlatformContact platform;
+    ContactResult result;
+    CHECK(!collision_contact_force(target, query, blink, platform, result));
+    CHECK((result.flags & 0x1u) != 0);
+    CHECK(platform.valid);
+    // Plane 0 has no vertical normal component, so retail's
+    // target.pitch - normal.pitch leg must preserve the raw positive value.
+    CHECK(platform.pitch == bam_from_degrees_wrapped(30.0));
 }
 
 // ---------------------------------------------------------------------------
@@ -995,7 +1042,7 @@ void test_face_raycast_husk_omits_spawned_piece_sections() {
 
 void test_face_raycast_rolled_entity() {
     // A static authored with roll must lean its collision shell WITH the
-    // visual [orig: the spawn orientation matrix Rz(90-yaw)*Ry(pitch)*Rx(roll)
+    // visual [orig: the spawn orientation matrix Rz(90-yaw)*Ry(-pitch)*Rx(roll)
     // @ 0x613f40 serves every collision query] — the yaw-only stand-in left
     // tilted rocks' shells upright, and rays threaded past them where the
     // model still looked solid (the 00TRg RckS07 through-shot).
@@ -1022,6 +1069,33 @@ void test_face_raycast_rolled_entity() {
     // dist = 2.0 of the 4.0 u segment (plane at world y = 9).
     CHECK(fh.dist > fx(1.9) && fh.dist < fx(2.1));
     b->roll = 0;
+}
+
+void test_face_raycast_pitched_entity() {
+    // Exercise the production target_view scratch path, not just the Euler
+    // helper. At heading 0, +90 authored pitch applies Ry(-90), rotating the
+    // local z=1 quad onto world x=9 with its front normal facing -x.
+    Rig rig(face_quad_model(14, 0));
+    Entity *b = rig.world.registry.get(rig.building);
+    b->bound_radius = 3.0f;
+
+    const int32_t s_dn[3] = {fx(10.0), fx(10.0), fx(3.0)};
+    const int32_t e_dn[3] = {fx(10.0), fx(10.0), fx(-1.0)};
+    RayFaceHit fh;
+    CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, s_dn, e_dn, 0, fh) ==
+          CollisionWorld::FaceRaycast::kHit);
+
+    b->pitch = 90;
+    CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, s_dn, e_dn, 0, fh) ==
+          CollisionWorld::FaceRaycast::kMiss);
+    const int32_t s_across[3] = {fx(8.0), fx(10.0), fx(0.0)};
+    const int32_t e_across[3] = {fx(10.0), fx(10.0), fx(0.0)};
+    CHECK(rig.cw.raycast_entity_faces(
+                  rig.world, rig.building, s_across, e_across, 0, fh) ==
+          CollisionWorld::FaceRaycast::kHit);
+    CHECK(fh.material == 14);
+    CHECK(fh.dist > fx(0.95) && fh.dist < fx(1.05));
+    b->pitch = 0;
 }
 
 void test_round_inside_bound_sphere_hits_wall() {
@@ -1179,6 +1253,7 @@ int main() {
     test_ground_probe_roof();
     test_resolver_wall_pushout();
     test_secondary_vertical_force_is_full_strength();
+    test_platform_contact_uses_positive_authored_pitch();
     test_resolver_hurt_and_zones();
     test_idle_skip_throttle();
     test_slice_cadence_and_invuln();
@@ -1193,6 +1268,7 @@ int main() {
     test_face_raycast_husk_swap();
     test_face_raycast_husk_omits_spawned_piece_sections();
     test_face_raycast_rolled_entity();
+    test_face_raycast_pitched_entity();
     test_round_inside_bound_sphere_hits_wall();
     test_round_equal_distance_uses_retail_pool_order();
     test_round_item_skip_mask();

@@ -1614,11 +1614,11 @@ bit-1-cleared box) IS the indoors trigger (entity Flags 0x800000).
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
-| D-COL-1 | ~~one yaw-only world matrix shared by every section~~ 2026-07-18c: statics authored with pitch/roll now take the FULL placement matrix `Rz(90−yaw)·Ry(pitch)·Rx(roll)` (`collision_matrix_from_euler` — the Q22 per-product >>22 composition of `Math_BuildFixedPointMatrixFromEulerAngles @ 0x613f40`, fed by the spawn euler pack `@ 0x40eb66-0x40eba6`); pure-yaw placements keep the quantized-table path. Still ONE matrix shared by every section | per-section matrices from the model callback (animated parts: doors) | tilted rocks/wrecks now collide where they RENDER (the 00TRg RckS07 through-shot root cause — a roll-19° rock's shell stood upright); animated-part collision (doors) pending; ctest `collision` test_face_raycast_rolled_entity |
+| D-COL-1 | ~~one yaw-only world matrix shared by every section~~ 2026-07-18c: statics authored with pitch/roll now take the FULL placement matrix `Rz(90−yaw)·Ry(−pitch)·Rx(roll)` (`collision_matrix_from_euler` — the Q22 per-product >>22 composition of `Math_BuildFixedPointMatrixFromEulerAngles @ 0x613f40`, fed by the spawn euler pack `@ 0x40eb66-0x40eba6`); pure-yaw placements keep the quantized-table path. Still ONE matrix shared by every section | per-section matrices from the model callback (animated parts: doors) | tilted rocks/wrecks now collide where they RENDER (the 00TRg RckS07 through-shot root cause — a roll-19° rock's shell stood upright); animated-part collision (doors) pending; ctest `collision` pitched/rolled entity |
 | D-COL-2 | building destroyed/animated section skip not modeled | itemDef+2192/2193 bone map + the `dword_A8A418` state table skips sections (gated !player) | destroyed-wall pass-through pending the destruction system |
 | D-COL-3 | bound radius recomputed as the .3di LOD-0 part-bound-sphere union (primitive boxes as the degenerate fallback), raised to the husk model's bound, +0.0625 pad (persons 1.0u) | entity+0 boundRadius = max(model gpm[5], husk gpm[5]) × def scale + 0x1000, stamped only when the model carries collision data [orig: `Entity_InitFromModel @ 0x40dc30`] | the recomputed union tracks the stored header bound; the authored def `scale` factor is not applied (unparsed), and we stamp collision-less models too so every item stays hittable — conservative |
 | D-COL-4 | eye test point reuses the head column | eye point = pos + CameraOffset | CameraOffset unmodeled; head/eye share a column until the camera entity fields land |
-| D-COL-5 | platform standing sets flags/groundEntity (any source, on plain contact) | full deck carry (anchor/yaw/pitch chase, step-up +20480/+39936/+60416, deck velocity), the entry gates (not Flags 2; was-platform OR player OR MoveOrder 0x400), the on-platform 2-point capsule mode, the platform-EXIT nudge (24576·sincos(bodyHeading)>>22) + local pitch-restore chase, pool-1 source slices | infantry-on-buildings unaffected; riders of MOVING vehicles slide until the vehicle pass wires it |
+| D-COL-5 | platform standing sets flags/groundEntity (any source, on plain contact); type-4 contact records the target-relative anchor/yaw/pitch from raw authored entity Euler | full deck carry (anchor/yaw/pitch chase, step-up +20480/+39936/+60416, deck velocity), the entry gates (not Flags 2; was-platform OR player OR MoveOrder 0x400), the on-platform 2-point capsule mode, the platform-EXIT nudge (24576·sincos(bodyHeading)>>22) + local pitch-restore chase, pool-1 source slices | infantry-on-buildings unaffected; riders of MOVING vehicles slide until the vehicle pass wires it |
 | D-COL-6 | capture-zone touch (0x200) not forwarded | `Server_OnPlayerTouchCaptureZone @ 0x500ba0` | zone capture rides its own radius path today (zone_capture.cpp); reconcile when contact-driven capture lands |
 | D-COL-7 | vertical ground probe = bilinear column height | `Terrain_RaycastHeightmapHiRes_0 @ 0x60e710` march + bisect | equal for vertical rays on a heightfield (the terrain-re B1 note); oblique rays use terrain_raycast_refined |
 | D-COL-8 | run-over kill / crush sound / walk-over-body sound / waypoint + collision callbacks (attrib 1/2) / the 0x20 section-touch vtbl callback / the blocked-push AI latch (pad_368[1]) not ported | steps 4/5/6 above | need Score/net + sound + destruction hooks; tracked here so the resolver stays honest |
@@ -1743,6 +1743,14 @@ proves the vertex runs are MODEL-space — so the shared entity matrix per
 section is structurally right for statics, and our IR consumption
 (`collision_model_from_ir`, disk `dominate_axis` word kept) is faithful.
 
+CXLT is collision metadata, not a per-COBJ additive transform. Retail keeps it
+at collision +0x70/+0x74, while `Physics_RaycastAgainstBoneCollision @ 0x4e4cb0`
+consumes callback-produced render-bone matrices instead. `JetSki.3di` pins the
+distinction in `threedi_collision_ir`: its one CXLT equals COBJ 1's offset, but
+that COBJ's CVRT run is already in model space, so applying CXLT would
+double-shift it. `DCHNK1` (five CXLT, one COBJ) also rules out positional
+association by index.
+
 Face-walk axes re-verified MATCHING against `[orig:
 Physics_RaycastAgainstBoneCollision @ 0x4e4cb0]`: the AABB interleave order,
 flags 0x100 never-hit, material-17 vs ammo 0x4000000, Q14 plane sides with the
@@ -1752,7 +1760,8 @@ uninitialized `backfaceCullFlag` arg), `|d0|·len/(|d0|+|d1|)` with the
 hit-point stepping, and the odd-even point-in-triangle on the CNRM
 dominate-axis plane. The husk model pick (`Flags & 4` + fallback) and the
 transform chain match (the scaled-entity `Math_BuildInverseFixedPointMatrix3x3
-@ 0x613e10` leg rides D-COL-1's shared yaw-only matrix).
+@ 0x613e10` leg rides D-COL-1's shared full-Euler entity matrix; animated
+sections still require the callback-selected render-bone matrices).
 
 Divergences found and FIXED this session (libs/world/src/round_sim.cpp):
 
@@ -1807,7 +1816,7 @@ the placement authors **pitch −355 / roll 19**, the visual leans with it, but
 the collision matrix was yaw-only (D-COL-1) — the shell stood upright ~2.5 u
 off the visible surface. Ported the full placement matrix
 `[orig: Math_BuildFixedPointMatrixFromEulerAngles @ 0x613f40 — Rz(90−yaw)·
-Ry(pitch)·Rx(roll), Q22 rows with per-product >>22 truncations and exact-zero
+Ry(−pitch)·Rx(roll), Q22 rows with per-product >>22 truncations and exact-zero
 stage skips; the spawn euler pack (90−yaw, +pitch, +roll) @ 0x40eb66-0x40eba6]`
 as `collision_matrix_from_euler`, used by `target_view` whenever a static
 authors pitch or roll (pure-yaw keeps the table path bit-for-bit). D-COL-1's

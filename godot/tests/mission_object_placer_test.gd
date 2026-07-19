@@ -38,17 +38,17 @@ func test_yaw_only_basis_matches_the_legacy_heading() -> void:
 			"yaw=%s basis is RotY(180 - yaw), unchanged from the legacy heading" % yaw)
 
 
-# Pitch must tip the model's nose the way the engine does. The model's local forward is +Z
-# (Vector3.BACK). At yaw=0, a +30 deg pitch points the nose DOWN: forward = (0, -sin30, -cos30),
-# matching M * Rz(90) * Ry(30) * (+X_engine). The old euler form produced (0, +sin30, -cos30) --
-# nose UP -- which is the bug this fix corrects. [orig: @0x40eb86 / @0x613f40]
-func test_pitch_tips_the_nose_down_like_the_engine() -> void:
+# Pitch must tip the model's nose the way retail does. The model's local forward is +Z
+# (Vector3.BACK). At yaw=0, a +30 degree authored pitch points the nose UP:
+# forward = (0, +sin30, -cos30), matching M * Rz(90) * Ry(-30) * (+X_engine).
+# [orig: @0x40eb86 / @0x613f40]
+func test_pitch_tips_the_nose_up_like_retail() -> void:
 	var basis := Placer.bms_to_godot_basis(Vector3(30, 0, 0))
 	var forward: Vector3 = basis * Vector3.BACK
 	var up: Vector3 = basis * Vector3.UP
-	assert_true(forward.is_equal_approx(Vector3(0.0, -sin(deg_to_rad(30.0)), -cos(deg_to_rad(30.0)))),
-		"a downward pitch points the nose down (engine-faithful), not up")
-	assert_true(up.is_equal_approx(Vector3(0.0, cos(deg_to_rad(30.0)), -sin(deg_to_rad(30.0)))),
+	assert_true(forward.is_equal_approx(Vector3(0.0, sin(deg_to_rad(30.0)), -cos(deg_to_rad(30.0)))),
+		"positive authored pitch follows retail Ry(-pitch)")
+	assert_true(up.is_equal_approx(Vector3(0.0, cos(deg_to_rad(30.0)), sin(deg_to_rad(30.0)))),
 		"and the model's up tilts to match")
 
 

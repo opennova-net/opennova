@@ -465,6 +465,39 @@ func test_batched_husk_and_wreck_anchor_follow_the_live_present_pose() -> void:
 	presenter.teardown()
 
 
+func test_batched_husk_retains_authored_tilt_when_peer_pose_is_yaw_only() -> void:
+	var sim := SimStub.new()
+	var fx := FxStub.new()
+	var world := WorldStub.new()
+	var placer := PlacerStub.new()
+	var authored_rot := Vector3(17, 40, -12)
+	var authored := Transform3D(
+			MissionObjectPlacer.bms_to_godot_basis(authored_rot), Vector3(9, 8, 7))
+	placer.batched_transforms[77] = authored
+	var live_pos := Vector3(-6, 5, 12)
+	sim.present_states[77] = PackedVector3Array([live_pos, Vector3(0, 40, 0)])
+	var container := Node3D.new()
+	add_child_autofree(container)
+	sim.events = {
+		'husk_swaps': [{
+			'bms_id': 77,
+			'item_id': 11,
+		}],
+	}
+	var presenter = DestructionPresentPass.new()
+	presenter.setup(sim, container, IndexStub.new(), placer, ItemDbStub.new(), world,
+			Callable(), func(): return fx)
+
+	presenter.present()
+
+	assert_eq(placer.built.size(), 1)
+	if placer.built.size() == 1:
+		var graft: Node3D = placer.built[0]
+		assert_eq(graft.transform, Transform3D(authored.basis, live_pos),
+				"a yaw-only peer update moves the wreck without erasing authored tilt")
+	presenter.teardown()
+
+
 func test_zero_origin_debris_event_is_not_discarded() -> void:
 	var sim := SimStub.new()
 	var fx := FxStub.new()

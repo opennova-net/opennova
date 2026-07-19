@@ -544,13 +544,15 @@ namespace {
 // Build the runtime collision model from a parsed .3di collision IR block — the exact
 // inverse of the parse scaling (BPLN normals int16 Q14 / 16384, distances + AABBs 16.16;
 // libs/threedi/src/threedi_3di3.cpp parse_bpln/parse_bvol). Sections mirror the COBJ
-// grouping (volumes are sequential per object in the IR conversion). Returns false when
-// the model carries no volumes.
+// grouping (volumes are sequential per object in the IR conversion). Retail permits a
+// face-only collision model: CFAC raycasts do not depend on BVOL.
 bool collision_model_from_ir(const ThreediIRCollision *col,
 	                             opennova::world::CollisionModel &out) {
-	if (col == nullptr || col->volume_count == 0 ||
-	    !threedi_ir_collision_is_runtime_safe(col))
-		return false;
+	if (col == nullptr || !threedi_ir_collision_is_runtime_safe(col)) return false;
+	const bool has_face_mesh =
+			col->face_count > 0 && col->faces != nullptr && col->vertex_count > 0 &&
+			col->vertices != nullptr && col->object_count > 0 && col->objects != nullptr;
+	if (col->volume_count == 0 && !has_face_mesh) return false;
 	auto fx = [](float v) { return static_cast<int32_t>(std::lround(v * 65536.0)); };
 
 	out.planes.reserve(col->plane_count);
@@ -609,8 +611,7 @@ bool collision_model_from_ir(const ThreediIRCollision *col,
 	// face records, in per-object runs [orig: the runtime CVRT/CNRM/CFAC arrays
 	// hung off each COBJ by the collision builder @ 0x5b3bf0; the projectile
 	// raycast Physics_RaycastAgainstBoneCollision @ 0x4e4cb0 walks them].
-	if (col->face_count > 0 && col->faces != nullptr && col->vertex_count > 0 &&
-	    col->vertices != nullptr && col->object_count > 0 && col->objects != nullptr) {
+	if (has_face_mesh) {
 		out.face_vertices.reserve(col->vertex_count);
 		for (size_t i = 0; i < col->vertex_count; ++i) {
 			opennova::world::CollisionFaceVertex v;
@@ -3098,9 +3099,10 @@ Dictionary NovaSimulation::get_local_player_aim_overlay() const {
 	// The torso-bend overlay state: the nine per-segment orientations from the exact BAM
 	// blends [orig: Entity_BuildBoneTransformMatrices @0x4b1290; world-wac-ai-re.md §14],
 	// converted once here to mission-euler degrees — yaw via the canonical (90 - heading),
-	// pitch NEGATED (engine BAM pitch is up-positive, BMS euler pitch is nose-down-positive
-	// per MissionObjectPlacer.bms_to_godot_basis). The host builds Godot bases from these
-	// with that single-sourced conversion; delta(body class) is identity by construction.
+	// pitch unchanged (the retail placement builder applies authored pitch as Ry(-pitch),
+	// and MissionObjectPlacer performs the matching basis conjugation). The host builds
+	// Godot bases from these with that single-sourced conversion; delta(body class) is
+	// identity by construction.
 	Dictionary out;
 	out["valid"] = false;
 	if (!world_ || !world_->ai || !world_->cached.local_player.valid()) return out;
@@ -3136,7 +3138,7 @@ Dictionary NovaSimulation::get_local_player_aim_overlay() const {
 
 	const auto to_mission = [](const opennova::anim::AimOverlayAngles &a) {
 		return Vector3(
-				static_cast<float>(-static_cast<double>(a.pitch) * opennova::world::kDegreesPerBam),
+				static_cast<float>(static_cast<double>(a.pitch) * opennova::world::kDegreesPerBam),
 				static_cast<float>(opennova::world::mission_yaw_deg_from_bam_heading(a.yaw)),
 				static_cast<float>(static_cast<double>(a.roll) * opennova::world::kDegreesPerBam));
 	};
@@ -4704,24 +4706,27 @@ void NovaSimulation::ensure_present_effect_pose_cache() const {
 
 		const int32_t heading_bam = static_cast<int32_t>(
 				static_cast<uint32_t>(entity_state.yaw_byte) << 24);
+		// Host/listen presentation can recover the authored pitch and roll from
+		// the authoritative registry. The compact peer row only carries yaw;
+		// joiners therefore retain the wire-only zeroes here.
+		const opennova::world::Entity *entity = joiner_ ? nullptr : world_->registry.get(
+				opennova::world::EntityHandle{entity_state.handle});
 		PresentEffectPose pose;
 		pose.position = Vector3(
 				static_cast<float>(entity_state.x / kFixed16),
 				static_cast<float>(entity_state.z / kFixed16),
 				static_cast<float>(-entity_state.y / kFixed16));
 		pose.rotation_deg = Vector3(
-				0.0f,
+				entity ? static_cast<float>(entity->pitch) : 0.0f,
 				static_cast<float>(opennova::world::mission_yaw_deg_from_bam_heading(
 						heading_bam)),
-				0.0f);
+				entity ? static_cast<float>(entity->roll) : 0.0f);
 		present_effect_poses_by_handle_[entity_state.handle] = pose;
 
 		// A joiner's decoded handles belong to the host, so only wire identity is
 		// meaningful there. Host/listen views can resolve the same registry entity
 		// used by get_present_snapshot() for BMS origin and SSN identity.
 		if (joiner_) continue;
-		const opennova::world::Entity *entity = world_->registry.get(
-				opennova::world::EntityHandle{entity_state.handle});
 		if (!entity) continue;
 		if (entity->bms_id > 0) {
 			present_effect_handles_by_bms_id_[static_cast<int>(entity->bms_id)] =
@@ -5112,6 +5117,8 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 			r[PF_BMS_ID] = static_cast<float>(ent->bms_id);
 			r[PF_NET_ID] = static_cast<float>(ent->net_id);
 			r[PF_BODY_ANIM_SLOT] = static_cast<float>(ent->body_anim_slot);
+			r[PF_PITCH_DEG] = static_cast<float>(ent->pitch);
+			r[PF_ROLL_DEG] = static_cast<float>(ent->roll);
 			r[PF_HIDDEN] = ent->hidden ? 1.0f : 0.0f;
 			r[PF_ALIVE] = ent->alive ? 1.0f : 0.0f;
 		}

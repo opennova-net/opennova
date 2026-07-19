@@ -51,7 +51,7 @@ struct Mat3 {
 };
 
 // The entity's render rotation in mission axes: the engine euler builder
-// Rz(90 - yaw) * Ry(pitch) * Rx(roll) [orig:
+// Rz(90 - yaw) * Ry(-pitch) * Rx(roll) [orig:
 // Math_BuildFixedPointMatrixFromEulerAngles @ 0x613F40] times the .3di
 // import's constant model-forward correction Rz(90). This is the exact
 // conjugate of the Godot-side MissionObjectPlacer.bms_to_godot_basis under
@@ -59,7 +59,7 @@ struct Mat3 {
 // godot/tests/mission_object_placer_test.gd pins.
 Mat3 entity_rotation_bms(int pitch_deg, int yaw_deg, int roll_deg) {
 	return Mat3::rot_z(90.0 - static_cast<double>(yaw_deg)) *
-	       Mat3::rot_y(static_cast<double>(pitch_deg)) *
+	       Mat3::rot_y(-static_cast<double>(pitch_deg)) *
 	       Mat3::rot_x(static_cast<double>(roll_deg)) *
 	       Mat3::rot_z(90.0);
 }

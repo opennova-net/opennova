@@ -61,7 +61,8 @@ struct ItemDeathTraits {
     // huskModel], unlike the collision husk pick (@ 0x538720 husk first).
     int32_t husk_section_count = 0;
     // Per-section centers of the piece model (model-local, mission axes) —
-    // baked into the piece spawn position through the entity yaw
+    // baked into the piece spawn position through the complete authored pose
+    // Rz(90-yaw) * Ry(-pitch) * Rx(roll)
     // [orig: the section-row center @ 0x4938bf-0x493900].
     std::vector<Vec3> husk_section_centers;
     // Section 0's z extents (units) — the dead-wreck ground rest offset
@@ -84,7 +85,8 @@ struct ItemDeathTraits {
     std::string particlefire;       // +0x47E name — the Fire-bone family
     std::string particleother;      // +0x4B2 name — the Other-bone family
     // Husk-model "KZ" user points (model-local, mission axes) — each queues a
-    // kz_OrganicBlast r=5.0 at death; empty -> one blast at the entity position
+    // kz_OrganicBlast r=5.0 at its full-Euler world pose; empty -> one blast
+    // at the entity position
     // with r = kz ?: bound radius. [orig: Entity_QueueKzBlastAtUserPoints @ 0x4eabf0]
     std::vector<Vec3> kz_points;
 };

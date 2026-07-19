@@ -71,6 +71,28 @@ float vec_len(const Vec3 &v) {
 
 Vec3 vec_sub(const Vec3 &a, const Vec3 &b) { return Vec3{a.x - b.x, a.y - b.y, a.z - b.z}; }
 
+// Retail uses the entity's complete placement matrix for model-local death
+// anchors: Rz(90-yaw) * Ry(-pitch) * Rx(roll).  Reuse the same Q22 builder
+// as collision so KZ points, death pieces, and the intact/husk shell cannot
+// disagree about authored pitch/roll signs or multiplication order.
+CollisionMatrix destruction_orientation(const Entity &target) {
+    const int32_t origin[3] = {0, 0, 0};
+    return collision_matrix_from_euler(
+            bam_heading_from_mission_yaw_deg(static_cast<double>(target.yaw)),
+            bam_from_degrees_wrapped(static_cast<double>(target.pitch)),
+            bam_from_degrees_wrapped(static_cast<double>(target.roll)), origin);
+}
+
+Vec3 rotate_authored_point(const CollisionMatrix &orientation, const Vec3 &point) {
+    const int32_t local[3] = {
+            to_fixed(point.x), to_fixed(point.y), to_fixed(point.z)};
+    int32_t rotated[3];
+    orientation.rotate_point(local, rotated);
+    constexpr float kFromFixed = 1.0f / 65536.0f;
+    return Vec3{rotated[0] * kFromFixed, rotated[1] * kFromFixed,
+                rotated[2] * kFromFixed};
+}
+
 // LOS between two points: collision-world walk when available (terrain +
 // pools), else the terrain leg alone; no data -> clear. Endpoints carry the
 // witnessed +0.25 u lift [orig: the +0x4000 z adds @ 0x4eb4ca..0x4eb4f6].
@@ -448,14 +470,12 @@ void emit_death_sounds_and_effects(World &world, Entity &target, bool silent) {
                                                                     : 1.0f);
             world.explosions.queue_explosion(world, blast);
         } else {
-            const double yaw_rad =
-                    (90.0 - static_cast<double>(target.yaw)) * (3.14159265358979 / 180.0);
-            const float cy = static_cast<float>(std::cos(yaw_rad));
-            const float sy = static_cast<float>(std::sin(yaw_rad));
+            const CollisionMatrix orientation = destruction_orientation(target);
             for (const Vec3 &p : traits->kz_points) {
-                blast.pos = Vec3{target.position.x + p.x * cy - p.y * sy,
-                                 target.position.y + p.x * sy + p.y * cy,
-                                 target.position.z + p.z};
+                const Vec3 offset = rotate_authored_point(orientation, p);
+                blast.pos = Vec3{target.position.x + offset.x,
+                                 target.position.y + offset.y,
+                                 target.position.z + offset.z};
                 blast.radius_override = 5.0f; // [orig: the 5.0 at @ 0x4eace7]
                 world.explosions.queue_explosion(world, blast);
             }
@@ -532,13 +552,10 @@ uint32_t spawn_death_pieces(World &world, Entity &target) {
             dir_ai_y = wreck_vy / alen;
         }
     }
-    // Section centers rotate through the entity yaw (mission frame), the same
-    // 90-minus-yaw bake the kz points use [orig: Math_TransformPointFixedPoint22
+    // Section centers use the complete entity orientation, exactly like KZ
+    // points and collision [orig: Math_TransformPointFixedPoint22
     // (orientationMatrix) @ 0x4938e6].
-    const double yaw_rad =
-            (90.0 - static_cast<double>(target.yaw)) * (3.14159265358979 / 180.0);
-    const float cy = static_cast<float>(std::cos(yaw_rad));
-    const float sy = static_cast<float>(std::sin(yaw_rad));
+    const CollisionMatrix orientation = destruction_orientation(target);
     for (int s = 1; s < sections; ++s) {
         // Every section spawns; only the TYPE lookup clamps at slot 16
         // [orig: the loop bound @ 0x493918 vs the index clamp @ 0x49362f].
@@ -560,9 +577,10 @@ uint32_t spawn_death_pieces(World &world, Entity &target) {
             // The piece starts at its section's center, not the entity origin
             // [orig: the section-row center add @ 0x4938bf-0x493900].
             const Vec3 &c = traits->husk_section_centers[static_cast<size_t>(s)];
-            p.pos.x += c.x * cy - c.y * sy;
-            p.pos.y += c.x * sy + c.y * cy;
-            p.pos.z += c.z;
+            const Vec3 offset = rotate_authored_point(orientation, c);
+            p.pos.x += offset.x;
+            p.pos.y += offset.y;
+            p.pos.z += offset.z;
         }
         // Launch direction, the witnessed two-stage build [orig: @ 0x493718-
         // 0x49380e]: (1) 2D-normalize the +-0.5 random spread around the wreck

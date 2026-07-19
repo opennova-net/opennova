@@ -77,7 +77,7 @@ func test_present_effect_lookup_matches_client_snapshot_and_reloads_cleanly() ->
 	first_mission.add_entity(3, 0, Vector3(12, 4, -3), Vector3.ZERO)
 	# Use the second pool-0 organic so its wire handle is non-zero; handle zero is
 	# the presentation sentinel even though slot zero is valid in the registry.
-	first_mission.add_entity(3, 0, Vector3(18, 4, -3), Vector3.ZERO)
+	first_mission.add_entity(3, 0, Vector3(18, 4, -3), Vector3(10, 20, 30))
 
 	var sim := NovaSimulation.new()
 	sim.enable_listen_server(true)
@@ -102,6 +102,12 @@ func test_present_effect_lookup_matches_client_snapshot_and_reloads_cleanly() ->
 			snapshot[row_base + NovaSimulation.PF_PITCH_DEG],
 			snapshot[row_base + NovaSimulation.PF_YAW_DEG],
 			snapshot[row_base + NovaSimulation.PF_ROLL_DEG])
+	assert_almost_eq(expected_rotation.x, 10.0, 0.001,
+			"the host snapshot restores authored pitch from the registry")
+	assert_almost_eq(expected_rotation.y, 20.0, 1.5,
+			"yaw remains the retail compact-byte view")
+	assert_almost_eq(expected_rotation.z, 30.0, 0.001,
+			"the host snapshot restores authored roll from the registry")
 	var wire_handle := int(snapshot[row_base + NovaSimulation.PF_WIRE_HANDLE])
 	var bms_id := int(snapshot[row_base + NovaSimulation.PF_BMS_ID])
 	var ssn := int(snapshot[row_base + NovaSimulation.PF_NET_ID])

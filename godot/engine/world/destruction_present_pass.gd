@@ -287,6 +287,7 @@ func _apply_husk_swap(husk: Dictionary) -> void:
 		'kind': 'static',
 		'bms_id': bms_id,
 		'spawn_origin': spawn_origin_v,
+		'placed_transform': xform_v,
 	}
 	graft.name = "HuskModel_%d" % bms_id
 	graft.transform = xform_v as Transform3D
@@ -309,8 +310,20 @@ func _present_transform_for_identity(bms_id: int,
 				(spawn_origin >> 24) & 0xff, spawn_origin & 0xffffff)
 	if state.size() != PRESENT_EFFECT_STATE_COUNT:
 		return null
-	return Transform3D(MissionObjectPlacer.bms_to_godot_basis(
-			state[PRESENT_EFFECT_ROTATION_DEG]), state[PRESENT_EFFECT_POSITION])
+	var rotation_deg := state[PRESENT_EFFECT_ROTATION_DEG]
+	var basis := MissionObjectPlacer.bms_to_godot_basis(rotation_deg)
+	# Compact peer poses carry yaw only. Static death motion changes position but
+	# not orientation, so retain the exact authored basis carved from the batch
+	# when pitch/roll are unavailable. Host/listen poses carry the full Euler
+	# angles and take the live-basis path above.
+	if is_zero_approx(rotation_deg.x) and is_zero_approx(rotation_deg.z):
+		var husk_key := _husk_identity_key(bms_id, spawn_origin_v)
+		var restore_v: Variant = _husk_restore.get(husk_key)
+		if restore_v is Dictionary:
+			var placed_v: Variant = (restore_v as Dictionary).get('placed_transform')
+			if placed_v is Transform3D:
+				basis = (placed_v as Transform3D).basis
+	return Transform3D(basis, state[PRESENT_EFFECT_POSITION])
 
 
 func _sync_static_husks() -> void:

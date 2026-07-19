@@ -454,6 +454,42 @@ void test_destructible_death_chain() {
     CHECK(!w.round_sim.hits.empty()); // the AI reaction stamp fed
 }
 
+// Retail transforms each husk-model KZ user point through the item's complete
+// authored Euler pose before adding its world position:
+// Rz(90-yaw) * Ry(-pitch) * Rx(roll).  These three +90 degree rotations make
+// the expected result order- and sign-sensitive: (x,y,z) -> (z,-y,x).
+void test_kz_point_full_euler() {
+    auto w_heap = std::make_unique<World>();
+    World &w = *w_heap;
+    seed_ammo(w);
+    w.registry.configure_pool(1, 4);
+
+    Entity seed;
+    seed.kind = EntityKind::Item;
+    seed.item_id = 500;
+    seed.health = 0;
+    seed.position = Vec3{4.0f, 6.0f, 10.0f};
+    seed.bound_radius = 1.0f;
+    seed.yaw = 0;
+    seed.pitch = 90;
+    seed.roll = 90;
+    const EntityHandle h = w.registry.spawn(1, seed);
+
+    ItemDeathTraits traits = barrel_traits();
+    traits.kz_points = {Vec3{1.5f, -0.5f, 0.75f}};
+    w.item_death_traits.set(500, traits);
+    Entity *e = w.registry.get(h);
+    destruction_notify_item_damage(w, *e, 1);
+
+    CHECK(w.explosions.queue.size() == 1);
+    if (w.explosions.queue.size() == 1) {
+        const Vec3 &pos = w.explosions.queue[0].pos;
+        CHECK(std::abs(pos.x - 4.75f) < 1.0e-4f);
+        CHECK(std::abs(pos.y - 6.5f) < 1.0e-4f);
+        CHECK(std::abs(pos.z - 11.5f) < 1.0e-4f);
+    }
+}
+
 // Death pieces: the per-section spawn distribution + the pool tick
 // [orig: Entity_SpawnDeathPieces @0x493400 / Entity_ProcessDeathPiecePhysics
 // @0x492dd0].
@@ -606,8 +642,9 @@ void test_death_piece_rng_is_world_local() {
     }
 }
 
-// The piece spawns at its section's center, rotated through the entity yaw
-// [orig: @0x4938bf-0x493900]. Mission yaw 90 bakes the identity rotation.
+// Retail transforms each section center through the complete authored Euler
+// pose [orig: @0x4938bf-0x493900].  As above, the three +90 degree rotations
+// make (x,y,z) -> (z,-y,x), witnessing both signs and multiplication order.
 void test_death_piece_section_center() {
     auto w_heap = std::make_unique<World>();
     World &w = *w_heap;
@@ -619,7 +656,9 @@ void test_death_piece_section_center() {
     seed.health = 0;
     seed.position = Vec3{4.0f, 6.0f, 10.0f};
     seed.bound_radius = 2.0f;
-    seed.yaw = 90;
+    seed.yaw = 0;
+    seed.pitch = 90;
+    seed.roll = 90;
     const EntityHandle h = w.registry.spawn(1, seed);
     ItemDeathTraits t = barrel_traits();
     t.husk_section_count = 2; // sections 0..1 -> one piece from section 1
@@ -632,9 +671,9 @@ void test_death_piece_section_center() {
         if (q.active) { p = &q; break; }
     CHECK(p != nullptr);
     if (p != nullptr) {
-        CHECK(std::abs(p->pos.x - 5.5f) < 1.0e-4f);
-        CHECK(std::abs(p->pos.y - 5.5f) < 1.0e-4f);
-        CHECK(std::abs(p->pos.z - 10.75f) < 1.0e-4f);
+        CHECK(std::abs(p->pos.x - 4.75f) < 1.0e-4f);
+        CHECK(std::abs(p->pos.y - 6.5f) < 1.0e-4f);
+        CHECK(std::abs(p->pos.z - 11.5f) < 1.0e-4f);
     }
 }
 
@@ -1169,6 +1208,7 @@ int main() {
     test_explosion_cone_wrap();
     test_explosion_resolves_attacker_chain_for_events();
     test_destructible_death_chain();
+    test_kz_point_full_euler();
     test_death_pieces();
     test_death_piece_ring_generation();
     test_death_piece_launch_and_spin();

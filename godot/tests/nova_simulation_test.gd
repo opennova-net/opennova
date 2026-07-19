@@ -82,6 +82,24 @@ func _weapon_arm_pitch_deg(sim: NovaSimulation) -> float:
 	return float(angles[4].x) if angles.size() > 4 else 0.0
 
 
+func test_aim_overlay_exports_the_retail_authored_pitch_sign() -> void:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+
+	sim.set_local_player_mouse(511, false)
+	sim.add_local_player_look(0.0, 100.0)
+	sim.step()
+	var authored_pitch := sim.get_local_player_pitch_deg()
+	var arm_pitch := _weapon_arm_pitch_deg(sim)
+	assert_gt(absf(authored_pitch), 0.5, "look input produced a signed pitch witness")
+	assert_almost_eq(arm_pitch, authored_pitch, 0.01,
+		"overlay pitch stays in authored sign for MissionObjectPlacer")
+	sim.free()
+
+
 func test_weapon_channel_keeps_own_phase_and_switch_identity_per_entity() -> void:
 	var md := NovaMissionData.new()
 	assert_eq(md.create_default(), OK)
@@ -1024,6 +1042,34 @@ func test_collision_backed_building_without_oobj_keeps_batch_visibility() -> voi
 		assert_eq(packed & 0xFFFFFFFF, 0xFFFFFFFF,
 			"without a section map the host preserves every de-batched render part")
 		assert_ne(packed & (1 << 32), 0, "the in-frustum building is visible")
+	sim.free()
+
+
+func test_face_only_cfac_model_attaches_for_projectile_raycast() -> void:
+	# Retail collision construction and the projectile face walker do not
+	# require BVOL. Bird1 is a committed face-only witness (242 CFAC, 0 BVOL);
+	# rejecting it here silently degrades authored bullet geometry to a sphere.
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var placed := md.add_entity(
+		NovaMissionData.KIND_BUILDING, 102001, Vector3(0, 20, 0), Vector3.ZERO)
+	assert_false(placed.is_empty())
+
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load(ProjectSettings.globalize_path("res://../fixtures/def/items.def")), OK)
+	var data := NovaObjectData.new()
+	assert_eq(data.open_file(
+		ProjectSettings.globalize_path("res://../fixtures/threedi/3di3/Bird1.3di")), OK)
+
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	assert_eq(sim.resolve_collision_instances(item_db, ObjectDataPlacerStub.new(data)), 1,
+		"face-only CFAC remains a real collision model")
+	var entities: Array = sim.get_hitbox_debug().get("entities", [])
+	assert_eq(entities.size(), 1)
+	if entities.size() == 1:
+		assert_eq(int((entities[0] as Dictionary).get("face_total", 0)), 242,
+			"all authored Bird1 faces reach the projectile walker")
 	sim.free()
 
 

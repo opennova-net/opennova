@@ -163,7 +163,7 @@ struct CollisionMatrix {
 // Per-part animated section transforms are a tracked follow-up (D-COL-1).
 CollisionMatrix collision_matrix_from_heading(int32_t heading_bam, const int32_t pos[3]);
 
-// The FULL placement matrix Rz(heading)·Ry(pitch)·Rx(roll) for statics authored
+// The FULL placement matrix Rz(heading)·Ry(-pitch)·Rx(roll) for statics authored
 // with pitch/roll (rocks rolled onto slopes, tilted wrecks) — the collision
 // shell must lean WITH the visual or rounds thread past its edge where the
 // model still looks solid. [orig: Math_BuildFixedPointMatrixFromEulerAngles

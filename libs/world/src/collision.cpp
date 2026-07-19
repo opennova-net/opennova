@@ -191,7 +191,7 @@ CollisionMatrix collision_matrix_from_heading(int32_t heading_bam, const int32_t
     return out;
 }
 
-// The full placement matrix — Rz(heading)·Ry(pitch)·Rx(roll), Q22 rows composed
+// The full placement matrix — Rz(heading)·Ry(-pitch)·Rx(roll), Q22 rows composed
 // with the original's per-product >>22 truncations and exact-zero stage skips.
 // [orig: Math_BuildFixedPointMatrixFromEulerAngles @ 0x613f40, fed by the spawn
 // euler pack {[3] = (90 − yaw) BAM, [4] = pitch BAM, [5] = roll BAM}
@@ -1202,7 +1202,11 @@ const CollisionTargetView *CollisionWorld::target_view(World &world, EntityHandl
     scratch.pos[1] = p[1];
     scratch.pos[2] = p[2];
     scratch.yaw_bam = heading;
-    scratch.pitch_bam = 0; // statics carry no pitch; the vehicle pass fills it (D-COL-5)
+    // Type-4 platform contact keeps a separate target-relative pitch even
+    // though the authored angle is also baked into the section matrix.
+    // [orig: targetEntity+20 Pitch read @ 0x4ae9a7]
+    scratch.pitch_bam =
+            bam_from_degrees_wrapped(static_cast<double>(e->pitch));
     scratch.entity_flags = e->flags;
     scratch.bound_radius = entity_bound_radius(*this, m);
     scratch.is_building = (e->kind == EntityKind::Building);

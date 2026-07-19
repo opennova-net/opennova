@@ -168,22 +168,22 @@ static func bms_to_godot_position(p: Vector3) -> Vector3:
 #
 # [orig: Entity_SpawnFromBMSRecord @0x40eb66 + Math_BuildFixedPointMatrixFromEulerAngles @0x613f40,
 #  called via Entity_UpdateOrientationMatrix @0x43b440 (Jointops.exe)] The engine builds the world
-#  matrix as Rz(90-yaw) * Ry(pitch) * Rx(roll) in its Z-up, right-handed world: yaw drives the Z/up
-#  axis (euler[3] = 90 - yaw), pitch the Y axis (euler[4], positive), roll the X axis (euler[5],
-#  positive). Conjugating by the position basis M:(x,y,z)->(x,z,-y) -- which sends engine +Z->godot
+#  matrix as Rz(90-yaw) * Ry(-pitch) * Rx(roll) in its Z-up, right-handed world: yaw drives the Z/up
+#  axis (euler[3] = 90 - yaw), while the builder applies stored positive euler[4] as Ry(-pitch);
+#  roll is positive about X. Conjugating by the position basis M:(x,y,z)->(x,z,-y) -- which sends
+#  engine +Z->godot
 #  +Y, +Y->godot -Z, +X->godot +X -- gives the faithful Godot world rotation
-#      R_godot = RotY(90 - yaw) * RotZ(-pitch) * RotX(roll).
+#      R_godot = RotY(90 - yaw) * RotZ(pitch) * RotX(roll).
 #  The .3di model imports Y-up / +Z-forward, so a constant model-forward correction C = RotY(90)
 #  turns the model's +Z nose onto the engine's +X canonical heading. For yaw-only this collapses to
-#  RotY(180 - yaw) -- identical to the long-standing (visually-correct) heading -- while correcting
-#  pitch, which the old euler form (Rx(-pitch) in a YXZ basis) tipped the wrong way (nose up instead
-#  of down). Roll was already equivalent. See godot/tests/mission_object_placer_test.gd.
+#  RotY(180 - yaw) -- identical to the long-standing (visually-correct) heading. See
+#  godot/tests/mission_object_placer_test.gd.
 static func bms_to_godot_basis(rot_deg: Vector3) -> Basis:
 	var pitch := deg_to_rad(rot_deg.x)
 	var yaw := deg_to_rad(rot_deg.y)
 	var roll := deg_to_rad(rot_deg.z)
 	return Basis(Vector3.UP, deg_to_rad(90.0) - yaw) \
-		* Basis(Vector3.BACK, -pitch) \
+		* Basis(Vector3.BACK, pitch) \
 		* Basis(Vector3.RIGHT, roll) \
 		* Basis(Vector3.UP, deg_to_rad(90.0))
 

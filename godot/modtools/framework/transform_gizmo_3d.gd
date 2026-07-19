@@ -13,7 +13,7 @@ extends Node3D
 #
 # Rotation frame: the host's authored angles may be nested in an euler convention with
 # no closed-form inverse (mission's bms_to_godot_basis is
-# RotY(90-yaw)*RotZ(-pitch)*RotX(roll)*RotY(90)), so each ring's world rotation axis is
+# RotY(90-yaw)*RotZ(pitch)*RotX(roll)*RotY(90)), so each ring's world rotation axis is
 # derived numerically (finite difference) from the current authored degrees through the
 # injected `basis_builder` -- see _compute_ring_axes. A ring drag maps its swept angle
 # back to a delta on exactly that one authored component, so the host's commit path
