@@ -53,7 +53,11 @@ static int collision_ir_matches_gp(const char *path,
             d->parent_subobject_index != s->parent_subobject ||
             d->offset[0] != (float)s->translation[0] ||
             d->offset[1] != (float)s->translation[1] ||
-            d->offset[2] != (float)s->translation[2]) {
+            d->offset[2] != (float)s->translation[2] ||
+            d->center_fp16[0] != s->center[0] ||
+            d->center_fp16[1] != s->center[1] ||
+            d->center_fp16[2] != s->center[2] ||
+            d->radius_fp16 != s->bounding_sphere_radius) {
             fprintf(stderr, "Collision object metadata mismatch for %s\n", path);
             return 0;
         }

@@ -50,7 +50,7 @@ int marker_item_id_for_path(const MissionDocument &doc, size_t path_index);
 // the ground hit minus the entity's ROTATED model-local ground anchor, so the
 // model's ground point lands exactly on the hit. [orig: sub_401A90,
 // dfx2med.exe] The rotation matrix is the engine's own euler builder
-// Rz(90-yaw) * Ry(pitch) * Rx(roll) [orig:
+// Rz(90-yaw) * Ry(-pitch) * Rx(roll) [orig:
 // Math_BuildFixedPointMatrixFromEulerAngles @ 0x613F40 (Jointops.exe)]
 // composed with the .3di import's constant model-forward correction
 // (RotZ(90) in mission axes — the model's +Z nose onto the engine's +X

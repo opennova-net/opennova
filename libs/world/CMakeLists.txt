@@ -12,6 +12,7 @@ add_library(opennova_world STATIC
     src/player_look.cpp
     src/player_spawn.cpp
     src/player_view.cpp
+    src/destruction.cpp
     src/round_sim.cpp
     src/spawn_select.cpp
     src/tracer_trails.cpp

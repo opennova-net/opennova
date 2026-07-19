@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "terrain/height_field.h"
+#include "world/angle.h"
 #include "world/collision.h"
 #include "world/world.h"
 
@@ -169,6 +170,83 @@ void test_matrix_roundtrip() {
     CHECK(std::abs(lp[1] - local[1]) <= 4);
     CHECK(std::abs(lp[2] - local[2]) <= 4);
     (void)back;
+
+    // Retail composes Rz(heading) * Ry(-pitch) * Rx(roll). Positive authored
+    // pitch therefore turns local +X toward world +Z. RckS05 at 00TRg entity
+    // 650 authors -173 degrees; using +pitch instead displaces corresponding
+    // render/CFAC vertices by up to 0.62u.
+    const int32_t origin[3] = {0, 0, 0};
+    const CollisionMatrix pitched =
+        collision_matrix_from_euler(0, 0x40000000, 0, origin);
+    int32_t pitched_x[3];
+    pitched.rotate_point(local, pitched_x);
+    CHECK(std::abs(pitched_x[0]) <= 4);
+    CHECK(std::abs(pitched_x[1]) <= 4);
+    CHECK(std::abs(pitched_x[2] - fx(1.0)) <= 4);
+}
+
+void test_retail_render_pose_matrix_roundtrip_and_order() {
+    const float identity[16] = {
+        1.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 1.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, 1.0f,
+    };
+    const int32_t entity_pos[3] = {fx(10.0), fx(20.0), fx(3.0)};
+    const CollisionMatrix entity =
+        collision_matrix_from_heading(0x40000000, entity_pos);
+    CollisionMatrix roundtrip;
+    CHECK(collision_matrix_apply_render_pose(entity, identity, roundtrip));
+    for (int i = 0; i < 12; ++i) CHECK(roundtrip.m[i] == entity.m[i]);
+    CHECK(!roundtrip.disabled()); // affine m[15] == 1 never disables a section.
+
+    // Render-float translation (2,3,4) maps back to mission (4,-2,3).
+    float translated[16];
+    std::copy(std::begin(identity), std::end(identity), translated);
+    translated[12] = 2.0f;
+    translated[13] = 3.0f;
+    translated[14] = 4.0f;
+    const int32_t origin[3] = {};
+    const CollisionMatrix at_origin = collision_matrix_from_heading(0, origin);
+    CollisionMatrix translated_world;
+    CHECK(collision_matrix_apply_render_pose(at_origin, translated, translated_world));
+    CHECK(translated_world.m[3] == fx(4.0));
+    CHECK(translated_world.m[7] == fx(-2.0));
+    CHECK(translated_world.m[11] == fx(3.0));
+
+    // Non-commuting order: local render +X is mission -Y. Pose*entity rotates
+    // that by the +90-degree entity heading to mission +X. Reversing the float
+    // multiply would leave it on -Y instead.
+    float local_x[16];
+    std::copy(std::begin(identity), std::end(identity), local_x);
+    local_x[12] = 2.0f;
+    CollisionMatrix posed_world;
+    CHECK(collision_matrix_apply_render_pose(entity, local_x, posed_world));
+    CHECK(posed_world.m[3] == fx(12.0));
+    CHECK(posed_world.m[7] == fx(20.0));
+    CHECK(posed_world.m[11] == fx(3.0));
+
+    // Reachable values that distinguish retail x87 PC53 accumulation from a
+    // binary32 matrix loop. The converted fixed matrix is bit-exact.
+    const int32_t x87_pos[3] = {655360, 1310720, 196608};
+    const CollisionMatrix x87_entity =
+        collision_matrix_from_heading(0x62c00000, x87_pos);
+    const float x87_pose[16] = {
+        0.156207114f, 0.0f, -0.987724304f, 0.0f,
+        0.0f, 1.0f, 0.0f, 0.0f,
+        0.987724304f, 0.0f, 0.156207114f, 0.0f,
+        0.0f, 0.0f, 0.0f, 1.0f,
+    };
+    const int32_t x87_expected[16] = {
+        2231699, -3551295, 0, 655360,
+        3551295, 2231699, 0, 1310720,
+        0, 0, 4194304, 196608,
+        0, 0, 0, 0,
+    };
+    CollisionMatrix x87_world;
+    CHECK(collision_matrix_apply_render_pose(x87_entity, x87_pose, x87_world));
+    for (int i = 0; i < 16; ++i)
+        CHECK(x87_world.m[i] == x87_expected[i]);
 }
 
 // ---------------------------------------------------------------------------
@@ -343,6 +421,39 @@ void test_secondary_vertical_force_is_full_strength() {
     CHECK(result.force[0] < 0);
     CHECK(result.force[2] < 0);
     CHECK(std::abs(result.force[2] - result.force[0]) <= 1);
+}
+
+// ---------------------------------------------------------------------------
+void test_platform_contact_uses_positive_authored_pitch() {
+    CollisionModel model = box_model(4, 0, 2.0, 2.0, 2.0);
+    model.finalize_sections();
+    const int32_t target_pos[3] = {0, 0, 0};
+    const CollisionMatrix matrix = collision_matrix_from_heading(0, target_pos);
+
+    CollisionTargetView target;
+    target.model = &model;
+    target.matrices = &matrix;
+    target.bound_radius = fx(4.0);
+    target.pitch_bam = bam_from_degrees_wrapped(30.0);
+
+    const CollisionPoint point{0, 0, fx(1.0), 0};
+    const int32_t radius = 0;
+    ContactQuery query;
+    query.points = &point;
+    query.radii = &radius;
+    query.num_points = 1;
+    query.source_bound_radius = fx(1.0);
+    query.mask = 0x1;
+
+    BlinkAccum blink;
+    PlatformContact platform;
+    ContactResult result;
+    CHECK(!collision_contact_force(target, query, blink, platform, result));
+    CHECK((result.flags & 0x1u) != 0);
+    CHECK(platform.valid);
+    // Plane 0 has no vertical normal component, so retail's
+    // target.pitch - normal.pitch leg must preserve the raw positive value.
+    CHECK(platform.pitch == bam_from_degrees_wrapped(30.0));
 }
 
 // ---------------------------------------------------------------------------
@@ -553,6 +664,72 @@ void test_slice_cadence_and_invuln() {
 }
 
 // ---------------------------------------------------------------------------
+void test_proximity_tables_use_host_bound_radius() {
+    // Both placed objects carry a tiny intact collision shell, but the host has
+    // stamped entity+0 with the max intact/husk model bound. At 12u from the
+    // organic source, retail's +4u source range admits each 8u hull; deriving
+    // the table radius from the 1u intact shell would drop both candidates.
+    World world;
+    CollisionWorld cw;
+    world.registry.configure_pool(0, 4);
+    world.registry.configure_pool(1, 4);
+    world.registry.configure_pool(2, 4);
+
+    Entity source_seed;
+    source_seed.kind = EntityKind::Organic;
+    source_seed.alive = true;
+    const EntityHandle source = world.registry.spawn(0, source_seed);
+
+    Entity dynamic_seed;
+    dynamic_seed.kind = EntityKind::Item;
+    dynamic_seed.position = {0.0f, 12.0f, 0.0f};
+    dynamic_seed.bound_radius = 8.0f;
+    dynamic_seed.alive = true;
+    const EntityHandle dynamic = world.registry.spawn(1, dynamic_seed);
+
+    Entity static_seed = dynamic_seed;
+    static_seed.kind = EntityKind::Building;
+    static_seed.position = {12.0f, 0.0f, 0.0f};
+    const EntityHandle statik = world.registry.spawn(2, static_seed);
+    CHECK(source.valid() && dynamic.valid() && statik.valid());
+
+    const int32_t tiny_model = cw.add_model(box_model(1, 0, 1.0, 1.0, 1.0));
+    cw.assign_entity(dynamic, tiny_model);
+    cw.assign_entity(statik, tiny_model);
+    for (int i = 0; i < 17; ++i) cw.build_tick_tables(world);
+
+    CHECK(cw.candidate_count(source) == 2);
+
+    // Pool-1 vehicle sources use their own host-stamped bound too. With the
+    // witnessed +6u vehicle pad, an 8u hull reaches this 1u static at 15u;
+    // the old hard-coded 1u source radius incorrectly dropped it.
+    Entity vehicle_seed;
+    vehicle_seed.kind = EntityKind::Item;
+    vehicle_seed.item_id = 900;
+    vehicle_seed.position = {40.0f, 40.0f, 0.0f};
+    vehicle_seed.bound_radius = 8.0f;
+    vehicle_seed.alive = true;
+    const EntityHandle vehicle = world.registry.spawn(1, vehicle_seed);
+
+    Entity near_static_seed;
+    near_static_seed.kind = EntityKind::Building;
+    near_static_seed.position = {55.0f, 40.0f, 0.0f};
+    near_static_seed.bound_radius = 1.0f;
+    near_static_seed.alive = true;
+    const EntityHandle near_static = world.registry.spawn(2, near_static_seed);
+    CHECK(vehicle.valid() && near_static.valid());
+
+    VehicleTraits vehicle_traits;
+    vehicle_traits.physics = 1;
+    world.vehicle_traits.set(vehicle_seed.item_id, vehicle_traits);
+    cw.assign_entity(vehicle, tiny_model);
+    cw.assign_entity(near_static, tiny_model);
+    for (int i = 0; i < 17; ++i) cw.build_tick_tables(world);
+
+    CHECK(cw.candidate_count(vehicle) == 1);
+}
+
+// ---------------------------------------------------------------------------
 void test_pool1_item_is_one_collision_candidate() {
     World world;
     CollisionWorld cw;
@@ -725,14 +902,917 @@ void test_los_point_bias() {
     CHECK(!los_terrain_blocked(f.field, q_a, q_b));
 }
 
+// ----------------------------------------------------------------------------
+// The projectile face raycast [orig: Physics_RaycastAgainstBoneCollision
+// @ 0x4e4cb0 + Math_PointInTriangle2D @ 0x414050].
+// ----------------------------------------------------------------------------
+
+// A one-section face mesh: a 2x2 u quad (two triangles) at section-local z = 1,
+// normal +z (Q14), projection plane XY (axis 1).
+CollisionModel face_quad_model(uint8_t material, uint32_t flags) {
+    CollisionModel m;
+    m.face_vertices = {{-256, -256, 256}, {256, -256, 256}, {256, 256, 256},
+                       {-256, 256, 256}}; // Q8: (+-1, +-1, 1)
+    auto face = [&](int a, int b, int c) {
+        CollisionFace f;
+        f.v[0] = static_cast<int16_t>(a);
+        f.v[1] = static_cast<int16_t>(b);
+        f.v[2] = static_cast<int16_t>(c);
+        f.normal[0] = 0;
+        f.normal[1] = 0;
+        f.normal[2] = 16384;
+        f.axis = 1;
+        // side = (v.n >> 14) + dist: on-plane at z=1 -> dist = -fx(1).
+        f.plane_dist = -fx(1.0);
+        f.min[0] = fx(-1.0); f.max[0] = fx(1.0);
+        f.min[1] = fx(-1.0); f.max[1] = fx(1.0);
+        f.min[2] = fx(1.0);  f.max[2] = fx(1.0);
+        f.flags = flags;
+        f.material = material;
+        m.faces.push_back(f);
+    };
+    face(0, 1, 2);
+    face(0, 2, 3);
+    m.sections.assign(1, {});
+    m.sections[0].face_start = 0;
+    m.sections[0].face_count = 2;
+    m.sections[0].face_vertex_start = 0;
+    m.sections[0].face_vertex_count = 4;
+    return m;
+}
+
+// Two spatially separate husk sections: the root quad is centered at local
+// x=-3, while section 1 is centered at x=+3. Each face's vertex indices are
+// relative to its section's own vertex run, matching the retail face walker.
+CollisionModel two_section_face_model(uint8_t root_material, uint8_t piece_material) {
+    CollisionModel m;
+    auto append_quad = [&](int center_x, uint8_t material) {
+        const int32_t vertex_start = static_cast<int32_t>(m.face_vertices.size());
+        const int32_t face_start = static_cast<int32_t>(m.faces.size());
+        const int16_t x0 = static_cast<int16_t>((center_x - 1) * 256);
+        const int16_t x1 = static_cast<int16_t>((center_x + 1) * 256);
+        m.face_vertices.push_back({x0, -256, 256});
+        m.face_vertices.push_back({x1, -256, 256});
+        m.face_vertices.push_back({x1, 256, 256});
+        m.face_vertices.push_back({x0, 256, 256});
+
+        auto append_face = [&](int a, int b, int c) {
+            CollisionFace f;
+            f.v[0] = static_cast<int16_t>(a);
+            f.v[1] = static_cast<int16_t>(b);
+            f.v[2] = static_cast<int16_t>(c);
+            f.normal[2] = 16384;
+            f.axis = 1;
+            f.plane_dist = -fx(1.0);
+            f.min[0] = fx(center_x - 1.0);
+            f.max[0] = fx(center_x + 1.0);
+            f.min[1] = fx(-1.0); f.max[1] = fx(1.0);
+            f.min[2] = fx(1.0);  f.max[2] = fx(1.0);
+            f.material = material;
+            m.faces.push_back(f);
+        };
+        append_face(0, 1, 2);
+        append_face(0, 2, 3);
+
+        CollisionSection section;
+        section.face_start = face_start;
+        section.face_count = 2;
+        section.face_vertex_start = vertex_start;
+        section.face_vertex_count = 4;
+        m.sections.push_back(section);
+    };
+    append_quad(-3, root_material);
+    append_quad(3, piece_material);
+    return m;
+}
+
+struct TwoSectionMatrixProvider final : ICollisionSectionMatrixProvider {
+    bool build_section_matrices(World &, EntityHandle, int32_t,
+                                const CollisionMatrix &,
+                                const CollisionModel &model,
+                                std::vector<CollisionMatrix> &out) override {
+        if (model.sections.size() != 2) return false;
+        const int32_t root_pos[3] = {fx(10.0), fx(10.0), 0};
+        const int32_t moved_pos[3] = {fx(14.0), fx(10.0), 0};
+        out = {collision_matrix_from_heading(0, root_pos),
+               collision_matrix_from_heading(0, moved_pos)};
+        return true;
+    }
+};
+
+CollisionModel person_section_model() {
+    CollisionModel model;
+    model.sections.resize(19);
+    // CharModel.3di COBJ 14 (head), preserved here as exact 16.16 authored data.
+    CollisionSection &head = model.sections[14];
+    head.center[0] = 3578;
+    head.center[1] = 65;
+    head.center[2] = 54371;
+    head.radius = 10345;
+    return model;
+}
+
+struct PosedHeadMatrixProvider final : ICollisionSectionMatrixProvider {
+    bool build_section_matrices(World &, EntityHandle, int32_t,
+                                const CollisionMatrix &entity_world,
+                                const CollisionModel &model,
+                                std::vector<CollisionMatrix> &out) override {
+        out.assign(model.sections.size(), entity_world);
+        // Move only COBJ/bone 14 one unit in +X. The narrow phase must consume
+        // callback slot 14, not the entity matrix or COBJ parent metadata.
+        out[14].m[3] += fx(1.0);
+        return true;
+    }
+};
+
+struct CountingMatrixProvider final : ICollisionSectionMatrixProvider {
+    std::vector<EntityHandle> build_handles;
+
+    bool build_section_matrices(World &, EntityHandle entity, int32_t,
+                                const CollisionMatrix &entity_world,
+                                const CollisionModel &model,
+                                std::vector<CollisionMatrix> &out) override {
+        build_handles.push_back(entity);
+        out.assign(model.sections.size(), entity_world);
+        return true;
+    }
+
+    int calls_for(EntityHandle entity) const {
+        int count = 0;
+        for (const EntityHandle built : build_handles) {
+            if (built == entity) ++count;
+        }
+        return count;
+    }
+};
+
+struct DemandPersonProvider final : ICollisionSectionMatrixProvider {
+    CollisionWorld *collision = nullptr;
+    int32_t model_id = -1;
+    EntityHandle expected;
+    int ensure_calls = 0;
+
+    bool ensure_collision_instance(World &, EntityHandle entity) override {
+        ++ensure_calls;
+        if (collision == nullptr || entity != expected || model_id < 0) return false;
+        collision->assign_entity(entity, model_id);
+        return true;
+    }
+
+    bool build_section_matrices(World &, EntityHandle, int32_t,
+                                const CollisionMatrix &entity_world,
+                                const CollisionModel &model,
+                                std::vector<CollisionMatrix> &out) override {
+        out.assign(model.sections.size(), entity_world);
+        return true;
+    }
+};
+
+struct ReusedSlotPersonProvider final : ICollisionSectionMatrixProvider {
+    CollisionWorld *collision = nullptr;
+    int32_t replacement_model_id = -1;
+    uint64_t expected_spawn_id = 0;
+    int ensure_calls = 0;
+
+    bool ensure_collision_instance(World &world, EntityHandle entity) override {
+        ++ensure_calls;
+        const Entity *current = world.registry.get(entity);
+        if (collision == nullptr || current == nullptr ||
+            current->registry_spawn_id != expected_spawn_id)
+            return false;
+        collision->assign_entity(entity, replacement_model_id,
+                                 current->registry_spawn_id);
+        return true;
+    }
+
+    bool build_section_matrices(World &, EntityHandle, int32_t,
+                                const CollisionMatrix &entity_world,
+                                const CollisionModel &model,
+                                std::vector<CollisionMatrix> &out) override {
+        out.assign(model.sections.size(), entity_world);
+        return true;
+    }
+};
+
+void test_person_section_raycast_uses_posed_bone_matrix() {
+    Rig rig(person_section_model());
+    rig.cw.assign_entity(rig.soldier, 0);
+    rig.world.registry.get(rig.soldier)->yaw = 90;
+    PosedHeadMatrixProvider provider;
+    rig.cw.set_section_matrix_provider(&provider);
+
+    // The soldier is at the origin and its posed head center is near
+    // (1.055, 0.001, 0.830). A Y-axis segment through that moved center must
+    // hit bone 14; the same segment through the stale rest center must miss.
+    PersonSectionHit hit;
+    const int32_t moved_start[3] = {fx(1.0545959473), fx(-1.0), fx(0.8296356201)};
+    const int32_t moved_end[3] = {fx(1.0545959473), fx(1.0), fx(0.8296356201)};
+    CHECK(rig.cw.raycast_person_sections(rig.world, rig.soldier,
+                                         moved_start, moved_end, 0, hit));
+    CHECK(hit.primary_section == 14);
+    CHECK(hit.secondary_section == 14);
+    CHECK(hit.material == 19);
+
+    const int32_t stale_start[3] = {fx(0.0545959473), fx(-1.0), fx(0.8296356201)};
+    const int32_t stale_end[3] = {fx(0.0545959473), fx(1.0), fx(0.8296356201)};
+    CHECK(!rig.cw.raycast_person_sections(rig.world, rig.soldier,
+                                          stale_start, stale_end, 0, hit));
+}
+
+void test_f3_debug_prefilters_before_building_section_matrices() {
+    World world;
+    world.registry.configure_pool(0, 4);
+    world.registry.configure_pool(2, 4);
+
+    auto spawn = [&](int pool, EntityKind kind, double x) {
+        Entity seed;
+        seed.kind = kind;
+        seed.alive = true;
+        seed.position = Vec3{static_cast<float>(x), 0.0f, 0.0f};
+        seed.yaw = 90; // engine heading 0: section center stays axis-aligned
+        return world.registry.spawn(pool, seed);
+    };
+    const EntityHandle near_person = spawn(0, EntityKind::Organic, 1.0);
+    const EntityHandle far_person = spawn(0, EntityKind::Organic, 100.0);
+    const EntityHandle near_static = spawn(2, EntityKind::Building, 2.0);
+    const EntityHandle far_static = spawn(2, EntityKind::Building, 100.0);
+    CHECK(near_person.valid() && far_person.valid() &&
+          near_static.valid() && far_static.valid());
+
+    CollisionModel model;
+    model.sections.resize(1);
+    model.sections[0].center[0] = fx(0.25);
+    model.sections[0].center[2] = fx(1.0);
+    model.sections[0].radius = fx(0.5);
+    CollisionWorld collision;
+    const int32_t model_id = collision.add_model(std::move(model));
+    collision.assign_entity(near_person, model_id);
+    collision.assign_entity(far_person, model_id);
+    collision.assign_entity(near_static, model_id);
+    collision.assign_entity(far_static, model_id);
+    CountingMatrixProvider provider;
+    collision.set_section_matrix_provider(&provider);
+
+    const int32_t anchor[3] = {};
+    const auto statics = collision.debug_hitboxes(
+            world, anchor, fx(10.0), 8, 100);
+    CHECK(statics.size() == 1);
+    if (!statics.empty()) CHECK(statics[0].handle == near_static);
+    CHECK(provider.calls_for(near_static) == 1);
+    CHECK(provider.calls_for(near_person) == 0);
+    CHECK(provider.calls_for(far_person) == 0);
+    CHECK(provider.calls_for(far_static) == 0);
+
+    provider.build_handles.clear();
+    const auto people = collision.debug_person_sections(
+            world, anchor, fx(10.0), 8);
+    CHECK(people.size() == 1);
+    if (!people.empty()) {
+        CHECK(people[0].handle == near_person);
+        CHECK(people[0].section == 0);
+        CHECK(people[0].center[0] == fx(1.25));
+        CHECK(people[0].center[1] == 0);
+        CHECK(people[0].center[2] == fx(1.0));
+        CHECK(people[0].authored_radius == fx(0.5));
+    }
+    CHECK(provider.calls_for(near_person) == 1);
+    CHECK(provider.calls_for(far_person) == 0);
+    CHECK(provider.calls_for(near_static) == 0);
+    CHECK(provider.calls_for(far_static) == 0);
+}
+
+void test_late_person_instance_is_demand_resolved_for_rounds_and_debug() {
+    World world;
+    world.registry.configure_pool(0, 4);
+    Entity seed;
+    seed.kind = EntityKind::Organic;
+    seed.health = 100;
+    seed.alive = true;
+    seed.position = Vec3{5.0f, 0.0f, 0.0f};
+    const EntityHandle victim = world.registry.spawn(0, seed);
+    CHECK(victim.valid());
+
+    CollisionModel person;
+    person.sections.resize(15);
+    person.sections[14].radius = fx(1.0);
+    CollisionWorld collision;
+    const int32_t model_id = collision.add_model(std::move(person));
+    DemandPersonProvider provider;
+    provider.collision = &collision;
+    provider.model_id = model_id;
+    provider.expected = victim;
+    collision.set_section_matrix_provider(&provider);
+
+    // No instance was assigned by a mission-start sweep. RoundSim must invoke
+    // the provider before choosing the torso sphere; this z=0 ray hits authored
+    // head section 14 while missing the fallback centered at z=0.9.
+    LiveRound &round = world.round_sim.rounds[0];
+    round.active = true;
+    world.round_sim.active_count = 1;
+    round.pos = Vec3{0.0f, 0.0f, 0.0f};
+    round.vel = Vec3{10.0f, 0.0f, 0.0f};
+    round.max_age_ticks = 100;
+    world.round_sim.tick(world, nullptr, &collision);
+    CHECK(provider.ensure_calls == 1);
+    CHECK(collision.has_instance(world, victim));
+    CHECK(world.round_sim.debug_trail_count == 1);
+    if (world.round_sim.debug_trail_count == 1)
+        CHECK(world.round_sim.debug_trail[0].section == 14);
+
+    // F3's posed-section snapshot shares the same ensure seam and does not
+    // re-enter it once an instance exists.
+    const int32_t anchor[3] = {};
+    const auto rows = collision.debug_person_sections(world, anchor, -1, 4);
+    CHECK(rows.size() == 1);
+    if (!rows.empty()) CHECK(rows[0].section == 14);
+    CHECK(provider.ensure_calls == 1);
+}
+
+void test_reused_registry_slot_rejects_old_collision_identity() {
+    World world;
+    world.registry.configure_pool(0, 2);
+    Entity seed;
+    seed.kind = EntityKind::Organic;
+    seed.health = 100;
+    seed.position = Vec3{5.0f, 0.0f, 0.0f};
+    const EntityHandle first = world.registry.spawn(0, seed);
+    CHECK(first.valid());
+    const uint64_t first_spawn_id =
+            world.registry.get(first)->registry_spawn_id;
+
+    CollisionWorld collision;
+    CollisionModel old_main;
+    old_main.sections.resize(4);
+    old_main.sections[3].radius = fx(1.0);
+    const int32_t old_main_id = collision.add_model(std::move(old_main));
+    CollisionModel old_husk;
+    old_husk.sections.resize(3);
+    old_husk.sections[2].radius = fx(1.0);
+    const int32_t old_husk_id = collision.add_model(std::move(old_husk));
+    collision.assign_entity(first, old_main_id, first_spawn_id);
+    collision.assign_entity_husk(first, old_husk_id);
+
+    world.registry.despawn(first);
+    seed.engine_flags = 0x4u; // would select the old husk if it leaked
+    const EntityHandle reused = world.registry.spawn(0, seed);
+    CHECK(reused == first);
+    const uint64_t reused_spawn_id =
+            world.registry.get(reused)->registry_spawn_id;
+    CHECK(reused_spawn_id != first_spawn_id);
+    CHECK(!collision.has_instance(world, reused));
+    CHECK(collision.model_for(world, reused) == nullptr);
+    collision.build_tick_tables(world);
+    CHECK(collision.instance_count() == 0);
+
+    CollisionModel replacement;
+    replacement.sections.resize(15);
+    replacement.sections[14].radius = fx(1.0);
+    const int32_t replacement_id = collision.add_model(std::move(replacement));
+    ReusedSlotPersonProvider provider;
+    provider.collision = &collision;
+    provider.replacement_model_id = replacement_id;
+    provider.expected_spawn_id = reused_spawn_id;
+    collision.set_section_matrix_provider(&provider);
+
+    const int32_t start[3] = {fx(0.0), 0, 0};
+    const int32_t end[3] = {fx(10.0), 0, 0};
+    PersonSectionHit hit;
+    CHECK(!collision.raycast_person_sections(
+            world, reused, start, end, 0, hit));
+    CHECK(collision.ensure_entity_instance(world, reused));
+    CHECK(provider.ensure_calls == 1);
+    CHECK(collision.raycast_person_sections(
+            world, reused, start, end, 0, hit));
+    CHECK(hit.primary_section == 14);
+    CHECK(collision.ensure_entity_instance(world, reused));
+    CHECK(provider.ensure_calls == 1);
+}
+
+struct PersonSectionsFixture {
+    CollisionModel model;
+    std::vector<CollisionMatrix> matrices;
+    CollisionTargetView target;
+
+    explicit PersonSectionsFixture(int section_count) {
+        model.sections.resize(static_cast<size_t>(section_count));
+        const int32_t origin[3] = {0, 0, 0};
+        matrices.assign(static_cast<size_t>(section_count),
+                        collision_matrix_from_heading(0, origin));
+        target.model = &model;
+        target.matrices = matrices.data();
+    }
+
+    void set_section(int section, double x, double y, double z, double radius) {
+        CollisionSection &s = model.sections[static_cast<size_t>(section)];
+        s.center[0] = fx(x);
+        s.center[1] = fx(y);
+        s.center[2] = fx(z);
+        s.radius = fx(radius);
+    }
+};
+
+void test_person_section_reverse_scan_and_mask() {
+    PersonSectionsFixture rig(6);
+    rig.set_section(1, 5.0, 0.0, 0.0, 1.0);
+    rig.set_section(5, 5.0, 0.0, 0.0, 1.0);
+    const int32_t start[3] = {0, 0, 0};
+    const int32_t end[3] = {fx(10.0), 0, 0};
+
+    PersonSectionHit hit;
+    CHECK(collision_raycast_person_sections(rig.target, start, end, 0, 0, hit));
+    CHECK(hit.primary_section == 5);   // first accepted in the high-to-low walk
+    CHECK(hit.secondary_section == 1); // final accepted overlap
+    CHECK(hit.projected_dist == fx(5.0));
+    CHECK(hit.dist == fx(4.5));
+    CHECK(hit.material == 19);
+
+    // entity+0x134 removes a section before the overlap test. Masking the high
+    // section promotes the lower overlap to both retail ray outputs.
+    CHECK(collision_raycast_person_sections(
+            rig.target, start, end, 0, 1u << 5, hit));
+    CHECK(hit.primary_section == 1);
+    CHECK(hit.secondary_section == 1);
+    CHECK(!collision_raycast_person_sections(
+            rig.target, start, end, 0, (1u << 5) | (1u << 1), hit));
+    CHECK(hit.primary_section == -1);
+    CHECK(hit.secondary_section == -1);
+}
+
+void test_person_section_retail_radius_rules() {
+    const int32_t start[3] = {0, 0, 0};
+    const int32_t end[3] = {fx(10.0), 0, 0};
+    PersonSectionHit hit;
+
+    // With authored radius 1u, the normal 45% rule plus 0xCCC padding reaches
+    // only ~0.50u. Head section 14 uses 65% and reaches ~0.70u.
+    PersonSectionsFixture head(15);
+    head.set_section(13, 5.0, 0.6, 0.0, 1.0);
+    head.set_section(14, 5.0, 0.6, 0.0, 1.0);
+    CHECK(collision_raycast_person_sections(head.target, start, end, 0, 0, hit));
+    CHECK(hit.primary_section == 14);
+    CHECK(hit.secondary_section == 14);
+    CHECK(!collision_raycast_person_sections(
+            head.target, start, end, 0, 1u << 14, hit));
+
+    // Hand sections 15 and 16 cap the FINAL effective radius at 0x3000
+    // (0.1875u), even though a 2u authored radius would otherwise be ~0.95u.
+    PersonSectionsFixture inside_cap(17);
+    inside_cap.set_section(15, 5.0, 0.18, 0.0, 2.0);
+    inside_cap.set_section(16, 5.0, 0.18, 0.0, 2.0);
+    CHECK(collision_raycast_person_sections(
+            inside_cap.target, start, end, 0, 0, hit));
+    CHECK(hit.primary_section == 16);
+    CHECK(hit.secondary_section == 15);
+
+    PersonSectionsFixture outside_cap(17);
+    outside_cap.set_section(15, 5.0, 0.19, 0.0, 2.0);
+    outside_cap.set_section(16, 5.0, 0.19, 0.0, 2.0);
+    CHECK(!collision_raycast_person_sections(
+            outside_cap.target, start, end, 0, 0, hit));
+}
+
+void test_face_raycast() {
+    // The quad sits at entity (10, 10, 0) -> world plane z = 1.
+    Rig rig(face_quad_model(14, 0)); // material 14 -> impact tag 18 'metal'
+    Entity *b = rig.world.registry.get(rig.building);
+    b->bound_radius = 3.0f;
+
+    // Straight down through the quad center: hit at half the segment.
+    const int32_t s_hit[3] = {fx(10.0), fx(10.0), fx(3.0)};
+    const int32_t e_hit[3] = {fx(10.0), fx(10.0), fx(-1.0)};
+    RayFaceHit fh;
+    CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, s_hit, e_hit, 0, fh) ==
+          CollisionWorld::FaceRaycast::kHit);
+    CHECK(fh.material == 14);
+    CHECK(fh.section == 0);
+    // dist = |d0| * len / (|d0|+|d1|) = 2.0 u of the 4.0 u segment.
+    CHECK(fh.dist > fx(1.95) && fh.dist < fx(2.05));
+
+    // THE angle case: inside the bound sphere, past the quad edge — the round
+    // must fly on (a sphere test alone would stop it midair).
+    const int32_t s_graze[3] = {fx(12.5), fx(10.0), fx(3.0)};
+    const int32_t e_graze[3] = {fx(12.5), fx(10.0), fx(-1.0)};
+    CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, s_graze, e_graze, 0, fh) ==
+          CollisionWorld::FaceRaycast::kMiss);
+
+    // Enter-front only: from below, the +z-facing quad is a backface -> miss.
+    const int32_t s_up[3] = {fx(10.0), fx(10.0), fx(-1.0)};
+    const int32_t e_up[3] = {fx(10.0), fx(10.0), fx(3.0)};
+    CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, s_up, e_up, 0, fh) ==
+          CollisionWorld::FaceRaycast::kMiss);
+
+    // No instance on the soldier -> the sphere stand-in verdict.
+    CHECK(rig.cw.raycast_entity_faces(rig.world, rig.soldier, s_hit, e_hit, 0, fh) ==
+          CollisionWorld::FaceRaycast::kNoFaceMesh);
+}
+
+void test_face_raycast_flags_and_materials() {
+    RayFaceHit fh;
+    const int32_t s_dn[3] = {fx(10.0), fx(10.0), fx(3.0)};
+    const int32_t e_dn[3] = {fx(10.0), fx(10.0), fx(-1.0)};
+    const int32_t s_up[3] = {fx(10.0), fx(10.0), fx(-1.0)};
+    const int32_t e_up[3] = {fx(10.0), fx(10.0), fx(3.0)};
+
+    {
+        // flags 0x100 = never hit.
+        Rig rig(face_quad_model(14, 0x100));
+        CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, s_dn, e_dn, 0, fh) ==
+              CollisionWorld::FaceRaycast::kMiss);
+    }
+    {
+        // Material 17 foliage vs the ammo 0x4000000 flag; hits without it.
+        Rig rig(face_quad_model(17, 0));
+        CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, s_dn, e_dn,
+                                          0x4000000u, fh) ==
+              CollisionWorld::FaceRaycast::kMiss);
+        CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, s_dn, e_dn, 0, fh) ==
+              CollisionWorld::FaceRaycast::kHit);
+        CHECK(fh.material == 17);
+    }
+    {
+        // 0x800 double-sided accepts the from-below ray; flag 1 does too.
+        Rig rig(face_quad_model(14, 0x800));
+        CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, s_up, e_up, 0, fh) ==
+              CollisionWorld::FaceRaycast::kHit);
+    }
+    {
+        Rig rig(face_quad_model(14, 1));
+        CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, s_up, e_up, 0, fh) ==
+              CollisionWorld::FaceRaycast::kHit);
+    }
+}
+
+void test_face_raycast_husk_swap() {
+    // Intact model material 14; husk model material 5. Flags & 4 must swap the
+    // face set the ray walks [orig: the (Flags & 4) huskModel pick @ 0x4e4d68].
+    Rig rig(face_quad_model(14, 0));
+    const int32_t husk_id = rig.cw.add_model(face_quad_model(5, 0));
+    rig.cw.assign_entity_husk(rig.building, husk_id);
+    const int32_t s_dn[3] = {fx(10.0), fx(10.0), fx(3.0)};
+    const int32_t e_dn[3] = {fx(10.0), fx(10.0), fx(-1.0)};
+    RayFaceHit fh;
+    CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, s_dn, e_dn, 0, fh) ==
+          CollisionWorld::FaceRaycast::kHit);
+    CHECK(fh.material == 14);
+    rig.world.registry.get(rig.building)->engine_flags |= 0x4u;
+    CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, s_dn, e_dn, 0, fh) ==
+          CollisionWorld::FaceRaycast::kHit);
+    CHECK(fh.material == 5);
+}
+
+void test_face_raycast_husk_omits_spawned_piece_sections() {
+    // Death-piece bits describe sections that left the wreck. Once bit 1 is
+    // stamped, rays must pass through that part's old location while the hull
+    // section (bit 0 never sets in retail) remains solid.
+    Rig rig(face_quad_model(14, 0));
+    const int32_t husk_id = rig.cw.add_model(two_section_face_model(5, 6));
+    rig.cw.assign_entity_husk(rig.building, husk_id);
+    Entity *building = rig.world.registry.get(rig.building);
+    building->engine_flags |= 0x4u;
+    building->bound_radius = 8.0f;
+
+    const int32_t root_start[3] = {fx(7.0), fx(10.0), fx(3.0)};
+    const int32_t root_end[3] = {fx(7.0), fx(10.0), fx(-1.0)};
+    const int32_t piece_start[3] = {fx(13.0), fx(10.0), fx(3.0)};
+    const int32_t piece_end[3] = {fx(13.0), fx(10.0), fx(-1.0)};
+    RayFaceHit fh;
+
+    CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, piece_start, piece_end, 0, fh) ==
+          CollisionWorld::FaceRaycast::kHit);
+    CHECK(fh.section == 1 && fh.material == 6);
+
+    building->spawned_piece_mask = 1u << 1;
+    CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, piece_start, piece_end, 0, fh) ==
+          CollisionWorld::FaceRaycast::kMiss);
+    CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, root_start, root_end, 0, fh) ==
+          CollisionWorld::FaceRaycast::kHit);
+    CHECK(fh.section == 0 && fh.material == 5);
+}
+
+void test_face_raycast_uses_callback_matrix_per_section() {
+    // The retail model callback returns one FINAL world matrix per COBJ and the
+    // projectile walker pairs both arrays by ordinal. Section 1 is posed +4u on
+    // X while section 0 stays at its entity placement. The old shared-matrix
+    // target_view hits x=13 and misses x=17; the callback-correct path reverses
+    // those verdicts without moving the root section.
+    Rig rig(two_section_face_model(5, 6));
+    // JetSki's two retail COBJ rows both name parent 0. Pin that hierarchy
+    // metadata cannot collapse the ordinal matrix pairing onto slot 0.
+    CollisionModel *model = const_cast<CollisionModel *>(rig.cw.model(0));
+    CHECK(model != nullptr && model->sections.size() == 2);
+    if (model != nullptr && model->sections.size() == 2) {
+        model->sections[0].parent_part_index = 0;
+        model->sections[1].parent_part_index = 0;
+    }
+    rig.world.registry.get(rig.building)->bound_radius = 12.0f;
+    TwoSectionMatrixProvider provider;
+    rig.cw.set_section_matrix_provider(&provider);
+
+    RayFaceHit fh;
+    const int32_t old_piece_start[3] = {fx(13.0), fx(10.0), fx(3.0)};
+    const int32_t old_piece_end[3] = {fx(13.0), fx(10.0), fx(-1.0)};
+    CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building,
+                                      old_piece_start, old_piece_end, 0, fh) ==
+          CollisionWorld::FaceRaycast::kMiss);
+
+    const int32_t moved_piece_start[3] = {fx(17.0), fx(10.0), fx(3.0)};
+    const int32_t moved_piece_end[3] = {fx(17.0), fx(10.0), fx(-1.0)};
+    CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building,
+                                      moved_piece_start, moved_piece_end, 0, fh) ==
+          CollisionWorld::FaceRaycast::kHit);
+    CHECK(fh.section == 1 && fh.material == 6);
+
+    const int32_t root_start[3] = {fx(7.0), fx(10.0), fx(3.0)};
+    const int32_t root_end[3] = {fx(7.0), fx(10.0), fx(-1.0)};
+    CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building,
+                                      root_start, root_end, 0, fh) ==
+          CollisionWorld::FaceRaycast::kHit);
+    CHECK(fh.section == 0 && fh.material == 5);
+}
+
+void test_face_raycast_rolled_entity() {
+    // A static authored with roll must lean its collision shell WITH the
+    // visual [orig: the spawn orientation matrix Rz(90-yaw)*Ry(-pitch)*Rx(roll)
+    // @ 0x613f40 serves every collision query] — the yaw-only stand-in left
+    // tilted rocks' shells upright, and rays threaded past them where the
+    // model still looked solid (the 00TRg RckS07 through-shot).
+    Rig rig(face_quad_model(14, 0));
+    Entity *b = rig.world.registry.get(rig.building);
+    b->bound_radius = 3.0f;
+
+    // Control: yaw-only (roll 0), the straight-down ray hits the z=1 quad.
+    const int32_t s_dn[3] = {fx(10.0), fx(10.0), fx(3.0)};
+    const int32_t e_dn[3] = {fx(10.0), fx(10.0), fx(-1.0)};
+    RayFaceHit fh;
+    CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, s_dn, e_dn, 0, fh) ==
+          CollisionWorld::FaceRaycast::kHit);
+
+    // Roll the entity 90 deg: the quad plane stands up at world y = 9 facing -y.
+    b->roll = 90;
+    CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, s_dn, e_dn, 0, fh) ==
+          CollisionWorld::FaceRaycast::kMiss); // the old plane position is empty air now
+    const int32_t s_fw[3] = {fx(10.0), fx(7.0), fx(0.0)};
+    const int32_t e_fw[3] = {fx(10.0), fx(11.0), fx(0.0)};
+    CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, s_fw, e_fw, 0, fh) ==
+          CollisionWorld::FaceRaycast::kHit); // the rolled plane catches the level ray
+    CHECK(fh.material == 14);
+    // dist = 2.0 of the 4.0 u segment (plane at world y = 9).
+    CHECK(fh.dist > fx(1.9) && fh.dist < fx(2.1));
+    b->roll = 0;
+}
+
+void test_face_raycast_pitched_entity() {
+    // Exercise the production target_view scratch path, not just the Euler
+    // helper. At heading 0, +90 authored pitch applies Ry(-90), rotating the
+    // local z=1 quad onto world x=9 with its front normal facing -x.
+    Rig rig(face_quad_model(14, 0));
+    Entity *b = rig.world.registry.get(rig.building);
+    b->bound_radius = 3.0f;
+
+    const int32_t s_dn[3] = {fx(10.0), fx(10.0), fx(3.0)};
+    const int32_t e_dn[3] = {fx(10.0), fx(10.0), fx(-1.0)};
+    RayFaceHit fh;
+    CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, s_dn, e_dn, 0, fh) ==
+          CollisionWorld::FaceRaycast::kHit);
+
+    b->pitch = 90;
+    CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, s_dn, e_dn, 0, fh) ==
+          CollisionWorld::FaceRaycast::kMiss);
+    const int32_t s_across[3] = {fx(8.0), fx(10.0), fx(0.0)};
+    const int32_t e_across[3] = {fx(10.0), fx(10.0), fx(0.0)};
+    CHECK(rig.cw.raycast_entity_faces(
+                  rig.world, rig.building, s_across, e_across, 0, fh) ==
+          CollisionWorld::FaceRaycast::kHit);
+    CHECK(fh.material == 14);
+    CHECK(fh.dist > fx(0.95) && fh.dist < fx(1.05));
+    b->pitch = 0;
+}
+
+void test_round_inside_bound_sphere_hits_wall() {
+    // The shoot-through-walls regression: a tick segment lying entirely INSIDE
+    // a big bound sphere must still reach the face walk — the witnessed broad
+    // phase is an UNCLAMPED perpendicular line-distance gate [orig:
+    // Projectile_RaycastProximitySlots @ 0x4e5492], with no boundary-crossing
+    // requirement. The old segment-vs-sphere gate returned no-hit for
+    // inside-sphere segments, so standing inside a building's bound sphere let
+    // rounds cross its walls untested.
+    Rig rig(face_quad_model(14, 0));
+    Entity *b = rig.world.registry.get(rig.building);
+    b->bound_radius = 3.0f;
+
+    RoundSim &rs = rig.world.round_sim;
+    LiveRound &r = rs.rounds[0];
+    r.active = true;
+    rs.active_count = 1;
+    r.owner = EntityHandle{};              // no shooter entity in this rig
+    r.ammo_index = -1;                     // no ammo table: flight/stop only
+    r.pos = Vec3{10.0f, 10.0f, 2.5f};      // 2.5 u from center: inside the sphere
+    r.vel = Vec3{0.0f, 0.0f, -4.0f};       // ends at z -1.5: still inside
+    r.max_age_ticks = 100;
+    rs.tick(rig.world, nullptr, &rig.cw);
+    CHECK(!r.active); // the round stopped on the quad instead of flying through
+    CHECK(rs.impacts.size() == 1);
+    CHECK(rs.impacts[0].effect_tag == 4 + 14); // the face material tag
+    CHECK(rs.impacts[0].position.z > 0.95f && rs.impacts[0].position.z < 1.05f);
+
+    // Inside the sphere but past the quad's edge: the face walk misses and the
+    // round flies on — the fixed gate must not reintroduce midair sphere stops.
+    LiveRound &r2 = rs.rounds[1];
+    r2.active = true;
+    rs.active_count = 1;
+    r2.owner = EntityHandle{};
+    r2.ammo_index = -1;
+    r2.pos = Vec3{11.5f, 10.0f, 2.0f};     // dist 2.5 < 3: inside; x past the quad
+    r2.vel = Vec3{0.0f, 0.0f, -4.0f};
+    r2.max_age_ticks = 100;
+    rs.tick(rig.world, nullptr, &rig.cw);
+    CHECK(r2.active);              // flew on
+    CHECK(rs.impacts.size() == 1); // no new impact
+}
+
+// Equal-distance entity hits keep the first retail dispatch winner: pool 2
+// statics before pool 1 dynamics, before the later organic list.
+void test_round_equal_distance_uses_retail_pool_order() {
+    World world;
+    world.registry.configure_pool(0, 4);
+    world.registry.configure_pool(1, 4);
+    world.registry.configure_pool(2, 4);
+
+    Entity seed;
+    seed.kind = EntityKind::Item;
+    seed.health = 100;
+    seed.position = Vec3{5.0f, 0.0f, 0.9f};
+    seed.bound_radius = kOrganicStandInRadius;
+    const EntityHandle dynamic = world.registry.spawn(1, seed);
+    const EntityHandle statik = world.registry.spawn(2, seed);
+    Entity organic_seed = seed;
+    organic_seed.kind = EntityKind::Organic;
+    organic_seed.position.z = 0.0f; // torso center is +0.9, identical to the items
+    const EntityHandle organic = world.registry.spawn(0, organic_seed);
+    CHECK(dynamic.valid() && statik.valid() && organic.valid());
+
+    LiveRound &round = world.round_sim.rounds[0];
+    round.active = true;
+    world.round_sim.active_count = 1;
+    round.pos = Vec3{0.0f, 0.0f, 0.9f};
+    round.vel = Vec3{10.0f, 0.0f, 0.0f};
+    round.max_age_ticks = 100;
+    world.round_sim.tick(world, nullptr, nullptr);
+
+    CHECK(world.round_sim.debug_trail_count == 1);
+    CHECK(world.round_sim.debug_trail[0].entity == statik.packed);
+}
+
+// Projectile_RaycastProximitySlots excludes the complete witnessed
+// Flags&0x02000001 mask. A bit-25 target must not stop the round; the eligible
+// item behind it becomes the winner.
+void test_round_item_skip_mask() {
+    World world;
+    world.registry.configure_pool(1, 4);
+
+    Entity skipped_seed;
+    skipped_seed.kind = EntityKind::Item;
+    skipped_seed.health = 100;
+    skipped_seed.position = Vec3{4.0f, 0.0f, 0.0f};
+    skipped_seed.bound_radius = 1.0f;
+    skipped_seed.engine_flags = 0x02000000u;
+    const EntityHandle skipped = world.registry.spawn(1, skipped_seed);
+
+    Entity hit_seed = skipped_seed;
+    hit_seed.position = Vec3{8.0f, 0.0f, 0.0f};
+    hit_seed.engine_flags = 0;
+    const EntityHandle eligible = world.registry.spawn(1, hit_seed);
+    CHECK(skipped.valid() && eligible.valid());
+
+    LiveRound &round = world.round_sim.rounds[0];
+    round.active = true;
+    world.round_sim.active_count = 1;
+    round.pos = Vec3{};
+    round.vel = Vec3{12.0f, 0.0f, 0.0f};
+    round.max_age_ticks = 100;
+    world.round_sim.tick(world, nullptr, nullptr);
+
+    CHECK(world.round_sim.debug_trail_count == 1);
+    CHECK(world.round_sim.debug_trail[0].entity == eligible.packed);
+}
+
+// Indestructible is a damage-zeroing gate, not a collision filter. The front
+// organic still stops the round and protects a vulnerable target behind it.
+void test_round_indestructible_organic_still_collides() {
+    World world;
+    world.registry.configure_pool(0, 4);
+
+    Entity front_seed;
+    front_seed.kind = EntityKind::Organic;
+    front_seed.health = 100;
+    front_seed.position = Vec3{4.0f, 0.0f, 0.0f};
+    front_seed.engine_flags = kEntityFlagIndestructible;
+    const EntityHandle front = world.registry.spawn(0, front_seed);
+
+    Entity rear_seed = front_seed;
+    rear_seed.position.x = 8.0f;
+    rear_seed.engine_flags = 0;
+    const EntityHandle rear = world.registry.spawn(0, rear_seed);
+    CHECK(front.valid() && rear.valid());
+
+    AmmoTableEntry ammo;
+    ammo.valid = true;
+    ammo.weight_in_grains = 875;
+    world.ammo.entries.push_back(ammo);
+
+    LiveRound &round = world.round_sim.rounds[0];
+    round.active = true;
+    world.round_sim.active_count = 1;
+    round.pos = Vec3{0.0f, 0.0f, kOrganicStandInCenterZ};
+    round.vel = Vec3{12.0f, 0.0f, 0.0f};
+    round.ammo_index = 0;
+    round.max_age_ticks = 100;
+    world.round_sim.tick(world, nullptr, nullptr);
+
+    CHECK(world.round_sim.debug_trail_count == 1);
+    CHECK(world.round_sim.debug_trail[0].entity == front.packed);
+    CHECK(world.round_sim.debug_trail[0].organic_fallback);
+    CHECK(world.round_sim.debug_trail[0].section == 1);
+    CHECK(world.round_sim.debug_trail[0].secondary_section == 1);
+    CHECK(world.registry.get(front)->health == 100);
+    CHECK(world.registry.get(rear)->health == 100);
+}
+
+void test_round_person_sections_drive_hit_and_death_animation() {
+    World world;
+    world.registry.configure_pool(0, 4);
+
+    Entity victim_seed;
+    victim_seed.kind = EntityKind::Organic;
+    victim_seed.health = 775;
+    victim_seed.alive = true;
+    victim_seed.position = Vec3{5.0f, 0.0f, 0.0f};
+    victim_seed.yaw = 90; // engine heading 0: +X round is the back quadrant
+    const EntityHandle victim = world.registry.spawn(0, victim_seed);
+    CHECK(victim.valid());
+
+    // Both spheres overlap. Retail's reverse walk publishes head 14 as the
+    // primary reaction/death bone and section 2 as the secondary damage zone.
+    CollisionModel model;
+    model.sections.resize(15);
+    model.sections[2].radius = fx(1.0);
+    model.sections[14].radius = fx(1.0);
+    CollisionWorld collision;
+    const int32_t model_id = collision.add_model(std::move(model));
+    collision.assign_entity(victim, model_id);
+
+    AmmoTableEntry ammo;
+    ammo.valid = true;
+    ammo.weight_in_grains = 875;
+    world.ammo.entries.push_back(ammo);
+
+    LiveRound &round = world.round_sim.rounds[0];
+    round.active = true;
+    world.round_sim.active_count = 1;
+    round.pos = Vec3{0.0f, 0.0f, 0.0f};
+    round.vel = Vec3{10.0f, 0.0f, 0.0f};
+    round.ammo_index = 0;
+    round.max_age_ticks = 100;
+    world.round_sim.tick(world, nullptr, &collision);
+
+    CHECK(!round.active);
+    CHECK(world.registry.get(victim)->health == 0);
+    CHECK(world.round_sim.hits.size() == 1);
+    if (!world.round_sim.hits.empty()) {
+        CHECK(world.round_sim.hits[0].victim == victim);
+        // speed 10 * 62, grains 875 => base 620; damage reads ray[32]=2,
+        // whose retail multiplier is 1.25. Using primary head 14 would be 1860.
+        CHECK(world.round_sim.hits[0].damage == 775);
+        CHECK(world.round_sim.hits[0].primary_section == 14);
+        CHECK(world.round_sim.hits[0].secondary_section == 2);
+    }
+    // Head group (base + 8) plus back quadrant 2. The former torso stand-in
+    // would select 186, so this exact 190 assertion catches lost bone routing.
+    CHECK(world.registry.get(victim)->death_anim_state == 190);
+
+    CHECK(world.round_sim.debug_trail_count == 1);
+    if (world.round_sim.debug_trail_count == 1) {
+        const RoundDebugEvent &event = world.round_sim.debug_trail[0];
+        CHECK(event.kind == RoundDebugEvent::kOrganic);
+        CHECK(event.entity == victim.packed);
+        CHECK(event.material == 19);
+        CHECK(event.section == 14);
+        CHECK(event.secondary_section == 2);
+        CHECK(!event.organic_fallback);
+        CHECK(event.hit.x > 4.46f && event.hit.x < 4.48f);
+    }
+}
+
 int main() {
     test_matrix_roundtrip();
+    test_retail_render_pose_matrix_roundtrip_and_order();
     test_blink_query_and_refresh();
     test_sound_occlusion();
     test_ray_clip();
     test_ground_probe_roof();
     test_resolver_wall_pushout();
     test_secondary_vertical_force_is_full_strength();
+    test_platform_contact_uses_positive_authored_pitch();
     test_resolver_hurt_and_zones();
     test_idle_skip_throttle();
     test_slice_cadence_and_invuln();
@@ -741,6 +1821,25 @@ int main() {
     test_debug_seams();
     test_raycast_clear_los();
     test_los_point_bias();
+    test_proximity_tables_use_host_bound_radius();
+    test_face_raycast();
+    test_face_raycast_flags_and_materials();
+    test_face_raycast_husk_swap();
+    test_face_raycast_husk_omits_spawned_piece_sections();
+    test_face_raycast_uses_callback_matrix_per_section();
+    test_person_section_raycast_uses_posed_bone_matrix();
+    test_f3_debug_prefilters_before_building_section_matrices();
+    test_late_person_instance_is_demand_resolved_for_rounds_and_debug();
+    test_reused_registry_slot_rejects_old_collision_identity();
+    test_person_section_reverse_scan_and_mask();
+    test_person_section_retail_radius_rules();
+    test_face_raycast_rolled_entity();
+    test_face_raycast_pitched_entity();
+    test_round_inside_bound_sphere_hits_wall();
+    test_round_equal_distance_uses_retail_pool_order();
+    test_round_item_skip_mask();
+    test_round_indestructible_organic_still_collides();
+    test_round_person_sections_drive_hit_and_death_animation();
     if (failures == 0) std::printf("collision_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }

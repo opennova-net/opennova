@@ -5,10 +5,12 @@
 // WacScript_TryMountEntityToVehicle @0x4f70f0 -> Entity_FindBestSeatSlot @0x4351f0.]
 #include <cmath>
 #include <cstdio>
+#include <memory>
 
 #include "mission/event_runtime.h"
 #include "mission/bms.h"
 #include "world/ai.h"
+#include "world/angle.h"
 #include "world/vehicle_attach.h"
 #include "world/world.h"
 
@@ -403,6 +405,118 @@ int main() {
         ai.tick(w, ctx);
         CHECK(ai.at(idx)->inf.anim_state == 70);
     }
+
+    // ---- mounted seat orientation feeds the complete collision/render body frame ----
+    // The seat is authored in mission degrees, while every AiEntity yaw field is engine BAM:
+    // heading = (90 - mission yaw) * 11930464. For a gunner, 37 - 11 = 26 degrees,
+    // so the witnessed integer convention produces (90 - 26) * 11930464 = 763549696.
+    // [orig: seat carry @0x4b654e-0x4b6575; heading multiplier @0x4659fa]
+    [] {
+        constexpr int32_t kSeatHeading = 763549696;
+        constexpr int32_t kSeatPitch = -143165577;
+        constexpr int32_t kSeatRoll = 202817900;
+
+        auto wp = std::make_unique<World>();
+        World &w = *wp;
+        w.registry.configure_pool(0, 16);
+        w.registry.configure_pool(1, 16);
+        Entity gun = make_gun(200, 10.f, 20.f, 5.f, 37);
+        gun.pitch = -12;
+        gun.roll = 17;
+        gun.seats[0].yaw_offset = 11;
+        w.registry.spawn(1, gun);
+        const EntityHandle sh = w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
+
+        auto aip = std::make_unique<AiSystem>();
+        AiSystem &ai = *aip;
+        w.ai = &ai;
+        const int idx = ai.attach(sh);
+        AiEntity *ae = ai.at(idx);
+        ae->inf.active = true;
+        ae->inf.body_heading = 0x11111111;
+        ae->inf.leg_yaw[0] = 0x22222222;
+        ae->inf.leg_yaw[1] = 0x33333333;
+        ae->inf.leg_target[0] = 0x44444444;
+        ae->inf.leg_target[1] = 0x55555555;
+        ae->body_pitch = 0x12345678;
+        ae->roll = 0x23456789;
+
+        CHECK(w.commands.mount(100, 200));
+        CHECK(ai.pose_if_mounted(*ae, w));
+        const Entity *occ = w.registry.get(sh);
+        CHECK(occ != nullptr);
+        CHECK(occ->yaw == 26);
+        CHECK(occ->pitch == -12);
+        CHECK(occ->roll == 17);
+        CHECK(ae->heading == kSeatHeading);
+        CHECK(ae->inf.body_heading == kSeatHeading);
+        CHECK(ae->inf.leg_yaw[0] == kSeatHeading);
+        CHECK(ae->inf.leg_yaw[1] == kSeatHeading);
+        CHECK(ae->inf.leg_target[0] == kSeatHeading);
+        CHECK(ae->inf.leg_target[1] == kSeatHeading);
+        CHECK(ae->body_pitch == kSeatPitch);
+        CHECK(ae->roll == kSeatRoll);
+    }();
+
+    // ---- a mounted local player's look stays independent of the carried seat body ----
+    // Capture the seat frame before replacing Entity.yaw with the rounded player look mirror.
+    // The AiEntity camera mirrors retain the full-precision look heading/pitch; the body,
+    // both leg chains, body pitch, and roll remain attached to the seat.
+    [] {
+        constexpr int32_t kSeatHeading = 763549696;
+        constexpr int32_t kSeatPitch = -143165577;
+        constexpr int32_t kSeatRoll = 202817900;
+        const int32_t look_heading = world::bam_heading_from_mission_yaw_deg(137.25);
+        constexpr int32_t kLookPitch = 12345678;
+
+        auto wp = std::make_unique<World>();
+        World &w = *wp;
+        w.registry.configure_pool(0, 16);
+        w.registry.configure_pool(1, 16);
+        Entity gun = make_gun(200, 10.f, 20.f, 5.f, 37);
+        gun.pitch = -12;
+        gun.roll = 17;
+        gun.seats[0].yaw_offset = 11;
+        w.registry.spawn(1, gun);
+        const EntityHandle sh = w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
+
+        auto aip = std::make_unique<AiSystem>();
+        AiSystem &ai = *aip;
+        w.ai = &ai;
+        const int idx = ai.attach(sh);
+        AiEntity *ae = ai.at(idx);
+        ae->inf.active = true;
+        ae->inf.is_local_player = true;
+        ae->inf.target_heading = look_heading;
+        ae->inf.look_pitch = kLookPitch;
+        ae->inf.body_heading = 0x11111111;
+        ae->inf.leg_yaw[0] = 0x22222222;
+        ae->inf.leg_yaw[1] = 0x33333333;
+        ae->inf.leg_target[0] = 0x44444444;
+        ae->inf.leg_target[1] = 0x55555555;
+        ae->body_pitch = 0x12345678;
+        ae->roll = 0x23456789;
+
+        CHECK(w.commands.mount(100, 200));
+        CHECK(ai.pose_if_mounted(*ae, w));
+        const Entity *occ = w.registry.get(sh);
+        CHECK(occ != nullptr);
+        CHECK(occ->yaw == 137); // degree-rounded registry/wire/motor look mirror
+        CHECK(occ->pitch == -12);
+        CHECK(occ->roll == 17);
+        CHECK(ae->heading == look_heading); // full precision, never the seat heading
+        CHECK(ae->pitch == kLookPitch);
+        CHECK(ae->inf.target_heading == look_heading);
+        CHECK(ae->heading != kSeatHeading);
+        CHECK(ae->pitch != kSeatPitch);
+        CHECK(ae->inf.body_heading == kSeatHeading);
+        CHECK(ae->inf.leg_yaw[0] == kSeatHeading);
+        CHECK(ae->inf.leg_yaw[1] == kSeatHeading);
+        CHECK(ae->inf.leg_target[0] == kSeatHeading);
+        CHECK(ae->inf.leg_target[1] == kSeatHeading);
+        CHECK(ae->body_pitch == kSeatPitch);
+        CHECK(ae->roll == kSeatRoll);
+    }();
 
     // ---- non-gunner seats carry a local facing offset, not just vehicle yaw ----
     {

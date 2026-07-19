@@ -81,18 +81,18 @@ int main() {
 
 	// --- bake_ground_transform: pitch-only, hand-computed -----------------
 	{
-		// pitch=90: R = Rz(90) * Ry(90) * Rz(90).
+		// pitch=90: R = Rz(90) * Ry(-90) * Rz(90).
 		// Step by step on anchor (1, 2, 3):
 		//   Rz(90):  (1, 2, 3)  -> (-2, 1, 3)
-		//   Ry(90):  (-2, 1, 3) -> (3, 1, 2)
-		//   Rz(90):  (3, 1, 2)  -> (-1, 3, 2)
+		//   Ry(-90): (-2, 1, 3) -> (-3, 1, -2)
+		//   Rz(90):  (-3, 1, -2) -> (-1, -3, -2)
 		EntityTransform hit;
 		hit.pitch = 90;
 		const float anchor[3] = {1.0f, 2.0f, 3.0f};
 		const EntityTransform baked = authoring::bake_ground_transform(hit, anchor);
 		TEST_EXPECT(near(baked.x, 1.0));
-		TEST_EXPECT(near(baked.y, -3.0));
-		TEST_EXPECT(near(baked.z, -2.0));
+		TEST_EXPECT(near(baked.y, 3.0));
+		TEST_EXPECT(near(baked.z, 2.0));
 	}
 
 	// --- place_entity_grounded: kind derivation + zero-rotation bake ------

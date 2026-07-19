@@ -77,7 +77,7 @@ func test_present_effect_lookup_matches_client_snapshot_and_reloads_cleanly() ->
 	first_mission.add_entity(3, 0, Vector3(12, 4, -3), Vector3.ZERO)
 	# Use the second pool-0 organic so its wire handle is non-zero; handle zero is
 	# the presentation sentinel even though slot zero is valid in the registry.
-	first_mission.add_entity(3, 0, Vector3(18, 4, -3), Vector3.ZERO)
+	first_mission.add_entity(3, 0, Vector3(18, 4, -3), Vector3(10, 20, 30))
 
 	var sim := NovaSimulation.new()
 	sim.enable_listen_server(true)
@@ -102,6 +102,12 @@ func test_present_effect_lookup_matches_client_snapshot_and_reloads_cleanly() ->
 			snapshot[row_base + NovaSimulation.PF_PITCH_DEG],
 			snapshot[row_base + NovaSimulation.PF_YAW_DEG],
 			snapshot[row_base + NovaSimulation.PF_ROLL_DEG])
+	assert_almost_eq(expected_rotation.x, 10.0, 0.001,
+			"the host snapshot restores authored pitch from the registry")
+	assert_almost_eq(expected_rotation.y, 20.0, 1.5,
+			"yaw remains the retail compact-byte view")
+	assert_almost_eq(expected_rotation.z, 30.0, 0.001,
+			"the host snapshot restores authored roll from the registry")
 	var wire_handle := int(snapshot[row_base + NovaSimulation.PF_WIRE_HANDLE])
 	var bms_id := int(snapshot[row_base + NovaSimulation.PF_BMS_ID])
 	var ssn := int(snapshot[row_base + NovaSimulation.PF_NET_ID])
@@ -143,6 +149,34 @@ func test_present_effect_lookup_matches_client_snapshot_and_reloads_cleanly() ->
 	assert_gt(replacement_state[NovaSimulation.EFFECT_STATE_POSITION].distance_to(
 			expected_position), 40.0,
 		"world replacement invalidates an equal-tick pose cache")
+	sim.free()
+
+
+func test_listen_server_restart_preserves_auto_spawned_local_identity() -> void:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	md.add_entity(3, 0, Vector3(8, 0, 0), Vector3.ZERO)
+
+	var sim := NovaSimulation.new()
+	sim.enable_listen_server(true)
+	assert_true(sim.load_from_mission_data(md))
+	assert_true(sim.has_local_player())
+	var player_handle := sim.get_local_player_wire_handle()
+
+	sim.restart()
+	assert_true(sim.has_local_player(),
+			"restart restores the listen baseline's host-player identity")
+	assert_eq(sim.get_local_player_wire_handle(), player_handle)
+	sim.step()
+	var stride := sim.get_present_stride()
+	var snapshot := sim.get_present_snapshot()
+	var found_player := false
+	for record in range(snapshot.size() / stride):
+		if int(snapshot[record * stride + NovaSimulation.PF_WIRE_HANDLE]) == player_handle:
+			found_player = true
+			break
+	assert_true(found_player,
+			"the restored host player still replicates through the loopback client")
 	sim.free()
 
 

@@ -8,6 +8,7 @@
 //  - the player deploy group stamp @0x519fd0 (commandGroup = 1)
 #include "world/ai.h"
 #include "world/angle.h"
+#include "world/collision.h"
 #include "world/entity.h"
 #include "world/player_spawn.h"
 #include "world/vehicle_attach.h"
@@ -127,38 +128,41 @@ void test_toggle_deck_best_seat() {
     CHECK(r.player().mount_type == SeatType::Controller);
 }
 
-// Toggle while mounted with no other seat in reach = dismount [orig: @0x4369c7].
-// With another free seat in reach = swap [orig: @0x4369ac].
+// Toggle while mounted = dismount [orig: @0x4369c7]: the OWN vehicle's seats are
+// LOS-blocked by its hull in retail, so the seated scan runs dry — USE exits, it
+// never cycles seats (the hull occlusion is a candidate skip until pool-1 collision
+// lands, D-AI-11 j). A DIFFERENT vehicle's free seat within reach still swaps
+// [orig: @0x4369ac].
 void test_toggle_dismount_and_swap() {
     Rig r(2.0f);
     CHECK(player_toggle_vehicle_mount(r.w, r.player_h));
     CHECK(r.player().mounted);
-    const int first_seat = r.player().mount_seat;
-    // Second toggle: the OTHER free seat is still within reach -> swap, not dismount.
-    CHECK(player_toggle_vehicle_mount(r.w, r.player_h));
-    CHECK(r.player().mounted);
-    CHECK(r.player().mount_seat != first_seat);
-    // Occupy the remaining free seat with someone else -> the next toggle dismounts.
-    Entity other;
-    other.kind = EntityKind::Organic;
-    other.item_id = 5305;
-    other.health = 150;
-    other.alive = true;
-    EntityHandle oh = r.w.registry.spawn(0, other);
-    Entity &veh = r.veh();
-    for (int i = 0; i < static_cast<int>(veh.seats.size()); ++i) {
-        if (!veh.seats[i].occupant.valid()) {
-            veh.seats[i].occupant = oh;
-            Entity *oe = r.w.registry.get(oh);
-            oe->mounted = true;
-            oe->mount_target = r.veh_h;
-            oe->mount_seat = static_cast<int8_t>(i);
-            oe->mount_type = veh.seats[i].type;
-            break;
-        }
-    }
+    // Second toggle: the own vehicle's other free seat does NOT swap — USE exits.
     CHECK(player_toggle_vehicle_mount(r.w, r.player_h));
     CHECK(!r.player().mounted);
+
+    // Remount, then park a SECOND vehicle with a free seat inside the 4 u gate of the
+    // seated player: the fresh scan hit re-enters (the vehicle-to-vehicle swap).
+    CHECK(player_toggle_vehicle_mount(r.w, r.player_h));
+    CHECK(r.player().mounted);
+    Entity other;
+    other.kind = EntityKind::Item;
+    other.item_id = 1294;
+    other.position = {103.0f, 200.0f, 10.0f}; // ~1 u from the standing spot at 102
+    other.yaw = 0;
+    other.health = 2000;
+    other.health_max = 2000;
+    other.alive = true;
+    Seat sit;
+    sit.type = SeatType::Passenger;
+    sit.bone_index = 2;
+    sit.source_name = "sitex00";
+    sit.seat_local = {0.0f, 0.5f, 1.0f};
+    other.seats.push_back(sit);
+    EntityHandle oh = r.w.registry.spawn(1, other);
+    CHECK(player_toggle_vehicle_mount(r.w, r.player_h));
+    CHECK(r.player().mounted);
+    CHECK(r.player().mount_target == oh); // swapped ACROSS vehicles, not out
 }
 
 // An enemy occupant rejects the whole vehicle in the scan [orig: Vehicle_HasEnemyOccupant
@@ -323,6 +327,82 @@ void test_ai_drive_leg() {
     }
 }
 
+// The pool-1 avoid BRAKE: a neighbor whose footprint ellipse overlaps ours and
+// sits within ~30 deg of dead ahead damps the command speed by the id/frame
+// factor ((id + (tick<<8)) & 0x7FFF) + 0x4000 per tick; a neighbor BEHIND does
+// not [orig: @0x48bd8f-0x48bf26].
+void test_ai_drive_avoid_brake() {
+    Rig r(30.0f);
+    const VehicleTraits t = truck_traits();
+    r.w.vehicle_traits.set(r.veh().item_id, t);
+    const int ai_idx = r.sys.attach(r.veh_h);
+    AiEntity &ve = *r.sys.at(ai_idx);
+    ve.pos[0] = 100 << 16;
+    ve.pos[1] = 200 << 16;
+    ve.pos[2] = 10 << 16;
+    r.sys.nav.channels.resize(3);
+    r.sys.nav.channels[2].count = 1;
+    r.sys.nav.channels[2].entries[0] = 0;
+    r.sys.nav.nodes.resize(1);
+    r.sys.nav.nodes[0] = NavEntry{{2 << 16, 300 << 16, 200 << 16, 10 << 16, 0}};
+    AiBrain &b = ve.brain;
+    b.f[AiBrain::kCurState] = 16;
+    b.f[AiBrain::kWpType] = 1;
+    b.f[AiBrain::kWpChannel] = 2;
+    b.f[AiBrain::kWpNode] = 0;
+    b.f[AiBrain::kOutSpeed] = 40 * 293;
+    // Face +x (engine BAM 0) with no bearing error -> the sharp-leg damps stay out.
+    r.veh().position = Vec3{100.0f, 200.0f, 10.0f};
+    r.veh().veh.yaw_bam = bam_heading_from_mission_yaw_deg(90.0);
+    r.veh().veh.yaw_seeded = true;
+    ve.heading = r.veh().veh.yaw_bam;
+    r.veh().bound_radius = 3.0f;
+
+    Entity npc;
+    npc.kind = EntityKind::Organic;
+    npc.item_id = 2072;
+    npc.health = 150;
+    npc.alive = true;
+    npc.team = 1;
+    const EntityHandle nh = r.w.registry.spawn(0, npc);
+    CHECK(entity_process_vehicle_attach(r.w, nh, r.veh_h, 1));
+    Entity *ctrl = resolve_vehicle_controller(r.w, r.veh());
+    CHECK(ctrl != nullptr);
+
+    // Baseline: open road, undamped.
+    VehicleDriveCmd cmd0;
+    r.sys.vehicle_ai_drive(r.w, r.veh(), ctrl, t, cmd0);
+    CHECK(cmd0.ai_drive);
+    CHECK(cmd0.cmd_speed > 0);
+
+    // A parked prop dead AHEAD (+x), footprints overlapping.
+    Entity prop;
+    prop.kind = EntityKind::Item;
+    prop.item_id = 999;
+    prop.position = Vec3{104.0f, 200.0f, 10.0f};
+    prop.bound_radius = 3.0f;
+    const EntityHandle ph = r.w.registry.spawn(1, prop);
+
+    VehicleDriveCmd cmd1;
+    r.sys.vehicle_ai_drive(r.w, r.veh(), ctrl, t, cmd1);
+    CHECK(cmd1.ai_drive);
+    const int32_t f = static_cast<int32_t>(
+            ((static_cast<uint32_t>(r.veh().net_id) +
+              (static_cast<uint32_t>(r.w.logic_tick) << 8)) &
+             0x7FFFu) +
+            0x4000u);
+    const int32_t expect = static_cast<int32_t>(
+            (static_cast<int64_t>(f) * cmd0.cmd_speed + 0x8000) >> 16);
+    CHECK(cmd1.cmd_speed == expect);
+    CHECK(cmd1.cmd_speed < cmd0.cmd_speed);
+
+    // The same prop BEHIND: inside reach, but the dead-ahead gate rejects.
+    r.w.registry.get(ph)->position = Vec3{96.0f, 200.0f, 10.0f};
+    VehicleDriveCmd cmd2;
+    r.sys.vehicle_ai_drive(r.w, r.veh(), ctrl, t, cmd2);
+    CHECK(cmd2.cmd_speed == cmd0.cmd_speed);
+}
+
 // The redirect order reaches the BRAIN (mode/list/node + budget) and the BMS speed
 // commands write kSpeedA/kSpeedB at the witnessed x65536/225 scale.
 // [orig: Entity_SetWaypointByTeam @0x43cdb4; Entity_ApplyCommand @0x43ab60 0x1D/0x1E ->
@@ -419,6 +499,16 @@ void test_local_player_drive_mirror() {
     const float dx = r.player().position.x - r.veh().position.x;
     const float dy = r.player().position.y - r.veh().position.y;
     CHECK(std::sqrt(dx * dx + dy * dy) < 4.0f);
+
+    // The seated LOOK stays mouse-instant at FULL precision on the AiEntity mirrors
+    // the camera reads — a mid-ride look change lands the same tick, both axes
+    // (tick_infantry's own mirrors are skipped for the whole ride)
+    // [orig: Input_HandleActionBinding_0 @0x4e1330 -> entity+0x10/+0x14].
+    pe.inf.target_heading = bam_heading_from_mission_yaw_deg(137.25);
+    pe.inf.look_pitch = 12345678;
+    CHECK(r.sys.pose_if_mounted(pe, r.w));
+    CHECK(pe.heading == pe.inf.target_heading); // full precision, not the deg roundtrip
+    CHECK(pe.pitch == 12345678);
 }
 
 // spawn_player stamps commandGroup 1 [orig: the deploy leg @0x519fd0] — 00TRa's tour
@@ -540,6 +630,145 @@ void test_attach_labels_armory_mode() {
 
 } // namespace
 
+// The hull-vs-world contact stops a driving vehicle at a building wall instead of
+// passing through, and the contact decays speed by the def torque shift.
+// [orig: Entity_CheckCollisionState @0x462a30 via the physics @0x47cb8c; severity
+//  decay @0x47cc13-0x47ccc1]
+void test_vehicle_hull_stops_at_building() {
+    Rig r(30.0f);
+    VehicleTraits t = truck_traits();
+    t.torque = 2; // sev-3 decay = speed - (speed >> 4) per contact tick
+    r.w.vehicle_traits.set(r.veh().item_id, t);
+
+    CollisionWorld cw;
+    r.sys.collision = &cw;
+
+    // A building wall across the truck's path at x=150 (the truck faces +x from
+    // x=100): 2u half-depth, 25u half-width (the spin-up arc drifts ~13u north), 5u tall.
+    Entity wall;
+    wall.kind = EntityKind::Building;
+    wall.position = {150.0f, 200.0f, 10.0f};
+    // Mission yaw 90 = engine heading 0 = identity section matrix (the matrix
+    // bakes the 90-minus-yaw mission->engine convention): the box's thin local-x
+    // axis lies along mission X — a wall square across the drive line.
+    wall.yaw = 90;
+    wall.alive = true;
+    wall.health = 30000;
+    r.w.registry.configure_pool(2, 4);
+    EntityHandle wh = r.w.registry.spawn(2, wall);
+    CollisionModel box;
+    {
+        auto plane = [&](int nx, int ny, int nz, double d) {
+            CollisionPlane p;
+            p.nx = static_cast<int16_t>(nx);
+            p.ny = static_cast<int16_t>(ny);
+            p.nz = static_cast<int16_t>(nz);
+            p.dist = static_cast<int32_t>(d * 65536.0);
+            box.planes.push_back(p);
+        };
+        plane(16384, 0, 0, -2.0);
+        plane(-16384, 0, 0, -2.0);
+        plane(0, 16384, 0, -25.0);
+        plane(0, -16384, 0, -25.0);
+        plane(0, 0, 16384, -5.0);
+        plane(0, 0, -16384, 0.0);
+        CollisionVolume v;
+        v.type = 1; // solid
+        v.min_x = static_cast<int32_t>(-2.0 * 65536);
+        v.max_x = static_cast<int32_t>(2.0 * 65536);
+        v.min_y = static_cast<int32_t>(-25.0 * 65536);
+        v.max_y = static_cast<int32_t>(25.0 * 65536);
+        v.min_z = 0;
+        v.max_z = static_cast<int32_t>(5.0 * 65536);
+        v.plane_start = 0;
+        v.plane_count = 6;
+        box.volumes.push_back(v);
+        CollisionSection s;
+        s.volume_start = 0;
+        s.volume_count = 1;
+        // The section AABB/bound the host fills from COBJ.
+        s.min_x = v.min_x;
+        s.max_x = v.max_x;
+        s.min_y = v.min_y;
+        s.max_y = v.max_y;
+        s.min_z = v.min_z;
+        s.max_z = v.max_z;
+        s.center[2] = static_cast<int32_t>(2.5 * 65536);
+        s.radius = static_cast<int32_t>(26.0 * 65536);
+        box.sections.push_back(s);
+    }
+    cw.assign_entity(wh, cw.add_model(std::move(box)));
+
+    // NPC driver + a route node BEYOND the wall: without the hull contact the truck
+    // drives straight through x=150.
+    const int ai_idx = r.sys.attach(r.veh_h);
+    AiEntity &ve = *r.sys.at(ai_idx);
+    ve.pos[0] = 100 << 16;
+    ve.pos[1] = 200 << 16;
+    ve.pos[2] = 10 << 16;
+    ve.heading = bam_heading_from_mission_yaw_deg(90.0); // face +x
+    r.sys.nav.channels.resize(3);
+    r.sys.nav.channels[2].count = 1;
+    r.sys.nav.channels[2].entries[0] = 0;
+    r.sys.nav.nodes.resize(1);
+    r.sys.nav.nodes[0] = NavEntry{{2 << 16, 300 << 16, 200 << 16, 10 << 16, 0}};
+    AiBrain &b = ve.brain;
+    b.f[AiBrain::kCurState] = 16;
+    b.f[AiBrain::kWpType] = 1;
+    b.f[AiBrain::kWpChannel] = 2;
+    b.f[AiBrain::kWpNode] = 0;
+    b.f[AiBrain::kOutSpeed] = 40 * 293;
+
+    Entity npc;
+    npc.kind = EntityKind::Organic;
+    npc.item_id = 2072;
+    npc.health = 150;
+    npc.alive = true;
+    npc.team = 1;
+    EntityHandle nh = r.w.registry.spawn(0, npc);
+    CHECK(entity_process_vehicle_attach(r.w, nh, r.veh_h, 1));
+    Entity *ctrl = resolve_vehicle_controller(r.w, r.veh());
+    CHECK(ctrl != nullptr);
+
+    // Unit probe: with tables built and the hull point INSIDE the wall face, the
+    // query must report the wall-severity push.
+    {
+        const double cases[3][2] = {{146.8, 200.0}, {146.8, 212.6}, {148.5, 212.6}};
+        for (auto &c : cases) {
+            r.veh().position = {static_cast<float>(c[0]), static_cast<float>(c[1]), 10.0f};
+            for (int i = 0; i < 17; ++i) cw.build_tick_tables(r.w);
+            const int32_t probe_pos[3] = {static_cast<int32_t>(c[0] * 65536),
+                                          static_cast<int32_t>(c[1] * 65536), 10 << 16};
+            const int32_t probe_prev[3] = {static_cast<int32_t>((c[0] - 0.2) * 65536),
+                                           static_cast<int32_t>(c[1] * 65536), 10 << 16};
+            int32_t pf[2];
+            const int sev = cw.resolve_vehicle_hull(r.w, r.veh_h, probe_pos, probe_prev, pf);
+            CHECK(sev == 3);  // a wall contact is the full-force class
+            CHECK(pf[0] < 0); // pushed back out along -x
+            CHECK(pf[1] == 0);
+        }
+        r.veh().position = {100.0f, 200.0f, 10.0f};
+    }
+
+    for (int i = 0; i < 950; ++i) {
+        cw.build_tick_tables(r.w); // self-gated to the 17-tick cadence
+        VehicleDriveCmd cmd;
+        r.sys.vehicle_ai_drive(r.w, r.veh(), ctrl, t, cmd);
+        tick_vehicle_motor(r.w, r.veh(), t, &cmd);
+        AiEntity *ve2 = r.sys.for_handle(r.veh_h);
+        ve2->pos[0] = static_cast<int32_t>(r.veh().position.x * 65536.0f);
+        ve2->pos[1] = static_cast<int32_t>(r.veh().position.y * 65536.0f);
+        ve2->pos[2] = static_cast<int32_t>(r.veh().position.z * 65536.0f);
+        ve2->heading = r.veh().veh.yaw_bam;
+    }
+    // The wall's near face is x=148; the hull point (1.5u radius) holds the truck
+    // outside it. Without the contact leg the truck ends far past 150.
+    CHECK(r.veh().position.x > 110.0f);  // it drove
+    CHECK(r.veh().position.x < 149.0f);  // and stopped at the wall
+    CHECK(std::abs(r.veh().veh.speed) < 40 * 293 / 2); // the contact decay bit
+
+}
+
 int main() {
     test_toggle_nearest_seat();
     test_toggle_deck_best_seat();
@@ -547,12 +776,14 @@ int main() {
     test_enemy_occupant_blocks_scan();
     test_bms_mount_predicates();
     test_ai_drive_leg();
+    test_ai_drive_avoid_brake();
     test_redirect_and_speed_commands();
     test_local_player_drive_mirror();
     test_player_spawn_group();
     test_attach_labels_seats();
     test_attach_labels_can_fire_gate();
     test_attach_labels_armory_mode();
+    test_vehicle_hull_stops_at_building();
     if (failures == 0) std::printf("vehicle_mount_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }

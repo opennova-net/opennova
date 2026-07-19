@@ -33,6 +33,7 @@ const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer
 const MissionPresentPass := preload("res://engine/world/mission_present_pass.gd")
 const WirePresentPass := preload("res://engine/world/wire_present_pass.gd")
 const FirePresentPass := preload("res://engine/world/fire_present_pass.gd")
+const DestructionPresentPass := preload("res://engine/world/destruction_present_pass.gd")
 const MissionSeatDiagnostics := preload("res://engine/world/mission_seat_diagnostics.gd")
 
 # Fixed-timestep accumulator. The original decouples the simulation from rendering: the master
@@ -46,6 +47,7 @@ var _sim: NovaSimulation
 var _present                          # MissionPresentPass: placed nodes (host/SP/editor); null on a joiner
 var _wire_present                     # WirePresentPass: un-placed remote players (co-op host + joiner); else null
 var _fire_present                     # FirePresentPass: AI/remote fire sound + muzzle + tracers (host); else null
+var _destruction_present              # DestructionPresentPass: husk swap + debris + wreck effects (host); else null
 var _index
 var _self_tick := false              # editor: self-tick via _process while playing; game: host calls tick()
 var _playing := false
@@ -57,6 +59,7 @@ var _perf_effects_us: int = 0
 var _perf_did_tick := false
 var _accum := 0.0                    # banked real time (s) not yet consumed by a logic tick
 var _ticks_last_frame := 0           # logic ticks run by the last tick_realtime() call (catch-up signal)
+var _presentation_time_ms := -1      # shared render/PANM DWORD; negative = direct-sim fallback
 # Stable mission identity for host-neutral diagnostics such as the F3 overlay.
 var _mission_file := ""
 var _mission_name := ""
@@ -152,6 +155,8 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 		_sim = null
 		_has_native_present_effect_pose_lookup = false
 		return 0
+	if _presentation_time_ms >= 0:
+		_sim.set_panm_time_ms(_presentation_time_ms)
 	# Ground the AI on the host's terrain (editor preview + game share this one call). Entities hug
 	# the terrain instead of floating; absent/unloaded terrain leaves their authored Z untouched.
 	if options.get("terrain") != null:
@@ -213,6 +218,18 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 			options.get("fire_audio", Callable()),
 			options.get("fire_fx", Callable()),
 			options.get("fire_listener", Callable()))
+	# The host destruction-presentation pass: husk model swaps, death-piece
+	# debris, wreck fire/smoke, destruction sounds — off the sim's destruction
+	# drain (world/destruction.h; world-wac-ai-re §24). Shares the fire pass's
+	# audio/fx providers.
+	if not is_joiner and options.has("fire_audio"):
+		_destruction_present = DestructionPresentPass.new()
+		_destruction_present.setup(_sim, container, _index, options.get("placer"),
+			options.get("item_db"), options.get("game_world"),
+			options.get("fire_audio", Callable()),
+			options.get("fire_fx", Callable()), options.get("env_node"))
+		simulation_restarted.connect(
+				Callable(_destruction_present, 'reset_runtime_state'))
 	# Spawn the host's own player as an authoritative pool-0 entity (ADR 0012 / net-re §5.2b).
 	# After load (the spawn needs the AI system wired). The spawn POSE is selected the way the
 	# original engine does — by game type, from the mission's player-START marker FARTHEST from the
@@ -489,6 +506,12 @@ func local_player_team() -> int:
 func get_fire_present_stats() -> Dictionary:
 	return _fire_present.get_stats() if _fire_present != null else {}
 
+
+func get_destruction_present_stats() -> RefCounted:
+	# DestructionPresentPass.Stats (typed counters, ADR 0017); null until a
+	# host mission runs with the pass.
+	return _destruction_present.get_stats() if _destruction_present != null else null
+
 func set_player_input(forward: bool, back: bool, left: bool, right: bool, lean_left: bool, lean_right: bool, jump: bool) -> void:
 	if _sim != null:
 		_sim.set_player_input(forward, back, left, right, lean_left, lean_right, jump)
@@ -511,6 +534,12 @@ func request_player_stance(stance: int) -> bool:
 
 func get_sim() -> NovaSimulation:
 	return _sim
+
+
+func set_presentation_time_ms(value_ms: int) -> void:
+	_presentation_time_ms = -1 if value_ms < 0 else value_ms & 0xffffffff
+	if _sim != null:
+		_sim.set_panm_time_ms(_presentation_time_ms)
 
 
 ## The placed-node registry (bms_id/kind/group -> live node). The render-occlusion
@@ -619,6 +648,8 @@ func tick() -> bool:
 			_wire_present.present()
 		if _fire_present != null:
 			_fire_present.present(1)
+		if _destruction_present != null:
+			_destruction_present.present()
 		_perf_present_us = Time.get_ticks_usec() - present_start
 	_perf_tick_us = Time.get_ticks_usec() - tick_start
 	_perf_did_tick = did_tick
@@ -680,7 +711,7 @@ func tick_realtime(delta: float) -> int:
 	_perf_sim_us = sim_us
 	_perf_effects_us = effects_us
 	_perf_present_us = 0
-	if _present != null or _wire_present != null or _fire_present != null:
+	if _present != null or _wire_present != null or _fire_present != null or _destruction_present != null:
 		var present_start := Time.get_ticks_usec()
 		if _present != null:
 			_present.present()
@@ -688,6 +719,8 @@ func tick_realtime(delta: float) -> int:
 			_wire_present.present()
 		if _fire_present != null:
 			_fire_present.present(n)
+		if _destruction_present != null:
+			_destruction_present.present()
 		_perf_present_us = Time.get_ticks_usec() - present_start
 	_perf_tick_us = Time.get_ticks_usec() - tick_start
 	_perf_did_tick = true
@@ -784,6 +817,12 @@ func _exit_tree() -> void:
 	if _fire_present != null:
 		_fire_present.teardown()  # frees the tracer mesh instance under the container
 		_fire_present = null
+	if _destruction_present != null:
+		var reset_destruction := Callable(_destruction_present, 'reset_runtime_state')
+		if simulation_restarted.is_connected(reset_destruction):
+			simulation_restarted.disconnect(reset_destruction)
+		_destruction_present.teardown()  # frees husk models + effect anchors
+		_destruction_present = null
 	if _sim != null and is_instance_valid(_sim):
 		_sim.free()
 		_sim = null

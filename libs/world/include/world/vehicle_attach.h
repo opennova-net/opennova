@@ -74,7 +74,9 @@ struct NearestSeatHit {
 // pick while the player stands in the armory volume; the mount toggle always scans seats.
 // Tracked deviations (D-AI-11): the candidate set is a registry sweep (the original walks
 // the player's proximity list), the eye is the +0.9 u chest stand-in + the witnessed
-// +0.1875 u bias (CameraOffset unmodeled), and the emplaced-gun carrier LOS/reject legs
+// +0.1875 u bias (CameraOffset unmodeled), the seated requester skips its CURRENT mount
+// vehicle outright (the own-hull LOS occlusion stand-in until pool-1 collision lands —
+// USE exits, never cycles seats; j), and the emplaced-gun carrier LOS/reject legs
 // (def attrib 0x20 -> groundEntity) are unmodeled.
 bool find_nearest_free_seat(World &world, const Entity &player, NearestSeatHit &out,
                             bool armory_mode);

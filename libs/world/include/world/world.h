@@ -15,6 +15,7 @@
 
 #include "audio/sound_profile.h"
 #include "terrain/surface_type_map.h"
+#include "world/destruction.h"
 #include "world/entity.h"
 #include "world/entity_registry.h"
 #include "world/trigger_relations.h"
@@ -402,6 +403,18 @@ public:
     // RoundData_AddRound; Weapon_UpdateAllProjectiles @0x4ec020; §5.60]
     RoundSim round_sim;
 
+    // The explosion queue + AoE damage, the death-piece pool, the per-item death
+    // traits, and the destruction presentation events (world/destruction.h;
+    // world-wac-ai-re §24). Explosions queued this tick drain inside
+    // run_logic_tick right after the round sim [orig: Projectile_ProcessExplosionQueue
+    // @0x4ead80 runs once per frame after the projectile update]; the host drains
+    // `destruction` (present) and feeds `item_death_traits` (item-traits sweep).
+    ExplosionSim explosions;
+    DeathPieceSim death_pieces;
+    DestructionRng destruction_rng;
+    ItemDeathTraitsTable item_death_traits;
+    DestructionEvents destruction;
+
     // End-of-round outcome + the SP kill-stat buckets (see the struct docs above).
     RoundEndState round_end;
     MissionKillStats kill_stats;
@@ -503,12 +516,14 @@ public:
 
     // Editor "play" support: snapshot/restore of mutable world state so a
     // simulate/stop cycle doesn't dirty the authored mission. Value copies of the
-    // registry + vars + env + clock; systems re-init from on_load on restore.
+    // registry + vars + env + clock + stable local-player ownership; per-tick
+    // health/proximity/human-count caches reset and systems re-init on restore.
     struct Snapshot {
         EntityRegistry registry;
         ScriptVarStore vars;
         EnvState env;
         uint32_t logic_tick = 0;
+        EntityHandle local_player;
     };
     Snapshot snapshot() const;
     void restore(const Snapshot &s);

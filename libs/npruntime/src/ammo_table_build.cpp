@@ -29,6 +29,12 @@ world::AmmoTable build_ammo_table(const DefAmmoFile &ammo) {
 		e.min_damage = d.min_damage;
 		e.max_damage = d.max_damage;
 		e.penetration_impact = d.penetration_impact;
+		// Kill-zone blast geometry + the blast armor gate (the explosion queue's
+		// consumers; docs/world/world-wac-ai-re.md §24).
+		e.penetration_kz = d.penetration_kz;
+		e.kz_minradius = static_cast<float>(d.kz_minradius_fp16) / 65536.0f;
+		e.kz_maxradius = static_cast<float>(d.kz_maxradius_fp16) / 65536.0f;
+		e.kz_pieslice_bam = d.kz_pieslice_bam;
 		e.tracer_rate = d.tracer_rate;
 		e.notarmmed_ammo = d.notarmmed_ammo;
 		// Bake the authored effects_table rows into the canonical tag slots [orig:

@@ -757,6 +757,40 @@ Dictionary transform_to_dict(const ThreediIRTransform &track, const ThreediModel
 	return result;
 }
 
+template <typename Animation>
+bool panm_animation_is_live(const Animation &anim) {
+	const auto track_is_live = [](const auto &track) {
+		return (track.control & 0xF0u) != 0;
+	};
+	const uint8_t rotation_type = threedi_panm_rotation_type(anim.flags);
+	// Spinner and the two view-derived modes are evaluated without sampling a
+	// conventional track. In particular, spinner coefficients reinterpret raw
+	// PANM bytes as floats and may have a zero control high nibble.
+	if (rotation_type == 1 || rotation_type == 3 || rotation_type == 4)
+		return true;
+	if (rotation_type == 2 &&
+			(track_is_live(anim.rotation_x) ||
+			 track_is_live(anim.rotation_y) ||
+			 track_is_live(anim.rotation_z)))
+		return true;
+
+	const uint8_t scale_type = threedi_panm_scale_type(anim.flags);
+	if (scale_type == 1 && track_is_live(anim.scale_x))
+		return true;
+	if (scale_type == 2 &&
+			(track_is_live(anim.scale_x) ||
+			 track_is_live(anim.scale_y) ||
+			 track_is_live(anim.scale_z)))
+		return true;
+
+	return threedi_panm_translate_type(anim.flags) != THREEDI_TRANS_NONE &&
+			track_is_live(anim.translation);
+}
+
+uint32_t retail_runtime_time_ms(int64_t time_ms) {
+	return time_ms < 0 ? 0u : static_cast<uint32_t>(time_ms);
+}
+
 const ThreediIRTransform *part_anim_track_for_name(const ThreediIRPartAnimation &anim, const String &p_track) {
 	const String track = p_track.to_lower();
 	if (track == "rotation_x" || track == "yaw") {
@@ -1307,6 +1341,11 @@ void NovaObjectData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("has_collision"), &NovaObjectData::has_collision);
 	ClassDB::bind_method(D_METHOD("has_occlusion"), &NovaObjectData::has_occlusion);
 	ClassDB::bind_method(D_METHOD("get_collision_volumes"), &NovaObjectData::get_collision_volumes);
+	ClassDB::bind_method(D_METHOD("has_live_panm"), &NovaObjectData::has_live_panm);
+	ClassDB::bind_method(D_METHOD("has_live_panm_for_lod", "lod_index"),
+			&NovaObjectData::has_live_panm_for_lod);
+	ClassDB::bind_method(D_METHOD("get_live_panm_lod"), &NovaObjectData::get_live_panm_lod);
+	ClassDB::bind_method(D_METHOD("get_effective_panm_targets", "lod_index"), &NovaObjectData::get_effective_panm_targets);
 	ClassDB::bind_method(D_METHOD("get_part_anim_count", "lod_index"), &NovaObjectData::get_part_anim_count);
 	ClassDB::bind_method(D_METHOD("get_part_animations", "lod_index"), &NovaObjectData::get_part_animations);
 	ClassDB::bind_method(D_METHOD("get_part_anim_editor_entries", "lod_index"), &NovaObjectData::get_part_anim_editor_entries);
@@ -2480,6 +2519,60 @@ Vector3 NovaObjectData::get_ground_anchor(int p_lod_index) const {
 	return godot_vec3(anchor);
 }
 
+bool NovaObjectData::_effective_panm_for_lod(int p_lod_index,
+		std::vector<ThreediPartAnimation> &r_nodes) const {
+	r_nodes.clear();
+	if (!has_ir || ir.lods == nullptr || p_lod_index < 0 ||
+			static_cast<size_t>(p_lod_index) >= ir.lod_count)
+		return false;
+	const ThreediIRLod &lod = ir.lods[p_lod_index];
+	if (lod.part_animation_count > 0 && lod.part_animations != nullptr) {
+		r_nodes.resize(lod.part_animation_count);
+		for (size_t i = 0; i < lod.part_animation_count; ++i)
+			copy_ir_part_animation(lod.part_animations[i], r_nodes[i]);
+	} else if (has_source_model &&
+			source_model.part_animation_count > 0 &&
+			source_model.part_animations != nullptr) {
+		r_nodes.assign(source_model.part_animations,
+				source_model.part_animations + source_model.part_animation_count);
+	}
+	return !r_nodes.empty();
+}
+
+bool NovaObjectData::has_live_panm_for_lod(int p_lod_index) const {
+	if (!has_ir || ir.lods == nullptr || p_lod_index < 0 ||
+			static_cast<size_t>(p_lod_index) >= ir.lod_count)
+		return false;
+	const ThreediIRLod &lod = ir.lods[p_lod_index];
+	if (lod.part_count == 0 || lod.parts == nullptr) return false;
+	std::vector<ThreediPartAnimation> nodes;
+	_effective_panm_for_lod(p_lod_index, nodes);
+	for (const ThreediPartAnimation &node : nodes)
+		if (panm_animation_is_live(node)) return true;
+	return false;
+}
+
+int NovaObjectData::get_live_panm_lod() const {
+	if (!has_ir || ir.lods == nullptr) return -1;
+	for (size_t lod_index = 0; lod_index < ir.lod_count; ++lod_index)
+		if (has_live_panm_for_lod(static_cast<int>(lod_index)))
+			return static_cast<int>(lod_index);
+	return -1;
+}
+
+bool NovaObjectData::has_live_panm() const {
+	return get_live_panm_lod() >= 0;
+}
+
+PackedInt32Array NovaObjectData::get_effective_panm_targets(int p_lod_index) const {
+	PackedInt32Array out;
+	std::vector<ThreediPartAnimation> nodes;
+	_effective_panm_for_lod(p_lod_index, nodes);
+	for (const ThreediPartAnimation &node : nodes)
+		out.push_back(static_cast<int32_t>(node.subobject_index));
+	return out;
+}
+
 int NovaObjectData::get_part_anim_count(int p_lod_index) const {
 	if (!has_ir || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= ir.lod_count) {
 		return 0;
@@ -2488,7 +2581,20 @@ int NovaObjectData::get_part_anim_count(int p_lod_index) const {
 }
 
 bool NovaObjectData::has_collision() const {
-	return has_ir && ir.collision != nullptr && ir.collision->volume_count > 0;
+	if (!has_ir || ir.collision == nullptr) return false;
+	const ThreediIRCollision *collision = ir.collision;
+	if (collision->volume_count > 0) return true;
+	if (!is_skinned(0)) return false;
+	if (collision->face_count > 0 && collision->faces != nullptr &&
+			collision->vertex_count > 0 && collision->vertices != nullptr &&
+			collision->object_count > 0 && collision->objects != nullptr)
+		return true;
+	if (collision->objects != nullptr) {
+		for (size_t i = 0; i < collision->object_count; ++i) {
+			if (collision->objects[i].radius_fp16 > 0) return true;
+		}
+	}
+	return false;
 }
 
 bool NovaObjectData::has_occlusion() const {
@@ -3325,7 +3431,7 @@ Array NovaObjectData::build_lod_submeshes(int p_lod_index, bool p_skeletal, int 
 	return result.duplicate(true);
 }
 
-Dictionary NovaObjectData::eval_material_runtime(int p_index, int p_time_ms, const Dictionary &p_ctrl_values) const {
+Dictionary NovaObjectData::eval_material_runtime(int p_index, int64_t p_time_ms, const Dictionary &p_ctrl_values) const {
 	Dictionary out;
 	if (!has_ir || p_index < 0 || static_cast<size_t>(p_index) >= ir.material_count) {
 		return out;
@@ -3335,7 +3441,7 @@ Dictionary NovaObjectData::eval_material_runtime(int p_index, int p_time_ms, con
 	const std::vector<std::string> ctrl_names = control_register_names(ir);
 	const std::unordered_map<std::string, uint16_t> ctrl_values = control_values_from_dict(p_ctrl_values);
 	const renderer::MaterialRuntime runtime = renderer::eval_material_runtime(
-			material, static_cast<uint32_t>(std::max(p_time_ms, 0)), ctrl_names, ctrl_values);
+			material, retail_runtime_time_ms(p_time_ms), ctrl_names, ctrl_values);
 	out["uv_offset"] = Vector2(runtime.uv.offset_u, runtime.uv.offset_v);
 	out["uv_scale"] = Vector2(runtime.uv.scale_u, runtime.uv.scale_v);
 	out["uv_rotation"] = runtime.uv.rotation;
@@ -3344,7 +3450,7 @@ Dictionary NovaObjectData::eval_material_runtime(int p_index, int p_time_ms, con
 	return out;
 }
 
-int NovaObjectData::compute_anim_frame(int p_index, int p_time_ms, const Dictionary &p_ctrl_values) const {
+int NovaObjectData::compute_anim_frame(int p_index, int64_t p_time_ms, const Dictionary &p_ctrl_values) const {
 	if (!has_ir || p_index < 0 || static_cast<size_t>(p_index) >= ir.material_count) {
 		return 0;
 	}
@@ -3352,10 +3458,11 @@ int NovaObjectData::compute_anim_frame(int p_index, int p_time_ms, const Diction
 	copy_ir_material(ir.materials[p_index], material);
 	const std::vector<std::string> ctrl_names = control_register_names(ir);
 	const std::unordered_map<std::string, uint16_t> ctrl_values = control_values_from_dict(p_ctrl_values);
-	return renderer::compute_anim_frame(material, 0, static_cast<uint32_t>(std::max(p_time_ms, 0)), ctrl_names, ctrl_values);
+	return renderer::compute_anim_frame(material, 0,
+			retail_runtime_time_ms(p_time_ms), ctrl_names, ctrl_values);
 }
 
-Dictionary NovaObjectData::evaluate_panm(int p_lod_index, int p_time_ms, const Dictionary &p_ctrl_values) const {
+Dictionary NovaObjectData::evaluate_panm(int p_lod_index, int64_t p_time_ms, const Dictionary &p_ctrl_values) const {
 	Dictionary out;
 	if (!has_ir || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= ir.lod_count) {
 		return out;
@@ -3379,20 +3486,11 @@ Dictionary NovaObjectData::evaluate_panm(int p_lod_index, int p_time_ms, const D
 		}
 	}
 
-	std::vector<ThreediPartAnimation> converted_anims;
-	const ThreediPartAnimation *anims = nullptr;
-	size_t node_count = 0;
-	if (lod.part_animation_count > 0 && lod.part_animations != nullptr) {
-		converted_anims.resize(lod.part_animation_count);
-		for (size_t i = 0; i < lod.part_animation_count; ++i) {
-			copy_ir_part_animation(lod.part_animations[i], converted_anims[i]);
-		}
-		anims = converted_anims.data();
-		node_count = converted_anims.size();
-	} else if (has_source_model && source_model.part_animation_count > 0 && source_model.part_animations != nullptr) {
-		anims = source_model.part_animations;
-		node_count = source_model.part_animation_count;
-	}
+	std::vector<ThreediPartAnimation> effective_anims;
+	_effective_panm_for_lod(p_lod_index, effective_anims);
+	const ThreediPartAnimation *anims =
+			effective_anims.empty() ? nullptr : effective_anims.data();
+	const size_t node_count = effective_anims.size();
 
 	size_t input_count = std::max(lod.part_count, node_count);
 	for (size_t i = 0; i < node_count && anims != nullptr; ++i) {
@@ -3423,7 +3521,7 @@ Dictionary NovaObjectData::evaluate_panm(int p_lod_index, int p_time_ms, const D
 				nullptr,
 				base_transforms.data(),
 				nullptr,
-				static_cast<uint32_t>(std::max(p_time_ms, 0)),
+				retail_runtime_time_ms(p_time_ms),
 				ctrl_table,
 				panm_matrices.data());
 		if (rc == 0) {
@@ -3446,7 +3544,7 @@ Dictionary NovaObjectData::evaluate_panm(int p_lod_index, int p_time_ms, const D
 	return out;
 }
 
-Array NovaObjectData::evaluate_lights(int p_time_ms, const Dictionary &p_ctrl_values) const {
+Array NovaObjectData::evaluate_lights(int64_t p_time_ms, const Dictionary &p_ctrl_values) const {
 	Array out;
 	if (!has_ir || ir.light_count == 0) {
 		return out;
@@ -3471,7 +3569,7 @@ Array NovaObjectData::evaluate_lights(int p_time_ms, const Dictionary &p_ctrl_va
 				runtime_light.rate,
 				color_start,
 				color_end,
-				static_cast<uint32_t>(std::max(p_time_ms, 0)),
+				retail_runtime_time_ms(p_time_ms),
 				0);
 		Dictionary entry;
 		entry["position"] = godot_vec3(light.offset);

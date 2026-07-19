@@ -160,6 +160,8 @@ class DefItemDef(ctypes.Structure):
         ("slip_slope", ctypes.c_int),
         ("turn_rate", ctypes.c_int),
         ("turn_rate2", ctypes.c_int),
+        # Collision speed-decay shift count ('torque', raw; mirror def.h).
+        ("torque", ctypes.c_int),
         ("critical_hp", ctypes.c_int),
         ("critical_drain", ctypes.c_int),
         ("unit_type", ctypes.c_int),
@@ -186,6 +188,17 @@ class DefItemDef(ctypes.Structure):
         ("deathtime_ticks", ctypes.c_int),
         # Emplacement weapon link ('primary_weapon'; empty = key absent; mirror def.h).
         ("primary_weapon", ctypes.c_char * 32),
+        # The destruction/husk block (mirror def.h; appended for FFI stride stability).
+        ("huskfinal", ctypes.c_char * 128),
+        ("sounddeath", ctypes.c_char * 32),
+        ("armor_impact", ctypes.c_int),
+        ("armor_blast", ctypes.c_int),
+        ("kz", ctypes.c_float),
+        ("husk_swap_at", ctypes.c_float),
+        ("husk_swap_at_sec", ctypes.c_float),
+        ("debris_scale", ctypes.c_float),
+        ("husk_sub_parts", ctypes.c_int),
+        ("husk_sub_part_types", ctypes.c_ubyte * 16),
     ]
 
 

@@ -286,7 +286,9 @@ typedef struct ThreediCollisionObject {
     int32_t unk0;
     int32_t num_vertices;
     int32_t num_faces;
-    int32_t num_planes;
+    int32_t num_normals;        /* per-object CNRM run count (face normal_index is
+                                   local to this run) [orig: the COBJ normal-run
+                                   fixup in the collision builder @ 0x5b3bf0] */
     int32_t num_bounding_volumes;
     int32_t parent_subobject_index;
     int32_t unk3;

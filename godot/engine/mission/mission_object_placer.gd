@@ -46,6 +46,7 @@ const PLAYER_VISUAL_ITEM_ID := 105310
 
 var resource_root: NovaResourceRoot
 var item_db: NovaItemDatabase
+var _panm_clock
 
 # When true, place() also records a per-entity pickable index in pickable_records
 # (used by the editor Mission workspace to select / move entities). Off for the
@@ -109,6 +110,10 @@ func _init(p_resource_root: NovaResourceRoot = null, p_item_db: NovaItemDatabase
 	item_db = p_item_db
 
 
+func set_panm_clock(value) -> void:
+	_panm_clock = value
+
+
 # Drop every derived cache when the resource-root epoch has moved since they were
 # filled. Called at the top of the cache-reading entry points (place / place_single /
 # ground_anchor_godot / collision_shapes_for); cheap when the epoch is unchanged.
@@ -168,22 +173,22 @@ static func bms_to_godot_position(p: Vector3) -> Vector3:
 #
 # [orig: Entity_SpawnFromBMSRecord @0x40eb66 + Math_BuildFixedPointMatrixFromEulerAngles @0x613f40,
 #  called via Entity_UpdateOrientationMatrix @0x43b440 (Jointops.exe)] The engine builds the world
-#  matrix as Rz(90-yaw) * Ry(pitch) * Rx(roll) in its Z-up, right-handed world: yaw drives the Z/up
-#  axis (euler[3] = 90 - yaw), pitch the Y axis (euler[4], positive), roll the X axis (euler[5],
-#  positive). Conjugating by the position basis M:(x,y,z)->(x,z,-y) -- which sends engine +Z->godot
+#  matrix as Rz(90-yaw) * Ry(-pitch) * Rx(roll) in its Z-up, right-handed world: yaw drives the Z/up
+#  axis (euler[3] = 90 - yaw), while the builder applies stored positive euler[4] as Ry(-pitch);
+#  roll is positive about X. Conjugating by the position basis M:(x,y,z)->(x,z,-y) -- which sends
+#  engine +Z->godot
 #  +Y, +Y->godot -Z, +X->godot +X -- gives the faithful Godot world rotation
-#      R_godot = RotY(90 - yaw) * RotZ(-pitch) * RotX(roll).
+#      R_godot = RotY(90 - yaw) * RotZ(pitch) * RotX(roll).
 #  The .3di model imports Y-up / +Z-forward, so a constant model-forward correction C = RotY(90)
 #  turns the model's +Z nose onto the engine's +X canonical heading. For yaw-only this collapses to
-#  RotY(180 - yaw) -- identical to the long-standing (visually-correct) heading -- while correcting
-#  pitch, which the old euler form (Rx(-pitch) in a YXZ basis) tipped the wrong way (nose up instead
-#  of down). Roll was already equivalent. See godot/tests/mission_object_placer_test.gd.
+#  RotY(180 - yaw) -- identical to the long-standing (visually-correct) heading. See
+#  godot/tests/mission_object_placer_test.gd.
 static func bms_to_godot_basis(rot_deg: Vector3) -> Basis:
 	var pitch := deg_to_rad(rot_deg.x)
 	var yaw := deg_to_rad(rot_deg.y)
 	var roll := deg_to_rad(rot_deg.z)
 	return Basis(Vector3.UP, deg_to_rad(90.0) - yaw) \
-		* Basis(Vector3.BACK, -pitch) \
+		* Basis(Vector3.BACK, pitch) \
 		* Basis(Vector3.RIGHT, roll) \
 		* Basis(Vector3.UP, deg_to_rad(90.0))
 
@@ -217,6 +222,9 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 		"batches": 0,
 	}
 	pickable_records = []
+	_destruction_batches = {}
+	_destruction_instances = {}
+	_hidden_destruction_instances = {}
 	_static_user_point_sources = []
 	_static_item_effect_sources = []
 	if mission == null or parent == null or resource_root == null:
@@ -243,6 +251,10 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 	# Parallel to static_by_graphic (same slot order); only filled in edit_mode so the
 	# pickable index can map a MultiMesh instance back to its mission entity.
 	var static_refs_by_graphic: Dictionary = {}  # graphic -> Array[{ kind, index }]
+	# Parallel to static_by_graphic (same slot order), ALWAYS filled: the runtime
+	# destruction pass carves a destroyed instance out of its batches by bms_id
+	# (world-wac-ai-re §24.6 — the husk swap on batched statics).
+	var static_ids_by_graphic: Dictionary = {}  # graphic -> Array[int bms_id]
 	var animated: Array = []  # [{ graphic, xform, (kind, index in edit_mode) }]
 	for e in mission.get_all_entities():
 		var entity: Dictionary = e
@@ -276,7 +288,9 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 				static_by_graphic[graphic] = []
 				static_refs_by_graphic[graphic] = []
 				static_effect_sources_by_graphic[graphic] = []
+				static_ids_by_graphic[graphic] = []
 			static_by_graphic[graphic].append(xform)
+			static_ids_by_graphic[graphic].append(int(entity.get("bms_id", 0)))
 			static_effect_sources_by_graphic[graphic].append({
 				"kind": int(entity.get("kind", -1)),
 				"item_id": item_id,
@@ -321,10 +335,19 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 			mmi.name = "Batch_%s_%d" % [graphic, int(batch.get("submesh", 0))]
 			container.add_child(mmi)
 			stats.batches += 1
+			_destruction_batches.get_or_add(graphic, []).append(mm)
 			if edit_mode:
 				_record_static_batch(graphic, static_refs_by_graphic.get(graphic, []), mm, mmi, offset, batch["mesh"])
 		stats.batched += xforms.size()
 		stats.placed += xforms.size()
+		var inst_ids: Array = static_ids_by_graphic.get(graphic, [])
+		for i in range(mini(inst_ids.size(), xforms.size())):
+			var iid := int(inst_ids[i])
+			if iid != 0:
+				_destruction_instances[iid] = {
+					"graphic": graphic, "index": i,
+					"xform": xforms[i] as Transform3D,
+				}
 	PerfTimeline.end_on(timeline)
 
 	# Align every harvested batch material with the env AS OF placement end —
@@ -359,6 +382,7 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 			stats.unresolved += 1
 			continue
 		var model: Node3D = NovaObjectModelScript.new()
+		model.set_panm_clock(_panm_clock)
 		model.name = "Anim_%s_%d" % [a["graphic"], stats.animated]
 		# Render the model origin at the entity's stored position directly. The engine bakes the
 		# Ground userpoint into the stored position once, at author-time (place / terrain-drag), not
@@ -372,7 +396,8 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 		# the ONE skeletal-keyed mesh build - the old order built a static-keyed
 		# set first and threw it away, doubling every animated entity's cost.
 		# Rigid weapon parts fake-skin; no anim_def -> stays static.
-		_apply_skeletal_anim(model, int(a.get("item_id", 0)), data.get_bone_origins())
+		_apply_skeletal_anim(model, int(a.get("item_id", 0)),
+				data.get_bone_origins(), data.get_bone_parents())
 		# Drive the build explicitly (not via _ready) so it is independent of when
 		# place() runs relative to the main loop; matches the static template path.
 		model.set_object_data(data)
@@ -421,11 +446,12 @@ func build_animated_model(item_id: int, parent: Node3D, env_node: Node = null) -
 	if data == null:
 		return null
 	var model: Node3D = NovaObjectModelScript.new()
+	model.set_panm_clock(_panm_clock)
 	model.name = "PlayerAvatar_%s" % graphic
 	parent.add_child(model)
 	if env_node != null and model.has_method("set_environment_node"):
 		model.set_environment_node(env_node)
-	_apply_skeletal_anim(model, item_id, data.get_bone_origins())
+	_apply_skeletal_anim(model, item_id, data.get_bone_origins(), data.get_bone_parents())
 	model.set_object_data(data)
 	return model
 
@@ -454,6 +480,7 @@ func build_model_from_graphic(graphic: String, adm_name: String, parent: Node3D,
 	if data == null:
 		return null
 	var model: Node3D = NovaObjectModelScript.new()
+	model.set_panm_clock(_panm_clock)
 	model.name = "Viewmodel_%s" % graphic
 	parent.add_child(model)
 	if env_node != null and model.has_method("set_environment_node"):
@@ -528,6 +555,7 @@ func place_single(mission: NovaMissionData, container: Node3D, kind: int, index:
 			delta.unresolved = 1
 			return delta
 		var model: Node3D = NovaObjectModelScript.new()
+		model.set_panm_clock(_panm_clock)
 		model.name = "Anim_%s_k%d_i%d" % [graphic, kind, index]
 		model.transform = xform
 		container.add_child(model)
@@ -535,7 +563,8 @@ func place_single(mission: NovaMissionData, container: Node3D, kind: int, index:
 			model.set_environment_node(env_node)
 		# Skeletal set first = no-op rebuild; set_object_data does the one
 		# skeletal-keyed build (same ordering rationale as place()).
-		_apply_skeletal_anim(model, item_id, data.get_bone_origins())
+		_apply_skeletal_anim(model, item_id,
+				data.get_bone_origins(), data.get_bone_parents())
 		model.set_object_data(data)
 		var ref := {
 			"kind": kind,
@@ -776,44 +805,17 @@ func _has_occlusion_records(item_id: int) -> bool:
 # parts away from rest. Inert PANM blocks (no family flags or every control idle) keep
 # static batching. Mirrors the evaluator's own gates: the entry-level animated check and
 # the per-track idle check. [orig: PANM_BuildNodeMatrices track gates + PANM_SampleTrack
-# (sub_4354B0) idle gate (control & 0xF0), clock dword_18B42A4 — ported in
+# (sub_4354B0) idle gate (control & 0xF0), Render_ShaderTickMs @0x2721A40 — ported in
 # libs/threedi/src/threedi_panm_matrices.cpp / threedi_panm_runtime.cpp]
 func _graphic_needs_live_panm(graphic: String) -> bool:
 	if _graphic_panm_cache.has(graphic):
 		return bool(_graphic_panm_cache[graphic])
 	var result := false
 	var data := _load_object_data(graphic)
-	if data != null and data.has_method("get_part_anim_count") and data.has_method("get_part_anim_info"):
-		var lod_count := int(data.get_summary().get("lod_count", 0))
-		for lod in range(lod_count):
-			for i in range(int(data.get_part_anim_count(lod))):
-				if part_anim_entry_is_live(data.get_part_anim_info(lod, i)):
-					result = true
-					break
-			if result:
-				break
+	if data != null and data.has_method("has_live_panm"):
+		result = bool(data.has_live_panm())
 	_graphic_panm_cache[graphic] = result
 	return result
-
-
-# One PANM entry can move/pose its part iff its family flags declare animation AND at
-# least one track carries a non-idle control function (the sampler treats a zero high
-# nibble as inactive). Public static: the pure, testable form of the gate — it takes a
-# get_part_anim_info() dictionary, holds no placer state, and is the seam the sampler
-# regression tests exercise directly.
-static func part_anim_entry_is_live(info: Dictionary) -> bool:
-	var animated := int(info.get("rotation_type", 0)) != 0 \
-			or int(info.get("scale_type", 0)) != 0 \
-			or int(info.get("translate_type", 0)) != 0 \
-			or bool(info.get("rotation_reversed", false))
-	if not animated:
-		return false
-	for track in ["rotation_x", "rotation_y", "rotation_z",
-			"scale_x", "scale_y", "scale_z", "translation"]:
-		var t: Dictionary = info.get(track, {})
-		if (int(t.get("control", 0)) & 0xF0) != 0:
-			return true
-	return false
 
 
 func _model_name_for(graphic: String) -> String:
@@ -824,14 +826,18 @@ func _model_name_for(graphic: String) -> String:
 # Resolve an animated entity's body-animation set from its item def's anim_def and attach it to
 # the model so its Skeleton3D builds. Cached per .adm (shared read-only across entities). A model
 # with an empty anim_def, or whose .adm fails to load, is left static (unchanged behaviour).
-func _apply_skeletal_anim(model: Node3D, item_id: int, model_bone_origins := PackedVector3Array()) -> void:
+func _apply_skeletal_anim(model: Node3D, item_id: int,
+		model_bone_origins := PackedVector3Array(),
+		model_bone_parents := PackedInt32Array()) -> void:
 	if model == null or resource_root == null or item_db == null:
 		return
 	var anim_def := item_db.get_anim_def(item_id)
 	if anim_def.is_empty():
 		return
 	var adm_name := anim_def if anim_def.to_lower().ends_with(".adm") else anim_def + ".adm"
-	_apply_skeletal_from_adm(model, adm_name, model_bone_origins)
+	var skeletal = _skeletal_from_adm(adm_name, model_bone_origins, model_bone_parents)
+	if skeletal != null and model.has_method("set_skeletal_anim"):
+		model.set_skeletal_anim(skeletal)
 
 
 # Attach a skeletal set from a resolved .adm name, feeding the .3di model's bone table
@@ -842,6 +848,13 @@ func _apply_skeletal_anim(model: Node3D, item_id: int, model_bone_origins := Pac
 # cache key folds in the table: two models can share one .adm (the FP arms + gun both use
 # ak47_1st.adm) yet carry different .3di pivots, so they must not alias. See NovaSkeletalAnim.
 func _apply_skeletal_from_adm(model: Node3D, adm_name: String, model_bone_origins: PackedVector3Array, model_bone_parents := PackedInt32Array()) -> void:
+	var skeletal = _skeletal_from_adm(adm_name, model_bone_origins, model_bone_parents)
+	if skeletal != null and model.has_method("set_skeletal_anim"):
+		model.set_skeletal_anim(skeletal)
+
+
+func _skeletal_from_adm(adm_name: String, model_bone_origins: PackedVector3Array,
+		model_bone_parents := PackedInt32Array()):
 	var cache_key := adm_name + "#" + str(hash(model_bone_origins)) + "#" + str(hash(model_bone_parents))
 	var skeletal
 	if _skeletal_cache.has(cache_key):
@@ -851,8 +864,7 @@ func _apply_skeletal_from_adm(model: Node3D, adm_name: String, model_bone_origin
 		if not skeletal.load_from_resource_root(resource_root, adm_name, model_bone_origins, model_bone_parents):
 			skeletal = null
 		_skeletal_cache[cache_key] = skeletal
-	if skeletal != null and model.has_method("set_skeletal_anim"):
-		model.set_skeletal_anim(skeletal)
+	return skeletal
 
 
 func _load_object_data(graphic: String) -> NovaObjectData:
@@ -893,6 +905,90 @@ func ground_anchor_godot(graphic: String) -> Vector3:
 func object_data_for(graphic: String) -> NovaObjectData:
 	_check_epoch()
 	return _load_object_data(graphic)
+
+
+## Authoritative read-only skeletal set for simulation collision. Uses the same
+## ADM + canonical model bone-table cache as the rendered NovaObjectModel, so
+## headless per-bone collision cannot drift onto lossy BAD parents/pivots.
+func skeletal_anim_for(item_id: int, graphic: String):
+	_check_epoch()
+	if resource_root == null or item_db == null:
+		return null
+	var data := _load_object_data(graphic)
+	if data == null:
+		return null
+	var anim_def := item_db.get_anim_def(item_id)
+	if anim_def.is_empty():
+		return null
+	var adm_name := anim_def if anim_def.to_lower().ends_with(".adm") else anim_def + ".adm"
+	return _skeletal_from_adm(
+			adm_name, data.get_bone_origins(), data.get_bone_parents())
+
+
+# --- destruction support (world-wac-ai-re §24.6) -------------------------------
+# Batched statics have no per-entity node; a destroyed one is carved out of its
+# graphic's MultiMesh batches (zero-scale at its own origin — the batch keeps its
+# instance count) and the caller grafts the husk model at the returned transform.
+var _destruction_batches: Dictionary = {}   # graphic -> Array[MultiMesh]
+var _destruction_instances: Dictionary = {} # bms_id -> { graphic, index, xform }
+var _hidden_destruction_instances: Dictionary = {} # bms_id -> exact per-batch transforms
+
+
+## Read-only world transform for a batched static, used by diagnostics that
+## compare its visual placement with the simulation collision instance.
+## Returns null when the bms_id is unknown.
+func get_static_instance_transform(bms_id: int) -> Variant:
+	var rec: Variant = _destruction_instances.get(bms_id)
+	if not (rec is Dictionary):
+		return null
+	return (rec as Dictionary).xform
+
+
+## Hide a destroyed batched static in every batch of its graphic. Returns the
+## instance's placed transform (for the husk graft), or null when unknown.
+func hide_static_instance(bms_id: int) -> Variant:
+	var rec: Variant = _destruction_instances.get(bms_id)
+	if not (rec is Dictionary):
+		return null
+	var graphic := String(rec['graphic'])
+	var index := int(rec['index'])
+	var xform: Transform3D = rec['xform']
+	if _hidden_destruction_instances.has(bms_id):
+		return xform
+	var carved := Transform3D(Basis().scaled(Vector3.ZERO), xform.origin)
+	var originals: Array = []
+	for mm_v in _destruction_batches.get(graphic, []):
+		var mm := mm_v as MultiMesh
+		if mm != null and index >= 0 and index < mm.instance_count:
+			originals.append({
+				'multimesh': mm,
+				'transform': mm.get_instance_transform(index),
+				'index': index,
+			})
+			mm.set_instance_transform(index, carved)
+	_hidden_destruction_instances[bms_id] = originals
+	return xform
+
+
+## Restore a static carved by hide_static_instance(). The placer owns the
+## MultiMeshes, so it also owns the exact per-batch transforms needed to undo a
+## destruction presentation reset. Returns false when the instance was not
+## hidden (including unknown bms_ids); repeated reset calls are therefore safe.
+func show_static_instance(bms_id: int) -> bool:
+	var originals_v: Variant = _hidden_destruction_instances.get(bms_id)
+	if not (originals_v is Array):
+		return false
+	for saved_v in originals_v as Array:
+		if not (saved_v is Dictionary):
+			continue
+		var saved: Dictionary = saved_v
+		var mm: Variant = saved.get('multimesh')
+		var index := int(saved.get('index', -1))
+		if mm is MultiMesh and index >= 0 and index < (mm as MultiMesh).instance_count:
+			(mm as MultiMesh).set_instance_transform(
+					index, saved.get('transform', Transform3D.IDENTITY))
+	_hidden_destruction_instances.erase(bms_id)
+	return true
 
 
 ## Register an already-resolved object plus its static render batches. This is

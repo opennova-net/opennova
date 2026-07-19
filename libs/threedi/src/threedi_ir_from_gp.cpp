@@ -777,6 +777,10 @@ int threedi_ir_from_gp(const ThreediGpFile *gp, ThreediModelIR *out) {
                 d->offset[0] = (float)so->translation[0];
                 d->offset[1] = (float)so->translation[1];
                 d->offset[2] = (float)so->translation[2];
+                d->center_fp16[0] = so->center[0];
+                d->center_fp16[1] = so->center[1];
+                d->center_fp16[2] = so->center[2];
+                d->radius_fp16 = so->bounding_sphere_radius;
             }
         }
 

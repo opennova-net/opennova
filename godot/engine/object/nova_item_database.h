@@ -49,6 +49,7 @@ private:
 		int player_speed = 0; // +0x8E8 (16.16 u/tick)
 		int turn_rate = 0;    // +0x924 (BAM/tick)
 		int turn_rate2 = 0;   // +0x928
+		int torque = 0;       // +0x91C raw — collision speed-decay shift [orig: @0x49dcca]
 		int unit_type = 0;    // minimap icon class [orig: Entity_ClassifyForMinimap @0x50FA70]
 		// items.def soundloop_1..7 — the looping ambient sound-set names for a
 		// "snd:"-prefixed `type marker` item (e.g. soundloop_1 LPNV_LIGHT). Time-of-day
@@ -89,6 +90,18 @@ private:
 		// (the attach label's text source); empty if none authored.
 		// [orig: -> ItemDef+0x54B primaryWeapon; docs/world/itemdef-re.md]
 		String primary_weapon;
+		// The destruction/husk block (docs/world/world-wac-ai-re.md §24):
+		// the husk model stages, the death sound, the armor-class words, the kz
+		// death-blast radius, and the per-section debris types.
+		String husk;      // itemDef+0x70 — the destroyed-model stage
+		String huskfinal; // itemDef+0x80 — the final (burned-out) stage
+		String sounddeath;    // -> deathSoundId; Entity_InitDeathSounds @ 0x4939b0
+		int armor_impact = 0; // def+0x190 (-1 = invulnerable)
+		int armor_blast = 0;  // def+0x192
+		float kz = 0.0f;      // def+0x198 death-blast radius (units)
+		float debris_scale = 0.0f; // def+0x1BC (0 = unset -> 1.0)
+		int husk_sub_parts = 0;    // def+0x100
+		uint8_t husk_sub_part_types[16] = {}; // def+0x101[] debris-type rows
 	};
 	std::unordered_map<int, Item> items;
 	String source_path;
@@ -179,6 +192,18 @@ public:
 	// (the USEGUN attach label resolves its attachtextid); empty if none authored.
 	// [orig: -> ItemDef+0x54B; consumer draw_vehicle_seat_and_armory_labels @ 0x5a351d]
 	String get_primary_weapon(int id) const;
+	// items.def husk / huskfinal — the destroyed-model stages the render and
+	// collision swap to at death (Flags & 4); empty if none authored.
+	// [orig: itemDef+0x70/+0x80 -> huskModel/huskFinalModel (+0xF4/+0xF8);
+	// render pick @ 0x413086, pieces prefer huskfinal @ 0x4934af]
+	String get_husk(int id) const;
+	String get_huskfinal(int id) const;
+	// The destruction traits as one bundle: {unit_type, kz, armor_impact,
+	// armor_blast, sounddeath, debris_scale, husk_sub_parts,
+	// husk_sub_part_types (PackedInt32Array), has_husk}. Empty Dictionary =
+	// unknown id. Feeds the sim's item-traits sweep (world::ItemDeathTraits).
+	// [docs/world/world-wac-ai-re.md §24]
+	Dictionary get_death_traits(int id) const;
 	// items.def sound_profile (a sound-set name resolved against the loaded .lwf
 	// banks at runtime); empty if the item declares none.
 	String get_sound_profile(int id) const;

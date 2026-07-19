@@ -153,8 +153,9 @@ RenderMatrix render_matrix_from_pose(const int32_t pos[3], int32_t yaw_bam, int3
 }
 
 // The float-space occlusion consumers use the full authored entity pose. The
-// fixed collision/blink matrices remain on their separately tracked yaw-only
-// D-COL-1 seam. [orig: Math_BuildFixedPointToFloatMatrix4x4(entity+4)]
+// collision path builds its fixed full-Euler entity matrix separately, then
+// applies any live PANM section callbacks at query time.
+// [orig: Math_BuildFixedPointToFloatMatrix4x4(entity+4)]
 RenderMatrix render_matrix_from_entity_pose(const Entity &e) {
     int32_t pos[3];
     entity_pos_fixed(e, pos);
@@ -469,7 +470,7 @@ void OcclusionWorld::collect_buildings(World &world, CollisionWorld &collision,
 
         Entity *e = world.registry.get(slot.h);
         if (e == nullptr) continue;
-        const CollisionModel *cm = collision.model_for(slot.h);
+        const CollisionModel *cm = collision.model_for(world, slot.h);
         if (cm == nullptr || !cm->valid()) continue; // [orig: the entity+48 model gate]
 
         // Bound sphere: local center from the collision bounds, placed through
@@ -1026,7 +1027,7 @@ bool OcclusionWorld::toc_occluded(World &world, CollisionWorld &collision, Batch
                                   const OcclusionFrameCamera &cam) {
     const Entity *cand = world.registry.get(entry.entity);
     if (cand == nullptr) return false;
-    const CollisionModel *cand_cm = collision.model_for(entry.entity);
+    const CollisionModel *cand_cm = collision.model_for(world, entry.entity);
 
     int32_t cand_pos_fixed[3];
     entity_pos_fixed(*cand, cand_pos_fixed);
@@ -1219,7 +1220,7 @@ void OcclusionWorld::build_section_masks(World &world, CollisionWorld &collision
         // z + min_z < water. [orig: the two algebraically-equal forms
         // @ 0x5c8922 (collision header) / 0x5c89a9 (entity bbox fields)]
         const Entity *e = world.registry.get(h);
-        const CollisionModel *cm = collision.model_for(h);
+        const CollisionModel *cm = collision.model_for(world, h);
         if (e == nullptr || cm == nullptr || !cm->valid()) return false;
         int32_t p[3];
         entity_pos_fixed(*e, p);
@@ -1379,7 +1380,7 @@ bool OcclusionWorld::entity_render_visible(World &world, CollisionWorld &collisi
     // latch only ticks for view-collected entities).
     int32_t center_world[3];
     int32_t radius = 0x10000;
-    const CollisionModel *cm = collision.model_for(ent.handle);
+    const CollisionModel *cm = collision.model_for(world, ent.handle);
     int32_t epos[3];
     entity_pos_fixed(ent, epos);
     if (cm != nullptr && cm->valid()) {

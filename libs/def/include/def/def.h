@@ -121,6 +121,16 @@ typedef struct DefAmmoDef {
     size_t effects_table_count;
     char (*raw_lines)[512];
     size_t raw_lines_count;
+    /* Kill-zone blast geometry (appended; FFI mirror stability). The explosion
+     * queue's blast radius is kz_maxradius (or the entry's float override); the
+     * linear damage falloff starts at kz_minradius; kz_pieslice != 0 makes the
+     * blast a cone around the entry direction. [orig: AmmoDef_ParseProperty
+     * 'kz_minradius'/'kz_maxradius' -> +52/+56 fp16, 'kz_pieslice' -> +60
+     * deg * 11930464 BAM; consumers Projectile_ProcessExplosionQueue @0x4ead80,
+     * Entity_ApplyWeaponDamage @0x4e6931/@0x4e695a] */
+    int kz_minradius_fp16;   /* +52 */
+    int kz_maxradius_fp16;   /* +56 */
+    int kz_pieslice_bam;     /* +60 */
 } DefAmmoDef;
 
 typedef struct DefAmmoFile {
@@ -358,6 +368,9 @@ typedef struct DefItemDef {
     int slip_slope;     /* +0x8F8 = deg token * 11930464 [orig: @0x49d960] */
     int turn_rate;      /* +0x924 = deg/s token * 192426 [orig: @0x49d89a] */
     int turn_rate2;     /* +0x928 = deg/s token * 192426 [orig: @0x49d8dc] */
+    int torque;         /* +0x91C raw ("torque") — the collision speed-decay shift count:
+                           severity 1/3 decay speed >> (torque+2), severity 2 >> (torque+1)
+                           [orig: parse @0x49dcca; consumers @0x47cc13-0x47ccc1] */
     int critical_hp;    /* +0x180 i16 raw ("criticalhp") — the burn threshold the vehicle
                            health state machine reads [docs/world/itemdef-re.md +0x180] */
     int critical_drain; /* +0x182 i16 raw ("criticaldrain") — burn drain per 64 ticks */
@@ -414,6 +427,45 @@ typedef struct DefItemDef {
        char[32] (docs/world/itemdef-re.md); consumers: the spawn weapon-slot build and
        draw_vehicle_seat_and_armory_labels @ 0x5a351d via slot0->def+0x3A0] */
     char primary_weapon[32];
+    /* --- The destruction/husk block (docs/world/world-wac-ai-re.md §24). Appended
+       (FFI mirror stability). [orig: ItemDef_ParseProperty @ 0x49eb00] --- */
+    char huskfinal[128];    /* 'huskfinal' -> def+0x80 huskFinal model name — the final
+                               (burned-out) wreck stage; death pieces + the dead-wreck
+                               effect banks prefer it over husk */
+    char sounddeath[32];    /* 'sounddeath' -> def+0x6DB soundDeath name (resolved to
+                               +0x860 deathSoundId; played by Entity_InitDeathSounds
+                               @ 0x4939b0 unless the silent phase bit) */
+    /* 'armor A [B]': +0x192 blastArmor = A, +0x190 impactArmor = A then overwritten
+       by B when authored. -1 = invulnerable word 0xFFFF. Bullets zero their damage
+       when ammo penetration_impact < impactArmor; blasts when ammo penetration_kz <
+       blastArmor. [orig: parse @ 0x4a00e7-0x4a0147; gates @ 0x4e802a / @ 0x4e69b0] */
+    int armor_impact;
+    int armor_blast;
+    float kz;               /* 'kz' -> +0x198 death-blast radius (units): the radius of
+                               the kz_OrganicBlast queued at the husk's KZ user points /
+                               entity pos when the item dies [orig: parse @ 0x49f0xx;
+                               consumers Entity_QueueKzBlastAtUserPoints @ 0x4eabf0,
+                               Entity_UpdateFallingDeathPhysics @ 0x4941d4] */
+    /* 'husk_swap_at' / 'husk_swap_at_sec': +0x19C/+0x1A0 floats. _sec = seconds*62
+       (an authored 0 -> 1.0 tick); husk_swap_at parses as percent*0.01 while +0x1A0
+       is still 0, else as seconds*62 (the witnessed dual-unit parse). Runtime
+       consumer unwitnessed — parsed for format fidelity (D-ITEM-2).
+       [orig: parse @ 0x49f1ce-0x49f2c2; scales dbl 62.0 @ 0x7c88c0 / flt 0.01 @ 0x7c56a8] */
+    float husk_swap_at;
+    float husk_swap_at_sec;
+    float debris_scale;     /* 'debris_scale' -> +0x1BC piece render scale (0 = unset;
+                               pieces render at 1.0) [orig: piece[34] = def+0x1BC ?: 1.0
+                               @ 0x4936f1] */
+    int husk_sub_parts;     /* 'husk_sub_parts' -> +0x100 count byte */
+    /* 'husk_sub_part_types NN_NAME ...' -> +0x101[slot] = debris-type table index.
+       Each value splits at its FIRST '_': slot = number-1 (0..15 accepted), the
+       remainder (internal underscores kept — CHUNK_M) matched case-insensitively
+       against the 13-row engine debris-type table (world/destruction.h mirrors it:
+       HULL 0, WHEEL 1, CHUNK_S/M/L 2-4, ROCK_S/M/L 5-7, CHUNKNP_S/M/L 8-10,
+       CACTUS_ 11, CHUNKSF_M 12). Zero-init like the engine: an unauthored slot
+       reads as HULL. [orig: parse @ 0x49f314-0x49f396 via DeathPieceType_FindByName
+       @ 0x57b310 over the 80-B table @ 0x8404f0] */
+    unsigned char husk_sub_part_types[16];
 } DefItemDef;
 
 typedef struct DefItemsFile {

@@ -104,6 +104,19 @@ func test_setup_promotes_and_counts() -> void:
 	assert_eq(rt.entity_count(), 2)
 
 
+func test_presentation_clock_survives_setup_and_forwards_immediately() -> void:
+	var w := _make_world(Transform3D.IDENTITY)
+	var rt := MissionRuntime.new()
+	add_child_autofree(rt)
+	rt.set_presentation_time_ms(0x1ffffffff)
+	rt.setup(w.mission, w.container)
+	assert_eq(rt.get_sim().get_panm_time_ms(), 0xffffffff,
+		"preconfigured clock is injected after mission-load reset")
+	rt.set_presentation_time_ms(1234)
+	assert_eq(rt.get_sim().get_panm_time_ms(), 1234,
+		"zero-tick and paused frames update collision time immediately")
+
+
 func test_setup_exposes_normalized_diagnostic_mission_identity() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
 	var rt := MissionRuntime.new()

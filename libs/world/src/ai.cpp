@@ -612,17 +612,23 @@ int32_t death_speed(const AiEntity &e) {
 // [orig: AI_TransitionToDeath_GroundVehicle @0x467b20] state-21 (vehicle DYING) enter:
 // death transforms + net notify when not yet husked (Flags&4), the def+1352 mounted-
 // children kill loop, the alert block, moveStep 16, and — already slow (< 1057) — the
-// immediate destroy event. The death-transform leg (savedLivePose snapshot + the
-// unitType death callback's husk swap/death pieces + death sounds
-// [orig: Entity_UpdateDeathTransforms @0x494660]) is presentation the host does not
-// render for vehicles yet — the pose snapshot lands, the rest is a visible stub.
+// immediate destroy event. The death-transform leg runs the witnessed order
+// [orig: Entity_UpdateDeathTransforms @0x494660]: pose snapshot, the unitType death
+// dispatch (husk swap Flags|=6 + death pieces), the death sounds/effects + kz blasts —
+// entity_update_death_transforms (world/destruction.cpp). The S2C 0x26 emit stays a
+// net-track stub (§24).
 void h_enter_vehicle_dying(AiThinkCtx &ctx) {
     AiEntity &e = *ctx.self;
     AiBrain &b = e.brain;
     e.net_saved_live_pose[0] = e.pos[0]; // [orig: savedLivePose = Position @0x494684]
     e.net_saved_live_pose[1] = e.pos[1];
     e.net_saved_live_pose[2] = e.pos[2];
-    ++ctx.sys->unported_calls; // the husk/death-pieces callback + death sounds + S2C 0x26
+    if (ctx.world != nullptr) {
+        if (Entity *ent = ctx.world->registry.get(e.handle)) {
+            if ((ent->engine_flags & kEntityFlagHusk) == 0) // [orig: the Flags&4 gate @0x467b4e]
+                entity_update_death_transforms(*ctx.world, *ent, /*silent=*/false);
+        }
+    }
     ++ctx.sys->unported_calls; // the def+1352 kill-mounted-children loop (def byte unparsed)
     death_alert_block(ctx, e);
     b.f[AiBrain::kStep] = 16;  // [orig: ai_data[7] = 16 @0x467c02]
@@ -670,12 +676,15 @@ void h_enter_vehicle_dead(AiThinkCtx &ctx) {
     AiEntity &e = *ctx.self;
     AiBrain &b = e.brain;
     death_alert_block(ctx, e);
-    ++ctx.sys->unported_calls; // the husk/death-pieces + death-sound leg (as in enter 21)
     if (ctx.world != nullptr) {
         if (Entity *ent = ctx.world->registry.get(e.handle)) {
+            if ((ent->engine_flags & kEntityFlagHusk) == 0) // [orig: the Flags&4 gate]
+                entity_update_death_transforms(*ctx.world, *ent, /*silent=*/false);
             ent->corpse_timer = 0; // [orig: entity+328 = 0 @0x467e22 — wrecks never expire]
             ent->team = 0;         // [orig: entity+354 = 0 @0x467e2c — a wreck goes teamless
                                    //  and drops out of ordinary target scans]
+            if (ent->death_tick == 0) // [orig: +0x1AC first write wins @0x467e4a]
+                ent->death_tick = ctx.world->logic_tick;
         }
         if (b.f[AiBrain::kTargetSlot] != 0)
             ctx.sys->ai_set_target(*ctx.world, e, EntityHandle{}); // [orig: @0x467e86]
@@ -1112,6 +1121,27 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
     if (occ->mount_seat < 0 || occ->mount_seat >= static_cast<int>(veh->seats.size())) return false;
     const Seat &seat = veh->seats[occ->mount_seat];
     pose_mounted_occupant(*occ, *veh, seat);
+    // Capture the resolved seat orientation before the local-player LOOK mirror below
+    // overwrites the registry yaw. Keep the witnessed integer yaw conversion here:
+    // the generic degree helper rounds differently at non-cardinal headings.
+    const int16_t seat_yaw = occ->yaw;
+    const int16_t seat_pitch = occ->pitch;
+    const int16_t seat_roll = occ->roll;
+    const int32_t seat_heading = static_cast<int32_t>(
+            static_cast<int64_t>(90 - seat_yaw) * kBamPerDegreeInt);
+    if (e.inf.active) {
+        // Mounted occupants early-continue before tick_infantry. Mirror both the direct
+        // seat-frame writes and the carried-infantry leg chase snap that it therefore
+        // skips, so render and per-section collision consume one coherent body frame.
+        // [orig: seat carry @0x4b654e-0x4b6575; carried body/leg snap Flags & 0x100060]
+        e.inf.body_heading = seat_heading;
+        e.inf.leg_yaw[0] = seat_heading;
+        e.inf.leg_yaw[1] = seat_heading;
+        e.inf.leg_target[0] = seat_heading;
+        e.inf.leg_target[1] = seat_heading;
+        e.body_pitch = bam_from_degrees_wrapped(static_cast<double>(seat_pitch));
+        e.roll = bam_from_degrees_wrapped(static_cast<double>(seat_roll));
+    }
     if (e.inf.active && e.inf.is_local_player) {
         // The mounted LOCAL player keeps the LOOK as its entity yaw: the witnessed mounted
         // carry writes bodyHeading/headLook from the seat bone but leaves entity->Yaw
@@ -1138,9 +1168,22 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
     e.pos[0] = to_fixed(occ->position.x);
     e.pos[1] = to_fixed(occ->position.y);
     e.pos[2] = to_fixed(occ->position.z);
-    // Engine-frame heading (90 - mission yaw), matching the spawn seed + the mover; the present
-    // converts back to mission yaw for the basis. [orig: entity heading = (90 - yaw) @0x40e9f0.]
-    e.heading = static_cast<int32_t>(static_cast<int64_t>(90 - occ->yaw) * kBamPerDegreeInt);
+    // Remote occupants present in the captured seat frame. The local LOOK override
+    // below remains player-owned and must not rotate the carried body/collision pose.
+    e.heading = seat_heading;
+    if (e.inf.active && e.inf.is_local_player) {
+        // The seated LOOK stays mouse-instant at FULL precision: retail drives entity
+        // Yaw/Pitch straight from input regardless of mount (the mounted body leg
+        // writes bodyHeading/headLook from the bone, never the look) — the camera
+        // reads these mirrors, and the whole-degree occ->yaw roundtrip above (the
+        // wire/motor mirror) must not quantize or freeze it. tick_infantry's own
+        // mirrors (its lines `e.heading = inf.target_heading` / `e.pitch =
+        // inf.look_pitch`) are skipped for the whole ride.
+        // [orig: Input_HandleActionBinding_0 @0x4e1330 writes entity+0x10/+0x14;
+        //  §23.5 — the entity Yaw is the LOOK, player-owned while seated]
+        e.heading = e.inf.target_heading;
+        e.pitch = e.inf.look_pitch;
+    }
     if (e.inf.active) {
         const int mounted_state = mounted_anim_state_for_seat(*veh, seat, e.inf, root_motion);
         if (e.inf.anim_state != mounted_state) {
@@ -1477,6 +1520,13 @@ void AiSystem::apply_route_order(AiEntity &e, int32_t list, int32_t node) {
     }
 }
 
+// The 1024-entry engine cos table at 2^22, computed form (the D-INF-4
+// equivalence) [orig: off_849934, idx = (bam + 0x200000) >> 22].
+static int32_t avoid_cos22(int32_t bam) {
+    const double a = static_cast<double>(bam) * (3.14159265358979323846 / 2147483648.0);
+    return static_cast<int32_t>(std::cos(a) * 4194304.0);
+}
+
 // See ai.h — the vehicle-physics AI/parked input staging. [orig: Entity_UpdateVehiclePhysics
 // @0x48af00: parked @0x48c002-0x48c02d, AI-driver leg @0x48bc12-0x48c034]
 void AiSystem::vehicle_ai_drive(World &world, Entity &veh, const Entity *controller,
@@ -1545,13 +1595,82 @@ void AiSystem::vehicle_ai_drive(World &world, Entity &veh, const Entity *control
             cmd_speed = static_cast<int32_t>((49152LL * cmd_speed + 0x8000) >> 16);
     }
 
+    // The pool-1 avoid BRAKE [orig: @0x48bd8f-0x48bf26]: for every pool-1
+    // neighbor whose heading-aware footprint ellipse overlaps ours (+1.0 u)
+    // AND that sits within ~30 deg of dead ahead, the command speed multiplies
+    // by an id/frame-keyed factor in [0.25, 0.75) per tick — vehicles brake
+    // behind obstacles; deflecting off them through the hull contact was never
+    // the retail path-follow behavior.
+    {
+        const int32_t self_bound = to_fixed(veh.bound_radius);
+        const int32_t sx = to_fixed(veh.position.x);
+        const int32_t sy = to_fixed(veh.position.y);
+        const int32_t sz = to_fixed(veh.position.z);
+        const size_t cap = world.registry.pool_capacity(1);
+        for (size_t si = 0; si < cap; ++si) {
+            const Entity *o =
+                    world.registry.get(EntityHandle::make(1, static_cast<int>(si)));
+            if (o == nullptr || o->handle == veh.handle) continue; // [orig: @0x48be19]
+            const int32_t ob = to_fixed(o->bound_radius);
+            if (ob <= 0) continue; // [orig: the pool-walk live gate @0x48bdd9]
+            const int32_t reach = ob + self_bound + 0x10000; // [orig: @0x48bdf2]
+            const int32_t dx = sx - to_fixed(o->position.x);
+            if (iabs32(dx) > reach) continue;
+            const int32_t dy = sy - to_fixed(o->position.y);
+            if (iabs32(dy) > reach) continue;
+            // Carrier chains never brake for each other [orig: @0x48be1d-0x48be25].
+            if (o->ground_target == veh.handle || veh.ground_target == o->handle)
+                continue;
+            const int32_t dz2 = 2 * (sz - to_fixed(o->position.z)); // [orig: @0x48be2d]
+            if (iabs32(dz2) > reach) continue;
+            const double fdx = static_cast<double>(dx);
+            const double fdy = static_cast<double>(dy);
+            const double fdz = static_cast<double>(dz2);
+            const int32_t dist =
+                    static_cast<int32_t>(std::sqrt(fdx * fdx + fdy * fdy + fdz * fdz));
+            if (dist > reach) continue;
+            // Bearing other->self in BAM [orig: fpatan(dy, dx) x 2^32/2pi
+            // (dbl @0x7C19D8) @0x48be7a-0x48be89].
+            const int32_t ang = static_cast<int32_t>(
+                    std::llround(std::atan2(fdy, fdx) * 683565275.5764316));
+            // Directional footprints: r/2 + (r/2)*|cos(yaw - ang)| — an end-on
+            // vehicle projects its full bound along the axis, side-on half
+            // [orig: the 1024-entry cos table off_849934 @0x48be8f-0x48bef1].
+            const int32_t oyaw = o->veh.yaw_seeded
+                    ? o->veh.yaw_bam
+                    : bam_heading_from_mission_yaw_deg(static_cast<double>(o->yaw));
+            const int32_t other_r =
+                    static_cast<int32_t>((static_cast<int64_t>(ob >> 1) *
+                                          iabs32(avoid_cos22(oyaw - ang))) >> 22) +
+                    (ob >> 1);
+            const int32_t self_r =
+                    static_cast<int32_t>((static_cast<int64_t>(self_bound >> 1) *
+                                          iabs32(avoid_cos22(heading - ang))) >> 22) +
+                    (self_bound >> 1);
+            if (dist > self_r + other_r + 0x10000) continue; // [orig: @0x48bef8]
+            // Dead-ahead gate: the other within ~30 deg of the nose
+            // [orig: |Yaw - ang - 0x7FFFFF80| <= 357913920 @0x48bf05-0x48bf0f].
+            if (iabs32(heading - ang - 0x7FFFFF80) > 357913920) continue;
+            // The brake factor ((id + (frame << 8)) & 0x7FFF) + 0x4000 — keyed
+            // off DcbId + the global frame counter dword_24C1948 (our net id +
+            // logic tick stand in) [orig: @0x48bf17-0x48bf26].
+            const int32_t f = static_cast<int32_t>(
+                    ((static_cast<uint32_t>(veh.net_id) +
+                      (static_cast<uint32_t>(world.logic_tick) << 8)) &
+                     0x7FFFu) +
+                    0x4000u);
+            cmd_speed = static_cast<int32_t>(
+                    (static_cast<int64_t>(f) * cmd_speed + 0x8000) >> 16);
+        }
+    }
     out.ai_drive = true;
     out.cmd_speed = cmd_speed;
     out.steer_target_bam = heading + delta + (delta >> 3); // [orig: @0x48bd7f]
-    // The pool-1 collision-avoid damping @0x48bd8f-0x48bf26, the wait-for-boarders stop
-    // @0x48bf6f-0x48bff9, the handbrake byte-973 latch @0x48c03a and the aim-lock stop
-    // @0x48c086 are tracked deferrals (D-NET-161).
-    (void)world;
+    // The wait-for-boarders stop @0x48bf6f-0x48bff9 (a full stop while any live
+    // unmounted pool-0 entity runs the boarding think toward THIS vehicle —
+    // brain mode 125 + the vehicle id; moot until the AI boarding think lands),
+    // the handbrake byte-973 latch @0x48c03a and the aim-lock stop @0x48c086
+    // stay tracked deferrals (D-NET-161).
 }
 
 // ----------------------------------------------------------------------------

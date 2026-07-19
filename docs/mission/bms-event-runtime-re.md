@@ -469,10 +469,12 @@ AI/runtime semantics below are doc refinements, not parser changes.
 
 Spawn-grid math reads (X@16, Y@20) as the horizontal plane and Z@24 as vertical; grid
 `X = (x>>18)+512`, `Y = 512−(y>>18)` (Y inverted). Confirms our `(x, z, −y)` import
-transform. Engine heading = **90 − yaw**, pitch/roll direct. Our editor's euler
-`(−pitch, −yaw+180, +roll)` differs in the in-plane zero (90 vs 180) and pitch sign —
-frame-dependent, **UNRESOLVED pending a visual A/B against the running game**; the file
-stores raw int16 degrees either way, so round-trip is unaffected.
+transform. Engine heading = **90 − yaw**, with pitch/roll stored direct. The
+retail matrix builder applies those as
+`Rz(90−yaw)·Ry(−pitch)·Rx(roll)`. Conjugating through `(x,z,−y)` and the
+model-forward correction gives the resolved Godot basis
+`RotY(90−yaw)·RotZ(+pitch)·RotX(roll)·RotY(90)`. The file stores the raw int16
+degrees unchanged, so round-trip remains unaffected.
 
 ### 6.7 Load orchestration
 

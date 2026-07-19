@@ -16,6 +16,7 @@
 
 #include <cstdint>
 #include <unordered_map>
+#include <vector>
 
 #include <oed/oed.h>
 #include <tdp/tdp.h>
@@ -86,6 +87,8 @@ private:
 	TdpProject _build_project_from_ir() const;
 	String _export_basename() const;
 	String _source_kind_name() const;
+	bool _effective_panm_for_lod(int p_lod_index,
+			std::vector<ThreediPartAnimation> &r_nodes) const;
 
 protected:
 	static void _bind_methods();
@@ -166,6 +169,13 @@ public:
 	// per frame [orig: the model +0xDC/+0xE0 record gate all consumers use].
 	bool has_occlusion() const;
 	Array get_collision_volumes() const;
+	// Effective PANM source selection mirrors retail: a LOD-local block wins,
+	// otherwise the model-level PANM block is inherited. Collision asks only
+	// for LOD0; the any-LOD query is for visual de-batching.
+	bool has_live_panm() const;
+	bool has_live_panm_for_lod(int p_lod_index) const;
+	int get_live_panm_lod() const;
+	PackedInt32Array get_effective_panm_targets(int p_lod_index) const;
 	int get_part_anim_count(int p_lod_index) const;
 	Array get_part_animations(int p_lod_index) const;
 	Array get_part_anim_editor_entries(int p_lod_index) const;
@@ -202,10 +212,10 @@ public:
 	// transform. World models keep the default flipped frame.
 	Array build_lod_submeshes(int p_lod_index, bool p_skeletal = false, int p_bone_count = 0,
 			bool p_native_frame = false) const;
-	Dictionary eval_material_runtime(int p_index, int p_time_ms, const Dictionary &p_ctrl_values) const;
-	int compute_anim_frame(int p_index, int p_time_ms, const Dictionary &p_ctrl_values) const;
-	Dictionary evaluate_panm(int p_lod_index, int p_time_ms, const Dictionary &p_ctrl_values) const;
-	Array evaluate_lights(int p_time_ms, const Dictionary &p_ctrl_values) const;
+	Dictionary eval_material_runtime(int p_index, int64_t p_time_ms, const Dictionary &p_ctrl_values) const;
+	int compute_anim_frame(int p_index, int64_t p_time_ms, const Dictionary &p_ctrl_values) const;
+	Dictionary evaluate_panm(int p_lod_index, int64_t p_time_ms, const Dictionary &p_ctrl_values) const;
+	Array evaluate_lights(int64_t p_time_ms, const Dictionary &p_ctrl_values) const;
 
 	Error set_material_shader(int p_material_index, const String &p_shader_name);
 	Error set_material_texture(int p_material_index, int p_texture_index, const String &p_texture_name);

@@ -670,7 +670,26 @@ void World::run_logic_tick(bool is_authority, bool pre_mission) {
     // round re-sim is not modeled here [orig: Entity_UpdateAllEntities ->
     // Weapon_UpdateAllProjectiles @0x4ec020; damage is authority-gated end-to-end,
     // §5.60]. Terrain is the host-wired sampler (AI grounding shares it).
-    if (is_authority && !pre_mission) round_sim.tick(*this, terrain);
+    if (is_authority && !pre_mission)
+        round_sim.tick(*this, terrain, ai != nullptr ? ai->collision : nullptr);
+    if (is_authority && !pre_mission) {
+        // The explosion-queue drain runs once per frame after the projectile
+        // update [orig: Projectile_ProcessExplosionQueue @0x4ead80]; entries the
+        // damage callbacks push (the kz death chain) land next tick, exactly like
+        // the original's post-reset writes. Dead non-AI items then settle
+        // [orig: the Entity_UpdateStaticDeathPhysics / _UpdateFallingDeathPhysics
+        // update callbacks] and the death-piece pool advances
+        // [orig: DeathPiece_TickAll @0x57b900].
+        // The water plane: env.water_z (16.16, the #265 sound-profile home) —
+        // zero means "no water authored", the same read the wreck gates use
+        // [orig: Env_WaterHeightFixed @0x26c6454].
+        const float water_z =
+                env.water_z != 0 ? static_cast<float>(env.water_z) / 65536.0f : -1.0e9f;
+        explosions.process(*this, ai != nullptr ? ai->collision : nullptr, terrain,
+                           water_z, destruction);
+        destruction_tick_dead_items(*this, terrain, water_z, destruction);
+        death_pieces.tick(*this, terrain, water_z, destruction);
+    }
     // The waypoint current-selection pass, from the local player's position (the
     // original runs it in the client frame beside the player update; our SP host
     // is that client — the pure-client view is D-HUD-16). Position converts to
@@ -766,16 +785,28 @@ World::Snapshot World::snapshot() const {
     s.vars = vars;
     s.env = env;
     s.logic_tick = logic_tick;
+    s.local_player = cached.local_player;
     return s;
 }
 
 void World::restore(const Snapshot &s) {
-    registry = s.registry;
+    registry.restore_from(s.registry);
     vars = s.vars;
     env = s.env;
     logic_tick = s.logic_tick;
+    // Reset per-tick health/proximity counters, then restore only the stable
+    // ownership identity captured with the registry. A post-snapshot player may
+    // have reused a baseline actor's slot, while a listen baseline may already
+    // contain its host player; copying the current cache or clearing ownership
+    // unconditionally gets one of those cases wrong.
+    cached = CachedFrameState{};
+    cached.local_player = s.local_player;
     effects.clear();
     round_sim.reset();
+    explosions.reset();
+    death_pieces.reset();
+    destruction_rng.reset();
+    destruction = DestructionEvents{};
     // Round outcome + kill stats reset with the mission [orig: Game_StartMission —
     // gate clear @0x524a1f + the scoreboard-block memset @0x5249df; the stat buckets
     // clear in the round-start state init].

@@ -1,0 +1,4 @@
+[gd_scene load_steps=2 format=3 uid="uid://cdestructpr0be"]
+[ext_resource type="Script" path="res://tests/destruction_probe.gd" id="1_dprobe"]
+[node name="DestructionProbe" type="Node"]
+script = ExtResource("1_dprobe")

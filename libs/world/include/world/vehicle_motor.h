@@ -50,6 +50,8 @@ struct VehicleTraits {
     int32_t deceleration = 0;  // itemDef+0x8E4
     int32_t turn_rate = 0;     // itemDef+0x924
     int32_t turn_rate2 = 0;    // itemDef+0x928 (low-speed minimum rate override)
+    int32_t torque = 0;        // itemDef+0x91C raw — the collision speed-decay shift count
+                               // [orig: parse @0x49dcca; severity handlers @0x47cc13-cc1]
     int32_t unit_type = 0;     // minimap icon class (5..8 helo, 3/4 boat, 12 special,
                                // else ground) [orig: Entity_ClassifyForMinimap @0x50FA70]
     bool player_control = false; // ItemDefAttrib & 0x40 — gates the occupant input block

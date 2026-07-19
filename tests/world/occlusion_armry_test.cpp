@@ -102,7 +102,7 @@ bool collision_from_ir(const ThreediIRCollision *col, CollisionModel &out) {
             ++cursor;
         }
         if (s < static_cast<int32_t>(col->object_count))
-            sec.part_index = col->objects[s].parent_subobject_index;
+            sec.parent_part_index = col->objects[s].parent_subobject_index;
     }
     return true;
 }

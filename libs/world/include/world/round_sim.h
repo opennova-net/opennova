@@ -9,12 +9,15 @@
 // AUTHORITY-ONLY. docs/net/novaworld-net-re.md §5.60.]
 //
 // Reimpl altitude — tracked deferrals (§5.60 port follow-ups):
-//  * hit test = per-tick segment vs a fixed organic cylinder (the witnessed proximity
-//    list + bone-section collision needs the collision-model port). Hit ZONE resolution
-//    is therefore body-only (zone multiplier 1.0; head 1.25 / limbs 0.5 / 13-14 3.0 wait
-//    on bone hits).
-//  * pool-0 organics only (vehicle/static hits need the itemDef+400 armor threshold and
-//    section model).
+//  * ORGANIC hit test = the posed per-COBJ sphere walk from
+//    Physics_RaycastAgainstBoneSections; ray[31] drives reactions/death while
+//    ray[32] drives normal-infantry damage, and F3 exposes both. Unresolved graphics retain
+//    the bounded torso fallback. ITEM hits (pools 1/2) run the witnessed
+//    bound-sphere broad phase + the
+//    collision-model FACE narrow phase with the material-tagged impact
+//    [orig: Projectile_RaycastProximitySlots @ 0x4E5340 ->
+//    Physics_RaycastAgainstBoneCollision @ 0x4E4CB0]; models with no face mesh keep
+//    the bound-sphere stand-in (D-ITEM-1's bounded fallback).
 //  * no drag/gravity yet (Projectile_ApplyDragDeceleration internals unwitnessed) — the
 //    round flies straight at muzzle speed, so kinetic damage does not yet fall off.
 //  * no weapon spread on the sim round (the 0x06 carries the claimed pre-spread pose;
@@ -38,6 +41,8 @@ struct TerrainHeightField;
 }
 
 namespace opennova::world {
+
+class CollisionWorld;
 
 class World;
 
@@ -114,6 +119,8 @@ struct RoundHit {
     EntityHandle victim;
     EntityHandle shooter;
     int32_t damage = 0;
+    int16_t primary_section = -1;
+    int16_t secondary_section = -1;
 };
 
 // One presented fire — the origin/direction/ammo of a spawned round, drained by the
@@ -131,6 +138,41 @@ struct FireEvent {
     int32_t yaw_bam = 0;  // fire direction (engine-frame BAM32, §5.16)
     int32_t pitch_bam = 0;
 };
+
+// One resolved hit-test outcome, kept in a persistent ring for the F3 Rounds
+// debug view (developer tooling over our port — not retail-mimicked UI). The
+// ring is never drained: hosts snapshot it read-only, so a headless server
+// pays only the ring writes.
+struct RoundDebugEvent {
+    enum Kind : uint8_t {
+        kOrganic = 0,      // pool-0 posed person-section hit (or unresolved fallback)
+        kItemFace = 1,     // pool-1/2 CFAC face hit (section/face/material valid)
+        kItemSphere = 2,   // pool-1/2 bound-sphere stand-in (no face mesh)
+        kTerrain = 3,      // terrain column stop
+        kExpired = 4,      // max-age expiry / timed fuze
+        kFaceMiss = 5,     // bound-sphere graze whose face walk missed — round flew on
+    };
+    uint32_t tick = 0;
+    uint8_t kind = kExpired;
+    uint8_t material = 0;    // CFAC byte (kItemFace), fixed 19 for organic
+    int16_t section = -1;    // primary COBJ section (item face / organic bone)
+    int16_t secondary_section = -1; // organic ray[32], lowest overlapping bone
+    bool organic_fallback = false; // synthetic torso sphere, not authored COBJ
+    int32_t face = -1;       // face index within the section (kItemFace)
+    int32_t effect_tag = -1; // impact tag handed to the present pass
+    uint16_t entity = 0xFFFF;   // packed EntityHandle of the struck entity
+    uint16_t shooter = 0xFFFF;  // packed EntityHandle of the round's owner
+    int32_t ammo_index = -1;
+    bool husk = false;       // target was in the husk-swapped (destroyed) state
+    float t = 0.0f;          // hit parameter along the tick segment
+    Vec3 p0, p1;             // the tick's flight segment (mission units)
+    Vec3 hit;                // resolved stop / graze point (mission units)
+};
+
+// Compatibility fallback for an organic whose graphic/COBJ block could not be
+// resolved. Normal organic collision uses posed per-section spheres.
+inline constexpr float kOrganicStandInCenterZ = 0.9f;
+inline constexpr float kOrganicStandInRadius = 0.6f;
 
 class RoundSim {
 public:
@@ -159,6 +201,14 @@ public:
     // present layer each tick; see FireEvent for the witness map.
     std::vector<FireEvent> fired;
 
+    // The F3 Rounds debug ring: the last kDebugTrailCap resolved outcomes
+    // (hits, terrain stops, expiries, AND face-miss fly-ons), newest replacing
+    // oldest. Read-only snapshots; reset() clears it.
+    static constexpr int kDebugTrailCap = 48;
+    std::array<RoundDebugEvent, kDebugTrailCap> debug_trail{};
+    int debug_trail_next = 0;  // ring cursor (next write slot)
+    int debug_trail_count = 0; // valid entries, saturates at the cap
+
     // The tracer trail channels — appended per round tick, drained per pool tick,
     // styled and drawn by the host present pass (world/tracer_trails.h witness map).
     TracerTrailPool trails;
@@ -180,8 +230,11 @@ public:
 
     // One 62 Hz step for every live round [orig: Weapon_UpdateAllProjectiles @ 0x4EC020
     // -> Projectile_UpdatePhysics @ 0x4E9D70]: advance along velocity, terrain stop,
-    // organic hit test, authority damage, death detection.
-    void tick(World &world, const terrain::TerrainHeightField *terrain);
+    // organic hit test, the item bound-sphere broad phase + the collision-model
+    // face narrow phase (through `collision`, husk-aware; null = sphere-only),
+    // authority damage, death detection.
+    void tick(World &world, const terrain::TerrainHeightField *terrain,
+              CollisionWorld *collision);
 
     // Mission restart discards all transient projectile/presentation state.
     void reset() noexcept;

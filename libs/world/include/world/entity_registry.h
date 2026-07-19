@@ -48,6 +48,11 @@ public:
     Entity *get(EntityHandle h);
     const Entity *get(EntityHandle h) const;
 
+    // Restore authored/runtime-visible registry state without rewinding the
+    // host-only lifetime serial. Collision and skeletal caches use that serial
+    // to distinguish entities that reuse the same packed pool/slot handle.
+    void restore_from(const EntityRegistry &snapshot);
+
     // Faithful to EntityPool_FindByNetId @0x4f0a20: scans pool 0 first, then pools
     // 1..3 (mask &0xF), first match wins; returns (pool<<12)|slot, else invalid.
     EntityHandle find_by_net_id(uint16_t net_id) const;
@@ -99,6 +104,7 @@ private:
         size_t live = 0;
     };
     std::array<Pool, kPoolCount> pools_{};
+    uint64_t next_spawn_id_ = 1; // zero means "identity not recorded"
     std::vector<Area> areas_;
     std::vector<Route> routes_;
     std::vector<std::string> group_names_;

@@ -264,6 +264,11 @@ bool find_nearest_free_seat(World &world, const Entity &player, NearestSeatHit &
     // registry sweep is the container rebase — behavior-equal inside the 4.0 u gate.
     world.registry.for_each([&](const Entity &cand) {
         if (scan_entity_rejected(world, cand, player)) return;
+        // While seated, the OWN vehicle's other seats are LOS-blocked by its hull in
+        // retail (the ray walks pool-1 collision models) — that is why USE exits
+        // instead of cycling seats. Pool-1 hulls are unbuilt (D-COL-5), so the hull
+        // occlusion is modeled as this candidate skip (D-AI-11 j).
+        if (player.mounted && cand.handle == player.mount_target) return;
         if (!armory_mode) {
             // [orig: the searchMode-0 seat loop @0x435f1e]
             for (int i = 0; i < static_cast<int>(cand.seats.size()); ++i) {

@@ -319,7 +319,7 @@ int main() {
 		if (!expect(world.round_sim.spawn(world, params) >= 0, "terrain-leg round spawned"))
 			return 1;
 		for (int i = 0; i < 4 && world.round_sim.active_count > 0; ++i)
-			world.round_sim.tick(world, &field);
+			world.round_sim.tick(world, &field, nullptr);
 		if (!expect(world.round_sim.active_count == 0, "terrain stopped the round")) return 1;
 		if (!expect(world.round_sim.impacts.size() == 1, "one terrain impact queued")) return 1;
 		const w::RoundImpact &imp = world.round_sim.impacts[0];
@@ -391,8 +391,11 @@ int main() {
 	if (!expect(ctx.respawn_queue.empty(), "a client-owned victim does NOT auto-respawn"))
 		return 1;
 
-	// --- 4. Kill the HOST player (loopback-owned, past the dead victim on the same
-	// line): it queues for respawn and releases at spawn health/position. ---
+	// --- 4. Kill the HOST player (loopback-owned): it queues for respawn and
+	// releases at spawn health/position. Retail corpses remain ballistic
+	// colliders (the proximity walk does not skip Flags bit 1 / dead), so move
+	// the already-verified client corpse off this unrelated line-of-fire fixture.
+	world.registry.get(hc)->position.y = 10.0f;
 	for (int shot = 0; shot < 3; ++shot) {
 		dispatch_fire(roster[1], roster, world,
 		              fire_body(hb.packed, 5, 0, 0, muzzle_z, 0, 0));
@@ -544,7 +547,7 @@ int main() {
 			return 1;
 		if (!expect(ch.cap == 12, "stdred ring cap = the witnessed 12-entry table"))
 			return 1;
-		for (int t = 0; t < 5; ++t) sim.tick(world, nullptr);
+		for (int t = 0; t < 5; ++t) sim.tick(world, nullptr, nullptr);
 		if (!expect(ch.count == 5, "one trail point per tick while alive")) return 1;
 		if (!expect(ch.pts[0].pos.x == 0.0f && ch.pts[0].pos.z == 500.0f,
 		            "the first point is the PRE-move spawn origin"))
@@ -553,15 +556,15 @@ int main() {
 		if (!expect(ch.age == 1, "a live channel's age re-arms every append")) return 1;
 		// Death by age-out: final point + kill request, then the drain timeline.
 		sim.rounds[size_t(slot)].max_age_ticks = sim.rounds[size_t(slot)].age_ticks;
-		sim.tick(world, nullptr);
+		sim.tick(world, nullptr, nullptr);
 		if (!expect(!sim.rounds[size_t(slot)].active && ch.kill && ch.count == 6,
 		            "round death appends the final point and requests the drain"))
 			return 1;
-		for (int t = 0; t < 11; ++t) sim.tick(world, nullptr);
+		for (int t = 0; t < 11; ++t) sim.tick(world, nullptr, nullptr);
 		if (!expect(ch.active && ch.count == 6,
 		            "the dead trail holds shape through the cap-length grace"))
 			return 1;
-		for (int t = 0; t < 30; ++t) sim.tick(world, nullptr);
+		for (int t = 0; t < 30; ++t) sim.tick(world, nullptr, nullptr);
 		if (!expect(!ch.active, "the drained channel frees its slot")) return 1;
 
 		// Enemy select: a presenting client on another team gets the enemy style.
@@ -583,7 +586,7 @@ int main() {
 		            "ring-cap round spawned"))
 			return 1;
 		auto &ch_r = sim.trails.channels[size_t(sim.rounds[size_t(slot_r)].trail_slot)];
-		for (int t = 0; t < 20; ++t) sim.tick(world, nullptr);
+		for (int t = 0; t < 20; ++t) sim.tick(world, nullptr, nullptr);
 		if (!expect(ch_r.count == 12, "the ring caps at the style count (oldest drops)"))
 			return 1;
 		sim.rounds[size_t(slot_r)].active = false;

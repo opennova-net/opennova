@@ -15,7 +15,8 @@ extern "C" {
 
 // Sample a PANM transform and return the raw 24.8 fixed-point value used by the
 // original animation code. The caller supplies:
-// - time_ms: tick time in milliseconds (matches dword_18B42A4 usage).
+// - time_ms: the frame-shared GetTickCount DWORD
+//   [orig: Render_ShaderTickMs @ 0x2721A40].
 // - ctrl_table: optional control register lookup table (512 entries). If NULL,
 //   control-based tracks will use 0.
 // Return value is signed 32-bit fixed (<<8), matching PANM_SampleTrack.

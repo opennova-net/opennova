@@ -1116,7 +1116,7 @@ int main() {
         for (uint32_t t = 0; t < 2000 && !killed; ++t) {
             tctx.logic_tick = t;
             sys.tick(w, tctx);
-            w.round_sim.tick(w, nullptr);
+            w.round_sim.tick(w, nullptr, nullptr);
             if (npc.inf.combat_target == player_h) acquired = true;
             if (w.rounds.count > 0) fired = true;
             for (const RoundDeath &d : w.round_sim.deaths)

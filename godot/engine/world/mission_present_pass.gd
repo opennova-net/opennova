@@ -78,12 +78,11 @@ func present() -> void:
 			# (its death anim holds the last frame) until the sim despawns it via
 			# PF_HIDDEN — the corpse timer + the seen-by-the-local-player watch
 			# [orig: Entity_UpdateInfantryAI @0x4b9c40 death edge / @0x4b9e4d corpse
-			# block; world-wac-ai-re §19]. Dead NON-organics still hide: their retail
-			# presentation is the husk-model swap (Flags|=6) + death pieces, unported
-			# (D-AI-9) — the hide is the stand-in.
-			var alive := int(snap[base + NovaSimulation.PF_ALIVE]) == 1
-			var organic := int(snap[base + NovaSimulation.PF_KIND]) == 3
-			var visible := int(snap[base + NovaSimulation.PF_HIDDEN]) == 0 and (alive or organic)
+			# block; world-wac-ai-re §19]. A dead NON-organic keeps rendering too:
+			# the destruction pass swaps its model to the husk (Flags|=6), and a
+			# def with no husk keeps its graphic standing — the witnessed render
+			# pick [orig: Flags&4 && huskModel ? husk : graphic @0x413086; §24].
+			var visible := int(snap[base + NovaSimulation.PF_HIDDEN]) == 0
 			node.visible = visible
 			if not visible:
 				_stats.hidden += 1

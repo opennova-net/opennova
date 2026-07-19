@@ -700,7 +700,7 @@ static int parse_cobj(const ThreediChunk *chunk, ThreediCollisionObject **out_ob
         assert(objs[i].unk0 == 0);
         objs[i].num_vertices = read_s32_le(base + 4);
         objs[i].num_faces = read_s32_le(base + 8);
-        objs[i].num_planes = read_s32_le(base + 12);
+        objs[i].num_normals = read_s32_le(base + 12);
         objs[i].num_bounding_volumes = read_s32_le(base + 16);
         objs[i].parent_subobject_index = read_s32_le(base + 20);
         objs[i].unk3 = read_s32_le(base + 24);
@@ -2583,7 +2583,7 @@ static int build_cobj_chunk(const ThreediCollisionModel *collision, ChunkBuilder
         if (buffer_append_s32_le(&out->payload, o->unk0) != 0 ||
             buffer_append_s32_le(&out->payload, o->num_vertices) != 0 ||
             buffer_append_s32_le(&out->payload, o->num_faces) != 0 ||
-            buffer_append_s32_le(&out->payload, o->num_planes) != 0 ||
+            buffer_append_s32_le(&out->payload, o->num_normals) != 0 ||
             buffer_append_s32_le(&out->payload, o->num_bounding_volumes) != 0 ||
             buffer_append_s32_le(&out->payload, o->parent_subobject_index) != 0 ||
             buffer_append_s32_le(&out->payload, o->unk3) != 0 ||

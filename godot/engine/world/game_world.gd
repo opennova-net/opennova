@@ -25,6 +25,7 @@ const VegAssets := preload("res://engine/terrain/veg_assets.gd")
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
 const MissionRuntime := preload("res://engine/world/mission_runtime.gd")
+const PanmClockScript := preload("res://engine/world/panm_clock.gd")
 const NovaModelResolver := preload("res://engine/mission/nova_model_resolver.gd")
 const NetWorldView := preload("res://engine/world/net_world_view.gd")
 const NetEventView := preload("res://engine/world/net_event_view.gd")
@@ -33,12 +34,16 @@ const UserPointDebugView := preload("res://engine/debug/user_point_debug_view.gd
 const CollisionDebugView := preload("res://engine/debug/collision_debug_view.gd")
 const OcclusionDebugView := preload("res://engine/debug/occlusion_debug_view.gd")
 const ParticleDebugView := preload("res://engine/debug/particle_debug_view.gd")
+const RoundDebugView := preload("res://engine/debug/round_debug_view.gd")
+const HitboxDebugView := preload("res://engine/debug/hitbox_debug_view.gd")
 const NET_CONTAINER_NAME := "NetObjects"
 const SKELETON_DEBUG_NAME := "SkeletonDebug"
 const USER_POINT_DEBUG_NAME := "UserPointDebug"
 const COLLISION_DEBUG_NAME := "CollisionDebug"
 const PARTICLE_DEBUG_NAME := "ParticleDebug"
 const OCCLUSION_DEBUG_NAME := "OcclusionDebug"
+const ROUND_DEBUG_NAME := "RoundDebug"
+const HITBOX_DEBUG_NAME := "HitboxDebug"
 const TICK_DT := 1.0 / 62.5  # mirrors MissionRuntime.TICK_DT; default for tick()'s delta param
 # [orig: ItemDef_GetBoneMaskByName @ 0x49ea40 scans the first 16 points.]
 const ITEM_EFFECT_USER_POINT_SCAN_LIMIT := 16
@@ -85,6 +90,7 @@ var _loaded_mission: NovaMissionData
 # state, deliberately separate from mission_file (the exported boot option).
 var _loaded_mission_file: String = ""
 var _runtime  # MissionRuntime: the one mission runtime driver (sim + present pass + index), DIVIDED cadence
+var _panm_clock = PanmClockScript.new()
 var _mission_stats: Dictionary = {}
 var _placer  # MissionObjectPlacer (kept so mission audio reuses its item database)
 var _weapon_db: NovaWeaponDatabase = null  # weapon.def, lazy per mounted root (FP viewmodel)
@@ -522,6 +528,8 @@ func _place_mission_objects(mission: NovaMissionData, timeline: PerfTimeline = n
 	if _resource_root == null or mission == null:
 		return
 	_placer = MissionObjectPlacer.new(_resource_root)
+	_panm_clock.sample_frame()
+	_placer.set_panm_clock(_panm_clock)
 	# A co-op joiner renders all dynamic entities WIRE-DIRECT (the faithful client model), so
 	# it does NOT place the .bms organics/vehicles — they would be frozen duplicates of the
 	# wire avatars. Still build the placer (the local-player avatar + the wire present pass
@@ -615,6 +623,12 @@ func unload() -> void:
 	var occ_debug := get_node_or_null(NodePath(OCCLUSION_DEBUG_NAME))
 	if occ_debug != null:
 		occ_debug.queue_free()
+	var rnd_debug := get_node_or_null(NodePath(ROUND_DEBUG_NAME))
+	if rnd_debug != null:
+		rnd_debug.queue_free()
+	var hb_debug := get_node_or_null(NodePath(HITBOX_DEBUG_NAME))
+	if hb_debug != null:
+		hb_debug.queue_free()
 	# Net session teardown (no-ops for a normal mission).
 	if _net_event_view != null:
 		_net_event_view.queue_free()
@@ -816,11 +830,18 @@ func get_current_frame_clear_color() -> Color:
 	return _clear_color.environment.background_color
 
 
+func _sample_panm_clock() -> void:
+	_panm_clock.sample_frame()
+	if _runtime != null and _runtime.has_method("set_presentation_time_ms"):
+		_runtime.set_presentation_time_ms(_panm_clock.time_ms)
+
+
 ## The host per-frame order, faithful to the original main loop's server-tick-then-client-render:
 ## foliage coverage around the viewer, then the mission runtime (MissionRuntime.tick advances the
 ## logic at the 62-frame cadence, presents entity state onto the placed nodes, and drains side
 ## effects), then the audio render pass. Effects come back through MissionRuntime.effects_drained.
 func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta: float = TICK_DT) -> void:
+	_sample_panm_clock()
 	var tick_start := Time.get_ticks_usec()
 	_last_tick_camera_pos = camera_pos  # the fire present pass's listener (audio-tick source)
 	var foliage_start := tick_start
@@ -919,6 +940,12 @@ func _fire_listener_position() -> Vector3:
 # Fire-presentation counters (probe/diagnostic seam; empty until a mission runs).
 func get_fire_present_stats() -> Dictionary:
 	return _runtime.get_fire_present_stats() if _runtime != null and _runtime.has_method("get_fire_present_stats") else {}
+
+
+# Destruction-presentation counters (DestructionPresentPass.Stats, typed per
+# ADR 0017; null until a host mission runs with the pass).
+func get_destruction_present_stats() -> RefCounted:
+	return _runtime.get_destruction_present_stats() if _runtime != null and _runtime.has_method("get_destruction_present_stats") else null
 
 
 # --- the local player (Phase 2; ADR 0012). Host delegates to the mission runtime. ---
@@ -1357,6 +1384,39 @@ func _refresh_collision_debug() -> void:
 	view.setup(self)  # duck-typed get_sim(), re-resolved per frame
 
 
+# --- Round debug view (F3 overlay's "Show round trails") ---------------------
+# Build / free a child RoundDebugView drawing the RoundSim debug ring (flight
+# segments + hit markers + labels) over the world — the collision-view
+# contract: the view re-resolves the sim through this GameWorld every frame,
+# so mission reloads never leave it stale.
+
+func set_round_debug(enabled: bool) -> void:
+	var existing := get_node_or_null(NodePath(ROUND_DEBUG_NAME))
+	if existing != null:
+		existing.queue_free()
+	if not enabled:
+		return
+	var view := RoundDebugView.new()
+	view.name = ROUND_DEBUG_NAME
+	add_child(view)
+	view.setup(self)  # duck-typed get_sim(), re-resolved per frame
+
+
+# Build / free a child HitboxDebugView drawing the round hit-detection reality
+# (bullet-mesh wireframes + bound spheres + posed organic bone spheres) — the
+# collision-view contract, on the overlay's "Show hit meshes" toggle.
+func set_hitbox_debug(enabled: bool) -> void:
+	var existing := get_node_or_null(NodePath(HITBOX_DEBUG_NAME))
+	if existing != null:
+		existing.queue_free()
+	if not enabled:
+		return
+	var view := HitboxDebugView.new()
+	view.name = HITBOX_DEBUG_NAME
+	add_child(view)
+	view.setup(self)  # duck-typed get_sim(), re-resolved per frame
+
+
 # --- Occlusion debug view (F3 overlay's "Show portal faces") -----------------
 # Build / free a child OcclusionDebugView drawing the render-occlusion portal
 # faces (type-colored outlines + section labels) over the world — the
@@ -1523,7 +1583,11 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> void:
 	opts["fire_audio"] = Callable(self, "get_mission_audio")
 	opts["fire_fx"] = Callable(self, "get_effect_world")
 	opts["fire_listener"] = Callable(self, "_fire_listener_position")
+	# The destruction present pass anchors its wreck/piece effect groups through
+	# register_effect_anchor and swaps husk models via the placer.
+	opts["game_world"] = self
 	_runtime.setup(mission, container, opts)
+	_runtime.set_presentation_time_ms(_panm_clock.time_ms)
 	if _runtime.get_sim() == null:
 		push_warning("GameWorld: failed to start mission runtime")
 	elif _water != null and _runtime.get_sim().has_method("set_water_z"):
@@ -1681,10 +1745,11 @@ func _start_effect_world() -> void:
 	var count := _effect_world.load_from_resource_root(_resource_root)
 	if _water != null:
 		_effect_world.set_water_height(float(_water.water_height))
-		# The sim-side water plane: the footstep water pick and the landing legs
-		# compare feet against it on logic ticks [orig: Env_WaterHeightFixed
-		# @ 0x26C6454]. Idempotent; re-pushed after runtime start too (either
-		# side may come up first).
+		# The sim-side water plane (env.water_z): the footstep water pick, the
+		# landing legs, AND the destruction paths (submerged wrecks skip pieces,
+		# the wreck fire steams out) all gate on it [orig: Env_WaterHeightFixed
+		# @ 0x26C6454; world-wac-ai-re §24]. Idempotent; re-pushed after runtime
+		# start too (either side may come up first).
 		var water_sim := get_sim()
 		if water_sim != null and water_sim.has_method("set_water_z"):
 			water_sim.set_water_z(float(_water.water_height))
@@ -2401,6 +2466,7 @@ func _reset_blink_frame_gates() -> void:
 # --- Frame clear color (env divergence #21, closed) ----------------------------
 
 func _process(_delta: float) -> void:
+	_sample_panm_clock()
 	if not _loaded or not is_visible_in_tree():
 		_restore_idle_frame_clear_color()
 		return
