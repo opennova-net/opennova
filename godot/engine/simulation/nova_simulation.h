@@ -407,6 +407,10 @@ private:
 	// @ 0x4dfa40 stamps g_pendingWeaponSlot + queues the action; the handler's
 	// completion consumes it].
 	bool weapon_switch_in_flight_ = false;
+	// LocalPlayerHost emits category/cycle input once per press. If that edge lands
+	// during SWITCHTO, retain the requested outgoing action here until the draw can
+	// transition to it; the portable queue writer keeps its witnessed refusal.
+	int32_t weapon_switch_deferred_action_ = -1;
 	// The next viewmodel install starts the FSM in SWITCHTO (the draw-in) instead of
 	// idle — set by every switch commit and by the spawn mount
 	// [orig: the switch chain runs switchfrom -> mount -> switchto].
@@ -734,6 +738,9 @@ public:
 	// @ 0x40f7ae]; the armory/profile legs store unfiltered (the server validates).
 	// An empty kit resets to the engine default {WPN_M4AUTO} [orig: @ 0x5246be].
 	void set_spawn_loadout(const TypedArray<Dictionary> &p_kit, bool p_filter_by_availability);
+	// True only after a mission/profile explicitly supplied a spawn kit; the
+	// WPN_M4AUTO engine fallback created by load_weapon_table leaves this false.
+	bool has_explicit_spawn_loadout() const { return spawn_kit_set_; }
 	// The map weapon-availability rules [orig: g_armoryWeaponAvailability @ 0x24D5600]:
 	// reset to all-allowed, then apply {name, value} pairs (the .mis item_availability
 	// chunk shape; -1 maps to 3, sub-weapons inherit the parent's value)
@@ -750,6 +757,8 @@ public:
 	// 0x2F validation shape, availability 2 requires the armory zone the ACCEPT is
 	// gated on anyway [orig: @ 0x515a4a]). Also stamps player_class when 5..9.
 	bool apply_local_player_loadout(const TypedArray<Dictionary> &p_kit, int p_player_class);
+	// Commit the profile class without replacing a mission-authored weapon kit.
+	bool set_local_player_class(int p_player_class);
 	// Rebuild the local player's slot pool from the spawn kit and select the spawn
 	// default — the Player_InitPlayer weapon leg [orig: @ 0x4e15f0: display list ->
 	// table fill -> pool seed -> clip recalc -> SelectWeaponSlot(195) ->
