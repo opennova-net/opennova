@@ -18,10 +18,10 @@ var scope_fraction := 0.0     # 0 = hip .. 1 = sighted, over the toggle's ease s
 # reads the eased fraction as 0). [orig: Player_UpdateFirstPersonCamera
 # @0x4dd439/@0x4dd4cc; predicate Player_IsReloadingCardSwitchWeapon @0x4dcdd0]
 var suppress_view_bias := false
-# The scope-card switch: a Scoped weapon at FULL raise in first person shows the
-# SIGHTS card INSTEAD of the FP viewmodel. [orig: Player_IsEquippedWeaponScoped
-# @0x4dcc80 -> draw_weapon_sight_overlays @0x4dce00; the FP model draw @0x5d822c
-# requires the gate clear]
+# The standard card switch: a Scoped or Sighted weapon at FULL raise in first
+# person shows its SIGHTS rows INSTEAD of the FP viewmodel. NoCardSwitch clears
+# both selectors unless ForceScoped overrides it. [orig: Render_ProcessMainSceneFrame
+# @0x5ca299..0x5ca304 / @0x5caaf3..0x5cab15]
 var scope_card_active := false
 var fov_h_deg := 80.0         # the main camera's HORIZONTAL fov (policy applied)
 var tp_anchor := Vector3.ZERO # the chased eye anchor, Godot space

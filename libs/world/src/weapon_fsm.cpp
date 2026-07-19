@@ -450,6 +450,20 @@ void run_handler(const WeaponFsmDef &def, WeaponSlotState &slot,
 
 } // namespace
 
+bool weapon_sights_card_eligible(const WeaponFsmDef &def,
+                                 const WeaponSlotState &slot) {
+    const bool scoped =
+        (def.flags & weapon_flag::kScoped) != 0 &&
+        (def.flags2 & weapon_flag2::kInset) == 0;
+    const bool sighted =
+        (def.flags & weapon_flag::kSighted) != 0 &&
+        slot.current != weapon_action::kSwitchFrom;
+    const bool card_switch_allowed =
+        (def.flags & weapon_flag::kNoCardSwitch) == 0 ||
+        (def.flags & weapon_flag::kForceScoped) != 0;
+    return (scoped || sighted) && card_switch_allowed;
+}
+
 const char *const kWeaponActionSuffixes[weapon_action::kCount] = {
     "idle",       "emptyidle",  "fire",    "recoil",  "reload",    "empty",
     "switchto",   "switchfrom", "switchrank", "scopeup", "scopedown", "overheated",

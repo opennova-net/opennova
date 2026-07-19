@@ -24,12 +24,10 @@ var rndgfx_texture := ""
 var rndgfx_offset := Vector2i.ZERO  # first round icon, relative to the HUDCLIP anchor
 var rndgfx_step := Vector2i.ZERO    # per-round icon step
 var rounds_per_icon := 0            # >1 draws one icon per N rounds, rounded up
-# The scoped-ADS card: Scoped (flags 0x1) weapons draw their SIGHTS rows at full
-# raise instead of the FP viewmodel. Rows are dicts {texture,x1,y1,x2,y2,blend,
-# scale,slide,slide_frames} in the authored draw order, virtual 1024x768 space.
-# [orig: draw_weapon_sight_overlays @0x4dce00; gate Player_IsEquippedWeaponScoped
-# @0x4dcc80]
-var scoped := false
+# Standard SIGHTS-card contents. The simulation owns the dynamic card selector;
+# this record only preserves every authored row as a dict
+# {texture,x1,y1,x2,y2,blend,scale,slide,slide_frames} in draw order and virtual
+# 1024x768 space. [orig: draw_weapon_sight_overlays @0x4dce00]
 var sights: Array = []
 
 
@@ -57,6 +55,5 @@ static func from_weapon_dict(d: Dictionary) -> PlayerHudWeaponDef:
 	# The original stores the divisor as a byte (weapon+727) — out-of-range
 	# file values wrap mod 256. [orig: HUDRNDGFX parse @0x5442fc; read @0x599bb1]
 	out.rounds_per_icon = layout.z & 0xFF
-	out.scoped = (int(d.get("flags", 0)) & 1) != 0
 	out.sights = d.get("sights", [])
 	return out

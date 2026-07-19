@@ -39,6 +39,7 @@ it is the **weapon heat bar**; the real map element is
 | Ammo count + weapon name text | **ported** (`hud_weapon_text.gd`) | `[orig: hud_draw_weapon_ammo_and_name @0x5939d0]`; format/hide/alignment/nudge witnessed; `hud_helpers_test.gd` format_ammo |
 | Clip + rounds indicator (HUDCLIPGFX/HUDRNDGFX) | **ported** (`hud_clip_indicator.gd`, D-HUD-5) | `[orig: draw_hud_ammo_indicator @0x599a30]`; parse `[orig: @0x5442fc]`; `hud_helpers_test.gd` round_icon_count + flash |
 | Crosshair / reticle + spread | **ported** (`hud_crosshair.gd`, D-HUD-7/8/9/10; target cursor / aim-point quad / lock brackets unported) | `[orig: HUD_DrawCrosshair @0x592640]` + `[orig: HUD_DrawCrosshairCornerQuad @0x590f50]`; spread math `hud_helpers_test.gd` |
+| Standard weapon SIGHTS card | **ported** (`world::weapon_sights_card_eligible` → sim `scope_card_active`; `game_hud.gd` materializes the authored rows) | `[orig: Render_ProcessMainSceneFrame @0x5ca299..0x5ca304 / @0x5caaf3..0x5cab15]`; Scoped/Sighted selectors + SWITCHFROM + NoCardSwitch/ForceScoped suppression; `nova_simulation_test.gd` + `game_hud_test.gd` |
 | ALPHAFADE semantics | **ported** (`hud_fade.gd`) | `[orig: parse @0x5a086c]` ×2.55/×2.55/×62; flash curve `[orig: @0x599af9]`; `hud_helpers_test.gd` |
 | Attach labels (seat/armory floats) | **ported** (`world::collect_attach_labels` + `hud_attach_labels.gd` + `game_hud_host.gd`, D-HUD-11/12/13) | `[orig: draw_vehicle_seat_and_armory_labels @0x5a3290]` full witness; label strings `[orig: HUD_InitOverlaySystem @0x5a479c..0x5a481e]`; `attachtextid` parse `[orig: @0x544d6c]`; ctest `vehicle_mount` + `def_parse_weapons`/`def_parse_items`; GUT `nova_simulation_test.gd`/`hud_helpers_test.gd` |
 | Armory/vehicle-bay/FARP bottom prompts | witnessed — deferred with their systems (D-HUD-14) | `[orig: HUD_DrawGameplayOverlays @0x5bde60]` — preround/0x0A armory prompt, Flags 0x800 bay prompt, FARP wait/reload |
@@ -292,13 +293,15 @@ Port: `hud_clip_indicator.gd` (restamp key proxy: D-HUD-5).
   the spread crosshair draws when the player **cannot** take an aimed shot —
   `!Player_CanFireWeapon() || vehicle auto-aim || (dword_A8235C && gunner
   scoped)` `[orig: @0x592adc..0x592b01]`. `Player_CanFireWeapon @0x5cf780`
-  requires the **settled** scope/sight view (`Player_IsEquippedWeaponScoped
-  @0x4dcc80`, the SIGHTS-card gate) and returns 0 under `g_camera_mode`
-  `[orig: @0x5cf807/@0x5cf828]` — so the crosshair draws from the hip, **all
-  through the ADS ease**, and in every external-camera mode; it yields only
-  once fully sighted (D-HUD-9 CLOSED 2026-07-11: the port hides only at
-  `scope_fraction >= 1` — the settled sight view; the `@0x4de4f7` promoter is
-  the only writer of `g_weaponScopeActive`). Its can't-fire
+  requires the **settled Scoped** view (`Player_IsEquippedWeaponScoped
+  @0x4dcc80` = `WeaponDef.Flags & 1` plus `g_weaponScopeActive`) and returns 0
+  under `g_camera_mode` `[orig: @0x5cf807/@0x5cf828]`. That predicate feeds
+  one standard-card selector, but it is not the complete SIGHTS-card gate:
+  Sighted has a separate selector at `0x4dcd30`. Thus, for Scoped weapons, the
+  crosshair draws from the hip, **all through the ADS ease**, and in every
+  external-camera mode; it yields only once fully scoped (D-HUD-9: the
+  `@0x4de4f7` promoter is the only writer of `g_weaponScopeActive`). The
+  Sighted-only distinction is the narrow remaining D-HUD-9 tail. Its can't-fire
   path also resets `g_cameraFovDeg = 5242880` = **80.0 deg** 16.16
   `[orig: @0x5cf88e]` — the port's `fov_deg` default.
 - **Anchor**: the offset applies to the **virtual-space** projection of the
@@ -370,7 +373,45 @@ Port: `hud_clip_indicator.gd` (restamp key proxy: D-HUD-5).
 
 Port: `hud_crosshair.gd` (spread_px / error_row / the 5 strips as UV'd
 polygons); visibility + row select in `game_hud.gd _draw_crosshair` (hidden
-while `scope_engaged`).
+once generic ADS is settled). That timing matches the Scoped path; retail's
+Sighted-only crosshair distinction remains the adjacent D-HUD-9 note.
+
+### Standard weapon SIGHTS card — `Render_ProcessMainSceneFrame @0x5ca299..0x5cab15` (corrected 2026-07-19)
+
+The standard 2D card is chosen dynamically after ADS settles; neither the
+presence of a `SIGHTS` block nor a static Scoped bit alone is its gate:
+
+- The **Scoped** predicate is `Player_IsEquippedWeaponScoped @0x4dcc80`
+  (`Flags & 1` plus `g_weaponScopeActive`). `Render_ProcessMainSceneFrame`
+  begins this path at `0x5ca299`; Inset (`Flags2 & 0x200`) does not set the
+  ordinary Scoped-card byte, while the standard path sets it at `0x5ca2c7`.
+- The separate **Sighted** predicate at `0x4dcd30`, called at `0x5ca2cc`,
+  requires `Flags & 2`, `g_weaponScopeActive`, and
+  `MountSlot.currentAction != SWITCHFROM (7)`. It sets the second selector byte
+  at `0x5ca2d5`.
+- The predicate at `0x4dcce0`, called at `0x5ca2f6`, recognizes
+  `NoCardSwitch && !ForceScoped` and clears **both** standard-card selectors at
+  `0x5ca2ff/0x5ca304`. ForceScoped overrides this suppression.
+
+Only the post-clear bytes reach the drawing branch. Sighted calls
+`draw_weapon_sight_overlays @0x4dce00` at `0x5caaf3/0x5caafa`; otherwise
+Scoped calls it at `0x5cab01/0x5cab08`, followed by
+`Hud_DrawScopeCircleMask @0x5d17a0` at `0x5cab15` as the Scoped fallback. When
+both selectors are zero, the first-person viewmodel path remains available
+(`0x5ca32c..0x5ca343`, consumed at `0x5ca822..0x5ca829`).
+
+`draw_weapon_sight_overlays` itself reads only the authored count
+(`WeaponDef+0x258`) and rows (`WeaponDef+0x1c8`, stride `0x24`). Those rows are
+card **content**, including draw order/blend/scale, not selection policy. A
+nonzero count is reported even if a row's texture handle is missing, which can
+suppress the circle fallback and leave a blank reticle. REVX02's
+`WPN_M4AUTO_EOTECH` confirms the Sighted path: it is Sighted, not Scoped, has no
+NoCardSwitch, and authors `M4ET_SGT.TGA` plus additive/scaled `et_rtcle.tga`;
+both textures exist in the retail resource root.
+
+Port: `world::weapon_sights_card_eligible` owns the dynamic selector, the sim
+publishes it as `scope_card_active`, and `game_hud.gd` always materializes the
+authored rows and uses that selector only for visibility.
 
 ### Mission triggered text — `HUD_DisplayTriggeredText @0x51f190` (ported 2026-07-09)
 
@@ -737,7 +778,7 @@ behind it.
 | D-HUD-6 | `hud_messages.gd` is a timed line feed (930-tick life, ≥186 stagger, wrap, two-space continuation indent) drawn at the `HUDCHATTEXT` anchor | triggered text rides the full chat system: channel-2 ring buffers `[orig: Chat_AddDebugMessage @0x4987f0]`, display rebuild `[orig: @0x498bd0]`, and a channel geometry table (`dword_28E4DF8`, writer unwitnessed) | Message-line altitude port. The channel's exact screen geometry, per-line fade curve, and the player-chat channel are the chat-pipeline follow-up. |
 | D-HUD-7 | crosshair spread = the ERROR term only | spread adds `(player+0x380 >> 7) + (player+0x384 >> 7)` — the recoil/aim accumulators `[orig: @0x592b95..0x592bc8]` | The runtime does not yet surface those accumulators (they live in the entity angle state; see `docs/world/world-wac-ai-re.md` pitchBlend). Wire them when the recoil write-side is witnessed. |
 | D-HUD-8 | crosshair color multiplies the texture (canvas modulate); default white | the strip writes the color to the **specular** channel with `diffuse = 1.0` `[orig: @0x5914d7]`; the blend-stage setup lives in the HUD shader pass (`GfxShader_ApplyPassChecked @0x677020`, unwitnessed); color source = user config `dword_25510E0` | Identical for the default white; witness the texture-stage state (and the config default) before modeling the user crosshair color. |
-| D-HUD-9 | the crosshair hides the instant the scope engages (`scope_engaged`) | it draws while an aimed shot is NOT available — `!Player_CanFireWeapon() @0x5cf780`, which requires the **settled** sight view (`Player_IsEquippedWeaponScoped @0x4dcc80` = `g_weaponScopeActive`, promoted only at ease completion `@0x4de4f7`) — so it stays up through the whole ADS ease and yields only once fully sighted `[orig: gate @0x592afa]` | FIXED 2026-07-11 (weapon round): the hide is `scope_engaged && scope_fraction >= 1`; the row select stays hip — `+3` keys on `Player_CanFireWeapon()` itself (`@0x592b87`), unreachable on foot while the crosshair draws. |
+| D-HUD-9 | the crosshair hides at settled generic ADS (`scope_engaged && scope_fraction >= 1`) | it draws while an aimed shot is NOT available — `!Player_CanFireWeapon() @0x5cf780`, whose settle predicate is specifically `Player_IsEquippedWeaponScoped @0x4dcc80` (`Flags & 1` + `g_weaponScopeActive`, promoted at `@0x4de4f7`), not the separate Sighted-card predicate at `0x4dcd30` | Timing FIXED 2026-07-11 for Scoped weapons: it stays up through the ease and the row select stays hip (`@0x592b87`). Narrow tail OPEN 2026-07-19: a Sighted-only weapon selects its 2D card but does not satisfy retail's Scoped-only crosshair-hide predicate; the port currently hides it. |
 | D-HUD-10 | the crosshair anchors at the fixed design center (512, 384) | the anchor is the projected aim point through `Viewport_ScreenToVirtual`: the literal screen center only for the on-foot local player with no camera mode `[orig: @0x5928a0]`; spectate / `g_camera_mode` (external/3P) project `Entity_BuildCameraView` (far point 65536000 q16 = 1000.0) `[orig: @0x592910..0x59295e]` | FIXED 2026-07-11 (weapon round): `LocalPlayerHost.aim_screen_point()` — `Vector2.INF` in first person (the HUD pins the exact center, matching `@0x5928a0`), the projected aim in third person; `NovaGameHudHost` feeds it to both shells. |
 | D-HUD-11 | the label nearest-only gate models `equipped_adm_index != 0xFF` + not-in-a-ctrl/drvr-seat (`NovaSimulation::get_attach_labels`) | `Player_CanFireWeapon @0x5cf780` additionally requires no camera mode (`g_camera_mode`), not underwater (`Position.Z + CameraOffset.Z < Env_WaterHeightFixed` with the 0x8000 flag), and the settled-scope legs | The extra legs are host/render state the sim doesn't carry; on foot with a weapon the observable difference is the underwater/camera cases. Wire when those states reach the sim. |
 | D-HUD-12 | label text metrics ride the `.fnt` fixed size through Godot layout (`hud_attach_labels.gd`) | `HUD_MeasureTextWH @0x580ab0` measures through the fontObj `{handle, scale_x, scale_y}` pair (`CGameFont_MeasureText @0x674e70`); labels draw at raw screen pixels | Same glyph source; exact per-glyph spacing is the standing CGameFont follow-up. Box arithmetic `(x−w/2,y−2)..(x+w/2+5,y+h+1)` is ported verbatim. |
@@ -825,9 +866,11 @@ call; IDB saved):
   index; D-HUD-1), with the misnomer + stance-keying comment at `0x599f10`.
 - **Rename** `draw_minimap_compass_ring @0x5d17a0` → `Hud_DrawScopeCircleMask` —
   the 64-segment circular scope mask drawn for Scoped weapons that author no
-  SIGHTS rows (net-re §5.62). Re-witnessed at rename time: both callers are the
-  SIGHTS-card gates (`Render_ProcessMainSceneFrame @0x5cab15`,
-  `render_hud_overlay @0x5d82f2`). The sibling reticle drawer
+  SIGHTS rows (net-re §5.62). Re-witnessed 2026-07-19: the
+  `Render_ProcessMainSceneFrame @0x5cab15` caller is the fallback after the
+  post-clear standard Scoped selector's SIGHTS-row call reports no authored
+  rows; a nonzero count suppresses it even if a texture handle is missing. The
+  second caller remains `render_hud_overlay @0x5d82f2`. The sibling reticle drawer
   `draw_minimap_crosshair_and_grid @0x5d1160` keeps its name (second caller
   unwitnessed) and carries a candidate-rename comment for the next HUD grill.
 - **Comment** at `0x59e3d6` noting `dword_25510DC` = the user crosshair-style
@@ -886,3 +929,17 @@ confidence — two kong-misnomer corrections announced inline; IDB saved):
   marker waypoint fields), `0x49b3de` (cycle key case 23), `0x593820` +
   `0x595470` (dead code), `0x5a4913` (`g_showWaypoints` init 1), `0x2723c8c`
   (the static -1 element-switch block), `0x42e4b8` (the 0x0F client apply).
+
+Read-only re-witness 2026-07-19 (no IDB mutations applied):
+
+- `0x4dcd30` is the settled **Sighted** standard-card predicate, additionally
+  blocked during `MountSlot.currentAction == SWITCHFROM (7)`; the current IDB
+  name `Player_IsVehicleGunnerScoped` is misleading.
+- `0x4dcce0` recognizes **NoCardSwitch without ForceScoped**; its
+  `Render_ProcessMainSceneFrame @0x5ca2f6` caller clears both the Scoped and
+  Sighted standard-card bytes. The current IDB name
+  `Player_IsVehicleHasAttackCapability` is misleading. No replacement names
+  were applied in this read-only pass.
+- `SIGHTS` rows are the selected card's content/fallback input, not the
+  selector. The post-clear bytes gate the calls at
+  `0x5caaf3..0x5cab15`.

@@ -4319,12 +4319,17 @@ lateral/forward signs are dialed by drive (the `pos[2]→down` term is the certa
 A full read-only grill of the **32 `Player_*` functions** (the local-player input / weapon / camera /
 net-identity cluster, `0x42a550`–`0x5cf780`) plus their player-subsystem neighbors. Method: per-function
 decompile / disasm / xref + struct-field witnessing, with every proposed rename adversarially re-derived
-from its address by two independent skeptic passes (read-only multi-agent refutation). Verdict:
-**MATCHING (read-only grill)** — the family is faithfully named after the corrections below; this is a
-naming/typing grill of original engine code, not a reimpl-equivalence claim. IDB names/types/comments
-were updated this session (log at the end).
+from its address by two independent skeptic passes (read-only multi-agent refutation). Verdict at the
+time: **MATCHING (read-only grill)**. A 2026-07-19 card-selector re-witness later
+disproved the `0x4dcd30` vehicle/gunner interpretation recorded below: flags bit
+2 is **Sighted**, and the compared `7` is `MountSlot.currentAction ==
+SWITCHFROM`, not a seat/type. The current IDB name remains misleading; the later
+pass was read-only. This is a naming/typing grill of original engine code, not a
+reimpl-equivalence claim. IDB names/types/comments updated in the original
+session are retained in its historical log.
 
-**Naming corrections (the misnomers the grill caught; each UPHELD by the adversarial pass):**
+**Naming corrections (the misnomers the grill caught; each was UPHELD by that
+session's adversarial pass, with the later `0x4dcd30` correction flagged inline):**
 
 | Addr | Old name | → New name | Why (witness) |
 |---|---|---|---|
@@ -4334,7 +4339,7 @@ were updated this session (log at the end).
 | `0x4a3d30` | `Player_ResetTerrainPosition` | `Camera_ResetToLocalPlayer` | `Camera_ClearViewState` + `Camera_SetTrackedEntity(local)` + cam-height/offset globals; nothing terrain |
 | `0x4dc6b0` | `Player_GetCurrentWeaponAmmoCapacity` | `Player_GetClampedWeaponElevation` | reads/clamps `MountSlot.Elevation` → `WeaponDef.MaxElevation`; feeds the FOV zoom divisor; no ammo |
 | `0x4dcc80` | `Player_GetVehicleAutoAimRange` | `Player_IsEquippedWeaponScoped` | returns `g_weaponScopeActive` gated on `Def->Flags&1`; not a range |
-| `0x4dcd30` | `Player_IsGunnerInVehicle` | `Player_IsVehicleGunnerScoped` | returns `g_weaponScopeActive` gated on gunner seat (`Flags&2`, `Type!=7`); not a clean bool |
+| `0x4dcd30` | `Player_IsGunnerInVehicle` | `Player_IsVehicleGunnerScoped` *(2026-06-26 IDB name; semantics disproven 2026-07-19)* | settled Sighted standard-card predicate: `Flags&2`, `g_weaponScopeActive`, and `MountSlot.currentAction != SWITCHFROM (7)`; no vehicle/gunner test |
 | `0x51cbc0` | `player_ServerAdd` | `Server_PlayerAdd` | own string `"server_PlayerAdd():"`; server subsystem |
 | `0x59b280` | `sub_59B280` | `Radar_AddBlip` | bearing(atan2) + compass-edge marker + 128-slot blip array (pos/type/lifetime 62/color); `OnDamageReceived` uses it for damage direction |
 | `0x541690` | `sub_541690` | `WeaponOverlay_BuildTypeLookup` | memset 0x200; iterate 780 slots; index by slot-type byte +216; action-specific overlays (state 5-9) |
@@ -4417,6 +4422,9 @@ camera; `Player_StartRoundEndTransition` target = weapon bone, Z −1.0). This c
   `0x4c6d40 NapiNP_GetLocalConnectionId`, `0x4dff60 Player_FatalPlayerDcbNotFound`, `0x4b1060
   PlayerClass_InitEntity`, `0x4dcc80 Player_IsEquippedWeaponScoped`, `0x4dcd30 Player_IsVehicleGunnerScoped`,
   `0x51cbc0 Server_PlayerAdd`, `0x59b280 Radar_AddBlip`, `0x541690 WeaponOverlay_BuildTypeLookup`.
+  The `0x4dcd30` rename is the historical 2026-06-26 mutation; its semantics
+  were disproven by the read-only 2026-07-19 pass and no replacement rename was
+  applied.
 - Signatures: `0x4e0090` `GamePlayerEntity*(void)`; `0x4e15f0` `int(int isRestore)`; `0x4c6d40`
   `unsigned int(NapiNPServerCtx*)`.
 - Globals named/typed: `g_cameraFovDeg` + `g_cameraFovDegTarget` (`0x26C6848/4C`), `g_weaponScopeActive`
@@ -6205,10 +6213,11 @@ weapon-switch machinery seams (D-WPN-5); local-player-only pump (D-WPN-6); inter
 ammo seed clipsize/startrounds (D-WPN-7); FSM↔net residual — authority/SP fire now
 appends the primary ring row (including ordinary hip/raise/3P subtype 12) and spawns
 `RoundSim` synchronously, while settled-FP/first-person-mounted zoom subtypes, joiner C2S 0x06/0x25
-uplink, and client S2C tag-2 round presentation remain unwired (D-WPN-8); ADS
-residuals — SIGHTS overlay draw,
-unscope-on-move site, zoom-level
-keys, scope net notify, 7-step interp variant, stance/NVG gates (D-WPN-9);
+uplink, and client S2C tag-2 round presentation remain unwired (D-WPN-8); the
+standard Scoped/Sighted SIGHTS-card selector, including SWITCHFROM and
+NoCardSwitch/ForceScoped suppression, is ported; remaining ADS residuals are the
+zoom-level keys, scope net notify, stance/NVG gates, movement reversal/auto-raise,
+and HandGunUp follow leg (D-WPN-9);
 **D-WPN-10** [reimpl divergence, FIXED 2026-07-10] the host clip-key lookup
 (`NovaSkeletalAnim::find_clip`) compared case-SENSITIVELY where the original is
 stricmp (`AnimMap_FindSlotByName @ 0x40cfa0`) — on JOTAC-era data (base localres +
@@ -6459,26 +6468,65 @@ aliased onto Underwater's 0x4 — replaced with the full two-dword table
 - The engage leg replicates C2S 0x1D (type 169) when seat-flag 0x40000 allows,
   and seat-flag 0x10000 zeroes the pitch.
 
-**NoCardSwitch (0x2000000) — the witnessed consumers** (the full binary sweep for
-the 0x02000000 immediate): while the equipped slot is mid-RELOAD on a weapon
-WITHOUT the flag — the predicate is `Player_IsReloadingCardSwitchWeapon @ 0x4dcdd0`
-(ex kong "Player_IsDriverInVehicle"; its "seat 4" was currentAction==RELOAD) —
-(a) `Player_UpdateFirstPersonCamera` SKIPS the view bias add, rot and pos legs
-(`@ 0x4dd439/@ 0x4dd4cc`): the sight picture drops instantly for the reload;
-(b) `Player_CanFireWeapon @ 0x5cf7be` refuses fire. NoCardSwitch weapons (REVX:
-knife, pistols, shotgun, the PointAim MGs, mortar/emplaced/turrets) keep their
-raised view through a reload. A third `test edx, 2000000h` site sits in
-`RoundData_SpawnRound @ 0x4ec249` (unclassified — likely a different dword; open).
-Related reload rule: **ForceCrouch (0x40000) weapons skip the reload scope stash
-entirely** (`@ 0x543126` -> `g_rescopeAfterReload = 0 @ 0x54313d`) — the mortars
-keep the sight view; every other weapon stashes + unscopes `@ 0x54312f`. The
-one-shot last-round unscope sites are gated on `!ForceScoped` (0x20000000).
+**The standard weapon card + NoCardSwitch (0x2000000), re-witnessed
+2026-07-19.** `Render_ProcessMainSceneFrame` derives two selector bytes after
+the ADS settle:
 
-Port row: libs/def full flag table + `flags2`; `player_view_set_engaged` (the
-latch/refusal protocol, 15/7/1 steps, the hipfire latch);
-`weapon_fsm` keep-scope reload + ForceScoped gates; the sim exposes
-`suppress_view_bias` (the NoCardSwitch reload camera rule) and refuses mid-ease
-scope toggles; ctest player_view/weapon_fsm/def_parse_weapons pin all three.
+- The **Scoped** path begins at `0x5ca299`.
+  `Player_IsEquippedWeaponScoped @ 0x4dcc80` requires `WeaponDef.Flags & 1`
+  and `g_weaponScopeActive`. An Inset weapon (`WeaponDef.Flags2 & 0x200`) does
+  not set the standard Scoped-card byte; the ordinary path sets it at
+  `0x5ca2c7`.
+- The independent **Sighted** predicate at `0x4dcd30`, called at `0x5ca2cc`,
+  requires `WeaponDef.Flags & 2`, `g_weaponScopeActive`, and
+  `MountSlot.currentAction != SWITCHFROM (7)`. Its standard-card byte is set
+  at `0x5ca2d5`. This is why a Sighted-only weapon is not equivalent to an
+  unscoped weapon for card selection.
+- The predicate at `0x4dcce0`, called at `0x5ca2f6`, is
+  `slot && def && (Flags & NoCardSwitch) && !(Flags & ForceScoped)`. When true
+  it clears **both** selector bytes at `0x5ca2ff` and `0x5ca304`. ForceScoped
+  therefore overrides NoCardSwitch for this card-selection purpose.
+
+The post-clear bytes gate the standard-card renderer: the Sighted path calls
+`draw_weapon_sight_overlays @ 0x4dce00` at `0x5caaf3/0x5caafa`; otherwise the
+Scoped path calls it at `0x5cab01/0x5cab08`, followed by the circle fallback at
+`0x5cab15`. With both selectors clear, the first-person viewmodel candidate is
+enabled at `0x5ca32c..0x5ca343` and consumed at `0x5ca822..0x5ca829`.
+
+The weapon-def `SIGHTS` block is **content, not the selector**.
+`draw_weapon_sight_overlays` reads only the row count at `WeaponDef+0x258` and
+the rows at `WeaponDef+0x1c8` (stride `0x24`); it does not inspect Scoped,
+Sighted, or NoCardSwitch. It reports authored-row presence even when a texture
+handle is missing, so a nonzero row count can suppress the Scoped circle
+fallback while producing a blank reticle. REVX02 `WPN_M4AUTO_EOTECH` is a
+concrete Sighted-only case (`Flags = 0x01000902`, no NoCardSwitch): it authors
+`M4ET_SGT.TGA` plus the additive/scaled `et_rtcle.tga` row, and both assets
+resolve in the retail data.
+
+NoCardSwitch also has the previously witnessed, independent reload-camera
+consumer. While the equipped slot is mid-RELOAD on a weapon **without** the
+flag, `Player_IsReloadingCardSwitchWeapon @ 0x4dcdd0` (ex kong
+"Player_IsDriverInVehicle"; its "seat 4" was `currentAction == RELOAD`) makes
+(a) `Player_UpdateFirstPersonCamera` skip the view-bias add, rotation, and
+position legs (`@ 0x4dd439/@ 0x4dd4cc`), so the sight picture drops instantly
+for the reload, and (b) `Player_CanFireWeapon @ 0x5cf7be` refuse fire.
+NoCardSwitch weapons (REVX: knife, pistols, shotgun, the PointAim MGs,
+mortar/emplaced/turrets) keep their raised view through a reload. Another
+`test edx, 2000000h` site remains in `RoundData_SpawnRound @ 0x4ec249`
+(unclassified — likely a different dword; open). Related reload rule:
+**ForceCrouch (0x40000) weapons skip the reload scope stash entirely**
+(`@ 0x543126` -> `g_rescopeAfterReload = 0 @ 0x54313d`) — the mortars keep the
+sight view; every other weapon stashes + unscopes `@ 0x54312f`. The one-shot
+last-round unscope sites are gated on `!ForceScoped` (0x20000000).
+
+Port row: libs/def carries the full flag table + `flags2`;
+`world::weapon_sights_card_eligible` owns the dynamic
+Scoped/Sighted/SWITCHFROM/NoCardSwitch/ForceScoped predicate; the sim exposes
+that result as `scope_card_active`; and the HUD materializes all authored
+SIGHTS rows, using the sim selector only for visibility. The existing
+`suppress_view_bias` remains the separate NoCardSwitch reload-camera rule.
+ctest `player_view`/`weapon_fsm`/`def_parse_weapons` and the focused simulation
+and HUD GUT cases pin the selector and authored-row legs.
 
 **The movement-scope legs (2026-07-11, the weapon-round grill).** The input packer
 `Player_PackInputStateToEntity @ 0x4df450` latches `g_movementKeyHeld @ 0xB7653B`

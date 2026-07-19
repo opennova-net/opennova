@@ -81,6 +81,51 @@ void test_ticks_from_ms() {
     CHECK(weapon_anim_ticks_from_ms(16) == 2);    // 1.0 -> trunc(1.5)+1
 }
 
+void test_sights_card_eligibility() {
+    WeaponFsmDef def;
+    WeaponSlotState slot;
+
+    def.flags = weapon_flag::kScoped;
+    CHECK(weapon_sights_card_eligible(def, slot));
+
+    slot.current = wa::kSwitchFrom;
+    CHECK(weapon_sights_card_eligible(def, slot));
+
+    slot.current = wa::kIdle;
+
+    def.flags2 = weapon_flag2::kInset;
+    CHECK(!weapon_sights_card_eligible(def, slot));
+
+    def.flags = weapon_flag::kSighted;
+    CHECK(weapon_sights_card_eligible(def, slot));
+
+    def.flags2 = 0;
+    CHECK(weapon_sights_card_eligible(def, slot));
+
+    slot.current = wa::kSwitchFrom;
+    CHECK(!weapon_sights_card_eligible(def, slot));
+
+    slot.current = wa::kIdle;
+    def.flags = weapon_flag::kSighted | weapon_flag::kNoCardSwitch;
+    CHECK(!weapon_sights_card_eligible(def, slot));
+
+    def.flags |= weapon_flag::kForceScoped;
+    CHECK(weapon_sights_card_eligible(def, slot));
+
+    def.flags = weapon_flag::kScoped | weapon_flag::kSighted;
+    def.flags2 = weapon_flag2::kInset;
+    slot.current = wa::kSwitchFrom;
+    CHECK(!weapon_sights_card_eligible(def, slot));
+
+    def.flags = weapon_flag::kScoped | weapon_flag::kNoCardSwitch;
+    def.flags2 = 0;
+    slot.current = wa::kIdle;
+    CHECK(!weapon_sights_card_eligible(def, slot));
+
+    def.flags = weapon_flag::kForceScoped;
+    CHECK(!weapon_sights_card_eligible(def, slot));
+}
+
 void test_bake() {
     WeaponFsmDef def = make_ak_def();
     // idle: ds explicit 0; de auto -> full clip ticks (64; ticks > ds -> ticks - 0).
@@ -731,6 +776,7 @@ void test_recoil_effect_leg() {
 
 int main() {
     test_ticks_from_ms();
+    test_sights_card_eligibility();
     test_bake();
     test_bake_ring_read_multiplicity();
     test_fire_chains_recoil();
