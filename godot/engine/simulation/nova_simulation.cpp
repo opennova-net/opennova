@@ -1672,10 +1672,10 @@ Dictionary NovaSimulation::get_hitbox_debug() {
 	out["organics"] = organics;
 	if (!world_) return out;
 
-	// Anchor on the local player like the volume view; a preview with no
-	// player sweeps up to the caps.
+	// Anchor on the local player like the volume view. All hitbox payloads use
+	// the same 80-unit debug budget; a preview with no player sweeps to the caps.
 	int32_t anchor[3] = {0, 0, 0};
-	int32_t item_range = -1;
+	int32_t debug_range = -1;
 	const opennova::world::EntityHandle local_player =
 	    world_->cached.local_player;
 	const opennova::world::Entity *lp =
@@ -1684,10 +1684,10 @@ Dictionary NovaSimulation::get_hitbox_debug() {
 		anchor[0] = opennova::world::to_fixed(lp->position.x);
 		anchor[1] = opennova::world::to_fixed(lp->position.y);
 		anchor[2] = opennova::world::to_fixed(lp->position.z);
-		item_range = 80 << 16;
+		debug_range = 80 << 16;
 	}
 	const std::vector<opennova::world::CollisionWorld::DebugHitboxEntity> ents =
-	    collision_world_.debug_hitboxes(*world_, anchor, item_range, kEntityCap, 24000);
+	    collision_world_.debug_hitboxes(*world_, anchor, debug_range, kEntityCap, 24000);
 	for (const opennova::world::CollisionWorld::DebugHitboxEntity &ent : ents) {
 		Dictionary d;
 		d["entity_handle"] = static_cast<int>(ent.handle.packed);
@@ -1717,16 +1717,17 @@ Dictionary NovaSimulation::get_hitbox_debug() {
 		entities.push_back(d);
 	}
 
-	// Posed pool-0 COBJ spheres from the exact person narrow phase. They are
-	// mission-wide under a 96-actor output cap. Preserve F3's late-spawn demand
+	// Posed pool-0 COBJ spheres from the exact person narrow phase. They share
+	// the nearby 80-unit/96-actor debug budget. Preserve F3's late-spawn demand
 	// bridge even though the local avatar is presentation-hidden; one spare query
-	// slot then prevents its authored rows from consuming the target budget. Entities
-	// whose graphic cannot supply usable authored sections are appended below
-	// with the bounded compatibility fallback used by RoundSim.
+	// slot then prevents its authored rows from consuming the target budget.
+	// Entities whose graphic cannot supply usable authored sections are appended
+	// below with the bounded compatibility fallback used by RoundSim.
 	if (local_player.valid()) ensure_collision_instance(*world_, local_player);
 	std::unordered_map<uint16_t, bool> posed_handles;
 	const std::vector<opennova::world::CollisionWorld::DebugPersonSection> people =
-	    collision_world_.debug_person_sections(*world_, anchor, -1, kEntityCap + 1);
+	    collision_world_.debug_person_sections(
+	        *world_, anchor, debug_range, kEntityCap + 1);
 	for (const opennova::world::CollisionWorld::DebugPersonSection &person : people) {
 		if (person.handle == local_player) continue;
 		const bool new_handle =
@@ -1754,6 +1755,16 @@ Dictionary NovaSimulation::get_hitbox_debug() {
 		    (e->engine_flags & 0x02000001u) != 0 ||
 		    posed_handles.find(static_cast<uint16_t>(s)) != posed_handles.end())
 			continue;
+		if (debug_range >= 0) {
+			const int32_t ep[3] = {
+			    opennova::world::to_fixed(e->position.x),
+			    opennova::world::to_fixed(e->position.y),
+			    opennova::world::to_fixed(e->position.z)};
+			if (std::llabs(static_cast<int64_t>(ep[0]) - anchor[0]) > debug_range ||
+			    std::llabs(static_cast<int64_t>(ep[1]) - anchor[1]) > debug_range ||
+			    std::llabs(static_cast<int64_t>(ep[2]) - anchor[2]) > debug_range)
+				continue;
+		}
 		Dictionary d;
 		d["entity_handle"] = static_cast<int>(s);
 		d["section"] = 1;

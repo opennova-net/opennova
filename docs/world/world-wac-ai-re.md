@@ -1935,12 +1935,12 @@ unresolved fallback amber), and labels entity/bone/radii/multiplier. The Rounds
 event list names the independent reaction bone and damage zone. Both views consume
 `CollisionWorld::debug_person_sections` / `NovaSimulation.get_hitbox_debug()`
 and the same matrix provider used by live bullets. The posed-person view omits
-the local avatar and is mission-wide under a 96-actor cap; the heavier object
-triangle view retains its local 80-unit budget. Native `collision` tests pin
+the local avatar and shares the object-triangle view's local 80-unit /
+96-actor debug budget. Native `collision` tests pin
 the moved-head pose, reverse-scan/mask behavior, radius rules, primary-bone
 propagation into a directional death animation, and a primary-14/secondary-2
 775-damage vector. GUT pins the late-spawn/recycled-slot attach, F3's remote-only
-mission-wide/96-entity budget/dead-body fallback, the zone colors and sphere payload,
+80-unit/96-entity budget/dead-body fallback, the zone colors and sphere payload,
 and animated CFAC cache invalidation when only transformed triangles move.
 
 IDB write-backs (2026-07-18, saved): rename `g_ProjectileDragTable @ 0xB7B300`

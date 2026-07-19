@@ -1067,10 +1067,10 @@ public:
 	//   radius, authored_radius, masked, fallback } ] }.
 	// Triangles are transformed in C++ through the SAME husk-aware
 	// target_view + full-euler matrices the projectile raycast uses — the
-	// drawn mesh IS the tested mesh. Item geometry is capped at 96 entities /
-	// 24000 faces within 80 u of the local player (face_total exposes per-entity
-	// truncation). Organic posed/fallback spheres omit the local avatar and are
-	// mission-wide under their own 96-actor cap, using the exact CollisionWorld
+	// drawn mesh IS the tested mesh. The payload is capped at 96 entities /
+	// 24000 item faces within 80 u of the local player (face_total exposes
+	// per-entity truncation). Organic posed/fallback spheres use the same range
+	// and actor cap, omit the local avatar, and use the exact CollisionWorld
 	// target matrices consumed by RoundSim.
 	Dictionary get_hitbox_debug();
 

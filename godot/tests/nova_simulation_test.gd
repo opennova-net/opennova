@@ -1443,10 +1443,10 @@ func test_late_spawned_player_resolves_posed_collision_on_demand() -> void:
 	sim.free()
 
 
-func test_f3_hides_local_player_and_keeps_distant_posed_organic() -> void:
-	# The F3 person view is for inspecting targets. It must not wrap the local
-	# avatar in debug spheres, and its payload must not silently discard a
-	# valid remote target merely because it is more than 80 mission units away.
+func test_f3_hides_local_player_and_omits_distant_posed_organic() -> void:
+	# The F3 person view is a nearby diagnostic. It must neither wrap the local
+	# avatar in debug spheres nor spend its pose/debug budget on a target more
+	# than 80 mission units away.
 	var md := NovaMissionData.new()
 	assert_eq(md.create_default(), OK)
 	assert_false(md.add_entity(
@@ -1473,12 +1473,8 @@ func test_f3_hides_local_player_and_keeps_distant_posed_organic() -> void:
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 
 	var rows: Array = sim.get_hitbox_debug().get("organics", [])
-	assert_eq(rows.size(), 19, "only the distant target's authored sections remain")
-	for value in rows:
-		var row: Dictionary = value
-		assert_eq(int(row.get("entity_handle", -1)), 0,
-				"F3 includes the distant target and excludes local handle 1")
-		assert_false(bool(row.get("fallback", true)))
+	assert_true(rows.is_empty(),
+			"F3 omits the 200-unit target while still excluding local handle 1")
 	sim.free()
 
 
@@ -1612,8 +1608,8 @@ func test_restart_re_resolves_the_restored_collision_identity() -> void:
 
 func test_f3_organic_fallbacks_match_live_filtering_bounds() -> void:
 	# F3 must describe the same unresolved pool-0 actors RoundSim can hit:
-	# engine-flag filtering only (dead bodies remain solid), mission-wide except
-	# for the local avatar, and bounded by the shared 96-entity debug budget.
+	# engine-flag filtering only (dead bodies remain solid), bounded to the local
+	# 80-unit view and shared 96-entity debug budget, with the local avatar hidden.
 	var md := NovaMissionData.new()
 	assert_eq(md.create_default(), OK)
 	for i in range(101):
@@ -1634,7 +1630,7 @@ func test_f3_organic_fallbacks_match_live_filtering_bounds() -> void:
 		var row: Dictionary = value
 		assert_true(bool(row.get("fallback", false)))
 		handles[int(row.get("entity_handle", -1))] = true
-	assert_true(handles.has(0), "the 200-unit actor remains visible mission-wide")
+	assert_false(handles.has(0), "the 200-unit actor is outside the local F3 range")
 	assert_true(handles.has(1), "a zero-health corpse retains its bullet fallback")
 	sim.free()
 

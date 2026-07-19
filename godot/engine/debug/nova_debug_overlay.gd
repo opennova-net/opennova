@@ -437,7 +437,7 @@ func _build_rounds_tab() -> void:
 	_rnd_hitbox_check = CheckBox.new()
 	_rnd_hitbox_check.name = "RoundsShowHitMeshes"
 	_rnd_hitbox_check.text = "Show hit meshes"
-	_rnd_hitbox_check.tooltip_text = "Draw what rounds actually test against: nearby object bullet meshes and broad-phase spheres, plus posed person bone spheres mission-wide (local player omitted; up to 96 targets). Person colors show normal-infantry damage zones: orange = x1.25 (0-4), cyan = x1.0 (5-8), lime = x0.5 (9-12/15-18), magenta = x3.0 head (13-14), dark red = masked, amber = unresolved fallback."
+	_rnd_hitbox_check.tooltip_text = "Draw nearby hit geometry within 80 mission units of the local player: object bullet meshes and broad-phase spheres, plus posed person bone spheres (local player omitted; up to 96 targets). Person colors show normal-infantry damage zones: orange = x1.25 (0-4), cyan = x1.0 (5-8), lime = x0.5 (9-12/15-18), magenta = x3.0 head (13-14), dark red = masked, amber = unresolved fallback."
 	_rnd_hitbox_check.button_pressed = false
 	_rnd_hitbox_check.toggled.connect(_on_hitbox_debug_toggled)
 	tab.add_child(_rnd_hitbox_check)
