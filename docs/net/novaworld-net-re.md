@@ -7626,12 +7626,12 @@ Phase-3 (login) wire contract. IDA: retail `Jointops.exe` (kong IDB).
   `CNapiNPConnection_QueueMessage @ 0x628640`. Our `client_session.cpp` `on_server_auth` emits the
   same bare container — **matching**. (The old source comment claiming retail "re-sends identity
   here" was wrong and has been corrected.)
-- **Timing divergence.** Retail does **not** send `ClientConnected` on `ServerAuth`. The only
+- **Timing divergence (fixed 2026-07-19, D-NET-21).** Retail does **not** send `ClientConnected` on `ServerAuth`. The only
   caller is `CNapiGameSession_ProcessPeriodicUpdate @ 0x4d4400`, gated on
   `np_conn_state == 5 && session_state == 2` — i.e. only after the NP layer's `ServerSessionInit`
   has completed and `CNapiGameSession_OnNovaWorldConnected @ 0x4d1570` has run (it sets session
-  state 2 at its tail). Our `ClientSession` fires it the instant it parses `ServerAuth` (state
-  `Verifying`). Permissive against the OpenNova server; premature against live NW.
+  state 2 at its tail). At the Wave-7 audit, `ClientSession` fired it while parsing `ServerAuth`.
+  It now emits from the explicit periodic-update boundary after the handler completes.
 - **Missing login→verify bridge.** Retail's `ClientRequestVerifyResult` builder
   `CNapiGameSession_SendVerifyRequest @ 0x4d3620` attaches **`SessIdString`** (from `session+1148`,
   empty on the first pass) **and a `"Cookie"` var-list** serialized from `session+388`, which
@@ -7935,7 +7935,7 @@ in [divergence-ledger.md](../divergence-ledger.md).
 `client_session.cpp` (A5/A7):
 - **D-NET-19** [MED, FIXED] `Success` compared as exact "1"; retail uses `atol(Success) != 0`. [orig: CNapiGameSession_HandleConnectVerifyResponse @ 0x4d5800]
 - **D-NET-20** [MED, **FIXED 2026-07-05**] `build_verify_request` now emits the `ClientVarList(VarList="Cookie")` parent unconditionally (empty when no cookie vars are configured), matching retail's SerializeVarList includeAll=1; pinned by the empty-cfg flow in `client_session_loopback_test`. [orig: CNapiGameSession_SendVerifyRequest @ 0x4d3620 / NapiStatement_SerializeVarList @ 0x4d0660]
-- **D-NET-21** [LOW, TRACKED] ClientConnected emitted synchronously; retail waits one periodic tick (conn_state==5 && session_state==2). [orig: CNapiGameSession_ProcessPeriodicUpdate @ 0x4d4400]
+- **D-NET-21** [LOW, **FIXED 2026-07-19**] `ClientConnected` now leaves `ClientSession::process_periodic_update` exactly once after `ServerSessionInit` moves the client to `Verifying`; handling opcode 0x82 itself emits no reply. `NovaWorldClient` and `NovaWorldHost` call the periodic boundary after draining inbound datagrams, and both the deterministic loopback and UDP host-registration harnesses exercise it. Test: `client_session_loopback` pins the silent synchronous handler, first-periodic emission, and no repeat on later updates. [orig: CNapiGameSession_ProcessPeriodicUpdate @ 0x4d4400, `conn_state==5 && session_state==2` -> CNapiGameSession_SendClientConnected @ 0x4cfe30]
 - **D-NET-22** [LOW, BINDING] the verify Cookie var-list is data-driven (locale + NW* identity) from client env — registry/Win32 glue belongs in the Godot binding, not `libs/`. Also fix the `client_session.h:99-110` comment. [orig: CNapiSession_ReadLocaleInfo @ 0x4ce390 / CNapiGameSession_SendLocaleAndVerify @ 0x4d57e0]
 
 `napi/session.{h,cpp}` (A9):

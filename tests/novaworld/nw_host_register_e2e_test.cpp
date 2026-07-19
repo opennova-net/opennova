@@ -90,24 +90,25 @@ int main() {
 	};
 
 	// Drive the handshake to Verified: send ClientHello, then pump replies back
-	// through the session (each handle_datagram emits the next leg) until the
-	// ServerVerifyResult lands or we time out.
+	// through the session, then run the same periodic-update boundary as the
+	// Godot pump, until the ServerVerifyResult lands or we time out.
 	send(session.start());
 	uint8_t rx[4096];
 	bool verified = false;
 	for (int i = 0; i < 40 && !verified; ++i) {
 		opennova::net::Endpoint from;
 		const int n = opennova::net::udp_recv_from(client, rx, sizeof rx, from, 200);
+		std::vector<std::vector<uint8_t>> out;
 		if (n > 0) {
-			std::vector<std::vector<uint8_t>> out;
 			if (!session.handle_datagram(rx, static_cast<size_t>(n), out)) {
 				std::fprintf(stderr, "FAIL: session error: %s\n",
 				             session.last_error().c_str());
 				++g_failures;
 				break;
 			}
-			for (const auto &dg : out) send(dg);
 		}
+		session.process_periodic_update(out);
+		for (const auto &dg : out) send(dg);
 		verified = session.is_verified();
 	}
 	expect(verified, "ClientSession reached Verified against the real listener");

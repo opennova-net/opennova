@@ -75,7 +75,6 @@ record splits a divergence into facets (e.g. D-NET-133), the facets get separate
 |---|---|---|---|---|
 | D-NET-9 | Gate literal parse is decimal-only; the 4-radix (char/hex/octal/binary) port is witnessed-and-ready | A | WITNESSED-READY-DEFERRED | PAR-NET |
 | D-NET-17 | ClientHello `DE`/`PV3`/`PM`/`ET` parser fields unmodeled (server side witnessed) | A | OPEN | PAR-NET |
-| D-NET-21 | `ClientConnected` emitted synchronously; retail waits one periodic tick (state 5/2) | A | OPEN | PAR-NET |
 | D-NET-22 | Verify Cookie var-list is data-driven from client env; the registry/Win32 glue belongs in the Godot binding | A | OPEN | PAR-NET |
 | D-NET-29 | Envelope variable-header (`first-dword==0`) decode mode unsupported — documented scope | A | WITNESSED-READY-DEFERRED | PAR-NET |
 | D-NET-49 | `jointoperations_pg()` is a placeholder; the in-match PG (16 B @ proto+284) is unwitnessed | B | NEEDS-RE | PAR-NET / research starter |
@@ -107,7 +106,10 @@ inconsistency) + the subnet key ported (`subnet_key()`, IPv4 /16)
 Closed net entries with a permanent facet are listed in the permanent register below
 (D-NET-131, D-NET-133 empty-slot facet, D-NET-140). Closed 2026-07-05: **D-NET-20**
 -> `FIXED` (the Cookie var-list parent emitted unconditionally; empty-cfg flow pinned
-in `client_session_loopback_test`).
+in `client_session_loopback_test`). Closed 2026-07-19: **D-NET-21** -> `FIXED`
+(`ClientSession::process_periodic_update` now emits the one-shot `ClientConnected`
+after `ServerSessionInit`; both Godot session pumps call the boundary after their
+receive drain, and `client_session_loopback_test` pins no synchronous 0x82 reply).
 
 ### Environment — [env/env-tod-re.md](env/env-tod-re.md) (#-catalog) + [env/env-honored-matrix.md](env/env-honored-matrix.md)
 
