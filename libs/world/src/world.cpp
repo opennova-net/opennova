@@ -785,6 +785,7 @@ World::Snapshot World::snapshot() const {
     s.vars = vars;
     s.env = env;
     s.logic_tick = logic_tick;
+    s.local_player = cached.local_player;
     return s;
 }
 
@@ -793,6 +794,13 @@ void World::restore(const Snapshot &s) {
     vars = s.vars;
     env = s.env;
     logic_tick = s.logic_tick;
+    // Reset per-tick health/proximity counters, then restore only the stable
+    // ownership identity captured with the registry. A post-snapshot player may
+    // have reused a baseline actor's slot, while a listen baseline may already
+    // contain its host player; copying the current cache or clearing ownership
+    // unconditionally gets one of those cases wrong.
+    cached = CachedFrameState{};
+    cached.local_player = s.local_player;
     effects.clear();
     round_sim.reset();
     explosions.reset();

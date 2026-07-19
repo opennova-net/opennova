@@ -516,12 +516,14 @@ public:
 
     // Editor "play" support: snapshot/restore of mutable world state so a
     // simulate/stop cycle doesn't dirty the authored mission. Value copies of the
-    // registry + vars + env + clock; systems re-init from on_load on restore.
+    // registry + vars + env + clock + stable local-player ownership; per-tick
+    // health/proximity/human-count caches reset and systems re-init on restore.
     struct Snapshot {
         EntityRegistry registry;
         ScriptVarStore vars;
         EnvState env;
         uint32_t logic_tick = 0;
+        EntityHandle local_player;
     };
     Snapshot snapshot() const;
     void restore(const Snapshot &s);

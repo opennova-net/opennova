@@ -100,6 +100,12 @@ int main() {
     blast_target.position = Vec3{20.0f, 20.0f, 1.0f};
     blast_target.bound_radius = 0.6f;
     const EntityHandle blast_victim = w.registry.spawn(0, blast_target);
+    // Local ownership is mission-lifetime identity even though the other cached
+    // fields are per-tick transients. A listen-server baseline may already own
+    // its player, so that one handle must survive restore.
+    w.cached.local_player = blast_victim;
+    w.cached.local_health = 100;
+    w.cached.humans = 1;
     World::Snapshot snap = w.snapshot();
     const EntityHandle post_snapshot = w.registry.spawn(0, blast_target);
     CHECK(post_snapshot.valid());
@@ -133,6 +139,12 @@ int main() {
     w.destruction.glass_breaks.push_back({});
     w.destruction.explosions_processed = 7;
     w.destruction.items_destroyed = 3;
+    // CachedFrameState is transient, not part of Snapshot. A local player
+    // spawned after the baseline may reuse a baseline actor's packed slot;
+    // restore must not keep treating that restored actor as the local avatar.
+    w.cached.local_player = post_snapshot;
+    w.cached.local_health = 77;
+    w.cached.humans = 2;
     w.restore(snap);
     CHECK(w.vars.get_mission(1) == 7);
     CHECK(w.round_sim.active_count == 0);
@@ -151,6 +163,9 @@ int main() {
     CHECK(w.destruction.glass_breaks.empty());
     CHECK(w.destruction.explosions_processed == 0);
     CHECK(w.destruction.items_destroyed == 0);
+    CHECK(w.cached.local_player == blast_victim);
+    CHECK(w.cached.local_health == 0);
+    CHECK(w.cached.humans == 0);
     const EntityHandle post_restore = w.registry.spawn(0, blast_target);
     CHECK(post_restore == post_snapshot);
     CHECK(w.registry.get(post_restore)->registry_spawn_id >

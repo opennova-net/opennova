@@ -120,6 +120,7 @@ and a synthetic compressed-clip regression: a sparsely-keyed bone holds its keyf
 `mission_present_pass_test`. Native `collision_test` additionally pins a moved posed head (section 14),
 strict reverse-scan/mask and radius rules, propagation of the primary/reaction bone into the directional
 death animation, and the independent secondary normal-infantry damage-zone multiplier; GUT
-`hitbox_debug_view_test` pins the F3 person-section roles. Headless dump confirms US01 and
+`hitbox_debug_view_test` pins the F3 person-section roles. F3 omits the local avatar and
+keeps posed remote targets mission-wide under its 96-actor diagnostic cap. Headless dump confirms US01 and
 C4Ground (40+ clips, compressed) pose as humanoids with no collapse. User-validated US01 walk/idle in the
 object preview.

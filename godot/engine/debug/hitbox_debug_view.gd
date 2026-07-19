@@ -1,10 +1,11 @@
 extends Node3D
 
-# Draws the round hit-detection reality over the scene: every nearby entity's
-# CFAC bullet-mesh wireframe (the triangles Physics_RaycastAgainstBoneCollision
-# walks), colored by face material, plus the broad-phase bound sphere, the
-# husk state, and the pool-0 organic posed bone spheres. The 3D face of the F3
-# Rounds tab's "Show hit meshes" toggle.
+# Draws the round hit-detection reality over the scene: nearby non-organic CFAC
+# bullet-mesh wireframes (the triangles Physics_RaycastAgainstBoneCollision
+# walks), colored by face material, plus their broad-phase bound spheres and
+# husk state. Pool-0 organic posed bone spheres are mission-wide under a
+# 96-target cap and omit the local avatar. The 3D face of the F3 Rounds tab's
+# "Show hit meshes" toggle.
 #
 # Geometry comes from NovaSimulation.get_hitbox_debug(): triangles are
 # transformed in C++ through the SAME husk-aware target_view + full-euler

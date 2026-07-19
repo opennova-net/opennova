@@ -152,6 +152,34 @@ func test_present_effect_lookup_matches_client_snapshot_and_reloads_cleanly() ->
 	sim.free()
 
 
+func test_listen_server_restart_preserves_auto_spawned_local_identity() -> void:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	md.add_entity(3, 0, Vector3(8, 0, 0), Vector3.ZERO)
+
+	var sim := NovaSimulation.new()
+	sim.enable_listen_server(true)
+	assert_true(sim.load_from_mission_data(md))
+	assert_true(sim.has_local_player())
+	var player_handle := sim.get_local_player_wire_handle()
+
+	sim.restart()
+	assert_true(sim.has_local_player(),
+			"restart restores the listen baseline's host-player identity")
+	assert_eq(sim.get_local_player_wire_handle(), player_handle)
+	sim.step()
+	var stride := sim.get_present_stride()
+	var snapshot := sim.get_present_snapshot()
+	var found_player := false
+	for record in range(snapshot.size() / stride):
+		if int(snapshot[record * stride + NovaSimulation.PF_WIRE_HANDLE]) == player_handle:
+			found_player = true
+			break
+	assert_true(found_player,
+			"the restored host player still replicates through the loopback client")
+	sim.free()
+
+
 func test_listen_server_auto_spawns_and_replicates_local_player() -> void:
 	# Phase 2 (the moving player, net-re §5.2b/§5.38) + the faithful §5.0 mode-3 bring-up: the host's
 	# own player is created as part of session bring-up (ADR 0012) — an authoritative pool-0 entity

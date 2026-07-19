@@ -1086,7 +1086,7 @@ func test_face_only_cfac_model_attaches_for_projectile_raycast() -> void:
 	var md := NovaMissionData.new()
 	assert_eq(md.create_default(), OK)
 	var placed := md.add_entity(
-		NovaMissionData.KIND_BUILDING, 102001, Vector3(0, 20, 0), Vector3.ZERO)
+		NovaMissionData.KIND_BUILDING, 102001, Vector3(0, 200, 0), Vector3.ZERO)
 	assert_false(placed.is_empty())
 
 	var item_db := NovaItemDatabase.new()
@@ -1104,6 +1104,9 @@ func test_face_only_cfac_model_attaches_for_projectile_raycast() -> void:
 	if entities.size() == 1:
 		assert_eq(int((entities[0] as Dictionary).get("face_total", 0)), 242,
 			"all authored Bird1 faces reach the projectile walker")
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	assert_true((sim.get_hitbox_debug().get("entities", []) as Array).is_empty(),
+		"the heavier non-organic mesh view retains its local 80-unit range")
 	sim.free()
 
 
@@ -1428,21 +1431,65 @@ func test_late_spawned_player_resolves_posed_collision_on_demand() -> void:
 			"the initial pre-deploy sweep has no player to attach")
 	assert_true(sim.spawn_local_player(Vector3(10, 0, 0), 0.0, 1))
 
-	# F3 and live rounds share CollisionWorld's demand provider. Reading F3 is
-	# enough to resolve this newly spawned player exactly once.
-	var rows: Array = sim.get_hitbox_debug().get("organics", [])
-	assert_eq(rows.size(), 19, "late player gets every CharModel COBJ section")
-	var sections := {}
-	for value in rows:
-		var row: Dictionary = value
-		assert_false(bool(row.get("fallback", true)))
-		sections[int(row.get("section", -1))] = true
-	assert_true(sections.has(14), "late player exposes the authored head section")
+	# F3 still exercises CollisionWorld's demand provider for late targets, but
+	# presentation filters the local avatar before any posed/fallback row escapes.
+	assert_true((sim.get_hitbox_debug().get("organics", []) as Array).is_empty(),
+			"the local avatar never renders posed or fallback hitboxes")
+	var local_bms_id := int(sim.get_entity_debug(
+			sim.get_entity_count() - 1).get("bms_id", -1))
+	assert_true(bool(sim.get_destruction_debug(local_bms_id).get(
+			"has_collision_instance", false)),
+			"the hidden local avatar was nevertheless attached on demand")
+	sim.free()
 
-	# A later explicit sweep remains idempotent: no duplicate model/section rows.
+
+func test_f3_hides_local_player_and_keeps_distant_posed_organic() -> void:
+	# The F3 person view is for inspecting targets. It must not wrap the local
+	# avatar in debug spheres, and its payload must not silently discard a
+	# valid remote target merely because it is more than 80 mission units away.
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	assert_false(md.add_entity(
+			NovaMissionData.KIND_ORGANIC, 105311,
+			Vector3(200, 0, 0), Vector3.ZERO).is_empty())
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/items.def")), OK)
+	var data := NovaObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(
+			"res://../fixtures/threedi/3di3/CharModel.3di")), OK)
+	var bad_root := NovaResourceRoot.new()
+	assert_eq(bad_root.set_root_dir(ProjectSettings.globalize_path(
+			"res://../fixtures/bad")), OK)
+	var skeletal := NovaSkeletalAnim.new()
+	assert_true(skeletal.load_from_bad_files(
+			bad_root, "BINOC.bad", {"anim_idle": "BINOC.bad"},
+			data.get_bone_origins(), data.get_bone_parents()))
+
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(md))
 	assert_eq(sim.resolve_collision_instances(
 			item_db, SkeletalDataPlacerStub.new(data, skeletal)), 1)
-	assert_eq((sim.get_hitbox_debug().get("organics", []) as Array).size(), 19)
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+
+	var rows: Array = sim.get_hitbox_debug().get("organics", [])
+	assert_eq(rows.size(), 19, "only the distant target's authored sections remain")
+	for value in rows:
+		var row: Dictionary = value
+		assert_eq(int(row.get("entity_handle", -1)), 0,
+				"F3 includes the distant target and excludes local handle 1")
+		assert_false(bool(row.get("fallback", true)))
+	sim.free()
+
+
+func test_f3_hides_unresolved_local_player_fallback() -> void:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	assert_true((sim.get_hitbox_debug().get("organics", []) as Array).is_empty(),
+			"an unresolved local avatar never leaks through the fallback path")
 	sim.free()
 
 
@@ -1491,13 +1538,13 @@ func test_reused_player_slot_invalidates_old_collision_attempt_identity() -> voi
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1),
 			"US01 reuses the freed pool-0 slot")
 
-	var rows: Array = sim.get_hitbox_debug().get("organics", [])
-	assert_eq(rows.size(), 19,
+	assert_true((sim.get_hitbox_debug().get("organics", []) as Array).is_empty(),
+			"the newly resolved local avatar remains hidden from F3")
+	var local_bms_id := int(sim.get_entity_debug(
+			sim.get_entity_count() - 1).get("bms_id", -1))
+	assert_true(bool(sim.get_destruction_debug(local_bms_id).get(
+			"has_collision_instance", false)),
 			"the old negative attempt cannot suppress the new slot identity")
-	for value in rows:
-		var row: Dictionary = value
-		assert_eq(int(row.get("entity_handle", -1)), 0)
-		assert_false(bool(row.get("fallback", true)))
 	sim.free()
 
 
@@ -1542,20 +1589,31 @@ func test_restart_re_resolves_the_restored_collision_identity() -> void:
 	for _tick in 16:
 		sim.step()
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
-	assert_eq((sim.get_hitbox_debug().get("organics", []) as Array).size(), 19,
-			"the replacement occupant receives the cached graphic")
+	assert_true((sim.get_hitbox_debug().get("organics", []) as Array).is_empty())
+	var local_bms_id := int(sim.get_entity_debug(
+			sim.get_entity_count() - 1).get("bms_id", -1))
+	assert_true(bool(sim.get_destruction_debug(local_bms_id).get(
+			"has_collision_instance", false)),
+			"the replacement local occupant receives the cached graphic")
 
 	sim.restart()
 	var restored := sim.get_destruction_debug(bms_id)
 	assert_true(bool(restored.get("has_collision_instance", false)),
 			"restart rebinds the baseline before any F3 or round demand query")
+	var restored_rows: Array = sim.get_hitbox_debug().get("organics", [])
+	assert_eq(restored_rows.size(), 19,
+			"the restored non-local actor exposes every authored section")
+	for value in restored_rows:
+		var row: Dictionary = value
+		assert_eq(int(row.get("entity_handle", -1)), 0)
+		assert_false(bool(row.get("fallback", true)))
 	sim.free()
 
 
 func test_f3_organic_fallbacks_match_live_filtering_bounds() -> void:
 	# F3 must describe the same unresolved pool-0 actors RoundSim can hit:
-	# engine-flag filtering only (dead bodies remain solid), bounded to the
-	# local 80-unit view and the shared 96-entity debug budget.
+	# engine-flag filtering only (dead bodies remain solid), mission-wide except
+	# for the local avatar, and bounded by the shared 96-entity debug budget.
 	var md := NovaMissionData.new()
 	assert_eq(md.create_default(), OK)
 	for i in range(101):
@@ -1570,13 +1628,13 @@ func test_f3_organic_fallbacks_match_live_filtering_bounds() -> void:
 	sim.debug_set_entity_health(1, 0)
 
 	var rows: Array = sim.get_hitbox_debug().get("organics", [])
-	assert_eq(rows.size(), 96, "posed plus fallback entities share the F3 cap")
+	assert_eq(rows.size(), 96, "fallback entities obey the F3 target cap")
 	var handles := {}
 	for value in rows:
 		var row: Dictionary = value
 		assert_true(bool(row.get("fallback", false)))
 		handles[int(row.get("entity_handle", -1))] = true
-	assert_false(handles.has(0), "the 200-unit actor is outside the local F3 range")
+	assert_true(handles.has(0), "the 200-unit actor remains visible mission-wide")
 	assert_true(handles.has(1), "a zero-health corpse retains its bullet fallback")
 	sim.free()
 

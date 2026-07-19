@@ -1664,6 +1664,7 @@ inline Vector3 godot_from_mission_vec3(const opennova::world::Vec3 &p) {
 } // namespace
 
 Dictionary NovaSimulation::get_hitbox_debug() {
+	constexpr int32_t kEntityCap = 96;
 	Dictionary out;
 	Array entities;
 	Array organics;
@@ -1674,18 +1675,19 @@ Dictionary NovaSimulation::get_hitbox_debug() {
 	// Anchor on the local player like the volume view; a preview with no
 	// player sweeps up to the caps.
 	int32_t anchor[3] = {0, 0, 0};
-	int32_t range = -1;
+	int32_t item_range = -1;
+	const opennova::world::EntityHandle local_player =
+	    world_->cached.local_player;
 	const opennova::world::Entity *lp =
-	    world_->cached.local_player.valid() ? world_->registry.get(world_->cached.local_player)
-	                                        : nullptr;
+	    local_player.valid() ? world_->registry.get(local_player) : nullptr;
 	if (lp != nullptr) {
 		anchor[0] = opennova::world::to_fixed(lp->position.x);
 		anchor[1] = opennova::world::to_fixed(lp->position.y);
 		anchor[2] = opennova::world::to_fixed(lp->position.z);
-		range = 80 << 16;
+		item_range = 80 << 16;
 	}
 	const std::vector<opennova::world::CollisionWorld::DebugHitboxEntity> ents =
-	    collision_world_.debug_hitboxes(*world_, anchor, range, 96, 24000);
+	    collision_world_.debug_hitboxes(*world_, anchor, item_range, kEntityCap, 24000);
 	for (const opennova::world::CollisionWorld::DebugHitboxEntity &ent : ents) {
 		Dictionary d;
 		d["entity_handle"] = static_cast<int>(ent.handle.packed);
@@ -1715,13 +1717,21 @@ Dictionary NovaSimulation::get_hitbox_debug() {
 		entities.push_back(d);
 	}
 
-	// Posed pool-0 COBJ spheres from the exact person narrow phase. Entities
+	// Posed pool-0 COBJ spheres from the exact person narrow phase. They are
+	// mission-wide under a 96-actor output cap. Preserve F3's late-spawn demand
+	// bridge even though the local avatar is presentation-hidden; one spare query
+	// slot then prevents its authored rows from consuming the target budget. Entities
 	// whose graphic cannot supply usable authored sections are appended below
 	// with the bounded compatibility fallback used by RoundSim.
+	if (local_player.valid()) ensure_collision_instance(*world_, local_player);
 	std::unordered_map<uint16_t, bool> posed_handles;
 	const std::vector<opennova::world::CollisionWorld::DebugPersonSection> people =
-	    collision_world_.debug_person_sections(*world_, anchor, range, 96);
+	    collision_world_.debug_person_sections(*world_, anchor, -1, kEntityCap + 1);
 	for (const opennova::world::CollisionWorld::DebugPersonSection &person : people) {
+		if (person.handle == local_player) continue;
+		const bool new_handle =
+		    posed_handles.find(person.handle.packed) == posed_handles.end();
+		if (new_handle && posed_handles.size() >= static_cast<size_t>(kEntityCap)) break;
 		Dictionary d;
 		d["entity_handle"] = static_cast<int>(person.handle.packed);
 		d["section"] = person.section;
@@ -1737,22 +1747,13 @@ Dictionary NovaSimulation::get_hitbox_debug() {
 	const size_t pool0 = world_->registry.pool_capacity(0);
 	int fallback_entity_count = static_cast<int>(posed_handles.size());
 	for (size_t s = 0; s < pool0; ++s) {
-		if (fallback_entity_count >= 96) break;
+		if (fallback_entity_count >= kEntityCap) break;
 		const opennova::world::Entity *e =
 		    world_->registry.get(opennova::world::EntityHandle{static_cast<uint16_t>(s)});
-		if (e == nullptr || (e->engine_flags & 0x02000001u) != 0 ||
+		if (e == nullptr || e->handle == local_player ||
+		    (e->engine_flags & 0x02000001u) != 0 ||
 		    posed_handles.find(static_cast<uint16_t>(s)) != posed_handles.end())
 			continue;
-		if (range >= 0) {
-			const int32_t ep[3] = {
-			    opennova::world::to_fixed(e->position.x),
-			    opennova::world::to_fixed(e->position.y),
-			    opennova::world::to_fixed(e->position.z)};
-			if (std::llabs(static_cast<int64_t>(ep[0]) - anchor[0]) > range ||
-			    std::llabs(static_cast<int64_t>(ep[1]) - anchor[1]) > range ||
-			    std::llabs(static_cast<int64_t>(ep[2]) - anchor[2]) > range)
-				continue;
-		}
 		Dictionary d;
 		d["entity_handle"] = static_cast<int>(s);
 		d["section"] = 1;
