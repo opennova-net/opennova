@@ -173,6 +173,7 @@ std::vector<uint8_t> ClientSession::start() {
 	// 0 makes ack=0 ambiguous with "acked nothing" in the peer's reliable-delivery
 	// layer, which stalls the verify exchange against live NW (NW-S5).
 	seq_ = SessionSequencing{1, 0};
+	sent_client_connected_ = false;
 	sent_verify_request_ = false;
 	reassembly_ = ProtocolReassemblyState{};
 	return build_client_hello();
@@ -336,7 +337,7 @@ bool ClientSession::handle_datagram(const uint8_t *data, size_t len,
 		if (state_ == State::Hello) on_server_hello(body, out);
 		break;
 	case SESSION_OPCODE_SERVER_AUTH:
-		if (state_ == State::Auth) on_server_auth(body, out);
+		if (state_ == State::Auth) on_server_auth(body);
 		break;
 	case SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE:
 		if (state_ == State::Verifying || state_ == State::Verified) {
@@ -363,8 +364,7 @@ void ClientSession::on_server_hello(const std::vector<uint8_t> &body,
 	out.push_back(build_client_auth());
 }
 
-void ClientSession::on_server_auth(const std::vector<uint8_t> &body,
-                                   std::vector<std::vector<uint8_t>> &out) {
+void ClientSession::on_server_auth(const std::vector<uint8_t> &body) {
 	ServerAuth sa;
 	if (!parse_server_auth(body.data(), body.size(), sa)) {
 		fail("bad ServerAuth");
@@ -377,6 +377,7 @@ void ClientSession::on_server_auth(const std::vector<uint8_t> &body,
 	server_sk_ = sa.sk;         // session_id for our outbound 0x43s
 	server_scrk_ = sa.scrk;     // decrypts inbound 0x83 inner streams
 	state_ = State::Verifying;
+	sent_client_connected_ = false;
 	sent_verify_request_ = false;
 
 	// The 0x82 is ServerSessionInit (NapiNPConnection_SendSessionInit @ 0x620ef0,
@@ -389,17 +390,22 @@ void ClientSession::on_server_auth(const std::vector<uint8_t> &body,
 		else if (kv.first == "NovaworldWebDomainNameAndPortNumber")
 			server_web_domain_ = kv.second;
 	}
+}
 
-	// Kick off the lobby verify handshake with a bare ClientConnected
+void ClientSession::process_periodic_update(
+		std::vector<std::vector<uint8_t>> &out) {
+	if (state_ != State::Verifying || sent_client_connected_) return;
+
+	// Emit the lobby verify handshake's bare ClientConnected
 	// (CNapiGameSession_SendClientConnected @ 0x4cfe30 — a "ClientConnected"
 	// statement with zero fields; capture frame 9778). Retail emits this from its
-	// periodic-update tick after conn_state==5 && session==2; we emit it on the
-	// SessionInit, which is functionally the same point (and the only point that
-	// keeps the permissive OpenNova-server loopback moving, since that server
-	// answers ClientConnected directly with ServerStartVerify).
+	// periodic-update tick after conn_state==5 && session==2; this method owns
+	// that boundary after the SessionInit handler completes. The one-shot flag
+	// prevents subsequent periodic updates from repeating the statement.
 	NapiMessage connected;
 	connected.name = "ClientConnected";
 	out.push_back(build_lobby_packet(connected));
+	sent_client_connected_ = true;
 }
 
 void ClientSession::on_server_protocol_message(const std::vector<uint8_t> &body,
