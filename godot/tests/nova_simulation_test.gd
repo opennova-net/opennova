@@ -1,5 +1,7 @@
 extends GutTest
 
+const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
+
 # NovaSimulation (the GDExtension binding): promote a synthetic BMS mission into a live
 # world + AI system, tick it, and confirm the AI walks entities along their authored route.
 # This is the in-Godot end of step 1 (promotion) + step 2 (locomotion).
@@ -480,6 +482,137 @@ func test_local_fire_spawns_the_authoritative_round_and_impact() -> void:
 	assert_eq(int(weapon_state.get("round_ring_count", 0)), 2)
 	assert_eq(int(weapon_state.get("last_round_seq", 0)), 2,
 			"weapon remount does not reset the shooter-lifetime sequence")
+	sim.free()
+
+
+func test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun() -> void:
+	# Exact player report: the target rendered in a rotated UseGun seat must keep
+	# its authored COBJ sections under the same entity basis, so a local-owned
+	# round through a visible section can damage it.
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var reference_gun := md.add_entity(
+			NovaMissionData.KIND_ITEM, 101294,
+			Vector3(-20, 8, 0), Vector3.ZERO)
+	var reference_enemy := md.add_entity(
+			NovaMissionData.KIND_ORGANIC, 105311,
+			Vector3(-20, 8, 0), Vector3.ZERO)
+	var rotated_gun := md.add_entity(
+			NovaMissionData.KIND_ITEM, 101294,
+			Vector3(0, 8, 0), Vector3(0, -90, 0))
+	var rotated_enemy := md.add_entity(
+			NovaMissionData.KIND_ORGANIC, 105311,
+			Vector3(0, 8, 0), Vector3.ZERO)
+	for pair in [
+		[reference_enemy, reference_gun],
+		[rotated_enemy, rotated_gun],
+	]:
+		assert_false((pair[0] as Dictionary).is_empty())
+		assert_false((pair[1] as Dictionary).is_empty())
+		assert_true(md.set_entity_property_int(
+				NovaMissionData.KIND_ORGANIC,
+				int((pair[0] as Dictionary)["index"]),
+				"waypoint_id", 125))
+		assert_true(md.set_entity_property_int(
+				NovaMissionData.KIND_ORGANIC,
+				int((pair[0] as Dictionary)["index"]),
+				"wp_number", int((pair[1] as Dictionary)["bms_id"])))
+
+	var sim := NovaSimulation.new()
+	sim.set_item_seat_specs([{
+		"type_id": 1294,
+		"seats": [{"type": 3, "position": Vector3.ZERO, "yaw_offset": 0}],
+	}])
+	assert_true(sim.load_from_mission_data(md))
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/items.def")), OK)
+	var data := NovaObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(
+			"res://../fixtures/threedi/3di3/CharModel.3di")), OK)
+	var bad_root := NovaResourceRoot.new()
+	assert_eq(bad_root.set_root_dir(ProjectSettings.globalize_path(
+			"res://../fixtures/bad")), OK)
+	var skeletal := NovaSkeletalAnim.new()
+	assert_true(skeletal.load_from_bad_files(
+			bad_root, "BINOC.bad", {
+				"anim_idle": "BINOC.bad",
+				"anim_emplaced": "BINOC.bad",
+			}, data.get_bone_origins(), data.get_bone_parents()))
+	assert_eq(sim.resolve_collision_instances(
+			item_db, SkeletalDataPlacerStub.new(data, skeletal)), 2,
+			"precondition: both enemies use authored posed COBJ collision")
+	var reference_card: Dictionary = sim.get_entity_debug(0)
+	var rotated_card: Dictionary = sim.get_entity_debug(1)
+	assert_true(bool(reference_card.get("mounted", false)))
+	assert_true(bool(rotated_card.get("mounted", false)))
+	assert_eq(int(rotated_card.get("mount_type", 0)), 3)
+	var health_before := int(rotated_card.get("health", 0))
+	assert_gt(health_before, 0)
+
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path("res://../fixtures/def")), OK)
+	assert_eq(sim.load_ammo_table(root, "ammo.def"), OK)
+	var sections: Array = sim.get_hitbox_debug().get("organics", [])
+	var reference_by_section := {}
+	var rotated_by_section := {}
+	for value in sections:
+		var row: Dictionary = value
+		var handle := int(row.get("entity_handle", -1))
+		var section := int(row.get("section", -1))
+		if handle == 0:
+			reference_by_section[section] = row
+		elif handle == 1:
+			rotated_by_section[section] = row
+	assert_eq(reference_by_section.size(), 19)
+	assert_eq(rotated_by_section.size(), 19)
+
+	var reference_pos: Vector3 = reference_card.get("position", Vector3.ZERO)
+	var rotated_pos: Vector3 = rotated_card.get("position", Vector3.ZERO)
+	var reference_yaw := float(reference_card.get("yaw_deg", 0.0))
+	var rotated_yaw := float(rotated_card.get("yaw_deg", 0.0))
+	var relative_basis := MissionObjectPlacer.bms_to_godot_basis(
+			Vector3(0, rotated_yaw, 0)) * MissionObjectPlacer.bms_to_godot_basis(
+			Vector3(0, reference_yaw, 0)).inverse()
+	var selected_section := -1
+	var selected_score := -1.0
+	for section_value in reference_by_section.keys():
+		var section := int(section_value)
+		var row: Dictionary = reference_by_section[section]
+		var offset: Vector3 = row.get("pos", Vector3.ZERO) - reference_pos
+		var radius := maxf(float(row.get("radius", 0.0)), 0.001)
+		var score := Vector2(offset.x, offset.z).length() / radius
+		if rotated_by_section.has(section) and score > selected_score:
+			selected_score = score
+			selected_section = section
+	assert_gte(selected_section, 0,
+			"a shared off-axis authored section exists")
+	var reference_center: Vector3 = (
+			reference_by_section[selected_section] as Dictionary).get(
+					"pos", Vector3.ZERO)
+	var expected_center := rotated_pos + relative_basis * (
+			reference_center - reference_pos)
+	var collision_center: Vector3 = (
+			rotated_by_section[selected_section] as Dictionary).get(
+					"pos", Vector3.ZERO)
+	assert_lt(collision_center.distance_to(expected_center), 0.01,
+			"posed collision follows the mounted entity's rendered yaw")
+
+	var radial := expected_center - rotated_pos
+	radial.y = 0.0
+	assert_gt(radial.length(), 0.01)
+	var tangent := Vector3(-radial.z, 0.0, radial.x).normalized()
+	assert_gte(sim.debug_spawn_round(
+			expected_center - tangent,
+			tangent, "AMMO_CAR15_556MM"), 0,
+			"a local-owned live round starts through the rendered section")
+	for _i in range(2):
+		sim.step()
+	var rotated_after: Dictionary = sim.get_entity_debug(1)
+	assert_lt(int(rotated_after.get("health", health_before)), health_before,
+			"the local round damages the rotated mounted enemy organic")
 	sim.free()
 
 

@@ -689,8 +689,12 @@ Shipped: `Entity.seats` + occupant refs riding the registry value-copy (`World::
 rewinds mounts for free); `EntityCommands::{find_best_seat, mount, mount_boarding_command,
 mount_best, dismount, find_mounted_on}` mirroring 0x4351f0/0x4f70f0/0x4355f0/0x4359f0;
 `pose_mounted_occupant` (occ.pos = veh.pos + rotate(seat_local, veh.yaw), gunner yaw = veh.yaw −
-yaw_offset); `AiSystem::pose_if_mounted` skips SM + locomotion and auto-dismounts when the vehicle
-is gone; event-runtime case 0x25 → `mount_best(param1)`; command-123/124/125 promotion mounts
+yaw_offset); `AiSystem::pose_if_mounted` captures that seat frame before the local LOOK mirror mutates
+`Entity.yaw`, synchronizes `body_heading`, both `leg_yaw`/`leg_target` chains, `body_pitch`,
+and roll, then skips SM + locomotion and auto-dismounts when the vehicle is gone. Remote
+`AiEntity.heading` stays in the seat frame; the local `heading`/`pitch` remain the full-precision
+`target_heading`/`look_pitch` while registry yaw is only the rounded wire/motor look mirror.
+Event-runtime case 0x25 → `mount_best(param1)`; command-123/124/125 promotion mounts
 already-near occupants onto their target SSN with the runtime gate above; mounted infantry pose class
 is selected from the occupied seat (`UseGun` → 67+variant if that clip exists, other seats →
 `anim_sit_N` from the seat name digits). GDExtension debug cards expose the selected seat source name
@@ -1065,7 +1069,9 @@ Ported for the local player, end to end, in the controller train:
 
 Remaining under this row: NPC/remote threading (the present-pass `PF_PITCH_DEG` seam + the
 same angles per entity in the snapshot — closes **D-NET-117**), mounted-gunner/seated
-branches, weapon/sight/muzzle attachment matrices, and the pitchBlend / lean / torsoRoll
+overlay-matrix selection by mount config remains under D-INF-11 (the landed seat-frame
+body/legs/pitch/roll synchronization does not select those retail matrices); weapon/sight/
+muzzle attachment matrices and the pitchBlend / lean / torsoRoll
 sources (terms carried, fed 0; headLookDecay now carries the PORTED arms-dip feed —
 §14.8.5/§14.8.7 — its other producers, the idle look-at and the audio pitch kick,
 stay open). The upper-body weapon channel's producer is witnessed and FULLY ported for
@@ -3222,6 +3228,10 @@ the org2 2× local integrate (§22.2). Unported by decision — dev/admin featur
 
 ### 22.4 Port deltas landed this session (libs/world)
 
+- Mounted early-continue now captures seat yaw/pitch/roll before the local look rewrite,
+  synchronizes `body_heading`, both `leg_yaw`/`leg_target` chains, `body_pitch`, and roll,
+  and keeps the remote seat heading separate from the local player's full-precision look.
+  The non-cardinal yaw path retains the witnessed `(90 - yaw) * 11930464` integer convention.
 - Player heading/legs rewritten to the §22.1 model (was the org1 approximation);
   NPC legs corrected to the midpoint re-plant value, staggered windows, and the
   walk half-snap path (§3.3).
@@ -3250,8 +3260,9 @@ the org2 2× local integrate (§22.2). Unported by decision — dev/admin featur
 
 1. The org2 swim/parachute physics block `@ 0x4b7b18+` (descent, water
    transitions) — unread; rides D-INF-3 (water) + D-INF-20 (parachute).
-2. The mounted heading branch (±120° clamp, seat-bone follow) and the platform
-   yaw-carry/exit legs — ride D-INF-2 / D-COL-5.
+2. The mounted ±120° look clamp and true per-tick seat-bone transform remain; the
+   host-fed seat frame now synchronizes body/legs/pitch/roll while preserving the local
+   look. The platform yaw-carry/exit legs remain under D-INF-2 / D-COL-5.
 3. `remote_player_body_anim` (the authority's wire-snapped peer selection) has
    no airborne gate — the wire does not carry the peer's in-air flag to the
    host today; rides the D-NET-159 anim-byte work.
@@ -3576,16 +3587,16 @@ bytes cleared), then per seat class — `parentSlot == 3` (UseGun) ->
 seat bone -> **Position = bone world pos, bodyHeading/headLook = bone yaw, Roll,
 bodyPitch** (the entity Yaw — the LOOK — stays player-owned), and the seated
 anim = `atol(bone-name digits) + 76` (a `sitex24` names anim 100; +-0x4444440
-roll on the carrier flips 109/110). Our `pose_if_mounted` +
-`pose_mounted_occupant` carry this; the local player's yaw preserves the look
-(the drive motor's mouse-steer source) and mirrors the live move-order bits
-into the wire input fields the motor consumes (tick_infantry's mirror is
-skipped while mounted). The seated CAMERA mirrors stay mouse-instant at full
-precision: the AiEntity heading/pitch the camera getters read take
-`target_heading`/`look_pitch` directly for the mounted local player — the
-degree-rounded entity-yaw wire mirror must not quantize (yaw) or freeze
-(pitch) the look [orig: Input_HandleActionBinding_0 @ 0x4e1330 writes entity
-+0x10/+0x14 straight from input, mount or not].
+roll on the carrier flips 109/110). Our `pose_mounted_occupant` performs the carry, then
+`pose_if_mounted` captures its yaw/pitch/roll before any local look rewrite. Because the
+mounted early-continue skips the normal infantry update, it explicitly synchronizes
+`body_heading`, both `leg_yaw` and `leg_target` chains, `body_pitch`, and roll to that
+captured seat frame; a remote occupant's `AiEntity.heading` uses the same exact seat heading.
+The local body remains in that seat frame while the camera LOOK remains player-owned:
+`AiEntity.heading`/`pitch` take full-precision `target_heading`/`look_pitch`; only registry
+yaw is the rounded wire/motor mirror. Live move-order bits still mirror into the wire fields
+the motor consumes, and a degree round-trip therefore cannot quantize yaw or freeze pitch
+[orig: Input_HandleActionBinding_0 @ 0x4e1330 writes entity +0x10/+0x14 from input, mount or not].
 
 ### 23.6 Divergences
 

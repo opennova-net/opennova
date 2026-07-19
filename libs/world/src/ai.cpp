@@ -1121,6 +1121,27 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
     if (occ->mount_seat < 0 || occ->mount_seat >= static_cast<int>(veh->seats.size())) return false;
     const Seat &seat = veh->seats[occ->mount_seat];
     pose_mounted_occupant(*occ, *veh, seat);
+    // Capture the resolved seat orientation before the local-player LOOK mirror below
+    // overwrites the registry yaw. Keep the witnessed integer yaw conversion here:
+    // the generic degree helper rounds differently at non-cardinal headings.
+    const int16_t seat_yaw = occ->yaw;
+    const int16_t seat_pitch = occ->pitch;
+    const int16_t seat_roll = occ->roll;
+    const int32_t seat_heading = static_cast<int32_t>(
+            static_cast<int64_t>(90 - seat_yaw) * kBamPerDegreeInt);
+    if (e.inf.active) {
+        // Mounted occupants early-continue before tick_infantry. Mirror both the direct
+        // seat-frame writes and the carried-infantry leg chase snap that it therefore
+        // skips, so render and per-section collision consume one coherent body frame.
+        // [orig: seat carry @0x4b654e-0x4b6575; carried body/leg snap Flags & 0x100060]
+        e.inf.body_heading = seat_heading;
+        e.inf.leg_yaw[0] = seat_heading;
+        e.inf.leg_yaw[1] = seat_heading;
+        e.inf.leg_target[0] = seat_heading;
+        e.inf.leg_target[1] = seat_heading;
+        e.body_pitch = bam_from_degrees_wrapped(static_cast<double>(seat_pitch));
+        e.roll = bam_from_degrees_wrapped(static_cast<double>(seat_roll));
+    }
     if (e.inf.active && e.inf.is_local_player) {
         // The mounted LOCAL player keeps the LOOK as its entity yaw: the witnessed mounted
         // carry writes bodyHeading/headLook from the seat bone but leaves entity->Yaw
@@ -1147,9 +1168,9 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
     e.pos[0] = to_fixed(occ->position.x);
     e.pos[1] = to_fixed(occ->position.y);
     e.pos[2] = to_fixed(occ->position.z);
-    // Engine-frame heading (90 - mission yaw), matching the spawn seed + the mover; the present
-    // converts back to mission yaw for the basis. [orig: entity heading = (90 - yaw) @0x40e9f0.]
-    e.heading = static_cast<int32_t>(static_cast<int64_t>(90 - occ->yaw) * kBamPerDegreeInt);
+    // Remote occupants present in the captured seat frame. The local LOOK override
+    // below remains player-owned and must not rotate the carried body/collision pose.
+    e.heading = seat_heading;
     if (e.inf.active && e.inf.is_local_player) {
         // The seated LOOK stays mouse-instant at FULL precision: retail drives entity
         // Yaw/Pitch straight from input regardless of mount (the mounted body leg

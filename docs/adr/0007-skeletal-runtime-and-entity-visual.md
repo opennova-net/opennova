@@ -60,7 +60,11 @@ simulation state, not from a presentation-node snapshot. `NovaSimulation` keeps 
 entity so actors sharing a graphic may occupy different clips/playheads, evaluates the primary pose plus
 aim/body overlay (and the authoritative secondary weapon channel when live), resolves FK/rest deformation,
 and emits FINAL world-space fixed matrices through `ICollisionSectionMatrixProvider`. The entity placement
-is composed exactly once. `Physics_RaycastAgainstBoneSections @0x4e4670` then pairs `COBJ[i]` strictly with
+is composed exactly once. Mounted infantry capture seat yaw/pitch/roll before the local look mirror and
+synchronize body heading, both leg yaw/target chains, body pitch, and roll into that seat frame. Remote
+entity heading follows the captured seat heading; the local entity keeps full-precision look heading/pitch
+as a separate overlay input while its body remains seat-bound.
+`Physics_RaycastAgainstBoneSections @0x4e4670` then pairs `COBJ[i]` strictly with
 matrix `i`; COBJ parent/offset and CXLT metadata do not select or further transform organic sections. This
 matches `BoneCallback_org0_Bone @0x4e34b0` → `Entity_BuildBoneTransformMatrices @0x4b1290` →
 `Math_FloatMatrixToFixedPoint22 @0x611140` and keeps headless authority, live bullets, and F3 on one pose.
@@ -102,7 +106,9 @@ reported to damage/death selection and the F3 hit-mesh view cannot drift from th
   `Math_BuildFixedPointToFloatMatrix4x4 @0x612200`) — **WITNESSED IN FULL 2026-07-08** and ported for
   the local render path plus the synchronous organic-collision pose (docs/world/world-wac-ai-re.md
   §14/§15.8b: the bone→overlay map, seven blend matrices, and pivot recomposition). Remaining D-INF-11
-  scope is NPC/remote secondary-weapon threading, mounted/seated branches, attachments, and blend windows;
+  scope is NPC/remote secondary-weapon threading, mounted/seated overlay-matrix selection by mount config,
+  attachments, and blend windows; the landed seat-frame body/leg/pitch/roll synchronization does not select
+  those retail matrices.
   Hex-Rays renders the switch labels shifted −1 (bone 0 = default).
 - Full **anim-slot table** (`Entity_ComputeAnimSlotIndex @0x43a690`, base 180 + 4·variant) and the
   player-avatar `off_8135F0` table — current selector is walk/run/idle by speed+alert.
@@ -117,7 +123,11 @@ reported to damage/death selection and the F3 hit-mesh view cannot drift from th
 `tests/anim/anim_sample_test` (native conventions, world↔local self-consistency, shared-rest regression,
 and a synthetic compressed-clip regression: a sparsely-keyed bone holds its keyframe, never identity),
 `tests/world/ai_test` (state → `anim_slot`), GUT `skeletal_anim_test`/`object_editor_test`/
-`mission_present_pass_test`. Native `collision_test` additionally pins a moved posed head (section 14),
+`mission_present_pass_test`. Native `mount_test` pins the exact non-cardinal seat-heading conversion,
+remote seat-frame state, and the local look/body split. Focused GUT `nova_simulation_test` test
+`test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun` fires a local-owned round through a
+rotated mounted enemy's posed section and confirms authoritative damage. Native `collision_test`
+additionally pins a moved posed head (section 14),
 strict reverse-scan/mask and radius rules, propagation of the primary/reaction bone into the directional
 death animation, and the independent secondary normal-infantry damage-zone multiplier; GUT
 `hitbox_debug_view_test` pins the F3 person-section roles. F3 omits the local avatar and
