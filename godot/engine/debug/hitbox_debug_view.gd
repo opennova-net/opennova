@@ -101,8 +101,8 @@ func setup(world: Node) -> void:
 		lb.fixed_size = false
 		lb.pixel_size = 0.005
 		lb.no_depth_test = true
-		lb.font_size = 36
-		lb.outline_size = 10
+		lb.font_size = 8
+		lb.outline_size = 2
 		lb.outline_modulate = Color(0.0, 0.0, 0.0, 0.85)
 		lb.visible = false
 		add_child(lb)

@@ -86,6 +86,28 @@ func test_draws_and_labels_posed_masked_and_fallback_sections() -> void:
 	assert_string_contains(label_text, "FALLBACK")
 
 
+func test_world_labels_use_compact_debug_font_scale() -> void:
+	var view := _make_view({
+		"entities": [],
+		"organics": [
+			{ "entity_handle": 7, "section": 14, "pos": Vector3(1, 1, 0),
+				"radius": 0.35, "authored_radius": 0.22,
+				"masked": false, "fallback": false },
+		],
+	})
+	view.refresh_now()
+
+	var label := view.get_node("HitboxLabel0") as Label3D
+	assert_true(label.visible)
+	assert_eq(label.font_size, 8, "compact world-debug font")
+	assert_eq(label.outline_size, 2,
+			"compact labels keep a proportional two-pixel outline")
+	assert_lte(float(label.font_size) * label.pixel_size, 0.04,
+			"one glyph is at most 0.04 world units")
+	assert_lte((float(label.font_size) + 2.0 * float(label.outline_size)) * label.pixel_size,
+			0.06, "glyph plus outline stays within the compact world-size budget")
+
+
 func test_static_hit_mesh_refreshes_when_only_transformed_triangles_change() -> void:
 	var view := _make_view({ "entities": [], "organics": [] })
 	var entity := {
