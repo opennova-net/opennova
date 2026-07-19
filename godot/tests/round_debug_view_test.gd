@@ -8,7 +8,7 @@ const ViewScript := preload("res://engine/debug/round_debug_view.gd")
 
 
 func test_organic_label_names_primary_and_secondary_bones() -> void:
-	var description: String = ViewScript._describe({
+	var description: String = ViewScript.describe_event({
 		"kind": 0,
 		"kind_name": "organic",
 		"entity_handle": 7,
@@ -24,7 +24,7 @@ func test_organic_label_names_primary_and_secondary_bones() -> void:
 
 
 func test_missing_secondary_bone_is_explicit() -> void:
-	var description: String = ViewScript._describe({
+	var description: String = ViewScript.describe_event({
 		"kind": 0,
 		"kind_name": "organic",
 		"section": 1,
@@ -34,7 +34,7 @@ func test_missing_secondary_bone_is_explicit() -> void:
 
 
 func test_unresolved_person_is_labeled_as_neutral_fallback() -> void:
-	var description: String = ViewScript._describe({
+	var description: String = ViewScript.describe_event({
 		"kind": 0,
 		"kind_name": "organic",
 		"section": 1,

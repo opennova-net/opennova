@@ -176,7 +176,7 @@ func _dictionary_vector3(value: Variant) -> Vector3:
 
 func test_rounds_tab_exposes_both_person_bone_sections() -> void:
 	var runtime := _make_pose_runtime()
-	runtime._sim.round_debug = {
+	runtime.get_sim().round_debug = {
 		"events": [{
 			"tick": 42,
 			"kind": 0,
@@ -206,7 +206,7 @@ func test_rounds_tab_exposes_both_person_bone_sections() -> void:
 
 func test_rounds_tab_names_unresolved_person_fallback() -> void:
 	var runtime := _make_pose_runtime()
-	runtime._sim.round_debug = {
+	runtime.get_sim().round_debug = {
 		"events": [{
 			"tick": 43,
 			"kind": 0,

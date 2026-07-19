@@ -250,7 +250,7 @@ func test_refresh_cadence_is_six_hz_at_common_frame_rates() -> void:
 		assert_eq(sim.read_count, 0,
 				"setup does not fetch before the first scheduled cadence at %d FPS" % fps)
 		for frame_index in range(fps):
-			view._process(1.0 / float(fps))
+			view.advance_refresh(1.0 / float(fps))
 		assert_eq(sim.read_count, 6,
 				"one simulated second performs six native reads at %d FPS" % fps)
 
@@ -265,16 +265,16 @@ func test_refresh_cadence_discards_missed_intervals_without_frame_bursts() -> vo
 	view.setup(world)
 	view.set_process(false)
 
-	view._process(2.0)
+	view.advance_refresh(2.0)
 	assert_eq(sim.read_count, 1, "a two-second hitch performs at most one native read")
 	for zero_frame in range(4):
-		view._process(0.0)
+		view.advance_refresh(0.0)
 	assert_eq(sim.read_count, 1, "zero-delta frames do not replay missed intervals")
 	for frame_index in range(9):
-		view._process(1.0 / 60.0)
+		view.advance_refresh(1.0 / 60.0)
 	assert_eq(sim.read_count, 1,
 			"nine fresh 60 FPS frames remain below the next cadence boundary")
-	view._process(1.0 / 60.0)
+	view.advance_refresh(1.0 / 60.0)
 	assert_eq(sim.read_count, 2,
 			"the tenth fresh 60 FPS frame reaches exactly one new cadence boundary")
 
@@ -289,7 +289,7 @@ func test_refresh_cadence_discards_missed_intervals_without_frame_bursts() -> vo
 		low_view.set_process(false)
 		for frame_index in range(fps):
 			var before_frame_reads := low_sim.read_count
-			low_view._process(1.0 / float(fps))
+			low_view.advance_refresh(1.0 / float(fps))
 			assert_lte(low_sim.read_count - before_frame_reads, 1,
 					"%d FPS never bursts more than one native read in a frame" % fps)
 		assert_eq(low_sim.read_count, fps,
@@ -401,7 +401,6 @@ func test_changed_organic_draw_inputs_invalidate_geometry_and_labels_update() ->
 
 
 func test_static_hit_mesh_refreshes_when_only_transformed_triangles_change() -> void:
-	var view := _make_view({ "entities": [], "organics": [] })
 	var entity := {
 		"entity_handle": 7,
 		"pos": Vector3.ZERO,
@@ -415,7 +414,9 @@ func test_static_hit_mesh_refreshes_when_only_transformed_triangles_change() -> 
 		"has_faces": true,
 		"face_total": 1,
 	}
-	view._update([entity], [])
+	var payload := { "entities": [entity], "organics": [] }
+	var view := _make_view(payload)
+	view.refresh_now()
 	var lines := view.get_node("HitboxLines") as MeshInstance3D
 	var before_center := (lines.mesh as ImmediateMesh).get_aabb().get_center()
 
@@ -424,7 +425,7 @@ func test_static_hit_mesh_refreshes_when_only_transformed_triangles_change() -> 
 	entity["tris"] = PackedVector3Array([
 		Vector3(10, 0, 0), Vector3(11, 0, 0), Vector3(10, 1, 0),
 	])
-	view._update([entity], [])
+	view.refresh_now()
 	var after_center := (lines.mesh as ImmediateMesh).get_aabb().get_center()
 	assert_gt(after_center.x - before_center.x, 9.0,
 			"same-origin animated collision triangles rebuild the F3 mesh")

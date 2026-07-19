@@ -157,6 +157,12 @@ var _refresh_elapsed := 0.0
 
 
 func _process(delta: float) -> void:
+	advance_refresh(delta)
+
+
+## Advance the fixed debug-snapshot cadence by one rendered-frame delta.
+## Public so hosts and tests drive the same bounded scheduling behavior.
+func advance_refresh(delta: float) -> void:
 	if delta <= 0.0:
 		return
 	_refresh_elapsed += delta

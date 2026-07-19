@@ -146,12 +146,12 @@ func _update(events: Array) -> void:
 		lb.visible = true
 		lb.position = (ev2.get("hit", Vector3.ZERO) as Vector3) + Vector3(0.0, 0.4, 0.0)
 		lb.modulate = kind_color(int(ev2.get("kind", 4)))
-		lb.text = _describe(ev2)
+		lb.text = describe_event(ev2)
 		label_i += 1
 		i2 -= 1
 
 
-static func _describe(ev: Dictionary) -> String:
+static func describe_event(ev: Dictionary) -> String:
 	var kind := int(ev.get("kind", 4))
 	var line := String(ev.get("kind_name", "?"))
 	var ent := int(ev.get("entity_handle", 0xFFFF))

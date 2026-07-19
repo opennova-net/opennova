@@ -55,7 +55,7 @@ func test_late_spawned_models_share_one_panm_epoch() -> void:
 		return
 
 	clock.set_time_ms_for_test(640)
-	first._process(0.0)
+	first.set_panm_clock(clock)
 	var second: Node3D = add_child_autofree(NovaObjectModelScript.new())
 	second.set_panm_clock(clock)
 	second.set_object_data(data)
