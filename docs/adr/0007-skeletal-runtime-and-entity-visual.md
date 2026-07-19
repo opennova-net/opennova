@@ -73,6 +73,24 @@ recycled, collision instances and per-entity skeletal sources are also keyed by 
 identity (whose high-water mark survives editor snapshot restore), preventing a new occupant from inheriting
 an old model, husk, failed-resolution result, or animation source.
 
+**Mounted overlay selection is animation-owned and result-shared.** `AimOverlayInputs` carries a small
+`MountMode` (`OnFoot`, `Seated`, or `Gunner`) plus an explicit `mount_config_valid` / `mount_config` pair.
+The value is the mounted target item definition's authored `phrase_set` dword, parsed at
+`ItemDef+0x86c` (`ItemDef_ParseProperty @0x49eb00`, store `@0x49fa0a`) and consumed by
+`Entity_BuildBoneTransformMatrices @0x4b1884`. Presence is independent of value: absent metadata is
+unknown, while `{valid=true, value=0}` is the real witnessed counter-lean branch. Mission promotion copies
+the pair to the mount target, attachment copies it to the occupant, snapshot/restore preserves it, and
+dismount clears the occupant's mode-driving copy and validity.
+
+`NovaSimulation` translates seat state to `MountMode` once (retail slots 2/5 = seated, slot 3 = gunner),
+builds the authoritative `AimOverlayInputs`, and calls
+`opennova::anim::compute_aim_overlay_angles`. Local pose export/rendering and organic collision consume
+that same selector result. Entity presentation snapshots carry the final body frame plus all nine selected
+overlay angles; `MissionPresentPass` and `WirePresentPass` only adapt that result to
+`NovaObjectModel.set_aim_overlay`, so placed and remote actors do not carry a second config switch or a
+collision-only heuristic. CXLT remains independent metadata: organic COBJ section `i` consumes final bone
+matrix `i`, with no CXLT selection or post-transform.
+
 **Grill verdict (`Jointops.exe.kong`): DIVERGENT (core matches).** Confirmed faithful: quat layout, slerp
 (with the small-angle nlerp fast path), the keyframe-duration walk, the bind matrix, the shared-rest FK, the
 `(-x,y,z)` handedness, no animation root motion, no standalone 180° flip, and the fixed-point separation.
@@ -106,11 +124,11 @@ live projectile queries remain exact per-tick queries.
   separation; single clip is fine for AI walk cycles.
 - Body-segment **aim/lean overlays** (`Entity_BuildBoneTransformMatrices @0x4b1290` bone-index switch +
   `Math_BuildFixedPointToFloatMatrix4x4 @0x612200`) — **WITNESSED IN FULL 2026-07-08** and ported for
-  the local render path plus the synchronous organic-collision pose (docs/world/world-wac-ai-re.md
-  §14/§15.8b: the bone→overlay map, seven blend matrices, and pivot recomposition). Remaining D-INF-11
-  scope is NPC/remote secondary-weapon threading, mounted/seated overlay-matrix selection by mount config,
-  attachments, and blend windows; the landed seat-frame body/leg/pitch/roll synchronization does not select
-  those retail matrices.
+  local/placed/remote rendering plus the synchronous organic-collision pose
+  (docs/world/world-wac-ai-re.md §14/§15.8b: the bone→overlay map, mounted config table, seven blend
+  matrices, and pivot recomposition). Remaining D-INF-11 scope is NPC/remote secondary-weapon threading,
+  attachments, and blend windows; mounted selection now shares the landed seat-frame
+  body/leg/pitch/roll inputs without replacing that synchronization.
   Hex-Rays renders the switch labels shifted −1 (bone 0 = default).
 - Full **anim-slot table** (`Entity_ComputeAnimSlotIndex @0x43a690`, base 180 + 4·variant) and the
   player-avatar `off_8135F0` table — current selector is walk/run/idle by speed+alert.
@@ -138,3 +156,11 @@ batch at the full 96×19 budget, six-Hz cadence, unchanged-snapshot cache, and r
 invalidation. F3 omits the local avatar and bounds posed/fallback remote targets to 80 units under its
 96-actor diagnostic cap. Headless dump confirms US01 and C4Ground (40+ clips, compressed) pose as humanoids
 with no collapse. User-validated US01 walk/idle in the object preview.
+
+The mounted-selector slice is intended to be accepted only after focused native/GUT coverage pins:
+`phrase_set` presence (including unknown versus explicit zero), every witnessed seated/gunner row,
+snapshot/restore and dismount clearing, local-render/collision selector parity, placed/wire presentation
+parity, and an end-to-end rendered-bone versus shot result. The focused run must also retain the rotated
+mounted-enemy and CXLT regressions plus F3's 80-unit cutoff, six-Hz sampling, dense 96-actor packed batch,
+local-player omission, and existing MultiMesh behavior; the enforced maturity ratchet and CI matrix remain
+required release gates. This paragraph records the verification target, not a result.

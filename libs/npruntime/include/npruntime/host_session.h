@@ -97,9 +97,9 @@ struct HostConfig {
 // the copies in main.cpp and nova_simulation.cpp [orig: the SinglePlayer_StartMission @0x561af0
 // sequence]: set_connection_mode(3) -> set_transport_mode -> create_session(loopback) ->
 // configure_session_runtime -> Server_InitNewRoundState. When cfg.serve_and_play (and ctx.world is set),
-// ALSO spawns the host's own player now and latches its loopback in-match (mark_host_client_in_match) so
-// the host's per-frame 0x0A fans to the local view a serve-and-play owner renders; a dedicated/headless
-// host skips that (its player spawns lazily in the pump and its loopback is discarded in step 5).
+// ALSO spawns the host's own player and queues its unpaced type-2 initial-state burst before the first
+// per-frame 0x0A; a dedicated/headless host skips that (its player spawns lazily in the pump and its
+// loopback is discarded in step 5).
 void start_host_session(HostOwner &owner, const HostConfig &cfg);
 
 } // namespace opennova::np

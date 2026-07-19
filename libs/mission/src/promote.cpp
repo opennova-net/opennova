@@ -37,7 +37,8 @@ const ItemSeatSpec *seat_spec_for_type(const PromoteOptions &opts, int32_t type_
 void seed_authored_seats(Entity &entity, const PromoteOptions &opts) {
     const ItemSeatSpec *spec = seat_spec_for_type(opts, entity.item_id);
     if (spec == nullptr) return;
-    entity.emplaced_pose_variant = spec->emplaced_pose_variant;
+    entity.emplaced_config_valid = spec->mount_config_valid;
+    entity.emplaced_config = spec->mount_config_valid ? spec->mount_config : 0;
     entity.armory_points = spec->armory_points;
     entity.primary_weapon = spec->primary_weapon;
     if (spec->seats.empty()) return;

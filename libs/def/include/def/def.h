@@ -466,6 +466,14 @@ typedef struct DefItemDef {
        reads as HULL. [orig: parse @ 0x49f314-0x49f396 via DeathPieceType_FindByName
        @ 0x57b310 over the 80-B table @ 0x8404f0] */
     unsigned char husk_sub_part_types[16];
+    /* items.def 'phrase_set', plain signed atol -> target itemDef+0x86C.
+       Mounted gunner skeletal selection reads this dword.  Presence is explicit
+       because authored zero is a witnessed configuration and zero-init otherwise
+       means the key was absent. Appended for FFI mirror stability.
+       [orig: ItemDef_ParseProperty @ 0x49F9DB..0x49FA0A; consumer
+       Entity_BuildBoneTransformMatrices @ 0x4B1884] */
+    int phrase_set;
+    int phrase_set_valid;
 } DefItemDef;
 
 typedef struct DefItemsFile {

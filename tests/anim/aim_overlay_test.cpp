@@ -3,6 +3,7 @@
 // formulas of both on-foot branches, and the pose compose invariants (identity deltas =
 // passthrough; child origins preserved under any delta; the bend gradient orders spine
 // segments between body and aim).
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -139,6 +140,161 @@ void test_non_aim_branch() {
     in.arms_locked = true; // Flags & 0x100000 [orig: @ 0x4b1d48]
     compute_aim_overlay_angles(in, out);
     CHECK(out[kOverlayArm].yaw == in.body_yaw && out[kOverlayArm].pitch == 0);
+}
+
+bool same_angles(const AimOverlayAngles &a, const AimOverlayAngles &b) {
+    return a.yaw == b.yaw && a.pitch == b.pitch && a.roll == b.roll;
+}
+
+void test_mounted_overlay_matrix_selection() {
+    // Mounted matrix selection is one animation-owned table, not a collision
+    // heuristic. Use deliberately distinct sources so an accidental copy is visible.
+    // [orig: mounted block @ 0x4b1868..0x4b1ba9; target itemDef phrase_set +0x86c]
+    using opennova::io::bam_add;
+    using opennova::io::bam_dbl;
+    using opennova::io::bam_sar;
+    using opennova::io::bam_sub;
+
+    AimOverlayInputs in;
+    in.aim_yaw = 103 * kBamDeg;
+    in.aim_pitch = 37 * kBamDeg;
+    in.body_yaw = 41 * kBamDeg;
+    in.body_pitch = 11 * kBamDeg;
+    in.leg_yaw_r = 29 * kBamDeg;
+    in.leg_yaw_l = 31 * kBamDeg;
+    in.roll = 3 * kBamDeg;
+    in.torso_roll = 5 * kBamDeg;
+    in.lean = 7 * kBamDeg;
+    in.pitch_blend = 13 * kBamDeg;
+    in.aim_state = true;
+
+    const AimOverlayAngles body{in.body_yaw, in.body_pitch, in.roll};
+    const AimOverlayAngles aim{
+        in.aim_yaw, in.aim_pitch, bam_add(in.torso_roll, bam_sar(in.lean, 1))};
+    const AimOverlayAngles leg_r{in.leg_yaw_r, in.body_pitch, in.roll};
+    const AimOverlayAngles leg_l{in.leg_yaw_l, in.body_pitch, in.roll};
+    const AimOverlayAngles config_zero_arm{
+        bam_sub(in.body_yaw, bam_sar(bam_sub(in.aim_yaw, in.body_yaw), 2)),
+        bam_add(bam_sar(in.pitch_blend, 1),
+                bam_sub(bam_dbl(in.body_pitch), in.aim_pitch)),
+        bam_add(in.roll, in.lean)};
+    const AimOverlayAngles other_arm{
+        bam_sub(in.body_yaw, bam_sar(bam_sub(in.aim_yaw, in.body_yaw), 2)),
+        bam_sub(bam_add(in.body_pitch, bam_sar(in.pitch_blend, 1)),
+                bam_sar(bam_sub(in.aim_pitch, in.body_pitch), 1)),
+        bam_add(in.roll, in.lean)};
+    const AimOverlayAngles other_upper{
+        bam_sub(in.body_yaw, bam_sar(bam_sub(in.aim_yaw, in.body_yaw), 4)),
+        bam_add(in.body_pitch, bam_sar(in.pitch_blend, 1)),
+        bam_add(in.roll, bam_sar(in.lean, 1))};
+
+    enum class Recipe { Seated, ConfigZero, OtherNonzero, BodyAll, BodyExceptHead };
+    struct Case {
+        MountMode mode;
+        bool config_valid;
+        int32_t config;
+        Recipe recipe;
+    };
+    // Controller slot 2 and Driver slot 5 share the Seated row. Gunner covers every
+    // witnessed phrase_set value in the retail 0..8 family, including both counter-
+    // lean recipes rather than folding valid zero into the nonzero fallback.
+    const std::array<Case, 10> cases{{
+        {MountMode::Seated, false, 0, Recipe::Seated},
+        {MountMode::Gunner, true, 0, Recipe::ConfigZero},
+        {MountMode::Gunner, true, 1, Recipe::OtherNonzero},
+        {MountMode::Gunner, true, 2, Recipe::OtherNonzero},
+        {MountMode::Gunner, true, 3, Recipe::BodyAll},
+        {MountMode::Gunner, true, 4, Recipe::OtherNonzero},
+        {MountMode::Gunner, true, 5, Recipe::BodyAll},
+        {MountMode::Gunner, true, 6, Recipe::BodyExceptHead},
+        {MountMode::Gunner, true, 7, Recipe::BodyAll},
+        {MountMode::Gunner, true, 8, Recipe::OtherNonzero},
+    }};
+
+    for (const Case &tc : cases) {
+        in.mount_mode = tc.mode;
+        in.mount_config_valid = tc.config_valid;
+        in.mount_config = tc.config;
+        AimOverlayAngles out[kOverlayClassCount];
+        compute_aim_overlay_angles(in, out);
+
+        CHECK(same_angles(out[kOverlayBody], body));
+        CHECK(same_angles(out[kOverlayLegR], leg_r));
+        CHECK(same_angles(out[kOverlayLegL], leg_l));
+        switch (tc.recipe) {
+            case Recipe::Seated:
+                CHECK(same_angles(out[kOverlaySpine], body));
+                CHECK(same_angles(out[kOverlayUpperSpine], body));
+                CHECK(same_angles(out[kOverlayClavicle], body));
+                CHECK(same_angles(out[kOverlayArm], body));
+                CHECK(same_angles(out[kOverlayNeck], aim));
+                CHECK(same_angles(out[kOverlayHead], aim));
+                break;
+            case Recipe::ConfigZero:
+                CHECK(same_angles(out[kOverlaySpine], body));
+                CHECK(same_angles(out[kOverlayUpperSpine], body));
+                CHECK(same_angles(out[kOverlayClavicle], config_zero_arm));
+                CHECK(same_angles(out[kOverlayArm], config_zero_arm));
+                CHECK(same_angles(out[kOverlayNeck], aim));
+                CHECK(same_angles(out[kOverlayHead], aim));
+                break;
+            case Recipe::OtherNonzero:
+                CHECK(same_angles(out[kOverlaySpine], body));
+                CHECK(same_angles(out[kOverlayUpperSpine], other_upper));
+                CHECK(same_angles(out[kOverlayClavicle], other_arm));
+                CHECK(same_angles(out[kOverlayArm], other_arm));
+                CHECK(same_angles(out[kOverlayNeck], aim));
+                CHECK(same_angles(out[kOverlayHead], aim));
+                break;
+            case Recipe::BodyAll:
+                CHECK(same_angles(out[kOverlaySpine], body));
+                CHECK(same_angles(out[kOverlayUpperSpine], body));
+                CHECK(same_angles(out[kOverlayClavicle], body));
+                CHECK(same_angles(out[kOverlayArm], body));
+                CHECK(same_angles(out[kOverlayNeck], body));
+                CHECK(same_angles(out[kOverlayHead], body));
+                break;
+            case Recipe::BodyExceptHead:
+                CHECK(same_angles(out[kOverlaySpine], body));
+                CHECK(same_angles(out[kOverlayUpperSpine], body));
+                CHECK(same_angles(out[kOverlayClavicle], body));
+                CHECK(same_angles(out[kOverlayArm], body));
+                CHECK(same_angles(out[kOverlayNeck], body));
+                CHECK(same_angles(out[kOverlayHead], aim));
+                break;
+        }
+    }
+}
+
+void test_unknown_gunner_config_is_not_valid_config_zero() {
+    // Retail always has a target itemDef. The port's absent-metadata state must stay
+    // on the existing on-foot branch; only an explicitly valid phrase_set 0 selects
+    // the witnessed config-zero counter-lean formula.
+    AimOverlayInputs in;
+    in.aim_yaw = 90 * kBamDeg;
+    in.aim_pitch = 30 * kBamDeg;
+    in.body_yaw = 45 * kBamDeg;
+    in.body_pitch = 5 * kBamDeg;
+    in.pitch_blend = 8 * kBamDeg;
+    in.aim_state = true;
+    in.mount_mode = MountMode::Gunner;
+    in.mount_config_valid = false;
+    in.mount_config = 0;
+    AimOverlayAngles unknown[kOverlayClassCount];
+    compute_aim_overlay_angles(in, unknown);
+
+    in.mount_config_valid = true;
+    AimOverlayAngles valid_zero[kOverlayClassCount];
+    compute_aim_overlay_angles(in, valid_zero);
+
+    AimOverlayInputs on_foot = in;
+    on_foot.mount_mode = MountMode::OnFoot;
+    on_foot.mount_config_valid = false;
+    AimOverlayAngles expected_on_foot[kOverlayClassCount];
+    compute_aim_overlay_angles(on_foot, expected_on_foot);
+    for (int i = 0; i < kOverlayClassCount; ++i)
+        CHECK(same_angles(unknown[i], expected_on_foot[i]));
+    CHECK(!same_angles(unknown[kOverlayArm], valid_zero[kOverlayArm]));
 }
 
 void test_rolling_zeroes_roll() {
@@ -289,6 +445,8 @@ int main() {
     test_aim_branch_blends();
     test_blends_wrap_across_the_bam_seam();
     test_non_aim_branch();
+    test_mounted_overlay_matrix_selection();
+    test_unknown_gunner_config_is_not_valid_config_zero();
     test_rolling_zeroes_roll();
     test_apply_identity_is_passthrough();
     test_apply_world_delta_reaches_target();

@@ -25,12 +25,9 @@ class World;
 //   1. resolve both handles; reject a missing entity or either side dead
 //      (Flags & 2 / health <= 0) [orig: @0x435b01];
 //   2. seat classification: the vehicle seat whose bone_index matches the wire bone
-//      [orig: Entity_GetBoneSlotType @0x434ED0 classifies the MODEL bone name —
-//      sitex 1 / ctrlx 2 / drvrx 5 / UseGun 3]. Our seat table is built from the same
-//      model's userpoints, but its bone_index is the USERPOINT enumeration index, which
-//      can diverge from the retail full-bone-table index — an unmatched wire bone
-//      therefore falls back to the best free seat with the wire bone kept as the
-//      occupancy/echo key (tracked divergence, D-NET-157);
+//      [orig: Entity_GetBoneSlotType @0x434ED0 classifies the MODEL USRP row name —
+//      48-byte rows, name +32, 1-based index; sitex 1 / ctrlx 2 / drvrx 5 / UseGun 3].
+//      Production seat specs preserve that exact enumeration; unknown rows reject;
 //   3. enemy-occupant gate: reject when a LIVE ENEMY already occupies the vehicle
 //      [orig: Vehicle_HasEnemyOccupant @0x4359F0 — scans pool 0, skips dead/self/
 //      same-team; same-team occupants never block multi-seat co-boarding];

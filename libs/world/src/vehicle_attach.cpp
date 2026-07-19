@@ -28,29 +28,11 @@ bool vehicle_has_enemy_occupant(const World &world, const Entity &vehicle,
     return hit;
 }
 
-// Another occupant already holds this wire bone on `vehicle` (the occupancy check for a
-// bone with no seat-table match). [orig: the mountHandles[idx] != 0xFFFF reject @0x435ba9,
-// keyed by the ItemDef seat-block position of the bone]
-bool wire_bone_taken(const World &world, const Entity &vehicle, const Entity &requester,
-                     uint8_t bone) {
-    bool taken = false;
-    world.registry.for_each([&](const Entity &e) {
-        if (taken) return;
-        if (e.handle.pool() != 0 || e.handle == requester.handle) return;
-        if (e.mounted && e.mount_target == vehicle.handle && e.mount_bone == bone) taken = true;
-    });
-    return taken;
-}
-
 // The shared attach write block [orig: Entity_AttachToVehicleSlot @0x4946D0 common tail
-// @0x494752-75]. seat_idx < 0 = wire-bone occupancy only (D-NET-157).
+// @0x494752-75].
 void attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t bone) {
-    if (seat_idx >= 0) {
-        veh.seats[seat_idx].occupant = occ.handle; // [orig: mountHandles[idx] = handle @0x494746]
-        occ.mount_type = veh.seats[seat_idx].type;
-    } else {
-        occ.mount_type = SeatType::Passenger; // wire-bone occupancy only (D-NET-157)
-    }
+    veh.seats[seat_idx].occupant = occ.handle; // [orig: mountHandles[idx] = handle @0x494746]
+    occ.mount_type = veh.seats[seat_idx].type;
     occ.flags = (occ.flags & 0xFFFF5FBFu) | 0x40u; // clear 0x8000|0x2000, set mounted
     occ.mount_target = veh.handle;                 // [orig: parentEntity(0x16C) = vehicle]
     occ.mount_target_net_id = veh.net_id;
@@ -59,6 +41,8 @@ void attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t 
     occ.mount_bone = bone;                          // [orig: attachBoneId(0x157) = bone]
     occ.mount_seat = static_cast<int8_t>(seat_idx); // [orig: parentSlot(0x168) = slotType]
     occ.mounted = true;
+    occ.mounted_config_valid = veh.emplaced_config_valid;
+    occ.mounted_config = veh.emplaced_config_valid ? veh.emplaced_config : 0;
     // Success clears the movement stance bits [orig: MoveOrder &= ~0x300 @0x435c42 + the
     // prone/crouch latch clears @0x435c54/@0x435c59].
     occ.net_stance_bits = 0;
@@ -115,12 +99,12 @@ bool entity_process_vehicle_attach(World &world, EntityHandle player, EntityHand
     if (occ->health <= 0 || !occ->alive || (occ->flags & 2u) != 0) return false;
     if (veh->health <= 0 || !veh->alive || (veh->flags & 2u) != 0) return false;
 
-    // 2. Seat classification by the wire bone. Exact bone_index match wins; an unmatched
-    //    bone (userpoint-index vs full-bone-table divergence, D-NET-157) falls back to the
-    //    best free seat, keeping the wire bone as the occupancy/echo key. A vehicle with no
-    //    seat table at all (no model specs fed) accepts on wire-bone occupancy alone.
-    //    [orig: Entity_GetBoneSlotType @0x434ED0 -> slotType 0 rejects; seat-block index
-    //    @0x435ba9]
+    // 2. Seat classification by the exact wire bone. The byte is a 1-based index into
+    //    the model USRP table (48-byte rows, name at +32), which is exactly how production
+    //    seat specs assign bone_index. Unknown/unrecognized rows reject; retail never
+    //    substitutes another free seat.
+    //    [orig: Entity_GetBoneSlotType @0x434ED0 -> slotType 0 reject @0x435B14;
+    //    seat-block index @0x435BA9]
     int seat_idx = -1;
     for (int i = 0; i < static_cast<int>(veh->seats.size()); ++i) {
         if (veh->seats[i].type == SeatType::None) continue;
@@ -129,20 +113,14 @@ bool entity_process_vehicle_attach(World &world, EntityHandle player, EntityHand
             break;
         }
     }
-    if (seat_idx < 0 && !veh->seats.empty())
-        seat_idx = world.commands.find_best_seat(*veh, player);
+    if (seat_idx < 0) return false;
 
     // 3. Enemy-occupant gate [orig: @0x4359F0 via the reject @0x435b4b-ish].
     if (vehicle_has_enemy_occupant(world, *veh, *occ)) return false;
 
-    // 4. Occupancy: the matched seat must be free (or already ours); an unmatched wire
-    //    bone must not be held by another occupant [orig: @0x435ba9].
-    if (seat_idx >= 0) {
-        const Seat &s = veh->seats[seat_idx];
-        if (s.occupant.valid() && s.occupant != player) return false;
-    } else if (wire_bone_taken(world, *veh, *occ, bone)) {
-        return false;
-    }
+    // 4. Occupancy: the matched seat must be free (or already ours) [orig: @0x435BA9].
+    const Seat &s = veh->seats[seat_idx];
+    if (s.occupant.valid() && s.occupant != player) return false;
 
     // 5. Already mounted -> detach first [orig: @0x435bce].
     if (occ->mounted) entity_detach_from_vehicle(world, player);
@@ -181,6 +159,8 @@ bool entity_detach_from_vehicle(World &world, EntityHandle player) {
     occ->mount_seat = -1;          // [orig: +0x168 = 0]
     occ->mount_type = SeatType::None;
     occ->mounted = false;
+    occ->mounted_config_valid = false;
+    occ->mounted_config = 0;
     if (veh != nullptr) {
         // [orig: the +368 leg @0x4356e9..0x43577c — runs only for the claimant]
         vehicle_release_primary_occupant(world, *veh, player);

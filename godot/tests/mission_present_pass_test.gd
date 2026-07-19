@@ -7,12 +7,14 @@ extends GutTest
 # resolver behaviour faked by a tiny index, and fake models capturing transform/phase/visible.
 
 const PresentPass := preload("res://engine/world/mission_present_pass.gd")
+const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
 
 
 class FakeModel:
 	extends Node3D
 	var phases: Array = []        # [channel, phase]
 	var body_calls: Array = []    # [key_or_slot, phase]
+	var overlay_calls: Array = []
 	func set_part_phase(channel: int, phase: int) -> void:
 		phases.append([channel, phase])
 	func play_body_clip_at(key: String, phase_ticks: int) -> void:
@@ -21,6 +23,8 @@ class FakeModel:
 		body_calls.append([slot, phase_ticks])
 	func play_body_anim(slot: int) -> void:
 		body_calls.append([slot, -1])
+	func set_aim_overlay(deltas: Array) -> void:
+		overlay_calls.append(deltas)
 
 
 # resolve(bms_id, kind, index) like MissionEntityRegistry: bms_id primary, (kind,index) fallback.
@@ -68,6 +72,21 @@ class FakeSim:
 			out[b + NovaSimulation.PF_ANIM_PHASE_TICKS] = float(e.get("anim_phase", 0))
 			out[b + NovaSimulation.PF_HIDDEN] = float(e.get("hidden", 0))
 			out[b + NovaSimulation.PF_ALIVE] = float(e.get("alive", 1))
+			out[b + NovaSimulation.PF_AIM_OVERLAY_VALID] = float(
+					e.get("aim_overlay_valid", 0))
+			var body: Vector3 = e.get("aim_body", Vector3.ZERO)
+			out[b + NovaSimulation.PF_AIM_BODY_PITCH_DEG] = body.x
+			out[b + NovaSimulation.PF_AIM_BODY_YAW_DEG] = body.y
+			out[b + NovaSimulation.PF_AIM_BODY_ROLL_DEG] = body.z
+			var angles: PackedVector3Array = e.get(
+					"aim_angles", PackedVector3Array())
+			for cls in range(mini(angles.size(), 9)):
+				var a := angles[cls]
+				var ob := (b + NovaSimulation.PF_AIM_ANGLES
+						+ cls * NovaSimulation.PF_AIM_CLASS_STRIDE)
+				out[ob] = a.x
+				out[ob + 1] = a.y
+				out[ob + 2] = a.z
 		return out
 
 
@@ -123,6 +142,47 @@ func test_body_clip_poses_to_sim_anim_state_phase() -> void:
 	assert_eq(model.body_calls.size(), 1, "one body clip posed")
 	assert_eq(String((model.body_calls[0] as Array)[0]), "anim_idle", "infantry anim state resolves to .adm key")
 	assert_eq(int((model.body_calls[0] as Array)[1]), 9, "sim clip phase passes through")
+
+
+func test_placed_model_applies_snapshot_overlay_in_body_frame() -> void:
+	var model := FakeModel.new()
+	add_child_autofree(model)
+	var index := FakeIndex.new()
+	index.by_bms_id = { 12: model }
+	var angles := PackedVector3Array()
+	for i in range(9):
+		angles.append(Vector3(2.0 + i, 20.0 + i, -3.0 + i))
+	var sim := FakeSim.new()
+	sim.entities = [{
+		"bms_id": 12,
+		"aim_overlay_valid": 1,
+		"aim_body": Vector3(7.0, 41.0, -5.0),
+		"aim_angles": angles,
+	}]
+	_make_pass(index, sim).present()
+	assert_eq(model.overlay_calls.size(), 1)
+	var deltas: Array = model.overlay_calls[0]
+	assert_eq(deltas.size(), 9, "all overlay classes use the packed selector result")
+	var body_basis := MissionObjectPlacer.bms_to_godot_basis(
+			Vector3(7.0, 41.0, -5.0))
+	assert_true(model.basis.is_equal_approx(body_basis),
+			"placed body renders in the same frame used to form overlay deltas")
+	var expected_head := (
+			body_basis.inverse()
+			* MissionObjectPlacer.bms_to_godot_basis(angles[8]))
+	assert_true((deltas[8] as Basis).is_equal_approx(expected_head))
+
+
+func test_placed_model_clears_overlay_when_snapshot_selector_is_invalid() -> void:
+	var model := FakeModel.new()
+	add_child_autofree(model)
+	var index := FakeIndex.new()
+	index.by_bms_id = { 13: model }
+	var sim := FakeSim.new()
+	sim.entities = [{ "bms_id": 13, "aim_overlay_valid": 0 }]
+	_make_pass(index, sim).present()
+	assert_eq(model.overlay_calls, [[]],
+			"an unknown selector clears any pose retained by the model")
 
 
 func test_resolves_by_kind_index_fallback() -> void:

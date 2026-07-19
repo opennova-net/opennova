@@ -1468,6 +1468,14 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
                docs/world/itemdef-re.md +0x54b] */
             consume_value_str(trimmed, tlen, 14, current.primary_weapon, sizeof(current.primary_weapon));
             parsed = 1;
+        } else if (lower_match_key(lower, ll, "phrase_set", 10)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
+            /* Plain signed atol -> target itemDef+0x86C. Presence cannot be
+               represented by the zero-initialized value because config 0 is real.
+               [orig: @ 0x49F9DB..0x49FA0A] */
+            current.phrase_set = parse_int_n(v, vl);
+            current.phrase_set_valid = 1;
+            parsed = 1;
         } else if (lower_match_key(lower, ll, "clipsize", 8)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 8, &vl);
             /* plain atol -> def+0x894, the entity+0x35C magazine reseed source

@@ -432,7 +432,10 @@ bool EntityCommands::mount(uint16_t occupant_ssn, uint16_t target_ssn, SeatSelec
     occ->mount_target_spawn_origin = tgt->spawn_origin;
     occ->mount_seat = static_cast<int8_t>(seat_idx);       // [orig: occupant+360]
     occ->mount_type = s.type;
+    occ->mount_bone = s.bone_index;                        // [orig: occupant+0x157]
     occ->mounted = true;                                   // [orig: occupant+36 |= 0x40]
+    occ->mounted_config_valid = tgt->emplaced_config_valid;
+    occ->mounted_config = tgt->emplaced_config_valid ? tgt->emplaced_config : 0;
     pose_mounted_occupant(*occ, *tgt, s);
     vehicle_claim_primary_occupant(world_, *tgt, oh, s.type); // [orig: +368 claim @0x4946d0]
     return true;
@@ -497,6 +500,9 @@ bool EntityCommands::dismount(uint16_t occupant_ssn) {
     occ->mount_target_spawn_origin = 0;
     occ->mount_seat = -1;
     occ->mount_type = SeatType::None;
+    occ->mount_bone = 0;
+    occ->mounted_config_valid = false;
+    occ->mounted_config = 0;
     if (tgt != nullptr) {
         vehicle_release_primary_occupant(world_, *tgt, oh); // [orig: +368 leg @0x4356e9]
     } else if (claim_capable_seat) {

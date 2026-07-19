@@ -352,7 +352,11 @@ struct Entity {
     //  Entity_DetachFromVehicle @0x4355f0 stop leg @0x4356e9..0x435759 + clear @0x43577c;
     //  spawner gate @0x48faad in entity_update_damage_accumulator_and_shadow @0x48fa70]
     EntityHandle primary_occupant;
-    uint8_t emplaced_pose_variant = 0; // model config 1..8 -> anim_emplaced_2..9 when available
+    // Target-side mounted skeletal/clip configuration: items.def phrase_set at
+    // itemDef+0x86C. Explicit validity keeps absent metadata distinct from the
+    // witnessed config 0 branch.
+    bool emplaced_config_valid = false;
+    int32_t emplaced_config = 0;
     // Occupant side: this entity is RIDING mount_target's seat mount_seat. [orig: occupant+364
     // vehicle ptr / +360 seat index / +36 & 0x40 mounted flag, written by
     // Entity_AttachToVehicleSlot @0x4946d0.] mounted == false => the rest are unset.
@@ -365,6 +369,11 @@ struct Entity {
     int8_t mount_seat = -1;
     SeatType mount_type = SeatType::None;
     bool mounted = false;
+    // Occupant-side copy of the target configuration. This is the active selector
+    // metadata consumed by animation/collision/presentation and serialized for
+    // remote presentation. Dismount clears it; registry snapshots value-copy it.
+    bool mounted_config_valid = false;
+    int32_t mounted_config = 0;
     // The RAW wire seat-bone index this occupant attached by (entity+0x157 attachBoneId,
     // 1-based into the vehicle MODEL's bone table) — the value the C2S 0x26 carried and the
     // 0x0A mounted player record echoes as byte 0 (clients resolve their own seat from it).

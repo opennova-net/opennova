@@ -25,6 +25,7 @@
 #include <world/ai.h>                 // AiSystem / AiEntity (engine-frame mirror)
 #include <world/entity.h>
 #include <world/geom.h>
+#include <world/vehicle_attach.h>
 #include <world/world.h>
 
 #include <cstdint>
@@ -179,6 +180,313 @@ bool run() {
 	if (!expect(view.frames_applied() == 2 && view.state().entities.size() == 1,
 	            "second frame re-applies to the same entity")) return false;
 
+	return true;
+}
+
+// The present pass consumes the client view, never the authoritative world (ADR 0011).
+// Keep the already-witnessed compact pose/mount bytes alive across that public fold so a
+// remote organic can select the same mounted overlay as the sender. The normalized fields
+// deliberately retain the raw wire values: carrier_handle is the class-specific parent,
+// and the player-only/infantry-only bytes are cleared when the class does not carry them.
+bool run_compact_pose_fields_survive_client_fold() {
+	nw::FrameUpdate mounted;
+	mounted.flags2 = 0;
+	mounted.mount_handle = 0xFFFF;
+	mounted.health = 100;
+
+	nw::FrameUpdateRecord player;
+	player.handle = 0x0001;
+	player.type_id = 0x14B9;
+	player.cls = nw::EntityClass::Player;
+	player.player.vehicle_bone = 5;
+	player.player.seat_type = 2;
+	player.player.carrier_handle = 0x1007;
+	player.player.pitch_byte = 0x21;
+	player.player.anim_state_id = 62;
+	player.player.anim_channel_ratio = 19;
+	player.player.health_class_byte = 0x28;
+	mounted.records.push_back(player);
+
+	nw::FrameUpdateRecord infantry;
+	infantry.handle = 0x0002;
+	infantry.type_id = 0x2000;
+	infantry.cls = nw::EntityClass::Infantry;
+	infantry.infantry.seat_bone_idx = 3;
+	infantry.infantry.vehicle_slot_handle = 0x1008;
+	infantry.infantry.pitch_byte = 0x31;
+	infantry.infantry.aim_yaw_byte = 0xF4;
+	infantry.infantry.anim_byte = 47;
+	mounted.records.push_back(infantry);
+
+	ns::NetClientView view([](uint16_t type_id) {
+		return type_id == 0x14B9 ? nw::EntityClass::Player : nw::EntityClass::Infantry;
+	});
+	view.apply(ns::kTag0aFrameUpdate, nw::encode_frame_update(mounted));
+
+	const ns::ClientEntityState *p = view.state().find(0x0001);
+	if (!expect(p != nullptr && p->carrier_handle == 0x1007 && p->mount_bone == 5 &&
+	                    p->seat_type == 2 && p->pitch_byte == 0x21 &&
+	                    p->aim_yaw_byte == 0 && p->anim_state_id == 62 &&
+	                    p->anim_channel_ratio == 19,
+	            "player compact mount/pose bytes survive the client fold")) return false;
+	const ns::ClientEntityState *i = view.state().find(0x0002);
+	if (!expect(i != nullptr && i->carrier_handle == 0x1008 && i->mount_bone == 3 &&
+	                    i->seat_type == 0 && i->pitch_byte == 0x31 &&
+	                    i->aim_yaw_byte == 0xF4 && i->anim_state_id == 47 &&
+	                    i->anim_channel_ratio == 0,
+	            "infantry compact mount/pose bytes survive the client fold")) return false;
+
+	// A subsequent free-standing record is the dismount signal. Overwrite every
+	// normalized field; stale carrier/bone bytes must never select yesterday's mount.
+	nw::FrameUpdate dismounted = mounted;
+	dismounted.records.clear();
+	player.player.vehicle_bone = 0;
+	player.player.seat_type = 0;
+	player.player.carrier_handle = 0xFFFF;
+	dismounted.records.push_back(player);
+	infantry.infantry.seat_bone_idx = 0;
+	infantry.infantry.vehicle_slot_handle = 0xFFFF;
+	dismounted.records.push_back(infantry);
+	view.apply(ns::kTag0aFrameUpdate, nw::encode_frame_update(dismounted));
+	p = view.state().find(0x0001);
+	i = view.state().find(0x0002);
+	if (!expect(p != nullptr && p->carrier_handle == 0xFFFF && p->mount_bone == 0 &&
+	                    p->seat_type == 0,
+	            "player dismount clears retained selector fields")) return false;
+	if (!expect(i != nullptr && i->carrier_handle == 0xFFFF && i->mount_bone == 0,
+	            "infantry dismount clears retained selector fields")) return false;
+	return true;
+}
+
+// The host's registry order emits pool-0 organics before their pool-1 carriers.
+// A frame is one state sample, so a child record must lift through the carrier's
+// pose from that same frame even when the parent record appears later. A truly
+// absent carrier keeps the prior world pose (retail drops that pose sample).
+bool run_carrier_local_pose_lifts_after_later_carrier_record() {
+	nw::FrameUpdate frame;
+	frame.flags2 = 0;
+	frame.mount_handle = 0xFFFF;
+	frame.health = 100;
+
+	nw::FrameUpdateRecord child;
+	child.handle = 0x0002;
+	child.type_id = 0x2000;
+	child.cls = nw::EntityClass::Infantry;
+	child.infantry.seat_bone_idx = 3;
+	child.infantry.vehicle_slot_handle = 0x1007;
+	child.infantry.pos_x_compressed = nw::network_compress_fixedpoint(1 << 16);
+	child.infantry.pos_y_compressed = nw::network_compress_fixedpoint(2 << 16);
+	child.infantry.pos_z_compressed = nw::network_compress_fixedpoint(3 << 16);
+	child.infantry.yaw_byte = 0x10;
+	child.infantry.anim_byte = 47;
+	frame.records.push_back(child); // deterministic production order: child first
+
+	nw::FrameUpdateRecord carrier;
+	carrier.handle = 0x1007;
+	carrier.type_id = 0x1004;
+	carrier.cls = nw::EntityClass::Vehicle;
+	carrier.vehicle.parent_slot_handle = 0xFFFF;
+	carrier.vehicle.pos_x_compressed = nw::network_compress_fixedpoint(0);
+	carrier.vehicle.pos_y_compressed = nw::network_compress_fixedpoint(0);
+	carrier.vehicle.pos_z_compressed = nw::network_compress_fixedpoint(0);
+	carrier.vehicle.euler_z = 0;
+	carrier.vehicle.flags_byte = 0;
+	carrier.vehicle.health_word = 3000;
+	frame.records.push_back(carrier);
+
+	auto classify = [](uint16_t type_id) {
+		return type_id == 0x1004 ? nw::EntityClass::Vehicle : nw::EntityClass::Infantry;
+	};
+	ns::NetClientView view(classify);
+	view.apply(ns::kTag0aFrameUpdate, nw::encode_frame_update(frame));
+	const ns::ClientEntityState *decoded = view.state().find(0x0002);
+	if (!expect(decoded != nullptr && decoded->x == (1 << 16) &&
+	                    decoded->y == (2 << 16) && decoded->z == (3 << 16) &&
+	                    decoded->yaw_byte == 0x10,
+	            "child-first record lifts through later same-frame carrier")) return false;
+
+	// Change the local pose/yaw but name a carrier that never appears. The client
+	// keeps the last resolved world pose instead of treating local coordinates as world.
+	nw::FrameUpdate missing;
+	missing.flags2 = 0;
+	missing.mount_handle = 0xFFFF;
+	missing.health = 100;
+	child.infantry.vehicle_slot_handle = 0x1008;
+	child.infantry.pos_x_compressed = nw::network_compress_fixedpoint(9 << 16);
+	child.infantry.pos_y_compressed = nw::network_compress_fixedpoint(8 << 16);
+	child.infantry.pos_z_compressed = nw::network_compress_fixedpoint(7 << 16);
+	child.infantry.yaw_byte = 0x44;
+	missing.records.push_back(child);
+	view.apply(ns::kTag0aFrameUpdate, nw::encode_frame_update(missing));
+	decoded = view.state().find(0x0002);
+	if (!expect(decoded != nullptr && decoded->x == (1 << 16) &&
+	                    decoded->y == (2 << 16) && decoded->z == (3 << 16) &&
+	                    decoded->yaw_byte == 0x10,
+	            "missing carrier drops the local pose sample")) return false;
+	return true;
+}
+
+// Vehicle live compacts omit pitch/roll; a remote seated body still needs the
+// carrier's last authored/full orientation. Retain spawn Euler X/Y, update them
+// when the existing dead-pose compact carries new high words, and do not zero
+// them merely because a live compact has no such fields.
+bool run_carrier_pitch_roll_persists_across_live_records() {
+	nw::PoolSpawnBatch spawn;
+	nw::PoolSpawnRecord vehicle;
+	vehicle.slot_id = 0x1007;
+	vehicle.item_type_id = 0x1004;
+	vehicle.euler_z = 0x10000000;
+	vehicle.euler_x = 0x23456789;
+	vehicle.euler_y = static_cast<int32_t>(0xD1234567u);
+	spawn.records.push_back(vehicle);
+
+	ns::NetClientView view;
+	view.apply(0x0D, nw::encode_pool_spawn_batch(spawn));
+	const ns::ClientEntityState *carrier = view.state().find(0x1007);
+	if (!expect(carrier != nullptr && carrier->pitch_bam == 0x23456789 &&
+	                    carrier->roll_bam == static_cast<int32_t>(0xD1234567u),
+	            "carrier spawn retains full pitch and roll BAM")) return false;
+
+	nw::FrameUpdate live;
+	live.flags2 = 0;
+	live.mount_handle = 0xFFFF;
+	live.health = 100;
+	nw::FrameUpdateRecord live_vehicle;
+	live_vehicle.handle = 0x1007;
+	live_vehicle.type_id = 0x1004;
+	live_vehicle.cls = nw::EntityClass::Vehicle;
+	live_vehicle.vehicle.parent_slot_handle = 0xFFFF;
+	live_vehicle.vehicle.euler_z = 0x3000;
+	live_vehicle.vehicle.flags_byte = 0;
+	live_vehicle.vehicle.health_word = 3000;
+	live.records.push_back(live_vehicle);
+	view.apply(ns::kTag0aFrameUpdate, nw::encode_frame_update(live));
+	carrier = view.state().find(0x1007);
+	if (!expect(carrier != nullptr && carrier->pitch_bam == 0x23456789 &&
+	                    carrier->roll_bam == static_cast<int32_t>(0xD1234567u),
+	            "live vehicle record preserves last full pitch and roll")) return false;
+
+	nw::FrameUpdate dead = live;
+	dead.records.clear();
+	live_vehicle.vehicle.flags_byte = 0x04;
+	live_vehicle.vehicle.euler_x = 0x1234;
+	live_vehicle.vehicle.euler_y = static_cast<int16_t>(-0x2345);
+	dead.records.push_back(live_vehicle);
+	view.apply(ns::kTag0aFrameUpdate, nw::encode_frame_update(dead));
+	carrier = view.state().find(0x1007);
+	if (!expect(carrier != nullptr && carrier->pitch_bam == 0x12340000 &&
+	                    carrier->roll_bam == static_cast<int32_t>(0xDCBB0000u),
+	            "dead-pose vehicle record refreshes full pitch and roll")) return false;
+	return true;
+}
+
+// Retail's InfantryCompactRecord already carries every remote mounted-selector input
+// available on the wire. Exercise the production world -> snapshot -> connection fan ->
+// codec -> client-view path: no collision-only or out-of-band replication heuristic.
+bool run_mounted_infantry_pose_fields_round_trip() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	world.registry.configure_pool(1, 8);
+	w::AiSystem ai;
+	world.ai = &ai;
+
+	w::Entity soldier;
+	soldier.kind = w::EntityKind::Organic;
+	soldier.item_id = 0x2000;
+	soldier.position = {0.0f, 0.0f, 0.0f};
+	soldier.yaw = 90; // engine heading 0: makes the witnessed target-heading clamp literal.
+	const w::EntityHandle ih = world.registry.spawn(0, soldier);
+	if (!expect(ih.valid(), "infantry spawned")) return false;
+	ai.attach(ih);
+	w::AiEntity *ae = ai.for_handle(ih);
+	if (!expect(ae != nullptr, "infantry AI state attached")) return false;
+	ae->inf.target_heading = 0x40000000; // clamps to +0x1FFFFFE0, rounds to byte 0x20.
+	ae->inf.aim_pitch = static_cast<int32_t>(0xF0000000u); // rounded high byte 0xF0.
+	w::Entity *infantry_entity = world.registry.get(ih);
+	if (!expect(infantry_entity != nullptr, "infantry entity resolvable")) return false;
+	infantry_entity->net_anim_state = 47;
+
+	w::Entity vehicle;
+	vehicle.kind = w::EntityKind::Item;
+	vehicle.item_id = 0x1004;
+	vehicle.position = {100.0f, 200.0f, 10.0f};
+	vehicle.yaw = 90; // identity engine-frame carrier rotation
+	vehicle.pitch = 15;
+	vehicle.roll = -10;
+	vehicle.health = 3000;
+	vehicle.health_max = 3000;
+	vehicle.net_class_code = static_cast<uint8_t>(nw::EntityClass::Vehicle);
+	w::Seat seat;
+	seat.type = w::SeatType::Gunner;
+	seat.bone_index = 3;
+	vehicle.seats.push_back(seat); // zero local pose: occupant lands at carrier origin.
+	const w::EntityHandle vh = world.registry.spawn_from(1, 0, vehicle);
+	if (!expect(vh.valid(), "carrier spawned")) return false;
+	if (!expect(w::entity_process_vehicle_attach(world, ih, vh, 3),
+	            "infantry attaches to witnessed wire bone")) return false;
+	if (!expect(ai.pose_if_mounted(*ae, world),
+	            "mounted infantry synchronizes to the seat frame")) return false;
+
+	ns::LoopbackChannel channel;
+	std::vector<ns::Connection> conns;
+	conns.push_back(ns::Connection{&channel, ns::TransportMode::Loopback, {}, 0});
+	nw::PlayerReplicationState fallback;
+	ns::test::emit_all(world, conns, fallback);
+	ns::Datagram dg;
+	if (!expect(channel.client_recv(dg), "mounted infantry frame dequeued")) return false;
+
+	auto classify = [](uint16_t type_id) {
+		if (type_id == 0x1004) return nw::EntityClass::Vehicle;
+		return nw::EntityClass::Infantry;
+	};
+	nw::FrameUpdate frame;
+	if (!expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), classify, frame),
+	            "mounted infantry frame decodes")) return false;
+	const nw::FrameUpdateRecord *wire = nullptr;
+	for (const nw::FrameUpdateRecord &record : frame.records)
+		if (record.handle == ih.packed) wire = &record;
+	if (!expect(wire != nullptr, "mounted infantry record present")) return false;
+	if (!expect(wire->infantry.seat_bone_idx == 3 &&
+	                    wire->infantry.vehicle_slot_handle == vh.packed,
+	            "mounted infantry carries existing bone and carrier fields")) return false;
+	if (!expect(wire->infantry.pos_x_compressed == 0 &&
+	                    wire->infantry.pos_y_compressed == 0 &&
+	                    wire->infantry.pos_z_compressed == 0,
+	            "mounted infantry position is carrier-local")) return false;
+	if (!expect((wire->infantry.flags_byte & 0x40u) != 0 &&
+	                    wire->infantry.pitch_byte == 0x20 &&
+	                    wire->infantry.aim_yaw_byte == 0xF0 &&
+	                    wire->infantry.anim_byte == 47,
+	            "mounted infantry carries witnessed flags, aim and animation bytes")) return false;
+
+	// Seed the carrier through its existing pool-1 spawn before applying the local
+	// infantry sample, matching a real client that has completed load sync.
+	ns::NetClientView view(classify);
+	view.apply(0x0D, nw::encode_pool_spawn_batch(ns::build_pool1_spawn_batch(world)));
+	const ns::ClientEntityState *decoded_carrier = view.state().find(vh.packed);
+	if (!expect(decoded_carrier != nullptr && decoded_carrier->pitch_bam == 178956960 &&
+	                    decoded_carrier->roll_bam == -119304640,
+	            "production carrier spawn retains authored pitch and roll")) return false;
+	view.apply(ns::kTag0aFrameUpdate, dg.body);
+	const ns::ClientEntityState *decoded = view.state().find(ih.packed);
+	if (!expect(decoded != nullptr && decoded->carrier_handle == vh.packed &&
+	                    decoded->mount_bone == 3 && decoded->pitch_byte == 0x20 &&
+	                    decoded->aim_yaw_byte == 0xF0 && decoded->anim_state_id == 47,
+	            "mounted infantry selector inputs survive the production client fold")) return false;
+	decoded_carrier = view.state().find(vh.packed);
+	if (!expect(decoded_carrier != nullptr && decoded->x == decoded_carrier->x &&
+	                    decoded->y == decoded_carrier->y && decoded->z == decoded_carrier->z,
+	            "client lifts carrier-local infantry pose through current decoded carrier"))
+		return false;
+
+	if (!expect(w::entity_detach_from_vehicle(world, ih), "infantry detaches")) return false;
+	ns::test::emit_all(world, conns, fallback);
+	if (!expect(channel.client_recv(dg), "dismounted infantry frame dequeued")) return false;
+	view.apply(ns::kTag0aFrameUpdate, dg.body);
+	decoded = view.state().find(ih.packed);
+	if (!expect(decoded != nullptr && decoded->carrier_handle == 0xFFFF &&
+	                    decoded->mount_bone == 0,
+	            "production dismount clears decoded infantry selector")) return false;
 	return true;
 }
 
@@ -373,6 +681,10 @@ bool run_motor_skips_net_peer() {
 int main() {
 	const bool ok = run_client_state_handle_lookup_contract() &&
 	                run() &&
+	                run_compact_pose_fields_survive_client_fold() &&
+	                run_carrier_local_pose_lifts_after_later_carrier_record() &&
+	                run_carrier_pitch_roll_persists_across_live_records() &&
+	                run_mounted_infantry_pose_fields_round_trip() &&
 	                run_header_only_records_are_ignored_by_client_view() &&
 	                run_apply_player_intent_stages_remote_peer() &&
 	                run_apply_rejects_own_player() &&

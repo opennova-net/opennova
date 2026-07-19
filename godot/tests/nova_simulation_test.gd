@@ -1,6 +1,8 @@
 extends GutTest
 
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
+const NovaObjectModelScript := preload("res://engine/object/nova_object_model.gd")
+const PresentAimOverlay := preload("res://engine/world/present_aim_overlay.gd")
 
 # NovaSimulation (the GDExtension binding): promote a synthetic BMS mission into a live
 # world + AI system, tick it, and confirm the AI walks entities along their authored route.
@@ -650,6 +652,182 @@ func test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun() -> void:
 	sim.free()
 
 
+func test_mounted_rendered_head_matrix_matches_collision_and_authoritative_shot() -> void:
+	# Config 6 is the decisive per-config witness: the mounted body/neck stay on
+	# the carrier frame while the head alone consumes aim. Build an actual
+	# NovaObjectModel from the same CharModel + BINOC rig as collision, feed it
+	# the packed presentation result, and compare its final head deformation to
+	# COBJ section 14 before shooting through that rendered point.
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var gun := md.add_entity(
+			NovaMissionData.KIND_ITEM, 101294,
+			Vector3(0, 8, 0), Vector3(45, 0, 0))
+	var enemy := md.add_entity(
+			NovaMissionData.KIND_ORGANIC, 105311,
+			Vector3(0, 8, 0), Vector3.ZERO)
+	assert_false(gun.is_empty())
+	assert_false(enemy.is_empty())
+	assert_true(md.set_entity_property_int(
+			NovaMissionData.KIND_ORGANIC, int(enemy["index"]),
+			"waypoint_id", 125))
+	assert_true(md.set_entity_property_int(
+			NovaMissionData.KIND_ORGANIC, int(enemy["index"]),
+			"wp_number", int(gun["bms_id"])))
+
+	var sim := NovaSimulation.new()
+	sim.enable_listen_server(true)
+	sim.set_item_seat_specs([{
+		"type_id": 1294,
+		"mount_config_valid": true,
+		"mount_config": 6,
+		"seats": [{
+			"type": 3,
+			"bone_index": 6,
+			"position": Vector3.ZERO,
+			"yaw_offset": 0,
+			"source_name": "UseGun",
+		}],
+	}])
+	assert_true(sim.load_from_mission_data(md))
+
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/items.def")), OK)
+	var data := NovaObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(
+			"res://../fixtures/threedi/3di3/CharModel.3di")), OK)
+	var bad_root := NovaResourceRoot.new()
+	assert_eq(bad_root.set_root_dir(ProjectSettings.globalize_path(
+			"res://../fixtures/bad")), OK)
+	var skeletal := NovaSkeletalAnim.new()
+	assert_true(skeletal.load_from_bad_files(
+			bad_root, "BINOC.bad", {"anim_emplaced": "BINOC.bad"},
+			data.get_bone_origins(), data.get_bone_parents()),
+			"mounted CharModel rig loads: %s" % skeletal.get_last_error())
+	assert_gte(sim.resolve_collision_instances(
+			item_db, SkeletalDataPlacerStub.new(data, skeletal)), 1,
+			"the mounted enemy owns authored posed COBJ collision")
+	var ammo_root := NovaResourceRoot.new()
+	assert_eq(ammo_root.set_root_dir(ProjectSettings.globalize_path(
+			"res://../fixtures/def")), OK)
+	assert_eq(sim.load_ammo_table(ammo_root, "ammo.def"), OK)
+
+	# Advance one authoritative frame so the mounted seat frame, collision pose,
+	# and listen-server client snapshot all describe the same clip phase.
+	sim.step()
+	var enemy_idx := _first_organic_ai_index(sim)
+	assert_gte(enemy_idx, 0)
+	var card := sim.get_entity_debug(enemy_idx)
+	assert_true(bool(card.get("mounted", false)))
+	assert_true(bool(card.get("mount_config_valid", false)))
+	assert_eq(int(card.get("mount_config", -1)), 6)
+	assert_eq(String(card.get("anim_key", "")), "anim_emplaced")
+	var enemy_handle := sim.get_entity_wire_handle(enemy_idx)
+	var snapshot := sim.get_present_snapshot()
+	var stride := sim.get_present_stride()
+	var row_base := -1
+	for record in range(snapshot.size() / stride):
+		var base := record * stride
+		if int(snapshot[base + NovaSimulation.PF_KIND]) == NovaMissionData.KIND_ORGANIC \
+				and int(snapshot[base + NovaSimulation.PF_INDEX]) == int(enemy["index"]):
+			row_base = base
+			break
+	assert_gte(row_base, 0, "the mounted placed enemy reached the decoded present")
+	if row_base < 0:
+		sim.free()
+		return
+	assert_eq(int(snapshot[row_base + NovaSimulation.PF_AIM_OVERLAY_VALID]), 1)
+	var packed_body := Vector3(
+			snapshot[row_base + NovaSimulation.PF_AIM_BODY_PITCH_DEG],
+			snapshot[row_base + NovaSimulation.PF_AIM_BODY_YAW_DEG],
+			snapshot[row_base + NovaSimulation.PF_AIM_BODY_ROLL_DEG])
+	var head_offset: int = (row_base + NovaSimulation.PF_AIM_ANGLES
+			+ 8 * NovaSimulation.PF_AIM_CLASS_STRIDE)
+	var packed_head := Vector3(
+			snapshot[head_offset], snapshot[head_offset + 1],
+			snapshot[head_offset + 2])
+	assert_gt(packed_head.distance_to(packed_body), 10.0,
+			"the config-6 witness really drives head aim away from the mounted body")
+
+	var model = NovaObjectModelScript.new()
+	add_child_autofree(model)
+	model.set_skeletal_anim(skeletal)
+	model.set_object_data(data)
+	assert_true(model.has_skeleton())
+	var presented_position := Vector3(
+			snapshot[row_base + NovaSimulation.PF_POS_X],
+			snapshot[row_base + NovaSimulation.PF_POS_Y],
+			snapshot[row_base + NovaSimulation.PF_POS_Z])
+	assert_lt(presented_position.distance_to(
+			card.get("position", Vector3.ZERO)), 0.5,
+			"the selected row is the mounted placed enemy")
+	model.global_position = presented_position
+	model.play_body_clip_at(
+			"anim_emplaced",
+			int(snapshot[row_base + NovaSimulation.PF_ANIM_PHASE_TICKS]))
+	PresentAimOverlay.apply(model, snapshot, row_base)
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	var skeleton: Skeleton3D = model.get_skeleton()
+	# Existing native fixture witness: CharModel COBJ 14/head authors
+	# center=(3578,65,54371) in signed 16.16 collision space. The retail
+	# fixed-to-render sandwich maps local collision (x,y,z) to the skeleton's
+	# node frame as (y,z,x) before the live bone deformation.
+	var head_center_model := Vector3(
+			65.0 / 65536.0, 54371.0 / 65536.0, 3578.0 / 65536.0)
+	var rendered_head_matrix := (skeleton.global_transform
+			* skeleton.get_bone_global_pose(14)
+			* skeleton.get_bone_global_rest(14).affine_inverse())
+	var rendered_head_center: Vector3 = rendered_head_matrix * head_center_model
+
+	var collision_head := Vector3.INF
+	for value in sim.get_hitbox_debug().get("organics", []):
+		var section: Dictionary = value
+		if int(section.get("entity_handle", -1)) == enemy_handle \
+				and int(section.get("section", -1)) == 14:
+			collision_head = section.get("pos", Vector3.INF)
+			break
+	assert_ne(collision_head, Vector3.INF,
+			"authoritative collision exposes mounted head section 14")
+	if collision_head != Vector3.INF:
+		assert_lt(collision_head.distance_to(rendered_head_center), 0.01,
+				"rendered final head bone matrix and collision section 14 are identical")
+
+	var health_before := int(card.get("health", 0))
+	var incoming := rendered_head_matrix.basis.x.normalized()
+	assert_gte(sim.debug_spawn_round(
+			rendered_head_center - incoming * 2.0,
+			incoming, "AMMO_CAR15_556MM"), 0,
+			"a local-owned round starts through the rendered mounted head")
+	for _tick in range(2):
+		sim.step()
+	var events: Array = sim.get_round_debug().get("events", [])
+	var hit_event: Dictionary = {}
+	for value in events:
+		var event: Dictionary = value
+		if int(event.get("entity_handle", -1)) == enemy_handle \
+				and String(event.get("kind_name", "")) == "organic":
+			hit_event = event
+	assert_false(hit_event.is_empty(),
+			"the authoritative shot resolves against the rendered mounted target")
+	if not hit_event.is_empty():
+		assert_eq(int(hit_event.get("section", -1)), 14,
+				"the primary posed-hit section remains authoritative")
+		assert_false(bool(hit_event.get("fallback", true)))
+	var impacts := sim.drain_round_impacts()
+	assert_eq(impacts.size(), 1)
+	if impacts.size() == 1:
+		var impact: Dictionary = impacts[0]
+		assert_lt((impact.get("direction", Vector3.ZERO) as Vector3).distance_to(
+				incoming), 0.001,
+				"the incoming shot direction remains authoritative for reactions")
+	assert_lt(int(sim.get_entity_debug(enemy_idx).get("health", health_before)),
+			health_before, "the posed head shot damages the mounted enemy")
+	sim.free()
+
+
 func test_weapon_event_batch_does_not_cross_lifecycle_boundaries() -> void:
 	var md := NovaMissionData.new()
 	assert_eq(md.create_default(), OK)
@@ -997,7 +1175,8 @@ func test_command_125_usegun_mount_renders_emplaced_pose() -> void:
 	sim.set_item_seat_specs([
 		{
 			"type_id": 1294,
-			"emplaced_pose_variant": 3,
+			"mount_config_valid": true,
+			"mount_config": 3,
 			"seats": [
 				{"type": 3, "position": Vector3.ZERO, "yaw_offset": 0}
 			],
@@ -1009,7 +1188,10 @@ func test_command_125_usegun_mount_renders_emplaced_pose() -> void:
 	var card: Dictionary = sim.get_entity_debug(0)
 	assert_true(bool(card["mounted"]), "debug card marks UseGun occupant mounted")
 	assert_eq(int(card["mount_type"]), 3, "seat type is UseGun/gunner")
-	assert_eq(int(card["mount_target_emplaced_pose_variant"]), 3)
+	assert_true(bool(card["mount_config_valid"]))
+	assert_eq(int(card["mount_config"]), 3)
+	assert_true(bool(card["mount_target_config_valid"]))
+	assert_eq(int(card["mount_target_config"]), 3)
 	assert_eq(int(card["anim_state"]), 67)
 	assert_eq(String(card["anim_key"]), "anim_emplaced")
 	sim.free()

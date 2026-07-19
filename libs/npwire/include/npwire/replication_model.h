@@ -97,6 +97,11 @@ struct GameEntitySnapshot {
 	uint8_t anim_state_id = 44;
 	uint8_t anim_pending_id = 0;
 	uint8_t anim_channel_ratio = 0;
+	// InfantryCompactRecord's two witnessed orientation sources. These stay full
+	// BAM32 in the transport-neutral snapshot; connection_fan performs the retail
+	// byte packing from entity+0x2EC/+0x2D0. They add no wire fields.
+	int32_t infantry_target_heading_bam = 0; // entity+748: clamp around heading, rounded high byte
+	int32_t infantry_aim_pitch_bam = 0;      // entity+720: rounded high byte (wire aim_yaw_byte)
 	// entity+0x157 attachBoneId — the RAW wire seat bone this player mounted by; the mounted
 	// player record's byte 0 [orig: @0x4c0a1a reads +0x157 when mounted]. 0 when unmounted.
 	uint8_t veh_bone = 0;
@@ -125,6 +130,7 @@ struct GameEntitySnapshot {
 	int32_t carrier_x = 0, carrier_y = 0, carrier_z = 0; // 16.16 world
 	int32_t carrier_yaw_bam = 0;
 	int32_t carrier_pitch_bam = 0;
+	int32_t carrier_roll_bam = 0;
 	// Entity Health (entity+286). The §5.10 player compact record's "health classification" byte
 	// (field 17) is quantized from this against health_max — see health_classification_byte
 	// [orig: Entity_GetHealthClassification @ 0x4AD4E0]. A living entity MUST replicate a non-zero

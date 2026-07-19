@@ -24,6 +24,7 @@ behavioral ctest is produced here — the evidence is the cited decompilation.
 | `ItemDef → GamePlayerEntity` copy | **MATCHING** | `Entity_InitFromItemDef @0x49e550` decompiles field-for-field clean (callbacks/models/health/armor/timer) |
 | `type` enum (`ItemDef+0x5c`) | **MATCHING** (was DIVERGENT; fixed **D-ITEMDEF-1** 2026-07-05) | `libs/def` `item_type_from_string` now returns the witnessed engine values (named `DefItemType`); pinned by `tests/def/def_parse_item_type_test.cpp` |
 | `attrib` / `attrib2` flags (`+0x54`/`+0x58`) | **documented + parsed** | full bit map witnessed in `ItemDef_ParseProperty`; now parsed into `DefItemDef.attrib`/`attrib2` (`libs/def`, `attrib:` token line) and consumed by the net `0x0D` AI-trailer gate (`Entity::is_ai_capable` ← `attrib & 0x100000` / `AIData`; see net-re D-NET-97) |
+| `phrase_set` (`+0x86c`) | **documented + parsed with presence** | `ItemDef_ParseProperty @0x49eb00`: `_stricmp("phrase_set") @0x49f9de`, `atol @0x49f9f0`, store to the 0xADC-stride item at `@0x49fa0a`; mounted bone selection reads the target definition dword at `Entity_BuildBoneTransformMatrices @0x4b1884`. `DefItemDef` retains a separate validity bit because authored zero is meaningful |
 | `DefItemDef` parsed model (`libs/def`) | **partial, MATCHING on covered fields** | parses a faithful subset (id/type/graphic/anim_def/husk/hp/sound_profile/soundloops/shots/`*_function`); the runtime struct is far wider (see follow-ups) |
 
 ## Globals
@@ -40,6 +41,13 @@ behavioral ctest is produced here — the evidence is the cited decompilation.
   `gItemDefs[ctx.idx]+offset`; this is the primary source of the field map.
   Passed as the per-property callback by `ItemDefs_LoadAndValidate @0x4a1da0`
   and `ItemDefs_LoadFromNSIFiles @0x4a1cb0`.
+- Its **`phrase_set` branch** is exact: `mov eax,[edi+4] @0x49f9db` selects the
+  0xADC-stride item, `_stricmp("phrase_set") @0x49f9de` recognizes the key,
+  `mov ecx,[edi+8] @0x49f9f0` supplies the value to `atol`, and
+  `mov [edx+esi+86Ch],eax @0x49fa0a` stores the signed dword. The consumer reads
+  this field from the **mounted target's definition** at
+  `Entity_BuildBoneTransformMatrices @0x4b1884`; it is the skeletal overlay
+  config as well as the `emplaced_N` family selector, not collision metadata.
 - **`ItemDef_DumpToFile @ 0x49e250`** — debug dump; the cleanest field↔name
   pairs: `type_id` `+0x50`, `attrib` `+0x54`, `attrib2` `+0x58`, `type`
   `+0x5c`, `graphicName` `+0x60`, `huskName` `+0x70`, `shadowName` `+0xa0`,
@@ -54,7 +62,8 @@ behavioral ctest is produced here — the evidence is the cited decompilation.
   `pad_270`: a 7-entry stride-24 name array (`soundDeath`/door/shot-TOD at
   `0x6db…0x76b`), `soundLoop[7]` names `0x783…0x82b` → resolved ids
   `0x82c…0x844`, then door/shot/death resolved ids `0x848…0x863`; also copies
-  default-resource render/anim slots into the `pad_86C` anim scratch.
+  default-resource render/anim slots into later tail fields. The now-named
+  `phraseSet @+0x86c` is the parser-written mounted config, not that scratch.
 - **`ItemDef_ResetAllRuntimeCounters @ 0x49e9c0`** — zeroes exactly the
   resolved-sound-id dwords `pad_270[1468…1520]` (NOT `0xf0…0x12c`; that
   confirms `0xf0…0x12c` are load-time model pointers, not runtime counters —
@@ -106,6 +115,7 @@ behavioral ctest is produced here — the evidence is the cited decompilation.
 | 0x783 | `soundLoop` | char[7][24] | `soundloop_1..7` |
 | 0x82b–0x863 | `soundFlags`/`soundLoopId[7]`/`doorOpenSoundId`/`doorCloseSoundId`/`shotSoundId[4]`/`deathSoundId` | u8/u32 | resolved sound ids |
 | 0x864/0x868 | `defaultResPlus64`/`…Dup` | u32 | sound-profile + 64 |
+| 0x86c | `phraseSet` | i32 | `phrase_set` via `atol`; mounted target definition config consumed at `Entity_BuildBoneTransformMatrices @0x4b1884`. Key absence is distinct from an authored value of 0 in the reimplementation |
 | 0x890–0x8a0 | `deathTime`/`clipsize`/`doorType`/`openRate`/`maxAngle` | i32/float | polymorphic: `clipsize`@0x894 is the door-item `door_dir` slot reused |
 | 0x8d8–0x948 | physics block (`minAI`,`mass`,`torque`,`spring`,`flip`,…) | i32 | `ItemDef_ParsePhysicsProperty` |
 | 0xa74 | `hudImage` | char[32] | `hud_image` |
@@ -180,7 +190,8 @@ The caller sets `entity->ItemTypeIndex` (`+28`, from
   `serializeCallback`/§5.10b dispatch) is not fully traced.
 - Residual `gap_*` spans remain genuinely unwitnessed: `+0x1c0…0x218`
   (`addeweap*`/`tool_help` bytes seen at `0x1c1-0x1c3`), `+0x21c…0x25c`,
-  `pad_94C` interior, parts of `pad_86C`/`pad_1B0`.
+  `pad_94C` interior, the still-unmapped fields surrounding the now-named
+  `phraseSet @+0x86c`, and parts of `pad_1B0`.
 - `DefItemDef` covers only the net/render-relevant subset; the physics block,
-  attrib flags, and the particle keys ARE parsed (2026-07-13); the seat/weapon/
-  door/sound tables are not yet parsed by `libs/def`.
+  attrib flags, particle keys, and `phrase_set` (with presence) ARE parsed; the
+  seat attachment/weapon/door/sound tables are not yet parsed by `libs/def`.

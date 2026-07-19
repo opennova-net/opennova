@@ -136,6 +136,15 @@ std::vector<GameEntitySnapshot> snapshot_world(const world::World &w) {
 	w.registry.for_each([&](const world::Entity &e) {
 		GameEntitySnapshot s = snapshot_of(e);
 		if (s.entity_class == EntityClass::Unknown) return; // no 0x0A compact form
+		// Retail's infantry compact writer reads entity+0x2EC (target heading)
+		// and entity+0x2D0 (aim pitch). In the port those animation-owned fields
+		// live on AiEntity, so lift them at the one world-to-wire snapshot seam.
+		if (s.entity_class == EntityClass::Infantry && w.ai != nullptr) {
+			if (const world::AiEntity *ai = w.ai->for_handle(e.handle)) {
+				s.infantry_target_heading_bam = ai->inf.target_heading;
+				s.infantry_aim_pitch_bam = ai->inf.aim_pitch;
+			}
+		}
 		// Resolve the record carrier's pose here, where the registry is in reach — the
 		// carrier is often a pool-2 STATIC (building) with no snapshot of its own in the
 		// 0x0A list. Mount wins over ground [orig: op1 @0x4c0a08]; a stale handle simply
@@ -156,6 +165,8 @@ std::vector<GameEntitySnapshot> snapshot_world(const world::World &w) {
 						static_cast<int64_t>(90 - c->yaw) * kBamPerDegree);
 				s.carrier_pitch_bam = static_cast<int32_t>(
 						static_cast<int64_t>(c->pitch) * kBamPerDegree);
+				s.carrier_roll_bam = static_cast<int32_t>(
+						static_cast<int64_t>(c->roll) * kBamPerDegree);
 			}
 		}
 		out.push_back(s);
@@ -171,6 +182,11 @@ constexpr int64_t kBamPerDegree = 11930464; // 2^32 / 360 (matches snapshot_of)
 // same convention snapshot_of writes and every spawn decoder reads (D-NET-86).
 int32_t engine_heading_bam(int16_t mission_yaw) {
 	return static_cast<int32_t>(static_cast<int64_t>(90 - mission_yaw) * kBamPerDegree);
+}
+
+// Pitch/roll are pure degree-to-BAM axes; only heading has the 90-degree frame inversion.
+int32_t engine_axis_bam(int16_t degrees) {
+	return static_cast<int32_t>(static_cast<int64_t>(degrees) * kBamPerDegree);
 }
 
 // entity+36 GamePlayerEntity Flags word for a PLAYER spawn record, written verbatim by the
@@ -320,6 +336,8 @@ PoolSpawnBatch build_pool1_spawn_batch(const world::World &w) {
 		rec.pos_y = world::to_fixed(e.position.y);
 		rec.pos_z = world::to_fixed(e.position.z);
 		rec.euler_z = engine_heading_bam(e.yaw);
+		rec.euler_x = engine_axis_bam(e.pitch);
+		rec.euler_y = engine_axis_bam(e.roll);
 		rec.team_byte = e.team;
 		// Faithful 0x0800 AI-trailer gate: emit the trailer ONLY for AI-capable item defs
 		// (items.def ItemDefAttrib & 0x100000 = AIData, resolved into Entity::is_ai_capable). This
@@ -391,6 +409,8 @@ StaticEntityBatch build_pool2_static_batch(const world::World &w) {
 		rec.pos_y = world::to_fixed(e->position.y);
 		rec.pos_z = world::to_fixed(e->position.z);
 		rec.euler_z = engine_heading_bam(e->yaw); // entity+16 heading (gates 0x0001 if non-zero)
+		rec.euler_x = engine_axis_bam(e->pitch);   // entity+20 pitch (0x0002 when non-zero)
+		rec.euler_y = engine_axis_bam(e->roll);    // entity+24 roll (0x0004 when non-zero)
 		rec.team_byte = e->team;
 		// The D-NET-147 building/armory fields: the composed entity Flags dword (entity+36,
 		// gates 0x0020), the BMS ammo byte (entity+290, always present), refNum (entity+533,

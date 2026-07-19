@@ -153,7 +153,8 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 			if (player_carrier != 0xFFFFu && e.carrier_pose_valid) {
 				const WorldPose local = network_transform_world_to_local(
 						e.x, e.y, e.z, e.carrier_x, e.carrier_y, e.carrier_z,
-						uint32_t(e.carrier_yaw_bam), uint32_t(e.carrier_pitch_bam), 0u);
+						uint32_t(e.carrier_yaw_bam), uint32_t(e.carrier_pitch_bam),
+						uint32_t(e.carrier_roll_bam));
 				rec.player.carrier_handle = player_carrier;
 				rec.player.pos_x_compressed = network_compress_fixedpoint(local.x);
 				rec.player.pos_y_compressed = network_compress_fixedpoint(local.y);
@@ -240,13 +241,57 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 			// Weapon-aim tail fields (entity+160 / vehicleData 132/135/136) stay 0 —
 			// turret state is unmodeled.
 			break;
-		case EntityClass::Infantry:
-			rec.infantry.vehicle_slot_handle = 0xFFFF;
-			rec.infantry.pos_x_compressed = cx;
-			rec.infantry.pos_y_compressed = cy;
-			rec.infantry.pos_z_compressed = cz;
-			rec.infantry.yaw_byte = yaw_byte_round; // rounded [orig: @0x4c08f8]
+		case EntityClass::Infantry: {
+			// Existing 14-byte infantry record, with the exact witnessed field
+			// sources [orig: NetPacket_SerializeInfantryEntityState @0x4C0320].
+			// A mounted entity writes its raw bone, vehicle handle, and local pose;
+			// no overlay-specific protocol extension is needed.
+			rec.infantry.seat_bone_idx =
+					e.mount_handle != 0xFFFFu ? e.veh_bone : 0;
+			if (e.mount_handle != 0xFFFFu && e.carrier_pose_valid) {
+				const WorldPose local = network_transform_world_to_local(
+						e.x, e.y, e.z, e.carrier_x, e.carrier_y, e.carrier_z,
+						uint32_t(e.carrier_yaw_bam), uint32_t(e.carrier_pitch_bam),
+						uint32_t(e.carrier_roll_bam));
+				rec.infantry.vehicle_slot_handle = e.mount_handle;
+				rec.infantry.pos_x_compressed = network_compress_fixedpoint(local.x);
+				rec.infantry.pos_y_compressed = network_compress_fixedpoint(local.y);
+				rec.infantry.pos_z_compressed = network_compress_fixedpoint(local.z);
+				const uint32_t local_heading =
+						uint32_t(e.euler_z) - uint32_t(e.carrier_yaw_bam);
+				rec.infantry.yaw_byte =
+						uint8_t((local_heading + 0x00800000u) >> 24);
+			} else {
+				rec.infantry.vehicle_slot_handle = 0xFFFFu;
+				rec.infantry.pos_x_compressed = cx;
+				rec.infantry.pos_y_compressed = cy;
+				rec.infantry.pos_z_compressed = cz;
+				rec.infantry.yaw_byte = yaw_byte_round; // rounded [orig: @0x4c08f8]
+			}
+			rec.infantry.flags_byte = e.state_flags; // entity+36 low byte [orig: @0x4c0917]
+			// Clamp entity+748 to entity+16 +/- 536870880, then pack the
+			// rounded absolute BAM high byte [orig: @0x4c0921..0x4c0960].
+			// Unsigned arithmetic preserves the original BAM wrap before the
+			// signed comparisons.
+			int32_t target_heading = e.infantry_target_heading_bam;
+			const int32_t target_delta = static_cast<int32_t>(
+					uint32_t(target_heading) - uint32_t(e.euler_z));
+			constexpr int32_t kInfantryTargetClamp = 536870880;
+			if (target_delta > kInfantryTargetClamp) {
+				target_heading = static_cast<int32_t>(
+						uint32_t(e.euler_z) + uint32_t(kInfantryTargetClamp));
+			} else if (target_delta < -kInfantryTargetClamp) {
+				target_heading = static_cast<int32_t>(
+						uint32_t(e.euler_z) - uint32_t(kInfantryTargetClamp));
+			}
+			rec.infantry.pitch_byte = uint8_t(
+					(uint32_t(target_heading) + 0x00800000u) >> 24);
+			rec.infantry.aim_yaw_byte = uint8_t(
+					(uint32_t(e.infantry_aim_pitch_bam) + 0x00800000u) >> 24);
+			rec.infantry.anim_byte =
+					e.anim_pending_id != 0 ? e.anim_pending_id : e.anim_state_id;
 			break;
+		}
 		case EntityClass::Guided:
 		case EntityClass::NoNetworkCallback:
 		case EntityClass::Unknown:

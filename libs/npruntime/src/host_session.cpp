@@ -147,11 +147,15 @@ void start_host_session(HostOwner &owner, const HostConfig &cfg) {
 	configure_session_runtime(owner.ctx);
 
 	if (cfg.serve_and_play && owner.ctx.world != nullptr) {
-		// Serve-and-play: spawn the host's own player now and latch its loopback in-match so it gets the
+		// Serve-and-play: spawn the host's own player and queue its load-time stream before it gets the
 		// per-frame 0x0A its local view renders from. A dedicated/headless host skips this — its player
 		// spawns lazily via tick_connections in the pump, and its loopback is discarded (pump step 5).
 		Server_ProcessPendingPlayerSpawns(owner.ctx, *owner.ctx.world);
-		mark_host_client_in_match(owner.ctx);
+		// Run the existing type-2 initial-state path instead of latching spawned directly. The
+		// loopback's effectively-unbounded burst budget queues every load-time pool batch now,
+		// including the 0x0D carrier pose required by mounted children whose ewep parent has no
+		// per-frame compact callback.
+		(void)tick_connections(owner.ctx, /*elapsed_ms=*/0, owner.now_tick);
 	}
 }
 

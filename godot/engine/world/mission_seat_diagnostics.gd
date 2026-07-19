@@ -48,6 +48,8 @@ static func seat_specs_for_item(resource_root, item_db, item_id: int, type_id :=
 		"seats": [],
 		"armory_points": [],
 		"primary_weapon": "",
+		"mount_config_valid": false,
+		"mount_config": 0,
 		"error": "",
 	}
 	if resource_root == null or item_db == null:
@@ -56,6 +58,18 @@ static func seat_specs_for_item(resource_root, item_db, item_id: int, type_id :=
 	if item_db.has_method("has_item") and not item_db.has_item(item_id):
 		out["error"] = "item_not_found"
 		return out
+	# Mounted gunner overlay selection reads the TARGET item definition's
+	# phrase_set dword at +0x86c. Carry presence independently because zero is a
+	# witnessed retail configuration.
+	# [orig: ItemDef_ParseProperty @0x49f9db..0x49fa0a; consumer @0x4b1884]
+	if item_db.has_method("get_mount_config"):
+		var mount_config: Dictionary = item_db.get_mount_config(item_id)
+		out["mount_config_valid"] = bool(mount_config.get("valid", false))
+		out["mount_config"] = (
+			int(mount_config.get("value", 0))
+			if bool(out["mount_config_valid"])
+			else 0
+		)
 	out["display_name"] = String(item_db.get_display_name(item_id)) if item_db.has_method("get_display_name") else ""
 	if item_db.has_method("get_primary_weapon"):
 		out["primary_weapon"] = String(item_db.get_primary_weapon(item_id))
@@ -173,12 +187,11 @@ static func seat_pose_index_for_user_point(name: String) -> int:
 
 
 static func canonical_seat_name(name: String) -> String:
-	var lower := name.to_lower().strip_edges()
-	for prefix in ["sitex", "ctrlx", "usegun", "drvrx"]:
-		var at := lower.find(prefix)
-		if at >= 0:
-			return lower.substr(at)
-	return lower
+	# Entity_GetBoneSlotType performs a case-insensitive comparison at byte zero
+	# of the model's USRP row name. Whitespace trimming is host-side string hygiene;
+	# embedded tokens are not seats.
+	# [orig: strnicmp(name, "sitex"/"ctrlx"/"UseGun"/"drvrx", 5/6) @0x434ED0]
+	return name.to_lower().strip_edges()
 
 
 static func seat_type_label(seat_type: int) -> String:

@@ -308,13 +308,13 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     — the clamp snaps the wrapped post-roll value back once the clip ends. Ported:
     `AiSystem::infantry_torso_roll_tick`.
 15. **Mounted pose states** (dump 4464–4539, mount/B2 pass): emplaced gunners force 67–75
-    (`emplaced_N` by mount config +2156); seat passengers pose from the seat bone and take
+    (`emplaced_N` by the target item definition's `phrase_set @+0x86c`); seat passengers pose from the seat bone and take
     `sit_N` = `atol(bone_name_digits) + 76`; sit_24 (=100) drivers lean 107–110 by steering
     (entity+24 of the vehicle, ±71582784) and speed (+668). Port status: `UseGun`/gunner seats
-    select `anim_emplaced` 67 plus a host-fed variant when that clip exists; non-gunner seats use
-    the parsed `sitexNN`/`ctrlxNN`/`drvrxNN` pose index (`anim_sit_N`). Remaining gaps: deriving the
-    emplaced variant from the real mount config, the driver-lean 107–110 overlay, and true per-tick
-    seat-bone follow (see §9.2).
+    select `anim_emplaced` 67 plus the production-extracted config variant when that clip exists;
+    non-gunner seats use the parsed `sitexNN`/`ctrlxNN`/`drvrxNN` pose index (`anim_sit_N`).
+    Config presence is explicit, so unknown does not alias authored config 0. Remaining gaps are
+    the driver-lean 107–110 overlay and true per-tick seat-bone follow (see §9.2).
 16. **Playhead rate**: channel time is normalized [0,1) advanced by a per-clip dt seeded at
     `AnimChannel_InitFromParams` (the literal 4096 param) — the exact dt derivation (sim-tick →
     clip-frame rate, blend-window advance) is unpinned; the IRootMotionSource seam owns phase
@@ -407,11 +407,11 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     player-physics grill this entry waited on = §22). `libs/world/src/infantry.cpp`; guarded by
     the gravity-cadence + player-jump cases in `tests/world/infantry_test.cpp`.
   - **D-INF-11** third-person body aim overlay (the torso bend) — **LOCAL PLAYER LANDED
-    2026-07-08** (§14.6: `libs/anim/aim_overlay`, the leg-chase sim fields, the
-    `NovaSkeletalAnim.eval_pose_overlay` path, the witnessed 3P camera numbers; verified
-    in-play via `godot/tests/bend_capture_probe.gd`). REMAINING (row stays open, partial):
-    NPC/remote present-pass threading (closes D-NET-117), the upper-body weapon channel
-    (rides D-INF-1), mounted/seated branches, attachment matrices, and the
+    2026-07-08; MOUNTED/PLACED/WIRE SELECTOR SEAM IMPLEMENTED 2026-07-19** (§14.6:
+    `libs/anim/aim_overlay`, the leg-chase sim fields, the shared present snapshot result,
+    and `NovaSkeletalAnim.eval_pose_overlay`; the original local bend was verified in-play
+    via `godot/tests/bend_capture_probe.gd`). REMAINING (row stays open, partial):
+    NPC/remote upper-body weapon-channel threading (rides D-INF-1), attachment matrices, and the
     pitchBlend/headLookDecay/lean/torsoRoll sources. `[orig: Entity_BuildBoneTransformMatrices
     @ 0x4b1290]`, witness §14.
   - **D-INF-12** player (org2) chase sources approximated by org1 math — **CLOSED
@@ -694,6 +694,11 @@ yaw_offset); `AiSystem::pose_if_mounted` captures that seat frame before the loc
 and roll, then skips SM + locomotion and auto-dismounts when the vehicle is gone. Remote
 `AiEntity.heading` stays in the seat frame; the local `heading`/`pitch` remain the full-precision
 `target_heading`/`look_pitch` while registry yaw is only the rounded wire/motor look mirror.
+Each target carries the parsed `phrase_set` as an explicit `{valid,value}` pair; attachment copies
+that pair to the occupant, registry snapshots value-copy it, restore recovers it, and every dismount
+path clears the occupant copy and validity. This is deliberately separate from seat-frame pose state:
+the frame synchronization above supplies body/leg/pitch/roll, while animation's `MountMode` selects
+which witnessed overlay matrix each skeletal class consumes.
 Event-runtime case 0x25 → `mount_best(param1)`; command-123/124/125 promotion mounts
 already-near occupants onto their target SSN with the runtime gate above; mounted infantry pose class
 is selected from the occupied seat (`UseGun` → 67+variant if that clip exists, other seats →
@@ -707,9 +712,9 @@ and the full target-seat candidate list (`source_name`, type, pose index, local 
    port consumes host-extracted model userpoints through `ItemSeatSpec`, so callers without model
    metadata still seed no seats.
 3. **Child-entity seat traversal** deferred (single-entity seats only).
-4. **Mounted-pose variants are partial.** `UseGun` can consume a host-fed emplaced variant and
-   non-gunners consume numbered `sit_N`, but deriving the variant from the real mount config and the
-   sit_24 driver-lean variants remain open.
+4. **Mounted-pose variants.** `UseGun` consumes the target definition's production-parsed
+   `phrase_set` (including valid zero), and non-gunners consume numbered `sit_N`. The sit_24
+   driver-lean 107–110 variants remain open.
 5. **Seat-local pose stand-in** — seat_local/yaw_offset come from host userpoints when available, but
    the true per-tick bone transform (`Entity_GetBoneTransformAndOrientation`) is still deferred. This
    is the known suspect when a rider attaches to the right logical seat but appears too far forward.
@@ -934,7 +939,9 @@ blend gradient IS the bend. Witnessed end-to-end in
 `[orig: Entity_BuildBoneTransformMatrices @ 0x4b1290]` (callers
 `[orig: Entity_UpdateInfantryPlayerBody @ 0x4b40e0]`, `[orig: Entity_UpdateInfantryAI @ 0x4b9910]`;
 render consumers `BoneCallback_org0_* @ 0x4e34b0/0x4e3940`, `Entity_GetCameraTransform @ 0x4b8c00`,
-`Entity_GetAttachmentWorldPosition @ 0x4b2670`). No reimpl exists yet (see D-INF-11 / D-NET-117).
+`Entity_GetAttachmentWorldPosition @ 0x4b2670`). The reimplementation's animation-owned selector is
+`opennova::anim::compute_aim_overlay_angles`; simulation, collision, and both presentation paths share
+its selected result rather than reconstructing these branches independently (see §14.6).
 
 ### 14.1 Pipeline
 
@@ -995,15 +1002,31 @@ chase yaws.
   arms get aim pitch + headLookDecay/4 + 2·pitchBlend (skipped when `Flags & 0x100000`); head keeps
   full aim. Anim states 41/42 (`roll_left/right`) additionally zero `Roll`/`torsoRoll` — the clip
   owns the whole body during combat rolls.
-- **Mounted gunner** (`parentSlot == 3`): keyed on the parent def's mount config (+0x86c, the
-  `emplaced_N` selector, §9): configs 3/5/7 → every bone takes the body matrix (fully-animated
-  emplaced poses); 6 → same but the aim matrix is kept for the head; else → gunner counter-lean:
-  arms/root get yaw = body − (aim−body)/4 and pitch = 2·bodyPitch − aimPitch + pitchBlend/2
-  (reversed — the body counter-rotates against the gun the mount itself aims), spine 1/16
-  counter-yaw, neck/head full aim.
-- **Seated** (`parentSlot ∈ {2,5}`): all bones body-matrix except neck = full aim (the driver's
-  head tracks look). The player body updater additionally HALVES the render pitch fed into the
-  build while in vehicle third person `[orig: @ 0x4b4942]`.
+- **Mounted config source and validity**: the gunner block reads the **target entity's item
+  definition** dword `+0x86c` at `@0x4b1884`. Its producer is the items.def `phrase_set` branch in
+  `ItemDef_ParseProperty`: `_stricmp @0x49f9de` → `atol @0x49f9f0` → 0xADC-stride store
+  `@0x49fa0a`. Retail always reaches this block with a target definition; the port therefore carries
+  key presence separately. Unknown config takes the ordinary on-foot selector, while valid config 0
+  enters the witnessed zero branch. It is never legitimate to use a default integer zero as proof of
+  config 0.
+- **Seated** (`parentSlot ∈ {2,5}`): lower/upper spine, clavicles, and arms take body; neck and head
+  take full aim; both leg classes keep the already-built seated leg-chain matrices. The player body
+  updater additionally HALVES the render pitch fed into the build while in vehicle third person
+  `[orig: @ 0x4b4942]`.
+- **Mounted gunner** (`parentSlot == 3`): let `A/P` be aim yaw/pitch, `B/Q` body yaw/pitch,
+  `R` roll, `LN` lean, and `PB` pitchBlend (all BAM32; subtractions wrap and shifts are arithmetic).
+  The valid-config table is:
+
+  | valid config | lower spine | upper spine | clavicles + arms | neck | head |
+  |---|---|---|---|---|---|
+  | `0` | body | body | yaw `B - ((A-B)>>2)`; pitch `(PB>>1) + 2Q - P`; roll `R+LN` | aim | aim |
+  | `3`, `5`, `7` | body | body | body | body | body |
+  | `6` | body | body | body | body | aim |
+  | other nonzero | body | yaw `B - ((A-B)>>4)`; pitch `Q+(PB>>1)`; roll `R+(LN>>1)` | yaw `B - ((A-B)>>2)`; pitch `Q+(PB>>1)-((P-Q)>>1)`; roll `R+LN` | aim | aim |
+
+  Gunner legs keep the unconditional leg-chain matrices. Configs 3/5/7 are the fully body-locked
+  witnessed upper skeleton; config 6 differs only at the head. Config 0 and the other-nonzero row are
+  distinct counter-lean recipes; there is no collision-specific mounted recipe.
 - **Local player**: when `entity == dword_C6EC38` (the view/local entity global; identity from
   reads — HUD self-label skip, audio listener), head/aim pitch gets
   `+ (g_audioOutLevel << 17)` `[orig: @ 0x4b17f0]`. **RESOLVED (2026-07-09)**:
@@ -1041,24 +1064,41 @@ chase yaws.
 - The InfantryAI leg-chase excerpt re-verify (the session's sub-investigation was cut by a spend
   limit after confirming the §3.1 36-tick re-plant stagger applies per DcbId): the §3.3 math rows
   predate this session and stand; the relabel is anchored by the bone-overlay consumers.
-- Mount-config codes 3/5/6/7 (+0x86c) → which retail emplacements use which (data sweep).
+- Complete shipped-data census of which emplacement definitions author each `phrase_set` value remains
+  a data-sweep follow-up; the parser, `+0x86c` field, consumer, and branch meanings are witnessed.
 - `Entity_GetCameraTransform @ 0x4b8c00` (bone-camera for mode-0 mounted view) not yet decompiled.
 
-### 14.6 Port status (D-INF-11 — LOCAL PLAYER LANDED 2026-07-08)
+### 14.6 Port status (D-INF-11 — LOCAL 2026-07-08; SHARED MOUNTED SELECTOR 2026-07-19)
 
-Ported for the local player, end to end, in the controller train:
+The local controller train remains, and mounted selection is now an animation-owned shared seam:
 
 - **Blends + bone map**: `libs/anim/{include/anim,src}/aim_overlay.{h,cpp}` — exact int32 BAM
-  blends of the on-foot aim/non-aim branches, the BN##→class map, and the pose compose
+  blends of the on-foot aim/non-aim branches, the full §14.3 mounted table, the BN##→class map,
+  and the pose compose
   (`apply_aim_overlay`: FK → per-class world delta → back to parent-locals; with parent-local
   poses the pivot re-anchor preserves every local origin, so only rotations change).
-  `tests/anim/aim_overlay_test.cpp` pins the map, both branch formulas, and the compose
+  `AimOverlayInputs` owns `MountMode::{OnFoot,Seated,Gunner}` and a separate config-valid/config-value
+  pair; a Gunner with unknown config bypasses the config switch, while valid zero enters it.
+  `tests/anim/aim_overlay_test.cpp` pins the map, on-foot formulas, and the compose
   invariants (identity = passthrough; uniform delta = world delta; differential = bend).
+- **Production metadata + lifecycle**: `libs/def` parses signed `phrase_set` and presence;
+  `NovaItemDatabase` exposes both; `MissionSeatDiagnostics` and `ItemSeatSpec` promote them to the
+  target entity. Both mount entry paths copy the pair to the occupant; both dismount paths clear it;
+  registry snapshot/restore value-copies it. This replaces `emplaced_pose_variant`'s ambiguous default
+  without changing the existing seat-frame body/leg/pitch/roll synchronization.
 - **Sim**: `InfantryState.leg_yaw/leg_target` + the §3.3 chase/re-plant/twist-limit tick in
   `libs/world/src/infantry.cpp`; the local player's `body_heading` now CHASES the aim
   (quarter-step, clamped) while render yaw stays mouse-instant — the aim/body split the
   overlay renders. `tests/world/infantry_test.cpp::test_player_body_chase_and_legs`.
-- **Host**: `NovaSimulation.get_local_player_aim_overlay()` (BAM→mission-euler once, native) →
+- **One selector, four consumers**: `NovaSimulation` is the production adapter from
+  `AiEntity` + mounted `Entity` state to `AimOverlayInputs`; it calls
+  `compute_aim_overlay_angles` for authoritative collision and local pose export. The present snapshot
+  packs the resulting body frame and nine absolute overlay angles. `MissionPresentPass` and
+  `WirePresentPass` share the result adapter that converts those packed angles to body-relative Godot
+  deltas; neither pass reads mount config or repeats the selector. Organic collision still emits final
+  bone matrix `i` for COBJ section `i`; CXLT remains independent metadata and is not a selector or extra
+  transform.
+- **Local host**: `NovaSimulation.get_local_player_aim_overlay()` (BAM→mission-euler once, native) →
   `LocalPlayerHost._update_avatar` builds the per-class deltas via the single-sourced
   `bms_to_godot_basis` and sets the avatar node to the BODY frame →
   `NovaObjectModel.set_aim_overlay` → `NovaSkeletalAnim.eval_pose_overlay`. The 3P camera now
@@ -1067,11 +1107,15 @@ Ported for the local player, end to end, in the controller train:
   injects F4 + mouse-look, captures poses; look-down bends the spine/head forward, look-up
   arches back (05TR.bms, JOX root).
 
-Remaining under this row: NPC/remote threading (the present-pass `PF_PITCH_DEG` seam + the
-same angles per entity in the snapshot — closes **D-NET-117**), mounted-gunner/seated
-overlay-matrix selection by mount config remains under D-INF-11 (the landed seat-frame
-body/legs/pitch/roll synchronization does not select those retail matrices); weapon/sight/
-muzzle attachment matrices and the pitchBlend / lean / torsoRoll
+The new mounted slice is intended to be verified by table-driven coverage of every witnessed seated/
+gunner branch (including unknown versus valid zero), metadata extraction, snapshot/restore and dismount
+clearing, local render/collision parity, placed/wire parity, and a posed rendered-bone-versus-shot case.
+The focused gate must rerun the rotated mounted-enemy, CXLT, and F3 cutoff/cadence/dense-batching
+regressions before the maturity ratchet and full CI matrix. This is the verification plan, not a recorded
+test result.
+
+Remaining under this row: NPC/remote secondary weapon-channel pose composition; weapon/sight/muzzle
+attachment matrices; and the pitchBlend / lean / torsoRoll
 sources (terms carried, fed 0; headLookDecay now carries the PORTED arms-dip feed —
 §14.8.5/§14.8.7 — its other producers, the idle look-at and the audio pitch kick,
 stay open). The upper-body weapon channel's producer is witnessed and FULLY ported for
@@ -1880,6 +1924,13 @@ each organic entity owns its ADM source and playhead, the pose is sampled
 synchronously from simulation state (including headless authority), FK is
 resolved against the canonical shared rest, and the entity transform is
 applied exactly once.
+
+Mounted organics use the same `AimOverlayInputs` adapter and
+`compute_aim_overlay_angles` result as local pose export and the packed
+Mission/Wire presentation snapshots. Collision has no mount-config heuristic
+of its own. Dismount clearing therefore changes all consumers together on the
+next sample, while the authoritative primary section and incoming direction
+continue through the unchanged reaction/death selection path below.
 
 The pairing rule is strictly ordinal: `COBJ[i]` consumes `boneMatrix[i]`.
 COBJ's parent/offset fields and CXLT are ignored by this organic person path;

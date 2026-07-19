@@ -98,6 +98,37 @@ func test_item_database_loads_and_handles_missing() -> void:
 	assert_eq(db.get_item(-99999), {}, "unknown id has empty record")
 
 
+func test_item_database_mount_config_preserves_presence_and_explicit_zero() -> void:
+	# The retail target definition source is phrase_set at itemDef+0x86c. Exercise
+	# the production database wrapper, including the state that the old
+	# emplaced_pose_variant=0 transport could not represent.
+	var tmp := ProjectSettings.globalize_path(
+			"user://mount_config_items_%d.def" % Time.get_ticks_usec())
+	var file := FileAccess.open(tmp, FileAccess.WRITE)
+	assert_not_null(file)
+	file.store_string(
+			"begin \"Unknown\"\n"
+			+ "  id 710001\n"
+			+ "end\n"
+			+ "begin \"Explicit Zero\"\n"
+			+ "  id 710002\n"
+			+ "  phrase_set 0\n"
+			+ "end\n")
+	file.close()
+	var db := NovaItemDatabase.new()
+	assert_eq(db.load(tmp), OK)
+	assert_eq(db.get_mount_config(710001), {"valid": false, "value": 0},
+			"absent phrase_set remains unknown")
+	assert_eq(db.get_mount_config(710002), {"valid": true, "value": 0},
+			"authored zero remains a valid retail config")
+	DirAccess.remove_absolute(tmp)
+
+	# Existing retail-shaped fixture witness: the emplaced B50cal target authors 4.
+	assert_eq(db.load(_items_abs()), OK)
+	assert_eq(db.get_mount_config(101419), {"valid": true, "value": 4},
+			"target item definition phrase_set is the production mount config source")
+
+
 func test_entities_resolve_to_models() -> void:
 	var m := NovaMissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)

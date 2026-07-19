@@ -199,6 +199,9 @@ class DefItemDef(ctypes.Structure):
         ("debris_scale", ctypes.c_float),
         ("husk_sub_parts", ctypes.c_int),
         ("husk_sub_part_types", ctypes.c_ubyte * 16),
+        # Mounted selector source: phrase_set dword + explicit authored presence.
+        ("phrase_set", ctypes.c_int),
+        ("phrase_set_valid", ctypes.c_int),
     ]
 
 
