@@ -55,6 +55,7 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 		if (world::Entity *victim = world.registry.get(d.victim)) {
 			victim->flags |= 2u;
 			victim->alive = false;
+			victim->damage_state = -1;
 		}
 		// Who controls the victim? Player-controlled == some connection owns it — the
 		// semantic behind the original's Flags & 0x100 check [orig: @0x51b55d].

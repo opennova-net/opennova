@@ -107,6 +107,8 @@ NovaItemDatabase::Item NovaItemDatabase::item_from_entry(const ::DefItemDef &ent
 	item.ai_function = String(entry.ai_function);
 	item.move_function = String(entry.move_function);
 	item.hp = entry.hp;
+	item.damage_reduc_pp = entry.damage_reduc_pp;
+	item.damage_reduc_max = entry.damage_reduc_max;
 	item.physics = entry.physics;
 	item.acceleration = entry.acceleration;
 	item.deceleration = entry.deceleration;
@@ -149,6 +151,7 @@ NovaItemDatabase::Item NovaItemDatabase::item_from_entry(const ::DefItemDef &ent
 	item.sounddeath = String(entry.sounddeath);
 	item.armor_impact = entry.armor_impact;
 	item.armor_blast = entry.armor_blast;
+	item.armor_kz = entry.armor_kz;
 	item.kz = entry.kz;
 	item.debris_scale = entry.debris_scale;
 	item.husk_sub_parts = entry.husk_sub_parts;
@@ -239,6 +242,26 @@ int NovaItemDatabase::get_hp(int id) const {
 int NovaItemDatabase::get_item_type(int id) const {
 	const auto it = items.find(id);
 	return it == items.end() ? static_cast<int>(TYPE_UNKNOWN) : it->second.type;
+}
+
+float NovaItemDatabase::get_damage_reduc_pp(int id) const {
+	const auto it = items.find(id);
+	return it == items.end() ? 0.0f : it->second.damage_reduc_pp;
+}
+
+float NovaItemDatabase::get_damage_reduc_max(int id) const {
+	const auto it = items.find(id);
+	return it == items.end() ? 0.0f : it->second.damage_reduc_max;
+}
+
+int NovaItemDatabase::get_armor_impact(int id) const {
+	const auto it = items.find(id);
+	return it == items.end() ? 0 : it->second.armor_impact;
+}
+
+int NovaItemDatabase::get_armor_kz(int id) const {
+	const auto it = items.find(id);
+	return it == items.end() ? 0 : it->second.armor_kz;
 }
 
 // items.def ItemDefAttrib & 0x100000 (AIData). Mirrors the stock 0x0D decoder's own gate

@@ -42,6 +42,10 @@ struct GameConfig {
 	// mission-metadata blob's attrib dword. Observed bits: 0x001 NoTracers, 0x004 TeamChoose,
 	// 0x008 FFWarning-suppress, 0x200 NoFriendlyFire, 0x400 NoFriendlyTag, 0x8000 ClaymorePref.
 	uint32_t mp_attributes = 14854;             // [orig game_settings +0xD0]
+	// Authoritative projectile game-option globals. These do not alter the
+	// advertised mp_attributes word; the host simulation consumes them directly.
+	bool fat_bullets = false;                   // [orig g_FatBullets @0x24D21A0]
+	bool one_shot_kill = false;                 // [orig g_OneShotKill @0x24D219C]
 
 	// --- §6.9 rule globals — the S2C 0x08 ServerConfig block [orig: ServerConfig_SerializeToPacket
 	// @0x505bd0]. dword[3] is `game_type` above; the rest are the standalone g_* rule globals in wire

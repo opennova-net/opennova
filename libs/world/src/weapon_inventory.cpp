@@ -105,6 +105,23 @@ std::vector<WeaponKitEntry> weapon_kit_filter_by_availability(
     return out;
 }
 
+void weapon_kit_build_damage_classes(const std::vector<WeaponKitEntry> &kit,
+                                     const WeaponTable &table, size_t ammo_count,
+                                     std::vector<uint8_t> &out) {
+    out.assign(ammo_count, 0);
+    for (const WeaponKitEntry &entry : kit) {
+        const int adm = table.index_of(entry.name.c_str());
+        if (adm < 0) continue;
+        const WeaponTableEntry *weapon = table.by_index(static_cast<uint8_t>(adm));
+        if (weapon == nullptr || weapon->ammo_index < 0) continue;
+        const size_t ammo_index = static_cast<size_t>(weapon->ammo_index);
+        if (ammo_index < out.size()) {
+            const uint8_t raw = static_cast<uint8_t>(entry.flags);
+            out[ammo_index] = (raw == 1 || raw == 2) ? raw : 0;
+        }
+    }
+}
+
 std::vector<std::string> weapon_kit_expand_display_list(
         const std::vector<WeaponKitEntry> &kit, const WeaponTable &table) {
     // [orig: AvatarDef_BuildDisplayList @ 0x54B9E0 — 255 x 40-B entries: the kit

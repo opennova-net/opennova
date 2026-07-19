@@ -294,7 +294,9 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 						"name": String(row.get("name", "")),
 						"ammo_primary": int(String(row.get("value1", "-1")).to_int()),
 						"ammo_secondary": int(String(row.get("value2", "-1")).to_int()),
-						"flags": -1,
+						# The BMS row's fourth string becomes the per-ammo damage-class
+						# byte: 1 = x0.9, 2 = x1.1, every other value is neutral.
+						"flags": int(String(row.get("value3", "-1")).to_int()),
 					})
 				if not kit.is_empty():
 					_sim.set_spawn_loadout(kit, true)

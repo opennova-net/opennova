@@ -202,6 +202,11 @@ class DefItemDef(ctypes.Structure):
         # Mounted selector source: phrase_set dword + explicit authored presence.
         ("phrase_set", ctypes.c_int),
         ("phrase_set_valid", ctypes.c_int),
+        # Projectile/vehicle damage traits appended C-side (mirror def.h). The
+        # destruction block's armor_impact is shared; armor_kz mirrors armor_blast.
+        ("damage_reduc_pp", ctypes.c_float),
+        ("damage_reduc_max", ctypes.c_float),
+        ("armor_kz", ctypes.c_int),
     ]
 
 

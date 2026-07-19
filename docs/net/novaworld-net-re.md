@@ -5297,7 +5297,12 @@ allowed-class mask `dword_24D59FC`); stamp `entity+660 = soldierType` (@0x515ab0
 the player model; load accepted entries into the 780-slot weapon table
 (`WeaponSlotPool_ResetAllEntries @ 0x53F240` + `WeaponSlotTable_LoadAllFromDefs @ 0x5414E0`);
 ammo per entry: `req >= 0 ? min(req, entry[83]) * entry[22] : entry[23]` →
-`WeaponSlot_SetAmmoCount @ 0x540B50` (@0x515e58-0x515e86).
+`WeaponSlot_SetAmmoCount @ 0x540B50` (@0x515e58-0x515e86). The fourth request byte is
+normalized (`1` = ×0.9, `2` = ×1.1, every other value = `0`) and stored at
+`player+89688[entry AmmoDef index]`. This is a **per-ammo table**, not a per-weapon field:
+accepted entries are processed in wire order and the last entry using an AmmoDef wins. Repeating
+the same `category*65+rank` replaces that 780-table slot, so it is emitted only once by the reply
+walk (with the last entry's ammo fill).
 
 **The reply walk (grilled 2026-07-02):** `Server_SendWeaponSlotListToPlayer` walks the player's
 780-slot table **ascending by weapon-slot combo `category*65 + rank`** (@0x5026e5..@0x5028a0 —
@@ -5308,8 +5313,13 @@ entity+416: 1/3 → blue 2, 2/4 → red 1, else 3 @0x502666; char mask from play
 AvatarDef_FindIndexByName(def name) @0x50273b]` `[u8 ammoPrimary = WeaponSlot_GetTotalClips
 @0x502794]` `[u8 ammoSecondary = the same count for the FIRST different-ammoclass sub-variant
 in parent+1..parent+LSC (@0x5027c8, class-byte compare @0x5027f8), else 0xFF]`
-`[u8 restriction (player+89688[admIdx], observed 0 @0x50288a)]`, then skips the LSC slots
+`[u8 damageClass = player+89688[slot AmmoDef index] @0x50288a]`, then skips the LSC slots
 (@0x50284e); 0xFF terminator after the leading `[u8 avatarClass]`.
+Consequently, every emitted weapon sharing one AmmoDef serializes the same final normalized class,
+including an earlier weapon whose request byte was different. The reimplementation decodes 0x2F
+once and accepts it only when the six-byte header, complete four-byte entries, one 0xFF terminator,
+and end-of-body coincide; missing terminators, truncated entries, and trailing bytes neither emit
+0x5A nor open the loadout gate.
 **`WeaponSlot_GetTotalClips @ 0x5425F0`** (ex-`sub_5425F0`; the auto "kill score" comment was a
 misnomer) = the slot's TOTAL AMMO IN CLIPS: (entity ammo pool for the def's ammoclass [+ the
 bucket value @0x542651 / loaded rounds slot+16 @0x54265b]) ÷ clipsize (@0x542673); clipsize −1
@@ -5428,9 +5438,9 @@ The deploy gate is unrelated: retail drops the loading screen via S2C 0x1D (§5.
 
 ### 5.60 The authoritative round simulation, damage, and the death broadcast family (engine-research scope, 2026-07-03)
 
-Witnessed to scope the port of server-side rounds — the D-NET-152 deferred tail. No reimpl
-exists yet: every claim here is confirm-only from the binary; the payload writers named in
-the follow-ups get byte-witnessed at port time.
+Witnessed originally to scope the port of server-side rounds — the D-NET-152 deferred tail.
+The binary claims remain the retail source record; the current reimplementation status and
+bounded residuals are recorded under PHYSICS/COLLISION ALIGNMENT below.
 
 **The spawn is synchronous.** `RoundData_AddRound @ 0x4FDB40` inline-calls
 `RoundData_SpawnRound @ 0x4EC0D0` — the `g_round_ring` is ONLY the tag-2 network fan-out
@@ -5469,19 +5479,38 @@ visual (effects, decals, sound).
 
 **The per-tick sim.** `Weapon_UpdateAllProjectiles` iterates live rounds →
 `Projectile_UpdatePhysics @ 0x4E9D70` (ammo def = `g_ammoDefTable[276·idx]`, idx at
-projectile+620, lifetime at +684): advance by velocity, segment ray per tick — terrain
-hi-res heightmap (`Terrain_RaycastHeightmapHiRes`), entity proximity list
-(`Entity_BuildProximityList` → `Physics_RaycastAgainstProximityList`, minimum proximity
-radius 0.1 u = 6553 fp16 "for networked authority" `@0x4ea263`), water
-(`Projectile_CheckWaterIntersection @ 0x4E59D0`) — drag
-(`Projectile_ApplyDragDeceleration @ 0x4E5CD0`, table from `Projectile_InitDragTable
-@ 0x4E78D0`), then the 5-way hit switch (`@0x4ea6a7`): 0 = terrain →
-`Projectile_HandleTerrainImpact @ 0x4E9210`, 1/2 = entity (with hit-bone data) →
-`Projectile_HandleEntityImpact @ 0x4E9390`, 3 = building → `@ 0x4E98F0`, 4 = water;
-effects `Projectile_SpawnImpactEffect @ 0x4E9B80`, tracer scar `@ 0x4E5AC0`.
+projectile+620, lifetime at +684). Flag 2 `ignore` only ages the round; flag 0x2000
+`useownmove` dispatches an ammo-specific movement callback and skips the stock ballistic
+ray/gravity/drag path. Before an ordinary sweep, a strictly submerged round below
+0x4000 Q16 speed is retired. Exact-zero velocity is another special leaf: no movement or
+ray, `vz -= 167` even for NoGravity, and no drag. Otherwise the tick sweeps with the OLD
+velocity through terrain, water (`Projectile_CheckWaterIntersection @ 0x4E59D0`), static
+CFAC, dynamic CFAC, then person COBJ bone spheres. The 0.1 u / 6553 fp16 radius clamp at
+`@0x4ea263` is conditional on network session + authority + FatBullets + a remote
+player-owned round; it is not a universal bullet radius. A hit runs the 5-way switch
+(`@0x4ea6a7`: 0 terrain, 1 static, 2 dynamic, 3 person, 4 water) and is consumed before
+this tick's forces; damage therefore observes the pre-force velocity. A miss commits the
+new position, applies the 167-Q16 gravity step unless NoGravity, then applies aerodynamic
+drag for the NEXT sweep.
 
-**Entity impact** (`Projectile_HandleEntityImpact @ 0x4E9390`): resolve through the
-vehicle parent chain (`@0x4e94e0`); the ARMING gate — elapsed ticks (projectile+676
+Aerodynamic flight drag is `Entity_ApplyDragAndBounceForce @ 0x4E5EC0`, not
+`Projectile_ApplyDragDeceleration`. `Projectile_InitDragTable @ 0x4E78D0` sweeps
+0..3999 ft/s through 40 inclusive power-law bands, repeatedly overwriting
+`floor(f·0.3048)` and leaving BSS bin 1219 at zero. Runtime indexes
+`clamp((62·|vQ16|)>>16,0,1219)`, performs the two signed truncations
+`trunc(trunc((table[index]<<16)/ammo.drag)/62)`, projects that step opposite velocity,
+and uses the fixed multiply `(step·dir + 0x8000)>>16`; at/below water the step is
+multiplied by 25 first. A drag overshoot zeros all velocity. Below
+`min_stable_velocity`, X/Y and positive Z receive the recovered 1/32 damping; the
+NoGravity branch then adds the otherwise-skipped 167-Q16 Z step. A threshold crossing
+also applies `tumble_error` in a randomized local frame. The deterministic branch is
+ported; that PRNG/frame producer remains open. The separate
+`Projectile_ApplyDragDeceleration @ 0x4E5CD0` is the impact-energy loss using ammo weight and the
+surface-specific `armor_density` fields.
+
+**Entity impact** (`Projectile_HandleEntityImpact @ 0x4E9390`): a child rolls to exactly
+one vehicle parent when its item attribute has 0x20, the child is not type 1, and that
+parent is type 1 (`@0x4e94e0`); the ARMING gate — elapsed ticks (projectile+676
 initial − +684 remaining) < the ammo `arm_age` (dword 3) means the round is NOT ARMED yet
 and spawns its `notarmmedammo` (+241) child in its place (`AmmoDef_LookupByName`, copies
 692 B of the projectile) — the inert/dud variant of a grenade inside arming distance (the
@@ -5490,26 +5519,45 @@ weapon-type-15 bone/section damage via `Entity_ComputeBoneCollisionBounds`; kine
 (`Entity_ClampKineticEnergy`); pass-through flags 0x18000000 = `lawr|fgrenade`
 (`@0x4e95a0`); then `Projectile_ProcessDamageOnTarget @ 0x4E7FB0`.
 
-**The damage model is kinetic.** `Weapon_CalcImpactDamage @ 0x4EC920`: damage scales with
-the round's REMAINING SPEED — `(62 · |vel|) >> 16`, clamped to 1219 (`@0x4ecad6`) — times
-a hit-zone multiplier. Normal infantry reads the final/lowest overlapping section from
-`ray[32]` (`hitZoneData+0x80 @0x4ec9a1`): zones 0-4 x1.25, 5-8 x1.0,
-9-12/15-18 x0.5, and 13-14 x3.0; the float product truncates toward zero before
-the min/max clamps. The separate first/highest `ray[31]` is copied to the damage-trigger
-hit record and drives reaction/death animation. The itemDef+84 `&0x200` seat branch
-instead reads `ray[31]`; seat types 2/3/6/7 get x6.0 and target+44 `|=0x800`.
-`g_OneShotKill` → flat 2000; clamp to ammoDef max (dword 48). Distance falloff EMERGES
-from drag — there is no range table. Zeroing gates in
-`Projectile_ProcessDamageOnTarget`: indestructible entity flags 0x4000000, itemDef+400
-armor threshold 0xFFFF or greater than the ammo `penetration_impact` (dword 49, +196 — the
-round must penetrate the target's armor class), target already dead (+292 == −1), occupant
-scale (`Entity_ApplyOccupantDamageScale`) when target+92 == 1; damage clamps to remaining
-health, and itemDef+84 flag 0x40000000 pins health at 1 (unkillable-by-damage). The
-authority applies `health −= damage` (`@0x4e8127`); a kill calls `Score_ProcessKillEvent
-@ 0x4FD400` (authority-gated scoring ONLY — it emits no messages); a PLAYER target (entity
-Flags & 0x100) additionally gets the hit bookkeeping — projectile+688 multi-hit counter,
-target+442 = the shooter slot word, +376 = the owner entity, and the entity damage
-callback (+456) fires with event 4.
+**The damage model is kinetic.** `Weapon_CalcImpactDamage @ 0x4EC920` uses the round's
+REMAINING pre-force Q16 speed. The magnitude is first capped at the exact float boundary
+`0x4EFFFE00`; the speed index is arithmetic-shifted from signed-32 wrapping
+`magnitude * 62`, then upper-clamped to 1219 (`@0x4ecad6`). Base damage is truncating
+signed division of wrapping `speedIndex * weight_in_grains` by 875. Normal infantry reads
+the final/lowest overlapping section from `ray[32]` (`hitZoneData+0x80 @0x4ec9a1`):
+zones 0-4 are x1.25, 5-8 x1.0, 9-12/15-18 x0.5, and 13-14 x3.0. The separate
+first/highest `ray[31]` is copied to the damage-trigger hit record and drives
+reaction/death animation. The itemDef+84 `&0x200` seat branch instead reads `ray[31]`;
+zones 2/3/6/7 get x6.0. Normal zones 13/14 and those special seat zones set target+44
+`|=0x800`. Each floating multiplier truncates separately. The shooter's per-ammo class
+then applies x0.9 for class 1 or x1.1 for class 2 before ammo minimum and positive maximum
+clamps.
+
+In a network session a non-authority calculation returns zero. Authority plus
+`g_OneShotKill` returns 2000 immediately, before zone/class/min/max; offline play ignores
+that multiplayer option. All downstream target gates still apply. Distance falloff
+emerges from aerodynamic drag—there is no range table.
+
+`Projectile_HandleEntityImpact` can redirect damage through exactly one carrier hop:
+the struck child must not be item type 1, must carry item attrib 0x20, and its direct
+parent must be type 1. Presentation stays on the geometry actually hit. A physical hit
+on an entity with no ItemDef consumes the projectile and presents its impact but returns
+before damage calculation. `Projectile_ProcessDamageOnTarget` zeros damage for entity
+flag 0x4000000, signed itemDef+400 impact armor -1, ammo `penetration_impact` below that
+armor class, or nonzero entity+292 damage state. A type-1 vehicle with more than one
+eligible live pool-0 direct/one-nested occupant reduces damage by
+`min(count * damage_reduc_pp, damage_reduc_max)`. Health and armor use signed-16 storage
+semantics; damage clamps to remaining health, and itemDef+84 flag 0x40000000 applies the
+retail NoDie `health - 1` clamp before the wrapping signed-16 subtraction.
+
+Retail authority applies `health -= damage` (`@0x4e8127`); a kill calls
+`Score_ProcessKillEvent @ 0x4FD400` (the scoring leaf itself emits no messages). A PLAYER
+target (entity Flags & 0x100) also receives the projectile+688 multi-hit count, shooter
+slot at target+442, owner at +376, and damage callback event 4. The ordinary bullet port
+implements the collision, calculation, target gates, health/death staging, and impact
+presentation; its separate peer callback/global-record tail, full scoring integration,
+`armor_density` impact-energy path, and projectile-triggered explosive/AoE integration
+remain distinct follow-ups.
 
 **The `ammo.def` table** (`AmmoDef_LoadAll @ 0x40B0B0`, `Game_StartMission @0x52548a` —
 the file is literally `ammo.def`, same encrypted-ASCII `File_ParseASCIIFile` key
@@ -5589,8 +5637,8 @@ ammo.def parse (the §5.60 token subset incl. the flag/kztype tables; `def_parse
 pinned by `def_parse_ammo` against the real 75-entry fixture — the 5.56 block field-for-field)
 → `world::AmmoTable` + the weapon `round_type` → ammo-index resolve (`ammo_table_build`,
 the adm+84 pair equivalent) → `world::RoundSim` (512-slot pool; spawn SYNCHRONOUS with the
-0x06 ring append; velocity = ammo/62 per tick from the wire BAMs via the (90°−yaw) mission
-frame; per-tick segment test vs pool-0 organics + the bilinear terrain column; the kinetic
+0x06 ring append; velocity = ammo/62 per tick with wire yaw used directly as the mission
+bearing; per-tick segment test vs pool-0 organics + the bilinear terrain column; the kinetic
 damage number `min(62·|vel|,1219)·grains/875` floored/capped, clamped to remaining health)
 → death routing in `Server_TickUpdate` (S2C 0x13 `[victim][killerSource]` + S2C 0x1E
 standard-kill feed event to every non-host in-match connection; a dead HOST player queues
@@ -5598,14 +5646,97 @@ for the 620-tick respawn release back to its recorded spawn point at template he
 joiner's respawn rides its own deploy request) → engine feed `NovaSimulation::load_ammo_table`
 (mission_runtime.gd, after the armory). Pinned by `npruntime_round_sim_test` (build+resolve,
 spawn velocity/frame, 3-hit kill at 60/60/30, 0x13/0x1E bytes, no-auto-respawn for clients,
-host respawn snap). MVP deferrals tracked in round_sim.h + here: bone-zone multipliers
-(body-only 1.0), drag/gravity (no falloff yet), spread, vehicles/statics (armor threshold),
-explosion kill zones, arm-age child swap, 0x52/0x54/0x32 emits, scoring, the shooter-class
-0.9/1.1 bytes.
+host respawn snap). That historical MVP deliberately used coarse collision and damage;
+the current collision/damage status is the alignment record immediately below.
+
+**PHYSICS/COLLISION ALIGNMENT (2026-07-19; supersedes the MVP collision/damage
+deferrals above).** RoundSim now submits every tick segment to one authoritative
+`CollisionWorld::trace_projectile` query. Its candidate order is exactly terrain → water
+→ static proximity table → dynamic proximity table → person proximity table. Later
+classes replace only on strict `<`, so terrain wins a tie with water/static, static wins
+a tie with dynamic, and dynamic wins a tie with person. Within one static/dynamic table,
+the recovered face routine uses `<=`; later equal-distance faces, sections, and slots
+overwrite earlier ones. Hit classes therefore mean 0 terrain, 1 static, 2 dynamic,
+3 person, and 4 water—not “building” for class 3. Entity kind remains separate metadata.
+
+Static and dynamic bullets now use the exact Poly Collision LOD path
+`Physics_RaycastAgainstBoneCollision @ 0x4E4CB0`: inverse live section matrix; local
+segment/CFAC AABB overlap; `material_flags & 0x100` skip; foliage poly type 17 skip only
+for AmmoDef flag `0x04000000`; Q14 CNRM plane crossing and the recovered 0x1/0x800 facing
+predicate; integer hit distance; then the dominant-axis signed odd/even
+`Math_PointInTriangle2D @ 0x414050` test over CVRT vertices. Section-local indices,
+material flags, poly type, section/bone, face, transformed point, and normal survive into
+the hit. The `.3di` bridge retains CVRT/CNRM/CFAC/COBJ source order and exact fixed fields.
+One live Q22 matrix per COBJ can be published by the pose owner; a yaw/root matrix is used
+only as the explicit fallback. The inverse selector resolves the entity+0x158 signed-Q16
+uniform-scale override before itemDef+0x1B8: zero is the rigid-transpose sentinel, while a
+nonzero scale uses the recovered scale-aware inverse. COBJ offsets are already baked into
+the matrices and are never added a second time. Matrix state `m[15] & 3` disables
+projectile faces.
+
+CB, CL, and VC are BVOL names, not aliases for that face mesh. **VC means vehicle
+collision.** CB/type 1 remains the ordinary solid convex volume used by generic
+LOS/ground/contact rays. CL/type 4 is the platform/seat-anchor contact volume. VC/type 7
+is the vehicle-collision volume selected by the vehicle-collision/contact mask. Ordinary
+static/dynamic bullet narrow phase touches none of them.
+
+Persons use the separate recovered COBJ bone-sphere path. When a live section pose is
+published, bones are tested descending; extra radius starts at bullet radius + 0.05 u;
+bone 14 adds 65% of authored radius, other bones add 45%, and bones 15/16 cap at 0x3000.
+The highest qualifying bone supplies the hit zone and the retail
+`projection - authoredRadius/2` distance. Until organic pose publication is wired from
+the renderer, one characterized torso COBJ is the bounded fallback; it deliberately
+does not invent a bone zone. The person table returns its first qualifying entity rather
+than the geometrically nearest person. The FatBullets 0.1 u clamp is applied only when
+all recovered network/authority/setting/remote-player-owner gates hold.
+
+Terrain is skipped for AmmoDef `nocollide` 0x80. Water uses the mission water plane and
+requires a strict endpoint straddle. Shooter exclusion is released by shrapnel flag 4;
+the extra-ignore entity and the controller/driver/gunner carrier exclusions are carried
+by the same query. Dead and indestructible entities remain physical blockers.
+
+RoundSim now carries the recovered ordinary force order around that query. Each public
+float position/velocity is converted to Q16 for the tick; the nonzero sweep uses the old
+velocity, a consumed hit gets no post-sweep force, and a miss commits its fixed endpoint
+before gravity and `Entity_ApplyDragAndBounceForce` update the next-tick velocity. The
+exact-zero, submerged-slow, Ignore, UseOwnMove, NoGravity, dry/wet drag, overshoot,
+bin-1219, and deterministic below-stable branches are pinned by `projectile_combat`.
+
+Damage consequences are no longer organic-only. RoundSim implements the arming/dud
+substitution as a live logical child rather than an impact-row-only swap: an early entity
+contact resolves `notarmmedammo`, preserves owner/kinematics/elapsed age from the witnessed
+692-B projectile-prefix copy, moves the replacement to the contact, installs the dud ammo
+and max-age, and leaves the +692 trail/emitter slot behind. Exactly one eligible
+child→vehicle carrier hop; MP authority and MP-only OneShotKill; the exact kinetic path
+(`|velQ16|` capped at float `0x4EFFFE00`, signed-32 wrapping `*62`, arithmetic `>>16`,
+upper-only 1219 clamp, then signed-32 wrapping `*grains` and IDIV `/875`); posed person zones and the
+item-attrib-0x200 ×6 seat zones; the shooter's replicated per-ammo ×0.9/×1.1 class;
+ammo min/max; indestructible, signed itemDef+400 impact-armor, penetration, and
+entity+292 damage-state gates; vehicle occupant-count reduction; remaining-health and
+NoDie clamps; the special-zone entity flag `|=0x800`; vehicle/static health/death staging;
+and impact-row selection. A collision target with no ItemDef remains a physical impact but
+returns before damage calculation. OneShotKill
+returns 2000 before zone/class/min/max but still passes through the downstream armor,
+occupant, remaining-health, and NoDie gates.
+
+Remaining data/integration gaps are explicit: threshold-crossing `tumble_error` still
+needs the retail PRNG and local frame; `useownmove` needs its ammo-specific callbacks and
+guidance; `Projectile_ApplyDragDeceleration` still needs the `armor_density` impact-energy
+path; explosive/AoE, bounce, and shell physics remain separate; production animated
+organic section matrices are not yet published, so persons can use the bounded torso
+fallback; and `LiveRound` still exposes float position/velocity carriers around the Q16
+tick, losing low fixed bits at sufficiently large magnitudes. Spawn-time weapon spread,
+the entity bone-disable/alternate-husk source, terrain `.TIL` surface overrides, and the
+`lawr|fgrenade` pass-through branch also remain open. The retail replacement's distinct
+pool-3 slot identity, same-frame allocator visitation, and copied fields that have no
+`LiveRound` representation remain structural gaps; the in-slot child first advances next
+tick and does not invent them. No CB/CL/VC equivalence is guessed for any of these gaps.
+The peer-side post-damage callback/global-record tail is not yet represented separately
+from `RoundImpact`; production maintains the invariant that offline simulation is authoritative.
 
 **Impact effects routed (2026-07-13/14, the PR #237 particle pass).** Ordinary ballistic
 effects are produced at the physical collision, not at fire time:
-`Projectile_UpdatePhysics @ 0x4e9d70` resolves terrain/entity/building/water, and its
+`Projectile_UpdatePhysics @ 0x4e9d70` resolves terrain/static/dynamic/person/water, and its
 type-specific impact handler
 path calls `Projectile_SpawnImpactEffect @ 0x4e9b80`, and that presenter selects the AmmoDef
 effects-table row for the resolved tag. `Weapon_RaycastAndSpawnImpact @ 0x4e8460` is the
@@ -5637,7 +5768,9 @@ impact route is currently host/SP-only. Three ledger rows record the audit:
 **D-WPN-14 is resolved as a false reading** (ballistic arrival timing already matches),
 **D-WPN-15** carries selection legs:
 charmap sampler + `.TIL` overrides unported → terrain always takes the retail no-map dirt
-default; pool-0 organics only → entity hits always tag 2 player; no water plane; and
+default; person hits take tag 2; CFAC static/dynamic hits now carry `poly_type + 4`;
+water-plane hits take tag 11. The remaining object-tag gap is the building
+material-1→23 special case; and
 **D-WPN-16** tracks the genuinely unported Knife/instant-kill-zone family. Pinned by
 `nova_simulation_test.gd` (the local FIRE→impact route) and `npruntime_round_sim`
 (the bake rules + the tag-2 impact row).
@@ -5664,11 +5797,11 @@ D-NET-66 behavior (the standing-idle LOOK is the body-motor anim gap — the dea
 state is not streamed yet). D-NET-155's first cut was found half-broken (see its entry) and
 re-fixed; HUD count re-verifies v31.
 
-**Port follow-ups (witness at port time):** the payload writers
+**Remaining port follow-ups:** the payload writers
 (`BuildDeathNotifyPayload`, `GameEvent_BuildPayload`, `NetPacket_WriteThreeInt32s`,
 `NetPacket_WriteEntityHandleWithByte`, `NetPacket_WriteEntityHandleAndTeam`) byte layouts;
-the drag-table build (`@ 0x4E78D0`) and how the per-tick deceleration consumes the ammo
-`drag` fp16; the exact spread math (`Weapon_CalcRandomSpreadOffset` on the ammo `error`);
+the exact spawn-spread math (`Weapon_CalcRandomSpreadOffset` on the ammo `error`) and the
+threshold-crossing tumble PRNG/local frame;
 the SpawnRound default-path field flow into the 780-B round record (the array
 `@ 0xB7E1A8`, 128 groups × 4 × 780 B, active-flag bytes `@ 0xB7DFA0` — witnessed via
 `Weapon_UpdateAllProjectiles @ 0x4EC020`, zone floats RESOLVED: head 1.25 `flt_7C6F18`,

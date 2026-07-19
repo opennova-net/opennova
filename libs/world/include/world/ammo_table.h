@@ -90,11 +90,15 @@ struct AmmoTableEntry {
     int32_t arm_age_ticks = 0;      // +12 — a hit before arming swaps in notarmmed_ammo
     float spread_error = 0.0f;      // +24 ballistic dispersion (16.16 -> float)
     float drag = 0.0f;              // +28 (16.16 -> float)
+    int32_t drag_fp16 = 0;          // +28 exact source value; flight uses this carrier
     float bullet_radius = 0.0f;     // +32 hit-test radius (16.16 -> float)
+    int32_t bullet_radius_fp16 = 0; // +32 exact source value; collision uses this carrier
     int32_t spread_count = 0;       // +48 shotgun/claymore pellet count
     int32_t kztype = 0;             // word +44: kill-zone class 0..7 [orig: table @0x8133E0]
     int32_t kz_damage = 0;          // word +46
     int32_t weight_in_grains = 0;   // +184 — the kinetic damage mass term [orig: @0x4ecb1a]
+    int32_t min_stable_velocity = 0; // +176 speed-table index threshold
+    int32_t tumble_error_fp16 = 0;  // +180; exact kick size, random frame still deferred
     int32_t min_damage = 0;         // +188 damage floor [orig: @0x4ecb3a]
     int32_t max_damage = 0;         // +192 damage cap when > 0 [orig: @0x4ecb42]
     int32_t penetration_impact = 0; // +196 — must reach the target itemDef+400 armor threshold

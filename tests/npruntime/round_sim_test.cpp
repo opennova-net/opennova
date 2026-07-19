@@ -180,6 +180,9 @@ int main() {
 		defs[1].weight_in_grains = 62;
 		defs[1].max_age_ticks = 186;
 		defs[1].kztype = DEF_AMMO_KZ_C4;
+		defs[1].drag_fp16 = 65536;
+		defs[1].min_stable_velocity = 101;
+		defs[1].tumble_error_fp16 = 655;
 		defs[1].bullet_radius_fp16 = 182;
 		// The per-surface impact rows (the real AMMO_AK47_556MM shape): the bake maps
 		// tag names to the canonical table slots, keeps the FIRST duplicate, empties
@@ -218,6 +221,10 @@ int main() {
 		// @ 0x813420 — player=2, dirt=5, zip=3].
 		const w::AmmoTableEntry *a = world.ammo.by_index(1);
 		if (!expect(a != nullptr, "ammo 1 valid")) return 1;
+		if (!expect(a->drag_fp16 == 65536 && a->min_stable_velocity == 101 &&
+		                    a->tumble_error_fp16 == 655 && a->bullet_radius_fp16 == 182,
+		            "exact fixed-point flight fields survive the ammo-table bake"))
+			return 1;
 		if (!expect(a->impact_effects[5].effect == "Effect_AmHitDirt" &&
 		                    a->impact_effects[5].sound == "IMP_BULLET_DIRT",
 		            "dirt row baked at tag 5 (first duplicate wins)"))
@@ -232,6 +239,10 @@ int main() {
 		if (!expect(a->impact_effects[11].effect.empty() && a->impact_effects[11].sound.empty(),
 		            "unauthored tags stay empty"))
 			return 1;
+		// This integration scenario isolates the existing fire/hit/death chain;
+		// aerodynamic drag itself is pinned by projectile_combat_test's exact vectors.
+		world.ammo.entries[1].drag = 0.0f;
+		world.ammo.entries[1].drag_fp16 = 0;
 	}
 
 	ns::LoopbackChannel loop;
@@ -395,7 +406,11 @@ int main() {
 	// releases at spawn health/position. Retail corpses remain ballistic
 	// colliders (the proximity walk does not skip Flags bit 1 / dead), so move
 	// the already-verified client corpse off this unrelated line-of-fire fixture.
-	world.registry.get(hc)->position.y = 10.0f;
+	// Retail checks the dead-state gate after geometric impact, so a corpse is
+	// not transparent to later rounds. Move this completed victim off the firing
+	// lane before the separate host-player kill scenario below; the focused
+	// projectile_combat test pins corpse interception itself.
+	world.registry.get(hc)->position.y = 20.0f;
 	for (int shot = 0; shot < 3; ++shot) {
 		dispatch_fire(roster[1], roster, world,
 		              fire_body(hb.packed, 5, 0, 0, muzzle_z, 0, 0));

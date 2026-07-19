@@ -8,6 +8,14 @@ const PresentAimOverlay := preload("res://engine/world/present_aim_overlay.gd")
 # world + AI system, tick it, and confirm the AI walks entities along their authored route.
 # This is the in-Godot end of step 1 (promotion) + step 2 (locomotion).
 
+func test_host_projectile_options_roundtrip() -> void:
+	var sim := NovaSimulation.new()
+	sim.configure_host_session({"fat_bullets": true, "one_shot_kill": true})
+	var options: Dictionary = sim.get_host_session_config()
+	assert_true(bool(options.get("fat_bullets", false)))
+	assert_true(bool(options.get("one_shot_kill", false)))
+	sim.free()
+
 func test_demo_mission_promotes() -> void:
 	var sim := NovaSimulation.new()
 	sim.build_demo_mission()
@@ -450,13 +458,19 @@ func test_local_fire_spawns_the_authoritative_round_and_impact() -> void:
 	# (90 - heading) flip flew the shot along +x and only an east-side target
 	# could pass (the compensating-error pair the fp_impact_probe pinned;
 	# ledger D-WPN-18).
-	assert_false(md.add_entity(NovaMissionData.KIND_ORGANIC, 102072,
+	# Use the fixture's Generic Soldier (wire id 5311 -> items.def id 105311),
+	# then resolve traits through the same production seam as mission_runtime. Retail
+	# returns before projectile damage when the struck entity has no ItemDef.
+	assert_false(md.add_entity(NovaMissionData.KIND_ORGANIC, 5311,
 			Vector3(0, 8, 0), Vector3.ZERO).is_empty())
 	var sim := NovaSimulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 	var root := NovaResourceRoot.new()
 	assert_eq(root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/def")), OK)
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load_from_resource_root(root, "items.def"), OK)
+	sim.resolve_item_traits(item_db)
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
 	assert_eq(sim.load_ammo_table(root, "ammo.def"), OK)
 	assert_eq(sim.get_local_player_weapon_name(), "WPN_M4AUTO")
@@ -563,6 +577,7 @@ func test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun() -> void:
 	var item_db := NovaItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path(
 			"res://../fixtures/def/items.def")), OK)
+	sim.resolve_item_traits(item_db)
 	var data := NovaObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(
 			"res://../fixtures/threedi/3di3/CharModel.3di")), OK)
@@ -694,6 +709,7 @@ func test_mounted_rendered_head_matrix_matches_collision_and_authoritative_shot(
 	var item_db := NovaItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path(
 			"res://../fixtures/def/items.def")), OK)
+	sim.resolve_item_traits(item_db)
 	var data := NovaObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(
 			"res://../fixtures/threedi/3di3/CharModel.3di")), OK)

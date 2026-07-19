@@ -2,9 +2,11 @@
 // tracked reimpl deferrals. docs/net/novaworld-net-re.md §5.60.
 #include "world/round_sim.h"
 
+#include <algorithm>
+#include <array>
 #include <cmath>
+#include <limits>
 
-#include "terrain/height_field.h"
 #include "world/ammo_table.h"
 #include "world/angle.h"
 #include "world/collision.h"
@@ -18,125 +20,282 @@ namespace {
 constexpr double kPi = 3.14159265358979323846;
 // BAM32 -> radians (full turn = 2^32) [orig: engine-wide BAM convention, angle.h].
 constexpr double kRadPerBam = (2.0 * kPi) / 4294967296.0;
+constexpr int32_t kProjectileGravityQ16 = 167;
+constexpr int32_t kDragTableSize = 1220;
 
-// Queue the round's kill zone at its stop [orig: the ammo-class dispatch —
-// kz-carrying classes push the 52-B explosion queue (WeaponEffect_QueueExplosion
-// @0x4e8330) with themselves as the ammo; type = the kztype word, radius = the
-// entry's kz_maxradius (no override). Knife/medic/bullet classes never do;
-// §24.]
-void detonate_round(World &world, const LiveRound &r, const Vec3 &at,
+// Queue an explosive round's kill zone at its stop. Knife/medic/bullet classes
+// never take this projectile detonation path.
+void detonate_round(World &world, const LiveRound &round, const Vec3 &at,
                     const AmmoTableEntry &ammo) {
     if (ammo.kz_maxradius <= 0.0f || ammo.kz_damage == 0) return;
-    if (ammo.kztype != ammo_kz::kStandard && ammo.kztype != ammo_kz::kRadiusBlast &&
+    if (ammo.kztype != ammo_kz::kStandard &&
+        ammo.kztype != ammo_kz::kRadiusBlast &&
         ammo.kztype != ammo_kz::kC4 && ammo.kztype != ammo_kz::kSlash)
         return;
-    ExplosionEntry e;
-    e.pos = at;
-    e.dir_bam = 0;
-    e.type = ammo.kztype;
-    e.ammo_index = r.ammo_index;
-    e.owner = r.owner;
-    e.hit_word = r.shot_seq;
-    e.radius_override = 0.0f;
-    world.explosions.queue_explosion(world, e);
+    ExplosionEntry explosion;
+    explosion.pos = at;
+    explosion.dir_bam = 0;
+    explosion.type = ammo.kztype;
+    explosion.ammo_index = round.ammo_index;
+    explosion.owner = round.owner;
+    explosion.hit_word = round.shot_seq;
+    explosion.radius_override = 0.0f;
+    world.explosions.queue_explosion(world, explosion);
 }
 
-// Bounded compatibility shape for a person whose graphic cannot supply a
-// usable authored COBJ model. Normal organic hits use the posed section walk;
-// this fallback retains neutral damage and a synthetic torso reaction bone.
-// The values are exported from round_sim.h and shared with the F3 hitbox view.
-constexpr float kOrganicCenterZ = kOrganicStandInCenterZ;
-constexpr float kOrganicRadius = kOrganicStandInRadius;
+void push_round_debug(RoundSim &sim, const RoundDebugEvent &event) {
+    sim.debug_trail[static_cast<size_t>(sim.debug_trail_next)] = event;
+    sim.debug_trail_next =
+        (sim.debug_trail_next + 1) % RoundSim::kDebugTrailCap;
+    if (sim.debug_trail_count < RoundSim::kDebugTrailCap)
+        ++sim.debug_trail_count;
+}
 
-struct SegHit {
-    bool hit = false;
-    float t = 1.0e9f;
+struct DragBand {
+    int32_t upper_fps;
+    double coefficient;
+    double exponent;
 };
 
-// Earliest intersection parameter of segment p0->p1 with a sphere. A segment
-// STARTING inside the sphere hits at t = 0 (the round is already in contact),
-// not at the exit point — the exit-t reading made point-blank stand-in hits
-// land on the far side.
-SegHit segment_vs_sphere(const Vec3 &p0, const Vec3 &p1, const Vec3 &c, float r) {
-    SegHit out;
-    const float dx = p1.x - p0.x, dy = p1.y - p0.y, dz = p1.z - p0.z;
-    const float fx = p0.x - c.x, fy = p0.y - c.y, fz = p0.z - c.z;
-    const float a = dx * dx + dy * dy + dz * dz;
-    if (a <= 0.0f) return out;
-    const float cc = fx * fx + fy * fy + fz * fz - r * r;
-    if (cc <= 0.0f) { // started inside
-        out.hit = true;
-        out.t = 0.0f;
-        return out;
-    }
-    const float b = 2.0f * (fx * dx + fy * dy + fz * dz);
-    const float disc = b * b - 4.0f * a * cc;
-    if (disc < 0.0f) return out;
-    const float sq = std::sqrt(disc);
-    const float t = (-b - sq) / (2.0f * a);
-    if (t < 0.0f || t > 1.0f) return out;
-    out.hit = true;
-    out.t = t;
-    return out;
+// Ballistic retardation bands used to build g_ProjectileDragTable.
+// [orig: Projectile_InitDragTable, consumed by Entity_ApplyDragAndBounceForce
+// @0x4E5EC0]. The source sweep is 0..3999 ft/s; repeated metric-bin writes are
+// intentional, and bin 1219 remains the zero-initialized BSS edge entry.
+constexpr std::array<DragBand, 40> kDragBands{{
+    {65,   .000052062141073205883, 2.0},
+    {100,  .000057926849570745460, 1.975},
+    {250,  .000072252473275904129, 1.925},
+    {550,  .000093379919571313886, 1.875},
+    {600,  .000092265570919734271, 1.875},
+    {640,  .000057111746887342401, 1.95},
+    {700,  .000018390150958995790, 2.125},
+    {750,  .000003569169672385163, 2.375},
+    {780,  6.824429329105383e-7, 2.625},
+    {810,  1.2911592008462161e-7, 2.875},
+    {860,  1.0455132639662721e-8, 3.25},
+    {905,  3.5661294709749512e-10, 3.75},
+    {945,  1.1850970456898540e-11, 4.25},
+    {980,  3.8550994248074508e-13, 4.75},
+    {1025, 2.9169382641004953e-14, 5.125},
+    {1060, 1.2285973707747459e-14, 5.25},
+    {1100, 2.9382369548473309e-14, 5.125},
+    {1150, 4.0701579611478821e-13, 4.75},
+    {1185, 1.3797465900250881e-11, 4.25},
+    {1220, 4.7454695371573713e-10, 3.75},
+    {1280, 1.6579563210676119e-8, 3.25},
+    {1315, 2.4194851918955649e-7, 2.875},
+    {1360, 1.4569223287202981e-6, 2.625},
+    {1420, 8.8477425816744163e-6, 2.375},
+    {1520, 5.4318962664623510e-5, 2.125},
+    {1595, 1.9544732100373980e-4, 1.95},
+    {1730, 4.0861467973051169e-4, 1.85},
+    {1810, 8.6099575924682592e-4, 1.75},
+    {1890, .0015110010288919039, 1.675},
+    {2015, .0022033295422978091, 1.625},
+    {2225, .0032229422712623359, 1.575},
+    {2460, .0039043682186912492, 1.55},
+    {2680, .0032095597831298811, 1.575},
+    {2830, .0021628872029303761, 1.625},
+    {2960, .0014537215601872859, 1.675},
+    {3130, .00097480736940786959, 1.725},
+    {3295, .00065204218718926618, 1.775},
+    {3450, .00043499051111156362, 1.825},
+    {3680, .00028947510268197461, 1.875},
+    {3999, .00019203392687556139, 1.925},
+}};
+
+const std::array<int32_t, kDragTableSize> &projectile_drag_table() {
+    static const std::array<int32_t, kDragTableSize> table = [] {
+        std::array<int32_t, kDragTableSize> values{};
+        for (int32_t feet_per_second = 0; feet_per_second <= 3999; ++feet_per_second) {
+            const DragBand *band = &kDragBands.back();
+            for (const DragBand &candidate : kDragBands) {
+                if (feet_per_second <= candidate.upper_fps) {
+                    band = &candidate;
+                    break;
+                }
+            }
+            const int32_t destination = feet_per_second * 381 / 1250;
+            const int64_t raw = static_cast<int64_t>(
+                std::pow(static_cast<double>(feet_per_second), band->exponent) *
+                band->coefficient * 19975.3728);
+            if (destination >= 0 && destination < kDragTableSize)
+                values[static_cast<size_t>(destination)] = static_cast<int32_t>(raw / 62);
+        }
+        return values;
+    }();
+    return table;
 }
 
-// The witnessed round broad phase [orig: the per-slot gates in
-// Projectile_RaycastProximitySlots @0x4e53d4-0x4e554a]: per-axis
-// |center − rayBoxCenter| ≤ radius + halfExtent, then the UNCLAMPED
-// perpendicular distance from the sphere center to the ray LINE ≤ radius.
-// A tick segment lying entirely INSIDE the bound sphere passes trivially —
-// the previous segment-vs-sphere gate required a boundary crossing within
-// the tick, so standing inside a big building's bound sphere skipped the
-// building entirely and rounds crossed its walls with no face test (the
-// shoot-through-walls report; D-ITEM-13d closed).
-bool round_broad_phase(const Vec3 &p0, const Vec3 &p1, const Vec3 &c, float r) {
-    const float hx = std::fabs(p1.x - p0.x) * 0.5f;
-    const float hy = std::fabs(p1.y - p0.y) * 0.5f;
-    const float hz = std::fabs(p1.z - p0.z) * 0.5f;
-    if (std::fabs((p0.x + p1.x) * 0.5f - c.x) > r + hx) return false;
-    if (std::fabs((p0.y + p1.y) * 0.5f - c.y) > r + hy) return false;
-    if (std::fabs((p0.z + p1.z) * 0.5f - c.z) > r + hz) return false;
-    const float dx = p1.x - p0.x, dy = p1.y - p0.y, dz = p1.z - p0.z;
-    const float len2 = dx * dx + dy * dy + dz * dz;
-    if (len2 <= 0.0f)
-        return true; // zero-length segment inside the AABB gate: the axis test decided
-    const float t = ((c.x - p0.x) * dx + (c.y - p0.y) * dy + (c.z - p0.z) * dz) / len2;
-    const float px = p0.x + dx * t - c.x;
-    const float py = p0.y + dy * t - c.y;
-    const float pz = p0.z + dz * t - c.z;
-    return px * px + py * py + pz * pz <= r * r;
+int32_t fixed_magnitude(const FixedVec3 &v) {
+    const double magnitude = std::sqrt(static_cast<double>(v.x) * v.x +
+                                       static_cast<double>(v.y) * v.y +
+                                       static_cast<double>(v.z) * v.z);
+    // Retail caps immediately below the signed ftol overflow boundary.
+    constexpr double kFtolLimit = 2147418112.0; // float bits 0x4EFFFE00
+    return static_cast<int32_t>(std::min(magnitude, kFtolLimit));
+}
+
+// Convert a modulo-2^32 result to the signed value represented by the same bits
+// without relying on implementation-defined unsigned-to-signed conversion.
+int32_t signed_from_u32(uint32_t value) {
+    if (value <= static_cast<uint32_t>(std::numeric_limits<int32_t>::max()))
+        return static_cast<int32_t>(value);
+    return -1 - static_cast<int32_t>(std::numeric_limits<uint32_t>::max() - value);
+}
+
+int32_t wrapped_signed_product(int32_t lhs, int32_t rhs) {
+    return signed_from_u32(static_cast<uint32_t>(lhs) * static_cast<uint32_t>(rhs));
+}
+
+int32_t drag_speed_index(int32_t magnitude_q16) {
+    const int64_t scaled = static_cast<int64_t>(magnitude_q16) * 62;
+    if (scaled <= 0) return 0;
+    const int64_t index = scaled >> 16;
+    return static_cast<int32_t>(index > 1219 ? 1219 : index);
+}
+
+int32_t arithmetic_shift_right_16(int64_t value) {
+    if (value >= 0) return static_cast<int32_t>(value >> 16);
+    return -static_cast<int32_t>((-value + 0xffff) >> 16);
+}
+
+Vec3 vec_from_fixed(const FixedVec3 &v) {
+    return Vec3{static_cast<float>(from_fixed(v.x)),
+                static_cast<float>(from_fixed(v.y)),
+                static_cast<float>(from_fixed(v.z))};
+}
+
+void apply_aerodynamic_drag(FixedVec3 &velocity, const AmmoTableEntry &ammo,
+                            int32_t position_z_q16, int32_t water_z_q16) {
+    if (ammo.drag_fp16 == 0) return;
+
+    const int32_t old_magnitude = fixed_magnitude(velocity);
+    if (old_magnitude == 0) return;
+    const int32_t old_index = drag_speed_index(old_magnitude);
+    const int32_t raw = projectile_drag_table()[static_cast<size_t>(old_index)];
+    const int64_t first_division =
+        (static_cast<int64_t>(raw) << 16) / ammo.drag_fp16;
+    const int64_t scaled_drag = first_division / 62;
+    const bool underwater = water_z_q16 != 0 && position_z_q16 <= water_z_q16;
+    const int64_t drag_step = underwater ? scaled_drag * 25 : scaled_drag;
+
+    const int32_t direction[3] = {
+        static_cast<int32_t>((-static_cast<int64_t>(velocity.x) * 65536) / old_magnitude),
+        static_cast<int32_t>((-static_cast<int64_t>(velocity.y) * 65536) / old_magnitude),
+        static_cast<int32_t>((-static_cast<int64_t>(velocity.z) * 65536) / old_magnitude),
+    };
+    const int32_t delta[3] = {
+        arithmetic_shift_right_16(drag_step * direction[0] + 0x8000),
+        arithmetic_shift_right_16(drag_step * direction[1] + 0x8000),
+        arithmetic_shift_right_16(drag_step * direction[2] + 0x8000),
+    };
+
+    velocity.x += delta[0];
+    velocity.y += delta[1];
+    velocity.z += delta[2];
+    const int64_t overshoot_dot = static_cast<int64_t>(delta[0]) * velocity.x +
+                                  static_cast<int64_t>(delta[1]) * velocity.y +
+                                  static_cast<int64_t>(delta[2]) * velocity.z;
+    if (overshoot_dot > 0) velocity = FixedVec3{};
+
+    const int32_t post_index = drag_speed_index(fixed_magnitude(velocity));
+    if (post_index < ammo.min_stable_velocity) {
+        velocity.x -= static_cast<int32_t>((static_cast<int64_t>(velocity.x) + 16) >> 5);
+        velocity.y -= static_cast<int32_t>((static_cast<int64_t>(velocity.y) + 16) >> 5);
+        if (velocity.z > 0)
+            velocity.z -= static_cast<int32_t>((static_cast<int64_t>(velocity.z) + 16) >> 5);
+        // This apparently inverted gate is retail behavior: the ordinary gravity
+        // pass skipped NoGravity, then the below-stable branch adds the same step.
+        if ((ammo.flags & 0x100u) != 0) velocity.z -= kProjectileGravityQ16;
+
+        // A threshold crossing also applies tumble_error in a randomized local
+        // frame. Its gate is characterized, but the PRNG/frame producer is not;
+        // deterministic damping above is the exact non-random portion.
+        (void)old_index;
+    }
 }
 
 // The kinetic damage number [orig: Weapon_CalcImpactDamage @ 0x4EC920]. `vel` is
-// units/tick; the original computes (62 * |vel|_16.16) >> 16 = units/second, clamps to
-// 1219 (@0x4ecad6), scales by weight_in_grains / 875 (@0x4ecb1a), applies the person
-// hit-zone multiplier selected by ray[32] and the shooter-class byte (0.9 / 1.1 —
-// the slot+89688 per-ammo class table, unported), floors at min_damage (@0x4ecb3a) and
-// caps at max_damage when > 0 (@0x4ecb42). Authority-only by construction: only the host
-// runs this sim at all (the original returns 0 for non-authority peers @0x4ec933).
-int32_t calc_impact_damage(const Vec3 &vel, const AmmoTableEntry &ammo,
-                           int32_t person_section = -1) {
-    const double speed_per_tick =
-            std::sqrt(double(vel.x) * vel.x + double(vel.y) * vel.y + double(vel.z) * vel.z);
-    int32_t speed_scaled = static_cast<int32_t>(62.0 * speed_per_tick);
+// units/tick; the original wraps 62 * |vel|_16.16 as signed 32-bit, shifts it by 16,
+// applies only an upper clamp of 1219 (@0x4ecad6), then wraps the signed speed*weight
+// product before /875 (@0x4ecb1a). It next applies the hit-zone
+// multiplier (now fed by posed COBJ hit zones) and the shooter-class byte (0.9 / 1.1 —
+// replicated from the loadout's per-ammo class table), floors at min_damage
+// (@0x4ecb3a), and caps at max_damage when > 0 (@0x4ecb42). Multiplayer authority and
+// OneShotKill are explicit inputs, including the non-authority zero return @0x4ec933.
+int32_t calc_impact_damage(const FixedVec3 &velocity_q16, const AmmoTableEntry &ammo,
+                           int32_t hit_zone, Entity &target, const Entity *shooter,
+                           int32_t ammo_index, const World &world) {
+    if (world.mp_session) {
+        if (!world.projectile_authority) return 0;
+        if (world.one_shot_kill) return 2000;
+    }
+    int32_t speed_scaled = arithmetic_shift_right_16(
+        wrapped_signed_product(fixed_magnitude(velocity_q16), 62));
     if (speed_scaled >= 1219) speed_scaled = 1219;
-    int32_t damage = speed_scaled * ammo.weight_in_grains / 875;
-    // [orig: Weapon_CalcImpactDamage @0x4ec9a1..0x4ec9f3] Person damage reads
-    // ray[32], the FINAL/lowest overlap from the reverse section walk. ray[31]
-    // independently drives reactions/death selection and must not be substituted.
-    float zone_multiplier = 1.0f;
-    if (person_section >= 0 && person_section <= 4)
-        zone_multiplier = 1.25f;
-    else if ((person_section >= 9 && person_section <= 12) ||
-             (person_section >= 15 && person_section <= 18))
-        zone_multiplier = 0.5f;
-    else if (person_section == 13 || person_section == 14)
-        zone_multiplier = 3.0f;
-    damage = static_cast<int32_t>(static_cast<float>(damage) * zone_multiplier);
-    // Shooter-class multiplier remains a tracked deferral.
+    int32_t damage = wrapped_signed_product(speed_scaled, ammo.weight_in_grains) / 875;
+    if (target.item_type == 3) {
+        double zone_scale = 1.0;
+        if ((target.item_attrib & 0x200u) != 0) {
+            if (hit_zone == 2 || hit_zone == 3 || hit_zone == 6 || hit_zone == 7) {
+                target.flags |= 0x800u;
+                zone_scale = 6.0;
+            }
+        } else if (hit_zone >= 0 && hit_zone <= 4) {
+            zone_scale = 1.25;
+        } else if ((hit_zone >= 9 && hit_zone <= 12) ||
+                   (hit_zone >= 15 && hit_zone <= 18)) {
+            zone_scale = 0.5;
+        } else if (hit_zone == 13 || hit_zone == 14) {
+            target.flags |= 0x800u;
+            zone_scale = 3.0;
+        }
+        damage = static_cast<int32_t>(static_cast<double>(damage) * zone_scale);
+
+        uint8_t damage_class = 0;
+        if (shooter != nullptr && ammo_index >= 0 &&
+            static_cast<size_t>(ammo_index) < shooter->ammo_damage_class.size())
+            damage_class = shooter->ammo_damage_class[static_cast<size_t>(ammo_index)];
+        if (damage_class == 1)
+            damage = static_cast<int32_t>(static_cast<double>(damage) *
+                                          static_cast<double>(0.9f));
+        else if (damage_class == 2)
+            damage = static_cast<int32_t>(static_cast<double>(damage) *
+                                          static_cast<double>(1.1f));
+    }
     if (damage <= ammo.min_damage) damage = ammo.min_damage;
     if (ammo.max_damage > 0 && damage >= ammo.max_damage) damage = ammo.max_damage;
     return damage;
+}
+
+int vehicle_occupant_count(const World &world, EntityHandle vehicle) {
+    int count = 0;
+    world.registry.for_each([&](const Entity &candidate) {
+        if (candidate.handle.pool() != 0) return;
+        if (!candidate.has_item_def) return;
+        if ((candidate.flags & 2u) != 0) return;
+        if (candidate.ground_target == vehicle) {
+            ++count;
+            return;
+        }
+        const Entity *parent = world.registry.get(candidate.ground_target);
+        if (parent != nullptr && parent->ground_target == vehicle) ++count;
+    });
+    return count;
+}
+
+int32_t apply_vehicle_occupant_scale(const World &world, const Entity &target,
+                                     int32_t damage) {
+    if (target.item_type != 1 || !target.has_item_def || damage <= 0) return damage;
+    const int count = vehicle_occupant_count(world, target.handle);
+    if (count <= 1) return damage;
+    double factor = static_cast<double>(count) *
+                    static_cast<double>(target.damage_reduc_pp);
+    if (factor > static_cast<double>(target.damage_reduc_max))
+        factor = static_cast<double>(target.damage_reduc_max);
+    const int32_t reduction = static_cast<int32_t>(static_cast<double>(damage) * factor);
+    return damage - reduction;
 }
 
 // Normalized flight direction for the impact descriptor
@@ -264,607 +423,351 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params) {
     return slot;
 }
 
-// Ring write for the F3 Rounds view — every resolved outcome lands here.
-static void push_round_debug(RoundSim &sim, const RoundDebugEvent &ev) {
-    sim.debug_trail[static_cast<size_t>(sim.debug_trail_next)] = ev;
-    sim.debug_trail_next = (sim.debug_trail_next + 1) % RoundSim::kDebugTrailCap;
-    if (sim.debug_trail_count < RoundSim::kDebugTrailCap) ++sim.debug_trail_count;
-}
-
 void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                     CollisionWorld *collision) {
-    // The trail pool drains once per logic tick even with no live rounds — dead
-    // rounds' streaks fade out over cap + count ticks [orig: CEffectEmitterPool_Tick
-    // runs unconditionally per frame from Game_ProcessMainFrame @ 0x526758].
+    // Keep the shared query seam synchronized even on an idle round tick; a
+    // mission transition may clear or replace the terrain before another
+    // collision consumer runs.
+    CollisionWorld *queries = collision != nullptr ? collision : world.collision;
+    if (queries != nullptr) queries->terrain = terrain;
     if (active_count <= 0) {
         trails.tick();
         return;
     }
 
-    const size_t pool0 = world.registry.pool_capacity(0);
+    // Production worlds use the host-owned mission CollisionWorld. Headless
+    // unit callers without one still route through the same query interface.
+    CollisionWorld fallback_collision;
+    if (queries == nullptr) {
+        fallback_collision.terrain = terrain;
+        // Standalone/headless World tests have no AiSystem to publish the
+        // per-tick proximity snapshot. Build the same pool tables locally so
+        // the person pass keeps its retail table semantics.
+        fallback_collision.build_tick_tables(world);
+        queries = &fallback_collision;
+    }
 
     for (int i = 0; i < kCapacity; ++i) {
         LiveRound &r = rounds[static_cast<size_t>(i)];
         if (!r.active) continue;
 
-        // Lifetime [orig: projectile+684 remaining-age check @0x4e9dae]. An
-        // explosive round expiring in flight detonates where it dies — the
-        // timed-fuze leg (hand grenades author max_age as the fuze)
-        // [orig: the ammo-class kz dispatch, RoundData_SpawnRound @0x4ec0d0 /
-        // WeaponEffect_QueueExplosion @0x4e8330; §24].
         if (++r.age_ticks > r.max_age_ticks) {
             const AmmoTableEntry *fuze_ammo = world.ammo.by_index(r.ammo_index);
-            if (fuze_ammo != nullptr) detonate_round(world, r, r.pos, *fuze_ammo);
-            // Round death: final trail point + drain request [orig:
-            // Projectile_ReleaseEffects @ 0x4e8280 — append the current anchor,
-            // CEffectChannel_RequestKill].
+            if (fuze_ammo != nullptr)
+                detonate_round(world, r, r.pos, *fuze_ammo);
             if (r.trail_slot >= 0) {
                 trails.append(r.trail_slot, r.pos);
                 trails.request_kill(r.trail_slot);
             }
-            {
-                RoundDebugEvent ev;
-                ev.tick = world.logic_tick;
-                ev.kind = RoundDebugEvent::kExpired;
-                ev.shooter = r.owner.packed;
-                ev.ammo_index = r.ammo_index;
-                ev.p0 = r.pos;
-                ev.p1 = r.pos;
-                ev.hit = r.pos;
-                push_round_debug(*this, ev);
-            }
+            RoundDebugEvent event;
+            event.tick = world.logic_tick;
+            event.kind = RoundDebugEvent::kExpired;
+            event.shooter = r.owner.packed;
+            event.ammo_index = r.ammo_index;
+            event.p0 = r.pos;
+            event.p1 = r.pos;
+            event.hit = r.pos;
+            push_round_debug(*this, event);
             r.active = false;
             --active_count;
             continue;
         }
 
-        // One trail point per tick at the PRE-move position — the streak head trails
-        // one tick behind the round [orig: Projectile_UpdatePhysics appends via
-        // Projectile_GetTrailAnchorPos before the position update, guided @ 0x4ea04f
-        // and ballistic @ 0x4ea97a; the rocket-spiral anchor offset (+0x2AC block)
-        // waits on the guided-round port].
         if (r.trail_slot >= 0) trails.append(r.trail_slot, r.pos);
 
-        const Vec3 p0 = r.pos;
-        Vec3 p1{p0.x + r.vel.x, p0.y + r.vel.y, p0.z + r.vel.z};
-
-        // Earliest hit along this tick's segment: pool-1/2 items through the
-        // bound-sphere broad phase + CFAC narrow phase, then pool-0 organics
-        // through the posed COBJ sphere walk [orig:
-        // Projectile_RaycastProximitySlots @0x4e5340 (pools 2 then 1: per-slot
-        // AABB + perpendicular-distance sphere gates) ->
-        // Physics_RaycastAgainstBoneCollision @0x4e4cb0 per candidate; the hit
-        // record carries the face material for the impact-effect pick].
-        float best_t = 2.0f;
-        Entity *best_target = nullptr;
-        uint16_t best_handle = 0xFFFF;
-        bool best_is_item = false;
-        uint8_t best_material = 0; // CFAC byte or fixed organic material 19
-        int16_t best_section = -1; // item section or organic reaction bone
-        int16_t best_secondary_section = -1; // organic ray[32]
-        int16_t best_damage_section = -1; // organic ray[32], posed-model hits only
-        bool best_organic_fallback = false;
-        int32_t best_face = -1;    // (-1 = sphere stand-in) — the F3 Rounds view
-        bool best_had_faces = false;
-        float best_impact_t = 2.0f; // person effect point backs off by 0x800
         const AmmoTableEntry *ammo = world.ammo.by_index(r.ammo_index);
-        // The exclusion set beyond the shooter [orig: the ray[17..20] build in
-        // Projectile_UpdatePhysics @0x4ea2a5-0x4ea2f8, compared by every pool
-        // walk @0x4e5572/@0x4e5782/@0x4e5983/@0x4e4c4e]: a Controller/Gunner/
-        // Driver occupant never hits their own mount (a PASSENGER's rounds
-        // still can — seat type 1 fills no slot), and a Gunner also skips the
-        // mount's standing-on carrier (mount+40 groundEntity). The fourth slot
-        // (+388 <- the fire request's +40) is an open witness
-        // (docs/world/world-wac-ai-re.md D-ITEM-11).
-        EntityHandle exclude_mount;
-        EntityHandle exclude_carrier;
-        if (const Entity *sh = world.registry.get(r.owner);
-            sh != nullptr && sh->mounted &&
-            (sh->mount_type == SeatType::Controller ||
-             sh->mount_type == SeatType::Gunner || sh->mount_type == SeatType::Driver)) {
-            exclude_mount = sh->mount_target;
-            if (sh->mount_type == SeatType::Gunner) {
-                if (const Entity *m = world.registry.get(sh->mount_target))
-                    exclude_carrier = m->ground_target;
-            }
-        }
-        for (int pool = 2; pool >= 1; --pool) {
-            const size_t cap = world.registry.pool_capacity(pool);
-            for (size_t s = 0; s < cap; ++s) {
-                const EntityHandle h = EntityHandle::make(pool, static_cast<int>(s));
-                if (r.owner.valid() && h.packed == r.owner.packed) continue;
-                if (exclude_mount.valid() && h.packed == exclude_mount.packed) continue;
-                if (exclude_carrier.valid() && h.packed == exclude_carrier.packed) continue;
-                Entity *e = world.registry.get(h);
-                if (e == nullptr || e->hidden) continue;
-                if ((e->engine_flags & 0x02000001u) != 0) continue; // [orig: the pool-walk
-                // Flags&1 skip @0x4eaf15-family] — dead husks still STOP rounds
-                // (the husk collision swap keeps wrecks solid [orig: the +52
-                // model substitution in raycast_against_entity_pool @0x538720]).
-                // bound_radius == 0 = no placed model (markers, trigger volumes) —
-                // the proximity-list-residency equivalence: model-less entities
-                // never enter the walked slices.
-                const float bound = e->bound_radius;
-                if (bound <= 0.0f) continue;
-                // The witnessed AABB + line-distance gate — NOT a segment-
-                // sphere crossing test, so segments entirely inside the bound
-                // sphere still reach the face walk [orig: @0x4e53d4-0x4e554a].
-                if (!round_broad_phase(p0, p1, e->position, bound)) continue;
-                // The face narrow phase (husk-aware) — a sphere graze that
-                // misses every face lets the round FLY ON, and the face hit
-                // carries the material for the impact tag [orig:
-                // Physics_RaycastAgainstBoneCollision @0x4e4cb0]. No face mesh
-                // on the model -> the sphere stand-in decides (D-ITEM-1),
-                // hitting at t=0 when the segment starts inside it.
-                float item_t = 2.0f;
-                uint8_t item_material = 0;
-                int16_t item_section = -1;
-                int32_t item_face = -1;
-                bool item_had_faces = false;
-                if (collision != nullptr) {
-                    const int32_t s16[3] = {static_cast<int32_t>(p0.x * 65536.0f),
-                                            static_cast<int32_t>(p0.y * 65536.0f),
-                                            static_cast<int32_t>(p0.z * 65536.0f)};
-                    const int32_t e16[3] = {static_cast<int32_t>(p1.x * 65536.0f),
-                                            static_cast<int32_t>(p1.y * 65536.0f),
-                                            static_cast<int32_t>(p1.z * 65536.0f)};
-                    RayFaceHit fh;
-                    const CollisionWorld::FaceRaycast res = collision->raycast_entity_faces(
-                            world, h, s16, e16, ammo != nullptr ? ammo->flags : 0u, fh);
-                    if (res == CollisionWorld::FaceRaycast::kMiss) {
-                        // The graze that flew on — the top "why didn't that
-                        // register" answer, so it lands in the debug ring. The
-                        // marker sits at the segment's closest approach.
-                        float gt = 0.5f;
-                        const float glen2 = r.vel.x * r.vel.x + r.vel.y * r.vel.y +
-                                            r.vel.z * r.vel.z;
-                        if (glen2 > 0.0f) {
-                            gt = ((e->position.x - p0.x) * r.vel.x +
-                                  (e->position.y - p0.y) * r.vel.y +
-                                  (e->position.z - p0.z) * r.vel.z) / glen2;
-                            gt = gt < 0.0f ? 0.0f : (gt > 1.0f ? 1.0f : gt);
-                        }
-                        RoundDebugEvent ev;
-                        ev.tick = world.logic_tick;
-                        ev.kind = RoundDebugEvent::kFaceMiss;
-                        ev.entity = h.packed;
-                        ev.shooter = r.owner.packed;
-                        ev.ammo_index = r.ammo_index;
-                        ev.husk = (e->engine_flags & 0x4u) != 0;
-                        ev.t = gt;
-                        ev.p0 = p0;
-                        ev.p1 = p1;
-                        ev.hit = Vec3{p0.x + r.vel.x * gt, p0.y + r.vel.y * gt,
-                                      p0.z + r.vel.z * gt};
-                        push_round_debug(*this, ev);
-                        continue;
-                    }
-                    if (res == CollisionWorld::FaceRaycast::kHit) {
-                        const float seg_len = std::sqrt(r.vel.x * r.vel.x +
-                                                        r.vel.y * r.vel.y +
-                                                        r.vel.z * r.vel.z);
-                        if (seg_len > 0.0f)
-                            item_t = static_cast<float>(fh.dist) / 65536.0f / seg_len;
-                        item_material = fh.material;
-                        item_section = static_cast<int16_t>(fh.section);
-                        item_face = fh.face;
-                        item_had_faces = true;
-                    }
-                }
-                if (!item_had_faces) {
-                    // The face-less sphere stand-in (or a null collision
-                    // world): the segment must actually reach the sphere this
-                    // tick; a start inside it hits at t = 0.
-                    const SegHit hit = segment_vs_sphere(p0, p1, e->position, bound);
-                    if (!hit.hit) continue;
-                    item_t = hit.t;
-                }
-                if (item_t < best_t) {
-                    best_t = item_t;
-                    best_impact_t = item_t;
-                    best_target = e;
-                    best_handle = h.packed;
-                    best_is_item = true;
-                    best_material = item_material;
-                    best_section = item_section;
-                    best_face = item_face;
-                    best_had_faces = item_had_faces;
-                }
-            }
-        }
+        const uint32_t ammo_flags = ammo != nullptr ? ammo->flags : 0;
 
-        // Retail's pool-0/3 proximity-list leg runs after the pool-2 and pool-1
-        // face walks. Strict-closer replacement therefore leaves an exact-tie
-        // item winner in place.
-        for (size_t s = 0; s < pool0; ++s) {
-            const uint16_t packed = static_cast<uint16_t>(s); // pool 0 -> high nibble 0
-            const EntityHandle h{packed};
-            if (r.owner.valid() && h.packed == r.owner.packed) continue; // own rounds
-            Entity *e = world.registry.get(h);
-            if (e == nullptr || (e->engine_flags & 0x02000001u) != 0) continue;
+        // `ignore` rounds only age. `useownmove` invokes an ammo-specific callback
+        // instead of the stock ballistic path in retail; that callback seam is not
+        // populated yet, so these rounds deliberately receive no invented stock ray,
+        // gravity, or drag here.
+        if ((ammo_flags & 0x2u) != 0 || (ammo_flags & 0x2000u) != 0) continue;
 
-            bool has_authored_sections = false;
-            if (collision != nullptr) {
-                // The player can deploy after the mission-start collision
-                // sweep. Ask the host to attach that late entity before the
-                // unresolved torso fallback becomes authoritative.
-                collision->ensure_entity_instance(world, h);
-            }
-            if (collision != nullptr && collision->has_instance(world, h)) {
-                if (const CollisionModel *person_model =
-                            collision->model_for(world, h)) {
-                    for (const CollisionSection &section : person_model->sections) {
-                        if (section.radius > 0) {
-                            has_authored_sections = true;
-                            break;
-                        }
-                    }
-                }
-            }
+        const FixedVec3 position_q16{to_fixed(r.pos.x), to_fixed(r.pos.y), to_fixed(r.pos.z)};
+        FixedVec3 velocity_q16{to_fixed(r.vel.x), to_fixed(r.vel.y), to_fixed(r.vel.z)};
 
-            bool person_hit = false;
-            float person_t = 2.0f;
-            float person_impact_t = 2.0f;
-            int16_t person_primary = -1;
-            int16_t person_secondary = -1;
-            int16_t person_damage_section = -1;
-            bool person_fallback = false;
-            if (has_authored_sections) {
-                const int32_t start16[3] = {
-                        static_cast<int32_t>(p0.x * 65536.0f),
-                        static_cast<int32_t>(p0.y * 65536.0f),
-                        static_cast<int32_t>(p0.z * 65536.0f)};
-                const int32_t end16[3] = {
-                        static_cast<int32_t>(p1.x * 65536.0f),
-                        static_cast<int32_t>(p1.y * 65536.0f),
-                        static_cast<int32_t>(p1.z * 65536.0f)};
-                PersonSectionHit person;
-                const int32_t extra_radius = ammo != nullptr
-                        ? static_cast<int32_t>(ammo->bullet_radius * 65536.0f)
-                        : 0;
-                if (collision->raycast_person_sections(
-                            world, h, start16, end16, extra_radius, person)) {
-                    const double dx = static_cast<double>(end16[0]) - start16[0];
-                    const double dy = static_cast<double>(end16[1]) - start16[1];
-                    const double dz = static_cast<double>(end16[2]) - start16[2];
-                    const double length16 = std::sqrt(dx * dx + dy * dy + dz * dz);
-                    if (length16 > 0.0) {
-                        person_t = static_cast<float>(person.dist / length16);
-                        person_impact_t =
-                                static_cast<float>((person.dist - 0x800) / length16);
-                        person_primary =
-                                static_cast<int16_t>(person.primary_section);
-                        person_secondary =
-                                static_cast<int16_t>(person.secondary_section);
-                        person_damage_section = person_secondary;
-                        person_hit = true;
-                    }
-                }
-            } else {
-                // Missing/unusable person model only: retain a bounded fallback
-                // so headless or modded missions do not make actors intangible.
-                const float radius =
-                        kOrganicRadius +
-                        (ammo != nullptr ? ammo->bullet_radius : 0.0f);
-                const Vec3 center{e->position.x, e->position.y,
-                                  e->position.z + kOrganicCenterZ};
-                const SegHit fallback = segment_vs_sphere(p0, p1, center, radius);
-                if (fallback.hit) {
-                    person_hit = true;
-                    person_t = fallback.t;
-                    person_impact_t = fallback.t;
-                    person_primary = 1;
-                    person_secondary = 1;
-                    person_fallback = true;
-                }
-            }
-            if (!person_hit) continue;
-
-            if (person_t < best_t) {
-                best_t = person_t;
-                best_impact_t = person_impact_t;
-                best_target = e;
-                best_handle = packed;
-                best_is_item = false;
-                best_material = 19;
-                best_section = person_primary;
-                best_secondary_section = person_secondary;
-                best_damage_section = person_damage_section;
-                best_organic_fallback = person_fallback;
-                best_face = -1;
-                best_had_faces = false;
-            }
-            break;
-        }
-
-        // Terrain stop: first sub-step whose column height swallows the round
-        // [orig: Terrain_RaycastHeightmapHiRes segment test in Projectile_UpdatePhysics;
-        // bilinear column sampling is the tracked heightfield altitude]. Mission (x, y)
-        // maps to the sampler as (x, -y) — the ai.cpp grounding convention.
-        // The 2-u sub-stepping is a stand-in for the hi-res heightmap raycast
-        // (docs/world/world-wac-ai-re.md D-ITEM-13a).
-        float terrain_t = 2.0f;
-        if (terrain != nullptr && terrain->valid()) {
-            const float seg_len = std::sqrt(r.vel.x * r.vel.x + r.vel.y * r.vel.y +
-                                            r.vel.z * r.vel.z);
-            const int steps = seg_len > 2.0f ? static_cast<int>(seg_len / 2.0f) + 1 : 1;
-            float prev_t = 0.0f;
-            float prev_above = terrain::height_field_height_world_bilinear(*terrain, p0.x, -p0.y);
-            prev_above = p0.z - prev_above; // clearance at the segment start
-            for (int st = 1; st <= steps; ++st) {
-                const float t = static_cast<float>(st) / static_cast<float>(steps);
-                const float sx = p0.x + r.vel.x * t;
-                const float sy = p0.y + r.vel.y * t;
-                const float sz = p0.z + r.vel.z * t;
-                const float ground =
-                        terrain::height_field_height_world_bilinear(*terrain, sx, -sy);
-                const float above = sz - ground;
-                if (above <= 0.0f) {
-                    // Refine the crossing between the last above-ground sample and this
-                    // one, so the stop (and the impact-effect point) sits ON the surface
-                    // rather than up to a whole 2-unit sub-step under it — the original
-                    // stops at the exact heightmap raycast hit
-                    // [orig: Terrain_RaycastHeightmapHiRes @ 0x610890 from
-                    //  Projectile_UpdatePhysics].
-                    terrain_t = t;
-                    if (prev_above > 0.0f && prev_above - above > 0.0001f)
-                        terrain_t = prev_t + (t - prev_t) * (prev_above / (prev_above - above));
-                    break;
-                }
-                prev_t = t;
-                prev_above = above;
-            }
-        }
-
-        // Entities win over the terrain stop only when STRICTLY closer — the
-        // original's pool legs accept ray[29] < closestHitDist, ties stay with
-        // the terrain/water winner [orig: @0x4ea50e/@0x4ea54e].
-        if (best_target != nullptr && best_t < terrain_t) {
-            const Vec3 impact_pos{p0.x + r.vel.x * best_impact_t,
-                                  p0.y + r.vel.y * best_impact_t,
-                                  p0.z + r.vel.z * best_impact_t};
-            if (best_is_item) {
-                // Item impact [orig: the same Projectile_ProcessDamageOnTarget
-                // @0x4e7fb0 chain — the zeroing gates ride the armor words].
-                if (ammo != nullptr) {
-                    int32_t damage = calc_impact_damage(r.vel, *ammo);
-                    damage = item_bullet_damage_gate(world, *best_target, damage,
-                                                     ammo->penetration_impact);
-                    if (damage > 0) {
-                        if (const Entity *shooter = world.registry.get(r.owner)) {
-                            auto &rel = world.relations;
-                            const int sg = shooter->group_id, ss = shooter->net_id;
-                            const int vg = best_target->group_id, vs = best_target->net_id;
-                            rel.set_group_group(TriggerRelations::kShot, sg, vg);
-                            rel.set_single_group(TriggerRelations::kShot, ss, vg);
-                            rel.set_group_single(TriggerRelations::kShot, sg, vs);
-                            rel.set_single_single(TriggerRelations::kShot, ss, vs);
-                        }
-                        best_target->health -= damage;
-                        best_target->last_attacker = r.owner; // [orig: +0x178 @0x4e8186]
-                        hits.push_back(RoundHit{EntityHandle{best_handle}, r.owner, damage});
-                        // deathCallback(entity, 1, 0) — the bullet-hit notify;
-                        // authority + health<=0 destroys [orig:
-                        // Entity_HandleDestructibleDeathEvent @0x440210].
-                        destruction_notify_item_damage(world, *best_target, 1);
-                        if (best_target->health <= 0) {
-                            RoundDeath d;
-                            d.victim = EntityHandle{best_handle};
-                            d.killer = r.owner;
-                            d.victim_handle = best_handle;
-                            d.killer_handle = r.shooter_handle;
-                            d.adm_index = r.adm_index;
-                            deaths.push_back(d);
-                        }
-                    }
-                    // An explosive round detonates on the hit [orig: the kz
-                    // dispatch; the blast center stamps the debris origin via
-                    // the queue sweep @0x4eb553].
-                    detonate_round(world, r, impact_pos, *ammo);
-                }
-                RoundImpact imp;
-                imp.position = impact_pos;
-                imp.direction = flight_direction(r.vel);
-                imp.ammo_index = r.ammo_index;
-                // The impact effect: face material + 4, with the building
-                // material-1 flesh remap; a face-less sphere stand-in carries
-                // material 0 -> tag 4 'obj' [orig: the entity/building
-                // material+4 selection in Projectile_SpawnImpactEffect
-                // @0x4e9b80, fed from the hit record ray[22] @0x4e982b].
-                int tag = 4 + static_cast<int>(best_material);
-                if (best_target->kind == EntityKind::Building && best_material == 1)
-                    tag = 23; // 'flesh'
-                if (tag < 0 || tag >= kImpactEffectTagCount) tag = 4;
-                imp.effect_tag = tag;
-                imp.tick = world.logic_tick;
-                imp.source_order = next_impact_order++;
-                if (impacts.size() < kMaxPendingImpacts) impacts.push_back(imp);
-                {
-                    RoundDebugEvent ev;
-                    ev.tick = world.logic_tick;
-                    ev.kind = best_had_faces ? RoundDebugEvent::kItemFace
-                                             : RoundDebugEvent::kItemSphere;
-                    ev.material = best_material;
-                    ev.section = best_section;
-                    ev.face = best_face;
-                    ev.effect_tag = tag;
-                    ev.entity = best_handle;
-                    ev.shooter = r.owner.packed;
-                    ev.ammo_index = r.ammo_index;
-                    ev.husk = (best_target->engine_flags & 0x4u) != 0;
-                    ev.t = best_t;
-                    ev.p0 = p0;
-                    ev.p1 = p1;
-                    ev.hit = impact_pos;
-                    push_round_debug(*this, ev);
-                }
-                // [orig: Projectile_ReleaseEffects @ 0x4e8280 from the impact
-                // handlers — the item stop ends the streak like any other.]
-                if (r.trail_slot >= 0) {
-                    trails.append(r.trail_slot, r.pos);
-                    trails.request_kill(r.trail_slot);
-                }
-                r.active = false;
-                --active_count;
-                continue;
-            }
-            // Organic impact -> authority damage [orig: Projectile_HandleEntityImpact
-            // @0x4e9390 -> Projectile_ProcessDamageOnTarget @0x4e7fb0]. Damage clamps to
-            // the remaining health [orig: @0x4e8064]; health<=0 raises the death event
-            // the host session routes [orig: Entity_CheckAndProcessDeath @0x51b550].
-            if (ammo != nullptr) {
-                int32_t damage = calc_impact_damage(
-                        r.vel, *ammo, best_damage_section);
-                // Indestructible bodies still collide and present the impact;
-                // the flag zeroes damage later in the retail hit chain.
-                if ((best_target->engine_flags & kEntityFlagIndestructible) != 0)
-                    damage = 0;
-                if (damage > best_target->health) damage = best_target->health;
-                if (damage > 0) {
-                    // Sticky SHOT relations, written only when damage is actually
-                    // processed (a discarded friendly-fire hit writes nothing)
-                    // [orig: Projectile_ProcessDamageOnTarget @ 0x4e80ae..0x4e80ef;
-                    //  FF gate Server_IsEntityValidForUpdate @ 0x4e74f0].
-                    if (const Entity *shooter = world.registry.get(r.owner)) {
-                        auto &rel = world.relations;
-                        const int sg = shooter->group_id, ss = shooter->net_id;
-                        const int vg = best_target->group_id, vs = best_target->net_id;
-                        rel.set_group_group(TriggerRelations::kShot, sg, vg);
-                        rel.set_single_group(TriggerRelations::kShot, ss, vg);
-                        rel.set_group_single(TriggerRelations::kShot, sg, vs);
-                        rel.set_single_single(TriggerRelations::kShot, ss, vs);
-                    }
-                    best_target->health -= damage;
-                    // Publish the processed hit for the AI reaction stamps (wasHit /
-                    // lastAttacker / the SM damage event) — drained by AiSystem::tick.
-                    hits.push_back(RoundHit{EntityHandle{best_handle}, r.owner, damage,
-                                            best_section, best_secondary_section});
-                    if (best_target->health <= 0) {
-                        // The kill selects the death anim at DAMAGE time [orig:
-                        // Entity_HandleDamageTrigger @0x407478/@0x407483 — bone from
-                        // the hit record, quadrant from the round's horizontal
-                        // velocity vs the victim's heading, cause 1 bullet]. The
-                        // posed-person hit record supplies the bone; only an
-                        // unresolved-graphic fallback stands in as section 1 (torso).
-                        const int32_t heading_bam =
-                                bam_heading_from_mission_yaw_deg(best_target->yaw);
-                        const int quadrant =
-                                death_quadrant_from_round(heading_bam, r.vel.x, r.vel.y);
-                        best_target->death_anim_state =
-                                compute_death_anim_state(
-                                        best_section >= 0 ? best_section : 1,
-                                        quadrant, death_cause::kBullet);
-                        // A member's death stamps its group alert red [orig: the
-                        // type-1 head @0x4073db-0x4073ea SetAlertRed(commandGroup)].
-                        world.relations.group(best_target->group_id).alert =
-                                TriggerRelations::kAlertRed;
-                    }
-                    if (best_target->health <= 0) {
-                        RoundDeath d;
-                        d.victim = EntityHandle{best_handle};
-                        d.killer = r.owner;
-                        d.victim_handle = best_handle;
-                        d.killer_handle = r.shooter_handle;
-                        d.adm_index = r.adm_index;
-                        deaths.push_back(d);
-                    }
-                }
-            }
-            // An explosive round detonates on the body hit too [orig: the kz
-            // dispatch runs for any stop].
-            if (ammo != nullptr) detonate_round(world, r, impact_pos, *ammo);
-            // The organic impact effect — tag 2 'player' [orig: entity material + 4
-            // selection @ 0x4e8867].
-            RoundImpact imp;
-            imp.position = impact_pos;
-            imp.direction = flight_direction(r.vel);
-            imp.ammo_index = r.ammo_index;
-            imp.effect_tag = 2; // 'player' [orig: g_AmmoEffectTagTable @ 0x813420]
-            imp.tick = world.logic_tick;
-            imp.source_order = next_impact_order++;
-            if (impacts.size() < kMaxPendingImpacts) impacts.push_back(imp);
-            // [orig: the impact handlers run Projectile_ReleaseEffects @ 0x4e8280 —
-            // the trail's final point is the PRE-move anchor (position updates after
-            // the handlers @ 0x4eaa3f), so the streak ends a tick short of the hit
-            // and the impact flash covers the gap.]
-            if (r.trail_slot >= 0) {
-                trails.append(r.trail_slot, r.pos);
-                trails.request_kill(r.trail_slot);
-            }
-            {
-                RoundDebugEvent ev;
-                ev.tick = world.logic_tick;
-                ev.kind = RoundDebugEvent::kOrganic;
-                ev.material = best_material;
-                ev.section = best_section;
-                ev.secondary_section = best_secondary_section;
-                ev.organic_fallback = best_organic_fallback;
-                ev.effect_tag = 2;
-                ev.entity = best_handle;
-                ev.shooter = r.owner.packed;
-                ev.ammo_index = r.ammo_index;
-                ev.t = best_t;
-                ev.p0 = p0;
-                ev.p1 = p1;
-                ev.hit = impact_pos;
-                push_round_debug(*this, ev);
-            }
-            r.active = false;
-            --active_count;
-            continue;
-        }
-        if (terrain_t <= 1.0f) {
-            // Terrain impact [orig: Projectile_HandleTerrainImpact @0x4e9210 — effects
-            // only at this altitude].
-            // The terrain impact effect: surface type + 4. The surface-map (charmap)
-            // sampler is a tracked deferral, so every terrain hit takes the original's
-            // own no-surface-map default (type 1 -> tag 5 'dirt')
-            // [orig: Terrain_GetSurfaceTypeAtPosition @ 0x606510 returns 1 when no map
-            //  is loaded; +4 shift @ 0x4e8862].
-            RoundImpact imp;
-            imp.position = Vec3{p0.x + r.vel.x * terrain_t, p0.y + r.vel.y * terrain_t,
-                                p0.z + r.vel.z * terrain_t};
-            imp.direction = flight_direction(r.vel);
-            imp.ammo_index = r.ammo_index;
-            imp.effect_tag = 1 + 4;
-            imp.tick = world.logic_tick;
-            imp.source_order = next_impact_order++;
-            if (impacts.size() < kMaxPendingImpacts) impacts.push_back(imp);
-            // An explosive round detonates on the terrain stop [orig: the kz
-            // dispatch from Projectile_HandleTerrainImpact @0x4e9210 family].
-            if (ammo != nullptr) detonate_round(world, r, imp.position, *ammo);
-            if (r.trail_slot >= 0) { // [orig: Projectile_ReleaseEffects @ 0x4e8280]
-                trails.append(r.trail_slot, r.pos);
-                trails.request_kill(r.trail_slot);
-            }
-            {
-                RoundDebugEvent ev;
-                ev.tick = world.logic_tick;
-                ev.kind = RoundDebugEvent::kTerrain;
-                ev.effect_tag = imp.effect_tag;
-                ev.shooter = r.owner.packed;
-                ev.ammo_index = r.ammo_index;
-                ev.t = terrain_t;
-                ev.p0 = p0;
-                ev.p1 = p1;
-                ev.hit = imp.position;
-                push_round_debug(*this, ev);
-            }
+        // Stock callback pre-ray water stall: a strictly submerged round below
+        // 0.25 units/tick is retired without a sweep or impact.
+        if (ammo != nullptr && world.env.water_z != 0 &&
+            position_q16.z < world.env.water_z && fixed_magnitude(velocity_q16) < 0x4000) {
+            if (r.trail_slot >= 0) trails.request_kill(r.trail_slot);
             r.active = false;
             --active_count;
             continue;
         }
 
-        // Straight-line flight: the retail per-tick gravity (velZ -= 167
-        // [orig: @0x4eaa5a]) and the drag/wind/water/tumble layer
-        // (Entity_ApplyDragAndBounceForce @0x4e5ec0) are the tracked
-        // ballistics deferral (docs/world/world-wac-ai-re.md D-ITEM-12).
-        r.pos = p1;
+        // Exact-zero is a distinct retail leaf: no sweep or position commit, one
+        // gravity step even for NoGravity ammo, and no aerodynamic drag.
+        if (velocity_q16.x == 0 && velocity_q16.y == 0 && velocity_q16.z == 0) {
+            velocity_q16.z -= kProjectileGravityQ16;
+            r.vel = vec_from_fixed(velocity_q16);
+            continue;
+        }
+
+        const FixedVec3 end_q16{
+            position_q16.x + velocity_q16.x,
+            position_q16.y + velocity_q16.y,
+            position_q16.z + velocity_q16.z,
+        };
+
+        ProjectileTrace trace;
+        trace.start = position_q16;
+        trace.end = end_q16;
+        trace.owner = r.owner;
+        trace.radius_q16 = ammo != nullptr ? ammo->bullet_radius_fp16 : 0;
+        trace.ammo_flags = ammo_flags;
+        const ProjectileHit collision = queries->trace_projectile(world, trace);
+        if (!collision.hit()) {
+            r.pos = vec_from_fixed(end_q16);
+            if ((ammo_flags & 0x100u) == 0) velocity_q16.z -= kProjectileGravityQ16;
+            if (ammo != nullptr)
+                apply_aerodynamic_drag(velocity_q16, *ammo, end_q16.z, world.env.water_z);
+            r.vel = vec_from_fixed(velocity_q16);
+            continue;
+        }
+
+        const bool entity_hit = collision.hit_class == ProjectileHitClass::StaticEntity ||
+                                collision.hit_class == ProjectileHitClass::DynamicEntity ||
+                                collision.hit_class == ProjectileHitClass::Person;
+        Entity *impact_target =
+            entity_hit ? world.registry.get(collision.geometry_entity) : nullptr;
+
+        FixedVec3 impact_q16 = collision.position_q16;
+        if (collision.hit_class == ProjectileHitClass::Person &&
+            collision.bone_index >= 0) {
+            // ray[29] remains the collision/arbitration distance. Authored
+            // person presentation backs the effect point another 0x800 Q16
+            // along the flight direction; the torso fallback does not.
+            const int32_t magnitude = fixed_magnitude(velocity_q16);
+            if (magnitude > 0) {
+                impact_q16.x -= static_cast<int32_t>(
+                    (static_cast<int64_t>(velocity_q16.x) * 0x800) / magnitude);
+                impact_q16.y -= static_cast<int32_t>(
+                    (static_cast<int64_t>(velocity_q16.y) * 0x800) / magnitude);
+                impact_q16.z -= static_cast<int32_t>(
+                    (static_cast<int64_t>(velocity_q16.z) * 0x800) / magnitude);
+            }
+        }
+        const Vec3 impact_position = vec_from_fixed(impact_q16);
+
+        // Pre-arm entity impacts substitute the authored dud and apply no damage.
+        // Retail resolves AmmoDef+241, copies the projectile's first 692 bytes, and
+        // continues with that child.  LiveRound has no separately addressable pool-3
+        // entity, so the same lifecycle is projected as an in-slot logical child:
+        // owner/kinematics/elapsed age survive, the dud definition supplies the new
+        // lifetime, and the trail slot at retail +0x2B4 (exactly byte 692) does not.
+        const bool not_armed = entity_hit && ammo != nullptr &&
+                               r.age_ticks < ammo->arm_age_ticks;
+        int32_t impact_ammo_index = r.ammo_index;
+        LiveRound dud_replacement;
+        bool has_dud_replacement = false;
+        if (not_armed && !ammo->notarmmed_ammo.empty()) {
+            const int32_t dud = world.ammo.index_of(ammo->notarmmed_ammo.c_str());
+            const AmmoTableEntry *dud_ammo = world.ammo.by_index(dud);
+            if (dud_ammo != nullptr) {
+                impact_ammo_index = dud;
+                dud_replacement = r;
+                dud_replacement.ammo_index = dud;
+                dud_replacement.pos = impact_position;
+                dud_replacement.max_age_ticks =
+                    ((dud_ammo->flags & 0x4000u) != 0)
+                        ? INT32_MAX
+                        : dud_ammo->max_age_ticks;
+                dud_replacement.trail_slot = -1;
+                has_dud_replacement = true;
+            }
+        }
+
+        // Damage can route exactly one carrier hop while impact presentation stays
+        // on the geometry actually struck.
+        EntityHandle damage_entity = collision.geometry_entity;
+        Entity *target = impact_target;
+        if (target != nullptr && target->item_type != 1 &&
+            (target->item_attrib & 0x20u) != 0) {
+            Entity *parent = world.registry.get(target->ground_target);
+            if (parent != nullptr && parent->item_type == 1) {
+                target = parent;
+                damage_entity = parent->handle;
+            }
+        }
+
+        // Entity Health/healthMax (+286 and its template mirror) and ItemDef armor
+        // (+0x190/+0x192) are signed WORDs in retail. Entity intentionally exposes
+        // int32_t carriers to the rest of OpenNova, so enforce the storage width at
+        // this consequence boundary before any signed comparisons are made.
+        if (target != nullptr) {
+            target->health = retail_signed_i16(target->health);
+            target->health_max = retail_signed_i16(target->health_max);
+            target->armor_impact = retail_signed_i16(target->armor_impact);
+            // Runtime armor_kz is the compatibility alias for canonical
+            // ItemDef +0x192 blast armor.
+            target->armor_kz = retail_signed_i16(target->armor_kz);
+        }
+
+        const bool person_collision =
+            collision.hit_class == ProjectileHitClass::Person;
+        const bool organic_fallback =
+            person_collision && collision.bone_index < 0;
+        const int16_t primary_section = person_collision
+            ? static_cast<int16_t>(organic_fallback ? 1 : collision.bone_index)
+            : static_cast<int16_t>(-1);
+        const int16_t secondary_section = person_collision
+            ? static_cast<int16_t>(organic_fallback
+                  ? 1
+                  : (collision.hit_zone >= 0 ? collision.hit_zone
+                                             : collision.bone_index))
+            : static_cast<int16_t>(-1);
+
+        // Projectile_ProcessDamageOnTarget returns before damage calculation when
+        // target->ItemDef is null.  Geometry still consumed the round above, so
+        // the physical impact remains observable even though no hit is recorded.
+        if (target != nullptr && target->has_item_def && !not_armed && ammo != nullptr) {
+            const Entity *shooter = world.registry.get(r.owner);
+            int32_t damage = calc_impact_damage(velocity_q16, *ammo, collision.hit_zone,
+                                                *target, shooter, r.ammo_index, world);
+            if ((target->engine_flags & 0x4000000u) != 0 ||
+                target->armor_impact == -1 ||
+                ammo->penetration_impact < target->armor_impact ||
+                target->damage_state != 0)
+                damage = 0;
+            damage = apply_vehicle_occupant_scale(world, *target, damage);
+            if (damage > target->health) damage = target->health;
+            if ((target->item_attrib & 0x40000000u) != 0 &&
+                damage >= target->health)
+                damage = target->health - 1;
+            if (damage != 0) {
+                if (shooter != nullptr) {
+                    auto &rel = world.relations;
+                    const int sg = shooter->group_id, ss = shooter->net_id;
+                    const int vg = target->group_id, vs = target->net_id;
+                    rel.set_group_group(TriggerRelations::kShot, sg, vg);
+                    rel.set_single_group(TriggerRelations::kShot, ss, vg);
+                    rel.set_group_single(TriggerRelations::kShot, sg, vs);
+                    rel.set_single_single(TriggerRelations::kShot, ss, vs);
+                }
+
+                // The original writes the subtraction back through a signed 16-bit
+                // entity+286 field. Preserve its modulo-2^16 wrap explicitly.
+                target->health = retail_signed_i16(
+                    static_cast<int64_t>(target->health) - static_cast<int64_t>(damage));
+                hits.push_back(RoundHit{damage_entity, r.owner, damage,
+                                        primary_section, secondary_section});
+                const bool damage_target_is_person =
+                    target->item_type == 3 ||
+                    (target->item_type == 0 &&
+                     target->kind == EntityKind::Organic);
+                if (!damage_target_is_person) {
+                    target->last_attacker = r.owner;
+                    // deathCallback(entity, 1, 0): nonlethal item damage is
+                    // observable, while lethal damage enters the husk chain.
+                    destruction_notify_item_damage(world, *target, 1);
+                }
+                if (target->health <= 0) {
+                    const int32_t heading_bam =
+                        bam_heading_from_mission_yaw_deg(target->yaw);
+                    const int quadrant =
+                        death_quadrant_from_round(heading_bam, r.vel.x, r.vel.y);
+                    if (damage_target_is_person) {
+                        const int32_t death_section =
+                            primary_section >= 0 ? primary_section : 1;
+                        target->death_anim_state =
+                            compute_death_anim_state(death_section, quadrant,
+                                                     death_cause::kBullet);
+                    }
+                    world.relations.group(target->group_id).alert =
+                        TriggerRelations::kAlertRed;
+
+                    RoundDeath d;
+                    d.victim = damage_entity;
+                    d.killer = r.owner;
+                    d.victim_handle = damage_entity.packed;
+                    d.killer_handle = r.shooter_handle;
+                    d.adm_index = r.adm_index;
+                    deaths.push_back(d);
+                }
+            }
+        }
+
+        RoundImpact imp;
+        imp.position = impact_position;
+        imp.direction = flight_direction(r.vel);
+        imp.ammo_index = impact_ammo_index;
+        if (collision.hit_class == ProjectileHitClass::Terrain) {
+            imp.effect_tag = 5; // no-charmap retail default: dirt
+        } else if (collision.hit_class == ProjectileHitClass::Water) {
+            imp.effect_tag = 11;
+        } else if (impact_target != nullptr &&
+                   (impact_target->item_type == 3 ||
+                    (impact_target->item_type == 0 &&
+                     impact_target->kind == EntityKind::Organic))) {
+            imp.effect_tag = 2;
+        } else if (impact_target != nullptr &&
+                   impact_target->kind == EntityKind::Building &&
+                   collision.surface_type == 1) {
+            imp.effect_tag = 23; // building material 1 uses the flesh bank
+        } else if (collision.surface_type >= 0 &&
+                   collision.surface_type + 4 < kImpactEffectTagCount) {
+            imp.effect_tag = collision.surface_type + 4;
+        } else {
+            imp.effect_tag = 4; // generic object without material data
+        }
+        imp.tick = world.logic_tick;
+        imp.source_order = next_impact_order++;
+        if (impacts.size() < kMaxPendingImpacts) impacts.push_back(imp);
+
+        // Every explosive round stop queues its authored kill zone. The queue
+        // drains after the round simulation, preserving direct-hit-before-AoE
+        // consequence ordering.
+        if (ammo != nullptr)
+            detonate_round(world, r, impact_position, *ammo);
+
+        RoundDebugEvent event;
+        event.tick = world.logic_tick;
+        if (person_collision) {
+            event.kind = RoundDebugEvent::kOrganic;
+            event.material = 19;
+            event.section = primary_section;
+            event.secondary_section = secondary_section;
+            event.organic_fallback = organic_fallback;
+        } else if (entity_hit) {
+            event.kind = collision.face_index >= 0
+                ? RoundDebugEvent::kItemFace
+                : RoundDebugEvent::kItemSphere;
+            if (collision.surface_type >= 0 && collision.surface_type <= 255)
+                event.material = static_cast<uint8_t>(collision.surface_type);
+            event.section = static_cast<int16_t>(collision.section_index);
+            event.face = collision.face_index;
+        } else {
+            // The retained debug schema predates water as a separate kind; both
+            // terrain and water are environmental stops, distinguished by tag.
+            event.kind = RoundDebugEvent::kTerrain;
+        }
+        event.effect_tag = imp.effect_tag;
+        if (collision.geometry_entity.valid())
+            event.entity = collision.geometry_entity.packed;
+        event.shooter = r.owner.packed;
+        event.ammo_index = impact_ammo_index;
+        event.husk = impact_target != nullptr &&
+                     (impact_target->engine_flags & 0x4u) != 0;
+        event.t = static_cast<float>(collision.t_q16) / 65536.0f;
+        event.p0 = r.pos;
+        event.p1 = vec_from_fixed(end_q16);
+        event.hit = impact_position;
+        push_round_debug(*this, event);
+
+        if (r.trail_slot >= 0) {
+            trails.append(r.trail_slot, r.pos);
+            trails.request_kill(r.trail_slot);
+        }
+        if (has_dud_replacement) {
+            r = dud_replacement;
+        } else {
+            r.active = false;
+            --active_count;
+        }
     }
 
-    // Pool drain after the round updates: appends this tick reset their channels'
-    // age, so live streaks hold shape and only dead ones shrink
-    // [orig: CEffectEmitterPool_Tick @ 0x5db830, once per 62 Hz frame].
     trails.tick();
 }
 

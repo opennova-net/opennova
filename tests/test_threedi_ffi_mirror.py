@@ -77,10 +77,10 @@ def test_collision_face_round_raycast_layout():
 
 def test_collision_object_exact_cobj_sphere_layout():
     obj = py_threedi.ThreediIRCollisionObject
-    assert ctypes.sizeof(obj) == 40
+    assert ctypes.sizeof(obj) == 72
     assert [(name, getattr(obj, name).offset) for name in (
         "center_fp16", "radius_fp16",
     )] == [
-        ("center_fp16", 24),
-        ("radius_fp16", 36),
+        ("center_fp16", 56),
+        ("radius_fp16", 68),
     ]

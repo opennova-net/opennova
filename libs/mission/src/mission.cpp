@@ -2853,7 +2853,7 @@ std::vector<WeaponLoadoutEntry> MissionDocument::weapon_loadout() const {
 	}
 	out.reserve(impl_->file.loadout.entries.size());
 	for (const bms::WeaponLoadoutRecord &entry : impl_->file.loadout.entries) {
-		out.push_back({entry.name, entry.value1, entry.value2});
+		out.push_back({entry.name, entry.value1, entry.value2, entry.value3});
 	}
 	return out;
 }
@@ -2892,7 +2892,8 @@ bool MissionDocument::set_weapon_loadout(const std::vector<WeaponLoadoutEntry> &
 	records.reserve(entries.size());
 	for (const WeaponLoadoutEntry &entry : entries) {
 		// Names are guaranteed non-empty by the validation above.
-		records.push_back({entry.name, entry.value1, entry.value2, "-1"});
+		records.push_back({entry.name, entry.value1, entry.value2,
+		                   entry.value3.empty() ? "-1" : entry.value3});
 	}
 	impl_->file.loadout.entries = std::move(records);
 	sync_counts();
@@ -4065,6 +4066,7 @@ int opennova_mission_get_weapon_loadout_entry(const OpenNovaMissionDocument *doc
 	copy_cstr(out_entry->name, sizeof(out_entry->name), entry.name);
 	copy_cstr(out_entry->value1, sizeof(out_entry->value1), entry.value1);
 	copy_cstr(out_entry->value2, sizeof(out_entry->value2), entry.value2);
+	copy_cstr(out_entry->value3, sizeof(out_entry->value3), entry.value3);
 	return 1;
 }
 
@@ -4081,6 +4083,8 @@ int opennova_mission_set_weapon_loadout(OpenNovaMissionDocument *document,
 		record.name = fixed_string(entries[i].name, sizeof(entries[i].name));
 		record.value1 = fixed_string(entries[i].value1, sizeof(entries[i].value1));
 		record.value2 = fixed_string(entries[i].value2, sizeof(entries[i].value2));
+		record.value3 = fixed_string(entries[i].value3, sizeof(entries[i].value3));
+		if (record.value3.empty()) record.value3 = "-1";
 		records.push_back(std::move(record));
 	}
 	return document->document.set_weapon_loadout(records) ? 1 : 0;

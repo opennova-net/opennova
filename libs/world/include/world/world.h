@@ -34,6 +34,8 @@ struct TerrainHeightField;
 
 namespace opennova::world {
 
+class CollisionWorld;
+
 // One sound-profile slot fire (footstep, foley, landing, death scream),
 // already resolved to the profile's authored sound-set name. The host present
 // layer drains these into full-volume positional one-shots
@@ -354,6 +356,8 @@ public:
     EntityCommands commands;
     AiSystem *ai = nullptr;    // non-owning; the host wires this to the AI system driving
                                // this world, so the AI-change command family can reach brains.
+    CollisionWorld *collision = nullptr; // non-owning authoritative spatial-query seam;
+                                         // the host owns the mission CollisionWorld.
 
     // Session + game-option state the BMS Teammate trigger family reads. Hosts
     // stamp these at bring-up; the SP defaults hold otherwise.
@@ -362,6 +366,12 @@ public:
     // type-5305 teammate spawns in Entity_SpawnFromBMSRecord @0x40ea5a]
     bool mp_session = false;
     bool teammates_disabled = false;
+    // Projectile_UpdatePhysics clamps the radius to 0.1u only for an
+    // authoritative multiplayer FatBullets trace owned by a remote player.
+    // These explicit host-fed gates keep that option out of ordinary/SP rays.
+    bool projectile_authority = true;
+    bool fat_bullets = false;
+    bool one_shot_kill = false; // MP-only g_OneShotKill; ignored offline
     // Sticky trigger-relation state (BMS cats 1/2): matrices + group alert/
     // count records + waypoint has-visited. Cleared per mission load by the
     // BMS system's on_load [orig: EventSystem_FreeAll @ 0x453210].
@@ -376,11 +386,20 @@ public:
     // TeammateEvacuating evaluate faithfully once it lands (0 = none active).
     int32_t heli_lift_active_count = 0;
 
-    // items.def Player-template hp (class-8 Player = 150), stamped by the host's item-traits
-    // sweep so LATE-JOINER spawns (which happen after the sweep) seed full health without an
-    // item-db reach-back from libs/ [orig: Entity_InitFromItemDef @0x49e550 — spawn Health =
-    // itemDef->healthMax]. 0 = unresolved: player_spawn falls back to the spawn seed. (D-NET-144)
+    // Cached Player ItemDef presence and traits. The default true covers native harnesses that
+    // seed the built-in Player directly; resolve_item_traits overwrites it with the database's
+    // actual presence so a malformed/missing Player definition is not invented for late spawns.
+    // [orig: Entity_InitFromItemDef @0x49e550; D-NET-144]
+    bool player_has_item_def = true;
     int32_t player_item_hp = 0;
+    // The rest of the same Player items.def template, cached for host/late-join
+    // entities allocated after the mission-wide trait sweep.
+    uint8_t player_item_type = 3;
+    uint32_t player_item_attrib = 0;
+    int32_t player_armor_impact = 0;
+    int32_t player_armor_kz = 0;
+    float player_damage_reduc_pp = 0.0f;
+    float player_damage_reduc_max = 0.0f;
 
     // The weapon.def armory table (empty until the host feeds it — NovaSimulation::
     // load_weapon_table). Read by the 0x2F/0x5A loadout service, the extended-uplink

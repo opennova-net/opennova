@@ -90,6 +90,7 @@ typedef struct DefAmmoDef {
     int kz_damage;           /* word +46 */
     int weight_in_grains;    /* +184 — the kinetic damage mass term [orig: @0x4ecb1a] */
     int min_stable_velocity; /* +176 */
+    int tumble_error_fp16;   /* +180: below-stable random deflection, 16.16 */
     int tracer_rate;         /* byte +226 ('tracerRate') */
     char notarmmed_ammo[64]; /* +241: the not-armed child ammo name ('notarmmedammo') */
     /* Host fire-presentation fields (world-wac-ai-re §17.4). The original resolves
@@ -331,7 +332,7 @@ typedef struct DefItemDef {
     char graphic[128];
     char anim_def[128];
     char husk[128];
-    int hp;
+    int hp;              /* ItemDef+0x17C signed i16 healthMax, sign-extended in this ABI */
     char sound_profile[128];
     /* The female-variant profile name; tracks sound_profile until authored
        explicitly (both resolve to "default" when empty) [orig:
@@ -474,6 +475,13 @@ typedef struct DefItemDef {
        Entity_BuildBoneTransformMatrices @ 0x4B1884] */
     int phrase_set;
     int phrase_set_valid;
+    /* Projectile damage traits, appended for normalized-struct/FFI stability.
+       Retail storage: damage reduction +0x188/+0x18C, signed armor classes
+       +0x190/+0x192. armor_impact is shared with the destruction block above;
+       armor_kz is the projectile-facing normalized mirror of armor_blast. */
+    float damage_reduc_pp;
+    float damage_reduc_max;
+    int armor_kz;     /* ItemDef+0x192 signed i16, sign-extended in this ABI */
 } DefItemDef;
 
 typedef struct DefItemsFile {

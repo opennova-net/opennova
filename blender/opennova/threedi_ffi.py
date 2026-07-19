@@ -230,9 +230,17 @@ class ThreediIRCollisionVolume(ctypes.Structure):
     ]
 
 
+class ThreediIRCollisionNormal(ctypes.Structure):
+    _fields_ = [
+        ('normal_q14',    ctypes.c_int16 * 3),
+        ('dominant_axis', ctypes.c_int16),
+    ]
+
+
 class ThreediIRCollisionFace(ctypes.Structure):
     _fields_ = [
         ("vert_index",      ctypes.c_int16 * 3),
+        ('normal_index',    ctypes.c_int16),
         ("material_flags",  ctypes.c_uint32),
         ("poly_type",       ctypes.c_uint8),
         ("normal",          ctypes.c_int16 * 3),
@@ -243,19 +251,38 @@ class ThreediIRCollisionFace(ctypes.Structure):
     ]
 
 
+class _ThreediIRCollisionObjectCenter(ctypes.Union):
+    _fields_ = [
+        ("mid",         ctypes.c_int32 * 3),
+        ("center_fp16", ctypes.c_int32 * 3),
+    ]
+
+
+class _ThreediIRCollisionObjectRadius(ctypes.Union):
+    _fields_ = [
+        ("radius",      ctypes.c_int32),
+        ("radius_fp16", ctypes.c_int32),
+    ]
+
+
 class ThreediIRCollisionObject(ctypes.Structure):
+    _anonymous_ = ("_center", "_radius")
     _fields_ = [
         ("num_vertices",            ctypes.c_int32),
         ("num_faces",               ctypes.c_int32),
+        ("num_planes",              ctypes.c_int32),
+        ("num_bounding_volumes",    ctypes.c_int32),
         ("parent_subobject_index",  ctypes.c_int32),
-        ("offset",                  ctypes.c_float * 3),
-        ("center_fp16",             ctypes.c_int32 * 3),
-        ("radius_fp16",             ctypes.c_int32),
+        ("offset",                  ctypes.c_int32 * 3),
+        ("min",                     ctypes.c_int32 * 3),
+        ("max",                     ctypes.c_int32 * 3),
+        ("_center",                 _ThreediIRCollisionObjectCenter),
+        ("_radius",                 _ThreediIRCollisionObjectRadius),
     ]
 
 
 class ThreediIRCollisionTranslation(ctypes.Structure):
-    _fields_ = [("translation", ctypes.c_float * 3)]
+    _fields_ = [("translation", ctypes.c_int32 * 3)]
 
 
 class ThreediIRCollision(ctypes.Structure):
@@ -265,6 +292,8 @@ class ThreediIRCollision(ctypes.Structure):
         ("model_center",       ctypes.c_float * 3),
         ("vertices",           ctypes.POINTER(ThreediIRCollisionVertex)),
         ("vertex_count",       ctypes.c_size_t),
+        ("normals",            ctypes.POINTER(ThreediIRCollisionNormal)),
+        ("normal_count",       ctypes.c_size_t),
         ("planes",             ctypes.POINTER(ThreediIRCollisionPlane)),
         ("plane_count",        ctypes.c_size_t),
         ("volumes",            ctypes.POINTER(ThreediIRCollisionVolume)),

@@ -365,6 +365,26 @@ void test_defaults() {
     CHECK(weapon_combo::kDefaultSpawnCombo == 195);
 }
 
+void test_kit_damage_classes() {
+    Fixture f;
+    f.t.entries[static_cast<size_t>(f.pistol)].ammo_index = 2;
+    f.t.entries[static_cast<size_t>(f.m4)].ammo_index = 4;
+    f.t.entries[static_cast<size_t>(f.ak)].ammo_index = 7;
+    std::vector<uint8_t> classes(10, 99);
+    weapon_kit_build_damage_classes(
+            {{"WPN_M4AUTO", -1, -1, 1}, {"WPN_PISTOL", -1, -1, 2},
+             {"WPN_NOSUCH", -1, -1, 2}},
+            f.t, 10, classes);
+    CHECK(classes.size() == 10);
+    CHECK(classes[4] == 1 && classes[2] == 2);
+    CHECK(classes[7] == 0 && classes[9] == 0);
+
+    // A new accepted kit clears values from the previous one before stamping.
+    weapon_kit_build_damage_classes({{"WPN_AK47AUTO", -1, -1, 2}},
+                                    f.t, 10, classes);
+    CHECK(classes[4] == 0 && classes[2] == 0 && classes[7] == 2);
+}
+
 } // namespace
 
 int main() {
@@ -375,6 +395,7 @@ int main() {
     test_select();
     test_switch_walks();
     test_defaults();
+    test_kit_damage_classes();
     test_cycle();
     if (failures == 0) std::printf("weapon_inventory_test: all passed\n");
     return failures == 0 ? 0 : 1;

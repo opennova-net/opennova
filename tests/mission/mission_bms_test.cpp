@@ -735,20 +735,22 @@ int main() {
 		TEST_EXPECT(doc.load_bms_bytes(original.data(), original.size()));
 		// Establish a known-good two-weapon loadout first.
 		std::vector<opennova::mission::WeaponLoadoutEntry> good;
-		good.push_back({"WPN_A", "-1", "-1"});
-		good.push_back({"WPN_B", "-1", "-1"});
+		good.push_back({"WPN_A", "-1", "-1", "1"});
+		good.push_back({"WPN_B", "-1", "-1", "2"});
 		TEST_EXPECT(doc.set_weapon_loadout(good));
 		TEST_EXPECT(doc.weapon_loadout().size() == 2);
 		// An edit that blanks a mid-list name is rejected; the loadout is left exactly as it was.
 		std::vector<opennova::mission::WeaponLoadoutEntry> with_blank;
-		with_blank.push_back({"WPN_A", "-1", "-1"});
-		with_blank.push_back({"", "-1", "-1"}); // blanked name -> reject the whole edit, no silent drop
-		with_blank.push_back({"WPN_B", "-1", "-1"});
+		with_blank.push_back({"WPN_A", "-1", "-1", "1"});
+		with_blank.push_back({"", "-1", "-1", "0"}); // blanked name -> reject the whole edit, no silent drop
+		with_blank.push_back({"WPN_B", "-1", "-1", "2"});
 		TEST_EXPECT(!doc.set_weapon_loadout(with_blank));
 		const std::vector<opennova::mission::WeaponLoadoutEntry> reread = doc.weapon_loadout();
 		TEST_EXPECT(reread.size() == 2);
 		TEST_EXPECT(reread[0].name == "WPN_A");
+		TEST_EXPECT(reread[0].value3 == "1");
 		TEST_EXPECT(reread[1].name == "WPN_B");
+		TEST_EXPECT(reread[1].value3 == "2");
 		// Deleting every weapon (an empty list) is still valid: the chunk goes to length 0.
 		TEST_EXPECT(doc.set_weapon_loadout({}));
 		TEST_EXPECT(doc.weapon_loadout().empty());

@@ -707,19 +707,19 @@ static int parse_cobj(const ThreediChunk *chunk, ThreediCollisionObject **out_ob
         objs[i].unk4 = read_s32_le(base + 28);
         objs[i].unk5 = read_s32_le(base + 32);
         assert(objs[i].unk3 == 0 && objs[i].unk4 == 0 && objs[i].unk5 == 0);
-        objs[i].offset[0] = (float)read_s32_le(base + 36);
-        objs[i].offset[1] = (float)read_s32_le(base + 40);
-        objs[i].offset[2] = (float)read_s32_le(base + 44);
-        objs[i].min[0] = (float)read_s32_le(base + 48);
-        objs[i].min[1] = (float)read_s32_le(base + 52);
-        objs[i].min[2] = (float)read_s32_le(base + 56);
-        objs[i].max[0] = (float)read_s32_le(base + 60);
-        objs[i].max[1] = (float)read_s32_le(base + 64);
-        objs[i].max[2] = (float)read_s32_le(base + 68);
-        objs[i].med[0] = (float)read_s32_le(base + 72);
-        objs[i].med[1] = (float)read_s32_le(base + 76);
-        objs[i].med[2] = (float)read_s32_le(base + 80);
-        objs[i].radius = (float)read_s32_le(base + 84);
+        objs[i].offset[0] = read_s32_le(base + 36);
+        objs[i].offset[1] = read_s32_le(base + 40);
+        objs[i].offset[2] = read_s32_le(base + 44);
+        objs[i].min[0] = read_s32_le(base + 48);
+        objs[i].min[1] = read_s32_le(base + 52);
+        objs[i].min[2] = read_s32_le(base + 56);
+        objs[i].max[0] = read_s32_le(base + 60);
+        objs[i].max[1] = read_s32_le(base + 64);
+        objs[i].max[2] = read_s32_le(base + 68);
+        objs[i].med[0] = read_s32_le(base + 72);
+        objs[i].med[1] = read_s32_le(base + 76);
+        objs[i].med[2] = read_s32_le(base + 80);
+        objs[i].radius = read_s32_le(base + 84);
     }
     *out_objs = objs;
     *out_count = count;
@@ -746,9 +746,9 @@ static int parse_cxlt(const ThreediChunk *chunk, ThreediCollisionTranslation **o
     }
     for (uint32_t i = 0; i < count; ++i) {
         const uint8_t *base = chunk->data + 8 + (size_t)i * record_size;
-        trans[i].translation[0] = (float)read_s32_le(base + 0);
-        trans[i].translation[1] = (float)read_s32_le(base + 4);
-        trans[i].translation[2] = (float)read_s32_le(base + 8);
+        trans[i].translation[0] = read_s32_le(base + 0);
+        trans[i].translation[1] = read_s32_le(base + 4);
+        trans[i].translation[2] = read_s32_le(base + 8);
     }
     *out_trans = trans;
     *out_count = count;
@@ -2589,19 +2589,19 @@ static int build_cobj_chunk(const ThreediCollisionModel *collision, ChunkBuilder
             buffer_append_s32_le(&out->payload, o->unk3) != 0 ||
             buffer_append_s32_le(&out->payload, o->unk4) != 0 ||
             buffer_append_s32_le(&out->payload, o->unk5) != 0 ||
-            buffer_append_s32_le(&out->payload, (int32_t)o->offset[0]) != 0 ||
-            buffer_append_s32_le(&out->payload, (int32_t)o->offset[1]) != 0 ||
-            buffer_append_s32_le(&out->payload, (int32_t)o->offset[2]) != 0 ||
-            buffer_append_s32_le(&out->payload, (int32_t)o->min[0]) != 0 ||
-            buffer_append_s32_le(&out->payload, (int32_t)o->min[1]) != 0 ||
-            buffer_append_s32_le(&out->payload, (int32_t)o->min[2]) != 0 ||
-            buffer_append_s32_le(&out->payload, (int32_t)o->max[0]) != 0 ||
-            buffer_append_s32_le(&out->payload, (int32_t)o->max[1]) != 0 ||
-            buffer_append_s32_le(&out->payload, (int32_t)o->max[2]) != 0 ||
-            buffer_append_s32_le(&out->payload, (int32_t)o->med[0]) != 0 ||
-            buffer_append_s32_le(&out->payload, (int32_t)o->med[1]) != 0 ||
-            buffer_append_s32_le(&out->payload, (int32_t)o->med[2]) != 0 ||
-            buffer_append_s32_le(&out->payload, (int32_t)o->radius) != 0) {
+            buffer_append_s32_le(&out->payload, o->offset[0]) != 0 ||
+            buffer_append_s32_le(&out->payload, o->offset[1]) != 0 ||
+            buffer_append_s32_le(&out->payload, o->offset[2]) != 0 ||
+            buffer_append_s32_le(&out->payload, o->min[0]) != 0 ||
+            buffer_append_s32_le(&out->payload, o->min[1]) != 0 ||
+            buffer_append_s32_le(&out->payload, o->min[2]) != 0 ||
+            buffer_append_s32_le(&out->payload, o->max[0]) != 0 ||
+            buffer_append_s32_le(&out->payload, o->max[1]) != 0 ||
+            buffer_append_s32_le(&out->payload, o->max[2]) != 0 ||
+            buffer_append_s32_le(&out->payload, o->med[0]) != 0 ||
+            buffer_append_s32_le(&out->payload, o->med[1]) != 0 ||
+            buffer_append_s32_le(&out->payload, o->med[2]) != 0 ||
+            buffer_append_s32_le(&out->payload, o->radius) != 0) {
             chunk_builder_free(out);
             return -1;
         }
@@ -2630,9 +2630,9 @@ static int build_cxlt_chunk(const ThreediCollisionModel *collision, ChunkBuilder
     }
     for (size_t i = 0; i < collision->translation_count; ++i) {
         const ThreediCollisionTranslation *t = &collision->translations[i];
-        if (buffer_append_s32_le(&out->payload, (int32_t)t->translation[0]) != 0 ||
-            buffer_append_s32_le(&out->payload, (int32_t)t->translation[1]) != 0 ||
-            buffer_append_s32_le(&out->payload, (int32_t)t->translation[2]) != 0) {
+        if (buffer_append_s32_le(&out->payload, t->translation[0]) != 0 ||
+            buffer_append_s32_le(&out->payload, t->translation[1]) != 0 ||
+            buffer_append_s32_le(&out->payload, t->translation[2]) != 0) {
             chunk_builder_free(out);
             return -1;
         }

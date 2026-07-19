@@ -26,7 +26,10 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     // the spawn seed's fallback. health_max is stamped alongside so the §5.10 field-17 tier
     // denominator reads the spawn value (full => tier 2 => the golden 0x28) even for a joiner
     // spawning AFTER the mission-load sweep. (D-NET-144)
-    const int32_t hp = world.player_item_hp > 0 ? world.player_item_hp : spawn.health;
+    const int32_t hp = retail_signed_i16(
+        (world.player_has_item_def && world.player_item_hp != 0)
+            ? world.player_item_hp
+            : static_cast<int32_t>(spawn.health));
 
     // §5.2b steps 1-4: a pool-0 player-infantry entity (type 0x14B9), item-template health,
     // placed pose. kind=Organic so entity_wire_bridge::entity_class_of resolves it as Player.
@@ -38,6 +41,13 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     seed.bms_id = static_cast<int32_t>(spawn.net_id);
     seed.kind = EntityKind::Organic;
     seed.item_id = kPlayerInfantryTypeId;
+    seed.has_item_def = world.player_has_item_def;
+    seed.item_type = world.player_item_type;
+    seed.item_attrib = world.player_item_attrib;
+    seed.armor_impact = retail_signed_i16(world.player_armor_impact);
+    seed.armor_kz = retail_signed_i16(world.player_armor_kz);
+    seed.damage_reduc_pp = world.player_damage_reduc_pp;
+    seed.damage_reduc_max = world.player_damage_reduc_max;
     seed.player_class = spawn.player_class; // entity+0x294 (host-diag 2026-07-01: was left 0)
     seed.position = spawn.position;
     seed.yaw = spawn.yaw;
@@ -81,14 +91,14 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     ae.heading = bam_heading_from_mission_yaw_deg(spawn.yaw);
     ae.team = spawn.team;
     ae.net_id = spawn.net_id;
-    ae.health = hp;
+    ae.health = static_cast<int16_t>(hp); // hp was explicitly narrowed/sign-extended above
     ae.inf.active = true;
     ae.inf.is_local_player = is_local;
     ae.inf.body_heading = ae.heading;
     ae.inf.target_heading = ae.heading;
     ae.inf.leg_yaw[0] = ae.inf.leg_yaw[1] = ae.heading;
     ae.inf.leg_target[0] = ae.inf.leg_target[1] = ae.heading;
-    ae.inf.max_health = hp;
+    ae.inf.max_health = static_cast<int16_t>(hp);
     ae.inf.anim_state = anim_state::kIdle;
 
     // Publish the local-player handle ONLY for the host's own player — the net anchor + present

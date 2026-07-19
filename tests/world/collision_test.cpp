@@ -88,6 +88,87 @@ CollisionModel box_model(int32_t type, uint32_t flags, double hx, double hy, dou
     return m;
 }
 
+// One authored CFAC triangle in the local X=0 plane. A +X ray crosses its
+// -X Q14 normal from positive to nonpositive, the retail front-facing case.
+CollisionModel wall_triangle_model(uint32_t material_flags = 0,
+                                   uint8_t poly_type = 5) {
+    CollisionModel m;
+    auto vertex = [&](double x, double y, double z) {
+        CollisionVertex v;
+        v.p[0] = fx(x);
+        v.p[1] = fx(y);
+        v.p[2] = fx(z);
+        m.vertices.push_back(v);
+    };
+    vertex(0.0, -2.0, 0.0);
+    vertex(0.0, 2.0, 0.0);
+    vertex(0.0, 0.0, 2.0);
+
+    CollisionNormal n;
+    n.n[0] = -16384;
+    n.dominant_axis = 4; // YZ projection
+    m.normals.push_back(n);
+
+    CollisionFace f;
+    f.vertex_index[0] = 0;
+    f.vertex_index[1] = 1;
+    f.vertex_index[2] = 2;
+    f.normal_index = 0;
+    f.min[0] = f.max[0] = 0;
+    f.min[1] = fx(-2.0);
+    f.max[1] = fx(2.0);
+    f.min[2] = 0;
+    f.max[2] = fx(2.0);
+    f.material_flags = material_flags;
+    f.poly_type = poly_type;
+    m.faces.push_back(f);
+
+    CollisionSection s;
+    s.vertex_count = 3;
+    s.normal_count = 1;
+    s.face_count = 1;
+    m.sections.push_back(s);
+    return m;
+}
+
+// A centered triangle in the plane selected by normal_axis. This pins all
+// three CNRM dominant-axis encodings used by Math_PointInTriangle2D.
+CollisionModel axis_triangle_model(int normal_axis) {
+    CollisionModel m;
+    const int u_axis = normal_axis == 0 ? 1 : 0;
+    const int v_axis = normal_axis == 2 ? 1 : 2;
+    auto vertex = [&](double u, double v) {
+        CollisionVertex p;
+        p.p[u_axis] = fx(u);
+        p.p[v_axis] = fx(v);
+        m.vertices.push_back(p);
+    };
+    vertex(-2.0, -2.0);
+    vertex(2.0, -2.0);
+    vertex(0.0, 2.0);
+
+    CollisionNormal n;
+    n.n[normal_axis] = -16384;
+    n.dominant_axis = normal_axis == 0 ? 4 : (normal_axis == 1 ? 2 : 1);
+    m.normals.push_back(n);
+
+    CollisionFace f;
+    f.vertex_index[0] = 0;
+    f.vertex_index[1] = 1;
+    f.vertex_index[2] = 2;
+    f.normal_index = 0;
+    f.min[u_axis] = f.min[v_axis] = fx(-2.0);
+    f.max[u_axis] = f.max[v_axis] = fx(2.0);
+    m.faces.push_back(f);
+
+    CollisionSection s;
+    s.vertex_count = 3;
+    s.normal_count = 1;
+    s.face_count = 1;
+    m.sections.push_back(s);
+    return m;
+}
+
 struct Rig {
     World world;
     CollisionWorld cw;
@@ -170,6 +251,26 @@ void test_matrix_roundtrip() {
     CHECK(std::abs(lp[1] - local[1]) <= 4);
     CHECK(std::abs(lp[2] - local[2]) <= 4);
     (void)back;
+
+    // The special inverse divides a uniformly scaled basis by scale squared.
+    CollisionMatrix scaled = m;
+    constexpr int rotation_indices[] = {0, 1, 2, 4, 5, 6, 8, 9, 10};
+    for (int index : rotation_indices) scaled.m[index] *= 2;
+    CollisionMatrix scaled_inverse;
+    CHECK(scaled.invert_uniform_scale_into(scaled_inverse, fx(2.0)));
+    int32_t scaled_world[3] = {};
+    int32_t scaled_local[3] = {};
+    scaled.transform_point(local, scaled_world);
+    const int32_t scaled_tmp[3] = {
+        scaled_world[0] + scaled_inverse.m[3],
+        scaled_world[1] + scaled_inverse.m[7],
+        scaled_world[2] + scaled_inverse.m[11],
+    };
+    scaled_inverse.rotate_point(scaled_tmp, scaled_local);
+    CHECK(std::abs(scaled_local[0] - local[0]) <= 4);
+    CHECK(std::abs(scaled_local[1] - local[1]) <= 4);
+    CHECK(std::abs(scaled_local[2] - local[2]) <= 4);
+    CHECK(!scaled.invert_uniform_scale_into(scaled_inverse, 1));
 
     // Retail composes Rz(heading) * Ry(-pitch) * Rx(roll). Positive authored
     // pitch therefore turns local +X toward world +Z. RckS05 at 00TRg entity
@@ -1202,6 +1303,9 @@ void test_late_person_instance_is_demand_resolved_for_rounds_and_debug() {
     provider.model_id = model_id;
     provider.expected = victim;
     collision.set_section_matrix_provider(&provider);
+    // RoundSim consumes the normal per-tick proximity snapshot. The entity may
+    // be present before its graphic instance; ensure-on-hit attaches that late.
+    collision.build_tick_tables(world);
 
     // No instance was assigned by a mission-start sweep. RoundSim must invoke
     // the provider before choosing the torso sphere; this z=0 ray hits authored
@@ -1744,6 +1848,8 @@ void test_round_person_sections_drive_hit_and_death_animation() {
 
     Entity victim_seed;
     victim_seed.kind = EntityKind::Organic;
+    victim_seed.has_item_def = true;
+    victim_seed.item_type = 3;
     victim_seed.health = 775;
     victim_seed.alive = true;
     victim_seed.position = Vec3{5.0f, 0.0f, 0.0f};
@@ -1760,6 +1866,11 @@ void test_round_person_sections_drive_hit_and_death_animation() {
     CollisionWorld collision;
     const int32_t model_id = collision.add_model(std::move(model));
     collision.assign_entity(victim, model_id);
+    const int32_t victim_pos[3] = {fx(5.0), 0, 0};
+    std::vector<CollisionMatrix> pose(
+        15, collision_matrix_from_heading(0, victim_pos));
+    CHECK(collision.publish_entity_section_matrices(victim, std::move(pose)));
+    collision.build_tick_tables(world);
 
     AmmoTableEntry ammo;
     ammo.valid = true;
@@ -1803,6 +1914,388 @@ void test_round_person_sections_drive_hit_and_death_animation() {
     }
 }
 
+void test_projectile_polygon_raycast() {
+    CollisionModel model = wall_triangle_model(/*material_flags=*/0x20,
+                                                /*poly_type=*/7);
+    model.finalize_sections();
+    const int32_t pos[3] = {fx(5.0), 0, 0};
+    CollisionMatrix matrix = collision_matrix_from_heading(0, pos);
+    CollisionTargetView target;
+    target.model = &model;
+    target.matrices = &matrix;
+
+    CollisionRay ray;
+    ray.start[0] = fx(0.0);
+    ray.start[1] = 0;
+    ray.start[2] = fx(1.0);
+    ray.end[0] = fx(10.0);
+    ray.end[1] = 0;
+    ray.end[2] = fx(1.0);
+    ray.refresh();
+    CollisionPolygonHit hit;
+    CHECK(collision_raycast_polygons(target, ray, fx(10.0), 0, hit));
+    CHECK(std::abs(hit.distance_q16 - fx(5.0)) <= 2);
+    CHECK(std::abs(hit.position_q16[0] - fx(5.0)) <= 2);
+    CHECK(hit.normal_q16[0] < -fx(0.99));
+    CHECK(hit.section_index == 0 && hit.face_index == 0 &&
+          hit.section_face_index == 0);
+    CHECK(hit.material_flags == 0x20u && hit.poly_type == 7);
+
+    // The face AABB alone is insufficient: this point is inside its Y/Z box
+    // but outside the actual triangle.
+    CollisionRay outside = ray;
+    outside.start[1] = outside.end[1] = fx(1.5);
+    outside.refresh();
+    CHECK(!collision_raycast_polygons(target, outside, fx(10.0), 0, hit));
+
+    // Equal-distance faces overwrite in source order within a table query.
+    model.faces.push_back(model.faces[0]);
+    model.sections[0].face_count = 2;
+    CHECK(collision_raycast_polygons(target, ray, fx(10.0), 0, hit));
+    CHECK(hit.section_face_index == 1 && hit.face_index == 1);
+    model.faces.resize(1);
+    model.sections[0].face_count = 1;
+
+    model.faces[0].material_flags = 0x100;
+    CHECK(!collision_raycast_polygons(target, ray, fx(10.0), 0, hit));
+    model.faces[0].material_flags = 0;
+    model.faces[0].poly_type = 17;
+    CHECK(collision_raycast_polygons(target, ray, fx(10.0), 0, hit));
+    CHECK(!collision_raycast_polygons(target, ray, fx(10.0), 0x04000000u, hit));
+
+    // 0x800 is one-sided for projectile backfaceArg=1. The reverse crossing
+    // misses with 0x800, but an ordinary face remains two-directional.
+    CollisionRay reverse;
+    for (int axis = 0; axis < 3; ++axis) {
+        reverse.start[axis] = ray.end[axis];
+        reverse.end[axis] = ray.start[axis];
+    }
+    reverse.refresh();
+    model.faces[0].poly_type = 7;
+    model.faces[0].material_flags = 0x800;
+    CHECK(collision_raycast_polygons(target, ray, fx(10.0), 0, hit));
+    CHECK(!collision_raycast_polygons(target, reverse, fx(10.0), 0, hit));
+    model.faces[0].material_flags = 0x801;
+    CHECK(collision_raycast_polygons(target, reverse, fx(10.0), 0, hit));
+    model.faces[0].material_flags = 0;
+    CHECK(collision_raycast_polygons(target, reverse, fx(10.0), 0, hit));
+
+    // A plane crossing at the segment endpoint is valid for CFAC and touches
+    // the zero-thickness face AABB rather than being strictly disjoint.
+    CollisionRay endpoint = ray;
+    endpoint.end[0] = fx(5.0);
+    endpoint.refresh();
+    CHECK(collision_raycast_polygons(target, endpoint, fx(5.0), 0, hit));
+    CHECK(std::abs(hit.distance_q16 - fx(5.0)) <= 2);
+
+    for (int state = 1; state <= 3; ++state) {
+        matrix.m[15] = state;
+        CHECK(!collision_raycast_polygons(target, ray, fx(10.0), 0, hit));
+    }
+    matrix.m[15] = 0;
+
+    // Section-local source indices are runs, not global face/vertex ordinals.
+    CollisionModel indexed = wall_triangle_model();
+    indexed.vertices.insert(indexed.vertices.begin(), CollisionVertex{});
+    indexed.normals.insert(indexed.normals.begin(), CollisionNormal{});
+    indexed.faces.insert(indexed.faces.begin(), CollisionFace{});
+    indexed.sections[0].vertex_start = 1;
+    indexed.sections[0].normal_start = 1;
+    indexed.sections[0].face_start = 1;
+    indexed.finalize_sections();
+    CollisionTargetView indexed_target = target;
+    indexed_target.model = &indexed;
+    CHECK(collision_raycast_polygons(indexed_target, ray, fx(10.0), 0, hit));
+    CHECK(hit.face_index == 1 && hit.section_face_index == 0);
+
+    // Every dominant-axis projection accepts the same centered hit.
+    const int32_t origin[3] = {};
+    CollisionMatrix identity = collision_matrix_from_heading(0, origin);
+    for (int normal_axis = 0; normal_axis < 3; ++normal_axis) {
+        CollisionModel axis_model = axis_triangle_model(normal_axis);
+        axis_model.finalize_sections();
+        CollisionTargetView axis_target;
+        axis_target.model = &axis_model;
+        axis_target.matrices = &identity;
+        CollisionRay axis_ray;
+        axis_ray.start[normal_axis] = fx(-5.0);
+        axis_ray.end[normal_axis] = fx(5.0);
+        axis_ray.refresh();
+        CHECK(collision_raycast_polygons(axis_target, axis_ray, fx(10.0), 0, hit));
+        CHECK(hit.normal_q16[normal_axis] < -fx(0.99));
+    }
+
+    // A quarter-turn section pose rotates local +X into world +Y and carries
+    // both the hit point and normal through the authored section matrix.
+    CollisionModel rotated_model = wall_triangle_model();
+    rotated_model.finalize_sections();
+    const int32_t rotated_pos[3] = {fx(2.0), fx(5.0), 0};
+    CollisionMatrix rotated_matrix =
+        collision_matrix_from_heading(static_cast<int32_t>(0x40000000u), rotated_pos);
+    CollisionTargetView rotated_target;
+    rotated_target.model = &rotated_model;
+    rotated_target.matrices = &rotated_matrix;
+    CollisionRay rotated_ray;
+    rotated_ray.start[0] = rotated_ray.end[0] = fx(2.0);
+    rotated_ray.start[1] = 0;
+    rotated_ray.end[1] = fx(10.0);
+    rotated_ray.start[2] = rotated_ray.end[2] = fx(1.0);
+    rotated_ray.refresh();
+    CHECK(collision_raycast_polygons(rotated_target, rotated_ray, fx(10.0), 0, hit));
+    CHECK(std::abs(hit.position_q16[1] - fx(5.0)) <= 2);
+    CHECK(hit.normal_q16[1] < -fx(0.99));
+
+    // A 2x authored matrix needs the recovered scale-aware inverse: this ray is
+    // outside the unscaled local triangle but inside its doubled world extent.
+    CollisionModel scale_model = wall_triangle_model();
+    scale_model.finalize_sections();
+    const int32_t scale_pos[3] = {fx(5.0), 0, 0};
+    CollisionMatrix scale_matrix = collision_matrix_from_heading(0, scale_pos);
+    constexpr int scale_rotation_indices[] = {0, 1, 2, 4, 5, 6, 8, 9, 10};
+    for (int index : scale_rotation_indices) scale_matrix.m[index] *= 2;
+    CollisionTargetView scale_target;
+    scale_target.model = &scale_model;
+    scale_target.matrices = &scale_matrix;
+    scale_target.uniform_scale_q16 = fx(2.0);
+    CollisionRay scale_ray = ray;
+    scale_ray.start[1] = scale_ray.end[1] = fx(2.0);
+    scale_ray.refresh();
+    CHECK(collision_raycast_polygons(scale_target, scale_ray, fx(10.0), 0, hit));
+    scale_target.uniform_scale_q16 = 0;
+    CHECK(!collision_raycast_polygons(scale_target, scale_ray, fx(10.0), 0, hit));
+}
+
+void test_projectile_trace_authority_radius_and_damage_gates() {
+    World world;
+    world.registry.configure_pool(0, 8);
+    Entity owner;
+    owner.kind = EntityKind::Organic;
+    owner.position = {0.0f, 0.0f, 0.0f};
+    const EntityHandle oh = world.registry.spawn(0, owner);
+    Entity target;
+    target.kind = EntityKind::Organic;
+    target.position = {5.0f, 0.0f, 0.0f};
+    const EntityHandle th = world.registry.spawn(0, target);
+
+    CollisionWorld cw;
+    cw.build_tick_tables(world);
+    ProjectileTrace q;
+    q.start = FixedVec3{fx(0.0), fx(0.65), fx(0.9)};
+    q.end = FixedVec3{fx(10.0), fx(0.65), fx(0.9)};
+    q.owner = oh;
+    q.radius_q16 = 0;
+    ProjectileHit hit = cw.trace_projectile(world, q);
+    CHECK(!hit.hit()); // no unconditional 0.1u expansion
+
+    Entity *shooter = world.registry.get(oh);
+    shooter->flags |= 0x100u;
+    world.mp_session = true;
+    world.projectile_authority = true;
+    world.fat_bullets = true;
+    world.cached.local_player = th; // owner is a remote player on this authority
+    hit = cw.trace_projectile(world, q);
+    CHECK(hit.hit_class == ProjectileHitClass::Person);
+    CHECK(hit.geometry_entity == th);
+    CHECK(hit.t_q16 > fx(0.35) && hit.t_q16 < fx(0.5));
+
+    // Indestructibility/death are downstream damage gates, not transparent
+    // geometry. The exact same trace must still stop on the body.
+    Entity *dead = world.registry.get(th);
+    dead->health = 0;
+    dead->alive = false;
+    dead->engine_flags |= 0x4000000u;
+    hit = cw.trace_projectile(world, q);
+    CHECK(hit.hit_class == ProjectileHitClass::Person);
+    CHECK(hit.geometry_entity == th);
+
+    // FatBullets never expands the local authority player's own shot.
+    world.cached.local_player = oh;
+    CHECK(!cw.trace_projectile(world, q).hit());
+    world.cached.local_player = th;
+
+    ProjectileTrace zero;
+    zero.start = zero.end = FixedVec3{fx(2.0), fx(3.0), fx(4.0)};
+    const ProjectileHit miss = cw.trace_projectile(world, zero);
+    CHECK(!miss.hit());
+    CHECK(miss.position_q16.x == zero.end.x && miss.position_q16.z == zero.end.z);
+    CHECK(miss.section_index == -1 && miss.face_index == -1 && miss.bone_index == -1);
+}
+
+void test_published_person_bone_pose() {
+    World world;
+    world.registry.configure_pool(0, 8);
+    Entity owner;
+    owner.kind = EntityKind::Organic;
+    const EntityHandle oh = world.registry.spawn(0, owner);
+    Entity person;
+    person.kind = EntityKind::Organic;
+    person.position = {5.0f, 0.0f, 0.0f};
+    const EntityHandle ph = world.registry.spawn(0, person);
+
+    CollisionModel model;
+    CollisionSection bone;
+    bone.authored_bounds = true;
+    bone.min_x = bone.min_y = bone.min_z = fx(-1.0);
+    bone.max_x = bone.max_y = bone.max_z = fx(1.0);
+    bone.radius = fx(1.0);
+    model.sections.push_back(bone);
+
+    CollisionWorld cw;
+    const int32_t model_id = cw.add_model(std::move(model));
+    cw.assign_entity(ph, model_id);
+    CHECK(!cw.publish_entity_section_matrices(ph, {}));
+    const int32_t posed_at[3] = {fx(5.0), 0, fx(0.9)};
+    std::vector<CollisionMatrix> pose{
+        collision_matrix_from_heading(0, posed_at),
+    };
+    CHECK(cw.publish_entity_section_matrices(ph, pose));
+    cw.build_tick_tables(world);
+
+    ProjectileTrace q;
+    q.owner = oh;
+    q.start = FixedVec3{0, 0, fx(0.9)};
+    q.end = FixedVec3{fx(10.0), 0, fx(0.9)};
+    const ProjectileHit hit = cw.trace_projectile(world, q);
+    CHECK(hit.hit_class == ProjectileHitClass::Person);
+    CHECK(hit.geometry_entity == ph);
+    CHECK(hit.section_index == 0 && hit.bone_index == 0 && hit.hit_zone == 0);
+    CHECK(std::abs(hit.position_q16.x - fx(4.5)) <= 4);
+}
+
+void test_projectile_trace_world_ordering() {
+    ProjectileTrace q;
+    q.start = FixedVec3{fx(0.0), 0, fx(1.0)};
+    q.end = FixedVec3{fx(10.0), 0, fx(1.0)};
+
+    // CB/type-1 is still a valid LOS/contact solid, but it is not projectile
+    // narrow-phase geometry in retail.
+    {
+        Rig cb_only(box_model(1, 0, 1.0, 1.0, 2.0), 5.0, 0.0);
+        q.owner = cb_only.soldier;
+        CHECK(!cb_only.cw.trace_projectile(cb_only.world, q).hit());
+    }
+
+    // Static CFAC is class 1 and wins over the later person pass.
+    Rig rig(wall_triangle_model(), 5.0, 0.0);
+    Entity target;
+    target.kind = EntityKind::Organic;
+    target.position = {8.0f, 0.0f, 0.0f};
+    const EntityHandle farther = rig.world.registry.spawn(0, target);
+    rig.rebuild();
+
+    q.owner = rig.soldier;
+    ProjectileHit hit = rig.cw.trace_projectile(rig.world, q);
+    CHECK(hit.hit_class == ProjectileHitClass::StaticEntity);
+    CHECK(hit.geometry_entity == rig.building);
+    CHECK(hit.geometry_entity != farther);
+    CHECK(hit.section_index == 0 && hit.bone_index == 0 && hit.face_index == 0);
+    CHECK(hit.surface_type == 5);
+    CHECK(std::abs(hit.position_q16.x - fx(5.0)) < 8);
+    CHECK(hit.normal_q16.x < 0);
+
+    // A dynamic CFAC at the same distance loses to static on equality. Ignoring
+    // the static exposes the same model as class 2.
+    rig.world.registry.configure_pool(1, 8);
+    Entity dynamic;
+    dynamic.kind = EntityKind::Item;
+    dynamic.position = {5.0f, 0.0f, 0.0f};
+    dynamic.yaw = 90;
+    dynamic.alive = true;
+    const EntityHandle dynamic_h = rig.world.registry.spawn(1, dynamic);
+    const int32_t dynamic_model = rig.cw.add_model(wall_triangle_model());
+    rig.cw.assign_entity(dynamic_h, dynamic_model);
+    rig.rebuild();
+    hit = rig.cw.trace_projectile(rig.world, q);
+    CHECK(hit.hit_class == ProjectileHitClass::StaticEntity);
+    CHECK(hit.geometry_entity == rig.building);
+    q.extra_ignore = rig.building;
+    hit = rig.cw.trace_projectile(rig.world, q);
+    CHECK(hit.hit_class == ProjectileHitClass::DynamicEntity);
+    CHECK(hit.geometry_entity == dynamic_h);
+    q.extra_ignore = EntityHandle{};
+
+    // Terrain is seeded first; a strictly nearer entity replaces it, while a
+    // farther entity cannot replace the refined ground crossing.
+    World world;
+    world.registry.configure_pool(0, 8);
+    Field flat(0);
+    CollisionWorld cw;
+    cw.terrain = &flat.field;
+    Entity e;
+    e.kind = EntityKind::Organic;
+    e.position = {8.0f, 0.0f, 0.0f};
+    const EntityHandle far = world.registry.spawn(0, e);
+    cw.build_tick_tables(world);
+    ProjectileTrace down;
+    down.start = FixedVec3{fx(0.0), 0, fx(5.0)};
+    down.end = FixedVec3{fx(10.0), 0, fx(-5.0)};
+    hit = cw.trace_projectile(world, down);
+    CHECK(hit.hit_class == ProjectileHitClass::Terrain);
+    CHECK(!hit.geometry_entity.valid());
+    CHECK(std::abs(hit.position_q16.z) < fx(0.02));
+    CHECK(hit.normal_q16.z > fx(0.99));
+
+    down.ammo_flags = 0x80u;
+    CHECK(!cw.trace_projectile(world, down).hit());
+    down.ammo_flags = 0;
+
+    Entity *near = world.registry.get(far);
+    near->position = {3.0f, 0.0f, 1.1f}; // torso center lies on the descending ray
+    cw.build_tick_tables(world);
+    hit = cw.trace_projectile(world, down);
+    CHECK(hit.hit_class == ProjectileHitClass::Person);
+    CHECK(hit.geometry_entity == far);
+    CHECK(hit.t_q16 < fx(0.5));
+
+    // The person proximity routine returns on its first qualifying table slot,
+    // even when a later person would be geometrically nearer.
+    World people;
+    people.registry.configure_pool(0, 8);
+    Entity owner;
+    owner.kind = EntityKind::Organic;
+    const EntityHandle people_owner = people.registry.spawn(0, owner);
+    Entity first;
+    first.kind = EntityKind::Organic;
+    first.position = {8.0f, 0.0f, 0.0f};
+    const EntityHandle first_h = people.registry.spawn(0, first);
+    Entity second = first;
+    second.position = {4.0f, 0.0f, 0.0f};
+    people.registry.spawn(0, second);
+    CollisionWorld people_collision;
+    people_collision.build_tick_tables(people);
+    q.owner = people_owner;
+    hit = people_collision.trace_projectile(people, q);
+    CHECK(hit.hit_class == ProjectileHitClass::Person);
+    CHECK(hit.geometry_entity == first_h);
+
+    // Water is pass 4's hit class but pass two in arbitration, and endpoints on
+    // the plane are deliberately not crossings.
+    World water;
+    water.env.water_z = fx(2.0);
+    CollisionWorld water_collision;
+    ProjectileTrace wet;
+    wet.start = FixedVec3{0, 0, fx(5.0)};
+    wet.end = FixedVec3{0, 0, fx(-5.0)};
+    hit = water_collision.trace_projectile(water, wet);
+    CHECK(hit.hit_class == ProjectileHitClass::Water);
+    CHECK(hit.position_q16.z == water.env.water_z);
+    wet.start.z = water.env.water_z;
+    CHECK(!water_collision.trace_projectile(water, wet).hit());
+}
+
+void test_idle_round_tick_clears_stale_terrain() {
+    World world;
+    CollisionWorld collision;
+    Field old_field(0);
+    world.collision = &collision;
+    collision.terrain = &old_field.field;
+    CHECK(world.round_sim.active_count == 0);
+    world.round_sim.tick(world, nullptr);
+    CHECK(collision.terrain == nullptr);
+    world.round_sim.tick(world, &old_field.field);
+    CHECK(collision.terrain == &old_field.field);
+}
+
 int main() {
     test_matrix_roundtrip();
     test_retail_render_pose_matrix_roundtrip_and_order();
@@ -1840,6 +2333,11 @@ int main() {
     test_round_item_skip_mask();
     test_round_indestructible_organic_still_collides();
     test_round_person_sections_drive_hit_and_death_animation();
+    test_projectile_polygon_raycast();
+    test_projectile_trace_authority_radius_and_damage_gates();
+    test_published_person_bone_pose();
+    test_projectile_trace_world_ordering();
+    test_idle_round_tick_clears_stale_terrain();
     if (failures == 0) std::printf("collision_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }

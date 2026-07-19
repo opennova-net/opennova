@@ -142,13 +142,15 @@ struct AreaTriggerRecord {
 	bool constrain_z = false; // flags & 0x02 (else Z unbounded ±16384.0)
 };
 
-// Public editor view of one weapon / restriction-loadout record. The BMS chunk is sanitized to four
-// NUL-terminated fields (name + three values); this API surfaces the name and first two values because
-// value3 is consistently a restriction/default slot in shipped missions and is written as "-1" for edits.
+// Public editor/runtime view of one weapon-loadout record. The BMS chunk is sanitized to four
+// NUL-terminated fields (name + three values). The fourth field is load-bearing: it becomes the
+// per-ammo damage-class byte consumed by Weapon_CalcImpactDamage (1 = x0.9, 2 = x1.1, every other
+// value neutral), so it must survive every editor and FFI round-trip. New rows default it to "-1".
 struct WeaponLoadoutEntry {
 	std::string name;
 	std::string value1;
 	std::string value2;
+	std::string value3 = "-1";
 };
 
 // Public view of one item-availability record from the .bms secondary chunk — the
@@ -495,12 +497,14 @@ typedef struct OpenNovaMissionAreaTriggerRecord {
 	int constrain_z;
 } OpenNovaMissionAreaTriggerRecord;
 
-// Loadout entry over FFI. The three on-disk strings are copied into fixed 64-char buffers (real weapon
-// names + "-1" values are short); a longer field would be truncated to 63 chars on read.
+// Loadout entry over FFI. The four on-disk strings are copied into fixed 64-char buffers (real weapon
+// names + numeric values are short); a longer field is truncated to 63 chars on read. value3 is
+// deliberately appended so the offsets of name/value1/value2 remain stable for rebuilt callers.
 typedef struct OpenNovaMissionWeaponLoadoutEntry {
 	char name[64];
 	char value1[64];
 	char value2[64];
+	char value3[64];
 } OpenNovaMissionWeaponLoadoutEntry;
 
 typedef struct OpenNovaMissionGroupRecord {

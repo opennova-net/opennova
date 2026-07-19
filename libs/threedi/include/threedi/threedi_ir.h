@@ -240,6 +240,13 @@ typedef struct ThreediIRCollisionVertex {
     float position[3];
 } ThreediIRCollisionVertex;
 
+// Exact CNRM representation. Keeping the authored Q14 values avoids a
+// float round-trip before retail-style fixed-point narrow-phase queries.
+typedef struct ThreediIRCollisionNormal {
+    int16_t normal_q14[3];
+    int16_t dominant_axis;       // 1=Z, 2=Y, 4=X
+} ThreediIRCollisionNormal;
+
 typedef struct ThreediIRCollisionPlane {
     float normal[3];
     float distance;             // Plane distance from origin
@@ -259,6 +266,7 @@ typedef struct ThreediIRCollisionVolume {
 
 typedef struct ThreediIRCollisionFace {
     int16_t vert_index[3];      // Local vertex indices (within subobject)
+    int16_t normal_index;       // Local index into this object's CNRM run
     uint32_t material_flags;    // CFAC material_flags (for material reverse-mapping)
     uint8_t poly_type;          // CFAC poly_type (for material reverse-mapping)
     // Round-raycast fields, carried as authored. The CNRM normal is resolved
@@ -276,14 +284,24 @@ typedef struct ThreediIRCollisionFace {
 typedef struct ThreediIRCollisionObject {
     int32_t num_vertices;       // Vertex count for this subobject
     int32_t num_faces;          // Face count for this subobject
+    int32_t num_planes;         // CNRM count for this subobject (legacy COBJ name)
+    int32_t num_bounding_volumes;
     int32_t parent_subobject_index;  // Part hierarchy parent
-    float offset[3];            // Center point position (raw fp16.16 stored as float)
-    int32_t center_fp16[3];     // Authored COBJ bounding-sphere center, exact 16.16
-    int32_t radius_fp16;        // Authored COBJ bounding-sphere radius, exact 16.16
+    int32_t offset[3];          // Exact authored 16.16 integers
+    int32_t min[3];
+    int32_t max[3];
+    union {
+        int32_t mid[3];         // Exact authored COBJ bounding-sphere center
+        int32_t center_fp16[3]; // Descriptive alias used by skeletal collision
+    };
+    union {
+        int32_t radius;
+        int32_t radius_fp16;    // Descriptive alias used by skeletal collision
+    };
 } ThreediIRCollisionObject;
 
 typedef struct ThreediIRCollisionTranslation {
-    float translation[3];       // Attachment point position (raw fp16.16 stored as float)
+    int32_t translation[3];     // Exact authored 16.16 integers
 } ThreediIRCollisionTranslation;
 
 typedef struct ThreediIRCollision {
@@ -295,6 +313,10 @@ typedef struct ThreediIRCollision {
     // Vertices
     ThreediIRCollisionVertex *vertices;
     size_t vertex_count;
+
+    // Exact collision normals (CNRM), in object-contiguous source order.
+    ThreediIRCollisionNormal *normals;
+    size_t normal_count;
 
     // Bounding planes
     ThreediIRCollisionPlane *planes;
@@ -482,16 +504,52 @@ THREEDI_EXPORT void threedi_ir_init(ThreediModelIR *ir);
 // Free all allocations inside an IR structure
 THREEDI_EXPORT void threedi_ir_free(ThreediModelIR *ir);
 
-// Return 1 when every collision volume is safe for runtime convex queries:
-// backing arrays are present, each volume owns a non-empty plane window wholly
-// inside the plane array, and any object index names an existing collision object
-// (or is -1 for the legacy ungrouped form). Return 0 for a null or malformed block.
+// Return 1 when every collision slice is safe for runtime queries: backing
+// arrays exist, COBJ-owned vertex/normal/face/volume runs are contiguous and
+// in range, local CFAC indices stay within their object, and every BVOL owns a
+// non-empty BPLN window. Object-less legacy convex blocks remain supported.
 // This is header-local so validation does not expand the stable shared-library ABI.
 static inline int threedi_ir_collision_is_runtime_safe(const ThreediIRCollision *collision) {
     if (!collision) return 0;
+    if (collision->vertex_count != 0 && !collision->vertices) return 0;
+    if (collision->normal_count != 0 && !collision->normals) return 0;
+    if (collision->face_count != 0 && !collision->faces) return 0;
     if (collision->volume_count != 0 && !collision->volumes) return 0;
     if (collision->plane_count != 0 && !collision->planes) return 0;
     if (collision->object_count != 0 && !collision->objects) return 0;
+
+    if (collision->object_count == 0 &&
+        (collision->vertex_count != 0 || collision->normal_count != 0 ||
+         collision->face_count != 0)) return 0;
+
+    size_t vertex_cursor = 0, normal_cursor = 0, face_cursor = 0, volume_cursor = 0;
+    for (size_t oi = 0; oi < collision->object_count; ++oi) {
+        const ThreediIRCollisionObject *object = &collision->objects[oi];
+        if (object->num_vertices < 0 || object->num_faces < 0 || object->num_planes < 0 ||
+            object->num_bounding_volumes < 0) return 0;
+        const size_t nv = (size_t)object->num_vertices;
+        const size_t nn = (size_t)object->num_planes;
+        const size_t nf = (size_t)object->num_faces;
+        const size_t nb = (size_t)object->num_bounding_volumes;
+        if (nv > collision->vertex_count - vertex_cursor ||
+            nn > collision->normal_count - normal_cursor ||
+            nf > collision->face_count - face_cursor ||
+            nb > collision->volume_count - volume_cursor) return 0;
+        for (size_t fi = 0; fi < nf; ++fi) {
+            const ThreediIRCollisionFace *face = &collision->faces[face_cursor + fi];
+            if (face->normal_index < 0 || (size_t)face->normal_index >= nn) return 0;
+            for (int k = 0; k < 3; ++k)
+                if (face->vert_index[k] < 0 || (size_t)face->vert_index[k] >= nv) return 0;
+        }
+        vertex_cursor += nv;
+        normal_cursor += nn;
+        face_cursor += nf;
+        volume_cursor += nb;
+    }
+    if (collision->object_count != 0 &&
+        (vertex_cursor != collision->vertex_count || normal_cursor != collision->normal_count ||
+         face_cursor != collision->face_count || volume_cursor != collision->volume_count))
+        return 0;
 
     int32_t previous_group = -1;
     for (size_t i = 0; i < collision->volume_count; ++i) {

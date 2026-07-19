@@ -134,6 +134,7 @@ int main(void) {
         {"arm_age_ticks", car15->arm_age_ticks, 0},
         {"error_fp16", car15->error_fp16, 0},
         {"drag_fp16", car15->drag_fp16, 16712},
+        {"tumble_error_fp16", car15->tumble_error_fp16, 655},
         {"weight_in_grains", car15->weight_in_grains, 62},
         {"penetration_impact", car15->penetration_impact, 20},
         {"kztype", car15->kztype, DEF_AMMO_KZ_C4},

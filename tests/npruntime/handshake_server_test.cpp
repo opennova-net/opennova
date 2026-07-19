@@ -15,6 +15,7 @@
 // so the encrypted 0x83 replies decode without any test accessor.
 
 #include <npruntime/napi_np_protocol.h>
+#include <npruntime/ammo_table_build.h>   // build_ammo_table / resolve_weapon_round_types
 #include <npruntime/weapon_table_build.h> // build_weapon_table (the D-NET-141 armory resolve)
 
 #include <def/def.h>
@@ -494,6 +495,13 @@ bool run_loadout_resolve_with_armory() {
 	world::World world;
 	world.weapons = np::build_weapon_table(wf);
 	def_free_weapons(&wf);
+	char ammo_path[4096];
+	std::snprintf(ammo_path, sizeof(ammo_path), "%s/fixtures/def/ammo.def", repo_root);
+	DefAmmoFile af{};
+	if (!expect(def_parse_ammo(ammo_path, &af) == 0, "fixture ammo.def parses")) return false;
+	world.ammo = np::build_ammo_table(af);
+	def_free_ammo(&af);
+	np::resolve_weapon_round_types(world.weapons, world.ammo);
 	ctx.world = &world;
 
 	const PeerAddr peer{0x0100007Fu, 30100};
@@ -524,6 +532,42 @@ bool run_loadout_resolve_with_armory() {
 		}
 		return false;
 	};
+	auto malformed_loadout_rejected = [&](const std::vector<uint8_t> &req, uint32_t now,
+	                                      const char *label) -> bool {
+		auto dg = craft_session(client_scrk, seq++, {make_protocol_message(0x2F, req)});
+		auto response = np::handle_server_datagram(ctx, peer, dg.data(), dg.size(), now);
+		bool saw_5a = false;
+		for (const std::vector<uint8_t> &outbound : response.outbound) {
+			ProtocolPacketHeader hdr;
+			std::vector<ProtocolMessage> messages;
+			if (!decode_s2c(outbound, server_scrk, hdr, messages)) continue;
+			if (reply_has_tag(messages, 0x5A)) saw_5a = true;
+		}
+		if (!expect(!saw_5a, label)) return false;
+		const np::NapiNPConnection *connection = nullptr;
+		for (const np::NapiNPConnection &candidate : ctx.np_protocol.connection_list)
+			if (candidate.peer == peer) connection = &candidate;
+		return expect(connection != nullptr && !connection->reply.loadout_synced &&
+		                      !connection->burst.loadout_received &&
+		                      connection->reply.last_loadout_reply.empty(),
+		              "malformed 0x2F leaves the loadout gate and prior grant untouched");
+	};
+
+	// The 0x2F body is an exact frame, not a best-effort list. Missing terminators,
+	// partial four-byte entries, and bytes after the terminator are all rejected and
+	// must not produce 0x5A or release the phase-8 loadout gate.
+	if (!malformed_loadout_rejected(
+			{0x01, 0x08, 0, 0, 0, 0, 9, 0xFF, 0xFF, 1}, 120,
+			"0x2F without the 0xFF terminator produces no 0x5A"))
+		return false;
+	if (!malformed_loadout_rejected(
+			{0x01, 0x08, 0, 0, 0, 0, 9, 4, 0xFF}, 121,
+			"0x2F with a truncated entry produces no 0x5A"))
+		return false;
+	if (!malformed_loadout_rejected(
+			{0x01, 0x08, 0, 0, 0, 0, 0xFF, 0x00}, 122,
+			"0x2F with trailing bytes after its terminator produces no 0x5A"))
+		return false;
 
 	// The live retail v14 request (class 2 red / soldier 8 rifleman, default 0xFF ammo). Fixture
 	// truth: {2 KNIFE2, 3 colt45, 21 AK47M203AUTO} pass the masks; {76,77,78,83} land on
@@ -571,12 +615,57 @@ bool run_loadout_resolve_with_armory() {
 	// Explicit requested count: blue rifleman asks 4 mags of M4AUTO -> min(4, maxclips 10) = 4.
 	{
 		std::vector<uint8_t> req = {0x01, 0x08, 0xC3, 0x00, 0x00, 0x00,
-		                            9, 4, 0xFF, 0xFF, 0xFF};
+		                            9, 4, 0xFF, 2, 0xFF};
 		WeaponLoadout lo;
 		if (!loadout_reply(req, 150, lo)) return false;
 		if (!expect(lo.slots.size() == 1 && lo.slots[0].type_id == 9 &&
-		                    lo.slots[0].ammo_primary == 4 && lo.slots[0].ammo_secondary == 0xFF,
-		            "explicit request -> min(requested, maxclips) clips")) return false;
+		                    lo.slots[0].ammo_primary == 4 &&
+		                    lo.slots[0].ammo_secondary == 0xFF &&
+		                    lo.slots[0].ammo_alt == 2,
+		            "explicit request -> clips plus the accepted damage-class byte")) return false;
+	}
+
+	const int m4_auto = world.weapons.index_of("WPN_M4AUTO");
+	const int m4_m203_auto = world.weapons.index_of("WPN_M4M203AUTO");
+	if (!expect(m4_auto > 0 && m4_m203_auto > 0,
+	            "shared-ammo loadout fixtures resolve")) return false;
+	const int16_t m4_ammo = world.weapons.entries[static_cast<size_t>(m4_auto)].ammo_index;
+	if (!expect(m4_ammo >= 0 &&
+	                    world.weapons.entries[static_cast<size_t>(m4_m203_auto)].ammo_index == m4_ammo,
+	            "M4AUTO and M4M203AUTO share one resolved AmmoDef index")) return false;
+
+	// player+89688 is indexed by AmmoDef, not by granted weapon. The later accepted M4M203AUTO
+	// therefore overwrites the M4AUTO's class, and BOTH serialized slots read back the final 2.
+	{
+		std::vector<uint8_t> req = {
+				0x01, 0x08, 0, 0, 0, 0,
+				static_cast<uint8_t>(m4_auto), 2, 0xFF, 1,
+				static_cast<uint8_t>(m4_m203_auto), 3, 0xFF, 2,
+				0xFF};
+		WeaponLoadout lo;
+		if (!loadout_reply(req, 160, lo)) return false;
+		if (!expect(lo.slots.size() == 2, "two different shared-ammo slots are granted"))
+			return false;
+		for (const WeaponLoadoutSlot &slot : lo.slots)
+			if (!expect(slot.ammo_alt == 2,
+			            "all shared-ammo slots serialize the final per-ammo damage class"))
+				return false;
+	}
+
+	// Repeating the same category*65+rank does not create a second granted slot: the load
+	// table entry is replaced. Its later ammo count and normalized damage class are retained.
+	{
+		std::vector<uint8_t> req = {
+				0x01, 0x08, 0, 0, 0, 0,
+				static_cast<uint8_t>(m4_auto), 2, 0xFF, 2,
+				static_cast<uint8_t>(m4_auto), 4, 0xFF, 1,
+				0xFF};
+		WeaponLoadout lo;
+		if (!loadout_reply(req, 170, lo)) return false;
+		if (!expect(lo.slots.size() == 1 && lo.slots[0].type_id == m4_auto &&
+		                    lo.slots[0].ammo_primary == 4 && lo.slots[0].ammo_alt == 1,
+		            "duplicate weapon slot serializes once with its last accepted values"))
+			return false;
 	}
 	return true;
 }

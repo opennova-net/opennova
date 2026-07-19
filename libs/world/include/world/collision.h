@@ -73,26 +73,62 @@ struct CollisionVolume {
     uint32_t flags = 0;             // authored bvol flags (blink letters)
 };
 
+// Poly Collision LOD records (CVRT/CNRM/CFAC). These preserve the authored
+// fixed-point query data and source order and remain deliberately distinct
+// from the CB/CL/VC (vehicle collision) BVOL families used by contact and
+// generic solid rays.
+struct CollisionVertex {
+    int32_t p[3] = {};              // section-local 16.16
+};
+
+struct CollisionNormal {
+    int16_t n[3] = {};              // exact signed Q14
+    int16_t dominant_axis = 0;      // projection: 1=XY, 2=XZ, 4=YZ
+};
+
+struct CollisionFace {
+    // Exact indexed representation.
+    int16_t vertex_index[3] = {};
+    int16_t normal_index = -1;
+    uint32_t material_flags = 0;
+    uint8_t poly_type = 0;
+    // Runtime Q8/embedded-normal representation.
+    int16_t v[3] = {};
+    int16_t normal[3] = {};
+    int16_t axis = 0;
+    int32_t plane_dist = 0;
+    int32_t min[3] = {}, max[3] = {};
+    uint32_t flags = 0;
+    uint8_t material = 0;
+};
+
 // [orig: runtime COBJ record, 108 B — volume count @+28, volume ptr @+36, damage
 // start @+32, local AABB minX,maxX,minY,maxY,minZ,maxZ @+68..+88, bound-sphere
 // center @+92..+100 + radius @+104.]
 struct CollisionSection {
+    int32_t vertex_start = 0;
+    int32_t vertex_count = 0;
+    int32_t normal_start = 0;
+    int32_t normal_count = 0;
+    int32_t face_start = 0;
+    int32_t face_count = 0;
     int32_t volume_start = 0;       // run into CollisionModel::volumes
     int32_t volume_count = 0;
-    int32_t face_start = 0;         // run into CollisionModel::faces [orig: COBJ+16]
-    int32_t face_count = 0;         // [orig: COBJ+12]
     int32_t face_vertex_start = 0;  // run into CollisionModel::face_vertices [orig: COBJ+8]
     int32_t face_vertex_count = 0;  // [orig: COBJ+4]
     int32_t damage_start = -1;      // first damage volume index (-1 = none) [orig: +32]
     int32_t min_x = 0, max_x = 0;   // section-local 16.16 AABB
     int32_t min_y = 0, max_y = 0;
     int32_t min_z = 0, max_z = 0;
+    int32_t offset[3] = {};         // exact COBJ section offset (16.16)
     int32_t center[3] = {};         // bound-sphere center (section-local 16.16)
     int32_t radius = 0;             // bound-sphere radius (16.16)
     // Hierarchy metadata copied from COBJ::parent_subobject_index. This is NOT
     // the section-matrix selector: retail pairs callback matrix i with COBJ i
     // strictly by ordinal, even when several COBJ rows share one parent.
     int32_t parent_part_index = -1;
+    int32_t part_index = -1;        // source render part
+    bool authored_bounds = false;   // exact COBJ bounds/radius were retained
 };
 
 // ----------------------------------------------------------------------------
@@ -107,23 +143,14 @@ struct CollisionFaceVertex {
     int16_t x = 0, y = 0, z = 0; // section-local Q8 (16.16 >> 8); <<8 to 16.16
 };
 
-struct CollisionFace {
-    int16_t v[3] = {};      // indices into the SECTION's vertex run
-    int16_t normal[3] = {}; // Q14 unit normal [orig: the 8-B CNRM record]
-    int16_t axis = 0;       // projection-plane flag: 1=XY, 2=XZ, 4=YZ
-    int32_t plane_dist = 0; // 16.16; side = (v.n >> 14) + plane_dist
-    int32_t min[3] = {}, max[3] = {}; // face AABB (section-local 16.16)
-    uint32_t flags = 0;     // CFAC material_flags: 1 = hit from both sides,
-                            // 0x100 = never hit, 0x800 = double-sided
-    uint8_t material = 0;   // CFAC poly_type -> the impact tag (material + 4)
-};
-
 struct CollisionModel {
     std::vector<CollisionSection> sections;
+    std::vector<CollisionVertex> vertices;
+    std::vector<CollisionNormal> normals;
+    std::vector<CollisionFaceVertex> face_vertices; // Q8 per-section runs
+    std::vector<CollisionFace> faces;               // shared per-section runs
     std::vector<CollisionVolume> volumes;
     std::vector<CollisionPlane> planes;
-    std::vector<CollisionFaceVertex> face_vertices; // per-section runs
-    std::vector<CollisionFace> faces;               // per-section runs
     // Model-level AABB (union of the section AABBs, mission axes 16.16) — the
     // runtime collision-header bounds the render occlusion reads. [orig: the
     // collision block +24..+44 min/max fields, consumed by render_TOC's corner
@@ -151,6 +178,9 @@ struct CollisionMatrix {
     int32_t m[16] = {};
 
     bool disabled() const { return (m[15] & 1) != 0; }
+    // Projectile polygon traversal rejects either of the two low state bits.
+    // [orig: Physics_RaycastAgainstBoneCollision @ 0x4e4cb0, matrix+60 & 3]
+    bool polygon_disabled() const { return (m[15] & 3) != 0; }
 
     // world = R * local >> 22 + t
     void transform_point(const int32_t in[3], int32_t out[3]) const;
@@ -159,6 +189,11 @@ struct CollisionMatrix {
     // out = inverse(this) for orthonormal rotations: R' = transpose(R),
     // t' = -(R' * t) >> 22. [orig: Matrix_Transpose3x3WithNegateCol3 @ 0x6136d0]
     void invert_into(CollisionMatrix &out) const;
+    // Safe port of Math_BuildInverseFixedPointMatrix3x3 @ 0x613e10. `this`
+    // must contain a uniformly scaled orthogonal basis and scale_q16 must be
+    // the same effective scale used to build it. False rejects retail-crashing
+    // zero/overflow divisors.
+    bool invert_uniform_scale_into(CollisionMatrix &out, int32_t scale_q16) const;
 };
 
 // Build the quantized yaw-only entity matrix (heading in BAM32, translation
@@ -253,6 +288,12 @@ struct CollisionTargetView {
     bool is_building = false;                  // itemDef type == 5 (blink gate)
     int32_t pool_index = 0;                    // pool index for the packed blink hit
     bool is_ground_of_source = false;          // source->groundEntity == target (type 13)
+    // Effective entity+0x158/itemDef+0x1B8 uniform scale metadata. The pose
+    // matrix already contains this scale; it only selects the matching inverse.
+    int32_t uniform_scale_q16 = 0;
+    // True only when the pose owner published one live matrix per COBJ section.
+    // A yaw-only rigid fallback deliberately does not claim animated-bone fidelity.
+    bool live_section_pose = false;
 };
 
 // ----------------------------------------------------------------------------
@@ -286,7 +327,39 @@ struct CollisionRay {
     void refresh_bounds();
 };
 
-bool collision_raycast_model(const CollisionTargetView &target, CollisionRay &ray);
+// Metadata for the solid volume that most recently clipped `ray` to its nearest
+// entry point. The legacy callers only need the bool and leave this null; the
+// projectile query retains section identity for downstream impact policy.
+struct CollisionModelHit {
+    int32_t section_index = -1;
+    int32_t volume_index = -1;
+    int32_t normal_q16[3] = {};
+};
+
+bool collision_raycast_model(const CollisionTargetView &target, CollisionRay &ray,
+                             CollisionModelHit *out_hit = nullptr);
+
+// Segment-vs-authored collision polygons. This is deliberately separate from
+// collision_raycast_model: retail projectile geometry is CVRT/CNRM/CFAC, while
+// the older query above is the TYPE-1 CB/BVOL solid path used by LOS/contact.
+// distance_q16 is distance along the segment in world 16.16 units.
+// [orig: Physics_RaycastAgainstBoneCollision @ 0x4e4cb0]
+struct CollisionPolygonHit {
+    int32_t distance_q16 = 0x7FFFFFFF;
+    int32_t position_q16[3] = {};
+    int32_t normal_q16[3] = {};
+    int32_t section_index = -1;
+    int32_t face_index = -1;
+    int32_t section_face_index = -1;
+    uint32_t material_flags = 0;
+    int32_t poly_type = -1;
+};
+
+bool collision_raycast_polygons(const CollisionTargetView &target,
+                                const CollisionRay &ray,
+                                int32_t segment_length_q16,
+                                uint32_t ammo_flags,
+                                CollisionPolygonHit &out_hit);
 
 // ----------------------------------------------------------------------------
 // Segment-vs-face-mesh query — the PROJECTILE hit test. Closest accepted face
@@ -394,6 +467,54 @@ public:
                                         std::vector<CollisionMatrix> &out) = 0;
 };
 
+// ---------------------------------------------------------------------------
+// Authoritative projectile trace. This is the single collision seam used by
+// RoundSim: fixed-point terrain/entity arbitration lives here; arming, armor,
+// health, scoring, and effects remain consequences owned by RoundSim.
+// ---------------------------------------------------------------------------
+struct FixedVec3 {
+    int32_t x = 0, y = 0, z = 0;
+
+    constexpr int32_t operator[](int i) const { return i == 0 ? x : (i == 1 ? y : z); }
+};
+
+enum class ProjectileHitClass : uint8_t {
+    Terrain = 0,
+    StaticEntity = 1,
+    DynamicEntity = 2,
+    Person = 3,
+    Water = 4,
+    None = 0xFF,
+};
+
+inline constexpr int32_t kProjectileAuthorityMinRadiusQ16 = 6553; // 0.1u
+
+struct ProjectileTrace {
+    FixedVec3 start;
+    FixedVec3 end;
+    EntityHandle owner;
+    int32_t radius_q16 = 0;
+    uint32_t ammo_flags = 0;
+    // The additional per-projectile exclusion carried by the retail ray context.
+    EntityHandle extra_ignore;
+};
+
+struct ProjectileHit {
+    ProjectileHitClass hit_class = ProjectileHitClass::None;
+    EntityHandle geometry_entity;
+    int32_t t_q16 = 0x10000;
+    FixedVec3 position_q16;
+    FixedVec3 normal_q16;
+    int32_t section_index = -1;
+    int32_t face_index = -1;
+    int32_t bone_index = -1;
+    int32_t hit_zone = -1;
+    int32_t surface_type = -1;
+    uint32_t material_flags = 0;
+
+    constexpr bool hit() const { return hit_class != ProjectileHitClass::None; }
+};
+
 // ----------------------------------------------------------------------------
 // CollisionWorld: the per-tick proximity tables + per-entity instances, and the
 // world-level blink state. [orig: the g_StaticProx*/g_DynProx*/g_PersonProx*
@@ -422,7 +543,14 @@ public:
     // Resolve a host-owned late-spawn instance on demand. Existing instances
     // never call the provider, so repeated round/F3 queries are idempotent.
     bool ensure_entity_instance(World &world, EntityHandle h);
+    // Publish the pose owner's current world-space Q22 section matrices. Retail
+    // collision consumes the model callback's live matrices rather than deriving
+    // animation itself. Count must exactly match the assigned model's COBJ count.
+    bool publish_entity_section_matrices(EntityHandle h,
+                                         std::vector<CollisionMatrix> matrices);
+    void clear_entity_section_matrices(EntityHandle h);
     bool has_instance(const World &world, EntityHandle h) const;
+    bool has_instance(EntityHandle h) const;
     size_t instance_count() const { return instances_.size(); }
 
     // --- per-tick snapshots ---
@@ -434,6 +562,12 @@ public:
     // [orig: Entity_BuildProximityListsFromPools @ 0x4b8eb0] per-entity candidate
     // slices (dyn radius+4.0u / statics; pool-1 radius+6.0u) into a 3000-entry arena.
     void build_tick_tables(World &world);
+
+    // Segment arbitration used by the authoritative projectile loop. The
+    // query is read-only: callers must publish/build collision snapshots at
+    // the normal tick seam before tracing.
+    ProjectileHit trace_projectile(const World &world,
+                                   const ProjectileTrace &trace) const;
 
     // Per-entity blink refresh: test the entity position (one point, radius 0.5u)
     // against nearby buildings' blink volumes; stamp Entity.blink_hits + the
@@ -601,6 +735,9 @@ public:
     // The collision model attached to this exact live registry identity
     // (nullptr for an absent or recycled packed slot).
     const CollisionModel *model_for(const World &world, EntityHandle h) const;
+    // Handle-only compatibility lookup for callers without a World identity
+    // source. Prefer the overload above when registry slot reuse matters.
+    const CollisionModel *model_for(EntityHandle h) const;
 
     // Read-only world-space geometry snapshot for a host collision debug view.
     // Each instance's volumes are transformed through the SAME target_view /
@@ -685,6 +822,7 @@ private:
         // Entity::registry_spawn_id at assignment. Zero preserves the legacy
         // handle-only behavior for portable callers/tests that do not stamp it.
         uint64_t registry_spawn_id = 0;
+        std::vector<CollisionMatrix> section_matrices;
     };
     const Instance *live_instance(const World &world, EntityHandle h) const;
     struct StaticSlot { // [orig: g_StaticProx* u16 tables + entity ptr array]
@@ -704,7 +842,7 @@ private:
         int32_t count = 0;
     };
 
-    const CollisionTargetView *target_view(World &world, EntityHandle h,
+    const CollisionTargetView *target_view(const World &world, EntityHandle h,
                                            CollisionTargetView &scratch,
                                            std::vector<CollisionMatrix> &mat_scratch) const;
 

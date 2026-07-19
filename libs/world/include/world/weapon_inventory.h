@@ -94,6 +94,13 @@ std::vector<WeaponKitEntry> weapon_kit_filter_by_availability(
         const std::vector<WeaponKitEntry> &kit, const WeaponTable &table,
         const WeaponAvailability &avail);
 
+// Build the player-slot table consumed by Weapon_CalcImpactDamage: each kit
+// row's fourth value is stored at its resolved AmmoDef index. Raw byte 1 means
+// x0.9, 2 means x1.1, and every other value is neutral.
+void weapon_kit_build_damage_classes(const std::vector<WeaponKitEntry> &kit,
+                                     const WeaponTable &table, size_t ammo_count,
+                                     std::vector<uint8_t> &out);
+
 // The display-list expansion [orig: AvatarDef_BuildDisplayList @ 0x54B9E0]: one name
 // per kit entry, then the def's loadout_subclasses sub-variants (parent+1..parent+LSC)
 // appended BY NAME; 255 entries cap. Unresolved kit names still land (the fill re-

@@ -140,7 +140,10 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	// hold — it deploys through the local flow, not the wire. (D-NET-156)
 	if (!is_host_own && world::world_has_spawn_zone(world)) {
 		conn.link.respawn_pending = true;
-		if (world::Entity *pe = world.registry.get(h)) pe->flags |= 1u;
+		if (world::Entity *pe = world.registry.get(h)) {
+			pe->flags |= 1u;
+			pe->damage_state = 620;
+		}
 		// The join-time respawn countdown (entity+292 = 620 ticks) is display/wave state the
 		// 0x6E status reports; with default host wave options the deploy is pick-driven, so
 		// only the pending flag is modeled (tracked, §5.61).

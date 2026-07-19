@@ -428,6 +428,9 @@ private:
 	// Player_InitPlayer's weapon leg [orig: @ 0x4e15f0]; shared by table load,
 	// respawn, and the ACCEPT apply (which passes the freshly stored kit).
 	void rebuild_local_player_loadout(bool p_select_spawn_default);
+	// Copy each accepted kit row's fourth value into the retail per-ammo
+	// shooter damage-class table (1 = x0.9, 2 = x1.1).
+	void sync_local_player_damage_classes();
 
 	// --- the local player's view state (ADS ease + 3P anchor chase) --------------------
 	// Ticked at the world cadence immediately before the weapon pump, so camera lag and

@@ -41,6 +41,13 @@ static int collision_ir_matches_gp(const char *path,
         fprintf(stderr, "Collision object count mismatch for %s\n", path);
         return 0;
     }
+    if (ir->vertex_count != (size_t)src->vertex_count ||
+        ir->normal_count != (size_t)src->normal_count ||
+        ir->face_count != (size_t)src->face_count ||
+        ir->translation_count != (size_t)src->translation_count) {
+        fprintf(stderr, "Collision mesh/translation count mismatch for %s\n", path);
+        return 0;
+    }
     if (!threedi_ir_collision_is_runtime_safe(ir)) {
         fprintf(stderr, "Runtime-unsafe collision IR for %s\n", path);
         return 0;
@@ -50,15 +57,48 @@ static int collision_ir_matches_gp(const char *path,
         const ThreediIRCollisionObject *d = &ir->objects[i];
         if (d->num_vertices != s->vertex_count ||
             d->num_faces != s->face_count ||
+            d->num_planes != s->normal_count ||
+            d->num_bounding_volumes != s->volume_count ||
             d->parent_subobject_index != s->parent_subobject ||
-            d->offset[0] != (float)s->translation[0] ||
-            d->offset[1] != (float)s->translation[1] ||
-            d->offset[2] != (float)s->translation[2] ||
-            d->center_fp16[0] != s->center[0] ||
-            d->center_fp16[1] != s->center[1] ||
-            d->center_fp16[2] != s->center[2] ||
-            d->radius_fp16 != s->bounding_sphere_radius) {
+            d->offset[0] != s->translation[0] ||
+            d->offset[1] != s->translation[1] ||
+            d->offset[2] != s->translation[2] ||
+            d->min[0] != s->bbox_min_x ||
+            d->min[1] != s->bbox_min_y ||
+            d->min[2] != s->bbox_min_z ||
+            d->max[0] != s->bbox_max_x ||
+            d->max[1] != s->bbox_max_y ||
+            d->max[2] != s->bbox_max_z ||
+            d->mid[0] != s->center[0] ||
+            d->mid[1] != s->center[1] ||
+            d->mid[2] != s->center[2] ||
+            d->radius != s->bounding_sphere_radius) {
             fprintf(stderr, "Collision object metadata mismatch for %s\n", path);
+            return 0;
+        }
+    }
+    for (size_t i = 0; i < ir->normal_count; ++i) {
+        const ThreediGpCollisionNormal *s = &src->normals[i];
+        const ThreediIRCollisionNormal *d = &ir->normals[i];
+        if (d->normal_q14[0] != s->nx || d->normal_q14[1] != s->ny ||
+            d->normal_q14[2] != s->nz || d->dominant_axis != s->dominant_axis) {
+            fprintf(stderr, "Collision normal mismatch for %s\n", path);
+            return 0;
+        }
+    }
+    for (size_t i = 0; i < ir->face_count; ++i) {
+        const ThreediGpCollisionFace *s = &src->faces[i];
+        const ThreediIRCollisionFace *d = &ir->faces[i];
+        if ((uint16_t)d->vert_index[0] != s->vertex_indices[0] ||
+            (uint16_t)d->vert_index[1] != s->vertex_indices[1] ||
+            (uint16_t)d->vert_index[2] != s->vertex_indices[2] ||
+            d->normal_index != s->normal_index || d->plane_dist_fp16 != s->plane_d ||
+            d->min_fp16[0] != s->bbox_min_x || d->min_fp16[1] != s->bbox_min_y ||
+            d->min_fp16[2] != s->bbox_min_z || d->max_fp16[0] != s->bbox_max_x ||
+            d->max_fp16[1] != s->bbox_max_y || d->max_fp16[2] != s->bbox_max_z ||
+            d->material_flags != (uint32_t)s->surface_flags ||
+            d->poly_type != s->surface_type) {
+            fprintf(stderr, "Collision face mismatch for %s\n", path);
             return 0;
         }
     }
@@ -66,6 +106,14 @@ static int collision_ir_matches_gp(const char *path,
         const int32_t object_index = ir->volumes[i].object_index;
         if (object_index >= 0 && (size_t)object_index >= ir->object_count) {
             fprintf(stderr, "Collision volume object index out of range for %s\n", path);
+            return 0;
+        }
+    }
+    for (size_t i = 0; i < ir->translation_count; ++i) {
+        if (ir->translations[i].translation[0] != src->translations[i].x ||
+            ir->translations[i].translation[1] != src->translations[i].y ||
+            ir->translations[i].translation[2] != src->translations[i].z) {
+            fprintf(stderr, "Collision translation mismatch for %s\n", path);
             return 0;
         }
     }
