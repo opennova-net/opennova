@@ -153,8 +153,9 @@ RenderMatrix render_matrix_from_pose(const int32_t pos[3], int32_t yaw_bam, int3
 }
 
 // The float-space occlusion consumers use the full authored entity pose. The
-// fixed collision/blink matrices remain on their separately tracked yaw-only
-// D-COL-1 seam. [orig: Math_BuildFixedPointToFloatMatrix4x4(entity+4)]
+// collision path builds its fixed full-Euler entity matrix separately, then
+// applies any live PANM section callbacks at query time.
+// [orig: Math_BuildFixedPointToFloatMatrix4x4(entity+4)]
 RenderMatrix render_matrix_from_entity_pose(const Entity &e) {
     int32_t pos[3];
     entity_pos_fixed(e, pos);

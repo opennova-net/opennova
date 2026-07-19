@@ -26,6 +26,7 @@
 
 #include "wac/nova_wac_program.h"
 #include <world/ai.h>
+#include <world/collision.h>
 #include <world/occlusion.h>
 #include <world/player_input.h>
 #include <world/player_look.h>
@@ -53,6 +54,7 @@
 namespace godot {
 
 class NovaTerrainData;
+class NovaObjectData;
 
 // THE mission runtime binding: a thin host shell over the portable libs/world runtime.
 // Owns one World + the three logic systems (WAC VM, BMS event evaluator, AI) and drives
@@ -69,7 +71,8 @@ class NovaTerrainData;
 // (mission space -> Godot space) and the part-anim phase are exposed for a scene/renderer
 // to draw; host-presentation side effects (text/dialog/win) drain out of the World
 // EffectLog each tick. Play/Pause/Step + Stop (snapshot/restore).
-class NovaSimulation : public Node3D {
+class NovaSimulation : public Node3D,
+                       private opennova::world::ICollisionSectionMatrixProvider {
 	GDCLASS(NovaSimulation, Node3D)
 
 public:
@@ -122,6 +125,17 @@ private:
 	// by resolve_collision_instances. ai_->collision points here (apply_collision_to_ai).
 	opennova::world::CollisionWorld collision_world_;
 	void apply_collision_to_ai();
+	// Only models with a sampler-live PANM track enter the Generic callback
+	// path. Inert PANM rows remain on CollisionWorld's bit-exact Simple path.
+	std::unordered_map<int32_t, Ref<NovaObjectData>> collision_pose_data_;
+	// A non-negative value is the host's once-per-frame retail presentation
+	// DWORD. Direct/headless simulations use deterministic logic time.
+	int64_t panm_time_override_ms_ = -1;
+	bool build_section_matrices(opennova::world::World &p_world,
+			opennova::world::EntityHandle p_entity, int32_t p_model_id,
+			const opennova::world::CollisionMatrix &p_entity_world,
+			const opennova::world::CollisionModel &p_model,
+			std::vector<opennova::world::CollisionMatrix> &r_out) override;
 	// Rendering occlusion: the portal/section-mask engine (world/occlusion.h) —
 	// models attached alongside collision by resolve_collision_instances, the
 	// portal weld run by occlusion_init_mission, per-frame masks/gates by
@@ -797,6 +811,9 @@ public:
 	// pre-mission pass in finish_load already advanced it once, so a freshly
 	// loaded mission reads 1 — consumers should track deltas, not absolutes.
 	int64_t get_logic_tick() const;
+	void set_panm_time_ms(int64_t p_time_ms);
+	int64_t get_panm_time_ms() const;
+	void debug_set_panm_time_ms(int64_t p_time_ms);
 	// Whole-bank snapshots of the script variable stores (V0..V511 / G0..G255 /
 	// M0..M15 [orig: dword_C6B240 / dword_C6BA40 / music bank]): ONE packed call
 	// for a low-Hz overlay refresh instead of hundreds of boxed scalar reads.

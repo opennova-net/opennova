@@ -25,6 +25,7 @@ const VegAssets := preload("res://engine/terrain/veg_assets.gd")
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
 const MissionRuntime := preload("res://engine/world/mission_runtime.gd")
+const PanmClockScript := preload("res://engine/world/panm_clock.gd")
 const NovaModelResolver := preload("res://engine/mission/nova_model_resolver.gd")
 const NetWorldView := preload("res://engine/world/net_world_view.gd")
 const NetEventView := preload("res://engine/world/net_event_view.gd")
@@ -89,6 +90,7 @@ var _loaded_mission: NovaMissionData
 # state, deliberately separate from mission_file (the exported boot option).
 var _loaded_mission_file: String = ""
 var _runtime  # MissionRuntime: the one mission runtime driver (sim + present pass + index), DIVIDED cadence
+var _panm_clock = PanmClockScript.new()
 var _mission_stats: Dictionary = {}
 var _placer  # MissionObjectPlacer (kept so mission audio reuses its item database)
 var _weapon_db: NovaWeaponDatabase = null  # weapon.def, lazy per mounted root (FP viewmodel)
@@ -526,6 +528,8 @@ func _place_mission_objects(mission: NovaMissionData, timeline: PerfTimeline = n
 	if _resource_root == null or mission == null:
 		return
 	_placer = MissionObjectPlacer.new(_resource_root)
+	_panm_clock.sample_frame()
+	_placer.set_panm_clock(_panm_clock)
 	# A co-op joiner renders all dynamic entities WIRE-DIRECT (the faithful client model), so
 	# it does NOT place the .bms organics/vehicles — they would be frozen duplicates of the
 	# wire avatars. Still build the placer (the local-player avatar + the wire present pass
@@ -826,11 +830,18 @@ func get_current_frame_clear_color() -> Color:
 	return _clear_color.environment.background_color
 
 
+func _sample_panm_clock() -> void:
+	_panm_clock.sample_frame()
+	if _runtime != null and _runtime.has_method("set_presentation_time_ms"):
+		_runtime.set_presentation_time_ms(_panm_clock.time_ms)
+
+
 ## The host per-frame order, faithful to the original main loop's server-tick-then-client-render:
 ## foliage coverage around the viewer, then the mission runtime (MissionRuntime.tick advances the
 ## logic at the 62-frame cadence, presents entity state onto the placed nodes, and drains side
 ## effects), then the audio render pass. Effects come back through MissionRuntime.effects_drained.
 func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta: float = TICK_DT) -> void:
+	_sample_panm_clock()
 	var tick_start := Time.get_ticks_usec()
 	_last_tick_camera_pos = camera_pos  # the fire present pass's listener (audio-tick source)
 	var foliage_start := tick_start
@@ -1576,6 +1587,7 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> void:
 	# register_effect_anchor and swaps husk models via the placer.
 	opts["game_world"] = self
 	_runtime.setup(mission, container, opts)
+	_runtime.set_presentation_time_ms(_panm_clock.time_ms)
 	if _runtime.get_sim() == null:
 		push_warning("GameWorld: failed to start mission runtime")
 	elif _water != null and _runtime.get_sim().has_method("set_water_z"):
@@ -2454,6 +2466,7 @@ func _reset_blink_frame_gates() -> void:
 # --- Frame clear color (env divergence #21, closed) ----------------------------
 
 func _process(_delta: float) -> void:
+	_sample_panm_clock()
 	if not _loaded or not is_visible_in_tree():
 		_restore_idle_frame_clear_color()
 		return

@@ -340,8 +340,9 @@ func test_ground_anchor_bms_is_the_axis_remap() -> void:
 # though items.def gives it no anim_def: a MultiMesh batch captures the rest pose once
 # and never evaluates PANM again, while the engine re-poses PANM from the global clock
 # every rendered frame [orig: PANM_SampleTrack (sub_4354B0) idle gate, clock
-# dword_18B42A4]. DFX2's "Oil Pump" (graphic Pmpjk01, type decoration, control 0x32
-# sine tracks) is the witnessed case. Inert PANM blocks (Armry01 as shipped: entries
+# Render_ShaderTickMs @0x2721A40]. DFX2's "Oil Pump" (graphic Pmpjk01,
+# type decoration, control-0x32 sine tracks) is the witnessed case. Inert PANM
+# blocks (Armry01 as shipped: entries
 # present, every control idle) must keep the perf-tier static batching.
 
 class PanmDataPlacer:
@@ -496,28 +497,3 @@ func test_place_single_routes_live_panm_graphic_to_a_live_model() -> void:
 	assert_eq(int(delta.get("animated", -1)), 1,
 		"place_single routes a live-PANM graphic to a live model")
 	assert_eq(int(delta.get("batched", -1)), 0, "not to a single-instance batch")
-
-
-func test_part_anim_entry_is_live_mirrors_the_sampler_gates() -> void:
-	# Entry-level: family flags must declare animation; track-level: a control with a
-	# zero high nibble is idle. Mirrors PANM_BuildNodeMatrices + PANM_SampleTrack.
-	assert_false(Placer.part_anim_entry_is_live({}), "no flags, no tracks -> inert")
-	assert_false(Placer.part_anim_entry_is_live({
-		"rotation_type": 2,
-		"rotation_z": { "control": 0x00 },
-	}), "declared track with an idle control function stays inert")
-	assert_false(Placer.part_anim_entry_is_live({
-		"rotation_x": { "control": 0x32 },
-	}), "an active control without its family flag is never sampled")
-	assert_true(Placer.part_anim_entry_is_live({
-		"rotation_type": 2,
-		"rotation_z": { "control": 0x32 },
-	}), "set-wave-sine rotation (the Pmpjk01 case) is live")
-	assert_true(Placer.part_anim_entry_is_live({
-		"translate_type": 3,
-		"translation": { "control": 0x71 },
-	}), "a control-register-bound translation is live")
-	assert_true(Placer.part_anim_entry_is_live({
-		"scale_type": 1,
-		"scale_x": { "control": 0x18 },
-	}), "a SET pose is live (rest-pose batches would render it unposed)")

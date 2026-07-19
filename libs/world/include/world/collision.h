@@ -89,7 +89,10 @@ struct CollisionSection {
     int32_t min_z = 0, max_z = 0;
     int32_t center[3] = {};         // bound-sphere center (section-local 16.16)
     int32_t radius = 0;             // bound-sphere radius (16.16)
-    int32_t part_index = -1;        // source render part (animated-part transforms later)
+    // Hierarchy metadata copied from COBJ::parent_subobject_index. This is NOT
+    // the section-matrix selector: retail pairs callback matrix i with COBJ i
+    // strictly by ordinal, even when several COBJ rows share one parent.
+    int32_t parent_part_index = -1;
 };
 
 // ----------------------------------------------------------------------------
@@ -158,9 +161,9 @@ struct CollisionMatrix {
     void invert_into(CollisionMatrix &out) const;
 };
 
-// Build a yaw-only world matrix (heading in BAM32, translation 16.16) using the
-// engine's quantized direction table — the static-object placement transform.
-// Per-part animated section transforms are a tracked follow-up (D-COL-1).
+// Build the quantized yaw-only entity matrix (heading in BAM32, translation
+// 16.16). Pure-yaw placements retain this exact table path; target_view uses
+// the full-Euler builder when needed and layers callback section poses above it.
 CollisionMatrix collision_matrix_from_heading(int32_t heading_bam, const int32_t pos[3]);
 
 // The FULL placement matrix Rz(heading)·Ry(-pitch)·Rx(roll) for statics authored
@@ -170,6 +173,22 @@ CollisionMatrix collision_matrix_from_heading(int32_t heading_bam, const int32_t
 // @ 0x613f40; the spawn euler pack @ 0x40eb66.]
 CollisionMatrix collision_matrix_from_euler(int32_t heading_bam, int32_t pitch_bam,
                                             int32_t roll_bam, const int32_t pos[3]);
+
+// Apply one row-major, row-vector render/PANM pose to an entity collision
+// matrix, returning the final fixed section matrix. This reproduces the exact
+// retail callback sandwich:
+//   fixed entity --0x611080 swizzle--> render float
+//   pose * entity                         [row-vector order]
+//   render float --0x611140 inverse--> final Q22/16.16
+// Conversion rejects non-finite/out-of-range input instead of invoking an
+// undefined host float-to-int cast. The affine pose's m[15] is never treated
+// as the collision section-disabled bit.
+// [orig: BoneCallback_Generic @ 0x4e26d0;
+// Math_FixedPointToFloatMatrix4x4_Swizzled @ 0x611080;
+// Math_FloatMatrixToFixedPoint22 @ 0x611140.]
+bool collision_matrix_apply_render_pose(const CollisionMatrix &entity_world,
+                                        const float pose_row_major[16],
+                                        CollisionMatrix &out);
 
 // The terrain leg of the LOS segment query, TRUE = the segment hits terrain
 // (blocked). The ported heightmap raycast over the runtime height field; shared
@@ -333,6 +352,21 @@ struct ContactResult {
 bool collision_contact_force(const CollisionTargetView &target, const ContactQuery &q,
                              BlinkAccum &blink, PlatformContact &platform, ContactResult &out);
 
+// Host/model callback for the final world-space matrix array consumed by every
+// collision walk. Matrix slot i corresponds to COBJ/collision section i by
+// ordinal; COBJ::parent_subobject_index is hierarchy metadata, not a selector.
+// [orig: model+168 callback -> one 16-dword matrix per COBJ, consumed in lockstep
+// by Physics_RaycastAgainstBoneCollision @ 0x4e4cb0.]
+class ICollisionSectionMatrixProvider {
+public:
+    virtual ~ICollisionSectionMatrixProvider() = default;
+    virtual bool build_section_matrices(World &world, EntityHandle entity,
+                                        int32_t model_id,
+                                        const CollisionMatrix &entity_world,
+                                        const CollisionModel &model,
+                                        std::vector<CollisionMatrix> &out) = 0;
+};
+
 // ----------------------------------------------------------------------------
 // CollisionWorld: the per-tick proximity tables + per-entity instances, and the
 // world-level blink state. [orig: the g_StaticProx*/g_DynProx*/g_PersonProx*
@@ -349,6 +383,11 @@ public:
     void assign_entity(EntityHandle h, int32_t model_id);
     // Attach the husk-stage collision model (swapped in while Flags & 4).
     void assign_entity_husk(EntityHandle h, int32_t husk_model_id);
+    // Install the model-animation callback that supplies final per-section
+    // matrices. Null restores the static shared-entity-matrix fallback.
+    void set_section_matrix_provider(ICollisionSectionMatrixProvider *provider) {
+        section_matrix_provider_ = provider;
+    }
     bool has_instance(EntityHandle h) const;
     size_t instance_count() const { return instances_.size(); }
 
@@ -616,6 +655,7 @@ private:
 
     std::vector<CollisionModel> models_;
     std::unordered_map<uint16_t, Instance> instances_; // key: EntityHandle.packed
+    ICollisionSectionMatrixProvider *section_matrix_provider_ = nullptr; // non-owning host seam
 
     std::vector<StaticSlot> statics_;   // cap 1199 counted [orig: g_StaticProx*]
     int32_t static_count_ = 0;

@@ -224,6 +224,8 @@ void NovaSimulation::reset_world() {
 	last_present_entity_count_ = 0;
 	// Collision models/instances are mission-scoped: drop them with the world (the
 	// sweep re-registers on the next load) and re-point the fresh ai_ at the container.
+	collision_pose_data_.clear();
+	panm_time_override_ms_ = -1;
 	collision_world_ = opennova::world::CollisionWorld{};
 	// Occlusion models too — retail reloads the model cache per mission, so the
 	// weld pass's shared-record type-5 rewrites never leak across loads.
@@ -604,7 +606,7 @@ bool collision_model_from_ir(const ThreediIRCollision *col,
 			++cursor;
 		}
 		if (s < static_cast<int32_t>(col->object_count))
-			sec.part_index = col->objects[s].parent_subobject_index;
+			sec.parent_part_index = col->objects[s].parent_subobject_index;
 	}
 
 	// The face mesh (the bullet LOD): Q8 int16 vertices + the 44-B-equivalent
@@ -792,11 +794,93 @@ bool occlusion_model_from_ir(const ThreediIROcclusion *occ,
 	return true;
 }
 
+void panm_render_matrix_from_godot(const Transform3D &transform, float out[16]) {
+	// Exact inverse of NovaObjectData::panm_matrix_to_transform: recover the
+	// row-major, row-vector render matrix emitted by the native PANM evaluator.
+	std::memset(out, 0, sizeof(float) * 16);
+	const Basis &basis = transform.basis;
+	out[0] = basis[0].x;
+	out[4] = -basis[0].y;
+	out[8] = -basis[0].z;
+	out[1] = -basis[1].x;
+	out[5] = basis[1].y;
+	out[9] = basis[1].z;
+	out[2] = -basis[2].x;
+	out[6] = basis[2].y;
+	out[10] = basis[2].z;
+	out[12] = -transform.origin.x;
+	out[13] = transform.origin.y;
+	out[14] = transform.origin.z;
+	out[15] = 1.0f;
+}
+
 } // namespace
 
 void NovaSimulation::apply_collision_to_ai() {
 	collision_world_.terrain = terrain_field_.valid() ? &terrain_field_ : nullptr;
+	collision_world_.set_section_matrix_provider(this);
 	if (ai_) ai_->collision = &collision_world_;
+}
+
+bool NovaSimulation::build_section_matrices(opennova::world::World &p_world,
+		opennova::world::EntityHandle p_entity, int32_t p_model_id,
+		const opennova::world::CollisionMatrix &p_entity_world,
+		const opennova::world::CollisionModel &p_model,
+		std::vector<opennova::world::CollisionMatrix> &r_out) {
+	const auto found = collision_pose_data_.find(p_model_id);
+	if (found == collision_pose_data_.end() || found->second.is_null()) return false;
+	const Ref<NovaObjectData> &data = found->second;
+	// Retail Generic collision always transforms the canonical first RLOD. It
+	// never follows the render-selected LOD or scans for another live PANM.
+	constexpr int lod_index = 0;
+	if (!data->has_live_panm_for_lod(lod_index)) return false;
+	const PackedInt32Array targets =
+			data->get_effective_panm_targets(lod_index);
+	if (targets.is_empty()) return false;
+	const ThreediModelIR &ir = data->native_ir();
+	if (ir.control_register_count > 0 && ir.control_registers == nullptr)
+		return false;
+
+	// PLAYPARTANIM channel 1/2 drives control-register ordinal 0/1. A brainless
+	// static still evaluates free-running PANM with the zero control table.
+	Dictionary controls;
+	AiEntity *ai_entity = ai_ ? ai_->for_handle(p_entity) : nullptr;
+	for (size_t slot = 0; slot < 2 && slot < ir.control_register_count; ++slot) {
+		const int phase = ai_entity != nullptr
+				? std::clamp(ai_entity->brain.f[AiBrain::kPartAnimPhase0 +
+						static_cast<int>(slot)], 0, 65535)
+				: 0;
+		const String name = String::utf8(ir.control_registers[slot].name);
+		if (!name.is_empty()) controls[name] = phase;
+	}
+	(void)p_world;
+	const uint32_t time_ms = panm_time_override_ms_ >= 0
+			? static_cast<uint32_t>(panm_time_override_ms_)
+			: (world_ != nullptr ? world_->logic_tick * 16u : 0u);
+	const Dictionary transforms =
+			data->evaluate_panm(lod_index, time_ms, controls);
+	if (transforms.is_empty()) return false;
+
+	// Default every COBJ slot to the Simple callback. Override only PANM nodes
+	// whose target part ordinal exists as a collision section. This intentionally
+	// ignores COBJ parent metadata and CXLT/offset records: CVRT is model-space.
+	r_out.assign(p_model.sections.size(), p_entity_world);
+	bool matched_section = false;
+	for (int i = 0; i < targets.size(); ++i) {
+		const int section = targets[i];
+		if (static_cast<size_t>(section) >= r_out.size() ||
+				!transforms.has(section))
+			continue;
+		const Variant value = transforms[section];
+		if (value.get_type() != Variant::TRANSFORM3D) return false;
+		float pose[16];
+		panm_render_matrix_from_godot(static_cast<Transform3D>(value), pose);
+		if (!opennova::world::collision_matrix_apply_render_pose(
+					p_entity_world, pose, r_out[static_cast<size_t>(section)]))
+			return false;
+		matched_section = true;
+	}
+	return matched_section;
 }
 
 int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_item_db,
@@ -838,8 +922,11 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 			Ref<NovaObjectData> data = p_placer->call("object_data_for", graphic);
 			if (data.is_valid()) {
 				opennova::world::CollisionModel model;
-				if (collision_model_from_ir(data->native_ir().collision, model))
+				if (collision_model_from_ir(data->native_ir().collision, model)) {
 					model_id = collision_world_.add_model(std::move(model));
+					if (data->has_live_panm_for_lod(0))
+						collision_pose_data_[model_id] = data;
+				}
 				opennova::world::OcclusionModel occ;
 				if (occlusion_model_from_ir(data->native_ir().occlusion, occ))
 					occlusion_id = occlusion_world_.add_model(std::move(occ));
@@ -876,8 +963,11 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 				Ref<NovaObjectData> hdata = p_placer->call("object_data_for", husk_name_s);
 				if (hdata.is_valid()) {
 					opennova::world::CollisionModel hmodel;
-					if (collision_model_from_ir(hdata->native_ir().collision, hmodel))
+					if (collision_model_from_ir(hdata->native_ir().collision, hmodel)) {
 						husk_model_id = collision_world_.add_model(std::move(hmodel));
+						if (hdata->has_live_panm_for_lod(0))
+							collision_pose_data_[husk_model_id] = hdata;
+					}
 					radius_by_graphic.emplace(husk_key,
 							model_bound_radius_from_ir(hdata->native_ir()));
 				}
@@ -2397,6 +2487,12 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("has_event_fired", "index"), &NovaSimulation::has_event_fired);
 	ClassDB::bind_method(D_METHOD("get_event_count"), &NovaSimulation::get_event_count);
 	ClassDB::bind_method(D_METHOD("get_logic_tick"), &NovaSimulation::get_logic_tick);
+	ClassDB::bind_method(D_METHOD("set_panm_time_ms", "time_ms"),
+			&NovaSimulation::set_panm_time_ms);
+	ClassDB::bind_method(D_METHOD("get_panm_time_ms"),
+			&NovaSimulation::get_panm_time_ms);
+	ClassDB::bind_method(D_METHOD("debug_set_panm_time_ms", "time_ms"),
+			&NovaSimulation::debug_set_panm_time_ms);
 	ClassDB::bind_method(D_METHOD("get_mission_variables_snapshot"), &NovaSimulation::get_mission_variables_snapshot);
 	ClassDB::bind_method(D_METHOD("get_global_variables_snapshot"), &NovaSimulation::get_global_variables_snapshot);
 	ClassDB::bind_method(D_METHOD("get_music_variables_snapshot"), &NovaSimulation::get_music_variables_snapshot);
@@ -4377,6 +4473,20 @@ int NovaSimulation::get_event_count() const {
 int64_t NovaSimulation::get_logic_tick() const {
 	// uint32 -> int64 keeps long sessions sign-safe on the GDScript side.
 	return world_ ? static_cast<int64_t>(world_->logic_tick) : 0;
+}
+
+void NovaSimulation::set_panm_time_ms(int64_t p_time_ms) {
+	panm_time_override_ms_ = p_time_ms < 0
+			? -1
+			: static_cast<int64_t>(static_cast<uint32_t>(p_time_ms));
+}
+
+int64_t NovaSimulation::get_panm_time_ms() const {
+	return panm_time_override_ms_;
+}
+
+void NovaSimulation::debug_set_panm_time_ms(int64_t p_time_ms) {
+	set_panm_time_ms(p_time_ms);
 }
 
 namespace {

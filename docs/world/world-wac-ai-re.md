@@ -1367,6 +1367,7 @@ store (details inline below), added D-COL-9, and extended D-COL-5/-8.
 | Per-tick proximity tables + candidate slices | MATCHING (structural) | `[orig: Entity_BuildProximityLists_Pool2 @ 0x4b9430 / _Pool01 @ 0x4b9340 / FromPools @ 0x4b8eb0]` |
 | The movement resolver (`CollisionWorld::resolve_entity`) | MATCHING (core; deferrals D-COL-5/6/8) | `[orig: Entity_ProcessCollisionAndPlatformPhysics @ 0x4b2bd0]` — the §4 open item 5 internals now decoded |
 | Blink boxes -> indoors | MATCHING | `[orig: @ 0x4aef90 / @ 0x4aea68-0x4aeae8 / Entity_BuildProximityList @ 0x4b3dc0]`; `collision` ctest blink cases |
+| Projectile FACE per-section callback matrices | MATCHING for non-organic effective LOD-0 ordinary/spinner PANM; camera-derived modes are D-COL-10, person/skeletal sections remain D-ITEM-13c / D-AI-9 | `[orig: Physics_RaycastAgainstBoneCollision @ 0x4e4cb0; BoneCallback_Generic @ 0x4e26d0]`; strict COBJ ordinal provider, shared DWORD presentation clock, x87-PC53 float sandwich; native + GUT source/clock/ordinal cases |
 | Armory/vehicle loadout-zone gates | MATCHING (read-only grill) | `[orig: Input_HandleActionBinding @ 0x49b83d case 218]`; menu side in [menu-re.md](../mnu/menu-re.md) §In-game armory |
 
 ### 15.2 Witness map — the query set
@@ -1383,7 +1384,23 @@ store (details inline below), added D-COL-9, and extended D-COL-5/-8.
 - **Transforms.** Per-section 16-dword fixed matrices from the model callback
   (`model+168`; collision header at `model+176`, ready gate dword`[32]`): row-major
   3x4, Q22 rotation rows with `+0x200000` rounding, world 16.16 translation at
-  `[3]/[7]/[11]`, `[15]` bit 0 = section disabled. `[orig:
+  `[3]/[7]/[11]`, `[15]` bit 0 = section disabled. The callback contract is
+  strictly ordinal: `callback_matrix[i]` transforms `COBJ[i]`. The ray walk
+  advances those pointers by 64 and 108 bytes respectively; COBJ
+  `parent_subobject_index`/offset and CXLT are neither matrix selectors nor
+  additive collision transforms. `BoneCallback_Simple @ 0x4e2600` duplicates
+  entity placement into every slot; the live non-organic PANM provider fills
+  animated slots with their current posed matrices. `BoneCallback_Generic`
+  dereferences the canonical first RLOD, so collision always evaluates effective
+  LOD0 (local PANM when present, otherwise model-level PANM), never the
+  render-selected or first-live LOD. `Render_SubmitEntity @ 0x5dad80` stores
+  `GetTickCount()` in the shared render DWORD before
+  `Model_TransformBoneMatrices @ 0x58e390`; the Generic collision callback
+  calls that same transformer. The port mirrors this with one frame-guarded
+  32-bit `PanmClock` sample shared by visual/material and collision paths
+  (deterministic `logic_tick * 16` only when a direct/headless sim has no
+  host clock). The float multiply follows the witnessed x87 PC53 operand order
+  before the one binary32 store/final fixed truncation. `[orig:
   Math_TransformPointWithTranslation22 @ 0x412f60 (translate-then-rotate — the
   inverse application), Math_TransformPointFixedPoint22 @ 0x412e90 (rotate only),
   Math_FixedPointTransformPoint22 @ 0x615810 (rotate-then-translate),
@@ -1614,7 +1631,7 @@ bit-1-cleared box) IS the indoors trigger (entity Flags 0x800000).
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
-| D-COL-1 | ~~one yaw-only world matrix shared by every section~~ 2026-07-18c: statics authored with pitch/roll now take the FULL placement matrix `Rz(90−yaw)·Ry(−pitch)·Rx(roll)` (`collision_matrix_from_euler` — the Q22 per-product >>22 composition of `Math_BuildFixedPointMatrixFromEulerAngles @ 0x613f40`, fed by the spawn euler pack `@ 0x40eb66-0x40eba6`); pure-yaw placements keep the quantized-table path. Still ONE matrix shared by every section | per-section matrices from the model callback (animated parts: doors) | tilted rocks/wrecks now collide where they RENDER (the 00TRg RckS07 through-shot root cause — a roll-19° rock's shell stood upright); animated-part collision (doors) pending; ctest `collision` pitched/rolled entity |
+| D-COL-1 | ~~one yaw-only world matrix shared by every section~~ CLOSED for full-Euler statics and non-organic effective-LOD0 ordinary/spinner PANM. `CollisionWorld::target_view` requests the final array from `ICollisionSectionMatrixProvider`; `NovaSimulation` uses canonical LOD0 only (a nonempty local PANM block wins, otherwise model-level PANM is inherited), scopes liveness to the active transform family, applies current AI controls, and defaults untouched slots to the Simple entity matrix. `PanmClock` samples one full 32-bit process-uptime value per rendered frame for models/materials/collision; direct/headless sims use deterministic `logic_tick * 16`. The fixed→render, pose × entity, render→Q22/16.16 sandwich preserves retail x87 PC53 add order and final truncation. Missing, inert, invalid, or count-mismatched data retains the exact Simple fallback | Generic loads the canonical first RLOD rather than the render-selected/first-live LOD; callback returns one final matrix per COBJ and `callback_matrix[i]` ↔ `COBJ[i]` by `+64`/`+108` pointer lockstep. COBJ parent/offset and CXLT are not selectors or additive transforms; render and collision consume the same GetTickCount-derived DWORD | tilted statics and ordinary/spinner parts collide at their rendered pose. Covered by `collision`, `threedi_panm_runtime`, `nova_simulation_test.gd`, `panm_clock_test.gd`, `mission_runtime_test.gd`. Camera-derived types 3/4 are D-COL-10; pool-0 skeletal zones remain D-ITEM-13c / D-AI-9 |
 | D-COL-2 | building destroyed/animated section skip not modeled | itemDef+2192/2193 bone map + the `dword_A8A418` state table skips sections (gated !player) | destroyed-wall pass-through pending the destruction system |
 | D-COL-3 | bound radius recomputed as the .3di LOD-0 part-bound-sphere union (primitive boxes as the degenerate fallback), raised to the husk model's bound, +0.0625 pad (persons 1.0u) | entity+0 boundRadius = max(model gpm[5], husk gpm[5]) × def scale + 0x1000, stamped only when the model carries collision data [orig: `Entity_InitFromModel @ 0x40dc30`] | the recomputed union tracks the stored header bound; the authored def `scale` factor is not applied (unparsed), and we stamp collision-less models too so every item stays hittable — conservative |
 | D-COL-4 | eye test point reuses the head column | eye point = pos + CameraOffset | CameraOffset unmodeled; head/eye share a column until the camera entity fields land |
@@ -1623,6 +1640,7 @@ bit-1-cleared box) IS the indoors trigger (entity Flags 0x800000).
 | D-COL-7 | vertical ground probe = bilinear column height | `Terrain_RaycastHeightmapHiRes_0 @ 0x60e710` march + bisect | equal for vertical rays on a heightfield (the terrain-re B1 note); oblique rays use terrain_raycast_refined |
 | D-COL-8 | run-over kill / crush sound / walk-over-body sound / waypoint + collision callbacks (attrib 1/2) / the 0x20 section-touch vtbl callback / the blocked-push AI latch (pad_368[1]) not ported | steps 4/5/6 above | need Score/net + sound + destruction hooks; tracked here so the resolver stays honest |
 | D-COL-9 | mounted/carried source semantics unmodeled: the `savedPosY` force-suppression gate (parentEntity+alive or Flags 0x40), the MoveOrder-0x100 step-up variant it selects, and the `+0x2c` aux latches (the pre-resolve 0x40 clear + the type-13 0x800 set) | `@ 0x4b2bfc/0x4b2d25/0x4b3330/0x4b34ba` | only on-foot organics run our resolver today; rides the vehicle/mount pass with D-COL-5 |
+| D-COL-10 | PANM rotation types 3/4 are correctly classified as live and routed through per-section matrices, but `NovaObjectData::evaluate_panm` currently passes an identity `view_inverse` | retail types 3/4 derive their matrix from the current global inverse-view matrix in `PANM_BuildNodeMatrices` | camera-facing/upright billboard parts can have a camera-relative visual/collision pose mismatch; no committed collidable type-3/4 witness yet. Requires sharing the render camera matrix beside `PanmClock` |
 
 **D-INF-3 status**: the horizontal capsule + object standing now land through
 this port (walls push out, roofs carry via the model-aware ground probe); the
@@ -1699,8 +1717,11 @@ collision block's **CFAC triangle mesh**, per section. Ported as
   line-distance ≤ radius; skip Flags & 0x2000001, the shooter chain (ray[17..20]), and
   the `+533` refNum self-hit group; survivors run the face walk.
 - **The face walk** `[orig: Physics_RaycastAgainstBoneCollision @ 0x4e4cb0]`: model =
-  `(Flags & 4 && huskModel) ? huskModel : graphicModel` (the husk swap again); per
-  COBJ section — skip `(boneMatrix+60) & 3`, invert the section matrix
+  `(Flags & 4 && huskModel) ? huskModel : graphicModel` (the husk swap again).
+  Its callback-matrix and COBJ cursors advance +64/+108 bytes in lockstep:
+  `callback_matrix[i]` always pairs with `COBJ[i]`, independent of COBJ
+  parent/offset or CXLT metadata. Per COBJ section — skip
+  `(boneMatrix+60) & 3`, invert the section matrix
   (`Matrix_Transpose3x3WithNegateCol3 @ 0x6136d0`), transform the segment + unit dir
   into bone-local space; per 44-B face — AABB reject, flags & 0x100 never-hit,
   material 17 skip when the ammo carries flag 0x4000000, plane sides
@@ -1740,12 +1761,16 @@ fields are copied but never read by the raycast `[orig:
 Threedi_BuildCollisionModelFromChunks @ 0x5b3bf0]`, and a JOX data probe
 (Chair03X/Cbunker1: every COBJ's CVRT run centroid lands ON its header offset)
 proves the vertex runs are MODEL-space — so the shared entity matrix per
-section is structurally right for statics, and our IR consumption
+section is structurally right for the nonanimated `BoneCallback_Simple` path,
+and our IR consumption
 (`collision_model_from_ir`, disk `dominate_axis` word kept) is faithful.
 
 CXLT is collision metadata, not a per-COBJ additive transform. Retail keeps it
 at collision +0x70/+0x74, while `Physics_RaycastAgainstBoneCollision @ 0x4e4cb0`
-consumes callback-produced render-bone matrices instead. `JetSki.3di` pins the
+consumes callback-produced render-bone matrices instead. Its matrix pointer
+advances +64 while its 108-B COBJ pointer advances +108 in the same loop, proving
+the strict `callback_matrix[i]` ↔ `COBJ[i]` mapping; no parent, offset, or
+CXLT field participates in selection. `JetSki.3di` pins the
 distinction in `threedi_collision_ir`: its one CXLT equals COBJ 1's offset, but
 that COBJ's CVRT run is already in model space, so applying CXLT would
 double-shift it. `DCHNK1` (five CXLT, one COBJ) also rules out positional
@@ -1759,9 +1784,15 @@ uninitialized `backfaceCullFlag` arg), `|d0|·len/(|d0|+|d1|)` with the
 `"Rounds Divide Error"` 0x40000000 clamp, accept `<=` best, the rounded
 hit-point stepping, and the odd-even point-in-triangle on the CNRM
 dominate-axis plane. The husk model pick (`Flags & 4` + fallback) and the
-transform chain match (the scaled-entity `Math_BuildInverseFixedPointMatrix3x3
-@ 0x613e10` leg rides D-COL-1's shared full-Euler entity matrix; animated
-sections still require the callback-selected render-bone matrices).
+transform chain match. Static placement uses D-COL-1's full-Euler entity matrix;
+live non-organic effective-LOD0 PANM runs the retail float sandwich (fixed
+entity `@ 0x611080` → x87-PC53 row-vector pose × entity → final
+Q22/16.16 `@ 0x611140`) through `ICollisionSectionMatrixProvider`
+and the production `NovaSimulation` host. Local LOD0 PANM suppresses
+the model-level fallback even when inert; LOD1+ never drives COBJ. The visual
+model and collision provider consume one frame-sampled 32-bit presentation
+clock. Pool-0 person/skeletal bone sections remain the separate, open
+`Physics_RaycastAgainstBoneSections @ 0x4e4670` path (D-ITEM-13c / D-AI-9).
 
 Divergences found and FIXED this session (libs/world/src/round_sim.cpp):
 
@@ -3776,7 +3807,7 @@ the FFI structs.
 | D-ITEM-1 | The bullet item hit-test now runs the witnessed shape: bound-sphere broad phase over pools 1/2 (model-less entities excluded as the proximity-residency equivalence) + the collision-model CFAC FACE narrow phase (husk-aware; a sphere graze that misses every face lets the round fly on) with the face material feeding the impact tag (material + 4; building material 1 → 23 flesh). Residuals: models with no face mesh keep the bound-sphere stand-in with tag 4 'obj'; the `+533` refNum self-hit exclusion and the retail prox-slot tables (we scan the pools directly) are unmodeled; the blast pool-2 leg still uses the bound sphere, not the AABB-face refinement | `Projectile_RaycastProximitySlots @ 0x4e5340` → `Physics_RaycastAgainstBoneCollision @ 0x4e4cb0` (see §15.8); the AABB refinement `@ 0x4eb700`; material + 4 `@ 0x4e982b` / `@ 0x4e9b80` | shots beside a prop no longer stop midair on the invisible bound sphere, impact effects pick the surface material row (metal barrels spark as metal), and hit points land on real faces; ctest `collision` face-raycast set |
 | D-ITEM-2 | `husk_swap_at`/`_sec` parsed for format fidelity only — the runtime consumer is unwitnessed (no +0x19C/+0x1A0 reader found this session) | fields written `@ 0x49f1ce-0x49f2c2` | no behavior port yet; find the reader (a progressive damage-stage swap is the hypothesis) |
 | D-ITEM-3 | The mid-life breakable-section sweep (a blast marks collision sections with byte flag & 2 into sectionMask) is a cited stub — our CollisionModel carries no per-section flag byte | `@ 0x4e6c5e-0x4e6e6b` | partial visual damage (windows/panels before death) missing; needs the section-flag plumb in the collision build |
-| D-ITEM-4 | Death pieces present only as their row's TRAIL effect following the sim piece: the single-section husk mesh, its render spin, and the explosion glow light are absent; one world-local PRNG stream stands in for the three retail streams | pieces render one husk section w/ spin `@ 0x493400`; `LightPool_SpawnGlowEffect @ 0x49351a`; PRNG_Next16/_B/_C | the debris trajectory is pinned, but the visible chunks do not match retail; mesh pieces need per-part render instancing (the `CollisionSection.part_index` seam exists) |
+| D-ITEM-4 | Death pieces present only as their row's TRAIL effect following the sim piece: the single-section husk mesh, its render spin, and the explosion glow light are absent; one world-local PRNG stream stands in for the three retail streams | pieces render one husk section w/ spin `@ 0x493400`; `LightPool_SpawnGlowEffect @ 0x49351a`; PRNG_Next16/_B/_C | the debris trajectory is pinned, but the visible chunks do not match retail; mesh pieces need section-ordinal render instancing. `CollisionSection::parent_part_index` preserves COBJ hierarchy metadata and is not that selector |
 | D-ITEM-5 | The kz death blast queues ONCE at the entity with r = def kz else boundRadius; the per-"KZ"-user-point multi-blast (r=5.0 each) is unported | `Entity_QueueKzBlastAtUserPoints @ 0x4eabf0` | single-blast radii match the def author's kz; multi-point husks (big ships/buildings) under-blast — feed `ItemDeathTraits.kz_points` from the husk model user points; wreck-bank anchors are tracked separately by D-ITEM-15 |
 | D-ITEM-6 | Blast/damage stubs: organic knockback (`Entity_ApplyCollisionForce`), the victim-attached burn emitter + hit sound (the ammo +72/+76 pair — field source unwitnessed), medic (type 3) + vehicle-ram (type 1) queue legs, the occupant damage scale, `g_destroy_buildings` (an MP rules seam), and the S2C 0x26/0x2F/0x21 wire emits | `@ 0x4eb1d2 / @ 0x4eb292 / @ 0x4eadc6 / @ 0x4e5a50 / @ 0x4e6860`; net-re §5.60 | each cited at its port site; glass presentation is split into D-ITEM-17 and the wire legs stage with the npruntime death broadcasts |
 | D-ITEM-7 | Which items take the destructible death path is routed by KIND (non-organic, non-AI-capable) + unit_type; retail routes via the def class resolve (`EntityDef_LoadModelsAndCallbacks @ 0x439f50` callback columns, unwitnessed per class) | deathCallback (+0x1C8) authored per def class | same observable for shipped JO data (destructibles author no ai/move function); witness the class-to-callback table to close |

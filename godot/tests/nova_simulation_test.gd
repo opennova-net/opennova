@@ -1073,6 +1073,266 @@ func test_face_only_cfac_model_attaches_for_projectile_raycast() -> void:
 	sim.free()
 
 
+func test_panm_liveness_is_scoped_to_the_active_transform_family() -> void:
+	var data := NovaObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(
+		"res://../fixtures/3dp/armry01/Armry01.3di")), OK)
+	for i in range(data.get_part_anim_count(0) - 1, -1, -1):
+		assert_true(data.delete_part_anim(0, i))
+	var anim := data.add_part_anim(0, 0)
+	assert_eq(anim, 0)
+	var tracks := [
+		"rotation_x", "rotation_y", "rotation_z",
+		"scale_x", "scale_y", "scale_z",
+		"translation",
+	]
+	var case := func(flags: int, live_tracks: Array) -> bool:
+		assert_eq(data.set_part_animation_flags(0, anim, flags), OK)
+		for track in tracks:
+			assert_true(data.set_part_anim_track_field(
+				0, anim, track, "control", 0))
+		for track in live_tracks:
+			assert_true(data.set_part_anim_track_field(
+				0, anim, track, "control", 0x10))
+		return data.has_live_panm_for_lod(0)
+
+	assert_true(case.call(1 << 8, []), "spinner uses raw coefficients")
+	assert_true(case.call(3 << 8, []), "view rotation type 3 is evaluated")
+	assert_true(case.call(4 << 8, []), "view rotation type 4 is evaluated")
+	assert_true(case.call(2 << 8, ["rotation_z"]),
+		"rotation family samples rotation tracks")
+	assert_false(case.call(2 << 8, ["scale_x"]),
+		"rotation ignores an unrelated live scale track")
+	assert_false(case.call(1, ["scale_y"]),
+		"uniform scale type samples only scale_x")
+	assert_true(case.call(1, ["scale_x"]))
+	assert_true(case.call(2, ["scale_y"]),
+		"axis scale samples all three scale tracks")
+	assert_true(case.call(1 << 24, ["translation"]))
+	assert_false(case.call(1 << 16, []),
+		"rotation-reversed without a rotation family is inert")
+
+
+func test_collision_uses_effective_lod0_and_never_first_live_lod() -> void:
+	var data := NovaObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(
+		"res://../fixtures/3dp/Pmpjk01/Pmpjk01.3di")), OK)
+	var lod_count := int(data.get_summary().get("lod_count", 0))
+	assert_gt(lod_count, 1, "fixture needs a second visual LOD")
+	if lod_count <= 1:
+		return
+
+	# A nonempty local block wins even when inert; model-level live rows must
+	# not leak through it for canonical LOD0.
+	for i in range(data.get_part_anim_count(0) - 1, -1, -1):
+		assert_true(data.delete_part_anim(0, i))
+	var inert := data.add_part_anim(0, 0)
+	assert_eq(inert, 0)
+	assert_false(data.has_live_panm_for_lod(0))
+	assert_eq(Array(data.get_effective_panm_targets(0)), [0],
+		"inert local row suppresses the model-level fallback")
+
+	# Make only LOD1 live. Visual de-batching may see it, but retail Generic
+	# collision always uses canonical LOD0 COBJ ordinals.
+	for i in range(data.get_part_anim_count(1) - 1, -1, -1):
+		assert_true(data.delete_part_anim(1, i))
+	var live := data.add_part_anim(1, 0)
+	assert_eq(live, 0)
+	assert_true(data.set_part_anim_channel_enabled(1, live, "rotation", true))
+	assert_true(data.set_part_anim_channel_mode(
+		1, live, "rotation", "z", "sine_wave", -1))
+	assert_true(data.set_part_anim_channel_values(
+		1, live, "rotation", "z", 0.0, 90.0, 1.0))
+	assert_true(data.has_live_panm_for_lod(1))
+	assert_eq(data.get_live_panm_lod(), 1)
+
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	assert_false(md.add_entity(
+		NovaMissionData.KIND_BUILDING, 102001,
+		Vector3.ZERO, Vector3.ZERO).is_empty())
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load(ProjectSettings.globalize_path(
+		"res://../fixtures/def/items.def")), OK)
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	assert_eq(sim.resolve_collision_instances(
+		item_db, ObjectDataPlacerStub.new(data)), 1)
+	sim.debug_set_panm_time_ms(0)
+	var before: PackedVector3Array = (
+		(sim.get_hitbox_debug().get("entities", [])[0] as Dictionary)
+		.get("tris", PackedVector3Array()))
+	sim.debug_set_panm_time_ms(640)
+	var after: PackedVector3Array = (
+		(sim.get_hitbox_debug().get("entities", [])[0] as Dictionary)
+		.get("tris", PackedVector3Array()))
+	assert_eq(after, before, "LOD1 PANM never transforms model-level COBJ")
+	sim.free()
+
+
+func test_animated_collision_uses_retail_section_ordinal_headlessly() -> void:
+	# Armry COBJ parents are all 0; face counts are [24, 213, 1, 12].
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var placed := md.add_entity(
+		NovaMissionData.KIND_ITEM, 105004, Vector3.ZERO, Vector3.ZERO)
+	var ssn := int(placed.get('bms_id', 0))
+	assert_gt(ssn, 0)
+	assert_false(md.add_event(0, 0, 0).is_empty())
+	assert_false(md.add_event_action(0, {
+		'action_type': 21, 'action_sub_type': 34,
+		'param1': ssn, 'param2': 1,
+		'param3': 1, 'param4': 65536,
+	}).is_empty())
+
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load(ProjectSettings.globalize_path(
+		'res://../fixtures/def/items.def')), OK)
+	var data := NovaObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(
+		'res://../fixtures/3dp/armry01/Armry01.3di')), OK)
+	assert_true(data.has_collision())
+	for i in range(data.get_part_anim_count(0) - 1, -1, -1):
+		assert_true(data.delete_part_anim(0, i))
+	var anim := data.add_part_anim(0, 1)
+	assert_eq(anim, 0)
+	assert_true(data.set_part_anim_channel_enabled(
+		0, anim, 'translation', true))
+	assert_true(data.set_part_anim_channel_mode(
+		0, anim, 'translation', 'x',
+		'control_register', 0))
+	assert_true(data.set_part_anim_channel_values(
+		0, anim, 'translation', 'x',
+		0.0, 4.0, 0.0))
+
+	var sim := NovaSimulation.new()
+	sim.set_item_seat_specs([{
+		'type_id': 5004,
+		'seats': [{
+			'type': 2,
+			'position': Vector3.ZERO,
+			'source_name': 'ctrlx00',
+		}],
+	}])
+	assert_true(sim.load_from_mission_data(md))
+	assert_eq(sim.get_entity_count(), 1)
+	assert_eq(sim.resolve_collision_instances(
+		item_db, ObjectDataPlacerStub.new(data)), 1)
+	var before_debug: Array = sim.get_hitbox_debug().get(
+		'entities', [])
+	assert_eq(before_debug.size(), 1)
+	assert_eq(int((before_debug[0] as Dictionary).get(
+		'face_total', 0)), 250)
+	var before: PackedVector3Array = (before_debug[0] as Dictionary).get(
+		'tris', PackedVector3Array())
+	assert_eq(before.size(), 250 * 3)
+
+	# No present pass/render node: collision reads authoritative AI state.
+	for _tick in range(80):
+		sim.step()
+	assert_eq(sim.get_entity_part_anim_phase(0, 1), 65535)
+	var after_debug: Array = sim.get_hitbox_debug().get(
+		'entities', [])
+	assert_eq(after_debug.size(), 1)
+	var after: PackedVector3Array = (after_debug[0] as Dictionary).get(
+		'tris', PackedVector3Array())
+	assert_eq(after.size(), before.size())
+	var moved := 0
+	var stayed := 0
+	var partial := 0
+	for i in before.size():
+		var distance := before[i].distance_to(after[i])
+		if distance > 3.99:
+			assert_almost_eq(distance, 4.0, 0.002)
+			moved += 1
+		elif distance < 0.002:
+			stayed += 1
+		else:
+			partial += 1
+	assert_eq(moved, 639, "only ordinal 1 moves")
+	assert_eq(stayed, 111)
+	assert_eq(partial, 0)
+	sim.free()
+
+
+func test_time_driven_collision_advances_without_an_ai_brain() -> void:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	assert_false(md.add_entity(
+		NovaMissionData.KIND_BUILDING, 102001,
+		Vector3.ZERO, Vector3.ZERO).is_empty())
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load(ProjectSettings.globalize_path(
+		'res://../fixtures/def/items.def')), OK)
+	var data := NovaObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(
+		'res://../fixtures/3dp/Pmpjk01/Pmpjk01.3di')), OK)
+	assert_gt(data.get_part_anim_count(0), 0)
+	# Remove the IR-local copy only. The parsed model-level PANM remains the
+	# canonical fallback used when effective LOD0 has no local rows.
+	for i in range(data.get_part_anim_count(0) - 1, -1, -1):
+		assert_true(data.delete_part_anim(0, i))
+	assert_eq(data.get_part_anim_count(0), 0)
+	assert_true(data.has_live_panm_for_lod(0),
+		'model-level PANM remains live as effective LOD0 fallback')
+	var targets := data.get_effective_panm_targets(0)
+	assert_gt(targets.size(), 0)
+	var pose_a: Dictionary = data.evaluate_panm(0, 0, {})
+	var pose_b: Dictionary = data.evaluate_panm(0, 640, {})
+	var moved_target := -1
+	for target_value in targets:
+		var target := int(target_value)
+		if pose_a.has(target) and pose_b.has(target) and not (
+				pose_a[target] as Transform3D).is_equal_approx(
+					pose_b[target] as Transform3D):
+			moved_target = target
+			break
+	assert_gte(moved_target, 0,
+		'effective model-level PANM advances with the shared time')
+
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	assert_eq(sim.get_entity_count(), 0, 'static has no AiEntity controls')
+	assert_eq(sim.resolve_collision_instances(
+		item_db, ObjectDataPlacerStub.new(data)), 1)
+	var fallback_tick := sim.get_logic_tick()
+	var fallback_before: PackedVector3Array = (
+		(sim.get_hitbox_debug().get('entities', [])[0] as Dictionary)
+		.get('tris', PackedVector3Array()))
+	for _tick in range(40):
+		sim.step()
+	assert_eq(sim.get_logic_tick() - fallback_tick, 40)
+	var fallback_after: PackedVector3Array = (
+		(sim.get_hitbox_debug().get('entities', [])[0] as Dictionary)
+		.get('tris', PackedVector3Array()))
+	var fallback_moved := 0
+	for i in fallback_before.size():
+		if fallback_before[i].distance_to(fallback_after[i]) > 0.002:
+			fallback_moved += 1
+	assert_gt(fallback_moved, 0,
+		'direct/headless simulation uses deterministic logic_tick * 16')
+
+	sim.debug_set_panm_time_ms(0)
+	var before_debug: Array = sim.get_hitbox_debug().get('entities', [])
+	assert_eq(before_debug.size(), 1)
+	var before: PackedVector3Array = (before_debug[0] as Dictionary).get(
+		'tris', PackedVector3Array())
+	assert_gt(before.size(), 0)
+	sim.debug_set_panm_time_ms(640)
+	var after_debug: Array = sim.get_hitbox_debug().get('entities', [])
+	assert_eq(after_debug.size(), 1)
+	var after: PackedVector3Array = (after_debug[0] as Dictionary).get(
+		'tris', PackedVector3Array())
+	assert_eq(after.size(), before.size())
+	var moved := 0
+	for i in before.size():
+		if before[i].distance_to(after[i]) > 0.002:
+			moved += 1
+	assert_gt(moved, 0,
+		'free-running PANM uses retail milliseconds with zero controls')
+	sim.free()
+
+
 func test_entity_debug_card_keeps_its_shape_after_a_scripted_remove() -> void:
 	# VaporizeSingle (action 22) despawns the registry slot while the AI entity
 	# stays in the pool - the card must keep a STABLE key set with typed

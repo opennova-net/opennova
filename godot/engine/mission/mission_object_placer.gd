@@ -46,6 +46,7 @@ const PLAYER_VISUAL_ITEM_ID := 105310
 
 var resource_root: NovaResourceRoot
 var item_db: NovaItemDatabase
+var _panm_clock
 
 # When true, place() also records a per-entity pickable index in pickable_records
 # (used by the editor Mission workspace to select / move entities). Off for the
@@ -107,6 +108,10 @@ var _built_epoch: int = 0
 func _init(p_resource_root: NovaResourceRoot = null, p_item_db: NovaItemDatabase = null) -> void:
 	resource_root = p_resource_root
 	item_db = p_item_db
+
+
+func set_panm_clock(value) -> void:
+	_panm_clock = value
 
 
 # Drop every derived cache when the resource-root epoch has moved since they were
@@ -377,6 +382,7 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 			stats.unresolved += 1
 			continue
 		var model: Node3D = NovaObjectModelScript.new()
+		model.set_panm_clock(_panm_clock)
 		model.name = "Anim_%s_%d" % [a["graphic"], stats.animated]
 		# Render the model origin at the entity's stored position directly. The engine bakes the
 		# Ground userpoint into the stored position once, at author-time (place / terrain-drag), not
@@ -439,6 +445,7 @@ func build_animated_model(item_id: int, parent: Node3D, env_node: Node = null) -
 	if data == null:
 		return null
 	var model: Node3D = NovaObjectModelScript.new()
+	model.set_panm_clock(_panm_clock)
 	model.name = "PlayerAvatar_%s" % graphic
 	parent.add_child(model)
 	if env_node != null and model.has_method("set_environment_node"):
@@ -472,6 +479,7 @@ func build_model_from_graphic(graphic: String, adm_name: String, parent: Node3D,
 	if data == null:
 		return null
 	var model: Node3D = NovaObjectModelScript.new()
+	model.set_panm_clock(_panm_clock)
 	model.name = "Viewmodel_%s" % graphic
 	parent.add_child(model)
 	if env_node != null and model.has_method("set_environment_node"):
@@ -546,6 +554,7 @@ func place_single(mission: NovaMissionData, container: Node3D, kind: int, index:
 			delta.unresolved = 1
 			return delta
 		var model: Node3D = NovaObjectModelScript.new()
+		model.set_panm_clock(_panm_clock)
 		model.name = "Anim_%s_k%d_i%d" % [graphic, kind, index]
 		model.transform = xform
 		container.add_child(model)
@@ -794,44 +803,17 @@ func _has_occlusion_records(item_id: int) -> bool:
 # parts away from rest. Inert PANM blocks (no family flags or every control idle) keep
 # static batching. Mirrors the evaluator's own gates: the entry-level animated check and
 # the per-track idle check. [orig: PANM_BuildNodeMatrices track gates + PANM_SampleTrack
-# (sub_4354B0) idle gate (control & 0xF0), clock dword_18B42A4 — ported in
+# (sub_4354B0) idle gate (control & 0xF0), Render_ShaderTickMs @0x2721A40 — ported in
 # libs/threedi/src/threedi_panm_matrices.cpp / threedi_panm_runtime.cpp]
 func _graphic_needs_live_panm(graphic: String) -> bool:
 	if _graphic_panm_cache.has(graphic):
 		return bool(_graphic_panm_cache[graphic])
 	var result := false
 	var data := _load_object_data(graphic)
-	if data != null and data.has_method("get_part_anim_count") and data.has_method("get_part_anim_info"):
-		var lod_count := int(data.get_summary().get("lod_count", 0))
-		for lod in range(lod_count):
-			for i in range(int(data.get_part_anim_count(lod))):
-				if part_anim_entry_is_live(data.get_part_anim_info(lod, i)):
-					result = true
-					break
-			if result:
-				break
+	if data != null and data.has_method("has_live_panm"):
+		result = bool(data.has_live_panm())
 	_graphic_panm_cache[graphic] = result
 	return result
-
-
-# One PANM entry can move/pose its part iff its family flags declare animation AND at
-# least one track carries a non-idle control function (the sampler treats a zero high
-# nibble as inactive). Public static: the pure, testable form of the gate — it takes a
-# get_part_anim_info() dictionary, holds no placer state, and is the seam the sampler
-# regression tests exercise directly.
-static func part_anim_entry_is_live(info: Dictionary) -> bool:
-	var animated := int(info.get("rotation_type", 0)) != 0 \
-			or int(info.get("scale_type", 0)) != 0 \
-			or int(info.get("translate_type", 0)) != 0 \
-			or bool(info.get("rotation_reversed", false))
-	if not animated:
-		return false
-	for track in ["rotation_x", "rotation_y", "rotation_z",
-			"scale_x", "scale_y", "scale_z", "translation"]:
-		var t: Dictionary = info.get(track, {})
-		if (int(t.get("control", 0)) & 0xF0) != 0:
-			return true
-	return false
 
 
 func _model_name_for(graphic: String) -> String:

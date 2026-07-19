@@ -59,6 +59,7 @@ var _perf_effects_us: int = 0
 var _perf_did_tick := false
 var _accum := 0.0                    # banked real time (s) not yet consumed by a logic tick
 var _ticks_last_frame := 0           # logic ticks run by the last tick_realtime() call (catch-up signal)
+var _presentation_time_ms := -1      # shared render/PANM DWORD; negative = direct-sim fallback
 # Stable mission identity for host-neutral diagnostics such as the F3 overlay.
 var _mission_file := ""
 var _mission_name := ""
@@ -154,6 +155,8 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 		_sim = null
 		_has_native_present_effect_pose_lookup = false
 		return 0
+	if _presentation_time_ms >= 0:
+		_sim.set_panm_time_ms(_presentation_time_ms)
 	# Ground the AI on the host's terrain (editor preview + game share this one call). Entities hug
 	# the terrain instead of floating; absent/unloaded terrain leaves their authored Z untouched.
 	if options.get("terrain") != null:
@@ -531,6 +534,12 @@ func request_player_stance(stance: int) -> bool:
 
 func get_sim() -> NovaSimulation:
 	return _sim
+
+
+func set_presentation_time_ms(value_ms: int) -> void:
+	_presentation_time_ms = -1 if value_ms < 0 else value_ms & 0xffffffff
+	if _sim != null:
+		_sim.set_panm_time_ms(_presentation_time_ms)
 
 
 ## The placed-node registry (bms_id/kind/group -> live node). The render-occlusion

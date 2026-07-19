@@ -167,6 +167,118 @@ void CollisionMatrix::rotate_point(const int32_t in[3], int32_t out[3]) const {
                                    static_cast<int64_t>(in[2]) * m[10] + 0x200000) >> 22);
 }
 
+static float retail_x87_mul3(float a0, float b0, float a1, float b1,
+                             float a2, float b2) {
+    volatile double value = static_cast<double>(a0) * b0;
+    value = value + static_cast<double>(a1) * b1;
+    value = value + static_cast<double>(a2) * b2;
+    return static_cast<float>(value);
+}
+
+static float retail_x87_mul3_add(float a0, float b0, float a1, float b1,
+                                 float a2, float b2, float add) {
+    volatile double value = static_cast<double>(a0) * b0;
+    value = value + static_cast<double>(a1) * b1;
+    value = value + static_cast<double>(a2) * b2;
+    value = value + add;
+    return static_cast<float>(value);
+}
+
+bool collision_matrix_apply_render_pose(const CollisionMatrix &entity_world,
+                                        const float pose[16],
+                                        CollisionMatrix &out) {
+    if (pose == nullptr) return false;
+    for (int i = 0; i < 16; ++i)
+        if (!std::isfinite(pose[i])) return false;
+
+    constexpr float kInvQ22 = 1.0f / 4194304.0f;
+    constexpr float kInv16 = 1.0f / 65536.0f;
+    // Fixed mission matrix -> row-vector render float, including the
+    // (-mission-y, mission-z, mission-x) axis map.
+    // [orig: Math_FixedPointToFloatMatrix4x4_Swizzled @ 0x611080]
+    float entity[16] = {};
+    entity[0] = entity_world.m[5] * kInvQ22;
+    entity[1] = -entity_world.m[9] * kInvQ22;
+    entity[2] = -entity_world.m[1] * kInvQ22;
+    entity[4] = -entity_world.m[6] * kInvQ22;
+    entity[5] = entity_world.m[10] * kInvQ22;
+    entity[6] = entity_world.m[2] * kInvQ22;
+    entity[8] = -entity_world.m[4] * kInvQ22;
+    entity[9] = entity_world.m[8] * kInvQ22;
+    entity[10] = entity_world.m[0] * kInvQ22;
+    entity[12] = -entity_world.m[7] * kInv16;
+    entity[13] = entity_world.m[11] * kInv16;
+    entity[14] = entity_world.m[3] * kInv16;
+    entity[15] = 1.0f;
+
+    // Row vectors: model point * PANM pose * entity world. Retail performs the
+    // adds in this operand order with x87 precision-control set to 53-bit, then
+    // stores one binary32 result. The explicit binary64 sequence differs from
+    // a normal float loop by one Q22 unit for reachable rotations.
+    // [orig: Math_MultiplyMatrix4x4_Float @ 0x611750, as called by
+    // Model_TransformBoneMatrices @ 0x58e390]
+    float final[16] = {};
+    final[0] = retail_x87_mul3(
+        pose[1], entity[4], pose[0], entity[0], pose[2], entity[8]);
+    final[1] = retail_x87_mul3(
+        pose[2], entity[9], pose[1], entity[5], pose[0], entity[1]);
+    final[2] = retail_x87_mul3(
+        pose[0], entity[2], pose[2], entity[10], pose[1], entity[6]);
+    final[4] = retail_x87_mul3(
+        pose[4], entity[0], pose[6], entity[8], pose[5], entity[4]);
+    final[5] = retail_x87_mul3(
+        pose[6], entity[9], pose[5], entity[5], pose[4], entity[1]);
+    final[6] = retail_x87_mul3(
+        pose[4], entity[2], pose[6], entity[10], pose[5], entity[6]);
+    final[8] = retail_x87_mul3(
+        pose[8], entity[0], pose[10], entity[8], pose[9], entity[4]);
+    final[9] = retail_x87_mul3(
+        pose[10], entity[9], pose[9], entity[5], pose[8], entity[1]);
+    final[10] = retail_x87_mul3(
+        pose[8], entity[2], pose[10], entity[10], pose[9], entity[6]);
+    final[12] = retail_x87_mul3_add(
+        pose[12], entity[0], pose[14], entity[8], pose[13], entity[4], entity[12]);
+    final[13] = retail_x87_mul3_add(
+        pose[14], entity[9], pose[13], entity[5], pose[12], entity[1], entity[13]);
+    final[14] = retail_x87_mul3_add(
+        pose[12], entity[2], pose[14], entity[10], pose[13], entity[6], entity[14]);
+    final[15] = 1.0f;
+    for (float v : final)
+        if (!std::isfinite(v)) return false;
+
+    constexpr double kQ22 = 4194304.0;
+    constexpr double kFixed16 = 65536.0;
+    const auto ftol_checked = [](double v, int32_t &dst) {
+        if (!std::isfinite(v) ||
+            v < static_cast<double>(INT32_MIN) ||
+            v > static_cast<double>(INT32_MAX))
+            return false;
+        dst = static_cast<int32_t>(v); // trunc toward zero [orig: _ftol2_sse]
+        return true;
+    };
+
+    CollisionMatrix converted;
+    // Render float -> fixed mission matrix, the exact inverse swizzle. Only the
+    // FINAL float matrix is quantized, like BoneCallback_Generic.
+    // [orig: Math_FloatMatrixToFixedPoint22 @ 0x611140]
+    if (!ftol_checked(final[10] * kQ22, converted.m[0]) ||
+        !ftol_checked(-final[2] * kQ22, converted.m[1]) ||
+        !ftol_checked(final[6] * kQ22, converted.m[2]) ||
+        !ftol_checked(final[14] * kFixed16, converted.m[3]) ||
+        !ftol_checked(-final[8] * kQ22, converted.m[4]) ||
+        !ftol_checked(final[0] * kQ22, converted.m[5]) ||
+        !ftol_checked(-final[4] * kQ22, converted.m[6]) ||
+        !ftol_checked(-final[12] * kFixed16, converted.m[7]) ||
+        !ftol_checked(final[9] * kQ22, converted.m[8]) ||
+        !ftol_checked(-final[1] * kQ22, converted.m[9]) ||
+        !ftol_checked(final[5] * kQ22, converted.m[10]) ||
+        !ftol_checked(final[13] * kFixed16, converted.m[11]))
+        return false;
+    converted.m[12] = converted.m[13] = converted.m[14] = converted.m[15] = 0;
+    out = converted;
+    return true;
+}
+
 // [orig: Matrix_Transpose3x3WithNegateCol3 @ 0x6136d0]
 void CollisionMatrix::invert_into(CollisionMatrix &out) const {
     out.m[3] = -m[3];
@@ -1185,7 +1297,23 @@ const CollisionTargetView *CollisionWorld::target_view(World &world, EntityHandl
                               bam_from_degrees_wrapped(static_cast<double>(e->pitch)),
                               bam_from_degrees_wrapped(static_cast<double>(e->roll)), p)
                     : collision_matrix_from_heading(heading, p);
-    mats.assign(m->sections.size(), world_mat); // shared per section (D-COL-1)
+    // The model callback owns the FINAL world-space slot array for animated
+    // models. Slots pair with COBJ sections by ordinal; the low-level walkers
+    // already consume target.matrices[si] that way. A missing, rejected, or
+    // count-mismatched callback falls back to the retail Simple callback: copy
+    // the entity placement matrix into every slot.
+    // [orig: model+168 callback; BoneCallback_Simple @ 0x4e2600;
+    // Physics_RaycastAgainstBoneCollision @ 0x4e4cb0 advances matrix+64 and
+    // COBJ+108 in lockstep.]
+    bool supplied_section_matrices = false;
+    if (section_matrix_provider_ != nullptr) {
+        mats.clear();
+        supplied_section_matrices = section_matrix_provider_->build_section_matrices(
+                world, h, model_id, world_mat, *m, mats) &&
+            mats.size() == m->sections.size();
+    }
+    if (!supplied_section_matrices)
+        mats.assign(m->sections.size(), world_mat);
     if (using_husk && e->spawned_piece_mask != 0) {
         // Sections that launched as death pieces no longer belong to the wreck.
         // The retail piece mask wraps section indices at 32, and collision's

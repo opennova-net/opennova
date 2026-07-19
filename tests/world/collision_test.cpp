@@ -185,6 +185,70 @@ void test_matrix_roundtrip() {
     CHECK(std::abs(pitched_x[2] - fx(1.0)) <= 4);
 }
 
+void test_retail_render_pose_matrix_roundtrip_and_order() {
+    const float identity[16] = {
+        1.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 1.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, 1.0f,
+    };
+    const int32_t entity_pos[3] = {fx(10.0), fx(20.0), fx(3.0)};
+    const CollisionMatrix entity =
+        collision_matrix_from_heading(0x40000000, entity_pos);
+    CollisionMatrix roundtrip;
+    CHECK(collision_matrix_apply_render_pose(entity, identity, roundtrip));
+    for (int i = 0; i < 12; ++i) CHECK(roundtrip.m[i] == entity.m[i]);
+    CHECK(!roundtrip.disabled()); // affine m[15] == 1 never disables a section.
+
+    // Render-float translation (2,3,4) maps back to mission (4,-2,3).
+    float translated[16];
+    std::copy(std::begin(identity), std::end(identity), translated);
+    translated[12] = 2.0f;
+    translated[13] = 3.0f;
+    translated[14] = 4.0f;
+    const int32_t origin[3] = {};
+    const CollisionMatrix at_origin = collision_matrix_from_heading(0, origin);
+    CollisionMatrix translated_world;
+    CHECK(collision_matrix_apply_render_pose(at_origin, translated, translated_world));
+    CHECK(translated_world.m[3] == fx(4.0));
+    CHECK(translated_world.m[7] == fx(-2.0));
+    CHECK(translated_world.m[11] == fx(3.0));
+
+    // Non-commuting order: local render +X is mission -Y. Pose*entity rotates
+    // that by the +90-degree entity heading to mission +X. Reversing the float
+    // multiply would leave it on -Y instead.
+    float local_x[16];
+    std::copy(std::begin(identity), std::end(identity), local_x);
+    local_x[12] = 2.0f;
+    CollisionMatrix posed_world;
+    CHECK(collision_matrix_apply_render_pose(entity, local_x, posed_world));
+    CHECK(posed_world.m[3] == fx(12.0));
+    CHECK(posed_world.m[7] == fx(20.0));
+    CHECK(posed_world.m[11] == fx(3.0));
+
+    // Reachable values that distinguish retail x87 PC53 accumulation from a
+    // binary32 matrix loop. The converted fixed matrix is bit-exact.
+    const int32_t x87_pos[3] = {655360, 1310720, 196608};
+    const CollisionMatrix x87_entity =
+        collision_matrix_from_heading(0x62c00000, x87_pos);
+    const float x87_pose[16] = {
+        0.156207114f, 0.0f, -0.987724304f, 0.0f,
+        0.0f, 1.0f, 0.0f, 0.0f,
+        0.987724304f, 0.0f, 0.156207114f, 0.0f,
+        0.0f, 0.0f, 0.0f, 1.0f,
+    };
+    const int32_t x87_expected[16] = {
+        2231699, -3551295, 0, 655360,
+        3551295, 2231699, 0, 1310720,
+        0, 0, 4194304, 196608,
+        0, 0, 0, 0,
+    };
+    CollisionMatrix x87_world;
+    CHECK(collision_matrix_apply_render_pose(x87_entity, x87_pose, x87_world));
+    for (int i = 0; i < 16; ++i)
+        CHECK(x87_world.m[i] == x87_expected[i]);
+}
+
 // ---------------------------------------------------------------------------
 void test_blink_query_and_refresh() {
     // Authored blink flags 0x3C = init 0x3E with the bit-1 letter cleared -> runtime
@@ -922,6 +986,20 @@ CollisionModel two_section_face_model(uint8_t root_material, uint8_t piece_mater
     return m;
 }
 
+struct TwoSectionMatrixProvider final : ICollisionSectionMatrixProvider {
+    bool build_section_matrices(World &, EntityHandle, int32_t,
+                                const CollisionMatrix &,
+                                const CollisionModel &model,
+                                std::vector<CollisionMatrix> &out) override {
+        if (model.sections.size() != 2) return false;
+        const int32_t root_pos[3] = {fx(10.0), fx(10.0), 0};
+        const int32_t moved_pos[3] = {fx(14.0), fx(10.0), 0};
+        out = {collision_matrix_from_heading(0, root_pos),
+               collision_matrix_from_heading(0, moved_pos)};
+        return true;
+    }
+};
+
 void test_face_raycast() {
     // The quad sits at entity (10, 10, 0) -> world plane z = 1.
     Rig rig(face_quad_model(14, 0)); // material 14 -> impact tag 18 'metal'
@@ -1036,6 +1114,47 @@ void test_face_raycast_husk_omits_spawned_piece_sections() {
     CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, piece_start, piece_end, 0, fh) ==
           CollisionWorld::FaceRaycast::kMiss);
     CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, root_start, root_end, 0, fh) ==
+          CollisionWorld::FaceRaycast::kHit);
+    CHECK(fh.section == 0 && fh.material == 5);
+}
+
+void test_face_raycast_uses_callback_matrix_per_section() {
+    // The retail model callback returns one FINAL world matrix per COBJ and the
+    // projectile walker pairs both arrays by ordinal. Section 1 is posed +4u on
+    // X while section 0 stays at its entity placement. The old shared-matrix
+    // target_view hits x=13 and misses x=17; the callback-correct path reverses
+    // those verdicts without moving the root section.
+    Rig rig(two_section_face_model(5, 6));
+    // JetSki's two retail COBJ rows both name parent 0. Pin that hierarchy
+    // metadata cannot collapse the ordinal matrix pairing onto slot 0.
+    CollisionModel *model = const_cast<CollisionModel *>(rig.cw.model(0));
+    CHECK(model != nullptr && model->sections.size() == 2);
+    if (model != nullptr && model->sections.size() == 2) {
+        model->sections[0].parent_part_index = 0;
+        model->sections[1].parent_part_index = 0;
+    }
+    rig.world.registry.get(rig.building)->bound_radius = 12.0f;
+    TwoSectionMatrixProvider provider;
+    rig.cw.set_section_matrix_provider(&provider);
+
+    RayFaceHit fh;
+    const int32_t old_piece_start[3] = {fx(13.0), fx(10.0), fx(3.0)};
+    const int32_t old_piece_end[3] = {fx(13.0), fx(10.0), fx(-1.0)};
+    CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building,
+                                      old_piece_start, old_piece_end, 0, fh) ==
+          CollisionWorld::FaceRaycast::kMiss);
+
+    const int32_t moved_piece_start[3] = {fx(17.0), fx(10.0), fx(3.0)};
+    const int32_t moved_piece_end[3] = {fx(17.0), fx(10.0), fx(-1.0)};
+    CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building,
+                                      moved_piece_start, moved_piece_end, 0, fh) ==
+          CollisionWorld::FaceRaycast::kHit);
+    CHECK(fh.section == 1 && fh.material == 6);
+
+    const int32_t root_start[3] = {fx(7.0), fx(10.0), fx(3.0)};
+    const int32_t root_end[3] = {fx(7.0), fx(10.0), fx(-1.0)};
+    CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building,
+                                      root_start, root_end, 0, fh) ==
           CollisionWorld::FaceRaycast::kHit);
     CHECK(fh.section == 0 && fh.material == 5);
 }
@@ -1247,6 +1366,7 @@ void test_round_indestructible_organic_still_collides() {
 
 int main() {
     test_matrix_roundtrip();
+    test_retail_render_pose_matrix_roundtrip_and_order();
     test_blink_query_and_refresh();
     test_sound_occlusion();
     test_ray_clip();
@@ -1267,6 +1387,7 @@ int main() {
     test_face_raycast_flags_and_materials();
     test_face_raycast_husk_swap();
     test_face_raycast_husk_omits_spawned_piece_sections();
+    test_face_raycast_uses_callback_matrix_per_section();
     test_face_raycast_rolled_entity();
     test_face_raycast_pitched_entity();
     test_round_inside_bound_sphere_hits_wall();

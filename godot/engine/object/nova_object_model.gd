@@ -48,6 +48,7 @@ var _anim_frames_by_mat: Dictionary = {}
 var _ctrl_values: Dictionary = {}
 var _part_anims: Dictionary = {}
 var _anim_time_ms: int = 0
+var _panm_clock
 var _active_lod: int = 0
 var _is_playing := true
 var _model_bounds := AABB()
@@ -166,6 +167,13 @@ func is_playing() -> bool:
 
 func set_playing(value: bool) -> void:
 	_is_playing = value
+
+
+func set_panm_clock(value) -> void:
+	_panm_clock = value
+	if _panm_clock != null:
+		_anim_time_ms = int(_panm_clock.get("time_ms")) & 0xffffffff
+	_apply_runtime_state(0.0)
 
 
 func reset_animation_time() -> void:
@@ -868,8 +876,10 @@ func _compute_transformed_mesh_bounds() -> AABB:
 func _apply_runtime_state(delta: float) -> void:
 	if object_data == null or not object_data.has_document():
 		return
-	if _is_playing:
-		_anim_time_ms = (_anim_time_ms + int(delta * 1000.0)) & 0x7fffffff
+	if _panm_clock != null:
+		_anim_time_ms = int(_panm_clock.get("time_ms")) & 0xffffffff
+	elif _is_playing:
+		_anim_time_ms = (_anim_time_ms + int(delta * 1000.0)) & 0xffffffff
 	var part_changed := _advance_part_anims(delta)
 	_advance_body_anim(delta)
 	# Only materials whose UV/RGB/alpha generators animate (or whose texture flip-book
@@ -1281,4 +1291,3 @@ func _set_model_bounds(bounds: AABB) -> void:
 
 func _aabb_equal_approx(a: AABB, b: AABB) -> bool:
 	return a.position.is_equal_approx(b.position) and a.size.is_equal_approx(b.size)
-
