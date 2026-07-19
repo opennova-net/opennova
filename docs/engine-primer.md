@@ -162,7 +162,7 @@ is authoritative, and each record owns the rationale and the stable `D-…` dive
 | Terrain (TRN + runtime queries) | `libs/terrain`, `libs/terrain_query` | [terrain/terrain-re.md](terrain/terrain-re.md) | partial record (PAR-R1; runtime queries ported, ENG-3; rendering parity re-grilled on #245) |
 | Foliage | `libs/foliage`, `NovaFoliageDispatcher` | [foliage/foliage-re.md](foliage/foliage-re.md) | matching incl. the model tier (runtime rebuilt on #245; D-FOLIAGE-7/9/10 open) |
 | Tiles (`.til` overlay) | `libs/til` | [tiles/til-re.md](tiles/til-re.md) | landed (PAR-R3; D-TIL-1) |
-| Fonts (`.fnt`) | `libs/fnt` | [fonts/fnt-re.md](fonts/fnt-re.md) | landed (PAR-R4; D-FNT-1..3) |
+| Fonts (`.fnt`) | `libs/fnt` | [fonts/fnt-re.md](fonts/fnt-re.md) | landed (PAR-R4; D-FNT-1..4) |
 | Credits (CBIN) | `libs/cbin` | [credits/cbin-re.md](credits/cbin-re.md) | partial (PAR-R5: codec matching; markup NEEDS-RE) |
 | Importer pipeline | `apps/importer`, `pyopennova` | [importer/importer-audit.md](importer/importer-audit.md) | tracked-by-composition (PAR-R6) |
 

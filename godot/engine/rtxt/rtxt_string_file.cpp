@@ -1,5 +1,6 @@
 #include "rtxt_string_file.h"
 
+#include "util/nova_cp1252.h"
 #include "util/nova_data_format.h"
 
 #include <godot_cpp/classes/file_access.hpp>
@@ -20,15 +21,6 @@ namespace {
 // back to cp1252; encode back to cp1252 whenever every character fits so edits
 // to retail files keep the game-readable encoding. Unedited entries never pass
 // through String at all — parse/write preserve their bytes exactly.
-
-// Unicode codepoints for cp1252 bytes 0x80..0x9F (0x0000 marks unmapped bytes,
-// which pass through as their own codepoint).
-constexpr char32_t CP1252_80_9F[32] = {
-	0x20AC, 0x0000, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021,
-	0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x0000, 0x017D, 0x0000,
-	0x0000, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014,
-	0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x0000, 0x017E, 0x0178,
-};
 
 bool is_valid_utf8(const std::string &s) {
 	size_t i = 0;
@@ -66,11 +58,7 @@ String std_to_gd(const std::string &s) {
 	String out;
 	for (const char raw : s) {
 		const unsigned char c = static_cast<unsigned char>(raw);
-		char32_t cp = c;
-		if (c >= 0x80 && c <= 0x9F && CP1252_80_9F[c - 0x80] != 0) {
-			cp = CP1252_80_9F[c - 0x80];
-		}
-		out += cp;
+		out += opennova::cp1252_decode_byte(c);
 	}
 	return out;
 }
@@ -82,26 +70,12 @@ std::string gd_to_std(const String &s) {
 	bool fits = true;
 	for (int i = 0; i < s.length(); ++i) {
 		const char32_t cp = s[i];
-		if (cp < 0x80 || (cp >= 0xA0 && cp <= 0xFF)) {
-			cp1252.push_back(static_cast<char>(cp));
-			continue;
-		}
-		if (cp <= 0x9F && CP1252_80_9F[cp - 0x80] == 0) {
-			cp1252.push_back(static_cast<char>(cp));  // unmapped cp1252 byte passed through decode
-			continue;
-		}
-		bool mapped = false;
-		for (int k = 0; k < 32; ++k) {
-			if (CP1252_80_9F[k] == cp) {
-				cp1252.push_back(static_cast<char>(0x80 + k));
-				mapped = true;
-				break;
-			}
-		}
-		if (!mapped) {
+		std::uint8_t encoded = 0;
+		if (!opennova::cp1252_encode_codepoint(cp, encoded)) {
 			fits = false;
 			break;
 		}
+		cp1252.push_back(static_cast<char>(encoded));
 	}
 	if (fits) {
 		return cp1252;

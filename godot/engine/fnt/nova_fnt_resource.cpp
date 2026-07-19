@@ -1,5 +1,7 @@
 #include "fnt/nova_fnt_resource.h"
 
+#include "util/nova_cp1252.h"
+
 #include <godot_cpp/classes/text_server.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
@@ -304,6 +306,7 @@ Ref<FontFile> NovaFntResource::to_font_file() const {
 
 	Ref<FontFile> font;
 	font.instantiate();
+	font->set_allow_system_fallback(false);
 
 	const int32_t cache_index = 0;
 	int32_t font_height = 16;
@@ -327,7 +330,16 @@ Ref<FontFile> NovaFntResource::to_font_file() const {
 
 	int32_t advance_adjust = font_.shadow_offset - 1;
 	for (uint32_t i = 0; i < FNT_GLYPH_COUNT; ++i) {
-		int32_t char_code = static_cast<int32_t>(FNT_FIRST_CHAR + i);
+		const std::uint8_t retail_byte = static_cast<std::uint8_t>(FNT_FIRST_CHAR + i);
+		// Retail measures and draws text from unsigned bytes. Bytes 0x7F..0x81
+		// are non-printing controls; every other byte directly selects its FNT
+		// record. Expose that record at the codepoint produced by OpenNova's
+		// CP1252 string boundary so Godot selects the same bitmap and metrics.
+		// [orig: CGameFont_MeasureText @ 0x674e70; CGameFont_DrawText @ 0x6752c0]
+		if (retail_byte >= 0x7F && retail_byte <= 0x81) {
+			continue;
+		}
+		const int32_t char_code = static_cast<int32_t>(opennova::cp1252_decode_byte(retail_byte));
 		const fnt_glyph_t *glyph = &font_.glyphs[i];
 
 		int x0 = 0;
