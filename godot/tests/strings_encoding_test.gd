@@ -9,16 +9,16 @@ extends GutTest
 #        docs/interface/rtxt-strings-re.md; the strings editor's read path)
 #     -> Godot String (Unicode)
 #     -> NovaFntResource.to_font_file() FontFile (the runtime's .fnt view;
-#        glyphs keyed at raw byte codepoints 32..255)
+#        glyph slots keyed at their decoded cp1252 codepoints)
 #     -> the engine draw (HudText.draw_text / menus / credits).
 #
 # cp1252 zones pinned here:
-#   0x20..0x7F  ASCII        — identity through every stage.
+#   0x20..0x7E  ASCII        — identity through every stage.
 #   0xA0..0xFF  Latin-1      — cp1252 == Unicode; identity through every stage.
-#   0x80..0x9F  specials     — decode maps to the cp1252 punctuation codepoints
-#               (0x93 -> U+201C etc.); encode maps back losslessly. The GLYPH
-#               stage does NOT follow (see the audited divergence below).
-#   0x81/0x8D/0x8F/0x90/0x9D — cp1252 holes: decode passes the byte through as
+#   0x82..0x9F  specials     — decode maps to the cp1252 punctuation codepoints
+#               (0x93 -> U+201C etc.); encode maps back losslessly, and the
+#               FontFile exposes each byte's retail glyph under that codepoint.
+#   0x8D/0x8F/0x90/0x9D      — cp1252 holes: decode passes the byte through as
 #               its own codepoint, encode returns it; glyph stage matches
 #               (whenever the font draws that slot at all).
 #
@@ -26,9 +26,12 @@ extends GutTest
 #   - bytes < 0x20 never map to glyphs: the .fnt format carries 224 glyphs for
 #     chars 32..255 only (libs/fnt fnt.h, FNT_FIRST_CHAR/FNT_GLYPH_COUNT).
 #   - byte 0x20 (space) is advance-only in the FontFile view (no drawn rect).
+#   - retail's text drawer and measurer skip bytes 0x7F, 0x80, and 0x81 as
+#     non-printing controls; the FontFile omits those slots and disables host
+#     fallback so decoded U+20AC does not become a system-font Euro glyph.
 #
-# This is an AUDIT: the divergence found in the 0x80..0x9F glyph stage is
-# pinned as it behaves today and reported, not fixed here.
+# D-FNT-4 closed the audited 0x80..0x9F glyph-stage divergence: decoded text
+# now selects the same bitmap slot and metric that retail selects by byte.
 
 const FNT_PATH := "res://../fixtures/fnt/Serpen24.fnt"
 
@@ -40,6 +43,9 @@ const LEFT_QUOTE_BYTE := 0x93  # cp1252 left curly quote — specials zone
 const LEFT_QUOTE_CODEPOINT := 0x201C  # what 0x93 decodes to
 const HOLE_BYTE := 0x9D      # unmapped in cp1252 — passes through by byte value
                              # (0x9D rather than 0x81: the fixture draws 0x9D)
+const DELETE_CONTROL_CODEPOINT := 0x7F
+const EURO_CODEPOINT := 0x20AC
+const UNDEFINED_81_CONTROL_CODEPOINT := 0x81
 
 
 func _two_entry_table() -> RtxtStringFile:
@@ -98,11 +104,9 @@ func _fixture_font() -> FontFile:
 	return font
 
 
-func test_glyph_stage_keys_the_fnt_slots_at_raw_byte_codepoints() -> void:
-	# String -> glyphs: the .fnt view registers each glyph under its table BYTE
-	# value (chars 32..255). For ASCII and the Latin-1 zone the decoded
-	# codepoint IS the byte, so the engine draw picks the same glyph slot the
-	# retail engine indexes for that byte.
+func test_identity_zones_key_fnt_slots_at_matching_codepoints() -> void:
+	# For ASCII, Latin-1, and pass-through holes, the decoded codepoint IS the
+	# table byte, so the engine draw picks the same glyph slot retail indexes.
 	var font := _fixture_font()
 	if font == null:
 		return
@@ -118,36 +122,32 @@ func test_glyph_stage_keys_the_fnt_slots_at_raw_byte_codepoints() -> void:
 		"the engine draw advances for the Latin-1 glyph — it renders")
 
 
-func test_specials_zone_glyphs_are_keyed_at_bytes_not_decoded_codepoints() -> void:
-	# AUDITED DIVERGENCE (reported, not fixed — this pin makes any fix a
-	# conscious flip): the retail engine indexes glyphs by the TABLE BYTE
-	# (glyph slot = byte - 32; the .fnt model in libs/fnt, drawn by
-	# [orig: CGameFont_DrawText @ 0x6752c0]), so a table byte 0x93 draws the
-	# font's curly-quote glyph. Our display decode (D-RTXT-8) maps 0x93 to
-	# U+201C, but NovaFntResource.to_font_file() keys glyphs at raw byte
-	# codepoints — U+201C finds NO .fnt glyph. Because the FontFile ships with
-	# allow_system_fallback on (Godot's default), the engine-path draw of a
-	# decoded cp1252 special (curly quotes, dashes: bytes 0x82..0x9F less the
-	# holes) silently substitutes a HOST SYSTEM font's glyph (or a missing-glyph
-	# box where no host font matches) for the .fnt glyph retail renders. Retail
-	# tables hit this: 67/98 JO bins carry bytes >= 0x80
-	# (docs/interface/rtxt-strings-re.md).
+func test_specials_zone_glyphs_follow_decoded_cp1252_codepoints() -> void:
+	# Retail indexes the .fnt slot by the TABLE BYTE (glyph = byte - 32)
+	# [orig: CGameFont_DrawText @ 0x6752c0]. OpenNova decodes table text to a
+	# Unicode Godot String first, so the FontFile boundary must expose that same
+	# slot under the byte's decoded cp1252 codepoint. Otherwise Godot substitutes
+	# a host-system glyph for shipped curly quotes and dashes (D-FNT-4).
 	var font := _fixture_font()
 	if font == null:
 		return
 	var fs := font.get_fixed_size()
 	var glyphs := font.get_glyph_list(0, Vector2i(fs, 0))
-	assert_true(glyphs.has(LEFT_QUOTE_BYTE),
-		"the .fnt DOES carry the curly-quote glyph — keyed at the byte value 0x93")
-	assert_false(glyphs.has(LEFT_QUOTE_CODEPOINT),
-		"…but nothing is keyed at the decoded U+201C (today's behavior, pinned)")
+	assert_false(glyphs.has(LEFT_QUOTE_BYTE),
+		"a defined cp1252 special is not exposed as the raw C1-control codepoint")
+	assert_true(glyphs.has(LEFT_QUOTE_CODEPOINT),
+		"byte 0x93's .fnt slot is exposed at its decoded U+201C codepoint")
+	assert_false(glyphs.has(DELETE_CONTROL_CODEPOINT),
+		"retail control byte 0x7F remains non-printing")
+	assert_false(glyphs.has(EURO_CODEPOINT),
+		"retail control byte 0x80 does not expose a Euro glyph")
+	assert_false(glyphs.has(UNDEFINED_81_CONTROL_CODEPOINT),
+		"retail control byte 0x81 remains non-printing")
+	assert_false(font.is_allow_system_fallback(),
+		"retail bitmap fonts never substitute glyphs from a host-system face")
 
-	# The .fnt slot renders with its own metric when addressed by byte
-	# (advance = rect width + shadow_offset - 1: 10 + 0 - 1 in this fixture)…
-	assert_eq(font.get_string_size(String.chr(LEFT_QUOTE_BYTE), HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x, 9.0,
-		"the .fnt curly-quote slot renders with the .fnt metric when addressed by byte")
-	# …while the decoded codepoint can only resolve outside the .fnt: the view
-	# leaves Godot's system-font fallback on, so the substitution is host-font
-	# dependent (today's behavior, pinned at the mechanism).
-	assert_true(font.is_allow_system_fallback(),
-		"the .fnt view leaves system-font fallback on — decoded specials draw host glyphs, not the .fnt's")
+	# The decoded codepoint must retain the source slot's own metric (advance =
+	# rect width + shadow_offset - 1: 10 + 0 - 1 in this fixture). This proves
+	# the engine draw resolves the bitmap font, not a host fallback face.
+	assert_eq(font.get_string_size(String.chr(LEFT_QUOTE_CODEPOINT), HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x, 9.0,
+		"decoded U+201C renders with byte 0x93's retail .fnt metric")

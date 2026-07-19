@@ -67,7 +67,7 @@ behavior is summarized and cited.
 | Credits (CBIN) | [`credits/cbin-re.md`](credits/cbin-re.md) | partial (PAR-R5: codec magic/header/ROL32-XOR cipher MATCHING vs retail `@0x75e348`; markup + read-path NEEDS-RE) |
 | Audio | [`audio/mus-sbf-re.md`](audio/mus-sbf-re.md) | landed |
 | Environment | [`env/env-tod-re.md`](env/env-tod-re.md) | landed |
-| Fonts | [`fonts/fnt-re.md`](fonts/fnt-re.md) | landed (PAR-R4 audit: the `.fnt` format + load contract, D-FNT-1..3) |
+| Fonts | [`fonts/fnt-re.md`](fonts/fnt-re.md) | landed (PAR-R4 audit: the `.fnt` format + load contract, D-FNT-1..4; cp1252 glyph mapping fixed 2026-07-19) |
 | Foliage | [`foliage/foliage-re.md`](foliage/foliage-re.md) | landed (fresh 2026-07-13 re-grill and replacement: ported detail/MODEL tier semantics, separate flat-detail and sector-routed MODEL authored-map gates, all-surface LOD0 geometry, `:fd`, shaders, static `.til` RGB/tint at the pre-wind coordinate, persistent LRU/1000-entry cache cadence, identity/eviction order, and matching shadow-off for retail's dead flag; D-FOLIAGE-7/-9/-10 bound the general page/cache + ordered RT producer, visibility membership, and host draw order/reflection) |
 | Tiles | [`tiles/til-re.md`](tiles/til-re.md) | landed (PAR-R3 audit: overlay/atlas/flip-rotate MATCHING vs retail `@0x60df0d`/`@0x604700`, D-TIL-1 outline) |
 | Importer | [`importer/importer-audit.md`](importer/importer-audit.md) | landed (PAR-R6: tracked-by-composition — no independent parity surface, composes RE'd `libs` via `pyopennova`) |
