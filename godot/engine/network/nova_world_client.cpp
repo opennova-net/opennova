@@ -527,6 +527,17 @@ void NovaWorldClient::poll_session() {
 		}
 		sync_session_state();
 	}
+
+	// Retail sends ClientConnected from its session-periodic update after the
+	// ServerSessionInit handler has completed, never as the 0x82 synchronous
+	// reply. Keep this after the receive drain so the portable state machine sees
+	// the established connection before the tick. [orig:
+	// CNapiGameSession_ProcessPeriodicUpdate @ 0x4d4400]
+	std::vector<std::vector<uint8_t>> periodic;
+	session_->process_periodic_update(periodic);
+	for (const auto &dg : periodic) {
+		send_nw_datagram(dg);
+	}
 }
 
 // Map the libs-side session state onto our public State + signals. CONNECTED

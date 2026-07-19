@@ -23,7 +23,7 @@ namespace opennova {
 //   <- ServerHello (0x81)            : learn host key `hk`
 //   ClientAuth (0x42)                : hk echoed, ck = client key, client scrk
 //   <- ServerAuth (0x82)             : learn server key `sk` + server scrk (cr==1)
-//   ClientConnected (0x43)           : begin the lobby verify handshake
+//   process_periodic_update() -> ClientConnected (0x43): begin lobby verification
 //   <- ServerStartVerify (0x83)
 //   ClientRequestVerifyResult (0x43)
 //   <- ServerVerifyResult (0x83)     : Success=1 -> Verified (lobby-ready)
@@ -139,6 +139,14 @@ public:
 	bool handle_datagram(const uint8_t *data, size_t len,
 	                     std::vector<std::vector<uint8_t>> &out);
 
+	// Run one session-periodic update after the caller has drained inbound
+	// datagrams. Once ServerSessionInit has established the NP connection and
+	// moved the session to Verifying, the first update emits ClientConnected;
+	// later updates do not repeat it. Keeping this boundary explicit matches
+	// retail's conn_state==5 && session_state==2 timing instead of replying
+	// synchronously from handle_datagram().
+	void process_periodic_update(std::vector<std::vector<uint8_t>> &out);
+
 	// Build a keep-alive: a header-only 0x43 with no inner messages (advances
 	// our seq, acks the peer). Valid once Verified.
 	std::vector<uint8_t> build_heartbeat();
@@ -183,8 +191,7 @@ private:
 
 	void on_server_hello(const std::vector<uint8_t> &body,
 	                     std::vector<std::vector<uint8_t>> &out);
-	void on_server_auth(const std::vector<uint8_t> &body,
-	                    std::vector<std::vector<uint8_t>> &out);
+	void on_server_auth(const std::vector<uint8_t> &body);
 	void on_server_protocol_message(const std::vector<uint8_t> &body,
 	                                std::vector<std::vector<uint8_t>> &out);
 	void dispatch_server_container(const NapiMessage &container,
@@ -205,6 +212,7 @@ private:
 
 	// The 0-default is deliberately preserved (start() resets it to 1 — see Risk #1 / capture frame 9739).
 	SessionSequencing seq_{0, 0}; // outbound seq + last inbound ack [ADR 0013 shared framing]
+	bool sent_client_connected_ = false;
 	bool sent_verify_request_ = false;
 	ProtocolReassemblyState reassembly_;
 };

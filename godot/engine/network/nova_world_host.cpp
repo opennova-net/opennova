@@ -344,6 +344,15 @@ void NovaWorldHost::poll_session() {
 		}
 		sync_session_state();
 	}
+
+	// Match the retail session boundary: ClientConnected is a one-shot from the
+	// periodic update after ServerSessionInit, not a synchronous 0x82 reply.
+	// [orig: CNapiGameSession_ProcessPeriodicUpdate @ 0x4d4400]
+	std::vector<std::vector<uint8_t>> periodic;
+	session_->process_periodic_update(periodic);
+	for (const auto &dg : periodic) {
+		send_nw_datagram(dg);
+	}
 }
 
 void NovaWorldHost::sync_session_state() {

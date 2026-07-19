@@ -1,9 +1,10 @@
 // Phase 1 (ADR 0010) — drive the Godot-free ClientSession state machine
 // through the full session handshake against apps/novaworld_server's own
 // parsers/builders, in-process (no sockets — deterministic). Proves the two
-// Phase 1 fixes end to end:
+// Phase 1 fixes and the D-NET-21 timing closure end to end:
 //   1. ServerHello.hk is parsed and ECHOED in ClientAuth.hk (was hardcoded 0).
-//   2. The 0x83 ServerProtocolMessage handler decodes the lobby stream and
+//   2. ClientConnected waits for the retail session-periodic boundary.
+//   3. The 0x83 ServerProtocolMessage handler decodes the lobby stream and
 //      runs the verify handshake to ServerVerifyResult -> Verified.
 //
 // The "server" here is a minimal responder using the real library functions
@@ -365,15 +366,23 @@ int main() {
 	expect(!server.client_scrk.empty(), "server captured the client SCRK");
 	expect(!s_auth.empty(), "ServerAuth datagram non-empty");
 
-	// 4) ServerAuth -> client transitions to Verifying + emits ClientConnected.
+	// 4) ServerAuth -> client transitions to Verifying but emits nothing yet.
+	// Retail sends ClientConnected only from the next periodic update after the
+	// SessionInit handler established conn_state==5 && session_state==2.
+	// [orig: CNapiGameSession_ProcessPeriodicUpdate @ 0x4d4400]
 	out.clear();
 	expect(client.handle_datagram(s_auth.data(), s_auth.size(), out),
 	       "client handles ServerAuth");
 	expect(client.state() == ClientSession::State::Verifying, "client in Verifying after ServerAuth");
 	expect(client.server_key() == server.server_sk, "client learned server SK");
 	expect(client.server_scrk() == server.server_scrk, "client learned server SCRK");
-	if (!expect(out.size() == 1, "ServerAuth yields exactly one reply (ClientConnected)")) return 1;
+	if (!expect(out.empty(), "ServerAuth has no synchronous ClientConnected reply")) return 1;
+	client.process_periodic_update(out);
+	if (!expect(out.size() == 1, "next periodic update emits ClientConnected")) return 1;
 	auto d_connected = out[0];
+	std::vector<std::vector<uint8_t>> duplicate_periodic;
+	client.process_periodic_update(duplicate_periodic);
+	expect(duplicate_periodic.empty(), "later periodic updates do not repeat ClientConnected");
 
 	// 5) ServerStartVerify -> client emits ClientRequestVerifyResult.
 	auto s_start_verify = server.respond(d_connected);
@@ -511,6 +520,8 @@ int main() {
 		o2.clear();
 		expect(client2.handle_datagram(sa2.data(), sa2.size(), o2),
 		       "D-NET-20 flow: ServerAuth handled");
+		expect(o2.empty(), "D-NET-20 flow: ServerAuth has no synchronous reply");
+		client2.process_periodic_update(o2);
 		auto sv2 = server2.respond(o2[0]);
 		o2.clear();
 		expect(client2.handle_datagram(sv2.data(), sv2.size(), o2),
