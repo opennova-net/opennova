@@ -772,6 +772,40 @@ void test_recoil_effect_leg() {
     CHECK(casing_tick - fired_tick >= 60); // the bolt-work delay carried the eject
 }
 
+void test_switch_completion_signal() {
+    // SWITCHFROM and SWITCHRANK reach the pending-slot swap directly in their
+    // handlers rather than through FinishActivePhase. The caller needs a distinct,
+    // one-tick signal for that inventory handoff.
+    WeaponFsmActionRow rows[2];
+    set_row(rows[0], "switchfrom", "", 0, 1);
+    set_row(rows[1], "switchrank", "", 0, 0);
+    WeaponFsmDef def;
+    weapon_fsm_bake(rows, 2, clip_resolves, clip_seconds, nullptr, def);
+    WeaponFsmInputs in;
+
+    WeaponSlotState holster;
+    holster.phase = weapon_phase::kDone;
+    weapon_fsm_queue_switch_from(holster);
+    int holster_completions = 0;
+    for (int t = 0; t < 80; ++t) {
+        WeaponFsmEvents ev;
+        weapon_fsm_tick(def, holster, in, ev);
+        if (ev.switch_completed) {
+            ++holster_completions;
+            CHECK(ev.action_finished == -1);
+        }
+    }
+    CHECK(holster_completions == 1);
+
+    WeaponSlotState rank;
+    rank.phase = weapon_phase::kDone;
+    weapon_fsm_queue_switch_rank(rank);
+    WeaponFsmEvents ev;
+    weapon_fsm_tick(def, rank, in, ev);
+    CHECK(ev.switch_completed);
+    CHECK(ev.action_finished == -1);
+}
+
 } // namespace
 
 int main() {
@@ -799,6 +833,7 @@ int main() {
     test_keep_scope_reload_class();
     test_non_local_recoil_makes_no_decision();
     test_recoil_effect_leg();
+    test_switch_completion_signal();
     if (failures == 0) std::printf("weapon_fsm_test: all passed\n");
     return failures == 0 ? 0 : 1;
 }

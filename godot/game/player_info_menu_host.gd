@@ -36,6 +36,7 @@ var _menu: Node                         # the built NovaMnuMenu (typed Node: onl
 var _root: NovaResourceRoot
 var _db: NovaAvatarDatabase
 var _weapons: NovaWeaponDatabase     # weapon.def loadout table (PRIMARY/SECONDARY/ACCESSORY)
+var _slot_rows: Dictionary = {}         # control name -> row-aligned weapon transport dicts
 var _team := 0                          # 0 = blue/good, 1 = red/evil (SIDE_BLUE default CHECKED)
 var _nat_db_index: Array[int] = []      # NATIONALITY visible row -> nationality DB index
 var _sel_nat := -1
@@ -108,6 +109,15 @@ func _display_name(key: String) -> String:
 
 # --- Loadout (weapon slot lists) ----------------------------------------------
 
+## Inject a weapon database for tests or another host-owned resource mount. Keeping
+## this as a public seam lets callers exercise the same menu population path without
+## reaching into host internals.
+func set_weapon_database(weapons: NovaWeaponDatabase) -> void:
+	_weapons = weapons
+	if _menu != null:
+		_populate_loadout()
+
+
 # Load weapon.def into the loadout table (best-effort; absent -> empty slot lists).
 func _ensure_weapons() -> void:
 	if _weapons != null or _root == null:
@@ -136,10 +146,27 @@ func _fill_weapon_slot(control: String, slot: int, class_mask: int, team_mask: i
 	if combo == null:
 		return
 	var rows := PackedStringArray()
+	var defs: Array[Dictionary] = []
 	rows.append(_menu_text("NONE", "None"))  # NONE at index 0 [orig: @ 0x560430]
+	defs.append({})
 	for w in _weapons.get_slot_weapons(slot, class_mask, team_mask):
 		rows.append(_weapon_label(w))
+		defs.append(w)
+	_slot_rows[control] = defs
 	_set_combo_items(combo, rows)
+
+
+# Return the selected weapon.def transport row for a loadout control. NONE and an
+# absent control both resolve to an empty dictionary.
+func _selected_weapon(control: String) -> Dictionary:
+	var combo := _combo(control)
+	var defs: Array = _slot_rows.get(control, [])
+	if combo == null:
+		return {}
+	var row := combo.get_selected()
+	if row < 0 or row >= defs.size():
+		return {}
+	return (defs[row] as Dictionary).duplicate(true)
 
 
 # Weapon display name = loadout_menu_textid resolved in gametext's "WepDes" section, else the
@@ -365,7 +392,7 @@ func _set_team(team: int) -> void:
 func snapshot() -> Dictionary:
 	var combo := _combo("COMBO_LIST")
 	var voice := _combo("PLAYERVOICE")
-	return {
+	var profile := {
 		"name": _edit_text("PLAYERNAME"),
 		"team": _team,
 		"nationality": _sel_nat,
@@ -373,6 +400,25 @@ func snapshot() -> Dictionary:
 		"combo": combo.get_selected() if combo != null else -1,
 		"voice": voice.get_selected() if voice != null else -1,
 	}
+	var class_combo := _combo("PLAYERCLASS")
+	if class_combo != null:
+		var class_value := class_combo.get_selected_value()
+		profile["player_class"] = int(class_value) if class_value.is_valid_int() else 0
+	# Missing weapon.def means there was no loadout choice to commit. Keep that
+	# distinct from a loaded screen whose three selected rows are explicitly NONE.
+	if _weapons != null and _weapons.is_loaded():
+		var primary := _selected_weapon("PRIMARY")
+		var secondary := _selected_weapon("SECONDARY")
+		var accessory := _selected_weapon("ACCESSORY")
+		profile.merge({
+			"primary": String(primary.get("name", "")),
+			"primary_clips": -1,
+			"secondary": String(secondary.get("name", "")),
+			"secondary_clips": -1,
+			"accessory": String(accessory.get("name", "")),
+			"accessory_clips": -1,
+		})
+	return profile
 
 
 func commit() -> void:

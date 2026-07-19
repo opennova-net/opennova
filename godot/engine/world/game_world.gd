@@ -151,6 +151,7 @@ var _particles_hidden := false
 var _particle_debug := false
 var _playable := true
 var _host_config: Dictionary = {}  # set by load_mission_as_host; consumed once by _start_runtime
+var _local_player_spawn_loadout: Dictionary = {}
 var _perf_tick_us: int = 0
 var _perf_foliage_us: int = 0
 var _perf_runtime_us: int = 0
@@ -162,6 +163,14 @@ var _perf_audio_us: int = 0
 ## returns to the game's settings-driven mount.
 func set_resource_root(root: NovaResourceRoot) -> void:
 	_injected_root = root
+
+
+## Configure the local player's profile for the next mission runtime start. The
+## value is consumed once the runtime exists (or discarded by unload after a
+## failed/abandoned load). An empty dictionary preserves the historical fallback;
+## a profile carrying empty slot names explicitly requests an all-NONE kit.
+func set_local_player_spawn_loadout(loadout: Dictionary) -> void:
+	_local_player_spawn_loadout = loadout.duplicate(true)
 
 
 func set_playable(enabled: bool) -> void:
@@ -595,6 +604,7 @@ func get_mission_stats() -> Dictionary:
 func unload() -> void:
 	_loaded = false
 	_host_config = {}
+	_local_player_spawn_loadout = {}
 	_clear_mission_tile_info()
 	_restore_idle_frame_clear_color()
 	var container := get_node_or_null(NodePath(MissionObjectPlacer.CONTAINER_NAME))
@@ -1058,6 +1068,60 @@ func set_local_player_weapon_by_name(weapon_name: String) -> bool:
 	if sim != null:
 		sim.set_local_player_weapon(_local_weapon_dict, {})
 	return true
+
+
+func _apply_local_player_spawn_loadout() -> void:
+	var loadout := _local_player_spawn_loadout
+	_local_player_spawn_loadout = {}
+	var sim := get_sim()
+	if sim == null:
+		return
+	var has_loadout := false
+	for slot_key in ["primary", "secondary", "accessory"]:
+		if loadout.has(slot_key):
+			has_loadout = true
+			break
+	if loadout.has("player_class"):
+		sim.set_local_player_class(int(loadout.get("player_class", 0)))
+	# Mission-authored kits outrank the profile selection. Unlike the inventory
+	# itself, this source bit stays false for load_weapon_table's WPN_M4AUTO
+	# fallback, so a real default weapon cannot masquerade as mission policy.
+	if bool(sim.has_explicit_spawn_loadout()):
+		_sync_local_player_weapon_from_inventory(sim)
+		return
+	if not has_loadout:
+		return
+	var kit: Array[Dictionary] = []
+	for slot_key in ["primary", "secondary", "accessory"]:
+		var weapon_name := String(loadout.get(slot_key, ""))
+		if weapon_name.is_empty():
+			continue
+		kit.append({
+			"name": weapon_name,
+			"ammo_primary": int(loadout.get(slot_key + "_clips", -1)),
+			"ammo_secondary": -1,
+			"flags": -1,
+		})
+	if not bool(sim.apply_local_player_loadout(kit, int(loadout.get("player_class", 0)))):
+		return
+	if kit.is_empty():
+		clear_local_player_weapon()
+		return
+	_sync_local_player_weapon_from_inventory(sim)
+
+
+func _sync_local_player_weapon_from_inventory(sim: NovaSimulation) -> void:
+	var inventory: Dictionary = sim.get_local_player_inventory()
+	if not bool(inventory.get("valid", false)):
+		return
+	var equipped := String(inventory.get("equipped_name", ""))
+	# A syntactically nonempty kit can still be rejected by mission/class rules.
+	# Keep the presentation aligned with the resulting authoritative inventory.
+	if equipped.is_empty():
+		clear_local_player_weapon()
+		return
+	set_local_player_weapon_by_name(equipped)
+
 
 ## Armory NONE: clear the equipped render/FSM state instead of falling back to the
 ## pre-armory default model on the next frame.
@@ -1587,6 +1651,7 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> void:
 	# register_effect_anchor and swaps husk models via the placer.
 	opts["game_world"] = self
 	_runtime.setup(mission, container, opts)
+	_apply_local_player_spawn_loadout()
 	_runtime.set_presentation_time_ms(_panm_clock.time_ms)
 	if _runtime.get_sim() == null:
 		push_warning("GameWorld: failed to start mission runtime")

@@ -873,6 +873,14 @@ func test_armory_reads_and_clears_authoritative_local_loadout() -> void:
 	assert_eq(sim.get_local_player_team(), 2, "spawned player exposes the assigned red team")
 	assert_eq(sim.get_local_player_weapon_name(), "WPN_M4AUTO",
 		"weapon-table load exposes the entity's stamped default instead of the FP fallback")
+	assert_false(sim.has_explicit_spawn_loadout(),
+		"the engine's WPN_M4AUTO fallback is not an authored spawn kit")
+	assert_true(sim.set_local_player_class(7),
+		"profile class can commit without replacing the current weapon kit")
+	assert_eq(sim.get_local_player_class(), 7)
+	sim.set_spawn_loadout([{"name": "WPN_M4AUTO"}], true)
+	assert_true(sim.has_explicit_spawn_loadout(),
+		"a supplied mission/profile kit is distinguishable from the fallback")
 
 	assert_true(sim.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 6))
 	assert_eq(sim.get_local_player_class(), 6, "accepted class is authoritative on reopen")
@@ -883,6 +891,89 @@ func test_armory_reads_and_clears_authoritative_local_loadout() -> void:
 	assert_true(sim.apply_local_player_loadout([], 9), "the all-NONE kit is a valid apply")
 	assert_eq(sim.get_local_player_class(), 9, "NONE still commits the selected class")
 	assert_eq(sim.get_local_player_weapon_name(), "", "NONE clears the equipped AdmDef")
+	sim.free()
+
+
+func test_loadout_weapon_category_switch_changes_equipped_weapon() -> void:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 2))
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/def")), OK)
+	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
+
+	assert_true(sim.apply_local_player_loadout([
+		{"name": "WPN_M4AUTO"},
+		{"name": "WPN_colt45"},
+	], 8))
+	var weapons := NovaWeaponDatabase.new()
+	assert_eq(weapons.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/weapon.def")), OK)
+	var primary_index := weapons.find_weapon("WPN_M4AUTO")
+	assert_gte(primary_index, 0)
+	sim.set_local_player_weapon(weapons.get_weapon(primary_index), {})
+	assert_eq(sim.get_local_player_weapon_name(), "WPN_M4AUTO",
+		"the primary is equipped before switching")
+	sim.drain_local_player_weapon_events()
+
+	# The retail '2' binding requests category 2 (secondary). Let the outgoing
+	# weapon's SWITCHFROM action complete, then observe the committed slot.
+	sim.request_local_player_weapon_category(2)
+	for _tick in range(120):
+		sim.step()
+		if sim.get_local_player_weapon_name() == "WPN_colt45":
+			break
+	assert_eq(sim.get_local_player_weapon_name(), "WPN_colt45",
+		"switching to a secondary in the accepted loadout changes the equipped weapon")
+	sim.free()
+
+
+func test_weapon_switch_requested_during_draw_commits_without_a_second_press() -> void:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 2))
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/def")), OK)
+	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
+	assert_true(sim.apply_local_player_loadout([
+		{"name": "WPN_M4AUTO"},
+		{"name": "WPN_colt45"},
+	], 8))
+
+	var weapons := NovaWeaponDatabase.new()
+	assert_eq(weapons.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/weapon.def")), OK)
+	var primary_index := weapons.find_weapon("WPN_M4AUTO")
+	var secondary_index := weapons.find_weapon("WPN_colt45")
+	assert_gte(primary_index, 0)
+	assert_gte(secondary_index, 0)
+	sim.set_local_player_weapon(weapons.get_weapon(primary_index), {})
+
+	# First switch normally, then mirror the LocalPlayerHost installing the new
+	# weapon definition. Its first tick enters SWITCHTO (the draw animation).
+	sim.request_local_player_weapon_category(2)
+	for _tick in range(120):
+		sim.step()
+		if sim.get_local_player_weapon_name() == "WPN_colt45":
+			break
+	assert_eq(sim.get_local_player_weapon_name(), "WPN_colt45")
+	sim.set_local_player_weapon(weapons.get_weapon(secondary_index), {})
+	sim.step()
+	assert_eq(int(sim.get_local_player_weapon_state().get("current", -1)), 6,
+		"the newly equipped secondary is drawing through SWITCHTO")
+
+	# One press during that draw must be remembered and committed after it settles.
+	sim.request_local_player_weapon_category(3)
+	for _tick in range(120):
+		sim.step()
+		if sim.get_local_player_weapon_name() == "WPN_M4AUTO":
+			break
+	assert_eq(sim.get_local_player_weapon_name(), "WPN_M4AUTO",
+		"a switch requested during draw does not require a second press")
 	sim.free()
 
 

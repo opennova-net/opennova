@@ -27,6 +27,42 @@ const BAKED_TERRAIN_FILES := [
 	"Dvxi5_dc2.tga", "Dvxi5_dc3.tga", "Dvxi5_dm.tga", "Dvxi5_dm2.tga",
 	"Dvxi5_dmd.tga", "Dvxi5_f.pcx", "Dvxi5_m.pcx", "TRNTILE10.TGA",
 ]
+# This lifecycle-only armory deliberately resolves the engine fallback as well
+# as the selected profile weapon. The regression must fail if GameWorld mistakes
+# a nonempty WPN_M4AUTO fallback inventory for a mission-authored kit.
+const LIFECYCLE_WEAPON_DEF := """
+ammoclass_max_carry CLASS_556MM 1000
+
+weapon "WPN_AK47AUTO"
+	category 1
+	rank 0
+	statid 102
+	ammo AM_556MM
+	clip 30
+	maxclips 7
+	gfx1 AK_TEST_FIRST
+end
+
+weapon "WPN_M4AUTO"
+	category 1
+	rank 0
+	statid 101
+	ammo AM_556MM
+	clip 30
+	maxclips 7
+	gfx1 M4AUTO_TEST_FIRST
+end
+
+weapon "WPN_M4"
+	category 1
+	rank 0
+	statid 100
+	ammo AM_556MM
+	clip 30
+	maxclips 7
+	gfx1 M4_TEST_FIRST
+end
+"""
 const ISOLATED_ENV := [
 	"NW_REPLAY", "NW_SP_MISSION", "NW_LAN_HOST", "NW_LAN_JOIN",
 ]
@@ -196,6 +232,38 @@ func test_debug_overlay_suspends_input_without_stopping_the_world() -> void:
 			"closing F3 restores the gameplay-input policy")
 
 
+func test_player_info_loadout_is_equipped_on_initial_spawn() -> void:
+	_shell = await _make_shell()
+	if _shell == null:
+		return
+	var world = _shell.get_node("World")
+	var menu_host = _shell.get_node("MenuLayer/MenuHost")
+	_shell.set_local_player_profile({
+		"player_class": 5,
+		"primary": "WPN_M4",
+		"primary_clips": -1,
+		"secondary": "",
+		"secondary_clips": -1,
+		"accessory": "",
+		"accessory_clips": -1,
+	})
+
+	menu_host.start_requested.emit("mnml.bms")
+	await _wait_for_world_load(world)
+	await get_tree().process_frame
+
+	assert_eq(world.local_player_weapon_name(), "WPN_M4",
+		"the first viewmodel uses the primary selected in PLAYER_INFO")
+	var viewmodel_def: PlayerViewmodelDef = world.local_player_viewmodel_def()
+	assert_not_null(viewmodel_def)
+	assert_eq(viewmodel_def.weapon_name, "WPN_M4")
+	assert_eq(viewmodel_def.gfx1, "M4_TEST_FIRST",
+		"the selected weapon's first-person model replaces the AK fallback")
+	var inventory: Dictionary = world.get_sim().get_local_player_inventory()
+	assert_eq(String(inventory.get("equipped_name", "")), "WPN_M4",
+		"the spawned simulation equips the same selected primary")
+
+
 func _make_shell():
 	_temp_dir = OS.get_cache_dir().path_join(
 			"opennova_main_game_lifecycle_%d" % Time.get_ticks_usec())
@@ -240,6 +308,8 @@ func _fixture_entries(filenames: Array) -> Array:
 		if filename == "mnml.trn":
 			source = BAKED_TERRAIN_DIR.path_join("Dvxi5.trn")
 		var bytes := FileAccess.get_file_as_bytes(source)
+		if filename == "weapon.def":
+			bytes = LIFECYCLE_WEAPON_DEF.to_utf8_buffer()
 		assert_false(bytes.is_empty(), "%s is available in the committed fixture" % filename)
 		entries.append({"name": filename, "bytes": bytes})
 	return entries

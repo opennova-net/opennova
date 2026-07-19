@@ -287,6 +287,46 @@ func test_loadout_class_filter_includes_and_excludes() -> void:
 	assert_false(_combo_texts(primary).has("WPN_M4AUTO"), "M4 is hidden for Sniper")
 
 
+func test_snapshot_carries_the_selected_loadout_weapon_ids() -> void:
+	var host := PlayerInfoMenuHost.new()
+	var wdb := _load_weapons()
+	host.set_weapon_database(wdb)
+	var menu := _make_loadout_menu()
+	host.on_menu_built(menu, "player.mnu", "PLAYER_INFO", null)
+
+	var primary_defs := wdb.get_slot_weapons(
+			NovaWeaponDatabase.SLOT_PRIMARY, 1, 2)
+	var selected_primary := ""
+	var selected_row := -1
+	for i in primary_defs.size():
+		var weapon: Dictionary = primary_defs[i]
+		if String(weapon.get("name", "")).nocasecmp_to("WPN_M4AUTO") == 0:
+			selected_primary = String(weapon.get("name", ""))
+			selected_row = i + 1 # row 0 is NONE
+			break
+	assert_false(selected_primary.is_empty(), "the fixture offers M4AUTO for medic/blue")
+	var primary := menu.find_child("PRIMARY", true, false) as NovaMnuCombo
+	primary.select_silent(selected_row)
+
+	var profile := host.snapshot()
+	assert_eq(String(profile.get("primary", "")), selected_primary,
+		"PLAYER_INFO ACCEPT preserves the selected primary's weapon.def id")
+	assert_eq(int(profile.get("player_class", 0)), 5,
+		"the selected class travels with the spawn loadout")
+
+
+func test_snapshot_carries_class_without_a_weapon_database() -> void:
+	var host := PlayerInfoMenuHost.new()
+	var menu := _make_loadout_menu()
+	host.on_menu_built(menu, "player.mnu", "PLAYER_INFO", null)
+
+	var profile := host.snapshot()
+	assert_eq(int(profile.get("player_class", 0)), 5,
+		"class selection does not depend on weapon.def loading")
+	assert_false(profile.has("primary"),
+		"missing weapon.def remains distinct from an explicit all-NONE kit")
+
+
 # End-to-end against the REAL player.mnu (built controls + nesting), so the loadout fills
 # through the same control names/tree the runtime uses, not just a stand-in. Runs in GUT so
 # the autoloads (NovaStrings) and the GDExtension are loaded.

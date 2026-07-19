@@ -478,12 +478,18 @@ func _wire_host() -> void:
 	_player_info_host.avatar_chosen.connect(_on_avatar_chosen)
 
 
-# The player pressed OK on the PLAYER_INFO screen. The on-disk player-profile format
-# and the in-world soldier appearance (D-PLAYERINFO-1) are not yet ported, so we hold
-# the chosen selection in memory as the seam for those later phases rather than invent
-# a profile format. See docs/playerinfo/avatars-re.md (ACCEPT / commit, D-PLAYERINFO-9).
+# Install the in-memory local-player profile used by the next mission spawn. This
+# public seam keeps lifecycle tests and future persistence adapters out of shell
+# internals.
+func set_local_player_profile(profile: Dictionary) -> void:
+	_chosen_avatar = profile.duplicate(true)
+
+
+# The player pressed OK on the PLAYER_INFO screen. On-disk persistence and the
+# in-world soldier appearance remain later phases; the selected loadout now travels
+# through the existing spawn-kit seam.
 func _on_avatar_chosen(profile: Dictionary) -> void:
-	_chosen_avatar = profile
+	set_local_player_profile(profile)
 
 
 func _on_crosshair_style_changed(style: int) -> void:
@@ -759,6 +765,7 @@ func _start_world_load(load_info: Dictionary, operation: Callable) -> void:
 	_world_load_pending = true
 	_world_load_request_id += 1
 	var request_id := _world_load_request_id
+	_world.set_local_player_spawn_loadout(_chosen_avatar)
 	_begin_world_load(load_info.duplicate(true))
 	_run_world_load(request_id, operation)
 

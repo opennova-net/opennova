@@ -405,6 +405,7 @@ void NovaSimulation::reset_world() {
 	spawn_kit_set_ = false;
 	weapon_availability_.reset();
 	weapon_switch_in_flight_ = false;
+	weapon_switch_deferred_action_ = -1;
 	weapon_start_in_switchto_ = false;
 	world_ = std::make_unique<World>();
 	ai_ = std::make_unique<AiSystem>();
@@ -2321,6 +2322,14 @@ int NovaSimulation::get_weapon_availability(const String &p_weapon_name) const {
 	return weapon_availability_.value_for(idx);
 }
 
+bool NovaSimulation::set_local_player_class(int p_player_class) {
+	if (!world_ || p_player_class < 5 || p_player_class > 9) return false;
+	opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);
+	if (e == nullptr) return false;
+	e->player_class = static_cast<uint8_t>(p_player_class);
+	return true;
+}
+
 bool NovaSimulation::apply_local_player_loadout(const TypedArray<Dictionary> &p_kit,
                                                 int p_player_class) {
 	// The armory ACCEPT apply [orig: WeaponLoadout_ApplyFromBuffer @ 0x565cd0 offline
@@ -2418,6 +2427,7 @@ void NovaSimulation::rebuild_local_player_loadout(bool p_select_spawn_default) {
 	opennova::world::weapon_inventory_recalc_clips(table, local_inventory_);
 	local_inventory_valid_ = true;
 	weapon_switch_in_flight_ = false;
+	weapon_switch_deferred_action_ = -1;
 	if (!p_select_spawn_default) return;
 	const opennova::world::WeaponSwitchGates gates = local_weapon_switch_gates();
 	if (!opennova::world::weapon_select_slot(
@@ -2470,6 +2480,7 @@ void NovaSimulation::commit_pending_weapon_switch() {
 	// consumes g_pendingWeaponSlot; EquippedSlot swap + the equippedAdmIndex stamp
 	// @ 0x4dd727; the FP model re-resolve runs host-side off the event].
 	weapon_switch_in_flight_ = false;
+	weapon_switch_deferred_action_ = -1;
 	if (!world_ || !local_inventory_valid_) return;
 	opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);
 	if (e == nullptr) return;
@@ -2533,10 +2544,28 @@ void NovaSimulation::handle_weapon_switch_outcome(
 				break;
 			}
 			weapon_switch_in_flight_ = true;
-			if (p_out.same_category)
+			const int32_t action = p_out.same_category
+					? opennova::world::weapon_action::kSwitchRank
+					: opennova::world::weapon_action::kSwitchFrom;
+			if (weapon_slot_.current == opennova::world::weapon_action::kSwitchTo) {
+				// The witnessed writer refuses during SWITCHTO. Unlike the original
+				// dispatcher, this host supplies one press edge, so retain it beside
+				// the already-stamped pending combo and keep restoring next after
+				// SWITCHTO's delay-start initializer writes its resume action.
+				weapon_switch_deferred_action_ = action;
+				weapon_slot_.next = action;
+			} else if (weapon_slot_.next ==
+					opennova::world::weapon_action::kSwitchTo) {
+				// The draw is queued but has not entered yet. Preserve it; the
+				// post-tick latch below attaches the requested outgoing action.
+				weapon_switch_deferred_action_ = action;
+			} else if (p_out.same_category) {
+				weapon_switch_deferred_action_ = -1;
 				opennova::world::weapon_fsm_queue_switch_rank(weapon_slot_);
-			else
+			} else {
+				weapon_switch_deferred_action_ = -1;
 				opennova::world::weapon_fsm_queue_switch_from(weapon_slot_);
+			}
 			break;
 		}
 		default:
@@ -3041,12 +3070,16 @@ void NovaSimulation::_bind_methods() {
 	                     &NovaSimulation::apply_local_player_loadout);
 	ClassDB::bind_method(D_METHOD("set_spawn_loadout", "kit", "filter_by_availability"),
 	                     &NovaSimulation::set_spawn_loadout);
+	ClassDB::bind_method(D_METHOD("has_explicit_spawn_loadout"),
+	                     &NovaSimulation::has_explicit_spawn_loadout);
 	ClassDB::bind_method(D_METHOD("set_weapon_availability", "pairs"),
 	                     &NovaSimulation::set_weapon_availability);
 	ClassDB::bind_method(D_METHOD("get_weapon_availability", "weapon_name"),
 	                     &NovaSimulation::get_weapon_availability);
 	ClassDB::bind_method(D_METHOD("respawn_local_player_loadout"),
 	                     &NovaSimulation::respawn_local_player_loadout);
+	ClassDB::bind_method(D_METHOD("set_local_player_class", "player_class"),
+	                     &NovaSimulation::set_local_player_class);
 	ClassDB::bind_method(D_METHOD("request_local_player_weapon_category", "category"),
 	                     &NovaSimulation::request_local_player_weapon_category);
 	ClassDB::bind_method(D_METHOD("request_local_player_weapon_cycle", "direction"),
@@ -3887,6 +3920,8 @@ void NovaSimulation::set_local_player_weapon(const Dictionary &p_def,
 
 void NovaSimulation::clear_local_player_weapon() {
 	weapon_active_ = false;
+	weapon_switch_in_flight_ = false;
+	weapon_switch_deferred_action_ = -1;
 	pending_weapon_events_.clear();
 	weapon_fire_held_ = false;
 	weapon_fire_pressed_ = false;
@@ -4059,6 +4094,16 @@ void NovaSimulation::tick_local_player_weapon() {
 			!opennova::world::player_view_scope_ease_active(player_view_);
 	opennova::world::WeaponFsmEvents ev;
 	opennova::world::weapon_fsm_tick(weapon_def_, weapon_slot_, in, ev);
+	// SWITCHTO seeds next=prev at the end of its delay-start phase. Reapply the
+	// retained one-shot after every draw tick so its eventual transition performs
+	// the pending inventory handoff without requiring another key press.
+	if (weapon_switch_deferred_action_ >= 0) {
+		if (weapon_slot_.current == weapon_switch_deferred_action_) {
+			weapon_switch_deferred_action_ = -1;
+		} else {
+			weapon_slot_.next = weapon_switch_deferred_action_;
+		}
+	}
 	weapon_fire_pressed_ = false; // edges consume on the first tick of the frame
 	weapon_reload_pressed_ = false;
 	PendingWeaponEvent pending;
@@ -4270,11 +4315,9 @@ void NovaSimulation::tick_local_player_weapon() {
 						local_weapon_switch_gates()));
 			}
 		}
-		// A queued manual switch commits when the outgoing SWITCHFROM/SWITCHRANK
-		// completes [orig: the completion consumes g_pendingWeaponSlot].
-		if (weapon_switch_in_flight_ &&
-		    (ev.action_finished == opennova::world::weapon_action::kSwitchFrom ||
-		     ev.action_finished == opennova::world::weapon_action::kSwitchRank)) {
+		// A queued manual switch commits at the outgoing SWITCHFROM/SWITCHRANK
+		// swap seam [orig: the completion consumes g_pendingWeaponSlot].
+		if (weapon_switch_in_flight_ && ev.switch_completed) {
 			commit_pending_weapon_switch();
 		}
 	}
