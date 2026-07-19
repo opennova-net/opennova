@@ -204,6 +204,10 @@ struct WeaponFsmEvents {
                                    //  gated on the phase byte being 2 (ACTIVE) at entry;
                                    //  reached from WeaponAction_Fire @ 0x542d1a (per
                                    //  shot) and WeaponAction_Reload @ 0x54316e]
+    bool switch_completed = false;  // outgoing SWITCHFROM/SWITCHRANK reached its
+                                    // pending-slot commit seam. These handlers do
+                                    // not run ActionSlot_FinishActivePhase, so this
+                                    // is intentionally distinct from action_finished.
     int32_t action_effect = -1;    // slot id whose DIRECT effect leg fired this tick —
                                    // the recoil-row casing/smoke spawn at the arbiter
                                    // tick (counter reached 0 after delaystart). Emitted

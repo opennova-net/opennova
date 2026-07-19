@@ -376,6 +376,7 @@ void handler_switchfrom(const WeaponFsmDef &, const WeaponFsmAction &desc,
                                //  @ 0x543475..0x5434a3 is the weapon-switch seam]
         slot.counter = 0;
         slot.phase = weapon_phase::kDone;
+        out.switch_completed = true;
     }
 }
 
@@ -392,6 +393,7 @@ void handler_switchrank(const WeaponFsmDef &, const WeaponFsmAction &desc,
     slot.counter = desc.delay_end; // [orig: @ 0x543596]
     slot.next = weapon_action::kIdle;
     slot.phase = weapon_phase::kDone;
+    out.switch_completed = true;
 }
 
 // [orig: WeaponAction_ScopeUp @ 0x543290 / ..ScopeDown @ 0x543320] Timed one-shots —

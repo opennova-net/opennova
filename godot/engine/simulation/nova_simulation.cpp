@@ -4114,11 +4114,9 @@ void NovaSimulation::tick_local_player_weapon() {
 						local_weapon_switch_gates()));
 			}
 		}
-		// A queued manual switch commits when the outgoing SWITCHFROM/SWITCHRANK
-		// completes [orig: the completion consumes g_pendingWeaponSlot].
-		if (weapon_switch_in_flight_ &&
-		    (ev.action_finished == opennova::world::weapon_action::kSwitchFrom ||
-		     ev.action_finished == opennova::world::weapon_action::kSwitchRank)) {
+		// A queued manual switch commits at the outgoing SWITCHFROM/SWITCHRANK
+		// swap seam [orig: the completion consumes g_pendingWeaponSlot].
+		if (weapon_switch_in_flight_ && ev.switch_completed) {
 			commit_pending_weapon_switch();
 		}
 	}
