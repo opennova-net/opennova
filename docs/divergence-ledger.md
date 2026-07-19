@@ -677,7 +677,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 
 | Domain | OPEN | NEEDS-RE | WITNESSED-READY-DEFERRED | Domain open total | Closed rows still tabled |
 |---|---|---|---|---|---|
-| Net | 11 | 1 | 11 | 23 | 0 |
+| Net | 10 | 1 | 11 | 22 | 0 |
 | Environment | 0 | 0 | 3 | 3 | 4 |
 | World / AI + events | 31 | 1 | 6 | 38 | 16 |
 | UI (menu/ctrl/sound/playerinfo/HUD) | 14 | 1 | 7 | 22 | 6 |
@@ -694,7 +694,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Render — materials/state | 0 | 0 | 1 | 1 | 1 |
 | Render — draw order | 2 | 0 | 1 | 3 | 3 |
 | Render — lighting | 4 | 0 | 2 | 6 | 0 |
-| **Total** | **70** | **10** | **33** | **113** | 73 |
+| **Total** | **69** | **10** | **33** | **112** | 73 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-INF-20, D-NET-136, D-NET-64.
 
