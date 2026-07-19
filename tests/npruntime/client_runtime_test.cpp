@@ -20,6 +20,7 @@
 //      the host's own local view is no longer starved and anchors correctly.
 
 #include <npruntime/client_runtime.h>
+#include <npruntime/host_session.h>
 #include <npruntime/napi_np_connection.h>
 #include <npruntime/napi_np_protocol.h>
 #include <npruntime/server_spawn.h>
@@ -39,6 +40,7 @@
 #include <world/entity.h>
 #include <world/geom.h>
 #include <world/player_spawn.h>
+#include <world/vehicle_attach.h>
 #include <world/world.h>
 
 #include <cstddef>
@@ -301,10 +303,99 @@ bool run_host_as_client() {
 	return true;
 }
 
+// ---------------------------------------------------------------------------------------------------
+// (C) Production HostOwner startup: the host-local client must receive the load-time pool stream
+// before its first compact frame. A mounted pool-0 organic can precede its pool-1 ewep carrier in
+// registry order, while the no-callback carrier has no live 0x0A body. Its 0x0D spawn is therefore
+// the only faithful source for the carrier row used to lift the child's local compact pose.
+// ---------------------------------------------------------------------------------------------------
+bool run_host_startup_seeds_mounted_no_callback_carrier() {
+	w::World world;
+	world.registry.configure_pool(0, 16);
+	world.registry.configure_pool(1, 16);
+	w::AiSystem ai;
+	world.ai = &ai;
+
+	w::Entity infantry;
+	infantry.kind = w::EntityKind::Organic;
+	infantry.item_id = 5311; // US02 organic in the production Godot witness
+	infantry.net_class_code = static_cast<uint8_t>(EntityClass::Infantry);
+	const w::EntityHandle infantry_h = world.registry.spawn(0, infantry);
+	if (!expect(infantry_h.valid() && ai.attach(infantry_h) >= 0,
+	            "mounted startup fixture spawns pool-0 infantry first")) return false;
+
+	w::Entity gun;
+	gun.kind = w::EntityKind::Item;
+	gun.item_id = 1294; // B50Cal ewep
+	gun.position = {0.0f, 8.0f, 0.0f};
+	gun.yaw = 45;
+	gun.net_class_code = static_cast<uint8_t>(EntityClass::NoNetworkCallback);
+	w::Seat gunner;
+	gunner.type = w::SeatType::Gunner;
+	gunner.bone_index = 6; // B50Cal.3di USRP row 6 is the witnessed Usegun bone
+	gun.seats.push_back(gunner);
+	const w::EntityHandle gun_h = world.registry.spawn_from(1, 0, gun);
+	if (!expect(gun_h.valid() && gun_h.packed == 0x1000,
+	            "B50Cal occupies the first pool-1 carrier handle")) return false;
+	if (!expect(w::entity_process_vehicle_attach(world, infantry_h, gun_h, 6),
+	            "infantry attaches to the B50Cal gunner bone")) return false;
+	w::Entity *infantry_live = world.registry.get(infantry_h);
+	const w::Entity *gun_live = world.registry.get(gun_h);
+	if (!expect(infantry_live != nullptr && gun_live != nullptr,
+	            "mounted startup fixture entities resolve")) return false;
+	w::pose_mounted_occupant(*infantry_live, *gun_live, gun_live->seats[0]);
+
+	ns::LoopbackChannel host_loop;
+	np::HostOwner owner;
+	owner.host_loopback = &host_loop;
+	owner.ctx.world = &world;
+	np::HostConfig cfg;
+	cfg.config.server_name = "SINGLEPLAYERGAME";
+	cfg.config.max_players = 1;
+	cfg.socket_mode = np::SocketMode::Socketless;
+	cfg.serve_and_play = true;
+	np::start_host_session(owner, cfg);
+
+	// Match NovaSimulation's startup order: construct/install the client view after host bring-up,
+	// then fold the queued initial stream and first whole-world compact frame together.
+	np::Server_TickUpdate(owner.ctx);
+	np::ClientRuntime host_view(host_loop);
+	host_view.view().set_item_class_resolver([](uint16_t type_id) {
+		if (type_id == 0x14B9u) return EntityClass::Player;
+		if (type_id == 5311u) return EntityClass::Infantry;
+		if (type_id == 1294u) return EntityClass::NoNetworkCallback;
+		return EntityClass::Unknown;
+	});
+	host_view.Client_ProcessNetworkFrame();
+
+	const ns::ClientEntityState *carrier = host_view.view().state().find(gun_h.packed);
+	if (!expect(carrier != nullptr && carrier->type_id == 1294,
+	            "production host startup streams the B50Cal 0x0D carrier row")) return false;
+	if (!expect(carrier->x == w::to_fixed(gun_live->position.x) &&
+	                    carrier->y == w::to_fixed(gun_live->position.y) &&
+	                    carrier->z == w::to_fixed(gun_live->position.z),
+	            "host-local carrier row retains its absolute spawn pose")) return false;
+	const ns::ClientEntityState *child = host_view.view().state().find(infantry_h.packed);
+	if (!expect(child != nullptr && child->carrier_handle == gun_h.packed &&
+	                    child->mount_bone == 6,
+	            "mounted child compact retains its B50Cal carrier and raw Usegun bone"))
+		return false;
+	if (!expect(child->x == carrier->x && child->y == carrier->y && child->z == carrier->z,
+	            "host-local mounted child lifts through the load-time no-callback carrier")) return false;
+
+	const np::NapiNPConnection *self = nullptr;
+	for (const np::NapiNPConnection &conn : owner.ctx.np_protocol.connection_list)
+		if (conn.type == 2) self = &conn;
+	if (!expect(self != nullptr && self->burst.spawned && self->burst.entity_batch_count > 0,
+	            "host startup reaches in-match through the real initial-state burst")) return false;
+	return true;
+}
+
 } // namespace
 
 int main() {
-	const bool ok = run_roundtrip() && run_host_as_client();
+	const bool ok = run_roundtrip() && run_host_as_client() &&
+	                run_host_startup_seeds_mounted_no_callback_carrier();
 	std::fprintf(stderr, ok ? "OK\n" : "FAIL\n");
 	return ok ? 0 : 1;
 }

@@ -80,6 +80,17 @@ inline constexpr bool weapon_channel_masks_bone(int model_bone_index) {
     return false;
 }
 
+// Mounted overlay selection belongs to animation because it chooses which of the
+// retail body/aim/counter-lean matrices each skeletal class consumes.  World/host
+// layers translate their seat facts into this small input; rendering and collision
+// then call the same builder.
+// [orig: parentSlot 2/3/5 dispatch @ 0x4b1868..0x4b1ba9]
+enum class MountMode : uint8_t {
+    OnFoot = 0,
+    Seated,
+    Gunner,
+};
+
 // Compose the secondary weapon channel in the same space as the original's matrix
 // mask: FK both parent-local rotation poses, select PRIMARY or WEAPON per bone in
 // world space, then convert the complete mixed hierarchy back to parent-local. The
@@ -118,6 +129,12 @@ struct AimOverlayInputs {
     // entity Flags & 0x100000: the non-aim branch keeps even the arms on the body
     // matrix. Semantics unconfirmed (swim-family suspected); hosts pass false.
     bool arms_locked = false;
+    // The target item definition's authored phrase_set dword (+0x86c).  Validity is
+    // independent of its value because zero is a witnessed gunner configuration;
+    // an absent target definition must not silently select that branch.
+    MountMode mount_mode = MountMode::OnFoot;
+    bool mount_config_valid = false;
+    int32_t mount_config = 0;
 };
 
 struct AimOverlayAngles {
@@ -127,10 +144,11 @@ struct AimOverlayAngles {
 };
 
 // Compute the nine per-class overlay orientations from the entity state -- the exact
-// int32 BAM blends of the on-foot branches. Mounted-gunner / seated variants
-// (parentSlot 2/3/5, mount config def+0x86c) are NOT modeled yet: no host mounts the
-// local player. [orig: aim branch @ 0x4b1bbe, non-aim branch @ 0x4b1cf1, top-of-function
-// v142/v143/v144 builds @ 0x4b17ad..0x4b185c; docs section 14.3]
+// int32 BAM blends and mounted matrix-selection branches.  A Gunner with unknown
+// config deliberately preserves the existing on-foot result: retail always has a
+// target item definition, so only a valid +0x86c value may enter its config switch.
+// [orig: mounted @ 0x4b1868..0x4b1ba9; aim @ 0x4b1bbe; non-aim @ 0x4b1cf1;
+// top-of-function v142/v143/v144 @ 0x4b17ad..0x4b185c; docs section 14.3]
 void compute_aim_overlay_angles(const AimOverlayInputs &in,
                                 AimOverlayAngles out[kOverlayClassCount]);
 

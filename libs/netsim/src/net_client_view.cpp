@@ -101,6 +101,8 @@ void NetClientView::apply_organic_spawn(const std::vector<uint8_t> &body) {
 		es.y = rec.pos_y;
 		es.z = rec.pos_z;
 		es.yaw_byte = yaw_byte_from_bam(rec.orientation);
+		es.pitch_bam = 0; // organic spawn carries no entity+20/+24 Euler fields
+		es.roll_bam = 0;
 	}
 }
 
@@ -118,6 +120,8 @@ void NetClientView::apply_pool_spawn(const std::vector<uint8_t> &body) {
 		es.y = rec.pos_y;
 		es.z = rec.pos_z;
 		es.yaw_byte = yaw_byte_from_bam(rec.euler_z);
+		es.pitch_bam = rec.euler_x;
+		es.roll_bam = rec.euler_y;
 	}
 }
 
@@ -136,6 +140,8 @@ void NetClientView::apply_static_batch(const std::vector<uint8_t> &body) {
 		es.y = rec.pos_y;
 		es.z = rec.pos_z;
 		es.yaw_byte = yaw_byte_from_bam(rec.euler_z);
+		es.pitch_bam = rec.euler_x;
+		es.roll_bam = rec.euler_y;
 	}
 }
 
@@ -151,6 +157,8 @@ void NetClientView::apply_pool3_batch(const std::vector<uint8_t> &body) {
 		es.y = rec.pos_y;
 		es.z = rec.pos_z;
 		es.yaw_byte = yaw_byte_from_bam(static_cast<int32_t>(rec.movement_val));
+		es.pitch_bam = 0; // pool-3 sync carries no entity+20/+24 Euler fields
+		es.roll_bam = 0;
 	}
 }
 
@@ -167,6 +175,16 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 	state_.local_health = fu.health;
 
 	for (ClientEntityState &e : state_.entities) e.seen_this_frame = false;
+	struct PendingCarrierPose {
+		uint16_t child_handle;
+		uint16_t carrier_handle;
+		uint16_t cx;
+		uint16_t cy;
+		uint16_t cz;
+		uint8_t local_yaw_byte;
+	};
+	std::vector<PendingCarrierPose> pending_carrier_poses;
+	pending_carrier_poses.reserve(fu.records.size());
 
 	for (const FrameUpdateRecord &rec : fu.records) {
 		if (rec.cls == EntityClass::NoNetworkCallback) {
@@ -176,6 +194,16 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 		es.type_id = rec.type_id;
 		es.cls = rec.cls;
 		es.seen_this_frame = true;
+		// Every compact record is a complete sample of these organic fields. Clear the
+		// normalized row before class-specific assignment so dismounts and class changes
+		// cannot retain a stale carrier/bone selector from an earlier frame.
+		es.carrier_handle = 0xFFFFu;
+		es.mount_bone = 0;
+		es.seat_type = 0;
+		es.pitch_byte = 0;
+		es.aim_yaw_byte = 0;
+		es.anim_state_id = 0;
+		es.anim_channel_ratio = 0;
 
 		// Reconstruct world position: decompress the compact (per-axis) and add the
 		// frame anchor — or, for a CARRIER-LOCAL player record (vehicle/ground handle !=
@@ -184,7 +212,8 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 		// Entity_TransformLocalToWorld @0x4c10d4; a carrier with no itemDef DROPS the
 		// record and queues a C2S 0x0F entity request — request plumbing an in-process
 		// view does not need, so an unknown carrier just skips the position sample].
-		// Mounted vehicle-parent records stay a later phase.
+		// Carrier-local samples are queued for a second pass after every record has
+		// updated the view. Production order is pool-0 child before pool-1 carrier.
 		uint16_t cx = 0, cy = 0, cz = 0;
 		bool skip_pos = false;
 		switch (rec.cls) {
@@ -192,25 +221,19 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 			cx = rec.player.pos_x_compressed;
 			cy = rec.player.pos_y_compressed;
 			cz = rec.player.pos_z_compressed;
-			es.yaw_byte = rec.player.yaw_byte;
+			es.carrier_handle = rec.player.carrier_handle;
+			es.mount_bone = rec.player.vehicle_bone;
+			es.seat_type = rec.player.seat_type;
+			es.pitch_byte = rec.player.pitch_byte;
+			es.anim_state_id = rec.player.anim_state_id;
+			es.anim_channel_ratio = rec.player.anim_channel_ratio;
 			if (rec.player.carrier_handle != 0xFFFFu) {
-				if (const ClientEntityState *carrier =
-				            state_.find(rec.player.carrier_handle)) {
-					const int32_t carrier_yaw_bam =
-							static_cast<int32_t>(uint32_t(carrier->yaw_byte) << 24);
-					const WorldPose w = network_transform_local_to_world(
-							network_decompress_fixedpoint(cx),
-							network_decompress_fixedpoint(cy),
-							network_decompress_fixedpoint(cz), carrier->x, carrier->y,
-							carrier->z, uint32_t(carrier_yaw_bam), 0u, 0u);
-					es.x = w.x;
-					es.y = w.y;
-					es.z = w.z;
-					// world yaw byte = carrier yaw + local yaw (BAM addition holds in
-					// the 8-bit ring).
-					es.yaw_byte = uint8_t(carrier->yaw_byte + rec.player.yaw_byte);
-				}
-				skip_pos = true; // carrier form: either applied above or dropped
+				pending_carrier_poses.push_back(PendingCarrierPose{
+						rec.handle, rec.player.carrier_handle, cx, cy, cz,
+						rec.player.yaw_byte});
+				skip_pos = true;
+			} else {
+				es.yaw_byte = rec.player.yaw_byte;
 			}
 			break;
 		case EntityClass::Vehicle:
@@ -219,12 +242,31 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 			cz = rec.vehicle.pos_z_compressed;
 			es.yaw_byte = static_cast<uint8_t>(
 					static_cast<uint16_t>(rec.vehicle.euler_z) >> 8);
+			// Live vehicle compacts omit entity+20/+24. Preserve the last full
+			// spawn/dead-pose values until the short dead-pose form carries new
+			// signed high words [orig: @0x460d4c/@0x460d52].
+			if (rec.vehicle.is_dead_pose) {
+				es.pitch_bam = static_cast<int32_t>(rec.vehicle.euler_x) * 65536;
+				es.roll_bam = static_cast<int32_t>(rec.vehicle.euler_y) * 65536;
+			}
 			break;
 		case EntityClass::Infantry:
 			cx = rec.infantry.pos_x_compressed;
 			cy = rec.infantry.pos_y_compressed;
 			cz = rec.infantry.pos_z_compressed;
-			es.yaw_byte = rec.infantry.yaw_byte;
+			es.carrier_handle = rec.infantry.vehicle_slot_handle;
+			es.mount_bone = rec.infantry.seat_bone_idx;
+			es.pitch_byte = rec.infantry.pitch_byte;
+			es.aim_yaw_byte = rec.infantry.aim_yaw_byte;
+			es.anim_state_id = rec.infantry.anim_byte;
+			if (rec.infantry.vehicle_slot_handle != 0xFFFFu) {
+				pending_carrier_poses.push_back(PendingCarrierPose{
+						rec.handle, rec.infantry.vehicle_slot_handle, cx, cy, cz,
+						rec.infantry.yaw_byte});
+				skip_pos = true;
+			} else {
+				es.yaw_byte = rec.infantry.yaw_byte;
+			}
 			break;
 		default:
 			break; // unresolved/guided records are not compact motion samples
@@ -234,6 +276,29 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 			es.y = fu.anchor_y + network_decompress_fixedpoint(cy);
 			es.z = fu.anchor_z + network_decompress_fixedpoint(cz);
 		}
+	}
+
+	// Resolve carrier-local children only after the complete frame has upserted and
+	// updated every carrier. If the carrier is genuinely absent, leave the child's
+	// prior world pose/yaw untouched, matching the retail record-drop path.
+	for (const PendingCarrierPose &pending : pending_carrier_poses) {
+		ClientEntityState *child = state_.find(pending.child_handle);
+		const ClientEntityState *carrier = state_.find(pending.carrier_handle);
+		if (child == nullptr || carrier == nullptr) continue;
+		const int32_t carrier_yaw_bam = static_cast<int32_t>(
+				uint32_t(carrier->yaw_byte) << 24);
+		const WorldPose w = network_transform_local_to_world(
+				network_decompress_fixedpoint(pending.cx),
+				network_decompress_fixedpoint(pending.cy),
+				network_decompress_fixedpoint(pending.cz), carrier->x, carrier->y,
+				carrier->z, uint32_t(carrier_yaw_bam), uint32_t(carrier->pitch_bam),
+				uint32_t(carrier->roll_bam));
+		child->x = w.x;
+		child->y = w.y;
+		child->z = w.z;
+		// World yaw byte = carrier yaw + local yaw; BAM addition holds in the
+		// 8-bit ring used by the compact view.
+		child->yaw_byte = uint8_t(carrier->yaw_byte + pending.local_yaw_byte);
 	}
 
 	++state_.frames_applied;

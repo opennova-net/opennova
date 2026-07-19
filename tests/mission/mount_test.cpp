@@ -103,10 +103,144 @@ struct ClipSource : IRootMotionSource {
     }
 };
 
+static void test_mount_config_lifecycle() {
+    auto world_fixture = std::make_unique<World>();
+    World &w = *world_fixture;
+    w.registry.configure_pool(0, 16);
+    w.registry.configure_pool(1, 16);
+    Entity gun = make_gun(200, 0.f, 0.f, 0.f, 0);
+    gun.emplaced_config_valid = true;
+    gun.emplaced_config = 0;
+    gun.seats[0].bone_index = 7;
+    const EntityHandle gh = w.registry.spawn(1, gun);
+    const EntityHandle sh =
+            w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
+
+    CHECK(w.commands.mount(100, 200));
+    CHECK(w.registry.get(sh)->mounted_config_valid);
+    CHECK(w.registry.get(sh)->mounted_config == 0);
+    CHECK(w.registry.get(sh)->mount_bone == 7);
+    const auto occupied = std::make_unique<World::Snapshot>(w.snapshot());
+
+    CHECK(w.commands.dismount(100));
+    CHECK(!w.registry.get(sh)->mounted_config_valid);
+    CHECK(w.registry.get(sh)->mounted_config == 0);
+    CHECK(w.registry.get(sh)->mount_bone == 0);
+
+    w.restore(*occupied);
+    CHECK(w.registry.get(sh)->mounted);
+    CHECK(w.registry.get(sh)->mounted_config_valid);
+    CHECK(w.registry.get(sh)->mounted_config == 0);
+    CHECK(w.registry.get(sh)->mount_bone == 7);
+    CHECK(w.registry.get(gh)->emplaced_config_valid);
+    CHECK(w.registry.get(gh)->emplaced_config == 0);
+}
+
+static void test_wire_mount_config_lifecycle() {
+    auto world_fixture = std::make_unique<World>();
+    World &w = *world_fixture;
+    w.registry.configure_pool(0, 16);
+    w.registry.configure_pool(1, 16);
+    Entity gun = make_gun(200, 0.f, 0.f, 0.f, 0);
+    gun.emplaced_config_valid = true;
+    gun.emplaced_config = 6;
+    gun.seats[0].bone_index = 7;
+    const EntityHandle gh = w.registry.spawn(1, gun);
+    const EntityHandle sh =
+            w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
+
+    CHECK(entity_process_vehicle_attach(w, sh, gh, 7));
+    CHECK(w.registry.get(sh)->mounted_config_valid);
+    CHECK(w.registry.get(sh)->mounted_config == 6);
+    CHECK(entity_detach_from_vehicle(w, sh));
+    CHECK(!w.registry.get(sh)->mounted_config_valid);
+    CHECK(w.registry.get(sh)->mounted_config == 0);
+}
+
+static void test_wire_attach_rejects_unknown_model_bone() {
+    // The wire byte is the 1-based index into the model's 48-byte user-point
+    // table. Retail first classifies that exact row's name and rejects an
+    // unrecognized/out-of-range row; it never substitutes another free seat.
+    // [orig: Entity_GetBoneSlotType @0x434ED0; reject @0x435B14]
+    auto world_fixture = std::make_unique<World>();
+    World &w = *world_fixture;
+    w.registry.configure_pool(0, 16);
+    w.registry.configure_pool(1, 16);
+    Entity gun = make_gun(200, 0.f, 0.f, 0.f, 0);
+    gun.seats[0].bone_index = 7;
+    const EntityHandle gh = w.registry.spawn(1, gun);
+    const EntityHandle sh =
+            w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
+
+    CHECK(!entity_process_vehicle_attach(w, sh, gh, 9));
+    CHECK(!w.registry.get(sh)->mounted);
+    CHECK(!w.registry.get(gh)->seats[0].occupant.valid());
+}
+
+static void test_target_loss_clears_zero_net_id_occupant() {
+    // Player entities deliberately share net_id 0 and are distinguished by their
+    // pool handles. Auto-dismount must clear the exact mounted occupant, not resolve
+    // the first zero-id player through the script-facing SSN table.
+    auto world_fixture = std::make_unique<World>();
+    World &w = *world_fixture;
+    w.registry.configure_pool(0, 16);
+    w.registry.configure_pool(1, 16);
+
+    Entity first_player = make_soldier(0, 0.f, 0.f, 0.f);
+    first_player.player_class = 1;
+    const EntityHandle first = w.registry.spawn(0, first_player);
+    Entity mounted_player = make_soldier(0, 0.f, 0.f, 0.f);
+    mounted_player.player_class = 2;
+    const EntityHandle mounted = w.registry.spawn(0, mounted_player);
+
+    Entity gun = make_gun(200, 0.f, 0.f, 0.f, 0);
+    gun.emplaced_config_valid = true;
+    gun.emplaced_config = 6;
+    gun.seats[0].bone_index = 7;
+    const EntityHandle target = w.registry.spawn(1, gun);
+
+    auto ai_fixture = std::make_unique<AiSystem>();
+    AiSystem &ai = *ai_fixture;
+    w.ai = &ai;
+    const int mounted_ai_index = ai.attach(mounted);
+    AiEntity *mounted_ai = ai.at(mounted_ai_index);
+
+    CHECK(entity_process_vehicle_attach(w, mounted, target, 7));
+    CHECK(w.registry.get(mounted)->mounted_config_valid);
+    w.registry.despawn(target);
+    CHECK(!ai.pose_if_mounted(*mounted_ai, w));
+    CHECK(!w.registry.get(mounted)->mounted);
+    CHECK(!w.registry.get(mounted)->mounted_config_valid);
+    CHECK(w.registry.get(mounted)->mounted_config == 0);
+    CHECK(!w.registry.get(first)->mounted);
+
+    Entity replacement = make_gun(201, 0.f, 0.f, 0.f, 0);
+    replacement.emplaced_config_valid = true;
+    replacement.emplaced_config = 6;
+    replacement.seats[0].bone_index = 7;
+    const EntityHandle replacement_target = w.registry.spawn(1, replacement);
+    CHECK(entity_process_vehicle_attach(w, mounted, replacement_target, 7));
+    Entity *mounted_entity = w.registry.get(mounted);
+    mounted_entity->health = 0;
+    mounted_entity->deathtime_ticks = 120;
+    mounted_ai->inf.active = true;
+    mounted_ai->inf.anim_state = world::anim_state::kIdleCrouch;
+    ai.tick_infantry(*mounted_ai, w, 1);
+    mounted_entity = w.registry.get(mounted);
+    CHECK(mounted_entity != nullptr);
+    if (mounted_entity != nullptr) {
+        CHECK(!mounted_entity->mounted);
+        CHECK(!mounted_entity->mounted_config_valid);
+        CHECK(mounted_entity->mounted_config == 0);
+    }
+    CHECK(!w.registry.get(first)->mounted);
+}
+
 int main() {
     // ---- mount sets both sides + poses onto the seat ----
     {
-        World w;
+        auto world_fixture = std::make_unique<World>();
+        World &w = *world_fixture;
         w.registry.configure_pool(0, 16); // organics
         w.registry.configure_pool(1, 16); // items
         const EntityHandle gh = w.registry.spawn(1, make_gun(200, 10.f, 20.f, 5.f, 0));
@@ -119,6 +253,8 @@ int main() {
         CHECK(occ->mount_target == gh);
         CHECK(occ->mount_seat == 0);
         CHECK(occ->mount_type == SeatType::Gunner);
+        CHECK(!occ->mounted_config_valid);
+        CHECK(occ->mounted_config == 0);
         CHECK(gun->seats[0].occupant == sh);
         // seat_local default 0 -> occupant snaps to the gun origin.
         CHECK(occ->position.x == 10.f && occ->position.y == 20.f && occ->position.z == 5.f);
@@ -128,16 +264,28 @@ int main() {
         CHECK(w.commands.dismount(100));
         CHECK(!occ->mounted);
         CHECK(occ->mount_seat == -1);
+        CHECK(!occ->mounted_config_valid);
+        CHECK(occ->mounted_config == 0);
         CHECK(!gun->seats[0].occupant.valid());
         CHECK(w.commands.find_mounted_on(200) == 0);
         CHECK(!w.commands.dismount(100)); // not mounted -> false
     }
 
+    // ---- target config validity/value copy onto the active selector ----
+    // Explicit zero is a real target phrase_set (+0x86C), distinct from the
+    // zero-valued unknown target above. The occupied selector rides snapshots and
+    // dismount clears both its validity and value.
+    test_mount_config_lifecycle();
+    test_wire_mount_config_lifecycle();
+    test_wire_attach_rejects_unknown_model_bone();
+    test_target_loss_clears_zero_net_id_occupant();
+
     // ---- only Controller/Driver seats publish the vehicle-control lifecycle ----
     {
         const SeatType control_types[] = {SeatType::Controller, SeatType::Driver};
         for (SeatType control_type : control_types) {
-            World w;
+            auto world_fixture = std::make_unique<World>();
+            World &w = *world_fixture;
             w.registry.configure_pool(0, 16);
             w.registry.configure_pool(1, 16);
             w.registry.spawn(1, make_vehicle(200, control_type));
@@ -172,7 +320,8 @@ int main() {
     // Entity_AttachToVehicleSlot @0x4946d0 empty-or-same claim;
     // Entity_DetachFromVehicle @0x4356e9 claimant-only stop leg].
     {
-        World w;
+        auto world_fixture = std::make_unique<World>();
+        World &w = *world_fixture;
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(1, 16);
         const EntityHandle vh = w.registry.spawn(1, make_dual_control_vehicle(200));
@@ -199,7 +348,8 @@ int main() {
 
     // The accepted wire attach/detach path publishes the same controlling-seat edges.
     {
-        World w;
+        auto world_fixture = std::make_unique<World>();
+        World &w = *world_fixture;
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(1, 16);
         Entity vehicle = make_vehicle(200, SeatType::Driver);
@@ -225,7 +375,8 @@ int main() {
 
     // The wire path obeys the same single-owner claim for dual control seats.
     {
-        World w;
+        auto world_fixture = std::make_unique<World>();
+        World &w = *world_fixture;
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(1, 16);
         const EntityHandle vh = w.registry.spawn(1, make_dual_control_vehicle(200));
@@ -248,24 +399,26 @@ int main() {
 
     // A passenger is occupancy, not vehicle control; mount, dismount, and restore stay silent.
     {
-        World w;
+        auto world_fixture = std::make_unique<World>();
+        World &w = *world_fixture;
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(1, 16);
         w.registry.spawn(1, make_vehicle(200, SeatType::Passenger));
         w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
         CHECK(w.commands.mount(100, 200));
         CHECK(w.effects.entries().empty());
-        const World::Snapshot occupied = w.snapshot();
+        const auto occupied = std::make_unique<World::Snapshot>(w.snapshot());
         CHECK(w.commands.dismount(100));
         CHECK(w.effects.entries().empty());
-        w.restore(occupied);
+        w.restore(*occupied);
         CHECK(w.effects.entries().empty());
     }
 
     // Teardown can remove the vehicle before the occupant is detached. The occupant's cached
     // target identity still has to publish the matching stop edge.
     {
-        World w;
+        auto world_fixture = std::make_unique<World>();
+        World &w = *world_fixture;
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(1, 16);
         const EntityHandle vh = w.registry.spawn(1, make_vehicle(200, SeatType::Controller));
@@ -287,7 +440,8 @@ int main() {
 
     // ---- edges: full seat, already-mounted, seatless target ----
     {
-        World w;
+        auto world_fixture = std::make_unique<World>();
+        World &w = *world_fixture;
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(1, 16);
         w.registry.spawn(1, make_gun(200, 0.f, 0.f, 0.f, 0));
@@ -309,7 +463,8 @@ int main() {
 
     // ---- mounted seat local rotates in the same frame as placed vehicle models ----
     {
-        World w;
+        auto world_fixture = std::make_unique<World>();
+        World &w = *world_fixture;
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(1, 16);
         Entity vehicle;
@@ -334,7 +489,8 @@ int main() {
 
     // ---- AI tick seat-follow: occupant tracks the seat, never path-follows ----
     {
-        World w;
+        auto world_fixture = std::make_unique<World>();
+        World &w = *world_fixture;
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(1, 16);
         const EntityHandle gh = w.registry.spawn(1, make_gun(200, 10.f, 20.f, 5.f, 0));
@@ -378,12 +534,14 @@ int main() {
 
     // ---- mounted pose selection follows seat context, not just "is mounted" ----
     {
-        World w;
+        auto world_fixture = std::make_unique<World>();
+        World &w = *world_fixture;
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(1, 16);
         const EntityHandle gh = w.registry.spawn(1, make_gun(200, 0.f, 0.f, 0.f, 0));
         const EntityHandle sh = w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
-        w.registry.get(gh)->emplaced_pose_variant = 3;
+        w.registry.get(gh)->emplaced_config_valid = true;
+        w.registry.get(gh)->emplaced_config = 3;
 
         AiSystem ai;
         ClipSource clips;
@@ -520,7 +678,8 @@ int main() {
 
     // ---- non-gunner seats carry a local facing offset, not just vehicle yaw ----
     {
-        World w;
+        auto world_fixture = std::make_unique<World>();
+        World &w = *world_fixture;
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(1, 16);
         Entity vehicle;
@@ -556,7 +715,8 @@ int main() {
 
     // ---- unmounted stance stays under normal infantry logic, not mount pose logic ----
     {
-        World w;
+        auto world_fixture = std::make_unique<World>();
+        World &w = *world_fixture;
         w.registry.configure_pool(0, 16);
         const EntityHandle sh = w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
         AiSystem ai;
@@ -570,7 +730,8 @@ int main() {
 
     // ---- BMS AttachToEmplaced: emits no unported_action + mounts via proximity ----
     {
-        World w;
+        auto world_fixture = std::make_unique<World>();
+        World &w = *world_fixture;
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(1, 16);
         w.registry.spawn(1, make_gun(200, 1.f, 1.f, 0.f, 0));
@@ -598,18 +759,19 @@ int main() {
 
     // ---- snapshot/restore rewinds the mount (seats ride the registry value-copy) ----
     {
-        World w;
+        auto world_fixture = std::make_unique<World>();
+        World &w = *world_fixture;
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(1, 16);
         const EntityHandle gh = w.registry.spawn(1, make_gun(200, 1.f, 1.f, 0.f, 0));
         const EntityHandle sh = w.registry.spawn(0, make_soldier(100, 2.f, 1.f, 0.f));
 
-        const World::Snapshot snap = w.snapshot(); // pre-mount
+        const auto snap = std::make_unique<World::Snapshot>(w.snapshot()); // pre-mount
         CHECK(w.commands.mount(100, 200));
         CHECK(w.registry.get(sh)->mounted);
         CHECK(w.registry.get(gh)->seats[0].occupant.valid());
 
-        w.restore(snap);
+        w.restore(*snap);
         CHECK(!w.registry.get(sh)->mounted);            // rewound
         CHECK(!w.registry.get(gh)->seats[0].occupant.valid()); // seat freed
     }
@@ -617,7 +779,8 @@ int main() {
     // Restoring occupied control seats republishes one per-vehicle lifecycle edge so
     // hosts can rebuild effects that were cleared with the transient EffectLog.
     {
-        World w;
+        auto world_fixture = std::make_unique<World>();
+        World &w = *world_fixture;
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(1, 16);
         const EntityHandle vh = w.registry.spawn(1, make_dual_control_vehicle(200));
@@ -625,11 +788,11 @@ int main() {
         const EntityHandle sh1 = w.registry.spawn(0, make_soldier(101, 0.f, 0.f, 0.f));
         CHECK(w.commands.mount(100, 200));
         CHECK(w.commands.mount(101, 200));
-        const World::Snapshot occupied = w.snapshot();
+        const auto occupied = std::make_unique<World::Snapshot>(w.snapshot());
         CHECK(w.commands.dismount(100));
         CHECK(w.commands.dismount(101));
 
-        w.restore(occupied);
+        w.restore(*occupied);
         CHECK(w.registry.get(sh0)->mounted);
         CHECK(w.registry.get(sh1)->mounted);
         CHECK(w.registry.get(vh)->seats[0].occupant == sh0);

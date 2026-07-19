@@ -98,7 +98,28 @@ int visual_item_id_for_runtime_type(int item_id, const Ref<NovaItemDatabase> &it
 	return item_id + opennova::mission::kItemIdOffset;
 }
 
-opennova::anim::AimOverlayInputs aim_overlay_inputs_for(const AiEntity &entity) {
+opennova::anim::MountMode mount_mode_for_seat_type(
+		opennova::world::SeatType seat_type) {
+	switch (seat_type) {
+		case opennova::world::SeatType::Controller:
+		case opennova::world::SeatType::Driver:
+			return opennova::anim::MountMode::Seated;
+		case opennova::world::SeatType::Gunner:
+			return opennova::anim::MountMode::Gunner;
+		default:
+			return opennova::anim::MountMode::OnFoot;
+	}
+}
+
+opennova::anim::MountMode mount_mode_for(
+		const opennova::world::Entity &entity) {
+	return entity.mounted
+			? mount_mode_for_seat_type(entity.mount_type)
+			: opennova::anim::MountMode::OnFoot;
+}
+
+opennova::anim::AimOverlayInputs aim_overlay_inputs_for(
+		const AiEntity &entity, const opennova::world::Entity &world_entity) {
 	opennova::anim::AimOverlayInputs in;
 	in.aim_yaw = entity.heading;
 	in.aim_pitch = entity.pitch;
@@ -115,7 +136,101 @@ opennova::anim::AimOverlayInputs aim_overlay_inputs_for(const AiEntity &entity) 
 	in.rolling =
 			entity.inf.anim_state == opennova::world::anim_state::kRollLeft ||
 			entity.inf.anim_state == opennova::world::anim_state::kRollRight;
+	in.mount_mode = mount_mode_for(world_entity);
+	if (in.mount_mode != opennova::anim::MountMode::OnFoot) {
+		in.mount_config_valid = world_entity.mounted_config_valid;
+		in.mount_config = world_entity.mounted_config_valid
+				? world_entity.mounted_config
+				: 0;
+	}
 	return in;
+}
+
+const opennova::netsim::ClientEntityState *client_entity_for_handle(
+		const opennova::netsim::ClientState &state, uint16_t handle) {
+	for (const opennova::netsim::ClientEntityState &entity : state.entities) {
+		if (entity.handle == handle) return &entity;
+	}
+	return nullptr;
+}
+
+const opennova::mission::ItemSeatSpec *item_seat_spec_for_type(
+		const std::vector<opennova::mission::ItemSeatSpec> &specs,
+		uint16_t type_id) {
+	for (const opennova::mission::ItemSeatSpec &spec : specs) {
+		if (spec.type_id == static_cast<int32_t>(type_id)) return &spec;
+	}
+	return nullptr;
+}
+
+bool aim_overlay_inputs_for_client(
+		const opennova::netsim::ClientEntityState &entity,
+		const opennova::netsim::ClientState &state,
+		const std::vector<opennova::mission::ItemSeatSpec> &specs,
+		opennova::anim::AimOverlayInputs &out) {
+	if (entity.cls != opennova::EntityClass::Player &&
+			entity.cls != opennova::EntityClass::Infantry)
+		return false;
+
+	out = opennova::anim::AimOverlayInputs{};
+	out.aim_yaw = static_cast<int32_t>(
+			static_cast<uint32_t>(entity.yaw_byte) << 24);
+	out.aim_pitch = static_cast<int32_t>(
+			static_cast<uint32_t>(
+					entity.cls == opennova::EntityClass::Player
+							? entity.pitch_byte
+							: entity.aim_yaw_byte)
+			<< 24);
+	out.body_yaw = out.aim_yaw;
+	out.leg_yaw_r = out.body_yaw;
+	out.leg_yaw_l = out.body_yaw;
+	out.aim_state =
+			(opennova::world::infantry_anim_flags(entity.anim_state_id) &
+					0x40u) != 0;
+	out.rolling =
+			entity.anim_state_id == opennova::world::anim_state::kRollLeft ||
+			entity.anim_state_id == opennova::world::anim_state::kRollRight;
+
+	// Both witnessed compact organic records already carry the carrier and raw
+	// seat bone. Bone zero is the standing-on/deck form, not a mount. Resolve
+	// the carrier's wire type into the host-fed production seat table; never
+	// synthesize a config byte or alias a missing definition to config zero.
+	if (entity.carrier_handle == 0xFFFFu || entity.mount_bone == 0) return true;
+	const opennova::netsim::ClientEntityState *carrier =
+			client_entity_for_handle(state, entity.carrier_handle);
+	if (carrier == nullptr) return true;
+	const opennova::mission::ItemSeatSpec *spec =
+			item_seat_spec_for_type(specs, carrier->type_id);
+	if (spec == nullptr) return true;
+	const opennova::world::Seat *seat = nullptr;
+	for (const opennova::world::Seat &candidate : spec->seats) {
+		if (candidate.bone_index == entity.mount_bone) {
+			seat = &candidate;
+			break;
+		}
+	}
+	if (seat == nullptr) return true;
+
+	out.mount_mode = mount_mode_for_seat_type(seat->type);
+	if (out.mount_mode == opennova::anim::MountMode::OnFoot) return true;
+	out.mount_config_valid = spec->mount_config_valid;
+	out.mount_config = spec->mount_config_valid ? spec->mount_config : 0;
+
+	// pose_mounted_occupant faces seated slots at carrier+yaw_offset and a
+	// Gunner at carrier-yaw_offset in mission yaw. Engine heading is
+	// (90-mission yaw), so those signs invert here.
+	const int32_t carrier_heading = static_cast<int32_t>(
+			static_cast<uint32_t>(carrier->yaw_byte) << 24);
+	const int32_t offset = opennova::world::bam_from_degrees_wrapped(
+			static_cast<double>(seat->yaw_offset));
+	out.body_yaw = out.mount_mode == opennova::anim::MountMode::Gunner
+			? opennova::io::bam_add(carrier_heading, offset)
+			: opennova::io::bam_sub(carrier_heading, offset);
+	out.body_pitch = carrier->pitch_bam;
+	out.roll = carrier->roll_bam;
+	out.leg_yaw_r = out.body_yaw;
+	out.leg_yaw_l = out.body_yaw;
+	return true;
 }
 
 double bam_to_radians(int32_t value) {
@@ -132,6 +247,37 @@ Basis godot_model_basis_from_overlay(
 			Basis(Vector3(0.0, 0.0, 1.0), bam_to_radians(angles.pitch)) *
 			Basis(Vector3(1.0, 0.0, 0.0), bam_to_radians(angles.roll)) *
 			Basis(Vector3(0.0, 1.0, 0.0), 1.57079632679489661923);
+}
+
+Vector3 mission_euler_from_overlay(
+		const opennova::anim::AimOverlayAngles &angles) {
+	return Vector3(
+			static_cast<float>(static_cast<double>(angles.pitch) *
+					opennova::world::kDegreesPerBam),
+			static_cast<float>(
+					opennova::world::mission_yaw_deg_from_bam_heading(
+							angles.yaw)),
+			static_cast<float>(static_cast<double>(angles.roll) *
+					opennova::world::kDegreesPerBam));
+}
+
+void write_present_overlay(float *record,
+		const opennova::anim::AimOverlayAngles
+				angles[opennova::anim::kOverlayClassCount]) {
+	record[NovaSimulation::PF_AIM_OVERLAY_VALID] = 1.0f;
+	const Vector3 body = mission_euler_from_overlay(
+			angles[opennova::anim::kOverlayBody]);
+	record[NovaSimulation::PF_AIM_BODY_PITCH_DEG] = body.x;
+	record[NovaSimulation::PF_AIM_BODY_YAW_DEG] = body.y;
+	record[NovaSimulation::PF_AIM_BODY_ROLL_DEG] = body.z;
+	for (int cls = 0; cls < opennova::anim::kOverlayClassCount; ++cls) {
+		const Vector3 value = mission_euler_from_overlay(angles[cls]);
+		const int base = NovaSimulation::PF_AIM_ANGLES +
+				cls * NovaSimulation::PF_AIM_CLASS_STRIDE;
+		record[base] = value.x;
+		record[base + 1] = value.y;
+		record[base + 2] = value.z;
+	}
 }
 
 Array aim_overlay_deltas_for(
@@ -956,7 +1102,7 @@ bool NovaSimulation::build_section_matrices(opennova::world::World &p_world,
 				: 0.0;
 
 		const opennova::anim::AimOverlayInputs inputs =
-				aim_overlay_inputs_for(*ai_entity);
+				aim_overlay_inputs_for(*ai_entity, *entity);
 		opennova::anim::AimOverlayAngles
 				angles[opennova::anim::kOverlayClassCount];
 		opennova::anim::compute_aim_overlay_angles(inputs, angles);
@@ -2524,8 +2670,12 @@ void NovaSimulation::set_item_seat_specs(const Array &p_specs) {
 		opennova::mission::ItemSeatSpec spec;
 		spec.type_id = static_cast<int32_t>(spec_d.get("type_id", 0));
 		if (spec.type_id == 0) continue;
-		spec.emplaced_pose_variant = static_cast<uint8_t>(
-		    std::clamp(static_cast<int>(spec_d.get("emplaced_pose_variant", 0)), 0, 8));
+		if (spec_d.has("mount_config_valid")) {
+			spec.mount_config_valid = static_cast<bool>(spec_d.get("mount_config_valid", false));
+			spec.mount_config = spec.mount_config_valid
+			                        ? static_cast<int32_t>(spec_d.get("mount_config", 0))
+			                        : 0;
+		}
 
 		const Variant seats_v = spec_d.get("seats", Array());
 		if (seats_v.get_type() != Variant::ARRAY) continue;
@@ -2566,7 +2716,7 @@ void NovaSimulation::set_item_seat_specs(const Array &p_specs) {
 		}
 		spec.primary_weapon =
 		    String(spec_d.get("primary_weapon", String())).utf8().get_data();
-		if (!spec.seats.empty() || !spec.armory_points.empty() ||
+		if (spec.mount_config_valid || !spec.seats.empty() || !spec.armory_points.empty() ||
 		    !spec.primary_weapon.empty())
 			item_seat_specs_.push_back(std::move(spec));
 	}
@@ -2935,6 +3085,12 @@ void NovaSimulation::_bind_methods() {
 	BIND_ENUM_CONSTANT(PF_ALIVE);
 	BIND_ENUM_CONSTANT(PF_TYPE_ID);
 	BIND_ENUM_CONSTANT(PF_WIRE_HANDLE);
+	BIND_ENUM_CONSTANT(PF_AIM_OVERLAY_VALID);
+	BIND_ENUM_CONSTANT(PF_AIM_BODY_PITCH_DEG);
+	BIND_ENUM_CONSTANT(PF_AIM_BODY_YAW_DEG);
+	BIND_ENUM_CONSTANT(PF_AIM_BODY_ROLL_DEG);
+	BIND_ENUM_CONSTANT(PF_AIM_ANGLES);
+	BIND_ENUM_CONSTANT(PF_AIM_CLASS_STRIDE);
 	BIND_ENUM_CONSTANT(PF_STRIDE);
 	BIND_ENUM_CONSTANT(EFFECT_STATE_POSITION);
 	BIND_ENUM_CONSTANT(EFFECT_STATE_ROTATION_DEG);
@@ -3511,9 +3667,11 @@ Dictionary NovaSimulation::get_local_player_aim_overlay() const {
 	out["valid"] = false;
 	if (!world_ || !world_->ai || !world_->cached.local_player.valid()) return out;
 	const AiEntity *p = world_->ai->for_handle(world_->cached.local_player);
-	if (!p) return out;
+	const opennova::world::Entity *entity =
+			world_->registry.get(world_->cached.local_player);
+	if (!p || !entity) return out;
 
-	opennova::anim::AimOverlayInputs in = aim_overlay_inputs_for(*p);
+	opennova::anim::AimOverlayInputs in = aim_overlay_inputs_for(*p, *entity);
 	// The head-look decay term carries the arms-dip feed (the +0x371 weapon-switch
 	// window drops it 0x2800000/tick; infantry_weapon_channel owns the decay)
 	// [orig: @ 0x4b5cab..0x4b5cd5]. The lean term is the sim's lean angle
@@ -3526,21 +3684,18 @@ Dictionary NovaSimulation::get_local_player_aim_overlay() const {
 	opennova::anim::AimOverlayAngles angles[opennova::anim::kOverlayClassCount];
 	opennova::anim::compute_aim_overlay_angles(in, angles);
 
-	const auto to_mission = [](const opennova::anim::AimOverlayAngles &a) {
-		return Vector3(
-				static_cast<float>(static_cast<double>(a.pitch) * opennova::world::kDegreesPerBam),
-				static_cast<float>(opennova::world::mission_yaw_deg_from_bam_heading(a.yaw)),
-				static_cast<float>(static_cast<double>(a.roll) * opennova::world::kDegreesPerBam));
-	};
-
 	PackedVector3Array packed;
 	packed.resize(opennova::anim::kOverlayClassCount);
 	for (int i = 0; i < opennova::anim::kOverlayClassCount; ++i) {
-		packed[i] = to_mission(angles[i]);
+		packed[i] = mission_euler_from_overlay(angles[i]);
 	}
 	out["valid"] = true;
 	out["aim_state"] = in.aim_state;
-	out["body"] = to_mission(angles[opennova::anim::kOverlayBody]);
+	out["mount_mode"] = static_cast<int>(in.mount_mode);
+	out["mount_config_valid"] = in.mount_config_valid;
+	out["mount_config"] = in.mount_config_valid ? in.mount_config : 0;
+	out["body"] = mission_euler_from_overlay(
+			angles[opennova::anim::kOverlayBody]);
 	out["angles"] = packed;
 	return out;
 }
@@ -4868,19 +5023,25 @@ Dictionary NovaSimulation::get_entity_debug(int p_index) const {
 	out["mount_target_net_id"] = 0;
 	out["mount_seat"] = ent ? static_cast<int>(ent->mount_seat) : -1;
 	out["mount_type"] = ent ? static_cast<int>(ent->mount_type) : 0;
+	out["mount_config_valid"] = ent ? ent->mounted_config_valid : false;
+	out["mount_config"] =
+			(ent && ent->mounted_config_valid) ? static_cast<int>(ent->mounted_config) : 0;
 	out["mount_seat_bone"] = 0;
 	out["mount_seat_pose_index"] = 0;
 	out["mount_seat_source_name"] = String();
 	out["mount_seat_local"] = Vector3();
 	out["mount_seat_yaw_offset"] = 0;
-	out["mount_target_emplaced_pose_variant"] = 0;
+	out["mount_target_config_valid"] = false;
+	out["mount_target_config"] = 0;
 	out["mount_target_seat_count"] = 0;
 	out["mount_target_seats"] = Array();
 	if (ent && ent->mounted) {
 		const opennova::world::Entity *target = world_->registry.get(ent->mount_target);
 		if (target) {
 			out["mount_target_net_id"] = static_cast<int>(target->net_id);
-			out["mount_target_emplaced_pose_variant"] = static_cast<int>(target->emplaced_pose_variant);
+			out["mount_target_config_valid"] = target->emplaced_config_valid;
+			out["mount_target_config"] =
+					target->emplaced_config_valid ? static_cast<int>(target->emplaced_config) : 0;
 			out["mount_target_seat_count"] = static_cast<int>(target->seats.size());
 			Array target_seats;
 			for (int i = 0; i < static_cast<int>(target->seats.size()); ++i) {
@@ -5499,6 +5660,8 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 		r[PF_BODY_ANIM_SLOT] = -1.0f; r[PF_ANIM_STATE] = -1.0f; r[PF_ANIM_PHASE_TICKS] = 0.0f;
 		r[PF_HIDDEN] = 0.0f; r[PF_ALIVE] = 1.0f;
 		r[PF_TYPE_ID] = 0.0f; r[PF_WIRE_HANDLE] = 0.0f;
+		for (int field = PF_AIM_OVERLAY_VALID; field < PF_STRIDE; ++field)
+			r[field] = 0.0f;
 
 		// Self-filter (joiner): the host SNAPs our own entity (wire handle H) and streams
 		// it back in 0x0A; we draw our local player L via LocalPlayerHost, so drop the wire
@@ -5546,6 +5709,26 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 			if (ae && ae->inf.active) {
 				r[PF_ANIM_STATE] = static_cast<float>(ae->inf.anim_state);
 				r[PF_ANIM_PHASE_TICKS] = static_cast<float>(ae->inf.clip_phase);
+				if (ent != nullptr) {
+					const opennova::anim::AimOverlayInputs inputs =
+							aim_overlay_inputs_for(*ae, *ent);
+					opennova::anim::AimOverlayAngles
+							angles[opennova::anim::kOverlayClassCount];
+					opennova::anim::compute_aim_overlay_angles(inputs, angles);
+					write_present_overlay(r, angles);
+				}
+			}
+		}
+		if (joiner_) {
+			opennova::anim::AimOverlayInputs inputs;
+			if (aim_overlay_inputs_for_client(
+						es, cs, item_seat_specs_, inputs)) {
+				r[PF_ANIM_STATE] =
+						static_cast<float>(es.anim_state_id);
+				opennova::anim::AimOverlayAngles
+						angles[opennova::anim::kOverlayClassCount];
+				opennova::anim::compute_aim_overlay_angles(inputs, angles);
+				write_present_overlay(r, angles);
 			}
 		}
 	}

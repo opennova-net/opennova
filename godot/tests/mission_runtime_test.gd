@@ -17,6 +17,10 @@ func test_seat_userpoint_prefixes_match_original_seat_names() -> void:
 	assert_eq(rt._seat_type_for_user_point("UseGun01"), 3, "UseGun -> gunner")
 	assert_eq(rt._seat_type_for_user_point("drvrx"), 5, "drvrx -> driver")
 	assert_eq(rt._seat_type_for_user_point("ground"), 0, "non-seat userpoints are ignored")
+	assert_eq(MissionSeatDiagnostics.seat_type_for_user_point("fooUseGun"), 0,
+			"retail classifies a prefix, not an embedded seat token")
+	assert_eq(MissionSeatDiagnostics.seat_type_for_user_point("xctrlx"), 0,
+			"embedded controller text is not a model seat row")
 
 
 func test_numbered_seat_userpoints_select_sit_pose_index() -> void:
@@ -63,6 +67,30 @@ func test_shared_seat_diagnostics_predict_original_command_rules() -> void:
 	assert_eq(int(any["seat_index"]), 1, "command 125 can select ctrlx by original priority")
 	assert_eq(String(any["seat"]["source_name"]), "ctrlx00")
 	assert_eq(String(any["candidates"][1]["status"]), "selected")
+
+
+func test_production_seat_specs_extract_target_phrase_set_config() -> void:
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/items.def")), OK)
+	var root := NovaResourceRoot.new()
+	root.set_root_dir(ProjectSettings.globalize_path(
+			"res://../fixtures/3dp/B50Cal"))
+	var spec := MissionSeatDiagnostics.seat_specs_for_item(
+			root, item_db, 101419, 101419)
+	assert_eq(String(spec.get("error", "")), "")
+	var seats: Array = spec.get("seats", []) as Array
+	assert_eq(seats.size(), 1,
+			"the witnessed B50Cal target contributes exactly its Usegun seat")
+	if seats.size() == 1:
+		assert_eq(String((seats[0] as Dictionary).get("source_name", "")), "Usegun")
+		assert_eq(int((seats[0] as Dictionary).get("bone_index", 0)), 6,
+				"the wire byte is the 1-based USRP table row, not a seat ordinal")
+		assert_eq(int((seats[0] as Dictionary).get("type", 0)), 3)
+	assert_true(bool(spec.get("mount_config_valid", false)),
+			"authored phrase_set marks target config valid")
+	assert_eq(int(spec.get("mount_config", -1)), 4,
+			"target itemDef+0x86c phrase_set reaches the production seat spec")
 
 
 # An animatable placed entity: play_part_anim marks it for the registry, set_part_phase + Node3D

@@ -1896,8 +1896,8 @@ ownerSession (0x1CC)); clear every matching `mountHandles[i] == handle → 0xFFF
 BOTH the passed vehicle and `entity->parentEntity` when different); finally `Flags &= ~0x40;
 0x16C = 0; 0x157 = 0; 0x168 = 0`. Reimpl: `world::entity_process_vehicle_attach /
 entity_detach_from_vehicle` (libs/world/vehicle_attach.cpp) behind the dispatch cases; the
-0x27 subject is clamped to the sender's own entity and the seat classification falls back to
-the model-userpoint seat table (divergences tracked in D-NET-157).
+0x27 subject is clamped to the sender's own entity. Production seat extraction preserves the
+USRP row's witnessed 1-based index, so attach classification uses the exact echoed bone.
 
 **Cross-witnessed against the 2026-06-16b capture** (joiner=`32769`, host=`32768`):
 - Frame, joiner stationary: vehHdl `ff ff` (none); posX `8f be b0 05` = `0x05b0be8f` / 65536
@@ -8742,13 +8742,12 @@ Entity_AttachToVehicleSlot @ 0x4946D0 writes; detach @ 0x4FC980/@ 0x4355F0; NO c
 — the 0x0A mounted branch is the confirmation). PORTED: dispatch cases 0x26/0x27 →
 `world::entity_process_vehicle_attach / entity_detach_from_vehicle`
 (libs/world/vehicle_attach.cpp) + `Entity::mount_bone` (+0x157) + the record byte0 echo +
-the header-tail mount handle. Tracked divergences (ours vs retail): (a) seat
-classification falls back to the model-USERPOINT seat table — our `Seat::bone_index` is
-the userpoint enumeration index, which can diverge from the retail full-bone-table index,
-so an unmatched wire bone takes the best free seat with the wire bone kept as the
-occupancy/echo key (retail classifies by bone NAME prefix in the model bone table and
-rejects unknowns); (b) the 0x27 detach subject is CLAMPED to the sender's own entity
-(retail trusts wire word0 with no range guard — a hardening divergence); (c) the
+the header-tail mount handle. The former seat-classification divergence is resolved: the
+model USRP enumeration has the witnessed 48-byte runtime row shape (name at +32), and the
+wire index is 1-based. Production extraction preserves that exact index and rejects
+unmatched rows instead of substituting a free seat. Tracked divergences (ours vs retail):
+(a) the 0x27 detach subject is CLAMPED to the sender's own entity
+(retail trusts wire word0 with no range guard — a hardening divergence); (b) the
 weapon-busy gate (EquippedSlot currentAction 0/1/11 @ 0x435b29), the ATTR_PlayerControl/
 ATTR_EWeap ctrl-seat def gates, gun-carrier traversal in the enemy-occupant scan, and the
 record's gun seatType byte (needs carrier +0x326/+0x312 modeling) are unmodeled. Test:

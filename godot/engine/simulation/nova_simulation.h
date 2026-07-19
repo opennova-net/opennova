@@ -109,7 +109,15 @@ public:
 		PF_ALIVE,      // 1 when alive
 		PF_TYPE_ID,    // items.def runtime type id from the wire (0 = none); keys the joiner's wire avatars
 		PF_WIRE_HANDLE,// (pool<<12)|slot wire handle from the decoded stream (joiner render key; 0 = none)
-		PF_STRIDE      // record length; also the count of fields above
+		// Final output of anim::compute_aim_overlay_angles. Presentation consumes
+		// this result; it never repeats the mounted config selector.
+		PF_AIM_OVERLAY_VALID,
+		PF_AIM_BODY_PITCH_DEG,
+		PF_AIM_BODY_YAW_DEG,
+		PF_AIM_BODY_ROLL_DEG,
+		PF_AIM_ANGLES, // nine contiguous (pitch,yaw,roll) triples, OverlayClass order
+		PF_AIM_CLASS_STRIDE = 3,
+		PF_STRIDE = PF_AIM_ANGLES + 9 * PF_AIM_CLASS_STRIDE
 	};
 
 	// Typed record returned by get_entity_effect_state_for_ssn(). Position is

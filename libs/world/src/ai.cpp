@@ -6,6 +6,7 @@
 #include "terrain/height_field.h"
 #include "world/angle.h"
 #include "world/body_anim.h"
+#include "world/vehicle_attach.h"
 #include "world/vehicle_motor.h"
 #include "world/world.h"
 
@@ -39,7 +40,9 @@ void update_body_anim_slot(AiEntity &e, World &world) {
 int mounted_anim_state_for_seat(const Entity &target, const Seat &seat, const InfantryState &inf,
                                 const IRootMotionSource *root_motion) {
     if (seat.type == SeatType::Gunner) {
-        const int variant = std::clamp<int>(target.emplaced_pose_variant, 0, 8);
+        const int variant = target.emplaced_config_valid
+                                ? std::clamp<int>(target.emplaced_config, 0, 8)
+                                : 0;
         if (variant > 0) {
             const int candidate = anim_state::kEmplaced + variant;
             if (root_motion != nullptr && root_motion->has_clip(inf.adm_id, candidate)) {
@@ -1115,7 +1118,7 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
     if (occ == nullptr || !occ->mounted) return false;
     Entity *veh = world.registry.get(occ->mount_target);
     if (veh == nullptr) {              // vehicle gone -> auto-dismount, resume normal AI
-        world.commands.dismount(occ->net_id);
+        entity_detach_from_vehicle(world, e.handle);
         return false;
     }
     if (occ->mount_seat < 0 || occ->mount_seat >= static_cast<int>(veh->seats.size())) return false;

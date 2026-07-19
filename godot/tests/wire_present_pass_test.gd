@@ -1,6 +1,20 @@
 extends GutTest
 
 const WirePresentPass := preload("res://engine/world/wire_present_pass.gd")
+const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
+
+
+class FakeModel:
+	extends Node3D
+	var overlay_calls: Array = []
+	var body_calls: Array = []
+	var pose_call_order: Array[String] = []
+	func play_body_clip_at(key: String, phase_ticks: int) -> void:
+		body_calls.append([key, phase_ticks])
+		pose_call_order.append("body")
+	func set_aim_overlay(deltas: Array) -> void:
+		overlay_calls.append(deltas)
+		pose_call_order.append("overlay")
 
 
 class FakeSim:
@@ -32,6 +46,23 @@ class FakeSim:
 			out[base + NovaSimulation.PF_PITCH_DEG] = float(entity.get("pitch", 0.0))
 			out[base + NovaSimulation.PF_ROLL_DEG] = float(entity.get("roll", 0.0))
 			out[base + NovaSimulation.PF_ALIVE] = float(entity.get("alive", 1))
+			out[base + NovaSimulation.PF_ANIM_STATE] = float(entity.get("anim_state", -1))
+			out[base + NovaSimulation.PF_ANIM_PHASE_TICKS] = float(
+					entity.get("anim_phase", 0))
+			out[base + NovaSimulation.PF_AIM_OVERLAY_VALID] = float(
+					entity.get("aim_overlay_valid", 0))
+			var body: Vector3 = entity.get("aim_body", Vector3.ZERO)
+			out[base + NovaSimulation.PF_AIM_BODY_PITCH_DEG] = body.x
+			out[base + NovaSimulation.PF_AIM_BODY_YAW_DEG] = body.y
+			out[base + NovaSimulation.PF_AIM_BODY_ROLL_DEG] = body.z
+			var angles: PackedVector3Array = entity.get(
+					"aim_angles", PackedVector3Array())
+			for cls in range(mini(angles.size(), 9)):
+				var ob := (base + NovaSimulation.PF_AIM_ANGLES
+						+ cls * NovaSimulation.PF_AIM_CLASS_STRIDE)
+				out[ob] = angles[cls].x
+				out[ob + 1] = angles[cls].y
+				out[ob + 2] = angles[cls].z
 		return out
 
 
@@ -41,7 +72,7 @@ class FakePlacer:
 
 	func build_player_animated_model(_type_id: int, parent: Node3D,
 			_env_node: Node = null) -> Node3D:
-		var node := Node3D.new()
+		var node := FakeModel.new()
 		parent.add_child(node)
 		built.append(node)
 		return node
@@ -101,3 +132,56 @@ func test_wire_model_spawn_registers_after_identity_and_transform_are_ready() ->
 	var late := SpawnObserver.new()
 	presenter.set_node_spawned_callback(Callable(late, "on_spawned"))
 	assert_eq(late.calls.size(), 1, "late consumers receive every already-live wire node")
+
+
+func test_wire_model_applies_the_same_packed_overlay_result() -> void:
+	var angles := PackedVector3Array()
+	for i in range(9):
+		angles.append(Vector3(-4.0 + i, 70.0 + i, 1.0 + i))
+	var sim := FakeSim.new()
+	sim.entities = [{
+		"type_id": 4567,
+		"handle": 0x1004,
+		"anim_state": 67,
+		"anim_phase": 11,
+		"aim_overlay_valid": 1,
+		"aim_body": Vector3(6.0, 33.0, -2.0),
+		"aim_angles": angles,
+	}]
+	var placer := FakePlacer.new()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var presenter := WirePresentPass.new()
+	presenter.setup(sim, placer, container)
+	presenter.present()
+	var model := placer.built[0] as FakeModel
+	assert_eq(model.body_calls, [["anim_emplaced", 11]],
+			"wire presentation selects the replicated mounted body clip")
+	assert_eq(model.pose_call_order, ["overlay", "body"],
+			"the current packed overlay is installed before the body clip evaluates")
+	assert_eq(model.overlay_calls.size(), 1)
+	var deltas: Array = model.overlay_calls[0]
+	assert_eq(deltas.size(), 9)
+	var body_basis := MissionObjectPlacer.bms_to_godot_basis(
+			Vector3(6.0, 33.0, -2.0))
+	assert_true(model.basis.is_equal_approx(body_basis))
+	assert_true((deltas[8] as Basis).is_equal_approx(
+			body_basis.inverse() * MissionObjectPlacer.bms_to_godot_basis(angles[8])))
+
+
+func test_wire_model_clears_overlay_when_snapshot_selector_is_invalid() -> void:
+	var sim := FakeSim.new()
+	sim.entities = [{
+		"type_id": 4567,
+		"handle": 0x1004,
+		"aim_overlay_valid": 0,
+	}]
+	var placer := FakePlacer.new()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var presenter := WirePresentPass.new()
+	presenter.setup(sim, placer, container)
+	presenter.present()
+	var model := placer.built[0] as FakeModel
+	assert_eq(model.overlay_calls, [[]],
+			"a remote model cannot retain an overlay after selector invalidation")

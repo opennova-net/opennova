@@ -27,7 +27,10 @@ namespace opennova::mission {
 
 struct ItemSeatSpec {
     int32_t type_id = 0; // raw BMS/items.def id stored in bms::Entity::type_id
-    uint8_t emplaced_pose_variant = 0;
+    // Target item definition phrase_set (+0x86C). Zero is valid when the flag is
+    // true; false means the production metadata source was absent.
+    bool mount_config_valid = false;
+    int32_t mount_config = 0;
     std::vector<world::Seat> seats;
     // "armory*" userpoint locals (host feeds them only for items.def Armory-attrib
     // 0x80000 items) + the ewep 'primary_weapon' link — the attach-label sources.

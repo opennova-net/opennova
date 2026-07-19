@@ -22,10 +22,11 @@ extends RefCounted
 # is the live §5.38b two-handle (L = local sim, H = wire identity) reconciliation.
 #
 # Host-agnostic, RefCounted, preload-referenced (same convention as MissionPresentPass).
-# Body-clip animation of remote avatars is a follow-up (the 0x0A stream carries position +
-# coarse yaw, not anim state); a first cut renders them in rest pose, like NetWorldView.
+# Replicated infantry anim state and phase drive the same primary body clip as the host pass;
+# the packed aim overlay is then applied to that clip in the same snapshot row.
 
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
+const PresentAimOverlay := preload("res://engine/world/present_aim_overlay.gd")
 # [orig: EntityPool_FindByNetId @ 0x4f0a20]
 const WIRE_HANDLE_POOL_SHIFT := 12
 const WIRE_HANDLE_POOL_MASK := 0xF
@@ -73,6 +74,27 @@ func setup(sim, placer, container: Node3D, env_node = null, defer_index = null) 
 
 func get_stats() -> Dictionary:
 	return _stats.duplicate()
+
+
+# Keep the wire-driven skeletal primary pose on the same projection path as
+# MissionPresentPass. Infantry uses its exact state-to-clip key; compatible
+# non-infantry nodes retain the coarse body-slot fallback.
+func _apply_body_anim(node, snap: PackedFloat32Array, base: int) -> void:
+	var anim_phase := int(snap[base + NovaSimulation.PF_ANIM_PHASE_TICKS])
+	var anim_state := int(snap[base + NovaSimulation.PF_ANIM_STATE])
+	if anim_state >= 0 and node.has_method("play_body_clip_at"):
+		var key := NovaSimulation.infantry_anim_key(anim_state)
+		if not key.is_empty():
+			node.play_body_clip_at(key, anim_phase)
+			return
+	var body_anim_slot := int(snap[base + NovaSimulation.PF_BODY_ANIM_SLOT])
+	if body_anim_slot < 0:
+		return
+	if node.has_method("play_body_anim_at"):
+		node.play_body_anim_at(body_anim_slot, anim_phase)
+		return
+	if node.has_method("play_body_anim"):
+		node.play_body_anim(body_anim_slot)
 
 
 ## Register the render-host seam for runtime consumers that follow a dynamically
@@ -161,6 +183,8 @@ func present() -> void:
 			snap[base + NovaSimulation.PF_YAW_DEG],
 			snap[base + NovaSimulation.PF_ROLL_DEG])
 		node.transform = Transform3D(MissionObjectPlacer.bms_to_godot_basis(rot), pos)
+		PresentAimOverlay.apply(node, snap, base)
+		_apply_body_anim(node, snap, base)
 		node.visible = int(snap[base + NovaSimulation.PF_ALIVE]) == 1
 		if spawned_now and _node_spawned_callback.is_valid():
 			_node_spawned_callback.call(node, runtime_kind, type_id)

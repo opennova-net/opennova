@@ -8,6 +8,107 @@ extends GutTest
 # loopback identity guard (tests/netsim/loopback_identity_test).
 
 
+func _present_row_base_for_handle(
+		sim: NovaSimulation, snapshot: PackedFloat32Array, wire_handle: int) -> int:
+	var stride := sim.get_present_stride()
+	for record in range(snapshot.size() / stride):
+		var base := record * stride
+		if int(snapshot[base + NovaSimulation.PF_WIRE_HANDLE]) == wire_handle:
+			return base
+	return -1
+
+
+func _packed_aim_angles(
+		snapshot: PackedFloat32Array, base: int) -> PackedVector3Array:
+	var angles := PackedVector3Array()
+	angles.resize(9)
+	for overlay_class in range(9):
+		var offset: int = (base + NovaSimulation.PF_AIM_ANGLES
+				+ overlay_class * NovaSimulation.PF_AIM_CLASS_STRIDE)
+		angles[overlay_class] = Vector3(
+				snapshot[offset], snapshot[offset + 1], snapshot[offset + 2])
+	return angles
+
+
+func test_mounted_local_overlay_matches_packed_present_for_valid_zero_and_six() -> void:
+	# The local avatar and the listen-server client view are two consumers of the
+	# same authoritative selector result. Config 0 is deliberately included: an
+	# explicit zero must survive as a real counter-lean branch, not become unknown.
+	for config_value in [0, 6]:
+		var md := NovaMissionData.new()
+		assert_eq(md.create_default(), OK)
+		assert_false(md.add_entity(
+				NovaMissionData.KIND_ITEM, 101294,
+				Vector3(2, 0, 0), Vector3.ZERO).is_empty())
+
+		var sim := NovaSimulation.new()
+		sim.enable_listen_server(true)
+		sim.set_item_seat_specs([{
+			"type_id": 1294,
+			"mount_config_valid": true,
+			"mount_config": config_value,
+			"seats": [{
+				"type": 3,
+				"bone_index": 6,
+				"position": Vector3.ZERO,
+				"source_name": "UseGun",
+			}],
+		}])
+		assert_true(sim.load_from_mission_data(md))
+		assert_true(sim.has_local_player())
+		assert_true(sim.local_player_toggle_mount(),
+				"the listen-server player mounts the config-%d gun" % config_value)
+		sim.set_local_player_mouse(511, false)
+		sim.add_local_player_look(80.0, 100.0)
+		sim.step()
+
+		var local: Dictionary = sim.get_local_player_aim_overlay()
+		assert_true(bool(local.get("valid", false)))
+		assert_eq(int(local.get("mount_mode", 0)), 2,
+				"UseGun selects the animation-owned Gunner mode")
+		assert_true(bool(local.get("mount_config_valid", false)))
+		assert_eq(int(local.get("mount_config", -1)), config_value)
+		var local_angles: PackedVector3Array = local.get(
+				"angles", PackedVector3Array())
+		assert_eq(local_angles.size(), 9)
+
+		var snapshot := sim.get_present_snapshot()
+		var base := _present_row_base_for_handle(
+				sim, snapshot, sim.get_local_player_wire_handle())
+		assert_gte(base, 0, "the mounted local player reached its decoded client view")
+		if base >= 0:
+			assert_eq(int(snapshot[base + NovaSimulation.PF_AIM_OVERLAY_VALID]), 1)
+			var packed_body := Vector3(
+					snapshot[base + NovaSimulation.PF_AIM_BODY_PITCH_DEG],
+					snapshot[base + NovaSimulation.PF_AIM_BODY_YAW_DEG],
+					snapshot[base + NovaSimulation.PF_AIM_BODY_ROLL_DEG])
+			assert_lt(packed_body.distance_to(local.get("body", Vector3.ZERO)), 0.001,
+					"packed body orientation equals the local selector result")
+			var packed_angles := _packed_aim_angles(snapshot, base)
+			for overlay_class in range(9):
+				assert_lt(packed_angles[overlay_class].distance_to(
+						local_angles[overlay_class]), 0.001,
+						"config %d class %d has local/present parity" % [
+								config_value, overlay_class])
+
+			# Keep each row branch-distinguishing rather than accepting nine equal
+			# zeroes: config 0 counter-leans its arms, while config 6 keeps the
+			# upper body on the body matrix and lets only the head take aim.
+			if config_value == 0:
+				assert_gt(packed_angles[4].distance_to(packed_angles[0]), 0.1,
+						"config 0 exports its witnessed arm counter-lean")
+				assert_gt(packed_angles[4].distance_to(packed_angles[8]), 0.1,
+						"config 0 arm is neither the body nor full-aim matrix")
+			else:
+				for overlay_class in [1, 2, 3, 4, 7]:
+					assert_lt(packed_angles[overlay_class].distance_to(
+							packed_angles[0]), 0.001,
+							"config 6 class %d stays on body" % overlay_class)
+				assert_gt(packed_angles[8].distance_to(packed_angles[0]), 0.1,
+						"config 6 head alone preserves full aim")
+		sim.free()
+
+
 func test_listen_server_present_reads_client_decoded_state() -> void:
 	var md := NovaMissionData.new()
 	assert_eq(md.create_default(), OK)

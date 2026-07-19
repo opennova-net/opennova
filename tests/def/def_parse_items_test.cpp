@@ -150,6 +150,49 @@ static int test_particle_keys(void) {
     return 0;
 }
 
+/* The mounted-gunner selector reads the target item definition's authored
+   phrase_set dword at +0x86c. Zero is a real value, so the portable definition
+   record must carry presence separately from the parsed integer.
+   [orig: ItemDef_ParseProperty @ 0x49f9db..0x49fa0a] */
+static int test_phrase_set_presence(void) {
+    static const char snippet[] =
+        "begin \"Absent\"\n"
+        "  id 1\n"
+        "end\n"
+        "begin \"Explicit Zero\"\n"
+        "  id 2\n"
+        "  phrase_set 0\n"
+        "end\n"
+        "begin \"Signed Value\"\n"
+        "  id 3\n"
+        "  PHRASE_SET -2\n"
+        "end\n";
+    DefItemsFile items;
+    memset(&items, 0, sizeof(items));
+    if (def_parse_items_memory((const unsigned char *)snippet, sizeof(snippet) - 1,
+                               &items) != 0 ||
+        items.count != 3) {
+        fprintf(stderr, "FAIL: phrase_set snippet did not parse\n");
+        def_free_items(&items);
+        return 1;
+    }
+    int fails = 0;
+    if (items.entries[0].phrase_set_valid != 0) {
+        fprintf(stderr, "FAIL: absent phrase_set became valid\n");
+        ++fails;
+    }
+    if (items.entries[1].phrase_set_valid != 1 || items.entries[1].phrase_set != 0) {
+        fprintf(stderr, "FAIL: explicit phrase_set 0 lost validity/value\n");
+        ++fails;
+    }
+    if (items.entries[2].phrase_set_valid != 1 || items.entries[2].phrase_set != -2) {
+        fprintf(stderr, "FAIL: phrase_set must preserve signed atol semantics\n");
+        ++fails;
+    }
+    def_free_items(&items);
+    return fails;
+}
+
 int main(void) {
     const char *repo_root = test_paths_repo_root(__FILE__);
     char path[4096];
@@ -486,6 +529,9 @@ int main(void) {
     def_free_items(&items);
 
     if (test_particle_keys() != 0) {
+        return 1;
+    }
+    if (test_phrase_set_presence() != 0) {
         return 1;
     }
 

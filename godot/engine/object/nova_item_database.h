@@ -90,6 +90,10 @@ private:
 		// (the attach label's text source); empty if none authored.
 		// [orig: -> ItemDef+0x54B primaryWeapon; docs/world/itemdef-re.md]
 		String primary_weapon;
+		// Mounted skeletal selector metadata: authored items.def phrase_set is the
+		// target itemDef+0x86C dword. Presence is separate because zero is valid.
+		bool mount_config_valid = false;
+		int mount_config = 0;
 		// The destruction/husk block (docs/world/world-wac-ai-re.md §24):
 		// the husk model stages, the death sound, the armor-class words, the kz
 		// death-blast radius, and the per-section debris types.
@@ -192,6 +196,10 @@ public:
 	// (the USEGUN attach label resolves its attachtextid); empty if none authored.
 	// [orig: -> ItemDef+0x54B; consumer draw_vehicle_seat_and_armory_labels @ 0x5a351d]
 	String get_primary_weapon(int id) const;
+	// {valid: bool, value: int} for the target definition's phrase_set +0x86C.
+	// Always returns both fields so absent and authored zero stay distinct.
+	// [orig: parse @ 0x49F9DB..0x49FA0A; mounted consumer @ 0x4B1884]
+	Dictionary get_mount_config(int id) const;
 	// items.def husk / huskfinal — the destroyed-model stages the render and
 	// collision swap to at death (Flags & 4); empty if none authored.
 	// [orig: itemDef+0x70/+0x80 -> huskModel/huskFinalModel (+0xF4/+0xF8);

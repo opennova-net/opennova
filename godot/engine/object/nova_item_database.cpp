@@ -47,6 +47,7 @@ void NovaItemDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_clipsize", "id"), &NovaItemDatabase::get_clipsize);
 	ClassDB::bind_method(D_METHOD("get_deathtime_ticks", "id"), &NovaItemDatabase::get_deathtime_ticks);
 	ClassDB::bind_method(D_METHOD("get_primary_weapon", "id"), &NovaItemDatabase::get_primary_weapon);
+	ClassDB::bind_method(D_METHOD("get_mount_config", "id"), &NovaItemDatabase::get_mount_config);
 	ClassDB::bind_method(D_METHOD("get_sound_profile", "id"), &NovaItemDatabase::get_sound_profile);
 	ClassDB::bind_method(D_METHOD("get_sound_loops", "id"), &NovaItemDatabase::get_sound_loops);
 	ClassDB::bind_method(D_METHOD("get_particle_effects", "id"), &NovaItemDatabase::get_particle_effects);
@@ -140,6 +141,8 @@ NovaItemDatabase::Item NovaItemDatabase::item_from_entry(const ::DefItemDef &ent
 	item.clipsize = entry.clipsize;
 	item.deathtime_ticks = entry.deathtime_ticks;
 	item.primary_weapon = String(entry.primary_weapon);
+	item.mount_config_valid = entry.phrase_set_valid != 0;
+	item.mount_config = entry.phrase_set;
 	// The destruction/husk block (world-wac-ai-re §24).
 	item.husk = String(entry.husk);
 	item.huskfinal = String(entry.huskfinal);
@@ -308,6 +311,15 @@ String NovaItemDatabase::get_primary_weapon(int id) const {
 	return it == items.end() ? String() : it->second.primary_weapon;
 }
 
+Dictionary NovaItemDatabase::get_mount_config(int id) const {
+	Dictionary out;
+	const auto it = items.find(id);
+	const bool valid = it != items.end() && it->second.mount_config_valid;
+	out["valid"] = valid;
+	out["value"] = valid ? it->second.mount_config : 0;
+	return out;
+}
+
 // Entity-attached profile name; the engine composes "<EntityDefName>_<SoundType>"
 // lookups from it [orig: SoundProfile_FindByEntityAndType @ 0x528180].
 String NovaItemDatabase::get_sound_profile(int id) const {
@@ -412,6 +424,8 @@ Dictionary NovaItemDatabase::get_item(int id) const {
 	out["anim_def"] = it->second.anim_def;
 	out["sound_profile"] = it->second.sound_profile;
 	out["soundloops"] = get_sound_loops(id);
+	out["mount_config_valid"] = it->second.mount_config_valid;
+	out["mount_config"] = it->second.mount_config_valid ? it->second.mount_config : 0;
 	return out;
 }
 
@@ -455,6 +469,8 @@ Array NovaItemDatabase::get_items() const {
 		entry["anim_def"] = item->anim_def;
 		entry["sound_profile"] = item->sound_profile;
 		entry["soundloops"] = get_sound_loops(item->id);
+		entry["mount_config_valid"] = item->mount_config_valid;
+		entry["mount_config"] = item->mount_config_valid ? item->mount_config : 0;
 		out.push_back(entry);
 	}
 	return out;

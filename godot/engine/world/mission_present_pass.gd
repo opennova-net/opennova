@@ -28,6 +28,7 @@ extends RefCounted
 # fallback). Host-agnostic, RefCounted, preload-referenced (same convention as MissionObjectPlacer).
 
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
+const PresentAimOverlay := preload("res://engine/world/present_aim_overlay.gd")
 
 var _sim                    # NovaSimulation (or a compatible snapshot source)
 var _index                  # MissionEntityRegistry: resolve(bms_id, kind, index) -> Node
@@ -71,6 +72,7 @@ func present() -> void:
 			continue
 		if _drive_transform:
 			_apply_transform(node, snap, base)
+		PresentAimOverlay.apply(node, snap, base)
 		if _drive_part_anim:
 			_apply_procedural_part(node, snap, base)
 		if _drive_visibility:
