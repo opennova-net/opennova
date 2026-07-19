@@ -37,9 +37,12 @@ const FLAG_BOTH_SIDES := 0x1
 
 var _world: Node                # duck-typed host (get_sim()); re-resolved every frame
 var _mesh: ImmediateMesh        # static entities: rebuilt only on set/pose/husk change
-var _dyn_mesh: ImmediateMesh    # posed organic bone spheres: rebuilt every refresh
+var _dyn_multimesh: MultiMesh   # posed organic spheres: retained across pose updates
+var _dyn_unit_mesh: ArrayMesh   # one unit wire sphere shared by every organic section
 var _labels: Array[Label3D] = []
 var _signature := 0
+var _organic_signature: Array = []
+var _organic_signature_valid := false
 
 
 # Stable per-material color: golden-ratio hue walk, saturated and bright so
@@ -74,6 +77,36 @@ static func organic_damage_multiplier(section: int) -> float:
 	return 1.0
 
 
+func _make_unit_wire_sphere_mesh() -> ArrayMesh:
+	var vertices := PackedVector3Array()
+	var colors := PackedColorArray()
+	var prev_xz := Vector3(1.0, 0.0, 0.0)
+	var prev_xy := Vector3(1.0, 0.0, 0.0)
+	var prev_yz := Vector3(0.0, 1.0, 0.0)
+	for i in range(1, SPHERE_SEGMENTS + 1):
+		var t := TAU * float(i) / float(SPHERE_SEGMENTS)
+		var c := cos(t)
+		var s := sin(t)
+		var p_xz := Vector3(c, 0.0, s)
+		var p_xy := Vector3(c, s, 0.0)
+		var p_yz := Vector3(0.0, c, s)
+		vertices.append_array(PackedVector3Array([
+			prev_xz, p_xz, prev_xy, p_xy, prev_yz, p_yz,
+		]))
+		for endpoint in range(6):
+			colors.append(Color.WHITE)
+		prev_xz = p_xz
+		prev_xy = p_xy
+		prev_yz = p_yz
+	var arrays: Array = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = vertices
+	arrays[Mesh.ARRAY_COLOR] = colors
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_LINES, arrays)
+	return mesh
+
+
 func setup(world: Node) -> void:
 	_world = world
 	_mesh = ImmediateMesh.new()
@@ -85,12 +118,20 @@ func setup(world: Node) -> void:
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	mi.material_override = mat
 	add_child(mi)
-	_dyn_mesh = ImmediateMesh.new()
-	var dyn := MeshInstance3D.new()
+	_dyn_unit_mesh = _make_unit_wire_sphere_mesh()
+	_dyn_multimesh = MultiMesh.new()
+	_dyn_multimesh.instance_count = 0
+	_dyn_multimesh.transform_format = MultiMesh.TRANSFORM_3D
+	_dyn_multimesh.use_colors = true
+	_dyn_multimesh.use_custom_data = false
+	_dyn_multimesh.mesh = _dyn_unit_mesh
+	var dyn := MultiMeshInstance3D.new()
 	dyn.name = "HitboxOrganicLines"
-	dyn.mesh = _dyn_mesh
+	dyn.multimesh = _dyn_multimesh
 	var dyn_mat := MissionOverlayUtil.line_material()
 	dyn_mat.no_depth_test = true  # people read through cover
+	dyn_mat.albedo_color = Color.WHITE
+	dyn_mat.vertex_color_use_as_albedo = true
 	dyn.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	dyn.material_override = dyn_mat
 	add_child(dyn)
@@ -109,14 +150,18 @@ func setup(world: Node) -> void:
 		_labels.append(lb)
 
 
-const REFRESH_EVERY := 10  # frames — the native fetch marshals up to 24k tris
+const REFRESH_INTERVAL_SECONDS := 1.0 / 6.0  # six Hz; native fetch marshals up to 24k tris
+const REFRESH_EPSILON := 0.000000001
 
-var _frame := 0
+var _refresh_elapsed := 0.0
 
 
-func _process(_delta: float) -> void:
-	_frame += 1
-	if _frame % REFRESH_EVERY == 0:
+func _process(delta: float) -> void:
+	if delta <= 0.0:
+		return
+	_refresh_elapsed += delta
+	if _refresh_elapsed + REFRESH_EPSILON >= REFRESH_INTERVAL_SECONDS:
+		_refresh_elapsed = fposmod(_refresh_elapsed, REFRESH_INTERVAL_SECONDS)
 		refresh_now()
 
 
@@ -141,27 +186,87 @@ func _resolve_sim() -> Object:
 
 func _clear_all() -> void:
 	_mesh.clear_surfaces()
-	_dyn_mesh.clear_surfaces()
+	if _dyn_multimesh.instance_count != 0:
+		_dyn_multimesh.instance_count = 0
+	if _dyn_multimesh.custom_aabb != AABB():
+		_dyn_multimesh.custom_aabb = AABB()
 	_signature = 0
+	_organic_signature = []
+	_organic_signature_valid = false
 	for lb in _labels:
 		lb.visible = false
 
 
 func _update(entities: Array, organics: Array) -> void:
-	# The posed organic bone spheres move constantly — their own mesh,
-	# rebuilt every refresh.
-	_dyn_mesh.clear_surfaces()
-	var dyn_segments: Array = []
+	# Native debug snapshots allocate fresh containers at the fixed cadence, but
+	# the posed values often stay identical across several samples. Cache only
+	# the fields that affect emitted sphere geometry; label-only fields still
+	# flow through _update_labels below.
+	var organic_signature: Array = []
 	for o_v in organics:
 		var o: Dictionary = o_v
-		var radius := float(o.get("radius", 0.0))
+		var radius := float(o.get('radius', 0.0))
 		if radius <= 0.0:
 			continue
-		_wire_sphere(dyn_segments, o.get("pos", Vector3.ZERO), radius,
-				organic_section_color(int(o.get("section", -1)),
-						bool(o.get("masked", false)), bool(o.get("fallback", false))))
-	if not dyn_segments.is_empty():
-		MissionOverlayUtil.emit_line_segments(_dyn_mesh, dyn_segments)
+		organic_signature.append(o.get('pos', Vector3.ZERO))
+		organic_signature.append(radius)
+		organic_signature.append(int(o.get('section', -1)))
+		organic_signature.append(bool(o.get('masked', false)))
+		organic_signature.append(bool(o.get('fallback', false)))
+	var organic_geometry_changed := (
+			not _organic_signature_valid or organic_signature != _organic_signature)
+	if organic_geometry_changed:
+		_organic_signature = organic_signature
+		_organic_signature_valid = true
+
+	if organic_geometry_changed:
+		var instance_count := 0
+		for o_v in organics:
+			var o: Dictionary = o_v
+			if float(o.get("radius", 0.0)) > 0.0:
+				instance_count += 1
+		if _dyn_multimesh.instance_count != instance_count:
+			_dyn_multimesh.instance_count = instance_count
+		if instance_count > 0:
+			var packed := PackedFloat32Array()
+			packed.resize(instance_count * 16)
+			var packed_index := 0
+			var bounds := AABB()
+			var has_bounds := false
+			for o_v in organics:
+				var o: Dictionary = o_v
+				var radius := float(o.get("radius", 0.0))
+				if radius <= 0.0:
+					continue
+				var pos: Vector3 = o.get("pos", Vector3.ZERO)
+				var color := organic_section_color(int(o.get("section", -1)),
+						bool(o.get("masked", false)), bool(o.get("fallback", false)))
+				var offset := packed_index * 16
+				packed[offset] = radius
+				packed[offset + 1] = 0.0
+				packed[offset + 2] = 0.0
+				packed[offset + 3] = pos.x
+				packed[offset + 4] = 0.0
+				packed[offset + 5] = radius
+				packed[offset + 6] = 0.0
+				packed[offset + 7] = pos.y
+				packed[offset + 8] = 0.0
+				packed[offset + 9] = 0.0
+				packed[offset + 10] = radius
+				packed[offset + 11] = pos.z
+				packed[offset + 12] = color.r
+				packed[offset + 13] = color.g
+				packed[offset + 14] = color.b
+				packed[offset + 15] = color.a
+				var extent := Vector3.ONE * radius
+				var row_bounds := AABB(pos - extent, extent * 2.0)
+				bounds = bounds.merge(row_bounds) if has_bounds else row_bounds
+				has_bounds = true
+				packed_index += 1
+			_dyn_multimesh.set_buffer(packed)
+			_dyn_multimesh.custom_aabb = bounds
+		else:
+			_dyn_multimesh.custom_aabb = AABB()
 
 	# Statics only change on set membership, pose, or husk swap.
 	var sig_parts := []
@@ -223,8 +328,6 @@ func _update(entities: Array, organics: Array) -> void:
 
 
 func _update_labels(entities: Array, organics: Array) -> void:
-	for lb in _labels:
-		lb.visible = false
 	# Labels on the nearest static entities and person bone spheres to the camera.
 	var cam := get_viewport().get_camera_3d() if get_viewport() != null else null
 	var cam_pos := cam.global_position if cam != null else Vector3.ZERO
@@ -238,12 +341,15 @@ func _update_labels(entities: Array, organics: Array) -> void:
 			continue
 		order.append([cam_pos.distance_to(o.get("pos", Vector3.ZERO)), true, o])
 	order.sort_custom(func(x, y): return x[0] < y[0])
-	for i in range(mini(order.size(), _labels.size())):
+	var visible_count := mini(order.size(), _labels.size())
+	for i in range(visible_count):
 		var lb := _labels[i]
 		var is_organic: bool = order[i][1]
 		var e3: Dictionary = order[i][2]
 		var ent := int(e3.get("entity_handle", 0xFFFF))
 		var text := "%d/%d" % [(ent >> 12) & 0xF, ent & 0xFFF]
+		var label_position: Vector3
+		var label_modulate: Color
 		if is_organic:
 			var section := int(e3.get("section", -1))
 			var radius := float(e3.get("radius", 0.0))
@@ -264,28 +370,37 @@ func _update_labels(entities: Array, organics: Array) -> void:
 			else:
 				var authored := float(e3.get("authored_radius", radius))
 				text += "  authored %.2f" % authored
-			lb.text = text
-			lb.position = (e3.get("pos", Vector3.ZERO) as Vector3) \
+			label_position = (e3.get("pos", Vector3.ZERO) as Vector3) \
 					+ Vector3(0.0, radius + 0.08, 0.0)
-			lb.modulate = organic_section_color(section, bool(e3.get("masked", false)),
+			label_modulate = organic_section_color(section, bool(e3.get("masked", false)),
 					bool(e3.get("fallback", false)))
-			lb.visible = true
-			continue
-		var total := int(e3.get("face_total", 0))
-		var drawn: int = (e3.get("materials", PackedByteArray()) as PackedByteArray).size()
-		if not bool(e3.get("has_faces", true)):
-			text += "  SPHERE STAND-IN"
 		else:
-			text += "  %d faces" % total
-			if drawn < total:
-				text += " (drawn %d)" % drawn
-		if bool(e3.get("husk", false)):
-			text += "  HUSK"
-		lb.text = text
-		lb.position = (e3.get("pos", Vector3.ZERO) as Vector3) \
-				+ Vector3(0.0, float(e3.get("bound_radius", 1.0)) + 0.3, 0.0)
-		lb.modulate = Color(1.0, 0.9, 0.5) if bool(e3.get("husk", false)) else Color(0.85, 0.95, 1.0)
-		lb.visible = true
+			var total := int(e3.get("face_total", 0))
+			var drawn: int = (e3.get("materials", PackedByteArray()) as PackedByteArray).size()
+			if not bool(e3.get("has_faces", true)):
+				text += "  SPHERE STAND-IN"
+			else:
+				text += "  %d faces" % total
+				if drawn < total:
+					text += " (drawn %d)" % drawn
+			if bool(e3.get("husk", false)):
+				text += "  HUSK"
+			label_position = (e3.get("pos", Vector3.ZERO) as Vector3) \
+					+ Vector3(0.0, float(e3.get("bound_radius", 1.0)) + 0.3, 0.0)
+			label_modulate = Color(1.0, 0.9, 0.5) \
+					if bool(e3.get("husk", false)) else Color(0.85, 0.95, 1.0)
+		if lb.text != text:
+			lb.text = text
+		if lb.position != label_position:
+			lb.position = label_position
+		if lb.modulate != label_modulate:
+			lb.modulate = label_modulate
+		if not lb.visible:
+			lb.visible = true
+	for i in range(visible_count, _labels.size()):
+		var lb := _labels[i]
+		if lb.visible:
+			lb.visible = false
 
 
 # Three axis-aligned wireframe circles reading as a sphere.

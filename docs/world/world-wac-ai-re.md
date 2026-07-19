@@ -1934,20 +1934,29 @@ one slot occupant cannot suppress or inherit the model/husk/pose of the next
 occupant.
 
 F3 exposes the same collision truth rather than reconstructing a display-only
-approximation. **Rounds → Show hit meshes** draws every current-pose person
-section at its effective projectile-zero radius, color-coded by the damage
-table (0-4 orange, 5-8 cyan, 9-12/15-18 lime, 13-14 magenta; masked dark red,
-unresolved fallback amber), and labels entity/bone/radii/multiplier. The Rounds
-event list names the independent reaction bone and damage zone. Both views consume
+approximation. On each six-Hz diagnostic sample, **Rounds → Show hit meshes**
+draws every then-current-pose person section at its effective projectile-zero
+radius, color-coded by the damage table (0-4 orange, 5-8 cyan, 9-12/15-18 lime,
+13-14 magenta; masked dark red, unresolved fallback amber), and labels
+entity/bone/radii/multiplier. The Rounds event list names the independent
+reaction bone and damage zone. Both views consume
 `CollisionWorld::debug_person_sections` / `NovaSimulation.get_hitbox_debug()`
-and the same matrix provider used by live bullets. The posed-person view omits
-the local avatar and shares the object-triangle view's local 80-unit /
-96-actor debug budget. Native `collision` tests pin
-the moved-head pose, reverse-scan/mask behavior, radius rules, primary-bone
-propagation into a directional death animation, and a primary-14/secondary-2
-775-damage vector. GUT pins the late-spawn/recycled-slot attach, F3's remote-only
-80-unit/96-entity budget/dead-body fallback, the zone colors and sphere payload,
-and animated CFAC cache invalidation when only transformed triangles move.
+and the same matrix provider used by live bullets. Between reads the view
+retains that snapshot, one shared unit-sphere mesh, and its packed MultiMesh
+batch; unchanged input causes no geometry, visibility, or label churn. The
+native object leg rejects organic and out-of-range candidates before invoking
+its matrix provider. The posed-person view omits the local avatar and shares
+the object-triangle view's local 80-unit / 96-actor debug budget. This cadence
+is diagnostic-only: live projectile queries do not consume the retained
+snapshot and remain exact, authoritative per-tick queries. Native `collision`
+tests pin the moved-head pose, reverse-scan/mask behavior, radius rules,
+primary-bone propagation into a directional death animation, and a
+primary-14/secondary-2 775-damage vector, plus object-leg prefiltering before
+matrix-provider work. GUT pins the late-spawn/recycled-slot attach, F3's
+remote-only 80-unit/96-entity budget/dead-body fallback, the zone colors, the
+packed 96×19 sphere batch, six-Hz cadence, unchanged-snapshot cache and
+real-input/label-only invalidation, and animated CFAC cache invalidation when
+only transformed triangles move.
 
 IDB write-backs (2026-07-18, saved): rename `g_ProjectileDragTable @ 0xB7B300`
 (ex `dword_B7B300`); comments at `@ 0x4ea291` (the exclusion-set build map)

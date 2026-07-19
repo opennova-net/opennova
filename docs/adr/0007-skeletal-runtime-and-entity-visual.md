@@ -96,7 +96,9 @@ Skinned organics and rigid view-model weapons animate from one path; mission NPC
 the object workspace has an `.adm` preview (the smoke-test gate). Dense clips (e.g. US01) are byte-unchanged
 by convention #3; compressed clips (C4* etc.) that previously collapsed now pose correctly. Organic
 collision spheres follow that same current pose per section, including in headless simulation, so the bone
-reported to damage/death selection and the F3 hit-mesh view cannot drift from the authoritative animation.
+reported to damage/death selection cannot drift from the authoritative animation. The F3 hit-mesh view
+samples that same authoritative pose at six Hz and retains the sampled snapshot between diagnostic reads;
+live projectile queries remain exact per-tick queries.
 
 ## Deferred seams (feature gaps, IDA-cited)
 
@@ -129,8 +131,10 @@ remote seat-frame state, and the local look/body split. Focused GUT `nova_simula
 rotated mounted enemy's posed section and confirms authoritative damage. Native `collision_test`
 additionally pins a moved posed head (section 14),
 strict reverse-scan/mask and radius rules, propagation of the primary/reaction bone into the directional
-death animation, and the independent secondary normal-infantry damage-zone multiplier; GUT
-`hitbox_debug_view_test` pins the F3 person-section roles. F3 omits the local avatar and
-bounds posed/fallback remote targets to 80 units under its 96-actor diagnostic cap. Headless dump confirms US01 and
-C4Ground (40+ clips, compressed) pose as humanoids with no collapse. User-validated US01 walk/idle in the
-object preview.
+death animation, and the independent secondary normal-infantry damage-zone multiplier. It also pins the
+native F3 object prefilter's organic and out-of-range rejection before matrix-provider work. GUT
+`hitbox_debug_view_test` pins the person-section roles, retained shared-sphere packed
+batch at the full 96×19 budget, six-Hz cadence, unchanged-snapshot cache, and real-input/label-only
+invalidation. F3 omits the local avatar and bounds posed/fallback remote targets to 80 units under its
+96-actor diagnostic cap. Headless dump confirms US01 and C4Ground (40+ clips, compressed) pose as humanoids
+with no collapse. User-validated US01 walk/idle in the object preview.
