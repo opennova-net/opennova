@@ -298,7 +298,7 @@ public:
     // OnGunOfSsn — the shipped IDB names were permuted misnomers).]
     // PLYRATTACHED: seated in ANY seat of the SSN (or of something the SSN carries).
     bool local_player_attached_to_ssn(uint16_t ssn) const;   // sub 38 @0x4f10d0
-    // PLYRONSSN: STANDING on the SSN (platform contact), not seated.
+    // PLYRONSSN: STANDING on the SSN (ground/carrier reference), not seated.
     bool local_player_standing_on_ssn(uint16_t ssn) const;   // sub 39 @0x4f1260
     // PLYRDRIVING: seated on the SSN chain in a ctrlx/drvrx seat.
     bool local_player_driving_ssn(uint16_t ssn) const;       // sub 40 @0x4f1150

@@ -110,8 +110,9 @@ void collect_attach_labels(World &world, const Entity &player, bool armory_mode,
 
 // The use-key mount toggle [orig: Entity_ToggleVehicleMount @0x436950 +
 // Entity_TryEnterNearestVehicle @0x4368c0]:
-//  - unmounted, standing ON a seat-bearing carrier (our platform contact ground_target
-//    stands in for the Flags 0x200 deck latch) -> best free seat on the carrier
+//  - unmounted, standing ON a seat-bearing carrier (our generic ground_target
+//    stands in for the Flags 0x200 deck latch; this is unrelated to CL) -> best free seat
+//    on the carrier
 //    [orig: Entity_FindBestSeatSlot @0x4351f0];
 //  - unmounted otherwise -> the nearest-seat scan;
 //  - mounted -> a seat in scan reach swaps [orig: @0x4369ac], else detach.

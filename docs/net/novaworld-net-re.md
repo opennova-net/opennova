@@ -1779,9 +1779,10 @@ misnomers corrected here):**
   (`@0x4c10a9-0x4c10bd`); 0xFFFF while mounted force-dismounts. And UNCONDITIONALLY —
   local player included — the record's carrier is stored into the entity's own
   **groundEntity (`+0x28`)**: `groundEntity = mounted ? mount->groundEntity : wireCarrier`
-  [orig: `@0x4c1353/@0x4c1358`]. The client's own platform physics re-derives the true
-  ground link every collision pass (`Flags |= 0x100000` + groundEntity = platform [orig:
-  `Entity_ProcessCollisionAndPlatformPhysics @ 0x4b3291-0x4b3297`]), so a HOST that echoes
+  [orig: `@0x4c1353/@0x4c1358`]. The client's own movement collision pass re-derives the
+  true ground link through its final CB/terrain probe (unconditional groundEntity store
+  `[orig: Entity_RaycastGroundHeightAndObject @ 0x414370]`; CL's 0x100000 ladder write is
+  separate and transient), so a HOST that echoes
   the matching carrier is steady-state — but a host that echoes `0xFFFF` at a grounded
   client re-nulls the link every 0x0A and destabilizes the standing state (D-NET-151).
 
@@ -3770,7 +3771,7 @@ calls `Entity_InitFromItemDef @0x49e550` (a leaf, §5.2b) and registers NO chann
 client-local round-load path above.
 
 **Landing-impact / fall-damage (the constant-damage root).** After ground/collision resolution
-(`[orig: Entity_ProcessCollisionAndPlatformPhysics @ 0x4b2bd0]`, returns the ground delta) @0x4b7cf4, when
+(`[orig: movement collision resolver @ 0x4b2bd0]`, returns the ground delta) @0x4b7cf4, when
 GROUNDED (delta ≤ 0; `jg` skips otherwise @0x4b7d04) the motor compares vertical velocity `velZ`
 (entity+0xA0) to `dword_C6EAE4 × -1057` (`imul eax,0FFFFFBDFh` @0x4b7d15; `cmp [esi+0A0h],eax; jg` skip
 @0x4b7d1b): if `velZ ≤ threshold` AND `entity == g_local_player_entity` it calls
@@ -5674,11 +5675,19 @@ nonzero scale uses the recovered scale-aware inverse. COBJ offsets are already b
 the matrices and are never added a second time. Matrix state `m[15] & 3` disables
 projectile faces.
 
-CB, CL, and VC are BVOL names, not aliases for that face mesh. **VC means vehicle
-collision.** CB/type 1 remains the ordinary solid convex volume used by generic
-LOS/ground/contact rays. CL/type 4 is the platform/seat-anchor contact volume. VC/type 7
-is the vehicle-collision volume selected by the vehicle-collision/contact mask. Ordinary
-static/dynamic bullet narrow phase touches none of them.
+The bundled **Super OED Manual v1.1 §1.1.3.4** supplies the canonical BVOL names:
+**CB** is Generic Collision Box, **CL** is Collision for Ladder, **CA** is Collision Box
+for Armory, **VC** is Collision for Vehicles, and **BB** is Blink Box. They are gameplay
+volumes, not aliases for the projectile face mesh. CB/type 1 is the ordinary solid convex
+volume used by generic LOS/ground/contact rays. CL/type 4 extracts a ladder alignment
+frame (anchor plus authored yaw/pitch); the reimplementation has that low-level contact
+path but not climb states/input/root motion/top exit. CA/type 6 sets the armory-zone flag
+that gates `weapon.mnu`. VC/type 7 is selected as solid geometry by the vehicle collision
+query when a section authors a VC/VK run; without one, that query falls back to CB/default
+solids. BB/type 8 drives indoor/section visibility. For a resolved static/dynamic collision
+instance, bullet narrow phase touches none of these BVOLs and requires CFAC triangles. An
+entity with no resolved collision instance may still use the separately documented
+compatibility sphere.
 
 Persons use the separate recovered COBJ bone-sphere path. When a live section pose is
 published, bones are tested descending; extra radius starts at bullet radius + 0.05 u;
@@ -5730,7 +5739,7 @@ the entity bone-disable/alternate-husk source, terrain `.TIL` surface overrides,
 `lawr|fgrenade` pass-through branch also remain open. The retail replacement's distinct
 pool-3 slot identity, same-frame allocator visitation, and copied fields that have no
 `LiveRound` representation remain structural gaps; the in-slot child first advances next
-tick and does not invent them. No CB/CL/VC equivalence is guessed for any of these gaps.
+tick and does not invent them. No BVOL-to-CFAC equivalence is guessed for any of these gaps.
 The peer-side post-damage callback/global-record tail is not yet represented separately
 from `RoundImpact`; production maintains the invariant that offline simulation is authoritative.
 
@@ -5973,7 +5982,7 @@ below is per-SECOND, while the client rescales wire seconds ×62 into ticks (§5
 2. **Capture requests** ride the physics pass, not this block: a live player touching a
    `0x20000` entity (authority, no preround, gametype & 0x30000) calls
    `Server_OnPlayerTouchCaptureZone @ 0x500BA0` `[orig: caller
-   Entity_ProcessCollisionAndPlatformPhysics @ 0x4B2BD0 @ 0x4B3238]`: gate
+    movement collision resolver @ 0x4B2BD0 @ 0x4B3238]`: gate
    `zone un-numbered || player.team == zone.team || control ≤ 0` (an enemy can only START
    on an unsecured zone; the securing OWNER always marks presence), mark the active-capture
    presence slot, and queue `{zone, player.team, player}` — numbered zones only while on
@@ -8794,7 +8803,7 @@ stop (`@ 0x48bf6f-0x48bff9`, aiComp mode 125), the minAI crew health clamp
 `EntityAI_ProcessVehicleStateMachine @ 0x4583c0`'s non-drive states, the engine sound
 state machine, husk/section damage, the wheel-contact pitch/roll solver
 (`Entity_ProcessTrackedVehiclePhysics @ 0x47c1c0` — substituted by the shared 5-tap
-bilinear terrain clamp), the above-water drive gate, the platform-follow
+bilinear terrain clamp), the above-water drive gate, the ground/carrier-follow
 grounded-on-entity block, and the driver-yaw analog write-back for remote drivers
 (their yaw is wire-owned on our host). 2026-07-17 update: the hull-vs-WORLD collision
 half of `Entity_CheckCollisionState @ 0x462a30` is PORTED (world-wac-ai-re §23.3
@@ -9053,9 +9062,10 @@ the same maneuver for 106 uplinks with NO snap: the retail host echoes the carri
 the player's own compact record (`vehBone=0 seat=0 carrier=0x1034` + compressed LOCAL pos)
 while the 0x0A header refs stay WORLD (the recipient-eye anchor). The witnessed contract
 (§5.10, all four ops of `NetPacket_SerializePlayerState @ 0x4C09C0`): the client uplinks
-`carrier = groundEntity (entity+0x28)` — maintained by its platform physics
-[orig: `Entity_ProcessCollisionAndPlatformPhysics @ 0x4b3291` sets `Flags |= 0x100000` +
-groundEntity] — with `Entity_TransformWorldToLocal @ 0x43BB50` pose (local pos + relative
+`carrier = groundEntity (entity+0x28)` — maintained by the movement resolver's final
+CB/terrain ground probe [orig: `Entity_RaycastGroundHeightAndObject @ 0x414370`
+unconditionally stores the hit entity or null; CL's 0x100000 write is separate] — with
+`Entity_TransformWorldToLocal @ 0x43BB50` pose (local pos + relative
 heading); the host apply lifts it back via `Entity_TransformLocalToWorld @ 0x43BD00`
 (`@0x4c1de1`, heading re-add `@0x43be7e`) and REPLACES flags bits 2-4 from the raw wire
 byte (`@0x4c1e4d`); the host echo selects mount-else-groundEntity (`@0x4c0a08`) and writes
@@ -9074,12 +9084,13 @@ along (§5.10 tables): `carrier_handle` (was vehicle_handle), `state_flags_byte`
 replace-bits apply (was flags_xor XOR-delta — the xor corrupted already-set crouch/prone
 bits), `anticheat_flags` (was reserved_18), priority `(handle,score)` pairs (were
 "weapon/fire counters"). DIVERGENCE NOTE (tracked here): retail's host re-derives
-groundEntity from its own platform physics each tick (it re-simulates remote players from
-replicated input); our read-apply peer model has no platform pass, so the owner's uplinked
-carrier is mirrored instead — wire-identical in steady state (the client reports exactly
-what it grounds on) but self-corrected a tick later by retail when they disagree. RESIDUAL:
-our HOST's own player never reports grounded (no platform physics on our motor), and
-seat-MOUNT replication (bone/seat != 0) remains deferred with mount modeling. Pinned by
+groundEntity from its own collision ground probe each tick (it re-simulates remote players
+from replicated input); our read-applied peer model does not re-simulate that probe, so the
+owner's uplinked carrier is mirrored instead — wire-identical in steady state (the client
+reports exactly what it grounds on) but self-corrected a tick later by retail when they
+disagree. Locally simulated entities do run the model-aware ground probe. RESIDUAL:
+read-applied disagreement is not host-corrected, and seat-MOUNT replication (bone/seat != 0)
+remains deferred with mount modeling. Pinned by
 `netsim_two_peer_fanout` (grounded_uplink_apply_and_echo: carrier-pose lift, ground_target
 mirror, flags replace, carrier echo + local pos + local yaw byte, free-standing regression;
 pose_transform_roundtrip: identity-exact + arbitrary-pose round-trip) and the §5.10 codec

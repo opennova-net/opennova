@@ -1,6 +1,6 @@
 // World-object collision unit tests [orig: the Jointops.exe query/resolver set —
 // Entity_TestCollisionSections @0x4aef90, Entity_RaycastCollisionModel @0x413060,
-// Entity_ComputeBoneCollisionForce @0x4ae150, Entity_ProcessCollisionAndPlatformPhysics
+// Entity_ComputeBoneCollisionForce @0x4ae150, the movement collision resolver
 // @0x4b2bd0, the proximity builders @0x4b9430/0x4b9340/0x4b8eb0] over hand-built
 // volumes (docs/world/world-wac-ai-re.md §15):
 //   * fixed matrix build/invert roundtrip (Q22 rows, translate-then-rotate inverse),
@@ -516,16 +516,16 @@ void test_secondary_vertical_force_is_full_strength() {
     query.source_bound_radius = fx(4.0);
 
     BlinkAccum blink;
-    PlatformContact platform;
+    LadderContact ladder;
     ContactResult result;
-    CHECK(collision_contact_force(target, query, blink, platform, result));
+    CHECK(collision_contact_force(target, query, blink, ladder, result));
     CHECK(result.force[0] < 0);
     CHECK(result.force[2] < 0);
     CHECK(std::abs(result.force[2] - result.force[0]) <= 1);
 }
 
 // ---------------------------------------------------------------------------
-void test_platform_contact_uses_positive_authored_pitch() {
+void test_ladder_contact_uses_positive_authored_pitch() {
     CollisionModel model = box_model(4, 0, 2.0, 2.0, 2.0);
     model.finalize_sections();
     const int32_t target_pos[3] = {0, 0, 0};
@@ -547,14 +547,79 @@ void test_platform_contact_uses_positive_authored_pitch() {
     query.mask = 0x1;
 
     BlinkAccum blink;
-    PlatformContact platform;
+    LadderContact ladder;
     ContactResult result;
-    CHECK(!collision_contact_force(target, query, blink, platform, result));
+    CHECK(!collision_contact_force(target, query, blink, ladder, result));
     CHECK((result.flags & 0x1u) != 0);
-    CHECK(platform.valid);
+    CHECK(ladder.valid);
     // Plane 0 has no vertical normal component, so retail's
     // target.pitch - normal.pitch leg must preserve the raw positive value.
-    CHECK(platform.pitch == bam_from_degrees_wrapped(30.0));
+    CHECK(ladder.pitch == bam_from_degrees_wrapped(30.0));
+}
+
+// ---------------------------------------------------------------------------
+void test_vehicle_collision_volume_selection() {
+    const int32_t target_pos[3] = {0, 0, 0};
+    const CollisionMatrix matrix = collision_matrix_from_heading(0, target_pos);
+
+    CollisionTargetView target;
+    target.matrices = &matrix;
+    target.bound_radius = fx(4.0);
+
+    const CollisionPoint point{fx(1.5), 0, fx(5.0), 0};
+    const int32_t radius = fx(1.0);
+    ContactQuery query;
+    query.points = &point;
+    query.radii = &radius;
+    query.num_points = 1;
+    query.prev_pos[0] = fx(3.5);
+    query.prev_pos[2] = fx(5.0);
+    query.source_bound_radius = fx(4.0);
+
+    auto contact_x = [&](CollisionModel &model, uint32_t mask, int32_t &force_x) {
+        model.finalize_sections();
+        target.model = &model;
+        query.mask = mask;
+        BlinkAccum blink;
+        LadderContact ladder;
+        ContactResult result;
+        const bool contact = collision_contact_force(target, query, blink, ladder, result);
+        force_x = result.force[0];
+        return contact;
+    };
+
+    // VC itself is invisible to an ordinary actor pass and solid to mask 0x8.
+    CollisionModel vc_only = box_model(7, 0, 2.0, 10.0, 10.0);
+    int32_t unused_force = 0;
+    CHECK(!contact_x(vc_only, 0, unused_force));
+    int32_t vc_force = 0;
+    CHECK(contact_x(vc_only, 0x8, vc_force));
+    CHECK(vc_force < 0);
+
+    // Retail falls back to CB/default solids when the section has no VC/VK run.
+    CollisionModel cb_only = box_model(1, 0, 3.0, 10.0, 10.0);
+    int32_t cb_force = 0;
+    CHECK(contact_x(cb_only, 0x8, cb_force));
+    CHECK(cb_force < 0);
+
+    // Once a VC run exists, the vehicle pass begins there and does not also apply
+    // the earlier CB. Different widths let the selected force identify the run.
+    CollisionModel mixed = box_model(1, 0, 3.0, 10.0, 10.0);
+    CollisionModel vc_part = box_model(7, 0, 2.0, 10.0, 10.0);
+    CollisionVolume vc = vc_part.volumes.front();
+    vc.plane_start = static_cast<int32_t>(mixed.planes.size());
+    mixed.planes.insert(mixed.planes.end(), vc_part.planes.begin(), vc_part.planes.end());
+    mixed.volumes.push_back(vc);
+    mixed.sections.front().volume_count = 2;
+
+    int32_t mixed_vehicle_force = 0;
+    CHECK(contact_x(mixed, 0x8, mixed_vehicle_force));
+    CHECK(mixed_vehicle_force == vc_force);
+    CHECK(mixed_vehicle_force != cb_force);
+
+    int32_t mixed_actor_force = 0;
+    CHECK(contact_x(mixed, 0, mixed_actor_force));
+    CHECK(mixed_actor_force == cb_force);
 }
 
 // ---------------------------------------------------------------------------
@@ -858,54 +923,38 @@ void test_pool1_item_is_one_collision_candidate() {
 }
 
 // ---------------------------------------------------------------------------
-void test_platform_latch() {
-    // A type-4 seat volume latches the platform state EVEN WITH ZERO FORCE —
-    // the flag dispatch runs on a zero contact return [orig: the goto LABEL_67
-    // @ 0x4b2fa5; the latch @ 0x4b3291-0x4b3297]. The authored shape pairs the
-    // seat with a type-1 deck below it; the ground-settle tail probe re-hits
-    // the deck (type 4 is ray-invisible), so groundEntity lands on the
-    // platform via the probe's unconditional +0x28 store [orig: @ 0x414370].
-    // The anchor/carry legs stay D-COL-5.
-    CollisionModel model = box_model(1, 0, 3.0, 3.0, 1.0); // the solid deck z 0..1
-    {
-        // The seat volume z 1.0..1.2 above the deck, its own plane run.
-        auto plane = [&](int nx, int ny, int nz, double d) {
-            CollisionPlane p;
-            p.nx = static_cast<int16_t>(nx);
-            p.ny = static_cast<int16_t>(ny);
-            p.nz = static_cast<int16_t>(nz);
-            p.dist = fx(d);
-            model.planes.push_back(p);
-        };
-        plane(16384, 0, 0, -3.0);
-        plane(-16384, 0, 0, -3.0);
-        plane(0, 16384, 0, -3.0);
-        plane(0, -16384, 0, -3.0);
-        plane(0, 0, 16384, -1.2);
-        plane(0, 0, -16384, 1.0);
-        CollisionVolume seat;
-        seat.type = 4;
-        seat.min_x = fx(-3.0);
-        seat.max_x = fx(3.0);
-        seat.min_y = fx(-3.0);
-        seat.max_y = fx(3.0);
-        seat.min_z = fx(1.0);
-        seat.max_z = fx(1.2);
-        seat.plane_start = 6;
-        seat.plane_count = 6;
-        model.volumes.push_back(seat);
-        model.sections[0].volume_count = 2;
-    }
-    Rig rig(std::move(model));
-    rig.move_soldier(10.0, 10.0, 1.05); // standing on the deck, inside the seat
-    int32_t pos[3] = {fx(10.0), fx(10.0), fx(1.05)};
+void test_ladder_contact_bookkeeping_is_not_ground() {
+    // A CL/type-4 touch records the ladder frame and raw 0x100000 flag even
+    // though it produces no push force. This is low-level retail bookkeeping,
+    // not a claim that climb locomotion is implemented. A CL is ray-invisible,
+    // so the ground-settle tail must not turn it into an ordinary floor.
+    Rig rig(box_model(4, 0, 0.25, 2.0, 3.0));
+    rig.move_soldier(10.0, 10.0, 1.0);
+    int32_t pos[3] = {fx(10.0), fx(10.0), fx(1.0)};
     int32_t vel[3] = {0, 0, 0};
     int16_t health = 100;
     CollisionWorld::ResolveState state;
     rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2], 0, fx(1.8), 0, 0,
                           false, true, 0, 43, 0u, health);
     Entity *s = rig.world.registry.get(rig.soldier);
-    CHECK((s->flags & kEntityFlagOnPlatform) != 0);
+    CHECK((s->flags & kEntityFlagLadderContact) != 0);
+    CHECK(!s->ground_target.valid());
+}
+
+// ---------------------------------------------------------------------------
+void test_cb_ground_probe_sets_ground_target() {
+    // Ordinary standing-on bookkeeping comes from the post-resolve ground ray,
+    // not CL's transient 0x100000 ladder contact.
+    Rig rig(box_model(1, 0, 3.0, 3.0, 1.0));
+    rig.move_soldier(10.0, 10.0, 1.05);
+    int32_t pos[3] = {fx(10.0), fx(10.0), fx(1.05)};
+    int32_t vel[3] = {0, 0, 0};
+    int16_t health = 100;
+    CollisionWorld::ResolveState state;
+    rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2], 0, fx(1.8), 0, 0,
+                          false, true, 0, 43, 0u, health);
+    const Entity *s = rig.world.registry.get(rig.soldier);
+    CHECK((s->flags & kEntityFlagLadderContact) == 0);
     CHECK(s->ground_target == rig.building);
 }
 
@@ -2167,12 +2216,13 @@ void test_projectile_trace_world_ordering() {
     q.start = FixedVec3{fx(0.0), 0, fx(1.0)};
     q.end = FixedVec3{fx(10.0), 0, fx(1.0)};
 
-    // CB/type-1 is still a valid LOS/contact solid, but it is not projectile
-    // narrow-phase geometry in retail.
-    {
-        Rig cb_only(box_model(1, 0, 1.0, 1.0, 2.0), 5.0, 0.0);
-        q.owner = cb_only.soldier;
-        CHECK(!cb_only.cw.trace_projectile(cb_only.world, q).hit());
+    // A resolved BVOL-only model is not substituted for projectile CFAC in retail.
+    // This covers CB, CL, CA, VC, and BB explicitly. Unresolved entities retain
+    // the separately tested compatibility-sphere fallback.
+    for (const int type : {1, 4, 6, 7, 8}) {
+        Rig bvol_only(box_model(type, 0, 1.0, 1.0, 2.0), 5.0, 0.0);
+        q.owner = bvol_only.soldier;
+        CHECK(!bvol_only.cw.trace_projectile(bvol_only.world, q).hit());
     }
 
     // Static CFAC is class 1 and wins over the later person pass.
@@ -2305,12 +2355,14 @@ int main() {
     test_ground_probe_roof();
     test_resolver_wall_pushout();
     test_secondary_vertical_force_is_full_strength();
-    test_platform_contact_uses_positive_authored_pitch();
+    test_ladder_contact_uses_positive_authored_pitch();
+    test_vehicle_collision_volume_selection();
     test_resolver_hurt_and_zones();
     test_idle_skip_throttle();
     test_slice_cadence_and_invuln();
     test_pool1_item_is_one_collision_candidate();
-    test_platform_latch();
+    test_ladder_contact_bookkeeping_is_not_ground();
+    test_cb_ground_probe_sets_ground_target();
     test_debug_seams();
     test_raycast_clear_los();
     test_los_point_bias();

@@ -221,13 +221,15 @@ int main() {
 
 	// D-NET-143: the peer record's off-16 anim_def_index echoes the CAPTURED uplink's
 	// equipped-weapon adm index (entity+0x2B0 ingest -> 0x0A echo [orig: @0x4C20A3]; this
-	// table-less world accepts the byte verbatim), and off-14 carries the 0x2B idle default.
+	// table-less world accepts the byte verbatim), and off-14 carries retail's 0x2C idle2
+	// spawn default (Entity_ResetToSpawnState @0x4B9714).
 	for (const auto &frec : fu.records) {
 		if (frec.handle != H.packed) continue;
 		if (!expect(frec.player.anim_def_index == up.equipped_adm_index,
 		            "emitted anim_def_index == the captured uplink's equipped adm index"))
 			return 1;
-		if (!expect(frec.player.anim_state_id == 0x2B, "emitted anim state = 0x2B idle default"))
+		if (!expect(frec.player.anim_state_id == 0x2C,
+		            "emitted anim state = 0x2C retail idle2 spawn default"))
 			return 1;
 	}
 

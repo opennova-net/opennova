@@ -25,7 +25,7 @@ inline int32_t abs32(int32_t v) { return opennova::io::bam_abs(v); }
 
 // [orig: dbl_7C19D8 = 2^31/pi — BAM per radian]
 constexpr double kBamPerRadian = 683565275.5764316;
-// [orig: dbl_7C57B8 = -2^31/pi — the NEGATED BAM-per-radian the platform-anchor
+// [orig: dbl_7C57B8 = -2^31/pi — the NEGATED BAM-per-radian the ladder-contact
 // leg multiplies its atan2 results by (the target-relative subtraction then
 // yields target + atan*BAM).]
 constexpr double kNegBamPerRadian = -683565275.5764316;
@@ -84,11 +84,11 @@ int32_t person_effective_radius(int32_t section, int32_t authored_radius,
 // ----------------------------------------------------------------------------
 void CollisionModel::finalize_sections() {
     for (CollisionSection &s : sections) {
-        if (s.damage_start < 0) {
+        if (s.vehicle_volume_start < 0) {
             for (int32_t i = 0; i < s.volume_count; ++i) {
                 const int32_t type = volumes[s.volume_start + i].type;
                 if (type == 7 || type == 12) {
-                    s.damage_start = i;
+                    s.vehicle_volume_start = i;
                     break;
                 }
             }
@@ -1138,7 +1138,7 @@ bool collision_raycast_polygons(const CollisionTargetView &target,
 // Contact force. [orig: Entity_ComputeBoneCollisionForce @ 0x4ae150]
 // ----------------------------------------------------------------------------
 bool collision_contact_force(const CollisionTargetView &target, const ContactQuery &q,
-                             BlinkAccum &blink, PlatformContact &platform, ContactResult &out) {
+                             BlinkAccum &blink, LadderContact &ladder, ContactResult &out) {
     out = ContactResult{};
     if (target.model == nullptr || target.matrices == nullptr) return false;
     if ((target.entity_flags & 1u) != 0) return false; // [orig: targetEntity[9] & 1 @ 0x4ae1bd]
@@ -1163,7 +1163,7 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
     int32_t any_collision = 0;
     int32_t max_penetration = 0;
     int32_t out_force[3] = {0, 0, 0};
-    int32_t damage_volume_counter = -1; // [orig: damageVolumeCount — type-8 counter]
+    int32_t blink_volume_counter = -1; // per-section BB ordinal [orig: local at @0x4ae575]
 
     for (size_t si = 0; si < model.sections.size(); ++si) {
         const CollisionSection &sec = model.sections[si];
@@ -1184,7 +1184,7 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
         // The type-8 ordinal restarts from the section-entry value per point (the
         // same volume keeps its ordinal across points). [orig: v118 save @ 0x4ae384
         // / per-point restore @ 0x4ae4f6]
-        const int32_t section_entry_counter = damage_volume_counter;
+        const int32_t section_entry_counter = blink_volume_counter;
 
         for (int32_t pi = 0; pi < q.num_points; ++pi) {
             const bool prev_has_collision = has_collision;
@@ -1197,39 +1197,41 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
                 local[2] - radius > sec.max_z || local[2] + radius < sec.min_z)
                 continue; // [orig: @ 0x4ae43b-0x4ae4a6]
 
-            damage_volume_counter = section_entry_counter;
-            // Damage pass start index. [orig: @ 0x4ae4b8-0x4ae4df]
-            const bool damage_pass = (q.mask & 8) != 0;
+            blink_volume_counter = section_entry_counter;
+            // Vehicle-collision pass start index. A section with VC/VK starts at
+            // that specialized run; a section without one falls back to its
+            // ordinary CB/default solids. [orig: @ 0x4ae4b8-0x4ae4df]
+            const bool vehicle_pass = (q.mask & 8) != 0;
             int32_t vi = 0;
-            bool damage_scoped = false;
-            if (damage_pass && sec.damage_start != -1) {
-                vi = sec.damage_start;
-                damage_scoped = true;
+            bool vehicle_scoped = false;
+            if (vehicle_pass && sec.vehicle_volume_start != -1) {
+                vi = sec.vehicle_volume_start;
+                vehicle_scoped = true;
             }
 
             for (; vi < sec.volume_count; ++vi) {
                 const CollisionVolume &vol = model.volumes[sec.volume_start + vi];
                 const int32_t type = vol.type;
-                if (damage_scoped && type != 7 && type != 12) continue; // [orig: @ 0x4ae52f]
+                if (vehicle_scoped && type != 7 && type != 12) continue; // [orig: @ 0x4ae52f]
                 if (type == 19) {
                     if ((q.mask & 2) == 0) continue; // [orig: @ 0x4ae543 player-only]
                 } else if (type == 7) {
-                    if (!damage_pass) continue; // [orig: @ 0x4ae558]
+                    if (!vehicle_pass) continue; // [orig: @ 0x4ae558]
                 } else if (type == 12) {
                     if ((q.mask & 0x10) == 0) continue; // [orig: @ 0x4ae568]
                 } else if (type == 8) {
-                    ++damage_volume_counter; // [orig: @ 0x4ae575]
+                    ++blink_volume_counter; // [orig: @ 0x4ae575]
                 }
 
-                const bool platform_mode = (q.mask & 1) != 0;
+                const bool ladder_recontact_mode = (q.mask & 1) != 0;
                 int32_t min_pen = INT32_MIN / 2;    // [orig: -1073741824]
                 int32_t second_pen = INT32_MIN / 2;
                 int32_t best_plane = 0, second_plane = 0;
                 int32_t plane_idx = 0;
                 bool reached_inside = false;
 
-                if (platform_mode && type == 4) {
-                    // Seat/platform volume: inflated AABB + current-point plane test.
+                if (ladder_recontact_mode && type == 4) {
+                    // CL ladder recontact: inflated AABB + current-point plane test.
                     // [orig: @ 0x4ae611-0x4ae6cf — margin 0x8000, dot>>9 vs
                     // 32*(dist - r - 0x8000)]
                     if (local[0] - radius - 0x8000 > vol.max_x ||
@@ -1293,7 +1295,7 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
                     case 5:
                         has_collision = true; // contact, no force [orig: @ 0x4ae874]
                         break;
-                    case 4: { // platform/seat anchor [orig: @ 0x4ae894-0x4aea30]
+                    case 4: { // CL ladder alignment frame [orig: @ 0x4ae894-0x4aea30]
                         out.flags |= 0x1u;
                         // Two rotations through the section matrix: x/y from
                         // (mid, mid, the point's local z), z from (mid, mid,
@@ -1306,16 +1308,16 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
                         int32_t anchor_xy[3], anchor_z[3];
                         mat.rotate_point(anchor_xy_local, anchor_xy);
                         mat.rotate_point(anchor_z_local, anchor_z);
-                        platform.anchor[0] = anchor_xy[0] + target.pos[0];
-                        platform.anchor[1] = anchor_xy[1] + target.pos[1];
-                        platform.anchor[2] = anchor_z[2] + target.pos[2];
+                        ladder.anchor[0] = anchor_xy[0] + target.pos[0];
+                        ladder.anchor[1] = anchor_xy[1] + target.pos[1];
+                        ladder.anchor[2] = anchor_z[2] + target.pos[2];
                         if (vol.plane_count > 0) {
                             const CollisionPlane &p0 = model.planes[vol.plane_start];
                             // Yaw/pitch are TARGET-RELATIVE: entity Yaw/Pitch minus
                             // atan2 * -BAM (net +). The XY length is ftol'd to int
                             // before the pitch atan2. [orig: @ 0x4ae938-0x4ae9d9,
                             // dbl_7C57B8 = -2^31/pi]
-                            platform.yaw =
+                            ladder.yaw =
                                 target.yaw_bam -
                                 static_cast<int32_t>(std::atan2(-static_cast<double>(p0.ny),
                                                                 -static_cast<double>(p0.nx)) *
@@ -1323,7 +1325,7 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
                             const int32_t lxy_int = sqrt_ftol(
                                 static_cast<double>(p0.nx) * p0.nx +
                                 static_cast<double>(p0.ny) * p0.ny);
-                            platform.pitch =
+                            ladder.pitch =
                                 target.pitch_bam -
                                 static_cast<int32_t>(std::atan2(static_cast<double>(p0.nz),
                                                                 static_cast<double>(lxy_int)) *
@@ -1332,19 +1334,19 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
                             // The original reads plane[0] unguarded even for a
                             // 0-plane volume (adjacent-memory read); a bounds
                             // guard is required here, defaults target-relative.
-                            platform.yaw = target.yaw_bam;
-                            platform.pitch = target.pitch_bam;
+                            ladder.yaw = target.yaw_bam;
+                            ladder.pitch = target.pitch_bam;
                         }
-                        // Pull the anchor 0.375u back along the platform yaw — REAL
+                        // Pull the anchor 0.375u back along the ladder-facing yaw — REAL
                         // sin/cos of the BAM angle scaled 2^22 and truncated, not the
                         // quantized table. [orig: @ 0x4ae9df-0x4aea30 — fsin/fcos of
                         // yaw * dbl_7C3608, * dbl_7C3600]
-                        const double yaw_rad = static_cast<double>(platform.yaw) * kRadianPerBam;
+                        const double yaw_rad = static_cast<double>(ladder.yaw) * kRadianPerBam;
                         const int32_t s22 = static_cast<int32_t>(std::sin(yaw_rad) * 4194304.0);
                         const int32_t c22 = static_cast<int32_t>(std::cos(yaw_rad) * 4194304.0);
-                        platform.anchor[0] -= static_cast<int32_t>((24576LL * c22) >> 22);
-                        platform.anchor[1] -= static_cast<int32_t>((24576LL * s22) >> 22);
-                        platform.valid = true;
+                        ladder.anchor[0] -= static_cast<int32_t>((24576LL * c22) >> 22);
+                        ladder.anchor[1] -= static_cast<int32_t>((24576LL * s22) >> 22);
+                        ladder.valid = true;
                         break;
                     }
                     case 6: // "CA" touch volume [orig: @ 0x4aea45]
@@ -1356,7 +1358,7 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
                             if (target.is_building) {
                                 blink.flags |= vol.flags ^ 6u;
                                 if (blink.hit_count != -1 && blink.hit_count < 4 &&
-                                    damage_volume_counter < 16)
+                                    blink_volume_counter < 16)
                                     blink.add_hit(static_cast<int32_t>(si), target.pool_index);
                             }
                         }
@@ -1373,6 +1375,8 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
                     case 13: // grounded-only touch [orig: @ 0x4aebb3]
                         if (target.is_ground_of_source) out.flags |= 0x800u;
                         break;
+                    case 7:  // VC: vehicle-collision solid (reachable only on mask 0x8)
+                    case 12: // optional extension of the same vehicle pass
                     default: {
                         // Solid: accumulate the SAT push-out. [orig: @ 0x4aebdd-0x4aed0c]
                         if (prev_has_collision && (q.mask & 1) != 0) break;
@@ -1831,7 +1835,7 @@ const CollisionTargetView *CollisionWorld::target_view(const World &world, Entit
     scratch.pos[1] = p[1];
     scratch.pos[2] = p[2];
     scratch.yaw_bam = heading;
-    // Type-4 platform contact keeps a separate target-relative pitch even
+    // CL/type-4 ladder contact keeps a separate target-relative pitch even
     // though the authored angle is also baked into the section matrix.
     // [orig: targetEntity+20 Pitch read @ 0x4ae9a7]
     scratch.pitch_bam =
@@ -1974,8 +1978,8 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
     ray.refresh();
 
     // Compatibility sphere for an item whose graphic has no resolved collision
-    // instance. An assigned CB/CL/VC-only model is deliberately NOT substituted:
-    // those BVOL families are contact/vehicle geometry, not projectile CFAC.
+    // instance. An assigned BVOL-only model is deliberately NOT substituted:
+    // gameplay volumes (CB/CL/CA/VC/BB/etc.) are not projectile CFAC geometry.
     auto unresolved_sphere_distance = [&](const Entity &entity, int32_t &out_distance) {
         const int32_t radius = entity.bound_radius > 0.0f
             ? to_fixed(entity.bound_radius)
@@ -2073,8 +2077,8 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
                         }
                     }
                 } else {
-                    // A resolved model without CFAC is CB/CL/VC-only and does
-                    // not stop ordinary bullets.
+                    // A resolved model without CFAC is BVOL-only and does not
+                    // stop ordinary bullets, regardless of its gameplay volume types.
                     continue;
                 }
             }
@@ -2815,15 +2819,16 @@ int32_t CollisionWorld::resolve_vehicle_hull(World &world, EntityHandle source,
     q.prev_pos[1] = prev_pos[1];
     q.prev_pos[2] = prev_pos[2] + 0x18000;
     q.source_bound_radius = radius;
-    // The vehicle contact mask is 8 (the damage-volume pass) — 24 when the def
+    // The vehicle contact mask is 8: use the VC/type-7 run when present, otherwise
+    // fall back to ordinary CB/default solids. It is 24 when the def
     // attrib2 low byte has bit 7 set, adding type-12 volumes [orig: @ 0x462a91-
     // 0x462a9f — collisionMask = 8; attrib2 sign byte -> 24]. attrib2 is not
     // fed to the sim yet, so the 24 leg is a tracked residual (D-NET-161).
     q.mask = 8;
     q.query_is_player = false;
 
-    BlinkAccum blink;         // vehicles accumulate no blink state
-    PlatformContact platform; // nor platform anchors
+    BlinkAccum blink;       // vehicles accumulate no blink state
+    LadderContact ladder;   // nor ladder contact frames
     int32_t severity = 0;
 
     for (int32_t i = 0; i < slice.count; ++i) {
@@ -2837,7 +2842,7 @@ int32_t CollisionWorld::resolve_vehicle_hull(World &world, EntityHandle source,
         const CollisionTargetView *tv = target_view(world, ch, view, mats);
         if (tv == nullptr) continue;
         ContactResult res;
-        if (!collision_contact_force(*tv, q, blink, platform, res)) continue;
+        if (!collision_contact_force(*tv, q, blink, ladder, res)) continue;
         // Verticality split [orig: @ 0x462fc2-0x462fcb — |fz|<<22 / |force| vs the
         // caller's slope thresholds]: a wall-like (horizontal-dominant) push lands
         // in FULL at severity 3 [orig: @ 0x46322d-0x463240]; vertical-dominant
@@ -2857,8 +2862,8 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                                        int32_t heading, int32_t body_pitch, bool is_player,
                                        bool is_authority, uint32_t tick, int32_t anim_state_id,
                                        uint32_t anim_state_flags, int16_t &health) {
-    // [orig: Entity_ProcessCollisionAndPlatformPhysics @ 0x4b2bd0]
-    (void)heading;    // consumed by the on-platform 2-point variant (D-COL-5)
+    // [orig: movement collision resolver @ 0x4b2bd0]
+    (void)heading;    // consumed by retail's on-ladder 2-point variant (D-COL-5)
     (void)body_pitch;
     Entity *ent = world.registry.get(source);
 
@@ -2914,10 +2919,10 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     const bool is_local = ent != nullptr && local_player.valid() && source == local_player;
     if (is_local) local_player_blink_flags = 0;
     if (ent != nullptr)
-        ent->flags &= ~(kEntityFlagIndoors | kEntityFlagOnPlatform | kEntityFlagArmoryZone |
+        ent->flags &= ~(kEntityFlagIndoors | kEntityFlagLadderContact | kEntityFlagArmoryZone |
                         kEntityFlagVehicleLoadoutZone);
 
-    // Capsule test points. [orig: the not-on-platform branch @ 0x4b2edb-0x4b2f2a —
+    // Capsule test points. [orig: the not-on-ladder branch @ 0x4b2edb-0x4b2f2a —
     // 3 points: head (z + collisionRadius - halfRadius + 0.0625), eye (pos +
     // CameraOffset -> our head stand-in), feet; radii {collisionRadius, 0.3125,
     // outerRadius}. CameraOffset is not modeled: the eye point reuses the head
@@ -2972,8 +2977,8 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     q.query_is_player = is_player;
 
     int32_t total_force[3] = {0, 0, 0};
-    PlatformContact platform;
-    EntityHandle platform_entity;
+    LadderContact ladder;
+    EntityHandle ladder_entity;
 
     auto it = candidates_.find(source.packed);
     if (it != candidates_.end()) {
@@ -2994,12 +2999,12 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                     mut.is_ground_of_source = (ent->ground_target == ch);
                 }
                 ContactResult res;
-                const bool contact = collision_contact_force(*tv, q, blink, platform, res);
+                const bool contact = collision_contact_force(*tv, q, blink, ladder, res);
                 if (pass == 0) {
                     // The contact-flag dispatch runs whether or not the query
-                    // produced force — a pure seat/zone touch still latches.
+                    // produced force — a pure ladder/zone touch still latches.
                     // [orig: the goto LABEL_67 on a zero return @ 0x4b2fa5]
-                    if ((res.flags & 0x1u) != 0 && platform.valid) platform_entity = ch;
+                    if ((res.flags & 0x1u) != 0 && ladder.valid) ladder_entity = ch;
                     apply_touch_flags(ent, res.flags, health, is_authority);
                 }
                 if (!contact) continue;
@@ -3044,8 +3049,8 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                     points[pi].x += total_force[0];
                     points[pi].y += total_force[1];
                 }
-            } else if (pass_contact && !platform_entity.valid()) {
-                // [orig: @ 0x4b36da — second-pass half force only when NOT on a platform]
+            } else if (pass_contact && !ladder_entity.valid()) {
+                // [orig: @ 0x4b36da — second-pass half force only without a CL contact]
                 total_force[0] += pass_force[0] >> 1; // [orig: @ 0x4b36e2]
                 total_force[1] += pass_force[1] >> 1;
             }
@@ -3060,12 +3065,12 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     pos[1] += total_force[1];
     pos[2] += total_force[2];
 
-    // Platform standing-on. [orig: @ 0x4b3291-0x4b3297 — Flags |= 0x100000 +
-    // groundEntity = platform. The moving-deck carry (yaw chase + anchor follow)
-    // rides the vehicle pass (D-COL-5).]
-    if (platform_entity.valid() && ent != nullptr) {
-        ent->flags |= kEntityFlagOnPlatform;
-        ent->ground_target = platform_entity;
+    // Low-level CL bookkeeping only. Retail's full climb state transitions,
+    // alignment chase, root motion, and top exit remain D-COL-5.
+    // [orig: @ 0x4b3291-0x4b3297 — Flags |= 0x100000 + groundEntity = ladder]
+    if (ladder_entity.valid() && ent != nullptr) {
+        ent->flags |= kEntityFlagLadderContact;
+        ent->ground_target = ladder_entity;
     }
 
     // Blink apply. [orig: @ 0x4b34c2-0x4b3502 — bit 2 -> Flags 0x800000; local
@@ -3138,7 +3143,8 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
         raycast_ground(world, source, pos, 0, 0, 0, 0x20000, &ground_hit);
     pos[2] = saved_z;
     // The probe's hit ALWAYS lands in groundEntity — null on a miss, overwriting
-    // even a same-resolve platform latch (which normally re-hits the platform).
+    // even a same-resolve CL latch. Generic ground is still resolved only by
+    // terrain or a type-1 CB solid.
     // [orig: the unconditional +0x28 store in
     // Entity_RaycastGroundHeightAndObject @ 0x414370]
     if (ent != nullptr) ent->ground_target = ground_hit;

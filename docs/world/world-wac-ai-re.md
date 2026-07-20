@@ -190,12 +190,13 @@ Everything below was decompiled and read this session (pseudocode dumps:
    dbl_7C3600 = 4194304.0); `fwd' = fwd·cos − strafe·sin; strafe' = fwd·sin + strafe·cos` (>>22).
    State 31 (jump_loop) forces fwd = 1024.
 2. **`pos.xy += rotated_delta + vel(entity[38..39])`; `pos.z += vertical_delta`.**
-   Flag 0x8000 (drowning) zeroes vertical; 0x100000 (deep water) zeroes horizontal root motion.
+   Flag 0x8000 (drowning) zeroes vertical; 0x100000 (CL ladder contact) zeroes
+   horizontal root motion while the body is aligned to the ladder.
 3. Every tick (the "every 2 ticks" first reading corrected by D-INF-10; both legs
    byte-witnessed 2026-07-16 §22): **gravity `vel_z(entity[40]) −= 416`** skipped while
-   `Flags & 0x108000` (platform/drowning) [orig: `@ 0x4bf7b8`] (terminal −32768; ladder/climb
+   `Flags & 0x108000` (ladder/drowning) [orig: `@ 0x4bf7b8`] (terminal −32768; ladder/climb
    chases `entity[193]` target at 1/16-step, cap 0x4000); `pos.z += 2·vel_z`;
-   `Entity_ProcessCollisionAndPlatformPhysics @ 0x4b2bd0 (entity, root_drop, height)`:
+   `movement collision resolver @ 0x4b2bd0 (entity, root_drop, height)`:
    ≤0 ⇒ ground push-out (`pos.z -= ret`), vel_z = 0, water-exit sounds (15/16),
    **fall damage** when `vel_z ≤ −1057·dword_C6EAE4`: `health −= (excess)>>4`;
    >61440 ⇒ set swim (flag 0x2000, states 47/31 hmm 47=tread/31 per anim availability).
@@ -264,9 +265,9 @@ and the vehicle rows 21/23) — ported 2026-07-16.
    water flags at entity+36). The airborne overlay decoded: flags 0x2000/0x20 set + 0x40
    clear → force parachute 47, fallback jump_loop 31 (dump 3679–3692).
 4. `sub_4142C0 @ 0x4142c0` (0x59 bytes — ground probe at offset; exact param semantics 0x4000/0x20000).
-5. `Entity_ProcessCollisionAndPlatformPhysics @ 0x4b2bd0` internals (0x11e3 — ground/water/platform
-   resolver). Related bookkeeping decoded: platform-rider counter entity[92]/[93] (+4 to 240 on a
-   same-team platform underfoot, −1 decay; dump 3711–3733).
+5. `movement collision resolver @ 0x4b2bd0` internals (0x11e3 — ground/water/BVOL
+   resolver). Type-4 bookkeeping was initially decoded under the incorrect platform reading;
+   the manual pins CL as ladder, and the remaining counter/entry semantics ride D-COL-5.
 6. ~~Marker wait/facing **BMS field mapping**~~ CLOSED (spawn map ported into promote; see §3.2).
 7. Perception scan fn (called at dump line 2377, kong-misnamed `Entity_SpawnProjectile`) + LOS `sub_53B130`.
 8. `dword_C6EAE4` (fall-damage gravity scale) value/source. ~~1024-entry sin/cos table
@@ -343,10 +344,10 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     `anim_emplaced` plus available variants (00TRa class). Remaining gaps: staged E/S/G/H
     walk-to-seat, 126/127, child-seat traversal, true seat-bone transform follow, and driver-lean
     mounted poses.
-  - **D-INF-3** ground/water resolver modeled as terrain-clamp + landing (platforms/water + the
-    horizontal capsule pending; the vertical capsule-bottom settle now landed — see **D-INF-6** —
-    `Entity_ProcessCollisionAndPlatformPhysics @ 0x4b2bd0`); horizontal slide velocity
-    zeroes on contact; the airborne anim overlay waits on the entity+36 flags.
+  - **D-INF-3** movement resolver now includes the horizontal CB capsule, object/terrain
+    ground probes, triggers, and landing. Water/swim transitions remain; CL climb locomotion
+    is tracked separately in **D-COL-5**. The vertical capsule-bottom settle is **D-INF-6**
+    (`movement collision resolver @ 0x4b2bd0`); horizontal slide velocity zeroes on contact.
   - **D-INF-4** — **CLOSED 2026-07-05**: the generator is witnessed and ported —
     `Math_BuildSinTable @ 0x613050` builds ONE 1281-entry sin table at 2^22 by an
     ACCUMULATING x87 loop (`angle += dbl_7DF578 = 0.006135923151542565` per entry,
@@ -361,7 +362,7 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     capsule_bottom`**, so the entity's collision-capsule bottom (the origin→feet offset) rests on
     the terrain and a waist-origin model's feet land exactly on the ground. WITNESSED end-to-end
     (re-confirmed against `Jointops.exe.kong.i64`, imagebase 0x400000, this session):
-    `Entity_ProcessCollisionAndPlatformPhysics @0x4b2bd0` resettles `entity[3] = entityRadius +
+    `movement collision resolver @0x4b2bd0` resettles `entity[3] = entityRadius +
     groundHeight` (`@0x4b3da3`; `groundHeight = heightDelta − entityRadius @0x4b3d90`), where
     `entityRadius` is the current animation frame's `capsule_bottom × 65536` fed from the
     `.bad`/`.adm` root record [orig: `AnimMap_UpdateEntity @0x40b5f0` (out-transform block `@0x40b82f`) `out_transform[3] =
@@ -400,7 +401,7 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     [esi+0Ch],edx`)]; the player (org2) falls `vel_z -= 208` EVERY tick then `pos.z += vel_z` (once,
     folded into the root-dz store) [orig: `Entity_UpdateInfantryPlayerBody @0x4b7acf`
     (`add … 0xFFFFFF30`), gate `@0x4b7ac8`, clamp `@0x4b7c77`, pos `@0x4b7cef`]; both clamp
-    to terminal −32768 and skip the step while `Flags & 0x108000` (platform/drowning — those
+    to terminal −32768 and skip the step while `Flags & 0x108000` (ladder/drowning — those
     flag legs ride their slices). A prior pass applied one `−416 every 2 ticks` + `pos += 2·vel`
     to BOTH; the NPC was fixed to the faithful per-tick `−416` + `2·vel` first, and the player's
     deferred 2-tick discretization is now the faithful per-tick `−208` + `vel` (the dedicated
@@ -429,7 +430,7 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     moving the feet. Ported in `tick_infantry` step 5 (player leg); pinned by the rewritten
     `test_player_body_chase_and_legs` / `test_player_body_chase_crosses_the_bam_seam`.
     Residual branches ride their slices: parachute (Flags 0x20) sixteenth-step body chase
-    [orig: `@0x4b494d`] (D-INF-20), the carried/platform ±0x55555500 (120°) yaw clamp
+    [orig: `@0x4b494d`] (D-INF-20), the carried/ladder ±0x55555500 (120°) yaw clamp
     [orig: `@0x4b4afb-0x4b4b5f`] and the seat-bone follow [orig: `@0x4b654e`] (D-INF-2 /
     mount).
   - **D-INF-16** the run promotion's pitch-tier term ported as the constant 2. The
@@ -440,7 +441,7 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     records the thresholds here; if a sibling title (DFX/BHD) turns out to write +0x37C,
     lift the term into a live field. `libs/world/src/infantry.cpp`.
   - **D-INF-17** lean producer gate legs unmodeled. The on-foot lean ramp skips on
-    `Flags & 0x100020` (bit 5 + the on-platform bit) and the prone roll-anim selection
+    `Flags & 0x100020` (bit 5 + the on-ladder bit) and the prone roll-anim selection
     skips on `Flags & 0x112002`'s 0x10000/0x100000 legs [orig: `@0x4b7da2/@0x4b7322`];
     our port gates on alive/prone/airborne only (the modeled equivalents of 0x2/0x2000).
     The seated (`+0x168 == 1`) ±0x1400000 ramp variant [orig: `@0x4b66b5`] rides the
@@ -1401,7 +1402,8 @@ resolve (infantry.cpp step 9 — the D-INF-3 seam) and fed by the host sweep
 (tests/world/collision_test.cpp). All addresses: retail `Jointops.exe`
 (`Jointops.exe.kong.i64`, imagebase 0x400000). The 2026-07-11 full re-grill
 (the collision extraction slice) walked every ported function against fresh
-decompiles: it corrected the port's platform-anchor leg, type-8 ordinals,
+decompiles: it corrected the port's type-4 contact-frame math (now identified
+as CL ladder alignment), type-8 ordinals,
 skip-throttle triggers, repulsion gates, proximity cadence, and groundEntity
 store (details inline below), added D-COL-9, and extended D-COL-5/-8.
 
@@ -1415,7 +1417,7 @@ store (details inline below), added D-COL-9, and extended D-COL-5/-8.
 | Contact force + type dispatch (`collision_contact_force`) | MATCHING (core paths; D-COL-2/4/5 tails) | `[orig: Entity_ComputeBoneCollisionForce @ 0x4ae150]`; `collision` ctest push-out/hurt/zones |
 | World raycast + ground probes (`CollisionWorld::raycast_ground`) | MATCHING (vertical; D-COL-7 terrain leg) | `[orig: raycast_entity_collision @ 0x413760; Entity_RaycastGroundHeight @ 0x4142c0 / ...AndObject @ 0x414320]` |
 | Per-tick proximity tables + candidate slices | MATCHING (structural) | `[orig: Entity_BuildProximityLists_Pool2 @ 0x4b9430 / _Pool01 @ 0x4b9340 / FromPools @ 0x4b8eb0]` |
-| The movement resolver (`CollisionWorld::resolve_entity`) | MATCHING (core; deferrals D-COL-5/6/8) | `[orig: Entity_ProcessCollisionAndPlatformPhysics @ 0x4b2bd0]` — the §4 open item 5 internals now decoded |
+| The movement resolver (`CollisionWorld::resolve_entity`) | MATCHING (core; deferrals D-COL-5/6/8) | `[orig: collision resolver @ 0x4b2bd0]` — the §4 open item 5 internals now decoded |
 | Blink boxes -> indoors | MATCHING | `[orig: @ 0x4aef90 / @ 0x4aea68-0x4aeae8 / Entity_BuildProximityList @ 0x4b3dc0]`; `collision` ctest blink cases |
 | Projectile per-section callback matrices | MATCHING for non-organic effective LOD-0 ordinary/spinner PANM and for pool-0 person current-pose skeletal spheres; camera-derived generic modes remain D-COL-10 | `[orig: Physics_RaycastAgainstBoneCollision @ 0x4e4cb0; Physics_RaycastAgainstBoneSections @ 0x4e4670; BoneCallback_Generic @ 0x4e26d0; BoneCallback_org0_Bone @ 0x4e34b0]`; strict COBJ ordinal providers, generic shared-DWORD PANM vs per-entity organic sim pose, one final-world composition; native + GUT source/clock/ordinal/person cases |
 | Armory/vehicle loadout-zone gates | MATCHING (read-only grill) | `[orig: Input_HandleActionBinding @ 0x49b83d case 218]`; menu side in [menu-re.md](../mnu/menu-re.md) §In-game armory |
@@ -1423,7 +1425,8 @@ store (details inline below), added D-COL-9, and extended D-COL-5/-8.
 ### 15.2 Witness map — the query set
 
 - **Runtime records.** COBJ section record (108 B): `+28` volume count, `+32`
-  first-damage-volume index (-1 none), `+36` volume ptr, `+68..+88` local AABB
+  first type-7/12 vehicle-pass volume index (-1 none), `+36` volume ptr,
+  `+68..+88` local AABB
   (minX,maxX,minY,maxY,minZ,maxZ), `+92..+100` bound-sphere center, `+104` radius.
   BVOL volume record (40 B): `+0` collidable type, `+4..+24` local AABB (same
   order), `+28` plane count, `+32` plane ptr, `+36` flags. BPLN plane record
@@ -1474,7 +1477,8 @@ store (details inline below), added D-COL-9, and extended D-COL-5/-8.
 - **Contact force** `[orig: Entity_ComputeBoneCollisionForce @ 0x4ae150]`: args
   (source, points stride-4, radii, n, target, outForce[4], outFlags, mask). Entry
   rejects a target with `Flags & 1` `[orig: @ 0x4ae1bd]`. Mask:
-  1 on-platform (type-4 seat test), 2 player (type-19), 8 damage pass (types 7/12
+  1 ladder recontact (inflated CL/type-4 test), 2 player (type-19), 8 vehicle
+  collision pass (VC/type 7 and type 12
   only, from the section's `+32` start), 0x10 type-12. The type-8 ordinal counter
   restores its section-entry save per POINT (`v118` `@ 0x4ae384/0x4ae4f6`) so a
   volume keeps a stable ordinal across points; the same pattern gates the blink
@@ -1486,7 +1490,7 @@ store (details inline below), added D-COL-9, and extended D-COL-5/-8.
   `sourceBoundRadius << 7` then `(f+16)>>5` (the length ftol is min-clamped by
   `flt_7C19E0 = 2147352576.0`, the shared sqrt-overflow guard on every distance
   in the query set). Type dispatch on containment:
-  4 platform anchor -> flag 0x1 — the anchor is TWO rotations through the section
+  4 CL ladder frame -> flag 0x1 — the anchor is TWO rotations through the section
   matrix (x/y from `(midX, midY, point-local z)`, z from `(midX, midY,
   maxZ - 1.0u)` `[orig: @ 0x4ae8f2/0x4ae903]`); yaw/pitch are TARGET-RELATIVE —
   `entity.Yaw − ftol(atan2(−ny,−nx) · dbl_7C57B8[−2^31/π])` and
@@ -1494,7 +1498,8 @@ store (details inline below), added D-COL-9, and extended D-COL-5/-8.
   @ 0x4ae938-0x4ae9d9]` — and the 0.375u pull-in uses REAL fsin/fcos of
   `yaw · 2π/2^32` scaled 2^22 truncated, not the quantized dir table `[orig:
   @ 0x4ae9df-0x4aea30]`; plane[0] is read unguarded even for a 0-plane volume;
-  5 contact-no-force; 6 armory volume -> 0x4; 7/12 masked; 8 blink accumulate
+  5 contact-no-force; 6 CA armory volume -> 0x4; 7/12 vehicle-mask solids;
+  8 BB blink accumulate
   (buildings, body/eye points only) -> 0x10; 9 destructible-section touch mask on
   target+692 -> 0x20; 10 capture-zone -> 0x200; 11 vehicle-loadout volume -> 0x400;
   13 grounded-on-target only -> 0x800; 16/17/18 hurt -> 0x100/0x80/0x40;
@@ -1544,7 +1549,7 @@ store (details inline below), added D-COL-9, and extended D-COL-5/-8.
   ResolveState.prev_pos = last-resolve-end is behaviorally equivalent if the
   stamp sits at update start.
 
-### 15.3 Witness map — the movement resolver `[orig: Entity_ProcessCollisionAndPlatformPhysics @ 0x4b2bd0]`
+### 15.3 Witness map — the movement resolver `[orig: collision resolver @ 0x4b2bd0]`
 
 Closes §4 open item 5 (the 0x11e3-byte internals). Per call (from each motor's
 gravity block, EVERY tick — the "every 2 ticks" first reading died with
@@ -1568,19 +1573,20 @@ D-INF-10/§22):
    caller cadence and could not catch the pair diverging). A net
    push-out later in the resolve resets the counter to 0 `[orig: @ 0x4b3773]`.
 2. **Per-query state**: blink globals cleared; entity Flags &= ~0x00D00800
-   (indoors 0x800000, armory 0x400000, platform 0x100000, vehicle-zone 0x800)
+   (indoors 0x800000, armory 0x400000, ladder 0x100000, vehicle-zone 0x800)
    plus the `+0x2c` aux bit 0x40 (the type-13 grounded-touch latch, D-COL-9);
    local player clears `g_LocalPlayerBlinkFlags`. A mounted/carried source
    (parentEntity set + alive, or Flags 0x40) suppresses force ACCUMULATION while
    the flag dispatch still runs (`savedPosY`, D-COL-9).
-3. **Capsule points** (not-on-platform): 3 points — head (z + collisionRadius -
+3. **Capsule points** (not on a ladder): 3 points — head (z + collisionRadius -
    halfRadius + 4096), eye (pos + CameraOffset), feet — radii {collisionRadius,
    20480, outerRadius} where halfRadius = capsuleBottom>>4, collisionRadius =
    halfRadius + |capsuleTop - capsuleBottom|/2 (floor 57344 - 2*cr, min 4096;
-   both radii floored at 6144). On-platform: 2 pitched/heading points, radii 25088.
+   both radii floored at 6144). On-ladder recontact: 2 ladder-oriented points,
+   radii 25088.
 4. **Candidate loop** over the entity slice: `@ 0x4ae150` per candidate; the
    contact-flag dispatch runs EVEN ON A ZERO-FORCE RETURN (`the goto @ 0x4b2fa5`
-   — a pure seat/zone touch still latches; `collision` ctest platform pin);
+   — a pure CL/zone touch still latches; `collision` ctest ladder-contact pin);
    forces accumulate NEGATED; a mostly-vertical negative force is dropped
    (standing pressure `@ 0x4b3010`); while swimming (Flags 0x2000) an UPWARD
    force damps slideDecay toward -167 (-83 steps; `@ 0x4b304e-0x4b308c` —
@@ -1589,11 +1595,12 @@ D-INF-10/§22):
    skipped entirely for Flags 0x4000000 sources `@ 0x4b3148`; each hit also
    stamps the damage-source attribution); 0x200 capture touch ->
    `Server_OnPlayerTouchCaptureZone @ 0x500ba0` (def attrib 0x20000, spawn gates);
-   0x1 platform (entry-gated: not Flags 2, and was-on-platform OR player OR
-   MoveOrder 0x400): Flags |= 0x100000 + groundEntity = candidate (`@ 0x4b3291`), the
-   moving-deck carry (anchor chase `(target-pos+32)>>6`, yaw `(delta+8)>>4` for
-   players / hard-set for AI, pitch copy, step-up +20480 / +39936 (MoveOrder
-   0x200) / +60416 (0x100), deck velocity 24576*sincos>>22); 0x4 -> Flags 0x400000
+   0x1 CL ladder (entry-gated: not Flags 2, and previous ladder contact OR player OR
+   MoveOrder 0x400): Flags |= 0x100000 + groundEntity = candidate (`@ 0x4b3291`),
+   then the ladder-frame chase `(target-pos+32)>>6`, yaw `(delta+8)>>4` for
+   players / hard-set for AI, pitch copy, vertical offsets +20480 / +39936
+   (MoveOrder 0x200) / +60416 (0x100), and 24576*sincos>>22 facing offset;
+   0x4 -> Flags 0x400000
    (armory zone); 0x400 -> Flags 0x800 (vehicle-loadout zone); 0x800 -> the
    `+0x2c` aux 0x40 latch (type 13, D-COL-9); 0x10 blink apply —
    bit 2 of the accum -> Flags 0x800000, local player ORs into
@@ -1602,7 +1609,7 @@ D-INF-10/§22):
    (`@ 0x4b30da`). itemDef attrib 1 -> `Entity_ProcessWaypointInteraction
    @ 0x4ad820`; attrib 2 + player -> `Entity_InvokeCollisionCallback @ 0x442350`.
 5. **Second relaxation pass** at the force-shifted points, adding half the fresh
-   X/Y force when not on a platform (`@ 0x4b3549-0x4b36ec`); packed blink hits
+   X/Y force when no CL contact is active (`@ 0x4b3549-0x4b36ec`); packed blink hits
    copied onto the entity quad (`@ 0x4b36f0` — only when a candidate slice
    exists; sliceless entities keep the refresh-stamped quad). When a push was
    applied and the push direction roughly opposes targetHeading (atan2 gates
@@ -1618,15 +1625,15 @@ D-INF-10/§22):
    position for the second distance + the push (dead/hidden peers Flags 2
    skipped `@ 0x4b3b8d`), threshold 30% of summed radii, push (thr - dist)/4
    along the `(0x200000 - atan2BAM)>>22`-indexed sin/cos pair
-   (`@ 0x4b3a5c-0x4b3c52`). Walking OFF a platform (was-platform, not latched,
+   (`@ 0x4b3a5c-0x4b3c52`). Leaving a ladder (previous CL flag, not relatched,
    player) nudges 24576*sincos(bodyHeading)>>22 and runs the local-player
    pitch-restore chase (`@ 0x4b3c5c-0x4b3d69` — D-COL-5's exit leg).
 8. **Ground settle tail**: quantize Z up to the 6144 grid (`(z+6143) & ~0x17FF`),
    probe `@ 0x414320 (entity,0,0,0,0x20000)` (2.0u drop), restore Z, return
    feetZ - groundZ (`@ 0x4b3d6e-0x4b3da9`); the probe's hit lands in
    groundEntity UNCONDITIONALLY (`the +0x28 store @ 0x414370` — null on a miss,
-   overwriting even the same-resolve platform latch, which normally re-hits the
-   deck); callers treat <= 0 as grounded (lift by the return), > 0xF000
+   overwriting even the same-resolve CL latch; generic CB/terrain ground is a
+   separate result); callers treat <= 0 as grounded (lift by the return), > 0xF000
    airborne (section 3.5, unchanged).
 
 Blink refresh also runs position-only on spawn/teleport/net-create and per net
@@ -1655,14 +1662,21 @@ terrain clamp (the `@ 0x413785` gate).
 
 ### 15.4 Collidable-type semantics (now witnessed at runtime)
 
+The bundled **Super OED Manual v1.1 §1.1.3.4** supplies the authoring names,
+which correct an earlier reverse-engineering misread: CB = Generic Collision Box,
+CL = Collision for Ladder, CA = Collision Box for Armory, VC = Collision for
+Vehicles, and BB = Blink Box. Numeric decoding was already correct; only the
+type-4/type-7 interpretation and derived identifiers were wrong. These BVOLs
+remain separate from the CVRT/CNRM/CFAC polygon mesh used by ordinary bullets.
+
 | Type | Runtime behavior | Witness |
 |---|---|---|
-| 1 (and unlisted) | solid — SAT push-out; the ONLY type raycasts clip | `@ 0x413298`, `@ 0x4aebdd` |
-| 4 | platform/seat surface — contact 0x1 + platform-carry anchor | `@ 0x4ae894-0x4aea30` |
+| 1 (`CB`) (and unlisted) | generic collision solid — SAT push-out; the ONLY BVOL type generic rays clip | `@ 0x413298`, `@ 0x4aebdd` |
+| 4 (`CL`) | ladder contact 0x1 + authored alignment anchor/yaw/pitch; low-level extraction is ported, climb locomotion is not | `@ 0x4ae894-0x4aea30`; manual §1.1.3.4 |
 | 5 | contact marker, no force | `@ 0x4ae874` |
-| 6 | armory volume — Flags 0x400000, gates weapon.mnu on action 218 | `@ 0x4aea45`, `@ 0x49b848` |
-| 7 | damage-pass volume (mask 8) | `@ 0x4ae558` |
-| 8 | blink box — blink accumulate (buildings), indoors bit | `@ 0x4aea68` |
+| 6 (`CA`) | armory volume — Flags 0x400000, gates weapon.mnu on action 218 | `@ 0x4aea45`, `@ 0x49b848`; manual §1.1.3.4 |
+| 7 (`VC`) | vehicle-collision solid, selected by vehicle mask 8 | `@ 0x4ae558`; manual §1.1.3.4 |
+| 8 (`BB`) | blink box — blink accumulate (buildings), indoors bit | `@ 0x4aea68`; manual §§1.1.3.2/1.1.3.4 |
 | 9 | destructible-section touch — bit per section on target+692; the bit index is `sectionIdx − itemDef+2193` (boneMapStart) through a char shift (x86 `shl cl` masks &31) — equal to `si & 31` while the bone map is unmodeled (D-COL-2) | `@ 0x4aeb0f-0x4aeb22` |
 | 10 | capture-zone touch | `@ 0x4aeb7b`, `@ 0x4b31e3` |
 | 11 | vehicle-loadout volume — Flags 0x800, gates vehicle.mnu | `@ 0x4aeb92`, `@ 0x49b858` |
@@ -1672,10 +1686,13 @@ terrain clamp (the `@ 0x413785` gate).
 | 19 | player-only solid (mask 2) | `@ 0x4ae543` |
 | 20..23 | occlusion list (not in the collision walkers) | format record |
 
-The authored bvol FLAGS letters (V/S/W/L/O clearing bits of init 0x3E) remain
-inference (exporter-side; ModSuperOed follow-up) — but the runtime consumption is
-witnessed: accumulated as `flags ^ 6`, and accum bit 2 (set by an authored
-bit-1-cleared box) IS the indoors trigger (entity Flags 0x800000).
+The manual officially defines BB suffix `W`/`S`/`V` as preserving water/sky/voxels,
+including combinations. The exporter additionally reconstructs `L`/`O`; those two
+letter expansions remain unresolved. All five clear bits from initial `0x3E`.
+Runtime consumption is witnessed separately: flags accumulate as `flags ^ 6`, and
+accum bit 2 (set by an authored bit-1-cleared box) is the indoors trigger (entity
+Flags 0x800000). The manual also pins convex-only BBs, a maximum of 16 per model,
+and a 0.5 m player detection sphere (§1.2.2.7).
 
 ### 15.5 Divergence catalog (D-COL)
 
@@ -1685,17 +1702,18 @@ bit-1-cleared box) IS the indoors trigger (entity Flags 0x800000).
 | D-COL-2 | building destroyed/animated section skip not modeled | itemDef+2192/2193 bone map + the `dword_A8A418` state table skips sections (gated !player) | destroyed-wall pass-through pending the destruction system |
 | D-COL-3 | bound radius recomputed as the .3di LOD-0 part-bound-sphere union (primitive boxes as the degenerate fallback), raised to the husk model's bound, +0.0625 pad (persons 1.0u) | entity+0 boundRadius = max(model gpm[5], husk gpm[5]) × def scale + 0x1000, stamped only when the model carries collision data [orig: `Entity_InitFromModel @ 0x40dc30`] | the recomputed union tracks the stored header bound; the authored def `scale` factor is not applied (unparsed), and we stamp collision-less models too so every item stays hittable — conservative |
 | D-COL-4 | eye test point reuses the head column | eye point = pos + CameraOffset | CameraOffset unmodeled; head/eye share a column until the camera entity fields land |
-| D-COL-5 | platform standing sets flags/groundEntity (any source, on plain contact); type-4 contact records the target-relative anchor/yaw/pitch from raw authored entity Euler | full deck carry (anchor/yaw/pitch chase, step-up +20480/+39936/+60416, deck velocity), the entry gates (not Flags 2; was-platform OR player OR MoveOrder 0x400), the on-platform 2-point capsule mode, the platform-EXIT nudge (24576·sincos(bodyHeading)>>22) + local pitch-restore chase, pool-1 source slices | infantry-on-buildings unaffected; riders of MOVING vehicles slide until the vehicle pass wires it |
+| D-COL-5 | CL/type-4 decoding, convex containment, contact flag 0x1, and the target-relative ladder anchor/yaw/pitch are ported; the raw 0x100000/groundEntity bookkeeping is retained | full ladder entry/recontact state, states 32–35, two-point ladder capsule, anchor/yaw/pitch chase, climb input/root motion, top/exit handling, and gravity suppression | ladders do not climb yet. The earlier “platform/seat/deck carry” description was a terminology error corrected from the Super OED manual. Generic type-1 ground probes still support static roofs; moving-carrier follow is a separate vehicle integration concern |
 | D-COL-6 | capture-zone touch (0x200) not forwarded | `Server_OnPlayerTouchCaptureZone @ 0x500ba0` | zone capture rides its own radius path today (zone_capture.cpp); reconcile when contact-driven capture lands |
 | D-COL-7 | vertical ground probe = bilinear column height | `Terrain_RaycastHeightmapHiRes_0 @ 0x60e710` march + bisect | equal for vertical rays on a heightfield (the terrain-re B1 note); oblique rays use terrain_raycast_refined |
 | D-COL-8 | run-over kill / crush sound / walk-over-body sound / waypoint + collision callbacks (attrib 1/2) / the 0x20 section-touch vtbl callback / the blocked-push AI latch (pad_368[1]) not ported | steps 4/5/6 above | need Score/net + sound + destruction hooks; tracked here so the resolver stays honest |
 | D-COL-9 | mounted/carried source semantics unmodeled: the `savedPosY` force-suppression gate (parentEntity+alive or Flags 0x40), the MoveOrder-0x100 step-up variant it selects, and the `+0x2c` aux latches (the pre-resolve 0x40 clear + the type-13 0x800 set) | `@ 0x4b2bfc/0x4b2d25/0x4b3330/0x4b34ba` | only on-foot organics run our resolver today; rides the vehicle/mount pass with D-COL-5 |
 | D-COL-10 | PANM rotation types 3/4 are correctly classified as live and routed through per-section matrices, but `NovaObjectData::evaluate_panm` currently passes an identity `view_inverse` | retail types 3/4 derive their matrix from the current global inverse-view matrix in `PANM_BuildNodeMatrices` | camera-facing/upright billboard parts can have a camera-relative visual/collision pose mismatch; no committed collidable type-3/4 witness yet. Requires sharing the render camera matrix beside `PanmClock` |
+| D-COL-11 | `LiveRound` has no BB/indoors state; projectile terrain arbitration only has the ammo-flag bypass | retail refreshes each projectile's blink state per tick and skips the terrain clamp while the round is indoors (`Projectile_UpdatePhysics @ 0x4e9d70`, refresh call `@ 0x4e9f21`, terrain gate `@ 0x413785`) | a shot inside an underground/interior BB can falsely hit the terrain heightfield. Port after the projectile probe radius/state lifetime is pinned; do not guess from the player’s 0.5 m BB sphere |
 
 **D-INF-3 status**: the horizontal capsule + object standing now land through
 this port (walls push out, roofs carry via the model-aware ground probe); the
-remaining D-INF-3 tail is water (the swim transitions) — platforms moved to
-D-COL-5.
+remaining D-INF-3 tail is water (the swim transitions) — ladder locomotion is
+tracked in D-COL-5.
 
 ### 15.6 The armory / loadout-zone flow (cross-record pointer)
 
@@ -1716,7 +1734,7 @@ Rename: `g_ProxSliceRefreshCounter @ 0xB57C84` (ex `dword_B57C84` — the 17-tic
 candidate-slice cadence counter). Comments: the cadence gate `@ 0x4c240f`, the
 statics 1199 count saturation `@ 0x4b94cb`, the per-point type-8 ordinal
 restore `@ 0x4ae4f6`, the unconditional groundEntity store `@ 0x414370`, the
-push-resets-skip-counter `@ 0x4b3773`, and the target-relative platform
+push-resets-skip-counter `@ 0x4b3773`, and the target-relative ladder
 yaw/pitch + real-sincos pull-in `@ 0x4ae938`. Confirmed no drift: the 0x4142c0
 rename from the 2026-07-09 session is intact (a stale Hex-Rays cache had shown
 the auto name).
@@ -1731,14 +1749,15 @@ Renames (auto names -> anchored): `Entity_RaycastGroundHeight @ 0x4142c0`,
 proximity tables (`g_StaticProx* / g_DynProx* / g_PersonProx*`, counts
 `g_StaticProxCount @ 0xB52FD0`, `g_StaticProxBuildingCount @ 0xB4D20C`,
 `g_DynProxCount @ 0xB4D208`, `g_PersonProxCount @ 0xB52FD4`,
-`g_ProxCandidateArena @ 0xB57C90` + used), the platform-contact anchors
-(`g_PlatformContact* @ 0xB5AB70..80`, `g_CollisionQueryIsPlayer @ 0xB5AB84`),
+`g_ProxCandidateArena @ 0xB57C90` + used), the ladder-contact anchors
+(`g_LadderContact* @ 0xB5AB70..80`, `g_CollisionQueryIsPlayer @ 0xB5AB84`),
 and the screen latches (`g_WeaponScreenOpen @ 0x24C1884`, `g_VehicleScreenOpen
 @ 0x24C1890`, `g_CmapScreenOpen @ 0x24C188C`). Entry comments on the ground
 probes, pool builders, blink query, action-218 gate, the ACCEPT handler, the
 WEAPON registration, and the type-6/11 dispatch sites. Applied 2026-07-16
 (repo hygiene pass): `collisionModel @ 0xB52FD8 -> g_StaticProxEntity`,
-`result @ 0xB5AB78 -> g_PlatformContactX`.
+`result @ 0xB5AB78 -> g_LadderContactX` (corrected 2026-07-19 from the
+earlier CL-as-platform misread).
 
 IDB addendum (2026-07-16 hygiene pass): `Entity_ComputeWeaponFirePositions @ 0x455ef0`
 renamed `AIEntity_ReleaseFlareCountermeasures` — re-witnessed this session: it swaps the
@@ -3249,24 +3268,24 @@ the gravity-cadence case, and the player-jump case in
 | Finding | Witness |
 |---|---|
 | Parachute (Flags 0x20): bodyHeading(+0x8C) sixteenth-steps toward the render yaw(+0x10) `(yaw−body+8)>>4`, both leg re-plant targets snap to the result | `[orig: @ 0x4b494d-0x4b496c]` |
-| Any of Flags 0x100060 (parachute/carried/platform): the yaw is clamped to ±0x55555500 (120°) of bodyHeading (mount seat-cfg 3 and an active-parent carried byte skip the clamp), the local player's camera-yaw mirror `dword_B75FCC` moves with it, legs snap to the body | `[orig: @ 0x4b4ac6-0x4b4b6b]` |
+| Any of Flags 0x100060 (parachute/carried/ladder): the yaw is clamped to ±0x55555500 (120°) of bodyHeading (mount seat-cfg 3 and an active-parent carried byte skip the clamp), the local player's camera-yaw mirror `dword_B75FCC` moves with it, legs snap to the body | `[orig: @ 0x4b4ac6-0x4b4b6b]` |
 | ON FOOT — movement state (flag-table bit 0): both leg targets = the yaw EVERY tick | `[orig: @ 0x4b4984 → @ 0x4b49dd/@ 0x4b49e3]` |
 | ON FOOT — idle: per-leg re-plant, drift measured vs the CURRENT LEG YAW (org1 measures vs the target), 5°/30° hysteresis, 64-tick windows staggered 32 apart (L `(tick−32)&0x3F`, R `tick&0x3F` via ebp set at function head) | `[orig: L @ 0x4b4993/@ 0x4b49ad-0x4b49bc; R @ 0x4b499b/@ 0x4b49d0-0x4b49e3; ebp @ 0x4b4680]` |
 | Leg chase: quarter-step `(Δ+2)>>2`, rate clamp ±0x3000000 (~4.2°/tick — 3/5 the org1 0x5000000), twist limit ±0x30000000 (67.5°) measured vs the YAW (org1: ±0x20000000 vs the body); no def+84&0x200 1/16 variant in the org2 block | `[orig: R @ 0x4b49e9-0x4b4a43; L @ 0x4b4a49-0x4b4aa9]` |
 | **bodyHeading = legYawL + (legYawR − legYawL)/2** — the body follows the FEET; the §14 torso twist is (yaw − midpoint), so small aim moves twist the torso while the feet and body hold | `[orig: @ 0x4b4aa9-0x4b4abb]` |
 | Seat-bone follow: while mounted the pose block writes pos from the seat bone and +0x8C/both leg targets = the bone yaw, bodyPitch/Roll = the bone pitch/roll (rides D-INF-2) | `[orig: Entity_GetBoneTransformAndOrientation → @ 0x4b654e-0x4b6575]` |
-| Platform yaw-carry: a deck rotation adds one delta to +0x8C, both leg yaws, both leg targets (+ the yaw and `dword_B75FCC` unless the def's +0x58 & 0x1000) — rides D-COL-5 | `[orig: @ 0x4b5690-0x4b56d9]` |
+| Ladder yaw alignment: CL target rotation adds one delta to +0x8C, both leg yaws, both leg targets (+ the yaw and `dword_B75FCC` unless the def's +0x58 & 0x1000) — rides D-COL-5 | `[orig: @ 0x4b5690-0x4b56d9]` |
 
 ### 22.2 Gravity / jump / edges (closes D-INF-10's player leg)
 
 | Finding | Witness |
 |---|---|
-| org2 gravity: `vel_z −= 208` EVERY tick, skipped while Flags 0x108000 (platform/drowning); terminal clamp −32768; `pos.z += vel_z + root_dz` in ONE store (ours splits the two adds, same net) | `[orig: gate @ 0x4b7ac8; step @ 0x4b7acf; clamp @ 0x4b7c77; pos @ 0x4b7cef]` |
+| org2 gravity: `vel_z −= 208` EVERY tick, skipped while Flags 0x108000 (ladder/drowning); terminal clamp −32768; `pos.z += vel_z + root_dz` in ONE store (ours splits the two adds, same net) | `[orig: gate @ 0x4b7ac8; step @ 0x4b7acf; clamp @ 0x4b7c77; pos @ 0x4b7cef]` |
 | org1 gravity re-pinned with the same gate shape: skip on 0x108000, `−416`, clamp, `pos.z += 2·vel_z` | `[orig: @ 0x4bf7b8-0x4bf7ee]` |
 | The horizontal integrate is 1× (rotated root delta + vel) for BOTH motors in normal play; the org2 local-player 2× branch is gated on `g_localPlayerPoofMode` — see D-INF-21 | `[orig: org1 @ 0x4bf684-0x4bf6a2; org2 1× @ 0x4b7cbf-0x4b7cd9; 2× gate @ 0x4b7c8d]` |
 | Jump cooldown lives in the REUSED +0x1A8 slot (org1's targetHeading): clamp [0,32], >1 counts down, parks at 1 while the jump key (MoveOrder bit 5) is held, key release → 0 — no auto-repeat on a held key | `[orig: @ 0x4b7de0-0x4b7e15; release edge @ 0x4b7e78-0x4b7e82]` |
 | Jump gates: cooldown 0 + key held + not prone (the cached prone local, also the freelook-pitch-halving and lean-skip selector) + `!(Flags & 0x1A002)` (in-air/dead/the water pair) + not carried (0x40) | `[orig: @ 0x4b7e8c-0x4b7ebd]` |
-| Jump impulse: `vel.xy += 3/4 · (this tick's ROTATED root step)` — running momentum — then `vel_z = 0x1600`, Flags |= 0x2000 (no 0x40 clear here — carried was gated out @0x4b7ebb), anim 30 jump_start NOW + 31 jump_loop PENDING (straight stamps, no availability check), cooldown = 32; on-platform jumps additionally take a sincos platform-exit leg (D-COL-5) | `[orig: @ 0x4b7ec3-0x4b7f0c]` |
+| Jump impulse: `vel.xy += 3/4 · (this tick's ROTATED root step)` — running momentum — then `vel_z = 0x1600`, Flags |= 0x2000 (no 0x40 clear here — carried was gated out @0x4b7ebb), anim 30 jump_start NOW + 31 jump_loop PENDING (straight stamps, no availability check), cooldown = 32; on-ladder jumps additionally take the CL exit-offset leg (D-COL-5) | `[orig: @ 0x4b7ec3-0x4b7f0c]` |
 | The ledge-fall edge, org2 (resolver return > 0xF000; gate `!(Flags & 0x10A002)` — the 0x2000 bit is the was-grounded test and DEAD skips the whole edge, carry included): carried 0x40 is force-CLEARED (not skipped), Flags |= 0x2000, the 3/4 momentum carry, pending cleared, then anim = 31 (+0x10 while parachuting) stamped STRAIGHT — no availability check. org1 (gate `!(Flags & 0x10A000)`, no dead bit): NO carry; 0x2000 sets and pending clears for live non-carried bodies (dead skips the stamp AND the pending-clear, carried skips the stamp only), and the 47→31 availability ladder (`animMap[id] != animMap[0]`) runs ONLY while parachuting — a plain NPC ledge fall keeps its current clip | `[orig: org2 @ 0x4b7e17-0x4b7e73; org1 @ 0x4bf8ae-0x4bf901, parachute gate @ 0x4bf8d8]` |
 | The 4th-tick org2 body-anim SELECTION is skipped while airborne(0x2000)/dead(0x2)/carried(0x40) — the jump/fall edges own the in-air clip; selection resumes on landing | `[orig: @ 0x4b70b8-0x4b70d3]` |
 | org1 landing: fall damage gates on WAS-airborne + authority + !0x4000000 + NOT DEAD (`test dl,2` — ours previously lacked the dead skip: a hard-landing corpse's health rounded back toward 0 through the clamp; fixed), damage `(threshold − vel_z) >> 4` clamped to health, a damaging landing STAGES the fall death-anim (+0x2C0 ← selector cause 4 → 174, equal to our generic-death fallback), landing sound = weapon slot 16 (15 when dead), then Flags &= ~0x2000 | `[orig: @ 0x4bf802-0x4bf89f]` |
@@ -3322,7 +3341,7 @@ the org2 2× local integrate (§22.2). Unported by decision — dev/admin featur
    transitions) — unread; rides D-INF-3 (water) + D-INF-20 (parachute).
 2. The mounted ±120° look clamp and true per-tick seat-bone transform remain; the
    host-fed seat frame now synchronizes body/legs/pitch/roll while preserving the local
-   look. The platform yaw-carry/exit legs remain under D-INF-2 / D-COL-5.
+   look. The ladder yaw-alignment/exit legs remain under D-INF-2 / D-COL-5.
 3. `remote_player_body_anim` (the authority's wire-snapped peer selection) has
    no airborne gate — the wire does not carry the peer's in-air flag to the
    host today; rides the D-NET-159 anim-byte work.
@@ -3542,9 +3561,10 @@ severity 3 on the authority additionally runs a wreck-damage block
 (29300-magnitude gates, unitType 3 leg zeroes health @ 0x47cd5d). Also
 witnessed: a big-vs-small size-class crush leg (`itemDef->mass` vs 2× the
 other model bound @ +2312 → flag 0x40 stamp, no force @ 0x462e94-0x462ec2).
-The vehicle's contact mask is 8 (the damage-volume pass — vehicles collide
-breakable/damage boxes), or 24 when the def attrib2 low byte has bit 7 set
-(adds type-12 volumes) [@ 0x462a91-0x462a9f].
+The vehicle's contact mask is 8: a section with VC/type 7 starts at its specialized
+vehicle run, while a section without VC/VK falls back to CB/default solids. It is 24
+when the def attrib2 low byte has bit 7 set (adds VK/type-12 volumes)
+[@ 0x462a91-0x462a9f].
 Ported: pool-1 candidate slices (+6.0 u [orig: @ 0x4b902f]) +
 `CollisionWorld::resolve_vehicle_hull` (one mid-hull point, radius 1.5 u,
 wall-class-only, mask 8) + the motor's push/decay leg; ctest `vehicle_mount`
@@ -3662,7 +3682,7 @@ the motor consumes, and a degree round-trip therefore cannot quantize yaw or fre
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
-| D-AI-11 | Mount-chain stand-ins: (a) the scan candidate set is a registry sweep (no per-entity proximity lists) and the eye is the +0.9 u chest constant (no CameraOffset), +0.1875 u bias kept; (b) the emplaced-gun carrier LOS/reject legs (attrib 0x20 -> groundEntity) are unmodeled — the armory-point leg (searchMode 1 / seatType 4) CLOSED 2026-07-17: `find_nearest_free_seat(..., armory_mode)` scans `Entity.armory_points` with the shared math (the attach-label pass consumes it; hud-re.md "Attach labels"); (c) the weapon-busy gate lives in the sim binding (World has no weapon slot); (d) the WAC no-dismount global (`dword_C6EADC`) is unmodeled; (e) seat-position keys 0xB6-0xBF (Entity_FindAvailableSeat @ 0x436790, incl. the displace-AI rule) unported; (f) the AI boarding think (walk to E5-E8 entry bones + the 64-tick seat-upgrade sweep) unported — script mounts are immediate; (g) child-vehicle seat traversal (FindBestSeatSlot's carried-gun walk + the 0x2000000 child-sitex weight) unmodeled; (h) sub-39's groundEntity persistence rides our collision's platform contact (retail keeps the stale boarding-time groundEntity while seated); (k) a DEAD controller counts as no controller (motor + AI staging) - the stand-in for the unported death->detach chain (retail detaches the corpse before the physics runs); (l) the toggle is AUTHORITY-only - the joiner-side C2S 0x26/0x27 wire leg is unported, `local_player_toggle_mount` refuses on a joiner | 23.1/23.4/23.5 above | the toggle covers 00TRa/04TR's gates (probe PASS); each residual cited at its port site |
+| D-AI-11 | Mount-chain stand-ins: (a) the scan candidate set is a registry sweep (no per-entity proximity lists) and the eye is the +0.9 u chest constant (no CameraOffset), +0.1875 u bias kept; (b) the emplaced-gun carrier LOS/reject legs (attrib 0x20 -> groundEntity) are unmodeled — the armory-point leg (searchMode 1 / seatType 4) CLOSED 2026-07-17: `find_nearest_free_seat(..., armory_mode)` scans `Entity.armory_points` with the shared math (the attach-label pass consumes it; hud-re.md "Attach labels"); (c) the weapon-busy gate lives in the sim binding (World has no weapon slot); (d) the WAC no-dismount global (`dword_C6EADC`) is unmodeled; (e) seat-position keys 0xB6-0xBF (Entity_FindAvailableSeat @0x436790, incl. the displace-AI rule) unported; (f) the AI boarding think (walk to E5-E8 entry bones + the 64-tick seat-upgrade sweep) unported — script mounts are immediate; (g) child-vehicle seat traversal (FindBestSeatSlot's carried-gun walk + the 0x2000000 child-sitex weight) unmodeled; (h) sub-39's groundEntity persistence rides the generic ground/carrier reference (retail keeps the stale boarding-time groundEntity while seated); (k) a DEAD controller counts as no controller (motor + AI staging) - the stand-in for the unported death->detach chain (retail detaches the corpse before the physics runs); (l) the toggle is AUTHORITY-only - the joiner-side C2S 0x26/0x27 wire leg is unported, `local_player_toggle_mount` refuses on a joiner | 23.1/23.4/23.5 above | the toggle covers 00TRa/04TR's gates (probe PASS); each residual cited at its port site |
 
 Correspondence adds: see the rows appended to the section-2 map this session
 (the toggle chain, the four predicates, `vehicle_ai_drive`, the deploy stamp).

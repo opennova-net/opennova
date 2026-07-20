@@ -528,9 +528,10 @@ bool apply_player_intent(world::World &world, const PlayerIntent &intent) {
 	// Mirror the uplinked ground link so the 0x0A echo re-emits it (the client stores its
 	// own record's carrier back into groundEntity(+0x28) @0x4c1353 and DETACH-corrects on a
 	// mismatch — echoing 0xFFFF at a grounded client is what snapped it, D-NET-151). Retail
-	// derives +0x28 from its own platform physics [orig: @0x4b3291]; our motor has no
-	// platform pass, so the owner's uplink is the authoritative source for read-applied
-	// peers (divergence note in the D-NET-151 entry).
+	// derives +0x28 from the movement resolver's unconditional CB/terrain ground probe
+	// [orig: Entity_RaycastGroundHeightAndObject @0x414370]. Our read-applied remote peers
+	// are not re-simulated, so their owner's uplink is authoritative for this field
+	// (divergence note in the D-NET-151 entry).
 	ent->ground_target = grounded ? world::EntityHandle{static_cast<uint16_t>(
 	                                        intent.carrier_handle)}
 	                              : world::EntityHandle{};

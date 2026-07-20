@@ -13,11 +13,12 @@
 //
 // Collidable types (runtime dispatch, witnessed in
 // Entity_ComputeBoneCollisionForce @ 0x4ae150):
-//   4  platform/seat surface -> contact flag 0x1 + platform-carry anchor
+//   1  generic collision box ("CB") -> ordinary solid contact and generic rays
+//   4  ladder volume ("CL")  -> contact flag 0x1 + ladder alignment frame
 //   6  armory volume ("CA")  -> contact flag 0x4 -> entity Flags |= 0x400000
 //      (gates the in-game armory screen: input action 218 opens weapon.mnu WEAPON
 //       only while this flag is set [orig: Input_HandleActionBinding @ 0x49b848])
-//   7  damage-only volume (projectile mask 0x8 path)
+//   7  vehicle collision ("VC") -> solid on the vehicle-contact mask 0x8 path
 //   8  blink box ("BB")      -> contact flag 0x10 + blink accumulation (buildings)
 //   9  destructible-section touch -> contact flag 0x20 + section bit on target
 //   10 capture-zone touch    -> contact flag 0x200
@@ -75,8 +76,9 @@ struct CollisionVolume {
 
 // Poly Collision LOD records (CVRT/CNRM/CFAC). These preserve the authored
 // fixed-point query data and source order and remain deliberately distinct
-// from the CB/CL/VC (vehicle collision) BVOL families used by contact and
-// generic solid rays.
+// from every BVOL gameplay family: CB (generic collision), CL (ladder), CA
+// (armory), VC (vehicle collision), BB (blink box), and the other trigger
+// volumes. Ordinary projectile narrow phase uses CFAC, never BVOL substitutes.
 struct CollisionVertex {
     int32_t p[3] = {};              // section-local 16.16
 };
@@ -102,8 +104,9 @@ struct CollisionFace {
     uint8_t material = 0;
 };
 
-// [orig: runtime COBJ record, 108 B — volume count @+28, volume ptr @+36, damage
-// start @+32, local AABB minX,maxX,minY,maxY,minZ,maxZ @+68..+88, bound-sphere
+// [orig: runtime COBJ record, 108 B — volume count @+28, volume ptr @+36,
+// type-7/12 vehicle-pass start @+32, local AABB minX,maxX,minY,maxY,minZ,maxZ
+// @+68..+88, bound-sphere
 // center @+92..+100 + radius @+104.]
 struct CollisionSection {
     int32_t vertex_start = 0;
@@ -116,7 +119,8 @@ struct CollisionSection {
     int32_t volume_count = 0;
     int32_t face_vertex_start = 0;  // run into CollisionModel::face_vertices [orig: COBJ+8]
     int32_t face_vertex_count = 0;  // [orig: COBJ+4]
-    int32_t damage_start = -1;      // first damage volume index (-1 = none) [orig: +32]
+    int32_t vehicle_volume_start = -1; // first type-7/12 vehicle-pass volume (-1 = none)
+                                       // [orig: COBJ+32]
     int32_t min_x = 0, max_x = 0;   // section-local 16.16 AABB
     int32_t min_y = 0, max_y = 0;
     int32_t min_z = 0, max_z = 0;
@@ -266,7 +270,10 @@ struct BlinkAccum {
 
 inline constexpr uint32_t kBlinkIndoorsBit = 0x2;        // accum bit -> Flags 0x800000
 inline constexpr uint32_t kEntityFlagIndoors = 0x800000; // entity+36 bit
-inline constexpr uint32_t kEntityFlagOnPlatform = 0x100000;
+// Raw entity Flags bit written by a CL/type-4 touch. Retail also uses it to lock
+// the upper-body pose and skip gravity while aligned to a ladder. The reimpl
+// currently extracts the contact frame but does not implement climb locomotion.
+inline constexpr uint32_t kEntityFlagLadderContact = 0x100000;
 inline constexpr uint32_t kEntityFlagArmoryZone = 0x400000;  // type-6 volume touch
 inline constexpr uint32_t kEntityFlagVehicleLoadoutZone = 0x800; // type-11 volume touch
 
@@ -281,8 +288,8 @@ struct CollisionTargetView {
     const CollisionModel *model = nullptr;
     const CollisionMatrix *matrices = nullptr; // one per section
     int32_t pos[3] = {};                       // entity+4/+8/+12 (16.16)
-    int32_t yaw_bam = 0;                       // entity+16 Yaw (BAM32) — platform-anchor leg
-    int32_t pitch_bam = 0;                     // entity+20 Pitch (BAM32) — platform-anchor leg
+    int32_t yaw_bam = 0;                       // entity+16 Yaw (BAM32) — ladder-contact leg
+    int32_t pitch_bam = 0;                     // entity+20 Pitch (BAM32) — ladder-contact leg
     uint32_t entity_flags = 0;                 // entity+36 Flags (contact rejects flags & 1)
     int32_t bound_radius = 0;                  // entity+0 boundRadius (16.16)
     bool is_building = false;                  // itemDef type == 5 (blink gate)
@@ -409,15 +416,16 @@ bool collision_raycast_person_sections(const CollisionTargetView &target,
 // over the plane run with prev-position gating, second-plane assist, per-type
 // flag dispatch, blink accumulation, and the bound-radius force clamp).
 //
-// mask bits: 0x1 = on-platform (test type-4 seat volumes), 0x2 = player (test
-// type-19), 0x8 = damage pass (types 7/12 only), 0x10 = type-12 pass.
+// mask bits: 0x1 = ladder recontact (inflated CL/type-4 test), 0x2 = player
+// (test type-19), 0x8 = vehicle collision query (use a section's type-7/12 run
+// when present; otherwise fall back to its CB/default solids), 0x10 = type-12 pass.
 // out_force is the world-space push (16.16, already >>5-scaled); out_flags is
 // the contact-flag word listed in the type table above.
 // ----------------------------------------------------------------------------
-struct PlatformContact {
-    // [orig: g_PlatformContactYaw/Pitch @ 0xB5AB74/0xB5AB70, anchor X/Y/Z
-    // @ 0xB5AB78/7C/80 — written by the type-4 seat-volume hit, consumed by the
-    // resolver's platform ride.]
+struct LadderContact {
+    // [orig: globals @ 0xB5AB70..80 — written by the CL/type-4 hit. Plane 0
+    // supplies the authored ladder facing; the frame is consumed by retail's
+    // climb alignment/motion, which is not ported yet.]
     int32_t anchor[3] = {};
     int32_t yaw = 0;
     int32_t pitch = 0;
@@ -441,7 +449,7 @@ struct ContactResult {
 };
 
 bool collision_contact_force(const CollisionTargetView &target, const ContactQuery &q,
-                             BlinkAccum &blink, PlatformContact &platform, ContactResult &out);
+                             BlinkAccum &blink, LadderContact &ladder, ContactResult &out);
 
 // Host/model callback for the final world-space matrix array consumed by every
 // collision walk. Matrix slot i corresponds to COBJ/collision section i by
@@ -663,7 +671,7 @@ public:
     // The movement resolver: candidate contact forces + damage/flag dispatch +
     // repulsion + the ground-settle tail. Returns the foot clearance (feet Z -
     // resolved ground Z): <= 0 grounded (caller lifts by the return), > 0xF000
-    // airborne. [orig: Entity_ProcessCollisionAndPlatformPhysics @ 0x4b2bd0]
+    // airborne. [orig: movement collision resolver @ 0x4b2bd0]
     // capsule_bottom/top are the anim frame's 16.16 capsule extents (out[3]/out[4]).
     struct ResolveState {
         int32_t prev_pos[3] = {};   // savedLivePose stand-in (updated per resolve)

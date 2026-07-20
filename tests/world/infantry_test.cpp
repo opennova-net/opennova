@@ -1522,7 +1522,7 @@ int main() {
     }
 
     // ---- ground settle floors pos[2] to ground + the frame's capsule_bottom (origin->feet),
-    //      NOT the death-fall mover's +0x50000 [orig: Entity_ProcessCollisionAndPlatformPhysics
+    //      NOT the death-fall mover's +0x50000 [orig: movement collision resolver
     //      @0x4b2bd0 settles entity[3]=entityRadius+ground @0x4b3da3; entityRadius = the .bad
     //      capsule_bottom*65536 via AnimMap_UpdateEntity @0x40b82f; D-INF-6]. ----
     {

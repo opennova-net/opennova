@@ -257,9 +257,10 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	if options.get("item_db") != null:
 		_sim.resolve_item_traits(options["item_db"])
 	# World-object collision: register each placed graphic's .3di collision block (BVOL
-	# volumes + BPLN planes) on the sim and attach per-entity instances — walls push back,
-	# roofs carry, hurt/ladder volumes act, blink boxes set indoors. [orig:
-	# Entity_ProcessCollisionAndPlatformPhysics @0x4b2bd0 + the query set;
+	# volumes + BPLN planes) on the sim and attach per-entity instances — CB walls push
+	# back, roofs support ground probes, CA/BB triggers act, and CL contact frames decode
+	# (climb locomotion is not ported). [orig:
+	# movement collision resolver @0x4b2bd0 + the query set;
 	# docs/world/world-wac-ai-re.md §15; D-INF-3 burn-down]
 	if options.get("item_db") != null and options.get("placer") != null:
 		_sim.resolve_collision_instances(options["item_db"], options["placer"])

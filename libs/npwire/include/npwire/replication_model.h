@@ -117,8 +117,9 @@ struct GameEntitySnapshot {
 	// CARRIER-LOCAL (Entity_TransformWorldToLocal @0x43BB50) with a carrier-relative yaw byte,
 	// and the client mirrors the echoed carrier back into its own groundEntity (@0x4c1353) —
 	// echoing 0xFFFF at a grounded client detaches and hard-snaps it (D-NET-151). Filled for
-	// read-applied peers from their §5.10 uplink (retail derives it from platform physics
-	// @0x4b3291, which our motor does not model yet).
+	// read-applied peers from their §5.10 uplink. Retail derives it from the movement
+	// resolver's unconditional CB/terrain ground probe @0x414370; our remote-peer
+	// read-apply path does not re-simulate that probe.
 	uint16_t ground_handle = 0xFFFF;
 	// Resolved carrier POSE for the record builder (the carrier may be a pool-2 static, which
 	// has no snapshot of its own in the 0x0A entity list — the World-aware snapshot pass

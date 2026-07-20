@@ -998,11 +998,14 @@ add_test(NAME occlusion COMMAND occlusion_test)
 # Real-asset occlusion probe: retail Armry01.3di (the 00TRa armory) through the
 # host's IR->runtime conversions, camera walked room to room, per-room section
 # masks asserted (window/portal/open-slot legs over authored OFAC topology).
-# Asset-gated on OPENNOVA_JO_ASSETS; skips-as-pass without it.
+# Uses the committed Armry01 fixture in CI; OPENNOVA_JO_ASSETS can override it
+# for a retail-install parity run.
 add_executable(occlusion_armry_test world/occlusion_armry_test.cpp)
 target_link_libraries(occlusion_armry_test PRIVATE opennova_world opennova_threedi)
 target_include_directories(occlusion_armry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(occlusion_armry_test PRIVATE cxx_std_17)
+target_compile_definitions(occlusion_armry_test PRIVATE
+    OPENNOVA_ARMRY_FIXTURE="${CMAKE_SOURCE_DIR}/fixtures/3dp/armry01/Armry01.3di")
 add_test(NAME occlusion_armry COMMAND occlusion_armry_test)
 
 # The FP weapon action FSM (WeaponAction_ProcessFrame @0x540e60 + Anim_InitActions

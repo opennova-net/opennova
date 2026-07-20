@@ -3,7 +3,7 @@ extends RefCounted
 # Build Godot convex-hull shapes from a NovaObjectData collision volume.
 #
 # NovaObjectData.get_collision_volumes() returns one dict per parsed collision
-# bounding volume (the engine's CB/CC collidable primitives), already in Godot
+# bounding volume (the engine's BVOL gameplay-volume families), already in Godot
 # model-local space (single negate-x, matching the render mesh):
 #   { type:int, flags:int, min:Vector3, max:Vector3, planes:Array[Plane],
 #     part_index:int, object_index:int }
@@ -18,9 +18,11 @@ extends RefCounted
 
 # Collidable-type abbreviations (from the reference exporter's map_collidable_type).
 # The LETTER CODES are exporter-side naming; the RUNTIME semantics are now witnessed
-# (docs/world/world-wac-ai-re.md §15.4): 1 solid (the only type raycasts clip),
-# 4 platform/seat, 5 contact-no-force, 6 armory zone (Flags 0x400000 gates
-# weapon.mnu), 7 damage-pass, 8 blink box (indoors), 9 destructible-section touch,
+# (docs/world/world-wac-ai-re.md §15.4): 1 generic CB solid (the only BVOL type
+# generic rays clip), 4 CL ladder contact/alignment (climb motor not ported),
+# 5 contact-no-force, 6 CA armory zone (Flags 0x400000 gates weapon.mnu),
+# 7 VC vehicle-collision solid (vehicle mask), 8 BB blink box (indoors),
+# 9 destructible-section touch,
 # 10 capture-zone touch, 11 vehicle-loadout zone (Flags 0x800 gates vehicle.mnu),
 # 12 masked, 13 grounded-only touch, 16/17/18 hurt -50/-6/-1 HP, 19 player-only
 # solid, 20..23 occlusion. [orig: Entity_ComputeBoneCollisionForce @0x4ae150 +

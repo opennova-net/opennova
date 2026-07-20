@@ -419,7 +419,7 @@ struct Entity {
     // the collision pass: ((section & 0x1F) | (pool_index << 8)) << 12. The renderer's
     // interior-lighting group selection reads these; hit presence + accum flag bit 2 set
     // the Flags 0x800000 "indoors" bit. [orig: the per-entity blink quad stamped by
-    // Entity_BuildProximityList @ 0x4b406b / Entity_ProcessCollisionAndPlatformPhysics
+    // Entity_BuildProximityList @ 0x4b406b / movement collision resolver
     // @ 0x4b36f0 from g_BlinkHitSlot0..3 @ 0xB57C74]
     uint32_t blink_hits[4] = {};
 
@@ -430,11 +430,11 @@ struct Entity {
     // 0x5c6cd9-0x5c6d0d; docs/render/render-occlusion-re.md §3.4]
     uint8_t occlusion_latch = 0;
 
-    // Standing-on carrier (entity+0x28 groundEntity): the entity this one stands ON — a
-    // building floor, a vehicle deck — any pool. Retail's platform physics maintains it
-    // every tick (Flags |= 0x100000 + groundEntity = platform
-    // [orig: Entity_ProcessCollisionAndPlatformPhysics @0x4b3291]); our motor has no
-    // platform pass yet, so for READ-APPLIED peers apply_player_intent mirrors the
+    // Ground/carrier reference (entity+0x28 groundEntity): the entity this one stands on
+    // — a building floor or vehicle deck, any pool — as maintained by the ground probe.
+    // CL/type-4 ladder contact also uses this field transiently with Flags 0x100000;
+    // that is ladder bookkeeping, not a platform volume [orig: @0x4b3291]. For
+    // READ-APPLIED peers apply_player_intent mirrors the
     // carrier the owning client uplinked (§5.10; D-NET-151) and the 0x0A echo re-emits
     // it (mount wins over ground [orig: NetPacket_SerializePlayerState op1 @0x4c0a08]).
     EntityHandle ground_target;         // kInvalid = free-standing

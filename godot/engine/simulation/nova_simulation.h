@@ -1012,9 +1012,10 @@ public:
 	// load its .3di collision block (BVOL volumes + BPLN planes via the placer's
 	// NovaObjectData cache), register one runtime model per graphic on the sim
 	// collision world, and attach the per-entity instance. From then on the infantry
-	// motor resolves against placed objects — wall push-out, standing on roofs,
-	// hurt/ladder volumes, blink-box indoors [orig: Entity_ProcessCollisionAndPlatform-
-	// Physics @0x4b2bd0 + the query set; docs/world/world-wac-ai-re.md §15; D-INF-3].
+	// motor resolves against placed objects — CB wall push-out, standing on roofs,
+	// hurt/CA/BB triggers, and CL contact-frame extraction (climb locomotion remains
+	// unported) [orig: collision resolver @0x4b2bd0 + the query set;
+	// docs/world/world-wac-ai-re.md §15; D-INF-3].
 	// p_placer duck-types MissionObjectPlacer (object_data_for(graphic)). Returns the
 	// instance count. Also attaches the render-occlusion portal models (buildings
 	// whose graphic carries OVRT/OPLN/OFAC/OOBJ records) with their def bits.

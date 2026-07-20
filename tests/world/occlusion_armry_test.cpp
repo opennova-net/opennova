@@ -23,6 +23,10 @@
 #include <string>
 #include <vector>
 
+#ifndef OPENNOVA_ARMRY_FIXTURE
+#define OPENNOVA_ARMRY_FIXTURE ""
+#endif
+
 #include "terrain/height_field.h"
 #include "threedi/threedi_ir.h"
 #include "world/collision.h"
@@ -222,17 +226,18 @@ struct Rig {
 } // namespace
 
 int main() {
+    std::string path = OPENNOVA_ARMRY_FIXTURE;
     const char *assets = std::getenv("OPENNOVA_JO_ASSETS");
-    if (assets == nullptr || assets[0] == '\0') {
-        std::printf("skipping: OPENNOVA_JO_ASSETS not set (asset-gated)\n");
-        return 0;
+    if (assets != nullptr && assets[0] != '\0') path = std::string(assets) + "/Armry01.3di";
+    if (path.empty()) {
+        std::fprintf(stderr, "FAIL: no Armry01.3di fixture path configured\n");
+        return 1;
     }
-    const std::string path = std::string(assets) + "/Armry01.3di";
     ThreediModelIR ir;
     threedi_ir_init(&ir);
     if (threedi_ir_read(path.c_str(), &ir) != 0) {
-        std::printf("skipping: %s not readable (asset-gated)\n", path.c_str());
-        return 0;
+        std::fprintf(stderr, "FAIL: %s not readable\n", path.c_str());
+        return 1;
     }
 
     CollisionModel cm;
@@ -242,6 +247,28 @@ int main() {
     // The authored shape this test's assertions are keyed to.
     CHECK(cm.sections.size() == 4);
     CHECK(om.records.size() == 8);
+    int cb_count = 0, cl_count = 0, ca_count = 0, vc_count = 0, bb_count = 0;
+    int bb_2e_count = 0, bb_28_count = 0;
+    for (const CollisionVolume &volume : cm.volumes) {
+        if (volume.type == 1) ++cb_count;
+        if (volume.type == 4) ++cl_count;
+        if (volume.type == 6) ++ca_count;
+        if (volume.type == 7) ++vc_count;
+        if (volume.type == 8) {
+            ++bb_count;
+            if (volume.flags == 0x2Eu) ++bb_2e_count;
+            if (volume.flags == 0x28u) ++bb_28_count;
+        }
+    }
+    // Super OED Manual v1.1 §1.1.3.4 names these families. The real armory
+    // independently pins the numeric mapping: generic CBs plus one CA armory
+    // trigger, one VC vehicle hull, and three BB rooms. It authors no CL ladder.
+    CHECK(cb_count == 14);
+    CHECK(cl_count == 0);
+    CHECK(ca_count == 1);
+    CHECK(vc_count == 1);
+    CHECK(bb_count == 3);
+    CHECK(bb_2e_count == 2 && bb_28_count == 1);
     threedi_ir_free(&ir);
     if (failures != 0) return 1; // shape mismatch: don't chase derived checks
 
