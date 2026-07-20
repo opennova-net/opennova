@@ -1972,6 +1972,18 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
                 ignored_mount_parent = mount->ground_target;
         }
     }
+    // The mission-authored refNum group (BMS byte 153 -> entity+533) carries
+    // self-site immunity through two DIFFERENT reference channels: the ITEM
+    // face narrow phase compares the candidate against the ray[18] MOUNT
+    // exclusion's refNum, null-guarded [orig: @ 0x4e4d40 in
+    // Physics_RaycastAgainstBoneCollision @ 0x4e4cb0], while the PERSON leg
+    // compares against the ray[17] SHOOTER's refNum [orig: @ 0x4e4688-0x4e46a3
+    // in Physics_RaycastAgainstBoneSections @ 0x4e4670 — retail derefs a null
+    // ray[17] unguarded there; a live owner is required here instead].
+    const Entity *mount_entity = world.registry.get(ignored_mount);
+    const uint8_t mount_ref_num =
+        mount_entity != nullptr ? mount_entity->ref_num : 0;
+    const uint8_t owner_ref_num = owner != nullptr ? owner->ref_num : 0;
     auto ignored = [&](EntityHandle h) {
         if (!h.valid()) return true;
         if (trace.extra_ignore.valid() && h == trace.extra_ignore) return true;
@@ -2031,6 +2043,11 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
             const Entity *entity = world.registry.get(h);
             if (ignored(h) || entity == nullptr || entity->hidden ||
                 (entity->engine_flags & 0x02000001u) != 0)
+                continue;
+            // Item self-site immunity: candidate refNum vs the mount
+            // exclusion's refNum [orig: @ 0x4e4d40].
+            if (entity->ref_num != 0 && mount_ref_num != 0 &&
+                entity->ref_num == mount_ref_num)
                 continue;
             CollisionTargetView view;
             std::vector<CollisionMatrix> matrices;
@@ -2135,6 +2152,10 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
         const Entity *e = world.registry.get(slot.h);
         if (e == nullptr || e->kind != EntityKind::Organic || e->hidden ||
             (e->engine_flags & 0x02000001u) != 0)
+            continue;
+        // Person self-group immunity: candidate refNum vs the SHOOTER's
+        // refNum [orig: @ 0x4e4688-0x4e46a3].
+        if (e->ref_num != 0 && owner_ref_num != 0 && e->ref_num == owner_ref_num)
             continue;
         ProjectileHit eh;
         int32_t hit_distance = 0;

@@ -1924,6 +1924,79 @@ void test_round_item_skip_mask() {
     CHECK(world.round_sim.debug_trail[0].entity == eligible.packed);
 }
 
+// Mission-authored refNum groups (BMS byte 153 -> entity+533) carry self-site
+// immunity: the person leg compares the candidate against the SHOOTER's refNum
+// [orig: @ 0x4e4688-0x4e46a3], the item leg against the ray[18] MOUNT
+// exclusion's refNum [orig: @ 0x4e4d40].
+void test_refnum_group_immunity() {
+    World world;
+    world.registry.configure_pool(0, 4);
+    world.registry.configure_pool(1, 4);
+
+    Entity owner_seed;
+    owner_seed.kind = EntityKind::Organic;
+    owner_seed.ref_num = 7;
+    const EntityHandle owner = world.registry.spawn(0, owner_seed);
+
+    Entity person_seed;
+    person_seed.kind = EntityKind::Organic;
+    person_seed.position = Vec3{5.0f, 0.0f, 0.0f};
+    person_seed.health = 100;
+    person_seed.ref_num = 7;
+    const EntityHandle person = world.registry.spawn(0, person_seed);
+
+    CollisionWorld cw;
+    cw.build_tick_tables(world);
+
+    ProjectileTrace q;
+    q.owner = owner;
+    q.start = FixedVec3{0, 0, fx(0.9)};
+    q.end = FixedVec3{fx(10.0), 0, fx(0.9)};
+    CHECK(!cw.trace_projectile(world, q).hit()); // shared group 7: immune
+
+    world.registry.get(person)->ref_num = 3;
+    CHECK(cw.trace_projectile(world, q).hit_class == ProjectileHitClass::Person);
+
+    world.registry.get(person)->ref_num = 7;
+    world.registry.get(owner)->ref_num = 0; // a zero shooter refNum never gates
+    CHECK(cw.trace_projectile(world, q).hit_class == ProjectileHitClass::Person);
+
+    // The ITEM leg keys off the MOUNT exclusion's refNum, not the shooter's.
+    Entity gun_seed;
+    gun_seed.kind = EntityKind::Item;
+    gun_seed.position = Vec3{100.0f, 100.0f, 100.0f};
+    gun_seed.bound_radius = 0.5f;
+    gun_seed.ref_num = 9;
+    const EntityHandle gun = world.registry.spawn(1, gun_seed);
+
+    Entity plate_seed;
+    plate_seed.kind = EntityKind::Item;
+    plate_seed.position = Vec3{4.0f, 0.0f, 0.9f};
+    plate_seed.bound_radius = 1.0f; // compatibility sphere, no resolved model
+    plate_seed.ref_num = 9;
+    const EntityHandle plate = world.registry.spawn(1, plate_seed);
+    CHECK(gun.valid() && plate.valid());
+    world.registry.get(person)->position = Vec3{100.0f, 0.0f, 0.0f}; // off the ray
+    cw.build_tick_tables(world);
+
+    Entity *shooter = world.registry.get(owner);
+    shooter->mounted = true;
+    shooter->mount_target = gun;
+    shooter->mount_type = SeatType::Gunner;
+    CHECK(!cw.trace_projectile(world, q).hit()); // the site's plate shares the gun's 9
+
+    shooter->mounted = false; // dismounted: ray[18] is empty, the plate hits
+    shooter->mount_type = SeatType::None;
+    CHECK(cw.trace_projectile(world, q).hit_class ==
+          ProjectileHitClass::DynamicEntity);
+
+    shooter->mounted = true; // mounted again, but a different plate group
+    shooter->mount_type = SeatType::Gunner;
+    world.registry.get(plate)->ref_num = 3;
+    CHECK(cw.trace_projectile(world, q).hit_class ==
+          ProjectileHitClass::DynamicEntity);
+}
+
 // Indestructible is a damage-zeroing gate, not a collision filter. The front
 // organic still stops the round and protects a vulnerable target behind it.
 void test_round_indestructible_organic_still_collides() {
@@ -2532,6 +2605,7 @@ int main() {
     test_round_inside_bound_sphere_hits_wall();
     test_round_equal_distance_uses_retail_pool_order();
     test_round_item_skip_mask();
+    test_refnum_group_immunity();
     test_round_indestructible_organic_still_collides();
     test_round_person_sections_drive_hit_and_death_animation();
     test_projectile_polygon_raycast();

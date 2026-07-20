@@ -1800,8 +1800,27 @@ collision block's **CFAC triangle mesh**, per section. Ported as
   the `g_FatBullets` 0.1u floor for remote players).
 - **Broad phase** `[orig: Projectile_RaycastProximitySlots @ 0x4e5340]`: per prox slot,
   per-axis |center − rayCenter| ≤ radius + halfExtent, then perpendicular
-  line-distance ≤ radius; skip Flags & 0x2000001, the shooter chain (ray[17..20]), and
-  the `+533` refNum self-hit group; survivors run the face walk.
+  line-distance ≤ radius; skip Flags & 0x2000001 and the shooter chain (ray[17..20]);
+  survivors run the face walk. (The `+533` refNum gate is NOT here — re-read
+  2026-07-20: it lives in the narrow phases, split by channel, below.) The
+  function's DEFAULT slotType (neither 1 nor 2) walks the PERSON prox table
+  through this same face walk — the consumer set of a person model's CFAC mesh:
+  the knife kill zone (`Weapon_RaycastAndSpawnImpact @ 0x4e8460`, all three slot
+  legs), the NVG laser (`Entity_RenderNVGLaserBeam @ 0x5c6090`), wreck/falling/
+  shell physics (`@ 0x445500/0x4472f0/0x4482a0`), `compute_clamped_displacement
+  @ 0x4ad6a0`, and `raycast_proximity_entities @ 0x538350`. Ordinary bullets
+  never see person CFAC — their person leg is the bone-sphere pair above.
+- **The refNum self-site gates** (witnessed 2026-07-20; ported in
+  `trace_projectile`): the mission-authored refNum group (BMS byte 153 →
+  entity+533, D-NET-94) suppresses hits through two DIFFERENT reference
+  channels. The ITEM face walk skips a candidate whose nonzero refNum equals
+  the **ray[18] mount exclusion's** refNum, null-guarded
+  `[orig: @ 0x4e4d40]` — a mounted shooter's rounds pass through the site items
+  sharing the carrier's group. The PERSON sphere walk skips a candidate whose
+  nonzero refNum equals the **ray[17] shooter's** `[orig: @ 0x4e4688-0x4e46a3]`
+  — authored same-group persons are immune to each other's fire; retail derefs
+  a null ray[17] unguarded there (a nonzero-refNum person vs an ownerless
+  flags&4 round would crash retail), so the port requires a live owner.
 - **The face walk** `[orig: Physics_RaycastAgainstBoneCollision @ 0x4e4cb0]`: model =
   `(Flags & 4 && huskModel) ? huskModel : graphicModel` (the husk swap again).
   Its callback-matrix and COBJ cursors advance +64/+108 bytes in lockstep:
@@ -1834,8 +1853,24 @@ collision block's **CFAC triangle mesh**, per section. Ported as
   the per-object CNRM run count (the parse-struct `num_planes` misnomer renamed
   `num_normals`; faces' `normal_index` is local to that run).
 
-Residuals live as D-ITEM-1 (§24.7): the sphere stand-in for face-less models, the
-`+533` refNum exclusion, and the prox-slot tables themselves (we scan the pools).
+Residuals live as D-ITEM-1 (§24.7): the sphere stand-in for face-less models and
+the prox-slot tables themselves (we scan the pools). The `+533` refNum gates are
+PORTED 2026-07-20 (both channels; `collision` ctest `test_refnum_group_immunity`).
+
+Person-model geometry roles (witnessed 2026-07-20, settling the F3 phantom-sphere
+question): the whole-player broad sphere is the ENTITY `+0` boundRadius stored per
+person prox slot (`Entity_BuildProximityLists_Pool01 @ 0x4b9340` copies entity+0;
+consumed by `Physics_RaycastAgainstProximityList @ 0x4e4a30` as slot radius +
+extraRadius) — it is NOT a COBJ. The bone-sphere walk reads ONLY each COBJ's
+authored mid (+92..+100) and radius (+104); COBJ min/max (+68..+88) are never
+read on the person path. The trailing CFAC mesh row (Indo01 COBJ 19) authors
+radius 0 + sentinel inverted bounds — a JOX corpus sweep (953 collision models)
+shows sentinels appear ONLY on rows owning zero BVOLs (0 of 2167 BVOL-owning
+rows), i.e. the exporter folds only the BVOL run into its bounds accumulator and
+rows with nothing to fold keep the untouched init. At radius 0 the row's only
+narrow-phase footprint is the extra+0xCCC floor at its (0,0,0) mid (inside the
+pelvis sphere); its 4630 faces serve the knife/NVG-laser/generic-ray consumers
+listed under the §15.8 broad phase, never bullets.
 
 ### 15.8a The hit-chain re-grill (grill-ida 2026-07-18)
 
