@@ -87,7 +87,10 @@ struct PosedDamageRig {
     EntityHandle shooter;
     EntityHandle target;
 
-    explicit PosedDamageRig(int active_section) {
+    // `active_section` is the FIRST sphere the descending walk crosses (the
+    // highest on-ray ordinal -> ray[31]); an optional lower `second_section`
+    // also sits on the ray so the final overlap rewrites ray[32] below it.
+    explicit PosedDamageRig(int active_section, int second_section = -1) {
         world.registry.configure_pool(0, 16);
 
         Entity s;
@@ -127,9 +130,11 @@ struct PosedDamageRig {
         std::vector<CollisionMatrix> matrices;
         matrices.reserve(static_cast<size_t>(section_count));
         for (int section = 0; section < section_count; ++section) {
+            const bool on_ray =
+                section == active_section || section == second_section;
             const int32_t center[3] = {
                 5 * 65536,
-                section == active_section ? 0 : (20 + section) * 65536,
+                on_ray ? 0 : (20 + section) * 65536,
                 58982, // retail unposed torso height, 0.9u in Q16
             };
             matrices.push_back(collision_matrix_from_heading(0, center));
@@ -451,6 +456,27 @@ void test_item_type_zone_domain_and_attrib_0200_sections() {
         CHECK(r.target_entity()->health == 1280);
         CHECK((r.target_entity()->flags & 0x800u) != 0);
     }
+
+    // A walk crossing TWO spheres splits the channels: ray[31] keeps the first/
+    // highest overlap (7) while ray[32] ends at the final/lowest (4). The
+    // attrib-0x200 seat switch reads ray[31] (hitZoneData+124 @0x4ec977).
+    {
+        PosedDamageRig r(7, 4);
+        r.target_entity()->item_attrib = 0x200u;
+        r.fire_and_tick();
+        CHECK(r.world.round_sim.hits.size() == 1);
+        CHECK(r.world.round_sim.hits[0].damage == 3720); // seat code 7 via ray[31]
+        CHECK((r.target_entity()->flags & 0x800u) != 0);
+    }
+    // The normal-infantry table keeps reading ray[32] (@0x4ec9bf): final zone 4
+    // takes 1.25x even though the primary bone 7 sits in the 1.0x band.
+    {
+        PosedDamageRig r(7, 4);
+        r.fire_and_tick();
+        CHECK(r.world.round_sim.hits.size() == 1);
+        CHECK(r.world.round_sim.hits[0].damage == 775); // 620 * 1.25 via ray[32]
+        CHECK((r.target_entity()->flags & 0x800u) == 0);
+    }
 }
 
 void test_shooter_damage_class_runs_after_zone_truncation() {
@@ -669,7 +695,9 @@ void test_vehicle_occupant_reduction_count_cap_and_depth() {
     Entity *child = r.world.registry.get(r.target);
     child->item_type = 3;
     child->item_attrib = 0x20u;
-    child->ground_target = vehicle_h;
+    child->ground_target = vehicle_h; // the one-hop damage rollup channel
+    child->mounted = true;            // the retail +40 attach the occupant scan reads
+    child->mount_target = vehicle_h;
     child->has_item_def = true;
 
     const auto fire_expect = [&](int32_t expected_damage) {
@@ -685,7 +713,10 @@ void test_vehicle_occupant_reduction_count_cap_and_depth() {
         CHECK(r.world.round_sim.impacts.size() == 1);
         CHECK(r.world.round_sim.impacts[0].effect_tag == 2);
     };
-    const auto add_rider = [&](EntityHandle ground, uint32_t flags = 0,
+    // [orig: Entity_CountMountedEntities @ 0x435970] Occupants are counted by
+    // the ATTACH parent, not by standing: candidate.mount_target == vehicle, or
+    // the candidate's carrier stands on the vehicle (carrier.ground_target).
+    const auto add_rider = [&](EntityHandle mount, uint32_t flags = 0,
                                int pool = 0) {
         Entity rider;
         rider.kind = EntityKind::Organic;
@@ -694,7 +725,8 @@ void test_vehicle_occupant_reduction_count_cap_and_depth() {
         rider.position = {100.0f, 100.0f, 100.0f};
         rider.health = 100;
         rider.flags = flags;
-        rider.ground_target = ground;
+        rider.mounted = true;
+        rider.mount_target = mount;
         return r.world.registry.spawn(pool, rider);
     };
 
@@ -717,9 +749,20 @@ void test_vehicle_occupant_reduction_count_cap_and_depth() {
     no_item_def.item_type = 3;
     no_item_def.position = {100.0f, 100.0f, 100.0f};
     no_item_def.health = 100;
-    no_item_def.ground_target = vehicle_h;
+    no_item_def.mounted = true;
+    no_item_def.mount_target = vehicle_h;
     CHECK(r.world.registry.spawn(0, no_item_def).valid());
     fire_expect(76); // a pool-0 slot without an ItemDef pointer is also excluded
+
+    Entity deck_stander;
+    deck_stander.kind = EntityKind::Organic;
+    deck_stander.has_item_def = true;
+    deck_stander.item_type = 3;
+    deck_stander.position = {100.0f, 100.0f, 100.0f};
+    deck_stander.health = 100;
+    deck_stander.ground_target = vehicle_h; // standing on the deck, not attached
+    CHECK(r.world.registry.spawn(0, deck_stander).valid());
+    fire_expect(76); // retail counts the +40 attach chain, never plain standing
 
     add_rider(nested);
     fire_expect(76); // two intermediates deep is outside the retail count
@@ -767,6 +810,9 @@ void test_retail_aerodynamic_drag_vectors() {
     FlightResult slow_wet = fly_one_tick(FixedVec3{0x3fff, 0, 0}, 0x100u, 0, 0,
                                          4 * 65536, 5 * 65536);
     CHECK(!slow_wet.active);
+    // The stall zeroes the lifetime BEFORE the sweep and the round still flies
+    // its final segment [orig: no early return @0x4ea142-0x4ea148].
+    CHECK(slow_wet.pos.x == 0x3fff);
     FlightResult edge_wet = fly_one_tick(FixedVec3{0x4000, 0, 0}, 0x100u, 0, 0,
                                          4 * 65536, 5 * 65536);
     CHECK(edge_wet.active && edge_wet.pos.x == 0x4000);

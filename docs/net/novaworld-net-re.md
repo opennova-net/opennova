@@ -5317,10 +5317,16 @@ in parent+1..parent+LSC (@0x5027c8, class-byte compare @0x5027f8), else 0xFF]`
 `[u8 damageClass = player+89688[slot AmmoDef index] @0x50288a]`, then skips the LSC slots
 (@0x50284e); 0xFF terminator after the leading `[u8 avatarClass]`.
 Consequently, every emitted weapon sharing one AmmoDef serializes the same final normalized class,
-including an earlier weapon whose request byte was different. The reimplementation decodes 0x2F
-once and accepts it only when the six-byte header, complete four-byte entries, one 0xFF terminator,
-and end-of-body coincide; missing terminators, truncated entries, and trailing bytes neither emit
-0x5A nor open the loadout gate.
+including an earlier weapon whose request byte was different. The 0x2F read side is witnessed
+(2026-07-20): every field goes through a bounds-guarded cursor that substitutes ZERO past the end
+(`@0x515853`-style guards throughout), the entry loop exits ONLY on the 0xFF terminator
+(`@0x515a99`), and there is no end-of-body check after that exit — TRAILING bytes are accepted and
+processed. An UNTERMINATED list never exits retail's loop (the zero-filled reads can't produce
+0xFF — a hang/overflow on hostile input). The reimplementation matches the accept side (trailing
+bytes accepted, 2026-07-20 fix) and rejects unterminated/truncated bodies as the crash-safe
+divergence, without emitting 0x5A or opening the loadout gate. An invalid class/type in retail
+answers with `Server_SendWeaponSlotListToPlayer` rather than silence (`@0x5158a9`); ours stays
+silent on those — a bounded residual.
 **`WeaponSlot_GetTotalClips @ 0x5425F0`** (ex-`sub_5425F0`; the auto "kill score" comment was a
 misnomer) = the slot's TOTAL AMMO IN CLIPS: (entity ammo pool for the def's ammoclass [+ the
 bucket value @0x542651 / loaded rounds slot+16 @0x54265b]) ÷ clipsize (@0x542673); clipsize −1
@@ -5547,7 +5553,12 @@ before damage calculation. `Projectile_ProcessDamageOnTarget` zeros damage for e
 flag 0x4000000, signed itemDef+400 impact armor -1, ammo `penetration_impact` below that
 armor class, or nonzero entity+292 damage state. A type-1 vehicle with more than one
 eligible live pool-0 direct/one-nested occupant reduces damage by
-`min(count * damage_reduc_pp, damage_reduc_max)`. Health and armor use signed-16 storage
+`min(count * damage_reduc_pp, damage_reduc_max)`. The occupant scan counts the ATTACH
+chain — a candidate whose parentEntity(+40) is the vehicle, or whose attach carrier's
+groundEntity(+0x28) is — never plain deck-standing
+[orig: `Entity_CountMountedEntities @ 0x435970`]; the reimpl maps +40 to
+`Entity::mount_target` (fixed 2026-07-20 from a ground-reference mis-channel).
+Health and armor use signed-16 storage
 semantics; damage clamps to remaining health, and itemDef+84 flag 0x40000000 applies the
 retail NoDie `health - 1` clamp before the wrapping signed-16 subtraction.
 

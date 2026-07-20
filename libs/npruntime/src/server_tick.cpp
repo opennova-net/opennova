@@ -201,9 +201,10 @@ void release_due_respawns(NapiNPServerCtx &ctx, world::World &world) {
 			world::entity_reset_to_spawn_state(*e);
 			e->alive = true; // the route_round_deaths dead mark lifts with the respawn
 			// Spawn health = the item template's healthMax [orig: Entity_InitFromItemDef
-			// @0x49e550; the player_item_hp mirror, D-NET-144].
-			if (world.player_item_hp > 0)
-				e->health = world.player_item_hp;
+			// @0x49e550; the player_item_hp mirror, D-NET-144]. Same signed-i16 gate as
+			// the first spawn (player_spawn.cpp) — healthMax is a signed WORD in retail.
+			if (world.player_has_item_def && world.player_item_hp != 0)
+				e->health = world::retail_signed_i16(world.player_item_hp);
 			else if (e->health_max > 0)
 				e->health = e->health_max;
 			else

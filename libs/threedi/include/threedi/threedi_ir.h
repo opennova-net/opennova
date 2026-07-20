@@ -537,7 +537,11 @@ static inline int threedi_ir_collision_is_runtime_safe(const ThreediIRCollision 
             nb > collision->volume_count - volume_cursor) return 0;
         for (size_t fi = 0; fi < nf; ++fi) {
             const ThreediIRCollisionFace *face = &collision->faces[face_cursor + fi];
-            if (face->normal_index < 0 || (size_t)face->normal_index >= nn) return 0;
+            /* A negative CNRM index is authorable; the runtime CFAC walker
+               skips such faces rather than rejecting the model
+               [orig: the CNRM resolve gate in
+               Physics_RaycastAgainstBoneCollision @ 0x4e4cb0]. */
+            if (face->normal_index >= 0 && (size_t)face->normal_index >= nn) return 0;
             for (int k = 0; k < 3; ++k)
                 if (face->vert_index[k] < 0 || (size_t)face->vert_index[k] >= nv) return 0;
         }
@@ -546,9 +550,15 @@ static inline int threedi_ir_collision_is_runtime_safe(const ThreediIRCollision 
         face_cursor += nf;
         volume_cursor += nb;
     }
+    /* The vertex/normal/face runs must exactly partition their pools, but
+       retail models legitimately author TRAILING BVOLs owned by no COBJ
+       (object_index -1): Zodiacs, mounted-weapon items, and large buildings
+       in the JO corpus all carry them. Retail never reaches them - every
+       walker consumes volumes only through per-COBJ runs (+28/+36) - so an
+       unowned tail is dead data, not an unsafe model. */
     if (collision->object_count != 0 &&
         (vertex_cursor != collision->vertex_count || normal_cursor != collision->normal_count ||
-         face_cursor != collision->face_count || volume_cursor != collision->volume_count))
+         face_cursor != collision->face_count || volume_cursor > collision->volume_count))
         return 0;
 
     int32_t previous_group = -1;
@@ -562,6 +572,12 @@ static inline int threedi_ir_collision_is_runtime_safe(const ThreediIRCollision 
         if (volume->object_index < -1) return 0;
         if (volume->object_index >= 0 &&
             (size_t)volume->object_index >= collision->object_count) return 0;
+        if (i >= volume_cursor) {
+            /* The unowned tail: outside every COBJ run, unreachable at
+               runtime; only its plane windows (validated above) matter. */
+            if (volume->object_index != -1) return 0;
+            continue;
+        }
         const int32_t group = volume->object_index < 0 ? 0 : volume->object_index;
         if (group < previous_group) return 0;
         previous_group = group;

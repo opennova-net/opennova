@@ -180,10 +180,19 @@ void apply_aerodynamic_drag(FixedVec3 &velocity, const AmmoTableEntry &ammo,
     const bool underwater = water_z_q16 != 0 && position_z_q16 <= water_z_q16;
     const int64_t drag_step = underwater ? scaled_drag * 25 : scaled_drag;
 
+    // Retail normalizes against the un-truncated x87 magnitude (PC53 = double
+    // semantics), multiplying each negated component by 65536/|v| and truncating
+    // [orig: the fdivr flt_7C32BC leg @0x4e5fd6-0x4e602e]. The ftol'd
+    // old_magnitude above feeds only the table index.
+    const double float_magnitude =
+        std::sqrt(static_cast<double>(velocity.x) * velocity.x +
+                  static_cast<double>(velocity.y) * velocity.y +
+                  static_cast<double>(velocity.z) * velocity.z);
+    const double direction_scale = 65536.0 / float_magnitude;
     const int32_t direction[3] = {
-        static_cast<int32_t>((-static_cast<int64_t>(velocity.x) * 65536) / old_magnitude),
-        static_cast<int32_t>((-static_cast<int64_t>(velocity.y) * 65536) / old_magnitude),
-        static_cast<int32_t>((-static_cast<int64_t>(velocity.z) * 65536) / old_magnitude),
+        static_cast<int32_t>(-static_cast<double>(velocity.x) * direction_scale),
+        static_cast<int32_t>(-static_cast<double>(velocity.y) * direction_scale),
+        static_cast<int32_t>(-static_cast<double>(velocity.z) * direction_scale),
     };
     const int32_t delta[3] = {
         arithmetic_shift_right_16(drag_step * direction[0] + 0x8000),
@@ -194,9 +203,17 @@ void apply_aerodynamic_drag(FixedVec3 &velocity, const AmmoTableEntry &ammo,
     velocity.x += delta[0];
     velocity.y += delta[1];
     velocity.z += delta[2];
-    const int64_t overshoot_dot = static_cast<int64_t>(delta[0]) * velocity.x +
-                                  static_cast<int64_t>(delta[1]) * velocity.y +
-                                  static_cast<int64_t>(delta[2]) * velocity.z;
+    // The reversal test rounds each Q32 product term to Q16 BEFORE the 32-bit
+    // wrapping sum [orig: the three (delta*vel + 0x8000) >> 16 legs
+    // @0x4e61f8-0x4e624a], so tiny same-sign terms can round to zero where an
+    // exact 64-bit dot would not.
+    auto dot_term = [](int32_t d, int32_t v) {
+        return static_cast<uint32_t>(
+            static_cast<uint64_t>(static_cast<int64_t>(d) * v + 0x8000) >> 16);
+    };
+    const int32_t overshoot_dot = signed_from_u32(dot_term(delta[0], velocity.x) +
+                                                  dot_term(delta[1], velocity.y) +
+                                                  dot_term(delta[2], velocity.z));
     if (overshoot_dot > 0) velocity = FixedVec3{};
 
     const int32_t post_index = drag_speed_index(fixed_magnitude(velocity));
@@ -225,8 +242,9 @@ void apply_aerodynamic_drag(FixedVec3 &velocity, const AmmoTableEntry &ammo,
 // (@0x4ecb3a), and caps at max_damage when > 0 (@0x4ecb42). Multiplayer authority and
 // OneShotKill are explicit inputs, including the non-authority zero return @0x4ec933.
 int32_t calc_impact_damage(const FixedVec3 &velocity_q16, const AmmoTableEntry &ammo,
-                           int32_t hit_zone, Entity &target, const Entity *shooter,
-                           int32_t ammo_index, const World &world) {
+                           int32_t hit_zone, int32_t hit_bone, Entity &target,
+                           const Entity *shooter, int32_t ammo_index,
+                           const World &world) {
     if (world.mp_session) {
         if (!world.projectile_authority) return 0;
         if (world.one_shot_kill) return 2000;
@@ -238,7 +256,11 @@ int32_t calc_impact_damage(const FixedVec3 &velocity_q16, const AmmoTableEntry &
     if (target.item_type == 3) {
         double zone_scale = 1.0;
         if ((target.item_attrib & 0x200u) != 0) {
-            if (hit_zone == 2 || hit_zone == 3 || hit_zone == 6 || hit_zone == 7) {
+            // The attrib-0x200 seat branch reads the primary/reaction section
+            // ray[31] (hitZoneData+124 @0x4ec977), NOT the damage zone ray[32]
+            // the normal-infantry table below reads (@0x4ec9bf). The two differ
+            // whenever the bone walk crosses more than one sphere.
+            if (hit_bone == 2 || hit_bone == 3 || hit_bone == 6 || hit_bone == 7) {
                 target.flags |= 0x800u;
                 zone_scale = 6.0;
             }
@@ -269,18 +291,24 @@ int32_t calc_impact_damage(const FixedVec3 &velocity_q16, const AmmoTableEntry &
     return damage;
 }
 
+// [orig: Entity_CountMountedEntities @ 0x435970] The pool-0 walk counts a live
+// candidate whose ATTACH parent (+40 — our mount_target) is the vehicle, or
+// whose attach parent's groundEntity (+0x28 — our ground_target) is: a person
+// seated on a deck-standing gun counts toward the carrier. Deck-standers with
+// no attach do not count.
 int vehicle_occupant_count(const World &world, EntityHandle vehicle) {
     int count = 0;
     world.registry.for_each([&](const Entity &candidate) {
         if (candidate.handle.pool() != 0) return;
         if (!candidate.has_item_def) return;
         if ((candidate.flags & 2u) != 0) return;
-        if (candidate.ground_target == vehicle) {
+        if (!candidate.mounted) return;
+        if (candidate.mount_target == vehicle) {
             ++count;
             return;
         }
-        const Entity *parent = world.registry.get(candidate.ground_target);
-        if (parent != nullptr && parent->ground_target == vehicle) ++count;
+        const Entity *carrier = world.registry.get(candidate.mount_target);
+        if (carrier != nullptr && carrier->ground_target == vehicle) ++count;
     });
     return count;
 }
@@ -487,21 +515,28 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         const FixedVec3 position_q16{to_fixed(r.pos.x), to_fixed(r.pos.y), to_fixed(r.pos.z)};
         FixedVec3 velocity_q16{to_fixed(r.vel.x), to_fixed(r.vel.y), to_fixed(r.vel.z)};
 
-        // Stock callback pre-ray water stall: a strictly submerged round below
-        // 0.25 units/tick is retired without a sweep or impact.
-        if (ammo != nullptr && world.env.water_z != 0 &&
-            position_q16.z < world.env.water_z && fixed_magnitude(velocity_q16) < 0x4000) {
-            if (r.trail_slot >= 0) trails.request_kill(r.trail_slot);
-            r.active = false;
-            --active_count;
-            continue;
-        }
+        // Stock pre-ray water stall: a strictly submerged round below
+        // 0.25 units/tick zeroes its lifetime BEFORE the sweep and still flies
+        // this tick — retail falls through to the ray and releases the round at
+        // the next tick's lifetime head check [orig: the +684/+28 zero
+        // @0x4ea142-0x4ea148 with no early return]. Model that as one final
+        // ordinary sweep followed by retirement at the end of this iteration.
+        const bool submerged_stall =
+            ammo != nullptr && world.env.water_z != 0 &&
+            position_q16.z < world.env.water_z && fixed_magnitude(velocity_q16) < 0x4000;
 
         // Exact-zero is a distinct retail leaf: no sweep or position commit, one
-        // gravity step even for NoGravity ammo, and no aerodynamic drag.
+        // gravity step even for NoGravity ammo, and no aerodynamic drag. A
+        // stalled zero round dies at the next lifetime head check without
+        // another sweep.
         if (velocity_q16.x == 0 && velocity_q16.y == 0 && velocity_q16.z == 0) {
             velocity_q16.z -= kProjectileGravityQ16;
             r.vel = vec_from_fixed(velocity_q16);
+            if (submerged_stall) {
+                if (r.trail_slot >= 0) trails.request_kill(r.trail_slot);
+                r.active = false;
+                --active_count;
+            }
             continue;
         }
 
@@ -524,6 +559,11 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             if (ammo != nullptr)
                 apply_aerodynamic_drag(velocity_q16, *ammo, end_q16.z, world.env.water_z);
             r.vel = vec_from_fixed(velocity_q16);
+            if (submerged_stall) {
+                if (r.trail_slot >= 0) trails.request_kill(r.trail_slot);
+                r.active = false;
+                --active_count;
+            }
             continue;
         }
 
@@ -625,7 +665,8 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         if (target != nullptr && target->has_item_def && !not_armed && ammo != nullptr) {
             const Entity *shooter = world.registry.get(r.owner);
             int32_t damage = calc_impact_damage(velocity_q16, *ammo, collision.hit_zone,
-                                                *target, shooter, r.ammo_index, world);
+                                                collision.bone_index, *target, shooter,
+                                                r.ammo_index, world);
             if ((target->engine_flags & 0x4000000u) != 0 ||
                 target->armor_impact == -1 ||
                 ammo->penetration_impact < target->armor_impact ||

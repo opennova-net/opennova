@@ -1429,7 +1429,13 @@ store (details inline below), added D-COL-9, and extended D-COL-5/-8.
   `+68..+88` local AABB
   (minX,maxX,minY,maxY,minZ,maxZ), `+92..+100` bound-sphere center, `+104` radius.
   BVOL volume record (40 B): `+0` collidable type, `+4..+24` local AABB (same
-  order), `+28` plane count, `+32` plane ptr, `+36` flags. BPLN plane record
+  order), `+28` plane count, `+32` plane ptr, `+36` flags. Retail models can
+  author TRAILING BVOLs owned by no COBJ (JOX corpus: the Zodiacs, several
+  mounted-weapon items, and large buildings carry them); every runtime walker
+  consumes volumes only through the per-COBJ `+28`/`+36` runs, so an unowned
+  tail is unreachable dead data — a loader/validator must tolerate it (the
+  2026-07-20 `threedi_ir_collision_is_runtime_safe` fix; `collision_ir` ctest).
+  BPLN plane record
   (12 B): `+0` s16 flags, `+2/+4/+6` s16 Q14 normal, `+8` 16.16 distance.
   Witnessed as the common field reads of `@ 0x4aef90`, `@ 0x413060`, `@ 0x4ae150`.
   On-disk BVOL types are ALREADY the runtime types — the remap switch cited in the
@@ -1760,8 +1766,15 @@ and the screen latches (`g_WeaponScreenOpen @ 0x24C1884`, `g_VehicleScreenOpen
 probes, pool builders, blink query, action-218 gate, the ACCEPT handler, the
 WEAPON registration, and the type-6/11 dispatch sites. Applied 2026-07-16
 (repo hygiene pass): `collisionModel @ 0xB52FD8 -> g_StaticProxEntity`,
-`result @ 0xB5AB78 -> g_LadderContactX` (corrected 2026-07-19 from the
-earlier CL-as-platform misread).
+`result @ 0xB5AB78 -> g_LadderContactX` (corrected from the earlier
+CL-as-platform misread; recorded 2026-07-19, IDB write applied 2026-07-20).
+
+IDB addendum (2026-07-20 PR-276 validation grill): the full ladder-anchor set
+applied — `g_PlatformContact{Pitch,Yaw,X,Y,Z} @ 0xB5AB70..80 ->
+g_LadderContact*`; `Entity_ProcessCollisionAndPlatformPhysics @ 0x4b2bd0 ->
+Entity_MovementCollisionResolver` (the record's "movement collision resolver"
+demotion made symbol-real); comments refreshed at the CL frame build
+(`@ 0x4ae894`, `@ 0x4ae938`) and the resolver's CL latch (`@ 0x4b3291`).
 
 IDB addendum (2026-07-16 hygiene pass): `Entity_ComputeWeaponFirePositions @ 0x455ef0`
 renamed `AIEntity_ReleaseFlareCountermeasures` — re-witnessed this session: it swaps the

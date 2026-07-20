@@ -553,9 +553,10 @@ bool run_loadout_resolve_with_armory() {
 		              "malformed 0x2F leaves the loadout gate and prior grant untouched");
 	};
 
-	// The 0x2F body is an exact frame, not a best-effort list. Missing terminators,
-	// partial four-byte entries, and bytes after the terminator are all rejected and
-	// must not produce 0x5A or release the phase-8 loadout gate.
+	// Retail's 0x2F reader stops the entry loop ONLY on the 0xFF terminator and
+	// never checks for trailing bytes after it (@0x515a99), so trailing bytes are
+	// accepted; an unterminated/truncated list is the retail zero-fill infinite
+	// loop (@0x5159c0) and is rejected here as the crash-safe divergence.
 	if (!malformed_loadout_rejected(
 			{0x01, 0x08, 0, 0, 0, 0, 9, 0xFF, 0xFF, 1}, 120,
 			"0x2F without the 0xFF terminator produces no 0x5A"))
@@ -564,10 +565,12 @@ bool run_loadout_resolve_with_armory() {
 			{0x01, 0x08, 0, 0, 0, 0, 9, 4, 0xFF}, 121,
 			"0x2F with a truncated entry produces no 0x5A"))
 		return false;
-	if (!malformed_loadout_rejected(
-			{0x01, 0x08, 0, 0, 0, 0, 0xFF, 0x00}, 122,
-			"0x2F with trailing bytes after its terminator produces no 0x5A"))
-		return false;
+	{
+		WeaponLoadout trailing_lo;
+		if (!expect(loadout_reply({0x01, 0x08, 0, 0, 0, 0, 0xFF, 0x00}, 122, trailing_lo),
+		            "0x2F with trailing bytes after its terminator is accepted like retail"))
+			return false;
+	}
 
 	// The live retail v14 request (class 2 red / soldier 8 rifleman, default 0xFF ammo). Fixture
 	// truth: {2 KNIFE2, 3 colt45, 21 AK47M203AUTO} pass the masks; {76,77,78,83} land on

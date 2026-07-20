@@ -598,9 +598,12 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// THIS request + the armory table when the host fed one (see
 				// grant_weapon_loadout; D-NET-141).
 				LoadoutSubmit req;
-				// The decoder owns the complete framing contract: header, whole 4-byte entries,
-				// exactly one terminal 0xFF, and no trailing bytes. A malformed submit is ignored
-				// without opening the phase-8 gate or disturbing the last valid grant.
+				// The decoder owns the framing contract: header, whole 4-byte entries, and one
+				// terminal 0xFF. Trailing bytes after the terminator are accepted exactly as
+				// retail accepts them (no end check after the 0xFF exit @0x515a99); only an
+				// unterminated list is ignored — the crash-safe stand-in for retail's
+				// zero-fill infinite loop — without opening the phase-8 gate or disturbing
+				// the last valid grant.
 				if (!decode_loadout_submit(msg.payload.data(), msg.payload.size(), req)) break;
 				const world::WeaponTable *armory =
 						(world != nullptr && !world->weapons.empty()) ? &world->weapons : nullptr;
@@ -731,7 +734,9 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// entity_reset_to_spawn_state re-backs spawn_position from the new pose and
 				// clears the movement gate [orig: Entity_ResetToSpawnState @0x4B9610].
 				world::entity_reset_to_spawn_state(*player);
-				if (world->player_item_hp > 0) player->health = world->player_item_hp;
+				// Same signed-i16 healthMax gate as the first spawn (player_spawn.cpp).
+				if (world->player_has_item_def && world->player_item_hp != 0)
+					player->health = world::retail_signed_i16(world->player_item_hp);
 				else if (player->health_max > 0) player->health = player->health_max;
 				else player->health = 100; // [orig: Entity_InitFromItemDef @0x49e550]
 				// Successful deploy CLEARS the respawn-pending flag + the hidden bit — the

@@ -231,6 +231,54 @@ int main() {
     check(threedi_ir_collision_is_runtime_safe(&grouped) == 1,
           "ordered object groups are safe");
 
+    // Retail models (Zodiacs, mounted weapons, large buildings) author
+    // TRAILING BVOLs owned by no COBJ. Every retail walker consumes volumes
+    // only through the per-COBJ runs, so the unowned tail is dead data and
+    // must not strip the whole model's collision.
+    ThreediIRCollisionVolume tail_volumes[3] = {};
+    tail_volumes[0] = grouped_volumes[0];
+    tail_volumes[1] = grouped_volumes[1];
+    tail_volumes[2].plane_start = 0;
+    tail_volumes[2].plane_count = 2;
+    tail_volumes[2].object_index = -1;
+    grouped.volumes = tail_volumes;
+    grouped.volume_count = 3;
+    check(threedi_ir_collision_is_runtime_safe(&grouped) == 1,
+          "an unowned trailing BVOL tail is safe (retail corpus shape)");
+    tail_volumes[2].object_index = 0; // an owned volume outside every run
+    check(threedi_ir_collision_is_runtime_safe(&grouped) == 0,
+          "an owned volume outside every COBJ run is rejected");
+    tail_volumes[2].object_index = -1;
+    tail_volumes[2].plane_count = 9; // tail plane windows stay validated
+    check(threedi_ir_collision_is_runtime_safe(&grouped) == 0,
+          "a tail volume with an overrunning plane window is rejected");
+    grouped.volumes = grouped_volumes;
+    grouped.volume_count = 2;
+
+    // A face whose CNRM index is -1 is skipped by the runtime CFAC walker
+    // [orig: the CNRM resolve gate @ 0x4e4cb0]; it must not reject the model.
+    ThreediIRCollisionVertex loose_vertices[3] = {};
+    ThreediIRCollisionFace loose_face = {};
+    loose_face.vert_index[0] = 0;
+    loose_face.vert_index[1] = 1;
+    loose_face.vert_index[2] = 2;
+    loose_face.normal_index = -1;
+    ThreediIRCollisionObject loose_object = {};
+    loose_object.num_vertices = 3;
+    loose_object.num_faces = 1;
+    ThreediIRCollision loose = {};
+    loose.vertices = loose_vertices;
+    loose.vertex_count = 3;
+    loose.faces = &loose_face;
+    loose.face_count = 1;
+    loose.objects = &loose_object;
+    loose.object_count = 1;
+    check(threedi_ir_collision_is_runtime_safe(&loose) == 1,
+          "a face with CNRM index -1 is safe (the runtime walker skips it)");
+    loose_face.normal_index = 0; // >= the object's zero-normal run
+    check(threedi_ir_collision_is_runtime_safe(&loose) == 0,
+          "an out-of-run CNRM index is still rejected");
+
     // Synthetic modern CDTA conversion retains every query-relevant CNRM,
     // CFAC, and COBJ field without a float/fixed-point information loss.
     ThreediCollisionVertex src_vertices[3] = {};

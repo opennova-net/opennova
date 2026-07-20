@@ -1612,6 +1612,13 @@ bool decode_join_padding_probe(const uint8_t *body, size_t len, JoinPaddingProbe
 }
 
 // §5.56 C2S 0x2F — [orig: NapiNPServerMsg_HandlePlayerLoadout @ 0x515790].
+// Retail reads every field through a bounds-guarded cursor that substitutes
+// ZERO past the end and stops the entry loop ONLY on the 0xFF terminator; it
+// never checks for trailing bytes after that exit (@ 0x515a99), so a body with
+// extra bytes after the terminator is accepted and processed. An UNTERMINATED
+// list is rejected here as a deliberate crash-safe divergence: retail's
+// zero-filled reads never produce 0xFF and its entry loop cannot exit
+// (@ 0x5159c0 zero-fill feeding the @ 0x515a99 backedge).
 bool decode_loadout_submit(const uint8_t *body, size_t len, LoadoutSubmit &out) {
 	out = LoadoutSubmit{};
 	Cursor c{body, body + len, true};
@@ -1629,7 +1636,7 @@ bool decode_loadout_submit(const uint8_t *body, size_t len, LoadoutSubmit &out) 
 		e.variant = c.u8();
 		if (c.ok) out.entries.push_back(e);
 	}
-	return c.ok && out.terminated && (c.p == c.end);
+	return c.ok && out.terminated;
 }
 
 } // namespace opennova
