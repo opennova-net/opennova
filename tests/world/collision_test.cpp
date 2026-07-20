@@ -1225,9 +1225,14 @@ struct TwoSectionMatrixProvider final : ICollisionSectionMatrixProvider {
     }
 };
 
+void mark_unset_person_sections_absent(CollisionModel &model) {
+    for (CollisionSection &section : model.sections) section.radius = -1;
+}
+
 CollisionModel person_section_model() {
     CollisionModel model;
     model.sections.resize(19);
+    mark_unset_person_sections_absent(model);
     // CharModel.3di COBJ 14 (head), preserved here as exact 16.16 authored data.
     CollisionSection &head = model.sections[14];
     head.center[0] = 3578;
@@ -1419,6 +1424,7 @@ void test_late_person_instance_is_demand_resolved_for_rounds_and_debug() {
 
     CollisionModel person;
     person.sections.resize(15);
+    mark_unset_person_sections_absent(person);
     person.sections[14].radius = fx(1.0);
     CollisionWorld collision;
     const int32_t model_id = collision.add_model(std::move(person));
@@ -1471,10 +1477,12 @@ void test_reused_registry_slot_rejects_old_collision_identity() {
     CollisionWorld collision;
     CollisionModel old_main;
     old_main.sections.resize(4);
+    mark_unset_person_sections_absent(old_main);
     old_main.sections[3].radius = fx(1.0);
     const int32_t old_main_id = collision.add_model(std::move(old_main));
     CollisionModel old_husk;
     old_husk.sections.resize(3);
+    mark_unset_person_sections_absent(old_husk);
     old_husk.sections[2].radius = fx(1.0);
     const int32_t old_husk_id = collision.add_model(std::move(old_husk));
     collision.assign_entity(first, old_main_id, first_spawn_id);
@@ -1494,6 +1502,7 @@ void test_reused_registry_slot_rejects_old_collision_identity() {
 
     CollisionModel replacement;
     replacement.sections.resize(15);
+    mark_unset_person_sections_absent(replacement);
     replacement.sections[14].radius = fx(1.0);
     const int32_t replacement_id = collision.add_model(std::move(replacement));
     ReusedSlotPersonProvider provider;
@@ -1523,6 +1532,7 @@ struct PersonSectionsFixture {
 
     explicit PersonSectionsFixture(int section_count) {
         model.sections.resize(static_cast<size_t>(section_count));
+        mark_unset_person_sections_absent(model);
         const int32_t origin[3] = {0, 0, 0};
         matrices.assign(static_cast<size_t>(section_count),
                         collision_matrix_from_heading(0, origin));
@@ -1570,6 +1580,22 @@ void test_person_section_retail_radius_rules() {
     const int32_t start[3] = {0, 0, 0};
     const int32_t end[3] = {fx(10.0), 0, 0};
     PersonSectionHit hit;
+
+    // Retail does not discard an authored radius of zero: every COBJ still
+    // receives the fixed 0xCCC floor. The trailing whole-body mesh row in JO
+    // person models relies on this exact narrow footprint.
+    PersonSectionsFixture inside_zero_floor(1);
+    inside_zero_floor.set_section(0, 5.0, 0.049, 0.0, 0.0);
+    CHECK(collision_raycast_person_sections(
+            inside_zero_floor.target, start, end, 0, 0, hit));
+    CHECK(hit.primary_section == 0);
+    CHECK(hit.secondary_section == 0);
+    CHECK(hit.dist == fx(5.0));
+
+    PersonSectionsFixture outside_zero_floor(1);
+    outside_zero_floor.set_section(0, 5.0, 0.051, 0.0, 0.0);
+    CHECK(!collision_raycast_person_sections(
+            outside_zero_floor.target, start, end, 0, 0, hit));
 
     // With authored radius 1u, the normal 45% rule plus 0xCCC padding reaches
     // only ~0.50u. Head section 14 uses 65% and reaches ~0.70u.
@@ -2058,6 +2084,7 @@ void test_round_person_sections_drive_hit_and_death_animation() {
     // primary reaction/death bone and section 2 as the secondary damage zone.
     CollisionModel model;
     model.sections.resize(15);
+    mark_unset_person_sections_absent(model);
     model.sections[2].radius = fx(1.0);
     model.sections[14].radius = fx(1.0);
     CollisionWorld collision;
@@ -2362,7 +2389,7 @@ void test_published_person_bone_pose() {
 // Every JO person model authors its trailing CFAC mesh row with radius 0 and
 // sentinel inverted bounds (Indo01 sec 19). Retail's bone walk reads the
 // AUTHORED mid/radius [orig: Physics_RaycastAgainstBoneSections @ 0x4e4670],
-// so the mesh row is never a bone sphere — a vertex-derived bound sphere there
+// so the row keeps only the fixed 0xCCC floor. A vertex-derived bound sphere
 // minted a phantom shootable "bone" on whatever pose slot the row landed on
 // (the F3 big off-body organic sphere).
 void test_person_mesh_row_keeps_authored_zero_sphere() {
@@ -2414,12 +2441,32 @@ void test_person_mesh_row_keeps_authored_zero_sphere() {
                  collision_matrix_from_heading(0, mesh_slot_at)}));
     cw.build_tick_tables(world);
 
-    // Through the phantom-sphere location: a clean miss.
-    ProjectileTrace at_mesh_slot;
-    at_mesh_slot.owner = oh;
-    at_mesh_slot.start = FixedVec3{0, fx(3.0), fx(0.9)};
-    at_mesh_slot.end = FixedVec3{fx(10.0), fx(3.0), fx(0.9)};
-    CHECK(!cw.trace_projectile(world, at_mesh_slot).hit());
+    // The authored zero still receives retail's tiny 0xCCC floor at its raw
+    // center, and F3 must report that same effective radius.
+    ProjectileTrace at_mesh_center;
+    at_mesh_center.owner = oh;
+    at_mesh_center.start = FixedVec3{0, fx(3.0), fx(0.9)};
+    at_mesh_center.end = FixedVec3{fx(10.0), fx(3.0), fx(0.9)};
+    const ProjectileHit mesh_hit = cw.trace_projectile(world, at_mesh_center);
+    CHECK(mesh_hit.hit_class == ProjectileHitClass::Person);
+    CHECK(mesh_hit.bone_index == 1 && mesh_hit.hit_zone == 1);
+
+    const int32_t debug_anchor[3] = {};
+    const auto debug_sections = cw.debug_person_sections(world, debug_anchor, -1, 8);
+    CHECK(debug_sections.size() == 2);
+    if (debug_sections.size() == 2) {
+        CHECK(debug_sections[1].section == 1);
+        CHECK(debug_sections[1].authored_radius == 0);
+        CHECK(debug_sections[1].radius == 0xCCC);
+    }
+
+    // One tenth of a unit off-center remains a clean miss: the old derived
+    // vertex sphere would have made this whole area shootable.
+    ProjectileTrace outside_mesh_floor;
+    outside_mesh_floor.owner = oh;
+    outside_mesh_floor.start = FixedVec3{0, fx(3.1), fx(0.9)};
+    outside_mesh_floor.end = FixedVec3{fx(10.0), fx(3.1), fx(0.9)};
+    CHECK(!cw.trace_projectile(world, outside_mesh_floor).hit());
 
     // The real bone still hits.
     ProjectileTrace at_bone;

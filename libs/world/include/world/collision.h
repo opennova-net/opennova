@@ -131,7 +131,7 @@ struct CollisionSection {
     int32_t min_z = 0, max_z = 0;
     int32_t offset[3] = {};         // exact COBJ section offset (16.16)
     int32_t center[3] = {};         // bound-sphere center (section-local 16.16)
-    int32_t radius = 0;             // bound-sphere radius (16.16)
+    int32_t radius = 0;             // bound-sphere radius (16.16); negative = absent synthetic row
     // Hierarchy metadata copied from COBJ::parent_subobject_index. This is NOT
     // the section-matrix selector: retail pairs callback matrix i with COBJ i
     // strictly by ordinal, even when several COBJ rows share one parent.
@@ -398,7 +398,8 @@ bool collision_raycast_faces(const CollisionTargetView &target, const int32_t st
                              const int32_t end[3], uint32_t ammo_flags, RayFaceHit &out);
 
 // Person/organic projectile narrow phase: one authored COBJ bound sphere per
-// skeletal section, transformed by the callback matrix with the same strict
+// skeletal section (radius zero still receives retail's fixed 0xCCC floor),
+// transformed by the callback matrix with the same strict
 // ordinal pairing as the face walker. primary_section is the first accepted
 // section in retail's reverse scan (the reaction/death-animation bone), while
 // secondary_section is the final overlap and normal-infantry damage zone.
