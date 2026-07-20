@@ -3031,7 +3031,7 @@ if the SP round was WON copy `dword_24C1960 → dword_24D2500` → round-state i
 
 ### 20.3 The WAC named-value table (the `bluekills` family)
 
-One static table drives every named engine value WAC scripts read:
+One static table drives every named engine value WAC scripts resolve:
 **24 records `{char name[16]; u32 param_type; u32 value_ptr}` at `@ 0x82EEF0`,
 count dword at `@ 0x82F130`**, resolved case-insensitively by the third lookup
 leg of `WacScript_ResolveParameter @ 0x4f2940` (`*outType = 1` → pointer).
@@ -3057,7 +3057,12 @@ Param types seen: 2 = int var, 9 = time (CurTOD), 0xB = entity handle.
 0xC6EAE8`, `bluekills → 0xC6EAF8`, `GameOver → 0xC6EAD8`, ...) was wrong; the
 resolver decompile pins the true anchors (name @ +0, type @ +0x10, value @ +0x14).
 Port: `Builtin` ids 8-13 in `libs/wac` (`bluekills/greenkills/humans/GameOver/
-WinVar/LoseVar`) reading `World::kill_stats` / `cached.humans` / `round_end`.
+WinVar/LoseVar`) read `World::kill_stats` / `cached.humans` / `round_end`.
+The writable `accuracyspread` row is also ported: case-insensitive compilation
+resolves it as a named engine-value lvalue, VM reads/writes
+`World::wac_values.accuracy_spread`, and the infantry aim pass consumes that same
+field in the witnessed formula. `event_runtime_bms` pins write/readback, no V0
+alias, and the resulting NPC aim heading.
 
 ### 20.4 The kill tallies (`bluekills`/`greenkills` and the epilog buckets)
 
@@ -3181,11 +3186,12 @@ Two load/response-time resolutions the probe forced out:
 |---|---|---|---|
 | D-AI-10 | Round-outcome stand-ins: (a) kill tallies are COUNTS only (no def+404 points, no difficulty scaling, no per-type enemy split, no human-player bucket); (b) the SP end presentation is a shell overlay — no flyaway cine / `.cne` playback, no score count-up lines, no saved-game list, no end-music track switch, a 3 s fade lead-in stands in for the cine fades, ESC/300 s stand in for the key/18600-tick exits; (c) the MP legs are cited stubs (0x61/0x1D wire, slot 6→7, `SetGameState(11)`, the 2790 linger, the round-win counters, the scoreboard block, `Server_CheckWinConditions` MP conditions); (d) `sub_5280B0` music-park and the `@ 0x3245B08` end-track selector are noted, unported; (e) the SP-gate reads `world.mp_session` (our listen server always has `ctx.is_in_session = 1`) | the full @ 0x5164f0 flow + the §20.6 cines | SP outcome loop works end-to-end (probe PASS); the omissions are presentation/MP depth, each cited inline for the follow-up slices | 
 
-`D-AI-6` update (ledger): the aim-error global `@ 0xC6EAE8` is the WAC named
-variable **accuracyspread** — its config source is mission scripts (the table
-§20.3); the earlier `autogain` attribution came from the phase-shifted table
-read. Our `AiSystem::ai_difficulty` still stands in; wiring it to the WAC var
-is the remaining tail.
+`D-AI-6` update (2026-07-20): the aim-error global `@ 0xC6EAE8` is the WAC
+named variable **accuracyspread** — its config source is mission scripts (the
+table §20.3); the earlier `autogain` attribution came from the phase-shifted
+table read. This leg is now ported through `World::wac_values` and consumed
+directly by `AiSystem::infantry_combat_think`. D-AI-6 remains open for only the
+bone-derived LOS/aim endpoints and prone-in-foliage concealment term.
 
 ### 20.9 Open follow-ups
 

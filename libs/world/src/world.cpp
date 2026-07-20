@@ -789,6 +789,7 @@ World::Snapshot World::snapshot() const {
     Snapshot s;
     s.registry = registry;
     s.vars = vars;
+    s.wac_values = wac_values;
     s.env = env;
     s.logic_tick = logic_tick;
     s.local_player = cached.local_player;
@@ -798,6 +799,7 @@ World::Snapshot World::snapshot() const {
 void World::restore(const Snapshot &s) {
     registry.restore_from(s.registry);
     vars = s.vars;
+    wac_values = s.wac_values;
     env = s.env;
     logic_tick = s.logic_tick;
     // Reset per-tick health/proximity counters, then restore only the stable
