@@ -218,7 +218,8 @@ enum class Action { EmitEmpty, EmitBody, Defer, SkipSilent };
 
 // Page a world-stream pool into per-datagram batches and push each as its own InitialStateMessage.
 // The original caps each S2C world-stream datagram at ~650 B and advances a pool cursor across calls
-// [orig: Server_SendInitialGameStateToPlayer @0x51bba0]; the golden's 0x10/0x20 bodies top out ~640 B.
+// [orig: Server_SendInitialGameStateToPlayer @0x51bba0]. The selected limit preserves each serializer's
+// witnessed post-write margin; 0x45 tiles select their distinct pre-write cap.
 // `encode_page(off, cnt)` slices the pool's records [off, off+cnt) into a sub-batch and returns its
 // encoded body. Each page climbs the F3 entity_batch_count. An empty pool still emits one header-only
 // batch (a faithful empty-batch marker). Instruments the host log with the record/page/byte counts so
@@ -230,9 +231,9 @@ enum class Action { EmitEmpty, EmitBody, Defer, SkipSilent };
 // frames so a joining client can interleave its join-FSM C2S chain (0x03 enter-Game-Loop / 0x0A
 // initial-sync / 0x22 / 0x2F / 0x0C) BETWEEN server messages — a one-shot blast denies it those points.
 template <typename EncodePage>
-bool emit_paged_pool(uint8_t tag, std::size_t n_records, EncodePage encode_page,
+bool emit_paged_pool(uint8_t tag, std::size_t n_records, BatchPageLimit page_limit,
+                     EncodePage encode_page,
                      InitialStateStep &step, InitialStateBurst &b, std::size_t budget) {
-	constexpr std::size_t kMaxPageBytes = 640;
 	if (n_records == 0) {
 		// Empty pool: one header-only marker (emitted on first visit), then done.
 		step.messages.push_back(InitialStateMessage{tag, encode_page(0, 0)});
@@ -244,7 +245,7 @@ bool emit_paged_pool(uint8_t tag, std::size_t n_records, EncodePage encode_page,
 	// Page from the saved cursor within this tick's remaining datagram budget, via the shared chunker.
 	const std::size_t max_pages = budget > step.messages.size() ? budget - step.messages.size() : 0;
 	BatchPageResult res =
-			slice_batch_pages(n_records, kMaxPageBytes, encode_page, b.phase_loop_counter, max_pages);
+			slice_batch_pages(n_records, page_limit, encode_page, b.phase_loop_counter, max_pages);
 	for (std::vector<uint8_t> &body : res.pages) {
 		step.messages.push_back(InitialStateMessage{tag, std::move(body)});
 		++b.entity_batch_count;
@@ -296,7 +297,9 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 			break;
 		case 1: { // 0x10 pool-2 static structures [orig: sub_5042F0]
 			const opennova::StaticEntityBatch full = opennova::netsim::build_pool2_static_batch(*ctx.world);
-			world_pool_done = emit_paged_pool(0x10, full.records.size(), [&](std::size_t off, std::size_t cnt) {
+			world_pool_done = emit_paged_pool(0x10, full.records.size(),
+			                                initial_state_page_limits::pool2_static(),
+			                                [&](std::size_t off, std::size_t cnt) {
 				opennova::StaticEntityBatch p;
 				p.start_index = static_cast<uint16_t>(full.start_index + off);
 				p.records.assign(full.records.begin() + static_cast<std::ptrdiff_t>(off),
@@ -308,7 +311,9 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 		}
 		case 2: { // 0x0D pool-1 destructibles / items / vehicles [orig: serialize_entity_pool_to_packet_0 @0x503940]
 			const opennova::PoolSpawnBatch full = opennova::netsim::build_pool1_spawn_batch(*ctx.world);
-			world_pool_done = emit_paged_pool(0x0D, full.records.size(), [&](std::size_t off, std::size_t cnt) {
+			world_pool_done = emit_paged_pool(0x0D, full.records.size(),
+			                                initial_state_page_limits::pool1_entities(),
+			                                [&](std::size_t off, std::size_t cnt) {
 				opennova::PoolSpawnBatch p;
 				p.records.assign(full.records.begin() + static_cast<std::ptrdiff_t>(off),
 				                 full.records.begin() + static_cast<std::ptrdiff_t>(off + cnt));
@@ -322,7 +327,9 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 			// (recipient's-own marker); the host player + other peers get 0x0100 (retail same-map parity).
 			const opennova::OrganicSpawnBatch full =
 					opennova::netsim::build_pool0_organic_batch(*ctx.world, conn.link.owned_entity);
-			world_pool_done = emit_paged_pool(0x0C, full.records.size(), [&](std::size_t off, std::size_t cnt) {
+			world_pool_done = emit_paged_pool(0x0C, full.records.size(),
+			                                initial_state_page_limits::pool0_organics(),
+			                                [&](std::size_t off, std::size_t cnt) {
 				opennova::OrganicSpawnBatch p;
 				p.records.assign(full.records.begin() + static_cast<std::ptrdiff_t>(off),
 				                 full.records.begin() + static_cast<std::ptrdiff_t>(off + cnt));
@@ -333,7 +340,9 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 		}
 		case 4: { // 0x20 pool-3 markers / waypoints / nav nodes (FULL, not just spawn markers) [orig: serialize_entity_pool_to_packet @0x503460]
 			const opennova::Pool3SyncBatch full = opennova::netsim::build_pool3_marker_batch(*ctx.world);
-			world_pool_done = emit_paged_pool(0x20, full.records.size(), [&](std::size_t off, std::size_t cnt) {
+			world_pool_done = emit_paged_pool(0x20, full.records.size(),
+			                                initial_state_page_limits::pool3_markers(),
+			                                [&](std::size_t off, std::size_t cnt) {
 				opennova::Pool3SyncBatch p;
 				p.start_index = static_cast<uint16_t>(off);
 				p.records.assign(full.records.begin() + static_cast<std::ptrdiff_t>(off),
@@ -369,7 +378,8 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 				world_pool_done = true;
 				break;
 			}
-			world_pool_done = emit_paged_pool(0x45, n_tiles, [&](std::size_t off, std::size_t cnt) {
+			world_pool_done = emit_paged_pool(0x45, n_tiles, initial_state_page_limits::terrain_tiles(),
+			                                [&](std::size_t off, std::size_t cnt) {
 				opennova::TerrainLoadBatch batch;
 				batch.has_header = (off == 0);
 				batch.start_index = static_cast<uint16_t>(off);

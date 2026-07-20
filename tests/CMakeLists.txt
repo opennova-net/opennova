@@ -1727,7 +1727,7 @@ target_link_libraries(npruntime_initial_state_burst_test
 add_test(NAME npruntime_initial_state_burst COMMAND npruntime_initial_state_burst_test)
 
 # ADR 0013: the shared byte-budget spawn/world-stream chunker (np::slice_batch_pages) the §5.2a burst
-# pages every world pool through — page-fit, lone-oversized-record, per-call budget, cursor resume.
+# pages every world pool through — retail pool margins, exact tile pages, oversized record, cursor resume.
 add_executable(npruntime_batch_chunker_test npruntime/batch_chunker_test.cpp)
 target_link_libraries(npruntime_batch_chunker_test PRIVATE opennova_npruntime)
 add_test(NAME npruntime_batch_chunker COMMAND npruntime_batch_chunker_test)

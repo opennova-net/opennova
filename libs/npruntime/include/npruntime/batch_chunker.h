@@ -17,11 +17,9 @@
 // guard checked AFTER writing a full record — serialize_entity_states_to_buffer @0x5030a0 (0x0C) breaks
 // when `written + 100 > 650`; serialize_entity_pool_to_packet @0x503460 (0x20) breaks when
 // `written + 30 > 650`. The common budget is 650; the headroom margin is the pool's max single-record
-// size (0x0C carries a variable name string → 100; 0x20's records are small → 30). Our chunker uses a
-// single fixed `max_page_bytes` checked BEFORE the record is added (never over-fills), so batch bodies top
-// out ~640 and the record-per-datagram split can differ from retail by one record on a boundary. Every
-// page is still a valid count-prefixed sub-batch a stock client reassembles into the identical world —
-// interop-equivalent, not byte-identical batching. See docs/net/novaworld-net-re.md (D-NET-135).
+// size (0x0C carries a variable name string → 100; 0x20's records are small → 30). BatchPageLimit
+// preserves that post-write guard while retaining the conventional pre-write cap used by 0x45 tiles.
+// See docs/net/novaworld-net-re.md (D-NET-135).
 namespace opennova::np {
 
 // The result of paging up to `max_pages` datagrams' worth of records out of a batch from a cursor.
@@ -31,14 +29,41 @@ struct BatchPageResult {
 	bool exhausted = true;                   // true once the whole batch has been paged
 };
 
-// Slice records [start_cursor, n_records) into pages, at most `max_pages` this call. Each page grows one
-// record at a time until adding another would push the ENCODED body past `max_page_bytes` — always >= 1
-// record per page, so a lone oversized record still ships as its own page. `encode_page(off, cnt)`
-// returns the encoded body for records [off, off+cnt). Stops early once `max_pages` pages are produced,
-// saving the cursor for resume next call. A byte-for-byte factoring of the emit_paged_pool inner loop:
-// the paced burst passes `max_pages` = its remaining per-tick datagram budget.
+// Where the serializer checks its byte budget. Most synthetic batches (and the 0x45 tile stream)
+// reject the next record before writing it. Retail's four entity-pool serializers instead include a
+// full record, then stop when the encoded size plus that pool's maximum-record headroom exceeds 650 B.
+struct BatchPageLimit {
+	enum class Check { BeforeNextRecord, AfterEachRecord };
+
+	std::size_t byte_budget = 0;
+	std::size_t headroom = 0;
+	Check check = Check::BeforeNextRecord;
+
+	static constexpr BatchPageLimit pre_write(std::size_t byte_budget) {
+		return BatchPageLimit{byte_budget, 0, Check::BeforeNextRecord};
+	}
+	static constexpr BatchPageLimit post_write(std::size_t byte_budget, std::size_t headroom) {
+		return BatchPageLimit{byte_budget, headroom, Check::AfterEachRecord};
+	}
+};
+
+// Witnessed policies for Server_SendInitialGameStateToPlayer. Naming them here keeps the tag-to-margin
+// mapping shared by production and the boundary tests.
+namespace initial_state_page_limits {
+constexpr BatchPageLimit pool2_static() { return BatchPageLimit::post_write(650, 40); }
+constexpr BatchPageLimit pool1_entities() { return BatchPageLimit::post_write(650, 110); }
+constexpr BatchPageLimit pool0_organics() { return BatchPageLimit::post_write(650, 100); }
+constexpr BatchPageLimit pool3_markers() { return BatchPageLimit::post_write(650, 30); }
+constexpr BatchPageLimit terrain_tiles() { return BatchPageLimit::pre_write(650); }
+} // namespace initial_state_page_limits
+
+// Slice records [start_cursor, n_records) into pages, at most `max_pages` this call. A pre-write limit
+// rejects the next record when its encoded body would exceed the budget. A post-write limit includes
+// the next complete record and stops once current encoded bytes + headroom exceeds the budget. Both
+// modes always ship at least one record per page. `encode_page(off, cnt)` returns the encoded body for
+// records [off, off+cnt); the cursor is retained when the per-call page budget is exhausted.
 template <typename EncodePage>
-BatchPageResult slice_batch_pages(std::size_t n_records, std::size_t max_page_bytes,
+BatchPageResult slice_batch_pages(std::size_t n_records, BatchPageLimit limit,
                                   EncodePage encode_page, std::size_t start_cursor,
                                   std::size_t max_pages) {
 	BatchPageResult out;
@@ -47,8 +72,16 @@ BatchPageResult slice_batch_pages(std::size_t n_records, std::size_t max_page_by
 		std::size_t cnt = 1;
 		std::vector<uint8_t> body = encode_page(i, cnt);
 		while (i + cnt < n_records) {
+			if (limit.check == BatchPageLimit::Check::AfterEachRecord &&
+			    (body.size() > limit.byte_budget ||
+			     limit.headroom > limit.byte_budget - body.size())) {
+				break;
+			}
 			std::vector<uint8_t> grown = encode_page(i, cnt + 1);
-			if (grown.size() > max_page_bytes) break;
+			if (limit.check == BatchPageLimit::Check::BeforeNextRecord &&
+			    grown.size() > limit.byte_budget) {
+				break;
+			}
 			body.swap(grown);
 			++cnt;
 		}
@@ -58,6 +91,15 @@ BatchPageResult slice_batch_pages(std::size_t n_records, std::size_t max_page_by
 	out.next_cursor = i;
 	out.exhausted = (i >= n_records);
 	return out;
+}
+
+// Compatibility shorthand for callers with a conventional pre-write hard cap.
+template <typename EncodePage>
+BatchPageResult slice_batch_pages(std::size_t n_records, std::size_t max_page_bytes,
+                                  EncodePage encode_page, std::size_t start_cursor,
+                                  std::size_t max_pages) {
+	return slice_batch_pages(n_records, BatchPageLimit::pre_write(max_page_bytes),
+	                         std::move(encode_page), start_cursor, max_pages);
 }
 
 } // namespace opennova::np

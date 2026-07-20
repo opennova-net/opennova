@@ -1,6 +1,6 @@
 // Unit test for np::slice_batch_pages — the shared byte-budget spawn/world-stream chunker (ADR 0013),
-// factored out of server_initial_state.cpp's emit_paged_pool. Verifies page-fit, the lone-oversized-record
-// rule, the per-call page budget, and cursor resume — the behavior the paced §5.2a world-stream relies on.
+// factored out of server_initial_state.cpp's emit_paged_pool. Verifies conventional pre-write paging,
+// retail's per-pool post-write guard, exact tile pages, lone oversized records, budget, and cursor resume.
 
 #include <npruntime/batch_chunker.h>
 
@@ -19,12 +19,20 @@ bool expect(bool cond, const char *msg) {
 	return false;
 }
 
-// A stand-in encoder: records [off, off+cnt) encode to a 2-byte header + cnt*rec_bytes body, mirroring
-// the real encoders' `[u16 count][records...]` shape. Size is what the chunker's byte budget keys on.
+// A stand-in encoder with a configurable fixed header (2 B by default, 4 B for pool-3) followed by
+// cnt*rec_bytes. Encoded size is what the chunker's byte budget keys on.
 struct FixedRecordEncoder {
 	std::size_t rec_bytes;
+	std::size_t header_bytes = 2;
 	std::vector<uint8_t> operator()(std::size_t /*off*/, std::size_t cnt) const {
-		return std::vector<uint8_t>(2 + cnt * rec_bytes, 0);
+		return std::vector<uint8_t>(header_bytes + cnt * rec_bytes, 0);
+	}
+};
+
+// 0x45 uses a 20-byte first-page header and a 4-byte continuation header, then 12 bytes per tile.
+struct TerrainTileEncoder {
+	std::vector<uint8_t> operator()(std::size_t off, std::size_t cnt) const {
+		return std::vector<uint8_t>((off == 0 ? 20 : 4) + cnt * 12, 0);
 	}
 };
 
@@ -43,6 +51,54 @@ int main() {
 		ok = expect(r.next_cursor == 5 && r.exhausted, "batch fully paged -> cursor at end + exhausted") && ok;
 		for (const std::vector<uint8_t> &p : r.pages)
 			ok = expect(p.size() <= 25, "no page exceeds the byte cap") && ok;
+	}
+
+	// Retail pool-3 guard: record 62 crosses written+30 > 650 but remains in the page.
+	{
+		np::BatchPageResult r = np::slice_batch_pages(
+				65, np::initial_state_page_limits::pool3_markers(), FixedRecordEncoder{10, 4}, 0, 100);
+		ok = (r.pages.size() == 2) && ok;
+		ok = (r.pages[0].size() == 624) && ok;
+		ok = (r.pages[1].size() == 34) && ok;
+		ok = (r.next_cursor == 65 && r.exhausted) && ok;
+	}
+
+	// The retail comparison is strict: 610 written + 40 margin == 650 continues one more record.
+	{
+		np::BatchPageResult r = np::slice_batch_pages(
+				103, np::initial_state_page_limits::pool2_static(), FixedRecordEncoder{6, 4}, 0, 100);
+		ok = (r.pages.size() == 2) && ok;
+		ok = (r.pages[0].size() == 616) && ok;
+		ok = (r.pages[1].size() == 10) && ok;
+	}
+
+	// The named production policies pin every witnessed entity-pool margin and the tile pre-check.
+	{
+		const np::BatchPageLimit p2 = np::initial_state_page_limits::pool2_static();
+		const np::BatchPageLimit p1 = np::initial_state_page_limits::pool1_entities();
+		const np::BatchPageLimit p0 = np::initial_state_page_limits::pool0_organics();
+		const np::BatchPageLimit p3 = np::initial_state_page_limits::pool3_markers();
+		const np::BatchPageLimit tiles = np::initial_state_page_limits::terrain_tiles();
+		ok = (p2.byte_budget == 650 && p2.headroom == 40) && ok;
+		ok = (p1.byte_budget == 650 && p1.headroom == 110) && ok;
+		ok = (p0.byte_budget == 650 && p0.headroom == 100) && ok;
+		ok = (p3.byte_budget == 650 && p3.headroom == 30) && ok;
+		ok = (p2.check == np::BatchPageLimit::Check::AfterEachRecord &&
+		      p1.check == np::BatchPageLimit::Check::AfterEachRecord &&
+		      p0.check == np::BatchPageLimit::Check::AfterEachRecord &&
+		      p3.check == np::BatchPageLimit::Check::AfterEachRecord) && ok;
+		ok = (tiles.byte_budget == 650 && tiles.headroom == 0 &&
+		      tiles.check == np::BatchPageLimit::Check::BeforeNextRecord) && ok;
+	}
+
+	// Retail 0x45: first page 20+52*12=644 bytes; continuation 4+53*12=640 bytes.
+	{
+		np::BatchPageResult r = np::slice_batch_pages(
+				105, np::initial_state_page_limits::terrain_tiles(), TerrainTileEncoder{}, 0, 100);
+		ok = (r.pages.size() == 2) && ok;
+		ok = (r.pages[0].size() == 644) && ok;
+		ok = (r.pages[1].size() == 640) && ok;
+		ok = (r.next_cursor == 105 && r.exhausted) && ok;
 	}
 
 	// Lone oversized record: 100-byte records, 25-byte cap -> each page must still ship exactly 1 record
