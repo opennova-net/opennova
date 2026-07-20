@@ -820,7 +820,7 @@ inline uint32_t map_collidable_type(uint32_t t) {
     case 0x04: return 4;   // CL
     case 0x05: return 5;   // CV
     case 0x06: return 6;   // CA
-    case 0x07: return 7;   // VC
+    case 0x07: return 7;   // VC (vehicle collision)
     case 0x08: return 8;   // BB
     case 0x09: return 9;   // CD
     case 0x0A: return 10;  // CT
@@ -1082,11 +1082,11 @@ static void build_collision_model(const LodBucketWorkspace &workspace,
     obj.parent_subobject_index = static_cast<int32_t>(so.attachIndex);
     obj.unk3 = obj.unk4 = obj.unk5 = 0;
     if (lod.centerCount > static_cast<uint32_t>(si)) {
-      obj.offset[0] = static_cast<float>(to_fp16_16_trunc(lod.centerPoints[si].pos[0]));
-      obj.offset[1] = static_cast<float>(to_fp16_16_trunc(lod.centerPoints[si].pos[1]));
-      obj.offset[2] = static_cast<float>(to_fp16_16_trunc(lod.centerPoints[si].pos[2]));
+      obj.offset[0] = to_fp16_16_trunc(lod.centerPoints[si].pos[0]);
+      obj.offset[1] = to_fp16_16_trunc(lod.centerPoints[si].pos[1]);
+      obj.offset[2] = to_fp16_16_trunc(lod.centerPoints[si].pos[2]);
     } else {
-      obj.offset[0] = obj.offset[1] = obj.offset[2] = 0.0f;
+      obj.offset[0] = obj.offset[1] = obj.offset[2] = 0;
     }
     const int32_t min_x_fp = to_fp16_16_trunc(minX);
     const int32_t min_y_fp = to_fp16_16_trunc(minY);
@@ -1097,16 +1097,16 @@ static void build_collision_model(const LodBucketWorkspace &workspace,
     const int32_t mid_x_fp = (min_x_fp + max_x_fp) / 2;
     const int32_t mid_y_fp = (min_y_fp + max_y_fp) / 2;
     const int32_t mid_z_fp = (min_z_fp + max_z_fp) / 2;
-    obj.min[0] = static_cast<float>(min_x_fp);
-    obj.min[1] = static_cast<float>(min_y_fp);
-    obj.min[2] = static_cast<float>(min_z_fp);
-    obj.max[0] = static_cast<float>(max_x_fp);
-    obj.max[1] = static_cast<float>(max_y_fp);
-    obj.max[2] = static_cast<float>(max_z_fp);
-    obj.med[0] = static_cast<float>(mid_x_fp);
-    obj.med[1] = static_cast<float>(mid_y_fp);
-    obj.med[2] = static_cast<float>(mid_z_fp);
-    obj.radius = static_cast<float>(to_fp16_16_trunc(maxRadius));
+    obj.min[0] = min_x_fp;
+    obj.min[1] = min_y_fp;
+    obj.min[2] = min_z_fp;
+    obj.max[0] = max_x_fp;
+    obj.max[1] = max_y_fp;
+    obj.max[2] = max_z_fp;
+    obj.med[0] = mid_x_fp;
+    obj.med[1] = mid_y_fp;
+    obj.med[2] = mid_z_fp;
+    obj.radius = to_fp16_16_trunc(maxRadius);
     objects.push_back(obj);
   }
 
@@ -1117,9 +1117,9 @@ static void build_collision_model(const LodBucketWorkspace &workspace,
   translations.reserve(translation_lod->attachCount);
   for (uint32_t i = 0; i < translation_lod->attachCount; ++i) {
     ThreediCollisionTranslation t{};
-    t.translation[0] = static_cast<float>(to_fp16_16_trunc(translation_lod->attachPoints[i].pos[0]));
-    t.translation[1] = static_cast<float>(to_fp16_16_trunc(translation_lod->attachPoints[i].pos[1]));
-    t.translation[2] = static_cast<float>(to_fp16_16_trunc(translation_lod->attachPoints[i].pos[2]));
+    t.translation[0] = to_fp16_16_trunc(translation_lod->attachPoints[i].pos[0]);
+    t.translation[1] = to_fp16_16_trunc(translation_lod->attachPoints[i].pos[1]);
+    t.translation[2] = to_fp16_16_trunc(translation_lod->attachPoints[i].pos[2]);
     translations.push_back(t);
   }
 

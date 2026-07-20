@@ -26,6 +26,7 @@ static void threedi_ir_lod_free(ThreediIRLod *lod) {
 static void threedi_ir_collision_free(ThreediIRCollision *col) {
     if (!col) return;
     free(col->vertices);
+    free(col->normals);
     free(col->planes);
     free(col->volumes);
     free(col->faces);

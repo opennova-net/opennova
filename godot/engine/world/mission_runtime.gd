@@ -257,9 +257,10 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	if options.get("item_db") != null:
 		_sim.resolve_item_traits(options["item_db"])
 	# World-object collision: register each placed graphic's .3di collision block (BVOL
-	# volumes + BPLN planes) on the sim and attach per-entity instances — walls push back,
-	# roofs carry, hurt/ladder volumes act, blink boxes set indoors. [orig:
-	# Entity_ProcessCollisionAndPlatformPhysics @0x4b2bd0 + the query set;
+	# volumes + BPLN planes) on the sim and attach per-entity instances — CB walls push
+	# back, roofs support ground probes, CA/BB triggers act, and CL contact frames decode
+	# (climb locomotion is not ported). [orig:
+	# movement collision resolver @0x4b2bd0 + the query set;
 	# docs/world/world-wac-ai-re.md §15; D-INF-3 burn-down]
 	if options.get("item_db") != null and options.get("placer") != null:
 		_sim.resolve_collision_instances(options["item_db"], options["placer"])
@@ -294,7 +295,9 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 						"name": String(row.get("name", "")),
 						"ammo_primary": int(String(row.get("value1", "-1")).to_int()),
 						"ammo_secondary": int(String(row.get("value2", "-1")).to_int()),
-						"flags": -1,
+						# The BMS row's fourth string becomes the per-ammo damage-class
+						# byte: 1 = x0.9, 2 = x1.1, every other value is neutral.
+						"flags": int(String(row.get("value3", "-1")).to_int()),
 					})
 				if not kit.is_empty():
 					_sim.set_spawn_loadout(kit, true)

@@ -76,34 +76,37 @@ to a numeric **collidableType**; `libs/oed/src/export_3di.cpp` then routes types
 `-colonly` suffix for collision, `-occonly` for occlusion. Repeated same-kind volumes get a
 base-26 letter suffix (`CB01`, `CB01a`, `CB01b`, …).
 
-> **The letter EXPANSIONS are inferred, but the runtime SEMANTICS are now witnessed**
-> (2026-07-09, docs/world/world-wac-ai-re.md §15.4 [orig: Entity_ComputeBoneCollisionForce
-> @0x4ae150 dispatch]): 1 solid (the only type raycasts clip), 4 platform/seat, 5
-> contact-no-force, 6 armory zone (gates the in-game weapon.mnu armory), 7 damage-pass,
-> 8 blink box (interior detection — accum bit 2 sets the entity indoors flag 0x800000),
-> 9 destructible-section touch, 10 capture-zone touch, 11 vehicle-loadout zone (gates
-> vehicle.mnu), 12 masked, 13 grounded-only touch, 16/17/18 hurt volumes (-50/-6/-1 HP),
-> 19 player-only solid, 20..23 occlusion. The "hint" column below predates that witness;
-> trust §15.4 where they differ.
+> **The primary names come from the bundled Super OED Manual v1.1, §1.1.3.4; runtime
+> behavior is separately witnessed** (docs/world/world-wac-ai-re.md §15.4 [orig:
+> Entity_ComputeBoneCollisionForce @0x4ae150 dispatch]): 1 `CB` generic solid (the only
+> BVOL type generic rays clip), 4 `CL` ladder contact/alignment (the reimpl decodes the
+> frame but has no climb motor), 5 contact-no-force, 6 `CA` armory zone (gates the
+> in-game weapon.mnu armory), 7 `VC` vehicle-collision solid on the vehicle mask,
+> 8 `BB` blink box (interior detection — accum bit 2 sets entity flag 0x800000),
+> 9 `CD` door activation (section-touch callback), 10 `CT` change-team touch,
+> 11 vehicle-loadout zone (gates vehicle.mnu), 12 masked, 13 `CF` flag/special-function
+> touch (grounded only), 16/17/18 `DH`/`DM`/`DL` contact damage (-50/-6/-1 HP),
+> 19 `CP` player collision (not AI), 20..23 occlusion. The "hint" column below
+> predates that witness; trust §15.4 where they differ.
 
-| Code | collidableType | Routing | Hint (inferred, unverified) |
+| Code | collidableType | Routing | Authoring meaning / note |
 |---|---|---|---|
-| `CB` | 1 | collision | box? |
+| `CB` | 1 | collision | Generic Collision Box (manual) |
 | `CS` | 2 | collision | sphere? |
 | `CC` | 3 | collision | cylinder? |
-| `CL` | 4 | collision | capsule / line? |
+| `CL` | 4 | collision | Collision for Ladder (manual) |
 | `CV` | 5 | collision | — (convex? vehicle? **unverified**) |
-| `CA` | 6 | collision | — |
-| `VC` | 7 | collision | — |
-| `BB` | 8 | collision | blink box — appends flag letters `V S W L O` (clears bits of `bvolFlags`, init `0x3E`, until a digit) |
-| `CD` | 9 | collision | — |
-| `CT` | 10 | collision | — |
+| `CA` | 6 | collision | Collision Box for Armory (manual) |
+| `VC` | 7 | collision | Collision for Vehicles (manual) |
+| `BB` | 8 | collision | Blink Box (manual); `W`/`S`/`V` preserve water/sky/voxels. Export also accepts reconstructed `L`/`O`; all suffixes clear bits of `bvolFlags` from `0x3E` until a digit. |
+| `CD` | 9 | collision | Door / moving-part activation; manual: Collision for Doors |
+| `CT` | 10 | collision | Change Team Box |
 | `CM` | 11 | collision | — |
 | `VK` | 12 | collision | — |
-| `CF` | 13 | collision | — |
+| `CF` | 13 | collision | Flag (project term); manual: activates special functions such as FARPs |
 | `LP` | 14 | collision | — (`LP` is also the light prefix; a LIGHT object is a light, a `LP##-colonly` **mesh** is this collidable) |
-| `CP` | 19 | collision | — |
-| `DH` `DM` `DL` | 16 / 17 / 18 | collision | — |
+| `CP` | 19 | collision | Player Collision; affects players, not AI |
+| `DH` `DM` `DL` | 16 / 17 / 18 | collision | Damage High / Medium / Low |
 | `OB` | 20 | occlusion | box? |
 | `OS` | 21 | occlusion | sphere? |
 | `OP` | 22 | occlusion | portal — reads a connecting subobject after `-`: `OP01-02-occonly` |

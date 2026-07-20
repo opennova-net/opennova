@@ -739,8 +739,16 @@ int threedi_ir_from_gp(const ThreediGpFile *gp, ThreediModelIR *out) {
         ThreediIRCollision *col = (ThreediIRCollision *)calloc(1, sizeof(ThreediIRCollision));
         if (!col) goto error;
         out->collision = col;
-        if (src->object_count < 0 ||
-            (src->object_count > 0 && !src->objects)) goto error;
+        if (src->object_count < 0 || src->vertex_count < 0 || src->normal_count < 0 ||
+            src->face_count < 0 || src->plane_count < 0 || src->volume_count < 0 ||
+            src->translation_count < 0 ||
+            (src->object_count > 0 && !src->objects) ||
+            (src->vertex_count > 0 && !src->vertices) ||
+            (src->normal_count > 0 && !src->normals) ||
+            (src->face_count > 0 && !src->faces) ||
+            (src->plane_count > 0 && !src->planes) ||
+            (src->volume_count > 0 && !src->volumes) ||
+            (src->translation_count > 0 && !src->translations)) goto error;
 
         // Copy model bounds from header
         memcpy(col->model_min, src->min, sizeof(float) * 3);
@@ -773,14 +781,20 @@ int threedi_ir_from_gp(const ThreediGpFile *gp, ThreediModelIR *out) {
                 ThreediIRCollisionObject *d = &col->objects[i];
                 d->num_vertices = so->vertex_count;
                 d->num_faces = so->face_count;
+                d->num_planes = so->normal_count;
+                d->num_bounding_volumes = so->volume_count;
                 d->parent_subobject_index = so->parent_subobject;
-                d->offset[0] = (float)so->translation[0];
-                d->offset[1] = (float)so->translation[1];
-                d->offset[2] = (float)so->translation[2];
-                d->center_fp16[0] = so->center[0];
-                d->center_fp16[1] = so->center[1];
-                d->center_fp16[2] = so->center[2];
-                d->radius_fp16 = so->bounding_sphere_radius;
+                d->offset[0] = so->translation[0];
+                d->offset[1] = so->translation[1];
+                d->offset[2] = so->translation[2];
+                d->min[0] = so->bbox_min_x;
+                d->min[1] = so->bbox_min_y;
+                d->min[2] = so->bbox_min_z;
+                d->max[0] = so->bbox_max_x;
+                d->max[1] = so->bbox_max_y;
+                d->max[2] = so->bbox_max_z;
+                for (int k = 0; k < 3; ++k) d->mid[k] = so->center[k];
+                d->radius = so->bounding_sphere_radius;
             }
         }
 
@@ -793,6 +807,60 @@ int threedi_ir_from_gp(const ThreediGpFile *gp, ThreediModelIR *out) {
                 col->vertices[i].position[0] = (float)src->vertices[i].x / 256.0f;
                 col->vertices[i].position[1] = (float)src->vertices[i].y / 256.0f;
                 col->vertices[i].position[2] = (float)src->vertices[i].z / 256.0f;
+            }
+        }
+
+        // GP already stores collision normals as exact signed Q14 integers.
+        col->normal_count = (size_t)src->normal_count;
+        if (col->normal_count > 0) {
+            col->normals = (ThreediIRCollisionNormal *)calloc(
+                col->normal_count, sizeof(ThreediIRCollisionNormal));
+            if (!col->normals) goto error;
+            for (size_t i = 0; i < col->normal_count; ++i) {
+                col->normals[i].normal_q14[0] = src->normals[i].nx;
+                col->normals[i].normal_q14[1] = src->normals[i].ny;
+                col->normals[i].normal_q14[2] = src->normals[i].nz;
+                col->normals[i].dominant_axis = src->normals[i].dominant_axis;
+            }
+        }
+
+        col->face_count = (size_t)src->face_count;
+        if (col->face_count > 0) {
+            col->faces = (ThreediIRCollisionFace *)calloc(
+                col->face_count, sizeof(ThreediIRCollisionFace));
+            if (!col->faces) goto error;
+            for (size_t i = 0; i < col->face_count; ++i) {
+                const ThreediGpCollisionFace *sf = &src->faces[i];
+                ThreediIRCollisionFace *df = &col->faces[i];
+                for (int k = 0; k < 3; ++k)
+                    df->vert_index[k] = (int16_t)sf->vertex_indices[k];
+                df->normal_index = sf->normal_index;
+                df->plane_dist_fp16 = sf->plane_d;
+                df->min_fp16[0] = sf->bbox_min_x;
+                df->min_fp16[1] = sf->bbox_min_y;
+                df->min_fp16[2] = sf->bbox_min_z;
+                df->max_fp16[0] = sf->bbox_max_x;
+                df->max_fp16[1] = sf->bbox_max_y;
+                df->max_fp16[2] = sf->bbox_max_z;
+                df->material_flags = (uint32_t)sf->surface_flags;
+                df->poly_type = sf->surface_type;
+            }
+            size_t face_cursor = 0;
+            size_t normal_base = 0;
+            for (size_t obj_idx = 0; obj_idx < col->object_count; ++obj_idx) {
+                const ThreediGpCollisionObject *obj = &src->objects[obj_idx];
+                for (int32_t f = 0; f < obj->face_count && face_cursor < col->face_count;
+                     ++f, ++face_cursor) {
+                    const ThreediGpCollisionFace *sf = &src->faces[face_cursor];
+                    ThreediIRCollisionFace *df = &col->faces[face_cursor];
+                    const size_t ni = normal_base + (size_t)sf->normal_index;
+                    if (sf->normal_index >= 0 && ni < col->normal_count) {
+                        const ThreediIRCollisionNormal *normal = &col->normals[ni];
+                        memcpy(df->normal, normal->normal_q14, sizeof(df->normal));
+                        df->dominate_axis = normal->dominant_axis;
+                    }
+                }
+                if (obj->normal_count > 0) normal_base += (size_t)obj->normal_count;
             }
         }
 
@@ -854,6 +922,18 @@ int threedi_ir_from_gp(const ThreediGpFile *gp, ThreediModelIR *out) {
             }
             if (vol_cursor != col->volume_count || plane_cursor != col->plane_count)
                 goto error;
+        }
+
+        col->translation_count = (size_t)src->translation_count;
+        if (col->translation_count > 0) {
+            col->translations = (ThreediIRCollisionTranslation *)calloc(
+                col->translation_count, sizeof(ThreediIRCollisionTranslation));
+            if (!col->translations) goto error;
+            for (size_t i = 0; i < col->translation_count; ++i) {
+                col->translations[i].translation[0] = src->translations[i].x;
+                col->translations[i].translation[1] = src->translations[i].y;
+                col->translations[i].translation[2] = src->translations[i].z;
+            }
         }
     }
 

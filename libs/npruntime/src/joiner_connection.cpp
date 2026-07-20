@@ -216,13 +216,26 @@ std::vector<std::vector<uint8_t>> JoinerConnection::pump(uint32_t /*now_tick*/) 
 	case 2: // player-sync ack (witnessed body)
 		out.push_back(frame_session({make_protocol_message(0x22, {0x00, 0xF7, 0x1C})}));
 		break;
-	case 3: // loadout (0x2F x2) + mission-status (0x0B) burst -> trips the spawn gate
+	case 3: { // loadout (0x2F x2) + mission-status (0x0B) burst -> trips the spawn gate
+		// The retail v14 body is six header bytes, seven four-byte ADM rows, then the
+		// mandatory 0xFF ADM terminator.  A zero-filled 35-byte placeholder has no
+		// terminator and is correctly rejected by the exact server decoder.
+		std::vector<uint8_t> loadout = {0x02, 0x08, 0xC3, 0x00, 0x00, 0x00};
+		for (uint8_t adm : {uint8_t(21), uint8_t(3), uint8_t(83), uint8_t(76),
+		                    uint8_t(77), uint8_t(78), uint8_t(2)}) {
+			loadout.push_back(adm);
+			loadout.push_back(0xFF);
+			loadout.push_back(0xFF);
+			loadout.push_back(0xFF);
+		}
+		loadout.push_back(0xFF);
 		out.push_back(frame_session({
-				make_protocol_message(0x2F, std::vector<uint8_t>(35, 0)),
-				make_protocol_message(0x2F, std::vector<uint8_t>(35, 0)),
+				make_protocol_message(0x2F, loadout),
+				make_protocol_message(0x2F, std::move(loadout)),
 				make_protocol_message(0x0B, std::vector<uint8_t>(13, 0)),
 		}));
 		break;
+	}
 	default:
 		// Keepalive after the gate-tripping burst: the real client never goes silent mid-join — it
 		// keeps streaming C2S status while the server's spawn gate opens (which takes several server

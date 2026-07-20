@@ -108,6 +108,14 @@ static int parse_int_n(const char *s, size_t len) {
     return (int)strtol(buf, NULL, 10);
 }
 
+/* ItemDef healthMax and the two armor classes are signed WORD stores in retail.
+   Keep the normalized C ABI carrier as int, but wrap to 16 bits and sign-extend at
+   parse time rather than relying on implementation-defined narrowing casts. */
+static int signed_i16_value(int value) {
+    const unsigned int low = (unsigned int)value & 0xFFFFu;
+    return low < 0x8000u ? (int)low : (int)low - 0x10000;
+}
+
 static float parse_float_n(const char *s, size_t len) {
     char buf[64];
     if (len >= sizeof(buf)) len = sizeof(buf) - 1;
@@ -711,6 +719,10 @@ static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out) {
         } else if (lower_starts_with(lower, ll, "min_stable_velocity", 19)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 19, &vl);
             current.min_stable_velocity = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "tumble_error", 12)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
+            current.tumble_error_fp16 = parse_fixed16_n(v, vl);
             parsed = 1;
         } else if (lower_starts_with(lower, ll, "weight_in_grains", 16)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 16, &vl);
@@ -1387,7 +1399,7 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
             parsed = 1;
         } else if (lower_starts_with(lower, ll, "hp ", 3)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 3, &vl);
-            current.hp = parse_int_n(v, vl);
+            current.hp = signed_i16_value(parse_int_n(v, vl)); /* healthMax i16 @+0x17C */
             parsed = 1;
         } else if (lower_match_key(lower, ll, "sound_profilefemale", 19)) {
             /* The female-variant profile [orig: ItemDef_ParseProperty
@@ -1551,6 +1563,36 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 13, &vl);
             current.critical_drain = parse_int_n(v, vl); /* i16 raw at +0x182 */
             parsed = 1;
+        } else if (lower_match_key(lower, ll, "damage_reduc_pp", 15)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 15, &vl);
+            Token tok[2];
+            const int count = split_values(v, vl, tok, 2);
+            if (count >= 1) {
+                current.damage_reduc_pp = parse_float_n(tok[0].s, tok[0].len);
+                current.damage_reduc_max = 1.0f - current.damage_reduc_pp;
+            }
+            if (count >= 2)
+                current.damage_reduc_max = parse_float_n(tok[1].s, tok[1].len);
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "armor", 5)) {
+            /* 'armor A [B]': +0x190 impact = A then overwritten by B;
+               +0x192 blast = A. The historical armor_kz API name is an alias
+               for blast armor, not a separate parsed field. Both retail words
+               are signed i16 (-1 is the 0xFFFF invulnerable value).
+               [orig: @ 0x4a00e7-0x4a0147] */
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 5, &vl);
+            Token tok[2];
+            const int count = split_values(v, vl, tok, 2);
+            if (count >= 1) {
+                const int armor = signed_i16_value(parse_int_n(tok[0].s, tok[0].len));
+                current.armor_impact = armor;
+                current.armor_blast = armor;
+                current.armor_kz = armor;
+            }
+            if (count >= 2)
+                current.armor_impact =
+                    signed_i16_value(parse_int_n(tok[1].s, tok[1].len));
+            parsed = 1;
         } else if (lower_match_key(lower, ll, "unit_type", 9)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
             current.unit_type = parse_int_n(v, vl); /* minimap icon class [orig: @0x50FA70]
@@ -1567,20 +1609,6 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
             size_t end = 0;
             while (end < vl && !isspace((unsigned char)v[end])) ++end;
             safe_copy(current.sounddeath, sizeof(current.sounddeath), v, end);
-            parsed = 1;
-        } else if (lower_match_key(lower, ll, "armor", 5)) {
-            /* 'armor A [B]': +0x190 impact = A then overwritten by B; +0x192 blast = A.
-               -1 = the 0xFFFF invulnerable word. [orig: @ 0x4a00e7-0x4a0147] */
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 5, &vl);
-            Token tok[MAX_TOKENS];
-            int ntok = split_values(v, vl, tok, MAX_TOKENS);
-            if (ntok >= 1) {
-                int a = parse_int_n(tok[0].s, tok[0].len);
-                current.armor_impact = a;
-                current.armor_blast = a;
-                if (ntok >= 2)
-                    current.armor_impact = parse_int_n(tok[1].s, tok[1].len);
-            }
             parsed = 1;
         } else if (lower_match_key(lower, ll, "kz", 2)) {
             /* Death-blast radius in units, plain float -> def+0x198. */

@@ -15,6 +15,17 @@
 
 namespace opennova::world {
 
+// Retail stores several gameplay values in signed 16-bit fields even though our public
+// entity model intentionally keeps int32_t carriers for API/network compatibility. Narrow
+// explicitly at the storage/mutation seams instead of relying on implementation-defined
+// int32_t -> int16_t conversion. The uint64_t mask also makes negative and oversized inputs
+// wrap exactly modulo 2^16 before sign extension.
+constexpr int32_t retail_signed_i16(int64_t value) noexcept {
+    const uint32_t low = static_cast<uint32_t>(static_cast<uint64_t>(value) & 0xFFFFu);
+    return low < 0x8000u ? static_cast<int32_t>(low)
+                         : static_cast<int32_t>(low) - 0x10000;
+}
+
 // Mirrors mission::EntityKind / bms::ItemType. Kept independent so libs/world
 // has no dependency on libs/mission (promotion adapts between them).
 enum class EntityKind : uint8_t {
@@ -110,6 +121,8 @@ struct Entity {
 
     EntityKind kind = EntityKind::Item;
     int32_t item_id = 0;      // items.def type id
+    bool has_item_def = false; // retail entity+0x20 ItemDef pointer is non-null
+    uint8_t item_type = 0;    // raw ItemDef+0x5C type (1 vehicle, 3 person)
     bool is_ai_capable = false; // items.def ItemDefAttrib & 0x100000 (AIData / §5.6 AI class). Gates the
                                 // 0x0D AI-trailer (D-NET-97). Distinct from ai_flags (BMS). [docs/world/itemdef-re.md]
     // The §5.10b wire replication class, resolved from the item's items.def *_function class
@@ -162,14 +175,35 @@ struct Entity {
     // counter surviving a player weapon swap is the tracked delta.
     // [orig: RoundData_SpawnRound @0x4ec199-0x4ec1bb]
     uint8_t tracer_shot_counter = 0;
-    int32_t health = 100;     // 0 -> dead
+    // Per-player replicated damage class, indexed by AmmoDef file index. C2S
+    // loadout entry byte 4 writes it; 1 = x0.9, 2 = x1.1, other = x1.
+    std::vector<uint8_t> ammo_damage_class;
+    int32_t health = 100;     // signed i16 retail storage carried sign-extended; <=0 -> dead
     // items.def hp (itemDef+0x17C healthMax), stamped by the host's item-traits sweep
     // (0 = unresolved). The original spawns entities at Health = healthMax
     // [orig: Entity_InitFromItemDef @0x49e550]; the sweep mirrors that by lifting health
     // to hp for entities still at their spawn default. Feeds the §5.10 field-17 tier
     // denominator and the §5.13 vehicle health word.
-    int32_t health_max = 0;
+    int32_t health_max = 0;   // signed i16 retail storage carried sign-extended
+    // Raw items.def ItemDefAttrib dword (itemDef+84), stamped by the host trait
+    // sweep. Combat keeps this value on the entity because damage targets are
+    // not necessarily AI entities. In particular bit 0x40000000 is NoDie:
+    // weapon damage may reduce health only as far as 1.
+    uint32_t item_attrib = 0;
+    // Signed impact/KZ armor classes and vehicle occupant-reduction factors
+    // from ItemDef +0x190/+0x192 and +0x188/+0x18C.
+    int32_t armor_impact = 0; // signed i16 retail storage carried sign-extended
+    int32_t armor_kz = 0;     // signed i16 retail storage carried sign-extended
+    float damage_reduc_pp = 0.0f;
+    float damage_reduc_max = 0.0f;
+    // Effective uniform model scale in signed Q16.16. Zero is retail's sentinel
+    // for the ordinary unscaled/rigid inverse. The host adapter resolves the
+    // entity+0x158 override before the itemDef+0x1B8 fallback.
+    int32_t uniform_scale_q16 = 0;
     bool alive = true;
+    // Retail entity+0x124 damage-disabled/respawn state: 0 damageable, 620
+    // join-pending countdown, -1 dead. Projectile damage gates on nonzero.
+    int32_t damage_state = 0;
     // The pending death-anim selection (GamePlayerEntity +0x2C0 deathAnimStateId):
     // written at DAMAGE time by the kill (RoundSim bullet selection [orig:
     // Entity_HandleDamageTrigger @0x407483]), consumed once by the infantry death
@@ -385,7 +419,7 @@ struct Entity {
     // the collision pass: ((section & 0x1F) | (pool_index << 8)) << 12. The renderer's
     // interior-lighting group selection reads these; hit presence + accum flag bit 2 set
     // the Flags 0x800000 "indoors" bit. [orig: the per-entity blink quad stamped by
-    // Entity_BuildProximityList @ 0x4b406b / Entity_ProcessCollisionAndPlatformPhysics
+    // Entity_BuildProximityList @ 0x4b406b / movement collision resolver
     // @ 0x4b36f0 from g_BlinkHitSlot0..3 @ 0xB57C74]
     uint32_t blink_hits[4] = {};
 
@@ -396,11 +430,11 @@ struct Entity {
     // 0x5c6cd9-0x5c6d0d; docs/render/render-occlusion-re.md §3.4]
     uint8_t occlusion_latch = 0;
 
-    // Standing-on carrier (entity+0x28 groundEntity): the entity this one stands ON — a
-    // building floor, a vehicle deck — any pool. Retail's platform physics maintains it
-    // every tick (Flags |= 0x100000 + groundEntity = platform
-    // [orig: Entity_ProcessCollisionAndPlatformPhysics @0x4b3291]); our motor has no
-    // platform pass yet, so for READ-APPLIED peers apply_player_intent mirrors the
+    // Ground/carrier reference (entity+0x28 groundEntity): the entity this one stands on
+    // — a building floor or vehicle deck, any pool — as maintained by the ground probe.
+    // CL/type-4 ladder contact also uses this field transiently with Flags 0x100000;
+    // that is ladder bookkeeping, not a platform volume [orig: @0x4b3291]. For
+    // READ-APPLIED peers apply_player_intent mirrors the
     // carrier the owning client uplinked (§5.10; D-NET-151) and the 0x0A echo re-emits
     // it (mount wins over ground [orig: NetPacket_SerializePlayerState op1 @0x4c0a08]).
     EntityHandle ground_target;         // kInvalid = free-standing

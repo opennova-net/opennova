@@ -40,6 +40,8 @@ private:
 		String ai_function;
 		String move_function;
 		int hp = 0; // items.def hp = itemDef+0x17C healthMax (0 = none declared)
+		float damage_reduc_pp = 0.0f;
+		float damage_reduc_max = 0.0f;
 		// Vehicle physics-property block, PRE-SCALED by the libs/def parser exactly like
 		// the original loader [orig: ItemDef_ParsePhysicsProperty @0x49d870]. Consumed by
 		// the sim's item-traits sweep (world::VehicleTraits). All 0 when absent.
@@ -102,6 +104,7 @@ private:
 		String sounddeath;    // -> deathSoundId; Entity_InitDeathSounds @ 0x4939b0
 		int armor_impact = 0; // def+0x190 (-1 = invulnerable)
 		int armor_blast = 0;  // def+0x192
+		int armor_kz = 0;     // compatibility mirror of armor_blast
 		float kz = 0.0f;      // def+0x198 death-blast radius (units)
 		float debris_scale = 0.0f; // def+0x1BC (0 = unset -> 1.0)
 		int husk_sub_parts = 0;    // def+0x100
@@ -161,6 +164,10 @@ public:
 	// items.def hp (itemDef+0x17C healthMax); 0 if unknown/none declared.
 	int get_hp(int id) const;
 	int get_item_type(int id) const;
+	float get_damage_reduc_pp(int id) const;
+	float get_damage_reduc_max(int id) const;
+	int get_armor_impact(int id) const;
+	int get_armor_kz(int id) const;
 	// items.def ItemDefAttrib & 0x100000 (AIData): true when the item def is AI-capable. The
 	// host's pool-1 0x0D stream gates the AI-trailer on this so the wire matches the stock
 	// decoder's own gate (itemDef.attrib & 0x100000 @0x433327). [docs/world/itemdef-re.md;

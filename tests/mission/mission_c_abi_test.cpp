@@ -444,8 +444,12 @@ int main() {
 	opennova_mission_free_bytes(&clamp_bytes);
 	TEST_EXPECT(opennova_mission_remove_area_trigger(document, clamped_index) == 1);
 
-	// Phase 3: weapon loadout. The fixture canonicalizes to 7 public three-field loadout records; the
+	// Phase 3: weapon loadout. The fixture canonicalizes to 7 public four-field loadout records; the
 	// earlier entity/zone edits do not touch the loadout list.
+	static_assert(offsetof(OpenNovaMissionWeaponLoadoutEntry, value3) == 192,
+	              "value3 must remain an ABI tail append");
+	static_assert(sizeof(OpenNovaMissionWeaponLoadoutEntry) == 256,
+	              "loadout ABI is four fixed 64-byte strings");
 	const size_t loadout_count = opennova_mission_weapon_loadout_count(document);
 	TEST_EXPECT(loadout_count == 7);
 	OpenNovaMissionWeaponLoadoutEntry first_loadout = {};
@@ -453,11 +457,12 @@ int main() {
 	TEST_EXPECT(std::string(first_loadout.name) == "WPN_CAR15AUTO");
 	TEST_EXPECT(std::string(first_loadout.value1) == "-1");
 	TEST_EXPECT(std::string(first_loadout.value2) == "-1");
+	TEST_EXPECT(std::string(first_loadout.value3) == "-1");
 	OpenNovaMissionWeaponLoadoutEntry last_loadout = {};
 	TEST_EXPECT(opennova_mission_get_weapon_loadout_entry(document, loadout_count - 1, &last_loadout) == 1);
 	TEST_EXPECT(std::string(last_loadout.name) == "WPN_KNIFE");
 	TEST_EXPECT(opennova_mission_get_weapon_loadout_entry(document, loadout_count, &last_loadout) == 0);
-	// Re-serialize the parsed entries and confirm the round-trip is identity (3-string format is exact).
+	// Re-serialize the parsed entries and confirm the round-trip is identity (4-string format is exact).
 	std::vector<OpenNovaMissionWeaponLoadoutEntry> loadout_snapshot(loadout_count);
 	for (size_t i = 0; i < loadout_count; ++i) {
 		TEST_EXPECT(opennova_mission_get_weapon_loadout_entry(document, i, &loadout_snapshot[i]) == 1);
@@ -472,9 +477,11 @@ int main() {
 	std::snprintf(custom[0].name, sizeof(custom[0].name), "WPN_KNIFE");
 	std::snprintf(custom[0].value1, sizeof(custom[0].value1), "-1");
 	std::snprintf(custom[0].value2, sizeof(custom[0].value2), "-1");
+	std::snprintf(custom[0].value3, sizeof(custom[0].value3), "1");
 	std::snprintf(custom[1].name, sizeof(custom[1].name), "WPN_M9Berreta");
 	std::snprintf(custom[1].value1, sizeof(custom[1].value1), "2");
 	std::snprintf(custom[1].value2, sizeof(custom[1].value2), "0");
+	std::snprintf(custom[1].value3, sizeof(custom[1].value3), "2");
 	TEST_EXPECT(opennova_mission_set_weapon_loadout(document, custom, 2) == 1);
 	TEST_EXPECT(opennova_mission_weapon_loadout_count(document) == 2);
 	OpenNovaMissionBytes loadout_bytes = {};
@@ -487,6 +494,7 @@ int main() {
 	TEST_EXPECT(std::string(reload_entry.name) == "WPN_M9Berreta");
 	TEST_EXPECT(std::string(reload_entry.value1) == "2");
 	TEST_EXPECT(std::string(reload_entry.value2) == "0");
+	TEST_EXPECT(std::string(reload_entry.value3) == "2");
 	opennova_mission_destroy(loadout_reload);
 	opennova_mission_free_bytes(&loadout_bytes);
 	// Clearing the loadout yields an empty chunk (the loader installs the WPN_KNIFE default at runtime).

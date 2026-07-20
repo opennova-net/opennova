@@ -5,6 +5,7 @@
 
 #include "world/collision.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 
@@ -24,7 +25,7 @@ inline int32_t abs32(int32_t v) { return opennova::io::bam_abs(v); }
 
 // [orig: dbl_7C19D8 = 2^31/pi — BAM per radian]
 constexpr double kBamPerRadian = 683565275.5764316;
-// [orig: dbl_7C57B8 = -2^31/pi — the NEGATED BAM-per-radian the platform-anchor
+// [orig: dbl_7C57B8 = -2^31/pi — the NEGATED BAM-per-radian the ladder-contact
 // leg multiplies its atan2 results by (the target-relative subtraction then
 // yields target + atan*BAM).]
 constexpr double kNegBamPerRadian = -683565275.5764316;
@@ -83,32 +84,89 @@ int32_t person_effective_radius(int32_t section, int32_t authored_radius,
 // ----------------------------------------------------------------------------
 void CollisionModel::finalize_sections() {
     for (CollisionSection &s : sections) {
-        if (s.volume_count <= 0) {
-            // Skeletal/person COBJ rows author their own med/radius even when
-            // they own no BVOLs or CFACs. Preserve those loader fields; the
-            // former zeroing erased every limb/head sphere in CharModel.3di.
+        if (s.vehicle_volume_start < 0) {
+            for (int32_t i = 0; i < s.volume_count; ++i) {
+                const int32_t type = volumes[s.volume_start + i].type;
+                if (type == 7 || type == 12) {
+                    s.vehicle_volume_start = i;
+                    break;
+                }
+            }
+        }
+        // Exact COBJ bounds win. Skeletal/person rows can also carry only an
+        // authored med/radius (no BVOL/CFAC), so preserve a positive radius even
+        // for legacy callers that did not set authored_bounds explicitly.
+        if (s.authored_bounds || (s.volume_count <= 0 && s.radius > 0)) continue;
+
+        // The bound SPHERE is synthesized only from a section's BVOL run.
+        // Vertex-derived AABBs (the CFAC mesh row) must never mint one: retail
+        // reads the AUTHORED COBJ mid/radius raw [orig:
+        // Physics_RaycastAgainstBoneSections @ 0x4e4670], and every JO person
+        // model authors its mesh row with radius 0 + sentinel inverted bounds
+        // (Indo01 sec 19: min +10000/max -10000) — a derived whole-mesh sphere
+        // there becomes a phantom shootable "bone" on the pose slot.
+        bool synthesize_sphere = false;
+        if (s.volume_count > 0) {
+            synthesize_sphere = true;
+            const CollisionVolume &v0 = volumes[s.volume_start];
+            s.min_x = v0.min_x; s.max_x = v0.max_x;
+            s.min_y = v0.min_y; s.max_y = v0.max_y;
+            s.min_z = v0.min_z; s.max_z = v0.max_z;
+            for (int32_t i = 1; i < s.volume_count; ++i) {
+                const CollisionVolume &v = volumes[s.volume_start + i];
+                if (v.min_x < s.min_x) s.min_x = v.min_x;
+                if (v.max_x > s.max_x) s.max_x = v.max_x;
+                if (v.min_y < s.min_y) s.min_y = v.min_y;
+                if (v.max_y > s.max_y) s.max_y = v.max_y;
+                if (v.min_z < s.min_z) s.min_z = v.min_z;
+                if (v.max_z > s.max_z) s.max_z = v.max_z;
+            }
+        } else if (s.vertex_count > 0) {
+            const CollisionVertex &v0 = vertices[s.vertex_start];
+            s.min_x = s.max_x = v0.p[0];
+            s.min_y = s.max_y = v0.p[1];
+            s.min_z = s.max_z = v0.p[2];
+            for (int32_t i = 1; i < s.vertex_count; ++i) {
+                const CollisionVertex &v = vertices[s.vertex_start + i];
+                if (v.p[0] < s.min_x) s.min_x = v.p[0];
+                if (v.p[0] > s.max_x) s.max_x = v.p[0];
+                if (v.p[1] < s.min_y) s.min_y = v.p[1];
+                if (v.p[1] > s.max_y) s.max_y = v.p[1];
+                if (v.p[2] < s.min_z) s.min_z = v.p[2];
+                if (v.p[2] > s.max_z) s.max_z = v.p[2];
+            }
+        } else if (s.face_vertex_count > 0) {
+            const CollisionFaceVertex &v0 = face_vertices[s.face_vertex_start];
+            s.min_x = s.max_x = static_cast<int32_t>(v0.x) << 8;
+            s.min_y = s.max_y = static_cast<int32_t>(v0.y) << 8;
+            s.min_z = s.max_z = static_cast<int32_t>(v0.z) << 8;
+            for (int32_t i = 1; i < s.face_vertex_count; ++i) {
+                const CollisionFaceVertex &v = face_vertices[s.face_vertex_start + i];
+                const int32_t p[3] = {static_cast<int32_t>(v.x) << 8,
+                                      static_cast<int32_t>(v.y) << 8,
+                                      static_cast<int32_t>(v.z) << 8};
+                if (p[0] < s.min_x) s.min_x = p[0];
+                if (p[0] > s.max_x) s.max_x = p[0];
+                if (p[1] < s.min_y) s.min_y = p[1];
+                if (p[1] > s.max_y) s.max_y = p[1];
+                if (p[2] < s.min_z) s.min_z = p[2];
+                if (p[2] > s.max_z) s.max_z = p[2];
+            }
+        } else {
+            s.min_x = s.max_x = s.min_y = s.max_y = s.min_z = s.max_z = 0;
+            s.center[0] = s.center[1] = s.center[2] = 0;
+            s.radius = 0;
             continue;
         }
-        const CollisionVolume &v0 = volumes[s.volume_start];
-        s.min_x = v0.min_x; s.max_x = v0.max_x;
-        s.min_y = v0.min_y; s.max_y = v0.max_y;
-        s.min_z = v0.min_z; s.max_z = v0.max_z;
-        for (int32_t i = 1; i < s.volume_count; ++i) {
-            const CollisionVolume &v = volumes[s.volume_start + i];
-            if (v.min_x < s.min_x) s.min_x = v.min_x;
-            if (v.max_x > s.max_x) s.max_x = v.max_x;
-            if (v.min_y < s.min_y) s.min_y = v.min_y;
-            if (v.max_y > s.max_y) s.max_y = v.max_y;
-            if (v.min_z < s.min_z) s.min_z = v.min_z;
-            if (v.max_z > s.max_z) s.max_z = v.max_z;
+        if (synthesize_sphere) {
+            const int32_t hx = (s.max_x - s.min_x) >> 1;
+            const int32_t hy = (s.max_y - s.min_y) >> 1;
+            const int32_t hz = (s.max_z - s.min_z) >> 1;
+            s.center[0] = s.min_x + hx;
+            s.center[1] = s.min_y + hy;
+            s.center[2] = s.min_z + hz;
+            s.radius = vec_len_ftol(hx, hy, hz);
         }
-        const int32_t hx = (s.max_x - s.min_x) >> 1;
-        const int32_t hy = (s.max_y - s.min_y) >> 1;
-        const int32_t hz = (s.max_z - s.min_z) >> 1;
-        s.center[0] = s.min_x + hx;
-        s.center[1] = s.min_y + hy;
-        s.center[2] = s.min_z + hz;
-        s.radius = vec_len_ftol(hx, hy, hz);
     }
     // Model-level bounds = union of the section AABBs — the runtime collision
     // header min/max the render occlusion consumes (+24..+44).
@@ -116,7 +174,9 @@ void CollisionModel::finalize_sections() {
     max[0] = max[1] = max[2] = 0;
     bool first = true;
     for (const CollisionSection &s : sections) {
-        if (s.volume_count <= 0) continue;
+        if (s.volume_count <= 0 && s.vertex_count <= 0 && s.face_vertex_count <= 0 &&
+            !s.authored_bounds && s.radius <= 0)
+            continue;
         if (first) {
             min[0] = s.min_x; max[0] = s.max_x;
             min[1] = s.min_y; max[1] = s.max_y;
@@ -301,6 +361,35 @@ void CollisionMatrix::invert_into(CollisionMatrix &out) const {
     out.m[12] = out.m[13] = out.m[14] = out.m[15] = 0;
 }
 
+bool CollisionMatrix::invert_uniform_scale_into(CollisionMatrix &out,
+                                                int32_t scale_q16) const {
+    // [orig: Math_BuildInverseFixedPointMatrix3x3 @ 0x613e10]
+    const int64_t scaled_q22 = static_cast<int64_t>(scale_q16) << 6;
+    if (scaled_q22 < INT32_MIN || scaled_q22 > INT32_MAX) return false;
+    const int64_t scale_sq_q22 = (scaled_q22 * scaled_q22) >> 22;
+    if (scale_sq_q22 == 0) return false;
+    const int64_t reciprocal_sq_q22 = (int64_t{1} << 44) / scale_sq_q22;
+    if (reciprocal_sq_q22 < INT32_MIN || reciprocal_sq_q22 > INT32_MAX) return false;
+    if (m[3] == INT32_MIN || m[7] == INT32_MIN || m[11] == INT32_MIN) return false;
+
+    CollisionMatrix candidate;
+    candidate.m[3] = -m[3];
+    candidate.m[7] = -m[7];
+    candidate.m[11] = -m[11];
+    const int source[3][3] = {{0, 1, 2}, {4, 5, 6}, {8, 9, 10}};
+    for (int row = 0; row < 3; ++row) {
+        for (int col = 0; col < 3; ++col) {
+            const int64_t value =
+                (static_cast<int64_t>(m[source[col][row]]) * reciprocal_sq_q22) >> 22;
+            if (value < INT32_MIN || value > INT32_MAX) return false;
+            candidate.m[source[row][col]] = static_cast<int32_t>(value);
+        }
+    }
+    candidate.m[15] = 0x400000;
+    out = candidate;
+    return true;
+}
+
 CollisionMatrix collision_matrix_from_heading(int32_t heading_bam, const int32_t pos[3]) {
     int32_t c, s;
     quantized_dir(heading_bam, c, s); // Q22 [orig: outMillis table indexing]
@@ -412,7 +501,11 @@ bool collision_test_blink(const CollisionTargetView &target, const CollisionPoin
         if (sec.volume_count == 0 || mat.disabled()) continue; // [orig: @ 0x4af0ae]
 
         CollisionMatrix inv;
-        mat.invert_into(inv);
+        if (target.uniform_scale_q16 != 0) {
+            if (!mat.invert_uniform_scale_into(inv, target.uniform_scale_q16)) continue;
+        } else {
+            mat.invert_into(inv);
+        }
         // The type-8 ordinal counter restarts from the section-entry value for
         // EACH point, so the same volume keeps the same ordinal across points;
         // the last point's count carries into the next section. [orig: the
@@ -497,10 +590,13 @@ void CollisionRay::refresh_bounds() {
     }
 }
 
-bool collision_raycast_model(const CollisionTargetView &target, CollisionRay &ray) {
+bool collision_raycast_model(const CollisionTargetView &target, CollisionRay &ray,
+                             CollisionModelHit *out_hit) {
+    if (out_hit != nullptr) *out_hit = CollisionModelHit{};
     if (target.model == nullptr || target.matrices == nullptr) return false;
     const CollisionModel &model = *target.model;
     bool hit_found = false;
+    CollisionModelHit nearest_hit;
 
     for (size_t si = 0; si < model.sections.size(); ++si) {
         const CollisionSection &sec = model.sections[si];
@@ -519,6 +615,7 @@ bool collision_raycast_model(const CollisionTargetView &target, CollisionRay &ra
         transform_translate_then_rotate(inv.m, ray.end, lend); // [orig: @ 0x413268]
 
         bool clipped_any = false;
+        CollisionModelHit section_hit;
         for (int32_t vi = 0; vi < sec.volume_count; ++vi) {
             const CollisionVolume &vol = model.volumes[sec.volume_start + vi];
             if (vol.type != 1) continue; // [orig: @ 0x413298 — solid type-1 only]
@@ -535,6 +632,7 @@ bool collision_raycast_model(const CollisionTargetView &target, CollisionRay &ra
             int32_t cs[3] = {lstart[0], lstart[1], lstart[2]};
             int32_t ce[3] = {lend[0], lend[1], lend[2]};
             bool miss = false;
+            int32_t entry_plane = -1;
             for (int32_t k = 0; k < vol.plane_count; ++k) {
                 const CollisionPlane &pl = model.planes[vol.plane_start + k];
                 const int32_t d0 = static_cast<int32_t>(
@@ -555,6 +653,7 @@ bool collision_raycast_model(const CollisionTargetView &target, CollisionRay &ra
                     for (int i = 0; i < 3; ++i)
                         cs[i] += static_cast<int32_t>(
                             (static_cast<int64_t>(t) * (ce[i] - cs[i]) + 0x8000) >> 16);
+                    entry_plane = vol.plane_start + k;
                 } else {
                     for (int i = 0; i < 3; ++i)
                         ce[i] = cs[i] + static_cast<int32_t>(
@@ -565,15 +664,31 @@ bool collision_raycast_model(const CollisionTargetView &target, CollisionRay &ra
             // Entry point = the clipped start. [orig: @ 0x413646-0x41365e]
             lend[0] = cs[0]; lend[1] = cs[1]; lend[2] = cs[2];
             clipped_any = true;
+            section_hit.section_index = static_cast<int32_t>(si);
+            section_hit.volume_index = sec.volume_start + vi;
+            section_hit.normal_q16[0] = 0;
+            section_hit.normal_q16[1] = 0;
+            section_hit.normal_q16[2] = 0;
+            if (entry_plane >= 0) {
+                const CollisionPlane &pl = model.planes[entry_plane];
+                const int32_t local_normal[3] = {
+                    static_cast<int32_t>(pl.nx) << 2,
+                    static_cast<int32_t>(pl.ny) << 2,
+                    static_cast<int32_t>(pl.nz) << 2,
+                };
+                mat.rotate_point(local_normal, section_hit.normal_q16);
+            }
         }
 
         if (clipped_any) {
             mat.transform_point(lend, ray.end); // [orig: @ 0x4136ac]
             hit_found = true;
+            nearest_hit = section_hit;
         }
     }
 
     if (hit_found) ray.refresh_bounds(); // [orig: @ 0x41370c mid/half recompute — dir untouched]
+    if (hit_found && out_hit != nullptr) *out_hit = nearest_hit;
     return hit_found;
 }
 
@@ -667,10 +782,14 @@ bool collision_raycast_faces(const CollisionTargetView &target, const int32_t st
         const CollisionSection &sec = model.sections[si];
         if (sec.face_count <= 0) continue;
         const CollisionMatrix &mat = target.matrices[si];
-        if (mat.disabled()) continue; // [orig: the (boneMatrix+60 & 3) skip @ 0x4e4f12]
+        if (mat.polygon_disabled()) continue; // [orig: matrix+60 & 3 @ 0x4e4f12]
 
         CollisionMatrix inv;
-        mat.invert_into(inv); // [orig: Matrix_Transpose3x3WithNegateCol3 @ 0x4e4f41]
+        if (target.uniform_scale_q16 != 0) {
+            if (!mat.invert_uniform_scale_into(inv, target.uniform_scale_q16)) continue;
+        } else {
+            mat.invert_into(inv); // [orig: Matrix_Transpose3x3WithNegateCol3 @ 0x4e4f41]
+        }
         int32_t ls[3], le[3], ldir[3];
         transform_translate_then_rotate(inv.m, start, ls); // [orig: @ 0x4e4f57]
         transform_translate_then_rotate(inv.m, end, le);   // [orig: @ 0x4e4f6d]
@@ -838,11 +957,199 @@ bool CollisionWorld::raycast_person_sections(World &world, EntityHandle h,
                                              entity->section_mask, out);
 }
 
+// Retail's signed-integer odd/even triangle test. The three vertices are already
+// in the exact Q16 form produced by CVRT raw 8.8 values shifted left eight.
+// [orig: Math_PointInTriangle2D @ 0x414050]
+static bool point_in_collision_triangle(const int32_t point[3],
+                                        const CollisionVertex vertices[3],
+                                        int16_t dominant_axis) {
+    int u_axis = 0;
+    int v_axis = 1;
+    if ((dominant_axis & 1) != 0) {
+        u_axis = 0;
+        v_axis = 1;
+    } else if ((dominant_axis & 2) != 0) {
+        u_axis = 0;
+        v_axis = 2;
+    } else if ((dominant_axis & 4) != 0) {
+        u_axis = 1;
+        v_axis = 2;
+    } else {
+        return false;
+    }
+
+    int32_t u[3] = {};
+    int32_t v[3] = {};
+    for (int i = 0; i < 3; ++i) {
+        u[i] = vertices[i].p[u_axis];
+        v[i] = vertices[i].p[v_axis];
+    }
+
+    const int32_t test_u = point[u_axis];
+    const int32_t test_v = point[v_axis];
+    int32_t prev_u = u[0];
+    int32_t prev_v = v[0];
+    bool prev_above = prev_v >= test_v;
+    int crossings = 0;
+    const int next_indices[3] = {1, 2, 0};
+    for (int edge = 0; edge < 3 && crossings < 2; ++edge) {
+        const int next = next_indices[edge];
+        const int32_t next_u = u[next];
+        const int32_t next_v = v[next];
+        const bool next_above = next_v >= test_v;
+        if (prev_above != next_above) {
+            const int quadrant = (prev_u < test_u ? 1 : 0) |
+                                 (next_u >= test_u ? 0 : 2);
+            if (quadrant != 3) {
+                if (quadrant == 0) {
+                    ++crossings;
+                } else {
+                    const int64_t intersection =
+                        (static_cast<int64_t>(next_u) - prev_u) *
+                            (static_cast<int64_t>(test_v) - prev_v) /
+                            (static_cast<int64_t>(next_v) - prev_v) +
+                        prev_u;
+                    if (intersection >= test_u) ++crossings;
+                }
+            }
+        }
+        prev_u = next_u;
+        prev_v = next_v;
+        prev_above = next_above;
+    }
+    return crossings == 1;
+}
+
+bool collision_raycast_polygons(const CollisionTargetView &target,
+                                const CollisionRay &ray,
+                                int32_t segment_length_q16,
+                                uint32_t ammo_flags,
+                                CollisionPolygonHit &out_hit) {
+    out_hit = CollisionPolygonHit{};
+    if (target.model == nullptr || target.matrices == nullptr ||
+        segment_length_q16 <= 0)
+        return false;
+
+    const CollisionModel &model = *target.model;
+    bool found = false;
+    for (size_t si = 0; si < model.sections.size(); ++si) {
+        const CollisionSection &sec = model.sections[si];
+        const CollisionMatrix &mat = target.matrices[si];
+        if (sec.face_count <= 0 || mat.polygon_disabled()) continue;
+
+        CollisionMatrix inv;
+        if (target.uniform_scale_q16 != 0) {
+            if (!mat.invert_uniform_scale_into(inv, target.uniform_scale_q16)) continue;
+        } else {
+            mat.invert_into(inv);
+        }
+        int32_t local_start[3] = {};
+        int32_t local_end[3] = {};
+        int32_t local_dir[3] = {};
+        transform_translate_then_rotate(inv.m, ray.start, local_start);
+        transform_translate_then_rotate(inv.m, ray.end, local_end);
+        inv.rotate_point(ray.dir, local_dir);
+
+        int32_t segment_min[3] = {};
+        int32_t segment_max[3] = {};
+        for (int axis = 0; axis < 3; ++axis) {
+            segment_min[axis] = std::min(local_start[axis], local_end[axis]);
+            segment_max[axis] = std::max(local_start[axis], local_end[axis]);
+        }
+
+        for (int32_t local_face = 0; local_face < sec.face_count; ++local_face) {
+            const int32_t face_index = sec.face_start + local_face;
+            if (face_index < 0 || face_index >= static_cast<int32_t>(model.faces.size()))
+                continue;
+            const CollisionFace &face = model.faces[face_index];
+            if (segment_min[0] > face.max[0] || segment_max[0] < face.min[0] ||
+                segment_min[1] > face.max[1] || segment_max[1] < face.min[1] ||
+                segment_min[2] > face.max[2] || segment_max[2] < face.min[2])
+                continue;
+            if ((face.material_flags & 0x100u) != 0) continue;
+            if (face.poly_type == 17 && (ammo_flags & 0x04000000u) != 0) continue;
+
+            const int32_t normal_index = sec.normal_start + face.normal_index;
+            if (face.normal_index < 0 || normal_index < 0 ||
+                normal_index >= static_cast<int32_t>(model.normals.size()))
+                continue;
+            const CollisionNormal &normal = model.normals[normal_index];
+            const int32_t d0 = static_cast<int32_t>(
+                                   (static_cast<int64_t>(local_start[0]) * normal.n[0] +
+                                    static_cast<int64_t>(local_start[1]) * normal.n[1] +
+                                    static_cast<int64_t>(local_start[2]) * normal.n[2]) >> 14) +
+                               face.plane_dist;
+            const int32_t d1 = static_cast<int32_t>(
+                                   (static_cast<int64_t>(local_end[0]) * normal.n[0] +
+                                    static_cast<int64_t>(local_end[1]) * normal.n[1] +
+                                    static_cast<int64_t>(local_end[2]) * normal.n[2]) >> 14) +
+                               face.plane_dist;
+            if (d0 > 0) {
+                if (d1 > 0) continue;
+            } else if (d1 <= 0) {
+                continue;
+            }
+
+            // Projectile callers pass backfaceArg=1. Only a non-two-sided,
+            // 0x800 face rejects the negative-to-positive crossing.
+            if ((face.material_flags & 1u) == 0 &&
+                (face.material_flags & 0x800u) != 0 &&
+                !(d0 > 0 && d1 <= 0))
+                continue;
+
+            const int32_t abs_d0 = abs32(d0);
+            const int32_t denom = abs_d0 + abs32(d1);
+            if (denom <= 0) continue;
+            const int32_t distance = static_cast<int32_t>(
+                static_cast<int64_t>(abs_d0) * segment_length_q16 / denom);
+            if (distance > out_hit.distance_q16) continue;
+
+            int32_t local_hit[3] = {};
+            for (int axis = 0; axis < 3; ++axis) {
+                local_hit[axis] = local_start[axis] + static_cast<int32_t>(
+                    (static_cast<int64_t>(local_dir[axis]) * distance + 0x8000) >> 16);
+            }
+
+            CollisionVertex triangle[3];
+            bool indices_valid = true;
+            for (int vertex = 0; vertex < 3; ++vertex) {
+                const int32_t local_index = face.vertex_index[vertex];
+                const int32_t vertex_index = sec.vertex_start + local_index;
+                if (local_index < 0 || vertex_index < 0 ||
+                    vertex_index >= static_cast<int32_t>(model.vertices.size())) {
+                    indices_valid = false;
+                    break;
+                }
+                triangle[vertex] = model.vertices[vertex_index];
+            }
+            if (!indices_valid ||
+                !point_in_collision_triangle(local_hit, triangle, normal.dominant_axis))
+                continue;
+
+            found = true;
+            out_hit.distance_q16 = distance;
+            mat.transform_point(local_hit, out_hit.position_q16);
+            const int32_t local_normal[3] = {
+                static_cast<int32_t>(normal.n[0]) << 2,
+                static_cast<int32_t>(normal.n[1]) << 2,
+                static_cast<int32_t>(normal.n[2]) << 2,
+            };
+            mat.rotate_point(local_normal, out_hit.normal_q16);
+            out_hit.section_index = static_cast<int32_t>(si);
+            out_hit.face_index = face_index;
+            out_hit.section_face_index = local_face;
+            out_hit.material_flags = face.material_flags;
+            out_hit.poly_type = face.poly_type;
+        }
+    }
+    return found;
+}
+
 // ----------------------------------------------------------------------------
 // Contact force. [orig: Entity_ComputeBoneCollisionForce @ 0x4ae150]
 // ----------------------------------------------------------------------------
 bool collision_contact_force(const CollisionTargetView &target, const ContactQuery &q,
-                             BlinkAccum &blink, PlatformContact &platform, ContactResult &out) {
+                             BlinkAccum &blink, LadderContact &ladder, ContactResult &out) {
     out = ContactResult{};
     if (target.model == nullptr || target.matrices == nullptr) return false;
     if ((target.entity_flags & 1u) != 0) return false; // [orig: targetEntity[9] & 1 @ 0x4ae1bd]
@@ -867,7 +1174,7 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
     int32_t any_collision = 0;
     int32_t max_penetration = 0;
     int32_t out_force[3] = {0, 0, 0};
-    int32_t damage_volume_counter = -1; // [orig: damageVolumeCount — type-8 counter]
+    int32_t blink_volume_counter = -1; // per-section BB ordinal [orig: local at @0x4ae575]
 
     for (size_t si = 0; si < model.sections.size(); ++si) {
         const CollisionSection &sec = model.sections[si];
@@ -888,7 +1195,7 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
         // The type-8 ordinal restarts from the section-entry value per point (the
         // same volume keeps its ordinal across points). [orig: v118 save @ 0x4ae384
         // / per-point restore @ 0x4ae4f6]
-        const int32_t section_entry_counter = damage_volume_counter;
+        const int32_t section_entry_counter = blink_volume_counter;
 
         for (int32_t pi = 0; pi < q.num_points; ++pi) {
             const bool prev_has_collision = has_collision;
@@ -901,39 +1208,41 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
                 local[2] - radius > sec.max_z || local[2] + radius < sec.min_z)
                 continue; // [orig: @ 0x4ae43b-0x4ae4a6]
 
-            damage_volume_counter = section_entry_counter;
-            // Damage pass start index. [orig: @ 0x4ae4b8-0x4ae4df]
-            const bool damage_pass = (q.mask & 8) != 0;
+            blink_volume_counter = section_entry_counter;
+            // Vehicle-collision pass start index. A section with VC/VK starts at
+            // that specialized run; a section without one falls back to its
+            // ordinary CB/default solids. [orig: @ 0x4ae4b8-0x4ae4df]
+            const bool vehicle_pass = (q.mask & 8) != 0;
             int32_t vi = 0;
-            bool damage_scoped = false;
-            if (damage_pass && sec.damage_start != -1) {
-                vi = sec.damage_start;
-                damage_scoped = true;
+            bool vehicle_scoped = false;
+            if (vehicle_pass && sec.vehicle_volume_start != -1) {
+                vi = sec.vehicle_volume_start;
+                vehicle_scoped = true;
             }
 
             for (; vi < sec.volume_count; ++vi) {
                 const CollisionVolume &vol = model.volumes[sec.volume_start + vi];
                 const int32_t type = vol.type;
-                if (damage_scoped && type != 7 && type != 12) continue; // [orig: @ 0x4ae52f]
+                if (vehicle_scoped && type != 7 && type != 12) continue; // [orig: @ 0x4ae52f]
                 if (type == 19) {
-                    if ((q.mask & 2) == 0) continue; // [orig: @ 0x4ae543 player-only]
+                    if ((q.mask & 2) == 0) continue; // CP: players, not AI [orig: @ 0x4ae543]
                 } else if (type == 7) {
-                    if (!damage_pass) continue; // [orig: @ 0x4ae558]
+                    if (!vehicle_pass) continue; // [orig: @ 0x4ae558]
                 } else if (type == 12) {
                     if ((q.mask & 0x10) == 0) continue; // [orig: @ 0x4ae568]
                 } else if (type == 8) {
-                    ++damage_volume_counter; // [orig: @ 0x4ae575]
+                    ++blink_volume_counter; // [orig: @ 0x4ae575]
                 }
 
-                const bool platform_mode = (q.mask & 1) != 0;
+                const bool ladder_recontact_mode = (q.mask & 1) != 0;
                 int32_t min_pen = INT32_MIN / 2;    // [orig: -1073741824]
                 int32_t second_pen = INT32_MIN / 2;
                 int32_t best_plane = 0, second_plane = 0;
                 int32_t plane_idx = 0;
                 bool reached_inside = false;
 
-                if (platform_mode && type == 4) {
-                    // Seat/platform volume: inflated AABB + current-point plane test.
+                if (ladder_recontact_mode && type == 4) {
+                    // CL ladder recontact: inflated AABB + current-point plane test.
                     // [orig: @ 0x4ae611-0x4ae6cf — margin 0x8000, dot>>9 vs
                     // 32*(dist - r - 0x8000)]
                     if (local[0] - radius - 0x8000 > vol.max_x ||
@@ -997,7 +1306,7 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
                     case 5:
                         has_collision = true; // contact, no force [orig: @ 0x4ae874]
                         break;
-                    case 4: { // platform/seat anchor [orig: @ 0x4ae894-0x4aea30]
+                    case 4: { // CL ladder alignment frame [orig: @ 0x4ae894-0x4aea30]
                         out.flags |= 0x1u;
                         // Two rotations through the section matrix: x/y from
                         // (mid, mid, the point's local z), z from (mid, mid,
@@ -1010,16 +1319,16 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
                         int32_t anchor_xy[3], anchor_z[3];
                         mat.rotate_point(anchor_xy_local, anchor_xy);
                         mat.rotate_point(anchor_z_local, anchor_z);
-                        platform.anchor[0] = anchor_xy[0] + target.pos[0];
-                        platform.anchor[1] = anchor_xy[1] + target.pos[1];
-                        platform.anchor[2] = anchor_z[2] + target.pos[2];
+                        ladder.anchor[0] = anchor_xy[0] + target.pos[0];
+                        ladder.anchor[1] = anchor_xy[1] + target.pos[1];
+                        ladder.anchor[2] = anchor_z[2] + target.pos[2];
                         if (vol.plane_count > 0) {
                             const CollisionPlane &p0 = model.planes[vol.plane_start];
                             // Yaw/pitch are TARGET-RELATIVE: entity Yaw/Pitch minus
                             // atan2 * -BAM (net +). The XY length is ftol'd to int
                             // before the pitch atan2. [orig: @ 0x4ae938-0x4ae9d9,
                             // dbl_7C57B8 = -2^31/pi]
-                            platform.yaw =
+                            ladder.yaw =
                                 target.yaw_bam -
                                 static_cast<int32_t>(std::atan2(-static_cast<double>(p0.ny),
                                                                 -static_cast<double>(p0.nx)) *
@@ -1027,7 +1336,7 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
                             const int32_t lxy_int = sqrt_ftol(
                                 static_cast<double>(p0.nx) * p0.nx +
                                 static_cast<double>(p0.ny) * p0.ny);
-                            platform.pitch =
+                            ladder.pitch =
                                 target.pitch_bam -
                                 static_cast<int32_t>(std::atan2(static_cast<double>(p0.nz),
                                                                 static_cast<double>(lxy_int)) *
@@ -1036,19 +1345,19 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
                             // The original reads plane[0] unguarded even for a
                             // 0-plane volume (adjacent-memory read); a bounds
                             // guard is required here, defaults target-relative.
-                            platform.yaw = target.yaw_bam;
-                            platform.pitch = target.pitch_bam;
+                            ladder.yaw = target.yaw_bam;
+                            ladder.pitch = target.pitch_bam;
                         }
-                        // Pull the anchor 0.375u back along the platform yaw — REAL
+                        // Pull the anchor 0.375u back along the ladder-facing yaw — REAL
                         // sin/cos of the BAM angle scaled 2^22 and truncated, not the
                         // quantized table. [orig: @ 0x4ae9df-0x4aea30 — fsin/fcos of
                         // yaw * dbl_7C3608, * dbl_7C3600]
-                        const double yaw_rad = static_cast<double>(platform.yaw) * kRadianPerBam;
+                        const double yaw_rad = static_cast<double>(ladder.yaw) * kRadianPerBam;
                         const int32_t s22 = static_cast<int32_t>(std::sin(yaw_rad) * 4194304.0);
                         const int32_t c22 = static_cast<int32_t>(std::cos(yaw_rad) * 4194304.0);
-                        platform.anchor[0] -= static_cast<int32_t>((24576LL * c22) >> 22);
-                        platform.anchor[1] -= static_cast<int32_t>((24576LL * s22) >> 22);
-                        platform.valid = true;
+                        ladder.anchor[0] -= static_cast<int32_t>((24576LL * c22) >> 22);
+                        ladder.anchor[1] -= static_cast<int32_t>((24576LL * s22) >> 22);
+                        ladder.valid = true;
                         break;
                     }
                     case 6: // "CA" touch volume [orig: @ 0x4aea45]
@@ -1060,23 +1369,25 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
                             if (target.is_building) {
                                 blink.flags |= vol.flags ^ 6u;
                                 if (blink.hit_count != -1 && blink.hit_count < 4 &&
-                                    damage_volume_counter < 16)
+                                    blink_volume_counter < 16)
                                     blink.add_hit(static_cast<int32_t>(si), target.pool_index);
                             }
                         }
                         break;
-                    case 9: // destructible-section touch [orig: @ 0x4aeb0f-0x4aeb22]
+                    case 9: // CD: door touch [orig: @ 0x4aeb0f-0x4aeb22]
                         out.flags |= 0x20u;
-                        out.touched_sections |= 1u << (si & 31);
+                        out.door_sections |= 1u << (si & 31);
                         break;
-                    case 16: out.flags |= 0x100u; break; // [orig: @ 0x4aeb39]
-                    case 17: out.flags |= 0x80u; break;  // [orig: @ 0x4aeb50]
-                    case 18: out.flags |= 0x40u; break;  // [orig: @ 0x4aeb67]
-                    case 10: out.flags |= 0x200u; break; // [orig: @ 0x4aeb7b]
+                    case 16: out.flags |= 0x100u; break; // DH damage high [orig: @ 0x4aeb39]
+                    case 17: out.flags |= 0x80u; break;  // DM damage medium [orig: @ 0x4aeb50]
+                    case 18: out.flags |= 0x40u; break;  // DL damage low [orig: @ 0x4aeb67]
+                    case 10: out.flags |= 0x200u; break; // CT: change team [orig: @ 0x4aeb7b]
                     case 11: out.flags |= 0x400u; break; // [orig: @ 0x4aeb92]
-                    case 13: // grounded-only touch [orig: @ 0x4aebb3]
+                    case 13: // CF: flag/special function, grounded touch [orig: @ 0x4aebb3]
                         if (target.is_ground_of_source) out.flags |= 0x800u;
                         break;
+                    case 7:  // VC: vehicle-collision solid (reachable only on mask 0x8)
+                    case 12: // optional extension of the same vehicle pass
                     default: {
                         // Solid: accumulate the SAT push-out. [orig: @ 0x4aebdd-0x4aed0c]
                         if (prev_has_collision && (q.mask & 1) != 0) break;
@@ -1203,6 +1514,25 @@ bool CollisionWorld::has_instance(const World &world, EntityHandle h) const {
     return live_instance(world, h) != nullptr;
 }
 
+bool CollisionWorld::publish_entity_section_matrices(
+    EntityHandle h, std::vector<CollisionMatrix> matrices) {
+    auto it = instances_.find(h.packed);
+    if (it == instances_.end()) return false;
+    const CollisionModel *m = model(it->second.model_id);
+    if (m == nullptr || matrices.size() != m->sections.size()) return false;
+    it->second.section_matrices = std::move(matrices);
+    return true;
+}
+
+void CollisionWorld::clear_entity_section_matrices(EntityHandle h) {
+    auto it = instances_.find(h.packed);
+    if (it != instances_.end()) it->second.section_matrices.clear();
+}
+
+bool CollisionWorld::has_instance(EntityHandle h) const {
+    return instances_.count(h.packed) != 0;
+}
+
 int32_t CollisionWorld::candidate_count(EntityHandle h) const {
     auto it = candidates_.find(h.packed);
     return it == candidates_.end() ? 0 : it->second.count;
@@ -1224,6 +1554,11 @@ const CollisionModel *CollisionWorld::model_for(
         const World &world, EntityHandle h) const {
     const Instance *instance = live_instance(world, h);
     return instance != nullptr ? model(instance->model_id) : nullptr;
+}
+
+const CollisionModel *CollisionWorld::model_for(EntityHandle h) const {
+    const auto it = instances_.find(h.packed);
+    return it != instances_.end() ? model(it->second.model_id) : nullptr;
 }
 
 bool CollisionWorld::ensure_entity_instance(World &world, EntityHandle h) {
@@ -1303,12 +1638,17 @@ void CollisionWorld::build_tick_tables(World &world) {
         // `count < 1199` post-increment gate @ 0x4b94cb / 0x4b955f]
         if (statics_.size() >= 1199) return;
         auto it = instances_.find(e.handle.packed);
-        if (it == instances_.end()) return; // no collision model -> not a collider
+        const CollisionModel *attached =
+            it != instances_.end() ? model(it->second.model_id) : nullptr;
+        // Projectile proximity also retains the bounded compatibility entry for
+        // an item whose graphic could not resolve a collision instance. Other
+        // collision consumers still reject it later at target_view().
+        if (attached == nullptr && e.bound_radius <= 0.0f) return;
         StaticSlot s;
         int32_t p[3];
         entity_pos_fixed(e, p);
         const int32_t radius =
-            entity_proximity_radius(*this, e, model(it->second.model_id)) + 111876;
+            entity_proximity_radius(*this, e, attached) + 111876;
         s.x = static_cast<uint16_t>((static_cast<uint32_t>(p[0]) + 0x8000u) >> 16);
         s.y = static_cast<uint16_t>((static_cast<uint32_t>(p[1]) + 0x8000u) >> 16);
         s.z = static_cast<uint16_t>((static_cast<uint32_t>(p[2]) + 0x8000u) >> 16);
@@ -1346,12 +1686,14 @@ void CollisionWorld::build_tick_tables(World &world) {
     world.registry.for_each([&](const Entity &e) {
         if (e.kind != EntityKind::Item || (e.flags & 1u) != 0) return;
         auto it = instances_.find(e.handle.packed);
-        if (it == instances_.end()) return;
+        const CollisionModel *attached =
+            it != instances_.end() ? model(it->second.model_id) : nullptr;
+        if (attached == nullptr && e.bound_radius <= 0.0f) return;
         DynSlot d;
         int32_t pf[3];
         entity_pos_fixed(e, pf);
         d.x = pf[0]; d.y = pf[1]; d.z = pf[2];
-        d.radius = entity_proximity_radius(*this, e, model(it->second.model_id));
+        d.radius = entity_proximity_radius(*this, e, attached);
         d.h = e.handle;
         dynamics_.push_back(d);
     });
@@ -1423,7 +1765,7 @@ void CollisionWorld::build_tick_tables(World &world) {
     });
 }
 
-const CollisionTargetView *CollisionWorld::target_view(World &world, EntityHandle h,
+const CollisionTargetView *CollisionWorld::target_view(const World &world, EntityHandle h,
                                                        CollisionTargetView &scratch,
                                                        std::vector<CollisionMatrix> &mats) const {
     const Instance *instance = live_instance(world, h);
@@ -1449,14 +1791,28 @@ const CollisionTargetView *CollisionWorld::target_view(World &world, EntityHandl
     // euler matrix so the shell leans with the visual [orig: the entity
     // orientation matrix @ 0x613f40 serves every collision query]; pure-yaw
     // placements keep the quantized-table heading path bit-for-bit.
-    const CollisionMatrix world_mat =
+    CollisionMatrix world_mat =
             (e->pitch != 0 || e->roll != 0)
                     ? collision_matrix_from_euler(
                               heading,
                               bam_from_degrees_wrapped(static_cast<double>(e->pitch)),
                               bam_from_degrees_wrapped(static_cast<double>(e->roll)), p)
                     : collision_matrix_from_heading(heading, p);
-    // The model callback owns the FINAL world-space slot array for animated
+    // Entity/item scale is already present in retail's placement/pose matrices;
+    // preserve it before either publication path so the matching scaled inverse
+    // can be selected by the polygon walker.
+    if (e->uniform_scale_q16 != 0) {
+        constexpr int rotation_indices[] = {0, 1, 2, 4, 5, 6, 8, 9, 10};
+        for (int index : rotation_indices) {
+            world_mat.m[index] = static_cast<int32_t>(
+                (static_cast<int64_t>(world_mat.m[index]) * e->uniform_scale_q16) >> 16);
+        }
+    }
+
+    // Explicitly published matrices and the host callback both own the FINAL
+    // world-space slot array for animated models. Slots pair with COBJ sections
+    // by ordinal. A missing, rejected, or count-mismatched pose falls back to
+    // the retail Simple callback: copy the entity placement matrix into every slot.
     // models. Slots pair with COBJ sections by ordinal; the low-level walkers
     // already consume target.matrices[si] that way. A missing, rejected, or
     // count-mismatched callback falls back to the retail Simple callback: copy
@@ -1464,14 +1820,16 @@ const CollisionTargetView *CollisionWorld::target_view(World &world, EntityHandl
     // [orig: model+168 callback; BoneCallback_Simple @ 0x4e2600;
     // Physics_RaycastAgainstBoneCollision @ 0x4e4cb0 advances matrix+64 and
     // COBJ+108 in lockstep.]
-    bool supplied_section_matrices = false;
-    if (section_matrix_provider_ != nullptr) {
+    bool live_pose = instance->section_matrices.size() == m->sections.size();
+    if (live_pose) {
+        mats = instance->section_matrices;
+    } else if (section_matrix_provider_ != nullptr) {
         mats.clear();
-        supplied_section_matrices = section_matrix_provider_->build_section_matrices(
-                world, h, model_id, world_mat, *m, mats) &&
+        live_pose = section_matrix_provider_->build_section_matrices(
+                const_cast<World &>(world), h, model_id, world_mat, *m, mats) &&
             mats.size() == m->sections.size();
     }
-    if (!supplied_section_matrices)
+    if (!live_pose)
         mats.assign(m->sections.size(), world_mat);
     if (using_husk && e->spawned_piece_mask != 0) {
         // Sections that launched as death pieces no longer belong to the wreck.
@@ -1482,14 +1840,13 @@ const CollisionTargetView *CollisionWorld::target_view(World &world, EntityHandl
             if ((e->spawned_piece_mask & bit) != 0) mats[si].m[15] |= 1;
         }
     }
-
     scratch.model = m;
     scratch.matrices = mats.data();
     scratch.pos[0] = p[0];
     scratch.pos[1] = p[1];
     scratch.pos[2] = p[2];
     scratch.yaw_bam = heading;
-    // Type-4 platform contact keeps a separate target-relative pitch even
+    // CL/type-4 ladder contact keeps a separate target-relative pitch even
     // though the authored angle is also baked into the section matrix.
     // [orig: targetEntity+20 Pitch read @ 0x4ae9a7]
     scratch.pitch_bam =
@@ -1499,7 +1856,428 @@ const CollisionTargetView *CollisionWorld::target_view(World &world, EntityHandl
     scratch.is_building = (e->kind == EntityKind::Building);
     scratch.pool_index = h.slot();
     scratch.is_ground_of_source = false;
+    scratch.uniform_scale_q16 = e->uniform_scale_q16;
+    scratch.live_section_pose = live_pose;
     return &scratch;
+}
+
+ProjectileHit CollisionWorld::trace_projectile(const World &world,
+                                               const ProjectileTrace &trace) const {
+    // [orig: Projectile_UpdatePhysics @0x4e9d70] Candidate passes are ordered
+    // terrain, water, static CFAC, dynamic CFAC, then person bone proxies.
+    // A later pass replaces only when strictly closer.
+    ProjectileHit best;
+    best.position_q16 = trace.end;
+
+    const int32_t delta[3] = {
+        trace.end.x - trace.start.x,
+        trace.end.y - trace.start.y,
+        trace.end.z - trace.start.z,
+    };
+    if (delta[0] == 0 && delta[1] == 0 && delta[2] == 0) return best;
+    const int32_t segment_length = vec_len_ftol(delta[0], delta[1], delta[2]);
+    if (segment_length <= 0) return best;
+    int32_t best_distance = 0x7FFFFFFF;
+
+    auto point_at = [&](int32_t t_q16) {
+        FixedVec3 p;
+        p.x = trace.start.x + static_cast<int32_t>(
+            (static_cast<int64_t>(delta[0]) * t_q16) >> 16);
+        p.y = trace.start.y + static_cast<int32_t>(
+            (static_cast<int64_t>(delta[1]) * t_q16) >> 16);
+        p.z = trace.start.z + static_cast<int32_t>(
+            (static_cast<int64_t>(delta[2]) * t_q16) >> 16);
+        return p;
+    };
+    auto t_for_distance = [&](int32_t distance) {
+        int64_t t = (static_cast<int64_t>(distance) << 16) / segment_length;
+        if (t < 0) t = 0;
+        if (t > 0x10000) t = 0x10000;
+        return static_cast<int32_t>(t);
+    };
+    auto consider = [&](ProjectileHit candidate, int32_t distance) {
+        if (!candidate.hit()) return;
+        if (!best.hit() || distance < best_distance) {
+            best = candidate;
+            best_distance = distance;
+        }
+    };
+
+    // Ammo flag 0x80 is the recovered NoCollide terrain bypass.
+    if ((trace.ammo_flags & 0x80u) == 0 && terrain != nullptr && terrain->valid()) {
+        const int32_t start[3] = {trace.start.x, trace.start.y, trace.start.z};
+        const int32_t end[3] = {trace.end.x, trace.end.y, trace.end.z};
+        int32_t hit[3] = {};
+        if (terrain_clip_segment(*terrain, start, end, hit)) {
+            const int32_t distance = vec_len_ftol(hit[0] - start[0], hit[1] - start[1],
+                                                  hit[2] - start[2]);
+            ProjectileHit th;
+            th.hit_class = ProjectileHitClass::Terrain;
+            th.t_q16 = t_for_distance(distance);
+            th.position_q16 = FixedVec3{hit[0], hit[1], hit[2]};
+
+            // Local bilinear gradient in engine axes. This is presentation
+            // metadata; the fixed refined hit point remains authoritative.
+            const float wx = static_cast<float>(hit[0]) / 65536.0f;
+            const float wy = static_cast<float>(hit[1]) / 65536.0f;
+            const float hx0 = terrain::height_field_height_world_bilinear(*terrain, wx - 1.0f, -wy);
+            const float hx1 = terrain::height_field_height_world_bilinear(*terrain, wx + 1.0f, -wy);
+            const float hy0 = terrain::height_field_height_world_bilinear(*terrain, wx, -(wy - 1.0f));
+            const float hy1 = terrain::height_field_height_world_bilinear(*terrain, wx, -(wy + 1.0f));
+            double nx = -0.5 * static_cast<double>(hx1 - hx0);
+            double ny = -0.5 * static_cast<double>(hy1 - hy0);
+            double nz = 1.0;
+            const double nl = std::sqrt(nx * nx + ny * ny + nz * nz);
+            th.normal_q16 = FixedVec3{
+                static_cast<int32_t>(nx * 65536.0 / nl),
+                static_cast<int32_t>(ny * 65536.0 / nl),
+                static_cast<int32_t>(nz * 65536.0 / nl),
+            };
+            consider(th, distance);
+        }
+    }
+
+    // Water is pass two regardless of a ClipWater-style ammo flag. Retail
+    // requires a strict straddle, so an endpoint on the plane is not a hit.
+    const int32_t water_z = world.env.water_z;
+    if (water_z != 0 &&
+        ((trace.start.z > water_z && trace.end.z < water_z) ||
+         (trace.start.z < water_z && trace.end.z > water_z))) {
+        const int64_t t =
+            (static_cast<int64_t>(water_z - trace.start.z) << 16) / delta[2];
+        if (t > 0 && t < 0x10000) {
+            ProjectileHit wh;
+            wh.hit_class = ProjectileHitClass::Water;
+            wh.t_q16 = static_cast<int32_t>(t);
+            wh.position_q16 = point_at(wh.t_q16);
+            wh.position_q16.z = water_z;
+            wh.normal_q16 = FixedVec3{0, 0, 0x10000};
+            const int32_t distance = static_cast<int32_t>(
+                (static_cast<int64_t>(segment_length) * wh.t_q16) >> 16);
+            consider(wh, distance);
+        }
+    }
+
+    const Entity *owner = world.registry.get(trace.owner);
+    EntityHandle ignored_mount;
+    EntityHandle ignored_mount_parent;
+    if (owner != nullptr && owner->mounted) {
+        if (owner->mount_type == SeatType::Controller ||
+            owner->mount_type == SeatType::Gunner ||
+            owner->mount_type == SeatType::Driver) {
+            ignored_mount = owner->mount_target;
+        }
+        if (owner->mount_type == SeatType::Gunner) {
+            if (const Entity *mount = world.registry.get(owner->mount_target))
+                ignored_mount_parent = mount->ground_target;
+        }
+    }
+    // The mission-authored refNum group (BMS byte 153 -> entity+533) carries
+    // self-site immunity through two DIFFERENT reference channels: the ITEM
+    // face narrow phase compares the candidate against the ray[18] MOUNT
+    // exclusion's refNum, null-guarded [orig: @ 0x4e4d40 in
+    // Physics_RaycastAgainstBoneCollision @ 0x4e4cb0], while the PERSON leg
+    // compares against the ray[17] SHOOTER's refNum [orig: @ 0x4e4688-0x4e46a3
+    // in Physics_RaycastAgainstBoneSections @ 0x4e4670 — retail derefs a null
+    // ray[17] unguarded there; a live owner is required here instead].
+    const Entity *mount_entity = world.registry.get(ignored_mount);
+    const uint8_t mount_ref_num =
+        mount_entity != nullptr ? mount_entity->ref_num : 0;
+    const uint8_t owner_ref_num = owner != nullptr ? owner->ref_num : 0;
+    auto ignored = [&](EntityHandle h) {
+        if (!h.valid()) return true;
+        if (trace.extra_ignore.valid() && h == trace.extra_ignore) return true;
+        if ((trace.ammo_flags & 4u) == 0 && h == trace.owner) return true;
+        return h == ignored_mount || h == ignored_mount_parent;
+    };
+
+    CollisionRay ray;
+    ray.start[0] = trace.start.x;
+    ray.start[1] = trace.start.y;
+    ray.start[2] = trace.start.z;
+    ray.end[0] = trace.end.x;
+    ray.end[1] = trace.end.y;
+    ray.end[2] = trace.end.z;
+    ray.refresh();
+
+    // Compatibility sphere for an item whose graphic has no resolved collision
+    // instance. An assigned BVOL-only model is deliberately NOT substituted:
+    // gameplay volumes (CB/CL/CA/VC/BB/etc.) are not projectile CFAC geometry.
+    auto unresolved_sphere_distance = [&](const Entity &entity, int32_t &out_distance) {
+        const int32_t radius = entity.bound_radius > 0.0f
+            ? to_fixed(entity.bound_radius)
+            : 0;
+        if (radius <= 0) return false;
+        const long double fx = static_cast<long double>(trace.start.x) -
+                               static_cast<long double>(to_fixed(entity.position.x));
+        const long double fy = static_cast<long double>(trace.start.y) -
+                               static_cast<long double>(to_fixed(entity.position.y));
+        const long double fz = static_cast<long double>(trace.start.z) -
+                               static_cast<long double>(to_fixed(entity.position.z));
+        const long double dx = delta[0], dy = delta[1], dz = delta[2];
+        const long double a = dx * dx + dy * dy + dz * dz;
+        const long double c = fx * fx + fy * fy + fz * fz -
+                              static_cast<long double>(radius) * radius;
+        if (c <= 0.0L) {
+            out_distance = 0;
+            return true;
+        }
+        const long double b = fx * dx + fy * dy + fz * dz;
+        const long double discriminant = b * b - a * c;
+        if (a <= 0.0L || discriminant < 0.0L) return false;
+        const long double t = (-b - std::sqrt(discriminant)) / a;
+        if (t < 0.0L || t > 1.0L) return false;
+        out_distance = static_cast<int32_t>(
+            t * static_cast<long double>(segment_length));
+        return true;
+    };
+
+    // Each table query uses <= internally: a later equal face, section, or
+    // entity overwrites the earlier result. Cross-pass arbitration stays strict.
+    auto trace_polygon_table = [&](const auto &slots, ProjectileHitClass hit_class) {
+        CollisionPolygonHit table_hit;
+        EntityHandle table_entity;
+        bool table_found = false;
+        for (const auto &slot : slots) {
+            const EntityHandle h = slot.h;
+            const Entity *entity = world.registry.get(h);
+            if (ignored(h) || entity == nullptr || entity->hidden ||
+                (entity->engine_flags & 0x02000001u) != 0)
+                continue;
+            // Item self-site immunity: candidate refNum vs the mount
+            // exclusion's refNum [orig: @ 0x4e4d40].
+            if (entity->ref_num != 0 && mount_ref_num != 0 &&
+                entity->ref_num == mount_ref_num)
+                continue;
+            CollisionTargetView view;
+            std::vector<CollisionMatrix> matrices;
+            CollisionPolygonHit model_hit;
+            const CollisionTargetView *target = target_view(world, h, view, matrices);
+            if (target == nullptr) {
+                if (!unresolved_sphere_distance(*entity, model_hit.distance_q16)) continue;
+                const int32_t t = t_for_distance(model_hit.distance_q16);
+                const FixedVec3 p = point_at(t);
+                model_hit.position_q16[0] = p.x;
+                model_hit.position_q16[1] = p.y;
+                model_hit.position_q16[2] = p.z;
+            } else {
+                const CollisionModel &model_ref = *target->model;
+                const bool indexed_mesh = !model_ref.faces.empty() &&
+                                          !model_ref.vertices.empty() &&
+                                          !model_ref.normals.empty();
+                const bool q8_mesh = !model_ref.faces.empty() &&
+                                     !model_ref.face_vertices.empty();
+                if (indexed_mesh) {
+                    if (!collision_raycast_polygons(*target, ray, segment_length,
+                                                    trace.ammo_flags, model_hit))
+                        continue;
+                } else if (q8_mesh) {
+                    RayFaceHit face_hit;
+                    if (!collision_raycast_faces(*target, ray.start, ray.end,
+                                                 trace.ammo_flags, face_hit))
+                        continue;
+                    model_hit.distance_q16 = face_hit.dist;
+                    const int32_t t = t_for_distance(face_hit.dist);
+                    const FixedVec3 p = point_at(t);
+                    model_hit.position_q16[0] = p.x;
+                    model_hit.position_q16[1] = p.y;
+                    model_hit.position_q16[2] = p.z;
+                    model_hit.section_index = face_hit.section;
+                    model_hit.section_face_index = face_hit.face;
+                    model_hit.poly_type = face_hit.material;
+                    model_hit.material_flags = face_hit.face_flags;
+                    if (face_hit.section >= 0 &&
+                        face_hit.section < static_cast<int32_t>(model_ref.sections.size())) {
+                        const CollisionSection &section =
+                            model_ref.sections[face_hit.section];
+                        const int32_t global_face = section.face_start + face_hit.face;
+                        model_hit.face_index = global_face;
+                        if (global_face >= 0 &&
+                            global_face < static_cast<int32_t>(model_ref.faces.size())) {
+                            const CollisionFace &face = model_ref.faces[global_face];
+                            const int32_t local_normal[3] = {
+                                static_cast<int32_t>(face.normal[0]) << 2,
+                                static_cast<int32_t>(face.normal[1]) << 2,
+                                static_cast<int32_t>(face.normal[2]) << 2,
+                            };
+                            target->matrices[face_hit.section].rotate_point(
+                                local_normal, model_hit.normal_q16);
+                        }
+                    }
+                } else {
+                    // A resolved model without CFAC is BVOL-only and does not
+                    // stop ordinary bullets, regardless of its gameplay volume types.
+                    continue;
+                }
+            }
+            if (!table_found || model_hit.distance_q16 <= table_hit.distance_q16) {
+                table_found = true;
+                table_hit = model_hit;
+                table_entity = h;
+            }
+        }
+        if (!table_found) return;
+        ProjectileHit eh;
+        eh.hit_class = hit_class;
+        eh.geometry_entity = table_entity;
+        eh.t_q16 = t_for_distance(table_hit.distance_q16);
+        eh.position_q16 = FixedVec3{table_hit.position_q16[0], table_hit.position_q16[1],
+                                    table_hit.position_q16[2]};
+        eh.normal_q16 = FixedVec3{table_hit.normal_q16[0], table_hit.normal_q16[1],
+                                  table_hit.normal_q16[2]};
+        eh.section_index = table_hit.section_index;
+        eh.bone_index = table_hit.section_index;
+        eh.face_index = table_hit.section_face_index;
+        eh.surface_type = table_hit.poly_type;
+        eh.material_flags = table_hit.material_flags;
+        consider(eh, table_hit.distance_q16);
+    };
+    trace_polygon_table(statics_, ProjectileHitClass::StaticEntity);
+    trace_polygon_table(dynamics_, ProjectileHitClass::DynamicEntity);
+
+    // Consume the pose owner's COBJ matrices when available. The bounded torso
+    // fallback is only for entities whose production pose has not been
+    // published; both paths preserve retail's first-qualifying-person table
+    // behavior rather than choosing the globally nearest person.
+    constexpr int32_t kOrganicCenterZQ16 = 58982;
+    int32_t effective_radius = std::max(trace.radius_q16, 0);
+    const bool authority_fat_bullet =
+        world.mp_session && world.projectile_authority && world.fat_bullets &&
+        owner != nullptr && (owner->flags & 0x100u) != 0 &&
+        trace.owner != world.cached.local_player;
+    if (authority_fat_bullet)
+        effective_radius = std::max(effective_radius, kProjectileAuthorityMinRadiusQ16);
+    for (const PersonSlot &slot : persons_) {
+        if (ignored(slot.h)) continue;
+        const Entity *e = world.registry.get(slot.h);
+        if (e == nullptr || e->kind != EntityKind::Organic || e->hidden ||
+            (e->engine_flags & 0x02000001u) != 0)
+            continue;
+        // Person self-group immunity: candidate refNum vs the SHOOTER's
+        // refNum [orig: @ 0x4e4688-0x4e46a3].
+        if (e->ref_num != 0 && owner_ref_num != 0 && e->ref_num == owner_ref_num)
+            continue;
+        ProjectileHit eh;
+        int32_t hit_distance = 0;
+        bool person_hit = false;
+        bool live_pose_available = false;
+
+        // With a published live pose, this is the recovered bone-section
+        // routine: bones descend, the first qualifying (highest-index) bone is
+        // primary, and its COBJ radius controls both tolerance and hit distance.
+        if (!has_instance(world, slot.h)) {
+            const_cast<CollisionWorld *>(this)->ensure_entity_instance(
+                const_cast<World &>(world), slot.h);
+        }
+        CollisionTargetView person_view;
+        std::vector<CollisionMatrix> person_matrices;
+        const CollisionTargetView *posed =
+            target_view(world, slot.h, person_view, person_matrices);
+        if (posed != nullptr && posed->live_section_pose) {
+            live_pose_available = true;
+            const CollisionModel &person_model = *posed->model;
+            const int32_t base_radius = effective_radius + 3276; // +0.05u
+            for (int32_t bone = static_cast<int32_t>(person_model.sections.size()) - 1;
+                 bone >= 0; --bone) {
+                const uint32_t bit = 1u << (static_cast<uint32_t>(bone) & 31u);
+                if ((e->section_mask & bit) != 0) continue;
+                const CollisionSection &sec = person_model.sections[bone];
+                if (sec.radius <= 0) continue;
+                int32_t center[3] = {};
+                posed->matrices[bone].transform_point(sec.center, center);
+                const int32_t projection = static_cast<int32_t>(
+                    (static_cast<int64_t>(ray.dir[0]) * (center[0] - ray.start[0]) +
+                     static_cast<int64_t>(ray.dir[1]) * (center[1] - ray.start[1]) +
+                     static_cast<int64_t>(ray.dir[2]) * (center[2] - ray.start[2])) >> 16);
+                if (projection < 0 || projection > segment_length) continue;
+                int32_t closest[3] = {};
+                for (int axis = 0; axis < 3; ++axis) {
+                    closest[axis] = ray.start[axis] + static_cast<int32_t>(
+                        (static_cast<int64_t>(ray.dir[axis]) * projection + 0x8000) >> 16);
+                }
+                const int32_t center_distance =
+                    vec_len_ftol(closest[0] - center[0], closest[1] - center[1],
+                                 closest[2] - center[2]);
+                int32_t hit_radius = base_radius +
+                    (bone == 14 ? 65 * sec.radius / 100 : 45 * sec.radius / 100);
+                if ((bone == 15 || bone == 16) && hit_radius > 0x3000)
+                    hit_radius = 0x3000;
+                if (center_distance > hit_radius) continue;
+
+                if (!person_hit) {
+                    hit_distance = projection - (sec.radius >> 1);
+                    eh.section_index = bone;
+                    eh.bone_index = bone;
+                    if (sec.face_count > 0 && sec.face_start >= 0 &&
+                        sec.face_start < static_cast<int32_t>(person_model.faces.size())) {
+                        const CollisionFace &face = person_model.faces[sec.face_start];
+                        eh.material_flags = face.normal_index >= 0
+                            ? face.material_flags
+                            : face.flags;
+                    }
+                }
+                // The reverse walk retains the first/highest overlap in ray[31]
+                // for reactions, but ray[32] is overwritten through the final/
+                // lowest overlap and drives normal-infantry damage.
+                eh.hit_zone = bone;
+                person_hit = true;
+            }
+        }
+
+        if (live_pose_available && !person_hit) continue;
+        if (!live_pose_available) {
+            // Bounded fallback until the pose owner publishes organic bone
+            // matrices. It follows the same projection/radius arithmetic using
+            // one characterized torso COBJ rather than a geometric sphere entry.
+            constexpr int32_t kFallbackAuthoredRadiusQ16 = 78642; // 1.2u
+            const int32_t center[3] = {
+                to_fixed(e->position.x),
+                to_fixed(e->position.y),
+                to_fixed(e->position.z) + kOrganicCenterZQ16,
+            };
+            const int32_t projection = static_cast<int32_t>(
+                (static_cast<int64_t>(ray.dir[0]) * (center[0] - ray.start[0]) +
+                 static_cast<int64_t>(ray.dir[1]) * (center[1] - ray.start[1]) +
+                 static_cast<int64_t>(ray.dir[2]) * (center[2] - ray.start[2])) >> 16);
+            if (projection < 0 || projection > segment_length) continue;
+            int32_t closest[3] = {};
+            for (int axis = 0; axis < 3; ++axis) {
+                closest[axis] = ray.start[axis] + static_cast<int32_t>(
+                    (static_cast<int64_t>(ray.dir[axis]) * projection + 0x8000) >> 16);
+            }
+            const int32_t center_distance =
+                vec_len_ftol(closest[0] - center[0], closest[1] - center[1],
+                             closest[2] - center[2]);
+            const int32_t hit_radius = effective_radius + 3276 +
+                                       45 * kFallbackAuthoredRadiusQ16 / 100;
+            if (center_distance > hit_radius) continue;
+            hit_distance = projection - (kFallbackAuthoredRadiusQ16 >> 1);
+            // No authored section identity exists. RoundSim maps this sentinel
+            // to synthetic torso 1 for presentation/reactions while preserving
+            // a neutral damage multiplier.
+            eh.section_index = -1;
+            eh.bone_index = -1;
+            eh.hit_zone = -1;
+        }
+
+        eh.hit_class = ProjectileHitClass::Person;
+        eh.geometry_entity = e->handle;
+        eh.t_q16 = t_for_distance(hit_distance);
+        const int32_t impact[3] = {
+            ray.start[0] + static_cast<int32_t>(
+                (static_cast<int64_t>(ray.dir[0]) * hit_distance + 0x8000) >> 16),
+            ray.start[1] + static_cast<int32_t>(
+                (static_cast<int64_t>(ray.dir[1]) * hit_distance + 0x8000) >> 16),
+            ray.start[2] + static_cast<int32_t>(
+                (static_cast<int64_t>(ray.dir[2]) * hit_distance + 0x8000) >> 16),
+        };
+        eh.position_q16 = FixedVec3{impact[0], impact[1], impact[2]};
+        eh.surface_type = 19;
+        consider(eh, hit_distance);
+        break;
+    }
+
+    return best;
 }
 
 void CollisionWorld::refresh_blink(World &world, Entity &ent) {
@@ -2073,15 +2851,16 @@ int32_t CollisionWorld::resolve_vehicle_hull(World &world, EntityHandle source,
     q.prev_pos[1] = prev_pos[1];
     q.prev_pos[2] = prev_pos[2] + 0x18000;
     q.source_bound_radius = radius;
-    // The vehicle contact mask is 8 (the damage-volume pass) — 24 when the def
+    // The vehicle contact mask is 8: use the VC/type-7 run when present, otherwise
+    // fall back to ordinary CB/default solids. It is 24 when the def
     // attrib2 low byte has bit 7 set, adding type-12 volumes [orig: @ 0x462a91-
     // 0x462a9f — collisionMask = 8; attrib2 sign byte -> 24]. attrib2 is not
     // fed to the sim yet, so the 24 leg is a tracked residual (D-NET-161).
     q.mask = 8;
     q.query_is_player = false;
 
-    BlinkAccum blink;         // vehicles accumulate no blink state
-    PlatformContact platform; // nor platform anchors
+    BlinkAccum blink;       // vehicles accumulate no blink state
+    LadderContact ladder;   // nor ladder contact frames
     int32_t severity = 0;
 
     for (int32_t i = 0; i < slice.count; ++i) {
@@ -2095,7 +2874,7 @@ int32_t CollisionWorld::resolve_vehicle_hull(World &world, EntityHandle source,
         const CollisionTargetView *tv = target_view(world, ch, view, mats);
         if (tv == nullptr) continue;
         ContactResult res;
-        if (!collision_contact_force(*tv, q, blink, platform, res)) continue;
+        if (!collision_contact_force(*tv, q, blink, ladder, res)) continue;
         // Verticality split [orig: @ 0x462fc2-0x462fcb — |fz|<<22 / |force| vs the
         // caller's slope thresholds]: a wall-like (horizontal-dominant) push lands
         // in FULL at severity 3 [orig: @ 0x46322d-0x463240]; vertical-dominant
@@ -2115,8 +2894,8 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                                        int32_t heading, int32_t body_pitch, bool is_player,
                                        bool is_authority, uint32_t tick, int32_t anim_state_id,
                                        uint32_t anim_state_flags, int16_t &health) {
-    // [orig: Entity_ProcessCollisionAndPlatformPhysics @ 0x4b2bd0]
-    (void)heading;    // consumed by the on-platform 2-point variant (D-COL-5)
+    // [orig: movement collision resolver @ 0x4b2bd0]
+    (void)heading;    // consumed by retail's on-ladder 2-point variant (D-COL-5)
     (void)body_pitch;
     Entity *ent = world.registry.get(source);
 
@@ -2172,10 +2951,10 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     const bool is_local = ent != nullptr && local_player.valid() && source == local_player;
     if (is_local) local_player_blink_flags = 0;
     if (ent != nullptr)
-        ent->flags &= ~(kEntityFlagIndoors | kEntityFlagOnPlatform | kEntityFlagArmoryZone |
+        ent->flags &= ~(kEntityFlagIndoors | kEntityFlagLadderContact | kEntityFlagArmoryZone |
                         kEntityFlagVehicleLoadoutZone);
 
-    // Capsule test points. [orig: the not-on-platform branch @ 0x4b2edb-0x4b2f2a —
+    // Capsule test points. [orig: the not-on-ladder branch @ 0x4b2edb-0x4b2f2a —
     // 3 points: head (z + collisionRadius - halfRadius + 0.0625), eye (pos +
     // CameraOffset -> our head stand-in), feet; radii {collisionRadius, 0.3125,
     // outerRadius}. CameraOffset is not modeled: the eye point reuses the head
@@ -2230,8 +3009,8 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     q.query_is_player = is_player;
 
     int32_t total_force[3] = {0, 0, 0};
-    PlatformContact platform;
-    EntityHandle platform_entity;
+    LadderContact ladder;
+    EntityHandle ladder_entity;
 
     auto it = candidates_.find(source.packed);
     if (it != candidates_.end()) {
@@ -2252,12 +3031,12 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                     mut.is_ground_of_source = (ent->ground_target == ch);
                 }
                 ContactResult res;
-                const bool contact = collision_contact_force(*tv, q, blink, platform, res);
+                const bool contact = collision_contact_force(*tv, q, blink, ladder, res);
                 if (pass == 0) {
                     // The contact-flag dispatch runs whether or not the query
-                    // produced force — a pure seat/zone touch still latches.
+                    // produced force — a pure ladder/zone touch still latches.
                     // [orig: the goto LABEL_67 on a zero return @ 0x4b2fa5]
-                    if ((res.flags & 0x1u) != 0 && platform.valid) platform_entity = ch;
+                    if ((res.flags & 0x1u) != 0 && ladder.valid) ladder_entity = ch;
                     apply_touch_flags(ent, res.flags, health, is_authority);
                 }
                 if (!contact) continue;
@@ -2302,8 +3081,8 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                     points[pi].x += total_force[0];
                     points[pi].y += total_force[1];
                 }
-            } else if (pass_contact && !platform_entity.valid()) {
-                // [orig: @ 0x4b36da — second-pass half force only when NOT on a platform]
+            } else if (pass_contact && !ladder_entity.valid()) {
+                // [orig: @ 0x4b36da — second-pass half force only without a CL contact]
                 total_force[0] += pass_force[0] >> 1; // [orig: @ 0x4b36e2]
                 total_force[1] += pass_force[1] >> 1;
             }
@@ -2318,12 +3097,12 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     pos[1] += total_force[1];
     pos[2] += total_force[2];
 
-    // Platform standing-on. [orig: @ 0x4b3291-0x4b3297 — Flags |= 0x100000 +
-    // groundEntity = platform. The moving-deck carry (yaw chase + anchor follow)
-    // rides the vehicle pass (D-COL-5).]
-    if (platform_entity.valid() && ent != nullptr) {
-        ent->flags |= kEntityFlagOnPlatform;
-        ent->ground_target = platform_entity;
+    // Low-level CL bookkeeping only. Retail's full climb state transitions,
+    // alignment chase, root motion, and top exit remain D-COL-5.
+    // [orig: @ 0x4b3291-0x4b3297 — Flags |= 0x100000 + groundEntity = ladder]
+    if (ladder_entity.valid() && ent != nullptr) {
+        ent->flags |= kEntityFlagLadderContact;
+        ent->ground_target = ladder_entity;
     }
 
     // Blink apply. [orig: @ 0x4b34c2-0x4b3502 — bit 2 -> Flags 0x800000; local
@@ -2396,7 +3175,8 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
         raycast_ground(world, source, pos, 0, 0, 0, 0x20000, &ground_hit);
     pos[2] = saved_z;
     // The probe's hit ALWAYS lands in groundEntity — null on a miss, overwriting
-    // even a same-resolve platform latch (which normally re-hits the platform).
+    // even a same-resolve CL latch. Generic ground is still resolved only by
+    // terrain or a type-1 CB solid.
     // [orig: the unconditional +0x28 store in
     // Entity_RaycastGroundHeightAndObject @ 0x414370]
     if (ent != nullptr) ent->ground_target = ground_hit;
@@ -2596,15 +3376,17 @@ CollisionWorld::debug_person_sections(World &world, const int32_t anchor[3],
 void CollisionWorld::apply_touch_flags(Entity *ent, uint32_t flags, int16_t &health,
                                        bool is_authority) {
     if (ent == nullptr || flags == 0) return;
-    // Hurt damage is authority-only AND gated off for EngineFlags 0x4000000 entities.
+    // DH/DM/DL contact damage is authority-only AND gated off for
+    // EngineFlags 0x4000000 entities.
     // [orig: the is_authority + (Flags & 0x4000000) == 0 wrap @ 0x4b3139-0x4b3148]
     if (is_authority && (ent->engine_flags & 0x4000000u) == 0) {
-        // Hurt-volume damage tiers. [orig: @ 0x4b317b-0x4b31d7 — -1 / -6 / -50 HP]
+        // Damage low/medium/high. [orig: @ 0x4b317b-0x4b31d7 — -1 / -6 / -50 HP]
         if ((flags & 0x40u) != 0 && health > 0) health = static_cast<int16_t>(health - 1);
         if ((flags & 0x80u) != 0 && health > 0) health = static_cast<int16_t>(health - 6);
         if ((flags & 0x100u) != 0 && health > 0) health = static_cast<int16_t>(health - 50);
-        // Capture-zone touch (0x200 -> Server_OnPlayerTouchCaptureZone @ 0x500ba0)
-        // rides the zone system's own proximity path for now (D-COL-6).
+        // CT/change-team touch (0x200) feeds the retail capture/team-change request
+        // callback (`Server_OnPlayerTouchCaptureZone @ 0x500ba0`). Ours still rides
+        // the zone system's independent proximity path (D-COL-6).
     }
     if ((flags & 0x4u) != 0) ent->flags |= kEntityFlagArmoryZone; // type 6 [orig: @ 0x4b34a0]
     if ((flags & 0x400u) != 0)

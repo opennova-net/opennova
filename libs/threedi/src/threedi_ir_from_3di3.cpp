@@ -678,6 +678,23 @@ static int convert_collision(const Threedi3di3 *model, ThreediModelIR *ir) {
         }
     }
 
+    // Preserve CNRM in its exact signed Q14 representation. The raw parser
+    // divided these values by 16384.0f, so multiplying by that power of two is
+    // an exact recovery rather than a lossy re-quantization.
+    ir->collision->normal_count = col->normal_count;
+    if (ir->collision->normal_count > 0) {
+        ir->collision->normals = (ThreediIRCollisionNormal *)calloc(
+            ir->collision->normal_count, sizeof(ThreediIRCollisionNormal));
+        if (!ir->collision->normals) return -1;
+        for (size_t i = 0; i < ir->collision->normal_count; ++i) {
+            const ThreediCollisionNormal *sn = &col->normals[i];
+            ThreediIRCollisionNormal *dn = &ir->collision->normals[i];
+            for (int k = 0; k < 3; ++k)
+                dn->normal_q14[k] = (int16_t)(sn->normal[k] * 16384.0f);
+            dn->dominant_axis = sn->dominate_axis;
+        }
+    }
+
     // Convert planes
     ir->collision->plane_count = col->plane_count;
     if (ir->collision->plane_count > 0) {
@@ -754,8 +771,7 @@ static int convert_collision(const Threedi3di3 *model, ThreediModelIR *ir) {
             df->vert_index[0] = sf->vert_index[0];
             df->vert_index[1] = sf->vert_index[1];
             df->vert_index[2] = sf->vert_index[2];
-            df->material_flags = sf->material_flags;
-            df->poly_type = sf->poly_type;
+            df->normal_index = sf->normal_index;
             df->plane_dist_fp16 = sf->plane_dist_fp16;
             df->min_fp16[0] = sf->min_x_fp16;
             df->min_fp16[1] = sf->min_y_fp16;
@@ -763,6 +779,8 @@ static int convert_collision(const Threedi3di3 *model, ThreediModelIR *ir) {
             df->max_fp16[0] = sf->max_x_fp16;
             df->max_fp16[1] = sf->max_y_fp16;
             df->max_fp16[2] = sf->max_z_fp16;
+            df->material_flags = sf->material_flags;
+            df->poly_type = sf->poly_type;
         }
         size_t face_cursor = 0;
         size_t normal_base = 0;
@@ -773,12 +791,10 @@ static int convert_collision(const Threedi3di3 *model, ThreediModelIR *ir) {
                 const ThreediCollisionFace *sf = &col->faces[face_cursor];
                 ThreediIRCollisionFace *df = &ir->collision->faces[face_cursor];
                 const size_t ni = normal_base + (size_t)sf->normal_index;
-                if (sf->normal_index >= 0 && ni < col->normal_count) {
-                    const ThreediCollisionNormal *sn = &col->normals[ni];
-                    df->normal[0] = (int16_t)lroundf(sn->normal[0] * 16384.0f);
-                    df->normal[1] = (int16_t)lroundf(sn->normal[1] * 16384.0f);
-                    df->normal[2] = (int16_t)lroundf(sn->normal[2] * 16384.0f);
-                    df->dominate_axis = sn->dominate_axis;
+                if (sf->normal_index >= 0 && ni < ir->collision->normal_count) {
+                    const ThreediIRCollisionNormal *sn = &ir->collision->normals[ni];
+                    memcpy(df->normal, sn->normal_q14, sizeof(df->normal));
+                    df->dominate_axis = sn->dominant_axis;
                 }
             }
             normal_base += (size_t)obj->num_normals;
@@ -797,14 +813,16 @@ static int convert_collision(const Threedi3di3 *model, ThreediModelIR *ir) {
             ThreediIRCollisionObject *d = &ir->collision->objects[i];
             d->num_vertices = so->num_vertices;
             d->num_faces = so->num_faces;
+            d->num_planes = so->num_normals;
+            d->num_bounding_volumes = so->num_bounding_volumes;
             d->parent_subobject_index = so->parent_subobject_index;
             d->offset[0] = so->offset[0];
             d->offset[1] = so->offset[1];
             d->offset[2] = so->offset[2];
-            d->center_fp16[0] = static_cast<int32_t>(so->med[0]);
-            d->center_fp16[1] = static_cast<int32_t>(so->med[1]);
-            d->center_fp16[2] = static_cast<int32_t>(so->med[2]);
-            d->radius_fp16 = static_cast<int32_t>(so->radius);
+            memcpy(d->min, so->min, sizeof(d->min));
+            memcpy(d->max, so->max, sizeof(d->max));
+            memcpy(d->mid, so->med, sizeof(d->mid));
+            d->radius = so->radius;
         }
     }
 
@@ -817,7 +835,8 @@ static int convert_collision(const Threedi3di3 *model, ThreediModelIR *ir) {
 
         for (size_t i = 0; i < col->translation_count; ++i) {
             memcpy(ir->collision->translations[i].translation,
-                   col->translations[i].translation, sizeof(float) * 3);
+                   col->translations[i].translation,
+                   sizeof(ir->collision->translations[i].translation));
         }
     }
 

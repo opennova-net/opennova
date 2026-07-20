@@ -974,6 +974,14 @@ target_include_directories(collision_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(collision_test PRIVATE cxx_std_17)
 add_test(NAME collision COMMAND collision_test)
 
+# Authoritative projectile consequences through RoundSim's CollisionWorld seam:
+# pre-arm dud substitution, kinetic damage, NoDie, and physical zero-damage blockers.
+add_executable(projectile_combat_test world/projectile_combat_test.cpp)
+target_link_libraries(projectile_combat_test PRIVATE opennova_world)
+target_include_directories(projectile_combat_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(projectile_combat_test PRIVATE cxx_std_17)
+add_test(NAME projectile_combat COMMAND projectile_combat_test)
+
 # Rendering occlusion (Terrain_InitBuildingPortals @0x5c7480 register/weld/flags,
 # build_sector_visibility_masks @0x5c8610 + render_visibility_portal_traversal
 # @0x5c4ae0, test_sector_entity_occlusion @0x5c4610, the entity-collector gates +
@@ -990,11 +998,14 @@ add_test(NAME occlusion COMMAND occlusion_test)
 # Real-asset occlusion probe: retail Armry01.3di (the 00TRa armory) through the
 # host's IR->runtime conversions, camera walked room to room, per-room section
 # masks asserted (window/portal/open-slot legs over authored OFAC topology).
-# Asset-gated on OPENNOVA_JO_ASSETS; skips-as-pass without it.
+# Uses the committed Armry01 fixture in CI; OPENNOVA_JO_ASSETS can override it
+# for a retail-install parity run.
 add_executable(occlusion_armry_test world/occlusion_armry_test.cpp)
 target_link_libraries(occlusion_armry_test PRIVATE opennova_world opennova_threedi)
 target_include_directories(occlusion_armry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(occlusion_armry_test PRIVATE cxx_std_17)
+target_compile_definitions(occlusion_armry_test PRIVATE
+    OPENNOVA_ARMRY_FIXTURE="${CMAKE_SOURCE_DIR}/fixtures/3dp/armry01/Armry01.3di")
 add_test(NAME occlusion_armry COMMAND occlusion_armry_test)
 
 # The FP weapon action FSM (WeaponAction_ProcessFrame @0x540e60 + Anim_InitActions
@@ -1054,6 +1065,12 @@ add_executable(player_spawn_test world/player_spawn_test.cpp)
 target_link_libraries(player_spawn_test PRIVATE opennova_world)
 target_include_directories(player_spawn_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(player_spawn_test PRIVATE cxx_std_17)
+# MSVC coalesces this test's many scoped World fixtures into one Release stack frame.
+# World intentionally embeds the fixed projectile ring, so the generated frame is about
+# 1.7 MiB even though only one fixture is live at a time; give this test runner room.
+if(MSVC)
+    target_link_options(player_spawn_test PRIVATE "/STACK:4194304")
+endif()
 add_test(NAME player_spawn COMMAND player_spawn_test)
 
 # Player spawn-point selection (Server_PositionPlayerForSpawn @0x50cf60 -> Entity_FindBestSpawnPoint

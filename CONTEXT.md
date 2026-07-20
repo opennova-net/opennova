@@ -105,6 +105,51 @@ runs the 62 Hz host/client session over it; the **net seam** (`libs/netsim`) is 
 world sim and the wire meet (`INetCommandSink`, the replication fan, ADR 0009).
 _Avoid_: "the netcode" (say which layer)
 
+## 3DI collision authoring
+
+The canonical author-facing names for gameplay collision-volume families in a `.3di` model.
+
+**Generic Collision Box (CB)**:
+A general-purpose collision volume.
+_Avoid_: generic BVOL, ordinary box
+
+**Ladder Collision (CL)**:
+A collision volume authored for a ladder.
+_Avoid_: platform volume, seat volume
+
+**Armory Collision Box (CA)**:
+A collision volume authored for an armory.
+_Avoid_: armory trigger (when naming the authored volume)
+
+**Vehicle Collision (VC)**:
+A collision volume authored for vehicle collision.
+_Avoid_: damage pass, damage volume
+
+**Blink Box (BB)**:
+A convex interior-containment volume authored for a room or enclosed space.
+_Avoid_: blink volume, visibility box
+
+**Door (CD)**:
+A collision volume authored to activate a door or another door-like moving part.
+_Avoid_: destructible-section volume
+
+**Change Team Box (CT)**:
+A collision volume whose player activation changes an object's team settings.
+_Avoid_: capture-zone volume
+
+**Flag (CF)**:
+The project name for the grounded activation volume. The bundled authoring manual
+describes its purpose as activating special functions such as FARPs.
+_Avoid_: flag collision box
+
+**Player Collision (CP)**:
+A collision volume that physically affects players but not AI.
+_Avoid_: generic player-only solid
+
+**Damage High / Damage Medium / Damage Low (DH / DM / DL)**:
+The three authored contact-damage volume grades, from high through low.
+_Avoid_: numbered hurt volume, damage tier 16/17/18
+
 ## Products & modes
 
 **Product**:

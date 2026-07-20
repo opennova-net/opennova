@@ -6,22 +6,38 @@
 // @ 0x4EC0D0 (called inline from RoundData_AddRound @ 0x4FDB40 — the ring is only the
 // tag-2 fan-out log); damage chain Projectile_HandleEntityImpact @ 0x4E9390 ->
 // Projectile_ProcessDamageOnTarget @ 0x4E7FB0 -> Weapon_CalcImpactDamage @ 0x4EC920,
-// AUTHORITY-ONLY. docs/net/novaworld-net-re.md §5.60.]
+// with authority-owned relation/health/death mutation and a shared peer callback/
+// presentation tail. docs/net/novaworld-net-re.md §5.60.]
 //
-// Reimpl altitude — tracked deferrals (§5.60 port follow-ups):
-//  * ORGANIC hit test = the posed per-COBJ sphere walk from
-//    Physics_RaycastAgainstBoneSections; ray[31] drives reactions/death while
-//    ray[32] drives normal-infantry damage, and F3 exposes both. Unresolved graphics retain
-//    the bounded torso fallback. ITEM hits (pools 1/2) run the witnessed
-//    bound-sphere broad phase + the
-//    collision-model FACE narrow phase with the material-tagged impact
-//    [orig: Projectile_RaycastProximitySlots @ 0x4E5340 ->
-//    Physics_RaycastAgainstBoneCollision @ 0x4E4CB0]; models with no face mesh keep
-//    the bound-sphere stand-in (D-ITEM-1's bounded fallback).
-//  * no drag/gravity yet (Projectile_ApplyDragDeceleration internals unwitnessed) — the
-//    round flies straight at muzzle speed, so kinetic damage does not yet fall off.
-//  * no weapon spread on the sim round (the 0x06 carries the claimed pre-spread pose;
-//    Weapon_CalcRandomSpreadOffset unported), no water plane, no bounce/shell physics.
+// Reimpl altitude — current retail-alignment boundary (§5.60):
+//  * hit test = one CollisionWorld query in retail order: refined terrain, water,
+//    static CFAC, dynamic CFAC, then persons. Static/dynamic faces use the exact
+//    fixed-point CNRM/CFAC/CVRT routine; models without a face mesh retain the
+//    bounded item-sphere fallback. Persons use posed COBJ bone spheres from either
+//    the host matrix provider or explicitly published matrices, with a bounded
+//    torso fallback. ray[31] selects reactions/death while ray[32] selects normal
+//    infantry damage; recovered head/limb/special multipliers consume ray[32].
+//  * stock ballistic flight sweeps with the pre-force Q16 velocity, then on a miss
+//    applies the retail 167-Q16 gravity step and aerodynamic drag-table force. The
+//    zero-speed, submerged-slow, Ignore, NoGravity, UseOwnMove, stability damping,
+//    overshoot, and underwater x25 gates follow the recovered branch order.
+//  * damage includes the ItemDef-presence gate, exact signed-32 overflow arithmetic,
+//    MP authority/OneShotKill, one carrier hop, impact-armor/dead/indestructible/NoDie
+//    gates, person and seat zones (including the critical 0x800 entity flag), per-ammo
+//    shooter class, and vehicle occupant-count reduction. Static/vehicle targets are
+//    no longer merely blockers when promoted item traits make them damageable.
+//  * a pre-arm entity contact resolves notarmmedammo and keeps an active logical
+//    dud child at the contact point. The modeled prefix preserves owner, kinematics,
+//    and elapsed age; the dud supplies its max age, while the trail/emitter slot at
+//    retail byte +692 is deliberately not inherited. Pool-slot identity and other
+//    bytes outside LiveRound remain unrepresentable rather than guessed; this in-slot
+//    projection first advances on the following RoundSim tick.
+//  * remaining flight gaps are the randomized tumble PRNG/local frame, the custom
+//    useownmove guidance callbacks, and float LiveRound position/velocity carriers
+//    around the per-tick fixed-point core. Unresolved/unposed persons continue to
+//    use the characterized torso fallback.
+//  * no spawn-time Weapon_CalcRandomSpreadOffset, impact-energy armor-density loss,
+//    bounce, or shell physics yet.
 //  * kztype Knife(1)/Medic(3) raycast leaves and item-placing ammo (`hasitem`) do not
 //    spawn a sim round; explosive kill zones (kz_* radius damage) apply direct-hit
 //    kinetic damage only.
@@ -99,8 +115,8 @@ struct RoundDeath {
 // [orig: Projectile_UpdatePhysics @ 0x4E9D70 -> Projectile_SpawnImpactEffect
 // @ 0x4E9B80]. Weapon_RaycastAndSpawnImpact @ 0x4E8460 is a separate Knife-only
 // instant-kill-zone leaf (flags&0x400, kztype==1) whose ray extent is
-// AmmoDef.kz_maxradius; it is not the bullet path. Terrain surface-map sampling,
-// entity material, and the water plane remain D-WPN-15 (net-re §5.60).
+// AmmoDef.kz_maxradius; it is not the bullet path. Terrain surface-map overrides
+// and the building material-1 special tag remain D-WPN-15 (net-re §5.60).
 struct RoundImpact {
     Vec3 position;
     Vec3 direction;         // normalized flight direction (the witnessed descriptor dir)
@@ -230,11 +246,12 @@ public:
 
     // One 62 Hz step for every live round [orig: Weapon_UpdateAllProjectiles @ 0x4EC020
     // -> Projectile_UpdatePhysics @ 0x4E9D70]: advance along velocity, terrain stop,
-    // organic hit test, the item bound-sphere broad phase + the collision-model
-    // face narrow phase (through `collision`, husk-aware; null = sphere-only),
-    // authority damage, death detection.
+    // ordered terrain/water/item/person collision through `collision`, fixed-point
+    // gravity/drag on a surviving miss, authority damage, death detection, and
+    // presentation/debug consequences. A null override uses World::collision and
+    // finally a headless fallback query world.
     void tick(World &world, const terrain::TerrainHeightField *terrain,
-              CollisionWorld *collision);
+              CollisionWorld *collision = nullptr);
 
     // Mission restart discards all transient projectile/presentation state.
     void reset() noexcept;

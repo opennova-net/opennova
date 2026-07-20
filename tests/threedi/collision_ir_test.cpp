@@ -49,13 +49,12 @@ static void test_cxlt_is_preserved_metadata_not_a_vertex_offset() {
         check(collision->object_count == 2, "JetSki keeps both COBJ records");
         check(collision->translation_count == 1, "JetSki keeps its sole CXLT record");
         if (collision->object_count == 2 && collision->translation_count == 1) {
-            const float *offset = collision->objects[1].offset;
-            const float *translation = collision->translations[0].translation;
-            check(near(offset[0], 23193.0f) && near(offset[1], 39.0f) &&
-                          near(offset[2], 34085.0f),
+            const int32_t *offset = collision->objects[1].offset;
+            const int32_t *translation = collision->translations[0].translation;
+            check(offset[0] == 23193 && offset[1] == 39 && offset[2] == 34085,
                   "COBJ offset remains raw fp16 metadata");
-            check(near(translation[0], offset[0]) && near(translation[1], offset[1]) &&
-                          near(translation[2], offset[2]),
+            check(translation[0] == offset[0] && translation[1] == offset[1] &&
+                          translation[2] == offset[2],
                   "CXLT is preserved independently and equals JetSki COBJ 1 metadata");
 
             const int32_t vertex_start = collision->objects[0].num_vertices;
@@ -138,8 +137,11 @@ static void test_charmodel_cobj_preserves_exact_bone_sphere() {
 }
 
 int main() {
+    check(sizeof(ThreediIRCollisionNormal) == 8, "collision normal ABI is 8 bytes");
     check(sizeof(ThreediIRCollisionFace) == 52,
-          "collision face ABI stride includes the round-raycast fields");
+          "collision face ABI includes indexed and self-contained normal fields");
+    check(offsetof(ThreediIRCollisionFace, normal_index) == 6,
+          "collision face normal index occupies the authored CFAC slot");
     check(offsetof(ThreediIRCollisionFace, material_flags) == 8,
           "collision face material_flags offset is stable");
     check(offsetof(ThreediIRCollisionFace, poly_type) == 12,
@@ -154,13 +156,15 @@ int main() {
           "collision face min AABB offset is stable");
     check(offsetof(ThreediIRCollisionFace, max_fp16) == 40,
           "collision face max AABB offset is stable");
-    check(sizeof(ThreediIRCollisionObject) == 40,
-          "collision object ABI stride includes exact COBJ sphere fields");
-    check(offsetof(ThreediIRCollisionObject, center_fp16) == 24,
-          "collision object exact center offset is stable");
-    check(offsetof(ThreediIRCollisionObject, radius_fp16) == 36,
-          "collision object exact radius offset is stable");
-
+    check(sizeof(ThreediIRCollisionObject) == 72, "collision object ABI is 72 bytes");
+    check(offsetof(ThreediIRCollisionObject, offset) == 20,
+          "collision object exact offset is stable");
+    check(offsetof(ThreediIRCollisionObject, mid) == 56 &&
+                  offsetof(ThreediIRCollisionObject, center_fp16) == 56,
+          "collision object center aliases share exact storage");
+    check(offsetof(ThreediIRCollisionObject, radius) == 68 &&
+                  offsetof(ThreediIRCollisionObject, radius_fp16) == 68,
+          "collision object radius aliases share exact storage");
     ThreediIRCollisionPlane planes[2] = {};
     ThreediIRCollisionVolume volume = {};
     volume.plane_count = 2;
@@ -205,6 +209,8 @@ int main() {
     ThreediIRCollisionPlane grouped_planes[4] = {};
     ThreediIRCollisionVolume grouped_volumes[2] = {};
     ThreediIRCollisionObject grouped_objects[2] = {};
+    grouped_objects[0].num_bounding_volumes = 1;
+    grouped_objects[1].num_bounding_volumes = 1;
     grouped_volumes[0].plane_start = 0;
     grouped_volumes[0].plane_count = 2;
     grouped_volumes[0].object_index = 1;
@@ -224,6 +230,141 @@ int main() {
     grouped_volumes[1].object_index = 1;
     check(threedi_ir_collision_is_runtime_safe(&grouped) == 1,
           "ordered object groups are safe");
+
+    // Retail models (Zodiacs, mounted weapons, large buildings) author
+    // TRAILING BVOLs owned by no COBJ. Every retail walker consumes volumes
+    // only through the per-COBJ runs, so the unowned tail is dead data and
+    // must not strip the whole model's collision.
+    ThreediIRCollisionVolume tail_volumes[3] = {};
+    tail_volumes[0] = grouped_volumes[0];
+    tail_volumes[1] = grouped_volumes[1];
+    tail_volumes[2].plane_start = 0;
+    tail_volumes[2].plane_count = 2;
+    tail_volumes[2].object_index = -1;
+    grouped.volumes = tail_volumes;
+    grouped.volume_count = 3;
+    check(threedi_ir_collision_is_runtime_safe(&grouped) == 1,
+          "an unowned trailing BVOL tail is safe (retail corpus shape)");
+    tail_volumes[2].object_index = 0; // an owned volume outside every run
+    check(threedi_ir_collision_is_runtime_safe(&grouped) == 0,
+          "an owned volume outside every COBJ run is rejected");
+    tail_volumes[2].object_index = -1;
+    tail_volumes[2].plane_count = 9; // tail plane windows stay validated
+    check(threedi_ir_collision_is_runtime_safe(&grouped) == 0,
+          "a tail volume with an overrunning plane window is rejected");
+    grouped.volumes = grouped_volumes;
+    grouped.volume_count = 2;
+
+    // A face whose CNRM index is -1 is skipped by the runtime CFAC walker
+    // [orig: the CNRM resolve gate @ 0x4e4cb0]; it must not reject the model.
+    ThreediIRCollisionVertex loose_vertices[3] = {};
+    ThreediIRCollisionFace loose_face = {};
+    loose_face.vert_index[0] = 0;
+    loose_face.vert_index[1] = 1;
+    loose_face.vert_index[2] = 2;
+    loose_face.normal_index = -1;
+    ThreediIRCollisionObject loose_object = {};
+    loose_object.num_vertices = 3;
+    loose_object.num_faces = 1;
+    ThreediIRCollision loose = {};
+    loose.vertices = loose_vertices;
+    loose.vertex_count = 3;
+    loose.faces = &loose_face;
+    loose.face_count = 1;
+    loose.objects = &loose_object;
+    loose.object_count = 1;
+    check(threedi_ir_collision_is_runtime_safe(&loose) == 1,
+          "a face with CNRM index -1 is safe (the runtime walker skips it)");
+    loose_face.normal_index = 0; // >= the object's zero-normal run
+    check(threedi_ir_collision_is_runtime_safe(&loose) == 0,
+          "an out-of-run CNRM index is still rejected");
+
+    // Synthetic modern CDTA conversion retains every query-relevant CNRM,
+    // CFAC, and COBJ field without a float/fixed-point information loss.
+    ThreediCollisionVertex src_vertices[3] = {};
+    src_vertices[0].position[0] = 1.0f;
+    src_vertices[1].position[1] = 2.0f;
+    src_vertices[2].position[2] = 3.0f;
+    ThreediCollisionNormal src_normal = {};
+    src_normal.normal[0] = 0.5f;
+    src_normal.normal[1] = -0.25f;
+    src_normal.normal[2] = 0.75f;
+    src_normal.dominate_axis = 4;
+    ThreediCollisionFace src_face = {};
+    src_face.vert_index[0] = 0;
+    src_face.vert_index[1] = 1;
+    src_face.vert_index[2] = 2;
+    src_face.normal_index = 0;
+    src_face.plane_dist_fp16 = -123456;
+    src_face.min_x_fp16 = -11;
+    src_face.min_y_fp16 = -22;
+    src_face.min_z_fp16 = -33;
+    src_face.max_x_fp16 = 44;
+    src_face.max_y_fp16 = 55;
+    src_face.max_z_fp16 = 66;
+    src_face.material_flags = 0x12345678u;
+    src_face.poly_type = 17;
+    ThreediCollisionObject src_object = {};
+    src_object.num_vertices = 3;
+    src_object.num_faces = 1;
+    src_object.num_normals = 1;
+    src_object.num_bounding_volumes = 0;
+    src_object.parent_subobject_index = 7;
+    for (int k = 0; k < 3; ++k) {
+        src_object.offset[k] = 0x12345679 + k;
+        src_object.min[k] = -0x12345679 - k;
+        src_object.max[k] = 0x23456789 + k;
+        src_object.med[k] = 0x10203041 + k;
+    }
+    src_object.radius = 0x3456789;
+    ThreediCollisionModel src_collision = {};
+    src_collision.vertices = src_vertices;
+    src_collision.vertex_count = 3;
+    src_collision.normals = &src_normal;
+    src_collision.normal_count = 1;
+    src_collision.faces = &src_face;
+    src_collision.face_count = 1;
+    src_collision.objects = &src_object;
+    src_collision.object_count = 1;
+    Threedi3di3 src_model = {};
+    src_model.collision = &src_collision;
+    ThreediModelIR converted;
+    threedi_ir_init(&converted);
+    check(threedi_ir_from_3di3(&src_model, &converted) == 0,
+          "synthetic modern CDTA converts");
+    check(converted.collision != nullptr, "converted collision exists");
+    if (converted.collision != nullptr) {
+        const ThreediIRCollision *c = converted.collision;
+        check(c->normal_count == 1 && c->face_count == 1 && c->object_count == 1,
+              "normal/face/object counts retained");
+        check(c->normals[0].normal_q14[0] == 8192 &&
+              c->normals[0].normal_q14[1] == -4096 &&
+              c->normals[0].normal_q14[2] == 12288 &&
+              c->normals[0].dominant_axis == 4,
+              "exact Q14 normal and dominant axis retained");
+        const ThreediIRCollisionFace &f = c->faces[0];
+        check(f.vert_index[0] == 0 && f.vert_index[1] == 1 && f.vert_index[2] == 2 &&
+              f.normal_index == 0 && f.plane_dist_fp16 == -123456,
+              "face indices and plane retained");
+        check(f.normal[0] == 8192 && f.normal[1] == -4096 && f.normal[2] == 12288 &&
+                      f.dominate_axis == 4,
+              "face carries the resolved Q14 normal for direct round raycasts");
+        check(f.min_fp16[0] == -11 && f.min_fp16[1] == -22 && f.min_fp16[2] == -33 &&
+              f.max_fp16[0] == 44 && f.max_fp16[1] == 55 && f.max_fp16[2] == 66 &&
+              f.material_flags == 0x12345678u && f.poly_type == 17,
+              "face bounds and material retained");
+        const ThreediIRCollisionObject &o = c->objects[0];
+        check(o.num_vertices == 3 && o.num_faces == 1 && o.num_planes == 1 &&
+              o.num_bounding_volumes == 0 && o.parent_subobject_index == 7,
+              "all COBJ counts and parent retained");
+        check(o.offset[2] == 0x1234567B && o.min[1] == -0x1234567A &&
+              o.max[2] == 0x2345678B && o.mid[0] == 0x10203041 &&
+              o.radius == 0x3456789,
+              "COBJ offset/bounds/mid/radius retain low bits above 2^24");
+        check(threedi_ir_collision_is_runtime_safe(c) == 1,
+              "face-only exact collision IR is runtime safe");
+    }
+    threedi_ir_free(&converted);
 
     if (failures == 0) std::printf("collision_ir_test: OK\n");
     return failures == 0 ? 0 : 1;

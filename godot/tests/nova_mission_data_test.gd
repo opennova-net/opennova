@@ -1079,16 +1079,18 @@ func test_weapon_loadout_dictionary_and_round_trip() -> void:
 	var m := NovaMissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
 	var entries := m.get_weapon_loadout()
-	# The fixture canonicalizes to 7 loadout records in the public three-field view.
+	# The fixture canonicalizes to 7 loadout records in the public four-field view.
 	assert_eq(entries.size(), 7, "fixture loadout has 7 weapons")
 	var first := entries[0] as Dictionary
-	for key in ["index", "name", "value1", "value2"]:
+	for key in ["index", "name", "value1", "value2", "value3"]:
 		assert_true(first.has(key), "loadout dict exposes %s" % key)
 	assert_eq(String(first["name"]), "WPN_CAR15AUTO", "first weapon name")
 	assert_eq(String(first["value1"]), "-1", "first value1")
+	assert_eq(String(first["value3"]), "-1", "first damage class")
 	# Edit one entry + append a custom one; persist and reload.
 	entries[0]["value1"] = "5"
-	entries.append({ "name": "WPN_TEST", "value1": "1", "value2": "2" })
+	entries[0]["value3"] = "1"
+	entries.append({ "name": "WPN_TEST", "value1": "1", "value2": "2", "value3": "2" })
 	assert_true(m.set_weapon_loadout(entries), "set_weapon_loadout succeeds")
 	assert_true(m.is_modified(), "editing the loadout dirties the mission")
 	var tmp := _temp_bms_path()
@@ -1098,7 +1100,9 @@ func test_weapon_loadout_dictionary_and_round_trip() -> void:
 	var reloaded := r.get_weapon_loadout()
 	assert_eq(reloaded.size(), 8, "edited loadout survives reload")
 	assert_eq(String((reloaded[0] as Dictionary)["value1"]), "5", "edited value1 survives reload")
+	assert_eq(String((reloaded[0] as Dictionary)["value3"]), "1", "edited damage class survives reload")
 	assert_eq(String((reloaded[7] as Dictionary)["name"]), "WPN_TEST", "appended weapon survives reload")
+	assert_eq(String((reloaded[7] as Dictionary)["value3"]), "2", "appended damage class survives reload")
 	# Clearing yields an empty list.
 	assert_true(m.set_weapon_loadout([]), "clearing the loadout succeeds")
 	assert_eq(m.get_weapon_loadout().size(), 0, "loadout is empty after clear")

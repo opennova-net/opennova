@@ -246,7 +246,7 @@ bool find_nearest_free_seat(World &world, const Entity &player, NearestSeatHit &
         if (scan_entity_rejected(world, cand, player)) return;
         // While seated, the OWN vehicle's other seats are LOS-blocked by its hull in
         // retail (the ray walks pool-1 collision models) — that is why USE exits
-        // instead of cycling seats. Pool-1 hulls are unbuilt (D-COL-5), so the hull
+        // instead of cycling seats. Pool-1 hulls are unbuilt (D-AI-11 j), so the hull
         // occlusion is modeled as this candidate skip (D-AI-11 j).
         if (player.mounted && cand.handle == player.mount_target) return;
         if (!armory_mode) {
@@ -327,8 +327,8 @@ bool player_toggle_vehicle_mount(World &world, EntityHandle player) {
 
     if (!p->mounted) {
         // Standing ON a seat-bearing carrier -> best free seat on it [orig: the Flags 0x200
-        // deck branch @0x4368cf -> Entity_FindBestSeatSlot @0x4351f0; our platform contact
-        // is ground_target].
+        // deck branch @0x4368cf -> Entity_FindBestSeatSlot @0x4351f0; represented by
+        // the generic ground_target carrier, not a CL ladder volume].
         Entity *g = world.registry.get(p->ground_target);
         if (g != nullptr && !g->seats.empty()) {
             const int si = world.commands.find_best_seat(*g, player);

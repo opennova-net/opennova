@@ -1,0 +1,873 @@
+// Observable projectile consequence tests through RoundSim's public seam:
+// arming/dud substitution, NoDie, and geometric dead/indestructible blockers.
+#include <cstdio>
+#include <vector>
+
+#include "world/collision.h"
+#include "world/world.h"
+
+using namespace opennova::world;
+
+namespace {
+
+int failures = 0;
+#define CHECK(c)                                                                       \
+    do {                                                                               \
+        if (!(c)) {                                                                    \
+            std::printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #c);                 \
+            ++failures;                                                                \
+        }                                                                              \
+    } while (0)
+
+struct Rig {
+    World world;
+    EntityHandle shooter;
+    EntityHandle target;
+
+    Rig() {
+        world.registry.configure_pool(0, 8);
+        Entity s;
+        s.kind = EntityKind::Organic;
+        s.item_type = 3;
+        s.position = {0.0f, 0.0f, 0.0f};
+        s.health = 100;
+        shooter = world.registry.spawn(0, s);
+
+        Entity t;
+        t.kind = EntityKind::Organic;
+        t.has_item_def = true;
+        t.item_type = 3;
+        t.position = {5.0f, 0.0f, 0.0f};
+        t.health = 100;
+        target = world.registry.spawn(0, t);
+
+        world.ammo.entries.resize(2);
+        AmmoTableEntry &armed = world.ammo.entries[0];
+        armed.name = "ARMED";
+        armed.valid = true;
+        armed.velocity = 620; // 10 units/tick
+        armed.max_age_ticks = 20;
+        armed.arm_age_ticks = 2;
+        armed.weight_in_grains = 875;
+        armed.max_damage = 25;
+        armed.notarmmed_ammo = "DUD";
+
+        AmmoTableEntry &dud = world.ammo.entries[1];
+        dud.name = "DUD";
+        dud.valid = true;
+        dud.velocity = 1;
+        dud.max_age_ticks = 7;
+    }
+
+    int fire() {
+        RoundSpawnParams p;
+        p.owner = shooter;
+        p.shooter_handle = shooter.packed;
+        p.origin = {0.0f, 0.0f, 0.9f};
+        p.dir_yaw_bam = 0;
+        p.dir_pitch_bam = 0;
+        p.ammo_index = 0;
+        return world.round_sim.spawn(world, p);
+    }
+
+    void clear_events() {
+        world.round_sim.impacts.clear();
+        world.round_sim.hits.clear();
+        world.round_sim.deaths.clear();
+    }
+};
+
+// Deterministic posed-person fixture. Only `active_section` is placed on the
+// projectile ray; every other section is translated far off-axis. This lets the
+// public RoundSim seam exercise the exact retail section/zone code without
+// reaching into the private damage helper.
+struct PosedDamageRig {
+    World world;
+    CollisionWorld collision;
+    EntityHandle shooter;
+    EntityHandle target;
+
+    // `active_section` is the FIRST sphere the descending walk crosses (the
+    // highest on-ray ordinal -> ray[31]); an optional lower `second_section`
+    // also sits on the ray so the final overlap rewrites ray[32] below it.
+    explicit PosedDamageRig(int active_section, int second_section = -1) {
+        world.registry.configure_pool(0, 16);
+
+        Entity s;
+        s.kind = EntityKind::Organic;
+        s.item_type = 3;
+        s.health = 100;
+        shooter = world.registry.spawn(0, s);
+
+        Entity t;
+        t.kind = EntityKind::Organic;
+        t.has_item_def = true;
+        t.item_type = 3;
+        t.position = {5.0f, 0.0f, 0.0f};
+        t.health = 5000;
+        target = world.registry.spawn(0, t);
+
+        AmmoTableEntry ammo;
+        ammo.name = "ZONE";
+        ammo.valid = true;
+        ammo.velocity = 620;
+        ammo.max_age_ticks = 20;
+        ammo.weight_in_grains = 875;
+        world.ammo.entries.push_back(ammo);
+
+        const int section_count = active_section + 1;
+        CollisionModel model;
+        model.sections.resize(static_cast<size_t>(section_count));
+        for (CollisionSection &section : model.sections) {
+            section.authored_bounds = true;
+            section.min_x = section.min_y = section.min_z = -0x10000;
+            section.max_x = section.max_y = section.max_z = 0x10000;
+            section.radius = 0x10000;
+        }
+
+        const int32_t model_id = collision.add_model(std::move(model));
+        collision.assign_entity(target, model_id);
+        std::vector<CollisionMatrix> matrices;
+        matrices.reserve(static_cast<size_t>(section_count));
+        for (int section = 0; section < section_count; ++section) {
+            const bool on_ray =
+                section == active_section || section == second_section;
+            const int32_t center[3] = {
+                5 * 65536,
+                on_ray ? 0 : (20 + section) * 65536,
+                58982, // retail unposed torso height, 0.9u in Q16
+            };
+            matrices.push_back(collision_matrix_from_heading(0, center));
+        }
+        CHECK(collision.publish_entity_section_matrices(target, std::move(matrices)));
+        collision.build_tick_tables(world);
+        world.collision = &collision;
+    }
+
+    Entity *shooter_entity() { return world.registry.get(shooter); }
+    Entity *target_entity() { return world.registry.get(target); }
+    AmmoTableEntry &ammo() { return world.ammo.entries[0]; }
+
+    void fire_and_tick() {
+        RoundSpawnParams params;
+        params.owner = shooter;
+        params.shooter_handle = shooter.packed;
+        params.origin = {0.0f, 0.0f, 0.9f};
+        params.ammo_index = 0;
+        CHECK(world.round_sim.spawn(world, params) >= 0);
+        world.round_sim.tick(world, nullptr);
+    }
+};
+
+struct FlightResult {
+    bool active = false;
+    int32_t age_ticks = 0;
+    FixedVec3 pos;
+    FixedVec3 vel;
+};
+
+FlightResult fly_one_tick(FixedVec3 velocity, uint32_t flags = 0,
+                          int32_t drag_fp16 = 0, int32_t min_stable_velocity = 0,
+                          int32_t origin_z = 10 * 65536, int32_t water_z = 0) {
+    World world;
+    world.env.water_z = water_z;
+    AmmoTableEntry ammo;
+    ammo.name = "FLIGHT";
+    ammo.valid = true;
+    ammo.velocity = 62;
+    ammo.max_age_ticks = 100;
+    ammo.flags = flags;
+    ammo.drag_fp16 = drag_fp16;
+    ammo.drag = static_cast<float>(from_fixed(drag_fp16));
+    ammo.min_stable_velocity = min_stable_velocity;
+    world.ammo.entries.push_back(ammo);
+
+    RoundSpawnParams params;
+    params.origin = {0.0f, 0.0f, static_cast<float>(from_fixed(origin_z))};
+    params.ammo_index = 0;
+    const int slot = world.round_sim.spawn(world, params);
+    CHECK(slot >= 0);
+    if (slot < 0) return {};
+    LiveRound &round = world.round_sim.rounds[static_cast<size_t>(slot)];
+    round.vel = {static_cast<float>(from_fixed(velocity.x)),
+                 static_cast<float>(from_fixed(velocity.y)),
+                 static_cast<float>(from_fixed(velocity.z))};
+    world.round_sim.tick(world, nullptr);
+    return FlightResult{
+        round.active,
+        round.age_ticks,
+        FixedVec3{to_fixed(round.pos.x), to_fixed(round.pos.y), to_fixed(round.pos.z)},
+        FixedVec3{to_fixed(round.vel.x), to_fixed(round.vel.y), to_fixed(round.vel.z)},
+    };
+}
+
+void test_arming_dud_and_armed_damage() {
+    Rig r;
+    r.world.ammo.entries[0].tracer_rate = 1;
+    r.world.ammo.entries[0].tracer_type_friendly = 7;
+    r.world.ammo.entries[0].tracer_type_enemy = 7;
+    const int source_slot = r.fire();
+    CHECK(source_slot >= 0);
+    CHECK(r.world.round_sim.rounds[static_cast<size_t>(source_slot)].trail_slot >= 0);
+    const LiveRound source =
+        r.world.round_sim.rounds[static_cast<size_t>(source_slot)];
+    r.world.round_sim.tick(r.world, nullptr); // age 1 < arm age 2
+    CHECK(r.world.registry.get(r.target)->health == 100);
+    CHECK(r.world.round_sim.hits.empty());
+    CHECK(r.world.round_sim.deaths.empty());
+    CHECK(r.world.round_sim.impacts.size() == 1);
+    CHECK(r.world.round_sim.impacts[0].ammo_index == 1);
+
+    // The dud is a live replacement projectile, not merely a different impact row.
+    // The modeled fields inside retail's 692-byte copy survive; the trail slot at
+    // byte +692 does not.  The dud definition supplies its own maximum lifetime.
+    CHECK(r.world.round_sim.active_count == 1);
+    const LiveRound &replacement =
+        r.world.round_sim.rounds[static_cast<size_t>(source_slot)];
+    CHECK(replacement.active);
+    CHECK(replacement.ammo_index == 1);
+    CHECK(replacement.owner == source.owner);
+    CHECK(replacement.shooter_handle == source.shooter_handle);
+    CHECK(replacement.age_ticks == 1);
+    CHECK(replacement.max_age_ticks == 7);
+    CHECK(to_fixed(replacement.vel.x) == to_fixed(source.vel.x));
+    CHECK(to_fixed(replacement.vel.y) == to_fixed(source.vel.y));
+    CHECK(to_fixed(replacement.vel.z) == to_fixed(source.vel.z));
+    CHECK(to_fixed(replacement.pos.x) ==
+          to_fixed(r.world.round_sim.impacts[0].position.x));
+    CHECK(to_fixed(replacement.pos.y) ==
+          to_fixed(r.world.round_sim.impacts[0].position.y));
+    CHECK(to_fixed(replacement.pos.z) ==
+          to_fixed(r.world.round_sim.impacts[0].position.z));
+    CHECK(replacement.trail_slot == -1);
+
+    // It remains in the ordinary flight loop under the DUD row on later ticks.
+    r.world.registry.get(r.target)->position.y = 100.0f;
+    const int32_t contact_x = to_fixed(replacement.pos.x);
+    r.clear_events();
+    r.world.round_sim.tick(r.world, nullptr);
+    CHECK(r.world.round_sim.active_count == 1);
+    CHECK(replacement.active);
+    CHECK(replacement.ammo_index == 1);
+    CHECK(replacement.age_ticks == 2);
+    CHECK(to_fixed(replacement.pos.x) > contact_x);
+    CHECK(r.world.round_sim.impacts.empty());
+
+    r.world.round_sim.reset();
+    r.world.registry.get(r.target)->position.y = 0.0f;
+    r.clear_events();
+    r.world.ammo.entries[0].arm_age_ticks = 0;
+    CHECK(r.fire() >= 0);
+    r.world.round_sim.tick(r.world, nullptr);
+    CHECK(r.world.registry.get(r.target)->health == 75);
+    CHECK(r.world.round_sim.hits.size() == 1);
+    CHECK(r.world.round_sim.hits[0].damage == 25);
+    CHECK(r.world.round_sim.impacts.size() == 1);
+    CHECK(r.world.round_sim.impacts[0].ammo_index == 0);
+}
+
+void test_missing_item_def_consumes_round_without_damage() {
+    Rig r;
+    r.world.ammo.entries[0].arm_age_ticks = 0;
+    Entity *target = r.world.registry.get(r.target);
+    target->has_item_def = false;
+
+    CHECK(r.fire() >= 0);
+    r.world.round_sim.tick(r.world, nullptr);
+    CHECK(target->health == 100);
+    CHECK(r.world.round_sim.hits.empty());
+    CHECK(r.world.round_sim.deaths.empty());
+    CHECK(r.world.round_sim.impacts.size() == 1);
+    CHECK(r.world.round_sim.active_count == 0);
+}
+
+void test_damage_uses_retail_signed_wrap_and_ftol_cap() {
+    Rig r;
+    AmmoTableEntry &ammo = r.world.ammo.entries[0];
+    ammo.arm_age_ticks = 0;
+    ammo.flags = 0x100u;
+    ammo.weight_in_grains = 875;
+    ammo.min_damage = -1000;
+    ammo.max_damage = 0;
+    Entity *target = r.world.registry.get(r.target);
+    target->item_type = 5; // isolate kinetic arithmetic from person-zone scaling
+    target->health = 1000;
+
+    const int slot = r.fire();
+    CHECK(slot >= 0);
+    if (slot < 0) return;
+    // The vector exceeds retail's 0x4EFFFE00 ftol cap. That exact cap is
+    // 0x7FFF0000 as an integer; wrapped *62, then sar 16, produces -62.
+    r.world.round_sim.rounds[static_cast<size_t>(slot)].vel = {32767.0f, 255.0f, 0.0f};
+    r.world.round_sim.tick(r.world, nullptr);
+    CHECK(r.world.round_sim.hits.size() == 1);
+    CHECK(r.world.round_sim.hits[0].damage == -62);
+    CHECK(target->health == 1062);
+}
+
+void test_nodie_and_nontransparent_damage_gates() {
+    Rig r;
+    r.world.ammo.entries[0].arm_age_ticks = 0;
+    Entity *target = r.world.registry.get(r.target);
+    target->health = 10;
+    target->item_attrib = 0x40000000u; // ItemDefAttrib NoDie
+    CHECK(r.fire() >= 0);
+    r.world.round_sim.tick(r.world, nullptr);
+    CHECK(target->health == 1);
+    CHECK(r.world.round_sim.hits.size() == 1);
+    CHECK(r.world.round_sim.hits[0].damage == 9); // NoDie adjusts the applied/logged amount
+    CHECK(r.world.round_sim.deaths.empty());
+
+    // Retail has no lower clamp around this leaf: malformed state (zero health
+    // while damage_state is still zero) turns health-1 into -1 applied damage.
+    r.clear_events();
+    target->health = 0;
+    CHECK(r.fire() >= 0);
+    r.world.round_sim.tick(r.world, nullptr);
+    CHECK(target->health == 1);
+    CHECK(r.world.round_sim.hits.size() == 1);
+    CHECK(r.world.round_sim.hits[0].damage == -1);
+
+    r.clear_events();
+    target->item_attrib = 0;
+    target->health = 10;
+    target->engine_flags |= 0x4000000u; // indestructible damage gate
+    CHECK(r.fire() >= 0);
+    r.world.round_sim.tick(r.world, nullptr);
+    CHECK(target->health == 10);
+    CHECK(r.world.round_sim.hits.empty());
+    CHECK(r.world.round_sim.impacts.size() == 1); // still a physical impact
+    CHECK(r.world.round_sim.active_count == 0);
+
+    r.clear_events();
+    target->engine_flags = 0;
+    target->health = 0;
+    target->alive = false;
+    Entity behind;
+    behind.kind = EntityKind::Organic;
+    behind.item_type = 3;
+    behind.position = {8.0f, 0.0f, 0.0f};
+    behind.health = 100;
+    const EntityHandle farther = r.world.registry.spawn(0, behind);
+    CHECK(r.fire() >= 0);
+    r.world.round_sim.tick(r.world, nullptr);
+    CHECK(r.world.round_sim.impacts.size() == 1); // corpse consumed the round
+    CHECK(r.world.registry.get(farther)->health == 100);
+    CHECK(r.world.round_sim.hits.empty());
+}
+
+void test_posed_head_zone_multiplier() {
+    World world;
+    world.registry.configure_pool(0, 8);
+    Entity shooter;
+    shooter.kind = EntityKind::Organic;
+    shooter.item_type = 3;
+    const EntityHandle sh = world.registry.spawn(0, shooter);
+    Entity target;
+    target.kind = EntityKind::Organic;
+    target.has_item_def = true;
+    target.item_type = 3;
+    target.position = {5.0f, 0.0f, 0.0f};
+    target.health = 1000;
+    const EntityHandle th = world.registry.spawn(0, target);
+
+    AmmoTableEntry ammo;
+    ammo.name = "ZONE";
+    ammo.valid = true;
+    ammo.velocity = 620;
+    ammo.max_age_ticks = 20;
+    ammo.weight_in_grains = 875;
+    world.ammo.entries.push_back(ammo);
+
+    CollisionModel model;
+    CollisionSection bone;
+    bone.authored_bounds = true;
+    bone.min_x = bone.min_y = bone.min_z = -0x10000;
+    bone.max_x = bone.max_y = bone.max_z = 0x10000;
+    bone.radius = 0x10000;
+    model.sections.push_back(bone); // bone 0 is in the 1.25 head-zone group
+
+    CollisionWorld collision;
+    const int32_t model_id = collision.add_model(std::move(model));
+    collision.assign_entity(th, model_id);
+    const int32_t center[3] = {5 * 65536, 0, static_cast<int32_t>(0.9 * 65536.0)};
+    CHECK(collision.publish_entity_section_matrices(
+        th, {collision_matrix_from_heading(0, center)}));
+    collision.build_tick_tables(world);
+    world.collision = &collision;
+
+    RoundSpawnParams params;
+    params.owner = sh;
+    params.shooter_handle = sh.packed;
+    params.origin = {0.0f, 0.0f, 0.9f};
+    params.ammo_index = 0;
+    CHECK(world.round_sim.spawn(world, params) >= 0);
+    world.round_sim.tick(world, nullptr);
+    CHECK(world.round_sim.hits.size() == 1);
+    CHECK(world.round_sim.hits[0].damage == 775); // 620 * 1.25
+    CHECK(world.registry.get(th)->health == 225);
+}
+
+void test_item_type_zone_domain_and_attrib_0200_sections() {
+    {
+        PosedDamageRig r(0);
+        r.fire_and_tick();
+        CHECK(r.world.round_sim.hits.size() == 1);
+        CHECK(r.world.round_sim.hits[0].damage == 775); // person zone 0: 620 * 1.25
+        CHECK(r.target_entity()->health == 4225);
+        CHECK((r.target_entity()->flags & 0x800u) == 0);
+    }
+    {
+        PosedDamageRig r(0);
+        r.target_entity()->item_type = 5;
+        r.fire_and_tick();
+        CHECK(r.world.round_sim.hits.size() == 1);
+        CHECK(r.world.round_sim.hits[0].damage == 620); // zones are type-3-only
+        CHECK(r.target_entity()->health == 4380);
+    }
+    {
+        PosedDamageRig r(0);
+        r.target_entity()->item_attrib = 0x200u;
+        r.fire_and_tick();
+        CHECK(r.world.round_sim.hits.size() == 1);
+        // The 0x200 branch uses its own section-code domain; section 0 is not
+        // interpreted as an ordinary person head zone.
+        CHECK(r.world.round_sim.hits[0].damage == 620);
+        CHECK((r.target_entity()->flags & 0x800u) == 0);
+    }
+
+    {
+        PosedDamageRig r(13);
+        r.fire_and_tick();
+        CHECK(r.world.round_sim.hits.size() == 1);
+        CHECK(r.world.round_sim.hits[0].damage == 1860); // ordinary critical zone: x3
+        CHECK((r.target_entity()->flags & 0x800u) != 0);
+    }
+
+    // ItemDefAttrib 0x200 selects the retail section-code switch. These four
+    // codes receive 6.0x; the literal cases prevent a range approximation.
+    const int special_sections[] = {2, 3, 6, 7};
+    for (int section : special_sections) {
+        PosedDamageRig r(section);
+        r.target_entity()->item_attrib = 0x200u;
+        r.fire_and_tick();
+        CHECK(r.world.round_sim.hits.size() == 1);
+        CHECK(r.world.round_sim.hits[0].damage == 3720); // 620 * 6.0
+        CHECK(r.target_entity()->health == 1280);
+        CHECK((r.target_entity()->flags & 0x800u) != 0);
+    }
+
+    // A walk crossing TWO spheres splits the channels: ray[31] keeps the first/
+    // highest overlap (7) while ray[32] ends at the final/lowest (4). The
+    // attrib-0x200 seat switch reads ray[31] (hitZoneData+124 @0x4ec977).
+    {
+        PosedDamageRig r(7, 4);
+        r.target_entity()->item_attrib = 0x200u;
+        r.fire_and_tick();
+        CHECK(r.world.round_sim.hits.size() == 1);
+        CHECK(r.world.round_sim.hits[0].damage == 3720); // seat code 7 via ray[31]
+        CHECK((r.target_entity()->flags & 0x800u) != 0);
+    }
+    // The normal-infantry table keeps reading ray[32] (@0x4ec9bf): final zone 4
+    // takes 1.25x even though the primary bone 7 sits in the 1.0x band.
+    {
+        PosedDamageRig r(7, 4);
+        r.fire_and_tick();
+        CHECK(r.world.round_sim.hits.size() == 1);
+        CHECK(r.world.round_sim.hits[0].damage == 775); // 620 * 1.25 via ray[32]
+        CHECK((r.target_entity()->flags & 0x800u) == 0);
+    }
+}
+
+void test_shooter_damage_class_runs_after_zone_truncation() {
+    {
+        PosedDamageRig r(0);
+        r.ammo().weight_in_grains = 13;
+        r.shooter_entity()->ammo_damage_class = {1}; // x0.9
+        r.fire_and_tick();
+        CHECK(r.world.round_sim.hits.size() == 1);
+        // base=floor(620*13/875)=9; zone trunc=floor(9*1.25)=11;
+        // class trunc=floor(11*0.9f)=9. A combined multiply would produce 10.
+        CHECK(r.world.round_sim.hits[0].damage == 9);
+    }
+    {
+        PosedDamageRig r(0);
+        r.ammo().weight_in_grains = 10;
+        r.shooter_entity()->ammo_damage_class = {2}; // x1.1
+        r.fire_and_tick();
+        CHECK(r.world.round_sim.hits.size() == 1);
+        // base=7; zone trunc=8; class trunc=floor(8*1.1f)=8.
+        // A combined multiply would produce 9.
+        CHECK(r.world.round_sim.hits[0].damage == 8);
+    }
+}
+
+void test_network_oneshot_authority_and_session_gate() {
+    {
+        Rig r;
+        r.world.ammo.entries[0].arm_age_ticks = 0;
+        r.world.mp_session = true;
+        r.world.projectile_authority = true;
+        r.world.one_shot_kill = true;
+        r.world.registry.get(r.target)->health = 3000;
+        CHECK(r.fire() >= 0);
+        r.world.round_sim.tick(r.world, nullptr);
+        CHECK(r.world.round_sim.hits.size() == 1);
+        CHECK(r.world.round_sim.hits[0].damage == 2000);
+        CHECK(r.world.registry.get(r.target)->health == 1000);
+        // The early MP option return bypasses the authored max_damage=25.
+        CHECK(r.world.ammo.entries[0].max_damage == 25);
+    }
+    {
+        Rig r;
+        r.world.ammo.entries[0].arm_age_ticks = 0;
+        r.world.mp_session = false;
+        r.world.one_shot_kill = true;
+        r.world.registry.get(r.target)->health = 3000;
+        CHECK(r.fire() >= 0);
+        r.world.round_sim.tick(r.world, nullptr);
+        CHECK(r.world.round_sim.hits.size() == 1);
+        CHECK(r.world.round_sim.hits[0].damage == 25);
+        CHECK(r.world.registry.get(r.target)->health == 2975);
+    }
+    {
+        Rig r;
+        r.world.ammo.entries[0].arm_age_ticks = 0;
+        r.world.mp_session = true;
+        r.world.projectile_authority = false;
+        r.world.one_shot_kill = true;
+        r.world.registry.get(r.target)->health = 3000;
+        CHECK(r.fire() >= 0);
+        r.world.round_sim.tick(r.world, nullptr);
+        CHECK(r.world.registry.get(r.target)->health == 3000);
+        CHECK(r.world.round_sim.hits.empty());
+        CHECK(r.world.round_sim.impacts.size() == 1); // client prediction remains visual
+        CHECK(r.world.round_sim.active_count == 0);
+    }
+}
+
+void test_signed_armor_equality_and_damage_state_gates() {
+    const auto run_case = [](int32_t armor, int32_t damage_state,
+                             int32_t expected_damage, int32_t expected_armor) {
+        Rig r;
+        r.world.ammo.entries[0].arm_age_ticks = 0;
+        r.world.ammo.entries[0].penetration_impact = 10;
+        Entity *target = r.world.registry.get(r.target);
+        target->armor_impact = armor;
+        target->damage_state = damage_state;
+        CHECK(r.fire() >= 0);
+        r.world.round_sim.tick(r.world, nullptr);
+        CHECK(r.world.round_sim.impacts.size() == 1);
+        CHECK(r.world.round_sim.active_count == 0);
+        CHECK(target->armor_impact == expected_armor);
+        if (expected_damage == 0) {
+            CHECK(target->health == 100);
+            CHECK(r.world.round_sim.hits.empty());
+        } else {
+            CHECK(target->health == 100 - expected_damage);
+            CHECK(r.world.round_sim.hits.size() == 1);
+            CHECK(r.world.round_sim.hits[0].damage == expected_damage);
+        }
+    };
+
+    run_case(-1, 0, 0, -1);  // signed sentinel is always immune
+    run_case(11, 0, 0, 11);  // penetration 10 is below armor 11
+    run_case(10, 0, 25, 10); // equality penetrates (the comparison is strict <)
+    run_case(0, 1, 0, 0);    // entity+292 nonzero independently zeros damage
+    run_case(65546, 0, 25, 10); // 0x1000A stores as signed-word 10, so equality penetrates
+    run_case(65535, 0, 0, -1);  // 0x0FFFF stores as the signed -1 immunity sentinel
+}
+
+void test_signed_health_subtraction_wraps_at_entity_word() {
+    Rig r;
+    Entity *target = r.world.registry.get(r.target);
+    target->item_type = 1; // skip person-zone scaling; keep the arithmetic isolated
+    target->health = 32760;
+    target->health_max = 65535; // normalized at the same target consequence boundary
+    target->armor_kz = 65535;
+
+    AmmoTableEntry &ammo = r.world.ammo.entries[0];
+    ammo.arm_age_ticks = 0;
+    ammo.weight_in_grains = -875;
+    ammo.min_damage = -1000;
+    ammo.max_damage = 0;
+
+    CHECK(r.fire() >= 0);
+    r.world.round_sim.tick(r.world, nullptr);
+    CHECK(r.world.round_sim.hits.size() == 1);
+    CHECK(r.world.round_sim.hits[0].damage == -620);
+    // 32760 - (-620) = 33380 -> low word 0x8264 -> signed -32156.
+    CHECK(target->health == -32156);
+    CHECK(target->health_max == -1 && target->armor_kz == -1);
+    CHECK(r.world.round_sim.deaths.size() == 1);
+}
+
+void test_exact_one_hop_vehicle_parent_damage_routing() {
+    const auto run_direct_case = [](uint8_t child_type, uint32_t child_attrib,
+                                    uint8_t parent_type, bool expect_parent) {
+        Rig r;
+        r.world.ammo.entries[0].arm_age_ticks = 0;
+        Entity *child = r.world.registry.get(r.target);
+        child->item_type = child_type;
+        child->item_attrib = child_attrib;
+
+        Entity parent;
+        parent.kind = EntityKind::Item;
+        parent.has_item_def = true;
+        parent.item_type = parent_type;
+        parent.position = {100.0f, 100.0f, 100.0f};
+        parent.health = 100;
+        const EntityHandle parent_h = r.world.registry.spawn(0, parent);
+        child = r.world.registry.get(r.target);
+        child->ground_target = parent_h;
+
+        CHECK(r.fire() >= 0);
+        r.world.round_sim.tick(r.world, nullptr);
+        CHECK(r.world.round_sim.hits.size() == 1);
+        CHECK(r.world.round_sim.impacts.size() == 1);
+        if (expect_parent) {
+            CHECK(r.world.registry.get(r.target)->health == 100);
+            CHECK(r.world.registry.get(parent_h)->health == 75);
+            CHECK(r.world.round_sim.hits[0].victim == parent_h);
+            // Presentation still classifies the child geometry actually struck,
+            // not the vehicle that receives the routed damage.
+            CHECK(r.world.round_sim.impacts[0].effect_tag == 2);
+        } else {
+            CHECK(r.world.registry.get(r.target)->health == 75);
+            CHECK(r.world.registry.get(parent_h)->health == 100);
+            CHECK(r.world.round_sim.hits[0].victim == r.target);
+        }
+    };
+
+    run_direct_case(3, 0x20u, 1, true);
+    run_direct_case(3, 0u, 1, false);     // missing child-link attribute
+    run_direct_case(1, 0x20u, 1, false);  // a vehicle child never rolls upward
+    run_direct_case(3, 0x20u, 5, false);  // immediate parent must be a vehicle
+
+    // The resolver does not search ancestors: child -> nonvehicle -> vehicle
+    // still damages the child.
+    Rig r;
+    r.world.ammo.entries[0].arm_age_ticks = 0;
+    Entity vehicle;
+    vehicle.kind = EntityKind::Item;
+    vehicle.has_item_def = true;
+    vehicle.item_type = 1;
+    vehicle.position = {100.0f, 100.0f, 100.0f};
+    vehicle.health = 100;
+    const EntityHandle vehicle_h = r.world.registry.spawn(0, vehicle);
+    Entity intermediate;
+    intermediate.kind = EntityKind::Item;
+    intermediate.item_type = 5;
+    intermediate.position = {100.0f, 100.0f, 100.0f};
+    intermediate.health = 100;
+    intermediate.ground_target = vehicle_h;
+    const EntityHandle intermediate_h = r.world.registry.spawn(0, intermediate);
+    Entity *child = r.world.registry.get(r.target);
+    child->has_item_def = true;
+    child->item_type = 3;
+    child->item_attrib = 0x20u;
+    child->ground_target = intermediate_h;
+    CHECK(r.fire() >= 0);
+    r.world.round_sim.tick(r.world, nullptr);
+    CHECK(r.world.round_sim.hits.size() == 1);
+    CHECK(r.world.round_sim.hits[0].victim == r.target);
+    CHECK(r.world.registry.get(r.target)->health == 75);
+    CHECK(r.world.registry.get(vehicle_h)->health == 100);
+}
+
+void test_vehicle_occupant_reduction_count_cap_and_depth() {
+    Rig r;
+    r.world.registry.configure_pool(1, 2);
+    r.world.ammo.entries[0].arm_age_ticks = 0;
+    r.world.ammo.entries[0].max_damage = 0;
+    r.world.ammo.entries[0].weight_in_grains = 143; // floor(620*143/875) = 101
+
+    Entity vehicle;
+    vehicle.kind = EntityKind::Item;
+    vehicle.item_type = 1;
+    vehicle.position = {100.0f, 100.0f, 100.0f};
+    vehicle.health = 5000;
+    vehicle.has_item_def = true;
+    vehicle.damage_reduc_pp = 0.10f;
+    vehicle.damage_reduc_max = 0.25f;
+    const EntityHandle vehicle_h = r.world.registry.spawn(0, vehicle);
+
+    Entity *child = r.world.registry.get(r.target);
+    child->item_type = 3;
+    child->item_attrib = 0x20u;
+    child->ground_target = vehicle_h; // the one-hop damage rollup channel
+    child->mounted = true;            // the retail +40 attach the occupant scan reads
+    child->mount_target = vehicle_h;
+    child->has_item_def = true;
+
+    const auto fire_expect = [&](int32_t expected_damage) {
+        r.clear_events();
+        r.world.registry.get(vehicle_h)->health = 5000;
+        CHECK(r.fire() >= 0);
+        r.world.round_sim.tick(r.world, nullptr);
+        CHECK(r.world.round_sim.hits.size() == 1);
+        CHECK(r.world.round_sim.hits[0].victim == vehicle_h);
+        CHECK(r.world.round_sim.hits[0].damage == expected_damage);
+        CHECK(r.world.registry.get(vehicle_h)->health == 5000 - expected_damage);
+        CHECK(r.world.registry.get(r.target)->health == 100);
+        CHECK(r.world.round_sim.impacts.size() == 1);
+        CHECK(r.world.round_sim.impacts[0].effect_tag == 2);
+    };
+    // [orig: Entity_CountMountedEntities @ 0x435970] Occupants are counted by
+    // the ATTACH parent, not by standing: candidate.mount_target == vehicle, or
+    // the candidate's carrier stands on the vehicle (carrier.ground_target).
+    const auto add_rider = [&](EntityHandle mount, uint32_t flags = 0,
+                               int pool = 0) {
+        Entity rider;
+        rider.kind = EntityKind::Organic;
+        rider.has_item_def = true;
+        rider.item_type = 3;
+        rider.position = {100.0f, 100.0f, 100.0f};
+        rider.health = 100;
+        rider.flags = flags;
+        rider.mounted = true;
+        rider.mount_target = mount;
+        return r.world.registry.spawn(pool, rider);
+    };
+
+    fire_expect(101); // the struck child is the sole direct occupant: no scale
+
+    add_rider(vehicle_h);
+    fire_expect(81); // count 2: trunc(101 * 0.20) = 20 reduction
+
+    const EntityHandle nested = add_rider(r.target);
+    fire_expect(76); // count 3: 0.30 capped to 0.25; trunc(25.25) = 25
+
+    add_rider(vehicle_h, 0x2u);
+    fire_expect(76); // Flags&2 occupants are excluded
+
+    CHECK(add_rider(vehicle_h, 0, 1).valid());
+    fire_expect(76); // the retail occupant scan is pool-0-only
+
+    Entity no_item_def;
+    no_item_def.kind = EntityKind::Organic;
+    no_item_def.item_type = 3;
+    no_item_def.position = {100.0f, 100.0f, 100.0f};
+    no_item_def.health = 100;
+    no_item_def.mounted = true;
+    no_item_def.mount_target = vehicle_h;
+    CHECK(r.world.registry.spawn(0, no_item_def).valid());
+    fire_expect(76); // a pool-0 slot without an ItemDef pointer is also excluded
+
+    Entity deck_stander;
+    deck_stander.kind = EntityKind::Organic;
+    deck_stander.has_item_def = true;
+    deck_stander.item_type = 3;
+    deck_stander.position = {100.0f, 100.0f, 100.0f};
+    deck_stander.health = 100;
+    deck_stander.ground_target = vehicle_h; // standing on the deck, not attached
+    CHECK(r.world.registry.spawn(0, deck_stander).valid());
+    fire_expect(76); // retail counts the +40 attach chain, never plain standing
+
+    add_rider(nested);
+    fire_expect(76); // two intermediates deep is outside the retail count
+}
+
+void test_retail_force_order_and_stock_gates() {
+    // The first sweep uses the old velocity. Gravity becomes visible only in
+    // the velocity for the following tick.
+    FlightResult gravity = fly_one_tick(FixedVec3{65536, 0, 0});
+    CHECK(gravity.active);
+    CHECK(gravity.pos.x == 65536 && gravity.pos.z == 10 * 65536);
+    CHECK(gravity.vel.x == 65536 && gravity.vel.z == -167);
+
+    FlightResult no_gravity = fly_one_tick(FixedVec3{65536, 0, 0}, 0x100u);
+    CHECK(no_gravity.pos.x == 65536 && no_gravity.pos.z == 10 * 65536);
+    CHECK(no_gravity.vel.z == 0);
+
+    // Exact zero takes the dedicated pre-ray leaf: no position change and one
+    // gravity step even when the authored ammo says NoGravity.
+    FlightResult stopped = fly_one_tick(FixedVec3{}, 0x100u);
+    CHECK(stopped.active && stopped.pos.x == 0 && stopped.pos.z == 10 * 65536);
+    CHECK(stopped.vel.x == 0 && stopped.vel.y == 0 && stopped.vel.z == -167);
+
+    // Both flags bypass the entire stock ballistic callback, but still age.
+    FlightResult ignored = fly_one_tick(FixedVec3{65536, 0, 0}, 0x2u);
+    CHECK(ignored.active && ignored.age_ticks == 1 && ignored.pos.x == 0);
+    CHECK(ignored.vel.x == 65536 && ignored.vel.z == 0);
+    FlightResult own_move = fly_one_tick(FixedVec3{65536, 0, 0}, 0x2000u);
+    CHECK(own_move.active && own_move.age_ticks == 1 && own_move.pos.x == 0);
+    CHECK(own_move.vel.x == 65536 && own_move.vel.z == 0);
+}
+
+void test_retail_aerodynamic_drag_vectors() {
+    // Recovered dry-air reference: speed bin 100 contains 1596; the two IDIV
+    // truncations turn that into a 25-Q16 step for drag=1.0.
+    FlightResult dry = fly_one_tick(FixedVec3{105704, 0, 0}, 0x100u, 65536);
+    CHECK(dry.pos.x == 105704);
+    CHECK(dry.vel.x == 105679 && dry.vel.y == 0 && dry.vel.z == 0);
+
+    // At/below water the step is multiplied by 25 before the component Q16
+    // multiply. The old-position stall gate does not fire above 0.25u/tick.
+    FlightResult wet = fly_one_tick(FixedVec3{105704, 0, 0}, 0x100u, 65536, 0,
+                                    4 * 65536, 5 * 65536);
+    CHECK(wet.active && wet.vel.x == 105079);
+    FlightResult slow_wet = fly_one_tick(FixedVec3{0x3fff, 0, 0}, 0x100u, 0, 0,
+                                         4 * 65536, 5 * 65536);
+    CHECK(!slow_wet.active);
+    // The stall zeroes the lifetime BEFORE the sweep and the round still flies
+    // its final segment [orig: no early return @0x4ea142-0x4ea148].
+    CHECK(slow_wet.pos.x == 0x3fff);
+    FlightResult edge_wet = fly_one_tick(FixedVec3{0x4000, 0, 0}, 0x100u, 0, 0,
+                                         4 * 65536, 5 * 65536);
+    CHECK(edge_wet.active && edge_wet.pos.x == 0x4000);
+
+    // Drag zero returns before the stability branch. With drag live, the exact
+    // below-stable damping follows drag, including retail's NoGravity Z step.
+    FlightResult no_drag_stability =
+        fly_one_tick(FixedVec3{105704, 0, 0}, 0x100u, 0, 200);
+    CHECK(no_drag_stability.vel.x == 105704 && no_drag_stability.vel.z == 0);
+    FlightResult stable =
+        fly_one_tick(FixedVec3{105704, 0, 0}, 0x100u, 65536, 101);
+    CHECK(stable.vel.x == 102377 && stable.vel.z == -167);
+
+    // Source speed 3999 only writes bin 1218. Bin 1219 remains BSS zero in
+    // retail, so a capped/high-speed round receives no aerodynamic decrement.
+    const int32_t speed_1218 = static_cast<int32_t>(((int64_t{1218} << 16) + 61) / 62);
+    const int32_t speed_1219 = static_cast<int32_t>(((int64_t{1219} << 16) + 61) / 62);
+    FlightResult bin_1218 =
+        fly_one_tick(FixedVec3{speed_1218, 0, 0}, 0x100u, 65536);
+    FlightResult bin_1219 =
+        fly_one_tick(FixedVec3{speed_1219, 0, 0}, 0x100u, 65536);
+    CHECK(bin_1218.vel.x == speed_1218 - 8567);
+    CHECK(bin_1219.vel.x == speed_1219);
+}
+
+void test_consumed_hit_skips_post_sweep_forces() {
+    Rig r;
+    r.world.ammo.entries[0].arm_age_ticks = 0;
+    const int slot = r.fire();
+    CHECK(slot >= 0);
+    if (slot < 0) return;
+    r.world.round_sim.tick(r.world, nullptr);
+    const LiveRound &round = r.world.round_sim.rounds[static_cast<size_t>(slot)];
+    CHECK(!round.active);
+    CHECK(to_fixed(round.vel.z) == 0); // no post-hit gravity or drag
+}
+
+} // namespace
+
+int main() {
+    test_arming_dud_and_armed_damage();
+    test_missing_item_def_consumes_round_without_damage();
+    test_damage_uses_retail_signed_wrap_and_ftol_cap();
+    test_nodie_and_nontransparent_damage_gates();
+    test_posed_head_zone_multiplier();
+    test_item_type_zone_domain_and_attrib_0200_sections();
+    test_shooter_damage_class_runs_after_zone_truncation();
+    test_network_oneshot_authority_and_session_gate();
+    test_signed_armor_equality_and_damage_state_gates();
+    test_signed_health_subtraction_wraps_at_entity_word();
+    test_exact_one_hop_vehicle_parent_damage_routing();
+    test_vehicle_occupant_reduction_count_cap_and_depth();
+    test_retail_force_order_and_stock_gates();
+    test_retail_aerodynamic_drag_vectors();
+    test_consumed_hit_skips_post_sweep_forces();
+    if (failures == 0) std::printf("projectile_combat_test: all checks passed\n");
+    return failures == 0 ? 0 : 1;
+}

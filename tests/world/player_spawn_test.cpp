@@ -120,23 +120,55 @@ int main() {
         w.ai = &ai;
         w.registry.configure_pool(0, 8);
         w.player_item_hp = 150; // the class-8 Player items.def hp, stamped by resolve_item_traits
+        w.player_item_type = 3;
+        w.player_item_attrib = 0x200u;
+        w.player_armor_impact = 7;
+        w.player_armor_kz = 9;
+        w.player_damage_reduc_pp = 0.1f;
+        w.player_damage_reduc_max = 0.25f;
         const EntityHandle h = spawn_remote_player(w, PlayerSpawn{});
         const Entity *e = w.registry.get(h);
         CHECK(e != nullptr);
+        CHECK(e->has_item_def);
         CHECK(e->health == 150);
         CHECK(e->health_max == 150);
+        CHECK(e->item_type == 3 && e->item_attrib == 0x200u);
+        CHECK(e->armor_impact == 7 && e->armor_kz == 9);
+        CHECK(e->damage_reduc_pp == 0.1f && e->damage_reduc_max == 0.25f);
         const AiEntity *ae = ai.at(0);
         CHECK(ae->health == 150);
         CHECK(ae->inf.max_health == 150);
+    }
+    // Public template carriers stay int32_t, but the retail Player ItemDef fields are
+    // signed words. Oversized API inputs wrap/sign-extend at the spawn stamp rather
+    // than leaking wider values into Entity or the int16 infantry mirror.
+    {
+        World w;
+        AiSystem ai;
+        w.ai = &ai;
+        w.registry.configure_pool(0, 8);
+        w.player_has_item_def = true;
+        w.player_item_hp = 65535;       // low word 0xFFFF -> -1
+        w.player_armor_impact = 65546;  // low word 0x000A -> 10
+        w.player_armor_kz = 65535;      // low word 0xFFFF -> -1
+        const EntityHandle h = spawn_remote_player(w, PlayerSpawn{});
+        const Entity *e = w.registry.get(h);
+        CHECK(e != nullptr);
+        CHECK(e->health == -1 && e->health_max == -1);
+        CHECK(e->armor_impact == 10 && e->armor_kz == -1);
+        const AiEntity *ae = ai.at(0);
+        CHECK(ae->health == -1 && ae->inf.max_health == -1);
     }
     {
         World w; // item-less world: the spawn-seed fallback still spawns AT FULL (100/100)
         AiSystem ai;
         w.ai = &ai;
         w.registry.configure_pool(0, 8);
+        w.player_has_item_def = false;
         const EntityHandle h = spawn_player(w, PlayerSpawn{});
         const Entity *e = w.registry.get(h);
         CHECK(e != nullptr);
+        CHECK(!e->has_item_def);
         CHECK(e->health == 100);
         CHECK(e->health_max == 100);
     }

@@ -853,6 +853,7 @@ Dictionary NovaMissionData::weapon_loadout_to_dictionary(const opennova::mission
 	out["name"] = String::utf8(entry.name.c_str());
 	out["value1"] = String::utf8(entry.value1.c_str());
 	out["value2"] = String::utf8(entry.value2.c_str());
+	out["value3"] = String::utf8(entry.value3.c_str());
 	return out;
 }
 
@@ -887,9 +888,11 @@ bool NovaMissionData::set_weapon_loadout(const Array &entries) {
 		const Dictionary dict = entries[i];
 		opennova::mission::WeaponLoadoutEntry record;
 		record.name = String(dict.get("name", "")).utf8().get_data();
-		// value1/value2 default to "-1" (the shipped convention) when a caller omits them.
+		// All three numeric strings default to "-1" when a caller omits them. value3 is the
+		// load-bearing per-ammo damage class used by the runtime loadout builder.
 		record.value1 = String(dict.get("value1", "-1")).utf8().get_data();
 		record.value2 = String(dict.get("value2", "-1")).utf8().get_data();
+		record.value3 = String(dict.get("value3", "-1")).utf8().get_data();
 		records.push_back(std::move(record));
 	}
 	if (!document.set_weapon_loadout(records)) {

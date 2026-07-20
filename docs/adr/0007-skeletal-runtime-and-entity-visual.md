@@ -101,7 +101,7 @@ The single correctness fix the grill produced is convention #3 (per-bone keyfram
   + the Y-negated Z-X-Y euler + the render-space transpose, already reproduced for the validated yaw-only
   case. Bones stay posed in raw model space; the entity world matrix is applied at placement.
 - **Root motion** is **not** applied — entity world position is sim-driven (`Entity_UpdateInfantryAI` AI
-  target-seeking + `Entity_ProcessCollisionAndPlatformPhysics`). The `.bad` translation channel (flag bit
+  target-seeking + the movement collision resolver). The `.bad` translation channel (flag bit
   `0x2`) is model-space bone deformation only; `BadEvent.velocity` has no position consumer.
 - **Bone record sizes**: the on-disk `.bad` bone (100 B, raw IEEE floats) and the runtime skeleton bone
   (108 B, fp16.16 with `parentIndex@+40`, pos@`+56/60/64`) are distinct records; `*1/65536` is the
@@ -135,7 +135,7 @@ live projectile queries remain exact per-tick queries.
 - **Cross-fade** on slot change (currently a hard cut); needs the two-channel blend first.
 - Playhead advances on Godot wall-clock × clip `fps`, not the fixed sim tick (`flt_A78354`) — a timing-parity
   follow-up; visually fine at `fps`.
-- Turn-rate clamp (sim-side, `Entity_ProcessCollisionAndPlatformPhysics`); pitch/roll present path is ported
+- Turn-rate clamp (sim-side infantry heading update); pitch/roll present path is ported
   but unexercised (flag for a visual check when a non-zero source exists).
 
 ## Verification

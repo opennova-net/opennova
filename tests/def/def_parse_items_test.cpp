@@ -593,7 +593,8 @@ int main(void) {
             if (items2.entries[i].id == 101419) { ewep = &items2.entries[i]; break; }
         }
         if (!ewep || strcmp(ewep->primary_weapon, "WPN_EMPLCD50NA") != 0 ||
-            strcmp(ewep->ai_function, "ewep") != 0) {
+            strcmp(ewep->ai_function, "ewep") != 0 ||
+            ewep->armor_impact != -1 || ewep->armor_kz != -1) {
             fprintf(stderr, "FAIL: ewep primary_weapon: '%s' ai='%s' (found=%d)\n",
                     ewep ? ewep->primary_weapon : "", ewep ? ewep->ai_function : "",
                     ewep != NULL);
@@ -602,6 +603,36 @@ int main(void) {
         }
         def_free_items(&items2);
     }
+
+    static const char damage_def[] =
+        "begin A\n id 1\n armor 7 11\n damage_reduc_pp .25\nend\n"
+        "begin B\n id 2\n armor 5\n damage_reduc_pp .25 .60\nend\n"
+        "begin C\n id 3\nend\n"
+        "begin D\n id 4\n hp 65535\n armor 32768 65534\nend\n";
+    DefItemsFile damage_items;
+    memset(&damage_items, 0, sizeof(damage_items));
+    if (def_parse_items_memory((const uint8_t *)damage_def, sizeof(damage_def) - 1,
+                               &damage_items) != 0 || damage_items.count != 4) {
+        fprintf(stderr, "FAIL: inline damage-trait block did not parse\n");
+        def_free_items(&damage_items);
+        return 1;
+    }
+    const DefItemDef *d0 = &damage_items.entries[0];
+    const DefItemDef *d1 = &damage_items.entries[1];
+    const DefItemDef *d2 = &damage_items.entries[2];
+    const DefItemDef *d3 = &damage_items.entries[3];
+    if (d0->armor_kz != 7 || d0->armor_impact != 11 ||
+        d0->damage_reduc_pp != 0.25f || d0->damage_reduc_max != 0.75f ||
+        d1->armor_kz != 5 || d1->armor_impact != 5 ||
+        d1->damage_reduc_max < 0.599f || d1->damage_reduc_max > 0.601f ||
+        d2->armor_kz != 0 || d2->armor_impact != 0 ||
+        d2->damage_reduc_pp != 0.0f || d2->damage_reduc_max != 0.0f ||
+        d3->hp != -1 || d3->armor_kz != -32768 || d3->armor_impact != -2) {
+        fprintf(stderr, "FAIL: damage trait parse semantics mismatch\n");
+        def_free_items(&damage_items);
+        return 1;
+    }
+    def_free_items(&damage_items);
 
     printf("PASS: items parsing OK\n");
     return 0;

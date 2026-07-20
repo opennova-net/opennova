@@ -1072,6 +1072,9 @@ int main() {
 
         // The player: pool 0, team 2, 20 u east of the NPC, at ground height 0.
         Entity player_seed;
+        player_seed.kind = EntityKind::Organic;
+        player_seed.has_item_def = true;
+        player_seed.item_type = 3;
         player_seed.team = 2;
         player_seed.health = 100;
         player_seed.net_id = 0x21;
@@ -1082,6 +1085,7 @@ int main() {
 
         // The NPC rifleman: pool 0, team 1, armed via the D-AI-5 profile seed.
         Entity npc_seed;
+        npc_seed.kind = EntityKind::Organic;
         npc_seed.team = 1;
         npc_seed.health = 100;
         npc_seed.net_id = 0x11;

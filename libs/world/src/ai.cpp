@@ -996,8 +996,13 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
     // [orig: Entity_UpdateAllEntities @0x4c2100 -> Entity_BuildAllProximityLists
     // @0x4c20f0 (pool-2 statics + pool-0/1 snapshots) + Entity_BuildProximityListsFromPools
     // @0x4b8eb0 (per-entity candidate slices)]
+    // Pool-0 person publication does not depend on any entity having a 3DI
+    // collision instance.  RoundSim still queries this snapshot on missions
+    // containing only organic entities, so always rebuild the pool tables when
+    // a CollisionWorld is installed.  Model-backed blink work remains gated on
+    // instance_count below.
     const bool collision_active = collision != nullptr && collision->instance_count() != 0;
-    if (collision_active) {
+    if (collision != nullptr) {
         collision->local_player = world.cached.local_player; // blink accumulation target
         collision->build_tick_tables(world);
     }

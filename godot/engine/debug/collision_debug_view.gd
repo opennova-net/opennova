@@ -16,6 +16,9 @@ extends Node3D
 # "Show collision" toggle, like the skeleton view.
 
 const MissionOverlayUtil := preload("res://engine/mission/mission_overlay_util.gd")
+const TYPE_CD := 9
+const TYPE_CT := 10
+const TYPE_CF := 13
 
 # Volume type -> wireframe color (the collidable-type table in
 # docs/world/world-wac-ai-re.md section 15 / libs/world/include/world/collision.h).
@@ -24,15 +27,21 @@ static func type_color(volume_type: int) -> Color:
 		1:
 			return Color(0.78, 0.78, 0.78)   # solid walls/floors - gray
 		4:
-			return Color(0.30, 0.55, 1.0)    # platform / stand-on surface - blue
+			return Color(0.30, 0.55, 1.0)    # CL ladder - blue
 		6:
-			return Color(0.30, 1.0, 0.45)    # armory zone - green
+			return Color(0.30, 1.0, 0.45)    # CA armory - green
 		8:
-			return Color(1.0, 0.9, 0.25)     # indoor (blink) box - yellow
+			return Color(1.0, 0.9, 0.25)     # BB blink box - yellow
+		TYPE_CD:
+			return Color(0.8, 0.4, 0.0)      # CD door - brown
+		TYPE_CT:
+			return Color(1.0, 0.2, 0.2)      # CT change team - coral
+		TYPE_CF:
+			return Color(0.3, 1.0, 0.3)      # CF flag / special function - green
 		16, 17, 18:
-			return Color(1.0, 0.25, 0.2)     # hurt volumes - red
+			return Color(1.0, 0.25, 0.2)     # DH/DM/DL damage - red
 		19:
-			return Color(0.75, 0.35, 1.0)    # player-only solid - purple
+			return Color(0.75, 0.35, 1.0)    # CP player collision - purple
 		_:
 			return COLOR_OTHER
 const COLOR_OTHER := Color(1.0, 0.55, 0.15)   # any other type - orange

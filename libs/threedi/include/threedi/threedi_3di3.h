@@ -294,16 +294,24 @@ typedef struct ThreediCollisionObject {
     int32_t unk3;
     int32_t unk4;
     int32_t unk5;
-    float offset[3];
-    float min[3];
-    float max[3];
-    float med[3];
-    float radius;
+    int32_t offset[3];  // exact authored 16.16 integers
+    int32_t min[3];
+    int32_t max[3];
+    int32_t med[3];
+    int32_t radius;
 } ThreediCollisionObject;
 
 typedef struct ThreediCollisionTranslation {
-    float translation[3];
+    int32_t translation[3]; // exact authored 16.16 integers
 } ThreediCollisionTranslation;
+
+#ifdef __cplusplus
+static_assert(sizeof(ThreediCollisionObject) == 88, "ThreediCollisionObject layout mismatch");
+static_assert(sizeof(ThreediCollisionTranslation) == 12, "ThreediCollisionTranslation layout mismatch");
+#else
+_Static_assert(sizeof(ThreediCollisionObject) == 88, "ThreediCollisionObject layout mismatch");
+_Static_assert(sizeof(ThreediCollisionTranslation) == 12, "ThreediCollisionTranslation layout mismatch");
+#endif
 
 typedef struct ThreediCollisionModel {
     ThreediCollisionModelData model_data; // CMDL

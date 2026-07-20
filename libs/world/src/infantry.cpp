@@ -14,7 +14,7 @@
 //            emplacement manning, seat attach on arrival; dump 1545-2330) and 126
 //            (guard/hold) are decoded but not driven by a command source; they idle.
 //            127 (follow local player) idles because the simulation has no local player.
-//   D-INF-3  the ground/water resolver [orig: Entity_ProcessCollisionAndPlatformPhysics
+//   D-INF-3  the ground/water resolver [orig: collision resolver
 //            @0x4b2bd0]: with a CollisionWorld wired (AiSystem::collision) the full
 //            resolver runs — wall push-out, standing on objects, hurt/zone volumes,
 //            person repulsion, blink/indoors (world/collision.h; witness
@@ -75,7 +75,7 @@ constexpr int32_t kLegChaseClampOrg2 = 0x3000000;   // org2 [orig: @0x4b49fb]
 constexpr int32_t kLegTwistLimitOrg2 = 0x30000000;  // org2, vs yaw [orig: @0x4b4a23]
 constexpr int32_t kLegReplantMin = 59652320;
 constexpr int32_t kLegReplantSnap = 357913920;
-// [orig: gravity, witnessed per tick with the platform/drowning skip (Flags 0x108000,
+// [orig: gravity, witnessed per tick with the ladder/drowning skip (Flags 0x108000,
 // unmodeled) and terminal -32768. NPC org1: vel_z -= 416 (@0x4bf7bf) then pos.z +=
 // 2*vel (@0x4bf7ec). Player org2: vel_z -= 208 (@0x4b7acf, gate @0x4b7ac8) then
 // pos.z += vel once, folded into the root-dz store (@0x4b7cef); clamp @0x4b7c77.
@@ -951,7 +951,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         // There is NO body chase: the LEGS chase the mouse yaw (+0x10) directly and
         // the body heading is written as their midpoint — the legs lead, the body
         // follows, and the §14 torso twist is (yaw − leg midpoint). The parachute
-        // (Flags 0x20) sixteenth-step body chase @0x4b494d, the carried/platform
+        // (Flags 0x20) sixteenth-step body chase @0x4b494d, the carried/ladder
         // ±120-deg yaw clamp @0x4b4afb-0x4b4b5f, and the seat-bone follow @0x4b654e
         // ride the parachute/mount/platform slices.
         e.heading = inf.target_heading; // mouse-instant render/aim yaw [orig:
@@ -1088,7 +1088,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
 
     // 7-8. Rotate the root delta into world axes and integrate. [orig: full-precision
     // sin/cos at 2^22; org1 pos += rotated + velocity @0x4bf684-0x4bf6a2 (the
-    // drowning-0x8000/platform-0x100000 zeroing @0x4bf667-0x4bf680 rides those
+    // drowning-0x8000/ladder-0x100000 zeroing @0x4bf667-0x4bf680 rides those
     // slices); org2 identical 1× @0x4b7cbf-0x4b7cd9 — its 2× local-player branch
     // @0x4b7c8d-0x4b7cb7 is gated on g_localPlayerPoofMode, the "!Poof!" ghost-mode
     // toggle (@0x42d450), NOT normal play, and stays unported:
@@ -1126,14 +1126,14 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     }
 
     // 9. Vertical resolve. The original caller passes entityRadius = AnimMap bottom
-    // (out[3]) and receives foot clearance from Entity_ProcessCollisionAndPlatformPhysics.
+    // (out[3]) and receives foot clearance from the collision resolver.
     // It lifts only on return <= 0; return > 0xF000 marks airborne; small positive
     // clearance is left as-is. [orig: Entity_UpdateInfantryAI @0x4b9910 and
     // Entity_UpdateInfantryPlayerBody @0x4b40e0 callers; resolver @0x4b2bd0]
     if (terrain != nullptr && inf.ground_cache_valid && inf.ground_cache != INT32_MIN) {
         // Gravity, per tick, asymmetric by motor (D-INF-10 CLOSED for both legs).
         // NPC org1: vel_z -= 416 then pos.z += 2*vel [orig: gate @0x4bf7b8 (the
-        // platform/drowning 0x108000 skip, unmodeled), step @0x4bf7bf, clamp
+        // ladder/drowning 0x108000 skip, unmodeled), step @0x4bf7bf, clamp
         // @0x4bf7c9, pos @0x4bf7ec]. Player org2: vel_z -= 208 then pos.z += vel
         // once [orig: gate @0x4b7ac8, step @0x4b7acf, clamp @0x4b7c77, pos @0x4b7cef
         // — folded into the root-dz store there; split here like org1's shape].
@@ -1158,9 +1158,9 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         }
 
         // Foot clearance: with a collision world wired this is the full resolver —
-        // candidate contact forces (wall push-out, hurt/ladder/blink volumes, platform
-        // standing-on) + person repulsion + the ground probe THROUGH candidate models
-        // (standing on buildings) [orig: Entity_ProcessCollisionAndPlatformPhysics
+        // candidate contact forces (CB wall push-out plus hurt/CL/CA/BB triggers)
+        // + person repulsion + the ground probe THROUGH candidate models
+        // (standing on buildings) [orig: collision resolver
         // @0x4b2bd0; burns down D-INF-3's terrain-only stand-in]. Without one, the
         // terrain-cache clearance stands (headless tests, no placed objects).
         int32_t foot_clearance;

@@ -408,6 +408,8 @@ void NovaSimulation::reset_world() {
 	weapon_switch_deferred_action_ = -1;
 	weapon_start_in_switchto_ = false;
 	world_ = std::make_unique<World>();
+	world_->projectile_authority = !joiner_;
+	world_->mp_session = host_listen_ || joiner_;
 	ai_ = std::make_unique<AiSystem>();
 	bms_ = std::make_unique<opennova::mission::BmsEventSystem>();
 	wac_ = std::make_unique<opennova::wac::WacSystem>();
@@ -546,15 +548,28 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 	// Cache the Player template's items.def hp at world level so LATE-JOINER spawns (which happen
 	// after this sweep) seed full health without an item-db reach-back from libs/ [orig:
 	// Entity_InitFromItemDef @0x49e550 — spawn Health = itemDef->healthMax]. (D-NET-144)
-	world_->player_item_hp = p_item_db->get_hp(
+	const int player_def_id =
 			static_cast<int>(opennova::world::kPlayerInfantryTypeId) +
-			opennova::mission::kItemIdOffset);
+			opennova::mission::kItemIdOffset;
+	world_->player_has_item_def = p_item_db->has_item(player_def_id);
+	world_->player_item_hp = opennova::world::retail_signed_i16(
+			p_item_db->get_hp(player_def_id));
+	world_->player_item_type = static_cast<uint8_t>(p_item_db->get_item_type(player_def_id));
+	world_->player_item_attrib = p_item_db->get_attrib(player_def_id);
+	world_->player_armor_impact = opennova::world::retail_signed_i16(
+			p_item_db->get_armor_impact(player_def_id));
+	world_->player_armor_kz = opennova::world::retail_signed_i16(
+			p_item_db->get_armor_kz(player_def_id));
+	world_->player_damage_reduc_pp = p_item_db->get_damage_reduc_pp(player_def_id);
+	world_->player_damage_reduc_max = p_item_db->get_damage_reduc_max(player_def_id);
 	std::vector<opennova::world::EntityHandle> handles;
 	world_->registry.for_each([&](const opennova::world::Entity &e) { handles.push_back(e.handle); });
 	for (const opennova::world::EntityHandle h : handles) {
 		opennova::world::Entity *e = world_->registry.get(h);
 		if (!e) continue;
 		const int def_id = static_cast<int>(e->item_id) + opennova::mission::kItemIdOffset;
+		e->has_item_def = p_item_db->has_item(def_id);
+		e->item_type = static_cast<uint8_t>(p_item_db->get_item_type(def_id));
 		e->is_ai_capable = p_item_db->is_ai_capable(def_id);
 		// §5.10b replication class from the *_function tag (ai_function, else move_function).
 		const String ai_fn = p_item_db->get_ai_function(def_id);
@@ -562,8 +577,16 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 		e->net_class_code =
 				static_cast<uint8_t>(opennova::class_from_tag(tag.utf8().get_data()));
 		// items.def hp -> healthMax; lift spawn-default health to full [orig: @0x49e550].
-		const int hp = p_item_db->get_hp(def_id);
-		if (hp > 0) {
+		const int hp = opennova::world::retail_signed_i16(p_item_db->get_hp(def_id));
+		e->health = opennova::world::retail_signed_i16(e->health);
+		e->health_max = opennova::world::retail_signed_i16(e->health_max);
+		e->armor_impact = opennova::world::retail_signed_i16(
+				p_item_db->get_armor_impact(def_id));
+		e->armor_kz = opennova::world::retail_signed_i16(
+				p_item_db->get_armor_kz(def_id));
+		e->damage_reduc_pp = p_item_db->get_damage_reduc_pp(def_id);
+		e->damage_reduc_max = p_item_db->get_damage_reduc_max(def_id);
+		if (hp != 0) {
 			e->health_max = hp;
 			if (e->health == 100) e->health = hp; // still at the promotion default
 		}
@@ -581,6 +604,7 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 		// Volume" objects carry both). [orig: def+84 gates in ZoneSlotChain_BuildFromMission
 		// @0x4a2de0 / Server_ResolveSpawnTargetHandle @0x4fe110; net-re §5.61]
 		const uint32_t attrib = p_item_db->get_attrib(def_id);
+		e->item_attrib = attrib;
 		e->is_capture_trigger = (attrib & 0x20000u) != 0;
 		e->is_spawn_point = (attrib & 0x40000u) != 0;
 		// Death-presentation traits: LeaveCorpse (attrib 0x400000) keeps the corpse
@@ -751,8 +775,9 @@ namespace {
 // Build the runtime collision model from a parsed .3di collision IR block — the exact
 // inverse of the parse scaling (BPLN normals int16 Q14 / 16384, distances + AABBs 16.16;
 // libs/threedi/src/threedi_3di3.cpp parse_bpln/parse_bvol). Sections mirror the COBJ
-// grouping (volumes are sequential per object in the IR conversion). Retail permits a
-// face-only collision model: CFAC raycasts do not depend on BVOL.
+// grouping: CVRT/CNRM/CFAC/BVOL arrays are sequential per object. Face-only Poly
+// Collision LOD models remain valid without semantic volumes, and organic callers may
+// explicitly retain COBJ sphere-only models for posed person collision.
 bool collision_model_from_ir(const ThreediIRCollision *col,
 	                             opennova::world::CollisionModel &out,
 	                             bool allow_sphere_only = false) {
@@ -773,6 +798,53 @@ bool collision_model_from_ir(const ThreediIRCollision *col,
 		return false;
 	auto fx = [](float v) { return static_cast<int32_t>(std::lround(v * 65536.0)); };
 
+	out.vertices.reserve(col->vertex_count);
+	for (size_t i = 0; i < col->vertex_count; ++i) {
+		opennova::world::CollisionVertex v;
+		for (int k = 0; k < 3; ++k) v.p[k] = fx(col->vertices[i].position[k]);
+		out.vertices.push_back(v);
+	}
+	out.normals.reserve(col->normal_count);
+	for (size_t i = 0; i < col->normal_count; ++i) {
+		opennova::world::CollisionNormal n;
+		for (int k = 0; k < 3; ++k) n.n[k] = col->normals[i].normal_q14[k];
+		n.dominant_axis = col->normals[i].dominant_axis;
+		out.normals.push_back(n);
+	}
+	// The legacy projectile path consumes the same CVRT run requantized to its
+	// authored Q8 words. IR positions originated as Q8/256, so this round-trip
+	// is exact while the indexed path above retains its Q16 view.
+	out.face_vertices.reserve(col->vertex_count);
+	for (size_t i = 0; i < col->vertex_count; ++i) {
+		opennova::world::CollisionFaceVertex v;
+		v.x = static_cast<int16_t>(std::lround(col->vertices[i].position[0] * 256.0f));
+		v.y = static_cast<int16_t>(std::lround(col->vertices[i].position[1] * 256.0f));
+		v.z = static_cast<int16_t>(std::lround(col->vertices[i].position[2] * 256.0f));
+		out.face_vertices.push_back(v);
+	}
+	// One shared face vector carries both query representations: exact indexed
+	// CVRT/CNRM fields and the embedded Q8/Q14 fields used by the older walker.
+	out.faces.reserve(col->face_count);
+	for (size_t i = 0; i < col->face_count; ++i) {
+		const ThreediIRCollisionFace &sf = col->faces[i];
+		opennova::world::CollisionFace f;
+		for (int k = 0; k < 3; ++k) {
+			f.vertex_index[k] = sf.vert_index[k];
+			f.v[k] = sf.vert_index[k];
+			f.normal[k] = sf.normal[k];
+			f.min[k] = sf.min_fp16[k];
+			f.max[k] = sf.max_fp16[k];
+		}
+		f.normal_index = sf.normal_index;
+		f.axis = sf.dominate_axis;
+		f.plane_dist = sf.plane_dist_fp16;
+		f.material_flags = sf.material_flags;
+		f.poly_type = sf.poly_type;
+		f.flags = sf.material_flags;
+		f.material = sf.poly_type;
+		out.faces.push_back(f);
+	}
+
 	out.planes.reserve(col->plane_count);
 	for (size_t i = 0; i < col->plane_count; ++i) {
 		const ThreediIRCollisionPlane &sp = col->planes[i];
@@ -785,7 +857,6 @@ bool collision_model_from_ir(const ThreediIRCollision *col,
 	}
 
 	out.volumes.reserve(col->volume_count);
-	int32_t max_object = 0;
 	for (size_t i = 0; i < col->volume_count; ++i) {
 		const ThreediIRCollisionVolume &sv = col->volumes[i];
 		opennova::world::CollisionVolume v;
@@ -800,101 +871,52 @@ bool collision_model_from_ir(const ThreediIRCollision *col,
 		v.plane_start = sv.plane_start;
 		v.plane_count = sv.plane_count;
 		out.volumes.push_back(v);
-		if (sv.object_index > max_object) max_object = sv.object_index;
 	}
 
-	// One section per collision object; object_index -1 (no COBJ) folds into
-	// section 0. Objects carrying only a face mesh (no volumes) still get a
-	// section so the round raycast can walk their faces.
-	const int32_t section_count =
-			std::max<int32_t>(max_object + 1, static_cast<int32_t>(col->object_count));
-	out.sections.assign(static_cast<size_t>(section_count), {});
-	// Volumes are contiguous per object; derive the runs.
-	int32_t cursor = 0;
-	for (int32_t s = 0; s < section_count; ++s) {
+	if (col->object_count == 0) {
+		// Legacy ungrouped convex-only block.
+		out.sections.assign(1, {});
+		out.sections[0].volume_count = static_cast<int32_t>(col->volume_count);
+		return true;
+	}
+
+	out.sections.assign(col->object_count, {});
+	int32_t vertex_cursor = 0, normal_cursor = 0, face_cursor = 0, volume_cursor = 0;
+	for (size_t s = 0; s < col->object_count; ++s) {
+		const ThreediIRCollisionObject &object = col->objects[s];
 		opennova::world::CollisionSection &sec = out.sections[s];
-		sec.volume_start = cursor;
-		sec.volume_count = 0;
-		while (cursor < static_cast<int32_t>(col->volume_count)) {
-			const int32_t oi = col->volumes[cursor].object_index;
-			if ((oi < 0 ? 0 : oi) != s) break;
-			++sec.volume_count;
-			++cursor;
+		sec.vertex_start = vertex_cursor;
+		sec.vertex_count = object.num_vertices;
+		sec.normal_start = normal_cursor;
+		sec.normal_count = object.num_planes;
+		sec.face_start = face_cursor;
+		sec.face_count = object.num_faces;
+		sec.face_vertex_start = vertex_cursor;
+		sec.face_vertex_count = object.num_vertices;
+		sec.volume_start = volume_cursor;
+		sec.volume_count = object.num_bounding_volumes;
+		sec.parent_part_index = object.parent_subobject_index;
+		sec.part_index = object.parent_subobject_index;
+		for (int k = 0; k < 3; ++k) {
+			sec.offset[k] = object.offset[k];
+			sec.center[k] = object.mid[k];
 		}
-		if (s < static_cast<int32_t>(col->object_count)) {
-			const ThreediIRCollisionObject &obj = col->objects[s];
-			sec.parent_part_index = obj.parent_subobject_index;
-			for (int axis = 0; axis < 3; ++axis) sec.center[axis] = obj.center_fp16[axis];
-			sec.radius = obj.radius_fp16;
-		}
-	}
-
-	// The face mesh (the bullet LOD): Q8 int16 vertices + the 44-B-equivalent
-	// face records, in per-object runs [orig: the runtime CVRT/CNRM/CFAC arrays
-	// hung off each COBJ by the collision builder @ 0x5b3bf0; the projectile
-	// raycast Physics_RaycastAgainstBoneCollision @ 0x4e4cb0 walks them].
-	if (has_face_mesh) {
-		out.face_vertices.reserve(col->vertex_count);
-		for (size_t i = 0; i < col->vertex_count; ++i) {
-			opennova::world::CollisionFaceVertex v;
-			// The parse divides the disk Q8 int16 by 256 — requantize losslessly.
-			v.x = static_cast<int16_t>(std::lround(col->vertices[i].position[0] * 256.0f));
-			v.y = static_cast<int16_t>(std::lround(col->vertices[i].position[1] * 256.0f));
-			v.z = static_cast<int16_t>(std::lround(col->vertices[i].position[2] * 256.0f));
-			out.face_vertices.push_back(v);
-		}
-		out.faces.reserve(col->face_count);
-		for (size_t i = 0; i < col->face_count; ++i) {
-			const ThreediIRCollisionFace &sf = col->faces[i];
-			opennova::world::CollisionFace f;
-			f.v[0] = sf.vert_index[0];
-			f.v[1] = sf.vert_index[1];
-			f.v[2] = sf.vert_index[2];
-			f.normal[0] = sf.normal[0];
-			f.normal[1] = sf.normal[1];
-			f.normal[2] = sf.normal[2];
-			f.axis = sf.dominate_axis;
-			f.plane_dist = sf.plane_dist_fp16;
-			for (int a = 0; a < 3; ++a) {
-				f.min[a] = sf.min_fp16[a];
-				f.max[a] = sf.max_fp16[a];
-			}
-			f.flags = sf.material_flags;
-			f.material = sf.poly_type;
-			out.faces.push_back(f);
-		}
-		// Per-object runs; clamp malformed indices to never-hit rather than
-		// letting the walk read out of range.
-		int32_t vcur = 0, fcur = 0;
-		for (int32_t s = 0; s < static_cast<int32_t>(col->object_count); ++s) {
-			opennova::world::CollisionSection &sec = out.sections[s];
-			const ThreediIRCollisionObject &obj = col->objects[s];
-			sec.face_vertex_start = vcur;
-			sec.face_vertex_count = obj.num_vertices;
-			sec.face_start = fcur;
-			sec.face_count = obj.num_faces;
-			for (int32_t fi = 0; fi < sec.face_count &&
-					fcur + fi < static_cast<int32_t>(out.faces.size()); ++fi) {
-				opennova::world::CollisionFace &f = out.faces[fcur + fi];
-				if (f.v[0] < 0 || f.v[0] >= obj.num_vertices || f.v[1] < 0 ||
-				    f.v[1] >= obj.num_vertices || f.v[2] < 0 || f.v[2] >= obj.num_vertices)
-					f.flags |= 0x100u;
-			}
-			vcur += obj.num_vertices;
-			fcur += obj.num_faces;
-			if (vcur > static_cast<int32_t>(out.face_vertices.size()) ||
-			    fcur > static_cast<int32_t>(out.faces.size())) {
-				// Malformed runs — drop the whole face mesh rather than serve
-				// a scrambled walk.
-				out.face_vertices.clear();
-				out.faces.clear();
-				for (auto &sc : out.sections) {
-					sc.face_start = sc.face_count = 0;
-					sc.face_vertex_start = sc.face_vertex_count = 0;
-				}
-				break;
-			}
-		}
+		sec.min_x = object.min[0]; sec.max_x = object.max[0];
+		sec.min_y = object.min[1]; sec.max_y = object.max[1];
+		sec.min_z = object.min[2]; sec.max_z = object.max[2];
+		sec.radius = object.radius;
+		// Empty COBJ records can carry inverted/sentinel bounds. Preserve valid
+		// authored bounds exactly; otherwise let finalize_sections derive them
+		// from that object's volume or vertex run.
+		sec.authored_bounds =
+				object.radius >= 0 &&
+				object.min[0] <= object.max[0] &&
+				object.min[1] <= object.max[1] &&
+				object.min[2] <= object.max[2];
+		vertex_cursor += sec.vertex_count;
+		normal_cursor += sec.normal_count;
+		face_cursor += sec.face_count;
+		volume_cursor += sec.volume_count;
 	}
 	return true;
 }
@@ -1039,6 +1061,7 @@ void panm_render_matrix_from_godot(const Transform3D &transform, float out[16]) 
 void NovaSimulation::apply_collision_to_ai() {
 	collision_world_.terrain = terrain_field_.valid() ? &terrain_field_ : nullptr;
 	collision_world_.set_section_matrix_provider(this);
+	if (world_) world_->collision = &collision_world_;
 	if (ai_) ai_->collision = &collision_world_;
 }
 
@@ -2401,6 +2424,17 @@ void NovaSimulation::respawn_local_player_loadout() {
 	rebuild_local_player_loadout(/*p_select_spawn_default=*/true);
 }
 
+void NovaSimulation::sync_local_player_damage_classes() {
+	if (!world_) return;
+	opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);
+	if (e == nullptr) return;
+	e->ammo_damage_class.assign(world_->ammo.entries.size(), 0);
+	const std::vector<opennova::world::WeaponKitEntry> kit =
+			spawn_kit_set_ ? spawn_kit_ : opennova::world::weapon_kit_default();
+	opennova::world::weapon_kit_build_damage_classes(
+			kit, world_->weapons, world_->ammo.entries.size(), e->ammo_damage_class);
+}
+
 void NovaSimulation::rebuild_local_player_loadout(bool p_select_spawn_default) {
 	// The Player_InitPlayer weapon leg [orig: @ 0x4e15f0: AvatarDef_BuildDisplayList
 	// (restrictionData) -> WeaponSlotPool_ResetAllEntries -> WeaponSlotTable_
@@ -2411,6 +2445,7 @@ void NovaSimulation::rebuild_local_player_loadout(bool p_select_spawn_default) {
 	opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);
 	if (e == nullptr) return;
 	const opennova::world::WeaponTable &table = world_->weapons;
+	sync_local_player_damage_classes();
 	if (table.empty()) return;
 	const std::vector<opennova::world::WeaponKitEntry> kit =
 			spawn_kit_set_ ? spawn_kit_ : opennova::world::weapon_kit_default();
@@ -2680,6 +2715,7 @@ Error NovaSimulation::load_ammo_table(const Ref<NovaResourceRoot> &p_resource_ro
 	world_->ammo = opennova::np::build_ammo_table(file);
 	def_free_ammo(&file);
 	opennova::np::resolve_weapon_round_types(world_->weapons, world_->ammo);
+	sync_local_player_damage_classes();
 	return OK;
 }
 
@@ -3249,6 +3285,10 @@ void NovaSimulation::bringup_host_runtime(const opennova::bms::File &file) {
 	} else {
 		host_config.server_name = "SINGLEPLAYERGAME";
 		host_config.max_players = 1;
+	}
+	if (world_) {
+		world_->fat_bullets = host_config.fat_bullets;
+		world_->one_shot_kill = host_config.one_shot_kill;
 	}
 
 	// The witnessed §5.0 listen-host bring-up, dedup'd to the ONE shared helper start_host_session
@@ -5506,6 +5546,10 @@ bool NovaSimulation::enable_host_listen(int p_port) {
 		return false;
 	}
 	host_listen_ = true;
+	if (world_) {
+		world_->projectile_authority = true;
+		world_->mp_session = true;
+	}
 	// P7: the LAN host rides the npruntime runtime (ctx_ over a real UDP socket), stood up per-load in
 	// bringup_host_runtime with SocketMode::Lan. NovaUdpPump owns the socket; all protocol/crypto/
 	// framing stays in libs (ADR 0010). host_session_config_ keeps the GDScript-facing session options
@@ -5543,6 +5587,10 @@ void NovaSimulation::configure_host_session(Dictionary p_options) {
 		config.game_type = dictionary_u32(p_options, "game_type", config.game_type);
 	}
 	config.mp_attributes = dictionary_u32(p_options, "mpattrib", config.mp_attributes);
+	if (p_options.has("fat_bullets"))
+		config.fat_bullets = static_cast<bool>(p_options["fat_bullets"]);
+	if (p_options.has("one_shot_kill"))
+		config.one_shot_kill = static_cast<bool>(p_options["one_shot_kill"]);
 	if (p_options.has("spawn_x") || p_options.has("spawn_y") || p_options.has("spawn_z")) {
 		config.spawn_x = dictionary_u32(p_options, "spawn_x", config.spawn_x);
 		config.spawn_y = dictionary_u32(p_options, "spawn_y", config.spawn_y);
@@ -5576,6 +5624,10 @@ void NovaSimulation::configure_host_session(Dictionary p_options) {
 		host_max_players_ = mp;
 	}
 	host_session_config_ = std::move(config);
+	if (world_ && host_listen_) {
+		world_->fat_bullets = host_session_config_.fat_bullets;
+		world_->one_shot_kill = host_session_config_.one_shot_kill;
+	}
 }
 
 Dictionary NovaSimulation::get_host_session_config() const {
@@ -5589,6 +5641,8 @@ Dictionary NovaSimulation::get_host_session_config() const {
 	out["expansion"] = String(session.expansion.c_str());
 	out["gametype"] = static_cast<int64_t>(session.game_type);
 	out["mpattrib"] = static_cast<int64_t>(session.mp_attributes);
+	out["fat_bullets"] = session.fat_bullets;
+	out["one_shot_kill"] = session.one_shot_kill;
 	out["spawn_x"] = static_cast<int64_t>(session.spawn_x);
 	out["spawn_y"] = static_cast<int64_t>(session.spawn_y);
 	out["spawn_z"] = static_cast<int64_t>(session.spawn_z);
@@ -5620,6 +5674,10 @@ bool NovaSimulation::enable_join(const String &p_host_ip, int p_port, const Stri
 			opennova::ClientSession::Config::jointoperations(), joiner_player_name_);
 	install_item_class_resolver();
 	joiner_ = true;
+	if (world_) {
+		world_->projectile_authority = false;
+		world_->mp_session = true;
+	}
 	joiner_started_ = false;
 	joiner_local_spawned_ = false;
 	joiner_self_wire_handle_ = 0;

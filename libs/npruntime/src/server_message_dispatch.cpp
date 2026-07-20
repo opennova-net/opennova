@@ -236,63 +236,119 @@ std::vector<uint8_t> build_reply_tag_16(const std::vector<NapiNPConnection> &ros
 // filtering each slot by the team/char masks (@0x502716) and emitting one 4-byte group:
 // [admIdx = AvatarDef_FindIndexByName @0x50273b][ammoPrimary = WeaponSlot_GetTotalClips
 // @0x502794][ammoSecondary = the same count for the first different-ammoclass sub-variant in
-// parent+1..parent+LSC (@0x5027c8), else 0xFF][restriction byte, witnessed 0 (@0x502871)].]
+// parent+1..parent+LSC (@0x5027c8), else 0xFF][per-ammo damage class from
+// player+89688: 1 = x0.9, 2 = x1.1, other/default = 0].]
 //
 // With the armory table fed (world::World::weapons), the reply resolves REAL counts through the
 // witnessed rules (weapon_table_build: loadout_entry_permitted / resolve_loadout_ammo) — the
 // golden ASH_I5A reply {2:255, 3:10, 21:10, 76:1, 77:2, 78:3, 83:3} reproduces from the host's
 // own resolved weapon.def (D-NET-141). Table-less hosts (unit paths / no resource root) keep the
 // prior request-echo: the client clamps echoed bytes on apply [orig: @0x4295d7-0x4295e9], a
-// tracked divergence for that configuration only. The armory-enable restriction table
-// (`unused6` @0x515a3f / player+89688) stays unmodeled — 4th byte 0 as witnessed.
-std::vector<uint8_t> build_tag_5a_weapon_loadout(const std::vector<uint8_t> &request_payload,
-                                                 const world::WeaponTable *table) {
-	LoadoutSubmit req;
-	decode_loadout_submit(request_payload.data(), request_payload.size(), req);
-
+// tracked divergence for that configuration only. The accepted fourth byte is the
+// player+89688 per-ammo damage class; captured 0xFF defaults normalize to 0.
+struct GrantedWeaponLoadout {
 	WeaponLoadout reply;
+	// Final player+89688 values, keyed by the resolved AmmoDef index. The retail
+	// request walk overwrites this table in request order, so the last accepted
+	// weapon using an ammo type controls every granted slot that uses that ammo.
+	std::vector<std::pair<int16_t, uint8_t>> ammo_damage_classes;
+};
+
+uint8_t normalized_damage_class(uint8_t value) {
+	return (value == 1 || value == 2) ? value : 0;
+}
+
+void set_ammo_damage_class(std::vector<std::pair<int16_t, uint8_t>> &classes,
+						   int16_t ammo_index, uint8_t value) {
+	if (ammo_index < 0) return;
+	for (auto &entry : classes) {
+		if (entry.first == ammo_index) {
+			entry.second = value;
+			return;
+		}
+	}
+	classes.emplace_back(ammo_index, value);
+}
+
+uint8_t find_ammo_damage_class(const std::vector<std::pair<int16_t, uint8_t>> &classes,
+							   int16_t ammo_index, uint8_t fallback) {
+	if (ammo_index < 0) return fallback;
+	for (const auto &entry : classes)
+		if (entry.first == ammo_index) return entry.second;
+	return 0;
+}
+
+GrantedWeaponLoadout grant_weapon_loadout(const LoadoutSubmit &req,
+										  const world::WeaponTable *table) {
+	GrantedWeaponLoadout grant;
+	WeaponLoadout &reply = grant.reply;
 	// Soldier-type accept: 5..9 pass, everything else forces 8 [orig: @0x515913; the
 	// allowed-class restriction mask dword_24D59FC is server armory config, unmodeled].
 	reply.avatar_class =
 			(req.soldier_type >= 5 && req.soldier_type <= 9) ? req.soldier_type : 8;
 
 	if (table != nullptr && !table->empty()) {
-		// Sort key per accepted entry: the weapon-slot combo the original's table walk implies
-		// [orig: slot = category*65 + rank, WeaponSlotTable_LoadAllFromDefs @0x5415D3].
-		std::vector<std::pair<uint16_t, WeaponLoadoutSlot>> accepted;
+		struct GrantedSlot {
+			uint16_t combo = 0;
+			WeaponLoadoutSlot wire;
+			int16_t ammo_index = -1;
+			uint8_t request_damage_class = 0;
+		};
+		// The original first loads a 780-slot table keyed by category*65+rank. Repeating
+		// that slot replaces it; the later reply walk therefore emits it exactly once.
+		std::vector<GrantedSlot> accepted;
 		for (const LoadoutSubmitEntry &e : req.entries) {
 			const world::WeaponTableEntry *we = table->by_index(e.adm_index);
 			if (we == nullptr) continue; // the AdmDef_GetEntryByIndex fail leg
 			if (!loadout_entry_permitted(*we, req.player_class, reply.avatar_class))
 				continue; // team/char mask filter [orig: @0x502716]
+			const uint8_t damage_class = normalized_damage_class(e.variant);
+			set_ammo_damage_class(grant.ammo_damage_classes, we->ammo_index, damage_class);
 			const LoadoutAmmoBytes ammo = resolve_loadout_ammo(*table, e.adm_index, e.ammo_primary);
-			WeaponLoadoutSlot s;
-			s.type_id = e.adm_index;
-			s.ammo_primary = ammo.primary;
-			s.ammo_secondary = ammo.secondary;
-			s.ammo_alt = 0; // restriction byte — witnessed 0 (@0x502871)
-			accepted.emplace_back(
-					static_cast<uint16_t>(we->category * 65u + we->rank), s);
+			GrantedSlot s;
+			s.combo = static_cast<uint16_t>(we->category * 65u + we->rank);
+			s.wire.type_id = e.adm_index;
+			s.wire.ammo_primary = ammo.primary;
+			s.wire.ammo_secondary = ammo.secondary;
+			s.ammo_index = we->ammo_index;
+			s.request_damage_class = damage_class;
+			auto existing = std::find_if(accepted.begin(), accepted.end(),
+									 [combo = s.combo](const GrantedSlot &slot) {
+										 return slot.combo == combo;
+									 });
+			if (existing == accepted.end()) accepted.push_back(s);
+			else *existing = s; // the last request entry loaded into this retail slot wins
 		}
 		std::sort(accepted.begin(), accepted.end(),
-		          [](const auto &a, const auto &b) { return a.first < b.first; });
-		for (const auto &p : accepted) reply.slots.push_back(p.second);
-		return encode_weapon_loadout(reply);
+		          [](const GrantedSlot &a, const GrantedSlot &b) { return a.combo < b.combo; });
+		for (GrantedSlot &slot : accepted) {
+			slot.wire.ammo_alt = find_ammo_damage_class(
+					grant.ammo_damage_classes, slot.ammo_index, slot.request_damage_class);
+			reply.slots.push_back(slot.wire);
+		}
+		return grant;
 	}
 
+	// Resource-less test/diagnostic fallback: no AmmoDef relationship exists, but duplicate
+	// ADM slots still behave like a table load (last entry wins) and serialize only once.
 	for (const LoadoutSubmitEntry &e : req.entries) {
 		WeaponLoadoutSlot s;
 		s.type_id = e.adm_index;
 		s.ammo_primary = e.ammo_primary;     // echoed; client clamps on apply (@0x4295d7)
 		s.ammo_secondary = e.ammo_secondary; // echoed; sub-slot clamp (@0x429652)
-		s.ammo_alt = 0;                      // restriction byte — witnessed 0 (@0x502871)
-		reply.slots.push_back(s);
+		s.ammo_alt = normalized_damage_class(e.variant);
+		auto existing = std::find_if(reply.slots.begin(), reply.slots.end(),
+								 [type_id = s.type_id](const WeaponLoadoutSlot &slot) {
+									 return slot.type_id == type_id;
+								 });
+		if (existing == reply.slots.end()) reply.slots.push_back(s);
+		else *existing = s;
 	}
 	std::sort(reply.slots.begin(), reply.slots.end(),
 	          [](const WeaponLoadoutSlot &a, const WeaponLoadoutSlot &b) {
 		          return a.type_id < b.type_id;
 	          }); // table-less fallback: ascending adm index (coincides for the golden kit)
-	return encode_weapon_loadout(reply);
+	return grant;
 }
 
 // tag=0x1E GAME-EVENT ev 0x3A (58) — the private deploy-screen frontier hint: "go capture zone N".
@@ -540,22 +596,38 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// the weapon-slot mismatch -> C2S 0x0F flood. Also unlatches the burst's phase 8
 				// gate so the game-start bundle emits on the next tick. The reply derives from
 				// THIS request + the armory table when the host fed one (see
-				// build_tag_5a_weapon_loadout; D-NET-141).
+				// grant_weapon_loadout; D-NET-141).
+				LoadoutSubmit req;
+				// The decoder owns the framing contract: header, whole 4-byte entries, and one
+				// terminal 0xFF. Trailing bytes after the terminator are accepted exactly as
+				// retail accepts them (no end check after the 0xFF exit @0x515a99); only an
+				// unterminated list is ignored — the crash-safe stand-in for retail's
+				// zero-fill infinite loop — without opening the phase-8 gate or disturbing
+				// the last valid grant.
+				if (!decode_loadout_submit(msg.payload.data(), msg.payload.size(), req)) break;
 				const world::WeaponTable *armory =
 						(world != nullptr && !world->weapons.empty()) ? &world->weapons : nullptr;
+				const GrantedWeaponLoadout grant = grant_weapon_loadout(req, armory);
 				// Retain the GRANTED body: the deploy-release bundle re-sends it (the client's
 				// 0x5A apply is the deploy un-latcher — resets dword_81474C; §5.30, D-NET-156).
-				st.last_loadout_reply = build_tag_5a_weapon_loadout(msg.payload, armory);
+				st.last_loadout_reply = encode_weapon_loadout(grant.reply);
 				replies.push_back(make_protocol_message(0x5A, st.last_loadout_reply));
 				// Accepted soldier type -> entity+660 playerClass [orig: @0x515ab0] — feeds the
 				// §5.10 field-17 class nibble and the 0x0C/0x18 spawn records for this player.
 				if (world != nullptr && conn.link.owned_entity.valid()) {
 					if (world::Entity *pe = world->registry.get(conn.link.owned_entity)) {
-						LoadoutSubmit req;
-						decode_loadout_submit(msg.payload.data(), msg.payload.size(), req);
-						pe->player_class =
-								(req.soldier_type >= 5 && req.soldier_type <= 9)
-										? req.soldier_type : 8;
+						pe->player_class = grant.reply.avatar_class;
+						// The fourth accepted byte is copied to the player-slot table at
+						// [ammoDef.index]. Weapon_CalcImpactDamage later interprets 1 as
+						// x0.9 and 2 as x1.1 for person targets.
+						if (armory != nullptr) {
+							pe->ammo_damage_class.assign(world->ammo.entries.size(), 0);
+							for (const auto &entry : grant.ammo_damage_classes) {
+								const size_t ammo_index = static_cast<size_t>(entry.first);
+								if (ammo_index < pe->ammo_damage_class.size())
+									pe->ammo_damage_class[ammo_index] = entry.second;
+							}
+						}
 					}
 				}
 				st.loadout_synced = true;
@@ -662,7 +734,9 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// entity_reset_to_spawn_state re-backs spawn_position from the new pose and
 				// clears the movement gate [orig: Entity_ResetToSpawnState @0x4B9610].
 				world::entity_reset_to_spawn_state(*player);
-				if (world->player_item_hp > 0) player->health = world->player_item_hp;
+				// Same signed-i16 healthMax gate as the first spawn (player_spawn.cpp).
+				if (world->player_has_item_def && world->player_item_hp != 0)
+					player->health = world::retail_signed_i16(world->player_item_hp);
 				else if (player->health_max > 0) player->health = player->health_max;
 				else player->health = 100; // [orig: Entity_InitFromItemDef @0x49e550]
 				// Successful deploy CLEARS the respawn-pending flag + the hidden bit — the
@@ -690,7 +764,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 							(world != nullptr && !world->weapons.empty()) ? &world->weapons
 							                                              : nullptr;
 					replies.push_back(make_protocol_message(
-							0x5A, build_tag_5a_weapon_loadout({}, armory)));
+							0x5A, encode_weapon_loadout(
+									  grant_weapon_loadout(LoadoutSubmit{}, armory).reply)));
 				}
 				replies.push_back(make_protocol_message(
 						0x61, {static_cast<uint8_t>(session_seed & 0xFFu),

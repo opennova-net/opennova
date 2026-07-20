@@ -21,11 +21,15 @@ world::AmmoTable build_ammo_table(const DefAmmoFile &ammo) {
 		// kept the original fixed encoding).
 		e.spread_error = static_cast<float>(d.error_fp16) / 65536.0f;
 		e.drag = static_cast<float>(d.drag_fp16) / 65536.0f;
+		e.drag_fp16 = d.drag_fp16;
 		e.bullet_radius = static_cast<float>(d.bullet_radius_fp16) / 65536.0f;
+		e.bullet_radius_fp16 = d.bullet_radius_fp16;
 		e.spread_count = d.spread_count;
 		e.kztype = d.kztype;
 		e.kz_damage = d.kz_damage;
 		e.weight_in_grains = d.weight_in_grains;
+		e.min_stable_velocity = d.min_stable_velocity;
+		e.tumble_error_fp16 = d.tumble_error_fp16;
 		e.min_damage = d.min_damage;
 		e.max_damage = d.max_damage;
 		e.penetration_impact = d.penetration_impact;

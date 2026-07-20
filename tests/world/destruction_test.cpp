@@ -1172,6 +1172,7 @@ void test_round_destroys_item() {
     Entity barrel_seed;
     barrel_seed.kind = EntityKind::Item;
     barrel_seed.item_id = 500;
+    barrel_seed.has_item_def = true; // retail damage gate: geometry + ItemDef
     barrel_seed.health = 40;
     barrel_seed.position = Vec3{6.0f, 0.0f, 1.0f};
     barrel_seed.bound_radius = 1.0f;
