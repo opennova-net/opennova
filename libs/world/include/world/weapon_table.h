@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <world/weapon_fsm.h>
 
 namespace opennova::world {
 
@@ -69,6 +70,11 @@ struct WeaponTableEntry {
     // arithmetic is identical; only the id VALUES may differ from retail bytes (never
     // wire-visible; pools are entity-local).
     int16_t ammo_class_id = -1;
+    // Runtime action descriptors baked from this weapon.def block's ACTION rows.
+    // Auto clip durations remain zero until a host with the ADM duration ring rebakes
+    // them; explicit authored timings and all state transitions are retained.
+    // [orig: Anim_InitActions @0x541fa0]
+    WeaponFsmDef action_fsm;
     bool valid = false;
 };
 

@@ -62,6 +62,12 @@ int main(void) {
 	CHECK(m4 != nullptr);
 	CHECK(m4->category == 3 && m4->rank == 0);
 	CHECK(m4->maxclips == 10 && m4->clipsize == 30 && m4->startrounds == 300);
+	CHECK(m4->action_fsm.auto_fire);
+	CHECK(m4->action_fsm.clip_capacity == 30);
+	CHECK(m4->action_fsm.actions[world::weapon_action::kFire].id ==
+	      world::weapon_action::kFire);
+	CHECK(m4->action_fsm.actions[world::weapon_action::kFire].delay_end == 3);
+	CHECK(m4->action_fsm.actions[world::weapon_action::kRecoil].delay_end == 2);
 	CHECK(m4->charfilter == (0x08u | 0x01u | 0x10u)); // rifleman|medic|engineer
 	CHECK(m4->teamfilter == 0x02u);                   // blue
 	CHECK(m4->loadout_subclasses == 1 && m4->loadout_selectable == 1);
@@ -108,6 +114,12 @@ int main(void) {
 		// An unfiltered (emplaced) entry is never loadout-visible: masks are 0.
 		const int mini = table.index_of("WPN_WEAKAIMINI");
 		CHECK(mini > 0 && !np::loadout_entry_permitted(*table.by_index(static_cast<uint8_t>(mini)), 1, 8));
+		const world::WeaponTableEntry &minie =
+				*table.by_index(static_cast<uint8_t>(mini));
+		CHECK(minie.action_fsm.auto_fire);
+		CHECK(minie.action_fsm.clip_capacity == -1);
+		CHECK(minie.action_fsm.actions[world::weapon_action::kFire].delay_end == 0);
+		CHECK(minie.action_fsm.actions[world::weapon_action::kRecoil].delay_end == 7);
 	}
 
 	// --- token -> bit maps [orig: @0x830EB0 / @0x830ED8].

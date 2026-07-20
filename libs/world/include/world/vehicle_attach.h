@@ -36,18 +36,21 @@ class World;
 //   4. seat occupancy: an occupied matching seat / an already-taken wire bone rejects
 //      [orig: @0x435ba9 mountHandles[idx] != 0xFFFF];
 //   5. an already-mounted requester detaches first [orig: @0x435bce];
-//   6. writes [orig: Entity_AttachToVehicleSlot @0x4946D0]: seat occupant = player,
-//      player Flags = (Flags & 0xFFFF5FBF) | 0x40 (clear 0x8000|0x2000, set mounted),
-//      mount_target/mount_bone/mount_type/mount_seat set, stance bits cleared
-//      [orig: MoveOrder &= ~0x300 @0x435c42 + the input-latch clears @0x435c54].
+//   6. writes: seat occupant + mount_target/mount_bone/mount_type/mount_seat, then
+//      stance bits clear [orig: MoveOrder &= ~0x300 @0x435c42 + input latches
+//      @0x435c54]. Generic vehicle slots clear 0xA000 and set Flags 0x40
+//      [orig: Entity_AttachToVehicleSlot @0x494752]; UseGun clears 0xA000 without
+//      setting 0x40 and binds the parent weapon slot
+//      [orig: Entity_AttachToUseGunSlot @0x546c42-0x546c7c].
 bool entity_process_vehicle_attach(World &world, EntityHandle player, EntityHandle vehicle,
                                    uint8_t bone);
 
 // Apply one C2S 0x27 detach: release every seat this occupant holds on its mount target,
-// clear the mount fields + the 0x40 mounted flag + the stance bits, and run the
+// clear the mount fields + any generic-slot 0x40 flag + the stance bits, and run the
 // +368 primary-occupant release (the engine-stop edge fires only for the claimant).
-// [orig: Entity_DetachFromVehicle @0x4355F0 — MoveOrder &= ~0x300, EquippedSlot restore
-//  (unmodeled), the +368/+0x170 claimant leg @0x4356e9..0x43577c,
+// [orig: Entity_DetachFromVehicle @0x4355F0 — MoveOrder &= ~0x300, EquippedSlot
+//  restore for parentSlot 2/3 then non-player clear @0x435671..0x4356aa (ported),
+//  the +368/+0x170 claimant leg @0x4356e9..0x43577c,
 //  all matching mountHandles -> 0xFFFF, Flags &= ~0x40, +0x16C/+0x157/+0x168 cleared.]
 // Returns true iff the entity was mounted.
 bool entity_detach_from_vehicle(World &world, EntityHandle player);

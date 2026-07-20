@@ -62,6 +62,11 @@ int main() {
     // waypoint_id is 1-based (channel 0 = the AI "no route" sentinel); these patrol channel 1.
     m.organics.push_back(organic(0, 0, 0, /*team=*/1, /*wp_id=*/1, /*wp_num=*/0));
     m.organics.push_back(organic(50 << 16, 0, 0, /*team=*/2, /*wp_id=*/1, /*wp_num=*/0));
+    m.organics[0].bmsi_attributes =
+            static_cast<uint32_t>(bms::BmsiAttributeFlags::Blind) |
+            static_cast<uint32_t>(bms::BmsiAttributeFlags::Guarding) |
+            static_cast<uint32_t>(bms::BmsiAttributeFlags::Berserk) |
+            static_cast<uint32_t>(bms::BmsiAttributeFlags::Coward);
 
     bms::Entity bldg{};
     bldg.type = bms::ItemType::Building;
@@ -118,6 +123,12 @@ int main() {
     CHECK(e0->team == 1);
     CHECK(e0->pos[0] == 0);               // spawned at origin
     CHECK(e0->net_id == 1);               // the AUTHORED record id, copied verbatim
+    CHECK((e0->slot.f[1] & 0x209) == 0x209);
+    CHECK(e0->see_all);
+    CHECK((world.registry.get(world.registry.find_by_net_id(1))->engine_flags &
+           0x40u) != 0);
+    CHECK((world.registry.get(world.registry.find_by_net_id(1))->flags &
+           0x40u) != 0);
 
     // entities carry their authored net ids; the registry resolves them (faithful
     // find_by_net_id over pools 0..3, markers included).

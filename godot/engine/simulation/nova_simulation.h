@@ -297,8 +297,9 @@ private:
 	// --- the local player's equipped-weapon action FSM (net-re §5.62) ------------------
 	// The 12-state action queue on the equipped slot, pumped once per logic tick after the
 	// world advances [orig: WeaponAction_ProcessAllEntities @ 0x542690 in the frame loop;
-	// this port pumps the LOCAL player's slot only — D-WPN-6]. The host feeds the baked def
-	// via set_local_player_weapon and per-frame trigger state via
+	// this member owns the LOCAL player's slot. World::run_logic_tick separately pumps
+	// occupied UseGun parent slots for NPC gunners in that same global phase]. The host
+	// feeds the baked def via set_local_player_weapon and per-frame trigger state via
 	// set_local_player_weapon_input. Presentation outputs accumulate as ordered
 	// per-tick records because several logic ticks can run per render frame; the
 	// snapshot's monotonic serials remain diagnostics/rebuild state.

@@ -100,6 +100,8 @@ void test_toggle_nearest_seat() {
         CHECK(player_toggle_vehicle_mount(r.w, r.player_h));
         CHECK(r.player().mounted);
         CHECK(r.player().mount_target == r.veh_h);
+        CHECK((r.player().flags & 0x40u) != 0);
+        CHECK((r.player().engine_flags & 0x40u) != 0);
         // Lowest SCORE (horiz + 3D/512) wins [orig: @0x436123]: from +2x the ctrl
         // bone (+0.5,+1.5 local; horiz 2.12) beats the sitex (0,-2; horiz 2.83).
         CHECK(r.player().mount_seat == 0);
@@ -220,6 +222,14 @@ void test_bms_mount_predicates() {
     gun.position = r.veh().position;
     gun.health = 500;
     gun.alive = true;
+    gun.primary_weapon.assign(1, 'x');
+    r.w.weapons.entries.resize(2);
+    r.w.weapons.entries[1].name.assign(1, 'x');
+    r.w.weapons.entries[1].clipsize = -1;
+    r.w.weapons.entries[1].valid = true;
+    r.player().equipped_adm_index = 7;
+    r.player().flags |= 0x100u;
+    r.player().engine_flags |= 0x100u;
     Seat gseat;
     gseat.type = SeatType::Gunner;
     gseat.bone_index = 1;
@@ -230,9 +240,19 @@ void test_bms_mount_predicates() {
     entity_detach_from_vehicle(r.w, r.player_h);
     CHECK(entity_process_vehicle_attach(r.w, r.player_h, gh, 1));
     CHECK(r.w.registry.get(r.player_h)->mount_type == SeatType::Gunner);
+    CHECK((r.player().flags & 0x40u) == 0);
+    CHECK((r.player().engine_flags & 0x40u) == 0);
     CHECK(cmds.local_player_on_gun_of_ssn(500));
     CHECK(cmds.local_player_attached_to_ssn(11)); // via the carrier link
     CHECK(!cmds.local_player_driving_ssn(500));
+    CHECK(r.player().equipped_adm_index == 1);
+    CHECK(r.player().pre_use_gun_equipped_adm_index == 7);
+    CHECK(r.player().use_gun_slot_swapped);
+    CHECK(r.w.registry.get(gh)->primary_weapon_owner == r.player_h);
+    CHECK(entity_detach_from_vehicle(r.w, r.player_h));
+    CHECK(r.player().equipped_adm_index == 7);
+    CHECK(!r.player().use_gun_slot_swapped);
+    CHECK(!r.w.registry.get(gh)->primary_weapon_owner.valid());
 }
 
 // The AI-driver leg: an NPC in the ctrl seat + a staged brain waypoint drives the truck

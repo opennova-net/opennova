@@ -198,6 +198,15 @@ bool vehicle_claim_primary_occupant(World &world, Entity &vehicle, EntityHandle 
 // [orig: Entity_DetachFromVehicle @0x4355f0 — `occupantEntity == entity` gate @0x4356e9,
 // emitter release + engine-stop sound @0x435716..0x435759, +368 clear @0x43577c]
 bool vehicle_release_primary_occupant(World &world, Entity &vehicle, EntityHandle occupant);
+// Swap a UseGun occupant to the parent's embedded weapon slot, preserving the
+// personal equipped AdmDef for detach. Returns true once the parent weapon resolves.
+// [orig: Entity_AttachToUseGunSlot @0x546b80..0x546c73]
+bool vehicle_bind_use_gun_slot(World &world, Entity &occupant, Entity &vehicle);
+// Clear parent ownership; restore a player's personal EquippedSlot and clear an
+// NPC's, matching the post-restore retail player-classifier branch.
+// [orig: Entity_DetachFromVehicle restore @0x435671-0x435687,
+//  NPC clear @0x435694-0x4356aa]
+void vehicle_release_use_gun_slot(Entity &occupant, Entity *vehicle);
 // True when at least one Controller/Driver seat has a live, internally consistent
 // occupant link. Motor input only — NOT the effect-lifecycle predicate (that is the
 // primary-occupant claim above).

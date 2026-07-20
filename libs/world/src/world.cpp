@@ -1,5 +1,6 @@
 #include "world/world.h"
 
+#include <algorithm>
 #include <cmath>
 #include <utility>
 #include <vector>
@@ -71,6 +72,51 @@ bool vehicle_release_primary_occupant(World &world, Entity &vehicle, EntityHandl
     vehicle.primary_occupant = EntityHandle{};
     emit_vehicle_control_stopped(world, vehicle);
     return true;
+}
+
+bool vehicle_bind_use_gun_slot(World &world, Entity &occupant, Entity &vehicle) {
+    if (!occupant.use_gun_slot_swapped) {
+        occupant.pre_use_gun_equipped_adm_index = occupant.equipped_adm_index;
+        occupant.use_gun_slot_swapped = true;
+    }
+    vehicle.primary_weapon_owner = occupant.handle;
+
+    const int weapon_index = world.weapons.index_of(vehicle.primary_weapon.c_str());
+    if (weapon_index < 0 || weapon_index > 0xFF) {
+        occupant.equipped_adm_index = 0xFF;
+        return false;
+    }
+    const uint8_t adm = static_cast<uint8_t>(weapon_index);
+    const WeaponTableEntry *weapon = world.weapons.by_index(adm);
+    if (weapon == nullptr) {
+        occupant.equipped_adm_index = 0xFF;
+        return false;
+    }
+    if (vehicle.primary_weapon_slot_adm != adm) {
+        vehicle.primary_weapon_slot = WeaponSlotState{};
+        vehicle.primary_weapon_slot_adm = adm;
+        if (weapon->clipsize < 0) {
+            vehicle.primary_weapon_slot.clip = -1;
+        } else {
+            vehicle.primary_weapon_slot.clip = weapon->clipsize;
+            vehicle.primary_weapon_slot.reserve = std::max<int32_t>(
+                    0, static_cast<int32_t>(weapon->startrounds) - weapon->clipsize);
+        }
+    }
+    occupant.equipped_adm_index = adm;
+    return true;
+}
+
+void vehicle_release_use_gun_slot(Entity &occupant, Entity *vehicle) {
+    if (vehicle != nullptr && vehicle->primary_weapon_owner == occupant.handle)
+        vehicle->primary_weapon_owner = EntityHandle{};
+    if (!occupant.use_gun_slot_swapped) return;
+    const bool is_player =
+            ((occupant.flags | occupant.engine_flags) & 0x100u) != 0;
+    occupant.equipped_adm_index =
+            is_player ? occupant.pre_use_gun_equipped_adm_index : 0xFF;
+    occupant.pre_use_gun_equipped_adm_index = 0xFF;
+    occupant.use_gun_slot_swapped = false;
 }
 
 bool vehicle_has_valid_control_occupant(const World &world, const Entity &vehicle) {
@@ -433,9 +479,22 @@ bool EntityCommands::mount(uint16_t occupant_ssn, uint16_t target_ssn, SeatSelec
     occ->mount_seat = static_cast<int8_t>(seat_idx);       // [orig: occupant+360]
     occ->mount_type = s.type;
     occ->mount_bone = s.bone_index;                        // [orig: occupant+0x157]
-    occ->mounted = true;                                   // [orig: occupant+36 |= 0x40]
+    occ->mounted = true;
+    if (s.type == SeatType::Gunner) {
+        // UseGun clears the transient 0xA000 pair but does not set the generic
+        // carried/vehicle flag. [orig: Entity_AttachToUseGunSlot @0x546c56-0x546c7c]
+        occ->flags &= ~0xA000u;
+        occ->engine_flags &= ~0xA000u;
+    } else {
+        // Ordinary vehicle slots clear 0xA000 and mark the occupant carried.
+        // [orig: Entity_AttachToVehicleSlot @0x494752-0x494775]
+        occ->flags = (occ->flags & 0xFFFF5FBFu) | 0x40u;
+        occ->engine_flags = (occ->engine_flags & 0xFFFF5FBFu) | 0x40u;
+    }
     occ->mounted_config_valid = tgt->emplaced_config_valid;
     occ->mounted_config = tgt->emplaced_config_valid ? tgt->emplaced_config : 0;
+    if (s.type == SeatType::Gunner)
+        vehicle_bind_use_gun_slot(world_, *occ, *tgt);
     pose_mounted_occupant(*occ, *tgt, s);
     vehicle_claim_primary_occupant(world_, *tgt, oh, s.type); // [orig: +368 claim @0x4946d0]
     return true;
@@ -493,7 +552,10 @@ bool EntityCommands::dismount(uint16_t occupant_ssn) {
     Entity *tgt = world_.registry.get(occ->mount_target);
     if (tgt && occ->mount_seat >= 0 && occ->mount_seat < static_cast<int>(tgt->seats.size()))
         tgt->seats[occ->mount_seat].occupant = EntityHandle{}; // [orig: vehicle[400+2*slot]=0xFFFF]
+    vehicle_release_use_gun_slot(*occ, tgt);
     occ->mounted = false;
+    occ->flags &= ~0x40u;
+    occ->engine_flags &= ~0x40u;
     occ->mount_target = EntityHandle{};
     occ->mount_target_net_id = 0;
     occ->mount_target_bms_id = 0;
@@ -672,6 +734,13 @@ void World::run_logic_tick(bool is_authority, bool pre_mission) {
     // entity to the replicated wire state. [orig: the client tick still steps the
     // local player's infantry motor; Server_TickUpdate / Game_ProcessMainFrame.]
     for (ISystem *s : systems_) s->tick(*this, ctx);
+    // The global weapon-action pump follows the complete entity/system update and
+    // precedes projectile stepping. This is where an AI UseGun nextAction write can
+    // become a same-frame round.
+    // [orig: Entity_UpdateAllEntities @0x52674b, then
+    //  WeaponAction_ProcessAllEntities @0x526786]
+    if (!pre_mission && ai != nullptr)
+        ai->pump_mounted_weapon_slots(*this, logic_tick);
     // Live rounds step inside the world frame, authority-only — the client's visual
     // round re-sim is not modeled here [orig: Entity_UpdateAllEntities ->
     // Weapon_UpdateAllProjectiles @0x4ec020; damage is authority-gated end-to-end,

@@ -112,26 +112,53 @@ static void test_mount_config_lifecycle() {
     gun.emplaced_config_valid = true;
     gun.emplaced_config = 0;
     gun.seats[0].bone_index = 7;
+    gun.primary_weapon.assign(1, 'x');
+    w.weapons.entries.resize(2);
+    w.weapons.entries[1].name.assign(1, 'x');
+    w.weapons.entries[1].clipsize = -1;
+    w.weapons.entries[1].valid = true;
     const EntityHandle gh = w.registry.spawn(1, gun);
-    const EntityHandle sh =
-            w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
+    Entity soldier = make_soldier(100, 0.f, 0.f, 0.f);
+    soldier.equipped_adm_index = 7;
+    soldier.flags |= 0x100u;
+    soldier.engine_flags |= 0x100u;
+    const EntityHandle sh = w.registry.spawn(0, soldier);
 
     CHECK(w.commands.mount(100, 200));
     CHECK(w.registry.get(sh)->mounted_config_valid);
     CHECK(w.registry.get(sh)->mounted_config == 0);
     CHECK(w.registry.get(sh)->mount_bone == 7);
+    // UseGun is not the generic carried-slot path and never gains Flags 0x40.
+    // [orig: Entity_AttachToUseGunSlot @0x546c56-0x546c7c]
+    CHECK((w.registry.get(sh)->flags & 0x40u) == 0);
+    CHECK((w.registry.get(sh)->engine_flags & 0x40u) == 0);
+    CHECK(w.registry.get(sh)->equipped_adm_index == 1);
+    CHECK(w.registry.get(sh)->pre_use_gun_equipped_adm_index == 7);
+    CHECK(w.registry.get(sh)->use_gun_slot_swapped);
+    CHECK(w.registry.get(gh)->primary_weapon_owner == sh);
+    CHECK(w.registry.get(gh)->primary_weapon_slot_adm == 1);
+    CHECK(w.registry.get(gh)->primary_weapon_slot.clip == -1);
     const auto occupied = std::make_unique<World::Snapshot>(w.snapshot());
 
     CHECK(w.commands.dismount(100));
     CHECK(!w.registry.get(sh)->mounted_config_valid);
     CHECK(w.registry.get(sh)->mounted_config == 0);
     CHECK(w.registry.get(sh)->mount_bone == 0);
+    CHECK((w.registry.get(sh)->flags & 0x40u) == 0);
+    CHECK((w.registry.get(sh)->engine_flags & 0x40u) == 0);
+    CHECK(w.registry.get(sh)->equipped_adm_index == 7);
+    CHECK(!w.registry.get(sh)->use_gun_slot_swapped);
+    CHECK(!w.registry.get(gh)->primary_weapon_owner.valid());
 
     w.restore(*occupied);
     CHECK(w.registry.get(sh)->mounted);
     CHECK(w.registry.get(sh)->mounted_config_valid);
     CHECK(w.registry.get(sh)->mounted_config == 0);
     CHECK(w.registry.get(sh)->mount_bone == 7);
+    CHECK(w.registry.get(sh)->equipped_adm_index == 1);
+    CHECK(w.registry.get(sh)->pre_use_gun_equipped_adm_index == 7);
+    CHECK(w.registry.get(sh)->use_gun_slot_swapped);
+    CHECK(w.registry.get(gh)->primary_weapon_owner == sh);
     CHECK(w.registry.get(gh)->emplaced_config_valid);
     CHECK(w.registry.get(gh)->emplaced_config == 0);
 }
@@ -564,7 +591,7 @@ int main() {
         CHECK(ai.at(idx)->inf.anim_state == 70);
     }
 
-    // ---- mounted seat orientation feeds the complete collision/render body frame ----
+    // ---- mounted seat orientation feeds the carried body while gunner look stays live ----
     // The seat is authored in mission degrees, while every AiEntity yaw field is engine BAM:
     // heading = (90 - mission yaw) * 11930464. For a gunner, 37 - 11 = 26 degrees,
     // so the witnessed integer convention produces (90 - 26) * 11930464 = 763549696.
@@ -573,6 +600,7 @@ int main() {
         constexpr int32_t kSeatHeading = 763549696;
         constexpr int32_t kSeatPitch = -143165577;
         constexpr int32_t kSeatRoll = 202817900;
+        const int32_t kLookHeading = world::bam_heading_from_mission_yaw_deg(80.0);
 
         auto wp = std::make_unique<World>();
         World &w = *wp;
@@ -596,6 +624,7 @@ int main() {
         ae->inf.leg_yaw[1] = 0x33333333;
         ae->inf.leg_target[0] = 0x44444444;
         ae->inf.leg_target[1] = 0x55555555;
+        ae->heading = kLookHeading;
         ae->body_pitch = 0x12345678;
         ae->roll = 0x23456789;
 
@@ -603,10 +632,13 @@ int main() {
         CHECK(ai.pose_if_mounted(*ae, w));
         const Entity *occ = w.registry.get(sh);
         CHECK(occ != nullptr);
-        CHECK(occ->yaw == 26);
+        // UseGun attachment restores the organic's independent look after carrying
+        // the body frame. With no aim solution yet, the look remains unchanged.
+        // [orig: Entity_AttachToUseGunSlot save/restore @0x546416..0x546664]
+        CHECK(occ->yaw == 80);
         CHECK(occ->pitch == -12);
         CHECK(occ->roll == 17);
-        CHECK(ae->heading == kSeatHeading);
+        CHECK(ae->heading == kLookHeading);
         CHECK(ae->inf.body_heading == kSeatHeading);
         CHECK(ae->inf.leg_yaw[0] == kSeatHeading);
         CHECK(ae->inf.leg_yaw[1] == kSeatHeading);

@@ -1,7 +1,7 @@
 # World / WAC / AI runtime — RE record and equivalence verdicts
 
 Binary: `Jointops.exe` (retail JO:CA, Steam), IDB `Jointops.exe.kong.i64`, imagebase 0x400000.
-Sessions: 2026-06-07 (WAC ISA + AI P1/P2, prior), 2026-06-08 (foundation), **2026-06-10 (entity-motor architecture grill — this record)**, 2026-07-08 (§14 aim overlay), 2026-07-09 (§14.8 weapon-channel producer), 2026-07-16 (§16 ground-AI combat chain — targeting feed + fire convergence).
+Sessions: 2026-06-07 (WAC ISA + AI P1/P2, prior), 2026-06-08 (foundation), **2026-06-10 (entity-motor architecture grill — this record)**, 2026-07-08 (§14 aim overlay), 2026-07-09 (§14.8 weapon-channel producer), 2026-07-16 (§16 ground-AI combat chain — targeting feed + fire convergence), 2026-07-20 (§26 allegiance, damage response, and mounted-weapon parity).
 Scope: `libs/world` (entity registry, var store, AI), `libs/wac` (VM), the mission-runtime bridge, and the
 locomotion/motor layer. Companion docs: `docs/mission/bms-event-runtime-re.md`,
 [ADR 0007](../adr/0007-skeletal-runtime-and-entity-visual.md) (skeletal),
@@ -1716,7 +1716,7 @@ and a 0.5 m player detection sphere (§1.2.2.7).
 | D-COL-6 | CT Change Team Box touch (0x200) is detected but not forwarded | `Server_OnPlayerTouchCaptureZone @ 0x500ba0` consumes the CT touch for capture/team-change requests | zone capture rides its own 1 Hz radius path today (zone_capture.cpp), so authored CT shape and touch timing are ignored; reconcile when contact-driven requests land |
 | D-COL-7 | vertical ground probe = bilinear column height | `Terrain_RaycastHeightmapHiRes_0 @ 0x60e710` march + bisect | equal for vertical rays on a heightfield (the terrain-re B1 note); oblique rays use terrain_raycast_refined |
 | D-COL-8 | run-over kill / crush sound / walk-over-body sound / waypoint + collision callbacks (attrib 1/2) / the CD 0x20 door-section vtbl callback / the blocked-push AI latch (pad_368[1]) not ported | steps 4/5/6 above | CD containment and its section mask are detected, but doors/lifts remain operationally inert; needs the animated-object callback plus Score/net + sound + destruction hooks |
-| D-COL-9 | mounted/carried source semantics unmodeled: the `savedPosY` force-suppression gate (parentEntity+alive or Flags 0x40), the MoveOrder-0x100 step-up variant it selects, and the `+0x2c` aux latches (the pre-resolve 0x40 clear + the CF/type-13 0x800 set) | `@ 0x4b2bfc/0x4b2d25/0x4b3330/0x4b34ba` | only on-foot organics run our full resolver; CF's practical vehicle/FARP special-function path is absent and rides the vehicle/mount pass with D-COL-5 |
+| D-COL-9 | mounted-organic cadence and force suppression PORTED 2026-07-20: a live mounted source calls the resolver every eight salted ticks and still processes contact/flag callbacks, but skips model push accumulation when it has a live modeled parent or `Flags & 0x40`; the MoveOrder-0x100 step-up variant and `+0x2c` auxiliary latches remain unmodeled | `[orig: Entity_UpdateInfantryAI @ 0x4bf5a5-0x4bf5c6]`; `[orig: movement collision resolver @ 0x4b2be0-0x4b2d3f]`; force gates `@ 0x4b3045-0x4b30af` / `@ 0x4b3658-0x4b36b9` | mounted contact phase is live and no longer receives ordinary mover push; specialized step-up/auxiliary tails remain with D-COL-5 |
 | D-COL-10 | PANM rotation types 3/4 are correctly classified as live and routed through per-section matrices, but `NovaObjectData::evaluate_panm` currently passes an identity `view_inverse` | retail types 3/4 derive their matrix from the current global inverse-view matrix in `PANM_BuildNodeMatrices` | camera-facing/upright billboard parts can have a camera-relative visual/collision pose mismatch; no committed collidable type-3/4 witness yet. Requires sharing the render camera matrix beside `PanmClock` |
 | D-COL-11 | `LiveRound` has no BB/indoors state; projectile terrain arbitration only has the ammo-flag bypass | retail refreshes each projectile's blink state per tick and skips the terrain clamp while the round is indoors (`Projectile_UpdatePhysics @ 0x4e9d70`, refresh call `@ 0x4e9f21`, terrain gate `@ 0x413785`) | a shot inside an underground/interior BB can falsely hit the terrain heightfield. Port after the projectile probe radius/state lifetime is pinned; do not guess from the player’s 0.5 m BB sphere |
 
@@ -2154,8 +2154,8 @@ weapon-slot target classes (`profile+40+4*i` ∈ 0..3), each gated by a per-clas
 
 Entry gates: no brain → null; own team byte (`+354`) == 0 requires `AiSlot[1] & 0x200`;
 `g_spawn_success_gate @ 0x24C1928` nonzero → null. Per-candidate gates, in order:
-`+28` (in-use) ≠ 0; team byte `+354` — teamless candidates need the attacker's
-`AiSlot[1] & 0x200` ("attack anyone") flag, same-team skipped unless that flag; skip
+`+28` (in-use) ≠ 0; team byte `+354` — teamless and same-team candidates are accepted
+when either scanner or candidate carries `AiSlot[1] & 0x200` (`attack anyone`); skip
 `flags & 2` and `flags & 0x8000000`; health word `+286 > 0`; not self;
 **aiTargetRefCount word `+530` ≤ 16** unless `profile+100 & 8` (anti-pile-on, §16.3);
 FOV/range as ported (primary FOV byte `profile+75|1` / range `profile+78`, secondary
@@ -3387,7 +3387,7 @@ the org2 2× local integrate (§22.2). Unported by decision — dev/admin featur
 
 ### 22.4 Port deltas landed this session (libs/world)
 
-- Mounted early-continue now captures seat yaw/pitch/roll before the local look rewrite,
+- Mounted pose phase captures seat yaw/pitch/roll before the local look rewrite,
   synchronizes `body_heading`, both `leg_yaw`/`leg_target` chains, `body_pitch`, and roll,
   and keeps the remote seat heading separate from the local player's full-precision look.
   The non-cardinal yaw path retains the witnessed `(90 - yaw) * 11930464` integer convention.
@@ -3726,7 +3726,9 @@ Ported same session (the second wave, after the 00TRa probe forced them out):
   authors a CONTROL seat (ctrlx/drvrx spec — the drivable class; the stand-in
   for the def AIData gate, D-AI-11), initialized into state 16 GROUND_FOLLOWWP
   (the shipped ground .aip `default_state`; the profile parse is unported).
-  Pure-gunner emplacements stay brainless (D-AI-2's slice). Item brains also
+  Pure-gunner parent items stay brainless: retail lets the attached organic gunner own
+  perception and drive the parent's embedded weapon slot (§26), so this is no longer a
+  no-fire condition. Item brains also
   spawn with the flags100-bit1 ACQUIRE SKIP [orig: the profile+100 & 2 gate
   @ 0x46775c]: the shipped transport .aip profiles author zero target
   priorities, and the D-AI-1 feed scans unconditionally where retail's class
@@ -3748,10 +3750,15 @@ seat bone -> **Position = bone world pos, bodyHeading/headLook = bone yaw, Roll,
 bodyPitch** (the entity Yaw — the LOOK — stays player-owned), and the seated
 anim = `atol(bone-name digits) + 76` (a `sitex24` names anim 100; +-0x4444440
 roll on the carrier flips 109/110). Our `pose_mounted_occupant` performs the carry, then
-`pose_if_mounted` captures its yaw/pitch/roll before any local look rewrite. Because the
-mounted early-continue skips the normal infantry update, it explicitly synchronizes
+`pose_if_mounted` captures its yaw/pitch/roll before any local look rewrite. It synchronizes
 `body_heading`, both `leg_yaw` and `leg_target` chains, `body_pitch`, and roll to that
-captured seat frame; a remote occupant's `AiEntity.heading` uses the same exact seat heading.
+captured seat frame. A non-gunner/passenger remote occupant uses that seat heading; a
+UseGun organic restores its independent live look and then chases/clamps against the
+captured mount base (§26.5).
+The mounted branch is no longer an early bypass of the infantry combat/animation pass:
+live mounted organics keep perception, damage reaction, target acquisition, aim, and
+animation, then bypass only the ordinary locomotion tail after the mounted collision phase
+(§26), matching the retail live-parent/health split.
 The local body remains in that seat frame while the camera LOOK remains player-owned:
 `AiEntity.heading`/`pitch` take full-precision `target_heading`/`look_pitch`; only registry
 yaw is the rounded wire/motor mirror. Live move-order bits still mirror into the wire fields
@@ -3762,7 +3769,7 @@ the motor consumes, and a degree round-trip therefore cannot quantize yaw or fre
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
-| D-AI-11 | Mount-chain stand-ins: (a) the scan candidate set is a registry sweep (no per-entity proximity lists) and the eye is the +0.9 u chest constant (no CameraOffset), +0.1875 u bias kept; (b) the emplaced-gun carrier LOS/reject legs (attrib 0x20 -> groundEntity) are unmodeled — the armory-point leg (searchMode 1 / seatType 4) CLOSED 2026-07-17: `find_nearest_free_seat(..., armory_mode)` scans `Entity.armory_points` with the shared math (the attach-label pass consumes it; hud-re.md "Attach labels"); (c) the weapon-busy gate lives in the sim binding (World has no weapon slot); (d) the WAC no-dismount global (`dword_C6EADC`) is unmodeled; (e) seat-position keys 0xB6-0xBF (Entity_FindAvailableSeat @0x436790, incl. the displace-AI rule) unported; (f) the AI boarding think (walk to E5-E8 entry bones + the 64-tick seat-upgrade sweep) unported — script mounts are immediate; (g) child-vehicle seat traversal (FindBestSeatSlot's carried-gun walk + the 0x2000000 child-sitex weight) unmodeled; (h) sub-39's groundEntity persistence rides the generic ground/carrier reference (retail keeps the stale boarding-time groundEntity while seated); (k) a DEAD controller counts as no controller (motor + AI staging) - the stand-in for the unported death->detach chain (retail detaches the corpse before the physics runs); (l) the toggle is AUTHORITY-only - the joiner-side C2S 0x26/0x27 wire leg is unported, `local_player_toggle_mount` refuses on a joiner | 23.1/23.4/23.5 above | the toggle covers 00TRa/04TR's gates (probe PASS); each residual cited at its port site |
+| D-AI-11 | Mount-chain residuals after §26 closes emplaced fire, mounted collision suppression, and death-detach animation: (a) the USE scan remains a registry sweep with a +0.9 u chest eye; (b) its emplaced-carrier LOS/reject leg (`attrib & 0x20` -> `groundEntity`) is unmodeled, while the armory leg is ported; (c) the WAC no-dismount global is unmodeled; (d) seat-position keys 0xB6-0xBF and the displace-AI rule are unported; (e) AI walk-to-entry/64-tick seat-upgrade boarding is unported and script mounts remain immediate; (f) child-vehicle seat traversal is unmodeled; (g) sub-39 groundEntity persistence rides the generic carrier reference; (h) vehicle brains retain the acquire-skip stand-in pending `.aip` parse; (i) own-hull seated-scan occlusion remains a candidate skip until pool-1 hulls are built; (j) the joiner C2S 0x26/0x27 attach/detach wire leg is unported. The parent embedded weapon slot/current-action gate, live mounted collision cadence, and corpse detach now match retail. | §23.1/§23.4/§23.5 and §26 | mount/ride/drive/emplaced-fire/death are live; the remaining boarding, scan, and joiner-wire residuals stay OPEN |
 
 Correspondence adds: see the rows appended to the section-2 map this session
 (the toggle chain, the four predicates, `vehicle_ai_drive`, the deploy stamp).
@@ -4305,3 +4312,173 @@ Entry comments on `@ 0x5db290 / 0x4e64e0 / 0x4e8280 / 0x5db830 / 0x5db3a0 /
 4. The round+0x2AC spiral-offset writer (the rocket corkscrew source).
 5. The style blocks' +8/+0xC words — find the consumer (possibly the distortion
    or an unwalked LOD path).
+
+## 26. Appendix: allegiance, damage response, and mounted-weapon parity (grill-ida, 2026-07-20)
+
+This pass resolves the mission-playability reports that ordinary AI attacked allies,
+actual hits did not wake NPCs reliably, an organic attached to a UseGun emplacement never
+fired, and a mounted corpse never entered its death animation. It also establishes a retail
+boundary that is easy to misread: a projectile passing near an NPC has presentation/listener
+side effects only; retail does not notify the AI. Implementing suppression for a near miss
+would therefore diverge from JO:CA. All addresses below are retail `Jointops.exe`, imagebase
+0x400000, IDB `Jointops.exe.kong.i64`.
+
+### 26.1 Verdicts
+
+| Component | Verdict | Evidence |
+|---|---|---|
+| BMS team + Blind/Guarding/Berserk/Coward promotion | **MATCHING** (behavioral proof) | exact spawn stores in §26.2; `mission_promote` and `ai` ctests |
+| ordinary same-team rejection + Berserk exception | **MATCHING** (behavioral proof) | `Entity_FindTargets` witness in §26.3; `ai` ctest |
+| actual-hit alert/reaction and self-hit exclusion | **MATCHING** (behavioral proof) | both retail callbacks in §26.4; `ai` and `player_spawn` ctests |
+| projectile near-miss behavior | **MATCHING** (read-only grill) | listener-only tail in §26.4; deliberately no AI notification |
+| mounted aim, request gates, action-FSM fire, muzzle, and shooter ownership | **MATCHING** (behavioral proof) | §26.5-§26.6; `ai` and `npruntime_weapon_table` ctests |
+| mounted collision cadence + model-force suppression | **MATCHING** core | §26.7; `collision` and `ai` ctests; D-COL-9 narrowed |
+| mounted death detach + directional death animation | **MATCHING** (behavioral proof) | §26.7 and §19; `ai` ctest |
+| automatic ADM-derived action duration in the runtime table builder | **DIVERGENT** (bounded) | §26.8; D-WPN-26 |
+
+### 26.2 Spawn allegiance and mission combat flags
+
+`Entity_SpawnFromBMSRecord` copies BMS byte `+73` to entity team byte `+354`; this is
+the authoritative team seed used by every later target filter
+[orig: Entity_SpawnFromBMSRecord @ 0x40eba9-0x40ebad]. The same spawn path maps the
+mission attributes that previously disappeared during promotion:
+
+| BMS attribute | Retail destination | Witness |
+|---|---|---|
+| Blind `0x1` | `AiSlot[1] |= 0x1` | `[orig: Entity_SpawnFromBMSRecord @ 0x40ed92-0x40ed9b]` |
+| Guarding `0x2` | entity `Flags |= 0x40` | `[orig: Entity_SpawnFromBMSRecord @ 0x40ed9f-0x40eda5]` |
+| Berserk `0x800` | `AiSlot[1] |= 0x200` | `[orig: Entity_SpawnFromBMSRecord @ 0x40eddd-0x40edea]` |
+| Coward `0x10000` | `AiSlot[1] |= 0x8` | `[orig: Entity_SpawnFromBMSRecord @ 0x40ee1a-0x40ee26]` |
+
+The port now writes those exact bits. `Guarding` shares the runtime entity flag used by
+the generic carried collision-force gate; UseGun itself deliberately does not set that
+flag and instead takes the live-modeled-parent suppression leg in §26.7. Blind/Coward are
+preserved in their retail slot for downstream AI legs (this pass does not claim a new
+consumer), while Berserk is live in target selection.
+
+### 26.3 Friendly filtering and the intentional Berserk exception
+
+For an ordinary scanner, a candidate on the same nonzero team is rejected. The retail
+exception is deliberate: a teamless or same-team candidate remains eligible when either
+the scanner or the candidate carries `AiSlot[1] & 0x200`
+[orig: Entity_FindTargets @ 0x53a7ea-0x53a824]. That bit is the Berserk spawn mapping in
+§26.2, not an unrelated host-side `see_all` switch. The infantry feed now reads this slot
+bit directly, so a normal allied pair never engages or fires while authored Berserk actors
+retain retail's attack-anyone behavior.
+
+### 26.4 Damage wakes AI; near misses do not
+
+An actual hit runs the organic damage callback. For a non-player victim
+(`!(Flags & 0x100)`), it writes AI move/alert byte `+136 = 2` and raises the command group
+to red [orig: Entity_HandleDamageTrigger @ 0x407310; alert block @ 0x4073c8-0x4073ea].
+The separate receive callback returns immediately for self-damage at `0x4af859`; otherwise
+it sets `wasHit`, adds 10 to the reaction timer when the old value is below 25, and records
+the attacker [orig: Entity_OnDamageReceived @ 0x4af800]. The port mirrors both layers:
+player entities carry the `Flags & 0x100` classifier, but a non-self hit still records the
+reaction source; self-damage does not.
+
+By contrast, the close-pass branch in the projectile update only submits listener and
+presentation work. It never mutates the candidate's AI slot, group alert, target, or last
+attacker [orig: Projectile_UpdatePhysics @ 0x4e9d70, near-miss tail @ 0x4ea99a-0x4ea9f2].
+The fidelity fix is therefore the actual-hit chain above, not an invented suppression
+event for shots that miss.
+
+### 26.5 Mounted live gate, slot ownership, and aim chase
+
+The mounted live branch requires both a parent and positive health
+[orig: Entity_UpdateInfantryAI @ 0x4b996f-0x4b9983]. Attaching to UseGun swaps the
+gunner's equipped-slot pointer to the parent's embedded slot at `parent+0x2B4`, assigns the
+gunner as its owner, and records parent slot 3
+[orig: Entity_AttachToUseGunSlot @ 0x546b80; slot swap @ 0x546c42]. OpenNova represents
+that same effective state as a parent-owned primary slot plus an explicit gunner owner.
+Attach saves the prior equipped ADM immediately and equips the parent slot. UseGun clears
+the transient `0xA000` pair but, unlike a generic vehicle-slot attach, does not set
+`Flags & 0x40` [orig: Entity_AttachToUseGunSlot @ 0x546c56-0x546c7c;
+Entity_AttachToVehicleSlot @ 0x494752]. Dismount and the death-detach edge clear parent
+ownership; retail restores the saved slot for a player-class occupant, then clears the
+equipped slot for a non-player NPC [orig: Entity_DetachFromVehicle @ 0x435671-0x4356aa].
+The persistent parent slot continues to own its own ammo.
+
+Mounted look remains live rather than snapping directly to the target. Yaw chases by
+`((desired-look)+2)>>2`, clamped to ±`0x02000000` per tick
+[orig: Entity_UpdateInfantryAI @ 0x4bef57-0x4bef84]; pitch uses
+`(delta+4)>>3` [orig: Entity_UpdateInfantryAI @ 0x4bef87-0x4bef97]. Look yaw is then
+clamped to ±`0x40000000` from the mount base except for mount configurations
+3/4/5/7 [orig: Entity_UpdateInfantryAI @ 0x4bef9a-0x4beff0]. The port applies and
+captures the attachment base, restores the saved independent live look, then performs
+this chase/clamp against that base.
+
+### 26.6 Fire request and global action-FSM phase
+
+Let `S = current_tick + 36*net_id`. A mounted gunner considers a fire request only when it
+has a live parent, target, and equipped slot; `(S & 3) == 0`; the target passes
+`((target.x-target.y+S) & 0x40) == 0`; `dz` is halved before distance; distance is strictly
+below `AiSlot[15]`; bearing error is below `0x0AAAAAA0` (about 15 degrees); and the slot's
+current action is IDLE. It writes only next action FIRE
+[orig: Entity_UpdateInfantryAI @ 0x4bf4b3-0x4bf59e]. Existing next action, phase,
+counter, heat, and ammo do not participate in this AI-side request gate.
+
+The infantry update does not spawn a round itself. Retail finishes all entity updates, then
+pumps every weapon action slot [orig: Entity_UpdateAllEntities @ 0x52674b;
+WeaponAction_ProcessAllEntities @ 0x526786]. The FIRE action invokes the shared weapon path,
+attributes the shooter to the organic owner, obtains origin from the mount/userpoint, and
+consumes the parent's embedded ammo; a clip size of -1 remains infinite. OpenNova now keeps
+that phase boundary: mounted requests queue during AI update, the parent slot is pumped once
+after world systems and before round simulation, and the resulting authoritative round uses
+the gunner net id with the mount's posed muzzle. An occupied pool-1 parent is not pumped a
+second time.
+
+### 26.7 Mounted collision and death
+
+After mounted combat/animation work, the live branch runs the movement resolver when
+`(S & 7) == 0` and exits without the ordinary mover tail
+[orig: Entity_UpdateInfantryAI @ 0x4bf5a5-0x4bf5c6]. The resolver does not omit the
+parent from its candidates. Instead, `savedPosY` suppresses accumulated model push for a
+source with a live modeled parent or `Flags & 0x40`, while contact classification and
+callbacks still run [orig: movement collision resolver @ 0x4b2be0-0x4b2d3f; force gates
+@ 0x4b3045-0x4b30af and @ 0x4b3658-0x4b36b9]. This core is now ported; D-COL-9 retains
+only its specialized step-up/auxiliary tails. In particular, a UseGun occupant reaches
+this suppression through its live modeled parent, not through the generic `0x40` flag.
+
+When health crosses to dead, the live mounted gate stops applying. The infantry death edge
+detaches first, then runs the same generic death pipeline as an unmounted organic
+[orig: Entity_UpdateInfantryAI @ 0x4b9c57-0x4b9d52]. The directional state staged by the
+damage callback in `+0x2C0` is consumed into current animation `+0x2BC`, the mount link is
+cleared, and the non-looping clip holds its final corpse pose. OpenNova now follows that
+order, so a gunner visibly leaves the emplacement pose and plays its selected death clip.
+
+### 26.8 Remaining divergence and regression map
+
+D-WPN-6 is narrowed, not closed. Mounted parent slots now participate in the global
+post-entity action phase, but other non-local pool-0 equipped slots and eligible unmounted
+pool-1 weapons still need the general pump coverage described by the original row.
+
+D-WPN-26 records the separate runtime-table gap: the builder has no ADM-duration
+callback/source when it bakes the action FSM. An authored `delayend auto` can therefore
+resolve to zero even though explicit delays, state transitions, recoil, automatic/burst
+flags, clip capacity, and mounted infinite-ammo behavior are live. This is the explicit
+remaining cadence-fidelity
+gap; it must be closed by feeding production ADM clip durations into the bake, not by
+guessing a delay.
+
+Regression coverage is split by contract: `mission_promote` pins all four BMS flag mappings;
+`player_spawn` pins the player classifier; `ai` pins ordinary friendly exclusion, the
+Berserk exception, actual/self/player damage reactions, exact mounted request/traverse
+gates, parent-slot FSM fire with mount muzzle and gunner attribution, and mounted death;
+`collision` pins mounted contact processing without push; `mission_mount` and
+`vehicle_mount` pin attach/snapshot/detach slot lifecycle (player restore, NPC clear) and
+the UseGun-versus-generic `0x40` split;
+`npruntime_weapon_table` pins the authored action-row bake. Every name is an always-on
+CTest target.
+
+### 26.9 IDB write-backs (2026-07-20, saved)
+
+No functions were renamed. Repeatable comments were appended and dedupe-verified at the
+allegiance/damage boundary (`@ 0x40eddd`, `@ 0x4073c8`, `@ 0x4af859`,
+`@ 0x4ea99a`), the mounted live/aim boundary (`@ 0x4b996f`, `@ 0x4bef57`,
+`@ 0x4bef87`), the fire-request gates (`@ 0x4bf4bb`, `@ 0x4bf4da`,
+`@ 0x4bf4e3`, `@ 0x4bf515`, `@ 0x4bf598`, `@ 0x4bf59e`), the embedded-slot swap
+and attach-flag split (`@ 0x546c42`, `@ 0x546c5c`, `@ 0x494752`), the conditional
+detach slot restore/clear (`@ 0x435671`, `@ 0x43568d`), and the detach-first death
+edge (`@ 0x4b9c57`). IDB
+`Jointops.exe.kong.i64` was saved.

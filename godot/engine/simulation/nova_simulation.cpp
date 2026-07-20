@@ -4111,9 +4111,10 @@ float NovaSimulation::fov_vertical_from_horizontal(float p_fov_h_deg, float p_as
 	return opennova::world::fov_vertical_from_horizontal_deg(p_fov_h_deg, p_aspect);
 }
 
-// One 62.5 Hz pump of the local player's slot, after the world logic tick
-// [orig: WeaponAction_ProcessAllEntities @ 0x542690 pumps every pooled entity in the
-// frame loop; local-player-only here — D-WPN-6].
+// One 62.5 Hz pump of the local player's slot, after the world logic tick. The world
+// tick now owns the parallel NPC UseGun parent-slot pump; this host method remains the
+// first-person player's presentation/input seam.
+// [orig: WeaponAction_ProcessAllEntities @0x542690 pumps every pooled entity]
 void NovaSimulation::tick_local_player_weapon() {
 	if (!weapon_active_ || !world_ || !world_->cached.local_player.valid()) return;
 	opennova::world::WeaponFsmInputs in;
@@ -4901,6 +4902,13 @@ void NovaSimulation::set_ai_muzzle_world(int p_net_id, const Vector3 &p_godot_po
 		static_cast<int32_t>(-p_godot_pos.z * 65536.0f),
 		static_cast<int32_t>(p_godot_pos.y * 65536.0f),
 	};
+	if (opennova::world::Entity *entity = world_->registry.get(h)) {
+		entity->posed_muzzle_world[0] = pos[0];
+		entity->posed_muzzle_world[1] = pos[1];
+		entity->posed_muzzle_world[2] = pos[2];
+		entity->posed_muzzle_tick = world_->logic_tick;
+		entity->posed_muzzle_valid = true;
+	}
 	ai_->set_entity_muzzle(h, pos, world_->logic_tick);
 }
 
