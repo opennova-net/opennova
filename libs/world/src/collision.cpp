@@ -155,7 +155,10 @@ void CollisionModel::finalize_sections() {
         } else {
             s.min_x = s.max_x = s.min_y = s.max_y = s.min_z = s.max_z = 0;
             s.center[0] = s.center[1] = s.center[2] = 0;
-            s.radius = 0;
+            // Preserve the negative host/test sentinel for an absent synthetic
+            // section. Authored sections use a non-negative radius, including
+            // retail's meaningful zero-radius whole-body mesh row.
+            if (s.radius >= 0) s.radius = 0;
             continue;
         }
         if (synthesize_sphere) {
@@ -887,7 +890,7 @@ bool collision_raycast_person_sections(const CollisionTargetView &target,
         const uint32_t bit = 1u << (static_cast<uint32_t>(si) & 31u);
         if ((section_mask & bit) != 0) continue;
         const CollisionSection &section = model.sections[si];
-        if (section.radius <= 0) continue;
+        if (section.radius < 0) continue; // host/test sentinel; authored zero is valid
 
         int32_t center[3];
         target.matrices[si].transform_point(section.center, center);
@@ -2176,13 +2179,12 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
         if (posed != nullptr && posed->live_section_pose) {
             live_pose_available = true;
             const CollisionModel &person_model = *posed->model;
-            const int32_t base_radius = effective_radius + 3276; // +0.05u
             for (int32_t bone = static_cast<int32_t>(person_model.sections.size()) - 1;
                  bone >= 0; --bone) {
                 const uint32_t bit = 1u << (static_cast<uint32_t>(bone) & 31u);
                 if ((e->section_mask & bit) != 0) continue;
                 const CollisionSection &sec = person_model.sections[bone];
-                if (sec.radius <= 0) continue;
+                if (sec.radius < 0) continue; // host/test sentinel; authored zero is valid
                 int32_t center[3] = {};
                 posed->matrices[bone].transform_point(sec.center, center);
                 const int32_t projection = static_cast<int32_t>(
@@ -2198,10 +2200,8 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
                 const int32_t center_distance =
                     vec_len_ftol(closest[0] - center[0], closest[1] - center[1],
                                  closest[2] - center[2]);
-                int32_t hit_radius = base_radius +
-                    (bone == 14 ? 65 * sec.radius / 100 : 45 * sec.radius / 100);
-                if ((bone == 15 || bone == 16) && hit_radius > 0x3000)
-                    hit_radius = 0x3000;
+                const int32_t hit_radius =
+                    person_effective_radius(bone, sec.radius, effective_radius);
                 if (center_distance > hit_radius) continue;
 
                 if (!person_hit) {
@@ -3353,7 +3353,7 @@ CollisionWorld::debug_person_sections(World &world, const int32_t anchor[3],
         for (int32_t si = 0;
              si < static_cast<int32_t>(target->model->sections.size()); ++si) {
             const CollisionSection &section = target->model->sections[si];
-            if (section.radius <= 0) continue;
+            if (section.radius < 0) continue; // host/test sentinel; authored zero is valid
             DebugPersonSection debug;
             debug.handle = entity.handle;
             debug.section = si;

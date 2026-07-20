@@ -1872,6 +1872,12 @@ narrow-phase footprint is the extra+0xCCC floor at its (0,0,0) mid (inside the
 pelvis sphere); its 4630 faces serve the knife/NVG-laser/generic-ray consumers
 listed under the §15.8 broad phase, never bullets.
 
+**Port status (2026-07-20): FIXED.** The person-section primitive, live projectile
+path, and F3 diagnostic walk no longer discard an authored radius of zero before
+the shared effective-radius calculation. The `collision` ctest pins the exact
+floor boundary (0.049u hits, 0.051u misses), the trailing mesh row's dead-center
+primary ordinal, and the absence of the former large vertex-derived sphere.
+
 Person-model subobject construction (US01 read 2026-07-20): a character `.3di`
 authors `.bad bone count + 1` subobjects on BOTH the render and collision sides.
 Subobjects 0..N-1 pair 1:1 BY ORDINAL with the `.bad` bones — US01's 20-part /
