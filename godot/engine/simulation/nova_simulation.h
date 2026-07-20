@@ -153,6 +153,11 @@ private:
 	std::unordered_map<std::string, int32_t> collision_model_by_graphic_;
 	std::unordered_map<std::string, int32_t> collision_occlusion_by_graphic_;
 	std::unordered_map<std::string, float> collision_radius_by_graphic_;
+	// First-stage husk KZ points in mission-local axes. Kept independently
+	// from the collision-model cache because a husk graphic may already have
+	// been registered as another entity's main graphic.
+	std::unordered_map<std::string, std::vector<opennova::world::Vec3>>
+			collision_husk_kz_points_by_graphic_;
 	std::unordered_map<std::string, CollisionHuskPieceInfo>
 			collision_husk_pieces_by_graphic_;
 	// Negative demand cache: one unresolved entity is attempted at most once per
@@ -857,7 +862,7 @@ public:
 	// husk-model section. [orig: DeathPiece_TickAll @0x57b900; §24]
 	Array get_death_pieces() const;
 	// Per-entity destruction diagnostics by bms_id (probe/F3 seam): health,
-	// bound_radius, flags, traits presence — the damage chain's gate inputs.
+	// bound_radius, flags, traits presence, KZ anchors — the damage chain's gate inputs.
 	// (get_entity_debug is the AI-pool-index detail card; this one resolves by
 	// the placed bms_id and carries the §24 gate fields.)
 	Dictionary get_destruction_debug(int p_bms_id) const;

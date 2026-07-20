@@ -428,6 +428,7 @@ void NovaSimulation::reset_world() {
 	collision_model_by_graphic_.clear();
 	collision_occlusion_by_graphic_.clear();
 	collision_radius_by_graphic_.clear();
+	collision_husk_kz_points_by_graphic_.clear();
 	collision_husk_pieces_by_graphic_.clear();
 	collision_resolution_attempted_.clear();
 	collision_pose_data_.clear();
@@ -647,9 +648,8 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 						String(fx.get("particleh2odeath", String())).utf8().get_data();
 				t.particlefire = String(fx.get("particlefire", String())).utf8().get_data();
 				t.particleother = String(fx.get("particleother", String())).utf8().get_data();
-				// kz_points: the husk-model KZ user-point multi-blast is a tracked
-				// refinement (§24) — the fallback single blast at the entity with
-				// r = kz ?: boundRadius carries the witnessed gameplay.
+				// resolve_collision_instances enriches this row with the active
+				// first-stage husk's KZ user points once model metadata is loaded.
 				world_->item_death_traits.set(e->item_id, std::move(t));
 			}
 		}
@@ -1378,21 +1378,22 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 				: p_item_db->get_husk(def_id);
 		if (!husk_name_s.is_empty()) {
 			const std::string husk_key(husk_name_s.utf8().get_data());
+			Ref<NovaObjectData> husk_data;
 			auto hit = collision_model_by_graphic_.find(husk_key);
 			if (hit == collision_model_by_graphic_.end()) {
 				int32_t husk_model_id = -1;
-				Ref<NovaObjectData> hdata = p_placer->call("object_data_for", husk_name_s);
-				if (hdata.is_valid()) {
+				husk_data = p_placer->call("object_data_for", husk_name_s);
+				if (husk_data.is_valid()) {
 					opennova::world::CollisionModel hmodel;
 					if (collision_model_from_ir(
-							hdata->native_ir().collision, hmodel,
-							hdata->has_collision())) {
+							husk_data->native_ir().collision, hmodel,
+							husk_data->has_collision())) {
 						husk_model_id = collision_world_.add_model(std::move(hmodel));
-						if (hdata->has_live_panm_for_lod(0))
-							collision_pose_data_[husk_model_id] = hdata;
+						if (husk_data->has_live_panm_for_lod(0))
+							collision_pose_data_[husk_model_id] = husk_data;
 					}
 					collision_radius_by_graphic_.emplace(husk_key,
-							model_bound_radius_from_ir(hdata->native_ir()));
+							model_bound_radius_from_ir(husk_data->native_ir()));
 				}
 				hit = collision_model_by_graphic_.emplace(
 						husk_key, husk_model_id).first;
@@ -1400,6 +1401,39 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 			}
 			if (hit->second >= 0 && it->second >= 0)
 				collision_world_.assign_entity_husk(h, hit->second);
+			// Retail's death-sound tail walks exact, case-insensitive "KZ"
+			// user points on the active FIRST husk, not the huskFinal piece
+			// model, and queues a radius-5 blast at every match. Cache this
+			// metadata separately from collision registration: the same graphic
+			// may already be resident as another entity's main model.
+			auto kz_it = collision_husk_kz_points_by_graphic_.find(husk_key);
+			if (kz_it == collision_husk_kz_points_by_graphic_.end()) {
+				if (husk_data.is_null())
+					husk_data = p_placer->call("object_data_for", husk_name_s);
+				std::vector<opennova::world::Vec3> kz_points;
+				if (husk_data.is_valid()) {
+					const ThreediModelIR &ir = husk_data->native_ir();
+					for (size_t up_index = 0;
+							ir.userpoints != nullptr && up_index < ir.userpoint_count;
+							++up_index) {
+						const ThreediIRUserPoint &point = ir.userpoints[up_index];
+						if (String::utf8(point.name).nocasecmp_to("KZ") != 0)
+							continue;
+						// IR is (-source y, source z, source x); destruction's
+						// placement math consumes mission-local (x, y, z).
+						kz_points.push_back(opennova::world::Vec3{
+								point.position[2],
+								-point.position[0],
+								point.position[1]});
+					}
+				}
+				kz_it = collision_husk_kz_points_by_graphic_.emplace(
+						husk_key, std::move(kz_points)).first;
+			}
+			if (opennova::world::ItemDeathTraits *t =
+						world_->item_death_traits.get_mutable(e->item_id);
+					t != nullptr && t->kz_points.empty() && !kz_it->second.empty())
+				t->kz_points = kz_it->second;
 			// The PIECE model is huskFINAL first [orig: @ 0x4934af
 			// huskFinalModel ?: huskModel] — the opposite preference from the
 			// collision husk pick above. Its LOD-0 part table feeds the
@@ -4764,6 +4798,11 @@ Dictionary NovaSimulation::get_destruction_debug(int p_bms_id) const {
 		out["unit_type"] = t->unit_type;
 		out["kz"] = t->kz;
 		out["has_husk"] = t->has_husk;
+		PackedVector3Array kz_points;
+		for (const opennova::world::Vec3 &point : t->kz_points)
+			kz_points.push_back(Vector3(point.x, point.y, point.z));
+		out["kz_point_count"] = static_cast<int64_t>(t->kz_points.size());
+		out["kz_points"] = kz_points;
 	}
 	out["pos"] = Vector3(found->position.x, found->position.z, -found->position.y);
 	return out;

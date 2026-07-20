@@ -72,6 +72,17 @@ class ObjectDataPlacerStub:
 		return data
 
 
+class GraphicDataPlacerStub:
+	extends RefCounted
+	var data_by_graphic: Dictionary
+
+	func _init(p_data_by_graphic: Dictionary) -> void:
+		data_by_graphic = p_data_by_graphic
+
+	func object_data_for(graphic: String) -> NovaObjectData:
+		return data_by_graphic.get(graphic) as NovaObjectData
+
+
 class SkeletalDataPlacerStub:
 	extends RefCounted
 	var data: NovaObjectData
@@ -1532,6 +1543,90 @@ func test_collision_backed_building_without_oobj_keeps_batch_visibility() -> voi
 		assert_eq(packed & 0xFFFFFFFF, 0xFFFFFFFF,
 			"without a section map the host preserves every de-batched render part")
 		assert_ne(packed & (1 << 32), 0, "the in-frustum building is visible")
+	sim.free()
+
+
+func test_first_husk_kz_userpoints_feed_death_blast_traits() -> void:
+	# Retail walks every exact, case-insensitive "KZ" point on the active first
+	# husk and queues a radius-5 blast there. Keep the main and final models out
+	# of the witness so reading either one cannot accidentally satisfy the test.
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var placed := md.add_entity(
+			NovaMissionData.KIND_BUILDING, 105002, Vector3.ZERO, Vector3.ZERO)
+	assert_false(placed.is_empty())
+	var bms_id := int(placed.get("bms_id", 0))
+
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/items.def")), OK)
+	var main_data := NovaObjectData.new()
+	assert_eq(main_data.open_file(ProjectSettings.globalize_path(
+			"res://../fixtures/threedi/3di3/House.3di")), OK)
+	# Armry01 is a committed, loadable 3DI3 model with two user points. Relabel
+	# those two 16-byte name fields in a temporary copy so the integration test
+	# owns an exact multi-KZ witness without checking in another binary fixture.
+	var source_path := ProjectSettings.globalize_path(
+			"res://../fixtures/3dp/armry01/Armry01.3di")
+	var bytes := FileAccess.get_file_as_bytes(source_path)
+	for source_name in ["Armory", "Ground"]:
+		var needle := String(source_name).to_ascii_buffer()
+		var name_offset := -1
+		for offset in range(bytes.size() - needle.size() + 1):
+			var matches := true
+			for byte_index in range(needle.size()):
+				if bytes[offset + byte_index] != needle[byte_index]:
+					matches = false
+					break
+			if matches:
+				name_offset = offset
+				break
+		assert_gte(name_offset, 0, "source user-point name is present")
+		if name_offset < 0:
+			continue
+		for byte_index in range(16):
+			bytes[name_offset + byte_index] = 0
+		bytes[name_offset] = "K".unicode_at(0)
+		bytes[name_offset + 1] = "Z".unicode_at(0)
+	var kz_fixture_path := ProjectSettings.globalize_path(
+			"user://nova_simulation_kz_husk.3di")
+	var fixture_file := FileAccess.open(kz_fixture_path, FileAccess.WRITE)
+	assert_not_null(fixture_file)
+	if fixture_file != null:
+		fixture_file.store_buffer(bytes)
+		fixture_file.close()
+	var husk_data := NovaObjectData.new()
+	assert_eq(husk_data.open_file(kz_fixture_path), OK)
+	assert_eq(DirAccess.remove_absolute(kz_fixture_path), OK)
+
+	var expected := PackedVector3Array()
+	for point_index in range(husk_data.get_user_point_count()):
+		var info: Dictionary = husk_data.get_user_point_info(point_index)
+		if String(info.get("name", "")).nocasecmp_to("KZ") == 0:
+			var model_point: Vector3 = info.get("position", Vector3.ZERO)
+			# Public model space is (source y, source z, source x); the
+			# destruction core consumes mission-local (forward, lateral, up).
+			expected.push_back(Vector3(model_point.z, model_point.x, model_point.y))
+	assert_gt(expected.size(), 1, "fixture carries a real multi-point KZ bank")
+
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	sim.resolve_item_traits(item_db)
+	var placer := GraphicDataPlacerStub.new({
+		"Barrel1": main_data,
+		"Barrel1X": husk_data,
+		# Deliberately omit Barrel1XF: KZ belongs to the first husk, while
+		# the final husk is only the preferred death-piece model.
+	})
+	assert_eq(sim.resolve_collision_instances(item_db, placer), 1)
+	var debug := sim.get_destruction_debug(bms_id)
+	assert_eq(int(debug.get("kz_point_count", -1)), expected.size(),
+			"all first-husk KZ points reach the destruction traits")
+	var actual: PackedVector3Array = debug.get("kz_points", PackedVector3Array())
+	assert_eq(actual.size(), expected.size())
+	for point_index in range(mini(actual.size(), expected.size())):
+		assert_eq(actual[point_index], expected[point_index],
+				"KZ point %d preserves retail mission-local axes" % point_index)
 	sim.free()
 
 
