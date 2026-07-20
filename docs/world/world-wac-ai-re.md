@@ -1872,6 +1872,22 @@ narrow-phase footprint is the extra+0xCCC floor at its (0,0,0) mid (inside the
 pelvis sphere); its 4630 faces serve the knife/NVG-laser/generic-ray consumers
 listed under the §15.8 broad phase, never bullets.
 
+Person-model subobject construction (US01 read 2026-07-20): a character `.3di`
+authors `.bad bone count + 1` subobjects on BOTH the render and collision sides.
+Subobjects 0..N-1 pair 1:1 BY ORDINAL with the `.bad` bones — US01's 20-part /
+20-COBJ layout against the 19-bone `Dt1rst.bad` (`anim_reset` of `US01.adm`)
+reproduces the bone parent chain exactly (Hips→Spine→…→Head, both sides) — the
+render parts are empty transform nodes (the skinned body's primitive batches
+hang off part 0/Hips) and the COBJs are the authored hit spheres. Subobject N is
+the WHOLE-BODY row: render side an empty node at the model ground point carrying
+the model bound radius (US01 part 19: r 1.019 @ y −1.02), collision side the
+CVRT/CNRM/CFAC mesh container above. At runtime `BoneCallback_org0_Bone
+@ 0x4e34b0` converts COBJ-COUNT matrices (`modelData+104`) straight out of the
+renderer's per-part pose array (`Entity_BuildBoneTransformMatrices @ 0x4b1290`),
+so slots 0..N-1 carry live skeletal poses while slot N — bone-less — keeps its
+authored rest transform under the entity placement (which is why the derived
+phantom sphere sat un-animated at the feet).
+
 ### 15.8a The hit-chain re-grill (grill-ida 2026-07-18)
 
 Full-chain verification pass over the §15.8 port after an in-play "hit detection
