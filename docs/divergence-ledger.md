@@ -89,7 +89,6 @@ record splits a divergence into facets (e.g. D-NET-133), the facets get separate
 | D-NET-127 | Reactive-reply residual: the 0x46 per-field slot-state VALUES + the 0x51 NetId/anim binding plumbing (shape faithful) | A | OPEN (LOW residual) | PAR-NET |
 | D-NET-133 | S2C 0x18 spawn approximations: `item_type` from pool, name-gate on `e.name`, attach-parent/ground-entity unmodeled → 0xFFFF | A | OPEN (approximation) | PAR-NET |
 | D-NET-134 | Per-frame 0x0A sub-block phase cycles the safe subset `{1,0,3}`, omitting env(2) + passenger pending `world.env` authoring + mount modeling | A | OPEN (approximation) | PAR-NET |
-| D-NET-135 | World-stream paging uses a flat 640-B pre-check vs the original's 650-B budget with a per-pool post-write margin (interop-equivalent, not byte-identical batching) | A | OPEN | PAR-NET |
 | D-NET-136 | 0x0C `entity+36` bit 0x01 computed per-recipient; diverges for ≥3 players; the faithful per-entity stamp needs the `NapiNPPlayer+0x37` gate witnessed | B | OPEN + NEEDS-RE (the +0x37 writer) | PAR-NET |
 | D-NET-137 | Player wire net_id is an invented encoding shim, not the minimap-slot packing — tolerable because the client self-heals unmatched ids | A | WITNESSED-READY-DEFERRED (tolerable) | PAR-NET |
 | D-NET-139 | 0x0A priority score ports distance/age/own-boost; the view-interest / LOS / enemy-team-bonus terms contribute 0 | A | OPEN (approximation) | PAR-NET |
@@ -110,6 +109,12 @@ in `client_session_loopback_test`). Closed 2026-07-19: **D-NET-21** -> `FIXED`
 (`ClientSession::process_periodic_update` now emits the one-shot `ClientConnected`
 after `ServerSessionInit`; both Godot session pumps call the boundary after their
 receive drain, and `client_session_loopback_test` pins no synchronous 0x82 reply).
+
+Closed 2026-07-20: **D-NET-135** -> `FIXED` (the four world pools now use retail's
+650-B post-write guards with margins 0x10=40, 0x0D=110, 0x0C=100, and 0x20=30;
+the crossing record remains in the page, while 0x45 tiles retain their separate
+650-B pre-write cap; boundaries are pinned by `npruntime_batch_chunker`, with the
+production path covered by `npruntime_initial_state_burst`).
 
 ### Environment — [env/env-tod-re.md](env/env-tod-re.md) (#-catalog) + [env/env-honored-matrix.md](env/env-honored-matrix.md)
 
@@ -698,7 +703,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 
 | Domain | OPEN | NEEDS-RE | WITNESSED-READY-DEFERRED | Domain open total | Closed rows still tabled |
 |---|---|---|---|---|---|
-| Net | 10 | 1 | 11 | 22 | 0 |
+| Net | 9 | 1 | 11 | 21 | 0 |
 | Environment | 0 | 0 | 3 | 3 | 4 |
 | World / AI + events | 48 | 4 | 6 | 58 | 17 |
 | UI (menu/ctrl/sound/playerinfo/HUD) | 14 | 1 | 7 | 22 | 6 |
@@ -715,7 +720,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Render — materials/state | 0 | 0 | 1 | 1 | 1 |
 | Render — draw order | 2 | 0 | 1 | 3 | 3 |
 | Render — lighting | 4 | 0 | 2 | 6 | 0 |
-| **Total** | **86** | **13** | **33** | **132** | 74 |
+| **Total** | **85** | **13** | **33** | **131** | 74 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-INF-20, D-NET-136, D-NET-64.
 

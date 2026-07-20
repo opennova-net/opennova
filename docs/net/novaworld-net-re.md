@@ -8072,7 +8072,7 @@ subset) function-by-function against the kong IDB. Scope and verdicts:
 | System | Reimpl | Verdict | Key witness |
 |---|---|---|---|
 | SessionSequencing/SessionCrypto framing | `frame_session_packet`/`deframe_session_packet` (`libs/npwire/protocol_message.{h,cpp}`) | **MATCHING** | `CNapiNPConnection_SendSessionPacket @ 0x61edd0` (header `[remote_key 0x150][seq 0x7ac][ack 0x7b8][u8 0]`, inner SCRK = TX key @ conn+0xCC, outer static NWU key) / `CNapiNPConnection_ParseMessages @ 0x625bc0` (RX key @ conn+0x10c, `recv_ack_seq` latch) / `CNapiNPConnection_BuildOutgoingPackets @ 0x628430` (`++out_packet_seq` per packet ⇒ identical wire seq 1,2,3…). Original is resend-capable (messages pre-assigned to a seq, node+52); ours frames at send time — wire-identical for first sends. TX/RX key split = `GenerateTxKey @ 0x61dfe0` self key vs peer key. |
-| `np::slice_batch_pages` chunker | `libs/npruntime/batch_chunker.h` | **MATCHING (model)** — boundary divergence D-NET-135 | budget 650 with per-pool margin, guard AFTER each record: 0x0C `+100 > 650` (`serialize_entity_states_to_buffer @ 0x5030a0` @0x50340d), 0x20 `+30 > 650` (`@ 0x503460` @0x503694), 0x10 `+40 > 650` (`serialize_pool2_static_to_buffer @ 0x5042F0` — function defined + named this session, was `loc_5042F0` code-island). Phase order 0x10→0x0D→0x0C→0x20→0x45 confirmed (`Server_SendInitialGameStateToPlayer @ 0x51bba0` state-4 cases 1..5). |
+| `np::slice_batch_pages` chunker | `libs/npruntime/batch_chunker.h` | **MATCHING (byte boundary)** — D-NET-135 fixed 2026-07-20 | budget 650 with per-pool margin, guard AFTER each record: 0x0C `+100 > 650` (`serialize_entity_states_to_buffer @ 0x5030a0` @0x50340d), 0x20 `+30 > 650` (`@ 0x503460` @0x503694), 0x10 `+40 > 650` (`serialize_pool2_static_to_buffer @ 0x5042F0`), 0x0D `+110 > 650` (`serialize_entity_pool_to_packet_0 @ 0x503940`). Phase order 0x10→0x0D→0x0C→0x20→0x45 confirmed (`Server_SendInitialGameStateToPlayer @ 0x51bba0` state-4 cases 1..5). |
 | Retail-join player record (minimap flags / net_id / playerClass) | `build_pool0_organic_batch` (`libs/netsim/entity_wire_bridge.cpp`) | flags bit 0x100 + playerClass clamp **matching**; bit 0x01 model **divergent** (D-NET-136); net_id encoding **divergent-tolerable** (D-NET-137) | `Server_PlayerAdd @ 0x51cbc0` (`entity+36 \|= 1` @0x51d0da per-entity, remote adds only; class [5,9]-else-8 clamp @0x51d102; entity+120 = event+76 = connection_id @0x51d068); packer `lookup_entity_slot_and_pack_entry @ 0x57ad40` (@0x57ae47); decoder `MinimapSlot_FindByPackedId @ 0x57a270` (renamed from `sub_57A270`); client self-heal `NapiNPClientMsg_0x00C @ 0x42eadb`. |
 | 0x22→0x46 ack-walk | `dispatch_session_replies case 0x22` + `encode_player_sync`/`_removal` | **FIXED to echo** (was server-computed) | §5.33 update: echo @ 0x505f05, client walk-terminator @ `NapiNPClientMsg_PlayerSync @ 0x431370` tail (`slot+1 < g_max_player_slots`, re-request `0x5CF7`); removal = 3-B early return @ 0x505f37; `Server_PlayerAdd` broadcast fieldFlags 0x1CF7 (`push 7415` @0x51d2bf). `cstr_fixed` misnomer → `cstr_capped` (strings are strlen+1 on the wire). |
 | 0x0A ported subset | `build_0a_frame`/`emit_connection_s2c` (`libs/netsim/connection_fan.cpp`) | ported subset **matching**; deferrals correctly characterized (D-NET-134 stands); health byte **divergent (D-NET-138 — FIXED 2026-07-02**, pack ported from `Entity_GetHealthClassification @ 0x4AD4E0`; live v11: 0 C 0x0F**)** | `Server_SendEntityStateToPlayer @ 0x517ba0` (deploy gate `+32==6`, `++phase` before first write, eye ref, budget halving `+89876`/uptime>2000, unreliable send flags (0,1)); sub-block 0 = weapon/reload/uniform (`@ 0x4ff81b`; `FrameAimBlock` → `FrameWeaponBlock` rename everywhere); sub-block 1 values confirmed (C6EAE0=20/C6EAE4=13/fps/cpu/round-secs). |
@@ -8502,30 +8502,28 @@ free counter unchanged once `world.env` authoring and vehicle-mount modeling lan
 so the load-bearing `C6EAE4` fall-damage tolerance reaches the client on frame 1 (matches the original,
 which increments to 1 before its first write).
 
-**D-NET-135** [reimpl divergence, DOCUMENTED 2026-07-01] **World-stream batch paging uses a single
-fixed 640-byte pre-check where the original uses a 650-byte budget with a per-pool headroom margin
-checked AFTER each record.** The pool serializers self-limit inside a 4096-B caller buffer: 0x0C
+**D-NET-135** [FIXED 2026-07-20] **World-stream batch paging now uses retail's 650-byte budget with
+the witnessed per-pool headroom margin checked AFTER each record.** The pool serializers self-limit
+inside a 4096-B caller buffer: 0x0C
 organics break on `written + 100 > 650` (`serialize_entity_states_to_buffer @ 0x5030a0`, guard
 @ 0x50340d — margin 100 covers the variable name string), 0x20 pool-3 on `written + 30 > 650`
 (`serialize_entity_pool_to_packet @ 0x503460` @ 0x503694), 0x10 pool-2 static on `written + 40 > 650`
 (`serialize_pool2_static_to_buffer @ 0x5042F0` @ 0x504687-region). `np::slice_batch_pages`
-(`libs/npruntime/batch_chunker.h`) grows a page until the NEXT record would exceed a flat
-`max_page_bytes = 640` — same ~650 cap, same ≥1-record-per-page guarantee and cursor resume, but the
-record-per-datagram boundary can differ from retail by one record. Every page is still a valid
-count-prefixed sub-batch a stock client reassembles into the identical world — interop-equivalent,
-not byte-identical batching. Faithful fix (if ever needed for capture-diff parity): per-pool margins
-with the post-write guard.
+now accepts an explicit pre-write or post-write policy. The four entity-pool call sites select the
+post-write policy with their retail margins, retaining the crossing record and the existing
+at-least-one-record guarantee, page cursor, and paced resume behavior.
 **Complete witness (2026-07-05), scoping the fix precisely:** all four world-stream pool margins are
 now pinned — 0x0C = **100** (`@ 0x5030a0`), 0x20 = **30** (`@ 0x503460`), 0x10 = **40** (`@ 0x5042F0`),
 and 0x0D = **110** (`serialize_entity_pool_to_packet_0 @ 0x503940`, guard `write_ptr - buffer_start +
 110 > 650`) — all against the common **650** budget, checked AFTER each record (the crossing record IS
 included). **The 0x45 tiles are NOT part of this divergence:** `serialize_terrain_tiles @ 0x6080F0`
 uses a different model — fill a caller `buf_size` while `remaining >= 12` (a PRE-check that EXCLUDES the
-crossing tile), which is exactly what our `slice_batch_pages` already does. So the faithful port applies
-to the four world pools only: add a per-tag `margin` post-write-guard mode (budget 650, include the
-crossing record) to `emit_paged_pool`, leaving the tile path on the existing pre-check. Deferred here
-because changing the world-pool page boundaries would alter byte-exact golden captures whose re-capture
-is asset-gated — this belongs on the golden-harness (tier-2) loop, not a blind edit.
+crossing tile). The production 0x45 call uses the named 650-B pre-write policy, reproducing the
+D-NET-83 stock boundaries exactly: 52 tiles / 644 B on the 20-B-header first page and 53 tiles /
+640 B on 4-B-header continuations. The four entity pools use their named post-write policies.
+`npruntime_batch_chunker` pins the real four-byte pool-3 header boundary (624/34 B), strict
+greater-than comparison, all five named policies, and both tile page shapes;
+`npruntime_initial_state_burst` covers the production initial-state path.
 
 **D-NET-136** [reimpl divergence, DOCUMENTED 2026-07-01] **The 0x0C player-record `entity+36` bit
 0x01 is computed PER-RECIPIENT ("this is your own entity"); retail sets it ONCE per entity at add
