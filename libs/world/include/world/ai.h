@@ -586,10 +586,6 @@ public:
     // @0x4301bc unread). Damage when landing with vel_z <= -1057*scale: health -= excess>>4
     // @0x4b9910 dump 5152]. 0 disables (the image default until the config source is RE'd).
     int32_t fall_damage_scale = 0;
-    // The AI aim-error difficulty scale [orig: dword_C6EAE8 in the §17.5 error formula
-    // (119304 * dword_C6EAE8 * acc) >> 5; its runtime config source is unwitnessed —
-    // sibling of dword_C6EAE4 above]. Default 1 keeps the error term live.
-    int32_t ai_difficulty = 1;
     int unported_calls = 0;   // coverage counter for not_yet_ported handlers
     int find_target_calls = 0;// coverage: target-acquisition invocations
     std::vector<RelMatCall> relmat_calls; // recorded mover side effects (net layer = P2+)

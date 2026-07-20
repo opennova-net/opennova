@@ -112,6 +112,17 @@ struct CachedFrameState {
     int32_t humans = 0;
 };
 
+// Mutable engine values exposed to mission scripts through retail's named-value
+// table. This is distinct from V#/G#/M#: named values are direct pointers into
+// engine state, so consumers such as infantry AI observe WAC writes immediately.
+// [orig: the 24-row table @0x82EEF0; WacScript_ResolveParameter @0x4f2940]
+struct WacNamedValues {
+    static constexpr int32_t kDefaultAccuracySpread = 1;
+    // Global multiplier in the infantry sawtooth aim-error formula.
+    // [orig: wac_var_accuracyspread @0xC6EAE8; read @0x4bc5ea]
+    int32_t accuracy_spread = kDefaultAccuracySpread;
+};
+
 // End-of-round outcome state. `ended` is the double-run latch every round-end
 // consumer keys on; `winner_team` is the winning-team value the WAC outcome
 // builtins and the presentation layer derive from (0 = none/green, 1 = blue,
@@ -348,6 +359,7 @@ public:
 
     EntityRegistry registry;
     ScriptVarStore vars;       // shared by WAC + BMS (the C6B240/C6BA40 seam)
+    WacNamedValues wac_values; // writable named engine values (the @0x82EEF0 table)
     EnvState env;
     EffectLog effects;
     CachedFrameState cached;
@@ -535,11 +547,13 @@ public:
 
     // Editor "play" support: snapshot/restore of mutable world state so a
     // simulate/stop cycle doesn't dirty the authored mission. Value copies of the
-    // registry + vars + env + clock + stable local-player ownership; per-tick
-    // health/proximity/human-count caches reset and systems re-init on restore.
+    // registry + vars + named WAC values + env + clock + stable local-player
+    // ownership; per-tick health/proximity/human-count caches reset and systems
+    // re-init on restore.
     struct Snapshot {
         EntityRegistry registry;
         ScriptVarStore vars;
+        WacNamedValues wac_values;
         EnvState env;
         uint32_t logic_tick = 0;
         EntityHandle local_player;

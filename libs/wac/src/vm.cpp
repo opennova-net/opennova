@@ -80,6 +80,7 @@ int32_t WacVm::read(opennova::world::World &w, uint32_t ref) const {
                 case Builtin::GameOver: return w.round_end.winner_team != 0 ? 1 : 0;
                 case Builtin::WinVar: return w.round_end.winner_team == 1 ? 1 : 0;
                 case Builtin::LoseVar: return w.round_end.winner_team == 2 ? 1 : 0;
+                case Builtin::AccuracySpread: return w.wac_values.accuracy_spread;
             }
             return 0;
         }
@@ -92,7 +93,15 @@ void WacVm::write(opennova::world::World &w, uint32_t ref, int32_t v) const {
         case OperandKind::MissionVar: w.vars.set_mission(static_cast<int>(operand_index(ref)), v); break;
         case OperandKind::GlobalVar: w.vars.set_global(static_cast<int>(operand_index(ref)), v); break;
         case OperandKind::MusicVar: w.vars.set_music(static_cast<int>(operand_index(ref)), v); break;
-        default: break; // pool/builtin are not lvalues
+        case OperandKind::Builtin:
+            // The retail named-value resolver returns the address of this mutable
+            // engine dword, so ordinary set/add/sub/inc/dec/store write through.
+            // [orig: WacScript_ResolveParameter @0x4f2940 ->
+            //  wac_var_accuracyspread @0xC6EAE8]
+            if (static_cast<Builtin>(operand_index(ref)) == Builtin::AccuracySpread)
+                w.wac_values.accuracy_spread = v;
+            break;
+        default: break; // pool values are not lvalues
     }
 }
 

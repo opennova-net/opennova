@@ -1574,7 +1574,8 @@ void AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
     // [orig: (119304 * dword_C6EAE8 * acc) >> 5, x (32 - ((tick>>2 [+ tick>>9]) & 0x3F));
     // the prone-in-foliage +40 concealment term needs the foliage-mask seam — D-AI-6.]
     const int32_t acc = (inf.aim_ref0 == inf.combat_target) ? slot.f[10] : slot.f[11];
-    const int64_t err_unit = (static_cast<int64_t>(119304) * ai_difficulty * acc) >> 5;
+    const int64_t err_unit =
+        (static_cast<int64_t>(119304) * world.wac_values.accuracy_spread * acc) >> 5;
     const int32_t err_a = static_cast<int32_t>(
         err_unit * (32 - static_cast<int32_t>(((key >> 2) + (key >> 9)) & 0x3Fu)));
     const int32_t err_b = static_cast<int32_t>(
