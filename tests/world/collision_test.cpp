@@ -2286,6 +2286,78 @@ void test_published_person_bone_pose() {
     CHECK(std::abs(hit.position_q16.x - fx(4.5)) <= 4);
 }
 
+// Every JO person model authors its trailing CFAC mesh row with radius 0 and
+// sentinel inverted bounds (Indo01 sec 19). Retail's bone walk reads the
+// AUTHORED mid/radius [orig: Physics_RaycastAgainstBoneSections @ 0x4e4670],
+// so the mesh row is never a bone sphere — a vertex-derived bound sphere there
+// minted a phantom shootable "bone" on whatever pose slot the row landed on
+// (the F3 big off-body organic sphere).
+void test_person_mesh_row_keeps_authored_zero_sphere() {
+    World world;
+    world.registry.configure_pool(0, 8);
+    Entity owner;
+    owner.kind = EntityKind::Organic;
+    const EntityHandle oh = world.registry.spawn(0, owner);
+    Entity person;
+    person.kind = EntityKind::Organic;
+    person.position = {5.0f, 0.0f, 0.0f};
+    const EntityHandle ph = world.registry.spawn(0, person);
+
+    CollisionModel model;
+    CollisionSection bone;
+    bone.authored_bounds = true;
+    bone.min_x = bone.min_y = bone.min_z = fx(-0.3);
+    bone.max_x = bone.max_y = bone.max_z = fx(0.3);
+    bone.radius = fx(0.3);
+    model.sections.push_back(bone);
+
+    // The retail-shaped mesh row: a vertex run, authored radius 0, sentinel
+    // inverted AABB, no BVOLs.
+    CollisionSection mesh_row;
+    mesh_row.authored_bounds = false;
+    mesh_row.min_x = mesh_row.min_y = mesh_row.min_z = fx(10000.0);
+    mesh_row.max_x = mesh_row.max_y = mesh_row.max_z = fx(-10000.0);
+    mesh_row.radius = 0;
+    mesh_row.vertex_start = 0;
+    mesh_row.vertex_count = 2;
+    model.vertices.push_back(CollisionVertex{{fx(-1.0), fx(-1.0), fx(-1.0)}});
+    model.vertices.push_back(CollisionVertex{{fx(1.0), fx(1.0), fx(1.0)}});
+    model.sections.push_back(mesh_row);
+    model.finalize_sections();
+
+    // The AABB derives for the model-level union; the bound sphere does not.
+    CHECK(model.sections[1].radius == 0);
+    CHECK(model.sections[1].center[0] == 0 && model.sections[1].center[2] == 0);
+    CHECK(model.sections[1].min_x == fx(-1.0) && model.sections[1].max_x == fx(1.0));
+    CHECK(model.max[0] >= fx(1.0) && model.min[0] <= fx(-1.0));
+
+    CollisionWorld cw;
+    const int32_t model_id = cw.add_model(std::move(model));
+    cw.assign_entity(ph, model_id);
+    const int32_t bone_at[3] = {fx(5.0), 0, fx(0.9)};
+    const int32_t mesh_slot_at[3] = {fx(5.0), fx(3.0), fx(0.9)}; // an off-body pose slot
+    CHECK(cw.publish_entity_section_matrices(
+            ph, {collision_matrix_from_heading(0, bone_at),
+                 collision_matrix_from_heading(0, mesh_slot_at)}));
+    cw.build_tick_tables(world);
+
+    // Through the phantom-sphere location: a clean miss.
+    ProjectileTrace at_mesh_slot;
+    at_mesh_slot.owner = oh;
+    at_mesh_slot.start = FixedVec3{0, fx(3.0), fx(0.9)};
+    at_mesh_slot.end = FixedVec3{fx(10.0), fx(3.0), fx(0.9)};
+    CHECK(!cw.trace_projectile(world, at_mesh_slot).hit());
+
+    // The real bone still hits.
+    ProjectileTrace at_bone;
+    at_bone.owner = oh;
+    at_bone.start = FixedVec3{0, 0, fx(0.9)};
+    at_bone.end = FixedVec3{fx(10.0), 0, fx(0.9)};
+    const ProjectileHit hit = cw.trace_projectile(world, at_bone);
+    CHECK(hit.hit_class == ProjectileHitClass::Person);
+    CHECK(hit.bone_index == 0);
+}
+
 void test_projectile_trace_world_ordering() {
     ProjectileTrace q;
     q.start = FixedVec3{fx(0.0), 0, fx(1.0)};
@@ -2465,6 +2537,7 @@ int main() {
     test_projectile_polygon_raycast();
     test_projectile_trace_authority_radius_and_damage_gates();
     test_published_person_bone_pose();
+    test_person_mesh_row_keeps_authored_zero_sphere();
     test_projectile_trace_world_ordering();
     test_idle_round_tick_clears_stale_terrain();
     if (failures == 0) std::printf("collision_test: all checks passed\n");

@@ -98,7 +98,16 @@ void CollisionModel::finalize_sections() {
         // for legacy callers that did not set authored_bounds explicitly.
         if (s.authored_bounds || (s.volume_count <= 0 && s.radius > 0)) continue;
 
+        // The bound SPHERE is synthesized only from a section's BVOL run.
+        // Vertex-derived AABBs (the CFAC mesh row) must never mint one: retail
+        // reads the AUTHORED COBJ mid/radius raw [orig:
+        // Physics_RaycastAgainstBoneSections @ 0x4e4670], and every JO person
+        // model authors its mesh row with radius 0 + sentinel inverted bounds
+        // (Indo01 sec 19: min +10000/max -10000) — a derived whole-mesh sphere
+        // there becomes a phantom shootable "bone" on the pose slot.
+        bool synthesize_sphere = false;
         if (s.volume_count > 0) {
+            synthesize_sphere = true;
             const CollisionVolume &v0 = volumes[s.volume_start];
             s.min_x = v0.min_x; s.max_x = v0.max_x;
             s.min_y = v0.min_y; s.max_y = v0.max_y;
@@ -149,13 +158,15 @@ void CollisionModel::finalize_sections() {
             s.radius = 0;
             continue;
         }
-        const int32_t hx = (s.max_x - s.min_x) >> 1;
-        const int32_t hy = (s.max_y - s.min_y) >> 1;
-        const int32_t hz = (s.max_z - s.min_z) >> 1;
-        s.center[0] = s.min_x + hx;
-        s.center[1] = s.min_y + hy;
-        s.center[2] = s.min_z + hz;
-        s.radius = vec_len_ftol(hx, hy, hz);
+        if (synthesize_sphere) {
+            const int32_t hx = (s.max_x - s.min_x) >> 1;
+            const int32_t hy = (s.max_y - s.min_y) >> 1;
+            const int32_t hz = (s.max_z - s.min_z) >> 1;
+            s.center[0] = s.min_x + hx;
+            s.center[1] = s.min_y + hy;
+            s.center[2] = s.min_z + hz;
+            s.radius = vec_len_ftol(hx, hy, hz);
+        }
     }
     // Model-level bounds = union of the section AABBs — the runtime collision
     // header min/max the render occlusion consumes (+24..+44).
