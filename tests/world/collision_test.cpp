@@ -623,17 +623,92 @@ void test_vehicle_collision_volume_selection() {
 }
 
 // ---------------------------------------------------------------------------
-void test_resolver_hurt_and_zones() {
-    // A hurt volume (type 18: -1 HP) overlapping the soldier.
-    Rig rig(box_model(18, 0, 3.0, 3.0, 3.0));
-    rig.move_soldier(10.0, 10.0, 0.5);
-    int32_t pos[3] = {fx(10.0), fx(10.0), fx(0.5)};
-    int32_t vel[3] = {0, 0, 0};
-    int16_t health = 100;
-    CollisionWorld::ResolveState state;
-    rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2], 0, fx(1.8), 0, 0,
-                          false, true, 0, 43, 0u, health);
-    CHECK(health == 99); // [orig: flag 0x40 -> health - 1 @0x4b318c]
+void test_named_gameplay_volume_dispatch() {
+    const int32_t target_pos[3] = {0, 0, 0};
+    const CollisionMatrix matrix = collision_matrix_from_heading(0, target_pos);
+    CollisionTargetView target;
+    target.matrices = &matrix;
+    target.bound_radius = fx(4.0);
+
+    const CollisionPoint point{fx(1.5), 0, fx(1.0), 0};
+    const int32_t radius = fx(1.0);
+    ContactQuery query;
+    query.points = &point;
+    query.radii = &radius;
+    query.num_points = 1;
+    query.prev_pos[0] = fx(3.5);
+    query.prev_pos[2] = fx(1.0);
+    query.source_bound_radius = fx(4.0);
+
+    auto run = [&](int type, uint8_t mask, bool grounded, ContactResult &result) {
+        CollisionModel model = box_model(type, 0, 2.0, 2.0, 2.0);
+        model.finalize_sections();
+        target.model = &model;
+        target.is_ground_of_source = grounded;
+        query.mask = mask;
+        BlinkAccum blink;
+        LadderContact ladder;
+        return collision_contact_force(target, query, blink, ladder, result);
+    };
+
+    // CD is a non-solid door activation touch and carries the touched door section.
+    ContactResult cd;
+    CHECK(!run(9, 0, false, cd));
+    CHECK((cd.flags & 0x20u) != 0);
+    CHECK(cd.door_sections == 1u);
+
+    // CT is the non-solid change-team box signal. Its downstream request bridge is
+    // deliberately tracked separately as D-COL-6.
+    ContactResult ct;
+    CHECK(!run(10, 0, false, ct));
+    CHECK((ct.flags & 0x200u) != 0);
+
+    // CF only activates when the source is already grounded on the target.
+    ContactResult cf_airborne;
+    CHECK(!run(13, 0, false, cf_airborne));
+    CHECK((cf_airborne.flags & 0x800u) == 0);
+    ContactResult cf_grounded;
+    CHECK(!run(13, 0, true, cf_grounded));
+    CHECK((cf_grounded.flags & 0x800u) != 0);
+
+    // DH/DM/DL are non-solid contact-damage signals, high through low.
+    ContactResult dh, dm, dl;
+    CHECK(!run(16, 0, false, dh));
+    CHECK(!run(17, 0, false, dm));
+    CHECK(!run(18, 0, false, dl));
+    CHECK(dh.flags == 0x100u);
+    CHECK(dm.flags == 0x80u);
+    CHECK(dl.flags == 0x40u);
+
+    // CP is physical collision for a player query only; an AI query walks through.
+    ContactResult cp_ai;
+    CHECK(!run(19, 0, false, cp_ai));
+    ContactResult cp_player;
+    CHECK(run(19, 0x2, false, cp_player));
+    CHECK(cp_player.force[0] < 0);
+}
+
+// ---------------------------------------------------------------------------
+void test_resolver_damage_grades_and_zones() {
+    auto health_after_touch = [](int type, bool authority, uint32_t engine_flags) {
+        Rig rig(box_model(type, 0, 3.0, 3.0, 3.0));
+        Entity *soldier = rig.world.registry.get(rig.soldier);
+        soldier->engine_flags |= engine_flags;
+        rig.move_soldier(10.0, 10.0, 0.5);
+        int32_t pos[3] = {fx(10.0), fx(10.0), fx(0.5)};
+        int32_t vel[3] = {0, 0, 0};
+        int16_t health = 100;
+        CollisionWorld::ResolveState state;
+        rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2], 0,
+                              fx(1.8), 0, 0, false, authority, 0, 43, 0u, health);
+        return health;
+    };
+
+    CHECK(health_after_touch(16, true, 0) == 50);  // DH: -50 HP
+    CHECK(health_after_touch(17, true, 0) == 94);  // DM: -6 HP
+    CHECK(health_after_touch(18, true, 0) == 99);  // DL: -1 HP
+    CHECK(health_after_touch(16, false, 0) == 100); // authority-only
+    CHECK(health_after_touch(16, true, 0x4000000u) == 100); // indestructible
 
     // A vehicle-loadout volume (type 11) sets the zone flag; an armory volume
     // (type 6) sets 0x400000 [orig: the input-218 gates @0x49b848/@0x49b858].
@@ -799,7 +874,7 @@ void test_slice_cadence_and_invuln() {
     cw.build_tick_tables(world); // the 17th call builds
     CHECK(cw.candidate_count(soldier) == 1);
 
-    // Hurt volumes never damage an EngineFlags-0x4000000 entity. [orig: the
+    // DH/DM/DL volumes never damage an EngineFlags-0x4000000 entity. [orig: the
     // (Flags & 0x4000000) == 0 wrap @ 0x4b3148]
     Rig rig(box_model(18, 0, 3.0, 3.0, 3.0));
     Entity *inv = rig.world.registry.get(rig.soldier);
@@ -2217,9 +2292,10 @@ void test_projectile_trace_world_ordering() {
     q.end = FixedVec3{fx(10.0), 0, fx(1.0)};
 
     // A resolved BVOL-only model is not substituted for projectile CFAC in retail.
-    // This covers CB, CL, CA, VC, and BB explicitly. Unresolved entities retain
-    // the separately tested compatibility-sphere fallback.
-    for (const int type : {1, 4, 6, 7, 8}) {
+    // This covers every named gameplay family in this pass: CB, CL, CA, VC, BB,
+    // CD, CT, CF, DH/DM/DL, and CP. Unresolved entities retain the separately
+    // tested compatibility-sphere fallback.
+    for (const int type : {1, 4, 6, 7, 8, 9, 10, 13, 16, 17, 18, 19}) {
         Rig bvol_only(box_model(type, 0, 1.0, 1.0, 2.0), 5.0, 0.0);
         q.owner = bvol_only.soldier;
         CHECK(!bvol_only.cw.trace_projectile(bvol_only.world, q).hit());
@@ -2357,7 +2433,8 @@ int main() {
     test_secondary_vertical_force_is_full_strength();
     test_ladder_contact_uses_positive_authored_pitch();
     test_vehicle_collision_volume_selection();
-    test_resolver_hurt_and_zones();
+    test_named_gameplay_volume_dispatch();
+    test_resolver_damage_grades_and_zones();
     test_idle_skip_throttle();
     test_slice_cadence_and_invuln();
     test_pool1_item_is_one_collision_candidate();

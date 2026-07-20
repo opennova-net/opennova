@@ -1477,7 +1477,7 @@ store (details inline below), added D-COL-9, and extended D-COL-5/-8.
 - **Contact force** `[orig: Entity_ComputeBoneCollisionForce @ 0x4ae150]`: args
   (source, points stride-4, radii, n, target, outForce[4], outFlags, mask). Entry
   rejects a target with `Flags & 1` `[orig: @ 0x4ae1bd]`. Mask:
-  1 ladder recontact (inflated CL/type-4 test), 2 player (type-19), 8 vehicle
+  1 ladder recontact (inflated CL/type-4 test), 2 player (CP/type-19), 8 vehicle
   collision pass (VC/type 7 and type 12
   only, from the section's `+32` start), 0x10 type-12. The type-8 ordinal counter
   restores its section-entry save per POINT (`v118` `@ 0x4ae384/0x4ae4f6`) so a
@@ -1500,10 +1500,10 @@ store (details inline below), added D-COL-9, and extended D-COL-5/-8.
   @ 0x4ae9df-0x4aea30]`; plane[0] is read unguarded even for a 0-plane volume;
   5 contact-no-force; 6 CA armory volume -> 0x4; 7/12 vehicle-mask solids;
   8 BB blink accumulate
-  (buildings, body/eye points only) -> 0x10; 9 destructible-section touch mask on
-  target+692 -> 0x20; 10 capture-zone -> 0x200; 11 vehicle-loadout volume -> 0x400;
-  13 grounded-on-target only -> 0x800; 16/17/18 hurt -> 0x100/0x80/0x40;
-  19 player-only solid; 1/others solid.
+  (buildings, body/eye points only) -> 0x10; 9 CD door activation touch mask on
+  target+692 -> 0x20; 10 CT change-team touch -> 0x200; 11 vehicle-loadout volume
+  -> 0x400; 13 CF flag/special-function touch, grounded-on-target only -> 0x800;
+  16/17/18 DH/DM/DL damage -> 0x100/0x80/0x40; 19 CP player collision; 1/others solid.
 - **World raycast** `[orig: raycast_entity_collision @ 0x413760]`: terrain clamp
   first (`Terrain_RaycastHeightmapHiRes_0 @ 0x60e710`) — SKIPPED when the source
   entity is indoors (Flags & 0x800000); then the source's candidate list
@@ -1574,7 +1574,7 @@ D-INF-10/§22):
    push-out later in the resolve resets the counter to 0 `[orig: @ 0x4b3773]`.
 2. **Per-query state**: blink globals cleared; entity Flags &= ~0x00D00800
    (indoors 0x800000, armory 0x400000, ladder 0x100000, vehicle-zone 0x800)
-   plus the `+0x2c` aux bit 0x40 (the type-13 grounded-touch latch, D-COL-9);
+   plus the `+0x2c` aux bit 0x40 (the CF/type-13 grounded-touch latch, D-COL-9);
    local player clears `g_LocalPlayerBlinkFlags`. A mounted/carried source
    (parentEntity set + alive, or Flags 0x40) suppresses force ACCUMULATION while
    the flag dispatch still runs (`savedPosY`, D-COL-9).
@@ -1591,9 +1591,9 @@ D-INF-10/§22):
    (standing pressure `@ 0x4b3010`); while swimming (Flags 0x2000) an UPWARD
    force damps slideDecay toward -167 (-83 steps; `@ 0x4b304e-0x4b308c` —
    rides the D-INF-3 water tail, unported); contact-flag dispatch:
-   0x40/0x80/0x100 hurt -1/-6/-50 HP (authority only `@ 0x4b317b-0x4b31d7`,
+   0x40/0x80/0x100 DL/DM/DH damage -1/-6/-50 HP (authority only `@ 0x4b317b-0x4b31d7`,
    skipped entirely for Flags 0x4000000 sources `@ 0x4b3148`; each hit also
-   stamps the damage-source attribution); 0x200 capture touch ->
+   stamps the damage-source attribution); 0x200 CT change-team/capture touch ->
    `Server_OnPlayerTouchCaptureZone @ 0x500ba0` (def attrib 0x20000, spawn gates);
    0x1 CL ladder (entry-gated: not Flags 2, and previous ladder contact OR player OR
    MoveOrder 0x400): Flags |= 0x100000 + groundEntity = candidate (`@ 0x4b3291`),
@@ -1602,10 +1602,10 @@ D-INF-10/§22):
    (MoveOrder 0x200) / +60416 (0x100), and 24576*sincos>>22 facing offset;
    0x4 -> Flags 0x400000
    (armory zone); 0x400 -> Flags 0x800 (vehicle-loadout zone); 0x800 -> the
-   `+0x2c` aux 0x40 latch (type 13, D-COL-9); 0x10 blink apply —
+   `+0x2c` aux 0x40 latch (CF/type 13, D-COL-9); 0x10 blink apply —
    bit 2 of the accum -> Flags 0x800000, local player ORs into
-   `g_LocalPlayerBlinkFlags` (`@ 0x4b34c2-0x4b3502`); 0x20 section-touch callback
-   (candidate vtbl+456)(6,0); walking over a live body plays the def sound
+   `g_LocalPlayerBlinkFlags` (`@ 0x4b34c2-0x4b3502`); 0x20 CD door/animated-part
+   section-touch callback (candidate vtbl+456)(6,0); walking over a live body plays the def sound
    (`@ 0x4b30da`). itemDef attrib 1 -> `Entity_ProcessWaypointInteraction
    @ 0x4ad820`; attrib 2 + player -> `Entity_InvokeCollisionCallback @ 0x442350`.
 5. **Second relaxation pass** at the force-shifted points, adding half the fresh
@@ -1663,11 +1663,15 @@ terrain clamp (the `@ 0x413785` gate).
 ### 15.4 Collidable-type semantics (now witnessed at runtime)
 
 The bundled **Super OED Manual v1.1 §1.1.3.4** supplies the authoring names,
-which correct an earlier reverse-engineering misread: CB = Generic Collision Box,
-CL = Collision for Ladder, CA = Collision Box for Armory, VC = Collision for
-Vehicles, and BB = Blink Box. Numeric decoding was already correct; only the
-type-4/type-7 interpretation and derived identifiers were wrong. These BVOLs
-remain separate from the CVRT/CNRM/CFAC polygon mesh used by ordinary bullets.
+which correct earlier behavior-only labels: CB = Generic Collision Box, CL =
+Collision for Ladder, CA = Collision Box for Armory, VC = Collision for Vehicles,
+BB = Blink Box, CD = Collision for Doors, CT = Change Team Box, and CP = collision
+that affects players but not AI. The project calls CF **Flag**; the same manual
+describes that family functionally as “Activates Special Functions (ex: FARPs),”
+and the runtime witnesses a grounded-only special-function latch. DH/DM/DL are the
+project's Damage High/Medium/Low names, consistent with their ordered -50/-6/-1
+effects. Numeric decoding was already correct. These BVOLs remain separate from
+the CVRT/CNRM/CFAC polygon mesh used by ordinary bullets.
 
 | Type | Runtime behavior | Witness |
 |---|---|---|
@@ -1677,13 +1681,13 @@ remain separate from the CVRT/CNRM/CFAC polygon mesh used by ordinary bullets.
 | 6 (`CA`) | armory volume — Flags 0x400000, gates weapon.mnu on action 218 | `@ 0x4aea45`, `@ 0x49b848`; manual §1.1.3.4 |
 | 7 (`VC`) | vehicle-collision solid, selected by vehicle mask 8 | `@ 0x4ae558`; manual §1.1.3.4 |
 | 8 (`BB`) | blink box — blink accumulate (buildings), indoors bit | `@ 0x4aea68`; manual §§1.1.3.2/1.1.3.4 |
-| 9 | destructible-section touch — bit per section on target+692; the bit index is `sectionIdx − itemDef+2193` (boneMapStart) through a char shift (x86 `shl cl` masks &31) — equal to `si & 31` while the bone map is unmodeled (D-COL-2) | `@ 0x4aeb0f-0x4aeb22` |
-| 10 | capture-zone touch | `@ 0x4aeb7b`, `@ 0x4b31e3` |
+| 9 (`CD`) | door / door-like moving-part activation — bit per touched section on target+692; the bit index is `sectionIdx − itemDef+2193` (boneMapStart) through a char shift (x86 `shl cl` masks &31) — equal to `si & 31` while the bone map is unmodeled (D-COL-2); retail then invokes the target callback | `@ 0x4aeb0f-0x4aeb22`; manual §§1.1.3.4/1.2.2.9 |
+| 10 (`CT`) | Change Team Box touch; downstream capture/team-change request | `@ 0x4aeb7b`, `@ 0x4b31e3`; manual §1.1.3.4 |
 | 11 | vehicle-loadout volume — Flags 0x800, gates vehicle.mnu | `@ 0x4aeb92`, `@ 0x49b858` |
 | 12 | masked volume (mask 0x10) | `@ 0x4ae568` |
-| 13 | grounded-on-target-only touch | `@ 0x4aebb3` |
-| 16/17/18 | hurt volumes: -50/-6/-1 HP per resolve (authority) | `@ 0x4aeb39/50/67` |
-| 19 | player-only solid (mask 2) | `@ 0x4ae543` |
+| 13 (`CF`) | Flag (project term); special-function/FARP activation in the manual — latches only while grounded on the target | `@ 0x4aebb3`; manual §1.1.3.4 |
+| 16/17/18 (`DH`/`DM`/`DL`) | Damage High/Medium/Low: -50/-6/-1 HP per resolver touch (authority only) | `@ 0x4aeb39/50/67` |
+| 19 (`CP`) | Player Collision — solid only on player mask 2, so AI passes through | `@ 0x4ae543`; manual §1.1.3.4 |
 | 20..23 | occlusion list (not in the collision walkers) | format record |
 
 The manual officially defines BB suffix `W`/`S`/`V` as preserving water/sky/voxels,
@@ -1703,10 +1707,10 @@ and a 0.5 m player detection sphere (§1.2.2.7).
 | D-COL-3 | bound radius recomputed as the .3di LOD-0 part-bound-sphere union (primitive boxes as the degenerate fallback), raised to the husk model's bound, +0.0625 pad (persons 1.0u) | entity+0 boundRadius = max(model gpm[5], husk gpm[5]) × def scale + 0x1000, stamped only when the model carries collision data [orig: `Entity_InitFromModel @ 0x40dc30`] | the recomputed union tracks the stored header bound; the authored def `scale` factor is not applied (unparsed), and we stamp collision-less models too so every item stays hittable — conservative |
 | D-COL-4 | eye test point reuses the head column | eye point = pos + CameraOffset | CameraOffset unmodeled; head/eye share a column until the camera entity fields land |
 | D-COL-5 | CL/type-4 decoding, convex containment, contact flag 0x1, and the target-relative ladder anchor/yaw/pitch are ported; the raw 0x100000/groundEntity bookkeeping is retained | full ladder entry/recontact state, states 32–35, two-point ladder capsule, anchor/yaw/pitch chase, climb input/root motion, top/exit handling, and gravity suppression | ladders do not climb yet. The earlier “platform/seat/deck carry” description was a terminology error corrected from the Super OED manual. Generic type-1 ground probes still support static roofs; moving-carrier follow is a separate vehicle integration concern |
-| D-COL-6 | capture-zone touch (0x200) not forwarded | `Server_OnPlayerTouchCaptureZone @ 0x500ba0` | zone capture rides its own radius path today (zone_capture.cpp); reconcile when contact-driven capture lands |
+| D-COL-6 | CT Change Team Box touch (0x200) is detected but not forwarded | `Server_OnPlayerTouchCaptureZone @ 0x500ba0` consumes the CT touch for capture/team-change requests | zone capture rides its own 1 Hz radius path today (zone_capture.cpp), so authored CT shape and touch timing are ignored; reconcile when contact-driven requests land |
 | D-COL-7 | vertical ground probe = bilinear column height | `Terrain_RaycastHeightmapHiRes_0 @ 0x60e710` march + bisect | equal for vertical rays on a heightfield (the terrain-re B1 note); oblique rays use terrain_raycast_refined |
-| D-COL-8 | run-over kill / crush sound / walk-over-body sound / waypoint + collision callbacks (attrib 1/2) / the 0x20 section-touch vtbl callback / the blocked-push AI latch (pad_368[1]) not ported | steps 4/5/6 above | need Score/net + sound + destruction hooks; tracked here so the resolver stays honest |
-| D-COL-9 | mounted/carried source semantics unmodeled: the `savedPosY` force-suppression gate (parentEntity+alive or Flags 0x40), the MoveOrder-0x100 step-up variant it selects, and the `+0x2c` aux latches (the pre-resolve 0x40 clear + the type-13 0x800 set) | `@ 0x4b2bfc/0x4b2d25/0x4b3330/0x4b34ba` | only on-foot organics run our resolver today; rides the vehicle/mount pass with D-COL-5 |
+| D-COL-8 | run-over kill / crush sound / walk-over-body sound / waypoint + collision callbacks (attrib 1/2) / the CD 0x20 door-section vtbl callback / the blocked-push AI latch (pad_368[1]) not ported | steps 4/5/6 above | CD containment and its section mask are detected, but doors/lifts remain operationally inert; needs the animated-object callback plus Score/net + sound + destruction hooks |
+| D-COL-9 | mounted/carried source semantics unmodeled: the `savedPosY` force-suppression gate (parentEntity+alive or Flags 0x40), the MoveOrder-0x100 step-up variant it selects, and the `+0x2c` aux latches (the pre-resolve 0x40 clear + the CF/type-13 0x800 set) | `@ 0x4b2bfc/0x4b2d25/0x4b3330/0x4b34ba` | only on-foot organics run our full resolver; CF's practical vehicle/FARP special-function path is absent and rides the vehicle/mount pass with D-COL-5 |
 | D-COL-10 | PANM rotation types 3/4 are correctly classified as live and routed through per-section matrices, but `NovaObjectData::evaluate_panm` currently passes an identity `view_inverse` | retail types 3/4 derive their matrix from the current global inverse-view matrix in `PANM_BuildNodeMatrices` | camera-facing/upright billboard parts can have a camera-relative visual/collision pose mismatch; no committed collidable type-3/4 witness yet. Requires sharing the render camera matrix beside `PanmClock` |
 | D-COL-11 | `LiveRound` has no BB/indoors state; projectile terrain arbitration only has the ammo-flag bypass | retail refreshes each projectile's blink state per tick and skips the terrain clamp while the round is indoors (`Projectile_UpdatePhysics @ 0x4e9d70`, refresh call `@ 0x4e9f21`, terrain gate `@ 0x413785`) | a shot inside an underground/interior BB can falsely hit the terrain heightfield. Port after the projectile probe radius/state lifetime is pinned; do not guess from the player’s 0.5 m BB sphere |
 

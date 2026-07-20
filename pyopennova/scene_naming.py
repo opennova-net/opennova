@@ -41,7 +41,7 @@ _OCCLUSION_COLORS = {
 class CollisionType(enum.IntEnum):
     CB = 1; CS = 2; CC = 3; CL = 4; CV = 5; CA = 6
     VC = 7; BB = 8; CD = 9; CT = 10; CM = 11; VK = 12
-    CF = 13; LP = 14; CP = 19
+    CF = 13; LP = 14; DH = 16; DM = 17; DL = 18; CP = 19
 
     @property
     def color(self) -> tuple[float, float, float]:
@@ -63,6 +63,9 @@ _COLLISION_COLORS = {
     CollisionType.VK: (1.0, 0.0, 0.0),
     CollisionType.CF: (0.3, 1.0, 0.3),
     CollisionType.LP: (1.0, 0.8, 0.2),
+    CollisionType.DH: (1.0, 0.1, 0.1),
+    CollisionType.DM: (1.0, 0.4, 0.1),
+    CollisionType.DL: (1.0, 0.7, 0.1),
     CollisionType.CP: (0.7, 0.7, 1.0),
 }
 

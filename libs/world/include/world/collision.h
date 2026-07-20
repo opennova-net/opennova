@@ -20,14 +20,17 @@
 //       only while this flag is set [orig: Input_HandleActionBinding @ 0x49b848])
 //   7  vehicle collision ("VC") -> solid on the vehicle-contact mask 0x8 path
 //   8  blink box ("BB")      -> contact flag 0x10 + blink accumulation (buildings)
-//   9  destructible-section touch -> contact flag 0x20 + section bit on target
-//   10 capture-zone touch    -> contact flag 0x200
+//   9  CD door touch         -> contact flag 0x20 + door-section bit on target
+//   10 CT change-team box    -> contact flag 0x200
 //   11 vehicle-loadout volume -> contact flag 0x400 -> entity Flags |= 0x800
 //      (gates vehicle.mnu VEHICLE on the same key [orig: @ 0x49b858])
 //   12 masked volume (mask 0x10 path)
-//   13 grounded-only touch   -> contact flag 0x800 (source stands on target)
-//   16/17/18 hurt volumes    -> contact flags 0x100/0x80/0x40 (-50/-6/-1 HP)
-//   19 player-only solid (mask 0x2)
+//   13 CF flag volume        -> contact flag 0x800 (source stands on target;
+//      the authoring manual describes the family as special-function/FARP activation)
+//   16 DH damage high        -> contact flag 0x100 (-50 HP)
+//   17 DM damage medium      -> contact flag 0x80  (-6 HP)
+//   18 DL damage low         -> contact flag 0x40  (-1 HP)
+//   19 CP player collision   -> solid only on the player mask 0x2 (not AI)
 //   1 (and other unlisted types) solid -> SAT push-out force
 //   5  contact-no-force marker
 // Raycasts test ONLY type-1 volumes [orig: Entity_RaycastCollisionModel @ 0x413060];
@@ -77,8 +80,10 @@ struct CollisionVolume {
 // Poly Collision LOD records (CVRT/CNRM/CFAC). These preserve the authored
 // fixed-point query data and source order and remain deliberately distinct
 // from every BVOL gameplay family: CB (generic collision), CL (ladder), CA
-// (armory), VC (vehicle collision), BB (blink box), and the other trigger
-// volumes. Ordinary projectile narrow phase uses CFAC, never BVOL substitutes.
+// (armory), VC (vehicle collision), BB (blink box), CD (door), CT (change team),
+// CF (flag/special function), DH/DM/DL (contact damage), CP (player collision),
+// and the other trigger volumes. Ordinary projectile narrow phase uses CFAC,
+// never BVOL substitutes.
 struct CollisionVertex {
     int32_t p[3] = {};              // section-local 16.16
 };
@@ -417,7 +422,7 @@ bool collision_raycast_person_sections(const CollisionTargetView &target,
 // flag dispatch, blink accumulation, and the bound-radius force clamp).
 //
 // mask bits: 0x1 = ladder recontact (inflated CL/type-4 test), 0x2 = player
-// (test type-19), 0x8 = vehicle collision query (use a section's type-7/12 run
+// (test CP/type-19), 0x8 = vehicle collision query (use a section's type-7/12 run
 // when present; otherwise fall back to its CB/default solids), 0x10 = type-12 pass.
 // out_force is the world-space push (16.16, already >>5-scaled); out_flags is
 // the contact-flag word listed in the type table above.
@@ -445,7 +450,7 @@ struct ContactQuery {
 struct ContactResult {
     int32_t force[4] = {};         // world push force (16.16); [3] spare like the orig
     uint32_t flags = 0;            // contact flags (see the type table)
-    uint32_t touched_sections = 0; // type-9 bit-per-section mask [orig: target+692]
+    uint32_t door_sections = 0;    // CD/type-9 bit-per-section mask [orig: target+692]
 };
 
 bool collision_contact_force(const CollisionTargetView &target, const ContactQuery &q,
@@ -813,8 +818,8 @@ public:
             int32_t max_entities);
 
 private:
-    // Contact-flag side effects shared by both resolver passes (damage tiers +
-    // the type-6/type-11 entity flags). [orig: the dispatch @ 0x4b30b7-0x4b351e]
+    // Contact-flag side effects shared by both resolver passes (DH/DM/DL damage +
+    // the CA/CM entity flags). [orig: the dispatch @ 0x4b30b7-0x4b351e]
     void apply_touch_flags(Entity *ent, uint32_t flags, int16_t &health, bool is_authority);
 
     struct Instance {

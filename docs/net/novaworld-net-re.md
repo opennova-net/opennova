@@ -5979,8 +5979,9 @@ below is per-SECOND, while the client rescales wire seconds ×62 into ticks (§5
    `0x40000` entities (3D: 2D dist ≤ radius, |dz| ≤ radius/2); drive the presence counters
    `[23593..95]` against the per-gametype config table (`sub_52D430(g_GameType, 0xC/0x24)` —
    follow-up) into `GameEvent_ProcessScoring @ 0x52F550`.
-2. **Capture requests** ride the physics pass, not this block: a live player touching a
-   `0x20000` entity (authority, no preround, gametype & 0x30000) calls
+2. **Capture requests** ride the CT (Change Team Box) physics touch, not this block:
+   a live player touching a `0x20000` entity (authority, no preround,
+   gametype & 0x30000) calls
    `Server_OnPlayerTouchCaptureZone @ 0x500BA0` `[orig: caller
     movement collision resolver @ 0x4B2BD0 @ 0x4B3238]`: gate
    `zone un-numbered || player.team == zone.team || control ≤ 0` (an enemy can only START

@@ -22,10 +22,10 @@ extends RefCounted
 # generic rays clip), 4 CL ladder contact/alignment (climb motor not ported),
 # 5 contact-no-force, 6 CA armory zone (Flags 0x400000 gates weapon.mnu),
 # 7 VC vehicle-collision solid (vehicle mask), 8 BB blink box (indoors),
-# 9 destructible-section touch,
-# 10 capture-zone touch, 11 vehicle-loadout zone (Flags 0x800 gates vehicle.mnu),
-# 12 masked, 13 grounded-only touch, 16/17/18 hurt -50/-6/-1 HP, 19 player-only
-# solid, 20..23 occlusion. [orig: Entity_ComputeBoneCollisionForce @0x4ae150 +
+# 9 CD door activation touch, 10 CT change-team box, 11 vehicle-loadout zone
+# (Flags 0x800 gates vehicle.mnu), 12 masked, 13 CF flag/special-function touch
+# (grounded only), 16/17/18 DH/DM/DL damage -50/-6/-1 HP, 19 CP player
+# collision (not AI), 20..23 occlusion. [orig: Entity_ComputeBoneCollisionForce @0x4ae150 +
 # Entity_TestCollisionSections @0x4aef90 + Entity_RaycastCollisionModel @0x413060]
 const TYPE_NAMES := {
 	1: "CB", 4: "CL", 5: "CV", 6: "CA", 7: "VC", 8: "BB", 9: "CD",

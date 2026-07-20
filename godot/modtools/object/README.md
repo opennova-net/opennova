@@ -53,7 +53,8 @@ lossless. Keep names exactly as below. Indices are two-digit and 1-based.
 
 Notes (all from the importer/exporter above):
 
-- **Collision** `<code>` is one of `CB CS CC CL CV CA VC BB CD CT CM VK CF LP CP`.
+- **Collision** `<code>` is one of
+  `CB CS CC CL CV CA VC BB CD CT CM VK CF LP DH DM DL CP`.
   Repeated volumes of the same kind get a letter suffix (`CB01`, `CB01a`, ...).
   `BB` (a blink box) appends enabled-flag letters (`V S W L O`), e.g. `BBVS01`.
 - **Occlusion** `<prefix>` is `OB`, `OS`, or `OP`. Portal types add the connecting

@@ -1214,7 +1214,7 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
                 const int32_t type = vol.type;
                 if (vehicle_scoped && type != 7 && type != 12) continue; // [orig: @ 0x4ae52f]
                 if (type == 19) {
-                    if ((q.mask & 2) == 0) continue; // [orig: @ 0x4ae543 player-only]
+                    if ((q.mask & 2) == 0) continue; // CP: players, not AI [orig: @ 0x4ae543]
                 } else if (type == 7) {
                     if (!vehicle_pass) continue; // [orig: @ 0x4ae558]
                 } else if (type == 12) {
@@ -1363,16 +1363,16 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
                             }
                         }
                         break;
-                    case 9: // destructible-section touch [orig: @ 0x4aeb0f-0x4aeb22]
+                    case 9: // CD: door touch [orig: @ 0x4aeb0f-0x4aeb22]
                         out.flags |= 0x20u;
-                        out.touched_sections |= 1u << (si & 31);
+                        out.door_sections |= 1u << (si & 31);
                         break;
-                    case 16: out.flags |= 0x100u; break; // [orig: @ 0x4aeb39]
-                    case 17: out.flags |= 0x80u; break;  // [orig: @ 0x4aeb50]
-                    case 18: out.flags |= 0x40u; break;  // [orig: @ 0x4aeb67]
-                    case 10: out.flags |= 0x200u; break; // [orig: @ 0x4aeb7b]
+                    case 16: out.flags |= 0x100u; break; // DH damage high [orig: @ 0x4aeb39]
+                    case 17: out.flags |= 0x80u; break;  // DM damage medium [orig: @ 0x4aeb50]
+                    case 18: out.flags |= 0x40u; break;  // DL damage low [orig: @ 0x4aeb67]
+                    case 10: out.flags |= 0x200u; break; // CT: change team [orig: @ 0x4aeb7b]
                     case 11: out.flags |= 0x400u; break; // [orig: @ 0x4aeb92]
-                    case 13: // grounded-only touch [orig: @ 0x4aebb3]
+                    case 13: // CF: flag/special function, grounded touch [orig: @ 0x4aebb3]
                         if (target.is_ground_of_source) out.flags |= 0x800u;
                         break;
                     case 7:  // VC: vehicle-collision solid (reachable only on mask 0x8)
@@ -3344,15 +3344,17 @@ CollisionWorld::debug_person_sections(World &world, const int32_t anchor[3],
 void CollisionWorld::apply_touch_flags(Entity *ent, uint32_t flags, int16_t &health,
                                        bool is_authority) {
     if (ent == nullptr || flags == 0) return;
-    // Hurt damage is authority-only AND gated off for EngineFlags 0x4000000 entities.
+    // DH/DM/DL contact damage is authority-only AND gated off for
+    // EngineFlags 0x4000000 entities.
     // [orig: the is_authority + (Flags & 0x4000000) == 0 wrap @ 0x4b3139-0x4b3148]
     if (is_authority && (ent->engine_flags & 0x4000000u) == 0) {
-        // Hurt-volume damage tiers. [orig: @ 0x4b317b-0x4b31d7 — -1 / -6 / -50 HP]
+        // Damage low/medium/high. [orig: @ 0x4b317b-0x4b31d7 — -1 / -6 / -50 HP]
         if ((flags & 0x40u) != 0 && health > 0) health = static_cast<int16_t>(health - 1);
         if ((flags & 0x80u) != 0 && health > 0) health = static_cast<int16_t>(health - 6);
         if ((flags & 0x100u) != 0 && health > 0) health = static_cast<int16_t>(health - 50);
-        // Capture-zone touch (0x200 -> Server_OnPlayerTouchCaptureZone @ 0x500ba0)
-        // rides the zone system's own proximity path for now (D-COL-6).
+        // CT/change-team touch (0x200) feeds the retail capture/team-change request
+        // callback (`Server_OnPlayerTouchCaptureZone @ 0x500ba0`). Ours still rides
+        // the zone system's independent proximity path (D-COL-6).
     }
     if ((flags & 0x4u) != 0) ent->flags |= kEntityFlagArmoryZone; // type 6 [orig: @ 0x4b34a0]
     if ((flags & 0x400u) != 0)
