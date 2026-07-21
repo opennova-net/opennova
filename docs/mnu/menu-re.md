@@ -825,8 +825,9 @@ to the host (the C2S 0x2F seam `[orig: @ 0x42cdc0]`, already byte-golden in
 npruntime — net-re §5.56/5.57); offline/SP it parses the tuples back
 (`AvatarDef_FindByName`), expands each def's **sub-weapons** (`def[235]` count),
 and applies through the SAME chain as the S2C 0x5A client apply (clips clamped
-to adm[83]; −1 -> **adm[23] used RAW as the total on the main leg but
-× adm[22] on the sub-weapon leg** `[orig: @ 0x566166 vs @ 0x566209]`;
+to adm[83]; −1 -> adm[23]. The main fallback is raw; a sub-weapon total is
+multiplied by adm[22] only when nonnegative, while a negative no-clip fallback
+stays raw `[orig: @ 0x566166; @ 0x5661E8..0x566215]`;
 `WeaponSlot_SetAmmoCount @ 0x540b50`, `WeaponSlotPool_ResetAllEntries
 @ 0x53f240` -> `WeaponSlotTable_LoadAllFromDefs @ 0x5414e0` ->
 `WeaponSlots_RecalculateAmmoFromCapacity @ 0x542280`; carry-flag bits

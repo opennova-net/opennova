@@ -128,6 +128,9 @@ const KIT_M4_CLAYMORE: Array[Dictionary] = [
 	{"name": "WPN_M4AUTO", "ammo_primary": -1, "ammo_secondary": -1, "flags": -1},
 	{"name": "WPN_CLAYMORE", "ammo_primary": -1, "ammo_secondary": -1, "flags": -1},
 ]
+const KIT_SATCHEL: Array[Dictionary] = [
+	{"name": "WPN_SATCHEL_CHARGE", "ammo_primary": -1, "ammo_secondary": -1, "flags": -1},
+]
 
 
 # The core regression: a same-name install (the FP model resolve) landing while
@@ -281,6 +284,34 @@ func test_claymore_throw_then_m4_fires_bullets() -> void:
 	_step_and_pump(20)
 	assert_eq(_visual_ids().count(1895), before,
 			"an M4 shot must not spawn claymore-model rounds")
+
+
+func test_satchel_loadout_can_switch_to_detonator() -> void:
+	_boot_kit(KIT_SATCHEL)
+	assert_eq(_sim.get_local_player_weapon_name(), "WPN_SATCHEL_CHARGE",
+			"the selectable loadout row equips the satchel charge")
+
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load_from_resource_root(_root, "items.def"), OK)
+	_sim.resolve_item_traits(item_db)
+	var terrain := NovaTerrainData.new()
+	terrain.set_trn_path(ProjectSettings.globalize_path(TERRAIN_FIXTURE))
+	assert_eq(terrain.load(), OK)
+	_sim.set_terrain_height_field(terrain)
+	var ground := terrain.get_height_world_bilinear(Vector3.ZERO)
+	assert_false(is_nan(ground))
+	_sim.debug_set_entity_position(0, Vector3(0, ground + 1.8, 0))
+
+	_sim.set_local_player_weapon_input(true, true, false)
+	_step_and_pump(5)
+	_sim.set_local_player_weapon_input(false, false, false)
+	_step_and_pump(200)
+	assert_gt(int(_sim.get_local_player_weapon_state().get("fired_serial", 0)), 0,
+			"the satchel fire action completed")
+	assert_true(_visual_ids().has(1891),
+			"the terrain-backed satchel persists as the placed device")
+
+	_switch_to(8, "WPN_SATCHEL_DETONATOR")
 
 
 func test_grenade_round_survives_its_flight_until_the_fuse() -> void:

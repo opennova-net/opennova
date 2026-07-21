@@ -671,7 +671,7 @@ mnu/menu-re.md "In-game armory"):
 | reimpl symbol (file) | original | addr | signature / role | evidence | status |
 |---|---|---|---|---|---|
 | `NovaSimulation.local_player_in_armory_zone` | `Input_HandleActionBinding_0` case 0xB1 (gate half; the USE-ITEM key, retail default Shift) | `0x4e0b3f` | armory open gated on Flags 0x400000 (type-6 volume); 0x800 -> vehicle.mnu; the parallel action 218 @0x49b83d ships unbound | decompile | ported (zone gate + the Shift key + UI host: `NovaArmoryHost`/`ArmoryMenuHost`) |
-| `apply_local_player_loadout` (NovaSimulation) | `WeaponLoadout_ApplyFromBuffer` | `0x565cd0` | ACCEPT: serialize UI -> PER-CLASS buffer (`g_armoryLoadoutBufferByClass` + 2048*class); MP sends (0x2F seam), SP applies via the 0x5A-equivalent chain + weapon re-mount | decompile | ported (multi-slot kit -> the slot pool + requested-ammo fills + re-select, 2026-07-18; per-class buffer MEMORY deferred, menu-re.md D-MNU-9) |
+| `apply_local_player_loadout` (NovaSimulation) | `WeaponLoadout_ApplyFromBuffer` | `0x565cd0` | ACCEPT: serialize UI -> PER-CLASS buffer (`g_armoryLoadoutBufferByClass` + 2048*class); MP sends (0x2F seam), SP applies via the 0x5A-equivalent chain + weapon re-mount; negative sub-weapon fallback stays raw | decompile, sentinel branch re-read `0x5661E8..0x566215` 2026-07-21 | ported (multi-slot kit -> the slot pool + requested-ammo fills + re-select, including the satchel detonator's −1 no-clip sentinel; per-class buffer MEMORY deferred, menu-re.md D-MNU-9) |
 
 The spawn-kit / slot-pool / availability / switching layer (the loadout grill 2026-07-18;
 witness record net-re §5.63; port `libs/world/weapon_inventory.{h,cpp}` + NovaSimulation,

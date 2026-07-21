@@ -2478,8 +2478,13 @@ bool NovaSimulation::apply_local_player_loadout(const TypedArray<Dictionary> &p_
 			if (sub == nullptr) continue;
 			if (opennova::strutil::iequals(sub->ammo_class, def->ammo_class)) continue;
 			int32_t total = entry.ammo_secondary >= 0
-					? std::min<int32_t>(entry.ammo_secondary, sub->maxclips) * sub->clipsize
-					: static_cast<int32_t>(sub->startrounds) * sub->clipsize;
+					? std::min<int32_t>(entry.ammo_secondary, sub->maxclips)
+					: static_cast<int32_t>(sub->startrounds);
+			// A nonnegative sub-weapon count is expressed in clips and expands to
+			// rounds; a negative fallback is the no-clip sentinel and stays raw.
+			// This is what keeps the implicit satchel detonator switch-eligible.
+			// [orig: WeaponLoadout_ApplyFromBuffer @ 0x5661E8..0x566215]
+			if (total >= 0) total *= sub->clipsize;
 			opennova::world::weapon_pool_set(table, local_inventory_, sub->ammo_class_id,
 			                                 total);
 			break; // the FIRST different-class sub-variant [orig: @ 0x5027c8 shape]
