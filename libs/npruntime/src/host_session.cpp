@@ -144,6 +144,11 @@ void start_host_session(HostOwner &owner, const HostConfig &cfg) {
 	SessionStartup startup;
 	startup.host_key = cfg.host_key;
 	create_session(owner.ctx, cfg.config, startup, owner.host_loopback); // also runs Server_InitNewRoundState (§5.2a step 1)
+	if (owner.ctx.world != nullptr) {
+		// [orig: dword_24D1E34 & 0x8000, "TeamTriggerClaymore" admin set @ 0x405f16]
+		owner.ctx.world->throwables.team_trigger_claymore =
+				(owner.ctx.config.mp_attributes & 0x8000u) != 0;
+	}
 	configure_session_runtime(owner.ctx);
 
 	if (cfg.serve_and_play && owner.ctx.world != nullptr) {
