@@ -1218,29 +1218,44 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
     }
     if (occ->mount_seat < 0 || occ->mount_seat >= static_cast<int>(veh->seats.size())) return false;
     const Seat &seat = veh->seats[occ->mount_seat];
+    // Local input owns LOOK before retail evaluates the parent UseGun bone. Our
+    // split AiEntity keeps that input in the infantry latch until the mounted
+    // branch, so expose it before the host asks for the live parent pose.
+    if (e.inf.active && e.inf.is_local_player) {
+        e.heading = e.inf.target_heading;
+        e.pitch = e.inf.look_pitch;
+    }
     const int32_t saved_look_heading = e.heading;
     const int32_t saved_look_pitch = e.pitch;
-    pose_mounted_occupant(*occ, *veh, seat);
-    // Capture the resolved seat orientation before the local-player LOOK mirror below
-    // overwrites the registry yaw. Keep the witnessed integer yaw conversion here:
-    // the generic degree helper rounds differently at non-cardinal headings.
-    const int16_t seat_yaw = occ->yaw;
-    const int16_t seat_pitch = occ->pitch;
-    const int16_t seat_roll = occ->roll;
-    const int32_t seat_heading = static_cast<int32_t>(
-            static_cast<int64_t>(90 - seat_yaw) * kBamPerDegreeInt);
-    if (e.inf.active) {
-        // Mirror both the direct seat-frame writes and the carried-infantry leg chase
-        // snap so render and per-section collision consume one coherent body frame.
-        // [orig: seat carry @0x4b654e-0x4b6575; carried body/leg snap Flags & 0x100060]
-        e.inf.body_heading = seat_heading;
-        e.inf.leg_yaw[0] = seat_heading;
-        e.inf.leg_yaw[1] = seat_heading;
-        e.inf.leg_target[0] = seat_heading;
-        e.inf.leg_target[1] = seat_heading;
-        e.body_pitch = bam_from_degrees_wrapped(static_cast<double>(seat_pitch));
-        e.roll = bam_from_degrees_wrapped(static_cast<double>(seat_roll));
-    }
+    const auto apply_resolved_seat_frame = [&]() {
+        pose_mounted_occupant(world, *occ, *veh, seat);
+        // Capture the resolved seat orientation before an independent LOOK mirror
+        // overwrites registry yaw. Keep the witnessed integer yaw conversion here:
+        // the generic degree helper rounds differently at non-cardinal headings.
+        const int16_t seat_yaw = occ->yaw;
+        const int16_t seat_pitch = occ->pitch;
+        const int16_t seat_roll = occ->roll;
+        const int32_t resolved_heading = static_cast<int32_t>(
+                static_cast<int64_t>(90 - seat_yaw) * kBamPerDegreeInt);
+        if (e.inf.active) {
+            // Mirror both the direct seat-frame writes and the carried-infantry leg chase
+            // snap so render and per-section collision consume one coherent body frame.
+            // [orig: seat carry @0x4b654e-0x4b6575; carried body/leg snap Flags & 0x100060]
+            e.inf.body_heading = resolved_heading;
+            e.inf.leg_yaw[0] = resolved_heading;
+            e.inf.leg_yaw[1] = resolved_heading;
+            e.inf.leg_target[0] = resolved_heading;
+            e.inf.leg_target[1] = resolved_heading;
+            e.body_pitch = bam_from_degrees_wrapped(static_cast<double>(seat_pitch));
+            e.roll = bam_from_degrees_wrapped(static_cast<double>(seat_roll));
+        }
+        // Organics present from AiEntity.pos, not Entity.position.
+        e.pos[0] = to_fixed(occ->position.x);
+        e.pos[1] = to_fixed(occ->position.y);
+        e.pos[2] = to_fixed(occ->position.z);
+        return resolved_heading;
+    };
+    const int32_t seat_heading = apply_resolved_seat_frame();
     if (e.inf.active && e.inf.is_local_player) {
         // The mounted LOCAL player keeps the LOOK as its entity yaw: the witnessed mounted
         // carry writes bodyHeading/headLook from the seat bone but leaves entity->Yaw
@@ -1262,11 +1277,6 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
         // bank a jump for dismount [orig: the mounted-leg flag scrub &= 0xFF8F57DF].
         e.inf.jump_requested = false;
     }
-    // Mirror the world Entity transform into the AiEntity the present snapshot reads (organics are
-    // presented from pos[]/heading, not Entity.position; promote seeds them the same way).
-    e.pos[0] = to_fixed(occ->position.x);
-    e.pos[1] = to_fixed(occ->position.y);
-    e.pos[2] = to_fixed(occ->position.z);
     // Remote occupants present in the captured seat frame. The local LOOK override
     // below remains player-owned and must not rotate the carried body/collision pose.
     e.heading = seat_heading;
@@ -1309,6 +1319,18 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
                 e.heading = io::bam_add(seat_heading, 0x40000000);
             else if (rel < -0x40000000)
                 e.heading = io::bam_sub(seat_heading, 0x40000000);
+        }
+        // The chase above changes the semantic EWEAP controls consumed by a
+        // model-aware provider. Resolve once more so the NPC root/body and the
+        // parent gun presented after this tick use the same Hn+1 control phase.
+        // Keep the first frame as the existing clamp base and preserve LOOK as
+        // the child's independent heading/pitch after the second seat resolve.
+        if (e.heading != saved_look_heading || e.pitch != saved_look_pitch) {
+            const int32_t chased_look_heading = e.heading;
+            const int32_t chased_look_pitch = e.pitch;
+            apply_resolved_seat_frame();
+            e.heading = chased_look_heading;
+            e.pitch = chased_look_pitch;
         }
         occ->yaw = static_cast<int16_t>(std::lround(normalize_mission_yaw_deg(
                 mission_yaw_deg_from_bam_heading(e.heading))));

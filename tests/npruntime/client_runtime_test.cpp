@@ -398,7 +398,7 @@ bool run_host_startup_seeds_mounted_no_callback_carrier() {
 	const w::Entity *gun_live = world.registry.get(gun_h);
 	if (!expect(infantry_live != nullptr && gun_live != nullptr,
 	            "mounted startup fixture entities resolve")) return false;
-	w::pose_mounted_occupant(*infantry_live, *gun_live, gun_live->seats[0]);
+	w::pose_mounted_occupant(world, *infantry_live, *gun_live, gun_live->seats[0]);
 
 	ns::LoopbackChannel host_loop;
 	np::HostOwner owner;

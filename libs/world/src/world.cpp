@@ -165,7 +165,17 @@ void presnap_vehicle_attach_heading(World &world, Entity &occupant,
         body->inf.target_heading = seat_heading;
 }
 
-void pose_mounted_occupant(Entity &occ, const Entity &vehicle, const Seat &seat) {
+void pose_mounted_occupant(World &world, Entity &occ, const Entity &vehicle,
+                           const Seat &seat) {
+    MountedPose live;
+    if (world.mounted_pose_provider != nullptr &&
+        world.mounted_pose_provider->resolve_mounted_pose(world, vehicle, seat, live)) {
+        occ.position = live.position;
+        occ.yaw = live.yaw;
+        occ.pitch = live.pitch;
+        occ.roll = live.roll;
+        return;
+    }
     // Rotate the seat-local offset by the entity orientation frame, then translate by the vehicle
     // origin. In our stored mission-yaw convention this is -vehicle.yaw; this matches the retail
     // seat bone path through Entity_GetBoneTransformAndOrientation @0x4b0c50.
@@ -517,7 +527,7 @@ bool EntityCommands::mount(uint16_t occupant_ssn, uint16_t target_ssn, SeatSelec
     occ->mounted_config = tgt->emplaced_config_valid ? tgt->emplaced_config : 0;
     if (s.type == SeatType::Gunner)
         vehicle_bind_use_gun_slot(world_, *occ, *tgt);
-    pose_mounted_occupant(*occ, *tgt, s);
+    pose_mounted_occupant(world_, *occ, *tgt, s);
     vehicle_claim_primary_occupant(world_, *tgt, oh, s.type); // [orig: +368 claim @0x4946d0]
     return true;
 }

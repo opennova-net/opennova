@@ -77,7 +77,8 @@ class NovaResourceRoot;
 // to draw; host-presentation side effects (text/dialog/win) drain out of the World
 // EffectLog each tick. Play/Pause/Step + Stop (snapshot/restore).
 class NovaSimulation : public Node3D,
-                       private opennova::world::ICollisionSectionMatrixProvider {
+                       private opennova::world::ICollisionSectionMatrixProvider,
+                       private opennova::world::IMountedPoseProvider {
 	GDCLASS(NovaSimulation, Node3D)
 
 public:
@@ -196,6 +197,10 @@ private:
 			const opennova::world::CollisionMatrix &p_entity_world,
 			const opennova::world::CollisionModel &p_model,
 			std::vector<opennova::world::CollisionMatrix> &r_out) override;
+	bool resolve_mounted_pose(opennova::world::World &p_world,
+			const opennova::world::Entity &p_carrier,
+			const opennova::world::Seat &p_seat,
+			opennova::world::MountedPose &r_out) override;
 	// Rendering occlusion: the portal/section-mask engine (world/occlusion.h) —
 	// models attached alongside collision by resolve_collision_instances, the
 	// portal weld run by occlusion_init_mission, per-frame masks/gates by
@@ -578,6 +583,9 @@ private:
 	void resolve_new_infantry_adm_ids();
 	static void resolve_infantry_adm_before_server_tick(void *p_context);
 	std::vector<opennova::mission::ItemSeatSpec> item_seat_specs_;
+	// Model resources paired with the persistent seat table. Kept across
+	// reset_world because set_item_seat_specs runs before mission promotion.
+	std::unordered_map<int32_t, Ref<NovaObjectData>> mounted_pose_data_by_type_;
 	opennova::mission::PromoteOptions promote_options() const;
 
 	void reset_world();

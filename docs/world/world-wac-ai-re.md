@@ -72,6 +72,7 @@ controller(brain[2])+16 phase += brain[7]/tick, thresholds 372/744, workZ = grou
 | `EntityCommands::find_best_seat` | `Entity_FindBestSeatSlot` | 0x4351f0 | §23.1 weights re-verified (ctrl 0x2000 < gun 0x20000 < sitex 0x200000) | **matching** (child walk = D-AI-11 g) |
 | `presnap_vehicle_attach_heading` (both attach entry points) | `Entity_RequestVehicleAttach` | 0x4364a0 | §23.1 (pre-relationship snap; UseGun yaw = veh.Yaw − stored offset); ctest `vehicle_mount` | **matching for UseGun; matching-core with §9.2.5 for moving generic seats** |
 | `NovaSimulation::sync_local_mounted_input_heading` | no separate retail seam (one input-owned entity Yaw) | n/a | §23.1/§26.5; asset-backed B50 GUT | **matching adapter** |
+| live UseGun root-position feedback (host parent pose → sim occupant) | `Entity_AttachToBoneAndUpdateTransform` | 0x5463d0 (player call 0x4b63c7; AI call 0x4bec23) | §23.5/§26.5a; asset-gated 00TRc E50triB GUT | **matching for UseGun root position** (generic seats, the full matrix basis, and joiner confirmation remain open) |
 | `EntityCommands::local_player_attached_to_ssn` | `Entity_IsLocalPlayerSeatedOnSsn` (renamed) | 0x4f10d0 | §23.2; ctest `vehicle_mount` | **matching** |
 | `EntityCommands::local_player_standing_on_ssn` | `Entity_IsLocalPlayerStandingOnSsn` (renamed) | 0x4f1260 | §23.2 | **matching** (persistence nuance D-AI-11 h) |
 | `EntityCommands::local_player_driving_ssn` | `Entity_IsLocalPlayerDrivingSsn` (renamed) | 0x4f1150 | §23.2 | **matching** |
@@ -315,8 +316,9 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     (entity+24 of the vehicle, ±71582784) and speed (+668). Port status: `UseGun`/gunner seats
     select `anim_emplaced` 67 plus the production-extracted config variant when that clip exists;
     non-gunner seats use the parsed `sitexNN`/`ctrlxNN`/`drvrxNN` pose index (`anim_sit_N`).
-    Config presence is explicit, so unknown does not alias authored config 0. Remaining gaps are
-    the driver-lean 107–110 overlay and true per-tick seat-bone follow (see §9.2).
+    Config presence is explicit, so unknown does not alias authored config 0. UseGun root position
+    now follows its live control-posed parent userpoint. Remaining gaps are the driver-lean 107–110
+    overlay and true per-tick bone follow for non-UseGun `sitex`/`ctrlx`/`drvrx` seats (see §9.2).
 16. **Playhead rate**: channel time is normalized [0,1) advanced by a per-clip dt seeded at
     `AnimChannel_InitFromParams` (the literal 4096 param) — the exact dt derivation (sim-tick →
     clip-frame rate, blend-window advance) is unpinned; the IRootMotionSource seam owns phase
@@ -341,10 +343,10 @@ and the vehicle rows 21/23) — ported 2026-07-16.
   - **D-INF-2** command channels 123–127 (`waypoint_id`; MED "Goto SSN/Group/Player", §11) are
     partially driven. Commands 123/124/125 authored spawn attachment now resolve `wp_number` as the
     target SSN, apply the IDA-confirmed seat filter (123 passenger-only, 124 rejects `ctrlx`, 125 any),
-    mount occupants already authored near a host-provided seat, and render `UseGun`/gunner seats with
-    `anim_emplaced` plus available variants (00TRa class). Remaining gaps: staged E/S/G/H
-    walk-to-seat, 126/127, child-seat traversal, true seat-bone transform follow, and driver-lean
-    mounted poses.
+    mount occupants already authored near a host-provided seat, render `UseGun`/gunner seats with
+    `anim_emplaced` plus available variants (00TRa class), and carry a UseGun occupant at the live
+    control-posed parent userpoint. Remaining gaps: staged E/S/G/H walk-to-seat, 126/127,
+    child-seat traversal, true bone-transform follow for non-UseGun seats, and driver-lean poses.
   - **D-INF-3** movement resolver now includes the horizontal CB capsule, object/terrain
     ground probes, triggers, and landing. Water/swim transitions remain; CL climb locomotion
     is tracked separately in **D-COL-5**. The vertical capsule-bottom settle is **D-INF-6**
@@ -432,8 +434,9 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     `test_player_body_chase_and_legs` / `test_player_body_chase_crosses_the_bam_seam`.
     Residual branches ride their slices: parachute (Flags 0x20) sixteenth-step body chase
     [orig: `@0x4b494d`] (D-INF-20), the carried/ladder ±0x55555500 (120°) yaw clamp
-    [orig: `@0x4b4afb-0x4b4b5f`] and the seat-bone follow [orig: `@0x4b654e`] (D-INF-2 /
-    mount).
+    [orig: `@0x4b4afb-0x4b4b5f`] and generic non-UseGun seat-bone follow
+    [orig: `@0x4b654e`] (D-INF-2 / mount). UseGun root-position follow is separately matched
+    through `Entity_AttachToBoneAndUpdateTransform @ 0x5463d0`.
   - **D-INF-16** the run promotion's pitch-tier term ported as the constant 2. The
     original reads `entity+0x37C` (`>0x430000 or <0 → 0; ≥0x210000 → 1; else 2` before
     adding `run_anim` [orig: `@0x4b72aa-0x4b72cf`]), but the field has NO writer anywhere
@@ -682,9 +685,11 @@ preserves unknown bits verbatim (merge-on-write), like event flags.
   accept any classified seat. This corrects the older "124 not-driver" reading.
   **Weights (LOWER wins):** ctrl/drvr `0x2000` < gunner `0x20000` < on-vehicle passenger `0x200000` <
   child-entity passenger `0x2000000`.
-- True occupant pose comes from the seat bone transform (`Entity_GetBoneTransformAndOrientation @
-  0x4b0c50`, `Entity_SerializeVehicleState @ 0x460560`); mounted-pose anim states (emplaced
-  67–75, sit_N, driver lean) are §4.15.
+- The live carry has two retail paths. Slot-3 `UseGun` calls
+  `Entity_AttachToBoneAndUpdateTransform @ 0x5463d0` from the player body at `0x4b63c7` and the AI
+  body at `0x4bec23`. Ordinary seats use `Entity_GetBoneTransformAndOrientation @ 0x4b0c50`
+  (`Entity_SerializeVehicleState @ 0x460560` is the adjacent wire witness). Mounted-pose anim states
+  (emplaced 67–75, sit_N, driver lean) are §4.15.
 
 ### 9.2 Port (libs/world + libs/mission) and tracked deviations
 Shipped: `Entity.seats` + occupant refs riding the registry value-copy (`World::Snapshot` ⇒ Play→Stop
@@ -706,6 +711,10 @@ yaw_offset); `AiSystem::pose_if_mounted` captures that seat frame before the loc
 and roll, then skips SM + locomotion and auto-dismounts when the vehicle is gone. Remote
 `AiEntity.heading` stays in the seat frame; the local `heading`/`pitch` remain the full-precision
 `target_heading`/`look_pitch` while registry yaw is only the rounded wire/motor look mirror.
+For UseGun only, the host evaluates the authored userpoint through its owning 3DI part's live PANM
+after the semantic EWEAP yaw/pitch controls and feeds that world position back to the mounted
+occupant. This overrides the static `seat_local` result for the root-position contract while leaving
+the full matrix basis, non-UseGun seat follow, and joiner confirmation unclaimed.
 Each target carries the parsed `phrase_set` as an explicit `{valid,value}` pair; attachment copies
 that pair to the occupant, registry snapshots value-copy it, restore recovers it, and every dismount
 path clears the occupant copy and validity. This is deliberately separate from seat-frame pose state:
@@ -736,10 +745,11 @@ the former failure. Deviations (NOT silently absorbed):
 4. **Mounted-pose variants.** `UseGun` consumes the target definition's production-parsed
    `phrase_set` (including valid zero), and non-gunners consume numbered `sit_N`. The sit_24
    driver-lean 107–110 variants remain open.
-5. **Seat-local pose stand-in** — seat_local/yaw_offset come from host userpoints when available, but
-   the true per-tick bone transform (`Entity_GetBoneTransformAndOrientation`) is still deferred. This
-   remains distinct from the now-matching request-time yaw pre-snap and is the known suspect when a
-   rider attaches to the right logical seat but appears too far forward or fails to follow a moving bone.
+5. **Generic seat-local pose stand-in** — UseGun root position now follows the owning part's live
+   control-posed userpoint, but non-UseGun seats still use host-fed `seat_local`/`yaw_offset` rather
+   than the true per-tick `Entity_GetBoneTransformAndOrientation @ 0x4b0c50` result. The full UseGun
+   matrix basis is also not claimed. These residuals remain distinct from the matching request-time
+   yaw pre-snap.
 
 ## 10. Appendix: coordinate frames + terrain grounding (2026-06-08)
 
@@ -3380,7 +3390,8 @@ the gravity-cadence case, and the player-jump case in
 | ON FOOT — idle: per-leg re-plant, drift measured vs the CURRENT LEG YAW (org1 measures vs the target), 5°/30° hysteresis, 64-tick windows staggered 32 apart (L `(tick−32)&0x3F`, R `tick&0x3F` via ebp set at function head) | `[orig: L @ 0x4b4993/@ 0x4b49ad-0x4b49bc; R @ 0x4b499b/@ 0x4b49d0-0x4b49e3; ebp @ 0x4b4680]` |
 | Leg chase: quarter-step `(Δ+2)>>2`, rate clamp ±0x3000000 (~4.2°/tick — 3/5 the org1 0x5000000), twist limit ±0x30000000 (67.5°) measured vs the YAW (org1: ±0x20000000 vs the body); no def+84&0x200 1/16 variant in the org2 block | `[orig: R @ 0x4b49e9-0x4b4a43; L @ 0x4b4a49-0x4b4aa9]` |
 | **bodyHeading = legYawL + (legYawR − legYawL)/2** — the body follows the FEET; the §14 torso twist is (yaw − midpoint), so small aim moves twist the torso while the feet and body hold | `[orig: @ 0x4b4aa9-0x4b4abb]` |
-| Seat-bone follow: while mounted the pose block writes pos from the seat bone and +0x8C/both leg targets = the bone yaw, bodyPitch/Roll = the bone pitch/roll (rides D-INF-2) | `[orig: Entity_GetBoneTransformAndOrientation → @ 0x4b654e-0x4b6575]` |
+| UseGun live root follow: slot 3 calls `Entity_AttachToBoneAndUpdateTransform @ 0x5463d0` from the player body at `0x4b63c7` and AI body at `0x4bec23`; the posed parent matrix transforms the authored UseGun point into the child Position. The port matches this root-position result only. | `[orig: @ 0x5463d0; callers @ 0x4b63c7 / @ 0x4bec23]` |
+| Generic-seat basis follow: ordinary mounted seats write Position from the seat bone and +0x8C/both leg targets = bone yaw, bodyPitch/Roll = bone pitch/roll (rides D-INF-2). | `[orig: Entity_GetBoneTransformAndOrientation @ 0x4b0c50 → @ 0x4b654e-0x4b6575]` |
 | Ladder yaw alignment: CL target rotation adds one delta to +0x8C, both leg yaws, both leg targets (+ the yaw and `dword_B75FCC` unless the def's +0x58 & 0x1000) — rides D-COL-5 | `[orig: @ 0x4b5690-0x4b56d9]` |
 
 ### 22.2 Gravity / jump / edges (closes D-INF-10's player leg)
@@ -3446,9 +3457,10 @@ the org2 2× local integrate (§22.2). Unported by decision — dev/admin featur
 
 1. The org2 swim/parachute physics block `@ 0x4b7b18+` (descent, water
    transitions) — unread; rides D-INF-3 (water) + D-INF-20 (parachute).
-2. The mounted ±120° look clamp and true per-tick seat-bone transform remain; the
-   host-fed seat frame now synchronizes body/legs/pitch/roll while preserving the local
-   look. The ladder yaw-alignment/exit legs remain under D-INF-2 / D-COL-5.
+2. The mounted ±120° look clamp and true per-tick transform for generic non-UseGun seats remain;
+   the host-fed seat frame synchronizes body/legs/pitch/roll while preserving the local look.
+   UseGun root position now follows the live control-posed userpoint, but its full matrix basis is
+   not claimed. The ladder yaw-alignment/exit legs remain under D-INF-2 / D-COL-5.
 3. `remote_player_body_anim` (the authority's wire-snapped peer selection) has
    no airborne gate — the wire does not carry the peer's in-air flag to the
    host today; rides the D-NET-159 anim-byte work.
@@ -3546,7 +3558,7 @@ successful local toggle and after local/host logic ticks. Both operations intent
 unchanged. `vehicle_mount::test_usegun_attach_presnaps_local_look` pins the core fields and first pose;
 the asset-backed B50 GUT pins the immediate toggle-side host latch through the first `sim.step()`.
 Joiner attach confirmation remains unported (D-AI-11); the generic live seat-bone transform follow
-remains deferred (§9.2.5).
+remains deferred (§9.2.5). The separate live UseGun root-position path is matched in §23.5.
 
 `Entity_FindNearestSeatOrArmory @ 0x435d50` (searchMode 0, the seat leg): walks
 the player's proximity list; per candidate — dead skip, vehicles with a live
@@ -3782,18 +3794,33 @@ Ported same session (the second wave, after the 00TRa probe forced them out):
 
 The body update's mounted leg [orig: Entity_UpdateInfantryPlayerBody, the
 parentEntity block]: every tick, flags scrubbed (`&= 0xFF8F57DF`, fire-bone
-bytes cleared), then per seat class — `parentSlot == 3` (UseGun) ->
-`Entity_AttachToBoneAndUpdateTransform` + anim state 67 (+ def config variants
-68-75); other seats -> `Entity_GetBoneTransformAndOrientation @ 0x4b0c50` on the
-seat bone -> **Position = bone world pos, bodyHeading/headLook = bone yaw, Roll,
-bodyPitch** (the entity Yaw — the LOOK — stays player-owned), and the seated
-anim = `atol(bone-name digits) + 76` (a `sitex24` names anim 100; +-0x4444440
-roll on the carrier flips 109/110). Our `pose_mounted_occupant` performs the carry, then
-`pose_if_mounted` captures its yaw/pitch/roll before any local look rewrite. It synchronizes
-`body_heading`, both `leg_yaw` and `leg_target` chains, `body_pitch`, and roll to that
-captured seat frame. A non-gunner/passenger remote occupant uses that seat heading; a
-UseGun organic restores its independent live look and then chases/clamps against the
-captured mount base (§26.5).
+bytes cleared), then dispatches by seat class. Slot 3 (UseGun) calls
+`Entity_AttachToBoneAndUpdateTransform @ 0x5463d0` from the player-body site
+`0x4b63c7` and the AI-body site `0x4bec23`, then selects anim state 67 (+ def
+config variants 68-75). That helper reads the parent UseGun slot byte at `+0x31A`,
+selects the 48-byte record at `gpModel[48] + 48 * (slot - 1)`, primes the model state
+through `HUD_CacheWeaponSlotInfo @ 0x440930` and
+`Model_TransformBoneMatrices @ 0x58e390`, and uses the record's matrix index at
+`+0x18`. `Math_FloatMatrixToFixedPoint22 @ 0x611140` converts the live matrix;
+`Math_FixedPointTransformPoint22 @ 0x615810` transforms the record's authored XYZ
+into child Position. Retail also derives orientation from that matrix through
+`Math_FixedPointMatrixToEulerAngles @ 0x613310`, then restores the occupant's
+independent look yaw/pitch at `0x546661` / `0x546664`.
+
+Other seats call `Entity_GetBoneTransformAndOrientation @ 0x4b0c50` on the seat
+bone -> **Position = bone world pos, bodyHeading/headLook = bone yaw, Roll,
+bodyPitch** (the entity Yaw — the LOOK — stays player-owned), and select seated anim
+`atol(bone-name digits) + 76` (a `sitex24` names anim 100; +-0x4444440 roll on
+the carrier flips 109/110).
+
+The port now matches the UseGun helper's root-position contract: after semantic EWEAP
+controls pose the owning parent part, the authored UseGun point is transformed through
+that live part and fed back to the occupant. It does **not** claim retail's full matrix
+basis, the ordinary-seat `0x4b0c50` follow, or joiner confirmation. The static
+`seat_local` carry remains the generic/fallback path. `pose_if_mounted` captures that
+seat frame before any local-look rewrite, synchronizes body/leg state, and a UseGun
+organic restores its independent live look before chasing/clamping against the mount
+base (§26.5).
 The mounted branch is no longer an early bypass of the infantry combat/animation pass:
 live mounted organics keep perception, damage reaction, target acquisition, aim, and
 animation, then bypass only the ordinary locomotion tail after the mounted collision phase
@@ -3808,7 +3835,7 @@ the motor consumes, and a degree round-trip therefore cannot quantize yaw or fre
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
-| D-AI-11 | Mount-chain residuals after §26 closes emplaced fire, mounted collision suppression, and death-detach animation: (a) the USE scan remains a registry sweep with a +0.9 u chest eye; (b) its emplaced-carrier LOS/reject leg (`attrib & 0x20` -> `groundEntity`) is unmodeled, while the armory leg is ported; (c) the WAC no-dismount global is unmodeled; (d) seat-position keys 0xB6-0xBF and the displace-AI rule are unported; (e) AI walk-to-entry/64-tick seat-upgrade boarding is unported and script mounts remain immediate; (f) child-vehicle seat traversal is unmodeled; (g) sub-39 groundEntity persistence rides the generic carrier reference; (h) vehicle brains retain the acquire-skip stand-in pending `.aip` parse; (i) own-hull seated-scan occlusion remains a candidate skip until pool-1 hulls are built; (j) the joiner C2S 0x26/0x27 attach/detach wire leg is unported. The parent embedded weapon slot/current-action gate, live mounted collision cadence, and corpse detach now match retail. | §23.1/§23.4/§23.5 and §26 | mount/ride/drive/emplaced-fire/death are live; the remaining boarding, scan, and joiner-wire residuals stay OPEN |
+| D-AI-11 | Mount-chain residuals after §26 closes emplaced fire, mounted collision suppression, death-detach animation, and UseGun live root position (`Entity_AttachToBoneAndUpdateTransform @ 0x5463d0`; player/AI callers `0x4b63c7` / `0x4bec23`): (a) the USE scan remains a registry sweep with a +0.9 u chest eye; (b) its emplaced-carrier LOS/reject leg (`attrib & 0x20` -> `groundEntity`) is unmodeled, while the armory leg is ported; (c) the WAC no-dismount global is unmodeled; (d) seat-position keys 0xB6-0xBF and the displace-AI rule are unported; (e) AI walk-to-entry/64-tick seat-upgrade boarding is unported and script mounts remain immediate; (f) child-vehicle seat traversal is unmodeled; (g) sub-39 groundEntity persistence rides the generic carrier reference; (h) vehicle brains retain the acquire-skip stand-in pending `.aip` parse; (i) own-hull seated-scan occlusion remains a candidate skip until pool-1 hulls are built; (j) the joiner C2S 0x26/0x27 attach/detach wire leg is unported. Generic-seat follow and the full UseGun matrix basis remain D-INF-2. | §23.1/§23.4/§23.5 and §26; asset-gated 00TRc E50triB GUT | mount/ride/drive/emplaced-fire/death plus UseGun root position are live; boarding, generic/full-basis, scan, and joiner-wire residuals stay OPEN |
 
 Correspondence adds: see the rows appended to the section-2 map this session
 (the toggle chain, the four predicates, `vehicle_ai_drive`, the deploy stamp).
@@ -4372,6 +4399,7 @@ would therefore diverge from JO:CA. All addresses below are retail `Jointops.exe
 | projectile near-miss behavior | **MATCHING** (read-only grill) | listener-only tail in §26.4; deliberately no AI notification |
 | mounted aim, request gates, action-FSM fire, muzzle, and shooter ownership | **MATCHING** (behavioral proof) | §26.5-§26.6; `ai` and `npruntime_weapon_table` ctests |
 | late-spawn player body-ADM binding + configured UseGun pose | **MATCHING** (behavioral proof) | §26.5b; asset-backed `nova_simulation_test.gd` |
+| live UseGun root position | **MATCHING** local/authority core | §23.5/§26.5a; asset-gated 00TRc E50triB GUT; generic seats, full matrix basis, and joiner confirmation remain open |
 | mounted collision cadence + model-force suppression | **MATCHING** core | §26.7; `collision` and `ai` ctests; D-COL-9 narrowed |
 | mounted death detach + directional death animation | **MATCHING** (behavioral proof) | §26.7 and §19; `ai` ctest |
 | automatic ADM-derived action duration in the runtime table builder | **DIVERGENT** (bounded) | §26.8; D-WPN-26 |
@@ -4449,8 +4477,8 @@ NovaSimulation red test then exposed the host's fourth representation: even with
 now mirrors the snapped `target_heading` into that input latch immediately on mount and again after
 local/host logic ticks, covering direct and listening-host paths. Joiner authority confirmation is
 still unported (D-AI-11). Pitch is not mirrored because the retail request snap is yaw-only. This
-one-time base initialization does not implement the still-open per-tick seat-bone transform follow
-(§9.2.5).
+request-time snap and the matching live UseGun root-position feedback are separate stages. Generic
+seat follow, the full UseGun matrix basis, and joiner confirmation remain open (§9.2.5).
 
 After that initialization, mounted look remains live rather than snapping directly to the target. Yaw chases by
 `((desired-look)+2)>>2`, clamped to ±`0x02000000` per tick
@@ -4495,6 +4523,14 @@ world-to-wire player lift restores that live AiEntity value before witnessed
 compact-byte rounding. An infantry compact instead carries the desired aim-pitch
 target. NetClientView reconstructs the mounted NPC's live Pitch once per decoded
 frame with retail's wrapped one-eighth chase before deriving the semantic phase.
+
+Those same EWEAP controls also pose the parent PANM consumed by the mounted carry.
+After yaw/pitch update the port transforms the authored UseGun point through its owning
+live part and feeds that world position to the occupant root, matching
+`Entity_AttachToBoneAndUpdateTransform @ 0x5463d0` and its player/AI callers at
+`0x4b63c7` / `0x4bec23`. Retail additionally consumes the resulting full matrix
+orientation; this port status is deliberately narrower and claims root position only.
+The asset-gated 00TRc E50triB regression supplies the articulated-part witness.
 
 ### 26.5b Late-spawn body-ADM registration (2026-07-21)
 
@@ -4582,9 +4618,15 @@ CTest target.
 GUT `test_late_spawn_player_resolves_own_adm_before_configured_usegun_pose` reproduces the
 production load-before-spawn order and requires the US01/B50 combination to select
 `anim_emplaced_5`; its rebuild/restore companions pin repopulation after registry invalidation.
-The adjacent UseGun assertions independently prove yaw and pitch cannot translate the entity origin
-off the authored seat point, and the host-session regression pins assignment before the first
-authoritative remote-player update.
+The adjacent B50 UseGun assertions prove that fixture's static authored point does not translate
+under yaw/pitch, and the host-session regression pins assignment before the first authoritative
+remote-player update. The complementary asset-gated
+`test_00trc_e50trib_mounted_avatar_root_follows_live_usegun_frame` loads 00TRc's E50triB,
+whose UseGun point belongs to articulated part 1, applies nonzero EWEAP yaw, and requires the
+sim occupant root to equal the live transformed userpoint within 0.001 and its body basis to match
+this asset's live yaw-part basis within 0.51 degrees. It requires
+`OPENNOVA_JO_DIR`, so it is production-asset evidence rather than an always-on CI test; it does
+not generalize full-basis parity to seats with non-identity rest-part frames or authored yaw offsets.
 
 The EWEAP articulation regression is asset-backed: nova_simulation_test.gd
 mounts a deliberately yaw-misaligned local player on fixture B50Cal, requires the attach to establish

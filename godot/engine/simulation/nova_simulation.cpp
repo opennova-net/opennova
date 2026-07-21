@@ -1215,13 +1215,177 @@ void panm_render_matrix_from_godot(const Transform3D &transform, float out[16]) 
 	out[15] = 1.0f;
 }
 
+constexpr double kHalfPi = 1.57079632679489661923;
+constexpr double kRadiansPerDegree =
+		3.14159265358979323846 / 180.0;
+
+// C++ twin of MissionObjectPlacer.bms_to_godot_basis for ordinary mission
+// eulers. Kept here because the mounted provider must produce the same world
+// frame without depending on presentation/GDScript.
+Basis godot_model_basis_from_mission_euler(
+		double pitch_deg, double yaw_deg, double roll_deg) {
+	return Basis(Vector3(0.0, 1.0, 0.0),
+			(90.0 - yaw_deg) * kRadiansPerDegree) *
+			Basis(Vector3(0.0, 0.0, 1.0),
+					pitch_deg * kRadiansPerDegree) *
+			Basis(Vector3(1.0, 0.0, 0.0),
+					roll_deg * kRadiansPerDegree) *
+			Basis(Vector3(0.0, 1.0, 0.0), kHalfPi);
+}
+
+bool finite_vector3(const Vector3 &value) {
+	return std::isfinite(static_cast<double>(value.x)) &&
+			std::isfinite(static_cast<double>(value.y)) &&
+			std::isfinite(static_cast<double>(value.z));
+}
+
+bool finite_basis(const Basis &value) {
+	return finite_vector3(value[0]) && finite_vector3(value[1]) &&
+			finite_vector3(value[2]);
+}
+
 } // namespace
 
 void NovaSimulation::apply_collision_to_ai() {
 	collision_world_.terrain = terrain_field_.valid() ? &terrain_field_ : nullptr;
 	collision_world_.set_section_matrix_provider(this);
-	if (world_) world_->collision = &collision_world_;
+	if (world_) {
+		world_->collision = &collision_world_;
+		world_->mounted_pose_provider = this;
+	}
 	if (ai_) ai_->collision = &collision_world_;
+}
+
+bool NovaSimulation::resolve_mounted_pose(
+		opennova::world::World &p_world,
+		const opennova::world::Entity &p_carrier,
+		const opennova::world::Seat &p_seat,
+		opennova::world::MountedPose &r_out) {
+	if (!world_ || &p_world != world_.get() ||
+			p_seat.type != opennova::world::SeatType::Gunner ||
+			p_seat.bone_index == 0)
+		return false;
+	const auto data_found =
+			mounted_pose_data_by_type_.find(p_carrier.item_id);
+	if (data_found == mounted_pose_data_by_type_.end() ||
+			data_found->second.is_null())
+		return false;
+	const Ref<NovaObjectData> &data = data_found->second;
+	const int userpoint_index = static_cast<int>(p_seat.bone_index) - 1;
+	if (userpoint_index < 0 ||
+			userpoint_index >= data->get_user_point_count())
+		return false;
+	const Dictionary userpoint = data->get_user_point_info(userpoint_index);
+	const int part_index = static_cast<int>(userpoint.get("subobject", -1));
+	const Vector3 authored_model_position =
+			userpoint.get("position", Vector3());
+	if (part_index < 0 || !finite_vector3(authored_model_position))
+		return false;
+
+	constexpr int lod_index = 0;
+	const Dictionary rest_parts =
+			data->evaluate_panm(lod_index, 0, Dictionary());
+	if (!rest_parts.has(part_index)) return false;
+
+	Dictionary controls;
+	const ThreediModelIR &ir = data->native_ir();
+	if (ir.control_register_count > 0 && ir.control_registers == nullptr)
+		return false;
+	AiEntity *carrier_ai = ai_ ? ai_->for_handle(p_carrier.handle) : nullptr;
+	for (size_t slot = 0; slot < 2 && slot < ir.control_register_count;
+			++slot) {
+		const int phase = carrier_ai != nullptr
+				? std::clamp(carrier_ai->brain.f[
+						AiBrain::kPartAnimPhase0 + static_cast<int>(slot)],
+						0, 65535)
+				: 0;
+		const String name = String::utf8(ir.control_registers[slot].name);
+		if (!name.is_empty()) controls[name] = phase;
+	}
+	EmplacedWeaponControls emplaced;
+	if (emplaced_weapon_controls_for(
+			p_world, ai_.get(), p_carrier, emplaced)) {
+		controls[String(kEmplacedGunYawRegister)] =
+				static_cast<int>(emplaced.gun_yaw);
+		controls[String(kEmplacedGunPitchRegister)] =
+				static_cast<int>(emplaced.gun_pitch);
+	}
+	const uint32_t time_ms = panm_time_override_ms_ >= 0
+			? static_cast<uint32_t>(panm_time_override_ms_)
+			: p_world.logic_tick * 16u;
+	const Dictionary live_parts =
+			data->evaluate_panm(lod_index, time_ms, controls);
+	if (!live_parts.has(part_index)) return false;
+	const Variant rest_value = rest_parts[part_index];
+	const Variant live_value = live_parts[part_index];
+	if (rest_value.get_type() != Variant::TRANSFORM3D ||
+			live_value.get_type() != Variant::TRANSFORM3D)
+		return false;
+	const Transform3D rest_part = static_cast<Transform3D>(rest_value);
+	const Transform3D live_part = static_cast<Transform3D>(live_value);
+	if (!finite_vector3(rest_part.origin) || !finite_basis(rest_part.basis) ||
+			!finite_vector3(live_part.origin) || !finite_basis(live_part.basis) ||
+			std::abs(static_cast<double>(rest_part.basis.determinant())) < 1.0e-8)
+		return false;
+
+	const Vector3 point_in_part =
+			rest_part.affine_inverse().xform(authored_model_position);
+	const Vector3 live_model_position = live_part.xform(point_in_part);
+	const Basis carrier_basis = godot_model_basis_from_mission_euler(
+			p_carrier.pitch, p_carrier.yaw, p_carrier.roll);
+	if (!finite_vector3(live_model_position) || !finite_basis(carrier_basis) ||
+			std::abs(static_cast<double>(carrier_basis.determinant())) < 1.0e-8)
+		return false;
+	const Vector3 carrier_origin(
+			p_carrier.position.x, p_carrier.position.z,
+			-p_carrier.position.y);
+	const Vector3 live_world_position =
+			Transform3D(carrier_basis, carrier_origin).xform(live_model_position);
+	if (!finite_vector3(live_world_position)) return false;
+	r_out.position = {
+			static_cast<float>(live_world_position.x),
+			static_cast<float>(-live_world_position.z),
+			static_cast<float>(live_world_position.y)};
+
+	// Apply the articulated part's rest-to-live delta around the carrier to the
+	// exact static seat orientation. This identity-round-trips the fallback and
+	// lets moving seat parts carry yaw/pitch/roll without coupling to LOOK.
+	const double baseline_yaw =
+			p_seat.type == opennova::world::SeatType::Gunner
+			? static_cast<double>(p_carrier.yaw - p_seat.yaw_offset)
+			: static_cast<double>(p_carrier.yaw + p_seat.yaw_offset);
+	const Basis baseline_basis = godot_model_basis_from_mission_euler(
+			p_carrier.pitch, baseline_yaw, p_carrier.roll);
+	const Basis part_delta =
+			live_part.basis * rest_part.basis.inverse();
+	Basis live_basis = carrier_basis * part_delta *
+			carrier_basis.inverse() * baseline_basis;
+	if (!finite_basis(live_basis) ||
+			std::abs(static_cast<double>(live_basis.determinant())) < 1.0e-8)
+		return false;
+	live_basis = live_basis.orthonormalized();
+	const Basis euler_basis = live_basis *
+			Basis(Vector3(0.0, 1.0, 0.0), -kHalfPi);
+	const double pitch_rad = std::asin(std::clamp(
+			static_cast<double>(euler_basis[1].x), -1.0, 1.0));
+	if (std::abs(std::cos(pitch_rad)) < 1.0e-6) return false;
+	const double heading_rad = std::atan2(
+			-static_cast<double>(euler_basis[2].x),
+			static_cast<double>(euler_basis[0].x));
+	const double roll_rad = std::atan2(
+			-static_cast<double>(euler_basis[1].z),
+			static_cast<double>(euler_basis[1].y));
+	const double yaw_deg = opennova::world::normalize_mission_yaw_deg(
+			90.0 - heading_rad / kRadiansPerDegree);
+	const double pitch_deg = pitch_rad / kRadiansPerDegree;
+	const double roll_deg = roll_rad / kRadiansPerDegree;
+	if (!std::isfinite(yaw_deg) || !std::isfinite(pitch_deg) ||
+			!std::isfinite(roll_deg))
+		return false;
+	r_out.yaw = static_cast<int16_t>(std::lround(yaw_deg));
+	r_out.pitch = static_cast<int16_t>(std::lround(pitch_deg));
+	r_out.roll = static_cast<int16_t>(std::lround(roll_deg));
+	return true;
 }
 
 bool NovaSimulation::ensure_collision_instance(
@@ -3143,6 +3307,7 @@ opennova::mission::PromoteOptions NovaSimulation::promote_options() const {
 
 void NovaSimulation::set_item_seat_specs(const Array &p_specs) {
 	item_seat_specs_.clear();
+	mounted_pose_data_by_type_.clear();
 	for (int64_t i = 0; i < p_specs.size(); ++i) {
 		const Variant spec_v = p_specs[i];
 		if (spec_v.get_type() != Variant::DICTIONARY) continue;
@@ -3151,6 +3316,13 @@ void NovaSimulation::set_item_seat_specs(const Array &p_specs) {
 		opennova::mission::ItemSeatSpec spec;
 		spec.type_id = static_cast<int32_t>(spec_d.get("type_id", 0));
 		if (spec.type_id == 0) continue;
+		const Variant model_data_value =
+				spec_d.get("model_data", Variant());
+		if (model_data_value.get_type() == Variant::OBJECT) {
+			Ref<NovaObjectData> model_data(model_data_value);
+			if (model_data.is_valid() && model_data->has_document())
+				mounted_pose_data_by_type_[spec.type_id] = model_data;
+		}
 		if (spec_d.has("mount_config_valid")) {
 			spec.mount_config_valid = static_cast<bool>(spec_d.get("mount_config_valid", false));
 			spec.mount_config = spec.mount_config_valid

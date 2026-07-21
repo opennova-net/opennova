@@ -54,6 +54,7 @@ void attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t 
     occ.mounted_config = veh.emplaced_config_valid ? veh.emplaced_config : 0;
     if (occ.mount_type == SeatType::Gunner)
         vehicle_bind_use_gun_slot(world, occ, veh);
+    pose_mounted_occupant(world, occ, veh, veh.seats[seat_idx]);
     // Success clears the movement stance bits [orig: MoveOrder &= ~0x300 @0x435c42 + the
     // prone/crouch latch clears @0x435c54/@0x435c59].
     occ.net_stance_bits = 0;

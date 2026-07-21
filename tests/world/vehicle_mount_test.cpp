@@ -18,6 +18,7 @@
 #include <cmath>
 #include <cstdio>
 #include <memory>
+#include <vector>
 
 using namespace opennova::world;
 
@@ -92,6 +93,53 @@ struct Rig {
     Entity &player() { return *w.registry.get(player_h); }
 };
 
+struct FakeMountedPoseProvider final : IMountedPoseProvider {
+    bool available = true;
+    MountedPose pose;
+
+    bool resolve_mounted_pose(World &, const Entity &, const Seat &,
+                              MountedPose &out) override {
+        if (!available) return false;
+        out = pose;
+        return true;
+    }
+};
+
+struct HeadingMountedPoseProvider final : IMountedPoseProvider {
+    std::vector<int32_t> headings;
+    std::vector<int32_t> pitches;
+
+    bool resolve_mounted_pose(World &world, const Entity &carrier, const Seat &,
+                              MountedPose &out) override {
+        if (world.ai == nullptr || !carrier.primary_weapon_owner.valid()) return false;
+        const AiEntity *gunner = world.ai->for_handle(carrier.primary_weapon_owner);
+        if (gunner == nullptr) return false;
+        headings.push_back(gunner->heading);
+        pitches.push_back(gunner->pitch);
+        const float heading_steps = static_cast<float>(gunner->heading) / 16777216.0f;
+        const float pitch_steps = static_cast<float>(gunner->pitch) / 16777216.0f;
+        out.position = {heading_steps, pitch_steps, 41.0f};
+        out.yaw = static_cast<int16_t>(10 + std::lround(heading_steps));
+        out.pitch = static_cast<int16_t>(20 + std::lround(pitch_steps));
+        out.roll = -30;
+        return true;
+    }
+
+    void clear() {
+        headings.clear();
+        pitches.clear();
+    }
+};
+
+void check_pose(const Entity &entity, const MountedPose &expected) {
+    CHECK(std::abs(entity.position.x - expected.position.x) < 0.0001f);
+    CHECK(std::abs(entity.position.y - expected.position.y) < 0.0001f);
+    CHECK(std::abs(entity.position.z - expected.position.z) < 0.0001f);
+    CHECK(entity.yaw == expected.yaw);
+    CHECK(entity.pitch == expected.pitch);
+    CHECK(entity.roll == expected.roll);
+}
+
 // Entity_RequestVehicleAttach pre-snaps the requester's Yaw to the chosen seat
 // before the authority applies the relationship. UseGun subtracts its authored
 // offset. Our split local-player body must update target_heading too; otherwise
@@ -146,6 +194,220 @@ void test_usegun_attach_presnaps_local_look() {
     CHECK(ai.pose_if_mounted(body, w));
     CHECK(body.heading == expected_heading);
     CHECK(body.inf.body_heading == (90 - expected_yaw) * 11930464);
+}
+
+// A model-aware host supplies the complete live seat-bone frame at the shared
+// World seam. Every attach entry point consumes it immediately, and mounted AI
+// consumes a newly evaluated frame on its next tick. A missing/declining host
+// retains the portable static seat geometry.
+void test_live_mounted_pose_provider_and_static_fallback() {
+    // EntityCommands mount consumes the host pose on the attach edge.
+    {
+        World w;
+        w.registry.configure_pool(0, 4);
+        w.registry.configure_pool(1, 4);
+        FakeMountedPoseProvider provider;
+        provider.pose = {{101.25f, -42.5f, 8.75f}, 37, -12, 17};
+        w.mounted_pose_provider = &provider;
+
+        Entity vehicle;
+        vehicle.net_id = 200;
+        vehicle.kind = EntityKind::Item;
+        vehicle.position = {10.0f, 20.0f, 30.0f};
+        vehicle.yaw = 90;
+        vehicle.pitch = 4;
+        vehicle.roll = 5;
+        vehicle.health = 100;
+        vehicle.alive = true;
+        Seat seat;
+        seat.type = SeatType::Passenger;
+        seat.bone_index = 7;
+        seat.source_name = "sitex00";
+        seat.seat_local = {2.0f, 3.0f, 4.0f};
+        seat.yaw_offset = 10;
+        vehicle.seats.push_back(seat);
+        w.registry.spawn(1, vehicle);
+
+        Entity occupant;
+        occupant.net_id = 100;
+        occupant.kind = EntityKind::Organic;
+        occupant.health = 100;
+        occupant.alive = true;
+        const EntityHandle occupant_h = w.registry.spawn(0, occupant);
+
+        CHECK(w.commands.mount(100, 200));
+        check_pose(*w.registry.get(occupant_h), provider.pose);
+    }
+
+    // The shared attach path consumes the same seam, then AI tick follows a new
+    // live position and carries the full orientation into its body frame.
+    {
+        World w;
+        w.registry.configure_pool(0, 4);
+        w.registry.configure_pool(1, 4);
+        AiSystem ai;
+        w.ai = &ai;
+        FakeMountedPoseProvider provider;
+        provider.pose = {{11.0f, 12.0f, 13.0f}, 21, -8, 9};
+        w.mounted_pose_provider = &provider;
+
+        Entity vehicle;
+        vehicle.net_id = 200;
+        vehicle.kind = EntityKind::Item;
+        vehicle.health = 100;
+        vehicle.alive = true;
+        Seat seat;
+        seat.type = SeatType::Passenger;
+        seat.bone_index = 7;
+        seat.source_name = "sitex00";
+        vehicle.seats.push_back(seat);
+        const EntityHandle vehicle_h = w.registry.spawn(1, vehicle);
+
+        Entity occupant;
+        occupant.net_id = 100;
+        occupant.kind = EntityKind::Organic;
+        occupant.health = 100;
+        occupant.alive = true;
+        const EntityHandle occupant_h = w.registry.spawn(0, occupant);
+        const int ai_index = ai.attach(occupant_h);
+        AiEntity *body = ai.at(ai_index);
+        body->net_id = 100;
+        body->inf.active = true;
+        body->inf.anim_state = anim_state::kIdleCrouch;
+
+        CHECK(entity_process_vehicle_attach(w, occupant_h, vehicle_h, 7));
+        check_pose(*w.registry.get(occupant_h), provider.pose);
+
+        provider.pose = {{31.5f, 32.25f, 33.75f}, 44, 15, -19};
+        TickContext ctx{};
+        ctx.is_authority = true;
+        ai.tick(w, ctx);
+
+        const Entity *mounted = w.registry.get(occupant_h);
+        check_pose(*mounted, provider.pose);
+        CHECK(body->pos[0] == to_fixed(31.5));
+        CHECK(body->pos[1] == to_fixed(32.25));
+        CHECK(body->pos[2] == to_fixed(33.75));
+        CHECK(body->inf.body_heading == (90 - provider.pose.yaw) * 11930464);
+        CHECK(body->body_pitch == bam_from_degrees_wrapped(provider.pose.pitch));
+        CHECK(body->roll == bam_from_degrees_wrapped(provider.pose.roll));
+    }
+
+    {
+        // A non-local Gunner first resolves the existing clamp base, chases its
+        // independent look, then resolves the final Hn+1 parent phase. The local
+        // path already exposes current input before its single resolve.
+        World w;
+        w.registry.configure_pool(0, 4);
+        w.registry.configure_pool(1, 4);
+        AiSystem ai;
+        w.ai = &ai;
+        HeadingMountedPoseProvider provider;
+        w.mounted_pose_provider = &provider;
+
+        Entity vehicle;
+        vehicle.net_id = 200;
+        vehicle.kind = EntityKind::Item;
+        vehicle.yaw = 90;
+        vehicle.health = 100;
+        vehicle.alive = true;
+        vehicle.emplaced_config_valid = true;
+        vehicle.emplaced_config = 3; // wide mount: isolate the chase phase from clamp limits
+        Seat seat;
+        seat.type = SeatType::Gunner;
+        seat.bone_index = 7;
+        seat.source_name = "UseGun";
+        vehicle.seats.push_back(seat);
+        const EntityHandle vehicle_h = w.registry.spawn(1, vehicle);
+
+        Entity occupant;
+        occupant.net_id = 100;
+        occupant.kind = EntityKind::Organic;
+        occupant.health = 100;
+        occupant.alive = true;
+        const EntityHandle occupant_h = w.registry.spawn(0, occupant);
+        const int ai_index = ai.attach(occupant_h);
+        AiEntity *body = ai.at(ai_index);
+        body->net_id = 100;
+        body->inf.active = true;
+
+        CHECK(entity_process_vehicle_attach(w, occupant_h, vehicle_h, 7));
+        provider.clear();
+        body->heading = 0;
+        body->pitch = 0;
+        body->inf.aim_valid = true;
+        body->inf.aim_heading = 0x08000000;
+        body->inf.aim_pitch = 0x08000000;
+        CHECK(ai.pose_if_mounted(*body, w));
+
+        constexpr int32_t kChasedHeading = 0x02000000;
+        constexpr int32_t kChasedPitch = 0x01000000;
+        CHECK(provider.headings.size() == 2);
+        CHECK(provider.pitches.size() == 2);
+        if (provider.headings.size() == 2) {
+            CHECK(provider.headings[0] == 0);
+            CHECK(provider.headings[1] == kChasedHeading);
+            CHECK(provider.pitches[0] == 0);
+            CHECK(provider.pitches[1] == kChasedPitch);
+        }
+        const Entity *mounted = w.registry.get(occupant_h);
+        CHECK(body->heading == kChasedHeading);
+        CHECK(body->pitch == kChasedPitch);
+        CHECK(std::abs(mounted->position.x - 2.0f) < 0.0001f);
+        CHECK(std::abs(mounted->position.y - 1.0f) < 0.0001f);
+        CHECK(std::abs(mounted->position.z - 41.0f) < 0.0001f);
+        CHECK(body->pos[0] == to_fixed(2.0));
+        CHECK(body->pos[1] == to_fixed(1.0));
+        CHECK(mounted->yaw == 87); // independent chased look, not provider body yaw 12
+        CHECK(mounted->pitch == 21);
+        CHECK(mounted->roll == -30);
+        CHECK(body->inf.body_heading == (90 - 12) * 11930464);
+        CHECK(body->body_pitch == bam_from_degrees_wrapped(21.0));
+        CHECK(body->roll == bam_from_degrees_wrapped(-30.0));
+
+        provider.clear();
+        body->inf.is_local_player = true;
+        body->inf.target_heading = 0x03000000;
+        body->inf.look_pitch = 0x02000000;
+        CHECK(ai.pose_if_mounted(*body, w));
+        CHECK(provider.headings.size() == 1);
+        CHECK(provider.pitches.size() == 1);
+        if (provider.headings.size() == 1) {
+            CHECK(provider.headings[0] == 0x03000000);
+            CHECK(provider.pitches[0] == 0x02000000);
+        }
+        CHECK(body->heading == 0x03000000);
+        CHECK(body->pitch == 0x02000000);
+        CHECK(std::abs(w.registry.get(occupant_h)->position.x - 3.0f) < 0.0001f);
+        CHECK(std::abs(w.registry.get(occupant_h)->position.y - 2.0f) < 0.0001f);
+    }
+
+    // Null and declining providers both preserve the known static fallback.
+    {
+        World w;
+        Entity vehicle;
+        vehicle.position = {10.0f, 20.0f, 30.0f};
+        vehicle.yaw = 90;
+        vehicle.pitch = 4;
+        vehicle.roll = 5;
+        Seat seat;
+        seat.type = SeatType::Passenger;
+        seat.seat_local = {2.0f, 3.0f, 4.0f};
+        seat.yaw_offset = 10;
+        const MountedPose expected = {{13.0f, 18.0f, 34.0f}, 100, 4, 5};
+
+        Entity occupant;
+        pose_mounted_occupant(w, occupant, vehicle, seat);
+        check_pose(occupant, expected);
+
+        FakeMountedPoseProvider provider;
+        provider.available = false;
+        provider.pose = {{999.0f, 999.0f, 999.0f}, -1, -2, -3};
+        w.mounted_pose_provider = &provider;
+        occupant = Entity{};
+        pose_mounted_occupant(w, occupant, vehicle, seat);
+        check_pose(occupant, expected);
+    }
 }
 
 // The nearest-seat toggle: a free seat within the 4.0 u horizontal gate attaches; out of
@@ -847,6 +1109,7 @@ void test_vehicle_hull_stops_at_building() {
 
 int main() {
     test_usegun_attach_presnaps_local_look();
+    test_live_mounted_pose_provider_and_static_fallback();
     test_toggle_nearest_seat();
     test_toggle_deck_best_seat();
     test_toggle_dismount_and_swap();

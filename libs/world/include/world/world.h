@@ -175,6 +175,23 @@ class World;     // fwd
 class AiSystem;  // fwd (lives in world/ai.h; World holds a non-owning pointer so the
                  // shared command layer can reach an entity's AI component in-engine)
 
+// Host-resolved live seat-bone pose. The portable world owns attachment policy and
+// fallback geometry; a model-aware host may supply the current articulated bone frame.
+// [orig: UseGun Entity_AttachToBoneAndUpdateTransform @0x5463d0; ordinary
+// seats Entity_GetBoneTransformAndOrientation @0x4b0c50]
+struct MountedPose {
+    Vec3 position;
+    int16_t yaw = 0;
+    int16_t pitch = 0;
+    int16_t roll = 0;
+};
+
+struct IMountedPoseProvider {
+    virtual ~IMountedPoseProvider() = default;
+    virtual bool resolve_mounted_pose(World &world, const Entity &carrier,
+                                      const Seat &seat, MountedPose &out) = 0;
+};
+
 // Host-facing lifecycle for effects that exist only while a vehicle has its single
 // tracked primary occupant (the +368 claimant). Payload fields are the target vehicle's
 // net_id, bms_id, spawn_origin.
@@ -220,13 +237,13 @@ bool vehicle_has_valid_control_occupant(const World &world, const Entity &vehicl
 void presnap_vehicle_attach_heading(World &world, Entity &occupant,
                                     const Entity &vehicle, const Seat &seat);
 
-// Snap a mounted occupant onto its seat: occ.position = vehicle.position +
-// rotate(seat.seat_local, -vehicle.yaw); a Gunner faces vehicle.yaw - seat.yaw_offset,
-// others face vehicle.yaw + seat.yaw_offset. Pure geometry (no AI), shared by
-// EntityCommands::mount (the attach-time pose) and the AI tick (the per-tick seat-follow).
-// [orig: stand-in for Entity_SerializeVehicleState @0x460560's seat follow; true
-// bone-transform follow is Entity_GetBoneTransformAndOrientation @0x4b0c50.]
-void pose_mounted_occupant(Entity &occ, const Entity &vehicle, const Seat &seat);
+// Snap a mounted occupant onto its seat. A model-aware host resolves retail's live
+// seat-bone frame; otherwise the portable fallback is vehicle.position +
+// rotate(seat.seat_local, -vehicle.yaw), with Gunner yaw at vehicle.yaw-yaw_offset
+// and other seats at vehicle.yaw+yaw_offset. Shared by every attach path and the AI
+// tick's per-frame seat follow. [orig: UseGun @0x5463d0; ordinary seats @0x4b0c50]
+void pose_mounted_occupant(World &world, Entity &occ, const Entity &vehicle,
+                           const Seat &seat);
 
 enum class SeatSelectionMode : uint8_t {
     Any = 0,
@@ -387,6 +404,8 @@ public:
                                // this world, so the AI-change command family can reach brains.
     CollisionWorld *collision = nullptr; // non-owning authoritative spatial-query seam;
                                          // the host owns the mission CollisionWorld.
+    IMountedPoseProvider *mounted_pose_provider = nullptr; // non-owning live seat-bone seam;
+                                                           // null/false keeps static geometry.
 
     // Session + game-option state the BMS Teammate trigger family reads. Hosts
     // stamp these at bring-up; the SP defaults hold otherwise.
