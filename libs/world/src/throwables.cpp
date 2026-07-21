@@ -424,15 +424,18 @@ static bool motor_nade(World &world, RoundSim &sim, LiveRound &r,
     }
     store_frame(r, f);
 
+    // RoundSim advances age storage before calling the motor, so the retail
+    // pre-decrement elapsed value is one less here.
+    const int32_t elapsed = r.age_ticks > 0 ? r.age_ticks - 1 : 0;
     // ARM: the obj effect fires once when elapsed == arm_age (the smoke-pour
     // start) [orig: @ 0x444908 — initial(+676) - remaining(+684) == arm_age].
-    if (ammo.arm_age_ticks > 0 && r.age_ticks == ammo.arm_age_ticks)
+    if (ammo.arm_age_ticks > 0 && elapsed == ammo.arm_age_ticks)
         push_motor_effect(sim, r, 4, r.pos, world.logic_tick);
 
     // FUSE: two ticks before expiry [orig: @ 0x444976 — above water arms the
     // detonate-at-expiry flag (0x1000); submerged detonates NOW with the
     // depth-keyed underwater tags and zeroes the age].
-    const int32_t remaining = r.max_age_ticks - r.age_ticks;
+    const int32_t remaining = r.max_age_ticks - elapsed;
     if (remaining == 2) {
         if (r.pos.z >= from_fixed(water)) {
             r.det_at_expiry = true;
@@ -781,15 +784,19 @@ bool ThrowableSim::enemy_in_cone(World &world, CollisionWorld *collision,
         const double dz = double(e->position.z) - double(device.pos.z);
         const double dist = std::sqrt(dx * dx + dy * dy + dz * dz);
         if (dist > double(max_range_units)) continue;
-        // [orig: |(-Yaw) - atan2| <= pieslice half-angle; pieslice 0 never
-        // passes — retail AV_Mine data authors none, so its proximity leg is
-        // data-dead.]
-        const int64_t bearing =
-                static_cast<int64_t>(std::llround(std::atan2(dy, dx) * kBamPerRad));
-        int64_t diff = -static_cast<int64_t>(device.yaw_bam) - bearing;
-        // 64-bit abs exactly as witnessed (no 32-bit wrap) [orig: @ 0x43cc9f]
-        if (diff < 0) diff = -diff;
-        if (diff > static_cast<int64_t>(static_cast<uint32_t>(cone_half_bam)))
+        // The original's radians-to-BAM constant is negative, making its
+        // minus-Yaw-minus-converted expression equal bearing minus Yaw.
+        // Subtraction and absolute value wrap in 32 bits
+        // [orig: @ 0x43cc9d..0x43ccfd].
+        const int32_t bearing = static_cast<int32_t>(
+                static_cast<uint32_t>(std::llround(std::atan2(dy, dx) * kBamPerRad)));
+        const int32_t signed_diff = static_cast<int32_t>(
+                static_cast<uint32_t>(bearing) -
+                static_cast<uint32_t>(device.yaw_bam));
+        const uint32_t diff = signed_diff < 0
+                                      ? uint32_t(0) - static_cast<uint32_t>(signed_diff)
+                                      : static_cast<uint32_t>(signed_diff);
+        if (diff > static_cast<uint32_t>(cone_half_bam))
             continue;
         // LOS [orig: Physics_RaycastSegment result 1..2 = visible; our terrain
         // stand-in is the shared LOS leg (D-AI-7 precedent)].

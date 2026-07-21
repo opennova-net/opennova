@@ -612,11 +612,13 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         LiveRound &r = rounds[static_cast<size_t>(i)];
         if (!r.active) continue;
 
-        if (++r.age_ticks > r.max_age_ticks) {
-            // Only rounds the motor armed detonate at expiry [orig: the head
-            // @ 0x4e9dd6 runs the queue push + obj effect only under the
-            // runtime 0x1000 flag the grenade motor set at 2 ticks remaining;
-            // an expiring ballistic round vanishes silently].
+        // The lifetime/armed-fuse head runs before the motor. Advance the
+        // stored age before dispatch; the custom motor compensates so its
+        // elapsed/remaining values match retail's post-motor decrement
+        // [orig: Projectile_UpdatePhysics @ 0x4e9da7..0x4e9f4e].
+        if (r.det_at_expiry || r.age_ticks >= r.max_age_ticks) {
+            // Only rounds the motor armed detonate at this head; an ordinary
+            // ballistic lifetime expiry vanishes silently.
             const AmmoTableEntry *fuze_ammo = world.ammo.by_index(r.ammo_index);
             if (fuze_ammo != nullptr && r.det_at_expiry) {
                 detonate_round(world, r, r.pos, *fuze_ammo);
@@ -648,6 +650,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             --active_count;
             continue;
         }
+        ++r.age_ticks;
 
         if (r.trail_slot >= 0) trails.append(r.trail_slot, r.pos);
 

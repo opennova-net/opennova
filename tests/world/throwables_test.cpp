@@ -322,6 +322,45 @@ void test_grenade_bounce_and_fuse() {
     CHECK(saw_obj);
 }
 
+void test_grenade_fuse_tick_boundaries() {
+    {
+        Rig rig(0);
+        auto &ammo = rig.w.ammo.entries[kAmmoGrenade];
+        ammo.max_age_ticks = 5;
+        ammo.arm_age_ticks = 2;
+        const int slot = rig.throw_ammo(kAmmoGrenade, Vec3{10, 10, 50}, 0, 0);
+        CHECK(slot >= 0);
+        rig.tick(2);
+        CHECK(rig.w.round_sim.impacts.empty());
+        CHECK(!rig.w.round_sim.rounds[size_t(slot)].det_at_expiry);
+        rig.tick(1);
+        CHECK(rig.w.round_sim.impacts.size() == 1);
+        CHECK(!rig.w.round_sim.rounds[size_t(slot)].det_at_expiry);
+        rig.tick(1);
+        CHECK(rig.w.round_sim.rounds[size_t(slot)].active);
+        CHECK(rig.w.round_sim.rounds[size_t(slot)].det_at_expiry);
+        CHECK(rig.w.explosions.queue.empty());
+        rig.tick(1);
+        CHECK(!rig.w.round_sim.rounds[size_t(slot)].active);
+        CHECK(rig.w.explosions.queue.size() == 1);
+        CHECK(rig.w.round_sim.impacts.size() == 2);
+    }
+    {
+        Rig rig(0);
+        rig.w.env.water_z = to_fixed(10.0);
+        auto &ammo = rig.w.ammo.entries[kAmmoGrenade];
+        ammo.max_age_ticks = 5;
+        const int slot = rig.throw_ammo(kAmmoGrenade, Vec3{10, 10, 5}, 0, 0);
+        CHECK(slot >= 0);
+        rig.tick(3);
+        CHECK(rig.w.round_sim.rounds[size_t(slot)].active);
+        CHECK(rig.w.explosions.queue.empty());
+        rig.tick(1);
+        CHECK(!rig.w.round_sim.rounds[size_t(slot)].active);
+        CHECK(rig.w.explosions.queue.size() == 1);
+    }
+}
+
 // A ballistic (non-motor) explosive round expiring mid-air vanishes silently
 // [orig: the expiry head requires the motor-armed 0x1000 flag].
 void test_ballistic_expiry_is_silent() {
@@ -431,7 +470,7 @@ void test_claymore_cone_trigger() {
     // Yaw -= spin @ 0x447377 over Entity_InitThrowableSpin_* rates], so the
     // test derives placement from the device yaw rather than the throw yaw.
     const PlacedDevice &placed = rig.w.throwables.devices[0];
-    const double axis = -double(placed.yaw_bam) * (2.0 * 3.14159265358979323846 / 4294967296.0);
+    const double axis = double(placed.yaw_bam) * (2.0 * 3.14159265358979323846 / 4294967296.0);
     const Vec3 ahead{placed.pos.x + 8.0f * float(std::cos(axis)),
                      placed.pos.y + 8.0f * float(std::sin(axis)), 0.0f};
     const Vec3 rear{placed.pos.x - 8.0f * float(std::cos(axis)),
@@ -459,7 +498,7 @@ void test_claymore_cone_trigger() {
     // an enemy dead ahead inside the cone: boom
     enemy_seed.team = 1;
     const EntityHandle enemy = rig.w.registry.spawn(0, enemy_seed);
-    rig.tick(4);
+    rig.tick(1);
     CHECK(rig.w.throwables.devices.empty());
     bool saw_kz = false;
     for (const ExplosionEntry &q : rig.w.explosions.queue)
@@ -471,8 +510,10 @@ void test_claymore_cone_trigger() {
         if (r.active && r.ammo_index == kAmmoClayShrap) ++pellets;
     CHECK(pellets == 16);
     for (const LiveRound &r : rig.w.round_sim.rounds)
-        if (r.active && r.ammo_index == kAmmoClayShrap)
+        if (r.active && r.ammo_index == kAmmoClayShrap) {
             CHECK(r.owner.packed == rig.thrower.packed);
+            CHECK(r.vel.x * float(std::cos(axis)) + r.vel.y * float(std::sin(axis)) > 0.0f);
+        }
     (void)enemy;
 }
 
@@ -537,7 +578,7 @@ void test_team_trigger_claymore_rule() {
     CHECK(rig.w.throwables.devices.size() == 1);
     if (rig.w.throwables.devices.empty()) return;
     const PlacedDevice &placed = rig.w.throwables.devices[0];
-    const double axis = -double(placed.yaw_bam) * (2.0 * 3.14159265358979323846 / 4294967296.0);
+    const double axis = double(placed.yaw_bam) * (2.0 * 3.14159265358979323846 / 4294967296.0);
     Entity mate_seed;
     mate_seed.kind = EntityKind::Organic;
     mate_seed.team = 0; // the owner's own team
@@ -556,6 +597,7 @@ int main() {
     test_charge_scales_spawn_speed();
     test_tracer_item_binding_fallbacks();
     test_grenade_bounce_and_fuse();
+    test_grenade_fuse_tick_boundaries();
     test_ballistic_expiry_is_silent();
     test_round_slot_reuse_clears_throwable_state();
     test_satchel_places_device();
