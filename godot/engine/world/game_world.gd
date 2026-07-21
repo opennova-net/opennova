@@ -588,6 +588,21 @@ func get_sim() -> NovaSimulation:
 	return _runtime.get_sim() if _runtime != null else null
 
 
+## The mounted world's shared weapon.def database. ArmoryHost consumes this on
+## first open so its canonical parent tuples and its visible rows resolve against
+## the same catalog; the FP viewmodel reuses it below (ADR 0018 resource seam).
+func get_weapon_database() -> NovaWeaponDatabase:
+	if _weapon_db == null:
+		if _resource_root == null:
+			return null
+		_weapon_db = NovaWeaponDatabase.new()
+		if _weapon_db.load_from_resource_root(_resource_root, "weapon.def") != OK:
+			push_warning("GameWorld: weapon.def unavailable (%s) — weapon presentation/loadout lookup disabled"
+					% _weapon_db.get_last_error())
+			return null
+	return _weapon_db if _weapon_db.is_loaded() else null
+
+
 func get_runtime():
 	return _runtime
 
@@ -1046,10 +1061,8 @@ var _viewmodel_weapon_cleared := false
 func set_local_player_weapon_by_name(weapon_name: String) -> bool:
 	if weapon_name.is_empty():
 		return false
-	if _weapon_db == null:
-		local_player_viewmodel_def()  # lazily loads weapon.def into _weapon_db
-	var index: int = _weapon_db.find_weapon(weapon_name) \
-			if _weapon_db != null and _weapon_db.is_loaded() else -1
+	var weapon_db := get_weapon_database()
+	var index: int = weapon_db.find_weapon(weapon_name) if weapon_db != null else -1
 	if index < 0:
 		push_warning("GameWorld: armory weapon '%s' not in weapon.def — keeping current" % weapon_name)
 		return false
@@ -1063,7 +1076,7 @@ func set_local_player_weapon_by_name(weapon_name: String) -> bool:
 	# again when the rebuilt viewmodel resolves (_setup_local_player_weapon); a model
 	# that never loads leaves 'auto' delays collapsed instead of leaving the OLD
 	# weapon's FSM live under the new entity stamp.
-	_local_weapon_dict = _weapon_db.get_weapon(index)
+	_local_weapon_dict = weapon_db.get_weapon(index)
 	var sim := get_sim()
 	if sim != null:
 		sim.set_local_player_weapon(_local_weapon_dict, {})
@@ -1308,15 +1321,8 @@ func set_local_player_weapon_tick_consumer(consumer: Callable) -> void:
 func local_player_viewmodel_def() -> PlayerViewmodelDef:
 	if _viewmodel_weapon_cleared:
 		return null
-	if _weapon_db == null:
-		if _resource_root == null:
-			return null
-		_weapon_db = NovaWeaponDatabase.new()
-		if _weapon_db.load_from_resource_root(_resource_root, "weapon.def") != OK:
-			push_warning("GameWorld: weapon.def unavailable (%s) — FP viewmodel keeps built-in defaults"
-					% _weapon_db.get_last_error())
-			return null
-	if not _weapon_db.is_loaded():
+	var weapon_db := get_weapon_database()
+	if weapon_db == null:
 		return null
 	# Precedence: the armory-equipped weapon, else the NOVA_VM_WEAPON debug override,
 	# else the fixed default until first equip.
@@ -1325,11 +1331,11 @@ func local_player_viewmodel_def() -> PlayerViewmodelDef:
 		weapon_name = OS.get_environment("NOVA_VM_WEAPON")
 	if weapon_name.is_empty():
 		weapon_name = DEFAULT_VIEWMODEL_WEAPON
-	var index: int = _weapon_db.find_weapon(weapon_name)
+	var index: int = weapon_db.find_weapon(weapon_name)
 	if index < 0:
 		push_warning("GameWorld: weapon '%s' not in weapon.def — FP viewmodel keeps built-in defaults" % weapon_name)
 		return null
-	_local_weapon_dict = _weapon_db.get_weapon(index)
+	_local_weapon_dict = weapon_db.get_weapon(index)
 	return PlayerViewmodelDef.from_weapon_dict(_local_weapon_dict)
 
 
