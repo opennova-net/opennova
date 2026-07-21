@@ -29,6 +29,8 @@ extends RefCounted
 
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
 const PresentAimOverlay := preload("res://engine/world/present_aim_overlay.gd")
+const PresentEmplacedWeapon := preload(
+		"res://engine/world/present_emplaced_weapon.gd")
 
 var _sim                    # NovaSimulation (or a compatible snapshot source)
 var _index                  # MissionEntityRegistry: resolve(bms_id, kind, index) -> Node
@@ -74,7 +76,12 @@ func present() -> void:
 			_apply_transform(node, snap, base)
 		PresentAimOverlay.apply(node, snap, base)
 		if _drive_part_anim:
+			# Remove last tick's semantic mount ownership before generic model-order
+			# channels run. A generic PLAYPARTANIM can itself address EWEAP_*; it
+			# must survive dismount, while live gunner aim still overlays it last.
+			PresentEmplacedWeapon.clear(node)
 			_apply_procedural_part(node, snap, base)
+			_stats.posed += PresentEmplacedWeapon.apply(node, snap, base, false)
 		if _drive_visibility:
 			# Death is not disappearance: a dead ORGANIC keeps rendering as a corpse
 			# (its death anim holds the last frame) until the sim despawns it via

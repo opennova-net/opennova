@@ -18,9 +18,10 @@ struct ClientEntityState {
 	int32_t y = 0;                                // compact position + the frame anchor)
 	int32_t z = 0;
 	uint8_t yaw_byte = 0;                         // coarse heading (compact high byte)
-	// Last full engine-frame entity+20/+24 orientation witnessed on an existing
-	// spawn or vehicle dead-pose record. Live vehicle compacts omit both, so they
-	// intentionally persist for mounted seat-frame presentation.
+	// Full/reconstructed entity+20 pitch plus entity+24 roll. Vehicles retain the
+	// last spawn/dead-pose values because live compacts omit both. Infantry pitch
+	// is reconstructed here from the compact aim target using retail's one-eighth
+	// chase; Player live pitch remains in pitch_byte below.
 	int32_t pitch_bam = 0;
 	int32_t roll_bam = 0;
 	// Normalized raw bytes retained from the class-specific compact organic record.

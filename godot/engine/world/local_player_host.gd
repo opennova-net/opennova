@@ -1133,6 +1133,7 @@ func _update_viewmodel() -> void:
 	var view_units := PLAYER_VIEWMODEL_POS_UNITS.lerp(PLAYER_VIEWMODEL_TPOS_UNITS, ads)
 	_viewmodel.global_transform = _camera.global_transform * Transform3D(
 		vm_basis, bias * _viewmodel_offset(view_units))
+	_apply_emplaced_viewmodel_controls()
 	# The FP overlay never enters the water mirror OR the main camera: retail draws it
 	# as its own renderfov/near-Z pass over the finished frame [orig:
 	# Player_RenderFirstPersonViewModel @ 0x4ded60]; hosted, the dedicated layer is drawn
@@ -1144,6 +1145,21 @@ func _update_viewmodel() -> void:
 	var carded := _view != null and _view.scope_card_active
 	_viewmodel.visible = ((not _third_person) and not carded) or debug_force_viewmodel
 	_update_viewmodel_pass()
+
+
+func _apply_emplaced_viewmodel_controls() -> void:
+	for part in _vm_parts:
+		if part == null or not is_instance_valid(part) or \
+				not part.has_method("set_ctrl_value"):
+			continue
+		if _weapon_view != null and _weapon_view.emplaced_controls_valid:
+			part.set_ctrl_value(
+					"EWEAP_GUNYAW", _weapon_view.emplaced_gun_yaw)
+			part.set_ctrl_value(
+					"EWEAP_GUNPITCH", _weapon_view.emplaced_gun_pitch)
+		elif part.has_method("clear_ctrl_value"):
+			part.clear_ctrl_value("EWEAP_GUNYAW")
+			part.clear_ctrl_value("EWEAP_GUNPITCH")
 
 
 # Stamp `layer_mask` onto every VisualInstance3D under `root` (inclusive).

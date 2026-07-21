@@ -8,6 +8,7 @@ class FakeWeaponPart:
 	extends Node3D
 	var plays: Array = []
 	var times: Array[float] = []
+	var ctrl_values: Dictionary = {}
 
 	func play_body_clip(key: String) -> void:
 		plays.append({"key": key, "variant": 0})
@@ -25,6 +26,12 @@ class FakeWeaponPart:
 
 	func get_object_data():
 		return null
+
+	func set_ctrl_value(name: String, value: int) -> void:
+		ctrl_values[name] = value
+
+	func clear_ctrl_value(name: String) -> void:
+		ctrl_values.erase(name)
 
 
 class FakeUserPointData:
@@ -591,6 +598,36 @@ func _weapon_view() -> PlayerWeaponView:
 	var v := PlayerWeaponView.new()
 	v.active = true
 	return v
+
+
+func test_viewmodel_tracks_and_clears_emplaced_weapon_controls() -> void:
+	var world := FakeWorld.new()
+	var camera := Camera3D.new()
+	var host := LocalPlayerHost.new()
+	add_child_autofree(world)
+	add_child_autofree(camera)
+	add_child_autofree(host)
+	world.view = PlayerLocalView.new()
+	world.weapon_view = _weapon_view()
+	world.weapon_view.emplaced_controls_valid = true
+	world.weapon_view.emplaced_gun_yaw = 0x2345
+	world.weapon_view.emplaced_gun_pitch = 0xDCBA
+	host.setup(world, camera)
+	host.set_input_source(func() -> Dictionary: return {})
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+
+	assert_not_null(world.last_weapon_part)
+	assert_eq(world.last_weapon_part.ctrl_values, {
+		"EWEAP_GUNYAW": 0x2345,
+		"EWEAP_GUNPITCH": 0xDCBA,
+	}, "the FP weapon receives the same semantic registers as the world model")
+
+	world.weapon_view.emplaced_controls_valid = false
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+	assert_true(world.last_weapon_part.ctrl_values.is_empty(),
+			"leaving UseGun cannot retain the previous turret pose")
 
 
 func _weapon_end_event(set_name: String) -> PlayerWeaponEvent:

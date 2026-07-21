@@ -163,6 +163,116 @@ const opennova::mission::ItemSeatSpec *item_seat_spec_for_type(
 	return nullptr;
 }
 
+constexpr char kEmplacedGunYawRegister[] = "EWEAP_GUNYAW";
+constexpr char kEmplacedGunPitchRegister[] = "EWEAP_GUNPITCH";
+
+struct EmplacedWeaponControls {
+	bool valid = false;
+	uint16_t gun_yaw = 0;
+	uint16_t gun_pitch = 0;
+};
+
+uint16_t emplaced_control_phase(int32_t parent_bam, int32_t occupant_bam) {
+	// Retail stores the high word of the wrapped parent-minus-occupant angle:
+	// occupant Yaw/Pitch = parent Yaw/Pitch - turret control.
+	// [orig: Entity_UpdateTransformAndTurret @0x441251..0x441263,
+	//  @0x441298..0x4412b3]
+	const int32_t delta = opennova::io::bam_sub(parent_bam, occupant_bam);
+	return static_cast<uint16_t>(static_cast<uint32_t>(delta) >> 16);
+}
+
+bool emplaced_weapon_controls_for(
+		const opennova::world::World &world,
+		opennova::world::AiSystem *ai,
+		const opennova::world::Entity &mount,
+		EmplacedWeaponControls &out) {
+	out = EmplacedWeaponControls{};
+	if (ai == nullptr || !mount.primary_weapon_owner.valid()) return false;
+	const opennova::world::Entity *occupant =
+			world.registry.get(mount.primary_weapon_owner);
+	if (occupant == nullptr || !occupant->alive || occupant->health <= 0 ||
+			!occupant->mounted ||
+			occupant->mount_type != opennova::world::SeatType::Gunner ||
+			occupant->mount_target != mount.handle)
+		return false;
+	const AiEntity *gunner = ai->for_handle(occupant->handle);
+	if (gunner == nullptr) return false;
+
+	// The parent owns the embedded weapon/model while the organic owns live look.
+	// A vehicle motor preserves sub-degree parent yaw in BAM; a static EWEAP uses
+	// its mission-yaw field. Pitch has no separate motor accumulator.
+	const int32_t parent_heading = mount.veh.yaw_seeded
+			? mount.veh.yaw_bam
+			: opennova::world::bam_heading_from_mission_yaw_deg(
+					static_cast<double>(mount.yaw));
+	const int32_t parent_pitch =
+			opennova::world::bam_from_degrees_wrapped(
+					static_cast<double>(mount.pitch));
+	out.valid = true;
+	out.gun_yaw = emplaced_control_phase(parent_heading, gunner->heading);
+	out.gun_pitch = emplaced_control_phase(parent_pitch, gunner->pitch);
+	return true;
+}
+
+bool emplaced_weapon_controls_for_client(
+		const opennova::netsim::ClientEntityState &mount,
+		const opennova::netsim::ClientState &state,
+		const std::vector<opennova::mission::ItemSeatSpec> &specs,
+		EmplacedWeaponControls &out) {
+	out = EmplacedWeaponControls{};
+	const opennova::mission::ItemSeatSpec *spec =
+			item_seat_spec_for_type(specs, mount.type_id);
+	if (spec == nullptr) return false;
+
+	for (const opennova::netsim::ClientEntityState &occupant : state.entities) {
+		if (occupant.carrier_handle != mount.handle ||
+				occupant.mount_bone == 0 ||
+				(occupant.cls != opennova::EntityClass::Player &&
+				 occupant.cls != opennova::EntityClass::Infantry))
+			continue;
+		const opennova::world::Seat *seat = nullptr;
+		for (const opennova::world::Seat &candidate : spec->seats) {
+			if (candidate.bone_index == occupant.mount_bone) {
+				seat = &candidate;
+				break;
+			}
+		}
+		if (seat == nullptr ||
+				seat->type != opennova::world::SeatType::Gunner)
+			continue;
+
+		// NetClientView has already composed mounted yaw into world heading and
+		// reconstructed an infantry gunner's live entity pitch from the compact
+		// aim target using retail's one-eighth chase.
+		const int32_t parent_heading = static_cast<int32_t>(
+				static_cast<uint32_t>(mount.yaw_byte) << 24);
+		const int32_t occupant_heading = static_cast<int32_t>(
+				static_cast<uint32_t>(occupant.yaw_byte) << 24);
+		const int32_t occupant_pitch =
+				occupant.cls == opennova::EntityClass::Player
+				? static_cast<int32_t>(
+						static_cast<uint32_t>(occupant.pitch_byte) << 24)
+				: occupant.pitch_bam;
+		out.valid = true;
+		out.gun_yaw =
+				emplaced_control_phase(parent_heading, occupant_heading);
+		out.gun_pitch =
+				emplaced_control_phase(mount.pitch_bam, occupant_pitch);
+		return true;
+	}
+	return false;
+}
+
+void write_present_emplaced_controls(
+		float *record, const EmplacedWeaponControls &controls) {
+	if (!controls.valid) return;
+	record[NovaSimulation::PF_EMPLACED_CONTROLS_VALID] = 1.0f;
+	record[NovaSimulation::PF_EWEAP_GUNYAW] =
+			static_cast<float>(controls.gun_yaw);
+	record[NovaSimulation::PF_EWEAP_GUNPITCH] =
+			static_cast<float>(controls.gun_pitch);
+}
+
 bool aim_overlay_inputs_for_client(
 		const opennova::netsim::ClientEntityState &entity,
 		const opennova::netsim::ClientState &state,
@@ -1223,7 +1333,17 @@ bool NovaSimulation::build_section_matrices(opennova::world::World &p_world,
 		const String name = String::utf8(ir.control_registers[slot].name);
 		if (!name.is_empty()) controls[name] = phase;
 	}
-	(void)p_world;
+	// EWEAP yaw/pitch are semantic CTRL names, not PLAYPARTANIM ordinals.
+	// B50Cal's register order is HEAT_GLOW, yaw, pitch, so aliasing channel
+	// 1/2 would drive the wrong registers and can never reach pitch.
+	EmplacedWeaponControls emplaced;
+	if (entity != nullptr &&
+			emplaced_weapon_controls_for(p_world, ai_.get(), *entity, emplaced)) {
+		controls[String(kEmplacedGunYawRegister)] =
+				static_cast<int>(emplaced.gun_yaw);
+		controls[String(kEmplacedGunPitchRegister)] =
+				static_cast<int>(emplaced.gun_pitch);
+	}
 	const uint32_t time_ms = panm_time_override_ms_ >= 0
 			? static_cast<uint32_t>(panm_time_override_ms_)
 			: (world_ != nullptr ? world_->logic_tick * 16u : 0u);
@@ -3420,6 +3540,9 @@ void NovaSimulation::_bind_methods() {
 	BIND_ENUM_CONSTANT(PF_AIM_BODY_ROLL_DEG);
 	BIND_ENUM_CONSTANT(PF_AIM_ANGLES);
 	BIND_ENUM_CONSTANT(PF_AIM_CLASS_STRIDE);
+	BIND_ENUM_CONSTANT(PF_EMPLACED_CONTROLS_VALID);
+	BIND_ENUM_CONSTANT(PF_EWEAP_GUNYAW);
+	BIND_ENUM_CONSTANT(PF_EWEAP_GUNPITCH);
 	BIND_ENUM_CONSTANT(PF_STRIDE);
 	BIND_ENUM_CONSTANT(EFFECT_STATE_POSITION);
 	BIND_ENUM_CONSTANT(EFFECT_STATE_ROTATION_DEG);
@@ -4744,6 +4867,29 @@ Dictionary NovaSimulation::get_local_player_weapon_state() const {
 	out["reserve"] = active_slot.reserve;
 	out["kick"] = static_cast<int>(active_slot.kick);
 	out["borrowed_usegun_slot"] = local_usegun_slot_active_;
+	out["emplaced_controls_valid"] = false;
+	out["emplaced_gun_yaw"] = 0;
+	out["emplaced_gun_pitch"] = 0;
+	if (world_ && world_->cached.local_player.valid()) {
+		const opennova::world::Entity *local =
+				world_->registry.get(world_->cached.local_player);
+		const opennova::world::Entity *mount =
+				local != nullptr && local->mounted &&
+						local->mount_type == opennova::world::SeatType::Gunner
+				? world_->registry.get(local->mount_target)
+				: nullptr;
+		EmplacedWeaponControls emplaced;
+		if (mount != nullptr &&
+				mount->primary_weapon_owner == local->handle &&
+				emplaced_weapon_controls_for(
+						*world_, ai_.get(), *mount, emplaced)) {
+			out["emplaced_controls_valid"] = true;
+			out["emplaced_gun_yaw"] =
+					static_cast<int>(emplaced.gun_yaw);
+			out["emplaced_gun_pitch"] =
+					static_cast<int>(emplaced.gun_pitch);
+		}
+	}
 	// Read-only diagnostics for the local FIRE -> RoundData_AddRound seam. The last
 	// row lets parity tests pin the observed tag-2 mode byte without exposing mutable
 	// ring state. [orig: ((MountSlot.clip & 3) << 4) | 2 sampled before consume
@@ -6194,6 +6340,16 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 						  opennova::world::weapon_flag2::kInvisible) != 0))
 					r[PF_LOCAL_VIEW_SUPPRESSED] = 1.0f;
 			}
+		}
+		EmplacedWeaponControls emplaced;
+		if (ent != nullptr) {
+			if (emplaced_weapon_controls_for(
+						*world_, ai_.get(), *ent, emplaced))
+				write_present_emplaced_controls(r, emplaced);
+		} else if (joiner_ &&
+				emplaced_weapon_controls_for_client(
+						es, cs, item_seat_specs_, emplaced)) {
+			write_present_emplaced_controls(r, emplaced);
 		}
 		// Decoded wire position is mission (x,y,z) 16.16 -> Godot (x, z, -y) world units,
 		// the SAME remap the AI-pool path uses. Position is post-compression (lossy) —

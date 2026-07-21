@@ -1406,6 +1406,111 @@ func test_local_first_person_usegun_parent_cull_follows_live_mount_slot() -> voi
 	sim.free()
 
 
+func test_local_usegun_aim_articulates_emplaced_weapon_model() -> void:
+	# B50Cal's authored PANM binds its turret and barrel to the semantic
+	# EWEAP_GUNYAW/EWEAP_GUNPITCH registers. A mounted local player's live look
+	# must pose those parts in authoritative model space, not only turn the camera.
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	assert_false(md.add_entity(
+			NovaMissionData.KIND_ITEM, 101419,
+			Vector3(2, 0, 0), Vector3.ZERO).is_empty())
+	var object_data := NovaObjectData.new()
+	assert_eq(object_data.open_file(ProjectSettings.globalize_path(
+			"res://../fixtures/3dp/B50Cal/B50Cal.3di")), OK)
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/items.def")), OK)
+	var sim := NovaSimulation.new()
+	sim.set_item_seat_specs([{
+		"type_id": 1419,
+		"seats": [{
+			"type": 3,
+			"bone_index": 6,
+			"position": Vector3.ZERO,
+			"source_name": "UseGun",
+		}],
+		"primary_weapon": "WPN_EMPLCD50NA",
+	}])
+	assert_true(sim.load_from_mission_data(md))
+	assert_eq(sim.resolve_collision_instances(
+			item_db, ObjectDataPlacerStub.new(object_data)), 1)
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
+			"res://../fixtures/def")), OK)
+	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
+	assert_true(sim.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 1))
+	var weapons := NovaWeaponDatabase.new()
+	assert_eq(weapons.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/weapon.def")), OK)
+	var personal: Dictionary = weapons.get_weapon(
+			weapons.find_weapon("WPN_M4AUTO"))
+	var mounted: Dictionary = weapons.get_weapon(
+			weapons.find_weapon("WPN_EMPLCD50NA"))
+	sim.set_local_player_weapon(personal, {})
+	sim.drain_local_player_weapon_events()
+	assert_true(sim.local_player_toggle_mount())
+	sim.step()
+	for raw in sim.drain_local_player_weapon_events():
+		if String((raw as Dictionary).get(
+				"switch_to_weapon", "")) == "WPN_EMPLCD50NA":
+			sim.set_local_player_weapon(mounted, {}, true)
+	sim.debug_set_panm_time_ms(0)
+	var initial_weapon_state: Dictionary = sim.get_local_player_weapon_state()
+	assert_true(bool(initial_weapon_state.get(
+			"emplaced_controls_valid", false)))
+	var initial_yaw_control := int(initial_weapon_state.get(
+			"emplaced_gun_yaw", 0))
+	var initial_pitch_control := int(initial_weapon_state.get(
+			"emplaced_gun_pitch", 0))
+
+	var before_entities: Array = sim.get_hitbox_debug().get("entities", [])
+	assert_eq(before_entities.size(), 1)
+	var before: PackedVector3Array = (before_entities[0] as Dictionary).get(
+			"tris", PackedVector3Array())
+	assert_gt(before.size(), 0)
+
+	sim.set_local_player_mouse(511, false)
+	var yaw_before := sim.get_local_player_yaw_deg()
+	sim.add_local_player_look(100.0, 0.0)
+	sim.step()
+	assert_gt(absf(sim.get_local_player_yaw_deg() - yaw_before), 0.1,
+			"the mounted local player's authoritative yaw changed")
+	assert_ne(int(sim.get_local_player_weapon_state().get(
+			"emplaced_gun_yaw", initial_yaw_control)), initial_yaw_control,
+			"look yaw reaches the retail EWEAP_GUNYAW phase")
+	var yaw_entities: Array = sim.get_hitbox_debug().get("entities", [])
+	var after_yaw: PackedVector3Array = (yaw_entities[0] as Dictionary).get(
+			"tris", PackedVector3Array())
+	var yaw_moved := 0
+	for index in before.size():
+		if before[index].distance_to(after_yaw[index]) > 0.001:
+			yaw_moved += 1
+	assert_gt(yaw_moved, 0,
+			"EWEAP_GUNYAW moves the authored B50Cal turret with local look")
+
+	var pitch_before := sim.get_local_player_pitch_deg()
+	sim.add_local_player_look(0.0, 100.0)
+	sim.step()
+	assert_gt(absf(sim.get_local_player_pitch_deg() - pitch_before), 0.1,
+			"the mounted local player's authoritative pitch changed")
+	assert_ne(int(sim.get_local_player_weapon_state().get(
+			"emplaced_gun_pitch", initial_pitch_control)),
+			initial_pitch_control,
+			"look pitch reaches the retail EWEAP_GUNPITCH phase")
+	var pitch_entities: Array = sim.get_hitbox_debug().get("entities", [])
+	var after_pitch: PackedVector3Array = (pitch_entities[0] as Dictionary).get(
+			"tris", PackedVector3Array())
+	var pitch_moved := 0
+	for index in after_yaw.size():
+		if after_yaw[index].distance_to(after_pitch[index]) > 0.001:
+			pitch_moved += 1
+	assert_gt(pitch_moved, 0,
+			"EWEAP_GUNPITCH moves the authored B50Cal barrel with local look")
+	sim.free()
+
+
 func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> void:
 	var md := NovaMissionData.new()
 	assert_eq(md.create_default(), OK)

@@ -233,8 +233,16 @@ bool run_compact_pose_fields_survive_client_fold() {
 	if (!expect(i != nullptr && i->carrier_handle == 0x1008 && i->mount_bone == 3 &&
 	                    i->seat_type == 0 && i->pitch_byte == 0x31 &&
 	                    i->aim_yaw_byte == 0xF4 && i->anim_state_id == 47 &&
-	                    i->anim_channel_ratio == 0,
-	            "infantry compact mount/pose bytes survive the client fold")) return false;
+	                    i->anim_channel_ratio == 0 &&
+	                    i->pitch_bam == static_cast<int32_t>(0xFE800000u),
+	            "infantry compact target advances live pitch by retail's one-eighth chase"))
+		return false;
+	view.apply(ns::kTag0aFrameUpdate, nw::encode_frame_update(mounted));
+	i = view.state().find(0x0002);
+	if (!expect(i != nullptr &&
+	                    i->pitch_bam == static_cast<int32_t>(0xFD300000u),
+	            "successive mounted frames continue the stateful pitch chase"))
+		return false;
 
 	// A subsequent free-standing record is the dismount signal. Overwrite every
 	// normalized field; stale carrier/bone bytes must never select yesterday's mount.
@@ -255,6 +263,8 @@ bool run_compact_pose_fields_survive_client_fold() {
 	            "player dismount clears retained selector fields")) return false;
 	if (!expect(i != nullptr && i->carrier_handle == 0xFFFF && i->mount_bone == 0,
 	            "infantry dismount clears retained selector fields")) return false;
+	if (!expect(i->pitch_bam == static_cast<int32_t>(0xFD300000u),
+	            "infantry dismount retains the last reconstructed live pitch")) return false;
 	return true;
 }
 
@@ -474,8 +484,10 @@ bool run_mounted_infantry_pose_fields_round_trip() {
 	const ns::ClientEntityState *decoded = view.state().find(ih.packed);
 	if (!expect(decoded != nullptr && decoded->carrier_handle == vh.packed &&
 	                    decoded->mount_bone == 3 && decoded->pitch_byte == 0x20 &&
-	                    decoded->aim_yaw_byte == 0xF0 && decoded->anim_state_id == 47,
-	            "mounted infantry selector inputs survive the production client fold")) return false;
+	                    decoded->aim_yaw_byte == 0xF0 && decoded->anim_state_id == 47 &&
+	                    decoded->pitch_bam == static_cast<int32_t>(0xFE000000u),
+	            "mounted infantry selector and chased live pitch survive the production fold"))
+		return false;
 	decoded_carrier = view.state().find(vh.packed);
 	if (!expect(decoded_carrier != nullptr && decoded->x == decoded_carrier->x &&
 	                    decoded->y == decoded_carrier->y && decoded->z == decoded_carrier->z,

@@ -4408,6 +4408,41 @@ clamped to ±`0x40000000` from the mount base except for mount configurations
 captures the attachment base, restores the saved independent live look, then performs
 this chase/clamp against that base.
 
+### 26.5a EWEAP model articulation (grill-ida, 2026-07-21)
+
+The attached organic owns live aim, but the parent owns the embedded weapon model.
+Retail bridges those two records in Entity_UpdateTransformAndTurret @ 0x440ca0.
+For a live occupant it publishes the wrapped high words of the parent-minus-occupant
+BAM angles: occupant Yaw = parent Yaw - turretYaw
+[@ 0x441251-0x441263] and occupant Pitch = parent Pitch - turretPitch
+[@ 0x441298-0x4412b3]. The resulting uint16 values are written into the model
+animation state as yaw slots 118/124 [@ 0x441007/0x44100d] and pitch slots
+119/125 [@ 0x44101a/0x441020]. Negative angles therefore wrap through 65535;
+they are not signed-degree values and must not be clamped.
+
+The semantic CTRL names are EWEAP_GUNYAW @ 0x83e3c8 and
+EWEAP_GUNPITCH @ 0x83e3e8. They are not PLAYPARTANIM channels. The global
+32-byte name table begins at LOD_FRAC @ 0x83dce8, making these name ordinals
+55/56, while each model has its own CTRL order. The checked-in B50Cal model
+demonstrates the failure mode: HEAT_GLOW is first, followed by yaw and pitch.
+Its PANM drives the upper mount and barrel from EWEAP_GUNYAW and the barrel
+from EWEAP_GUNPITCH; the authored start/end angles own direction (B50Cal
+authors pitch 360 to 0, while M1trret authors the forward mapping).
+
+D-WPN-27 records the former divergence: OpenNova supplied only two
+model-order PLAYPARTANIM phases, so B50Cal received HEAT_GLOW plus yaw at
+zero and could never receive pitch. The fixed path derives one typed semantic
+pair from the validated parent primary-weapon owner and applies the exact
+names after generic channels to authoritative collision, placed and wire
+presentation, and every first-person weapon part. Dismount/death clears only
+those two owned names. The client path joins the decoded carrier, mount bone,
+and current heading without extending the retail wire. A player compact already
+carries live entity Pitch; because the port splits Entity from AiEntity, the
+world-to-wire player lift restores that live AiEntity value before witnessed
+compact-byte rounding. An infantry compact instead carries the desired aim-pitch
+target. NetClientView reconstructs the mounted NPC's live Pitch once per decoded
+frame with retail's wrapped one-eighth chase before deriving the semantic phase.
+
 ### 26.6 Fire request and global action-FSM phase
 
 Let `S = current_tick + 36*net_id`. A mounted gunner considers a fire request only when it
@@ -4470,6 +4505,14 @@ gates, parent-slot FSM fire with mount muzzle and gunner attribution, and mounte
 the UseGun-versus-generic `0x40` split;
 `npruntime_weapon_table` pins the authored action-row bake. Every name is an always-on
 CTest target.
+
+The EWEAP articulation regression is asset-backed: nova_simulation_test.gd
+mounts the local player on fixture B50Cal and proves both yaw and pitch move
+the authoritative collision triangles. mission_present_pass_test.gd,
+wire_present_pass_test.gd, local_player_host_test.gd, and
+player_weapon_view_test.gd pin named-control delivery, precedence, and stale
+clearing; two_peer_fanout_test pins live player pitch at the existing wire lift,
+and loopback_identity_test pins the client-side mounted-infantry pitch chase.
 
 ### 26.9 IDB write-backs (2026-07-20, saved)
 

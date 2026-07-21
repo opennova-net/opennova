@@ -15,8 +15,14 @@ class FakeModel:
 	var phases: Array = []        # [channel, phase]
 	var body_calls: Array = []    # [key_or_slot, phase]
 	var overlay_calls: Array = []
+	var ctrl_values: Dictionary = {}
+	var cleared_controls: Array[String] = []
+	var part_control_names: Dictionary = {}
 	func set_part_phase(channel: int, phase: int) -> void:
 		phases.append([channel, phase])
+		var control_name := String(part_control_names.get(channel, ""))
+		if not control_name.is_empty():
+			ctrl_values[control_name] = phase
 	func play_body_clip_at(key: String, phase_ticks: int) -> void:
 		body_calls.append([key, phase_ticks])
 	func play_body_anim_at(slot: int, phase_ticks: int) -> void:
@@ -25,6 +31,11 @@ class FakeModel:
 		body_calls.append([slot, -1])
 	func set_aim_overlay(deltas: Array) -> void:
 		overlay_calls.append(deltas)
+	func set_ctrl_value(name: String, value: int) -> void:
+		ctrl_values[name] = value
+	func clear_ctrl_value(name: String) -> void:
+		ctrl_values.erase(name)
+		cleared_controls.append(name)
 
 
 # resolve(bms_id, kind, index) like MissionEntityRegistry: bms_id primary, (kind,index) fallback.
@@ -80,6 +91,12 @@ class FakeSim:
 			out[b + NovaSimulation.PF_AIM_BODY_PITCH_DEG] = body.x
 			out[b + NovaSimulation.PF_AIM_BODY_YAW_DEG] = body.y
 			out[b + NovaSimulation.PF_AIM_BODY_ROLL_DEG] = body.z
+			out[b + NovaSimulation.PF_EMPLACED_CONTROLS_VALID] = float(
+					e.get("emplaced_controls_valid", 0))
+			out[b + NovaSimulation.PF_EWEAP_GUNYAW] = float(
+					e.get("emplaced_gun_yaw", 0))
+			out[b + NovaSimulation.PF_EWEAP_GUNPITCH] = float(
+					e.get("emplaced_gun_pitch", 0))
 			var angles: PackedVector3Array = e.get(
 					"aim_angles", PackedVector3Array())
 			for cls in range(mini(angles.size(), 9)):
@@ -131,6 +148,71 @@ func test_both_channels_posed() -> void:
 	sim.entities = [{ "bms_id": 7, "active1": 1, "phase1": 100, "active2": 1, "phase2": 200 }]
 	_make_pass(index, sim).present()
 	assert_eq(model.phases.size(), 2, "both active channels posed")
+
+
+func test_emplaced_weapon_uses_named_controls_and_clears_them() -> void:
+	var model := FakeModel.new()
+	add_child_autofree(model)
+	var index := FakeIndex.new()
+	index.by_bms_id = { 8: model }
+	var sim := FakeSim.new()
+	sim.entities = [{
+		"bms_id": 8,
+		"emplaced_controls_valid": 1,
+		"emplaced_gun_yaw": 0x1234,
+		"emplaced_gun_pitch": 0xFEDC,
+	}]
+	var presenter := _make_pass(index, sim)
+	presenter.present()
+	assert_eq(model.ctrl_values, {
+		"EWEAP_GUNYAW": 0x1234,
+		"EWEAP_GUNPITCH": 0xFEDC,
+	}, "semantic controls do not alias model-order PLAYPARTANIM channels")
+	assert_true(model.phases.is_empty())
+
+	sim.entities[0]["emplaced_controls_valid"] = 0
+	presenter.present()
+	assert_true(model.ctrl_values.is_empty(),
+			"dismount/death clears retained EWEAP controls")
+	assert_has(model.cleared_controls, "EWEAP_GUNYAW")
+	assert_has(model.cleared_controls, "EWEAP_GUNPITCH")
+
+
+func test_dismount_restores_generic_part_values_for_the_same_registers() -> void:
+	var model := FakeModel.new()
+	model.part_control_names = {
+		1: "EWEAP_GUNYAW",
+		2: "EWEAP_GUNPITCH",
+	}
+	add_child_autofree(model)
+	var index := FakeIndex.new()
+	index.by_bms_id = { 9: model }
+	var sim := FakeSim.new()
+	sim.entities = [{
+		"bms_id": 9,
+		"active1": 1,
+		"phase1": 0x1111,
+		"active2": 1,
+		"phase2": 0xEEEE,
+		"emplaced_controls_valid": 1,
+		"emplaced_gun_yaw": 0x2222,
+		"emplaced_gun_pitch": 0xDDDD,
+	}]
+	var presenter := _make_pass(index, sim)
+	presenter.present()
+	assert_eq(model.ctrl_values, {
+		"EWEAP_GUNYAW": 0x2222,
+		"EWEAP_GUNPITCH": 0xDDDD,
+	}, "live gunner controls outrank generic model-order values")
+
+	sim.entities[0]["emplaced_controls_valid"] = 0
+	sim.entities[0]["phase1"] = 0x3333
+	sim.entities[0]["phase2"] = 0xCCCC
+	presenter.present()
+	assert_eq(model.ctrl_values, {
+		"EWEAP_GUNYAW": 0x3333,
+		"EWEAP_GUNPITCH": 0xCCCC,
+	}, "dismount clears stale semantic ownership before generic PLAYPARTANIM")
 
 
 func test_body_clip_poses_to_sim_anim_state_phase() -> void:

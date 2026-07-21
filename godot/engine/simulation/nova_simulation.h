@@ -120,7 +120,13 @@ public:
 		PF_AIM_BODY_ROLL_DEG,
 		PF_AIM_ANGLES, // nine contiguous (pitch,yaw,roll) triples, OverlayClass order
 		PF_AIM_CLASS_STRIDE = 3,
-		PF_STRIDE = PF_AIM_ANGLES + 9 * PF_AIM_CLASS_STRIDE
+		// Semantic emplaced-weapon PANM registers. These are deliberately not
+		// PF_PHASE1/2: CTRL order is model-specific (B50Cal starts with HEAT_GLOW).
+		PF_EMPLACED_CONTROLS_VALID =
+				PF_AIM_ANGLES + 9 * PF_AIM_CLASS_STRIDE,
+		PF_EWEAP_GUNYAW,
+		PF_EWEAP_GUNPITCH,
+		PF_STRIDE
 	};
 
 	// Typed record returned by get_entity_effect_state_for_ssn(). Position is

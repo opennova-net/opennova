@@ -9,12 +9,19 @@ class FakeModel:
 	var overlay_calls: Array = []
 	var body_calls: Array = []
 	var pose_call_order: Array[String] = []
+	var ctrl_values: Dictionary = {}
+	var cleared_controls: Array[String] = []
 	func play_body_clip_at(key: String, phase_ticks: int) -> void:
 		body_calls.append([key, phase_ticks])
 		pose_call_order.append("body")
 	func set_aim_overlay(deltas: Array) -> void:
 		overlay_calls.append(deltas)
 		pose_call_order.append("overlay")
+	func set_ctrl_value(name: String, value: int) -> void:
+		ctrl_values[name] = value
+	func clear_ctrl_value(name: String) -> void:
+		ctrl_values.erase(name)
+		cleared_controls.append(name)
 
 
 class FakeSim:
@@ -57,6 +64,12 @@ class FakeSim:
 			out[base + NovaSimulation.PF_AIM_BODY_PITCH_DEG] = body.x
 			out[base + NovaSimulation.PF_AIM_BODY_YAW_DEG] = body.y
 			out[base + NovaSimulation.PF_AIM_BODY_ROLL_DEG] = body.z
+			out[base + NovaSimulation.PF_EMPLACED_CONTROLS_VALID] = float(
+					entity.get("emplaced_controls_valid", 0))
+			out[base + NovaSimulation.PF_EWEAP_GUNYAW] = float(
+					entity.get("emplaced_gun_yaw", 0))
+			out[base + NovaSimulation.PF_EWEAP_GUNPITCH] = float(
+					entity.get("emplaced_gun_pitch", 0))
 			var angles: PackedVector3Array = entity.get(
 					"aim_angles", PackedVector3Array())
 			for cls in range(mini(angles.size(), 9)):
@@ -175,6 +188,34 @@ func test_wire_model_applies_the_same_packed_overlay_result() -> void:
 	assert_true(model.basis.is_equal_approx(body_basis))
 	assert_true((deltas[8] as Basis).is_equal_approx(
 			body_basis.inverse() * MissionObjectPlacer.bms_to_godot_basis(angles[8])))
+
+
+func test_wire_model_applies_and_clears_named_emplaced_controls() -> void:
+	var sim := FakeSim.new()
+	sim.entities = [{
+		"type_id": 4567,
+		"handle": 0x1004,
+		"emplaced_controls_valid": 1,
+		"emplaced_gun_yaw": 0x2000,
+		"emplaced_gun_pitch": 0xE000,
+	}]
+	var placer := FakePlacer.new()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var presenter := WirePresentPass.new()
+	presenter.setup(sim, placer, container)
+	presenter.present()
+	var model := placer.built[0] as FakeModel
+	assert_eq(model.ctrl_values, {
+		"EWEAP_GUNYAW": 0x2000,
+		"EWEAP_GUNPITCH": 0xE000,
+	})
+
+	sim.entities[0]["emplaced_controls_valid"] = 0
+	presenter.present()
+	assert_true(model.ctrl_values.is_empty())
+	assert_has(model.cleared_controls, "EWEAP_GUNYAW")
+	assert_has(model.cleared_controls, "EWEAP_GUNPITCH")
 
 
 func test_wire_model_honors_local_first_person_parent_cull() -> void:
