@@ -23,6 +23,16 @@ var suppress_view_bias := false
 # both selectors unless ForceScoped overrides it. [orig: Render_ProcessMainSceneFrame
 # @0x5ca299..0x5ca304 / @0x5caaf3..0x5cab15]
 var scope_card_active := false
+var binoculars_requested := false
+var binoculars_raised := false
+var binoculars_view_active := false
+# One fixed-radius random displacement, generated on the raw toggle-on edge and
+# retained through movement/death/third-person suppression.
+var binocular_yaw_offset_deg := 0.0
+var binocular_pitch_offset_deg := 0.0
+var nvg_active := false
+var nvg_visible := false
+var nvg_gain := 0
 var fov_h_deg := 80.0         # the main camera's HORIZONTAL fov (policy applied)
 var tp_anchor := Vector3.ZERO # the chased eye anchor, Godot space
 var tp_anchor_valid := false
@@ -43,6 +53,14 @@ static func from_view_dict(d: Dictionary) -> PlayerLocalView:
 	out.scope_fraction = float(d.get("scope_fraction", 0.0))
 	out.suppress_view_bias = bool(d.get("suppress_view_bias", false))
 	out.scope_card_active = bool(d.get("scope_card_active", false))
+	out.binoculars_requested = bool(d.get("binoculars_requested", false))
+	out.binoculars_raised = bool(d.get("binoculars_raised", false))
+	out.binoculars_view_active = bool(d.get("binoculars_view_active", false))
+	out.binocular_yaw_offset_deg = float(d.get("binocular_yaw_offset_deg", 0.0))
+	out.binocular_pitch_offset_deg = float(d.get("binocular_pitch_offset_deg", 0.0))
+	out.nvg_active = bool(d.get("nvg_active", false))
+	out.nvg_visible = bool(d.get("nvg_visible", false))
+	out.nvg_gain = clampi(int(d.get("nvg_gain", 0)), 0, 4)
 	out.fov_h_deg = float(d.get("fov_h_deg", 80.0))
 	out.tp_anchor = d.get("tp_anchor", Vector3.ZERO)
 	out.tp_anchor_valid = bool(d.get("tp_anchor_valid", false))

@@ -208,9 +208,11 @@ func get_water_uv_state(cam_x: float, cam_z: float, fog_distance: float) -> Vect
 
 
 func _write_shader_globals(env: Node) -> void:
-	RenderingServer.global_shader_parameter_set(&"opennova_fill_light", get_smooth_fill())
+	# NovaEnvironment's public hemisphere getters include the camera-gated NVG
+	# gain rewrite; publishing the smoother directly would bypass it each tick.
+	RenderingServer.global_shader_parameter_set(&"opennova_fill_light", env.get_fill_light())
 	RenderingServer.global_shader_parameter_set(&"opennova_sun_light", get_smooth_sun())
-	RenderingServer.global_shader_parameter_set(&"opennova_sky_ambient", get_smooth_sky())
+	RenderingServer.global_shader_parameter_set(&"opennova_sky_ambient", env.get_sky_ambient())
 	RenderingServer.global_shader_parameter_set(&"opennova_fog_color", get_smooth_fog())
 	# Terrain tile DOT3 and foliage follow the current environment light
 	# (sun by day, moon by night), not the always-solar sky highlight vector.
