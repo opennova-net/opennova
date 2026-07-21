@@ -801,6 +801,10 @@ public:
 	// Inventory snapshot for hosts/tests: {equipped_combo, equipped_name, slots:
 	// [{combo, name, clip}], pools: {class_name: rounds}, carry_flags}.
 	Dictionary get_local_player_inventory() const;
+	// Canonical, unexpanded current tuples for the armory host. Retail preselects
+	// visible parent rows from g_armoryLoadoutBufferByClass, never from the expanded
+	// weaponSlotArrayBase [orig: populate_ammo_type_combo_boxes @ 0x564930].
+	TypedArray<Dictionary> get_local_player_loadout() const;
 
 	// --- WAC scripts ------------------------------------------------------
 	// Install a compiled program on the script VM (NovaWacProgram). Applied now if

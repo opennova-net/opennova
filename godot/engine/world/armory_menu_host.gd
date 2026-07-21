@@ -24,7 +24,7 @@ extends RefCounted
 # NovaWeaponDatabase.get_slot_weapons + the g_armoryWeaponAvailability term
 # @0x566e6b — value semantics in net-re §5.63], rows sorted case-insensitively
 # ascending [orig: ListWidget_SortRows -> cmp @0x6448a0, mode (string, asc)]
-# under NONE at row 0; every slot reselects from the live kit.
+# under NONE at row 0; every slot reselects from the canonical parent tuples.
 # Deferred (tracked in the armory RE notes): the per-class 2048-byte loadout
 # buffer MEMORY (save-on-flip + remembered counts) [orig:
 # g_armoryLoadoutBufferByClass @0x25DD740 -> populate_ammo_type_combo_boxes
@@ -45,9 +45,9 @@ var _class_allow_mask := 0x3FF
 # PLAYER_CLASS spin (and its label) outside one [orig: the is_in_session branch of
 # the WEAPON on-show handler @0x567370]. SP/PIE shells leave this false.
 var _class_selection_enabled := false
-# The current kit (weapon.def ids) from the sim's slot pool; each slot reselects
-# its row [orig: select-by-adm-index sub_645240 in populate_ammo_type_combo_boxes
-# @0x564930]. The per-class buffer MEMORY stays deferred (see the header).
+# The current kit's canonical parent weapon.def ids; each slot reselects its row
+# [orig: g_armoryLoadoutBufferByClass -> select-by-adm-index sub_645240 in
+# populate_ammo_type_combo_boxes @0x564930]. Per-class buffer MEMORY stays deferred.
 var _current_primary := ""
 var _current_secondary := ""
 var _current_accessory := ""
@@ -86,10 +86,10 @@ func set_player_class(player_class: int) -> void:
 	_player_class = player_class
 
 
-## The current kit from the sim's slot pool; each slot pre-selects its row on
-## populate. The per-class loadout-buffer MEMORY (remembered ammo counts,
-## save-on-class-flip) stands deferred — the reselect itself now reads the live
-## inventory [orig: populate_ammo_type_combo_boxes @0x564930 select-by-adm-index].
+## The current canonical parent tuples; each slot pre-selects its row on populate.
+## The per-class loadout-buffer MEMORY (remembered ammo counts, save-on-class-flip)
+## stands deferred; initial selection reads the active authoritative tuple buffer
+## [orig: populate_ammo_type_combo_boxes @0x564930 select-by-adm-index].
 func set_current_loadout(primary: String, secondary: String = "",
 		accessory: String = "") -> void:
 	_current_primary = primary
@@ -251,7 +251,7 @@ func _fill_slot(control: String, slot: int, team_mask: int) -> void:
 		dicts.append(pair[1])
 	_slot_rows[control] = dicts
 	_set_combo_items(combo, rows)
-	# Each slot re-selects its row from the live kit [orig: sub_645240
+	# Each slot re-selects its row from the canonical parent tuples [orig: sub_645240
 	# select-by-adm-index in @0x564930]; the per-class buffer MEMORY stays deferred.
 	var current := ""
 	match control:

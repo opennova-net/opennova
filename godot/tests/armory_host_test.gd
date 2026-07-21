@@ -48,12 +48,12 @@ class FakeWorld:
 	extends Node
 	var root: NovaResourceRoot
 	var weapons: NovaWeaponDatabase
-	var sim: FakeSim
+	var sim
 	var entity_team := 2
 	var set_weapon_calls: Array[String] = []
 	var clear_calls := 0
 
-	func get_sim() -> FakeSim:
+	func get_sim():
 		return sim
 
 	func get_resource_root() -> NovaResourceRoot:
@@ -82,6 +82,38 @@ class FakePlayerHost:
 
 	func refresh_viewmodel() -> void:
 		refresh_calls += 1
+
+
+class ArmoryZoneSimProxy:
+	extends RefCounted
+	var inner: NovaSimulation
+
+	func _init(p_inner: NovaSimulation) -> void:
+		inner = p_inner
+
+	func local_player_in_armory_zone() -> bool:
+		return true
+
+	func is_host_listening() -> bool:
+		return false
+
+	func is_joiner() -> bool:
+		return false
+
+	func get_local_player_class() -> int:
+		return inner.get_local_player_class()
+
+	func get_local_player_weapon_name() -> String:
+		return inner.get_local_player_weapon_name()
+
+	func get_local_player_inventory() -> Dictionary:
+		return inner.get_local_player_inventory()
+
+	func get_local_player_loadout() -> Array:
+		return inner.get_local_player_loadout()
+
+	func apply_local_player_loadout(kit: Array, selected_class: int) -> bool:
+		return inner.apply_local_player_loadout(kit, selected_class)
 
 
 func before_each() -> void:
@@ -137,6 +169,15 @@ func _label_text(node: Node) -> String:
 		if not text.is_empty():
 			return text
 	return ""
+
+
+func _weapon_display_text(row: Dictionary) -> String:
+	var textid := String(row.get("display_textid", ""))
+	var gametext: RtxtStringFile = NovaStrings.get_table("gametext")
+	if gametext != null and not textid.is_empty() \
+			and gametext.has_string_in_section("WepDes", textid):
+		return gametext.get_string_in_section("WepDes", textid)
+	return String(row.get("name", ""))
 
 
 func test_sp_open_uses_authoritative_context_and_full_menu_protocol() -> void:
@@ -201,6 +242,72 @@ func test_sp_open_uses_authoritative_context_and_full_menu_protocol() -> void:
 		"the authored NONE row reaches the simulation")
 	assert_eq(world.clear_calls, 1, "NONE clears the rendered/action weapon state")
 	assert_eq(player_host.refresh_calls, 2, "both equip and unequip rebuild the FP view")
+
+
+func test_open_preselects_the_authoritative_satchel_loadout() -> void:
+	var mission := NovaMissionData.new()
+	assert_eq(mission.create_default(), OK)
+	var simulation := NovaSimulation.new()
+	assert_true(simulation.load_from_mission_data(mission))
+	assert_true(simulation.spawn_local_player(Vector3.ZERO, 0.0, 2))
+	var resource_root := _make_root()
+	assert_eq(simulation.load_weapon_table(resource_root, "weapon.def"), OK)
+	var weapons := _make_weapons()
+	var rows: Array = weapons.get_slot_weapons(NovaWeaponDatabase.SLOT_ACCESSORY, 8, 1)
+	assert_gt(rows.size(), 0, "the fixture has an equippable red rifleman accessory")
+	var expected := String((rows[0] as Dictionary).get("name", ""))
+	assert_eq(expected, "WPN_SATCHEL_CHARGE", "the minimized fixture row is the satchel")
+	var primary_rows: Array = weapons.get_slot_weapons(NovaWeaponDatabase.SLOT_PRIMARY, 8, 1)
+	assert_gt(primary_rows.size(), 0, "the fixture has a primary beside the satchel")
+	var primary := String((primary_rows[0] as Dictionary).get("name", ""))
+	assert_eq(primary, "WPN_AK47AUTO",
+		"the minimized primary expands the non-selectable WPN_AK47 subclass")
+	assert_true(simulation.apply_local_player_loadout([
+		{"name": primary}, {"name": expected}], 8),
+		"the real simulation owns the primary + satchel kit before the armory opens")
+	var canonical_names: Array[String] = []
+	for value in simulation.get_local_player_loadout():
+		canonical_names.append(String((value as Dictionary).get("name", "")))
+	assert_eq(canonical_names, [primary, expected],
+		"the armory transport preserves only the selectable parent tuples")
+	assert_does_not_have(canonical_names, "WPN_AK47",
+		"the primary's hidden subclass is not part of the canonical armory buffer")
+	var inventory: Dictionary = simulation.get_local_player_inventory()
+	var inventory_names: Array[String] = []
+	for value in inventory.get("slots", []):
+		inventory_names.append(String((value as Dictionary).get("name", "")))
+	assert_has(inventory_names, expected, "the authoritative inventory still contains the satchel")
+	assert_has(inventory_names, "WPN_AK47",
+		"the expanded runtime pool contains the misleading hidden subclass")
+
+	var sim := ArmoryZoneSimProxy.new(simulation)
+	var world := FakeWorld.new()
+	world.root = resource_root
+	world.weapons = weapons
+	world.sim = sim
+	add_child_autofree(world)
+	var overlay := Control.new()
+	add_child_autofree(overlay)
+	overlay.size = Vector2(800, 600)
+	var host := ArmoryHost.new()
+	add_child_autofree(host)
+	host.setup(world, null, overlay)
+
+	assert_true(host.try_open(), "a fresh armory host opens for the equipped local player")
+	var menu := overlay.get_node("ArmoryMenu") as NovaMnuMenu
+	var accessory := menu.find_child("ACCESSORY", true, false) as NovaMnuCombo
+	assert_gt(accessory.get_selected(), 0,
+		"ACCESSORY pre-selects the satchel that is already in the player's loadout")
+	assert_eq(accessory.get_item_text(accessory.get_selected()),
+		_weapon_display_text(rows[0] as Dictionary),
+		"the selected accessory row is exactly the canonical satchel parent")
+	var primary_combo := menu.find_child("PRIMARY", true, false) as NovaMnuCombo
+	assert_gt(primary_combo.get_selected(), 0,
+		"PRIMARY pre-selects the canonical AK parent instead of relying on fallback")
+	assert_eq(primary_combo.get_item_text(primary_combo.get_selected()),
+		_weapon_display_text(primary_rows[0] as Dictionary),
+		"the selected primary row is exactly WPN_AK47AUTO")
+	simulation.free()
 
 
 func test_multiplayer_open_is_gated_until_live_loadout_submission_exists() -> void:

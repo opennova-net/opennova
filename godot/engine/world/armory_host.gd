@@ -94,9 +94,7 @@ func try_open() -> bool:
 	if not _ensure_menu():
 		return false
 	# The on-show protocol: the screen re-resolves the class and repopulates every
-	# open [orig: the WEAPON activate handler @0x567370 -> populate @0x566db0]; the
-	# equipped primary stands in for the per-class buffer reselect (see the
-	# companion's header).
+	# open [orig: the WEAPON activate handler @0x567370 -> populate @0x566db0].
 	# Re-read the spawned entity on every show. Entity teams use 1/3=blue and
 	# 2/4=red; the menu filter uses the profile-side 0=blue, 1=red domain.
 	if _world.has_method("local_player_team"):
@@ -118,25 +116,32 @@ func try_open() -> bool:
 	_armory.set_class_selection_enabled(true)
 	var vmdef: PlayerViewmodelDef = _world.local_player_viewmodel_def() \
 			if _world.has_method("local_player_viewmodel_def") else null
-	var current_primary := vmdef.weapon_name if vmdef != null else ""
+	var fallback_primary := vmdef.weapon_name if vmdef != null else ""
 	if sim.has_method("get_local_player_weapon_name"):
-		current_primary = String(sim.get_local_player_weapon_name())
-	# The live kit from the sim's slot pool re-selects every slot row; the map
-	# availability rules filter the lists [orig: populate_three_category_lists
-	# @0x566db0 — the g_armoryWeaponAvailability term + the per-class reselect].
+		fallback_primary = String(sim.get_local_player_weapon_name())
+	# Retail resolves each visible parent tuple from the selected class's canonical
+	# buffer and routes it by that parent's weapon_class. It never scans the expanded
+	# runtime slot pool, whose hidden subclasses can occupy a different class.
+	# [orig: g_armoryLoadoutBufferByClass -> populate_ammo_type_combo_boxes
+	# @0x564930; name/catalog resolve @0x564A00; slot route @0x564B47]
+	var current_primary := fallback_primary
 	var current_secondary := ""
 	var current_accessory := ""
-	if sim.has_method("get_local_player_inventory") \
+	if sim.has_method("get_local_player_loadout") \
 			and _world.has_method("get_weapon_database"):
 		var weapon_db: NovaWeaponDatabase = _world.get_weapon_database()
-		var inv: Dictionary = sim.get_local_player_inventory()
-		for row in inv.get("slots", []):
+		current_primary = ""
+		for value in sim.get_local_player_loadout():
+			var row := value as Dictionary
 			var weapon_name := String(row.get("name", ""))
 			var index: int = weapon_db.find_weapon(weapon_name) \
 					if weapon_db != null and weapon_db.is_loaded() else -1
 			if index < 0:
 				continue
 			match int(weapon_db.get_weapon(index).get("slot", -1)):
+				NovaWeaponDatabase.SLOT_PRIMARY:
+					if current_primary.is_empty():
+						current_primary = weapon_name
 				NovaWeaponDatabase.SLOT_SECONDARY:
 					if current_secondary.is_empty():
 						current_secondary = weapon_name

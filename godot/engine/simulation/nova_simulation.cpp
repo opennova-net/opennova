@@ -2374,6 +2374,15 @@ opennova::world::WeaponKitEntry kit_entry_from_dict(const Dictionary &d) {
 	return e;
 }
 
+Dictionary kit_entry_to_dict(const opennova::world::WeaponKitEntry &e) {
+	Dictionary d;
+	d["name"] = String::utf8(e.name.c_str());
+	d["ammo_primary"] = e.ammo_primary;
+	d["ammo_secondary"] = e.ammo_secondary;
+	d["flags"] = e.flags;
+	return d;
+}
+
 } // namespace
 
 void NovaSimulation::set_spawn_loadout(const TypedArray<Dictionary> &p_kit,
@@ -2718,6 +2727,15 @@ Dictionary NovaSimulation::get_local_player_inventory() const {
 	out["equipped_name"] = equipped_name;
 	out["slots"] = slots;
 	out["pools"] = pools;
+	return out;
+}
+
+TypedArray<Dictionary> NovaSimulation::get_local_player_loadout() const {
+	TypedArray<Dictionary> out;
+	const std::vector<opennova::world::WeaponKitEntry> kit =
+			spawn_kit_set_ ? spawn_kit_ : opennova::world::weapon_kit_default();
+	for (const opennova::world::WeaponKitEntry &entry : kit)
+		out.push_back(kit_entry_to_dict(entry));
 	return out;
 }
 
@@ -3198,6 +3216,8 @@ void NovaSimulation::_bind_methods() {
 	                     &NovaSimulation::request_local_player_weapon_cycle);
 	ClassDB::bind_method(D_METHOD("get_local_player_inventory"),
 	                     &NovaSimulation::get_local_player_inventory);
+	ClassDB::bind_method(D_METHOD("get_local_player_loadout"),
+	                     &NovaSimulation::get_local_player_loadout);
 	ClassDB::bind_method(D_METHOD("load_weapon_table", "resource_root", "name"),
 	                     &NovaSimulation::load_weapon_table, DEFVAL(String("weapon.def")));
 	ClassDB::bind_method(D_METHOD("load_ammo_table", "resource_root", "name"),

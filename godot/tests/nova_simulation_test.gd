@@ -959,6 +959,10 @@ func test_armory_reads_and_clears_authoritative_local_loadout() -> void:
 		"weapon-table load exposes the entity's stamped default instead of the FP fallback")
 	assert_false(sim.has_explicit_spawn_loadout(),
 		"the engine's WPN_M4AUTO fallback is not an authored spawn kit")
+	var fallback_loadout: Array = sim.get_local_player_loadout()
+	assert_eq(fallback_loadout.size(), 1,
+		"the canonical transport exposes the effective default kit")
+	assert_eq(String((fallback_loadout[0] as Dictionary).get("name", "")), "WPN_M4AUTO")
 	assert_true(sim.set_local_player_class(7),
 		"profile class can commit without replacing the current weapon kit")
 	assert_eq(sim.get_local_player_class(), 7)
@@ -968,6 +972,10 @@ func test_armory_reads_and_clears_authoritative_local_loadout() -> void:
 
 	assert_true(sim.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 6))
 	assert_eq(sim.get_local_player_class(), 6, "accepted class is authoritative on reopen")
+	var accepted_loadout: Array = sim.get_local_player_loadout()
+	assert_eq(accepted_loadout.size(), 1)
+	assert_eq(int((accepted_loadout[0] as Dictionary).get("ammo_primary", 0)), -1,
+		"unspecified canonical ammo remains the retail fallback sentinel")
 	var inv: Dictionary = sim.get_local_player_inventory()
 	assert_true(bool(inv.get("valid", false)), "the ACCEPT rebuilt the slot pool")
 	assert_eq(String(inv.get("equipped_name", "")), "WPN_M4AUTO",
@@ -975,6 +983,8 @@ func test_armory_reads_and_clears_authoritative_local_loadout() -> void:
 	assert_true(sim.apply_local_player_loadout([], 9), "the all-NONE kit is a valid apply")
 	assert_eq(sim.get_local_player_class(), 9, "NONE still commits the selected class")
 	assert_eq(sim.get_local_player_weapon_name(), "", "NONE clears the equipped AdmDef")
+	assert_true(sim.get_local_player_loadout().is_empty(),
+		"an explicit all-NONE kit remains empty instead of falling back to M4")
 	sim.free()
 
 

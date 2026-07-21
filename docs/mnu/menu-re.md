@@ -800,9 +800,13 @@ serves player.mnu's PLAYER_INFO): filter = def valid && class mask && team mask
 `CAdminServer_HandleWeaponCommand`); category dword +17 routes 1->PRIMARY,
 2->SECONDARY, 0->ACCESSORY; rows **sorted case-insensitively ascending**
 (`ListWidget_SortRows @ 0x644990` -> `cmp @ 0x6448a0`, params (string, asc));
-`Menu/NONE` prepended at row 0. The tail re-selects each list from the
-**per-class** loadout buffer (`populate_ammo_type_combo_boxes @ 0x564930`
-select-by-adm-index via `sub_645240`) and fills the ammo/type combos from it,
+`Menu/NONE` prepended at row 0. The tail parses the canonical, unexpanded
+`{name, ammoPri, ammoSec, flags}` tuples from the **per-class** loadout buffer
+(`populate_ammo_type_combo_boxes @ 0x564930`), resolves each parent name to its
+catalog index `@ 0x564A00..0x564A06`, routes it by the parent's category
+(`ACCESSORY` case 0 `@ 0x564B47`), selects that visible row by adm index via
+`sub_645240 @ 0x564B26..0x564B33`, and fills the ammo/type combos from it. It
+does not reconstruct the selection from the expanded runtime weapon-slot table,
 then `update_weapon_weight_display @ 0x565640` renders STATIC_TOTAL_WEIGHT as
 `sprintf "%s %.1f %s (%s)"` = TOTAL_WEIGHT / `calculate_equipped_weapons_weight
 @ 0x565490` / LBS / encumbrance (`< 33.3 LIGHT_ENCUMBRANCE`, `< 66.6 NORMAL_`,
@@ -841,11 +845,12 @@ fills, the witnessed re-select), stamps `player_class`, and the commit event
 re-mounts the FP viewmodel/action FSM; the accepted kit becomes the respawn
 spawn kit (net-re §5.63).
 
-**Reimpl status (2026-07-11 re-grill; refreshed 2026-07-18, the loadout grill).**
+**Reimpl status (2026-07-11 re-grill; refreshed 2026-07-21).**
 Ported and matching: the zone-gated open on the use-item key (SHIFT), including
 its not-seated gate, the live-overlay (no world-stop) state, the CHARCLASS_*
-class rows + resolve rule in offline play, sorted rows under NONE, the live-kit
-reselect on ALL THREE slot combos (backed by the sim's slot pool), the
+class rows + resolve rule in offline play, sorted rows under NONE, the canonical
+parent-tuple reselect on ALL THREE slot combos (backed by the authoritative
+unexpanded spawn kit rather than the expanded runtime slot pool), the
 `g_armoryWeaponAvailability` filter term (mission-authored via the .bms
 item_availability promote; values in net-re §5.63), the witnessed weight
 format, and the offline ACCEPT collect/apply seam — now the full multi-slot
