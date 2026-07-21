@@ -705,7 +705,16 @@ already-near occupants onto their target SSN with the runtime gate above; mounte
 is selected from the occupied seat (`UseGun` → 67+variant if that clip exists, other seats →
 `anim_sit_N` from the seat name digits). GDExtension debug cards expose the selected seat source name
 and the full target-seat candidate list (`source_name`, type, pose index, local offset, occupancy) for
-00TRa-style audits. Deviations (NOT silently absorbed):
+00TRa-style audits. Per-entity ADM resolver inputs remain live mission state: newly appended AI entries
+(including joiner-local and host-admitted players) register their model ADM before the configured mounted
+selector runs. This matches the entity-registration lifetime at `AnimMap_RegisterEntity @ 0x40bb60`; a
+one-time post-load sweep left late players on the default map, silently collapsing B50 `phrase_set=4`
+from `anim_emplaced_5` to the visibly offset generic `anim_emplaced` pose. The host admission hook runs
+after connection spawning but before `Server_TickUpdate`; direct local/joiner spawn paths resolve before
+their first body update. Clearing/reloading the animation registry resets the resolver high-water and
+repopulates every live `adm_id`, while Play→Stop restore rewinds both the AI array and resolver mark before
+re-resolving the baseline. `test_late_spawn_player_resolves_own_adm_before_configured_usegun_pose` pins
+the former failure. Deviations (NOT silently absorbed):
 1. **Proximity proxy vs occupant-model+144.** The original's vehicle is the occupant's model hierarchy
    link; we pick the nearest free-seat entity within 20 units (`kMountRadius`). Faithful for a soldier
    placed on its gun; wrong if two guns overlap.
@@ -1086,7 +1095,13 @@ The local controller train remains, and mounted selection is now an animation-ow
   `NovaItemDatabase` exposes both; `MissionSeatDiagnostics` and `ItemSeatSpec` promote them to the
   target entity. Both mount entry paths copy the pair to the occupant; both dismount paths clear it;
   registry snapshot/restore value-copies it. This replaces `emplaced_pose_variant`'s ambiguous default
-  without changing the existing seat-frame body/leg/pitch/roll synchronization.
+  without changing the existing seat-frame body/leg/pitch/roll synchronization. `NovaSimulation`
+  retains the per-entity ADM resolver inputs and advances an append-only AI-entry high-water at the
+  direct-spawn and host pre-tick boundaries, so players created after mission-load registration still own
+  US01 before the mounted selector reads B50's configured pose (`AnimMap_RegisterEntity @ 0x40bb60`).
+  An animation-registry rebuild invalidates every stored `adm_id` and therefore resets/repopulates the
+  high-water; Play→Stop restore likewise rewinds the AI array and resolver mark, even when the restored
+  entry count equals the prior count.
 - **Sim**: `InfantryState.leg_yaw/leg_target` + the §3.3 chase/re-plant/twist-limit tick in
   `libs/world/src/infantry.cpp`; the local player's `body_heading` now CHASES the aim
   (quarter-step, clamped) while render yaw stays mouse-instant — the aim/body split the
@@ -4332,6 +4347,7 @@ would therefore diverge from JO:CA. All addresses below are retail `Jointops.exe
 | actual-hit alert/reaction and self-hit exclusion | **MATCHING** (behavioral proof) | both retail callbacks in §26.4; `ai` and `player_spawn` ctests |
 | projectile near-miss behavior | **MATCHING** (read-only grill) | listener-only tail in §26.4; deliberately no AI notification |
 | mounted aim, request gates, action-FSM fire, muzzle, and shooter ownership | **MATCHING** (behavioral proof) | §26.5-§26.6; `ai` and `npruntime_weapon_table` ctests |
+| late-spawn player body-ADM binding + configured UseGun pose | **MATCHING** (behavioral proof) | §26.5b; asset-backed `nova_simulation_test.gd` |
 | mounted collision cadence + model-force suppression | **MATCHING** core | §26.7; `collision` and `ai` ctests; D-COL-9 narrowed |
 | mounted death detach + directional death animation | **MATCHING** (behavioral proof) | §26.7 and §19; `ai` ctest |
 | automatic ADM-derived action duration in the runtime table builder | **DIVERGENT** (bounded) | §26.8; D-WPN-26 |
@@ -4443,6 +4459,24 @@ compact-byte rounding. An infantry compact instead carries the desired aim-pitch
 target. NetClientView reconstructs the mounted NPC's live Pitch once per decoded
 frame with retail's wrapped one-eighth chase before deriving the semantic phase.
 
+### 26.5b Late-spawn body-ADM registration (2026-07-21)
+
+The mounted state is selected against the occupant's own body AnimMap. Retail creates both body
+channels from that entity's graphic-definition ADM in `AnimMap_RegisterEntity @ 0x40bb60`;
+`AnimMap_UpdateEntity @ 0x40b5f0` subsequently indexes that per-entity table. A US01 player on B50
+`phrase_set 4` therefore selects state 71, `anim_emplaced_5`.
+
+OpenNova had reduced ADM resolution to one mission-load sweep. Joiner-local and host-admitted remote
+players appended afterward retained default `adm_id 0`, so the configured-state availability gate
+selected state 67, generic `anim_emplaced`, even though the entity origin remained on the authored
+UseGun point. D-INF-22 closes that ordering divergence: `NovaSimulation` retains the resource root and
+item database, resolves host admissions after connection spawning but before `Server_TickUpdate`, and
+resolves direct local/joiner spawn paths before their first body update. Rebuilding the animation
+registry rewinds the resolver high-water and repopulates all live ids; Play→Stop restore independently
+rewinds the AI array and resolver mark before re-resolving the baseline, including the equal-count case.
+This mounted-selector fallback happened before playback and is distinct from §14.8.1's still-open
+missing-key NO-OP versus retail RESET behavior.
+
 ### 26.6 Fire request and global action-FSM phase
 
 Let `S = current_tick + 36*net_id`. A mounted gunner considers a fire request only when it
@@ -4505,6 +4539,13 @@ gates, parent-slot FSM fire with mount muzzle and gunner attribution, and mounte
 the UseGun-versus-generic `0x40` split;
 `npruntime_weapon_table` pins the authored action-row bake. Every name is an always-on
 CTest target.
+
+GUT `test_late_spawn_player_resolves_own_adm_before_configured_usegun_pose` reproduces the
+production load-before-spawn order and requires the US01/B50 combination to select
+`anim_emplaced_5`; its rebuild/restore companions pin repopulation after registry invalidation.
+The adjacent UseGun assertions independently prove yaw and pitch cannot translate the entity origin
+off the authored seat point, and the host-session regression pins assignment before the first
+authoritative remote-player update.
 
 The EWEAP articulation regression is asset-backed: nova_simulation_test.gd
 mounts the local player on fixture B50Cal and proves both yaw and pitch move

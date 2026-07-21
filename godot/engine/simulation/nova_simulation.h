@@ -59,6 +59,7 @@ class NovaTerrainData;
 class NovaObjectData;
 class NovaSkeletalAnim;
 class NovaItemDatabase;
+class NovaResourceRoot;
 
 // THE mission runtime binding: a thin host shell over the portable libs/world runtime.
 // Owns one World + the three logic systems (WAC VM, BMS event evaluator, AI) and drives
@@ -561,7 +562,17 @@ private:
 	// motor integrates (world/infantry.h). Owned here so it survives reset_world; the fresh
 	// ai_ is re-pointed at it like the terrain field. Empty = soldiers hold and stand.
 	InfantryRootMotion infantry_anim_;
+	// Per-entity ADM resolution is a spawn-time invariant, not a one-shot mission-load
+	// sweep: joiner-local and host-admitted players are attached to the AI pool after
+	// MissionRuntime's initial call. Retain the resolver inputs and advance this
+	// high-water mark whenever AiSystem gains entries (its attach storage is append-only).
+	Ref<NovaResourceRoot> infantry_adm_resource_root_;
+	Ref<NovaItemDatabase> infantry_adm_item_db_;
+	int infantry_adm_resolved_ai_count_ = 0;
 	void apply_root_motion_to_ai();
+	void reset_infantry_adm_ids();
+	void resolve_new_infantry_adm_ids();
+	static void resolve_infantry_adm_before_server_tick(void *p_context);
 	std::vector<opennova::mission::ItemSeatSpec> item_seat_specs_;
 	opennova::mission::PromoteOptions promote_options() const;
 
@@ -1045,8 +1056,8 @@ public:
 
 	// Per-entity grounding: resolve every active infantry soldier's OWN model .adm (from its
 	// items.def type id via the item database) and store its registry adm_id on the entity, so
-	// each grounds + locomotes off its own clip rather than the shared default set. Idempotent;
-	// call after load and again after spawning the local player.
+	// each grounds + locomotes off its own clip rather than the shared default set. The
+	// resolver inputs are retained so players spawned later receive their ADM automatically.
 	void resolve_infantry_adm_ids(const Ref<class NovaResourceRoot> &p_resource_root,
 	                              const Ref<class NovaItemDatabase> &p_item_db);
 

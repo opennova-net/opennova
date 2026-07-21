@@ -552,6 +552,9 @@ void NovaSimulation::reset_world() {
 	collision_resolution_attempted_.clear();
 	collision_pose_data_.clear();
 	collision_skeletal_sources_.clear();
+	infantry_adm_resource_root_.unref();
+	infantry_adm_item_db_.unref();
+	infantry_adm_resolved_ai_count_ = 0;
 	panm_time_override_ms_ = -1;
 	collision_world_ = opennova::world::CollisionWorld{};
 	// Occlusion models too — retail reloads the model cache per mission, so the
@@ -604,40 +607,76 @@ void NovaSimulation::apply_root_motion_to_ai() {
 	ai_->root_motion = !infantry_anim_.empty() ? &infantry_anim_ : nullptr;
 }
 
+void NovaSimulation::reset_infantry_adm_ids() {
+	infantry_adm_resolved_ai_count_ = 0;
+	if (!world_ || !world_->ai) return;
+	AiSystem &ai = *world_->ai;
+	for (int i = 0; i < ai.count(); ++i) {
+		if (AiEntity *e = ai.at(i)) e->inf.adm_id = 0;
+	}
+}
+
 int NovaSimulation::set_infantry_anim_map(const Ref<NovaResourceRoot> &p_resource_root, const String &p_adm_name) {
 	// The default clip set (adm_id 0): every infantry entity grounds off this until its own
 	// model's .adm is registered (register_infantry_adm + set_infantry_adm_id). Clearing here
 	// resets the whole registry on each (re)load.
 	infantry_anim_.clear();
-	infantry_anim_.register_adm(p_resource_root, p_adm_name);
+	reset_infantry_adm_ids();
+	const int default_adm_id = infantry_anim_.register_adm(p_resource_root, p_adm_name);
+	const int default_clip_count = default_adm_id == 0 ? infantry_anim_.clip_count(0) : 0;
+	// Every stored per-entity id indexes this registry; rebuilding it invalidates
+	// all prior assignments. Only repopulate once slot 0 is the successfully loaded
+	// default map; otherwise a model-specific ADM could usurp the default slot and
+	// turn a failed load into false success.
+	if (default_adm_id == 0) resolve_new_infantry_adm_ids();
 	apply_root_motion_to_ai();
-	return infantry_anim_.clip_count(0);
+	return default_clip_count;
+}
+
+// Assign only newly attached AI entries. AiSystem::attach is append-only, including when
+// an entity handle is reused, so the count is a generation-safe high-water mark. This is
+// the spawn-time half of AnimMap_RegisterEntity: late joiner-local/remote players must not
+// retain the default E_STAND map or configured emplacements fall back to anim_emplaced.
+// [orig: AnimMap_RegisterEntity @0x40bb60; AnimMap_UpdateEntity @0x40b5f0.]
+void NovaSimulation::resolve_new_infantry_adm_ids() {
+	if (!world_ || !world_->ai || infantry_adm_resource_root_.is_null() ||
+			infantry_adm_item_db_.is_null() || infantry_anim_.empty())
+		return;
+	AiSystem &ai = *world_->ai;
+	const int count = ai.count();
+	if (infantry_adm_resolved_ai_count_ < 0 ||
+			infantry_adm_resolved_ai_count_ > count)
+		infantry_adm_resolved_ai_count_ = 0;
+	for (int i = infantry_adm_resolved_ai_count_; i < count; ++i) {
+		AiEntity *e = ai.at(i);
+		if (!e) continue;
+		e->inf.adm_id = 0;
+		if (!e->inf.active) continue;
+		const opennova::world::Entity *ent = world_->registry.get(e->handle);
+		if (!ent) continue;
+		const int visual_item_id =
+				visual_item_id_for_runtime_type(ent->item_id, infantry_adm_item_db_);
+		String adm = infantry_adm_item_db_->get_anim_def(visual_item_id);
+		if (adm.is_empty()) continue;
+		if (!adm.to_lower().ends_with(".adm")) adm += ".adm";
+		const int adm_id =
+				infantry_anim_.register_adm(infantry_adm_resource_root_, adm);
+		if (adm_id >= 0) e->inf.adm_id = adm_id;
+	}
+	infantry_adm_resolved_ai_count_ = count;
 }
 
 // Per-entity .adm resolution: ground each soldier off its OWN model's clip, not the shared
-// default set (adm_id 0). For every active infantry entity, resolve its anim_def from its
-// items.def type id, register that .adm (parsed once, cached by name), and store the resulting
-// adm_id on its InfantryState. The local player (US01) is covered the same way once spawned.
-// Idempotent: re-registering a name returns the cached id, re-setting adm_id is harmless, so the
-// host can call this after load and again after spawning the player. [orig: AnimMap_UpdateEntity
-// @0x40b5f0 evaluates the entity's own anim map per frame; docs/world/world-wac-ai-re.md D-INF-6.]
+// default set (adm_id 0). Retain the host inputs because multiplayer players are spawned
+// after this mission-load sweep; the step/spawn hooks above the world layer resolve each
+// later AiSystem entry exactly once.
 void NovaSimulation::resolve_infantry_adm_ids(const Ref<NovaResourceRoot> &p_resource_root,
-                                              const Ref<NovaItemDatabase> &p_item_db) {
-	if (!world_ || !world_->ai || p_resource_root.is_null() || p_item_db.is_null()) return;
-	AiSystem &ai = *world_->ai;
-	for (int i = 0; i < ai.count(); ++i) {
-		AiEntity *e = ai.at(i);
-		if (!e || !e->inf.active) continue;
-		const opennova::world::Entity *ent = world_->registry.get(e->handle);
-		if (!ent) continue;
-		const int visual_item_id = visual_item_id_for_runtime_type(ent->item_id, p_item_db);
-		String adm = p_item_db->get_anim_def(visual_item_id);
-		if (adm.is_empty()) continue;
-		if (!adm.to_lower().ends_with(".adm")) adm += ".adm";
-		const int adm_id = infantry_anim_.register_adm(p_resource_root, adm);
-		if (adm_id >= 0) e->inf.adm_id = adm_id;
-	}
-	apply_root_motion_to_ai();
+		const Ref<NovaItemDatabase> &p_item_db) {
+	if (p_resource_root.is_null() || p_item_db.is_null()) return;
+	infantry_adm_resource_root_ = p_resource_root;
+	infantry_adm_item_db_ = p_item_db;
+	reset_infantry_adm_ids();
+	resolve_new_infantry_adm_ids();
 }
 
 // Stamp every live entity's items.def-derived wire traits via the item database:
@@ -3607,11 +3646,13 @@ bool NovaSimulation::step() {
 	const uint64_t sim_start = perf_now_us();
 	if (listen_server_) { // P7 listen server (SP + LAN host) -> the npruntime owner loop
 		host_pump();
+		resolve_new_infantry_adm_ids();
 		last_sim_tick_us_ = perf_now_us() - sim_start;
 		return true;
 	}
 	if (joiner_) { // P7 co-op joiner -> the npruntime ClientRuntime (non-authority)
 		joiner_pump();
+		resolve_new_infantry_adm_ids();
 		last_sim_tick_us_ = perf_now_us() - sim_start;
 		return true;
 	}
@@ -3620,6 +3661,7 @@ bool NovaSimulation::step() {
 	world_->run_logic_tick(/*is_authority=*/true);
 	tick_local_player_view();   // retail promotes the per-frame view before weapon actions
 	tick_local_player_weapon(); // the equipped-slot FSM pump, after the view promoter
+	resolve_new_infantry_adm_ids();
 	last_sim_tick_us_ = perf_now_us() - sim_start;
 	return true;
 }
@@ -3770,12 +3812,18 @@ private:
 // longer drift. NovaSimulation supplies the socket (a NovaUdpPump adapter; SP passes a null pump and the
 // loop's socket legs go inert) and folds the host's own loopback 0x0A into ClientState for the present
 // pass (serve_and_play: host_session_pump skips the loopback discard so we can read it here).
+void NovaSimulation::resolve_infantry_adm_before_server_tick(void *p_context) {
+	if (p_context == nullptr) return;
+	static_cast<NovaSimulation *>(p_context)->resolve_new_infantry_adm_ids();
+}
+
 void NovaSimulation::host_pump() {
 	namespace np = opennova::np;
 	const uint32_t now = host_owner_.now_tick;
 	apply_player_input_pre_tick(); // input -> the host player's body input, before logic (ADR 0009/0012)
 	NovaUdpPumpDatagramSocket sock(host_listen_ ? pump_.ptr() : nullptr);
-	np::host_session_pump(host_owner_, sock); // recv-drain -> tick_connections -> Server_TickUpdate -> S2C flush
+	np::host_session_pump(host_owner_, sock,
+			&NovaSimulation::resolve_infantry_adm_before_server_tick, this);
 	tick_local_player_view();   // retail promotes the per-frame view before weapon actions
 	tick_local_player_weapon(); // the equipped-slot FSM pump, after the view promoter
 	if (runtime_) runtime_->Client_ProcessNetworkFrame(now); // fold host_loop_ -> ClientState (HostClient view)
@@ -3837,6 +3885,7 @@ void NovaSimulation::joiner_pump() {
 		const opennova::world::PlayerSpawn spawn = spawn_from_self(sp);
 		const opennova::world::EntityHandle h = opennova::world::spawn_player(*world_, spawn);
 		joiner_local_spawned_ = h.valid();
+		resolve_new_infantry_adm_ids();
 		player_input_ = opennova::world::PlayerInput{};
 		player_input_.look_heading = opennova::world::bam_heading_from_mission_yaw_deg(spawn.yaw);
 		stance_latch_ = 0;
@@ -3884,6 +3933,7 @@ bool NovaSimulation::spawn_local_player(Vector3 p_position, float p_yaw_deg, int
 	if (listen_server_) spawn.min_entity_slot = kRetailPlayerMinEntitySlot;
 	const opennova::world::EntityHandle h = opennova::world::spawn_player(*world_, spawn);
 	if (!h.valid()) return false;
+	resolve_new_infantry_adm_ids();
 	// Seed the look heading to the spawn facing so the body starts aligned. [(90 - yaw) BAM]
 	player_input_ = opennova::world::PlayerInput{};
 	player_input_.look_heading = opennova::world::bam_heading_from_mission_yaw_deg(p_yaw_deg);
@@ -3919,6 +3969,7 @@ int NovaSimulation::spawn_local_player_at_start() {
 	if (listen_server_) spawn.min_entity_slot = kRetailPlayerMinEntitySlot;
 	const opennova::world::EntityHandle h = opennova::world::spawn_player(*world_, spawn);
 	if (!h.valid()) return -1;
+	resolve_new_infantry_adm_ids();
 	// Seed the look heading to the spawn facing so the body starts aligned. [(90 - yaw) BAM]
 	player_input_ = opennova::world::PlayerInput{};
 	player_input_.look_heading = opennova::world::bam_heading_from_mission_yaw_deg(spawn.yaw);
@@ -5050,6 +5101,8 @@ void NovaSimulation::restart() {
 	weapon_switch_deferred_action_ = -1;
 	world_->restore(baseline_); // rewinds registry/vars/env/clock + re-inits systems (incl. AI;
 	                            // WacSystem::on_load also resets its 62-tick accumulator)
+	reset_infantry_adm_ids();
+	resolve_new_infantry_adm_ids();
 	if (usegun_was_active) {
 		// The world snapshot restores the play-start entity set, while the host
 		// still presents the borrowed emplacement definition. Reinstall the saved
@@ -5667,6 +5720,7 @@ Dictionary NovaSimulation::get_entity_debug(int p_index) const {
 		}
 	}
 	out["net_id"] = e->net_id;
+	out["wire_handle"] = static_cast<int>(e->handle.packed);
 	out["team"] = static_cast<int>(e->team);
 	// The AI-side entity+286 mirror; diverges from the registry health under
 	// some damage paths, so the card shows both.
@@ -5683,6 +5737,8 @@ Dictionary NovaSimulation::get_entity_debug(int p_index) const {
 	out["wp_distance"] = e->brain.f[AiBrain::kWpDistance];
 	out["out_speed"] = e->brain.f[AiBrain::kOutSpeed];
 	out["infantry"] = e->inf.active;
+	out["adm_id"] = e->inf.active ? e->inf.adm_id : -1;
+	out["adm_name"] = e->inf.active ? infantry_anim_.adm_name(e->inf.adm_id) : String();
 	out["infantry_move_mode"] = e->inf.move_mode;
 	out["anim_state"] = e->inf.active ? e->inf.anim_state : -1;
 	out["anim_key"] = e->inf.active ? infantry_anim_key(e->inf.anim_state) : String();
@@ -6254,7 +6310,11 @@ bool NovaSimulation::admit_test_remote_peer(Vector3 p_position, float p_yaw_deg,
 		link.transport = std::make_unique<opennova::netsim::UdpSessionTransport>(
 				opennova::netsim::UdpSessionTransport::Role::Host);
 	}
-	return opennova::np::admit_synthetic_peer(ctx_, *world_, peer, spawn, link.transport.get()).valid();
+	const opennova::world::EntityHandle h =
+			opennova::np::admit_synthetic_peer(
+					ctx_, *world_, peer, spawn, link.transport.get());
+	resolve_new_infantry_adm_ids();
+	return h.valid();
 }
 
 PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {

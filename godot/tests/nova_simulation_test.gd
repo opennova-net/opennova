@@ -1,6 +1,7 @@
 extends GutTest
 
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
+const MissionSeatDiagnostics := preload("res://engine/world/mission_seat_diagnostics.gd")
 const NovaObjectModelScript := preload("res://engine/object/nova_object_model.gd")
 const PresentAimOverlay := preload("res://engine/world/present_aim_overlay.gd")
 
@@ -1073,7 +1074,110 @@ func test_infantry_anim_map_failure_paths() -> void:
 	assert_eq(int(sim.set_infantry_anim_map(null, "soldier.adm")), 0, "null root -> 0 clips")
 	assert_eq(int(sim.set_infantry_anim_map(_anim_root(), "missing.adm")), 0, "absent .adm -> 0 clips")
 	assert_eq(sim.get_infantry_clip_count(), 0, "failed load leaves no stale clip set")
+	assert_gt(sim.set_infantry_anim_map(_anim_root(), "soldier.adm"), 0)
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/items.def")), OK)
+	sim.resolve_infantry_adm_ids(_anim_root(), item_db)
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	assert_eq(int(sim.set_infantry_anim_map(_anim_root(), "missing.adm")), 0,
+			"a retained per-entity resolver cannot replace a failed default with US01")
+	assert_eq(sim.get_infantry_clip_count(), 0,
+			"a failed registry rebuild remains empty after per-entity resolution")
 	sim.free()
+
+
+func test_restart_rebinds_baseline_player_to_own_adm() -> void:
+	# The listen host's player is captured in AiSystem's baseline before the
+	# MissionRuntime per-entity ADM sweep. Stop/Restart replaces the live AI rows
+	# with that baseline at the same count, so a count-only late-spawn resolver
+	# must explicitly repopulate the restored rows.
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var sim := NovaSimulation.new()
+	sim.enable_listen_server(true)
+	assert_true(sim.load_from_mission_data(md))
+	assert_true(sim.has_local_player(), "listen host player exists in the restart baseline")
+	assert_gt(sim.set_infantry_anim_map(_anim_root(), "soldier.adm"), 0)
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/items.def")), OK)
+	sim.resolve_infantry_adm_ids(_anim_root(), item_db)
+	var player_ai_index := -1
+	var local_handle := sim.get_local_player_wire_handle()
+	for ai_index in range(sim.get_entity_count()):
+		if int(sim.get_entity_debug(ai_index).get("wire_handle", 0)) == local_handle:
+			player_ai_index = ai_index
+			break
+	assert_gte(player_ai_index, 0)
+	assert_eq(String(sim.get_entity_debug(player_ai_index).get("adm_name", "")),
+			"US01.adm", "the live host player owns its graphic ADM")
+	sim.set_player_input(true, false, false, false, false, false, false)
+	sim.step()
+	assert_eq(sim.get_local_player_anim_key(), "anim_idle",
+			"US01 lacks the requested gait and resolves through its own idle clip")
+
+	sim.restart()
+	assert_eq(String(sim.get_entity_debug(player_ai_index).get("adm_name", "")),
+			"US01.adm", "restart immediately repopulates the restored baseline row")
+	sim.set_player_input(true, false, false, false, false, false, false)
+	sim.step()
+	assert_eq(sim.get_local_player_anim_key(), "anim_idle",
+			"restart repopulates US01 instead of silently retaining default soldier.adm")
+	sim.free()
+
+
+func test_late_spawn_player_resolves_own_adm_before_configured_usegun_pose() -> void:
+	# MissionRuntime resolves per-entity ADMs once after the host player spawn. A
+	# joiner's local L and host-admitted remote players spawn later; they must still
+	# receive US01 rather than retaining the default E_STAND/soldier map. Otherwise
+	# B50 phrase_set 4 cannot select anim_emplaced_5 and silently uses the generic
+	# emplaced pose, visibly placing the body beside the gun.
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	assert_false(md.add_entity(
+			NovaMissionData.KIND_ITEM, 101419,
+			Vector3(2, 0, 0), Vector3.ZERO).is_empty())
+	var object_data := NovaObjectData.new()
+	assert_eq(object_data.open_file(ProjectSettings.globalize_path(
+			"res://../fixtures/3dp/B50Cal/B50Cal.3di")), OK)
+	var sim := NovaSimulation.new()
+	sim.set_item_seat_specs([{
+			"type_id": 1419,
+			"seats": MissionSeatDiagnostics.seat_specs_from_model(object_data),
+			"mount_config_valid": true,
+			"mount_config": 4,
+			"primary_weapon": "WPN_EMPLCD50NA",
+	}])
+	assert_true(sim.load_from_mission_data(md))
+	assert_gt(sim.set_infantry_anim_map(_anim_root(), "soldier.adm"), 0)
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/items.def")), OK)
+	# Reproduce the production ordering bug: the one-time sweep happens before
+	# this player exists.
+	sim.resolve_infantry_adm_ids(_anim_root(), item_db)
+	assert_true(sim.spawn_local_player(Vector3(2, 0, 0), 0.0, 1))
+
+	var weapon_root := NovaResourceRoot.new()
+	assert_eq(weapon_root.set_root_dir(ProjectSettings.globalize_path(
+			"res://../fixtures/def")), OK)
+	assert_eq(sim.load_weapon_table(weapon_root, "weapon.def"), OK)
+	var weapons := NovaWeaponDatabase.new()
+	assert_eq(weapons.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/weapon.def")), OK)
+	sim.set_local_player_weapon(
+			weapons.get_weapon(weapons.find_weapon("WPN_M4AUTO")), {})
+	for _tick in range(120):
+		if int(sim.get_local_player_weapon_state().get("current", -1)) < 2:
+			break
+		sim.step()
+	assert_true(sim.local_player_toggle_mount())
+	sim.step()
+	assert_eq(sim.get_local_player_anim_key(), "anim_emplaced_5",
+			"a late-spawn player receives US01 before phrase_set 4 selects its pose")
+	sim.free()
+
 
 func test_load_from_editor_mission_data() -> void:
 	# The editor-integration path: promote a live NovaMissionData (what the mission editor holds),
@@ -1418,19 +1522,21 @@ func test_local_usegun_aim_articulates_emplaced_weapon_model() -> void:
 	var object_data := NovaObjectData.new()
 	assert_eq(object_data.open_file(ProjectSettings.globalize_path(
 			"res://../fixtures/3dp/B50Cal/B50Cal.3di")), OK)
+	var seat_specs := MissionSeatDiagnostics.seat_specs_from_model(object_data)
+	assert_eq(seat_specs.size(), 1, "B50Cal exposes its authored Usegun seat")
+	var usegun_info: Dictionary = object_data.get_user_point_info(
+			int((seat_specs[0] as Dictionary).get("bone_index", 0)) - 1)
+	var expected_usegun_world := MissionObjectPlacer.entity_transform(
+			Vector3(2, 0, 0), Vector3.ZERO) * Vector3(
+					usegun_info.get("position", Vector3.ZERO))
 	var item_db := NovaItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path(
 			"res://../fixtures/def/items.def")), OK)
 	var sim := NovaSimulation.new()
 	sim.set_item_seat_specs([{
-		"type_id": 1419,
-		"seats": [{
-			"type": 3,
-			"bone_index": 6,
-			"position": Vector3.ZERO,
-			"source_name": "UseGun",
-		}],
-		"primary_weapon": "WPN_EMPLCD50NA",
+			"type_id": 1419,
+			"seats": seat_specs,
+			"primary_weapon": "WPN_EMPLCD50NA",
 	}])
 	assert_true(sim.load_from_mission_data(md))
 	assert_eq(sim.resolve_collision_instances(
@@ -1452,6 +1558,8 @@ func test_local_usegun_aim_articulates_emplaced_weapon_model() -> void:
 	sim.drain_local_player_weapon_events()
 	assert_true(sim.local_player_toggle_mount())
 	sim.step()
+	assert_lt(sim.get_local_player_position().distance_to(expected_usegun_world),
+			0.001, "mounted player origin coincides with the authored Usegun point")
 	for raw in sim.drain_local_player_weapon_events():
 		if String((raw as Dictionary).get(
 				"switch_to_weapon", "")) == "WPN_EMPLCD50NA":
@@ -1475,6 +1583,8 @@ func test_local_usegun_aim_articulates_emplaced_weapon_model() -> void:
 	var yaw_before := sim.get_local_player_yaw_deg()
 	sim.add_local_player_look(100.0, 0.0)
 	sim.step()
+	assert_lt(sim.get_local_player_position().distance_to(expected_usegun_world),
+			0.001, "look yaw cannot move the player off the Usegun point")
 	assert_gt(absf(sim.get_local_player_yaw_deg() - yaw_before), 0.1,
 			"the mounted local player's authoritative yaw changed")
 	assert_ne(int(sim.get_local_player_weapon_state().get(
@@ -1493,6 +1603,8 @@ func test_local_usegun_aim_articulates_emplaced_weapon_model() -> void:
 	var pitch_before := sim.get_local_player_pitch_deg()
 	sim.add_local_player_look(0.0, 100.0)
 	sim.step()
+	assert_lt(sim.get_local_player_position().distance_to(expected_usegun_world),
+			0.001, "look pitch cannot move the player off the Usegun point")
 	assert_gt(absf(sim.get_local_player_pitch_deg() - pitch_before), 0.1,
 			"the mounted local player's authoritative pitch changed")
 	assert_ne(int(sim.get_local_player_weapon_state().get(
