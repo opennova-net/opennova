@@ -337,6 +337,9 @@ private:
 	float weapon_ring_take_length(const char *p_key);
 	// Serve-then-advance play take; returns the served variant index (0 for ringless).
 	int weapon_ring_take_variant(const String &p_key);
+	void install_local_player_weapon(const Dictionary &p_def,
+	                                 const Dictionary &p_clip_seconds,
+	                                 bool p_allow_same_weapon_rebake);
 	uint64_t weapon_fired_serial_ = 0;
 	// Per-shooter tag-2 sequence. Unlike the presentation serial above, this
 	// survives weapon remounts/switches and resets only with the mission/player
@@ -696,11 +699,14 @@ public:
 	// a plain float is accepted as a single-variant convenience). The lengths seed the
 	// per-slot rings and the Anim_InitActions bake consumes them ring-wise: one
 	// serve-then-advance read per 'auto' delay field [orig: @ 0x541fa0;
-	// Anim_GetDurationTicks @ 0x53ee10]. Resets the slot to a fresh idle with a full
-	// magazine (retail bakes a def ONCE globally, so its rings persist across
-	// re-equips; this per-equip reset rides the existing per-equip re-bake shape,
-	// D-WPN-6 family).
+	// Anim_GetDurationTicks @ 0x53ee10]. A normal install is a real mount and
+	// resets the slot to a fresh idle using the authoritative inventory.
 	void set_local_player_weapon(const Dictionary &p_def, const Dictionary &p_clip_seconds);
+	// Render-side late binding of .adm clip lengths for the already-mounted def.
+	// This is the only path allowed to preserve a same-name live action slot and
+	// queued presentation [orig: FP model resolve @ 0x4ded60 is not a mount].
+	void rebake_local_player_weapon(const Dictionary &p_def,
+	                                const Dictionary &p_clip_seconds);
 	void clear_local_player_weapon();
 	// Per-frame trigger state: fire held + edge, raw reload edge (the dispatch
 	// gate runs sim-side) [orig: the binding-149/reload input dispatch,
@@ -1087,8 +1093,8 @@ public:
 	// first, capped at RoundSim::kDebugTrailCap. Covers every resolved outcome
 	// including face-miss fly-ons (the "why didn't that register" case).
 	Dictionary get_round_debug() const;
-	// Per-frame visual snapshot of item-modeled throwables: flying rounds with a
-	// TrcrID model plus placed devices. Entries: {key, item_id, pos (godot),
+	// Per-frame visual snapshot of item-modeled throwables: tracer-cadence flying
+	// rounds with a TrcrID model plus placed devices. Entries: {key, item_id, pos (godot),
 	// rotation_deg (pitch, yaw, roll — placer convention)}; the enemy-team item
 	// swap follows the viewer team [orig: the S2C 0x59 dual TrcrID words +
 	// the spawner's team pick @ 0x4ec79b; world-wac-ai-re §26].

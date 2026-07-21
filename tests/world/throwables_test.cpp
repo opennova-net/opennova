@@ -323,6 +323,14 @@ void test_tracer_item_binding_fallbacks() {
         CHECK(!round.tracer);
         CHECK(round.item_type_id == kItemFrag);
         CHECK(round.motor == ThrowClass::kNade);
+
+        const int tracer_slot = rig.throw_ammo(kAmmoGrenade, Vec3{10, 10, 5}, 0, 0);
+        CHECK(tracer_slot >= 0);
+        const LiveRound &tracer_round =
+            rig.w.round_sim.rounds[size_t(tracer_slot)];
+        CHECK(tracer_round.tracer);
+        CHECK(tracer_round.item_type_id == kItemFrag);
+        CHECK(tracer_round.motor == ThrowClass::kNade);
     }
 }
 

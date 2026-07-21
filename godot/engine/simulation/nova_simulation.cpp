@@ -2028,7 +2028,7 @@ Array NovaSimulation::get_throwable_visuals() const {
 	for (int i = 0; i < opennova::world::RoundSim::kCapacity; ++i) {
 		const opennova::world::LiveRound &r =
 				world_->round_sim.rounds[static_cast<size_t>(i)];
-		if (!r.active || r.item_type_id == 0) continue;
+		if (!r.active || !r.tracer || r.item_type_id == 0) continue;
 		push_entry(i, r.item_type_id, r.pos, r.yaw_bam, r.pitch_bam, r.roll_bam);
 	}
 	uint8_t viewer_team = 0xFF;
@@ -3039,6 +3039,7 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_local_player_anim_phase_ticks"), &NovaSimulation::get_local_player_anim_phase_ticks);
 	ClassDB::bind_method(D_METHOD("get_local_player_aim_overlay"), &NovaSimulation::get_local_player_aim_overlay);
 	ClassDB::bind_method(D_METHOD("set_local_player_weapon", "def", "clip_seconds"), &NovaSimulation::set_local_player_weapon);
+	ClassDB::bind_method(D_METHOD("rebake_local_player_weapon", "def", "clip_seconds"), &NovaSimulation::rebake_local_player_weapon);
 	ClassDB::bind_method(D_METHOD("clear_local_player_weapon"), &NovaSimulation::clear_local_player_weapon);
 	ClassDB::bind_method(D_METHOD("set_local_player_weapon_input", "fire_held", "fire_pressed", "reload_pressed"), &NovaSimulation::set_local_player_weapon_input);
 	ClassDB::bind_method(D_METHOD("request_local_player_scope_toggle"), &NovaSimulation::request_local_player_scope_toggle);
@@ -3876,19 +3877,31 @@ int NovaSimulation::weapon_ring_take_variant(const String &p_key) {
 
 void NovaSimulation::set_local_player_weapon(const Dictionary &p_def,
 		const Dictionary &p_clip_seconds) {
+	install_local_player_weapon(p_def, p_clip_seconds, false);
+}
+
+void NovaSimulation::rebake_local_player_weapon(const Dictionary &p_def,
+		const Dictionary &p_clip_seconds) {
+	install_local_player_weapon(p_def, p_clip_seconds, true);
+}
+
+void NovaSimulation::install_local_player_weapon(const Dictionary &p_def,
+		const Dictionary &p_clip_seconds, bool p_allow_same_weapon_rebake) {
 	using opennova::world::WeaponFsmActionRow;
 	// The FP model resolve re-installs the SAME weapon once its viewmodel (and
 	// .adm clip lengths) finish loading. That resolve is a render-side consumer
 	// in retail with no access to the action slot [orig: the per-frame FP model
 	// resolve @ 0x4ded60 vs the mount's slot state in Player_MountWeaponSlot
-	// @ 0x4dfa40], so a same-name install only REBAKES the def and rings.
+	// @ 0x4dfa40], so an explicitly requested same-name rebake only refreshes
+	// the def and rings.
 	// Resetting the slot here instead destroyed a queued/holstering SWITCHFROM
 	// whenever the late viewmodel install raced a switch request: the completion
 	// never fired, commit_pending_weapon_switch never ran, and the FSM def
 	// desynced from equipped_adm_index (the rifle then fired the previous
 	// weapon's ammo).
 	const String incoming_name = p_def.get("name", String());
-	const bool same_weapon_rebake = weapon_active_ && !weapon_start_in_switchto_ &&
+	const bool same_weapon_rebake = p_allow_same_weapon_rebake &&
+			weapon_active_ && !weapon_start_in_switchto_ &&
 			!incoming_name.is_empty() &&
 			incoming_name.nocasecmp_to(weapon_def_name_) == 0;
 	// A mount is a new presentation epoch: no payload from the previous weapon may
@@ -4742,6 +4755,11 @@ String NovaSimulation::get_local_player_weapon_name() const {
 void NovaSimulation::restart() {
 	if (!loaded_ || !have_baseline_) return;
 	pending_weapon_events_.clear();
+	power_throw_start_tick_ = 0;
+	pending_throw_charge_ = 0;
+	weapon_fire_held_ = false;
+	weapon_fire_pressed_ = false;
+	weapon_reload_pressed_ = false;
 	world_->restore(baseline_); // rewinds registry/vars/env/clock + re-inits systems (incl. AI;
 	                            // WacSystem::on_load also resets its 62-tick accumulator)
 	if (collision_item_db_.is_valid() && collision_placer_.is_valid())

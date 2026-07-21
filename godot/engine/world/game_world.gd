@@ -1192,7 +1192,7 @@ func _setup_local_player_weapon(model) -> void:
 				# and play latches) [orig: the animState slot heads +72;
 				# Anim_GetDurationTicks @0x53ee10 / AnimMap_PlayAnimBySlot @0x40bda0].
 				clip_seconds[k] = skeletal.get_clip_variant_lengths(k)
-	sim.set_local_player_weapon(_local_weapon_dict, clip_seconds)
+	sim.rebake_local_player_weapon(_local_weapon_dict, clip_seconds)
 
 
 ## Per-frame weapon trigger state from the host: fire held + edge and the RAW reload

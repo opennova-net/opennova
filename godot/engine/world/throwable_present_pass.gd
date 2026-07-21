@@ -7,6 +7,8 @@
 ## reconciles model nodes against get_throwable_visuals() each frame.]
 extends RefCounted
 
+const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
+
 var _sim  # NovaSimulation
 var _container: Node3D
 var _placer
@@ -52,10 +54,10 @@ func present() -> void:
 		var node: Node3D = rec.get("node")
 		if node == null or not is_instance_valid(node):
 			continue
-		node.position = entry.get("pos", Vector3.ZERO)
+		var pos: Vector3 = entry.get("pos", Vector3.ZERO)
 		var rot: Vector3 = entry.get("rotation_deg", Vector3.ZERO)
 		# the placer euler convention: rotation_deg = (pitch, MISSION yaw, roll)
-		node.rotation_degrees = Vector3(rot.x, rot.y, rot.z)
+		node.transform = Transform3D(MissionObjectPlacer.bms_to_godot_basis(rot), pos)
 	# release models whose sim state is gone (detonated, converted, removed)
 	for key in _models.keys():
 		if not seen.has(key):

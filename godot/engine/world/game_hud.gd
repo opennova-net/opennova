@@ -396,7 +396,7 @@ func _draw_heat_bar(surface: Vector2) -> void:
 
 # The PowerThrow charge bar at the HUDPOWERBAR rect (x,y,w,h): a wireframe
 # outline, an inset fill proportional to the windup, and the percent text 15
-# design-units above. The fill curve is the witnessed windup shape: full during
+# output pixels above. The fill curve is the witnessed windup shape: full during
 # the first 31 held ticks (the tap window throws at full power), then restarting
 # at 0 and climbing (held-31)/93 to 1. Fill span = (progress_fp16 * w + 0x8000)
 # >> 16, drawn (x+1, y+1)-(x+span, y+h-1); everything in the flat 0xFF800000
@@ -423,8 +423,10 @@ func _draw_power_bar(surface: Vector2) -> void:
 		draw_rect(Rect2(r.position + Vector2.ONE,
 			Vector2(minf(float(span - 1), r.size.x - 2.0), r.size.y - 2.0)), color)
 	if _font != null:
+		var label_pos := design.position + HudLayout.pixel_delta_to_design(
+				Vector2(0, -15), surface)
 		HudText.draw_text(self, _font,
-			Vector2(design.position.x, design.position.y - 15.0), surface,
+			label_pos, surface,
 			"%d%%" % int(progress * 100.0), HudText.half_bright(color))
 
 

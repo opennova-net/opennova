@@ -860,16 +860,28 @@ func test_weapon_event_batch_does_not_cross_lifecycle_boundaries() -> void:
 
 	sim.set_local_player_weapon(def, clips)
 	sim.step()
-	# The FP model resolve re-installs the SAME weapon once its viewmodel loads
-	# (the clip-length late-bind). That is a def rebake, not a lifecycle
-	# boundary: queued presentation — including a racing switch commit/deny —
-	# must survive it, and the live action slot continues untouched.
-	sim.set_local_player_weapon(def, clips)
+	var before_rebake: Dictionary = sim.get_local_player_weapon_state()
+	# The FP model resolve explicitly rebakes the SAME weapon once its viewmodel
+	# loads. Queued presentation and the live action slot survive that late bind.
+	sim.rebake_local_player_weapon(def, clips)
+	var after_rebake: Dictionary = sim.get_local_player_weapon_state()
+	assert_eq(int(after_rebake.get("current", -1)), int(before_rebake.get("current", -2)))
+	assert_eq(int(after_rebake.get("next", -1)), int(before_rebake.get("next", -2)))
+	assert_eq(int(after_rebake.get("play_serial", -1)),
+		int(before_rebake.get("play_serial", -2)))
 	assert_false(sim.drain_local_player_weapon_events().is_empty(),
-		"a same-weapon re-install preserves the queued presentation")
+		"an explicit same-weapon rebake preserves queued presentation")
 	sim.step()
-	# A DIFFERENT weapon is a new presentation epoch: its mount discards the
-	# previous weapon's queued payload.
+	# A real mount is a new epoch even when the def name is unchanged.
+	sim.set_local_player_weapon(def, clips)
+	assert_true(sim.drain_local_player_weapon_events().is_empty(),
+		"a same-name real mount discards the previous epoch's presentation")
+	var remounted: Dictionary = sim.get_local_player_weapon_state()
+	assert_eq(int(remounted.get("current", -1)), 0)
+	assert_eq(int(remounted.get("next", -1)), 0)
+	assert_eq(int(remounted.get("play_serial", -1)), 0)
+	sim.step()
+	# A different-weapon mount has the same epoch boundary.
 	var def_b: Dictionary = def.duplicate(true)
 	def_b["name"] = "WPN_EVENT_LIFECYCLE_B"
 	sim.set_local_player_weapon(def_b, clips)
@@ -884,6 +896,50 @@ func test_weapon_event_batch_does_not_cross_lifecycle_boundaries() -> void:
 	sim.restart()
 	assert_true(sim.drain_local_player_weapon_events().is_empty(),
 		"restart cannot age a pre-rewind event across the logic-tick reset")
+	sim.free()
+
+
+func test_restart_clears_powerthrow_charge_and_input_latches() -> void:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	var def := {
+		"name": "WPN_RESTART_POWERTHROW",
+		"actions": [
+			{"name": "idle", "delaystart": 0, "delayend": 0},
+			{"name": "fire", "delaystart": 0, "delayend": 0},
+			{"name": "recoil", "delaystart": 0, "delayend": 0},
+		],
+		"flags": 1 << 31,
+		"clipsize": 1,
+		"startrounds": 0,
+	}
+	sim.set_local_player_weapon(def, {})
+	sim.step() # advance off tick zero so the idle sentinel cannot mask the windup
+	sim.set_local_player_weapon_input(true, true, false)
+	for _tick in range(5):
+		sim.step()
+	var wound: Dictionary = sim.get_local_player_weapon_state()
+	assert_true(bool(wound.get("windup_active", false)))
+	assert_gt(int(wound.get("windup_held_ticks", 0)), 0)
+
+	sim.restart()
+	var rewound: Dictionary = sim.get_local_player_weapon_state()
+	assert_false(bool(rewound.get("windup_active", true)))
+	assert_eq(int(rewound.get("windup_held_ticks", -1)), 0)
+	var fired_before := int(rewound.get("fired_serial", 0))
+	var rounds_before := int(rewound.get("round_ring_count", 0))
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	sim.step() # stale held input must not recreate the windup
+	assert_false(bool(sim.get_local_player_weapon_state().get("windup_active", true)))
+	sim.set_local_player_weapon_input(false, false, false)
+	for _tick in range(6):
+		sim.step()
+	var settled: Dictionary = sim.get_local_player_weapon_state()
+	assert_eq(int(settled.get("fired_serial", -1)), fired_before)
+	assert_eq(int(settled.get("round_ring_count", -1)), rounds_before)
 	sim.free()
 
 
@@ -919,6 +975,51 @@ func test_armory_reads_and_clears_authoritative_local_loadout() -> void:
 	assert_true(sim.apply_local_player_loadout([], 9), "the all-NONE kit is a valid apply")
 	assert_eq(sim.get_local_player_class(), 9, "NONE still commits the selected class")
 	assert_eq(sim.get_local_player_weapon_name(), "", "NONE clears the equipped AdmDef")
+	sim.free()
+
+
+func test_same_name_armory_accept_refills_the_live_weapon_slot() -> void:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/def")), OK)
+	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
+	var weapons := NovaWeaponDatabase.new()
+	assert_eq(weapons.load_from_resource_root(root, "weapon.def"), OK)
+	var m4_index := weapons.find_weapon("WPN_M4AUTO")
+	assert_gte(m4_index, 0)
+	var m4: Dictionary = weapons.get_weapon(m4_index)
+	assert_true(sim.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 8))
+	sim.set_local_player_weapon(m4, {})
+	sim.step()
+	var full_clip := int(sim.get_local_player_weapon_state().get("clip", -1))
+	sim.set_local_player_weapon_input(false, true, false)
+	sim.step()
+	sim.set_local_player_weapon_input(false, false, false)
+	var spent_clip := int(sim.get_local_player_weapon_state().get("clip", -1))
+	assert_lt(spent_clip, full_clip, "the live M4 spent a round before reopening armory")
+
+	assert_true(sim.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 8))
+	var inventory: Dictionary = sim.get_local_player_inventory()
+	var equipped_combo := int(inventory.get("equipped_combo", -1))
+	var rebuilt_clip := -1
+	for value in inventory.get("slots", []):
+		var slot: Dictionary = value
+		if int(slot.get("combo", -2)) == equipped_combo:
+			rebuilt_clip = int(slot.get("clip", -1))
+			break
+	assert_gt(rebuilt_clip, spent_clip, "ACCEPT rebuilt the same named slot at full clip")
+	sim.set_local_player_weapon(m4, {})
+	var mounted: Dictionary = sim.get_local_player_weapon_state()
+	assert_eq(int(mounted.get("clip", -1)), rebuilt_clip,
+		"same-name real mount reads the rebuilt authoritative inventory")
+	assert_eq(int(mounted.get("current", -1)), 0)
+	assert_eq(int(mounted.get("next", -1)), 0)
+	assert_false(bool(mounted.get("windup_active", true)))
+	assert_false(bool(sim.get_local_player_view().get("scope_engaged", true)))
 	sim.free()
 
 
