@@ -4262,7 +4262,7 @@ FrameFX leg]`. The normal-pass geometry:
 | Blend/fog (additive fog-black vs alpha smoke) | MATCHING (family-level; Godot `disable_fog` stands in for fog-to-black — D-AI-12c) | materials in `fire_present_pass.gd` |
 | B=1 wave anim + 4-wide cross-section + anim UVs | divergent (single-ribbon stand-in; params recorded 25.3) | D-AI-12a |
 | Distortion pass (+0x828 channels) | not ported (witnessed structurally) | D-AI-12b |
-| Round item graphic + TRACER_SCALE/WIDTH channels | not ported (parse landed: `frndlyTrcrID`/`foeTrcrID` in libs/def + the ammo table) | D-AI-12d |
+| Round item graphic + TRACER_SCALE/WIDTH channels | visible TrcrID item model ported (including friendly/enemy fallback and non-tracer suppression); procedural SCALE/WIDTH channels unported | `NovaSimulation::get_throwable_visuals` + `throwable_present_pass.gd`; D-AI-12d |
 | light_move glow | not ported (parse landed; light-pool port pending with the D-AI-8d muzzle glow) | D-AI-12e |
 | NVG laser beam | not ported (witnessed; needs NVG mode) | D-AI-12f |
 
@@ -4270,7 +4270,7 @@ FrameFX leg]`. The normal-pass geometry:
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
-| D-AI-12 | Tracer ribbon residuals: (a) jitter/anim styles (smoke 3/4/5, sniper 9/10, NVG 8) draw the same single camera-facing ribbon as the tracer styles — the witnessed 4-verts-per-point 3-quad cross-section, the GetTickCount wave (+0x81C/+0x820/+0x824 x 0.3/0.2/4e-4), and the animated UVs are unported (params recorded 25.3); (b) the distortion pass (+0x828 styles: rocket/at4/sniper — backbuffer-capture shimmer behind `CEffectEmitterPool_RenderDistortionPass @ 0x5dcb40`) is unported; (c) additive fog-to-black (`SetFogAndBlendMode(dev, 2) @ 0x677740`) approximated by `disable_fog` on the Godot material — an additive streak neither fades nor tints with distance until our fog model lands; (d) the round's visible item model (`frndlyTrcrID`/`foeTrcrID` -> `Entity_InitFromItemDef @ 0x49e550`) and its TRACER_SCALE/TRACER_WIDTH procedural node channels (table `@ 0x83e428`, evaluator in the 0x41bxxx region, unwalked) are unported — parse landed to the ammo table; (e) the `light_move` per-round glow (round+0x1B4) is parsed but not presented (no light-pool port — rides with D-AI-8d); (f) the NVG laser beam (`Entity_RenderNVGLaserBeam @ 0x5c6090`, style 8) waits on an NVG mode; (g) the min-screen-width projection divisor (the `fdiv` operand feeding `flt_7DC69C = 1.83e-8`) is unresolved — ported as 0.0012 x distance; (h) the per-point W jitter uses a local LCG, not the shared effect PRNG (`PRNG_Next16_B @ 0x6130f0` stream unwitnessed) — presentation-only randomness; (i) the style blocks' +8/+0xC words have no witnessed consumer; (j) the POOL drain runs per logic tick in our sim — retail drains per FRAME (`Game_ProcessMainFrame`); identical at 62 Hz presentation, faster evaporation during catch-up bursts | 25.1-25.4 above | the in-flight tracer look (colors/widths/ramp/drain) is the witnessed one; the residuals are secondary dressing, each with its witness recorded |
+| D-AI-12 | Tracer ribbon residuals: (a) jitter/anim styles (smoke 3/4/5, sniper 9/10, NVG 8) draw the same single camera-facing ribbon as the tracer styles — the witnessed 4-verts-per-point 3-quad cross-section, the GetTickCount wave (+0x81C/+0x820/+0x824 x 0.3/0.2/4e-4), and the animated UVs are unported (params recorded 25.3); (b) the distortion pass (+0x828 styles: rocket/at4/sniper — backbuffer-capture shimmer behind `CEffectEmitterPool_RenderDistortionPass @ 0x5dcb40`) is unported; (c) additive fog-to-black (`SetFogAndBlendMode(dev, 2) @ 0x677740`) approximated by `disable_fog` on the Godot material — an additive streak neither fades nor tints with distance until our fog model lands; (d) the visible round item model selected by `frndlyTrcrID`/`foeTrcrID` is ported through `NovaSimulation::get_throwable_visuals` and `throwable_present_pass.gd`, including the retail non-tracer suppression, but its TRACER_SCALE/TRACER_WIDTH procedural node channels (table `@ 0x83e428`, evaluator in the 0x41bxxx region, unwalked) remain unported; (e) the `light_move` per-round glow (round+0x1B4) is parsed but not presented (no light-pool port — rides with D-AI-8d); (f) the NVG laser beam (`Entity_RenderNVGLaserBeam @ 0x5c6090`, style 8) waits on an NVG mode; (g) the min-screen-width projection divisor (the `fdiv` operand feeding `flt_7DC69C = 1.83e-8`) is unresolved — ported as 0.0012 x distance; (h) the per-point W jitter uses a local LCG, not the shared effect PRNG (`PRNG_Next16_B @ 0x6130f0` stream unwitnessed) — presentation-only randomness; (i) the style blocks' +8/+0xC words have no witnessed consumer; (j) the POOL drain runs per logic tick in our sim — retail drains per FRAME (`Game_ProcessMainFrame`); identical at 62 Hz presentation, faster evaporation during catch-up bursts | 25.1-25.4 above | the visible model and core in-flight look are ported; the remaining procedural/dressing residuals each retain their witness |
 
 ### 25.7 IDB write-backs (2026-07-18 session, saved)
 
@@ -4301,7 +4301,8 @@ Entry comments on `@ 0x5db290 / 0x4e64e0 / 0x4e8280 / 0x5db830 / 0x5db3a0 /
 2. The `fdiv` projection operand in the min-width clamp (25.3) — resolve and
    replace the 0.0012 approximation.
 3. The TRACER_SCALE/TRACER_WIDTH node-channel evaluator (the 0x41bxxx undefined
-   region) — define + walk when the round item graphic ports.
+   region) — define + walk; the item graphic now renders without these
+   procedural scale/width channels.
 4. The round+0x2AC spiral-offset writer (the rocket corkscrew source).
 5. The style blocks' +8/+0xC words — find the consumer (possibly the distortion
    or an unwalked LOD path).
@@ -4309,7 +4310,8 @@ Entry comments on `@ 0x5db290 / 0x4e64e0 / 0x4e8280 / 0x5db830 / 0x5db3a0 /
 ## 26. Appendix: throwables — grenades, satchels, claymores, mines, the detonator (engine-research, 2026-07-20)
 
 Reimpl: `libs/world/throwables.{h,cpp}` (motors + placed devices + thinks),
-the `RoundSim` spawn dispatches and useownmove leg (`libs/world/round_sim.{h,cpp}`),
+the `RoundSim` spawn dispatches and witnessed throwable `useownmove` leg
+(`libs/world/round_sim.{h,cpp}`),
 the PowerThrow charge chain (`godot/engine/simulation/nova_simulation.cpp`), the
 class/trait feed (`resolve_item_traits`), and `godot/engine/world/throwable_present_pass.gd`.
 Binary: retail `Jointops.exe` (kong IDB, imagebase 0x400000). ctest `throwables`
@@ -4319,15 +4321,21 @@ Binary: retail `Jointops.exe` (kong IDB, imagebase 0x400000). ctest `throwables`
 
 | Component | Verdict | Evidence |
 |---|---|---|
-| PowerThrow charge (press gate, release curve, speed scale) | MATCHING | 3 citations; ctest `throwables` test_power_throw_charge / test_charge_scales_spawn_speed |
-| Grenade motor (drag/gravity/spin/bounce/water/fuse) | MATCHING (float carriers around the Q16 core, the RoundSim rule) | §26.4; test_grenade_bounce_and_fuse, test_ballistic_expiry_is_silent |
-| Satchel/claymore motors + rest conversion | MATCHING (stick pose geometric, D-THROW-4) | §26.5; test_satchel_places_device |
-| Placed-device think/detonate chain (satchel/claymore/AV mine) | MATCHING | §26.6; test_detonator_chain, test_claymore_cone_trigger, test_avmine_proximity_is_data_dead, test_team_trigger_claymore_rule |
-| Owner-death cleanup | MATCHING (sim-side owner poll stands in for the death hook) | §26.6; test_owner_death_removes_devices |
+| PowerThrow charge (press gate, release curve, speed scale, remote C2S byte) | MATCHING | §26.3; ctest `throwables` test_power_throw_charge / test_charge_scales_spawn_speed; `npruntime_client_fire_test` |
+| PowerThrow HUDPOWERBAR | MATCHING (including 15 output-pixel text offset) | §26.3; D-THROW-5 |
+| Grenade motor (drag/gravity/spin/bounce/water/fuse) | ported core; exact no-water sentinel + lifetime-head/fuse timing fixed in PR #282; query/PRNG/parent-Euler residuals remain | §26.4; D-THROW-1/-2/-4; test_grenade_bounce_and_fuse, test_ballistic_expiry_is_silent |
+| Satchel/claymore motors + rest conversion | ported core; face-normal stick predicate and full placed pose/item/health carry fixed in PR #282 | §26.5; D-THROW-1/-2/-4; test_satchel_places_device |
+| Placed-device think/detonate chain (satchel/claymore/AV mine) | ported core; exact pool-1 order/cadence and wrapped cone angle fixed; LOS/collision residuals remain | §26.6; D-THROW-2/-3/-8/-9; device lifecycle/cone tests |
+| Owner-death cleanup | matching observable, with generation-checked sim-side owner poll standing in for the death hook | §26.6; test_owner_death_removes_devices |
 | items.def class binding (ai_function/move_function) | MATCHING | §26.2; the resolve_item_traits feed |
 | ammo.def `kz_pieslice` HALF-angle | MATCHING (fixed this slice — was full-angle) | def_parse_ammo claymore row |
+| Host flying/placed item-model presentation | ported; procedural TRACER_SCALE/WIDTH remains D-AI-12d, remote consumption remains D-THROW-7 | §25.4/§26.2; `throwable_present_pass.gd` |
 | Landmine items (`lndm`) | witnessed, unported | D-THROW-6 |
-| MP replication of placed devices (S2C 0x59/0x12 encoders) | witnessed + decoded (net-re §5.36), sim consumption unwired | D-THROW-7 |
+| MP round/device presentation (tag 2 + S2C 0x59/0x12) | wire shapes witnessed/decoded; client fold and placed-device host emit are unwired | D-THROW-7; net-re §5.36 |
+
+This is not a blanket MATCHING classification. The audit closes D-THROW-5 and
+D-THROW-9 and fixes the fuse, dry-water, face-normal, cone, and lifecycle bugs
+described below; D-THROW-1..4 and D-THROW-6..8 remain explicit fidelity gaps.
 
 ### 26.2 The class architecture — items.def tags drive everything
 
@@ -4353,6 +4361,13 @@ satchel model and receive the `schl` class bind. A missing friendly TrcrID or
 global NoTracers suppression yields no model and **no motor** — the round
 drifts and only the fuse leg still runs.
 
+The host presentation now carries that selected item id into
+`NovaSimulation::get_throwable_visuals` and `throwable_present_pass.gd`.
+Class binding remains independent of the per-shot tracer-rate decision, while
+the visible flying model is emitted only for an actual tracer, matching the
+retail `@ 0x4ec900` non-tracer model clear. The item's procedural
+TRACER_SCALE/TRACER_WIDTH channels remain D-AI-12d.
+
 Ammo pairs intern by name in `WeaponDef_ResolveAllReferences @ 0x540270`:
 `g_ammo_satchel/satchelboom/claymore/claymoreshrapnel/claymorekillzone/AV_Mine/
 AV_Minekillzone @ 0x24E7DD8/D4/D0/CC/C8/C0/C4`.
@@ -4373,7 +4388,9 @@ AV_Minekillzone @ 0x24E7DD8/D4/D0/CC/C8/C0/C4`.
   `[orig: @ 0x4ec5bb]`; 0 and 255 = unscaled. The byte rides the wire as the
   round event's `slot_byte` (ring+32, flags|0x80 leg, net-re §5.60);
   `NetPacket_DeserializeRoundEvent` restores it into slot+0x5C
-  `[orig: @ 0x42f769/@ 0x42f935]`.
+  `[orig: @ 0x42f769/@ 0x42f935]`. The reimpl's C2S 0x06 authority dispatch
+  now preserves that byte into `RoundSpawnParams::charge`; this does not imply
+  the still-absent client tag-2 presentation fold (D-THROW-7).
 - The HUD windup meter is `HUD_DrawPowerThrowChargeBar @ 0x599830` (renamed
   2026-07-21, ex kong "HUD_DrawWeaponReloadBar" — a misnomer: the function only
   draws this bar). Gates: local player, HUD element enabled, equipped def+8
@@ -4386,15 +4403,21 @@ AV_Minekillzone @ 0x24E7DD8/D4/D0/CC/C8/C0/C4`.
   rects), viewport-scaled: a wireframe outline `(x,y)-(x+w,y+h)`, the fill
   `(x+1,y+1)-(x+span, y+h−1)` with `span = (fill_fp16 × w + 0x8000) >> 16`
   `[orig: @ 0x599964]`, and `"%d%"` percent text at `(x, y−15)` via
-  `HUD_DrawTextLeft_HalfBright @ 0x5804c0` — everything in the flat 0xFF800000
-  half-red `@ 0x840B1C`. Ported: `game_hud.gd _draw_power_bar` off the sim's
-  windup state (closes D-THROW-5).
+  `HUD_DrawTextLeft_HalfBright @ 0x5804c0`. The 15-unit text lift is **15
+  final output pixels**, not 15 design-space pixels; the port converts that
+  delta through `HudLayout.pixel_delta_to_design` before the shared HUD scale.
+  Everything uses the flat 0xFF800000 half-red `@ 0x840B1C`. Ported:
+  `game_hud.gd _draw_power_bar` off the sim's windup state (closes D-THROW-5).
 - The mount zeroes the charge state: `Player_SwitchToWeaponByHandle @ 0x4e0170`
   clears `g_fireChargeStartTick` before mounting — a new mount can never carry
   a stale windup or charge byte (the port mirrors this in the sim's mount
   install; a release the FSM refuses also drops its charge).
 
 ### 26.4 The grenade motor — `Entity_UpdateGrenadePhysics @ 0x443F50` (defined this session)
+
+An environment water height of zero means **no authored water**; the throwable
+motor maps that host sentinel to `INT32_MIN` before all comparisons, rather
+than treating every position at/below world z=0 as submerged.
 
 Per tick, Q16 with +0x8000 rounding throughout: drag (+28) on velX/velY then
 advance; gravity split −167 above water / −55 submerged (submerged also
@@ -4413,13 +4436,16 @@ through persons); face hits reflect via `Physics_ComputeReflectionForce
 @ 0x4e4310` — normal = the CFAC face normal (fallback −v̂), v' = tangential +
 (1−|v·n|)·n̂, rescaled to **0.35 × |v_in|** (flt_7C6FA8). ARM: elapsed ==
 arm_age(+12) → the ammo obj row (tag 4) fires once — the smoke-pour start.
-FUSE: at 2 ticks remaining, above water → runtime flag 0x1000 (detonate at
-expiry: the `Projectile_UpdatePhysics @ 0x4e9d70` head queues
-`WeaponEffect_PushExplosionQueueEntry @ 0x4e83c0` + obj tag 4 **only under
-0x1000** — an expiring ballistic round vanishes silently); submerged →
-immediate detonation with depth-keyed tags (>3 u: 27+25, else 26) and zeroed
-age. The useownmove leg `[orig: @ 0x4e9f06]` runs ONLY the motor (+ proximity
-list): no stock ray, gravity, drag, or collision; noage (0x4000) skips aging.
+FUSE timing follows the retail head exactly: `Projectile_UpdatePhysics`
+tests armed/expired state **before** this tick's age increment and motor; the
+ported motor therefore computes retail elapsed age as stored age−1. At exactly
+2 ticks remaining, above water → runtime flag 0x1000, and the next lifetime
+head queues `WeaponEffect_PushExplosionQueueEntry @ 0x4e83c0` + obj tag 4
+**only under 0x1000** (an ordinary expired round vanishes silently);
+submerged → immediate detonation with depth-keyed tags (>3 u: 27+25, else 26)
+and zeroed age. The useownmove leg `[orig: @ 0x4e9f06]` runs ONLY the motor
+(+ proximity list): no stock ray, gravity, drag, or collision; noage (0x4000)
+skips aging.
 
 ### 26.5 The satchel/claymore motors — `Entity_UpdateSatchelPhysics @ 0x4482A0` / `Entity_UpdateClaymorePhysics @ 0x4472F0` (renamed this session, ex Entity_UpdateShellPhysics / Entity_ProcessFallingPhysics)
 
@@ -4428,10 +4454,13 @@ water (floaty toss) / −167 submerged (sinks fast); satchel angles −= spins,
 claymore yaw −= spin with pitch pinned 0 (stands upright); water entry splash
 tag 11, submerged damp (satchel spins ×0.98 vel ×0.94; claymore velXY ×0.5);
 terrain = full stop (velocity zeroed, no bounce) + surface effect. An object
-hit reflects; a strong hit (reflected z-speed > half the impact speed) STICKS:
-`Entity_OrientToSurfaceNormal @ 0x445fa0` pose (satchel roll −90°, claymore
-keeps yaw), spins zeroed, parent = the hit entity (satchel-on-vehicle rides
-it). REST (height over ground ≤ 0xFF, not rising): +4096 z lift when
+hit reflects; the independent retail stick predicate reads the **face normal**:
+`nz > 0 && nz > 0.5 × hypot(nx, ny)`
+`[orig: schl @ 0x448858..0x4488c4; clym @ 0x447802..0x4478a7]`. Accepted
+faces take the `Entity_OrientToSurfaceNormal @ 0x445fa0` pose (satchel roll
+−90°, claymore keeps yaw), zero spins, and parent to the hit entity
+(satchel-on-vehicle rides it). REST (height over ground ≤ 0xFF, not rising):
++4096 z lift when
 unparented, then on the authority `Entity_CloneFromTemplateByType @ 0x4398a0`
 (pool by items.def type: Person→0, Vehicle/object→1, Building/Decoration→2)
 + `Entity_ConvertRoundToPlacedEntity @ 0x5455B0` (memcpy of the round's first
@@ -4441,6 +4470,13 @@ round expires next tick; placed motor +452 = parent-interp or null) + **S2C
 satchel / 4 claymore); a non-authority round instead clears noage and
 self-expires in 248 ticks.
 
+The audited host mirror now carries the complete placed pose, selected TrcrID
+item, item-def health/armor, owner/team/ammo/think data, and parent link into
+the pool-1 entity. Device, owner, and parent references retain registry
+generation ids so a recycled handle cannot be mistaken for the original
+object. Parent follow updates the registry pose and yaw; exact full-Euler
+interpolation remains D-THROW-4.
+
 ### 26.6 The placed-device think chain
 
 `Entity_UpdatePool1Slot @ 0x4b8dd0` (defined this session) per pool-1 entity
@@ -4448,9 +4484,14 @@ per tick: +0x144 removal countdown → `Server_RemoveEntityAndNotify @ 0x50a270`
 at 0; remaining age (+684) −1/tick; at ≤ 0 → `Entity_BuildProximityList` +
 **deathCallback(entity, 0, 0) every tick**. The clone kept the round's un-aged
 +684 (noage), so **the leftover ammo max_age IS the arm delay** (satchel/
-claymore 1 s). Item pools think staggered: pool 2 every 8 ticks (age −8), pool
-3 every 64 `[orig: Entity_UpdateAllEntities @ 0x4c2100 loops @ 0x4c2288 /
-@ 0x4c2340]`.
+claymore 1 s). Ported devices are pool 1 and therefore decrement exactly once
+per tick; the pool-2 every-8 / pool-3 every-64 cadence belongs to other item
+pools (including the unported `lndm` scope), not these devices
+`[orig: Entity_UpdateAllEntities @ 0x4c2100 loops @ 0x4c2288 / @ 0x4c2340]`.
+The production world walks this pool-1 device pass before projectiles, so a
+newly converted charge does not lose an arm-delay tick and shrapnel spawned by
+a device think can fly later in the same frame. Per-tick throwable event rows
+are cleared at the start of that authoritative pass.
 
 The thinks (renamed this session):
 - `Entity_SatchelThink @ 0x443670` (ex Entity_HandleInfantryDeath): authority,
@@ -4475,8 +4516,11 @@ The thinks (renamed this session):
 
 The cone tests: eye = device + 0.3 u; candidate gates active/alive/controller,
 team ≠ device team OR the `TeamTriggerClaymore` host rule (dword_24D1E34 &
-0x8000, admin set `@ 0x405f16`); 3D distance ≤ ammo kz_minradius(+52); 64-bit
-|(−Yaw) − atan2(dy,dx)| ≤ kz_pieslice(+60); LOS `Physics_RaycastSegment
+0x8000, admin set `@ 0x405f16`); production host creation copies
+`HostConfig.config.mp_attributes & 0x8000` into that sim rule. 3D distance ≤
+ammo kz_minradius(+52);
+32-bit-wrapped `abs(bearing − Yaw)` ≤ kz_pieslice(+60), including the signed
+absolute-value wrap at the BAM seam; LOS `Physics_RaycastSegment
 @ 0x415550` result 1..2. The vehicle variant adds def kind(+92) == 1, skips
 the device's own parent, and requires |speed(+0x29C)| ≥ 3276 (0.05 u/t —
 parked vehicles never trigger). **`kz_pieslice` stores the HALF-angle**:
@@ -4522,11 +4566,11 @@ death hook).
 | D-THROW-2 | world-local PRNG streams (the retail generator shape) | shared globals @ 0x31BFBB0/B8 | bounce kicks / fan angles distribution-faithful, not sequence-identical (the destruction-port precedent) |
 | D-THROW-3 | device LOS = the terrain leg (`los_terrain_blocked`) | `Physics_RaycastSegment @ 0x415550` (terrain + sectors) | a claymore can see a target through a building wall until the sector leg ports (the D-AI-7 stand-in) |
 | D-THROW-4 | stick pose derived geometrically from the face normal; parent-follow = translation + yaw orbit | `Entity_OrientToSurfaceNormal @ 0x445fa0` exact euler decomposition; `Entity_InterpolateFromParentDelta @ 0x4a8d60` full euler | presentation-only pose deltas on steep faces / pitching vehicles; the cone axis (yaw) is exact |
-| D-THROW-5 | CLOSED 2026-07-21: the charge bar is ported (`game_hud.gd _draw_power_bar` at the hudpos HUDPOWERBAR x,y,w,h rect, witnessed fill curve + percent text + 0xFF800000 half-red) | `HUD_DrawPowerThrowChargeBar @ 0x599830` (ex "HUD_DrawWeaponReloadBar" misnomer, renamed) | §26.3 windup meter entry; throwable_repro_test windup-state pin |
+| D-THROW-5 | CLOSED 2026-07-21: the charge bar is ported (`game_hud.gd _draw_power_bar` at the hudpos HUDPOWERBAR x,y,w,h rect, witnessed fill curve + percent text at an exact 15-output-pixel lift + 0xFF800000 half-red) | `HUD_DrawPowerThrowChargeBar @ 0x599830` (ex "HUD_DrawWeaponReloadBar" misnomer, renamed) | §26.3 windup meter entry; throwable_repro_test windup-state pin |
 | D-THROW-6 | landmine items (`lndm`) unported | `Entity_LandmineThink @ 0x441A40` witnessed in full | the def wiring for ammo slots +692/+696 (`SMALLLANDMINE`/`LARGELANDMINE` names) is unwitnessed; no lndm items found in JO:CA missions so far |
-| D-THROW-7 | placed devices SP/listen-host only; no 0x59/0x12 emit into np dispatch | S2C 0x59 (net-re §5.36) + 0x12 removal | remote clients see the thrown ROUND (ring fan-out, charge in slot_byte) but not the persisted device swap; MP wire wiring is the follow-up |
-| D-THROW-8 | placed devices collide via the 0.5 u bound-sphere fallback | the item model's CFAC via the collision instance | shootable everywhere; face-accurate hits once hosts register device graphics |
-| D-THROW-9 | device think delay ticks at 62 Hz from placement | pool-1 age −1/tick, pool-2/3 items stagger −8/−64 | equivalent for pool-1 devices; the staggered item cadences apply only to lndm (unported) |
+| D-THROW-7 | clients consume neither decoded tag-2 round events nor the placed-device 0x59/0x12 path; the host also emits no 0x59/0x12 device lifecycle | retail re-simulates tag-2 rounds, then applies S2C 0x59 (net-re §5.36) + 0x12 removal | remote clients see neither the flying throwable nor its persisted-device swap; codec coverage is not runtime consumption |
+| D-THROW-8 | placed devices collide via the 0.5 u bound-sphere fallback | the item model's CFAC via the collision instance | visible graphics are hosted, but collision remains spherical; register the deployed model's CFAC for face-accurate hits |
+| D-THROW-9 | CLOSED: ported devices are pool 1, run before projectiles, and decrement arm delay once per tick | pool-1 age −1/tick; the pool-2/3 −8/−64 cadence is outside the ported-device scope | no divergence for satchel/claymore/AV-mine devices; unported lndm cadence remains under D-THROW-6 |
 
 ### 26.9 Open follow-ups
 

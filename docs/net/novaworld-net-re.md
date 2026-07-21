@@ -3249,6 +3249,12 @@ The friend/foe item pair lets one deployable look different to each side, select
 flag). [orig: `NapiNPClientMsg_0x059 @ 0x4228E0` → `Entity_SpawnOrUpdateFromSlotPacket @ 0x546770`].
 **Witness:** probe3_again ×12 — a `Rifle-sized Crate` (`itemId=0x0362`) dropped by player slot 5 at world
 `(53.5, -27.9, 11.6)`, `parent=none`; byte-exact full-consume via `decode_deployed_item_spawn`.
+That is **codec coverage, not production client consumption**: the reimpl
+`NetClientView` does not fold decoded 0x59 rows into live placed entities,
+and the throwable host path emits neither 0x59 spawn nor 0x12 removal. Together
+with the absent tag-2 round-event → client `RoundSim` fold, remote clients see
+neither the flying throwable nor its persisted-device replacement
+(D-THROW-7).
 
 **S2C `0x44` — entity-routed sub-packet.** A 5-B sub-header `[u16 field0][i16 netId][u8 subtype]` then a
 class-dependent body the dispatcher routes to the target entity's per-class serialize callback (`entity
@@ -5488,7 +5494,9 @@ visual (effects, decals, sound).
 `Projectile_UpdatePhysics @ 0x4E9D70` (ammo def = `g_ammoDefTable[276·idx]`, idx at
 projectile+620, lifetime at +684). Flag 2 `ignore` only ages the round; flag 0x2000
 `useownmove` dispatches an ammo-specific movement callback and skips the stock ballistic
-ray/gravity/drag path. Before an ordinary sweep, a strictly submerged round below
+ray/gravity/drag path. The witnessed `nade`/`schl`/`clym` callbacks are now ported
+through the items.def class binding (§26 / correspondence §5.8); other callback/guidance
+families remain open. Before an ordinary sweep, a strictly submerged round below
 0x4000 Q16 speed is retired. Exact-zero velocity is another special leaf: no movement or
 ray, `vz -= 167` even for NoGravity, and no drag. Otherwise the tick sweeps with the OLD
 velocity through terrain, water (`Projectile_CheckWaterIntersection @ 0x4E59D0`), static
@@ -5719,8 +5727,10 @@ RoundSim now carries the recovered ordinary force order around that query. Each 
 float position/velocity is converted to Q16 for the tick; the nonzero sweep uses the old
 velocity, a consumed hit gets no post-sweep force, and a miss commits its fixed endpoint
 before gravity and `Entity_ApplyDragAndBounceForce` update the next-tick velocity. The
-exact-zero, submerged-slow, Ignore, UseOwnMove, NoGravity, dry/wet drag, overshoot,
-bin-1219, and deterministic below-stable branches are pinned by `projectile_combat`.
+exact-zero, submerged-slow, Ignore, the UseOwnMove dispatch, NoGravity, dry/wet drag,
+overshoot, bin-1219, and deterministic below-stable branches are pinned by
+`projectile_combat`; the throwable motor bodies and exact fuse-head timing are pinned
+separately by `throwables`.
 
 Damage consequences are no longer organic-only. RoundSim implements the arming/dud
 substitution as a live logical child rather than an impact-row-only swap: an early entity
@@ -5740,8 +5750,9 @@ returns 2000 before zone/class/min/max but still passes through the downstream a
 occupant, remaining-health, and NoDie gates.
 
 Remaining data/integration gaps are explicit: threshold-crossing `tumble_error` still
-needs the retail PRNG and local frame; `useownmove` needs its ammo-specific callbacks and
-guidance; `Projectile_ApplyDragDeceleration` still needs the `armor_density` impact-energy
+needs the retail PRNG and local frame; non-throwable `useownmove` classes still need their
+ammo-specific callbacks/guidance (the witnessed grenade/satchel/claymore motors are
+ported under D-THROW); `Projectile_ApplyDragDeceleration` still needs the `armor_density` impact-energy
 path; explosive/AoE, bounce, and shell physics remain separate; production animated
 organic section matrices are not yet published, so persons can use the bounded torso
 fallback; and `LiveRound` still exposes float position/velocity carriers around the Q16
@@ -5783,8 +5794,10 @@ resolution (position, normalized direction, tag) →
 (`world/ammo_table.h kImpactEffectTagNames`) → `game_world._route_round_impacts`
 destructively drains each row and presents both its generic World-domain particle transient
 and 3D soundset, retaining production tick/order and catch-up age. A joiner still does not
-feed decoded S2C tag-2 round events into a presentation `RoundSim` (D-WPN-8), so the
-impact route is currently host/SP-only. Three ledger rows record the audit:
+feed decoded S2C tag-2 round events into a presentation `RoundSim` (D-WPN-8 /
+D-THROW-7), so the impact route and flying throwable item models are currently
+host/SP-only; deployed throwables additionally lack the 0x59/0x12 runtime path
+(§5.36). Three ledger rows record the audit:
 **D-WPN-14 is resolved as a false reading** (ballistic arrival timing already matches),
 **D-WPN-15** carries selection legs:
 charmap sampler + `.TIL` overrides unported → terrain always takes the retail no-map dirt
