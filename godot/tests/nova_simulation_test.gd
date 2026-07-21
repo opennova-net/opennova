@@ -537,8 +537,9 @@ func test_local_fire_spawns_the_authoritative_round_and_impact() -> void:
 
 func test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun() -> void:
 	# Exact player report: the target rendered in a rotated UseGun seat must keep
-	# its authored COBJ sections under the same entity basis, so a local-owned
-	# round through a visible section can damage it.
+	# its authored COBJ sections under the carried body basis while its look yaw
+	# remains independent, so a local-owned round through a visible section can
+	# damage it.
 	var md := NovaMissionData.new()
 	assert_eq(md.create_default(), OK)
 	var reference_gun := md.add_entity(
@@ -569,6 +570,7 @@ func test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun() -> void:
 				"wp_number", int((pair[1] as Dictionary)["bms_id"])))
 
 	var sim := NovaSimulation.new()
+	sim.enable_listen_server(true)
 	sim.set_item_seat_specs([{
 		"type_id": 1294,
 		"seats": [{"type": 3, "position": Vector3.ZERO, "yaw_offset": 0}],
@@ -590,7 +592,7 @@ func test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun() -> void:
 				"anim_idle": "BINOC.bad",
 				"anim_emplaced": "BINOC.bad",
 			}, data.get_bone_origins(), data.get_bone_parents()))
-	assert_eq(sim.resolve_collision_instances(
+	assert_gte(sim.resolve_collision_instances(
 			item_db, SkeletalDataPlacerStub.new(data, skeletal)), 2,
 			"precondition: both enemies use authored posed COBJ collision")
 	var reference_card: Dictionary = sim.get_entity_debug(0)
@@ -606,6 +608,33 @@ func test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun() -> void:
 	assert_eq(root.set_root_dir(
 			ProjectSettings.globalize_path("res://../fixtures/def")), OK)
 	assert_eq(sim.load_ammo_table(root, "ammo.def"), OK)
+	# Advance one authoritative frame so collision and the decoded presentation
+	# snapshot expose the same mounted body pose.
+	sim.step()
+	var snapshot := sim.get_present_snapshot()
+	var stride := sim.get_present_stride()
+	var reference_row_base := -1
+	var rotated_row_base := -1
+	for record in range(snapshot.size() / stride):
+		var base := record * stride
+		if int(snapshot[base + NovaSimulation.PF_KIND]) != NovaMissionData.KIND_ORGANIC:
+			continue
+		var mission_index := int(snapshot[base + NovaSimulation.PF_INDEX])
+		if mission_index == int(reference_enemy["index"]):
+			reference_row_base = base
+		elif mission_index == int(rotated_enemy["index"]):
+			rotated_row_base = base
+	assert_gte(reference_row_base, 0,
+			"the reference gunner reached the decoded presentation")
+	assert_gte(rotated_row_base, 0,
+			"the rotated gunner reached the decoded presentation")
+	if reference_row_base < 0 or rotated_row_base < 0:
+		sim.free()
+		return
+	assert_eq(int(snapshot[reference_row_base +
+			NovaSimulation.PF_AIM_OVERLAY_VALID]), 1)
+	assert_eq(int(snapshot[rotated_row_base +
+			NovaSimulation.PF_AIM_OVERLAY_VALID]), 1)
 	var sections: Array = sim.get_hitbox_debug().get("organics", [])
 	var reference_by_section := {}
 	var rotated_by_section := {}
@@ -622,15 +651,25 @@ func test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun() -> void:
 
 	var reference_pos: Vector3 = reference_card.get("position", Vector3.ZERO)
 	var rotated_pos: Vector3 = rotated_card.get("position", Vector3.ZERO)
-	var reference_yaw := float(reference_card.get("yaw_deg", 0.0))
-	var rotated_yaw := float(rotated_card.get("yaw_deg", 0.0))
+	# PF_YAW_DEG / debug yaw is the gunner's independent look. The final body
+	# field is the basis PresentAimOverlay actually applies to the rendered model
+	# and the same body class build_section_matrices uses for posed collision.
+	var reference_body_yaw := snapshot[reference_row_base +
+			NovaSimulation.PF_AIM_BODY_YAW_DEG]
+	var rotated_body_yaw := snapshot[rotated_row_base +
+			NovaSimulation.PF_AIM_BODY_YAW_DEG]
 	var relative_basis := MissionObjectPlacer.bms_to_godot_basis(
-			Vector3(0, rotated_yaw, 0)) * MissionObjectPlacer.bms_to_godot_basis(
-			Vector3(0, reference_yaw, 0)).inverse()
+			Vector3(0, rotated_body_yaw, 0)) * MissionObjectPlacer.bms_to_godot_basis(
+			Vector3(0, reference_body_yaw, 0)).inverse()
 	var selected_section := -1
 	var selected_score := -1.0
-	for section_value in reference_by_section.keys():
+	# Hips, thighs, calves, and feet are the body/leg overlay classes. Their
+	# mounted yaw is carried by the seat even when the two gunners independently
+	# aim their upper bodies after the authoritative step.
+	for section_value in [0, 7, 8, 11, 12, 17, 18]:
 		var section := int(section_value)
+		if not reference_by_section.has(section):
+			continue
 		var row: Dictionary = reference_by_section[section]
 		var offset: Vector3 = row.get("pos", Vector3.ZERO) - reference_pos
 		var radius := maxf(float(row.get("radius", 0.0)), 0.001)
@@ -649,7 +688,7 @@ func test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun() -> void:
 			rotated_by_section[selected_section] as Dictionary).get(
 					"pos", Vector3.ZERO)
 	assert_lt(collision_center.distance_to(expected_center), 0.01,
-			"posed collision follows the mounted entity's rendered yaw")
+			"posed collision follows the mounted entity's rendered body yaw")
 
 	var radial := expected_center - rotated_pos
 	radial.y = 0.0

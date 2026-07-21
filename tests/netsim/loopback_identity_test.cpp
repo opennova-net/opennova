@@ -453,11 +453,14 @@ bool run_mounted_infantry_pose_fields_round_trip() {
 	                    wire->infantry.pos_y_compressed == 0 &&
 	                    wire->infantry.pos_z_compressed == 0,
 	            "mounted infantry position is carrier-local")) return false;
-	if (!expect((wire->infantry.flags_byte & 0x40u) != 0 &&
-	                    wire->infantry.pitch_byte == 0x20 &&
+	// UseGun is not a generic vehicle slot: retail clears 0xA000 but does not
+	// set entity Flags 0x40. [orig: Entity_AttachToUseGunSlot @0x546c5c]
+	if (!expect((wire->infantry.flags_byte & 0x40u) == 0,
+	            "UseGun infantry leaves the generic vehicle-seat flag clear")) return false;
+	if (!expect(wire->infantry.pitch_byte == 0x20 &&
 	                    wire->infantry.aim_yaw_byte == 0xF0 &&
 	                    wire->infantry.anim_byte == 47,
-	            "mounted infantry carries witnessed flags, aim and animation bytes")) return false;
+	            "mounted infantry carries witnessed aim and animation bytes")) return false;
 
 	// Seed the carrier through its existing pool-1 spawn before applying the local
 	// infantry sample, matching a real client that has completed load sync.
