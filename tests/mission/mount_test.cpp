@@ -600,6 +600,8 @@ int main() {
         constexpr int32_t kSeatHeading = 763549696;
         constexpr int32_t kSeatPitch = -143165577;
         constexpr int32_t kSeatRoll = 202817900;
+        const int32_t kRequestHeading =
+                world::bam_heading_from_mission_yaw_deg(26.0);
         const int32_t kLookHeading = world::bam_heading_from_mission_yaw_deg(80.0);
 
         auto wp = std::make_unique<World>();
@@ -629,12 +631,14 @@ int main() {
         ae->roll = 0x23456789;
 
         CHECK(w.commands.mount(100, 200));
+        CHECK(ae->heading == kRequestHeading); // request pre-snap, before live look resumes
+        ae->heading = kLookHeading;            // first post-attach NPC look update
         CHECK(ai.pose_if_mounted(*ae, w));
         const Entity *occ = w.registry.get(sh);
         CHECK(occ != nullptr);
-        // UseGun attachment restores the organic's independent look after carrying
-        // the body frame. With no aim solution yet, the look remains unchanged.
-        // [orig: Entity_AttachToUseGunSlot save/restore @0x546416..0x546664]
+        // After Entity_RequestVehicleAttach establishes the seat base, later UseGun
+        // look updates remain independent while the body stays in the carried frame.
+        // [orig: request pre-snap @0x4364a0; UseGun save/restore @0x546416..0x546664]
         CHECK(occ->yaw == 80);
         CHECK(occ->pitch == -12);
         CHECK(occ->roll == 17);
@@ -656,6 +660,8 @@ int main() {
         constexpr int32_t kSeatHeading = 763549696;
         constexpr int32_t kSeatPitch = -143165577;
         constexpr int32_t kSeatRoll = 202817900;
+        const int32_t request_heading =
+                world::bam_heading_from_mission_yaw_deg(26.0);
         const int32_t look_heading = world::bam_heading_from_mission_yaw_deg(137.25);
         constexpr int32_t kLookPitch = 12345678;
 
@@ -688,6 +694,9 @@ int main() {
         ae->roll = 0x23456789;
 
         CHECK(w.commands.mount(100, 200));
+        CHECK(ae->heading == request_heading);
+        CHECK(ae->inf.target_heading == request_heading);
+        ae->inf.target_heading = look_heading; // first post-attach mouse look
         CHECK(ai.pose_if_mounted(*ae, w));
         const Entity *occ = w.registry.get(sh);
         CHECK(occ != nullptr);

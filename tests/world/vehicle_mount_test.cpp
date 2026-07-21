@@ -92,6 +92,62 @@ struct Rig {
     Entity &player() { return *w.registry.get(player_h); }
 };
 
+// Entity_RequestVehicleAttach pre-snaps the requester's Yaw to the chosen seat
+// before the authority applies the relationship. UseGun subtracts its authored
+// offset. Our split local-player body must update target_heading too; otherwise
+// pose_if_mounted immediately restores the pre-attach look and swings the gun/body
+// overlay away from the authored neutral pose.
+// [orig: Entity_RequestVehicleAttach @0x4364a0, UseGun @0x43656c]
+void test_usegun_attach_presnaps_local_look() {
+    World w;
+    AiSystem ai;
+    w.ai = &ai;
+    w.registry.configure_pool(0, 4);
+    w.registry.configure_pool(1, 4);
+
+    Entity gun;
+    gun.kind = EntityKind::Item;
+    gun.health = 100;
+    gun.alive = true;
+    gun.yaw = 35;
+    Seat usegun;
+    usegun.type = SeatType::Gunner;
+    usegun.bone_index = 6;
+    usegun.source_name = "UseGun";
+    usegun.yaw_offset = 12;
+    gun.seats.push_back(usegun);
+    const EntityHandle gun_h = w.registry.spawn(1, gun);
+
+    Entity player;
+    player.kind = EntityKind::Organic;
+    player.player_class = 8;
+    player.health = 100;
+    player.alive = true;
+    const EntityHandle player_h = w.registry.spawn(0, player);
+    w.cached.local_player = player_h;
+    const int ai_index = ai.attach(player_h);
+    AiEntity &body = *ai.at(ai_index);
+    body.health = 100;
+    body.inf.active = true;
+    body.inf.is_local_player = true;
+    body.heading = bam_heading_from_mission_yaw_deg(160.0);
+    body.inf.target_heading = body.heading;
+    body.inf.look_pitch = 0x12345678;
+
+    CHECK(entity_process_vehicle_attach(w, player_h, gun_h, 6));
+    const int16_t expected_yaw = 23; // vehicle yaw 35 - UseGun offset 12
+    const int32_t expected_heading =
+            bam_heading_from_mission_yaw_deg(expected_yaw);
+    CHECK(w.registry.get(player_h)->yaw == expected_yaw);
+    CHECK(body.heading == expected_heading);
+    CHECK(body.inf.target_heading == expected_heading);
+    CHECK(body.inf.look_pitch == 0x12345678); // request pre-snap is yaw-only
+
+    CHECK(ai.pose_if_mounted(body, w));
+    CHECK(body.heading == expected_heading);
+    CHECK(body.inf.body_heading == (90 - expected_yaw) * 11930464);
+}
+
 // The nearest-seat toggle: a free seat within the 4.0 u horizontal gate attaches; out of
 // range does nothing. [orig: @0x435d50 gate @0x436123; @0x436950]
 void test_toggle_nearest_seat() {
@@ -790,6 +846,7 @@ void test_vehicle_hull_stops_at_building() {
 }
 
 int main() {
+    test_usegun_attach_presnaps_local_look();
     test_toggle_nearest_seat();
     test_toggle_deck_best_seat();
     test_toggle_dismount_and_swap();

@@ -212,6 +212,14 @@ void vehicle_release_use_gun_slot(Entity &occupant, Entity *vehicle);
 // primary-occupant claim above).
 bool vehicle_has_valid_control_occupant(const World &world, const Entity &vehicle);
 
+// Entity_RequestVehicleAttach snaps the requester yaw to the chosen seat before
+// authority applies the relationship. Keep the registry Entity and our split
+// AiEntity/local-player look target coherent so the first mounted tick cannot
+// restore the pre-attach look. Pitch is deliberately untouched.
+// [orig: Entity_RequestVehicleAttach @0x4364a0; UseGun yaw @0x43656c]
+void presnap_vehicle_attach_heading(World &world, Entity &occupant,
+                                    const Entity &vehicle, const Seat &seat);
+
 // Snap a mounted occupant onto its seat: occ.position = vehicle.position +
 // rotate(seat.seat_local, -vehicle.yaw); a Gunner faces vehicle.yaw - seat.yaw_offset,
 // others face vehicle.yaw + seat.yaw_offset. Pure geometry (no AI), shared by

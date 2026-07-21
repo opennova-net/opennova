@@ -5,6 +5,8 @@
 #include <utility>
 #include <vector>
 
+#include "world/angle.h"
+
 #include "world/ai.h" // AiSystem / AiEntity / ai_apply_command — the AI-change command target
 
 namespace opennova::world {
@@ -142,6 +144,25 @@ bool seat_allowed_for_mode(SeatType type, SeatSelectionMode mode) {
         default:
             return true;
     }
+}
+
+void presnap_vehicle_attach_heading(World &world, Entity &occupant,
+                                    const Entity &vehicle, const Seat &seat) {
+    const int16_t seat_yaw = seat.type == SeatType::Gunner
+            ? static_cast<int16_t>(vehicle.yaw - seat.yaw_offset)
+            : static_cast<int16_t>(vehicle.yaw + seat.yaw_offset);
+    occupant.yaw = seat_yaw;
+    if (world.ai == nullptr) return;
+    AiEntity *body = world.ai->for_handle(occupant.handle);
+    if (body == nullptr) return;
+
+    const int32_t seat_heading =
+            bam_heading_from_mission_yaw_deg(static_cast<double>(seat_yaw));
+    body->heading = seat_heading;
+    // Retail has one entity Yaw. OpenNova separates the local input-owned look
+    // target from the render heading, so both must receive the same attach snap.
+    if (body->inf.is_local_player)
+        body->inf.target_heading = seat_heading;
 }
 
 void pose_mounted_occupant(Entity &occ, const Entity &vehicle, const Seat &seat) {
@@ -471,6 +492,7 @@ bool EntityCommands::mount(uint16_t occupant_ssn, uint16_t target_ssn, SeatSelec
     const int seat_idx = find_best_seat(*tgt, oh, mode);
     if (seat_idx < 0) return false;
     Seat &s = tgt->seats[seat_idx];
+    presnap_vehicle_attach_heading(world_, *occ, *tgt, s);
     s.occupant = oh;                                       // [orig: vehicle[400+2*slot] = handle]
     occ->mount_target = th;                                // [orig: occupant+364]
     occ->mount_target_net_id = tgt->net_id;

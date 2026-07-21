@@ -70,7 +70,8 @@ controller(brain[2])+16 phase += brain[7]/tick, thresholds 372/744, workZ = grou
 | `player_toggle_vehicle_mount` | `Entity_ToggleVehicleMount` (+ `Entity_TryEnterNearestVehicle`) | 0x436950 / 0x4368c0 | §23.1 witness; ctest `vehicle_mount` | **matching** w/ D-AI-11 (weapon gate at the sim binding) |
 | `find_nearest_free_seat` | `Entity_FindNearestSeatOrArmory` (both legs) | 0x435d50 | §23.1 — 4.0 u gate, score `horiz + d3/512`, enemy-occupant reject, LOS-last; the armory leg (searchMode 1, seatType 4) landed with the attach labels (hud-re.md) | **matching** w/ D-AI-11 a/b |
 | `EntityCommands::find_best_seat` | `Entity_FindBestSeatSlot` | 0x4351f0 | §23.1 weights re-verified (ctrl 0x2000 < gun 0x20000 < sitex 0x200000) | **matching** (child walk = D-AI-11 g) |
-| `entity_process_vehicle_attach` yaw pre-snap | `Entity_RequestVehicleAttach` | 0x4364a0 | §23.1 (authority direct-apply; UseGun yaw = veh.Yaw − stored offset) | matching-core (pre-snap unmodeled — the pose overwrites next tick) |
+| `presnap_vehicle_attach_heading` (both attach entry points) | `Entity_RequestVehicleAttach` | 0x4364a0 | §23.1 (pre-relationship snap; UseGun yaw = veh.Yaw − stored offset); ctest `vehicle_mount` | **matching for UseGun; matching-core with §9.2.5 for moving generic seats** |
+| `NovaSimulation::sync_local_mounted_input_heading` | no separate retail seam (one input-owned entity Yaw) | n/a | §23.1/§26.5; asset-backed B50 GUT | **matching adapter** |
 | `EntityCommands::local_player_attached_to_ssn` | `Entity_IsLocalPlayerSeatedOnSsn` (renamed) | 0x4f10d0 | §23.2; ctest `vehicle_mount` | **matching** |
 | `EntityCommands::local_player_standing_on_ssn` | `Entity_IsLocalPlayerStandingOnSsn` (renamed) | 0x4f1260 | §23.2 | **matching** (persistence nuance D-AI-11 h) |
 | `EntityCommands::local_player_driving_ssn` | `Entity_IsLocalPlayerDrivingSsn` (renamed) | 0x4f1150 | §23.2 | **matching** |
@@ -689,6 +690,16 @@ preserves unknown bits verbatim (merge-on-write), like event flags.
 Shipped: `Entity.seats` + occupant refs riding the registry value-copy (`World::Snapshot` ⇒ Play→Stop
 rewinds mounts for free); `EntityCommands::{find_best_seat, mount, mount_boarding_command,
 mount_best, dismount, find_mounted_on}` mirroring 0x4351f0/0x4f70f0/0x4355f0/0x4359f0;
+both the command mount and authoritative attach-apply paths run `presnap_vehicle_attach_heading`
+before writing the relationship. The request-time seat yaw is copied into `Entity.yaw` and the
+occupant's `AiEntity.heading`; for the local player it also initializes
+`InfantryState.target_heading`. `NovaSimulation` owns an additional host-only
+`PlayerInput.look_heading` latch that retail does not need because its input and entity yaw are one
+state. `sync_local_mounted_input_heading` mirrors the snapped local target into that latch immediately
+after a successful mount toggle and after local/host logic ticks, before the next
+`apply_player_input_pre_tick` can restore the pre-attach look. Both layers are yaw-only; pitch remains
+player-owned and deliberately untouched. The joiner attach-confirmation wire leg remains unported
+(D-AI-11), so the defensive client-tick call does not claim that path complete.
 `pose_mounted_occupant` (occ.pos = veh.pos + rotate(seat_local, veh.yaw), gunner yaw = veh.yaw −
 yaw_offset); `AiSystem::pose_if_mounted` captures that seat frame before the local LOOK mirror mutates
 `Entity.yaw`, synchronizes `body_heading`, both `leg_yaw`/`leg_target` chains, `body_pitch`,
@@ -727,7 +738,8 @@ the former failure. Deviations (NOT silently absorbed):
    driver-lean 107–110 variants remain open.
 5. **Seat-local pose stand-in** — seat_local/yaw_offset come from host userpoints when available, but
    the true per-tick bone transform (`Entity_GetBoneTransformAndOrientation`) is still deferred. This
-   is the known suspect when a rider attaches to the right logical seat but appears too far forward.
+   remains distinct from the now-matching request-time yaw pre-snap and is the known suspect when a
+   rider attaches to the right logical seat but appears too far forward or fails to follow a moving bone.
 
 ## 10. Appendix: coordinate frames + terrain grounding (2026-06-08)
 
@@ -3524,6 +3536,18 @@ from the seat bone (UseGun seats: `vehicle->Yaw - (HIWORD(SpawnOrigin.Z) << 16)`
 others: the bone euler yaw), then applies directly on the authority
 (`Entity_ProcessVehicleAttach`) or queues C2S 0x26.
 
+OpenNova now performs that snap before either in-process attach relationship is written. Because the
+port splits retail's body/look state across records, `presnap_vehicle_attach_heading` synchronizes the
+registry `Entity.yaw`, `AiEntity.heading`, and the local player's
+`InfantryState.target_heading`. The Godot host had one more stale copy:
+`player_input_.look_heading`; the next `apply_player_input_pre_tick` overwrote the otherwise-correct
+core snap. `sync_local_mounted_input_heading` now copies the snapped target back immediately after a
+successful local toggle and after local/host logic ticks. Both operations intentionally leave pitch
+unchanged. `vehicle_mount::test_usegun_attach_presnaps_local_look` pins the core fields and first pose;
+the asset-backed B50 GUT pins the immediate toggle-side host latch through the first `sim.step()`.
+Joiner attach confirmation remains unported (D-AI-11); the generic live seat-bone transform follow
+remains deferred (§9.2.5).
+
 `Entity_FindNearestSeatOrArmory @ 0x435d50` (searchMode 0, the seat leg): walks
 the player's proximity list; per candidate — dead skip, vehicles with a live
 ENEMY occupant rejected [orig: Vehicle_HasEnemyOccupant @ 0x4359F0], emplaced
@@ -4415,7 +4439,20 @@ ownership; retail restores the saved slot for a player-class occupant, then clea
 equipped slot for a non-player NPC [orig: Entity_DetachFromVehicle @ 0x435671-0x4356aa].
 The persistent parent slot continues to own its own ammo.
 
-Mounted look remains live rather than snapping directly to the target. Yaw chases by
+Retail first initializes the mount base with the request-time yaw snap described in §23.1. The port
+previously updated only `Entity.yaw` from the posed seat on the following tick; its stale
+`AiEntity.heading` and local `target_heading` then restored the pre-attach look, immediately feeding a
+false EWEAP yaw phase and the configured emplaced-body counter-lean. The shared attach helper now
+synchronizes all three core yaw representations before the relationship goes live. A focused
+NovaSimulation red test then exposed the host's fourth representation: even with the core fixed,
+`player_input_.look_heading` still reapplied the stale look at the top of the next step. The simulation
+now mirrors the snapped `target_heading` into that input latch immediately on mount and again after
+local/host logic ticks, covering direct and listening-host paths. Joiner authority confirmation is
+still unported (D-AI-11). Pitch is not mirrored because the retail request snap is yaw-only. This
+one-time base initialization does not implement the still-open per-tick seat-bone transform follow
+(§9.2.5).
+
+After that initialization, mounted look remains live rather than snapping directly to the target. Yaw chases by
 `((desired-look)+2)>>2`, clamped to ±`0x02000000` per tick
 [orig: Entity_UpdateInfantryAI @ 0x4bef57-0x4bef84]; pitch uses
 `(delta+4)>>3` [orig: Entity_UpdateInfantryAI @ 0x4bef87-0x4bef97]. Look yaw is then
@@ -4536,7 +4573,9 @@ Berserk exception, actual/self/player damage reactions, exact mounted request/tr
 gates, parent-slot FSM fire with mount muzzle and gunner attribution, and mounted death;
 `collision` pins mounted contact processing without push; `mission_mount` and
 `vehicle_mount` pin attach/snapshot/detach slot lifecycle (player restore, NPC clear) and
-the UseGun-versus-generic `0x40` split;
+the UseGun-versus-generic `0x40` split. `vehicle_mount` also starts a local occupant with a
+deliberately mismatched look and pins request-time synchronization of `Entity.yaw`,
+`AiEntity.heading`, and `target_heading`, unchanged pitch, and the first mounted pose tick;
 `npruntime_weapon_table` pins the authored action-row bake. Every name is an always-on
 CTest target.
 
@@ -4548,8 +4587,12 @@ off the authored seat point, and the host-session regression pins assignment bef
 authoritative remote-player update.
 
 The EWEAP articulation regression is asset-backed: nova_simulation_test.gd
-mounts the local player on fixture B50Cal and proves both yaw and pitch move
-the authoritative collision triangles. mission_present_pass_test.gd,
+mounts a deliberately yaw-misaligned local player on fixture B50Cal, requires the attach to establish
+the neutral UseGun base before look input, and proves both yaw and pitch then move
+the authoritative collision triangles. Its red fixture starts at 160 degrees: before the host-latch
+mirror, the first `sim.step()` restored that stale look and produced a nonzero EWEAP yaw phase and
+body-segment twist; green requires snapped yaw, EWEAP_GUNYAW, and maximum segment twist all neutral
+before new look input. mission_present_pass_test.gd,
 wire_present_pass_test.gd, local_player_host_test.gd, and
 player_weapon_view_test.gd pin named-control delivery, precedence, and stale
 clearing; two_peer_fanout_test pins live player pitch at the existing wire lift,

@@ -2652,7 +2652,10 @@ bool NovaSimulation::local_player_toggle_mount() {
 		return false;
 	const bool changed = opennova::world::player_toggle_vehicle_mount(
 			*world_, world_->cached.local_player);
-	if (changed) sync_local_usegun_weapon_transition();
+	if (changed) {
+		sync_local_mounted_input_heading();
+		sync_local_usegun_weapon_transition();
+	}
 	return changed;
 }
 
@@ -3659,6 +3662,7 @@ bool NovaSimulation::step() {
 	// No-net editor/unit path: one authoritative logic tick, no replication.
 	apply_player_input_pre_tick();
 	world_->run_logic_tick(/*is_authority=*/true);
+	sync_local_mounted_input_heading();
 	tick_local_player_view();   // retail promotes the per-frame view before weapon actions
 	tick_local_player_weapon(); // the equipped-slot FSM pump, after the view promoter
 	resolve_new_infantry_adm_ids();
@@ -3824,6 +3828,7 @@ void NovaSimulation::host_pump() {
 	NovaUdpPumpDatagramSocket sock(host_listen_ ? pump_.ptr() : nullptr);
 	np::host_session_pump(host_owner_, sock,
 			&NovaSimulation::resolve_infantry_adm_before_server_tick, this);
+	sync_local_mounted_input_heading();
 	tick_local_player_view();   // retail promotes the per-frame view before weapon actions
 	tick_local_player_weapon(); // the equipped-slot FSM pump, after the view promoter
 	if (runtime_) runtime_->Client_ProcessNetworkFrame(now); // fold host_loop_ -> ClientState (HostClient view)
@@ -3859,6 +3864,7 @@ void NovaSimulation::joiner_pump() {
 	}
 	apply_player_input_pre_tick();                  // input -> L's body input
 	world_->run_logic_tick(/*is_authority=*/false); // local World tick: moves L's motor ONLY (never Server_TickUpdate)
+	sync_local_mounted_input_heading();
 	tick_local_player_view();   // retail promotes the per-frame view before weapon actions
 	tick_local_player_weapon(); // the equipped-slot FSM pump, after the view promoter
 
@@ -3916,6 +3922,22 @@ void NovaSimulation::apply_player_input_pre_tick() {
 		p->inf.wpn_run_anim = weapon_active_ ? weapon_run_anim_ : 0;
 		p->inf.wpn_force_crouch = weapon_active_ && weapon_force_crouch_;
 	}
+}
+
+void NovaSimulation::sync_local_mounted_input_heading() {
+	if (!world_ || !world_->ai || !world_->cached.local_player.valid()) return;
+	const opennova::world::Entity *player =
+			world_->registry.get(world_->cached.local_player);
+	const AiEntity *body = world_->ai->for_handle(world_->cached.local_player);
+	if (player == nullptr || !player->mounted || body == nullptr ||
+			!body->inf.is_local_player)
+		return;
+
+	// Entity_RequestVehicleAttach writes one retail Yaw before the relationship.
+	// The core mirrors that snap into target_heading; carry it through our extra
+	// host input record so apply_player_input_pre_tick cannot undo it next frame.
+	// Pitch remains untouched because the retail request snap is yaw-only.
+	player_input_.look_heading = body->inf.target_heading;
 }
 
 bool NovaSimulation::spawn_local_player(Vector3 p_position, float p_yaw_deg, int p_team) {

@@ -31,6 +31,7 @@ bool vehicle_has_enemy_occupant(const World &world, const Entity &vehicle,
 // Shared host attach write block. Retail splits UseGun from ordinary vehicle slots at
 // the flags write; the remaining relationship fields are common.
 void attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t bone) {
+    presnap_vehicle_attach_heading(world, occ, veh, veh.seats[seat_idx]);
     veh.seats[seat_idx].occupant = occ.handle; // [orig: mountHandles[idx] = handle @0x494746]
     occ.mount_type = veh.seats[seat_idx].type;
     if (occ.mount_type == SeatType::Gunner) {

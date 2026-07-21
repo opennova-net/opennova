@@ -289,6 +289,10 @@ private:
 	// player then locomotes through the same infantry motor as an NPC. [net-re §5.38]
 	opennova::world::PlayerInput player_input_{};
 	void apply_player_input_pre_tick();
+	// Retail has one input-owned entity yaw. An authoritative attach can snap the
+	// split world/AI copy during the logic tick, so mirror it back into the host
+	// latch before the next pre-tick input write can restore the old look.
+	void sync_local_mounted_input_heading();
 	// The mouse options + the sim-owned stance latches (the dword_B76484/dword_B76480
 	// equivalents the 0x1D apply writes) — the host sends key EDGES and pixel deltas;
 	// look angles and stance state live here. [orig: profile +0x590/+0x594; the

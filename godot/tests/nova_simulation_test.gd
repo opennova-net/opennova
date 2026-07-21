@@ -1541,7 +1541,13 @@ func test_local_usegun_aim_articulates_emplaced_weapon_model() -> void:
 	assert_true(sim.load_from_mission_data(md))
 	assert_eq(sim.resolve_collision_instances(
 			item_db, ObjectDataPlacerStub.new(object_data)), 1)
-	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	# Start well off the gun's authored zero yaw. Retail's attach request snaps the
+	# requester's look/body heading to the UseGun heading before establishing the
+	# relationship; leaving this stale produces the visible torso twist at the grips.
+	const PRE_ATTACH_YAW_DEG := 160.0
+	assert_true(sim.spawn_local_player(Vector3.ZERO, PRE_ATTACH_YAW_DEG, 1))
+	assert_gt(absf(wrapf(sim.get_local_player_yaw_deg(), -180.0, 180.0)),
+			90.0, 'fixture starts far from the gun yaw')
 	var root := NovaResourceRoot.new()
 	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
 			"res://../fixtures/def")), OK)
@@ -1560,6 +1566,8 @@ func test_local_usegun_aim_articulates_emplaced_weapon_model() -> void:
 	sim.step()
 	assert_lt(sim.get_local_player_position().distance_to(expected_usegun_world),
 			0.001, "mounted player origin coincides with the authored Usegun point")
+	assert_lt(absf(wrapf(sim.get_local_player_yaw_deg(), -180.0, 180.0)),
+			0.01, 'UseGun attach pre-snaps a mismatched local look to the gun yaw')
 	for raw in sim.drain_local_player_weapon_events():
 		if String((raw as Dictionary).get(
 				"switch_to_weapon", "")) == "WPN_EMPLCD50NA":
@@ -1570,6 +1578,22 @@ func test_local_usegun_aim_articulates_emplaced_weapon_model() -> void:
 			"emplaced_controls_valid", false)))
 	var initial_yaw_control := int(initial_weapon_state.get(
 			"emplaced_gun_yaw", 0))
+	assert_eq(initial_yaw_control, 0,
+			'the attach snap starts EWEAP_GUNYAW at its neutral phase')
+	var initial_overlay: Dictionary = sim.get_local_player_aim_overlay()
+	assert_true(bool(initial_overlay.get('valid', false)))
+	var initial_body: Vector3 = initial_overlay.get('body', Vector3.ZERO)
+	var initial_angles: PackedVector3Array = initial_overlay.get(
+			'angles', PackedVector3Array())
+	assert_gt(initial_angles.size(), 0)
+	assert_lt(absf(wrapf(initial_body.y, -180.0, 180.0)), 0.01,
+			'the mounted body neutral overlay follows the snapped gun yaw')
+	var max_initial_twist_deg := 0.0
+	for angle in initial_angles:
+		max_initial_twist_deg = maxf(max_initial_twist_deg,
+				absf(wrapf(angle.y - initial_body.y, -180.0, 180.0)))
+	assert_lt(max_initial_twist_deg, 0.01,
+			'no segment retains the pre-attach look as a torso twist')
 	var initial_pitch_control := int(initial_weapon_state.get(
 			"emplaced_gun_pitch", 0))
 
