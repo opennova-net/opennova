@@ -45,6 +45,8 @@ class FakeSim:
 			out[base + NovaSimulation.PF_YAW_DEG] = float(entity.get("yaw", 0.0))
 			out[base + NovaSimulation.PF_PITCH_DEG] = float(entity.get("pitch", 0.0))
 			out[base + NovaSimulation.PF_ROLL_DEG] = float(entity.get("roll", 0.0))
+			out[base + NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED] = float(
+					entity.get("local_view_suppressed", 0))
 			out[base + NovaSimulation.PF_ALIVE] = float(entity.get("alive", 1))
 			out[base + NovaSimulation.PF_ANIM_STATE] = float(entity.get("anim_state", -1))
 			out[base + NovaSimulation.PF_ANIM_PHASE_TICKS] = float(
@@ -76,6 +78,12 @@ class FakePlacer:
 		parent.add_child(node)
 		built.append(node)
 		return node
+
+
+class EmptyIndex:
+	extends RefCounted
+	func resolve(_bms_id: int, _kind: int, _index: int):
+		return null
 
 
 class SpawnObserver:
@@ -167,6 +175,34 @@ func test_wire_model_applies_the_same_packed_overlay_result() -> void:
 	assert_true(model.basis.is_equal_approx(body_basis))
 	assert_true((deltas[8] as Basis).is_equal_approx(
 			body_basis.inverse() * MissionObjectPlacer.bms_to_godot_basis(angles[8])))
+
+
+func test_wire_model_honors_local_first_person_parent_cull() -> void:
+	# Host-side dynamic/unplaced mount targets are owned by this pass rather than
+	# MissionPresentPass. They consume the same transient retail render verdict.
+	var sim := FakeSim.new()
+	sim.entities = [{
+		"type_id": 4567,
+		"handle": 0x1004,
+		"alive": 1,
+		"local_view_suppressed": 1,
+	}]
+	var placer := FakePlacer.new()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var presenter := WirePresentPass.new()
+	presenter.setup(sim, placer, container, null, EmptyIndex.new())
+	presenter.present()
+	var model := placer.built[0] as FakeModel
+	assert_false(model.visible,
+			"the dynamic local UseGun parent skips its own world model")
+
+	sim.entities[0]["local_view_suppressed"] = 0
+	presenter.present()
+	assert_true(model.visible, "clearing the transient verdict restores the parent")
+	sim.entities[0]["alive"] = 0
+	presenter.present()
+	assert_false(model.visible, "authoritative death visibility remains independent")
 
 
 func test_wire_model_clears_overlay_when_snapshot_selector_is_invalid() -> void:

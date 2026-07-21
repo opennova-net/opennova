@@ -106,6 +106,9 @@ public:
 		PF_ANIM_STATE, // InfantryState.anim_state (full off_8135F0 state id; -1 when unavailable)
 		PF_ANIM_PHASE_TICKS, // InfantryState.clip_phase, in IDA half-frame ticks
 		PF_HIDDEN,     // 1 when the entity is hidden
+		// Local render-only verdict: skip this placed entity's own world model.
+		// Does not mutate Entity.hidden, collision, simulation, or attached actors.
+		PF_LOCAL_VIEW_SUPPRESSED,
 		PF_ALIVE,      // 1 when alive
 		PF_TYPE_ID,    // items.def runtime type id from the wire (0 = none); keys the joiner's wire avatars
 		PF_WIRE_HANDLE,// (pool<<12)|slot wire handle from the decoded stream (joiner render key; 0 = none)
@@ -326,6 +329,10 @@ private:
 	uint8_t local_usegun_pending_weapon_adm_ = 0xFF;
 	uint8_t local_usegun_saved_adm_ = 0xFF;
 	int32_t local_usegun_switch_action_ = -1;
+	// Retail's render gate reads the resolved Def.fpModel pointer, not merely the
+	// authored gfx1 token. The host reports which equipped Def actually owns the
+	// resolved first-person model; 0xFF means no model resolved.
+	uint8_t local_first_person_model_adm_ = 0xFF;
 	opennova::world::WeaponSlotState *active_local_weapon_slot();
 	const opennova::world::WeaponSlotState *active_local_weapon_slot() const;
 	bool local_usegun_switch_is_instant() const;
@@ -731,6 +738,7 @@ public:
 	void set_local_player_weapon(const Dictionary &p_def, const Dictionary &p_clip_seconds,
 	                             bool p_preserve_slot_state = false);
 	void clear_local_player_weapon();
+	void set_local_player_first_person_model_available(bool p_available);
 	// Per-frame trigger state: fire held + edge, raw reload edge (the dispatch
 	// gate runs sim-side) [orig: the binding-149/reload input dispatch,
 	// Input_HandleActionBinding_0 @ 0x4e0420].

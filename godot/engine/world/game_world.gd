@@ -789,8 +789,11 @@ func _load_terrain(trn_path: String) -> bool:
 func _configure_foliage() -> void:
 	if _dispatcher == null or _terrain_data == null:
 		return
+	# The runtime source already supplies height, detail/model foliage indices,
+	# colormap, and change invalidation. Binding the same NovaTerrainData again as
+	# the fallback colormap source attempts a duplicate terrain_changed connection
+	# in Godot and makes mission reloads report ERR_INVALID_PARAMETER.
 	_dispatcher.terrain_data = _terrain_data
-	_dispatcher.colormap_source = _terrain_data
 	_dispatcher.tile_info = _terrain.tile_info_override
 	var defs: Array = _terrain_data.get_foliage_defs()
 	_dispatcher.configure_slots(
@@ -1073,6 +1076,7 @@ func set_local_player_weapon_by_name(weapon_name: String,
 	_local_weapon_dict = _weapon_db.get_weapon(index)
 	var sim := get_sim()
 	if sim != null:
+		_set_local_player_first_person_model_available(false)
 		sim.set_local_player_weapon(
 				_local_weapon_dict, {}, _local_weapon_preserve_slot_state)
 	return true
@@ -1140,12 +1144,21 @@ func clear_local_player_weapon() -> void:
 	_local_weapon_preserve_slot_state = false
 	var sim := get_sim()
 	if sim != null:
+		_set_local_player_first_person_model_available(false)
 		sim.clear_local_player_weapon()
+
+
+func _set_local_player_first_person_model_available(available: bool) -> void:
+	var sim := get_sim()
+	if sim != null:
+		sim.set_local_player_first_person_model_available(available)
 
 func build_local_player_viewmodel() -> Node3D:
 	if _placer == null:
+		_set_local_player_first_person_model_available(false)
 		return null
 	if _viewmodel_weapon_cleared:
+		_set_local_player_first_person_model_available(false)
 		return null
 	var container := Node3D.new()
 	container.name = "PlayerViewmodel"
@@ -1155,7 +1168,9 @@ func build_local_player_viewmodel() -> Node3D:
 	# (retail draws the FP model through the same lighting constants
 	# [orig: Player_RenderFirstPersonViewModel @ 0x4ded60 -> the ctx block]).
 	var def := local_player_viewmodel_def()
-	var gun_name := def.gfx1 if def != null and not def.gfx1.is_empty() else "ak47_1st"
+	# The AK is only the no-definition bring-up fallback. A resolved retail Def
+	# with no fpModel intentionally submits no first-person gun.
+	var gun_name := def.gfx1 if def != null else "ak47_1st"
 	var arms_name := def.gfx1a if def != null and not def.gfx1a.is_empty() else "armsG"
 	var adm_name := def.animadm if def != null and not def.animadm.is_empty() else "ak47_1st"
 	# Emplaced (Flags 0x80) mounts render their own FP gun but omit the carried
@@ -1166,14 +1181,21 @@ func build_local_player_viewmodel() -> Node3D:
 	# basename truncates late animated parts such as the M14 magazine. [orig: @0x4ded60]
 	var arms = _placer.build_model_from_graphic(arms_name, adm_name, container,
 			"anim_wpn_idle", _env, gun_name) if show_arms else null  # _placer untyped -> no :=
-	var gun = _placer.build_model_from_graphic(gun_name, adm_name, container, "anim_wpn_idle", _env, gun_name)
+	var gun = _placer.build_model_from_graphic(gun_name, adm_name, container,
+			"anim_wpn_idle", _env, gun_name) if not gun_name.is_empty() else null
+	_set_local_player_first_person_model_available(gun != null)
 	if show_arms and arms == null:
 		push_warning("GameWorld: FP arms model '%s' failed to load from the resource root" % arms_name)
-	if gun == null:
+	if gun == null and not gun_name.is_empty():
 		push_warning("GameWorld: FP gun model '%s' failed to load from the resource root" % gun_name)
 	if arms == null and gun == null:
-		container.queue_free()
-		return null
+		# A valid definition with no resolved fpModel is a stable, intentionally
+		# empty presentation epoch. Returning its container prevents the host from
+		# retrying every frame or substituting a different weapon.
+		if def == null:
+			container.queue_free()
+			return null
+		return container
 	_setup_local_player_weapon(gun if gun != null else arms)
 	return container
 

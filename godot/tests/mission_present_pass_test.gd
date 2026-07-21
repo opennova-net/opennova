@@ -71,6 +71,8 @@ class FakeSim:
 			out[b + NovaSimulation.PF_ANIM_STATE] = float(e.get("anim_state", -1))
 			out[b + NovaSimulation.PF_ANIM_PHASE_TICKS] = float(e.get("anim_phase", 0))
 			out[b + NovaSimulation.PF_HIDDEN] = float(e.get("hidden", 0))
+			out[b + NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED] = float(
+					e.get("local_view_suppressed", 0))
 			out[b + NovaSimulation.PF_ALIVE] = float(e.get("alive", 1))
 			out[b + NovaSimulation.PF_AIM_OVERLAY_VALID] = float(
 					e.get("aim_overlay_valid", 0))
@@ -266,6 +268,41 @@ func test_visibility_from_hidden_and_alive() -> void:
 	assert_true(dead.visible, "a dead non-organic renders (husk swap / graphic fallback)")
 	assert_true(corpse.visible, "a dead organic renders as a corpse")
 	assert_false(despawned.visible, "the sim ends the corpse via PF_HIDDEN")
+
+
+func test_local_first_person_usegun_parent_is_not_world_rendered() -> void:
+	# Retail skips the local UseGun PARENT'S own vehicle-model submit after its
+	# embedded MountSlot becomes EquippedSlot in first person. This is a local
+	# render verdict, independent of authoritative Entity.hidden; attached actors
+	# render through a separate child walk. [orig: Entity_RenderVehicleModel
+	# @0x4407d0, cull @0x4407f6..0x44084c, submit @0x440918;
+	# RenderSlot_RenderEntityAndChildren child walk @0x5d7938+]
+	var mount := FakeModel.new()
+	var unrelated := FakeModel.new()
+	add_child_autofree(mount)
+	add_child_autofree(unrelated)
+	var index := FakeIndex.new()
+	index.by_bms_id = { 41: mount, 42: unrelated }
+	var sim := FakeSim.new()
+	sim.entities = [
+		{ "bms_id": 41, "hidden": 0, "local_view_suppressed": 1 },
+		{ "bms_id": 42, "hidden": 0, "local_view_suppressed": 0 },
+	]
+	var presenter := _make_pass(index, sim)
+	presenter.present()
+	assert_false(mount.visible,
+			"the committed first-person UseGun parent skips its own world model")
+	assert_true(unrelated.visible,
+			"local UseGun suppression cannot hide unrelated world entities")
+
+	# Camera-mode changes, detach, and pre-commit slot mismatch all clear the
+	# transient verdict. PF_HIDDEN remains independently authoritative.
+	sim.entities[0]["local_view_suppressed"] = 0
+	presenter.present()
+	assert_true(mount.visible, "clearing the render verdict restores the parent immediately")
+	sim.entities[0]["hidden"] = 1
+	presenter.present()
+	assert_false(mount.visible, "authoritative PF_HIDDEN still wins independently")
 
 
 func test_options_gate_each_channel() -> void:

@@ -72,6 +72,12 @@ int main(void) {
 	CHECK(m4->teamfilter == 0x02u);                   // blue
 	CHECK(m4->loadout_subclasses == 1 && m4->loadout_selectable == 1);
 	CHECK(m4->ammo_class == "CLASS_556MM");
+	CHECK(m4->has_first_person_model_reference);
+	const int empl50_index = table.index_of("WPN_EMPLCD50");
+	const int avenger_index = table.index_of("WPN_AVENGER");
+	CHECK(empl50_index > 0 && avenger_index > 0);
+	CHECK(table.by_index(static_cast<uint8_t>(empl50_index))->has_first_person_model_reference);
+	CHECK(!table.by_index(static_cast<uint8_t>(avenger_index))->has_first_person_model_reference);
 	const world::WeaponTableEntry *knife = table.by_index(1);
 	CHECK(knife != nullptr && knife->clipsize == -1 && knife->startrounds == -1);
 	CHECK(knife->charfilter == 0x1Fu && knife->teamfilter == 0x02u);

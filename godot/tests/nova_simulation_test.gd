@@ -128,6 +128,18 @@ func _weapon_arm_pitch_deg(sim: NovaSimulation) -> float:
 	return float(angles[4].x) if angles.size() > 4 else 0.0
 
 
+func _present_field_for_origin(sim: NovaSimulation, kind: int, index: int,
+		field: int) -> int:
+	var snapshot := sim.get_present_snapshot()
+	var stride := sim.get_present_stride()
+	for record in range(snapshot.size() / stride):
+		var base := record * stride
+		if int(snapshot[base + NovaSimulation.PF_KIND]) == kind \
+				and int(snapshot[base + NovaSimulation.PF_INDEX]) == index:
+			return int(snapshot[base + field])
+	return -1
+
+
 func test_aim_overlay_exports_the_retail_authored_pitch_sign() -> void:
 	var md := NovaMissionData.new()
 	assert_eq(md.create_default(), OK)
@@ -1313,6 +1325,87 @@ func test_local_player_toggle_mount_weapon_busy_gate() -> void:
 # [orig: Entity_AttachToUseGunSlot @0x546c25..0x546c3d;
 # Player_MountWeaponSlot @0x4dfa40; switch commits @0x543475/@0x543539;
 # Entity_DetachFromVehicle restore @0x43565f]
+func test_local_first_person_usegun_parent_cull_follows_live_mount_slot() -> void:
+	# Retail suppresses the parent model only after THIS parent's MountSlot is
+	# EquippedSlot in first person. Pre-commit attach, third person, and detach
+	# render it normally. [orig: Entity_RenderVehicleModel @0x4407d0;
+	# predicate @0x4407f6..0x44084c; Render_SubmitEntity @0x440918]
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var gun := md.add_entity(NovaMissionData.KIND_ITEM, 101294,
+			Vector3(2, 0, 0), Vector3.ZERO)
+	assert_false(gun.is_empty())
+	var sim := NovaSimulation.new()
+	sim.enable_listen_server(true)
+	sim.set_item_seat_specs([{
+		"type_id": 1294,
+		"seats": [{"type": 3, "position": Vector3(0, -1, 1),
+				"source_name": "UseGun"}],
+		"primary_weapon": "WPN_EMPLCD50",
+	}])
+	assert_true(sim.load_from_mission_data(md))
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/items.def")), OK)
+	sim.resolve_item_traits(item_db)
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path("res://../fixtures/def")), OK)
+	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
+	assert_true(sim.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 1))
+	var weapons := NovaWeaponDatabase.new()
+	assert_eq(weapons.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/weapon.def")), OK)
+	var personal: Dictionary = weapons.get_weapon(
+			weapons.find_weapon("WPN_M4AUTO"))
+	var mounted: Dictionary = weapons.get_weapon(
+			weapons.find_weapon("WPN_EMPLCD50"))
+	sim.set_local_player_weapon(personal, {})
+	sim.drain_local_player_weapon_events()
+	sim.step() # seed the decoded listen-client present rows
+	var gun_index := int(gun["index"])
+	assert_eq(_present_field_for_origin(sim, NovaMissionData.KIND_ITEM, gun_index,
+			NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
+			"an unattached emplacement renders in the world pass")
+
+	assert_true(sim.local_player_toggle_mount())
+	assert_eq(_present_field_for_origin(sim, NovaMissionData.KIND_ITEM, gun_index,
+			NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
+			"the parent stays visible until its embedded slot commits")
+	sim.step()
+	var mount_event_found := false
+	for raw in sim.drain_local_player_weapon_events():
+		if String((raw as Dictionary).get("switch_to_weapon", "")) == "WPN_EMPLCD50":
+			mount_event_found = true
+	assert_true(mount_event_found)
+	sim.set_local_player_weapon(mounted, {}, true)
+	assert_eq(_present_field_for_origin(sim, NovaMissionData.KIND_ITEM, gun_index,
+			NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
+			"authored gfx1 alone cannot cull when its first-person model failed to resolve")
+	sim.set_local_player_first_person_model_available(true)
+	assert_eq(_present_field_for_origin(sim, NovaMissionData.KIND_ITEM, gun_index,
+			NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED), 1,
+			"the live parent slot with a resolved FP model suppresses the duplicate world gun")
+
+	sim.set_local_player_camera_third_person(true)
+	assert_eq(_present_field_for_origin(sim, NovaMissionData.KIND_ITEM, gun_index,
+			NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
+			"third person restores the parent model")
+	sim.set_local_player_camera_third_person(false)
+	assert_eq(_present_field_for_origin(sim, NovaMissionData.KIND_ITEM, gun_index,
+			NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED), 1)
+	for _tick in range(120):
+		if int(sim.get_local_player_weapon_state().get("current", -1)) < 2:
+			break
+		sim.step()
+	assert_true(sim.local_player_toggle_mount())
+	assert_eq(_present_field_for_origin(sim, NovaMissionData.KIND_ITEM, gun_index,
+			NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
+			"detach restores the world model immediately, before the holster commit")
+	sim.free()
+
+
 func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> void:
 	var md := NovaMissionData.new()
 	assert_eq(md.create_default(), OK)
@@ -1457,11 +1550,17 @@ func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> vo
 func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> void:
 	var md := NovaMissionData.new()
 	assert_eq(md.create_default(), OK)
-	assert_false(md.add_entity(NovaMissionData.KIND_ITEM, 101294,
-			Vector3(2, 0, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(NovaMissionData.KIND_ITEM, 101295,
-			Vector3(3, 0, 0), Vector3.ZERO).is_empty())
+	var first_gun := md.add_entity(NovaMissionData.KIND_ITEM, 101294,
+			Vector3(2, 0, 0), Vector3.ZERO)
+	var second_gun := md.add_entity(NovaMissionData.KIND_ITEM, 101295,
+			Vector3(3, 0, 0), Vector3.ZERO)
+	var third_gun := md.add_entity(NovaMissionData.KIND_ITEM, 101296,
+			Vector3(3.5, 0, 0), Vector3.ZERO)
+	assert_false(first_gun.is_empty())
+	assert_false(second_gun.is_empty())
+	assert_false(third_gun.is_empty())
 	var sim := NovaSimulation.new()
+	sim.enable_listen_server(true)
 	sim.set_item_seat_specs([
 		{
 			"type_id": 1294,
@@ -1475,8 +1574,18 @@ func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> v
 					"source_name": "UseGun"}],
 			"primary_weapon": "WPN_EMPLCD50",
 		},
+		{
+			"type_id": 1296,
+			"seats": [{"type": 3, "position": Vector3(0, -1, 1),
+					"source_name": "UseGun"}],
+			"primary_weapon": "WPN_EMPLCD50",
+		},
 	])
 	assert_true(sim.load_from_mission_data(md))
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/items.def")), OK)
+	sim.resolve_item_traits(item_db)
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 	var root := NovaResourceRoot.new()
 	assert_eq(root.set_root_dir(
@@ -1493,6 +1602,15 @@ func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> v
 			weapons.find_weapon("WPN_EMPLCD50"))
 	sim.set_local_player_weapon(personal, {})
 	sim.drain_local_player_weapon_events()
+	# Seed the listen-client rows and let the personal slot reach an attachable
+	# state. The cull verdict is produced against this decoded presentation view.
+	for _tick in range(80):
+		sim.step()
+		if int(sim.get_local_player_weapon_state().get("current", -1)) < 2:
+			break
+	var first_gun_index := int(first_gun["index"])
+	var second_gun_index := int(second_gun["index"])
+	var third_gun_index := int(third_gun["index"])
 
 	assert_true(sim.local_player_toggle_mount())
 	sim.step()
@@ -1503,6 +1621,15 @@ func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> v
 			first_event = raw
 	assert_false(first_event.is_empty())
 	sim.set_local_player_weapon(first_mount, {}, true)
+	# Even a host-side resolution report cannot manufacture fpModel on a Def that
+	# has none, and a different target Def must not inherit that model identity.
+	sim.set_local_player_first_person_model_available(true)
+	assert_eq(_present_field_for_origin(sim, NovaMissionData.KIND_ITEM,
+			first_gun_index, NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
+			"a live AVENGER MountSlot without gfx1 keeps its world model")
+	assert_eq(_present_field_for_origin(sim, NovaMissionData.KIND_ITEM,
+			second_gun_index, NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
+			"mounting AVENGER cannot suppress the unrelated 50-cal parent")
 	for _tick in range(80):
 		sim.step()
 		if int(sim.get_local_player_weapon_state().get("current", -1)) < 2:
@@ -1512,6 +1639,12 @@ func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> v
 			"a nearby second gun is a direct mounted-seat swap")
 	assert_eq(sim.get_local_player_weapon_name(), "WPN_AVENGER",
 			"the old parent remains equipped until the rank commit")
+	assert_eq(_present_field_for_origin(sim, NovaMissionData.KIND_ITEM,
+			first_gun_index, NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
+			"pre-commit swap restores the old parent world model")
+	assert_eq(_present_field_for_origin(sim, NovaMissionData.KIND_ITEM,
+			second_gun_index, NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
+			"pre-commit target is not culled before its MountSlot is equipped")
 	sim.step()
 	var swap_event: Dictionary = {}
 	for raw in sim.drain_local_player_weapon_events():
@@ -1521,11 +1654,42 @@ func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> v
 	assert_false(swap_event.is_empty(),
 			"latest pending parent commits directly with no personal interlude")
 	sim.set_local_player_weapon(second_mount, {}, true)
+	assert_eq(_present_field_for_origin(sim, NovaMissionData.KIND_ITEM,
+			first_gun_index, NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
+			"the committed swap leaves the old AVENGER parent visible")
+	assert_eq(_present_field_for_origin(sim, NovaMissionData.KIND_ITEM,
+			second_gun_index, NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
+			"the new authored model does not cull before its FP graphic resolves")
+	sim.set_local_player_first_person_model_available(true)
+	assert_eq(_present_field_for_origin(sim, NovaMissionData.KIND_ITEM,
+			second_gun_index, NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED), 1,
+			"the resolved EMPLCD50 replacement culls only its own world model")
 	sim.step()
 	assert_eq(int(sim.get_local_player_weapon_state().get("current", -1)), 0,
 			"SWITCHRANK does not queue SWITCHTO onto the target parent slot")
 	assert_true(bool(sim.get_local_player_weapon_state().get(
 			"borrowed_usegun_slot", false)))
+
+	assert_true(sim.local_player_toggle_mount(),
+			"a closer third gun drives a second direct mounted-seat swap")
+	assert_eq(_present_field_for_origin(sim, NovaMissionData.KIND_ITEM,
+			second_gun_index, NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
+			"the outgoing parent restores before the same-Def swap commits")
+	assert_eq(_present_field_for_origin(sim, NovaMissionData.KIND_ITEM,
+			third_gun_index, NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
+			"the target parent stays visible before its slot is live")
+	sim.step()
+	var same_def_event: Dictionary = {}
+	for raw in sim.drain_local_player_weapon_events():
+		if String((raw as Dictionary).get(
+				"switch_to_weapon", "")) == "WPN_EMPLCD50":
+			same_def_event = raw
+	assert_false(same_def_event.is_empty())
+	assert_eq(_present_field_for_origin(sim, NovaMissionData.KIND_ITEM,
+			second_gun_index, NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED), 0)
+	assert_eq(_present_field_for_origin(sim, NovaMissionData.KIND_ITEM,
+			third_gun_index, NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED), 1,
+			"the same resolved Def model immediately suppresses the newly live parent")
 	sim.free()
 
 

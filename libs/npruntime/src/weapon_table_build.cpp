@@ -171,6 +171,7 @@ world::WeaponTable build_weapon_table(const DefWeaponsFile &weapons) {
 		e.attach_text_id = d.attach_text_id; // the attach-label Overlays key [orig: +0x3A0]
 		e.flags = d.flags;
 		e.flags2 = d.flags2;
+		e.has_first_person_model_reference = d.gfx1[0] != '\0';
 		// Bind this weapon's ACTION rows into the same 12-state descriptor table
 		// consumed by a MountSlot. The resource-only table has no ADM duration ring,
 		// so auto fields take the original unresolved-clip zero fallback here; hosts

@@ -687,7 +687,8 @@ func _advance_one_tick_no_present() -> bool:
 ## ticks (clamped to MAX_CATCHUP_TICKS), and present ONCE after the batch. This is the faithful
 ## fixed-62.5 Hz accumulator — the sim runs at a constant rate while rendering stays decoupled at the
 ## host frame rate, with no inter-tick interpolation (present reads current sim state). A long frame
-## runs several ticks, a short frame runs none. Effects drain per tick (the original's per-tick
+## runs several ticks; a short frame runs none but still presents current render-only state (camera,
+## local UseGun suppression, and node ownership). Effects drain per tick (the original's per-tick
 ## emission). Returns the number of logic ticks run this call. [orig: Game_MainLoop @ 0x52b630]
 func tick_realtime(delta: float) -> int:
 	if _sim == null or not _playing:
@@ -697,8 +698,20 @@ func tick_realtime(delta: float) -> int:
 	_accum += delta
 	var n := int(_accum / TICK_DT)
 	if n <= 0:
+		# Retail evaluates entity submission every render frame. Camera mode and
+		# local attach/detach can change between fixed ticks, so the scene passes
+		# must not wait for the next 62.5 Hz quantum. Fire and destruction
+		# presentation remain tick-driven because no gameplay state advanced here.
+		_perf_present_us = 0
+		if _present != null or _wire_present != null:
+			var present_start := Time.get_ticks_usec()
+			if _present != null:
+				_present.present()
+			if _wire_present != null:
+				_wire_present.present()
+			_perf_present_us = Time.get_ticks_usec() - present_start
 		_ticks_last_frame = 0
-		_perf_tick_us = 0
+		_perf_tick_us = Time.get_ticks_usec() - tick_start
 		_perf_did_tick = false
 		return 0
 	_accum -= float(n) * TICK_DT

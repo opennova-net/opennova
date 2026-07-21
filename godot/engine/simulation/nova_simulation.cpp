@@ -415,6 +415,7 @@ void NovaSimulation::reset_world() {
 	local_usegun_pending_weapon_adm_ = 0xFF;
 	local_usegun_saved_adm_ = 0xFF;
 	local_usegun_switch_action_ = -1;
+	local_first_person_model_adm_ = 0xFF;
 	world_ = std::make_unique<World>();
 	world_->external_local_mounted_weapon_pump = true;
 	world_->projectile_authority = !joiner_;
@@ -2314,6 +2315,7 @@ void NovaSimulation::commit_local_usegun_weapon_switch() {
 		local_usegun_switch_action_ = -1;
 		weapon_switch_deferred_action_ = -1;
 		weapon_active_ = false;
+		local_first_person_model_adm_ = 0xFF;
 		return;
 	}
 
@@ -3226,6 +3228,8 @@ void NovaSimulation::_bind_methods() {
 					"preserve_slot_state"),
 			&NovaSimulation::set_local_player_weapon, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("clear_local_player_weapon"), &NovaSimulation::clear_local_player_weapon);
+	ClassDB::bind_method(D_METHOD("set_local_player_first_person_model_available", "available"),
+			&NovaSimulation::set_local_player_first_person_model_available);
 	ClassDB::bind_method(D_METHOD("set_local_player_weapon_input", "fire_held", "fire_pressed", "reload_pressed"), &NovaSimulation::set_local_player_weapon_input);
 	ClassDB::bind_method(D_METHOD("request_local_player_scope_toggle"), &NovaSimulation::request_local_player_scope_toggle);
 	ClassDB::bind_method(D_METHOD("set_local_player_eye", "eye_godot", "valid"), &NovaSimulation::set_local_player_eye);
@@ -3406,6 +3410,7 @@ void NovaSimulation::_bind_methods() {
 	BIND_ENUM_CONSTANT(PF_ANIM_STATE);
 	BIND_ENUM_CONSTANT(PF_ANIM_PHASE_TICKS);
 	BIND_ENUM_CONSTANT(PF_HIDDEN);
+	BIND_ENUM_CONSTANT(PF_LOCAL_VIEW_SUPPRESSED);
 	BIND_ENUM_CONSTANT(PF_ALIVE);
 	BIND_ENUM_CONSTANT(PF_TYPE_ID);
 	BIND_ENUM_CONSTANT(PF_WIRE_HANDLE);
@@ -4221,6 +4226,7 @@ void NovaSimulation::set_local_player_weapon(const Dictionary &p_def,
 
 void NovaSimulation::clear_local_player_weapon() {
 	weapon_active_ = false;
+	local_first_person_model_adm_ = 0xFF;
 	weapon_switch_in_flight_ = false;
 	weapon_switch_deferred_action_ = -1;
 	pending_weapon_events_.clear();
@@ -4239,6 +4245,15 @@ void NovaSimulation::clear_local_player_weapon() {
 	weapon_run_anim_ = 0;
 	weapon_force_crouch_ = false;
 	weapon_anim_map_ = String();
+}
+
+void NovaSimulation::set_local_player_first_person_model_available(bool p_available) {
+	local_first_person_model_adm_ = 0xFF;
+	if (!p_available || !world_) return;
+	const opennova::world::Entity *player =
+			world_->registry.get(world_->cached.local_player);
+	if (player != nullptr)
+		local_first_person_model_adm_ = player->equipped_adm_index;
 }
 
 void NovaSimulation::set_local_player_weapon_input(bool p_fire_held, bool p_fire_pressed,
@@ -6101,6 +6116,16 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 	if (!world_ || !runtime_) return out;
 	// P7: every path (SP / LAN host / joiner) reads its own npruntime ClientRuntime view's ClientState.
 	const opennova::netsim::ClientState &cs = runtime_->state();
+	const opennova::world::Entity *local_player =
+			world_->registry.get(world_->cached.local_player);
+	// Entity_RenderVehicleModel's local UseGun predicate is a render verdict,
+	// not Entity.hidden: parent equality + first-person camera + raw UseGun seat.
+	// The per-row tail below adds the live EquippedSlot/Def tests.
+	// [orig: @0x4407f6..0x44084c; sole submit @0x440918]
+	const bool local_first_person_usegun =
+			!player_view_.third_person && local_player != nullptr &&
+			local_player->mounted &&
+			local_player->mount_type == opennova::world::SeatType::Gunner;
 	const int count = static_cast<int>(cs.entities.size());
 	out.resize(static_cast<int64_t>(count) * PF_STRIDE);
 	float *w = out.ptrw();
@@ -6112,7 +6137,8 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 		r[PF_PITCH_DEG] = 0.0f; r[PF_YAW_DEG] = 0.0f; r[PF_ROLL_DEG] = 0.0f;
 		r[PF_PHASE1] = 0.0f; r[PF_ACTIVE1] = 0.0f; r[PF_PHASE2] = 0.0f; r[PF_ACTIVE2] = 0.0f;
 		r[PF_BODY_ANIM_SLOT] = -1.0f; r[PF_ANIM_STATE] = -1.0f; r[PF_ANIM_PHASE_TICKS] = 0.0f;
-		r[PF_HIDDEN] = 0.0f; r[PF_ALIVE] = 1.0f;
+		r[PF_HIDDEN] = 0.0f; r[PF_LOCAL_VIEW_SUPPRESSED] = 0.0f;
+		r[PF_ALIVE] = 1.0f;
 		r[PF_TYPE_ID] = 0.0f; r[PF_WIRE_HANDLE] = 0.0f;
 		for (int field = PF_AIM_OVERLAY_VALID; field < PF_STRIDE; ++field)
 			r[field] = 0.0f;
@@ -6146,6 +6172,28 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 			r[PF_ROLL_DEG] = static_cast<float>(ent->roll);
 			r[PF_HIDDEN] = ent->hidden ? 1.0f : 0.0f;
 			r[PF_ALIVE] = ent->alive ? 1.0f : 0.0f;
+			if (local_first_person_usegun &&
+					local_player->mount_target == h) {
+				const opennova::world::WeaponTableEntry *mount_def =
+						world_->weapons.by_index(ent->primary_weapon_slot_adm);
+				// Primary retail leg: FP model exists and this exact embedded
+				// MountSlot is the live EquippedSlot. flags2 Invisible is the
+				// witnessed alternate forced-cull leg and does not require the
+				// EquippedSlot comparison.
+				// [orig: Def+0x16c @0x440824; EquippedSlot @0x440833;
+				//  Def+0x0c & 0x800 @0x44083f]
+				const bool equipped_parent_slot =
+						local_usegun_slot_active_ && local_usegun_mount_ == h &&
+						local_usegun_weapon_adm_ == ent->primary_weapon_slot_adm;
+				if (mount_def != nullptr &&
+						((mount_def->has_first_person_model_reference &&
+						  local_first_person_model_adm_ ==
+								  ent->primary_weapon_slot_adm &&
+						  equipped_parent_slot) ||
+						 (mount_def->flags2 &
+						  opennova::world::weapon_flag2::kInvisible) != 0))
+					r[PF_LOCAL_VIEW_SUPPRESSED] = 1.0f;
+			}
 		}
 		// Decoded wire position is mission (x,y,z) 16.16 -> Godot (x, z, -y) world units,
 		// the SAME remap the AI-pool path uses. Position is post-compression (lossy) —

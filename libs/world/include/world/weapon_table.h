@@ -51,6 +51,12 @@ struct WeaponTableEntry {
     // @0x4e02c3; Player_SelectWeaponSlot @0x4dd6d8].
     int32_t flags = 0;
     int32_t flags2 = 0;
+    // Whether the definition authors a nonempty first-person-model reference.
+    // Resource resolution is host-side; the renderer requires both this
+    // candidate and the current host resolution result before suppressing the
+    // duplicate third-person emplacement for a local first-person gunner.
+    // [orig: Entity_RenderVehicleModel @0x440824/@0x440833]
+    bool has_first_person_model_reference = false;
     // weapon_class routing slot (0=accessory 1=primary 2=secondary 3=grenade). The
     // switch eligibility exempts 1/2 from the has-ammo requirement [orig: AdmDef+0x3A4
     // read @0x4e0294; keyword 'weapon_class' -> +0x3A4].

@@ -84,7 +84,16 @@ func present() -> void:
 			# the destruction pass swaps its model to the husk (Flags|=6), and a
 			# def with no husk keeps its graphic standing — the witnessed render
 			# pick [orig: Flags&4 && huskModel ? husk : graphic @0x413086; §24].
-			var visible := int(snap[base + NovaSimulation.PF_HIDDEN]) == 0
+			# Retail skips the local first-person UseGun parent's OWN world-model
+			# submit once its embedded MountSlot is live and has an FP model (or
+			# flags2 Invisible forces it). This packed bit is presentation-only:
+			# Entity.hidden, collision, simulation, and separately-rendered attached
+			# actors remain untouched. [orig: Entity_RenderVehicleModel @0x4407d0,
+			# cull @0x4407f6..0x44084c, submit @0x440918]
+			var visible := (
+					int(snap[base + NovaSimulation.PF_HIDDEN]) == 0
+					and int(snap[base +
+							NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED]) == 0)
 			node.visible = visible
 			if not visible:
 				_stats.hidden += 1
