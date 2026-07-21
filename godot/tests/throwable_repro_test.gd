@@ -56,7 +56,7 @@ func _install(weapon_name: String) -> void:
 
 # Step + drain like the hosts: a switch event installs the def, and the rebuilt
 # viewmodel installs the SAME def again ~a frame later (the FP model resolve —
-# game_world._setup_local_player_weapon). The re-install racing the FSM is the
+# GameWorld's local-player weapon setup). The re-install racing the FSM is the
 # regression surface this file exists for.
 func _step_and_pump(ticks: int) -> Array[String]:
 	var switched: Array[String] = []
