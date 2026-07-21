@@ -165,6 +165,10 @@ class FakeWorld:
 	# The sim-owned view state seam (ADS ease / fov policy / 3P anchor).
 	var view = null  # PlayerLocalView
 	var scope_toggle_requests := 0
+	var binocular_toggle_requests := 0
+	var nvg_toggle_requests := 0
+	var nvg_gain_requests: Array[int] = []
+	var nvg_view_calls: Array = []
 	var camera_mode_calls: Array = []
 	# The ordered action-sound + effect-world seams the host drains on the event batch.
 	var mission_audio = null  # FakeMissionAudio
@@ -223,6 +227,21 @@ class FakeWorld:
 	func request_local_player_scope_toggle() -> bool:
 		scope_toggle_requests += 1
 		return true
+
+	func request_local_player_binoculars_toggle() -> bool:
+		binocular_toggle_requests += 1
+		return true
+
+	func request_local_player_nvg_toggle() -> bool:
+		nvg_toggle_requests += 1
+		return true
+
+	func request_local_player_nvg_gain(delta: int) -> int:
+		nvg_gain_requests.append(delta)
+		return delta
+
+	func set_local_player_nvg_view(active: bool, gain: int) -> void:
+		nvg_view_calls.append([active, gain])
 
 	func set_local_player_camera_third_person(third_person: bool) -> void:
 		camera_mode_calls.append(third_person)
@@ -383,6 +402,25 @@ func test_stance_keys_are_three_key_select_requests() -> void:
 		key.pressed = true
 		assert_true(host.handle_key_input(key, true))
 	assert_eq(world.stance_requests, [2, 1, 0])
+
+
+func test_binoculars_nvg_and_gain_keys_route_retail_actions() -> void:
+	var world := FakeWorld.new()
+	var camera := Camera3D.new()
+	var host := LocalPlayerHost.new()
+	add_child_autofree(world)
+	add_child_autofree(camera)
+	add_child_autofree(host)
+	host.setup(world, camera)
+
+	for keycode in [KEY_B, KEY_N, KEY_EQUAL, KEY_MINUS]:
+		var key := InputEventKey.new()
+		key.physical_keycode = keycode
+		key.pressed = true
+		assert_true(host.handle_key_input(key, true))
+	assert_eq(world.binocular_toggle_requests, 1)
+	assert_eq(world.nvg_toggle_requests, 1)
+	assert_eq(world.nvg_gain_requests, [1, -1])
 
 
 func test_first_person_routes_the_body_to_the_water_mirror_by_layer() -> void:

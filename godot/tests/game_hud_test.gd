@@ -5,6 +5,7 @@ extends GutTest
 
 const HUDPOS_PATH := "res://../fixtures/def/hudpos.def"
 const WEAPON_PATH := "res://../fixtures/def/weapon.def"
+const PlayerViewEffectsScript := preload("res://engine/world/player_view_effects.gd")
 
 var _temp_dirs: Array[String] = []
 
@@ -130,6 +131,11 @@ func test_sighted_m4_draws_all_authored_sight_card_rows() -> void:
 	if reticle_material != null:
 		assert_eq(reticle_material.blend_mode, CanvasItemMaterial.BLEND_MODE_ADD,
 			"The M4 red-dot layer renders additively")
+	hud.update_info({"scope_card": true, "binoculars_view_active": true})
+	await get_tree().process_frame
+	for i in range(sights.size()):
+		assert_false((hud.get_child(i) as Control).visible,
+				"Binocular view suppresses authored SIGHTS row %d" % i)
 	hud.free()
 
 
@@ -273,6 +279,84 @@ func test_weapon_cluster_draws_nothing_without_crosshair_texture() -> void:
 
 	assert_eq(RenderingServer.debug_canvas_item_get_rect(hud.get_canvas_item()), Rect2(),
 		"A missing crosshair texture produces no invented replacement reticle.")
+
+
+func test_binocular_view_hides_weapon_crosshair() -> void:
+	var fixture := _load_temp_layout(PackedStringArray([
+		"ALPHAFADE 30 50 3",
+	]), PackedStringArray(["cross01.tga"]), {
+		"cross01.tga": Vector2i(8, 8),
+	})
+	var hud := WeaponClusterOnlyHud.new()
+	hud.size = Vector2(1024, 768)
+	add_child_autofree(hud)
+	hud.set_layout(fixture["layout"], fixture["root"])
+	hud.set_weapon(PlayerHudWeaponDef.from_weapon_dict({
+		"name": "WPN_TEST",
+		"error": PackedFloat32Array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+	}), "Test weapon")
+	hud.update_info({
+		"weapon_active": true,
+		"scope_engaged": false,
+		"binoculars_view_active": true,
+		"stance": 0,
+		"fov_deg": 20.0,
+	})
+	await get_tree().process_frame
+	RenderingServer.canvas_item_set_custom_rect(hud.get_canvas_item(), false)
+
+	assert_eq(RenderingServer.debug_canvas_item_get_rect(hud.get_canvas_item()), Rect2(),
+			"Binocular view hides the normal weapon crosshair without hiding the HUD.")
+
+
+func test_binocular_range_smoothing_matches_retail_steps() -> void:
+	assert_eq(PlayerViewEffectsScript.smooth_range_value(-10, 1000), 1000,
+			"Corrections larger than 1000 snap to the target.")
+	assert_eq(PlayerViewEffectsScript.smooth_range_value(0, 1000), 111)
+	assert_eq(PlayerViewEffectsScript.smooth_range_value(0, 111), 33)
+	assert_eq(PlayerViewEffectsScript.smooth_range_value(0, 33), 11)
+	assert_eq(PlayerViewEffectsScript.smooth_range_value(0, 11), 3)
+	assert_eq(PlayerViewEffectsScript.smooth_range_value(0, 3), 1)
+	assert_eq(PlayerViewEffectsScript.smooth_range_value(10, 1), 7,
+			"Negative corrections use the same stepped easing.")
+	assert_eq(PlayerViewEffectsScript.smooth_range_value(1, 0), 1,
+			"The raw range target clamps to the retail 1..1000 interval.")
+
+
+func test_player_view_effects_draw_retail_asset_stack() -> void:
+	var fixture := _load_temp_layout(PackedStringArray([
+		"ALPHAFADE 30 50 3",
+	]), PackedStringArray([
+		"Binoculr.tga", "BinoCH.tga", "BNumbers.tga", "NVG.tga", "Nvgscale.tga",
+	]), {
+		"Binoculr.tga": Vector2i(512, 256),
+		"BinoCH.tga": Vector2i(128, 128),
+		"BNumbers.tga": Vector2i(16, 160),
+		"NVG.tga": Vector2i(512, 512),
+		"Nvgscale.tga": Vector2i(16, 80),
+	})
+	var effects := PlayerViewEffectsScript.new()
+	effects.size = Vector2(1024, 768)
+	add_child_autofree(effects)
+	effects.set_resource_root(fixture["root"])
+	effects.update_info({
+		"binoculars_view_active": true,
+		"binocular_range": 1000,
+		"nvg_visible": true,
+		"nvg_gain": 4,
+	})
+	await get_tree().process_frame
+	RenderingServer.canvas_item_set_custom_rect(effects.get_canvas_item(), false)
+
+	assert_eq(RenderingServer.debug_canvas_item_get_rect(effects.get_canvas_item()),
+			Rect2(0, 0, 1024, 768),
+			"Retail masks cover the viewport while inset art stays in design coordinates.")
+	assert_eq(effects.get_child_count(true), 1, "The NVG post-process is an internal child.")
+	assert_true((effects.get_child(0, true) as CanvasItem).visible,
+			"First-person-visible NVG enables the post-process.")
+	effects.update_info({"nvg_visible": false})
+	assert_false((effects.get_child(0, true) as CanvasItem).visible,
+			"Camera suppression hides the post-process without consuming simulation state.")
 
 
 func test_crosshair_style_clamps_and_reloads_live() -> void:

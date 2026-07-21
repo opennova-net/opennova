@@ -107,6 +107,87 @@ void test_fov_policy() {
     CHECK(player_view_fov_h_deg(v, 2, 4.0f) == kPlayerCameraFovHDeg);
 }
 
+void test_binoculars_effective_state_and_fov() {
+    PlayerViewState v;
+    CHECK(!v.binoculars_requested);
+    CHECK(!v.binoculars_raised);
+    CHECK(!v.binoculars_view_active);
+
+    // Toggling records intent; the effective update raises the body pose and
+    // first-person optical view while all gates permit it.
+    CHECK(player_view_toggle_binoculars(v));
+    CHECK(v.binoculars_requested);
+    player_view_update_effective_modes(v, true, false);
+    CHECK(v.binoculars_raised);
+    CHECK(v.binoculars_view_active);
+    CHECK(player_view_fov_h_deg(v, 2, 8.0f) == kBinocularCameraFovHDeg);
+
+    // Movement suppresses both derived states without consuming the request;
+    // releasing movement restores them.
+    CHECK(!player_view_move_input(v, true, 0));
+    player_view_update_effective_modes(v, true, false);
+    CHECK(v.binoculars_requested);
+    CHECK(!v.binoculars_raised);
+    CHECK(!v.binoculars_view_active);
+    CHECK(!player_view_move_input(v, false, 0));
+    player_view_update_effective_modes(v, true, false);
+    CHECK(v.binoculars_raised && v.binoculars_view_active);
+
+    // Third person preserves the raised pose for observers but suppresses the
+    // optical view and returns the camera to the base fov.
+    v.third_person = true;
+    player_view_update_effective_modes(v, true, false);
+    CHECK(v.binoculars_requested);
+    CHECK(v.binoculars_raised);
+    CHECK(!v.binoculars_view_active);
+    CHECK(player_view_fov_h_deg(v, 2, 8.0f) == kPlayerCameraFovHDeg);
+
+    // Death and round end are reversible gates too.
+    v.third_person = false;
+    player_view_update_effective_modes(v, false, false);
+    CHECK(v.binoculars_requested);
+    CHECK(!v.binoculars_raised && !v.binoculars_view_active);
+    player_view_update_effective_modes(v, true, true);
+    CHECK(v.binoculars_requested);
+    CHECK(!v.binoculars_raised && !v.binoculars_view_active);
+    player_view_update_effective_modes(v, true, false);
+    CHECK(v.binoculars_raised && v.binoculars_view_active);
+
+    // Explicit toggle-off is the operation that clears the persistent intent.
+    CHECK(!player_view_toggle_binoculars(v));
+    CHECK(!v.binoculars_requested);
+    CHECK(!v.binoculars_raised);
+    CHECK(!v.binoculars_view_active);
+}
+
+void test_nvg_toggle_gain_and_first_person_visibility() {
+    PlayerViewState v;
+    CHECK(!v.nvg_active);
+    CHECK(v.nvg_gain == kNvgGainMin);
+    CHECK(!player_view_nvg_visible(v));
+
+    CHECK(player_view_toggle_nvg(v));
+    CHECK(player_view_nvg_visible(v));
+    v.third_person = true;
+    CHECK(v.nvg_active); // camera suppression does not consume the toggle
+    CHECK(!player_view_nvg_visible(v));
+    v.third_person = false;
+    CHECK(player_view_nvg_visible(v));
+
+    CHECK(player_view_adjust_nvg_gain(v, 1) == 1);
+    CHECK(player_view_adjust_nvg_gain(v, 100) == kNvgGainMax);
+    CHECK(player_view_adjust_nvg_gain(v, -100) == kNvgGainMin);
+
+    // Gain controls remain live and retained while NVG itself is inactive.
+    CHECK(!player_view_toggle_nvg(v));
+    CHECK(!player_view_nvg_visible(v));
+    CHECK(player_view_adjust_nvg_gain(v, 3) == 3);
+    CHECK(!v.nvg_active);
+    CHECK(player_view_toggle_nvg(v));
+    CHECK(v.nvg_gain == 3);
+    CHECK(player_view_nvg_visible(v));
+}
+
 void test_fov_vertical_conversion() {
     // [orig: @ 0x58d900 fovY = 2*atan(tan(fovX/2)/aspect)] Square viewport: v == h.
     CHECK(std::fabs(fov_vertical_from_horizontal_deg(80.0f, 1.0f) - 80.0f) < 1e-4f);
@@ -246,6 +327,8 @@ int main() {
     test_equal_ticks_equal_state_regardless_of_frame_grouping();
     test_anchor_chase_quarter_step_and_seeding();
     test_fov_policy();
+    test_binoculars_effective_state_and_fov();
+    test_nvg_toggle_gain_and_first_person_visibility();
     test_fov_vertical_conversion();
     test_view_bias_blend();
     test_input_dispatch_gates();

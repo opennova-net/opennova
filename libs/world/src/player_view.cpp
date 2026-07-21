@@ -86,7 +86,47 @@ bool player_view_scope_up_blocked(const PlayerViewState &v, int32_t def_flags) {
     return v.move_held && (def_flags & 1) != 0;
 }
 
+bool player_view_toggle_binoculars(PlayerViewState &v) {
+    v.binoculars_requested = !v.binoculars_requested;
+    if (!v.binoculars_requested) {
+        // Effective states normally update once per simulation tick, but a
+        // toggle-off must not leave one frame of stale optics/body pose.
+        v.binoculars_raised = false;
+        v.binoculars_view_active = false;
+    }
+    return v.binoculars_requested;
+}
+
+void player_view_update_effective_modes(PlayerViewState &v, bool alive, bool round_ended) {
+    // Raw intent survives every temporary suppression. Third person only
+    // suppresses the optical view: remote observers still see the raised pose.
+    v.binoculars_raised =
+        v.binoculars_requested && alive && !round_ended && !v.move_held;
+    v.binoculars_view_active = v.binoculars_raised && !v.third_person;
+}
+
+bool player_view_toggle_nvg(PlayerViewState &v) {
+    v.nvg_active = !v.nvg_active;
+    return v.nvg_active;
+}
+
+int32_t player_view_adjust_nvg_gain(PlayerViewState &v, int32_t delta) {
+    // Widen before addition so an arbitrary caller-provided delta cannot
+    // overflow before the clamp.
+    const int64_t adjusted = static_cast<int64_t>(v.nvg_gain) + delta;
+    if (adjusted < kNvgGainMin) v.nvg_gain = kNvgGainMin;
+    else if (adjusted > kNvgGainMax) v.nvg_gain = kNvgGainMax;
+    else v.nvg_gain = static_cast<int32_t>(adjusted);
+    return v.nvg_gain;
+}
+
+bool player_view_nvg_visible(const PlayerViewState &v) {
+    return v.nvg_active && !v.third_person;
+}
+
 float player_view_fov_h_deg(const PlayerViewState &v, int32_t def_flags, float scope_max_mag) {
+    // Effective-mode refresh guarantees this optical view is first-person.
+    if (v.binoculars_view_active) return kBinocularCameraFovHDeg;
     // Third person renders at the base fov regardless of the scope state.
     // [orig: @ 0x4df3fa g_camera_mode -> 80.0]
     if (v.third_person) return kPlayerCameraFovHDeg;

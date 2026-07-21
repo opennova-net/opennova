@@ -423,6 +423,7 @@ func _send_weapon_switch_input(captured: bool) -> void:
 
 func after_world_tick() -> void:
 	if not _has_player():
+		_set_world_nvg_view(false, 0)
 		_set_fly_camera_locked(false)
 		_release_mouse_capture()
 		_clear_models()
@@ -433,6 +434,8 @@ func after_world_tick() -> void:
 		_view = null
 		return
 	_view = _world.local_player_view() if _world.has_method("local_player_view") else null
+	_set_world_nvg_view(_view != null and _view.nvg_visible,
+			_view.nvg_gain if _view != null else 0)
 	# Place the camera/viewmodel root for THIS tick before consuming one-shot
 	# presentation events. On the first live tick the freshly built model is still
 	# at its default transform; on later ticks it otherwise trails movement/look by
@@ -782,6 +785,23 @@ func handle_key_input(event: InputEvent, active: bool) -> bool:
 		_third_person = not _third_person
 		_sync_camera_mode()
 		return true
+	var physical := key.physical_keycode if key.physical_keycode != 0 else key.keycode
+	if physical == KEY_B:
+		if _world.has_method("request_local_player_binoculars_toggle"):
+			_world.request_local_player_binoculars_toggle()
+		return true
+	if physical == KEY_N:
+		if _world.has_method("request_local_player_nvg_toggle"):
+			_world.request_local_player_nvg_toggle()
+		return true
+	if physical == KEY_EQUAL or physical == KEY_PLUS or physical == KEY_KP_ADD:
+		if _world.has_method("request_local_player_nvg_gain"):
+			_world.request_local_player_nvg_gain(1)
+		return true
+	if physical == KEY_MINUS or physical == KEY_KP_SUBTRACT:
+		if _world.has_method("request_local_player_nvg_gain"):
+			_world.request_local_player_nvg_gain(-1)
+		return true
 	if key.keycode == KEY_Z:
 		_request_stance(2)  # prone [orig: case 170 sends 0xAA]
 		return true
@@ -820,7 +840,13 @@ func _reset_state() -> void:
 	_reload_was_down = false
 	_scope_was_down = false
 	_view = null
+	_set_world_nvg_view(false, 0)
 	_sync_camera_mode()
+
+
+func _set_world_nvg_view(active: bool, gain: int) -> void:
+	if _world != null and _world.has_method("set_local_player_nvg_view"):
+		_world.set_local_player_nvg_view(active, gain)
 
 
 func _has_player() -> bool:
@@ -909,14 +935,46 @@ func aim_screen_point() -> Vector2:
 		return Vector2.INF  # 1P: the HUD pins the design center [orig: @0x5928a0]
 	if _world == null or _camera == null or not _has_player():
 		return Vector2.INF
-	var yr := deg_to_rad(_world.local_player_yaw_deg())
-	var pr := deg_to_rad(_world.local_player_pitch_deg())
+	var angles := _aim_angles_deg()
+	var yr := deg_to_rad(angles.x)
+	var pr := deg_to_rad(angles.y)
 	var forward := Vector3(sin(yr) * cos(pr), sin(pr), -cos(yr) * cos(pr))
 	var eye := _eye_position(_world.local_player_position())
 	var target := eye + forward * AIM_PROJECT_RANGE
 	if _camera.is_position_behind(target):
 		return Vector2.INF
 	return _camera.unproject_position(target)
+
+
+# The binocular rangefinder targets the same aim ray as the camera. Retail
+# measures from entity Position to the collision/far endpoint, truncates to an
+# integer, and clamps the display to 1..1000.
+func aim_range_units() -> int:
+	if _world == null or _camera == null or not _has_player():
+		return 1
+	var pos: Vector3 = _world.local_player_position()
+	var eye := _eye_position(pos)
+	var angles := _aim_angles_deg()
+	var yr := deg_to_rad(angles.x)
+	var pr := deg_to_rad(angles.y)
+	var forward := Vector3(sin(yr) * cos(pr), sin(pr), -cos(yr) * cos(pr))
+	var endpoint := eye + forward * AIM_PROJECT_RANGE
+	var world_3d := _camera.get_world_3d()
+	if world_3d != null:
+		var query := PhysicsRayQueryParameters3D.create(eye, endpoint)
+		var hit: Dictionary = world_3d.direct_space_state.intersect_ray(query)
+		if not hit.is_empty():
+			endpoint = hit.get("position", endpoint)
+	return clampi(int(pos.distance_to(endpoint)), 1, 1000)
+
+
+func _aim_angles_deg() -> Vector2:
+	var yaw := float(_world.local_player_yaw_deg())
+	var pitch := float(_world.local_player_pitch_deg())
+	if _view != null and _view.binoculars_view_active:
+		yaw += _view.binocular_yaw_offset_deg
+		pitch += _view.binocular_pitch_offset_deg
+	return Vector2(yaw, pitch)
 
 
 # The eye anchor: Position + CameraOffset, where the local player's CameraOffset is
@@ -972,8 +1030,9 @@ func _update_player_camera() -> void:
 	if _world == null or _camera == null:
 		return
 	var pos: Vector3 = _world.local_player_position()
-	var yr := deg_to_rad(_world.local_player_yaw_deg())
-	var pr := deg_to_rad(_world.local_player_pitch_deg())
+	var angles := _aim_angles_deg()
+	var yr := deg_to_rad(angles.x)
+	var pr := deg_to_rad(angles.y)
 	var forward := Vector3(sin(yr) * cos(pr), sin(pr), -cos(yr) * cos(pr))
 	var eye := _eye_position(pos)
 	if _third_person:
@@ -1143,7 +1202,10 @@ func _update_viewmodel() -> void:
 	# the frame shows one or the other [orig: selectors/clear @0x5ca299..0x5ca304;
 	# the card path @0x5caaf3..0x5cab15 and the viewmodel candidate @0x5ca32c].
 	var carded := _view != null and _view.scope_card_active
-	_viewmodel.visible = ((not _third_person) and not carded) or debug_force_viewmodel
+	var binoculars := _view != null and _view.binoculars_view_active
+	_viewmodel.visible = (
+			((not _third_person) and not carded and not binoculars)
+			or debug_force_viewmodel)
 	_update_viewmodel_pass()
 
 

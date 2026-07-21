@@ -201,6 +201,10 @@ func tick() -> void:
 	var scope_fraction := 0.0
 	var scope_card := false
 	var fov_deg := 80.0
+	var binoculars_view_active := false
+	var binocular_range := 1
+	var nvg_visible := false
+	var nvg_gain := 0
 	var lv: PlayerLocalView = _world.local_player_view() \
 			if _world.has_method("local_player_view") else null
 	if lv != null:
@@ -208,6 +212,12 @@ func tick() -> void:
 		scope_fraction = lv.scope_fraction
 		scope_card = lv.scope_card_active
 		fov_deg = lv.fov_h_deg
+		binoculars_view_active = lv.binoculars_view_active
+		nvg_visible = lv.nvg_visible
+		nvg_gain = lv.nvg_gain
+	if binoculars_view_active and _player_host != null \
+			and _player_host.has_method("aim_range_units"):
+		binocular_range = clampi(int(_player_host.aim_range_units()), 1, 1000)
 
 	_game_hud.update_info({
 		"health_fraction": clampf(frac, 0.0, 1.0),
@@ -223,6 +233,10 @@ func tick() -> void:
 		"scope_fraction": scope_fraction,
 		# The SIGHTS card switch [orig: Player_IsEquippedWeaponScoped @0x4dcc80].
 		"scope_card": scope_card,
+		"binoculars_view_active": binoculars_view_active,
+		"binocular_range": binocular_range,
+		"nvg_visible": nvg_visible,
+		"nvg_gain": nvg_gain,
 		# The crosshair's witnessed anchor: Vector2.INF in first person (the HUD pins
 		# the design center @0x5928a0), the projected aim in 3P/spectate (@0x592910).
 		"aim_screen": _player_host.aim_screen_point() \

@@ -501,6 +501,16 @@ private:
 	// The sim OWNS the engaged bit [orig: g_scopeEngaged @ 0x82CE94]: the host requests
 	// toggles and reads the state; the FSM's unscope/rescope events flip it here.
 	opennova::world::PlayerViewState player_view_{};
+	// Night vision temporarily drops an Inset scope and remembers that it should be
+	// restored when NVG is switched back off [orig: Player_ToggleNightVision
+	// @ 0x4e08b0, g_restoreScopeAfterNVG].
+	bool nvg_scope_restore_ = false;
+	// The binocular toggle seeds one fixed-radius random aim displacement. It
+	// survives movement/death/third-person suppression until the raw toggle drops.
+	float binocular_yaw_offset_deg_ = 0.0f;
+	float binocular_pitch_offset_deg_ = 0.0f;
+	void reset_local_player_view_effects();
+	void refresh_local_player_view_effects();
 	void tick_local_player_view();
 	// The host-sampled head-bone eye (mission space), the 3P anchor-chase target
 	// [orig: ThirdPersonCamera_Update @ 0x437b70 target = Position + CameraOffset,
@@ -779,6 +789,17 @@ public:
 	// [orig: input case 6 @ 0x4e0420; Player_ToggleWeaponScope @ 0x4df0c0;
 	//  WeaponSlot_TryQueueScopeUp @ 0x53f050 / ..ScopeDown @ 0x53f080]
 	bool request_local_player_scope_toggle();
+	// Retail action 26 (default B): toggles the persistent binocular request.
+	// The effective raised/view bits are derived each tick from movement, life,
+	// round-end, and camera mode. Returns the new requested state; false also
+	// represents a refused toggle.
+	bool request_local_player_binoculars_toggle();
+	// Retail action 41 (default N), deliberately independent of the mission's
+	// EnableNVG night-semantics flag. Returns the new active state.
+	bool request_local_player_nvg_toggle();
+	// Retail actions 56/57 (default +/-), available even while NVG is off.
+	// Returns the clamped gain in [0,4].
+	int request_local_player_nvg_gain(int p_delta);
 	// The host's camera mode, driving the fov suppression + anchor chase
 	// [orig: g_camera_mode @ 0xA890C8].
 	void set_local_player_camera_third_person(bool p_third_person);
