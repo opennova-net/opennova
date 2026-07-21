@@ -44,6 +44,7 @@ namespace opennova::world {
 class World;
 class CollisionWorld;
 class RoundSim;
+struct FixedVec3;
 struct LiveRound;
 struct AmmoTableEntry;
 
@@ -71,6 +72,10 @@ ThrowClass throw_class_from_tag(const char *tag);
 // [orig: RoundData_SpawnRound @ 0x4ec787..0x4ec79d].
 int32_t throwable_item_for_viewer(int32_t friendly_item, int32_t enemy_item,
                                   uint8_t item_team, uint8_t viewer_team);
+
+// Whether a satchel/claymore impact face is upward-facing enough to accept a
+// stick [orig: Entity_UpdateSatchelPhysics @ 0x448858 / claymore @ 0x447802].
+bool throwable_surface_accepts_stick(const FixedVec3 &normal_q16);
 
 // Host-fed binding rows: item type id (items.def id - 100000, the TrcrID space)
 // -> {think class (ai_function), motor class (move_function)}.

@@ -49,6 +49,15 @@ int32_t throwable_item_for_viewer(int32_t friendly_item, int32_t enemy_item,
     return friendly_item;
 }
 
+bool throwable_surface_accepts_stick(const FixedVec3 &normal_q16) {
+    // Retail tests the face normal, not the reflected velocity: nz must point
+    // upward and exceed half the horizontal normal magnitude
+    // [orig: satchel @ 0x448858..0x4488c4; claymore @ 0x447802..0x4478a7].
+    if (normal_q16.z <= 0) return false;
+    const double horizontal = std::hypot(double(normal_q16.x), double(normal_q16.y));
+    return double(normal_q16.z) > horizontal * 0.5;
+}
+
 ThrowClass throw_class_from_tag(const char *tag) {
     if (tag == nullptr || tag[0] == '\0') return ThrowClass::kNone;
     // The retail tables match the full 8-byte tag [orig: the class-name scans
@@ -114,6 +123,13 @@ struct MotorFrame {
     int32_t vx, vy, vz;    // velocity Q16 / tick
     int32_t prev_z;        // pre-move z (the water-transition edge)
 };
+
+int32_t throwable_water_q16(const World &world) {
+    // Environment zero means no authored water. Fixed-point cannot represent
+    // the host's -1e9 dry sentinel, so INT32_MIN is the lowest equivalent
+    // plane for the motor comparisons.
+    return world.env.water_z != 0 ? world.env.water_z : INT32_MIN;
+}
 
 void load_frame(const LiveRound &r, MotorFrame &f) {
     f.px = to_fixed(r.pos.x);
@@ -302,7 +318,7 @@ static bool motor_nade(World &world, RoundSim &sim, LiveRound &r,
                        const terrain::TerrainHeightField *terrain) {
     MotorFrame f;
     load_frame(r, f);
-    const int32_t water = world.env.water_z;
+    const int32_t water = throwable_water_q16(world);
     bool bounce_eligible = true; // [orig: v91]
     bool ground_hit = false;     // [orig: v86]
     int32_t ground_surface = 0;  // effect-tag surface for the bounce dust
@@ -469,7 +485,7 @@ static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
                          bool claymore) {
     MotorFrame f;
     load_frame(r, f);
-    const int32_t water = world.env.water_z;
+    const int32_t water = throwable_water_q16(world);
     bool ground_hit = false;
     bool rest = false;
     int32_t ground_surface = 0;
@@ -552,10 +568,8 @@ static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
             if (hit.geometry_entity.valid()) {
                 const int32_t n[3] = {hit.normal_q16.x, hit.normal_q16.y,
                                       hit.normal_q16.z};
-                const int32_t before = speed;
                 reflect_velocity(f, n);
-                const double rz = from_fixed(f.vz);
-                if (to_fixed(std::fabs(rz)) > before / 2) {
+                if (throwable_surface_accepts_stick(hit.normal_q16)) {
                     // stick to the face
                     stick_pose_from_normal(n, claymore, r.yaw_bam, r.pitch_bam,
                                            r.roll_bam);

@@ -296,6 +296,29 @@ void test_tracer_item_binding_fallbacks() {
     }
 }
 
+// Zero is the environment's no-water sentinel, not a plane at mission Z=0.
+// A grenade below zero in a dry mission therefore takes the above-water
+// gravity branch [orig: Env_WaterHeightFixed authoring gate + motor @ 0x443ffa].
+void test_zero_water_is_dry_below_altitude_zero() {
+    Rig rig;
+    const int slot = rig.throw_ammo(kAmmoGrenade, Vec3{10, 10, -10}, 0, 0);
+    CHECK(slot >= 0);
+    rig.w.round_sim.tick(rig.w, nullptr, nullptr);
+    const LiveRound &round = rig.w.round_sim.rounds[size_t(slot)];
+    CHECK(to_fixed(round.vel.z) == -167);
+    for (const RoundImpact &impact : rig.w.round_sim.impacts)
+        CHECK(impact.effect_tag != 11);
+}
+
+// Retail tests the hit face itself: upward nz and nz > hypot(nx,ny)/2.
+void test_charge_stick_surface_gate() {
+    CHECK(throwable_surface_accepts_stick(FixedVec3{0, 0, 65536}));
+    CHECK(throwable_surface_accepts_stick(FixedVec3{46341, 0, 46341}));
+    CHECK(!throwable_surface_accepts_stick(FixedVec3{60000, 0, 20000}));
+    CHECK(!throwable_surface_accepts_stick(FixedVec3{65536, 0, 0}));
+    CHECK(!throwable_surface_accepts_stick(FixedVec3{0, 0, -65536}));
+}
+
 // The grenade motor: gravity arc, terrain bounce (velZ * -0.2 + spin kicks),
 // and the fuse queuing the kill zone at expiry [orig: @ 0x443F50 + the 0x1000
 // expiry head].
@@ -596,6 +619,8 @@ int main() {
     test_power_throw_charge();
     test_charge_scales_spawn_speed();
     test_tracer_item_binding_fallbacks();
+    test_zero_water_is_dry_below_altitude_zero();
+    test_charge_stick_surface_gate();
     test_grenade_bounce_and_fuse();
     test_grenade_fuse_tick_boundaries();
     test_ballistic_expiry_is_silent();
