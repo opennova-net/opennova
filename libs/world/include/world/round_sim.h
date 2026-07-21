@@ -32,15 +32,19 @@
 //    retail byte +692 is deliberately not inherited. Pool-slot identity and other
 //    bytes outside LiveRound remain unrepresentable rather than guessed; this in-slot
 //    projection first advances on the following RoundSim tick.
-//  * remaining flight gaps are the randomized tumble PRNG/local frame, the custom
-//    useownmove guidance callbacks, and float LiveRound position/velocity carriers
+//  * remaining flight gaps are the randomized tumble PRNG/local frame, the guided
+//    (designator/missile) callbacks, and float LiveRound position/velocity carriers
 //    around the per-tick fixed-point core. Unresolved/unposed persons continue to
 //    use the characterized torso fallback.
+//  * useownmove rounds run the throwable class motors (world/throwables.cpp,
+//    world-wac-ai-re §26): grenade arc/bounce/fuse, satchel/claymore stick +
+//    placed-device conversion; the spawn dispatches instantkillzone (0x400),
+//    Detonatesatchels (0x20), and the claymore pellet fan (0x20000) before the
+//    ballistic default, and the PowerThrow charge byte scales launch speed.
 //  * no spawn-time Weapon_CalcRandomSpreadOffset, impact-energy armor-density loss,
-//    bounce, or shell physics yet.
+//    or shell-eject physics yet.
 //  * kztype Knife(1)/Medic(3) raycast leaves and item-placing ammo (`hasitem`) do not
-//    spawn a sim round; explosive kill zones (kz_* radius damage) apply direct-hit
-//    kinetic damage only.
+//    spawn a sim round.
 #ifndef OPENNOVA_WORLD_ROUND_SIM_H
 #define OPENNOVA_WORLD_ROUND_SIM_H
 
@@ -62,6 +66,10 @@ class CollisionWorld;
 
 class World;
 
+struct AmmoTableEntry; // world/ammo_table.h
+
+enum class ThrowClass : uint8_t; // world/throwables.h
+
 struct RoundSpawnParams {
     EntityHandle owner;               // the shooter entity (skipped in the hit test)
     uint16_t shooter_handle = 0xFFFF; // pool<<12|slot, for death credit
@@ -71,6 +79,10 @@ struct RoundSpawnParams {
     int32_t ammo_index = -1;          // resolved adm round_type -> AmmoTable index
     uint8_t adm_index = 0;
     uint16_t shot_seq = 0;
+    // The PowerThrow charge byte [orig: fire descriptor +20 <- MountSlot+0x5C;
+    // 1..254 scale the ammo velocity by charge/256 @ 0x4ec5bb, 0/255 = full].
+    // Rides the wire as the round event's slot_byte (ring+32).
+    uint8_t charge = 0;
 };
 
 // One in-flight round. [orig: 780-B record; the fields we simulate: pos, velocity
@@ -95,6 +107,34 @@ struct LiveRound {
     // The round's trail channel [orig: round+0x2B4 <- CEffectEmitterPool_AllocSlot
     // @ 0x4ec774]; -1 = no visual (non-tracer, NoTracers rules, or pool full).
     int32_t trail_slot = -1;
+
+    // --- throwable state (zeroed on ballistic rounds; world-wac-ai-re §26) ---
+    // Orientation + spin [orig: round +16/+20/+24 angles, +164/+168/+172 spin
+    // rates; the class init callback seeds 1 deg/tick @ 0x4435A0].
+    int32_t yaw_bam = 0;
+    int32_t pitch_bam = 0;
+    int32_t roll_bam = 0;
+    int32_t spin_yaw = 0;
+    int32_t spin_pitch = 0;
+    int32_t spin_roll = 0;
+    uint8_t bounce_count = 0;      // [orig: byte +341]
+    // The TrcrID item the round renders as (items.def id - 100000) — picked
+    // friendly/enemy by the spawning host's team [orig: +28 ItemTypeIndex
+    // @ 0x4ec79b -> Entity_InitFromItemDef].
+    int32_t item_type_id = 0;
+    // Class bindings resolved from the item's ai_function/move_function tags
+    // [orig: itemDef updateCallback -> +452, deathCallback -> +456].
+    ThrowClass motor{};
+    ThrowClass think{};
+    // Landed-on / stuck-to entity [orig: +40 groundEntity; the motors parent
+    // and follow it].
+    EntityHandle parent;
+    Vec3 parent_prev_pos;
+    int32_t parent_prev_yaw_bam = 0;
+    bool parent_tracking = false;
+    // Armed at 2 ticks remaining above water; the expiry queues the kill zone
+    // [orig: the runtime 0x1000 flag @ 0x444a29 consumed by the update head].
+    bool det_at_expiry = false;
 };
 
 // A death the damage pass detected this tick — drained by the host session, which owns
@@ -194,7 +234,10 @@ class RoundSim {
 public:
     static constexpr int kCapacity = 512; // [orig: 128 groups x 4 sub-slots @0xB7E1A8]
 
-    std::array<LiveRound, kCapacity> rounds{};
+    // Heap-backed pool (fixed kCapacity size for the life of the sim): a World
+    // embeds this sim, and hosts/tests stack-allocate Worlds — the 512-slot
+    // record array stays off that footprint.
+    std::vector<LiveRound> rounds = std::vector<LiveRound>(kCapacity);
     int active_count = 0;
 
     // Deaths detected by the damage pass, in tick order. The host session drains this
@@ -244,6 +287,11 @@ public:
     // Returns the round slot, or -1 (pool full / non-ballistic ammo / null ammo).
     int spawn(World &world, const RoundSpawnParams &params);
 
+    // The pellet fan for claymore-flag ammo [orig: Weapon_SpawnProjectileBurst
+    // @ 0x4EB900]. Returns the first pellet slot or -1.
+    int spawn_burst(World &world, const RoundSpawnParams &params,
+                    const AmmoTableEntry &ammo);
+
     // One 62 Hz step for every live round [orig: Weapon_UpdateAllProjectiles @ 0x4EC020
     // -> Projectile_UpdatePhysics @ 0x4E9D70]: advance along velocity, terrain stop,
     // ordered terrain/water/item/person collision through `collision`, fixed-point
@@ -256,6 +304,12 @@ public:
     // Mission restart discards all transient projectile/presentation state.
     void reset() noexcept;
 };
+
+// Queue an explosive round's kill zone at its stop [orig: the kztype-gated
+// WeaponEffect_PushExplosionQueueEntry push @ 0x4e83c0 the impact/expiry
+// handlers run]. Shared with the throwable motors (world/throwables.cpp).
+void detonate_round(World &world, const LiveRound &round, const Vec3 &at,
+                    const AmmoTableEntry &ammo);
 
 } // namespace opennova::world
 

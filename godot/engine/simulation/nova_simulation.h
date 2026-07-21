@@ -306,6 +306,10 @@ private:
 	opennova::world::WeaponSlotState weapon_slot_{};
 	bool weapon_active_ = false;
 	bool weapon_fire_held_ = false;
+	// PowerThrow windup [orig: g_fireChargeStartTick @ 0xB76800]; 0 = idle. The
+	// release stamps pending_throw_charge_ for the next fire commit.
+	uint32_t power_throw_start_tick_ = 0;
+	uint8_t pending_throw_charge_ = 0;
 	bool weapon_fire_pressed_ = false;
 	bool weapon_reload_pressed_ = false;
 	uint64_t weapon_play_serial_ = 0;
@@ -1079,6 +1083,12 @@ public:
 	// first, capped at RoundSim::kDebugTrailCap. Covers every resolved outcome
 	// including face-miss fly-ons (the "why didn't that register" case).
 	Dictionary get_round_debug() const;
+	// Per-frame visual snapshot of item-modeled throwables: flying rounds with a
+	// TrcrID model plus placed devices. Entries: {key, item_id, pos (godot),
+	// rotation_deg (pitch, yaw, roll — placer convention)}; the enemy-team item
+	// swap follows the viewer team [orig: the S2C 0x59 dual TrcrID words +
+	// the spawner's team pick @ 0x4ec79b; world-wac-ai-re §26].
+	Array get_throwable_visuals() const;
 
 	// The round hit-detection reality for the F3 hitbox view:
 	// { entities: [ { entity_handle, pos, bound_radius, husk, has_faces,

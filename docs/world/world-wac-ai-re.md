@@ -4305,3 +4305,236 @@ Entry comments on `@ 0x5db290 / 0x4e64e0 / 0x4e8280 / 0x5db830 / 0x5db3a0 /
 4. The round+0x2AC spiral-offset writer (the rocket corkscrew source).
 5. The style blocks' +8/+0xC words — find the consumer (possibly the distortion
    or an unwalked LOD path).
+
+## 26. Appendix: throwables — grenades, satchels, claymores, mines, the detonator (engine-research, 2026-07-20)
+
+Reimpl: `libs/world/throwables.{h,cpp}` (motors + placed devices + thinks),
+the `RoundSim` spawn dispatches and useownmove leg (`libs/world/round_sim.{h,cpp}`),
+the PowerThrow charge chain (`godot/engine/simulation/nova_simulation.cpp`), the
+class/trait feed (`resolve_item_traits`), and `godot/engine/world/throwable_present_pass.gd`.
+Binary: retail `Jointops.exe` (kong IDB, imagebase 0x400000). ctest `throwables`
++ the claymore rows in `def_parse_ammo`.
+
+### 26.1 Verdicts
+
+| Component | Verdict | Evidence |
+|---|---|---|
+| PowerThrow charge (press gate, release curve, speed scale) | MATCHING | 3 citations; ctest `throwables` test_power_throw_charge / test_charge_scales_spawn_speed |
+| Grenade motor (drag/gravity/spin/bounce/water/fuse) | MATCHING (float carriers around the Q16 core, the RoundSim rule) | §26.4; test_grenade_bounce_and_fuse, test_ballistic_expiry_is_silent |
+| Satchel/claymore motors + rest conversion | MATCHING (stick pose geometric, D-THROW-4) | §26.5; test_satchel_places_device |
+| Placed-device think/detonate chain (satchel/claymore/AV mine) | MATCHING | §26.6; test_detonator_chain, test_claymore_cone_trigger, test_avmine_proximity_is_data_dead, test_team_trigger_claymore_rule |
+| Owner-death cleanup | MATCHING (sim-side owner poll stands in for the death hook) | §26.6; test_owner_death_removes_devices |
+| items.def class binding (ai_function/move_function) | MATCHING | §26.2; the resolve_item_traits feed |
+| ammo.def `kz_pieslice` HALF-angle | MATCHING (fixed this slice — was full-angle) | def_parse_ammo claymore row |
+| Landmine items (`lndm`) | witnessed, unported | D-THROW-6 |
+| MP replication of placed devices (S2C 0x59/0x12 encoders) | witnessed + decoded (net-re §5.36), sim consumption unwired | D-THROW-7 |
+
+### 26.2 The class architecture — items.def tags drive everything
+
+A throwable's behavior binds through its **TrcrID item**, not the ammo:
+`RoundData_SpawnRound @ 0x4ec0d0` picks `frndlyTrcrID`(+16)/`foeTrcrID`(+20) by
+round team vs the local player's team `[orig: @ 0x4ec79b]`, stores it as the
+round's ItemTypeIndex (+28) and runs `Entity_InitFromItemDef @ 0x49e550`, which
+copies from the item def: the **per-tick motor** (`move_function` tag against
+the physics table `@ 0x82abc8`) into round+452, the **event/think callback**
+(`ai_function` tag against `g_EntityClassEventCallbackTable @ 0x813000`, rows
+12–17: squib/nade/schl/clym/vmne/lndm at `@ 0x813120..0x8131A8`) into +456,
+def Health/Armor, and the init callback (`Entity_InitThrowableSpin_* @ 0x4435A0/
+C0/E0/610`) which seeds **1 deg/tick spin** on +164/+168/+172 (the constant
+0xB60B60 = 11930464 BAM, not a pointer). JO data (ids = items.def id − 100000):
+frag 1883 + flashbang 1875 `nade/nade`, satchel 1891 `schl/schl` (foe id 0 —
+**enemies see no satchel model**), claymore 1895 `clym/clym`, AT mine 368
+`vmne/schl` (mine think, satchel flight). TrcrID absent or NoTracers-suppressed
+→ no model, **no motor** — the round drifts and only the fuse leg still runs.
+
+Ammo pairs intern by name in `WeaponDef_ResolveAllReferences @ 0x540270`:
+`g_ammo_satchel/satchelboom/claymore/claymoreshrapnel/claymorekillzone/AV_Mine/
+AV_Minekillzone @ 0x24E7DD8/D4/D0/CC/C8/C0/C4`.
+
+### 26.3 The PowerThrow charge
+
+- Press (fire binding, jumptable 0x4E048B): weapon def+8 Flags sign bit
+  0x80000000 = `PowerThrow`; fireable (`WeaponSlot_CanFireInCurrentState`) with
+  ammo → `g_fireChargeStartTick @ 0xB76800` = tick; **no fire on press**
+  `[orig: @ 0x4e08fd]`.
+- Release `[orig: @ 0x4e07e9]`: held < 31 ticks → charge 255 (a tap throws
+  FULL power); else `clamp((held−31)/93, 0.1, 1.0) × 255` — 10% at 0.5 s
+  rising to 100% at ~2.5 s (flt_7CD390 = 1/93, flt_7C69F4 = 0.1, flt_7CA29C
+  = 255). → `WeaponSlot_RequestFire @ 0x53efa0` arg 3 → MountSlot+0x5C.
+- `WeaponAction_Fire @ 0x542b10` passes slot+0x5C as
+  `Entity_FireWeaponAndSendPacket @ 0x42bd80` arg 6 → fire descriptor +20 →
+  the spawner scales launch speed ×charge/256 for charge ∈ [1..254]
+  `[orig: @ 0x4ec5bb]`; 0 and 255 = unscaled. The byte rides the wire as the
+  round event's `slot_byte` (ring+32, flags|0x80 leg, net-re §5.60);
+  `NetPacket_DeserializeRoundEvent` restores it into slot+0x5C
+  `[orig: @ 0x42f769/@ 0x42f935]`. The HUD windup meter reads the same global
+  (`HUD_DrawWeaponReloadBar @ 0x599881 leg`, D-THROW-5).
+
+### 26.4 The grenade motor — `Entity_UpdateGrenadePhysics @ 0x443F50` (defined this session)
+
+Per tick, Q16 with +0x8000 rounding throughout: drag (+28) on velX/velY then
+advance; gravity split −167 above water / −55 submerged (submerged also
+disables the bounce this tick); spin integration yaw += +164, pitch += +168
+(roll spin only ever decays); horizontal speed < 2048 → treated as 0. Water:
+entry (prev above, now below, moving) = splash tag 11 + velXY ×0.25; breach
+upward = ×0.45 on all three; submerged = spins ×0.9, velocity ×0.95. Terrain
+(`Terrain_SampleHeightBilinear @ 0x6067b0`; skipped for nocollide 0x80):
+clamp, spins ×0.8, velXY ×0.8; moving → **bounce**: velZ ×−0.2 (−13107),
+bounce_count(+341)++, spin kicks +11930464×(PRNG16%10−5) yaw and
++11930464×(PRNG16%10)−59652320 pitch (`PRNG_Next16 @ 0x6130a0`), surface
+effect tag material+4; at rest → spins 0, roll 0x3FFFFFC0 (lies flat), pitch
+0. Landed-on entity (+40) → parent-follow (`Entity_InterpolateFromParentDelta
+@ 0x4a8d60`). The swept item raycast covers pools 2/1 ONLY (grenades pass
+through persons); face hits reflect via `Physics_ComputeReflectionForce
+@ 0x4e4310` — normal = the CFAC face normal (fallback −v̂), v' = tangential +
+(1−|v·n|)·n̂, rescaled to **0.35 × |v_in|** (flt_7C6FA8). ARM: elapsed ==
+arm_age(+12) → the ammo obj row (tag 4) fires once — the smoke-pour start.
+FUSE: at 2 ticks remaining, above water → runtime flag 0x1000 (detonate at
+expiry: the `Projectile_UpdatePhysics @ 0x4e9d70` head queues
+`WeaponEffect_PushExplosionQueueEntry @ 0x4e83c0` + obj tag 4 **only under
+0x1000** — an expiring ballistic round vanishes silently); submerged →
+immediate detonation with depth-keyed tags (>3 u: 27+25, else 26) and zeroed
+age. The useownmove leg `[orig: @ 0x4e9f06]` runs ONLY the motor (+ proximity
+list): no stock ray, gravity, drag, or collision; noage (0x4000) skips aging.
+
+### 26.5 The satchel/claymore motors — `Entity_UpdateSatchelPhysics @ 0x4482A0` / `Entity_UpdateClaymorePhysics @ 0x4472F0` (renamed this session, ex Entity_UpdateShellPhysics / Entity_ProcessFallingPhysics)
+
+One skeleton: drag with |v| < 256 epsilon stop; **inverted gravity** −55 above
+water (floaty toss) / −167 submerged (sinks fast); satchel angles −= spins,
+claymore yaw −= spin with pitch pinned 0 (stands upright); water entry splash
+tag 11, submerged damp (satchel spins ×0.98 vel ×0.94; claymore velXY ×0.5);
+terrain = full stop (velocity zeroed, no bounce) + surface effect. An object
+hit reflects; a strong hit (reflected z-speed > half the impact speed) STICKS:
+`Entity_OrientToSurfaceNormal @ 0x445fa0` pose (satchel roll −90°, claymore
+keeps yaw), spins zeroed, parent = the hit entity (satchel-on-vehicle rides
+it). REST (height over ground ≤ 0xFF, not rising): +4096 z lift when
+unparented, then on the authority `Entity_CloneFromTemplateByType @ 0x4398a0`
+(pool by items.def type: Person→0, Vehicle/object→1, Building/Decoration→2)
++ `Entity_ConvertRoundToPlacedEntity @ 0x5455B0` (memcpy of the round's first
+0x2B4 bytes — pos/angles/team/owner/ammo/health/callbacks all carry; source
+round expires next tick; placed motor +452 = parent-interp or null) + **S2C
+0x59** (32 B, mask 0x90 — net-re §5.36) + the stat op (`sub_5119E0`, op 3
+satchel / 4 claymore); a non-authority round instead clears noage and
+self-expires in 248 ticks.
+
+### 26.6 The placed-device think chain
+
+`Entity_UpdatePool1Slot @ 0x4b8dd0` (defined this session) per pool-1 entity
+per tick: +0x144 removal countdown → `Server_RemoveEntityAndNotify @ 0x50a270`
+at 0; remaining age (+684) −1/tick; at ≤ 0 → `Entity_BuildProximityList` +
+**deathCallback(entity, 0, 0) every tick**. The clone kept the round's un-aged
++684 (noage), so **the leftover ammo max_age IS the arm delay** (satchel/
+claymore 1 s). Item pools think staggered: pool 2 every 8 ticks (age −8), pool
+3 every 64 `[orig: Entity_UpdateAllEntities @ 0x4c2100 loops @ 0x4c2288 /
+@ 0x4c2340]`.
+
+The thinks (renamed this session):
+- `Entity_SatchelThink @ 0x443670` (ex Entity_HandleInfantryDeath): authority,
+  Health(+286) ≤ 0 → spawn a fire descriptor at the device position with
+  `g_ammo_satchelboom` (owner +368 credited, +442 hit word) →
+  the instantkillzone leg queues the blast; above water obj tag 4, submerged
+  depth tags 27+25/26; `Server_SendEntityStatePacket(entity, 0)` +
+  `Entity_Destroy @ 0x43e810`. Non-authority mirrors on eventType 4.
+- `Entity_ClaymoreThink @ 0x4438C0` (ex Entity_HandleDeathExplosion): Health ≤
+  0 OR `Entity_FindEnemyInCone @ 0x43cba0` → spawn `claymoreshrapnel` (flag
+  0x20000 → the fan) + `claymorekillzone` (instantkillzone) → destroy.
+- `Entity_AVMineThink @ 0x443BB0` (ex Entity_HandleVehicleDeathExplosion):
+  Health ≤ 0 OR `Entity_FindEnemyVehicleInCone @ 0x43c9f0` → `AV_Minekillzone`.
+- `Entity_LandmineThink @ 0x441A40` (ex check_bone_ground_contact): the mission
+  minefield item — up to 14 per-mine bones (int16 triplets, spent mask +308);
+  persons (pool 0, stance z-adjust: stand −1 u, crouch −0.5 u, prone none via
+  MoveOrder +300 bits 0x100/0x200) within the item radius then 0.75 u per
+  bone; ground-clamped moving vehicles by bounds; per-bone size byte[784+n]
+  1/2 → def ammo +692 (`SMALLLANDMINE`) / 3/4 → +696 (`LARGELANDMINE`) via
+  `Weapon_FireProcess @ 0x53f5b0`; all bones spent → destroy. **Unported**
+  (D-THROW-6).
+
+The cone tests: eye = device + 0.3 u; candidate gates active/alive/controller,
+team ≠ device team OR the `TeamTriggerClaymore` host rule (dword_24D1E34 &
+0x8000, admin set `@ 0x405f16`); 3D distance ≤ ammo kz_minradius(+52); 64-bit
+|(−Yaw) − atan2(dy,dx)| ≤ kz_pieslice(+60); LOS `Physics_RaycastSegment
+@ 0x415550` result 1..2. The vehicle variant adds def kind(+92) == 1, skips
+the device's own parent, and requires |speed(+0x29C)| ≥ 3276 (0.05 u/t —
+parked vehicles never trigger). **`kz_pieslice` stores the HALF-angle**:
+`AmmoDef_ParseProperty @ 0x40ad33` parses `(atol / 2) × 11930464` (signed
+div-2 then the deg→BAM multiply) — our parser stored the full angle until
+this slice (fixed; the §18.1/net-re gloss lacked the ÷2). Retail `AV_Mine`
+authors NO kz_pieslice → +60 = 0 → the cone gate never passes: **AV-mine
+proximity is data-dead in JO:CA** — damage/chain detonation only.
+
+Other consumers: `Projectile_DamagePairEligible @ 0x4e74f0` (ex
+Server_IsEntityValidForUpdate; called from `Projectile_ProcessDamageOnTarget`
++ 3× `Projectile_ProcessExplosionQueue`) refuses damage from a placed-device
+round while its owner sits unseated; `EventTrigger_AnySatchelInArea @ 0x547160`
+is a BMS/WAC event condition (satchel-ammo pool-1 entity inside a zone rec);
+`SaveFile_WriteAmmoInstances @ 0x4aae60` persists satchel instances.
+
+### 26.7 The detonator + owner cleanup
+
+`RoundData_SpawnRound` dispatch order `[orig: @ 0x4ec1f3..0x4ec2a5]`:
+instantkillzone (0x400) → queue at the spawn point, no round (the kztype 1
+knife raycast leaf excepted); **Detonatesatchels (0x20)** →
+`Entity_DetonateSatchelsByOwner @ 0x546ed0` (ex
+Entity_InvalidateStreamingSlotsByNetId): every pool-1 satchel-ammo entity
+owned (+368) by the firer gets **Health = −1** — the next think detonates;
+DesignateTarget (0x2000000) → the tracker; claymore (0x20000) →
+`Weapon_SpawnProjectileBurst @ 0x4eb900`: spread_count (≤32) plain ballistic
+pellets, per pellet the rol4(s+rol11(s))^1 stream draws yaw ∈ base ±
+kz_pieslice and pitch ∈ [base, base+kz_pieslice), no tracer/model/fire-event;
+then shotgun (0x10000) and the ballistic default.
+
+Owner death/leave: `Server_ProcessPlayerDeath @ 0x5178d8` (and the player-
+removal recursion in `Server_RemoveEntityAndNotify @ 0x50a270`, S2C 0x12) →
+`Entity_RemovePlacedDevicesByOwner @ 0x546e00`: the owner's satchels/
+claymores/AV mines are **removed silently, never detonated**. Our port polls
+the owner's health in `ThrowableSim::tick` (transport-free stand-in for the
+death hook).
+
+### 26.8 Divergence catalog (D-THROW)
+
+| ID | Ours | Original | Why / consequence |
+|---|---|---|---|
+| D-THROW-1 | motors sweep via `trace_projectile` and drop person/terrain/water hits | pools 2/1 broad+face walk only | a person standing between a grenade and a wall can mask the wall hit for that tick; rare, self-corrects next tick |
+| D-THROW-2 | world-local PRNG streams (the retail generator shape) | shared globals @ 0x31BFBB0/B8 | bounce kicks / fan angles distribution-faithful, not sequence-identical (the destruction-port precedent) |
+| D-THROW-3 | device LOS = the terrain leg (`los_terrain_blocked`) | `Physics_RaycastSegment @ 0x415550` (terrain + sectors) | a claymore can see a target through a building wall until the sector leg ports (the D-AI-7 stand-in) |
+| D-THROW-4 | stick pose derived geometrically from the face normal; parent-follow = translation + yaw orbit | `Entity_OrientToSurfaceNormal @ 0x445fa0` exact euler decomposition; `Entity_InterpolateFromParentDelta @ 0x4a8d60` full euler | presentation-only pose deltas on steep faces / pitching vehicles; the cone axis (yaw) is exact |
+| D-THROW-5 | no HUD windup meter yet | `HUD_DrawWeaponReloadBar @ 0x599881` doubles as the charge bar off g_fireChargeStartTick | charge works invisibly; HUD leg open |
+| D-THROW-6 | landmine items (`lndm`) unported | `Entity_LandmineThink @ 0x441A40` witnessed in full | the def wiring for ammo slots +692/+696 (`SMALLLANDMINE`/`LARGELANDMINE` names) is unwitnessed; no lndm items found in JO:CA missions so far |
+| D-THROW-7 | placed devices SP/listen-host only; no 0x59/0x12 emit into np dispatch | S2C 0x59 (net-re §5.36) + 0x12 removal | remote clients see the thrown ROUND (ring fan-out, charge in slot_byte) but not the persisted device swap; MP wire wiring is the follow-up |
+| D-THROW-8 | placed devices collide via the 0.5 u bound-sphere fallback | the item model's CFAC via the collision instance | shootable everywhere; face-accurate hits once hosts register device graphics |
+| D-THROW-9 | device think delay ticks at 62 Hz from placement | pool-1 age −1/tick, pool-2/3 items stagger −8/−64 | equivalent for pool-1 devices; the staggered item cadences apply only to lndm (unported) |
+
+### 26.9 Open follow-ups
+
+1. The +388 fourth exclusion slot on thrown rounds (D-ITEM-11 shares it).
+2. The `squib` class pair (`Entity_InitArcMovement @ 0x449810` fn1 /
+   `Entity_ProcessProjectileTravel @ 0x448D50` motor) — unwalked.
+3. `Weapon_FireProcess @ 0x53f5b0` internals (the AI/scripted fire helper the
+   landmine uses) — skimmed only.
+4. The AI grenade-throw think (body anims 159–162 exist, §8/§14 tables) — the
+   AI never throws in our port yet.
+5. `sub_5119E0` (the stat op) — cited, unwalked.
+6. The 0x59 payload's angle words vs our BAM halves — verify at MP wiring time
+   (D-THROW-7).
+
+### 26.10 IDB write-backs (2026-07-20 session, saved)
+
+Renames (kong misnomers corrected at anchored confidence + new definitions):
+`Entity_UpdateGrenadePhysics @ 0x443F50` (defined; was an undefined blob
+behind a stale byte), `Entity_UpdateSatchelPhysics @ 0x4482A0`,
+`Entity_UpdateClaymorePhysics @ 0x4472F0`, `Entity_SatchelThink @ 0x443670`,
+`Entity_ClaymoreThink @ 0x4438C0`, `Entity_AVMineThink @ 0x443BB0`,
+`Entity_LandmineThink @ 0x441A40`, `Entity_FindEnemyVehicleInCone @ 0x43c9f0`,
+`Entity_RemovePlacedDevicesByOwner @ 0x546e00`, `Entity_DetonateSatchelsByOwner
+@ 0x546ed0`, `EventTrigger_AnySatchelInArea @ 0x547160`,
+`Server_RemoveEntityAndNotify @ 0x50a270`, `Entity_UpdatePool1Slot @ 0x4b8dd0`,
+`Entity_ConvertRoundToPlacedEntity @ 0x5455b0`,
+`WeaponEffect_PushExplosionQueueEntry @ 0x4e83c0`,
+`Projectile_DamagePairEligible @ 0x4e74f0`, `Entity_InitThrowableSpin_Nade/
+Satchel/Claymore/AVMine @ 0x4435A0/C0/E0/610`, `Entity_OrientToSurfaceNormal
+@ 0x445fa0`; data `g_ammo_satchel/satchelboom/claymore/claymoreshrapnel/
+claymorekillzone/AV_Mine/AV_Minekillzone @ 0x24E7DD8..C0`. Entry comments on
+each + inner-site comments at `@ 0x4e08fd` (press gate), `@ 0x4e07e9` (charge
+curve), `@ 0x4ec5bb` (speed scale), `@ 0x4ec234/0x4ec288/0x4ec79b` (spawn
+dispatches), `@ 0x4e9f06` (useownmove leg), `@ 0x4c2288` (pool-2 think loop).
+IDB saved.

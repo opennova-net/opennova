@@ -23,6 +23,7 @@
 #include "world/var_store.h"
 #include "world/ammo_table.h"
 #include "world/round_sim.h"
+#include "world/throwables.h"
 #include "world/vehicle_motor.h"
 #include "world/waypoint_track.h"
 #include "world/weapon_table.h"
@@ -441,6 +442,9 @@ public:
     // @0x4ead80 runs once per frame after the projectile update]; the host drains
     // `destruction` (present) and feeds `item_death_traits` (item-traits sweep).
     ExplosionSim explosions;
+
+    // Placed throwable devices + class bindings (world-wac-ai-re §26).
+    ThrowableSim throwables;
     DeathPieceSim death_pieces;
     DestructionRng destruction_rng;
     ItemDeathTraitsTable item_death_traits;

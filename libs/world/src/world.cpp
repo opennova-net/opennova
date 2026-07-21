@@ -678,6 +678,12 @@ void World::run_logic_tick(bool is_authority, bool pre_mission) {
     // §5.60]. Terrain is the host-wired sampler (AI grounding shares it).
     if (is_authority && !pre_mission)
         round_sim.tick(*this, terrain, ai != nullptr ? ai->collision : nullptr);
+    // Placed throwable devices think after the round step [orig: the pool-1
+    // per-tick walk in Entity_UpdateAllEntities -> Entity_UpdatePool1Slot
+    // @ 0x4b8dd0 — arm-delay countdown, then deathCallback(entity, 0, 0) every
+    // tick; world-wac-ai-re §26].
+    if (is_authority && !pre_mission)
+        throwables.tick(*this, ai != nullptr ? ai->collision : nullptr, terrain);
     if (is_authority && !pre_mission) {
         // The explosion-queue drain runs once per frame after the projectile
         // update [orig: Projectile_ProcessExplosionQueue @0x4ead80]; entries the
@@ -812,6 +818,7 @@ void World::restore(const Snapshot &s) {
     effects.clear();
     round_sim.reset();
     explosions.reset();
+    throwables.reset();
     death_pieces.reset();
     destruction_rng.reset();
     destruction = DestructionEvents{};

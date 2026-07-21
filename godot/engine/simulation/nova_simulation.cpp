@@ -676,6 +676,34 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 			}
 		}
 	}
+	// Throwable class bindings: every items.def entry whose ai_function /
+	// move_function names a throwable class (nade/schl/clym/vmne/lndm) lands a
+	// row keyed by type id (id - 100000, the ammo TrcrID space), with the def
+	// hp/armor the placed device spawns at. [orig: EntityDef_InitAllCallbacks
+	// @ 0x4a5a70 resolves the class tables into every item def at load;
+	// world-wac-ai-re §26.]
+	world_->throwables.classes.clear();
+	const PackedInt32Array all_ids = p_item_db->get_item_ids();
+	for (int i = 0; i < all_ids.size(); ++i) {
+		const int def_id = all_ids[i];
+		const opennova::world::ThrowClass think = opennova::world::throw_class_from_tag(
+				p_item_db->get_ai_function(def_id).utf8().get_data());
+		const opennova::world::ThrowClass motor = opennova::world::throw_class_from_tag(
+				p_item_db->get_move_function(def_id).utf8().get_data());
+		if (think == opennova::world::ThrowClass::kNone &&
+				motor == opennova::world::ThrowClass::kNone)
+			continue;
+		opennova::world::ThrowableClassRow row;
+		row.item_id = def_id - opennova::mission::kItemIdOffset;
+		row.think = think;
+		row.motor = motor;
+		row.health_max = opennova::world::retail_signed_i16(p_item_db->get_hp(def_id));
+		row.armor_impact = opennova::world::retail_signed_i16(
+				p_item_db->get_armor_impact(def_id));
+		row.armor_kz = opennova::world::retail_signed_i16(
+				p_item_db->get_armor_kz(def_id));
+		world_->throwables.classes.set(row);
+	}
 	// The AS zone-slot chain — built AFTER the trait stamp (zone registration keys on
 	// is_capture_trigger), then the secure latch seeds each rear zone's control to 1.0.
 	// [orig: ZoneSlotChain_BuildFromMission @0x4a2de0 from Game_StartMission @0x526126;
@@ -1979,6 +2007,46 @@ int NovaSimulation::debug_spawn_round(const Vector3 &p_from_godot, const Vector3
 	return world_->round_sim.spawn(*world_, params);
 }
 
+Array NovaSimulation::get_throwable_visuals() const {
+	Array out;
+	if (!world_) return out;
+	const double kDegPerBam = opennova::world::kDegreesPerBam;
+	auto push_entry = [&](int key, int item_id, const opennova::world::Vec3 &pos,
+			int32_t yaw_bam, int32_t pitch_bam, int32_t roll_bam) {
+		Dictionary d;
+		d["key"] = key;
+		d["item_id"] = item_id;
+		d["pos"] = Vector3(pos.x, pos.z, -pos.y);
+		// the placer euler convention: rotation_deg = (pitch, MISSION yaw, roll)
+		d["rotation_deg"] = Vector3(
+				static_cast<float>(double(pitch_bam) * kDegPerBam),
+				static_cast<float>(
+						opennova::world::mission_yaw_deg_from_bam_heading(yaw_bam)),
+				static_cast<float>(double(roll_bam) * kDegPerBam));
+		out.push_back(d);
+	};
+	for (int i = 0; i < opennova::world::RoundSim::kCapacity; ++i) {
+		const opennova::world::LiveRound &r =
+				world_->round_sim.rounds[static_cast<size_t>(i)];
+		if (!r.active || r.item_type_id == 0) continue;
+		push_entry(i, r.item_type_id, r.pos, r.yaw_bam, r.pitch_bam, r.roll_bam);
+	}
+	uint8_t viewer_team = 0xFF;
+	if (const opennova::world::Entity *lp =
+			world_->registry.get(world_->cached.local_player))
+		viewer_team = static_cast<uint8_t>(lp->team);
+	for (const opennova::world::PlacedDevice &d : world_->throwables.devices) {
+		if (!d.active) continue;
+		// the viewer-side item pick [orig: frndly vs foe TrcrID by team — an
+		// enemy satchel (foe id 0) draws nothing]
+		const int item = d.team == viewer_team ? d.item_friendly : d.item_enemy;
+		if (item == 0) continue;
+		push_entry(0x10000 + d.entity.packed, item, d.pos, d.yaw_bam, d.pitch_bam,
+				d.roll_bam);
+	}
+	return out;
+}
+
 Dictionary NovaSimulation::get_round_debug() const {
 	Dictionary out;
 	Array events;
@@ -3086,6 +3154,7 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_collision_debug"), &NovaSimulation::get_collision_debug);
 	ClassDB::bind_method(D_METHOD("get_occlusion_debug"), &NovaSimulation::get_occlusion_debug);
 	ClassDB::bind_method(D_METHOD("get_round_debug"), &NovaSimulation::get_round_debug);
+	ClassDB::bind_method(D_METHOD("get_throwable_visuals"), &NovaSimulation::get_throwable_visuals);
 	ClassDB::bind_method(D_METHOD("debug_spawn_round", "from_godot", "dir_godot", "ammo_name"),
 	                     &NovaSimulation::debug_spawn_round);
 	ClassDB::bind_method(D_METHOD("get_hitbox_debug"), &NovaSimulation::get_hitbox_debug);
@@ -4119,6 +4188,33 @@ void NovaSimulation::tick_local_player_weapon() {
 	opennova::world::WeaponFsmInputs in;
 	in.fire_held = weapon_fire_held_;
 	in.fire_pressed = weapon_fire_pressed_;
+	// PowerThrow: the press never fires — it starts the windup; the release
+	// converts the held time into the charge byte and fires. [orig: press gate
+	// @ 0x4e08fd (def Flags sign bit 0x80000000, fireable + ammo ->
+	// g_fireChargeStartTick = tick), release @ 0x4e07e9 -> WeaponSlot_RequestFire
+	// with the computed charge; world-wac-ai-re §26.]
+	if ((weapon_def_.flags & 0x80000000u) != 0) {
+		if (weapon_fire_held_ || weapon_fire_pressed_) {
+			const bool fireable =
+					weapon_slot_.current == opennova::world::weapon_action::kIdle;
+			const bool has_ammo =
+					weapon_slot_.clip > 0 || weapon_def_.clip_capacity < 0;
+			if (power_throw_start_tick_ == 0 && fireable && has_ammo)
+				power_throw_start_tick_ = world_->logic_tick;
+			in.fire_held = false;
+			in.fire_pressed = false;
+		} else if (power_throw_start_tick_ != 0) {
+			const int32_t held = static_cast<int32_t>(
+					world_->logic_tick - power_throw_start_tick_);
+			pending_throw_charge_ =
+					opennova::world::power_throw_charge_from_hold(held);
+			power_throw_start_tick_ = 0;
+			in.fire_pressed = true;
+			in.fire_held = false;
+		}
+	} else {
+		power_throw_start_tick_ = 0;
+	}
 	// The dispatch gate runs here now: the raw reload edge is refused on a full
 	// magazine or an empty reserve [orig: input case 0xD3 @ 0x4e0420].
 	in.reload_pressed = weapon_reload_pressed_ &&
@@ -4290,6 +4386,11 @@ void NovaSimulation::tick_local_player_weapon() {
 					round_event.subtype = 12;
 				}
 				round_event.adm_index = adm_index;
+				// The PowerThrow charge rides the ring/wire slot_byte (ring+32,
+				// wire flags|0x80 leg) and scales the spawned round's launch
+				// speed [orig: WeaponAction_Fire arg 6 <- MountSlot+0x5C ->
+				// descriptor +20 @ 0x4ec5bb; deserializer restore @ 0x42f769].
+				round_event.slot_byte = pending_throw_charge_;
 				world_->rounds.add(round_event);
 
 				opennova::world::RoundSpawnParams round;
@@ -4301,7 +4402,9 @@ void NovaSimulation::tick_local_player_weapon() {
 				round.ammo_index = adm->ammo_index;
 				round.adm_index = adm_index;
 				round.shot_seq = shot_seq;
+				round.charge = pending_throw_charge_;
 				world_->round_sim.spawn(*world_, round);
+				pending_throw_charge_ = 0;
 			}
 		}
 	}

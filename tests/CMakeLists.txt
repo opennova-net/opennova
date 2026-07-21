@@ -937,6 +937,15 @@ target_include_directories(destruction_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(destruction_test PRIVATE cxx_std_17)
 add_test(NAME destruction COMMAND destruction_test)
 
+# Throwables (world/throwables.h; world-wac-ai-re §26): PowerThrow charge,
+# grenade bounce/fuse, satchel place/detonator, claymore cone + fan, AV-mine
+# data-dead proximity, owner-death cleanup.
+add_executable(throwables_test world/throwables_test.cpp)
+target_link_libraries(throwables_test PRIVATE opennova_world)
+target_include_directories(throwables_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(throwables_test PRIVATE cxx_std_17)
+add_test(NAME throwables COMMAND throwables_test)
+
 # Terrain-grounded movement: the shared height_field samplers, the 5-tap
 # calc_average_ground_height port (Entity_CalcAverageGroundHeight @0x457230) by hand
 # math, and the AiSystem ground clamp over a synthetic ramp atlas.

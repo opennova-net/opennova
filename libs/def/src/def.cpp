@@ -714,7 +714,10 @@ static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out) {
             parsed = 1;
         } else if (lower_starts_with(lower, ll, "kz_pieslice", 11)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 11, &vl);
-            current.kz_pieslice_bam = parse_int_n(v, vl) * 11930464; /* deg -> BAM (+60) */
+            /* HALF-angle: retail stores (deg / 2) x 11930464 BAM — the cone
+             * tests compare |angle diff| <= this half-angle.
+             * [orig: atol -> cdq/sub/sar signed div 2 -> imul 0xB60B60 @0x40ad51] */
+            current.kz_pieslice_bam = (parse_int_n(v, vl) / 2) * 11930464;
             parsed = 1;
         } else if (lower_starts_with(lower, ll, "min_stable_velocity", 19)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 19, &vl);

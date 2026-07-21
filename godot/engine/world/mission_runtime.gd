@@ -34,6 +34,7 @@ const MissionPresentPass := preload("res://engine/world/mission_present_pass.gd"
 const WirePresentPass := preload("res://engine/world/wire_present_pass.gd")
 const FirePresentPass := preload("res://engine/world/fire_present_pass.gd")
 const DestructionPresentPass := preload("res://engine/world/destruction_present_pass.gd")
+const ThrowablePresentPass := preload("res://engine/world/throwable_present_pass.gd")
 const MissionSeatDiagnostics := preload("res://engine/world/mission_seat_diagnostics.gd")
 
 # Fixed-timestep accumulator. The original decouples the simulation from rendering: the master
@@ -48,6 +49,7 @@ var _present                          # MissionPresentPass: placed nodes (host/S
 var _wire_present                     # WirePresentPass: un-placed remote players (co-op host + joiner); else null
 var _fire_present                     # FirePresentPass: AI/remote fire sound + muzzle + tracers (host); else null
 var _destruction_present              # DestructionPresentPass: husk swap + debris + wreck effects (host); else null
+var _throwable_present                # ThrowablePresentPass: thrown/placed device models (host); else null
 var _index
 var _self_tick := false              # editor: self-tick via _process while playing; game: host calls tick()
 var _playing := false
@@ -230,6 +232,15 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 			options.get("fire_fx", Callable()), options.get("env_node"))
 		simulation_restarted.connect(
 				Callable(_destruction_present, 'reset_runtime_state'))
+	# The throwable-presentation pass: item models for flying grenades/satchels
+	# and placed devices, reconciled from the sim's visual snapshot
+	# (world-wac-ai-re §26; the sim stays render-free).
+	if not is_joiner:
+		_throwable_present = ThrowablePresentPass.new()
+		_throwable_present.setup(_sim, container, options.get("placer"),
+			options.get("item_db"), options.get("env_node"))
+		simulation_restarted.connect(
+				Callable(_throwable_present, 'reset_runtime_state'))
 	# Spawn the host's own player as an authoritative pool-0 entity (ADR 0012 / net-re §5.2b).
 	# After load (the spawn needs the AI system wired). The spawn POSE is selected the way the
 	# original engine does — by game type, from the mission's player-START marker FARTHEST from the
@@ -653,6 +664,8 @@ func tick() -> bool:
 			_fire_present.present(1)
 		if _destruction_present != null:
 			_destruction_present.present()
+		if _throwable_present != null:
+			_throwable_present.present()
 		_perf_present_us = Time.get_ticks_usec() - present_start
 	_perf_tick_us = Time.get_ticks_usec() - tick_start
 	_perf_did_tick = did_tick
@@ -724,6 +737,8 @@ func tick_realtime(delta: float) -> int:
 			_fire_present.present(n)
 		if _destruction_present != null:
 			_destruction_present.present()
+		if _throwable_present != null:
+			_throwable_present.present()
 		_perf_present_us = Time.get_ticks_usec() - present_start
 	_perf_tick_us = Time.get_ticks_usec() - tick_start
 	_perf_did_tick = true
@@ -826,6 +841,12 @@ func _exit_tree() -> void:
 			simulation_restarted.disconnect(reset_destruction)
 		_destruction_present.teardown()  # frees husk models + effect anchors
 		_destruction_present = null
+	if _throwable_present != null:
+		var reset_throwable := Callable(_throwable_present, 'reset_runtime_state')
+		if simulation_restarted.is_connected(reset_throwable):
+			simulation_restarted.disconnect(reset_throwable)
+		_throwable_present.teardown()
+		_throwable_present = null
 	if _sim != null and is_instance_valid(_sim):
 		_sim.free()
 		_sim = null
