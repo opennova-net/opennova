@@ -321,6 +321,38 @@ func test_round_impacts_route_generic_transient_and_audio_legs() -> void:
 	}], 'impact audio shares collision presentation with the visual transient')
 
 
+func test_round_impacts_route_sound_only_without_a_particle() -> void:
+	var world := ImpactGameWorldHarness.new()
+	var terrain := NovaTerrain.new()
+	terrain.name = 'NovaTerrain'
+	world.add_child(terrain)
+	add_child_autofree(world)
+	var runtime := ImpactRuntimeStub.new()
+	var effects := FxWorldStub.new()
+	var audio := ImpactAudioStub.new(null, null)
+	add_child_autofree(runtime)
+	add_child_autofree(effects)
+	world.configure(runtime, effects, audio)
+	runtime.sim.rows = [{
+		'position': Vector3(3, 2, 1),
+		'direction': Vector3.UP,
+		'effect': '',
+		'sound': 'IMP_GREN_DIRT',
+		'age_ticks': 0,
+		'source_tick': 43,
+		'source_order': 8,
+	}]
+
+	world.route_round_impacts()
+
+	assert_true(effects.spawns.is_empty(),
+			'a sound-only grenade bounce must not spawn its explosion particle')
+	assert_eq(audio.fires, [{
+		'name': 'IMP_GREN_DIRT',
+		'position': Vector3(3, 2, 1),
+	}], 'the first five grenade bounces retain their authored surface sound')
+
+
 func test_fixed_tick_orders_weapon_and_impact_before_particle_advance() -> void:
 	var world := ImpactGameWorldHarness.new()
 	var terrain := NovaTerrain.new()

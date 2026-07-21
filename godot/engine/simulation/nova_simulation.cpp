@@ -4682,10 +4682,11 @@ Array NovaSimulation::drain_local_player_weapon_events() {
 }
 
 // Drain the round impacts the flight sim resolved since the last call, each row already
-// resolved through the ammo effects_table (canonical tag -> {effect, sound}); rows whose
-// tag has neither an effect nor a sound are dropped, matching the original impact
-// presenter [orig: Projectile_SpawnImpactEffect @ 0x4e9b80; selection witness on
-// world/round_sim.h RoundImpact].
+// resolved through the ammo effects_table (canonical tag -> {effect, sound}) and its
+// per-leg presentation mask; rows with no enabled authored leg are dropped, matching
+// the original impact presenter [orig: AmmoDef_ProcessImpactEffect @ 0x40a170;
+// ballistic wrapper Projectile_SpawnImpactEffect @ 0x4e9b80; selection witness
+// on world/round_sim.h RoundImpact].
 Array NovaSimulation::drain_round_impacts() {
 	Array out;
 	if (!world_) return out;
@@ -4696,13 +4697,15 @@ Array NovaSimulation::drain_round_impacts() {
 		if (imp.effect_tag < 0 || imp.effect_tag >= opennova::world::kImpactEffectTagCount)
 			continue;
 		const opennova::world::AmmoImpactEffectRow &row = ammo->impact_effects[imp.effect_tag];
-		if (row.effect.empty() && row.sound.empty()) continue;
+		const bool has_effect = imp.present_effect && !row.effect.empty();
+		const bool has_sound = imp.present_sound && !row.sound.empty();
+		if (!has_effect && !has_sound) continue;
 		Dictionary d;
 		// mission (x,y,z) -> Godot (x, z, -y), the get_local_player_position convention.
 		d["position"] = Vector3(imp.position.x, imp.position.z, -imp.position.y);
 		d["direction"] = Vector3(imp.direction.x, imp.direction.z, -imp.direction.y);
-		d["effect"] = String::utf8(row.effect.c_str());
-		d["sound"] = String::utf8(row.sound.c_str());
+		d["effect"] = has_effect ? String::utf8(row.effect.c_str()) : String();
+		d["sound"] = has_sound ? String::utf8(row.sound.c_str()) : String();
 		// A lifecycle rewind must never turn a future/stale source tick into an
 		// unsigned multi-billion-tick particle pre-age request.
 		const uint32_t age_ticks = now >= imp.tick ? now - imp.tick : 0u;

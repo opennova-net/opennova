@@ -176,13 +176,16 @@ int32_t speed3_q16(const MotorFrame &f) {
 }
 
 void push_motor_effect(RoundSim &sim, const LiveRound &r, int tag,
-                       const Vec3 &at, uint32_t tick) {
+                       const Vec3 &at, uint32_t tick,
+                       bool present_effect = true, bool present_sound = true) {
     if (sim.impacts.size() >= RoundSim::kMaxPendingImpacts) return;
     RoundImpact imp;
     imp.position = at;
     imp.direction = Vec3{0.0f, 0.0f, 1.0f};
     imp.ammo_index = r.ammo_index;
     imp.effect_tag = tag;
+    imp.present_effect = present_effect;
+    imp.present_sound = present_sound;
     imp.tick = tick;
     imp.source_order = sim.next_impact_order++;
     sim.impacts.push_back(imp);
@@ -443,13 +446,18 @@ static bool motor_nade(World &world, RoundSim &sim, LiveRound &r,
             ground_surface = hit.surface_type >= 0 ? hit.surface_type : 0;
         }
     }
-    // Bounce effect [orig: @ 0x4447c3 — material + 4, above water only].
-    if (ground_hit && ground_surface != 0 && f.pz >= water) {
+    // Bounce presentation [orig: @ 0x4447c3 — material + 4, above water only].
+    // The descriptor is deliberately sound-only for contacts 1..5
+    // (flags 0x80000400), then has neither presentation leg (0x00000400).
+    // In particular, retail does NOT submit the dirt row's Effect_FragGrndDirt
+    // particle here; that same particle is also authored on the fuse's obj row.
+    if (ground_hit && ground_surface != 0 && f.pz >= water &&
+        r.bounce_count <= 5) {
         push_motor_effect(sim, r, ground_surface + 4,
                           Vec3{static_cast<float>(from_fixed(f.px)),
                                static_cast<float>(from_fixed(f.py)),
                                static_cast<float>(from_fixed(f.pz))},
-                          world.logic_tick);
+                          world.logic_tick, false, true);
     }
     store_frame(r, f);
 

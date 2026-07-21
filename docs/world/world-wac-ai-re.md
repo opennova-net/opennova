@@ -4323,7 +4323,7 @@ Binary: retail `Jointops.exe` (kong IDB, imagebase 0x400000). ctest `throwables`
 |---|---|---|
 | PowerThrow charge (press gate, release curve, speed scale, remote C2S byte) | MATCHING | §26.3; ctest `throwables` test_power_throw_charge / test_charge_scales_spawn_speed; `npruntime_client_fire_test` |
 | PowerThrow HUDPOWERBAR | MATCHING (including 15 output-pixel text offset) | §26.3; D-THROW-5 |
-| Grenade motor (drag/gravity/spin/bounce/water/fuse) | ported core; exact no-water sentinel + lifetime-head/fuse timing fixed in PR #282; query/PRNG/parent-Euler residuals remain | §26.4; D-THROW-1/-2/-4; test_grenade_bounce_and_fuse, test_ballistic_expiry_is_silent |
+| Grenade motor (drag/gravity/spin/bounce/water/fuse) | ported core; exact no-water sentinel, lifetime-head/fuse timing, and sound-only first-five-bounces presentation fixed in PR #282; query/PRNG/parent-Euler residuals remain | §26.4; D-THROW-1/-2/-4; test_grenade_bounce_and_fuse, test_ballistic_expiry_is_silent |
 | Satchel/claymore motors + rest conversion | ported core; face-normal stick predicate and full placed pose/item/health carry fixed in PR #282 | §26.5; D-THROW-1/-2/-4; test_satchel_places_device |
 | Placed-device think/detonate chain (satchel/claymore/AV mine) | ported core; exact pool-1 order/cadence and wrapped cone angle fixed; LOS/collision residuals remain | §26.6; D-THROW-2/-3/-8/-9; device lifecycle/cone tests |
 | Owner-death cleanup | matching observable, with generation-checked sim-side owner poll standing in for the death hook | §26.6; test_owner_death_removes_devices |
@@ -4335,7 +4335,9 @@ Binary: retail `Jointops.exe` (kong IDB, imagebase 0x400000). ctest `throwables`
 
 This is not a blanket MATCHING classification. The audit closes D-THROW-5 and
 D-THROW-9 and fixes the fuse, dry-water, face-normal, cone, and lifecycle bugs
-described below; D-THROW-1..4 and D-THROW-6..8 remain explicit fidelity gaps.
+described below. The 2026-07-21 follow-up also restores the grenade descriptor's
+sound/particle leg mask so a bounce cannot submit the detonation particle;
+D-THROW-1..4 and D-THROW-6..8 remain explicit fidelity gaps.
 
 ### 26.2 The class architecture — items.def tags drive everything
 
@@ -4428,8 +4430,17 @@ upward = ×0.45 on all three; submerged = spins ×0.9, velocity ×0.95. Terrain
 (`Terrain_SampleHeightBilinear @ 0x6067b0`; skipped for nocollide 0x80):
 clamp, spins ×0.8, velXY ×0.8; moving → **bounce**: velZ ×−0.2 (−13107),
 bounce_count(+341)++, spin kicks +11930464×(PRNG16%10−5) yaw and
-+11930464×(PRNG16%10)−59652320 pitch (`PRNG_Next16 @ 0x6130a0`), surface
-effect tag material+4; at rest → spins 0, roll 0x3FFFFFC0 (lies flat), pitch
++11930464×(PRNG16%10)−59652320 pitch (`PRNG_Next16 @ 0x6130a0`). Bounce
+presentation calls `AmmoDef_ProcessImpactEffect @ 0x40A170` with surface tag
+material+4, but its descriptor deliberately selects individual legs: contacts
+1–5 use flags `0x80000400` (sound only), then `0x00000400` (neither sound nor
+particle) `[orig: @ 0x4447D3..0x444824]`. The helper plays sound from the sign
+bit `[orig: @ 0x40A20D..0x40A216]` and submits a particle only for bit
+`0x40000000` `[orig: @ 0x40A21E..0x40A240]`; therefore no grenade bounce
+spawns a particle. This is materially visible because JO's dirt tag 5 and
+detonation obj tag 4 both author `Effect_FragGrndDirt`, while their sounds are
+`IMP_GREN_DIRT` and `EXPLO_FRAG_GREN` respectively. At rest → spins 0, roll
+0x3FFFFFC0 (lies flat), pitch
 0. Landed-on entity (+40) → parent-follow (`Entity_InterpolateFromParentDelta
 @ 0x4a8d60`). The swept item raycast covers pools 2/1 ONLY (grenades pass
 through persons); face hits reflect via `Physics_ComputeReflectionForce

@@ -371,6 +371,17 @@ void test_grenade_bounce_and_fuse() {
     CHECK(r.active);
     CHECK(r.bounce_count >= 1);        // it bounced
     CHECK(r.pos.z >= -0.01f);          // clamped at the ground
+    CHECK(rig.w.explosions.queue.empty());
+    // Retail calls the effects-table helper with sound-only flags for the first
+    // five bounces, then disables both legs. The grenade dirt row shares its
+    // particle with the detonation row, so publishing that particle here looks
+    // exactly like a premature explosion.
+    CHECK(rig.w.round_sim.impacts.size() == 5);
+    for (const RoundImpact &bounce : rig.w.round_sim.impacts) {
+        CHECK(bounce.effect_tag == 5);
+        CHECK(!bounce.present_effect);
+        CHECK(bounce.present_sound);
+    }
     // the fuse: run past max_age — the kill zone queues exactly once
     rig.tick(120);
     CHECK(!rig.w.round_sim.rounds[size_t(slot)].active);
@@ -379,7 +390,11 @@ void test_grenade_bounce_and_fuse() {
     // the detonation obj-row effect (tag 4) landed for the present pass
     bool saw_obj = false;
     for (const RoundImpact &imp : rig.w.round_sim.impacts)
-        if (imp.effect_tag == 4 && imp.ammo_index == kAmmoGrenade) saw_obj = true;
+        if (imp.effect_tag == 4 && imp.ammo_index == kAmmoGrenade) {
+            CHECK(imp.present_effect);
+            CHECK(imp.present_sound);
+            saw_obj = true;
+        }
     CHECK(saw_obj);
 }
 

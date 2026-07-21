@@ -12,6 +12,7 @@ extends GutTest
 #  - the thrown grenade flies as its TrcrID item and dies by fuse, never by
 #    ground contact.
 const DEF_FIXTURES := "res://../fixtures/def"
+const TERRAIN_FIXTURE := "res://../fixtures/godot/dvxi5/Dvxi5.trn"
 
 var _sim: NovaSimulation = null
 var _db: NovaWeaponDatabase = null
@@ -207,6 +208,8 @@ func test_grenade_throw_then_m4_fires_bullets() -> void:
 			first_seen = t
 	assert_between(first_seen, 60, 100,
 			"the thrown grenade flies with the TrcrID 1883 model after the windup")
+	assert_true(_visual_ids().has(1883),
+			"the production-thrown grenade survives through the pre-fuse flight window")
 
 	_switch_to(3, "WPN_M4AUTO")
 
@@ -219,6 +222,39 @@ func test_grenade_throw_then_m4_fires_bullets() -> void:
 	_step_and_pump(20)
 	assert_eq(_visual_ids().count(1883), before,
 			"an M4 shot must not spawn grenade-model rounds")
+
+
+func test_grenade_ground_bounces_are_sound_only_until_the_fuse() -> void:
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load_from_resource_root(_root, "items.def"), OK)
+	_sim.resolve_item_traits(item_db)
+
+	var terrain := NovaTerrainData.new()
+	terrain.set_trn_path(ProjectSettings.globalize_path(TERRAIN_FIXTURE))
+	assert_eq(terrain.load(), OK, "the committed Dvxi5 terrain loads")
+	assert_true(terrain.is_loaded())
+	_sim.set_terrain_height_field(terrain)
+	var ground := terrain.get_height_world_bilinear(Vector3.ZERO)
+	assert_false(is_nan(ground), "the terrain covers the test origin")
+
+	var slot := _sim.debug_spawn_round(
+			Vector3(0, ground + 2.0, 0), Vector3.RIGHT, "grenadehe")
+	assert_gte(slot, 0, "a production grenade round spawns over real terrain")
+	var bounces: Array = []
+	for _tick in 160:
+		_sim.step()
+		bounces.append_array(_sim.drain_round_impacts())
+
+	assert_eq(bounces.size(), 5,
+			"retail presents only the first five grenade contacts")
+	for value in bounces:
+		var bounce: Dictionary = value
+		assert_eq(String(bounce.get("effect", "")), "",
+				"a terrain bounce never submits Effect_FragGrndDirt")
+		assert_eq(String(bounce.get("sound", "")), "IMP_GREN_DIRT",
+				"the retained bounce leg is the authored ground-impact sound")
+	assert_true(_visual_ids().has(1883),
+			"the grenade remains in flight until its fuse after bouncing")
 
 
 func test_claymore_throw_then_m4_fires_bullets() -> void:

@@ -150,11 +150,14 @@ struct RoundDeath {
 };
 
 // A round impact the flight pass resolved this tick — the IMPACT-EFFECT seam. The host
-// drains these and spawns the ammo effects_table row for the tag (effect + sound), with
-// the emitter forward = the flight direction. Retail ballistic rounds select and spawn
-// this row from the physical impact handlers at collision time
+// drains these and presents the enabled legs of the ammo effects_table row for the tag,
+// with the emitter forward = the flight direction. Retail ballistic rounds select and
+// spawn both legs from the physical impact handlers at collision time
 // [orig: Projectile_UpdatePhysics @ 0x4E9D70 -> Projectile_SpawnImpactEffect
-// @ 0x4E9B80]. Weapon_RaycastAndSpawnImpact @ 0x4E8460 is a separate Knife-only
+// @ 0x4E9B80]. Custom motors can select the legs independently: grenade bounces call
+// AmmoDef_ProcessImpactEffect directly with sound enabled and particles disabled
+// [orig: Entity_UpdateGrenadePhysics @ 0x4447D3..0x444824]. Weapon_RaycastAndSpawnImpact
+// @ 0x4E8460 is a separate Knife-only
 // instant-kill-zone leaf (flags&0x400, kztype==1) whose ray extent is
 // AmmoDef.kz_maxradius; it is not the bullet path. Terrain surface-map overrides
 // and the building material-1 special tag remain D-WPN-15 (net-re §5.60).
@@ -164,6 +167,8 @@ struct RoundImpact {
     int32_t ammo_index = -1;
     int32_t effect_tag = 0; // canonical effect-tag index [orig: g_AmmoEffectTagTable
                             //  @ 0x813420; world/ammo_table.h kImpactEffectTagNames]
+    bool present_effect = true; // submit the row's particle-effect leg
+    bool present_sound = true;  // play the row's impact-sound leg
     uint32_t tick = 0;      // authoritative presentation tick for catch-up aging
     uint64_t source_order = 0; // stable order across impacts resolved on the same tick
 };
