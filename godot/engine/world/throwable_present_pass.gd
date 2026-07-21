@@ -1,6 +1,6 @@
 ## Host presentation for throwables: item-modeled flying rounds (grenades,
 ## satchels, claymores in the air) and placed devices — the render half of
-## libs/world's ThrowableSim/RoundSim state (world-wac-ai-re §26).
+## libs/world's ThrowableSim/RoundSim state (world-wac-ai-re §27).
 ## [orig: the round renders as its TrcrID item model via Entity_InitFromItemDef
 ## @ 0x49e550 with the motor-integrated angles; a placed device is a pool-1
 ## item entity drawn like any other. The sim stays render-free — this pass

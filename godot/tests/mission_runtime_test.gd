@@ -257,6 +257,20 @@ func test_tick_realtime_ignored_when_not_playing() -> void:
 	assert_eq(rt.tick_realtime(0.0), 0, "play() reset the accumulator; zero delta fires nothing")
 
 
+func test_tick_realtime_still_presents_a_zero_tick_render_frame() -> void:
+	var w := _make_world(Transform3D.IDENTITY)
+	var rt := MissionRuntime.new()
+	add_child_autofree(rt)
+	rt.setup(w.mission, w.container)
+	rt.play()
+	assert_eq(rt.tick_realtime(MissionRuntime.TICK_DT), 1,
+			"seed one decoded presentation snapshot")
+	(w.model as Node3D).visible = false
+	assert_eq(rt.tick_realtime(0.0), 0, "no fixed simulation tick advances")
+	assert_true((w.model as Node3D).visible,
+			"the render frame still reapplies current visibility state")
+
+
 func test_tick_realtime_presents_latest_state_once() -> void:
 	# The node is authored far from spawn; after a catch-up batch the single present puts it on the
 	# sim's LATEST position (decoupled render = present once per host frame, no inter-tick interpolation).

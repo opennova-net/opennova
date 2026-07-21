@@ -2,6 +2,7 @@
 
 #include "netsim/entity_wire_bridge.h" // class_for_type_id (default resolver)
 #include "netsim/connection_fan.h"     // kTag0aFrameUpdate
+#include <io/bam.h>                      // wrapped retail pitch chase
 
 namespace opennova::netsim {
 
@@ -86,6 +87,15 @@ namespace {
 // engine BAM (present does `bam = yaw_byte << 24`). [nova_simulation present.]
 inline uint8_t yaw_byte_from_bam(int32_t bam) {
 	return static_cast<uint8_t>(static_cast<uint32_t>(bam) >> 24);
+}
+
+inline int32_t chase_infantry_pitch(int32_t current, uint8_t target_byte) {
+	const int32_t target = static_cast<int32_t>(
+			static_cast<uint32_t>(target_byte) << 24);
+	const int32_t delta = opennova::io::bam_sub(target, current);
+	const int32_t step = opennova::io::bam_sar(
+			opennova::io::bam_add(delta, 4), 3);
+	return opennova::io::bam_add(current, step);
 }
 } // namespace
 
@@ -259,6 +269,15 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 			es.pitch_byte = rec.infantry.pitch_byte;
 			es.aim_yaw_byte = rec.infantry.aim_yaw_byte;
 			es.anim_state_id = rec.infantry.anim_byte;
+			// The compact carries desired aim pitch (entity+0x2D0), not live
+			// entity+0x14. Retail's remote gunner rebuilds the latter locally
+			// with the same wrapped one-eighth chase as authoritative AI.
+			// [orig: chase @0x4bef7b..0x4bef97]
+			if (rec.infantry.vehicle_slot_handle != 0xFFFFu &&
+					rec.infantry.seat_bone_idx != 0) {
+				es.pitch_bam = chase_infantry_pitch(
+						es.pitch_bam, rec.infantry.aim_yaw_byte);
+			}
 			if (rec.infantry.vehicle_slot_handle != 0xFFFFu) {
 				pending_carrier_poses.push_back(PendingCarrierPose{
 						rec.handle, rec.infantry.vehicle_slot_handle, cx, cy, cz,

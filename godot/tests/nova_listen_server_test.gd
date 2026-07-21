@@ -53,9 +53,26 @@ func test_mounted_local_overlay_matches_packed_present_for_valid_zero_and_six() 
 				"position": Vector3.ZERO,
 				"source_name": "UseGun",
 			}],
+			"primary_weapon": "WPN_AVENGER",
 		}])
 		assert_true(sim.load_from_mission_data(md))
 		assert_true(sim.has_local_player())
+		# Ordinary retail UseGun attach rejects a null EquippedSlot
+		# [orig: Entity_AttachToUseGunSlot @0x546c07]. The auto-spawned
+		# listen-server fixture has not loaded weapon.def yet, so complete the
+		# normal mission-start weapon/loadout leg before exercising the seat.
+		var root := NovaResourceRoot.new()
+		assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
+				"res://../fixtures/def")), OK)
+		assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
+		var weapons := NovaWeaponDatabase.new()
+		assert_eq(weapons.load(ProjectSettings.globalize_path(
+				"res://../fixtures/def/weapon.def")), OK)
+		var personal_index := weapons.find_weapon("WPN_M4AUTO")
+		assert_gte(personal_index, 0)
+		if personal_index >= 0:
+			sim.set_local_player_weapon(weapons.get_weapon(personal_index), {})
+		sim.drain_local_player_weapon_events()
 		assert_true(sim.local_player_toggle_mount(),
 				"the listen-server player mounts the config-%d gun" % config_value)
 		sim.set_local_player_mouse(511, false)

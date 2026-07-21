@@ -1,7 +1,7 @@
 // Throwables: thrown-grenade / satchel / claymore round motors, the placed-device
 // entities they convert into, and the device think/detonate chain — the witnessed
 // path from "fire released" to "the claymore cuts loose".
-// Witness record: docs/world/world-wac-ai-re.md §26 (engine-research 2026-07-20,
+// Witness record: docs/world/world-wac-ai-re.md §27 (engine-research 2026-07-20,
 // retail Jointops.exe kong IDB).
 //
 // [orig anchors: the items.def class tag tables — event callbacks (`ai_function`)

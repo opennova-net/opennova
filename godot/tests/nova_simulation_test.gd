@@ -1,6 +1,7 @@
 extends GutTest
 
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
+const MissionSeatDiagnostics := preload("res://engine/world/mission_seat_diagnostics.gd")
 const NovaObjectModelScript := preload("res://engine/object/nova_object_model.gd")
 const PresentAimOverlay := preload("res://engine/world/present_aim_overlay.gd")
 
@@ -126,6 +127,18 @@ func _weapon_arm_pitch_deg(sim: NovaSimulation) -> float:
 	var overlay: Dictionary = sim.get_local_player_aim_overlay()
 	var angles: PackedVector3Array = overlay.get("angles", PackedVector3Array())
 	return float(angles[4].x) if angles.size() > 4 else 0.0
+
+
+func _present_field_for_origin(sim: NovaSimulation, kind: int, index: int,
+		field: int) -> int:
+	var snapshot := sim.get_present_snapshot()
+	var stride := sim.get_present_stride()
+	for record in range(snapshot.size() / stride):
+		var base := record * stride
+		if int(snapshot[base + NovaSimulation.PF_KIND]) == kind \
+				and int(snapshot[base + NovaSimulation.PF_INDEX]) == index:
+			return int(snapshot[base + field])
+	return -1
 
 
 func test_aim_overlay_exports_the_retail_authored_pitch_sign() -> void:
@@ -537,8 +550,9 @@ func test_local_fire_spawns_the_authoritative_round_and_impact() -> void:
 
 func test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun() -> void:
 	# Exact player report: the target rendered in a rotated UseGun seat must keep
-	# its authored COBJ sections under the same entity basis, so a local-owned
-	# round through a visible section can damage it.
+	# its authored COBJ sections under the carried body basis while its look yaw
+	# remains independent, so a local-owned round through a visible section can
+	# damage it.
 	var md := NovaMissionData.new()
 	assert_eq(md.create_default(), OK)
 	var reference_gun := md.add_entity(
@@ -569,6 +583,7 @@ func test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun() -> void:
 				"wp_number", int((pair[1] as Dictionary)["bms_id"])))
 
 	var sim := NovaSimulation.new()
+	sim.enable_listen_server(true)
 	sim.set_item_seat_specs([{
 		"type_id": 1294,
 		"seats": [{"type": 3, "position": Vector3.ZERO, "yaw_offset": 0}],
@@ -590,7 +605,7 @@ func test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun() -> void:
 				"anim_idle": "BINOC.bad",
 				"anim_emplaced": "BINOC.bad",
 			}, data.get_bone_origins(), data.get_bone_parents()))
-	assert_eq(sim.resolve_collision_instances(
+	assert_gte(sim.resolve_collision_instances(
 			item_db, SkeletalDataPlacerStub.new(data, skeletal)), 2,
 			"precondition: both enemies use authored posed COBJ collision")
 	var reference_card: Dictionary = sim.get_entity_debug(0)
@@ -606,6 +621,33 @@ func test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun() -> void:
 	assert_eq(root.set_root_dir(
 			ProjectSettings.globalize_path("res://../fixtures/def")), OK)
 	assert_eq(sim.load_ammo_table(root, "ammo.def"), OK)
+	# Advance one authoritative frame so collision and the decoded presentation
+	# snapshot expose the same mounted body pose.
+	sim.step()
+	var snapshot := sim.get_present_snapshot()
+	var stride := sim.get_present_stride()
+	var reference_row_base := -1
+	var rotated_row_base := -1
+	for record in range(snapshot.size() / stride):
+		var base := record * stride
+		if int(snapshot[base + NovaSimulation.PF_KIND]) != NovaMissionData.KIND_ORGANIC:
+			continue
+		var mission_index := int(snapshot[base + NovaSimulation.PF_INDEX])
+		if mission_index == int(reference_enemy["index"]):
+			reference_row_base = base
+		elif mission_index == int(rotated_enemy["index"]):
+			rotated_row_base = base
+	assert_gte(reference_row_base, 0,
+			"the reference gunner reached the decoded presentation")
+	assert_gte(rotated_row_base, 0,
+			"the rotated gunner reached the decoded presentation")
+	if reference_row_base < 0 or rotated_row_base < 0:
+		sim.free()
+		return
+	assert_eq(int(snapshot[reference_row_base +
+			NovaSimulation.PF_AIM_OVERLAY_VALID]), 1)
+	assert_eq(int(snapshot[rotated_row_base +
+			NovaSimulation.PF_AIM_OVERLAY_VALID]), 1)
 	var sections: Array = sim.get_hitbox_debug().get("organics", [])
 	var reference_by_section := {}
 	var rotated_by_section := {}
@@ -622,15 +664,25 @@ func test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun() -> void:
 
 	var reference_pos: Vector3 = reference_card.get("position", Vector3.ZERO)
 	var rotated_pos: Vector3 = rotated_card.get("position", Vector3.ZERO)
-	var reference_yaw := float(reference_card.get("yaw_deg", 0.0))
-	var rotated_yaw := float(rotated_card.get("yaw_deg", 0.0))
+	# PF_YAW_DEG / debug yaw is the gunner's independent look. The final body
+	# field is the basis PresentAimOverlay actually applies to the rendered model
+	# and the same body class build_section_matrices uses for posed collision.
+	var reference_body_yaw := snapshot[reference_row_base +
+			NovaSimulation.PF_AIM_BODY_YAW_DEG]
+	var rotated_body_yaw := snapshot[rotated_row_base +
+			NovaSimulation.PF_AIM_BODY_YAW_DEG]
 	var relative_basis := MissionObjectPlacer.bms_to_godot_basis(
-			Vector3(0, rotated_yaw, 0)) * MissionObjectPlacer.bms_to_godot_basis(
-			Vector3(0, reference_yaw, 0)).inverse()
+			Vector3(0, rotated_body_yaw, 0)) * MissionObjectPlacer.bms_to_godot_basis(
+			Vector3(0, reference_body_yaw, 0)).inverse()
 	var selected_section := -1
 	var selected_score := -1.0
-	for section_value in reference_by_section.keys():
+	# Hips, thighs, calves, and feet are the body/leg overlay classes. Their
+	# mounted yaw is carried by the seat even when the two gunners independently
+	# aim their upper bodies after the authoritative step.
+	for section_value in [0, 7, 8, 11, 12, 17, 18]:
 		var section := int(section_value)
+		if not reference_by_section.has(section):
+			continue
 		var row: Dictionary = reference_by_section[section]
 		var offset: Vector3 = row.get("pos", Vector3.ZERO) - reference_pos
 		var radius := maxf(float(row.get("radius", 0.0)), 0.001)
@@ -649,7 +701,7 @@ func test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun() -> void:
 			rotated_by_section[selected_section] as Dictionary).get(
 					"pos", Vector3.ZERO)
 	assert_lt(collision_center.distance_to(expected_center), 0.01,
-			"posed collision follows the mounted entity's rendered yaw")
+			"posed collision follows the mounted entity's rendered body yaw")
 
 	var radial := expected_center - rotated_pos
 	radial.y = 0.0
@@ -1145,7 +1197,110 @@ func test_infantry_anim_map_failure_paths() -> void:
 	assert_eq(int(sim.set_infantry_anim_map(null, "soldier.adm")), 0, "null root -> 0 clips")
 	assert_eq(int(sim.set_infantry_anim_map(_anim_root(), "missing.adm")), 0, "absent .adm -> 0 clips")
 	assert_eq(sim.get_infantry_clip_count(), 0, "failed load leaves no stale clip set")
+	assert_gt(sim.set_infantry_anim_map(_anim_root(), "soldier.adm"), 0)
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/items.def")), OK)
+	sim.resolve_infantry_adm_ids(_anim_root(), item_db)
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	assert_eq(int(sim.set_infantry_anim_map(_anim_root(), "missing.adm")), 0,
+			"a retained per-entity resolver cannot replace a failed default with US01")
+	assert_eq(sim.get_infantry_clip_count(), 0,
+			"a failed registry rebuild remains empty after per-entity resolution")
 	sim.free()
+
+
+func test_restart_rebinds_baseline_player_to_own_adm() -> void:
+	# The listen host's player is captured in AiSystem's baseline before the
+	# MissionRuntime per-entity ADM sweep. Stop/Restart replaces the live AI rows
+	# with that baseline at the same count, so a count-only late-spawn resolver
+	# must explicitly repopulate the restored rows.
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var sim := NovaSimulation.new()
+	sim.enable_listen_server(true)
+	assert_true(sim.load_from_mission_data(md))
+	assert_true(sim.has_local_player(), "listen host player exists in the restart baseline")
+	assert_gt(sim.set_infantry_anim_map(_anim_root(), "soldier.adm"), 0)
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/items.def")), OK)
+	sim.resolve_infantry_adm_ids(_anim_root(), item_db)
+	var player_ai_index := -1
+	var local_handle := sim.get_local_player_wire_handle()
+	for ai_index in range(sim.get_entity_count()):
+		if int(sim.get_entity_debug(ai_index).get("wire_handle", 0)) == local_handle:
+			player_ai_index = ai_index
+			break
+	assert_gte(player_ai_index, 0)
+	assert_eq(String(sim.get_entity_debug(player_ai_index).get("adm_name", "")),
+			"US01.adm", "the live host player owns its graphic ADM")
+	sim.set_player_input(true, false, false, false, false, false, false)
+	sim.step()
+	assert_eq(sim.get_local_player_anim_key(), "anim_idle",
+			"US01 lacks the requested gait and resolves through its own idle clip")
+
+	sim.restart()
+	assert_eq(String(sim.get_entity_debug(player_ai_index).get("adm_name", "")),
+			"US01.adm", "restart immediately repopulates the restored baseline row")
+	sim.set_player_input(true, false, false, false, false, false, false)
+	sim.step()
+	assert_eq(sim.get_local_player_anim_key(), "anim_idle",
+			"restart repopulates US01 instead of silently retaining default soldier.adm")
+	sim.free()
+
+
+func test_late_spawn_player_resolves_own_adm_before_configured_usegun_pose() -> void:
+	# MissionRuntime resolves per-entity ADMs once after the host player spawn. A
+	# joiner's local L and host-admitted remote players spawn later; they must still
+	# receive US01 rather than retaining the default E_STAND/soldier map. Otherwise
+	# B50 phrase_set 4 cannot select anim_emplaced_5 and silently uses the generic
+	# emplaced pose, visibly placing the body beside the gun.
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	assert_false(md.add_entity(
+			NovaMissionData.KIND_ITEM, 101419,
+			Vector3(2, 0, 0), Vector3.ZERO).is_empty())
+	var object_data := NovaObjectData.new()
+	assert_eq(object_data.open_file(ProjectSettings.globalize_path(
+			"res://../fixtures/3dp/B50Cal/B50Cal.3di")), OK)
+	var sim := NovaSimulation.new()
+	sim.set_item_seat_specs([{
+			"type_id": 1419,
+			"seats": MissionSeatDiagnostics.seat_specs_from_model(object_data),
+			"mount_config_valid": true,
+			"mount_config": 4,
+			"primary_weapon": "WPN_EMPLCD50NA",
+	}])
+	assert_true(sim.load_from_mission_data(md))
+	assert_gt(sim.set_infantry_anim_map(_anim_root(), "soldier.adm"), 0)
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/items.def")), OK)
+	# Reproduce the production ordering bug: the one-time sweep happens before
+	# this player exists.
+	sim.resolve_infantry_adm_ids(_anim_root(), item_db)
+	assert_true(sim.spawn_local_player(Vector3(2, 0, 0), 0.0, 1))
+
+	var weapon_root := NovaResourceRoot.new()
+	assert_eq(weapon_root.set_root_dir(ProjectSettings.globalize_path(
+			"res://../fixtures/def")), OK)
+	assert_eq(sim.load_weapon_table(weapon_root, "weapon.def"), OK)
+	var weapons := NovaWeaponDatabase.new()
+	assert_eq(weapons.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/weapon.def")), OK)
+	sim.set_local_player_weapon(
+			weapons.get_weapon(weapons.find_weapon("WPN_M4AUTO")), {})
+	for _tick in range(120):
+		if int(sim.get_local_player_weapon_state().get("current", -1)) < 2:
+			break
+		sim.step()
+	assert_true(sim.local_player_toggle_mount())
+	sim.step()
+	assert_eq(sim.get_local_player_anim_key(), "anim_emplaced_5",
+			"a late-spawn player receives US01 before phrase_set 4 selects its pose")
+	sim.free()
+
 
 func test_load_from_editor_mission_data() -> void:
 	# The editor-integration path: promote a live NovaMissionData (what the mission editor holds),
@@ -1388,6 +1543,632 @@ func test_local_player_toggle_mount_weapon_busy_gate() -> void:
 	var seats: Array = card.get("seats", [])
 	assert_true(seats.size() == 1 and bool(seats[0]["occupied"]),
 		"the scan took the truck's one sitex seat")
+	sim.free()
+
+
+# Local UseGun follows Player_MountWeaponSlot rather than the nonlocal direct slot
+# assignment: holster the personal slot, commit the parent's embedded MountSlot, and
+# restore the preserved personal slot through the same switch path on detach.
+# [orig: Entity_AttachToUseGunSlot @0x546c25..0x546c3d;
+# Player_MountWeaponSlot @0x4dfa40; switch commits @0x543475/@0x543539;
+# Entity_DetachFromVehicle restore @0x43565f]
+func test_local_first_person_usegun_parent_cull_follows_live_mount_slot() -> void:
+	# Retail suppresses the parent model only after THIS parent's MountSlot is
+	# EquippedSlot in first person. Pre-commit attach, third person, and detach
+	# render it normally. [orig: Entity_RenderVehicleModel @0x4407d0;
+	# predicate @0x4407f6..0x44084c; Render_SubmitEntity @0x440918]
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var gun := md.add_entity(NovaMissionData.KIND_ITEM, 101294,
+			Vector3(2, 0, 0), Vector3.ZERO)
+	assert_false(gun.is_empty())
+	var sim := NovaSimulation.new()
+	sim.enable_listen_server(true)
+	sim.set_item_seat_specs([{
+		"type_id": 1294,
+		"seats": [{"type": 3, "position": Vector3(0, -1, 1),
+				"source_name": "UseGun"}],
+		"primary_weapon": "WPN_EMPLCD50",
+	}])
+	assert_true(sim.load_from_mission_data(md))
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/items.def")), OK)
+	sim.resolve_item_traits(item_db)
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path("res://../fixtures/def")), OK)
+	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
+	assert_true(sim.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 1))
+	var weapons := NovaWeaponDatabase.new()
+	assert_eq(weapons.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/weapon.def")), OK)
+	var personal: Dictionary = weapons.get_weapon(
+			weapons.find_weapon("WPN_M4AUTO"))
+	var mounted: Dictionary = weapons.get_weapon(
+			weapons.find_weapon("WPN_EMPLCD50"))
+	sim.set_local_player_weapon(personal, {})
+	sim.drain_local_player_weapon_events()
+	sim.step() # seed the decoded listen-client present rows
+	var gun_index := int(gun["index"])
+	assert_eq(_present_field_for_origin(sim, NovaMissionData.KIND_ITEM, gun_index,
+			NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
+			"an unattached emplacement renders in the world pass")
+
+	assert_true(sim.local_player_toggle_mount())
+	assert_eq(_present_field_for_origin(sim, NovaMissionData.KIND_ITEM, gun_index,
+			NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
+			"the parent stays visible until its embedded slot commits")
+	sim.step()
+	var mount_event_found := false
+	for raw in sim.drain_local_player_weapon_events():
+		if String((raw as Dictionary).get("switch_to_weapon", "")) == "WPN_EMPLCD50":
+			mount_event_found = true
+	assert_true(mount_event_found)
+	sim.set_local_player_weapon(mounted, {}, true)
+	assert_eq(_present_field_for_origin(sim, NovaMissionData.KIND_ITEM, gun_index,
+			NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
+			"authored gfx1 alone cannot cull when its first-person model failed to resolve")
+	sim.set_local_player_first_person_model_available(true)
+	assert_eq(_present_field_for_origin(sim, NovaMissionData.KIND_ITEM, gun_index,
+			NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED), 1,
+			"the live parent slot with a resolved FP model suppresses the duplicate world gun")
+
+	sim.set_local_player_camera_third_person(true)
+	assert_eq(_present_field_for_origin(sim, NovaMissionData.KIND_ITEM, gun_index,
+			NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
+			"third person restores the parent model")
+	sim.set_local_player_camera_third_person(false)
+	assert_eq(_present_field_for_origin(sim, NovaMissionData.KIND_ITEM, gun_index,
+			NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED), 1)
+	for _tick in range(120):
+		if int(sim.get_local_player_weapon_state().get("current", -1)) < 2:
+			break
+		sim.step()
+	assert_true(sim.local_player_toggle_mount())
+	assert_eq(_present_field_for_origin(sim, NovaMissionData.KIND_ITEM, gun_index,
+			NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
+			"detach restores the world model immediately, before the holster commit")
+	sim.free()
+
+
+func test_local_usegun_aim_articulates_emplaced_weapon_model() -> void:
+	# B50Cal's authored PANM binds its turret and barrel to the semantic
+	# EWEAP_GUNYAW/EWEAP_GUNPITCH registers. A mounted local player's live look
+	# must pose those parts in authoritative model space, not only turn the camera.
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	assert_false(md.add_entity(
+			NovaMissionData.KIND_ITEM, 101419,
+			Vector3(2, 0, 0), Vector3.ZERO).is_empty())
+	var object_data := NovaObjectData.new()
+	assert_eq(object_data.open_file(ProjectSettings.globalize_path(
+			"res://../fixtures/3dp/B50Cal/B50Cal.3di")), OK)
+	var seat_specs := MissionSeatDiagnostics.seat_specs_from_model(object_data)
+	assert_eq(seat_specs.size(), 1, "B50Cal exposes its authored Usegun seat")
+	var usegun_info: Dictionary = object_data.get_user_point_info(
+			int((seat_specs[0] as Dictionary).get("bone_index", 0)) - 1)
+	var expected_usegun_world := MissionObjectPlacer.entity_transform(
+			Vector3(2, 0, 0), Vector3.ZERO) * Vector3(
+					usegun_info.get("position", Vector3.ZERO))
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/items.def")), OK)
+	var sim := NovaSimulation.new()
+	sim.set_item_seat_specs([{
+			"type_id": 1419,
+			"seats": seat_specs,
+			"primary_weapon": "WPN_EMPLCD50NA",
+	}])
+	assert_true(sim.load_from_mission_data(md))
+	assert_eq(sim.resolve_collision_instances(
+			item_db, ObjectDataPlacerStub.new(object_data)), 1)
+	# Start well off the gun's authored zero yaw. Retail's attach request snaps the
+	# requester's look/body heading to the UseGun heading before establishing the
+	# relationship; leaving this stale produces the visible torso twist at the grips.
+	const PRE_ATTACH_YAW_DEG := 160.0
+	assert_true(sim.spawn_local_player(Vector3.ZERO, PRE_ATTACH_YAW_DEG, 1))
+	assert_gt(absf(wrapf(sim.get_local_player_yaw_deg(), -180.0, 180.0)),
+			90.0, 'fixture starts far from the gun yaw')
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
+			"res://../fixtures/def")), OK)
+	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
+	assert_true(sim.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 1))
+	var weapons := NovaWeaponDatabase.new()
+	assert_eq(weapons.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/weapon.def")), OK)
+	var personal: Dictionary = weapons.get_weapon(
+			weapons.find_weapon("WPN_M4AUTO"))
+	var mounted: Dictionary = weapons.get_weapon(
+			weapons.find_weapon("WPN_EMPLCD50NA"))
+	sim.set_local_player_weapon(personal, {})
+	sim.drain_local_player_weapon_events()
+	assert_true(sim.local_player_toggle_mount())
+	sim.step()
+	assert_lt(sim.get_local_player_position().distance_to(expected_usegun_world),
+			0.001, "mounted player origin coincides with the authored Usegun point")
+	assert_lt(absf(wrapf(sim.get_local_player_yaw_deg(), -180.0, 180.0)),
+			0.01, 'UseGun attach pre-snaps a mismatched local look to the gun yaw')
+	for raw in sim.drain_local_player_weapon_events():
+		if String((raw as Dictionary).get(
+				"switch_to_weapon", "")) == "WPN_EMPLCD50NA":
+			sim.set_local_player_weapon(mounted, {}, true)
+	sim.debug_set_panm_time_ms(0)
+	var initial_weapon_state: Dictionary = sim.get_local_player_weapon_state()
+	assert_true(bool(initial_weapon_state.get(
+			"emplaced_controls_valid", false)))
+	var initial_yaw_control := int(initial_weapon_state.get(
+			"emplaced_gun_yaw", 0))
+	assert_eq(initial_yaw_control, 0,
+			'the attach snap starts EWEAP_GUNYAW at its neutral phase')
+	var initial_overlay: Dictionary = sim.get_local_player_aim_overlay()
+	assert_true(bool(initial_overlay.get('valid', false)))
+	var initial_body: Vector3 = initial_overlay.get('body', Vector3.ZERO)
+	var initial_angles: PackedVector3Array = initial_overlay.get(
+			'angles', PackedVector3Array())
+	assert_gt(initial_angles.size(), 0)
+	assert_lt(absf(wrapf(initial_body.y, -180.0, 180.0)), 0.01,
+			'the mounted body neutral overlay follows the snapped gun yaw')
+	var max_initial_twist_deg := 0.0
+	for angle in initial_angles:
+		max_initial_twist_deg = maxf(max_initial_twist_deg,
+				absf(wrapf(angle.y - initial_body.y, -180.0, 180.0)))
+	assert_lt(max_initial_twist_deg, 0.01,
+			'no segment retains the pre-attach look as a torso twist')
+	var initial_pitch_control := int(initial_weapon_state.get(
+			"emplaced_gun_pitch", 0))
+
+	var before_entities: Array = sim.get_hitbox_debug().get("entities", [])
+	assert_eq(before_entities.size(), 1)
+	var before: PackedVector3Array = (before_entities[0] as Dictionary).get(
+			"tris", PackedVector3Array())
+	assert_gt(before.size(), 0)
+
+	sim.set_local_player_mouse(511, false)
+	var yaw_before := sim.get_local_player_yaw_deg()
+	sim.add_local_player_look(100.0, 0.0)
+	sim.step()
+	assert_lt(sim.get_local_player_position().distance_to(expected_usegun_world),
+			0.001, "look yaw cannot move the player off the Usegun point")
+	assert_gt(absf(sim.get_local_player_yaw_deg() - yaw_before), 0.1,
+			"the mounted local player's authoritative yaw changed")
+	assert_ne(int(sim.get_local_player_weapon_state().get(
+			"emplaced_gun_yaw", initial_yaw_control)), initial_yaw_control,
+			"look yaw reaches the retail EWEAP_GUNYAW phase")
+	var yaw_entities: Array = sim.get_hitbox_debug().get("entities", [])
+	var after_yaw: PackedVector3Array = (yaw_entities[0] as Dictionary).get(
+			"tris", PackedVector3Array())
+	var yaw_moved := 0
+	for index in before.size():
+		if before[index].distance_to(after_yaw[index]) > 0.001:
+			yaw_moved += 1
+	assert_gt(yaw_moved, 0,
+			"EWEAP_GUNYAW moves the authored B50Cal turret with local look")
+
+	var pitch_before := sim.get_local_player_pitch_deg()
+	sim.add_local_player_look(0.0, 100.0)
+	sim.step()
+	assert_lt(sim.get_local_player_position().distance_to(expected_usegun_world),
+			0.001, "look pitch cannot move the player off the Usegun point")
+	assert_gt(absf(sim.get_local_player_pitch_deg() - pitch_before), 0.1,
+			"the mounted local player's authoritative pitch changed")
+	assert_ne(int(sim.get_local_player_weapon_state().get(
+			"emplaced_gun_pitch", initial_pitch_control)),
+			initial_pitch_control,
+			"look pitch reaches the retail EWEAP_GUNPITCH phase")
+	var pitch_entities: Array = sim.get_hitbox_debug().get("entities", [])
+	var after_pitch: PackedVector3Array = (pitch_entities[0] as Dictionary).get(
+			"tris", PackedVector3Array())
+	var pitch_moved := 0
+	for index in after_yaw.size():
+		if after_yaw[index].distance_to(after_pitch[index]) > 0.001:
+			pitch_moved += 1
+	assert_gt(pitch_moved, 0,
+			"EWEAP_GUNPITCH moves the authored B50Cal barrel with local look")
+	sim.free()
+
+
+func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> void:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var gun := md.add_entity(
+			NovaMissionData.KIND_ITEM, 101294, Vector3(2, 0, 0), Vector3.ZERO)
+	assert_false(gun.is_empty())
+	var sim := NovaSimulation.new()
+	sim.set_item_seat_specs([{
+		"type_id": 1294,
+		"seats": [{
+			"type": 3,
+			"position": Vector3(0, -1, 1),
+			"source_name": "UseGun",
+		}],
+		# A finite clip makes parent-slot persistence observable across remounts.
+		"primary_weapon": "WPN_AVENGER",
+	}])
+	assert_true(sim.load_from_mission_data(md))
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path("res://../fixtures/def")), OK)
+	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
+	assert_true(sim.apply_local_player_loadout([
+		{"name": "WPN_M4AUTO"},
+		{"name": "WPN_M4"},
+	], 1))
+	var weapons := NovaWeaponDatabase.new()
+	assert_eq(weapons.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/weapon.def")), OK)
+	var personal_idx := weapons.find_weapon("WPN_M4AUTO")
+	var mounted_idx := weapons.find_weapon("WPN_AVENGER")
+	assert_gte(personal_idx, 0)
+	assert_gte(mounted_idx, 0)
+	var personal_def: Dictionary = weapons.get_weapon(personal_idx)
+	var mounted_def: Dictionary = weapons.get_weapon(mounted_idx)
+	# Exercise the merge seam with a PowerThrow-shaped personal def while the
+	# authoritative inventory still selects WPN_M4AUTO. A UseGun handoff must
+	# cancel its windup before borrowing the parent's persistent slot.
+	var powerthrow_personal: Dictionary = personal_def.duplicate(true)
+	powerthrow_personal["flags"] = int(personal_def.get("flags", 0)) | (1 << 31)
+	sim.set_local_player_weapon(powerthrow_personal, {})
+	sim.drain_local_player_weapon_events()
+	sim.step() # move beyond tick zero, the windup's idle sentinel
+	sim.set_local_player_weapon_input(true, true, false)
+	for _tick in range(5):
+		sim.step()
+	var wound_before_mount: Dictionary = sim.get_local_player_weapon_state()
+	assert_true(bool(wound_before_mount.get("windup_active", false)))
+	var personal_fired_before := int(wound_before_mount.get("fired_serial", 0))
+	var personal_rounds_before := int(wound_before_mount.get("round_ring_count", 0))
+	var personal_clip := int(sim.get_local_player_weapon_state().get("clip", -1))
+	var inventory_clip := int(
+			sim.get_local_player_inventory().get("slots", [])[0].get("clip", -1))
+
+	assert_true(sim.local_player_toggle_mount())
+	assert_eq(sim.get_local_player_weapon_name(), "WPN_M4AUTO",
+			"local UseGun stages the parent slot instead of assigning it immediately")
+	# The still-held PowerThrow plus a simultaneous trigger edge cannot overwrite
+	# the pending mount action.
+	sim.set_local_player_weapon_input(true, true, false)
+	sim.step()
+	sim.set_local_player_weapon_input(false, false, false)
+	var mount_event: Dictionary = {}
+	for raw in sim.drain_local_player_weapon_events():
+		var event: Dictionary = raw
+		if String(event.get("switch_to_weapon", "")) == "WPN_AVENGER":
+			mount_event = event
+	assert_false(mount_event.is_empty(),
+			"an Emplaced pending def takes retail's same-pump -901 commit")
+	assert_true(bool(mount_event.get("preserve_slot_state", false)),
+			"the host must not reset the emplacement's persistent slot")
+	assert_eq(sim.get_local_player_weapon_name(), "WPN_AVENGER")
+	var handed_off: Dictionary = sim.get_local_player_weapon_state()
+	assert_false(bool(handed_off.get("windup_active", true)),
+			"UseGun input suppression cancels the outgoing PowerThrow windup")
+	assert_eq(int(handed_off.get("fired_serial", -1)), personal_fired_before)
+	assert_eq(int(handed_off.get("round_ring_count", -1)), personal_rounds_before,
+			"releasing through the handoff cannot leak a charged personal round")
+	sim.set_local_player_weapon(mounted_def, {}, true)
+	var mounted_before: Dictionary = sim.get_local_player_weapon_state()
+	assert_eq(int(mounted_before.get("clip", -1)),
+			int(mounted_def.get("clipsize", -2)))
+	var mounted_slot_before_rebake := {
+		"current": int(mounted_before.get("current", -1)),
+		"next": int(mounted_before.get("next", -1)),
+		"phase": int(mounted_before.get("phase", -1)),
+		"clip": int(mounted_before.get("clip", -1)),
+	}
+	sim.rebake_local_player_weapon(mounted_def, {
+		"anim_wpn_idle": PackedFloat32Array([0.2]),
+	}, true)
+	var mounted_after_rebake: Dictionary = sim.get_local_player_weapon_state()
+	for field in mounted_slot_before_rebake:
+		assert_eq(int(mounted_after_rebake.get(field, -2)),
+				int(mounted_slot_before_rebake[field]),
+				"late mounted-def rebake preserves parent slot %s" % field)
+
+	sim.set_local_player_weapon_input(true, true, false)
+	var fired_before := int(mounted_before.get("fired_serial", 0))
+	for _tick in range(120):
+		sim.step()
+		if int(sim.get_local_player_weapon_state().get(
+				"fired_serial", 0)) > fired_before:
+			break
+	sim.set_local_player_weapon_input(false, false, false)
+	var mounted_clip_after := int(
+			sim.get_local_player_weapon_state().get("clip", -1))
+	assert_eq(mounted_clip_after, int(mounted_before.get("clip", -1)) - 1,
+			"local LMB consumes the parent's embedded weapon slot")
+	assert_eq(int(sim.get_local_player_inventory().get(
+			"slots", [])[0].get("clip", -1)), inventory_clip,
+			"mounted fire cannot consume the saved personal magazine")
+
+	for _tick in range(180):
+		sim.step()
+		if int(sim.get_local_player_weapon_state().get("current", -1)) < 2:
+			break
+	assert_true(sim.local_player_toggle_mount())
+	assert_eq(sim.get_local_player_weapon_name(), "WPN_AVENGER",
+			"detach also waits for the mounted slot's holster commit")
+	# The entity is already detached, but its borrowed slot still owns the pending
+	# UseGun SWITCHFROM. Manual requests in this frame must not replace that action.
+	sim.request_local_player_weapon_category(3)
+	sim.request_local_player_weapon_cycle(1)
+	sim.set_local_player_weapon_input(true, true, false)
+	sim.step()
+	sim.set_local_player_weapon_input(false, false, false)
+	var detach_event: Dictionary = {}
+	for raw in sim.drain_local_player_weapon_events():
+		var event: Dictionary = raw
+		if String(event.get("switch_to_weapon", "")) == "WPN_M4AUTO":
+			detach_event = event
+	assert_false(detach_event.is_empty(),
+			"outgoing Emplaced detach also commits on the next pump")
+	assert_true(bool(detach_event.get("preserve_slot_state", false)))
+	sim.set_local_player_weapon(personal_def, {}, true)
+	assert_eq(int(sim.get_local_player_weapon_state().get("clip", -1)),
+			personal_clip, "the personal slot resumes with its original magazine")
+
+	for _tick in range(120):
+		sim.step()
+		if int(sim.get_local_player_weapon_state().get("current", -1)) < 2:
+			break
+	assert_true(sim.local_player_toggle_mount())
+	var remount_event: Dictionary = {}
+	for _tick in range(120):
+		sim.step()
+		for raw in sim.drain_local_player_weapon_events():
+			var event: Dictionary = raw
+			if String(event.get("switch_to_weapon", "")) == "WPN_AVENGER":
+				remount_event = event
+		if not remount_event.is_empty():
+			break
+	assert_false(remount_event.is_empty())
+	sim.set_local_player_weapon(mounted_def, {}, true)
+	assert_eq(int(sim.get_local_player_weapon_state().get("clip", -1)),
+			mounted_clip_after,
+			"the emplacement keeps its own clip state while nobody is attached")
+
+	sim.restart()
+	var restart_event: Dictionary = {}
+	for raw in sim.drain_local_player_weapon_events():
+		var event: Dictionary = raw
+		if String(event.get("switch_to_weapon", "")) == "WPN_M4AUTO":
+			restart_event = event
+	assert_false(restart_event.is_empty(),
+			"restart explicitly restores the saved personal presentation")
+	assert_false(bool(restart_event.get("preserve_slot_state", true)),
+			"restart installs a fresh personal slot epoch")
+	assert_false(bool(sim.get_local_player_weapon_state().get("active", true)),
+			"the mounted definition cannot pump the restored personal slot")
+	sim.free()
+
+
+func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> void:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var first_gun := md.add_entity(NovaMissionData.KIND_ITEM, 101294,
+			Vector3(2, 0, 0), Vector3.ZERO)
+	var second_gun := md.add_entity(NovaMissionData.KIND_ITEM, 101295,
+			Vector3(3, 0, 0), Vector3.ZERO)
+	var third_gun := md.add_entity(NovaMissionData.KIND_ITEM, 101296,
+			Vector3(3.5, 0, 0), Vector3.ZERO)
+	assert_false(first_gun.is_empty())
+	assert_false(second_gun.is_empty())
+	assert_false(third_gun.is_empty())
+	var sim := NovaSimulation.new()
+	sim.enable_listen_server(true)
+	sim.set_item_seat_specs([
+		{
+			"type_id": 1294,
+			"seats": [{"type": 3, "position": Vector3(0, -1, 1),
+					"source_name": "UseGun"}],
+			"primary_weapon": "WPN_AVENGER",
+		},
+		{
+			"type_id": 1295,
+			"seats": [{"type": 3, "position": Vector3(0, -1, 1),
+					"source_name": "UseGun"}],
+			"primary_weapon": "WPN_EMPLCD50",
+		},
+		{
+			"type_id": 1296,
+			"seats": [{"type": 3, "position": Vector3(0, -1, 1),
+					"source_name": "UseGun"}],
+			"primary_weapon": "WPN_EMPLCD50",
+		},
+	])
+	assert_true(sim.load_from_mission_data(md))
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/items.def")), OK)
+	sim.resolve_item_traits(item_db)
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path("res://../fixtures/def")), OK)
+	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
+	var weapons := NovaWeaponDatabase.new()
+	assert_eq(weapons.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/weapon.def")), OK)
+	var personal: Dictionary = weapons.get_weapon(
+			weapons.find_weapon("WPN_M4AUTO"))
+	var first_mount: Dictionary = weapons.get_weapon(
+			weapons.find_weapon("WPN_AVENGER"))
+	var second_mount: Dictionary = weapons.get_weapon(
+			weapons.find_weapon("WPN_EMPLCD50"))
+	sim.set_local_player_weapon(personal, {})
+	sim.drain_local_player_weapon_events()
+	# Seed the listen-client rows and let the personal slot reach an attachable
+	# state. The cull verdict is produced against this decoded presentation view.
+	for _tick in range(80):
+		sim.step()
+		if int(sim.get_local_player_weapon_state().get("current", -1)) < 2:
+			break
+	var first_gun_index := int(first_gun["index"])
+	var second_gun_index := int(second_gun["index"])
+	var third_gun_index := int(third_gun["index"])
+
+	assert_true(sim.local_player_toggle_mount())
+	sim.step()
+	var first_event: Dictionary = {}
+	for raw in sim.drain_local_player_weapon_events():
+		if String((raw as Dictionary).get(
+				"switch_to_weapon", "")) == "WPN_AVENGER":
+			first_event = raw
+	assert_false(first_event.is_empty())
+	sim.set_local_player_weapon(first_mount, {}, true)
+	# Even a host-side resolution report cannot manufacture fpModel on a Def that
+	# has none, and a different target Def must not inherit that model identity.
+	sim.set_local_player_first_person_model_available(true)
+	assert_eq(_present_field_for_origin(sim, NovaMissionData.KIND_ITEM,
+			first_gun_index, NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
+			"a live AVENGER MountSlot without gfx1 keeps its world model")
+	assert_eq(_present_field_for_origin(sim, NovaMissionData.KIND_ITEM,
+			second_gun_index, NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
+			"mounting AVENGER cannot suppress the unrelated 50-cal parent")
+	for _tick in range(80):
+		sim.step()
+		if int(sim.get_local_player_weapon_state().get("current", -1)) < 2:
+			break
+
+	assert_true(sim.local_player_toggle_mount(),
+			"a nearby second gun is a direct mounted-seat swap")
+	assert_eq(sim.get_local_player_weapon_name(), "WPN_AVENGER",
+			"the old parent remains equipped until the rank commit")
+	assert_eq(_present_field_for_origin(sim, NovaMissionData.KIND_ITEM,
+			first_gun_index, NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
+			"pre-commit swap restores the old parent world model")
+	assert_eq(_present_field_for_origin(sim, NovaMissionData.KIND_ITEM,
+			second_gun_index, NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
+			"pre-commit target is not culled before its MountSlot is equipped")
+	sim.step()
+	var swap_event: Dictionary = {}
+	for raw in sim.drain_local_player_weapon_events():
+		if String((raw as Dictionary).get(
+				"switch_to_weapon", "")) == "WPN_EMPLCD50":
+			swap_event = raw
+	assert_false(swap_event.is_empty(),
+			"latest pending parent commits directly with no personal interlude")
+	sim.set_local_player_weapon(second_mount, {}, true)
+	assert_eq(_present_field_for_origin(sim, NovaMissionData.KIND_ITEM,
+			first_gun_index, NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
+			"the committed swap leaves the old AVENGER parent visible")
+	assert_eq(_present_field_for_origin(sim, NovaMissionData.KIND_ITEM,
+			second_gun_index, NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
+			"the new authored model does not cull before its FP graphic resolves")
+	sim.set_local_player_first_person_model_available(true)
+	assert_eq(_present_field_for_origin(sim, NovaMissionData.KIND_ITEM,
+			second_gun_index, NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED), 1,
+			"the resolved EMPLCD50 replacement culls only its own world model")
+	sim.step()
+	assert_eq(int(sim.get_local_player_weapon_state().get("current", -1)), 0,
+			"SWITCHRANK does not queue SWITCHTO onto the target parent slot")
+	assert_true(bool(sim.get_local_player_weapon_state().get(
+			"borrowed_usegun_slot", false)))
+
+	assert_true(sim.local_player_toggle_mount(),
+			"a closer third gun drives a second direct mounted-seat swap")
+	assert_eq(_present_field_for_origin(sim, NovaMissionData.KIND_ITEM,
+			second_gun_index, NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
+			"the outgoing parent restores before the same-Def swap commits")
+	assert_eq(_present_field_for_origin(sim, NovaMissionData.KIND_ITEM,
+			third_gun_index, NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
+			"the target parent stays visible before its slot is live")
+	sim.step()
+	var same_def_event: Dictionary = {}
+	for raw in sim.drain_local_player_weapon_events():
+		if String((raw as Dictionary).get(
+				"switch_to_weapon", "")) == "WPN_EMPLCD50":
+			same_def_event = raw
+	assert_false(same_def_event.is_empty())
+	assert_eq(_present_field_for_origin(sim, NovaMissionData.KIND_ITEM,
+			second_gun_index, NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED), 0)
+	assert_eq(_present_field_for_origin(sim, NovaMissionData.KIND_ITEM,
+			third_gun_index, NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED), 1,
+			"the same resolved Def model immediately suppresses the newly live parent")
+	sim.free()
+
+
+func test_death_during_usegun_draw_restores_personal_weapon() -> void:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	assert_false(md.add_entity(NovaMissionData.KIND_ITEM, 101294,
+			Vector3(2, 0, 0), Vector3.ZERO).is_empty())
+	var sim := NovaSimulation.new()
+	sim.set_item_seat_specs([{
+		"type_id": 1294,
+		"seats": [{"type": 3, "position": Vector3(0, -1, 1),
+				"source_name": "UseGun"}],
+		"primary_weapon": "WPN_AVENGER",
+	}])
+	assert_true(sim.load_from_mission_data(md))
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path("res://../fixtures/def")), OK)
+	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
+	var weapons := NovaWeaponDatabase.new()
+	assert_eq(weapons.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/weapon.def")), OK)
+	var mounted_def: Dictionary = weapons.get_weapon(
+			weapons.find_weapon("WPN_AVENGER"))
+	var personal_def: Dictionary = weapons.get_weapon(
+			weapons.find_weapon("WPN_M4AUTO"))
+	sim.set_local_player_weapon(personal_def, {})
+	sim.drain_local_player_weapon_events()
+
+	assert_true(sim.local_player_toggle_mount())
+	sim.step()
+	var mount_event: Dictionary = {}
+	for raw in sim.drain_local_player_weapon_events():
+		if String((raw as Dictionary).get(
+				"switch_to_weapon", "")) == "WPN_AVENGER":
+			mount_event = raw
+	assert_false(mount_event.is_empty(),
+			"the emplacement commits before its SWITCHTO draw")
+	sim.set_local_player_weapon(mounted_def, {}, true)
+	var fired_before := int(sim.get_local_player_weapon_state().get(
+			"fired_serial", 0))
+	sim.set_local_player_weapon_input(true, true, false)
+	sim.debug_set_entity_health(0, 0)
+	var restore_event: Dictionary = {}
+	for _tick in range(160):
+		sim.step()
+		for raw in sim.drain_local_player_weapon_events():
+			if String((raw as Dictionary).get(
+					"switch_to_weapon", "")) == "WPN_M4AUTO":
+				restore_event = raw
+		if not restore_event.is_empty():
+			break
+	assert_false(restore_event.is_empty(),
+			"forced detach during SWITCHTO eventually restores the personal slot")
+	assert_eq(int(sim.get_local_player_weapon_state().get("fired_serial", 0)),
+			fired_before, "a dead local gunner cannot fire the emplacement")
+	sim.set_local_player_weapon(personal_def, {}, true)
+	assert_false(bool(sim.get_local_player_weapon_state().get(
+			"borrowed_usegun_slot", true)))
+	sim.free()
+
+
+func test_unarmed_local_usegun_toggle_is_rejected() -> void:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	assert_false(md.add_entity(NovaMissionData.KIND_ITEM, 101294,
+			Vector3(2, 0, 0), Vector3.ZERO).is_empty())
+	var sim := NovaSimulation.new()
+	sim.set_item_seat_specs([{
+		"type_id": 1294,
+		"seats": [{"type": 3, "position": Vector3(0, -1, 1),
+				"source_name": "UseGun"}],
+		"primary_weapon": "WPN_AVENGER",
+	}])
+	assert_true(sim.load_from_mission_data(md))
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	sim.clear_local_player_weapon()
+	assert_false(sim.local_player_toggle_mount(),
+			"retail rejects ordinary UseGun attach without EquippedSlot/Def")
 	sim.free()
 
 

@@ -45,6 +45,7 @@ static func seat_specs_for_item(resource_root, item_db, item_id: int, type_id :=
 		"display_name": "",
 		"graphic": "",
 		"model": "",
+		"model_data": null,
 		"seats": [],
 		"armory_points": [],
 		"primary_weapon": "",
@@ -87,6 +88,7 @@ static func seat_specs_for_item(resource_root, item_db, item_id: int, type_id :=
 	if data.open_from_resource_root(resource_root, model_name) != OK:
 		out["error"] = "model_not_found"
 		return out
+	out["model_data"] = data
 	out["seats"] = seat_specs_from_model(data, include_raw)
 	# "armory*" userpoints label/scan only on Armory-attrib items — the same attrib
 	# gate the original applies before its userpoint walk

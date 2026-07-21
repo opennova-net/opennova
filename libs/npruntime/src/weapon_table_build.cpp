@@ -171,6 +171,34 @@ world::WeaponTable build_weapon_table(const DefWeaponsFile &weapons) {
 		e.attach_text_id = d.attach_text_id; // the attach-label Overlays key [orig: +0x3A0]
 		e.flags = d.flags;
 		e.flags2 = d.flags2;
+		e.has_first_person_model_reference = d.gfx1[0] != '\0';
+		// Bind this weapon's ACTION rows into the same 12-state descriptor table
+		// consumed by a MountSlot. The resource-only table has no ADM duration ring,
+		// so auto fields take the original unresolved-clip zero fallback here; hosts
+		// with clip metadata may rebake later.
+		// [orig: Anim_InitActions @0x541fa0; WeaponAction_ProcessFrame @0x540e60]
+		std::vector<world::WeaponFsmActionRow> action_rows(d.actions_count);
+		for (size_t a = 0; a < d.actions_count; ++a) {
+			const DefWeaponAction &src = d.actions[a];
+			world::WeaponFsmActionRow &dst = action_rows[a];
+			std::memcpy(dst.name, src.name, sizeof(dst.name));
+			std::memcpy(dst.anim, src.anim, sizeof(dst.anim));
+			std::memcpy(dst.function, src.function, sizeof(dst.function));
+			dst.delaystart = src.delaystart;
+			dst.delayend = src.delayend;
+			std::memcpy(dst.soundset, src.soundset, sizeof(dst.soundset));
+			std::memcpy(dst.soundsetend, src.soundsetend, sizeof(dst.soundsetend));
+			std::memcpy(dst.particle, src.particle, sizeof(dst.particle));
+			std::memcpy(dst.particleuserpoint, src.particleuserpoint,
+			            sizeof(dst.particleuserpoint));
+		}
+		world::weapon_fsm_bake(action_rows.data(), action_rows.size(), nullptr, nullptr,
+		                       nullptr, e.action_fsm);
+		e.action_fsm.auto_fire = (d.flags & 0x100) != 0;
+		e.action_fsm.burst3 = (d.flags & 0x20) != 0;
+		e.action_fsm.clip_capacity = e.clipsize;
+		e.action_fsm.flags = d.flags;
+		e.action_fsm.flags2 = d.flags2;
 		e.weapon_class_slot = d.weapon_class_slot;
 		for (int k = 0; k < 7; ++k) e.classrounds[k] = d.classrounds[k];
 		e.switchcategory = d.switchcategory;

@@ -37,7 +37,7 @@
 //    around the per-tick fixed-point core. Unresolved/unposed persons continue to
 //    use the characterized torso fallback.
 //  * useownmove rounds run the throwable class motors (world/throwables.cpp,
-//    world-wac-ai-re §26): grenade arc/bounce/fuse, satchel/claymore stick +
+//    world-wac-ai-re §27): grenade arc/bounce/fuse, satchel/claymore stick +
 //    placed-device conversion; the spawn dispatches instantkillzone (0x400),
 //    Detonatesatchels (0x20), and the claymore pellet fan (0x20000) before the
 //    ballistic default, and the PowerThrow charge byte scales launch speed.
@@ -108,7 +108,7 @@ struct LiveRound {
     // @ 0x4ec774]; -1 = no visual (non-tracer, NoTracers rules, or pool full).
     int32_t trail_slot = -1;
 
-    // --- throwable state (zeroed on ballistic rounds; world-wac-ai-re §26) ---
+    // --- throwable state (zeroed on ballistic rounds; world-wac-ai-re §27) ---
     // Orientation + spin [orig: round +16/+20/+24 angles, +164/+168/+172 spin
     // rates; the class init callback seeds 1 deg/tick @ 0x4435A0].
     int32_t yaw_bam = 0;

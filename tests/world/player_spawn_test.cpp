@@ -101,6 +101,8 @@ int main() {
         const Entity *e = w.registry.get(h);
         CHECK(e != nullptr);
         CHECK(e->item_id == kPlayerInfantryTypeId);
+        CHECK((e->engine_flags & 0x100u) != 0u);
+        CHECK((e->flags & 0x100u) != 0u);
         CHECK((e->flags & 2u) == 0u); // §5.2b gate cleared
         CHECK(e->health > 0);
         CHECK(e->kind == EntityKind::Organic);
@@ -135,6 +137,8 @@ int main() {
         CHECK(e->item_type == 3 && e->item_attrib == 0x200u);
         CHECK(e->armor_impact == 7 && e->armor_kz == 9);
         CHECK(e->damage_reduc_pp == 0.1f && e->damage_reduc_max == 0.25f);
+        CHECK((e->engine_flags & 0x100u) != 0u);
+        CHECK((e->flags & 0x100u) != 0u);
         const AiEntity *ae = ai.at(0);
         CHECK(ae->health == 150);
         CHECK(ae->inf.max_health == 150);

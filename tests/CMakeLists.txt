@@ -937,7 +937,7 @@ target_include_directories(destruction_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(destruction_test PRIVATE cxx_std_17)
 add_test(NAME destruction COMMAND destruction_test)
 
-# Throwables (world/throwables.h; world-wac-ai-re §26): PowerThrow charge,
+# Throwables (world/throwables.h; world-wac-ai-re §27): PowerThrow charge,
 # grenade bounce/fuse, satchel place/detonator, claymore cone + fan, AV-mine
 # data-dead proximity, owner-death cleanup.
 add_executable(throwables_test world/throwables_test.cpp)

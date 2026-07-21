@@ -1,4 +1,4 @@
-// Throwable tests (world/throwables.h; docs/world/world-wac-ai-re.md §26):
+// Throwable tests (world/throwables.h; docs/world/world-wac-ai-re.md §27):
 // the PowerThrow charge curve + spawn speed scale, the grenade motor's bounce
 // and fuse, the satchel stick/convert chain, the detonator, the claymore cone
 // trigger + shrapnel fan, AV-mine data-dead proximity, and the owner-death

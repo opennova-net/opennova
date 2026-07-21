@@ -368,6 +368,12 @@ void handler_switchfrom(const WeaponFsmDef &, const WeaponFsmAction &desc,
         slot.phase = weapon_phase::kDone;
         return;
     }
+    if (in.instant_emplaced_switch) {
+        // Either side of an Emplaced handoff uses the -901 sentinel, crossing
+        // the ordinary >= -900 timer gate on this handler call.
+        // [orig: outgoing/pending Def Flags 0x80 @0x543417..0x54344a]
+        slot.switch_timer = -901;
+    }
     if (slot.switch_timer >= -900) {
         slot.switch_timer = static_cast<int16_t>(slot.switch_timer - 30); // [orig: @ 0x5434c2]
         slot.counter = desc.delay_end;
@@ -646,6 +652,15 @@ void weapon_fsm_queue_switch_rank(WeaponSlotState &slot) {
     } else {
         slot.next = weapon_action::kIdle;
     }
+}
+
+void weapon_fsm_try_queue_switch_to(WeaponSlotState &slot) {
+    // [orig: WeaponSlot_TryQueueSwitchTo @0x53f140]
+    if (slot.current == weapon_action::kSwitchTo) return;
+    if (slot.phase == weapon_phase::kDone || slot.phase == weapon_phase::kNone)
+        slot.next = weapon_action::kSwitchTo;
+    else
+        slot.next = weapon_action::kIdle;
 }
 
 void weapon_fsm_tick(const WeaponFsmDef &def, WeaponSlotState &slot,

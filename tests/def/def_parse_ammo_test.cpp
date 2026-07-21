@@ -129,7 +129,7 @@ int main(void) {
         return 1;
     }
     /* The throwable fields against the real claymore block (world-wac-ai-re
-       §26): kz_pieslice stores the HALF-angle — (24 / 2) * 11930464 BAM
+       §27): kz_pieslice stores the HALF-angle — (24 / 2) * 11930464 BAM
        [orig: AmmoDef_ParseProperty @0x40ad51 signed div 2 -> imul 0xB60B60] —
        and the TrcrID item ids ride +16/+20. */
     const DefAmmoDef *claymore = NULL;

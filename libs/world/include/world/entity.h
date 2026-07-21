@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <world/weapon_fsm.h>
 
 #include "world/geom.h"
 
@@ -287,6 +288,13 @@ struct Entity {
     // to the WPN_M4AUTO table index [orig: PlayerClass_InitEntity @0x4B1116 resolves by name].
     // (D-NET-143)
     uint8_t equipped_adm_index = 0xFF;
+    // UseGun temporarily replaces EquippedSlot with the parent's embedded slot.
+    // Preserve the personal AdmDef byte. Detach restores it for a player-classified
+    // occupant and clears the equipped byte for an NPC.
+    // [orig: Entity_AttachToUseGunSlot @0x546c42; Entity_DetachFromVehicle
+    //  restore @0x435671-0x435687, NPC clear @0x435694-0x4356aa]
+    uint8_t pre_use_gun_equipped_adm_index = 0xFF;
+    bool use_gun_slot_swapped = false;
     bool hidden = false;
     bool held = false;
     bool disabled = false;
@@ -326,7 +334,8 @@ struct Entity {
     //   NoShadow(1<<24) -> 0x1000000            [orig: Entity_SpawnFromBMSRecord @0x40e9f0]
     //   kind Building                -> 0x20000  [orig: Entity_InitFromModel @0x40e105]
     //   items.def hp == 0            -> 0x4000000 (+ sub_type 0xFF) [orig: @0x40dc8e]
-    // Dynamic runtime bits (movement gate 0x2, mounted 0x40, ...) are NOT modeled here.
+    // Organic low-byte runtime/wire state also has a legacy flags mirror. Retail
+    // consumers of player 0x100 and guarding/mounted 0x40 keep both views coherent.
     uint32_t engine_flags = 0;
     // entity+290 low byte <- BMS record byte 81; always-present byte of the 0x10 static record
     // (golden buildings carry 0xFF). [orig: Entity_SpawnFromBMSRecord @0x40e9f0]
@@ -377,6 +386,21 @@ struct Entity {
     // Empty for non-emplacements. [orig: ItemDef+0x54B primaryWeapon; label consumer
     // draw_vehicle_seat_and_armory_labels @0x5a351d via Entity_GetWeaponSlots slot0]
     std::string primary_weapon;
+    // The emplacement's embedded MountSlot (parent+0x2B4). A UseGun occupant borrows
+    // this slot: the AI update only queues nextAction=FIRE, then the later global
+    // weapon-action pump owns cadence/ammo and attributes the round to slot.owner.
+    // [orig: Entity_AttachToUseGunSlot @0x546b80; WeaponAction_ProcessAllEntities
+    //  @0x542690; WeaponAction_Fire @0x542b10]
+    WeaponSlotState primary_weapon_slot;
+    uint8_t primary_weapon_slot_adm = 0xFF;
+    EntityHandle primary_weapon_owner;
+    // Host-fed posed muzzle/userpoint on this entity. For a UseGun shot this is
+    // sampled from the emplacement model, while primary_weapon_owner remains the
+    // organic shooter for damage/network attribution.
+    // [orig: Entity_CalcWeaponFirePosition parentSlot 3 from WeaponAction_Fire]
+    int32_t posed_muzzle_world[3] = {};
+    uint32_t posed_muzzle_tick = 0;
+    bool posed_muzzle_valid = false;
     // The single tracked FIRST occupant (entity+368 occupantEntity): claimed at attach by
     // ctrlx/drvrx (empty-or-same) and UseGun (only when empty), never by sitex; cleared only
     // when THE claimant detaches — a remaining second controller does not inherit it. This
@@ -391,9 +415,11 @@ struct Entity {
     // witnessed config 0 branch.
     bool emplaced_config_valid = false;
     int32_t emplaced_config = 0;
-    // Occupant side: this entity is RIDING mount_target's seat mount_seat. [orig: occupant+364
-    // vehicle ptr / +360 seat index / +36 & 0x40 mounted flag, written by
-    // Entity_AttachToVehicleSlot @0x4946d0.] mounted == false => the rest are unset.
+    // Occupant side: this entity is RIDING mount_target's seat mount_seat. The host bool
+    // represents the parent relationship for every seat. Retail's generic vehicle attach
+    // also sets Flags 0x40 [orig: Entity_AttachToVehicleSlot @0x494752], while UseGun
+    // deliberately does not [orig: Entity_AttachToUseGunSlot @0x546c5c].
+    // mounted == false => the rest are unset.
     EntityHandle mount_target;          // kInvalid = not mounted
     // Stable identity of mount_target at attach time. The handle can stop resolving before
     // occupant teardown; these fields preserve the control-stop notification payload.

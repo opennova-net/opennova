@@ -658,9 +658,12 @@ bool run_0a_player_record_field_sources() {
 			w::spawn_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF0));
 	w::Entity *e = world.registry.get(host_h);
 	if (!expect(e != nullptr, "host entity resolvable")) return false;
+	w::AiEntity *ae = ai.for_handle(host_h);
+	if (!expect(ae != nullptr, "host AI pose resolvable")) return false;
 	e->net_move_input = 0x21; // the uplink-ingested +0x12C movement-input byte the record echoes
 	e->flags |= 0x40; // an arbitrary entity+0x24 bit rides the wire unmasked
-	e->pitch = 45;
+	e->pitch = -45; // deliberately disagree with the live split-store look
+	ae->pitch = 0x1F800000;
 	e->equipped_adm_index = 0x09; // the equipped-weapon adm index the record's off-16 echoes
 
 	std::vector<ns::Connection> conns;
@@ -682,7 +685,8 @@ bool run_0a_player_record_field_sources() {
 	// yaw 0 -> engine BAM (90-0)*11930464 = 0x3FFFFFC0: TRUNCATED high byte = 0x3F (rounding
 	// would give 0x40 — the exact bit the witness corrected).
 	if (!expect(rec->player.yaw_byte == 0x3F, "yaw byte is the TRUNCATED high byte")) return false;
-	// pitch 45 deg -> BAM 0x1FFFFFE0 -> rounded high byte 0x20.
+	// Live AiEntity pitch 0x1F800000 rounds to high byte 0x20; the
+	// deliberately disagreeing registry pitch above must be ignored.
 	if (!expect(rec->player.pitch_byte == 0x20, "pitch byte is the ROUNDED high byte")) return false;
 	if (!expect(rec->player.move_input_byte == 0x21, "movement-input byte echoed")) return false;
 	if (!expect((rec->player.state_flags & 0x40) != 0, "state flags carried unmasked")) return false;

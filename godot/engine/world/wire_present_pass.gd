@@ -27,6 +27,8 @@ extends RefCounted
 
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
 const PresentAimOverlay := preload("res://engine/world/present_aim_overlay.gd")
+const PresentEmplacedWeapon := preload(
+		"res://engine/world/present_emplaced_weapon.gd")
 # [orig: EntityPool_FindByNetId @ 0x4f0a20]
 const WIRE_HANDLE_POOL_SHIFT := 12
 const WIRE_HANDLE_POOL_MASK := 0xF
@@ -184,8 +186,15 @@ func present() -> void:
 			snap[base + NovaSimulation.PF_ROLL_DEG])
 		node.transform = Transform3D(MissionObjectPlacer.bms_to_godot_basis(rot), pos)
 		PresentAimOverlay.apply(node, snap, base)
+		PresentEmplacedWeapon.apply(node, snap, base)
 		_apply_body_anim(node, snap, base)
-		node.visible = int(snap[base + NovaSimulation.PF_ALIVE]) == 1
+		# Host-side dynamic mount targets reach this pass instead of the placed
+		# MissionPresentPass, so consume the same retail local-view cull verdict.
+		# Joiner snapshots leave the bit clear.
+		node.visible = (
+				int(snap[base + NovaSimulation.PF_ALIVE]) == 1
+				and int(snap[base +
+						NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED]) == 0)
 		if spawned_now and _node_spawned_callback.is_valid():
 			_node_spawned_callback.call(node, runtime_kind, type_id)
 	_stats.live = live.size()

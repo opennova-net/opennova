@@ -1,5 +1,5 @@
 // Throwables: the thrown-round class motors, placed-device conversion, and the
-// device think/detonate chain. Witness record: docs/world/world-wac-ai-re.md §26
+// device think/detonate chain. Witness record: docs/world/world-wac-ai-re.md §27
 // (engine-research 2026-07-20, retail Jointops.exe kong IDB).
 #include "world/throwables.h"
 

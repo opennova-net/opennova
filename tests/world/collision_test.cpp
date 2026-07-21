@@ -491,6 +491,89 @@ void test_resolver_wall_pushout() {
 }
 
 // ---------------------------------------------------------------------------
+void test_mounted_resolver_keeps_touch_without_parent_pushout() {
+    World world;
+    world.registry.configure_pool(0, 4);
+    world.registry.configure_pool(1, 4);
+
+    Entity gun{};
+    gun.kind = EntityKind::Item;
+    gun.has_item_def = true;
+    gun.health = 100;
+    gun.alive = true;
+    gun.net_id = 0x20;
+    gun.position = Vec3{10.0f, 10.0f, 0.0f};
+    gun.yaw = 90;
+    Seat seat{};
+    seat.type = SeatType::Gunner;
+    gun.seats.push_back(seat);
+    const EntityHandle gun_h = world.registry.spawn(1, gun);
+
+    Entity rider{};
+    rider.kind = EntityKind::Organic;
+    rider.health = 100;
+    rider.alive = true;
+    rider.net_id = 0x10;
+    rider.position = Vec3{12.8f, 10.0f, 0.0f};
+    const EntityHandle rider_h = world.registry.spawn(0, rider);
+
+    // One parent model carries both an ordinary solid and an armory trigger.
+    // The solid proves the contact would push an on-foot source; the trigger
+    // proves mounted resolution still dispatches touch state.
+    CollisionModel model = box_model(1, 0, 2.0, 2.0, 3.0);
+    CollisionModel armory = box_model(6, 0, 2.0, 2.0, 3.0);
+    CollisionVolume trigger = armory.volumes.front();
+    trigger.plane_start = static_cast<int32_t>(model.planes.size());
+    model.planes.insert(model.planes.end(), armory.planes.begin(), armory.planes.end());
+    model.volumes.push_back(trigger);
+    model.sections.front().volume_count = 2;
+
+    CollisionWorld collision;
+    const int32_t model_id = collision.add_model(std::move(model));
+    collision.assign_entity(gun_h, model_id);
+    CHECK(world.commands.mount(0x10, 0x20));
+    for (int i = 0; i < 17; ++i) collision.build_tick_tables(world);
+
+    int32_t pos[3] = {fx(12.8), fx(10.0), 0};
+    int32_t vel[3] = {0, 0, 0};
+    int16_t health = 100;
+    CollisionWorld::ResolveState mounted_state;
+    collision.resolve_entity(world, rider_h, mounted_state, pos, vel, vel[2], 0,
+                             fx(1.8), 0, 0, false, true, 0, 43, 0u, health);
+
+    Entity *rider_live = world.registry.get(rider_h);
+    rider_live->position.x = 11.6f;
+    for (int i = 0; i < 17; ++i) collision.build_tick_tables(world);
+    pos[0] = fx(11.6);
+    const int32_t mounted_before = pos[0];
+    collision.resolve_entity(world, rider_h, mounted_state, pos, vel, vel[2], 0,
+                             fx(1.8), 0, 0, false, true, 1, 43, 0u, health);
+
+    // Retail's carried-source latch suppresses model force, not the contact walk.
+    // [orig: savedPosY @0x4b2be0..0x4b2d3f; force gates
+    //  @0x4b3045..0x4b30af/@0x4b3658..0x4b36b9]
+    CHECK(pos[0] == mounted_before);
+    CHECK((rider_live->flags & kEntityFlagArmoryZone) != 0);
+
+    // The identical model transition pushes once the source is on foot, proving
+    // that the mounted equality above observes suppression rather than a miss.
+    CHECK(world.commands.dismount(0x10));
+    rider_live->position.x = 12.8f;
+    for (int i = 0; i < 17; ++i) collision.build_tick_tables(world);
+    CollisionWorld::ResolveState on_foot_state;
+    pos[0] = fx(12.8);
+    collision.resolve_entity(world, rider_h, on_foot_state, pos, vel, vel[2], 0,
+                             fx(1.8), 0, 0, false, true, 0, 43, 0u, health);
+    rider_live->position.x = 11.6f;
+    for (int i = 0; i < 17; ++i) collision.build_tick_tables(world);
+    pos[0] = fx(11.6);
+    const int32_t on_foot_before = pos[0];
+    collision.resolve_entity(world, rider_h, on_foot_state, pos, vel, vel[2], 0,
+                             fx(1.8), 0, 0, false, true, 1, 43, 0u, health);
+    CHECK(pos[0] > on_foot_before);
+}
+
+// ---------------------------------------------------------------------------
 void test_secondary_vertical_force_is_full_strength() {
     CollisionModel model = box_model(1, 0, 2.0, 2.0, 2.0);
     model.finalize_sections();
@@ -2622,6 +2705,7 @@ int main() {
     test_ray_clip();
     test_ground_probe_roof();
     test_resolver_wall_pushout();
+    test_mounted_resolver_keeps_touch_without_parent_pushout();
     test_secondary_vertical_force_is_full_strength();
     test_ladder_contact_uses_positive_authored_pitch();
     test_vehicle_collision_volume_selection();
