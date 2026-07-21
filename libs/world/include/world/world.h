@@ -393,6 +393,10 @@ public:
     bool projectile_authority = true;
     bool fat_bullets = false;
     bool one_shot_kill = false; // MP-only g_OneShotKill; ignored offline
+    // An embedding adapter may own the local player's borrowed UseGun slot so
+    // it can supply trigger/reload/scope input and drain presentation events.
+    // Standalone World users keep the default global mounted-slot pump.
+    bool external_local_mounted_weapon_pump = false;
     // Sticky trigger-relation state (BMS cats 1/2): matrices + group alert/
     // count records + waypoint has-visited. Cleared per mission load by the
     // BMS system's on_load [orig: EventSystem_FreeAll @ 0x453210].

@@ -1307,6 +1307,309 @@ func test_local_player_toggle_mount_weapon_busy_gate() -> void:
 	sim.free()
 
 
+# Local UseGun follows Player_MountWeaponSlot rather than the nonlocal direct slot
+# assignment: holster the personal slot, commit the parent's embedded MountSlot, and
+# restore the preserved personal slot through the same switch path on detach.
+# [orig: Entity_AttachToUseGunSlot @0x546c25..0x546c3d;
+# Player_MountWeaponSlot @0x4dfa40; switch commits @0x543475/@0x543539;
+# Entity_DetachFromVehicle restore @0x43565f]
+func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> void:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var gun := md.add_entity(
+			NovaMissionData.KIND_ITEM, 101294, Vector3(2, 0, 0), Vector3.ZERO)
+	assert_false(gun.is_empty())
+	var sim := NovaSimulation.new()
+	sim.set_item_seat_specs([{
+		"type_id": 1294,
+		"seats": [{
+			"type": 3,
+			"position": Vector3(0, -1, 1),
+			"source_name": "UseGun",
+		}],
+		# A finite clip makes parent-slot persistence observable across remounts.
+		"primary_weapon": "WPN_AVENGER",
+	}])
+	assert_true(sim.load_from_mission_data(md))
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path("res://../fixtures/def")), OK)
+	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
+	assert_true(sim.apply_local_player_loadout([
+		{"name": "WPN_M4AUTO"},
+		{"name": "WPN_M4"},
+	], 1))
+	var weapons := NovaWeaponDatabase.new()
+	assert_eq(weapons.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/weapon.def")), OK)
+	var personal_idx := weapons.find_weapon("WPN_M4AUTO")
+	var mounted_idx := weapons.find_weapon("WPN_AVENGER")
+	assert_gte(personal_idx, 0)
+	assert_gte(mounted_idx, 0)
+	var personal_def: Dictionary = weapons.get_weapon(personal_idx)
+	var mounted_def: Dictionary = weapons.get_weapon(mounted_idx)
+	sim.set_local_player_weapon(personal_def, {})
+	sim.drain_local_player_weapon_events()
+	var personal_clip := int(sim.get_local_player_weapon_state().get("clip", -1))
+	var inventory_clip := int(
+			sim.get_local_player_inventory().get("slots", [])[0].get("clip", -1))
+
+	assert_true(sim.local_player_toggle_mount())
+	assert_eq(sim.get_local_player_weapon_name(), "WPN_M4AUTO",
+			"local UseGun stages the parent slot instead of assigning it immediately")
+	# A simultaneous trigger edge cannot overwrite the pending mount action.
+	sim.set_local_player_weapon_input(true, true, false)
+	sim.step()
+	sim.set_local_player_weapon_input(false, false, false)
+	var mount_event: Dictionary = {}
+	for raw in sim.drain_local_player_weapon_events():
+		var event: Dictionary = raw
+		if String(event.get("switch_to_weapon", "")) == "WPN_AVENGER":
+			mount_event = event
+	assert_false(mount_event.is_empty(),
+			"an Emplaced pending def takes retail's same-pump -901 commit")
+	assert_true(bool(mount_event.get("preserve_slot_state", false)),
+			"the host must not reset the emplacement's persistent slot")
+	assert_eq(sim.get_local_player_weapon_name(), "WPN_AVENGER")
+	sim.set_local_player_weapon(mounted_def, {}, true)
+	var mounted_before: Dictionary = sim.get_local_player_weapon_state()
+	assert_eq(int(mounted_before.get("clip", -1)),
+			int(mounted_def.get("clipsize", -2)))
+
+	sim.set_local_player_weapon_input(true, true, false)
+	var fired_before := int(mounted_before.get("fired_serial", 0))
+	for _tick in range(120):
+		sim.step()
+		if int(sim.get_local_player_weapon_state().get(
+				"fired_serial", 0)) > fired_before:
+			break
+	sim.set_local_player_weapon_input(false, false, false)
+	var mounted_clip_after := int(
+			sim.get_local_player_weapon_state().get("clip", -1))
+	assert_eq(mounted_clip_after, int(mounted_before.get("clip", -1)) - 1,
+			"local LMB consumes the parent's embedded weapon slot")
+	assert_eq(int(sim.get_local_player_inventory().get(
+			"slots", [])[0].get("clip", -1)), inventory_clip,
+			"mounted fire cannot consume the saved personal magazine")
+
+	for _tick in range(180):
+		sim.step()
+		if int(sim.get_local_player_weapon_state().get("current", -1)) < 2:
+			break
+	assert_true(sim.local_player_toggle_mount())
+	assert_eq(sim.get_local_player_weapon_name(), "WPN_AVENGER",
+			"detach also waits for the mounted slot's holster commit")
+	# The entity is already detached, but its borrowed slot still owns the pending
+	# UseGun SWITCHFROM. Manual requests in this frame must not replace that action.
+	sim.request_local_player_weapon_category(3)
+	sim.request_local_player_weapon_cycle(1)
+	sim.set_local_player_weapon_input(true, true, false)
+	sim.step()
+	sim.set_local_player_weapon_input(false, false, false)
+	var detach_event: Dictionary = {}
+	for raw in sim.drain_local_player_weapon_events():
+		var event: Dictionary = raw
+		if String(event.get("switch_to_weapon", "")) == "WPN_M4AUTO":
+			detach_event = event
+	assert_false(detach_event.is_empty(),
+			"outgoing Emplaced detach also commits on the next pump")
+	assert_true(bool(detach_event.get("preserve_slot_state", false)))
+	sim.set_local_player_weapon(personal_def, {}, true)
+	assert_eq(int(sim.get_local_player_weapon_state().get("clip", -1)),
+			personal_clip, "the personal slot resumes with its original magazine")
+
+	for _tick in range(120):
+		sim.step()
+		if int(sim.get_local_player_weapon_state().get("current", -1)) < 2:
+			break
+	assert_true(sim.local_player_toggle_mount())
+	var remount_event: Dictionary = {}
+	for _tick in range(120):
+		sim.step()
+		for raw in sim.drain_local_player_weapon_events():
+			var event: Dictionary = raw
+			if String(event.get("switch_to_weapon", "")) == "WPN_AVENGER":
+				remount_event = event
+		if not remount_event.is_empty():
+			break
+	assert_false(remount_event.is_empty())
+	sim.set_local_player_weapon(mounted_def, {}, true)
+	assert_eq(int(sim.get_local_player_weapon_state().get("clip", -1)),
+			mounted_clip_after,
+			"the emplacement keeps its own clip state while nobody is attached")
+
+	sim.restart()
+	var restart_event: Dictionary = {}
+	for raw in sim.drain_local_player_weapon_events():
+		var event: Dictionary = raw
+		if String(event.get("switch_to_weapon", "")) == "WPN_M4AUTO":
+			restart_event = event
+	assert_false(restart_event.is_empty(),
+			"restart explicitly restores the saved personal presentation")
+	assert_false(bool(restart_event.get("preserve_slot_state", true)),
+			"restart installs a fresh personal slot epoch")
+	assert_false(bool(sim.get_local_player_weapon_state().get("active", true)),
+			"the mounted definition cannot pump the restored personal slot")
+	sim.free()
+
+
+func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> void:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	assert_false(md.add_entity(NovaMissionData.KIND_ITEM, 101294,
+			Vector3(2, 0, 0), Vector3.ZERO).is_empty())
+	assert_false(md.add_entity(NovaMissionData.KIND_ITEM, 101295,
+			Vector3(3, 0, 0), Vector3.ZERO).is_empty())
+	var sim := NovaSimulation.new()
+	sim.set_item_seat_specs([
+		{
+			"type_id": 1294,
+			"seats": [{"type": 3, "position": Vector3(0, -1, 1),
+					"source_name": "UseGun"}],
+			"primary_weapon": "WPN_AVENGER",
+		},
+		{
+			"type_id": 1295,
+			"seats": [{"type": 3, "position": Vector3(0, -1, 1),
+					"source_name": "UseGun"}],
+			"primary_weapon": "WPN_EMPLCD50",
+		},
+	])
+	assert_true(sim.load_from_mission_data(md))
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path("res://../fixtures/def")), OK)
+	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
+	var weapons := NovaWeaponDatabase.new()
+	assert_eq(weapons.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/weapon.def")), OK)
+	var personal: Dictionary = weapons.get_weapon(
+			weapons.find_weapon("WPN_M4AUTO"))
+	var first_mount: Dictionary = weapons.get_weapon(
+			weapons.find_weapon("WPN_AVENGER"))
+	var second_mount: Dictionary = weapons.get_weapon(
+			weapons.find_weapon("WPN_EMPLCD50"))
+	sim.set_local_player_weapon(personal, {})
+	sim.drain_local_player_weapon_events()
+
+	assert_true(sim.local_player_toggle_mount())
+	sim.step()
+	var first_event: Dictionary = {}
+	for raw in sim.drain_local_player_weapon_events():
+		if String((raw as Dictionary).get(
+				"switch_to_weapon", "")) == "WPN_AVENGER":
+			first_event = raw
+	assert_false(first_event.is_empty())
+	sim.set_local_player_weapon(first_mount, {}, true)
+	for _tick in range(80):
+		sim.step()
+		if int(sim.get_local_player_weapon_state().get("current", -1)) < 2:
+			break
+
+	assert_true(sim.local_player_toggle_mount(),
+			"a nearby second gun is a direct mounted-seat swap")
+	assert_eq(sim.get_local_player_weapon_name(), "WPN_AVENGER",
+			"the old parent remains equipped until the rank commit")
+	sim.step()
+	var swap_event: Dictionary = {}
+	for raw in sim.drain_local_player_weapon_events():
+		if String((raw as Dictionary).get(
+				"switch_to_weapon", "")) == "WPN_EMPLCD50":
+			swap_event = raw
+	assert_false(swap_event.is_empty(),
+			"latest pending parent commits directly with no personal interlude")
+	sim.set_local_player_weapon(second_mount, {}, true)
+	sim.step()
+	assert_eq(int(sim.get_local_player_weapon_state().get("current", -1)), 0,
+			"SWITCHRANK does not queue SWITCHTO onto the target parent slot")
+	assert_true(bool(sim.get_local_player_weapon_state().get(
+			"borrowed_usegun_slot", false)))
+	sim.free()
+
+
+func test_death_during_usegun_draw_restores_personal_weapon() -> void:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	assert_false(md.add_entity(NovaMissionData.KIND_ITEM, 101294,
+			Vector3(2, 0, 0), Vector3.ZERO).is_empty())
+	var sim := NovaSimulation.new()
+	sim.set_item_seat_specs([{
+		"type_id": 1294,
+		"seats": [{"type": 3, "position": Vector3(0, -1, 1),
+				"source_name": "UseGun"}],
+		"primary_weapon": "WPN_AVENGER",
+	}])
+	assert_true(sim.load_from_mission_data(md))
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path("res://../fixtures/def")), OK)
+	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
+	var weapons := NovaWeaponDatabase.new()
+	assert_eq(weapons.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/weapon.def")), OK)
+	var mounted_def: Dictionary = weapons.get_weapon(
+			weapons.find_weapon("WPN_AVENGER"))
+	var personal_def: Dictionary = weapons.get_weapon(
+			weapons.find_weapon("WPN_M4AUTO"))
+	sim.set_local_player_weapon(personal_def, {})
+	sim.drain_local_player_weapon_events()
+
+	assert_true(sim.local_player_toggle_mount())
+	sim.step()
+	var mount_event: Dictionary = {}
+	for raw in sim.drain_local_player_weapon_events():
+		if String((raw as Dictionary).get(
+				"switch_to_weapon", "")) == "WPN_AVENGER":
+			mount_event = raw
+	assert_false(mount_event.is_empty(),
+			"the emplacement commits before its SWITCHTO draw")
+	sim.set_local_player_weapon(mounted_def, {}, true)
+	var fired_before := int(sim.get_local_player_weapon_state().get(
+			"fired_serial", 0))
+	sim.set_local_player_weapon_input(true, true, false)
+	sim.debug_set_entity_health(0, 0)
+	var restore_event: Dictionary = {}
+	for _tick in range(160):
+		sim.step()
+		for raw in sim.drain_local_player_weapon_events():
+			if String((raw as Dictionary).get(
+					"switch_to_weapon", "")) == "WPN_M4AUTO":
+				restore_event = raw
+		if not restore_event.is_empty():
+			break
+	assert_false(restore_event.is_empty(),
+			"forced detach during SWITCHTO eventually restores the personal slot")
+	assert_eq(int(sim.get_local_player_weapon_state().get("fired_serial", 0)),
+			fired_before, "a dead local gunner cannot fire the emplacement")
+	sim.set_local_player_weapon(personal_def, {}, true)
+	assert_false(bool(sim.get_local_player_weapon_state().get(
+			"borrowed_usegun_slot", true)))
+	sim.free()
+
+
+func test_unarmed_local_usegun_toggle_is_rejected() -> void:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	assert_false(md.add_entity(NovaMissionData.KIND_ITEM, 101294,
+			Vector3(2, 0, 0), Vector3.ZERO).is_empty())
+	var sim := NovaSimulation.new()
+	sim.set_item_seat_specs([{
+		"type_id": 1294,
+		"seats": [{"type": 3, "position": Vector3(0, -1, 1),
+				"source_name": "UseGun"}],
+		"primary_weapon": "WPN_AVENGER",
+	}])
+	assert_true(sim.load_from_mission_data(md))
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	sim.clear_local_player_weapon()
+	assert_false(sim.local_player_toggle_mount(),
+			"retail rejects ordinary UseGun attach without EquippedSlot/Def")
+	sim.free()
+
+
 func test_command_125_usegun_mount_renders_emplaced_pose() -> void:
 	var md := NovaMissionData.new()
 	assert_eq(md.create_default(), OK)

@@ -546,6 +546,10 @@ static void test_mounted_fire_uses_retail_range_and_spatial_stagger() {
     gun_live->posed_muzzle_world[2] = 0x34567;
     gun_live->posed_muzzle_tick = 0;
     gun_live->posed_muzzle_valid = true;
+    // Merely caching an owner as local cannot disable the standalone World's
+    // global slot pump. Only an adapter that explicitly supplies its own pump
+    // may take ownership.
+    w->cached.local_player = npc_h;
     ai.pump_mounted_weapon_slots(*w, 0);
     CHECK(w->rounds.count == 1);
     CHECK(w->rounds.records[0].shooter_handle == npc_h.packed);
@@ -568,6 +572,13 @@ static void test_mounted_fire_uses_retail_range_and_spatial_stagger() {
     CHECK(gun_live->primary_weapon_slot.next == weapon_action::kIdle);
     ai.pump_mounted_weapon_slots(*w, 64);
     CHECK(w->rounds.count == before);
+
+    gun_live->primary_weapon_slot = WeaponSlotState{};
+    gun_live->primary_weapon_slot.next = weapon_action::kFire;
+    w->external_local_mounted_weapon_pump = true;
+    ai.pump_mounted_weapon_slots(*w, 68);
+    CHECK(w->rounds.count == before);
+    CHECK(gun_live->primary_weapon_slot.next == weapon_action::kFire);
 }
 
 static void test_mounted_look_traverses_before_fire_request() {

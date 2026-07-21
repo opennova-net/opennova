@@ -305,6 +305,33 @@ private:
 	// snapshot's monotonic serials remain diagnostics/rebuild state.
 	opennova::world::WeaponFsmDef weapon_def_{};
 	opennova::world::WeaponSlotState weapon_slot_{};
+	// The local UseGun path borrows the parent's embedded MountSlot through the
+	// normal holster/commit/draw lifecycle. Nonlocal occupants still take the
+	// direct world::vehicle_bind_use_gun_slot assignment.
+	// [orig: Entity_AttachToUseGunSlot @0x546c25; Player_MountWeaponSlot
+	// @0x4dfa40; SwitchFrom/Rank commits @0x543475/@0x543539]
+	enum class LocalUseGunSwitch : uint8_t {
+		kNone,
+		kAttach,
+		kSwap,
+		kDetach,
+	};
+	LocalUseGunSwitch local_usegun_switch_ = LocalUseGunSwitch::kNone;
+	bool local_usegun_slot_active_ = false;
+	// Current EquippedSlot and latest g_pendingWeaponSlot equivalents. A direct
+	// gunner-to-gunner attach overwrites only the pending pair until commit.
+	opennova::world::EntityHandle local_usegun_mount_{};
+	uint8_t local_usegun_weapon_adm_ = 0xFF;
+	opennova::world::EntityHandle local_usegun_pending_mount_{};
+	uint8_t local_usegun_pending_weapon_adm_ = 0xFF;
+	uint8_t local_usegun_saved_adm_ = 0xFF;
+	int32_t local_usegun_switch_action_ = -1;
+	opennova::world::WeaponSlotState *active_local_weapon_slot();
+	const opennova::world::WeaponSlotState *active_local_weapon_slot() const;
+	bool local_usegun_switch_is_instant() const;
+	void sync_local_usegun_weapon_transition();
+	void commit_local_usegun_weapon_switch();
+	void queue_local_usegun_weapon_switch(bool p_same_category);
 	bool weapon_active_ = false;
 	bool weapon_fire_held_ = false;
 	bool weapon_fire_pressed_ = false;
@@ -380,6 +407,12 @@ private:
 		// reinstalls the viewmodel/FSM for it [orig: the mount's model re-resolve;
 		// the equippedAdmIndex stamp @ 0x4dd727]. Empty = no switch this tick.
 		String switch_to_weapon;
+		// Explicit no-weapon commit. Empty switch_to_weapon alone means an event
+		// with no switch; it cannot represent restoring an unarmed personal slot.
+		bool clear_weapon = false;
+		// A UseGun commit selects an already-live parent/personal slot. The host
+		// may rebake/rebuild the model definition but must not reset that slot.
+		bool preserve_slot_state = false;
 		// The switch-walk wrap-around deny [orig: PlaySoundOnDedicatedServer
 		// (dword_24E08C4) @ 0x4e0354 — the deny sound seam].
 		bool switch_denied = false;
@@ -690,10 +723,13 @@ public:
 	// per-slot rings and the Anim_InitActions bake consumes them ring-wise: one
 	// serve-then-advance read per 'auto' delay field [orig: @ 0x541fa0;
 	// Anim_GetDurationTicks @ 0x53ee10]. Resets the slot to a fresh idle with a full
-	// magazine (retail bakes a def ONCE globally, so its rings persist across
+	// magazine unless p_preserve_slot_state is true (UseGun presentation rebake;
+	// the parent/personal slot has already been selected by the switch commit).
+	// Retail bakes a def ONCE globally, so its rings persist across
 	// re-equips; this per-equip reset rides the existing per-equip re-bake shape,
 	// D-WPN-6 family).
-	void set_local_player_weapon(const Dictionary &p_def, const Dictionary &p_clip_seconds);
+	void set_local_player_weapon(const Dictionary &p_def, const Dictionary &p_clip_seconds,
+	                             bool p_preserve_slot_state = false);
 	void clear_local_player_weapon();
 	// Per-frame trigger state: fire held + edge, raw reload edge (the dispatch
 	// gate runs sim-side) [orig: the binding-149/reload input dispatch,

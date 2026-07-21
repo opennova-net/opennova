@@ -152,6 +152,9 @@ class FakeWorld:
 	# The equipped-weapon FSM seam (null = no weapon installed, the default).
 	var weapon_view = null  # PlayerWeaponView
 	var weapon_events: Array[PlayerWeaponEvent] = []
+	var installed_weapon_name := "WPN_M4AUTO"
+	var weapon_switch_calls: Array[Dictionary] = []
+	var weapon_clear_calls := 0
 	# The sim-owned view state seam (ADS ease / fov policy / 3P anchor).
 	var view = null  # PlayerLocalView
 	var scope_toggle_requests := 0
@@ -176,6 +179,22 @@ class FakeWorld:
 
 	func local_player_weapon_view():
 		return weapon_view
+
+	func local_player_weapon_name() -> String:
+		return installed_weapon_name
+
+	func set_local_player_weapon_by_name(name: String,
+			preserve_slot_state: bool = false) -> bool:
+		weapon_switch_calls.append({
+			"name": name,
+			"preserve_slot_state": preserve_slot_state,
+		})
+		installed_weapon_name = name
+		return true
+
+	func clear_local_player_weapon() -> void:
+		weapon_clear_calls += 1
+		installed_weapon_name = ""
 
 	func drain_local_player_weapon_events() -> Array[PlayerWeaponEvent]:
 		var drained: Array[PlayerWeaponEvent] = []
@@ -230,6 +249,72 @@ func test_shared_host_drives_simultaneous_raw_input_before_world_tick() -> void:
 	assert_false(call["lean_right"])
 	assert_eq(world.avatar_count, 1, "3P avatar is owned by the shared host")
 	assert_eq(world.viewmodel_count, 1, "FP viewmodel is owned by the shared host")
+
+
+func test_usegun_switch_event_rebuilds_borrowed_viewmodel_without_resetting_slot() -> void:
+	var world := FakeWorld.new()
+	var camera := Camera3D.new()
+	var host := LocalPlayerHost.new()
+	add_child_autofree(world)
+	add_child_autofree(camera)
+	add_child_autofree(host)
+	host.setup(world, camera)
+	host.set_input_source(func() -> Dictionary:
+		return {})
+	world.weapon_view = _weapon_view()
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+	assert_eq(world.viewmodel_count, 1)
+
+	var event := PlayerWeaponEvent.new()
+	event.switch_to_weapon = "WPN_EMPLCD50"
+	event.preserve_slot_state = true
+	world.weapon_events.append(event)
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+
+	assert_eq(world.weapon_switch_calls, [{
+		"name": "WPN_EMPLCD50",
+		"preserve_slot_state": true,
+	}], "the mount commit installs the parent weapon definition through the FP seam")
+	# refresh_viewmodel invalidates immediately; the normal next host frame owns
+	# the asynchronous scene rebuild.
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+	assert_eq(world.viewmodel_count, 2,
+			"the stale personal viewmodel is replaced by the emplacement viewmodel")
+
+	var clear_event := PlayerWeaponEvent.new()
+	clear_event.clear_weapon = true
+	world.weapon_events.append(clear_event)
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+	assert_eq(world.weapon_clear_calls, 1,
+			"an unarmed detach explicitly clears the emplaced presentation")
+
+
+func test_unarmed_usegun_switch_is_consumed_without_a_weapon_view() -> void:
+	var world := FakeWorld.new()
+	var camera := Camera3D.new()
+	var host := LocalPlayerHost.new()
+	add_child_autofree(world)
+	add_child_autofree(camera)
+	add_child_autofree(host)
+	host.setup(world, camera)
+	host.set_input_source(func() -> Dictionary:
+		return {})
+	world.weapon_view = null
+	var event := PlayerWeaponEvent.new()
+	event.switch_to_weapon = "WPN_EMPLCD50"
+	event.preserve_slot_state = true
+	world.weapon_events.append(event)
+
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+	assert_eq(world.weapon_switch_calls, [{
+		"name": "WPN_EMPLCD50",
+		"preserve_slot_state": true,
+	}], "slot-control events cannot depend on an existing viewmodel")
 
 
 func test_inactive_gameplay_submits_neutral_movement_while_world_keeps_ticking() -> void:

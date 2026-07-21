@@ -264,15 +264,26 @@ func _free_viewmodel_pass() -> void:
 ## follows the equipped slot, count_weapon_effects_and_update_viewmodel @ 0x4dc9e0].
 ## Redundant reinstalls (the installed def already IS the target and its viewmodel
 ## exists) are skipped so the queued SWITCHTO draw-in survives.
-func _apply_weapon_switch(weapon_name: String) -> void:
+func _apply_weapon_switch(weapon_name: String,
+		preserve_slot_state: bool = false) -> void:
 	if _world == null or not _world.has_method("set_local_player_weapon_by_name"):
 		return
 	if (_world.has_method("local_player_weapon_name")
 			and String(_world.local_player_weapon_name()).nocasecmp_to(weapon_name) == 0
 			and _viewmodel != null and is_instance_valid(_viewmodel)):
 		return
-	if _world.set_local_player_weapon_by_name(weapon_name):
+	var switched := bool(_world.set_local_player_weapon_by_name(
+			weapon_name, true)) if preserve_slot_state else bool(
+					_world.set_local_player_weapon_by_name(weapon_name))
+	if switched:
 		refresh_viewmodel()
+
+
+func _apply_weapon_clear() -> void:
+	if _world == null or not _world.has_method("clear_local_player_weapon"):
+		return
+	_world.clear_local_player_weapon()
+	refresh_viewmodel()
 
 
 ## Drop the built FP viewmodel so the next update pass rebuilds gun/arms/FSM from the
@@ -477,6 +488,14 @@ func _consume_weapon_events(view: PlayerWeaponView,
 		authoritative_phase: bool = false) -> void:
 	_weapon_view = view
 	if view == null:
+		# Slot selection is control state, not viewmodel presentation. In
+		# particular, an unarmed player has no view until UseGun installs one.
+		for event in events:
+			if event.clear_weapon:
+				_apply_weapon_clear()
+			elif not event.switch_to_weapon.is_empty():
+				_apply_weapon_switch(
+						event.switch_to_weapon, event.preserve_slot_state)
 		_weapon_play_serial = -1
 		return
 	var batch_started_clip := false
@@ -499,8 +518,10 @@ func _consume_weapon_events(view: PlayerWeaponView,
 			_fire_direct_action_effect(event)
 		if event.action_finished >= 0:
 			_fire_action_end_sound(event)
-		if not event.switch_to_weapon.is_empty():
-			_apply_weapon_switch(event.switch_to_weapon)
+		if event.clear_weapon:
+			_apply_weapon_clear()
+		elif not event.switch_to_weapon.is_empty():
+			_apply_weapon_switch(event.switch_to_weapon, event.preserve_slot_state)
 		# event.switch_denied is the deny-sound seam [orig: PlaySoundOnDedicatedServer
 		# (dword_24E08C4) @ 0x4e0354] — the shipped set name is unwitnessed (D-WPN-22).
 	if batch_started_clip:

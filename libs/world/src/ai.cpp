@@ -1158,6 +1158,14 @@ void AiSystem::pump_mounted_weapon_slots(World &world, uint32_t logic_tick) {
             mount->primary_weapon_owner = EntityHandle{};
             continue;
         }
+        // L's borrowed parent slot is pumped by NovaSimulation with the live
+        // trigger/reload/scope inputs and first-person event sink. Advancing it
+        // here as well would run one slot twice per frame. Remote players and
+        // NPC gunners remain owned by this global world pump.
+        // [orig: one WeaponAction_ProcessAllEntities walk @0x542690]
+        if (world.external_local_mounted_weapon_pump &&
+            owner->handle == world.cached.local_player)
+            continue;
         AiEntity *gunner = for_handle(owner->handle);
         if (gunner == nullptr || mount->primary_weapon_slot_adm == 0xFF) continue;
         const WeaponTableEntry *weapon =
