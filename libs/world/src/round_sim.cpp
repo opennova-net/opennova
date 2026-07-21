@@ -432,6 +432,7 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params) {
         speed_per_tick = speed_per_tick * double(params.charge) / 256.0;
 
     LiveRound &r = rounds[static_cast<size_t>(slot)];
+    r = LiveRound{};
     r.active = true;
     r.owner = params.owner;
     r.shooter_handle = params.shooter_handle;
@@ -476,24 +477,29 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params) {
     // player, else enemy (+236); id 0 = no channel; -> round+0x2B4].
     r.trail_slot = -1;
     const bool forcetracer = (ammo->flags & 0x8000u) != 0;
-    const bool friendly = (local_player.valid() && params.owner.valid() &&
-                           params.owner.packed == local_player.packed) ||
-                          r.team == local_team;
+    const bool same_team = r.team == local_team;
+    const bool friendly_tracer =
+            (local_player.valid() && params.owner.valid() &&
+             params.owner.packed == local_player.packed) ||
+            same_team;
     if ((tracer && !no_tracers_rule) || forcetracer) {
-        const int32_t style = friendly ? ammo->tracer_type_friendly : ammo->tracer_type_enemy;
+        const int32_t style =
+                friendly_tracer ? ammo->tracer_type_friendly : ammo->tracer_type_enemy;
         if (style != 0) r.trail_slot = trails.alloc(style);
     }
 
-    // The TrcrID item model + class bind [orig: @ 0x4ec79b — friendly/enemy
-    // item id (satchels author no foe id: invisible to enemies) -> round
-    // ItemTypeIndex(+28) -> Entity_InitFromItemDef binds the class motor
+    // The TrcrID item model + class bind [orig: @ 0x4ec787..0x4ec7b7 —
+    // team item selection with a missing-foe -> friendly fallback, independent
+    // of the per-shot tracer cadence; global NoTracers still suppresses it].
+    // The result becomes round ItemTypeIndex(+28); Entity_InitFromItemDef binds
+    // the class motor
     // (+452) / think (+456) from the items.def ai_function/move_function tags,
     // and the init callback seeds 1 deg/tick spin @ 0x4435A0].
     r.yaw_bam = params.dir_yaw_bam;
     r.pitch_bam = params.dir_pitch_bam;
-    const int32_t item_id =
-            friendly ? ammo->tracer_item_friendly : ammo->tracer_item_enemy;
-    if (item_id != 0 && ((tracer && !no_tracers_rule) || forcetracer)) {
+    const int32_t item_id = throwable_item_for_viewer(
+            ammo->tracer_item_friendly, ammo->tracer_item_enemy, r.team, local_team);
+    if (item_id != 0 && (!no_tracers_rule || forcetracer)) {
         r.item_type_id = item_id;
         if (const ThrowableClassRow *row = world.throwables.classes.get(item_id)) {
             r.motor = row->motor;

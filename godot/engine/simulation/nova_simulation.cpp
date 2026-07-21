@@ -2037,9 +2037,10 @@ Array NovaSimulation::get_throwable_visuals() const {
 		viewer_team = static_cast<uint8_t>(lp->team);
 	for (const opennova::world::PlacedDevice &d : world_->throwables.devices) {
 		if (!d.active) continue;
-		// the viewer-side item pick [orig: frndly vs foe TrcrID by team — an
-		// enemy satchel (foe id 0) draws nothing]
-		const int item = d.team == viewer_team ? d.item_friendly : d.item_enemy;
+		// Viewer-side team variant with the retail base/friendly fallback when
+		// no foe TrcrID is authored [orig: @ 0x5469db..0x546a15].
+		const int item = opennova::world::throwable_item_for_viewer(
+				d.item_friendly, d.item_enemy, d.team, viewer_team);
 		if (item == 0) continue;
 		push_entry(0x10000 + d.entity.packed, item, d.pos, d.yaw_bam, d.pitch_bam,
 				d.roll_bam);

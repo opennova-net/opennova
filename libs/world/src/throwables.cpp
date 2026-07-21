@@ -41,6 +41,14 @@ inline void bam_dir(int32_t yaw_bam, int32_t pitch_bam, double out[3]) {
 
 } // namespace
 
+int32_t throwable_item_for_viewer(int32_t friendly_item, int32_t enemy_item,
+                                  uint8_t item_team, uint8_t viewer_team) {
+    // Enemy selection falls back to the friendly item when no foe TrcrID was
+    // authored [orig: RoundData_SpawnRound @ 0x4ec787..0x4ec79d].
+    if (item_team != viewer_team && enemy_item != 0) return enemy_item;
+    return friendly_item;
+}
+
 ThrowClass throw_class_from_tag(const char *tag) {
     if (tag == nullptr || tag[0] == '\0') return ThrowClass::kNone;
     // The retail tables match the full 8-byte tag [orig: the class-name scans

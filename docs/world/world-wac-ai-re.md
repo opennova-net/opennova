@@ -4333,8 +4333,12 @@ Binary: retail `Jointops.exe` (kong IDB, imagebase 0x400000). ctest `throwables`
 
 A throwable's behavior binds through its **TrcrID item**, not the ammo:
 `RoundData_SpawnRound @ 0x4ec0d0` picks `frndlyTrcrID`(+16)/`foeTrcrID`(+20) by
-round team vs the local player's team `[orig: @ 0x4ec79b]`, stores it as the
-round's ItemTypeIndex (+28) and runs `Entity_InitFromItemDef @ 0x49e550`, which
+round team vs the local player's team, with a zero foe id falling back to the
+friendly item `[orig: @ 0x4ec787..0x4ec79d]`. This selection is independent of
+the per-shot tracer-rate decision; only the global NoTracers rule suppresses
+it (unless ForceTracer is set) `[orig: @ 0x4ec79d..0x4ec7b7]`. The result is
+stored as the round's ItemTypeIndex (+28) and passed to
+`Entity_InitFromItemDef @ 0x49e550`, which
 copies from the item def: the **per-tick motor** (`move_function` tag against
 the physics table `@ 0x82abc8`) into round+452, the **event/think callback**
 (`ai_function` tag against `g_EntityClassEventCallbackTable @ 0x813000`, rows
@@ -4342,10 +4346,12 @@ the physics table `@ 0x82abc8`) into round+452, the **event/think callback**
 def Health/Armor, and the init callback (`Entity_InitThrowableSpin_* @ 0x4435A0/
 C0/E0/610`) which seeds **1 deg/tick spin** on +164/+168/+172 (the constant
 0xB60B60 = 11930464 BAM, not a pointer). JO data (ids = items.def id − 100000):
-frag 1883 + flashbang 1875 `nade/nade`, satchel 1891 `schl/schl` (foe id 0 —
-**enemies see no satchel model**), claymore 1895 `clym/clym`, AT mine 368
-`vmne/schl` (mine think, satchel flight). TrcrID absent or NoTracers-suppressed
-→ no model, **no motor** — the round drifts and only the fuse leg still runs.
+frag 1883 + flashbang 1875 `nade/nade`, satchel 1891 `schl/schl` (foe id 0,
+therefore the friendly 1891 fallback), claymore 1895 `clym/clym`, AT mine 368
+`vmne/schl` (mine think, satchel flight). Both teams therefore see the same
+satchel model and receive the `schl` class bind. A missing friendly TrcrID or
+global NoTracers suppression yields no model and **no motor** — the round
+drifts and only the fuse leg still runs.
 
 Ammo pairs intern by name in `WeaponDef_ResolveAllReferences @ 0x540270`:
 `g_ammo_satchel/satchelboom/claymore/claymoreshrapnel/claymorekillzone/AV_Mine/

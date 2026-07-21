@@ -66,6 +66,12 @@ enum class ThrowClass : uint8_t {
 
 ThrowClass throw_class_from_tag(const char *tag);
 
+// Select the TrcrID item for a viewer. Retail uses the foe item only when the
+// teams differ AND a foe id is authored; otherwise it falls back to friendly
+// [orig: RoundData_SpawnRound @ 0x4ec787..0x4ec79d].
+int32_t throwable_item_for_viewer(int32_t friendly_item, int32_t enemy_item,
+                                  uint8_t item_team, uint8_t viewer_team);
+
 // Host-fed binding rows: item type id (items.def id - 100000, the TrcrID space)
 // -> {think class (ai_function), motor class (move_function)}.
 struct ThrowableClassRow {
@@ -110,8 +116,8 @@ struct PlacedDevice {
     uint16_t owner_handle = 0xFFFF;
     uint16_t hit_word = 0;        // [orig: +442] rides the detonation descriptor
     int32_t ammo_index = -1;      // [orig: +620] the PLACED ammo (satchel/claymore/AV_Mine)
-    int32_t item_friendly = 0;    // [orig: ammo +16] the frndlyTrcrID item (satchel foe = 0
-    int32_t item_enemy = 0;       //  [orig: ammo +20]  -> invisible to enemies)
+    int32_t item_friendly = 0;    // [orig: ammo +16] the frndlyTrcrID/base item
+    int32_t item_enemy = 0;       // [orig: ammo +20] foe variant; 0 -> friendly fallback
     uint8_t team = 0xFF;          // [orig: +354]
     ThrowClass think = ThrowClass::kNone;
     Vec3 pos;                     // mission units

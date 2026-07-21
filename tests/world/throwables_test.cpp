@@ -101,7 +101,7 @@ void seed_ammo(World &w) {
     satchel.max_age_ticks = 62; // the 1 s arm delay
     satchel.drag_fp16 = 0x10000;
     satchel.tracer_item_friendly = kItemSatchel;
-    satchel.tracer_item_enemy = 0; // invisible to enemies (retail data)
+    satchel.tracer_item_enemy = 0; // retail falls back to the friendly item
 
     auto &boom = w.ammo.entries[kAmmoSatchelBoom];
     boom.name = "satchelboom";
@@ -262,6 +262,40 @@ void test_charge_scales_spawn_speed() {
     CHECK(rf.spin_yaw == 11930464); // 1 deg/tick init
 }
 
+// TrcrID class initialization is independent of the per-shot trail cadence,
+// and a missing foe TrcrID falls back to the friendly item [orig:
+// RoundData_SpawnRound @ 0x4ec787..0x4ec7b7].
+void test_tracer_item_binding_fallbacks() {
+    CHECK(throwable_item_for_viewer(10, 20, 0, 0) == 10);
+    CHECK(throwable_item_for_viewer(10, 20, 1, 0) == 20);
+    CHECK(throwable_item_for_viewer(10, 0, 1, 0) == 10);
+    {
+        Rig rig;
+        Entity *owner = rig.w.registry.get(rig.thrower);
+        CHECK(owner != nullptr);
+        owner->team = 1;
+        rig.w.round_sim.local_team = 0;
+        const int slot = rig.throw_ammo(kAmmoSatchel, Vec3{10, 10, 5}, 0, 0);
+        CHECK(slot >= 0);
+        const LiveRound &round = rig.w.round_sim.rounds[size_t(slot)];
+        CHECK(round.item_type_id == kItemSatchel);
+        CHECK(round.motor == ThrowClass::kSatchel);
+        CHECK(round.think == ThrowClass::kSatchel);
+    }
+    {
+        Rig rig;
+        auto &ammo = rig.w.ammo.entries[kAmmoGrenade];
+        ammo.flags = kUseOwnMove;
+        ammo.tracer_rate = 2;
+        const int slot = rig.throw_ammo(kAmmoGrenade, Vec3{10, 10, 5}, 0, 0);
+        CHECK(slot >= 0);
+        const LiveRound &round = rig.w.round_sim.rounds[size_t(slot)];
+        CHECK(!round.tracer);
+        CHECK(round.item_type_id == kItemFrag);
+        CHECK(round.motor == ThrowClass::kNade);
+    }
+}
+
 // The grenade motor: gravity arc, terrain bounce (velZ * -0.2 + spin kicks),
 // and the fuse queuing the kill zone at expiry [orig: @ 0x443F50 + the 0x1000
 // expiry head].
@@ -301,6 +335,37 @@ void test_ballistic_expiry_is_silent() {
     CHECK(slot >= 0);
     rig.tick(10);
     CHECK(!rig.w.round_sim.rounds[size_t(slot)].active);
+    CHECK(rig.w.explosions.queue.empty());
+}
+
+// A released pool slot is a fresh retail round record. Throwable-only state
+// must not leak into the next ballistic occupant of that slot.
+void test_round_slot_reuse_clears_throwable_state() {
+    Rig rig(0);
+    auto &ammo = rig.w.ammo.entries[kAmmoGrenade];
+    ammo.max_age_ticks = 4;
+    const int thrown = rig.throw_ammo(kAmmoGrenade, Vec3{10, 10, 50}, 0, 0);
+    CHECK(thrown == 0);
+    rig.tick(6);
+    CHECK(!rig.w.round_sim.rounds[size_t(thrown)].active);
+
+    rig.w.explosions.queue.clear();
+    rig.w.round_sim.impacts.clear();
+    ammo.flags = 0;
+    ammo.tracer_item_friendly = 0;
+    ammo.tracer_item_enemy = 0;
+    ammo.max_age_ticks = 2;
+    const int ballistic = rig.throw_ammo(kAmmoGrenade, Vec3{10, 10, 50}, 0, 0);
+    CHECK(ballistic == thrown);
+    const LiveRound &reused = rig.w.round_sim.rounds[size_t(ballistic)];
+    CHECK(reused.item_type_id == 0);
+    CHECK(reused.motor == ThrowClass::kNone);
+    CHECK(reused.think == ThrowClass::kNone);
+    CHECK(reused.spin_yaw == 0);
+    CHECK(reused.bounce_count == 0);
+    CHECK(!reused.parent.valid());
+    CHECK(!reused.det_at_expiry);
+    rig.tick(4);
     CHECK(rig.w.explosions.queue.empty());
 }
 
@@ -489,8 +554,10 @@ void test_team_trigger_claymore_rule() {
 int main() {
     test_power_throw_charge();
     test_charge_scales_spawn_speed();
+    test_tracer_item_binding_fallbacks();
     test_grenade_bounce_and_fuse();
     test_ballistic_expiry_is_silent();
+    test_round_slot_reuse_clears_throwable_state();
     test_satchel_places_device();
     test_detonator_chain();
     test_claymore_cone_trigger();
