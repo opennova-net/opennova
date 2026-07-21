@@ -29,6 +29,7 @@
 #include <world/player_spawn.h>
 #include <world/world.h>
 
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <vector>
@@ -136,6 +137,7 @@ int main() {
 		rifle.category = 3;
 		rifle.rank = 2;
 		rifle.clipsize = 30;
+		rifle.ammo_index = 0;
 		rifle.valid = true;
 		w::WeaponTableEntry &knife = world.weapons.entries[7];
 		knife.name = "WPN_TESTKNIFE";
@@ -144,6 +146,11 @@ int main() {
 		knife.clipsize = -1;
 		knife.valid = true;
 	}
+	world.ammo.entries.resize(1);
+	world.ammo.entries[0].name = "REMOTE_POWER_THROW";
+	world.ammo.entries[0].velocity = 620;
+	world.ammo.entries[0].max_age_ticks = 248;
+	world.ammo.entries[0].valid = true;
 
 	ns::LoopbackChannel loop;
 	ns::UdpSessionTransport udp_b(ns::UdpSessionTransport::Role::Host);
@@ -162,7 +169,7 @@ int main() {
 	const std::vector<uint8_t> body =
 			fire_body(hb.packed, /*flags=*/0x22, /*adm=*/5, 0x100000, 0x200000, 0x30000,
 	                  /*dx=*/0x1234, /*dy=*/int32_t(0xFFFFAAAA), hc.packed,
-	                  /*hit_part=*/1025, /*extra2=*/12, /*misc=*/0);
+	                  /*hit_part=*/1025, /*extra2=*/12, /*misc=*/64);
 	if (!expect(body.size() == 45, "crafted 0x06 body is 45 B"))
 		return 1;
 	int nreplies = dispatch_fire(roster[1], roster, world, body);
@@ -182,6 +189,7 @@ int main() {
 		if (!expect(ev.shot_seq == 1025, "ring shot_seq = the uplink hit_part")) return 1;
 		if (!expect(ev.mode_flags == 0x22, "ring mode = the fire-flags byte")) return 1;
 		if (!expect(ev.subtype == 12, "ring subtype = extra_byte2 composite")) return 1;
+		if (!expect(ev.slot_byte == 64, "ring slot byte = PowerThrow charge")) return 1;
 		if (!expect(ev.adm_index == 5, "ring adm index")) return 1;
 	}
 	{
@@ -189,6 +197,15 @@ int main() {
 		auto it = roster[1].weapon_slots.find(combo);
 		if (!expect(it != roster[1].weapon_slots.end(), "weapon slot bound by combo")) return 1;
 		if (!expect(it->second.clip == 29, "clip 30 -> 29 after one primary fire")) return 1;
+	}
+	{
+		const w::LiveRound &round = world.round_sim.rounds[0];
+		const float speed =
+				std::sqrt(round.vel.x * round.vel.x + round.vel.y * round.vel.y +
+				          round.vel.z * round.vel.z);
+		if (!expect(std::fabs(speed - (620.0f / 62.0f) * (64.0f / 256.0f)) < 0.01f,
+		            "remote PowerThrow charge scales the authoritative round"))
+			return 1;
 	}
 	{
 		const w::Entity *sh = world.registry.get(hb);
