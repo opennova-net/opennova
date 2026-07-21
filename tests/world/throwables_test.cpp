@@ -61,7 +61,8 @@ enum : int {
     kAmmoClayShrap = 7,   // claymoreshrapnel: fan
     kAmmoAvMine = 8,      // AV_Mine: useownmove + noage, no pieslice
     kAmmoAvMineKz = 9,    // AV_Minekillzone
-    kAmmoCount = 10,
+    kAmmoBullet = 10,     // plain ballistic round for device damage
+    kAmmoCount = 11,
 };
 
 // items.def type ids for the TrcrID models (JO: 1883 frag, 1891 satchel,
@@ -177,6 +178,17 @@ void seed_ammo(World &w) {
     avkz.kz_damage = 30000;
     avkz.kz_minradius = 5.0f;
     avkz.kz_maxradius = 15.0f;
+
+    auto &bullet = w.ammo.entries[kAmmoBullet];
+    bullet.name = "testbullet";
+    bullet.valid = true;
+    bullet.flags = 0x100u; // no gravity
+    bullet.velocity = 620; // 10 units/tick
+    bullet.max_age_ticks = 8;
+    bullet.drag_fp16 = 0x10000;
+    bullet.weight_in_grains = 1000;
+    bullet.min_damage = 10;
+    bullet.max_damage = 10;
 }
 
 // The items.def ai_function/move_function bindings (the host feed).
@@ -229,6 +241,24 @@ struct Rig {
         }
     }
 };
+
+LiveRound make_satchel_round(const Rig &rig, const Vec3 &pos,
+                             EntityHandle parent = EntityHandle{}) {
+    LiveRound round;
+    round.active = true;
+    round.owner = rig.thrower;
+    round.shooter_handle = rig.thrower.packed;
+    round.ammo_index = kAmmoSatchel;
+    round.item_type_id = kItemSatchel;
+    round.team = 0;
+    round.think = ThrowClass::kSatchel;
+    round.motor = ThrowClass::kSatchel;
+    round.pos = pos;
+    round.parent = parent;
+    if (const Entity *p = rig.w.registry.get(parent))
+        round.parent_spawn_id = p->registry_spawn_id;
+    return round;
+}
 
 // ---------------------------------------------------------------------------
 // The PowerThrow charge curve [orig: @ 0x4e07e9 — tap < 31 ticks = 255 (full),
@@ -450,9 +480,212 @@ void test_satchel_places_device() {
     const Entity *e = rig.w.registry.get(d.entity);
     CHECK(e != nullptr);
     CHECK(e->item_id == kItemSatchel);
+    CHECK(e->has_item_def);
     CHECK(e->health == 5); // the class row hp
     CHECK(rig.w.throwables.events.spawns.size() == 1);
     CHECK(rig.w.throwables.events.spawns[0].item_enemy == 0); // foe id absent
+}
+
+void test_placed_device_pose_and_ballistic_damage() {
+    Rig rig(0);
+    LiveRound round = make_satchel_round(rig, Vec3{20, 20, 2});
+    round.yaw_bam = 0x10000000;
+    round.pitch_bam = 0x20000000;
+    round.roll_bam = static_cast<int32_t>(0xC0000000u);
+    CHECK(rig.w.throwables.place_from_round(rig.w, round,
+                                            rig.w.ammo.entries[kAmmoSatchel]));
+    CHECK(rig.w.throwables.devices.size() == 1);
+    if (rig.w.throwables.devices.empty()) return;
+    PlacedDevice &device = rig.w.throwables.devices[0];
+    Entity *entity = rig.w.registry.get(device.entity);
+    CHECK(entity != nullptr);
+    if (entity == nullptr) return;
+    CHECK(entity->has_item_def);
+    CHECK(entity->yaw == 68);
+    CHECK(entity->pitch == 45);
+    CHECK(entity->roll == -90);
+    CHECK(!entity->ground_target.valid());
+    CHECK(device.entity_spawn_id == entity->registry_spawn_id);
+    const Entity *owner = rig.w.registry.get(rig.thrower);
+    CHECK(owner != nullptr && device.owner_spawn_id == owner->registry_spawn_id);
+
+    // The bounded collision fallback consumes a real ballistic hit and the
+    // armed think then follows the normal damage-trigger detonation path.
+    device.think_delay_ticks = 0;
+    RoundSpawnParams bullet;
+    bullet.owner = rig.thrower;
+    bullet.shooter_handle = rig.thrower.packed;
+    bullet.origin = Vec3{device.pos.x - 2.0f, device.pos.y, device.pos.z};
+    bullet.dir_yaw_bam = 0;
+    bullet.ammo_index = kAmmoBullet;
+    CHECK(rig.w.round_sim.spawn(rig.w, bullet) >= 0);
+    rig.w.round_sim.tick(rig.w, nullptr, nullptr);
+    entity = rig.w.registry.get(device.entity);
+    CHECK(entity != nullptr && entity->health <= 0);
+    rig.w.throwables.tick(rig.w, nullptr, nullptr);
+    CHECK(rig.w.throwables.devices.empty());
+    bool saw_boom = false;
+    for (const ExplosionEntry &entry : rig.w.explosions.queue)
+        if (entry.ammo_index == kAmmoSatchelBoom) saw_boom = true;
+    CHECK(saw_boom);
+}
+
+void test_parented_device_follows_parent_yaw() {
+    Rig rig(0);
+    Entity parent_seed;
+    parent_seed.kind = EntityKind::Item;
+    parent_seed.position = Vec3{10, 10, 1};
+    parent_seed.yaw = 90; // mission heading zero
+    const EntityHandle parent = rig.w.registry.spawn(1, parent_seed);
+    CHECK(parent.valid());
+    LiveRound round = make_satchel_round(rig, Vec3{11, 10, 2}, parent);
+    round.yaw_bam = 0;
+    CHECK(rig.w.throwables.place_from_round(rig.w, round,
+                                            rig.w.ammo.entries[kAmmoSatchel]));
+    CHECK(rig.w.throwables.devices.size() == 1);
+    if (rig.w.throwables.devices.empty()) return;
+    Entity *carrier = rig.w.registry.get(parent);
+    CHECK(carrier != nullptr);
+    carrier->position = Vec3{20, 30, 3};
+    carrier->yaw = 0; // +90 degrees of mission-heading rotation
+    rig.w.throwables.tick(rig.w, nullptr, nullptr);
+    const PlacedDevice &device = rig.w.throwables.devices[0];
+    CHECK(std::fabs(device.pos.x - 20.0f) < 1e-4f);
+    CHECK(std::fabs(device.pos.y - 31.0f) < 1e-4f);
+    CHECK(std::fabs(device.pos.z - 4.0f) < 1e-4f);
+    CHECK(static_cast<uint32_t>(device.yaw_bam) == 0x40000000u);
+    const Entity *entity = rig.w.registry.get(device.entity);
+    CHECK(entity != nullptr && entity->yaw == 0);
+    CHECK(entity != nullptr && entity->ground_target == parent);
+}
+
+void test_device_and_owner_handle_reuse() {
+    // A stale device record must not control or despawn a replacement occupant.
+    {
+        Rig rig(0);
+        LiveRound round = make_satchel_round(rig, Vec3{20, 20, 2});
+        CHECK(rig.w.throwables.place_from_round(rig.w, round,
+                                                rig.w.ammo.entries[kAmmoSatchel]));
+        const EntityHandle old_handle = rig.w.throwables.devices[0].entity;
+        const uint64_t old_id = rig.w.throwables.devices[0].entity_spawn_id;
+        rig.w.registry.despawn(old_handle);
+        Entity replacement_seed;
+        replacement_seed.kind = EntityKind::Item;
+        replacement_seed.health = 77;
+        const EntityHandle replacement = rig.w.registry.spawn(1, replacement_seed);
+        CHECK(replacement == old_handle);
+        const uint64_t replacement_id = rig.w.registry.get(replacement)->registry_spawn_id;
+        CHECK(replacement_id != old_id);
+        rig.w.throwables.tick(rig.w, nullptr, nullptr);
+        CHECK(rig.w.throwables.devices.empty());
+        const Entity *still_live = rig.w.registry.get(replacement);
+        CHECK(still_live != nullptr && still_live->registry_spawn_id == replacement_id);
+    }
+
+    // A new entity in the owner's slot neither detonates nor inherits the old
+    // owner's device; the next think removes that orphaned charge.
+    {
+        Rig rig(0);
+        LiveRound round = make_satchel_round(rig, Vec3{20, 20, 2});
+        CHECK(rig.w.throwables.place_from_round(rig.w, round,
+                                                rig.w.ammo.entries[kAmmoSatchel]));
+        const EntityHandle device_handle = rig.w.throwables.devices[0].entity;
+        rig.w.registry.despawn(rig.thrower);
+        Entity new_owner_seed;
+        new_owner_seed.kind = EntityKind::Organic;
+        new_owner_seed.health = 100;
+        const EntityHandle new_owner = rig.w.registry.spawn(0, new_owner_seed);
+        CHECK(new_owner == rig.thrower);
+        rig.w.throwables.detonate_satchels_by_owner(rig.w, new_owner);
+        const Entity *device_entity = rig.w.registry.get(device_handle);
+        CHECK(device_entity != nullptr && device_entity->health == 5);
+        rig.w.throwables.tick(rig.w, nullptr, nullptr);
+        CHECK(rig.w.throwables.devices.empty());
+        CHECK(rig.w.registry.get(device_handle) == nullptr);
+        CHECK(rig.w.registry.get(new_owner) != nullptr);
+    }
+}
+
+void test_parent_handle_reuse_detaches_device() {
+    Rig rig(0);
+    Entity parent_seed;
+    parent_seed.kind = EntityKind::Item;
+    parent_seed.position = Vec3{10, 10, 1};
+    parent_seed.yaw = 90;
+    const EntityHandle parent = rig.w.registry.spawn(1, parent_seed);
+    LiveRound round = make_satchel_round(rig, Vec3{11, 10, 2}, parent);
+    CHECK(rig.w.throwables.place_from_round(rig.w, round,
+                                            rig.w.ammo.entries[kAmmoSatchel]));
+    const Vec3 last_pos = rig.w.throwables.devices[0].pos;
+    rig.w.registry.despawn(parent);
+    parent_seed.position = Vec3{100, 100, 100};
+    parent_seed.yaw = 0;
+    const EntityHandle replacement = rig.w.registry.spawn(1, parent_seed);
+    CHECK(replacement == parent);
+    rig.w.throwables.tick(rig.w, nullptr, nullptr);
+    CHECK(rig.w.throwables.devices.size() == 1);
+    const PlacedDevice &device = rig.w.throwables.devices[0];
+    CHECK(!device.parent.valid());
+    CHECK(std::fabs(device.pos.x - last_pos.x) < 1e-4f);
+    CHECK(std::fabs(device.pos.y - last_pos.y) < 1e-4f);
+    CHECK(std::fabs(device.pos.z - last_pos.z) < 1e-4f);
+    const Entity *entity = rig.w.registry.get(device.entity);
+    CHECK(entity != nullptr && !entity->ground_target.valid());
+}
+
+void test_world_tick_uses_retail_device_order() {
+    // A round that converts this frame must not lose an arm-delay tick: pool 1
+    // has already run before the projectile pool creates it.
+    {
+        Rig rig(0);
+        rig.w.terrain = &rig.flat.field;
+        const int slot = rig.throw_ammo(kAmmoSatchel, Vec3{20, 20, 0}, 0, 0);
+        CHECK(slot >= 0);
+        rig.w.run_logic_tick();
+        CHECK(!rig.w.round_sim.rounds[size_t(slot)].active);
+        CHECK(rig.w.throwables.devices.size() == 1);
+        CHECK(rig.w.throwables.devices[0].think_delay_ticks ==
+              rig.w.ammo.entries[kAmmoSatchel].max_age_ticks);
+        CHECK(rig.w.throwables.events.spawns.size() == 1);
+        rig.w.run_logic_tick();
+        CHECK(rig.w.throwables.devices[0].think_delay_ticks ==
+              rig.w.ammo.entries[kAmmoSatchel].max_age_ticks - 1);
+        CHECK(rig.w.throwables.events.spawns.empty());
+    }
+
+    // A claymore fan spawned by the pool-1 think advances in the same frame's
+    // later projectile pass [orig: Entity_UpdateAllEntities pool order].
+    {
+        Rig rig(0);
+        LiveRound round;
+        round.owner = rig.thrower;
+        round.shooter_handle = rig.thrower.packed;
+        round.ammo_index = kAmmoClaymore;
+        round.item_type_id = kItemClaymore;
+        round.team = 0;
+        round.think = ThrowClass::kClaymore;
+        round.motor = ThrowClass::kClaymore;
+        round.pos = Vec3{20, 20, 2};
+        round.yaw_bam = 0;
+        CHECK(rig.w.throwables.place_from_round(rig.w, round,
+                                                rig.w.ammo.entries[kAmmoClaymore]));
+        rig.w.throwables.devices[0].think_delay_ticks = 0;
+        Entity enemy;
+        enemy.kind = EntityKind::Organic;
+        enemy.team = 1;
+        enemy.health = 100;
+        enemy.position = Vec3{28, 20, 2};
+        rig.w.registry.spawn(0, enemy);
+        rig.w.run_logic_tick();
+        CHECK(rig.w.throwables.devices.empty());
+        int live_pellets = 0;
+        for (const LiveRound &pellet : rig.w.round_sim.rounds) {
+            if (!pellet.active || pellet.ammo_index != kAmmoClayShrap) continue;
+            ++live_pellets;
+            CHECK(pellet.age_ticks == 1);
+        }
+        CHECK(live_pellets > 0);
+    }
 }
 
 // The detonator: firing it marks the owner's satchels Health = -1; the armed
@@ -626,6 +859,11 @@ int main() {
     test_ballistic_expiry_is_silent();
     test_round_slot_reuse_clears_throwable_state();
     test_satchel_places_device();
+    test_placed_device_pose_and_ballistic_damage();
+    test_parented_device_follows_parent_yaw();
+    test_device_and_owner_handle_reuse();
+    test_parent_handle_reuse_detaches_device();
+    test_world_tick_uses_retail_device_order();
     test_detonator_chain();
     test_claymore_cone_trigger();
     test_avmine_proximity_is_data_dead();

@@ -131,6 +131,17 @@ int32_t throwable_water_q16(const World &world) {
     return world.env.water_z != 0 ? world.env.water_z : INT32_MIN;
 }
 
+Entity *entity_for_lifetime(World &world, EntityHandle handle, uint64_t spawn_id) {
+    Entity *entity = world.registry.get(handle);
+    if (entity == nullptr || spawn_id == 0 || entity->registry_spawn_id != spawn_id)
+        return nullptr;
+    return entity;
+}
+
+int16_t item_angle_degrees_from_bam(int32_t bam) {
+    return static_cast<int16_t>(std::lround(double(bam) * kDegreesPerBam));
+}
+
 void load_frame(const LiveRound &r, MotorFrame &f) {
     f.px = to_fixed(r.pos.x);
     f.py = to_fixed(r.pos.y);
@@ -277,9 +288,11 @@ void stick_pose_from_normal(const int32_t normal_q16[3], bool keep_yaw,
 // position delta + rotation delta through the 22-bit trig; the pitch/roll legs
 // stay open (D-THROW-4)].
 void follow_parent(World &world, LiveRound &r) {
-    Entity *parent = world.registry.get(r.parent);
+    Entity *parent = entity_for_lifetime(world, r.parent, r.parent_spawn_id);
     if (parent == nullptr || (parent->engine_flags & 0x02000001u) != 0) {
         r.parent = EntityHandle{};
+        r.parent_spawn_id = 0;
+        r.parent_tracking = false;
         return;
     }
     if (!r.parent_tracking) {
@@ -292,7 +305,8 @@ void follow_parent(World &world, LiveRound &r) {
                   parent->position.y - r.parent_prev_pos.y,
                   parent->position.z - r.parent_prev_pos.z};
     const int32_t yaw_now = bam_heading_from_mission_yaw_deg(parent->yaw);
-    const int32_t dyaw = yaw_now - r.parent_prev_yaw_bam;
+    const int32_t dyaw = static_cast<int32_t>(
+            static_cast<uint32_t>(yaw_now) - static_cast<uint32_t>(r.parent_prev_yaw_bam));
     // rotate the offset from the parent by the yaw delta
     const double lx = double(r.pos.x - r.parent_prev_pos.x);
     const double ly = double(r.pos.y - r.parent_prev_pos.y);
@@ -303,7 +317,8 @@ void follow_parent(World &world, LiveRound &r) {
     r.pos.y = r.parent_prev_pos.y + static_cast<float>(lx * sa + ly * ca) +
               static_cast<float>(dp.y);
     r.pos.z += static_cast<float>(dp.z);
-    r.yaw_bam += dyaw;
+    r.yaw_bam = static_cast<int32_t>(static_cast<uint32_t>(r.yaw_bam) +
+                                     static_cast<uint32_t>(dyaw));
     r.parent_prev_pos = parent->position;
     r.parent_prev_yaw_bam = yaw_now;
 }
@@ -316,6 +331,7 @@ void follow_parent(World &world, LiveRound &r) {
 static bool motor_nade(World &world, RoundSim &sim, LiveRound &r,
                        const AmmoTableEntry &ammo, CollisionWorld *collision,
                        const terrain::TerrainHeightField *terrain) {
+    if (r.parent.valid()) follow_parent(world, r);
     MotorFrame f;
     load_frame(r, f);
     const int32_t water = throwable_water_q16(world);
@@ -408,9 +424,6 @@ static bool motor_nade(World &world, RoundSim &sim, LiveRound &r,
             }
         }
     }
-    // Ride a parent when landed on one [orig: @ 0x444434].
-    if (r.parent.valid()) follow_parent(world, r);
-
     // The swept item raycast [orig: @ 0x444522-0x444729].
     if (horiz != 0) {
         ProjectileHit hit;
@@ -483,6 +496,7 @@ static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
                          const AmmoTableEntry &ammo, CollisionWorld *collision,
                          const terrain::TerrainHeightField *terrain,
                          bool claymore) {
+    if (r.parent.valid()) follow_parent(world, r);
     MotorFrame f;
     load_frame(r, f);
     const int32_t water = throwable_water_q16(world);
@@ -501,7 +515,6 @@ static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
         f.py += f.vy;
         if (std::abs(f.vy) < 256) f.vy = 0;
     }
-    if (r.parent.valid()) follow_parent(world, r);
     // Inverted gravity split [orig: satchel @ 0x4482f8 — above water -55
     // (light toss), submerged -167 (sinks fast)].
     if (f.pz > water) f.vz -= 55;
@@ -553,6 +566,7 @@ static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
             ground_hit = true;
             ground_surface = 1; // no-charmap default material: dirt (D-WPN-15)
             r.parent = EntityHandle{};
+            r.parent_spawn_id = 0;
             r.parent_tracking = false;
         }
     }
@@ -581,6 +595,8 @@ static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
                     f.vy = 0;
                     f.vz = 0;
                     r.parent = hit.geometry_entity;
+                    if (const Entity *parent = world.registry.get(r.parent))
+                        r.parent_spawn_id = parent->registry_spawn_id;
                     r.parent_tracking = false;
                     rest = true;
                 }
@@ -637,6 +653,18 @@ bool ThrowableSim::place_from_round(World &world, const LiveRound &round,
                                     const AmmoTableEntry &ammo) {
     if (devices.size() >= static_cast<size_t>(kCapacity)) return false;
 
+    EntityHandle parent_handle;
+    Entity *parent_entity = nullptr;
+    if (round.parent.valid()) {
+        Entity *candidate = world.registry.get(round.parent);
+        if (candidate != nullptr &&
+            (round.parent_spawn_id == 0 ||
+             candidate->registry_spawn_id == round.parent_spawn_id)) {
+            parent_handle = round.parent;
+            parent_entity = candidate;
+        }
+    }
+
     // The registry entity the device lives as — pool 1 [orig:
     // Entity_CloneFromTemplateByType @ 0x4398a0 routes items.def type
     // vehicle/object into pool 1; the sweeps @ 0x546e00/0x546ed0/0x547160 all
@@ -648,9 +676,13 @@ bool ThrowableSim::place_from_round(World &world, const LiveRound &round,
                                                ? ammo.tracer_item_friendly
                                                : ammo.tracer_item_enemy);
     seed.kind = EntityKind::Item;
+    seed.has_item_def = true;
     seed.position = round.pos;
     seed.yaw = static_cast<int16_t>(
             std::lround(mission_yaw_deg_from_bam_heading(round.yaw_bam)));
+    seed.pitch = item_angle_degrees_from_bam(round.pitch_bam);
+    seed.roll = item_angle_degrees_from_bam(round.roll_bam);
+    seed.ground_target = parent_handle;
     seed.team = round.team;
     seed.item_id = item_id;
     if (const ThrowableClassRow *row = classes.get(item_id)) {
@@ -672,11 +704,15 @@ bool ThrowableSim::place_from_round(World &world, const LiveRound &round,
     Entity *owner_ent = world.registry.get(round.owner);
     const EntityHandle handle = world.registry.spawn(1, seed);
     if (!handle.valid()) return false;
+    Entity *placed_entity = world.registry.get(handle);
+    if (placed_entity == nullptr) return false;
 
     PlacedDevice d;
     d.active = true;
     d.entity = handle;
+    d.entity_spawn_id = placed_entity->registry_spawn_id;
     d.owner = round.owner;
+    d.owner_spawn_id = owner_ent != nullptr ? owner_ent->registry_spawn_id : 0;
     d.owner_handle = round.shooter_handle;
     d.hit_word = round.shot_seq;
     d.ammo_index = round.ammo_index;
@@ -688,19 +724,18 @@ bool ThrowableSim::place_from_round(World &world, const LiveRound &round,
     d.yaw_bam = round.yaw_bam;
     d.pitch_bam = round.pitch_bam;
     d.roll_bam = round.roll_bam;
-    d.parent = round.parent;
+    d.parent = parent_handle;
+    d.parent_spawn_id = parent_entity != nullptr ? parent_entity->registry_spawn_id : 0;
     // ARM DELAY: the un-aged remaining life [orig: noage skipped round aging,
     // so the clone's +684 still holds ~max_age; Entity_UpdatePool1Slot then
     // counts it down 1/tick and thinks at <= 0].
     d.think_delay_ticks = ammo.max_age_ticks;
-    if (round.parent.valid()) {
-        Entity *parent = world.registry.get(round.parent);
-        if (parent != nullptr) {
-            d.parent_offset = Vec3{round.pos.x - parent->position.x,
-                                   round.pos.y - parent->position.y,
-                                   round.pos.z - parent->position.z};
-            d.parent_yaw_at_stick = bam_heading_from_mission_yaw_deg(parent->yaw);
-        }
+    if (parent_entity != nullptr) {
+        d.parent_offset = Vec3{round.pos.x - parent_entity->position.x,
+                               round.pos.y - parent_entity->position.y,
+                               round.pos.z - parent_entity->position.z};
+        d.parent_yaw_at_stick = bam_heading_from_mission_yaw_deg(parent_entity->yaw);
+        d.device_yaw_at_stick = round.yaw_bam;
     }
     devices.push_back(d);
 
@@ -720,12 +755,16 @@ bool ThrowableSim::place_from_round(World &world, const LiveRound &round,
 void ThrowableSim::detonate_satchels_by_owner(World &world, EntityHandle owner) {
     // [orig: Entity_DetonateSatchelsByOwner @ 0x546ed0 — Health(+286) = -1 on
     // every pool-1 satchel-ammo record owned by the firer; only SATCHEL ammo.]
+    const Entity *live_owner = world.registry.get(owner);
+    if (live_owner == nullptr) return;
     for (PlacedDevice &d : devices) {
-        if (!d.active || d.owner.packed != owner.packed) continue;
+        if (!d.active || d.owner.packed != owner.packed ||
+            d.owner_spawn_id != live_owner->registry_spawn_id)
+            continue;
         const AmmoTableEntry *ammo = world.ammo.by_index(d.ammo_index);
         if (ammo == nullptr) continue;
         if (!strutil::iequals(ammo->name, "satchel")) continue;
-        Entity *e = world.registry.get(d.entity);
+        Entity *e = entity_for_lifetime(world, d.entity, d.entity_spawn_id);
         if (e != nullptr) e->health = -1;
     }
 }
@@ -733,14 +772,22 @@ void ThrowableSim::detonate_satchels_by_owner(World &world, EntityHandle owner) 
 void ThrowableSim::remove_devices_by_owner(World &world, EntityHandle owner) {
     // [orig: Server_ProcessPlayerDeath -> Entity_RemovePlacedDevicesByOwner
     // @ 0x546e00 -> Server_RemoveEntityAndNotify @ 0x50a270 — silent removal.]
+    const Entity *live_owner = world.registry.get(owner);
+    if (live_owner == nullptr) return;
     for (PlacedDevice &d : devices) {
-        if (!d.active || d.owner.packed != owner.packed) continue;
+        if (!d.active || d.owner.packed != owner.packed ||
+            d.owner_spawn_id != live_owner->registry_spawn_id)
+            continue;
         remove_device(world, d);
     }
 }
 
 void ThrowableSim::remove_device(World &world, PlacedDevice &device) {
     if (!device.active) return;
+    if (entity_for_lifetime(world, device.entity, device.entity_spawn_id) == nullptr) {
+        device.active = false;
+        return;
+    }
     device.active = false;
     ThrowableEvents::DeviceRemove ev;
     ev.entity = device.entity.packed;
@@ -828,7 +875,7 @@ void ThrowableSim::tick(World &world, CollisionWorld *collision,
                         const terrain::TerrainHeightField *terrain) {
     for (PlacedDevice &d : devices) {
         if (!d.active) continue;
-        Entity *e = world.registry.get(d.entity);
+        Entity *e = entity_for_lifetime(world, d.entity, d.entity_spawn_id);
         if (e == nullptr) {
             d.active = false;
             continue;
@@ -837,7 +884,7 @@ void ThrowableSim::tick(World &world, CollisionWorld *collision,
         // Server_ProcessPlayerDeath @ 0x5178d8 / Server_RemoveEntityAndNotify
         // @ 0x50a270 -> Entity_RemovePlacedDevicesByOwner @ 0x546e00].
         {
-            const Entity *owner = world.registry.get(d.owner);
+            const Entity *owner = entity_for_lifetime(world, d.owner, d.owner_spawn_id);
             if (owner == nullptr || owner->health <= 0) {
                 remove_device(world, d);
                 continue;
@@ -845,10 +892,12 @@ void ThrowableSim::tick(World &world, CollisionWorld *collision,
         }
         // ride the stuck-to parent
         if (d.parent.valid()) {
-            Entity *parent = world.registry.get(d.parent);
+            Entity *parent = entity_for_lifetime(world, d.parent, d.parent_spawn_id);
             if (parent != nullptr) {
-                const int32_t dyaw = bam_heading_from_mission_yaw_deg(parent->yaw) -
-                                     d.parent_yaw_at_stick;
+                const int32_t parent_yaw = bam_heading_from_mission_yaw_deg(parent->yaw);
+                const int32_t dyaw = static_cast<int32_t>(
+                        static_cast<uint32_t>(parent_yaw) -
+                        static_cast<uint32_t>(d.parent_yaw_at_stick));
                 const double a = double(dyaw) / kBamPerRad;
                 const double ca = std::cos(a), sa = std::sin(a);
                 d.pos.x = parent->position.x +
@@ -858,9 +907,19 @@ void ThrowableSim::tick(World &world, CollisionWorld *collision,
                           static_cast<float>(double(d.parent_offset.x) * sa +
                                              double(d.parent_offset.y) * ca);
                 d.pos.z = parent->position.z + d.parent_offset.z;
+                d.yaw_bam = static_cast<int32_t>(
+                        static_cast<uint32_t>(d.device_yaw_at_stick) +
+                        static_cast<uint32_t>(dyaw));
                 e->position = d.pos;
+                e->yaw = static_cast<int16_t>(
+                        std::lround(mission_yaw_deg_from_bam_heading(d.yaw_bam)));
+                e->pitch = item_angle_degrees_from_bam(d.pitch_bam);
+                e->roll = item_angle_degrees_from_bam(d.roll_bam);
+                e->ground_target = d.parent;
             } else {
                 d.parent = EntityHandle{};
+                d.parent_spawn_id = 0;
+                e->ground_target = EntityHandle{};
             }
         }
         // ARM delay [orig: Entity_UpdatePool1Slot age -1/tick, think at <= 0].

@@ -117,7 +117,9 @@ struct ThrowableClassTable {
 struct PlacedDevice {
     bool active = false;
     EntityHandle entity;          // the registry entity (shootable; health lives there)
+    uint64_t entity_spawn_id = 0; // host lifetime identity for the reusable handle
     EntityHandle owner;           // [orig: +368] kill credit / detonator / cleanup key
+    uint64_t owner_spawn_id = 0;
     uint16_t owner_handle = 0xFFFF;
     uint16_t hit_word = 0;        // [orig: +442] rides the detonation descriptor
     int32_t ammo_index = -1;      // [orig: +620] the PLACED ammo (satchel/claymore/AV_Mine)
@@ -130,8 +132,10 @@ struct PlacedDevice {
     int32_t pitch_bam = 0;
     int32_t roll_bam = 0;
     EntityHandle parent;          // stuck-to entity [orig: +40 groundEntity]
+    uint64_t parent_spawn_id = 0;
     Vec3 parent_offset;           // device pos in the parent's yaw frame at stick time
     int32_t parent_yaw_at_stick = 0;
+    int32_t device_yaw_at_stick = 0;
     // Remaining ticks until the think starts — the ARM DELAY. [orig: the clone
     // keeps the round's un-aged +684 (noage skipped aging) = ammo max_age, and
     // Entity_UpdatePool1Slot decrements 1/tick, thinking every tick at <= 0.]

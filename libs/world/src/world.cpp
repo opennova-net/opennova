@@ -672,18 +672,20 @@ void World::run_logic_tick(bool is_authority, bool pre_mission) {
     // entity to the replicated wire state. [orig: the client tick still steps the
     // local player's infantry motor; Server_TickUpdate / Game_ProcessMainFrame.]
     for (ISystem *s : systems_) s->tick(*this, ctx);
-    // Live rounds step inside the world frame, authority-only — the client's visual
-    // round re-sim is not modeled here [orig: Entity_UpdateAllEntities ->
-    // Weapon_UpdateAllProjectiles @0x4ec020; damage is authority-gated end-to-end,
-    // §5.60]. Terrain is the host-wired sampler (AI grounding shares it).
+    // Entity_UpdateAllEntities walks pool 1 before the projectile pool. That
+    // prevents a newly converted charge from losing an arm-delay tick and lets
+    // claymore shrapnel fly later in its detonation frame [orig:
+    // Entity_UpdatePool1Slot @0x4b8dd0 -> Weapon_UpdateAllProjectiles @0x4ec020].
+    // These presentation events describe only the current authoritative tick.
+    if (is_authority && !pre_mission) {
+        throwables.events.clear();
+        throwables.tick(*this, ai != nullptr ? ai->collision : nullptr, terrain);
+    }
+    // Live rounds then step authority-only; client visual re-simulation remains
+    // unmodeled. Terrain is the host-wired sampler shared with AI grounding,
+    // and damage stays authority-gated end-to-end (world-wac-ai-re §26).
     if (is_authority && !pre_mission)
         round_sim.tick(*this, terrain, ai != nullptr ? ai->collision : nullptr);
-    // Placed throwable devices think after the round step [orig: the pool-1
-    // per-tick walk in Entity_UpdateAllEntities -> Entity_UpdatePool1Slot
-    // @ 0x4b8dd0 — arm-delay countdown, then deathCallback(entity, 0, 0) every
-    // tick; world-wac-ai-re §26].
-    if (is_authority && !pre_mission)
-        throwables.tick(*this, ai != nullptr ? ai->collision : nullptr, terrain);
     if (is_authority && !pre_mission) {
         // The explosion-queue drain runs once per frame after the projectile
         // update [orig: Projectile_ProcessExplosionQueue @0x4ead80]; entries the

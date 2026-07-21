@@ -129,6 +129,7 @@ struct LiveRound {
     // Landed-on / stuck-to entity [orig: +40 groundEntity; the motors parent
     // and follow it].
     EntityHandle parent;
+    uint64_t parent_spawn_id = 0;
     Vec3 parent_prev_pos;
     int32_t parent_prev_yaw_bam = 0;
     bool parent_tracking = false;
