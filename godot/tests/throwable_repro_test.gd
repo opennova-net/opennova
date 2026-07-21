@@ -1,0 +1,293 @@
+extends GutTest
+
+# Throwable weapon-switch + PowerThrow lifecycle against the REAL JOX defs,
+# driven the way the game hosts drive NovaSimulation (loadout -> switch walk ->
+# commit events -> def installs, including the FP model resolve's delayed
+# same-weapon re-install). Pins the PR #282 field bugs:
+#  - a same-name install landing during a SWITCHFROM must not destroy the
+#    switch chain (it desynced weapon_def_ from equipped_adm_index — the
+#    "rifle fires the last-thrown ammo" bug),
+#  - a PowerThrow press during the draw-in must not leak a latched charge
+#    onto a later shot,
+#  - the thrown grenade flies as its TrcrID item and dies by fuse, never by
+#    ground contact.
+# Asset-gated: skips without the JOX corpus.
+
+const JOX := "C:/Users/taylor/Desktop/JOX"
+
+var _sim: NovaSimulation = null
+var _db: NovaWeaponDatabase = null
+var _root: NovaResourceRoot = null
+var _reinstall_pending := ""
+var _reinstall_ticks := 0
+
+
+func before_each() -> void:
+	_reinstall_pending = ""
+	_reinstall_ticks = 0
+	if not DirAccess.dir_exists_absolute(JOX):
+		return
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	_sim = NovaSimulation.new()
+	assert_true(_sim.load_from_mission_data(md))
+	assert_true(_sim.spawn_local_player(Vector3(0, 0, 0), 0.0, 1))
+	_root = NovaResourceRoot.new()
+	_root.set_root_dir(JOX)
+	assert_eq(_sim.load_weapon_table(_root, "weapon.def"), OK)
+	assert_eq(_sim.load_ammo_table(_root, "ammo.def"), OK)
+	_db = NovaWeaponDatabase.new()
+	assert_eq(_db.load_from_resource_root(_root, "weapon.def"), OK)
+
+
+func after_each() -> void:
+	if _sim != null:
+		_sim.free()
+	_sim = null
+	_db = null
+	_root = null
+
+
+func _install(weapon_name: String) -> void:
+	var idx: int = _db.find_weapon(weapon_name)
+	assert_gt(idx, -1, "weapon %s in weapon.def" % weapon_name)
+	_sim.set_local_player_weapon(_db.get_weapon(idx), {})
+
+
+# Step + drain like the hosts: a switch event installs the def, and the rebuilt
+# viewmodel installs the SAME def again ~a frame later (the FP model resolve —
+# game_world._setup_local_player_weapon). The re-install racing the FSM is the
+# regression surface this file exists for.
+func _step_and_pump(ticks: int) -> Array[String]:
+	var switched: Array[String] = []
+	for _i in ticks:
+		_sim.step()
+		if not _reinstall_pending.is_empty():
+			_reinstall_ticks -= 1
+			if _reinstall_ticks <= 0:
+				_install(_reinstall_pending)
+				_reinstall_pending = ""
+		for ev in _sim.drain_local_player_weapon_events():
+			var name := String((ev as Dictionary).get("switch_to_weapon", ""))
+			if not name.is_empty():
+				switched.append(name)
+				_install(name)
+				_reinstall_pending = name
+				_reinstall_ticks = 2
+	return switched
+
+
+func _visual_ids() -> Array[int]:
+	var out: Array[int] = []
+	for v in _sim.get_throwable_visuals():
+		out.append(int((v as Dictionary).get("item_id", 0)))
+	return out
+
+
+func _wait_for_idle(max_ticks: int) -> bool:
+	for _i in max_ticks:
+		var s: Dictionary = _sim.get_local_player_weapon_state()
+		if int(s.get("current", -1)) == 0 and int(s.get("next", -1)) == 0:
+			return true
+		_step_and_pump(1)
+	return false
+
+
+func _boot_kit(kit: Array[Dictionary]) -> void:
+	assert_true(_sim.apply_local_player_loadout(kit, 0), "loadout applied")
+	var boot := _step_and_pump(2)
+	if boot.is_empty():
+		_install(_sim.get_local_player_weapon_name())
+	assert_true(_wait_for_idle(150), "spawn draw-in settles")
+
+
+func _switch_to(category: int, expect_name: String) -> void:
+	_sim.request_local_player_weapon_category(category)
+	var sw: Array[String] = []
+	for _i in 150:
+		sw.append_array(_step_and_pump(1))
+		if sw.has(expect_name):
+			break
+	assert_has(sw, expect_name, "category %d commits %s" % [category, expect_name])
+	assert_true(_wait_for_idle(150), "%s draw-in settles" % expect_name)
+	_step_and_pump(20)  # human pause; also flushes the delayed re-install
+	assert_eq(_sim.get_local_player_weapon_name(), expect_name,
+			"equipped_adm_index stamped to %s" % expect_name)
+
+
+const KIT_M4_GRENADE: Array[Dictionary] = [
+	{"name": "WPN_M4AUTO", "ammo_primary": -1, "ammo_secondary": -1, "flags": -1},
+	{"name": "WPN_GRENADEHE", "ammo_primary": -1, "ammo_secondary": -1, "flags": -1},
+]
+const KIT_M4_CLAYMORE: Array[Dictionary] = [
+	{"name": "WPN_M4AUTO", "ammo_primary": -1, "ammo_secondary": -1, "flags": -1},
+	{"name": "WPN_CLAYMORE", "ammo_primary": -1, "ammo_secondary": -1, "flags": -1},
+]
+
+
+# The core regression: a same-name install (the FP model resolve) landing while
+# the outgoing SWITCHFROM holsters must leave the switch chain intact — the
+# commit still fires and equipped_adm_index moves to the new weapon.
+func test_reinstall_during_holster_preserves_the_switch() -> void:
+	if _sim == null:
+		pass_test("JOX corpus not present")
+		return
+	_boot_kit(KIT_M4_GRENADE)
+	assert_eq(_sim.get_local_player_weapon_name(), "WPN_M4AUTO")
+	_sim.request_local_player_weapon_category(5)
+	_sim.step()  # the M4 FSM enters SWITCHFROM
+	assert_eq(int(_sim.get_local_player_weapon_state().get("current", -1)), 7,
+			"the holster is playing")
+	_install("WPN_M4AUTO")  # the racing same-weapon re-install
+	assert_eq(int(_sim.get_local_player_weapon_state().get("current", -1)), 7,
+			"the re-install must not reset the live action slot")
+	var sw: Array[String] = []
+	for _i in 150:
+		sw.append_array(_step_and_pump(1))
+		if sw.has("WPN_GRENADEHE"):
+			break
+	assert_has(sw, "WPN_GRENADEHE", "the displaced switch still commits")
+	_wait_for_idle(150)
+	assert_eq(_sim.get_local_player_weapon_name(), "WPN_GRENADEHE")
+
+
+# A PowerThrow press inside the queued draw-in is refused (the fireable gate),
+# and no charge byte leaks onto a later shot's wire slot_byte.
+func test_windup_during_draw_leaves_no_stale_charge() -> void:
+	if _sim == null:
+		pass_test("JOX corpus not present")
+		return
+	_boot_kit(KIT_M4_GRENADE)
+	_switch_to(5, "WPN_GRENADEHE")
+	_switch_to(3, "WPN_M4AUTO")
+	# Re-mount the grenade and press DURING the draw (before idle).
+	_sim.request_local_player_weapon_category(5)
+	var sw: Array[String] = []
+	for _i in 150:
+		sw.append_array(_step_and_pump(1))
+		if sw.has("WPN_GRENADEHE"):
+			break
+	assert_has(sw, "WPN_GRENADEHE")
+	_sim.set_local_player_weapon_input(true, true, false)
+	_step_and_pump(3)
+	_sim.set_local_player_weapon_input(false, false, false)
+	_step_and_pump(3)
+	assert_eq(int(_sim.get_local_player_weapon_state().get("fired_serial", -1)), 0,
+			"the mid-draw press does not fire")
+	# Settle, then a real tap-throw: the wire slot_byte must be the tap's 255,
+	# not a leftover from the refused windup — and the fire must happen.
+	assert_true(_wait_for_idle(150), "draw settles")
+	_step_and_pump(20)
+	_sim.set_local_player_weapon_input(true, true, false)
+	_step_and_pump(5)
+	_sim.set_local_player_weapon_input(false, false, false)
+	var fired := false
+	for _i in 120:
+		_step_and_pump(1)
+		if int(_sim.get_local_player_weapon_state().get("fired_serial", 0)) == 1:
+			fired = true
+			break
+	assert_true(fired, "the settled tap throws")
+	assert_eq(int(_sim.get_local_player_weapon_state().get("last_round_slot_byte", -1)),
+			255, "the tap rides the full charge byte")
+
+
+func test_grenade_throw_then_m4_fires_bullets() -> void:
+	if _sim == null:
+		pass_test("JOX corpus not present")
+		return
+	_boot_kit(KIT_M4_GRENADE)
+	assert_eq(_sim.get_local_player_weapon_name(), "WPN_M4AUTO", "spawn equip = M4")
+	_switch_to(5, "WPN_GRENADEHE")
+
+	# PowerThrow: tap (hold 5 ticks) = full charge; the fire row's delaystart 80
+	# is the throw windup anim, so the round spawns ~80 ticks after release.
+	_sim.set_local_player_weapon_input(true, true, false)
+	_step_and_pump(5)
+	_sim.set_local_player_weapon_input(false, false, false)
+	var first_seen := -1
+	for t in 200:
+		_step_and_pump(1)
+		if first_seen < 0 and _visual_ids().has(1883):
+			first_seen = t
+	assert_between(first_seen, 60, 100,
+			"the thrown grenade flies with the TrcrID 1883 model after the windup")
+
+	_switch_to(3, "WPN_M4AUTO")
+
+	# Fire the M4: no throwable-model round may appear (the flying grenade's own
+	# 1883 entry persists until its fuse).
+	var before := _visual_ids().count(1883)
+	_sim.set_local_player_weapon_input(true, true, false)
+	_step_and_pump(3)
+	_sim.set_local_player_weapon_input(false, false, false)
+	_step_and_pump(20)
+	assert_eq(_visual_ids().count(1883), before,
+			"an M4 shot must not spawn grenade-model rounds")
+
+
+func test_claymore_throw_then_m4_fires_bullets() -> void:
+	if _sim == null:
+		pass_test("JOX corpus not present")
+		return
+	_boot_kit(KIT_M4_CLAYMORE)
+	_switch_to(7, "WPN_CLAYMORE")
+
+	# Plain fire (no PowerThrow flag on the claymore).
+	_sim.set_local_player_weapon_input(true, true, false)
+	_step_and_pump(3)
+	_sim.set_local_player_weapon_input(false, false, false)
+	var first_seen := -1
+	for t in 200:
+		_step_and_pump(1)
+		if first_seen < 0 and _visual_ids().has(1895):
+			first_seen = t
+	assert_gt(first_seen, -1, "the thrown claymore flies with the TrcrID 1895 model")
+
+	_switch_to(3, "WPN_M4AUTO")
+
+	var before := _visual_ids().count(1895)
+	_sim.set_local_player_weapon_input(true, true, false)
+	_step_and_pump(3)
+	_sim.set_local_player_weapon_input(false, false, false)
+	_step_and_pump(20)
+	assert_eq(_visual_ids().count(1895), before,
+			"an M4 shot must not spawn claymore-model rounds")
+
+
+func test_grenade_round_survives_its_flight_until_the_fuse() -> void:
+	if _sim == null:
+		pass_test("JOX corpus not present")
+		return
+	var slot := _sim.debug_spawn_round(Vector3(0, 10, 0), Vector3(1, 1, 0), "grenadehe")
+	assert_gt(slot, -1, "grenadehe spawned")
+	var expired_tick := -1
+	for t in 300:
+		_sim.step()
+		for ev in _sim.get_round_debug().get("events", []):
+			var d := ev as Dictionary
+			if int(d.get("kind", -1)) == 4 and expired_tick < 0:  # kExpired
+				expired_tick = t
+	assert_between(expired_tick, 240, 260, "the fuse, not an impact, ends the round")
+
+
+# The windup exposure the HUD charge bar reads [orig: g_fireChargeStartTick ->
+# HUD_DrawPowerThrowChargeBar @0x599830]: active only while held with ammo on a
+# PowerThrow weapon, with the held tick count.
+func test_windup_state_feeds_the_charge_bar() -> void:
+	if _sim == null:
+		pass_test("JOX corpus not present")
+		return
+	_boot_kit(KIT_M4_GRENADE)
+	_switch_to(5, "WPN_GRENADEHE")
+	assert_false(bool(_sim.get_local_player_weapon_state().get("windup_active", true)),
+			"no windup before the press")
+	_sim.set_local_player_weapon_input(true, true, false)
+	_step_and_pump(40)
+	var s: Dictionary = _sim.get_local_player_weapon_state()
+	assert_true(bool(s.get("windup_active", false)), "held press winds up")
+	assert_between(int(s.get("windup_held_ticks", 0)), 35, 45, "held ticks exposed")
+	_sim.set_local_player_weapon_input(false, false, false)
+	_step_and_pump(2)
+	assert_false(bool(_sim.get_local_player_weapon_state().get("windup_active", true)),
+			"release ends the windup")

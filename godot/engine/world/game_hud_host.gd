@@ -235,6 +235,11 @@ func tick() -> void:
 		# per-slot heat accumulator is ported (D-HUD-15).
 		# [orig: hudInfo+60 = WeaponSlot_CalcAccumulatedHeat @0x53f780, @0x4b8533]
 		"heat": 0,
+		# The PowerThrow windup driving the charge bar; the drawer derives the
+		# witnessed fill curve from held ticks. [orig: g_fireChargeStartTick
+		# @0xB76800 read by HUD_DrawPowerThrowChargeBar @0x599830]
+		"windup_active": wv != null and wv.active and wv.windup_active,
+		"windup_held_ticks": wv.windup_held_ticks if wv != null and wv.active else 0,
 		"waypoint": _waypoint_info_dict(),
 		"objectives": _build_objectives() if _objectives_visible else [],
 	})

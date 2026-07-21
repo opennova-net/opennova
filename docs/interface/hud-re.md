@@ -84,7 +84,7 @@ each frame); the draw code reads both.
   | `dword_2723CA0` | weapon/ammo + stance-indicator + ammo-indicator cluster |
   | `dword_2723CB4` | crosshair cluster (read in `HUD_DrawCrosshair @0x592757`) |
   | `dword_2723C90` | altitude / power bar |
-  | `dword_2723CD0` | weapon reload bar |
+  | `dword_2723CD0` | PowerThrow charge bar (`[orig: HUD_DrawPowerThrowChargeBar @0x599830]` — ex kong "HUD_DrawWeaponReloadBar" misnomer: it gates on the PowerThrow def bit + `g_fireChargeStartTick` and never draws reloads; witnessed + ported, world-wac-ai-re §26.3) |
   | `dword_2723CD8` | weapon slot bar (`[orig: HUD_DrawWeaponSlotBar @0x599cd0]`, unwitnessed) |
 
   A spectator path (`g_death_screen_active`) rebuilds the info for the *spectated* entity
@@ -823,8 +823,10 @@ behind it.
   team tile uses `entityA+354`; the text color table is unwitnessed).
 - **CGameFont glyph layout** `[orig: CGameFont_DrawText @0x6752c0]` — per-glyph
   D3D vertex build / spacing, to confirm `NovaFntResource` layout parity.
-- **Timer/score, altitude/power bar, reload bar, weapon slot bar** — enable
-  flags witnessed; draws (`HUD_DrawWeaponSlotBar @0x599cd0` located) unwitnessed.
+- **Timer/score, altitude/power bar, weapon slot bar** — enable flags
+  witnessed; draws (`HUD_DrawWeaponSlotBar @0x599cd0` located) unwitnessed.
+  (The ex-"reload bar" is the PowerThrow charge bar — witnessed + ported,
+  world-wac-ai-re §26.3.)
 - **Weapon heat source** — the HUDHEAT drawer is witnessed + ported
   (D-HUD-15); the per-slot heat accumulator
   (`WeaponSlot_CalcAccumulatedHeat @0x53f780` write side) is the remaining

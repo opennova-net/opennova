@@ -4367,8 +4367,26 @@ AV_Minekillzone @ 0x24E7DD8/D4/D0/CC/C8/C0/C4`.
   `[orig: @ 0x4ec5bb]`; 0 and 255 = unscaled. The byte rides the wire as the
   round event's `slot_byte` (ring+32, flags|0x80 leg, net-re §5.60);
   `NetPacket_DeserializeRoundEvent` restores it into slot+0x5C
-  `[orig: @ 0x42f769/@ 0x42f935]`. The HUD windup meter reads the same global
-  (`HUD_DrawWeaponReloadBar @ 0x599881 leg`, D-THROW-5).
+  `[orig: @ 0x42f769/@ 0x42f935]`.
+- The HUD windup meter is `HUD_DrawPowerThrowChargeBar @ 0x599830` (renamed
+  2026-07-21, ex kong "HUD_DrawWeaponReloadBar" — a misnomer: the function only
+  draws this bar). Gates: local player, HUD element enabled, equipped def+8
+  sign bit, `g_fireChargeStartTick != 0`, `WeaponSlot_HasAmmoAvailable
+  @ 0x541b30`. Fill: held < 31 ticks → **full** (the tap window mirrors the
+  charge-255 tap), else `clamp((held−31)/93, 1.0)` `[orig: @ 0x5998ad,
+  flt_7CD390 = 1/93]`. Geometry = the hudpos `HUDPOWERBAR` row read as
+  **x,y,w,h** (`dword_27237EC..F8`, writer `HUD_ParseHudposToken @ 0x5a1549`;
+  JOX authors `20,720,72,11` — unlike the corner-encoded HUDHEALTH/HUDHEAT
+  rects), viewport-scaled: a wireframe outline `(x,y)-(x+w,y+h)`, the fill
+  `(x+1,y+1)-(x+span, y+h−1)` with `span = (fill_fp16 × w + 0x8000) >> 16`
+  `[orig: @ 0x599964]`, and `"%d%"` percent text at `(x, y−15)` via
+  `HUD_DrawTextLeft_HalfBright @ 0x5804c0` — everything in the flat 0xFF800000
+  half-red `@ 0x840B1C`. Ported: `game_hud.gd _draw_power_bar` off the sim's
+  windup state (closes D-THROW-5).
+- The mount zeroes the charge state: `Player_SwitchToWeaponByHandle @ 0x4e0170`
+  clears `g_fireChargeStartTick` before mounting — a new mount can never carry
+  a stale windup or charge byte (the port mirrors this in the sim's mount
+  install; a release the FSM refuses also drops its charge).
 
 ### 26.4 The grenade motor — `Entity_UpdateGrenadePhysics @ 0x443F50` (defined this session)
 
@@ -4498,7 +4516,7 @@ death hook).
 | D-THROW-2 | world-local PRNG streams (the retail generator shape) | shared globals @ 0x31BFBB0/B8 | bounce kicks / fan angles distribution-faithful, not sequence-identical (the destruction-port precedent) |
 | D-THROW-3 | device LOS = the terrain leg (`los_terrain_blocked`) | `Physics_RaycastSegment @ 0x415550` (terrain + sectors) | a claymore can see a target through a building wall until the sector leg ports (the D-AI-7 stand-in) |
 | D-THROW-4 | stick pose derived geometrically from the face normal; parent-follow = translation + yaw orbit | `Entity_OrientToSurfaceNormal @ 0x445fa0` exact euler decomposition; `Entity_InterpolateFromParentDelta @ 0x4a8d60` full euler | presentation-only pose deltas on steep faces / pitching vehicles; the cone axis (yaw) is exact |
-| D-THROW-5 | no HUD windup meter yet | `HUD_DrawWeaponReloadBar @ 0x599881` doubles as the charge bar off g_fireChargeStartTick | charge works invisibly; HUD leg open |
+| D-THROW-5 | CLOSED 2026-07-21: the charge bar is ported (`game_hud.gd _draw_power_bar` at the hudpos HUDPOWERBAR x,y,w,h rect, witnessed fill curve + percent text + 0xFF800000 half-red) | `HUD_DrawPowerThrowChargeBar @ 0x599830` (ex "HUD_DrawWeaponReloadBar" misnomer, renamed) | §26.3 windup meter entry; throwable_repro_test windup-state pin |
 | D-THROW-6 | landmine items (`lndm`) unported | `Entity_LandmineThink @ 0x441A40` witnessed in full | the def wiring for ammo slots +692/+696 (`SMALLLANDMINE`/`LARGELANDMINE` names) is unwitnessed; no lndm items found in JO:CA missions so far |
 | D-THROW-7 | placed devices SP/listen-host only; no 0x59/0x12 emit into np dispatch | S2C 0x59 (net-re §5.36) + 0x12 removal | remote clients see the thrown ROUND (ring fan-out, charge in slot_byte) but not the persisted device swap; MP wire wiring is the follow-up |
 | D-THROW-8 | placed devices collide via the 0.5 u bound-sphere fallback | the item model's CFAC via the collision instance | shootable everywhere; face-accurate hits once hosts register device graphics |

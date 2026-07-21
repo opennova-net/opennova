@@ -366,8 +366,9 @@ static bool motor_nade(World &world, RoundSim &sim, LiveRound &r,
                 ++r.bounce_count;
                 f.vz = qmul(f.vz, -13107);
                 ground_hit = true;
-                ground_surface = 5; // dirt-family default; the surface-map
-                                    // override remains D-WPN-15 (net-re §5.60)
+                ground_surface = 1; // no-charmap default material: dirt (tag 5,
+                                    // the ballistic terrain default); the
+                                    // surface-map override remains D-WPN-15
                 const int32_t kick_yaw =
                         (world.throwables.prng16() % 10) - 5; // [orig: %10-5]
                 const int32_t kick_pitch = world.throwables.prng16() % 10;
@@ -523,7 +524,7 @@ static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
             f.vz = 0;
             speed = 0;
             ground_hit = true;
-            ground_surface = 5; // dirt-family default (D-WPN-15 surface map)
+            ground_surface = 1; // no-charmap default material: dirt (D-WPN-15)
             r.parent = EntityHandle{};
             r.parent_tracking = false;
         }

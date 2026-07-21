@@ -860,9 +860,21 @@ func test_weapon_event_batch_does_not_cross_lifecycle_boundaries() -> void:
 
 	sim.set_local_player_weapon(def, clips)
 	sim.step()
+	# The FP model resolve re-installs the SAME weapon once its viewmodel loads
+	# (the clip-length late-bind). That is a def rebake, not a lifecycle
+	# boundary: queued presentation — including a racing switch commit/deny —
+	# must survive it, and the live action slot continues untouched.
 	sim.set_local_player_weapon(def, clips)
+	assert_false(sim.drain_local_player_weapon_events().is_empty(),
+		"a same-weapon re-install preserves the queued presentation")
+	sim.step()
+	# A DIFFERENT weapon is a new presentation epoch: its mount discards the
+	# previous weapon's queued payload.
+	var def_b: Dictionary = def.duplicate(true)
+	def_b["name"] = "WPN_EVENT_LIFECYCLE_B"
+	sim.set_local_player_weapon(def_b, clips)
 	assert_true(sim.drain_local_player_weapon_events().is_empty(),
-		"remount discards the previous weapon's queued presentation")
+		"a new-weapon mount discards the previous weapon's queued presentation")
 	sim.step()
 	sim.clear_local_player_weapon()
 	assert_true(sim.drain_local_player_weapon_events().is_empty(),

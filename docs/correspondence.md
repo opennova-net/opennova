@@ -990,6 +990,7 @@ the NovaSimulation PowerThrow chain. ctest `throwables` + `def_parse_ammo`.
 | `kz_pieslice` half-angle parse | `0x40ad33` | `(atol signed-div-2) × 11930464` — the stored value is the HALF-angle (claymore 24 → ±12°) | disasm 2026-07-20 | ported (def.cpp fix this slice; def_parse_ammo claymore row) |
 | `g_ammo_satchel/satchelboom/claymore/claymoreshrapnel/claymorekillzone/AV_Mine/AV_Minekillzone` | `0x24E7DD8/D4/D0/CC/C8/C0/C4` | the interned ammo pairs (`WeaponDef_ResolveAllReferences @ 0x540270`; `0x24E7DD4` was the kong misnomer `entitySlot`) | decompile 2026-07-20 | ported (name lookups at the detonate sites) |
 | class tables rows 12–17 | `0x813120..0x8131A8` | `g_EntityClassEventCallbackTable` squib/nade/schl/clym/vmne/lndm {name[8], fn1 think, fn2 spin-init} + physics-table motors `@ 0x82abc8` (nade/schl/clym; vmne/lndm none) | data reads 2026-07-20 | ported (`ThrowableClassTable` fed from items.def ai_function/move_function) |
+| `HUD_DrawPowerThrowChargeBar` | `0x599830` | (ex kong "HUD_DrawWeaponReloadBar" misnomer) the windup meter: PowerThrow bit + `g_fireChargeStartTick` + ammo gates; held<31 → full else clamp((held−31)/93,1); HUDPOWERBAR hudpos rect as x,y,w,h; outline + Q16 inset fill + "%d%" text at y−15, 0xFF800000 half-red | decompile 2026-07-21 | ported (`game_hud.gd _draw_power_bar` off the sim windup state; closes D-THROW-5) |
 
 ## 6. Host Command wiring ([ADR 0001](adr/0001-mnu-action-command-boundary.md), matches)
 

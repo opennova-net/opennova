@@ -3876,9 +3876,25 @@ int NovaSimulation::weapon_ring_take_variant(const String &p_key) {
 void NovaSimulation::set_local_player_weapon(const Dictionary &p_def,
 		const Dictionary &p_clip_seconds) {
 	using opennova::world::WeaponFsmActionRow;
+	// The FP model resolve re-installs the SAME weapon once its viewmodel (and
+	// .adm clip lengths) finish loading. That resolve is a render-side consumer
+	// in retail with no access to the action slot [orig: the per-frame FP model
+	// resolve @ 0x4ded60 vs the mount's slot state in Player_MountWeaponSlot
+	// @ 0x4dfa40], so a same-name install only REBAKES the def and rings.
+	// Resetting the slot here instead destroyed a queued/holstering SWITCHFROM
+	// whenever the late viewmodel install raced a switch request: the completion
+	// never fired, commit_pending_weapon_switch never ran, and the FSM def
+	// desynced from equipped_adm_index (the rifle then fired the previous
+	// weapon's ammo).
+	const String incoming_name = p_def.get("name", String());
+	const bool same_weapon_rebake = weapon_active_ && !weapon_start_in_switchto_ &&
+			!incoming_name.is_empty() &&
+			incoming_name.nocasecmp_to(weapon_def_name_) == 0;
 	// A mount is a new presentation epoch: no payload from the previous weapon may
 	// cross this seam, even though its strings were copied into the pending records.
-	pending_weapon_events_.clear();
+	// The same-weapon rebake is NOT an epoch — undrained records (including a
+	// racing switch commit or deny) must survive it.
+	if (!same_weapon_rebake) pending_weapon_events_.clear();
 	// Mirror the weapon dict's ACTION rows into the def-agnostic bake inputs.
 	std::vector<WeaponFsmActionRow> rows;
 	const Array actions = p_def.get("actions", Array());
@@ -3967,6 +3983,12 @@ void NovaSimulation::set_local_player_weapon(const Dictionary &p_def,
 	}
 	const int clipsize = int(p_def.get("clipsize", 0));
 	weapon_def_.clip_capacity = clipsize > 0 ? clipsize : -1; // no clipsize key = no clip tracking
+	if (same_weapon_rebake) {
+		// Def + rings rebaked above; the live action slot, serials, input
+		// latches, scope state, and charge state all continue untouched.
+		weapon_def_name_ = incoming_name;
+		return;
+	}
 	// A queued or in-flight SWITCHTO survives the per-equip reset — the switch flow
 	// installs twice (dict-only, then with the rebuilt viewmodel's clip lengths) and
 	// the draw-in must reach the second install (D-WPN-6 family artifact).
@@ -3986,8 +4008,8 @@ void NovaSimulation::set_local_player_weapon(const Dictionary &p_def,
 				(eq != nullptr && eq->adm_index >= 0)
 						? world_->weapons.by_index(static_cast<uint8_t>(eq->adm_index))
 						: nullptr;
-		const String def_name = p_def.get("name", String());
-		if (def != nullptr && def_name.nocasecmp_to(String::utf8(def->name.c_str())) == 0) {
+		if (def != nullptr &&
+				incoming_name.nocasecmp_to(String::utf8(def->name.c_str())) == 0) {
 			weapon_slot_.clip = eq->clip;
 			weapon_slot_.reserve =
 					opennova::world::weapon_pool_get(local_inventory_, def->ammo_class_id);
@@ -4007,6 +4029,15 @@ void NovaSimulation::set_local_player_weapon(const Dictionary &p_def,
 		weapon_slot_.next = opennova::world::weapon_action::kSwitchTo;
 		weapon_start_in_switchto_ = false;
 	}
+	// A walk outcome that mounted but has not committed yet (its outgoing
+	// SWITCHFROM was displaced by this mount) resumes through the deferred latch
+	// once the draw completes, so the pending combo still commits.
+	if (weapon_switch_in_flight_)
+		weapon_switch_deferred_action_ = opennova::world::weapon_action::kSwitchFrom;
+	// The mount is the charge epoch [orig: Player_SwitchToWeaponByHandle zeroes
+	// g_fireChargeStartTick on the walk, before the mount].
+	power_throw_start_tick_ = 0;
+	pending_throw_charge_ = 0;
 	weapon_play_serial_ = 0;
 	weapon_anim_key_ = String();
 	weapon_anim_variant_ = 0;
@@ -4024,11 +4055,15 @@ void NovaSimulation::set_local_player_weapon(const Dictionary &p_def,
 	player_view_.scope_step = 0;
 	player_view_.ease_steps = opennova::world::kScopeEaseSteps;
 	player_view_.scope_hipfire = true;
+	weapon_def_name_ = incoming_name;
 	weapon_active_ = true;
 }
 
 void NovaSimulation::clear_local_player_weapon() {
 	weapon_active_ = false;
+	weapon_def_name_ = String();
+	power_throw_start_tick_ = 0;
+	pending_throw_charge_ = 0;
 	weapon_switch_in_flight_ = false;
 	weapon_switch_deferred_action_ = -1;
 	pending_weapon_events_.clear();
@@ -4193,10 +4228,18 @@ void NovaSimulation::tick_local_player_weapon() {
 	// @ 0x4e08fd (def Flags sign bit 0x80000000, fireable + ammo ->
 	// g_fireChargeStartTick = tick), release @ 0x4e07e9 -> WeaponSlot_RequestFire
 	// with the computed charge; world-wac-ai-re §26.]
+	bool power_throw_release = false;
 	if ((weapon_def_.flags & 0x80000000u) != 0) {
 		if (weapon_fire_held_ || weapon_fire_pressed_) {
+			// The windup refuses while a switch action runs OR is queued — the
+			// press gate's fireable term, not just the current action [orig: the
+			// fireable check @ 0x4e08fd]. Without the queued/deferred legs a
+			// press landing inside the draw-in latched a windup whose release
+			// the FSM then refused, leaking the charge byte onto a later shot.
 			const bool fireable =
-					weapon_slot_.current == opennova::world::weapon_action::kIdle;
+					weapon_slot_.current == opennova::world::weapon_action::kIdle &&
+					weapon_slot_.next == opennova::world::weapon_action::kIdle &&
+					!weapon_switch_in_flight_ && weapon_switch_deferred_action_ < 0;
 			const bool has_ammo =
 					weapon_slot_.clip > 0 || weapon_def_.clip_capacity < 0;
 			if (power_throw_start_tick_ == 0 && fireable && has_ammo)
@@ -4211,6 +4254,7 @@ void NovaSimulation::tick_local_player_weapon() {
 			power_throw_start_tick_ = 0;
 			in.fire_pressed = true;
 			in.fire_held = false;
+			power_throw_release = true;
 		}
 	} else {
 		power_throw_start_tick_ = 0;
@@ -4230,6 +4274,13 @@ void NovaSimulation::tick_local_player_weapon() {
 			!opennova::world::player_view_scope_ease_active(player_view_);
 	opennova::world::WeaponFsmEvents ev;
 	opennova::world::weapon_fsm_tick(weapon_def_, weapon_slot_, in, ev);
+	// A release whose fire request the FSM refused must not leave the charge
+	// latched for a later unrelated shot — the charge byte is consumed by the
+	// very fire it triggers [orig: descriptor +20 consume @ 0x4ec5bb].
+	if (power_throw_release && !ev.fired &&
+			weapon_slot_.current != opennova::world::weapon_action::kFire &&
+			weapon_slot_.next != opennova::world::weapon_action::kFire)
+		pending_throw_charge_ = 0;
 	// SWITCHTO seeds next=prev at the end of its delay-start phase. Reapply the
 	// retained one-shot after every draw tick so its eventual transition performs
 	// the pending inventory handoff without requiring another key press.
@@ -4487,6 +4538,11 @@ Dictionary NovaSimulation::get_local_player_weapon_state() const {
 	out["active"] = weapon_active_;
 	if (!weapon_active_) return out;
 	out["current"] = weapon_slot_.current;
+	out["next"] = weapon_slot_.next;
+	out["phase"] = static_cast<int>(weapon_slot_.phase);
+	out["switch_deferred"] = weapon_switch_deferred_action_;
+	out["switch_in_flight"] = weapon_switch_in_flight_;
+	out["pending_combo"] = local_inventory_.pending_combo;
 	out["anim_key"] = weapon_anim_key_;
 	out["anim_variant"] = weapon_anim_variant_;
 	const uint32_t anim_age_ticks = world_ && !weapon_anim_key_.is_empty()
@@ -4523,6 +4579,17 @@ Dictionary NovaSimulation::get_local_player_weapon_state() const {
 	} else {
 		out["action_end_soundset"] = String();
 	}
+	// The PowerThrow windup for the HUD charge bar [orig: HUD_DrawPowerThrowChargeBar
+	// @ 0x599830 (ex kong "HUD_DrawWeaponReloadBar" misnomer — it only draws the
+	// windup): gates = def+8 sign bit, g_fireChargeStartTick != 0, ammo available;
+	// the drawer derives the fill from held ticks].
+	const bool windup_active = (weapon_def_.flags & 0x80000000u) != 0 &&
+			power_throw_start_tick_ != 0 && world_ != nullptr &&
+			(weapon_slot_.clip > 0 || weapon_def_.clip_capacity < 0);
+	out["windup_active"] = windup_active;
+	out["windup_held_ticks"] = windup_active
+			? static_cast<int64_t>(world_->logic_tick - power_throw_start_tick_)
+			: static_cast<int64_t>(0);
 	out["fired_serial"] = static_cast<int64_t>(weapon_fired_serial_);
 	out["dry_serial"] = static_cast<int64_t>(weapon_dry_serial_);
 	out["reload_serial"] = static_cast<int64_t>(weapon_reload_serial_);

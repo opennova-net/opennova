@@ -15,6 +15,14 @@ Rect2i rect_from_corners(const int v[4]) {
 	return Rect2i(v[0], v[1], v[2] - v[0], v[3] - v[1]);
 }
 
+// HUDPOWERBAR alone is authored x,y,w,h — its witnessed consumer adds the third
+// and fourth dwords to the anchor (JOX authors "20,720,72,11": as corners the
+// height would be negative). [orig: HUD_DrawPowerThrowChargeBar @0x599830 draws
+// (x, y)-(x+w, y+h) from dword_27237EC..F8]
+Rect2i rect_from_xywh(const int v[4]) {
+	return Rect2i(v[0], v[1], v[2], v[3]);
+}
+
 // Positioned text tokens keep the original's 4-dword layout: x, y, hidden
 // (0 = draw), alignment (0=left 1=right 2=center). [orig: AMMOCOUNTPOS parse
 // @0x59fc3d; the draws gate on the hidden dword @0x5939f3]
@@ -243,7 +251,7 @@ Dictionary NovaHudPos::to_dictionary() const {
 	Dictionary rects;
 	rects["health"] = rect_from_corners(h.health);
 	rects["heat"] = rect_from_corners(h.heat);
-	rects["powerbar"] = rect_from_corners(h.powerbar);
+	rects["powerbar"] = rect_from_xywh(h.powerbar);
 	rects["starttimer"] = rect_from_corners(h.starttimer);
 	rects["mrclippy_normal"] = rect_from_corners(h.mrclippy_normal);
 	rects["mrclippy_alternate"] = rect_from_corners(h.mrclippy_alternate);

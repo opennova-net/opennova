@@ -303,6 +303,10 @@ private:
 	// per-tick records because several logic ticks can run per render frame; the
 	// snapshot's monotonic serials remain diagnostics/rebuild state.
 	opennova::world::WeaponFsmDef weapon_def_{};
+	// Name of the weapon record weapon_def_ was baked from: the same-weapon
+	// re-install (the FP model resolve late-binding clip lengths) is a def
+	// rebake and must never reset the live action slot.
+	String weapon_def_name_;
 	opennova::world::WeaponSlotState weapon_slot_{};
 	bool weapon_active_ = false;
 	bool weapon_fire_held_ = false;
