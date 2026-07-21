@@ -1564,7 +1564,7 @@ func test_start_with_nvg_is_a_distinct_mission_option() -> void:
 		"starting enabled is distinct from the mission's NVG/night semantics")
 	var ctx := _make({})
 	ctx.fake.mission_ref = _loaded_mission_for_props()
-	ctx.inspector._refresh()
+	ctx.fake.changed.emit()
 	var check_name := "MissionFlag_%d" % int(NovaMissionData.ATTRIB_START_WITH_NVG_ON)
 	var check := ctx.inspector.find_child(check_name, true, false) as CheckBox
 	assert_not_null(check, "mission properties expose Start with night vision on")
