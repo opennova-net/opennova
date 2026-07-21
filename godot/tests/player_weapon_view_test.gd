@@ -21,6 +21,9 @@ func test_weapon_view_decodes_state_dict() -> void:
 		"clip": 24,
 		"reserve": 270,
 		"kick": 12,
+		"emplaced_controls_valid": true,
+		"emplaced_gun_yaw": 0x1234,
+		"emplaced_gun_pitch": 0xFEDC,
 	})
 	assert_not_null(view)
 	assert_eq(view.current_action, 3)
@@ -34,6 +37,9 @@ func test_weapon_view_decodes_state_dict() -> void:
 	assert_eq(view.clip, 24)
 	assert_eq(view.reserve, 270)
 	assert_eq(view.kick, 12)
+	assert_true(view.emplaced_controls_valid)
+	assert_eq(view.emplaced_gun_yaw, 0x1234)
+	assert_eq(view.emplaced_gun_pitch, 0xFEDC)
 
 
 func test_weapon_view_null_when_inactive() -> void:
@@ -59,6 +65,8 @@ func test_weapon_event_decodes_transport_row() -> void:
 		"action_effect": 3,
 		"effect_particle": "Effect_TestCas",
 		"effect_particle_userpoint": "bcasing",
+		"clear_weapon": true,
+		"preserve_slot_state": true,
 	})
 	assert_eq(event.age_ticks, 3)
 	assert_eq(event.world_position, Vector3(1.0, 2.0, 3.0))
@@ -78,6 +86,9 @@ func test_weapon_event_decodes_transport_row() -> void:
 	assert_eq(event.action_effect, 3)
 	assert_eq(event.effect_particle, "Effect_TestCas")
 	assert_eq(event.effect_particle_userpoint, "bcasing")
+	assert_true(event.clear_weapon)
+	assert_true(event.preserve_slot_state,
+			"UseGun commits tell the presenter to retain the borrowed/personal slot")
 
 
 func test_viewmodel_def_carries_fsm_fields() -> void:

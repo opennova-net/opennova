@@ -76,7 +76,8 @@ void dispatch_event(HostOwner &owner, netsim::IDatagramSocket &sock, const PeerA
 	}
 }
 
-void host_session_pump(HostOwner &owner, netsim::IDatagramSocket &sock) {
+void host_session_pump(HostOwner &owner, netsim::IDatagramSocket &sock,
+		HostBeforeServerTickFn before_server_tick, void *before_server_tick_context) {
 	const uint32_t now = owner.now_tick;
 
 	// (1) recv-drain — drain everything pending this frame. The recv timeout lives in the adapter.
@@ -99,6 +100,11 @@ void host_session_pump(HostOwner &owner, netsim::IDatagramSocket &sock) {
 		}
 		for (const HostAcceptEvent &ev : t.events) dispatch_event(owner, sock, t.peer, ev);
 	}
+
+	// Owner-side entity registration belongs between creation and the first body update.
+	// Retail's AnimMap_RegisterEntity runs at entity creation; adapters with external
+	// animation registries use this boundary to preserve the same lifetime.
+	if (before_server_tick != nullptr) before_server_tick(before_server_tick_context);
 
 	// (3) the authoritative per-frame host loop (single C2S drain + logic tick + 0x0A fan).
 	Server_TickUpdate(owner.ctx);

@@ -58,8 +58,8 @@ Entity *resolve_vehicle_controller(World &world, Entity &veh) {
         }
         if (controller == nullptr) controller = occ;
     }
-    // Stale claimant (despawned without a detach — the host has no death->detach chain
-    // yet): validate the +368 mirror each tick alongside the seat sweep. The stop edge
+    // Stale claimant (for example, a scripted/despawned occupant that bypassed detach):
+    // validate the +368 mirror each tick alongside the seat sweep. The stop edge
     // fires for THE claimant only, matching the detach leg; a surviving second control
     // occupant does not inherit the claim (it re-arms only on a fresh attach).
     // [orig: Entity_DetachFromVehicle @0x4356e9..0x43577c]
@@ -94,9 +94,9 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
     // @0x48b949-0x48c034. The authority always runs it; the driver's own client runs
     // it as prediction — we ARE the authority host.]
     Entity *occ = traits.player_control ? resolve_vehicle_controller(world, veh) : nullptr;
-    // A DEAD controller counts as none: retail never sees one (the death chain
-    // detaches the corpse before the physics runs) — the stand-in for the unported
-    // death->detach chain (D-AI-11 k).
+    // A DEAD controller counts as none. The infantry death edge now detaches first;
+    // this remains the same-frame safety gate when motor/system ordering varies.
+    // [orig: infantry death detach @0x4b9c57..0x4b9c60]
     if (occ != nullptr && (!occ->alive || occ->health <= 0)) occ = nullptr;
     // "Occupant is a player" [orig: `occupant->Flags & 0x100`] — our runtime players
     // are pool-0 organics with a resolved soldier class.

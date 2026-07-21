@@ -2944,10 +2944,22 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     }
 
     // Per-resolve blink/query state. [orig: the g_Blink* clears @ 0x4b2d54-0x4b2d7d]
-    // Not modeled: the mounted/carried source gate (savedPosY force suppression),
-    // the +0x2c aux latches, and the resolver's kill/sound/callback side effects —
-    // docs/world/world-wac-ai-re.md (D-COL-8, D-COL-9); on-foot organics only today.
+    // The +0x2c aux latches and resolver kill/sound/callback side effects remain
+    // deferred (D-COL-8); the mounted/carried source gate is modeled below.
+    // Mounted/carried sources still compute contacts and dispatch their flags,
+    // but suppress every model push force. Retail forms this latch from a live
+    // modeled parent, OR source Flags&0x40.
+    // [orig: savedPosY @0x4b2be0..0x4b2d3f; force gates
+    //  @0x4b3045..0x4b30af/@0x4b3658..0x4b36b9]
     BlinkAccum blink;
+    bool suppress_model_force = ent != nullptr &&
+            ((ent->flags | ent->engine_flags) & 0x40u) != 0;
+    if (ent != nullptr && ent->mounted && health > 0) {
+        const Entity *parent = world.registry.get(ent->mount_target);
+        suppress_model_force = suppress_model_force ||
+                (parent != nullptr &&
+                 (parent->has_item_def || has_instance(world, parent->handle)));
+    }
     const bool is_local = ent != nullptr && local_player.valid() && source == local_player;
     if (is_local) local_player_blink_flags = 0;
     if (ent != nullptr)
@@ -3039,7 +3051,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                     if ((res.flags & 0x1u) != 0 && ladder.valid) ladder_entity = ch;
                     apply_touch_flags(ent, res.flags, health, is_authority);
                 }
-                if (!contact) continue;
+                if (!contact || suppress_model_force) continue;
                 if (pass == 0) {
                     // Down-force suppression: a mostly-vertical negative force is
                     // dropped (standing pressure, not a wall). [orig: @ 0x4b3010]

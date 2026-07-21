@@ -29,6 +29,7 @@
 #include "host_test_setup.h"
 
 #include <netsim/connection.h>
+#include <netsim/idatagram_socket.h>
 #include <netsim/loopback_channel.h>
 #include <netsim/session_transport.h>
 #include <netsim/udp_session_transport.h>
@@ -46,6 +47,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -62,6 +64,59 @@ bool expect(bool cond, const char *msg) {
 	std::fprintf(stderr, "FAIL: %s\n", msg);
 	return false;
 }
+
+struct NullDatagramSocket final : ns::IDatagramSocket {
+	int recv_from(uint8_t *, std::size_t, PeerAddr &) override { return 0; }
+	void send_to(const PeerAddr &, const uint8_t *, std::size_t) override {}
+};
+
+struct HostPumpHookProbe {
+	np::HostOwner *owner = nullptr;
+	w::World *world = nullptr;
+	w::AiSystem *ai = nullptr;
+	PeerAddr peer{};
+	int calls = 0;
+	w::EntityHandle spawned{};
+	bool saw_spawned_connection = false;
+	bool saw_live_entity = false;
+	bool saw_ai_component = false;
+	bool saw_before_logic = false;
+	bool saw_before_fan = false;
+};
+
+void observe_host_before_server_tick(void *opaque) {
+	auto &probe = *static_cast<HostPumpHookProbe *>(opaque);
+	++probe.calls;
+	for (np::NapiNPConnection &conn : probe.owner->ctx.np_protocol.connection_list) {
+		if (!(conn.peer == probe.peer)) continue;
+		probe.spawned = conn.link.owned_entity;
+		probe.saw_spawned_connection =
+				conn.burst.spawned && conn.phase == np::ConnectionPhase::Spawned;
+		probe.saw_live_entity = probe.spawned.valid() &&
+				probe.world->registry.get(probe.spawned) != nullptr;
+		probe.saw_ai_component = probe.spawned.valid() &&
+				probe.ai->for_handle(probe.spawned) != nullptr;
+		probe.saw_before_logic = probe.world->logic_tick == 0;
+		probe.saw_before_fan = conn.link.s2c_phase == 0;
+		return;
+	}
+}
+
+struct FirstLogicTickProbe final : w::ISystem {
+	HostPumpHookProbe *hook = nullptr;
+	int ticks = 0;
+	bool first_tick_saw_hook = false;
+	bool first_tick_saw_player = false;
+
+	const char *name() const override { return "host-before-server-tick-order"; }
+	void tick(w::World &world, const w::TickContext &) override {
+		++ticks;
+		if (ticks != 1) return;
+		first_tick_saw_hook = hook != nullptr && hook->calls == 1;
+		first_tick_saw_player = hook != nullptr && hook->spawned.valid() &&
+				world.registry.get(hook->spawned) != nullptr;
+	}
+};
 
 w::PlayerSpawn player_spawn(w::Vec3 pos, int16_t yaw, uint16_t net_id) {
 	w::PlayerSpawn s;
@@ -343,7 +398,7 @@ bool run_host_startup_seeds_mounted_no_callback_carrier() {
 	const w::Entity *gun_live = world.registry.get(gun_h);
 	if (!expect(infantry_live != nullptr && gun_live != nullptr,
 	            "mounted startup fixture entities resolve")) return false;
-	w::pose_mounted_occupant(*infantry_live, *gun_live, gun_live->seats[0]);
+	w::pose_mounted_occupant(world, *infantry_live, *gun_live, gun_live->seats[0]);
 
 	ns::LoopbackChannel host_loop;
 	np::HostOwner owner;
@@ -391,11 +446,75 @@ bool run_host_startup_seeds_mounted_no_callback_carrier() {
 	return true;
 }
 
+// ---------------------------------------------------------------------------------------------------
+// (D) Host-owner registration boundary: a player created by tick_connections must be visible to
+// adapter registration before its first authoritative body tick and per-connection 0x0A fan.
+// ---------------------------------------------------------------------------------------------------
+bool run_host_pump_hook_observes_remote_before_first_tick() {
+	w::World world;
+	w::AiSystem ai;
+	world.ai = &ai;
+	world.registry.configure_pool(0, 16);
+
+	np::HostOwner owner;
+	np::test::bring_up_host(owner.ctx, np::ConnectionMode::HostClient,
+			np::SocketMode::Socketless, 0x0FE0E112u);
+	owner.ctx.world = &world;
+
+	const PeerAddr peer{0x0100007Fu, 31000};
+	np::PeerLink &peer_link = owner.peers[peer];
+	peer_link.transport = std::make_unique<ns::UdpSessionTransport>(
+			ns::UdpSessionTransport::Role::Host);
+
+	np::NapiNPConnection conn;
+	conn.peer = peer;
+	conn.type = 1;
+	conn.connection_id = np::kFirstJoinerDcb;
+	conn.player_name = "LateJoiner";
+	conn.self_id_seen = true;
+	conn.phase = np::ConnectionPhase::PendingSpawn;
+	conn.link.transport = peer_link.transport.get();
+	conn.link.mode = ns::TransportMode::Client;
+	conn.reply.roster_pushed = true;
+	conn.burst.sync_state = 4;
+	conn.burst.world_stream_phase = 8;
+	conn.burst.loadout_received = true;
+	conn.burst.entity_batch_count = 1;
+	owner.ctx.np_protocol.connection_list.push_back(std::move(conn));
+	owner.ctx.np_protocol.next_connection_id = np::kFirstJoinerDcb + 1;
+
+	HostPumpHookProbe hook{&owner, &world, &ai, peer};
+	FirstLogicTickProbe logic_probe;
+	logic_probe.hook = &hook;
+	world.add_system(&logic_probe);
+
+	NullDatagramSocket sock;
+	np::host_session_pump(owner, sock, &observe_host_before_server_tick, &hook);
+
+	np::NapiNPConnection *remote = nullptr;
+	for (np::NapiNPConnection &candidate : owner.ctx.np_protocol.connection_list) {
+		if (candidate.peer == peer) remote = &candidate;
+	}
+	if (!expect(hook.calls == 1, "pre-Server_TickUpdate hook runs exactly once")) return false;
+	if (!expect(hook.saw_spawned_connection && hook.saw_live_entity && hook.saw_ai_component,
+			"hook observes the remote spawned and AI-attached by tick_connections")) return false;
+	if (!expect(hook.saw_before_logic && hook.saw_before_fan,
+			"hook runs before the remote's first logic tick and 0x0A fan")) return false;
+	if (!expect(logic_probe.ticks == 1 && logic_probe.first_tick_saw_hook &&
+				logic_probe.first_tick_saw_player,
+			"first authoritative logic tick observes completed registration")) return false;
+	if (!expect(world.logic_tick == 1, "host pump advances exactly one logic tick")) return false;
+	if (!expect(remote != nullptr && remote->link.s2c_phase == 1,
+			"the first authoritative 0x0A fan follows registration")) return false;
+	return true;
+}
+
 } // namespace
 
 int main() {
 	const bool ok = run_roundtrip() && run_host_as_client() &&
-	                run_host_startup_seeds_mounted_no_callback_carrier();
+	                run_host_startup_seeds_mounted_no_callback_carrier() &&
+	                run_host_pump_hook_observes_remote_before_first_tick();
 	std::fprintf(stderr, ok ? "OK\n" : "FAIL\n");
 	return ok ? 0 : 1;
 }

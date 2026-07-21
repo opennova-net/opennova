@@ -40,6 +40,28 @@ class ItemPoseRuntimeStub:
 		return pose
 
 
+class ViewmodelPlacerStub:
+	extends RefCounted
+	var graphics: Array[String] = []
+	func build_model_from_graphic(graphic: String, _adm_name: String,
+			_parent: Node3D, _clip_key: String, _env_node, _rig_graphic: String):
+		graphics.append(graphic)
+		return null
+
+
+class ViewmodelWorldHarness:
+	extends GameWorld
+	var requested_def: PlayerViewmodelDef
+	var model_availability: Array[bool] = []
+	func install_viewmodel_fixture(def: PlayerViewmodelDef, placer) -> void:
+		requested_def = def
+		_placer = placer
+	func local_player_viewmodel_def() -> PlayerViewmodelDef:
+		return requested_def
+	func _set_local_player_first_person_model_available(available: bool) -> void:
+		model_availability.append(available)
+
+
 class ImpactSimStub:
 	extends RefCounted
 	var drain_count := 0
@@ -895,6 +917,26 @@ func test_unload_drops_the_previous_entitys_armory_viewmodel_state() -> void:
 	if restored != null:
 		assert_eq(restored.weapon_name, "WPN_M4",
 			"the next mission can resolve a weapon after the previous entity selected NONE")
+
+
+func test_valid_emplaced_def_without_gfx1_builds_no_fallback_gun() -> void:
+	# AVENGER has a valid retail weapon definition but no fpModel. That means an
+	# intentionally empty FP pass, not the bring-up AK fallback used when no
+	# definition resolves at all.
+	var world: ViewmodelWorldHarness = autofree(ViewmodelWorldHarness.new())
+	var placer := ViewmodelPlacerStub.new()
+	world.install_viewmodel_fixture(PlayerViewmodelDef.from_weapon_dict({
+		"name": "WPN_AVENGER",
+		"gfx1": "",
+		"flags": 0x80,
+	}), placer)
+	var viewmodel := world.build_local_player_viewmodel()
+	assert_not_null(viewmodel,
+			"a valid no-model definition is a stable empty FP presentation epoch")
+	assert_true(placer.graphics.is_empty(),
+			"a missing authored gfx1 must not substitute the AK first-person gun")
+	assert_eq(world.model_availability, [false],
+			"the render gate observes that no first-person gun model resolved")
 
 
 func test_joiner_accepts_novaworld_advertised_mission_basename() -> void:

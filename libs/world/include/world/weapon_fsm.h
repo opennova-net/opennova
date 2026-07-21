@@ -47,6 +47,7 @@ namespace weapon_flag {
 enum : int32_t {
     kScoped = 0x00000001,
     kSighted = 0x00000002,
+    kEmplaced = 0x00000080,
     kNoCardSwitch = 0x02000000,
     kForceScoped = 0x20000000,
 };
@@ -55,6 +56,7 @@ enum : int32_t {
 namespace weapon_flag2 {
 enum : int32_t {
     kInset = 0x00000200,
+    kInvisible = 0x00000800,
 };
 } // namespace weapon_flag2
 
@@ -211,6 +213,11 @@ struct WeaponFsmInputs {
     bool is_authority = true;    // listen-host/SP: reload requests apply immediately
     bool auto_reload = true;     // [orig: g_autoReloadEnabled @ 0x24D2118]
     bool scope_active = false;   // g_weaponScopeActive at reload time (the stash source)
+    // SWITCHFROM bypasses its 30/tick holster timer when either the outgoing
+    // or pending definition is Emplaced (Flags 0x80). The pending-slot owner
+    // computes this because the standalone slot does not know its target def.
+    // [orig: WeaponAction_SwitchFrom @0x543417..0x54344a]
+    bool instant_emplaced_switch = false;
 };
 
 // Per-tick outputs for the host. anim events carry the .adm clip key to start on the
@@ -277,6 +284,11 @@ void weapon_fsm_queue_scope_down(WeaponSlotState &slot);
 // pending -> equipped when the queued action's active phase finishes.
 void weapon_fsm_queue_switch_from(WeaponSlotState &slot);
 void weapon_fsm_queue_switch_rank(WeaponSlotState &slot);
+// Queue SWITCHTO on a newly committed target only when it is not already drawing
+// and its phase is DONE/NONE; a busy target is allowed to settle to IDLE. READY
+// is deliberately not accepted here.
+// [orig: WeaponSlot_TryQueueSwitchTo @0x53f140]
+void weapon_fsm_try_queue_switch_to(WeaponSlotState &slot);
 
 // The input-dispatcher gates in front of the requests
 // [orig: Input_HandleActionBinding_0 @ 0x4e0420]:

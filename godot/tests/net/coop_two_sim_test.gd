@@ -27,6 +27,14 @@ const AI_TYPE := 0x0816       # AI infantry
 const BUILDING_TYPE := 0x0123 # a static structure
 const MARKER_TYPE := 0x1773   # a start marker
 
+
+func _anim_root() -> NovaResourceRoot:
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
+			"res://../fixtures/anim")), OK)
+	return root
+
+
 func _two_organics() -> NovaMissionData:
 	var md := NovaMissionData.new()
 	assert_eq(md.create_default(), OK)
@@ -44,6 +52,12 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 	# A co-op host is playable — it spawns its own pool-0 player (0x14B9), which the joiner must
 	# see over the wire. Without it the only player entity would be the joiner's own echo.
 	assert_true(host.spawn_local_player(Vector3(5, 0, 5), 0.0, 1), "host spawned its own player")
+	var host_anim_root := _anim_root()
+	assert_gt(host.set_infantry_anim_map(host_anim_root, "soldier.adm"), 0)
+	var host_item_db := NovaItemDatabase.new()
+	assert_eq(host_item_db.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/items.def")), OK)
+	host.resolve_infantry_adm_ids(host_anim_root, host_item_db)
 	var host_port: int = host.get_host_listen_port()
 	assert_gt(host_port, 0, "host got a real bound port")
 
@@ -52,6 +66,12 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 	assert_true(joiner.is_joiner(), "joiner flag set before load")
 	assert_eq(joiner.get_joiner_phase(), 0, "joiner phase Idle before the first frame")
 	assert_true(joiner.load_from_mission_data(_two_organics()), "joiner promoted as a client")
+	var joiner_anim_root := _anim_root()
+	assert_gt(joiner.set_infantry_anim_map(joiner_anim_root, "soldier.adm"), 0)
+	var joiner_item_db := NovaItemDatabase.new()
+	assert_eq(joiner_item_db.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/items.def")), OK)
+	joiner.resolve_infantry_adm_ids(joiner_anim_root, joiner_item_db)
 
 	var before_peers: int = host.get_host_peer_count()
 
@@ -92,6 +112,15 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 				and int(hsnap[base + NovaSimulation.PF_WIRE_HANDLE]) != host_own:
 			host_sees_joiner = true
 	assert_true(host_sees_joiner, "host's present includes the admitted joiner (a player row that isn't the host's own)")
+	var host_remote_adm := ""
+	for ai_index in range(host.get_entity_count()):
+		var card: Dictionary = host.get_entity_debug(ai_index)
+		if int(card.get("item_id", 0)) == 0x14B9 \
+				and int(card.get("wire_handle", 0)) != host_own:
+			host_remote_adm = String(card.get("adm_name", ""))
+			break
+	assert_eq(host_remote_adm, "US01.adm",
+			"the real host admission path binds the remote player's body ADM")
 
 	# JOINER sees the HOST: its wire-decoded present carries a player row (type 0x14B9) that is
 	# NOT its own echo, and its own wire echo (handle H) is self-filtered out.
@@ -108,6 +137,16 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 			joiner_sees_host = true
 	assert_true(joiner_sees_host, "joiner's wire present includes the host player (0x14B9), not itself")
 	assert_false(saw_self_echo, "the joiner's own wire echo (handle H) is self-filtered from its present")
+	var joiner_local_adm := ""
+	for ai_index in range(joiner.get_entity_count()):
+		var card: Dictionary = joiner.get_entity_debug(ai_index)
+		# Joiner get_local_player_wire_handle() deliberately returns host identity H,
+		# not local simulation handle L. Its local World contains only L as a player.
+		if int(card.get("item_id", 0)) == 0x14B9:
+			joiner_local_adm = String(card.get("adm_name", ""))
+			break
+	assert_eq(joiner_local_adm, "US01.adm",
+			"the real joiner name-match path binds local L's body ADM")
 
 	# JOINER sees the host's full ENTITY world: the witnessed initial-state burst streams EVERY entity
 	# pool to a joining player [orig: Server_SendInitialGameStateToPlayer @0x51bba0, sync-state 4] —

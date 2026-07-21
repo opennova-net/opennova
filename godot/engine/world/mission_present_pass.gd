@@ -29,6 +29,8 @@ extends RefCounted
 
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
 const PresentAimOverlay := preload("res://engine/world/present_aim_overlay.gd")
+const PresentEmplacedWeapon := preload(
+		"res://engine/world/present_emplaced_weapon.gd")
 
 var _sim                    # NovaSimulation (or a compatible snapshot source)
 var _index                  # MissionEntityRegistry: resolve(bms_id, kind, index) -> Node
@@ -74,7 +76,12 @@ func present() -> void:
 			_apply_transform(node, snap, base)
 		PresentAimOverlay.apply(node, snap, base)
 		if _drive_part_anim:
+			# Remove last tick's semantic mount ownership before generic model-order
+			# channels run. A generic PLAYPARTANIM can itself address EWEAP_*; it
+			# must survive dismount, while live gunner aim still overlays it last.
+			PresentEmplacedWeapon.clear(node)
 			_apply_procedural_part(node, snap, base)
+			_stats.posed += PresentEmplacedWeapon.apply(node, snap, base, false)
 		if _drive_visibility:
 			# Death is not disappearance: a dead ORGANIC keeps rendering as a corpse
 			# (its death anim holds the last frame) until the sim despawns it via
@@ -84,7 +91,16 @@ func present() -> void:
 			# the destruction pass swaps its model to the husk (Flags|=6), and a
 			# def with no husk keeps its graphic standing — the witnessed render
 			# pick [orig: Flags&4 && huskModel ? husk : graphic @0x413086; §24].
-			var visible := int(snap[base + NovaSimulation.PF_HIDDEN]) == 0
+			# Retail skips the local first-person UseGun parent's OWN world-model
+			# submit once its embedded MountSlot is live and has an FP model (or
+			# flags2 Invisible forces it). This packed bit is presentation-only:
+			# Entity.hidden, collision, simulation, and separately-rendered attached
+			# actors remain untouched. [orig: Entity_RenderVehicleModel @0x4407d0,
+			# cull @0x4407f6..0x44084c, submit @0x440918]
+			var visible := (
+					int(snap[base + NovaSimulation.PF_HIDDEN]) == 0
+					and int(snap[base +
+							NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED]) == 0)
 			node.visible = visible
 			if not visible:
 				_stats.hidden += 1

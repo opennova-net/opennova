@@ -145,6 +145,16 @@ std::vector<GameEntitySnapshot> snapshot_world(const world::World &w) {
 				s.infantry_aim_pitch_bam = ai->inf.aim_pitch;
 			}
 		}
+		// Retail's PLAYER compact writer reads entity Pitch directly. The port
+		// splits the registry record from AiEntity, and mounted pose keeps the
+		// carrier pitch on Entity while preserving the gunner's live look on
+		// AiEntity. Rejoin only that split here; snapshot_of's witnessed integer
+		// yaw conversion deliberately retains its distinct truncation behavior.
+		if (s.entity_class == EntityClass::Player && w.ai != nullptr) {
+			if (const world::AiEntity *ai = w.ai->for_handle(e.handle)) {
+				s.pitch_bam = ai->pitch;
+			}
+		}
 		// Resolve the record carrier's pose here, where the registry is in reach — the
 		// carrier is often a pool-2 STATIC (building) with no snapshot of its own in the
 		// 0x0A list. Mount wins over ground [orig: op1 @0x4c0a08]; a stale handle simply

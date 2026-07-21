@@ -59,6 +59,7 @@ class NovaTerrainData;
 class NovaObjectData;
 class NovaSkeletalAnim;
 class NovaItemDatabase;
+class NovaResourceRoot;
 
 // THE mission runtime binding: a thin host shell over the portable libs/world runtime.
 // Owns one World + the three logic systems (WAC VM, BMS event evaluator, AI) and drives
@@ -76,7 +77,8 @@ class NovaItemDatabase;
 // to draw; host-presentation side effects (text/dialog/win) drain out of the World
 // EffectLog each tick. Play/Pause/Step + Stop (snapshot/restore).
 class NovaSimulation : public Node3D,
-                       private opennova::world::ICollisionSectionMatrixProvider {
+                       private opennova::world::ICollisionSectionMatrixProvider,
+                       private opennova::world::IMountedPoseProvider {
 	GDCLASS(NovaSimulation, Node3D)
 
 public:
@@ -106,6 +108,9 @@ public:
 		PF_ANIM_STATE, // InfantryState.anim_state (full off_8135F0 state id; -1 when unavailable)
 		PF_ANIM_PHASE_TICKS, // InfantryState.clip_phase, in IDA half-frame ticks
 		PF_HIDDEN,     // 1 when the entity is hidden
+		// Local render-only verdict: skip this placed entity's own world model.
+		// Does not mutate Entity.hidden, collision, simulation, or attached actors.
+		PF_LOCAL_VIEW_SUPPRESSED,
 		PF_ALIVE,      // 1 when alive
 		PF_TYPE_ID,    // items.def runtime type id from the wire (0 = none); keys the joiner's wire avatars
 		PF_WIRE_HANDLE,// (pool<<12)|slot wire handle from the decoded stream (joiner render key; 0 = none)
@@ -117,7 +122,13 @@ public:
 		PF_AIM_BODY_ROLL_DEG,
 		PF_AIM_ANGLES, // nine contiguous (pitch,yaw,roll) triples, OverlayClass order
 		PF_AIM_CLASS_STRIDE = 3,
-		PF_STRIDE = PF_AIM_ANGLES + 9 * PF_AIM_CLASS_STRIDE
+		// Semantic emplaced-weapon PANM registers. These are deliberately not
+		// PF_PHASE1/2: CTRL order is model-specific (B50Cal starts with HEAT_GLOW).
+		PF_EMPLACED_CONTROLS_VALID =
+				PF_AIM_ANGLES + 9 * PF_AIM_CLASS_STRIDE,
+		PF_EWEAP_GUNYAW,
+		PF_EWEAP_GUNPITCH,
+		PF_STRIDE
 	};
 
 	// Typed record returned by get_entity_effect_state_for_ssn(). Position is
@@ -186,6 +197,10 @@ private:
 			const opennova::world::CollisionMatrix &p_entity_world,
 			const opennova::world::CollisionModel &p_model,
 			std::vector<opennova::world::CollisionMatrix> &r_out) override;
+	bool resolve_mounted_pose(opennova::world::World &p_world,
+			const opennova::world::Entity &p_carrier,
+			const opennova::world::Seat &p_seat,
+			opennova::world::MountedPose &r_out) override;
 	// Rendering occlusion: the portal/section-mask engine (world/occlusion.h) —
 	// models attached alongside collision by resolve_collision_instances, the
 	// portal weld run by occlusion_init_mission, per-frame masks/gates by
@@ -279,6 +294,10 @@ private:
 	// player then locomotes through the same infantry motor as an NPC. [net-re §5.38]
 	opennova::world::PlayerInput player_input_{};
 	void apply_player_input_pre_tick();
+	// Retail has one input-owned entity yaw. An authoritative attach can snap the
+	// split world/AI copy during the logic tick, so mirror it back into the host
+	// latch before the next pre-tick input write can restore the old look.
+	void sync_local_mounted_input_heading();
 	// The mouse options + the sim-owned stance latches (the dword_B76484/dword_B76480
 	// equivalents the 0x1D apply writes) — the host sends key EDGES and pixel deltas;
 	// look angles and stance state live here. [orig: profile +0x590/+0x594; the
@@ -297,13 +316,45 @@ private:
 	// --- the local player's equipped-weapon action FSM (net-re §5.62) ------------------
 	// The 12-state action queue on the equipped slot, pumped once per logic tick after the
 	// world advances [orig: WeaponAction_ProcessAllEntities @ 0x542690 in the frame loop;
-	// this port pumps the LOCAL player's slot only — D-WPN-6]. The host feeds the baked def
-	// via set_local_player_weapon and per-frame trigger state via
+	// this member owns the LOCAL player's slot. World::run_logic_tick separately pumps
+	// occupied UseGun parent slots for NPC gunners in that same global phase]. The host
+	// feeds the baked def via set_local_player_weapon and per-frame trigger state via
 	// set_local_player_weapon_input. Presentation outputs accumulate as ordered
 	// per-tick records because several logic ticks can run per render frame; the
 	// snapshot's monotonic serials remain diagnostics/rebuild state.
 	opennova::world::WeaponFsmDef weapon_def_{};
 	opennova::world::WeaponSlotState weapon_slot_{};
+	// The local UseGun path borrows the parent's embedded MountSlot through the
+	// normal holster/commit/draw lifecycle. Nonlocal occupants still take the
+	// direct world::vehicle_bind_use_gun_slot assignment.
+	// [orig: Entity_AttachToUseGunSlot @0x546c25; Player_MountWeaponSlot
+	// @0x4dfa40; SwitchFrom/Rank commits @0x543475/@0x543539]
+	enum class LocalUseGunSwitch : uint8_t {
+		kNone,
+		kAttach,
+		kSwap,
+		kDetach,
+	};
+	LocalUseGunSwitch local_usegun_switch_ = LocalUseGunSwitch::kNone;
+	bool local_usegun_slot_active_ = false;
+	// Current EquippedSlot and latest g_pendingWeaponSlot equivalents. A direct
+	// gunner-to-gunner attach overwrites only the pending pair until commit.
+	opennova::world::EntityHandle local_usegun_mount_{};
+	uint8_t local_usegun_weapon_adm_ = 0xFF;
+	opennova::world::EntityHandle local_usegun_pending_mount_{};
+	uint8_t local_usegun_pending_weapon_adm_ = 0xFF;
+	uint8_t local_usegun_saved_adm_ = 0xFF;
+	int32_t local_usegun_switch_action_ = -1;
+	// Retail's render gate reads the resolved Def.fpModel pointer, not merely the
+	// authored gfx1 token. The host reports which equipped Def actually owns the
+	// resolved first-person model; 0xFF means no model resolved.
+	uint8_t local_first_person_model_adm_ = 0xFF;
+	opennova::world::WeaponSlotState *active_local_weapon_slot();
+	const opennova::world::WeaponSlotState *active_local_weapon_slot() const;
+	bool local_usegun_switch_is_instant() const;
+	void sync_local_usegun_weapon_transition();
+	void commit_local_usegun_weapon_switch();
+	void queue_local_usegun_weapon_switch(bool p_same_category);
 	bool weapon_active_ = false;
 	bool weapon_fire_held_ = false;
 	bool weapon_fire_pressed_ = false;
@@ -379,6 +430,12 @@ private:
 		// reinstalls the viewmodel/FSM for it [orig: the mount's model re-resolve;
 		// the equippedAdmIndex stamp @ 0x4dd727]. Empty = no switch this tick.
 		String switch_to_weapon;
+		// Explicit no-weapon commit. Empty switch_to_weapon alone means an event
+		// with no switch; it cannot represent restoring an unarmed personal slot.
+		bool clear_weapon = false;
+		// A UseGun commit selects an already-live parent/personal slot. The host
+		// may rebake/rebuild the model definition but must not reset that slot.
+		bool preserve_slot_state = false;
 		// The switch-walk wrap-around deny [orig: PlaySoundOnDedicatedServer
 		// (dword_24E08C4) @ 0x4e0354 — the deny sound seam].
 		bool switch_denied = false;
@@ -514,8 +571,21 @@ private:
 	// motor integrates (world/infantry.h). Owned here so it survives reset_world; the fresh
 	// ai_ is re-pointed at it like the terrain field. Empty = soldiers hold and stand.
 	InfantryRootMotion infantry_anim_;
+	// Per-entity ADM resolution is a spawn-time invariant, not a one-shot mission-load
+	// sweep: joiner-local and host-admitted players are attached to the AI pool after
+	// MissionRuntime's initial call. Retain the resolver inputs and advance this
+	// high-water mark whenever AiSystem gains entries (its attach storage is append-only).
+	Ref<NovaResourceRoot> infantry_adm_resource_root_;
+	Ref<NovaItemDatabase> infantry_adm_item_db_;
+	int infantry_adm_resolved_ai_count_ = 0;
 	void apply_root_motion_to_ai();
+	void reset_infantry_adm_ids();
+	void resolve_new_infantry_adm_ids();
+	static void resolve_infantry_adm_before_server_tick(void *p_context);
 	std::vector<opennova::mission::ItemSeatSpec> item_seat_specs_;
+	// Model resources paired with the persistent seat table. Kept across
+	// reset_world because set_item_seat_specs runs before mission promotion.
+	std::unordered_map<int32_t, Ref<NovaObjectData>> mounted_pose_data_by_type_;
 	opennova::mission::PromoteOptions promote_options() const;
 
 	void reset_world();
@@ -689,11 +759,15 @@ public:
 	// per-slot rings and the Anim_InitActions bake consumes them ring-wise: one
 	// serve-then-advance read per 'auto' delay field [orig: @ 0x541fa0;
 	// Anim_GetDurationTicks @ 0x53ee10]. Resets the slot to a fresh idle with a full
-	// magazine (retail bakes a def ONCE globally, so its rings persist across
+	// magazine unless p_preserve_slot_state is true (UseGun presentation rebake;
+	// the parent/personal slot has already been selected by the switch commit).
+	// Retail bakes a def ONCE globally, so its rings persist across
 	// re-equips; this per-equip reset rides the existing per-equip re-bake shape,
 	// D-WPN-6 family).
-	void set_local_player_weapon(const Dictionary &p_def, const Dictionary &p_clip_seconds);
+	void set_local_player_weapon(const Dictionary &p_def, const Dictionary &p_clip_seconds,
+	                             bool p_preserve_slot_state = false);
 	void clear_local_player_weapon();
+	void set_local_player_first_person_model_available(bool p_available);
 	// Per-frame trigger state: fire held + edge, raw reload edge (the dispatch
 	// gate runs sim-side) [orig: the binding-149/reload input dispatch,
 	// Input_HandleActionBinding_0 @ 0x4e0420].
@@ -994,8 +1068,8 @@ public:
 
 	// Per-entity grounding: resolve every active infantry soldier's OWN model .adm (from its
 	// items.def type id via the item database) and store its registry adm_id on the entity, so
-	// each grounds + locomotes off its own clip rather than the shared default set. Idempotent;
-	// call after load and again after spawning the local player.
+	// each grounds + locomotes off its own clip rather than the shared default set. The
+	// resolver inputs are retained so players spawned later receive their ADM automatically.
 	void resolve_infantry_adm_ids(const Ref<class NovaResourceRoot> &p_resource_root,
 	                              const Ref<class NovaItemDatabase> &p_item_db);
 

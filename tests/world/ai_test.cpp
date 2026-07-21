@@ -164,6 +164,591 @@ static void test_fire_pass_uses_host_fed_muzzle() {
     CHECK(near_f(w->round_sim.rounds[2].pos.z, 5.9f));
 }
 
+// Compact attack-animation source for the behavioral regressions below. Retail
+// infantry fires from .bad event bit 0x4, so these drive the actual attack path.
+struct AttackEventSource final : IRootMotionSource {
+    bool has_clip(int, int id) const override {
+        return id == anim_state::kIdle || id == anim_state::kAttack ||
+               (id >= 67 && id <= 75) || (id >= 173 && id <= 239);
+    }
+    int32_t clip_length_ticks(int, int) const override { return -1; }
+    bool advance(int, int id, int32_t &phase, RootMotionFrame &out) override {
+        if (!has_clip(0, id)) return false;
+        ++phase;
+        out = RootMotionFrame{};
+        if (id == anim_state::kAttack) out.events = 0x4;
+        return true;
+    }
+};
+
+static void seed_test_rifle_ammo(World &w) {
+    w.ammo.entries.resize(2);
+    w.ammo.entries[1].velocity = 800;
+    w.ammo.entries[1].max_age_ticks = 124;
+    w.ammo.entries[1].weight_in_grains = 875;
+    w.ammo.entries[1].min_damage = 10;
+    w.ammo.entries[1].max_damage = 40;
+    w.ammo.entries[1].valid = true;
+}
+
+static void configure_test_emplacement_weapon(WeaponTableEntry &weapon) {
+    weapon.clipsize = -1;
+    weapon.action_fsm.clip_capacity = -1;
+    for (int action = 0; action < weapon_action::kCount; ++action)
+        weapon.action_fsm.actions[action].id = action;
+    weapon.action_fsm.actions[weapon_action::kRecoil].delay_end = 1;
+}
+
+static void configure_rifleman(AiEntity &npc, uint16_t net_id, uint8_t team) {
+    npc.inf.active = true;
+    npc.team = team;
+    npc.net_id = net_id;
+    npc.health = 100;
+    npc.profile.ammo_primary = 1;
+    npc.profile.clip_size = 30;
+    npc.inf.magazine = 30;
+    npc.slot.f[10] = 0;
+    npc.slot.f[11] = 0;
+    npc.slot.f[15] = 60 << 16;
+    npc.slot.f[16] = 10 << 16;
+    npc.slot.f[17] = 100 << 16;
+    npc.slot.f[22] = 62;
+}
+
+static void test_world_feed_never_engages_same_team() {
+    auto w = std::make_unique<World>();
+    w->registry.configure_pool(0, 8);
+    seed_test_rifle_ammo(*w);
+
+    Entity ally_seed{};
+    ally_seed.kind = EntityKind::Organic;
+    ally_seed.has_item_def = true;
+    ally_seed.item_type = 3;
+    ally_seed.team = 1;
+    ally_seed.health = 100;
+    ally_seed.net_id = 0x22;
+    ally_seed.group_id = 2;
+    ally_seed.position = Vec3{20.0f, 0.0f, 0.0f};
+    const EntityHandle ally_h = w->registry.spawn(0, ally_seed);
+
+    Entity npc_seed{};
+    npc_seed.kind = EntityKind::Organic;
+    npc_seed.team = 1;
+    npc_seed.health = 100;
+    npc_seed.net_id = 0x11;
+    npc_seed.group_id = 1;
+    const EntityHandle npc_h = w->registry.spawn(0, npc_seed);
+
+    AttackEventSource clips;
+    AiSystem ai;
+    ai.is_authority = true;
+    ai.root_motion = &clips;
+    w->ai = &ai;
+    AiEntity &npc = *ai.at(ai.attach(npc_h));
+    configure_rifleman(npc, 0x11, 1);
+
+    TickContext ctx{};
+    ctx.world = w.get();
+    ctx.is_authority = true;
+    for (uint32_t tick = 0; tick < 512; ++tick) {
+        ctx.logic_tick = tick;
+        ai.tick(*w, ctx);
+        w->round_sim.tick(*w, nullptr, nullptr);
+    }
+
+    CHECK(!npc.inf.combat_target.valid());
+    CHECK(w->rounds.count == 0);
+    CHECK(w->registry.get(ally_h)->health == 100);
+}
+
+static void test_berserk_candidate_is_intentional_team_exception() {
+    auto w = std::make_unique<World>();
+    w->registry.configure_pool(0, 8);
+
+    Entity candidate_seed{};
+    candidate_seed.kind = EntityKind::Organic;
+    candidate_seed.team = 1;
+    candidate_seed.health = 100;
+    candidate_seed.net_id = 0x22;
+    candidate_seed.position = Vec3{20.0f, 0.0f, 0.0f};
+    const EntityHandle candidate_h = w->registry.spawn(0, candidate_seed);
+
+    Entity npc_seed{};
+    npc_seed.kind = EntityKind::Organic;
+    npc_seed.team = 1;
+    npc_seed.health = 100;
+    npc_seed.net_id = 0x11;
+    const EntityHandle npc_h = w->registry.spawn(0, npc_seed);
+
+    AttackEventSource clips;
+    AiSystem ai;
+    ai.is_authority = true;
+    ai.root_motion = &clips;
+    w->ai = &ai;
+    const int npc_index = ai.attach(npc_h);
+    const int candidate_index = ai.attach(candidate_h);
+    AiEntity &npc = *ai.at(npc_index);
+    configure_rifleman(npc, 0x11, 1);
+    npc.profile.ammo_primary = -1;
+    AiEntity &candidate = *ai.at(candidate_index);
+    configure_rifleman(candidate, 0x22, 1);
+    candidate.profile.ammo_primary = -1;
+    candidate.slot.f[1] |= 0x200;
+
+    TickContext ctx{};
+    ctx.world = w.get();
+    ctx.is_authority = true;
+    ctx.logic_tick = 28; // 28 + 36*0x11 is the scanner's 32-tick phase
+    ai.tick(*w, ctx);
+
+    // Shared infantry targeting accepts a same-team candidate carrying Berserk.
+    // [orig: Entity_FindTargets @0x53a7ea..0x53a824]
+    CHECK(npc.inf.combat_target == candidate_h);
+
+    // The exception is symmetric: a Berserk scanner may also select an ordinary
+    // same-team candidate.
+    candidate.slot.f[1] &= ~0x200;
+    npc.slot.f[1] |= 0x200;
+    ai.ai_set_target(*w, npc, EntityHandle{});
+    npc.inf.damage_timer = 0;
+    npc.inf.was_hit = false;
+    ctx.logic_tick = 156; // key 768: 32-tick scan, full-range phase
+    ai.tick(*w, ctx);
+    CHECK(npc.inf.combat_target == candidate_h);
+}
+
+static void test_damage_hit_sets_retail_alert_state() {
+    auto w = std::make_unique<World>();
+    w->registry.configure_pool(0, 8);
+
+    Entity shooter_seed{};
+    shooter_seed.kind = EntityKind::Organic;
+    shooter_seed.team = 2;
+    shooter_seed.health = 100;
+    shooter_seed.net_id = 0x21;
+    shooter_seed.group_id = 2;
+    const EntityHandle shooter_h = w->registry.spawn(0, shooter_seed);
+
+    Entity npc_seed{};
+    npc_seed.kind = EntityKind::Organic;
+    npc_seed.team = 1;
+    npc_seed.health = 100;
+    npc_seed.net_id = 0x11;
+    npc_seed.group_id = 1;
+    const EntityHandle npc_h = w->registry.spawn(0, npc_seed);
+
+    AttackEventSource clips;
+    AiSystem ai;
+    ai.is_authority = true;
+    ai.root_motion = &clips;
+    w->ai = &ai;
+    AiEntity &npc = *ai.at(ai.attach(npc_h));
+    configure_rifleman(npc, 0x11, 1);
+
+    // The sim/AI seam carries the already-processed hit. Retail's damage callback
+    // writes these stamps inline before the next infantry update.
+    // [orig: Entity_HandleDamageTrigger @0x4073db..0x4073ea;
+    //  Entity_OnDamageReceived @0x4af85b..0x4af878]
+    w->round_sim.hits.push_back(RoundHit{npc_h, shooter_h, 10, 1, 1});
+
+    TickContext ctx{};
+    ctx.world = w.get();
+    ctx.is_authority = true;
+    ctx.logic_tick = 1; // not a 32-tick perception scan: preserve lastAttacker
+    ai.tick(*w, ctx);
+
+    CHECK(npc.slot.bytes()[AiSlot::kMoveFlagByte] == 2);
+    CHECK(w->relations.group(1).alert == TriggerRelations::kAlertRed);
+    CHECK(npc.inf.damage_timer == 9); // +10 on hit, then the body tick decays once
+    CHECK(npc.inf.was_hit);
+    CHECK(npc.inf.last_attacker == shooter_h);
+
+    npc.inf.was_hit = false;
+    npc.inf.damage_timer = 0;
+    npc.inf.last_attacker = EntityHandle{};
+    w->round_sim.hits.push_back(RoundHit{npc_h, npc_h, 1, 1, 2});
+    ctx.logic_tick = 2;
+    ai.tick(*w, ctx);
+    CHECK(!npc.inf.was_hit);
+    CHECK(npc.inf.damage_timer == 0);
+    CHECK(!npc.inf.last_attacker.valid());
+
+    npc.inf.damage_timer = 24;
+    w->round_sim.hits.push_back(RoundHit{npc_h, shooter_h, 1, 1, 3});
+    ctx.logic_tick = 3;
+    ai.tick(*w, ctx);
+    CHECK(npc.inf.damage_timer == 33); // callback reaches 34, body tick decays once
+}
+
+static void test_remote_player_hit_skips_npc_group_alert() {
+    auto w = std::make_unique<World>();
+    w->registry.configure_pool(0, 8);
+
+    Entity shooter_seed{};
+    shooter_seed.kind = EntityKind::Organic;
+    shooter_seed.health = 100;
+    const EntityHandle shooter_h = w->registry.spawn(0, shooter_seed);
+
+    Entity player_seed{};
+    player_seed.kind = EntityKind::Organic;
+    player_seed.health = 100;
+    player_seed.net_id = 0x41;
+    player_seed.group_id = 3;
+    player_seed.player_class = 8;
+    player_seed.engine_flags = 0x100u;
+    const EntityHandle player_h = w->registry.spawn(0, player_seed);
+
+    AiSystem ai;
+    ai.is_authority = true;
+    w->ai = &ai;
+    AiEntity &player = *ai.at(ai.attach(player_h));
+    configure_rifleman(player, 0x41, 1);
+    player.inf.is_local_player = false;
+    w->round_sim.hits.push_back(RoundHit{player_h, shooter_h, 10, 1, 1});
+
+    TickContext ctx{};
+    ctx.world = w.get();
+    ctx.is_authority = true;
+    ctx.logic_tick = 1;
+    ai.tick(*w, ctx);
+
+    CHECK(player.slot.bytes()[AiSlot::kMoveFlagByte] == 0);
+    CHECK(w->relations.group(3).alert != TriggerRelations::kAlertRed);
+    CHECK(player.inf.was_hit);
+    CHECK(player.inf.last_attacker == shooter_h);
+}
+
+static void test_mounted_gunner_acquires_and_fires() {
+    auto w = std::make_unique<World>();
+    w->registry.configure_pool(0, 8);
+    w->registry.configure_pool(1, 8);
+    seed_test_rifle_ammo(*w);
+
+    Entity enemy_seed{};
+    enemy_seed.kind = EntityKind::Organic;
+    enemy_seed.has_item_def = true;
+    enemy_seed.item_type = 3;
+    enemy_seed.team = 2;
+    enemy_seed.health = 100;
+    enemy_seed.net_id = 0x21;
+    enemy_seed.group_id = 2;
+    enemy_seed.position = Vec3{20.0f, 0.0f, 0.0f};
+    const EntityHandle enemy_h = w->registry.spawn(0, enemy_seed);
+
+    Entity gun{};
+    gun.kind = EntityKind::Item;
+    gun.team = 1;
+    gun.net_id = 0x31;
+    gun.yaw = 90; // engine heading 0: faces the enemy on +X.
+    gun.primary_weapon.assign(1, 'x');
+    Seat seat{};
+    seat.type = SeatType::Gunner;
+    gun.seats.push_back(seat);
+    w->registry.spawn(1, gun);
+    w->weapons.entries.resize(2);
+    w->weapons.entries[1].name.assign(1, 'x');
+    w->weapons.entries[1].ammo_index = 1;
+    w->weapons.entries[1].valid = true;
+    configure_test_emplacement_weapon(w->weapons.entries[1]);
+
+    Entity npc_seed{};
+    npc_seed.kind = EntityKind::Organic;
+    npc_seed.team = 1;
+    npc_seed.health = 100;
+    npc_seed.net_id = 0x11;
+    npc_seed.group_id = 1;
+    const EntityHandle npc_h = w->registry.spawn(0, npc_seed);
+
+    AttackEventSource clips;
+    AiSystem ai;
+    ai.is_authority = true;
+    ai.root_motion = &clips;
+    w->ai = &ai;
+    AiEntity &npc = *ai.at(ai.attach(npc_h));
+    configure_rifleman(npc, 0x11, 1);
+    w->add_system(&ai);
+    npc.profile.ammo_primary = -1; // mounted fire must not use the personal rifle slot
+    CHECK(w->commands.mount(0x11, 0x31));
+
+    bool acquired = false;
+    bool fired = false;
+    for (uint32_t tick = 0; tick < 1000 && !fired; ++tick) {
+        // Exercise the production phase order: entity AI queues FIRE, the global
+        // action pump consumes it, then the projectile pass steps the new round.
+        // [orig: Entity_UpdateAllEntities @0x52674b, WeaponAction_ProcessAllEntities
+        //  @0x526786, Weapon_UpdateAllProjectiles @0x4ec020]
+        w->run_logic_tick(true, false);
+        acquired = acquired || npc.inf.combat_target == enemy_h;
+        fired = fired || w->rounds.count > 0;
+    }
+    CHECK(acquired);
+    CHECK(fired);
+}
+
+static void test_mounted_fire_uses_retail_range_and_spatial_stagger() {
+    auto w = std::make_unique<World>();
+    w->registry.configure_pool(0, 8);
+    w->registry.configure_pool(1, 8);
+    seed_test_rifle_ammo(*w);
+
+    Entity target_seed{};
+    target_seed.kind = EntityKind::Organic;
+    target_seed.team = 2;
+    target_seed.health = 100;
+    target_seed.net_id = 0x21;
+    target_seed.position = Vec3{1.0f, 0.0f, 10.0f};
+    const EntityHandle target_h = w->registry.spawn(0, target_seed);
+
+    Entity gun{};
+    gun.kind = EntityKind::Item;
+    gun.team = 1;
+    gun.net_id = 0x31;
+    gun.yaw = 90;
+    gun.primary_weapon.assign(1, 'x');
+    Seat seat{};
+    seat.type = SeatType::Gunner;
+    gun.seats.push_back(seat);
+    w->registry.spawn(1, gun);
+    w->weapons.entries.resize(2);
+    w->weapons.entries[1].name.assign(1, 'x');
+    w->weapons.entries[1].ammo_index = 1;
+    w->weapons.entries[1].valid = true;
+    configure_test_emplacement_weapon(w->weapons.entries[1]);
+
+    Entity npc_seed{};
+    npc_seed.kind = EntityKind::Organic;
+    npc_seed.team = 1;
+    npc_seed.health = 100;
+    npc_seed.net_id = 0x11;
+    const EntityHandle npc_h = w->registry.spawn(0, npc_seed);
+
+    AiSystem ai;
+    ai.is_authority = true;
+    w->ai = &ai;
+    AiEntity &npc = *ai.at(ai.attach(npc_h));
+    configure_rifleman(npc, 0x11, 1);
+    npc.profile.ammo_primary = -1;
+    npc.slot.f[15] = 6 << 16;
+    npc.inf.combat_target = target_h;
+    npc.inf.aim_valid = true;
+    npc.inf.aim_heading = 0;
+    CHECK(w->commands.mount(0x11, 0x31));
+
+    // Retail halves dz before the 3-D range test: sqrt(1^2 + (10/2)^2) < 6.
+    // [orig: Entity_UpdateInfantryAI sar dz,1 @0x4bf515]
+    ai.infantry_mounted_fire_pass(npc, *w, 0, 0);
+    Entity *gun_live = w->registry.get(w->registry.find_by_net_id(0x31));
+    CHECK(gun_live != nullptr);
+    CHECK(gun_live->primary_weapon_slot.next == weapon_action::kFire);
+    CHECK(w->rounds.count == 0);
+    gun_live->posed_muzzle_world[0] = 0x12345;
+    gun_live->posed_muzzle_world[1] = -0x23456;
+    gun_live->posed_muzzle_world[2] = 0x34567;
+    gun_live->posed_muzzle_tick = 0;
+    gun_live->posed_muzzle_valid = true;
+    // Merely caching an owner as local cannot disable the standalone World's
+    // global slot pump. Only an adapter that explicitly supplies its own pump
+    // may take ownership.
+    w->cached.local_player = npc_h;
+    ai.pump_mounted_weapon_slots(*w, 0);
+    CHECK(w->rounds.count == 1);
+    CHECK(w->rounds.records[0].shooter_handle == npc_h.packed);
+    CHECK(w->rounds.records[0].origin_x == 0x12345);
+    CHECK(w->rounds.records[0].origin_y == -0x23456);
+    CHECK(w->rounds.records[0].origin_z == 0x34567);
+    CHECK(gun_live->primary_weapon_slot.current == weapon_action::kFire);
+    const int32_t busy_next = gun_live->primary_weapon_slot.next;
+    ai.infantry_mounted_fire_pass(npc, *w, 4, 4);
+    CHECK(gun_live->primary_weapon_slot.next == busy_next);
+    CHECK(w->rounds.count == 1);
+
+    // The four-tick gate is followed by a spatial stagger. Whole-unit positions
+    // leave bit 0x40 to the stagger key here, so key 64 suppresses the request.
+    // [orig: Entity_UpdateInfantryAI @0x4bf4e3..0x4bf4ee]
+    w->registry.get(target_h)->position.z = 0.0f;
+    const int before = w->rounds.count;
+    gun_live->primary_weapon_slot = WeaponSlotState{};
+    ai.infantry_mounted_fire_pass(npc, *w, 64, 64);
+    CHECK(gun_live->primary_weapon_slot.next == weapon_action::kIdle);
+    ai.pump_mounted_weapon_slots(*w, 64);
+    CHECK(w->rounds.count == before);
+
+    gun_live->primary_weapon_slot = WeaponSlotState{};
+    gun_live->primary_weapon_slot.next = weapon_action::kFire;
+    w->external_local_mounted_weapon_pump = true;
+    ai.pump_mounted_weapon_slots(*w, 68);
+    CHECK(w->rounds.count == before);
+    CHECK(gun_live->primary_weapon_slot.next == weapon_action::kFire);
+}
+
+static void test_mounted_look_traverses_before_fire_request() {
+    auto w = std::make_unique<World>();
+    w->registry.configure_pool(0, 8);
+    w->registry.configure_pool(1, 8);
+    seed_test_rifle_ammo(*w);
+
+    Entity target_seed{};
+    target_seed.kind = EntityKind::Organic;
+    target_seed.team = 2;
+    target_seed.health = 100;
+    target_seed.net_id = 0x21;
+    target_seed.position = Vec3{20.0f, 20.0f, 0.0f};
+    const EntityHandle target_h = w->registry.spawn(0, target_seed);
+
+    Entity gun{};
+    gun.kind = EntityKind::Item;
+    gun.team = 1;
+    gun.net_id = 0x31;
+    gun.yaw = 90;
+    gun.primary_weapon.assign(1, 'x');
+    Seat seat{};
+    seat.type = SeatType::Gunner;
+    gun.seats.push_back(seat);
+    const EntityHandle gun_h = w->registry.spawn(1, gun);
+    w->weapons.entries.resize(2);
+    w->weapons.entries[1].name.assign(1, 'x');
+    w->weapons.entries[1].ammo_index = 1;
+    w->weapons.entries[1].valid = true;
+    configure_test_emplacement_weapon(w->weapons.entries[1]);
+
+    Entity npc_seed{};
+    npc_seed.kind = EntityKind::Organic;
+    npc_seed.team = 1;
+    npc_seed.health = 100;
+    npc_seed.net_id = 0x11;
+    const EntityHandle npc_h = w->registry.spawn(0, npc_seed);
+
+    AiSystem ai;
+    ai.is_authority = true;
+    w->ai = &ai;
+    AiEntity &npc = *ai.at(ai.attach(npc_h));
+    configure_rifleman(npc, 0x11, 1);
+    npc.inf.combat_target = target_h;
+    npc.inf.aim_valid = true;
+    npc.inf.aim_heading = 0x20000000;
+    npc.inf.aim_pitch = 0;
+    npc.heading = 0;
+    CHECK(w->commands.mount(0x11, 0x31));
+
+    CHECK(ai.pose_if_mounted(npc, *w));
+    CHECK(npc.heading == 0x02000000);
+    ai.infantry_mounted_fire_pass(npc, *w, 0, 0);
+    CHECK(w->registry.get(gun_h)->primary_weapon_slot.next == weapon_action::kIdle);
+
+    bool queued = false;
+    for (uint32_t phase = 4; phase <= 60 && !queued; phase += 4) {
+        CHECK(ai.pose_if_mounted(npc, *w));
+        ai.infantry_mounted_fire_pass(npc, *w, phase, phase);
+        queued = w->registry.get(gun_h)->primary_weapon_slot.next ==
+                weapon_action::kFire;
+    }
+    CHECK(queued);
+}
+
+static void test_mounted_gunner_dismounts_into_death_animation() {
+    auto w = std::make_unique<World>();
+    w->registry.configure_pool(0, 8);
+    w->registry.configure_pool(1, 8);
+
+    Entity gun{};
+    gun.kind = EntityKind::Item;
+    gun.net_id = 0x31;
+    Seat seat{};
+    seat.type = SeatType::Gunner;
+    gun.seats.push_back(seat);
+    const EntityHandle gun_h = w->registry.spawn(1, gun);
+
+    Entity npc_seed{};
+    npc_seed.kind = EntityKind::Organic;
+    npc_seed.team = 1;
+    npc_seed.health = 100;
+    npc_seed.net_id = 0x11;
+    npc_seed.deathtime_ticks = 124;
+    npc_seed.equipped_adm_index = 7;
+    const EntityHandle npc_h = w->registry.spawn(0, npc_seed);
+
+    AttackEventSource clips;
+    AiSystem ai;
+    ai.is_authority = true;
+    ai.root_motion = &clips;
+    w->ai = &ai;
+    AiEntity &npc = *ai.at(ai.attach(npc_h));
+    npc.inf.active = true;
+    npc.health = 100;
+    CHECK(w->commands.mount(0x11, 0x31));
+
+    constexpr int kSelectedDeath = 184;
+    w->registry.get(npc_h)->health = 0;
+    w->registry.get(npc_h)->death_anim_state = kSelectedDeath;
+    npc.health = 0;
+
+    TickContext ctx{};
+    ctx.world = w.get();
+    ctx.is_authority = true;
+    ctx.logic_tick = 1;
+    ai.tick(*w, ctx);
+
+    CHECK(!w->registry.get(npc_h)->mounted);
+    CHECK(!w->registry.get(gun_h)->seats[0].occupant.valid());
+    CHECK(w->registry.get(npc_h)->equipped_adm_index == 0xFF);
+    CHECK(!w->registry.get(npc_h)->use_gun_slot_swapped);
+    CHECK(!w->registry.get(gun_h)->primary_weapon_owner.valid());
+    CHECK(npc.inf.anim_state == kSelectedDeath);
+    CHECK(w->registry.get(npc_h)->death_anim_state == 0);
+    CHECK(w->registry.get(npc_h)->corpse_timer == 123);
+    CHECK(npc.inf.clip_phase == 1);
+}
+
+static void test_mounted_collision_tail_uses_retail_eight_tick_phase_without_models() {
+    auto w = std::make_unique<World>();
+    w->registry.configure_pool(0, 4);
+    w->registry.configure_pool(1, 4);
+
+    Entity gun{};
+    gun.kind = EntityKind::Item;
+    gun.net_id = 0x20;
+    Seat seat{};
+    seat.type = SeatType::Gunner;
+    gun.seats.push_back(seat);
+    w->registry.spawn(1, gun);
+
+    Entity npc_seed{};
+    npc_seed.kind = EntityKind::Organic;
+    npc_seed.team = 1;
+    npc_seed.health = 100;
+    npc_seed.net_id = 0x10;
+    const EntityHandle npc_h = w->registry.spawn(0, npc_seed);
+
+    CollisionWorld collision;
+    AiSystem ai;
+    ai.is_authority = true;
+    ai.collision = &collision;
+    w->ai = &ai;
+    AiEntity &npc = *ai.at(ai.attach(npc_h));
+    configure_rifleman(npc, 0x10, 1);
+    CHECK(w->commands.mount(0x10, 0x20));
+    CHECK(collision.instance_count() == 0);
+
+    Entity *npc_live = w->registry.get(npc_h);
+    CHECK(npc_live != nullptr);
+    npc_live->flags |= kEntityFlagArmoryZone;
+
+    TickContext ctx{};
+    ctx.world = w.get();
+    ctx.is_authority = true;
+    ctx.logic_tick = 1;
+    ai.tick(*w, ctx);
+    CHECK((npc_live->flags & kEntityFlagArmoryZone) != 0);
+
+    // key = tick + 36*net_id; net id 0x10 leaves the low three bits unchanged.
+    // The mounted tail therefore resolves at tick 8 even with no model instances,
+    // clearing the resolver's transient contact flags only on that retail phase.
+    // [orig: Entity_UpdateInfantryAI @0x4bf5a5..0x4bf5c3]
+    ctx.logic_tick = 8;
+    ai.tick(*w, ctx);
+    CHECK((npc_live->flags & kEntityFlagArmoryZone) == 0);
+}
+
 int main() {
     // ---- struct layout (byte-exact strides) ----
     CHECK(sizeof(AiBrain) == 812);
@@ -1148,6 +1733,15 @@ int main() {
 
     test_vehicle_death_rows();
     test_fire_pass_uses_host_fed_muzzle();
+    test_world_feed_never_engages_same_team();
+    test_berserk_candidate_is_intentional_team_exception();
+    test_damage_hit_sets_retail_alert_state();
+    test_remote_player_hit_skips_npc_group_alert();
+    test_mounted_gunner_acquires_and_fires();
+    test_mounted_fire_uses_retail_range_and_spatial_stagger();
+    test_mounted_look_traverses_before_fire_request();
+    test_mounted_gunner_dismounts_into_death_animation();
+    test_mounted_collision_tail_uses_retail_eight_tick_phase_without_models();
 
     if (failures == 0) std::printf("ai: all tests passed\n");
     return failures ? 1 : 0;

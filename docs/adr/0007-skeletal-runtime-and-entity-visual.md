@@ -68,10 +68,16 @@ as a separate overlay input while its body remains seat-bound.
 matrix `i`; COBJ parent/offset and CXLT metadata do not select or further transform organic sections. This
 matches `BoneCallback_org0_Bone @0x4e34b0` → `Entity_BuildBoneTransformMatrices @0x4b1290` →
 `Math_FloatMatrixToFixedPoint22 @0x611140` and keeps headless authority, live bullets, and F3 on one pose.
-Late-spawn attachment reuses the same mission-lifetime graphic/ADM caches. Because packed pool handles are
-recycled, collision instances and per-entity skeletal sources are also keyed by a monotonic registry spawn
-identity (whose high-water mark survives editor snapshot restore), preventing a new occupant from inheriting
-an old model, husk, failed-resolution result, or animation source.
+Late-spawn attachment reuses the same mission-lifetime graphic/ADM caches. Per-entity ADM resolution is a
+player-spawn invariant: the host retains the resource root and item database and binds every later
+local/remote player to its own `items.def` `anim_def` before its first authoritative body update, rather
+than leaving it on default `adm_id 0`. Rebuilding the animation registry invalidates every stored id, so
+the resolver rewinds its append-only high-water mark and repopulates all live entries. Play→Stop restore
+likewise rewinds `AiSystem` and the resolver mark before re-resolving the restored baseline; an equal entry
+count cannot hide restored default ids. Because packed pool handles are recycled, collision instances and
+per-entity skeletal sources are also keyed by a monotonic registry spawn identity (whose high-water mark
+survives editor snapshot restore), preventing a new occupant from inheriting an old model, husk,
+failed-resolution result, or animation source.
 
 **Mounted overlay selection is animation-owned and result-shared.** `AimOverlayInputs` carries a small
 `MountMode` (`OnFoot`, `Seated`, or `Gunner`) plus an explicit `mount_config_valid` / `mount_config` pair.
@@ -156,6 +162,10 @@ batch at the full 96×19 budget, six-Hz cadence, unchanged-snapshot cache, and r
 invalidation. F3 omits the local avatar and bounds posed/fallback remote targets to 80 units under its
 96-actor diagnostic cap. Headless dump confirms US01 and C4Ground (40+ clips, compressed) pose as humanoids
 with no collapse. User-validated US01 walk/idle in the object preview.
+
+GUT `nova_simulation_test::test_late_spawn_player_resolves_own_adm_before_configured_usegun_pose`
+reproduces the multiplayer spawn order and pins B50 `phrase_set=4` selecting US01's
+`anim_emplaced_5`; it may not silently fall back to the generic `anim_emplaced` pose.
 
 The mounted-selector slice is intended to be accepted only after focused native/GUT coverage pins:
 `phrase_set` presence (including unknown versus explicit zero), every witnessed seated/gunner row,

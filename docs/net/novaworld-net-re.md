@@ -6359,11 +6359,13 @@ reload/one-shot forced unscope + the pump's rescope. Live-verified (fp_clean_pro
 recoil clip), reload refill 24→30 with reserve 300→294 (the §5.58 refund math),
 mid-reload RMB refused, ADS engage fraction→1 with cam fov 80h→40h, disengage clean.
 
-**Divergences** (ledger D-WPN-1..15): the FUNCTION registry unported (std-only in all
+**Divergences** (ledger D-WPN-1..15 plus the D-WPN-26 runtime-builder addendum): the FUNCTION registry unported (std-only in all
 shipped data, D-WPN-1); single-pool ammo vs per-class pools (D-WPN-2); CanFire's
 busy-child/underwater/score-lock legs + kick sound gate (D-WPN-3); the heat model
 (`WeaponSlot_CalcAccumulatedHeat @ 0x53f780` internals unwitnessed, D-WPN-4); the
-weapon-switch machinery seams (D-WPN-5); local-player-only pump (D-WPN-6); interim
+weapon-switch machinery seams (D-WPN-5); local-player + occupied mounted-parent pump,
+with general non-local/unmounted coverage still open (D-WPN-6); production runtime
+action-table bake lacks the ADM-duration source for authored `auto` delays (D-WPN-26); interim
 ammo seed clipsize/startrounds (D-WPN-7); FSM↔net residual — authority/SP fire now
 appends the primary ring row (including ordinary hip/raise/3P subtype 12) and spawns
 `RoundSim` synchronously, while settled-FP/first-person-mounted zoom subtypes, joiner C2S 0x06/0x25
