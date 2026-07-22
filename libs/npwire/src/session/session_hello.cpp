@@ -467,7 +467,8 @@ std::vector<uint8_t> server_hello_to_bytes(const ServerHello &msg) {
 	append_string_field(buf, "CO", msg.co);
 	append_string_field(buf, "AP", msg.ap);
 	append_string_field(buf, "BDAT", msg.bdat);
-	append_u32_field(buf, "UT", msg.ut);
+	// [orig: NapiNPProtocol_SendServerInfoPacket @ 0x6204b0]
+	if (msg.ut) append_u32_field(buf, "UT", msg.ut);
 	append_string_field(buf, "PN", msg.pn);
 	append_bytes_field(buf, "PG", msg.pg.data(), msg.pg.size());
 	append_string_field(buf, "PV1", msg.pv1);
