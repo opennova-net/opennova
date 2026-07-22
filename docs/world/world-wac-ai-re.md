@@ -4005,9 +4005,10 @@ SpawnDeathPieces, clamps
 `g_snd_EXPLO_SHIP_TINY`, and installs `Entity_UpdateStaticDeathPhysics` even
 when SpawnDeathPieces rejects a fully submerged entity. With no husk model the
 callback body is a no-op; the matched-row `Flags |= 6` still follows. The port
-matches the callback ordering but gates on an authored `has_husk` name, not
-successful live model resolution, so missing/corrupt asset behavior remains
-D-ITEM-20. For unitType 3 it spawns the pieces and installs an explicit
+now matches that gate: `resolve_collision_instances` records successful live
+huskFinal/husk `NovaObjectData` resolution separately from the authored name,
+and the building callback reads that runtime bit. D-ITEM-20 closed 2026-07-22.
+For unitType 3 it spawns the pieces and installs an explicit
 `PiecePhysics` mode, but deliberately does not substitute generic falling: the
 specialized `DeathPiece_PhysicsUpdate` body remains D-ITEM-18. UnitType 11's
 common pieces and per-`KZ` blast path run, but its `Effect_ShockWaterBrdg` at
@@ -4194,7 +4195,7 @@ the FFI structs.
 | D-ITEM-17 | The sim records a building glass-break event and the presenter increments a diagnostic count only; it does not resolve `GLASS1..GLASS4` model user points, range-filter them against the blast, or spawn the retail shatter effects | `@ 0x4eb814-0x4eb85d` | blast-adjacent windows do not visibly shatter; a statistic is not a presentation implementation |
 | D-ITEM-18 | UnitType 3 spawns normal section pieces and installs an explicit `PiecePhysics` mode, but the shared production pass deliberately skips that mode rather than substituting Generic. Retail runs the specialized main-entity `DeathPiece_PhysicsUpdate` callback | `DeathPiece_PhysicsUpdate @ 0x48f500`: distinct air/water lateral motion, slope force, dual-blast, and landing legs | the unitType-3 husk does not receive its retail main-entity motion/presentation; the explicit sentinel prevents a falsely "matching" generic settle |
 | D-ITEM-19 | UnitType 11 runs pieces and the common per-`KZ` path, but does not resolve each husk `DEAD` user point or spawn `Effect_ShockWaterBrdg` there at water height | `Entity_SpawnDeathEffectsAtBones @ 0x4944c0` | destroyed bridges lack their authored per-point water-shock presentation; per-`KZ` blast positions were fixed separately by D-ITEM-5 |
-| D-ITEM-20 | Building Static/collapse dispatch gates on the authored presence of husk names (`ItemDeathTraits::has_husk`), while retail gates on a successfully loaded live huskFinal/husk model pointer | `Entity_ProcessBuildingDeath @ 0x49442c`; the pointer gate wraps only the callback body | valid shipped assets behave alike, but a missing/corrupt husk asset can still receive collapse sound and Static motion in the port where retail would leave the callback body untouched |
+| D-ITEM-20 | **FIXED 2026-07-22.** Building Static/collapse dispatch gates on `ItemDeathTraits::husk_model_loaded`, fed by successful live huskFinal/husk `NovaObjectData` resolution and kept separate from authored `has_husk` | `Entity_ProcessBuildingDeath @ 0x49442c`; the pointer gate wraps only the callback body | missing/corrupt husk assets receive the matched-row death flags, but no pieces, Static motion, or collapse sound; valid first-stage and final-only models both open the gate |
 
 ### 24.8 IDB write-backs (2026-07-17, saved)
 

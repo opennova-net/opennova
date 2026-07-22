@@ -657,7 +657,7 @@ void entity_update_death_transforms(World &world, Entity &target, bool silent) {
     if (!was_husked) target.death_motion = DeathMotionMode::None;
     uint32_t mask = 0;
     // The dispatch table @ 0x815410: every row spawns pieces and ORs Flags 6;
-    // buildings (5-8) additionally play the collapse sound and require a husk
+    // buildings (5-8) additionally play the collapse sound and require a live husk
     // [orig: Entity_ProcessBuildingDeath @ 0x494420]; bridges (11) add the
     // water shock at DEAD points (present-pass leg); the no-row default also
     // clears 0x20000 [orig: Flags & ~0x20006 | 6 @ 0x493f4b].
@@ -677,7 +677,7 @@ void entity_update_death_transforms(World &world, Entity &target, bool silent) {
         // still ORs the death flags after it [orig: the huskFinal||husk gate
         // @ 0x49442c wraps ONLY the callback body; Flags |= table flagBits
         // @ 0x493f63 runs regardless].
-        if (traits != nullptr && traits->has_husk) {
+        if (traits != nullptr && traits->husk_model_loaded) {
             mask = spawn_death_pieces(world, target);
             if (target.veh.slide_z > 0) target.veh.slide_z = 0;
             target.death_motion = DeathMotionMode::Static;
