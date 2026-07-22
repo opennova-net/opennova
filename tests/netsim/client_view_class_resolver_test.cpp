@@ -10,7 +10,7 @@
 // i.e. lands scattered around the local player (the #262-era "vehicles follow me"
 // symptom: parked vehicles became live placed nodes, rendering the junk).
 //
-// Three contracts:
+// Five contracts:
 //   1. A view carrying the items.def table walks a mixed frame — a header-only
 //      no-callback record (bldg/ewep form) followed by vehicle + infantry compacts —
 //      and decodes every position exactly (pipeline identity vs the lossy codec).
@@ -19,6 +19,10 @@
 //   3. The items.def table OUTRANKS the 0x0D pool-blanket learning: a pool-1
 //      no-callback type (an `ewep` emplacement) that arrived via 0x0D must still
 //      decode header-only.
+//   4. Lenient partial frames update recipient health only after the fixed tail
+//      decoded, independently of a later event-loop failure.
+//   5. Objective masks likewise commit only after the complete off-wire-gated
+//      16-byte phase-3 body decodes.
 
 #include "netsim/net_client_view.h"
 
@@ -215,6 +219,111 @@ bool run_items_table_outranks_pool_blanket() {
 	return true;
 }
 
+bool run_recipient_health_requires_a_decoded_tail() {
+	ns::NetClientView view([](uint16_t) { return nw::EntityClass::Unknown; });
+
+	// Establish a known valid sample first.
+	nw::FrameUpdate baseline;
+	baseline.flags2 = 1;
+	baseline.mount_handle = 0xFFFF;
+	baseline.health = 123;
+	view.apply(0x0A, nw::encode_frame_update(baseline));
+	if (!expect(view.state().local_health == 123 &&
+	                    view.state().health_updates_applied == 1,
+	            "complete recipient tail establishes health")) return false;
+
+	// The view intentionally counts/applies partial frames for diagnostic and
+	// presentation state, but this one ends before its selected sub-block and tail.
+	std::vector<uint8_t> short_frame(14, 0);
+	view.apply(0x0A, short_frame);
+	if (!expect(view.state().frames_applied == 2,
+	            "pre-tail partial frame remains visible to the lenient fold")) return false;
+	if (!expect(view.state().local_health == 123 &&
+	                    view.state().health_updates_applied == 1,
+	            "pre-tail partial frame preserves authoritative health")) return false;
+
+	// Conversely, failure after the tail does not invalidate health the retail
+	// handler already consumed. Append an unresolved tag-1 header before EOB.
+	nw::FrameUpdate later;
+	later.flags2 = 1;
+	later.mount_handle = 0xFFFF;
+	later.health = 77;
+	std::vector<uint8_t> malformed_event = nw::encode_frame_update(later);
+	malformed_event.pop_back();
+	malformed_event.insert(malformed_event.end(), {0x01, 0x34, 0x12, 0xEF, 0xBE});
+	nw::FrameUpdate decoded;
+	if (!expect(!nw::decode_frame_update(malformed_event.data(), malformed_event.size(),
+	                    [](uint16_t) { return nw::EntityClass::Unknown; }, decoded) &&
+	                    decoded.local_tail_present,
+	            "post-tail event failure retains explicit tail validity")) return false;
+	view.apply(0x0A, malformed_event);
+	return expect(view.state().local_health == 77 &&
+	                      view.state().health_updates_applied == 2,
+	              "post-tail partial frame advances authoritative health");
+}
+
+bool run_objectives_require_a_complete_phase3_block() {
+	ns::NetClientView view;
+	// Replay/bare-view folds learn the off-wire width hint from either session
+	// message before the first objective frame.
+	std::vector<uint8_t> session_config(51, 0);
+	session_config[12] = 0x20;
+	session_config[14] = 0x03; // little-endian field[3] = 0x00030020
+	view.apply(0x08, session_config);
+	if (!expect(view.game_type() == 0x30020,
+	            "S2C 0x08 teaches the view objective frame layout")) return false;
+	view.set_game_type(0);
+	const std::vector<uint8_t> full_info = {
+		0, 0, 0, 0, 0,       // five empty cstrings
+		0x20, 0x00, 0x03, 0x00, // extra = g_GameType
+		0, 0,                 // motd + game-name cstrings
+	};
+	view.apply(0x7B, full_info);
+	if (!expect(view.game_type() == 0x30020,
+	            "S2C 0x7B teaches the view objective frame layout")) return false;
+
+	// Establish a known authoritative sample first.
+	nw::FrameUpdate baseline;
+	baseline.flags2 = 3;
+	baseline.objective.present = true;
+	baseline.objective.state[0] = 0x11;
+	baseline.objective.state[1] = 0x22;
+	baseline.objective.state[2] = 0x44;
+	baseline.objective.state[3] = 0x88;
+	baseline.mount_handle = 0xFFFF;
+	view.apply(0x0A, nw::encode_frame_update(baseline));
+	const ns::ClientState &established = view.state();
+	if (!expect(established.objective_won == 0x11 &&
+	                    established.objective_lost == 0x22 &&
+	                    established.objective_show_win == 0x44 &&
+	                    established.objective_show_lose == 0x88 &&
+	                    established.objective_updates_applied == 1,
+	            "complete phase-3 block establishes objective masks")) return false;
+
+	// Cut a different sample ten bytes into its 16-byte objective body. The
+	// lenient frame fold may retain earlier fields, but must not publish a mixed
+	// partial/default objective snapshot over the last complete one.
+	nw::FrameUpdate truncated;
+	truncated.flags2 = 3;
+	truncated.objective.present = true;
+	truncated.objective.state[0] = 0xAA;
+	truncated.objective.state[1] = 0xBB;
+	truncated.objective.state[2] = 0xCC;
+	truncated.objective.state[3] = 0xDD;
+	truncated.mount_handle = 0xFFFF;
+	std::vector<uint8_t> short_objective = nw::encode_frame_update(truncated);
+	constexpr std::size_t kHeaderBytes = 12 + 2;
+	short_objective.resize(kHeaderBytes + 10);
+	view.apply(0x0A, short_objective);
+
+	const ns::ClientState &after = view.state();
+	return expect(after.objective_won == 0x11 && after.objective_lost == 0x22 &&
+	                      after.objective_show_win == 0x44 &&
+	                      after.objective_show_lose == 0x88 &&
+	                      after.objective_updates_applied == 1,
+	              "truncated phase-3 block preserves authoritative objective masks");
+}
+
 } // namespace
 
 int main() {
@@ -222,6 +331,8 @@ int main() {
 	ok &= run_items_table_sizes_mixed_frame();
 	ok &= run_default_view_desyncs_on_no_callback_record();
 	ok &= run_items_table_outranks_pool_blanket();
+	ok &= run_recipient_health_requires_a_decoded_tail();
+	ok &= run_objectives_require_a_complete_phase3_block();
 	if (ok) std::printf("client_view_class_resolver: OK\n");
 	return ok ? 0 : 1;
 }

@@ -48,11 +48,20 @@ struct ClientEntityState {
 	int32_t parent_local_pitch_bam = 0;
 	int32_t parent_local_roll_bam = 0;
 	bool parent_pose_valid = false;
-	// Last explicit compact lifecycle sample. `health_known` prevents a load-only
-	// row from treating its default zero as death.
+	// Raw entity flags from the latest compact organic record: PlayerCompactRecord::
+	// state_flags or InfantryCompactRecord::flags_byte. Bit 0 is hidden and bit 1
+	// is dead/undeployed. Spawns carry no compact flags, so `state_flags_known`
+	// distinguishes an unwitnessed zero from a witnessed alive sample.
 	uint8_t state_flags = 0;
+	bool state_flags_known = false;
+	// Last explicit compact health sample. `health_known` prevents a load-only
+	// row from treating its default zero as death.
 	uint16_t health_word = 0;
 	bool health_known = false;
+	// Advances on each witnessed dead -> alive edge. Keeping the epoch in the
+	// decoded view preserves a respawn even if several 0x0A frames are folded by
+	// one client pump before presentation runs.
+	std::uint32_t respawn_revision = 0;
 	bool seen_this_frame = false;
 };
 
@@ -65,6 +74,16 @@ struct ClientState {
 	int32_t anchor_y = 0;
 	int32_t anchor_z = 0;
 	int16_t local_health = 0;
+	// Advances only when the complete seven-byte recipient-local 0x0A tail was
+	// decoded. frames_applied remains the lenient partial-presentation counter.
+	std::uint32_t health_updates_applied = 0;
+	// Phase-3 objective masks, present when g_GameType bit 0x20000 is active.
+	// Text IDs remain mission-local; these four authoritative masks drive them.
+	std::uint32_t objective_won = 0;
+	std::uint32_t objective_lost = 0;
+	std::uint32_t objective_show_win = 0;
+	std::uint32_t objective_show_lose = 0;
+	std::uint32_t objective_updates_applied = 0;
 	std::vector<ClientEntityState> entities;
 	std::uint32_t frames_applied = 0;
 

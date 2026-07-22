@@ -49,6 +49,8 @@ struct FrameHeaderState {
 std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
                                     const std::vector<GameEntitySnapshot> &entities, uint8_t flags2,
                                     const FrameHeaderState &hdr,
+                                    uint32_t game_type,
+                                    const world::World::SubgoalState &subgoals,
                                     std::vector<RoundEventRecord> round_events = {}) {
 	FrameUpdate fu;
 	const int32_t ax = int32_t(ctx.spawn_x);
@@ -91,10 +93,16 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 		fu.timer.timer_seconds = -1; // dword_24C1958 = -1 -> no round time limit
 		break;
 	default:
-		// Sub-block 3 (gametype): 0 bytes on the wire for a non-objective gametype [orig gate
-		// g_GameType & 0x20000 @0x4ffc2d — off for co-op]. Sub-block 2 (env) is DEFERRED and never
-		// selected here (see emit_connection_s2c): our host does not author world.env, so emitting it
-		// would clobber the client's mission-loaded sky.
+		// Sub-block 3 (gametype): four objective i32s only when the shared
+		// g_GameType bit 0x20000 is set (Co-op 0x30020 is the captured case).
+		// The masks are the authoritative World::subgoals state consumed by
+		// the objective HUD on each recipient.
+		// Sub-block 2 (env) is deferred and never selected here.
+		fu.objective.present = (game_type & 0x20000u) != 0u;
+		fu.objective.state[0] = static_cast<int32_t>(subgoals.won);
+		fu.objective.state[1] = static_cast<int32_t>(subgoals.lost);
+		fu.objective.state[2] = static_cast<int32_t>(subgoals.show_win);
+		fu.objective.state[3] = static_cast<int32_t>(subgoals.show_lose);
 		break;
 	}
 
@@ -577,14 +585,15 @@ std::vector<RoundEventRecord> select_round_events(const world::World &w, Connect
 
 // Header wire size for a given flags2, mirroring encode_frame_update: 12-B anchor +
 // 2 flag bytes + the phase sub-block (0 weapon 11 B / 1 timer 6 B / 2 env 11 B /
-// 3 gametype 0 B) + the 7-B local tail + the 1-B event-loop terminator. The passenger
+// 3 gametype 0/16 B, selected by the off-wire objective gate) + the 7-B local tail +
+// the 1-B event-loop terminator. The passenger
 // block ((flags2 & 0xF) == 8) never fires on the {1,0,3} safe cycle.
-std::size_t frame_header_bytes(uint8_t flags2) {
+std::size_t frame_header_bytes(uint8_t flags2, uint32_t game_type) {
 	switch (flags2 & 0x03) {
 	case 0: return 12 + 2 + 11 + 7 + 1;
 	case 1: return 12 + 2 + 6 + 7 + 1;
 	case 2: return 12 + 2 + 11 + 7 + 1;
-	default: return 12 + 2 + 0 + 7 + 1;
+	default: return 12 + 2 + (((game_type & 0x20000u) != 0u) ? 16 : 0) + 7 + 1;
 	}
 }
 
@@ -651,7 +660,8 @@ void drain_connection_c2s(world::World &world, const Connection &conn) {
 // npruntime's Server_TickUpdate fan over connection_list.
 void emit_connection_s2c(const world::World &w, Connection &conn,
                          const std::vector<GameEntitySnapshot> &ents,
-                         const PlayerReplicationState &fallback_anchor) {
+                         const PlayerReplicationState &fallback_anchor,
+                         uint32_t game_type) {
 	if (conn.transport == nullptr) return;
 	const PlayerReplicationState anchor = anchor_for_connection(w, conn, fallback_anchor);
 
@@ -677,7 +687,7 @@ void emit_connection_s2c(const world::World &w, Connection &conn,
 	// view RENDERS FROM the loopback 0x0A fold (ADR 0011), so the loopback connection gets
 	// the full record set; that frame never leaves the process, so retail interop is
 	// unaffected (D-NET-140).
-	const std::size_t header_bytes = frame_header_bytes(flags2);
+	const std::size_t header_bytes = frame_header_bytes(flags2, game_type);
 	// Round events FIRST under the shared frame budget [orig: the @0x50f312 interleave
 	// serves tag-2 refs inside the SAME @0x50f070 budget loop as the tag-1 records].
 	// The first grouped-order port handed rounds only the leftovers — a real-world
@@ -711,7 +721,8 @@ void emit_connection_s2c(const world::World &w, Connection &conn,
 		}
 	}
 	conn.transport->host_send(kTag0aFrameUpdate,
-	                          build_0a_frame(anchor, selected, flags2, hs, std::move(rounds)));
+	                          build_0a_frame(anchor, selected, flags2, hs, game_type, w.subgoals,
+	                                         std::move(rounds)));
 }
 
 } // namespace opennova::netsim

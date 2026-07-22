@@ -702,6 +702,29 @@ int test_frame_update_roundtrip() {
 		EXPECT(out.passenger.has_seat && out.passenger.seat_yaw == 0xAA11 && out.passenger.seat_pitch == 0xBB22);
 	}
 
+	// (d) objective-gametype phase 3 carries a wire-invisible 16-byte block.
+	// The receiver must learn this layout from 0x7B extra == g_GameType.
+	{
+		FrameUpdate in;
+		in.flags2 = 0x03;
+		in.objective.present = true;
+		in.objective.state[0] = 0x11223344;
+		in.objective.state[1] = -2;
+		in.objective.state[2] = 0x55667788;
+		in.objective.state[3] = -4;
+		in.mount_handle = 0xFFFF;
+		in.health = 88;
+		std::vector<uint8_t> wire = encode_frame_update(in);
+		FrameUpdate out;
+		EXPECT(decode_frame_update(wire.data(), wire.size(), class_of, out,
+		                           /*is_objective_gametype=*/true));
+		EXPECT(out.complete && out.consumed == wire.size());
+		EXPECT(out.objective.present && out.objective.state[0] == 0x11223344 &&
+		       out.objective.state[1] == -2 && out.objective.state[2] == 0x55667788 &&
+		       out.objective.state[3] == -4);
+		EXPECT(out.local_tail_present && out.health == 88);
+	}
+
 	std::printf("PASS frame_update_roundtrip\n");
 	return 0;
 }

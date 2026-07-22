@@ -269,6 +269,87 @@ bool run_compact_pose_fields_survive_client_fold() {
 	return true;
 }
 
+nw::FrameUpdate compact_lifecycle_frame(uint8_t player_flags,
+		uint8_t infantry_flags) {
+	nw::FrameUpdate frame;
+	frame.flags2 = 0;
+	frame.mount_handle = 0xFFFF;
+	frame.health = 100;
+
+	nw::FrameUpdateRecord player;
+	player.handle = 0x0001;
+	player.type_id = 0x14B9;
+	player.cls = nw::EntityClass::Player;
+	player.player.carrier_handle = 0xFFFF;
+	player.player.state_flags = player_flags;
+	player.player.anim_def_index = 0xFF;
+	frame.records.push_back(player);
+
+	nw::FrameUpdateRecord infantry;
+	infantry.handle = 0x0002;
+	infantry.type_id = 0x2000;
+	infantry.cls = nw::EntityClass::Infantry;
+	infantry.infantry.vehicle_slot_handle = 0xFFFF;
+	infantry.infantry.flags_byte = infantry_flags;
+	frame.records.push_back(infantry);
+	return frame;
+}
+
+// Compact organic flags are the remote lifecycle authority: bit 0 hides and
+// bit 1 marks dead/undeployed. A render pass can trail the network pump, so the
+// decoded state also carries a monotonic dead->alive epoch; final alive state
+// alone would lose two complete respawns folded below by one pump().
+bool run_compact_lifecycle_survives_multi_frame_pump() {
+	ns::LoopbackChannel channel;
+	ns::NetClientView view([](uint16_t type_id) {
+		return type_id == 0x14B9 ? nw::EntityClass::Player :
+				nw::EntityClass::Infantry;
+	});
+
+	// An initially witnessed dead record establishes the known state, but is not
+	// itself a respawn edge. Retain high/raw bits rather than normalizing the byte.
+	channel.host_send(ns::kTag0aFrameUpdate,
+			nw::encode_frame_update(compact_lifecycle_frame(0x83, 0x42)));
+	view.pump(channel);
+	const ns::ClientEntityState *player = view.state().find(0x0001);
+	const ns::ClientEntityState *infantry = view.state().find(0x0002);
+	if (!expect(player != nullptr && player->state_flags_known &&
+				player->state_flags == 0x83 && player->respawn_revision == 0,
+			"initial player lifecycle sample is known without a false respawn"))
+		return false;
+	if (!expect(infantry != nullptr && infantry->state_flags_known &&
+				infantry->state_flags == 0x42 && infantry->respawn_revision == 0,
+			"initial infantry lifecycle sample retains its raw flag byte"))
+		return false;
+
+	// alive, dead, alive: two dead->alive edges for each organic, all folded by
+	// one pump before presentation gets a chance to inspect final state.
+	channel.host_send(ns::kTag0aFrameUpdate,
+			nw::encode_frame_update(compact_lifecycle_frame(0x80, 0x41)));
+	channel.host_send(ns::kTag0aFrameUpdate,
+			nw::encode_frame_update(compact_lifecycle_frame(0x82, 0x43)));
+	channel.host_send(ns::kTag0aFrameUpdate,
+			nw::encode_frame_update(compact_lifecycle_frame(0x81, 0x40)));
+	view.pump(channel);
+	player = view.state().find(0x0001);
+	infantry = view.state().find(0x0002);
+	if (!expect(view.frames_applied() == 4,
+			"one pump folds every queued lifecycle frame")) return false;
+	if (!expect(player != nullptr && player->state_flags == 0x81 &&
+				(player->state_flags & 0x01u) != 0u &&
+				(player->state_flags & 0x02u) == 0u &&
+				player->respawn_revision == 2,
+			"player final flags and both respawn edges survive the pump"))
+		return false;
+	if (!expect(infantry != nullptr && infantry->state_flags == 0x40 &&
+				(infantry->state_flags & 0x01u) == 0u &&
+				(infantry->state_flags & 0x02u) == 0u &&
+				infantry->respawn_revision == 2,
+			"infantry final flags and both respawn edges survive the pump"))
+		return false;
+	return true;
+}
+
 // The host's registry order emits pool-0 organics before their pool-1 carriers.
 // A frame is one state sample, so a child record must lift through the carrier's
 // pose from that same frame even when the parent record appears later. A truly
@@ -788,6 +869,7 @@ int main() {
 	const bool ok = run_client_state_handle_lookup_contract() &&
 	                run() &&
 	                run_compact_pose_fields_survive_client_fold() &&
+	                run_compact_lifecycle_survives_multi_frame_pump() &&
 	                run_carrier_local_pose_lifts_after_later_carrier_record() &&
 	                run_carrier_pitch_roll_persists_across_live_records() &&
 	                run_parented_pool_spawn_follows_and_retires() &&

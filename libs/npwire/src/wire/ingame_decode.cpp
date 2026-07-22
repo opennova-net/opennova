@@ -889,12 +889,12 @@ bool decode_frame_update(const uint8_t *body, size_t len,
 		// capture to carry it (docs/net/novaworld-net-re.md D-NET-75); the 4 i32 land
 		// in dword_AC86F4/F0/EC/E8.
 		if (is_objective_gametype) {
-			out.objective.present  = true;
 			out.objective.state[0] = c.i32();
 			out.objective.state[1] = c.i32();
 			out.objective.state[2] = c.i32();
 			out.objective.state[3] = c.i32();
 			if (!c.ok) return finish(false);
+			out.objective.present = true;
 		}
 		break;
 	}
@@ -905,6 +905,7 @@ bool decode_frame_update(const uint8_t *body, size_t len,
 	out.health          = c.i16();
 	out.state_word      = c.i16();
 	if (!c.ok) return finish(false);
+	out.local_tail_present = true;
 
 	// Conditional vehicle-passenger record (sub-block 0 + flags2 bit 3 set).
 	if ((out.flags2 & 0x0F) == 8) {

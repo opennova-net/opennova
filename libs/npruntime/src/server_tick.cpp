@@ -490,7 +490,8 @@ void Server_TickUpdate(NapiNPServerCtx &ctx, const PlayerReplicationState &fallb
 		const std::vector<GameEntitySnapshot> ents = netsim::snapshot_world(world);
 		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 			if (!is_in_match(conn)) continue;
-			netsim::emit_connection_s2c(world, conn.link, ents, fallback_anchor);
+			netsim::emit_connection_s2c(world, conn.link, ents, fallback_anchor,
+			                            ctx.config.game_type);
 		}
 	}
 

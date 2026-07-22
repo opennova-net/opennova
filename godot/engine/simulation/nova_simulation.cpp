@@ -3677,6 +3677,8 @@ void NovaSimulation::set_item_seat_specs(const Array &p_specs) {
 		const Variant seats_v = spec_d.get("seats", Array());
 		if (seats_v.get_type() != Variant::ARRAY) continue;
 		const Array seats_a = seats_v;
+		bool retail_slots_used[10] = {};
+		int inferred_passenger_slot = 0;
 		for (int64_t j = 0; j < seats_a.size(); ++j) {
 			const Variant seat_v = seats_a[j];
 			if (seat_v.get_type() != Variant::DICTIONARY) continue;
@@ -3685,6 +3687,42 @@ void NovaSimulation::set_item_seat_specs(const Array &p_specs) {
 			opennova::world::Seat seat;
 			seat.type = seat_type_from_variant(static_cast<int>(seat_d.get("type", 0)));
 			if (seat.type == opennova::world::SeatType::None) continue;
+			int retail_slot = -1;
+			if (seat_d.has("retail_slot")) {
+				retail_slot = static_cast<int>(seat_d.get("retail_slot", -1));
+			} else {
+				// Compatibility for tests/tools that construct seat dictionaries
+				// directly. Production extraction supplies the explicit slot.
+				switch (seat.type) {
+					case opennova::world::SeatType::Passenger:
+						while (inferred_passenger_slot < 8 &&
+						       retail_slots_used[inferred_passenger_slot])
+							++inferred_passenger_slot;
+						if (inferred_passenger_slot < 8)
+							retail_slot = inferred_passenger_slot++;
+						break;
+					case opennova::world::SeatType::Controller:
+					case opennova::world::SeatType::Driver:
+						retail_slot = 8;
+						break;
+					case opennova::world::SeatType::Gunner:
+						retail_slot = 9;
+						break;
+					default:
+						break;
+				}
+			}
+			const bool slot_matches_type =
+					(retail_slot >= 0 && retail_slot < 8 &&
+					 seat.type == opennova::world::SeatType::Passenger) ||
+					(retail_slot == 8 &&
+					 opennova::world::is_vehicle_control_seat(seat.type)) ||
+					(retail_slot == 9 &&
+					 seat.type == opennova::world::SeatType::Gunner);
+			if (slot_matches_type && !retail_slots_used[retail_slot]) {
+				seat.retail_slot = static_cast<uint8_t>(retail_slot);
+				retail_slots_used[retail_slot] = true;
+			}
 			seat.bone_index = static_cast<uint8_t>(
 			    std::clamp(static_cast<int>(seat_d.get("bone_index", 0)), 0, 255));
 			seat.pose_index = static_cast<uint8_t>(
@@ -4043,6 +4081,7 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_round_outcome_debug"), &NovaSimulation::get_round_outcome_debug);
 	ClassDB::bind_static_method("NovaSimulation", D_METHOD("ai_state_name", "state"), &NovaSimulation::ai_state_name);
 	ClassDB::bind_static_method("NovaSimulation", D_METHOD("infantry_anim_key", "state"), &NovaSimulation::infantry_anim_key);
+	ClassDB::bind_static_method("NovaSimulation", D_METHOD("infantry_anim_flags", "state"), &NovaSimulation::infantry_anim_flags);
 	ClassDB::bind_method(D_METHOD("get_entity_count"), &NovaSimulation::get_entity_count);
 	ClassDB::bind_method(D_METHOD("get_entity_kind", "index"), &NovaSimulation::get_entity_kind);
 	ClassDB::bind_method(D_METHOD("get_entity_index", "index"), &NovaSimulation::get_entity_index);
@@ -4165,9 +4204,11 @@ void NovaSimulation::_bind_methods() {
 	BIND_ENUM_CONSTANT(PF_BODY_ANIM_SLOT);
 	BIND_ENUM_CONSTANT(PF_ANIM_STATE);
 	BIND_ENUM_CONSTANT(PF_ANIM_PHASE_TICKS);
+	BIND_ENUM_CONSTANT(PF_ANIM_REMOTE_REQUEST);
 	BIND_ENUM_CONSTANT(PF_HIDDEN);
 	BIND_ENUM_CONSTANT(PF_LOCAL_VIEW_SUPPRESSED);
 	BIND_ENUM_CONSTANT(PF_ALIVE);
+	BIND_ENUM_CONSTANT(PF_RESPAWN_REVISION);
 	BIND_ENUM_CONSTANT(PF_TYPE_ID);
 	BIND_ENUM_CONSTANT(PF_WIRE_HANDLE);
 	BIND_ENUM_CONSTANT(PF_AIM_OVERLAY_VALID);
@@ -4331,6 +4372,10 @@ void NovaSimulation::bringup_host_runtime(const opennova::bms::File &file) {
 		// The host's own client view (HostClient role: recv-fold only, 0x0C suppressed). Folds host_loop_
 		// each frame into the ClientState the present pass reads.
 		runtime_ = std::make_unique<np::ClientRuntime>(host_loop_);
+		// Phase-3 0x0A objective width is gated by the same g_GameType
+		// carried to remote clients in 0x7B extra; the local loopback has no
+		// handshake, so seed its view directly from the consolidated config.
+		runtime_->view().set_game_type(host_config.game_type);
 
 		// Seed the look heading from the auto-spawned player's facing so the body starts aligned (the
 		// motor drives entity Yaw from player_input_.look_heading each frame, else input snaps it to 0).
@@ -4465,6 +4510,10 @@ void NovaSimulation::joiner_pump() {
 
 	// Run the client frame: recv-fold (-> ClientState) + connect-drive + the C2S 0x0C uplink (gated
 	// InMatch && deployed inside the runtime). Build the uplink from L once it exists.
+	const uint32_t health_updates_before =
+			runtime_->state().health_updates_applied;
+	const uint32_t objective_updates_before =
+			runtime_->state().objective_updates_applied;
 	std::vector<std::vector<uint8_t>> outs;
 	const bool have_L = joiner_local_spawned_ && world_->ai && world_->cached.local_player.valid();
 	const opennova::world::Entity *e = have_L ? world_->registry.get(world_->cached.local_player) : nullptr;
@@ -4476,6 +4525,17 @@ void NovaSimulation::joiner_pump() {
 		outs = runtime_->Client_ProcessNetworkFrame(now);
 	}
 	for (const std::vector<uint8_t> &dg : outs) ship_to_host(dg);
+	const bool received_authoritative_health =
+			runtime_->state().health_updates_applied != health_updates_before;
+	const bool received_authoritative_objectives =
+			runtime_->state().objective_updates_applied != objective_updates_before;
+	if (received_authoritative_objectives) {
+		const opennova::netsim::ClientState &client = runtime_->state();
+		world_->subgoals.won = client.objective_won;
+		world_->subgoals.lost = client.objective_lost;
+		world_->subgoals.show_win = client.objective_show_win;
+		world_->subgoals.show_lose = client.objective_show_lose;
+	}
 
 	// On reaching in-match (detected by the recv-fold above): learn H + spawn L at the host-advertised
 	// pose. L is the joiner's OWN motor-driven pool-0 entity (publishes cached.local_player); H is the
@@ -4491,6 +4551,39 @@ void NovaSimulation::joiner_pump() {
 		player_input_.look_heading = opennova::world::bam_heading_from_mission_yaw_deg(spawn.yaw);
 		stance_latch_ = 0;
 		look_px_accum_x_ = look_px_accum_y_ = 0.0f;
+	}
+
+	// The 0x0A tail is the authoritative health source for the recipient's OWN
+	// player. H belongs to the host's handle space; apply that recipient-local
+	// scalar to the joiner's distinct motor entity L without touching L's
+	// predicted pose. A fresh-frame guard prevents ClientState's pre-frame zero
+	// default from killing L during the handshake. Once L is dead, a later stale
+	// positive tail is ignored: retail requires the separate deploy edge before
+	// clearing Flags bit 1 and restoring health.
+	// [orig: tail health read @0x430428; store to local Health @0x4305df]
+	if (received_authoritative_health && joiner_local_spawned_ &&
+			world_->cached.local_player.valid()) {
+		const opennova::world::EntityHandle local_h =
+				world_->cached.local_player;
+		opennova::world::Entity *local =
+				world_->registry.get(local_h);
+		AiEntity *local_ai =
+				world_->ai ? world_->ai->for_handle(local_h) : nullptr;
+		if (local != nullptr && local_ai != nullptr) {
+			// ClientRuntime latches deployment closed on any decoded zero tail,
+			// even if a later packet in this recv pump carries stale positive HP.
+			const int16_t health = runtime_->deployed()
+					? runtime_->state().local_health : 0;
+			if (health <= 0) {
+				local->health = health;
+				local_ai->health = health;
+				local->alive = false;
+				local->flags |= 2u;
+			} else if (local->alive && (local->flags & 2u) == 0u) {
+				local->health = health;
+				local_ai->health = health;
+			}
+		}
 	}
 	++now_tick_;
 }
@@ -6583,6 +6676,7 @@ Dictionary NovaSimulation::get_entity_debug(int p_index) const {
 				Dictionary d;
 				d["index"] = i;
 				d["type"] = static_cast<int>(seat.type);
+				d["retail_slot"] = static_cast<int>(seat.retail_slot);
 				d["bone_index"] = static_cast<int>(seat.bone_index);
 				d["pose_index"] = static_cast<int>(seat.pose_index);
 				d["source_name"] = String(seat.source_name.c_str());
@@ -6657,6 +6751,11 @@ String NovaSimulation::infantry_anim_key(int p_state) {
 	const char *name = opennova::world::kInfantryAnimNames[p_state];
 	if (!name || !name[0]) return String();
 	return String("anim_") + String(name);
+}
+
+int64_t NovaSimulation::infantry_anim_flags(int p_state) {
+	if (p_state < 0 || p_state >= opennova::world::kInfantryAnimStateCount) return 0;
+	return static_cast<int64_t>(opennova::world::kInfantryAnimFlags[p_state]);
 }
 
 int NovaSimulation::get_entity_count() const {
@@ -7226,9 +7325,10 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 		r[PF_POS_X] = 0.0f; r[PF_POS_Y] = 0.0f; r[PF_POS_Z] = 0.0f;
 		r[PF_PITCH_DEG] = 0.0f; r[PF_YAW_DEG] = 0.0f; r[PF_ROLL_DEG] = 0.0f;
 		r[PF_PHASE1] = 0.0f; r[PF_ACTIVE1] = 0.0f; r[PF_PHASE2] = 0.0f; r[PF_ACTIVE2] = 0.0f;
-		r[PF_BODY_ANIM_SLOT] = -1.0f; r[PF_ANIM_STATE] = -1.0f; r[PF_ANIM_PHASE_TICKS] = 0.0f;
+		r[PF_BODY_ANIM_SLOT] = -1.0f; r[PF_ANIM_STATE] = -1.0f; r[PF_ANIM_PHASE_TICKS] = -1.0f;
+		r[PF_ANIM_REMOTE_REQUEST] = 0.0f;
 		r[PF_HIDDEN] = 0.0f; r[PF_LOCAL_VIEW_SUPPRESSED] = 0.0f;
-		r[PF_ALIVE] = 1.0f;
+		r[PF_ALIVE] = 1.0f; r[PF_RESPAWN_REVISION] = 0.0f;
 		r[PF_TYPE_ID] = 0.0f; r[PF_WIRE_HANDLE] = 0.0f;
 		for (int field = PF_AIM_OVERLAY_VALID; field < PF_STRIDE; ++field)
 			r[field] = 0.0f;
@@ -7285,6 +7385,21 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 						 (mount_def->flags2 &
 						  opennova::world::weapon_flag2::kInvisible) != 0))
 					r[PF_LOCAL_VIEW_SUPPRESSED] = 1.0f;
+			}
+		}
+		// A joiner cannot resolve host wire handles through its local registry.
+		// Organic lifecycle therefore comes straight from the raw compact byte:
+		// bit 0 hides, bit 1 is dead/undeployed. The revision survives multiple
+		// decoded frames between render passes and gives presentation a stable
+		// signal to reset one-shot/body-channel state on respawn.
+		// Both roles fold compact lifecycle records. Preserve the epoch on the
+		// host too: WirePresentPass renders admitted remote players that have no
+		// placed mission node.
+		r[PF_RESPAWN_REVISION] = static_cast<float>(es.respawn_revision);
+		if (joiner_) {
+			if (es.state_flags_known) {
+				r[PF_HIDDEN] = (es.state_flags & 0x01u) != 0u ? 1.0f : 0.0f;
+				r[PF_ALIVE] = (es.state_flags & 0x02u) == 0u ? 1.0f : 0.0f;
 			}
 		}
 		EmplacedWeaponControls emplaced;
@@ -7376,6 +7491,18 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 						&collapse_right_hand)) {
 				r[PF_ANIM_STATE] =
 						static_cast<float>(es.anim_state_id);
+				r[PF_ANIM_REMOTE_REQUEST] = 1.0f;
+				// The player compact's byte 15 is the authority's elapsed
+				// half-frame ticks in the current body loop. Retail applies it
+				// to remote players as the anim-channel phase seed. Infantry
+				// compacts carry only the state byte, so their -1 sentinel tells
+				// presentation to advance the selected clip locally.
+				// [orig: player write @0x4c0cf2; remote apply @0x4c11a6;
+				//  AnimMap_UpdateEntity consumes entity+0x377 @0x40b74b]
+				if (es.cls == opennova::EntityClass::Player) {
+					r[PF_ANIM_PHASE_TICKS] =
+							static_cast<float>(es.anim_channel_ratio);
+				}
 				r[PF_RIGHT_HAND_COLLAPSED] =
 						collapse_right_hand ? 1.0f : 0.0f;
 				opennova::anim::AimOverlayAngles

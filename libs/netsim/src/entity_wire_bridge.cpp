@@ -291,32 +291,45 @@ FullEntitySpawnRecord build_full_entity_spawn(const world::Entity &e,
                                               world::EntityHandle recipient_own) {
 	FullEntitySpawnRecord rec;
 	rec.slot_id = e.handle.packed;
-	rec.item_type_id = static_cast<uint16_t>(e.item_id);
-	// items.def `type` byte (itemDef+0x5C) — the value that lets the client run the rebuild at
-	// all (@0x433b5a; ItemType_Person=3 additionally gates ADM/anim registration @0x433d6e).
-	// The engine's pools ARE typed (pool 0 = organics/person, pool 1 = vehicles) and the retail
-	// 0x0F handler only serves pools 0/1, so derive from the pool until world::Entity carries
-	// the resolved item-def type.
-	rec.item_type = (e.handle.pool() == 0) ? 3u : 1u;
+	// Both fields are dereferenced from entity+0x20 ItemDef. A null def writes zero for each,
+	// which is load-bearing: item_type==0 makes the client stop after destroy+memset instead of
+	// rebuilding the slot. [orig: serialize_object_to_buffer @0x504d79/@0x504dc8;
+	// NapiNPClientMsg_FullEntitySpawn gate @0x433b5a]
+	rec.item_type_id = e.has_item_def ? static_cast<uint16_t>(e.item_id) : 0;
+	rec.item_type = e.has_item_def ? e.item_type : 0;
 	rec.team = e.team;
 	rec.minimap_flags =
 			(e.item_id == kPlayerInfantryTypeId) ? player_wire_flags(e, recipient_own) : 0;
 	rec.entity_flags = e.owner_connection_id;
-	// Retail gates the name on itemDef attrib & 0x100000 (aidata — the player def carries it,
-	// JOX "Player #1, Multiplayer"). Entity::is_ai_capable is not yet populated for spawned
-	// players, so send the name we have: an unnamed entity yields the empty string either way,
-	// and the client re-checks its LOCAL def attrib before copying (@0x433d3e).
-	rec.entity_name = e.name;
-	// Mount links: the ridden vehicle lives at entity+364 [orig: Entity_AttachToVehicleSlot
-	// @0x4946d0 writes occupant+364]; entity+368 (attach parent) and entity+40 (ground entity)
-	// are not modeled on world::Entity and stay 0xFFFF.
-	if (e.mounted && e.mount_target.valid()) rec.parent_entity_handle = e.mount_target.packed;
-	// Seat block: one bit per seat this entity OFFERS (the Seat vector mirrors the def's seat
-	// list = itemDef+604), occupant handle or 0xFFFF [orig: entity+400+2i].
-	for (size_t i = 0; i < e.seats.size() && i < 8; ++i) {
-		rec.seat_mask |= static_cast<uint8_t>(1u << i);
-		rec.mount_handles[i] =
-				e.seats[i].occupant.valid() ? e.seats[i].occupant.packed : 0xFFFFu;
+	// The name rides only when the resolved ItemDef carries AIData. Use the raw attrib source,
+	// rather than name presence or a pool heuristic, so a null/non-AI def emits the required
+	// one-byte empty cstr. [orig: serialize_object_to_buffer @0x504e20..0x504e7c]
+	if (e.has_item_def && (e.item_attrib & 0x100000u) != 0) rec.entity_name = e.name;
+	// The three live relationship pointers serialize independently; do not infer one from
+	// mounted, because the original simply resolves each stored pointer to its pool handle.
+	// [orig: serialize_object_to_buffer @0x504e8c..0x504fb4]
+	if (e.primary_occupant.valid()) rec.parent_vehicle_handle = e.primary_occupant.packed;
+	if (e.ground_target.valid()) rec.ground_entity_handle = e.ground_target.packed;
+	if (e.mount_target.valid()) rec.parent_entity_handle = e.mount_target.packed;
+	// A live initialized entity carries invalid handles in every empty slot. Slots 0..7
+	// are the sparse passenger mask, slot 8 is ctrlx/drvrx, and slot 9 is UseGun.
+	// Entity::seats stays dense for gameplay and carries the fixed retail slot explicitly.
+	// [orig: itemDef+604/+605..+614; entity+400..+418]
+	if (e.has_item_def) {
+		rec.mount_handle_8 = 0xFFFFu;
+		rec.mount_handle_9 = 0xFFFFu;
+		for (const world::Seat &seat : e.seats) {
+			const uint16_t occupant =
+					seat.occupant.valid() ? seat.occupant.packed : 0xFFFFu;
+			if (seat.retail_slot < 8) {
+				rec.seat_mask |= static_cast<uint8_t>(1u << seat.retail_slot);
+				rec.mount_handles[seat.retail_slot] = occupant;
+			} else if (seat.retail_slot == 8) {
+				rec.mount_handle_8 = occupant;
+			} else if (seat.retail_slot == 9) {
+				rec.mount_handle_9 = occupant;
+			}
+		}
 	}
 	rec.pos_x = world::to_fixed(e.position.x);
 	rec.pos_y = world::to_fixed(e.position.y);
@@ -324,6 +337,8 @@ FullEntitySpawnRecord build_full_entity_spawn(const world::Entity &e,
 	// Yaw high word — the client restores Yaw = (i16)heading_hi << 16 (@0x433aa1), so this is
 	// the engine-frame heading BAM's top half (same convention as the 0x0C orientation).
 	rec.heading_hi = static_cast<uint16_t>(static_cast<uint32_t>(engine_heading_bam(e.yaw)) >> 16);
+	rec.pitch_hi = static_cast<uint16_t>(static_cast<uint32_t>(engine_axis_bam(e.pitch)) >> 16);
+	rec.ai_state = static_cast<uint8_t>(e.ai_state); // entity+692 low byte, serialized raw
 	// Same field sources as the 0x0C organic record: entity+0x374 raw + the per-team minimap id
 	// (see build_pool0_organic_batch; D-NET-146/137).
 	rec.anim_slot = e.anim_slot;
@@ -331,6 +346,10 @@ FullEntitySpawnRecord build_full_entity_spawn(const world::Entity &e,
 			? (e.minimap_net_id != 0 ? e.minimap_net_id : player_minimap_net_id(e))
 			: e.net_id;
 	rec.player_class = player_class_for_wire(e);
+	// The wire struct retains its early alert_level name, but the grilled source is refNum.
+	// entity+340 remains the sole unmodeled live-record byte and therefore stays zero.
+	rec.alert_level = e.ref_num;
+	rec.sub_type = e.sub_type;
 	return rec;
 }
 

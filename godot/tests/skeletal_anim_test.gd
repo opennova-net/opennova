@@ -518,12 +518,90 @@ func test_play_body_clip_at_pins_ida_phase_ticks() -> void:
 
 	model.call("play_body_clip_at", "anim_walk_forward", phase_ticks)
 	var pinned_pose := model.get_skeleton().get_bone_pose_position(0)
-	model._process(0.5)
+	model.advance_body_animation(0.5)
 
 	assert_almost_eq(model.get_animation_time(), expected_time, 0.001,
 		"IDA half-frame phase ticks map to skeleton pose seconds")
 	assert_true(model.get_skeleton().get_bone_pose_position(0).is_equal_approx(pinned_pose),
 		"externally phased playback does not free-run between sim snapshots")
+
+
+func test_play_body_clip_seeded_consumes_ticks_then_free_runs() -> void:
+	var model = NovaObjectModelScript.new()
+	add_child_autofree(model)
+	model.set_skeletal_anim(_loaded_skeletal())
+	model.set_object_data(_open(SHED))
+	var fps: float = model.get_skeletal_anim().get_clip_fps("anim_walk_forward")
+	var expected := 5.0 / (2.0 * fps)
+
+	model.play_body_clip_seeded("anim_walk_forward", 5)
+	assert_almost_eq(model.get_animation_time(), expected, 0.001,
+		"the accepted player transition consumes its half-frame tick seed")
+	model.advance_body_animation(0.05)
+	assert_false(is_equal_approx(model.get_animation_time(), expected),
+		"a seeded remote clip advances locally on the very next render frame")
+
+
+func test_remote_body_same_state_does_not_rescrub_player_phase() -> void:
+	var model = NovaObjectModelScript.new()
+	add_child_autofree(model)
+	model.set_skeletal_anim(_loaded_skeletal())
+	model.set_object_data(_open(SHED))
+	var flags := int(NovaSimulation.infantry_anim_flags(1))
+
+	model.apply_remote_body_state(1, "anim_walk_forward", flags, 10)
+	model.advance_body_animation(0.05)
+	var locally_advanced := model.get_animation_time()
+	model.apply_remote_body_state(1, "anim_walk_forward", flags, 22)
+	assert_almost_eq(model.get_animation_time(), locally_advanced, 0.001,
+		"steady-state off15 samples do not hard-scrub a free-running channel")
+
+
+func test_remote_body_locked_state_promotes_pending_at_tick_zero() -> void:
+	var model = NovaObjectModelScript.new()
+	add_child_autofree(model)
+	model.set_skeletal_anim(_loaded_skeletal())
+	model.set_object_data(_open(SHED))
+	var locked_flags := int(NovaSimulation.infantry_anim_flags(41))
+	assert_ne(locked_flags & 0x4, 0, "state 41 is transition-locked in the retail table")
+
+	model.apply_remote_body_state(41, "anim_idle", locked_flags, 0)
+	model.apply_remote_body_state(1, "anim_walk_forward",
+			int(NovaSimulation.infantry_anim_flags(1)), 200)
+	assert_eq(model.get_active_body_clip(), "anim_idle",
+		"a locked current clip defers the incoming wire request")
+	var current_length: float = model.get_skeletal_anim().get_clip_length("anim_idle")
+	assert_gt(current_length, 0.0)
+	model.advance_body_animation(current_length + 0.01)
+	assert_eq(model.get_active_body_clip(), "anim_walk_forward",
+		"the queued request promotes when the current clip completes")
+	assert_almost_eq(model.get_animation_time(), 0.0, 0.001,
+		"queued off15 belongs to the old channel; promotion starts at tick zero")
+
+
+func test_remote_body_exit_gate_accepts_only_incoming_flag_one() -> void:
+	var model = NovaObjectModelScript.new()
+	add_child_autofree(model)
+	model.set_skeletal_anim(_loaded_skeletal())
+	model.set_object_data(_open(SHED))
+	var exit_flags := int(NovaSimulation.infantry_anim_flags(115))
+	var blocked_flags := int(NovaSimulation.infantry_anim_flags(43))
+	var interrupt_flags := int(NovaSimulation.infantry_anim_flags(1))
+	assert_ne(exit_flags & 0x20, 0, "state 115 uses the retail exit gate")
+	assert_eq(blocked_flags & 0x1, 0)
+	assert_ne(interrupt_flags & 0x1, 0)
+
+	model.apply_remote_body_state(115, "anim_idle", exit_flags, 0)
+	model.apply_remote_body_state(43, "anim_walk_forward", blocked_flags, 90)
+	assert_eq(model.get_active_body_clip(), "anim_idle",
+		"an incoming state without flag 0x1 queues behind an exit-gated clip")
+	var fps: float = model.get_skeletal_anim().get_clip_fps("anim_run_forward")
+	var expected := 6.0 / (2.0 * fps)
+	model.apply_remote_body_state(1, "anim_run_forward", interrupt_flags, 6)
+	assert_eq(model.get_active_body_clip(), "anim_run_forward",
+		"incoming flag 0x1 interrupts an exit-gated current state")
+	assert_almost_eq(model.get_animation_time(), expected, 0.001,
+		"an immediately accepted interrupt consumes its own player phase seed")
 
 
 func test_skinned_model_reports_nonzero_bounds() -> void:

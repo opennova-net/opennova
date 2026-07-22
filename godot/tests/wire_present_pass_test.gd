@@ -9,13 +9,25 @@ class FakeModel:
 	var overlay_calls: Array = []
 	var right_hand_collapse_calls: Array[bool] = []
 	var body_calls: Array = []
+	var remote_body_calls: Array = []
+	var reset_remote_body_calls := 0
 	var part_calls: Array = []
 	var pose_call_order: Array[String] = []
 	var ctrl_values: Dictionary = {}
 	var cleared_controls: Array[String] = []
 	func play_body_clip_at(key: String, phase_ticks: int) -> void:
-		body_calls.append([key, phase_ticks])
+		body_calls.append(["at", key, phase_ticks])
 		pose_call_order.append("body")
+	func play_body_clip(key: String) -> void:
+		body_calls.append(["free", key])
+		pose_call_order.append("body")
+	func apply_remote_body_state(state_id: int, key: String, flags: int,
+			phase_ticks: int = -1) -> void:
+		remote_body_calls.append([state_id, key, flags, phase_ticks])
+		pose_call_order.append("body")
+	func reset_remote_body_state() -> void:
+		reset_remote_body_calls += 1
+		pose_call_order.append("reset")
 	func set_part_phase(channel: int, phase: int) -> void:
 		part_calls.append([channel, phase])
 	func set_aim_overlay(deltas: Array) -> void:
@@ -61,15 +73,19 @@ class FakeSim:
 			out[base + NovaSimulation.PF_ROLL_DEG] = float(entity.get("roll", 0.0))
 			out[base + NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED] = float(
 					entity.get("local_view_suppressed", 0))
-			out[base + NovaSimulation.PF_ALIVE] = float(entity.get("alive", 1))
 			out[base + NovaSimulation.PF_HIDDEN] = float(entity.get("hidden", 0))
+			out[base + NovaSimulation.PF_ALIVE] = float(entity.get("alive", 1))
+			out[base + NovaSimulation.PF_RESPAWN_REVISION] = float(
+					entity.get("respawn_revision", 0))
 			out[base + NovaSimulation.PF_ACTIVE1] = float(entity.get("active1", 0))
 			out[base + NovaSimulation.PF_PHASE1] = float(entity.get("phase1", 0))
 			out[base + NovaSimulation.PF_ACTIVE2] = float(entity.get("active2", 0))
 			out[base + NovaSimulation.PF_PHASE2] = float(entity.get("phase2", 0))
 			out[base + NovaSimulation.PF_ANIM_STATE] = float(entity.get("anim_state", -1))
 			out[base + NovaSimulation.PF_ANIM_PHASE_TICKS] = float(
-					entity.get("anim_phase", 0))
+					entity.get("anim_phase", -1))
+			out[base + NovaSimulation.PF_ANIM_REMOTE_REQUEST] = float(
+					entity.get("anim_remote_request", 1))
 			out[base + NovaSimulation.PF_AIM_OVERLAY_VALID] = float(
 					entity.get("aim_overlay_valid", 0))
 			var body: Vector3 = entity.get("aim_body", Vector3.ZERO)
@@ -385,8 +401,9 @@ func test_wire_model_applies_the_same_packed_overlay_result() -> void:
 	presenter.setup(sim, placer, container)
 	presenter.present()
 	var model := placer.built[0] as FakeModel
-	assert_eq(model.body_calls, [["anim_emplaced", 11]],
-			"wire presentation selects the replicated mounted body clip")
+	assert_eq(model.remote_body_calls, [[67, "anim_emplaced",
+			NovaSimulation.infantry_anim_flags(67), 11]],
+			"presentation forwards state, retail flags, and player phase")
 	assert_eq(model.pose_call_order, ["right_hand", "overlay", "body"],
 			"the current packed overlay is installed before the body clip evaluates")
 	assert_eq(model.overlay_calls.size(), 1)
@@ -397,6 +414,108 @@ func test_wire_model_applies_the_same_packed_overlay_result() -> void:
 	assert_true(model.basis.is_equal_approx(body_basis))
 	assert_true((deltas[8] as Basis).is_equal_approx(
 			body_basis.inverse() * MissionObjectPlacer.bms_to_godot_basis(angles[8])))
+
+	# The model owns transition acceptance and completion, so presentation keeps
+	# forwarding raw requests rather than filtering state changes itself.
+	sim.entities[0]["anim_phase"] = 22
+	presenter.present()
+	sim.entities[0]["anim_state"] = 68
+	sim.entities[0]["anim_phase"] = 6
+	presenter.present()
+	assert_eq(model.remote_body_calls, [
+		[67, "anim_emplaced", NovaSimulation.infantry_anim_flags(67), 11],
+		[67, "anim_emplaced", NovaSimulation.infantry_anim_flags(67), 22],
+		[68, "anim_emplaced_2", NovaSimulation.infantry_anim_flags(68), 6],
+	], "raw compact requests reach the completion-aware remote animation channel")
+
+
+func test_wire_model_free_runs_compact_infantry_when_phase_is_absent() -> void:
+	# Production infantry compacts carry the state byte but no player-channel
+	# phase byte. Re-presenting that snapshot must preserve local playback
+	# instead of externally pinning the selected clip to tick zero.
+	var sim := FakeSim.new()
+	sim.entities = [{
+		"type_id": 4567,
+		"handle": 0x0004,
+		"anim_state": 67,
+	}]
+	var placer := FakePlacer.new()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var presenter := WirePresentPass.new()
+	presenter.setup(sim, placer, container)
+	presenter.present()
+	presenter.present()
+
+	var model := placer.built[0] as FakeModel
+	assert_eq(model.remote_body_calls, [
+		[67, "anim_emplaced", NovaSimulation.infantry_anim_flags(67), -1],
+		[67, "anim_emplaced", NovaSimulation.infantry_anim_flags(67), -1],
+	], "phase-less compact infantry forwards an unavailable phase sentinel")
+
+
+func test_host_current_body_state_is_posed_without_remote_rearbitration() -> void:
+	# Host-loopback snapshots carry AiEntity's already-accepted current state and
+	# phase, not a compact pending request. It must retain the direct pose path.
+	var sim := FakeSim.new()
+	sim.entities = [{
+		"type_id": 4567,
+		"handle": 0x0004,
+		"anim_state": 67,
+		"anim_phase": 11,
+		"anim_remote_request": 0,
+	}]
+	var placer := FakePlacer.new()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var presenter := WirePresentPass.new()
+	presenter.setup(sim, placer, container)
+	presenter.present()
+
+	var model := placer.built[0] as FakeModel
+	assert_eq(model.remote_body_calls, [],
+			"host current state is not submitted to the receive-side request channel")
+	assert_eq(model.body_calls, [["at", "anim_emplaced", 11]],
+			"host current state keeps the authoritative direct-phase pose path")
+
+
+func test_wire_model_resets_remote_body_channel_on_respawn_revision_change() -> void:
+	var sim := FakeSim.new()
+	sim.entities = [{
+		"type_id": 4567,
+		"handle": 0x0004,
+		"anim_state": 67,
+		"anim_phase": 11,
+		"respawn_revision": 0,
+	}]
+	var placer := FakePlacer.new()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var presenter := WirePresentPass.new()
+	presenter.setup(sim, placer, container)
+	presenter.present()
+	var model := placer.built[0] as FakeModel
+	assert_eq(model.reset_remote_body_calls, 0,
+			"the first lifecycle sample initializes rather than resets a new model")
+
+	# A revision jump represents one or more dead->alive edges folded before this
+	# render. Reset must precede the animation request so an identical state ID is
+	# accepted into a fresh remote body-channel epoch.
+	model.pose_call_order.clear()
+	sim.entities[0]["respawn_revision"] = 2
+	sim.entities[0]["anim_phase"] = 6
+	presenter.present()
+	assert_eq(model.reset_remote_body_calls, 1)
+	assert_eq(model.pose_call_order, ["right_hand", "overlay", "reset", "body"],
+			"respawn reset runs before the compact animation is applied")
+	assert_eq(model.remote_body_calls[-1], [67, "anim_emplaced",
+			NovaSimulation.infantry_anim_flags(67), 6])
+
+	model.pose_call_order.clear()
+	presenter.present()
+	assert_eq(model.reset_remote_body_calls, 1,
+			"a steady revision does not repeatedly reset local clip playback")
+	assert_eq(model.pose_call_order, ["right_hand", "overlay", "body"])
 
 
 func test_wire_model_applies_and_restores_mounted_right_hand_collapse() -> void:
@@ -473,10 +592,12 @@ func test_wire_model_honors_local_first_person_parent_cull() -> void:
 	assert_true(model.visible, "clearing the transient verdict restores the parent")
 	sim.entities[0]["alive"] = 0
 	presenter.present()
-	assert_true(model.visible, "death retains the corpse or non-organic graphic")
+	assert_true(model.visible,
+			"a dead non-hidden organic remains visible as a corpse")
 	sim.entities[0]["hidden"] = 1
 	presenter.present()
-	assert_false(model.visible, "authoritative hidden visibility remains independent")
+	assert_false(model.visible,
+			"the authoritative compact hidden bit suppresses the world model")
 
 
 func test_wire_model_clears_overlay_when_snapshot_selector_is_invalid() -> void:

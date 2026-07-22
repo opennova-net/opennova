@@ -106,12 +106,14 @@ public:
 		PF_ACTIVE2,
 		PF_BODY_ANIM_SLOT, // Entity.body_anim_slot (main-body .bad/.adm clip; consumed only by the deferred seam)
 		PF_ANIM_STATE, // InfantryState.anim_state (full off_8135F0 state id; -1 when unavailable)
-		PF_ANIM_PHASE_TICKS, // InfantryState.clip_phase, in IDA half-frame ticks
+		PF_ANIM_PHASE_TICKS, // body-clip phase in IDA half-frame ticks; -1 when the compact omits it
+		PF_ANIM_REMOTE_REQUEST, // 1 = compact request needs receive-side arbitration; 0 = authoritative current state
 		PF_HIDDEN,     // 1 when the entity is hidden
 		// Local render-only verdict: skip this placed entity's own world model.
 		// Does not mutate Entity.hidden, collision, simulation, or attached actors.
 		PF_LOCAL_VIEW_SUPPRESSED,
 		PF_ALIVE,      // 1 when alive
+		PF_RESPAWN_REVISION, // decoded organic dead->alive epoch; resets remote body state
 		PF_TYPE_ID,    // items.def runtime type id from the wire (0 = none); keys the joiner's wire avatars
 		PF_WIRE_HANDLE,// (pool<<12)|slot wire handle from the decoded stream (joiner render key; 0 = none)
 		// Final output of anim::compute_aim_overlay_angles. Presentation consumes
@@ -1044,6 +1046,8 @@ public:
 	static String ai_state_name(int p_state);
 	// Infantry anim state id -> ADM clip key ("anim_<off_8135F0 name>"), empty for invalid gaps.
 	static String infantry_anim_key(int p_state);
+	// The adjacent retail transition-arbitration flags table (off_8139E8).
+	static int64_t infantry_anim_flags(int p_state);
 
 	// Entity query. The (kind, index) pair lets the editor map a sim entity back to its placed
 	// mission record + its already-rendered node (MissionController._pickable).

@@ -42,6 +42,7 @@ var _defer_index           # MissionEntityRegistry (host only): rows resolving t
 var _synthetic_origin_only := false
 var _nodes := {}           # wire_handle -> Node3D
 var _unresolved := {}      # wire_handle -> runtime type_id (don't retry same failed type each tick)
+var _respawn_revisions := {} # wire_handle -> last presented dead->alive epoch
 var _stats: Dictionary = { "spawned": 0, "unresolved": 0, "live": 0 }
 var _node_spawned_callback := Callable()
 
@@ -94,6 +95,7 @@ func _free_wire_node(wire_handle: int) -> void:
 	if node_v is Node3D and is_instance_valid(node_v):
 		(node_v as Node3D).queue_free()
 	_nodes.erase(wire_handle)
+	_respawn_revisions.erase(wire_handle)
 
 
 func reset_runtime_state() -> void:
@@ -101,6 +103,7 @@ func reset_runtime_state() -> void:
 		_free_wire_node(int(handle_v))
 	_nodes.clear()
 	_unresolved.clear()
+	_respawn_revisions.clear()
 	_stats.live = 0
 
 
@@ -114,15 +117,36 @@ func teardown() -> void:
 func _apply_body_anim(node, snap: PackedFloat32Array, base: int) -> void:
 	var anim_phase := int(snap[base + NovaSimulation.PF_ANIM_PHASE_TICKS])
 	var anim_state := int(snap[base + NovaSimulation.PF_ANIM_STATE])
-	if anim_state >= 0 and node.has_method("play_body_clip_at"):
+	var remote_request := (
+			int(snap[base + NovaSimulation.PF_ANIM_REMOTE_REQUEST]) != 0)
+	if anim_state >= 0:
 		var key := NovaSimulation.infantry_anim_key(anim_state)
 		if not key.is_empty():
-			node.play_body_clip_at(key, anim_phase)
-			return
+			# NovaObjectModel owns current/pending acceptance because it also owns
+			# clip time and completion. Forward every raw wire request; the model
+			# consumes player phase only on an accepted transition and starts a
+			# queued state at tick zero. [orig: @0x4c0859/@0x4c11a6]
+			if remote_request and node.has_method("apply_remote_body_state"):
+				node.apply_remote_body_state(anim_state, key,
+						NovaSimulation.infantry_anim_flags(anim_state), anim_phase)
+				return
+			if remote_request and node.has_method("play_body_clip"):
+				node.play_body_clip(key)
+				return
+			# Host-loopback rows expose the authority's already-accepted CURRENT
+			# state and playhead. Re-arbitrating that result can defer it for an
+			# extra loop, so pose it directly as before.
+			if (not remote_request and anim_phase >= 0
+					and node.has_method("play_body_clip_at")):
+				node.play_body_clip_at(key, anim_phase)
+				return
+			if not remote_request and node.has_method("play_body_clip"):
+				node.play_body_clip(key)
+				return
 	var body_anim_slot := int(snap[base + NovaSimulation.PF_BODY_ANIM_SLOT])
 	if body_anim_slot < 0:
 		return
-	if node.has_method("play_body_anim_at"):
+	if anim_phase >= 0 and node.has_method("play_body_anim_at"):
 		node.play_body_anim_at(body_anim_slot, anim_phase)
 		return
 	if node.has_method("play_body_anim"):
@@ -230,6 +254,12 @@ func present() -> void:
 			_nodes[handle] = node
 			_stats.spawned += 1
 			spawned_now = true
+		var respawn_revision := int(
+				snap[base + NovaSimulation.PF_RESPAWN_REVISION])
+		var respawned_since_present := (
+				not spawned_now
+				and _respawn_revisions.has(handle)
+				and int(_respawn_revisions[handle]) != respawn_revision)
 		# Position is already Godot-space (x, z, -y); yaw is mission-space degrees. Build the
 		# basis through the ONE placement convention so a wire entity sits exactly where a
 		# placed/host-present entity would. Yaw-only (pitch/roll arrive 0 for infantry).
@@ -246,7 +276,13 @@ func present() -> void:
 		PresentEmplacedWeapon.clear(node)
 		_apply_procedural_part(node, snap, base)
 		PresentEmplacedWeapon.apply(node, snap, base, false)
+		# Respawn begins a fresh remote animation epoch. The decoded revision can
+		# advance even when death and respawn frames were folded by one network
+		# pump, so compare revisions rather than looking for a rendered dead row.
+		if respawned_since_present and node.has_method("reset_remote_body_state"):
+			node.reset_remote_body_state()
 		_apply_body_anim(node, snap, base)
+		_respawn_revisions[handle] = respawn_revision
 		# Host-side dynamic mount targets reach this pass instead of the placed
 		# MissionPresentPass, so consume the same retail local-view cull verdict.
 		# Joiner snapshots leave the bit clear.

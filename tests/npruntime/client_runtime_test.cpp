@@ -65,6 +65,29 @@ bool expect(bool cond, const char *msg) {
 	return false;
 }
 
+bool run_seeded_objective_layout_hint() {
+	np::ClientRuntime client(ClientSession::Config::jointoperations(), "Replay");
+	client.seed_session(0x1234u, "client-key", "server-key",
+	                    7, 6, 0x0001, w::kPlayerInfantryTypeId, 0x30020u);
+	if (!expect(client.view().game_type() == 0x30020u,
+	            "midstream replay seeds the off-wire objective layout hint")) return false;
+
+	FrameUpdate frame;
+	frame.flags2 = 3;
+	frame.objective.present = true;
+	frame.objective.state[0] = 1;
+	frame.objective.state[1] = 2;
+	frame.objective.state[2] = 4;
+	frame.objective.state[3] = 8;
+	frame.mount_handle = 0xFFFF;
+	frame.health = 100;
+	client.view().apply(0x0A, encode_frame_update(frame));
+	return expect(client.state().objective_updates_applied == 1 &&
+	                      client.state().objective_won == 1 &&
+	                      client.state().local_health == 100,
+	              "seeded replay folds objective body before recipient tail");
+}
+
 struct NullDatagramSocket final : ns::IDatagramSocket {
 	int recv_from(uint8_t *, std::size_t, PeerAddr &) override { return 0; }
 	void send_to(const PeerAddr &, const uint8_t *, std::size_t) override {}
@@ -159,8 +182,10 @@ bool run_roundtrip() {
 	// HostClient listen host (mode 3). local_client = nullptr: no host loopback connection in this
 	// run — the only connection is the joiner, keeping the round-trip focused (the host loopback path
 	// is run (B)). The host advertises this HK; ClientRuntime echoes it so the join HK gate passes.
+	np::GameConfig host_config;
+	host_config.game_type = 0x30020u; // captured Co-op: phase-3 objective layout is active
 	np::test::bring_up_host(ctx, np::ConnectionMode::HostClient, np::SocketMode::Socketless,
-	                        0x0FE0E112u);
+	                        0x0FE0E112u, nullptr, host_config);
 
 	// The host's authoritative World. ctx.world set BEFORE the join so tick_connections'
 	// Server_ProcessPendingPlayerSpawns spawns the joiner's pool-0 entity (binding conn.link.owned_entity).
@@ -168,6 +193,10 @@ bool run_roundtrip() {
 	world.registry.configure_pool(0, 16);
 	w::AiSystem ai;
 	world.ai = &ai;
+	world.subgoals.won = 0x12u;
+	world.subgoals.lost = 0x24u;
+	world.subgoals.show_win = 0x48u;
+	world.subgoals.show_lose = 0x90u;
 	ctx.world = &world;
 	// The host's own local player (sets cached.local_player, which apply_player_intent refuses to snap).
 	const w::EntityHandle host_h = w::spawn_player(world, player_spawn({0, 0, 0}, 0, 0xFFF0));
@@ -218,6 +247,7 @@ bool run_roundtrip() {
 		if (c.peer == peer) {
 			c.link.transport = &udp_host;
 			c.link.mode = ns::TransportMode::Client;
+			c.link.s2c_phase = 2; // first live frame exercises objective phase 3
 			Hh = c.link.owned_entity;
 		}
 	}
@@ -237,6 +267,8 @@ bool run_roundtrip() {
 	}
 	if (!expect(client.in_match() && client.self_handle() == Hh.packed,
 	            "client reached InMatch via the name-match; H == the host wire handle")) return false;
+	if (!expect(client.view().game_type() == host_config.game_type,
+	            "joiner learned authoritative g_GameType before live 0x0A frames")) return false;
 	if (!expect(client.deployed(), "client is deployed on the spawn name-match (the 0x0C gate)")) return false;
 
 	// --- 3) In-match per-frame loop: client 0x0C -> apply_in_match_c2s -> Server_TickUpdate -> 0x0A fold ---
@@ -291,6 +323,67 @@ bool run_roundtrip() {
 	                    client.state().anchor_z == w::to_fixed(je->position.z),
 	            "client ClientState anchor == joiner's post-SNAP position (0x0A folded)")) return false;
 	if (!expect(client.state().frames_applied >= 1, "client folded at least one 0x0A frame")) return false;
+	if (!expect(client.state().objective_updates_applied == 1 &&
+	                    client.state().objective_won == world.subgoals.won &&
+	                    client.state().objective_lost == world.subgoals.lost &&
+	                    client.state().objective_show_win == world.subgoals.show_win &&
+	                    client.state().objective_show_lose == world.subgoals.show_lose,
+	            "objective Co-op frame folds all four authoritative subgoal masks")) return false;
+
+	// Partial 0x0A decoding is intentionally useful for entity presentation, but a
+	// packet that ends before the recipient tail must not manufacture health zero
+	// or close the deployed gate. The tail is after the selected sub-block.
+	const int16_t health_before_short_frame = client.state().local_health;
+	const uint32_t frames_before_short_frame = client.state().frames_applied;
+	std::vector<uint8_t> short_0a(14, 0); // anchor + flags, short before sub-block/tail
+	std::vector<uint8_t> short_dg;
+	if (!expect(np::frame_in_match_s2c(ctx, peer, 0x0A, short_0a, short_dg),
+	            "host frames the deliberately short 0x0A")) return false;
+	client.receive(short_dg.data(), short_dg.size());
+	client.Client_ProcessNetworkFrame(tick++);
+	if (!expect(client.state().frames_applied == frames_before_short_frame + 1,
+	            "partial frame remains available to the lenient view fold")) return false;
+	if (!expect(client.state().local_health == health_before_short_frame,
+	            "a frame without a decoded recipient tail preserves local health")) return false;
+	if (!expect(client.deployed(),
+	            "a frame without a decoded recipient tail cannot close the deploy gate")) return false;
+
+	// The 0x0A tail is recipient-specific: once the authoritative owned entity reaches zero health,
+	// the same client frame must fold that death before evaluating the deployed 0x0C send gate.
+	// This is deliberately death-only. A future respawn/deploy exchange owns re-opening the gate.
+	w::Entity *victim = world.registry.get(Hh);
+	if (!expect(victim != nullptr, "joiner entity present for the authoritative death frame")) return false;
+	victim->health = 0;
+	victim->alive = false;
+	victim->flags |= 2u;
+	const uint32_t frames_before_death = client.state().frames_applied;
+	np::Server_TickUpdate(ctx);
+
+	bool got_death_0a = false;
+	while (udp_host.pop_outbound(raw)) {
+		if (raw.empty() || raw[0] != 0x0A) continue;
+		std::vector<uint8_t> inner(raw.begin() + 1, raw.end());
+		std::vector<uint8_t> dg83;
+		if (np::frame_in_match_s2c(ctx, peer, 0x0A, inner, dg83)) {
+			client.receive(dg83.data(), dg83.size());
+			got_death_0a = true;
+		}
+	}
+	if (!expect(got_death_0a, "host emitted the authoritative S2C 0x0A death frame")) return false;
+
+	std::size_t staged_after_death = 0;
+	for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(up, tick)) {
+		np::HandleResult r = np::handle_server_datagram(ctx, peer, d.data(), d.size(), tick++);
+		for (const np::HostAcceptEvent &event : r.events)
+			staged_after_death += np::apply_in_match_c2s(ctx, event);
+	}
+	if (!expect(client.state().frames_applied == frames_before_death + 1,
+	            "client folded the fresh authoritative death frame")) return false;
+	if (!expect(client.state().local_health == 0,
+	            "client stores zero from its recipient-specific 0x0A health tail")) return false;
+	if (!expect(!client.deployed(), "authoritative death closes the deployed uplink gate")) return false;
+	if (!expect(staged_after_death == 0,
+	            "the receive-before-send death frame stages no C2S 0x0C uplink")) return false;
 
 	// Exactly one SNAP per 0x0C: a second tick with no new uplink drained nothing more.
 	if (!expect(udp_host.inbound_pending() == 0, "the connection's C2S queue is drained")) return false;
@@ -547,7 +640,8 @@ bool run_host_pump_hook_observes_remote_before_first_tick() {
 } // namespace
 
 int main() {
-	const bool ok = run_roundtrip() && run_host_as_client() &&
+	const bool ok = run_seeded_objective_layout_hint() &&
+	                run_roundtrip() && run_host_as_client() &&
 	                run_host_startup_seeds_mounted_no_callback_carrier() &&
 	                run_host_startup_maps_claymore_preference() &&
 	                run_host_pump_hook_observes_remote_before_first_tick();

@@ -44,6 +44,7 @@ void drain_connection_c2s(world::World &world, const Connection &conn);
 // [orig: ++playerSlot+100566 in Server_SendEntityStateToPlayer @0x517be8].
 void emit_connection_s2c(const world::World &w, Connection &conn,
                          const std::vector<GameEntitySnapshot> &ents,
-                         const PlayerReplicationState &fallback_anchor);
+                         const PlayerReplicationState &fallback_anchor,
+                         uint32_t game_type = 0);
 
 } // namespace opennova::netsim

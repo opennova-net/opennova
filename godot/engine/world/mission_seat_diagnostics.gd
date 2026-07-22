@@ -166,6 +166,7 @@ static func seat_specs_from_model(data: NovaObjectData, include_raw := false) ->
 	var seats: Array = []
 	if data == null:
 		return seats
+	var passenger_slot := 0
 	for i in range(data.get_user_point_count()):
 		var up: Dictionary = data.get_user_point_info(i)
 		var source_name := String(up.get("name", ""))
@@ -173,10 +174,25 @@ static func seat_specs_from_model(data: NovaObjectData, include_raw := false) ->
 		var seat_type := seat_type_for_user_point(source_name)
 		if seat_type == SEAT_NONE:
 			continue
+		# Retail keeps the gameplay/userpoint list and the ten occupant handles in
+		# different layouts: sitex rows fill 0..7, ctrlx/drvrx share 8, UseGun is 9.
+		# Carry the fixed slot beside the dense presentation/gameplay record.
+		# [orig: ItemDef seatBoneIndex/controlBone/useGunBone +0x25D..+0x266]
+		var retail_slot := -1
+		match seat_type:
+			SEAT_PASSENGER:
+				if passenger_slot < 8:
+					retail_slot = passenger_slot
+				passenger_slot += 1
+			SEAT_CONTROLLER, SEAT_DRIVER:
+				retail_slot = 8
+			SEAT_GUNNER:
+				retail_slot = 9
 		var position: Vector3 = seat_local_from_user_point_position(up.get("position", Vector3.ZERO))
 		var seat := {
 			"type": seat_type,
 			"type_label": seat_type_label(seat_type),
+			"retail_slot": retail_slot,
 			"position": position,
 			"local": position,
 			"bone_index": i + 1,

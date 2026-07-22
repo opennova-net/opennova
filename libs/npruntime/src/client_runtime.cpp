@@ -39,10 +39,12 @@ void ClientRuntime::receive(const uint8_t *raw, std::size_t len) {
 
 void ClientRuntime::seed_session(uint32_t session_id, std::string client_scrk,
                                  std::string server_scrk, uint32_t next_seq, uint32_t last_ack,
-                                 uint16_t self_handle, uint16_t self_type) {
+                                 uint16_t self_handle, uint16_t self_type,
+                                 uint32_t game_type) {
 	if (role_ != Role::Joiner) return;
 	joiner_->seed_in_match(session_id, std::move(client_scrk), std::move(server_scrk), next_seq,
-	                       last_ack, self_handle, self_type);
+	                       last_ack, self_handle, self_type, game_type);
+	view_.set_game_type(game_type);
 	deployed_ = true;     // a seeded replay is post-deploy (the captured client was uplinking)
 	replay_mode_ = true;  // reproduce ONLY the captured 0x0C — suppress the live housekeeping (§5.44)
 }
@@ -77,11 +79,26 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(const PlayerExtendedU
 			std::vector<uint8_t> dg = std::move(recv_fifo_.front());
 			recv_fifo_.pop_front();
 			JoinerConnection::PollResult pr = joiner_->handle_datagram(dg.data(), dg.size());
+			// S2C 0x7B may have updated the wire-invisible phase-3 layout hint
+			// before this datagram's 0x0A bodies are folded.
+			view_.set_game_type(joiner_->game_type());
 			for (std::vector<uint8_t> &reply : pr.outbound) outbound.push_back(std::move(reply));
 			for (const auto &tb : pr.inbound_world) view_.apply(tb.first, tb.second); // 0x0C/0x0D/0x10/0x20
-			for (const std::vector<uint8_t> &a : pr.inbound_0a) view_.apply(0x0A, a);  // per-frame 0x0A
 			if (pr.reached_in_match) deployed_ = true; // deploy on the spawn name-match (§5.44 gate)
+			for (const std::vector<uint8_t> &a : pr.inbound_0a) {
+				const uint32_t health_before = view_.state().health_updates_applied;
+				view_.apply(0x0A, a); // per-frame 0x0A
+				// Evaluate each decoded tail in receive order. A later positive
+				// sample in the same pump cannot erase an earlier death edge.
+				if (view_.state().health_updates_applied != health_before &&
+				    view_.state().local_health <= 0) {
+					deployed_ = false;
+				}
+			}
 		}
+		// The recipient-specific 0x0A tail is the authoritative local health channel. Close the
+		// deployed gate on a fresh death frame before this same client frame reaches its send block.
+		// Positive health deliberately does not reopen it: respawn remains owned by the deploy flow.
 	}
 
 	if (role_ == Role::HostClient) return outbound; // host: no connect-drive, no housekeeping send, no 0x0C

@@ -493,7 +493,7 @@ struct PlayerCompactRecord {
 	                                  // flags table g_animStateFlagsTable; transition-arbitrated, remote-only
 	                                  // apply except the wire-bit2 dead path) [orig: @0x4c1153;
 	                                  // renamed from weapon_anim_state/weapon_id — witness 2026-07-02]
-	uint8_t  anim_channel_ratio = 0;  // 0..255 float ratio off the entity+0x188 anim-channel object
+	uint8_t  anim_channel_ratio = 0;  // elapsed half-frame ticks in the current body loop (legacy field name)
 	                                  // (f32[+0x28]/f32[+0x2C] or f32[+8]/f32[+0xC] by obj+0x14);
 	                                  // read side stores it at entity+0x377, remote-only and ONLY
 	                                  // inside the anim-state-accept branch [orig: @0x4c0cf2 write /
@@ -767,7 +767,7 @@ struct FrameTimerBlock {
 // g_GameType 0x30020). [orig: NapiNPClientMsg_0x00A gate @ 0x430361, body
 // @ 0x430363..0x4303D0]
 struct FrameObjectiveBlock {
-	bool     present = false;   // true iff the objective body was read (hint on + sub_block 3)
+	bool     present = false;   // true iff all 16 objective bytes decoded (hint on + sub_block 3)
 	int32_t  state[4] = {0, 0, 0, 0}; // → dword_AC86F4/F0/EC/E8
 };
 
@@ -794,6 +794,7 @@ struct FrameUpdate {
 	uint16_t mount_handle = 0xFFFF; // local-player vehicle-mount (header tail)
 	int16_t  health = 0;            // local-player health
 	int16_t  state_word = 0;
+	bool     local_tail_present = false; // all seven recipient-local tail bytes decoded
 	FrameWeaponBlock    weapon;     // valid iff sub_block == 0
 	FrameTimerBlock     timer;      // valid iff sub_block == 1
 	FrameEnv            env;        // valid iff sub_block == 2

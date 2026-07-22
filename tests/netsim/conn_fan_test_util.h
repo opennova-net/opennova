@@ -28,9 +28,11 @@ inline void drain_all(world::World &world, const std::vector<Connection> &conns,
 // [orig: NapiNPServer_SendFiltered @0x4C87E0 builds once, SendToConn @0x4c4f20 per node]. `conns` is
 // non-const: each emit advances that connection's 0x0A sub-block phase counter.
 inline void emit_all(const world::World &w, std::vector<Connection> &conns,
-                     const PlayerReplicationState &fallback_anchor) {
+                     const PlayerReplicationState &fallback_anchor,
+                     uint32_t game_type = 0) {
 	const std::vector<GameEntitySnapshot> ents = snapshot_world(w);
-	for (Connection &c : conns) emit_connection_s2c(w, c, ents, fallback_anchor);
+	for (Connection &c : conns)
+		emit_connection_s2c(w, c, ents, fallback_anchor, game_type);
 }
 
 // Spawn a joiner's owned pool-0 player (a REMOTE peer — spawn_remote_player leaves it non-local) and
@@ -45,4 +47,3 @@ inline world::EntityHandle admit_peer(world::World &w, std::vector<Connection> &
 }
 
 } // namespace opennova::netsim::test
-
