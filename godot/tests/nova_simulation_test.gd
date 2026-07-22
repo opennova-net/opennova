@@ -2712,8 +2712,9 @@ func test_first_husk_kz_userpoints_feed_death_blast_traits() -> void:
 			continue
 		for byte_index in range(16):
 			bytes[name_offset + byte_index] = 0
-		bytes[name_offset] = "K".unicode_at(0)
-		bytes[name_offset + 1] = "Z".unicode_at(0)
+		var replacement := "KZ" if source_name == "Armory" else "kz"
+		bytes[name_offset] = replacement.unicode_at(0)
+		bytes[name_offset + 1] = replacement.unicode_at(1)
 	var kz_fixture_path := ProjectSettings.globalize_path(
 			"user://nova_simulation_kz_husk.3di")
 	var fixture_file := FileAccess.open(kz_fixture_path, FileAccess.WRITE)
@@ -2754,6 +2755,52 @@ func test_first_husk_kz_userpoints_feed_death_blast_traits() -> void:
 		assert_eq(actual[point_index], expected[point_index],
 				"KZ point %d preserves retail mission-local axes" % point_index)
 	sim.free()
+
+	# Retail reads entity+52 huskModel for this walk. A final-only definition may
+	# use huskFinal for pieces (and our legacy collision fallback), but it must not
+	# mine that model for KZ anchors; the empty bank selects the origin fallback.
+	var final_only_path := ProjectSettings.globalize_path(
+			"user://nova_simulation_final_only_husk_items.def")
+	var final_only_file := FileAccess.open(final_only_path, FileAccess.WRITE)
+	assert_not_null(final_only_file)
+	if final_only_file == null:
+		return
+	final_only_file.store_string(
+			"begin \"Final-only KZ witness\"\n"
+			+ "  id 105099\n"
+			+ "  type object\n"
+			+ "  graphic Barrel1\n"
+			+ "  sid final_only_kz\n"
+			+ "  huskfinal Barrel1XF\n"
+			+ "  hp 75\n"
+			+ "  kz 4.0\n"
+			+ "  unit_type 6\n"
+			+ "end\n")
+	final_only_file.close()
+	var final_only_db := NovaItemDatabase.new()
+	assert_eq(final_only_db.load(final_only_path), OK)
+	assert_eq(DirAccess.remove_absolute(final_only_path), OK)
+	assert_true(final_only_db.get_husk(105099).is_empty())
+	assert_eq(final_only_db.get_huskfinal(105099), "Barrel1XF")
+
+	var final_only_md := NovaMissionData.new()
+	assert_eq(final_only_md.create_default(), OK)
+	var final_only_placed := final_only_md.add_entity(
+			NovaMissionData.KIND_BUILDING, 105099, Vector3.ZERO, Vector3.ZERO)
+	assert_false(final_only_placed.is_empty())
+	var final_only_sim := NovaSimulation.new()
+	assert_true(final_only_sim.load_from_mission_data(final_only_md))
+	final_only_sim.resolve_item_traits(final_only_db)
+	assert_eq(final_only_sim.resolve_collision_instances(
+			final_only_db, GraphicDataPlacerStub.new({
+				"Barrel1": main_data,
+				"Barrel1XF": husk_data,
+			})), 1)
+	var final_only_debug := final_only_sim.get_destruction_debug(
+			int(final_only_placed.get("bms_id", 0)))
+	assert_eq(int(final_only_debug.get("kz_point_count", -1)), 0,
+			"huskFinal alone does not replace retail's first-stage KZ source")
+	final_only_sim.free()
 
 
 func test_face_only_cfac_model_attaches_for_projectile_raycast() -> void:

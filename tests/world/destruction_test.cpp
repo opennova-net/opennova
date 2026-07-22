@@ -524,10 +524,12 @@ void test_kz_point_full_euler() {
 
     CHECK(w.explosions.queue.size() == 1);
     if (w.explosions.queue.size() == 1) {
-        const Vec3 &pos = w.explosions.queue[0].pos;
+        const ExplosionEntry &blast = w.explosions.queue[0];
+        const Vec3 &pos = blast.pos;
         CHECK(std::abs(pos.x - 4.75f) < 1.0e-4f);
         CHECK(std::abs(pos.y - 6.5f) < 1.0e-4f);
         CHECK(std::abs(pos.z - 11.5f) < 1.0e-4f);
+        CHECK(std::abs(blast.radius_override - 5.0f) < 1.0e-6f);
     }
 }
 

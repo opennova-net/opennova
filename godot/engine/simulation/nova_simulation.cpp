@@ -1974,9 +1974,10 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 		// every query swaps to the wreck once Flags & 4 sets. The collision pick
 		// is the FIRST husk stage (entity+52 huskModel), not huskFinal [orig: the
 		// +52 substitution @ 0x538720 / @ 0x413086; D-AI-7 residual closed].
-		const String husk_name_s = p_item_db->get_husk(def_id).is_empty()
+		const String first_husk_name_s = p_item_db->get_husk(def_id);
+		const String husk_name_s = first_husk_name_s.is_empty()
 				? p_item_db->get_huskfinal(def_id)
-				: p_item_db->get_husk(def_id);
+				: first_husk_name_s;
 		if (!husk_name_s.is_empty()) {
 			const std::string husk_key(husk_name_s.utf8().get_data());
 			Ref<NovaObjectData> husk_data;
@@ -2007,34 +2008,39 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 			// model, and queues a radius-5 blast at every match. Cache this
 			// metadata separately from collision registration: the same graphic
 			// may already be resident as another entity's main model.
-			auto kz_it = collision_husk_kz_points_by_graphic_.find(husk_key);
-			if (kz_it == collision_husk_kz_points_by_graphic_.end()) {
-				if (husk_data.is_null())
-					husk_data = p_placer->call("object_data_for", husk_name_s);
-				std::vector<opennova::world::Vec3> kz_points;
-				if (husk_data.is_valid()) {
-					const ThreediModelIR &ir = husk_data->native_ir();
-					for (size_t up_index = 0;
-							ir.userpoints != nullptr && up_index < ir.userpoint_count;
-							++up_index) {
-						const ThreediIRUserPoint &point = ir.userpoints[up_index];
-						if (String::utf8(point.name).nocasecmp_to("KZ") != 0)
-							continue;
-						// IR is (-source y, source z, source x); destruction's
-						// placement math consumes mission-local (x, y, z).
-						kz_points.push_back(opennova::world::Vec3{
-								point.position[2],
-								-point.position[0],
-								point.position[1]});
+			// Unlike collision's legacy final-only fallback, the retail KZ walker
+			// reads entity+52 huskModel. A def with only huskFinal has no KZ source
+			// and therefore takes the entity-origin fallback blast.
+			if (!first_husk_name_s.is_empty()) {
+				auto kz_it = collision_husk_kz_points_by_graphic_.find(husk_key);
+				if (kz_it == collision_husk_kz_points_by_graphic_.end()) {
+					if (husk_data.is_null())
+						husk_data = p_placer->call("object_data_for", husk_name_s);
+					std::vector<opennova::world::Vec3> kz_points;
+					if (husk_data.is_valid()) {
+						const ThreediModelIR &ir = husk_data->native_ir();
+						for (size_t up_index = 0;
+								ir.userpoints != nullptr && up_index < ir.userpoint_count;
+								++up_index) {
+							const ThreediIRUserPoint &point = ir.userpoints[up_index];
+							if (String::utf8(point.name).nocasecmp_to("KZ") != 0)
+								continue;
+							// IR is (-source y, source z, source x); destruction's
+							// placement math consumes mission-local (x, y, z).
+							kz_points.push_back(opennova::world::Vec3{
+									point.position[2],
+									-point.position[0],
+									point.position[1]});
+						}
 					}
+					kz_it = collision_husk_kz_points_by_graphic_.emplace(
+							husk_key, std::move(kz_points)).first;
 				}
-				kz_it = collision_husk_kz_points_by_graphic_.emplace(
-						husk_key, std::move(kz_points)).first;
+				if (opennova::world::ItemDeathTraits *t =
+							world_->item_death_traits.get_mutable(e->item_id);
+						t != nullptr && t->kz_points.empty() && !kz_it->second.empty())
+					t->kz_points = kz_it->second;
 			}
-			if (opennova::world::ItemDeathTraits *t =
-						world_->item_death_traits.get_mutable(e->item_id);
-					t != nullptr && t->kz_points.empty() && !kz_it->second.empty())
-				t->kz_points = kz_it->second;
 			// The PIECE model is huskFINAL first [orig: @ 0x4934af
 			// huskFinalModel ?: huskModel] — the opposite preference from the
 			// collision husk pick above. Its LOD-0 part table feeds the

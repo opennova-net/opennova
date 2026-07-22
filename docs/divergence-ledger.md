@@ -255,7 +255,7 @@ the ref-32 discard was a misport, now deleted (env-tod-re.md #34).
 | D-ITEM-2 | `husk_swap_at`/`_sec` are parsed, but their runtime reader was not found; no progressive swap behavior is implemented (world-wac-ai-re §24.7) | B | NEEDS-RE (find the +0x19C/+0x1A0 reader) | PAR-WORLD |
 | D-ITEM-3 | Blast-time breakable collision-section marking is unported; the collision model carries no per-section flag byte (world-wac-ai-re §24.7) | A | OPEN | PAR-WORLD |
 | D-ITEM-4 | Death-piece trajectories are simulated, but presentation has trail effects only: no isolated husk-section mesh/spin or glow light, and one PRNG stream replaces retail's three (world-wac-ai-re §24.7) | A | OPEN (presentation fidelity) | PAR-WORLD |
-| D-ITEM-5 | Death kz now reads every exact case-insensitive `KZ` user point from the active first-stage husk (not `huskFinal`), converts the model IR back to mission-local axes, and queues the witnessed radius-5 blast at each point; husks without a `KZ` point retain the entity-origin `kz ?: boundRadius` fallback (world-wac-ai-re §24.1/§24.5/§24.7) | A | FIXED 2026-07-20 (`nova_simulation_test` first-husk/count/axis integration + `destruction` full-Euler/radius pins) | fidelity audit 2026-07-20 |
+| D-ITEM-5 | Death kz now reads every exact case-insensitive `KZ` user point from the active first-stage husk (not `huskFinal`), converts the model IR back to mission-local axes, and queues the witnessed radius-5 blast at each point; husks without a `KZ` point retain the entity-origin `kz ?: boundRadius` fallback (world-wac-ai-re §24.1/§24.5/§24.7) | A | FIXED 2026-07-20 (`nova_simulation_test` first-husk/final-only/count/axis integration + `destruction` full-Euler/radius pins) | fidelity audit 2026-07-20 |
 | D-ITEM-6 | Blast/damage tails remain: organic knockback and hit emitter/sound, medic/ram queue legs, the MP destroy-buildings gate, and destruction wire emits. Ordinary bullet vehicle-occupant scaling is now ported separately (world-wac-ai-re §24.7; net-re §5.60) | A | OPEN | PAR-WORLD |
 | D-ITEM-7 | Destruction eligibility is inferred from kind/capabilities plus unitType; retail's def-class callback-column mapping remains unwitnessed (world-wac-ai-re §24.7) | B | NEEDS-RE (witness the class callback table) | PAR-WORLD |
 | D-ITEM-8 | Crane/water-tower special destruction, 992-tick re-notify, and ambient phase-0 regional shot behavior are unported (world-wac-ai-re §24.7) | A | OPEN | PAR-WORLD |
@@ -718,7 +718,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 |---|---|---|---|---|---|
 | Net | 9 | 1 | 11 | 21 | 0 |
 | Environment | 0 | 0 | 3 | 3 | 4 |
-| World / AI + events | 56 | 5 | 5 | 66 | 21 |
+| World / AI + events | 55 | 5 | 5 | 65 | 22 |
 | UI (menu/ctrl/sound/playerinfo/HUD) | 14 | 1 | 7 | 22 | 6 |
 | Mission `.mis` | 0 | 2 | 1 | 3 | 0 |
 | LW `.3di` | 0 | 2 | 1 | 3 | 0 |
@@ -733,7 +733,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Render — materials/state | 0 | 0 | 1 | 1 | 1 |
 | Render — draw order | 2 | 0 | 1 | 3 | 3 |
 | Render — lighting | 4 | 0 | 2 | 6 | 0 |
-| **Total** | **93** | **14** | **32** | **139** | 78 |
+| **Total** | **92** | **14** | **32** | **138** | 79 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-INF-20, D-NET-136, D-NET-64.
 
