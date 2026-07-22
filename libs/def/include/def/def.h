@@ -278,6 +278,31 @@ typedef struct DefWeaponDef {
        Player_SwitchToWeaponByHandle(category*65)]. */
     int switchcategory;
     int has_switchcategory;
+    /* The weapon heat model (emplaced/vehicle heavy guns). Both keys store 16.16
+       fixed point exactly as the original computes it, because the runtime divides
+       them against each other as integers and a re-quantized float would shift the
+       per-shot tick count.
+
+       'heat_values <pctPerShot>,<pctPerSecondCooldown>' — each value goes through
+       the engine's own digit parser (NOT atof) and is then integer-divided:
+       heat_per_shot = parse16_16(v0) / 100 (percent -> a 0..0x10000 fraction),
+       heat_decay_per_tick = parse16_16(v1) / 6200 (percent-per-second -> per-tick
+       at the 62 Hz logic rate). 0 in heat_per_shot disables the whole model.
+       'heat_effect <fxName>,<threshold>,...' — the overheat glow effect name and
+       the 16.16 heat level it starts at (stored raw, no divide). Shipped JO data
+       writes 'heat_effect heat, .5, 30, 60': the parser consumes only the first
+       two values, so the trailing pair is authored-but-unread in retail too.
+       'heat_sound' (+0x368) is a third key in the original parser that no shipped
+       weapon.def authors; deliberately unparsed here.
+       [orig: WeaponDefs_ParseLineCallback keys 'heat_effect' @ 0x543e36 -> +0x358
+        name / +0x374 threshold, 'heat_sound' @ 0x543e85 -> +0x368, 'heat_values'
+        @ 0x543eb7 -> +0x36C / +0x370; Math_ParseFixedPoint16 @ 0x6131f0;
+        consumers WeaponSlot_CalcAccumulatedHeat @ 0x53f780,
+        WeaponAction_Recoil @ 0x542f8b, WeaponAction_ProcessFrame @ 0x541031] */
+    int heat_per_shot;         /* +0x36C, 16.16; 0 = no heat model */
+    int heat_decay_per_tick;   /* +0x370, 16.16 per logic tick */
+    int heat_glow_threshold;   /* +0x374, 16.16; heat above this spawns the glow */
+    char heat_effect[64];      /* +0x358, the glow effect name ("heat") */
 } DefWeaponDef;
 
 typedef struct DefWeaponsFile {

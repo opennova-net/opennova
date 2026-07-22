@@ -8,6 +8,16 @@
 
 namespace opennova::world {
 
+// [orig: WeaponSlot_CalcAccumulatedHeat @ 0x53f780] — heat = rate x ticks remaining.
+// Gated on the DEF field, not the slot's, so a weapon with no heat model reads 0 even
+// if a stale window survived a def swap.
+int32_t weapon_slot_accumulated_heat(const WeaponFsmDef &def, const WeaponSlotState &slot,
+                                     int32_t current_tick) {
+    if (def.heat_per_shot == 0) return 0;
+    if (slot.heat_window_end_tick <= current_tick) return 0;
+    return def.heat_decay_per_tick * (slot.heat_window_end_tick - current_tick);
+}
+
 namespace {
 
 // ASCII case-insensitive compare (the original binds action names via stricmp
@@ -250,8 +260,32 @@ void handler_recoil(const WeaponFsmDef &def, const WeaponFsmAction &desc,
     if (in.is_local && desc.particle[0] != '\0')
         out.action_effect = weapon_action::kRecoil;
     slot.phase = weapon_phase::kDone; // [orig: @ 0x542f74]
-    // (heat-window stamp @ 0x542f8b and the rest of the muzzle-effect leg are host
-    //  seams — D-WPN-4)
+    // The per-shot heat stamp. The window is pushed out by however many ticks it
+    // takes to shed one shot's worth of heat, so the "accumulator" is really a
+    // deadline. A cold slot (or one whose window already lapsed) restarts from now
+    // rather than crediting the time it spent cold.
+    //
+    // The `heat_decay_per_tick > 0` term is ours: the original gates on def+876 alone
+    // and would divide by zero on a hypothetical `heat_values <n>,0`. No shipped def
+    // authors that, and reproducing a hardware exception is not parity — treat a zero
+    // decay as no heat model.
+    // [orig: @ 0x542f8b..0x542fdc]
+    if (def.heat_per_shot != 0 && def.heat_decay_per_tick > 0) {
+        if (slot.heat_window_end_tick < in.current_tick)
+            slot.heat_window_end_tick = in.current_tick; // [orig: @ 0x542fa0]
+        slot.heat_window_end_tick +=
+                def.heat_per_shot / def.heat_decay_per_tick + 1; // [orig: @ 0x542fb4]
+        // The ceiling clamp: past it the window is re-stamped to a fixed overrun, so
+        // a held trigger cannot bank heat beyond one lockout's worth.
+        // [orig: @ 0x542fc4 — the compare is > kCeiling-1, i.e. >= kCeiling]
+        if (weapon_slot_accumulated_heat(def, slot, in.current_tick) >
+            weapon_heat::kCeiling - 1)
+            slot.heat_window_end_tick =
+                    in.current_tick +
+                    weapon_heat::kCeiling / def.heat_decay_per_tick + 1; // [orig: @ 0x542fdc]
+    }
+    // (the overheat glow emitter — actionTable[11] muzzle FX @ 0x54109e..0x54122c —
+    //  is a host effect seam, D-WPN-28)
     if (!in.is_local) { // [orig: @ 0x542fe9 -> LABEL_59]
         slot.counter = desc.delay_end;
         return;
@@ -688,8 +722,25 @@ void weapon_fsm_tick(const WeaponFsmDef &def, WeaponSlotState &slot,
             slot.kick = 0;
     }
 
-    // (the overheat deny — heat > 0xFFFF converting a queued FIRE to EMPTY
-    //  [orig: @ 0x541046] — needs the heat model, D-WPN-4)
+    // The heat window [orig: @ 0x540fed..0x541262]. A live window either denies the
+    // next shot or, once it lapses (or the owner submerges with a def that is not
+    // Underwater), clears itself back to cold.
+    if (slot.heat_window_end_tick != 0) {
+        const bool window_live = slot.heat_window_end_tick > in.current_tick;
+        const bool water_ok = !in.submerged || (def.flags & weapon_flag::kUnderwater) != 0;
+        if (window_live && water_ok) {
+            // The overheat deny: a queued FIRE becomes the dry-fire click. Note it
+            // does NOT cancel an in-flight FIRE, and nothing stops the heat from
+            // climbing past kFull — the gun coughs until the level falls back under.
+            // [orig: @ 0x541046]
+            if (weapon_slot_accumulated_heat(def, slot, in.current_tick) >
+                        weapon_heat::kFull &&
+                slot.next == weapon_action::kFire)
+                slot.next = weapon_action::kEmpty;
+        } else {
+            slot.heat_window_end_tick = 0; // [orig: @ 0x54125f]
+        }
+    }
 
     const WeaponFsmAction *desc = &def.actions[slot.current];
     if (slot.counter == 0) {

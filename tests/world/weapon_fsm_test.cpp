@@ -852,6 +852,168 @@ void test_emplaced_switchfrom_and_try_switchto_contract() {
 
 } // namespace
 
+// --- the heat model [orig: WeaponSlot_CalcAccumulatedHeat @ 0x53f780, the stamp
+// @ 0x542f8b..0x542fdc, the deny/expiry @ 0x540fed..0x54125f] -------------------
+//
+// The def numbers are the shipped JOX 'WPN_EMPLCD50' line 'heat_values 2,4' after
+// the parser's two truncating divides: 2 -> 131072/100 = 1310 per shot, 4 ->
+// 262144/6200 = 42 per tick. Everything below is derived from that pair alone.
+WeaponFsmDef make_emplaced_50_def() {
+    WeaponFsmDef def = make_ak_def();
+    def.heat_per_shot = 1310;
+    def.heat_decay_per_tick = 42;
+    def.heat_glow_threshold = 32768; // 'heat_effect heat, .5, ...' -> .5 in 16.16
+    return def;
+}
+
+void test_heat_is_derived_from_the_window_deadline() {
+    WeaponFsmDef def = make_emplaced_50_def();
+    WeaponSlotState s{};
+    // Cold: no window, no heat.
+    CHECK(weapon_slot_accumulated_heat(def, s, 1000) == 0);
+    // A window 100 ticks out reads rate x ticks-remaining, and sheds itself as the
+    // tick advances — the cooldown is implicit in the deadline, never stored.
+    s.heat_window_end_tick = 1100;
+    CHECK(weapon_slot_accumulated_heat(def, s, 1000) == 42 * 100);
+    CHECK(weapon_slot_accumulated_heat(def, s, 1050) == 42 * 50);
+    CHECK(weapon_slot_accumulated_heat(def, s, 1100) == 0); // expired, not negative
+    CHECK(weapon_slot_accumulated_heat(def, s, 1200) == 0);
+    // The gate is the DEF field: a weapon with no heat model reads 0 even with a
+    // window left over [orig: the def+876 test @ 0x53f79b].
+    WeaponFsmDef cold = make_ak_def();
+    CHECK(weapon_slot_accumulated_heat(cold, s, 1000) == 0);
+}
+
+// Hold the trigger on an emplaced .50 and walk the whole heat arc. The shot numbers
+// below belong to THIS def's cadence (the AK rows fire every 8 ticks) crossed with
+// the .50's heat rate: each shot buys 32 ticks of window but only 8 tick's worth is
+// spent before the next one, so the level climbs 1008 a shot and the gun quits after
+// the 65th. Change either the rows or heat_values and these move together.
+void test_emplaced_gun_overheats_and_locks_out() {
+    WeaponFsmDef def = make_emplaced_50_def();
+    WeaponSlotState s{};
+    def.clip_capacity = -1; // 'clipsize -1' — the emplaced guns feed from a belt
+    WeaponFsmInputs in;
+    in.fire_held = true;
+    in.fire_pressed = true;
+    WeaponFsmEvents ev;
+
+    int shots = 0, first_glow_shot = 0, dry_at_shot = 0;
+    int32_t peak_heat = 0, heat_when_denied = 0;
+    int32_t tick = 0;
+    for (; tick < 3000; ++tick) {
+        in.current_tick = tick;
+        // What the pump itself sees when it decides whether to deny.
+        const int32_t heat_at_pump = weapon_slot_accumulated_heat(def, s, tick);
+        weapon_fsm_tick(def, s, in, ev);
+        in.fire_pressed = false; // the press edge starts it; the refire chain sustains
+        const int32_t h = weapon_slot_accumulated_heat(def, s, tick);
+        if (h > peak_heat) peak_heat = h;
+        if (ev.fired) ++shots;
+        if (!first_glow_shot && h > def.heat_glow_threshold) first_glow_shot = shots;
+        if (!dry_at_shot && ev.dry_fired) {
+            dry_at_shot = shots;
+            heat_when_denied = heat_at_pump;
+            break;
+        }
+    }
+    // 32 ticks of window bought per shot [orig: @ 0x542fb4].
+    CHECK(def.heat_per_shot / def.heat_decay_per_tick + 1 == 32);
+    // The glow lights around half the arc, long before the gun quits.
+    CHECK(first_glow_shot == 33);
+    // The deny converts the queued FIRE into the dry click, and it fires exactly
+    // when the level the pump reads has passed kFull [orig: @ 0x541046].
+    CHECK(dry_at_shot == 65);
+    CHECK(heat_when_denied > weapon_heat::kFull);
+    CHECK(s.current == wa::kEmpty);
+    // Nothing ever banks past the ceiling.
+    CHECK(peak_heat <= weapon_heat::kCeiling);
+
+    // The volley does NOT resume on its own: the refire chain only re-arms from the
+    // recoil window, so an overheat costs the player a fresh trigger press — the
+    // same consequence the original's deferred-event design produces.
+    const int shots_at_deny = shots;
+    for (int i = 0; i < 400; ++i) {
+        in.current_tick = ++tick;
+        weapon_fsm_tick(def, s, in, ev);
+        if (ev.fired) ++shots;
+    }
+    CHECK(shots == shots_at_deny);
+    // The window is still live and still shedding at the authored rate — the gun is
+    // hot for a good while after it quits, it does not reset on the dry click.
+    CHECK(s.heat_window_end_tick > tick);
+    CHECK(weapon_slot_accumulated_heat(def, s, tick) ==
+          def.heat_decay_per_tick * (s.heat_window_end_tick - tick));
+    // Once the deadline passes, the pump zeroes the window and the gun reads cold.
+    tick = s.heat_window_end_tick + 1;
+    in.current_tick = tick;
+    weapon_fsm_tick(def, s, in, ev);
+    CHECK(s.heat_window_end_tick == 0); // [orig: @ 0x54125f]
+    CHECK(weapon_slot_accumulated_heat(def, s, tick) == 0);
+}
+
+// The ceiling clamp, driven straight at the stamp: a window already worth nearly the
+// ceiling takes one more shot and gets re-stamped to a fixed overrun instead of
+// banking the sum. [orig: @ 0x542fc4..0x542fdc]
+void test_heat_ceiling_clamps_the_window() {
+    WeaponFsmDef def = make_emplaced_50_def();
+    const int32_t now = 10000;
+    const int32_t per_shot_ticks = def.heat_per_shot / def.heat_decay_per_tick + 1;
+
+    WeaponSlotState s{};
+    s.heat_window_end_tick = now + weapon_heat::kCeiling / def.heat_decay_per_tick;
+    CHECK(weapon_slot_accumulated_heat(def, s, now) == 73710); // just under the ceiling
+    // Unclamped, this shot would bank 75054 — past the ceiling.
+    s.heat_window_end_tick += per_shot_ticks;
+    CHECK(weapon_slot_accumulated_heat(def, s, now) == 75054);
+    // The clamp re-stamps to the fixed overrun the original computes.
+    s.heat_window_end_tick = now + weapon_heat::kCeiling / def.heat_decay_per_tick + 1;
+    CHECK(weapon_slot_accumulated_heat(def, s, now) == 73752);
+    // The lockout that buys: cooling from the ceiling back under kFull.
+    const int32_t lockout =
+            (73752 - weapon_heat::kFull) / def.heat_decay_per_tick + 1;
+    CHECK(lockout == 196); // ~3.1 s at the 62 Hz logic rate
+    CHECK(weapon_slot_accumulated_heat(def, s, now + lockout) <= weapon_heat::kFull);
+}
+
+// An infantry weapon authors no heat_values, so nothing in the model may engage.
+void test_no_heat_model_never_stamps_a_window() {
+    WeaponFsmDef def = make_ak_def(); // heat_per_shot == 0
+    WeaponSlotState s = make_ak_slot();
+    WeaponFsmInputs in;
+    in.fire_held = true;
+    in.fire_pressed = true;
+    WeaponFsmEvents ev;
+    for (int32_t tick = 0; tick < 400; ++tick) {
+        in.current_tick = tick;
+        weapon_fsm_tick(def, s, in, ev);
+        in.fire_pressed = false;
+        CHECK(s.heat_window_end_tick == 0);
+        CHECK(weapon_slot_accumulated_heat(def, s, tick) == 0);
+    }
+    CHECK(s.next != wa::kEmpty || s.clip == 0); // never denied by heat
+}
+
+// Submerging drops the window unless the def carries Underwater (Flags 0x4).
+void test_submerging_clears_the_heat_window() {
+    WeaponFsmDef def = make_emplaced_50_def();
+    WeaponSlotState s{};
+    s.heat_window_end_tick = 500;
+    WeaponFsmInputs in;
+    in.current_tick = 100;
+    in.submerged = true;
+    WeaponFsmEvents ev;
+    weapon_fsm_tick(def, s, in, ev);
+    CHECK(s.heat_window_end_tick == 0); // [orig: @ 0x54125f]
+
+    WeaponFsmDef wet = make_emplaced_50_def();
+    wet.flags |= weapon_flag::kUnderwater;
+    WeaponSlotState s2{};
+    s2.heat_window_end_tick = 500;
+    weapon_fsm_tick(wet, s2, in, ev);
+    CHECK(s2.heat_window_end_tick == 500); // the window survives
+}
+
 int main() {
     test_ticks_from_ms();
     test_sights_card_eligibility();
@@ -879,6 +1041,11 @@ int main() {
     test_recoil_effect_leg();
     test_switch_completion_signal();
     test_emplaced_switchfrom_and_try_switchto_contract();
+    test_heat_is_derived_from_the_window_deadline();
+    test_emplaced_gun_overheats_and_locks_out();
+    test_heat_ceiling_clamps_the_window();
+    test_no_heat_model_never_stamps_a_window();
+    test_submerging_clears_the_heat_window();
     if (failures == 0) std::printf("weapon_fsm_test: all passed\n");
     return failures == 0 ? 0 : 1;
 }

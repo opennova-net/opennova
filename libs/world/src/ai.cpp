@@ -1176,6 +1176,10 @@ void AiSystem::pump_mounted_weapon_slots(World &world, uint32_t logic_tick) {
         inputs.is_local = owner->handle == world.cached.local_player;
         inputs.is_authority = is_authority;
         inputs.auto_reload = true;
+        // The heat window is derived from the tick, so the pump needs it. AI gunners
+        // sit on the emplaced guns that actually author heat, so this is the path
+        // that overheats in practice. [orig: current_tick @ 0x24C1968]
+        inputs.current_tick = static_cast<int32_t>(logic_tick);
         WeaponFsmEvents weapon_events;
         weapon_fsm_tick(weapon->action_fsm, mount->primary_weapon_slot,
                         inputs, weapon_events);

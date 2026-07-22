@@ -5109,6 +5109,11 @@ void NovaSimulation::install_local_player_weapon(const Dictionary &p_def,
 	weapon_def_.burst3 = (flags & 0x20) != 0;     // [orig: WeaponAction_Fire @ 0x542c8a]
 	weapon_def_.flags = flags;                    // raw mask: the scope gate + fov policy read it
 	weapon_def_.flags2 = int(p_def.get("flags2", 0)); // Inset (0x200) picks the 7-step ease
+	// The heat model [orig: WeaponDef +0x36C/+0x370/+0x374]. Absent keys leave 0,
+	// which disables the model exactly as the original's zero-init does.
+	weapon_def_.heat_per_shot = int(int64_t(p_def.get("heat_per_shot", 0)));
+	weapon_def_.heat_decay_per_tick = int(int64_t(p_def.get("heat_decay_per_tick", 0)));
+	weapon_def_.heat_glow_threshold = int(int64_t(p_def.get("heat_glow_threshold", 0)));
 	weapon_scope_max_mag_ = float(double(p_def.get("scope_max_mag", 0.0)));
 	// The 3P body-channel kinds [orig: weapon.def special_hold/attack_anim -> the
 	// AdmDefs record +0xA4/+0xA8; world-wac-ai-re.md §14.8.4].
@@ -5558,6 +5563,11 @@ void NovaSimulation::tick_local_player_weapon() {
 	in.scope_active = player_view_.scope_engaged &&
 			!opennova::world::player_view_scope_ease_active(player_view_);
 	in.instant_emplaced_switch = local_usegun_switch_is_instant();
+	// The heat window is a deadline against the logic tick, not a stored level.
+	// `submerged` stays false: the sim has no per-entity water test at the weapon
+	// site yet, and above water is what the runtime actually plays (D-WPN-29).
+	// [orig: current_tick @ 0x24C1968; the water gate @ 0x54101c]
+	in.current_tick = static_cast<int32_t>(world_->logic_tick);
 	if (!accept_weapon_input) active_slot.refire_queued = false;
 	opennova::world::WeaponFsmEvents ev;
 	opennova::world::weapon_fsm_tick(
@@ -5893,6 +5903,19 @@ Dictionary NovaSimulation::get_local_player_weapon_state() const {
 	out["clip"] = active_slot.clip;
 	out["reserve"] = active_slot.reserve;
 	out["kick"] = static_cast<int>(active_slot.kick);
+	// Weapon heat, clamped where the original's info builder clamps it — the drawer
+	// downstream reads a plain 0..0xFFFF level and self-hides at 0.
+	// [orig: HUD_BuildEntityInfo @ 0x4b852e -> hudInfo+60, the clamp @ 0x4b854d]
+	{
+		const int32_t heat = world_ != nullptr
+				? opennova::world::weapon_slot_accumulated_heat(
+						  weapon_def_, active_slot,
+						  static_cast<int32_t>(world_->logic_tick))
+				: 0;
+		out["heat"] = heat > opennova::world::weapon_heat::kFull
+				? opennova::world::weapon_heat::kFull
+				: heat;
+	}
 	out["borrowed_usegun_slot"] = local_usegun_slot_active_;
 	out["emplaced_controls_valid"] = false;
 	out["emplaced_gun_yaw"] = 0;

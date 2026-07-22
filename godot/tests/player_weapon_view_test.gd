@@ -26,6 +26,7 @@ func test_weapon_view_decodes_state_dict() -> void:
 		"emplaced_controls_valid": true,
 		"emplaced_gun_yaw": 0x1234,
 		"emplaced_gun_pitch": 0xFEDC,
+		"heat": 0x8000,
 	})
 	assert_not_null(view)
 	assert_eq(view.current_action, 3)
@@ -44,6 +45,16 @@ func test_weapon_view_decodes_state_dict() -> void:
 	assert_true(view.emplaced_controls_valid)
 	assert_eq(view.emplaced_gun_yaw, 0x1234)
 	assert_eq(view.emplaced_gun_pitch, 0xFEDC)
+	assert_eq(view.heat, 0x8000)
+
+
+# Weapons that author no heat_values omit the key entirely; the view must read cold
+# rather than carrying whatever the previous weapon left behind.
+# [orig: hudInfo+60 = WeaponSlot_CalcAccumulatedHeat @0x53f780]
+func test_weapon_view_heat_defaults_cold() -> void:
+	var view := PlayerWeaponView.from_state_dict({ "active": true })
+	assert_not_null(view)
+	assert_eq(view.heat, 0)
 
 
 func test_weapon_view_null_when_inactive() -> void:

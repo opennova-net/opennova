@@ -43,6 +43,11 @@ var unscope_serial := 0
 var rescope_serial := 0
 var clip := 0              # rounds in the magazine
 var reserve := 0           # carried pool, rounds
+# Accumulated weapon heat, 0..0xFFFF, already clamped by the sim exactly where the
+# original's info builder clamps it. 0 for every weapon that authors no heat_values
+# (all infantry arms) and for a cold emplaced gun.
+# [orig: hudInfo+60 = WeaponSlot_CalcAccumulatedHeat @0x53f780, clamp @0x4b854d]
+var heat := 0
 var kick := 0              # recoil kick intensity 0..20 [orig: MountSlot+0x5B]
 # The PowerThrow windup, feeding the HUD charge bar [orig: g_fireChargeStartTick
 # @0xB76800 read by HUD_DrawPowerThrowChargeBar @0x599830].
@@ -87,6 +92,7 @@ static func from_state_dict(d: Dictionary) -> PlayerWeaponView:
 	out.rescope_serial = int(d.get("rescope_serial", 0))
 	out.clip = int(d.get("clip", 0))
 	out.reserve = int(d.get("reserve", 0))
+	out.heat = int(d.get("heat", 0))
 	out.kick = int(d.get("kick", 0))
 	out.windup_active = bool(d.get("windup_active", false))
 	out.windup_held_ticks = int(d.get("windup_held_ticks", 0))

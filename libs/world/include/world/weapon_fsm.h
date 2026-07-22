@@ -47,6 +47,7 @@ namespace weapon_flag {
 enum : int32_t {
     kScoped = 0x00000001,
     kSighted = 0x00000002,
+    kUnderwater = 0x00000004, // keeps firing (and keeps its heat window) submerged
     kEmplaced = 0x00000080,
     kNoCardSwitch = 0x02000000,
     kForceScoped = 0x20000000,
@@ -128,7 +129,27 @@ struct WeaponFsmDef {
                                // sighted 2, ..., forcecrouch 0x40000 (keep-scope reload),
                                // nocardswitch 0x2000000, forcescoped 0x20000000]
     int32_t flags2 = 0;        // the flags2 dword (noselect 1 / ... / inset 0x200)
+    // The heat model, in the def's own 16.16 units (libs/def parses and pre-divides
+    // them; see def.h 'heat_values'/'heat_effect'). heat_per_shot == 0 disables the
+    // whole model, which is every infantry weapon in the shipped corpora — only the
+    // emplaced/vehicle heavy guns author it.
+    // [orig: WeaponDef +0x36C / +0x370 / +0x374]
+    int32_t heat_per_shot = 0;        // added per shot, as a fraction of kHeatFull
+    int32_t heat_decay_per_tick = 0;  // shed per logic tick
+    int32_t heat_glow_threshold = 0;  // heat above this drives the overheat glow
 };
+
+// Heat is not a stored accumulator: the slot carries a DEADLINE and the level is
+// recomputed from the ticks left on it, so the linear cooldown is implicit.
+// [orig: the constants in WeaponAction_Recoil @ 0x542fc4 / ProcessFrame @ 0x541046]
+namespace weapon_heat {
+enum : int32_t {
+    kFull = 0xFFFF,     // the overheat-deny level: above this a queued FIRE dry-fires
+    kCeiling = 73728,   // 0x12000 — the per-shot stamp clamps here, so holding the
+                        // trigger through an overheat costs a fixed lockout instead
+                        // of banking unbounded heat
+};
+} // namespace weapon_heat
 
 // ms -> 62.5 Hz ticks. [orig: Anim_GetDurationTicks @ 0x53ee10 = ms * 62.5 / 1000 + 1
 // (flt_7C3B3C)]
@@ -189,7 +210,18 @@ struct WeaponSlotState {
     // tick's input stage (the deferred dispatch runs before the pump).
     // [orig: Input_QueueDeferredEvent @ 0x4993e0; writers @ 0x542e9d / @ 0x53effd]
     bool refire_queued = false;
+    // The heat window's expiry tick. Each shot pushes it further out; the level is
+    // derived from what is left of it (weapon_slot_accumulated_heat). 0 = cold.
+    // [orig: MountSlot+0x14; stamp @ 0x542fa0/@ 0x542fb4, clear @ 0x54125f]
+    int32_t heat_window_end_tick = 0;
 };
+
+// The accumulated heat on a slot, 0..~kCeiling — 0 when the def authors no heat model
+// or the window has run out. The whole cooldown lives in this expression: every tick
+// that passes without a shot takes heat_decay_per_tick off the level for free.
+// [orig: WeaponSlot_CalcAccumulatedHeat @ 0x53f780]
+int32_t weapon_slot_accumulated_heat(const WeaponFsmDef &def, const WeaponSlotState &slot,
+                                     int32_t current_tick);
 
 // Whether this definition/action pair selects the standard 2D SIGHTS card after
 // the frame's outer CanFire/view gates pass. Scoped and Sighted are asymmetric
@@ -218,6 +250,13 @@ struct WeaponFsmInputs {
     // computes this because the standalone slot does not know its target def.
     // [orig: WeaponAction_SwitchFrom @0x543417..0x54344a]
     bool instant_emplaced_switch = false;
+    // The logic tick, needed because the heat level is derived from a deadline
+    // rather than stored. [orig: current_tick @ 0x24C1968]
+    int32_t current_tick = 0;
+    // Owner submerged: the original drops the heat window (and the glow) the moment
+    // the firing entity goes under, unless the def carries Underwater (Flags 0x4).
+    // [orig: the Env_WaterHeightFixed compare @ 0x54101c -> the clear @ 0x54125f]
+    bool submerged = false;
 };
 
 // Per-tick outputs for the host. anim events carry the .adm clip key to start on the
