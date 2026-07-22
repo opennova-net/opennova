@@ -344,3 +344,38 @@ func test_windup_state_feeds_the_charge_bar() -> void:
 	_step_and_pump(2)
 	assert_false(bool(_sim.get_local_player_weapon_state().get("windup_active", true)),
 			"release ends the windup")
+
+
+func test_binocular_toggle_refuses_during_powerthrow_windup() -> void:
+	_boot_kit(KIT_M4_GRENADE)
+	_switch_to(5, "WPN_GRENADEHE")
+	_sim.set_local_player_weapon_input(true, true, false)
+	_step_and_pump(40)
+	var wound: Dictionary = _sim.get_local_player_weapon_state()
+	assert_true(bool(wound.get("windup_active", false)), "the grenade is charging")
+	var fired_before := int(wound.get("fired_serial", 0))
+	var rounds_before := int(wound.get("round_ring_count", 0))
+
+	assert_false(_sim.request_local_player_binoculars_toggle(),
+			"retail refuses binoculars during a live fire charge")
+	assert_false(bool(_sim.get_local_player_view().get("binoculars_requested", true)))
+	_sim.set_local_player_weapon_input(true, false, false)
+	_step_and_pump(2)
+	wound = _sim.get_local_player_weapon_state()
+	assert_true(bool(wound.get("windup_active", false)),
+			"the refusal preserves the still-held windup")
+	assert_eq(int(wound.get("fired_serial", -1)), fired_before,
+			"the optics request cannot release the grenade")
+
+	_sim.set_local_player_weapon_input(false, false, false)
+	var fired := false
+	for _tick in 120:
+		_step_and_pump(1)
+		if int(_sim.get_local_player_weapon_state().get("fired_serial", 0)) == fired_before + 1:
+			fired = true
+			break
+	assert_true(fired, "the later real release fires exactly once")
+	var released: Dictionary = _sim.get_local_player_weapon_state()
+	assert_eq(int(released.get("round_ring_count", -1)), rounds_before + 1)
+	assert_gt(int(released.get("last_round_slot_byte", 0)), 0,
+			"the released round carries the accumulated PowerThrow charge")

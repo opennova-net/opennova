@@ -60,6 +60,7 @@ func _build_props_panel() -> void:
 	_add_props_game_mode()
 	InspectorForms.add_section_heading(_props_box, "Options")
 	_add_props_flag(NovaMissionData.ATTRIB_ENABLE_NVG, "Night vision")
+	_add_props_flag(NovaMissionData.ATTRIB_START_WITH_NVG_ON, "Start with night vision on")
 	_add_props_flag(NovaMissionData.ATTRIB_ROTATE_MAP_180, "Rotate map 180")
 	InspectorForms.add_section_heading(_props_box, "Audio")
 	_add_props_spin("music", "Music track", 0.0, 1000000.0)

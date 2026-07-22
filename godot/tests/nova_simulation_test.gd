@@ -28,6 +28,116 @@ func test_demo_mission_promotes() -> void:
 	sim.free()
 
 
+func test_binocular_and_nvg_requests_drive_effective_view_state() -> void:
+	var sim := NovaSimulation.new()
+	sim.build_demo_mission()
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+
+	assert_true(sim.request_local_player_binoculars_toggle())
+	var view: Dictionary = sim.get_local_player_view()
+	assert_true(bool(view.get("binoculars_requested", false)))
+	assert_true(bool(view.get("binoculars_raised", false)))
+	assert_true(bool(view.get("binoculars_view_active", false)))
+	assert_almost_eq(float(view.get("fov_h_deg", 0.0)), 20.0, 0.001)
+	var jitter := Vector2(
+			float(view.get("binocular_yaw_offset_deg", 0.0)),
+			float(view.get("binocular_pitch_offset_deg", 0.0)))
+	assert_almost_eq(jitter.length(), 2.8125, 0.0001,
+			"the toggle seeds the fixed 0x02000000-BAM displacement")
+
+	sim.set_player_input(true, false, false, false, false, false, false)
+	view = sim.get_local_player_view()
+	assert_true(bool(view.get("binoculars_requested", false)),
+			"movement suppresses rather than destroys raw intent")
+	assert_false(bool(view.get("binoculars_raised", true)))
+	assert_false(bool(view.get("binoculars_view_active", true)))
+	sim.set_player_input(false, false, false, false, false, false, false)
+	sim.set_local_player_camera_third_person(true)
+	view = sim.get_local_player_view()
+	assert_true(bool(view.get("binoculars_raised", false)),
+			"third person retains the remote-visible body pose")
+	assert_false(bool(view.get("binoculars_view_active", true)))
+	sim.set_local_player_camera_third_person(false)
+	sim.request_local_player_binoculars_toggle()
+	assert_false(bool(sim.get_local_player_view().get("binoculars_requested", true)))
+
+	assert_eq(sim.request_local_player_nvg_gain(99), 4)
+	assert_eq(int(sim.get_local_player_view().get("nvg_gain", -1)), 4,
+			"gain is adjustable while NVG is inactive")
+	assert_true(sim.request_local_player_nvg_toggle())
+	assert_true(bool(sim.get_local_player_view().get("nvg_visible", false)))
+	sim.set_local_player_camera_third_person(true)
+	view = sim.get_local_player_view()
+	assert_true(bool(view.get("nvg_active", false)))
+	assert_false(bool(view.get("nvg_visible", true)),
+			"third person suppresses treatment without clearing NVG")
+	sim.free()
+
+
+func test_start_with_nvg_reseeds_on_player_init() -> void:
+	var mission := NovaMissionData.new()
+	assert_eq(mission.create_default(), OK)
+	assert_true(mission.set_header_flag(
+			NovaMissionData.ATTRIB_START_WITH_NVG_ON, true))
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(mission))
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	var view: Dictionary = sim.get_local_player_view()
+	assert_true(bool(view.get("nvg_active", false)))
+	assert_eq(int(view.get("nvg_gain", -1)), 0)
+
+	assert_false(sim.request_local_player_nvg_toggle())
+	assert_eq(sim.request_local_player_nvg_gain(3), 3)
+	sim.respawn_local_player_loadout()
+	view = sim.get_local_player_view()
+	assert_true(bool(view.get("nvg_active", false)),
+			"Player_InitPlayer reseeds the mission's StartWithNVGOn bit")
+	assert_eq(int(view.get("nvg_gain", -1)), 0)
+	sim.free()
+
+
+func test_nvg_inset_scope_drop_refusal_and_restore_latch() -> void:
+	var mission := NovaMissionData.new()
+	assert_eq(mission.create_default(), OK)
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(mission))
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	var weapon := {
+		"name": "WPN_INSET_NVG_TEST",
+		"actions": [{"name": "idle", "delaystart": 0, "delayend": 0}],
+		"flags": 0x1,
+		"flags2": 0x200,
+		"clipsize": 30,
+		"startrounds": 60,
+	}
+	sim.set_local_player_weapon(weapon, {})
+	sim.step()
+	assert_true(sim.request_local_player_scope_toggle())
+	for _i in range(7):
+		sim.step()
+	assert_true(bool(sim.get_local_player_view().get("scope_engaged", false)))
+
+	assert_true(sim.request_local_player_nvg_toggle())
+	assert_false(bool(sim.get_local_player_view().get("scope_engaged", true)),
+			"enabling NVG drops a settled Inset scope")
+	for _i in range(7):
+		sim.step()
+	assert_false(sim.request_local_player_scope_toggle(),
+			"Inset scope-up is refused while NVG remains active")
+	sim.rebake_local_player_weapon(weapon, {})
+
+	assert_false(sim.request_local_player_nvg_toggle())
+	assert_true(bool(sim.get_local_player_view().get("scope_engaged", false)),
+			"a render-only same-weapon rebake preserves the scope restore latch")
+
+	assert_true(sim.request_local_player_nvg_toggle())
+	sim.set_local_player_weapon(weapon, {})
+	assert_false(sim.request_local_player_nvg_toggle())
+	assert_false(bool(sim.get_local_player_view().get("scope_engaged", true)),
+			"a real weapon mount invalidates the stale scope restore latch")
+	sim.free()
+
+
 # The HUD waypoint track: the demo mission's BLUE route becomes the player track;
 # a spawned local player latches waypoint 0 on the first tick and walking into the
 # radius advances. [orig chain: NetPacket_WriteWorldStateLoad0x0F @0x502e41 list ->

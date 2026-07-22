@@ -55,6 +55,11 @@ var _sun_light := Vector3(0.9, 0.85, 0.75)
 var _fog_color_rt := Vector3(0.5, 0.7, 0.9)
 # ColorSrcGlobalGain — the modulator /64 (iris exposure), NovaWeather-written.
 var _color_src_gain := Vector3.ONE
+# The NVG world-lighting rewrite is a view concern, so the host supplies the
+# already camera-gated (first-person-visible) state here. Gain remains in the
+# retail 0..4 range even while the effect is inactive.
+var _nvg_view_active := false
+var _nvg_gain: int = 0
 var _fog_distance: float = 1000.0
 var _mission_time_fixed24: int = DEFAULT_START_HOUR * FIXED24_ONE_HOUR
 var _mission_advance_per_tick: int = int(
@@ -217,7 +222,7 @@ static func _double_vec3(value: Vector3) -> Vector3:
 
 
 func _write_shader_globals() -> void:
-	RenderingServer.global_shader_parameter_set(&"opennova_fill_light", _fill_light)
+	RenderingServer.global_shader_parameter_set(&"opennova_fill_light", get_fill_light())
 	RenderingServer.global_shader_parameter_set(&"opennova_sun_light", _sun_light)
 	RenderingServer.global_shader_parameter_set(&"opennova_sky_ambient", get_sky_ambient())
 	RenderingServer.global_shader_parameter_set(&"opennova_sun_direction", _light_dir)
@@ -234,7 +239,7 @@ func get_sun_light() -> Vector3:
 
 
 func get_fill_light() -> Vector3:
-	return _fill_light
+	return _apply_nvg_hemi_gain(_fill_light) if _nvg_view_active else _fill_light
 
 
 ## The SMOOTHED sky block when the weather tick drives it — written back per
@@ -244,7 +249,31 @@ func get_fill_light() -> Vector3:
 ## @ 0x57ef97..0x57f03c]. Discrete TOD recomputes re-seed it from the keyframe
 ## (like _fill_light); the chase target stays get_sky_ambient_target().
 func get_sky_ambient() -> Vector3:
-	return _sky_ambient_rt
+	return _apply_nvg_hemi_gain(_sky_ambient_rt) if _nvg_view_active else _sky_ambient_rt
+
+
+## Applies the first-person-visible NVG hemisphere rewrite. _color_src_gain is
+## the retail modulator byte unpacked as /64, so modulator*f/640 becomes
+## _color_src_gain*f/10 here [orig: NVG world-light gain rewrite].
+func _apply_nvg_hemi_gain(color: Vector3) -> Vector3:
+	var f := float(_nvg_gain + 1) * 0.2
+	return color * (0.25 * f) + _color_src_gain * (f / 10.0)
+
+
+## active is already gated to the view where retail applies NVG lighting
+## (first person). The raw NVG toggle remains simulation-owned.
+func set_nvg_view(active: bool, gain: int) -> void:
+	var clamped_gain := clampi(gain, 0, 4)
+	if active == _nvg_view_active and clamped_gain == _nvg_gain:
+		return
+	_nvg_view_active = active
+	_nvg_gain = clamped_gain
+	_env_generation += 1
+	# NovaWeather owns the full per-frame global write while present. Refresh
+	# only the two affected channels immediately, and let its next tick publish
+	# the same getter-derived values again without disturbing wind/fog state.
+	RenderingServer.global_shader_parameter_set(&"opennova_fill_light", get_fill_light())
+	RenderingServer.global_shader_parameter_set(&"opennova_sky_ambient", get_sky_ambient())
 
 
 func get_fog_color() -> Vector3:

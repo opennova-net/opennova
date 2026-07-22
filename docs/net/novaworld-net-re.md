@@ -3977,7 +3977,23 @@ kill-cam distance reel, the weather/impact shake.
   both directions. **Unported tails**: the seated lean ramp variant, the Flags 0x20/0x100000
   ramp gates, the 4-sample terrain eye clamp + the remote trig CameraOffset, torsoRoll(+0x2DC)
   and pitchBlend(+0x380) camera terms, the zoom-adjust keys (slot+0xC beyond the scope_max_mag
-  seed), analog axes, keyboard look/turn keys, binoculars/NVG inputs.
+  seed), analog axes, and keyboard look/turn keys.
+- **Binoculars/NVG ported 2026-07-21.** Binoculars is input action 26 (catalog id 103,
+  default B), not action 220: the raw request (0xB76539) survives movement/death/round/3P
+  suppression; raised pose (0xB7653A) survives 3P; effective optics (0xB76538) is FP-only,
+  fixes horizontal FOV at 20 degrees, hides the FP model/crosshair/SIGHTS card, disables scoped
+  mouse reduction and weapon/category/cycle input, and adds the persistent 0x02000000-BAM
+  random aim displacement. The hosted HUD loads `Binoculr.tga`, `BinoCH.tga`, and
+  `BNumbers.tga` from VFS and ports the exact four-digit range easing. NVG is action 41
+  (catalog id 104, default N), independent of mission `EnableNVG`; actions 56/57 (OEM +/−)
+  clamp gain 0..4 even while off. `StartWithNVGOn 0x400000` reseeds every player init,
+  first-person-only environment gain uses the exact hemisphere formula, Inset sights drop/
+  restore through the normal scope toggle, and the post/mask/scale presentation is hosted.
+  Binocular activation also refuses while the PowerThrow fire-charge tick is live, preserving
+  the held windup instead of converting optics input suppression into a release. Bounded
+  residuals: the NVG post collapses the retail four-frame temporal history to the current
+  frame, the NVG style-8 laser and raw-active death-screen exception remain unported, and
+  Binoculars still lacks its capture-point detail overlay.
 
 **§5.40 viewmodel correction (2026-07-08, same train):** the FP viewmodel hardcode named a
 model that does not exist in the JO assets ("AKM_1st"), so the gun never loaded and the arms
@@ -6949,14 +6965,16 @@ the FP model re-resolve `count_weapon_effects_and_update_viewmodel @ 0x4dc9e0`).
 reimpl commits on the FSM's switchfrom/switchrank `action_finished`, re-installing the
 viewmodel through the host event drain (`switch_to_weapon`).
 
-**The binoculars hold-swap (input case 220, unported — D-WPN-23).**
-`g_binocularsWeaponSlot @ 0xB75FE0` (renamed) = the slot whose def carries flags
-bit 0x8000000, found at table load `@ 0x54165a`; the key press stashes the equipped slot
-in `g_binocularsStashedSlot @ 0xB75FE4` and equips it via `Player_EquipWeaponByEntity
-@ 0x4e0370`; the release (runtime keys `g_binocularsBindingKey0/1 @ 0x81B68C/E`)
-re-equips the stash. Msg 0x38 (`handle_weapon_switch_packet @ 0x4260b0`) is the
-server-confirmed weapon-entity swap against the tracked pickup entity at
-localPlayer+0x140 — also unported.
+**ToSpecial/QuickSwitch (input case 220, unported — D-WPN-23).**
+This path was previously mislabeled Binoculars. Action 220 is ToSpecial (catalog id 37,
+default F): global 0xB75FE0 is the slot whose def carries `QuickSwitch 0x08000000`
+(found at table load `@ 0x54165a`; only retail `WPN_MAG58_PointAim` authors it), and
+0xB75FE4 stashes the equipped slot. Press equips the target via
+`Player_EquipWeaponByEntity @ 0x4e0370`; release (runtime binding words
+`0x81B68C/E`) re-equips the stash. True Binoculars is the independent action 26/default-B
+state machine described in §5.39 and performs no inventory swap. Msg 0x38
+(`handle_weapon_switch_packet @0x4260b0`) is the server-confirmed weapon-entity swap
+against the tracked pickup entity at localPlayer+0x140 — also unported.
 
 **Map availability rules.** `g_armoryWeaponAvailability @ 0x24D5600`, 255 ints indexed by
 catalog/adm index. Values: 0 banned, 1 allowed (default), 2 ARMORY-ZONE-ONLY (the server
@@ -7019,6 +7037,11 @@ g_localAmmoPools`, `dword_B75FE0/4 → g_binocularsWeaponSlot/g_binocularsStashe
 `word_A76412/6 → g_bmsLoadoutChunkLen/g_bmsAvailabilityChunkLen`, `byte_24D4DFA →
 g_weaponRestoreFlag`; rename proposal left as a comment: `restrictionData →
 g_spawnLoadoutBuffer` (human-curated name, proposal-first policy).
+
+**Erratum (2026-07-21):** the 0xB75FE0/4 and 0x81B68C/E names in that 2026-07-18
+rename list are wrong: they belong to ToSpecial/QuickSwitch, not Binoculars. Treat them as
+`g_quickSwitchWeaponSlot` / `g_quickSwitchStashedSlot` and the corresponding
+ToSpecial binding words; Binocular globals are 0xB76538..0xB7653B.
 
 **Open follow-ups:** the entity+0x68 AI-binding value DURING Player_InitPlayer (decides
 whether the spawn switch's mount walk runs — D-WPN-21 models it as not-yet-bound); the

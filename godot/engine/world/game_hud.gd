@@ -20,6 +20,7 @@ const MIN_CROSSHAIR_STYLE := 0
 const MAX_CROSSHAIR_STYLE := 24
 const DEFAULT_CHAT_LINES := 8 # HUDCHLINE fallback
 const STANCE_FRAME_COUNT := 6
+const PlayerViewEffectsScript := preload("res://engine/world/player_view_effects.gd")
 
 var _hudpos: NovaHudPos
 var _root: NovaResourceRoot
@@ -50,6 +51,7 @@ var _round_tex: Texture2D
 # virtual 1024x768 design space and scale to the live viewport per draw
 # [orig: Viewport_ScaleToVirtualCoords @0x5d2b20].
 var _card_rows: Array = []
+var _view_effects = null # PlayerViewEffects; preloaded explicitly above
 
 
 class SightRowControl:
@@ -87,12 +89,17 @@ var _info: Dictionary = {
 	"clip": -1,
 	"reserve": -1,
 	"scope_engaged": false,
+	"binoculars_view_active": false,
+	"binocular_range": 1,
+	"nvg_visible": false,
+	"nvg_gain": 0,
 	"fov_deg": 80.0,
 	"ticks": 0,
 }
 
 
 func set_layout(hudpos: NovaHudPos, root: NovaResourceRoot) -> void:
+	_ensure_view_effects()
 	_hudpos = hudpos
 	_root = root
 	_font = null
@@ -106,7 +113,21 @@ func set_layout(hudpos: NovaHudPos, root: NovaResourceRoot) -> void:
 	_alpha_fade = Vector3.ZERO
 	_chat_lines = DEFAULT_CHAT_LINES
 	_load_assets()
+	_view_effects.set_resource_root(root)
 	queue_redraw()
+
+
+func _ensure_view_effects() -> void:
+	if _view_effects != null:
+		return
+	_view_effects = PlayerViewEffectsScript.new()
+	_view_effects.name = "PlayerViewEffects"
+	_view_effects.show_behind_parent = true
+	_view_effects.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# Internal children stay out of authored SIGHTS-row traversal and scene ownership,
+	# while INTERNAL_MODE_BACK gives the post-process/masks a stable layer below them.
+	add_child(_view_effects, false, Node.INTERNAL_MODE_BACK)
+	_view_effects.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
 
 ## Select and immediately reload the configured crosshair art. Style 0 is cross01.tga;
@@ -168,7 +189,9 @@ func _rebuild_sights_card() -> void:
 # overrides it. The FP viewmodel hides on the same bit. [orig:
 # Render_ProcessMainSceneFrame @0x5ca299..0x5ca304 / @0x5caaf3..0x5cab15]
 func _sync_sights_card() -> void:
-	var up: bool = bool(_info.get("scope_card", false)) and not _card_rows.is_empty()
+	var up: bool = bool(_info.get("scope_card", false)) \
+			and not bool(_info.get("binoculars_view_active", false)) \
+			and not _card_rows.is_empty()
 	for row in _card_rows:
 		if is_instance_valid(row):
 			row.visible = up
@@ -192,6 +215,8 @@ func update_info(info: Dictionary) -> void:
 		_stance_stamp = int(info.get("ticks", 0))
 	_info = info
 	_sync_sights_card()
+	if _view_effects != null:
+		_view_effects.update_info(info)
 	queue_redraw()
 
 
@@ -583,6 +608,8 @@ func _draw_attach_labels() -> void:
 # (@0x592b6c). The recoil-accumulator terms (+0x380/+0x384 >>7) are D-HUD-7.
 # [orig: HUD_DrawCrosshair @0x592640]
 func _draw_crosshair(surface: Vector2) -> void:
+	if bool(_info.get("binoculars_view_active", false)):
+		return
 	var scoped := bool(_info.get("scope_engaged", false))
 	# The settled-sights hide [orig: !Player_CanFireWeapon @0x5cf780 via @0x592afa;
 	# scope_fraction < 1 = the ease still interpolating = scopeActive still 0].

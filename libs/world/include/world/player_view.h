@@ -30,6 +30,11 @@ constexpr int32_t kScopeEaseStepsInset = 7;
 constexpr int32_t kScopeEaseStepsHipfire = 1;
 // [orig: g_cameraFovDeg @ 0x26C6848 default 0x500000 = 80.0 horizontal degrees]
 constexpr float kPlayerCameraFovHDeg = 80.0f;
+// [orig: binocular camera fov constant in Player_UpdateFirstPersonCamera]
+constexpr float kBinocularCameraFovHDeg = 20.0f;
+// [orig: the five NVG gain positions selected by actions 56/57]
+constexpr int32_t kNvgGainMin = 0;
+constexpr int32_t kNvgGainMax = 4;
 // [orig: the chase anchor ease @ 0x437c8d — one quarter per 62 Hz tick]
 constexpr float kTpAnchorEase = 0.25f;
 
@@ -40,6 +45,11 @@ struct PlayerViewState {
     bool scope_hipfire = true;    // [orig: g_scopeHipfire @ 0x82CE98, init/reset 1]
     bool move_held = false;       // [orig: the movement-held latch byte_B7653B @ 0xB7653B]
     bool third_person = false;    // [orig: g_camera_mode @ 0xA890C8]
+    bool binoculars_requested = false;   // [orig: raw toggle byte_B76539 @ 0xB76539]
+    bool binoculars_raised = false;      // [orig: body-pose byte_B7653A @ 0xB7653A]
+    bool binoculars_view_active = false; // [orig: first-person view byte_B76538 @ 0xB76538]
+    bool nvg_active = false;
+    int32_t nvg_gain = kNvgGainMin;
     bool tp_anchor_valid = false;
     float tp_anchor[3] = {0.0f, 0.0f, 0.0f}; // mission space (Z-up)
 };
@@ -83,10 +93,35 @@ bool player_view_move_input(PlayerViewState &v, bool move_held, int32_t def_flag
 // [orig: byte_B7653B && (flags & 1) -> return @ 0x4df29c].
 bool player_view_scope_up_blocked(const PlayerViewState &v, int32_t def_flags);
 
+// Toggle the persistent binocular request. Raising is resolved separately so
+// movement/death/round-end/camera suppression never destroys the request.
+// Turning the request off clears both derived states immediately. Returns the
+// new requested state. [orig: input action 26; byte_B76539]
+bool player_view_toggle_binoculars(PlayerViewState &v);
+
+// Recompute the binocular body pose and first-person view. The raised pose is
+// suppressed by movement, death, and round end, but survives third person;
+// the optical view additionally requires first person. [orig: per-frame
+// binocular state update around byte_B76538..byte_B7653B]
+void player_view_update_effective_modes(PlayerViewState &v, bool alive, bool round_ended);
+
+// Toggle NVG and return its new active state. Gain is independent of the
+// toggle and is retained while inactive. [orig: input action 41]
+bool player_view_toggle_nvg(PlayerViewState &v);
+
+// Add `delta`, clamp to the retail five-position range, store, and return it.
+// [orig: input actions 56/57]
+int32_t player_view_adjust_nvg_gain(PlayerViewState &v, int32_t delta);
+
+// The NVG state remains active in third person, but its world/post treatment
+// is first-person only. [orig: g_camera_mode gates in the NVG render path]
+bool player_view_nvg_visible(const PlayerViewState &v);
+
 // The main camera's HORIZONTAL fov in degrees: 80 at the hip, eased to
 // 80 / scope_max_mag for sighted defs (file flag 2) with a magnification,
-// and pinned to 80 in third person. `def_flags` is the raw weapon.def flag
-// mask, `scope_max_mag` the def's zoom (0 = key absent).
+// overridden by the fixed 20-degree binocular view, and pinned to 80 in third
+// person. `def_flags` is the raw weapon.def flag mask, `scope_max_mag` the
+// def's zoom (0 = key absent).
 // [orig: Player_ToggleWeaponScope @ 0x4df401; 3P suppress @ 0x4df3fa]
 float player_view_fov_h_deg(const PlayerViewState &v, int32_t def_flags, float scope_max_mag);
 

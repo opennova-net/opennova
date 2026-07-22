@@ -56,6 +56,8 @@ constexpr double kFixed16 = 65536.0;
 constexpr int kPlayerVisualItemId = 105310; // items.def "Player #1, Single player" -> US01/US01.adm
 // Canonical definition lives in libs/world/player_spawn.h (shared with the npruntime host).
 constexpr uint16_t kRetailPlayerMinEntitySlot = opennova::world::kRetailPlayerMinEntitySlot;
+constexpr float kBinocularAimOffsetDeg = 2.8125f; // 0x02000000 BAM
+constexpr double kTau = 6.28318530717958647692;
 
 uint64_t present_effect_origin_key(int kind, int index) {
 	return (static_cast<uint64_t>(static_cast<uint32_t>(kind)) << 32) |
@@ -522,6 +524,31 @@ NovaSimulation::NovaSimulation() {
 	set_process(true);
 }
 
+void NovaSimulation::reset_local_player_view_effects() {
+	player_view_.binoculars_requested = false;
+	player_view_.binoculars_raised = false;
+	player_view_.binoculars_view_active = false;
+	binocular_yaw_offset_deg_ = 0.0f;
+	binocular_pitch_offset_deg_ = 0.0f;
+	player_view_.nvg_gain = opennova::world::kNvgGainMin;
+	player_view_.nvg_active = world_ != nullptr &&
+			(world_->mission_attrib_flags &
+					static_cast<uint32_t>(
+							opennova::bms::AttribFlags::StartWithNVGOn)) != 0;
+	nvg_scope_restore_ = false;
+	refresh_local_player_view_effects();
+}
+
+void NovaSimulation::refresh_local_player_view_effects() {
+	const opennova::world::Entity *local = world_ != nullptr
+			? world_->registry.get(world_->cached.local_player)
+			: nullptr;
+	const bool alive = local != nullptr && local->alive && local->health > 0;
+	const bool round_ended = world_ != nullptr && world_->round_end.ended;
+	opennova::world::player_view_update_effective_modes(
+			player_view_, alive, round_ended);
+}
+
 void NovaSimulation::reset_world() {
 	invalidate_present_effect_pose_cache();
 	pending_weapon_events_.clear();
@@ -540,6 +567,11 @@ void NovaSimulation::reset_world() {
 	weapon_switch_in_flight_ = false;
 	weapon_switch_deferred_action_ = -1;
 	weapon_start_in_switchto_ = false;
+	player_view_ = opennova::world::PlayerViewState{};
+	nvg_scope_restore_ = false;
+	binocular_yaw_offset_deg_ = 0.0f;
+	binocular_pitch_offset_deg_ = 0.0f;
+	local_eye_valid_ = false;
 	local_usegun_switch_ = LocalUseGunSwitch::kNone;
 	local_usegun_slot_active_ = false;
 	local_usegun_mount_ = opennova::world::EntityHandle{};
@@ -2923,6 +2955,12 @@ bool NovaSimulation::local_player_toggle_mount() {
 	const bool changed = opennova::world::player_toggle_vehicle_mount(
 			*world_, world_->cached.local_player);
 	if (changed) {
+		// A successful ToSpecial/use-item transition clears the raw binocular
+		// request, not merely the effective first-person view.
+		player_view_.binoculars_requested = false;
+		binocular_yaw_offset_deg_ = 0.0f;
+		binocular_pitch_offset_deg_ = 0.0f;
+		refresh_local_player_view_effects();
 		sync_local_mounted_input_heading();
 		sync_local_usegun_weapon_transition();
 	}
@@ -3115,6 +3153,9 @@ bool NovaSimulation::apply_local_player_loadout(const TypedArray<Dictionary> &p_
 
 void NovaSimulation::respawn_local_player_loadout() {
 	rebuild_local_player_loadout(/*p_select_spawn_default=*/true);
+	// Player_InitPlayer clears both view effects and seeds NVG from the mission
+	// StartWithNVGOn bit on every respawn.
+	reset_local_player_view_effects();
 }
 
 void NovaSimulation::sync_local_player_damage_classes() {
@@ -3211,6 +3252,7 @@ void NovaSimulation::commit_pending_weapon_switch() {
 	// @ 0x4dd727; the FP model re-resolve runs host-side off the event].
 	weapon_switch_in_flight_ = false;
 	weapon_switch_deferred_action_ = -1;
+	nvg_scope_restore_ = false;
 	if (!world_ || !local_inventory_valid_) return;
 	opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);
 	if (e == nullptr) return;
@@ -3231,6 +3273,7 @@ void NovaSimulation::commit_pending_weapon_switch() {
 }
 
 void NovaSimulation::request_local_player_weapon_category(int p_category) {
+	if (player_view_.binoculars_view_active) return;
 	// [orig: input cases 200-210 @ 0x4e1144 -> Player_SwitchToWeaponByHandle
 	//  ((action-200)*65). The binoculars-view and fire-charge input gates have no
 	//  sim mechanics yet — record note.]
@@ -3246,6 +3289,7 @@ void NovaSimulation::request_local_player_weapon_category(int p_category) {
 }
 
 void NovaSimulation::request_local_player_weapon_cycle(int p_direction) {
+	if (player_view_.binoculars_view_active) return;
 	// [orig: input cases 212/214 -> Player_CycleWeaponSlot @ 0x4dfe70; the mounted-gun
 	//  elevation dual-purpose leg belongs to the vehicle channel, not this walk]
 	if (local_usegun_switch_ != LocalUseGunSwitch::kNone) return;
@@ -3586,6 +3630,7 @@ void NovaSimulation::finish_load(const opennova::bms::File &file) {
 	// death auto-lose in check_win_conditions). [orig: Bms_AttribFlags @0xa76258,
 	// read by Server_CheckWinConditions @0x51ad6f]
 	world_->mission_attrib_flags = static_cast<uint32_t>(file.header.attrib_flags);
+	reset_local_player_view_effects();
 	world_->ai = ai_.get();
 	// P7 listen server (SP + LAN host): stand up the npruntime in-match runtime (mode-3 HostClient
 	// over an in-process loopback, the faithful §5.0 path). Server_TickUpdate owns the logic tick +
@@ -3699,6 +3744,12 @@ void NovaSimulation::_bind_methods() {
 			&NovaSimulation::set_local_player_first_person_model_available);
 	ClassDB::bind_method(D_METHOD("set_local_player_weapon_input", "fire_held", "fire_pressed", "reload_pressed"), &NovaSimulation::set_local_player_weapon_input);
 	ClassDB::bind_method(D_METHOD("request_local_player_scope_toggle"), &NovaSimulation::request_local_player_scope_toggle);
+	ClassDB::bind_method(D_METHOD("request_local_player_binoculars_toggle"),
+			&NovaSimulation::request_local_player_binoculars_toggle);
+	ClassDB::bind_method(D_METHOD("request_local_player_nvg_toggle"),
+			&NovaSimulation::request_local_player_nvg_toggle);
+	ClassDB::bind_method(D_METHOD("request_local_player_nvg_gain", "delta"),
+			&NovaSimulation::request_local_player_nvg_gain);
 	ClassDB::bind_method(D_METHOD("set_local_player_eye", "eye_godot", "valid"), &NovaSimulation::set_local_player_eye);
 	ClassDB::bind_method(D_METHOD("set_local_player_camera_third_person", "third_person"), &NovaSimulation::set_local_player_camera_third_person);
 	ClassDB::bind_method(D_METHOD("get_local_player_view"), &NovaSimulation::get_local_player_view);
@@ -4213,6 +4264,7 @@ void NovaSimulation::apply_player_input_pre_tick() {
 	if (!world_ || !world_->ai || !world_->cached.local_player.valid()) return;
 	AiEntity *p = world_->ai->for_handle(world_->cached.local_player);
 	if (!p) return;
+	refresh_local_player_view_effects();
 	opennova::world::apply_player_body_input(*p, opennova::world::pack_player_body_input(player_input_));
 	// The local-player weapon-channel inputs, refreshed before the body updater runs —
 	// the per-tick re-read of the held AdmDefs record kind + the Flags-bit refresh
@@ -4225,11 +4277,20 @@ void NovaSimulation::apply_player_input_pre_tick() {
 		}
 		p->inf.wpn_hold_kind = weapon_active_ ? weapon_hold_kind_ : 0;
 		p->inf.scope_raised = weapon_active_ && player_view_.scope_engaged;
+		p->inf.binoculars_raised = player_view_.binoculars_raised;
 		// The run-gait class + ForceCrouch mirror, same per-tick re-read pattern as the
 		// hold kind [orig: the selection reads AdmDefs[+0x2B0]+0xAC each pass @ 0x4b72cf;
 		// the ForceCrouch checks read the equipped def flags @ 0x4b7245/@ 0x4e0d8a].
 		p->inf.wpn_run_anim = weapon_active_ ? weapon_run_anim_ : 0;
 		p->inf.wpn_force_crouch = weapon_active_ && weapon_force_crouch_;
+	}
+	if (opennova::world::Entity *entity =
+				world_->registry.get(world_->cached.local_player)) {
+		uint32_t view_flags = 0;
+		if (player_view_.nvg_active) view_flags |= 0x4u;
+		if (player_view_.binoculars_raised) view_flags |= 0x8u;
+		if (weapon_active_ && player_view_.scope_engaged) view_flags |= 0x10u;
+		entity->flags = (entity->flags & ~0x1cu) | view_flags;
 	}
 }
 
@@ -4270,6 +4331,7 @@ bool NovaSimulation::spawn_local_player(Vector3 p_position, float p_yaw_deg, int
 	player_input_.look_heading = opennova::world::bam_heading_from_mission_yaw_deg(p_yaw_deg);
 	stance_latch_ = 0;
 	look_px_accum_x_ = look_px_accum_y_ = 0.0f;
+	reset_local_player_view_effects();
 	return true;
 }
 
@@ -4306,6 +4368,7 @@ int NovaSimulation::spawn_local_player_at_start() {
 	player_input_.look_heading = opennova::world::bam_heading_from_mission_yaw_deg(spawn.yaw);
 	stance_latch_ = 0;
 	look_px_accum_x_ = look_px_accum_y_ = 0.0f;
+	reset_local_player_view_effects();
 	return sel.found ? 1 : 0;
 }
 
@@ -4354,6 +4417,7 @@ void NovaSimulation::set_player_input(bool p_forward, bool p_back, bool p_left, 
 			opennova::world::weapon_fsm_queue_scope_down(
 					*active_local_weapon_slot());
 	}
+	refresh_local_player_view_effects();
 }
 
 void NovaSimulation::add_local_player_look(float p_dx_px, float p_dy_px) {
@@ -4364,7 +4428,8 @@ void NovaSimulation::add_local_player_look(float p_dx_px, float p_dy_px) {
 	// the sim's own bit; the zoom-adjust keys are an unported tail, so the seed
 	// (scope_max_mag) IS the current zoom.
 	int32_t scoped_zoom = 0;
-	if (weapon_active_ && player_view_.scope_engaged && weapon_scope_max_mag_ > 1.0f)
+	if (!player_view_.binoculars_view_active && weapon_active_ &&
+			player_view_.scope_engaged && weapon_scope_max_mag_ > 1.0f)
 		scoped_zoom = static_cast<int32_t>(weapon_scope_max_mag_);
 	const bool prone = (stance_latch_ == 2); // [orig: MoveOrder & 0x100 @ 0x4e0ff7]
 	// Godot supplies float relative motion; the original consumes whole center-lock
@@ -4602,6 +4667,9 @@ void NovaSimulation::install_local_player_weapon(const Dictionary &p_def,
 			weapon_active_ && !weapon_start_in_switchto_ &&
 			!incoming_name.is_empty() &&
 			incoming_name.nocasecmp_to(weapon_def_name_) == 0;
+	// A real mount invalidates the one-shot scope restore latch. The late
+	// first-person-model rebake is render-side only and must not mutate view state.
+	if (!same_weapon_rebake) nvg_scope_restore_ = false;
 	// A mount is a new presentation epoch: no payload from the previous weapon may
 	// cross this seam, even though its strings were copied into the pending records.
 	// The same-weapon rebake is NOT an epoch — undrained records (including a
@@ -4776,6 +4844,7 @@ void NovaSimulation::install_local_player_weapon(const Dictionary &p_def,
 }
 
 void NovaSimulation::clear_local_player_weapon() {
+	nvg_scope_restore_ = false;
 	weapon_active_ = false;
 	weapon_def_name_ = String();
 	power_throw_start_tick_ = 0;
@@ -4812,6 +4881,12 @@ void NovaSimulation::set_local_player_first_person_model_available(bool p_availa
 
 void NovaSimulation::set_local_player_weapon_input(bool p_fire_held, bool p_fire_pressed,
 		bool p_reload_pressed) {
+	if (player_view_.binoculars_view_active) {
+		weapon_fire_held_ = false;
+		weapon_fire_pressed_ = false;
+		weapon_reload_pressed_ = false;
+		return;
+	}
 	weapon_fire_held_ = p_fire_held;
 	weapon_fire_pressed_ = weapon_fire_pressed_ || p_fire_pressed; // latch until consumed
 	weapon_reload_pressed_ = weapon_reload_pressed_ || p_reload_pressed;
@@ -4831,6 +4906,11 @@ bool NovaSimulation::request_local_player_scope_toggle() {
 	if (!player_view_.scope_engaged &&
 			opennova::world::player_view_scope_up_blocked(player_view_, weapon_def_.flags))
 		return false;
+	// Inset optics cannot be raised under NVG. Non-Inset sights retain the
+	// original independent behavior.
+	if (!player_view_.scope_engaged && player_view_.nvg_active &&
+			(weapon_def_.flags2 & 0x200) != 0)
+		return false;
 	// ForceScoped pins the raised sight: un-scoping is refused once settled
 	// [orig: (flags1 & 0x20000000) == 0 || !g_weaponScopeActive @ 0x4df12d].
 	if (player_view_.scope_engaged && (weapon_def_.flags & 0x20000000) != 0 &&
@@ -4849,8 +4929,72 @@ bool NovaSimulation::request_local_player_scope_toggle() {
 	return true;
 }
 
+bool NovaSimulation::request_local_player_binoculars_toggle() {
+	const opennova::world::Entity *local = world_ != nullptr
+			? world_->registry.get(world_->cached.local_player)
+			: nullptr;
+	if (local == nullptr) return false;
+	// Retail refuses binoculars while a PowerThrow charge is live. Allowing the
+	// view to rise would suppress held weapon input and turn the charge into an
+	// unintended release [orig: g_fireChargeStartTick @ 0xB76800; action 26 gate].
+	if (power_throw_start_tick_ != 0) return false;
+	// An active scope also blocks binoculars in a gunner parent slot.
+	if (player_view_.scope_engaged && local->mounted &&
+			local->mount_type == opennova::world::SeatType::Gunner)
+		return false;
+
+	const bool requested =
+			opennova::world::player_view_toggle_binoculars(player_view_);
+	if (requested) {
+		const double unit =
+				(static_cast<double>(std::rand()) + 0.5) /
+				(static_cast<double>(RAND_MAX) + 1.0);
+		const double angle = unit * kTau;
+		binocular_yaw_offset_deg_ =
+				static_cast<float>(std::cos(angle) * kBinocularAimOffsetDeg);
+		binocular_pitch_offset_deg_ =
+				static_cast<float>(std::sin(angle) * kBinocularAimOffsetDeg);
+	} else {
+		binocular_yaw_offset_deg_ = 0.0f;
+		binocular_pitch_offset_deg_ = 0.0f;
+	}
+	refresh_local_player_view_effects();
+	return requested;
+}
+
+bool NovaSimulation::request_local_player_nvg_toggle() {
+	const opennova::world::Entity *local = world_ != nullptr
+			? world_->registry.get(world_->cached.local_player)
+			: nullptr;
+	if (local == nullptr) return false;
+
+	if (!player_view_.nvg_active) {
+		nvg_scope_restore_ = false;
+		if (weapon_active_ && player_view_.scope_engaged &&
+				(weapon_def_.flags2 & 0x200) != 0 &&
+				!opennova::world::player_view_scope_ease_active(player_view_)) {
+			nvg_scope_restore_ = request_local_player_scope_toggle();
+		}
+		return opennova::world::player_view_toggle_nvg(player_view_);
+	}
+
+	// Clear NVG before the normal scope-up request so the Inset refusal no
+	// longer applies, then consume the one-shot restore latch.
+	opennova::world::player_view_toggle_nvg(player_view_);
+	const bool restore_scope = nvg_scope_restore_;
+	nvg_scope_restore_ = false;
+	if (restore_scope && !player_view_.scope_engaged)
+		request_local_player_scope_toggle();
+	return false;
+}
+
+int NovaSimulation::request_local_player_nvg_gain(int p_delta) {
+	return opennova::world::player_view_adjust_nvg_gain(player_view_, p_delta);
+}
+
 void NovaSimulation::set_local_player_camera_third_person(bool p_third_person) {
 	player_view_.third_person = p_third_person; // [orig: g_camera_mode @ 0xA890C8]
+	refresh_local_player_view_effects();
 }
 
 // One 62.5 Hz tick of the view state, before the weapon pump: the ADS ease and the
@@ -4861,11 +5005,14 @@ void NovaSimulation::set_local_player_camera_third_person(bool p_third_person) {
 // [orig: call sites @ 0x42c18e / @ 0x526786; promoter @ 0x4de4f7].
 void NovaSimulation::tick_local_player_view() {
 	if (!world_ || !world_->cached.local_player.valid()) {
-		player_view_ = opennova::world::PlayerViewState{};
+		opennova::world::player_view_update_effective_modes(
+				player_view_, false, world_ != nullptr && world_->round_end.ended);
+		player_view_.tp_anchor_valid = false;
 		return;
 	}
 	const opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);
 	if (!e) return;
+	refresh_local_player_view_effects();
 	// The anchor-chase target is Position + CameraOffset — the posed head-bone eye
 	// [orig: ThirdPersonCamera_Update @ 0x437b70..76], fed by the host's per-frame
 	// skeleton sample (see local_eye_mission_). Without a sample: Position + 1.0,
@@ -4891,6 +5038,15 @@ Dictionary NovaSimulation::get_local_player_view() const {
 	const opennova::world::WeaponSlotState *active_slot =
 			active_local_weapon_slot();
 	out["scope_engaged"] = player_view_.scope_engaged;
+	out["binoculars_requested"] = player_view_.binoculars_requested;
+	out["binoculars_raised"] = player_view_.binoculars_raised;
+	out["binoculars_view_active"] = player_view_.binoculars_view_active;
+	out["binocular_yaw_offset_deg"] = binocular_yaw_offset_deg_;
+	out["binocular_pitch_offset_deg"] = binocular_pitch_offset_deg_;
+	out["nvg_active"] = player_view_.nvg_active;
+	out["nvg_visible"] =
+			opennova::world::player_view_nvg_visible(player_view_);
+	out["nvg_gain"] = player_view_.nvg_gain;
 	const opennova::world::Entity *local = world_ != nullptr
 			? world_->registry.get(world_->cached.local_player)
 			: nullptr;
@@ -4918,6 +5074,7 @@ Dictionary NovaSimulation::get_local_player_view() const {
 			opennova::world::weapon_sights_card_eligible(
 					weapon_def_, *active_slot) &&
 			player_view_.scope_engaged && !player_view_.third_person &&
+			!player_view_.binoculars_view_active &&
 			!opennova::world::player_view_scope_ease_active(player_view_);
 	out["fov_h_deg"] = opennova::world::player_view_fov_h_deg(player_view_,
 			weapon_active_ ? weapon_def_.flags : 0,
@@ -5595,6 +5752,7 @@ void NovaSimulation::restart() {
 	if (collision_item_db_.is_valid() && collision_placer_.is_valid())
 		resolve_collision_instances(collision_item_db_, collision_placer_.ptr());
 	weapon_anim_tick_ = world_->logic_tick;
+	reset_local_player_view_effects();
 	// The restored world can share a tick number with a previously cached view.
 	// Force the next FollowOwner query to rebuild against the post-restart epoch.
 	invalidate_present_effect_pose_cache();

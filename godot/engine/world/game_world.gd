@@ -683,6 +683,7 @@ func unload() -> void:
 	# next mission's terrain/sky/water hidden.
 	_reset_blink_frame_gates()
 	_reset_occlusion_frame()
+	set_local_player_nvg_view(false, 0)
 	if _env != null and _env.environment_data != null:
 		_env.environment_data.clear_mission_overrides()
 	_loaded_mission = null
@@ -1280,6 +1281,33 @@ func local_player_weapon_name() -> String:
 func request_local_player_scope_toggle() -> bool:
 	var sim := get_sim()
 	return sim != null and bool(sim.request_local_player_scope_toggle())
+
+
+## Retail Binoculars action 26 (default B). The sim owns the persistent request
+## and its movement/life/round/camera-derived effective states.
+func request_local_player_binoculars_toggle() -> bool:
+	var sim := get_sim()
+	return sim != null and bool(sim.request_local_player_binoculars_toggle())
+
+
+## Retail Night Vision action 41 (default N); mission EnableNVG is night
+## semantics, not an input permission gate.
+func request_local_player_nvg_toggle() -> bool:
+	var sim := get_sim()
+	return sim != null and bool(sim.request_local_player_nvg_toggle())
+
+
+## Retail NVG gain actions 56/57 (default +/-), clamped sim-side to 0..4.
+func request_local_player_nvg_gain(delta: int) -> int:
+	var sim := get_sim()
+	return int(sim.request_local_player_nvg_gain(delta)) if sim != null else 0
+
+
+## Feed only the first-person-visible NVG state into world lighting. The raw
+## active state deliberately survives third person in the simulation.
+func set_local_player_nvg_view(active: bool, gain: int) -> void:
+	if _env != null and _env.has_method("set_nvg_view"):
+		_env.set_nvg_view(active, gain)
 
 
 ## The host camera mode, driving the sim-side fov suppression + anchor chase
