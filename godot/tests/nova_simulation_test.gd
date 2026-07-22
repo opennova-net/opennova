@@ -2749,6 +2749,8 @@ func test_first_husk_kz_userpoints_feed_death_blast_traits() -> void:
 	})
 	assert_eq(sim.resolve_collision_instances(item_db, placer), 1)
 	var debug := sim.get_destruction_debug(bms_id)
+	assert_true(bool(debug.get("husk_model_loaded", false)),
+			"a successfully opened first husk supplies the retail live-model gate")
 	assert_eq(int(debug.get("kz_point_count", -1)), expected.size(),
 			"all first-husk KZ points reach the destruction traits")
 	var actual: PackedVector3Array = debug.get("kz_points", PackedVector3Array())
@@ -2800,9 +2802,25 @@ func test_first_husk_kz_userpoints_feed_death_blast_traits() -> void:
 			})), 1)
 	var final_only_debug := final_only_sim.get_destruction_debug(
 			int(final_only_placed.get("bms_id", 0)))
+	assert_true(bool(final_only_debug.get("husk_model_loaded", false)),
+			"a successfully opened final-only husk also supplies the retail gate")
 	assert_eq(int(final_only_debug.get("kz_point_count", -1)), 0,
 			"huskFinal alone does not replace retail's first-stage KZ source")
 	final_only_sim.free()
+
+	# Authored names do not stand in for the live retail pointer. A placer that
+	# resolves the main graphic but neither husk leaves the callback gate clear.
+	var missing_sim := NovaSimulation.new()
+	assert_true(missing_sim.load_from_mission_data(md))
+	missing_sim.resolve_item_traits(item_db)
+	assert_eq(missing_sim.resolve_collision_instances(
+			item_db, GraphicDataPlacerStub.new({"Barrel1": main_data})), 1)
+	var missing_debug := missing_sim.get_destruction_debug(bms_id)
+	assert_true(bool(missing_debug.get("has_husk", false)),
+			"items.def still records the authored husk name")
+	assert_false(bool(missing_debug.get("husk_model_loaded", true)),
+			"missing/corrupt husk assets leave the retail live-model gate clear")
+	missing_sim.free()
 
 
 func test_face_only_cfac_model_attaches_for_projectile_raycast() -> void:
