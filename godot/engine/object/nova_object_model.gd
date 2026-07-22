@@ -316,7 +316,7 @@ func play_body_clip_variant_at_time(key: String, variant: int, seconds: float) -
 	if same_external and not _body_pose_dirty:
 		return
 	_body_pose_dirty = true
-	_advance_body_anim(0.0)
+	advance_body_animation(0.0)
 
 
 ## Pose a main-body clip at the authoritative infantry motor playhead. IDA's
@@ -341,7 +341,7 @@ func play_body_clip_at(key: String, phase_ticks: int) -> void:
 	if same_external and not _body_pose_dirty:
 		return
 	_body_pose_dirty = true
-	_advance_body_anim(0.0)
+	advance_body_animation(0.0)
 
 
 ## Seed a main-body clip from retail half-frame ticks, pose it immediately, and
@@ -349,7 +349,7 @@ func play_body_clip_at(key: String, phase_ticks: int) -> void:
 ## every later playhead sample and therefore intentionally pin external phase.
 func play_body_clip_seeded(key: String, phase_ticks: int) -> void:
 	if _select_body_clip_seeded(key, phase_ticks):
-		_advance_body_anim(0.0)
+		advance_body_animation(0.0)
 
 
 func _select_body_clip_seeded(key: String, phase_ticks: int) -> bool:
@@ -401,7 +401,7 @@ func _accept_remote_body_state(state_id: int, key: String, flags: int,
 	_remote_state = state_id
 	_remote_flags = flags
 	if _select_body_clip_seeded(key, phase_ticks if phase_ticks >= 0 else 0):
-		_advance_body_anim(0.0)
+		advance_body_animation(0.0)
 
 
 func _queue_remote_body_state(state_id: int, key: String, flags: int) -> void:
@@ -417,7 +417,7 @@ func _queue_remote_body_state(state_id: int, key: String, flags: int) -> void:
 		_remote_pending_end_time = length
 	# A request arriving after a one-shot already ended promotes immediately.
 	if _promote_remote_body_pending_if_due():
-		_advance_body_anim(0.0)
+		advance_body_animation(0.0)
 
 
 func _clear_remote_body_pending() -> void:
@@ -494,7 +494,7 @@ func set_animation_time(seconds: float) -> void:
 	_anim_external_phase = false
 	_set_body_playhead(seconds)
 	_body_pose_dirty = true
-	_advance_body_anim(0.0)
+	advance_body_animation(0.0)
 
 
 func _set_body_playhead(seconds: float) -> void:
@@ -713,10 +713,11 @@ func set_aim_overlay(deltas: Array) -> void:
 	_body_pose_dirty = true
 
 
-# Pose the Skeleton3D from the active main-body clip. Advances the playhead while playing,
-# evaluates the parent-local pose per bone (NovaSkeletalAnim, Godot space) and writes it as
-# the bone pose. With no active clip the bones stay at their reset (== bind) pose.
-func _advance_body_anim(delta: float) -> void:
+## Pose the Skeleton3D from the active main-body clip. Advances the playhead while playing,
+## evaluates the parent-local pose per bone (NovaSkeletalAnim, Godot space) and writes it as
+## the bone pose. Public so deterministic hosts can advance the render-time channel without
+## reaching through Godot's private _process callback.
+func advance_body_animation(delta: float) -> void:
 	if _skeleton == null or _skeletal == null or _anim_key.is_empty():
 		return
 	if _is_playing and _anim_playing and not _anim_external_phase and delta != 0.0:
@@ -995,7 +996,7 @@ func _apply_runtime_state(delta: float) -> void:
 	elif _is_playing:
 		_anim_time_ms = (_anim_time_ms + int(delta * 1000.0)) & 0xffffffff
 	var part_changed := _advance_part_anims(delta)
-	_advance_body_anim(delta)
+	advance_body_animation(delta)
 	# Only materials whose UV/RGB/alpha generators animate (or whose texture flip-book
 	# advances) need a per-frame push; a fully-static material already carries its identity
 	# values from _create_material, so re-evaluating it each frame just re-writes identical

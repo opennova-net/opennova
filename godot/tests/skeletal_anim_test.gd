@@ -318,7 +318,7 @@ func test_play_body_clip_at_pins_ida_phase_ticks() -> void:
 
 	model.call("play_body_clip_at", "anim_walk_forward", phase_ticks)
 	var pinned_pose := model.get_skeleton().get_bone_pose_position(0)
-	model._process(0.5)
+	model.advance_body_animation(0.5)
 
 	assert_almost_eq(model.get_animation_time(), expected_time, 0.001,
 		"IDA half-frame phase ticks map to skeleton pose seconds")
@@ -337,7 +337,7 @@ func test_play_body_clip_seeded_consumes_ticks_then_free_runs() -> void:
 	model.play_body_clip_seeded("anim_walk_forward", 5)
 	assert_almost_eq(model.get_animation_time(), expected, 0.001,
 		"the accepted player transition consumes its half-frame tick seed")
-	model._process(0.05)
+	model.advance_body_animation(0.05)
 	assert_false(is_equal_approx(model.get_animation_time(), expected),
 		"a seeded remote clip advances locally on the very next render frame")
 
@@ -350,7 +350,7 @@ func test_remote_body_same_state_does_not_rescrub_player_phase() -> void:
 	var flags := int(NovaSimulation.infantry_anim_flags(1))
 
 	model.apply_remote_body_state(1, "anim_walk_forward", flags, 10)
-	model._process(0.05)
+	model.advance_body_animation(0.05)
 	var locally_advanced := model.get_animation_time()
 	model.apply_remote_body_state(1, "anim_walk_forward", flags, 22)
 	assert_almost_eq(model.get_animation_time(), locally_advanced, 0.001,
@@ -372,7 +372,7 @@ func test_remote_body_locked_state_promotes_pending_at_tick_zero() -> void:
 		"a locked current clip defers the incoming wire request")
 	var current_length: float = model.get_skeletal_anim().get_clip_length("anim_idle")
 	assert_gt(current_length, 0.0)
-	model._process(current_length + 0.01)
+	model.advance_body_animation(current_length + 0.01)
 	assert_eq(model.get_active_body_clip(), "anim_walk_forward",
 		"the queued request promotes when the current clip completes")
 	assert_almost_eq(model.get_animation_time(), 0.0, 0.001,
