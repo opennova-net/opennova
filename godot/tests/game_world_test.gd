@@ -535,6 +535,112 @@ func test_packaged_scene_instantiates_with_intact_wiring() -> void:
 	var terrain: NovaTerrain = world.get_node("NovaTerrain")
 	assert_eq(terrain.environment_path, NodePath("../NovaEnvironment"), "terrain env path survived extraction")
 	assert_eq(terrain.weather_path, NodePath("../NovaWeather"), "terrain weather path survived extraction")
+	var water: NovaWater = world.get_node("NovaWater")
+	assert_eq(water.water_height, 0.0,
+		"the retained scene must not invent water before ENV/TRN/BMS author it")
+	assert_false(water.is_water_active())
+	assert_eq(water.reflection_viewport.render_target_update_mode,
+		SubViewport.UPDATE_DISABLED)
+	water.water_height = 10.0
+	assert_true(water.is_water_active(), "the authored height remains retained")
+	assert_false(water.is_water_render_active(),
+		"the packaged host keeps retained water out of rendering before a load")
+	assert_false(world.is_water_render_active(),
+		"frame clear and occlusion use the lifecycle-aware water predicate")
+	water.set_host_rendering_enabled(true)
+	assert_true(world.is_water_render_active())
+	water.set_host_rendering_enabled(false)
+
+
+func test_explicit_bms_zero_water_beats_nonzero_terrain() -> void:
+	var root_dir := OS.get_cache_dir().path_join(WORLD_TEST_ROOT).path_join(
+		"zero_water_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(root_dir)
+	for source_dir in [
+		ProjectSettings.globalize_path("res://../fixtures/godot/dvxi5"),
+		ProjectSettings.globalize_path("res://../fixtures/minimal/resources"),
+	]:
+		for file_name in DirAccess.get_files_at(source_dir):
+			assert_eq(DirAccess.copy_absolute(
+				source_dir.path_join(file_name), root_dir.path_join(file_name)), OK)
+
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(root_dir), OK)
+	var packed := load("res://engine/world/game_world.tscn") as PackedScene
+	var world := packed.instantiate() as GameWorld
+	add_child_autofree(world)
+	world.set_resource_root(root)
+	var mission := NovaMissionData.new()
+	assert_eq(mission.open_from_resource_root(root, "mnml.bms"), OK)
+	assert_true(mission.set_header_string("terrain", "Dvxi5"))
+	assert_true(mission.set_header_string("environment", "mnml"))
+	assert_true(mission.set_header_int("water_override", 0))
+	assert_true(mission.set_header_flag(0x1, true))
+	assert_true(mission.get_environment_overrides().has("water_height"))
+
+	assert_eq(world.load_mission_data(mission, "mnml.bms"), OK)
+	var water := world.get_node("NovaWater") as NovaWater
+	assert_eq(world.get_terrain_data().get_water_height(), 21,
+		"fixture proves the lower-priority TRN has nonzero water")
+	assert_eq(water.water_height, 0.0,
+		"flagged BMS zero disables water and still beats TRN")
+	assert_false(water.is_water_active())
+	assert_eq(water.reflection_viewport.render_target_update_mode,
+		SubViewport.UPDATE_DISABLED)
+
+
+func test_net_map_missing_environment_does_not_commit_partial_render_state() -> void:
+	var root_dir := _stage_minimal_fixture("net_missing_env")
+	var mission_path := root_dir.path_join("mnml.bms")
+	var mission := NovaMissionData.new()
+	assert_eq(mission.open_file(mission_path), OK)
+	assert_true(mission.set_header_int("water_override", 24))
+	assert_true(mission.set_header_flag(0x1, true))
+	assert_eq(mission.save_file(), OK)
+	_write_pff(root_dir.path_join("resource.pff"), [{
+		"name": "mnml.bms",
+		"bytes": FileAccess.get_file_as_bytes(mission_path),
+	}])
+	assert_eq(DirAccess.remove_absolute(root_dir.path_join("mnml.env")), OK)
+
+	var root := NovaResourceRoot.new()
+	assert_eq(root.mount_runtime(root_dir, "", true), OK)
+	var packed := load("res://engine/world/game_world.tscn") as PackedScene
+	var world := packed.instantiate() as GameWorld
+	add_child_autofree(world)
+	await get_tree().process_frame
+	world.set_resource_root(root)
+
+	# A retained environment is exactly what the failed wire load must not
+	# mutate or render against. It may belong to a preview or an earlier epoch.
+	var stale_env := EnvFile.new()
+	stale_env.set_source_path(ProjectSettings.globalize_path(
+			"res://../fixtures/minimal/resources/mnml.env"))
+	assert_eq(stale_env.load(), OK)
+	var env_node := world.get_node("NovaEnvironment") as NovaEnvironment
+	env_node.environment_data = stale_env
+	var water := world.get_node("NovaWater") as NovaWater
+	water.water_height = 3.0
+
+	assert_eq(world.load_net_session({
+		"replay_host": "127.0.0.1",
+		"replay_port": 9,
+	}), OK)
+	var client = world.get_net_client()
+	assert_not_null(client)
+	if client == null:
+		return
+	client.emit_signal("mission_known", "mnml.bms")
+
+	assert_false(stale_env.has_mission_overrides(),
+			"a missing required ENV cannot apply BMS overrides to retained data")
+	assert_null(world.get_loaded_mission(),
+			"an incomplete wire map stays retryable instead of latching its BMS")
+	assert_eq(water.water_height, 3.0,
+			"the distinct BMS water rung commits with the map, not a partial load")
+	assert_false(water.is_water_render_active(),
+			"terrain success alone cannot render water against a stale ENV")
+	world.unload()
 
 
 func test_armory_can_reuse_game_world_weapon_database_on_first_open() -> void:
@@ -676,7 +782,31 @@ func test_hidden_world_suppresses_retained_terrain_and_restores_idle_frame_clear
 		"the loaded fixture presents native RenderingServer terrain patches")
 	var mission_clear := world.get_current_frame_clear_color()
 	assert_ne(mission_clear, idle_clear,
-		"the loaded mission replaces the scene-authored frame clear")
+			"the loaded mission replaces the scene-authored frame clear")
+
+	# Camera offsets move the rendered eye independently of global_position.
+	# Cross the waterline with v_offset alone and pin the clear-color branch to
+	# the same adjusted eye used by NovaWater strip classification.
+	var water := world.get_node("NovaWater") as NovaWater
+	var env := world.get_node("NovaEnvironment") as NovaEnvironment
+	water.set_height_override(10.0)
+	camera.position.y = 10.25
+	camera.v_offset = -1.0
+	assert_lt(camera.get_camera_transform().origin.y, water.water_height)
+	await get_tree().process_frame
+	var combined := EnvFile.combine_terrain_light(
+			Color(env.get_sun_light().x, env.get_sun_light().y, env.get_sun_light().z),
+			Color(env.get_sky_ambient().x, env.get_sky_ambient().y, env.get_sky_ambient().z))
+	var lit := EnvFile.lit_water_color(
+			Color(env.get_water_color().x, env.get_water_color().y, env.get_water_color().z),
+			combined)
+	assert_eq(world.get_current_frame_clear_color(), Color(lit.r, lit.g, lit.b),
+			"v_offset below water selects the underwater clear even when the node origin is above")
+	camera.v_offset = 0.0
+	camera.position.y = 71.0
+	water.set_height_override(NAN)
+	await get_tree().process_frame
+	assert_eq(world.get_current_frame_clear_color(), mission_clear)
 
 	world.visible = false
 	await get_tree().process_frame
@@ -777,14 +907,91 @@ func test_loaded_mission_drives_the_shared_time_of_day_clock() -> void:
 	assert_almost_eq(env.time_of_day, 515.0, 0.001,
 		"the BMS start time, not the environment node's noon default, initializes the shared clock")
 
-	# 0.128 seconds advances eight fixed 62.5 Hz ticks. The exact clock math is
-	# pinned at NovaEnvironment's public seam; this integration assertion pins
-	# GameWorld's runtime-tick routing and guards against a reset to stale noon.
+	# 0.128 seconds advances eight 62.5 Hz simulation ticks but only seven
+	# recovered 62 Hz weather/TOD ticks. Those clocks must remain distinct.
 	world.tick(Vector3.ZERO, Transform3D(), 0.128)
 	var advanced := env.time_of_day
-	assert_gt(advanced, 515.0, "runtime ticks advance the authored mission clock")
-	assert_lt(advanced, 516.0, "a single frame cannot jump the clock to another hour")
+	var expected_clock := NovaEnvironment.new()
+	expected_clock.configure_mission_clock(0x0540, 60)
+	expected_clock.advance_mission_clock(7)
+	assert_almost_eq(advanced, expected_clock.time_of_day, 0.000001,
+			"the mission clock advances on the separate 62 Hz weather cadence")
+	assert_eq(int(world.get_runtime().get_perf_counters().get("ticks", 0)), 8,
+			"mission simulation retains its 62.5 Hz cadence")
+	expected_clock.free()
 	world.unload()
+
+
+func _hosted_weather_state_after(deltas: Array) -> Array:
+	var packed := load("res://engine/world/game_world.tscn") as PackedScene
+	var world := packed.instantiate() as GameWorld
+	add_child_autofree(world)
+	await get_tree().process_frame
+	world.set_playable(false)
+
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
+			"res://../fixtures/minimal/resources")), OK)
+	world.set_resource_root(root)
+	var mission := NovaMissionData.new()
+	assert_eq(mission.open_from_resource_root(root, "mnml.bms"), OK)
+	mission.set_header_int("start_time", 0x0540)
+	mission.set_header_int("minutes_per_day", 60)
+	assert_eq(world.load_mission_data(mission, "mnml.bms"), OK)
+
+	var sim_ticks := 0
+	for delta in deltas:
+		world.tick(Vector3.ZERO, Transform3D(), float(delta))
+		sim_ticks += int(world.get_runtime().get_perf_counters().get("ticks", 0))
+	var env := world.get_node("NovaEnvironment") as NovaEnvironment
+	var weather := world.get_node("NovaWeather") as NovaWeather
+	var state := [
+		sim_ticks,
+		env.time_of_day,
+		weather.get_smooth_fill(),
+		weather.get_smooth_sun(),
+		weather.get_smooth_fog(),
+		weather.get_smooth_sky(),
+		weather.get_smooth_skyfog(),
+		weather.get_smooth_sky_base(),
+		weather.get_smooth_sky_bright(),
+		weather.get_smooth_sky_highlight(),
+		weather.get_smooth_cloud_base(),
+		weather.get_smooth_cloud_highlight(),
+		weather.get_smooth_cloud_edge(),
+		weather.get_sway_amount(),
+		weather.get_sway_phase(),
+	]
+	world.unload()
+	return state
+
+
+func test_hosted_weather_is_invariant_to_render_batching() -> void:
+	var slow: Array = await _hosted_weather_state_after([0.128])
+	var split: Array = await _hosted_weather_state_after([
+		0.016, 0.016, 0.016, 0.016, 0.016, 0.016, 0.016, 0.016,
+	])
+	assert_eq(slow, split,
+			"each 62 Hz clock advance refreshes TOD targets before one weather tick")
+	assert_eq(int(slow[0]), 8, "0.128 seconds still contains eight simulation ticks")
+
+	var expected_seven := NovaEnvironment.new()
+	expected_seven.configure_mission_clock(0x0540, 60)
+	expected_seven.advance_mission_clock(7)
+	assert_almost_eq(float(slow[1]), expected_seven.time_of_day, 0.000001,
+			"0.128 seconds contains seven weather/TOD ticks")
+	expected_seven.free()
+
+	var eighth_delta := 8.0 / GameWorld.WEATHER_TICK_HZ - 0.128 + 0.000001
+	var boundary: Array = await _hosted_weather_state_after([0.128, eighth_delta])
+	var expected_eight := NovaEnvironment.new()
+	expected_eight.configure_mission_clock(0x0540, 60)
+	expected_eight.advance_mission_clock(8)
+	assert_eq(int(boundary[0]), 8,
+			"the extra weather quantum is shorter than one simulation tick")
+	assert_almost_eq(float(boundary[1]), expected_eight.time_of_day, 0.000001,
+			"the residual weather credit consumes the eighth TOD tick")
+	expected_eight.free()
 
 
 func test_injected_root_bypasses_settings_mount() -> void:

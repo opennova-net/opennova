@@ -7,7 +7,7 @@ extends Node3D
 # [orig: Environment_UpdateWeatherTick @ 0x57e9b0]: the wind PRNG/sway
 # oscillator, both lightning flash sequencers
 # ([orig: Environment_SetLightningFlash @ 0x57d320] SET-per-epoch additives),
-# rain fade, and the four color-block pipelines
+# rain fade, and all fourteen non-modulator color-block pipelines
 # ([orig: interpolate_weather_color @ 0x57d9e0]). This node is scene
 # plumbing only: it feeds the env node's TOD targets into the core each
 # 62 Hz tick, writes the smoothed colors back, and publishes the shader
@@ -15,11 +15,17 @@ extends Node3D
 
 @export var environment_path: NodePath
 
+const WEATHER_TICK_HZ := 62.0
+const MAX_CATCHUP_TICKS := 31
+
 # Declared before wind_strength: the export's default assignment runs the
 # setter during init, which needs the core.
 var _core := NovaWeatherCore.new()
+var _configured_wind_intensity := 256
 var _cached_env: Node = null
 var _colors_synced := false
+var _tick_credit := 0.0
+var _host_tick_driven := false
 
 # The marched iris-exposure samples (D-RLIT-2): the in-world host stamps
 # three per-sample classification codes each frame (NovaSimulation.
@@ -36,9 +42,10 @@ var iris_samples := PackedInt32Array()
 		# @ 0x57c1d1, its only writer]. The oscillator's 15*prev feedback term
 		# is stable only for intensity <= 273 — the previous 0..8192 mapping
 		# drove the 32-bit state divergent (docs/env/env-tod-re.md).
-		_core.set_wind_intensity(int(value / 100.0 * 256.0))
+		_configured_wind_intensity = int(value / 100.0 * 256.0)
+		_core.set_wind_intensity(_configured_wind_intensity)
 	get:
-		return float(_core.get_wind_intensity()) / 256.0 * 100.0
+		return float(_configured_wind_intensity) / 256.0 * 100.0
 
 
 func _ready() -> void:
@@ -46,7 +53,68 @@ func _ready() -> void:
 	_cached_env = get_node_or_null(environment_path) if not environment_path.is_empty() else null
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	if _host_tick_driven:
+		return
+	_tick_credit += maxf(delta, 0.0) * WEATHER_TICK_HZ
+	var tick_count := int(floor(_tick_credit + 1.0e-9))
+	if tick_count > 0:
+		_tick_credit = maxf(0.0, _tick_credit - float(tick_count))
+		if tick_count > MAX_CATCHUP_TICKS:
+			tick_count = MAX_CATCHUP_TICKS
+			_tick_credit = 0.0
+	if tick_count <= 0:
+		_tick_weather(0)
+	else:
+		for _tick in range(tick_count):
+			_tick_weather(1)
+
+
+## GameWorld owns the recovered 62 Hz weather/TOD accumulator while a mission
+## runtime is active. Standalone/editor previews leave this false and keep the
+## autonomous render-delta accumulator above.
+func set_host_tick_driven(enabled: bool) -> void:
+	if _host_tick_driven == enabled:
+		return
+	_host_tick_driven = enabled
+	_tick_credit = 0.0
+
+
+## Enter hosted mode and snap every block at the mission's authored T0 before
+## the first clock advance. Lazy-snapping after T1 would skip retail's first
+## target chase.
+func prepare_hosted() -> void:
+	_reset_for_environment(true)
+
+
+## Start an independently ticking environment from the same deterministic
+## mission reset epoch used by hosted play.
+func prepare_autonomous() -> void:
+	_reset_for_environment(false)
+
+
+func _reset_for_environment(host_tick_driven: bool) -> void:
+	# GameWorld retains this node across missions, but retail's environment
+	# start re-seeds the PRNG and clears every transient weather channel. A new
+	# core is the single complete reset for oscillator/rings, lightning, rain,
+	# color/modulator blocks, scalar springs, and cloud-scroll accumulators.
+	_core = NovaWeatherCore.new()
+	_core.set_wind_intensity(_configured_wind_intensity)
+	iris_samples = PackedInt32Array()
+	_host_tick_driven = host_tick_driven
+	_tick_credit = 0.0
+	resync_colors()
+	_tick_weather(0)
+
+
+## Advance exactly one recovered weather tick. The host advances the integer
+## mission clock immediately before this call, so every target read below sees
+## curtime + advance like Environment_UpdateWeatherTick.
+func tick_fixed() -> void:
+	_tick_weather(1)
+
+
+func _tick_weather(tick_count: int) -> void:
 	if not _cached_env or not _cached_env.has_method("is_loaded") or not _cached_env.is_loaded():
 		return
 	var env := _cached_env
@@ -67,13 +135,33 @@ func _process(_delta: float) -> void:
 		_core.snap_colors(
 			_vec3_color(env.get_fill_light_target()),
 			_vec3_color(env.get_sun_light_target()),
-			_vec3_color(env.get_fog_color_target()),
+			_vec3_color(env.get_fog_color_base_target()),
 			_vec3_color(env.get_sky_ambient_target()))
+		_core.snap_sky_colors(
+			_vec3_color(env.get_skyfog_color_target()),
+			_vec3_color(env.get_ceiling_color_target()),
+			_vec3_color(env.get_cloud_tint_target()),
+			_vec3_color(env.get_floor_color_target()),
+			_vec3_color(env.get_sky_base_target()),
+			_vec3_color(env.get_sky_bright_target()),
+			_vec3_color(env.get_sky_highlight_target()),
+			_vec3_color(env.get_cloud_base_target()),
+			_vec3_color(env.get_cloud_highlight_target()),
+			_vec3_color(env.get_cloud_edge_target()))
 		_colors_synced = true
+	if tick_count <= 0:
+		_write_weather_state(env)
+		return
 	var env_data: EnvFile = env.get_environment_data()
 	var lightning := Color.WHITE
 	if env_data:
-		lightning = env_data.get_lightning_color()
+		# lightning_rgb is a global parser color, so it takes the same envscale
+		# engine view as the hosted static blocks and water. Keep a raw fallback
+		# for duck-typed legacy environment hosts.
+		if env.has_method("get_lightning_color_target"):
+			lightning = _vec3_color(env.get_lightning_color_target())
+		else:
+			lightning = env_data.get_lightning_color()
 		# The iris auto-exposure target (env #17): the marched in-world gain
 		# when the host stamps samples, else the outdoor fallback — chased by
 		# the modulator over 62 ticks; retail re-targets every render pass,
@@ -84,8 +172,8 @@ func _process(_delta: float) -> void:
 		_core.set_exposure_from_iris_samples(
 			iris_samples,
 			env.get_sun_direction(),
-			env_data.get_ceiling_color(),
-			env_data.get_floor_color(),
+			_core.get_ceiling_pre_mod(),
+			_core.get_floor_pre_mod(),
 			env_data.get_iris_percent(),
 			env_data.get_iris_center())
 	# The smoothers chase the TOD keyframe targets, never their own written-
@@ -98,13 +186,29 @@ func _process(_delta: float) -> void:
 	# touches targets only — currents always ramp [orig: @ 0x57d1e0]).
 	if env.has_method("get_fog_level_target"):
 		_core.set_scalar_targets(env.get_fog_level_target(), env.get_sky_height_target())
-	_core.tick(
-		_vec3_color(env.get_fill_light_target()),
-		_vec3_color(env.get_sun_light_target()),
-		_vec3_color(env.get_fog_color_target()),
-		_vec3_color(env.get_sky_ambient_target()),
-		lightning,
-		env.get_sky_speed())
+	_core.set_sky_color_targets(
+		_vec3_color(env.get_skyfog_color_target()),
+		_vec3_color(env.get_ceiling_color_target()),
+		_vec3_color(env.get_cloud_tint_target()),
+		_vec3_color(env.get_floor_color_target()),
+		_vec3_color(env.get_sky_base_target()),
+		_vec3_color(env.get_sky_bright_target()),
+		_vec3_color(env.get_sky_highlight_target()),
+		_vec3_color(env.get_cloud_base_target()),
+		_vec3_color(env.get_cloud_highlight_target()),
+		_vec3_color(env.get_cloud_edge_target()))
+	for _tick in range(tick_count):
+		_core.tick(
+			_vec3_color(env.get_fill_light_target()),
+			_vec3_color(env.get_sun_light_target()),
+			_vec3_color(env.get_fog_color_base_target()),
+			_vec3_color(env.get_sky_ambient_target()),
+			lightning,
+			env.get_sky_speed())
+	_write_weather_state(env)
+
+
+func _write_weather_state(env: Node) -> void:
 	env.set_fill_light(get_smooth_fill())
 	env.set_sun_light(get_smooth_sun())
 	env.set_fog_color_rt(get_smooth_fog())
@@ -113,6 +217,20 @@ func _process(_delta: float) -> void:
 	# consumed by the entity-constants writer @ 0x5c8090].
 	if env.has_method("set_sky_ambient_rt"):
 		env.set_sky_ambient_rt(get_smooth_sky())
+	if env.has_method("set_static_colors_rt"):
+		env.set_static_colors_rt(
+			get_smooth_ceiling(),
+			get_smooth_cloud(),
+			get_smooth_floor())
+	if env.has_method("set_sky_colors_rt"):
+		env.set_sky_colors_rt(
+			get_smooth_skyfog(),
+			get_smooth_sky_base(),
+			get_smooth_sky_bright(),
+			get_smooth_sky_highlight(),
+			get_smooth_cloud_base(),
+			get_smooth_cloud_highlight(),
+			get_smooth_cloud_edge())
 	if env.has_method("set_color_src_gain"):
 		env.set_color_src_gain(_core.get_color_src_gain())
 	# env #27 writeback: the smoothed scalar currents flow back through the
@@ -177,6 +295,46 @@ func get_smooth_fog() -> Vector3:
 
 func get_smooth_sky() -> Vector3:
 	return _color_vec3(_core.get_sky())
+
+
+func get_smooth_skyfog() -> Vector3:
+	return _color_vec3(_core.get_skyfog())
+
+
+func get_smooth_ceiling() -> Vector3:
+	return _color_vec3(_core.get_ceiling())
+
+
+func get_smooth_cloud() -> Vector3:
+	return _color_vec3(_core.get_cloud())
+
+
+func get_smooth_floor() -> Vector3:
+	return _color_vec3(_core.get_floor())
+
+
+func get_smooth_sky_base() -> Vector3:
+	return _color_vec3(_core.get_skybase())
+
+
+func get_smooth_sky_bright() -> Vector3:
+	return _color_vec3(_core.get_skybright())
+
+
+func get_smooth_sky_highlight() -> Vector3:
+	return _color_vec3(_core.get_skyhighlight())
+
+
+func get_smooth_cloud_base() -> Vector3:
+	return _color_vec3(_core.get_cloudbase())
+
+
+func get_smooth_cloud_highlight() -> Vector3:
+	return _color_vec3(_core.get_cloudhighlight())
+
+
+func get_smooth_cloud_edge() -> Vector3:
+	return _color_vec3(_core.get_cloudedge())
 
 
 func get_lightning_intensity() -> float:

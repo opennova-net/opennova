@@ -360,6 +360,55 @@ void WeatherColorBlock::tick(uint32_t modulator_packed, int rain_intensity) {
 	render_color = modulated;
 }
 
+void SkyWeatherColorBlocks::snap(const std::array<uint32_t, kCount> &packed_colors) {
+	skyfog.snap(packed_colors[0]);
+	ceiling.snap(packed_colors[1]);
+	cloud.snap(packed_colors[2]);
+	floor.snap(packed_colors[3]);
+	skybase.snap(packed_colors[4]);
+	skybright.snap(packed_colors[5]);
+	skyhighlight.snap(packed_colors[6]);
+	cloudbase.snap(packed_colors[7]);
+	cloudhighlight.snap(packed_colors[8]);
+	cloudedge.snap(packed_colors[9]);
+}
+
+void SkyWeatherColorBlocks::set_targets(const std::array<uint32_t, kCount> &packed_colors) {
+	skyfog.target = packed_colors[0];
+	ceiling.target = packed_colors[1];
+	cloud.target = packed_colors[2];
+	floor.target = packed_colors[3];
+	skybase.target = packed_colors[4];
+	skybright.target = packed_colors[5];
+	skyhighlight.target = packed_colors[6];
+	cloudbase.target = packed_colors[7];
+	cloudhighlight.target = packed_colors[8];
+	cloudedge.target = packed_colors[9];
+}
+
+void SkyWeatherColorBlocks::set_skyfog_additive(uint32_t packed_additive) {
+	skyfog.additive = packed_additive;
+}
+
+void SkyWeatherColorBlocks::tick_skyfog(uint32_t modulator_packed, int rain_intensity) {
+	skyfog.tick(modulator_packed, rain_intensity);
+}
+
+void SkyWeatherColorBlocks::tick_statics(uint32_t modulator_packed, int rain_intensity) {
+	ceiling.tick(modulator_packed, rain_intensity);
+	cloud.tick(modulator_packed, rain_intensity);
+	floor.tick(modulator_packed, rain_intensity);
+}
+
+void SkyWeatherColorBlocks::tick_dome(uint32_t modulator_packed, int rain_intensity) {
+	skybase.tick(modulator_packed, rain_intensity);
+	skybright.tick(modulator_packed, rain_intensity);
+	skyhighlight.tick(modulator_packed, rain_intensity);
+	cloudbase.tick(modulator_packed, rain_intensity);
+	cloudhighlight.tick(modulator_packed, rain_intensity);
+	cloudedge.tick(modulator_packed, rain_intensity);
+}
+
 // ---------------------------------------------------------------------------
 // Cloud scroll
 
@@ -768,11 +817,29 @@ void water_project_plane_to_screen(const WaterStripView &view, int32_t plane_hei
 		    (ref_side < 0.0f && center_side < 0.0f)) {
 			out.visible = 1;
 			// Marching in from off-screen: the origin clamps onto the edges
-			// the march will enter through [orig: @ 0x5c0fd1..0x5c1023].
-			out.origin[1] = (0.0f >= ny) ? static_cast<float>(view.vp_max_y) + 1.0f
-			                             : static_cast<float>(view.vp_min_y);
-			out.origin[0] = (0.0f >= nx) ? static_cast<float>(view.vp_max_x) + 1.0f
-			                             : static_cast<float>(view.vp_min_x);
+			// the march will enter through [orig: @ 0x5c0fd1..0x5c1023]. The
+			// witnessed depth-W perspective keeps its exact >= edge choice.
+			// Under constant-W orthographic projection, however, a zero march
+			// component leaves that coordinate unconstrained; anchoring it at an
+			// outer edge combines with the literal row-dy guard to collapse the
+			// first row. Use the viewport center only for that host extension.
+			const bool constant_clip_w = view.proj[11] == 0.0f && view.proj[15] != 0.0f;
+			if (constant_clip_w) {
+				// Start one pixel inside the entering edge. At the exact edge,
+				// the witnessed 1e-6 row-dy guard can round the nominal endpoint
+				// just outside and collapse an otherwise full orthographic row.
+				out.origin[1] = ny == 0.0f ? static_cast<float>(view.vp_center_y)
+						: (ny < 0.0f ? static_cast<float>(view.vp_max_y)
+						             : static_cast<float>(view.vp_min_y + 1));
+				out.origin[0] = nx == 0.0f ? static_cast<float>(view.vp_center_x)
+						: (nx < 0.0f ? static_cast<float>(view.vp_max_x)
+						             : static_cast<float>(view.vp_min_x + 1));
+			} else {
+				out.origin[1] = (0.0f >= ny) ? static_cast<float>(view.vp_max_y) + 1.0f
+				                                 : static_cast<float>(view.vp_min_y);
+				out.origin[0] = (0.0f >= nx) ? static_cast<float>(view.vp_max_x) + 1.0f
+				                                 : static_cast<float>(view.vp_min_x);
+			}
 		}
 	}
 }
@@ -966,32 +1033,52 @@ int water_build_strip_rows(const WaterStripView &view, const WaterStripParams &p
 	int stride = 4;             // var_1C [orig: @ 0x5c286d]
 	int rows = 0;
 
-	// Unprojects a clipped screen point to the plane: view ray (ndc/m00,
-	// ndc/m11, 1) through the inverse view rotation rows, then t = (plane -
-	// camY)/ray.y; a zero ray.y reuses the previous t and the RAW ray
-	// components as the world delta (the witnessed fallback)
+	// Unprojects a clipped screen point to the plane. For Camera3D's projection
+	// family, clip X/Y are diagonal plus a view-Z shear/translation and clip W
+	// is `p11 * viewZ + p15`. Solving those two equations yields one view-space
+	// line parameterized by view depth:
+	//   origin = ((ndc*p15 - translation) / focal, ..., 0)
+	//   direction = ((ndc*p11 - z_shear) / focal, ..., 1)
+	// Centered perspective reduces exactly to the witnessed ray
+	// (ndc/m00, ndc/m11, 1); orthographic instead gets a per-pixel origin and
+	// parallel forward direction; off-center frusta retain their z shear.
+	// The line is transformed through the inverse view rows, then intersected
+	// with the water plane. A zero direction Y keeps the witnessed fallback
 	// [orig: left @ 0x5c29ef..0x5c2ae8; right @ 0x5c2b08..0x5c2bce].
 	const auto unproject = [&](float sx, float sy, double &t, double delta[3]) {
 		const double ndc_x = (static_cast<double>(sx) - center_x) / half_width;
 		const double ndc_y = -((static_cast<double>(sy) - center_y) / half_height);
-		const double vx = ndc_x * inv_m00;
-		const double vy = ndc_y * inv_m11;
-		const double ray_x = inv[0] * vx + inv[4] * vy + inv[8];
-		const double ray_y = inv[1] * vx + inv[5] * vy + inv[9];
-		const double ray_z = inv[2] * vx + inv[6] * vy + inv[10];
+		const double origin_vx = (ndc_x * view.proj[15] - view.proj[12]) * inv_m00;
+		const double origin_vy = (ndc_y * view.proj[15] - view.proj[13]) * inv_m11;
+		const double dir_vx = (ndc_x * view.proj[11] - view.proj[8]) * inv_m00;
+		const double dir_vy = (ndc_y * view.proj[11] - view.proj[9]) * inv_m11;
+		const double origin_x = cam_x + inv[0] * origin_vx + inv[4] * origin_vy;
+		const double origin_y = cam_y + inv[1] * origin_vx + inv[5] * origin_vy;
+		const double origin_z = cam_z + inv[2] * origin_vx + inv[6] * origin_vy;
+		const double ray_x = inv[0] * dir_vx + inv[4] * dir_vy + inv[8];
+		const double ray_y = inv[1] * dir_vx + inv[5] * dir_vy + inv[9];
+		const double ray_z = inv[2] * dir_vx + inv[6] * dir_vy + inv[10];
 		if (ray_y != 0.0) {
-			// (camY - planeY) * (-1/rayY) [orig: flt_7D7C00 = -1.0 @ 0x5c2ac4]
-			t = (static_cast<double>(cam_y) - plane_y) * (-1.0 / ray_y);
+			// (originY - planeY) * (-1/rayY); originY == camY on
+			// the witnessed perspective path [orig: flt_7D7C00 @ 0x5c2ac4].
+			t = (origin_y - plane_y) * (-1.0 / ray_y);
 			last_t = t;
-			delta[0] = ray_x * t;
-			delta[1] = ray_y * t;
-			delta[2] = ray_z * t;
+			delta[0] = origin_x - cam_x + ray_x * t;
+			delta[1] = origin_y - cam_y + ray_y * t;
+			delta[2] = origin_z - cam_z + ray_z * t;
 		} else {
 			t = last_t;
-			delta[0] = ray_x;
-			delta[1] = ray_y;
-			delta[2] = ray_z;
+			delta[0] = origin_x - cam_x + ray_x;
+			delta[1] = origin_y - cam_y + ray_y;
+			delta[2] = origin_z - cam_z + ray_z;
 		}
+	};
+	// D3D transformed-vertex RHW is reciprocal CLIP W, not necessarily
+	// reciprocal view depth. They coincide on the witnessed perspective path;
+	// orthographic Camera3D projections instead carry constant clip W = 1.
+	const auto reciprocal_clip_w = [&](double view_depth) {
+		return static_cast<float>(1.0 /
+				(view.proj[11] * view_depth + view.proj[15]));
 	};
 
 	WaterRowClip clip;
@@ -1037,7 +1124,7 @@ int water_build_strip_rows(const WaterStripView &view, const WaterStripParams &p
 		const float v0_m = (v0_r + v0_l) * 0.5f;
 		const double t_mid = (t_left + t_right) * 0.5; // [orig: @ 0x5c2c7e]
 
-		const float row_rhw = static_cast<float>(1.0 / t_left); // [orig: fst @ 0x5c2c06]
+		const float row_rhw = reciprocal_clip_w(t_left); // perspective: fst 1/t @ 0x5c2c06
 		const float right_delta[3] = {static_cast<float>(delta_r[0]),
 		                              static_cast<float>(delta_r[1]),
 		                              static_cast<float>(delta_r[2])};
@@ -1078,7 +1165,7 @@ int water_build_strip_rows(const WaterStripView &view, const WaterStripParams &p
 			out.screen_pos.push_back(screen_y[i]);
 			out.depth.push_back(water_strip_depth(static_cast<float>(depth_t[i]),
 			                                      params.uv_scale, params.uv_bias));
-			out.rhw.push_back(static_cast<float>(1.0 / depth_t[i]));
+			out.rhw.push_back(reciprocal_clip_w(depth_t[i]));
 			out.diffuse.push_back(colors.diffuse);
 			out.specular.push_back(colors.specular);
 			out.uv0.push_back(u0[i]);

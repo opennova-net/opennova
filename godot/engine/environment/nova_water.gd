@@ -43,18 +43,51 @@ const REFLECTION_RTT_SIZE := Vector2i(256, 256)
 		water_height = value
 		# The strip vertices carry the plane height themselves (the mesh node
 		# stays pinned at the world origin) — no node repositioning here.
-		_push_water_split_height()
+		_sync_render_activity()
 @export_range(0, 1, 0.01) var water_alpha: float = 0.6
 
 # When set (not NaN), the host drives water height directly and the env/terrain
 # fallback is ignored — the terrain editor authors height through its document.
 var _height_override: float = NAN
+# The mission header's attrib-gated water value is a distinct rung from the
+# live EnvFile view. Keeping it here preserves authoring > BMS > TRN > ENV,
+# including an explicit BMS zero (which disables water instead of falling
+# through to terrain).
+var _mission_water_height_override: float = NAN
+# GameWorld retains this node across unload/reload; editor previews do not need
+# to opt in, so standalone water starts enabled.
+var _host_rendering_enabled := true
 
 
 func set_height_override(value: float) -> void:
 	_height_override = value
-	if not is_nan(value):
-		water_height = value
+	_apply_environment_water_height()
+
+
+## Set the mission/BMS rung in world units; NAN means absent. Zero is
+## meaningful and still beats TRN and ENV.
+func set_mission_water_height_override(value: float) -> void:
+	_mission_water_height_override = value
+	_apply_environment_water_height()
+
+
+## Disable retained runtime rendering while no world is loaded.
+func set_host_rendering_enabled(value: bool) -> void:
+	_host_rendering_enabled = value
+	_sync_render_activity()
+
+
+## Env_WaterHeightFixed == 0 is retail's no-water sentinel. Signed nonzero
+## heights remain valid for terrain below the world origin.
+func is_water_active() -> bool:
+	return water_height != 0.0
+
+
+## The authored height can remain valid while GameWorld retains this node
+## between loads. Consumers that decide whether water participates in a render
+## frame must use this predicate rather than the height sentinel alone.
+func is_water_render_active() -> bool:
+	return _host_rendering_enabled and is_water_active()
 
 
 # Publish this water plane's height as the session's transparent water-split
@@ -62,8 +95,37 @@ func set_height_override(value: float) -> void:
 # blended world materials can take their far/camera-side rung; cleared when
 # the water node leaves the tree.
 func _push_water_split_height() -> void:
-	if built and is_inside_tree():
+	if not built or not is_inside_tree():
+		return
+	if is_water_render_active() and is_visible_in_tree():
 		NovaObjectShaderCache.get_singleton().set_water_split_height(water_height)
+	else:
+		NovaObjectShaderCache.get_singleton().clear_water_split_height()
+
+
+func _sync_render_activity() -> void:
+	if not built:
+		return
+	var world_active := (is_water_render_active()
+			and is_inside_tree() and is_visible_in_tree())
+	if mesh_instance:
+		mesh_instance.visible = world_active
+	# Do not spend a permanent UPDATE_ALWAYS pass on an absent, hidden, or
+	# off-screen surface. The strip march re-arms this after it produces rows.
+	var reflection_active := world_active and _has_drawable_surface and _cached_cam != null
+	if reflection_viewport:
+		reflection_viewport.render_target_update_mode = (
+				SubViewport.UPDATE_ALWAYS if reflection_active else SubViewport.UPDATE_DISABLED)
+	if water_material:
+		water_material.set_shader_parameter("u_has_reflection", reflection_active)
+	_push_water_split_height()
+	if not world_active:
+		_clear_strip_surfaces()
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_VISIBILITY_CHANGED and built:
+		_sync_render_activity()
 
 
 func _exit_tree() -> void:
@@ -107,16 +169,16 @@ var _noise_normal_img: Image = null
 var _noise_color_tex: ImageTexture = null
 var _noise_normal_tex: ImageTexture = null
 var _frame_counter: int = 0
+var _has_drawable_surface := false
 # Standalone fallback when no weather node is wired (the UV offsets ride the
 # weather core's cloud-scroll accumulators).
 var _fallback_scroll: NovaWeatherCore = null
+var _fallback_tick_credit := 0.0
 
 
 func _ready() -> void:
 	_cached_env = get_node_or_null(environment_path) if not environment_path.is_empty() else null
 	_recompute_terrain_water_fallback()
-	if _terrain_water_height != 0.0:
-		water_height = _terrain_water_height
 	_apply_environment_water_height()
 	build()
 
@@ -130,7 +192,7 @@ func _recompute_terrain_water_fallback() -> void:
 	_terrain_water_height = 0.0
 	if terrain_data and terrain_data.is_loaded():
 		var raw := terrain_data.get_water_height()
-		if raw > 0:
+		if raw != 0:
 			_terrain_water_height = float(raw) * 0.5
 
 
@@ -161,6 +223,8 @@ func build() -> void:
 	# against a transformed host parent.
 	mesh_instance.top_level = true
 	mesh_instance.position = Vector3.ZERO
+	mesh_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mesh_instance.gi_mode = GeometryInstance3D.GI_MODE_DISABLED
 	# The water surface rides its OWN visual layer (bit 10) instead of the
 	# default bit 0: a fresh Camera3D cull_mask has all 20 layer bits set, so
 	# every normal view still renders the water, while the mirror camera
@@ -170,7 +234,6 @@ func build() -> void:
 	mesh_instance.layers = VISUAL_LAYER_WATER
 	add_child(mesh_instance)
 	built = true
-	_push_water_split_height()
 
 	# The witnessed per-frame noise texture pair (created once, updated per
 	# frame) [orig: Water_GenerateNoiseTextures @ 0x5c0360].
@@ -214,23 +277,39 @@ func build() -> void:
 		reflection_camera.cull_mask = 0xFFFFF & ~(VISUAL_LAYER_WATER | VISUAL_LAYER_VIEWMODEL)
 		reflection_viewport.add_child(reflection_camera)
 		reflection_camera.current = true
-	reflection_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	reflection_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 	water_material.set_shader_parameter("u_reflection", reflection_viewport.get_texture())
-	water_material.set_shader_parameter("u_has_reflection", true)
+	water_material.set_shader_parameter("u_has_reflection", false)
+	_sync_render_activity()
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if not built or water_material == null:
 		return
+	if not _cached_env or not _cached_env.is_inside_tree():
+		_cached_env = get_node_or_null(environment_path) if not environment_path.is_empty() else null
+	# Live environment edits can change the fallback height. A standalone
+	# water node with no authoritative env/terrain keeps its direct property.
+	if _cached_env and _cached_env.has_method("is_loaded") and _cached_env.is_loaded():
+		_apply_environment_water_height()
 	# The murk uniform feed stays for host/probe compatibility even though the
 	# shader's murk role moved to the per-vertex COLOR.a (env #29).
 	water_material.set_shader_parameter("u_water_murk", water_alpha)
 
-	if not _cached_cam or not _cached_cam.is_inside_tree():
+	if (not _cached_cam or not _cached_cam.is_inside_tree()
+			or not _cached_cam.current):
 		_cached_cam = _find_camera()
+	if (not _host_rendering_enabled or not is_water_active()
+			or not is_visible_in_tree() or _cached_cam == null):
+		_clear_strip_surfaces()
+		_sync_render_activity()
+		return
 	var cam_pos := Vector3.ZERO
 	if _cached_cam:
-		cam_pos = _cached_cam.global_position
+		# Camera3D's public render transform includes h_offset/v_offset;
+		# global_position does not. Classify and march from the same effective
+		# eye the main viewport actually renders.
+		cam_pos = _cached_cam.get_camera_transform().origin
 
 	# env #30: refresh the mirror camera before this frame's strip rebuild —
 	# the SubViewport renders ahead of the main view, like the witnessed
@@ -238,8 +317,9 @@ func _process(_delta: float) -> void:
 	# main frame in Render_TerrainScene @ 0x610c80].
 	_update_reflection_camera()
 
-	# Regenerate the animated noise pair, one tick per rendered frame like the
-	# weather core [orig: render_water_surface @ 0x5c3326 regenerates per frame].
+	# Regenerate the animated noise pair once per rendered water frame; unlike
+	# the fixed-62 Hz weather clock, this is explicitly render-driven
+	# [orig: render_water_surface @ 0x5c3326 regenerates per frame].
 	_frame_counter += 1
 	_water_core.update(_frame_counter)
 	_noise_color_img.set_data(_water_core.get_texture_size(), _water_core.get_texture_size(), false, Image.FORMAT_RGBA8, _water_core.get_color_rgba8())
@@ -257,7 +337,6 @@ func _process(_delta: float) -> void:
 
 	var env := _cached_env
 	if env and env.has_method("is_loaded") and env.is_loaded():
-		_apply_environment_water_height()
 		# Water renders lit: water_rgb x (light*0.707 + sky) x 2, saturating
 		# [orig: Environment_UpdateWeatherTick @ 0x57f16b].
 		var water: Vector3 = env.get_water_color()
@@ -279,7 +358,16 @@ func _process(_delta: float) -> void:
 		else:
 			if _fallback_scroll == null:
 				_fallback_scroll = NovaWeatherCore.new()
-			_fallback_scroll.tick_cloud_scroll(env.get_sky_speed())
+			_fallback_tick_credit += maxf(delta, 0.0) * NovaWeather.WEATHER_TICK_HZ
+			var tick_count := int(floor(_fallback_tick_credit + 1.0e-9))
+			if tick_count > 0:
+				_fallback_tick_credit = maxf(
+						0.0, _fallback_tick_credit - float(tick_count))
+				if tick_count > NovaWeather.MAX_CATCHUP_TICKS:
+					tick_count = NovaWeather.MAX_CATCHUP_TICKS
+					_fallback_tick_credit = 0.0
+				for _tick in range(tick_count):
+					_fallback_scroll.tick_cloud_scroll(env.get_sky_speed())
 			uv_state = _fallback_scroll.get_water_uv_state(cam_pos.x, cam_pos.z, fog_end)
 		water_material.set_shader_parameter("u_water_uv", uv_state)
 		water_material.set_shader_parameter("u_fog_color", env.get_fog_color())
@@ -289,6 +377,7 @@ func _process(_delta: float) -> void:
 			water_material.set_shader_parameter("u_water_murk", murk)
 
 	_rebuild_strip_mesh(cam_pos, murk, fog_end, uv_state, lit, env_data)
+	_sync_render_activity()
 
 
 # Mirrors the live camera about the water plane y = water_height into the
@@ -317,7 +406,11 @@ func _update_reflection_camera() -> void:
 	if viewport == null:
 		return
 	var source_size := viewport.get_visible_rect().size
-	if source_size.x <= 0.0 or source_size.y <= 0.0:
+	# A one-pixel viewport is a real transient state while ONED swaps or lays
+	# out workspaces. The strip builder below already treats either dimension
+	# <= 1 as non-drawable; stop the mirror projection here too, before an
+	# extreme aspect asks Camera3D for an out-of-range FOV.
+	if source_size.x <= 1.0 or source_size.y <= 1.0:
 		return
 	var source_aspect := source_size.x / source_size.y
 
@@ -335,13 +428,47 @@ func _update_reflection_camera() -> void:
 	var origin := xform.origin
 	origin.y = 2.0 * water_height - origin.y
 	reflection_camera.global_transform = Transform3D(mirrored, origin)
-	# Retail rebuilds projection for the square RTT while preserving horizontal
-	# FOV [orig: Viewport_BuildProjectionMatrix @ 0x410fb0; bounds @ 0x5c1476].
-	var source_horizontal_fov := rad_to_deg(
-			2.0 * atan(tan(deg_to_rad(_cached_cam.fov) * 0.5) * source_aspect))
-	reflection_camera.keep_aspect = Camera3D.KEEP_HEIGHT
-	reflection_camera.fov = NovaSimulation.fov_vertical_from_horizontal(
-			source_horizontal_fov, 1.0)
+	# Retail rebuilds projection for the square RTT while preserving the
+	# source's horizontal field [orig: Viewport_BuildProjectionMatrix @
+	# 0x410fb0; bounds @ 0x5c1476]. Camera3D's authored `fov`/`size` axis is
+	# selected by keep_aspect, so normalize every source projection to its
+	# horizontal extent before installing it on the square pass.
+	reflection_camera.keep_aspect = Camera3D.KEEP_WIDTH
+	match _cached_cam.projection:
+		Camera3D.PROJECTION_ORTHOGONAL:
+			var horizontal_size := _cached_cam.size
+			if _cached_cam.keep_aspect == Camera3D.KEEP_HEIGHT:
+				horizontal_size *= source_aspect
+			reflection_camera.set_orthogonal(
+					horizontal_size, _cached_cam.near, _cached_cam.far)
+		Camera3D.PROJECTION_FRUSTUM:
+			# Godot's frustum size is always the vertical span; unlike the
+			# orthogonal/perspective builders it does not reinterpret the axis
+			# through keep_aspect. The square pass therefore always receives the
+			# source vertical span multiplied by its aspect.
+			var horizontal_size := _cached_cam.size * source_aspect
+			var mirrored_offset := Vector2(
+					_cached_cam.frustum_offset.x,
+					-_cached_cam.frustum_offset.y)
+			reflection_camera.set_frustum(horizontal_size,
+					mirrored_offset, _cached_cam.near, _cached_cam.far)
+		_:
+			var source_horizontal_fov := _cached_cam.fov
+			if _cached_cam.keep_aspect == Camera3D.KEEP_HEIGHT:
+				source_horizontal_fov = rad_to_deg(2.0 * atan(
+						tan(deg_to_rad(_cached_cam.fov) * 0.5) * source_aspect))
+			# Camera3D accepts [1, 179] degrees. Very thin but still
+			# drawable host viewports asymptotically approach 180 degrees.
+			reflection_camera.set_perspective(
+					clampf(source_horizontal_fov, 1.0, 179.0),
+					_cached_cam.near, _cached_cam.far)
+	# These offsets are independent of the projection mode and are otherwise
+	# lost when the reflection camera is rebuilt from the source transform.
+	reflection_camera.h_offset = _cached_cam.h_offset
+	# The proper mirror camera deliberately negates the reflected UP column.
+	# Negate its local vertical offset too so the effective camera origin is
+	# the geometric reflection of the source rather than shifted oppositely.
+	reflection_camera.v_offset = -_cached_cam.v_offset
 	# The strip rows encode normalized coordinates from the source viewport.
 	# Preserving horizontal FOV makes the square mirror's X focal scale match,
 	# but its Y focal scale is source_height/source_width of the main camera's.
@@ -349,8 +476,6 @@ func _update_reflection_camera() -> void:
 	# fixed reflected world point remains registered while the view rotates.
 	water_material.set_shader_parameter("u_reflection_uv_scale",
 			Vector2(1.0, 1.0 / source_aspect))
-	reflection_camera.near = _cached_cam.near
-	reflection_camera.far = _cached_cam.far
 	# NEAR-PLANE NOTE (TRACKED approximation, env #30 ledger): retail clips
 	# the mirrored scene against the water surface — the PolyTrn context arms
 	# a below-plane clip at waterHeight - 0.1 [orig: plane block wh - 0.1,
@@ -398,7 +523,9 @@ func _rebuild_strip_mesh(cam_pos: Vector3, murk: float, fog_end: float,
 	var pass_fog_end := fog_end * (1.0 - overcast * 0.5)
 	if underwater and env_data:
 		pass_fog_end = env_data.get_fog_end_underwater()
-	_water_core.strip_set_view(_cached_cam.global_transform,
+	# The adjusted camera transform includes Camera3D h/v offsets, keeping the
+	# screen-marched row coordinates registered to the actual main view.
+	_water_core.strip_set_view(_cached_cam.get_camera_transform(),
 			_cached_cam.get_camera_projection(), vp_size, pass_fog_end)
 	# The nightvision redraw variant is a FrameFX pass, not hosted yet.
 	var rows: int = _water_core.strip_build(water_height, murk, lit,
@@ -408,6 +535,7 @@ func _rebuild_strip_mesh(cam_pos: Vector3, murk: float, fog_end: float,
 		# [orig: windows under 2 rows draw nothing @ 0x5c3195].
 		_clear_strip_surfaces()
 		return
+	_has_drawable_surface = true
 	var arrays := []
 	arrays.resize(Mesh.ARRAY_MAX)
 	arrays[Mesh.ARRAY_VERTEX] = _water_core.strip_positions()
@@ -432,6 +560,7 @@ func _rebuild_strip_mesh(cam_pos: Vector3, murk: float, fog_end: float,
 
 
 func _clear_strip_surfaces() -> void:
+	_has_drawable_surface = false
 	if mesh_instance == null:
 		return
 	var mesh := mesh_instance.mesh as ArrayMesh
@@ -447,6 +576,9 @@ func _apply_environment_water_height() -> void:
 	if not is_nan(_height_override):
 		water_height = _height_override
 		return
+	if not is_nan(_mission_water_height_override):
+		water_height = _mission_water_height_override
+		return
 	if _terrain_water_height != 0.0:
 		water_height = _terrain_water_height
 		return
@@ -456,6 +588,16 @@ func _apply_environment_water_height() -> void:
 		# same convention as the terrain value above
 		# [orig: TimeOfDay_ParseProperty @ 0x57cb4e].
 		water_height = float(env.get_water_height()) * 0.5
+		return
+	# A loaded terrain or environment is authoritative even when its encoded
+	# height is zero. Clear stale editor/previous-map state instead of drawing
+	# phantom water; standalone nodes with no source retain direct properties.
+	var has_loaded_terrain: bool = (
+			terrain_data != null and bool(terrain_data.is_loaded()))
+	var has_loaded_env: bool = bool(
+			env != null and env.has_method("is_loaded") and env.is_loaded())
+	if has_loaded_terrain or has_loaded_env:
+		water_height = 0.0
 
 
 func _find_camera() -> Camera3D:

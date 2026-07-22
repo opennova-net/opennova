@@ -2,6 +2,7 @@
 
 #include "env/env.h"
 
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <vector>
@@ -278,6 +279,34 @@ struct WeatherColorBlock {
 	// `target` in `frames` ticks (rounded division; frames 0 clamps to 1)
 	// [orig: ColorBlock_SetStepDeltas @ 0x57d940].
 	void set_step_deltas(int frames);
+};
+
+// The ten weather color blocks beyond the world-lighting quartet: skyfog, the
+// three static ceiling/cloud/floor blocks, then the six sky/cloud TOD ramps.
+// Their hosted consumers span the sky pass, frame clear, and indoor iris.
+// The three explicit tick methods preserve the witnessed grouping and order
+// while every block reads the same fresh modulator.
+// [orig: Environment_UpdateWeatherTick @ 0x57efc9..0x57f03c]
+struct SkyWeatherColorBlocks {
+	static constexpr std::size_t kCount = 10;
+
+	WeatherColorBlock skyfog;
+	WeatherColorBlock ceiling;
+	WeatherColorBlock cloud;
+	WeatherColorBlock floor;
+	WeatherColorBlock skybase;
+	WeatherColorBlock skybright;
+	WeatherColorBlock skyhighlight;
+	WeatherColorBlock cloudbase;
+	WeatherColorBlock cloudhighlight;
+	WeatherColorBlock cloudedge;
+
+	void snap(const std::array<uint32_t, kCount> &packed_colors);
+	void set_targets(const std::array<uint32_t, kCount> &packed_colors);
+	void set_skyfog_additive(uint32_t packed_additive);
+	void tick_skyfog(uint32_t modulator_packed, int rain_intensity);
+	void tick_statics(uint32_t modulator_packed, int rain_intensity);
+	void tick_dome(uint32_t modulator_packed, int rain_intensity);
 };
 
 // ---------------------------------------------------------------------------
@@ -739,7 +768,12 @@ WaterUvState water_uv_state(const CloudScrollState &scroll, float cam_x, float c
 struct WaterStripView {
 	float view[16];     // world->view [orig: viewMatrix @ 0xA7845C]
 	float view_inv[16]; // its inverse, cached per pass [orig: @ 0x611960 result]
-	float proj[16];     // projection [orig: mat @ 0x2721980; m11 read @ 0x2721994]
+	// Host projection converted to the render basis/row-vector convention.
+	// X/Y clip rows and clip-W are complete: perspective/frustum use depth W,
+	// orthographic uses constant W, and the translation/shear terms preserve
+	// off-center host projections. The witnessed retail path is the centered
+	// perspective subset [orig: mat @ 0x2721980; m11 @ 0x2721994].
+	float proj[16];
 	// Camera world-basis rows of the render context's camera matrix
 	// [orig: flt_27219C0 row 0 (right) / row 2 (forward), Math_CopyVec3Row0/2
 	// @ 0x611fb0/@ 0x611f70].
@@ -878,7 +912,9 @@ struct WaterStripParams {
 struct WaterStripRows {
 	std::vector<float> screen_pos;  // x, y pixel pairs        (+0x00/+0x04)
 	std::vector<float> depth;       // the clamped depth/fog W (+0x08)
-	std::vector<float> rhw;         // 1 / view depth          (+0x0C)
+	// Reciprocal clip W. Retail perspective makes this 1 / view depth;
+	// the host orthographic extension carries constant clip W = 1.
+	std::vector<float> rhw;                                 // (+0x0C)
 	std::vector<uint32_t> diffuse;  // packed ARGB             (+0x10)
 	std::vector<uint32_t> specular; // packed ARGB             (+0x14)
 	std::vector<float> uv0;         // world x/32, z/32 pairs  (+0x18)

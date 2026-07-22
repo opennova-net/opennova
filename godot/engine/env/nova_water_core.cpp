@@ -136,19 +136,21 @@ void NovaWaterCore::strip_set_view(const Transform3D &p_cam_transform,
 	inv[14] = static_cast<float>(eye.z);
 	inv[15] = 1.0f;
 
-	// Projection [orig: mat @ 0x2721980; m11 read @ 0x2721994]. The strip
-	// code consumes only m00/m11 (the x/y focal scales — identical between
-	// Godot's column-vector projection and the D3D row-vector one for the
-	// witnessed symmetric perspective) and the w column, where p[11] = 1
-	// makes w = +view depth. Godot encodes w = -z_view (its view space looks
-	// down -z); the D3D view built above already measures +depth along the
-	// camera forward, so the sign lives in the basis, not the matrix.
-	for (int i = 0; i < 16; ++i) {
-		strip_view.proj[i] = 0.0f;
+	// Projection [orig: mat @ 0x2721980; m11 read @ 0x2721994].
+	// Preserve the complete host matrix so the screen march also serves
+	// orthographic and off-center frustum cameras. Godot is column-vector
+	// while the strip core is row-vector, but both layouts index a coefficient
+	// as [input][output], so flattening columns is direct. Only the view-Z
+	// input changes sign: Godot looks down -Z, while the D3D/render view above
+	// measures +forward.
+	for (int input = 0; input < 4; ++input) {
+		const float input_sign = input == 2 ? -1.0f : 1.0f;
+		const Vector4 &column = p_cam_projection.columns[input];
+		strip_view.proj[input * 4 + 0] = static_cast<float>(column.x) * input_sign;
+		strip_view.proj[input * 4 + 1] = static_cast<float>(column.y) * input_sign;
+		strip_view.proj[input * 4 + 2] = static_cast<float>(column.z) * input_sign;
+		strip_view.proj[input * 4 + 3] = static_cast<float>(column.w) * input_sign;
 	}
-	strip_view.proj[0] = static_cast<float>(p_cam_projection.columns[0].x);
-	strip_view.proj[5] = static_cast<float>(p_cam_projection.columns[1].y);
-	strip_view.proj[11] = 1.0f;
 
 	// Camera world-basis rows for the texm3x2 bump rows [orig: flt_27219C0
 	// row 0 (right) / row 2 (forward), Math_CopyVec3Row0/2 @ 0x611fb0 /

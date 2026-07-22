@@ -14,6 +14,17 @@ render_mode unshaded, depth_draw_never, cull_disabled, blend_mix;
 uniform sampler2D u_diffuse : filter_linear_mipmap;
 uniform vec3 u_tint = vec3(1.0, 1.0, 1.0);
 uniform float u_opacity = 1.0;
+// CPU placement is anchored to the main camera. Each viewport supplies its
+// own eye through INV_VIEW_MATRIX; the delta reproduces retail re-submission
+// for the mirrored water pass without duplicating scene nodes.
+uniform vec3 u_anchor_camera_world = vec3(0.0);
+
+void vertex() {
+	vec3 world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	vec3 pass_eye = INV_VIEW_MATRIX[3].xyz;
+	world_pos += pass_eye - u_anchor_camera_world;
+	POSITION = PROJECTION_MATRIX * VIEW_MATRIX * vec4(world_pos, 1.0);
+}
 
 void fragment() {
 	vec4 tex = texture(u_diffuse, UV);

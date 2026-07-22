@@ -29,6 +29,14 @@ Color packed_to_color(uint32_t packed) {
 
 void NovaWeatherCore::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("snap_colors", "fill", "sun", "fog", "sky"), &NovaWeatherCore::snap_colors);
+	ClassDB::bind_method(
+			D_METHOD("snap_sky_colors", "skyfog", "ceiling", "cloud", "floor", "skybase", "skybright", "skyhighlight",
+					"cloudbase", "cloudhighlight", "cloudedge"),
+			&NovaWeatherCore::snap_sky_colors);
+	ClassDB::bind_method(
+			D_METHOD("set_sky_color_targets", "skyfog", "ceiling", "cloud", "floor", "skybase", "skybright", "skyhighlight",
+					"cloudbase", "cloudhighlight", "cloudedge"),
+			&NovaWeatherCore::set_sky_color_targets);
 	ClassDB::bind_method(D_METHOD("tick", "fill_target", "sun_target", "fog_target", "sky_target", "lightning_color",
 								  "sky_speed"),
 			&NovaWeatherCore::tick);
@@ -59,6 +67,18 @@ void NovaWeatherCore::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_sun"), &NovaWeatherCore::get_sun);
 	ClassDB::bind_method(D_METHOD("get_fog"), &NovaWeatherCore::get_fog);
 	ClassDB::bind_method(D_METHOD("get_sky"), &NovaWeatherCore::get_sky);
+	ClassDB::bind_method(D_METHOD("get_skyfog"), &NovaWeatherCore::get_skyfog);
+	ClassDB::bind_method(D_METHOD("get_ceiling"), &NovaWeatherCore::get_ceiling);
+	ClassDB::bind_method(D_METHOD("get_cloud"), &NovaWeatherCore::get_cloud);
+	ClassDB::bind_method(D_METHOD("get_floor"), &NovaWeatherCore::get_floor);
+	ClassDB::bind_method(D_METHOD("get_ceiling_pre_mod"), &NovaWeatherCore::get_ceiling_pre_mod);
+	ClassDB::bind_method(D_METHOD("get_floor_pre_mod"), &NovaWeatherCore::get_floor_pre_mod);
+	ClassDB::bind_method(D_METHOD("get_skybase"), &NovaWeatherCore::get_skybase);
+	ClassDB::bind_method(D_METHOD("get_skybright"), &NovaWeatherCore::get_skybright);
+	ClassDB::bind_method(D_METHOD("get_skyhighlight"), &NovaWeatherCore::get_skyhighlight);
+	ClassDB::bind_method(D_METHOD("get_cloudbase"), &NovaWeatherCore::get_cloudbase);
+	ClassDB::bind_method(D_METHOD("get_cloudhighlight"), &NovaWeatherCore::get_cloudhighlight);
+	ClassDB::bind_method(D_METHOD("get_cloudedge"), &NovaWeatherCore::get_cloudedge);
 	ClassDB::bind_method(D_METHOD("get_sway_amount"), &NovaWeatherCore::get_sway_amount);
 	ClassDB::bind_method(D_METHOD("get_sway_phase"), &NovaWeatherCore::get_sway_phase);
 	ClassDB::bind_method(D_METHOD("get_lightning_intensity"), &NovaWeatherCore::get_lightning_intensity);
@@ -69,6 +89,44 @@ void NovaWeatherCore::snap_colors(const Color &p_fill, const Color &p_sun, const
 	sun_block.snap(color_to_packed(p_sun));
 	fog_block.snap(color_to_packed(p_fog));
 	sky_block.snap(color_to_packed(p_sky));
+}
+
+void NovaWeatherCore::snap_sky_colors(const Color &p_skyfog, const Color &p_ceiling,
+		const Color &p_cloud, const Color &p_floor, const Color &p_skybase,
+		const Color &p_skybright, const Color &p_skyhighlight,
+		const Color &p_cloudbase, const Color &p_cloudhighlight,
+		const Color &p_cloudedge) {
+	sky_color_blocks.snap({
+			color_to_packed(p_skyfog),
+			color_to_packed(p_ceiling),
+			color_to_packed(p_cloud),
+			color_to_packed(p_floor),
+			color_to_packed(p_skybase),
+			color_to_packed(p_skybright),
+			color_to_packed(p_skyhighlight),
+			color_to_packed(p_cloudbase),
+			color_to_packed(p_cloudhighlight),
+			color_to_packed(p_cloudedge),
+	});
+}
+
+void NovaWeatherCore::set_sky_color_targets(const Color &p_skyfog, const Color &p_ceiling,
+		const Color &p_cloud, const Color &p_floor, const Color &p_skybase,
+		const Color &p_skybright, const Color &p_skyhighlight,
+		const Color &p_cloudbase, const Color &p_cloudhighlight,
+		const Color &p_cloudedge) {
+	sky_color_blocks.set_targets({
+			color_to_packed(p_skyfog),
+			color_to_packed(p_ceiling),
+			color_to_packed(p_cloud),
+			color_to_packed(p_floor),
+			color_to_packed(p_skybase),
+			color_to_packed(p_skybright),
+			color_to_packed(p_skyhighlight),
+			color_to_packed(p_cloudbase),
+			color_to_packed(p_cloudhighlight),
+			color_to_packed(p_cloudedge),
+	});
 }
 
 void NovaWeatherCore::tick(const Color &p_fill_target, const Color &p_sun_target,
@@ -108,6 +166,7 @@ void NovaWeatherCore::tick(const Color &p_fill_target, const Color &p_sun_target
 						color_to_packed(p_lightning_color) & 0xFFFFFFu, lightning.level);
 		sky_block.additive = additives.sky;
 		fog_block.additive = additives.fog;
+		sky_color_blocks.set_skyfog_additive(additives.skyfog);
 		fill_block.additive = additives.ground;
 		sun_block.additive = 0;
 	}
@@ -119,10 +178,13 @@ void NovaWeatherCore::tick(const Color &p_fill_target, const Color &p_sun_target
 	//  blocks]. Rain enters as the witnessed per-block blend factor.
 	modulator_chain.tick(rain.intensity);
 	const uint32_t modulator_packed = modulator_chain.render_color();
-	fill_block.tick(modulator_packed, rain.intensity);
 	sun_block.tick(modulator_packed, rain.intensity);
-	fog_block.tick(modulator_packed, rain.intensity);
 	sky_block.tick(modulator_packed, rain.intensity);
+	fill_block.tick(modulator_packed, rain.intensity);
+	fog_block.tick(modulator_packed, rain.intensity);
+	sky_color_blocks.tick_skyfog(modulator_packed, rain.intensity);
+	sky_color_blocks.tick_statics(modulator_packed, rain.intensity);
+	sky_color_blocks.tick_dome(modulator_packed, rain.intensity);
 
 	// The tick's tail [orig: accumulators @ 0x57f1a5..0x57f1d1].
 	tick_cloud_scroll(p_sky_speed);
@@ -167,6 +229,10 @@ opennova::env::Rgb packed_to_rgb01(uint32_t packed) {
 	c.g = static_cast<float>((packed >> 8) & 0xFF) / 255.0f;
 	c.b = static_cast<float>(packed & 0xFF) / 255.0f;
 	return c;
+}
+
+Color rgb_to_color(const opennova::env::Rgb &rgb) {
+	return Color(rgb.r, rgb.g, rgb.b);
 }
 
 } // namespace
@@ -265,11 +331,70 @@ Color NovaWeatherCore::get_sun() const {
 }
 
 Color NovaWeatherCore::get_fog() const {
-	return packed_to_color(fog_block.render_color);
+	// Fog color blocks operate in authored half-intensity bytes; the derived
+	// render color doubles only after smoothing, lightning and modulation.
+	return rgb_to_color(opennova::env::double_saturate(
+			packed_to_rgb01(fog_block.render_color)));
 }
 
 Color NovaWeatherCore::get_sky() const {
 	return packed_to_color(sky_block.render_color);
+}
+
+Color NovaWeatherCore::get_skyfog() const {
+	// Retail overwrites skyfog[0] with the horizon blend in undoubled space,
+	// then applies the same saturating x2 as fog. The host's modulate2x clear
+	// and dome-fog paths consume this final color verbatim.
+	const opennova::env::Rgb blended = opennova::env::horizon_blend_skyfog(
+			packed_to_rgb01(fog_block.render_color),
+			packed_to_rgb01(sky_color_blocks.skyfog.render_color),
+			static_cast<uint32_t>(scalar_channels.fog_dist_fp),
+			1024u << 16);
+	return rgb_to_color(opennova::env::double_saturate(blended));
+}
+
+Color NovaWeatherCore::get_ceiling() const {
+	return packed_to_color(sky_color_blocks.ceiling.render_color);
+}
+
+Color NovaWeatherCore::get_cloud() const {
+	return packed_to_color(sky_color_blocks.cloud.render_color);
+}
+
+Color NovaWeatherCore::get_floor() const {
+	return packed_to_color(sky_color_blocks.floor.render_color);
+}
+
+Color NovaWeatherCore::get_ceiling_pre_mod() const {
+	return packed_to_color(sky_color_blocks.ceiling.pre_mod_color);
+}
+
+Color NovaWeatherCore::get_floor_pre_mod() const {
+	return packed_to_color(sky_color_blocks.floor.pre_mod_color);
+}
+
+Color NovaWeatherCore::get_skybase() const {
+	return packed_to_color(sky_color_blocks.skybase.render_color);
+}
+
+Color NovaWeatherCore::get_skybright() const {
+	return packed_to_color(sky_color_blocks.skybright.render_color);
+}
+
+Color NovaWeatherCore::get_skyhighlight() const {
+	return packed_to_color(sky_color_blocks.skyhighlight.render_color);
+}
+
+Color NovaWeatherCore::get_cloudbase() const {
+	return packed_to_color(sky_color_blocks.cloudbase.render_color);
+}
+
+Color NovaWeatherCore::get_cloudhighlight() const {
+	return packed_to_color(sky_color_blocks.cloudhighlight.render_color);
+}
+
+Color NovaWeatherCore::get_cloudedge() const {
+	return packed_to_color(sky_color_blocks.cloudedge.render_color);
 }
 
 float NovaWeatherCore::get_sway_amount() const {

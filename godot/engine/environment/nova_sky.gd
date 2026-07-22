@@ -27,6 +27,7 @@ var _cached_cam: Camera3D = null
 # Standalone fallback (hosts with no weather node): a private core ticked for
 # its cloud scroll only — the integer math has ONE home either way.
 var _fallback_scroll: NovaWeatherCore = null
+var _fallback_tick_credit := 0.0
 
 
 func _ready() -> void:
@@ -62,12 +63,14 @@ func build() -> void:
 	# before the vertex stage [orig: render_skybox @ 0x5790d0].
 	mesh_instance.extra_cull_margin = 1.0e6
 	mesh_instance.ignore_occlusion_culling = true
+	mesh_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mesh_instance.gi_mode = GeometryInstance3D.GI_MODE_DISABLED
 	mesh_instance.mesh = mesh
 	add_child(mesh_instance)
 	built = true
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if not built or sky_material == null:
 		return
 	# Camera3D.current changes when ONED switches workspace cameras while the
@@ -112,10 +115,10 @@ func _process(_delta: float) -> void:
 		# vs @ 0x579291 Environment_GetLightDirectionFloat].
 		sky_material.set_shader_parameter("u_sun_dir", env.get_sun_direction())
 		sky_material.set_shader_parameter("u_light_dir", env.get_light_direction())
-		# The dome fogs with the same scene fog state as terrain - the active fog
-		# block color, no dome-specific derivation
-		# [orig: CD3DDevice_SetActiveFogColor @ 0x677040].
-		sky_material.set_shader_parameter("u_fog_color", env.get_fog_color())
+		# The sky pass temporarily swaps the device fog color from world fog to
+		# the post-horizon-blend, doubled skyfog block, then restores world fog.
+		# [orig: sky fog wrapper @ 0x579cb0].
+		sky_material.set_shader_parameter("u_fog_color", env.get_skyfog_color())
 		sky_material.set_shader_parameter("u_fog_end", env.get_fog_level())
 		sky_speed = env.get_sky_speed()
 		sky_height = env.get_sky_height()
@@ -129,7 +132,7 @@ func _process(_delta: float) -> void:
 	# four integer accumulators; the UV translation is U = +cam/4096 - acc*2^-28,
 	# V = +cam/4096 + acc*2^-28 (layer 2: /8192 and 2^-29) - the accumulator
 	# rides U NEGATIVELY (env #26).
-	var scroll_source: Object = _scroll_source(sky_speed)
+	var scroll_source: Object = _scroll_source(sky_speed, delta)
 	var cam_x := 0.0
 	var cam_z := 0.0
 	if _cached_cam:
@@ -174,16 +177,24 @@ func sync_frame_clear_color() -> void:
 
 
 # The weather node when wired (it ticks the shared core at process priority
-# -10, before us), else a private fallback core this node ticks itself —
-# one-tick-per-frame, the NovaWeather convention.
-func _scroll_source(sky_speed: float) -> Object:
+# -10, before us), else a private fallback core advanced at the same fixed
+# 62 Hz cadence. Rendering may run at any refresh rate.
+func _scroll_source(sky_speed: float, delta: float) -> Object:
 	if not _cached_weather or not _cached_weather.is_inside_tree():
 		_cached_weather = get_node_or_null(weather_path) if not weather_path.is_empty() else null
 	if _cached_weather and _cached_weather.has_method("get_cloud_uv_offset1"):
 		return _cached_weather
 	if _fallback_scroll == null:
 		_fallback_scroll = NovaWeatherCore.new()
-	_fallback_scroll.tick_cloud_scroll(sky_speed)
+	_fallback_tick_credit += maxf(delta, 0.0) * NovaWeather.WEATHER_TICK_HZ
+	var tick_count := int(floor(_fallback_tick_credit + 1.0e-9))
+	if tick_count > 0:
+		_fallback_tick_credit = maxf(0.0, _fallback_tick_credit - float(tick_count))
+		if tick_count > NovaWeather.MAX_CATCHUP_TICKS:
+			tick_count = NovaWeather.MAX_CATCHUP_TICKS
+			_fallback_tick_credit = 0.0
+		for _tick in range(tick_count):
+			_fallback_scroll.tick_cloud_scroll(sky_speed)
 	return _fallback_scroll
 
 

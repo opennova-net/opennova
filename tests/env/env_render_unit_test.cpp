@@ -544,6 +544,44 @@ int main() {
 		rain_block.tick(kModulatorIdentityPacked, 0x4000);
 		if (!expect(rain_block.render_color == 0x407F2064u, "block rain-half modulation")) return 1;
 		if (!expect(rain_block.pre_mod_color == 0x80FF40C8u, "pre-mod color unaffected by rain")) return 1;
+
+		// The hosted sky cluster keeps skyfog, the static colors, and the six
+		// dome ramps in witnessed order while delegating every channel to the
+		// same WeatherColorBlock pipeline.
+		SkyWeatherColorBlocks sky_blocks;
+		sky_blocks.snap({0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u});
+		sky_blocks.set_targets({
+				0x00081018u,
+				0x00102030u,
+				0x00182838u,
+				0x00204060u,
+				0x00284868u,
+				0x00305070u,
+				0x00385878u,
+				0x00406080u,
+				0x00486888u,
+				0x00507090u,
+		});
+		sky_blocks.set_skyfog_additive(0x00010101u);
+		sky_blocks.tick_skyfog(kModulatorIdentityPacked, 0);
+		sky_blocks.tick_statics(kModulatorIdentityPacked, 0);
+		sky_blocks.tick_dome(kModulatorIdentityPacked, 0);
+		if (!expect(sky_blocks.skyfog.render_color == 0x00020304u,
+		            "skyfog uses the block pipeline plus its lightning additive")) return 1;
+		if (!expect(sky_blocks.ceiling.render_color == 0x00020406u &&
+		                    sky_blocks.cloud.render_color == 0x00030507u &&
+		                    sky_blocks.floor.render_color == 0x0004080Cu &&
+		                    sky_blocks.ceiling.pre_mod_color == 0x00020406u &&
+		                    sky_blocks.floor.pre_mod_color == 0x0004080Cu,
+		            "all three static colors take one pre- and post-mod eighth-step")) return 1;
+		if (!expect(sky_blocks.skybase.render_color == 0x0005090Du &&
+		                    sky_blocks.skybright.render_color == 0x00060A0Eu &&
+		                    sky_blocks.skyhighlight.render_color == 0x00070B0Fu,
+		            "all three sky ramps take one 12.20 eighth-step")) return 1;
+		if (!expect(sky_blocks.cloudbase.render_color == 0x00080C10u &&
+		                    sky_blocks.cloudhighlight.render_color == 0x00090D11u &&
+		                    sky_blocks.cloudedge.render_color == 0x000A0E12u,
+		            "all three cloud ramps take the same weather-block path")) return 1;
 	}
 
 	// --- Cloud scroll [orig: rate ramp @ 0x57eecc; accumulators
@@ -1033,6 +1071,90 @@ int main() {
 		            "specular is row-constant")) return 1;
 		if (!expect(near(rows.screen_pos[7], 254.0f, 1e-3f),
 		            "row1 marches 2 px (the stride floor)")) return 1;
+
+		// Every emitted vertex must reproject to the screen coordinate carried
+		// by its texm3x2 row. This pins the host extension of the witnessed
+		// centered-perspective march to off-center perspective and orthographic
+		// projections without weakening the retail fixture above.
+		const auto row_vertex_reprojects = [&](const WaterStripView &test_view,
+				const WaterStripRows &test_rows, size_t vertex) {
+			const float world[3] = {
+				test_rows.uv0[vertex * 2] * 32.0f,
+				0.0f,
+				test_rows.uv0[vertex * 2 + 1] * 32.0f,
+			};
+			const float *m = test_view.view;
+			const float vx = m[0] * world[0] + m[4] * world[1] + m[8] * world[2] + m[12];
+			const float vy = m[1] * world[0] + m[5] * world[1] + m[9] * world[2] + m[13];
+			const float vz = m[2] * world[0] + m[6] * world[1] + m[10] * world[2] + m[14];
+			const float *p = test_view.proj;
+			const float cx = p[0] * vx + p[4] * vy + p[8] * vz + p[12];
+			const float cy = p[1] * vx + p[5] * vy + p[9] * vz + p[13];
+			const float cw = p[3] * vx + p[7] * vy + p[11] * vz + p[15];
+			const float sx = test_view.vp_center_x + cx / (2.0f * cw) *
+					(test_view.vp_max_x - test_view.vp_min_x);
+			const float sy = test_view.vp_center_y - cy / (2.0f * cw) *
+					(test_view.vp_max_y - test_view.vp_min_y);
+			return near(sx, test_rows.screen_pos[vertex * 2], 2e-3f) &&
+					near(sy, test_rows.screen_pos[vertex * 2 + 1], 2e-3f);
+		};
+
+		WaterStripView off_center = v;
+		// Converted Godot frustum projection: clip x = m00*x - m20*z,
+		// clip y = m11*y - m21*z, clip w = +view depth.
+		off_center.proj[8] = -0.20f;
+		off_center.proj[9] = 0.10f;
+		WaterStripRows off_center_rows;
+		const int off_center_count = water_build_strip_rows(off_center, sp, off_center_rows);
+		if (!expect(off_center_count >= 2, "off-center perspective emits rows")) return 1;
+		if (!expect(row_vertex_reprojects(off_center, off_center_rows, 0) &&
+		            row_vertex_reprojects(off_center, off_center_rows,
+		                                  off_center_rows.uv0.size() / 2 - 1),
+		            "off-center perspective rows invert z-shear projection")) return 1;
+
+		// Orthographic camera pitched down at the plane. Clip W is constant;
+		// each screen pixel owns a different line origin while every ray shares
+		// the camera forward direction.
+		WaterStripView orthographic = v;
+		const float ortho_view[16] = {
+			1.0f, 0.0f, 0.0f, 0.0f,
+			0.0f, 0.6f, -0.8f, 0.0f,
+			0.0f, 0.8f, 0.6f, 0.0f,
+			0.0f, -60.0f, 80.0f, 1.0f,
+		};
+		const float ortho_inv[16] = {
+			1.0f, 0.0f, 0.0f, 0.0f,
+			0.0f, 0.6f, 0.8f, 0.0f,
+			0.0f, -0.8f, 0.6f, 0.0f,
+			0.0f, 100.0f, 0.0f, 1.0f,
+		};
+		for (int i = 0; i < 16; ++i) {
+			orthographic.view[i] = ortho_view[i];
+			orthographic.view_inv[i] = ortho_inv[i];
+			orthographic.proj[i] = 0.0f;
+		}
+		orthographic.proj[0] = 1.0f / 320.0f; // 640-world-unit width
+		orthographic.proj[5] = 1.0f / 240.0f; // 480-world-unit height
+		orthographic.proj[15] = 1.0f;          // constant clip W
+		orthographic.cam_right[0] = 1.0f;
+		orthographic.cam_right[1] = 0.0f;
+		orthographic.cam_right[2] = 0.0f;
+		orthographic.cam_forward[0] = 0.0f;
+		orthographic.cam_forward[1] = -0.8f;
+		orthographic.cam_forward[2] = 0.6f;
+		WaterStripRows ortho_rows;
+		const int ortho_count = water_build_strip_rows(orthographic, sp, ortho_rows);
+		if (!expect(ortho_count >= 2, "orthographic pitched view emits rows")) return 1;
+		if (!expect(row_vertex_reprojects(orthographic, ortho_rows, 0) &&
+		            row_vertex_reprojects(orthographic, ortho_rows,
+		                                  ortho_rows.uv0.size() / 2 - 1),
+		            "orthographic rows invert constant-W projection")) return 1;
+		if (!expect(near(ortho_rows.rhw[0], 1.0f),
+		            "orthographic row RHW is reciprocal constant clip W")) return 1;
+		if (!expect(near(ortho_rows.screen_pos[7] - ortho_rows.screen_pos[1], 9.0f, 1e-3f),
+		            "orthographic constant RHW drives the clamped 9-pixel stride")) return 1;
+		if (!expect(near(ortho_rows.uv0[4] - ortho_rows.uv0[0], 20.03125f, 2e-3f),
+		            "orthographic row spans the viewport at constant world scale")) return 1;
 
 		// The underwater pass: white diffuse, the boot stride 4 (never
 		// re-derived [orig: @ 0x5c30c5]) and the flipped t2 V
