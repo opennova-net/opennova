@@ -518,6 +518,41 @@ static int parse_fixed16_n(const char *s, size_t len) {
     return (int)(neg ? -v : v);
 }
 
+/* The engine's decimal -> 16.16 digit walker, translated exactly rather than
+   re-derived. It accumulates the integer part by digits, then walks the fractional
+   digits with a scale that starts at 2^24 and is repeatedly multiplied by 419430/2^22
+   (0.09999990 — a hair UNDER 1/10), seeding the accumulator with 127 so the closing
+   >> 8 rounds to nearest. No sign and no exponent: a leading '-' terminates the
+   integer scan and yields 0, exactly as the original does.
+
+   This is deliberately NOT parse_fixed16_n above. That helper is a clean round-half-up
+   conversion, and the two disagree by one 16.16 LSB on roughly 4% of decimal forms
+   (e.g. "0.07" -> 4587 here, 4588 there) because the original's per-digit scale drifts
+   low. Callers whose value is consumed as a magnitude can live with a 1-LSB shift;
+   callers who divide two parsed values against each other cannot, which is why the
+   heat keys use this one. The same 1-LSB gap in parse_fixed16_n's own callers (the
+   ammo.def magnitudes) is tracked as D-WPN-30.
+   [orig: Math_ParseFixedPoint16 @ 0x6131f0] */
+static int parse_fixed16_digits_n(const char *s, size_t len) {
+    size_t i = 0;
+    int integer_part = 0;
+    while (i < len && s[i] >= '0' && s[i] <= '9') {
+        integer_part = s[i] + 10 * integer_part - '0';
+        ++i;
+    }
+    int frac_accum = 127;
+    if (i < len && s[i] == '.') {
+        long long frac_scale = 0x1000000;
+        ++i;
+        while (i < len && s[i] >= '0' && s[i] <= '9') {
+            frac_scale = (419430LL * frac_scale) >> 22;
+            frac_accum += (int)(frac_scale * (s[i] - '0'));
+            ++i;
+        }
+    }
+    return (integer_part << 16) + (frac_accum >> 8);
+}
+
 /* Parsed 16.16 seconds -> 62 Hz ticks with rounding. [orig: sub_40A0F0 @0x40a0f0 —
  * (62 * fp16 + 0x8000) >> 16] */
 static int parse_age_ticks_n(const char *s, size_t len) {
@@ -1120,6 +1155,26 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                    [orig: Player_ToggleWeaponScope @ 0x4df401]. */
                 size_t vl; const char *v = consume_value_span(trimmed, tlen, 13, &vl);
                 cw.scope_max_mag = parse_float_n(v, vl);
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "heat_values", 11)) {
+                /* percent-per-shot / percent-per-second, each through the engine's
+                   digit parser then integer-divided by 100 and by 100*62 (the logic
+                   rate) — the two truncating divides are load-bearing, see def.h.
+                   [orig: @ 0x543eb7 -> +0x36C / +0x370] */
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 11, &vl);
+                Token hv[MAX_TOKENS];
+                int hn = split_values(v, vl, hv, MAX_TOKENS);
+                if (hn >= 1) cw.heat_per_shot = parse_fixed16_digits_n(hv[0].s, hv[0].len) / 100;
+                if (hn >= 2) cw.heat_decay_per_tick = parse_fixed16_digits_n(hv[1].s, hv[1].len) / 6200;
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "heat_effect", 11)) {
+                /* Effect name + the 16.16 glow threshold; any further values on the
+                   line are unread in retail too. [orig: @ 0x543e36 -> +0x358 / +0x374] */
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 11, &vl);
+                Token hv[MAX_TOKENS];
+                int hn = split_values(v, vl, hv, MAX_TOKENS);
+                if (hn >= 1) safe_copy(cw.heat_effect, sizeof(cw.heat_effect), hv[0].s, hv[0].len);
+                if (hn >= 2) cw.heat_glow_threshold = parse_fixed16_digits_n(hv[1].s, hv[1].len);
                 parsed = 1;
             } else if (lower_match_key(lower, ll, "special_hold", 12)) {
                 /* 3P hold-pose kind, atol [orig: weapon.def key 'special_hold' ->

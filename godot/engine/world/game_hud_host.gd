@@ -245,10 +245,10 @@ func tick() -> void:
 		"fov_deg": fov_deg,
 		"ticks": _hud_ticks(),
 		"attach_labels": _build_attach_labels(),
-		# Weapon heat 0..0xFFFF; the drawer self-hides at 0. Always 0 until the
-		# per-slot heat accumulator is ported (D-HUD-15).
+		# Weapon heat 0..0xFFFF; the drawer self-hides at 0. Only the emplaced and
+		# vehicle heavy guns author heat_values, so this stays 0 on foot.
 		# [orig: hudInfo+60 = WeaponSlot_CalcAccumulatedHeat @0x53f780, @0x4b8533]
-		"heat": 0,
+		"heat": wv.heat if wv != null and wv.active else 0,
 		# The PowerThrow windup driving the charge bar; the drawer derives the
 		# witnessed fill curve from held ticks. [orig: g_fireChargeStartTick
 		# @0xB76800 read by HUD_DrawPowerThrowChargeBar @0x599830]

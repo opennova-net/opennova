@@ -199,6 +199,11 @@ world::WeaponTable build_weapon_table(const DefWeaponsFile &weapons) {
 		e.action_fsm.clip_capacity = e.clipsize;
 		e.action_fsm.flags = d.flags;
 		e.action_fsm.flags2 = d.flags2;
+		// The heat model, already in the original's pre-divided 16.16 units
+		// [orig: WeaponDef +0x36C/+0x370/+0x374].
+		e.action_fsm.heat_per_shot = d.heat_per_shot;
+		e.action_fsm.heat_decay_per_tick = d.heat_decay_per_tick;
+		e.action_fsm.heat_glow_threshold = d.heat_glow_threshold;
 		e.weapon_class_slot = d.weapon_class_slot;
 		for (int k = 0; k < 7; ++k) e.classrounds[k] = d.classrounds[k];
 		e.switchcategory = d.switchcategory;

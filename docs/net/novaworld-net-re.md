@@ -6887,11 +6887,91 @@ recycles dead children individually and clears the suppression mapping only at f
 group death. D-WPN-19 records the false-reading correction and the whole-group
 regression replaces the former first-child contract.
 
+**The weapon heat model (witnessed + ported 2026-07-22).** Heat is **not a stored
+accumulator** — the slot carries a DEADLINE and the level is recomputed from what is
+left of it, so the linear cooldown is implicit and costs no per-tick work.
+
+- **Read** [orig: `WeaponSlot_CalcAccumulatedHeat @ 0x53f780`]:
+  `heat = def+880 × (slot+0x14 − current_tick)`, gated on `def+876 != 0` and on the
+  deadline still being in the future; otherwise 0. The gate is the DEF field, so a
+  weapon with no heat model reads 0 even if a stale window survived a def swap.
+- **Write**, once per shot at the recoil arbiter [orig: `WeaponAction_Recoil
+  @ 0x542f8b..0x542fdc`]: a lapsed window first restarts from `current_tick`
+  (`@ 0x542fa0` — time spent cold is never credited), then the deadline advances by
+  `def+876 / def+880 + 1` ticks (`@ 0x542fb4`), i.e. one shot's worth of cooling. If
+  the resulting level exceeds **73727** the window is re-stamped to
+  `current_tick + 73728/def+880 + 1` (`@ 0x542fc4`/`@ 0x542fdc`) — a **ceiling of
+  0x12000**, so a held trigger cannot bank unbounded heat.
+- **Deny** [orig: `WeaponAction_ProcessFrame @ 0x541046`]: while the window is live,
+  a level above **0xFFFF** converts a QUEUED `FIRE(2)` into `EMPTY(5)` — the dry-fire
+  click. It does not cancel an in-flight FIRE and does not stop the level climbing;
+  the gun simply coughs. Because the deny only rewrites a *queued* action and the
+  auto-fire volley is sustained by the recoil window's deferred re-queue, an overheat
+  BREAKS the chain: the player must release and press again. The 0xFFFF deny against
+  the 0x12000 ceiling is the hysteresis — worst case ~196 ticks (~3.1 s) of lockout.
+- **Expiry** [orig: `@ 0x54125f`]: a window that has lapsed — or any window while the
+  owner is submerged and the def lacks `Underwater` (Flags 0x4) — is zeroed and the
+  glow emitter released.
+- **The def keys** [orig: `WeaponDefs_ParseLineCallback`]. `heat_values <pctPerShot>,
+  <pctPerSecondCool>` `@ 0x543eb7`: each value goes through the engine's digit parser
+  (`Math_ParseFixedPoint16 @ 0x6131f0`, NOT atof) and is then **integer-divided** —
+  `def+0x36C = v0/100` (percent -> a 0..0x10000 fraction) and `def+0x370 = v1/6200`
+  (percent-per-second -> per-tick at the 62 Hz logic rate). Both divides truncate and
+  both are load-bearing, because the runtime divides the two results against each
+  other. `heat_effect <fx>,<threshold>` `@ 0x543e36` stores the glow effect name at
+  `def+0x358` and the raw 16.16 threshold at `def+0x374`; shipped rows author
+  `heat_effect heat, .5, 30, 60` and the parser reads only the first two values, so
+  the trailing pair is authored-but-unread in retail too. A third key `heat_sound`
+  (`def+0x368`, `@ 0x543e85`) exists in the parser and **no shipped weapon.def
+  authors it**.
+- **Who authors it.** Thirteen JOX entries, all emplaced or vehicle-mounted heavy
+  guns — `WPN_EMPLCD50`, `EMPLCDMINI`, `EMPLCDGRND`, `EMP50TRI`, `UG50cal`,
+  `EMPLCD50NA`, `EMP50TRI180`, `EMPLCDHUM`, `EMPLCDBOT`, `EMP50BOT180`, `EMPLCDSUV`,
+  `EMPLCD50SUV`, `QUAD50`. No infantry weapon authors heat, so the model is inert on
+  foot and the HUD bar correctly never appears there. Worked example — the .50's
+  `heat_values 2,4` parses to 1310 per shot / 42 per tick, i.e. 32 ticks of window a
+  shot; fired at the 8-tick action cadence the level climbs ~1008 a shot, lights the
+  glow (threshold `.5` = 0x8000) around the 33rd and denies at the 65th.
+- **The HUD feed** [orig: `HUD_BuildEntityInfo @ 0x4b852e`]: the same accumulator
+  writes `hudInfo+60`, clamped to 0xFFFF at `@ 0x4b854d`, which is what
+  `HUD_DrawWeaponHeatBar @ 0x599700` fills from (D-HUD-15).
+
+Ported as `DefWeaponDef::heat_*` + `WeaponFsmDef::heat_*`/`WeaponSlotState::
+heat_window_end_tick`/`weapon_slot_accumulated_heat` + the `NovaSimulation` weapon-view
+feed. The submerged term has no live source yet (D-WPN-29).
+
+**What the glow half still needs (D-WPN-28).** The level is ported. There are TWO candidate
+consumers, and only one of them is real:
+
+1. The **particle emitter** — the `@ 0x54109e..0x54122c` leg above. This is the actual
+   overheat visual (shipped data authors `FX_OVERHEAT1` on the emplaced .50s, miniguns,
+   DShK and turrets) and it is a host effect seam, still unported.
+2. The **`HEAT_GLOW` CTRL register** — **witnessed 2026-07-22 and dead in shipped JO.**
+   It is ordinal 54 in the global 32-byte CTRL name table (`aLodFrac @ 0x83dce8`;
+   resolver `CtrlName_ToOrdinal @ 0x57b290`; the per-model CtrlReg loader stores the
+   ordinal at `+24` `[orig: @ 0x5b4640]`), and `B50Cal.3di` carries exactly
+   `[HEAT_GLOW, EWEAP_GUNYAW, EWEAP_GUNPITCH]`. The engine has exactly ONE path that
+   drives a CTRL register: an ACTION row carrying a `ctrlreg <NAME>` key, parsed to
+   `ActionDef+28` `[orig: ActionDef_ParseScriptLine @ 0x4027fa]` and executed as a
+   ramping anim slot `[orig: ActionSlot_ExecuteAction @ 0x4020cc ->
+   CtrlRegAnimSlot_Allocate @ 0x401ca0 -> CtrlRegAnimSlot_UpdateAll @ 0x401bf0`, which
+   writes the global `dword_83FCE8[2*ordinal]` and bounces at 0/0xFFFF]`. **No shipped
+   weapon.def authors `ctrlreg` at all** — zero occurrences across the JOX corpus. So
+   retail never writes HEAT_GLOW, the heat level never reaches a control register, and
+   porting a HEAT_GLOW write would be inventing behavior, not restoring it.
+
+A related find while walking this: `ActionSlot_ExecuteAction @ 0x4020a0` (the DEFAULT
+action handler) carries its own copy of the heat-window stamp, gated on
+`MountSlot+0x2C == RECOIL(3)` `[orig: @ 0x402242..0x402299]`, byte-identical to the one
+in `WeaponAction_Recoil`. It only runs for a recoil row that does NOT name
+`wpn_std_recoil`, which no shipped row does (D-WPN-1), so there is no double stamp in
+practice and the port's single stamp in the recoil handler is correct for all shipped
+data.
+
 **Open follow-ups:** who queues OVERHEATED(11) as an ACTION (its ROW is consumed as
 glow data by the heat window leg above — whether anything transitions TO state 11
 remains unwalked);
-the `*_map` scope function variants; `WeaponSlot_CalcAccumulatedHeat @ 0x53f780`
-internals (the stamp/decay math feeding the heat window);
+the `*_map` scope function variants;
 the `g_FpWeaponViewFlags` option bits beyond bit 0; the `word_B7C670` transition write vs the §5.16 shot-seq;
 remote-entity action sounds/effects (the `@ 0x541a83` leg) once remote slots pump;
 the RoundData_SpawnRound 0x2000000 test site; the slot Elevation zoom-adjust input;

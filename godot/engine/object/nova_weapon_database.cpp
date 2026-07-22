@@ -107,6 +107,10 @@ void NovaWeaponDatabase::append_entry(const DefWeaponDef &e) {
 	w.special_hold = e.special_hold;
 	w.attack_anim = e.attack_anim;
 	w.run_anim = e.run_anim;
+	w.heat_per_shot = e.heat_per_shot;
+	w.heat_decay_per_tick = e.heat_decay_per_tick;
+	w.heat_glow_threshold = e.heat_glow_threshold;
+	w.heat_effect = String(e.heat_effect);
 	for (int k = 0; k < 6; ++k) {
 		w.error[k] = e.error[k];
 	}
@@ -221,6 +225,12 @@ Dictionary NovaWeaponDatabase::weapon_dict(int index) const {
 	d["attack_anim"] = w.attack_anim;
 	// The run-gait class [orig: 'run_anim' -> AdmDefs +0xAC; promotion @ 0x4b729d].
 	d["run_anim"] = w.run_anim;
+	// The weapon heat model [orig: weapon.def 'heat_values'/'heat_effect' ->
+	// WeaponDef +0x36C/+0x370/+0x374/+0x358; docs/net/novaworld-net-re.md §5.62].
+	d["heat_per_shot"] = w.heat_per_shot;
+	d["heat_decay_per_tick"] = w.heat_decay_per_tick;
+	d["heat_glow_threshold"] = w.heat_glow_threshold;
+	d["heat_effect"] = w.heat_effect;
 	PackedFloat32Array error;
 	for (int k = 0; k < 6; ++k) {
 		error.push_back(w.error[k]);

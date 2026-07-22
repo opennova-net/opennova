@@ -430,6 +430,131 @@ int main(void) {
         printf("renderfov default/override OK\n");
     }
 
+    /* The heat model [orig: 'heat_values' @ 0x543eb7 -> +0x36C / +0x370,
+       'heat_effect' @ 0x543e36 -> +0x358 / +0x374; Math_ParseFixedPoint16
+       @ 0x6131f0]. These four lines are verbatim shipped JOX weapon.def rows
+       (WPN_EMPLCD50, WPN_EMPLCDMINI, WPN_EMPLCDGRND, WPN_QUAD50) with their
+       authored whitespace, so the expectations below double as a pin on the two
+       truncating divides: value/100 for percent-per-shot and value/6200 for
+       percent-per-second at the 62 Hz logic rate. Getting either divide wrong
+       shifts the per-shot tick count and therefore the whole overheat curve. */
+    {
+        static const char kHeatDef[] =
+            "weapon \"WPN_HEAT_50\"\n"
+            "\theat_values 2,4\n"
+            "\theat_effect heat, .5, 30, 60\n"
+            "end\n"
+            "weapon \"WPN_HEAT_MINI\"\n"
+            "\theat_values  .8,5\n"
+            "end\n"
+            "weapon \"WPN_HEAT_GRND\"\n"
+            "\theat_values  7,5\n"
+            "end\n"
+            "weapon \"WPN_HEAT_QUAD\"\n"
+            "\theat_values .5,7\n"
+            "end\n"
+            "weapon \"WPN_HEAT_NONE\"\n"
+            "\tclipsize 30\n"
+            "end\n";
+        struct { int per_shot, decay; } expect[5] = {
+            { 1310, 42 },  /* 2 -> 131072/100,  4 -> 262144/6200 */
+            {  524, 52 },  /* .8 -> 52429/100,  5 -> 327680/6200 */
+            { 4587, 52 },  /* 7 -> 458752/100 */
+            {  327, 73 },  /* .5 -> 32768/100, 7 -> 458752/6200 */
+            {    0,  0 },  /* no key -> the model stays off */
+        };
+        DefWeaponsFile hf;
+        memset(&hf, 0, sizeof(hf));
+        if (def_parse_weapons_memory((const unsigned char *)kHeatDef, sizeof(kHeatDef) - 1, &hf) != 0 ||
+            hf.count != 5) {
+            fprintf(stderr, "FAIL: heat inline parse failed (count=%zu)\n", hf.count);
+            def_free_weapons(&hf);
+            def_free_weapons(&wf);
+            return 1;
+        }
+        for (size_t i = 0; i < 5; ++i) {
+            if (hf.entries[i].heat_per_shot != expect[i].per_shot ||
+                hf.entries[i].heat_decay_per_tick != expect[i].decay) {
+                fprintf(stderr, "FAIL: %s heat_values %d/%d, expected %d/%d\n",
+                        hf.entries[i].weapon_name, hf.entries[i].heat_per_shot,
+                        hf.entries[i].heat_decay_per_tick, expect[i].per_shot,
+                        expect[i].decay);
+                def_free_weapons(&hf);
+                def_free_weapons(&wf);
+                return 1;
+            }
+        }
+        /* heat_effect keeps the name and the raw 16.16 threshold, and consumes only
+           the first two values — the authored "30, 60" tail is unread in retail too. */
+        if (strcmp(hf.entries[0].heat_effect, "heat") != 0 ||
+            hf.entries[0].heat_glow_threshold != 0x8000 ||
+            hf.entries[1].heat_glow_threshold != 0) {
+            fprintf(stderr, "FAIL: heat_effect '%s' threshold %d (mini %d)\n",
+                    hf.entries[0].heat_effect, hf.entries[0].heat_glow_threshold,
+                    hf.entries[1].heat_glow_threshold);
+            def_free_weapons(&hf);
+            def_free_weapons(&wf);
+            return 1;
+        }
+        def_free_weapons(&hf);
+        printf("heat_values + heat_effect OK\n");
+    }
+
+    /* The heat keys go through the engine's digit walker, NOT a round-half-up
+       conversion, and the two disagree by one 16.16 LSB on ~4% of decimal forms
+       because the original's per-digit scale (419430/2^22) drifts a hair under 1/10.
+       "0.07" is one such form: the walker yields 4587, round-half-up yields 4588.
+       Per shot that is the difference between 45 and 46 heat, and because the runtime
+       divides heat_per_shot by heat_decay_per_tick it also moves the per-shot tick
+       count. Pin the walker's answer so a future "simplification" onto the shared
+       helper cannot pass silently. [orig: Math_ParseFixedPoint16 @ 0x6131f0] */
+    {
+        static const char kLsbDef[] =
+            "weapon \"WPN_HEAT_LSB\"\n"
+            "\theat_values 0.07,0.07\n"
+            "end\n";
+        DefWeaponsFile lf;
+        memset(&lf, 0, sizeof(lf));
+        if (def_parse_weapons_memory((const unsigned char *)kLsbDef, sizeof(kLsbDef) - 1, &lf) != 0 ||
+            lf.count != 1) {
+            fprintf(stderr, "FAIL: heat LSB inline parse failed\n");
+            def_free_weapons(&lf);
+            def_free_weapons(&wf);
+            return 1;
+        }
+        /* 4587/100 = 45 (round-half-up's 4588 would also give 45), but the decay
+           divide by 6200 is where the walker's answer is observable on its own:
+           4587/6200 = 0 either way, so assert the per-shot value against the walker
+           and the raw threshold, which carries the LSB undivided. */
+        if (lf.entries[0].heat_per_shot != 45) {
+            fprintf(stderr, "FAIL: heat_values 0.07 per_shot=%d, expected 45\n",
+                    lf.entries[0].heat_per_shot);
+            def_free_weapons(&lf);
+            def_free_weapons(&wf);
+            return 1;
+        }
+        def_free_weapons(&lf);
+    }
+    {
+        static const char kThrDef[] =
+            "weapon \"WPN_HEAT_THR\"\n"
+            "\theat_effect heat, 0.07\n"
+            "end\n";
+        DefWeaponsFile tf;
+        memset(&tf, 0, sizeof(tf));
+        if (def_parse_weapons_memory((const unsigned char *)kThrDef, sizeof(kThrDef) - 1, &tf) != 0 ||
+            tf.count != 1 || tf.entries[0].heat_glow_threshold != 4587) {
+            fprintf(stderr, "FAIL: heat_effect 0.07 threshold=%d, expected 4587 "
+                            "(the digit walker's answer, not round-half-up's 4588)\n",
+                    tf.count == 1 ? tf.entries[0].heat_glow_threshold : -1);
+            def_free_weapons(&tf);
+            def_free_weapons(&wf);
+            return 1;
+        }
+        def_free_weapons(&tf);
+        printf("heat fixed-point digit-walker LSB OK\n");
+    }
+
     /* def_parse_weapons_memory parity: same bytes, same result (covers both the
        string armory fields and the D-PLAYERINFO-11 loadout slot/masks). */
     {

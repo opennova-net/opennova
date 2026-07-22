@@ -66,6 +66,13 @@ private:
 		// 62/63 on fire [orig: AdmDefs +0xA4/+0xA8, read @ 0x4b5dba / @ 0x542bbc].
 		int special_hold = 0;
 		int attack_anim = 0;
+		// The heat model, in the def's pre-divided 16.16 units (0 = the weapon
+		// authors no heat, which is every infantry weapon in the shipped corpora)
+		// [orig: WeaponDef +0x36C / +0x370 / +0x374 / +0x358].
+		int heat_per_shot = 0;
+		int heat_decay_per_tick = 0;
+		int heat_glow_threshold = 0;
+		String heat_effect;
 		// Run-gait class: the forward-walk promotion adds this to the constant pitch
 		// tier 2 to pick run_2/run_3 [orig: 'run_anim' -> AdmDefs +0xAC; @ 0x4b729d].
 		int run_anim = 0;

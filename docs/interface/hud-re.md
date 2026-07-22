@@ -126,7 +126,7 @@ This is the model the OpenNova runtime "HUD info" gatherer mirrors
 | +56 | **clip rounds** | `-1` when capacity (`def+88`) is `-1` `[orig: @0x4b85fa]`; else the pool clip (`def+220` set) or `MountSlot+16` u16 |
 | +64 | clip capacity | `def+88` |
 | +572 | **rounds-per-icon divisor** byte | `def+727` (the HUDRNDGFX 5th field) `[orig: @0x4b85fd]` |
-| +60 | weapon heat (capped `0xFFFF`) | `WeaponSlot_CalcAccumulatedHeat @0x53f780` — heat elements unwitnessed |
+| +60 | weapon heat (capped `0xFFFF`) | `WeaponSlot_CalcAccumulatedHeat @0x53f780`, clamp `@0x4b854d` — witnessed + ported 2026-07-22 (net-re §5.62) |
 | +72 | horizontal **speed** | `300 * sqrt((entity+156>>8)² + (entity+152>>8)²) / 585` |
 | +364 | distance to target/cam | sqrt of delta, `→int` |
 | +368 | entity name string | `GameText_GetString("item", weapondef+1318)` else `"text_default"` |
@@ -784,7 +784,7 @@ behind it.
 | D-HUD-12 | label text metrics ride the `.fnt` fixed size through Godot layout (`hud_attach_labels.gd`) | `HUD_MeasureTextWH @0x580ab0` measures through the fontObj `{handle, scale_x, scale_y}` pair (`CGameFont_MeasureText @0x674e70`); labels draw at raw screen pixels | Same glyph source; exact per-glyph spacing is the standing CGameFont follow-up. Box arithmetic `(x−w/2,y−2)..(x+w/2+5,y+h+1)` is ported verbatim. |
 | D-HUD-13 | the label color base is the hudpos `hud_textcolor` | the master overlay color `alpha @0x24c1868` (`overlayCtx+0x448`; writer unwalked) | The dim transform `((rgb & 0xFEFEFE) \| 0xFE000001) >> 1` is ported exactly (`HudAttachLabels.dim`, `hud_helpers_test.gd`); swap the base once the overlay-color writer is witnessed. |
 | D-HUD-14 | no bottom prompts | `HUD_DrawGameplayOverlays @0x5bde60`: the preround armory prompt (`STROVER_ARMORY_INFO`, S2C-0x0A-fed `dword_A85B64`; SP never draws it), the vehicle-bay prompt (`Flags & 0x800` + team-gated groundEntity), the FARP wait/reload overlays (`attrib2 & 0x2000` + unlock mask) | Witnessed, deferred: each rides an unported system (MP preround state / vehicle.mnu / FARP rearm). The `STROVER_ARMORY_WAIT` leg is dead code in retail (the impossible `@0x5bdef8` recheck). |
-| D-HUD-15 | the heat-bar element is ported but our weapon FSM accumulates no heat — the info feed supplies 0 and the bar self-hides, matching the original's zero-heat behavior | heat = `WeaponSlot_CalcAccumulatedHeat @0x53f780` per frame (per-slot accumulators, unwalked) | The drawer is parity-complete; wire the source when the heat accumulator is witnessed (it drives emplacement/vehicle guns; infantry weapons author no heat). |
+| D-HUD-15 | **CLOSED 2026-07-22.** The drawer was already parity-complete; the missing half was the source. The accumulator is now witnessed and ported (D-WPN-4, net-re §5.62): heat is a DEADLINE on the slot, `def+880 × (slot+0x14 − tick)`, stamped once per shot by the recoil arbiter | heat = `WeaponSlot_CalcAccumulatedHeat @0x53f780` per frame, clamped to `0xFFFF` into `hudInfo+60` `[orig: HUD_BuildEntityInfo @0x4b852e, clamp @0x4b854d]` | Fed sim → weapon view → HUD with the clamp applied where the original's info builder applies it. The bar fills on the thirteen emplaced/vehicle guns that author `heat_values` and stays hidden on foot, because no infantry weapon authors heat in retail either. |
 | D-HUD-16 | the SP waypoint track is built sim-side at mission load from the BMS nav channel (`flags & 2`) + pool-3 markers — no 0x0F wire leg in the loop | retail always routes the list through the S2C 0x0F apply, even in SP mode 3 (the local server serializes, the local client applies) | Same data, same selection rule, no serialization round-trip. The npwire 0x0F waypoint block already decodes (net-re §5.29); wire-parity for MP join is the npwire follow-up, not a HUD divergence. |
 | D-HUD-17 | proximity advance ports the distance/last-entry/skip-done legs; `SpawnPoint_CheckWeaponRestrictions @0x4dbe80` (the AAS spawn-point weapon-restriction pass gate) is modeled as always-pass; the MP POI list (`Entity_BuildMapPoiLists @0x42de40`) and spectate reuse are unported | the restriction check reads the 4 weapon slots vs the event-system restriction mask and can force-advance | SP missions author no weapon restrictions on route markers; port the check with the AAS/MP HUD phase. |
 | D-HUD-18 | the objectives panel draws Godot rects/polylines for the checkbox + backing box, a full-alpha toggle, and skips the win-score add, the "New Objective" toast, and the header unknown5[2]/[3] team-banner legs; the toggle key is a host mapping (KEY_O) | checkbox/checkmark = ten `draw_clipped_2d_line` calls (operands elided by the decompiler), box = `HUD_DrawLabelBox @0x5baaba`, toggle alpha ramps the row color, score add `@0x454526`, toast `HUD_ShowObjectiveNotification`, banner masks `byte_A762D6/D7`, binding row = the input layer | The state machine, row walk, gray completed fold, chat/banner announcements are exact; the residuals are presentation polish + the unported input-binding/score/notification systems. |
@@ -827,10 +827,13 @@ behind it.
   witnessed; draws (`HUD_DrawWeaponSlotBar @0x599cd0` located) unwitnessed.
   (The ex-"reload bar" is the PowerThrow charge bar — witnessed + ported,
   world-wac-ai-re §27.3.)
-- **Weapon heat source** — the HUDHEAT drawer is witnessed + ported
-  (D-HUD-15); the per-slot heat accumulator
-  (`WeaponSlot_CalcAccumulatedHeat @0x53f780` write side) is the remaining
-  witness.
+- **Weapon heat source** — RESOLVED 2026-07-22. Both halves are now ported:
+  the HUDHEAT drawer (D-HUD-15) and the accumulator behind it
+  (`WeaponSlot_CalcAccumulatedHeat @0x53f780`, the `heat_values`/`heat_effect` def
+  keys, the per-shot deadline stamp, and the overheat deny) — witness in
+  `docs/net/novaworld-net-re.md` §5.62, divergences D-WPN-4/-28/-29. The one
+  unported leg is the overheat GLOW emitter (D-WPN-28), which is a muzzle-effect
+  seam rather than a HUD element.
 - **MP objective status + stance team tile** — witnessed
   (`draw_objective_status_text @0x59aa30`, `@0x59a0cb`); port with the MP HUD.
 - **Parachute/armor icons** — witnessed

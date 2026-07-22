@@ -179,6 +179,49 @@ const opennova::mission::ItemSeatSpec *item_seat_spec_for_type(
 
 constexpr char kEmplacedGunYawRegister[] = "EWEAP_GUNYAW";
 constexpr char kEmplacedGunPitchRegister[] = "EWEAP_GUNPITCH";
+constexpr char kHeatGlowRegister[] = "HEAT_GLOW";
+
+// CTRL registers that a dedicated engine system owns, so a generic PLAYPARTANIM
+// phase must never be placed on one.
+//
+// In retail these are two unrelated arrays on the AI comp: PLAYPARTANIM integrates
+// its two channels into comp[113]/comp[114] (direction comp[109/110] + rate
+// comp[111/112], clamped to [0, 0x10000]), while the named CTRL registers live at
+// comp+0x1D4 + 4*index and are written by their own systems — the emplaced turret
+// writes the yaw/pitch pair directly, and HEAT_GLOW is only ever driven by an ACTION
+// row carrying a `ctrlreg` key. Our PANM evaluation binds by NAME, so without this
+// rule the model-order walk below drops a part phase onto whichever register happens
+// to come first. B50Cal is exactly that case: its CTRL list is
+// [HEAT_GLOW, EWEAP_GUNYAW, EWEAP_GUNPITCH], so all three are owned and it takes no
+// generic phase at all.
+//
+// Deliberately only the three names witnessed as non-PLAYPARTANIM. Other entries in
+// the global 32-byte table (LOD_*, HELO_*, VEHICLE_*, PARTICLE_*) are very likely
+// engine-owned too, but their writers are unwalked and guessing would be inventing.
+// [orig: PLAYPARTANIM case 34 @ 0x43b192 (slot = ANIMNUM-1, direction @ comp+0x1B4,
+//  rate @ comp+0x1BC); the integrator @ 0x456710; the CTRL name table @ 0x83dce8
+//  (HEAT_GLOW ordinal 54); the turret writer @ 0x441007/@ 0x44101a; the only CTRL
+//  animator ActionSlot_ExecuteAction @ 0x4020cc -> CtrlRegAnimSlot_Allocate
+//  @ 0x401ca0 -> CtrlRegAnimSlot_UpdateAll @ 0x401bf0]
+bool ctrl_register_is_engine_owned(const String &p_name) {
+	return p_name.nocasecmp_to(kEmplacedGunYawRegister) == 0 ||
+			p_name.nocasecmp_to(kEmplacedGunPitchRegister) == 0 ||
+			p_name.nocasecmp_to(kHeatGlowRegister) == 0;
+}
+
+// Place the two generic PLAYPARTANIM phases onto the model's CTRL registers in model
+// order, skipping engine-owned names. `p_phase_for` yields the phase for channel i.
+template <typename PhaseFn>
+void assign_part_anim_phases(const ThreediModelIR &p_ir, Dictionary &r_controls,
+		PhaseFn p_phase_for) {
+	int channel = 0;
+	for (size_t slot = 0; slot < p_ir.control_register_count && channel < 2; ++slot) {
+		const String name = String::utf8(p_ir.control_registers[slot].name);
+		if (name.is_empty() || ctrl_register_is_engine_owned(name)) continue;
+		r_controls[name] = p_phase_for(channel);
+		++channel;
+	}
+}
 
 struct EmplacedWeaponControls {
 	bool valid = false;
@@ -1546,16 +1589,12 @@ bool NovaSimulation::resolve_mounted_pose(
 	if (ir.control_register_count > 0 && ir.control_registers == nullptr)
 		return false;
 	AiEntity *carrier_ai = ai_ ? ai_->for_handle(p_carrier.handle) : nullptr;
-	for (size_t slot = 0; slot < 2 && slot < ir.control_register_count;
-			++slot) {
-		const int phase = carrier_ai != nullptr
+	assign_part_anim_phases(ir, controls, [carrier_ai](int p_channel) {
+		return carrier_ai != nullptr
 				? std::clamp(carrier_ai->brain.f[
-						AiBrain::kPartAnimPhase0 + static_cast<int>(slot)],
-						0, 65535)
+						AiBrain::kPartAnimPhase0 + p_channel], 0, 65535)
 				: 0;
-		const String name = String::utf8(ir.control_registers[slot].name);
-		if (!name.is_empty()) controls[name] = phase;
-	}
+	});
 	EmplacedWeaponControls emplaced;
 	if (emplaced_weapon_controls_for(
 			p_world, ai_.get(), p_carrier, emplaced)) {
@@ -1796,17 +1835,16 @@ bool NovaSimulation::build_section_matrices(opennova::world::World &p_world,
 	// static still evaluates free-running PANM with the zero control table.
 	Dictionary controls;
 	AiEntity *ai_entity = ai_ ? ai_->for_handle(p_entity) : nullptr;
-	for (size_t slot = 0; slot < 2 && slot < ir.control_register_count; ++slot) {
-		const int phase = ai_entity != nullptr
-				? std::clamp(ai_entity->brain.f[AiBrain::kPartAnimPhase0 +
-						static_cast<int>(slot)], 0, 65535)
+	assign_part_anim_phases(ir, controls, [ai_entity](int p_channel) {
+		return ai_entity != nullptr
+				? std::clamp(ai_entity->brain.f[
+						AiBrain::kPartAnimPhase0 + p_channel], 0, 65535)
 				: 0;
-		const String name = String::utf8(ir.control_registers[slot].name);
-		if (!name.is_empty()) controls[name] = phase;
-	}
-	// EWEAP yaw/pitch are semantic CTRL names, not PLAYPARTANIM ordinals.
-	// B50Cal's register order is HEAT_GLOW, yaw, pitch, so aliasing channel
-	// 1/2 would drive the wrong registers and can never reach pitch.
+	});
+	// EWEAP yaw/pitch are semantic CTRL names, not PLAYPARTANIM ordinals — two
+	// separate arrays in retail, see ctrl_register_is_engine_owned. The generic
+	// walk above skips them (and HEAT_GLOW), so B50Cal takes no part phase and
+	// this pair is the only thing that drives it.
 	EmplacedWeaponControls emplaced;
 	if (entity != nullptr &&
 			emplaced_weapon_controls_for(p_world, ai_.get(), *entity, emplaced)) {
@@ -5125,6 +5163,11 @@ void NovaSimulation::install_local_player_weapon(const Dictionary &p_def,
 	weapon_def_.burst3 = (flags & 0x20) != 0;     // [orig: WeaponAction_Fire @ 0x542c8a]
 	weapon_def_.flags = flags;                    // raw mask: the scope gate + fov policy read it
 	weapon_def_.flags2 = int(p_def.get("flags2", 0)); // Inset (0x200) picks the 7-step ease
+	// The heat model [orig: WeaponDef +0x36C/+0x370/+0x374]. Absent keys leave 0,
+	// which disables the model exactly as the original's zero-init does.
+	weapon_def_.heat_per_shot = int(int64_t(p_def.get("heat_per_shot", 0)));
+	weapon_def_.heat_decay_per_tick = int(int64_t(p_def.get("heat_decay_per_tick", 0)));
+	weapon_def_.heat_glow_threshold = int(int64_t(p_def.get("heat_glow_threshold", 0)));
 	weapon_scope_max_mag_ = float(double(p_def.get("scope_max_mag", 0.0)));
 	// The 3P body-channel kinds [orig: weapon.def special_hold/attack_anim -> the
 	// AdmDefs record +0xA4/+0xA8; world-wac-ai-re.md §14.8.4].
@@ -5574,6 +5617,11 @@ void NovaSimulation::tick_local_player_weapon() {
 	in.scope_active = player_view_.scope_engaged &&
 			!opennova::world::player_view_scope_ease_active(player_view_);
 	in.instant_emplaced_switch = local_usegun_switch_is_instant();
+	// The heat window is a deadline against the logic tick, not a stored level.
+	// `submerged` stays false: the sim has no per-entity water test at the weapon
+	// site yet, and above water is what the runtime actually plays (D-WPN-29).
+	// [orig: current_tick @ 0x24C1968; the water gate @ 0x54101c]
+	in.current_tick = static_cast<int32_t>(world_->logic_tick);
 	if (!accept_weapon_input) active_slot.refire_queued = false;
 	opennova::world::WeaponFsmEvents ev;
 	opennova::world::weapon_fsm_tick(
@@ -5909,6 +5957,19 @@ Dictionary NovaSimulation::get_local_player_weapon_state() const {
 	out["clip"] = active_slot.clip;
 	out["reserve"] = active_slot.reserve;
 	out["kick"] = static_cast<int>(active_slot.kick);
+	// Weapon heat, clamped where the original's info builder clamps it — the drawer
+	// downstream reads a plain 0..0xFFFF level and self-hides at 0.
+	// [orig: HUD_BuildEntityInfo @ 0x4b852e -> hudInfo+60, the clamp @ 0x4b854d]
+	{
+		const int32_t heat = world_ != nullptr
+				? opennova::world::weapon_slot_accumulated_heat(
+						  weapon_def_, active_slot,
+						  static_cast<int32_t>(world_->logic_tick))
+				: 0;
+		out["heat"] = heat > opennova::world::weapon_heat::kFull
+				? opennova::world::weapon_heat::kFull
+				: heat;
+	}
 	out["borrowed_usegun_slot"] = local_usegun_slot_active_;
 	out["emplaced_controls_valid"] = false;
 	out["emplaced_gun_yaw"] = 0;
