@@ -649,11 +649,26 @@ ONED therefore exposes ANIMNUM as a plain "Part #" raw int (the speculative name
   def+764..784 → comp+436..456) — objects can ship an idle part-anim (radar-dish spin).
 - It never calls AnimMap: the part system (turret yaw / barrel pitch / dish) is DISTINCT from the
   infantry full-body ADM/BAD system.
-- Port contract (`NovaObjectModel.play_part_anim(channel, play_type, time_s)`): channel ∈ {1,2} → PANM
-  control register index `slot`; value 0..65535 = the 16.16 phase; speed = 65535/time_s per second
-  (delta-based); velocity from CURRENT value; **endpoint = clamp [0,65535]** (one-shot; continuous-spin
-  wrap is the def-default idle case, flagged as a possible per-part refinement — the consumer's
-  clamp-vs-wrap was not captured).
+- **The integrator, and the CTRL separation (witnessed 2026-07-22).** The per-tick integrator is
+  `Entity_UpdateSuspensionBounce @ 0x456710` — an IDA misnomer for its first half. Per channel it reads
+  the direction `comp[109]/comp[110]` and the rate `comp[111]/comp[112]` and accumulates into
+  `comp[113]/comp[114]`, clamping to **[0, 0x10000]** and zeroing the direction on arrival (so a finished
+  sweep parks itself). That confirms the endpoint clamp and the velocity-from-current model above.
+  **The phases are their own pair, NOT the named CTRL registers**: the named registers live at
+  `comp+0x1D4 + 4*index` (their target bank at `comp+0x1EC + 4*index`) and are written by other systems
+  entirely — the emplaced turret writes the yaw/pitch pair straight in
+  `[orig: @0x441007/@0x44101a]`, and the ONLY generic CTRL animator is an ACTION row carrying a
+  `ctrlreg <NAME>` key `[orig: ActionSlot_ExecuteAction @0x4020cc -> CtrlRegAnimSlot_Allocate @0x401ca0
+  -> CtrlRegAnimSlot_UpdateAll @0x401bf0]`. So PLAYPARTANIM never touches a named CTRL register.
+- Port contract (`NovaObjectModel.play_part_anim(channel, play_type, time_s)`): channel ∈ {1,2} → part
+  channel `slot` = channel − 1 `[orig: @0x43b198]`; value 0..65535 = the 16.16 phase; speed =
+  65535/time_s per second (delta-based); velocity from CURRENT value; **endpoint = clamp [0,65535]**
+  (one-shot; continuous-spin wrap is the def-default idle case, flagged as a possible per-part
+  refinement — the consumer's clamp-vs-wrap was not captured). **Correction 2026-07-22:** this line
+  previously read "→ PANM control register index `slot`". Our renderer binds parts by CTRL NAME, so the
+  sim used to place the two phases on the model's first two registers in model order — which on B50Cal
+  dropped a phase onto `HEAT_GLOW`. Retail has no such mapping (see the integrator note above); the
+  bridge now skips engine-owned register names (D-WPN-31).
 
 ### 8.5 bmsi attribute flags (checkbox dialog)
 Flag label table @ 0x5b1c84 (dfx2med): REFLECTIVE, INDESTRUCTABLE, GUARDING, BLIND, **DEAF**,
@@ -4568,6 +4583,17 @@ target. NetClientView reconstructs the mounted NPC's live Pitch once per decoded
 frame with retail's wrapped one-eighth chase before deriving the semantic phase.
 
 Those same EWEAP controls also pose the parent PANM consumed by the mounted carry.
+
+**HEAT_GLOW (witnessed 2026-07-22).** B50Cal's leading CTRL entry is not a loose end: `HEAT_GLOW` is
+ordinal **54** in the same global 32-byte name table (`aLodFrac @ 0x83dce8`, resolved by
+`CtrlName_ToOrdinal @ 0x57b290`, stored per model CtrlReg at `+24` by the loader `@ 0x5b4640`), directly
+ahead of `EWEAP_GUNYAW` (55) and `EWEAP_GUNPITCH` (56). The checked-in `B50Cal.3di` CTRL chunk carries
+exactly those three, in that order. **Nothing in retail writes it.** The engine's only path to a CTRL
+register is an ACTION row's `ctrlreg <NAME>` key, and **no shipped weapon.def authors `ctrlreg`** (0
+occurrences across the JOX corpus), so the weapon heat level never reaches a control register — the
+overheat visual is the particle emitter alone (§5.62 of the net record, D-WPN-28). Treat `HEAT_GLOW` as
+an authored-but-undriven register, in the same class as the dead compass strip and the unwritten
+`entity+0x37C` pitch tier: reproducing nothing is the faithful behavior.
 After yaw/pitch update the port transforms the authored UseGun point through its owning
 live part and feeds that world position to the occupant root, matching
 `Entity_AttachToBoneAndUpdateTransform @ 0x5463d0` and its player/AI callers at

@@ -6940,20 +6940,33 @@ Ported as `DefWeaponDef::heat_*` + `WeaponFsmDef::heat_*`/`WeaponSlotState::
 heat_window_end_tick`/`weapon_slot_accumulated_heat` + the `NovaSimulation` weapon-view
 feed. The submerged term has no live source yet (D-WPN-29).
 
-**What the glow half still needs (D-WPN-28).** The level is ported; nothing consumes it
-visually yet, and there are TWO consumers, not one:
+**What the glow half still needs (D-WPN-28).** The level is ported. There are TWO candidate
+consumers, and only one of them is real:
 
-1. The **particle emitter** — the `@ 0x54109e..0x54122c` leg above, a host effect seam.
-2. The **`HEAT_GLOW` model CTRL register** — a semantic name in the global 32-byte CTRL
-   table (base `LOD_FRAC @ 0x83dce8`, the same table that carries `EWEAP_GUNYAW`
-   @ 0x83e3c8 / `EWEAP_GUNPITCH` @ 0x83e3e8) and B50Cal's CTRL[0] (§26.5a of
-   world-wac-ai-re). **Its retail writer is unwitnessed** — do not assume it takes the
-   same normalized `(heat − threshold)/(0xFFFF − threshold)` fraction the emitter
-   descriptor gets; witness it first. Note our PANM bridge currently writes the first
-   two MODEL-ORDER registers from the generic `kPartAnimPhase0/1` brain channels, so on
-   B50Cal `HEAT_GLOW` is already receiving PLAYPARTANIM phase 0 — the same
-   generic-channel-into-a-semantic-register mistake D-WPN-27 corrected for yaw/pitch.
-   It is inert today only because that phase reads 0.
+1. The **particle emitter** — the `@ 0x54109e..0x54122c` leg above. This is the actual
+   overheat visual (shipped data authors `FX_OVERHEAT1` on the emplaced .50s, miniguns,
+   DShK and turrets) and it is a host effect seam, still unported.
+2. The **`HEAT_GLOW` CTRL register** — **witnessed 2026-07-22 and dead in shipped JO.**
+   It is ordinal 54 in the global 32-byte CTRL name table (`aLodFrac @ 0x83dce8`;
+   resolver `CtrlName_ToOrdinal @ 0x57b290`; the per-model CtrlReg loader stores the
+   ordinal at `+24` `[orig: @ 0x5b4640]`), and `B50Cal.3di` carries exactly
+   `[HEAT_GLOW, EWEAP_GUNYAW, EWEAP_GUNPITCH]`. The engine has exactly ONE path that
+   drives a CTRL register: an ACTION row carrying a `ctrlreg <NAME>` key, parsed to
+   `ActionDef+28` `[orig: ActionDef_ParseScriptLine @ 0x4027fa]` and executed as a
+   ramping anim slot `[orig: ActionSlot_ExecuteAction @ 0x4020cc ->
+   CtrlRegAnimSlot_Allocate @ 0x401ca0 -> CtrlRegAnimSlot_UpdateAll @ 0x401bf0`, which
+   writes the global `dword_83FCE8[2*ordinal]` and bounces at 0/0xFFFF]`. **No shipped
+   weapon.def authors `ctrlreg` at all** — zero occurrences across the JOX corpus. So
+   retail never writes HEAT_GLOW, the heat level never reaches a control register, and
+   porting a HEAT_GLOW write would be inventing behavior, not restoring it.
+
+A related find while walking this: `ActionSlot_ExecuteAction @ 0x4020a0` (the DEFAULT
+action handler) carries its own copy of the heat-window stamp, gated on
+`MountSlot+0x2C == RECOIL(3)` `[orig: @ 0x402242..0x402299]`, byte-identical to the one
+in `WeaponAction_Recoil`. It only runs for a recoil row that does NOT name
+`wpn_std_recoil`, which no shipped row does (D-WPN-1), so there is no double stamp in
+practice and the port's single stamp in the recoil handler is correct for all shipped
+data.
 
 **Open follow-ups:** who queues OVERHEATED(11) as an ACTION (its ROW is consumed as
 glow data by the heat window leg above — whether anything transitions TO state 11
