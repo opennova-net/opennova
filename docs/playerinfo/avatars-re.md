@@ -260,12 +260,16 @@ composed model (idle spin + hover sway, seeded with the original's random initia
 `(rand()%180)·0xB60B60`) while the camera only zooms (`_process`, `set_hovered`). The **skeletal
 idle**: it builds one shared `NovaSkeletalAnim` from the raw `Dt1rst.bad` (rest/skeleton) +
 `PI_Idle.BAD` (looping idle clip) via `NovaSkeletalAnim.load_from_bad_files` — the no-`.adm`
-raw-`.bad` path that mirrors the original's two `BoneFile_Load` calls — and binds it onto every
-skinned part (`set_skeletal_anim` + `play_body_clip("anim_idle")`). The avatars.def head/body/arms
-part `.3di` are vertex-skinned to the 19-bone `Dt1rst` skeleton (confirmed via
-`NovaObjectData.is_skinned`), so the composed soldier deforms through the idle as the original
-does. The `.bad` assets resolve from the retail PFFs; when absent (a loose mount lacking them) the
-parts render static at rest. (`HwmCube.dds` reflection map: not yet applied — minor.)
+raw-`.bad` path that mirrors the original's two `BoneFile_Load` calls — and binds it onto the
+composed skinned head/body parts (`set_skeletal_anim` + `play_body_clip("anim_idle")`). Retail IR
+confirms those third-person graphics use weighted bone references within the 19-bone `Dt1rst`
+domain. The combo arms graphics are different: all four retail variants are 38/40-part models
+with weighted references through bone 36, and the current first-person runtime pairs `ArmsG`
+with the active weapon's larger model table and ADM. `AvatarPreview` therefore keeps arms out of
+the standing composition instead of binding them to `Dt1rst`. This asset/runtime evidence does
+not close the still-unwitnessed combo → spawned-player consumer in D-PLAYERINFO-1. The `.bad`
+assets resolve from the retail PFFs; when absent (a loose mount lacking them) the composed parts
+render static at rest. (`HwmCube.dds` reflection map: not yet applied — minor.)
 
 ## Screen orchestration — witness map (grilled 2026-06-23)
 
@@ -419,7 +423,7 @@ stable.
 
 | ID | Original (Jointops.exe) | Why / consequence for the port |
 | --- | --- | --- |
-| D-PLAYERINFO-1 | combo → spawned-player 3D model binding not traced | **partially open**. The **preview** is witnessed + ported in full: the transform animation (`update_player_preview_animation @ 0x55dba0`) AND the skeletal idle (`PlayerInfo_InitPreviewModel @ 0x5600d0` binds `Dt1rst.bad` rest + `PI_Idle.BAD` idle on a `BoneSystem_Init` skeleton) — `AvatarPreview` plays `PI_Idle.BAD` on the 19-bone `Dt1rst` skeleton across the vertex-skinned combo parts (see "Preview animation" above). Still open: the **in-world** (spawned-player) combo→model binding — how a selected combo drives the in-mission avatar — which remains untraced. |
+| D-PLAYERINFO-1 | combo → spawned-player 3D model binding not traced | **partially open**. The preview's **animation path** is witnessed and ported: the transform animation (`update_player_preview_animation @ 0x55dba0`) and skeletal idle (`PlayerInfo_InitPreviewModel @ 0x5600d0` binds `Dt1rst.bad` rest + `PI_Idle.BAD` idle on a `BoneSystem_Init` skeleton) — `AvatarPreview` plays `PI_Idle.BAD` on the compatible 19-bone head/body composition (see "Preview animation" above). Excluding arms is a geometry policy supported by retail asset structure and current-runtime evidence: the 38/40-part arm graphics require a larger rig. Still open: the **in-world** (spawned-player) combo→model binding — how a selected combo drives the in-mission avatar — which remains untraced. |
 | D-PLAYERINFO-2 | `>= 512` parts → `MessageBoxA("ComboObj Parse Error")` + abort | **FIXED 2026-07-05 (verified enforced)**: the parser errors at the cap (`avatars.cpp` guard `[orig: CAvatarDefs_ParseConfigLine @ 0x57a456]`), `NovaAvatarDatabase` propagates, and `avatars_parse_test.cpp` pins the 512-part failure. |
 | D-PLAYERINFO-3 | `graphic` and `graphic_d` write the **same** part field (+76) | `graphic_d` aliases/overwrites `graphic`; only `graphic_j` (+92) and `graphic_s` (+108) are distinct slots. A faithful parser stores both keywords into one field (last wins). |
 | D-PLAYERINFO-4 | combo retains only denormalized part data, not the part names/indices | the runtime struct cannot reproduce the `combo <id> <head> <body> <arms>` line. The reimpl's authoring model must *additionally* keep the three reference names to round-trip the writer — a superset; runtime behavior is unchanged. |

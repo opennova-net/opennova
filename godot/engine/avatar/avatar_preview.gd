@@ -1,14 +1,15 @@
 class_name AvatarPreview
 extends Control
 
-# 3D preview for an Avatars.def character combo: composes the resolved head /
-# body / arms part .3di models into one scene under a shared environment, framed
-# by a fly camera with the editor grid + axis gizmo. Forked from
+# 3D preview for an Avatars.def character combo: composes the resolved third-person
+# head + body .3di models into one scene under a shared environment, framed as a
+# standing character by a fly camera with the editor grid + axis gizmo. Retail combo
+# arms graphics use a larger rig than this preview skeleton and must never be overlaid.
+# Forked from
 # object_preview.gd — it reuses the same SubViewport scaffold, guide gizmos, and
-# bounds framing, and the arms-overlay idea (a sibling NovaObjectModel sharing one
-# NovaSkeletalAnim) generalized to three part slots.
+# bounds framing.
 #
-# Each combo's skinned parts share one skeletal idle (Dt1rst.bad rest + PI_Idle.BAD clip),
+# Each composed third-person part shares one skeletal idle (Dt1rst.bad rest + PI_Idle.BAD clip),
 # matching the original PLAYER_INFO preview [orig: PlayerInfo_InitPreviewModel @ 0x5600d0].
 # When those .bad assets aren't resolvable (e.g. a loose ONED mount that lacks them) the parts
 # render static at rest — a valid degraded state. The remaining unwitnessed piece of
@@ -18,8 +19,12 @@ const FlyCameraScript = preload("res://engine/fly_camera.gd")
 const NovaObjectModelScript = preload("res://engine/object/nova_object_model.gd")
 const NovaEnvironmentScript = preload("res://engine/environment/nova_environment.gd")
 
-# Part slot keys, matching resolve_combo()'s head/body/arms sub-dictionaries.
-const SLOTS := ["head", "body", "arms"]
+# The standing character uses only the compatible third-person slots. `resolve_combo()`
+# also returns `arms`, but retail arm graphics reference bones outside this preview rig.
+const THIRD_PERSON_SLOTS := ["head", "body"]
+# The old 1.5x object-preview distance cropped head and feet once the malformed
+# first-person arms stopped inflating the bounds. Leave a full-character margin.
+const EDITOR_DISTANCE_SCALE := 2.7
 
 # Menu-preview tuning (set_menu_preview): a front portrait of a standing soldier for
 # the player.mnu PLAYER_PREVIEW pane. Camera yaw 0 puts the orbit camera on +Z and the
@@ -236,14 +241,14 @@ func _build_viewport() -> void:
 
 # --- Combo composition --------------------------------------------------------
 
-# Compose the resolved combo's head/body/arms parts into the scene. `combo` is a
+# Compose the resolved combo's third-person head/body parts into the scene. `combo` is a
 # resolve_combo() Dictionary: each present slot carries a part sub-Dictionary with
 # a `graphic` basename. A missing/unknown graphic simply skips that slot (no error).
 # Re-frames the camera on the composed bounds.
 func load_combo(combo: Dictionary) -> void:
 	clear()
 	_missing_parts = PackedStringArray()
-	for slot in _active_slots():
+	for slot in THIRD_PERSON_SLOTS:
 		var part: Variant = combo.get(slot, null)
 		if part == null or not (part is Dictionary):
 			continue
@@ -258,16 +263,6 @@ func load_combo(combo: Dictionary) -> void:
 			apply_camo(Vector3(float(camo[0]), float(camo[1]), float(camo[2])) / 255.0)
 	_refresh_status_label()
 	_refresh_preview_guides()
-
-
-# Slots to compose for the current mode. The menu portrait shows the standing
-# character (head + body) only; the `arms` part is the first-person arms model and
-# reads wrong overlaid on the full figure, so it is dropped there. The ONED Avatars
-# workspace keeps all three for inspection.
-func _active_slots() -> Array:
-	if _menu_preview:
-		return ["head", "body"]
-	return SLOTS
 
 
 # Build the shared skeletal idle once from the two raw .bad files the original binds
@@ -533,7 +528,8 @@ func _frame_bounds(bounds: AABB) -> void:
 	_camera.set("zoom_speed", clampf(radius * 0.18, 0.05, 20.0))
 	_camera.set("pan_sensitivity", clampf(radius * 0.01, 0.01, 1.0))
 	if not _has_framed:
-		_camera.call("frame_bounds_custom", center, radius, 1.5, maxf(radius * 8.0, 6.0), 2.8, -0.18)
+		_camera.call("frame_bounds_custom", center, radius, EDITOR_DISTANCE_SCALE,
+				maxf(radius * 8.0, 6.0), 2.8, -0.18)
 		_has_framed = true
 
 

@@ -54,6 +54,70 @@ func test_load_combo_composes_parts_when_root_mounted() -> void:
 		assert_eq(_preview.get_part_model_count(), 0, "no parts compose when the graphics are absent")
 
 
+func _model_fixture_root():
+	var root := NovaResourceRoot.new()
+	var dir := ProjectSettings.globalize_path("res://../fixtures/threedi/3di3")
+	return root if root.set_root_dir(dir) == OK else null
+
+
+func _three_slot_fixture_combo() -> Dictionary:
+	var part := {"graphic": "CharModel.3di"}
+	return {"head": part, "body": part, "arms": part}
+
+
+func test_combo_preview_excludes_incompatible_arm_rig() -> void:
+	# Retail combo arm graphics reference bones outside the 19-bone standing preview
+	# rig and must not be overlaid on the third-person head + body. Drive load_combo
+	# with a committed graphic in every slot so this policy regression is deterministic
+	# and asset-independent.
+	var root = _model_fixture_root()
+	assert_not_null(root, "committed model fixture mounts")
+	if root == null:
+		return
+	_preview.set_resource_root(root)
+	_preview.load_combo(_three_slot_fixture_combo())
+	var head = _preview.get_part_model("head")
+	var body = _preview.get_part_model("body")
+	var arms = _preview.get_part_model("arms")
+	var has_head := is_instance_valid(head)
+	var has_body := is_instance_valid(body)
+	var has_arms := is_instance_valid(arms)
+	var count: int = int(_preview.get_part_model_count())
+	_preview.clear()
+	await get_tree().process_frame
+	assert_true(has_head, "the third-person head composes")
+	assert_true(has_body, "the third-person body composes")
+	assert_false(has_arms, "the incompatible arms slot is excluded")
+	assert_eq(count, 2, "only the third-person character parts compose")
+
+
+func test_retail_combo_preview_excludes_incompatible_arm_rig() -> void:
+	# Exact regression for the screenshot path. Before the fix, ArmsG.3di was
+	# forced onto the 19-bone portrait rig despite positive weights referencing up
+	# to bone 36, producing the duplicate limbs and frame-spanning triangles.
+	var root = _retail_root()
+	if root == null:
+		pending("OPENNOVA_JO_DIR / retail PFFs not configured")
+		return
+	var combo := _resolved_combo()
+	if combo.is_empty():
+		pending("Avatars.def fixture missing or has no combos")
+		return
+	_preview.set_resource_root(root)
+	_preview.load_combo(combo)
+	var head = _preview.get_part_model("head")
+	var body = _preview.get_part_model("body")
+	var arms = _preview.get_part_model("arms")
+	var has_head := is_instance_valid(head)
+	var has_body := is_instance_valid(body)
+	var has_arms := is_instance_valid(arms)
+	_preview.clear()
+	await get_tree().process_frame
+	assert_true(has_head, "the retail third-person head composes")
+	assert_true(has_body, "the retail third-person body composes")
+	assert_false(has_arms, "the retail incompatible arms model is not overlaid")
+
+
 # True when the combo's head part graphic exists in the mounted root, so part
 # composition is expected.
 func _head_graphic_resolves(root, combo: Dictionary) -> bool:
@@ -89,12 +153,30 @@ func _soldier_bounds() -> AABB:
 	return AABB(Vector3(-0.4, 0.0, -0.4), Vector3(0.8, 1.8, 0.8))
 
 
-func test_menu_preview_drops_the_arms_slot() -> void:
-	# The portrait shows head + body only; arms is the FP arms model and reads wrong
-	# overlaid on the standing figure. The editor keeps all three for inspection.
-	assert_eq(_preview._active_slots(), ["head", "body", "arms"], "editor composes all slots")
+func test_editor_preview_uses_full_character_distance_margin() -> void:
+	var bounds := _soldier_bounds()
+	_preview._has_framed = false
+	_preview._frame_bounds(bounds)
+	var radius := maxf(bounds.size.length() * 0.5, 1.0)
+	var distance: float = (_preview.get_editor_camera().global_position - bounds.get_center()).length()
+	assert_gte(distance, radius * 2.5,
+			"editor framing preserves the full-character distance margin")
+
+
+func test_menu_preview_keeps_incompatible_arm_rig_excluded() -> void:
+	var root = _model_fixture_root()
+	assert_not_null(root, "committed model fixture mounts")
+	if root == null:
+		return
 	_preview.set_menu_preview(true)
-	assert_eq(_preview._active_slots(), ["head", "body"], "menu portrait drops arms")
+	_preview.set_resource_root(root)
+	_preview.load_combo(_three_slot_fixture_combo())
+	var has_arms := is_instance_valid(_preview.get_part_model("arms"))
+	var count: int = int(_preview.get_part_model_count())
+	_preview.clear()
+	await get_tree().process_frame
+	assert_false(has_arms, "the menu does not overlay the incompatible arms rig")
+	assert_eq(count, 2, "the menu composes only the third-person character")
 
 
 func test_menu_preview_hides_grid_and_axes() -> void:
