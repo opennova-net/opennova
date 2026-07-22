@@ -563,6 +563,10 @@ private:
 	// dispatches via its own items.def serialize callback [orig: itemDef+356 @0x50f2e2].
 	// Shared into the view's classifier lambda; survives per-load runtime rebuilds.
 	std::shared_ptr<const std::unordered_map<uint16_t, opennova::EntityClass>> item_class_table_;
+	// Mission-scoped source for the authoritative half of the same contract.
+	// World::restore rewinds registry entities to the pre-trait promotion baseline,
+	// so restart reapplies this database before rebuilding the decoded client view.
+	Ref<NovaItemDatabase> item_traits_db_;
 	// Install item_class_table_ on runtime_'s view (no-op until both exist). Called from
 	// resolve_item_traits, finish_load (per-load runtime rebuild), and enable_join.
 	void install_item_class_resolver();

@@ -195,14 +195,15 @@ struct IMountedPoseProvider {
 
 // Host-facing lifecycle for effects that exist only while a vehicle has its single
 // tracked primary occupant (the +368 claimant). Payload fields are the target vehicle's
-// net_id, bms_id, spawn_origin.
+// net_id, bms_id, spawn_origin, and packed runtime wire handle.
 // [orig: occupied spawn in entity_update_damage_accumulator_and_shadow @0x48fa70 gate
 // @0x48faad (attrib&0x40 && occupantEntity(+368)); release in Entity_DetachFromVehicle
 // @0x4355f0 stop leg @0x4356e9..0x435759 — runs ONLY when the detacher IS the claimant.]
 void emit_vehicle_control_started(World &world, const Entity &vehicle);
 void emit_vehicle_control_stopped(World &world, const Entity &vehicle);
 void emit_vehicle_control_stopped(World &world, uint16_t target_net_id,
-                                   int32_t target_bms_id, uint32_t target_spawn_origin);
+                                   int32_t target_bms_id, uint32_t target_spawn_origin,
+                                   uint16_t target_wire_handle);
 // The +368 primary-occupant claim: Controller/Driver seats claim when the slot is empty
 // or already theirs; a Gunner claims only when empty (the emplaced-gun UseGun leg);
 // Passengers never claim. Emits vehicle_control_started on the empty -> claimed edge.

@@ -2,6 +2,7 @@
 // AI system, then the AI is ticked to prove the brains/nav are wired to the real mission
 // data (entities patrol their authored routes). See libs/mission/src/promote.cpp.
 #include <cstdio>
+#include <memory>
 
 #include "mission/promote.h"
 #include "world/ai.h"
@@ -43,6 +44,195 @@ static bms::Entity item(int32_t type_id, int32_t x, int32_t y, int32_t z) {
     e.type_id = type_id;
     e.x = x; e.y = y; e.z = z;
     return e;
+}
+
+#if defined(_MSC_VER)
+__declspec(noinline)
+#elif defined(__GNUC__)
+__attribute__((noinline))
+#endif
+static void test_emplacement_attachments() {
+    bms::File cm{};
+    cm.items.push_back(item(/*type_id=*/164, 10 << 16, 20 << 16, 3 << 16));
+    cm.items[0].id = 11;
+
+    mission::PromoteOptions co{};
+    mission::ItemSeatSpec carrier{};
+    carrier.type_id = 164;
+    mission::ItemEmplacementAttachmentSpec plain{};
+    plain.child_type_id = 166;
+    plain.kind = mission::EmplacementAttachmentKind::Standard;
+    plain.stored_slot = 1;
+    plain.anchor.type = SeatType::Gunner;
+    plain.anchor.bone_index = 4;
+    plain.anchor.seat_local = {2.f, 0.f, 1.f};
+    plain.anchor_found = true;
+    carrier.emplacement_attachments.push_back(plain);
+    mission::ItemEmplacementAttachmentSpec gun{};
+    gun.child_type_id = 183;
+    gun.kind = mission::EmplacementAttachmentKind::G;
+    gun.stored_slot = 2;
+    gun.attachment_flags = 2;
+    gun.anchor.type = SeatType::Gunner;
+    gun.angle_count = 4;
+    gun.down_limit_bam = 70 * 11930464;
+    carrier.emplacement_attachments.push_back(gun);
+    mission::ItemEmplacementAttachmentSpec crosshair{};
+    crosshair.child_type_id = 182;
+    crosshair.kind = mission::EmplacementAttachmentKind::C;
+    crosshair.stored_slot = 3;
+    crosshair.attachment_flags = 1;
+    crosshair.anchor.type = SeatType::Gunner;
+    carrier.emplacement_attachments.push_back(crosshair);
+    co.item_seat_specs.push_back(carrier);
+
+    mission::ItemSeatSpec gun_item{};
+    gun_item.type_id = 183;
+    Seat usegun{};
+    usegun.type = SeatType::Gunner;
+    gun_item.seats.push_back(usegun);
+    gun_item.primary_weapon = "WPN_HELOGUN";
+    co.item_seat_specs.push_back(gun_item);
+
+    auto cw = std::make_unique<World>();
+    auto cai = std::make_unique<AiSystem>();
+    const mission::PromoteResult cr =
+            mission::promote_mission(cm, *cw, *cai, co);
+    CHECK(cr.spawned == 4);
+    CHECK(cw->registry.live_count() == 4);
+    const EntityHandle parent_h = cw->registry.find_by_net_id(11);
+    EntityHandle plain_h{}, gun_h{}, crosshair_h{};
+    cw->registry.for_each([&](const Entity &e) {
+        if (e.item_id == 166) plain_h = e.handle;
+        if (e.item_id == 183) gun_h = e.handle;
+        if (e.item_id == 182) crosshair_h = e.handle;
+    });
+    Entity *parent = cw->registry.get(parent_h);
+    Entity *plain_child = cw->registry.get(plain_h);
+    Entity *gun_child = cw->registry.get(gun_h);
+    Entity *crosshair_child = cw->registry.get(crosshair_h);
+    CHECK(parent != nullptr && plain_child != nullptr);
+    CHECK(gun_child != nullptr && crosshair_child != nullptr);
+    if (parent == nullptr || plain_child == nullptr ||
+        gun_child == nullptr || crosshair_child == nullptr)
+        return;
+    CHECK(plain_child->emplacement_parent == parent_h);
+    CHECK(plain_child->emplacement_kind == 0);
+    CHECK(gun_child->emplacement_kind == 1);
+    CHECK(gun_child->emplacement_attachment_flags == 2);
+    CHECK(gun_child->emplacement_angle_count == 4);
+    CHECK(gun_child->emplacement_down_limit_bam == 70 * 11930464);
+    CHECK(gun_child->seats.size() == 1);
+    CHECK(gun_child->primary_weapon == "WPN_HELOGUN");
+    CHECK(crosshair_child->emplacement_kind == 2);
+    CHECK(crosshair_child->emplacement_attachment_flags == 1);
+    CHECK(plain_child->position.x == 12.f && plain_child->position.y == 20.f &&
+          plain_child->position.z == 4.f);
+    CHECK(gun_child->position.x == 10.f && gun_child->position.y == 20.f &&
+          gun_child->position.z == 3.f);
+
+    parent->position = {30.f, 40.f, 5.f};
+    parent->yaw = 90;
+    cw->run_logic_tick();
+    plain_child = cw->registry.get(plain_h);
+    CHECK(plain_child->position.x == 30.f && plain_child->position.y == 38.f &&
+          plain_child->position.z == 6.f);
+    Entity rider_seed{};
+    rider_seed.kind = EntityKind::Organic;
+    rider_seed.health = 100;
+    const EntityHandle rider_h = cw->registry.spawn(0, rider_seed);
+    Entity *rider = cw->registry.get(rider_h);
+    rider->mounted = true;
+    rider->mount_target = gun_h;
+    rider->mount_seat = 0;
+    rider->mount_type = SeatType::Gunner;
+    gun_child->seats[0].occupant = rider_h;
+    const uint64_t old_parent_spawn_id = parent->registry_spawn_id;
+    cw->registry.despawn(parent_h);
+    Entity replacement_seed{};
+    replacement_seed.kind = EntityKind::Item;
+    replacement_seed.item_id = 999;
+    const EntityHandle replacement_h =
+            cw->registry.spawn(1, replacement_seed);
+    CHECK(replacement_h == parent_h);
+    CHECK(cw->registry.get(replacement_h)->registry_spawn_id !=
+          old_parent_spawn_id);
+    cw->run_logic_tick();
+    CHECK(cw->registry.get(plain_h) == nullptr);
+    CHECK(cw->registry.get(gun_h) == nullptr);
+    CHECK(cw->registry.get(crosshair_h) == nullptr);
+    rider = cw->registry.get(rider_h);
+    CHECK(rider != nullptr && !rider->mounted);
+    CHECK(cw->registry.get(replacement_h) != nullptr);
+}
+
+#if defined(_MSC_VER)
+__declspec(noinline)
+#elif defined(__GNUC__)
+__attribute__((noinline))
+#endif
+static void test_emplacement_parent_death_cascades() {
+    auto world = std::make_unique<World>();
+    world->registry.configure_pool(0, 4);
+    world->registry.configure_pool(1, 8);
+
+    Entity parent_seed{};
+    parent_seed.kind = EntityKind::Item;
+    parent_seed.item_id = 164;
+    const EntityHandle parent_h = world->registry.spawn(1, parent_seed);
+    Entity *parent = world->registry.get(parent_h);
+    CHECK(parent != nullptr);
+    if (parent == nullptr) return;
+
+    Entity child_seed{};
+    child_seed.kind = EntityKind::Item;
+    child_seed.item_id = 166;
+    child_seed.emplacement_parent = parent_h;
+    child_seed.emplacement_parent_spawn_id = parent->registry_spawn_id;
+    const EntityHandle child_h = world->registry.spawn(1, child_seed);
+    Entity *child = world->registry.get(child_h);
+    CHECK(child != nullptr);
+    if (child == nullptr) return;
+
+    Entity grandchild_seed{};
+    grandchild_seed.kind = EntityKind::Item;
+    grandchild_seed.item_id = 183;
+    grandchild_seed.emplacement_parent = child_h;
+    grandchild_seed.emplacement_parent_spawn_id = child->registry_spawn_id;
+    const EntityHandle grandchild_h = world->registry.spawn(1, grandchild_seed);
+    Entity *grandchild = world->registry.get(grandchild_h);
+    CHECK(grandchild != nullptr);
+    if (grandchild == nullptr) return;
+
+    Entity rider_seed{};
+    rider_seed.kind = EntityKind::Organic;
+    const EntityHandle rider_h = world->registry.spawn(0, rider_seed);
+    Entity *rider = world->registry.get(rider_h);
+    CHECK(rider != nullptr);
+    if (rider == nullptr) return;
+    Seat usegun{};
+    usegun.type = SeatType::Gunner;
+    usegun.occupant = rider_h;
+    grandchild->seats.push_back(usegun);
+    rider->mounted = true;
+    rider->mount_target = grandchild_h;
+    rider->mount_seat = 0;
+    rider->mount_type = SeatType::Gunner;
+
+    // The ordinary item-death path keeps the carrier entity resident as a husk.
+    // Its implicit attachment ownership must still end immediately.
+    parent->health = 0;
+    destruction_notify_item_damage(*world, *parent, 2);
+    CHECK(world->registry.get(parent_h) != nullptr);
+    CHECK(!parent->alive);
+
+    world->run_logic_tick();
+    CHECK(world->registry.get(parent_h) != nullptr);
+    CHECK(world->registry.get(child_h) == nullptr);
+    CHECK(world->registry.get(grandchild_h) == nullptr);
+    rider = world->registry.get(rider_h);
+    CHECK(rider != nullptr && !rider->mounted);
+    CHECK(rider != nullptr && !rider->mount_target.valid());
 }
 
 int main() {
@@ -412,6 +602,10 @@ int main() {
         CHECK(occ->mount_type == SeatType::Driver);
         CHECK(occ->position.x == 11.f);
     }
+
+    // ---- items.def addeweap*: spawn every child and carry it on the parent frame ----
+    test_emplacement_attachments();
+    test_emplacement_parent_death_cascades();
 
     // ---- organics are routed through the INFANTRY motor with seeded slots ----
     // [orig: g_EntityClassPhysicsTable "org1" -> Entity_UpdateInfantryAI @0x4b9910;

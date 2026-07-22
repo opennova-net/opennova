@@ -600,6 +600,7 @@ void NovaSimulation::reset_world() {
 	// sweep re-registers on the next load) and re-point the fresh ai_ at the container.
 	collision_item_db_.unref();
 	collision_placer_.unref();
+	item_traits_db_.unref();
 	collision_model_by_graphic_.clear();
 	collision_occlusion_by_graphic_.clear();
 	collision_radius_by_graphic_.clear();
@@ -759,6 +760,7 @@ void NovaSimulation::resolve_infantry_adm_ids(const Ref<NovaResourceRoot> &p_res
 // [orig: NapiNPClientMsg_0x00D @0x432c40; docs/net/novaworld-net-re.md D-NET-97]
 void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db) {
 	if (!world_ || p_item_db.is_null()) return;
+	item_traits_db_ = p_item_db;
 	// Cache the Player template's items.def hp at world level so LATE-JOINER spawns (which happen
 	// after this sweep) seed full health without an item-db reach-back from libs/ [orig:
 	// Entity_InitFromItemDef @0x49e550 — spawn Health = itemDef->healthMax]. (D-NET-144)
@@ -1325,6 +1327,175 @@ bool finite_vector3(const Vector3 &value) {
 bool finite_basis(const Basis &value) {
 	return finite_vector3(value[0]) && finite_vector3(value[1]) &&
 			finite_vector3(value[2]);
+}
+
+bool resolve_model_mounted_pose(
+		const Ref<NovaObjectData> &data,
+		const opennova::world::Entity &carrier,
+		const opennova::world::Seat &seat,
+		const Dictionary &controls, uint32_t time_ms,
+		opennova::world::MountedPose &out) {
+	if (data.is_null() || seat.type != opennova::world::SeatType::Gunner ||
+			seat.bone_index == 0)
+		return false;
+	const int userpoint_index = static_cast<int>(seat.bone_index) - 1;
+	if (userpoint_index < 0 || userpoint_index >= data->get_user_point_count())
+		return false;
+	const Dictionary userpoint = data->get_user_point_info(userpoint_index);
+	const int part_index = static_cast<int>(userpoint.get("subobject", -1));
+	const Vector3 authored_model_position = userpoint.get("position", Vector3());
+	if (part_index < 0 || !finite_vector3(authored_model_position)) return false;
+
+	constexpr int lod_index = 0;
+	const Dictionary rest_parts = data->evaluate_panm(lod_index, 0, Dictionary());
+	const Dictionary live_parts = data->evaluate_panm(lod_index, time_ms, controls);
+	if (!rest_parts.has(part_index) || !live_parts.has(part_index)) return false;
+	const Variant rest_value = rest_parts[part_index];
+	const Variant live_value = live_parts[part_index];
+	if (rest_value.get_type() != Variant::TRANSFORM3D ||
+			live_value.get_type() != Variant::TRANSFORM3D)
+		return false;
+	const Transform3D rest_part = static_cast<Transform3D>(rest_value);
+	const Transform3D live_part = static_cast<Transform3D>(live_value);
+	if (!finite_vector3(rest_part.origin) || !finite_basis(rest_part.basis) ||
+			!finite_vector3(live_part.origin) || !finite_basis(live_part.basis) ||
+			std::abs(static_cast<double>(rest_part.basis.determinant())) < 1.0e-8)
+		return false;
+
+	const Vector3 point_in_part =
+			rest_part.affine_inverse().xform(authored_model_position);
+	const Vector3 live_model_position = live_part.xform(point_in_part);
+	const Basis carrier_basis = godot_model_basis_from_mission_euler(
+			carrier.pitch, carrier.yaw, carrier.roll);
+	if (!finite_vector3(live_model_position) || !finite_basis(carrier_basis) ||
+			std::abs(static_cast<double>(carrier_basis.determinant())) < 1.0e-8)
+		return false;
+	const Vector3 carrier_origin(
+			carrier.position.x, carrier.position.z, -carrier.position.y);
+	const Vector3 live_world_position =
+			Transform3D(carrier_basis, carrier_origin).xform(live_model_position);
+	if (!finite_vector3(live_world_position)) return false;
+	out.position = {
+			static_cast<float>(live_world_position.x),
+			static_cast<float>(-live_world_position.z),
+			static_cast<float>(live_world_position.y)};
+
+	const double baseline_yaw =
+			seat.type == opennova::world::SeatType::Gunner
+			? static_cast<double>(carrier.yaw - seat.yaw_offset)
+			: static_cast<double>(carrier.yaw + seat.yaw_offset);
+	const Basis baseline_basis = godot_model_basis_from_mission_euler(
+			carrier.pitch, baseline_yaw, carrier.roll);
+	const Basis part_delta = live_part.basis * rest_part.basis.inverse();
+	Basis live_basis = carrier_basis * part_delta *
+			carrier_basis.inverse() * baseline_basis;
+	if (!finite_basis(live_basis) ||
+			std::abs(static_cast<double>(live_basis.determinant())) < 1.0e-8)
+		return false;
+	live_basis = live_basis.orthonormalized();
+	const Basis euler_basis = live_basis *
+			Basis(Vector3(0.0, 1.0, 0.0), -kHalfPi);
+	const double pitch_rad = std::asin(std::clamp(
+			static_cast<double>(euler_basis[1].x), -1.0, 1.0));
+	if (std::abs(std::cos(pitch_rad)) < 1.0e-6) return false;
+	const double heading_rad = std::atan2(
+			-static_cast<double>(euler_basis[2].x),
+			static_cast<double>(euler_basis[0].x));
+	const double roll_rad = std::atan2(
+			-static_cast<double>(euler_basis[1].z),
+			static_cast<double>(euler_basis[1].y));
+	const double yaw_deg = opennova::world::normalize_mission_yaw_deg(
+			90.0 - heading_rad / kRadiansPerDegree);
+	const double pitch_deg = pitch_rad / kRadiansPerDegree;
+	const double roll_deg = roll_rad / kRadiansPerDegree;
+	if (!std::isfinite(yaw_deg) || !std::isfinite(pitch_deg) ||
+			!std::isfinite(roll_deg))
+		return false;
+	out.yaw = static_cast<int16_t>(std::lround(yaw_deg));
+	out.pitch = static_cast<int16_t>(std::lround(pitch_deg));
+	out.roll = static_cast<int16_t>(std::lround(roll_deg));
+	return true;
+}
+
+bool resolve_client_eweap_attachment_pose(
+		const opennova::netsim::ClientEntityState &child,
+		const opennova::netsim::ClientState &state,
+		const std::vector<opennova::mission::ItemSeatSpec> &specs,
+		const std::unordered_map<int32_t, Ref<NovaObjectData>> &model_data_by_type,
+		uint32_t time_ms, opennova::world::MountedPose &out) {
+	if (child.parent_handle == 0xFFFFu) return false;
+	const opennova::netsim::ClientEntityState *parent =
+			client_entity_for_handle(state, child.parent_handle);
+	if (parent == nullptr) return false;
+	const opennova::mission::ItemSeatSpec *parent_spec =
+			item_seat_spec_for_type(specs, parent->type_id);
+	if (parent_spec == nullptr) return false;
+
+	// The 0x0D relation names only the parent, not the authored attachment slot.
+	// Reconstruct only when the child type selects exactly one authored row and
+	// that row resolves a userpoint; duplicate same-type rows are intentionally
+	// left on the rigid fallback.
+	const opennova::mission::ItemEmplacementAttachmentSpec *attachment = nullptr;
+	for (const opennova::mission::ItemEmplacementAttachmentSpec &candidate :
+			parent_spec->emplacement_attachments) {
+		if (candidate.child_type_id != static_cast<int32_t>(child.type_id))
+			continue;
+		if (attachment != nullptr) return false;
+		attachment = &candidate;
+	}
+	if (attachment == nullptr || !attachment->anchor_found ||
+			attachment->anchor.bone_index == 0)
+		return false;
+	const auto data_found = model_data_by_type.find(parent->type_id);
+	if (data_found == model_data_by_type.end() || data_found->second.is_null())
+		return false;
+	const Ref<NovaObjectData> &data = data_found->second;
+
+	// Remote generic PLAYPARTANIM phases are not in ClientEntityState. Do not
+	// synthesize them from timing or repurpose a wire field. EWEAP is the one safe
+	// articulated family: the decoded mounted gunner already determines both
+	// semantic controls through the witnessed parent-minus-occupant relationship.
+	EmplacedWeaponControls emplaced;
+	if (!emplaced_weapon_controls_for_client(
+				*parent, state, specs, emplaced))
+		return false;
+	const ThreediModelIR &ir = data->native_ir();
+	if (ir.control_register_count > 0 && ir.control_registers == nullptr)
+		return false;
+	bool has_eweap_control = false;
+	for (size_t slot = 0; slot < ir.control_register_count; ++slot) {
+		const String name = String::utf8(ir.control_registers[slot].name);
+		if (name.nocasecmp_to(kEmplacedGunYawRegister) == 0 ||
+				name.nocasecmp_to(kEmplacedGunPitchRegister) == 0) {
+			has_eweap_control = true;
+			break;
+		}
+	}
+	if (!has_eweap_control) return false;
+	Dictionary controls;
+	controls[String(kEmplacedGunYawRegister)] =
+			static_cast<int>(emplaced.gun_yaw);
+	controls[String(kEmplacedGunPitchRegister)] =
+			static_cast<int>(emplaced.gun_pitch);
+
+	opennova::world::Entity carrier;
+	carrier.item_id = static_cast<int32_t>(parent->type_id);
+	carrier.position = {
+			static_cast<float>(parent->x / kFixed16),
+			static_cast<float>(parent->y / kFixed16),
+			static_cast<float>(parent->z / kFixed16)};
+	carrier.yaw = static_cast<int16_t>(std::lround(
+			opennova::world::mission_yaw_deg_from_bam_heading(
+					static_cast<int32_t>(
+							static_cast<uint32_t>(parent->yaw_byte) << 24))));
+	carrier.pitch = static_cast<int16_t>(std::lround(
+			static_cast<double>(parent->pitch_bam) *
+				opennova::world::kDegreesPerBam));
+	carrier.roll = static_cast<int16_t>(std::lround(
+			static_cast<double>(parent->roll_bam) *
+				opennova::world::kDegreesPerBam));
+	return resolve_model_mounted_pose(
+			data, carrier, attachment->anchor, controls, time_ms, out);
 }
 
 } // namespace
@@ -3526,6 +3697,70 @@ void NovaSimulation::set_item_seat_specs(const Array &p_specs) {
 			    std::clamp(static_cast<int>(seat_d.get("yaw_offset", 0)), -32768, 32767));
 			spec.seats.push_back(seat);
 		}
+		const Variant attachments_v =
+				spec_d.get("emplacement_attachments", Array());
+		if (attachments_v.get_type() == Variant::ARRAY) {
+			const Array attachments_a = attachments_v;
+			for (int64_t j = 0; j < attachments_a.size(); ++j) {
+				const Variant attachment_v = attachments_a[j];
+				if (attachment_v.get_type() != Variant::DICTIONARY) continue;
+				const Dictionary attachment_d = attachment_v;
+				const int full_child_id =
+						static_cast<int>(attachment_d.get("item_id", 0));
+				const int child_type_id = full_child_id - 100000;
+				if (child_type_id <= 0) continue;
+				opennova::mission::ItemEmplacementAttachmentSpec attachment;
+				attachment.child_type_id =
+						static_cast<int32_t>(child_type_id);
+				attachment.kind =
+						static_cast<opennova::mission::EmplacementAttachmentKind>(
+								std::clamp(static_cast<int>(
+										attachment_d.get("kind", 0)), 0, 2));
+				attachment.stored_slot = static_cast<uint8_t>(
+						std::clamp(static_cast<int>(
+								attachment_d.get("stored_slot", 0)), 0, 4));
+				if (static_cast<bool>(
+						attachment_d.get("designated_c", false)))
+					attachment.attachment_flags |= 1;
+				if (static_cast<bool>(
+						attachment_d.get("designated_g", false)))
+					attachment.attachment_flags |= 2;
+				attachment.anchor_found = static_cast<bool>(
+						attachment_d.get("anchor_found", false));
+				attachment.anchor.type =
+						opennova::world::SeatType::Gunner;
+				attachment.anchor.bone_index = static_cast<uint8_t>(
+						std::clamp(static_cast<int>(
+								attachment_d.get("bone_index", 0)), 0, 255));
+				attachment.anchor.source_name =
+						String(attachment_d.get(
+								"source_name", String())).utf8().get_data();
+				const Vector3 local =
+						attachment_d.get("local", Vector3());
+				attachment.anchor.seat_local = {
+						static_cast<float>(local.x),
+						static_cast<float>(local.y),
+						static_cast<float>(local.z)};
+				attachment.anchor.yaw_offset = static_cast<int16_t>(
+						std::clamp(static_cast<int>(
+								attachment_d.get("yaw_offset", 0)),
+								-32768, 32767));
+				attachment.angle_count = static_cast<uint8_t>(
+						static_cast<int>(
+								attachment_d.get("angle_count", 0)) == 4
+								? 4 : 0);
+				attachment.down_limit_bam = static_cast<int32_t>(
+						attachment_d.get("down_limit_bam", 0));
+				attachment.up_limit_bam = static_cast<int32_t>(
+						attachment_d.get("up_limit_bam", 0));
+				attachment.right_limit_bam = static_cast<int32_t>(
+						attachment_d.get("right_limit_bam", 0));
+				attachment.left_limit_bam = static_cast<int32_t>(
+						attachment_d.get("left_limit_bam", 0));
+				spec.emplacement_attachments.push_back(
+						std::move(attachment));
+			}
+		}
 		// The attach-label sources: "armory*" userpoint locals (Armory-attrib items
 		// only — the host gates on itemdef attrib 0x80000) + the ewep primary_weapon
 		// link [orig: @0x4361ee/@0x5a36f5; ItemDef+0x54B].
@@ -3543,7 +3778,7 @@ void NovaSimulation::set_item_seat_specs(const Array &p_specs) {
 		spec.primary_weapon =
 		    String(spec_d.get("primary_weapon", String())).utf8().get_data();
 		if (spec.mount_config_valid || !spec.seats.empty() || !spec.armory_points.empty() ||
-		    !spec.primary_weapon.empty())
+		    !spec.primary_weapon.empty() || !spec.emplacement_attachments.empty())
 			item_seat_specs_.push_back(std::move(spec));
 	}
 }
@@ -5717,6 +5952,31 @@ void NovaSimulation::restart() {
 	weapon_switch_deferred_action_ = -1;
 	world_->restore(baseline_); // rewinds registry/vars/env/clock + re-inits systems (incl. AI;
 	                            // WacSystem::on_load also resets its 62-tick accumulator)
+	// The baseline is captured during finish_load, before MissionRuntime supplies
+	// items.def. Restore those authoritative callback/health traits first; the
+	// encoder and the client classifier must agree on every 0x0A record width.
+	if (item_traits_db_.is_valid()) resolve_item_traits(item_traits_db_);
+	if (listen_server_ && !joiner_ && runtime_) {
+		// Stop restores the authoritative registry, including NoNetworkCallback
+		// attachment children, but those children never have a live 0x0A body that
+		// could recreate a row erased from the host's decoded ClientState. Start a
+		// fresh HostClient view and replay the same production load batches, in the
+		// witnessed stream order, so restored runtime identities materialize now
+		// instead of inheriting a prior play epoch's rows and handle caches.
+		host_loop_.clear();
+		runtime_ = std::make_unique<opennova::np::ClientRuntime>(host_loop_);
+		install_item_class_resolver();
+		opennova::netsim::NetClientView &view = runtime_->view();
+		view.apply(0x10, opennova::encode_static_entity_batch(
+				opennova::netsim::build_pool2_static_batch(*world_)));
+		view.apply(0x0D, opennova::encode_pool_spawn_batch(
+				opennova::netsim::build_pool1_spawn_batch(*world_)));
+		view.apply(0x0C, opennova::encode_organic_spawn_batch(
+				opennova::netsim::build_pool0_organic_batch(
+						*world_, world_->cached.local_player)));
+		view.apply(0x20, opennova::encode_pool3_sync_batch(
+				opennova::netsim::build_pool3_marker_batch(*world_)));
+	}
 	reset_infantry_adm_ids();
 	resolve_new_infantry_adm_ids();
 	if (usegun_was_active) {
@@ -5768,6 +6028,9 @@ Array NovaSimulation::drain_effects() {
 		d["b"] = e.b;
 		d["c"] = e.c;
 		d["d"] = e.d;
+		if (e.kind == "vehicle_control_started" ||
+				e.kind == "vehicle_control_stopped")
+			d["wire_handle"] = e.d;
 		d["str"] = String(e.str.c_str());
 		out.push_back(d);
 	}
@@ -5828,6 +6091,9 @@ Dictionary NovaSimulation::drain_destruction_events() {
 		d["dir"] = to_godot(e.dir);
 		d["attach_net_id"] = static_cast<int>(e.attach_net_id);
 		d["attach_bms_id"] = e.attach_bms_id;
+		d["attach_wire_handle"] = static_cast<int>(e.attach_wire_handle);
+		d["attach_spawn_origin"] =
+				static_cast<int64_t>(e.attach_spawn_origin);
 		d["family"] = static_cast<int>(e.family);
 		effects.push_back(d);
 	}
@@ -5842,6 +6108,7 @@ Dictionary NovaSimulation::drain_destruction_events() {
 	for (const opennova::world::HuskSwapEvent &h : ev.husk_swaps) {
 		Dictionary d;
 		d["net_id"] = static_cast<int>(h.net_id);
+		d["wire_handle"] = static_cast<int>(h.wire_handle);
 		d["bms_id"] = h.bms_id;
 		d["spawn_origin"] = static_cast<int64_t>(h.spawn_origin);
 		d["item_id"] = h.item_id;
@@ -7030,19 +7297,64 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 						es, cs, item_seat_specs_, emplaced)) {
 			write_present_emplaced_controls(r, emplaced);
 		}
-		// Decoded wire position is mission (x,y,z) 16.16 -> Godot (x, z, -y) world units,
-		// the SAME remap the AI-pool path uses. Position is post-compression (lossy) —
-		// exactly what the original client renders for its decoded peers.
-		r[PF_POS_X] = static_cast<float>(es.x / kFixed16);
-		r[PF_POS_Y] = static_cast<float>(es.z / kFixed16);
-		r[PF_POS_Z] = static_cast<float>(-es.y / kFixed16);
-		// Coarse heading: rebuild the 32-bit engine BAM from the compact high byte, then
-		// engine -> mission yaw (90 - heading), matching the AI-pool present.
-		const int32_t heading_bam = static_cast<int32_t>(static_cast<uint32_t>(es.yaw_byte) << 24);
-		r[PF_YAW_DEG] = static_cast<float>(opennova::world::mission_yaw_deg_from_bam_heading(heading_bam));
+		const bool authoritative_attachment_pose =
+				ent != nullptr && ent->emplacement_parent.valid() &&
+				ent->emplacement_parent.packed == es.parent_handle;
+		opennova::world::MountedPose client_attachment_pose;
+		const uint32_t attachment_time_ms = panm_time_override_ms_ >= 0
+				? static_cast<uint32_t>(panm_time_override_ms_)
+				: world_->logic_tick * 16u;
+		const bool reconstructed_client_attachment_pose = joiner_ &&
+				resolve_client_eweap_attachment_pose(
+						es, cs, item_seat_specs_, mounted_pose_data_by_type_,
+						attachment_time_ms, client_attachment_pose);
+		if (authoritative_attachment_pose) {
+			// NoNetworkCallback addeweap children have only their 0x0D spawn pose in
+			// ClientState. The host has already advanced their authoritative userpoint
+			// pose through World::update_emplacement_attachments; use that exact result
+			// rather than flattening live PANM back to the client's rigid spawn offset.
+			r[PF_POS_X] = ent->position.x;
+			r[PF_POS_Y] = ent->position.z;
+			r[PF_POS_Z] = -ent->position.y;
+			r[PF_PITCH_DEG] = static_cast<float>(ent->pitch);
+			r[PF_YAW_DEG] = static_cast<float>(ent->yaw);
+			r[PF_ROLL_DEG] = static_cast<float>(ent->roll);
+		} else if (reconstructed_client_attachment_pose) {
+			r[PF_POS_X] = client_attachment_pose.position.x;
+			r[PF_POS_Y] = client_attachment_pose.position.z;
+			r[PF_POS_Z] = -client_attachment_pose.position.y;
+			r[PF_PITCH_DEG] = static_cast<float>(client_attachment_pose.pitch);
+			r[PF_YAW_DEG] = static_cast<float>(client_attachment_pose.yaw);
+			r[PF_ROLL_DEG] = static_cast<float>(client_attachment_pose.roll);
+		} else {
+			// Decoded wire position is mission (x,y,z) 16.16 -> Godot (x, z, -y)
+			// world units, the SAME remap the AI-pool path uses. Position is
+			// post-compression (lossy), exactly what retail renders for decoded peers.
+			r[PF_POS_X] = static_cast<float>(es.x / kFixed16);
+			r[PF_POS_Y] = static_cast<float>(es.z / kFixed16);
+			r[PF_POS_Z] = static_cast<float>(-es.y / kFixed16);
+			// Rebuild the 32-bit engine BAM from the compact high byte, then convert
+			// engine -> mission yaw (90 - heading), matching the AI-pool present.
+			const int32_t heading_bam = static_cast<int32_t>(
+					static_cast<uint32_t>(es.yaw_byte) << 24);
+			r[PF_YAW_DEG] = static_cast<float>(
+					opennova::world::mission_yaw_deg_from_bam_heading(heading_bam));
+		}
 		// Infantry anim from the local AI pool (host only — same registry caveat as above).
 		if (world_->ai && !joiner_) {
 			const AiEntity *ae = world_->ai->for_handle(h);
+			if (ae != nullptr) {
+				for (int slot = 0; slot < 2; ++slot) {
+					const int phase = std::clamp(
+							ae->brain.f[AiBrain::kPartAnimPhase0 + slot],
+							0, 65535);
+					const bool active =
+							ae->brain.f[AiBrain::kPartAnimRate0 + slot] != 0 ||
+							phase != 0;
+					r[PF_PHASE1 + slot * 2] = static_cast<float>(phase);
+					r[PF_ACTIVE1 + slot * 2] = active ? 1.0f : 0.0f;
+				}
+			}
 			if (ae && ae->inf.active) {
 				r[PF_ANIM_STATE] = static_cast<float>(ae->inf.anim_state);
 				r[PF_ANIM_PHASE_TICKS] = static_cast<float>(ae->inf.clip_phase);

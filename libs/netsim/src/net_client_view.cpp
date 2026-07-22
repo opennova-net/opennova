@@ -4,6 +4,8 @@
 #include "netsim/connection_fan.h"     // kTag0aFrameUpdate
 #include <io/bam.h>                      // wrapped retail pitch chase
 
+#include <algorithm>
+
 namespace opennova::netsim {
 
 // ---- ClientState lookup -----------------------------------------------------
@@ -132,7 +134,104 @@ void NetClientView::apply_pool_spawn(const std::vector<uint8_t> &body) {
 		es.yaw_byte = yaw_byte_from_bam(rec.euler_z);
 		es.pitch_bam = rec.euler_x;
 		es.roll_bam = rec.euler_y;
+		es.parent_handle = rec.parent_handle;
+		es.parent_pose_valid = false;
+		es.state_flags = static_cast<uint8_t>(rec.entity_flags & 0xFFu);
+		es.health_known = false;
 	}
+	// 0x0D positions are absolute and parent rows normally precede their BFS
+	// children. Resolve after the complete batch anyway, so record ordering is
+	// not a hidden requirement.
+	refresh_parented_pool_entities();
+}
+
+void NetClientView::erase_entity_tree(uint16_t root_handle) {
+	std::vector<uint16_t> retired{root_handle};
+	// Promotion caps attachment lineage at eight. Discover descendants before
+	// erasing so nested children cannot retain a dangling parent row.
+	for (int depth = 0; depth < 8; ++depth) {
+		const std::size_t before = retired.size();
+		for (const ClientEntityState &entity : state_.entities) {
+			if (entity.parent_handle == 0xFFFFu) continue;
+			if (std::find(retired.begin(), retired.end(), entity.parent_handle) ==
+					retired.end())
+				continue;
+			if (std::find(retired.begin(), retired.end(), entity.handle) ==
+					retired.end())
+				retired.push_back(entity.handle);
+		}
+		if (retired.size() == before) break;
+	}
+	state_.entities.erase(
+			std::remove_if(state_.entities.begin(), state_.entities.end(),
+					[&](const ClientEntityState &entity) {
+						return std::find(retired.begin(), retired.end(), entity.handle) !=
+								retired.end();
+					}),
+			state_.entities.end());
+}
+
+void NetClientView::refresh_parented_pool_entities() {
+	std::vector<uint16_t> dead_children;
+	// Repeating the parent-before-child composition makes nested attachment
+	// chains order-independent while preserving the promotion depth cap.
+	for (int depth = 0; depth < 8; ++depth) {
+		for (ClientEntityState &child : state_.entities) {
+			if (child.parent_handle == 0xFFFFu) continue;
+			ClientEntityState *parent = state_.find(child.parent_handle);
+			if (parent == nullptr) continue; // a later batch may still provide it
+			// 0x0D entity_flags bit 1 is a spawn/movement gate, not a death
+			// verdict. Only interpret flags/health after a real live compact has
+			// supplied the vehicle health word. Scripted removals without a final
+			// compact still need their witnessed destroy-list message mapped.
+			if (parent->health_known && parent->health_word == 0) {
+				if (std::find(dead_children.begin(), dead_children.end(), child.handle) ==
+						dead_children.end())
+					dead_children.push_back(child.handle);
+				continue;
+			}
+
+			const int32_t parent_yaw_bam = static_cast<int32_t>(
+					static_cast<uint32_t>(parent->yaw_byte) << 24);
+			if (!child.parent_pose_valid) {
+				const WorldPose local = network_transform_world_to_local(
+						child.x, child.y, child.z, parent->x, parent->y, parent->z,
+						static_cast<uint32_t>(parent_yaw_bam),
+						static_cast<uint32_t>(parent->pitch_bam),
+						static_cast<uint32_t>(parent->roll_bam));
+				child.parent_local_x = local.x;
+				child.parent_local_y = local.y;
+				child.parent_local_z = local.z;
+				child.parent_local_yaw_byte =
+						static_cast<uint8_t>(child.yaw_byte - parent->yaw_byte);
+				child.parent_local_pitch_bam = static_cast<int32_t>(
+						static_cast<uint32_t>(child.pitch_bam) -
+						static_cast<uint32_t>(parent->pitch_bam));
+				child.parent_local_roll_bam = static_cast<int32_t>(
+						static_cast<uint32_t>(child.roll_bam) -
+						static_cast<uint32_t>(parent->roll_bam));
+				child.parent_pose_valid = true;
+			}
+			const WorldPose posed = network_transform_local_to_world(
+					child.parent_local_x, child.parent_local_y, child.parent_local_z,
+					parent->x, parent->y, parent->z,
+					static_cast<uint32_t>(parent_yaw_bam),
+					static_cast<uint32_t>(parent->pitch_bam),
+					static_cast<uint32_t>(parent->roll_bam));
+			child.x = posed.x;
+			child.y = posed.y;
+			child.z = posed.z;
+			child.yaw_byte = static_cast<uint8_t>(
+					parent->yaw_byte + child.parent_local_yaw_byte);
+			child.pitch_bam = static_cast<int32_t>(
+					static_cast<uint32_t>(parent->pitch_bam) +
+					static_cast<uint32_t>(child.parent_local_pitch_bam));
+			child.roll_bam = static_cast<int32_t>(
+					static_cast<uint32_t>(parent->roll_bam) +
+					static_cast<uint32_t>(child.parent_local_roll_bam));
+		}
+	}
+	for (uint16_t handle : dead_children) erase_entity_tree(handle);
 }
 
 void NetClientView::apply_static_batch(const std::vector<uint8_t> &body) {
@@ -237,6 +336,7 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 			es.pitch_byte = rec.player.pitch_byte;
 			es.anim_state_id = rec.player.anim_state_id;
 			es.anim_channel_ratio = rec.player.anim_channel_ratio;
+			es.state_flags = rec.player.state_flags;
 			if (rec.player.carrier_handle != 0xFFFFu) {
 				pending_carrier_poses.push_back(PendingCarrierPose{
 						rec.handle, rec.player.carrier_handle, cx, cy, cz,
@@ -252,6 +352,9 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 			cz = rec.vehicle.pos_z_compressed;
 			es.yaw_byte = static_cast<uint8_t>(
 					static_cast<uint16_t>(rec.vehicle.euler_z) >> 8);
+			es.state_flags = rec.vehicle.flags_byte;
+			es.health_word = rec.vehicle.health_word;
+			es.health_known = true;
 			// Live vehicle compacts omit entity+20/+24. Preserve the last full
 			// spawn/dead-pose values until the short dead-pose form carries new
 			// signed high words [orig: @0x460d4c/@0x460d52].
@@ -269,6 +372,7 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 			es.pitch_byte = rec.infantry.pitch_byte;
 			es.aim_yaw_byte = rec.infantry.aim_yaw_byte;
 			es.anim_state_id = rec.infantry.anim_byte;
+			es.state_flags = rec.infantry.flags_byte;
 			// The compact carries desired aim pitch (entity+0x2D0), not live
 			// entity+0x14. Retail's remote gunner rebuilds the latter locally
 			// with the same wrapped one-eighth chase as authoritative AI.
@@ -319,6 +423,8 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 		// 8-bit ring used by the compact view.
 		child->yaw_byte = uint8_t(carrier->yaw_byte + pending.local_yaw_byte);
 	}
+
+	refresh_parented_pool_entities();
 
 	++state_.frames_applied;
 }

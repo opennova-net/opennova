@@ -46,7 +46,7 @@ const MAX_CATCHUP_TICKS := 31        # spiral-of-death clamp: port of the 500 ms
 
 var _sim: NovaSimulation
 var _present                          # MissionPresentPass: placed nodes (host/SP/editor); null on a joiner
-var _wire_present                     # WirePresentPass: un-placed remote players (co-op host + joiner); else null
+var _wire_present                     # WirePresentPass: un-placed network entities or SP attachment children
 var _fire_present                     # FirePresentPass: AI/remote fire sound + muzzle + tracers (host); else null
 var _destruction_present              # DestructionPresentPass: husk swap + debris + wreck effects (host); else null
 var _throwable_present                # ThrowablePresentPass: thrown/placed device models (host); else null
@@ -207,10 +207,17 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	# MissionPresentPass can't resolve it. The host keeps MissionPresentPass for its placed NPCs and
 	# adds this pass for the spawned players, deferring any row that resolves to a placed node (via
 	# _index) so nothing double-renders. The joiner places nothing (index null -> render every row).
-	if is_joiner or _sim.is_host_listening():
+	var full_wire_present := is_joiner or _sim.is_host_listening()
+	var sp_attachment_present := (
+			not full_wire_present and options.get("placer") != null)
+	if full_wire_present or sp_attachment_present:
 		_wire_present = WirePresentPass.new()
 		_wire_present.setup(_sim, options.get("placer"), container, options.get("env_node"),
-			null if is_joiner else _index)
+			null if is_joiner else _index, {
+				"synthetic_origin_only": sp_attachment_present,
+			})
+		simulation_restarted.connect(
+				Callable(_wire_present, 'reset_runtime_state'))
 	# The host fire-presentation pass: AI/remote fire sound + muzzle effect + tracer
 	# streaks off the sim's fired/tracer drains — providers come from the host shell
 	# (game_world). A joiner's presentation seam is its own decode path (net views).
@@ -229,7 +236,8 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 		_destruction_present.setup(_sim, container, _index, options.get("placer"),
 			options.get("item_db"), options.get("game_world"),
 			options.get("fire_audio", Callable()),
-			options.get("fire_fx", Callable()), options.get("env_node"))
+			options.get("fire_fx", Callable()), options.get("env_node"),
+			_wire_present)
 		simulation_restarted.connect(
 				Callable(_destruction_present, 'reset_runtime_state'))
 	# The throwable-presentation pass: item models for flying grenades/satchels
@@ -849,6 +857,12 @@ func _exit_tree() -> void:
 	if _fire_present != null:
 		_fire_present.teardown()  # frees the tracer mesh instance under the container
 		_fire_present = null
+	if _wire_present != null:
+		var reset_wire := Callable(_wire_present, 'reset_runtime_state')
+		if simulation_restarted.is_connected(reset_wire):
+			simulation_restarted.disconnect(reset_wire)
+		_wire_present.teardown()
+		_wire_present = null
 	if _destruction_present != null:
 		var reset_destruction := Callable(_destruction_present, 'reset_runtime_state')
 		if simulation_restarted.is_connected(reset_destruction):

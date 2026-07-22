@@ -124,6 +124,19 @@ class DefItemParticleFx(ctypes.Structure):
     ]
 
 
+class DefItemEmplacementAttachment(ctypes.Structure):
+    _fields_ = [
+        ("userpoint", ctypes.c_char * 16),
+        ("item_id", ctypes.c_int),
+        ("down_angle", ctypes.c_int),
+        ("up_angle", ctypes.c_int),
+        ("right_angle", ctypes.c_int),
+        ("left_angle", ctypes.c_int),
+        ("angle_count", ctypes.c_int),
+        ("kind", ctypes.c_int),
+    ]
+
+
 class DefItemDef(ctypes.Structure):
     _fields_ = [
         ("display_name", ctypes.c_char * 128),
@@ -207,6 +220,10 @@ class DefItemDef(ctypes.Structure):
         ("damage_reduc_pp", ctypes.c_float),
         ("damage_reduc_max", ctypes.c_float),
         ("armor_kz", ctypes.c_int),
+        ("emplacement_attachments", ctypes.POINTER(DefItemEmplacementAttachment)),
+        ("emplacement_attachments_count", ctypes.c_size_t),
+        ("emplacement_g_slot", ctypes.c_int),
+        ("emplacement_c_slot", ctypes.c_int),
     ]
 
 

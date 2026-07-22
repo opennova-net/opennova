@@ -1525,6 +1525,7 @@ func test_item_seat_specs_mount_command_125_spawn() -> void:
 	assert_true(md.set_entity_property_int(NovaMissionData.KIND_ORGANIC, int(soldier["index"]), "wp_number", int(vehicle["bms_id"])))
 
 	var sim := NovaSimulation.new()
+	sim.enable_listen_server(true)
 	sim.set_item_seat_specs([
 		{
 			"type_id": 1294,
@@ -1535,6 +1536,28 @@ func test_item_seat_specs_mount_command_125_spawn() -> void:
 		}
 	])
 	assert_true(sim.load_from_mission_data(md), "loaded command-125 mission with seat specs")
+	var started: Dictionary = {}
+	for effect_v in sim.drain_effects():
+		var effect: Dictionary = effect_v
+		if String(effect.get("kind", "")) == "vehicle_control_started":
+			started = effect
+			break
+	assert_false(started.is_empty(),
+			"command-125 controller mount emits the occupied-item lifecycle edge")
+	sim.step()
+	var expected_vehicle_handle := -1
+	var snapshot := sim.get_present_snapshot()
+	var stride := sim.get_present_stride()
+	for base in range(0, snapshot.size(), stride):
+		if int(snapshot[base + NovaSimulation.PF_TYPE_ID]) == 1294:
+			expected_vehicle_handle = int(
+					snapshot[base + NovaSimulation.PF_WIRE_HANDLE])
+			break
+	assert_gte(expected_vehicle_handle, 0)
+	assert_eq(int(started.get("wire_handle", -1)), expected_vehicle_handle,
+			"binding names the packed identity used by dynamic presentation")
+	assert_eq(int(started.get("d", -1)), expected_vehicle_handle,
+			"the generic effect payload retains the same packed identity")
 	var soldier_idx := _first_organic_ai_index(sim)
 	assert_true(soldier_idx >= 0, "found the soldier's AI row")
 	var pos := sim.get_entity_position(soldier_idx)
@@ -2763,6 +2786,216 @@ func test_collision_uses_effective_lod0_and_never_first_live_lod() -> void:
 		(sim.get_hitbox_debug().get("entities", [])[0] as Dictionary)
 		.get("tris", PackedVector3Array()))
 	assert_eq(after, before, "LOD1 PANM never transforms model-level COBJ")
+	sim.free()
+
+
+func test_listen_snapshot_exports_authoritative_part_anim_channels() -> void:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var placed := md.add_entity(
+			NovaMissionData.KIND_ITEM, 105004, Vector3.ZERO, Vector3.ZERO)
+	var ssn := int(placed.get("bms_id", 0))
+	assert_gt(ssn, 0)
+	assert_false(md.add_event(0, 0, 0).is_empty())
+	assert_false(md.add_event_action(0, {
+		"action_type": 21,
+		"action_sub_type": 34,
+		"param1": ssn,
+		"param2": 1,
+		"param3": 1,
+		"param4": 65536,
+	}).is_empty())
+	var sim := NovaSimulation.new()
+	sim.enable_listen_server(true)
+	sim.set_item_seat_specs([{
+		"type_id": 5004,
+		"seats": [{
+			"type": 2,
+			"position": Vector3.ZERO,
+			"source_name": "ctrlx00",
+		}],
+	}])
+	assert_true(sim.load_from_mission_data(md))
+	for _tick in range(80):
+		sim.step()
+	assert_eq(_present_field_for_origin(
+			sim, NovaMissionData.KIND_ITEM, int(placed["index"]),
+			NovaSimulation.PF_ACTIVE1), 1)
+	assert_eq(_present_field_for_origin(
+			sim, NovaMissionData.KIND_ITEM, int(placed["index"]),
+			NovaSimulation.PF_PHASE1), 65535,
+			"SP/host presentation receives the authoritative PLAYPARTANIM pose")
+	sim.free()
+
+
+func test_listen_snapshot_attachment_follows_animated_userpoint() -> void:
+	# Build a deterministic PLAYPARTANIM track on the M1A1's real turret part,
+	# then hang the synthetic ewep from a userpoint owned by that part. A rigid
+	# parent-local reconstruction stays at the authored point; the authoritative
+	# mounted pose carries it four metres with the live part.
+	var data := NovaObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(
+			"res://../fixtures/3dp/dm1a1/dm1a1.3di")), OK)
+	var anchor_index := -1
+	var anchor_info := {}
+	for index in range(data.get_user_point_count()):
+		var candidate: Dictionary = data.get_user_point_info(index)
+		if String(candidate.get("name", "")).to_lower() == "ewep01":
+			anchor_index = index
+			anchor_info = candidate
+			break
+	assert_gte(anchor_index, 0, "M1A1 fixture has its authored ewep01 attachment point")
+	if anchor_index < 0:
+		return
+	var anchor_part := int(anchor_info.get("subobject", -1))
+	assert_gte(anchor_part, 0, "ewep01 is bound to a model part")
+	if anchor_part < 0:
+		return
+	for index in range(data.get_part_anim_count(0) - 1, -1, -1):
+		assert_true(data.delete_part_anim(0, index))
+	var anim := data.add_part_anim(0, anchor_part)
+	assert_eq(anim, 0)
+	assert_true(data.set_part_anim_channel_enabled(
+			0, anim, "translation", true))
+	assert_true(data.set_part_anim_channel_mode(
+			0, anim, "translation", "x", "control_register", 0))
+	assert_true(data.set_part_anim_channel_values(
+			0, anim, "translation", "x", 0.0, 4.0, 0.0))
+
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var placed := md.add_entity(
+			NovaMissionData.KIND_ITEM, 101291, Vector3.ZERO, Vector3.ZERO)
+	var ssn := int(placed.get("bms_id", 0))
+	assert_gt(ssn, 0)
+	assert_false(md.add_event(0, 0, 0).is_empty())
+	assert_false(md.add_event_action(0, {
+		"action_type": 21,
+		"action_sub_type": 34,
+		"param1": ssn,
+		"param2": 1,
+		"param3": 1,
+		"param4": 65536,
+	}).is_empty())
+	assert_false(md.add_event(0, 0, 0).is_empty())
+	assert_false(md.add_event_trigger(1, {
+		"main_type": 4,
+		"sub_type": 1,
+		"param1": 7,
+		"param2": 1,
+	}).is_empty())
+	assert_false(md.add_event_action(1, {
+		"action_type": 20,
+		"param1": ssn,
+	}).is_empty())
+
+	var sim := NovaSimulation.new()
+	sim.enable_listen_server(true)
+	sim.set_item_seat_specs([{
+		"type_id": 1291,
+		"model_data": data,
+		"seats": [{
+			"type": 2,
+			"position": Vector3.ZERO,
+			"source_name": "ctrlx00",
+		}],
+		"emplacement_attachments": [{
+			"item_id": 101419,
+			"stored_slot": 1,
+			"anchor_found": true,
+			"bone_index": anchor_index + 1,
+			"source_name": String(anchor_info.get("name", "")),
+			"local": MissionSeatDiagnostics.seat_local_from_user_point_position(
+					anchor_info.get("position", Vector3.ZERO)),
+		}],
+	}])
+	assert_true(sim.load_from_mission_data(md))
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/items.def")), OK)
+	sim.resolve_item_traits(item_db)
+
+	# First fold materializes the synthetic row before the scripted animation has
+	# reached its endpoint. Retain that baseline so the assertion cannot pass on
+	# a root-only follow implementation.
+	sim.step()
+	var stride := sim.get_present_stride()
+	var snapshot := sim.get_present_snapshot()
+	var initial_position := Vector3.INF
+	for record in range(snapshot.size() / stride):
+		var base := record * stride
+		if int(snapshot[base + NovaSimulation.PF_TYPE_ID]) == 1419:
+			initial_position = Vector3(
+					snapshot[base + NovaSimulation.PF_POS_X],
+					snapshot[base + NovaSimulation.PF_POS_Y],
+					snapshot[base + NovaSimulation.PF_POS_Z])
+			break
+	assert_true(initial_position.is_finite(), "synthetic ewep reached the listen client")
+	for _tick in range(79):
+		sim.step()
+	assert_eq(_present_field_for_origin(
+			sim, NovaMissionData.KIND_ITEM, int(placed["index"]),
+			NovaSimulation.PF_PHASE1), 65535,
+			"carrier reached the scripted live PANM endpoint")
+	snapshot = sim.get_present_snapshot()
+	var final_position := Vector3.INF
+	for record in range(snapshot.size() / stride):
+		var base := record * stride
+		if int(snapshot[base + NovaSimulation.PF_TYPE_ID]) == 1419:
+			final_position = Vector3(
+					snapshot[base + NovaSimulation.PF_POS_X],
+					snapshot[base + NovaSimulation.PF_POS_Y],
+					snapshot[base + NovaSimulation.PF_POS_Z])
+			break
+	assert_true(final_position.is_finite(), "animated attachment remains presented")
+	if initial_position.is_finite() and final_position.is_finite():
+		assert_gt(final_position.distance_to(initial_position), 3.9,
+				"presented attachment follows its animated userpoint, not only the parent root")
+		var expected: Vector3 = anchor_info.get("position", Vector3.ZERO) + Vector3(4, 0, 0)
+		assert_lt(final_position.distance_to(expected), 0.002,
+				"host snapshot uses the authoritative mounted child pose")
+
+	# A zero-health vehicle compact legitimately retires the decoded attachment
+	# subtree. Stop restores the authoritative baseline; its fresh decoded view
+	# must replay the load stream because this child has no live compact of its own.
+	sim.set_mission_variable(7, 1)
+	var retired := false
+	for _tick in range(80):
+		sim.step()
+		snapshot = sim.get_present_snapshot()
+		retired = true
+		for record in range(snapshot.size() / stride):
+			if int(snapshot[record * stride + NovaSimulation.PF_TYPE_ID]) == 1419:
+				retired = false
+				break
+		if retired:
+			break
+	assert_true(retired,
+			"decoded zero-health carrier retires the synthetic child subtree")
+
+	sim.restart()
+	snapshot = sim.get_present_snapshot()
+	var restored := false
+	for record in range(snapshot.size() / stride):
+		if int(snapshot[record * stride + NovaSimulation.PF_TYPE_ID]) == 1419:
+			restored = true
+			break
+	assert_true(restored,
+			"restart immediately replays restored NoNetworkCallback attachments")
+
+	# The first live 0x0A after replay must use the re-applied authoritative
+	# items.def classes. If restore had reverted the carrier callback width, this
+	# fold would desynchronize and lose/scatter the following child row.
+	sim.step()
+	snapshot = sim.get_present_snapshot()
+	var live_carrier := false
+	var live_child := false
+	for record in range(snapshot.size() / stride):
+		var type_id := int(snapshot[record * stride + NovaSimulation.PF_TYPE_ID])
+		live_carrier = live_carrier or type_id == 1291
+		live_child = live_child or type_id == 1419
+	assert_true(live_carrier and live_child,
+			"post-restart 0x0A keeps carrier and attachment class widths aligned")
 	sim.free()
 
 

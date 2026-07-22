@@ -1529,6 +1529,72 @@ func test_controller_net_id_does_not_alias_a_wire_handle() -> void:
 			"event a is a simulation net id, not the presentation wire handle")
 
 
+func test_synthetic_controller_effects_are_scoped_to_their_wire_sibling() -> void:
+	const PLAYER_CONTROL_ITEM := 101291
+	var world := _make_item_fx_world()
+	add_child_autofree(world)
+	var effects := FxWorldStub.new()
+	world.add_child(effects)
+	var db := ItemFxDbStub.new()
+	db.attribs[PLAYER_CONTROL_ITEM] = 0x40
+	db.effects[PLAYER_CONTROL_ITEM] = {
+		"particlefx": {
+			"effect": "Effect_whiteExhaust",
+			"userpoint": "FX00",
+		},
+	}
+	var placer := ItemFxPlacerStub.new()
+	placer.item_db = db
+	world.configure_item_fx(effects, placer)
+
+	var siblings: Array[ItemFxModelStub] = []
+	for wire_handle in [0x1004, 0x1005]:
+		var model := ItemFxModelStub.new()
+		model.set_meta("entity_ref", {
+			"kind": NovaMissionData.KIND_ITEM,
+			"origin_kind": 0xff,
+			"index": 0xffffff,
+			"bms_id": 0,
+			"wire_handle": wire_handle,
+			"item_id": PLAYER_CONTROL_ITEM,
+		})
+		world.add_child(model)
+		siblings.append(model)
+		assert_eq(world.present_item_fx(
+				model, NovaMissionData.KIND_ITEM, PLAYER_CONTROL_ITEM), 0)
+
+	world.consume_runtime_effects([{
+		"kind": "vehicle_control_started",
+		"a": 0,
+		"b": 0,
+		"c": -1,
+		"wire_handle": 0x1004,
+	}])
+	assert_eq(effects.attached_spawns.size(), 1,
+			"mounting one synthetic emplacement starts only that sibling's effect")
+	assert_eq(String(effects.attached_spawns[0].owner),
+			"itemfx:%d:0" % siblings[0].get_instance_id())
+
+	world.consume_runtime_effects([{
+		"kind": "vehicle_control_stopped",
+		"a": 0,
+		"b": 0,
+		"c": -1,
+		"wire_handle": 0x1004,
+	}, {
+		"kind": "vehicle_control_started",
+		"a": 0,
+		"b": 0,
+		"c": -1,
+		"wire_handle": 0x1005,
+	}])
+	assert_eq(effects.stopped_groups, [1])
+	assert_eq(effects.attached_spawns.size(), 2)
+	assert_eq(String(effects.attached_spawns[1].owner),
+			"itemfx:%d:0" % siblings[1].get_instance_id(),
+			"the shared synthetic origin cannot activate a neighboring attachment")
+
+
 func test_static_item_effects_spawn_world_bound_from_value_descriptors() -> void:
 	var world := _make_item_fx_world()
 	add_child_autofree(world)

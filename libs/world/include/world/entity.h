@@ -386,6 +386,23 @@ struct Entity {
     // Empty for non-emplacements. [orig: ItemDef+0x54B primaryWeapon; label consumer
     // draw_vehicle_seat_and_armory_labels @0x5a351d via Entity_GetWeaponSlots slot0]
     std::string primary_weapon;
+    // Child entity created from its parent's items.def addeweap* slot. All
+    // variants share the parent/userpoint carry relation; G/C remain explicit
+    // metadata (G flag bit 2, C flag bit 1 in retail) for their distinct
+    // mount/HUD consumers. A zero bone is the witnessed parent-root fallback.
+    EntityHandle emplacement_parent;
+    uint64_t emplacement_parent_spawn_id = 0;
+    Vec3 emplacement_local;
+    int16_t emplacement_yaw_offset = 0;
+    uint8_t emplacement_bone = 0;
+    uint8_t emplacement_kind = 0;
+    uint8_t emplacement_slot = 0;
+    uint8_t emplacement_attachment_flags = 0;
+    uint8_t emplacement_angle_count = 0;
+    int32_t emplacement_down_limit_bam = 0;
+    int32_t emplacement_up_limit_bam = 0;
+    int32_t emplacement_right_limit_bam = 0;
+    int32_t emplacement_left_limit_bam = 0;
     // The emplacement's embedded MountSlot (parent+0x2B4). A UseGun occupant borrows
     // this slot: the AI update only queues nextAction=FIRE, then the later global
     // weapon-action pump owns cadence/ammo and attributes the round to slot.owner.

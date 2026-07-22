@@ -269,6 +269,7 @@ void test_stale_driver_publishes_control_stop() {
         CHECK(stopped.a == 200);
         CHECK(stopped.b == 77);
         CHECK(stopped.c == 0x01000003);
+        CHECK(stopped.d == r.veh_h.packed);
     }
     r.tick(1, t);
     CHECK(r.w.effects.entries().size() == 1); // cleared once, never repeated
@@ -307,8 +308,10 @@ void test_stale_claimant_stops_despite_second_controller() {
     r.w.effects.clear();
     CHECK(entity_process_vehicle_attach(r.w, second, r.veh_h, 2));
     CHECK(r.w.effects.entries().size() == 1);
-    if (r.w.effects.entries().size() == 1)
+    if (r.w.effects.entries().size() == 1) {
         CHECK(r.w.effects.entries()[0].kind == "vehicle_control_started");
+        CHECK(r.w.effects.entries()[0].d == r.veh_h.packed);
+    }
 }
 
 // A non-claimant control occupant leaving publishes nothing; only the claimant's
@@ -362,8 +365,10 @@ void test_gunner_first_claims_and_stops() {
 
     CHECK(entity_detach_from_vehicle(r.w, gunner)); // the claimant leaves
     CHECK(r.w.effects.entries().size() == 1);
-    if (r.w.effects.entries().size() == 1)
+    if (r.w.effects.entries().size() == 1) {
         CHECK(r.w.effects.entries()[0].kind == "vehicle_control_stopped");
+        CHECK(r.w.effects.entries()[0].d == r.veh_h.packed);
+    }
     CHECK(!r.veh().primary_occupant.valid());
     CHECK(r.veh().seats[0].occupant == r.drv_h); // the driver still flies
 }

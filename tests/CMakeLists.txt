@@ -1157,6 +1157,13 @@ add_executable(promote_test mission/promote_test.cpp)
 target_link_libraries(promote_test PRIVATE opennova_mission opennova_world)
 target_include_directories(promote_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(promote_test PRIVATE cxx_std_17)
+# This long-running parity harness deliberately keeps many heavyweight World
+# fixtures in one main. MSVC reserves their debug/optimized stack slots in a
+# single frame; Entity layout growth can therefore exceed Windows' 1 MiB PE
+# default before main executes. Keep the larger reserve local to this test.
+if(MSVC)
+    target_link_options(promote_test PRIVATE "/STACK:4194304")
+endif()
 add_test(NAME mission_promote COMMAND promote_test)
 
 # Emplacement mount: the seat model + EntityCommands mount/dismount/find_best_seat

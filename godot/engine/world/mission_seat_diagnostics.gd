@@ -12,6 +12,7 @@ const SEAT_DRIVER := 5
 const COMMAND_PASSENGER_ONLY := 123
 const COMMAND_SKIP_CONTROLLER := 124
 const COMMAND_ANY_SEAT := 125
+const ITEM_ID_OFFSET := 100000
 
 
 static func model_name_for_graphic(graphic: String) -> String:
@@ -24,17 +25,36 @@ static func build_item_seat_specs(mission, resource_root, item_db, include_raw :
 	if mission == null or resource_root == null or item_db == null:
 		return specs
 	var seen_types: Dictionary = {}
+	var pending: Array = []
 	for raw in mission.get_all_entities():
 		var entity: Dictionary = raw
 		var item_id := int(entity.get("item_id", 0))
 		var type_id := int(entity.get("type_id", 0))
+		if item_id == 0 or type_id == 0:
+			continue
+		pending.append({"item_id": item_id, "type_id": type_id})
+	while not pending.is_empty():
+		var next: Dictionary = pending.pop_front()
+		var item_id := int(next.get("item_id", 0))
+		var type_id := int(next.get("type_id", 0))
 		if item_id == 0 or type_id == 0 or seen_types.has(type_id):
 			continue
 		seen_types[type_id] = true
 		var resolved := seat_specs_for_item(resource_root, item_db, item_id, type_id, include_raw)
-		if not (resolved.get("seats", []) as Array).is_empty() \
-				or not (resolved.get("armory_points", []) as Array).is_empty():
+		var has_runtime_metadata := (
+				not (resolved.get("seats", []) as Array).is_empty()
+				or not (resolved.get("armory_points", []) as Array).is_empty()
+				or not (resolved.get("emplacement_attachments", []) as Array).is_empty()
+				or not String(resolved.get("primary_weapon", "")).is_empty()
+				or bool(resolved.get("mount_config_valid", false)))
+		if has_runtime_metadata:
 			specs.append(resolved)
+		for raw_attachment in resolved.get("emplacement_attachments", []):
+			var attachment: Dictionary = raw_attachment
+			var child_item_id := int(attachment.get("item_id", 0))
+			var child_type_id := child_item_id - ITEM_ID_OFFSET
+			if child_type_id > 0 and not seen_types.has(child_type_id):
+				pending.append({"item_id": child_item_id, "type_id": child_type_id})
 	return specs
 
 
@@ -48,6 +68,7 @@ static func seat_specs_for_item(resource_root, item_db, item_id: int, type_id :=
 		"model_data": null,
 		"seats": [],
 		"armory_points": [],
+		"emplacement_attachments": [],
 		"primary_weapon": "",
 		"mount_config_valid": false,
 		"mount_config": 0,
@@ -74,6 +95,11 @@ static func seat_specs_for_item(resource_root, item_db, item_id: int, type_id :=
 	out["display_name"] = String(item_db.get_display_name(item_id)) if item_db.has_method("get_display_name") else ""
 	if item_db.has_method("get_primary_weapon"):
 		out["primary_weapon"] = String(item_db.get_primary_weapon(item_id))
+	var authored_attachments: Array = []
+	if item_db.has_method("get_emplacement_attachments"):
+		authored_attachments = item_db.get_emplacement_attachments(item_id)
+	out["emplacement_attachments"] = emplacement_specs_from_model(
+			null, authored_attachments, include_raw)
 	var graphic := String(item_db.get_graphic(item_id))
 	out["graphic"] = graphic
 	if graphic.is_empty():
@@ -90,12 +116,50 @@ static func seat_specs_for_item(resource_root, item_db, item_id: int, type_id :=
 		return out
 	out["model_data"] = data
 	out["seats"] = seat_specs_from_model(data, include_raw)
+	out["emplacement_attachments"] = emplacement_specs_from_model(
+			data, authored_attachments, include_raw)
 	# "armory*" userpoints label/scan only on Armory-attrib items — the same attrib
 	# gate the original applies before its userpoint walk
 	# [orig: itemDef->attrib & 0x80000 @0x4361ee/@0x5a36f5; walk @0x436226/@0x5a372b].
 	if item_db.has_method("get_attrib") and (int(item_db.get_attrib(item_id)) & 0x80000) != 0:
 		out["armory_points"] = armory_points_from_model(data)
 	return out
+
+
+static func emplacement_specs_from_model(
+		data: NovaObjectData, authored: Array, include_raw := false) -> Array:
+	var attachments: Array = []
+	for raw in authored:
+		var spec: Dictionary = (raw as Dictionary).duplicate(true)
+		spec["anchor_found"] = false
+		spec["bone_index"] = 0
+		spec["subobject"] = -1
+		spec["source_name"] = String(spec.get("userpoint", ""))
+		spec["position"] = Vector3.ZERO
+		spec["local"] = Vector3.ZERO
+		spec["yaw_offset"] = 0
+		if data != null:
+			var wanted := String(spec.get("userpoint", "")).strip_edges()
+			for i in range(data.get_user_point_count()):
+				var up: Dictionary = data.get_user_point_info(i)
+				if String(up.get("name", "")).strip_edges().nocasecmp_to(wanted) != 0:
+					continue
+				var position := seat_local_from_user_point_position(
+						up.get("position", Vector3.ZERO))
+				spec["anchor_found"] = true
+				spec["bone_index"] = i + 1
+				spec["subobject"] = int(up.get("subobject", -1))
+				spec["source_name"] = String(up.get("name", ""))
+				spec["position"] = position
+				spec["local"] = position
+				spec["yaw_offset"] = seat_yaw_offset_from_user_point_rotation(
+						up.get("rotation", Vector3.ZERO))
+				if include_raw:
+					spec["raw_position"] = up.get("position", Vector3.ZERO)
+					spec["raw_rotation"] = up.get("rotation", Vector3.ZERO)
+				break
+		attachments.append(spec)
+	return attachments
 
 
 static func seat_specs_from_model(data: NovaObjectData, include_raw := false) -> Array:

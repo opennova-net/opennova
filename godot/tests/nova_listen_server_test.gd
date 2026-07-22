@@ -203,6 +203,65 @@ func test_listen_server_present_reads_client_decoded_state() -> void:
 	sim.free()
 
 
+func test_items_attachment_follows_through_listen_client() -> void:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var vehicle := md.add_entity(
+			NovaMissionData.KIND_ITEM, 101291,
+			Vector3(10, 0, 0), Vector3.ZERO)
+	assert_false(vehicle.is_empty())
+	var sim := NovaSimulation.new()
+	sim.enable_listen_server(true)
+	sim.set_item_seat_specs([{
+		"type_id": 1291,
+		"emplacement_attachments": [{
+			"item_id": 101419,
+			"kind": 0,
+			"stored_slot": 1,
+			"anchor_found": false,
+			"local": Vector3(2, 0, 0),
+		}],
+	}])
+	assert_true(sim.load_from_mission_data(md))
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
+			"res://../fixtures/def")), OK)
+	var items := NovaItemDatabase.new()
+	assert_eq(items.load_from_resource_root(root, "items.def"), OK)
+	sim.resolve_item_traits(items)
+
+	# Fold the initial 0x0D pool stream and capture the child's spawn pose.
+	sim.step()
+	var stride := sim.get_present_stride()
+	var snapshot := sim.get_present_snapshot()
+	var child_base := -1
+	for record in range(snapshot.size() / stride):
+		var base := record * stride
+		if int(snapshot[base + NovaSimulation.PF_TYPE_ID]) == 1419:
+			child_base = base
+			break
+	assert_gte(child_base, 0, "the ewep child reached the listen client")
+	var spawn_x := snapshot[child_base + NovaSimulation.PF_POS_X]
+
+	# The child has no 0x0A callback of its own. Its presented motion comes from
+	# the stock 0x0D parent relation recomposed against the decoded vehicle row.
+	sim.debug_set_world_entity_position(
+			int(vehicle["bms_id"]), Vector3(30, 0, 0))
+	sim.step()
+	snapshot = sim.get_present_snapshot()
+	child_base = -1
+	for record in range(snapshot.size() / stride):
+		var base := record * stride
+		if int(snapshot[base + NovaSimulation.PF_TYPE_ID]) == 1419:
+			child_base = base
+			break
+	assert_gte(child_base, 0, "the moving child remains presented")
+	if child_base >= 0:
+		assert_gt(absf(snapshot[child_base + NovaSimulation.PF_POS_X] - spawn_x), 15.0,
+				"the child follows the decoded carrier instead of freezing at spawn")
+	sim.free()
+
+
 func test_present_effect_lookup_matches_client_snapshot_and_reloads_cleanly() -> void:
 	var first_mission := NovaMissionData.new()
 	assert_eq(first_mission.create_default(), OK)

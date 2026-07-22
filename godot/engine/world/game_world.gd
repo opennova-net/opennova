@@ -2055,8 +2055,17 @@ func _item_effect_controller_allows(kind: int, attrib: int) -> bool:
 
 
 func _item_fx_identity_aliases(net_id: int, bms_id: int,
-		spawn_origin: int) -> Array[String]:
+		spawn_origin: int, wire_handle: int = -1) -> Array[String]:
 	var aliases: Array[String] = []
+	var has_wire_identity := wire_handle >= 0 and wire_handle != 0xffff
+	if has_wire_identity:
+		aliases.append("wire:%d" % wire_handle)
+	# Synthetic items.def attachments all carry the same sentinel origin and no
+	# authored BMS/net identity. Their packed runtime handle is therefore the only
+	# alias that distinguishes siblings on the same carrier.
+	if has_wire_identity and bms_id == 0 and (
+			spawn_origin == -1 or spawn_origin == 0xffffffff):
+		return aliases
 	if net_id > 0:
 		aliases.append("net:%d" % net_id)
 	if bms_id > 0:
@@ -2070,7 +2079,8 @@ func _item_fx_control_event_aliases(effect: Dictionary) -> Array[String]:
 	return _item_fx_identity_aliases(
 			int(effect.get("a", 0)),
 			int(effect.get("b", 0)),
-			int(effect.get("c", 0)))
+			int(effect.get("c", 0)),
+			int(effect.get("wire_handle", -1)))
 
 
 func _item_fx_control_node_aliases(node: Node3D) -> Array[String]:
@@ -2084,7 +2094,8 @@ func _item_fx_control_node_aliases(node: Node3D) -> Array[String]:
 	var spawn_origin := 0
 	if origin_kind >= 0 and index >= 0:
 		spawn_origin = ((origin_kind & 0xff) << 24) | (index & 0xffffff)
-	return _item_fx_identity_aliases(net_id, bms_id, spawn_origin)
+	return _item_fx_identity_aliases(
+			net_id, bms_id, spawn_origin, int(ref.get("wire_handle", -1)))
 
 
 func _item_fx_aliases_intersect(left: Array, right: Array) -> bool:

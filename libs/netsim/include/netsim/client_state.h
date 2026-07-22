@@ -36,6 +36,23 @@ struct ClientEntityState {
 	uint8_t aim_yaw_byte = 0;                     // infantry-only entity+720 byte
 	uint8_t anim_state_id = 0;                    // player anim_state_id / infantry anim_byte
 	uint8_t anim_channel_ratio = 0;               // player-only; 0 for infantry
+	// Pool-1 0x0D entity+368 relationship. The spawn positions are absolute;
+	// NetClientView captures this row's rigid parent-local pose after the whole
+	// batch is present, then recomposes it from each decoded parent sample. This
+	// is the retail path for NoNetworkCallback addeweap children.
+	uint16_t parent_handle = 0xFFFF;
+	int32_t parent_local_x = 0;
+	int32_t parent_local_y = 0;
+	int32_t parent_local_z = 0;
+	uint8_t parent_local_yaw_byte = 0;
+	int32_t parent_local_pitch_bam = 0;
+	int32_t parent_local_roll_bam = 0;
+	bool parent_pose_valid = false;
+	// Last explicit compact lifecycle sample. `health_known` prevents a load-only
+	// row from treating its default zero as death.
+	uint8_t state_flags = 0;
+	uint16_t health_word = 0;
+	bool health_known = false;
 	bool seen_this_frame = false;
 };
 
