@@ -1,13 +1,22 @@
-# `libs/npruntime` — clean-slate in-match client + server roadmap
+# `libs/npruntime` — the in-match client + server build record
 
 The IDA-faithful, Godot-free, headless-testable redesign of the NovaWorld (Joint Operations)
 in-match networking client and server. Mirrors the original engine's function flow / type names /
 global names, reuses the verified codec libs, and proves parity by driving the new code with the
 golden pcaps. **Server-first.**
 
-This file is the working build plan + live status. The approved design lives in the session plan
-`ok-so-we-have-gleaming-puzzle.md`; the witness record is `docs/net/novaworld-net-re.md`;
-governing decisions are ADRs 0009–0012.
+> **Status: the P0–P8.2 build-out below is COMPLETE (closed 2026-06-27).** This file is now the
+> record of *how the runtime was built* and why each phase decided what it did — read it for the
+> module map, the frame order, what P8 retired, and the test-harness design. It is **not** live
+> status: in-match work since P8.2 (world-stream paging, the 0x0A/0x18 residual repairs, the
+> retail-join fidelity rounds) is tracked per-divergence in
+> [`docs/divergence-ledger.md`](../../docs/divergence-ledger.md) (the `PAR-NET` slice) and witnessed
+> in [`docs/net/novaworld-net-re.md`](../../docs/net/novaworld-net-re.md) §8. Start there for what
+> is open today.
+
+The witness record is `docs/net/novaworld-net-re.md`; governing decisions are ADRs 0009–0013 and
+0019. The original approved design lived in a session plan that was never tracked in this repo;
+everything load-bearing from it was folded into the phase sections below.
 
 ## Why
 
@@ -440,8 +449,11 @@ Goldens (local, gitignored, captured 2026-06-26): `.scratch/golden/retail-lan-ho
 - Spec / witnesses: `docs/net/novaworld-net-re.md` §3 (session flow), §4 (NAPI dispatch), §5.0
   (bring-up), §5.1/§5.2/§5.2a (load + spawn gates + host spawn flow), §5.9 (replication loop),
   §6.3–6.5 (structs). ADRs 0009–0012.
-- Runbooks: `.agents/network.md` (architecture guardrails, module ownership, frame order),
-  `.agents/interop.md`, `.agents/ida.md`, `.agents/debug.md`.
+- Runbooks: `.agents/README.md` (the standing working rules and task routing),
+  `.agents/interop.md` (capture, packet-diff, live-repro triage), `.agents/ida.md`,
+  `.agents/debug.md`. (`.agents/network.md` is a redirect that points back here — this file
+  is the architecture-guardrails / module-ownership / frame-order owner; do not chase the
+  redirect in a circle.)
 - Promote-from: `libs/novaworld/include/novaworld/{host_session_accept.h,joiner_session.h}`.
 - Seam: `libs/netsim/include/netsim/{connection_fan.h,connection.h,session_transport.h,serializing_sink.h,udp_session_transport.h}`.
 - Test pattern: `tests/novaworld/nw_pool_groundtruth_test.cpp`, `tests/netsim/*`,

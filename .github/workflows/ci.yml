@@ -64,7 +64,7 @@ jobs:
           python scripts/lint/ratchet_counts.py --enforce
           python scripts/lint/maturity_lint.py --enforce
           python scripts/lint/link_graph_check.py --enforce
-          python scripts/lint/ledger_check.py
+          python scripts/lint/ledger_check.py --check
 
       - name: Build and test
         shell: bash

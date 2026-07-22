@@ -19,6 +19,9 @@ divergences in its §8 catalog):
 - `.agents/interop.md`, `.agents/ida.md`, and `.agents/debug.md`
   (`.agents/network.md` is now a redirect to the current architecture owners:
   `libs/npruntime/ROADMAP.md`, ADR 0013, ADR 0019)
+- `docs/divergence-ledger.md` — the `PAR-NET` slice is the live open-work list for
+  in-match networking; `libs/npruntime/ROADMAP.md` is the completed build record
+  behind it, not current status
 - `.agents/porting-0a-emit.md` — runbook for porting the per-frame S2C 0x0A emit
   from the witnessed retail chain (phase counter + sub-blocks + priority/budget
   entity loop), with the verify loop (`scripts/net/diff_0a.py` + the golden) and

@@ -20,6 +20,13 @@ workspaces *uniform*; this one makes them *equally deep* — and grew them to
 Facts below were re-verified 2026-07-04 against the post-program tree;
 anything marked *re-grep at execution* drifts too easily to pin.
 
+> **Counting note (2026-07-22).** Every "twelve workspaces" in this document is
+> this program's scope as it stood at close. ONED has since gained a thirteenth,
+> Particles, which landed with the `.ptl` stack on 2026-07-12 and was never on
+> this program's matrix. The live count is
+> `EditorWorkstation._workspace_defs()`; the live list is
+> [`godot/modtools/README.md`](../../godot/modtools/README.md).
+
 ## The bar (what "up to snuff" means, per workspace)
 
 Four capabilities, each either met, or covered by a tracked divergence

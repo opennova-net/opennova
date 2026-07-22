@@ -1,5 +1,10 @@
 # TODO
 
+Everything here is work that is **not** a parity divergence: editor UX, code
+hardening, and project health. Divergences from the original engine belong in
+[docs/divergence-ledger.md](docs/divergence-ledger.md) instead, and
+[docs/current-state.md](docs/current-state.md) explains which is which.
+
 ## General Mission
 
 - [ ] Waypoint types needs to be an enum and then not a number in the UI
@@ -26,18 +31,22 @@
 
 ## Cleanup & verification backlog
 
-- [ ] `npruntime_golden_gameplay` FAILS when actually run against the golden capture
-      (found 2026-07-04 by re-arming the asset-gated tests; it skip-passed before):
-      the test pins the pre-round-14 `0x2B idle default` at record off-14
-      (`tests/npruntime/golden_gameplay_test.cpp:230`) while the server now recomputes
-      anim state from replicated input (D-NET-159). Decide test-stale vs regression
-      against the wire witness and re-pin. All other gated tests pass with data
-      (117/117 corpus, JO sweeps, LAN-join goldens, golden client).
+- [x] `npruntime_golden_gameplay` — RESOLVED. The 2026-07-04 entry recorded a real failure
+      against the golden capture: the test pinned the pre-round-14 `0x2B idle default` at
+      record off-14 while the server had moved to recomputing anim state from replicated
+      input (D-NET-159). #276 re-pinned it against the wire witness — it now asserts
+      `anim_state_id == 0x2C`, retail's idle2 spawn default
+      [orig: `Entity_ResetToSpawnState @0x4B9714`]. Verified 2026-07-22 by running the
+      binary directly against `retail-gameplay-session.pcapng` (C2S 0x0C = 2351,
+      S2C 0x0A = 2361), so it is passing on real data, not skip-passing. The test still
+      prints its own DEFERRED note: full 0x0A body byte-parity vs the capture is not
+      asserted, because our World holds host+peer only and not the capture's ASH_G3D
+      entity set.
 
 - [ ] Terrain native `[orig]` citation pass: sweep `godot/engine/terrain/` + `libs/terrain` for the remaining uncited chains — `docs/terrain/terrain-re.md` now exists (partial, PAR-R1) and `libs/terrain` carries inline citations after the 2026-07 re-grills (#245); narrow or close this entry after the sweep
-- [ ] Present-pass / entity-reconcile citation pass: `engine/world/mission_present_pass.gd`, `mission_entity_registry.gd`, `wire_present_pass.gd` document design but carry no `[orig]` anchors; engine-research the original present/tick chain and cite into `docs/runtime-architecture.md` + `docs/correspondence.md`
+- [ ] Present-pass / entity-reconcile citation pass: narrowed 2026-07-22 — the fidelity slices gave `mission_present_pass.gd` and `wire_present_pass.gd` `[orig]` anchors (4 and 3 respectively), but `engine/world/mission_entity_registry.gd` still carries none. Remaining: engine-research the original entity-reconcile chain and cite it into `docs/runtime-architecture.md` + `docs/correspondence.md`
 - [ ] Two-net-stack convergence: the NovaNetClient replay/spectate path vs the NovaWorldClient/NovaSimulation listen-server path (see godot/engine/CLAUDE.md); decide convergence once the net workstream stabilizes
-- [ ] `engine/mcp/` relocation (optional): all 11 files are class_name-referenced with zero `res://engine/mcp` literals, so it can move (e.g. next to `modtools/mcp/`) without path edits if engine/ layering ever needs it
+- [ ] `engine/mcp/` relocation (optional): all 12 files are class_name-referenced with zero `res://engine/mcp` literals, so it can move (e.g. next to `modtools/mcp/`) without path edits if engine/ layering ever needs it
 - [ ] `opennova::io` adoption continuation: migrate remaining per-lib byte readers on-touch (policy in libs/CLAUDE.md); excluded: mus/wac VM cursors (faithful-port surface)
 - [ ] `mission_controller.gd` full decomposition (beyond what the inspector split needed): extract selection/gizmo/placement concerns
 - [ ] Mission workspace rail conversion: with the inspector decomposed into section components, moving Mission onto `_build_inspector_defs()` workflow rows is a small step, but it swaps the in-panel mode tabs for the shell's workflow rail (visible layout change) - needs a deliberate UX pass
@@ -55,6 +64,8 @@
 - [ ] Release-gate parity: make tag releases run the same required quality gates as PR/master CI, or reject release tags whose commit is not on `master`. Acceptance: an off-master tag cannot publish, and a valid release commit passes the shared maturity, native, Python, and Godot gates.
 - [ ] Full Linux core tests: add an Ubuntu leg for the complete native/Python suite after triaging any platform-only failures. Acceptance: the full CTest and Python suites run on Linux for every PR without relying on the net-only or packaging jobs.
 - [ ] Incremental conventional linting: establish project-owned editor/format settings, then add per-language lint checks in advisory or changed-file mode before enforcing them. Acceptance: CI checks new changes without requiring a repository-wide reformat, with documented local commands for each enabled linter.
+- [ ] Missing `.gd.uid` sidecars: 582 are tracked but 11 scripts have none (`godot/engine/world/panm_clock.gd`, `godot/engine/world/present_emplaced_weapon.gd`, and 9 files under `godot/tests/`). Godot regenerates them on the next import, which dirties a clean worktree for anyone who opens the editor. Acceptance: run an import once and commit the generated sidecars, then keep them in the same commit as any new script.
+- [ ] Two ctests are `DISABLED TRUE` in `tests/CMakeLists.txt` with reasons recorded but no owner: `parametric_parity` (long byte-identical CPT fixture run, disabled pending CI stability/perf cost) and `particle_smoke_all_fixtures` (waiting on the full 77-file corpus being mirrored into `fixtures/particle/`). Acceptance: each is either re-enabled or converted into an env-gated test alongside the rest of the asset-gated set (`docs/asset-gated-tests.md`).
 
 ## Player info (player.mnu / PLAYER_INFO)
 

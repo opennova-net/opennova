@@ -16,7 +16,8 @@ behavior is summarized and cited.
 
 | Doc | What it covers |
 |---|---|
-| [`engine-primer.md`](engine-primer.md) | Start here: the original engine in one read — binaries/IDBs, engine-wide conventions (fixed-point, coordinates, the 62 Hz tick), subsystem index, and the research toolbox |
+| [`current-state.md`](current-state.md) | Where the project is and where the next step is written down: the phase (maturity program closed, retail-fidelity slices current), the standing slice loop, which record names each domain's next step, and the research queue |
+| [`engine-primer.md`](engine-primer.md) | Start here for engine work: the original engine in one read — binaries/IDBs, engine-wide conventions (fixed-point, coordinates, the 62 Hz tick), subsystem index, and the research toolbox |
 | [`runtime-architecture.md`](runtime-architecture.md) | How a mission runs: the consolidated logic tick, present pass, and audio pass, mapped onto the original main loop |
 | [`correspondence.md`](correspondence.md) | The cross-system parity matrix: which original function each reimplementation corresponds to, with verdicts |
 | [`perf/mission-load-baseline.md`](perf/mission-load-baseline.md) | Recorded mission-load timings (PerfTimeline) and the verdict that gates the perf push-down slices |
@@ -28,6 +29,7 @@ behavior is summarized and cited.
 | [`asset-gated-tests.md`](asset-gated-tests.md) | Every env-var-gated test: the var→data matrix, the skip-passes-as-green caveat, local setup, why captures are never committed, and the CI stance |
 | [`maturity-program.md`](maturity-program.md) | The maturity program (the pre-reimplementation rearchitecture push): seven tracks, five waves, the boundary-conformance checklist, enforcement ratchets, and gates — the program dashboard. **Closed 2026-07-12** (freeze lifted); the enforcement instruments and standing ADRs survive it |
 | [`divergence-ledger.md`](divergence-ledger.md) | The divergence burn-down: every tracked divergence in one place under one vocabulary, the per-domain OPEN tables, the count-to-zero scoreboard, the permanent register, and the UNAUDITED systems — the parity dashboard (ADR 0022) |
+| [`render/README.md`](render/README.md) | The render domain's own index: which REN record covers what, and the three-tier parity instrument (state vectors, offline compare, retail scene attestation) |
 | [`required-resources.md`](required-resources.md) | The witnessed boot-required, hardcoded-by-name resource set (R8/ENG-6): the fatal set, per-resource failure behavior, the ordered boot sequence, and the D-BOOT catalog — the source for the ENG-6 manifest and ONED's new-game scaffold |
 
 ## Decision records
