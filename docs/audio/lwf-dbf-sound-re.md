@@ -168,7 +168,7 @@ and a per-frame updater plays the queue **one audio channel at a time**:
 ## WAC scripted voice — `wave` / `pwave` (grilled 2026-06-15; re-confirmed 2026-07-09)
 
 A WAC mission script triggers voice/wav lines separately from the BMS `PlayWavList`
-dialog system. The `wave` and `pwave` commands both target `sub_4ED610`:
+dialog system. The `wave` and `pwave` commands both target `Wac_PlayScriptedVoiceWave`:
 
 - guards on `g_local_player_entity` (no-op without a local player, like
   `Dialog_PlayByName`);
@@ -195,7 +195,7 @@ direct `.wav` name, not a `.DBF` dialog id.
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
-| D-SND-5 | WAC `wave`/`pwave` emit a `"dialog_wav"` effect carrying the filename; the host (`NovaMissionAudio.play_wac_wave`) reads the wav through the VFS, decodes via `NovaWavLoader`, and plays it on a single `_wac_voice` `AudioStreamPlayer` that `play()` restarts (interrupt-on-new) | `sub_4ED610` resets `dword_C6EC30` then plays the loaded wav | host-side reproduction of the single interrupting voice channel. Previously WAC `wave`/`pwave` fell through `vm.cpp`'s default case to an unrouted `kind="wave"` effect and never played. Scope: `wave`/`pwave`; positional `SSNwave`/`SSNradio` (voice at an entity) and the rest of the sound family (`sound`, `sound2tgt`, `SS2SSN`, `waveready`) remain parsed-but-unconsumed, tracked follow-ups. |
+| D-SND-5 | WAC `wave`/`pwave` emit a `"dialog_wav"` effect carrying the filename; the host (`NovaMissionAudio.play_wac_wave`) reads the wav through the VFS, decodes via `NovaWavLoader`, and plays it on a single `_wac_voice` `AudioStreamPlayer` that `play()` restarts (interrupt-on-new) | `Wac_PlayScriptedVoiceWave` resets `dword_C6EC30` then plays the loaded wav | host-side reproduction of the single interrupting voice channel. Previously WAC `wave`/`pwave` fell through `vm.cpp`'s default case to an unrouted `kind="wave"` effect and never played. Scope: `wave`/`pwave`; positional `SSNwave`/`SSNradio` (voice at an entity) and the rest of the sound family (`sound`, `sound2tgt`, `SS2SSN`, `waveready`) remain parsed-but-unconsumed, tracked follow-ups. |
 
 ## items.def marker sounds
 
@@ -471,11 +471,11 @@ slots / crossfade), and the `dialog_vs_ambient_probe.gd` bed-vs-dialog gate.
 | D-SND-8 | master fade ramp, underwater vol/pan halving, options SFX volume, and the bearing-byte pan map to host territory (Ambient bus volume, Godot's spatial panner); doppler (emitter/listener velocity feed) unported | `g_SoundMasterFadeQ24 @ 0x85A3E4` (255/256 steady), `g_SoundListenerUnderwater @ 0x33429A8` halving @ 0x75ca7d, `g_SoundVolumeOption @ 0x24D20CC` per channel write, atan2 bearing pan @ 0x5289c0, `calculate_3d_sound_attenuation @ 0x527f60` doppler | host playback/bus routing (not grillable address-by-address); the underwater duck and doppler are candidates once an underwater/vehicle pass needs them. |
 
 **IDB changes (2026-07-10 session):** renamed `Entity_SpawnBoneEffect -> Entity_UpdateEnvSoundEmitter @ 0x4a8080`,
-`Entity_CalcTerrainRegion -> Entity_CalcTimeOfDayRegion @ 0x408110`, `sub_57D5B0 ->
+`Entity_CalcTerrainRegion -> Entity_CalcTimeOfDayRegion @ 0x408110`, `Env_GetTimeOfDayHoursQ16 ->
 Env_GetTimeOfDayHoursQ16`, `register_effect_slot_entry -> SoundEmitter_RegisterSetLayers
 @ 0x528340`, `sub_529270 -> SoundEmitter_Register`, `SoundProfile_FindLoadedByName ->
 SoundBank_FindSetByNameAnyBank @ 0x5274f0`, `sub_529970 -> Sound_ApplyOcclusionDistance`,
-`update_positional_sound_emitters -> SoundEmitter_UpdateAndMixTop8 @ 0x5284a0`, `sub_767060 ->
+`update_positional_sound_emitters -> SoundEmitter_UpdateAndMixTop8 @ 0x5284a0`, `AudioChannel_OpenSlotChecked ->
 AudioChannel_OpenSlotChecked`, `BinkVideo_ResetState -> SoundProfile_ResetState @ 0x526de0`
 (kong misnomers, all behavior-witnessed); globals `g_SoundEmitterSlots @ 0x24D66A8`,
 `g_AmbientChannelHandles @ 0x24D6688`, `g_AmbientChannelEmitterIdx @ 0x24D6668`,

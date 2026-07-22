@@ -215,7 +215,7 @@ nationality-alignment accessor.
   body display name), both resolved through the `"Avatars"` RTXT table and shown
   as `sprintf("%s - %s", last, first)`. The voice list then comes from
   `[orig: populate_player_voice_combo @ 0x55dce0]`. Combo lookup by packed id:
-  `[orig: sub_57A270 @ 0x57a270]`.
+  `[orig: MinimapSlot_FindByPackedId @ 0x57a270]`.
 
 So the menu reads the parsed object directly; the display vocabulary lives in the
 `"Avatars"` RTXT string table, keyed by the name fields, and the head/body
@@ -521,7 +521,7 @@ Per the project shared-IDB policy these were left as proposals, not written.
   `sub_57AEC0 → CAvatarDefs_EnumCombosByNatDiv`,
   `sub_57A310 → CAvatarDefs_GetComboLastNameKey`,
   `sub_57A340 → CAvatarDefs_GetComboFirstNameKey`,
-  `sub_57A270 → CAvatarDefs_FindComboByPackedId`.
+  `MinimapSlot_FindByPackedId → CAvatarDefs_FindComboByPackedId`.
 - **Rename globals:** `dword_2697F08 → g_pAvatarDefs`,
   `count_and_entries → g_avatarDefs` (or `g_avatarDefsAndMinimap`, given the
   composite), `byte_2697F3C → g_avatarPartPool`,

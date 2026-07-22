@@ -110,7 +110,7 @@ foliage/effects brightness ride the exposure.
 **The world lighting block (writer).** `CTerrainRenderer_BuildLightingShaderConstants
 @ 0x5c8090` (callers: `Terrain_RenderSceneWithReflection @ 0x5c93a0` ×5 —
 per-wave, mirrored and unmirrored — `Player_RenderFirstPersonViewModel
-@ 0x4deea4`, and the offscreen `sub_5C8510`) fills a 32-float block from the
+@ 0x4deea4`, and the offscreen `Water_RenderReflectedWorldScene`) fills a 32-float block from the
 env blocks' **[0] render colors** (post-modulator — the exposure reaches
 world lighting through the block colors themselves) ÷255: [0] dir-enable
 flag, [1..3] ← `Env_LightBlock`, [5..7] ← −normalize(`Environment_GetLightDirectionFloat
@@ -217,7 +217,7 @@ touching the constants. The sector-model lightmap pass
 back-to-front, sets **D3D light 4 as a pure-ambient injector** (ambient =
 detail-average × ramp — ×2 combined on the non-multitexture path — diffuse
 0), and draws 4 quadrants per sector through the lightmap TILE cache
-(`sub_6042A0 @ 0x6042a0`; the planar world→tile-UV matrix stored @ 0x3266b88
+(`Terrain_FindSectorPatchRT @ 0x6042a0`; the planar world→tile-UV matrix stored @ 0x3266b88
 feeds the wind VS's c7/c8 projection). The mission lightmap TGA
 (`Terrain_LoadLightmapTexture @ 0x604a90`: 64-px tiles, dims + reciprocals
 @ 0x319f7b0..) is sampled by `render_foliage_billboards @ 0x607b30` and

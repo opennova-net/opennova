@@ -386,7 +386,7 @@ widget through a single host `.lwf` profile - all corrected.
 
 `g_MenuSoundBank @ 0x25DC3E0` (the hardcoded `menu.lwf` load at profile-selector init
 `@ 0x5613bf`) is a RED HERRING: it is the player-info VOICE preview bank
-(`VOICE_%d`, `sub_55FF70`), not the widget sound mechanism.
+(`VOICE_%d`, `PlayerInfo_PreviewVoice`), not the widget sound mechanism.
 
 ## Screen music `[orig: UI_DispatchScreenEvent @ 0x54e6a0]`
 
@@ -666,9 +666,9 @@ applied (the IDB is shared state — apply manually via `set_comments`, reversib
 | `WeaponLoadout_ApplyFromBuffer @ 0x565cd0` (ACCEPT/CANCEL, `skip_apply` arg) | `ArmoryMenuHost._on_accept/_on_cancel` -> the shell's SP apply |
 
 IDB state note (2026-06-23): the 2026-06-23 render grill renamed `sub_639480 ->
-CUIScene_SetScreenScale`, `sub_6465E0 -> CWnd_AccumulateAncestorOffset`, `sub_6394E0 ->
-CUIScene_GetActiveScreenName`, `sub_647E40 -> CUIElement_DrawTextureNative`, `sub_654E60
--> CTextureManager_DrawScaledRect`, `sub_65BE40 -> CComboWnd_Construct`, and `sub_65CEB0
+CUIScene_SetScreenScale`, `sub_6465E0 -> CWnd_AccumulateAncestorOffset`, `CUIScene_GetActiveScreenName ->
+CUIScene_GetActiveScreenName`, `sub_647E40 -> CUIElement_DrawTextureNative`, `CTextureManager_DrawScaledRect
+-> CTextureManager_DrawScaledRect`, `sub_65BE40 -> CComboWnd_Construct`, and `CMarqueeWnd_ParseXMLDefinition
 -> CMarqueeWnd_ParseXMLDefinition` (all anchored). `0x64ad90` is still unnamed
 (`sub_64AD90`) and `0x649790` folds into the `0x648120` body (vtable-reached, no direct
 xrefs); naming/splitting them remains a proposed edit.
@@ -688,7 +688,7 @@ IDB state note (2026-07-16 dropdown-input grill): renamed, all anchored —
 `sub_6480E0 -> CWnd_SetShown`, the FLIRT-misnamed
 `UMSSchedulerProxy::GetTransferListEvent -> CWnd_IsShown` (`0x646280`, returns `this[56]`),
 `sub_6480A0 -> CWnd_SetParentAndAttach`, `sub_658340 -> CButtonWnd_HandleNamedEvent`,
-`sub_64AB80 -> CCheckboxWnd_HandleNamedEvent`, `sub_646970 ->
+`sub_64AB80 -> CCheckboxWnd_HandleNamedEvent`, `CWnd_EmitEventToNamedHandlerAndCallbacks ->
 CWnd_EmitEventToNamedHandlerAndCallbacks`, `sub_6471C0 -> CWnd_MarkDirtyWithChildren`;
 data `dword_31C16CC -> g_ui_mouse_capture_wnd`, `dword_31C16D0 -> g_ui_active_combo_wnd`,
 `dword_31C16D8 -> g_ui_open_popup_wnd`. Witness comments at `0x65c190`, `0x63ab00`,

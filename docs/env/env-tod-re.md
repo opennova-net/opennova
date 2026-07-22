@@ -53,7 +53,7 @@ remain parsed-but-deferred — is tracked per field in
 | `EffectWorld_TickInstancesAndLightScale @ 0x5aa170` | terrain_rgb reciprocal consumer (documented, deferred) |
 
 Misnames fixed during the grill: `Render_SetFogParams @ 0x54b4b0` was an entity-pool sweeper
-(now `Entity_DestroyUnreferencedPool4Entries`); `sub_57C4B0`/`sub_57C4F0` were "water
+(now `Entity_DestroyUnreferencedPool4Entries`); `Environment_SetCurrentTime`/`Environment_SetTodRate` were "water
 reflection"/"ambient G" in kong comments but are the current-time and TOD-rate setters.
 
 ## Format truths (parser, `TimeOfDay_ParseProperty @ 0x57c590`)
@@ -294,7 +294,7 @@ Env_WaterHeightFixed` at most sites. Complete ordered walk:
 | 4 | @ 0x57e471–0x57e4ad | device fog color ← underwater ? `Env_WaterColorLit` : `is_alternate_fog` ? `0x808080` : fog block `[0]`; fog type ← underwater ? 1 : `Env_FogType` |
 | 5 | @ 0x57e4c3–0x57e4db | `Render_SetFogState(0.5, end/65536, type, Env_OvercastBlend/65536)` |
 | 6 | @ 0x57e4ee | `Env_FogEndApplied = end` |
-| 7 | @ 0x57e4f4–0x57e505 | smoothed sky height pushed on change → `Terrain_PushSkyDomeHeightFloat @ 0x610920` → `sub_579070` (dome) |
+| 7 | @ 0x57e4f4–0x57e505 | smoothed sky height pushed on change → `Terrain_PushSkyDomeHeightFloat @ 0x610920` → `SkyDome_SetHeightAndRebuild` (dome) |
 | 8 | @ 0x57e512–0x57e538 | if local player && `dword_C6EAFC`: `modulator.target[11] = 0x10101 × compute_ambient_light_along_direction(player)`, then `ColorBlock_SetStepDeltas(modulator, 62)` — exposure reaches the new target in 62 ticks (1 s) |
 
 **Ceiling/floor application points** (the G4 question): (a) the **indoor branch of the
@@ -793,12 +793,12 @@ the scar/decal setup `@ 0x58aa80`) fell through into unclaimed code — merged a
   clear depth `1 − 2⁻¹⁵` → **`GTexRT_SelectThunk(&Water_ReflectionTexture)` = RTT
   begin** → BeginScene/viewport/proj → scar ctx → `Environment_ApplyFogAndAmbient`
   (`@ 0x5c164c`) → fog color/mode → the sky dome (`sub_579CB0`) → the lo-res
-  terrain leg (`sub_60C670`) → projection rebuilds + `sub_5C90A0` +
+  terrain leg (`Terrain_RenderSectorBatchLit`) → projection rebuilds + `sub_5C90A0` +
   **`Water_RenderReflectedWorldScene @ 0x5c8510`** → an inline effect quad (the
   `Water_ShaderAdditiveFlat` consumer `@ 0x5c1913`) → **celestial bodies + sun glow
   mirrored into the reflection** (`@ 0x5c18fb/0x5c1904`) → restore +
   `GTexRT_RestoreThunk` = RTT end. `Water_RenderReflectedWorldScene` (the ex
-  "sub_5C8510 three flushes" DECOMPILE-FAIL — a 5-byte header `call sub_58AA80`
+  "Water_RenderReflectedWorldScene three flushes" DECOMPILE-FAIL — a 5-byte header `call sub_58AA80`
   falling through into the body, real extent → retn `@ 0x5c8af8`): fog/ambient
   push (0,0) → `CTerrainRenderer_BuildLightingShaderConstants(0)` (NORMAL
   lighting — the arg-1 mirrored-lighting sub-passes belong to the MAIN pass's
@@ -1056,7 +1056,7 @@ image and the env grill did not close (terrain-lighting / foliage scope):
 | `Terrain_SetLightingColors @ 0x5C4B10` | VERIFY-pending | no fn at that address; `render_visibility_portal_traversal @ 0x5c4ae0` at −48. Entity/sector lighting was since anchored at `terrain_sector_compute_lighting @ 0x5c7550` (§iris) |
 | `Render_ConfigureFog @ 0x5F9890` | VERIFY-pending | unnamed `sub_5F98A0` at +16, body unconfirmed; the device fog path was since anchored at `CD3DDevice_SetFogParameters @ 0x677960` (§Fog policy) |
 | `Terrain_GetModulatedColorAtPos @ 0x5C5FE0` | VERIFY-pending | nearest `Entity_BuildProjectileTrailRay @ 0x5c6090` at +176 — likely a different function |
-| `Foliage_BuildGeometry @ 0x5BF5F0` | stale / do not cite | address resolves inside `build_shader_pass_name @ 0x5bf5d0`; foliage placement anchors are `terrain_update_foliage_tiles @ 0x601F50`, `generate_foliage_instances @ 0x600980`, and `sub_606620 @ 0x606620` |
+| `Foliage_BuildGeometry @ 0x5BF5F0` | stale / do not cite | address resolves inside `build_shader_pass_name @ 0x5bf5d0`; foliage placement anchors are `terrain_update_foliage_tiles @ 0x601F50`, `generate_foliage_instances @ 0x600980`, and `Foliage_SampleFoliageMapMask @ 0x606620` |
 | jodemo `sub_5D0A90` (terrain-init caller of the loader) | closed by the grill | `Terrain_LoadEnvironmentConfig @ 0x610940` (§BMS overrides) |
 
 ### Gap-walk dispositions
@@ -1123,7 +1123,7 @@ roadmap slice C7).
 | 0x57d940 | `sub_57D940` | `ColorBlock_SetStepDeltas` | per-channel `|target−current|/frames` body |
 | 0x58db30 | `Render_UnpackFogColor` | `Render_UnpackModulatorToLightScale` | input = modulator block value; output consumed by `apply_shader_parameters` (old kong name wrong) |
 | 0x5aaef0 | `CEffectWorld_UnpackAmbientLightColor` | `EffectWorld_UnpackModulatorToAmbientScale` | same shape, foliage/effects consumers |
-| 0x610920 | `sub_610920` | `Terrain_PushSkyDomeHeightFloat` | 16.16→float → `sub_579070` |
+| 0x610920 | `sub_610920` | `Terrain_PushSkyDomeHeightFloat` | 16.16→float → `SkyDome_SetHeightAndRebuild` |
 | 0x8409f4-fc | `flt_8409F4..` | `Render_LightScaleR/G/B` | modulator÷64 shader constant |
 | 0x840b24-2c | `flt_840B24..` | `EffectWorld_AmbientScaleR/G/B` | effects/foliage gain |
 | 0x7d7338 | `aVs11DclPositio` | `SkyVS_GradientPassSource` | embedded vs_1_1 source, pass 1 |

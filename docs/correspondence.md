@@ -161,8 +161,8 @@ NW-C2 in [§8](net/novaworld-net-re.md). Polymorphic edit-widget `+0x38` dispatc
 
 | reimpl symbol (file) | original | addr | role | evidence | status |
 |---|---|---|---|---|---|
-| `epask_encrypt` (`libs/novacrypto/src/epask.cpp`) | `sub_6669A0` | `0x6669a0` | NWU → modexp → NWU → A-P | golden vectors == test fixtures | matching (byte-exact) |
-| `modexp_encrypt` (`epask.cpp`) | `sub_666600` / `modular_exponentiation` | `0x666600` / `0x666470` | `pow(byte+2,exp,mod)`, 32-bit LE/byte | `+2` byte-confirmed | matching |
+| `epask_encrypt` (`libs/novacrypto/src/epask.cpp`) | `EPASK_Encrypt` | `0x6669a0` | NWU → modexp → NWU → A-P | golden vectors == test fixtures | matching (byte-exact) |
+| `modexp_encrypt` (`epask.cpp`) | `EPASK_ModexpEncrypt` / `modular_exponentiation` | `0x666600` / `0x666470` | `pow(byte+2,exp,mod)`, 32-bit LE/byte | `+2` byte-confirmed | matching |
 | `encode_ap` (`epask.cpp`) | `NapiNP_EncodeToHexAlpha` | `0x666570` | A-P low-nibble-first | — | matching |
 | `epask_from_string` (`epask.cpp`) | `parse_colon_delimited_string` | `0x666710` | `exp:mod:key` split | — | matching |
 | (EPASK NWU copy) | `NapiNP_EncryptBufferAlt` | `0x6668e0` | UI-module NWU ADD chain | == `0x6187b0` | matching |

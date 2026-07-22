@@ -532,7 +532,7 @@ One trunk PR, slice-per-commit, per-slice attestations in the description.
   the terrain/foliage **c0/c1 = sky/light blocks** closed
   (`@ 0x604420/0x604ee0/0x610c80`; `terrain_lighting.gdshaderinc` corrected;
   the planning anchors resolved: `sample_terrain_lightmap` = the tinted
-  colormap sampler feeding D-FOLIAGE-1, `sub_604CE0` = scorch textures,
+  colormap sampler feeding D-FOLIAGE-1, `Terrain_LoadScorchTextures` = scorch textures,
   `render_terrain_lightmaps` = the sector-model lightmap-tile pass);
   point lights (modulator-scaled, {1,0,15/r²,1} = the OED math,
   owner/interior group culling, ≤4 D3D lights) witnessed;

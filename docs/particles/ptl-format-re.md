@@ -509,7 +509,7 @@ dedicated host is headless and never draws) + the `game_world.gd` fx routing.
 | `CEffectWorld_FindEffectDefByName` (renamed 2026-07-16 from `CEffectWorld_FindDefByName`) | `0x5e34f0` | by-name effect lookup over the parsed set (the world's +70 def list); compares each def's vtable+0 name with **`_stricmp` @ 0x5e352c** — effect names resolve case-insensitively | `EffectScene::effect_by_name` `fold_ascii` keys (pinned by `catalog_and_stock_alias_contract`) |
 | `CEffectWorld_FindParticleDefByName` (renamed 2026-07-16 from kong `CEffectWorld_FindTableDefByName` — a trap; the true TBLDEF find is `@ 0x5e9540`) | `0x5e41d0` | by-name PARTICLE-def lookup over the world's +82 def list; compares with **`_stricmp` @ 0x5e420c**. The effect-def pdefs member resolve (`@ 0x5e4920`, 64-byte name slots from +340) resolves through it and logs `UNRESOLVED: EFFDEF %s missing PARDEF %s` on a miss | `EffectScene` `definition_by_name` `fold_ascii` keys + `ParticleFile::find_particle` / `NovaParticleFile::find_particle`/`find_effect` case-folded (pinned by `pdef_reference_resolution_is_case_insensitive_contract` + the minimal-effect `find_particle` fold check) |
 | `CEffectBank_ResolveAllEntries` (the EFFDEF vtable+8 resolve, slot `@ 0x7dca2c`) | `0x5e4920` (0xab) | resolves the effect's pdefs members into its entry buffer (+2388) **all-or-nothing**: each 64-byte name (from +340) finds its PARDEF via `@ 0x5e41d0`, then runs the PARDEF's own vtable+8 resolve; the FIRST miss breaks (`@ 0x5e495d`), logs `UNRESOLVED: EFFDEF %s missing PARDEF %s` once, `CCircularBuffer_ClearAll`s the whole buffer (`@ 0x5e49be`), and returns 0 with the resolved flag (+332) left 0 — a partially-resolvable effect keeps NO members. The def stays in the world list (`CParticleManager_ResolveAllReferences @ 0x5ec850` tracks the failure but never unlinks), so intern/find still return it and a spawn allocates a group whose child-spawn walks the empty buffer — zero children, reaped on the next update. Zero authored pdefs short-circuits to success | `EffectScene::open` clears `definition_indices` and stops at the first unresolved pdefs member; the effect stays registered by name and `spawn` returns `EmptyEffect` (the zero-child group that reaps immediately, expressed as a rejection receipt). Pinned by `effect_resolve_is_all_or_nothing_contract` |
-| `CEffectWorld_SpawnEmitterAtPosition` | `0x5f6df0` (0x182) | spawn descriptor (14 dwords): +0 flags (bit0/1 = orientation-in-descriptor; bit2 inverted into the spawn call), +4 interned handle (≤0 → +8 name ptr), +12 owner/tag (stored at emitter+0), +16..24 fixed-point position and +28..36 fixed-point orientation (both through `Math_FixedPointToFloat3_YNegated @ 0x611210`), +40 attenuation 16.16, +44 blend 16.16, +48/+52 sample params (action-slot coupling); spawns via `sub_5EA200(g_EffectWorld, 0, def, pos, orient, flag)` | `NovaEffectWorld.spawn_effect_request`: one value-owned `EffectScene` group with one pooled emitter value per `pdefs` entry; the mission fixed tick owns lifetime, while the shared renderer consumes immutable draw packets. No emitter renderer Nodes cross the facade |
+| `CEffectWorld_SpawnEmitterAtPosition` | `0x5f6df0` (0x182) | spawn descriptor (14 dwords): +0 flags (bit0/1 = orientation-in-descriptor; bit2 inverted into the spawn call), +4 interned handle (≤0 → +8 name ptr), +12 owner/tag (stored at emitter+0), +16..24 fixed-point position and +28..36 fixed-point orientation (both through `Math_FixedPointToFloat3_YNegated @ 0x611210`), +40 attenuation 16.16, +44 blend 16.16, +48/+52 sample params (action-slot coupling); spawns via `CEffectWorld_AllocGroupAndSpawn(g_EffectWorld, 0, def, pos, orient, flag)` | `NovaEffectWorld.spawn_effect_request`: one value-owned `EffectScene` group with one pooled emitter value per `pdefs` entry; the mission fixed tick owns lifetime, while the shared renderer consumes immutable draw packets. No emitter renderer Nodes cross the facade |
 | `WacScript_SpawnEffectAtSsnEntity` | `0x4f23a0` (0x13f) | (renamed from kong `WacScript_SpawnSoundAtEntity` — it spawns a particle emitter) WAC `fx2ssn`: resolves the `(pool<<12)\|slot` handle, **detaches any live emitter at entity+460 first**, descriptor at the entity position, orientation = **terrain surface normal** at its grid cell (`outMillis`/`off_849934` tables), new handle → entity+460 | `game_world._route_mission_effects` resolves the live registry SSN, then `spawn_effect_owned`; replacement detaches the previous group, each sweep follows the entity position/forward, and registry removal stops emission while live world-space particles drain. Initial orientation remains up until the terrain-normal read lands (D-PTL-7) |
 | `WacScript_SpawnEffectAtTargetMarker` | `0x4f7fd0` (0x122) | (renamed from kong `WacScript_PlaySoundAtEmitter`) WAC `fx2tgt`: pool-3 walk for `itemDef+80 == 6088` (placed target marker, ids 1..99) with the matching target id; same descriptor + entity+460 handle protocol | unrouted: which `.bms` record field carries the target number is unwitnessed (§8) |
 | `ActionSlot_SpawnEffect` | `0x401f20` (0x17f) | weapon-action effect spawn (the ACTION block `particle` key = ActionDef+16, a 1-based interned handle): resolves the firing entity through vehicle parent chains, `Entity_ComputeActionTransform @ 0x401310` fills descriptor position/orientation from the action bone, and passes descriptor dwords 12/13 to the group spawn. The FIRE path supplies `ActionSlot_ClearEffectHandle @ 0x53f760`; `CEffectGroup_SetDeathCallback @ 0x5e1940` stores it at group+0x5C/+0x60. The recoil path passes 0 and never records a guarded handle. While the group handle lives, the pump re-anchors it to the recorded action bone every tick and releases it underwater [orig: `WeaponAction_ProcessFrame @ 0x540edf` → `CEffectEmitter_UpdatePositionAndParams @ 0x5f6810`] | routed by `LocalPlayerHost` for local FIRE: resolve the live viewmodel userpoint, apply the settled-scope gate, and key the owner-bound live-group guard by viewmodel generation/action. `GameWorld.register_effect_anchor` supplies the pump tracker's host analog. Every witnessed weapon particle enters the global World-domain pass; exact vehicle-parent capability/transform and third-person model sourcing remain open (§8) |
@@ -688,7 +688,7 @@ the retail degree→radian conversion is not repeated.
 ### 5.4 Distort (blend mode 7)
 
 Uses the secondary render-state pointer at `sample+8`; the captured scene is bound by
-`sub_680760`. Type-7 atlas preprocessing converts the blue height byte to a wrapped normal
+`apply_texture_stages`. Type-7 atlas preprocessing converts the blue height byte to a wrapped normal
 with scale `0.03125` and forces B=255 (§4). At draw time, let `n = 2·tex.rgb−1`,
 `θ = GetTickCount()·0.004`, and `w = (sin θ, cos θ, −sin θ) / 51.2`. With particle alpha `a`
 and the projective scene coordinate `p`, retail samples:
@@ -1158,21 +1158,21 @@ wiring). Witnessed from the kong IDB:
 
 - **`Debug_DrawParticleStats @ 0x44c840`** — the counts + emitter-list page:
   - Header: `"Current Particle Count:  %ld / %ld"` — current vs PEAK. Current
-    comes through the checked facade `sub_5F69C0` (0 when the global disable
+    comes through the checked facade `EffectWorld_GetActiveEntryCountChecked` (0 when the global disable
     byte `byte_24D261D` is set, the world is absent, or its init probe
-    `sub_5DF7A0` fails; otherwise `sub_5DFED0(g_EffectWorld)` = the world's
+    `sub_5DF7A0` fails; otherwise `CEffectWorld_GetEntryCount(g_EffectWorld)` = the world's
     active-entry count, the used size of the circular buffer at `world+116`).
     The peak global (`dword_A895E0`) latches the max and RESETS TO ZERO when
     the current count hits 0.
   - Body: iterates from the shared debug scroll global (`dword_A895B4`, also
     written by `Debug_ScrollPageUp @ 0x44a390` / `Debug_ScrollPageDown
-    @ 0x44a900`), listing names via `sub_5F6710(group, index)` → the entry's
+    @ 0x44a900`), listing names via `EffectWorld_GetEntryNameByIndex(group, index)` → the entry's
     vtable slot-0 name getter; first row of a group prints `"%02ld   %s"`,
     subsequent rows indent `"      %s"`. Rows draw at x=566 from y=148, step
     20, clipped at y>588.
 - **`Debug_DrawEffectBrowser @ 0x44c950`** — the interactive browser page:
   - Header rows at (25, 20/40/60/80), color 0xFFC10DFF-style (-4128769):
-    `"Total: %d"` (registered effect count via `sub_5E01D0(world)`),
+    `"Total: %d"` (registered effect count via `CEffectWorld_GetEffectDefCount(world)`),
     `"Current: %d"` (the selection global), `"Effect: %s"` (selected
     effect's vtable slot-0 NAME), `"File: %s"` (vtable +20 — **each effect
     knows its source file**; the browser displays which .ptl provided it).
@@ -1184,7 +1184,7 @@ wiring). Witnessed from the kong IDB:
     DESPAWNS the previous debug instance (`sub_5E57C0`, handle
     `dword_A895E8`, validity probe `sub_5E5FF0`) or SPAWNS the selected
     effect at `camera_pos + camera_fwd >> 3` (fixed-point camera globals →
-    `Math_FixedPointToFloat3_YNegated @ 0x611210` → `sub_5EA200(world, …,
+    `Math_FixedPointToFloat3_YNegated @ 0x611210` → `CEffectWorld_AllocGroupAndSpawn(world, …,
     effect, origin, dir, 1)`).
 - **Registration-time miss log**: `CEffectManager_RegisterAllMaterials
   @ 0x5f79c0` interns a fixed 78-pair table of engine-referenced effect
@@ -1211,7 +1211,7 @@ wiring). Witnessed from the kong IDB:
 ### Texture entries, the atlas exclusion gate, and the null-material path
 
 - A texture ENTRY carries its (already per-frame) file name at +24; the size
-  probe `sub_5DFAA0` builds `path = manager+732 dir ⧺ name` (`sub_5DF8C0` —
+  probe `CParticleTextureEntry_ProbeSizeFromDisk` builds `path = manager+732 dir ⧺ name` (`CParticleManager_BuildTexturePath` —
   plain concat, NO frame derivation here), header-loads via
   `CTextureData_LoadTGA @ 0x5f7b20`, and stores width/height at +288/+292;
   a load failure leaves the size unset and returns 0.
@@ -1235,11 +1235,11 @@ wiring). Witnessed from the kong IDB:
 
 ### IDB write-backs (APPLIED 2026-07-13, idb saved)
 
-Applied at anchored confidence (plus `sub_5E0D40 → CParticleEmitter_DrawDebugAABB`, `byte_24D261D → g_ParticlesDisabled`, and the mislabeled `newSize → g_DebugBrowserSelection` / `group_index → g_DebugPageScroll`): `sub_5F69C0 →
-EffectWorld_GetActiveEntryCountChecked`, `sub_5F6710 →
+Applied at anchored confidence (plus `sub_5E0D40 → CParticleEmitter_DrawDebugAABB`, `byte_24D261D → g_ParticlesDisabled`, and the mislabeled `newSize → g_DebugBrowserSelection` / `group_index → g_DebugPageScroll`): `EffectWorld_GetActiveEntryCountChecked →
+EffectWorld_GetActiveEntryCountChecked`, `EffectWorld_GetEntryNameByIndex →
 EffectWorld_GetEntryNameByIndex`, `sub_5DFED0 → CEffectWorld_GetEntryCount`,
-`sub_5DFAA0 → CParticleTextureEntry_ProbeSizeFromDisk`, `sub_5DF8C0 →
-CParticleManager_BuildTexturePath`, `sub_5E01D0 →
+`sub_5DFAA0 → CParticleTextureEntry_ProbeSizeFromDisk`, `CParticleManager_BuildTexturePath →
+CParticleManager_BuildTexturePath`, `CEffectWorld_GetEffectDefCount →
 CEffectWorld_GetEffectDefCount` (probable), plus entry comments on
 `Debug_DrawParticleStats` / `Debug_DrawEffectBrowser` globals
 (`dword_A895A4` = debug page index, `dword_A895B0` = page-6 action latch,
