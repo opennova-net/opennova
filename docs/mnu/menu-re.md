@@ -850,7 +850,11 @@ Ported and matching: the zone-gated open on the use-item key (SHIFT), including
 its not-seated gate, the live-overlay (no world-stop) state, the CHARCLASS_*
 class rows + resolve rule in offline play, sorted rows under NONE, the canonical
 parent-tuple reselect on ALL THREE slot combos (backed by the authoritative
-unexpanded spawn kit rather than the expanded runtime slot pool), the
+unexpanded spawn kit rather than the expanded runtime slot pool), retail
+one-through-max parent-ammo rows with quantity/round labels and canonical count
+preselect, the `GRENADE_AMMO1..3` count selectors backed by class/team/selectable
+grenade defs in table order (an unavailable definition keeps its control as
+zero-only; canonical count preselect + ACCEPT serialization are live), the
 `g_armoryWeaponAvailability` filter term (mission-authored via the .bms
 item_availability promote; values in net-re §5.63), the witnessed weight
 format, and the offline ACCEPT collect/apply seam — now the full multi-slot
@@ -864,7 +868,7 @@ in `ArmoryMenuHost`'s header): the per-class loadout buffer MEMORY
 submission (the UI stays gated in a network session until that authoritative
 path is exposed; the S2C 0x66/admin availability writers ride it), MP class
 selection, the `*_AMMO1_TYPE` round-type cascade + per-ammo-def weight,
-`*_AMMO2` / GRENADE_AMMO1..3, the icon swaps, the MP scoreboard overlay, and
+`*_AMMO2`, the icon swaps, the MP scoreboard overlay, and
 the use-item key's non-armory leg (the ACCEPT hotkeys landed with the weapon
 round — see the on-show section above). Open questions: ~~the SP-time
 value/writer of `g_hostClassAllowMask`~~ (CLOSED 2026-07-18: MP = the per-class
@@ -886,12 +890,14 @@ g_hostClassAllowMask`; `WeaponLoadout_ApplyFromBuffer` param 3 ->
 `skip_apply`. (2026-07-09: `UI_OpenMenuScreen @ 0x54e520` renamed, ex
 "renderer init" misnomer.)
 
-- **D-MNU-9 (armory ammo-combo model):** the original's clip-count combos are
-  driven by the per-class loadout buffer (remembered counts; the weight path
-  reads `(row+1)` clips `[orig: @ 0x565490]`); the reimpl fills `0..maxclips`
-  with full clips pre-selected and no per-class memory. Kept until the
-  per-class buffer layer is ported; the ACCEPT-side clamp and −1 default match
-  the original.
+- **D-MNU-9 (armory per-class loadout memory):** the original's clip-count
+  combos are driven by the per-class loadout buffer, including save-on-class-flip
+  remembered counts. The reimpl now matches the visible row model and weight
+  path: parent row zero means one clip, rows show
+  `clips * clipsize - round_type`, and ACCEPT serializes `row+1`
+  `[orig: @0x564c7d..0x564ce4; @0x565490]`; grenade rows retain zero and
+  serialize the selected row. First open restores counts from the authoritative
+  canonical kit, but separate remembered buffers per class remain deferred.
 
 - **D-MNU-10 (offline class selection, deliberate — user decision 2026-07-11):**
   the retail WEAPON screen enables the PLAYER_CLASS spin only **in a network

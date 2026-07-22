@@ -262,8 +262,11 @@ func test_open_preselects_the_authoritative_satchel_loadout() -> void:
 	var primary := String((primary_rows[0] as Dictionary).get("name", ""))
 	assert_eq(primary, "WPN_AK47AUTO",
 		"the minimized primary expands the non-selectable WPN_AK47 subclass")
+	const PRIMARY_CLIPS := 3
+	const ACCESSORY_CLIPS := 1
 	assert_true(simulation.apply_local_player_loadout([
-		{"name": primary}, {"name": expected}], 8),
+		{"name": primary, "ammo_primary": PRIMARY_CLIPS},
+		{"name": expected, "ammo_primary": ACCESSORY_CLIPS}], 8),
 		"the real simulation owns the primary + satchel kit before the armory opens")
 	var canonical_names: Array[String] = []
 	for value in simulation.get_local_player_loadout():
@@ -307,6 +310,91 @@ func test_open_preselects_the_authoritative_satchel_loadout() -> void:
 	assert_eq(primary_combo.get_item_text(primary_combo.get_selected()),
 		_weapon_display_text(primary_rows[0] as Dictionary),
 		"the selected primary row is exactly WPN_AK47AUTO")
+	var primary_ammo := menu.find_child("PRIMARY_AMMO1", true, false) as NovaMnuCombo
+	var accessory_ammo := menu.find_child("ACCESSORY_AMMO1", true, false) as NovaMnuCombo
+	assert_eq(primary_ammo.get_selected(), PRIMARY_CLIPS - 1,
+		"first open converts the canonical primary clip count to its zero-based row")
+	assert_eq(accessory_ammo.get_selected(), ACCESSORY_CLIPS - 1,
+		"first open converts the canonical satchel clip count to its zero-based row")
+
+	menu.find_child("ACCEPT", true, false).emit_signal("pressed")
+	var accepted_by_name := {}
+	for value in simulation.get_local_player_loadout():
+		var row := value as Dictionary
+		accepted_by_name[String(row.get("name", ""))] = int(row.get("ammo_primary", -1))
+	assert_eq(int(accepted_by_name.get(primary, -1)), PRIMARY_CLIPS,
+		"untouched ACCEPT converts the primary row back to the canonical clip count")
+	assert_eq(int(accepted_by_name.get(expected, -1)), ACCESSORY_CLIPS,
+		"untouched ACCEPT converts the satchel row back to the canonical clip count")
+	simulation.free()
+
+
+func test_open_populates_the_authored_grenade_combo_from_weapon_def() -> void:
+	var mission := NovaMissionData.new()
+	assert_eq(mission.create_default(), OK)
+	var simulation := NovaSimulation.new()
+	assert_true(simulation.load_from_mission_data(mission))
+	assert_true(simulation.spawn_local_player(Vector3.ZERO, 0.0, 2))
+	var resource_root := _make_root()
+	assert_eq(simulation.load_weapon_table(resource_root, "weapon.def"), OK)
+	var weapons := _make_weapons()
+	var grenade_rows: Array = weapons.get_slot_weapons(
+			NovaWeaponDatabase.SLOT_GRENADE, 8, 1)
+	assert_eq(grenade_rows.size(), 3,
+		"the real weapon.def fixture has three selectable red rifleman grenades")
+	var primary_rows: Array = weapons.get_slot_weapons(
+			NovaWeaponDatabase.SLOT_PRIMARY, 8, 1)
+	assert_gt(primary_rows.size(), 0, "the canonical kit has a normal equipped primary")
+	var primary := String((primary_rows[0] as Dictionary).get("name", ""))
+	var kit: Array[Dictionary] = [{"name": primary}]
+	for i in grenade_rows.size():
+		kit.append({
+			"name": String((grenade_rows[i] as Dictionary).get("name", "")),
+			"ammo_primary": i + 1,
+		})
+	assert_true(simulation.apply_local_player_loadout(kit, 8),
+		"the authoritative simulation owns all three grenade tuples before first open")
+
+	var sim := ArmoryZoneSimProxy.new(simulation)
+	var world := FakeWorld.new()
+	world.root = resource_root
+	world.weapons = weapons
+	world.sim = sim
+	add_child_autofree(world)
+	var overlay := Control.new()
+	add_child_autofree(overlay)
+	var host := ArmoryHost.new()
+	add_child_autofree(host)
+	host.setup(world, null, overlay)
+
+	assert_true(host.try_open(), "the real weapon.mnu armory opens")
+	var menu := overlay.get_node("ArmoryMenu") as NovaMnuMenu
+	for i in grenade_rows.size():
+		var combo_name := "GRENADE_AMMO%d" % (i + 1)
+		var grenade_combo := menu.find_child(combo_name, true, false) as NovaMnuCombo
+		assert_not_null(grenade_combo, "weapon.mnu authors %s" % combo_name)
+		assert_eq(grenade_combo.get_item_count(),
+			int((grenade_rows[i] as Dictionary).get("maxclips", 0)) + 1,
+			"%s exposes selectable 0..maxclips rows from weapon.def" % combo_name)
+		assert_eq(grenade_combo.get_selected(), i + 1,
+			"%s preselects the authoritative canonical grenade count" % combo_name)
+
+	menu.find_child("ACCEPT", true, false).emit_signal("pressed")
+	var accepted_by_name := {}
+	for value in simulation.get_local_player_loadout():
+		var row := value as Dictionary
+		accepted_by_name[String(row.get("name", ""))] = int(row.get("ammo_primary", -1))
+	assert_true(accepted_by_name.has(primary),
+		"untouched ACCEPT keeps the normal primary beside the grenade tuples")
+	var inventory_names: Array[String] = []
+	for value in simulation.get_local_player_inventory().get("slots", []):
+		inventory_names.append(String((value as Dictionary).get("name", "")))
+	for i in grenade_rows.size():
+		var grenade_name := String((grenade_rows[i] as Dictionary).get("name", ""))
+		assert_eq(int(accepted_by_name.get(grenade_name, -1)), i + 1,
+			"untouched ACCEPT preserves %s and its selected count" % grenade_name)
+		assert_has(inventory_names, grenade_name,
+			"the ArmoryHost ACCEPT rebuild keeps %s equipped in the slot pool" % grenade_name)
 	simulation.free()
 
 

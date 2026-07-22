@@ -127,6 +127,12 @@ func try_open() -> bool:
 	var current_primary := fallback_primary
 	var current_secondary := ""
 	var current_accessory := ""
+	var current_grenades: Array = []
+	var current_parent_clips := {
+		"PRIMARY": -1,
+		"SECONDARY": -1,
+		"ACCESSORY": -1,
+	}
 	if sim.has_method("get_local_player_loadout") \
 			and _world.has_method("get_weapon_database"):
 		var weapon_db: NovaWeaponDatabase = _world.get_weapon_database()
@@ -142,13 +148,23 @@ func try_open() -> bool:
 				NovaWeaponDatabase.SLOT_PRIMARY:
 					if current_primary.is_empty():
 						current_primary = weapon_name
+						current_parent_clips["PRIMARY"] = int(
+								row.get("ammo_primary", -1))
 				NovaWeaponDatabase.SLOT_SECONDARY:
 					if current_secondary.is_empty():
 						current_secondary = weapon_name
+						current_parent_clips["SECONDARY"] = int(
+								row.get("ammo_primary", -1))
 				NovaWeaponDatabase.SLOT_ACCESSORY:
 					if current_accessory.is_empty():
 						current_accessory = weapon_name
-	_armory.set_current_loadout(current_primary, current_secondary, current_accessory)
+						current_parent_clips["ACCESSORY"] = int(
+								row.get("ammo_primary", -1))
+				NovaWeaponDatabase.SLOT_GRENADE:
+					current_grenades.append(row.duplicate(true))
+	_armory.set_current_loadout(
+			current_primary, current_secondary, current_accessory, current_grenades,
+			current_parent_clips)
 	if sim.has_method("get_weapon_availability"):
 		_armory.set_availability_lookup(
 				func(weapon_name: String) -> int:
@@ -239,7 +255,7 @@ func _ensure_menu() -> bool:
 	return true
 
 
-# Armory ACCEPT: the full multi-slot kit (primary/secondary/accessory + clip
+# Armory ACCEPT: the full multi-slot kit (primary/secondary/accessory/grenades + clip
 # requests) rebuilds the sim's slot pool and becomes the respawn kit; the sim's
 # commit event then reinstalls the FP viewmodel/FSM around the re-selected equipped
 # weapon. SP-local apply — the MP client path rides the 0x2F/0x5A loadout service.
@@ -261,6 +277,17 @@ func _on_loadout_accepted(loadout: Dictionary) -> void:
 				"ammo_primary": int(loadout.get(slot_key + "_clips", -1)),
 				"ammo_secondary": -1,
 				"flags": -1,
+			})
+		for value in loadout.get("grenades", []):
+			var grenade := value as Dictionary
+			var weapon_name := String(grenade.get("name", ""))
+			if weapon_name.is_empty():
+				continue
+			kit.append({
+				"name": weapon_name,
+				"ammo_primary": int(grenade.get("ammo_primary", -1)),
+				"ammo_secondary": int(grenade.get("ammo_secondary", -1)),
+				"flags": int(grenade.get("flags", -1)),
 			})
 		var applied := false
 		if sim != null and sim.has_method("apply_local_player_loadout"):
