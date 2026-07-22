@@ -114,11 +114,11 @@ expansion (re)load:
   `@ 0x4a4989`, `<n>.lwf` `@ 0x4a495e` — slots 0/1 of the six-slot table, see
   docs/audio/lwf-dbf-sound-re.md).
 
-### Divergence D-MUS-PAIRGRACE
+### Closed divergence D-MUS-PAIRGRACE (2026-07-22)
 
-| ID | Ours | Original | Why / consequence |
+| ID | Ours | Original | Closure |
 | --- | --- | --- | --- |
-| D-MUS-PAIRGRACE | `NovaMusicService.resolve_music_pair` uses the expansion pair only when COMPLETE (bank on disk AND script in the VFS); otherwise the base pair plays | the `.pff` exists-check is the only reselect; a partial-music expansion is silent (`@ 0x4a4767/0x4a4775`) | deliberate grace: silence reads as a defect to players (the REV expansion ships no `Mrevx02`/`Grevx02` pair and would be music-dead). Halves never mix across stems — bank and script always come from the SAME stem, matching the witnessed unconditional pair-set. Retail parity available by dropping the completeness probe. |
+| D-MUS-PAIRGRACE | `NovaMusicService.resolve_music_pair` now sets the expansion bank and script names unconditionally once the expansion is mounted; an incomplete pair fails during the normal bank/script open and remains silent | the `.pff` exists-check is the only reselect; a partial-music expansion is silent (`@ 0x4a4767/0x4a4775`) | **FIXED.** Removed the completeness probe and covered missing-bank, missing-script, and musicless expansions with regressions. Halves still always come from the same stem. |
 
 ### Context lifecycle
 
