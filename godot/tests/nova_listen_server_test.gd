@@ -95,6 +95,8 @@ func test_mounted_local_overlay_matches_packed_present_for_valid_zero_and_six() 
 		assert_gte(base, 0, "the mounted local player reached its decoded client view")
 		if base >= 0:
 			assert_eq(int(snapshot[base + NovaSimulation.PF_AIM_OVERLAY_VALID]), 1)
+			assert_eq(int(snapshot[base + NovaSimulation.PF_RIGHT_HAND_COLLAPSED]), 0,
+					"retail Flags 0x100 keeps the player BN17 row live on UseGun")
 			var packed_body := Vector3(
 					snapshot[base + NovaSimulation.PF_AIM_BODY_PITCH_DEG],
 					snapshot[base + NovaSimulation.PF_AIM_BODY_YAW_DEG],
@@ -123,6 +125,18 @@ func test_mounted_local_overlay_matches_packed_present_for_valid_zero_and_six() 
 							"config 6 class %d stays on body" % overlay_class)
 				assert_gt(packed_angles[8].distance_to(packed_angles[0]), 0.1,
 						"config 6 head alone preserves full aim")
+
+		assert_true(sim.local_player_toggle_mount(),
+				"the same player can leave the emplaced seat")
+		sim.step()
+		var dismounted_snapshot := sim.get_present_snapshot()
+		var dismounted_base := _present_row_base_for_handle(
+				sim, dismounted_snapshot, sim.get_local_player_wire_handle())
+		assert_gte(dismounted_base, 0)
+		if dismounted_base >= 0:
+			assert_eq(int(dismounted_snapshot[dismounted_base
+					+ NovaSimulation.PF_RIGHT_HAND_COLLAPSED]), 0,
+					"dismount clears the transient bone-collapse verdict")
 		sim.free()
 
 

@@ -141,6 +141,64 @@ func _present_field_for_origin(sim: NovaSimulation, kind: int, index: int,
 	return -1
 
 
+func _mounted_npc_right_hand_verdict(seat_type: int) -> int:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var mount := md.add_entity(
+			NovaMissionData.KIND_ITEM, 101294,
+			Vector3(0, 8, 0), Vector3.ZERO)
+	var npc := md.add_entity(
+			NovaMissionData.KIND_ORGANIC, 105311,
+			Vector3(0, 8, 0), Vector3.ZERO)
+	assert_false(mount.is_empty())
+	assert_false(npc.is_empty())
+	assert_true(md.set_entity_property_int(
+			NovaMissionData.KIND_ORGANIC, int(npc["index"]),
+			"waypoint_id", 125))
+	assert_true(md.set_entity_property_int(
+			NovaMissionData.KIND_ORGANIC, int(npc["index"]),
+			"wp_number", int(mount["bms_id"])))
+	var source_names := {
+		1: "sitex00",
+		2: "ctrlx00",
+		3: "UseGun",
+		5: "drvrx00",
+	}
+	var sim := NovaSimulation.new()
+	sim.enable_listen_server(true)
+	sim.set_item_seat_specs([{
+		"type_id": 1294,
+		"mount_config_valid": true,
+		"mount_config": 6,
+		"seats": [{
+			"type": seat_type,
+			"bone_index": 6,
+			"position": Vector3.ZERO,
+			"source_name": String(source_names.get(seat_type, "")),
+		}],
+	}])
+	assert_true(sim.load_from_mission_data(md))
+	sim.step()
+	var verdict := _present_field_for_origin(
+			sim, NovaMissionData.KIND_ORGANIC, int(npc["index"]),
+			NovaSimulation.PF_RIGHT_HAND_COLLAPSED)
+	sim.free()
+	return verdict
+
+
+func test_mounted_npc_right_hand_predicate_excludes_passengers() -> void:
+	# Retail parentSlot codes: sitex=1 keeps the hand/weapon, while ctrlx=2,
+	# UseGun=3, and drvrx=5 zero BN17 for non-player organics.
+	for row in [
+		{"seat": 1, "collapsed": 0, "name": "Passenger"},
+		{"seat": 2, "collapsed": 1, "name": "Controller"},
+		{"seat": 3, "collapsed": 1, "name": "Gunner"},
+		{"seat": 5, "collapsed": 1, "name": "Driver"},
+	]:
+		assert_eq(_mounted_npc_right_hand_verdict(int(row["seat"])),
+				int(row["collapsed"]), "%s seat predicate" % row["name"])
+
+
 func test_aim_overlay_exports_the_retail_authored_pitch_sign() -> void:
 	var md := NovaMissionData.new()
 	assert_eq(md.create_default(), OK)
@@ -806,6 +864,8 @@ func test_mounted_rendered_head_matrix_matches_collision_and_authoritative_shot(
 		sim.free()
 		return
 	assert_eq(int(snapshot[row_base + NovaSimulation.PF_AIM_OVERLAY_VALID]), 1)
+	assert_eq(int(snapshot[row_base + NovaSimulation.PF_RIGHT_HAND_COLLAPSED]), 1,
+			"the mounted NPC exports retail's BN17 final-row verdict")
 	var packed_body := Vector3(
 			snapshot[row_base + NovaSimulation.PF_AIM_BODY_PITCH_DEG],
 			snapshot[row_base + NovaSimulation.PF_AIM_BODY_YAW_DEG],
@@ -849,19 +909,38 @@ func test_mounted_rendered_head_matrix_matches_collision_and_authoritative_shot(
 			* skeleton.get_bone_global_pose(14)
 			* skeleton.get_bone_global_rest(14).affine_inverse())
 	var rendered_head_center: Vector3 = rendered_head_matrix * head_center_model
+	var rendered_hand_matrix := (skeleton.global_transform
+			* skeleton.get_bone_global_pose(16)
+			* skeleton.get_bone_global_rest(16).affine_inverse())
+	assert_true(rendered_hand_matrix.basis.x.is_zero_approx()
+			and rendered_hand_matrix.basis.y.is_zero_approx()
+			and rendered_hand_matrix.basis.z.is_zero_approx(),
+			"render skinning receives retail's all-zero BN17 basis")
+	assert_true(rendered_hand_matrix.origin.is_zero_approx(),
+			"retail zeroes BN17 after final world composition")
 
 	var collision_head := Vector3.INF
+	var collision_hand := Vector3.INF
 	for value in sim.get_hitbox_debug().get("organics", []):
 		var section: Dictionary = value
 		if int(section.get("entity_handle", -1)) == enemy_handle \
 				and int(section.get("section", -1)) == 14:
 			collision_head = section.get("pos", Vector3.INF)
-			break
+		if int(section.get("entity_handle", -1)) == enemy_handle \
+				and int(section.get("section", -1)) == 16:
+			collision_hand = section.get("pos", Vector3.INF)
 	assert_ne(collision_head, Vector3.INF,
 			"authoritative collision exposes mounted head section 14")
 	if collision_head != Vector3.INF:
 		assert_lt(collision_head.distance_to(rendered_head_center), 0.01,
 				"rendered final head bone matrix and collision section 14 are identical")
+	assert_ne(collision_hand, Vector3.INF,
+			"authoritative collision exposes mounted right-hand section 16")
+	if collision_hand != Vector3.INF:
+		assert_lt(collision_hand.distance_to(rendered_hand_matrix.origin), 0.01,
+				"collision consumes the same final all-zero BN17 matrix as rendering")
+		assert_true(collision_hand.is_zero_approx(),
+				"authoritative COBJ 16 receives retail's all-zero final row")
 
 	var health_before := int(card.get("health", 0))
 	var incoming := rendered_head_matrix.basis.x.normalized()

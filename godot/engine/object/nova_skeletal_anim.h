@@ -175,10 +175,13 @@ public:
 	// p_wpn_key (optional): the weapon channel's clip, spliced onto the mask bones at
 	// p_wpn_playhead BEFORE the overlay composes — the witnessed order (primary sample →
 	// mask override → overlay multiply). Empty = single channel.
+	// collapse_right_hand emits the terminal all-zero BN17 final-row marker even
+	// when overlay inputs are unavailable and this falls back to the sampled pose.
 	// [orig: Entity_BuildBoneTransformMatrices @0x4b1290; world-wac-ai-re.md §14/§14.8.6]
 	Array eval_pose_overlay(const String &p_key, double p_playhead_seconds,
 			const PackedInt32Array &p_classes, const Array &p_deltas,
-			const String &p_wpn_key = String(), double p_wpn_playhead_seconds = 0.0) const;
+			const String &p_wpn_key = String(), double p_wpn_playhead_seconds = 0.0,
+			bool p_collapse_right_hand = false) const;
 
 	NovaSkeletalAnim() = default;
 };

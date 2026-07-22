@@ -574,6 +574,12 @@ func _advance_part_anims(delta: float) -> bool:
 # docs/world/world-wac-ai-re.md §14 (D-INF-11)]
 var _aim_overlay_deltas: Array = []
 var _aim_overlay_classes := PackedInt32Array()
+# Retail clips the baked personal weapon for a non-player organic attached to a
+# controller/gunner/driver mount slot by zeroing model bone 16 (BN17 R Hand)
+# after the FINAL world pose is composed. Presentation supplies the authoritative
+# derived verdict; this model carries it into the shared native evaluator. [orig: special row in
+# Entity_BuildBoneTransformMatrices @0x4b1290; world-wac-ai-re.md section 14.1]
+var _collapse_right_hand := false
 
 # The upper-body weapon channel: a second clip posed at its OWN playhead onto the mask
 # bones (clavicles/arms/forearms/neck/head/hands) before the aim overlay composes. The
@@ -601,6 +607,13 @@ func set_aim_overlay(deltas: Array) -> void:
 	_body_pose_dirty = true
 
 
+func set_right_hand_collapsed(collapsed: bool) -> void:
+	if collapsed == _collapse_right_hand:
+		return
+	_collapse_right_hand = collapsed
+	_body_pose_dirty = true
+
+
 # Pose the Skeleton3D from the active main-body clip. Advances the playhead while playing,
 # evaluates the parent-local pose per bone (NovaSkeletalAnim, Godot space) and writes it as
 # the bone pose. With no active clip the bones stay at their reset (== bind) pose.
@@ -624,7 +637,7 @@ func _advance_body_anim(delta: float) -> void:
 				wpn_time = float(maxi(_wpn_phase_ticks, 0)) / (2.0 * wfps)
 		pose = _skeletal.eval_pose_overlay(
 			_anim_key, _anim_time, _aim_overlay_classes, _aim_overlay_deltas,
-			_wpn_key, wpn_time)
+			_wpn_key, wpn_time, _collapse_right_hand)
 	else:
 		# The weapon channel only renders through the overlay path — its export gate
 		# (primary-state flag 0x40) implies the aim overlay is active [orig: @0x4b14a7].
@@ -632,8 +645,27 @@ func _advance_body_anim(delta: float) -> void:
 	var count: int = mini(pose.size(), _skeleton.get_bone_count())
 	for i in range(count):
 		var t: Transform3D = pose[i]
-		_skeleton.set_bone_pose_position(i, t.origin)
-		_skeleton.set_bone_pose_rotation(i, t.basis.get_rotation_quaternion())
+		if _collapse_right_hand and i == 16:
+			# eval_pose_overlay's all-zero BN17 is a final/world-matrix marker.
+			# Skeleton3D stores parent-local poses under the entity's Node3D transform,
+			# so first express WORLD zero in skeleton space, then choose the local
+			# origin that reaches it. With zero scale, the complete final skin matrix
+			# (skeleton.global * global_pose * global_rest^-1) is retail's zero row.
+			# This branch also covers the no-overlay eval_pose fallback above.
+			var parent := _skeleton.get_bone_parent(i)
+			var skeleton_zero_origin := (
+					_skeleton.global_transform.affine_inverse() * Vector3.ZERO)
+			var local_zero_origin := skeleton_zero_origin
+			if parent >= 0:
+				local_zero_origin = (_skeleton.get_bone_global_pose(parent)
+						.affine_inverse() * skeleton_zero_origin)
+			_skeleton.set_bone_pose_position(i, local_zero_origin)
+			_skeleton.set_bone_pose_rotation(i, Quaternion.IDENTITY)
+			_skeleton.set_bone_pose_scale(i, Vector3.ZERO)
+		else:
+			_skeleton.set_bone_pose_position(i, t.origin)
+			_skeleton.set_bone_pose_rotation(i, t.basis.get_rotation_quaternion())
+			_skeleton.set_bone_pose_scale(i, t.basis.get_scale())
 	_body_pose_dirty = false
 
 

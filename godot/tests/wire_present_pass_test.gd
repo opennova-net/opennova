@@ -7,6 +7,7 @@ const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer
 class FakeModel:
 	extends Node3D
 	var overlay_calls: Array = []
+	var right_hand_collapse_calls: Array[bool] = []
 	var body_calls: Array = []
 	var pose_call_order: Array[String] = []
 	var ctrl_values: Dictionary = {}
@@ -17,6 +18,9 @@ class FakeModel:
 	func set_aim_overlay(deltas: Array) -> void:
 		overlay_calls.append(deltas)
 		pose_call_order.append("overlay")
+	func set_right_hand_collapsed(collapsed: bool) -> void:
+		right_hand_collapse_calls.append(collapsed)
+		pose_call_order.append("right_hand")
 	func set_ctrl_value(name: String, value: int) -> void:
 		ctrl_values[name] = value
 	func clear_ctrl_value(name: String) -> void:
@@ -70,6 +74,8 @@ class FakeSim:
 					entity.get("emplaced_gun_yaw", 0))
 			out[base + NovaSimulation.PF_EWEAP_GUNPITCH] = float(
 					entity.get("emplaced_gun_pitch", 0))
+			out[base + NovaSimulation.PF_RIGHT_HAND_COLLAPSED] = float(
+					entity.get("right_hand_collapsed", 0))
 			var angles: PackedVector3Array = entity.get(
 					"aim_angles", PackedVector3Array())
 			for cls in range(mini(angles.size(), 9)):
@@ -178,7 +184,7 @@ func test_wire_model_applies_the_same_packed_overlay_result() -> void:
 	var model := placer.built[0] as FakeModel
 	assert_eq(model.body_calls, [["anim_emplaced", 11]],
 			"wire presentation selects the replicated mounted body clip")
-	assert_eq(model.pose_call_order, ["overlay", "body"],
+	assert_eq(model.pose_call_order, ["right_hand", "overlay", "body"],
 			"the current packed overlay is installed before the body clip evaluates")
 	assert_eq(model.overlay_calls.size(), 1)
 	var deltas: Array = model.overlay_calls[0]
@@ -188,6 +194,27 @@ func test_wire_model_applies_the_same_packed_overlay_result() -> void:
 	assert_true(model.basis.is_equal_approx(body_basis))
 	assert_true((deltas[8] as Basis).is_equal_approx(
 			body_basis.inverse() * MissionObjectPlacer.bms_to_godot_basis(angles[8])))
+
+
+func test_wire_model_applies_and_restores_mounted_right_hand_collapse() -> void:
+	var sim := FakeSim.new()
+	sim.entities = [{
+		"type_id": 4567,
+		"handle": 0x1004,
+		"aim_overlay_valid": 1,
+		"right_hand_collapsed": 1,
+	}]
+	var placer := FakePlacer.new()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var presenter := WirePresentPass.new()
+	presenter.setup(sim, placer, container)
+	presenter.present()
+	sim.entities[0]["right_hand_collapsed"] = 0
+	presenter.present()
+	var model := placer.built[0] as FakeModel
+	assert_eq(model.right_hand_collapse_calls, [true, false],
+			"the wire pose consumes the same mount verdict and restores on dismount")
 
 
 func test_wire_model_applies_and_clears_named_emplaced_controls() -> void:

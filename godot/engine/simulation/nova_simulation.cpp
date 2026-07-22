@@ -78,9 +78,8 @@ opennova::world::SeatType seat_type_from_variant(int value) {
 	}
 }
 
-bool mount_blocks_weapon_channel(const opennova::world::Entity &entity) {
-	if (!entity.mounted) return false;
-	switch (entity.mount_type) {
+bool seat_type_blocks_weapon_channel(opennova::world::SeatType type) {
+	switch (type) {
 		case opennova::world::SeatType::Controller:
 		case opennova::world::SeatType::Gunner:
 		case opennova::world::SeatType::Driver:
@@ -88,6 +87,19 @@ bool mount_blocks_weapon_channel(const opennova::world::Entity &entity) {
 		default:
 			return false; // passenger seats retain the on-foot upper-body channel
 	}
+}
+
+bool mount_blocks_weapon_channel(const opennova::world::Entity &entity) {
+	return entity.mounted && seat_type_blocks_weapon_channel(entity.mount_type);
+}
+
+bool mount_collapses_right_hand_row(const opennova::world::Entity &entity) {
+	// This terminal skeletal row is stricter than the secondary-channel gate:
+	// retail requires a controller/gunner/driver parent slot AND no Flags 0x100.
+	// In the port, engine_flags is the authoritative entity+0x24 Flags mirror.
+	return entity.mounted &&
+			seat_type_blocks_weapon_channel(entity.mount_type) &&
+			(entity.engine_flags & 0x100u) == 0;
 }
 
 int visual_item_id_for_runtime_type(int item_id, const Ref<NovaItemDatabase> &item_db) {
@@ -277,7 +289,9 @@ bool aim_overlay_inputs_for_client(
 		const opennova::netsim::ClientEntityState &entity,
 		const opennova::netsim::ClientState &state,
 		const std::vector<opennova::mission::ItemSeatSpec> &specs,
-		opennova::anim::AimOverlayInputs &out) {
+		opennova::anim::AimOverlayInputs &out,
+		bool *r_collapse_right_hand = nullptr) {
+	if (r_collapse_right_hand != nullptr) *r_collapse_right_hand = false;
 	if (entity.cls != opennova::EntityClass::Player &&
 			entity.cls != opennova::EntityClass::Infantry)
 		return false;
@@ -320,6 +334,15 @@ bool aim_overlay_inputs_for_client(
 		}
 	}
 	if (seat == nullptr) return true;
+	if (r_collapse_right_hand != nullptr) {
+		// The compact organic class is the decoded form of the relevant Flags
+		// distinction: Player rows carry 0x100; Infantry rows do not. Derive the
+		// presentation verdict from existing wire fields rather than adding a
+		// transport-only boolean.
+		*r_collapse_right_hand =
+				entity.cls == opennova::EntityClass::Infantry &&
+				seat_type_blocks_weapon_channel(seat->type);
+	}
 
 	out.mount_mode = mount_mode_for_seat_type(seat->type);
 	if (out.mount_mode == opennova::anim::MountMode::OnFoot) return true;
@@ -1485,6 +1508,8 @@ bool NovaSimulation::build_section_matrices(opennova::world::World &p_world,
 
 		String weapon_key;
 		double weapon_seconds = 0.0;
+		const bool collapse_right_hand =
+				mount_collapses_right_hand_row(*entity);
 		if (p_world.cached.local_player.valid() &&
 				p_entity.packed == p_world.cached.local_player.packed &&
 				opennova::world::infantry_weapon_channel_visible(
@@ -1501,7 +1526,7 @@ bool NovaSimulation::build_section_matrices(opennova::world::World &p_world,
 
 		const Array pose = source.anim->eval_pose_overlay(
 				primary_key, primary_seconds, source.overlay_classes, deltas,
-				weapon_key, weapon_seconds);
+				weapon_key, weapon_seconds, collapse_right_hand);
 		if (pose.size() < static_cast<int64_t>(section_count)) return false;
 
 		// The callback result is FINAL world-space. Build the body placement from
@@ -1524,6 +1549,18 @@ bool NovaSimulation::build_section_matrices(opennova::world::World &p_world,
 			if (value.get_type() != Variant::TRANSFORM3D) return false;
 			const Transform3D local = static_cast<Transform3D>(value);
 			const int32_t parent = source.parents[i];
+			// eval_pose_overlay emits retail's terminal all-zero marker for BN17.
+			// Retail zeroes the FINAL world row after overlay/re-anchor. Preserve
+			// that literal result for COBJ 16: composing body_world here would
+			// incorrectly reintroduce the entity translation.
+			// [orig: special row @0x4b1290]
+			const bool collapsed_right_hand =
+					collapse_right_hand && i == 16;
+			if (collapsed_right_hand) {
+				pose_global[i] = local;
+				r_out[i] = opennova::world::CollisionMatrix{};
+				continue;
+			}
 			pose_global[i] = parent >= 0
 					? pose_global[static_cast<size_t>(parent)] * local
 					: local;
@@ -3856,6 +3893,7 @@ void NovaSimulation::_bind_methods() {
 	BIND_ENUM_CONSTANT(PF_EMPLACED_CONTROLS_VALID);
 	BIND_ENUM_CONSTANT(PF_EWEAP_GUNYAW);
 	BIND_ENUM_CONSTANT(PF_EWEAP_GUNPITCH);
+	BIND_ENUM_CONSTANT(PF_RIGHT_HAND_COLLAPSED);
 	BIND_ENUM_CONSTANT(PF_STRIDE);
 	BIND_ENUM_CONSTANT(EFFECT_STATE_POSITION);
 	BIND_ENUM_CONSTANT(EFFECT_STATE_ROTATION_DEG);
@@ -6799,6 +6837,8 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 			r[PF_ROLL_DEG] = static_cast<float>(ent->roll);
 			r[PF_HIDDEN] = ent->hidden ? 1.0f : 0.0f;
 			r[PF_ALIVE] = ent->alive ? 1.0f : 0.0f;
+			r[PF_RIGHT_HAND_COLLAPSED] =
+					mount_collapses_right_hand_row(*ent) ? 1.0f : 0.0f;
 			if (local_first_person_usegun &&
 					local_player->mount_target == h) {
 				const opennova::world::WeaponTableEntry *mount_def =
@@ -6860,10 +6900,14 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 		}
 		if (joiner_) {
 			opennova::anim::AimOverlayInputs inputs;
+			bool collapse_right_hand = false;
 			if (aim_overlay_inputs_for_client(
-						es, cs, item_seat_specs_, inputs)) {
+						es, cs, item_seat_specs_, inputs,
+						&collapse_right_hand)) {
 				r[PF_ANIM_STATE] =
 						static_cast<float>(es.anim_state_id);
+				r[PF_RIGHT_HAND_COLLAPSED] =
+						collapse_right_hand ? 1.0f : 0.0f;
 				opennova::anim::AimOverlayAngles
 						angles[opennova::anim::kOverlayClassCount];
 				opennova::anim::compute_aim_overlay_angles(inputs, angles);

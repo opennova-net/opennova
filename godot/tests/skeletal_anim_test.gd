@@ -225,6 +225,85 @@ func _loaded_skeletal() -> NovaSkeletalAnim:
 	return sk
 
 
+func test_emplaced_pose_collapses_right_hand_bone_and_restores_off_mount() -> void:
+	# Retail zeros model bone 16 (BN17 R Hand) while an organic occupies a
+	# controller/gunner/driver parent slot. The personal weapon is baked into the
+	# character mesh, so this is a skeletal collapse, not a child-node visibility gate.
+	# [orig: Entity_BuildBoneTransformMatrices special rows; world-wac-ai-re.md §14.1]
+	var data := _open(CHARMODEL)
+	var root := NovaResourceRoot.new()
+	root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/anim"))
+	var sk := NovaSkeletalAnim.new()
+	assert_true(sk.load_from_resource_root(root, "soldier.adm",
+			data.get_bone_origins(), data.get_bone_parents()),
+			"the 19-bone character rig loads: %s" % sk.get_last_error())
+	assert_gt(sk.get_bone_count(), 16, "the fixture contains retail's BN17 R Hand row")
+
+	var deltas: Array = []
+	for _i in range(9):
+		deltas.append(Basis.IDENTITY)
+	var normal: Array = sk.eval_pose_overlay(
+			"anim_idle", 0.0, sk.get_overlay_classes(), deltas, "", 0.0, false)
+	var mounted: Array = sk.eval_pose_overlay(
+			"anim_idle", 0.0, sk.get_overlay_classes(), deltas, "", 0.0, true)
+	var normal_hand: Transform3D = normal[16]
+	var mounted_hand: Transform3D = mounted[16]
+	assert_true(mounted_hand.basis.x.is_zero_approx()
+			and mounted_hand.basis.y.is_zero_approx()
+			and mounted_hand.basis.z.is_zero_approx()
+			and mounted_hand.origin.is_zero_approx(),
+			"mounted BN17 is the all-zero transform retail uses to clip the baked weapon")
+	assert_true(normal_hand.is_equal_approx(sk.eval_pose("anim_idle", 0.0)[16]),
+			"leaving the emplaced weapon restores BN17's authored pose")
+
+
+func test_model_collapses_right_hand_to_final_world_zero_without_aim_overlay() -> void:
+	# The special row is applied after retail composes the final/world bone
+	# matrices. Exercise NovaObjectModel's no-overlay eval_pose fallback at a
+	# deliberately non-zero world transform: model-local zero would leave the
+	# baked gun collapsed at the actor root instead of producing the witnessed
+	# all-zero final matrix.
+	var data := _open(CHARMODEL)
+	var root := NovaResourceRoot.new()
+	root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/anim"))
+	var sk := NovaSkeletalAnim.new()
+	assert_true(sk.load_from_resource_root(root, "soldier.adm",
+			data.get_bone_origins(), data.get_bone_parents()))
+	var model = NovaObjectModelScript.new()
+	add_child_autofree(model)
+	model.set_skeletal_anim(sk)
+	model.set_object_data(data)
+	model.global_transform = Transform3D(
+			Basis(Vector3.UP, 0.37), Vector3(7.0, 3.0, -11.0))
+	model.play_body_clip_at("anim_idle", 0)
+	var skeleton: Skeleton3D = model.get_skeleton()
+	skeleton.force_update_all_bone_transforms()
+	var authored_hand := (skeleton.global_transform
+			* skeleton.get_bone_global_pose(16)
+			* skeleton.get_bone_global_rest(16).affine_inverse())
+
+	model.set_right_hand_collapsed(true)
+	await get_tree().process_frame
+	skeleton.force_update_all_bone_transforms()
+	var collapsed_hand := (skeleton.global_transform
+			* skeleton.get_bone_global_pose(16)
+			* skeleton.get_bone_global_rest(16).affine_inverse())
+	assert_true(collapsed_hand.basis.x.is_zero_approx()
+			and collapsed_hand.basis.y.is_zero_approx()
+			and collapsed_hand.basis.z.is_zero_approx()
+			and collapsed_hand.origin.is_zero_approx(),
+			"BN17 is all-zero after final world composition even without overlay data")
+
+	model.set_right_hand_collapsed(false)
+	await get_tree().process_frame
+	skeleton.force_update_all_bone_transforms()
+	var restored_hand := (skeleton.global_transform
+			* skeleton.get_bone_global_pose(16)
+			* skeleton.get_bone_global_rest(16).affine_inverse())
+	assert_true(restored_hand.is_equal_approx(authored_hand),
+			"dismount restores the authored hand transform after a real zero-scale pose")
+
+
 func _bone_poses(skel: Skeleton3D) -> Array:
 	var out: Array = []
 	for i in range(skel.get_bone_count()):

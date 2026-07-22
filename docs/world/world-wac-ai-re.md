@@ -1100,7 +1100,7 @@ chase yaws.
   a data-sweep follow-up; the parser, `+0x86c` field, consumer, and branch meanings are witnessed.
 - `Entity_GetCameraTransform @ 0x4b8c00` (bone-camera for mode-0 mounted view) not yet decompiled.
 
-### 14.6 Port status (D-INF-11 — LOCAL 2026-07-08; SHARED MOUNTED SELECTOR 2026-07-19)
+### 14.6 Port status (D-INF-11 — LOCAL 2026-07-08; SHARED MOUNTED SELECTOR 2026-07-19; FINAL BN17 ROW 2026-07-21)
 
 The local controller train remains, and mounted selection is now an animation-owned shared seam:
 
@@ -1136,6 +1136,25 @@ The local controller train remains, and mounted selection is now an animation-ow
   deltas; neither pass reads mount config or repeats the selector. Organic collision still emits final
   bone matrix `i` for COBJ section `i`; CXLT remains independent metadata and is not a selector or extra
   transform.
+- **BN17 final-row clipping is derived, not transported**: the terminal §14.1.5
+  predicate is deliberately separate from the broader mounted weapon-channel gate.
+  Authority requires a live Controller/Gunner/Driver mount and
+  `!(Entity.engine_flags & 0x100)`; Passenger and player-classified rows remain
+  untouched. The packed `PF_RIGHT_HAND_COLLAPSED` value is presentation-derived
+  state, not a new network field. A joiner reconstructs it from the decoded organic
+  class (Player is the wire form of Flags 0x100; Infantry is not), carrier handle,
+  raw mount bone, and the same production `ItemSeatSpec` table already used by the
+  mounted overlay selector. Each compact sample clears carrier/bone defaults first,
+  so dismount cannot retain a stale verdict.
+- **The zero is a FINAL world row**: `NovaSkeletalAnim` applies the BN17 terminal
+  marker after both normal overlay composition and the invalid/empty-overlay
+  `eval_pose` fallback. `NovaObjectModel` maps world origin through
+  `Skeleton3D.global_transform⁻¹` and the live parent pose before applying zero
+  scale, yielding an all-zero final skin matrix even when the actor is away from
+  world origin. Authoritative organic collision bypasses the ordinary body-world
+  composition for COBJ 16 and emits a literal all-zero `CollisionMatrix`. Rendering
+  and hit geometry therefore consume the same retail final row rather than two
+  actor-local approximations.
 - **Local host**: `NovaSimulation.get_local_player_aim_overlay()` (BAM→mission-euler once, native) →
   `LocalPlayerHost._update_avatar` builds the per-class deltas via the single-sourced
   `bms_to_godot_basis` and sets the avatar node to the BODY frame →
@@ -1145,12 +1164,14 @@ The local controller train remains, and mounted selection is now an animation-ow
   injects F4 + mouse-look, captures poses; look-down bends the spine/head forward, look-up
   arches back (05TR.bms, JOX root).
 
-The new mounted slice is intended to be verified by table-driven coverage of every witnessed seated/
+The mounted slice is verified by table-driven coverage of every witnessed seated/
 gunner branch (including unknown versus valid zero), metadata extraction, snapshot/restore and dismount
-clearing, local render/collision parity, placed/wire parity, and a posed rendered-bone-versus-shot case.
-The focused gate must rerun the rotated mounted-enemy, CXLT, and F3 cutoff/cadence/dense-batching
-regressions before the maturity ratchet and full CI matrix. This is the verification plan, not a recorded
-test result.
+clearing, local render/collision parity, and placed/wire parity. The BN17 regressions additionally pin
+Passenger/Controller/Gunner/Driver selection, the Flags-0x100 exclusion, invalid/empty-overlay fallback,
+real Skeleton3D dismount restoration, and the same literal world-zero matrix in rendering and
+authoritative COBJ 16. The posed rendered-head-versus-shot case remains live beside that zero-row check.
+The focused gate also reruns the rotated mounted-enemy, CXLT, and F3
+cutoff/cadence/dense-batching regressions before the maturity ratchet and full CI matrix.
 
 Remaining under this row: NPC/remote secondary weapon-channel pose composition; weapon/sight/muzzle
 attachment matrices; and the pitchBlend / lean / torsoRoll
