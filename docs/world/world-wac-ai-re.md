@@ -1323,7 +1323,7 @@ anim_javelin_scoped`, `anim_binoculars`, `anim_reload/reload2`,
 (Eindo/FSldr/pilots/ESTAND) carry `anim_reload` only; the Cindo family not even that.
 With the original's RESET backfill (§14.8.1), an AI body in a hold state plays the
 reset pose; our host's unknown-key no-op is therefore invisible for the local-player
-slice and only becomes observable with NPC/remote threading (D-NET-117).
+slice and only becomes observable with NPC/remote threading (D-INF-11).
 
 ### 14.8.5 The reload window and the FSM sync
 
@@ -1414,7 +1414,7 @@ steady `anim_knife`, fire stamps `anim_knife_attack` with an advancing playhead,
 locked exit back to the hold; the rifle `body_reload_probe` re-run green (mirror at
 idle, `anim_reload`, 73.4° mask-bone delta).
 
-Deferred (later slices): NPC/remote threading (D-NET-117 — includes the AI-body RESET
+Deferred (later slices): NPC/remote threading (D-INF-11 — includes the AI-body RESET
 backfill question, see the data-coverage note in §14.8.4), the binoculars input toggle
 (case-26 binding + forced-clear rules; the ladder side is ported), blend windows on
 channel re-init (D-INF-1), the audio-level pitch kick (needs a mixer level tap —

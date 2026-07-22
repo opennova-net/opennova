@@ -259,6 +259,14 @@ int main_impl() {
 		                        /*host_key=*/0, &lb2);
 		ctx2.world = &w2;
 		ctx2.mission = &mission;
+		if (!expect(np::Server_ProcessPendingPlayerSpawns(ctx2, w2) == 1,
+		            "world-path pose player spawned")) return 1;
+		np::NapiNPConnection &pose_conn = ctx2.np_protocol.connection_list[0];
+		w::AiEntity *pose_ai = ai2.for_handle(pose_conn.link.owned_entity);
+		if (!expect(pose_ai != nullptr, "world-path pose resolves the owned AiEntity")) return 1;
+		constexpr int32_t kLookPitchBam = 0x23456789;
+		constexpr int16_t kLookPitchHigh = 0x2345;
+		pose_ai->pitch = kLookPitchBam;
 
 		const std::vector<np::TickOut> outs = np::tick_connections(ctx2, /*elapsed_ms=*/16, /*now_tick=*/1);
 		int f3_at = -1, spawned_at = -1, seq = 0;
@@ -266,9 +274,13 @@ int main_impl() {
 			for (const np::HostAcceptEvent &ev : to.events) {
 				if (ev.kind == np::HostAcceptEvent::Kind::PeerEnteredWorldStreaming) {
 					if (!expect(ev.self_id == np::kHostPlayerDcb, "F3 self_id == host dcb")) return 1;
+					if (!expect(ev.pose.pitch == kLookPitchHigh,
+					            "F3 world-path pose pitch == AiEntity BAM32 high word")) return 1;
 					if (f3_at < 0) f3_at = seq;
 				} else if (ev.kind == np::HostAcceptEvent::Kind::PeerSpawned) {
 					if (!expect(ev.self_id == np::kHostPlayerDcb, "PeerSpawned self_id == host dcb")) return 1;
+					if (!expect(ev.pose.pitch == kLookPitchHigh,
+					            "PeerSpawned world-path pose pitch == AiEntity BAM32 high word")) return 1;
 					if (spawned_at < 0) spawned_at = seq;
 				}
 				++seq;
@@ -277,6 +289,43 @@ int main_impl() {
 		if (!expect(f3_at >= 0, "one-shot World burst still surfaces PeerEnteredWorldStreaming (F3)")) return 1;
 		if (!expect(spawned_at >= 0, "one-shot World burst surfaces PeerSpawned")) return 1;
 		if (!expect(f3_at < spawned_at, "F3 surfaces BEFORE PeerSpawned (dcb-timing order)")) return 1;
+	}
+
+	// A bound World entity without an AiEntity keeps the historical zero-pitch fallback. In
+	// particular, world::Entity::pitch is not a substitute: it has different ownership/units.
+	{
+		w::World no_ai_world;
+		no_ai_world.registry.configure_pool(0, 1);
+		w::Entity entity;
+		entity.kind = w::EntityKind::Organic;
+		entity.item_id = 0x14B9;
+		entity.pitch = 0x1234;
+		const w::EntityHandle entity_handle = no_ai_world.registry.spawn(0, entity);
+		if (!expect(entity_handle.valid(), "missing-AI pose fixture entity spawned")) return 1;
+
+		ns::LoopbackChannel no_ai_loopback;
+		np::NapiNPServerCtx no_ai_ctx;
+		np::test::bring_up_host(no_ai_ctx, np::ConnectionMode::HostClient,
+		                        np::SocketMode::Socketless, /*host_key=*/0, &no_ai_loopback);
+		no_ai_ctx.world = &no_ai_world;
+		np::NapiNPConnection &no_ai_conn = no_ai_ctx.np_protocol.connection_list[0];
+		no_ai_conn.phase = np::ConnectionPhase::New;
+		no_ai_conn.link.owned_entity = entity_handle;
+		no_ai_conn.burst.entity_batch_count = 1;
+
+		bool saw_world_pose = false;
+		for (const np::TickOut &to : np::tick_connections(
+		             no_ai_ctx, /*elapsed_ms=*/16, /*now_tick=*/1)) {
+			for (const np::HostAcceptEvent &ev : to.events) {
+				if (ev.kind != np::HostAcceptEvent::Kind::PeerEnteredWorldStreaming) continue;
+				saw_world_pose = true;
+				if (!expect(ev.pose.entity_handle == entity_handle.packed,
+				            "missing-AI fallback still uses the bound World entity")) return 1;
+				if (!expect(ev.pose.pitch == 0,
+				            "missing-AI World-path pose retains zero pitch")) return 1;
+			}
+		}
+		if (!expect(saw_world_pose, "missing-AI World-path pose surfaced")) return 1;
 	}
 
 	// --- Loadout gate pacing: a TYPE-1 (remote joiner) connection PAUSES at phase 7→8 until
