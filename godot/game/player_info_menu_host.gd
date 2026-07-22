@@ -27,6 +27,13 @@ extends RefCounted
 # against [orig: TextResource_GetStringWithFallback(resource, "Avatars", nameKey)].
 const ATBL_SECTION := "Avatars"
 
+# TESTPLAYERVOICE is a semantic screen command, not the button's generic click sound.
+# Retail resolves the trigger from the current avatar and plays it from the dedicated
+# menu bank. [orig: PlayerInfo_PreviewVoice @ 0x55ff70]
+const VOICE_PREVIEW_CONTROL := "TESTPLAYERVOICE"
+const VOICE_PREVIEW_BANK := "menu.lwf"
+const VOICE_PREVIEW_TRIGGER_FORMAT := "VOICE_%d"
+
 # The 3D character preview (head/body/arms .3di composited), reused from the ONED
 # Avatars workspace. Mounted into the PLAYER_PREVIEW widget rect and fed the resolved
 # combo; static at rest (no .adm bound) behind the D-PLAYERINFO-1 seam.
@@ -67,6 +74,7 @@ func on_menu_built(menu: Node, _file: String, _screen: String, root: NovaResourc
 	_connect_combo("NATIONALITY", _on_nat_selected)
 	_connect_combo("DIVISION", _on_div_selected)
 	_connect_combo("COMBO_LIST", _on_combo_selected)
+	_connect_pressed(VOICE_PREVIEW_CONTROL, _preview_voice)
 	# SIDE_BLUE is CHECKED in player.mnu; team follows whichever radio is set.
 	_team = 1 if _radio_checked("SIDE_RED") else 0
 	_populate_nationalities()  # cascades into divisions -> combos -> voice
@@ -282,6 +290,15 @@ func _selected_combo_head_voice() -> int:
 	var c: Dictionary = _db.get_combo(_sel_nat, _sel_div, idx)
 	var head: Dictionary = c.get("head", {})
 	return int(head.get("voice", -1))
+
+
+func _preview_voice() -> void:
+	var voice := _selected_combo_head_voice()
+	if voice < 0 or _menu == null or not _menu.has_method("play_widget_sound"):
+		return
+	# The persisted profile override is owned by D-PLAYERINFO-9; until that profile
+	# field exists, retail's selected-avatar fallback is the authoritative voice.
+	_menu.call("play_widget_sound", VOICE_PREVIEW_TRIGGER_FORMAT % voice, VOICE_PREVIEW_BANK)
 
 
 # --- 3D character preview (PLAYER_PREVIEW) ------------------------------------

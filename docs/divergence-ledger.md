@@ -347,7 +347,7 @@ Sources: [mnu/menu-re.md](mnu/menu-re.md), [audio/lwf-dbf-sound-re.md](audio/lwf
 | D-PLAYERINFO-1 | In-world (spawned-player) combo→3D-model binding untraced (the preview is witnessed + fully ported) | B | NEEDS-RE | PAR-UI / research starter |
 | D-PLAYERINFO-7 | `PLAYER_INFO` screen orchestration (init + 28-control registration + nat→div→combo cascade) host wiring is the next phase | A | WITNESSED-READY-DEFERRED | PAR-UI |
 | D-PLAYERINFO-9 | ACCEPT/commit + profile persistence host wiring is the next phase | A | WITNESSED-READY-DEFERRED | PAR-UI |
-| D-PLAYERINFO-10 | Voice preview (`VOICE_%d` via `menu.lwf`) host wiring is the next phase | A | WITNESSED-READY-DEFERRED | PAR-UI |
+| D-PLAYERINFO-10 | Voice preview host wiring now binds `TESTPLAYERVOICE` and requests the selected avatar's `VOICE_%d` through `menu.lwf` `[orig: PlayerInfo_PreviewVoice @ 0x55ff70]`; `test_voice_preview_requests_selected_avatar_voice` pins the public sound request (persisted profile override remains under D-PLAYERINFO-9) | A | FIXED 2026-07-22 | PAR-UI |
 | D-PLAYERINFO-11 | Loadout ammo combos + weight readout remaining (weapon lists implemented; the weight-calc CORE now ported to `libs/def` `def_loadout_weight`/`def_encumbrance_class` `[orig: @ 0x55f1f0; @ 0x55f480]`, unit-tested — the residual is the ammo combos + the UI host wiring, which need the Godot runtime) | A | OPEN (partial) | PAR-UI |
 | D-PLAYERINFO-12 | Per-(slot, team) selection-state globals host wiring is the next phase | A | WITNESSED-READY-DEFERRED | PAR-UI |
 | D-HUD-1 | Stance indicator = discrete cross-faded `HUDSTANCE` frames (IDB was `draw_minimap_compass_overlay` + oscarmike model it as a compass) — the cross-fade ported 2026-07-09 (`hud_stance.gd`/`hud_fade.gd`); the IDB rename to `HUD_DrawStanceIndicator` applied 2026-07-16 | A | FIXED (2026-07-09 port; IDB rename applied 2026-07-16) | PAR-UI |
@@ -719,7 +719,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Net | 9 | 1 | 11 | 21 | 0 |
 | Environment | 0 | 0 | 3 | 3 | 4 |
 | World / AI + events | 54 | 5 | 5 | 64 | 23 |
-| UI (menu/ctrl/sound/playerinfo/HUD) | 14 | 1 | 7 | 22 | 6 |
+| UI (menu/ctrl/sound/playerinfo/HUD) | 14 | 1 | 6 | 21 | 7 |
 | Mission `.mis` | 0 | 2 | 1 | 3 | 0 |
 | LW `.3di` | 0 | 2 | 1 | 3 | 0 |
 | Particles `.ptl` | 2 | 0 | 0 | 2 | 15 |
@@ -733,7 +733,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Render — materials/state | 0 | 0 | 1 | 1 | 1 |
 | Render — draw order | 2 | 0 | 1 | 3 | 3 |
 | Render — lighting | 4 | 0 | 2 | 6 | 0 |
-| **Total** | **91** | **14** | **32** | **137** | 80 |
+| **Total** | **91** | **14** | **31** | **136** | 81 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-INF-20, D-NET-136, D-NET-64.
 
