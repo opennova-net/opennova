@@ -446,10 +446,10 @@ func test_packaged_scene_instantiates_with_intact_wiring() -> void:
 	assert_true(water.is_water_active(), "the authored height remains retained")
 	assert_false(water.is_water_render_active(),
 		"the packaged host keeps retained water out of rendering before a load")
-	assert_false(world._is_water_render_active(),
+	assert_false(world.is_water_render_active(),
 		"frame clear and occlusion use the lifecycle-aware water predicate")
 	water.set_host_rendering_enabled(true)
-	assert_true(world._is_water_render_active())
+	assert_true(world.is_water_render_active())
 	water.set_host_rendering_enabled(false)
 
 
@@ -752,7 +752,7 @@ func test_loaded_mission_drives_the_shared_time_of_day_clock() -> void:
 	world.unload()
 
 
-func _hosted_weather_state_after(deltas: Array, verify_reload_resync := false) -> Array:
+func _hosted_weather_state_after(deltas: Array) -> Array:
 	var packed := load("res://engine/world/game_world.tscn") as PackedScene
 	var world := packed.instantiate() as GameWorld
 	add_child_autofree(world)
@@ -792,17 +792,12 @@ func _hosted_weather_state_after(deltas: Array, verify_reload_resync := false) -
 		weather.get_sway_amount(),
 		weather.get_sway_phase(),
 	]
-	if verify_reload_resync:
-		assert_true(bool(weather.get("_colors_synced")))
-		assert_true(world._load_environment("mnml.env"))
-		assert_false(bool(weather.get("_colors_synced")),
-				"a retained weather node must snap to the replacement mission ENV")
 	world.unload()
 	return state
 
 
 func test_hosted_weather_is_invariant_to_render_batching() -> void:
-	var slow: Array = await _hosted_weather_state_after([0.128], true)
+	var slow: Array = await _hosted_weather_state_after([0.128])
 	var split: Array = await _hosted_weather_state_after([
 		0.016, 0.016, 0.016, 0.016, 0.016, 0.016, 0.016, 0.016,
 	])

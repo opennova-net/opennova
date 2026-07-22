@@ -17,8 +17,7 @@ func _loaded_env() -> EnvFile:
 
 
 func _advance_one_second(node: Node, hz: int) -> void:
-	for _frame in range(hz):
-		node._process(1.0 / float(hz))
+	simulate(node, hz, 1.0 / float(hz))
 
 
 func _weather_state_after_one_second(hz: int) -> Array:

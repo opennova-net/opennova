@@ -781,7 +781,7 @@ func _set_water_host_rendering_enabled(enabled: bool) -> void:
 # Runtime water exposes a render-aware predicate so its retained authored
 # height cannot leak into frame clear/occlusion while a load is absent or in
 # progress. Keep the height-only fallback for compatible test/host doubles.
-func _is_water_render_active() -> bool:
+func is_water_render_active() -> bool:
 	if _water == null:
 		return false
 	if _water.has_method("is_water_render_active"):
@@ -2620,7 +2620,7 @@ func _apply_occlusion_frame(camera_xform: Transform3D) -> void:
 	if _env != null and _env.has_method("get_fog_distance"):
 		fog = float(_env.get_fog_distance())
 	var water_z := -100000.0
-	if _is_water_render_active():
+	if is_water_render_active():
 		var wh = _water.get("water_height")
 		if wh != null:
 			water_z = float(wh)
@@ -2752,7 +2752,7 @@ func _update_frame_clear_color() -> void:
 		return
 	var above := true
 	var cam := get_viewport().get_camera_3d() if is_inside_tree() else null
-	if cam != null and _is_water_render_active():
+	if cam != null and is_water_render_active():
 		# Camera3D h/v offsets move the rendered eye without changing the node
 		# transform. Classify the same adjusted eye NovaWater marches from.
 		above = cam.get_camera_transform().origin.y > float(_water.water_height)

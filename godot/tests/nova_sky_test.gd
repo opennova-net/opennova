@@ -122,7 +122,7 @@ func test_dome_fog_uses_skyfog_instead_of_world_fog() -> void:
 		keyframe.set_fog_color(Color8(10, 20, 30))
 		keyframe.set_skyfog_color(Color8(40, 50, 60))
 	ctx.env.set_fog_level(1024.0)
-	ctx.sky._process(TICK)
+	simulate(ctx.sky, 1, TICK)
 
 	var dome_fog: Vector3 = ctx.sky.sky_material.get_shader_parameter("u_fog_color")
 	assert_eq(dome_fog, ctx.env_node.get_skyfog_color())
