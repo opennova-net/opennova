@@ -58,12 +58,9 @@ func current_script() -> NovaMusicScript:
 ## unconditionally, and the context open then bails when the loose .sbf is
 ## absent (the CreateFileA gate precedes the script load [orig:
 ## AudioVM_OpenContextFile @ 0x672160]), so an expansion that ships partial or
-## no music is SILENT in retail. We diverge by grace: the expansion pair is used
-## only when COMPLETE (both halves resolve); otherwise the base pair plays
-## instead of silence — docs/audio/mus-sbf-re.md (D-MUS-PAIRGRACE). Bank and
-## script always come from the SAME stem (the script's play ops index that
-## bank's entries), so halves are never mixed — the MusicPair typed record
-## carries the two halves (ADR 0017).
+## no music is SILENT in retail. Bank and script always come from the SAME stem
+## (the script's play ops index that bank's entries), so halves are never mixed
+## — the MusicPair typed record carries the two halves (ADR 0017).
 static func resolve_music_pair(root, prefix: String, base_stem: String) -> MusicPair:
 	var pair := MusicPair.new()
 	if root == null:
@@ -78,10 +75,12 @@ static func resolve_music_pair(root, prefix: String, base_stem: String) -> Music
 		# ambiguous duplicate instead of choosing by enumeration order.
 		var expansion_dir: String = root.get_root_dir().path_join("expansion").path_join(exp_name)
 		var bank_path := _resolve_loose_file(expansion_dir, stem + ".sbf")
-		if not bank_path.is_empty() and root.has_file(stem + ".bin"):
-			pair.bank = bank_path
-			pair.script_name = stem + ".bin"
-			return pair
+		# Retail writes both expansion names immediately after the expansion PFF
+		# exists-check. Preserve the actual spelling when the bank exists, but keep
+		# the canonical missing path otherwise so the bank-first open fails silent.
+		pair.bank = bank_path if not bank_path.is_empty() else expansion_dir.path_join(stem + ".sbf")
+		pair.script_name = stem + ".bin"
+		return pair
 	pair.bank = String(root.resolve_file(base_stem + ".sbf"))
 	pair.script_name = base_stem + ".bin" if root.has_file(base_stem + ".bin") else ""
 	return pair
