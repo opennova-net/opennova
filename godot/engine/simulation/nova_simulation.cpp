@@ -864,8 +864,8 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 						String(fx.get("particleh2odeath", String())).utf8().get_data();
 				t.particlefire = String(fx.get("particlefire", String())).utf8().get_data();
 				t.particleother = String(fx.get("particleother", String())).utf8().get_data();
-				// resolve_collision_instances enriches this row with the active
-				// first-stage husk's KZ user points once model metadata is loaded.
+				// resolve_collision_instances enriches this row with live husk-model
+				// state and the active first-stage husk's KZ user points.
 				world_->item_death_traits.set(e->item_id, std::move(t));
 			}
 		}
@@ -1975,16 +1975,32 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 		// is the FIRST husk stage (entity+52 huskModel), not huskFinal [orig: the
 		// +52 substitution @ 0x538720 / @ 0x413086; D-AI-7 residual closed].
 		const String first_husk_name_s = p_item_db->get_husk(def_id);
+		const String final_husk_name_s = p_item_db->get_huskfinal(def_id);
 		const String husk_name_s = first_husk_name_s.is_empty()
-				? p_item_db->get_huskfinal(def_id)
+				? final_husk_name_s
 				: first_husk_name_s;
 		if (!husk_name_s.is_empty()) {
+			// Retail keeps live huskModel and huskFinalModel pointers on the
+			// entity. A successfully opened model supplies that pointer even when
+			// it has no collision block; missing/corrupt assets leave it null.
+			// [orig: Entity_ProcessBuildingDeath @ 0x49442c]
+			Ref<NovaObjectData> first_husk_data;
+			Ref<NovaObjectData> final_husk_data;
+			if (!first_husk_name_s.is_empty())
+				first_husk_data = p_placer->call("object_data_for", first_husk_name_s);
+			if (!final_husk_name_s.is_empty())
+				final_husk_data = p_placer->call("object_data_for", final_husk_name_s);
+			if (opennova::world::ItemDeathTraits *t =
+						world_->item_death_traits.get_mutable(e->item_id))
+				t->husk_model_loaded =
+						first_husk_data.is_valid() || final_husk_data.is_valid();
 			const std::string husk_key(husk_name_s.utf8().get_data());
-			Ref<NovaObjectData> husk_data;
+			Ref<NovaObjectData> husk_data = first_husk_name_s.is_empty()
+					? final_husk_data
+					: first_husk_data;
 			auto hit = collision_model_by_graphic_.find(husk_key);
 			if (hit == collision_model_by_graphic_.end()) {
 				int32_t husk_model_id = -1;
-				husk_data = p_placer->call("object_data_for", husk_name_s);
 				if (husk_data.is_valid()) {
 					opennova::world::CollisionModel hmodel;
 					if (collision_model_from_ir(
@@ -2014,8 +2030,6 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 			if (!first_husk_name_s.is_empty()) {
 				auto kz_it = collision_husk_kz_points_by_graphic_.find(husk_key);
 				if (kz_it == collision_husk_kz_points_by_graphic_.end()) {
-					if (husk_data.is_null())
-						husk_data = p_placer->call("object_data_for", husk_name_s);
 					std::vector<opennova::world::Vec3> kz_points;
 					if (husk_data.is_valid()) {
 						const ThreediModelIR &ir = husk_data->native_ir();
@@ -2050,14 +2064,16 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 			// [orig: @ 0x461e23-0x461e4b]). Its own cache, independent of the
 			// collision cache: a husk graphic can double as some entity's main
 			// graphic, which would leave the joint cache without an entry.
-			const String piece_name_s = p_item_db->get_huskfinal(def_id).is_empty()
-					? p_item_db->get_husk(def_id)
-					: p_item_db->get_huskfinal(def_id);
+			const String piece_name_s = final_husk_name_s.is_empty()
+					? first_husk_name_s
+					: final_husk_name_s;
 			const std::string piece_key(piece_name_s.utf8().get_data());
 			auto hs = collision_husk_pieces_by_graphic_.find(piece_key);
 			if (hs == collision_husk_pieces_by_graphic_.end()) {
 				CollisionHuskPieceInfo info;
-				Ref<NovaObjectData> hdata = p_placer->call("object_data_for", piece_name_s);
+				Ref<NovaObjectData> hdata = final_husk_name_s.is_empty()
+						? first_husk_data
+						: final_husk_data;
 				if (hdata.is_valid() && hdata->native_ir().lod_count > 0 &&
 				    hdata->native_ir().lods != nullptr) {
 					const ThreediIRLod &lod = hdata->native_ir().lods[0];
@@ -6341,6 +6357,7 @@ Dictionary NovaSimulation::get_destruction_debug(int p_bms_id) const {
 		out["unit_type"] = t->unit_type;
 		out["kz"] = t->kz;
 		out["has_husk"] = t->has_husk;
+		out["husk_model_loaded"] = t->husk_model_loaded;
 		PackedVector3Array kz_points;
 		for (const opennova::world::Vec3 &point : t->kz_points)
 			kz_points.push_back(Vector3(point.x, point.y, point.z));
