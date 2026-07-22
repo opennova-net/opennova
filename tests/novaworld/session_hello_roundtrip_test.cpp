@@ -1,6 +1,7 @@
-// Roundtrip tests for the new client-side serializers added in Phase A:
+// Roundtrip tests for the client-side serializers added in Phase A:
 //   client_hello_to_bytes / parse_client_hello
 //   client_auth_to_bytes  / parse_client_auth
+// Plus focused wire-gating checks for server_hello_to_bytes.
 //
 // Builds a populated struct, serializes, parses the bytes back, then asserts
 // every field matches. Catches drift in TLV ordering / size encoding so the
@@ -18,14 +19,34 @@
 using opennova::ClientAuth;
 using opennova::ClientHello;
 using opennova::ServerAuth;
+using opennova::ServerHello;
 using opennova::client_auth_to_bytes;
 using opennova::client_hello_to_bytes;
 using opennova::parse_client_auth;
 using opennova::parse_client_hello;
 using opennova::parse_server_auth;
 using opennova::server_auth_to_bytes;
+using opennova::server_hello_to_bytes;
 
 namespace {
+
+bool has_tlv_field(const std::vector<uint8_t> &bytes, const std::string &wanted) {
+	size_t pos = 0;
+	while (pos < bytes.size()) {
+		size_t name_end = pos;
+		while (name_end < bytes.size() && bytes[name_end] != 0) ++name_end;
+		if (name_end + 2 >= bytes.size()) return false;
+
+		const std::string name(reinterpret_cast<const char *>(bytes.data() + pos), name_end - pos);
+		const uint16_t value_size = static_cast<uint16_t>(bytes[name_end + 1]) |
+		                            (static_cast<uint16_t>(bytes[name_end + 2]) << 8);
+		const size_t next = name_end + 3 + value_size;
+		if (next > bytes.size()) return false;
+		if (name == wanted) return true;
+		pos = next;
+	}
+	return false;
+}
 
 int test_client_hello_roundtrip() {
 	ClientHello src;
@@ -143,6 +164,16 @@ int test_server_auth_rejection_roundtrip() {
 	return 0;
 }
 
+int test_server_hello_ut_is_nonzero_gated() {
+	ServerHello hello;
+	hello.ut = 0;
+	TEST_EXPECT(!has_tlv_field(server_hello_to_bytes(hello), "UT"));
+
+	hello.ut = 0x12345678u;
+	TEST_EXPECT(has_tlv_field(server_hello_to_bytes(hello), "UT"));
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -151,6 +182,7 @@ int main() {
 	if (test_client_auth_roundtrip() != 0) return 1;
 	if (test_client_auth_minimum_for_acceptance() != 0) return 1;
 	if (test_server_auth_rejection_roundtrip() != 0) return 1;
-	std::printf("OK: ClientHello/ClientAuth serializer roundtrip\n");
+	if (test_server_hello_ut_is_nonzero_gated() != 0) return 1;
+	std::printf("OK: session hello/auth serializer roundtrip and gating\n");
 	return 0;
 }
