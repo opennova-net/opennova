@@ -3785,10 +3785,16 @@ Ported same session (the second wave, after the 00TRa probe forced them out):
 - **Redirects reach brains**: `set_ssn_waypoint`/`group_to_waypoint` now run the
   witnessed per-entity order — mounted non-players auto-detach, the entity route
   fields update, and `AiSystem::apply_route_order` writes mode 1 + list +
-  nearest-node + the turn-budget seed into the brain
+  the authored node + the turn-budget seed into the brain. Only authored node
+  `-1` resolves to the nearest trigger; BMS action `param3` now reaches this seam
   [orig: Entity_SetWaypointByTeam @ 0x43cdb4 / Entity_FindNearestTriggerByType
   @ 0x407ea0]. Before this the redirect actions only touched entity fields and a
   vehicle's SM never saw its new route.
+- **Arrivals reach BMS conditions (2026-07-22)**: the infantry channel mover and
+  the shared SM/vehicle route mover apply the retail SetBitB(group) then
+  SetBitA(SSN) waypoint-visited pair to `World::relations`; the retained
+  `relmat_calls` vector is now a diagnostic trace of applied side effects
+  [orig: AI_UpdateWaypointMovement @ 0x457c6d..0x457c88].
 - **The speed commands**: BMS ChangeGroup/SingleAI subs 29 COMBATSPEED /
   30 PATROLSPEED land in `ai_apply_command` as the kSpeedA/kSpeedB writes with
   the exact scale — km/h x 1000 x (1/225000) x 65536 = x65536/225 (~291.27; the

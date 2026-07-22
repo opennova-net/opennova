@@ -278,7 +278,9 @@ public:
     bool remove_ssn(uint16_t ssn);
     bool set_ssn_hp(uint16_t ssn, int32_t hp);
     bool add_ssn_hp(uint16_t ssn, int32_t delta);
-    bool set_ssn_waypoint(uint16_t ssn, int32_t wp);
+    // `node < 0` selects the nearest node on the list (the two-argument WAC form);
+    // BMS RedirectSingleTo carries an explicit node in param3.
+    bool set_ssn_waypoint(uint16_t ssn, int32_t wp, int32_t node = -1);
     bool set_ssn_alert(uint16_t ssn, int32_t state);
     bool set_ssn_target(uint16_t ssn, uint16_t target);
     bool set_ssn_move_speed(uint16_t ssn, int32_t kph);
@@ -303,7 +305,9 @@ public:
 
     // --- group (by group id) ---
     int kill_group(int group);          // returns members affected
-    int group_to_waypoint(int group, int32_t wp);
+    // `node < 0` selects the nearest node on the list; BMS RedirectGroupTo passes
+    // its authored param3 here instead of silently replacing it with nearest.
+    int group_to_waypoint(int group, int32_t wp, int32_t node = -1);
     int set_group_hp(int group, int32_t hp);
     int set_group_engage_min(int group, int32_t v);
     int set_group_engage_max(int group, int32_t v);
