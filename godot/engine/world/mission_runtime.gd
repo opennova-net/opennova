@@ -577,6 +577,12 @@ func set_wire_node_spawned_callback(callback: Callable) -> void:
 		_wire_present.set_node_spawned_callback(callback)
 
 
+## The active wire-direct presenter, exposed for lifecycle integrations and
+## diagnostics. Null when this mission has no replicated/synthetic rows.
+func get_wire_presenter() -> RefCounted:
+	return _wire_present
+
+
 func get_present_index():
 	return _index
 

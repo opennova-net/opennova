@@ -573,7 +573,7 @@ func test_synthetic_wreck_families_use_distinct_moving_wire_anchors() -> void:
 					'each sibling/family pair owns a distinct effect group')
 			assert_eq(world.anchor_position(key), node.global_transform)
 		var fire_key := 'wreck:wire:%d:2' % wire_handle
-		assert_true(presenter._burning.has(fire_key),
+		assert_true(presenter.has_active_wreck_fire(fire_key),
 				'family 2 enters the per-owner wreck crackle set')
 	first.position = Vector3(-3, 4, 5)
 	second.position = Vector3(12, -2, 6)

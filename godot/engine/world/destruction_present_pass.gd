@@ -103,6 +103,13 @@ func get_stats() -> Stats:
 	return _stats
 
 
+## Whether an owned fire-family effect is still registered for retail wreck
+## crackle updates. The owner key is the same public identity used by the
+## effect-anchor registry.
+func has_active_wreck_fire(owner_key: String) -> bool:
+	return _burning.has(owner_key)
+
+
 func setup(sim, container: Node3D, index, placer, item_db, game_world,
 		audio_provider: Callable, fx_provider: Callable, env_node: Node = null,
 		dynamic_node_resolver = null) -> void:

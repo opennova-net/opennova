@@ -165,8 +165,9 @@ func test_wire_presenter_resets_with_runtime_stop() -> void:
 	add_child_autofree(rt)
 	var placer := RefCounted.new()
 	rt.setup(w.mission, w.container, {"placer": placer})
-	assert_not_null(rt._wire_present)
-	var reset_wire := Callable(rt._wire_present, "reset_runtime_state")
+	var wire_present := rt.get_wire_presenter()
+	assert_not_null(wire_present)
+	var reset_wire := Callable(wire_present, "reset_runtime_state")
 	assert_true(rt.simulation_restarted.is_connected(reset_wire),
 			"Stop clears wire handle/type caches before restored rows present again")
 	rt.stop()
