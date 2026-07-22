@@ -1581,10 +1581,10 @@ bool NovaSimulation::build_section_matrices(opennova::world::World &p_world,
 			if (value.get_type() != Variant::TRANSFORM3D) return false;
 			const Transform3D local = static_cast<Transform3D>(value);
 			const int32_t parent = source.parents[i];
-			// eval_pose_overlay emits retail's terminal all-zero marker for BN17.
-			// Retail zeroes the FINAL world row after overlay/re-anchor. Preserve
-			// that literal result for COBJ 16: composing body_world here would
-			// incorrectly reintroduce the entity translation.
+			// eval_pose_overlay emits BN17's zero-scale local clip pose.
+			// Retail zeroes the FINAL collision row after overlay/re-anchor. Preserve
+			// that literal collision result for COBJ 16: composing body_world here
+			// would incorrectly reintroduce the entity translation.
 			// [orig: special row @0x4b1290]
 			const bool collapsed_right_hand =
 					collapse_right_hand && i == 16;

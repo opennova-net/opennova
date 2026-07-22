@@ -1146,15 +1146,15 @@ The local controller train remains, and mounted selection is now an animation-ow
   raw mount bone, and the same production `ItemSeatSpec` table already used by the
   mounted overlay selector. Each compact sample clears carrier/bone defaults first,
   so dismount cannot retain a stale verdict.
-- **The zero is a FINAL world row**: `NovaSkeletalAnim` applies the BN17 terminal
-  marker after both normal overlay composition and the invalid/empty-overlay
-  `eval_pose` fallback. `NovaObjectModel` maps world origin through
-  `Skeleton3D.global_transform⁻¹` and the live parent pose before applying zero
-  scale, yielding an all-zero final skin matrix even when the actor is away from
-  world origin. Authoritative organic collision bypasses the ordinary body-world
-  composition for COBJ 16 and emits a literal all-zero `CollisionMatrix`. Rendering
-  and hit geometry therefore consume the same retail final row rather than two
-  actor-local approximations.
+- **The clip has consumer-specific matrix semantics**: `NovaSkeletalAnim` applies
+  BN17's terminal zero-scale pose after both normal overlay composition and the
+  invalid/empty-overlay `eval_pose` fallback while preserving the sampled local
+  joint origin. `NovaObjectModel` collapses the skin there; translating the joint
+  to world origin makes mixed-weight triangles stretch across the frame. The
+  authoritative collision adapter still bypasses ordinary body-world composition
+  for COBJ 16 and emits the witnessed literal all-zero `CollisionMatrix`. Rendering
+  and hit geometry share the same retail predicate but adapt it to their respective
+  skinning and final-collision-row representations.
 - **Local host**: `NovaSimulation.get_local_player_aim_overlay()` (BAM→mission-euler once, native) →
   `LocalPlayerHost._update_avatar` builds the per-class deltas via the single-sourced
   `bms_to_godot_basis` and sets the avatar node to the BODY frame →
@@ -1168,8 +1168,9 @@ The mounted slice is verified by table-driven coverage of every witnessed seated
 gunner branch (including unknown versus valid zero), metadata extraction, snapshot/restore and dismount
 clearing, local render/collision parity, and placed/wire parity. The BN17 regressions additionally pin
 Passenger/Controller/Gunner/Driver selection, the Flags-0x100 exclusion, invalid/empty-overlay fallback,
-real Skeleton3D dismount restoration, and the same literal world-zero matrix in rendering and
-authoritative COBJ 16. The posed rendered-head-versus-shot case remains live beside that zero-row check.
+real Skeleton3D dismount restoration, joint-local render clipping without stretched triangles, and the
+separate literal zero row for authoritative COBJ 16. The posed rendered-head-versus-shot case remains
+live beside that zero-row check.
 The focused gate also reruns the rotated mounted-enemy, CXLT, and F3
 cutoff/cadence/dense-batching regressions before the maturity ratchet and full CI matrix.
 

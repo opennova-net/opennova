@@ -175,8 +175,9 @@ public:
 	// p_wpn_key (optional): the weapon channel's clip, spliced onto the mask bones at
 	// p_wpn_playhead BEFORE the overlay composes — the witnessed order (primary sample →
 	// mask override → overlay multiply). Empty = single channel.
-	// collapse_right_hand emits the terminal all-zero BN17 final-row marker even
-	// when overlay inputs are unavailable and this falls back to the sampled pose.
+	// collapse_right_hand emits a terminal zero-scale BN17 pose at its sampled
+	// local joint even when overlay inputs are unavailable and this falls back to
+	// the sampled pose. Collision adapts that verdict to its final-row convention.
 	// [orig: Entity_BuildBoneTransformMatrices @0x4b1290; world-wac-ai-re.md §14/§14.8.6]
 	Array eval_pose_overlay(const String &p_key, double p_playhead_seconds,
 			const PackedInt32Array &p_classes, const Array &p_deltas,

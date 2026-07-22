@@ -1009,6 +1009,18 @@ func test_mounted_rendered_head_matrix_matches_collision_and_authoritative_shot(
 	await get_tree().process_frame
 
 	var skeleton: Skeleton3D = model.get_skeleton()
+	# Inspect the same composed pose once without the clip verdict to capture the
+	# animated joint, then restore the snapshot's mounted verdict.
+	model.set_right_hand_collapsed(false)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	skeleton.force_update_all_bone_transforms()
+	var authored_hand_joint := (skeleton.global_transform
+			* skeleton.get_bone_global_pose(16).origin)
+	model.set_right_hand_collapsed(true)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	skeleton.force_update_all_bone_transforms()
 	# Existing native fixture witness: CharModel COBJ 14/head authors
 	# center=(3578,65,54371) in signed 16.16 collision space. The retail
 	# fixed-to-render sandwich maps local collision (x,y,z) to the skeleton's
@@ -1025,9 +1037,9 @@ func test_mounted_rendered_head_matrix_matches_collision_and_authoritative_shot(
 	assert_true(rendered_hand_matrix.basis.x.is_zero_approx()
 			and rendered_hand_matrix.basis.y.is_zero_approx()
 			and rendered_hand_matrix.basis.z.is_zero_approx(),
-			"render skinning receives retail's all-zero BN17 basis")
-	assert_true(rendered_hand_matrix.origin.is_zero_approx(),
-			"retail zeroes BN17 after final world composition")
+			"render skinning receives retail's zero-scale BN17 basis")
+	assert_true(rendered_hand_matrix.origin.is_equal_approx(authored_hand_joint),
+			"render skinning collapses BN17 at the animated joint, never world origin")
 
 	var collision_head := Vector3.INF
 	var collision_hand := Vector3.INF
@@ -1047,10 +1059,8 @@ func test_mounted_rendered_head_matrix_matches_collision_and_authoritative_shot(
 	assert_ne(collision_hand, Vector3.INF,
 			"authoritative collision exposes mounted right-hand section 16")
 	if collision_hand != Vector3.INF:
-		assert_lt(collision_hand.distance_to(rendered_hand_matrix.origin), 0.01,
-				"collision consumes the same final all-zero BN17 matrix as rendering")
 		assert_true(collision_hand.is_zero_approx(),
-				"authoritative COBJ 16 receives retail's all-zero final row")
+				"authoritative COBJ 16 retains retail's separate all-zero final row")
 
 	var health_before := int(card.get("health", 0))
 	var incoming := rendered_head_matrix.basis.x.normalized()

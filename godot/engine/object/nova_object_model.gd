@@ -575,9 +575,9 @@ func _advance_part_anims(delta: float) -> bool:
 var _aim_overlay_deltas: Array = []
 var _aim_overlay_classes := PackedInt32Array()
 # Retail clips the baked personal weapon for a non-player organic attached to a
-# controller/gunner/driver mount slot by zeroing model bone 16 (BN17 R Hand)
-# after the FINAL world pose is composed. Presentation supplies the authoritative
-# derived verdict; this model carries it into the shared native evaluator. [orig: special row in
+# controller/gunner/driver mount slot by collapsing model bone 16 (BN17 R Hand)
+# at its animated joint. Presentation supplies the authoritative derived verdict;
+# this model carries it into the shared native evaluator. [orig: special row in
 # Entity_BuildBoneTransformMatrices @0x4b1290; world-wac-ai-re.md section 14.1]
 var _collapse_right_hand := false
 
@@ -646,20 +646,12 @@ func _advance_body_anim(delta: float) -> void:
 	for i in range(count):
 		var t: Transform3D = pose[i]
 		if _collapse_right_hand and i == 16:
-			# eval_pose_overlay's all-zero BN17 is a final/world-matrix marker.
-			# Skeleton3D stores parent-local poses under the entity's Node3D transform,
-			# so first express WORLD zero in skeleton space, then choose the local
-			# origin that reaches it. With zero scale, the complete final skin matrix
-			# (skeleton.global * global_pose * global_rest^-1) is retail's zero row.
+			# eval_pose_overlay preserves BN17's sampled parent-local joint origin
+			# while clearing its basis. Apply that origin directly and collapse scale
+			# there. Sending the joint to world zero makes mixed-weight triangles span
+			# from the actor to the origin instead of clipping the baked weapon.
 			# This branch also covers the no-overlay eval_pose fallback above.
-			var parent := _skeleton.get_bone_parent(i)
-			var skeleton_zero_origin := (
-					_skeleton.global_transform.affine_inverse() * Vector3.ZERO)
-			var local_zero_origin := skeleton_zero_origin
-			if parent >= 0:
-				local_zero_origin = (_skeleton.get_bone_global_pose(parent)
-						.affine_inverse() * skeleton_zero_origin)
-			_skeleton.set_bone_pose_position(i, local_zero_origin)
+			_skeleton.set_bone_pose_position(i, t.origin)
 			_skeleton.set_bone_pose_rotation(i, Quaternion.IDENTITY)
 			_skeleton.set_bone_pose_scale(i, Vector3.ZERO)
 		else:

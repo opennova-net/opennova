@@ -128,9 +128,9 @@ public:
 				PF_AIM_ANGLES + 9 * PF_AIM_CLASS_STRIDE,
 		PF_EWEAP_GUNYAW,
 		PF_EWEAP_GUNPITCH,
-		// Retail's derived final skeletal special-row verdict. For a non-player
-		// organic in controller/gunner/driver (never passenger), presentation
-		// and collision zero the complete final model-bone 16 / BN17 R Hand row.
+		// Retail's derived skeletal clipping verdict. For a non-player organic in
+		// controller/gunner/driver (never passenger), presentation zero-scales
+		// BN17 at its animated joint while collision emits its literal zero row.
 		PF_RIGHT_HAND_COLLAPSED,
 		PF_STRIDE
 	};
