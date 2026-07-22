@@ -105,12 +105,12 @@ bool parse_vec3(const std::vector<std::string> &values, Vec3 &out) {
 	return true;
 }
 
-// "table12", "table12 reverse", "table12 inverse", "table12 reverse inverse"
+// "table12", "table12 reverse", "table12 inverse", "table12 invert reverse"
 // (modifiers in either order). CParticleDef_ParseProperties @ 0x5ea320 sets
 // reverse on bit 0x02 and inverse on bit 0x01 — see e.g. scale_func @ 0x5eafdd.
-// The engine only checks one trailing token, so "table12 reverse inverse" only
-// captures the last one. Our parser is more forgiving (accepts both modifiers
-// regardless of order); fixtures observed in the corpus only use one at a time.
+// The engine only checks one trailing token and spells bit 0x01 "inverse", while
+// CurveRef_ModifierSuffix @ 0x42bf60 writes "invert". Our parser accepts both
+// spellings and both modifiers so it can read retail writer output.
 CurveRef parse_curve_ref(const std::string &raw) {
 	CurveRef out;
 	out.present = true;
@@ -127,7 +127,7 @@ CurveRef parse_curve_ref(const std::string &raw) {
 		const std::string trailing = lowercase(tokens.back());
 		if (trailing == "reverse") {
 			out.reverse = true;
-		} else if (trailing == "inverse") {
+		} else if (trailing == "inverse" || trailing == "invert") {
 			out.inverse = true;
 		} else {
 			break;

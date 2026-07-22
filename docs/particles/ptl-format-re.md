@@ -247,9 +247,12 @@ is corpus-derived (`boatwake.ptl:40-45`) and round-trip verified.
   corpus diverges).
 - **Curve-ref modifiers** `[orig: CParticleDef_ParseProperties @ 0x5ea320]`: one trailing token
   is consumed; `reverse` sets bit `0x02`, `inverse` sets bit `0x01` on the curve reference (e.g.
-  the `scale_func` site @ `0x5eafdd`). The reimpl deliberately accepts and composes both trailing
-  modifiers in either order; retail consumes only the last token. Shipped files use at most one
-  modifier, so the difference is a mod-syntax superset (D-PTL-20).
+  the `scale_func` site @ `0x5eafdd`). The retail writer's suffix helper instead emits bit `0x01`
+  as `invert`, then bit `0x02` as `reverse` (`CurveRef_ModifierSuffix @ 0x42bf60`). Our writer now
+  matches that spelling and order; the parser accepts both `invert` and `inverse` so its own output
+  round-trips. It deliberately composes both trailing modifiers in either order while retail
+  consumes only the last token. Shipped files use at most one modifier, so that remaining
+  difference is a mod-syntax superset (D-PTL-20).
 - **Flip-frame bounds**: retail carries the authored `flip_frames` count into its frame registrar
   without the host's normalization. The reimpl forces non-positive counts to `1` and caps larger
   counts at `256` across parse, bake, preview, and runtime seams to bound allocation/work
@@ -434,7 +437,7 @@ Writers (round-trip verification gold):
 
 | Original | Addr (size) | Behavior witnessed | Reimpl | Verdict |
 | --- | --- | --- | --- | --- |
-| `CParticleDef_SaveToFile` | `0x5e4d70` (0x9ef) | field-by-field fprintf, `%5.3f` floats, BGR byte order in memory printed back as R,G,B; writes `emit_dur` **twice** (fprintf sites `0x5e4e6a` + `0x5e4f30`, same field) and `lod` unconditionally | `writer.cpp::write_particle`; round-trip parity via `particle_writer_roundtrip_test` (engine writer uses `\n` only) | match |
+| `CParticleDef_SaveToFile` | `0x5e4d70` (0x9ef) | field-by-field fprintf, `%5.3f` floats, BGR byte order in memory printed back as R,G,B; writes `emit_dur` **twice** (fprintf sites `0x5e4e6a` + `0x5e4f30`, same field), `lod` unconditionally, and curve bits as `invert reverse` | `writer.cpp::write_particle`; round-trip parity via `particle_writer_roundtrip_test` (engine writer uses `\n` only) | match; curve suffix spelling/order closed 2026-07-22 |
 | `CParticleEffectDef_WriteToFile` | `0x5e0fe0` (0xc7) | `\tid = %s;`, `\tpdefs = a, b;` (separator `", "` from `word_7CDA14`); space-equals, not tab-equals | `writer.cpp::write_effect` | match |
 | `CParticleTableDef_WriteToFile` | `0x5e27e0` (0xee) | 32 fixed rows of 8 `%u`; `\ttlN = ...;`; `id = ` space-equals | `writer.cpp::write_table`; zero-fills if parsed table < 32 rows (defensive) | match |
 | (no engine writer for `[tabledef_edithandles]`) | n/a | format corpus-derived (`boatwake.ptl:40-45`) | `writer.cpp::write_handles`; round-trip verified | match (corpus-derived) |
