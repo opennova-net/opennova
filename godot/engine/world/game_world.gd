@@ -588,6 +588,21 @@ func get_sim() -> NovaSimulation:
 	return _runtime.get_sim() if _runtime != null else null
 
 
+## The mounted world's shared weapon.def database. ArmoryHost consumes this on
+## first open so its canonical parent tuples and its visible rows resolve against
+## the same catalog; the FP viewmodel reuses it below (ADR 0018 resource seam).
+func get_weapon_database() -> NovaWeaponDatabase:
+	if _weapon_db == null:
+		if _resource_root == null:
+			return null
+		_weapon_db = NovaWeaponDatabase.new()
+		if _weapon_db.load_from_resource_root(_resource_root, "weapon.def") != OK:
+			push_warning("GameWorld: weapon.def unavailable (%s) — weapon presentation/loadout lookup disabled"
+					% _weapon_db.get_last_error())
+			return null
+	return _weapon_db if _weapon_db.is_loaded() else null
+
+
 func get_runtime():
 	return _runtime
 
@@ -1056,10 +1071,8 @@ func set_local_player_weapon_by_name(weapon_name: String,
 		preserve_slot_state: bool = false) -> bool:
 	if weapon_name.is_empty():
 		return false
-	if _weapon_db == null:
-		local_player_viewmodel_def()  # lazily loads weapon.def into _weapon_db
-	var index: int = _weapon_db.find_weapon(weapon_name) \
-			if _weapon_db != null and _weapon_db.is_loaded() else -1
+	var weapon_db := get_weapon_database()
+	var index: int = weapon_db.find_weapon(weapon_name) if weapon_db != null else -1
 	if index < 0:
 		push_warning("GameWorld: armory weapon '%s' not in weapon.def — keeping current" % weapon_name)
 		return false
@@ -1074,7 +1087,7 @@ func set_local_player_weapon_by_name(weapon_name: String,
 	# again when the rebuilt viewmodel resolves (_setup_local_player_weapon); a model
 	# that never loads leaves 'auto' delays collapsed instead of leaving the OLD
 	# weapon's FSM live under the new entity stamp.
-	_local_weapon_dict = _weapon_db.get_weapon(index)
+	_local_weapon_dict = weapon_db.get_weapon(index)
 	var sim := get_sim()
 	if sim != null:
 		_set_local_player_first_person_model_available(false)
@@ -1228,7 +1241,7 @@ func _setup_local_player_weapon(model) -> void:
 				# and play latches) [orig: the animState slot heads +72;
 				# Anim_GetDurationTicks @0x53ee10 / AnimMap_PlayAnimBySlot @0x40bda0].
 				clip_seconds[k] = skeletal.get_clip_variant_lengths(k)
-	sim.set_local_player_weapon(
+	sim.rebake_local_player_weapon(
 			_local_weapon_dict, clip_seconds, _local_weapon_preserve_slot_state)
 
 
@@ -1372,15 +1385,8 @@ func set_local_player_weapon_tick_consumer(consumer: Callable) -> void:
 func local_player_viewmodel_def() -> PlayerViewmodelDef:
 	if _viewmodel_weapon_cleared:
 		return null
-	if _weapon_db == null:
-		if _resource_root == null:
-			return null
-		_weapon_db = NovaWeaponDatabase.new()
-		if _weapon_db.load_from_resource_root(_resource_root, "weapon.def") != OK:
-			push_warning("GameWorld: weapon.def unavailable (%s) — FP viewmodel keeps built-in defaults"
-					% _weapon_db.get_last_error())
-			return null
-	if not _weapon_db.is_loaded():
+	var weapon_db := get_weapon_database()
+	if weapon_db == null:
 		return null
 	# Precedence: the armory-equipped weapon, else the NOVA_VM_WEAPON debug override,
 	# else the fixed default until first equip.
@@ -1389,11 +1395,11 @@ func local_player_viewmodel_def() -> PlayerViewmodelDef:
 		weapon_name = OS.get_environment("NOVA_VM_WEAPON")
 	if weapon_name.is_empty():
 		weapon_name = DEFAULT_VIEWMODEL_WEAPON
-	var index: int = _weapon_db.find_weapon(weapon_name)
+	var index: int = weapon_db.find_weapon(weapon_name)
 	if index < 0:
 		push_warning("GameWorld: weapon '%s' not in weapon.def — FP viewmodel keeps built-in defaults" % weapon_name)
 		return null
-	_local_weapon_dict = _weapon_db.get_weapon(index)
+	_local_weapon_dict = weapon_db.get_weapon(index)
 	return PlayerViewmodelDef.from_weapon_dict(_local_weapon_dict)
 
 
@@ -2049,8 +2055,17 @@ func _item_effect_controller_allows(kind: int, attrib: int) -> bool:
 
 
 func _item_fx_identity_aliases(net_id: int, bms_id: int,
-		spawn_origin: int) -> Array[String]:
+		spawn_origin: int, wire_handle: int = -1) -> Array[String]:
 	var aliases: Array[String] = []
+	var has_wire_identity := wire_handle >= 0 and wire_handle != 0xffff
+	if has_wire_identity:
+		aliases.append("wire:%d" % wire_handle)
+	# Synthetic items.def attachments all carry the same sentinel origin and no
+	# authored BMS/net identity. Their packed runtime handle is therefore the only
+	# alias that distinguishes siblings on the same carrier.
+	if has_wire_identity and bms_id == 0 and (
+			spawn_origin == -1 or spawn_origin == 0xffffffff):
+		return aliases
 	if net_id > 0:
 		aliases.append("net:%d" % net_id)
 	if bms_id > 0:
@@ -2064,7 +2079,8 @@ func _item_fx_control_event_aliases(effect: Dictionary) -> Array[String]:
 	return _item_fx_identity_aliases(
 			int(effect.get("a", 0)),
 			int(effect.get("b", 0)),
-			int(effect.get("c", 0)))
+			int(effect.get("c", 0)),
+			int(effect.get("wire_handle", -1)))
 
 
 func _item_fx_control_node_aliases(node: Node3D) -> Array[String]:
@@ -2078,7 +2094,8 @@ func _item_fx_control_node_aliases(node: Node3D) -> Array[String]:
 	var spawn_origin := 0
 	if origin_kind >= 0 and index >= 0:
 		spawn_origin = ((origin_kind & 0xff) << 24) | (index & 0xffffff)
-	return _item_fx_identity_aliases(net_id, bms_id, spawn_origin)
+	return _item_fx_identity_aliases(
+			net_id, bms_id, spawn_origin, int(ref.get("wire_handle", -1)))
 
 
 func _item_fx_aliases_intersect(left: Array, right: Array) -> bool:

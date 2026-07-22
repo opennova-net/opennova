@@ -686,6 +686,12 @@ func _advance_part_anims(delta: float) -> bool:
 # docs/world/world-wac-ai-re.md §14 (D-INF-11)]
 var _aim_overlay_deltas: Array = []
 var _aim_overlay_classes := PackedInt32Array()
+# Retail clips the baked personal weapon for a non-player organic attached to a
+# controller/gunner/driver mount slot by collapsing model bone 16 (BN17 R Hand)
+# at its animated joint. Presentation supplies the authoritative derived verdict;
+# this model carries it into the shared native evaluator. [orig: special row in
+# Entity_BuildBoneTransformMatrices @0x4b1290; world-wac-ai-re.md section 14.1]
+var _collapse_right_hand := false
 
 # The upper-body weapon channel: a second clip posed at its OWN playhead onto the mask
 # bones (clavicles/arms/forearms/neck/head/hands) before the aim overlay composes. The
@@ -710,6 +716,13 @@ func set_aim_overlay(deltas: Array) -> void:
 	if not deltas.is_empty() and _aim_overlay_classes.is_empty() and _skeletal != null \
 			and _skeletal.has_method("get_overlay_classes"):
 		_aim_overlay_classes = _skeletal.get_overlay_classes()
+	_body_pose_dirty = true
+
+
+func set_right_hand_collapsed(collapsed: bool) -> void:
+	if collapsed == _collapse_right_hand:
+		return
+	_collapse_right_hand = collapsed
 	_body_pose_dirty = true
 
 
@@ -739,7 +752,7 @@ func advance_body_animation(delta: float) -> void:
 				wpn_time = float(maxi(_wpn_phase_ticks, 0)) / (2.0 * wfps)
 		pose = _skeletal.eval_pose_overlay(
 			_anim_key, _anim_time, _aim_overlay_classes, _aim_overlay_deltas,
-			_wpn_key, wpn_time)
+			_wpn_key, wpn_time, _collapse_right_hand)
 	else:
 		# The weapon channel only renders through the overlay path — its export gate
 		# (primary-state flag 0x40) implies the aim overlay is active [orig: @0x4b14a7].
@@ -747,8 +760,19 @@ func advance_body_animation(delta: float) -> void:
 	var count: int = mini(pose.size(), _skeleton.get_bone_count())
 	for i in range(count):
 		var t: Transform3D = pose[i]
-		_skeleton.set_bone_pose_position(i, t.origin)
-		_skeleton.set_bone_pose_rotation(i, t.basis.get_rotation_quaternion())
+		if _collapse_right_hand and i == 16:
+			# eval_pose_overlay preserves BN17's sampled parent-local joint origin
+			# while clearing its basis. Apply that origin directly and collapse scale
+			# there. Sending the joint to world zero makes mixed-weight triangles span
+			# from the actor to the origin instead of clipping the baked weapon.
+			# This branch also covers the no-overlay eval_pose fallback above.
+			_skeleton.set_bone_pose_position(i, t.origin)
+			_skeleton.set_bone_pose_rotation(i, Quaternion.IDENTITY)
+			_skeleton.set_bone_pose_scale(i, Vector3.ZERO)
+		else:
+			_skeleton.set_bone_pose_position(i, t.origin)
+			_skeleton.set_bone_pose_rotation(i, t.basis.get_rotation_quaternion())
+			_skeleton.set_bone_pose_scale(i, t.basis.get_scale())
 	_body_pose_dirty = false
 
 

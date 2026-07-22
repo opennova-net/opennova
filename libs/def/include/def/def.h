@@ -321,6 +321,31 @@ typedef struct DefItemParticleFx {
     char secondary_effect[32];
 } DefItemParticleFx;
 
+/* Authored child-emplacement attachment keys. Keep the three spellings distinct:
+   packed retail data uses bare addeweap for ordinary vehicle/turret attachments,
+   addeweapG for the Apache/Ka-52 gun, and addeweapC for the M1A1/T80 OnTurret
+   child. Their exact control/chaining policy is a runtime concern, not a parser
+   normalization. The optional four angles are authored in down/up/right/left
+   order. */
+typedef enum DefItemEmplacementAttachmentKind {
+    DEF_ITEM_EMPLACEMENT_ADDEWEAP = 0,
+    DEF_ITEM_EMPLACEMENT_ADDEWEAP_G = 1,
+    DEF_ITEM_EMPLACEMENT_ADDEWEAP_C = 2
+} DefItemEmplacementAttachmentKind;
+
+typedef struct DefItemEmplacementAttachment {
+    char userpoint[16];
+    int item_id;
+    /* Retail-scaled BAM limits: down/right positive, up/left negative.
+       One authored degree = 11930464. */
+    int down_angle;
+    int up_angle;
+    int right_angle;
+    int left_angle;
+    int angle_count; /* 0 when limits are absent; packed retail records use 0 or 4 */
+    int kind;        /* DefItemEmplacementAttachmentKind */
+} DefItemEmplacementAttachment;
+
 typedef struct DefItemDef {
     char display_name[128];
     int id;
@@ -482,6 +507,14 @@ typedef struct DefItemDef {
     float damage_reduc_pp;
     float damage_reduc_max;
     int armor_kz;     /* ItemDef+0x192 signed i16, sign-extended in this ABI */
+    /* Ordered items.def addeweap/addeweapG/addeweapC records. Appended for
+       normalized-struct/FFI stability. */
+    DefItemEmplacementAttachment *emplacement_attachments;
+    size_t emplacement_attachments_count;
+    /* 1-based stored-slot markers. A later G/C record overwrites its marker;
+       zero means that variant was not stored. */
+    int emplacement_g_slot;
+    int emplacement_c_slot;
 } DefItemDef;
 
 typedef struct DefItemsFile {

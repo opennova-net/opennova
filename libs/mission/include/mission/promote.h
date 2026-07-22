@@ -25,6 +25,26 @@
 
 namespace opennova::mission {
 
+enum class EmplacementAttachmentKind : uint8_t {
+    Standard = 0,
+    G = 1,
+    C = 2,
+};
+
+struct ItemEmplacementAttachmentSpec {
+    int32_t child_type_id = 0; // raw BMS type id (public item id minus 100000)
+    EmplacementAttachmentKind kind = EmplacementAttachmentKind::Standard;
+    uint8_t stored_slot = 0;   // 1-based fixed items.def attachment slot
+    uint8_t attachment_flags = 0; // designated C bit 1 / G bit 2
+    world::Seat anchor;        // authored parent userpoint frame; bone 0 = parent root
+    bool anchor_found = false;
+    uint8_t angle_count = 0;   // 0 = weapon.def fallback, 4 = explicit (even all-zero)
+    int32_t down_limit_bam = 0;
+    int32_t up_limit_bam = 0;
+    int32_t right_limit_bam = 0;
+    int32_t left_limit_bam = 0;
+};
+
 struct ItemSeatSpec {
     int32_t type_id = 0; // raw BMS/items.def id stored in bms::Entity::type_id
     // Target item definition phrase_set (+0x86C). Zero is valid when the flag is
@@ -36,6 +56,7 @@ struct ItemSeatSpec {
     // 0x80000 items) + the ewep 'primary_weapon' link — the attach-label sources.
     std::vector<world::Vec3> armory_points;
     std::string primary_weapon;
+    std::vector<ItemEmplacementAttachmentSpec> emplacement_attachments;
 };
 
 struct PromoteOptions {

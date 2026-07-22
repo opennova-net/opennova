@@ -22,6 +22,12 @@ static_assert(NovaItemDatabase::TYPE_BUILDING == DEF_ITEM_TYPE_BUILDING, "TYPE_B
 static_assert(NovaItemDatabase::TYPE_POWERUP == DEF_ITEM_TYPE_POWERUP, "TYPE_POWERUP drifted from DefItemType");
 static_assert(NovaItemDatabase::TYPE_OBJECT == DEF_ITEM_TYPE_OBJECT, "TYPE_OBJECT drifted from DefItemType");
 static_assert(NovaItemDatabase::TYPE_EFFECT == DEF_ITEM_TYPE_EFFECT, "TYPE_EFFECT drifted from DefItemType");
+static_assert(NovaItemDatabase::EMPLACEMENT_ADDEWEAP == DEF_ITEM_EMPLACEMENT_ADDEWEAP,
+		"EMPLACEMENT_ADDEWEAP drifted from DefItemEmplacementAttachmentKind");
+static_assert(NovaItemDatabase::EMPLACEMENT_ADDEWEAP_G == DEF_ITEM_EMPLACEMENT_ADDEWEAP_G,
+		"EMPLACEMENT_ADDEWEAP_G drifted from DefItemEmplacementAttachmentKind");
+static_assert(NovaItemDatabase::EMPLACEMENT_ADDEWEAP_C == DEF_ITEM_EMPLACEMENT_ADDEWEAP_C,
+		"EMPLACEMENT_ADDEWEAP_C drifted from DefItemEmplacementAttachmentKind");
 
 void NovaItemDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("load", "path"), &NovaItemDatabase::load);
@@ -47,6 +53,8 @@ void NovaItemDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_clipsize", "id"), &NovaItemDatabase::get_clipsize);
 	ClassDB::bind_method(D_METHOD("get_deathtime_ticks", "id"), &NovaItemDatabase::get_deathtime_ticks);
 	ClassDB::bind_method(D_METHOD("get_primary_weapon", "id"), &NovaItemDatabase::get_primary_weapon);
+	ClassDB::bind_method(D_METHOD("get_emplacement_attachments", "id"), &NovaItemDatabase::get_emplacement_attachments);
+	ClassDB::bind_method(D_METHOD("get_emplacement_attachment_markers", "id"), &NovaItemDatabase::get_emplacement_attachment_markers);
 	ClassDB::bind_method(D_METHOD("get_mount_config", "id"), &NovaItemDatabase::get_mount_config);
 	ClassDB::bind_method(D_METHOD("get_sound_profile", "id"), &NovaItemDatabase::get_sound_profile);
 	ClassDB::bind_method(D_METHOD("get_sound_loops", "id"), &NovaItemDatabase::get_sound_loops);
@@ -67,6 +75,9 @@ void NovaItemDatabase::_bind_methods() {
 	BIND_CONSTANT(TYPE_POWERUP);
 	BIND_CONSTANT(TYPE_OBJECT);
 	BIND_CONSTANT(TYPE_EFFECT);
+	BIND_CONSTANT(EMPLACEMENT_ADDEWEAP);
+	BIND_CONSTANT(EMPLACEMENT_ADDEWEAP_G);
+	BIND_CONSTANT(EMPLACEMENT_ADDEWEAP_C);
 }
 
 Error NovaItemDatabase::load(const String &path) {
@@ -143,6 +154,22 @@ NovaItemDatabase::Item NovaItemDatabase::item_from_entry(const ::DefItemDef &ent
 	item.clipsize = entry.clipsize;
 	item.deathtime_ticks = entry.deathtime_ticks;
 	item.primary_weapon = String(entry.primary_weapon);
+	item.emplacement_attachments.reserve(entry.emplacement_attachments_count);
+	for (size_t i = 0; i < entry.emplacement_attachments_count; ++i) {
+		const DefItemEmplacementAttachment &src = entry.emplacement_attachments[i];
+		Item::EmplacementAttachment dst;
+		dst.userpoint = String(src.userpoint);
+		dst.item_id = src.item_id;
+		dst.down_angle = src.down_angle;
+		dst.up_angle = src.up_angle;
+		dst.right_angle = src.right_angle;
+		dst.left_angle = src.left_angle;
+		dst.angle_count = src.angle_count;
+		dst.kind = src.kind;
+		item.emplacement_attachments.push_back(dst);
+	}
+	item.emplacement_g_slot = entry.emplacement_g_slot;
+	item.emplacement_c_slot = entry.emplacement_c_slot;
 	item.mount_config_valid = entry.phrase_set_valid != 0;
 	item.mount_config = entry.phrase_set;
 	// The destruction/husk block (world-wac-ai-re §24).
@@ -334,6 +361,56 @@ String NovaItemDatabase::get_primary_weapon(int id) const {
 	return it == items.end() ? String() : it->second.primary_weapon;
 }
 
+Array NovaItemDatabase::get_emplacement_attachments(int id) const {
+	Array out;
+	const auto it = items.find(id);
+	if (it == items.end()) {
+		return out;
+	}
+	for (size_t i = 0; i < it->second.emplacement_attachments.size(); ++i) {
+		const Item::EmplacementAttachment &attachment =
+				it->second.emplacement_attachments[i];
+		Dictionary row;
+		row["kind"] = attachment.kind;
+		switch (attachment.kind) {
+			case EMPLACEMENT_ADDEWEAP_G:
+				row["key"] = "addeweapG";
+				break;
+			case EMPLACEMENT_ADDEWEAP_C:
+				row["key"] = "addeweapC";
+				break;
+			default:
+				row["key"] = "addeweap";
+				break;
+		}
+		row["userpoint"] = attachment.userpoint;
+		row["item_id"] = attachment.item_id;
+		row["stored_slot"] = static_cast<int>(i + 1);
+		row["angle_count"] = attachment.angle_count;
+		row["has_explicit_limits"] = attachment.angle_count == 4;
+		row["down_limit_bam"] = attachment.down_angle;
+		row["up_limit_bam"] = attachment.up_angle;
+		row["right_limit_bam"] = attachment.right_angle;
+		row["left_limit_bam"] = attachment.left_angle;
+		row["designated_g"] =
+				static_cast<int>(i + 1) == it->second.emplacement_g_slot;
+		row["designated_c"] =
+				static_cast<int>(i + 1) == it->second.emplacement_c_slot;
+		out.push_back(row);
+	}
+	return out;
+}
+
+Dictionary NovaItemDatabase::get_emplacement_attachment_markers(int id) const {
+	Dictionary out;
+	const auto it = items.find(id);
+	out["g_slot"] =
+			it == items.end() ? 0 : it->second.emplacement_g_slot;
+	out["c_slot"] =
+			it == items.end() ? 0 : it->second.emplacement_c_slot;
+	return out;
+}
+
 Dictionary NovaItemDatabase::get_mount_config(int id) const {
 	Dictionary out;
 	const auto it = items.find(id);
@@ -449,6 +526,9 @@ Dictionary NovaItemDatabase::get_item(int id) const {
 	out["soundloops"] = get_sound_loops(id);
 	out["mount_config_valid"] = it->second.mount_config_valid;
 	out["mount_config"] = it->second.mount_config_valid ? it->second.mount_config : 0;
+	out["emplacement_attachments"] = get_emplacement_attachments(id);
+	out["emplacement_attachment_markers"] =
+			get_emplacement_attachment_markers(id);
 	return out;
 }
 
@@ -494,6 +574,9 @@ Array NovaItemDatabase::get_items() const {
 		entry["soundloops"] = get_sound_loops(item->id);
 		entry["mount_config_valid"] = item->mount_config_valid;
 		entry["mount_config"] = item->mount_config_valid ? item->mount_config : 0;
+		entry["emplacement_attachments"] = get_emplacement_attachments(item->id);
+		entry["emplacement_attachment_markers"] =
+				get_emplacement_attachment_markers(item->id);
 		out.push_back(entry);
 	}
 	return out;

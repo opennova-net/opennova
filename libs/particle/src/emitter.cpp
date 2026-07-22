@@ -11,6 +11,8 @@ namespace opennova::particle {
 
 namespace {
 
+constexpr float kDegreesToRadians = 0.01745329251994329577f;
+
 // Numerically-stable LCG. Constants are the classic glibc `rand()` parameters.
 // We don't need engine bit-exact RNG output because the simulator is not
 // claiming byte parity with retail; we DO need cross-platform determinism so
@@ -279,8 +281,9 @@ void integrate_particle(Particle &p, const ParticleDef &def, const Emitter &e, f
 	// ORBIT modifier (move & 4 — engine bit 2 per the 0x848800 reorder, see
 	// particle.h::move_flag). When set, after the ballistic / spring step, the
 	// engine rotates the relative position vector and velocity around
-	// `def.orbital_axis` by an angle proportional to time. We use
-	// the emitter-randomized `orbit_speed * dt` as the per-frame angle (engine derives a similar
+	// `def.orbital_axis` by an angle proportional to time. `emitter_init` stores
+	// the randomized authored degrees/sec as radians/sec, so we use
+	// `orbit_speed * dt` as the per-frame angle (engine derives a similar
 	// quantity from emitter state × particle.age × dt; the exact FPU stack
 	// chain is not byte-decodable without full register tracing). Rotates
 	// both position offset and velocity so the orbital trajectory stays
@@ -501,6 +504,11 @@ void emitter_init(Emitter &e, const ParticleDef *def, Vec3 pos, std::uint32_t se
 	}
 	if (!std::isfinite(e.orbit_speed)) {
 		e.orbit_speed = 0.0f;
+	} else {
+		// CParticleEmitter_SpawnNewParticle @ 0x5f37a2..0x5f37c3 first
+		// randomizes orbitalspeed +/- orbitalspeed_adj in authored degrees/sec,
+		// then multiplies the result by pi/180 before storing the runtime rate.
+		e.orbit_speed *= kDegreesToRadians;
 	}
 	e.next_serial = 0;
 	e.active = def != nullptr;

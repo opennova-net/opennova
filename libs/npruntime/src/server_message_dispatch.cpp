@@ -953,6 +953,9 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						rp.ammo_index = fire_adm->ammo_index;
 						rp.adm_index = fr.adm_index;
 						rp.shot_seq = fr.hit_part;
+						// PowerThrow charge from fireRequest+80; RoundData_SpawnRound
+						// scales velocity for bytes 1..254 [orig: @0x4ec5bb].
+						rp.charge = fr.misc_byte;
 						world->round_sim.spawn(*world, rp);
 					}
 				}

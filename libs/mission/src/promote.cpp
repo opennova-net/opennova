@@ -396,6 +396,7 @@ PromoteResult promote_mission(const bms::File &m, World &world, AiSystem &ai,
         }
         return false;
     };
+    std::vector<EntityHandle> promoted_item_handles;
     auto promote_vec = [&](const std::vector<bms::Entity> &vec, EntityKind kind, bool ai_capable_default) {
         uint32_t idx = 0;
         for (const bms::Entity &e : vec) {
@@ -405,6 +406,7 @@ PromoteResult promote_mission(const bms::File &m, World &world, AiSystem &ai,
             EntityHandle h = world.registry.spawn(pool_for_kind(kind), seed);
             if (!h.valid()) { ++r.dropped; continue; }
             ++r.spawned;
+            if (kind == EntityKind::Item) promoted_item_handles.push_back(h);
             if (Entity *spawned = world.registry.get(h)) {
                 seed_authored_seats(*spawned, opts);
             }
@@ -437,6 +439,84 @@ PromoteResult promote_mission(const bms::File &m, World &world, AiSystem &ai,
         }
     };
     promote_vec(m.items, EntityKind::Item, /*ai_capable=*/false);
+
+    // Every stored items.def addeweap* slot creates a pool-1 child. The public
+    // metadata already normalized the authored full item id to the raw type id;
+    // G/C flags and angle fallback presence remain separate. Children use a
+    // non-BMS origin sentinel so the listen-server WirePresentPass cannot defer
+    // them to an unrelated placed node with the same (kind,index).
+    struct AttachmentWork {
+        EntityHandle carrier;
+        std::vector<int32_t> lineage;
+    };
+    std::vector<AttachmentWork> attachment_work;
+    attachment_work.reserve(promoted_item_handles.size());
+    for (EntityHandle h : promoted_item_handles) {
+        const Entity *carrier = world.registry.get(h);
+        if (carrier != nullptr)
+            attachment_work.push_back(AttachmentWork{h, {carrier->item_id}});
+    }
+    for (size_t work_index = 0; work_index < attachment_work.size(); ++work_index) {
+        const AttachmentWork work = attachment_work[work_index];
+        Entity *carrier = world.registry.get(work.carrier);
+        if (carrier == nullptr) continue;
+        const ItemSeatSpec *carrier_spec =
+                seat_spec_for_type(opts, carrier->item_id);
+        if (carrier_spec == nullptr) continue;
+        if (work.lineage.size() >= 8) continue;
+        for (const ItemEmplacementAttachmentSpec &attachment :
+             carrier_spec->emplacement_attachments) {
+            if (attachment.child_type_id == 0 ||
+                std::find(work.lineage.begin(), work.lineage.end(),
+                          attachment.child_type_id) != work.lineage.end())
+                continue;
+            Entity child_seed;
+            child_seed.kind = EntityKind::Item;
+            child_seed.item_id = attachment.child_type_id;
+            child_seed.position = carrier->position;
+            child_seed.yaw = carrier->yaw;
+            child_seed.pitch = carrier->pitch;
+            child_seed.roll = carrier->roll;
+            child_seed.team = carrier->team;
+            child_seed.spawn_origin = 0xFFFFFFFFu;
+            const EntityHandle child_handle =
+                    world.registry.spawn(pool_for_kind(EntityKind::Item), child_seed);
+            if (!child_handle.valid()) {
+                ++r.dropped;
+                break;
+            }
+            ++r.spawned;
+            Entity *child = world.registry.get(child_handle);
+            carrier = world.registry.get(work.carrier);
+            if (child == nullptr || carrier == nullptr) continue;
+            child->emplacement_parent = work.carrier;
+            child->emplacement_parent_spawn_id =
+                    carrier->registry_spawn_id;
+            child->emplacement_local = attachment.anchor.seat_local;
+            child->emplacement_yaw_offset = attachment.anchor.yaw_offset;
+            child->emplacement_bone =
+                    attachment.anchor_found ? attachment.anchor.bone_index : 0;
+            child->emplacement_kind = static_cast<uint8_t>(attachment.kind);
+            child->emplacement_slot = attachment.stored_slot;
+            child->emplacement_attachment_flags = attachment.attachment_flags;
+            child->emplacement_angle_count = attachment.angle_count;
+            child->emplacement_down_limit_bam = attachment.down_limit_bam;
+            child->emplacement_up_limit_bam = attachment.up_limit_bam;
+            child->emplacement_right_limit_bam = attachment.right_limit_bam;
+            child->emplacement_left_limit_bam = attachment.left_limit_bam;
+            seed_authored_seats(*child, opts);
+            Seat anchor = attachment.anchor;
+            anchor.type = SeatType::Gunner;
+            anchor.bone_index = child->emplacement_bone;
+            pose_mounted_occupant(world, *child, *carrier, anchor);
+
+            std::vector<int32_t> lineage = work.lineage;
+            lineage.push_back(attachment.child_type_id);
+            attachment_work.push_back(
+                    AttachmentWork{child_handle, std::move(lineage)});
+        }
+    }
+
     promote_vec(m.buildings, EntityKind::Building, /*ai_capable=*/false);
     promote_vec(m.markers, EntityKind::Marker, /*ai_capable=*/false);
     promote_vec(m.organics, EntityKind::Organic, /*ai_capable=*/true);

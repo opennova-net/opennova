@@ -439,16 +439,19 @@ void emit_death_sounds_and_effects(World &world, Entity &target, bool silent) {
             submerged ? traits->particleh2odeath : traits->particledeath;
     if (!family.empty())
         ev.effects.push_back(DestructionEffectEvent{
-                family, target.position, Vec3{}, target.net_id, target.bms_id, 1});
+                family, target.position, Vec3{}, target.net_id, target.bms_id, 1,
+                target.handle.packed, target.spawn_origin});
     // The fire + other families [orig: the +0x47A / +0x4AE banks @ 0x493b6c/
     // @ 0x493bba]; the present pass runs the per-tick wreck-fire behavior
     // (random crackle, underwater steam-out) on these.
     if (!traits->particlefire.empty())
         ev.effects.push_back(DestructionEffectEvent{traits->particlefire,
-                target.position, Vec3{}, target.net_id, target.bms_id, 2});
+                target.position, Vec3{}, target.net_id, target.bms_id, 2,
+                target.handle.packed, target.spawn_origin});
     if (!traits->particleother.empty())
         ev.effects.push_back(DestructionEffectEvent{traits->particleother,
-                target.position, Vec3{}, target.net_id, target.bms_id, 3});
+                target.position, Vec3{}, target.net_id, target.bms_id, 3,
+                target.handle.packed, target.spawn_origin});
     // The kz blasts: one kz_OrganicBlast r=5.0 per husk KZ user point, else one
     // at the entity with r = kz ?: bound radius [orig:
     // Entity_QueueKzBlastAtUserPoints(g_ammo_kz_OrganicBlast, ..., "KZ", 1, ...)
@@ -501,7 +504,8 @@ void process_destructible_death(World &world, Entity &target) {
     target.health = 0;
     if (target.death_tick == 0) target.death_tick = world.logic_tick; // [orig: @ 0x43fbfd]
     ++ev.items_destroyed;
-    ev.husk_swaps.push_back(HuskSwapEvent{target.net_id, target.bms_id,
+    ev.husk_swaps.push_back(HuskSwapEvent{target.net_id, target.handle.packed,
+                                          target.bms_id,
                                           target.spawn_origin, target.item_id,
                                           target.spawned_piece_mask, target.position});
     // The S2C 0x26 entity-state broadcast (Server_SendEntityStatePacket
@@ -697,8 +701,9 @@ void entity_update_death_transforms(World &world, Entity &target, bool silent) {
     if (target.death_tick == 0) target.death_tick = world.logic_tick;
     if (!was_husked) {
         world.destruction.husk_swaps.push_back(
-                HuskSwapEvent{target.net_id, target.bms_id, target.spawn_origin,
-                              target.item_id, mask, target.position});
+                HuskSwapEvent{target.net_id, target.handle.packed, target.bms_id,
+                              target.spawn_origin, target.item_id, mask,
+                              target.position});
         ++world.destruction.items_destroyed;
     }
     // The successful spawn applied the death vertical kick [orig: @ 0x493969

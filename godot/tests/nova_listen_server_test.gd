@@ -95,6 +95,8 @@ func test_mounted_local_overlay_matches_packed_present_for_valid_zero_and_six() 
 		assert_gte(base, 0, "the mounted local player reached its decoded client view")
 		if base >= 0:
 			assert_eq(int(snapshot[base + NovaSimulation.PF_AIM_OVERLAY_VALID]), 1)
+			assert_eq(int(snapshot[base + NovaSimulation.PF_RIGHT_HAND_COLLAPSED]), 0,
+					"retail Flags 0x100 keeps the player BN17 row live on UseGun")
 			var packed_body := Vector3(
 					snapshot[base + NovaSimulation.PF_AIM_BODY_PITCH_DEG],
 					snapshot[base + NovaSimulation.PF_AIM_BODY_YAW_DEG],
@@ -123,6 +125,18 @@ func test_mounted_local_overlay_matches_packed_present_for_valid_zero_and_six() 
 							"config 6 class %d stays on body" % overlay_class)
 				assert_gt(packed_angles[8].distance_to(packed_angles[0]), 0.1,
 						"config 6 head alone preserves full aim")
+
+		assert_true(sim.local_player_toggle_mount(),
+				"the same player can leave the emplaced seat")
+		sim.step()
+		var dismounted_snapshot := sim.get_present_snapshot()
+		var dismounted_base := _present_row_base_for_handle(
+				sim, dismounted_snapshot, sim.get_local_player_wire_handle())
+		assert_gte(dismounted_base, 0)
+		if dismounted_base >= 0:
+			assert_eq(int(dismounted_snapshot[dismounted_base
+					+ NovaSimulation.PF_RIGHT_HAND_COLLAPSED]), 0,
+					"dismount clears the transient bone-collapse verdict")
 		sim.free()
 
 
@@ -186,6 +200,65 @@ func test_listen_server_present_reads_client_decoded_state() -> void:
 			"decoded position round-trips within codec tolerance")
 		matched += 1
 	assert_eq(matched, 3, "every decoded entity matched a sim entity")
+	sim.free()
+
+
+func test_items_attachment_follows_through_listen_client() -> void:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var vehicle := md.add_entity(
+			NovaMissionData.KIND_ITEM, 101291,
+			Vector3(10, 0, 0), Vector3.ZERO)
+	assert_false(vehicle.is_empty())
+	var sim := NovaSimulation.new()
+	sim.enable_listen_server(true)
+	sim.set_item_seat_specs([{
+		"type_id": 1291,
+		"emplacement_attachments": [{
+			"item_id": 101419,
+			"kind": 0,
+			"stored_slot": 1,
+			"anchor_found": false,
+			"local": Vector3(2, 0, 0),
+		}],
+	}])
+	assert_true(sim.load_from_mission_data(md))
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
+			"res://../fixtures/def")), OK)
+	var items := NovaItemDatabase.new()
+	assert_eq(items.load_from_resource_root(root, "items.def"), OK)
+	sim.resolve_item_traits(items)
+
+	# Fold the initial 0x0D pool stream and capture the child's spawn pose.
+	sim.step()
+	var stride := sim.get_present_stride()
+	var snapshot := sim.get_present_snapshot()
+	var child_base := -1
+	for record in range(snapshot.size() / stride):
+		var base := record * stride
+		if int(snapshot[base + NovaSimulation.PF_TYPE_ID]) == 1419:
+			child_base = base
+			break
+	assert_gte(child_base, 0, "the ewep child reached the listen client")
+	var spawn_x := snapshot[child_base + NovaSimulation.PF_POS_X]
+
+	# The child has no 0x0A callback of its own. Its presented motion comes from
+	# the stock 0x0D parent relation recomposed against the decoded vehicle row.
+	sim.debug_set_world_entity_position(
+			int(vehicle["bms_id"]), Vector3(30, 0, 0))
+	sim.step()
+	snapshot = sim.get_present_snapshot()
+	child_base = -1
+	for record in range(snapshot.size() / stride):
+		var base := record * stride
+		if int(snapshot[base + NovaSimulation.PF_TYPE_ID]) == 1419:
+			child_base = base
+			break
+	assert_gte(child_base, 0, "the moving child remains presented")
+	if child_base >= 0:
+		assert_gt(absf(snapshot[child_base + NovaSimulation.PF_POS_X] - spawn_x), 15.0,
+				"the child follows the decoded carrier instead of freezing at spawn")
 	sim.free()
 
 

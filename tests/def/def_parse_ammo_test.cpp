@@ -128,6 +128,35 @@ int main(void) {
         def_free_ammo(&ammo);
         return 1;
     }
+    /* The throwable fields against the real claymore block (world-wac-ai-re
+       §27): kz_pieslice stores the HALF-angle — (24 / 2) * 11930464 BAM
+       [orig: AmmoDef_ParseProperty @0x40ad51 signed div 2 -> imul 0xB60B60] —
+       and the TrcrID item ids ride +16/+20. */
+    const DefAmmoDef *claymore = NULL;
+    for (size_t i = 0; i < ammo.count; ++i) {
+        if (strcmp(ammo.entries[i].name, "claymore") == 0) {
+            claymore = &ammo.entries[i];
+            break;
+        }
+    }
+    if (!claymore) {
+        fprintf(stderr, "FAIL: could not find claymore entry\n");
+        def_free_ammo(&ammo);
+        return 1;
+    }
+    if (claymore->kz_pieslice_bam != 12 * 11930464) {
+        fprintf(stderr, "FAIL: claymore kz_pieslice_bam want %ld got %ld\n",
+                (long)(12 * 11930464), (long)claymore->kz_pieslice_bam);
+        def_free_ammo(&ammo);
+        return 1;
+    }
+    if (claymore->frndly_trcr_type_id != 1895 || claymore->foe_trcr_type_id != 1895) {
+        fprintf(stderr, "FAIL: claymore TrcrIDs want 1895/1895 got %d/%d\n",
+                claymore->frndly_trcr_type_id, claymore->foe_trcr_type_id);
+        def_free_ammo(&ammo);
+        return 1;
+    }
+
     struct { const char *what; long got, want; } checks[] = {
         {"velocity", car15->velocity, 854},
         {"max_age_ticks", car15->max_age_ticks, 186},

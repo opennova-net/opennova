@@ -173,6 +173,11 @@ struct DestructionEffectEvent {
     int32_t attach_bms_id = 0; // the placed-node resolve key for the anchor
     uint8_t family = 0;        // 0 transient, 1 death-family slot, 2 fire-family
                                // slot, 3 other-family slot (the 4-slot banks)
+    uint16_t attach_wire_handle = EntityHandle::kInvalid; // packed pool/slot
+                                                          // identity for
+                                                          // runtime-only owners
+    uint32_t attach_spawn_origin = 0; // distinguishes authored zero-BMS origins
+                                      // from the synthetic promotion sentinel
 };
 
 struct DestructionSoundEvent {
@@ -184,6 +189,10 @@ struct DestructionSoundEvent {
 // (with the collision feed) its ray/contact model. Emitted once per death.
 struct HuskSwapEvent {
     uint16_t net_id = 0;
+    uint16_t wire_handle = EntityHandle::kInvalid; // packed pool/slot identity;
+                                                  // unlike net/BMS/origin this
+                                                  // is distinct for synthetic
+                                                  // attachment siblings
     int32_t bms_id = 0;
     uint32_t spawn_origin = 0;
     int32_t item_id = 0;

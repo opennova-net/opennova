@@ -305,6 +305,7 @@ func _draw() -> void:
 	_draw_stance(surface, ticks)
 	_draw_weapon_cluster(surface, ticks)
 	_draw_heat_bar(surface)
+	_draw_power_bar(surface)
 	_draw_waypoint_info(surface)
 	_draw_objectives_panel(surface)
 	_draw_attach_labels()
@@ -416,6 +417,42 @@ func _draw_heat_bar(surface: Vector2) -> void:
 		var top := r.position.y + r.size.y - vspan + 1.0
 		draw_rect(Rect2(Vector2(r.position.x + 1.0, top),
 			Vector2(r.size.x - 2.0, maxf(r.position.y + r.size.y - 1.0 - top, 0.0))), fill)
+
+
+# The PowerThrow charge bar at the HUDPOWERBAR rect (x,y,w,h): a wireframe
+# outline, an inset fill proportional to the windup, and the percent text 15
+# output pixels above. The fill curve is the witnessed windup shape: full during
+# the first 31 held ticks (the tap window throws at full power), then restarting
+# at 0 and climbing (held-31)/93 to 1. Fill span = (progress_fp16 * w + 0x8000)
+# >> 16, drawn (x+1, y+1)-(x+span, y+h-1); everything in the flat 0xFF800000
+# half-red the original passes for both rects and the text.
+# [orig: HUD_DrawPowerThrowChargeBar @0x599830 (ex kong "HUD_DrawWeaponReloadBar"
+#  misnomer): gates @0x59988f (def+8 sign bit + g_fireChargeStartTick + ammo);
+#  curve @0x5998ad (1/93 = flt_7CD390, fld1 clamp); fill @0x599964; text
+#  "%d%" @0x5999ef at y-15 via HUD_DrawTextLeft_HalfBright @0x5804c0]
+func _draw_power_bar(surface: Vector2) -> void:
+	if not bool(_info.get("windup_active", false)):
+		return
+	var design: Rect2 = _rects.get("powerbar", Rect2())
+	if design.size.x <= 0.0 or design.size.y <= 0.0:
+		return
+	var held := int(_info.get("windup_held_ticks", 0))
+	var progress := 1.0
+	if held >= 31:
+		progress = minf(float(held - 31) * (1.0 / 93.0), 1.0)
+	var color := Color8(128, 0, 0)  # [orig: the 0xFF800000 constant @0x840b1c]
+	var r := HudLayout.scale_rect(design, surface)
+	draw_rect(r, color, false)
+	var span := (int(progress * 65536.0) * int(r.size.x) + 0x8000) >> 16
+	if span > 1:
+		draw_rect(Rect2(r.position + Vector2.ONE,
+			Vector2(minf(float(span - 1), r.size.x - 2.0), r.size.y - 2.0)), color)
+	if _font != null:
+		var label_pos := design.position + HudLayout.pixel_delta_to_design(
+				Vector2(0, -15), surface)
+		HudText.draw_text(self, _font,
+			label_pos, surface,
+			"%d%%" % int(progress * 100.0), HudText.half_bright(color))
 
 
 # The waypoint name + distance label at the HUDWPDINFO anchor. Gates: the mission

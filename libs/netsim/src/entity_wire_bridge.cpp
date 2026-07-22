@@ -368,6 +368,16 @@ PoolSpawnBatch build_pool1_spawn_batch(const world::World &w) {
 		rec.euler_x = engine_axis_bam(e.pitch);
 		rec.euler_y = engine_axis_bam(e.roll);
 		rec.team_byte = e.team;
+		// items.def addeweap children use retail's existing entity+368
+		// relationship in the 0x0D spawn record. Positions remain absolute world
+		// coordinates; the client derives the rigid child-to-parent transform only
+		// after the complete batch has populated both rows.
+		if (e.emplacement_parent.valid()) {
+			const world::Entity *parent = w.registry.get(e.emplacement_parent);
+			if (parent != nullptr && parent->registry_spawn_id ==
+					e.emplacement_parent_spawn_id)
+				rec.parent_handle = e.emplacement_parent.packed;
+		}
 		// Faithful 0x0800 AI-trailer gate: emit the trailer ONLY for AI-capable item defs
 		// (items.def ItemDefAttrib & 0x100000 = AIData, resolved into Entity::is_ai_capable). This
 		// matches the stock 0x0D decoder's own gate exactly (itemDef.attrib & 0x100000 @0x433327),

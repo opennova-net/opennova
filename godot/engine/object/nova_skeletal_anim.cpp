@@ -21,6 +21,21 @@ using namespace godot;
 
 namespace {
 
+constexpr int kRightHandBoneIndex = 16;
+
+// Entity_BuildBoneTransformMatrices applies the BN17 special row after every
+// ordinary channel/overlay branch, including the fallback taken when overlay
+// inputs are unavailable. Keep the zero-scale pose in one helper so a future
+// early return cannot leave the baked personal weapon at the wrist. Preserve
+// the sampled local origin: presentation must collapse at the animated joint,
+// not drag partially weighted vertices toward world origin.
+void apply_right_hand_local_collapse(Array &pose, bool collapse) {
+	if (!collapse || pose.size() <= kRightHandBoneIndex) return;
+	const Transform3D hand = pose[kRightHandBoneIndex];
+	pose[kRightHandBoneIndex] =
+			Transform3D(Basis(Vector3(), Vector3(), Vector3()), hand.origin);
+}
+
 // The sampler already produces engine-native (Y-up) transforms -- the same space Godot
 // and the original engine use -- so a bone's parent-local pose maps DIRECTLY to a Godot
 // Transform3D with no change-of-basis. (The mesh carries the (-x,y,z) handedness flip;
@@ -635,7 +650,8 @@ void NovaSkeletalAnim::splice_weapon_channel(Array &p_pose, const String &p_wpn_
 
 Array NovaSkeletalAnim::eval_pose_overlay(const String &p_key, double p_playhead_seconds,
 		const PackedInt32Array &p_classes, const Array &p_deltas,
-		const String &p_wpn_key, double p_wpn_playhead_seconds) const {
+		const String &p_wpn_key, double p_wpn_playhead_seconds,
+		bool p_collapse_right_hand) const {
 	Array pose = eval_pose(p_key, p_playhead_seconds);
 	// The witnessed order: primary sample -> weapon-channel mask override -> the aim
 	// overlay multiplies ON TOP of the composed pose [orig: @0x4b14a7..@0x4b16a7 run
@@ -644,6 +660,7 @@ Array NovaSkeletalAnim::eval_pose_overlay(const String &p_key, double p_playhead
 	const int n = static_cast<int>(pose.size());
 	if (n == 0 || static_cast<size_t>(n) != bones_.size() || p_classes.size() < n ||
 			p_deltas.size() < static_cast<int>(opennova::anim::kOverlayClassCount)) {
+		apply_right_hand_local_collapse(pose, p_collapse_right_hand);
 		return pose;
 	}
 
@@ -673,6 +690,14 @@ Array NovaSkeletalAnim::eval_pose_overlay(const String &p_key, double p_playhead
 		const opennova::anim::Quat &q = rots[static_cast<size_t>(i)];
 		pose[i] = Transform3D(Basis(Quaternion(q.x, q.y, q.z, q.w)), t.origin);
 	}
+	// Retail's final special row clips BN17 R Hand after channel composition,
+	// overlay, and parent-pivot re-anchor. The personal weapon is baked into the
+	// character mesh and weighted to model bone 16. The portable pose preserves
+	// BN17's animated joint origin while zeroing its basis; the collision consumer
+	// applies its witnessed final-row representation separately.
+	// [orig: Entity_BuildBoneTransformMatrices @0x4b1290 special row;
+	// world-wac-ai-re.md section 14.1.5]
+	apply_right_hand_local_collapse(pose, p_collapse_right_hand);
 	return pose;
 }
 
@@ -695,5 +720,5 @@ void NovaSkeletalAnim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_clip_looping", "key", "variant"), &NovaSkeletalAnim::is_clip_looping, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("eval_pose", "key", "playhead_seconds", "variant"), &NovaSkeletalAnim::eval_pose, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("get_overlay_classes"), &NovaSkeletalAnim::get_overlay_classes);
-	ClassDB::bind_method(D_METHOD("eval_pose_overlay", "key", "playhead_seconds", "classes", "deltas", "wpn_key", "wpn_playhead_seconds"), &NovaSkeletalAnim::eval_pose_overlay, DEFVAL(String()), DEFVAL(0.0));
+	ClassDB::bind_method(D_METHOD("eval_pose_overlay", "key", "playhead_seconds", "classes", "deltas", "wpn_key", "wpn_playhead_seconds", "collapse_right_hand"), &NovaSkeletalAnim::eval_pose_overlay, DEFVAL(String()), DEFVAL(0.0), DEFVAL(false));
 }
