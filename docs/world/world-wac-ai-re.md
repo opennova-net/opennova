@@ -211,7 +211,7 @@ Everything below was decompiled and read this session (pseudocode dumps:
    `Roll(+0x18)` ease to level 1/16-step — a live standing/crouched soldier neither
    slope-leans nor slope-slides (the slide impulse only exists inside the conform branch;
    dead+airborne diverts to the corpse tumble `@0x4ba0b2` instead). Conforming: 4 probes
-   `sub_4142C0(entity, ±dir·22528>>22 …, 0x4000, 0x20000)` ahead/behind (pitch slope ×2^14)
+   `Entity_RaycastGroundHeight(entity, ±dir·22528>>22 …, 0x4000, 0x20000)` ahead/behind (pitch slope ×2^14)
    and left/right at quarter offset (roll slope ×2^16), clamp ±656175520; if |slope| >
    572662272: **slide** `vel ∓= dir·2^11>>22`; then `bodyPitch(+0x90)` and `Roll(+0x18)`
    chase the slopes at eighth-step [orig: `@0x4ba320`]; a dead NPC also aims along the
@@ -259,19 +259,19 @@ and the vehicle rows 21/23) — ported 2026-07-16.
 2. ~~**Avoidance** internals~~ CLOSED 2026-06-10 (negative result): patrol walking has **no
    peer/obstacle steering** in `0x4b9910`. The probe fans found are (a) a peer-cohesion
    *facing* average for combat idles 163/44/126 only (same-team peers ≤ 3u + a 9-direction
-   `sub_53B130` clearance fan biasing `entity[106]`; dump 3734–4082), and (b) vehicle-entry
+   `Entity_CheckLineOfSightTerrainAndEntities` clearance fan biasing `entity[106]`; dump 3734–4082), and (b) vehicle-entry
    approach probes inside the command path. Entity separation = the resolver's push-out
    (item 5), not AI steering.
 3. **Swim**: no swim locomotion in the unread regions beyond the known state overlays
    (36/37/154 selection + wash 27–29); swimming physics lives in the resolver (item 5,
    water flags at entity+36). The airborne overlay decoded: flags 0x2000/0x20 set + 0x40
    clear → force parachute 47, fallback jump_loop 31 (dump 3679–3692).
-4. `sub_4142C0 @ 0x4142c0` (0x59 bytes — ground probe at offset; exact param semantics 0x4000/0x20000).
+4. `Entity_RaycastGroundHeight @ 0x4142c0` (0x59 bytes — ground probe at offset; exact param semantics 0x4000/0x20000).
 5. `movement collision resolver @ 0x4b2bd0` internals (0x11e3 — ground/water/BVOL
    resolver). Type-4 bookkeeping was initially decoded under the incorrect platform reading;
    the manual pins CL as ladder, and the remaining counter/entry semantics ride D-COL-5.
 6. ~~Marker wait/facing **BMS field mapping**~~ CLOSED (spawn map ported into promote; see §3.2).
-7. Perception scan fn (called at dump line 2377, kong-misnamed `Entity_SpawnProjectile`) + LOS `sub_53B130`.
+7. Perception scan fn (called at dump line 2377, kong-misnamed `Entity_SpawnProjectile`) + LOS `Entity_CheckLineOfSightTerrainAndEntities`.
 8. `dword_C6EAE4` (fall-damage gravity scale) value/source. ~~1024-entry sin/cos table
    extraction~~ CLOSED 2026-07-05: the table is 1281 entries built by
    `Math_BuildSinTable @ 0x613050` (accumulating step `dbl_7DF578`, scale `dbl_7C3600` =
@@ -780,11 +780,11 @@ sources; unifying needs a shared sampler (open).
   `dead = ((entity+36 & 2) || entity+286 <= 0) && entity+52`;
 - radius 0 path: center tap only.
 
-**Decompile-lossiness warning (durable):** the per-tap samplers `sub_4142C0` / `sub_414320` decompile
+**Decompile-lossiness warning (durable):** the per-tap samplers `Entity_RaycastGroundHeight` / `Entity_RaycastGroundHeightAndObject` decompile
 as if they ignore the dx/dy offsets and return a flat field — WRONG. Disasm + the pointer write-back
 show each builds `pos = {x+dx, y+dy, z + 0x10000 − 0x300000}` (a ray from z+1.0 down to z−47.0) and
 calls `raycast_entity_collision @ 0x413760`, which writes the sampled ground height back into `pos.z`
-(returned in eax) — the 5 taps DO sample 5 distinct columns. `sub_414320` additionally stores the
+(returned in eax) — the 5 taps DO sample 5 distinct columns. `Entity_RaycastGroundHeightAndObject` additionally stores the
 raycast collision-object at record+40. The real sampler is
 `Terrain_RaycastHeightmapHiRes_0 @ 0x60e710`: a LoRes pass, then back/forward step + 8-iteration
 bisection refine (the per-step terrain samples are `Terrain_SampleHeightBilinear @ 0x6067b0` —
@@ -2272,7 +2272,7 @@ recorded-not-applied rel-ops — plus `AI_UpdateWaypointMovement` / `AI_UpdateMo
 1. ~~`AIEntity_ProcessWeaponFire @ 0x472e00` full-body digest~~ CLOSED 2026-07-16 → §17.6.
 2. ~~The **infantry** combat pass inside `Entity_UpdateInfantryAI @ 0x4b9910`~~ CLOSED
    2026-07-16 → §17.1–17.5 (perception fn = `Entity_FindNearestThreat @ 0x4b0990`, the
-   ex kong "Entity_SpawnProjectile" misnomer; LOS fan = `sub_53B130`, renamed
+   ex kong "Entity_SpawnProjectile" misnomer; LOS fan = `Entity_CheckLineOfSightTerrainAndEntities`, renamed
    `Entity_CheckLineOfSightTerrainAndEntities`).
 3. ~~brain[42] (retarget timer) incrementer unfound.~~ CLOSED 2026-07-16: it is inside the
    state-17 tick itself — `brain[42] += 16` per processed tick `[orig: @ 0x472e00, the
@@ -2782,7 +2782,7 @@ organics are pool 0, unwalked, matching retail residency).
 ### 18.6 IDB write-backs (2026-07-16 session 4, saved)
 
 Renames (anchored, ex auto-names): `Sound_TickPendingSlots @ 0x529310` (ex
-`sub_529310`), `Entity_UpdateMuzzleGlowEffect @ 0x56c960` (ex `sub_56C960`),
+`Sound_TickPendingSlots`), `Entity_UpdateMuzzleGlowEffect @ 0x56c960` (ex `sub_56C960`),
 `g_SoundSpeedFixed @ 0x24d6660` (ex `dword_24D6660`). Entry comments:
 `@ 0x528e40` (the inverted "dedicated server only" gloss corrected — the gate is
 the is_client bit, TRUE in SP; delay formula + speed global), `@ 0x527c30`

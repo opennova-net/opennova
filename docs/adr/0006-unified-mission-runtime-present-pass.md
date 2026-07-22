@@ -9,7 +9,7 @@ Status: accepted (branch `unified-edit-history`)
 ## Context
 
 A prior change consolidated the mission **logic** onto one faithful tick (`libs/world` `World` +
-`TickService` + `ISystem`s WAC→BMS→AI, modelled on `sub_4F81A0`). But the layer **above** the logic —
+`TickService` + `ISystem`s WAC→BMS→AI, modelled on `WacScript_AdvanceTick`). But the layer **above** the logic —
 "drive the sim and draw its entities onto the scene" — was still split into two divergent paths:
 
 - **Game**: `game_world.gd` → `MissionCommandHost` applied **only PANM part-anim phase**, keyed by

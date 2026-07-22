@@ -110,7 +110,7 @@ Witnessed per-tick frame structure inside `Game_ProcessMainFrame @0x5263f0` (the
 callback; `current_tick @0x24c1968` increments once per call):
 
 1. `Server_TickUpdate @0x51d7e0` (authority only):
-   - `sub_4F81A0 @0x51d8bf` — the **WAC executor**: 14-instruction wrapper that gates
+   - `WacScript_AdvanceTick @0x51d8bf` — the **WAC executor**: 14-instruction wrapper that gates
      on `dword_C6EB28` (script disable), counts `dword_C6EAD4` up to **0x3E (62)**
      (@0x4f81b1), then runs `WacScript_ExecuteBytecode` once and increments the run
      counter `dword_C6EAD8` (@0x4f81d3). One VM execution per 62 ticks.
@@ -292,7 +292,7 @@ group 0 forced to count 0):
 |---|---|---|
 | alert dword (0=green 1=yellow 2=red) | `0xA33FA4` | setters @0x40d5f0/=0, @0x40d610/=1, @0x40d630/=2 (all three kong names are misnomers); ChangeGroupAI subs 5→red 6→green 22→yellow (`Entity_HandleAlertCommand @0x43cff7`); AI death/damage → red (@0x465f9e, @0x4073ea, @0x465984) |
 | initial count | `0xA33FA8` | `EntityPool_RecountByType @0x40e7e0` — pools 2,0,1 by entity+284; called ONCE from `Game_StartMission @0x525b8b` right after the pre pass |
-| live count | `0xA33FAC` | `sub_40E8D0` full rescan (`!(flags&2) && health>0`), once per **62 ticks** in Server_TickUpdate (timer @0x51db6d, reload 0x3E @0x51db93, call @0x51dc02) and after the two group-reassign actions (@0x43c671, @0x43d75f) |
+| live count | `0xA33FAC` | `EntityPool_RecountLiveByGroup` full rescan (`!(flags&2) && health>0`), once per **62 ticks** in Server_TickUpdate (timer @0x51db6d, reload 0x3E @0x51db93, call @0x51dc02) and after the two group-reassign actions (@0x43c671, @0x43d75f) |
 
 **Twelve sticky relation bitmatrices** (single key = DcbId +0x7C, the authored
 SSN; group key = commandGroup):
@@ -341,7 +341,7 @@ group p1 holding an object with type word p2 (`sub_43C870 @0x43c870`).
 | `BmsEventSystem::dispatch_action` | `EventAction_Dispatch @0x4542e0` |
 | `BmsEventSystem::tick` (pre/post/normal passes) | `@0x454dc0` / `@0x454e00` / `@0x454d50` + the 16-tick gate in `Server_TickUpdate @0x51d7e0` |
 | `BmsEventSystem::load` | `EventTrigger_LoadAllData @0x453eb0` |
-| `WacSystem::tick` (62-divider) | `sub_4F81A0 @0x4f81a0` |
+| `WacSystem::tick` (62-divider) | `WacScript_AdvanceTick @0x4f81a0` |
 | `WacVm::time()` | `dword_C6EAD8` |
 | `World::logic_tick` | `current_tick @0x24c1968` |
 | `World::run_logic_tick` system order | `Game_ProcessMainFrame @0x5263f0` (Server_TickUpdate → Entity_UpdateAllEntities) |
@@ -355,7 +355,7 @@ Renames (dry-run validated 13/13):
 - `sub_454050` → `EventTrigger_EvaluateChain` (anchored)
 - `Entity_SetStateWreckage @0x454d50` → `EventTrigger_UpdateQuarterRoundRobin` (anchored) — **APPLIED 2026-06-25** (during the GamePlayerEntity grill: it was a kong-misnomer in the `Entity_*` namespace; verified callee `EventTrigger_UpdateEntry` + caller `Server_TickUpdate`)
 - `EventTrigger_NotifyEntityDeath @0x452ce0` → `Event_OnEventFired_MarkLinkedSpawnEntries` (probable)
-- `sub_4F81A0` → `WacScript_TickEvery62` (anchored)
+- `WacScript_AdvanceTick` → `WacScript_TickEvery62` (anchored)
 - globals: `trigger @0xae0704`→`g_Events`, `dword_AE0700`→`g_EventCount`,
   `dword_AE070C`→`g_EventTriggers`, `dword_AE0708`→`g_EventTriggerCount`,
   `dword_AE0714`→`g_EventActions`, `dword_AE0710`→`g_EventActionCount`,
@@ -621,8 +621,8 @@ MedicAssisting, sub3 Evacuating. No params.
 | 33 | (unnamed) | `1 << (byte@12 + 15)` | BIT index |
 | 34 | PlayerDialogDone | `Dialog_ExistsByIndex(p1)==0` | DIALOG |
 | 35 | PlayerDialogFinished | `sub_44E220(p1)` | DIALOG |
-| 36 | PlayerAwol | `sub_439DE0() >= p1` | SECONDS outside mission area |
-| 37 | PlayerSatchel | `sub_547160(block)` | AREA (per dfx2med §8) |
+| 36 | PlayerAwol | `Entity_GetPlayerAwolCounter() >= p1` | SECONDS outside mission area |
+| 37 | PlayerSatchel | `EventTrigger_AnySatchelInArea(block)` | AREA (per dfx2med §8) |
 | 38/39/40/41 | AttachedToSsn/OnSsn/DrivingSsn/OnGun | `FindByNetId(p1)` → vehicle/mount check | ENTITY |
 
 The engine handles player sub-types 22–30, 32, 33 that our enum does not name; they
@@ -666,7 +666,7 @@ display as raw values and round-trip.
 | 37 | AttachToEmplaced | `FindByNetId(p1)` → mount (§1.5 case 0x25) | ENTITY | — | — | — |
 | 38 | SetLightState | `sub_5A8C80(p1,p2)` | id | state | — | — |
 | 39 | Teammates | sub1 `HeliLift_SpawnPickup(p1,p2)`, sub2 `…Flyover` | p1 | p2 | — | 1=pickup 2=flyover 3=evac-AT |
-| 40 | ShowWaypoints | `sub_58FB50(p1)` | bool | — | — | — |
+| 40 | ShowWaypoints | `Game_SetShowWaypoints(p1)` | bool | — | — | — |
 | 41 | ExecuteWac | not dispatched here (WAC subsystem; no-op in this dispatcher) | — | — | — | — |
 | 42–49 | Ssn/GroupTarget{Ssn,Group}{Pri,Exc} | `Entity_Set{Alert,Action,Waypoint,Target,Weapon}*(p1,p2)` | ENTITY/GROUP | target | — | — |
 
@@ -817,7 +817,7 @@ correspondence made explicit.
 | 0x454050 | sub_454050 | EventTrigger_EvaluateChain | anchored |
 | 0x454d50 | EventTrigger_UpdateQuarterRoundRobin | (applied) | **APPLIED 2026-06-25** (was kong-misnomer `Entity_SetStateWreckage`) |
 | 0x452ce0 | EventTrigger_NotifyEntityDeath | Event_OnEventFired_MarkLinkedSpawnEntries | probable (arg is the EVENT entry, not an entity) |
-| 0x4f81a0 | sub_4F81A0 | WacScript_TickEvery62 | anchored |
+| 0x4f81a0 | WacScript_AdvanceTick | WacScript_TickEvery62 | anchored |
 | 0xae0704 | trigger | g_Events | anchored |
 | 0xae0700 | dword_AE0700 | g_EventCount | anchored |
 | 0xae070c | dword_AE070C | g_EventTriggers | anchored |
@@ -848,7 +848,7 @@ correspondence made explicit.
 | `EventTrigger_EvaluateCondition @0x453620` | `libs/mission/src/event_runtime.cpp` |
 | `EventAction_Dispatch @0x4542e0` | `libs/mission/src/event_runtime.cpp` |
 | `@0x454d50` (quarter pass) | `libs/mission/src/event_runtime.cpp` |
-| `sub_4F81A0 @0x4f81a0` | `libs/wac/include/wac/wac_system.h` |
+| `WacScript_AdvanceTick @0x4f81a0` | `libs/wac/include/wac/wac_system.h` |
 | `Mission_LoadBMSFile @0x40f4e0` | `libs/mission/src/promote.cpp` |
 | `Entity_SpawnFromBMSRecord @0x40e9f0` | `libs/mission/src/promote.cpp` |
 | `EntityPool_FindByNetId @0x4f0a20` | libs/world entity registry (`EntityRegistry::find_by_net_id`) |

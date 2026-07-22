@@ -87,7 +87,7 @@ appear only where a record says so. Known scales, each owned by its record:
   increments `current_tick @ 0x24c1968` once per call
   ([bms-event-runtime-re.md §1.6](mission/bms-event-runtime-re.md)).
 - Dividers are **per system**, inside each system: the WAC VM executes once per
-  **62 ticks** (`[orig: sub_4F81A0 @ 0x4f81a0]`, the 0x3E divider — ours is
+  **62 ticks** (`[orig: WacScript_AdvanceTick @ 0x4f81a0]`, the 0x3E divider — ours is
   `WacSystem::kTicksPerExecution`, `libs/wac/include/wac/wac_system.h`); normal BMS
   events run a 16-tick gate over a quarter-list cursor (each event evaluated about
   every 64 ticks); the AI/entity motor runs every tick with its own 2/8/16-tick

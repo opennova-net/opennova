@@ -228,7 +228,7 @@ Port: `hud_stance.gd` (frame draw + offsets) + `hud_fade.gd` (the fade pair) +
 Both elements gate on the info struct's weapon-def pointer (`dword_27235B0`,
 info+552) and their own token's **hidden** dword, and both draw **half-bright**
 in `WEAPON_TEXTCOLOR` (`dword_2723AC4`) with the token's alignment
-(0=left→`sub_5804C0`, 1=right→`@0x580850`, 2=center→`sub_580680`).
+(0=left→`HUD_DrawTextLeft_HalfBright`, 1=right→`@0x580850`, 2=center→`HUD_DrawTextCentered_HalfBright`).
 
 - **Ammo count** at `AMMOCOUNTPOS` (`dword_27235FC/2600/2604/2608` =
   x/y/hidden/align): reads reserve (info+52, `dword_27233BC`) and clip
@@ -439,7 +439,7 @@ follow-up.
 Port: `hud_messages.gd` feed + `main_game.gd _show_triggered_text` /
 `_load_hud_text_tables` (D-HUD-6 on the reduced altitude).
 
-### Parachute / armor icons — `sub_5925C0 @0x5925c0`
+### Parachute / armor icons — `HUD_DrawParachuteAndArmorIcons @0x5925c0`
 
 - Parachute: `entityA flags &0x10` → draw `ParachuteIcon` at `(x@0x272383C, y@0x2723840)`,
   handle `dword_27239A4`.
@@ -912,7 +912,7 @@ confidence — two kong-misnomer corrections announced inline; IDB saved):
 - **Rename** `HUD_DrawTargetNameAndDistance @0x5947a0` →
   `HUD_DrawWaypointNameAndDistance` (anchored: `get_waypoint_name` +
   `g_waypointList` + the HUDWPDINFO anchor globals).
-- **Rename** `sub_58FB50/sub_58FB60` → `Game_SetShowWaypoints` /
+- **Rename** `sub_58FB50/Game_GetShowWaypoints` → `Game_SetShowWaypoints` /
   `Game_GetShowWaypoints` (anchored: the BMS action-40 target + the
   label/cycle gates).
 - **Rename** `sub_5A5F40` → `HUD_DrawMapOverlay` (anchored: grid/blip/WPNames

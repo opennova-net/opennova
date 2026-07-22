@@ -31,7 +31,7 @@ this record.
 ## Witness map
 
 **Boot and registry.** `HLSLEffect_InitAndLoadAll @ 0x5b0080` (renamed from
-`sub_5B0080`): queries device caps, sets `HLSLEffect_PassClassGates @ 0x27e569c`
+`HLSLEffect_InitAndLoadAll`): queries device caps, sets `HLSLEffect_PassClassGates @ 0x27e569c`
 (low byte forced 1 = vertex shaders assumed; high byte = adapter caps bit for
 pixel-shader techniques), registers the fixed-function set, then loads `.fx`
 from an override directory (`FindFirstFileA` — loose files only,

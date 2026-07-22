@@ -155,7 +155,7 @@ scale. Retail geometry scale is therefore X/Z `1.0`, Y `0.5`, matching the
 host when the imported 3DI positions themselves are faithful.
 
 The recovered `Terrain_GetSurfaceTypeAtFixedPoint` name on this path is a
-misnomer: its backing buffer is the foliagemap loaded by `sub_605AD0`. This is
+misnomer: its backing buffer is the foliagemap loaded by `Foliage_LoadFoliageMapPCX`. This is
 also required by retail data: Dvxi5's charmap is uniformly index 1, while its
 foliage definitions and authored coverage use indices 253 and 254.
 

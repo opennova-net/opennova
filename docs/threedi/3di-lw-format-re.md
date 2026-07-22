@@ -274,7 +274,7 @@ matrix-construction code. Per bone `i` in 0..14 (sub-object array at `model+164`
    `rel = pos - parent.pos`, fixed-point.
 3. **World position** = `unk_8840C0[p]` (parent world matrix) · `o` (matrix×point via
    `sub_404138 → 0x458C60`). Position chains through the parent; bone 0 is the root (special, §2.7).
-4. **World rotation** from the 3 angle bytes via `sub_402ECD → sub_4592B0 @ 0x4592B0`:
+4. **World rotation** from the 3 angle bytes via `sub_402ECD → Entity_ClearSuspensionState @ 0x4592B0`:
    - `b2<<24` → **Rx**, applied FIRST (innermost): rows `[1,0,0] [0,c,-s] [0,s,c]`
    - `b1<<24` → **Ry**, second: rows `[c,0,-s] [0,1,0] [s,0,c]`
    - `b0<<24` → **Rz**, third (outermost): rows `[c,-s,0] [s,c,0] [0,0,1]`

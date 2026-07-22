@@ -49,7 +49,7 @@ mirror-winding byte at `+840` (REN-2: CULLMODE CW when set); `+841` set at
 frame begin and every flush; dev collector toggles at `+843/+844` (written
 only by `Input_HandleActionBinding @ 0x49ad40` — debug keybinds).
 `RenderBatchCtx_BeginFrame @ 0x5d8990` (sole per-frame reset, renamed from
-`sub_5D8990`) zeroes the queue counts, bone count, stats, and stack top, and
+`RenderBatchCtx_BeginFrame`) zeroes the queue counts, bone count, stats, and stack top, and
 sets stack entry 0 to the defaults `{scale 1.0, 0.0, flags &= ~7, 0}`.
 
 **The render-state stack.** Entries are `{float effectScale, float aux,
@@ -161,7 +161,7 @@ driver; camera above water shown — the sides mirror when underwater):
    offscreen prep: the per-entity shadow-slot pass (`render_shadow_pass
    @ 0x5d7b70` → `RenderSlot_RenderEntityAndChildren @ 0x5d7690` per active
    slot, each flushing mode 0), the reflection prerender when water is active
-   (`g_WaterActive @ 0x31BC918` → `sub_5C2780 @ 0x5c2780` →
+   (`g_WaterActive @ 0x31BC918` → `Water_ReflectionPrerender @ 0x5c2780` →
    `render_main_scene @ 0x5c1240`, the reusable offscreen scene renderer also
    used by `render_cinematic_multiview @ 0x570940`), the environment cubemap
    update, and the terrain lighting ramps.
@@ -193,7 +193,9 @@ driver; camera above water shown — the sides mirror when underwater):
      MATCHTERRAIN sub-pass (submit 0x200, entities gated on `+300 & 0x300`)
      → flush(1), then normal → flush(1); terrain LOD update → flush(1)
    - **flush(3)** — the far-side (below-water) transparents
-   - trails (`render_all_trail_strips @ 0x5dcaf0`, renamed from `sub_5DCAF0`)
+   - trails (`CEffectEmitterPool_RenderMainPass @ 0x5dcaf0`; this record's earlier
+     `render_all_trail_strips` label was superseded in the IDB by the
+     `CEffectEmitterPool_*` family — see [correspondence.md](../correspondence.md))
      + particle pass A (`EffectWorld_RenderParticlePass @ 0x5f7240` →
      `EffectWorld_DrawParticles @ 0x5f6680`, renamed from the
      `CNapiSession_*` misnomers — `g_EffectWorld @ 0x2C25CD8`)
@@ -259,7 +261,7 @@ pure functions in `libs/renderer/render_order.{h,cpp}`:
 | 0x4dbc70 | CNetPlayer_PushPositionToHistory | RenderStateStack_Push | copies stack entry top→top+1 at ctx+240, ++top — identical to the waves' inline push |
 | 0x5d8990 | sub_5D8990 | RenderBatchCtx_BeginFrame | resets queue counts, stack top, stack defaults, stats |
 | 0x5d87d0 | sub_5D87D0 | RenderBatchCtx_EndFrameStats | copies live stats to the last-frame block |
-| 0x5dcaf0 | sub_5DCAF0 | render_all_trail_strips | iterates 256 trail channels → render_trail_strip |
+| 0x5dcaf0 | CEffectEmitterPool_RenderMainPass | render_all_trail_strips | iterates 256 trail channels → render_trail_strip |
 | 0x610640 | sub_610640 | Terrain_RenderWaterPass | calls render_water_surface under g_WaterActive; stores the terrain render mode |
 | 0x58a8f0 | Scar_SetShadowBias | Render_SwapProjectionNearZ | swaps g_ProjectionNearZ (0x8409DC), the D3DXMatrixPerspectiveFovLH zNear |
 | 0x58a7b0 | Scar_SubmitDecalToRenderObject | Render_SetViewportDepth01 | builds a D3D viewport {x,y,w,h,0,0.1} → device SetViewport |
@@ -289,7 +291,7 @@ logged in [render-material-re.md](render-material-re.md).
   clip-plane state); the MATCHTERRAIN class MECHANISM (binds the terrain tile
   texture under the object — [render-material-re.md](render-material-re.md)
   §Pass execution).
-- **Closed at REN-6 (2026-07-06)** — `sub_5C8510` was a 5-byte header
+- **Closed at REN-6 (2026-07-06)** — `Water_RenderReflectedWorldScene` was a 5-byte header
   (`call sub_58AA80`) falling through into an unclaimed body (the same split
   shape as `render_water_surface`; a stale NORET flag on `sub_58AA80`
   truncated the analysis). Renamed `Water_RenderReflectedWorldScene`: the

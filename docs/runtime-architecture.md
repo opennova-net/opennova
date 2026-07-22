@@ -22,7 +22,7 @@ A long frame runs **multiple** sim ticks; a short frame runs **zero**; the accum
 clamped at ~500 ms / ~31 ticks against the spiral of death, and there is **no inter-tick
 render interpolation** (render reads current entity state). The engine tick itself is
 `Game_ProcessMainFrame @0x5263f0` (`current_tick @0x24c1968`). Dividers are **per system**,
-inside each system: the WAC VM (`sub_4F81A0 @0x4f81a0`) executes once per **62 ticks** (the
+inside each system: the WAC VM (`WacScript_AdvanceTick @0x4f81a0`) executes once per **62 ticks** (the
 `0x3E` divider), normal BMS events run a 16-tick gate over a quarter cursor, and the
 AI/entity motor runs every tick — witnessed in
 [bms-event-runtime-re.md](mission/bms-event-runtime-re.md) §1.6. OpenNova mirrors this shape.
@@ -84,7 +84,7 @@ path (`wire_present_pass.gd`). Converging them is a tracked decision, not an ove
   shared registry + var store + `EffectLog`. `World::logic_tick` is the 62 Hz engine tick
   (`Game_ProcessMainFrame @0x5263f0`, `current_tick @0x24c1968`); dividers live inside each system —
   the WAC VM runs once per 62 ticks (`WacSystem::kTicksPerExecution`, the `0x3E` divider of
-  `sub_4F81A0`), BMS events run a 16-tick gate over a quarter cursor, and the AI motor runs every
+  `WacScript_AdvanceTick`), BMS events run a 16-tick gate over a quarter cursor, and the AI motor runs every
   tick (witnessed in [bms-event-runtime-re.md](mission/bms-event-runtime-re.md) §1.6/§2).
 - **Binding (C++ GDExtension)** — `NovaSimulation` wraps the World, exposes transport
   (`step` = exactly one 62 Hz logic tick, `restart`), `drain_effects`, and **one batched present snapshot**
@@ -143,4 +143,4 @@ path (`wire_present_pass.gd`). Converging them is a tracked decision, not an ove
   (`AudioVM_OpenMusicContext @0x6722a0`) are seams; dialog-id resolution stays host-side (it is bound
   to `NovaDbfData`).
 - The exact main-loop / entity-render order is cited from existing RE notes; a focused `grill-ida`
-  pass to pin `sub_4F81A0`'s surroundings + the entity-render function is a tracked follow-up.
+  pass to pin `WacScript_AdvanceTick`'s surroundings + the entity-render function is a tracked follow-up.

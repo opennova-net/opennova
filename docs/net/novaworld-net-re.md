@@ -910,12 +910,12 @@ in-process. The flow:
 
    | phase | tag | serializer |
    |---|---|---|
-   | 1 | 0x10 | `[orig: sub_5042F0]` (static batch; §5.9) |
+   | 1 | 0x10 | `[orig: serialize_pool2_static_to_buffer]` (static batch; §5.9) |
    | 2 | 0x0D | `[orig: serialize_entity_pool_to_packet_0 @ 0x503940]` (pool spawn; §5.11) |
    | 3 | 0x0C | `[orig: serialize_entity_states_to_buffer @ 0x5030a0]` (entity states) |
    | 4 | 0x20 | `[orig: serialize_entity_pool_to_packet @ 0x503460]` (bulk pool-3; §5.12) |
-   | 5 | 0x45 | `[orig: sub_506570]` (terrain; repeats until it returns 0) |
-   | 6 | 0x7E | `[orig: sub_506620]` |
+   | 5 | 0x45 | `[orig: NetPacket_WriteTerrainTiles]` (terrain; repeats until it returns 0) |
+   | 6 | 0x7E | `[orig: NetPacket_WriteBriefingText]` |
    | 7 | 0x1A | `[orig: NetPacket_WriteTimestamp @ 0x5046c0]`; then `CNetPlayer_SetGameState(9)` |
 
    The per-entity payload bodies these serializers emit are the inverse of the witnessed decoders: the
@@ -1277,7 +1277,7 @@ the raw arg]`.
 against a shipped SP mission (00TRa.bms, "Training: Basics / Armory", `attrib_flags=0x3` ⇒ no
 game-mode bit ⇒ `g_GameType=0`) found the per-game-type chain above does NOT cover real authored
 starts. `[orig: Server_OnPlayerJoin @0x51a680]` calls `Server_PositionPlayerForSpawn` with spawn-param
-low-word **0** (not 0xFFFF), so the engine first tries `[orig: sub_4FE110 @0x4fe110]` — which is a
+low-word **0** (not 0xFFFF), so the engine first tries `[orig: Server_ResolveSpawnTargetHandle @0x4fe110]` — which is a
 live-entity **handle** resolver (`poolType = handle>>12`, `index = handle & 0xFFF`, fetch
 `g_pool_list[poolType][index]`, gate on model flag `0x40000` + team), NOT a spawn-point lookup; at
 join (handle 0, no live entity yet) it returns null and the marker chain runs. 00TRa ships ZERO
@@ -1305,7 +1305,7 @@ feeds the result into the §5.2b `spawn_player`; `mission_runtime.gd` calls it i
 placeholder that read `get_entity_position(0)` (= the first promoted organic = NPC #0), which spawned
 the player on top of the first soldier. No family marker → a safe fallback origin, never an NPC
 position. **D-NET-88 divergence:** the unified family scan replaces the exact per-game-type
-resolution (`g_GameType`-driven order, the `sub_4FE110` handle pre-check, the cycling-vs-farthest
+resolution (`g_GameType`-driven order, the `Server_ResolveSpawnTargetHandle` handle pre-check, the cycling-vs-farthest
 distinction, the separate 6001/cinematic consumers, the `"psp"` bone offset + `+0x10000` Z nudge) —
 all deferred. Guarded by `tests/world/spawn_select_test.cpp` (incl. the 6001-only 00TRa shape).
 
@@ -1356,7 +1356,7 @@ verified in both capture3 (frames 197227/197228, the only S2C 0x11 emissions) an
 
 Why it matters: 0x11 sets `dword_A82358 = 1`, which unblocks WaitForDisconnect; the client
 then immediately runs `Game_LoadTerrainDuringConnect`, which reads the mission basename out of
-the tag-0x0B header copy (`byte_A761D0+0x44`) via `sub_610940`. Sending 0x11 before the 0x0B
+the tag-0x0B header copy (`byte_A761D0+0x44`) via `Terrain_LoadEnvironmentConfig`. Sending 0x11 before the 0x0B
 header is delivered makes that load fail → unnumbered "Mission loading aborted" → disconnect
 ~2-3 s later. A reimplementation must deliver 0x0B and 0x11 in the same packet (0x11 last) or
 at minimum strictly after 0x0B.
@@ -3330,7 +3330,7 @@ cmp entity, g_local_player_entity ; jz loc_4B9C3E ; jump if entity IS the local 
 - **`loc_4B9C3E` = authoritative / local-player SIMULATION.** Taken when
   `is_authority || entity == g_local_player_entity`. Runs the anim-driven ground locomotion that
   integrates the live `Position` (entity+4/+8/+0xC): heading→velocity (speed scale `0x5800`),
-  restriction/avoidance probes (`[orig: sub_4142C0 @ 0x4142C0]`), the anim flag table
+  restriction/avoidance probes (`[orig: Entity_RaycastGroundHeight @ 0x4142C0]`), the anim flag table
   `g_animStateFlagsTable` gating velocity application. This is the SAME mover the AI uses (OpenNova
   `AiSystem::tick_infantry`, `libs/world/src/infantry.cpp`, verdict MATCHING) — the only
   difference is the move-order source.
@@ -3473,7 +3473,7 @@ Jointops.exe; behavioral, read-only (no IDB writes).
   - **CORRECTION (D-NET-92):** the RETAIL client's self-ID is **NUMERIC, not a name-match.**
     `Player_FindLocalPlayerEntity @0x4e0090` scans pool 0 for `(entity.miniFlags+0x36 & 0x100) &&
     (entity+0x78 == local_session_id)`, where `local_session_id` is the client's own
-    `NapiNPConnection.unk_18` (its ConnectionId / dcb, via `sub_4C6D40`). In `host_and_join_lan.pcapng` the
+    `NapiNPConnection.unk_18` (its ConnectionId / dcb, via `NapiNP_GetLocalConnectionId`). In `host_and_join_lan.pcapng` the
     matched record happened to ALSO carry `name="cdouglass"`, so the name-match was coincidental — the
     `entity+0x78` (eFlags) numeric match is the real mechanism (confirmed by the F3 dcb work,
     `project_dcb_join_mechanism`; the crash is `Player_InitPlayer @0x4e15f0` →
@@ -4403,7 +4403,7 @@ session's adversarial pass, with the later `0x4dcd30` correction flagged inline)
 | `0x4dcd30` | `Player_IsGunnerInVehicle` | `Player_IsVehicleGunnerScoped` *(2026-06-26 IDB name; semantics disproven 2026-07-19)* | settled Sighted standard-card predicate: `Flags&2`, `g_weaponScopeActive`, and `MountSlot.currentAction != SWITCHFROM (7)`; no vehicle/gunner test |
 | `0x51cbc0` | `player_ServerAdd` | `Server_PlayerAdd` | own string `"server_PlayerAdd():"`; server subsystem |
 | `0x59b280` | `sub_59B280` | `Radar_AddBlip` | bearing(atan2) + compass-edge marker + 128-slot blip array (pos/type/lifetime 62/color); `OnDamageReceived` uses it for damage direction |
-| `0x541690` | `sub_541690` | `WeaponOverlay_BuildTypeLookup` | memset 0x200; iterate 780 slots; index by slot-type byte +216; action-specific overlays (state 5-9) |
+| `0x541690` | `WeaponSlots_SeedAmmoPoolsFromDefs` | `WeaponOverlay_BuildTypeLookup` | memset 0x200; iterate 780 slots; index by slot-type byte +216; action-specific overlays (state 5-9) |
 
 **Signature corrections:** `Player_FindLocalPlayerEntity @0x4e0090` → `GamePlayerEntity* __cdecl(void)`
 (the decompiled `stream`/`playerData` params are spurious; returns the matched entity); `Player_InitPlayer
@@ -5343,7 +5343,7 @@ Key per-entry fields (dword index / byte offset / keyword / handler):
 `category*65 + rank`, consumer `WeaponSlotTable_LoadAllFromDefs @ 0x5414E0` slot =
 `table + 100*(def[4] + 65*def[0])` @0x5415D3, 780 slots) · `[22]+0x58 clipsize @0x543A79`
 (rounds/mag, default 1) · `[23]+0x5C startrounds @0x543AA8` (raw atol, **default −1** — the
-shipped norm for most entries, set in `sub_53FEF0 @ 0x53FF19`) · `[31]+0x7C charfilter @0x543F6E`
+shipped norm for most entries, set in `AdmDef_InitEntryDefaults @ 0x53FF19`) · `[31]+0x7C charfilter @0x543F6E`
 (medic=1, sniper=2, gunner=4, rifleman=8, engineer=0x10 — table @0x830EB0) · `[32]+0x80
 teamfilter @0x543FE3` (red=1, blue=2 — a TEAM mask) · `[83]+0x14C maxclips @0x5440A9` ·
 byte+0xD8 `ammoclass <name> <n>` @0x5441CB (ammo-class id byte; builtins @0x830F10; second param →
@@ -6217,7 +6217,7 @@ IndexOf@0x43B990}` over `g_spawn_zone_list/count`); `CMap_SetupSpawnCamera @ 0x5
 `Server_PositionPlayerForSpawn`; `sub_4FE110` → `Server_ResolveSpawnTargetHandle`;
 `sub_500BA0` → `Server_OnPlayerTouchCaptureZone`; `calculate_capture_zone_score_delta
 @ 0x501120` → `calculate_capture_zone_control_delta`; `Server_ChangePlayerTeam @ 0x518D70`
-→ `Server_ChangeEntityTeam` (it retargets ANY entity — zones included); `sub_519600` →
+→ `Server_ChangeEntityTeam` (it retargets ANY entity — zones included); `Server_EnforceZoneEntityTeams` →
 `Server_EnforceZoneEntityTeams`; the `stru_24E0E48` helpers → `SpawnWaveList_{TickEntry
 @0x52A330 (ex-update_death_queue_node), RemovePlayer@0x52A410, TryQueuePlayer@0x52A490,
 HasEntryForZone@0x52A520, Tick@0x52A550, ResetOnZoneTeamChange@0x52A5B0,
@@ -6530,7 +6530,7 @@ anim-less/expired actions is the recorded divergence tail (rides D-WPN-6's
 presentation family).
 
 **IDB (2026-07-10 session).** Renamed: `ActionDef_GetCurrent @ 0x401ef0` (ex
-`sub_401EF0` — returns the open ActionDef), `g_currentActionDef @ 0xA2E8E8`,
+`ActionDef_GetCurrent` — returns the open ActionDef), `g_currentActionDef @ 0xA2E8E8`,
 `g_weaponParseInActionBlock @ 0x252DB88`, `g_weaponParseCurActionDef @ 0x252DB8C`.
 Comments: the `@ 0x402409` refusal, the `@ 0x54388d` forward-before-dispatch order,
 `@ 0x40cfa0` stricmp + name+5 prefix skip, `@ 0x401ef0`. idb_save run.
@@ -6851,7 +6851,7 @@ LIGHT (`ActionSlot_SpawnEffect` tail `@0x402080`: `AmmoDef+36` gates
 **The oscarmike adjudication (2026-07-15, session 3 continued).** The maintainer
 pointed at the archived `on-godot-oscarmike` attempt as having better-feeling weapon
 particle timing. Its mechanism: spawn the row's particle at the action FINISH
-(their reading of `sub_53F7B0` -> `sub_401100` as "soundsetend + particle"),
+(their reading of `ActionSlot_FinishActivePhase` -> `ActionSlot_PlayEndSoundAndDupes` as "soundsetend + particle"),
 UNGUARDED, one hand-authored short Godot scene per shot, parented to the weapon.
 Adjudicated against the binary: `ActionSlot_PlayEndSoundAndDupes @ 0x401100` is
 SOUNDS ONLY — the end soundset (`ActionDef+12`) plus the `dupsound` echo scheduler
@@ -7318,7 +7318,7 @@ Strongest witnesses for the 0x500 region: `[orig: NapiNPProtocol_SendServerInfoP
 0x6204b0]` reads each DWORD in order and emits the matching TLV tag;
 `[orig: CNapiGameSession_CreateSession @ 0x4c97c0]` performs the symmetric writes with
 explicit 512-byte copies into the SUS buffers. Host-state DWORDs confirmed by StartServer
-(`sub_62B5E0`), `StopServer @ 0x62a820`, `NapiNPProtocol_Create @ 0x625a10`,
+(`NapiNPProtocol_StartServer`), `StopServer @ 0x62a820`, `NapiNPProtocol_Create @ 0x625a10`,
 `NapiNPTimer_GenerateRandomId @ 0x61e533`, and HandleClientJoin's HK validation.
 
 #### `NapiCSConfig` defaults and direction mirroring
@@ -7398,8 +7398,8 @@ rename candidate `NapiPingManager_Init`).
 
 Per-entry tick logic: `[orig: CNapiPingEntry_ProcessTick @ 0x62F900]` retries after the
 response timeout, gives up after `max_retries`, and throttles sends to one per
-`send_throttle_ms`. Stale `sub_` names identified: `sub_62FE50` = `NapiPingManager_Start`,
-`sub_62FD10` = `NapiPingManager_Pump` (100 ms throttle), `sub_62FE10` =
+`send_throttle_ms`. Stale `sub_` names identified: `CNapiNPConnection_Start` = `NapiPingManager_Start`,
+`CNapiNPConnection_OnTick` = `NapiPingManager_Pump` (100 ms throttle), `sub_62FE10` =
 `NapiPingManager_DestroyEntries`.
 
 ### 6.7 `CNapiGateManager` (304 B; methods 0x4ce6b0-0x637b30; 14/14 typed)
@@ -7827,7 +7827,7 @@ browser:
 | System (reimpl) | Original | Verdict | Notes |
 |---|---|---|---|
 | NWU cipher (`libs/novacrypto/src/nwu.cpp`) | `NapiNP_EncryptBuffer @ 0x6187b0` / `NapiNP_DecryptBuffer @ 0x618880` (retail) | **matching (byte-exact, retail)** | NW-C1: re-grilled against retail (was jodemo-anchored only). All six primitives + the seed + the 3-step derive + the 4-phase order match. Name-swap confirmed at byte level. Fixed a doc bug: the LCG multiplier `78665521` is `0x04B05731`, not `0x04B02631` as commented. |
-| EPASK login-form encrypt (`libs/novacrypto/src/epask.cpp`) | `sub_6669A0 @ 0x6669a0` (core) ← edit-widget vtable `+0x38` `build_form_field_query_string @ 0x657760` ← `build_url_and_submit_request @ 0x63e3f0` | **matching (byte-exact, retail)** | NW-C2: polymorphic dispatch resolved. Core = NWU-add → modexp `pow(byte+2,exp,mod)` 4-byte LE (`sub_666600 @ 0x666600`) → NWU-add → A-P low-first (`NapiNP_EncodeToHexAlpha @ 0x666570`); `exp:mod:key` split (`parse_colon_delimited_string @ 0x666710`); the NWU copy `NapiNP_EncryptBufferAlt @ 0x6668e0` is byte-identical to `0x6187b0`. Golden vectors equal the test's own ciphertext fixtures. |
+| EPASK login-form encrypt (`libs/novacrypto/src/epask.cpp`) | `EPASK_Encrypt @ 0x6669a0` (core) ← edit-widget vtable `+0x38` `build_form_field_query_string @ 0x657760` ← `build_url_and_submit_request @ 0x63e3f0` | **matching (byte-exact, retail)** | NW-C2: polymorphic dispatch resolved. Core = NWU-add → modexp `pow(byte+2,exp,mod)` 4-byte LE (`EPASK_ModexpEncrypt @ 0x666600`) → NWU-add → A-P low-first (`NapiNP_EncodeToHexAlpha @ 0x666570`); `exp:mod:key` split (`parse_colon_delimited_string @ 0x666710`); the NWU copy `NapiNP_EncryptBufferAlt @ 0x6668e0` is byte-identical to `0x6187b0`. Golden vectors equal the test's own ciphertext fixtures. |
 | PUBcrypto `PUB*` join fields (`libs/novacrypto/src/pubcrypto.cpp`) | `NapiNP_EncryptAndEncodeToHexAlpha @ 0x618fd0` (encode) / `NapiNP_DecodeEncryptedString @ 0x619130` (decode) | **matching (byte-exact, retail)** | NW-C3: PUB encode = CRC32-append (`NapiNP_ComputeCRC @ 0x618770`, MPEG-2) → NWU-encrypt → A-P. Single-key path == `encode_pub_value`; because the encrypt step *is* `0x6187b0`, this proves `ticket_transform` == NWU. The colon-key multi-layer form is the Python remember-cookie (out of our scope). |
 | url_cipher `NK`/`CK` join tokens (`libs/novacrypto/src/url_cipher.cpp`) | `parse_connection_query_string @ 0x54dfb0` | **matching (byte-exact, retail)** | NW-C4: `plain[i] = cipher[i] - key[i] + '0'`, `'&'`(38)-terminated; keys NK@`0x7d3f30` `"diheijefhgcdjcgcjcfbd"`, CK@`0x7d3f04` `"cfhdcegjigecjehcgjdhe"` (jodemo: `Auth_ParseRegistrationURL @ 0x514c40`, keys `0x74d8a0`/`0x74d874`). `BK` is the literal `"986119"`, not a cipher. |
 
@@ -7856,11 +7856,11 @@ The client login submit (`build_url_and_submit_request @ 0x63e3f0`) reads the se
 `EPASK` cookie (`exp:mod:key`), forms `<url>?EPASK=<key>`, and dispatches each form field
 through the widget vtable `+0x38`. For the text/password EDIT widget that slot is
 `build_form_field_query_string @ 0x657760`, which sizes its output at `8·len`
-(= modexp ×4 · A-P ×2) and calls the EPASK core `sub_6669A0 @ 0x6669a0`:
+(= modexp ×4 · A-P ×2) and calls the EPASK core `EPASK_Encrypt @ 0x6669a0`:
 
 1. `NapiNP_EncryptBufferAlt @ 0x6668e0` — NWU ADD chain (key-add, reverse, progression-add,
    LCG-add; multiplier `0x5731`, reverse-flag mult `0x31`), byte-identical to `0x6187b0`.
-2. `sub_666600 @ 0x666600` — per byte, `modular_exponentiation(byte + 2, exp, mod)`
+2. `EPASK_ModexpEncrypt @ 0x666600` — per byte, `modular_exponentiation(byte + 2, exp, mod)`
    (`@ 0x666470`) stored as a 32-bit little-endian word. The `+2` and 4-byte expansion match
    `epask.cpp::modexp_encrypt` exactly (guard: `modulus > 258`).
 3. `NapiNP_EncryptBufferAlt` again on the expanded buffer.
@@ -8230,7 +8230,7 @@ in [divergence-ledger.md](../divergence-ledger.md).
 
 `novacrypto/epask.cpp` (B2, edge-case only):
 - **D-NET-26** [LOW, FIXED] `epask_from_string` uses `_atoi64` semantics (return 0, no throw). [orig: parse_colon_delimited_string @ 0x666710]
-- **D-NET-27** [LOW, FIXED] `epask_encrypt` truncates plaintext at first NUL (strlen). [orig: sub_6669A0 @ 0x6669a0]
+- **D-NET-27** [LOW, FIXED] `epask_encrypt` truncates plaintext at first NUL (strlen). [orig: EPASK_Encrypt @ 0x6669a0]
 
 `napi` tlv/envelope (B6/B7):
 - **D-NET-28** [LOW, FIXED 2026-06-27] The statement-param limits are WITNESSED real at `NapiStatementParam_Create @0x632b30` (name `strlen-1 > 0x3E` ⇒ 1..63; `dataSize >= 4096` ⇒ 0..4095; reject = error flag + null). `make_client_var_list` (`libs/napi/session.cpp`) now skips a ClientVar whose name/value data exceeds 4095 (the param names are the fixed VarFNum/VarName/VarValue literals, always in [1,63]) — the faithful reject. Note: this is the gate STATEMENT layer, distinct from the in-match TLV codec `NapiNP_WriteTLV @0x61dd60`, which uses a plain u16 length (0xFFFF) with no such limit — our `libs/napi/tlv.cpp` already matches that. [orig: NapiStatementParam_Create @ 0x632b30]
