@@ -40,19 +40,14 @@ void write_vec3(std::ostream &out, const Vec3 &v) {
 }
 
 // [orig: CurveRef_ModifierSuffix @ 0x42bf60 (ParticleEdit_v1_1.exe); JO suffix writer in CParticleDef_SaveToFile @ 0x5e4d70]
-// DIVERGENCE D2 (corpus-invisible / LOW — see notes/ida_particle_witness.md): the
-// engine writer maps modifier bit 0x01 -> " invert", bit 0x02 -> " reverse", both
-// -> " invert reverse" (INVERT-first, and the word is "invert"). We emit " reverse"
-// then " inverse" (reverse-first, word "inverse"), matching the JO *parser*
-// (CParticleDef_ParseProperties sets 0x02 on "reverse", 0x01 on "inverse"); the
-// ParticleEdit writer/parser are themselves inconsistent (writer says "invert",
-// parser matches "inverse"). The corpus uses ONLY "reverse" (0 invert/inverse), so
-// the single-reverse case round-trips byte-exact; the word/order differences only
-// surface with the never-authored invert bit. Our parser+writer are self-consistent.
+// The engine writer maps modifier bit 0x01 -> " invert", bit 0x02 ->
+// " reverse", and both -> " invert reverse". Its parser spells the first token
+// "inverse" instead; our parser accepts both spellings so retail writer output
+// remains round-trippable.
 std::string format_curve_suffix(const CurveRef &ref) {
 	std::string out;
+	if (ref.inverse) out += " invert";
 	if (ref.reverse) out += " reverse";
-	if (ref.inverse) out += " inverse";
 	return out;
 }
 

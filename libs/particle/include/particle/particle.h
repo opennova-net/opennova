@@ -148,9 +148,10 @@ const std::vector<std::pair<std::string, std::uint32_t>> &move_flag_entries();
 // Indexed by BlendMode value (0..7): names()[i] == blend_mode_name((BlendMode)i).
 const std::vector<std::string> &blend_mode_names();
 
-// "table12", "table12 reverse", "table12 inverse", or both modifiers in any
-// order. Engine: per-func dispatch in CParticleDef_ParseProperties (e.g.
-// scale_func @ 0x5eafdd) sets bit 0x02 on "reverse" and bit 0x01 on "inverse".
+// "table12", "table12 reverse", "table12 inverse"/"table12 invert", or both
+// modifiers in any order. Engine: per-func dispatch in
+// CParticleDef_ParseProperties (e.g. scale_func @ 0x5eafdd) sets bit 0x02 on
+// "reverse" and bit 0x01 on "inverse"; its writer spells that bit "invert".
 //
 // `baked_lut` mirrors the runtime LUT pointer the engine writes at
 // CurveRef-equivalent offset +68 (e.g. graphic+480 for alpha_func, +552 for

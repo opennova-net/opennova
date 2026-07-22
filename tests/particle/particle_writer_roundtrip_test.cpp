@@ -154,6 +154,7 @@ bool roundtrip_synthetic_full_particle() {
 	p.scale_adj = 0.125f;
 	p.scale_func = {"scale curve", false, true, true};
 	p.alpha = 0.875f;
+	p.alpha_func = {"alpha curve", true, true, true};
 	p.red_func = {"red curve", false, false, true};
 	p.green_func = {"green curve", true, false, true};
 	p.blue_func = {"blue curve", false, true, true};
@@ -215,6 +216,12 @@ bool roundtrip_synthetic_full_particle() {
 			"unknown particle key is serialized")) return false;
 	if (!expect(text.find("g1_future_mode") != std::string::npos,
 			"graphic-shaped unknown particle key is serialized")) return false;
+	if (!expect(text.find("emit_rate_func\t= emit curve reverse;") != std::string::npos,
+			"reverse-only curve uses the retail writer token")) return false;
+	if (!expect(text.find("scale_func\t= scale curve invert;") != std::string::npos,
+			"inverse curve uses retail's invert spelling")) return false;
+	if (!expect(text.find("alpha_func\t= alpha curve invert reverse;") != std::string::npos,
+			"combined modifiers use retail's invert-first order")) return false;
 
 	std::istringstream replay(text);
 	ParticleFile second;
