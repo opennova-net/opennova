@@ -1541,6 +1541,16 @@ int32_t CollisionWorld::candidate_count(EntityHandle h) const {
     return it == candidates_.end() ? 0 : it->second.count;
 }
 
+const EntityHandle *CollisionWorld::candidate_slice(EntityHandle h, int32_t &count_out) const {
+    auto it = candidates_.find(h.packed);
+    if (it == candidates_.end() || it->second.count <= 0) {
+        count_out = 0;
+        return nullptr;
+    }
+    count_out = it->second.count;
+    return arena_.data() + it->second.start;
+}
+
 CollisionWorld::StaticSlotView CollisionWorld::static_slot(int32_t i) const {
     StaticSlotView v;
     if (i < 0 || i >= static_count_) return v;
@@ -1864,6 +1874,54 @@ const CollisionTargetView *CollisionWorld::target_view(const World &world, Entit
     return &scratch;
 }
 
+// The witnessed projectile broad phase over the pools-2/1 proximity slots
+// [orig: Projectile_RaycastProximitySlots @ 0x4e53d4-0x4e554a]: per-axis
+// |slotCenter - segCenter| <= radius + halfExtent, then the UNCLAMPED
+// perpendicular line distance <= radius — a segment entirely inside the bound
+// passes trivially (the D-ITEM-13d lesson: inside-sphere segments are the
+// common case near buildings). Restored from #266's round_broad_phase after
+// the #276 trace_projectile restructure dropped it, leaving every round to
+// resolve a target view (and its per-section matrix vector) for every table
+// entity each tick.
+static bool round_broad_phase(const float p0[3], const float p1[3], const float c[3],
+                              float r) {
+    const float hx = std::fabs(p1[0] - p0[0]) * 0.5f;
+    const float hy = std::fabs(p1[1] - p0[1]) * 0.5f;
+    const float hz = std::fabs(p1[2] - p0[2]) * 0.5f;
+    if (std::fabs((p0[0] + p1[0]) * 0.5f - c[0]) > r + hx) return false;
+    if (std::fabs((p0[1] + p1[1]) * 0.5f - c[1]) > r + hy) return false;
+    if (std::fabs((p0[2] + p1[2]) * 0.5f - c[2]) > r + hz) return false;
+    const float dx = p1[0] - p0[0], dy = p1[1] - p0[1], dz = p1[2] - p0[2];
+    const float len2 = dx * dx + dy * dy + dz * dz;
+    if (len2 <= 0.0f)
+        return true; // zero-length segment inside the AABB gate: the axis test decided
+    const float t = ((c[0] - p0[0]) * dx + (c[1] - p0[1]) * dy + (c[2] - p0[2]) * dz) / len2;
+    const float px = p0[0] + dx * t - c[0];
+    const float py = p0[1] + dy * t - c[1];
+    const float pz = p0[2] + dz * t - c[2];
+    return px * px + py * py + pz * pz <= r * r;
+}
+
+bool CollisionWorld::target_bound(const World &world, EntityHandle h, int32_t pos_out[3],
+                                  int32_t &radius_out) const {
+    // target_view's model selection (live identity, the husk swap, validity)
+    // WITHOUT the section-matrix build — bound-gate metadata only, so callers
+    // can run the witnessed cheap gate first and build the full view for gate
+    // survivors alone. Returns false exactly when target_view would return null.
+    const Instance *instance = live_instance(world, h);
+    if (instance == nullptr) return false;
+    const Entity *e = world.registry.get(h);
+    if (e == nullptr) return false;
+    const bool using_husk =
+            (e->engine_flags & 0x4u) != 0 && instance->husk_model_id >= 0;
+    const CollisionModel *m =
+            model(using_husk ? instance->husk_model_id : instance->model_id);
+    if (m == nullptr || !m->valid()) return false;
+    entity_pos_fixed(*e, pos_out);
+    radius_out = entity_bound_radius(*this, m);
+    return true;
+}
+
 ProjectileHit CollisionWorld::trace_projectile(const World &world,
                                                const ProjectileTrace &trace) const {
     // [orig: Projectile_UpdatePhysics @0x4e9d70] Candidate passes are ordered
@@ -2035,16 +2093,45 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
         return true;
     };
 
+    // Segment endpoints in slot-table units for the witnessed broad phase.
+    const float p0f[3] = {
+        static_cast<float>(trace.start.x) / 65536.0f,
+        static_cast<float>(trace.start.y) / 65536.0f,
+        static_cast<float>(trace.start.z) / 65536.0f,
+    };
+    const float p1f[3] = {
+        static_cast<float>(trace.end.x) / 65536.0f,
+        static_cast<float>(trace.end.y) / 65536.0f,
+        static_cast<float>(trace.end.z) / 65536.0f,
+    };
+
     // Each table query uses <= internally: a later equal face, section, or
     // entity overwrites the earlier result. Cross-pass arbitration stays strict.
-    auto trace_polygon_table = [&](const auto &slots, ProjectileHitClass hit_class) {
+    // `slot_to_units` scales the table's stored coordinates to world units:
+    // static slots are whole-unit quantized u16 entries (their +1.707u radius
+    // pad absorbs the rounding [orig: the u16 tables built @ 0x4b94cb]),
+    // dynamic slots store full 16.16.
+    auto trace_polygon_table = [&](const auto &slots, ProjectileHitClass hit_class,
+                                   float slot_to_units) {
         CollisionPolygonHit table_hit;
         EntityHandle table_entity;
         bool table_found = false;
         for (const auto &slot : slots) {
             const EntityHandle h = slot.h;
+            if (ignored(h)) continue;
+            // The slot gate runs on table fields alone; the entity resolves
+            // only for gate survivors [orig: @ 0x4e53d4 reads the slot x/y/z/
+            // radius words before any entity deref].
+            const float sc[3] = {
+                static_cast<float>(slot.x) * slot_to_units,
+                static_cast<float>(slot.y) * slot_to_units,
+                static_cast<float>(slot.z) * slot_to_units,
+            };
+            if (!round_broad_phase(p0f, p1f, sc,
+                                   static_cast<float>(slot.radius) * slot_to_units))
+                continue;
             const Entity *entity = world.registry.get(h);
-            if (ignored(h) || entity == nullptr || entity->hidden ||
+            if (entity == nullptr || entity->hidden ||
                 (entity->engine_flags & 0x02000001u) != 0)
                 continue;
             // Item self-site immunity: candidate refNum vs the mount
@@ -2135,8 +2222,8 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
         eh.material_flags = table_hit.material_flags;
         consider(eh, table_hit.distance_q16);
     };
-    trace_polygon_table(statics_, ProjectileHitClass::StaticEntity);
-    trace_polygon_table(dynamics_, ProjectileHitClass::DynamicEntity);
+    trace_polygon_table(statics_, ProjectileHitClass::StaticEntity, 1.0f);
+    trace_polygon_table(dynamics_, ProjectileHitClass::DynamicEntity, 1.0f / 65536.0f);
 
     // Consume the pose owner's COBJ matrices when available. The bounded torso
     // fallback is only for entities whose production pose has not been
@@ -2647,22 +2734,46 @@ bool CollisionWorld::raycast_clear(World &world, const int32_t a[3], const int32
         if (e.ground_target.valid() &&
             (e.ground_target == exclude_a || e.ground_target == exclude_b))
             return false;
+        // The bound gate runs on target_bound's cheap metadata BEFORE the
+        // view/matrix build — the witnessed order [orig: the bound-sphere fold
+        // @ 0x5387c4-0x5389a4 gates first; the @ 0x413060 clip core only runs
+        // for gate survivors]. Same pos/radius inputs as the old post-view
+        // gate, so the reject set is unchanged.
+        int32_t bp[3];
+        int32_t br = 0;
+        if (!target_bound(world, e.handle, bp, br)) return false;
+        if (abs32(ray.mid[0] - bp[0]) > br + static_cast<int32_t>(ray.half[0]) ||
+            abs32(ray.mid[1] - bp[1]) > br + static_cast<int32_t>(ray.half[1]) ||
+            abs32(ray.mid[2] - bp[2]) > br + static_cast<int32_t>(ray.half[2]))
+            return false;
+        if (ray_line_distance(ray.start, ray.dir, bp) > br) return false;
         CollisionTargetView view;
         std::vector<CollisionMatrix> mats;
         const CollisionTargetView *tv = target_view(world, e.handle, view, mats);
         if (tv == nullptr) return false;
-        if (abs32(ray.mid[0] - tv->pos[0]) >
-                    tv->bound_radius + static_cast<int32_t>(ray.half[0]) ||
-            abs32(ray.mid[1] - tv->pos[1]) >
-                    tv->bound_radius + static_cast<int32_t>(ray.half[1]) ||
-            abs32(ray.mid[2] - tv->pos[2]) >
-                    tv->bound_radius + static_cast<int32_t>(ray.half[2]))
-            return false;
-        if (ray_line_distance(ray.start, ray.dir, tv->pos) > tv->bound_radius) return false;
         CollisionRay probe = ray; // model clip clips end in place; keep the walk ray whole
         return collision_raycast_model(*tv, probe);
     };
 
+    // Pool passes over the per-tick tables — the same membership the witnessed
+    // pool walk covers (@ 0x539a3a pool 2 then pool 1), without a whole-registry
+    // sweep per ray. Entities absent from the tables (no model AND no bound)
+    // could never block: target_bound returns false for them. Entries spawned
+    // after this tick's table build are missed for at most one 62 Hz tick.
+    if (!statics_.empty() || !dynamics_.empty()) {
+        for (const StaticSlot &s : statics_) { // pass 1: pool-2 statics
+            const Entity *e = world.registry.get(s.h);
+            if (e != nullptr && blocked_by(*e)) return false;
+        }
+        for (const DynSlot &d : dynamics_) { // pass 2: dynamics (Item kind)
+            if (d.h.pool() == 2) continue; // statics table already covered pool 2
+            const Entity *e = world.registry.get(d.h);
+            if (e != nullptr && blocked_by(*e)) return false;
+        }
+        return true;
+    }
+    // Un-ticked worlds (headless callers that never ran the per-tick table
+    // build) keep the registry sweep so LOS still sees their entities.
     bool blocked = false;
     world.registry.for_each([&](const Entity &e) { // pass 1: pool-2 statics
         if (blocked || e.handle.pool() != 2) return;

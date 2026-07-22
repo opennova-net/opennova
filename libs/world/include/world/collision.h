@@ -736,6 +736,15 @@ public:
     int32_t static_count() const { return static_count_; }
     int32_t static_building_count() const { return static_building_count_; }
     int32_t candidate_count(EntityHandle h) const;
+    // The entity's proximity slice [orig: entity+444/448 — the g_ProxCandidateArena
+    // window Entity_BuildProximityListsFromPools fills @ 0x4b8eb0]. Pointer into
+    // the arena, valid until the next 17th-tick rebuild; null when the entity has
+    // no slice (retail's BSS-zero start: the first 16 ticks scan nothing).
+    const EntityHandle *candidate_slice(EntityHandle h, int32_t &count_out) const;
+    // True once the per-tick pool tables have been built — the discriminator
+    // between "no candidates near" and "this world never ran the table build"
+    // (headless callers), which keep whole-registry fallbacks.
+    bool tick_tables_ready() const { return !statics_.empty() || !dynamics_.empty(); }
 
     // Static prox-table slot view (quantized u16 coords/radius like the retail
     // tables) — the render-occlusion engine walks the building prefix through
@@ -859,6 +868,11 @@ private:
     const CollisionTargetView *target_view(const World &world, EntityHandle h,
                                            CollisionTargetView &scratch,
                                            std::vector<CollisionMatrix> &mat_scratch) const;
+    // target_view's model selection without the section-matrix build: fills the
+    // entity position and bound radius for the witnessed gate-before-view order.
+    // False exactly when target_view would return null.
+    bool target_bound(const World &world, EntityHandle h, int32_t pos_out[3],
+                      int32_t &radius_out) const;
 
     // One sound-occlusion LOS ray (terrain + building legs); true = clear.
     // [orig: Entity_CheckLineOfSightTerrainAndEntities @ 0x53b130]
