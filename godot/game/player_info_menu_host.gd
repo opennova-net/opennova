@@ -34,9 +34,9 @@ const VOICE_PREVIEW_CONTROL := "TESTPLAYERVOICE"
 const VOICE_PREVIEW_BANK := "menu.lwf"
 const VOICE_PREVIEW_TRIGGER_FORMAT := "VOICE_%d"
 
-# The 3D character preview (head/body/arms .3di composited), reused from the ONED
-# Avatars workspace. Mounted into the PLAYER_PREVIEW widget rect and fed the resolved
-# combo; static at rest (no .adm bound) behind the D-PLAYERINFO-1 seam.
+# The 3D character preview (compatible head/body .3di composited), reused from the
+# ONED Avatars workspace. Mounted into the PLAYER_PREVIEW widget rect and fed the
+# resolved combo; it plays the witnessed raw-.bad idle when those assets resolve.
 const AvatarPreviewScript := preload("res://engine/avatar/avatar_preview.gd")
 
 var _menu: Node                         # the built NovaMnuMenu (typed Node: only its tree is used)
@@ -303,7 +303,7 @@ func _preview_voice() -> void:
 
 # --- 3D character preview (PLAYER_PREVIEW) ------------------------------------
 
-# Mount the head/body/arms 3D preview into the PLAYER_PREVIEW widget rect (a custom
+# Mount the head/body 3D preview into the PLAYER_PREVIEW widget rect (a custom
 # button surface in player.mnu) and feed it the current combo. Null-guarded: a menu
 # without the widget, or without an avatar db / resource root, simply shows no preview.
 func _wire_preview() -> void:
@@ -315,7 +315,7 @@ func _wire_preview() -> void:
 	_preview.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_preview.mouse_filter = Control.MOUSE_FILTER_IGNORE  # let the button keep its clicks
 	(rect as Control).add_child(_preview)
-	# Static menu portrait: no grid/axes, camera locked, character facing the viewer.
+	# Locked menu portrait: no grid/axes, camera fixed, character facing the viewer.
 	# The editor Avatars workspace keeps the interactive fly camera; only this runtime
 	# mount opts into the portrait (idle spin + hover zoom/sway, see AvatarPreview).
 	_preview.set_menu_preview(true)

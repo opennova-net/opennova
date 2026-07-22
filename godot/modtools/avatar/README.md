@@ -46,13 +46,16 @@ and calling the workspace's `apply_model()`.
 
 `engine/avatar/avatar_preview.gd` (`AvatarPreview extends Control`, in the
 shared engine layer because the game's PLAYER_INFO menu host mounts the same
-preview) composes the resolved combo's head / body / arms part `.3di` models
+preview) composes the resolved combo's third-person head / body `.3di` models
 into one `SubViewport` scene under a shared environment, framed by a fly
-camera with the editor grid and axis gizmo.
-Missing or unknown graphics are shown in an overlay instead of being silently
-ignored.
+camera with the editor grid and axis gizmo. The combo's arms reference remains
+editable in Parts and Characters, but is not overlaid on the standing preview:
+all four retail arm graphics use larger rigs with weighted references beyond the
+19-bone preview skeleton. The current first-person runtime demonstrates that
+`ArmsG` needs weapon/viewmodel rig context. Missing or unknown composed head/body
+graphics are shown in an overlay instead of being silently ignored.
 
-The parts render static at rest: the original combo -> spawned-player model
-binding (and the in-game camo application) is unwitnessed — see
-**D-PLAYERINFO-1** in the RE record — so the preview and `apply_camo()` stop at
-the resolved part geometry behind that seam.
+The composed head/body parts play the shared `Dt1rst.bad` + `PI_Idle.BAD`
+preview idle when those assets resolve, and otherwise render static at rest.
+The original combo → spawned-player model binding and in-game camo application
+remain unwitnessed; see **D-PLAYERINFO-1** in the RE record.
