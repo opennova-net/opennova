@@ -109,13 +109,15 @@ public:
 	// self_handle/self_type = its 0x0C sub-header. server_scrk lets the same runtime also decode the
 	// capture's S2C 0x83 stream. Skips the live handshake — for replay/parity only.
 	void seed_in_match(uint32_t session_id, std::string client_scrk, std::string server_scrk,
-	                   uint32_t next_seq, uint32_t last_ack, uint16_t self_handle, uint16_t self_type);
+	                   uint32_t next_seq, uint32_t last_ack, uint16_t self_handle,
+	                   uint16_t self_type, uint32_t game_type = 0);
 
 	Phase phase() const { return phase_; }
 	bool in_match() const { return phase_ == Phase::InMatch; }
 	bool has_self_handle() const { return has_self_handle_; }
 	uint16_t self_handle() const { return self_handle_; } // the wire handle H
 	const SelfSpawn &spawn_pose() const { return spawn_; }
+	uint32_t game_type() const { return game_type_; }
 	const std::string &player_name() const { return player_name_; }
 	uint32_t server_key() const { return conn_.server_sk; }
 	const std::string &client_scrk() const { return conn_.client_scrk; }
@@ -148,6 +150,7 @@ private:
 	bool has_self_handle_ = false;
 	uint16_t self_handle_ = 0;  // wire handle H, learned via the name-match (pool<<12|slot)
 	SelfSpawn spawn_;
+	uint32_t game_type_ = 0;    // authoritative g_GameType learned from S2C 0x08 field 3 / 0x7B extra
 
 	std::string last_error_;
 };

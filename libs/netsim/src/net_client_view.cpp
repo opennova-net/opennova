@@ -55,6 +55,22 @@ EntityClass NetClientView::classify(uint16_t type_id) const {
 
 void NetClientView::apply(uint8_t tag, const std::vector<uint8_t> &body) {
 	switch (tag) {
+	case 0x08: { // fixed session config; field 3 = shared g_GameType
+		SessionConfig config;
+		if (decode_session_config(body.data(), body.size(), config))
+			game_type_ = static_cast<uint32_t>(config.fields[3]);
+		else
+			++unknown_tags_;
+		break;
+	}
+	case 0x7B: { // full player/session info; extra = shared g_GameType
+		FullPlayerInfo info;
+		if (decode_full_player_info(body.data(), body.size(), info))
+			game_type_ = info.extra;
+		else
+			++unknown_tags_;
+		break;
+	}
 	case kTag0aFrameUpdate:
 		apply_frame_update(body);
 		break;
@@ -177,12 +193,23 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 	// decode_frame_update leaves everything it walked in `fu` even on a short read,
 	// so we apply whatever decoded cleanly (out.complete reflects a clean terminator).
 	decode_frame_update(body.data(), body.size(),
-	                    [this](uint16_t tid) { return classify(tid); }, fu);
+	                    [this](uint16_t tid) { return classify(tid); }, fu,
+	                    (game_type_ & 0x20000u) != 0u);
 
 	state_.anchor_x = fu.anchor_x;
 	state_.anchor_y = fu.anchor_y;
 	state_.anchor_z = fu.anchor_z;
-	state_.local_health = fu.health;
+	if (fu.local_tail_present) {
+		state_.local_health = fu.health;
+		++state_.health_updates_applied;
+	}
+	if (fu.objective.present) {
+		state_.objective_won = static_cast<uint32_t>(fu.objective.state[0]);
+		state_.objective_lost = static_cast<uint32_t>(fu.objective.state[1]);
+		state_.objective_show_win = static_cast<uint32_t>(fu.objective.state[2]);
+		state_.objective_show_lose = static_cast<uint32_t>(fu.objective.state[3]);
+		++state_.objective_updates_applied;
+	}
 
 	for (ClientEntityState &e : state_.entities) e.seen_this_frame = false;
 	struct PendingCarrierPose {
@@ -214,6 +241,31 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 		es.aim_yaw_byte = 0;
 		es.anim_state_id = 0;
 		es.anim_channel_ratio = 0;
+
+		// Compact player and infantry records carry the authoritative organic
+		// lifecycle bits. Retain the complete byte, while counting only known
+		// dead -> alive edges so an initial alive spawn is not mistaken for a
+		// respawn. This happens per decoded record rather than per render frame:
+		// pump() may fold several queued 0x0A datagrams before Godot presents.
+		bool has_state_flags = false;
+		uint8_t state_flags = 0;
+		if (rec.cls == EntityClass::Player) {
+			has_state_flags = true;
+			state_flags = rec.player.state_flags;
+		} else if (rec.cls == EntityClass::Infantry) {
+			has_state_flags = true;
+			state_flags = rec.infantry.flags_byte;
+		}
+		if (has_state_flags) {
+			const bool was_known = es.state_flags_known;
+			const bool was_dead = (es.state_flags & 0x02u) != 0u;
+			const bool is_alive = (state_flags & 0x02u) == 0u;
+			es.state_flags = state_flags;
+			es.state_flags_known = true;
+			if (was_known && was_dead && is_alive) {
+				++es.respawn_revision;
+			}
+		}
 
 		// Reconstruct world position: decompress the compact (per-axis) and add the
 		// frame anchor — or, for a CARRIER-LOCAL player record (vehicle/ground handle !=

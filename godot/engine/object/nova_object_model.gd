@@ -81,6 +81,15 @@ var _anim_variant := 0              # same-key variant index (multi-clip .adm ro
 var _anim_time := 0.0               # playhead seconds into the active clip
 var _anim_playing := false
 var _anim_external_phase := false   # true when the sim, not _process(delta), owns _anim_time
+# Retail remote-body request channel. The wire may advertise a pending state
+# while the current clip's flags defer acceptance, so current/pending ownership
+# belongs beside this model's playhead and completion clock.
+var _remote_state := -1
+var _remote_flags := 0
+var _remote_pending_state := -1
+var _remote_pending_key := ""
+var _remote_pending_flags := 0
+var _remote_pending_end_time := INF
 var _body_pose_dirty := true
 var _bounds_dirty := true
 
@@ -105,6 +114,7 @@ func set_object_data(value: NovaObjectData) -> void:
 	if object_data != null and object_data.object_changed.is_connected(_on_object_changed):
 		object_data.object_changed.disconnect(_on_object_changed)
 	object_data = value
+	reset_remote_body_state()
 	_part_anims.clear()
 	_active_lod = _clamp_lod_index(_active_lod)
 	if object_data != null and not object_data.object_changed.is_connected(_on_object_changed):
@@ -180,6 +190,7 @@ func reset_animation_time() -> void:
 	_anim_time_ms = 0
 	_anim_time = 0.0
 	_anim_external_phase = false
+	reset_remote_body_state()
 	_apply_runtime_state(0.0)
 
 
@@ -190,6 +201,7 @@ func reset_animation_time() -> void:
 # mission present pass drive these, so organic bodies animate from one path.
 func set_skeletal_anim(skeletal) -> void:
 	_skeletal = skeletal
+	reset_remote_body_state()
 	_anim_key = ""
 	_anim_variant = 0
 	_anim_time = 0.0
@@ -332,9 +344,109 @@ func play_body_clip_at(key: String, phase_ticks: int) -> void:
 	_advance_body_anim(0.0)
 
 
+## Seed a main-body clip from retail half-frame ticks, pose it immediately, and
+## leave it free-running. Distinct from play_body_clip_at(), whose callers own
+## every later playhead sample and therefore intentionally pin external phase.
+func play_body_clip_seeded(key: String, phase_ticks: int) -> void:
+	if _select_body_clip_seeded(key, phase_ticks):
+		_advance_body_anim(0.0)
+
+
+func _select_body_clip_seeded(key: String, phase_ticks: int) -> bool:
+	if _skeletal == null or not _skeletal.has_clip(key):
+		return false
+	_anim_key = key
+	_anim_variant = 0
+	var fps: float = _skeletal.get_clip_fps(key)
+	var seconds := 0.0
+	if fps > 0.0:
+		seconds = float(maxi(phase_ticks, 0)) / (2.0 * fps)
+	_set_body_playhead(seconds)
+	_anim_playing = true
+	_anim_external_phase = false
+	_body_pose_dirty = true
+	return true
+
+
+## Apply one raw compact-organic body-state request with retail's remote
+## transition arbitration. A phase belongs only to an immediately accepted
+## player transition; queued states promote at tick zero when the current clip
+## reaches its completion boundary.
+func apply_remote_body_state(state_id: int, key: String, flags: int,
+		phase_ticks: int = -1) -> void:
+	if state_id < 0 or key.is_empty() or _skeletal == null or not _skeletal.has_clip(key):
+		return
+	if _remote_state < 0:
+		_accept_remote_body_state(state_id, key, flags, phase_ticks)
+		return
+	if state_id == _remote_state:
+		_clear_remote_body_pending()
+		return
+	if ((_remote_flags & 0x4) != 0
+			or ((_remote_flags & 0x20) != 0 and (flags & 0x1) == 0)):
+		_queue_remote_body_state(state_id, key, flags)
+		return
+	_accept_remote_body_state(state_id, key, flags, phase_ticks)
+
+
+func reset_remote_body_state() -> void:
+	_remote_state = -1
+	_remote_flags = 0
+	_clear_remote_body_pending()
+
+
+func _accept_remote_body_state(state_id: int, key: String, flags: int,
+		phase_ticks: int) -> void:
+	_clear_remote_body_pending()
+	_remote_state = state_id
+	_remote_flags = flags
+	if _select_body_clip_seeded(key, phase_ticks if phase_ticks >= 0 else 0):
+		_advance_body_anim(0.0)
+
+
+func _queue_remote_body_state(state_id: int, key: String, flags: int) -> void:
+	_remote_pending_state = state_id
+	_remote_pending_key = key
+	_remote_pending_flags = flags
+	var length: float = _skeletal.get_clip_length(_anim_key, _anim_variant)
+	if length <= 0.0:
+		_remote_pending_end_time = INF
+	elif _skeletal.is_clip_looping(_anim_key, _anim_variant):
+		_remote_pending_end_time = (floorf(_anim_time / length) + 1.0) * length
+	else:
+		_remote_pending_end_time = length
+	# A request arriving after a one-shot already ended promotes immediately.
+	if _promote_remote_body_pending_if_due():
+		_advance_body_anim(0.0)
+
+
+func _clear_remote_body_pending() -> void:
+	_remote_pending_state = -1
+	_remote_pending_key = ""
+	_remote_pending_flags = 0
+	_remote_pending_end_time = INF
+
+
+func _promote_remote_body_pending_if_due() -> bool:
+	if _remote_pending_state < 0 or is_inf(_remote_pending_end_time):
+		return false
+	if _anim_time + 0.000001 < _remote_pending_end_time:
+		return false
+	var state_id := _remote_pending_state
+	var key := _remote_pending_key
+	var flags := _remote_pending_flags
+	_clear_remote_body_pending()
+	_remote_state = state_id
+	_remote_flags = flags
+	# The queued packet's phase described the old current channel. Retail starts
+	# the promoted request at the first frame and discards any overshoot.
+	return _select_body_clip_seeded(key, 0)
+
+
 func stop_body_clip() -> void:
 	_anim_playing = false
 	_anim_external_phase = false
+	reset_remote_body_state()
 
 
 func get_active_body_clip() -> String:
@@ -609,6 +721,8 @@ func _advance_body_anim(delta: float) -> void:
 		return
 	if _is_playing and _anim_playing and not _anim_external_phase and delta != 0.0:
 		_anim_time += delta
+		_body_pose_dirty = true
+	if _promote_remote_body_pending_if_due():
 		_body_pose_dirty = true
 	if not _body_pose_dirty:
 		return

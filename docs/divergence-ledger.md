@@ -87,8 +87,8 @@ record splits a divergence into facets (e.g. D-NET-133), the facets get separate
 | D-NET-124 | Drain/emit fan assumes type-1 (remote-joiner) nodes stay resident across a mid-match `configure_session_runtime()` | A | WITNESSED-READY-DEFERRED (latent) | PAR-NET |
 | D-NET-125 | The single-drain / single-tick invariant is comment-only (nothing blocks a `NetSystem` + `Server_TickUpdate` double-owner) | A | WITNESSED-READY-DEFERRED (latent) | PAR-NET |
 | D-NET-127 | Reactive-reply residual: the 0x46 per-field slot-state VALUES + the 0x51 NetId/anim binding plumbing (shape faithful) | A | OPEN (LOW residual) | PAR-NET |
-| D-NET-133 | S2C 0x18 spawn approximations: `item_type` from pool, name-gate on `e.name`, attach-parent/ground-entity unmodeled → 0xFFFF | A | OPEN (approximation) | PAR-NET |
-| D-NET-134 | Per-frame 0x0A sub-block phase cycles the safe subset `{1,0,3}`, omitting env(2) + passenger pending `world.env` authoring + mount modeling | A | OPEN (approximation) | PAR-NET |
+| D-NET-133 | S2C 0x18 residual: fixed-slot seat mapping/empty sentinels and several modeled fields are repaired; entity+340, live AiBrain→Entity state mirroring, non-player entity+36 flags, and the pre-admission 0x0F over-answer remain (player flag/net-id gaps also remain D-NET-136/137) | A | OPEN (partial repair) | PAR-NET |
+| D-NET-134 | Per-frame 0x0A phase still cycles safe `{1,0,3}`: objective phase 3 now carries authoritative Co-op masks, while env(2) + passenger remain omitted pending `world.env` authoring + mount modeling | A | OPEN (narrowed approximation) | PAR-NET |
 | D-NET-136 | 0x0C `entity+36` bit 0x01 computed per-recipient; diverges for ≥3 players; the faithful per-entity stamp needs the `NapiNPPlayer+0x37` gate witnessed | B | OPEN + NEEDS-RE (the +0x37 writer) | PAR-NET |
 | D-NET-137 | Player wire net_id is an invented encoding shim, not the minimap-slot packing — tolerable because the client self-heals unmatched ids | A | WITNESSED-READY-DEFERRED (tolerable) | PAR-NET |
 | D-NET-139 | 0x0A priority score ports distance/age/own-boost; the view-interest / LOS / enemy-team-bonus terms contribute 0 | A | OPEN (approximation) | PAR-NET |

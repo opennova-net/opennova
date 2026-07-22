@@ -47,6 +47,9 @@ func _two_organics() -> NovaMissionData:
 
 func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 	var host := NovaSimulation.new()
+	# Captured retail Co-op g_GameType: bit 0x20000 makes every phase-3
+	# 0x0A carry a 16-byte objective block before the local-health tail.
+	host.configure_host_session({"gametype": 0x30020})
 	assert_true(host.enable_host_listen(0), "host bound an OS-assigned UDP port")
 	assert_true(host.load_from_mission_data(_two_organics()), "host promoted with the net seam")
 	# A co-op host is playable — it spawns its own pool-0 player (0x14B9), which the joiner must
@@ -113,11 +116,13 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 			host_sees_joiner = true
 	assert_true(host_sees_joiner, "host's present includes the admitted joiner (a player row that isn't the host's own)")
 	var host_remote_adm := ""
+	var host_remote_index := -1
 	for ai_index in range(host.get_entity_count()):
 		var card: Dictionary = host.get_entity_debug(ai_index)
 		if int(card.get("item_id", 0)) == 0x14B9 \
 				and int(card.get("wire_handle", 0)) != host_own:
 			host_remote_adm = String(card.get("adm_name", ""))
+			host_remote_index = ai_index
 			break
 	assert_eq(host_remote_adm, "US01.adm",
 			"the real host admission path binds the remote player's body ADM")
@@ -127,6 +132,8 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 	var jsnap: PackedFloat32Array = joiner.get_present_snapshot()
 	var joiner_sees_host := false
 	var saw_self_echo := false
+	var host_player_anim_state := -1
+	var host_player_anim_phase := -2
 	for rec in range(jsnap.size() / stride):
 		var base := rec * stride
 		var tid := int(jsnap[base + NovaSimulation.PF_TYPE_ID])
@@ -135,8 +142,16 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 			saw_self_echo = true
 		if tid == 0x14B9 and whandle != h and whandle != 0:
 			joiner_sees_host = true
+			host_player_anim_state = int(
+					jsnap[base + NovaSimulation.PF_ANIM_STATE])
+			host_player_anim_phase = int(
+					jsnap[base + NovaSimulation.PF_ANIM_PHASE_TICKS])
 	assert_true(joiner_sees_host, "joiner's wire present includes the host player (0x14B9), not itself")
 	assert_false(saw_self_echo, "the joiner's own wire echo (handle H) is self-filtered from its present")
+	assert_gte(host_player_anim_state, 0,
+			"the host player's authoritative body state reaches presentation")
+	assert_gte(host_player_anim_phase, 0,
+			"the player compact's channel-phase byte reaches presentation")
 	var joiner_local_adm := ""
 	for ai_index in range(joiner.get_entity_count()):
 		var card: Dictionary = joiner.get_entity_debug(ai_index)
@@ -157,15 +172,71 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 	# mission header) — distinct from pool-2 entity instances, which DO stream. (D-NET-98 corrected;
 	# net-re §5.38c.)
 	var ai_seen := 0
+	var ai_with_anim_state := 0
+	var ai_without_wire_phase := 0
 	var building_seen := false
 	for rec in range(jsnap.size() / stride):
-		var tid := int(jsnap[rec * stride + NovaSimulation.PF_TYPE_ID])
+		var base := rec * stride
+		var tid := int(jsnap[base + NovaSimulation.PF_TYPE_ID])
 		if tid == AI_TYPE:
 			ai_seen += 1
+			if int(jsnap[base + NovaSimulation.PF_ANIM_STATE]) >= 0:
+				ai_with_anim_state += 1
+			if int(jsnap[base + NovaSimulation.PF_ANIM_PHASE_TICKS]) == -1:
+				ai_without_wire_phase += 1
 		elif tid == BUILDING_TYPE:
 			building_seen = true
 	assert_eq(ai_seen, 2, "joiner's present carries both host AI organics (type 0x0816) from the 0x0C stream")
+	assert_eq(ai_with_anim_state, 2,
+			"both compact infantry records carry their body state")
+	assert_eq(ai_without_wire_phase, 2,
+			"infantry compacts expose the absent phase for local free-running playback")
 	assert_true(building_seen, "pool-2 static building IS wire-streamed to the joiner under S2C 0x10 (the join burst's phase 1) [orig: @0x51bba0]")
+
+	# The recipient-specific 0x0A tail, not the lossy self-echo H, owns the
+	# joiner's health. Kill H on the authority and verify the same received
+	# frame is applied to local motor entity L for HUD and death state.
+	assert_gte(host_remote_index, 0, "host resolves the joiner's authoritative player H")
+	assert_gt(joiner.get_local_player_health(), 0, "joiner starts alive before the authority kill")
+	host.debug_set_entity_health(host_remote_index, 0)
+	var death_arrived := false
+	for _i in range(120):
+		host.step()
+		joiner.step()
+		if joiner.get_local_player_health() == 0:
+			death_arrived = true
+			break
+		OS.delay_msec(2)
+	assert_true(death_arrived,
+			"the authoritative 0x0A tail health reaches the joiner's local player L")
+	var local_death_card: Dictionary = {}
+	for ai_index in range(joiner.get_entity_count()):
+		var card: Dictionary = joiner.get_entity_debug(ai_index)
+		if int(card.get("item_id", 0)) == 0x14B9:
+			local_death_card = card
+			break
+	assert_false(local_death_card.is_empty(), "joiner retains its local player L after death")
+	assert_eq(int(local_death_card.get("health", -1)), 0)
+	assert_eq(int(local_death_card.get("ai_health", -1)), 0)
+	assert_false(bool(local_death_card.get("alive", true)))
+
+	# A positive tail without a new deploy edge is not a respawn. This also
+	# protects the next infantry tick from hydrating its motor copy back to life.
+	host.debug_set_entity_health(host_remote_index, 100)
+	for _i in range(8):
+		host.step()
+		joiner.step()
+		OS.delay_msec(2)
+	var after_stale_positive: Dictionary = {}
+	for ai_index in range(joiner.get_entity_count()):
+		var card: Dictionary = joiner.get_entity_debug(ai_index)
+		if int(card.get("item_id", 0)) == 0x14B9:
+			after_stale_positive = card
+			break
+	assert_eq(int(after_stale_positive.get("health", -1)), 0)
+	assert_eq(int(after_stale_positive.get("ai_health", -1)), 0)
+	assert_false(bool(after_stale_positive.get("alive", true)),
+			"positive health without a deploy edge cannot partially revive local L")
 
 	host.free()
 	joiner.free()

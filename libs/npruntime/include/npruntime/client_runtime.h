@@ -92,12 +92,13 @@ public:
 	// Deterministic golden replay (Joiner): seed the connection keys + seq/ack + self handle/type so
 	// frame_c2s_uplink reproduces a captured C2S 0x0C datagram byte-for-byte. [ROADMAP "Determinism"]
 	void seed_session(uint32_t session_id, std::string client_scrk, std::string server_scrk,
-	                  uint32_t next_seq, uint32_t last_ack, uint16_t self_handle, uint16_t self_type);
+	                  uint32_t next_seq, uint32_t last_ack, uint16_t self_handle,
+	                  uint16_t self_type, uint32_t game_type = 0);
 
-	// The "deployed" predicate gating the 0x0C uplink — the witnessed !g_spawn_success_gate
-	// ("deployed/alive": the gate is SET on death/spectator via the 0x0A flags1&0x01 and at
-	// spawn-select via 0x1D, and CLEARED on deploy). Defaults to true on reaching InMatch; a caller
-	// flips it for death/respawn. (The dword_81474C respawn-pending half is deferred-and-logged.)
+	// The "deployed" predicate gating the 0x0C uplink. It defaults true on reaching InMatch;
+	// a complete recipient-local 0x0A tail with health <= 0 closes it before the same frame's send.
+	// Positive health does not reopen it. The explicit deploy/respawn exchange that reopens the gate
+	// remains deferred; set_deployed(true) is the integration seam for that future edge.
 	void set_deployed(bool v) { deployed_ = v; }
 	bool deployed() const { return deployed_; }
 

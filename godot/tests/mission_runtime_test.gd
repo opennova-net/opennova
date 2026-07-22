@@ -87,6 +87,8 @@ func test_production_seat_specs_extract_target_phrase_set_config() -> void:
 		assert_eq(int((seats[0] as Dictionary).get("bone_index", 0)), 6,
 				"the wire byte is the 1-based USRP table row, not a seat ordinal")
 		assert_eq(int((seats[0] as Dictionary).get("type", 0)), 3)
+		assert_eq(int((seats[0] as Dictionary).get("retail_slot", -1)), 9,
+				"UseGun occupies fixed retail mountHandles slot 9")
 	assert_true(bool(spec.get("mount_config_valid", false)),
 			"authored phrase_set marks target config valid")
 	assert_eq(int(spec.get("mount_config", -1)), 4,

@@ -48,6 +48,12 @@ public:
 	// frame. Unknown falls through to the learned map, then the phase-1 resolver.
 	void set_item_class_resolver(std::function<EntityClass(uint16_t)> resolver);
 
+	// The phase-3 0x0A objective block has no on-wire discriminator. apply()
+	// learns the shared g_GameType from S2C 0x08 field 3 / 0x7B `extra`;
+	// replay/bootstrap callers may also seed it explicitly before a midstream 0x0A.
+	void set_game_type(uint32_t game_type) { game_type_ = game_type; }
+	uint32_t game_type() const { return game_type_; }
+
 private:
 	void apply_frame_update(const std::vector<uint8_t> &body);
 	// Load-time world-stream spawn/static batches (§5.2a) -> ClientState upsert. Each carries
@@ -74,6 +80,7 @@ private:
 	std::function<EntityClass(uint16_t)> resolver_;      // phase-1 heuristic fallback
 	std::unordered_map<uint16_t, EntityClass> learned_classes_;
 	std::size_t unknown_tags_ = 0;
+	uint32_t game_type_ = 0;
 };
 
 } // namespace opennova::netsim

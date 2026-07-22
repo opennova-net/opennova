@@ -36,6 +36,16 @@ struct ClientEntityState {
 	uint8_t aim_yaw_byte = 0;                     // infantry-only entity+720 byte
 	uint8_t anim_state_id = 0;                    // player anim_state_id / infantry anim_byte
 	uint8_t anim_channel_ratio = 0;               // player-only; 0 for infantry
+	// Raw entity flags from the latest compact organic record: PlayerCompactRecord::
+	// state_flags or InfantryCompactRecord::flags_byte. Bit 0 is hidden and bit 1
+	// is dead/undeployed. Spawns carry no compact flags, so `state_flags_known`
+	// distinguishes an unwitnessed zero from a witnessed alive sample.
+	uint8_t state_flags = 0;
+	bool state_flags_known = false;
+	// Advances on each witnessed dead -> alive edge. Keeping the epoch in the
+	// decoded view preserves a respawn even if several 0x0A frames are folded by
+	// one client pump before presentation runs.
+	std::uint32_t respawn_revision = 0;
 	bool seen_this_frame = false;
 };
 
@@ -48,6 +58,16 @@ struct ClientState {
 	int32_t anchor_y = 0;
 	int32_t anchor_z = 0;
 	int16_t local_health = 0;
+	// Advances only when the complete seven-byte recipient-local 0x0A tail was
+	// decoded. frames_applied remains the lenient partial-presentation counter.
+	std::uint32_t health_updates_applied = 0;
+	// Phase-3 objective masks, present when g_GameType bit 0x20000 is active.
+	// Text IDs remain mission-local; these four authoritative masks drive them.
+	std::uint32_t objective_won = 0;
+	std::uint32_t objective_lost = 0;
+	std::uint32_t objective_show_win = 0;
+	std::uint32_t objective_show_lose = 0;
+	std::uint32_t objective_updates_applied = 0;
 	std::vector<ClientEntityState> entities;
 	std::uint32_t frames_applied = 0;
 

@@ -1463,11 +1463,11 @@ header; the rest is client-side.
 |---|---|---|
 | ref0/ref1/ref2 | 3× i32 | tick/reference header → dword_A822E4/E8/EC |
 | flags1 | u8 | Write side `[orig: NetPacket_WritePlayerState @ 0x4ff793-0x4ff7dd]`: bit0 = spectator (slot+100567; also ORs entity+36 bit0), **bit1 = RESPAWN-PENDING (slot+89912 & 0x10)** — re-asserted EVERY frame while the recipient is undeployed (also ORs entity+36 bit0 → the record byte13 `0x01`), bit2 = one-shot load hint (entity+44 & 0x1000 && dword_2550850, clears the entity bit). Read side: `0x04`→loadprog `dword_A8235C=10`; **`0x02`→`g_deploy_screen_active @ 0xA860DC` = `(flags1 & 2) != 0` EVERY frame — the deploy screen is HELD open by bit1; one bit1=0 frame closes it** (@ 0x42ff82; D-NET-156); `0x01` EDGES drive `g_death_screen_active @ 0xA860EC` (0→1 opens the death/spectator screen — camera `CameraOffset.Z=0xD000`, tip 22, spawn-gate `dword_24C1928`; 1→0 closes + latches `byte_A85B48 = player.Team`) |
-| flags2 | u8 | low 2 bits select the sub-block AND its ROLE: **0** = aim/player-view (client-authoritative — the working golden does NOT send it in gameplay), **1** = server-status/timer, **2** = ENV, **3** = objective (gametype-gated). The golden CYCLES 1/2/3. bit 3 (`0x08`) gates a 6 B vehicle-passenger record after the fixed tail (joiner-as-passenger; only the `(flags2 & 0xF) == 8` exact value triggers it — i.e. sub-block 0 + passenger bit) [orig: 0x430459] |
+| flags2 | u8 | low 2 bits select the sub-block AND its ROLE: **0** = aim/player-view (client-authoritative — the working golden does NOT send it in gameplay), **1** = server-status/timer, **2** = ENV, **3** = objective (gametype-gated). The retail counter free-runs and cycles all four. bit 3 (`0x08`) gates a 6 B vehicle-passenger record after the fixed tail (joiner-as-passenger; only the `(flags2 & 0xF) == 8` exact value triggers it — i.e. sub-block 0 + passenger bit) [orig: 0x430459] |
 | sub-block 0 | `==0`: 6× u8 + u8 (`0xFF` sentinel) + i32, 11 B | player aim/state → dword_A85B5C… [orig: 0x430054..0x43012E] |
 | sub-block 1 (server-status/timer) | `==1`: 4× u8 + i16, 6 B | `[u8→dword_C6EAE0][u8→dword_C6EAE4][u8→g_serverFps (0xC8FC64)][u8→g_serverCpuPct (0xC8FC68)][i16 timer]`; each u8 is `movzx`-widened from one wire byte; `dword_24C1958 = 62 × i16` (62 Hz timer; `-1` if negative) [orig: C6EAE0@0x4301a1, C6EAE4@0x4301bc, g_serverFps@0x4301e0, g_serverCpuPct@0x430200, timer@0x430210]. Init defaults [orig: 0x4f638b C6EAE0=20, **C6EAE4=13**, C6EAE8=10]. **`dword_C6EAE4` is the fall-damage tolerance (§5.38d)** — a server that only ever sends sub-block 0 leaves the client's C6EAE4 at 0 → per-frame fall damage [orig: read @0x4b7d0d] |
 | sub-block 2 (ENV) | `==2`: u16,u16,u16,u8,u8,u8,u8,u8, 11 B | `Env_FogDistTarget=u16<<16`, `Env_FogDistAccelClamp=u16<<8`, `Env_CurTimeFixed24=u16<<13` (TOD), `Env_QuakeTicks`, `Env_CloudScrollRateTarget=u8<<10`, u8<<8, `Env_OvercastBlendTarget=u8<<8`, u8 [orig: 0x430253..0x430341] |
-| sub-block 3 | `==3 && g_GameType & 0x20000`: 4× i32, 16 B (else 0 B) | dword_AC86E8… — gate is wire-invisible, so `decode_frame_update` reads the body only when its `is_objective_gametype` hint is set. **First witnessed in probe3** (Co-op, `g_GameType 0x30020`; 771 frames, body all-zero); the `flags2 & 0xF0` high bits don't change sub-block selection (D-NET-75) [orig: 0x430361..0x4303C8] |
+| sub-block 3 | `==3 && g_GameType & 0x20000`: 4× i32, 16 B (else 0 B) | `won, lost, show_win, show_lose` → dword_AC86F4/F0/EC/E8. The gate is wire-invisible, so `decode_frame_update` reads the body only when its `is_objective_gametype` hint is set. **First witnessed in probe3** (Co-op, `g_GameType 0x30020`; 771 frames, body all-zero); the `flags2 & 0xF0` high bits don't change sub-block selection (D-NET-75) [orig: 0x430361..0x4303D0] |
 | state_flag_byte | u8 | **The recipient's OWN stance echo**: bit 0 (prone)→`dword_B76484`, bit 1 (crouch)→`dword_B76480`, bits 0/1→`g_local_player_entity` MoveOrder (+0x12C) bits 8/9 — re-latched EVERY frame (@ 0x430562/@ 0x430570), so a host that hardcodes 0 force-STANDS a crouched client each frame (witness 2026-07-03; the pre-v32 crouch/prone bug). The authoritative source is the server's per-player stance from C2S 0x1D (dispatch table) — vehicle attach/detach clears it (@ 0x435c54/@ 0x43561e). (The `<<8` of older notes was the receiver's internal shift, not a wire-format detail) [orig: 0x4303E5] |
 | mountHandle | u16 | vehicle-mount handle (`pool<<12\|slot`; `0xFFFF`=none) [orig: 0x430408] |
 | health | i16 | read @0x430428; applied late in the handler — compares the new value to the stored `Health` (`cmp dx,[entity+0x11E]` @0x43059a, `jge` skip @0x4305a1) and, ONLY when it DROPPED, fires INLINE COSMETIC feedback (red flash `dword_B764B4+=0x78` @0x4305a3, camera-shake `dword_B764B0+=0x0A` @0x4305c1; both capped 0xFF; **no `Radar_AddBlip`** — distinct from the body motor's `Player_OnDamageReceived`, §5.38d) — then stores `Health` @0x4305df. ⇒ stream this at full health (`healthMax`) or any below-stored tail self-triggers the flash [orig: 0x430428 / 0x43059a / 0x4305df] |
@@ -1477,6 +1477,19 @@ header; the rest is client-side.
 | seat_yaw | u16 | rider body yaw [orig: 0x4304C3] |
 | seat_pitch | u16 | rider body pitch [orig: 0x4304DC] |
 | event loop | trailing `[u8 tag]…` | tags exactly `{0,1,2}` — `cmp eax,2 / jg` at `0x4306DA` treats any tag ≥3 as silent terminator (same exit as `tag==0`); `tag==1`→`[u16 handle][u16 typeId]` then per-class callback (§5.10b); `tag==2`→§5.9.1 round event; ends at `tag==0`/EOB/tag≥3 [orig: 0x4306A1, handle@0x43070C, typeId@0x43076B] |
+
+**Objective-phase reimplementation (2026-07-21).** The phase-3 writer now emits the four live
+`World::subgoals` masks in retail order whenever `game_type & 0x20000`; non-objective modes retain
+the faithful zero-byte body. A joiner learns the off-wire gate from the initial S2C `0x08` session
+config field 3 and the later S2C `0x7B extra`; the host loopback receives the configured game type
+directly. `NetClientView` also consumes both metadata tags itself for chronological capture/replay
+folds, while a replay starting midstream can seed `game_type` through `ClientRuntime::seed_session`.
+The view commits the masks and advances its objective revision only after all 16
+bytes decode, so a truncated phase-3 datagram cannot replace the last authoritative snapshot with
+partial/default values. `NovaSimulation` mirrors fresh masks into the joiner's `World::subgoals`,
+which is already the objective-HUD source. Codec, truncation, fanout, runtime, and two-simulation
+coverage lives in `nw_ingame_encode_test`, `netsim_client_view_class_resolver_test`,
+`netsim_two_peer_fanout_test`, `npruntime_client_runtime_test`, and `coop_two_sim_test.gd`.
 
 (The handler was undefined in the IDB — a data blob mis-marked at the `0x430000` page boundary;
 defined 2026-06-16. Sub-block + tail field maps fully witnessed 2026-06-16c via
@@ -3541,7 +3554,7 @@ remote player rendered in-game. Launch contract (the host listens on the witness
 must pass the mission via `NW_LAN_MISSION`, NOT `NW_LAN_HOST` — `main_game.gd` tests `NW_LAN_HOST` first and
 takes the HOST path before it ever reads `NW_LAN_JOIN`, so a joiner with `NW_LAN_HOST` set silently becomes a
 second host (its `32768` bind fails, it falls back to a socketless listen server, and never dials).
-Two faithful-render gaps remain (the next work):
+Tracked client-fidelity items:
 1. **[CLOSED 2026-06-25 — stream the DYNAMIC set during load]** *(was: the joiner saw only the host player,
    not the NPCs.)* The host streams the networked/dynamic set during the joiner's world-load via
    `NovaSimulation::stream_world_state_to_peer` (fired on the F3 `PeerEnteredWorldStreaming` event, after the
@@ -3558,11 +3571,36 @@ a live retail join at 7%. The host now streams ALL four pools paged in the witne
    present carries the host's two AI organics AND the pool-2 building — which IS wire-streamed under 0x10,
    matching @0x51bba0 phase 1; D-NET-98 UPDATE) + lib round-trips (`nw_ingame_encode`,
    `netsim_world_stream_extractors`). Pool-1 (`0x0D`) is now streamed, AI-trailer crash fixed (D-NET-97).
-2. **Remote bodies glide — body animation is not carried over the wire.** The `0x0A` motion stream moves the
-   model but no anim-state rides it, so remote soldiers slide in their rest pose (the "soldier-glide" gap).
+2. **Remote body phase + acceptance arbitration — FIXED for the received compact channel
+   2026-07-21.** Both compact organic forms carry the body-state byte. The player form additionally
+   carries the authority's elapsed half-frame tick byte (off 15); the infantry form intentionally
+   does not. A newly accepted player state seeds that elapsed tick once and then free-runs locally;
+   repeated same-state packets do not rescrub the clip, and infantry no longer pins to frame zero.
+   `NovaObjectModel` owns the retail current/pending channel: current flags `0x04` queue an incoming
+   state; current `0x20` queues unless the incoming state carries `0x01`; otherwise the state
+   interrupts immediately. Pending states promote at the current clip's completion boundary and begin
+   at tick zero. Concrete skeletal tests pin seeding, free-run, same-state stability, both flag gates,
+   and completion-time promotion. The packed present row explicitly distinguishes a joiner's raw compact
+   request from the host's already-accepted authority state, so the listen host keeps its direct phase pose
+   instead of re-arbitrating a transition. Raw player/infantry lifecycle flags now drive remote hidden/dead
+   state; dead non-hidden corpses stay visible, and a decoded dead→alive revision resets the body channel
+   before the first respawn animation request even when several wire frames folded in one render pump.
+   D-NET-159 remains open only for its upstream authority body-motor
+   stand-ins (gait/lean/death selection), not this receive-side phase/arbitration path. [orig: player
+   write @0x4c0cf2; remote accept @0x4c11a6; infantry compact apply @0x4c0859;
+   AnimChannel_AdvancePlayback @0x40b140]
 3. **The joiner's local player uses the NPC motor.** On a non-authority client, L does not route through the
    `is_local_player` infantry-motor branch (§5.38) the SP host uses, so the joiner's own movement reads as
    NPC locomotion. Investigate the joiner `spawn_player` + motor gating under `run_logic_tick(false)`.
+4. **Joiner authoritative health/death bridge — PARTIALLY FIXED 2026-07-21.** NetClientView already
+   decoded the recipient-specific `0x0A` tail health, but ClientRuntime never consumed it and the Godot HUD
+   continued reading local predicted entity L. A fresh decoded zero now closes the deployed/uplink gate in
+   the same client frame, and NovaSimulation applies the scalar to L's registry + infantry-motor stores
+   without resolving host-space identity H or disturbing L's predicted pose. The fresh-frame guard prevents
+   the pre-`0x0A` default zero from killing L during handshake; once dead, L also rejects a later positive
+   tail until a real deploy edge can restore it. This ports the observable death outcome, but infers the gate
+   from tail health rather than retail's separate state/flags edge. Death-screen, spectator, and C2S `0x0E`
+   respawn/deploy fidelity remain open. [orig: tail health read @0x430428; local Health store @0x4305df]
 
 **D-NET-97 [TRACKED SIMPLIFICATION + POOL-1 CRASH] — pool routing is by `EntityKind`, not item-def
 capability flags; pool-1 (`0x0D`) deferred.** The original routes an entity to a wire pool (and thus its
@@ -5067,14 +5105,15 @@ alive + exclude-host) for the freshly spawned deployable AND every pool-1 entity
 (+0x215) — 0x18 is "full entity (re)spawn", not exclusively the 0x0F reply. (3) The client tests the
 wire `item_type` byte ONLY against zero (@ 0x433b5a); the rebuild's person-vs-vehicle behavior comes from
 the LOCAL itemDef's type (@ 0x433d6e), so any nonzero value is observably equivalent — D-NET-133's
-pool-derived approximation is provably safe. Also witnessed: the 0x0F handler additionally gates on the
+former pool-derived approximation was provably safe before the exact def source landed. Also witnessed:
+the 0x0F handler additionally gates on the
 requester having a session player (`session+192` non-null) — our host replies regardless (safe direction;
 noted in D-NET-133).
 
 **Reimpl (2026-07-01, all 46 net+world ctests green):** `encode_full_entity_spawn` /
 `decode_full_entity_spawn` (libs/npwire/ingame_{encode,decode}); `netsim::build_full_entity_spawn`
 (entity_wire_bridge — shares the player wire rules with the 0x0C builder: per-recipient flags, minimap
-net_id, playerClass clamp; D-NET-133 documents the source approximations); npruntime dispatch `case 0x0F`
+net_id, playerClass clamp; D-NET-133 documents the narrow +340/dispatch residuals); npruntime dispatch `case 0x0F`
 (server_message_dispatch.cpp — in-capacity empty slots reply the type-0 record;
 `EntityRegistry::pool_capacity` mirrors the capacity gate); nw_pp `print_tag_18` + catalog row
 `S 0x18 full-entity-spawn` (Decoded) and the C 0x0F rename `spawn-query → entity-info-query` (the old
@@ -5121,17 +5160,20 @@ emits `[u8 1][u16 handle][u16 type = *(itemDef+0x50)][compact body]`, then the p
 each frame emits a distance-prioritized SUBSET and the priority cursor round-robins across frames — the
 mechanism by which a retail host replicates dozens of vehicles/AI a few per frame rather than all at once.
 
-**Reimpl status.** The header phase-counter + sub-block cycle is ported (`netsim::Connection::s2c_phase` =
-`playerSlot+100566`; `emit_connection_s2c` advances it; `build_0a_frame` dispatches on `flags2 & 3`,
-`libs/netsim/src/connection_fan.cpp`). We cycle the SAFE subset `{1 server-status, 0 weapon, 3 gametype}`;
-**sub-block 2 (env) is DEFERRED (D-NET-134)** because our headless host does not yet author `world.env`
-(env is set only by WAC `TOD`/`fogdist` commands, which ASH_I5A drives from its `.env` file, not on the
-netsim world) — emitting it would OVERWRITE the client's correct mission-loaded sky. The passenger block
-(`phase & 0xF == 8`) is likewise deferred pending vehicle-mount modeling. The **entity loop still emits
-only players** (our `entity_class_of` returns `Unknown` for pool-1 vehicles) with no priority/budget/
-round-robin — porting the priority pairlist + budget + all-class replication is the tracked next step
-(the under-send that leaves the retail joiner's world incomplete; §5.46 flood context). Verified:
-`netsim_two_peer_fanout` (`run_0a_subblock_phase_cycle`) + the shape harness `scripts/net/diff_0a.py`.
+**Reimpl status.** The header phase-counter + sub-block dispatch is ported
+(`netsim::Connection::s2c_phase` = `playerSlot+100566`; `emit_connection_s2c` advances it;
+`build_0a_frame` dispatches on `flags2 & 3`, `libs/netsim/src/connection_fan.cpp`). We cycle the SAFE
+subset `{1 server-status, 0 weapon, 3 gametype}`. Phase 3 now faithfully emits the four authoritative
+`World::subgoals` masks for objective game types and zero bytes otherwise; joiners learn the required
+off-wire game-type gate from S2C `0x08`/`0x7B`. **Sub-block 2 (env) remains DEFERRED
+(D-NET-134)** because our headless host does not yet author `world.env` (env is set only by WAC
+`TOD`/`fogdist` commands, which ASH_I5A drives from its `.env` file, not on the netsim world) —
+emitting it would OVERWRITE the client's correct mission-loaded sky. The passenger block
+(`phase & 0xF == 8`) is likewise deferred pending vehicle-mount modeling. Entity-loop class dispatch,
+priority, aging, budget, and round-robin are implemented and tracked under their own residuals; they are
+no longer part of this phase-counter divergence. Verified by the objective codec/fanout/runtime tests
+named in §5.9, `netsim_two_peer_fanout` (`run_0a_subblock_phase_cycle`), and
+`scripts/net/diff_0a.py`.
 
 **Player-record health byte is PACKED, not raw health (grill 2026-07-01; pack witnessed + ported
 2026-07-02, D-NET-138 FIXED).** The §5.10 player compact record's field-17 byte decodes client-side
@@ -8489,24 +8531,24 @@ net ctests + the byte-parity goldens (`npruntime_golden_lan_join`, `npruntime_go
 @0x505bd0 / NapiNPMsg_0x7B_BuildPayload @0x507740 / CNapiServerConfig_BuildFlags @0x4c4dc0 /
 NetPacket_WriteServerNameAndMapFile @0x505780 / CAdminServer_HandleStatus @0x402e30 /
 CAdminServer_HandleSetCommand @0x405a60]
-**D-NET-133** [reimpl approximation, DOCUMENTED 2026-07-01] **`build_full_entity_spawn` sources four
-S2C 0x18 fields from approximations pending richer world modeling** (wire SHAPE faithful; §5.46):
-(1) `item_type` (itemDef+0x5C) is derived from the handle's pool (0 → person, 1 → vehicle) — the pools
-are type-homogeneous and the 0x0F handler serves only pools 0/1, but the def's own `type` byte is the
-true source once `world::Entity` carries it. (2) The name gate is `e.name` non-empty, not itemDef attrib
-& 0x100000 (`Entity::is_ai_capable` is unpopulated for spawned players — the same gap that leaves the
-0x0D AI-trailer names empty, D-NET-97); observably equal for named players (JOX "Player #1, Multiplayer"
-carries `aidata`). (3) entity+368 (attach parent) / entity+40 (ground entity) are unmodeled → 0xFFFF; the
-ridden vehicle (entity+364) maps from `Entity::mount_target`. (4) mount_handle_8/9, ai_state and the
-+340/+533/+532 tail bytes are 0 (unmodeled). Also: an in-capacity EMPTY slot replies a zeroed type-0
-record — retail serializes the slot's raw memory (stale bytes possible), but with itemDef null the client
-stops at the type gate either way, so the observable effect (destroy + clear) is identical.
-**AMENDED 2026-07-01 (re-grill):** (1) is now provably safe, not just plausible — the client tests the
-wire item_type ONLY against zero (@ 0x433b5a); rebuild behavior keys off the LOCAL itemDef type
-(@ 0x433d6e), so any nonzero byte is observably equivalent. New approximation (5): retail's 0x0F handler
-also gates on the requester having a session player (session+192 non-null, @ 0x5141a8); our dispatch
-replies regardless — over-answering, never under-answering (a pre-admission 0x0F cannot strand a broken
-entity).
+**D-NET-133** [reimpl residual, PARTIALLY FIXED 2026-07-21] **`build_full_entity_spawn` now reads the
+modeled retail sources for several formerly deferred fields** (§5.46): a null `has_item_def` emits zero
+`item_type_id`/`item_type` and an empty name (preserving the client's destroy-and-stop gate); a resolved
+def supplies its raw `item_type`, and `item_attrib & 0x100000` is the exact name gate.
+`primary_occupant` / `ground_target` / `mount_target` source entity+368/+40/+364. Seat discovery now keeps
+gameplay's dense vector while assigning the retail fixed slots (passengers 0..7, control/driver 8,
+UseGun 9), and empty live slots serialize as `0xFFFF`. `pitch`, `ref_num`, and `sub_type` source the other
+modeled pose/tail fields. The rich extractor test pins these values through encode/decode, including
+sparse fixed seats, low-byte, and BAM high-word truncation.
+
+This facet remains broader than a single-byte residual: entity+340 is unmodeled; the builder reads
+`world::Entity::ai_state`, but production AI does not yet mirror the live `AiBrain` current state into it;
+and the non-player entity+36 low-16 flags source is still zero. The player-specific flag and minimap-ID
+approximations remain separately tracked as D-NET-136/137. The 0x0F handler also over-answers when the
+requester has no session player (retail gates on session+192 non-null @ 0x5141a8). An in-capacity EMPTY
+slot deliberately remains a zeroed type-0 record rather than retail's possibly stale slot memory; the
+client-observable destroy+clear effect is identical and the permanent garbage-policy facet remains
+registered under ADR 0022.
 
 **D-NET-134** [reimpl divergence, DOCUMENTED 2026-07-01] **The per-frame S2C 0x0A sub-block phase counter
 cycles a SAFE 3-value subset `{1,0,3}` instead of the original's free-running 4-value counter (§5.47).**
@@ -8514,13 +8556,16 @@ The original `NetPacket_WritePlayerState @0x4ff6b0` writes `flags2 = playerSlot+
 counter), so `flags2 & 3` cycles all four sub-blocks — including **2 (env)** — evenly, and `flags2 & 0xF
 == 8` emits a passenger block every 16th frame. Our `emit_connection_s2c` advances the same counter
 (`netsim::Connection::s2c_phase`) but maps it to `{1 server-status, 0 weapon, 3 gametype}`, omitting env
-and passenger. Reason: env sub-block 2 authoritatively OVERWRITES the client's `Env_FogDistTarget` /
+and passenger. Phase 3 is now faithful within that subset: objective game types carry the four live
+`World::subgoals` masks, with the off-wire gate learned from S2C `0x08`/`0x7B`; other modes
+carry zero bytes. Reason for the remaining omission: env sub-block 2 authoritatively OVERWRITES the
+client's `Env_FogDistTarget` /
 `Env_CurTimeFixed24`, and our headless host does not populate `world.env` (it is set only by WAC
 `TOD`/`fogdist` commands; ASH_I5A drives TOD from its `.env` file, which the netsim world does not load) —
 so emitting it would darken/de-fog the client's correctly mission-loaded sky. Sending nothing leaves the
 client's own env intact (the correct visual). Weapon sub-block 0 is emitted with the golden-witnessed
-co-op steady value (all-zero slots + zero uniform mask) pending a recipient-weapon-slot model; gametype
-sub-block 3 is 0 bytes for a non-objective gametype (faithful). Both env and passenger slot back into the
+co-op steady value (all-zero slots + zero uniform mask) pending a recipient-weapon-slot model. Both env
+and passenger slot back into the
 free counter unchanged once `world.env` authoring and vehicle-mount modeling land. First send is phase 1
 so the load-bearing `C6EAE4` fall-damage tolerance reaches the client on frame 1 (matches the original,
 which increments to 1 before its first write).
@@ -8763,7 +8808,7 @@ Each is a documented message shape whose emit is deferred; `nw_golden_diff_test.
 `kDeferredGaps` now maps every tag to this ID, so the diff PASSES with each deferral named
 and a NEW gap (any tag not on this baseline) still fails. The lone allowed spurious
 (S2C `0x18` full-entity-spawn, which our host emits and the retail reference session did
-not) is the tracked D-NET-133 spawn approximation.
+not) is the tracked D-NET-133 repair-path residual.
 
 **D-NET-162** [reimpl gap, PORTED 2026-07-04 (slice 2; verify v35)] **The AS capture loop
 now runs on our host** — the §5.61 1 Hz block was witnessed round 13 but unported (v33: no

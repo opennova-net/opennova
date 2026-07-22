@@ -150,7 +150,20 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 		return; // lenient: an in-match streaming packet we can't parse is not fatal
 	}
 	for (const ProtocolMessage &m : messages) {
-		if (m.tag == 0x0C) {
+		if (m.tag == 0x08) {
+			// Our initial-state burst carries the same g_GameType in the fixed
+			// session-config block before any live frame. Retail keeps this equal
+			// to the later 0x7B `extra` value.
+			SessionConfig config;
+			if (decode_session_config(m.payload.data(), m.payload.size(), config))
+				game_type_ = static_cast<uint32_t>(config.fields[3]);
+		} else if (m.tag == 0x7B) {
+			// The authoritative off-wire layout hint for later 0x0A phase-3
+			// frames. Every full-player-info record repeats g_GameType in extra.
+			FullPlayerInfo info;
+			if (decode_full_player_info(m.payload.data(), m.payload.size(), info))
+				game_type_ = info.extra;
+		} else if (m.tag == 0x0C) {
 			// S2C 0x0C organic-spawn batch — the self name-match (§5.23). ALSO surface the whole
 			// batch to the NetClientView (below) so every other organic upserts too.
 			OrganicSpawnBatch batch;
@@ -264,7 +277,8 @@ std::vector<uint8_t> JoinerConnection::frame_c2s_uplink(uint16_t handle_H, uint1
 
 void JoinerConnection::seed_in_match(uint32_t session_id, std::string client_scrk,
                                      std::string server_scrk, uint32_t next_seq, uint32_t last_ack,
-                                     uint16_t self_handle, uint16_t self_type) {
+                                     uint16_t self_handle, uint16_t self_type,
+                                     uint32_t game_type) {
 	conn_.server_sk = session_id;            // 0x43 header session_id (= ServerAuth.sk)
 	conn_.client_scrk = std::move(client_scrk); // encrypts our outbound 0x43 (the captured client SCRK)
 	conn_.server_scrk = std::move(server_scrk); // decrypts inbound 0x83 (for the S2C fold half)
@@ -272,6 +286,7 @@ void JoinerConnection::seed_in_match(uint32_t session_id, std::string client_scr
 	self_handle_ = self_handle;
 	has_self_handle_ = true;
 	spawn_.item_type_id = self_type;
+	game_type_ = game_type;
 	phase_ = Phase::InMatch;
 }
 

@@ -94,9 +94,9 @@ const std::map<Key, const char *> kDeferredGaps = {
 // bookkeeping wire-legal but absent from the retail<->retail reference, each with
 // its tracked D-NET reference.
 const std::map<Key, const char *> kAllowedSpurious = {
-    // Our host emits the 0x18 spawn approximation where the retail reference
-    // session did not; the shape is the tracked approximation.
-    {{'S', 0x18}, "D-NET-133"}, // full-entity-spawn (spawn approximations)
+    // Our host emits the 0x18 repair record where this retail reference session
+    // did not; the extra repair-path emission is the tracked residual.
+    {{'S', 0x18}, "D-NET-133"}, // full-entity-spawn (repair-path residual)
 };
 
 std::map<Key, long> histogram(const std::vector<net::PcapDatagram> &pkts) {

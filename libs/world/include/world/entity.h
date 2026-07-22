@@ -80,6 +80,10 @@ constexpr bool is_vehicle_control_seat(SeatType type) {
 // Entity_RequestVehicleAttach @0x4364a0.]
 struct Seat {
     SeatType type = SeatType::None;
+    // Fixed retail mountHandles slot: passenger seats 0..7, control/driver 8,
+    // UseGun 9. Runtime gameplay keeps seats densely packed, so this cannot be
+    // inferred from the vector index. 0xFF means no retail wire slot.
+    uint8_t retail_slot = 0xFF;
     uint8_t bone_index = 0;     // [orig: model[605+slot] seat-bone index]
     uint8_t pose_index = 0;     // `sitexNN`/`ctrlxNN`/`drvrxNN` -> anim_sit + NN
     std::string source_name;     // original seat/userpoint name (`sitex00`, `drvrx01`, `UseGun`)

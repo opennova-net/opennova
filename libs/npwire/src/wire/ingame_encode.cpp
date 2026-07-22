@@ -528,7 +528,13 @@ std::vector<uint8_t> encode_frame_update(const FrameUpdate &fu) {
 		w.u8(fu.env.quake_ticks); w.u8(fu.env.cloud_scroll); w.u8(fu.env.cloud_param2);
 		w.u8(fu.env.overcast); w.u8(fu.env.env_param);
 		break;
-	default: // sub-block 3: the objective gate is wire-invisible → 0 B (matches decode)
+	default: // sub-block 3: 16 B only when the off-wire objective-gametype gate is active
+		if (fu.objective.present) {
+			w.u32(uint32_t(fu.objective.state[0]));
+			w.u32(uint32_t(fu.objective.state[1]));
+			w.u32(uint32_t(fu.objective.state[2]));
+			w.u32(uint32_t(fu.objective.state[3]));
+		}
 		break;
 	}
 

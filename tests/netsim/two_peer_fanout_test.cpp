@@ -431,6 +431,32 @@ bool run_0a_subblock_phase_cycle() {
 	}
 	// The connection's phase counter advanced once per send.
 	if (!expect(conns[0].s2c_phase == 6, "phase counter advanced once per send")) return false;
+
+	// Co-op's shared g_GameType (0x30020) turns phase 3 into a 16-byte
+	// objective block. The gate is not encoded in flags2, so both fan and view
+	// must receive the same session value.
+	world.subgoals.won = 0x00000102u;
+	world.subgoals.lost = 0x00000204u;
+	world.subgoals.show_win = 0x00000408u;
+	world.subgoals.show_lose = 0x00000810u;
+	conns[0].s2c_phase = 2; // next safe-cycle entry is phase 3
+	ns::test::emit_all(world, conns, fallback, 0x30020u);
+	ns::Datagram objective_dg;
+	if (!expect(ch.client_recv(objective_dg), "objective 0x0A frame dequeued")) return false;
+	nw::FrameUpdate objective_fu;
+	if (!expect(nw::decode_frame_update(objective_dg.body.data(), objective_dg.body.size(),
+	                    ns::class_for_type_id, objective_fu,
+	                    /*is_objective_gametype=*/true),
+	            "objective 0x0A frame decodes with the session hint")) return false;
+	if (!expect(objective_fu.flags2 == 3 && objective_fu.objective.present,
+	            "co-op phase 3 carries the required 16-byte objective block")) return false;
+	if (!expect(uint32_t(objective_fu.objective.state[0]) == world.subgoals.won &&
+	                    uint32_t(objective_fu.objective.state[1]) == world.subgoals.lost &&
+	                    uint32_t(objective_fu.objective.state[2]) == world.subgoals.show_win &&
+	                    uint32_t(objective_fu.objective.state[3]) == world.subgoals.show_lose,
+	            "phase 3 carries won/lost/show-win/show-lose in retail order")) return false;
+	if (!expect(objective_fu.local_tail_present,
+	            "objective bytes cannot be mistaken for the recipient health tail")) return false;
 	std::printf("PASS 0a_subblock_phase_cycle\n");
 	return true;
 }
