@@ -325,8 +325,12 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a) {
         case bms::ActionType::KillSingle: cmds.kill_ssn(static_cast<uint16_t>(a.param1)); break;
         case bms::ActionType::VaporizeSingle: cmds.remove_ssn(static_cast<uint16_t>(a.param1)); break;
         case bms::ActionType::KillGroup: cmds.kill_group(a.param1); break;
-        case bms::ActionType::RedirectSingleTo: cmds.set_ssn_waypoint(static_cast<uint16_t>(a.param1), a.param2); break;
-        case bms::ActionType::RedirectGroupTo: cmds.group_to_waypoint(a.param1, a.param2); break;
+        case bms::ActionType::RedirectSingleTo:
+            cmds.set_ssn_waypoint(static_cast<uint16_t>(a.param1), a.param2, a.param3);
+            break;
+        case bms::ActionType::RedirectGroupTo:
+            cmds.group_to_waypoint(a.param1, a.param2, a.param3);
+            break;
         // AI-change family: param1 = target, action_sub_type selects the command, param2/3/4 are
         // its slots. Mutates the AI component in-engine (no effect emitted). [orig: cases 3/0x15
         // -> Entity_HandleAlertCommand / Entity_HandleAlertStateEvent @0x43dee0 -> Entity_ApplyCommand

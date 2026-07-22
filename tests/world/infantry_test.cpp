@@ -1261,6 +1261,9 @@ int main() {
         src.step = 0x2000; // 0.125u/tick: a think window (16 ticks) covers 2u exactly
         ai.root_motion = &src;
         AiEntity *e = soldier(ai);
+        // Preserve this lifecycle test's think phase: 36 * 8 is divisible by 16.
+        e->net_id = 8;
+        e->relmat_id = 4;
         // node0 at 3u holds 4s (248 ticks -> 16 thinks); node1 at 6u ends the path.
         route(ai, e,
               {node(fx(3), 0, fx(1), /*facing=*/0, /*wait=*/248), node(fx(6), 0, fx(1))}, 1);
@@ -1274,6 +1277,8 @@ int main() {
         CHECK(ai.relmat_calls.size() == 2);         // SetBitB + SetBitA at the arrival
         if (!ai.relmat_calls.empty())
             CHECK(ai.relmat_calls[0].channel == 1 && ai.relmat_calls[0].node == 0);
+        CHECK(w.relations.group_visited(4, 1, 0));
+        CHECK(w.relations.single_visited(8, 1, 0));
 
         run_ticks(ai, w, 33, 200); // mid-hold: standing in idle, cooldown draining
         CHECK(e->pos[0] == fx(2));
@@ -1285,6 +1290,8 @@ int main() {
         CHECK(e->slot.f[38] == 1);                  // one-shot end pins the last node
         CHECK(e->inf.anim_state == anim_state::kIdle);
         CHECK(e->inf.wait_cooldown == 20);          // end-of-path cooldown
+        CHECK(w.relations.group_visited(4, 1, 1));
+        CHECK(w.relations.single_visited(8, 1, 1));
 
         const size_t marks = ai.relmat_calls.size();
         run_ticks(ai, w, 320, 1200); // parked: cooldown re-arms, never moves again

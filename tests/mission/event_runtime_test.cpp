@@ -361,6 +361,78 @@ static void test_playpartanim_mutates_brain() {
     CHECK(w.effects.count("unported_action") == 0);
 }
 
+// RedirectGroupTo/RedirectSingleTo carry an authored waypoint node in param3.
+// The two-argument WAC form uses -1/nearest, but BMS must preserve its explicit
+// node through dispatch and the shared EntityCommands seam.
+// [orig: Entity_SetWaypointByTeam @0x43cdb4]
+static void test_redirect_actions_preserve_authored_node() {
+    World w;
+    w.registry.configure_pool(0, 8);
+
+    world::Entity first{};
+    first.net_id = 42;
+    first.group_id = 3;
+    first.alive = true;
+    first.position = {90.0f, 0.0f, 0.0f}; // nearest node is 1
+    const world::EntityHandle first_h = w.registry.spawn(0, first);
+
+    world::Entity second = first;
+    second.net_id = 43;
+    second.position = {10.0f, 0.0f, 0.0f}; // nearest node is 0
+    const world::EntityHandle second_h = w.registry.spawn(0, second);
+
+    world::AiSystem ai;
+    const int first_ai_index = ai.attach(first_h);
+    const int second_ai_index = ai.attach(second_h);
+    world::AiEntity &first_ai = *ai.at(first_ai_index);
+    world::AiEntity &second_ai = *ai.at(second_ai_index);
+    first_ai.pos[0] = 90 << 16;
+    second_ai.pos[0] = 10 << 16;
+    ai.nav.channels.resize(3);
+    ai.nav.channels[2].count = 2;
+    ai.nav.channels[2].entries[0] = 0;
+    ai.nav.channels[2].entries[1] = 1;
+    ai.nav.nodes.resize(2);
+    ai.nav.nodes[0] = world::NavEntry{{1 << 16, 0, 0, 0, 0}};
+    ai.nav.nodes[1] = world::NavEntry{{1 << 16, 100 << 16, 0, 0, 0}};
+    w.ai = &ai;
+
+    bms::Event e = simple_event(bms::EventFlags::None, 0);
+    e.action_count = 2;
+    bms::Action group{};
+    group.action_type = bms::ActionType::RedirectGroupTo;
+    group.param1 = 3;
+    group.param2 = 2;
+    group.param3 = 0; // explicit node 0, despite first being nearer node 1
+    bms::Action single{};
+    single.action_type = bms::ActionType::RedirectSingleTo;
+    single.param1 = 43;
+    single.param2 = 2;
+    single.param3 = 1; // explicit node 1, despite second being nearer node 0
+
+    mission::BmsEventSystem sys;
+    sys.load({e}, {}, {group, single});
+    w.add_system(&sys);
+    w.load_systems();
+    tick_n(w, kPass);
+
+    CHECK(first_ai.brain.f[world::AiBrain::kWpNode] == 0);
+    CHECK(second_ai.brain.f[world::AiBrain::kWpNode] == 1);
+    CHECK(w.registry.get(first_h)->wp_number == 0);
+    CHECK(w.registry.get(second_h)->wp_number == 1);
+
+    // Arrival closes the mission loop: the mover must use the live registry's
+    // script-facing group/SSN keys, not the provisional AiEntity mirrors.
+    first_ai.pos[0] = 0;
+    second_ai.pos[0] = 100 << 16;
+    ai.update_waypoint_movement(first_ai, w);
+    ai.update_waypoint_movement(second_ai, w);
+    CHECK(w.relations.group_visited(3, 2, 0));
+    CHECK(w.relations.group_visited(3, 2, 1));
+    CHECK(w.relations.single_visited(42, 2, 0));
+    CHECK(w.relations.single_visited(43, 2, 1));
+}
+
 // Host-presentation actions surface as presentation-only EffectLog entries; an unmodelled
 // action records as "unported_action" (diagnostic), never as a real effect.
 static void test_presentation_effects() {
@@ -969,6 +1041,7 @@ int main() {
     test_repeat_zero_refires_every_pass();
     test_pre_mission_pass();
     test_playpartanim_mutates_brain();
+    test_redirect_actions_preserve_authored_node();
     test_presentation_effects();
     test_waypoint_track_integration();
     test_subgoal_state();

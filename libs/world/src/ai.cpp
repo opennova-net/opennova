@@ -291,7 +291,7 @@ void h_ground_followwp_tick(AiThinkCtx &ctx) {
     if (has_target)
         ctx.sys->engage_target(*ctx.world, e, tgt); // [orig: rel quads + SetAITarget + pending=17]
     else
-        ctx.sys->update_waypoint_movement(e); // [orig: AI_UpdateWaypointMovement @0x457bd0]
+        ctx.sys->update_waypoint_movement(e, *ctx.world); // [orig: AI_UpdateWaypointMovement @0x457bd0]
 }
 
 // [orig: AI_UpdatePatrolBehavior @0x457d70] state-18 GROUND_EVADE tick. On death: queue a
@@ -479,7 +479,7 @@ void h_ground_combat_tick(AiThinkCtx &ctx) {
         b.f[AiBrain::kWorkPosX] = e.pos[0]; // [orig: brain[129]/[130] = 0 — work-relative;
         b.f[AiBrain::kWorkPosY] = e.pos[1]; //  rebase freezes the absolute work pos instead]
         if ((e.profile.flags100 & 1) != 0) {
-            ctx.sys->update_waypoint_movement(e); // moves while searching
+            ctx.sys->update_waypoint_movement(e, *ctx.world); // moves while searching
         } else if ((e.profile.flags100 & 4) != 0) {
             b.f[AiBrain::kWorkHeading] = e.heading; // hold heading
         } else {
@@ -525,7 +525,7 @@ void h_ground_combat_tick(AiThinkCtx &ctx) {
     if (!processed) return; // continuation volleys ride the solver — stubbed (D-AI-2)
 
     if (b.f[AiBrain::kFireDelay] != 0) { // the engage fire delay: move only
-        if ((e.profile.flags100 & 1) != 0) ctx.sys->update_waypoint_movement(e);
+        if ((e.profile.flags100 & 1) != 0) ctx.sys->update_waypoint_movement(e, *ctx.world);
         return;
     }
 
@@ -548,7 +548,7 @@ void h_ground_combat_tick(AiThinkCtx &ctx) {
                              static_cast<int32_t>(tent->position.z * 65536.0f)};
     const int32_t bearing = bearing_bam(tpos[1] - e.pos[1], tpos[0] - e.pos[0]);
     if ((e.profile.flags100 & 1) != 0) {
-        ctx.sys->update_waypoint_movement(e);
+        ctx.sys->update_waypoint_movement(e, *ctx.world);
     } else if ((e.profile.flags100 & 4) != 0) {
         b.f[AiBrain::kWorkHeading] = bearing + 2147483520; // [orig: +0x7FFFFF80 half-turn]
     } else {
@@ -1568,10 +1568,26 @@ int ai_waypoint_update_target(AiBrain &b, const int32_t pos[3], const NavNodeTab
     return (type == 2) ? 0 : -1; // [orig: type 2 -> 0 (no-op); any other -> -1]
 }
 
+void AiSystem::mark_waypoint_visited(AiEntity &e, World &world, int32_t list, int32_t node) {
+    // The original reads the group key from entity+284 and the single key from
+    // entity+124. In the rebase, the live registry Entity owns those script-facing
+    // identities; fall back to the AiEntity mirrors for isolated motor tests.
+    // [orig: AI_UpdateWaypointMovement @0x457c6d..0x457c88]
+    const Entity *entity = world.registry.get(e.handle);
+    const int32_t group = entity != nullptr
+                                  ? static_cast<int32_t>(entity->group_id)
+                                  : static_cast<int32_t>(static_cast<int16_t>(e.relmat_id));
+    const int32_t ssn = entity != nullptr ? static_cast<int32_t>(entity->net_id) : e.net_id;
+
+    relmat_calls.push_back({1, group, list, node}); // SetBitB first
+    relmat_calls.push_back({0, ssn, list, node});   // SetBitA second
+    world.relations.mark_waypoint_visited(ssn, group, list, node);
+}
+
 // [orig: AI_UpdateWaypointMovement @0x457bd0] advance along the path; write the working
 // target transform + out-speed. The return value is unused by the caller; we mirror the
 // original's "freeze on path end / no waypoint" branches faithfully.
-int AiSystem::update_waypoint_movement(AiEntity &e) {
+int AiSystem::update_waypoint_movement(AiEntity &e, World &world) {
     AiBrain &b = e.brain;
     int32_t moveSpeed = (b.f[AiBrain::kCurState] == 16) ? b.f[AiBrain::kSpeedB]
                                                         : b.f[AiBrain::kSpeedA];
@@ -1593,9 +1609,7 @@ int AiSystem::update_waypoint_movement(AiEntity &e) {
         int32_t kf = b.f[AiBrain::kWpNode];           // aiState[15] (pre-increment)
         b.f[AiBrain::kStoredKeyTime] = animTime;      // aiState[35]
         b.f[AiBrain::kAnimFlag] = 0;                  // aiState[32]
-        // [orig: SetBitB key = movsx word [entity+284] @0x457c6d -> sign-extend the u16]
-        relmat_calls.push_back({1, static_cast<int32_t>(static_cast<int16_t>(e.relmat_id)), ch, kf});
-        relmat_calls.push_back({0, e.net_id, ch, kf}); // SetBitA(entity+124) is a full dword load
+        mark_waypoint_visited(e, world, ch, kf);
         ++b.f[AiBrain::kWpNode];                      // ++aiState[15]
         const NavChannel *nc = nav.channel(ch);
         int32_t numKeyframes = nc ? nc->count : 0;    // dword_A71DD4[34*ch]

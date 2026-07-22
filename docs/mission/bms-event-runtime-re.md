@@ -239,10 +239,13 @@ Dispositions after the 2026-07-05 grill (§3a carries the witnesses):
   cat-1 evaluator map + the cat-2 matrix/visited mirror, the 62-tick live
   recount inside the logic tick + the initial recount after the pre pass, the
   ChangeGroupAI alert stamps, load-time zeroing, and the damage-site SHOT
-  writes in round_sim. **Residuals (WITNESSED-READY-DEFERRED):** the remaining
-  write-sites — AI target-acquisition SEES quads and fire-time SEES+TARGETED
-  (our fire path carries no aim-target yet) ride the combat pass, the motor's
-  visited marks ride the D-INF-2 channel work; cat-1 sub 11 needs the
+  writes in round_sim. **Waypoint arrivals FIXED 2026-07-22:** both the infantry
+  channel mover and the shared SM/vehicle route mover now apply the witnessed
+  SetBitB(group) then SetBitA(SSN) pair to those live visited matrices, so
+  GroupAtWaypoint/SingleAtWaypoint can advance missions from actual NPC motion.
+  **Residuals (WITNESSED-READY-DEFERRED):** the remaining write-sites — AI
+  target-acquisition SEES quads and fire-time SEES+TARGETED ride the combat
+  pass; cat-1 sub 11 needs the
   held-object link (entity +616); the cat-2 alert/count subs (3/6/9/12/14) and
   the 42-45 distance/LOS family stay unwitnessed. Cat 7's input/view family
   rides its host subsystems. Cat 5 "SecondTimeThrough" = the raw session load-parity word

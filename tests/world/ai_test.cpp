@@ -1019,6 +1019,7 @@ int main() {
 
     // ---- path follower: arrival advances the node + records relmat + outputs ----
     {
+        World w;
         AiSystem sys;
         sys.nav.channels.resize(2);
         sys.nav.channels[1].count = 3;
@@ -1030,8 +1031,8 @@ int main() {
         sys.nav.nodes[10] = NavEntry{{1000, 500, 600, 0, 0}}; // payload0=1000 (arrival radius)
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
-        e.relmat_id = 0x1234;
-        e.net_id = 0x9999;
+        e.relmat_id = 4;
+        e.net_id = 9;
         e.brain.f[AiBrain::kCurState] = kAiGroundFollowWp; // 16 -> moveSpeed = kSpeedB
         e.brain.f[AiBrain::kWpType] = 1;
         e.brain.f[AiBrain::kWpChannel] = 1;
@@ -1039,17 +1040,19 @@ int main() {
         e.brain.f[AiBrain::kSpeedB] = 20;
         e.brain.f[AiBrain::kStep] = 64;
 
-        sys.update_waypoint_movement(e);
+        sys.update_waypoint_movement(e, w);
 
         // dist=600 (|dz|=600 base) < nodeVal=1000 -> advance.
         CHECK(e.brain.f[AiBrain::kWpNode] == 1);
         CHECK(e.brain.f[AiBrain::kStoredKeyTime] == 1000);
         CHECK(sys.relmat_calls.size() == 2);
         CHECK(sys.relmat_calls[0].which == 1);                    // SetBitB first
-        CHECK(sys.relmat_calls[0].key == 0x1234);                 // relmat_id
+        CHECK(sys.relmat_calls[0].key == 4);                      // group / SetBitB key
         CHECK(sys.relmat_calls[1].which == 0);                    // SetBitA second
-        CHECK(sys.relmat_calls[1].key == 0x9999);                 // net_id
+        CHECK(sys.relmat_calls[1].key == 9);                      // SSN / SetBitA key
         CHECK(sys.relmat_calls[0].channel == 1 && sys.relmat_calls[0].node == 0);
+        CHECK(w.relations.group_visited(4, 1, 0));
+        CHECK(w.relations.single_visited(9, 1, 0));
         // working transform from the resolved node; out-speed halved (timeDelta<step*speed).
         CHECK(e.brain.f[AiBrain::kWorkPosX] == 500);
         CHECK(e.brain.f[AiBrain::kWorkPosY] == 600);
@@ -1059,6 +1062,7 @@ int main() {
     // ---- path follower: loop-wrap vs one-shot terminate at path end ----
     {
         for (int loopflag = 0; loopflag <= 1; ++loopflag) {
+            World w;
             AiSystem sys;
             sys.nav.channels.resize(2);
             sys.nav.channels[1].count = 3;
@@ -1075,7 +1079,7 @@ int main() {
             e.brain.f[AiBrain::kSpeedB] = 20;
             e.brain.f[AiBrain::kStep] = 64;
 
-            sys.update_waypoint_movement(e);
+            sys.update_waypoint_movement(e, w);
 
             if (loopflag & 1) {
                 // one-shot: terminate, clear waypoint type, clamp node, freeze.
@@ -1135,6 +1139,7 @@ int main() {
 
     // ---- path follower: state-17 uses 16*speed threshold + kSpeedA; un-halved output ----
     {
+        World w;
         AiSystem sys;
         sys.nav.channels.resize(2);
         sys.nav.channels[1].count = 3;
@@ -1150,7 +1155,7 @@ int main() {
         e.brain.f[AiBrain::kSpeedA] = 20;
         e.brain.f[AiBrain::kSpeedB] = 999; // must NOT be used in state 17
         e.brain.f[AiBrain::kStep] = 64;
-        sys.update_waypoint_movement(e);
+        sys.update_waypoint_movement(e, w);
         // dist=2000 >= nodeVal=1000 -> no advance. timeDelta=1000. state17 threshold 16*20=320;
         // 1000 >= 320 -> NOT halved -> speed stays 20 (proves kSpeedA source + 16x threshold).
         CHECK(e.brain.f[AiBrain::kOutSpeed] == 20);
@@ -1159,6 +1164,7 @@ int main() {
 
     // ---- contrast: state-16 with the SAME timeDelta halves (threshold speed*step=1280) ----
     {
+        World w;
         AiSystem sys;
         sys.nav.channels.resize(2);
         sys.nav.channels[1].count = 3;
@@ -1172,7 +1178,7 @@ int main() {
         e.brain.f[AiBrain::kWpChannel] = 1;
         e.brain.f[AiBrain::kSpeedB] = 20;
         e.brain.f[AiBrain::kStep] = 64;
-        sys.update_waypoint_movement(e);
+        sys.update_waypoint_movement(e, w);
         // state16 threshold 20*64=1280; timeDelta 1000 < 1280 -> halve -> 10.
         CHECK(e.brain.f[AiBrain::kOutSpeed] == 10);
     }
@@ -1193,6 +1199,7 @@ int main() {
 
     // ---- path follower: unresolvable waypoint -> freeze at current transform ----
     {
+        World w;
         AiSystem sys;
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
@@ -1202,7 +1209,7 @@ int main() {
         e.brain.f[AiBrain::kWpType] = 1;
         e.brain.f[AiBrain::kWpChannel] = 0; // navMeshId 0 -> solver returns -1 -> freeze
         e.brain.f[AiBrain::kSpeedB] = 20;
-        sys.update_waypoint_movement(e);
+        sys.update_waypoint_movement(e, w);
         CHECK(e.brain.f[AiBrain::kWorkPosX] == 11);
         CHECK(e.brain.f[AiBrain::kWorkPosY] == 22);
         CHECK(e.brain.f[AiBrain::kWorkPosZ] == 33);

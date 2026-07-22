@@ -138,7 +138,6 @@ int32_t bearing_to(int32_t dx, int32_t dy) {
 // Navigation think (every 16 ticks, authority). [orig: 0x4b9910 dump 1293-1540]
 // ----------------------------------------------------------------------------
 void AiSystem::infantry_think(AiEntity &e, World &world) {
-    (void)world;
     InfantryState &inf = e.inf;
     AiSlot &slot = e.slot;
 
@@ -201,8 +200,7 @@ void AiSystem::infantry_think(AiEntity &e, World &world) {
     }
 
     // Arrived. [orig: dump 1464-1532]
-    relmat_calls.push_back({1, static_cast<int32_t>(static_cast<int16_t>(e.relmat_id)), ch, node});
-    relmat_calls.push_back({0, e.net_id, ch, node});
+    mark_waypoint_visited(e, world, ch, node);
 
     bool hold_here = false;
     if (mk->wait_ticks != 0) {

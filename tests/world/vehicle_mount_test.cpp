@@ -768,6 +768,13 @@ void test_redirect_and_speed_commands() {
     // Entry 1 (x=150) is nearest to x=100 — distinct from entry 0, which is also
     // the scan's fallback initializer, so a broken nearest-node scan fails here.
     CHECK(b.f[AiBrain::kWpNode] == 1);
+    CHECK(r.veh().wp_number == 1);
+
+    // BMS RedirectGroupTo carries an explicit node in param3. It must not be
+    // replaced by the nearest-node sentinel used by the two-argument WAC form.
+    CHECK(r.w.commands.group_to_waypoint(3, 2, 0) == 1);
+    CHECK(b.f[AiBrain::kWpNode] == 0);
+    CHECK(r.veh().wp_number == 0);
 
     // PatrolSpeed 40 -> kSpeedB = trunc(40 * 65536/225) = 11650. CombatSpeed -> kSpeedA.
     CHECK(r.w.commands.apply_group_ai_command(3, 30, 40, 0, 0) == 1);

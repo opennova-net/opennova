@@ -473,7 +473,8 @@ int32_t calc_average_ground_height(const terrain::TerrainHeightField &field,
                                    const GroundClearance &clearance);
 
 // A recorded RelationMatrix_SetBitA/B side effect (net-replication bookkeeping the
-// mover emits per node advance; the actual matrix is deferred to the net layer).
+// mover emits per node advance). The live TriggerRelations matrices are updated alongside
+// this diagnostic trace by the route-arrival seam.
 struct RelMatCall {
     int which;     // 0 = SetBitA (net_id key), 1 = SetBitB (relmat_id key)
     int32_t key;   // entity+124 (A) or entity+284 (B)
@@ -588,7 +589,7 @@ public:
     int32_t fall_damage_scale = 0;
     int unported_calls = 0;   // coverage counter for not_yet_ported handlers
     int find_target_calls = 0;// coverage: target-acquisition invocations
-    std::vector<RelMatCall> relmat_calls; // recorded mover side effects (net layer = P2+)
+    std::vector<RelMatCall> relmat_calls; // diagnostic trace of the applied mover side effects
 
     // ---- P2: GROUND combat + targeting ----
     std::vector<RelOpCall> rel_ops;        // recorded engagement relation-matrix ops (trace;
@@ -676,8 +677,9 @@ public:
 
     // [orig: AI_UpdateWaypointMovement @0x457bd0] advance the brain along its path via
     // the nav table; writes the working target transform (kWorkPos*/kWorkHeading) and
-    // out-speed (kOutSpeed). Records the per-advance relation-matrix side effects.
-    int update_waypoint_movement(AiEntity &e);
+    // out-speed (kOutSpeed). Applies the per-advance visited marks that BMS
+    // SingleAtWaypoint/GroupAtWaypoint consume, and retains a diagnostic trace.
+    int update_waypoint_movement(AiEntity &e, World &world);
 
     // Apply the mover output to the entity transform (turn to kWorkHeading, advance pos toward
     // the kWorkPos* target by kOutSpeed * loco_scale, clamped to not overshoot). See loco_scale.
@@ -836,6 +838,10 @@ public:
     const StateRow &row(int32_t state) const;
 
 private:
+    // Apply the paired SetBitB(group)/SetBitA(SSN) waypoint-arrival writes to the
+    // shared trigger relations, retaining relmat_calls as a diagnostic trace.
+    // [orig: AI_UpdateWaypointMovement @0x457c6d..0x457c88]
+    void mark_waypoint_visited(AiEntity &e, World &world, int32_t list, int32_t node);
     void clear_handle_index();
     void rebuild_handle_index();
 
