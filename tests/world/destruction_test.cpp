@@ -59,6 +59,7 @@ ItemDeathTraits barrel_traits() {
     t.armor_impact = 5;
     t.armor_blast = 10;
     t.has_husk = true;
+    t.husk_model_loaded = true;
     t.husk_sub_part_count = 4;
     t.husk_sub_part_types[1] = 3; // CHUNK_M
     t.husk_sub_part_types[2] = 3;
@@ -1169,6 +1170,7 @@ void test_death_kick_field() {
     ItemDeathTraits no_husk = barrel_traits();
     no_husk.unit_type = 5;
     no_husk.has_husk = false;
+    no_husk.husk_model_loaded = false;
     Entity *no_husk_building = kill(702, no_husk);
     CHECK(no_husk_building->veh.slide_z == 0);
     CHECK(no_husk_building->death_motion == DeathMotionMode::None);
@@ -1244,6 +1246,47 @@ void test_round_destroys_item() {
     CHECK(husk_evented);
 }
 
+// An authored husk name is not enough to enter the building callback. Retail
+// gates the collapse body on the live huskFinal/husk model pointer after asset
+// resolution; a missing/corrupt model still receives the table's death flags
+// but no pieces, Static motion, or collapse sound
+// [orig: Entity_ProcessBuildingDeath @0x49442c].
+void test_building_death_requires_loaded_husk_model() {
+    auto w_heap = std::make_unique<World>();
+    World &w = *w_heap;
+    w.registry.configure_pool(2, 2);
+
+    ItemDeathTraits traits = barrel_traits();
+    traits.unit_type = 5;
+    traits.has_husk = true;          // the def authors a husk name
+    traits.husk_model_loaded = false; // but asset resolution found no live model
+    traits.husk_section_count = 0;   // asset resolution found no live model
+    traits.husk_sub_part_count = 0;
+    w.item_death_traits.set(990, traits);
+
+    Entity seed;
+    seed.kind = EntityKind::Building;
+    seed.item_id = 990;
+    seed.health = 0;
+    const EntityHandle h = w.registry.spawn(2, seed);
+    Entity *building = w.registry.get(h);
+    CHECK(building != nullptr);
+
+    entity_update_death_transforms(w, *building, false);
+
+    CHECK((building->engine_flags & (kEntityFlagDead | kEntityFlagHusk)) ==
+          (kEntityFlagDead | kEntityFlagHusk));
+    CHECK(building->death_motion == DeathMotionMode::None);
+    size_t active_pieces = 0;
+    for (const DeathPiece &piece : w.death_pieces.pieces)
+        if (piece.active) ++active_pieces;
+    CHECK(active_pieces == 0);
+    bool collapse_sound = false;
+    for (const DestructionSoundEvent &sound : w.destruction.sounds)
+        if (sound.sound == "EXPLO_SHIP_TINY") collapse_sound = true;
+    CHECK(!collapse_sound);
+}
+
 int main() {
     test_explosion_damage_gates();
     test_explosion_los_excludes_victim_hull();
@@ -1269,6 +1312,7 @@ int main() {
     test_death_dispatch_flag_routing();
     test_death_kick_field();
     test_round_destroys_item();
+    test_building_death_requires_loaded_husk_model();
     if (failures == 0) std::printf("destruction_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }
