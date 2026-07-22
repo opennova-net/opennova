@@ -4004,8 +4004,9 @@ successful live model resolution, so missing/corrupt asset behavior remains
 D-ITEM-20. For unitType 3 it spawns the pieces and installs an explicit
 `PiecePhysics` mode, but deliberately does not substitute generic falling: the
 specialized `DeathPiece_PhysicsUpdate` body remains D-ITEM-18. UnitType 11's
-common pieces and fallback KZ path run, but its `Effect_ShockWaterBrdg` at each
-"DEAD" user point is D-ITEM-19 (per-"KZ" blasts remain D-ITEM-5).
+common pieces and per-`KZ` blast path run, but its `Effect_ShockWaterBrdg` at
+each "DEAD" user point is D-ITEM-19 (the `KZ` positions were fixed under
+D-ITEM-5 on 2026-07-20).
 
 `Entity_SpawnDeathPieces @ 0x493400`: gate = husk model present (huskFinal
 +0x38 else husk +0x34), not already husked, not fully underwater. The
@@ -4066,7 +4067,21 @@ else the `particledeath` pair (+0x412 handle / +0x414 "Dead" bone mask);
 always the fire family (+0x47A, the "Fire" bones) and the third family
 (+0x4AE, "Other"); and queues a `g_ammo_kz_OrganicBlast` blast (r=5.0) at
 every husk "KZ" user point via `Entity_QueueKzBlastAtUserPoints @ 0x4eabf0` —
-THE death explosion. `Entity_UpdateDeadWreckEffects @ 0x493140` (renamed from
+THE death explosion.
+
+Port note (2026-07-20): `resolve_collision_instances` now caches every exact,
+case-insensitive `KZ` point from the authored first-stage `huskModel`; a
+final-only definition does not borrow the `huskFinal` piece source and keeps
+the no-point fallback. It converts IR
+`(-sourceY, sourceZ, sourceX)` to destruction's mission-local
+`(sourceX, sourceY, sourceZ)`, and stamps `ItemDeathTraits::kz_points`.
+`emit_death_sounds_and_effects` already applies the full authored placement
+Euler transform and queues radius 5.0 per point; an empty bank keeps the
+witnessed entity-origin `kz ?: boundRadius` fallback. The Godot integration
+test pins first-husk selection, final-only exclusion, multiplicity, and axes; the native
+`destruction` test pins the downstream Euler transform and radius.
+
+`Entity_UpdateDeadWreckEffects @ 0x493140` (renamed from
 the `Entity_UpdateMuzzleFlashAndEffects` misnomer) follows the husk bones per
 tick, rolls the fire crackle (PRNG < 16/65536 = `g_fx_BoatExpSec` +
 `g_snd_EXPLO_SHIP_SM_b`), and steams a bone out when it dips underwater
@@ -4158,7 +4173,7 @@ the FFI structs.
 | D-ITEM-2 | `husk_swap_at`/`_sec` parsed for format fidelity only — the runtime consumer is unwitnessed (no +0x19C/+0x1A0 reader found this session) | fields written `@ 0x49f1ce-0x49f2c2` | no behavior port yet; find the reader (a progressive damage-stage swap is the hypothesis) |
 | D-ITEM-3 | The mid-life breakable-section sweep (a blast marks collision sections with byte flag & 2 into sectionMask) is a cited stub — our CollisionModel carries no per-section flag byte | `@ 0x4e6c5e-0x4e6e6b` | partial visual damage (windows/panels before death) missing; needs the section-flag plumb in the collision build |
 | D-ITEM-4 | Death pieces present only as their row's TRAIL effect following the sim piece: the single-section husk mesh, its render spin, and the explosion glow light are absent; one world-local PRNG stream stands in for the three retail streams | pieces render one husk section w/ spin `@ 0x493400`; `LightPool_SpawnGlowEffect @ 0x49351a`; PRNG_Next16/_B/_C | the debris trajectory is pinned, but the visible chunks do not match retail; mesh pieces need section-ordinal render instancing. `CollisionSection::parent_part_index` preserves COBJ hierarchy metadata and is not that selector |
-| D-ITEM-5 | The kz death blast queues ONCE at the entity with r = def kz else boundRadius; the per-"KZ"-user-point multi-blast (r=5.0 each) is unported | `Entity_QueueKzBlastAtUserPoints @ 0x4eabf0` | single-blast radii match the def author's kz; multi-point husks (big ships/buildings) under-blast — feed `ItemDeathTraits.kz_points` from the husk model user points; wreck-bank anchors are tracked separately by D-ITEM-15 |
+| D-ITEM-5 | **FIXED 2026-07-20:** the active first-stage husk's exact case-insensitive "KZ" user points feed `ItemDeathTraits::kz_points`; each queues r=5.0 after full authored placement rotation, while a model with no match falls back once at the entity with r = def kz else boundRadius | `Entity_QueueKzBlastAtUserPoints @ 0x4eabf0` | `nova_simulation_test` pins first-husk selection, final-only exclusion, all-match multiplicity, and IR→mission axes; `destruction` pins full-Euler placement and the radius-5 queue. Wreck-bank anchors remain separately D-ITEM-15 |
 | D-ITEM-6 | Blast/damage stubs: organic knockback (`Entity_ApplyCollisionForce`), the victim-attached burn emitter + hit sound (the ammo +72/+76 pair — field source unwitnessed), medic (type 3) + vehicle-ram (type 1) queue legs, the occupant damage scale, `g_destroy_buildings` (an MP rules seam), and the S2C 0x26/0x2F/0x21 wire emits | `@ 0x4eb1d2 / @ 0x4eb292 / @ 0x4eadc6 / @ 0x4e5a50 / @ 0x4e6860`; net-re §5.60 | each cited at its port site; glass presentation is split into D-ITEM-17 and the wire legs stage with the npruntime death broadcasts |
 | D-ITEM-7 | Which items take the destructible death path is routed by KIND (non-organic, non-AI-capable) + unit_type; retail routes via the def class resolve (`EntityDef_LoadModelsAndCallbacks @ 0x439f50` callback columns, unwitnessed per class) | deathCallback (+0x1C8) authored per def class | same observable for shipped JO data (destructibles author no ai/move function); witness the class-to-callback table to close |
 | D-ITEM-8 | The crane/water-tower special death (the "scrane" pool walk + the double kz queue `@ 0x43fc70`) and `Entity_ProcessCraneDestruction @ 0x43eee0` are unported; the destructible 992-tick spawnPhase re-notify and the ambient phase-0 shot leg (`Entity_SpawnRegionalEffect @ 0x408290`) are unported | as cited | special-cased content (shipyard cranes, water towers); the ambient shot leg is a separate feature (items firing scheduled time-of-day sounds) |
@@ -4172,7 +4187,7 @@ the FFI structs.
 | D-ITEM-16 | Section debris is six randomized radial `TreeWoodExp` spawns at the entity; the presenter never walks collision faces, samples triangle centroids at `(scale<<8)/150`, transforms them by section bones, or switches material 17 to `TreeFoliageExp` | `Entity_SpawnSectionDebris @ 0x43f580` | the burst is readable but its count, positions, directions, and material family are presentation stand-ins rather than triangle-faithful |
 | D-ITEM-17 | The sim records a building glass-break event and the presenter increments a diagnostic count only; it does not resolve `GLASS1..GLASS4` model user points, range-filter them against the blast, or spawn the retail shatter effects | `@ 0x4eb814-0x4eb85d` | blast-adjacent windows do not visibly shatter; a statistic is not a presentation implementation |
 | D-ITEM-18 | UnitType 3 spawns normal section pieces and installs an explicit `PiecePhysics` mode, but the shared production pass deliberately skips that mode rather than substituting Generic. Retail runs the specialized main-entity `DeathPiece_PhysicsUpdate` callback | `DeathPiece_PhysicsUpdate @ 0x48f500`: distinct air/water lateral motion, slope force, dual-blast, and landing legs | the unitType-3 husk does not receive its retail main-entity motion/presentation; the explicit sentinel prevents a falsely "matching" generic settle |
-| D-ITEM-19 | UnitType 11 runs pieces and the common fallback KZ path, but does not resolve each husk `DEAD` user point or spawn `Effect_ShockWaterBrdg` there at water height | `Entity_SpawnDeathEffectsAtBones @ 0x4944c0` | destroyed bridges lack their authored per-point water-shock presentation; per-`KZ` blast positions are separately D-ITEM-5 |
+| D-ITEM-19 | UnitType 11 runs pieces and the common per-`KZ` path, but does not resolve each husk `DEAD` user point or spawn `Effect_ShockWaterBrdg` there at water height | `Entity_SpawnDeathEffectsAtBones @ 0x4944c0` | destroyed bridges lack their authored per-point water-shock presentation; per-`KZ` blast positions were fixed separately by D-ITEM-5 |
 | D-ITEM-20 | Building Static/collapse dispatch gates on the authored presence of husk names (`ItemDeathTraits::has_husk`), while retail gates on a successfully loaded live huskFinal/husk model pointer | `Entity_ProcessBuildingDeath @ 0x49442c`; the pointer gate wraps only the callback body | valid shipped assets behave alike, but a missing/corrupt husk asset can still receive collapse sound and Static motion in the port where retail would leave the callback body untouched |
 
 ### 24.8 IDB write-backs (2026-07-17, saved)
