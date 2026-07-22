@@ -718,7 +718,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 |---|---|---|---|---|---|
 | Net | 9 | 1 | 10 | 20 | 1 |
 | Environment | 0 | 0 | 3 | 3 | 4 |
-| World / AI + events | 54 | 5 | 5 | 64 | 23 |
+| World / AI + events | 53 | 5 | 5 | 63 | 24 |
 | UI (menu/ctrl/sound/playerinfo/HUD) | 14 | 1 | 6 | 21 | 7 |
 | Mission `.mis` | 0 | 2 | 1 | 3 | 0 |
 | LW `.3di` | 0 | 2 | 1 | 3 | 0 |
@@ -733,7 +733,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Render — materials/state | 0 | 0 | 1 | 1 | 1 |
 | Render — draw order | 2 | 0 | 1 | 3 | 3 |
 | Render — lighting | 4 | 0 | 2 | 6 | 0 |
-| **Total** | **91** | **14** | **31** | **136** | 81 |
+| **Total** | **90** | **14** | **30** | **134** | 83 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-INF-20, D-NET-136, D-NET-64.
 
