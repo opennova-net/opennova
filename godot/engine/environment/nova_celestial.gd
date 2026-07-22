@@ -161,7 +161,7 @@ func _apply_material_override(model: Node3D, base_material: ShaderMaterial) -> A
 			# through blend_mix exposes a dark quad at the horizon. Preserve
 			# the source material's blend classification while replacing only
 			# the celestial placement/tint shader logic.
-			if _source_material_uses_additive(src):
+			if source_material_uses_additive(src):
 				material.shader = CelestialAdditiveShader
 			if src is ShaderMaterial:
 				var diffuse = (src as ShaderMaterial).get_shader_parameter("u_diffuse")
@@ -178,7 +178,9 @@ func _apply_material_override(model: Node3D, base_material: ShaderMaterial) -> A
 	return installed
 
 
-static func _source_material_uses_additive(source: Material) -> bool:
+## Whether a source surface uses additive blending that the celestial
+## replacement material must preserve.
+static func source_material_uses_additive(source: Material) -> bool:
 	if not (source is ShaderMaterial):
 		return false
 	var shader := (source as ShaderMaterial).shader

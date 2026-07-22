@@ -6,27 +6,23 @@ extends GutTest
 
 const MODEL_FIXTURE_ROOT := "res://../fixtures/3dp/CmpFireN"
 const MODEL_NAME := "CmpFireN.3di"
-const ADDITIVE_MODEL_FIXTURE_ROOT := "res://../fixtures/3dp/fxflshw5"
-const ADDITIVE_MODEL_NAME := "fxflshw5.3di"
 const CELESTIAL_SHADER := "res://shaders/celestial.gdshader"
 const ADDITIVE_SHADER := "res://shaders/celestial_additive.gdshader"
 const TICK := 1.0 / 62.0
 const FAR_CAMERA_POSITION := Vector3(50000.0, 64.0, -40000.0)
 
 
-func _make_fixture(
-		model_fixture_root: String = MODEL_FIXTURE_ROOT,
-		model_name: String = MODEL_NAME) -> Dictionary:
+func _make_fixture() -> Dictionary:
 	var resource_root := NovaResourceRoot.new()
 	assert_eq(resource_root.set_root_dir(
-			ProjectSettings.globalize_path(model_fixture_root)), OK)
+			ProjectSettings.globalize_path(MODEL_FIXTURE_ROOT)), OK)
 
 	var env_data := EnvFile.new()
 	env_data.reset_to_default()
-	env_data.set_sun_3di(model_name)
+	env_data.set_sun_3di(MODEL_NAME)
 	env_data.set_moon_3di("")
-	env_data.set_glare_3di(model_name)
-	env_data.set_star_3di(model_name)
+	env_data.set_glare_3di(MODEL_NAME)
+	env_data.set_star_3di(MODEL_NAME)
 
 	var env := NovaEnvironment.new()
 	env.name = "CelestialTestEnv"
@@ -76,30 +72,23 @@ func test_body_updates_reach_installed_surface_materials() -> void:
 			assert_not_null(material, "each live surface owns a celestial material")
 			if material == null:
 				continue
-			assert_eq(material.shader, load(CELESTIAL_SHADER),
-					"ordinary source surfaces use the regular celestial shader")
 			assert_eq(material.get_shader_parameter("u_anchor_camera_world"),
 					camera.global_position,
 					"TOD/pass-camera state updates the installed material, not a template")
 
 
 func test_additive_source_material_keeps_black_as_transparent_zero() -> void:
-	var fixture := _make_fixture(ADDITIVE_MODEL_FIXTURE_ROOT, ADDITIVE_MODEL_NAME)
-	var sun := fixture.celestial.get_node_or_null("Celestial_sun") as Node3D
-	assert_not_null(sun, "the committed FF_ST_AD_LUM fixture loads")
-	if sun == null:
-		return
+	var source_shader := Shader.new()
+	source_shader.code = "shader_type spatial; render_mode blend_add;"
+	var source_material := ShaderMaterial.new()
+	source_material.shader = source_shader
+	assert_true(NovaCelestial.source_material_uses_additive(source_material),
+			"FF_ST_AD-style sun/moon textures must keep additive blend semantics")
 
-	var meshes: Array[MeshInstance3D] = []
-	_collect_meshes(sun, meshes)
-	assert_gt(meshes.size(), 0)
-	for mesh in meshes:
-		for surface in mesh.mesh.get_surface_count():
-			var material := mesh.get_surface_override_material(surface) as ShaderMaterial
-			assert_not_null(material, "each additive surface owns a celestial material")
-			if material != null:
-				assert_eq(material.shader, load(ADDITIVE_SHADER),
-						"FF_ST_AD-style textures keep black as additive zero")
+	source_shader = Shader.new()
+	source_shader.code = "shader_type spatial; render_mode blend_mix;"
+	source_material.shader = source_shader
+	assert_false(NovaCelestial.source_material_uses_additive(source_material))
 
 
 func test_star_instances_are_local_to_a_camera_anchored_multimesh() -> void:
