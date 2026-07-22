@@ -216,6 +216,35 @@ func test_accept_emits_avatar_chosen() -> void:
 	assert_eq(int(profile.get("nationality", -1)), 0, "the committed profile carries the selection")
 
 
+func test_voice_preview_requests_selected_avatar_voice() -> void:
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/avatars")), OK,
+		"the avatar fixture directory mounts as a retail resource root")
+
+	var doc := NovaMnuDocument.new()
+	assert_eq(doc.load_from_bytes(
+			FileAccess.get_file_as_bytes("res://../fixtures/mnu/jo_player.mnu")), OK,
+		"the retail player menu fixture loads")
+	var menu := NovaMnuMenu.new()
+	menu.build_on_ready = false
+	add_child_autofree(menu)
+	menu.set_edit_mode(false)
+	menu.set_resource_root(root)
+	menu.menu = doc
+
+	var host := PlayerInfoMenuHost.new()
+	host.on_menu_built(menu, "player.mnu", "PLAYER_INFO", root)
+	watch_signals(menu)
+	var preview := menu.find_child("TESTPLAYERVOICE", true, false) as BaseButton
+	assert_not_null(preview, "the retail PLAYER_INFO screen builds its voice-preview button")
+	preview.pressed.emit()
+
+	# The fixture's initially selected US/SEAL head carries voice 1. Retail formats
+	# that avatar-derived fallback as VOICE_1 and plays it from the dedicated menu.lwf
+	# bank. [orig: PlayerInfo_PreviewVoice @ 0x55ff70]
+	assert_signal_emitted_with_parameters(menu, "sound_requested", ["menu.lwf", "VOICE_1"])
+
+
 # --- Loadout (PRIMARY/SECONDARY/ACCESSORY) ------------------------------------
 
 const WEAPON_FIXTURE := "res://../fixtures/def/weapon.def"
