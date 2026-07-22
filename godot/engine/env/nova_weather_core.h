@@ -13,8 +13,10 @@ namespace godot {
 
 // The per-tick weather state cluster of [orig: Environment_UpdateWeatherTick
 // @ 0x57e9b0]: the wind-sway oscillator, both lightning flash sequencers,
-// rain fade, and the four color blocks the host smooths (ground/fill,
-// directional light, fog, sky ambient). All math lives in libs/env
+// rain fade, and the fourteen color blocks with live host consumers (ground/
+// fill, directional light, fog, sky ambient, skyfog, ceiling/cloud/floor, and
+// the six dome ramps). All
+// math lives in libs/env
 // (env/env_render.h); this binding owns state and the witnessed
 // order-of-operations only. NovaWeather (the node) drives one tick() per
 // 62 Hz frame and reads the results back. RE record: docs/env/env-tod-re.md.
@@ -29,6 +31,7 @@ private:
 	opennova::env::WeatherColorBlock sun_block;  // directional light (never flashed)
 	opennova::env::WeatherColorBlock fog_block;
 	opennova::env::WeatherColorBlock sky_block;
+	opennova::env::SkyWeatherColorBlocks sky_color_blocks;
 	// The iris auto-exposure chain (env #17): modulator-2 -> modulator ->
 	// every block, ticked ahead of the color blocks in the witnessed order
 	// [orig: Environment_UpdateWeatherTick block sequence @ 0x57ef97..;
@@ -58,14 +61,26 @@ protected:
 	static void _bind_methods();
 
 public:
-	// Snaps all four block states (and their packed colors) to the given
-	// colors — the discrete-scrub resync path.
+	// Snaps the four world-lighting block states (and their packed colors) to
+	// the given colors — the discrete-scrub resync path. The ten sky-pass
+	// blocks use snap_sky_colors() below.
 	void snap_colors(const Color &p_fill, const Color &p_sun, const Color &p_fog, const Color &p_sky);
+
+	void snap_sky_colors(const Color &p_skyfog, const Color &p_ceiling,
+			const Color &p_cloud, const Color &p_floor, const Color &p_skybase,
+			const Color &p_skybright, const Color &p_skyhighlight,
+			const Color &p_cloudbase, const Color &p_cloudhighlight,
+			const Color &p_cloudedge);
+	void set_sky_color_targets(const Color &p_skyfog, const Color &p_ceiling,
+			const Color &p_cloud, const Color &p_floor, const Color &p_skybase,
+			const Color &p_skybright, const Color &p_skyhighlight,
+			const Color &p_cloudbase, const Color &p_cloudhighlight,
+			const Color &p_cloudedge);
 
 	// One 62 Hz weather tick in the witnessed order: oscillator, wind-decay
 	// extension, rain fade, lightning sequencers (additive slot rewrites on
-	// epoch), the four block pipelines, then the cloud-scroll ramp +
-	// accumulators (the tick's tail).
+	// epoch), the fourteen hosted block pipelines in retail order, then the
+	// cloud-scroll ramp + accumulators (the tick's tail).
 	void tick(const Color &p_fill_target, const Color &p_sun_target,
 			const Color &p_fog_target, const Color &p_sky_target,
 			const Color &p_lightning_color, float p_sky_speed);
@@ -124,6 +139,18 @@ public:
 	Color get_sun() const;
 	Color get_fog() const;
 	Color get_sky() const;
+	Color get_skyfog() const;
+	Color get_ceiling() const;
+	Color get_cloud() const;
+	Color get_floor() const;
+	Color get_ceiling_pre_mod() const;
+	Color get_floor_pre_mod() const;
+	Color get_skybase() const;
+	Color get_skybright() const;
+	Color get_skyhighlight() const;
+	Color get_cloudbase() const;
+	Color get_cloudhighlight() const;
+	Color get_cloudedge() const;
 
 	// (smoothed - 0x8000) / 0x8000 * 2 — the shader-facing sway scalar.
 	float get_sway_amount() const;

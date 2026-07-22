@@ -38,7 +38,7 @@ var _glare_occlusion := NovaGlareOcclusion.new()
 var _resource_root: NovaResourceRoot
 var _cached_env: Node = null
 var _cached_cam: Camera3D = null
-var _bodies: Dictionary = {} # name -> { model, material, additive, priority, tint_key }
+var _bodies: Dictionary = {} # name -> { model, materials, tint }
 var _loaded_names: Dictionary = {}
 # env #33: the 256-instance star field (generation + twinkle in libs/env via
 # NovaStarField; regenerated per celestial load like retail
@@ -102,10 +102,13 @@ func _rebuild_if_needed() -> void:
 		add_child(model)
 		model.set_object_data(data)
 		var material := _make_celestial_material(spec["additive"], spec["priority"])
-		_apply_material_override(model, material)
+		var materials := _apply_material_override(model, material)
+		if key == "glare":
+			for surface_material in materials:
+				surface_material.set_shader_parameter("u_glare_view_fade", true)
 		_bodies[key] = {
 			"model": model,
-			"material": material,
+			"materials": materials,
 			"tint": spec["tint"],
 		}
 
@@ -133,20 +136,53 @@ func _make_celestial_material(additive: bool, priority: int) -> ShaderMaterial:
 
 
 # Walk the model's MeshInstance3D parts, reuse each surface's diffuse texture in
-# our celestial material, and override the part's material.
-func _apply_material_override(model: Node3D, base_material: ShaderMaterial) -> void:
+# our celestial material, and return the ACTUAL installed materials. NovaObjectModel
+# puts its generated material in GeometryInstance3D.material_override; clear that
+# whole-mesh override after harvesting its texture so these surface overrides own
+# the draw and remain the objects updated by the TOD pass.
+func _apply_material_override(model: Node3D, base_material: ShaderMaterial) -> Array[ShaderMaterial]:
+	var installed: Array[ShaderMaterial] = []
 	var meshes: Array[MeshInstance3D] = []
 	_collect_meshes(model, meshes)
 	for mesh_instance in meshes:
+		# The vertex shader relocates celestials for the active render-pass camera.
+		# Keep the source-camera AABB/occlusion result from rejecting the mirror
+		# pass before that relocation reaches the GPU.
+		mesh_instance.extra_cull_margin = 1.0e6
+		mesh_instance.ignore_occlusion_culling = true
+		mesh_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		var surface_count := mesh_instance.mesh.get_surface_count() if mesh_instance.mesh else 0
+		var surface_materials: Array[ShaderMaterial] = []
 		for surface in surface_count:
 			var src := mesh_instance.get_active_material(surface)
 			var material := base_material.duplicate() as ShaderMaterial
+			# The stock sun/moon models author FF_ST_AD_LUM. Their textures use
+			# opaque black as the additive zero, so forcing those surfaces
+			# through blend_mix exposes a dark quad at the horizon. Preserve
+			# the source material's blend classification while replacing only
+			# the celestial placement/tint shader logic.
+			if _source_material_uses_additive(src):
+				material.shader = CelestialAdditiveShader
 			if src is ShaderMaterial:
 				var diffuse = (src as ShaderMaterial).get_shader_parameter("u_diffuse")
 				if diffuse:
 					material.set_shader_parameter("u_diffuse", diffuse)
+			surface_materials.append(material)
+		# NovaObjectModel's whole-mesh override otherwise wins over the celestial
+		# surface materials on the render path.
+		mesh_instance.material_override = null
+		for surface in surface_count:
+			var material := surface_materials[surface]
 			mesh_instance.set_surface_override_material(surface, material)
+			installed.append(material)
+	return installed
+
+
+static func _source_material_uses_additive(source: Material) -> bool:
+	if not (source is ShaderMaterial):
+		return false
+	var shader := (source as ShaderMaterial).shader
+	return shader != null and shader.code.contains("blend_add")
 
 
 static func _collect_meshes(node: Node, out: Array[MeshInstance3D]) -> void:
@@ -165,25 +201,26 @@ func _process(_delta: float) -> void:
 	if env == null or not env.has_method("is_loaded") or not env.is_loaded():
 		return
 
-	if not _cached_cam or not _cached_cam.is_inside_tree():
+	if not _cached_cam or not _cached_cam.is_inside_tree() or not _cached_cam.current:
 		_cached_cam = _find_camera()
 	var cam_pos := _cached_cam.global_position if _cached_cam else Vector3.ZERO
 
 	var sun_dir: Vector3 = env.get_sun_direction()
 	var moon_dir: Vector3 = env.get_moon_direction()
 
-	var cam_forward := Vector3.FORWARD
-	if _cached_cam:
-		cam_forward = -_cached_cam.global_transform.basis.z
-
 	var star_tint: Vector3 = env.get_sky_ambient()
 	if _star_mmi != null and _star_mmi.material_override is ShaderMaterial:
-		(_star_mmi.material_override as ShaderMaterial).set_shader_parameter("u_tint", star_tint)
-	var cam_basis := _cached_cam.global_transform.basis if _cached_cam else Basis()
+		var star_material := _star_mmi.material_override as ShaderMaterial
+		star_material.set_shader_parameter("u_tint", star_tint)
+		star_material.set_shader_parameter("u_anchor_camera_world", cam_pos)
+		# Keep every instance local to a camera-anchored MMI. Absolute per-star
+		# transforms leave the MultiMesh AABB at the world origin and disappear
+		# once a mission camera travels far enough from it.
+		_star_mmi.global_position = cam_pos
 	# The active light (sun by day, moon at night) drives the near-light cull
 	# [orig: Environment_GetLightDirectionFixed @ 0x57d8e0 at the field loop].
 	var light_dir: Vector3 = env.get_light_direction() if env.has_method("get_light_direction") else sun_dir
-	_update_star_field(cam_pos, cam_basis, light_dir)
+	_update_star_field(light_dir)
 
 	for key in _bodies:
 		var body: Dictionary = _bodies[key]
@@ -194,16 +231,17 @@ func _process(_delta: float) -> void:
 		# terrain depth-occludes the body, like retail's draw order.
 		model.global_position = cam_pos + dir * EnvFile.celestial_body_distance()
 		var tint: Vector3 = _tint_for(env, body["tint"])
-		body["material"].set_shader_parameter("u_tint", tint)
+		_set_body_shader_parameter(body, "u_anchor_camera_world", cam_pos)
+		_set_body_shader_parameter(body, "u_tint", tint)
 		if key == "sun":
 			# Overcast (#16) stays 0 until the overcast systems land; the
 			# SunDim channel is live end-to-end (env #27 — spring-smoothed in
 			# the weather core; target 0 in stock data).
 			var sun_dim: float = env.get_sun_dim_pct() if env.has_method("get_sun_dim_pct") else 0.0
-			body["material"].set_shader_parameter("u_opacity", EnvFile.celestial_sun_alpha(0.0, sun_dim))
+			_set_body_shader_parameter(body, "u_opacity", EnvFile.celestial_sun_alpha(0.0, sun_dim))
 		elif key == "moon":
 			# The moon fades with the fog distance [orig: @ 0x5acc40].
-			body["material"].set_shader_parameter("u_opacity",
+			_set_body_shader_parameter(body, "u_opacity",
 					EnvFile.celestial_moon_alpha(env.get_fog_level(), 0.0))
 		elif key == "glare":
 			# env #14 (closed): two jittered terrain rays per frame feed the
@@ -214,11 +252,23 @@ func _process(_delta: float) -> void:
 			var visible_a := _glare_ray_clear(cam_pos, sun_dir, ray_length, _glare_occlusion.get_ray_jitter_a())
 			var visible_b := _glare_ray_clear(cam_pos, sun_dir, ray_length, _glare_occlusion.get_ray_jitter_b())
 			_glare_occlusion.tick(visible_a, visible_b, env.get_fog_level())
-			var dot := cam_forward.dot(sun_dir)
 			var sun_dim_glow: float = env.get_sun_dim_pct() if env.has_method("get_sun_dim_pct") else 0.0
-			var glow := EnvFile.glare_glow_alpha(dot, _glare_occlusion.get_brightness(), 0.0, sun_dim_glow)
-			model.visible = glow > 0.0
-			body["material"].set_shader_parameter("u_opacity", glow)
+			# Preserve the recovered fixed-point occlusion/brightness/dimming fold
+			# at dot=1. The shader applies the remaining positive dot^4 factor from
+			# EACH pass camera, so the mirror view no longer inherits the main
+			# camera's glare angle (or its CPU visibility rejection).
+			var peak_glow := EnvFile.glare_glow_alpha(
+					1.0, _glare_occlusion.get_brightness(), 0.0, sun_dim_glow)
+			model.visible = peak_glow > 0.0
+			_set_body_shader_parameter(body, "u_glare_direction", sun_dir)
+			_set_body_shader_parameter(body, "u_opacity", peak_glow)
+
+
+func _set_body_shader_parameter(body: Dictionary, parameter: StringName, value) -> void:
+	var materials: Array = body.get("materials", [])
+	for material in materials:
+		if material is ShaderMaterial:
+			(material as ShaderMaterial).set_shader_parameter(parameter, value)
 
 
 # env #33: the star field host — one MultiMesh of camera-facing quads under
@@ -237,6 +287,7 @@ func _build_star_field(star_name: String) -> void:
 	if diffuse:
 		material.set_shader_parameter("u_diffuse", diffuse)
 	material.set_shader_parameter("u_opacity", 1.0)
+	material.set_shader_parameter("u_billboard", true)
 	var mm := MultiMesh.new()
 	mm.transform_format = MultiMesh.TRANSFORM_3D
 	mm.use_colors = true
@@ -248,13 +299,18 @@ func _build_star_field(star_name: String) -> void:
 	_star_mmi.name = "StarField"
 	_star_mmi.multimesh = mm
 	_star_mmi.material_override = material
-	# The field spans the whole sky around the camera; cull as one unit.
+	# Instances stay local to this camera-anchored node. The field spans the
+	# whole sky around that local origin; cull as one conservative unit and
+	# bypass main-view occlusion because the reflection pass reanchors it.
 	_star_mmi.custom_aabb = AABB(Vector3(-600, -600, -600), Vector3(1200, 1200, 1200))
+	_star_mmi.extra_cull_margin = 1.0e6
+	_star_mmi.ignore_occlusion_culling = true
+	_star_mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(_star_mmi)
 	_star_core.regenerate(1)
 
 
-func _update_star_field(cam_pos: Vector3, cam_basis: Basis, light_dir: Vector3) -> void:
+func _update_star_field(light_dir: Vector3) -> void:
 	if _star_mmi == null:
 		return
 	var mm := _star_mmi.multimesh
@@ -266,12 +322,15 @@ func _update_star_field(cam_pos: Vector3, cam_basis: Basis, light_dir: Vector3) 
 		var o := i * 6
 		var visible := buf[o + 5] > 0.5
 		if not visible:
-			mm.set_instance_transform(i, Transform3D(Basis().scaled(Vector3.ZERO), cam_pos))
+			mm.set_instance_transform(i, Transform3D(Basis().scaled(Vector3.ZERO), Vector3.ZERO))
 			continue
 		var offset := Vector3(buf[o], buf[o + 1], buf[o + 2])
 		var scale := buf[o + 3]
 		var brightness := buf[o + 4]
-		var xform := Transform3D(cam_basis.scaled(Vector3(scale, scale, scale)), cam_pos + offset)
+		# Orientation is deliberately identity here. The additive vertex shader
+		# rebuilds the quad from the active pass camera's right/up basis, which is
+		# the only way one MultiMesh can billboard correctly in both viewports.
+		var xform := Transform3D(Basis().scaled(Vector3(scale, scale, scale)), offset)
 		mm.set_instance_transform(i, xform)
 		mm.set_instance_color(i, Color(brightness, brightness, brightness))
 

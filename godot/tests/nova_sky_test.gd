@@ -6,6 +6,7 @@ extends GutTest
 
 const FULL_00_ENV_FIXTURE := "res://../fixtures/env/full_00.env"
 const SKY_SHADER := "res://shaders/sky.gdshader"
+const TICK := 1.0 / 62.0
 
 
 func _make() -> Dictionary:
@@ -34,8 +35,8 @@ func test_keyframed_path_pushes_spec_uniforms() -> void:
 		"pass 1 is always sun-driven [orig: render_skybox @ 0x579287]")
 	assert_eq(mat.get_shader_parameter("u_light_dir"), ctx.env_node.get_light_direction(),
 		"pass 2 follows the active light [orig: render_skybox @ 0x579291]")
-	assert_eq(mat.get_shader_parameter("u_fog_color"), ctx.env_node.get_fog_color(),
-		"the dome fogs with the shared scene fog color [orig: CD3DDevice_SetActiveFogColor @ 0x677040]")
+	assert_eq(mat.get_shader_parameter("u_fog_color"), ctx.env_node.get_skyfog_color(),
+		"the dome fogs with the dedicated skyfog block [orig: sky fog wrapper @ 0x579cb0]")
 	assert_eq(float(mat.get_shader_parameter("u_fog_end")), ctx.env_node.get_fog_level(), "dome fog end distance")
 
 
@@ -60,12 +61,82 @@ func test_keyframed_colors_use_retail_upload_scale_without_redoubling_fog() -> v
 		[38, 46, 18],
 		[308, 316, 330],
 		[154, 182, 255],
-	], "six sky/cloud constants use retail 2/255; active packed fog stays byte/255")
+	], "six sky/cloud constants use retail 2/255; active packed skyfog stays byte/255")
+
+
+func test_weather_core_ticks_every_hosted_sky_block_and_doubles_fog_afterward() -> void:
+	var core := NovaWeatherCore.new()
+	var black := Color8(0, 0, 0)
+	core.snap_colors(black, black, black, black)
+	core.snap_sky_colors(black, black, black, black, black, black, black, black, black, black)
+	core.set_sky_color_targets(
+		Color8(8, 16, 24),
+		Color8(16, 32, 48),
+		Color8(24, 40, 56),
+		Color8(32, 64, 96),
+		Color8(40, 72, 104),
+		Color8(48, 80, 112),
+		Color8(56, 88, 120),
+		Color8(64, 96, 128),
+		Color8(72, 104, 136),
+		Color8(80, 112, 144))
+	core.tick(black, black, Color8(200, 104, 48), black, Color.WHITE, 0.0)
+
+	assert_eq(_color_units(core.get_fog()), [50, 26, 12],
+		"fog smooths in authored bytes before the saturating x2 render tail")
+	assert_eq(_color_units(core.get_skyfog()), [2, 4, 6],
+		"skyfog smooths, horizon-blends, then doubles (no blend at 1024)")
+	assert_eq(_color_units(core.get_ceiling()), [2, 4, 6])
+	assert_eq(_color_units(core.get_cloud()), [3, 5, 7])
+	assert_eq(_color_units(core.get_floor()), [4, 8, 12])
+	assert_eq(_color_units(core.get_skybase()), [5, 9, 13])
+	assert_eq(_color_units(core.get_skybright()), [6, 10, 14])
+	assert_eq(_color_units(core.get_skyhighlight()), [7, 11, 15])
+	assert_eq(_color_units(core.get_cloudbase()), [8, 12, 16])
+	assert_eq(_color_units(core.get_cloudhighlight()), [9, 13, 17])
+	assert_eq(_color_units(core.get_cloudedge()), [10, 14, 18])
+
+
+func test_weather_writes_all_dome_colors_back_to_environment() -> void:
+	var ctx := _make()
+	var weather := NovaWeather.new()
+	weather.environment_path = ctx.env_node.get_path()
+	add_child_autofree(weather)
+	simulate(weather, 1, TICK)
+
+	assert_eq(ctx.env_node.get_skyfog_color(), weather.get_smooth_skyfog())
+	assert_eq(ctx.env_node.get_ceiling_color(), weather.get_smooth_ceiling())
+	assert_eq(ctx.env_node.get_cloud_tint(), weather.get_smooth_cloud())
+	assert_eq(ctx.env_node.get_floor_color(), weather.get_smooth_floor())
+	assert_eq(ctx.env_node.get_sky_base(), weather.get_smooth_sky_base())
+	assert_eq(ctx.env_node.get_sky_bright(), weather.get_smooth_sky_bright())
+	assert_eq(ctx.env_node.get_sky_highlight(), weather.get_smooth_sky_highlight())
+	assert_eq(ctx.env_node.get_cloud_base(), weather.get_smooth_cloud_base())
+	assert_eq(ctx.env_node.get_cloud_highlight(), weather.get_smooth_cloud_highlight())
+	assert_eq(ctx.env_node.get_cloud_edge(), weather.get_smooth_cloud_edge())
+
+
+func test_dome_fog_uses_skyfog_instead_of_world_fog() -> void:
+	var ctx := _make()
+	for keyframe in ctx.env.get_tod_keyframes():
+		keyframe.set_fog_color(Color8(10, 20, 30))
+		keyframe.set_skyfog_color(Color8(40, 50, 60))
+	ctx.env.set_fog_level(1024.0)
+	ctx.sky._process(TICK)
+
+	var dome_fog: Vector3 = ctx.sky.sky_material.get_shader_parameter("u_fog_color")
+	assert_eq(dome_fog, ctx.env_node.get_skyfog_color())
+	assert_ne(dome_fog, ctx.env_node.get_fog_color(),
+		"the sky wrapper swaps to skyfog while the world keeps ordinary fog")
 
 
 func _shader_color_units(material: ShaderMaterial, parameter: StringName) -> Array[int]:
 	var value: Vector3 = material.get_shader_parameter(parameter)
 	return [roundi(value.x * 255.0), roundi(value.y * 255.0), roundi(value.z * 255.0)]
+
+
+func _color_units(value: Color) -> Array[int]:
+	return [roundi(value.r * 255.0), roundi(value.g * 255.0), roundi(value.b * 255.0)]
 
 
 func test_flat_pass_does_not_stuff_keyframed_uniforms() -> void:
@@ -135,6 +206,12 @@ func test_cloud_tint_uniform_is_gone_from_the_shader() -> void:
 		"the fabricated keyframed-path cloud tint is deleted (divergence #20 fix)")
 	assert_false(shader.code.contains("u_moon_dir"),
 		"sun/moon glow terms are deleted - celestial bodies are NovaCelestial's job")
+
+
+func test_cloud_layers_keep_the_recovered_anisotropic_stage_filter() -> void:
+	var shader := load(SKY_SHADER) as Shader
+	assert_eq(shader.code.count("filter_linear_mipmap_anisotropic"), 2,
+		"both active cloud stages use the reference device's anisotropic minification")
 
 
 func test_dome_rides_at_half_camera_height() -> void:

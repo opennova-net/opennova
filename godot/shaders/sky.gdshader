@@ -25,13 +25,15 @@ uniform vec3 u_cloud_highlight = vec3(0.6, 0.65, 0.7); // c27
 uniform vec3 u_cloud_edge = vec3(0.3, 0.35, 0.4); // c26
 uniform vec3 u_sun_dir = vec3(0.0, 1.0, 0.0); // pass-1 c13/c14 direction
 uniform vec3 u_light_dir = vec3(0.0, 1.0, 0.0); // pass-2 c13/c14 direction
-uniform vec3 u_fog_color = vec3(0.5, 0.7, 0.9); // D3DRS_FOGCOLOR (scene fog)
+uniform vec3 u_fog_color = vec3(0.5, 0.7, 0.9); // sky-pass D3DRS_FOGCOLOR (skyfog)
 uniform float u_fog_end = 1000.0; // world-unit fog end distance
 uniform bool u_flat_pass = false; // advanced_clouds == 0
 uniform vec3 u_flat_color = vec3(0.5, 0.5, 0.5); // cloud_rgb, flat path only
 
-uniform sampler2D u_cloud_tex1 : filter_linear_mipmap, repeat_enable;
-uniform sampler2D u_cloud_tex2 : filter_linear_mipmap, repeat_enable;
+// The reference device applies anisotropic minification to active texture
+// stages; this matters most at the dome's grazing-angle horizon.
+uniform sampler2D u_cloud_tex1 : filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D u_cloud_tex2 : filter_linear_mipmap_anisotropic, repeat_enable;
 uniform bool u_has_clouds = false;
 uniform vec2 u_scroll_offset1 = vec2(0.0);
 uniform vec2 u_scroll_offset2 = vec2(0.0);
@@ -140,10 +142,9 @@ void fragment() {
 		}
 	}
 
-	// Vertex fog against the shared scene fog color: the dome fogs with the same
-	// D3DRS_FOGCOLOR as terrain - the active fog block value, no dome-specific
-	// derivation [orig: CD3DDevice_SetActiveFogColor @ 0x677040 ->
-	// CD3DDevice_SetFogAndBlendMode @ 0x677740].
+	// The sky wrapper temporarily selects the post-horizon-blend, doubled
+	// skyfog block, matching the clear below the open dome rim; world passes
+	// restore ordinary fog afterward [orig: sky fog wrapper @ 0x579cb0].
 	if (u_fog_end > 0.0) {
 		col = mix(u_fog_color, col, clamp(v_fog, 0.0, 1.0));
 	}

@@ -45,6 +45,8 @@ const OCCLUSION_DEBUG_NAME := "OcclusionDebug"
 const ROUND_DEBUG_NAME := "RoundDebug"
 const HITBOX_DEBUG_NAME := "HitboxDebug"
 const TICK_DT := 1.0 / 62.5  # mirrors MissionRuntime.TICK_DT; default for tick()'s delta param
+const WEATHER_TICK_HZ := 62.0
+const MAX_WEATHER_CATCHUP_TICKS := 31
 # [orig: ItemDef_GetBoneMaskByName @ 0x49ea40 scans the first 16 points.]
 const ITEM_EFFECT_USER_POINT_SCAN_LIMIT := 16
 
@@ -155,6 +157,7 @@ var _local_player_spawn_loadout: Dictionary = {}
 var _perf_tick_us: int = 0
 var _perf_foliage_us: int = 0
 var _perf_runtime_us: int = 0
+var _weather_tick_credit := 0.0
 var _perf_audio_us: int = 0
 
 
@@ -201,6 +204,13 @@ func _ready() -> void:
 	if _terrain != null:
 		_dispatcher = _terrain.get_node_or_null("FoliageDispatcher") as NovaFoliageDispatcher
 		_tile_overlay = _terrain.get_node_or_null("TileOverlay") as NovaTerrainTileOverlay
+	# Both retained render systems start dormant until a successful load chooses
+	# their host mode. In particular, do not let an authored scene height make
+	# initial/menu frames look underwater.
+	_set_water_host_rendering_enabled(false)
+	# Freeze the retained weather node until a load selects autonomous bare/net
+	# rendering or prepares a mission-owned fixed tick.
+	_set_weather_host_tick_driven(true)
 
 
 func _notification(what: int) -> void:
@@ -230,6 +240,8 @@ func load_world(dir: String = "") -> int:
 		load_failed.emit("%s not found in %s" % [env_file, resource_root.get_root_dir()])
 		return ERR_FILE_NOT_FOUND
 
+	_set_water_host_rendering_enabled(false)
+	_set_mission_water_height_override(NAN)
 	_clear_mission_tile_info()
 	_resource_root = resource_root
 	if not _load_environment(env_file):
@@ -240,6 +252,8 @@ func load_world(dir: String = "") -> int:
 		return ERR_CANT_OPEN
 
 	_loaded = true
+	_prepare_autonomous_weather()
+	_set_water_host_rendering_enabled(true)
 	if _user_point_debug:
 		_refresh_user_point_debug()
 	world_loaded.emit()
@@ -431,17 +445,28 @@ func _on_net_mission(mission_name: String) -> void:
 			_resource_root, mission_name, NovaResourceRoot.LOOKUP_FORCE_ARCHIVE_ONLY) != OK:
 		push_warning("net session: failed to parse %s: %s" % [mission_name, mission.get_last_error()])
 		return
-	_loaded_mission = mission
-	_mission_forces_indoors = (int(mission.get_info().get("attrib_flags", 0)) & 0x10) != 0
+	# A wire map is a small transaction over both required render resources.
+	# Keep retained consumers dormant and the BMS retryable until ENV + TRN have
+	# both loaded; otherwise a valid terrain could resurrect stale atmosphere.
+	_set_weather_host_tick_driven(true)
+	_set_water_host_rendering_enabled(false)
 	_load_mission_tile_info(mission_name, _resource_root)
 	var env_name := mission.get_environment_ref() + ".env"
-	if _resource_root.has_file(env_name) and _load_environment(env_name):
-		_apply_mission_environment_overrides(mission)
+	if not _resource_root.has_file(env_name) or not _load_environment(env_name):
+		push_warning("net session: environment %s.env not loaded" % mission.get_environment_ref())
+		return
 	var trn := mission.get_terrain_ref() + ".trn"
-	if _resource_root.has_file(trn) and _load_terrain(trn):
-		print("GameWorld(net): map %s -> terrain %s loaded" % [mission_name, mission.get_terrain_ref()])
-	else:
+	if not _resource_root.has_file(trn) or not _load_terrain(trn):
 		push_warning("net session: terrain %s.trn not loaded" % mission.get_terrain_ref())
+		return
+	# EnvFile overrides and the distinct BMS water-height rung commit together
+	# only after the complete map is renderable. A partial load publishes neither.
+	_apply_mission_environment_overrides(mission)
+	_loaded_mission = mission
+	_mission_forces_indoors = (int(mission.get_info().get("attrib_flags", 0)) & 0x10) != 0
+	_prepare_autonomous_weather()
+	_set_water_host_rendering_enabled(true)
+	print("GameWorld(net): map %s -> terrain %s loaded" % [mission_name, mission.get_terrain_ref()])
 
 
 # The ONE mission path — the file entry (load_mission) and the in-memory
@@ -458,6 +483,8 @@ func _load_mission_internal(mission: NovaMissionData, bms_name: String, resource
 		load_failed.emit("%s.env (from %s) not found in %s" % [mission.get_environment_ref(), bms_name, resource_root.get_root_dir()])
 		return ERR_FILE_NOT_FOUND
 
+	_set_weather_host_tick_driven(true)
+	_set_water_host_rendering_enabled(false)
 	# Same stage attribution as the editor's mission open, so the two hosts'
 	# load costs stay comparable (one timeline ring serves both).
 	var timeline := PerfTimeline.begin("Mission load %s" % bms_name)
@@ -501,6 +528,7 @@ func _load_mission_internal(mission: NovaMissionData, bms_name: String, resource
 	timeline.span("audio")
 	_start_mission_audio(mission, bms_name)
 	timeline.end_span()
+	_prepare_hosted_weather()
 	load_progress.emit(90)
 	timeline.span("effects")
 	_start_effect_world()
@@ -509,6 +537,7 @@ func _load_mission_internal(mission: NovaMissionData, bms_name: String, resource
 	timeline.finish()
 	_loaded_mission_file = bms_name
 	_loaded = true
+	_set_water_host_rendering_enabled(true)
 	load_progress.emit(100)
 	if _user_point_debug:
 		_refresh_user_point_debug()
@@ -603,6 +632,8 @@ func get_mission_stats() -> Dictionary:
 ## Safe to call when nothing is loaded.
 func unload() -> void:
 	_loaded = false
+	_set_weather_host_tick_driven(true)
+	_set_water_host_rendering_enabled(false)
 	_host_config = {}
 	_local_player_spawn_loadout = {}
 	_clear_mission_tile_info()
@@ -671,6 +702,7 @@ func unload() -> void:
 	set_local_player_nvg_view(false, 0)
 	if _env != null and _env.environment_data != null:
 		_env.environment_data.clear_mission_overrides()
+	_set_mission_water_height_override(NAN)
 	_loaded_mission = null
 	_loaded_mission_file = ""
 	if _runtime != null:
@@ -701,6 +733,12 @@ func _load_environment(env_path: String) -> bool:
 		return false
 	# NovaEnvironment's setter reloads + pushes shader globals on assignment.
 	_env.environment_data = env
+	# GameWorld retains one NovaWeather node across loads. A replacement ENV is
+	# a discrete state change: retail snaps every color block to the new mission
+	# targets instead of easing over from the previous mission's currents.
+	var weather := get_node_or_null("NovaWeather")
+	if weather != null and weather.has_method("resync_colors"):
+		weather.resync_colors()
 	var celestial := get_node_or_null("NovaCelestial")
 	if celestial != null and celestial.has_method("set_resource_root"):
 		celestial.set_resource_root(_resource_root)
@@ -711,16 +749,86 @@ func _load_environment(env_path: String) -> bool:
 ## EnvFile's non-persistent override layer [orig: Game_LoadTerrainDuringConnect
 ## @ 0x520710]. The base .env is never mutated.
 func _apply_mission_environment_overrides(mission: NovaMissionData) -> void:
-	if _env == null or mission == null:
-		return
-	var env_data: EnvFile = _env.environment_data
-	if env_data == null:
+	if mission == null:
 		return
 	var overrides: Dictionary = mission.get_environment_overrides()
-	if overrides.is_empty():
-		env_data.clear_mission_overrides()
+	# EnvFile owns the other live-view overrides, while water keeps the BMS
+	# rung distinct so a flagged zero still beats a nonzero TRN height.
+	if _env != null:
+		var env_data: EnvFile = _env.environment_data
+		if env_data != null:
+			if overrides.is_empty():
+				env_data.clear_mission_overrides()
+			else:
+				env_data.apply_mission_overrides(overrides)
+	var mission_water := NAN
+	if overrides.has("water_height"):
+		# Mission header values are signed engine half-units.
+		mission_water = float(overrides["water_height"]) * 0.5
+	_set_mission_water_height_override(mission_water)
+
+
+func _set_mission_water_height_override(world_height: float) -> void:
+	if _water != null and _water.has_method("set_mission_water_height_override"):
+		_water.set_mission_water_height_override(world_height)
+
+
+func _set_water_host_rendering_enabled(enabled: bool) -> void:
+	if _water != null and _water.has_method("set_host_rendering_enabled"):
+		_water.set_host_rendering_enabled(enabled)
+
+
+# Runtime water exposes a render-aware predicate so its retained authored
+# height cannot leak into frame clear/occlusion while a load is absent or in
+# progress. Keep the height-only fallback for compatible test/host doubles.
+func _is_water_render_active() -> bool:
+	if _water == null:
+		return false
+	if _water.has_method("is_water_render_active"):
+		return bool(_water.is_water_render_active())
+	return not _water.has_method("is_water_active") or bool(_water.is_water_active())
+
+
+func _set_weather_host_tick_driven(enabled: bool) -> void:
+	_weather_tick_credit = 0.0
+	var weather := get_node_or_null("NovaWeather")
+	if weather != null and weather.has_method("set_host_tick_driven"):
+		weather.set_host_tick_driven(enabled)
+
+
+func _prepare_hosted_weather() -> void:
+	_weather_tick_credit = 0.0
+	var weather := get_node_or_null("NovaWeather")
+	if weather != null and weather.has_method("prepare_hosted"):
+		weather.prepare_hosted()
 	else:
-		env_data.apply_mission_overrides(overrides)
+		_set_weather_host_tick_driven(true)
+
+
+func _prepare_autonomous_weather() -> void:
+	_weather_tick_credit = 0.0
+	var weather := get_node_or_null('NovaWeather')
+	if weather != null and weather.has_method('prepare_autonomous'):
+		weather.prepare_autonomous()
+	else:
+		_set_weather_host_tick_driven(false)
+
+
+func _advance_hosted_weather(delta: float) -> void:
+	_weather_tick_credit += maxf(delta, 0.0) * WEATHER_TICK_HZ
+	var tick_count := int(floor(_weather_tick_credit + 1.0e-9))
+	if tick_count <= 0:
+		return
+	_weather_tick_credit = maxf(
+			0.0, _weather_tick_credit - float(tick_count))
+	if tick_count > MAX_WEATHER_CATCHUP_TICKS:
+		tick_count = MAX_WEATHER_CATCHUP_TICKS
+		_weather_tick_credit = 0.0
+	var weather := get_node_or_null("NovaWeather")
+	for _tick in range(tick_count):
+		_env.advance_mission_clock(1)
+		if weather != null and weather.has_method("tick_fixed"):
+			weather.tick_fixed()
 
 
 # Retail loads <mission>.til into one shared g_TerrainTileArray used by
@@ -905,10 +1013,13 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 			var sim = _runtime.get_sim()
 			if sim != null and sim.has_method("get_host_peer_count"):
 				_nw_host.set_player_count(1 + sim.get_host_peer_count())
-	# The environment owns the one mission clock and advances only for fixed
-	# simulation ticks [orig: Environment_SetTodAdvanceRate @ 0x57d170].
-	if _loaded and runtime_ticks > 0 and _env != null:
-		_env.advance_mission_clock(runtime_ticks)
+	# Weather/TOD is a distinct 62 Hz fixed clock; the mission simulation above
+	# remains 62.5 Hz. Each weather quantum advances integer fixed24 time, which
+	# recomputes TOD targets, then ticks every weather block exactly once
+	# [orig: Environment_UpdateWeatherTick @ 0x57e9b0].
+	if (_loaded and _runtime != null and _runtime.is_playing()
+			and _env != null):
+		_advance_hosted_weather(delta)
 	# Blink flags only change on sim ticks; re-apply the frame gates then.
 	if _loaded and runtime_ticks > 0:
 		_apply_blink_frame_gates()
@@ -2509,7 +2620,7 @@ func _apply_occlusion_frame(camera_xform: Transform3D) -> void:
 	if _env != null and _env.has_method("get_fog_distance"):
 		fog = float(_env.get_fog_distance())
 	var water_z := -100000.0
-	if _water != null:
+	if _is_water_render_active():
 		var wh = _water.get("water_height")
 		if wh != null:
 			water_z = float(wh)
@@ -2641,8 +2752,10 @@ func _update_frame_clear_color() -> void:
 		return
 	var above := true
 	var cam := get_viewport().get_camera_3d() if is_inside_tree() else null
-	if cam != null and _water != null:
-		above = cam.global_position.y > float(_water.water_height)
+	if cam != null and _is_water_render_active():
+		# Camera3D h/v offsets move the rendered eye without changing the node
+		# transform. Classify the same adjusted eye NovaWater marches from.
+		above = cam.get_camera_transform().origin.y > float(_water.water_height)
 	var gen := int(_env.get_env_generation())
 	if gen == _clear_env_generation and above == _clear_above_water:
 		return

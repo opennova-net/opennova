@@ -53,6 +53,16 @@ var _fill_light := Vector3(0.4, 0.45, 0.55)
 var _sky_ambient_rt := Vector3(0.3, 0.4, 0.6)
 var _sun_light := Vector3(0.9, 0.85, 0.75)
 var _fog_color_rt := Vector3(0.5, 0.7, 0.9)
+var _skyfog_color_rt := Vector3(0.5, 0.7, 0.9)
+var _ceiling_color_rt := Vector3(0.5, 0.5, 0.5)
+var _cloud_tint_rt := Vector3(0.5, 0.5, 0.5)
+var _floor_color_rt := Vector3(0.5, 0.5, 0.5)
+var _sky_base_rt := Vector3(0.3, 0.4, 0.6)
+var _sky_bright_rt := Vector3(0.3, 0.4, 0.6)
+var _sky_highlight_rt := Vector3(0.5, 0.5, 0.5)
+var _cloud_base_rt := Vector3(0.3, 0.4, 0.6)
+var _cloud_highlight_rt := Vector3(0.5, 0.5, 0.5)
+var _cloud_edge_rt := Vector3(0.3, 0.4, 0.6)
 # ColorSrcGlobalGain — the modulator /64 (iris exposure), NovaWeather-written.
 var _color_src_gain := Vector3.ONE
 # The NVG world-lighting rewrite is a view concern, so the host supplies the
@@ -65,7 +75,7 @@ var _mission_time_fixed24: int = DEFAULT_START_HOUR * FIXED24_ONE_HOUR
 var _mission_advance_per_tick: int = int(
 	TOD_DAY_FIXED24 / (TOD_TICKS_PER_REAL_MINUTE * DEFAULT_MINUTES_PER_DAY))
 # TRUE once a NovaWeather node drives this environment: the weather tick then
-# OWNS the four current render colors + the smoothed fog distance + the shader
+# OWNS the current render colors + the smoothed fog distance + the shader
 # globals (its per-frame writeback), and _update_tod refreshes only the
 # keyframe TARGETS — the witnessed split [orig: Environment_ComputeTimeOfDayColors
 # @ 0x57de40 refreshes target slots; the smoothers own the currents]. Without
@@ -191,10 +201,22 @@ func _update_tod() -> void:
 		_sun_light = _tod.get(light_key, _sun_light)
 		_fill_light = _tod.get("ground", _fill_light)
 		_sky_ambient_rt = _tod.get("sky", _sky_ambient_rt)
-		# Fog render color is the keyframe color doubled, saturating
-		# [orig: Environment_UpdateWeatherTick @ 0x57f17c].
+		_sky_base_rt = _tod.get("skybase", _sky_base_rt)
+		_sky_bright_rt = _tod.get("skybright", _sky_bright_rt)
+		_sky_highlight_rt = _tod.get("skyhighlight", _sky_highlight_rt)
+		_cloud_base_rt = _tod.get("cloudbase", _cloud_base_rt)
+		_cloud_highlight_rt = _tod.get("cloudhighlight", _cloud_highlight_rt)
+		_cloud_edge_rt = _tod.get("cloudedge", _cloud_edge_rt)
+		_ceiling_color_rt = get_ceiling_color_target()
+		_cloud_tint_rt = get_cloud_tint_target()
+		_floor_color_rt = get_floor_color_target()
+		# Fog/skyfog blocks operate in undoubled authored bytes. Standalone
+		# hosts derive the same post-blend doubled colors that NovaWeather
+		# writes after its block tick.
 		var fog_raw: Vector3 = _tod.get("fog", _fog_color_rt * 0.5)
 		_fog_color_rt = _double_vec3(fog_raw)
+		_skyfog_color_rt = _derive_skyfog_render_color(
+			fog_raw, _tod.get("skyfog", fog_raw), get_fog_level())
 	if not _weather_driven:
 		_fog_distance = environment_data.get_fog_level()
 	# A TOD recompute can move any object-consumed value (weather-driven, the
@@ -219,6 +241,37 @@ func is_weather_driven() -> bool:
 static func _double_vec3(value: Vector3) -> Vector3:
 	var doubled := EnvFile.double_saturate_color(Color(value.x, value.y, value.z))
 	return Vector3(doubled.r, doubled.g, doubled.b)
+
+
+static func _derive_skyfog_render_color(
+		fog_raw: Vector3, skyfog_raw: Vector3, fog_distance: float) -> Vector3:
+	var blended := EnvFile.horizon_blend_skyfog(
+		Color(fog_raw.x, fog_raw.y, fog_raw.z),
+		Color(skyfog_raw.x, skyfog_raw.y, skyfog_raw.z),
+		fog_distance, 1024.0)
+	return _double_vec3(Vector3(blended.r, blended.g, blended.b))
+
+
+## Global (non-TOD) colors stay raw on EnvFile so editor/export round-trips do
+## not bake envscale into authored values. The runtime view performs the same
+## byte quantize -> envscale truncation -> saturation as the retail parser
+## [orig: Color_ScaleRGBAndPack @ 0x57f890; divergence #8].
+static func _scale_global_channel(channel: float, envscale: float) -> float:
+	var authored_byte := clampi(int(channel * 255.0 + 0.5), 0, 255)
+	var scaled_byte := clampi(int(float(authored_byte) * envscale), 0, 255)
+	return float(scaled_byte) / 255.0
+
+
+static func _scale_global_color(color: Color, envscale: float) -> Vector3:
+	return Vector3(
+		_scale_global_channel(color.r, envscale),
+		_scale_global_channel(color.g, envscale),
+		_scale_global_channel(color.b, envscale))
+
+
+func _global_color_target(color: Color) -> Vector3:
+	var envscale := environment_data.get_envscale() if environment_data != null else 1.0
+	return _scale_global_color(color, envscale)
 
 
 func _write_shader_globals() -> void:
@@ -300,8 +353,66 @@ func get_fog_color_target() -> Vector3:
 	return _double_vec3(_tod.get("fog", _fog_color_rt * 0.5))
 
 
+func get_fog_color_base_target() -> Vector3:
+	# WeatherColorBlock chases the authored half-intensity color; doubling is
+	# the derived tail after smoothing/modulation [orig: @ 0x57f17c].
+	return _tod.get("fog", _fog_color_rt * 0.5)
+
+
 func get_sky_ambient_target() -> Vector3:
 	return _tod.get("sky", Vector3(0.3, 0.4, 0.6))
+
+
+func get_skyfog_color_target() -> Vector3:
+	return _tod.get("skyfog", Vector3.ZERO)
+
+
+func get_ceiling_color_target() -> Vector3:
+	if environment_data == null:
+		return _ceiling_color_rt
+	return _global_color_target(environment_data.get_ceiling_color())
+
+
+func get_cloud_tint_target() -> Vector3:
+	if environment_data == null:
+		return _cloud_tint_rt
+	return _global_color_target(environment_data.get_cloud_tint())
+
+
+func get_floor_color_target() -> Vector3:
+	if environment_data == null:
+		return _floor_color_rt
+	return _global_color_target(environment_data.get_floor_color())
+
+
+func get_lightning_color_target() -> Vector3:
+	if environment_data == null:
+		return Vector3.ONE
+	return _global_color_target(environment_data.get_lightning_color())
+
+
+func get_sky_base_target() -> Vector3:
+	return _tod.get("skybase", _sky_base_rt)
+
+
+func get_sky_bright_target() -> Vector3:
+	return _tod.get("skybright", _sky_bright_rt)
+
+
+func get_sky_highlight_target() -> Vector3:
+	return _tod.get("skyhighlight", _sky_highlight_rt)
+
+
+func get_cloud_base_target() -> Vector3:
+	return _tod.get("cloudbase", _cloud_base_rt)
+
+
+func get_cloud_highlight_target() -> Vector3:
+	return _tod.get("cloudhighlight", _cloud_highlight_rt)
+
+
+func get_cloud_edge_target() -> Vector3:
+	return _tod.get("cloudedge", _cloud_edge_rt)
 
 
 func get_terrain_tint() -> Vector3:
@@ -360,8 +471,7 @@ func apply_terrain_uniforms(material: ShaderMaterial) -> void:
 func get_water_color() -> Vector3:
 	if environment_data == null:
 		return Vector3(0.408, 0.314, 0.224)
-	var color := environment_data.get_water_color()
-	return Vector3(color.r, color.g, color.b)
+	return _global_color_target(environment_data.get_water_color())
 
 
 func has_water_height() -> bool:
@@ -373,10 +483,15 @@ func get_water_height() -> float:
 
 
 func get_cloud_tint() -> Vector3:
-	if environment_data == null:
-		return Vector3(0.5, 0.5, 0.5)
-	var color := environment_data.get_cloud_tint()
-	return Vector3(color.r, color.g, color.b)
+	return _cloud_tint_rt
+
+
+func get_ceiling_color() -> Vector3:
+	return _ceiling_color_rt
+
+
+func get_floor_color() -> Vector3:
+	return _floor_color_rt
 
 
 func get_sun_direction() -> Vector3:
@@ -411,36 +526,35 @@ func get_moon_color() -> Vector3:
 
 
 func get_sky_base() -> Vector3:
-	return _tod.get("skybase", Vector3.ZERO)
+	return _sky_base_rt
 
 
 func get_sky_bright() -> Vector3:
-	return _tod.get("skybright", Vector3.ZERO)
+	return _sky_bright_rt
 
 
 func get_sky_highlight() -> Vector3:
-	return _tod.get("skyhighlight", Vector3.ZERO)
+	return _sky_highlight_rt
 
 
 ## Cloud-pass color blocks (sky dome VS constants c24/c27/c26)
 ## [orig: render_skybox uploads @ 0x57934a..0x57936f].
 func get_cloud_base() -> Vector3:
-	return _tod.get("cloudbase", Vector3.ZERO)
+	return _cloud_base_rt
 
 
 func get_cloud_highlight() -> Vector3:
-	return _tod.get("cloudhighlight", Vector3.ZERO)
+	return _cloud_highlight_rt
 
 
 func get_cloud_edge() -> Vector3:
-	return _tod.get("cloudedge", Vector3.ZERO)
+	return _cloud_edge_rt
 
 
 func get_skyfog_color() -> Vector3:
-	# The skyfog render color, doubled like fog [orig: Environment_UpdateWeatherTick
-	# @ 0x57f190]. Hosts wanting the frame CLEAR color use get_frame_clear_color()
-	# (the horizon-blended form; divergence #21, closed).
-	return _double_vec3(_tod.get("skyfog", Vector3.ZERO))
+	# Weather-owned, horizon-blended in undoubled block space, then doubled.
+	# Both the dome fog and the modulate2x frame clear consume this value.
+	return _skyfog_color_rt
 
 
 func get_frame_clear_color() -> Vector3:
@@ -466,13 +580,7 @@ func get_frame_clear_color() -> Vector3:
 	#  @ 0x5ca776..0x5ca7bf; dome fog toward the same value sub_579CB0; device
 	#  Clear @ 0x677100, its non-modulate2x halving fallback @ 0x67715d;
 	#  defaults Environment_InitDefaults @ 0x57c0b0 / Terrain_Init @ 0x60fca3]
-	var fog_raw: Vector3 = _tod.get("fog", Vector3.ZERO)
-	var sky_raw: Vector3 = _tod.get("skyfog", Vector3.ZERO)
-	var blended := EnvFile.horizon_blend_skyfog(
-		Color(fog_raw.x, fog_raw.y, fog_raw.z),
-		Color(sky_raw.x, sky_raw.y, sky_raw.z),
-		get_fog_level(), 1024.0)
-	return _double_vec3(Vector3(blended.r, blended.g, blended.b))
+	return _skyfog_color_rt
 
 
 func set_fill_light(value: Vector3) -> void:
@@ -496,6 +604,41 @@ func set_fog_color_rt(value: Vector3) -> void:
 func set_sky_ambient_rt(value: Vector3) -> void:
 	if value != _sky_ambient_rt:
 		_sky_ambient_rt = value
+		_env_generation += 1
+
+
+func set_static_colors_rt(ceiling: Vector3, cloud: Vector3, floor_color: Vector3) -> void:
+	var changed := (
+		_ceiling_color_rt != ceiling
+		or _cloud_tint_rt != cloud
+		or _floor_color_rt != floor_color
+	)
+	_ceiling_color_rt = ceiling
+	_cloud_tint_rt = cloud
+	_floor_color_rt = floor_color
+	# cloud_rgb is sampled by the flat dome every frame; ceiling/floor are live
+	# indoor-light inputs. Keep the shared material-generation seam honest for
+	# any additional consumers that cache environment values.
+	if changed:
+		_env_generation += 1
+
+
+func set_sky_colors_rt(
+		skyfog: Vector3, sky_base: Vector3, sky_bright: Vector3,
+		sky_highlight: Vector3, cloud_base: Vector3,
+		cloud_highlight: Vector3, cloud_edge: Vector3) -> void:
+	var skyfog_changed := _skyfog_color_rt != skyfog
+	_skyfog_color_rt = skyfog
+	_sky_base_rt = sky_base
+	_sky_bright_rt = sky_bright
+	_sky_highlight_rt = sky_highlight
+	_cloud_base_rt = cloud_base
+	_cloud_highlight_rt = cloud_highlight
+	_cloud_edge_rt = cloud_edge
+	# GameWorld generation-gates the clear-color push; the six dome ramps are
+	# sampled directly every frame, but the shared skyfog/clear value must wake
+	# that gate when its weather block moves.
+	if skyfog_changed:
 		_env_generation += 1
 
 
