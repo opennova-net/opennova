@@ -27,6 +27,8 @@ extends RefCounted
 
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
 const PresentAimOverlay := preload("res://engine/world/present_aim_overlay.gd")
+const PresentEmplacedWeapon := preload(
+		"res://engine/world/present_emplaced_weapon.gd")
 # [orig: EntityPool_FindByNetId @ 0x4f0a20]
 const WIRE_HANDLE_POOL_SHIFT := 12
 const WIRE_HANDLE_POOL_MASK := 0xF
@@ -37,8 +39,9 @@ var _container: Node3D     # parent for spawned wire avatars
 var _env_node              # optional NovaEnvironment node for model lighting globals
 var _defer_index           # MissionEntityRegistry (host only): rows resolving to a PLACED node are
                            # left to MissionPresentPass; null on the joiner (render every wire row)
+var _synthetic_origin_only := false
 var _nodes := {}           # wire_handle -> Node3D
-var _unresolved := {}      # wire_handle -> true (type didn't resolve; don't retry each tick)
+var _unresolved := {}      # wire_handle -> runtime type_id (don't retry same failed type each tick)
 var _stats: Dictionary = { "spawned": 0, "unresolved": 0, "live": 0 }
 var _node_spawned_callback := Callable()
 
@@ -64,16 +67,45 @@ static func _mission_kind_for_wire_handle(handle: int) -> int:
 # defer_index: on the HOST, the MissionEntityRegistry — any wire row that resolves to a placed
 # node is rendered by MissionPresentPass instead, so this pass only draws the un-placed remote
 # players (admitted joiners). Pass null on the JOINER, where nothing is placed (render all).
-func setup(sim, placer, container: Node3D, env_node = null, defer_index = null) -> void:
+func setup(sim, placer, container: Node3D, env_node = null, defer_index = null,
+		options: Dictionary = {}) -> void:
 	_sim = sim
 	_placer = placer
 	_container = container
 	_env_node = env_node
 	_defer_index = defer_index
+	_synthetic_origin_only = bool(options.get("synthetic_origin_only", false))
 
 
 func get_stats() -> Dictionary:
 	return _stats.duplicate()
+
+
+## Resolve the live node owned by this wire presenter. Runtime-only entities
+## have no authored BMS identity, so consumers such as destruction must use the
+## same packed pool/slot handle that keys this pass.
+func resolve_wire_handle(wire_handle: int) -> Node3D:
+	var node_v: Variant = _nodes.get(wire_handle)
+	return node_v as Node3D if node_v is Node3D and is_instance_valid(node_v) else null
+
+
+func _free_wire_node(wire_handle: int) -> void:
+	var node_v: Variant = _nodes.get(wire_handle)
+	if node_v is Node3D and is_instance_valid(node_v):
+		(node_v as Node3D).queue_free()
+	_nodes.erase(wire_handle)
+
+
+func reset_runtime_state() -> void:
+	for handle_v in _nodes.keys():
+		_free_wire_node(int(handle_v))
+	_nodes.clear()
+	_unresolved.clear()
+	_stats.live = 0
+
+
+func teardown() -> void:
+	reset_runtime_state()
 
 
 # Keep the wire-driven skeletal primary pose on the same projection path as
@@ -95,6 +127,18 @@ func _apply_body_anim(node, snap: PackedFloat32Array, base: int) -> void:
 		return
 	if node.has_method("play_body_anim"):
 		node.play_body_anim(body_anim_slot)
+
+
+# Keep dynamically materialized items on the same generic PANM path as placed
+# mission objects. Semantic EWEAP controls are overlaid after these model-order
+# channels, exactly as MissionPresentPass does.
+func _apply_procedural_part(node, snap: PackedFloat32Array, base: int) -> void:
+	if not node.has_method("set_part_phase"):
+		return
+	if int(snap[base + NovaSimulation.PF_ACTIVE1]) == 1:
+		node.set_part_phase(1, int(snap[base + NovaSimulation.PF_PHASE1]))
+	if int(snap[base + NovaSimulation.PF_ACTIVE2]) == 1:
+		node.set_part_phase(2, int(snap[base + NovaSimulation.PF_PHASE2]))
 
 
 ## Register the render-host seam for runtime consumers that follow a dynamically
@@ -135,7 +179,14 @@ func present() -> void:
 		# both — on the joiner local_handle is L, which never appears in the wire stream (harmless).
 		if type_id == 0 or handle == 0 or handle == local_handle:
 			continue
+		if _synthetic_origin_only and not (
+				int(snap[base + NovaSimulation.PF_KIND]) == 255
+				and int(snap[base + NovaSimulation.PF_INDEX]) == 0xFFFFFF):
+			continue
 		var runtime_kind := _mission_kind_for_wire_handle(handle)
+		var visual_item_id := type_id
+		if _placer.has_method("resolve_player_visual_item_id"):
+			visual_item_id = int(_placer.resolve_player_visual_item_id(type_id))
 		# Host: defer any wire row that resolves to a PLACED mission node to MissionPresentPass,
 		# so a placed NPC isn't drawn twice. The joiner passes no index and renders every row.
 		if _defer_index != null:
@@ -147,8 +198,15 @@ func present() -> void:
 				continue
 		live[handle] = true
 		if _unresolved.has(handle):
-			continue
+			if int(_unresolved[handle]) == type_id:
+				continue
+			_unresolved.erase(handle)
 		var node = _nodes.get(handle)
+		if node != null and is_instance_valid(node):
+			var existing_ref: Dictionary = node.get_meta("entity_ref", {})
+			if int(existing_ref.get("runtime_type_id", 0)) != type_id:
+				_free_wire_node(handle)
+				node = null
 		var spawned_now := false
 		if node == null or not is_instance_valid(node):
 			# build_player_animated_model maps the player runtime type (0x14B9) to its visual
@@ -156,7 +214,7 @@ func present() -> void:
 			# the host uses for the local avatar and placed NPCs.
 			node = _placer.build_player_animated_model(type_id, _container, _env_node)
 			if node == null:
-				_unresolved[handle] = true
+				_unresolved[handle] = type_id
 				_stats.unresolved += 1
 				continue
 			node.name = "Wire_%04x" % handle
@@ -166,7 +224,8 @@ func present() -> void:
 				"index": int(snap[base + NovaSimulation.PF_INDEX]),
 				"bms_id": int(snap[base + NovaSimulation.PF_BMS_ID]),
 				"wire_handle": handle,
-				"item_id": type_id,
+				"item_id": visual_item_id,
+				"runtime_type_id": type_id,
 			})
 			_nodes[handle] = node
 			_stats.spawned += 1
@@ -184,15 +243,30 @@ func present() -> void:
 			snap[base + NovaSimulation.PF_ROLL_DEG])
 		node.transform = Transform3D(MissionObjectPlacer.bms_to_godot_basis(rot), pos)
 		PresentAimOverlay.apply(node, snap, base)
+		PresentEmplacedWeapon.clear(node)
+		_apply_procedural_part(node, snap, base)
+		PresentEmplacedWeapon.apply(node, snap, base, false)
 		_apply_body_anim(node, snap, base)
-		node.visible = int(snap[base + NovaSimulation.PF_ALIVE]) == 1
+		# Host-side dynamic mount targets reach this pass instead of the placed
+		# MissionPresentPass, so consume the same retail local-view cull verdict.
+		# Joiner snapshots leave the bit clear.
+		# Death is not disappearance: non-organics retain their graphic or
+		# husk, and organics retain their corpse, until PF_HIDDEN ends their
+		# presentation. This is the same contract as MissionPresentPass.
+		node.visible = (
+				int(snap[base + NovaSimulation.PF_HIDDEN]) == 0
+				and int(snap[base +
+						NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED]) == 0)
 		if spawned_now and _node_spawned_callback.is_valid():
-			_node_spawned_callback.call(node, runtime_kind, type_id)
+			_node_spawned_callback.call(node, runtime_kind, visual_item_id)
 	_stats.live = live.size()
-	for h in _nodes.keys():
-		if not live.has(h):
-			_nodes[h].queue_free()
-			_nodes.erase(h)
+	for handle_v in _nodes.keys():
+		var handle := int(handle_v)
+		if not live.has(handle):
+			_free_wire_node(handle)
+	for handle_v in _unresolved.keys():
+		if not live.has(int(handle_v)):
+			_unresolved.erase(handle_v)
 
 
 func entity_count() -> int:

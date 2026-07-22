@@ -3249,6 +3249,12 @@ The friend/foe item pair lets one deployable look different to each side, select
 flag). [orig: `NapiNPClientMsg_0x059 @ 0x4228E0` → `Entity_SpawnOrUpdateFromSlotPacket @ 0x546770`].
 **Witness:** probe3_again ×12 — a `Rifle-sized Crate` (`itemId=0x0362`) dropped by player slot 5 at world
 `(53.5, -27.9, 11.6)`, `parent=none`; byte-exact full-consume via `decode_deployed_item_spawn`.
+That is **codec coverage, not production client consumption**: the reimpl
+`NetClientView` does not fold decoded 0x59 rows into live placed entities,
+and the throwable host path emits neither 0x59 spawn nor 0x12 removal. Together
+with the absent tag-2 round-event → client `RoundSim` fold, remote clients see
+neither the flying throwable nor its persisted-device replacement
+(D-THROW-7).
 
 **S2C `0x44` — entity-routed sub-packet.** A 5-B sub-header `[u16 field0][i16 netId][u8 subtype]` then a
 class-dependent body the dispatcher routes to the target entity's per-class serialize callback (`entity
@@ -3971,7 +3977,23 @@ kill-cam distance reel, the weather/impact shake.
   both directions. **Unported tails**: the seated lean ramp variant, the Flags 0x20/0x100000
   ramp gates, the 4-sample terrain eye clamp + the remote trig CameraOffset, torsoRoll(+0x2DC)
   and pitchBlend(+0x380) camera terms, the zoom-adjust keys (slot+0xC beyond the scope_max_mag
-  seed), analog axes, keyboard look/turn keys, binoculars/NVG inputs.
+  seed), analog axes, and keyboard look/turn keys.
+- **Binoculars/NVG ported 2026-07-21.** Binoculars is input action 26 (catalog id 103,
+  default B), not action 220: the raw request (0xB76539) survives movement/death/round/3P
+  suppression; raised pose (0xB7653A) survives 3P; effective optics (0xB76538) is FP-only,
+  fixes horizontal FOV at 20 degrees, hides the FP model/crosshair/SIGHTS card, disables scoped
+  mouse reduction and weapon/category/cycle input, and adds the persistent 0x02000000-BAM
+  random aim displacement. The hosted HUD loads `Binoculr.tga`, `BinoCH.tga`, and
+  `BNumbers.tga` from VFS and ports the exact four-digit range easing. NVG is action 41
+  (catalog id 104, default N), independent of mission `EnableNVG`; actions 56/57 (OEM +/−)
+  clamp gain 0..4 even while off. `StartWithNVGOn 0x400000` reseeds every player init,
+  first-person-only environment gain uses the exact hemisphere formula, Inset sights drop/
+  restore through the normal scope toggle, and the post/mask/scale presentation is hosted.
+  Binocular activation also refuses while the PowerThrow fire-charge tick is live, preserving
+  the held windup instead of converting optics input suppression into a release. Bounded
+  residuals: the NVG post collapses the retail four-frame temporal history to the current
+  frame, the NVG style-8 laser and raw-active death-screen exception remain unported, and
+  Binoculars still lacks its capture-point detail overlay.
 
 **§5.40 viewmodel correction (2026-07-08, same train):** the FP viewmodel hardcode named a
 model that does not exist in the JO assets ("AKM_1st"), so the gun never loaded and the arms
@@ -5488,7 +5510,9 @@ visual (effects, decals, sound).
 `Projectile_UpdatePhysics @ 0x4E9D70` (ammo def = `g_ammoDefTable[276·idx]`, idx at
 projectile+620, lifetime at +684). Flag 2 `ignore` only ages the round; flag 0x2000
 `useownmove` dispatches an ammo-specific movement callback and skips the stock ballistic
-ray/gravity/drag path. Before an ordinary sweep, a strictly submerged round below
+ray/gravity/drag path. The witnessed `nade`/`schl`/`clym` callbacks are now ported
+through the items.def class binding (§27 / correspondence §5.8); other callback/guidance
+families remain open. Before an ordinary sweep, a strictly submerged round below
 0x4000 Q16 speed is retired. Exact-zero velocity is another special leaf: no movement or
 ray, `vz -= 167` even for NoGravity, and no drag. Otherwise the tick sweeps with the OLD
 velocity through terrain, water (`Projectile_CheckWaterIntersection @ 0x4E59D0`), static
@@ -5719,8 +5743,10 @@ RoundSim now carries the recovered ordinary force order around that query. Each 
 float position/velocity is converted to Q16 for the tick; the nonzero sweep uses the old
 velocity, a consumed hit gets no post-sweep force, and a miss commits its fixed endpoint
 before gravity and `Entity_ApplyDragAndBounceForce` update the next-tick velocity. The
-exact-zero, submerged-slow, Ignore, UseOwnMove, NoGravity, dry/wet drag, overshoot,
-bin-1219, and deterministic below-stable branches are pinned by `projectile_combat`.
+exact-zero, submerged-slow, Ignore, the UseOwnMove dispatch, NoGravity, dry/wet drag,
+overshoot, bin-1219, and deterministic below-stable branches are pinned by
+`projectile_combat`; the throwable motor bodies and exact fuse-head timing are pinned
+separately by `throwables`.
 
 Damage consequences are no longer organic-only. RoundSim implements the arming/dud
 substitution as a live logical child rather than an impact-row-only swap: an early entity
@@ -5740,8 +5766,9 @@ returns 2000 before zone/class/min/max but still passes through the downstream a
 occupant, remaining-health, and NoDie gates.
 
 Remaining data/integration gaps are explicit: threshold-crossing `tumble_error` still
-needs the retail PRNG and local frame; `useownmove` needs its ammo-specific callbacks and
-guidance; `Projectile_ApplyDragDeceleration` still needs the `armor_density` impact-energy
+needs the retail PRNG and local frame; non-throwable `useownmove` classes still need their
+ammo-specific callbacks/guidance (the witnessed grenade/satchel/claymore motors are
+ported under D-THROW); `Projectile_ApplyDragDeceleration` still needs the `armor_density` impact-energy
 path; explosive/AoE, bounce, and shell physics remain separate; production animated
 organic section matrices are not yet published, so persons can use the bounded torso
 fallback; and `LiveRound` still exposes float position/velocity carriers around the Q16
@@ -5783,8 +5810,10 @@ resolution (position, normalized direction, tag) →
 (`world/ammo_table.h kImpactEffectTagNames`) → `game_world._route_round_impacts`
 destructively drains each row and presents both its generic World-domain particle transient
 and 3D soundset, retaining production tick/order and catch-up age. A joiner still does not
-feed decoded S2C tag-2 round events into a presentation `RoundSim` (D-WPN-8), so the
-impact route is currently host/SP-only. Three ledger rows record the audit:
+feed decoded S2C tag-2 round events into a presentation `RoundSim` (D-WPN-8 /
+D-THROW-7), so the impact route and flying throwable item models are currently
+host/SP-only; deployed throwables additionally lack the 0x59/0x12 runtime path
+(§5.36). Three ledger rows record the audit:
 **D-WPN-14 is resolved as a false reading** (ballistic arrival timing already matches),
 **D-WPN-15** carries selection legs:
 charmap sampler + `.TIL` overrides unported → terrain always takes the retail no-map dirt
@@ -6359,11 +6388,13 @@ reload/one-shot forced unscope + the pump's rescope. Live-verified (fp_clean_pro
 recoil clip), reload refill 24→30 with reserve 300→294 (the §5.58 refund math),
 mid-reload RMB refused, ADS engage fraction→1 with cam fov 80h→40h, disengage clean.
 
-**Divergences** (ledger D-WPN-1..15): the FUNCTION registry unported (std-only in all
+**Divergences** (ledger D-WPN-1..15 plus the D-WPN-26 runtime-builder addendum): the FUNCTION registry unported (std-only in all
 shipped data, D-WPN-1); single-pool ammo vs per-class pools (D-WPN-2); CanFire's
 busy-child/underwater/score-lock legs + kick sound gate (D-WPN-3); the heat model
 (`WeaponSlot_CalcAccumulatedHeat @ 0x53f780` internals unwitnessed, D-WPN-4); the
-weapon-switch machinery seams (D-WPN-5); local-player-only pump (D-WPN-6); interim
+weapon-switch machinery seams (D-WPN-5); local-player + occupied mounted-parent pump,
+with general non-local/unmounted coverage still open (D-WPN-6); production runtime
+action-table bake lacks the ADM-duration source for authored `auto` delays (D-WPN-26); interim
 ammo seed clipsize/startrounds (D-WPN-7); FSM↔net residual — authority/SP fire now
 appends the primary ring row (including ordinary hip/raise/3P subtype 12) and spawns
 `RoundSim` synchronously, while settled-FP/first-person-mounted zoom subtypes, joiner C2S 0x06/0x25
@@ -6934,14 +6965,16 @@ the FP model re-resolve `count_weapon_effects_and_update_viewmodel @ 0x4dc9e0`).
 reimpl commits on the FSM's switchfrom/switchrank `action_finished`, re-installing the
 viewmodel through the host event drain (`switch_to_weapon`).
 
-**The binoculars hold-swap (input case 220, unported — D-WPN-23).**
-`g_binocularsWeaponSlot @ 0xB75FE0` (renamed) = the slot whose def carries flags
-bit 0x8000000, found at table load `@ 0x54165a`; the key press stashes the equipped slot
-in `g_binocularsStashedSlot @ 0xB75FE4` and equips it via `Player_EquipWeaponByEntity
-@ 0x4e0370`; the release (runtime keys `g_binocularsBindingKey0/1 @ 0x81B68C/E`)
-re-equips the stash. Msg 0x38 (`handle_weapon_switch_packet @ 0x4260b0`) is the
-server-confirmed weapon-entity swap against the tracked pickup entity at
-localPlayer+0x140 — also unported.
+**ToSpecial/QuickSwitch (input case 220, unported — D-WPN-23).**
+This path was previously mislabeled Binoculars. Action 220 is ToSpecial (catalog id 37,
+default F): global 0xB75FE0 is the slot whose def carries `QuickSwitch 0x08000000`
+(found at table load `@ 0x54165a`; only retail `WPN_MAG58_PointAim` authors it), and
+0xB75FE4 stashes the equipped slot. Press equips the target via
+`Player_EquipWeaponByEntity @ 0x4e0370`; release (runtime binding words
+`0x81B68C/E`) re-equips the stash. True Binoculars is the independent action 26/default-B
+state machine described in §5.39 and performs no inventory swap. Msg 0x38
+(`handle_weapon_switch_packet @0x4260b0`) is the server-confirmed weapon-entity swap
+against the tracked pickup entity at localPlayer+0x140 — also unported.
 
 **Map availability rules.** `g_armoryWeaponAvailability @ 0x24D5600`, 255 ints indexed by
 catalog/adm index. Values: 0 banned, 1 allowed (default), 2 ARMORY-ZONE-ONLY (the server
@@ -7004,6 +7037,11 @@ g_localAmmoPools`, `dword_B75FE0/4 → g_binocularsWeaponSlot/g_binocularsStashe
 `word_A76412/6 → g_bmsLoadoutChunkLen/g_bmsAvailabilityChunkLen`, `byte_24D4DFA →
 g_weaponRestoreFlag`; rename proposal left as a comment: `restrictionData →
 g_spawnLoadoutBuffer` (human-curated name, proposal-first policy).
+
+**Erratum (2026-07-21):** the 0xB75FE0/4 and 0x81B68C/E names in that 2026-07-18
+rename list are wrong: they belong to ToSpecial/QuickSwitch, not Binoculars. Treat them as
+`g_quickSwitchWeaponSlot` / `g_quickSwitchStashedSlot` and the corresponding
+ToSpecial binding words; Binocular globals are 0xB76538..0xB7653B.
 
 **Open follow-ups:** the entity+0x68 AI-binding value DURING Player_InitPlayer (decides
 whether the spawn switch's mount walk runs — D-WPN-21 models it as not-yet-bound); the
@@ -8072,7 +8110,7 @@ subset) function-by-function against the kong IDB. Scope and verdicts:
 | System | Reimpl | Verdict | Key witness |
 |---|---|---|---|
 | SessionSequencing/SessionCrypto framing | `frame_session_packet`/`deframe_session_packet` (`libs/npwire/protocol_message.{h,cpp}`) | **MATCHING** | `CNapiNPConnection_SendSessionPacket @ 0x61edd0` (header `[remote_key 0x150][seq 0x7ac][ack 0x7b8][u8 0]`, inner SCRK = TX key @ conn+0xCC, outer static NWU key) / `CNapiNPConnection_ParseMessages @ 0x625bc0` (RX key @ conn+0x10c, `recv_ack_seq` latch) / `CNapiNPConnection_BuildOutgoingPackets @ 0x628430` (`++out_packet_seq` per packet ⇒ identical wire seq 1,2,3…). Original is resend-capable (messages pre-assigned to a seq, node+52); ours frames at send time — wire-identical for first sends. TX/RX key split = `GenerateTxKey @ 0x61dfe0` self key vs peer key. |
-| `np::slice_batch_pages` chunker | `libs/npruntime/batch_chunker.h` | **MATCHING (model)** — boundary divergence D-NET-135 | budget 650 with per-pool margin, guard AFTER each record: 0x0C `+100 > 650` (`serialize_entity_states_to_buffer @ 0x5030a0` @0x50340d), 0x20 `+30 > 650` (`@ 0x503460` @0x503694), 0x10 `+40 > 650` (`serialize_pool2_static_to_buffer @ 0x5042F0` — function defined + named this session, was `loc_5042F0` code-island). Phase order 0x10→0x0D→0x0C→0x20→0x45 confirmed (`Server_SendInitialGameStateToPlayer @ 0x51bba0` state-4 cases 1..5). |
+| `np::slice_batch_pages` chunker | `libs/npruntime/batch_chunker.h` | **MATCHING (byte boundary)** — D-NET-135 fixed 2026-07-20 | budget 650 with per-pool margin, guard AFTER each record: 0x0C `+100 > 650` (`serialize_entity_states_to_buffer @ 0x5030a0` @0x50340d), 0x20 `+30 > 650` (`@ 0x503460` @0x503694), 0x10 `+40 > 650` (`serialize_pool2_static_to_buffer @ 0x5042F0`), 0x0D `+110 > 650` (`serialize_entity_pool_to_packet_0 @ 0x503940`). Phase order 0x10→0x0D→0x0C→0x20→0x45 confirmed (`Server_SendInitialGameStateToPlayer @ 0x51bba0` state-4 cases 1..5). |
 | Retail-join player record (minimap flags / net_id / playerClass) | `build_pool0_organic_batch` (`libs/netsim/entity_wire_bridge.cpp`) | flags bit 0x100 + playerClass clamp **matching**; bit 0x01 model **divergent** (D-NET-136); net_id encoding **divergent-tolerable** (D-NET-137) | `Server_PlayerAdd @ 0x51cbc0` (`entity+36 \|= 1` @0x51d0da per-entity, remote adds only; class [5,9]-else-8 clamp @0x51d102; entity+120 = event+76 = connection_id @0x51d068); packer `lookup_entity_slot_and_pack_entry @ 0x57ad40` (@0x57ae47); decoder `MinimapSlot_FindByPackedId @ 0x57a270` (renamed from `sub_57A270`); client self-heal `NapiNPClientMsg_0x00C @ 0x42eadb`. |
 | 0x22→0x46 ack-walk | `dispatch_session_replies case 0x22` + `encode_player_sync`/`_removal` | **FIXED to echo** (was server-computed) | §5.33 update: echo @ 0x505f05, client walk-terminator @ `NapiNPClientMsg_PlayerSync @ 0x431370` tail (`slot+1 < g_max_player_slots`, re-request `0x5CF7`); removal = 3-B early return @ 0x505f37; `Server_PlayerAdd` broadcast fieldFlags 0x1CF7 (`push 7415` @0x51d2bf). `cstr_fixed` misnomer → `cstr_capped` (strings are strlen+1 on the wire). |
 | 0x0A ported subset | `build_0a_frame`/`emit_connection_s2c` (`libs/netsim/connection_fan.cpp`) | ported subset **matching**; deferrals correctly characterized (D-NET-134 stands); health byte **divergent (D-NET-138 — FIXED 2026-07-02**, pack ported from `Entity_GetHealthClassification @ 0x4AD4E0`; live v11: 0 C 0x0F**)** | `Server_SendEntityStateToPlayer @ 0x517ba0` (deploy gate `+32==6`, `++phase` before first write, eye ref, budget halving `+89876`/uptime>2000, unreliable send flags (0,1)); sub-block 0 = weapon/reload/uniform (`@ 0x4ff81b`; `FrameAimBlock` → `FrameWeaponBlock` rename everywhere); sub-block 1 values confirmed (C6EAE0=20/C6EAE4=13/fps/cpu/round-secs). |
@@ -8502,30 +8540,28 @@ free counter unchanged once `world.env` authoring and vehicle-mount modeling lan
 so the load-bearing `C6EAE4` fall-damage tolerance reaches the client on frame 1 (matches the original,
 which increments to 1 before its first write).
 
-**D-NET-135** [reimpl divergence, DOCUMENTED 2026-07-01] **World-stream batch paging uses a single
-fixed 640-byte pre-check where the original uses a 650-byte budget with a per-pool headroom margin
-checked AFTER each record.** The pool serializers self-limit inside a 4096-B caller buffer: 0x0C
+**D-NET-135** [FIXED 2026-07-20] **World-stream batch paging now uses retail's 650-byte budget with
+the witnessed per-pool headroom margin checked AFTER each record.** The pool serializers self-limit
+inside a 4096-B caller buffer: 0x0C
 organics break on `written + 100 > 650` (`serialize_entity_states_to_buffer @ 0x5030a0`, guard
 @ 0x50340d — margin 100 covers the variable name string), 0x20 pool-3 on `written + 30 > 650`
 (`serialize_entity_pool_to_packet @ 0x503460` @ 0x503694), 0x10 pool-2 static on `written + 40 > 650`
 (`serialize_pool2_static_to_buffer @ 0x5042F0` @ 0x504687-region). `np::slice_batch_pages`
-(`libs/npruntime/batch_chunker.h`) grows a page until the NEXT record would exceed a flat
-`max_page_bytes = 640` — same ~650 cap, same ≥1-record-per-page guarantee and cursor resume, but the
-record-per-datagram boundary can differ from retail by one record. Every page is still a valid
-count-prefixed sub-batch a stock client reassembles into the identical world — interop-equivalent,
-not byte-identical batching. Faithful fix (if ever needed for capture-diff parity): per-pool margins
-with the post-write guard.
+now accepts an explicit pre-write or post-write policy. The four entity-pool call sites select the
+post-write policy with their retail margins, retaining the crossing record and the existing
+at-least-one-record guarantee, page cursor, and paced resume behavior.
 **Complete witness (2026-07-05), scoping the fix precisely:** all four world-stream pool margins are
 now pinned — 0x0C = **100** (`@ 0x5030a0`), 0x20 = **30** (`@ 0x503460`), 0x10 = **40** (`@ 0x5042F0`),
 and 0x0D = **110** (`serialize_entity_pool_to_packet_0 @ 0x503940`, guard `write_ptr - buffer_start +
 110 > 650`) — all against the common **650** budget, checked AFTER each record (the crossing record IS
 included). **The 0x45 tiles are NOT part of this divergence:** `serialize_terrain_tiles @ 0x6080F0`
 uses a different model — fill a caller `buf_size` while `remaining >= 12` (a PRE-check that EXCLUDES the
-crossing tile), which is exactly what our `slice_batch_pages` already does. So the faithful port applies
-to the four world pools only: add a per-tag `margin` post-write-guard mode (budget 650, include the
-crossing record) to `emit_paged_pool`, leaving the tile path on the existing pre-check. Deferred here
-because changing the world-pool page boundaries would alter byte-exact golden captures whose re-capture
-is asset-gated — this belongs on the golden-harness (tier-2) loop, not a blind edit.
+crossing tile). The production 0x45 call uses the named 650-B pre-write policy, reproducing the
+D-NET-83 stock boundaries exactly: 52 tiles / 644 B on the 20-B-header first page and 53 tiles /
+640 B on 4-B-header continuations. The four entity pools use their named post-write policies.
+`npruntime_batch_chunker` pins the real four-byte pool-3 header boundary (624/34 B), strict
+greater-than comparison, all five named policies, and both tile page shapes;
+`npruntime_initial_state_burst` covers the production initial-state path.
 
 **D-NET-136** [reimpl divergence, DOCUMENTED 2026-07-01] **The 0x0C player-record `entity+36` bit
 0x01 is computed PER-RECIPIENT ("this is your own entity"); retail sets it ONCE per entity at add

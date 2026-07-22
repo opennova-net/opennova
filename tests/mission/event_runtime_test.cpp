@@ -126,6 +126,61 @@ static void test_wac_to_bms_shared_var() {
     CHECK(w.commands.ssn_dead(100));
 }
 
+// A mission WAC script can tune the global infantry aim spread, and the AI pass
+// consumes the new value. Retail resolves `accuracyspread` through the writable
+// named-value table, then reads that same dword in the sawtooth aim-error formula.
+// [orig: WacScript_ResolveParameter @0x4f2940 -> wac_var_accuracyspread
+// @0xC6EAE8; Entity_UpdateInfantryAI @0x4bc5ea]
+static void test_wac_accuracyspread_drives_npc_aim() {
+    World w;
+    w.registry.configure_pool(0, 4);
+
+    world::Entity target{};
+    target.kind = world::EntityKind::Organic;
+    target.team = 2;
+    target.health = 100;
+    target.position = {20.0f, 0.0f, 0.0f};
+    const world::EntityHandle target_h = w.registry.spawn(0, target);
+
+    world::Entity npc_seed{};
+    npc_seed.kind = world::EntityKind::Organic;
+    npc_seed.team = 1;
+    npc_seed.health = 100;
+    const world::EntityHandle npc_h = w.registry.spawn(0, npc_seed);
+
+    world::AiSystem ai;
+    const int ai_index = ai.attach(npc_h);
+    world::AiEntity &npc = *ai.at(ai_index);
+    npc.team = 1;
+    npc.health = 100;
+    npc.inf.combat_target = target_h;
+    npc.inf.anim_state = world::anim_state::kAttack;
+    npc.inf.aim_point[0] = 20 << 16; // no lead: target is stationary
+    npc.slot.f[11] = 1;              // fresh-target accuracy parameter
+
+    // Default spread 1: target is due east, so the heading is only the witnessed
+    // sawtooth error term.
+    ai.infantry_combat_think(npc, w, /*key=*/1);
+    CHECK(npc.inf.aim_valid);
+    const int32_t default_heading = npc.inf.aim_heading;
+    CHECK(default_heading != 0);
+
+    wac::WacSystem wac_sys;
+    wac::CompileEnv env;
+    wac_sys.set_program(wac::compile_source(
+        "if never() then set(AcCuRaCySpReAd,3) endif\n"
+        "if eq(accuracyspread,3) then set(v9,1) endif\n", env));
+    w.add_system(&wac_sys);
+    w.load_systems();
+    tick_n(w, wac::WacSystem::kTicksPerExecution);
+    CHECK(w.vars.get_mission(0) == 0); // the named lvalue must not alias V0
+    CHECK(w.vars.get_mission(9) == 1); // WAC can read its write back
+
+    npc.inf.aim_point[0] = 20 << 16;
+    ai.infantry_combat_think(npc, w, /*key=*/1);
+    CHECK(npc.inf.aim_heading == default_heading * 3);
+}
+
 // Pure BMS: var counter via Increment, trigger threshold, fire-once vs ResetAfter.
 // Two events: index 0 is touched on passes 1,5,9,.. (ticks 16,80,144,208) and index 1
 // on passes 2,6,10,.. (ticks 32,96,160,224).
@@ -906,6 +961,7 @@ static void test_bluewin_ends_round() {
 int main() {
     test_bms_to_wac_shared_var();
     test_wac_to_bms_shared_var();
+    test_wac_accuracyspread_drives_npc_aim();
     test_bms_increment_and_threshold();
     test_activation_delay();
     test_activation_delay_signed_wrap();

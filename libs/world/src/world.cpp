@@ -1,8 +1,12 @@
 #include "world/world.h"
 
+#include <algorithm>
 #include <cmath>
 #include <utility>
 #include <vector>
+
+#include "world/angle.h"
+#include "world/vehicle_attach.h"
 
 #include "world/ai.h" // AiSystem / AiEntity / ai_apply_command — the AI-change command target
 
@@ -14,28 +18,32 @@ namespace opennova::world {
 static constexpr double kMountRadius = 20.0;
 
 static void emit_vehicle_control(World &world, const char *kind, uint16_t target_net_id,
-                                 int32_t target_bms_id, uint32_t target_spawn_origin) {
+                                 int32_t target_bms_id, uint32_t target_spawn_origin,
+                                 uint16_t target_wire_handle) {
     Effect effect;
     effect.kind = kind;
     effect.a = static_cast<int32_t>(target_net_id);
     effect.b = target_bms_id;
     effect.c = static_cast<int32_t>(target_spawn_origin);
+    effect.d = static_cast<int32_t>(target_wire_handle);
     world.effects.push(std::move(effect));
 }
 
 void emit_vehicle_control_started(World &world, const Entity &vehicle) {
     emit_vehicle_control(world, "vehicle_control_started", vehicle.net_id, vehicle.bms_id,
-                         vehicle.spawn_origin);
+                         vehicle.spawn_origin, vehicle.handle.packed);
 }
 
 void emit_vehicle_control_stopped(World &world, const Entity &vehicle) {
-    emit_vehicle_control_stopped(world, vehicle.net_id, vehicle.bms_id, vehicle.spawn_origin);
+    emit_vehicle_control_stopped(world, vehicle.net_id, vehicle.bms_id, vehicle.spawn_origin,
+                                 vehicle.handle.packed);
 }
 
 void emit_vehicle_control_stopped(World &world, uint16_t target_net_id,
-                                  int32_t target_bms_id, uint32_t target_spawn_origin) {
+                                  int32_t target_bms_id, uint32_t target_spawn_origin,
+                                  uint16_t target_wire_handle) {
     emit_vehicle_control(world, "vehicle_control_stopped", target_net_id, target_bms_id,
-                         target_spawn_origin);
+                         target_spawn_origin, target_wire_handle);
 }
 
 bool vehicle_claim_primary_occupant(World &world, Entity &vehicle, EntityHandle occupant,
@@ -73,6 +81,51 @@ bool vehicle_release_primary_occupant(World &world, Entity &vehicle, EntityHandl
     return true;
 }
 
+bool vehicle_bind_use_gun_slot(World &world, Entity &occupant, Entity &vehicle) {
+    if (!occupant.use_gun_slot_swapped) {
+        occupant.pre_use_gun_equipped_adm_index = occupant.equipped_adm_index;
+        occupant.use_gun_slot_swapped = true;
+    }
+    vehicle.primary_weapon_owner = occupant.handle;
+
+    const int weapon_index = world.weapons.index_of(vehicle.primary_weapon.c_str());
+    if (weapon_index < 0 || weapon_index > 0xFF) {
+        occupant.equipped_adm_index = 0xFF;
+        return false;
+    }
+    const uint8_t adm = static_cast<uint8_t>(weapon_index);
+    const WeaponTableEntry *weapon = world.weapons.by_index(adm);
+    if (weapon == nullptr) {
+        occupant.equipped_adm_index = 0xFF;
+        return false;
+    }
+    if (vehicle.primary_weapon_slot_adm != adm) {
+        vehicle.primary_weapon_slot = WeaponSlotState{};
+        vehicle.primary_weapon_slot_adm = adm;
+        if (weapon->clipsize < 0) {
+            vehicle.primary_weapon_slot.clip = -1;
+        } else {
+            vehicle.primary_weapon_slot.clip = weapon->clipsize;
+            vehicle.primary_weapon_slot.reserve = std::max<int32_t>(
+                    0, static_cast<int32_t>(weapon->startrounds) - weapon->clipsize);
+        }
+    }
+    occupant.equipped_adm_index = adm;
+    return true;
+}
+
+void vehicle_release_use_gun_slot(Entity &occupant, Entity *vehicle) {
+    if (vehicle != nullptr && vehicle->primary_weapon_owner == occupant.handle)
+        vehicle->primary_weapon_owner = EntityHandle{};
+    if (!occupant.use_gun_slot_swapped) return;
+    const bool is_player =
+            ((occupant.flags | occupant.engine_flags) & 0x100u) != 0;
+    occupant.equipped_adm_index =
+            is_player ? occupant.pre_use_gun_equipped_adm_index : 0xFF;
+    occupant.pre_use_gun_equipped_adm_index = 0xFF;
+    occupant.use_gun_slot_swapped = false;
+}
+
 bool vehicle_has_valid_control_occupant(const World &world, const Entity &vehicle) {
     for (const Seat &seat : vehicle.seats) {
         if (!is_vehicle_control_seat(seat.type) || !seat.occupant.valid()) continue;
@@ -98,7 +151,36 @@ bool seat_allowed_for_mode(SeatType type, SeatSelectionMode mode) {
     }
 }
 
-void pose_mounted_occupant(Entity &occ, const Entity &vehicle, const Seat &seat) {
+void presnap_vehicle_attach_heading(World &world, Entity &occupant,
+                                    const Entity &vehicle, const Seat &seat) {
+    const int16_t seat_yaw = seat.type == SeatType::Gunner
+            ? static_cast<int16_t>(vehicle.yaw - seat.yaw_offset)
+            : static_cast<int16_t>(vehicle.yaw + seat.yaw_offset);
+    occupant.yaw = seat_yaw;
+    if (world.ai == nullptr) return;
+    AiEntity *body = world.ai->for_handle(occupant.handle);
+    if (body == nullptr) return;
+
+    const int32_t seat_heading =
+            bam_heading_from_mission_yaw_deg(static_cast<double>(seat_yaw));
+    body->heading = seat_heading;
+    // Retail has one entity Yaw. OpenNova separates the local input-owned look
+    // target from the render heading, so both must receive the same attach snap.
+    if (body->inf.is_local_player)
+        body->inf.target_heading = seat_heading;
+}
+
+void pose_mounted_occupant(World &world, Entity &occ, const Entity &vehicle,
+                           const Seat &seat) {
+    MountedPose live;
+    if (world.mounted_pose_provider != nullptr &&
+        world.mounted_pose_provider->resolve_mounted_pose(world, vehicle, seat, live)) {
+        occ.position = live.position;
+        occ.yaw = live.yaw;
+        occ.pitch = live.pitch;
+        occ.roll = live.roll;
+        return;
+    }
     // Rotate the seat-local offset by the entity orientation frame, then translate by the vehicle
     // origin. In our stored mission-yaw convention this is -vehicle.yaw; this matches the retail
     // seat bone path through Entity_GetBoneTransformAndOrientation @0x4b0c50.
@@ -114,6 +196,77 @@ void pose_mounted_occupant(Entity &occ, const Entity &vehicle, const Seat &seat)
                       : static_cast<int16_t>(vehicle.yaw + seat.yaw_offset);
     occ.pitch = vehicle.pitch;
     occ.roll = vehicle.roll;
+}
+
+// Attached emplacement children are allocated breadth-first after their carrier,
+// so pool/slot iteration is parent-before-child even for turret-on-vehicle chains.
+// Reuse the mounted-pose provider: a resolved USRP bone follows live PANM; bone
+// zero takes pose_mounted_occupant's parent-root/local fallback.
+static void pose_emplacement_attachments(World &world) {
+    // Parent ownership ends when the carrier dies, even though ordinary item
+    // destruction keeps that carrier resident as a husk. Peel orphan chains
+    // without mutating registry slots during traversal.
+    for (int depth = 0; depth < 8; ++depth) {
+        std::vector<EntityHandle> orphans;
+        world.registry.for_each([&](const Entity &candidate) {
+            if (!candidate.emplacement_parent.valid()) return;
+            const Entity *parent =
+                    world.registry.get(candidate.emplacement_parent);
+            if (parent == nullptr ||
+                parent->registry_spawn_id !=
+                        candidate.emplacement_parent_spawn_id ||
+                !parent->alive || parent->health <= 0)
+                orphans.push_back(candidate.handle);
+        });
+        if (orphans.empty()) break;
+        for (EntityHandle orphan : orphans) {
+            std::vector<EntityHandle> occupants;
+            world.registry.for_each([&](const Entity &candidate) {
+                if (candidate.mounted && candidate.mount_target == orphan)
+                    occupants.push_back(candidate.handle);
+            });
+            for (EntityHandle occupant : occupants)
+                entity_detach_from_vehicle(world, occupant);
+            world.registry.despawn(orphan);
+        }
+    }
+    world.registry.for_each([&](const Entity &snapshot) {
+        if (!snapshot.emplacement_parent.valid()) return;
+        Entity *child = world.registry.get(snapshot.handle);
+        const Entity *parent =
+                world.registry.get(snapshot.emplacement_parent);
+        if (child == nullptr || parent == nullptr ||
+            parent->registry_spawn_id !=
+                    snapshot.emplacement_parent_spawn_id)
+            return;
+        Seat anchor;
+        anchor.type = SeatType::Gunner;
+        anchor.bone_index = child->emplacement_bone;
+        anchor.seat_local = child->emplacement_local;
+        anchor.yaw_offset = child->emplacement_yaw_offset;
+        pose_mounted_occupant(world, *child, *parent, anchor);
+    });
+
+    // A gunner riding an attached child was posed earlier in the AI system loop,
+    // before the carrier moved. Refresh those occupants from the child's fresh pose.
+    world.registry.for_each([&](const Entity &snapshot) {
+        if (!snapshot.mounted) return;
+        Entity *occupant = world.registry.get(snapshot.handle);
+        const Entity *target = world.registry.get(snapshot.mount_target);
+        if (occupant == nullptr || target == nullptr ||
+            !target->emplacement_parent.valid() ||
+            snapshot.mount_seat < 0 ||
+            snapshot.mount_seat >= static_cast<int>(target->seats.size()))
+            return;
+        if (world.ai != nullptr) {
+            if (AiEntity *body = world.ai->for_handle(snapshot.handle)) {
+                world.ai->pose_if_mounted(*body, world);
+                return;
+            }
+        }
+        pose_mounted_occupant(
+                world, *occupant, *target, target->seats[snapshot.mount_seat]);
+    });
 }
 
 // ----------------------------------------------------------------------------
@@ -425,6 +578,7 @@ bool EntityCommands::mount(uint16_t occupant_ssn, uint16_t target_ssn, SeatSelec
     const int seat_idx = find_best_seat(*tgt, oh, mode);
     if (seat_idx < 0) return false;
     Seat &s = tgt->seats[seat_idx];
+    presnap_vehicle_attach_heading(world_, *occ, *tgt, s);
     s.occupant = oh;                                       // [orig: vehicle[400+2*slot] = handle]
     occ->mount_target = th;                                // [orig: occupant+364]
     occ->mount_target_net_id = tgt->net_id;
@@ -433,10 +587,23 @@ bool EntityCommands::mount(uint16_t occupant_ssn, uint16_t target_ssn, SeatSelec
     occ->mount_seat = static_cast<int8_t>(seat_idx);       // [orig: occupant+360]
     occ->mount_type = s.type;
     occ->mount_bone = s.bone_index;                        // [orig: occupant+0x157]
-    occ->mounted = true;                                   // [orig: occupant+36 |= 0x40]
+    occ->mounted = true;
+    if (s.type == SeatType::Gunner) {
+        // UseGun clears the transient 0xA000 pair but does not set the generic
+        // carried/vehicle flag. [orig: Entity_AttachToUseGunSlot @0x546c56-0x546c7c]
+        occ->flags &= ~0xA000u;
+        occ->engine_flags &= ~0xA000u;
+    } else {
+        // Ordinary vehicle slots clear 0xA000 and mark the occupant carried.
+        // [orig: Entity_AttachToVehicleSlot @0x494752-0x494775]
+        occ->flags = (occ->flags & 0xFFFF5FBFu) | 0x40u;
+        occ->engine_flags = (occ->engine_flags & 0xFFFF5FBFu) | 0x40u;
+    }
     occ->mounted_config_valid = tgt->emplaced_config_valid;
     occ->mounted_config = tgt->emplaced_config_valid ? tgt->emplaced_config : 0;
-    pose_mounted_occupant(*occ, *tgt, s);
+    if (s.type == SeatType::Gunner)
+        vehicle_bind_use_gun_slot(world_, *occ, *tgt);
+    pose_mounted_occupant(world_, *occ, *tgt, s);
     vehicle_claim_primary_occupant(world_, *tgt, oh, s.type); // [orig: +368 claim @0x4946d0]
     return true;
 }
@@ -489,11 +656,15 @@ bool EntityCommands::dismount(uint16_t occupant_ssn) {
     const uint16_t target_net_id = occ->mount_target_net_id;
     const int32_t target_bms_id = occ->mount_target_bms_id;
     const uint32_t target_spawn_origin = occ->mount_target_spawn_origin;
+    const uint16_t target_wire_handle = occ->mount_target.packed;
     const EntityHandle oh = occ->handle;
     Entity *tgt = world_.registry.get(occ->mount_target);
     if (tgt && occ->mount_seat >= 0 && occ->mount_seat < static_cast<int>(tgt->seats.size()))
         tgt->seats[occ->mount_seat].occupant = EntityHandle{}; // [orig: vehicle[400+2*slot]=0xFFFF]
+    vehicle_release_use_gun_slot(*occ, tgt);
     occ->mounted = false;
+    occ->flags &= ~0x40u;
+    occ->engine_flags &= ~0x40u;
     occ->mount_target = EntityHandle{};
     occ->mount_target_net_id = 0;
     occ->mount_target_bms_id = 0;
@@ -510,7 +681,7 @@ bool EntityCommands::dismount(uint16_t occupant_ssn) {
         // host tears the presentation down (host cleanup — the claimant check is
         // unavailable, and a spurious stop is idempotent downstream).
         emit_vehicle_control_stopped(world_, target_net_id, target_bms_id,
-                                     target_spawn_origin);
+                                     target_spawn_origin, target_wire_handle);
     }
     return true;
 }
@@ -672,10 +843,27 @@ void World::run_logic_tick(bool is_authority, bool pre_mission) {
     // entity to the replicated wire state. [orig: the client tick still steps the
     // local player's infantry motor; Server_TickUpdate / Game_ProcessMainFrame.]
     for (ISystem *s : systems_) s->tick(*this, ctx);
-    // Live rounds step inside the world frame, authority-only — the client's visual
-    // round re-sim is not modeled here [orig: Entity_UpdateAllEntities ->
+    pose_emplacement_attachments(*this);
+    // Entity_UpdateAllEntities walks pool 1 before the projectile pool. That
+    // prevents a newly converted charge from losing an arm-delay tick and lets
+    // claymore shrapnel fly later in its detonation frame [orig:
+    // Entity_UpdatePool1Slot @0x4b8dd0 -> Weapon_UpdateAllProjectiles @0x4ec020].
+    // These presentation events describe only the current authoritative tick.
+    if (is_authority && !pre_mission) {
+        throwables.events.clear();
+        throwables.tick(*this, ai != nullptr ? ai->collision : nullptr, terrain);
+    }
+    // The global weapon-action pump follows the complete entity/system update and
+    // precedes projectile stepping. This is where an AI UseGun nextAction write can
+    // become a same-frame round.
+    // [orig: Entity_UpdateAllEntities @0x52674b, then
+    //  WeaponAction_ProcessAllEntities @0x526786]
+    if (!pre_mission && ai != nullptr)
+        ai->pump_mounted_weapon_slots(*this, logic_tick);
+    // Live rounds then step authority-only; the client's visual round re-sim is
+    // not modeled here [orig: Entity_UpdateAllEntities ->
     // Weapon_UpdateAllProjectiles @0x4ec020; damage is authority-gated end-to-end,
-    // §5.60]. Terrain is the host-wired sampler (AI grounding shares it).
+    // §5.60]. Terrain is the host-wired sampler shared with AI grounding.
     if (is_authority && !pre_mission)
         round_sim.tick(*this, terrain, ai != nullptr ? ai->collision : nullptr);
     if (is_authority && !pre_mission) {
@@ -789,6 +977,7 @@ World::Snapshot World::snapshot() const {
     Snapshot s;
     s.registry = registry;
     s.vars = vars;
+    s.wac_values = wac_values;
     s.env = env;
     s.logic_tick = logic_tick;
     s.local_player = cached.local_player;
@@ -798,6 +987,7 @@ World::Snapshot World::snapshot() const {
 void World::restore(const Snapshot &s) {
     registry.restore_from(s.registry);
     vars = s.vars;
+    wac_values = s.wac_values;
     env = s.env;
     logic_tick = s.logic_tick;
     // Reset per-tick health/proximity counters, then restore only the stable
@@ -810,6 +1000,7 @@ void World::restore(const Snapshot &s) {
     effects.clear();
     round_sim.reset();
     explosions.reset();
+    throwables.reset();
     death_pieces.reset();
     destruction_rng.reset();
     destruction = DestructionEvents{};

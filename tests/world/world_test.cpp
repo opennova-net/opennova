@@ -106,6 +106,7 @@ int main() {
     w.cached.local_player = blast_victim;
     w.cached.local_health = 100;
     w.cached.humans = 1;
+    w.wac_values.accuracy_spread = 3;
     World::Snapshot snap = w.snapshot();
     const EntityHandle post_snapshot = w.registry.spawn(0, blast_target);
     CHECK(post_snapshot.valid());
@@ -145,8 +146,10 @@ int main() {
     w.cached.local_player = post_snapshot;
     w.cached.local_health = 77;
     w.cached.humans = 2;
+    w.wac_values.accuracy_spread = 9;
     w.restore(snap);
     CHECK(w.vars.get_mission(1) == 7);
+    CHECK(w.wac_values.accuracy_spread == 3);
     CHECK(w.round_sim.active_count == 0);
     CHECK(!w.round_sim.rounds[0].active);
     CHECK(w.round_sim.deaths.empty());

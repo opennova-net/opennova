@@ -145,6 +145,16 @@ std::vector<GameEntitySnapshot> snapshot_world(const world::World &w) {
 				s.infantry_aim_pitch_bam = ai->inf.aim_pitch;
 			}
 		}
+		// Retail's PLAYER compact writer reads entity Pitch directly. The port
+		// splits the registry record from AiEntity, and mounted pose keeps the
+		// carrier pitch on Entity while preserving the gunner's live look on
+		// AiEntity. Rejoin only that split here; snapshot_of's witnessed integer
+		// yaw conversion deliberately retains its distinct truncation behavior.
+		if (s.entity_class == EntityClass::Player && w.ai != nullptr) {
+			if (const world::AiEntity *ai = w.ai->for_handle(e.handle)) {
+				s.pitch_bam = ai->pitch;
+			}
+		}
 		// Resolve the record carrier's pose here, where the registry is in reach — the
 		// carrier is often a pool-2 STATIC (building) with no snapshot of its own in the
 		// 0x0A list. Mount wins over ground [orig: op1 @0x4c0a08]; a stale handle simply
@@ -339,6 +349,16 @@ PoolSpawnBatch build_pool1_spawn_batch(const world::World &w) {
 		rec.euler_x = engine_axis_bam(e.pitch);
 		rec.euler_y = engine_axis_bam(e.roll);
 		rec.team_byte = e.team;
+		// items.def addeweap children use retail's existing entity+368
+		// relationship in the 0x0D spawn record. Positions remain absolute world
+		// coordinates; the client derives the rigid child-to-parent transform only
+		// after the complete batch has populated both rows.
+		if (e.emplacement_parent.valid()) {
+			const world::Entity *parent = w.registry.get(e.emplacement_parent);
+			if (parent != nullptr && parent->registry_spawn_id ==
+					e.emplacement_parent_spawn_id)
+				rec.parent_handle = e.emplacement_parent.packed;
+		}
 		// Faithful 0x0800 AI-trailer gate: emit the trailer ONLY for AI-capable item defs
 		// (items.def ItemDefAttrib & 0x100000 = AIData, resolved into Entity::is_ai_capable). This
 		// matches the stock 0x0D decoder's own gate exactly (itemDef.attrib & 0x100000 @0x433327),

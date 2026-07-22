@@ -34,6 +34,7 @@ const MissionPresentPass := preload("res://engine/world/mission_present_pass.gd"
 const WirePresentPass := preload("res://engine/world/wire_present_pass.gd")
 const FirePresentPass := preload("res://engine/world/fire_present_pass.gd")
 const DestructionPresentPass := preload("res://engine/world/destruction_present_pass.gd")
+const ThrowablePresentPass := preload("res://engine/world/throwable_present_pass.gd")
 const MissionSeatDiagnostics := preload("res://engine/world/mission_seat_diagnostics.gd")
 
 # Fixed-timestep accumulator. The original decouples the simulation from rendering: the master
@@ -45,9 +46,10 @@ const MAX_CATCHUP_TICKS := 31        # spiral-of-death clamp: port of the 500 ms
 
 var _sim: NovaSimulation
 var _present                          # MissionPresentPass: placed nodes (host/SP/editor); null on a joiner
-var _wire_present                     # WirePresentPass: un-placed remote players (co-op host + joiner); else null
+var _wire_present                     # WirePresentPass: un-placed network entities or SP attachment children
 var _fire_present                     # FirePresentPass: AI/remote fire sound + muzzle + tracers (host); else null
 var _destruction_present              # DestructionPresentPass: husk swap + debris + wreck effects (host); else null
+var _throwable_present                # ThrowablePresentPass: thrown/placed device models (host); else null
 var _index
 var _self_tick := false              # editor: self-tick via _process while playing; game: host calls tick()
 var _playing := false
@@ -205,10 +207,17 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	# MissionPresentPass can't resolve it. The host keeps MissionPresentPass for its placed NPCs and
 	# adds this pass for the spawned players, deferring any row that resolves to a placed node (via
 	# _index) so nothing double-renders. The joiner places nothing (index null -> render every row).
-	if is_joiner or _sim.is_host_listening():
+	var full_wire_present := is_joiner or _sim.is_host_listening()
+	var sp_attachment_present := (
+			not full_wire_present and options.get("placer") != null)
+	if full_wire_present or sp_attachment_present:
 		_wire_present = WirePresentPass.new()
 		_wire_present.setup(_sim, options.get("placer"), container, options.get("env_node"),
-			null if is_joiner else _index)
+			null if is_joiner else _index, {
+				"synthetic_origin_only": sp_attachment_present,
+			})
+		simulation_restarted.connect(
+				Callable(_wire_present, 'reset_runtime_state'))
 	# The host fire-presentation pass: AI/remote fire sound + muzzle effect + tracer
 	# streaks off the sim's fired/tracer drains — providers come from the host shell
 	# (game_world). A joiner's presentation seam is its own decode path (net views).
@@ -227,9 +236,19 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 		_destruction_present.setup(_sim, container, _index, options.get("placer"),
 			options.get("item_db"), options.get("game_world"),
 			options.get("fire_audio", Callable()),
-			options.get("fire_fx", Callable()), options.get("env_node"))
+			options.get("fire_fx", Callable()), options.get("env_node"),
+			_wire_present)
 		simulation_restarted.connect(
 				Callable(_destruction_present, 'reset_runtime_state'))
+	# The throwable-presentation pass: item models for flying grenades/satchels
+	# and placed devices, reconciled from the sim's visual snapshot
+	# (world-wac-ai-re §27; the sim stays render-free).
+	if not is_joiner:
+		_throwable_present = ThrowablePresentPass.new()
+		_throwable_present.setup(_sim, container, options.get("placer"),
+			options.get("item_db"), options.get("env_node"))
+		simulation_restarted.connect(
+				Callable(_throwable_present, 'reset_runtime_state'))
 	# Spawn the host's own player as an authoritative pool-0 entity (ADR 0012 / net-re §5.2b).
 	# After load (the spawn needs the AI system wired). The spawn POSE is selected the way the
 	# original engine does — by game type, from the mission's player-START marker FARTHEST from the
@@ -558,6 +577,12 @@ func set_wire_node_spawned_callback(callback: Callable) -> void:
 		_wire_present.set_node_spawned_callback(callback)
 
 
+## The active wire-direct presenter, exposed for lifecycle integrations and
+## diagnostics. Null when this mission has no replicated/synthetic rows.
+func get_wire_presenter() -> RefCounted:
+	return _wire_present
+
+
 func get_present_index():
 	return _index
 
@@ -653,6 +678,8 @@ func tick() -> bool:
 			_fire_present.present(1)
 		if _destruction_present != null:
 			_destruction_present.present()
+		if _throwable_present != null:
+			_throwable_present.present()
 		_perf_present_us = Time.get_ticks_usec() - present_start
 	_perf_tick_us = Time.get_ticks_usec() - tick_start
 	_perf_did_tick = did_tick
@@ -687,7 +714,8 @@ func _advance_one_tick_no_present() -> bool:
 ## ticks (clamped to MAX_CATCHUP_TICKS), and present ONCE after the batch. This is the faithful
 ## fixed-62.5 Hz accumulator — the sim runs at a constant rate while rendering stays decoupled at the
 ## host frame rate, with no inter-tick interpolation (present reads current sim state). A long frame
-## runs several ticks, a short frame runs none. Effects drain per tick (the original's per-tick
+## runs several ticks; a short frame runs none but still presents current render-only state (camera,
+## local UseGun suppression, and node ownership). Effects drain per tick (the original's per-tick
 ## emission). Returns the number of logic ticks run this call. [orig: Game_MainLoop @ 0x52b630]
 func tick_realtime(delta: float) -> int:
 	if _sim == null or not _playing:
@@ -697,8 +725,20 @@ func tick_realtime(delta: float) -> int:
 	_accum += delta
 	var n := int(_accum / TICK_DT)
 	if n <= 0:
+		# Retail evaluates entity submission every render frame. Camera mode and
+		# local attach/detach can change between fixed ticks, so the scene passes
+		# must not wait for the next 62.5 Hz quantum. Fire and destruction
+		# presentation remain tick-driven because no gameplay state advanced here.
+		_perf_present_us = 0
+		if _present != null or _wire_present != null:
+			var present_start := Time.get_ticks_usec()
+			if _present != null:
+				_present.present()
+			if _wire_present != null:
+				_wire_present.present()
+			_perf_present_us = Time.get_ticks_usec() - present_start
 		_ticks_last_frame = 0
-		_perf_tick_us = 0
+		_perf_tick_us = Time.get_ticks_usec() - tick_start
 		_perf_did_tick = false
 		return 0
 	_accum -= float(n) * TICK_DT
@@ -714,7 +754,8 @@ func tick_realtime(delta: float) -> int:
 	_perf_sim_us = sim_us
 	_perf_effects_us = effects_us
 	_perf_present_us = 0
-	if _present != null or _wire_present != null or _fire_present != null or _destruction_present != null:
+	if (_present != null or _wire_present != null or _fire_present != null
+			or _destruction_present != null or _throwable_present != null):
 		var present_start := Time.get_ticks_usec()
 		if _present != null:
 			_present.present()
@@ -724,6 +765,8 @@ func tick_realtime(delta: float) -> int:
 			_fire_present.present(n)
 		if _destruction_present != null:
 			_destruction_present.present()
+		if _throwable_present != null:
+			_throwable_present.present()
 		_perf_present_us = Time.get_ticks_usec() - present_start
 	_perf_tick_us = Time.get_ticks_usec() - tick_start
 	_perf_did_tick = true
@@ -820,12 +863,24 @@ func _exit_tree() -> void:
 	if _fire_present != null:
 		_fire_present.teardown()  # frees the tracer mesh instance under the container
 		_fire_present = null
+	if _wire_present != null:
+		var reset_wire := Callable(_wire_present, 'reset_runtime_state')
+		if simulation_restarted.is_connected(reset_wire):
+			simulation_restarted.disconnect(reset_wire)
+		_wire_present.teardown()
+		_wire_present = null
 	if _destruction_present != null:
 		var reset_destruction := Callable(_destruction_present, 'reset_runtime_state')
 		if simulation_restarted.is_connected(reset_destruction):
 			simulation_restarted.disconnect(reset_destruction)
 		_destruction_present.teardown()  # frees husk models + effect anchors
 		_destruction_present = null
+	if _throwable_present != null:
+		var reset_throwable := Callable(_throwable_present, 'reset_runtime_state')
+		if simulation_restarted.is_connected(reset_throwable):
+			simulation_restarted.disconnect(reset_throwable)
+		_throwable_present.teardown()
+		_throwable_present = null
 	if _sim != null and is_instance_valid(_sim):
 		_sim.free()
 		_sim = null

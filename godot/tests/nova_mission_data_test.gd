@@ -129,6 +129,46 @@ func test_item_database_mount_config_preserves_presence_and_explicit_zero() -> v
 			"target item definition phrase_set is the production mount config source")
 
 
+func test_item_database_preserves_emplacement_attachment_variants_and_markers() -> void:
+	var tmp := ProjectSettings.globalize_path(
+			"user://emplacement_attachment_items_%d.def" % Time.get_ticks_usec())
+	var file := FileAccess.open(tmp, FileAccess.WRITE)
+	assert_not_null(file)
+	file.store_string(
+			"begin AttachmentCarrier\n"
+			+ "  id 710100\n"
+			+ "  addeweap ewep01 710101\n"
+			+ "  addeweapG ewep02 710102 70 10 100 100\n"
+			+ "  addeweapC ewep03 710103\n"
+			+ "  addeweapC ewep04 710104 0 0 0 0\n"
+			+ "  addeweapG ignored05 710105\n"
+			+ "end\n")
+	file.close()
+	var db := NovaItemDatabase.new()
+	assert_eq(db.load(tmp), OK)
+	var rows: Array = db.get_emplacement_attachments(710100)
+	assert_eq(rows.size(), 4, "retail stores at most four child emplacement rows")
+	assert_eq(rows[0]["key"], "addeweap")
+	assert_eq(rows[1]["key"], "addeweapG")
+	assert_eq(rows[2]["key"], "addeweapC")
+	assert_eq(rows[1]["userpoint"], "ewep02")
+	assert_eq(rows[1]["item_id"], 710102, "the public domain keeps the full child item id")
+	assert_eq(rows[1]["down_limit_bam"], 70 * 11930464)
+	assert_eq(rows[1]["up_limit_bam"], -10 * 11930464)
+	assert_true(rows[1]["has_explicit_limits"])
+	assert_true(rows[3]["has_explicit_limits"],
+			"explicit all-zero limits remain distinct from an omitted fallback")
+	assert_eq(db.get_emplacement_attachment_markers(710100),
+			{"g_slot": 2, "c_slot": 4},
+			"the last stored G/C records retain their 1-based markers")
+	assert_true(rows[1]["designated_g"])
+	assert_false(rows[2]["designated_c"],
+			"a later C row overwrites the earlier C designation")
+	assert_true(rows[3]["designated_c"])
+	assert_eq(db.get_item(710100)["emplacement_attachments"].size(), 4)
+	DirAccess.remove_absolute(tmp)
+
+
 func test_entities_resolve_to_models() -> void:
 	var m := NovaMissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)

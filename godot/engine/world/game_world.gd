@@ -588,6 +588,21 @@ func get_sim() -> NovaSimulation:
 	return _runtime.get_sim() if _runtime != null else null
 
 
+## The mounted world's shared weapon.def database. ArmoryHost consumes this on
+## first open so its canonical parent tuples and its visible rows resolve against
+## the same catalog; the FP viewmodel reuses it below (ADR 0018 resource seam).
+func get_weapon_database() -> NovaWeaponDatabase:
+	if _weapon_db == null:
+		if _resource_root == null:
+			return null
+		_weapon_db = NovaWeaponDatabase.new()
+		if _weapon_db.load_from_resource_root(_resource_root, "weapon.def") != OK:
+			push_warning("GameWorld: weapon.def unavailable (%s) — weapon presentation/loadout lookup disabled"
+					% _weapon_db.get_last_error())
+			return null
+	return _weapon_db if _weapon_db.is_loaded() else null
+
+
 func get_runtime():
 	return _runtime
 
@@ -668,6 +683,7 @@ func unload() -> void:
 	# next mission's terrain/sky/water hidden.
 	_reset_blink_frame_gates()
 	_reset_occlusion_frame()
+	set_local_player_nvg_view(false, 0)
 	if _env != null and _env.environment_data != null:
 		_env.environment_data.clear_mission_overrides()
 	_loaded_mission = null
@@ -682,6 +698,7 @@ func unload() -> void:
 	_placer = null
 	_weapon_db = null  # re-resolves against the next load's mounted root
 	_local_weapon_dict = {}
+	_local_weapon_preserve_slot_state = false
 	# Armory selections belong to the entity from the mission being torn down.
 	# A new spawn must resolve from its own equipped AdmDef instead of inheriting
 	# either the previous mission's override or its authored NONE state.
@@ -788,8 +805,11 @@ func _load_terrain(trn_path: String) -> bool:
 func _configure_foliage() -> void:
 	if _dispatcher == null or _terrain_data == null:
 		return
+	# The runtime source already supplies height, detail/model foliage indices,
+	# colormap, and change invalidation. Binding the same NovaTerrainData again as
+	# the fallback colormap source attempts a duplicate terrain_changed connection
+	# in Godot and makes mission reloads report ERR_INVALID_PARAMETER.
 	_dispatcher.terrain_data = _terrain_data
-	_dispatcher.colormap_source = _terrain_data
 	_dispatcher.tile_info = _terrain.tile_info_override
 	var defs: Array = _terrain_data.get_foliage_defs()
 	_dispatcher.configure_slots(
@@ -1038,23 +1058,27 @@ var _viewmodel_weapon_override := ""
 # NONE is distinct from the pre-armory empty override, which falls back to the
 # witnessed bring-up default until an equipped weapon is resolved.
 var _viewmodel_weapon_cleared := false
+# A UseGun presentation rebuild follows a slot-pointer commit that has already
+# selected a persistent parent/personal slot. Both the dict-only install and the
+# later ADM-duration rebake must preserve that slot's action/ammo state.
+var _local_weapon_preserve_slot_state := false
 
 ## Armory apply, host side: point the FP viewmodel + action FSM at `weapon_name`.
 ## Validates against weapon.def; the caller (main_game) drops the old viewmodel so the
 ## per-frame pass rebuilds gun/arms/FSM from the new def [orig: the ACCEPT re-mount,
 ## WeaponLoadout_ApplyFromBuffer @0x565cd0 -> Player_MountWeaponSlot @0x4dfa40].
-func set_local_player_weapon_by_name(weapon_name: String) -> bool:
+func set_local_player_weapon_by_name(weapon_name: String,
+		preserve_slot_state: bool = false) -> bool:
 	if weapon_name.is_empty():
 		return false
-	if _weapon_db == null:
-		local_player_viewmodel_def()  # lazily loads weapon.def into _weapon_db
-	var index: int = _weapon_db.find_weapon(weapon_name) \
-			if _weapon_db != null and _weapon_db.is_loaded() else -1
+	var weapon_db := get_weapon_database()
+	var index: int = weapon_db.find_weapon(weapon_name) if weapon_db != null else -1
 	if index < 0:
 		push_warning("GameWorld: armory weapon '%s' not in weapon.def — keeping current" % weapon_name)
 		return false
 	_viewmodel_weapon_override = weapon_name
 	_viewmodel_weapon_cleared = false
+	_local_weapon_preserve_slot_state = preserve_slot_state
 	# Install the new weapon's FSM on the sim NOW — the mount is not hostage to the FP
 	# model load [orig: the ACCEPT chain rebuilds the slot table + mounts with no
 	# render dependency — WeaponSlotTable_LoadAllFromDefs @0x5414e0 +
@@ -1063,10 +1087,12 @@ func set_local_player_weapon_by_name(weapon_name: String) -> bool:
 	# again when the rebuilt viewmodel resolves (_setup_local_player_weapon); a model
 	# that never loads leaves 'auto' delays collapsed instead of leaving the OLD
 	# weapon's FSM live under the new entity stamp.
-	_local_weapon_dict = _weapon_db.get_weapon(index)
+	_local_weapon_dict = weapon_db.get_weapon(index)
 	var sim := get_sim()
 	if sim != null:
-		sim.set_local_player_weapon(_local_weapon_dict, {})
+		_set_local_player_first_person_model_available(false)
+		sim.set_local_player_weapon(
+				_local_weapon_dict, {}, _local_weapon_preserve_slot_state)
 	return true
 
 
@@ -1129,14 +1155,24 @@ func clear_local_player_weapon() -> void:
 	_viewmodel_weapon_override = ""
 	_viewmodel_weapon_cleared = true
 	_local_weapon_dict = {}
+	_local_weapon_preserve_slot_state = false
 	var sim := get_sim()
 	if sim != null:
+		_set_local_player_first_person_model_available(false)
 		sim.clear_local_player_weapon()
+
+
+func _set_local_player_first_person_model_available(available: bool) -> void:
+	var sim := get_sim()
+	if sim != null:
+		sim.set_local_player_first_person_model_available(available)
 
 func build_local_player_viewmodel() -> Node3D:
 	if _placer == null:
+		_set_local_player_first_person_model_available(false)
 		return null
 	if _viewmodel_weapon_cleared:
+		_set_local_player_first_person_model_available(false)
 		return null
 	var container := Node3D.new()
 	container.name = "PlayerViewmodel"
@@ -1146,21 +1182,34 @@ func build_local_player_viewmodel() -> Node3D:
 	# (retail draws the FP model through the same lighting constants
 	# [orig: Player_RenderFirstPersonViewModel @ 0x4ded60 -> the ctx block]).
 	var def := local_player_viewmodel_def()
-	var gun_name := def.gfx1 if def != null and not def.gfx1.is_empty() else "ak47_1st"
+	# The AK is only the no-definition bring-up fallback. A resolved retail Def
+	# with no fpModel intentionally submits no first-person gun.
+	var gun_name := def.gfx1 if def != null else "ak47_1st"
 	var arms_name := def.gfx1a if def != null and not def.gfx1a.is_empty() else "armsG"
 	var adm_name := def.animadm if def != null and not def.animadm.is_empty() else "ak47_1st"
+	# Emplaced (Flags 0x80) mounts render their own FP gun but omit the carried
+	# character-arms model. [orig: Player_RenderFirstPersonViewModel @0x4dedc7]
+	var show_arms := def == null or (def.flags & 0x80) == 0
 	# Both submits reuse the equipped GUN's model table, while `adm_name` supplies the clips.
 	# Some valid retail sets differ (M21B_1st: 42 parts, M21_1st: 40); sizing from the ADM
 	# basename truncates late animated parts such as the M14 magazine. [orig: @0x4ded60]
-	var arms = _placer.build_model_from_graphic(arms_name, adm_name, container, "anim_wpn_idle", _env, gun_name)  # _placer untyped -> no :=
-	var gun = _placer.build_model_from_graphic(gun_name, adm_name, container, "anim_wpn_idle", _env, gun_name)
-	if arms == null:
+	var arms = _placer.build_model_from_graphic(arms_name, adm_name, container,
+			"anim_wpn_idle", _env, gun_name) if show_arms else null  # _placer untyped -> no :=
+	var gun = _placer.build_model_from_graphic(gun_name, adm_name, container,
+			"anim_wpn_idle", _env, gun_name) if not gun_name.is_empty() else null
+	_set_local_player_first_person_model_available(gun != null)
+	if show_arms and arms == null:
 		push_warning("GameWorld: FP arms model '%s' failed to load from the resource root" % arms_name)
-	if gun == null:
+	if gun == null and not gun_name.is_empty():
 		push_warning("GameWorld: FP gun model '%s' failed to load from the resource root" % gun_name)
 	if arms == null and gun == null:
-		container.queue_free()
-		return null
+		# A valid definition with no resolved fpModel is a stable, intentionally
+		# empty presentation epoch. Returning its container prevents the host from
+		# retrying every frame or substituting a different weapon.
+		if def == null:
+			container.queue_free()
+			return null
+		return container
 	_setup_local_player_weapon(gun if gun != null else arms)
 	return container
 
@@ -1192,7 +1241,8 @@ func _setup_local_player_weapon(model) -> void:
 				# and play latches) [orig: the animState slot heads +72;
 				# Anim_GetDurationTicks @0x53ee10 / AnimMap_PlayAnimBySlot @0x40bda0].
 				clip_seconds[k] = skeletal.get_clip_variant_lengths(k)
-	sim.set_local_player_weapon(_local_weapon_dict, clip_seconds)
+	sim.rebake_local_player_weapon(
+			_local_weapon_dict, clip_seconds, _local_weapon_preserve_slot_state)
 
 
 ## Per-frame weapon trigger state from the host: fire held + edge and the RAW reload
@@ -1231,6 +1281,33 @@ func local_player_weapon_name() -> String:
 func request_local_player_scope_toggle() -> bool:
 	var sim := get_sim()
 	return sim != null and bool(sim.request_local_player_scope_toggle())
+
+
+## Retail Binoculars action 26 (default B). The sim owns the persistent request
+## and its movement/life/round/camera-derived effective states.
+func request_local_player_binoculars_toggle() -> bool:
+	var sim := get_sim()
+	return sim != null and bool(sim.request_local_player_binoculars_toggle())
+
+
+## Retail Night Vision action 41 (default N); mission EnableNVG is night
+## semantics, not an input permission gate.
+func request_local_player_nvg_toggle() -> bool:
+	var sim := get_sim()
+	return sim != null and bool(sim.request_local_player_nvg_toggle())
+
+
+## Retail NVG gain actions 56/57 (default +/-), clamped sim-side to 0..4.
+func request_local_player_nvg_gain(delta: int) -> int:
+	var sim := get_sim()
+	return int(sim.request_local_player_nvg_gain(delta)) if sim != null else 0
+
+
+## Feed only the first-person-visible NVG state into world lighting. The raw
+## active state deliberately survives third person in the simulation.
+func set_local_player_nvg_view(active: bool, gain: int) -> void:
+	if _env != null and _env.has_method("set_nvg_view"):
+		_env.set_nvg_view(active, gain)
 
 
 ## The host camera mode, driving the sim-side fov suppression + anchor chase
@@ -1308,15 +1385,8 @@ func set_local_player_weapon_tick_consumer(consumer: Callable) -> void:
 func local_player_viewmodel_def() -> PlayerViewmodelDef:
 	if _viewmodel_weapon_cleared:
 		return null
-	if _weapon_db == null:
-		if _resource_root == null:
-			return null
-		_weapon_db = NovaWeaponDatabase.new()
-		if _weapon_db.load_from_resource_root(_resource_root, "weapon.def") != OK:
-			push_warning("GameWorld: weapon.def unavailable (%s) — FP viewmodel keeps built-in defaults"
-					% _weapon_db.get_last_error())
-			return null
-	if not _weapon_db.is_loaded():
+	var weapon_db := get_weapon_database()
+	if weapon_db == null:
 		return null
 	# Precedence: the armory-equipped weapon, else the NOVA_VM_WEAPON debug override,
 	# else the fixed default until first equip.
@@ -1325,11 +1395,11 @@ func local_player_viewmodel_def() -> PlayerViewmodelDef:
 		weapon_name = OS.get_environment("NOVA_VM_WEAPON")
 	if weapon_name.is_empty():
 		weapon_name = DEFAULT_VIEWMODEL_WEAPON
-	var index: int = _weapon_db.find_weapon(weapon_name)
+	var index: int = weapon_db.find_weapon(weapon_name)
 	if index < 0:
 		push_warning("GameWorld: weapon '%s' not in weapon.def — FP viewmodel keeps built-in defaults" % weapon_name)
 		return null
-	_local_weapon_dict = _weapon_db.get_weapon(index)
+	_local_weapon_dict = weapon_db.get_weapon(index)
 	return PlayerViewmodelDef.from_weapon_dict(_local_weapon_dict)
 
 
@@ -1755,6 +1825,12 @@ func _on_runtime_fixed_tick(_logic_tick: int) -> void:
 
 
 func _on_runtime_simulation_restarted() -> void:
+	# A Stop/restart can restore the saved personal slot while the presenter still
+	# owns an emplaced model. Consume that control event synchronously; no fixed
+	# tick runs while stopped.
+	if _local_player_weapon_tick_consumer.is_valid():
+		_local_player_weapon_tick_consumer.call(
+				drain_local_player_weapon_events())
 	if _effect_world == null:
 		return
 	_effect_world.reset_runtime_state()
@@ -1979,8 +2055,17 @@ func _item_effect_controller_allows(kind: int, attrib: int) -> bool:
 
 
 func _item_fx_identity_aliases(net_id: int, bms_id: int,
-		spawn_origin: int) -> Array[String]:
+		spawn_origin: int, wire_handle: int = -1) -> Array[String]:
 	var aliases: Array[String] = []
+	var has_wire_identity := wire_handle >= 0 and wire_handle != 0xffff
+	if has_wire_identity:
+		aliases.append("wire:%d" % wire_handle)
+	# Synthetic items.def attachments all carry the same sentinel origin and no
+	# authored BMS/net identity. Their packed runtime handle is therefore the only
+	# alias that distinguishes siblings on the same carrier.
+	if has_wire_identity and bms_id == 0 and (
+			spawn_origin == -1 or spawn_origin == 0xffffffff):
+		return aliases
 	if net_id > 0:
 		aliases.append("net:%d" % net_id)
 	if bms_id > 0:
@@ -1994,7 +2079,8 @@ func _item_fx_control_event_aliases(effect: Dictionary) -> Array[String]:
 	return _item_fx_identity_aliases(
 			int(effect.get("a", 0)),
 			int(effect.get("b", 0)),
-			int(effect.get("c", 0)))
+			int(effect.get("c", 0)),
+			int(effect.get("wire_handle", -1)))
 
 
 func _item_fx_control_node_aliases(node: Node3D) -> Array[String]:
@@ -2008,7 +2094,8 @@ func _item_fx_control_node_aliases(node: Node3D) -> Array[String]:
 	var spawn_origin := 0
 	if origin_kind >= 0 and index >= 0:
 		spawn_origin = ((origin_kind & 0xff) << 24) | (index & 0xffffff)
-	return _item_fx_identity_aliases(net_id, bms_id, spawn_origin)
+	return _item_fx_identity_aliases(
+			net_id, bms_id, spawn_origin, int(ref.get("wire_handle", -1)))
 
 
 func _item_fx_aliases_intersect(left: Array, right: Array) -> bool:

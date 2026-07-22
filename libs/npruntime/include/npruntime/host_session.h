@@ -78,8 +78,14 @@ void dispatch_event(HostOwner &owner, netsim::IDatagramSocket &sock, const PeerA
 //   (3) Server_TickUpdate: the single C2S drain + one logic tick + per-connection 0x0A fan
 //   (4) S2C flush: pop each remote transport's identity [tag][body] -> frame_in_match_s2c (0x83) -> send
 //   (5) drain the host's own loopback (no socket consumer for a headless Listen host)
+// `before_server_tick`, when supplied, runs after tick_connections has completed any
+// player spawns and before their first authoritative logic update / 0x0A fan. The opaque
+// context keeps this shared owner loop independent of adapter-specific registration state.
 // Advances owner.now_tick by 1.
-void host_session_pump(HostOwner &owner, netsim::IDatagramSocket &sock);
+using HostBeforeServerTickFn = void (*)(void *context);
+void host_session_pump(HostOwner &owner, netsim::IDatagramSocket &sock,
+		HostBeforeServerTickFn before_server_tick = nullptr,
+		void *before_server_tick_context = nullptr);
 
 // Host bring-up config. The owner sets owner.ctx.world / owner.ctx.mission and owner.host_loopback (its
 // dcb-2 LoopbackChannel) BEFORE start_host_session; this fills the rest.

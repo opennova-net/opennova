@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <world/weapon_fsm.h>
 
 namespace opennova::world {
 
@@ -50,6 +51,12 @@ struct WeaponTableEntry {
     // @0x4e02c3; Player_SelectWeaponSlot @0x4dd6d8].
     int32_t flags = 0;
     int32_t flags2 = 0;
+    // Whether the definition authors a nonempty first-person-model reference.
+    // Resource resolution is host-side; the renderer requires both this
+    // candidate and the current host resolution result before suppressing the
+    // duplicate third-person emplacement for a local first-person gunner.
+    // [orig: Entity_RenderVehicleModel @0x440824/@0x440833]
+    bool has_first_person_model_reference = false;
     // weapon_class routing slot (0=accessory 1=primary 2=secondary 3=grenade). The
     // switch eligibility exempts 1/2 from the has-ammo requirement [orig: AdmDef+0x3A4
     // read @0x4e0294; keyword 'weapon_class' -> +0x3A4].
@@ -69,6 +76,11 @@ struct WeaponTableEntry {
     // arithmetic is identical; only the id VALUES may differ from retail bytes (never
     // wire-visible; pools are entity-local).
     int16_t ammo_class_id = -1;
+    // Runtime action descriptors baked from this weapon.def block's ACTION rows.
+    // Auto clip durations remain zero until a host with the ADM duration ring rebakes
+    // them; explicit authored timings and all state transitions are retained.
+    // [orig: Anim_InitActions @0x541fa0]
+    WeaponFsmDef action_fsm;
     bool valid = false;
 };
 

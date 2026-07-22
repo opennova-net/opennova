@@ -1,6 +1,8 @@
 class_name ArmoryMenuHost
 extends RefCounted
 
+const GRENADE_CONTROLS := ["GRENADE_AMMO1", "GRENADE_AMMO2", "GRENADE_AMMO3"]
+
 # Drives the JO in-game armory — weapon.mnu's WEAPON screen — by control NAME, as a
 # companion the game-agnostic NovaMenuHost (menu_shell.gd) delegates to (the
 # mp_menu_host / player_info_menu_host pattern). The original registers exactly these
@@ -24,13 +26,12 @@ extends RefCounted
 # NovaWeaponDatabase.get_slot_weapons + the g_armoryWeaponAvailability term
 # @0x566e6b — value semantics in net-re §5.63], rows sorted case-insensitively
 # ascending [orig: ListWidget_SortRows -> cmp @0x6448a0, mode (string, asc)]
-# under NONE at row 0; every slot reselects from the live kit.
+# under NONE at row 0; every slot reselects from the canonical parent tuples.
 # Deferred (tracked in the armory RE notes): the per-class 2048-byte loadout
 # buffer MEMORY (save-on-flip + remembered counts) [orig:
 # g_armoryLoadoutBufferByClass @0x25DD740 -> populate_ammo_type_combo_boxes
 # @0x564930], the icon swaps [orig: @0x565640 tail, icon table @0x2540D70], the
-# exact ammo row model [orig: (row+1) clips @0x565490], and the *_AMMO1_TYPE
-# round-type cascade.
+# *_AMMO2 controls, and the *_AMMO1_TYPE round-type cascade.
 
 var _menu: Node                      # the built NovaMnuMenu
 var _root: NovaResourceRoot
@@ -45,18 +46,27 @@ var _class_allow_mask := 0x3FF
 # PLAYER_CLASS spin (and its label) outside one [orig: the is_in_session branch of
 # the WEAPON on-show handler @0x567370]. SP/PIE shells leave this false.
 var _class_selection_enabled := false
-# The current kit (weapon.def ids) from the sim's slot pool; each slot reselects
-# its row [orig: select-by-adm-index sub_645240 in populate_ammo_type_combo_boxes
-# @0x564930]. The per-class buffer MEMORY stays deferred (see the header).
+# The current kit's canonical parent weapon.def ids; each slot reselects its row
+# [orig: g_armoryLoadoutBufferByClass -> select-by-adm-index sub_645240 in
+# populate_ammo_type_combo_boxes @0x564930]. Per-class buffer MEMORY stays deferred.
 var _current_primary := ""
 var _current_secondary := ""
 var _current_accessory := ""
+var _current_grenades: Array = []
+# Canonical parent clip counts keyed by PRIMARY / SECONDARY / ACCESSORY. The
+# visible row is zero-based while the buffer value is one-based; -1 selects the
+# authored maximum [orig: @0x564c7d..0x564ce4].
+var _current_parent_clips := {}
 # Availability lookup (name -> value); banned (0) weapons drop from the lists
 # [orig: the g_armoryWeaponAvailability term @0x566e6b]. Invalid = allow all.
 var _availability_lookup := Callable()
 var _populating := false
 # Selected weapon dicts per slot control name ("" row 0 = NONE).
 var _slot_rows := {}                 # control name -> Array[Dictionary] (row-1 aligned)
+# The grenade definitions assigned to GRENADE_AMMO1..3 in weapon.def table order.
+# Each authored control selects a count for its definition rather than a weapon row
+# [orig: sub_566D70 registration args 0/1/2 @0x567020].
+var _grenade_rows: Array = []
 # The ACCEPT-hotkey debounce: the opener press that showed the screen must release
 # once before the key acts as ACCEPT — the open stamps it, only the row's KEYUP
 # arms it [orig: g_weaponScreenOpenDebounce = 1 at the open @0x4e0b21; cleared by
@@ -86,15 +96,22 @@ func set_player_class(player_class: int) -> void:
 	_player_class = player_class
 
 
-## The current kit from the sim's slot pool; each slot pre-selects its row on
-## populate. The per-class loadout-buffer MEMORY (remembered ammo counts,
-## save-on-class-flip) stands deferred — the reselect itself now reads the live
-## inventory [orig: populate_ammo_type_combo_boxes @0x564930 select-by-adm-index].
+## The current canonical parent tuples; each slot pre-selects its row on populate.
+## The per-class loadout-buffer MEMORY (remembered ammo counts, save-on-class-flip)
+## stands deferred; initial selection reads the active authoritative tuple buffer
+## [orig: populate_ammo_type_combo_boxes @0x564930 select-by-adm-index].
 func set_current_loadout(primary: String, secondary: String = "",
-		accessory: String = "") -> void:
+		accessory: String = "", grenades: Array = [],
+		parent_clips: Dictionary = {}) -> void:
 	_current_primary = primary
 	_current_secondary = secondary
 	_current_accessory = accessory
+	_current_grenades = grenades.duplicate(true)
+	_current_parent_clips = {
+		"PRIMARY": int(parent_clips.get("PRIMARY", -1)),
+		"SECONDARY": int(parent_clips.get("SECONDARY", -1)),
+		"ACCESSORY": int(parent_clips.get("ACCESSORY", -1)),
+	}
 
 
 ## Availability lookup (weapon name -> 0 banned / 1 allowed / 2 armory-zone-only /
@@ -126,6 +143,9 @@ func on_menu_built(menu: Node, _file: String, _screen: String, root: NovaResourc
 	_populate_slots()
 	for slot_name in ["PRIMARY", "SECONDARY", "ACCESSORY"]:
 		_connect_combo(slot_name, _on_slot_selected.bind(slot_name))
+		_connect_combo(slot_name + "_AMMO1", _on_ammo_selected)
+	for control in GRENADE_CONTROLS:
+		_connect_combo(control, _on_ammo_selected)
 	_connect_pressed("ACCEPT", _on_accept)   # [orig: @0x5671f6 arg 0]
 	_connect_pressed("CANCEL", _on_cancel)   # [orig: @0x567214 arg 1 skips the apply]
 	# The on-show re-registers the ACCEPT hotkeys and the open re-stamps the
@@ -221,21 +241,27 @@ func _populate_slots() -> void:
 	_fill_slot("PRIMARY", NovaWeaponDatabase.SLOT_PRIMARY, team_mask)
 	_fill_slot("SECONDARY", NovaWeaponDatabase.SLOT_SECONDARY, team_mask)
 	_fill_slot("ACCESSORY", NovaWeaponDatabase.SLOT_ACCESSORY, team_mask)
+	_populate_grenades(team_mask)
 	for slot_name in ["PRIMARY", "SECONDARY", "ACCESSORY"]:
 		_populate_ammo(slot_name)
+
+
+func _available_slot_weapons(slot: int, team_mask: int) -> Array:
+	var dicts: Array = _weapons.get_slot_weapons(slot, _class_mask(), team_mask)
+	if _availability_lookup.is_valid():
+		dicts = dicts.filter(func(w):
+			return int(_availability_lookup.call(String(w.get("name", "")))) != 0)
+	return dicts
 
 
 func _fill_slot(control: String, slot: int, team_mask: int) -> void:
 	var combo := _combo(control)
 	if combo == null:
 		return
-	var dicts: Array = _weapons.get_slot_weapons(slot, _class_mask(), team_mask)
+	var dicts: Array = _available_slot_weapons(slot, team_mask)
 	# The map availability term: banned (0) weapons never list; every nonzero value
 	# (allowed / armory-zone-only / mission-allowed) does
 	# [orig: the !g_armoryWeaponAvailability[i] skip @0x566e6b].
-	if _availability_lookup.is_valid():
-		dicts = dicts.filter(func(w):
-			return int(_availability_lookup.call(String(w.get("name", "")))) != 0)
 	# Rows are sorted case-insensitively ascending by display label before NONE is
 	# prepended at row 0 [orig: ListWidget_SortRows -> cmp @0x6448a0 with (string, asc);
 	# NONE inserted at 0 @0x566f15].
@@ -251,7 +277,7 @@ func _fill_slot(control: String, slot: int, team_mask: int) -> void:
 		dicts.append(pair[1])
 	_slot_rows[control] = dicts
 	_set_combo_items(combo, rows)
-	# Each slot re-selects its row from the live kit [orig: sub_645240
+	# Each slot re-selects its row from the canonical parent tuples [orig: sub_645240
 	# select-by-adm-index in @0x564930]; the per-class buffer MEMORY stays deferred.
 	var current := ""
 	match control:
@@ -265,6 +291,50 @@ func _fill_slot(control: String, slot: int, team_mask: int) -> void:
 				break
 
 
+# weapon.mnu has no parent GRENADE weapon combo: its three authored controls are
+# count selectors for the class/team/selectable grenade definitions in table
+# order. Availability is applied only after a definition owns its control, so a
+# banned grenade retains that position with a zero-only row. Their
+# registered callback args 0/1/2 address the same three positions
+# [orig: WeaponDef_RegisterUICallbacks @0x567020 -> sub_566D70].
+func _populate_grenades(team_mask: int) -> void:
+	# Unlike the three parent lists, availability does not remove a grenade def:
+	# retail assigns class/team/selectable category-3 defs to controls first, then
+	# an unavailable def stops after its zero row [orig: @0x5647a4..0x5648a6].
+	var dicts: Array = _weapons.get_slot_weapons(
+			NovaWeaponDatabase.SLOT_GRENADE, _class_mask(), team_mask)
+	_grenade_rows = []
+	for i in mini(dicts.size(), GRENADE_CONTROLS.size()):
+		_grenade_rows.append(dicts[i])
+	for i in GRENADE_CONTROLS.size():
+		var combo := _combo(GRENADE_CONTROLS[i])
+		if combo == null:
+			continue
+		var w: Dictionary = _grenade_rows[i] if i < _grenade_rows.size() else {}
+		var allowed := not w.is_empty()
+		if allowed and _availability_lookup.is_valid():
+			allowed = int(_availability_lookup.call(String(w.get("name", "")))) != 0
+		var maxclips := int(w.get("maxclips", 0)) if allowed else 0
+		var rows := PackedStringArray()
+		for clips in range(0, maxclips + 1):
+			rows.append(_ammo_row_label(w, clips))
+		_set_combo_items(combo, rows)
+		if not w.is_empty():
+			combo.select_silent(_current_grenade_clips(
+					String(w.get("name", "")), maxclips))
+	_update_weight()
+
+
+func _current_grenade_clips(weapon_name: String, maxclips: int) -> int:
+	for value in _current_grenades:
+		var row := value as Dictionary
+		if String(row.get("name", "")).nocasecmp_to(weapon_name) != 0:
+			continue
+		var clips := int(row.get("ammo_primary", -1))
+		return maxclips if clips < 0 else clampi(clips, 0, maxclips)
+	return 0
+
+
 func _weapon_label(w: Dictionary) -> String:
 	var textid := String(w.get("display_textid", ""))
 	if not textid.is_empty():
@@ -272,6 +342,18 @@ func _weapon_label(w: Dictionary) -> String:
 		if t != null and t.has_string_in_section("WepDes", textid):
 			return t.get_string_in_section("WepDes", textid)
 	return String(w.get("name", ""))
+
+
+func _ammo_row_label(w: Dictionary, clips: int) -> String:
+	var round_label := String(w.get("round_type", ""))
+	if not round_label.is_empty():
+		var gametext: RtxtStringFile = NovaStrings.get_table("gametext")
+		if gametext != null and gametext.has_string_in_section("WepDes", round_label):
+			round_label = gametext.get_string_in_section("WepDes", round_label)
+	return "%d - %s" % [
+		clips * int(w.get("clipsize", 0)),
+		round_label,
+	]
 
 
 # The slot's selected weapon dict (the NovaWeaponDatabase transport dict; {} = NONE).
@@ -294,10 +376,15 @@ func _on_slot_selected(_row: int, _value: String, control: String) -> void:
 	_update_weight()
 
 
-# Clip-count rows for the slot's ammo combo, capped by the selected weapon's maxclips
-# [orig: populate_ammo_combo_boxes @0x55def0 fills per-weapon; the ACCEPT clamp is
-# clips <= adm[83] @0x565cd0]. The exact original row text is unwitnessed (tracked);
-# plain counts carry the same value the collect reads back.
+func _on_ammo_selected(_row: int, _value: String) -> void:
+	if _populating:
+		return
+	_update_weight()
+
+
+# Clip-count rows for the slot's ammo combo. Retail row 0 means one clip, shows
+# clipsize rounds, and serializes as 1; row maxclips-1 is the full load
+# [orig: @0x564c7d..0x564ce4, sprintf "%d - %s"].
 func _populate_ammo(control: String) -> void:
 	var combo := _combo(control + "_AMMO1")
 	if combo == null:
@@ -305,12 +392,21 @@ func _populate_ammo(control: String) -> void:
 	var w := selected_weapon(control)
 	var rows := PackedStringArray()
 	var maxclips := int(w.get("maxclips", 0))
-	for i in range(0, maxclips + 1):
-		rows.append(str(i))
-	if rows.is_empty():
-		rows.append("0")
+	for clips in range(1, maxclips + 1):
+		rows.append(_ammo_row_label(w, clips))
 	_set_combo_items(combo, rows)
-	combo.select_silent(rows.size() - 1)  # full clips default
+	if not rows.is_empty():
+		var clips := int(_current_parent_clips.get(control, -1))
+		var current_name := ""
+		match control:
+			"PRIMARY": current_name = _current_primary
+			"SECONDARY": current_name = _current_secondary
+			"ACCESSORY": current_name = _current_accessory
+		if (current_name.is_empty()
+				or String(w.get("name", "")).nocasecmp_to(current_name) != 0
+				or clips < 0):
+			clips = maxclips
+		combo.select_silent(clampi(clips, 1, maxclips) - 1)
 	_update_weight()
 
 
@@ -322,7 +418,23 @@ func selected_clips(control: String) -> int:
 		# -1 = the def default; the original's main leg takes adm[23] RAW as the total
 		# (only the sub-weapon leg multiplies by clipsize) [orig: @0x565cd0 0x566166].
 		return -1
-	return combo.get_selected()  # rows are the counts 0..maxclips; index == count
+	return combo.get_selected() + 1
+
+
+func _selected_grenade_loadout() -> Array[Dictionary]:
+	var selected: Array[Dictionary] = []
+	for i in _grenade_rows.size():
+		var combo := _combo(GRENADE_CONTROLS[i])
+		var clips := combo.get_selected() if combo != null else 0
+		if clips <= 0:
+			continue
+		selected.append({
+			"name": String((_grenade_rows[i] as Dictionary).get("name", "")),
+			"ammo_primary": clips,
+			"ammo_secondary": -1,
+			"flags": -1,
+		})
+	return selected
 
 
 # --- Weight ----------------------------------------------------------------------
@@ -349,14 +461,26 @@ func _update_weight() -> void:
 		if clips < 0:
 			clips = int(w.get("maxclips", 0))
 		total += float(w.get("weight", 0.0)) + clips * float(w.get("clip_weight", 0.0))
+	for i in _grenade_rows.size():
+		var combo := _combo(GRENADE_CONTROLS[i])
+		var clips := combo.get_selected() if combo != null else 0
+		if clips <= 0:
+			continue
+		var grenade := _grenade_rows[i] as Dictionary
+		# The category-3 controls are extra-ammo legs, not parent weapon slots:
+		# retail adds selected_row * adm[84] only [orig: @0x5655c9..0x56561c].
+		total += clips * float(grenade.get("clip_weight", 0.0))
 	var encumbrance := _menu_text("LIGHT_ENCUMBRANCE", "Light")
 	if total >= HEAVY_ENCUMBRANCE_LBS:
 		encumbrance = _menu_text("HEAVY_ENCUMBRANCE", "Heavy")
 	elif total >= NORMAL_ENCUMBRANCE_LBS:
 		encumbrance = _menu_text("NORMAL_ENCUMBRANCE", "Normal")
 	var node := _find("STATIC_TOTAL_WEIGHT")
-	if node != null and node is Label:
-		(node as Label).text = "%s %.1f %s (%s)" % [
+	var label := node as Label
+	if label == null and node != null:
+		label = node.find_child("Label", false, false) as Label
+	if label != null:
+		label.text = "%s %.1f %s (%s)" % [
 			_menu_text("TOTAL_WEIGHT", "Total Weight"), total,
 			_menu_text("LBS", "lbs"), encumbrance]
 
@@ -366,8 +490,8 @@ func _update_weight() -> void:
 # Collect the selection the way the original serializes it before applying/sending
 # [orig: WeaponLoadout_SerializeSelectionsToBuffer @0x5658b0 {name, ammoPri, ammoSec,
 # flags} per slot, into the PER-CLASS 2048-byte buffer @0x25DD740 + 2048*class]. The
-# host applies primary to the sim + viewmodel; the full multi-slot inventory is the
-# runtime's tracked gap.
+# host applies the full canonical kit to the sim; the selected slot then remounts
+# its first-person viewmodel.
 func _on_accept() -> void:
 	var loadout := {
 		"player_class": _selected_class_value,
@@ -378,6 +502,7 @@ func _on_accept() -> void:
 		"secondary_clips": selected_clips("SECONDARY"),
 		"accessory": String(selected_weapon("ACCESSORY").get("name", "")),
 		"accessory_clips": selected_clips("ACCESSORY"),
+		"grenades": _selected_grenade_loadout(),
 	}
 	loadout_accepted.emit(loadout)
 

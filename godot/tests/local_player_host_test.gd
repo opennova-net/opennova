@@ -8,6 +8,7 @@ class FakeWeaponPart:
 	extends Node3D
 	var plays: Array = []
 	var times: Array[float] = []
+	var ctrl_values: Dictionary = {}
 
 	func play_body_clip(key: String) -> void:
 		plays.append({"key": key, "variant": 0})
@@ -25,6 +26,12 @@ class FakeWeaponPart:
 
 	func get_object_data():
 		return null
+
+	func set_ctrl_value(name: String, value: int) -> void:
+		ctrl_values[name] = value
+
+	func clear_ctrl_value(name: String) -> void:
+		ctrl_values.erase(name)
 
 
 class FakeUserPointData:
@@ -152,9 +159,16 @@ class FakeWorld:
 	# The equipped-weapon FSM seam (null = no weapon installed, the default).
 	var weapon_view = null  # PlayerWeaponView
 	var weapon_events: Array[PlayerWeaponEvent] = []
+	var installed_weapon_name := "WPN_M4AUTO"
+	var weapon_switch_calls: Array[Dictionary] = []
+	var weapon_clear_calls := 0
 	# The sim-owned view state seam (ADS ease / fov policy / 3P anchor).
 	var view = null  # PlayerLocalView
 	var scope_toggle_requests := 0
+	var binocular_toggle_requests := 0
+	var nvg_toggle_requests := 0
+	var nvg_gain_requests: Array[int] = []
+	var nvg_view_calls: Array = []
 	var camera_mode_calls: Array = []
 	# The ordered action-sound + effect-world seams the host drains on the event batch.
 	var mission_audio = null  # FakeMissionAudio
@@ -177,6 +191,22 @@ class FakeWorld:
 	func local_player_weapon_view():
 		return weapon_view
 
+	func local_player_weapon_name() -> String:
+		return installed_weapon_name
+
+	func set_local_player_weapon_by_name(name: String,
+			preserve_slot_state: bool = false) -> bool:
+		weapon_switch_calls.append({
+			"name": name,
+			"preserve_slot_state": preserve_slot_state,
+		})
+		installed_weapon_name = name
+		return true
+
+	func clear_local_player_weapon() -> void:
+		weapon_clear_calls += 1
+		installed_weapon_name = ""
+
 	func drain_local_player_weapon_events() -> Array[PlayerWeaponEvent]:
 		var drained: Array[PlayerWeaponEvent] = []
 		for event in weapon_events:
@@ -197,6 +227,21 @@ class FakeWorld:
 	func request_local_player_scope_toggle() -> bool:
 		scope_toggle_requests += 1
 		return true
+
+	func request_local_player_binoculars_toggle() -> bool:
+		binocular_toggle_requests += 1
+		return true
+
+	func request_local_player_nvg_toggle() -> bool:
+		nvg_toggle_requests += 1
+		return true
+
+	func request_local_player_nvg_gain(delta: int) -> int:
+		nvg_gain_requests.append(delta)
+		return delta
+
+	func set_local_player_nvg_view(active: bool, gain: int) -> void:
+		nvg_view_calls.append([active, gain])
 
 	func set_local_player_camera_third_person(third_person: bool) -> void:
 		camera_mode_calls.append(third_person)
@@ -230,6 +275,72 @@ func test_shared_host_drives_simultaneous_raw_input_before_world_tick() -> void:
 	assert_false(call["lean_right"])
 	assert_eq(world.avatar_count, 1, "3P avatar is owned by the shared host")
 	assert_eq(world.viewmodel_count, 1, "FP viewmodel is owned by the shared host")
+
+
+func test_usegun_switch_event_rebuilds_borrowed_viewmodel_without_resetting_slot() -> void:
+	var world := FakeWorld.new()
+	var camera := Camera3D.new()
+	var host := LocalPlayerHost.new()
+	add_child_autofree(world)
+	add_child_autofree(camera)
+	add_child_autofree(host)
+	host.setup(world, camera)
+	host.set_input_source(func() -> Dictionary:
+		return {})
+	world.weapon_view = _weapon_view()
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+	assert_eq(world.viewmodel_count, 1)
+
+	var event := PlayerWeaponEvent.new()
+	event.switch_to_weapon = "WPN_EMPLCD50"
+	event.preserve_slot_state = true
+	world.weapon_events.append(event)
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+
+	assert_eq(world.weapon_switch_calls, [{
+		"name": "WPN_EMPLCD50",
+		"preserve_slot_state": true,
+	}], "the mount commit installs the parent weapon definition through the FP seam")
+	# refresh_viewmodel invalidates immediately; the normal next host frame owns
+	# the asynchronous scene rebuild.
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+	assert_eq(world.viewmodel_count, 2,
+			"the stale personal viewmodel is replaced by the emplacement viewmodel")
+
+	var clear_event := PlayerWeaponEvent.new()
+	clear_event.clear_weapon = true
+	world.weapon_events.append(clear_event)
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+	assert_eq(world.weapon_clear_calls, 1,
+			"an unarmed detach explicitly clears the emplaced presentation")
+
+
+func test_unarmed_usegun_switch_is_consumed_without_a_weapon_view() -> void:
+	var world := FakeWorld.new()
+	var camera := Camera3D.new()
+	var host := LocalPlayerHost.new()
+	add_child_autofree(world)
+	add_child_autofree(camera)
+	add_child_autofree(host)
+	host.setup(world, camera)
+	host.set_input_source(func() -> Dictionary:
+		return {})
+	world.weapon_view = null
+	var event := PlayerWeaponEvent.new()
+	event.switch_to_weapon = "WPN_EMPLCD50"
+	event.preserve_slot_state = true
+	world.weapon_events.append(event)
+
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+	assert_eq(world.weapon_switch_calls, [{
+		"name": "WPN_EMPLCD50",
+		"preserve_slot_state": true,
+	}], "slot-control events cannot depend on an existing viewmodel")
 
 
 func test_inactive_gameplay_submits_neutral_movement_while_world_keeps_ticking() -> void:
@@ -291,6 +402,25 @@ func test_stance_keys_are_three_key_select_requests() -> void:
 		key.pressed = true
 		assert_true(host.handle_key_input(key, true))
 	assert_eq(world.stance_requests, [2, 1, 0])
+
+
+func test_binoculars_nvg_and_gain_keys_route_retail_actions() -> void:
+	var world := FakeWorld.new()
+	var camera := Camera3D.new()
+	var host := LocalPlayerHost.new()
+	add_child_autofree(world)
+	add_child_autofree(camera)
+	add_child_autofree(host)
+	host.setup(world, camera)
+
+	for keycode in [KEY_B, KEY_N, KEY_EQUAL, KEY_MINUS]:
+		var key := InputEventKey.new()
+		key.physical_keycode = keycode
+		key.pressed = true
+		assert_true(host.handle_key_input(key, true))
+	assert_eq(world.binocular_toggle_requests, 1)
+	assert_eq(world.nvg_toggle_requests, 1)
+	assert_eq(world.nvg_gain_requests, [1, -1])
 
 
 func test_first_person_routes_the_body_to_the_water_mirror_by_layer() -> void:
@@ -506,6 +636,36 @@ func _weapon_view() -> PlayerWeaponView:
 	var v := PlayerWeaponView.new()
 	v.active = true
 	return v
+
+
+func test_viewmodel_tracks_and_clears_emplaced_weapon_controls() -> void:
+	var world := FakeWorld.new()
+	var camera := Camera3D.new()
+	var host := LocalPlayerHost.new()
+	add_child_autofree(world)
+	add_child_autofree(camera)
+	add_child_autofree(host)
+	world.view = PlayerLocalView.new()
+	world.weapon_view = _weapon_view()
+	world.weapon_view.emplaced_controls_valid = true
+	world.weapon_view.emplaced_gun_yaw = 0x2345
+	world.weapon_view.emplaced_gun_pitch = 0xDCBA
+	host.setup(world, camera)
+	host.set_input_source(func() -> Dictionary: return {})
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+
+	assert_not_null(world.last_weapon_part)
+	assert_eq(world.last_weapon_part.ctrl_values, {
+		"EWEAP_GUNYAW": 0x2345,
+		"EWEAP_GUNPITCH": 0xDCBA,
+	}, "the FP weapon receives the same semantic registers as the world model")
+
+	world.weapon_view.emplaced_controls_valid = false
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+	assert_true(world.last_weapon_part.ctrl_values.is_empty(),
+			"leaving UseGun cannot retain the previous turret pose")
 
 
 func _weapon_end_event(set_name: String) -> PlayerWeaponEvent:

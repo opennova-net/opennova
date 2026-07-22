@@ -57,6 +57,8 @@ private:
 	void apply_pool_spawn(const std::vector<uint8_t> &body);    // 0x0D pool-1
 	void apply_static_batch(const std::vector<uint8_t> &body);  // 0x10 pool-2
 	void apply_pool3_batch(const std::vector<uint8_t> &body);   // 0x20 pool-3
+	void refresh_parented_pool_entities();
+	void erase_entity_tree(uint16_t root_handle);
 
 	// Effective record classifier for the 0x0A event loop: the items.def table (when
 	// installed) wins, then the class LEARNED from the world spawn stream, then the

@@ -56,6 +56,8 @@ constexpr double kFixed16 = 65536.0;
 constexpr int kPlayerVisualItemId = 105310; // items.def "Player #1, Single player" -> US01/US01.adm
 // Canonical definition lives in libs/world/player_spawn.h (shared with the npruntime host).
 constexpr uint16_t kRetailPlayerMinEntitySlot = opennova::world::kRetailPlayerMinEntitySlot;
+constexpr float kBinocularAimOffsetDeg = 2.8125f; // 0x02000000 BAM
+constexpr double kTau = 6.28318530717958647692;
 
 uint64_t present_effect_origin_key(int kind, int index) {
 	return (static_cast<uint64_t>(static_cast<uint32_t>(kind)) << 32) |
@@ -78,9 +80,8 @@ opennova::world::SeatType seat_type_from_variant(int value) {
 	}
 }
 
-bool mount_blocks_weapon_channel(const opennova::world::Entity &entity) {
-	if (!entity.mounted) return false;
-	switch (entity.mount_type) {
+bool seat_type_blocks_weapon_channel(opennova::world::SeatType type) {
+	switch (type) {
 		case opennova::world::SeatType::Controller:
 		case opennova::world::SeatType::Gunner:
 		case opennova::world::SeatType::Driver:
@@ -88,6 +89,19 @@ bool mount_blocks_weapon_channel(const opennova::world::Entity &entity) {
 		default:
 			return false; // passenger seats retain the on-foot upper-body channel
 	}
+}
+
+bool mount_blocks_weapon_channel(const opennova::world::Entity &entity) {
+	return entity.mounted && seat_type_blocks_weapon_channel(entity.mount_type);
+}
+
+bool mount_collapses_right_hand_row(const opennova::world::Entity &entity) {
+	// This terminal skeletal row is stricter than the secondary-channel gate:
+	// retail requires a controller/gunner/driver parent slot AND no Flags 0x100.
+	// In the port, engine_flags is the authoritative entity+0x24 Flags mirror.
+	return entity.mounted &&
+			seat_type_blocks_weapon_channel(entity.mount_type) &&
+			(entity.engine_flags & 0x100u) == 0;
 }
 
 int visual_item_id_for_runtime_type(int item_id, const Ref<NovaItemDatabase> &item_db) {
@@ -163,11 +177,123 @@ const opennova::mission::ItemSeatSpec *item_seat_spec_for_type(
 	return nullptr;
 }
 
+constexpr char kEmplacedGunYawRegister[] = "EWEAP_GUNYAW";
+constexpr char kEmplacedGunPitchRegister[] = "EWEAP_GUNPITCH";
+
+struct EmplacedWeaponControls {
+	bool valid = false;
+	uint16_t gun_yaw = 0;
+	uint16_t gun_pitch = 0;
+};
+
+uint16_t emplaced_control_phase(int32_t parent_bam, int32_t occupant_bam) {
+	// Retail stores the high word of the wrapped parent-minus-occupant angle:
+	// occupant Yaw/Pitch = parent Yaw/Pitch - turret control.
+	// [orig: Entity_UpdateTransformAndTurret @0x441251..0x441263,
+	//  @0x441298..0x4412b3]
+	const int32_t delta = opennova::io::bam_sub(parent_bam, occupant_bam);
+	return static_cast<uint16_t>(static_cast<uint32_t>(delta) >> 16);
+}
+
+bool emplaced_weapon_controls_for(
+		const opennova::world::World &world,
+		opennova::world::AiSystem *ai,
+		const opennova::world::Entity &mount,
+		EmplacedWeaponControls &out) {
+	out = EmplacedWeaponControls{};
+	if (ai == nullptr || !mount.primary_weapon_owner.valid()) return false;
+	const opennova::world::Entity *occupant =
+			world.registry.get(mount.primary_weapon_owner);
+	if (occupant == nullptr || !occupant->alive || occupant->health <= 0 ||
+			!occupant->mounted ||
+			occupant->mount_type != opennova::world::SeatType::Gunner ||
+			occupant->mount_target != mount.handle)
+		return false;
+	const AiEntity *gunner = ai->for_handle(occupant->handle);
+	if (gunner == nullptr) return false;
+
+	// The parent owns the embedded weapon/model while the organic owns live look.
+	// A vehicle motor preserves sub-degree parent yaw in BAM; a static EWEAP uses
+	// its mission-yaw field. Pitch has no separate motor accumulator.
+	const int32_t parent_heading = mount.veh.yaw_seeded
+			? mount.veh.yaw_bam
+			: opennova::world::bam_heading_from_mission_yaw_deg(
+					static_cast<double>(mount.yaw));
+	const int32_t parent_pitch =
+			opennova::world::bam_from_degrees_wrapped(
+					static_cast<double>(mount.pitch));
+	out.valid = true;
+	out.gun_yaw = emplaced_control_phase(parent_heading, gunner->heading);
+	out.gun_pitch = emplaced_control_phase(parent_pitch, gunner->pitch);
+	return true;
+}
+
+bool emplaced_weapon_controls_for_client(
+		const opennova::netsim::ClientEntityState &mount,
+		const opennova::netsim::ClientState &state,
+		const std::vector<opennova::mission::ItemSeatSpec> &specs,
+		EmplacedWeaponControls &out) {
+	out = EmplacedWeaponControls{};
+	const opennova::mission::ItemSeatSpec *spec =
+			item_seat_spec_for_type(specs, mount.type_id);
+	if (spec == nullptr) return false;
+
+	for (const opennova::netsim::ClientEntityState &occupant : state.entities) {
+		if (occupant.carrier_handle != mount.handle ||
+				occupant.mount_bone == 0 ||
+				(occupant.cls != opennova::EntityClass::Player &&
+				 occupant.cls != opennova::EntityClass::Infantry))
+			continue;
+		const opennova::world::Seat *seat = nullptr;
+		for (const opennova::world::Seat &candidate : spec->seats) {
+			if (candidate.bone_index == occupant.mount_bone) {
+				seat = &candidate;
+				break;
+			}
+		}
+		if (seat == nullptr ||
+				seat->type != opennova::world::SeatType::Gunner)
+			continue;
+
+		// NetClientView has already composed mounted yaw into world heading and
+		// reconstructed an infantry gunner's live entity pitch from the compact
+		// aim target using retail's one-eighth chase.
+		const int32_t parent_heading = static_cast<int32_t>(
+				static_cast<uint32_t>(mount.yaw_byte) << 24);
+		const int32_t occupant_heading = static_cast<int32_t>(
+				static_cast<uint32_t>(occupant.yaw_byte) << 24);
+		const int32_t occupant_pitch =
+				occupant.cls == opennova::EntityClass::Player
+				? static_cast<int32_t>(
+						static_cast<uint32_t>(occupant.pitch_byte) << 24)
+				: occupant.pitch_bam;
+		out.valid = true;
+		out.gun_yaw =
+				emplaced_control_phase(parent_heading, occupant_heading);
+		out.gun_pitch =
+				emplaced_control_phase(mount.pitch_bam, occupant_pitch);
+		return true;
+	}
+	return false;
+}
+
+void write_present_emplaced_controls(
+		float *record, const EmplacedWeaponControls &controls) {
+	if (!controls.valid) return;
+	record[NovaSimulation::PF_EMPLACED_CONTROLS_VALID] = 1.0f;
+	record[NovaSimulation::PF_EWEAP_GUNYAW] =
+			static_cast<float>(controls.gun_yaw);
+	record[NovaSimulation::PF_EWEAP_GUNPITCH] =
+			static_cast<float>(controls.gun_pitch);
+}
+
 bool aim_overlay_inputs_for_client(
 		const opennova::netsim::ClientEntityState &entity,
 		const opennova::netsim::ClientState &state,
 		const std::vector<opennova::mission::ItemSeatSpec> &specs,
-		opennova::anim::AimOverlayInputs &out) {
+		opennova::anim::AimOverlayInputs &out,
+		bool *r_collapse_right_hand = nullptr) {
+	if (r_collapse_right_hand != nullptr) *r_collapse_right_hand = false;
 	if (entity.cls != opennova::EntityClass::Player &&
 			entity.cls != opennova::EntityClass::Infantry)
 		return false;
@@ -210,6 +336,15 @@ bool aim_overlay_inputs_for_client(
 		}
 	}
 	if (seat == nullptr) return true;
+	if (r_collapse_right_hand != nullptr) {
+		// The compact organic class is the decoded form of the relevant Flags
+		// distinction: Player rows carry 0x100; Infantry rows do not. Derive the
+		// presentation verdict from existing wire fields rather than adding a
+		// transport-only boolean.
+		*r_collapse_right_hand =
+				entity.cls == opennova::EntityClass::Infantry &&
+				seat_type_blocks_weapon_channel(seat->type);
+	}
 
 	out.mount_mode = mount_mode_for_seat_type(seat->type);
 	if (out.mount_mode == opennova::anim::MountMode::OnFoot) return true;
@@ -389,6 +524,31 @@ NovaSimulation::NovaSimulation() {
 	set_process(true);
 }
 
+void NovaSimulation::reset_local_player_view_effects() {
+	player_view_.binoculars_requested = false;
+	player_view_.binoculars_raised = false;
+	player_view_.binoculars_view_active = false;
+	binocular_yaw_offset_deg_ = 0.0f;
+	binocular_pitch_offset_deg_ = 0.0f;
+	player_view_.nvg_gain = opennova::world::kNvgGainMin;
+	player_view_.nvg_active = world_ != nullptr &&
+			(world_->mission_attrib_flags &
+					static_cast<uint32_t>(
+							opennova::bms::AttribFlags::StartWithNVGOn)) != 0;
+	nvg_scope_restore_ = false;
+	refresh_local_player_view_effects();
+}
+
+void NovaSimulation::refresh_local_player_view_effects() {
+	const opennova::world::Entity *local = world_ != nullptr
+			? world_->registry.get(world_->cached.local_player)
+			: nullptr;
+	const bool alive = local != nullptr && local->alive && local->health > 0;
+	const bool round_ended = world_ != nullptr && world_->round_end.ended;
+	opennova::world::player_view_update_effective_modes(
+			player_view_, alive, round_ended);
+}
+
 void NovaSimulation::reset_world() {
 	invalidate_present_effect_pose_cache();
 	pending_weapon_events_.clear();
@@ -407,7 +567,22 @@ void NovaSimulation::reset_world() {
 	weapon_switch_in_flight_ = false;
 	weapon_switch_deferred_action_ = -1;
 	weapon_start_in_switchto_ = false;
+	player_view_ = opennova::world::PlayerViewState{};
+	nvg_scope_restore_ = false;
+	binocular_yaw_offset_deg_ = 0.0f;
+	binocular_pitch_offset_deg_ = 0.0f;
+	local_eye_valid_ = false;
+	local_usegun_switch_ = LocalUseGunSwitch::kNone;
+	local_usegun_slot_active_ = false;
+	local_usegun_mount_ = opennova::world::EntityHandle{};
+	local_usegun_weapon_adm_ = 0xFF;
+	local_usegun_pending_mount_ = opennova::world::EntityHandle{};
+	local_usegun_pending_weapon_adm_ = 0xFF;
+	local_usegun_saved_adm_ = 0xFF;
+	local_usegun_switch_action_ = -1;
+	local_first_person_model_adm_ = 0xFF;
 	world_ = std::make_unique<World>();
+	world_->external_local_mounted_weapon_pump = true;
 	world_->projectile_authority = !joiner_;
 	world_->mp_session = host_listen_ || joiner_;
 	ai_ = std::make_unique<AiSystem>();
@@ -425,6 +600,7 @@ void NovaSimulation::reset_world() {
 	// sweep re-registers on the next load) and re-point the fresh ai_ at the container.
 	collision_item_db_.unref();
 	collision_placer_.unref();
+	item_traits_db_.unref();
 	collision_model_by_graphic_.clear();
 	collision_occlusion_by_graphic_.clear();
 	collision_radius_by_graphic_.clear();
@@ -433,6 +609,9 @@ void NovaSimulation::reset_world() {
 	collision_resolution_attempted_.clear();
 	collision_pose_data_.clear();
 	collision_skeletal_sources_.clear();
+	infantry_adm_resource_root_.unref();
+	infantry_adm_item_db_.unref();
+	infantry_adm_resolved_ai_count_ = 0;
 	panm_time_override_ms_ = -1;
 	collision_world_ = opennova::world::CollisionWorld{};
 	// Occlusion models too — retail reloads the model cache per mission, so the
@@ -485,40 +664,76 @@ void NovaSimulation::apply_root_motion_to_ai() {
 	ai_->root_motion = !infantry_anim_.empty() ? &infantry_anim_ : nullptr;
 }
 
+void NovaSimulation::reset_infantry_adm_ids() {
+	infantry_adm_resolved_ai_count_ = 0;
+	if (!world_ || !world_->ai) return;
+	AiSystem &ai = *world_->ai;
+	for (int i = 0; i < ai.count(); ++i) {
+		if (AiEntity *e = ai.at(i)) e->inf.adm_id = 0;
+	}
+}
+
 int NovaSimulation::set_infantry_anim_map(const Ref<NovaResourceRoot> &p_resource_root, const String &p_adm_name) {
 	// The default clip set (adm_id 0): every infantry entity grounds off this until its own
 	// model's .adm is registered (register_infantry_adm + set_infantry_adm_id). Clearing here
 	// resets the whole registry on each (re)load.
 	infantry_anim_.clear();
-	infantry_anim_.register_adm(p_resource_root, p_adm_name);
+	reset_infantry_adm_ids();
+	const int default_adm_id = infantry_anim_.register_adm(p_resource_root, p_adm_name);
+	const int default_clip_count = default_adm_id == 0 ? infantry_anim_.clip_count(0) : 0;
+	// Every stored per-entity id indexes this registry; rebuilding it invalidates
+	// all prior assignments. Only repopulate once slot 0 is the successfully loaded
+	// default map; otherwise a model-specific ADM could usurp the default slot and
+	// turn a failed load into false success.
+	if (default_adm_id == 0) resolve_new_infantry_adm_ids();
 	apply_root_motion_to_ai();
-	return infantry_anim_.clip_count(0);
+	return default_clip_count;
+}
+
+// Assign only newly attached AI entries. AiSystem::attach is append-only, including when
+// an entity handle is reused, so the count is a generation-safe high-water mark. This is
+// the spawn-time half of AnimMap_RegisterEntity: late joiner-local/remote players must not
+// retain the default E_STAND map or configured emplacements fall back to anim_emplaced.
+// [orig: AnimMap_RegisterEntity @0x40bb60; AnimMap_UpdateEntity @0x40b5f0.]
+void NovaSimulation::resolve_new_infantry_adm_ids() {
+	if (!world_ || !world_->ai || infantry_adm_resource_root_.is_null() ||
+			infantry_adm_item_db_.is_null() || infantry_anim_.empty())
+		return;
+	AiSystem &ai = *world_->ai;
+	const int count = ai.count();
+	if (infantry_adm_resolved_ai_count_ < 0 ||
+			infantry_adm_resolved_ai_count_ > count)
+		infantry_adm_resolved_ai_count_ = 0;
+	for (int i = infantry_adm_resolved_ai_count_; i < count; ++i) {
+		AiEntity *e = ai.at(i);
+		if (!e) continue;
+		e->inf.adm_id = 0;
+		if (!e->inf.active) continue;
+		const opennova::world::Entity *ent = world_->registry.get(e->handle);
+		if (!ent) continue;
+		const int visual_item_id =
+				visual_item_id_for_runtime_type(ent->item_id, infantry_adm_item_db_);
+		String adm = infantry_adm_item_db_->get_anim_def(visual_item_id);
+		if (adm.is_empty()) continue;
+		if (!adm.to_lower().ends_with(".adm")) adm += ".adm";
+		const int adm_id =
+				infantry_anim_.register_adm(infantry_adm_resource_root_, adm);
+		if (adm_id >= 0) e->inf.adm_id = adm_id;
+	}
+	infantry_adm_resolved_ai_count_ = count;
 }
 
 // Per-entity .adm resolution: ground each soldier off its OWN model's clip, not the shared
-// default set (adm_id 0). For every active infantry entity, resolve its anim_def from its
-// items.def type id, register that .adm (parsed once, cached by name), and store the resulting
-// adm_id on its InfantryState. The local player (US01) is covered the same way once spawned.
-// Idempotent: re-registering a name returns the cached id, re-setting adm_id is harmless, so the
-// host can call this after load and again after spawning the player. [orig: AnimMap_UpdateEntity
-// @0x40b5f0 evaluates the entity's own anim map per frame; docs/world/world-wac-ai-re.md D-INF-6.]
+// default set (adm_id 0). Retain the host inputs because multiplayer players are spawned
+// after this mission-load sweep; the step/spawn hooks above the world layer resolve each
+// later AiSystem entry exactly once.
 void NovaSimulation::resolve_infantry_adm_ids(const Ref<NovaResourceRoot> &p_resource_root,
-                                              const Ref<NovaItemDatabase> &p_item_db) {
-	if (!world_ || !world_->ai || p_resource_root.is_null() || p_item_db.is_null()) return;
-	AiSystem &ai = *world_->ai;
-	for (int i = 0; i < ai.count(); ++i) {
-		AiEntity *e = ai.at(i);
-		if (!e || !e->inf.active) continue;
-		const opennova::world::Entity *ent = world_->registry.get(e->handle);
-		if (!ent) continue;
-		const int visual_item_id = visual_item_id_for_runtime_type(ent->item_id, p_item_db);
-		String adm = p_item_db->get_anim_def(visual_item_id);
-		if (adm.is_empty()) continue;
-		if (!adm.to_lower().ends_with(".adm")) adm += ".adm";
-		const int adm_id = infantry_anim_.register_adm(p_resource_root, adm);
-		if (adm_id >= 0) e->inf.adm_id = adm_id;
-	}
-	apply_root_motion_to_ai();
+		const Ref<NovaItemDatabase> &p_item_db) {
+	if (p_resource_root.is_null() || p_item_db.is_null()) return;
+	infantry_adm_resource_root_ = p_resource_root;
+	infantry_adm_item_db_ = p_item_db;
+	reset_infantry_adm_ids();
+	resolve_new_infantry_adm_ids();
 }
 
 // Stamp every live entity's items.def-derived wire traits via the item database:
@@ -546,6 +761,7 @@ void NovaSimulation::resolve_infantry_adm_ids(const Ref<NovaResourceRoot> &p_res
 // [orig: NapiNPClientMsg_0x00D @0x432c40; docs/net/novaworld-net-re.md D-NET-97]
 void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db) {
 	if (!world_ || p_item_db.is_null()) return;
+	item_traits_db_ = p_item_db;
 	// Cache the Player template's items.def hp at world level so LATE-JOINER spawns (which happen
 	// after this sweep) seed full health without an item-db reach-back from libs/ [orig:
 	// Entity_InitFromItemDef @0x49e550 — spawn Health = itemDef->healthMax]. (D-NET-144)
@@ -675,6 +891,34 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 				world_->vehicle_traits.set(e->item_id, vt);
 			}
 		}
+	}
+	// Throwable class bindings: every items.def entry whose ai_function /
+	// move_function names a throwable class (nade/schl/clym/vmne/lndm) lands a
+	// row keyed by type id (id - 100000, the ammo TrcrID space), with the def
+	// hp/armor the placed device spawns at. [orig: EntityDef_InitAllCallbacks
+	// @ 0x4a5a70 resolves the class tables into every item def at load;
+	// world-wac-ai-re §27.]
+	world_->throwables.classes.clear();
+	const PackedInt32Array all_ids = p_item_db->get_item_ids();
+	for (int i = 0; i < all_ids.size(); ++i) {
+		const int def_id = all_ids[i];
+		const opennova::world::ThrowClass think = opennova::world::throw_class_from_tag(
+				p_item_db->get_ai_function(def_id).utf8().get_data());
+		const opennova::world::ThrowClass motor = opennova::world::throw_class_from_tag(
+				p_item_db->get_move_function(def_id).utf8().get_data());
+		if (think == opennova::world::ThrowClass::kNone &&
+				motor == opennova::world::ThrowClass::kNone)
+			continue;
+		opennova::world::ThrowableClassRow row;
+		row.item_id = def_id - opennova::mission::kItemIdOffset;
+		row.think = think;
+		row.motor = motor;
+		row.health_max = opennova::world::retail_signed_i16(p_item_db->get_hp(def_id));
+		row.armor_impact = opennova::world::retail_signed_i16(
+				p_item_db->get_armor_impact(def_id));
+		row.armor_kz = opennova::world::retail_signed_i16(
+				p_item_db->get_armor_kz(def_id));
+		world_->throwables.classes.set(row);
 	}
 	// The AS zone-slot chain — built AFTER the trait stamp (zone registration keys on
 	// is_capture_trigger), then the secure latch seeds each rear zone's control to 1.0.
@@ -1056,13 +1300,346 @@ void panm_render_matrix_from_godot(const Transform3D &transform, float out[16]) 
 	out[15] = 1.0f;
 }
 
+constexpr double kHalfPi = 1.57079632679489661923;
+constexpr double kRadiansPerDegree =
+		3.14159265358979323846 / 180.0;
+
+// C++ twin of MissionObjectPlacer.bms_to_godot_basis for ordinary mission
+// eulers. Kept here because the mounted provider must produce the same world
+// frame without depending on presentation/GDScript.
+Basis godot_model_basis_from_mission_euler(
+		double pitch_deg, double yaw_deg, double roll_deg) {
+	return Basis(Vector3(0.0, 1.0, 0.0),
+			(90.0 - yaw_deg) * kRadiansPerDegree) *
+			Basis(Vector3(0.0, 0.0, 1.0),
+					pitch_deg * kRadiansPerDegree) *
+			Basis(Vector3(1.0, 0.0, 0.0),
+					roll_deg * kRadiansPerDegree) *
+			Basis(Vector3(0.0, 1.0, 0.0), kHalfPi);
+}
+
+bool finite_vector3(const Vector3 &value) {
+	return std::isfinite(static_cast<double>(value.x)) &&
+			std::isfinite(static_cast<double>(value.y)) &&
+			std::isfinite(static_cast<double>(value.z));
+}
+
+bool finite_basis(const Basis &value) {
+	return finite_vector3(value[0]) && finite_vector3(value[1]) &&
+			finite_vector3(value[2]);
+}
+
+bool resolve_model_mounted_pose(
+		const Ref<NovaObjectData> &data,
+		const opennova::world::Entity &carrier,
+		const opennova::world::Seat &seat,
+		const Dictionary &controls, uint32_t time_ms,
+		opennova::world::MountedPose &out) {
+	if (data.is_null() || seat.type != opennova::world::SeatType::Gunner ||
+			seat.bone_index == 0)
+		return false;
+	const int userpoint_index = static_cast<int>(seat.bone_index) - 1;
+	if (userpoint_index < 0 || userpoint_index >= data->get_user_point_count())
+		return false;
+	const Dictionary userpoint = data->get_user_point_info(userpoint_index);
+	const int part_index = static_cast<int>(userpoint.get("subobject", -1));
+	const Vector3 authored_model_position = userpoint.get("position", Vector3());
+	if (part_index < 0 || !finite_vector3(authored_model_position)) return false;
+
+	constexpr int lod_index = 0;
+	const Dictionary rest_parts = data->evaluate_panm(lod_index, 0, Dictionary());
+	const Dictionary live_parts = data->evaluate_panm(lod_index, time_ms, controls);
+	if (!rest_parts.has(part_index) || !live_parts.has(part_index)) return false;
+	const Variant rest_value = rest_parts[part_index];
+	const Variant live_value = live_parts[part_index];
+	if (rest_value.get_type() != Variant::TRANSFORM3D ||
+			live_value.get_type() != Variant::TRANSFORM3D)
+		return false;
+	const Transform3D rest_part = static_cast<Transform3D>(rest_value);
+	const Transform3D live_part = static_cast<Transform3D>(live_value);
+	if (!finite_vector3(rest_part.origin) || !finite_basis(rest_part.basis) ||
+			!finite_vector3(live_part.origin) || !finite_basis(live_part.basis) ||
+			std::abs(static_cast<double>(rest_part.basis.determinant())) < 1.0e-8)
+		return false;
+
+	const Vector3 point_in_part =
+			rest_part.affine_inverse().xform(authored_model_position);
+	const Vector3 live_model_position = live_part.xform(point_in_part);
+	const Basis carrier_basis = godot_model_basis_from_mission_euler(
+			carrier.pitch, carrier.yaw, carrier.roll);
+	if (!finite_vector3(live_model_position) || !finite_basis(carrier_basis) ||
+			std::abs(static_cast<double>(carrier_basis.determinant())) < 1.0e-8)
+		return false;
+	const Vector3 carrier_origin(
+			carrier.position.x, carrier.position.z, -carrier.position.y);
+	const Vector3 live_world_position =
+			Transform3D(carrier_basis, carrier_origin).xform(live_model_position);
+	if (!finite_vector3(live_world_position)) return false;
+	out.position = {
+			static_cast<float>(live_world_position.x),
+			static_cast<float>(-live_world_position.z),
+			static_cast<float>(live_world_position.y)};
+
+	const double baseline_yaw =
+			seat.type == opennova::world::SeatType::Gunner
+			? static_cast<double>(carrier.yaw - seat.yaw_offset)
+			: static_cast<double>(carrier.yaw + seat.yaw_offset);
+	const Basis baseline_basis = godot_model_basis_from_mission_euler(
+			carrier.pitch, baseline_yaw, carrier.roll);
+	const Basis part_delta = live_part.basis * rest_part.basis.inverse();
+	Basis live_basis = carrier_basis * part_delta *
+			carrier_basis.inverse() * baseline_basis;
+	if (!finite_basis(live_basis) ||
+			std::abs(static_cast<double>(live_basis.determinant())) < 1.0e-8)
+		return false;
+	live_basis = live_basis.orthonormalized();
+	const Basis euler_basis = live_basis *
+			Basis(Vector3(0.0, 1.0, 0.0), -kHalfPi);
+	const double pitch_rad = std::asin(std::clamp(
+			static_cast<double>(euler_basis[1].x), -1.0, 1.0));
+	if (std::abs(std::cos(pitch_rad)) < 1.0e-6) return false;
+	const double heading_rad = std::atan2(
+			-static_cast<double>(euler_basis[2].x),
+			static_cast<double>(euler_basis[0].x));
+	const double roll_rad = std::atan2(
+			-static_cast<double>(euler_basis[1].z),
+			static_cast<double>(euler_basis[1].y));
+	const double yaw_deg = opennova::world::normalize_mission_yaw_deg(
+			90.0 - heading_rad / kRadiansPerDegree);
+	const double pitch_deg = pitch_rad / kRadiansPerDegree;
+	const double roll_deg = roll_rad / kRadiansPerDegree;
+	if (!std::isfinite(yaw_deg) || !std::isfinite(pitch_deg) ||
+			!std::isfinite(roll_deg))
+		return false;
+	out.yaw = static_cast<int16_t>(std::lround(yaw_deg));
+	out.pitch = static_cast<int16_t>(std::lround(pitch_deg));
+	out.roll = static_cast<int16_t>(std::lround(roll_deg));
+	return true;
+}
+
+bool resolve_client_eweap_attachment_pose(
+		const opennova::netsim::ClientEntityState &child,
+		const opennova::netsim::ClientState &state,
+		const std::vector<opennova::mission::ItemSeatSpec> &specs,
+		const std::unordered_map<int32_t, Ref<NovaObjectData>> &model_data_by_type,
+		uint32_t time_ms, opennova::world::MountedPose &out) {
+	if (child.parent_handle == 0xFFFFu) return false;
+	const opennova::netsim::ClientEntityState *parent =
+			client_entity_for_handle(state, child.parent_handle);
+	if (parent == nullptr) return false;
+	const opennova::mission::ItemSeatSpec *parent_spec =
+			item_seat_spec_for_type(specs, parent->type_id);
+	if (parent_spec == nullptr) return false;
+
+	// The 0x0D relation names only the parent, not the authored attachment slot.
+	// Reconstruct only when the child type selects exactly one authored row and
+	// that row resolves a userpoint; duplicate same-type rows are intentionally
+	// left on the rigid fallback.
+	const opennova::mission::ItemEmplacementAttachmentSpec *attachment = nullptr;
+	for (const opennova::mission::ItemEmplacementAttachmentSpec &candidate :
+			parent_spec->emplacement_attachments) {
+		if (candidate.child_type_id != static_cast<int32_t>(child.type_id))
+			continue;
+		if (attachment != nullptr) return false;
+		attachment = &candidate;
+	}
+	if (attachment == nullptr || !attachment->anchor_found ||
+			attachment->anchor.bone_index == 0)
+		return false;
+	const auto data_found = model_data_by_type.find(parent->type_id);
+	if (data_found == model_data_by_type.end() || data_found->second.is_null())
+		return false;
+	const Ref<NovaObjectData> &data = data_found->second;
+
+	// Remote generic PLAYPARTANIM phases are not in ClientEntityState. Do not
+	// synthesize them from timing or repurpose a wire field. EWEAP is the one safe
+	// articulated family: the decoded mounted gunner already determines both
+	// semantic controls through the witnessed parent-minus-occupant relationship.
+	EmplacedWeaponControls emplaced;
+	if (!emplaced_weapon_controls_for_client(
+				*parent, state, specs, emplaced))
+		return false;
+	const ThreediModelIR &ir = data->native_ir();
+	if (ir.control_register_count > 0 && ir.control_registers == nullptr)
+		return false;
+	bool has_eweap_control = false;
+	for (size_t slot = 0; slot < ir.control_register_count; ++slot) {
+		const String name = String::utf8(ir.control_registers[slot].name);
+		if (name.nocasecmp_to(kEmplacedGunYawRegister) == 0 ||
+				name.nocasecmp_to(kEmplacedGunPitchRegister) == 0) {
+			has_eweap_control = true;
+			break;
+		}
+	}
+	if (!has_eweap_control) return false;
+	Dictionary controls;
+	controls[String(kEmplacedGunYawRegister)] =
+			static_cast<int>(emplaced.gun_yaw);
+	controls[String(kEmplacedGunPitchRegister)] =
+			static_cast<int>(emplaced.gun_pitch);
+
+	opennova::world::Entity carrier;
+	carrier.item_id = static_cast<int32_t>(parent->type_id);
+	carrier.position = {
+			static_cast<float>(parent->x / kFixed16),
+			static_cast<float>(parent->y / kFixed16),
+			static_cast<float>(parent->z / kFixed16)};
+	carrier.yaw = static_cast<int16_t>(std::lround(
+			opennova::world::mission_yaw_deg_from_bam_heading(
+					static_cast<int32_t>(
+							static_cast<uint32_t>(parent->yaw_byte) << 24))));
+	carrier.pitch = static_cast<int16_t>(std::lround(
+			static_cast<double>(parent->pitch_bam) *
+				opennova::world::kDegreesPerBam));
+	carrier.roll = static_cast<int16_t>(std::lround(
+			static_cast<double>(parent->roll_bam) *
+				opennova::world::kDegreesPerBam));
+	return resolve_model_mounted_pose(
+			data, carrier, attachment->anchor, controls, time_ms, out);
+}
+
 } // namespace
 
 void NovaSimulation::apply_collision_to_ai() {
 	collision_world_.terrain = terrain_field_.valid() ? &terrain_field_ : nullptr;
 	collision_world_.set_section_matrix_provider(this);
-	if (world_) world_->collision = &collision_world_;
+	if (world_) {
+		world_->collision = &collision_world_;
+		world_->mounted_pose_provider = this;
+	}
 	if (ai_) ai_->collision = &collision_world_;
+}
+
+bool NovaSimulation::resolve_mounted_pose(
+		opennova::world::World &p_world,
+		const opennova::world::Entity &p_carrier,
+		const opennova::world::Seat &p_seat,
+		opennova::world::MountedPose &r_out) {
+	if (!world_ || &p_world != world_.get() ||
+			p_seat.type != opennova::world::SeatType::Gunner ||
+			p_seat.bone_index == 0)
+		return false;
+	const auto data_found =
+			mounted_pose_data_by_type_.find(p_carrier.item_id);
+	if (data_found == mounted_pose_data_by_type_.end() ||
+			data_found->second.is_null())
+		return false;
+	const Ref<NovaObjectData> &data = data_found->second;
+	const int userpoint_index = static_cast<int>(p_seat.bone_index) - 1;
+	if (userpoint_index < 0 ||
+			userpoint_index >= data->get_user_point_count())
+		return false;
+	const Dictionary userpoint = data->get_user_point_info(userpoint_index);
+	const int part_index = static_cast<int>(userpoint.get("subobject", -1));
+	const Vector3 authored_model_position =
+			userpoint.get("position", Vector3());
+	if (part_index < 0 || !finite_vector3(authored_model_position))
+		return false;
+
+	constexpr int lod_index = 0;
+	const Dictionary rest_parts =
+			data->evaluate_panm(lod_index, 0, Dictionary());
+	if (!rest_parts.has(part_index)) return false;
+
+	Dictionary controls;
+	const ThreediModelIR &ir = data->native_ir();
+	if (ir.control_register_count > 0 && ir.control_registers == nullptr)
+		return false;
+	AiEntity *carrier_ai = ai_ ? ai_->for_handle(p_carrier.handle) : nullptr;
+	for (size_t slot = 0; slot < 2 && slot < ir.control_register_count;
+			++slot) {
+		const int phase = carrier_ai != nullptr
+				? std::clamp(carrier_ai->brain.f[
+						AiBrain::kPartAnimPhase0 + static_cast<int>(slot)],
+						0, 65535)
+				: 0;
+		const String name = String::utf8(ir.control_registers[slot].name);
+		if (!name.is_empty()) controls[name] = phase;
+	}
+	EmplacedWeaponControls emplaced;
+	if (emplaced_weapon_controls_for(
+			p_world, ai_.get(), p_carrier, emplaced)) {
+		controls[String(kEmplacedGunYawRegister)] =
+				static_cast<int>(emplaced.gun_yaw);
+		controls[String(kEmplacedGunPitchRegister)] =
+				static_cast<int>(emplaced.gun_pitch);
+	}
+	const uint32_t time_ms = panm_time_override_ms_ >= 0
+			? static_cast<uint32_t>(panm_time_override_ms_)
+			: p_world.logic_tick * 16u;
+	const Dictionary live_parts =
+			data->evaluate_panm(lod_index, time_ms, controls);
+	if (!live_parts.has(part_index)) return false;
+	const Variant rest_value = rest_parts[part_index];
+	const Variant live_value = live_parts[part_index];
+	if (rest_value.get_type() != Variant::TRANSFORM3D ||
+			live_value.get_type() != Variant::TRANSFORM3D)
+		return false;
+	const Transform3D rest_part = static_cast<Transform3D>(rest_value);
+	const Transform3D live_part = static_cast<Transform3D>(live_value);
+	if (!finite_vector3(rest_part.origin) || !finite_basis(rest_part.basis) ||
+			!finite_vector3(live_part.origin) || !finite_basis(live_part.basis) ||
+			std::abs(static_cast<double>(rest_part.basis.determinant())) < 1.0e-8)
+		return false;
+
+	const Vector3 point_in_part =
+			rest_part.affine_inverse().xform(authored_model_position);
+	const Vector3 live_model_position = live_part.xform(point_in_part);
+	const Basis carrier_basis = godot_model_basis_from_mission_euler(
+			p_carrier.pitch, p_carrier.yaw, p_carrier.roll);
+	if (!finite_vector3(live_model_position) || !finite_basis(carrier_basis) ||
+			std::abs(static_cast<double>(carrier_basis.determinant())) < 1.0e-8)
+		return false;
+	const Vector3 carrier_origin(
+			p_carrier.position.x, p_carrier.position.z,
+			-p_carrier.position.y);
+	const Vector3 live_world_position =
+			Transform3D(carrier_basis, carrier_origin).xform(live_model_position);
+	if (!finite_vector3(live_world_position)) return false;
+	r_out.position = {
+			static_cast<float>(live_world_position.x),
+			static_cast<float>(-live_world_position.z),
+			static_cast<float>(live_world_position.y)};
+
+	// Apply the articulated part's rest-to-live delta around the carrier to the
+	// exact static seat orientation. This identity-round-trips the fallback and
+	// lets moving seat parts carry yaw/pitch/roll without coupling to LOOK.
+	const double baseline_yaw =
+			p_seat.type == opennova::world::SeatType::Gunner
+			? static_cast<double>(p_carrier.yaw - p_seat.yaw_offset)
+			: static_cast<double>(p_carrier.yaw + p_seat.yaw_offset);
+	const Basis baseline_basis = godot_model_basis_from_mission_euler(
+			p_carrier.pitch, baseline_yaw, p_carrier.roll);
+	const Basis part_delta =
+			live_part.basis * rest_part.basis.inverse();
+	Basis live_basis = carrier_basis * part_delta *
+			carrier_basis.inverse() * baseline_basis;
+	if (!finite_basis(live_basis) ||
+			std::abs(static_cast<double>(live_basis.determinant())) < 1.0e-8)
+		return false;
+	live_basis = live_basis.orthonormalized();
+	const Basis euler_basis = live_basis *
+			Basis(Vector3(0.0, 1.0, 0.0), -kHalfPi);
+	const double pitch_rad = std::asin(std::clamp(
+			static_cast<double>(euler_basis[1].x), -1.0, 1.0));
+	if (std::abs(std::cos(pitch_rad)) < 1.0e-6) return false;
+	const double heading_rad = std::atan2(
+			-static_cast<double>(euler_basis[2].x),
+			static_cast<double>(euler_basis[0].x));
+	const double roll_rad = std::atan2(
+			-static_cast<double>(euler_basis[1].z),
+			static_cast<double>(euler_basis[1].y));
+	const double yaw_deg = opennova::world::normalize_mission_yaw_deg(
+			90.0 - heading_rad / kRadiansPerDegree);
+	const double pitch_deg = pitch_rad / kRadiansPerDegree;
+	const double roll_deg = roll_rad / kRadiansPerDegree;
+	if (!std::isfinite(yaw_deg) || !std::isfinite(pitch_deg) ||
+			!std::isfinite(roll_deg))
+		return false;
+	r_out.yaw = static_cast<int16_t>(std::lround(yaw_deg));
+	r_out.pitch = static_cast<int16_t>(std::lround(pitch_deg));
+	r_out.roll = static_cast<int16_t>(std::lround(roll_deg));
+	return true;
 }
 
 bool NovaSimulation::ensure_collision_instance(
@@ -1134,6 +1711,8 @@ bool NovaSimulation::build_section_matrices(opennova::world::World &p_world,
 
 		String weapon_key;
 		double weapon_seconds = 0.0;
+		const bool collapse_right_hand =
+				mount_collapses_right_hand_row(*entity);
 		if (p_world.cached.local_player.valid() &&
 				p_entity.packed == p_world.cached.local_player.packed &&
 				opennova::world::infantry_weapon_channel_visible(
@@ -1150,7 +1729,7 @@ bool NovaSimulation::build_section_matrices(opennova::world::World &p_world,
 
 		const Array pose = source.anim->eval_pose_overlay(
 				primary_key, primary_seconds, source.overlay_classes, deltas,
-				weapon_key, weapon_seconds);
+				weapon_key, weapon_seconds, collapse_right_hand);
 		if (pose.size() < static_cast<int64_t>(section_count)) return false;
 
 		// The callback result is FINAL world-space. Build the body placement from
@@ -1173,6 +1752,18 @@ bool NovaSimulation::build_section_matrices(opennova::world::World &p_world,
 			if (value.get_type() != Variant::TRANSFORM3D) return false;
 			const Transform3D local = static_cast<Transform3D>(value);
 			const int32_t parent = source.parents[i];
+			// eval_pose_overlay emits BN17's zero-scale local clip pose.
+			// Retail zeroes the FINAL collision row after overlay/re-anchor. Preserve
+			// that literal collision result for COBJ 16: composing body_world here
+			// would incorrectly reintroduce the entity translation.
+			// [orig: special row @0x4b1290]
+			const bool collapsed_right_hand =
+					collapse_right_hand && i == 16;
+			if (collapsed_right_hand) {
+				pose_global[i] = local;
+				r_out[i] = opennova::world::CollisionMatrix{};
+				continue;
+			}
 			pose_global[i] = parent >= 0
 					? pose_global[static_cast<size_t>(parent)] * local
 					: local;
@@ -1213,7 +1804,17 @@ bool NovaSimulation::build_section_matrices(opennova::world::World &p_world,
 		const String name = String::utf8(ir.control_registers[slot].name);
 		if (!name.is_empty()) controls[name] = phase;
 	}
-	(void)p_world;
+	// EWEAP yaw/pitch are semantic CTRL names, not PLAYPARTANIM ordinals.
+	// B50Cal's register order is HEAT_GLOW, yaw, pitch, so aliasing channel
+	// 1/2 would drive the wrong registers and can never reach pitch.
+	EmplacedWeaponControls emplaced;
+	if (entity != nullptr &&
+			emplaced_weapon_controls_for(p_world, ai_.get(), *entity, emplaced)) {
+		controls[String(kEmplacedGunYawRegister)] =
+				static_cast<int>(emplaced.gun_yaw);
+		controls[String(kEmplacedGunPitchRegister)] =
+				static_cast<int>(emplaced.gun_pitch);
+	}
 	const uint32_t time_ms = panm_time_override_ms_ >= 0
 			? static_cast<uint32_t>(panm_time_override_ms_)
 			: (world_ != nullptr ? world_->logic_tick * 16u : 0u);
@@ -2013,6 +2614,47 @@ int NovaSimulation::debug_spawn_round(const Vector3 &p_from_godot, const Vector3
 	return world_->round_sim.spawn(*world_, params);
 }
 
+Array NovaSimulation::get_throwable_visuals() const {
+	Array out;
+	if (!world_) return out;
+	const double kDegPerBam = opennova::world::kDegreesPerBam;
+	auto push_entry = [&](int key, int item_id, const opennova::world::Vec3 &pos,
+			int32_t yaw_bam, int32_t pitch_bam, int32_t roll_bam) {
+		Dictionary d;
+		d["key"] = key;
+		d["item_id"] = item_id;
+		d["pos"] = Vector3(pos.x, pos.z, -pos.y);
+		// the placer euler convention: rotation_deg = (pitch, MISSION yaw, roll)
+		d["rotation_deg"] = Vector3(
+				static_cast<float>(double(pitch_bam) * kDegPerBam),
+				static_cast<float>(
+						opennova::world::mission_yaw_deg_from_bam_heading(yaw_bam)),
+				static_cast<float>(double(roll_bam) * kDegPerBam));
+		out.push_back(d);
+	};
+	for (int i = 0; i < opennova::world::RoundSim::kCapacity; ++i) {
+		const opennova::world::LiveRound &r =
+				world_->round_sim.rounds[static_cast<size_t>(i)];
+		if (!r.active || !r.tracer || r.item_type_id == 0) continue;
+		push_entry(i, r.item_type_id, r.pos, r.yaw_bam, r.pitch_bam, r.roll_bam);
+	}
+	uint8_t viewer_team = 0xFF;
+	if (const opennova::world::Entity *lp =
+			world_->registry.get(world_->cached.local_player))
+		viewer_team = static_cast<uint8_t>(lp->team);
+	for (const opennova::world::PlacedDevice &d : world_->throwables.devices) {
+		if (!d.active) continue;
+		// Viewer-side team variant with the retail base/friendly fallback when
+		// no foe TrcrID is authored [orig: @ 0x5469db..0x546a15].
+		const int item = opennova::world::throwable_item_for_viewer(
+				d.item_friendly, d.item_enemy, d.team, viewer_team);
+		if (item == 0) continue;
+		push_entry(0x10000 + d.entity.packed, item, d.pos, d.yaw_bam, d.pitch_bam,
+				d.roll_bam);
+	}
+	return out;
+}
+
 Dictionary NovaSimulation::get_round_debug() const {
 	Dictionary out;
 	Array events;
@@ -2260,6 +2902,229 @@ bool NovaSimulation::local_player_in_vehicle_loadout_zone() const {
 	       (e->flags & opennova::world::kEntityFlagVehicleLoadoutZone) != 0;
 }
 
+opennova::world::WeaponSlotState *NovaSimulation::active_local_weapon_slot() {
+	if (local_usegun_slot_active_ && world_ && local_usegun_mount_.valid()) {
+		opennova::world::Entity *mount =
+				world_->registry.get(local_usegun_mount_);
+		if (mount != nullptr &&
+				mount->primary_weapon_slot_adm == local_usegun_weapon_adm_)
+			return &mount->primary_weapon_slot;
+	}
+	return &weapon_slot_;
+}
+
+const opennova::world::WeaponSlotState *
+NovaSimulation::active_local_weapon_slot() const {
+	if (local_usegun_slot_active_ && world_ && local_usegun_mount_.valid()) {
+		const opennova::world::Entity *mount =
+				world_->registry.get(local_usegun_mount_);
+		if (mount != nullptr &&
+				mount->primary_weapon_slot_adm == local_usegun_weapon_adm_)
+			return &mount->primary_weapon_slot;
+	}
+	return &weapon_slot_;
+}
+
+bool NovaSimulation::local_usegun_switch_is_instant() const {
+	if (!world_ ||
+			local_usegun_switch_action_ !=
+				opennova::world::weapon_action::kSwitchFrom)
+		return false;
+	const uint8_t from_adm = local_usegun_slot_active_
+			? local_usegun_weapon_adm_
+			: local_usegun_saved_adm_;
+	const uint8_t to_adm =
+			(local_usegun_switch_ == LocalUseGunSwitch::kAttach ||
+			 local_usegun_switch_ == LocalUseGunSwitch::kSwap)
+			? local_usegun_pending_weapon_adm_
+			: local_usegun_saved_adm_;
+	const opennova::world::WeaponTableEntry *from =
+			world_->weapons.by_index(from_adm);
+	const opennova::world::WeaponTableEntry *to =
+			world_->weapons.by_index(to_adm);
+	const int32_t flags = (from != nullptr ? from->flags : 0) |
+			(to != nullptr ? to->flags : 0);
+	return (flags & opennova::world::weapon_flag::kEmplaced) != 0;
+}
+
+void NovaSimulation::queue_local_usegun_weapon_switch(bool p_same_category) {
+	local_usegun_switch_action_ = p_same_category
+			? opennova::world::weapon_action::kSwitchRank
+			: opennova::world::weapon_action::kSwitchFrom;
+	weapon_switch_deferred_action_ = local_usegun_switch_action_;
+	if (!weapon_active_ ||
+			(local_usegun_slot_active_ &&
+			 active_local_weapon_slot() == &weapon_slot_)) {
+		commit_local_usegun_weapon_switch();
+		return;
+	}
+	opennova::world::WeaponSlotState *slot = active_local_weapon_slot();
+	if (local_usegun_switch_action_ ==
+			opennova::world::weapon_action::kSwitchRank)
+		opennova::world::weapon_fsm_queue_switch_rank(*slot);
+	else
+		opennova::world::weapon_fsm_queue_switch_from(*slot);
+}
+
+void NovaSimulation::commit_local_usegun_weapon_switch() {
+	if (!world_ || local_usegun_switch_ == LocalUseGunSwitch::kNone) return;
+	opennova::world::Entity *player =
+			world_->registry.get(world_->cached.local_player);
+	if (player == nullptr) {
+		local_usegun_switch_ = LocalUseGunSwitch::kNone;
+		local_usegun_slot_active_ = false;
+		local_usegun_mount_ = opennova::world::EntityHandle{};
+		local_usegun_weapon_adm_ = 0xFF;
+		local_usegun_pending_mount_ = opennova::world::EntityHandle{};
+		local_usegun_pending_weapon_adm_ = 0xFF;
+		local_usegun_saved_adm_ = 0xFF;
+		local_usegun_switch_action_ = -1;
+		weapon_switch_deferred_action_ = -1;
+		weapon_active_ = false;
+		local_first_person_model_adm_ = 0xFF;
+		return;
+	}
+
+	uint8_t next_adm = 0xFF;
+	opennova::world::WeaponSlotState *next_slot = nullptr;
+	bool select_parent =
+			local_usegun_switch_ == LocalUseGunSwitch::kAttach ||
+			local_usegun_switch_ == LocalUseGunSwitch::kSwap;
+	if (select_parent) {
+		opennova::world::Entity *mount =
+				world_->registry.get(local_usegun_pending_mount_);
+		if (mount == nullptr ||
+				mount->primary_weapon_slot_adm !=
+						local_usegun_pending_weapon_adm_) {
+			select_parent = false;
+		} else {
+			local_usegun_slot_active_ = true;
+			local_usegun_mount_ = local_usegun_pending_mount_;
+			local_usegun_weapon_adm_ =
+					local_usegun_pending_weapon_adm_;
+			next_adm = local_usegun_weapon_adm_;
+			next_slot = &mount->primary_weapon_slot;
+		}
+	}
+	if (!select_parent) {
+		local_usegun_slot_active_ = false;
+		next_adm = local_usegun_saved_adm_;
+		next_slot = &weapon_slot_;
+	}
+
+	player->equipped_adm_index = next_adm;
+	const opennova::world::WeaponTableEntry *next_def =
+			world_->weapons.by_index(next_adm);
+	// SWITCHFROM draws the committed target through TryQueueSwitchTo. SWITCHRANK
+	// swaps directly and must not disturb a persistent target slot's current
+	// action/phase/next fields. [orig: commits @0x543475 / @0x543539]
+	if (next_slot != nullptr && next_def != nullptr &&
+			local_usegun_switch_action_ ==
+				opennova::world::weapon_action::kSwitchFrom)
+		opennova::world::weapon_fsm_try_queue_switch_to(*next_slot);
+	PendingWeaponEvent event;
+	event.tick = world_->logic_tick;
+	event.world_position = get_local_player_position();
+	event.switch_to_weapon =
+			next_def != nullptr ? String::utf8(next_def->name.c_str()) : String();
+	event.clear_weapon = next_def == nullptr;
+	event.preserve_slot_state = true;
+	pending_weapon_events_.push_back(std::move(event));
+	if (next_def == nullptr) weapon_active_ = false;
+
+	local_usegun_switch_ = LocalUseGunSwitch::kNone;
+	local_usegun_pending_mount_ = opennova::world::EntityHandle{};
+	local_usegun_pending_weapon_adm_ = 0xFF;
+	local_usegun_switch_action_ = -1;
+	weapon_switch_deferred_action_ = -1;
+	if (!local_usegun_slot_active_) {
+		local_usegun_mount_ = opennova::world::EntityHandle{};
+		local_usegun_weapon_adm_ = 0xFF;
+		local_usegun_saved_adm_ = 0xFF;
+	}
+}
+
+void NovaSimulation::sync_local_usegun_weapon_transition() {
+	if (!world_ || !world_->cached.local_player.valid()) return;
+	opennova::world::Entity *player =
+			world_->registry.get(world_->cached.local_player);
+	if (player == nullptr) return;
+	opennova::world::Entity *mounted_parent =
+			player->mounted &&
+					player->mount_type == opennova::world::SeatType::Gunner
+			? world_->registry.get(player->mount_target)
+			: nullptr;
+	const bool on_usegun =
+			mounted_parent != nullptr && player->use_gun_slot_swapped &&
+			mounted_parent->primary_weapon_slot_adm != 0xFF;
+	const auto same_category = [&](uint8_t p_from, uint8_t p_to) {
+		const opennova::world::WeaponTableEntry *from =
+				world_->weapons.by_index(p_from);
+		const opennova::world::WeaponTableEntry *to =
+				world_->weapons.by_index(p_to);
+		return from != nullptr && to != nullptr &&
+				from->category == to->category;
+	};
+	const auto stage_parent = [&](opennova::world::Entity &p_mount) {
+		const uint8_t target_adm = p_mount.primary_weapon_slot_adm;
+		if (!local_usegun_slot_active_)
+			local_usegun_saved_adm_ =
+					player->pre_use_gun_equipped_adm_index;
+		local_usegun_pending_mount_ = p_mount.handle;
+		local_usegun_pending_weapon_adm_ = target_adm;
+		local_usegun_switch_ = local_usegun_slot_active_
+				? LocalUseGunSwitch::kSwap
+				: LocalUseGunSwitch::kAttach;
+		const uint8_t from_adm = local_usegun_slot_active_
+				? local_usegun_weapon_adm_
+				: local_usegun_saved_adm_;
+		// The shared helper applied the nonlocal immediate stamp. L retains its
+		// outgoing EquippedSlot until the action handler's commit seam.
+		player->equipped_adm_index = from_adm;
+		queue_local_usegun_weapon_switch(
+				same_category(from_adm, target_adm));
+	};
+	const auto stage_personal = [&]() {
+		const uint8_t from_adm = local_usegun_slot_active_
+				? local_usegun_weapon_adm_
+				: local_usegun_saved_adm_;
+		player->equipped_adm_index = from_adm;
+		local_usegun_pending_mount_ =
+				opennova::world::EntityHandle{};
+		local_usegun_pending_weapon_adm_ = 0xFF;
+		local_usegun_switch_ = LocalUseGunSwitch::kDetach;
+		queue_local_usegun_weapon_switch(
+				same_category(from_adm, local_usegun_saved_adm_));
+	};
+
+	if (on_usegun) {
+		const bool active_matches = local_usegun_slot_active_ &&
+				local_usegun_mount_ == mounted_parent->handle &&
+				local_usegun_weapon_adm_ ==
+						mounted_parent->primary_weapon_slot_adm;
+		const bool pending_matches =
+				(local_usegun_switch_ == LocalUseGunSwitch::kAttach ||
+				 local_usegun_switch_ == LocalUseGunSwitch::kSwap) &&
+				local_usegun_pending_mount_ == mounted_parent->handle &&
+				local_usegun_pending_weapon_adm_ ==
+						mounted_parent->primary_weapon_slot_adm;
+		if (local_usegun_switch_ == LocalUseGunSwitch::kNone) {
+			if (!active_matches) stage_parent(*mounted_parent);
+		} else if (!pending_matches) {
+			// A later attach overwrites g_pendingWeaponSlot without changing the
+			// outgoing slot. This includes direct old-gun -> new-gun swaps.
+			stage_parent(*mounted_parent);
+		}
+		return;
+	}
+
+	if ((local_usegun_slot_active_ ||
+			 local_usegun_switch_ == LocalUseGunSwitch::kAttach ||
+			 local_usegun_switch_ == LocalUseGunSwitch::kSwap) &&
+			local_usegun_switch_ != LocalUseGunSwitch::kDetach)
+		stage_personal();
+}
+
 bool NovaSimulation::local_player_toggle_mount() {
 	// The USE-ITEM mount toggle for the local player — the shell calls this when the
 	// armory/vehicle-zone legs of the key don't apply. [orig: Input_ProcessFrame release
@@ -2272,16 +3137,39 @@ bool NovaSimulation::local_player_toggle_mount() {
 	// would silently desync against the host, so the toggle refuses (the armory
 	// leg's MP stance).
 	if (joiner_) return false;
+	// The ordinary local/offline toggle requires a live EquippedSlot/Def. Script
+	// and network authority paths may still attach through the world core.
+	// [orig: Entity_AttachToUseGunSlot null-slot reject @0x546c07]
+	const opennova::world::Entity *toggle_player =
+			world_->registry.get(world_->cached.local_player);
+	if (!weapon_active_ &&
+			(toggle_player == nullptr || !toggle_player->mounted))
+		return false;
+	sync_local_usegun_weapon_transition();
 	// The weapon-busy gate [orig: @0x436958-0x436977 — no EquippedSlot passes;
 	// currentAction < 2 (idle/emptyidle) or == 5 (the dry click) passes, as does a
 	// pending OVERHEATED (nextAction == 11); an in-flight fire/reload/switch swallows
 	// the toggle].
-	const int32_t cur = weapon_slot_.current;
-	const int32_t next = weapon_slot_.next;
+	const opennova::world::WeaponSlotState *active_slot =
+			active_local_weapon_slot();
+	const int32_t cur = active_slot->current;
+	const int32_t next = active_slot->next;
 	if (!(cur < 2 || cur == opennova::world::weapon_action::kEmpty ||
 	      next == opennova::world::weapon_action::kOverheated))
 		return false;
-	return opennova::world::player_toggle_vehicle_mount(*world_, world_->cached.local_player);
+	const bool changed = opennova::world::player_toggle_vehicle_mount(
+			*world_, world_->cached.local_player);
+	if (changed) {
+		// A successful ToSpecial/use-item transition clears the raw binocular
+		// request, not merely the effective first-person view.
+		player_view_.binoculars_requested = false;
+		binocular_yaw_offset_deg_ = 0.0f;
+		binocular_pitch_offset_deg_ = 0.0f;
+		refresh_local_player_view_effects();
+		sync_local_mounted_input_heading();
+		sync_local_usegun_weapon_transition();
+	}
+	return changed;
 }
 
 TypedArray<Dictionary> NovaSimulation::get_attach_labels() const {
@@ -2337,6 +3225,15 @@ opennova::world::WeaponKitEntry kit_entry_from_dict(const Dictionary &d) {
 	e.ammo_secondary = int(int64_t(d.get("ammo_secondary", -1)));
 	e.flags = int(int64_t(d.get("flags", -1)));
 	return e;
+}
+
+Dictionary kit_entry_to_dict(const opennova::world::WeaponKitEntry &e) {
+	Dictionary d;
+	d["name"] = String::utf8(e.name.c_str());
+	d["ammo_primary"] = e.ammo_primary;
+	d["ammo_secondary"] = e.ammo_secondary;
+	d["flags"] = e.flags;
+	return d;
 }
 
 } // namespace
@@ -2443,8 +3340,13 @@ bool NovaSimulation::apply_local_player_loadout(const TypedArray<Dictionary> &p_
 			if (sub == nullptr) continue;
 			if (opennova::strutil::iequals(sub->ammo_class, def->ammo_class)) continue;
 			int32_t total = entry.ammo_secondary >= 0
-					? std::min<int32_t>(entry.ammo_secondary, sub->maxclips) * sub->clipsize
-					: static_cast<int32_t>(sub->startrounds) * sub->clipsize;
+					? std::min<int32_t>(entry.ammo_secondary, sub->maxclips)
+					: static_cast<int32_t>(sub->startrounds);
+			// A nonnegative sub-weapon count is expressed in clips and expands to
+			// rounds; a negative fallback is the no-clip sentinel and stays raw.
+			// This is what keeps the implicit satchel detonator switch-eligible.
+			// [orig: WeaponLoadout_ApplyFromBuffer @ 0x5661E8..0x566215]
+			if (total >= 0) total *= sub->clipsize;
 			opennova::world::weapon_pool_set(table, local_inventory_, sub->ammo_class_id,
 			                                 total);
 			break; // the FIRST different-class sub-variant [orig: @ 0x5027c8 shape]
@@ -2456,6 +3358,9 @@ bool NovaSimulation::apply_local_player_loadout(const TypedArray<Dictionary> &p_
 
 void NovaSimulation::respawn_local_player_loadout() {
 	rebuild_local_player_loadout(/*p_select_spawn_default=*/true);
+	// Player_InitPlayer clears both view effects and seeds NVG from the mission
+	// StartWithNVGOn bit on every respawn.
+	reset_local_player_view_effects();
 }
 
 void NovaSimulation::sync_local_player_damage_classes() {
@@ -2539,7 +3444,9 @@ opennova::world::WeaponSwitchGates NovaSimulation::local_weapon_switch_gates() c
 			local_inventory_.equipped_combo >= 0 &&
 			local_inventory_.slot(local_inventory_.equipped_combo) != nullptr &&
 			local_inventory_.slot(local_inventory_.equipped_combo)->adm_index >= 0;
-	gates.equipped_action = weapon_active_ ? weapon_slot_.current
+	const opennova::world::WeaponSlotState *active_slot =
+			active_local_weapon_slot();
+	gates.equipped_action = weapon_active_ ? active_slot->current
 	                                       : opennova::world::weapon_action::kIdle;
 	return gates;
 }
@@ -2550,6 +3457,7 @@ void NovaSimulation::commit_pending_weapon_switch() {
 	// @ 0x4dd727; the FP model re-resolve runs host-side off the event].
 	weapon_switch_in_flight_ = false;
 	weapon_switch_deferred_action_ = -1;
+	nvg_scope_restore_ = false;
 	if (!world_ || !local_inventory_valid_) return;
 	opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);
 	if (e == nullptr) return;
@@ -2570,9 +3478,11 @@ void NovaSimulation::commit_pending_weapon_switch() {
 }
 
 void NovaSimulation::request_local_player_weapon_category(int p_category) {
+	if (player_view_.binoculars_view_active) return;
 	// [orig: input cases 200-210 @ 0x4e1144 -> Player_SwitchToWeaponByHandle
 	//  ((action-200)*65). The binoculars-view and fire-charge input gates have no
 	//  sim mechanics yet — record note.]
+	if (local_usegun_switch_ != LocalUseGunSwitch::kNone) return;
 	if (!world_ || !local_inventory_valid_) return;
 	if (p_category < 0 || p_category >= opennova::world::weapon_combo::kCategories)
 		return;
@@ -2584,8 +3494,10 @@ void NovaSimulation::request_local_player_weapon_category(int p_category) {
 }
 
 void NovaSimulation::request_local_player_weapon_cycle(int p_direction) {
+	if (player_view_.binoculars_view_active) return;
 	// [orig: input cases 212/214 -> Player_CycleWeaponSlot @ 0x4dfe70; the mounted-gun
 	//  elevation dual-purpose leg belongs to the vehicle channel, not this walk]
+	if (local_usegun_switch_ != LocalUseGunSwitch::kNone) return;
 	if (!world_ || !local_inventory_valid_) return;
 	const opennova::world::WeaponSwitchOutcome out = opennova::world::weapon_cycle_slot(
 			world_->weapons, local_inventory_, p_direction, local_weapon_switch_gates());
@@ -2613,27 +3525,30 @@ void NovaSimulation::handle_weapon_switch_outcome(
 				break;
 			}
 			weapon_switch_in_flight_ = true;
+			opennova::world::WeaponSlotState *active_slot =
+					active_local_weapon_slot();
 			const int32_t action = p_out.same_category
 					? opennova::world::weapon_action::kSwitchRank
 					: opennova::world::weapon_action::kSwitchFrom;
-			if (weapon_slot_.current == opennova::world::weapon_action::kSwitchTo) {
+			if (active_slot->current ==
+					opennova::world::weapon_action::kSwitchTo) {
 				// The witnessed writer refuses during SWITCHTO. Unlike the original
 				// dispatcher, this host supplies one press edge, so retain it beside
 				// the already-stamped pending combo and keep restoring next after
 				// SWITCHTO's delay-start initializer writes its resume action.
 				weapon_switch_deferred_action_ = action;
-				weapon_slot_.next = action;
-			} else if (weapon_slot_.next ==
+				active_slot->next = action;
+			} else if (active_slot->next ==
 					opennova::world::weapon_action::kSwitchTo) {
 				// The draw is queued but has not entered yet. Preserve it; the
 				// post-tick latch below attaches the requested outgoing action.
 				weapon_switch_deferred_action_ = action;
 			} else if (p_out.same_category) {
 				weapon_switch_deferred_action_ = -1;
-				opennova::world::weapon_fsm_queue_switch_rank(weapon_slot_);
+				opennova::world::weapon_fsm_queue_switch_rank(*active_slot);
 			} else {
 				weapon_switch_deferred_action_ = -1;
-				opennova::world::weapon_fsm_queue_switch_from(weapon_slot_);
+				opennova::world::weapon_fsm_queue_switch_from(*active_slot);
 			}
 			break;
 		}
@@ -2678,6 +3593,15 @@ Dictionary NovaSimulation::get_local_player_inventory() const {
 	out["equipped_name"] = equipped_name;
 	out["slots"] = slots;
 	out["pools"] = pools;
+	return out;
+}
+
+TypedArray<Dictionary> NovaSimulation::get_local_player_loadout() const {
+	TypedArray<Dictionary> out;
+	const std::vector<opennova::world::WeaponKitEntry> kit =
+			spawn_kit_set_ ? spawn_kit_ : opennova::world::weapon_kit_default();
+	for (const opennova::world::WeaponKitEntry &entry : kit)
+		out.push_back(kit_entry_to_dict(entry));
 	return out;
 }
 
@@ -2761,6 +3685,7 @@ opennova::mission::PromoteOptions NovaSimulation::promote_options() const {
 
 void NovaSimulation::set_item_seat_specs(const Array &p_specs) {
 	item_seat_specs_.clear();
+	mounted_pose_data_by_type_.clear();
 	for (int64_t i = 0; i < p_specs.size(); ++i) {
 		const Variant spec_v = p_specs[i];
 		if (spec_v.get_type() != Variant::DICTIONARY) continue;
@@ -2769,6 +3694,13 @@ void NovaSimulation::set_item_seat_specs(const Array &p_specs) {
 		opennova::mission::ItemSeatSpec spec;
 		spec.type_id = static_cast<int32_t>(spec_d.get("type_id", 0));
 		if (spec.type_id == 0) continue;
+		const Variant model_data_value =
+				spec_d.get("model_data", Variant());
+		if (model_data_value.get_type() == Variant::OBJECT) {
+			Ref<NovaObjectData> model_data(model_data_value);
+			if (model_data.is_valid() && model_data->has_document())
+				mounted_pose_data_by_type_[spec.type_id] = model_data;
+		}
 		if (spec_d.has("mount_config_valid")) {
 			spec.mount_config_valid = static_cast<bool>(spec_d.get("mount_config_valid", false));
 			spec.mount_config = spec.mount_config_valid
@@ -2799,6 +3731,70 @@ void NovaSimulation::set_item_seat_specs(const Array &p_specs) {
 			    std::clamp(static_cast<int>(seat_d.get("yaw_offset", 0)), -32768, 32767));
 			spec.seats.push_back(seat);
 		}
+		const Variant attachments_v =
+				spec_d.get("emplacement_attachments", Array());
+		if (attachments_v.get_type() == Variant::ARRAY) {
+			const Array attachments_a = attachments_v;
+			for (int64_t j = 0; j < attachments_a.size(); ++j) {
+				const Variant attachment_v = attachments_a[j];
+				if (attachment_v.get_type() != Variant::DICTIONARY) continue;
+				const Dictionary attachment_d = attachment_v;
+				const int full_child_id =
+						static_cast<int>(attachment_d.get("item_id", 0));
+				const int child_type_id = full_child_id - 100000;
+				if (child_type_id <= 0) continue;
+				opennova::mission::ItemEmplacementAttachmentSpec attachment;
+				attachment.child_type_id =
+						static_cast<int32_t>(child_type_id);
+				attachment.kind =
+						static_cast<opennova::mission::EmplacementAttachmentKind>(
+								std::clamp(static_cast<int>(
+										attachment_d.get("kind", 0)), 0, 2));
+				attachment.stored_slot = static_cast<uint8_t>(
+						std::clamp(static_cast<int>(
+								attachment_d.get("stored_slot", 0)), 0, 4));
+				if (static_cast<bool>(
+						attachment_d.get("designated_c", false)))
+					attachment.attachment_flags |= 1;
+				if (static_cast<bool>(
+						attachment_d.get("designated_g", false)))
+					attachment.attachment_flags |= 2;
+				attachment.anchor_found = static_cast<bool>(
+						attachment_d.get("anchor_found", false));
+				attachment.anchor.type =
+						opennova::world::SeatType::Gunner;
+				attachment.anchor.bone_index = static_cast<uint8_t>(
+						std::clamp(static_cast<int>(
+								attachment_d.get("bone_index", 0)), 0, 255));
+				attachment.anchor.source_name =
+						String(attachment_d.get(
+								"source_name", String())).utf8().get_data();
+				const Vector3 local =
+						attachment_d.get("local", Vector3());
+				attachment.anchor.seat_local = {
+						static_cast<float>(local.x),
+						static_cast<float>(local.y),
+						static_cast<float>(local.z)};
+				attachment.anchor.yaw_offset = static_cast<int16_t>(
+						std::clamp(static_cast<int>(
+								attachment_d.get("yaw_offset", 0)),
+								-32768, 32767));
+				attachment.angle_count = static_cast<uint8_t>(
+						static_cast<int>(
+								attachment_d.get("angle_count", 0)) == 4
+								? 4 : 0);
+				attachment.down_limit_bam = static_cast<int32_t>(
+						attachment_d.get("down_limit_bam", 0));
+				attachment.up_limit_bam = static_cast<int32_t>(
+						attachment_d.get("up_limit_bam", 0));
+				attachment.right_limit_bam = static_cast<int32_t>(
+						attachment_d.get("right_limit_bam", 0));
+				attachment.left_limit_bam = static_cast<int32_t>(
+						attachment_d.get("left_limit_bam", 0));
+				spec.emplacement_attachments.push_back(
+						std::move(attachment));
+			}
+		}
 		// The attach-label sources: "armory*" userpoint locals (Armory-attrib items
 		// only — the host gates on itemdef attrib 0x80000) + the ewep primary_weapon
 		// link [orig: @0x4361ee/@0x5a36f5; ItemDef+0x54B].
@@ -2816,7 +3812,7 @@ void NovaSimulation::set_item_seat_specs(const Array &p_specs) {
 		spec.primary_weapon =
 		    String(spec_d.get("primary_weapon", String())).utf8().get_data();
 		if (spec.mount_config_valid || !spec.seats.empty() || !spec.armory_points.empty() ||
-		    !spec.primary_weapon.empty())
+		    !spec.primary_weapon.empty() || !spec.emplacement_attachments.empty())
 			item_seat_specs_.push_back(std::move(spec));
 	}
 }
@@ -2903,6 +3899,7 @@ void NovaSimulation::finish_load(const opennova::bms::File &file) {
 	// death auto-lose in check_win_conditions). [orig: Bms_AttribFlags @0xa76258,
 	// read by Server_CheckWinConditions @0x51ad6f]
 	world_->mission_attrib_flags = static_cast<uint32_t>(file.header.attrib_flags);
+	reset_local_player_view_effects();
 	world_->ai = ai_.get();
 	// P7 listen server (SP + LAN host): stand up the npruntime in-match runtime (mode-3 HostClient
 	// over an in-process loopback, the faithful §5.0 path). Server_TickUpdate owns the logic tick +
@@ -3003,10 +4000,25 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_local_player_anim_key"), &NovaSimulation::get_local_player_anim_key);
 	ClassDB::bind_method(D_METHOD("get_local_player_anim_phase_ticks"), &NovaSimulation::get_local_player_anim_phase_ticks);
 	ClassDB::bind_method(D_METHOD("get_local_player_aim_overlay"), &NovaSimulation::get_local_player_aim_overlay);
-	ClassDB::bind_method(D_METHOD("set_local_player_weapon", "def", "clip_seconds"), &NovaSimulation::set_local_player_weapon);
+	ClassDB::bind_method(
+			D_METHOD("set_local_player_weapon", "def", "clip_seconds",
+					"preserve_slot_state"),
+			&NovaSimulation::set_local_player_weapon, DEFVAL(false));
+	ClassDB::bind_method(
+			D_METHOD("rebake_local_player_weapon", "def", "clip_seconds",
+					"preserve_slot_state"),
+			&NovaSimulation::rebake_local_player_weapon, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("clear_local_player_weapon"), &NovaSimulation::clear_local_player_weapon);
+	ClassDB::bind_method(D_METHOD("set_local_player_first_person_model_available", "available"),
+			&NovaSimulation::set_local_player_first_person_model_available);
 	ClassDB::bind_method(D_METHOD("set_local_player_weapon_input", "fire_held", "fire_pressed", "reload_pressed"), &NovaSimulation::set_local_player_weapon_input);
 	ClassDB::bind_method(D_METHOD("request_local_player_scope_toggle"), &NovaSimulation::request_local_player_scope_toggle);
+	ClassDB::bind_method(D_METHOD("request_local_player_binoculars_toggle"),
+			&NovaSimulation::request_local_player_binoculars_toggle);
+	ClassDB::bind_method(D_METHOD("request_local_player_nvg_toggle"),
+			&NovaSimulation::request_local_player_nvg_toggle);
+	ClassDB::bind_method(D_METHOD("request_local_player_nvg_gain", "delta"),
+			&NovaSimulation::request_local_player_nvg_gain);
 	ClassDB::bind_method(D_METHOD("set_local_player_eye", "eye_godot", "valid"), &NovaSimulation::set_local_player_eye);
 	ClassDB::bind_method(D_METHOD("set_local_player_camera_third_person", "third_person"), &NovaSimulation::set_local_player_camera_third_person);
 	ClassDB::bind_method(D_METHOD("get_local_player_view"), &NovaSimulation::get_local_player_view);
@@ -3120,6 +4132,7 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_collision_debug"), &NovaSimulation::get_collision_debug);
 	ClassDB::bind_method(D_METHOD("get_occlusion_debug"), &NovaSimulation::get_occlusion_debug);
 	ClassDB::bind_method(D_METHOD("get_round_debug"), &NovaSimulation::get_round_debug);
+	ClassDB::bind_method(D_METHOD("get_throwable_visuals"), &NovaSimulation::get_throwable_visuals);
 	ClassDB::bind_method(D_METHOD("debug_spawn_round", "from_godot", "dir_godot", "ammo_name"),
 	                     &NovaSimulation::debug_spawn_round);
 	ClassDB::bind_method(D_METHOD("get_hitbox_debug"), &NovaSimulation::get_hitbox_debug);
@@ -3156,6 +4169,8 @@ void NovaSimulation::_bind_methods() {
 	                     &NovaSimulation::request_local_player_weapon_cycle);
 	ClassDB::bind_method(D_METHOD("get_local_player_inventory"),
 	                     &NovaSimulation::get_local_player_inventory);
+	ClassDB::bind_method(D_METHOD("get_local_player_loadout"),
+	                     &NovaSimulation::get_local_player_loadout);
 	ClassDB::bind_method(D_METHOD("load_weapon_table", "resource_root", "name"),
 	                     &NovaSimulation::load_weapon_table, DEFVAL(String("weapon.def")));
 	ClassDB::bind_method(D_METHOD("load_ammo_table", "resource_root", "name"),
@@ -3185,6 +4200,7 @@ void NovaSimulation::_bind_methods() {
 	BIND_ENUM_CONSTANT(PF_ANIM_STATE);
 	BIND_ENUM_CONSTANT(PF_ANIM_PHASE_TICKS);
 	BIND_ENUM_CONSTANT(PF_HIDDEN);
+	BIND_ENUM_CONSTANT(PF_LOCAL_VIEW_SUPPRESSED);
 	BIND_ENUM_CONSTANT(PF_ALIVE);
 	BIND_ENUM_CONSTANT(PF_TYPE_ID);
 	BIND_ENUM_CONSTANT(PF_WIRE_HANDLE);
@@ -3194,6 +4210,10 @@ void NovaSimulation::_bind_methods() {
 	BIND_ENUM_CONSTANT(PF_AIM_BODY_ROLL_DEG);
 	BIND_ENUM_CONSTANT(PF_AIM_ANGLES);
 	BIND_ENUM_CONSTANT(PF_AIM_CLASS_STRIDE);
+	BIND_ENUM_CONSTANT(PF_EMPLACED_CONTROLS_VALID);
+	BIND_ENUM_CONSTANT(PF_EWEAP_GUNYAW);
+	BIND_ENUM_CONSTANT(PF_EWEAP_GUNPITCH);
+	BIND_ENUM_CONSTANT(PF_RIGHT_HAND_COLLAPSED);
 	BIND_ENUM_CONSTANT(PF_STRIDE);
 	BIND_ENUM_CONSTANT(EFFECT_STATE_POSITION);
 	BIND_ENUM_CONSTANT(EFFECT_STATE_ROTATION_DEG);
@@ -3258,19 +4278,23 @@ bool NovaSimulation::step() {
 	const uint64_t sim_start = perf_now_us();
 	if (listen_server_) { // P7 listen server (SP + LAN host) -> the npruntime owner loop
 		host_pump();
+		resolve_new_infantry_adm_ids();
 		last_sim_tick_us_ = perf_now_us() - sim_start;
 		return true;
 	}
 	if (joiner_) { // P7 co-op joiner -> the npruntime ClientRuntime (non-authority)
 		joiner_pump();
+		resolve_new_infantry_adm_ids();
 		last_sim_tick_us_ = perf_now_us() - sim_start;
 		return true;
 	}
 	// No-net editor/unit path: one authoritative logic tick, no replication.
 	apply_player_input_pre_tick();
 	world_->run_logic_tick(/*is_authority=*/true);
+	sync_local_mounted_input_heading();
 	tick_local_player_view();   // retail promotes the per-frame view before weapon actions
 	tick_local_player_weapon(); // the equipped-slot FSM pump, after the view promoter
+	resolve_new_infantry_adm_ids();
 	last_sim_tick_us_ = perf_now_us() - sim_start;
 	return true;
 }
@@ -3421,12 +4445,19 @@ private:
 // longer drift. NovaSimulation supplies the socket (a NovaUdpPump adapter; SP passes a null pump and the
 // loop's socket legs go inert) and folds the host's own loopback 0x0A into ClientState for the present
 // pass (serve_and_play: host_session_pump skips the loopback discard so we can read it here).
+void NovaSimulation::resolve_infantry_adm_before_server_tick(void *p_context) {
+	if (p_context == nullptr) return;
+	static_cast<NovaSimulation *>(p_context)->resolve_new_infantry_adm_ids();
+}
+
 void NovaSimulation::host_pump() {
 	namespace np = opennova::np;
 	const uint32_t now = host_owner_.now_tick;
 	apply_player_input_pre_tick(); // input -> the host player's body input, before logic (ADR 0009/0012)
 	NovaUdpPumpDatagramSocket sock(host_listen_ ? pump_.ptr() : nullptr);
-	np::host_session_pump(host_owner_, sock); // recv-drain -> tick_connections -> Server_TickUpdate -> S2C flush
+	np::host_session_pump(host_owner_, sock,
+			&NovaSimulation::resolve_infantry_adm_before_server_tick, this);
+	sync_local_mounted_input_heading();
 	tick_local_player_view();   // retail promotes the per-frame view before weapon actions
 	tick_local_player_weapon(); // the equipped-slot FSM pump, after the view promoter
 	if (runtime_) runtime_->Client_ProcessNetworkFrame(now); // fold host_loop_ -> ClientState (HostClient view)
@@ -3462,6 +4493,7 @@ void NovaSimulation::joiner_pump() {
 	}
 	apply_player_input_pre_tick();                  // input -> L's body input
 	world_->run_logic_tick(/*is_authority=*/false); // local World tick: moves L's motor ONLY (never Server_TickUpdate)
+	sync_local_mounted_input_heading();
 	tick_local_player_view();   // retail promotes the per-frame view before weapon actions
 	tick_local_player_weapon(); // the equipped-slot FSM pump, after the view promoter
 
@@ -3488,6 +4520,7 @@ void NovaSimulation::joiner_pump() {
 		const opennova::world::PlayerSpawn spawn = spawn_from_self(sp);
 		const opennova::world::EntityHandle h = opennova::world::spawn_player(*world_, spawn);
 		joiner_local_spawned_ = h.valid();
+		resolve_new_infantry_adm_ids();
 		player_input_ = opennova::world::PlayerInput{};
 		player_input_.look_heading = opennova::world::bam_heading_from_mission_yaw_deg(spawn.yaw);
 		stance_latch_ = 0;
@@ -3500,6 +4533,7 @@ void NovaSimulation::apply_player_input_pre_tick() {
 	if (!world_ || !world_->ai || !world_->cached.local_player.valid()) return;
 	AiEntity *p = world_->ai->for_handle(world_->cached.local_player);
 	if (!p) return;
+	refresh_local_player_view_effects();
 	opennova::world::apply_player_body_input(*p, opennova::world::pack_player_body_input(player_input_));
 	// The local-player weapon-channel inputs, refreshed before the body updater runs —
 	// the per-tick re-read of the held AdmDefs record kind + the Flags-bit refresh
@@ -3512,12 +4546,37 @@ void NovaSimulation::apply_player_input_pre_tick() {
 		}
 		p->inf.wpn_hold_kind = weapon_active_ ? weapon_hold_kind_ : 0;
 		p->inf.scope_raised = weapon_active_ && player_view_.scope_engaged;
+		p->inf.binoculars_raised = player_view_.binoculars_raised;
 		// The run-gait class + ForceCrouch mirror, same per-tick re-read pattern as the
 		// hold kind [orig: the selection reads AdmDefs[+0x2B0]+0xAC each pass @ 0x4b72cf;
 		// the ForceCrouch checks read the equipped def flags @ 0x4b7245/@ 0x4e0d8a].
 		p->inf.wpn_run_anim = weapon_active_ ? weapon_run_anim_ : 0;
 		p->inf.wpn_force_crouch = weapon_active_ && weapon_force_crouch_;
 	}
+	if (opennova::world::Entity *entity =
+				world_->registry.get(world_->cached.local_player)) {
+		uint32_t view_flags = 0;
+		if (player_view_.nvg_active) view_flags |= 0x4u;
+		if (player_view_.binoculars_raised) view_flags |= 0x8u;
+		if (weapon_active_ && player_view_.scope_engaged) view_flags |= 0x10u;
+		entity->flags = (entity->flags & ~0x1cu) | view_flags;
+	}
+}
+
+void NovaSimulation::sync_local_mounted_input_heading() {
+	if (!world_ || !world_->ai || !world_->cached.local_player.valid()) return;
+	const opennova::world::Entity *player =
+			world_->registry.get(world_->cached.local_player);
+	const AiEntity *body = world_->ai->for_handle(world_->cached.local_player);
+	if (player == nullptr || !player->mounted || body == nullptr ||
+			!body->inf.is_local_player)
+		return;
+
+	// Entity_RequestVehicleAttach writes one retail Yaw before the relationship.
+	// The core mirrors that snap into target_heading; carry it through our extra
+	// host input record so apply_player_input_pre_tick cannot undo it next frame.
+	// Pitch remains untouched because the retail request snap is yaw-only.
+	player_input_.look_heading = body->inf.target_heading;
 }
 
 bool NovaSimulation::spawn_local_player(Vector3 p_position, float p_yaw_deg, int p_team) {
@@ -3535,11 +4594,13 @@ bool NovaSimulation::spawn_local_player(Vector3 p_position, float p_yaw_deg, int
 	if (listen_server_) spawn.min_entity_slot = kRetailPlayerMinEntitySlot;
 	const opennova::world::EntityHandle h = opennova::world::spawn_player(*world_, spawn);
 	if (!h.valid()) return false;
+	resolve_new_infantry_adm_ids();
 	// Seed the look heading to the spawn facing so the body starts aligned. [(90 - yaw) BAM]
 	player_input_ = opennova::world::PlayerInput{};
 	player_input_.look_heading = opennova::world::bam_heading_from_mission_yaw_deg(p_yaw_deg);
 	stance_latch_ = 0;
 	look_px_accum_x_ = look_px_accum_y_ = 0.0f;
+	reset_local_player_view_effects();
 	return true;
 }
 
@@ -3570,11 +4631,13 @@ int NovaSimulation::spawn_local_player_at_start() {
 	if (listen_server_) spawn.min_entity_slot = kRetailPlayerMinEntitySlot;
 	const opennova::world::EntityHandle h = opennova::world::spawn_player(*world_, spawn);
 	if (!h.valid()) return -1;
+	resolve_new_infantry_adm_ids();
 	// Seed the look heading to the spawn facing so the body starts aligned. [(90 - yaw) BAM]
 	player_input_ = opennova::world::PlayerInput{};
 	player_input_.look_heading = opennova::world::bam_heading_from_mission_yaw_deg(spawn.yaw);
 	stance_latch_ = 0;
 	look_px_accum_x_ = look_px_accum_y_ = 0.0f;
+	reset_local_player_view_effects();
 	return sel.found ? 1 : 0;
 }
 
@@ -3620,8 +4683,10 @@ void NovaSimulation::set_player_input(bool p_forward, bool p_back, bool p_left, 
 			(weapon_def_.flags & 0x20000000) == 0) {
 		if (opennova::world::player_view_set_engaged(player_view_, false,
 				(weapon_def_.flags2 & 0x200) != 0))
-			opennova::world::weapon_fsm_queue_scope_down(weapon_slot_);
+			opennova::world::weapon_fsm_queue_scope_down(
+					*active_local_weapon_slot());
 	}
+	refresh_local_player_view_effects();
 }
 
 void NovaSimulation::add_local_player_look(float p_dx_px, float p_dy_px) {
@@ -3632,7 +4697,8 @@ void NovaSimulation::add_local_player_look(float p_dx_px, float p_dy_px) {
 	// the sim's own bit; the zoom-adjust keys are an unported tail, so the seed
 	// (scope_max_mag) IS the current zoom.
 	int32_t scoped_zoom = 0;
-	if (weapon_active_ && player_view_.scope_engaged && weapon_scope_max_mag_ > 1.0f)
+	if (!player_view_.binoculars_view_active && weapon_active_ &&
+			player_view_.scope_engaged && weapon_scope_max_mag_ > 1.0f)
 		scoped_zoom = static_cast<int32_t>(weapon_scope_max_mag_);
 	const bool prone = (stance_latch_ == 2); // [orig: MoveOrder & 0x100 @ 0x4e0ff7]
 	// Godot supplies float relative motion; the original consumes whole center-lock
@@ -3839,11 +4905,45 @@ int NovaSimulation::weapon_ring_take_variant(const String &p_key) {
 }
 
 void NovaSimulation::set_local_player_weapon(const Dictionary &p_def,
-		const Dictionary &p_clip_seconds) {
+		const Dictionary &p_clip_seconds, bool p_preserve_slot_state) {
+	install_local_player_weapon(
+			p_def, p_clip_seconds, p_preserve_slot_state, false);
+}
+
+void NovaSimulation::rebake_local_player_weapon(const Dictionary &p_def,
+		const Dictionary &p_clip_seconds, bool p_preserve_slot_state) {
+	install_local_player_weapon(
+			p_def, p_clip_seconds, p_preserve_slot_state, true);
+}
+
+void NovaSimulation::install_local_player_weapon(const Dictionary &p_def,
+		const Dictionary &p_clip_seconds, bool p_preserve_slot_state,
+		bool p_allow_same_weapon_rebake) {
 	using opennova::world::WeaponFsmActionRow;
+	// The FP model resolve re-installs the SAME weapon once its viewmodel (and
+	// .adm clip lengths) finish loading. That resolve is a render-side consumer
+	// in retail with no access to the action slot [orig: the per-frame FP model
+	// resolve @ 0x4ded60 vs the mount's slot state in Player_MountWeaponSlot
+	// @ 0x4dfa40], so an explicitly requested same-name rebake only refreshes
+	// the def and rings.
+	// Resetting the slot here instead destroyed a queued/holstering SWITCHFROM
+	// whenever the late viewmodel install raced a switch request: the completion
+	// never fired, commit_pending_weapon_switch never ran, and the FSM def
+	// desynced from equipped_adm_index (the rifle then fired the previous
+	// weapon's ammo).
+	const String incoming_name = p_def.get("name", String());
+	const bool same_weapon_rebake = p_allow_same_weapon_rebake &&
+			weapon_active_ && !weapon_start_in_switchto_ &&
+			!incoming_name.is_empty() &&
+			incoming_name.nocasecmp_to(weapon_def_name_) == 0;
+	// A real mount invalidates the one-shot scope restore latch. The late
+	// first-person-model rebake is render-side only and must not mutate view state.
+	if (!same_weapon_rebake) nvg_scope_restore_ = false;
 	// A mount is a new presentation epoch: no payload from the previous weapon may
 	// cross this seam, even though its strings were copied into the pending records.
-	pending_weapon_events_.clear();
+	// The same-weapon rebake is NOT an epoch — undrained records (including a
+	// racing switch commit or deny) must survive it.
+	if (!same_weapon_rebake) pending_weapon_events_.clear();
 	// Mirror the weapon dict's ACTION rows into the def-agnostic bake inputs.
 	std::vector<WeaponFsmActionRow> rows;
 	const Array actions = p_def.get("actions", Array());
@@ -3932,46 +5032,65 @@ void NovaSimulation::set_local_player_weapon(const Dictionary &p_def,
 	}
 	const int clipsize = int(p_def.get("clipsize", 0));
 	weapon_def_.clip_capacity = clipsize > 0 ? clipsize : -1; // no clipsize key = no clip tracking
+	if (same_weapon_rebake) {
+		// Def + rings rebaked above; the live action slot, serials, input
+		// latches, scope state, and charge state all continue untouched.
+		weapon_def_name_ = incoming_name;
+		return;
+	}
 	// A queued or in-flight SWITCHTO survives the per-equip reset — the switch flow
 	// installs twice (dict-only, then with the rebuilt viewmodel's clip lengths) and
 	// the draw-in must reach the second install (D-WPN-6 family artifact).
-	const bool carry_switchto = weapon_active_ &&
+	const bool carry_switchto = !p_preserve_slot_state && weapon_active_ &&
 			(weapon_slot_.next == opennova::world::weapon_action::kSwitchTo ||
 			 weapon_slot_.current == opennova::world::weapon_action::kSwitchTo);
-	weapon_slot_ = opennova::world::WeaponSlotState{};
-	// Ammo comes from the slot pool when the installed def IS the equipped inventory
-	// slot: clip = the slot's loaded rounds, reserve = the def's ammo-class pool
-	// [orig: MountSlot+0x10 + Entity_GetScoreValueBySlotType @ 0x5406e0 — closes the
-	// D-WPN-7 interim default for pool-backed equips].
-	bool ammo_from_inventory = false;
-	if (local_inventory_valid_ && world_ != nullptr) {
-		const opennova::world::WeaponInventorySlot *eq =
-				local_inventory_.slot(local_inventory_.equipped_combo);
-		const opennova::world::WeaponTableEntry *def =
-				(eq != nullptr && eq->adm_index >= 0)
-						? world_->weapons.by_index(static_cast<uint8_t>(eq->adm_index))
-						: nullptr;
-		const String def_name = p_def.get("name", String());
-		if (def != nullptr && def_name.nocasecmp_to(String::utf8(def->name.c_str())) == 0) {
-			weapon_slot_.clip = eq->clip;
-			weapon_slot_.reserve =
-					opennova::world::weapon_pool_get(local_inventory_, def->ammo_class_id);
-			ammo_from_inventory = true;
+	if (!p_preserve_slot_state) {
+		weapon_slot_ = opennova::world::WeaponSlotState{};
+		// Ammo comes from the slot pool when the installed def IS the equipped
+		// inventory slot: clip = the slot's loaded rounds, reserve = the def's
+		// ammo-class pool [orig: MountSlot+0x10 +
+		// Entity_GetScoreValueBySlotType @0x5406e0].
+		bool ammo_from_inventory = false;
+		if (local_inventory_valid_ && world_ != nullptr) {
+			const opennova::world::WeaponInventorySlot *eq =
+					local_inventory_.slot(local_inventory_.equipped_combo);
+			const opennova::world::WeaponTableEntry *def =
+					(eq != nullptr && eq->adm_index >= 0)
+							? world_->weapons.by_index(
+									static_cast<uint8_t>(eq->adm_index))
+							: nullptr;
+			if (def != nullptr &&
+					incoming_name.nocasecmp_to(
+							String::utf8(def->name.c_str())) == 0) {
+				weapon_slot_.clip = eq->clip;
+				weapon_slot_.reserve = opennova::world::weapon_pool_get(
+						local_inventory_, def->ammo_class_id);
+				ammo_from_inventory = true;
+			}
+		}
+		if (!ammo_from_inventory) {
+			// Fresh slot: full magazine + the def's carried reserve (the interim
+			// ammo default for inventory-less installs — D-WPN-7).
+			weapon_slot_.clip = clipsize > 0 ? clipsize : 0;
+			weapon_slot_.reserve = int(p_def.get("startrounds", 0));
+		}
+		// A commit-driven inventory install starts in SWITCHTO. A UseGun commit
+		// already queued SWITCHTO on the selected parent/personal slot.
+		if (weapon_start_in_switchto_ || carry_switchto) {
+			weapon_slot_.next =
+					opennova::world::weapon_action::kSwitchTo;
+			weapon_start_in_switchto_ = false;
 		}
 	}
-	if (!ammo_from_inventory) {
-		// Fresh slot: full magazine + the def's carried reserve (the interim ammo
-		// default for inventory-less installs — D-WPN-7).
-		weapon_slot_.clip = clipsize > 0 ? clipsize : 0;
-		weapon_slot_.reserve = int(p_def.get("startrounds", 0));
-	}
-	// A commit-driven install starts the FSM in SWITCHTO — the draw-in the original
-	// plays after the switchfrom completes [orig: the switch chain's mount ->
-	// switchto ordering; ForceQueueSwitchFrom @ 0x53f170 -> the completion handler].
-	if (weapon_start_in_switchto_ || carry_switchto) {
-		weapon_slot_.next = opennova::world::weapon_action::kSwitchTo;
-		weapon_start_in_switchto_ = false;
-	}
+	// A walk outcome that mounted but has not committed yet (its outgoing
+	// SWITCHFROM was displaced by this mount) resumes through the deferred latch
+	// once the draw completes, so the pending combo still commits.
+	if (weapon_switch_in_flight_)
+		weapon_switch_deferred_action_ = opennova::world::weapon_action::kSwitchFrom;
+	// The mount is the charge epoch [orig: Player_SwitchToWeaponByHandle zeroes
+	// g_fireChargeStartTick on the walk, before the mount].
+	power_throw_start_tick_ = 0;
+	pending_throw_charge_ = 0;
 	weapon_play_serial_ = 0;
 	weapon_anim_key_ = String();
 	weapon_anim_variant_ = 0;
@@ -3989,11 +5108,17 @@ void NovaSimulation::set_local_player_weapon(const Dictionary &p_def,
 	player_view_.scope_step = 0;
 	player_view_.ease_steps = opennova::world::kScopeEaseSteps;
 	player_view_.scope_hipfire = true;
+	weapon_def_name_ = incoming_name;
 	weapon_active_ = true;
 }
 
 void NovaSimulation::clear_local_player_weapon() {
+	nvg_scope_restore_ = false;
 	weapon_active_ = false;
+	weapon_def_name_ = String();
+	power_throw_start_tick_ = 0;
+	pending_throw_charge_ = 0;
+	local_first_person_model_adm_ = 0xFF;
 	weapon_switch_in_flight_ = false;
 	weapon_switch_deferred_action_ = -1;
 	pending_weapon_events_.clear();
@@ -4014,8 +5139,23 @@ void NovaSimulation::clear_local_player_weapon() {
 	weapon_anim_map_ = String();
 }
 
+void NovaSimulation::set_local_player_first_person_model_available(bool p_available) {
+	local_first_person_model_adm_ = 0xFF;
+	if (!p_available || !world_) return;
+	const opennova::world::Entity *player =
+			world_->registry.get(world_->cached.local_player);
+	if (player != nullptr)
+		local_first_person_model_adm_ = player->equipped_adm_index;
+}
+
 void NovaSimulation::set_local_player_weapon_input(bool p_fire_held, bool p_fire_pressed,
 		bool p_reload_pressed) {
+	if (player_view_.binoculars_view_active) {
+		weapon_fire_held_ = false;
+		weapon_fire_pressed_ = false;
+		weapon_reload_pressed_ = false;
+		return;
+	}
 	weapon_fire_held_ = p_fire_held;
 	weapon_fire_pressed_ = weapon_fire_pressed_ || p_fire_pressed; // latch until consumed
 	weapon_reload_pressed_ = weapon_reload_pressed_ || p_reload_pressed;
@@ -4026,11 +5166,19 @@ bool NovaSimulation::request_local_player_scope_toggle() {
 	//  Player_ToggleWeaponScope @ 0x4df0c0 gates def Flags & 3, flips g_scopeEngaged
 	//  @ 0x82CE94, and queues the scopeup/scopedown FSM state @ 0x53f050/0x53f080]
 	if (!weapon_active_) return false;
-	if (!opennova::world::weapon_fsm_scope_toggle_allowed(weapon_def_, weapon_slot_)) return false;
+	opennova::world::WeaponSlotState *active_slot =
+			active_local_weapon_slot();
+	if (!opennova::world::weapon_fsm_scope_toggle_allowed(
+			weapon_def_, *active_slot)) return false;
 	// Scope-UP is refused while a movement key is held on a Scoped weapon
 	// [orig: byte_B7653B && (flags & 1) -> return @ 0x4df29c].
 	if (!player_view_.scope_engaged &&
 			opennova::world::player_view_scope_up_blocked(player_view_, weapon_def_.flags))
+		return false;
+	// Inset optics cannot be raised under NVG. Non-Inset sights retain the
+	// original independent behavior.
+	if (!player_view_.scope_engaged && player_view_.nvg_active &&
+			(weapon_def_.flags2 & 0x200) != 0)
 		return false;
 	// ForceScoped pins the raised sight: un-scoping is refused once settled
 	// [orig: (flags1 & 0x20000000) == 0 || !g_weaponScopeActive @ 0x4df12d].
@@ -4044,14 +5192,78 @@ bool NovaSimulation::request_local_player_scope_toggle() {
 			(weapon_def_.flags2 & 0x200) != 0))
 		return false;
 	if (player_view_.scope_engaged)
-		opennova::world::weapon_fsm_queue_scope_up(weapon_slot_);
+		opennova::world::weapon_fsm_queue_scope_up(*active_slot);
 	else
-		opennova::world::weapon_fsm_queue_scope_down(weapon_slot_);
+		opennova::world::weapon_fsm_queue_scope_down(*active_slot);
 	return true;
+}
+
+bool NovaSimulation::request_local_player_binoculars_toggle() {
+	const opennova::world::Entity *local = world_ != nullptr
+			? world_->registry.get(world_->cached.local_player)
+			: nullptr;
+	if (local == nullptr) return false;
+	// Retail refuses binoculars while a PowerThrow charge is live. Allowing the
+	// view to rise would suppress held weapon input and turn the charge into an
+	// unintended release [orig: g_fireChargeStartTick @ 0xB76800; action 26 gate].
+	if (power_throw_start_tick_ != 0) return false;
+	// An active scope also blocks binoculars in a gunner parent slot.
+	if (player_view_.scope_engaged && local->mounted &&
+			local->mount_type == opennova::world::SeatType::Gunner)
+		return false;
+
+	const bool requested =
+			opennova::world::player_view_toggle_binoculars(player_view_);
+	if (requested) {
+		const double unit =
+				(static_cast<double>(std::rand()) + 0.5) /
+				(static_cast<double>(RAND_MAX) + 1.0);
+		const double angle = unit * kTau;
+		binocular_yaw_offset_deg_ =
+				static_cast<float>(std::cos(angle) * kBinocularAimOffsetDeg);
+		binocular_pitch_offset_deg_ =
+				static_cast<float>(std::sin(angle) * kBinocularAimOffsetDeg);
+	} else {
+		binocular_yaw_offset_deg_ = 0.0f;
+		binocular_pitch_offset_deg_ = 0.0f;
+	}
+	refresh_local_player_view_effects();
+	return requested;
+}
+
+bool NovaSimulation::request_local_player_nvg_toggle() {
+	const opennova::world::Entity *local = world_ != nullptr
+			? world_->registry.get(world_->cached.local_player)
+			: nullptr;
+	if (local == nullptr) return false;
+
+	if (!player_view_.nvg_active) {
+		nvg_scope_restore_ = false;
+		if (weapon_active_ && player_view_.scope_engaged &&
+				(weapon_def_.flags2 & 0x200) != 0 &&
+				!opennova::world::player_view_scope_ease_active(player_view_)) {
+			nvg_scope_restore_ = request_local_player_scope_toggle();
+		}
+		return opennova::world::player_view_toggle_nvg(player_view_);
+	}
+
+	// Clear NVG before the normal scope-up request so the Inset refusal no
+	// longer applies, then consume the one-shot restore latch.
+	opennova::world::player_view_toggle_nvg(player_view_);
+	const bool restore_scope = nvg_scope_restore_;
+	nvg_scope_restore_ = false;
+	if (restore_scope && !player_view_.scope_engaged)
+		request_local_player_scope_toggle();
+	return false;
+}
+
+int NovaSimulation::request_local_player_nvg_gain(int p_delta) {
+	return opennova::world::player_view_adjust_nvg_gain(player_view_, p_delta);
 }
 
 void NovaSimulation::set_local_player_camera_third_person(bool p_third_person) {
 	player_view_.third_person = p_third_person; // [orig: g_camera_mode @ 0xA890C8]
+	refresh_local_player_view_effects();
 }
 
 // One 62.5 Hz tick of the view state, before the weapon pump: the ADS ease and the
@@ -4062,11 +5274,14 @@ void NovaSimulation::set_local_player_camera_third_person(bool p_third_person) {
 // [orig: call sites @ 0x42c18e / @ 0x526786; promoter @ 0x4de4f7].
 void NovaSimulation::tick_local_player_view() {
 	if (!world_ || !world_->cached.local_player.valid()) {
-		player_view_ = opennova::world::PlayerViewState{};
+		opennova::world::player_view_update_effective_modes(
+				player_view_, false, world_ != nullptr && world_->round_end.ended);
+		player_view_.tp_anchor_valid = false;
 		return;
 	}
 	const opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);
 	if (!e) return;
+	refresh_local_player_view_effects();
 	// The anchor-chase target is Position + CameraOffset — the posed head-bone eye
 	// [orig: ThirdPersonCamera_Update @ 0x437b70..76], fed by the host's per-frame
 	// skeleton sample (see local_eye_mission_). Without a sample: Position + 1.0,
@@ -4089,7 +5304,18 @@ void NovaSimulation::set_local_player_eye(const Vector3 &p_eye_godot, bool p_val
 
 Dictionary NovaSimulation::get_local_player_view() const {
 	Dictionary out;
+	const opennova::world::WeaponSlotState *active_slot =
+			active_local_weapon_slot();
 	out["scope_engaged"] = player_view_.scope_engaged;
+	out["binoculars_requested"] = player_view_.binoculars_requested;
+	out["binoculars_raised"] = player_view_.binoculars_raised;
+	out["binoculars_view_active"] = player_view_.binoculars_view_active;
+	out["binocular_yaw_offset_deg"] = binocular_yaw_offset_deg_;
+	out["binocular_pitch_offset_deg"] = binocular_pitch_offset_deg_;
+	out["nvg_active"] = player_view_.nvg_active;
+	out["nvg_visible"] =
+			opennova::world::player_view_nvg_visible(player_view_);
+	out["nvg_gain"] = player_view_.nvg_gain;
 	const opennova::world::Entity *local = world_ != nullptr
 			? world_->registry.get(world_->cached.local_player)
 			: nullptr;
@@ -4106,7 +5332,7 @@ Dictionary NovaSimulation::get_local_player_view() const {
 	//  predicate is Player_IsReloadingCardSwitchWeapon @ 0x4dcdd0 (ex kong
 	//  "Player_IsDriverInVehicle"), whose one caller refuses fire @ 0x5cf7be]
 	out["suppress_view_bias"] = weapon_active_ &&
-			weapon_slot_.current == opennova::world::weapon_action::kReload &&
+			active_slot->current == opennova::world::weapon_action::kReload &&
 			(weapon_def_.flags & opennova::world::weapon_flag::kNoCardSwitch) == 0;
 	// On the supported on-foot first-person path, the standard SIGHTS card replaces
 	// the FP viewmodel once ADS settles. Scoped and Sighted are asymmetric selectors;
@@ -4114,8 +5340,10 @@ Dictionary NovaSimulation::get_local_player_view() const {
 	// card or the FP viewmodel, never both. [orig: Render_ProcessMainSceneFrame
 	// @0x5ca299..0x5ca304 / @0x5caaf3..0x5cab15; suppression @0x4dcce0]
 	out["scope_card_active"] = weapon_active_ &&
-			opennova::world::weapon_sights_card_eligible(weapon_def_, weapon_slot_) &&
+			opennova::world::weapon_sights_card_eligible(
+					weapon_def_, *active_slot) &&
 			player_view_.scope_engaged && !player_view_.third_person &&
+			!player_view_.binoculars_view_active &&
 			!opennova::world::player_view_scope_ease_active(player_view_);
 	out["fov_h_deg"] = opennova::world::player_view_fov_h_deg(player_view_,
 			weapon_active_ ? weapon_def_.flags : 0,
@@ -4145,18 +5373,82 @@ float NovaSimulation::fov_vertical_from_horizontal(float p_fov_h_deg, float p_as
 	return opennova::world::fov_vertical_from_horizontal_deg(p_fov_h_deg, p_aspect);
 }
 
-// One 62.5 Hz pump of the local player's slot, after the world logic tick
-// [orig: WeaponAction_ProcessAllEntities @ 0x542690 pumps every pooled entity in the
-// frame loop; local-player-only here — D-WPN-6].
+// One 62.5 Hz pump of the local player's slot, after the world logic tick. The world
+// tick now owns the parallel NPC UseGun parent-slot pump; this host method remains the
+// first-person player's presentation/input seam.
+// [orig: WeaponAction_ProcessAllEntities @0x542690 pumps every pooled entity]
 void NovaSimulation::tick_local_player_weapon() {
-	if (!weapon_active_ || !world_ || !world_->cached.local_player.valid()) return;
+	if (!world_ || !world_->cached.local_player.valid()) return;
+	sync_local_usegun_weapon_transition();
+	if (!weapon_active_) return;
+	opennova::world::WeaponSlotState &active_slot =
+			*active_local_weapon_slot();
+	const opennova::world::Entity *player =
+			world_->registry.get(world_->cached.local_player);
+	const bool player_alive = player != nullptr && player->alive &&
+			player->health > 0;
+	const bool usegun_switch_pending =
+			local_usegun_switch_ != LocalUseGunSwitch::kNone;
+	if (!player_alive && !usegun_switch_pending) {
+		active_slot.refire_queued = false;
+		power_throw_start_tick_ = 0;
+		pending_throw_charge_ = 0;
+		weapon_fire_pressed_ = false;
+		weapon_reload_pressed_ = false;
+		return;
+	}
+	// Capture the outgoing slot identity. A switch completion below changes the
+	// active selection, but this tick's ammo bridge still belongs to the slot the
+	// FSM actually pumped.
+	const bool borrowed_usegun_slot = local_usegun_slot_active_;
 	opennova::world::WeaponFsmInputs in;
-	in.fire_held = weapon_fire_held_;
-	in.fire_pressed = weapon_fire_pressed_;
+	const bool accept_weapon_input = player_alive && !usegun_switch_pending;
+	in.fire_held = accept_weapon_input && weapon_fire_held_;
+	in.fire_pressed = accept_weapon_input && weapon_fire_pressed_;
+	// PowerThrow: the press never fires — it starts the windup; the release
+	// converts the held time into the charge byte and fires. [orig: press gate
+	// @ 0x4e08fd (def Flags sign bit 0x80000000, fireable + ammo ->
+	// g_fireChargeStartTick = tick), release @ 0x4e07e9 -> WeaponSlot_RequestFire
+	// with the computed charge; world-wac-ai-re §27.]
+	bool power_throw_release = false;
+	if ((weapon_def_.flags & 0x80000000u) != 0) {
+		if (!accept_weapon_input) {
+			power_throw_start_tick_ = 0;
+			pending_throw_charge_ = 0;
+		} else if (weapon_fire_held_ || weapon_fire_pressed_) {
+			// The windup refuses while a switch action runs OR is queued — the
+			// press gate's fireable term, not just the current action [orig: the
+			// fireable check @ 0x4e08fd]. Without the queued/deferred legs a
+			// press landing inside the draw-in latched a windup whose release
+			// the FSM then refused, leaking the charge byte onto a later shot.
+			const bool fireable =
+					active_slot.current == opennova::world::weapon_action::kIdle &&
+					active_slot.next == opennova::world::weapon_action::kIdle &&
+					!weapon_switch_in_flight_ && weapon_switch_deferred_action_ < 0;
+			const bool has_ammo =
+					active_slot.clip > 0 || weapon_def_.clip_capacity < 0;
+			if (power_throw_start_tick_ == 0 && fireable && has_ammo)
+				power_throw_start_tick_ = world_->logic_tick;
+			in.fire_held = false;
+			in.fire_pressed = false;
+		} else if (power_throw_start_tick_ != 0) {
+			const int32_t held = static_cast<int32_t>(
+					world_->logic_tick - power_throw_start_tick_);
+			pending_throw_charge_ =
+					opennova::world::power_throw_charge_from_hold(held);
+			power_throw_start_tick_ = 0;
+			in.fire_pressed = true;
+			in.fire_held = false;
+			power_throw_release = true;
+		}
+	} else {
+		power_throw_start_tick_ = 0;
+	}
 	// The dispatch gate runs here now: the raw reload edge is refused on a full
 	// magazine or an empty reserve [orig: input case 0xD3 @ 0x4e0420].
-	in.reload_pressed = weapon_reload_pressed_ &&
-			opennova::world::weapon_fsm_reload_allowed(weapon_def_, weapon_slot_);
+	in.reload_pressed = accept_weapon_input && weapon_reload_pressed_ &&
+			opennova::world::weapon_fsm_reload_allowed(
+					weapon_def_, active_slot);
 	in.is_local = true;
 	in.is_authority = !joiner_; // the joiner defers the refill to the §5.58 round-trip
 	in.auto_reload = true;      // [orig: g_autoReloadEnabled @ 0x24D2118, default on]
@@ -4166,16 +5458,26 @@ void NovaSimulation::tick_local_player_weapon() {
 	// completed [orig: promoter @ 0x4de4f7; weapon pump @ 0x526786].
 	in.scope_active = player_view_.scope_engaged &&
 			!opennova::world::player_view_scope_ease_active(player_view_);
+	in.instant_emplaced_switch = local_usegun_switch_is_instant();
+	if (!accept_weapon_input) active_slot.refire_queued = false;
 	opennova::world::WeaponFsmEvents ev;
-	opennova::world::weapon_fsm_tick(weapon_def_, weapon_slot_, in, ev);
+	opennova::world::weapon_fsm_tick(
+			weapon_def_, active_slot, in, ev);
+	// A release whose fire request the FSM refused must not leave the charge
+	// latched for a later unrelated shot — the charge byte is consumed by the
+	// very fire it triggers [orig: descriptor +20 consume @ 0x4ec5bb].
+	if (power_throw_release && !ev.fired &&
+			active_slot.current != opennova::world::weapon_action::kFire &&
+			active_slot.next != opennova::world::weapon_action::kFire)
+		pending_throw_charge_ = 0;
 	// SWITCHTO seeds next=prev at the end of its delay-start phase. Reapply the
 	// retained one-shot after every draw tick so its eventual transition performs
 	// the pending inventory handoff without requiring another key press.
 	if (weapon_switch_deferred_action_ >= 0) {
-		if (weapon_slot_.current == weapon_switch_deferred_action_) {
+		if (active_slot.current == weapon_switch_deferred_action_) {
 			weapon_switch_deferred_action_ = -1;
 		} else {
-			weapon_slot_.next = weapon_switch_deferred_action_;
+			active_slot.next = weapon_switch_deferred_action_;
 		}
 	}
 	weapon_fire_pressed_ = false; // edges consume on the first tick of the frame
@@ -4324,6 +5626,11 @@ void NovaSimulation::tick_local_player_weapon() {
 					round_event.subtype = 12;
 				}
 				round_event.adm_index = adm_index;
+				// The PowerThrow charge rides the ring/wire slot_byte (ring+32,
+				// wire flags|0x80 leg) and scales the spawned round's launch
+				// speed [orig: WeaponAction_Fire arg 6 <- MountSlot+0x5C ->
+				// descriptor +20 @ 0x4ec5bb; deserializer restore @ 0x42f769].
+				round_event.slot_byte = pending_throw_charge_;
 				world_->rounds.add(round_event);
 
 				opennova::world::RoundSpawnParams round;
@@ -4335,7 +5642,9 @@ void NovaSimulation::tick_local_player_weapon() {
 				round.ammo_index = adm->ammo_index;
 				round.adm_index = adm_index;
 				round.shot_seq = shot_seq;
+				round.charge = pending_throw_charge_;
 				world_->round_sim.spawn(*world_, round);
+				pending_throw_charge_ = 0;
 			}
 		}
 	}
@@ -4354,7 +5663,12 @@ void NovaSimulation::tick_local_player_weapon() {
 	// [orig: the FSM's clip lives on the MountSlot (+0x10) and the reserve is the
 	//  per-ammo-class pool — one storage, two views; this port mirrors between the
 	//  single-slot FSM state and the inventory]
-	if (local_inventory_valid_ && world_ != nullptr) {
+	if (local_usegun_switch_ != LocalUseGunSwitch::kNone &&
+			ev.switch_completed &&
+			active_slot.current == local_usegun_switch_action_)
+		commit_local_usegun_weapon_switch();
+	if (local_inventory_valid_ && world_ != nullptr &&
+			!borrowed_usegun_slot) {
 		opennova::world::WeaponInventorySlot *eq =
 				local_inventory_.slot(local_inventory_.equipped_combo);
 		const opennova::world::WeaponTableEntry *eq_def =
@@ -4371,11 +5685,11 @@ void NovaSimulation::tick_local_player_weapon() {
 				opennova::world::weapon_inventory_reload_slot(world_->weapons,
 				                                              local_inventory_,
 				                                              local_inventory_.equipped_combo);
-				weapon_slot_.clip = eq->clip;
+				active_slot.clip = eq->clip;
 			} else {
-				eq->clip = weapon_slot_.clip; // fire consume mirrors down
+				eq->clip = active_slot.clip; // fire consume mirrors down
 			}
-			weapon_slot_.reserve =
+			active_slot.reserve =
 					opennova::world::weapon_pool_get(local_inventory_, eq_def->ammo_class_id);
 			// The post-recoil auto-switch [orig: WeaponAction_Recoil tail @ 0x543062:
 			// def+0x168 -> Player_SwitchToWeaponByHandle(def[+0x164]*65) — the
@@ -4417,7 +5731,14 @@ Dictionary NovaSimulation::get_local_player_weapon_state() const {
 	Dictionary out;
 	out["active"] = weapon_active_;
 	if (!weapon_active_) return out;
-	out["current"] = weapon_slot_.current;
+	const opennova::world::WeaponSlotState &active_slot =
+			*active_local_weapon_slot();
+	out["current"] = active_slot.current;
+	out["next"] = active_slot.next;
+	out["phase"] = static_cast<int>(active_slot.phase);
+	out["switch_deferred"] = weapon_switch_deferred_action_;
+	out["switch_in_flight"] = weapon_switch_in_flight_;
+	out["pending_combo"] = local_inventory_.pending_combo;
 	out["anim_key"] = weapon_anim_key_;
 	out["anim_variant"] = weapon_anim_variant_;
 	const uint32_t anim_age_ticks = world_ && !weapon_anim_key_.is_empty()
@@ -4454,14 +5775,49 @@ Dictionary NovaSimulation::get_local_player_weapon_state() const {
 	} else {
 		out["action_end_soundset"] = String();
 	}
+	// The PowerThrow windup for the HUD charge bar [orig: HUD_DrawPowerThrowChargeBar
+	// @ 0x599830 (ex kong "HUD_DrawWeaponReloadBar" misnomer — it only draws the
+	// windup): gates = def+8 sign bit, g_fireChargeStartTick != 0, ammo available;
+	// the drawer derives the fill from held ticks].
+	const bool windup_active = (weapon_def_.flags & 0x80000000u) != 0 &&
+			power_throw_start_tick_ != 0 && world_ != nullptr &&
+			(active_slot.clip > 0 || weapon_def_.clip_capacity < 0);
+	out["windup_active"] = windup_active;
+	out["windup_held_ticks"] = windup_active
+			? static_cast<int64_t>(world_->logic_tick - power_throw_start_tick_)
+			: static_cast<int64_t>(0);
 	out["fired_serial"] = static_cast<int64_t>(weapon_fired_serial_);
 	out["dry_serial"] = static_cast<int64_t>(weapon_dry_serial_);
 	out["reload_serial"] = static_cast<int64_t>(weapon_reload_serial_);
 	out["unscope_serial"] = static_cast<int64_t>(weapon_unscope_serial_);
 	out["rescope_serial"] = static_cast<int64_t>(weapon_rescope_serial_);
-	out["clip"] = weapon_slot_.clip;
-	out["reserve"] = weapon_slot_.reserve;
-	out["kick"] = static_cast<int>(weapon_slot_.kick);
+	out["clip"] = active_slot.clip;
+	out["reserve"] = active_slot.reserve;
+	out["kick"] = static_cast<int>(active_slot.kick);
+	out["borrowed_usegun_slot"] = local_usegun_slot_active_;
+	out["emplaced_controls_valid"] = false;
+	out["emplaced_gun_yaw"] = 0;
+	out["emplaced_gun_pitch"] = 0;
+	if (world_ && world_->cached.local_player.valid()) {
+		const opennova::world::Entity *local =
+				world_->registry.get(world_->cached.local_player);
+		const opennova::world::Entity *mount =
+				local != nullptr && local->mounted &&
+						local->mount_type == opennova::world::SeatType::Gunner
+				? world_->registry.get(local->mount_target)
+				: nullptr;
+		EmplacedWeaponControls emplaced;
+		if (mount != nullptr &&
+				mount->primary_weapon_owner == local->handle &&
+				emplaced_weapon_controls_for(
+						*world_, ai_.get(), *mount, emplaced)) {
+			out["emplaced_controls_valid"] = true;
+			out["emplaced_gun_yaw"] =
+					static_cast<int>(emplaced.gun_yaw);
+			out["emplaced_gun_pitch"] =
+					static_cast<int>(emplaced.gun_pitch);
+		}
+	}
 	// Read-only diagnostics for the local FIRE -> RoundData_AddRound seam. The last
 	// row lets parity tests pin the observed tag-2 mode byte without exposing mutable
 	// ring state. [orig: ((MountSlot.clip & 3) << 4) | 2 sampled before consume
@@ -4524,6 +5880,8 @@ Array NovaSimulation::drain_local_player_weapon_events() {
 		row["effect_particle"] = event.effect_particle;
 		row["effect_particle_userpoint"] = event.effect_particle_userpoint;
 		row["switch_to_weapon"] = event.switch_to_weapon;
+		row["clear_weapon"] = event.clear_weapon;
+		row["preserve_slot_state"] = event.preserve_slot_state;
 		row["switch_denied"] = event.switch_denied;
 		out.push_back(row);
 	}
@@ -4532,10 +5890,11 @@ Array NovaSimulation::drain_local_player_weapon_events() {
 }
 
 // Drain the round impacts the flight sim resolved since the last call, each row already
-// resolved through the ammo effects_table (canonical tag -> {effect, sound}); rows whose
-// tag has neither an effect nor a sound are dropped, matching the original impact
-// presenter [orig: Projectile_SpawnImpactEffect @ 0x4e9b80; selection witness on
-// world/round_sim.h RoundImpact].
+// resolved through the ammo effects_table (canonical tag -> {effect, sound}) and its
+// per-leg presentation mask; rows with no enabled authored leg are dropped, matching
+// the original impact presenter [orig: AmmoDef_ProcessImpactEffect @ 0x40a170;
+// ballistic wrapper Projectile_SpawnImpactEffect @ 0x4e9b80; selection witness
+// on world/round_sim.h RoundImpact].
 Array NovaSimulation::drain_round_impacts() {
 	Array out;
 	if (!world_) return out;
@@ -4546,13 +5905,15 @@ Array NovaSimulation::drain_round_impacts() {
 		if (imp.effect_tag < 0 || imp.effect_tag >= opennova::world::kImpactEffectTagCount)
 			continue;
 		const opennova::world::AmmoImpactEffectRow &row = ammo->impact_effects[imp.effect_tag];
-		if (row.effect.empty() && row.sound.empty()) continue;
+		const bool has_effect = imp.present_effect && !row.effect.empty();
+		const bool has_sound = imp.present_sound && !row.sound.empty();
+		if (!has_effect && !has_sound) continue;
 		Dictionary d;
 		// mission (x,y,z) -> Godot (x, z, -y), the get_local_player_position convention.
 		d["position"] = Vector3(imp.position.x, imp.position.z, -imp.position.y);
 		d["direction"] = Vector3(imp.direction.x, imp.direction.z, -imp.direction.y);
-		d["effect"] = String::utf8(row.effect.c_str());
-		d["sound"] = String::utf8(row.sound.c_str());
+		d["effect"] = has_effect ? String::utf8(row.effect.c_str()) : String();
+		d["sound"] = has_sound ? String::utf8(row.sound.c_str()) : String();
 		// A lifecycle rewind must never turn a future/stale source tick into an
 		// unsigned multi-billion-tick particle pre-age request.
 		const uint32_t age_ticks = now >= imp.tick ? now - imp.tick : 0u;
@@ -4604,12 +5965,88 @@ String NovaSimulation::get_local_player_weapon_name() const {
 
 void NovaSimulation::restart() {
 	if (!loaded_ || !have_baseline_) return;
+	const bool usegun_was_active = local_usegun_slot_active_;
+	const bool usegun_was_pending =
+			local_usegun_switch_ != LocalUseGunSwitch::kNone;
+	const uint8_t saved_personal_adm = local_usegun_saved_adm_;
 	pending_weapon_events_.clear();
+	power_throw_start_tick_ = 0;
+	pending_throw_charge_ = 0;
+	weapon_fire_held_ = false;
+	weapon_fire_pressed_ = false;
+	weapon_reload_pressed_ = false;
+	local_usegun_switch_ = LocalUseGunSwitch::kNone;
+	local_usegun_slot_active_ = false;
+	local_usegun_mount_ = opennova::world::EntityHandle{};
+	local_usegun_weapon_adm_ = 0xFF;
+	local_usegun_pending_mount_ = opennova::world::EntityHandle{};
+	local_usegun_pending_weapon_adm_ = 0xFF;
+	local_usegun_saved_adm_ = 0xFF;
+	local_usegun_switch_action_ = -1;
+	weapon_switch_deferred_action_ = -1;
 	world_->restore(baseline_); // rewinds registry/vars/env/clock + re-inits systems (incl. AI;
 	                            // WacSystem::on_load also resets its 62-tick accumulator)
+	// The baseline is captured during finish_load, before MissionRuntime supplies
+	// items.def. Restore those authoritative callback/health traits first; the
+	// encoder and the client classifier must agree on every 0x0A record width.
+	if (item_traits_db_.is_valid()) resolve_item_traits(item_traits_db_);
+	if (listen_server_ && !joiner_ && runtime_) {
+		// Stop restores the authoritative registry, including NoNetworkCallback
+		// attachment children, but those children never have a live 0x0A body that
+		// could recreate a row erased from the host's decoded ClientState. Start a
+		// fresh HostClient view and replay the same production load batches, in the
+		// witnessed stream order, so restored runtime identities materialize now
+		// instead of inheriting a prior play epoch's rows and handle caches.
+		host_loop_.clear();
+		runtime_ = std::make_unique<opennova::np::ClientRuntime>(host_loop_);
+		install_item_class_resolver();
+		opennova::netsim::NetClientView &view = runtime_->view();
+		view.apply(0x10, opennova::encode_static_entity_batch(
+				opennova::netsim::build_pool2_static_batch(*world_)));
+		view.apply(0x0D, opennova::encode_pool_spawn_batch(
+				opennova::netsim::build_pool1_spawn_batch(*world_)));
+		view.apply(0x0C, opennova::encode_organic_spawn_batch(
+				opennova::netsim::build_pool0_organic_batch(
+						*world_, world_->cached.local_player)));
+		view.apply(0x20, opennova::encode_pool3_sync_batch(
+				opennova::netsim::build_pool3_marker_batch(*world_)));
+	}
+	reset_infantry_adm_ids();
+	resolve_new_infantry_adm_ids();
+	if (usegun_was_active) {
+		// The world snapshot restores the play-start entity set, while the host
+		// still presents the borrowed emplacement definition. Reinstall the saved
+		// personal selection as a fresh restart epoch; MissionRuntime delivers this
+		// event synchronously while stopped.
+		if (opennova::world::Entity *player =
+					world_->registry.get(world_->cached.local_player))
+			player->equipped_adm_index = saved_personal_adm;
+		weapon_active_ = false;
+		const opennova::world::WeaponTableEntry *saved_def =
+				world_->weapons.by_index(saved_personal_adm);
+		weapon_start_in_switchto_ = saved_def != nullptr;
+		PendingWeaponEvent event;
+		event.tick = world_->logic_tick;
+		event.world_position = get_local_player_position();
+		event.switch_to_weapon = saved_def != nullptr
+				? String::utf8(saved_def->name.c_str())
+				: String();
+		event.clear_weapon = saved_def == nullptr;
+		pending_weapon_events_.push_back(std::move(event));
+	} else if (usegun_was_pending) {
+		// The presenter never left the personal weapon, but its outgoing slot may
+		// already be inside SWITCHFROM/RANK. Cancel only that action state while
+		// retaining the personal magazine and reserve.
+		const int32_t clip = weapon_slot_.clip;
+		const int32_t reserve = weapon_slot_.reserve;
+		weapon_slot_ = opennova::world::WeaponSlotState{};
+		weapon_slot_.clip = clip;
+		weapon_slot_.reserve = reserve;
+	}
 	if (collision_item_db_.is_valid() && collision_placer_.is_valid())
 		resolve_collision_instances(collision_item_db_, collision_placer_.ptr());
 	weapon_anim_tick_ = world_->logic_tick;
+	reset_local_player_view_effects();
 	// The restored world can share a tick number with a previously cached view.
 	// Force the next FollowOwner query to rebuild against the post-restart epoch.
 	invalidate_present_effect_pose_cache();
@@ -4625,6 +6062,9 @@ Array NovaSimulation::drain_effects() {
 		d["b"] = e.b;
 		d["c"] = e.c;
 		d["d"] = e.d;
+		if (e.kind == "vehicle_control_started" ||
+				e.kind == "vehicle_control_stopped")
+			d["wire_handle"] = e.d;
 		d["str"] = String(e.str.c_str());
 		out.push_back(d);
 	}
@@ -4685,6 +6125,9 @@ Dictionary NovaSimulation::drain_destruction_events() {
 		d["dir"] = to_godot(e.dir);
 		d["attach_net_id"] = static_cast<int>(e.attach_net_id);
 		d["attach_bms_id"] = e.attach_bms_id;
+		d["attach_wire_handle"] = static_cast<int>(e.attach_wire_handle);
+		d["attach_spawn_origin"] =
+				static_cast<int64_t>(e.attach_spawn_origin);
 		d["family"] = static_cast<int>(e.family);
 		effects.push_back(d);
 	}
@@ -4699,6 +6142,7 @@ Dictionary NovaSimulation::drain_destruction_events() {
 	for (const opennova::world::HuskSwapEvent &h : ev.husk_swaps) {
 		Dictionary d;
 		d["net_id"] = static_cast<int>(h.net_id);
+		d["wire_handle"] = static_cast<int>(h.wire_handle);
 		d["bms_id"] = h.bms_id;
 		d["spawn_origin"] = static_cast<int64_t>(h.spawn_origin);
 		d["item_id"] = h.item_id;
@@ -4940,6 +6384,13 @@ void NovaSimulation::set_ai_muzzle_world(int p_net_id, const Vector3 &p_godot_po
 		static_cast<int32_t>(-p_godot_pos.z * 65536.0f),
 		static_cast<int32_t>(p_godot_pos.y * 65536.0f),
 	};
+	if (opennova::world::Entity *entity = world_->registry.get(h)) {
+		entity->posed_muzzle_world[0] = pos[0];
+		entity->posed_muzzle_world[1] = pos[1];
+		entity->posed_muzzle_world[2] = pos[2];
+		entity->posed_muzzle_tick = world_->logic_tick;
+		entity->posed_muzzle_valid = true;
+	}
 	ai_->set_entity_muzzle(h, pos, world_->logic_tick);
 }
 
@@ -5192,6 +6643,7 @@ Dictionary NovaSimulation::get_entity_debug(int p_index) const {
 		}
 	}
 	out["net_id"] = e->net_id;
+	out["wire_handle"] = static_cast<int>(e->handle.packed);
 	out["team"] = static_cast<int>(e->team);
 	// The AI-side entity+286 mirror; diverges from the registry health under
 	// some damage paths, so the card shows both.
@@ -5208,6 +6660,8 @@ Dictionary NovaSimulation::get_entity_debug(int p_index) const {
 	out["wp_distance"] = e->brain.f[AiBrain::kWpDistance];
 	out["out_speed"] = e->brain.f[AiBrain::kOutSpeed];
 	out["infantry"] = e->inf.active;
+	out["adm_id"] = e->inf.active ? e->inf.adm_id : -1;
+	out["adm_name"] = e->inf.active ? infantry_anim_.adm_name(e->inf.adm_id) : String();
 	out["infantry_move_mode"] = e->inf.move_mode;
 	out["anim_state"] = e->inf.active ? e->inf.anim_state : -1;
 	out["anim_key"] = e->inf.active ? infantry_anim_key(e->inf.anim_state) : String();
@@ -5779,7 +7233,11 @@ bool NovaSimulation::admit_test_remote_peer(Vector3 p_position, float p_yaw_deg,
 		link.transport = std::make_unique<opennova::netsim::UdpSessionTransport>(
 				opennova::netsim::UdpSessionTransport::Role::Host);
 	}
-	return opennova::np::admit_synthetic_peer(ctx_, *world_, peer, spawn, link.transport.get()).valid();
+	const opennova::world::EntityHandle h =
+			opennova::np::admit_synthetic_peer(
+					ctx_, *world_, peer, spawn, link.transport.get());
+	resolve_new_infantry_adm_ids();
+	return h.valid();
 }
 
 PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
@@ -5787,6 +7245,16 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 	if (!world_ || !runtime_) return out;
 	// P7: every path (SP / LAN host / joiner) reads its own npruntime ClientRuntime view's ClientState.
 	const opennova::netsim::ClientState &cs = runtime_->state();
+	const opennova::world::Entity *local_player =
+			world_->registry.get(world_->cached.local_player);
+	// Entity_RenderVehicleModel's local UseGun predicate is a render verdict,
+	// not Entity.hidden: parent equality + first-person camera + raw UseGun seat.
+	// The per-row tail below adds the live EquippedSlot/Def tests.
+	// [orig: @0x4407f6..0x44084c; sole submit @0x440918]
+	const bool local_first_person_usegun =
+			!player_view_.third_person && local_player != nullptr &&
+			local_player->mounted &&
+			local_player->mount_type == opennova::world::SeatType::Gunner;
 	const int count = static_cast<int>(cs.entities.size());
 	out.resize(static_cast<int64_t>(count) * PF_STRIDE);
 	float *w = out.ptrw();
@@ -5798,7 +7266,8 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 		r[PF_PITCH_DEG] = 0.0f; r[PF_YAW_DEG] = 0.0f; r[PF_ROLL_DEG] = 0.0f;
 		r[PF_PHASE1] = 0.0f; r[PF_ACTIVE1] = 0.0f; r[PF_PHASE2] = 0.0f; r[PF_ACTIVE2] = 0.0f;
 		r[PF_BODY_ANIM_SLOT] = -1.0f; r[PF_ANIM_STATE] = -1.0f; r[PF_ANIM_PHASE_TICKS] = 0.0f;
-		r[PF_HIDDEN] = 0.0f; r[PF_ALIVE] = 1.0f;
+		r[PF_HIDDEN] = 0.0f; r[PF_LOCAL_VIEW_SUPPRESSED] = 0.0f;
+		r[PF_ALIVE] = 1.0f;
 		r[PF_TYPE_ID] = 0.0f; r[PF_WIRE_HANDLE] = 0.0f;
 		for (int field = PF_AIM_OVERLAY_VALID; field < PF_STRIDE; ++field)
 			r[field] = 0.0f;
@@ -5832,20 +7301,99 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 			r[PF_ROLL_DEG] = static_cast<float>(ent->roll);
 			r[PF_HIDDEN] = ent->hidden ? 1.0f : 0.0f;
 			r[PF_ALIVE] = ent->alive ? 1.0f : 0.0f;
+			r[PF_RIGHT_HAND_COLLAPSED] =
+					mount_collapses_right_hand_row(*ent) ? 1.0f : 0.0f;
+			if (local_first_person_usegun &&
+					local_player->mount_target == h) {
+				const opennova::world::WeaponTableEntry *mount_def =
+						world_->weapons.by_index(ent->primary_weapon_slot_adm);
+				// Primary retail leg: FP model exists and this exact embedded
+				// MountSlot is the live EquippedSlot. flags2 Invisible is the
+				// witnessed alternate forced-cull leg and does not require the
+				// EquippedSlot comparison.
+				// [orig: Def+0x16c @0x440824; EquippedSlot @0x440833;
+				//  Def+0x0c & 0x800 @0x44083f]
+				const bool equipped_parent_slot =
+						local_usegun_slot_active_ && local_usegun_mount_ == h &&
+						local_usegun_weapon_adm_ == ent->primary_weapon_slot_adm;
+				if (mount_def != nullptr &&
+						((mount_def->has_first_person_model_reference &&
+						  local_first_person_model_adm_ ==
+								  ent->primary_weapon_slot_adm &&
+						  equipped_parent_slot) ||
+						 (mount_def->flags2 &
+						  opennova::world::weapon_flag2::kInvisible) != 0))
+					r[PF_LOCAL_VIEW_SUPPRESSED] = 1.0f;
+			}
 		}
-		// Decoded wire position is mission (x,y,z) 16.16 -> Godot (x, z, -y) world units,
-		// the SAME remap the AI-pool path uses. Position is post-compression (lossy) —
-		// exactly what the original client renders for its decoded peers.
-		r[PF_POS_X] = static_cast<float>(es.x / kFixed16);
-		r[PF_POS_Y] = static_cast<float>(es.z / kFixed16);
-		r[PF_POS_Z] = static_cast<float>(-es.y / kFixed16);
-		// Coarse heading: rebuild the 32-bit engine BAM from the compact high byte, then
-		// engine -> mission yaw (90 - heading), matching the AI-pool present.
-		const int32_t heading_bam = static_cast<int32_t>(static_cast<uint32_t>(es.yaw_byte) << 24);
-		r[PF_YAW_DEG] = static_cast<float>(opennova::world::mission_yaw_deg_from_bam_heading(heading_bam));
+		EmplacedWeaponControls emplaced;
+		if (ent != nullptr) {
+			if (emplaced_weapon_controls_for(
+						*world_, ai_.get(), *ent, emplaced))
+				write_present_emplaced_controls(r, emplaced);
+		} else if (joiner_ &&
+				emplaced_weapon_controls_for_client(
+						es, cs, item_seat_specs_, emplaced)) {
+			write_present_emplaced_controls(r, emplaced);
+		}
+		const bool authoritative_attachment_pose =
+				ent != nullptr && ent->emplacement_parent.valid() &&
+				ent->emplacement_parent.packed == es.parent_handle;
+		opennova::world::MountedPose client_attachment_pose;
+		const uint32_t attachment_time_ms = panm_time_override_ms_ >= 0
+				? static_cast<uint32_t>(panm_time_override_ms_)
+				: world_->logic_tick * 16u;
+		const bool reconstructed_client_attachment_pose = joiner_ &&
+				resolve_client_eweap_attachment_pose(
+						es, cs, item_seat_specs_, mounted_pose_data_by_type_,
+						attachment_time_ms, client_attachment_pose);
+		if (authoritative_attachment_pose) {
+			// NoNetworkCallback addeweap children have only their 0x0D spawn pose in
+			// ClientState. The host has already advanced their authoritative userpoint
+			// pose through World::update_emplacement_attachments; use that exact result
+			// rather than flattening live PANM back to the client's rigid spawn offset.
+			r[PF_POS_X] = ent->position.x;
+			r[PF_POS_Y] = ent->position.z;
+			r[PF_POS_Z] = -ent->position.y;
+			r[PF_PITCH_DEG] = static_cast<float>(ent->pitch);
+			r[PF_YAW_DEG] = static_cast<float>(ent->yaw);
+			r[PF_ROLL_DEG] = static_cast<float>(ent->roll);
+		} else if (reconstructed_client_attachment_pose) {
+			r[PF_POS_X] = client_attachment_pose.position.x;
+			r[PF_POS_Y] = client_attachment_pose.position.z;
+			r[PF_POS_Z] = -client_attachment_pose.position.y;
+			r[PF_PITCH_DEG] = static_cast<float>(client_attachment_pose.pitch);
+			r[PF_YAW_DEG] = static_cast<float>(client_attachment_pose.yaw);
+			r[PF_ROLL_DEG] = static_cast<float>(client_attachment_pose.roll);
+		} else {
+			// Decoded wire position is mission (x,y,z) 16.16 -> Godot (x, z, -y)
+			// world units, the SAME remap the AI-pool path uses. Position is
+			// post-compression (lossy), exactly what retail renders for decoded peers.
+			r[PF_POS_X] = static_cast<float>(es.x / kFixed16);
+			r[PF_POS_Y] = static_cast<float>(es.z / kFixed16);
+			r[PF_POS_Z] = static_cast<float>(-es.y / kFixed16);
+			// Rebuild the 32-bit engine BAM from the compact high byte, then convert
+			// engine -> mission yaw (90 - heading), matching the AI-pool present.
+			const int32_t heading_bam = static_cast<int32_t>(
+					static_cast<uint32_t>(es.yaw_byte) << 24);
+			r[PF_YAW_DEG] = static_cast<float>(
+					opennova::world::mission_yaw_deg_from_bam_heading(heading_bam));
+		}
 		// Infantry anim from the local AI pool (host only — same registry caveat as above).
 		if (world_->ai && !joiner_) {
 			const AiEntity *ae = world_->ai->for_handle(h);
+			if (ae != nullptr) {
+				for (int slot = 0; slot < 2; ++slot) {
+					const int phase = std::clamp(
+							ae->brain.f[AiBrain::kPartAnimPhase0 + slot],
+							0, 65535);
+					const bool active =
+							ae->brain.f[AiBrain::kPartAnimRate0 + slot] != 0 ||
+							phase != 0;
+					r[PF_PHASE1 + slot * 2] = static_cast<float>(phase);
+					r[PF_ACTIVE1 + slot * 2] = active ? 1.0f : 0.0f;
+				}
+			}
 			if (ae && ae->inf.active) {
 				r[PF_ANIM_STATE] = static_cast<float>(ae->inf.anim_state);
 				r[PF_ANIM_PHASE_TICKS] = static_cast<float>(ae->inf.clip_phase);
@@ -5861,10 +7409,14 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 		}
 		if (joiner_) {
 			opennova::anim::AimOverlayInputs inputs;
+			bool collapse_right_hand = false;
 			if (aim_overlay_inputs_for_client(
-						es, cs, item_seat_specs_, inputs)) {
+						es, cs, item_seat_specs_, inputs,
+						&collapse_right_hand)) {
 				r[PF_ANIM_STATE] =
 						static_cast<float>(es.anim_state_id);
+				r[PF_RIGHT_HAND_COLLAPSED] =
+						collapse_right_hand ? 1.0f : 0.0f;
 				opennova::anim::AimOverlayAngles
 						angles[opennova::anim::kOverlayClassCount];
 				opennova::anim::compute_aim_overlay_angles(inputs, angles);

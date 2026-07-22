@@ -42,6 +42,8 @@ const FIRE_CRACKLE_CHANCE := 16.0 / 65536.0       # [orig: PRNG_Next16_C() < 16 
 const PRESENT_EFFECT_POSITION := 0
 const PRESENT_EFFECT_ROTATION_DEG := 1
 const PRESENT_EFFECT_STATE_COUNT := 2
+const INVALID_WIRE_HANDLE := 0xffff
+const SYNTHETIC_SPAWN_ORIGIN := 0xffffffff
 
 # The debris-type trail effects by table index [orig: g_death_piece_types
 # @ 0x8404f0 +0x2C column; "" = the type authors no trail (NP rows)].
@@ -68,11 +70,12 @@ var _placer                       # MissionObjectPlacer (husk model builds)
 var _item_db                      # NovaItemDatabase (husk graphic names)
 var _game_world                   # GameWorld (effect anchors) or null
 var _env_node: Node = null        # live mission environment for model materials
+var _dynamic_node_resolver        # WirePresentPass (runtime-only packed handles)
 var _audio_provider := Callable() # -> NovaMissionAudio (or null)
 var _fx_provider := Callable()    # -> NovaEffectWorld (or null)
 var _husked: Dictionary = {}      # canonical mission identity -> husk Node3D/null
 var _husk_restore: Dictionary = {} # canonical mission identity -> original state
-var _burning: Dictionary = {}     # bms_id -> {node, fire} — the crackle roll set
+var _burning: Dictionary = {}     # canonical wreck owner key -> live crackle anchor
 var _wreck_anchor_keys: Dictionary = {} # registered wreck owner keys
 var _piece_pos: Dictionary = {}   # piece slot -> Vector3 (anchor resolver source)
 var _piece_generation: Dictionary = {}  # piece slot -> presented allocation generation
@@ -100,8 +103,16 @@ func get_stats() -> Stats:
 	return _stats
 
 
+## Whether an owned fire-family effect is still registered for retail wreck
+## crackle updates. The owner key is the same public identity used by the
+## effect-anchor registry.
+func has_active_wreck_fire(owner_key: String) -> bool:
+	return _burning.has(owner_key)
+
+
 func setup(sim, container: Node3D, index, placer, item_db, game_world,
-		audio_provider: Callable, fx_provider: Callable, env_node: Node = null) -> void:
+		audio_provider: Callable, fx_provider: Callable, env_node: Node = null,
+		dynamic_node_resolver = null) -> void:
 	_sim = sim
 	_container = container
 	_index = index
@@ -109,6 +120,7 @@ func setup(sim, container: Node3D, index, placer, item_db, game_world,
 	_item_db = item_db
 	_game_world = game_world
 	_env_node = env_node
+	_dynamic_node_resolver = dynamic_node_resolver
 	_audio_provider = audio_provider
 	_fx_provider = fx_provider
 	_rng.randomize()
@@ -185,8 +197,10 @@ func present() -> void:
 	_tick_wreck_fires()
 
 
-# Destruction events carry the same value identity used by the mission present
-# pass: file BMS id plus packed (kind,index), with the origin as the zero-id leg.
+# Authored destruction events retain the mission-present value identity: file
+# BMS id plus packed (kind,index), with the origin as the zero-id leg. Synthetic
+# runtime entities instead use their packed wire handle because siblings share
+# both zero BMS id and the non-BMS origin sentinel.
 func _spawn_origin_parts(spawn_origin_v: Variant) -> Vector2i:
 	if spawn_origin_v == null:
 		return Vector2i(-1, -1)
@@ -194,12 +208,46 @@ func _spawn_origin_parts(spawn_origin_v: Variant) -> Vector2i:
 	return Vector2i((spawn_origin >> 24) & 0xff, spawn_origin & 0xffffff)
 
 
-func _husk_identity_key(bms_id: int, spawn_origin_v: Variant) -> String:
+func _uses_dynamic_husk_identity(bms_id: int, spawn_origin_v: Variant,
+		wire_handle: int) -> bool:
+	if wire_handle < 0 or wire_handle == INVALID_WIRE_HANDLE or bms_id != 0:
+		return false
+	# A real authored origin remains canonical even when its BMS id is zero.
+	# Runtime-only entities carry either no origin or the promotion sentinel.
+	return spawn_origin_v == null or int(spawn_origin_v) == SYNTHETIC_SPAWN_ORIGIN
+
+
+func _husk_identity_key(bms_id: int, spawn_origin_v: Variant,
+		wire_handle: int = -1) -> String:
+	if _uses_dynamic_husk_identity(bms_id, spawn_origin_v, wire_handle):
+		return 'wire:%d' % wire_handle
 	var origin := _spawn_origin_parts(spawn_origin_v)
 	return '%d:%d:%d' % [bms_id, origin.x, origin.y]
 
 
-func _resolve_entity_node(bms_id: int, spawn_origin_v: Variant = null) -> Node3D:
+func _resolve_entity_node(bms_id: int, spawn_origin_v: Variant = null,
+		wire_handle: int = -1) -> Node3D:
+	var dynamic_identity := _uses_dynamic_husk_identity(
+			bms_id, spawn_origin_v, wire_handle)
+	if dynamic_identity:
+		var dynamic_resolver = _dynamic_node_resolver
+		# Tests may supply one object that implements both lookup contracts.
+		if (
+				dynamic_resolver == null
+				and _index != null
+				and _index.has_method('resolve_wire_handle')
+		):
+			dynamic_resolver = _index
+		if (
+				dynamic_resolver != null
+				and dynamic_resolver.has_method('resolve_wire_handle')
+		):
+			var dynamic_v: Variant = dynamic_resolver.resolve_wire_handle(wire_handle)
+			if dynamic_v is Node3D and is_instance_valid(dynamic_v):
+				return dynamic_v as Node3D
+		# A runtime-only owner has no authored mission identity. Never fall
+		# through to the BMS/static lookup when its wire node is unavailable.
+		return null
 	if _index == null:
 		return null
 	var node_v: Variant = null
@@ -221,7 +269,8 @@ func _resolve_entity_node(bms_id: int, spawn_origin_v: Variant = null) -> Node3D
 func _apply_husk_swap(husk: Dictionary) -> void:
 	var bms_id := int(husk.get("bms_id", 0))
 	var spawn_origin_v: Variant = husk.get('spawn_origin')
-	var husk_key := _husk_identity_key(bms_id, spawn_origin_v)
+	var wire_handle := int(husk.get('wire_handle', -1))
+	var husk_key := _husk_identity_key(bms_id, spawn_origin_v, wire_handle)
 	if _husked.has(husk_key):
 		return
 	_stats.husk_swaps += 1
@@ -237,7 +286,7 @@ func _apply_husk_swap(husk: Dictionary) -> void:
 		_husked[husk_key] = null
 		_stats.no_husk += 1
 		return
-	var node := _resolve_entity_node(bms_id, spawn_origin_v)
+	var node := _resolve_entity_node(bms_id, spawn_origin_v, wire_handle)
 	if node != null and is_instance_valid(node):
 		var model: Node3D = _placer.build_model_from_graphic(
 				husk_graphic, "", node, "", _env_node)
@@ -258,9 +307,16 @@ func _apply_husk_swap(husk: Dictionary) -> void:
 			'kind': 'individual',
 			'bms_id': bms_id,
 			'spawn_origin': spawn_origin_v,
+			'wire_handle': wire_handle,
 			'children': child_visibility,
 		}
 		_husked[husk_key] = model
+		return
+	if _uses_dynamic_husk_identity(bms_id, spawn_origin_v, wire_handle):
+		# The dynamic row may already have retired or failed model resolution.
+		# There is no safe static fallback: bms_id zero is a valid authored key.
+		_husked[husk_key] = null
+		_stats.no_husk += 1
 		return
 	# Batched static (world-wac-ai-re §24.6): carve the instance, graft at its
 	# placed transform. An unknown bms_id (individual entity whose node is gone)
@@ -387,35 +443,52 @@ func _apply_effect(eff: Dictionary) -> void:
 	var pos: Vector3 = eff.get("pos", Vector3.ZERO)
 	var family := int(eff.get("family", 0))
 	var net_id := int(eff.get("attach_net_id", 0))
-	if family == 0 or net_id == 0:
+	var bms_id := int(eff.get("attach_bms_id", 0))
+	var spawn_origin_v: Variant = eff.get('attach_spawn_origin')
+	var wire_handle := int(eff.get('attach_wire_handle', -1))
+	var dynamic_identity := _uses_dynamic_husk_identity(
+			bms_id, spawn_origin_v, wire_handle)
+	if family == 0 or (net_id == 0 and not dynamic_identity):
 		fx.spawn_effect(effect, pos, eff.get("dir", Vector3.ZERO))
 		_stats.effects += 1
 		return
 	# Attached families (death smoke / fire / other): one owned group per
 	# (entity, family), anchored at the wreck (the husk Dead/Fire/Other
 	# user-point anchors are the tracked refinement).
-	var key := "wreck:%d:%d" % [net_id, family]
+	var key := ('wreck:wire:%d:%d' % [wire_handle, family]
+			if dynamic_identity else "wreck:%d:%d" % [net_id, family])
 	fx.spawn_effect_owned(key, effect, pos, Vector3.UP)
 	_stats.effects += 1
 	if _game_world != null and _game_world.has_method("register_effect_anchor"):
-		var bms_id := int(eff.get("attach_bms_id", 0))
 		var node: Node3D = null
-		if _index != null and bms_id != 0:
+		if dynamic_identity:
+			node = _resolve_entity_node(bms_id, spawn_origin_v, wire_handle)
+		elif _index != null and bms_id != 0:
 			node = _index.resolve_single(bms_id)
 		if node != null and is_instance_valid(node):
 			_game_world.register_effect_anchor(key, func() -> Variant:
 				return node.global_transform if is_instance_valid(node) else null)
 			if family == 2:
-				_burning[net_id] = {"node": node}
+				_burning[key] = {"node": node}
 		else:
 			# Batched-static wreck: no node. Resolve the authoritative present
 			# pose while it settles, with the event pose as an identity fallback.
 			var fixed := Transform3D(Basis.IDENTITY, pos)
 			_game_world.register_effect_anchor(key, func() -> Variant:
-				var live_v: Variant = _present_transform_for_identity(bms_id)
+				var live_v: Variant = null if dynamic_identity \
+						else _present_transform_for_identity(bms_id, spawn_origin_v)
 				return live_v if live_v is Transform3D else fixed)
 			if family == 2:
-				_burning[net_id] = {"bms_id": bms_id, "pos": pos}
+				if dynamic_identity:
+					# A missing runtime node has no sibling-safe positional lookup;
+					# retain its event pose instead of querying the shared sentinel.
+					_burning[key] = {"pos": pos}
+				else:
+					_burning[key] = {
+						"bms_id": bms_id,
+						"spawn_origin": spawn_origin_v,
+						"pos": pos,
+					}
 		_wreck_anchor_keys[key] = true
 
 
@@ -495,29 +568,29 @@ func _tick_wreck_fires() -> void:
 		return
 	var fx = _fx_provider.call() if _fx_provider.is_valid() else null
 	var audio = _audio_provider.call() if _audio_provider.is_valid() else null
-	for net_id in _burning.keys():
-		var entry: Dictionary = _burning[net_id]
+	for owner_key in _burning.keys():
+		var entry: Dictionary = _burning[owner_key]
 		var pos: Vector3
 		var node: Variant = entry.get("node")
 		if node is Node3D:
 			if not is_instance_valid(node):
-				_burning.erase(net_id)
+				_burning.erase(owner_key)
 				continue
 			pos = (node as Node3D).global_position
 		elif entry.has("bms_id"):
 			var live_v: Variant = _present_transform_for_identity(
-					int(entry.get("bms_id", 0)))
+					int(entry.get("bms_id", 0)), entry.get("spawn_origin"))
 			if live_v is Transform3D:
 				pos = (live_v as Transform3D).origin
 			elif entry.has("pos"):
 				pos = entry["pos"]
 			else:
-				_burning.erase(net_id)
+				_burning.erase(owner_key)
 				continue
 		elif entry.has("pos"):
 			pos = entry["pos"]
 		else:
-			_burning.erase(net_id)
+			_burning.erase(owner_key)
 			continue
 		if _rng.randf() < FIRE_CRACKLE_CHANCE:
 			_stats.crackles += 1

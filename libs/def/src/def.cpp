@@ -714,7 +714,10 @@ static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out) {
             parsed = 1;
         } else if (lower_starts_with(lower, ll, "kz_pieslice", 11)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 11, &vl);
-            current.kz_pieslice_bam = parse_int_n(v, vl) * 11930464; /* deg -> BAM (+60) */
+            /* HALF-angle: retail stores (deg / 2) x 11930464 BAM — the cone
+             * tests compare |angle diff| <= this half-angle.
+             * [orig: atol -> cdq/sub/sar signed div 2 -> imul 0xB60B60 @0x40ad51] */
+            current.kz_pieslice_bam = (parse_int_n(v, vl) / 2) * 11930464;
             parsed = 1;
         } else if (lower_starts_with(lower, ll, "min_stable_velocity", 19)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 19, &vl);
@@ -1344,6 +1347,7 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
     memset(&current, 0, sizeof(current));
     int in_block = 0;
     size_t raw_cap = 0;
+    size_t emplacement_attachments_cap = 0;
 
     LineIter it = {buf, file_len, 0};
     const char *line; size_t line_len;
@@ -1361,6 +1365,7 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
             if (lower_starts_with(lower, ll, "begin", 5)) {
                 memset(&current, 0, sizeof(current));
                 raw_cap = 0;
+                emplacement_attachments_cap = 0;
                 extract_quoted(trimmed, tlen, current.display_name, sizeof(current.display_name));
                 in_block = 1;
             }
@@ -1371,6 +1376,7 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
             DA_PUSH(out->entries, out->count, entries_cap, current);
             memset(&current, 0, sizeof(current));
             raw_cap = 0;
+            emplacement_attachments_cap = 0;
             in_block = 0;
             continue;
         }
@@ -1480,6 +1486,61 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
                docs/world/itemdef-re.md +0x54b] */
             consume_value_str(trimmed, tlen, 14, current.primary_weapon, sizeof(current.primary_weapon));
             parsed = 1;
+        } else if (lower_match_key(lower, ll, "addeweapg", 9) ||
+                   lower_match_key(lower, ll, "addeweapc", 9) ||
+                   lower_match_key(lower, ll, "addeweap", 8)) {
+            /* Authored child-emplacement attachment:
+                 <userpoint> <item-def id> [down up right left]
+               Packed JOX has three deliberately distinct key spellings. Retain
+               the variant instead of folding G/C into the ordinary record. */
+            const int kind =
+                    lower_match_key(lower, ll, "addeweapg", 9)
+                            ? DEF_ITEM_EMPLACEMENT_ADDEWEAP_G
+                    : lower_match_key(lower, ll, "addeweapc", 9)
+                            ? DEF_ITEM_EMPLACEMENT_ADDEWEAP_C
+                            : DEF_ITEM_EMPLACEMENT_ADDEWEAP;
+            const size_t key_len =
+                    kind == DEF_ITEM_EMPLACEMENT_ADDEWEAP ? 8u : 9u;
+            size_t vl;
+            const char *v = consume_value_span(trimmed, tlen, key_len, &vl);
+            Token tok[6];
+            const int n = tokenize(v, vl, tok, 6);
+            /* Retail has four fixed slots. A fifth valid record is recognized but
+               silently ignored. The optional arc is all-or-none: partial tails
+               remain raw diagnostics instead of inventing missing limits. */
+            if (n == 2 || n >= 6) {
+                parsed = 1;
+                if (current.emplacement_attachments_count >= 4) {
+                    continue;
+                }
+                DefItemEmplacementAttachment attachment;
+                memset(&attachment, 0, sizeof(attachment));
+                safe_copy(attachment.userpoint, sizeof(attachment.userpoint),
+                          tok[0].s, tok[0].len);
+                attachment.item_id = parse_int_n(tok[1].s, tok[1].len);
+                attachment.kind = kind;
+                attachment.angle_count = n >= 6 ? 4 : 0;
+                if (n >= 6) {
+                    constexpr int kBamPerDegree = 11930464;
+                    attachment.down_angle =
+                            parse_int_n(tok[2].s, tok[2].len) * kBamPerDegree;
+                    attachment.up_angle =
+                            -parse_int_n(tok[3].s, tok[3].len) * kBamPerDegree;
+                    attachment.right_angle =
+                            parse_int_n(tok[4].s, tok[4].len) * kBamPerDegree;
+                    attachment.left_angle =
+                            -parse_int_n(tok[5].s, tok[5].len) * kBamPerDegree;
+                }
+                DA_PUSH(current.emplacement_attachments,
+                        current.emplacement_attachments_count,
+                        emplacement_attachments_cap, attachment);
+                const int stored_slot =
+                        static_cast<int>(current.emplacement_attachments_count);
+                if (kind == DEF_ITEM_EMPLACEMENT_ADDEWEAP_G)
+                    current.emplacement_g_slot = stored_slot;
+                else if (kind == DEF_ITEM_EMPLACEMENT_ADDEWEAP_C)
+                    current.emplacement_c_slot = stored_slot;
+            }
         } else if (lower_match_key(lower, ll, "phrase_set", 10)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
             /* Plain signed atol -> target itemDef+0x86C. Presence cannot be
@@ -1778,6 +1839,7 @@ DEF_EXPORT int def_parse_items_memory(const uint8_t *data, size_t size, DefItems
 DEF_EXPORT void def_free_items(DefItemsFile *f) {
     if (!f) return;
     for (size_t i = 0; i < f->count; ++i) {
+        free(f->entries[i].emplacement_attachments);
         free(f->entries[i].raw_lines);
     }
     free(f->entries);

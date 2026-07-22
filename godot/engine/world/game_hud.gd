@@ -20,6 +20,7 @@ const MIN_CROSSHAIR_STYLE := 0
 const MAX_CROSSHAIR_STYLE := 24
 const DEFAULT_CHAT_LINES := 8 # HUDCHLINE fallback
 const STANCE_FRAME_COUNT := 6
+const PlayerViewEffectsScript := preload("res://engine/world/player_view_effects.gd")
 
 var _hudpos: NovaHudPos
 var _root: NovaResourceRoot
@@ -50,6 +51,7 @@ var _round_tex: Texture2D
 # virtual 1024x768 design space and scale to the live viewport per draw
 # [orig: Viewport_ScaleToVirtualCoords @0x5d2b20].
 var _card_rows: Array = []
+var _view_effects = null # PlayerViewEffects; preloaded explicitly above
 
 
 class SightRowControl:
@@ -87,12 +89,17 @@ var _info: Dictionary = {
 	"clip": -1,
 	"reserve": -1,
 	"scope_engaged": false,
+	"binoculars_view_active": false,
+	"binocular_range": 1,
+	"nvg_visible": false,
+	"nvg_gain": 0,
 	"fov_deg": 80.0,
 	"ticks": 0,
 }
 
 
 func set_layout(hudpos: NovaHudPos, root: NovaResourceRoot) -> void:
+	_ensure_view_effects()
 	_hudpos = hudpos
 	_root = root
 	_font = null
@@ -106,7 +113,21 @@ func set_layout(hudpos: NovaHudPos, root: NovaResourceRoot) -> void:
 	_alpha_fade = Vector3.ZERO
 	_chat_lines = DEFAULT_CHAT_LINES
 	_load_assets()
+	_view_effects.set_resource_root(root)
 	queue_redraw()
+
+
+func _ensure_view_effects() -> void:
+	if _view_effects != null:
+		return
+	_view_effects = PlayerViewEffectsScript.new()
+	_view_effects.name = "PlayerViewEffects"
+	_view_effects.show_behind_parent = true
+	_view_effects.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# Internal children stay out of authored SIGHTS-row traversal and scene ownership,
+	# while INTERNAL_MODE_BACK gives the post-process/masks a stable layer below them.
+	add_child(_view_effects, false, Node.INTERNAL_MODE_BACK)
+	_view_effects.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
 
 ## Select and immediately reload the configured crosshair art. Style 0 is cross01.tga;
@@ -168,7 +189,9 @@ func _rebuild_sights_card() -> void:
 # overrides it. The FP viewmodel hides on the same bit. [orig:
 # Render_ProcessMainSceneFrame @0x5ca299..0x5ca304 / @0x5caaf3..0x5cab15]
 func _sync_sights_card() -> void:
-	var up: bool = bool(_info.get("scope_card", false)) and not _card_rows.is_empty()
+	var up: bool = bool(_info.get("scope_card", false)) \
+			and not bool(_info.get("binoculars_view_active", false)) \
+			and not _card_rows.is_empty()
 	for row in _card_rows:
 		if is_instance_valid(row):
 			row.visible = up
@@ -192,6 +215,8 @@ func update_info(info: Dictionary) -> void:
 		_stance_stamp = int(info.get("ticks", 0))
 	_info = info
 	_sync_sights_card()
+	if _view_effects != null:
+		_view_effects.update_info(info)
 	queue_redraw()
 
 
@@ -280,6 +305,7 @@ func _draw() -> void:
 	_draw_stance(surface, ticks)
 	_draw_weapon_cluster(surface, ticks)
 	_draw_heat_bar(surface)
+	_draw_power_bar(surface)
 	_draw_waypoint_info(surface)
 	_draw_objectives_panel(surface)
 	_draw_attach_labels()
@@ -391,6 +417,42 @@ func _draw_heat_bar(surface: Vector2) -> void:
 		var top := r.position.y + r.size.y - vspan + 1.0
 		draw_rect(Rect2(Vector2(r.position.x + 1.0, top),
 			Vector2(r.size.x - 2.0, maxf(r.position.y + r.size.y - 1.0 - top, 0.0))), fill)
+
+
+# The PowerThrow charge bar at the HUDPOWERBAR rect (x,y,w,h): a wireframe
+# outline, an inset fill proportional to the windup, and the percent text 15
+# output pixels above. The fill curve is the witnessed windup shape: full during
+# the first 31 held ticks (the tap window throws at full power), then restarting
+# at 0 and climbing (held-31)/93 to 1. Fill span = (progress_fp16 * w + 0x8000)
+# >> 16, drawn (x+1, y+1)-(x+span, y+h-1); everything in the flat 0xFF800000
+# half-red the original passes for both rects and the text.
+# [orig: HUD_DrawPowerThrowChargeBar @0x599830 (ex kong "HUD_DrawWeaponReloadBar"
+#  misnomer): gates @0x59988f (def+8 sign bit + g_fireChargeStartTick + ammo);
+#  curve @0x5998ad (1/93 = flt_7CD390, fld1 clamp); fill @0x599964; text
+#  "%d%" @0x5999ef at y-15 via HUD_DrawTextLeft_HalfBright @0x5804c0]
+func _draw_power_bar(surface: Vector2) -> void:
+	if not bool(_info.get("windup_active", false)):
+		return
+	var design: Rect2 = _rects.get("powerbar", Rect2())
+	if design.size.x <= 0.0 or design.size.y <= 0.0:
+		return
+	var held := int(_info.get("windup_held_ticks", 0))
+	var progress := 1.0
+	if held >= 31:
+		progress = minf(float(held - 31) * (1.0 / 93.0), 1.0)
+	var color := Color8(128, 0, 0)  # [orig: the 0xFF800000 constant @0x840b1c]
+	var r := HudLayout.scale_rect(design, surface)
+	draw_rect(r, color, false)
+	var span := (int(progress * 65536.0) * int(r.size.x) + 0x8000) >> 16
+	if span > 1:
+		draw_rect(Rect2(r.position + Vector2.ONE,
+			Vector2(minf(float(span - 1), r.size.x - 2.0), r.size.y - 2.0)), color)
+	if _font != null:
+		var label_pos := design.position + HudLayout.pixel_delta_to_design(
+				Vector2(0, -15), surface)
+		HudText.draw_text(self, _font,
+			label_pos, surface,
+			"%d%%" % int(progress * 100.0), HudText.half_bright(color))
 
 
 # The waypoint name + distance label at the HUDWPDINFO anchor. Gates: the mission
@@ -546,6 +608,8 @@ func _draw_attach_labels() -> void:
 # (@0x592b6c). The recoil-accumulator terms (+0x380/+0x384 >>7) are D-HUD-7.
 # [orig: HUD_DrawCrosshair @0x592640]
 func _draw_crosshair(surface: Vector2) -> void:
+	if bool(_info.get("binoculars_view_active", false)):
+		return
 	var scoped := bool(_info.get("scope_engaged", false))
 	# The settled-sights hide [orig: !Player_CanFireWeapon @0x5cf780 via @0x592afa;
 	# scope_fraction < 1 = the ease still interpolating = scopeActive still 0].

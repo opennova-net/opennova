@@ -32,6 +32,13 @@ var effect_particle_userpoint := ""
 ## reinstalls the FP viewmodel/FSM for it [orig: the mount's model re-resolve;
 ## equippedAdmIndex stamp @ 0x4dd727]. Empty = no switch this tick.
 var switch_to_weapon := ""
+## The committed target has no weapon definition (for example, an originally
+## unarmed player detaching from a UseGun). This is distinct from no switch event.
+var clear_weapon := false
+## UseGun switches borrow the parent's persistent MountSlot and restore the saved
+## personal slot. Rebuilding presentation must not initialize either slot again.
+## [orig: Entity_AttachToUseGunSlot @0x546c25; detach restore @0x43565f]
+var preserve_slot_state := false
 ## The switch-walk wrap-around refusal — the deny sound seam
 ## [orig: PlaySoundOnDedicatedServer(dword_24E08C4) @ 0x4e0354].
 var switch_denied := false
@@ -56,5 +63,7 @@ static func from_event_dict(d: Dictionary) -> PlayerWeaponEvent:
 	out.effect_particle = String(d.get("effect_particle", ""))
 	out.effect_particle_userpoint = String(d.get("effect_particle_userpoint", ""))
 	out.switch_to_weapon = String(d.get("switch_to_weapon", ""))
+	out.clear_weapon = bool(d.get("clear_weapon", false))
+	out.preserve_slot_state = bool(d.get("preserve_slot_state", false))
 	out.switch_denied = bool(d.get("switch_denied", false))
 	return out

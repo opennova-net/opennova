@@ -15,8 +15,15 @@ class FakeModel:
 	var phases: Array = []        # [channel, phase]
 	var body_calls: Array = []    # [key_or_slot, phase]
 	var overlay_calls: Array = []
+	var right_hand_collapse_calls: Array[bool] = []
+	var ctrl_values: Dictionary = {}
+	var cleared_controls: Array[String] = []
+	var part_control_names: Dictionary = {}
 	func set_part_phase(channel: int, phase: int) -> void:
 		phases.append([channel, phase])
+		var control_name := String(part_control_names.get(channel, ""))
+		if not control_name.is_empty():
+			ctrl_values[control_name] = phase
 	func play_body_clip_at(key: String, phase_ticks: int) -> void:
 		body_calls.append([key, phase_ticks])
 	func play_body_anim_at(slot: int, phase_ticks: int) -> void:
@@ -25,6 +32,13 @@ class FakeModel:
 		body_calls.append([slot, -1])
 	func set_aim_overlay(deltas: Array) -> void:
 		overlay_calls.append(deltas)
+	func set_right_hand_collapsed(collapsed: bool) -> void:
+		right_hand_collapse_calls.append(collapsed)
+	func set_ctrl_value(name: String, value: int) -> void:
+		ctrl_values[name] = value
+	func clear_ctrl_value(name: String) -> void:
+		ctrl_values.erase(name)
+		cleared_controls.append(name)
 
 
 # resolve(bms_id, kind, index) like MissionEntityRegistry: bms_id primary, (kind,index) fallback.
@@ -71,6 +85,8 @@ class FakeSim:
 			out[b + NovaSimulation.PF_ANIM_STATE] = float(e.get("anim_state", -1))
 			out[b + NovaSimulation.PF_ANIM_PHASE_TICKS] = float(e.get("anim_phase", 0))
 			out[b + NovaSimulation.PF_HIDDEN] = float(e.get("hidden", 0))
+			out[b + NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED] = float(
+					e.get("local_view_suppressed", 0))
 			out[b + NovaSimulation.PF_ALIVE] = float(e.get("alive", 1))
 			out[b + NovaSimulation.PF_AIM_OVERLAY_VALID] = float(
 					e.get("aim_overlay_valid", 0))
@@ -78,6 +94,14 @@ class FakeSim:
 			out[b + NovaSimulation.PF_AIM_BODY_PITCH_DEG] = body.x
 			out[b + NovaSimulation.PF_AIM_BODY_YAW_DEG] = body.y
 			out[b + NovaSimulation.PF_AIM_BODY_ROLL_DEG] = body.z
+			out[b + NovaSimulation.PF_EMPLACED_CONTROLS_VALID] = float(
+					e.get("emplaced_controls_valid", 0))
+			out[b + NovaSimulation.PF_EWEAP_GUNYAW] = float(
+					e.get("emplaced_gun_yaw", 0))
+			out[b + NovaSimulation.PF_EWEAP_GUNPITCH] = float(
+					e.get("emplaced_gun_pitch", 0))
+			out[b + NovaSimulation.PF_RIGHT_HAND_COLLAPSED] = float(
+					e.get("right_hand_collapsed", 0))
 			var angles: PackedVector3Array = e.get(
 					"aim_angles", PackedVector3Array())
 			for cls in range(mini(angles.size(), 9)):
@@ -129,6 +153,71 @@ func test_both_channels_posed() -> void:
 	sim.entities = [{ "bms_id": 7, "active1": 1, "phase1": 100, "active2": 1, "phase2": 200 }]
 	_make_pass(index, sim).present()
 	assert_eq(model.phases.size(), 2, "both active channels posed")
+
+
+func test_emplaced_weapon_uses_named_controls_and_clears_them() -> void:
+	var model := FakeModel.new()
+	add_child_autofree(model)
+	var index := FakeIndex.new()
+	index.by_bms_id = { 8: model }
+	var sim := FakeSim.new()
+	sim.entities = [{
+		"bms_id": 8,
+		"emplaced_controls_valid": 1,
+		"emplaced_gun_yaw": 0x1234,
+		"emplaced_gun_pitch": 0xFEDC,
+	}]
+	var presenter := _make_pass(index, sim)
+	presenter.present()
+	assert_eq(model.ctrl_values, {
+		"EWEAP_GUNYAW": 0x1234,
+		"EWEAP_GUNPITCH": 0xFEDC,
+	}, "semantic controls do not alias model-order PLAYPARTANIM channels")
+	assert_true(model.phases.is_empty())
+
+	sim.entities[0]["emplaced_controls_valid"] = 0
+	presenter.present()
+	assert_true(model.ctrl_values.is_empty(),
+			"dismount/death clears retained EWEAP controls")
+	assert_has(model.cleared_controls, "EWEAP_GUNYAW")
+	assert_has(model.cleared_controls, "EWEAP_GUNPITCH")
+
+
+func test_dismount_restores_generic_part_values_for_the_same_registers() -> void:
+	var model := FakeModel.new()
+	model.part_control_names = {
+		1: "EWEAP_GUNYAW",
+		2: "EWEAP_GUNPITCH",
+	}
+	add_child_autofree(model)
+	var index := FakeIndex.new()
+	index.by_bms_id = { 9: model }
+	var sim := FakeSim.new()
+	sim.entities = [{
+		"bms_id": 9,
+		"active1": 1,
+		"phase1": 0x1111,
+		"active2": 1,
+		"phase2": 0xEEEE,
+		"emplaced_controls_valid": 1,
+		"emplaced_gun_yaw": 0x2222,
+		"emplaced_gun_pitch": 0xDDDD,
+	}]
+	var presenter := _make_pass(index, sim)
+	presenter.present()
+	assert_eq(model.ctrl_values, {
+		"EWEAP_GUNYAW": 0x2222,
+		"EWEAP_GUNPITCH": 0xDDDD,
+	}, "live gunner controls outrank generic model-order values")
+
+	sim.entities[0]["emplaced_controls_valid"] = 0
+	sim.entities[0]["phase1"] = 0x3333
+	sim.entities[0]["phase2"] = 0xCCCC
+	presenter.present()
+	assert_eq(model.ctrl_values, {
+		"EWEAP_GUNYAW": 0x3333,
+		"EWEAP_GUNPITCH": 0xCCCC,
+	}, "dismount clears stale semantic ownership before generic PLAYPARTANIM")
 
 
 func test_body_clip_poses_to_sim_anim_state_phase() -> void:
@@ -183,6 +272,25 @@ func test_placed_model_clears_overlay_when_snapshot_selector_is_invalid() -> voi
 	_make_pass(index, sim).present()
 	assert_eq(model.overlay_calls, [[]],
 			"an unknown selector clears any pose retained by the model")
+
+
+func test_placed_model_applies_and_restores_mounted_right_hand_collapse() -> void:
+	var model := FakeModel.new()
+	add_child_autofree(model)
+	var index := FakeIndex.new()
+	index.by_bms_id = { 14: model }
+	var sim := FakeSim.new()
+	sim.entities = [{
+		"bms_id": 14,
+		"aim_overlay_valid": 1,
+		"right_hand_collapsed": 1,
+	}]
+	var presenter := _make_pass(index, sim)
+	presenter.present()
+	sim.entities[0]["right_hand_collapsed"] = 0
+	presenter.present()
+	assert_eq(model.right_hand_collapse_calls, [true, false],
+			"the placed pose consumes the packed mount verdict and restores on dismount")
 
 
 func test_resolves_by_kind_index_fallback() -> void:
@@ -266,6 +374,41 @@ func test_visibility_from_hidden_and_alive() -> void:
 	assert_true(dead.visible, "a dead non-organic renders (husk swap / graphic fallback)")
 	assert_true(corpse.visible, "a dead organic renders as a corpse")
 	assert_false(despawned.visible, "the sim ends the corpse via PF_HIDDEN")
+
+
+func test_local_first_person_usegun_parent_is_not_world_rendered() -> void:
+	# Retail skips the local UseGun PARENT'S own vehicle-model submit after its
+	# embedded MountSlot becomes EquippedSlot in first person. This is a local
+	# render verdict, independent of authoritative Entity.hidden; attached actors
+	# render through a separate child walk. [orig: Entity_RenderVehicleModel
+	# @0x4407d0, cull @0x4407f6..0x44084c, submit @0x440918;
+	# RenderSlot_RenderEntityAndChildren child walk @0x5d7938+]
+	var mount := FakeModel.new()
+	var unrelated := FakeModel.new()
+	add_child_autofree(mount)
+	add_child_autofree(unrelated)
+	var index := FakeIndex.new()
+	index.by_bms_id = { 41: mount, 42: unrelated }
+	var sim := FakeSim.new()
+	sim.entities = [
+		{ "bms_id": 41, "hidden": 0, "local_view_suppressed": 1 },
+		{ "bms_id": 42, "hidden": 0, "local_view_suppressed": 0 },
+	]
+	var presenter := _make_pass(index, sim)
+	presenter.present()
+	assert_false(mount.visible,
+			"the committed first-person UseGun parent skips its own world model")
+	assert_true(unrelated.visible,
+			"local UseGun suppression cannot hide unrelated world entities")
+
+	# Camera-mode changes, detach, and pre-commit slot mismatch all clear the
+	# transient verdict. PF_HIDDEN remains independently authoritative.
+	sim.entities[0]["local_view_suppressed"] = 0
+	presenter.present()
+	assert_true(mount.visible, "clearing the render verdict restores the parent immediately")
+	sim.entities[0]["hidden"] = 1
+	presenter.present()
+	assert_false(mount.visible, "authoritative PF_HIDDEN still wins independently")
 
 
 func test_options_gate_each_channel() -> void:

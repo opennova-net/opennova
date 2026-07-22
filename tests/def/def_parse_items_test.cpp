@@ -604,6 +604,68 @@ int main(void) {
         def_free_items(&items2);
     }
 
+    /* Vehicle child-emplacement attachments retain authored order, optional
+       down/up/right/left limits, and the G/C key variants. */
+    static const char attachment_def[] =
+        "begin AttachmentCarrier\n"
+        "  id 100164\n"
+        "  addeweap abcdefghijklmnopq 100166\n"
+        "  addeweapG ewep02 100183 70 10 100 100\n"
+        "  addeweapC ewep03 100182\n"
+        "  addeweapC ewep04 100184 0 0 0 0\n"
+        "  addeweapG ignored05 100185\n"
+        "end\n"
+        "begin PartialAngles\n"
+        "  id 100200\n"
+        "  addeweap ewep01 100201 15 37\n"
+        "end\n";
+    DefItemsFile attachment_items;
+    memset(&attachment_items, 0, sizeof(attachment_items));
+    if (def_parse_items_memory((const uint8_t *)attachment_def,
+                               sizeof(attachment_def) - 1,
+                               &attachment_items) != 0 ||
+        attachment_items.count != 2) {
+        fprintf(stderr, "FAIL: inline emplacement-attachment block did not parse\n");
+        def_free_items(&attachment_items);
+        return 1;
+    }
+    const DefItemDef *carrier = &attachment_items.entries[0];
+    if (carrier->emplacement_attachments_count != 4) {
+        fprintf(stderr, "FAIL: expected 4 capped emplacement attachments, got %zu\n",
+                carrier->emplacement_attachments_count);
+        def_free_items(&attachment_items);
+        return 1;
+    }
+    const DefItemEmplacementAttachment *a0 = &carrier->emplacement_attachments[0];
+    const DefItemEmplacementAttachment *a1 = &carrier->emplacement_attachments[1];
+    const DefItemEmplacementAttachment *a2 = &carrier->emplacement_attachments[2];
+    const DefItemEmplacementAttachment *a3 = &carrier->emplacement_attachments[3];
+    static const int bam_per_degree = 11930464;
+    if (a0->kind != DEF_ITEM_EMPLACEMENT_ADDEWEAP ||
+        strcmp(a0->userpoint, "abcdefghijklmno") != 0 || a0->item_id != 100166 ||
+        a0->angle_count != 0 ||
+        a1->kind != DEF_ITEM_EMPLACEMENT_ADDEWEAP_G ||
+        strcmp(a1->userpoint, "ewep02") != 0 || a1->item_id != 100183 ||
+        a1->angle_count != 4 || a1->down_angle != 70 * bam_per_degree ||
+        a1->up_angle != -10 * bam_per_degree ||
+        a1->right_angle != 100 * bam_per_degree ||
+        a1->left_angle != -100 * bam_per_degree ||
+        a2->kind != DEF_ITEM_EMPLACEMENT_ADDEWEAP_C ||
+        strcmp(a2->userpoint, "ewep03") != 0 || a2->item_id != 100182 ||
+        a2->angle_count != 0 ||
+        a3->kind != DEF_ITEM_EMPLACEMENT_ADDEWEAP_C ||
+        a3->angle_count != 4 || a3->down_angle != 0 || a3->up_angle != 0 ||
+        a3->right_angle != 0 || a3->left_angle != 0 ||
+        carrier->emplacement_g_slot != 2 || carrier->emplacement_c_slot != 4 ||
+        carrier->raw_lines_count != 0 ||
+        attachment_items.entries[1].emplacement_attachments_count != 0 ||
+        attachment_items.entries[1].raw_lines_count != 1) {
+        fprintf(stderr, "FAIL: emplacement attachment parse semantics mismatch\n");
+        def_free_items(&attachment_items);
+        return 1;
+    }
+    def_free_items(&attachment_items);
+
     static const char damage_def[] =
         "begin A\n id 1\n armor 7 11\n damage_reduc_pp .25\nend\n"
         "begin B\n id 2\n armor 5\n damage_reduc_pp .25 .60\nend\n"

@@ -264,15 +264,26 @@ func _free_viewmodel_pass() -> void:
 ## follows the equipped slot, count_weapon_effects_and_update_viewmodel @ 0x4dc9e0].
 ## Redundant reinstalls (the installed def already IS the target and its viewmodel
 ## exists) are skipped so the queued SWITCHTO draw-in survives.
-func _apply_weapon_switch(weapon_name: String) -> void:
+func _apply_weapon_switch(weapon_name: String,
+		preserve_slot_state: bool = false) -> void:
 	if _world == null or not _world.has_method("set_local_player_weapon_by_name"):
 		return
 	if (_world.has_method("local_player_weapon_name")
 			and String(_world.local_player_weapon_name()).nocasecmp_to(weapon_name) == 0
 			and _viewmodel != null and is_instance_valid(_viewmodel)):
 		return
-	if _world.set_local_player_weapon_by_name(weapon_name):
+	var switched := bool(_world.set_local_player_weapon_by_name(
+			weapon_name, true)) if preserve_slot_state else bool(
+					_world.set_local_player_weapon_by_name(weapon_name))
+	if switched:
 		refresh_viewmodel()
+
+
+func _apply_weapon_clear() -> void:
+	if _world == null or not _world.has_method("clear_local_player_weapon"):
+		return
+	_world.clear_local_player_weapon()
+	refresh_viewmodel()
 
 
 ## Drop the built FP viewmodel so the next update pass rebuilds gun/arms/FSM from the
@@ -412,6 +423,7 @@ func _send_weapon_switch_input(captured: bool) -> void:
 
 func after_world_tick() -> void:
 	if not _has_player():
+		_set_world_nvg_view(false, 0)
 		_set_fly_camera_locked(false)
 		_release_mouse_capture()
 		_clear_models()
@@ -422,6 +434,8 @@ func after_world_tick() -> void:
 		_view = null
 		return
 	_view = _world.local_player_view() if _world.has_method("local_player_view") else null
+	_set_world_nvg_view(_view != null and _view.nvg_visible,
+			_view.nvg_gain if _view != null else 0)
 	# Place the camera/viewmodel root for THIS tick before consuming one-shot
 	# presentation events. On the first live tick the freshly built model is still
 	# at its default transform; on later ticks it otherwise trails movement/look by
@@ -477,6 +491,14 @@ func _consume_weapon_events(view: PlayerWeaponView,
 		authoritative_phase: bool = false) -> void:
 	_weapon_view = view
 	if view == null:
+		# Slot selection is control state, not viewmodel presentation. In
+		# particular, an unarmed player has no view until UseGun installs one.
+		for event in events:
+			if event.clear_weapon:
+				_apply_weapon_clear()
+			elif not event.switch_to_weapon.is_empty():
+				_apply_weapon_switch(
+						event.switch_to_weapon, event.preserve_slot_state)
 		_weapon_play_serial = -1
 		return
 	var batch_started_clip := false
@@ -499,8 +521,10 @@ func _consume_weapon_events(view: PlayerWeaponView,
 			_fire_direct_action_effect(event)
 		if event.action_finished >= 0:
 			_fire_action_end_sound(event)
-		if not event.switch_to_weapon.is_empty():
-			_apply_weapon_switch(event.switch_to_weapon)
+		if event.clear_weapon:
+			_apply_weapon_clear()
+		elif not event.switch_to_weapon.is_empty():
+			_apply_weapon_switch(event.switch_to_weapon, event.preserve_slot_state)
 		# event.switch_denied is the deny-sound seam [orig: PlaySoundOnDedicatedServer
 		# (dword_24E08C4) @ 0x4e0354] — the shipped set name is unwitnessed (D-WPN-22).
 	if batch_started_clip:
@@ -761,6 +785,23 @@ func handle_key_input(event: InputEvent, active: bool) -> bool:
 		_third_person = not _third_person
 		_sync_camera_mode()
 		return true
+	var physical := key.physical_keycode if key.physical_keycode != 0 else key.keycode
+	if physical == KEY_B:
+		if _world.has_method("request_local_player_binoculars_toggle"):
+			_world.request_local_player_binoculars_toggle()
+		return true
+	if physical == KEY_N:
+		if _world.has_method("request_local_player_nvg_toggle"):
+			_world.request_local_player_nvg_toggle()
+		return true
+	if physical == KEY_EQUAL or physical == KEY_PLUS or physical == KEY_KP_ADD:
+		if _world.has_method("request_local_player_nvg_gain"):
+			_world.request_local_player_nvg_gain(1)
+		return true
+	if physical == KEY_MINUS or physical == KEY_KP_SUBTRACT:
+		if _world.has_method("request_local_player_nvg_gain"):
+			_world.request_local_player_nvg_gain(-1)
+		return true
 	if key.keycode == KEY_Z:
 		_request_stance(2)  # prone [orig: case 170 sends 0xAA]
 		return true
@@ -799,7 +840,13 @@ func _reset_state() -> void:
 	_reload_was_down = false
 	_scope_was_down = false
 	_view = null
+	_set_world_nvg_view(false, 0)
 	_sync_camera_mode()
+
+
+func _set_world_nvg_view(active: bool, gain: int) -> void:
+	if _world != null and _world.has_method("set_local_player_nvg_view"):
+		_world.set_local_player_nvg_view(active, gain)
 
 
 func _has_player() -> bool:
@@ -888,14 +935,46 @@ func aim_screen_point() -> Vector2:
 		return Vector2.INF  # 1P: the HUD pins the design center [orig: @0x5928a0]
 	if _world == null or _camera == null or not _has_player():
 		return Vector2.INF
-	var yr := deg_to_rad(_world.local_player_yaw_deg())
-	var pr := deg_to_rad(_world.local_player_pitch_deg())
+	var angles := _aim_angles_deg()
+	var yr := deg_to_rad(angles.x)
+	var pr := deg_to_rad(angles.y)
 	var forward := Vector3(sin(yr) * cos(pr), sin(pr), -cos(yr) * cos(pr))
 	var eye := _eye_position(_world.local_player_position())
 	var target := eye + forward * AIM_PROJECT_RANGE
 	if _camera.is_position_behind(target):
 		return Vector2.INF
 	return _camera.unproject_position(target)
+
+
+# The binocular rangefinder targets the same aim ray as the camera. Retail
+# measures from entity Position to the collision/far endpoint, truncates to an
+# integer, and clamps the display to 1..1000.
+func aim_range_units() -> int:
+	if _world == null or _camera == null or not _has_player():
+		return 1
+	var pos: Vector3 = _world.local_player_position()
+	var eye := _eye_position(pos)
+	var angles := _aim_angles_deg()
+	var yr := deg_to_rad(angles.x)
+	var pr := deg_to_rad(angles.y)
+	var forward := Vector3(sin(yr) * cos(pr), sin(pr), -cos(yr) * cos(pr))
+	var endpoint := eye + forward * AIM_PROJECT_RANGE
+	var world_3d := _camera.get_world_3d()
+	if world_3d != null:
+		var query := PhysicsRayQueryParameters3D.create(eye, endpoint)
+		var hit: Dictionary = world_3d.direct_space_state.intersect_ray(query)
+		if not hit.is_empty():
+			endpoint = hit.get("position", endpoint)
+	return clampi(int(pos.distance_to(endpoint)), 1, 1000)
+
+
+func _aim_angles_deg() -> Vector2:
+	var yaw := float(_world.local_player_yaw_deg())
+	var pitch := float(_world.local_player_pitch_deg())
+	if _view != null and _view.binoculars_view_active:
+		yaw += _view.binocular_yaw_offset_deg
+		pitch += _view.binocular_pitch_offset_deg
+	return Vector2(yaw, pitch)
 
 
 # The eye anchor: Position + CameraOffset, where the local player's CameraOffset is
@@ -951,8 +1030,9 @@ func _update_player_camera() -> void:
 	if _world == null or _camera == null:
 		return
 	var pos: Vector3 = _world.local_player_position()
-	var yr := deg_to_rad(_world.local_player_yaw_deg())
-	var pr := deg_to_rad(_world.local_player_pitch_deg())
+	var angles := _aim_angles_deg()
+	var yr := deg_to_rad(angles.x)
+	var pr := deg_to_rad(angles.y)
 	var forward := Vector3(sin(yr) * cos(pr), sin(pr), -cos(yr) * cos(pr))
 	var eye := _eye_position(pos)
 	if _third_person:
@@ -1112,6 +1192,7 @@ func _update_viewmodel() -> void:
 	var view_units := PLAYER_VIEWMODEL_POS_UNITS.lerp(PLAYER_VIEWMODEL_TPOS_UNITS, ads)
 	_viewmodel.global_transform = _camera.global_transform * Transform3D(
 		vm_basis, bias * _viewmodel_offset(view_units))
+	_apply_emplaced_viewmodel_controls()
 	# The FP overlay never enters the water mirror OR the main camera: retail draws it
 	# as its own renderfov/near-Z pass over the finished frame [orig:
 	# Player_RenderFirstPersonViewModel @ 0x4ded60]; hosted, the dedicated layer is drawn
@@ -1121,8 +1202,26 @@ func _update_viewmodel() -> void:
 	# the frame shows one or the other [orig: selectors/clear @0x5ca299..0x5ca304;
 	# the card path @0x5caaf3..0x5cab15 and the viewmodel candidate @0x5ca32c].
 	var carded := _view != null and _view.scope_card_active
-	_viewmodel.visible = ((not _third_person) and not carded) or debug_force_viewmodel
+	var binoculars := _view != null and _view.binoculars_view_active
+	_viewmodel.visible = (
+			((not _third_person) and not carded and not binoculars)
+			or debug_force_viewmodel)
 	_update_viewmodel_pass()
+
+
+func _apply_emplaced_viewmodel_controls() -> void:
+	for part in _vm_parts:
+		if part == null or not is_instance_valid(part) or \
+				not part.has_method("set_ctrl_value"):
+			continue
+		if _weapon_view != null and _weapon_view.emplaced_controls_valid:
+			part.set_ctrl_value(
+					"EWEAP_GUNYAW", _weapon_view.emplaced_gun_yaw)
+			part.set_ctrl_value(
+					"EWEAP_GUNPITCH", _weapon_view.emplaced_gun_pitch)
+		elif part.has_method("clear_ctrl_value"):
+			part.clear_ctrl_value("EWEAP_GUNYAW")
+			part.clear_ctrl_value("EWEAP_GUNPITCH")
 
 
 # Stamp `layer_mask` onto every VisualInstance3D under `root` (inclusive).

@@ -112,8 +112,9 @@ struct Emitter {
 	float spring_const = 0.0f;
 	float gravity_accel = 0.0f;     // retail authored gravity × -0.09803897
 	float drag_coefficient = 0.0f;  // retail authored drag × 0.01
-	// Signed-randomized authored orbitalspeed ± orbitalspeed_adj. The host
-	// ORBIT integrator remains an approximation of retail's basis/age chain.
+	// Runtime radians/sec, converted after signed-randomizing authored
+	// orbitalspeed +/- orbitalspeed_adj (which are degrees/sec). The host ORBIT
+	// integrator remains an approximation of retail's basis/age chain.
 	float orbit_speed = 0.0f;
 
 	// CParticleEmitter_TranslatePosition @ 0x5efe90 mirror.

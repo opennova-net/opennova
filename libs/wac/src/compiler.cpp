@@ -62,6 +62,7 @@ int builtin_id(const std::string &name) {
     if (ieq(name, "GameOver")) return static_cast<int>(Builtin::GameOver);
     if (ieq(name, "WinVar")) return static_cast<int>(Builtin::WinVar);
     if (ieq(name, "LoseVar")) return static_cast<int>(Builtin::LoseVar);
+    if (ieq(name, "accuracyspread")) return static_cast<int>(Builtin::AccuracySpread);
     return -1;
 }
 
@@ -149,14 +150,24 @@ private:
             int idx = std::atoi(t.c_str() + 1);
             return encode_operand(OperandKind::MusicVar, idx);
         }
+        const int named_value = builtin_id(t);
         if (type == ParamType::Variable) {
+            // Retail's named-value table stores direct pointers. Port the writable
+            // accuracyspread row without pretending the cache-only rows are lvalues.
+            // [orig: WacScript_ResolveParameter @0x4f2940; named table @0x82EEF0]
+            if (named_value == static_cast<int>(Builtin::AccuracySpread)) {
+                return encode_operand(OperandKind::Builtin,
+                                      static_cast<uint32_t>(named_value));
+            }
             warn(line, "expected a variable");
             return encode_operand(OperandKind::MissionVar, 0);
         }
 
-        // Read-only builtins (health/ticks/near*/...).
-        int bi = builtin_id(t);
-        if (bi >= 0) return encode_operand(OperandKind::Builtin, static_cast<uint32_t>(bi));
+        // Named engine values (health/ticks/near*/accuracyspread/...).
+        if (named_value >= 0) {
+            return encode_operand(OperandKind::Builtin,
+                                  static_cast<uint32_t>(named_value));
+        }
 
         // Symbolic asset prefixes -> string pool.
         if (starts_with_ci(t, "FX_") || starts_with_ci(t, "effect_") ||

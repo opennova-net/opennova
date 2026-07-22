@@ -1557,6 +1557,26 @@ func test_changing_climate_commits_through_set_header_int() -> void:
 	assert_eq(ctx.fake.header_int_calls[0][1], 2, "selected id (Snow) carried through")
 
 
+func test_start_with_nvg_is_a_distinct_mission_option() -> void:
+	assert_eq(int(NovaMissionData.ATTRIB_START_WITH_NVG_ON), 0x400000,
+		"StartWithNVGOn binds the retail mission attribute bit")
+	assert_ne(int(NovaMissionData.ATTRIB_START_WITH_NVG_ON), int(NovaMissionData.ATTRIB_ENABLE_NVG),
+		"starting enabled is distinct from the mission's NVG/night semantics")
+	var ctx := _make({})
+	ctx.fake.mission_ref = _loaded_mission_for_props()
+	ctx.fake.changed.emit()
+	var check_name := "MissionFlag_%d" % int(NovaMissionData.ATTRIB_START_WITH_NVG_ON)
+	var check := ctx.inspector.find_child(check_name, true, false) as CheckBox
+	assert_not_null(check, "mission properties expose Start with night vision on")
+	if check == null:
+		return
+	assert_eq(check.text, "Start with night vision on", "the authoring label is explicit")
+	check.toggled.emit(true)
+	assert_eq(ctx.fake.header_flag_calls.size(), 1, "one header-flag commit")
+	assert_eq(int(ctx.fake.header_flag_calls[0][0]), 0x400000, "the checkbox writes StartWithNVGOn")
+	assert_true(bool(ctx.fake.header_flag_calls[0][1]), "the checkbox writes the enabled state")
+
+
 func test_selecting_game_mode_commits_through_set_game_mode() -> void:
 	var ctx := _make({})
 	ctx.fake.mission_ref = _loaded_mission_for_props()

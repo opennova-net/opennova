@@ -586,10 +586,6 @@ public:
     // @0x4301bc unread). Damage when landing with vel_z <= -1057*scale: health -= excess>>4
     // @0x4b9910 dump 5152]. 0 disables (the image default until the config source is RE'd).
     int32_t fall_damage_scale = 0;
-    // The AI aim-error difficulty scale [orig: dword_C6EAE8 in the §17.5 error formula
-    // (119304 * dword_C6EAE8 * acc) >> 5; its runtime config source is unwitnessed —
-    // sibling of dword_C6EAE4 above]. Default 1 keeps the error term live.
-    int32_t ai_difficulty = 1;
     int unported_calls = 0;   // coverage counter for not_yet_ported handlers
     int find_target_calls = 0;// coverage: target-acquisition invocations
     std::vector<RelMatCall> relmat_calls; // recorded mover side effects (net layer = P2+)
@@ -695,12 +691,12 @@ public:
     // floating spawn. No-op when `terrain` is null or the column has no terrain coverage.
     void apply_ground_clamp(AiEntity &e);
 
-    // Seat-follow for a mounted occupant (manned gun/seat). If the entity behind `e` is mounted,
-    // pose it onto its seat (pose_mounted_occupant) and mirror the world Entity transform back into
-    // this AiEntity (what the present snapshot reads), then return true so the tick SKIPS the state
-    // machine + locomotion (a manned gunner never path-follows). Auto-dismounts + returns false if
-    // the mount target is gone. Returns false (run AI normally) when not mounted.
-    // [orig: Entity_SerializeVehicleState @0x460560 runs per tick for mounted entities.]
+    // Seat-follow phase for a LIVE mounted occupant. Infantry callers keep running
+    // death, perception, combat, and animation around it and suppress only ordinary
+    // locomotion; non-infantry callers may use the result as a full SM shortcut.
+    // Dead occupants return false so the infantry death edge detaches first.
+    // [orig: Entity_UpdateInfantryAI parent/health gate @0x4b9960..0x4b9983,
+    //  mounted pose @0x4bec23..0x4bed3f, death detach @0x4b9c57..0x4b9c60.]
     bool pose_if_mounted(AiEntity &e, World &world);
 
     // The brain half of a waypoint REDIRECT (RedirectGroupTo/RedirectSingleTo): mode 1 +
@@ -758,6 +754,20 @@ public:
     // (inf.last_events, odd ticks) + the walking-fire latch -> fire_ai_round; magazine
     // decrement + the reload trigger. Runs AFTER the anim advance refreshed last_events.
     void infantry_fire_pass(AiEntity &e, World &world, uint32_t logic_tick);
+    // Dedicated UseGun request after the ordinary anim-event block: resolve the parent
+    // emplacement weapon, then require target/range/alignment before authoritative fire.
+    // The occupant's personal profile ammo is never used.
+    // [orig: Entity_AttachToUseGunSlot @0x546b80; request @0x4bf4bb..0x4bf59e.]
+    void infantry_mounted_fire_pass(AiEntity &e, World &world, uint32_t logic_tick,
+                                    uint32_t key);
+    // The post-entity global action pump for occupied emplacement MountSlots. The
+    // infantry request above only writes next=FIRE; this phase advances the authored
+    // weapon FSM and emits the round with the NPC gunner as owner.
+    // [orig: frame order @0x52674b/@0x526786; WeaponAction_ProcessAllEntities @0x542690.]
+    void pump_mounted_weapon_slots(World &world, uint32_t logic_tick);
+    // Reconcile the split AiEntity/registry stores, wire animation, and part channels
+    // at either the mounted return or the ordinary end of the infantry tick.
+    void finish_infantry_tick(AiEntity &e, World &world);
     // AUTHORITY body-anim selection for a net-snapped REMOTE player. The movement motor must
     // not re-simulate a wire-snapped peer (tick_infantry skips it), but the retail authority
     // still runs the player-body ANIM selection for every player, consuming the REPLICATED
@@ -834,6 +844,7 @@ private:
     std::vector<int> handle_to_ai_index_;
     std::vector<EntityHandle> vehicle_pass_handles_; // per-tick scratch for the vehicle
                                                      // motor pass (reused, no realloc)
+    std::vector<EntityHandle> mounted_weapon_handles_; // global UseGun pump scratch
     std::vector<AiCandidate> scan_candidates_;       // acquire_target feed scratch (reused)
     bool baseline_captured_ = false;
 };

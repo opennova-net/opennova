@@ -28,12 +28,21 @@ bool vehicle_has_enemy_occupant(const World &world, const Entity &vehicle,
     return hit;
 }
 
-// The shared attach write block [orig: Entity_AttachToVehicleSlot @0x4946D0 common tail
-// @0x494752-75].
+// Shared host attach write block. Retail splits UseGun from ordinary vehicle slots at
+// the flags write; the remaining relationship fields are common.
 void attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t bone) {
+    presnap_vehicle_attach_heading(world, occ, veh, veh.seats[seat_idx]);
     veh.seats[seat_idx].occupant = occ.handle; // [orig: mountHandles[idx] = handle @0x494746]
     occ.mount_type = veh.seats[seat_idx].type;
-    occ.flags = (occ.flags & 0xFFFF5FBFu) | 0x40u; // clear 0x8000|0x2000, set mounted
+    if (occ.mount_type == SeatType::Gunner) {
+        occ.flags &= ~0xA000u;
+        occ.engine_flags &= ~0xA000u;
+        // [orig: Entity_AttachToUseGunSlot @0x546c56-0x546c7c]
+    } else {
+        occ.flags = (occ.flags & 0xFFFF5FBFu) | 0x40u;
+        occ.engine_flags = (occ.engine_flags & 0xFFFF5FBFu) | 0x40u;
+        // [orig: Entity_AttachToVehicleSlot @0x494752-0x494775]
+    }
     occ.mount_target = veh.handle;                 // [orig: parentEntity(0x16C) = vehicle]
     occ.mount_target_net_id = veh.net_id;
     occ.mount_target_bms_id = veh.bms_id;
@@ -43,6 +52,9 @@ void attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t 
     occ.mounted = true;
     occ.mounted_config_valid = veh.emplaced_config_valid;
     occ.mounted_config = veh.emplaced_config_valid ? veh.emplaced_config : 0;
+    if (occ.mount_type == SeatType::Gunner)
+        vehicle_bind_use_gun_slot(world, occ, veh);
+    pose_mounted_occupant(world, occ, veh, veh.seats[seat_idx]);
     // Success clears the movement stance bits [orig: MoveOrder &= ~0x300 @0x435c42 + the
     // prone/crouch latch clears @0x435c54/@0x435c59].
     occ.net_stance_bits = 0;
@@ -138,19 +150,23 @@ bool entity_detach_from_vehicle(World &world, EntityHandle player) {
     const uint16_t target_net_id = occ->mount_target_net_id;
     const int32_t target_bms_id = occ->mount_target_bms_id;
     const uint32_t target_spawn_origin = occ->mount_target_spawn_origin;
+    const uint16_t target_wire_handle = occ->mount_target.packed;
     Entity *veh = world.registry.get(occ->mount_target);
     // [orig: Entity_DetachFromVehicle @0x4355F0] MoveOrder &= ~0x300 (stance clear), then
     // every matching seat handle on the mount target releases (all 10 slots in the
     // original; our seat vector sweeps by occupant), Flags &= ~0x40 and the mount trio
-    // clears. The EquippedSlot restore (+0x308) and the ATTR_PlayerControl engine-state 7
-    // are unmodeled (no weapon-slot / engine-state model) — tracked in D-NET-157.
+    // clears. The EquippedSlot backup is restored for a player and cleared for an
+    // NPC below; only the
+    // ATTR_PlayerControl engine-state 7 transition remains unmodeled (D-NET-157).
     occ->net_stance_bits = 0;
     if (veh != nullptr) {
         for (Seat &s : veh->seats) {
             if (s.occupant == player) s.occupant = EntityHandle{}; // [orig: -> 0xFFFF]
         }
     }
+    vehicle_release_use_gun_slot(*occ, veh);
     occ->flags &= ~0x40u;          // [orig: Flags &= ~0x40]
+    occ->engine_flags &= ~0x40u;
     occ->mount_target = EntityHandle{}; // [orig: +0x16C = 0]
     occ->mount_target_net_id = 0;
     occ->mount_target_bms_id = 0;
@@ -168,7 +184,7 @@ bool entity_detach_from_vehicle(World &world, EntityHandle player) {
         // The vehicle is already gone; the stored identity carries the stop (host
         // cleanup — a spurious stop is idempotent downstream).
         emit_vehicle_control_stopped(world, target_net_id, target_bms_id,
-                                     target_spawn_origin);
+                                     target_spawn_origin, target_wire_handle);
     }
     return true;
 }

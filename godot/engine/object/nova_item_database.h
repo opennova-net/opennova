@@ -92,6 +92,19 @@ private:
 		// (the attach label's text source); empty if none authored.
 		// [orig: -> ItemDef+0x54B primaryWeapon; docs/world/itemdef-re.md]
 		String primary_weapon;
+		struct EmplacementAttachment {
+			String userpoint;
+			int item_id = 0;
+			int down_angle = 0;
+			int up_angle = 0;
+			int right_angle = 0;
+			int left_angle = 0;
+			int angle_count = 0;
+			int kind = 0;
+		};
+		std::vector<EmplacementAttachment> emplacement_attachments;
+		int emplacement_g_slot = 0;
+		int emplacement_c_slot = 0;
 		// Mounted skeletal selector metadata: authored items.def phrase_set is the
 		// target itemDef+0x86C dword. Presence is separate because zero is valid.
 		bool mount_config_valid = false;
@@ -142,6 +155,9 @@ public:
 		TYPE_POWERUP = 6,
 		TYPE_OBJECT = 6,
 		TYPE_EFFECT = 8,
+		EMPLACEMENT_ADDEWEAP = 0,
+		EMPLACEMENT_ADDEWEAP_G = 1,
+		EMPLACEMENT_ADDEWEAP_C = 2,
 	};
 
 	Error load(const String &path);
@@ -203,6 +219,12 @@ public:
 	// (the USEGUN attach label resolves its attachtextid); empty if none authored.
 	// [orig: -> ItemDef+0x54B; consumer draw_vehicle_seat_and_armory_labels @ 0x5a351d]
 	String get_primary_weapon(int id) const;
+	// Ordered child-emplacement records from addeweap/addeweapG/addeweapC.
+	// Every Dictionary retains the exact key variant plus source userpoint,
+	// child item id, and optional down/up/right/left limits.
+	Array get_emplacement_attachments(int id) const;
+	// Last stored G/C attachment slot, 1-based; zero means absent.
+	Dictionary get_emplacement_attachment_markers(int id) const;
 	// {valid: bool, value: int} for the target definition's phrase_set +0x86C.
 	// Always returns both fields so absent and authored zero stay distinct.
 	// [orig: parse @ 0x49F9DB..0x49FA0A; mounted consumer @ 0x4B1884]

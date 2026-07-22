@@ -110,9 +110,11 @@ inline constexpr OperandKind operand_kind(uint32_t ref) {
 }
 inline constexpr uint32_t operand_index(uint32_t ref) { return ref & kOperandIndexMask; }
 
-// Read-only builtin variable ids (subset of the original named-value table — 24
+// Named engine-value ids (subset of the original named-value table — 24
 // records {char name[16]; u32 param_type; u32 value_ptr} @0x82EEF0, count @0x82F130,
 // resolved case-insensitively by WacScript_ResolveParameter's third lookup leg).
+// Most currently modeled rows are read-only cache values; AccuracySpread retains
+// retail's writable pointer semantics.
 enum class Builtin : uint32_t {
     Ticks = 0,    // seconds-equivalent: logic tick counter [orig: wac_var_ticks @0xC6EAD8]
     Result = 1,   // accumulator / last return value [orig: wac_var_result @0xC6EB24]
@@ -131,6 +133,7 @@ enum class Builtin : uint32_t {
     GameOver = 11,  // winner != 0 [orig: wac_var_GameOver @0xC6EB0C, derived @0x4f57bb]
     WinVar = 12,    // winner == 1 [orig: wac_var_WinVar @0xC6EB08, derived @0x4f57c9]
     LoseVar = 13,   // winner == 2 [orig: wac_var_LoseVar @0xC6EB04, derived @0x4f57cf]
+    AccuracySpread = 14, // writable AI error multiplier [orig: @0xC6EAE8, read @0x4bc5ea]
 };
 
 } // namespace opennova::wac

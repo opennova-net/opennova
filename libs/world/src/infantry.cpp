@@ -864,7 +864,9 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         // @0x4b70c6 `test al,42h` / @0x4b70ce `test tick,3` — any set skips]
         // The jump itself runs AFTER the vertical resolve (step 9b), as the original
         // orders it (integrate -> resolver -> edges -> jump @0x4b7e8c).
-        if ((logic_tick & 3u) == 0 && !inf.airborne) player_body_select(e);
+        const Entity *ent = world.registry.get(e.handle);
+        const bool carried = ent != nullptr && ent->mounted;
+        if ((logic_tick & 3u) == 0 && !inf.airborne && !carried) player_body_select(e);
     } else if (is_authority && (key & 15u) == 0) {
         // 2. Think + selection (every 16 ticks). [orig: gate (tick & 0xF) | !authority]
         infantry_think(e, world);
@@ -877,6 +879,16 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // [orig: Entity_UpdateInfantryAI @0x4b9910 §17.1-17.3/17.5 region]
     if (!inf.is_local_player && is_authority && e.health > 0)
         infantry_combat_think(e, world, key);
+
+    // Mounted pose is a late phase, not an update bypass: death ran first and a
+    // living NPC has already perceived, selected, and aimed. The mounted return
+    // below suppresses only ordinary ground locomotion.
+    // [orig: Entity_UpdateInfantryAI @0x4b9910; pose @0x4bec23..0x4bed3f;
+    //  dedicated return @0x4bf5c6]
+    const bool mounted = e.health > 0 && pose_if_mounted(e, world);
+    const Entity *mounted_occ = mounted ? world.registry.get(e.handle) : nullptr;
+    const bool mounted_gunner =
+            mounted_occ != nullptr && mounted_occ->mount_type == SeatType::Gunner;
 
     // The lean angle decays every body tick (corpse included — the decay sits before
     // the weapon-channel block in the original) and ramps while a lean key is held;
@@ -914,8 +926,10 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // The fire pass: consume the fresh trigger bits + the walking-fire latch into
     // authoritative rounds (odd ticks). [orig: the @0x4bf15c-0x4bf4b0 fire block runs
     // after the anim advance refreshed g_animEventTriggerBits; §17.4]
-    if (!inf.is_local_player && is_authority && e.health > 0)
+    if (!inf.is_local_player && is_authority && e.health > 0 && !mounted_gunner)
         infantry_fire_pass(e, world, logic_tick);
+    if (!inf.is_local_player && is_authority && e.health > 0 && mounted_gunner)
+        infantry_mounted_fire_pass(e, world, logic_tick, key);
 
     // 3b. Deferred promotion when a LOCKED (flag 0x4) playing clip reaches its end —
     // the PRIMARY channel's end-flag path, the same machinery the weapon channel uses.
@@ -931,6 +945,26 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             inf.clip_phase = 0;
             if (reset_capsule_bottom_state(inf.anim_state)) inf.prev_capsule_bottom = 0;
         }
+    }
+
+    // Retail exits the ordinary mover immediately after the dedicated UseGun
+    // request. Seat pose already supplied the transform; animation, wire state,
+    // and part channels remain live.
+    // [orig: mounted fire tail @0x4bf4bb..0x4bf5c6]
+    if (mounted) {
+        // The live mounted tail invokes the movement resolver on its exact
+        // eight-tick entity phase. Contact/trigger work remains live while the
+        // mounted source latch suppresses push-out, preserving the parent pose.
+        // [orig: phase8 gate/call @0x4bf5a5..0x4bf5c3]
+        if ((key & 7u) == 0 && collision != nullptr) {
+            collision->resolve_entity(
+                    world, e.handle, e.collide_state, e.pos, inf.vel, inf.vel[2],
+                    frame.capsule_bottom, frame.capsule_top, e.heading, e.pitch,
+                    inf.is_local_player, is_authority, logic_tick, inf.anim_state,
+                    infantry_anim_flags(inf.anim_state), e.health);
+        }
+        finish_infantry_tick(e, world);
+        return;
     }
 
     // 4. Ground resample (every 8 ticks). [orig: dump 319-326, cache entity+676]
@@ -1284,6 +1318,11 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         }
     }
 
+    finish_infantry_tick(e, world);
+}
+
+void AiSystem::finish_infantry_tick(AiEntity &e, World &world) {
+    InfantryState &inf = e.inf;
     // Mirror the mover-output brain fields the present snapshot reads (kWorkPosZ stays the
     // grounded Z; kOutSpeed reflects motion for anim-slot consumers).
     e.brain.f[AiBrain::kWorkPosX] = e.pos[0];
@@ -1351,7 +1390,8 @@ EntityHandle infantry_scan_nearest_threat(AiSystem &sys, World &world, AiEntity 
     // [orig: @0x4b0a02 — teamless scanners pose as team 2 when slot+4 & 8]
     uint8_t own_team = e.team;
     if (own_team == 0 && (e.slot.f[1] & 8) != 0) own_team = 2;
-    if (own_team == 0 && !e.see_all) return EntityHandle{};
+    const bool scanner_berserk = (e.slot.f[1] & 0x200) != 0;
+    if (own_team == 0 && !scanner_berserk) return EntityHandle{};
 
     EntityHandle best{};
     int64_t best_d2 = static_cast<int64_t>(radius) * radius;
@@ -1364,8 +1404,16 @@ EntityHandle infantry_scan_nearest_threat(AiSystem &sys, World &world, AiEntity 
             const Entity *c = world.registry.get(h);
             if (c == nullptr || c->health <= 0) continue;      // in-use + alive
             if ((c->engine_flags & 0x8000001u) != 0) continue; // [orig: flags skip]
-            if (c->team == 0 || c->team == own_team) {         // enemies only
-                if (!e.see_all) continue;
+            if (c->team == 0 || c->team == own_team) {
+                // The shared infantry feed accepts the candidate when either side
+                // carries AiSlot[1] bit 0x200. This is the authored Berserk
+                // attack-anyone exception; ordinary same-team candidates still skip.
+                // [orig: Entity_FindTargets @0x53a7ea..0x53a824]
+                const AiEntity *candidate_ai = sys.for_handle(h);
+                const bool candidate_berserk = candidate_ai != nullptr &&
+                        (candidate_ai->slot.f[1] & 0x200) != 0;
+                if (!scanner_berserk && !candidate_berserk)
+                    continue;
             }
             const int32_t cpos[3] = {static_cast<int32_t>(c->position.x * 65536.0f),
                                      static_cast<int32_t>(c->position.y * 65536.0f),
@@ -1574,7 +1622,8 @@ void AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
     // [orig: (119304 * dword_C6EAE8 * acc) >> 5, x (32 - ((tick>>2 [+ tick>>9]) & 0x3F));
     // the prone-in-foliage +40 concealment term needs the foliage-mask seam — D-AI-6.]
     const int32_t acc = (inf.aim_ref0 == inf.combat_target) ? slot.f[10] : slot.f[11];
-    const int64_t err_unit = (static_cast<int64_t>(119304) * ai_difficulty * acc) >> 5;
+    const int64_t err_unit =
+        (static_cast<int64_t>(119304) * world.wac_values.accuracy_spread * acc) >> 5;
     const int32_t err_a = static_cast<int32_t>(
         err_unit * (32 - static_cast<int32_t>(((key >> 2) + (key >> 9)) & 0x3Fu)));
     const int32_t err_b = static_cast<int32_t>(
@@ -1718,6 +1767,63 @@ void AiSystem::infantry_fire_pass(AiEntity &e, World &world, uint32_t logic_tick
         }
     }
     inf.aim_ref0 = inf.combat_target; // [orig: aiRef0 = slot[3] after the fire block]
+}
+
+void AiSystem::infantry_mounted_fire_pass(AiEntity &e, World &world,
+                                          uint32_t logic_tick, uint32_t key) {
+    (void)logic_tick;
+    InfantryState &inf = e.inf;
+    Entity *occ = world.registry.get(e.handle);
+    if (occ == nullptr || !occ->mounted || occ->mount_type != SeatType::Gunner)
+        return;
+    Entity *mount = world.registry.get(occ->mount_target);
+    if (mount == nullptr) return;
+    const bool slot_bound = vehicle_bind_use_gun_slot(world, *occ, *mount);
+    if (!inf.combat_target.valid() || !slot_bound) return;
+
+    // The dedicated request runs on its four-tick infantry cadence, then a
+    // coordinate/entity stagger admits one 64-tick half-window and rejects the next.
+    // [orig: Entity_UpdateInfantryAI @0x4bf4cf..0x4bf4ee]
+    if ((key & 3u) != 0) return;
+
+    const Entity *target = world.registry.get(inf.combat_target);
+    if (target == nullptr || target->health <= 0) return;
+
+    const int32_t target_pos[3] = {
+        static_cast<int32_t>(target->position.x * 65536.0f),
+        static_cast<int32_t>(target->position.y * 65536.0f),
+        static_cast<int32_t>(target->position.z * 65536.0f)};
+    const uint32_t stagger = static_cast<uint32_t>(target_pos[0]) -
+            static_cast<uint32_t>(target_pos[1]) + key;
+    if ((stagger & 0x40u) != 0) return;
+
+    // UseGun already swapped EquippedSlot to the parent's persistent embedded
+    // MountSlot at attach. This request never touches the personal magazine.
+    // [orig: Entity_AttachToUseGunSlot @0x546c42..0x546c73]
+    const uint8_t adm = mount->primary_weapon_slot_adm;
+    const WeaponTableEntry *weapon =
+            world.weapons.by_index(adm);
+    if (weapon == nullptr || weapon->ammo_index < 0) return;
+
+    const int32_t dx = io::bam_sub(target_pos[0], e.pos[0]);
+    const int32_t dy = io::bam_sub(target_pos[1], e.pos[1]);
+    // Retail deliberately halves the vertical component before the 3-D range test.
+    const int32_t dz = io::bam_sar(io::bam_sub(target_pos[2], e.pos[2]), 1);
+    const double fdx = static_cast<double>(dx);
+    const double fdy = static_cast<double>(dy);
+    const double fdz = static_cast<double>(dz);
+    const double distance = std::sqrt(fdx * fdx + fdy * fdy + fdz * fdz);
+    if (distance >= static_cast<double>(e.slot.f[15])) return;
+
+    const int32_t target_heading = bearing_to(dx, dy);
+    constexpr int32_t kMountedFireArc = 178956960;
+    if (abs_bam(io::bam_sub(target_heading, e.heading)) >= kMountedFireArc) return;
+
+    // The AI leg checks only currentAction and queues FIRE. The later global action
+    // pump owns timing, recoil, ammo, and the actual round spawn.
+    // [orig: currentAction/nextAction @0x4bf583..0x4bf59e]
+    if (mount->primary_weapon_slot.current != weapon_action::kIdle) return;
+    mount->primary_weapon_slot.next = weapon_action::kFire;
 }
 
 // Mirror the motor-selected body-anim state + channel phase onto the world Entity — the store

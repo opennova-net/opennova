@@ -806,6 +806,50 @@ void test_switch_completion_signal() {
     CHECK(ev.action_finished == -1);
 }
 
+void test_emplaced_switchfrom_and_try_switchto_contract() {
+    WeaponFsmActionRow rows[1];
+    set_row(rows[0], "switchfrom", "", 1, 1);
+    WeaponFsmDef def;
+    weapon_fsm_bake(rows, 1, clip_resolves, clip_seconds, nullptr, def);
+
+    WeaponSlotState holster;
+    holster.phase = weapon_phase::kDone;
+    weapon_fsm_queue_switch_from(holster);
+    WeaponFsmInputs in;
+    in.instant_emplaced_switch = true;
+    WeaponFsmEvents ev;
+    weapon_fsm_tick(def, holster, in, ev);
+    CHECK(ev.switch_completed); // shipped emplaced rows use delaystart=1
+
+    WeaponSlotState ready_target;
+    ready_target.phase = weapon_phase::kNone;
+    ready_target.next = wa::kFire;
+    weapon_fsm_try_queue_switch_to(ready_target);
+    CHECK(ready_target.next == wa::kSwitchTo);
+
+    WeaponSlotState busy_target;
+    busy_target.current = wa::kRecoil;
+    busy_target.phase = weapon_phase::kEntered;
+    busy_target.next = wa::kFire;
+    weapon_fsm_try_queue_switch_to(busy_target);
+    CHECK(busy_target.current == wa::kRecoil);
+    CHECK(busy_target.phase == weapon_phase::kEntered);
+    CHECK(busy_target.next == wa::kIdle);
+
+    WeaponSlotState drawing_target;
+    drawing_target.current = wa::kSwitchTo;
+    drawing_target.phase = weapon_phase::kActive;
+    drawing_target.next = wa::kFire;
+    weapon_fsm_try_queue_switch_to(drawing_target);
+    CHECK(drawing_target.next == wa::kFire);
+
+    WeaponSlotState ready_phase_target;
+    ready_phase_target.phase = weapon_phase::kHeld;
+    ready_phase_target.next = wa::kFire;
+    weapon_fsm_try_queue_switch_to(ready_phase_target);
+    CHECK(ready_phase_target.next == wa::kIdle);
+}
+
 } // namespace
 
 int main() {
@@ -834,6 +878,7 @@ int main() {
     test_non_local_recoil_makes_no_decision();
     test_recoil_effect_leg();
     test_switch_completion_signal();
+    test_emplaced_switchfrom_and_try_switchto_contract();
     if (failures == 0) std::printf("weapon_fsm_test: all passed\n");
     return failures == 0 ? 0 : 1;
 }

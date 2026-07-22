@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <io/bam.h>
 
 namespace opennova::world {
 
@@ -980,8 +981,24 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
         AiEntity *victim = for_handle(hit.victim);
         if (victim == nullptr) continue;
         if (victim->inf.active) {
-            victim->inf.was_hit = true;
-            victim->inf.last_attacker = hit.shooter;
+            // Every ordinary damage callback alerts an NPC and its trigger group,
+            // before lethal/nonlethal handling. The player flag skips this AI leg.
+            // [orig: Entity_HandleDamageTrigger @0x4073c8..0x4073ea]
+            const Entity *victim_entity = world.registry.get(victim->handle);
+            if (victim_entity != nullptr &&
+                (victim_entity->engine_flags & 0x100u) == 0) {
+                victim->slot.bytes()[AiSlot::kMoveFlagByte] = 2;
+                world.relations.group(victim_entity->group_id).alert =
+                        TriggerRelations::kAlertRed;
+            }
+            // Self-damage does not stamp a reaction or attacker. Retail tests the
+            // timer against 25, then adds 10 without clamping (24 becomes 34).
+            // [orig: Entity_OnDamageReceived @0x4af859..0x4af878]
+            if (hit.shooter != victim->handle) {
+                victim->inf.was_hit = true;
+                if (victim->inf.damage_timer < 25) victim->inf.damage_timer += 10;
+                victim->inf.last_attacker = hit.shooter;
+            }
         } else {
             AiEventEntry ev{};
             ev.f[0] = 1; // damage
@@ -1015,13 +1032,14 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
     // per-entity AI tick; Entity_UpdateInfantryAI @0x4b9910 simulate-when entity==local.]
     for (int i = 0; i < count(); ++i) {
         AiEntity &e = *at(i);
-        // A mounted occupant (manned gun/seat) follows its seat and never path-follows; skip the
-        // state machine + locomotion for it.
-        if (pose_if_mounted(e, world)) {
-            advance_part_anim(e);
-            continue;
-        }
         if (e.inf.active) {
+            // Net-snapped peers do not locally simulate their body, but retain the
+            // existing seat-follow presentation phase. Simulated infantry enters the
+            // full retail body tick; its mounted return suppresses locomotion only.
+            if (e.net_is_remote_peer && pose_if_mounted(e, world)) {
+                advance_part_anim(e);
+                continue;
+            }
             // Net-snapped remote peers skip the movement motor, so their blink/indoors
             // state comes from the position-only refresh instead. [orig: remote persons
             // refresh via the net position/create handlers — NapiNPClientMsg_0x00F
@@ -1035,6 +1053,11 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
             // locomotion for this entity. [orig: g_EntityClassPhysicsTable row "org1" ->
             // Entity_UpdateInfantryAI @0x4b9910]
             tick_infantry(e, world, ctx.logic_tick);
+            continue;
+        }
+        // Non-infantry mounted controllers retain the seat-follow shortcut.
+        if (pose_if_mounted(e, world)) {
+            advance_part_anim(e);
             continue;
         }
         if (begin_update(e)) {
@@ -1081,10 +1104,10 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
             VehicleDriveCmd cmd;
             if (traits->player_control) {
                 Entity *ctrl = resolve_vehicle_controller(world, *veh);
-                // A DEAD controller parks the vehicle: retail never sees one (the death
-                // chain detaches the corpse before the physics runs) — treating it as
-                // no-controller is the stand-in for the unported death->detach chain
-                // (D-AI-11 k).
+                // A DEAD controller parks the vehicle. The infantry death edge detaches
+                // first; this guard preserves the same result if the vehicle pass happens
+                // to observe the controller earlier in the frame.
+                // [orig: infantry death detach @0x4b9c57..0x4b9c60]
                 const bool ctrl_alive =
                         ctrl != nullptr && ctrl->alive && ctrl->health > 0;
                 const bool player_ctrl = ctrl_alive && ctrl->handle.pool() == 0 &&
@@ -1118,9 +1141,76 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
     events.process_timed(*this, world);
 }
 
+void AiSystem::pump_mounted_weapon_slots(World &world, uint32_t logic_tick) {
+    mounted_weapon_handles_.clear();
+    world.registry.for_each([&](const Entity &entity) {
+        if (entity.handle.pool() == 1 && entity.primary_weapon_owner.valid())
+            mounted_weapon_handles_.push_back(entity.handle);
+    });
+
+    for (const EntityHandle mount_handle : mounted_weapon_handles_) {
+        Entity *mount = world.registry.get(mount_handle);
+        if (mount == nullptr) continue;
+        Entity *owner = world.registry.get(mount->primary_weapon_owner);
+        if (owner == nullptr || owner->health <= 0 || !owner->mounted ||
+            owner->mount_type != SeatType::Gunner ||
+            owner->mount_target != mount_handle) {
+            mount->primary_weapon_owner = EntityHandle{};
+            continue;
+        }
+        // L's borrowed parent slot is pumped by NovaSimulation with the live
+        // trigger/reload/scope inputs and first-person event sink. Advancing it
+        // here as well would run one slot twice per frame. Remote players and
+        // NPC gunners remain owned by this global world pump.
+        // [orig: one WeaponAction_ProcessAllEntities walk @0x542690]
+        if (world.external_local_mounted_weapon_pump &&
+            owner->handle == world.cached.local_player)
+            continue;
+        AiEntity *gunner = for_handle(owner->handle);
+        if (gunner == nullptr || mount->primary_weapon_slot_adm == 0xFF) continue;
+        const WeaponTableEntry *weapon =
+                world.weapons.by_index(mount->primary_weapon_slot_adm);
+        if (weapon == nullptr || weapon->ammo_index < 0) continue;
+
+        WeaponFsmInputs inputs;
+        inputs.is_local = owner->handle == world.cached.local_player;
+        inputs.is_authority = is_authority;
+        inputs.auto_reload = true;
+        WeaponFsmEvents weapon_events;
+        weapon_fsm_tick(weapon->action_fsm, mount->primary_weapon_slot,
+                        inputs, weapon_events);
+        if (!weapon_events.fired || !is_authority) continue;
+
+        // The slot owner is the gunner, while its def/ammo live on the parent.
+        // Use the live chased look and the freshest posed muzzle available; the
+        // fallback is the mounted occupant's chest/seat origin.
+        // [orig: slot owner path in WeaponAction_Fire @0x542b10;
+        //  Entity_CalcWeaponFirePosition parentSlot 3]
+        int32_t origin[3] = {gunner->pos[0], gunner->pos[1],
+                             gunner->pos[2] + 0xE666};
+        if (mount->posed_muzzle_valid &&
+            logic_tick - mount->posed_muzzle_tick <= 4u) {
+            origin[0] = mount->posed_muzzle_world[0];
+            origin[1] = mount->posed_muzzle_world[1];
+            origin[2] = mount->posed_muzzle_world[2];
+        } else if (gunner->muzzle_valid &&
+                   logic_tick - gunner->muzzle_tick <= 4u) {
+            origin[0] = gunner->muzzle_world[0];
+            origin[1] = gunner->muzzle_world[1];
+            origin[2] = gunner->muzzle_world[2];
+        }
+        if (fire_ai_round(world, *gunner, origin, gunner->heading,
+                          gunner->pitch, weapon->ammo_index))
+            gunner->inf.aim_ref0 = gunner->inf.combat_target;
+    }
+}
+
 bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
     Entity *occ = world.registry.get(e.handle);
-    if (occ == nullptr || !occ->mounted) return false;
+    // A dead occupant cannot enter the live mounted-pose path: it must reach the
+    // infantry death edge, detach, then consume its staged death animation.
+    // [orig: Entity_UpdateInfantryAI @0x4b9960..0x4b9983]
+    if (occ == nullptr || !occ->mounted || occ->health <= 0) return false;
     Entity *veh = world.registry.get(occ->mount_target);
     if (veh == nullptr) {              // vehicle gone -> auto-dismount, resume normal AI
         entity_detach_from_vehicle(world, e.handle);
@@ -1128,28 +1218,44 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
     }
     if (occ->mount_seat < 0 || occ->mount_seat >= static_cast<int>(veh->seats.size())) return false;
     const Seat &seat = veh->seats[occ->mount_seat];
-    pose_mounted_occupant(*occ, *veh, seat);
-    // Capture the resolved seat orientation before the local-player LOOK mirror below
-    // overwrites the registry yaw. Keep the witnessed integer yaw conversion here:
-    // the generic degree helper rounds differently at non-cardinal headings.
-    const int16_t seat_yaw = occ->yaw;
-    const int16_t seat_pitch = occ->pitch;
-    const int16_t seat_roll = occ->roll;
-    const int32_t seat_heading = static_cast<int32_t>(
-            static_cast<int64_t>(90 - seat_yaw) * kBamPerDegreeInt);
-    if (e.inf.active) {
-        // Mounted occupants early-continue before tick_infantry. Mirror both the direct
-        // seat-frame writes and the carried-infantry leg chase snap that it therefore
-        // skips, so render and per-section collision consume one coherent body frame.
-        // [orig: seat carry @0x4b654e-0x4b6575; carried body/leg snap Flags & 0x100060]
-        e.inf.body_heading = seat_heading;
-        e.inf.leg_yaw[0] = seat_heading;
-        e.inf.leg_yaw[1] = seat_heading;
-        e.inf.leg_target[0] = seat_heading;
-        e.inf.leg_target[1] = seat_heading;
-        e.body_pitch = bam_from_degrees_wrapped(static_cast<double>(seat_pitch));
-        e.roll = bam_from_degrees_wrapped(static_cast<double>(seat_roll));
+    // Local input owns LOOK before retail evaluates the parent UseGun bone. Our
+    // split AiEntity keeps that input in the infantry latch until the mounted
+    // branch, so expose it before the host asks for the live parent pose.
+    if (e.inf.active && e.inf.is_local_player) {
+        e.heading = e.inf.target_heading;
+        e.pitch = e.inf.look_pitch;
     }
+    const int32_t saved_look_heading = e.heading;
+    const int32_t saved_look_pitch = e.pitch;
+    const auto apply_resolved_seat_frame = [&]() {
+        pose_mounted_occupant(world, *occ, *veh, seat);
+        // Capture the resolved seat orientation before an independent LOOK mirror
+        // overwrites registry yaw. Keep the witnessed integer yaw conversion here:
+        // the generic degree helper rounds differently at non-cardinal headings.
+        const int16_t seat_yaw = occ->yaw;
+        const int16_t seat_pitch = occ->pitch;
+        const int16_t seat_roll = occ->roll;
+        const int32_t resolved_heading = static_cast<int32_t>(
+                static_cast<int64_t>(90 - seat_yaw) * kBamPerDegreeInt);
+        if (e.inf.active) {
+            // Mirror both the direct seat-frame writes and the carried-infantry leg chase
+            // snap so render and per-section collision consume one coherent body frame.
+            // [orig: seat carry @0x4b654e-0x4b6575; carried body/leg snap Flags & 0x100060]
+            e.inf.body_heading = resolved_heading;
+            e.inf.leg_yaw[0] = resolved_heading;
+            e.inf.leg_yaw[1] = resolved_heading;
+            e.inf.leg_target[0] = resolved_heading;
+            e.inf.leg_target[1] = resolved_heading;
+            e.body_pitch = bam_from_degrees_wrapped(static_cast<double>(seat_pitch));
+            e.roll = bam_from_degrees_wrapped(static_cast<double>(seat_roll));
+        }
+        // Organics present from AiEntity.pos, not Entity.position.
+        e.pos[0] = to_fixed(occ->position.x);
+        e.pos[1] = to_fixed(occ->position.y);
+        e.pos[2] = to_fixed(occ->position.z);
+        return resolved_heading;
+    };
+    const int32_t seat_heading = apply_resolved_seat_frame();
     if (e.inf.active && e.inf.is_local_player) {
         // The mounted LOCAL player keeps the LOOK as its entity yaw: the witnessed mounted
         // carry writes bodyHeading/headLook from the seat bone but leaves entity->Yaw
@@ -1171,11 +1277,6 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
         // bank a jump for dismount [orig: the mounted-leg flag scrub &= 0xFF8F57DF].
         e.inf.jump_requested = false;
     }
-    // Mirror the world Entity transform into the AiEntity the present snapshot reads (organics are
-    // presented from pos[]/heading, not Entity.position; promote seeds them the same way).
-    e.pos[0] = to_fixed(occ->position.x);
-    e.pos[1] = to_fixed(occ->position.y);
-    e.pos[2] = to_fixed(occ->position.z);
     // Remote occupants present in the captured seat frame. The local LOOK override
     // below remains player-owned and must not rotate the carried body/collision pose.
     e.heading = seat_heading;
@@ -1191,6 +1292,48 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
         //  §23.5 — the entity Yaw is the LOOK, player-owned while seated]
         e.heading = e.inf.target_heading;
         e.pitch = e.inf.look_pitch;
+    } else if (e.inf.active && seat.type == SeatType::Gunner) {
+        // Attachment writes the seat/base pose but restores the child's independent
+        // live look. The look then chases the desired solution instead of snapping:
+        // yaw quarter-step clamped to +/-0x02000000, pitch eighth-step. Most mount
+        // configs also constrain look to +/-90 degrees around the attached base.
+        // [orig: save/restore @0x546416..0x546664; chase @0x4bef57..0x4bef97;
+        //  base-relative clamp @0x4bef9a..0x4beff0]
+        e.heading = saved_look_heading;
+        e.pitch = saved_look_pitch;
+        if (e.inf.aim_valid) {
+            int32_t yaw_step = io::bam_sar(
+                    io::bam_add(io::bam_sub(e.inf.aim_heading, e.heading), 2), 2);
+            yaw_step = std::clamp(yaw_step, -0x02000000, 0x02000000);
+            e.heading = io::bam_add(e.heading, yaw_step);
+            const int32_t pitch_step = io::bam_sar(
+                    io::bam_add(io::bam_sub(e.inf.aim_pitch, e.pitch), 4), 3);
+            e.pitch = io::bam_add(e.pitch, pitch_step);
+        }
+        const int cfg = veh->emplaced_config;
+        const bool wide_mount = veh->emplaced_config_valid &&
+                (cfg == 3 || cfg == 4 || cfg == 5 || cfg == 7);
+        if (!wide_mount) {
+            const int32_t rel = io::bam_sub(e.heading, seat_heading);
+            if (rel > 0x40000000)
+                e.heading = io::bam_add(seat_heading, 0x40000000);
+            else if (rel < -0x40000000)
+                e.heading = io::bam_sub(seat_heading, 0x40000000);
+        }
+        // The chase above changes the semantic EWEAP controls consumed by a
+        // model-aware provider. Resolve once more so the NPC root/body and the
+        // parent gun presented after this tick use the same Hn+1 control phase.
+        // Keep the first frame as the existing clamp base and preserve LOOK as
+        // the child's independent heading/pitch after the second seat resolve.
+        if (e.heading != saved_look_heading || e.pitch != saved_look_pitch) {
+            const int32_t chased_look_heading = e.heading;
+            const int32_t chased_look_pitch = e.pitch;
+            apply_resolved_seat_frame();
+            e.heading = chased_look_heading;
+            e.pitch = chased_look_pitch;
+        }
+        occ->yaw = static_cast<int16_t>(std::lround(normalize_mission_yaw_deg(
+                mission_yaw_deg_from_bam_heading(e.heading))));
     }
     if (e.inf.active) {
         const int mounted_state = mounted_anim_state_for_seat(*veh, seat, e.inf, root_motion);

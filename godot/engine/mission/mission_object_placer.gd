@@ -462,6 +462,13 @@ func resolve_player_visual_item_id(runtime_type_id: int) -> int:
 	_ensure_item_db()
 	if runtime_type_id == PLAYER_RUNTIME_TYPE_ID and item_db != null and item_db.has_item(PLAYER_VISUAL_ITEM_ID):
 		return PLAYER_VISUAL_ITEM_ID
+	if item_db != null:
+		if item_db.has_item(runtime_type_id):
+			return runtime_type_id
+		if runtime_type_id > 0 and runtime_type_id < 100000:
+			var authored_item_id := runtime_type_id + 100000
+			if item_db.has_item(authored_item_id):
+				return authored_item_id
 	return runtime_type_id
 
 

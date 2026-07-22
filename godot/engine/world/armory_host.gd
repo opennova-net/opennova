@@ -94,9 +94,7 @@ func try_open() -> bool:
 	if not _ensure_menu():
 		return false
 	# The on-show protocol: the screen re-resolves the class and repopulates every
-	# open [orig: the WEAPON activate handler @0x567370 -> populate @0x566db0]; the
-	# equipped primary stands in for the per-class buffer reselect (see the
-	# companion's header).
+	# open [orig: the WEAPON activate handler @0x567370 -> populate @0x566db0].
 	# Re-read the spawned entity on every show. Entity teams use 1/3=blue and
 	# 2/4=red; the menu filter uses the profile-side 0=blue, 1=red domain.
 	if _world.has_method("local_player_team"):
@@ -118,32 +116,55 @@ func try_open() -> bool:
 	_armory.set_class_selection_enabled(true)
 	var vmdef: PlayerViewmodelDef = _world.local_player_viewmodel_def() \
 			if _world.has_method("local_player_viewmodel_def") else null
-	var current_primary := vmdef.weapon_name if vmdef != null else ""
+	var fallback_primary := vmdef.weapon_name if vmdef != null else ""
 	if sim.has_method("get_local_player_weapon_name"):
-		current_primary = String(sim.get_local_player_weapon_name())
-	# The live kit from the sim's slot pool re-selects every slot row; the map
-	# availability rules filter the lists [orig: populate_three_category_lists
-	# @0x566db0 — the g_armoryWeaponAvailability term + the per-class reselect].
+		fallback_primary = String(sim.get_local_player_weapon_name())
+	# Retail resolves each visible parent tuple from the selected class's canonical
+	# buffer and routes it by that parent's weapon_class. It never scans the expanded
+	# runtime slot pool, whose hidden subclasses can occupy a different class.
+	# [orig: g_armoryLoadoutBufferByClass -> populate_ammo_type_combo_boxes
+	# @0x564930; name/catalog resolve @0x564A00; slot route @0x564B47]
+	var current_primary := fallback_primary
 	var current_secondary := ""
 	var current_accessory := ""
-	if sim.has_method("get_local_player_inventory") \
+	var current_grenades: Array = []
+	var current_parent_clips := {
+		"PRIMARY": -1,
+		"SECONDARY": -1,
+		"ACCESSORY": -1,
+	}
+	if sim.has_method("get_local_player_loadout") \
 			and _world.has_method("get_weapon_database"):
 		var weapon_db: NovaWeaponDatabase = _world.get_weapon_database()
-		var inv: Dictionary = sim.get_local_player_inventory()
-		for row in inv.get("slots", []):
+		current_primary = ""
+		for value in sim.get_local_player_loadout():
+			var row := value as Dictionary
 			var weapon_name := String(row.get("name", ""))
 			var index: int = weapon_db.find_weapon(weapon_name) \
 					if weapon_db != null and weapon_db.is_loaded() else -1
 			if index < 0:
 				continue
 			match int(weapon_db.get_weapon(index).get("slot", -1)):
+				NovaWeaponDatabase.SLOT_PRIMARY:
+					if current_primary.is_empty():
+						current_primary = weapon_name
+						current_parent_clips["PRIMARY"] = int(
+								row.get("ammo_primary", -1))
 				NovaWeaponDatabase.SLOT_SECONDARY:
 					if current_secondary.is_empty():
 						current_secondary = weapon_name
+						current_parent_clips["SECONDARY"] = int(
+								row.get("ammo_primary", -1))
 				NovaWeaponDatabase.SLOT_ACCESSORY:
 					if current_accessory.is_empty():
 						current_accessory = weapon_name
-	_armory.set_current_loadout(current_primary, current_secondary, current_accessory)
+						current_parent_clips["ACCESSORY"] = int(
+								row.get("ammo_primary", -1))
+				NovaWeaponDatabase.SLOT_GRENADE:
+					current_grenades.append(row.duplicate(true))
+	_armory.set_current_loadout(
+			current_primary, current_secondary, current_accessory, current_grenades,
+			current_parent_clips)
 	if sim.has_method("get_weapon_availability"):
 		_armory.set_availability_lookup(
 				func(weapon_name: String) -> int:
@@ -234,7 +255,7 @@ func _ensure_menu() -> bool:
 	return true
 
 
-# Armory ACCEPT: the full multi-slot kit (primary/secondary/accessory + clip
+# Armory ACCEPT: the full multi-slot kit (primary/secondary/accessory/grenades + clip
 # requests) rebuilds the sim's slot pool and becomes the respawn kit; the sim's
 # commit event then reinstalls the FP viewmodel/FSM around the re-selected equipped
 # weapon. SP-local apply — the MP client path rides the 0x2F/0x5A loadout service.
@@ -256,6 +277,17 @@ func _on_loadout_accepted(loadout: Dictionary) -> void:
 				"ammo_primary": int(loadout.get(slot_key + "_clips", -1)),
 				"ammo_secondary": -1,
 				"flags": -1,
+			})
+		for value in loadout.get("grenades", []):
+			var grenade := value as Dictionary
+			var weapon_name := String(grenade.get("name", ""))
+			if weapon_name.is_empty():
+				continue
+			kit.append({
+				"name": weapon_name,
+				"ammo_primary": int(grenade.get("ammo_primary", -1)),
+				"ammo_secondary": int(grenade.get("ammo_secondary", -1)),
+				"flags": int(grenade.get("flags", -1)),
 			})
 		var applied := false
 		if sim != null and sim.has_method("apply_local_player_loadout"):

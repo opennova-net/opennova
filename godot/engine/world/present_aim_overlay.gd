@@ -10,7 +10,17 @@ const OVERLAY_CLASS_COUNT := 9
 
 
 static func apply(node, snap: PackedFloat32Array, base: int) -> void:
-	if node == null or not node.has_method("set_aim_overlay"):
+	if node == null:
+		return
+	# The mounted-seat selector is resolved beside the overlay in native code for
+	# both authoritative and decoded-wire entities. Apply its final skeletal
+	# verdict here so placed and wire models cannot diverge. Player/Passenger rows
+	# keep the bit clear; the producer owns the exact Flags/seat predicate.
+	# [orig: BN17 special row @0x4b1290]
+	if node.has_method("set_right_hand_collapsed"):
+		node.set_right_hand_collapsed(
+				int(snap[base + NovaSimulation.PF_RIGHT_HAND_COLLAPSED]) != 0)
+	if not node.has_method("set_aim_overlay"):
 		return
 	if int(snap[base + NovaSimulation.PF_AIM_OVERLAY_VALID]) == 0:
 		node.set_aim_overlay([])
