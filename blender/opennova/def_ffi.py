@@ -103,6 +103,13 @@ class DefWeaponDef(ctypes.Structure):
         # Post-recoil auto-switch category ('switchcategory'; mirror def.h).
         ("switchcategory", ctypes.c_int),
         ("has_switchcategory", ctypes.c_int),
+        # The weapon heat model ('heat_values' / 'heat_effect'; mirror def.h).
+        # Both heat_values fields are 16.16 and PRE-DIVIDED by the parser (by 100
+        # and by 6200); the runtime divides them against each other.
+        ("heat_per_shot", ctypes.c_int),
+        ("heat_decay_per_tick", ctypes.c_int),
+        ("heat_glow_threshold", ctypes.c_int),
+        ("heat_effect", ctypes.c_char * 64),
     ]
 
 
