@@ -56,6 +56,10 @@ func get_stats() -> Dictionary:
 
 ## Apply the current sim state onto every resolved animated node. Called once per logic tick by the
 ## runtime driver (after the sim advances).
+var _perf_probe_skip_transform := false
+var _perf_probe_skip_body_anim := false
+
+
 func present() -> void:
 	if _sim == null or _index == null:
 		return
@@ -72,7 +76,7 @@ func present() -> void:
 			int(snap[base + NovaSimulation.PF_INDEX]))
 		if node == null or not is_instance_valid(node):
 			continue
-		if _drive_transform:
+		if _drive_transform and not _perf_probe_skip_transform:
 			_apply_transform(node, snap, base)
 		PresentAimOverlay.apply(node, snap, base)
 		if _drive_part_anim:
@@ -104,7 +108,8 @@ func present() -> void:
 			node.visible = visible
 			if not visible:
 				_stats.hidden += 1
-		_apply_body_anim(node, snap, base)
+		if not _perf_probe_skip_body_anim:
+			_apply_body_anim(node, snap, base)
 		_push_muzzle(node, int(snap[base + NovaSimulation.PF_NET_ID]))
 
 

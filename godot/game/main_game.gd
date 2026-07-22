@@ -1025,6 +1025,11 @@ func _set_hud_visible(v: bool) -> void:
 # world finishes loading. Gating on "loaded, not paused" rather than State.WORLD
 # also lets a host that drives load_world() directly (the headless runtime probe,
 # which stays in MENU) keep dispatching foliage.
+var _perf_probe_spans := {}
+var _perf_probe_skip_world := false
+var _perf_probe_skip_hud := false
+
+
 func _process(delta: float) -> void:
 	var debug_overlay_open := is_debug_overlay_open()
 	# Release the captured mouse while UI overlays the world or nothing is loaded.
@@ -1044,16 +1049,25 @@ func _process(delta: float) -> void:
 	# because player_live below is false outside State.WORLD].
 	if _state == State.PAUSED or not _world.is_loaded():
 		return
+	var __pf_t0 := Time.get_ticks_usec()
 	if _player_host != null:
 		var player_live := is_gameplay_input_active()
 		_player_host.before_world_tick(delta, player_live, player_live)
-	_world.tick(_camera.global_position, _camera.global_transform, delta)
+	var __pf_t1 := Time.get_ticks_usec()
+	if not _perf_probe_skip_world:
+		_world.tick(_camera.global_position, _camera.global_transform, delta)
+	var __pf_t2 := Time.get_ticks_usec()
 	if _player_host != null:
 		_player_host.after_world_tick()
+	var __pf_t3 := Time.get_ticks_usec()
 	# The shared HUD host rebuilds the per-frame info while the player is in-world
 	# (WORLD or the live-play ARMORY) [orig: HUD_BuildEntityInfo @0x4b8440 per frame].
-	if _hud_host != null and (_state == State.WORLD or _state == State.ARMORY):
+	if _hud_host != null and (_state == State.WORLD or _state == State.ARMORY) \
+			and not _perf_probe_skip_hud:
 		_hud_host.tick()
+	var __pf_t4 := Time.get_ticks_usec()
+	_perf_probe_spans = {before = __pf_t1 - __pf_t0, world = __pf_t2 - __pf_t1,
+			after = __pf_t3 - __pf_t2, hud = __pf_t4 - __pf_t3}
 
 
 # Mouse-look rides the shared LocalPlayerHost (the yaw/pitch witnesses live there);

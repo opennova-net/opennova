@@ -149,6 +149,9 @@ func _load_rtxt(root: NovaResourceRoot, name: String) -> RtxtStringFile:
 ## original rebuilding its HUD info struct each frame. Call once per frame while the
 ## player is in-world (the shells gate on their own state).
 ## [orig: HUD_BuildEntityInfo @0x4b8440]
+var _perf_probe_spans := {}
+
+
 func tick() -> void:
 	if _world == null or not _world.is_loaded():
 		return
@@ -197,6 +200,7 @@ func tick() -> void:
 		# [orig: HUD_BuildEntityInfo @0x4b85ef — hudInfo+52 += clip when def+88 == 1]
 		if weapon != null and weapon.clipsize == 1 and clip >= 0 and reserve >= 0:
 			reserve += clip
+	var __pf_t0 := Time.get_ticks_usec()
 	var scope_engaged := false
 	var scope_fraction := 0.0
 	var scope_card := false
@@ -219,6 +223,11 @@ func tick() -> void:
 			and _player_host.has_method("aim_range_units"):
 		binocular_range = clampi(int(_player_host.aim_range_units()), 1, 1000)
 
+	var __pf_t1 := Time.get_ticks_usec()
+	var __pf_attach := _build_attach_labels()
+	var __pf_t2 := Time.get_ticks_usec()
+	var __pf_waypoint := _waypoint_info_dict()
+	var __pf_t3 := Time.get_ticks_usec()
 	_game_hud.update_info({
 		"health_fraction": clampf(frac, 0.0, 1.0),
 		"stance": stance,
@@ -244,7 +253,7 @@ func tick() -> void:
 				else Vector2.INF,
 		"fov_deg": fov_deg,
 		"ticks": _hud_ticks(),
-		"attach_labels": _build_attach_labels(),
+		"attach_labels": __pf_attach,
 		# Weapon heat 0..0xFFFF; the drawer self-hides at 0. Only the emplaced and
 		# vehicle heavy guns author heat_values, so this stays 0 on foot.
 		# [orig: hudInfo+60 = WeaponSlot_CalcAccumulatedHeat @0x53f780, @0x4b8533]
@@ -254,12 +263,16 @@ func tick() -> void:
 		# @0xB76800 read by HUD_DrawPowerThrowChargeBar @0x599830]
 		"windup_active": wv != null and wv.active and wv.windup_active,
 		"windup_held_ticks": wv.windup_held_ticks if wv != null and wv.active else 0,
-		"waypoint": _waypoint_info_dict(),
+		"waypoint": __pf_waypoint,
 		"objectives": _build_objectives() if _objectives_visible else [],
 	})
+	var __pf_t4 := Time.get_ticks_usec()
 	# Effects drain synchronously during _world.tick(), before this HUD update.
 	# Flush afterward so GameHud.push_message stamps the current 62 Hz tick.
 	_flush_pending_hud_messages()
+	_perf_probe_spans = {scalars = __pf_t1 - __pf_t0, attach = __pf_t2 - __pf_t1,
+			waypoint = __pf_t3 - __pf_t2, update_info = __pf_t4 - __pf_t3,
+			flush = Time.get_ticks_usec() - __pf_t4}
 
 
 # The HUD's 62 Hz presentation clock driving the fade/message timers.

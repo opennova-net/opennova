@@ -180,36 +180,36 @@ func _run() -> void:
 	# with it (deferred/RS-side work its calls generate)?
 	var worldoff := {avg = -1.0}
 	var hudtickoff := {avg = -1.0}
-	if _main != null and _main.get("_dbg_pf_skip_world") != null:
-		_main.set("_dbg_pf_skip_world", true)
+	if _main != null and _main.get("_perf_probe_skip_world") != null:
+		_main.set("_perf_probe_skip_world", true)
 		worldoff = await _measure("worldoff", 3000)
-		_main.set("_dbg_pf_skip_world", false)
+		_main.set("_perf_probe_skip_world", false)
 		await _settle_ms(500)
-		_main.set("_dbg_pf_skip_hud", true)
+		_main.set("_perf_probe_skip_hud", true)
 		hudtickoff = await _measure("hudtickoff", 3000)
-		_main.set("_dbg_pf_skip_hud", false)
+		_main.set("_perf_probe_skip_hud", false)
 
 	# Present-pass sub-step A/B: transforms vs body anim.
 	var xformoff := {avg = -1.0}
 	var bodyoff := {avg = -1.0}
 	var present = _runtime.get("_present") if _runtime != null else null
-	if present != null and present.get("_dbg_pf_skip_transform") != null:
+	if present != null and present.get("_perf_probe_skip_transform") != null:
 		await _settle_ms(500)
-		present.set("_dbg_pf_skip_transform", true)
+		present.set("_perf_probe_skip_transform", true)
 		xformoff = await _measure("xformoff", 3000)
-		present.set("_dbg_pf_skip_transform", false)
+		present.set("_perf_probe_skip_transform", false)
 		await _settle_ms(500)
-		present.set("_dbg_pf_skip_body_anim", true)
+		present.set("_perf_probe_skip_body_anim", true)
 		bodyoff = await _measure("bodyanimoff", 3000)
-		present.set("_dbg_pf_skip_body_anim", false)
+		present.set("_perf_probe_skip_body_anim", false)
 
 	# Occlusion legs A/B (visibility writes across the occluded set per frame).
 	var occloff := {avg = -1.0}
-	if _gw != null and _gw.get("_dbg_pf_skip_occl") != null:
+	if _gw != null and _gw.get("_perf_probe_skip_occl") != null:
 		await _settle_ms(500)
-		_gw.set("_dbg_pf_skip_occl", true)
+		_gw.set("_perf_probe_skip_occl", true)
 		occloff = await _measure("occloff", 3000)
-		_gw.set("_dbg_pf_skip_occl", false)
+		_gw.set("_perf_probe_skip_occl", false)
 
 	# HARD reflection off: stop the water script FIRST (it re-asserts the update
 	# mode every frame — the earlier soft toggle was overwritten within a frame),
@@ -227,11 +227,30 @@ func _run() -> void:
 	# Particle fixed-tick A/B (advance_fixed_tick runs per 62 Hz tick — 8-9x per
 	# frame at low FPS).
 	var fxtickoff := {avg = -1.0}
-	if _gw != null and _gw.get("_dbg_pf_skip_effect_tick") != null:
+	if _gw != null and _gw.get("_perf_probe_skip_effect_tick") != null:
 		await _settle_ms(500)
-		_gw.set("_dbg_pf_skip_effect_tick", true)
+		_gw.set("_perf_probe_skip_effect_tick", true)
 		fxtickoff = await _measure("fxtickoff", 3000)
-		_gw.set("_dbg_pf_skip_effect_tick", false)
+		_gw.set("_perf_probe_skip_effect_tick", false)
+
+	# tick_realtime partition: sim step / present bundle / fixed-tick handlers.
+	var simoff := {avg = -1.0}
+	var presentoff := {avg = -1.0}
+	var handleroff := {avg = -1.0}
+	if _runtime != null and _runtime.get("_perf_probe_skip_sim") != null:
+		await _settle_ms(500)
+		_runtime.set("_perf_probe_skip_sim", true)
+		simoff = await _measure("simoff", 3000)
+		_runtime.set("_perf_probe_skip_sim", false)
+		await _settle_ms(500)
+		_runtime.set("_perf_probe_skip_present", true)
+		presentoff = await _measure("presentoff", 3000)
+		_runtime.set("_perf_probe_skip_present", false)
+	if _gw != null and _gw.get("_perf_probe_skip_fixed_handlers") != null:
+		await _settle_ms(500)
+		_gw.set("_perf_probe_skip_fixed_handlers", true)
+		handleroff = await _measure("handleroff", 3000)
+		_gw.set("_perf_probe_skip_fixed_handlers", false)
 
 	_report("BASELINE", base)
 	_report("FIRING1 ", fire1)
@@ -264,6 +283,15 @@ func _run() -> void:
 	if float(fxtickoff.avg) >= 0.0:
 		print("[pfg] FXTICKOFF avg=%.2fms (particle tick share vs cooldown: %+.2fms)" % [
 				float(fxtickoff.avg), float(cool.avg) - float(fxtickoff.avg)])
+	if float(simoff.avg) >= 0.0:
+		print("[pfg] SIMOFF   avg=%.2fms (sim step share vs cooldown: %+.2fms)" % [
+				float(simoff.avg), float(cool.avg) - float(simoff.avg)])
+	if float(presentoff.avg) >= 0.0:
+		print("[pfg] PRESENTOFF avg=%.2fms (present bundle share vs cooldown: %+.2fms)" % [
+				float(presentoff.avg), float(cool.avg) - float(presentoff.avg)])
+	if float(handleroff.avg) >= 0.0:
+		print("[pfg] HANDLEROFF avg=%.2fms (fixed handlers share vs cooldown: %+.2fms)" % [
+				float(handleroff.avg), float(cool.avg) - float(handleroff.avg)])
 	var base_avg: float = base.avg
 	var base_p95: float = base.p95
 	var cool_avg: float = cool.avg
@@ -353,14 +381,14 @@ func _counter_row(sec_frames: int, sec_accum: float) -> String:
 		parts = "%d/%d" % [groups.size(), alive]
 	var spans := ""
 	if _main != null:
-		var mg = _main.get("_dbg_pf")
+		var mg = _main.get("_perf_probe_spans")
 		if mg is Dictionary and not (mg as Dictionary).is_empty():
 			spans += " main{before=%.1f world=%.1f after=%.1f hud=%.1f}" % [
 					float(mg.get("before", 0)) / 1000.0, float(mg.get("world", 0)) / 1000.0,
 					float(mg.get("after", 0)) / 1000.0, float(mg.get("hud", 0)) / 1000.0]
 		var hh = _main.get("_hud_host")
 		if hh != null:
-			var hg = hh.get("_dbg_pf")
+			var hg = hh.get("_perf_probe_spans")
 			if hg is Dictionary and not (hg as Dictionary).is_empty():
 				spans += " hud{scal=%.1f attach=%.1f wp=%.1f info=%.1f flush=%.1f}" % [
 						float(hg.get("scalars", 0)) / 1000.0,
@@ -369,7 +397,7 @@ func _counter_row(sec_frames: int, sec_accum: float) -> String:
 						float(hg.get("update_info", 0)) / 1000.0,
 						float(hg.get("flush", 0)) / 1000.0]
 	if _gw != null:
-		var gg = _gw.get("_dbg_pf")
+		var gg = _gw.get("_perf_probe_spans")
 		if gg is Dictionary and not (gg as Dictionary).is_empty():
 			spans += " gw{occl_r=%.1f occl_f=%.1f iris=%.1f weather=%.1f blink=%.1f}" % [
 					float(gg.get("occl_restore", 0)) / 1000.0,

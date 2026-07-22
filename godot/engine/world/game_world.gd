@@ -978,6 +978,12 @@ func _sample_panm_clock() -> void:
 ## foliage coverage around the viewer, then the mission runtime (MissionRuntime.tick advances the
 ## logic at the 62-frame cadence, presents entity state onto the placed nodes, and drains side
 ## effects), then the audio render pass. Effects come back through MissionRuntime.effects_drained.
+var _perf_probe_spans := {}
+var _perf_probe_skip_occl := false
+var _perf_probe_skip_effect_tick := false
+var _perf_probe_skip_fixed_handlers := false
+
+
 func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta: float = TICK_DT) -> void:
 	_sample_panm_clock()
 	var tick_start := Time.get_ticks_usec()
@@ -1008,8 +1014,10 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 	# present, it never force-shows a node the sim wants hidden. Safe while
 	# paused too: the culled/hidden sets only ever contain nodes occlusion
 	# itself hid while they were visible.
-	if _loaded:
+	var __pf_t := Time.get_ticks_usec()
+	if _loaded and not _perf_probe_skip_occl:
 		_restore_occlusion_overrides()
+	_perf_probe_spans["occl_restore"] = Time.get_ticks_usec() - __pf_t
 	# Gate on the runtime transport so MissionRuntime._playing is THE play flag
 	# in both hosts: the debug overlay's Pause/Step work in the game too, not
 	# just the editor preview. _start_runtime calls play(), so normal missions
@@ -1032,19 +1040,27 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 	# remains 62.5 Hz. Each weather quantum advances integer fixed24 time, which
 	# recomputes TOD targets, then ticks every weather block exactly once
 	# [orig: Environment_UpdateWeatherTick @ 0x57e9b0].
+	__pf_t = Time.get_ticks_usec()
 	if (_loaded and _runtime != null and _runtime.is_playing()
 			and _env != null):
 		_advance_hosted_weather(delta)
+	_perf_probe_spans["weather"] = Time.get_ticks_usec() - __pf_t
 	# Blink flags only change on sim ticks; re-apply the frame gates then.
+	__pf_t = Time.get_ticks_usec()
 	if _loaded and runtime_ticks > 0:
 		_apply_blink_frame_gates()
+	_perf_probe_spans["blink"] = Time.get_ticks_usec() - __pf_t
 	# The render-occlusion frame is camera-driven: it runs every render frame
 	# (retail collects visible entities per scene render, not per sim tick).
 	# [orig: Terrain_CollectVisibleEntities @ 0x5c9160 from
 	# Terrain_RenderSceneWithReflection @ 0x5c94f0]
-	if _loaded:
+	__pf_t = Time.get_ticks_usec()
+	if _loaded and not _perf_probe_skip_occl:
 		_apply_occlusion_frame(camera_xform)
+		_perf_probe_spans["occl_frame"] = Time.get_ticks_usec() - __pf_t
+		__pf_t = Time.get_ticks_usec()
 		_stamp_iris_samples(camera_xform)
+		_perf_probe_spans["iris"] = Time.get_ticks_usec() - __pf_t
 	var audio_start := Time.get_ticks_usec()
 	if _loaded and _mission_audio != null:
 		# Ambient soundloop regions read that same clock [orig:
@@ -1924,6 +1940,8 @@ func _on_runtime_effects(effects: Array) -> void:
 
 
 func _on_runtime_fixed_tick(_logic_tick: int) -> void:
+	if _perf_probe_skip_fixed_handlers:
+		return
 	# Retail executes local weapon actions and physical impacts before the same
 	# frame's global particle update. Consume each source tick synchronously so
 	# admission slots, first emission, and catch-up chronology are exact; only
@@ -1931,7 +1949,8 @@ func _on_runtime_fixed_tick(_logic_tick: int) -> void:
 	if _local_player_weapon_tick_consumer.is_valid():
 		_local_player_weapon_tick_consumer.call(drain_local_player_weapon_events())
 	_route_round_impacts()
-	if _effect_world != null and _effect_world.has_method("advance_fixed_tick"):
+	if _effect_world != null and _effect_world.has_method("advance_fixed_tick") \
+			and not _perf_probe_skip_effect_tick:
 		_effect_world.advance_fixed_tick(MissionRuntime.TICK_DT)
 
 
