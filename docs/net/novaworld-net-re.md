@@ -6938,8 +6938,22 @@ left of it, so the linear cooldown is implicit and costs no per-tick work.
 
 Ported as `DefWeaponDef::heat_*` + `WeaponFsmDef::heat_*`/`WeaponSlotState::
 heat_window_end_tick`/`weapon_slot_accumulated_heat` + the `NovaSimulation` weapon-view
-feed. The GLOW EMITTER leg is not ported (D-WPN-28), and the submerged term has no live
-source yet (D-WPN-29).
+feed. The submerged term has no live source yet (D-WPN-29).
+
+**What the glow half still needs (D-WPN-28).** The level is ported; nothing consumes it
+visually yet, and there are TWO consumers, not one:
+
+1. The **particle emitter** — the `@ 0x54109e..0x54122c` leg above, a host effect seam.
+2. The **`HEAT_GLOW` model CTRL register** — a semantic name in the global 32-byte CTRL
+   table (base `LOD_FRAC @ 0x83dce8`, the same table that carries `EWEAP_GUNYAW`
+   @ 0x83e3c8 / `EWEAP_GUNPITCH` @ 0x83e3e8) and B50Cal's CTRL[0] (§26.5a of
+   world-wac-ai-re). **Its retail writer is unwitnessed** — do not assume it takes the
+   same normalized `(heat − threshold)/(0xFFFF − threshold)` fraction the emitter
+   descriptor gets; witness it first. Note our PANM bridge currently writes the first
+   two MODEL-ORDER registers from the generic `kPartAnimPhase0/1` brain channels, so on
+   B50Cal `HEAT_GLOW` is already receiving PLAYPARTANIM phase 0 — the same
+   generic-channel-into-a-semantic-register mistake D-WPN-27 corrected for yaw/pitch.
+   It is inert today only because that phase reads 0.
 
 **Open follow-ups:** who queues OVERHEATED(11) as an ACTION (its ROW is consumed as
 glow data by the heat window leg above — whether anything transitions TO state 11
