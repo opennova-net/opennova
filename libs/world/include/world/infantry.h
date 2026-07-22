@@ -234,7 +234,7 @@ struct InfantryState {
     // dip window runs, head_look_decay drops 0x2800000 per tick before the eighth-step
     // ease, and the window decrements TWICE per tick (both witnessed sub-1 sites), so
     // the 20-tick weapon-switch stamp dips for 10 ticks. Seeds: 20 on a held-weapon
-    // adm change [orig: @ 0x4b46f5], 80 by the remote-reload 0x49 path (D-NET-117).
+    // adm change [orig: @ 0x4b46f5], 80 by the remote-reload 0x49 path (net-re §5.58).
     // [orig: @ 0x4b5cab..0x4b5ce7; consumed by the section-14.2 aim overlay]
     int32_t arms_dip_ticks = 0;
     int32_t head_look_decay = 0;

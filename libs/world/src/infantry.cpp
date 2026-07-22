@@ -900,7 +900,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // The secondary (weapon) channel and its arms/head-look decay block run on every
     // local-player body tick, including death ticks. The primary death state disables
     // rendering through its flag gate, but the independent playhead/timers do not
-    // freeze on the corpse. NPC/remote threading rides D-NET-117.
+    // freeze on the corpse. NPC/remote threading remains tracked by D-INF-11.
     // [orig: the same body updater drives both pairs @0x4b40e0; witness §14.8]
     if (inf.is_local_player) infantry_weapon_channel(e);
 

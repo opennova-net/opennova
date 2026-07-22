@@ -13,6 +13,7 @@
 
 #include <netsim/session_transport.h> // ISessionTransport::host_send (loopback burst delivery)
 
+#include <world/ai.h>
 #include <world/entity.h>
 #include <world/geom.h> // to_fixed
 #include <world/world.h>
@@ -165,14 +166,16 @@ HostJoinerPose pose_for_conn(NapiNPServerCtx &ctx, const NapiNPConnection &conn)
 			constexpr int64_t kBamPerDegree = 11930464; // 2^32 / 360
 			p.heading = static_cast<int16_t>(
 					(static_cast<int64_t>(90 - e->yaw) * kBamPerDegree) >> 16);
-			// Look-pitch: DEFERRED on the World path [D-NET-117]. The session pitch this mirrors
-			// (pose_from_session's gss.client_pitch) is the HIGH 16 bits of the BAM32 look-pitch
-			// (entity_wire_bridge stores ae.pitch >> 16). world::Entity::pitch is NOT that value — it is
-			// unset for a net-snapped remote peer (apply_player_intent writes AiEntity::pitch, not the
-			// world entity) and the LOW 16 bits for the local player (infantry.cpp narrows look_pitch) —
-			// so sourcing it here would report wrong-units pitch. Leave it 0 (the HostJoinerPose default)
-			// until the AiEntity look-pitch is threaded in; pitch is ~0 at spawn and never reaches the
-			// wire (the 0x0C/0x0A pitch comes from the AiEntity, not this in-process pose event).
+			// The pose event mirrors the same signed BAM32 high word as the C2S 0x0C path. The
+			// authoritative look pitch lives on AiEntity, not world::Entity; retain the zero default
+			// when a non-AI entity is bound. [orig: pose_from_session gss.client_pitch;
+			// entity_wire_bridge ae.pitch >> 16]
+			if (ctx.world->ai != nullptr) {
+				if (const world::AiEntity *ae =
+						ctx.world->ai->for_handle(conn.link.owned_entity)) {
+					p.pitch = static_cast<int16_t>(ae->pitch >> 16);
+				}
+			}
 			p.team = e->team;
 			return p;
 		}

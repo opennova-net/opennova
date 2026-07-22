@@ -4779,16 +4779,17 @@ is loaded with its markers. A production driver that wires `ctx.world` DURING lo
 load-complete gate, else the idempotent origin fallback latches the player at (0,0,0).
 `[orig: CNapiServer_ProcessPendingPlayerSpawns @0x4c8dc0]`
 
-**D-NET-117** [reimpl deferral, DOCUMENTED] **World-path pose look-pitch is not yet sourced.** The
-legacy `pose_from_session` filled `HostJoinerPose.pitch` from `gss.client_pitch` — the HIGH 16 bits
-of the BAM32 look-pitch (the wire/0x0C uses `ae.pitch >> 16`). The World-path `pose_for_conn` has no
-faithful source: `world::Entity::pitch` is unset for a net-snapped remote peer (the C2S apply writes
-`AiEntity::pitch`, not the world entity) and is the LOW 16 bits for the local player (`infantry.cpp`
-narrows `look_pitch`). So the field is left 0 until the AiEntity look-pitch is threaded into the pose
-builder. Impact is minimal: pitch is ~0 at spawn and `HostJoinerPose.pitch` rides only the in-process
-PeerSpawned/F3 event — it never reaches the 0x0C/0x20/0x0A wire (verified: `encode_organic_spawn_batch`
-has no pitch field; the per-frame 0x0A pitch comes from the AiEntity). `[orig: pose_from_session
-gss.client_pitch; entity_wire_bridge ae.pitch >> 16]`
+**D-NET-117** [reimpl divergence, **FIXED 2026-07-22**] **World-path pose look-pitch is sourced from
+the bound `AiEntity`.** The legacy `pose_from_session` fills `HostJoinerPose.pitch` from
+`gss.client_pitch`, the signed HIGH 16 bits of the BAM32 look-pitch (the wire/0x0C likewise uses
+`ae.pitch >> 16`). The World path now resolves `ctx.world->ai->for_handle(owned_entity)` and copies
+that same high word. It deliberately does not read `world::Entity::pitch`: that field is unset for a
+net-snapped remote peer and narrowed to the LOW 16 bits for the local player. When the World entity
+has no AI peer, the pose retains its prior zero pitch; when the live World/entity path is unavailable,
+the existing pre-spawn/session fallback is unchanged. This field rides only the in-process
+PeerSpawned/F3 event and does not change the 0x0C/0x20/0x0A wire. The
+`npruntime_initial_state_burst` regression pins both lifecycle events to a nonzero `AiEntity` pitch
+high word. `[orig: pose_from_session gss.client_pitch; entity_wire_bridge ae.pitch >> 16]`
 
 No IDB changes this grill (all fields/functions already named in §5.41/§5.42); read-only.
 
@@ -8340,7 +8341,7 @@ Stock-content validation (the FIRST capture of a normal retail Co-op session —
 
 `CNapiNetwork_*` / `CNapiServer*` IDB-hygiene grill (decomp cleanup + naming validation of the whole
 network-context method family, 2026-06-27; IDB-only — no reimpl behaviour change):
-- **D-NET-129** [INFO, IDB] (renumbered from D-NET-117 on 2026-06-27 — the IDB-hygiene ID collided with the §5.43 behavior entry **D-NET-117** "world-path pose look-pitch not yet sourced", which is cited in code and keeps the number) **The `CNapiNetwork_*`/`CNapiServer*` family (42 functions, 0x4a8040-0x4ca4a0) was cleaned up and its names validated against the bytes.** Changes (Jointops.exe.kong.i64):
+- **D-NET-129** [INFO, IDB] (renumbered from D-NET-117 on 2026-06-27 — the IDB-hygiene ID collided with the §5.43 behavior entry **D-NET-117** "world-path pose look-pitch", which is cited in code and keeps the number) **The `CNapiNetwork_*`/`CNapiServer*` family (42 functions, 0x4a8040-0x4ca4a0) was cleaned up and its names validated against the bytes.** Changes (Jointops.exe.kong.i64):
   - **Receiver type consolidated onto `NapiNPServerCtx`** (user-approved). The duplicate `CNapiNetwork` struct (4432 B, `field_*` placeholders) was **deleted**; all 42 method `this`/ctx params now type as `NapiNPServerCtx *`, matching the type already on `g_napi_np_ctx`. `NapiNPServerCtx` grown from 4520 to its true **5232 B (0x1470)** (witnessed by `ClearState`'s `memset` and `OnPlayerDisconnected`'s +0x11A8 write); `field_5C`→`connection_mode`, new `active_connection_id`@0x1190, `randomized_timeout_ms`@0x1194, `disconnect_reason_buf`@0x1270; four interior auto-named globals folded back in as ctx fields. See §6.2/§6.3.
   - **Calling-convention fixes:** `CheckPlayerTimeouts`, `DisconnectActiveConnection`, `ProcessPendingPlayerSpawns`, `DisconnectPendingSpawnBans`, `ClearState`, `SerializeToSession` were `__thiscall` mis-detected as `__cdecl`/no-args (used `ecx` as the object base); corrected so fields render by name.
   - **Misnomers fixed (6):** Kong `PumpProtocolType25/737/26/738` → `PumpServerProtocolRecv`/`PumpServerProtocolSend`/`PumpClientProtocolRecv`/`PumpClientProtocolSend` (the suffix was the literal `flags` value; recv/send from the `NapiNPProtocol_Pump` 0x8/0x3F0 decode, server/client from the connection-type low-bit selector + caller split); `PumpManagerType4` → `PumpManagerReceive`; `SendPunkBusterChat @0x4c9140` → `DisconnectActiveConnection` (no chat — builds a `NapiNPDisconnectEvent` + `RequestDisconnect`); `CNapiServerInfo_Init @0x4c8690` → `CNapiNetwork_ClearState` (resets the whole ctx, not a sub-struct); `CNapiNetwork_GetConnectionParams @0x4a8040` → `VideoConfig_GetResolution` (**not a network function** — reads display width/height/AA from `off_840960`).
