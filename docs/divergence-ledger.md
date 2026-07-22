@@ -292,7 +292,7 @@ the ref-32 discard was a misport, now deleted (env-tod-re.md #34).
 
 | D-THROW-1 | Throwable motors use generic `trace_projectile` first-hit arbitration and discard person/terrain/water hits; retail walks pool 2 then pool 1 through its broad/CFAC path, so an intervening person can mask a wall for one tick (world-wac-ai-re §27.8) | A | OPEN (port the witnessed pool-2/pool-1 candidate walk) | PAR-WORLD |
 | D-THROW-2 | Bounce kicks and claymore-fan angles use world-local streams with retail's generator shape; retail uses the shared globals at `0x31BFBB0/B8`, so distribution matches but sequence/cross-system coupling does not (world-wac-ai-re §27.8) | A | OPEN (restore shared-stream sequence identity or ratify the local-stream choice) | PAR-WORLD |
-| D-THROW-3 | Placed-device LOS tests terrain only; retail `Physics_RaycastSegment @0x415550` tests terrain plus sectors, so claymores can see through building walls (world-wac-ai-re §27.8) | A | OPEN (route through the full terrain+sector collision ray) | PAR-WORLD |
+| D-THROW-3 | Placed-device LOS now routes through the full terrain-plus-sector collision ray, excluding the device and candidate; claymores no longer see eligible targets through type-1 building solids (`Entity_FindEnemyInCone @0x43cba0 -> Physics_RaycastSegment @0x415550`; world-wac-ai-re §27.6/§27.8) | A | FIXED 2026-07-22 (`throwables` ctest `test_claymore_sector_los_blocks_trigger`) | PAR-WORLD |
 | D-THROW-4 | Stick pose uses geometric normal decomposition and parent-follow applies translation/yaw only; retail uses exact `Entity_OrientToSurfaceNormal` plus full-Euler `Entity_InterpolateFromParentDelta` (world-wac-ai-re §27.8) | A | OPEN (port exact Euler decomposition and full parent basis interpolation) | PAR-WORLD |
 | D-THROW-5 | The PowerThrow HUDPOWERBAR outline/fill/percent presentation and windup-state feed now match `HUD_DrawPowerThrowChargeBar @0x599830` (world-wac-ai-re §27.3/§27.8) | A | FIXED 2026-07-21 | PR #282 |
 | D-THROW-6 | `lndm` minefield items remain unported: `Entity_LandmineThink @0x441A40` is witnessed, but the def ammo-slot writers for +692/+696 (`SMALLLANDMINE`/`LARGELANDMINE`) are not (world-wac-ai-re §27.6/§27.8) | B | NEEDS-RE (resolve the def wiring, then port the witnessed think) | PAR-WORLD / research starter |
@@ -718,7 +718,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 |---|---|---|---|---|---|
 | Net | 9 | 1 | 11 | 21 | 0 |
 | Environment | 0 | 0 | 3 | 3 | 4 |
-| World / AI + events | 55 | 5 | 5 | 65 | 22 |
+| World / AI + events | 54 | 5 | 5 | 64 | 23 |
 | UI (menu/ctrl/sound/playerinfo/HUD) | 14 | 1 | 7 | 22 | 6 |
 | Mission `.mis` | 0 | 2 | 1 | 3 | 0 |
 | LW `.3di` | 0 | 2 | 1 | 3 | 0 |
@@ -733,7 +733,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Render — materials/state | 0 | 0 | 1 | 1 | 1 |
 | Render — draw order | 2 | 0 | 1 | 3 | 3 |
 | Render — lighting | 4 | 0 | 2 | 6 | 0 |
-| **Total** | **92** | **14** | **32** | **138** | 79 |
+| **Total** | **91** | **14** | **32** | **137** | 80 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-INF-20, D-NET-136, D-NET-64.
 

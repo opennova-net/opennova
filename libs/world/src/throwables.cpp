@@ -827,10 +827,11 @@ bool ThrowableSim::enemy_in_cone(World &world, CollisionWorld *collision,
                                  const terrain::TerrainHeightField *terrain,
                                  const PlacedDevice &device, float max_range_units,
                                  int32_t cone_half_bam, bool vehicles) {
-    (void)collision;
     // [orig: Entity_FindEnemyInCone @ 0x43cba0 (pool 0 persons) /
     // Entity_FindEnemyVehicleInCone @ 0x43c9f0 (pool 1, def kind 1, moving).]
     if (max_range_units <= 0.0f) return false;
+    CollisionWorld *queries = collision != nullptr ? collision : world.collision;
+    if (queries != nullptr) queries->terrain = terrain;
     const int pool = vehicles ? 1 : 0;
     const size_t cap = world.registry.pool_capacity(pool);
     const int32_t eye[3] = {to_fixed(device.pos.x), to_fixed(device.pos.y),
@@ -867,12 +868,18 @@ bool ThrowableSim::enemy_in_cone(World &world, CollisionWorld *collision,
                                       : static_cast<uint32_t>(signed_diff);
         if (diff > static_cast<uint32_t>(cone_half_bam))
             continue;
-        // LOS [orig: Physics_RaycastSegment result 1..2 = visible; our terrain
-        // stand-in is the shared LOS leg (D-AI-7 precedent)].
-        if (terrain != nullptr) {
-            const int32_t b[3] = {to_fixed(e->position.x), to_fixed(e->position.y),
-                                  to_fixed(e->position.z) + 19660};
-            if (los_terrain_blocked(*terrain, eye, b)) continue;
+        // The retail query tests terrain plus sector solids, excluding the
+        // device and candidate themselves. CollisionWorld::raycast_clear is
+        // the shared full-query structural port; collision-less harnesses keep
+        // the terrain leaf as their host fallback.
+        // [orig: Entity_FindEnemyInCone @ 0x43cba0 ->
+        // Physics_RaycastSegment @ 0x415550]
+        const int32_t b[3] = {to_fixed(e->position.x), to_fixed(e->position.y),
+                              to_fixed(e->position.z) + 19660};
+        if (queries != nullptr) {
+            if (!queries->raycast_clear(world, eye, b, device.entity, h)) continue;
+        } else if (terrain != nullptr && los_terrain_blocked(*terrain, eye, b)) {
+            continue;
         }
         return true;
     }

@@ -49,6 +49,42 @@ struct FlatField {
     }
 };
 
+// A type-1 collision box, the solid family walked by retail LOS rays.
+// [orig: Entity_RaycastCollisionModel @ 0x413060]
+CollisionModel solid_box_model(double half_x, double half_y, double height) {
+    CollisionModel model;
+    auto add_plane = [&](int nx, int ny, int nz, double distance) {
+        CollisionPlane plane;
+        plane.nx = static_cast<int16_t>(nx);
+        plane.ny = static_cast<int16_t>(ny);
+        plane.nz = static_cast<int16_t>(nz);
+        plane.dist = to_fixed(static_cast<float>(distance));
+        model.planes.push_back(plane);
+    };
+    add_plane(16384, 0, 0, -half_x);
+    add_plane(-16384, 0, 0, -half_x);
+    add_plane(0, 16384, 0, -half_y);
+    add_plane(0, -16384, 0, -half_y);
+    add_plane(0, 0, 16384, -height);
+    add_plane(0, 0, -16384, 0.0);
+
+    CollisionVolume volume;
+    volume.type = 1;
+    volume.min_x = to_fixed(static_cast<float>(-half_x));
+    volume.max_x = to_fixed(static_cast<float>(half_x));
+    volume.min_y = to_fixed(static_cast<float>(-half_y));
+    volume.max_y = to_fixed(static_cast<float>(half_y));
+    volume.min_z = 0;
+    volume.max_z = to_fixed(static_cast<float>(height));
+    volume.plane_count = 6;
+    model.volumes.push_back(volume);
+
+    CollisionSection section;
+    section.volume_count = 1;
+    model.sections.push_back(section);
+    return model;
+}
+
 // The JO throwable ammo family, minimally: indices are stable for the checks.
 enum : int {
     kAmmoNull = 0,
@@ -213,6 +249,7 @@ struct Rig {
         seed_classes(w);
         w.registry.configure_pool(0, 8);
         w.registry.configure_pool(1, 16);
+        w.registry.configure_pool(2, 8);
         Entity seed;
         seed.kind = EntityKind::Organic;
         seed.team = 0;
@@ -796,6 +833,56 @@ void test_claymore_cone_trigger() {
     (void)enemy;
 }
 
+// The cone LOS is the full terrain + sector query. A solid building between
+// the placed device and an otherwise eligible enemy must keep the claymore
+// armed; removing that building exposes the same enemy and trips it.
+// [orig: Entity_FindEnemyInCone @ 0x43cba0 -> Physics_RaycastSegment @ 0x415550]
+void test_claymore_sector_los_blocks_trigger() {
+    Rig rig(0);
+    rig.throw_ammo(kAmmoClaymore, Vec3{20.0f, 20.0f, 0.8f}, 0, 0);
+    rig.tick(160);
+    CHECK(rig.w.throwables.devices.size() == 1);
+    if (rig.w.throwables.devices.empty()) return;
+
+    const PlacedDevice placed = rig.w.throwables.devices[0];
+    const double axis = double(placed.yaw_bam) *
+                        (2.0 * 3.14159265358979323846 / 4294967296.0);
+    const Vec3 ahead{placed.pos.x + 8.0f * float(std::cos(axis)),
+                     placed.pos.y + 8.0f * float(std::sin(axis)), 0.0f};
+
+    Entity enemy_seed;
+    enemy_seed.kind = EntityKind::Organic;
+    enemy_seed.team = 1;
+    enemy_seed.health = 100;
+    enemy_seed.position = ahead;
+    rig.w.registry.spawn(0, enemy_seed);
+
+    Entity wall_seed;
+    wall_seed.kind = EntityKind::Building;
+    wall_seed.health = 100;
+    wall_seed.position = Vec3{(placed.pos.x + ahead.x) * 0.5f,
+                              (placed.pos.y + ahead.y) * 0.5f, 0.0f};
+    wall_seed.yaw = 90; // mission yaw 90 -> identity collision basis
+    const EntityHandle wall = rig.w.registry.spawn(2, wall_seed);
+
+    CollisionWorld collision;
+    collision.terrain = &rig.flat.field;
+    const int32_t wall_model = collision.add_model(solid_box_model(0.75, 0.75, 3.0));
+    const Entity *wall_entity = rig.w.registry.get(wall);
+    CHECK(wall_entity != nullptr);
+    collision.assign_entity(wall, wall_model,
+                            wall_entity != nullptr ? wall_entity->registry_spawn_id : 0);
+
+    rig.w.throwables.tick(rig.w, &collision, &rig.flat.field);
+    CHECK(rig.w.throwables.devices.size() == 1);
+    if (rig.w.throwables.devices.empty()) return;
+
+    collision.remove_entity_instance(wall);
+    rig.w.registry.despawn(wall);
+    rig.w.throwables.tick(rig.w, &collision, &rig.flat.field);
+    CHECK(rig.w.throwables.devices.empty());
+}
+
 // AV mine: the retail data authors no kz_pieslice, so the vehicle cone can
 // never pass — only damage detonates it [orig: think @ 0x443BB0; the 0-angle
 // gate in Entity_FindEnemyVehicleInCone @ 0x43c9f0].
@@ -889,6 +976,7 @@ int main() {
     test_world_tick_uses_retail_device_order();
     test_detonator_chain();
     test_claymore_cone_trigger();
+    test_claymore_sector_los_blocks_trigger();
     test_avmine_proximity_is_data_dead();
     test_owner_death_removes_devices();
     test_team_trigger_claymore_rule();
