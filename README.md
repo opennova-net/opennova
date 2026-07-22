@@ -19,8 +19,8 @@ This repo is the full toolchain: extract and edit assets with the importer, the 
 | [<img src="screenshots/music.png" alt="Music editing in OpenNova" width="420">](screenshots/music.png) | [<img src="screenshots/sound.png" alt="Sound editing in OpenNova" width="420">](screenshots/sound.png) |
 | Avatars workspace | HUD workspace |
 | [<img src="screenshots/avatars.png" alt="Avatar editing in OpenNova" width="420">](screenshots/avatars.png) | [<img src="screenshots/hud.png" alt="HUD layout preview in OpenNova" width="420">](screenshots/hud.png) |
-| Environment workspace | |
-| [<img src="screenshots/environment.png" alt="Environment editing in OpenNova" width="420">](screenshots/environment.png) | |
+| Environment workspace | Particles workspace |
+| [<img src="screenshots/environment.png" alt="Environment editing in OpenNova" width="420">](screenshots/environment.png) | [<img src="screenshots/particles.png" alt="Particle editing in OpenNova" width="420">](screenshots/particles.png) |
 
 ## Architecture
 

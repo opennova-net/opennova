@@ -66,6 +66,7 @@ editor_screenshots=(
   menus.png
   hud.png
   music.png
+  particles.png
   sound.png
   environment.png
 )
