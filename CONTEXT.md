@@ -190,13 +190,13 @@ _Avoid_: promote (for anything but the mission→world spawn)
 ## Editor & Runtime
 
 **ONED**:
-The OpenNova Editor (`godot/modtools/`): the authoring application, twelve workspaces over
+The OpenNova Editor (`godot/modtools/`): the authoring application, thirteen workspaces over
 one code-first framework. "ONED" or "the editor" in prose.
 _Avoid_: terrain editor, modtools (as a name)
 
 **Workspace**:
 One asset-domain authoring surface inside ONED (Terrain, Object, Avatars, Mission, Fonts, Credits,
-Strings, Menus, HUD, Music, Sound, Environment). A workspace declares itself as a typed
+Strings, Menus, HUD, Music, Particles, Sound, Environment). A workspace declares itself as a typed
 registry row and exposes capability hooks; the shell never switches on its type.
 _Avoid_: tab, tool, mode
 

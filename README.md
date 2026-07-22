@@ -17,6 +17,8 @@ This repo is the full toolchain: extract and edit assets with the importer, the 
 | [<img src="screenshots/strings.png" alt="Strings editing in OpenNova" width="420">](screenshots/strings.png) | [<img src="screenshots/menus.png" alt="Menu editing in OpenNova" width="420">](screenshots/menus.png) |
 | Music workspace | Sound workspace |
 | [<img src="screenshots/music.png" alt="Music editing in OpenNova" width="420">](screenshots/music.png) | [<img src="screenshots/sound.png" alt="Sound editing in OpenNova" width="420">](screenshots/sound.png) |
+| Avatars workspace | HUD workspace |
+| [<img src="screenshots/avatars.png" alt="Avatar editing in OpenNova" width="420">](screenshots/avatars.png) | [<img src="screenshots/hud.png" alt="HUD layout preview in OpenNova" width="420">](screenshots/hud.png) |
 | Environment workspace | |
 | [<img src="screenshots/environment.png" alt="Environment editing in OpenNova" width="420">](screenshots/environment.png) | |
 
@@ -24,11 +26,11 @@ This repo is the full toolchain: extract and edit assets with the importer, the 
 
 Three layers:
 
-- **Authoring (`godot/modtools/`).** The OpenNova Editor (ONED): workspaces for terrain, objects, missions, avatars, fonts, credits, strings, menus, HUD preview, music, sound, and environment that write the game's canonical data formats (`.trn`, `.cpt`, `.til`, `.3di`, `.bms`, `.mis`, `Avatars.def`, `.fnt`, `.kda`, `.mnu`, `.sbf`, `.lwf`, `.env`, …) directly.
+- **Authoring (`godot/modtools/`).** The OpenNova Editor (ONED): workspaces for terrain, objects, missions, avatars, fonts, credits, strings, menus, HUD preview, music, particles, sound, and environment that write the game's canonical data formats (`.trn`, `.cpt`, `.til`, `.3di`, `.bms`, `.mis`, `Avatars.def`, `.fnt`, `.kda`, `.mnu`, `.sbf`, `.ptl`, `.lwf`, `.env`, …) directly.
 - **Core engine (`libs/`).** Format parsers plus the runtime systems: terrain LOD, foliage scatter, environment sampling, the world substrate with its WAC script VM, BMS event runtime, and AI, skeletal animation, audio selection, and the virtual file system. Also consumed by Python (`opennova_blender/`, `apps/importer/`) and Blender (`blender/`).
 - **Godot (`godot/engine/` + `godot/game/`).** GDExtension wrappers in `engine/` bind the core into Godot; `game/` is the runtime scene.
 
-All of this is pre-1.0 and under active development. Nothing here is production-ready. The asset pipeline (importer, Blender addon, and ONED) is the most exercised surface today; the Godot runtime loads exported scenes, runs the terrain and foliage systems, and simulates authored missions (WAC scripts, BMS events, AI). Player interaction and multiplayer are still being built.
+All of this is pre-1.0 and experimental. Nothing here is production-ready. The asset pipeline (importer, Blender addon, and ONED) is the most exercised surface today. The Godot runtime loads exported scenes, runs the terrain, foliage, and environment systems, and simulates authored missions (WAC scripts, BMS events, AI). On-foot play is coming up: weapons and loadouts, projectile physics and damage, throwables, mounted and emplaced weapons, vehicles, item destruction, optics, and the HUD are ported from the original engine and covered by tests. Multiplayer runs on a wire-compatible in-match protocol with single-player hosted as an in-process listen server, so joins and replication exercise the same path retail clients use. Every one of those systems still carries tracked gaps: the honest per-system status is the [divergence ledger](docs/divergence-ledger.md).
 
 Pre-JO NovaLogic titles may sort of work by chance, but are not officially supported.
 
@@ -81,7 +83,7 @@ The authoring layer for JO assets, organized into workspaces grouped by purpose:
 - **World**: Terrain (sculpt, paint, foliage, tiles, layout), Object (`.3di` model projects), Mission (`.bms`/`.mis` missions: entities, waypoints, zones, BMS event scripting, with play-in-editor on the engine's mission runtime), and Avatars (`Avatars.def` player characters: head/body/arms parts and combos under the nationality/division tree, with a 3D preview).
 - **Interface**: Fonts (`.fnt` bitmap fonts), Credits (`.kda` rolling credits), Strings (RTXT string tables), Menus (`.mnu` / `.mns` menu screens with a WYSIWYG canvas and interactive preview), and HUD (a read-only preview of the in-game HUD layout).
 - **Audio**: Music (interactive music: `.sbf` banks plus `.bin` music scripts).
-- **Atmosphere**: Sound (`.lwf` sound profiles) and Environment (`.env` weather, lighting, and time of day), a popup that overlays the active 3D view.
+- **Atmosphere**: Particles (`.ptl` effects: explosions, smoke, muzzle flashes, water spray), Sound (`.lwf` sound profiles), and Environment (`.env` weather, lighting, and time of day), a popup that overlays the active 3D view.
 
 Each workspace reads and writes the game's canonical formats directly. The packaged build opens to the Terrain workspace by default. See [`godot/modtools/README.md`](godot/modtools/README.md) for per-workspace docs and the editor's code-first framework.
 
@@ -105,7 +107,7 @@ Each workspace reads and writes the game's canonical formats directly. The packa
 | `deploy/`, `infra/` | Deployment stack for the NovaWorld service (Docker, Terraform); see [DEPLOY.md](DEPLOY.md). |
 | `scripts/` | Build, test, and packaging scripts (sh + ps1). |
 | `tests/` | C++ test suite (ctest). Godot tests live under `godot/tests/`. |
-| `third_party/` | Vendored deps: godot-cpp, gut, modsuperoed. |
+| `third_party/` | Vendored deps: godot-cpp, gut, and modsuperoed as submodules, plus the in-tree bcrypt and sqlite sources. |
 
 **Conventions.** Format libraries use `opennova_<domain>` CMake target names and the `opennova` C++ namespace; C ABI exports stay flat and domain-prefixed for FFI stability. The shared library target is `opennova_shared`, which bundles the core statics into `opennova.dll` / `libopennova.so`. Blender custom properties owned by this project use `opennova_*` keys.
 
@@ -133,6 +135,7 @@ Modular libraries for the NovaLogic formats and runtime systems. The format pars
 | **cpt** | `.cpt` | Compiled terrain mesh, collision and render (DPTH and CDEP flavors). |
 | **tpj** | `.tpj` | Editable terrain project: a terrain config plus editor lock coordinates and project metadata. |
 | **cbin** | `.kda` | Rolling credits: obfuscated text compiled to a CBIN blob. |
+| **particle** | `.ptl` | Particle effects: the effect/emitter definition parser and writer, plus the emitter integrator and effect scene the runtime and the editor preview share. |
 | **mnu** | `.mnu` | Menu screens: window tree, widgets, and Actions, with a round-trip writer that preserves the format superset. Includes the NovaLogic-flavored XML reader. |
 | **mns** | `.mns` | Menu stylesheets: named style variables the menu screens reference. |
 | **lwf** | `.lwf` | Sound profiles (LWF1): trigger sets of layered member sounds. |
@@ -150,7 +153,7 @@ Modular libraries for the NovaLogic formats and runtime systems. The format pars
 | **terrain_query** | The world-to-terrain query seam: the zero-dependency height and coordinate query leaf that `world` links and `terrain` builds on (ADR 0020). |
 | **foliage** | Procedural foliage scatter from the foliage map, distance cull, dispatch. |
 | **renderer** | Material classification and per-vertex/object light evaluation shared by runtime and editor. |
-| **world** | World substrate: entity registry and pools, variable store, AI with the infantry motor, and the logic tick. |
+| **world** | World substrate: entity registry and pools, variable store, the logic tick, and the ported gameplay systems on top of it: AI and the infantry motor, collision and occlusion queries, the weapon FSM/inventory/tables, rounds and ballistics, throwables, vehicle mount and drive, item destruction, spawn selection, zones, and the player view. |
 | **wac** | WAC scripting: lexer, parser, compiler, and bytecode VM. |
 | **mission** | `.bms`/`.mis` missions: records and schema reflection, the BMS event runtime, and mission-to-world promotion. Two targets: `opennova_mission_format` (parse/write/schema) and `opennova_mission` (event runtime + promotion). |
 | **anim** | Skeletal animation: `.adm` definition parsing plus the evaluator that samples `.bad` clips into per-bone transforms. |

@@ -37,18 +37,46 @@ main_game.gd / editor _process(delta)
          bank delta; for each banked 16 ms quantum:   [Game_MainLoop @0x52b630 accumulator, 62.5 Hz]
            NovaSimulation.step()                        one engine tick; per-system dividers  [Game_ProcessMainFrame @0x5263f0]
              World.run_logic_tick()                       WAC -> BMS -> AI over one world
+             NetSystem drain/emit                         the in-match seam (ADR 0009/0011/0012)
            drain effects -> effects_drained             host-presentation side effects (per tick)
-         MissionPresentPass.present()                  draw each entity once after the batch (transform/PANM/visibility)
+         present passes, in this fixed order:          draw once after the batch, never per sim tick
+           MissionPresentPass.present()                  placed .bms entities: transform/PANM/visibility
+           WirePresentPass.present()                     wire-spawned entities with no .bms placement
+           FirePresentPass.present(n)                    fire sound + muzzle + tracer ribbons
+           DestructionPresentPass.present()              husk swaps, death pieces, wreck effects
+           ThrowablePresentPass.present()                thrown and placed device models
        NovaMissionAudio.tick(camera)                 audio render pass
 ```
 
-The editor "Play the mission" goes through the **same** `MissionRuntime` + `MissionPresentPass`
-and the same `tick_realtime` accumulator (the editor preview self-ticks via `_process`). There is
-one runtime, one present pass, one entity index — see [ADR 0006](adr/0006-unified-mission-runtime-present-pass.md).
+The editor "Play the mission" goes through the **same** `MissionRuntime` and the same
+`tick_realtime` accumulator (the editor preview self-ticks via `_process`). There is one runtime,
+one entity index, and one present *step* — see
+[ADR 0006](adr/0006-unified-mission-runtime-present-pass.md). That step has grown into a fixed
+sequence of per-system passes, each owning one drain of the sim, and each installed only where its
+role applies: a joiner places nothing and so runs `WirePresentPass` alone, while a host or
+single-player session runs the full ladder. Adding a system means adding a pass to that sequence,
+not a second present loop.
 The single-tick `MissionRuntime.tick()` survives as the deterministic primitive for editor Step,
-the MCP, and tests.
+the MCP, and tests; it runs the identical pass sequence with `n = 1`.
 `GameWorld` (game) and `MissionController` (editor) are **sibling hosts** of that one runtime: exactly one
 `NovaSimulation` per host context is intentional, not duplication.
+
+## Single-player is a listen server
+
+There is no no-net path. Single-player constructs the same in-process host the LAN and NovaWorld
+paths use, and the local player is a host-side server entity driven by a wire-shaped intent
+([ADR 0011](adr/0011-single-player-in-process-listen-server.md),
+[ADR 0012](adr/0012-player-is-host-side-server-entity.md)). The consequence for this map: the net
+seam (`NetSystem`) is inside the 62.5 Hz tick for *every* session, `local_player_host.gd` feeds
+intent rather than writing entity state, and the wire encoders run in single-player exactly as they
+do for a joined client. The in-match runtime behind that seam is `libs/npruntime`
+([ADR 0013](adr/0013-consolidated-net-core.md)); the wire record is
+[net/novaworld-net-re.md](net/novaworld-net-re.md).
+
+Two net *render* paths coexist deliberately: the `NovaNetClient` replay/spectate views
+(`net_world_view.gd` / `net_event_view.gd`) and the `NovaWorldClient`/`NovaSimulation` listen-server
+path (`wire_present_pass.gd`). Converging them is a tracked decision, not an oversight (see
+`godot/engine/CLAUDE.md` and `TODO.md`).
 
 ## Layers
 
@@ -67,11 +95,15 @@ the MCP, and tests.
   fixed-timestep accumulator (banks `delta`, runs 0..N 62.5 Hz ticks, presents once); `tick()` is
   the deterministic single-tick primitive (Step / MCP / tests). Both `game_world.gd` (game) and
   `mission_controller.gd` (editor) drive it.
-- **Present pass (GDScript)** — `mission_present_pass.gd` applies each entity's transform + PANM part
+- **Present passes (GDScript)** — `mission_present_pass.gd` applies each entity's transform + PANM part
   channels + visibility onto its placed node. Hybrid: the engine decides the state (snapshot), the
   host writes the `Node3D`. The basis convention is single-sourced in
   `MissionObjectPlacer.bms_to_godot_basis` (`Entity_SpawnFromBMSRecord @0x40eb66` +
-  `Math_BuildFixedPointMatrixFromEulerAngles @0x613f40`).
+  `Math_BuildFixedPointMatrixFromEulerAngles @0x613f40`). The sibling passes listed in the map above
+  follow the same rule for their own systems: each reads a drain or snapshot the sim produced and
+  writes host nodes/effects, so the simulation itself stays render-free and headless-testable.
+  Local-player presentation (viewmodel, aim overlay, HUD feed, view effects) hangs off
+  `local_player_host.gd` and the `world/player_*` / `present_*` scripts on the same principle.
 - **Audio** — name-keyed sound sets (`SoundProfile_FindLoadedByName @0x5274f0`); the member-selection
   state machine lives in portable `libs/audio` ([ADR 0004](adr/0004-audio-selection-pushdown.md)).
 
@@ -98,8 +130,9 @@ the MCP, and tests.
 - Main-body skeletal `.bad`/`.adm` runtime is now implemented
   ([ADR 0007](adr/0007-skeletal-runtime-and-entity-visual.md)); deferred within it: player-avatar
   `off_8135F0` slot table, two-channel upper/lower-body blend, aim/lean overlays, fixed-tick playhead.
-- Present transform is **yaw-only**; pitch/roll are reserved fields in the snapshot (`PF_PITCH_DEG`/
-  `PF_ROLL_DEG`, emitted as 0) gated behind a basis-parity check.
+- Present transform carries full pitch/yaw/roll: `PF_PITCH_DEG`/`PF_ROLL_DEG` are live in the
+  snapshot (from `Entity.pitch`/`Entity.roll`, or the client attachment pose for a mounted entity)
+  and consumed by all three entity present passes. The former yaw-only restriction is closed.
 - The fixed-62.5 Hz accumulator is **implemented** (`MissionRuntime.tick_realtime`): the sim runs
   at a constant rate decoupled from the render frame rate, faithful to `Game_MainLoop @0x52b630`
   ([bms-event-runtime-re.md](mission/bms-event-runtime-re.md) §1.6 / §2a). There is no inter-tick

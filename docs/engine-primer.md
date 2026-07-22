@@ -151,7 +151,15 @@ is authoritative, and each record owns the rationale and the stable `D-…` dive
 | String tables (RTXT) | `libs/rtxt`, NovaStrings | [interface/rtxt-strings-re.md](interface/rtxt-strings-re.md) | matching at byte level (98/98) |
 | Mission loader (`.bms`) | `libs/mission` | [correspondence.md §3](correspondence.md) | per function |
 | BMS event runtime + promotion | `libs/mission` | [mission/bms-event-runtime-re.md](mission/bms-event-runtime-re.md) | matching (D-EVT-1..4) |
-| World / WAC VM / AI | `libs/world`, `libs/wac` | [world/world-wac-ai-re.md](world/world-wac-ai-re.md) | matching (D-INF-1..5; ground-vehicle drive ported net-side, D-NET-161; AI-driven + HELO physics not yet ported) |
+| World / WAC VM / AI / gameplay systems | `libs/world`, `libs/wac` | [world/world-wac-ai-re.md](world/world-wac-ai-re.md) | matching core, largest live surface: §14–§27 carry the infantry motor, collision + blink boxes, ground-AI combat, fire/death presentation, the round-outcome loop, player-body physics, the vehicle pass, item destruction, tracers, allegiance/mounted weapons, and throwables. Catalogs D-INF / D-COL / D-AI / D-ITEM / D-WPN / D-THROW; open rows in the [ledger](divergence-ledger.md) |
+| Items (items.def entity defs) | `libs/def`, `NovaItemDatabase` | [world/itemdef-re.md](world/itemdef-re.md) | landed |
+| HUD + interface overlays | `godot/engine/ui/hud_*.gd`, `NovaHudPos`, `game_hud.gd` | [interface/hud-re.md](interface/hud-re.md) | ported (weapon-coupled elements, waypoint track, heat bar, objectives panel, attach labels; D-HUD-1..18) |
+| Mission loading screen | `godot/engine/ui/nova_loading_screen.gd` | [interface/loading-screen-re.md](interface/loading-screen-re.md) | matching for sidecar rule / MP text / bar (D-LOADSCR-1..6) |
+| Player info / avatars | `libs/avatars`, `NovaAvatarDatabase`, `player_info_menu_host.gd` | [playerinfo/avatars-re.md](playerinfo/avatars-re.md) | matching for parser + screen orchestration (D-PLAYERINFO-1..12; loadout combos open) |
+| Render — materials / state | `libs/oed` tag registry, `libs/renderer`, `NovaObjectShaderCache` | [render/render-material-re.md](render/render-material-re.md) | matching (REN-2; D-RMAT catalog) |
+| Render — draw order | `libs/renderer` render_order + the engine priority ladder | [render/render-order-re.md](render/render-order-re.md) | matching for the ported ladder (REN-3; D-RORD catalog) |
+| Render — lighting | `libs/renderer/light_runtime`, `libs/env::ModulatorChain` | [render/render-lighting-re.md](render/render-lighting-re.md) | matching for the ported chain (REN-5; D-RLIT catalog) |
+| Render — occlusion / blink boxes | `libs/world/occlusion`, `GameWorld` frame gates | [render/render-occlusion-re.md](render/render-occlusion-re.md) | landed 2026-07-16 (sound occlusion + indoor gates ported; section-mask/portal engine is the follow-up slice; D-OCC-1..8) |
 | Skeletal animation (`.bad`/`.adm`) | `libs/anim`, NovaSkeletalAnim | [ADR 0007](adr/0007-skeletal-runtime-and-entity-visual.md) | implemented (deferrals listed there) |
 | Models (`.3di`: 3DI3 + GP) | `libs/threedi` | [threedi/3di-gp-format-re.md](threedi/3di-gp-format-re.md) | landed format record |
 | Models (Land Warrior `.3di`) | — | [threedi/3di-lw-format-re.md](threedi/3di-lw-format-re.md) | unlanded (PR #45 closed) |

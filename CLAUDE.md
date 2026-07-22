@@ -14,7 +14,7 @@ easier to relay than to rediscover.
   Consumed via flat C ABI by Python and Godot. See `libs/CLAUDE.md`.
 - `godot/` — Godot 4.6.1 host project: `engine/` (GDExtension C++ glue, `Nova*` classes,
   plus the shared host-neutral GDScript engine layer — see `godot/engine/CLAUDE.md`),
-  `modtools/` (the OpenNova Editor "ONED" — twelve authoring workspaces), `game/` (the
+  `modtools/` (the OpenNova Editor "ONED" — thirteen authoring workspaces), `game/` (the
   game shell), `tests/` (GUT suite).
 - `apps/` — `importer/` (Python + native FFI importer behind `onimport.exe`),
   `novaworld_server/` (the NovaWorld service), `nw_server/` (dev/golden-harness
@@ -117,6 +117,10 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
 
 ## Deeper docs
 
+- [docs/current-state.md](docs/current-state.md) — start here for "what phase are we in
+  and what is next": the maturity program is closed, work now runs as retail-fidelity
+  slices off [docs/divergence-ledger.md](docs/divergence-ledger.md), and this page routes
+  each domain to the record that names its next step. It is a router, not a priority list.
 - [docs/maturity-program.md](docs/maturity-program.md) — the maturity program
   (pre-reimplementation rearchitecture), CLOSED 2026-07-12 with the freeze lifted:
   the dashboard, close-out dispositions, and the permanent enforcement instruments

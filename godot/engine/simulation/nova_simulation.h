@@ -97,9 +97,10 @@ public:
 		PF_POS_X,      // Godot-space position (mission (x,y,z) 16.16 -> (x, z, -y) units)
 		PF_POS_Y,
 		PF_POS_Z,
-		PF_PITCH_DEG,  // mission-space rotation, degrees (0 today; reserved)
+		PF_PITCH_DEG,  // mission-space rotation, degrees (live: Entity.pitch, or the
+		               // client attachment pose for a mounted entity)
 		PF_YAW_DEG,
-		PF_ROLL_DEG,   // (0 today; reserved)
+		PF_ROLL_DEG,   // live: Entity.roll / the client attachment pose
 		PF_PHASE1,     // PANM channel 1 phase 0..65535
 		PF_ACTIVE1,    // 1 when channel 1 has a live part-anim to render, else 0
 		PF_PHASE2,     // PANM channel 2 phase

@@ -122,7 +122,7 @@ Environment) skip the workflow rail and override `build_inspector(host)` instead
 |---|---|
 | `editor/` | the app root (`editor_app.gd` — boot wiring, window sizing, MCP service), the shell (`editor_workstation.gd`), the resource browser and library, the PFF archive tool, the export dialog |
 | `framework/` | base classes and typed registries (`EditorWorkspace`, `WorkspaceDef`, `InspectorDef`) |
-| `terrain/`, `object/`, `avatar/`, `mission/`, `fonts/`, `credits/`, `strings/`, `mnu/`, `hud/`, `music/`, `sound/`, `environment/` | one workspace module each (adapter, editor model, UI, inspectors) |
+| `terrain/`, `object/`, `avatar/`, `mission/`, `fonts/`, `credits/`, `strings/`, `mnu/`, `hud/`, `music/`, `particle/`, `sound/`, `environment/` | one workspace module each (adapter, editor model, UI, inspectors) |
 | `mcp/` | the embedded agent server's ONED side: built-in tool catalog, asset describe serializers, and the service that boots `godot/engine/mcp/` |
 | `tools/` | `screenshot_capture` automation helper (not a workspace) |
 
