@@ -15,6 +15,7 @@ class FakeModel:
 	var phases: Array = []        # [channel, phase]
 	var body_calls: Array = []    # [key_or_slot, phase]
 	var overlay_calls: Array = []
+	var right_hand_collapse_calls: Array[bool] = []
 	var ctrl_values: Dictionary = {}
 	var cleared_controls: Array[String] = []
 	var part_control_names: Dictionary = {}
@@ -31,6 +32,8 @@ class FakeModel:
 		body_calls.append([slot, -1])
 	func set_aim_overlay(deltas: Array) -> void:
 		overlay_calls.append(deltas)
+	func set_right_hand_collapsed(collapsed: bool) -> void:
+		right_hand_collapse_calls.append(collapsed)
 	func set_ctrl_value(name: String, value: int) -> void:
 		ctrl_values[name] = value
 	func clear_ctrl_value(name: String) -> void:
@@ -97,6 +100,8 @@ class FakeSim:
 					e.get("emplaced_gun_yaw", 0))
 			out[b + NovaSimulation.PF_EWEAP_GUNPITCH] = float(
 					e.get("emplaced_gun_pitch", 0))
+			out[b + NovaSimulation.PF_RIGHT_HAND_COLLAPSED] = float(
+					e.get("right_hand_collapsed", 0))
 			var angles: PackedVector3Array = e.get(
 					"aim_angles", PackedVector3Array())
 			for cls in range(mini(angles.size(), 9)):
@@ -267,6 +272,25 @@ func test_placed_model_clears_overlay_when_snapshot_selector_is_invalid() -> voi
 	_make_pass(index, sim).present()
 	assert_eq(model.overlay_calls, [[]],
 			"an unknown selector clears any pose retained by the model")
+
+
+func test_placed_model_applies_and_restores_mounted_right_hand_collapse() -> void:
+	var model := FakeModel.new()
+	add_child_autofree(model)
+	var index := FakeIndex.new()
+	index.by_bms_id = { 14: model }
+	var sim := FakeSim.new()
+	sim.entities = [{
+		"bms_id": 14,
+		"aim_overlay_valid": 1,
+		"right_hand_collapsed": 1,
+	}]
+	var presenter := _make_pass(index, sim)
+	presenter.present()
+	sim.entities[0]["right_hand_collapsed"] = 0
+	presenter.present()
+	assert_eq(model.right_hand_collapse_calls, [true, false],
+			"the placed pose consumes the packed mount verdict and restores on dismount")
 
 
 func test_resolves_by_kind_index_fallback() -> void:

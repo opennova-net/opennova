@@ -169,6 +169,33 @@ The caller sets `entity->ItemTypeIndex` (`+28`, from
 `TunnelPiece 0x40`, `UseVK 0x80`, `StaticDeath 0x100`, `OnTurret 0x400`,
 `HasTurret 0x800`, `IsTurret 0x1000`, `Farp 0x2000`, `LandMine 0x4000`.
 
+## Vehicle child-emplacement attachments
+
+As of 2026-07-21, `libs/def` parses the authored `addeweap`, `addeweapG`,
+and `addeweapC` rows used to attach child guns/equipment to vehicle model
+userpoints. The port retains authored order, the retail four-row cap and
+15-character userpoint limit, full child item IDs, the last designated G/C
+slot, and the optional all-or-none down/up/right/left limits in signed BAM
+units. Invalid partial angle tails remain unparsed rather than inventing
+defaults.
+
+Mission promotion recursively creates the child item entities and resolves
+their model userpoints case-insensitively (falling back to the parent root when
+the anchor is absent). On the authority, children follow the resolved live
+USRP/PANM pose. Their S2C `0x0D` records retain absolute spawn position and use
+the witnessed `0x0100` relation flag plus the entity+368 parent handle; after
+the complete batch, a remote client derives a rigid parent-local pose and
+follows the decoded parent. A replicated zero-health carrier compact retires
+the decoded attachment subtree. Direct scripted carrier removal remains open
+until its witnessed destroy-list message is mapped; S2C `0x4E` is a paged
+loadout transaction and is deliberately not repurposed for this lifecycle.
+
+The entity+290 bone-byte consumer remains unwitnessed, so remote generic
+PANM-bone articulation is still open rather than encoded into a guessed wire
+field. The G/C designation and authored limits are carried into runtime
+metadata, but their specialized control/HUD consumers are likewise deferred;
+this slice does not claim those behaviors.
+
 ## Divergence catalog
 
 | ID | Ours | Original (Jointops.exe) | Why / consequence |
@@ -188,10 +215,13 @@ The caller sets `entity->ItemTypeIndex` (`+28`, from
   `void*` from their single-store witness; the exact class-binding record
   (tag vs resolved fn pointers, and how the chosen class' `fn[3]` lands in
   `serializeCallback`/§5.10b dispatch) is not fully traced.
-- Residual `gap_*` spans remain genuinely unwitnessed: `+0x1c0…0x218`
-  (`addeweap*`/`tool_help` bytes seen at `0x1c1-0x1c3`), `+0x21c…0x25c`,
+- Residual `gap_*` spans in the original executable layout remain genuinely
+  unwitnessed: `+0x1c0…0x218` (the authoring-level `addeweap*` rows are now
+  parsed by the port, but their exact retail in-struct representation beyond
+  the observed selector bytes at `0x1c1-0x1c3` is not claimed), `+0x21c…0x25c`,
   `pad_94C` interior, the still-unmapped fields surrounding the now-named
   `phraseSet @+0x86c`, and parts of `pad_1B0`.
 - `DefItemDef` covers only the net/render-relevant subset; the physics block,
-  attrib flags, particle keys, and `phrase_set` (with presence) ARE parsed; the
-  seat attachment/weapon/door/sound tables are not yet parsed by `libs/def`.
+  attrib flags, particle keys, `phrase_set` (with presence), `primary_weapon`,
+  and `addeweap*` child attachments ARE parsed. The remaining ordinary
+  seat/door/sound tables are not yet parsed by `libs/def`.

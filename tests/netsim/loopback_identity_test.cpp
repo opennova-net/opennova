@@ -29,6 +29,7 @@
 #include <world/world.h>
 
 #include <cstdint>
+#include <cstdlib>
 #include <cstdio>
 #include <vector>
 
@@ -390,6 +391,96 @@ bool run_carrier_pitch_roll_persists_across_live_records() {
 	return true;
 }
 
+// An items.def addeweap child is a real pool-1 entity, but its ewep callback is
+// intentionally NoNetworkCallback: retail carries the exact parent relation in
+// the load-time 0x0D record and the client keeps the child attached locally.
+// Prove that production 0x0D -> ClientState relationship drives later parent
+// motion, and that the parent's replicated death retires the child rather than
+// leaving its spawn pose in the presented client view forever.
+bool run_parented_pool_spawn_follows_and_retires() {
+	w::World world;
+	world.registry.configure_pool(1, 8);
+
+	w::Entity parent_seed;
+	parent_seed.kind = w::EntityKind::Item;
+	parent_seed.item_id = 0x1004;
+	parent_seed.position = {10.0f, 20.0f, -5.0f};
+	parent_seed.health = 3000;
+	parent_seed.health_max = 3000;
+	parent_seed.flags = 0x02u; // overloaded load/movement gate, not a death verdict
+	parent_seed.net_class_code = static_cast<uint8_t>(nw::EntityClass::Vehicle);
+	const w::EntityHandle parent_h = world.registry.spawn(1, parent_seed);
+	if (!expect(parent_h.valid(), "attachment parent spawned")) return false;
+
+	w::Entity child_seed;
+	child_seed.kind = w::EntityKind::Item;
+	child_seed.item_id = 0x0666;
+	child_seed.position = {12.0f, 20.0f, -5.0f};
+	child_seed.spawn_origin = 0xFFFFFFFFu;
+	child_seed.net_class_code =
+			static_cast<uint8_t>(nw::EntityClass::NoNetworkCallback);
+	child_seed.emplacement_parent = parent_h;
+	child_seed.emplacement_parent_spawn_id =
+			world.registry.get(parent_h)->registry_spawn_id;
+	child_seed.emplacement_local = {2.0f, 0.0f, 0.0f};
+	const w::EntityHandle child_h = world.registry.spawn(1, child_seed);
+	if (!expect(child_h.valid(), "attachment child spawned")) return false;
+
+	ns::NetClientView view;
+	view.set_item_class_resolver([](uint16_t type_id) {
+		if (type_id == 0x1004) return nw::EntityClass::Vehicle;
+		if (type_id == 0x0666) return nw::EntityClass::NoNetworkCallback;
+		return nw::EntityClass::Unknown;
+	});
+	view.apply(0x0D, nw::encode_pool_spawn_batch(ns::build_pool1_spawn_batch(world)));
+	const ns::ClientEntityState *decoded_child = view.state().find(child_h.packed);
+	const ns::ClientEntityState *decoded_parent = view.state().find(parent_h.packed);
+	if (!expect(decoded_child != nullptr && decoded_parent != nullptr &&
+	                    decoded_child->parent_handle == parent_h.packed,
+	            "0x0D retains the synthetic child's exact parent handle")) return false;
+	const int32_t initial_child_x = decoded_child->x;
+	const int32_t initial_parent_delta_x = decoded_child->x - decoded_parent->x;
+
+	// The authoritative world poses the attachment after its carrier moves. The
+	// child still emits no 0x0A compact body; its decoded pose must follow through
+	// the retained parent relation instead of freezing at the 0x0D spawn sample.
+	w::Entity *parent = world.registry.get(parent_h);
+	parent->position.x = 20.0f;
+	world.run_logic_tick();
+	const w::Entity *moved_child = world.registry.get(child_h);
+	if (!expect(moved_child != nullptr && moved_child->position.x == 22.0f,
+	            "authoritative attachment followed the moving parent")) return false;
+
+	ns::LoopbackChannel channel;
+	std::vector<ns::Connection> conns;
+	conns.push_back(ns::Connection{&channel, ns::TransportMode::Loopback, {}, 0});
+	nw::PlayerReplicationState anchor;
+	ns::test::emit_all(world, conns, anchor);
+	view.pump(channel);
+	decoded_child = view.state().find(child_h.packed);
+	decoded_parent = view.state().find(parent_h.packed);
+	if (!expect(decoded_child != nullptr && decoded_parent != nullptr &&
+	                    decoded_child->x != initial_child_x &&
+	                    std::abs((decoded_child->x - decoded_parent->x) -
+	                             initial_parent_delta_x) < 128,
+	            "NoNetworkCallback child follows the decoded parent pose")) return false;
+
+	// A replicated vehicle death carries a zero health word in its ordinary
+	// compact. The authority retires the synthetic child, and the decoded parent
+	// relationship lets the client retire the same subtree without inventing a
+	// destroy packet for a message whose retail transaction is unrelated.
+	parent->health = 0;
+	parent->alive = false;
+	world.run_logic_tick();
+	if (!expect(world.registry.get(child_h) == nullptr,
+	            "authoritative parent death despawned the attachment")) return false;
+	ns::test::emit_all(world, conns, anchor);
+	view.pump(channel);
+	if (!expect(view.state().find(child_h.packed) == nullptr,
+	            "decoded zero-health parent retires the attachment subtree")) return false;
+	return true;
+}
+
 // Retail's InfantryCompactRecord already carries every remote mounted-selector input
 // available on the wire. Exercise the production world -> snapshot -> connection fan ->
 // codec -> client-view path: no collision-only or out-of-band replication heuristic.
@@ -699,6 +790,7 @@ int main() {
 	                run_compact_pose_fields_survive_client_fold() &&
 	                run_carrier_local_pose_lifts_after_later_carrier_record() &&
 	                run_carrier_pitch_roll_persists_across_live_records() &&
+	                run_parented_pool_spawn_follows_and_retires() &&
 	                run_mounted_infantry_pose_fields_round_trip() &&
 	                run_header_only_records_are_ignored_by_client_view() &&
 	                run_apply_player_intent_stages_remote_peer() &&

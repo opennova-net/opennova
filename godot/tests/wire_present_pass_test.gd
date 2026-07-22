@@ -7,16 +7,23 @@ const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer
 class FakeModel:
 	extends Node3D
 	var overlay_calls: Array = []
+	var right_hand_collapse_calls: Array[bool] = []
 	var body_calls: Array = []
+	var part_calls: Array = []
 	var pose_call_order: Array[String] = []
 	var ctrl_values: Dictionary = {}
 	var cleared_controls: Array[String] = []
 	func play_body_clip_at(key: String, phase_ticks: int) -> void:
 		body_calls.append([key, phase_ticks])
 		pose_call_order.append("body")
+	func set_part_phase(channel: int, phase: int) -> void:
+		part_calls.append([channel, phase])
 	func set_aim_overlay(deltas: Array) -> void:
 		overlay_calls.append(deltas)
 		pose_call_order.append("overlay")
+	func set_right_hand_collapsed(collapsed: bool) -> void:
+		right_hand_collapse_calls.append(collapsed)
+		pose_call_order.append("right_hand")
 	func set_ctrl_value(name: String, value: int) -> void:
 		ctrl_values[name] = value
 	func clear_ctrl_value(name: String) -> void:
@@ -55,6 +62,11 @@ class FakeSim:
 			out[base + NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED] = float(
 					entity.get("local_view_suppressed", 0))
 			out[base + NovaSimulation.PF_ALIVE] = float(entity.get("alive", 1))
+			out[base + NovaSimulation.PF_HIDDEN] = float(entity.get("hidden", 0))
+			out[base + NovaSimulation.PF_ACTIVE1] = float(entity.get("active1", 0))
+			out[base + NovaSimulation.PF_PHASE1] = float(entity.get("phase1", 0))
+			out[base + NovaSimulation.PF_ACTIVE2] = float(entity.get("active2", 0))
+			out[base + NovaSimulation.PF_PHASE2] = float(entity.get("phase2", 0))
 			out[base + NovaSimulation.PF_ANIM_STATE] = float(entity.get("anim_state", -1))
 			out[base + NovaSimulation.PF_ANIM_PHASE_TICKS] = float(
 					entity.get("anim_phase", 0))
@@ -70,6 +82,8 @@ class FakeSim:
 					entity.get("emplaced_gun_yaw", 0))
 			out[base + NovaSimulation.PF_EWEAP_GUNPITCH] = float(
 					entity.get("emplaced_gun_pitch", 0))
+			out[base + NovaSimulation.PF_RIGHT_HAND_COLLAPSED] = float(
+					entity.get("right_hand_collapsed", 0))
 			var angles: PackedVector3Array = entity.get(
 					"aim_angles", PackedVector3Array())
 			for cls in range(mini(angles.size(), 9)):
@@ -93,6 +107,24 @@ class FakePlacer:
 		return node
 
 
+class ResolvingFakePlacer:
+	extends FakePlacer
+	func resolve_player_visual_item_id(type_id: int) -> int:
+		return type_id + 100000 if type_id < 100000 else type_id
+
+
+class SelectiveFakePlacer:
+	extends FakePlacer
+	var failed_types: Dictionary = {}
+	var attempts: Array[int] = []
+	func build_player_animated_model(type_id: int, parent: Node3D,
+			_env_node: Node = null) -> Node3D:
+		attempts.append(type_id)
+		if bool(failed_types.get(type_id, false)):
+			return null
+		return super.build_player_animated_model(type_id, parent, _env_node)
+
+
 class EmptyIndex:
 	extends RefCounted
 	func resolve(_bms_id: int, _kind: int, _index: int):
@@ -110,6 +142,183 @@ class SpawnObserver:
 			"item_id": item_id,
 			"position": node.position,
 		})
+
+
+func test_sp_synthetic_filter_materializes_only_attachment_origin_rows() -> void:
+	var sim := FakeSim.new()
+	sim.entities = [
+		{
+			"type_id": 164,
+			"handle": 0x1004,
+			"kind": 1,
+			"index": 0,
+			"bms_id": 11,
+		},
+		{
+			"type_id": 166,
+			"handle": 0x1005,
+			"kind": 255,
+			"index": 0xFFFFFF,
+			"bms_id": 0,
+		},
+	]
+	var placer := ResolvingFakePlacer.new()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var presenter := WirePresentPass.new()
+	presenter.setup(sim, placer, container, null, EmptyIndex.new(), {
+		"synthetic_origin_only": true,
+	})
+	presenter.present()
+	assert_eq(placer.built.size(), 1,
+			"ordinary SP rows stay with MissionPresentPass; synthetic children materialize")
+	var ref: Dictionary = placer.built[0].get_meta("entity_ref", {})
+	assert_eq(int(ref.get("item_id", 0)), 100166)
+	assert_eq(int(ref.get("runtime_type_id", 0)), 166)
+	assert_eq(int(ref.get("origin_kind", 0)), 255)
+
+
+func test_wire_handle_resolver_keeps_synthetic_siblings_distinct() -> void:
+	var sim := FakeSim.new()
+	sim.entities = [{
+		'type_id': 166,
+		'handle': 0x1004,
+		'kind': 255,
+		'index': 0xffffff,
+	}, {
+		'type_id': 166,
+		'handle': 0x1005,
+		'kind': 255,
+		'index': 0xffffff,
+	}]
+	var placer := ResolvingFakePlacer.new()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var presenter := WirePresentPass.new()
+	presenter.setup(sim, placer, container, null, EmptyIndex.new(), {
+		'synthetic_origin_only': true,
+	})
+
+	presenter.present()
+
+	assert_eq(presenter.resolve_wire_handle(0x1004), placer.built[0])
+	assert_eq(presenter.resolve_wire_handle(0x1005), placer.built[1],
+			'each attachment sibling resolves to its own live node')
+	sim.entities = []
+	presenter.present()
+	assert_null(presenter.resolve_wire_handle(0x1004),
+			'a retired wire row no longer resolves through its reused pool slot')
+
+
+func test_unresolved_slot_retries_after_disappearance_and_reuse() -> void:
+	var sim := FakeSim.new()
+	sim.entities = [{"type_id": 166, "handle": 0x1004}]
+	var placer := SelectiveFakePlacer.new()
+	placer.failed_types[166] = true
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var presenter := WirePresentPass.new()
+	presenter.setup(sim, placer, container)
+	presenter.present()
+	assert_eq(placer.attempts, [166])
+	assert_eq(presenter.entity_count(), 0)
+
+	sim.entities = []
+	presenter.present()
+	placer.failed_types[166] = false
+	sim.entities = [{"type_id": 166, "handle": 0x1004}]
+	presenter.present()
+	assert_eq(placer.attempts, [166, 166],
+			"retired failure cache cannot poison slot reuse")
+	assert_eq(presenter.entity_count(), 1)
+
+
+func test_unresolved_slot_retries_immediately_when_type_changes() -> void:
+	var sim := FakeSim.new()
+	sim.entities = [{"type_id": 166, "handle": 0x1004}]
+	var placer := SelectiveFakePlacer.new()
+	placer.failed_types[166] = true
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var presenter := WirePresentPass.new()
+	presenter.setup(sim, placer, container)
+	presenter.present()
+
+	sim.entities[0]["type_id"] = 167
+	presenter.present()
+	assert_eq(placer.attempts, [166, 167])
+	assert_eq(presenter.entity_count(), 1)
+
+
+func test_live_slot_type_change_rebuilds_the_visual() -> void:
+	var sim := FakeSim.new()
+	sim.entities = [{"type_id": 166, "handle": 0x1004}]
+	var placer := SelectiveFakePlacer.new()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var presenter := WirePresentPass.new()
+	presenter.setup(sim, placer, container)
+	presenter.present()
+	var first := presenter.resolve_wire_handle(0x1004)
+
+	sim.entities[0]["type_id"] = 167
+	presenter.present()
+	var second := presenter.resolve_wire_handle(0x1004)
+	assert_eq(placer.attempts, [166, 167])
+	assert_ne(second, first, "recycled handle cannot keep the prior type model")
+	assert_eq(int(second.get_meta("entity_ref", {}).get("runtime_type_id", 0)), 167)
+
+
+func test_runtime_reset_rematerializes_the_restored_same_type_slot() -> void:
+	var sim := FakeSim.new()
+	sim.entities = [{"type_id": 166, "handle": 0x1004}]
+	var placer := SelectiveFakePlacer.new()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var presenter := WirePresentPass.new()
+	presenter.setup(sim, placer, container)
+	presenter.present()
+	var first := presenter.resolve_wire_handle(0x1004)
+
+	presenter.reset_runtime_state()
+	assert_eq(presenter.entity_count(), 0)
+	assert_null(presenter.resolve_wire_handle(0x1004))
+	presenter.present()
+	var restored := presenter.resolve_wire_handle(0x1004)
+	assert_eq(placer.attempts, [166, 166])
+	assert_ne(restored, first,
+			"restart builds a fresh restored-incarnation visual")
+
+
+func test_synthetic_attachment_uses_panm_and_hidden_visibility_contract() -> void:
+	var sim := FakeSim.new()
+	sim.entities = [{
+		"type_id": 166,
+		"handle": 0x1005,
+		"kind": 255,
+		"index": 0xFFFFFF,
+		"alive": 0,
+		"active1": 1,
+		"phase1": 0x2345,
+		"active2": 1,
+		"phase2": 0x6789,
+	}]
+	var placer := ResolvingFakePlacer.new()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var presenter := WirePresentPass.new()
+	presenter.setup(sim, placer, container, null, EmptyIndex.new(), {
+		"synthetic_origin_only": true,
+	})
+	presenter.present()
+	var model := placer.built[0] as FakeModel
+	assert_eq(model.part_calls, [[1, 0x2345], [2, 0x6789]],
+			"attached items consume the same two PANM channels as placed items")
+	assert_true(model.visible,
+			"a dead attached item retains its graphic or husk until explicitly hidden")
+	sim.entities[0]["hidden"] = 1
+	presenter.present()
+	assert_false(model.visible, "PF_HIDDEN ends attached-item presentation")
 
 
 func test_wire_model_spawn_registers_after_identity_and_transform_are_ready() -> void:
@@ -178,7 +387,7 @@ func test_wire_model_applies_the_same_packed_overlay_result() -> void:
 	var model := placer.built[0] as FakeModel
 	assert_eq(model.body_calls, [["anim_emplaced", 11]],
 			"wire presentation selects the replicated mounted body clip")
-	assert_eq(model.pose_call_order, ["overlay", "body"],
+	assert_eq(model.pose_call_order, ["right_hand", "overlay", "body"],
 			"the current packed overlay is installed before the body clip evaluates")
 	assert_eq(model.overlay_calls.size(), 1)
 	var deltas: Array = model.overlay_calls[0]
@@ -188,6 +397,27 @@ func test_wire_model_applies_the_same_packed_overlay_result() -> void:
 	assert_true(model.basis.is_equal_approx(body_basis))
 	assert_true((deltas[8] as Basis).is_equal_approx(
 			body_basis.inverse() * MissionObjectPlacer.bms_to_godot_basis(angles[8])))
+
+
+func test_wire_model_applies_and_restores_mounted_right_hand_collapse() -> void:
+	var sim := FakeSim.new()
+	sim.entities = [{
+		"type_id": 4567,
+		"handle": 0x1004,
+		"aim_overlay_valid": 1,
+		"right_hand_collapsed": 1,
+	}]
+	var placer := FakePlacer.new()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var presenter := WirePresentPass.new()
+	presenter.setup(sim, placer, container)
+	presenter.present()
+	sim.entities[0]["right_hand_collapsed"] = 0
+	presenter.present()
+	var model := placer.built[0] as FakeModel
+	assert_eq(model.right_hand_collapse_calls, [true, false],
+			"the wire pose consumes the same mount verdict and restores on dismount")
 
 
 func test_wire_model_applies_and_clears_named_emplaced_controls() -> void:
@@ -243,7 +473,10 @@ func test_wire_model_honors_local_first_person_parent_cull() -> void:
 	assert_true(model.visible, "clearing the transient verdict restores the parent")
 	sim.entities[0]["alive"] = 0
 	presenter.present()
-	assert_false(model.visible, "authoritative death visibility remains independent")
+	assert_true(model.visible, "death retains the corpse or non-organic graphic")
+	sim.entities[0]["hidden"] = 1
+	presenter.present()
+	assert_false(model.visible, "authoritative hidden visibility remains independent")
 
 
 func test_wire_model_clears_overlay_when_snapshot_selector_is_invalid() -> void:

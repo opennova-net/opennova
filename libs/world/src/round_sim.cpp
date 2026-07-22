@@ -11,6 +11,7 @@
 #include "world/angle.h"
 #include "world/collision.h"
 #include "world/infantry.h"
+#include "world/throwables.h"
 #include "world/world.h"
 
 namespace opennova::world {
@@ -23,8 +24,11 @@ constexpr double kRadPerBam = (2.0 * kPi) / 4294967296.0;
 constexpr int32_t kProjectileGravityQ16 = 167;
 constexpr int32_t kDragTableSize = 1220;
 
+} // namespace
+
 // Queue an explosive round's kill zone at its stop. Knife/medic/bullet classes
-// never take this projectile detonation path.
+// never take this projectile detonation path. Shared with the throwable
+// motors [orig: WeaponEffect_PushExplosionQueueEntry @ 0x4e83c0].
 void detonate_round(World &world, const LiveRound &round, const Vec3 &at,
                     const AmmoTableEntry &ammo) {
     if (ammo.kz_maxradius <= 0.0f || ammo.kz_damage == 0) return;
@@ -34,7 +38,7 @@ void detonate_round(World &world, const LiveRound &round, const Vec3 &at,
         return;
     ExplosionEntry explosion;
     explosion.pos = at;
-    explosion.dir_bam = 0;
+    explosion.dir_bam = round.yaw_bam; // [orig: entry dir <- the round angles]
     explosion.type = ammo.kztype;
     explosion.ammo_index = round.ammo_index;
     explosion.owner = round.owner;
@@ -42,6 +46,8 @@ void detonate_round(World &world, const LiveRound &round, const Vec3 &at,
     explosion.radius_override = 0.0f;
     world.explosions.queue_explosion(world, explosion);
 }
+
+namespace {
 
 void push_round_debug(RoundSim &sim, const RoundDebugEvent &event) {
     sim.debug_trail[static_cast<size_t>(sim.debug_trail_next)] = event;
@@ -337,7 +343,7 @@ Vec3 flight_direction(const Vec3 &vel) {
 } // namespace
 
 void RoundSim::reset() noexcept {
-	rounds = {};
+	rounds.assign(kCapacity, LiveRound{});
 	active_count = 0;
 	deaths.clear();
 	impacts.clear();
@@ -353,10 +359,49 @@ void RoundSim::reset() noexcept {
 
 int RoundSim::spawn(World &world, const RoundSpawnParams &params) {
     const AmmoTableEntry *ammo = world.ammo.by_index(params.ammo_index);
+    if (ammo == nullptr) return -1;
+    // The retail spawn dispatch order [orig: RoundData_SpawnRound @ 0x4ec1f3..
+    // 0x4ec2a5]: instantkillzone -> Detonatesatchels -> designator -> claymore
+    // fan -> shotgun -> the ballistic default.
+    if ((ammo->flags & 0x400u) != 0) {
+        // instantkillzone: the kill zone queues at the spawn point, no round
+        // flies [orig: @ 0x4ec1f3 -> WeaponEffect_PushExplosionQueueEntry; the
+        // kztype==1 knife raycast leaf stays with the FSM knife path].
+        ExplosionEntry explosion;
+        explosion.pos = params.origin;
+        explosion.dir_bam = params.dir_yaw_bam;
+        explosion.type = ammo->kztype;
+        explosion.ammo_index = params.ammo_index;
+        explosion.owner = params.owner;
+        explosion.hit_word = params.shot_seq;
+        world.explosions.queue_explosion(world, explosion);
+        if (impacts.size() < kMaxPendingImpacts) {
+            // the detonation's obj-row effect [orig: AmmoDef_ProcessImpactEffect
+            // tag 4 at the descriptor position in every think handler]
+            RoundImpact imp;
+            imp.position = params.origin;
+            imp.direction = Vec3{0.0f, 0.0f, 1.0f};
+            imp.ammo_index = params.ammo_index;
+            imp.effect_tag = 4;
+            imp.tick = world.logic_tick;
+            imp.source_order = next_impact_order++;
+            impacts.push_back(imp);
+        }
+        return -1;
+    }
+    if ((ammo->flags & 0x20u) != 0) {
+        // Detonatesatchels [orig: @ 0x4ec234 -> Entity_DetonateSatchelsByOwner]
+        world.throwables.detonate_satchels_by_owner(world, params.owner);
+        return -1;
+    }
+    if ((ammo->flags & 0x20000u) != 0) {
+        // the claymore shrapnel fan [orig: @ 0x4ec288 -> Weapon_SpawnProjectileBurst]
+        return spawn_burst(world, params, *ammo);
+    }
     // Null/non-ballistic ammo spawns nothing at this altitude: the Knife(1)/Medic(3)
     // kill zones are the immediate-raycast leaves [orig: kztype dispatch @0x4ec21f],
     // `hasitem` ammo places an item entity instead of flying.
-    if (ammo == nullptr || ammo->velocity <= 0) return -1;
+    if (ammo->velocity <= 0) return -1;
     if (ammo->kztype == 1 || ammo->kztype == 3) return -1;
     if ((ammo->flags & 0x200u) != 0) return -1; // hasitem
 
@@ -380,9 +425,14 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params) {
     const double bearing = double(params.dir_yaw_bam) * kRadPerBam;
     const double pitch = double(params.dir_pitch_bam) * kRadPerBam;
     const double cp = std::cos(pitch);
-    const double speed_per_tick = double(ammo->velocity) / 62.0; // [orig: speed/62 @0x4ec508]
+    double speed_per_tick = double(ammo->velocity) / 62.0; // [orig: speed/62 @0x4ec508]
+    // The PowerThrow charge byte scales the launch speed for 1..254; 0 and 255
+    // mean full [orig: (charge - 1) <= 0xFD gate @ 0x4ec5bb, x charge/256].
+    if (static_cast<uint8_t>(params.charge - 1u) <= 0xFDu)
+        speed_per_tick = speed_per_tick * double(params.charge) / 256.0;
 
     LiveRound &r = rounds[static_cast<size_t>(slot)];
+    r = LiveRound{};
     r.active = true;
     r.owner = params.owner;
     r.shooter_handle = params.shooter_handle;
@@ -427,12 +477,37 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params) {
     // player, else enemy (+236); id 0 = no channel; -> round+0x2B4].
     r.trail_slot = -1;
     const bool forcetracer = (ammo->flags & 0x8000u) != 0;
+    const bool same_team = r.team == local_team;
+    const bool friendly_tracer =
+            (local_player.valid() && params.owner.valid() &&
+             params.owner.packed == local_player.packed) ||
+            same_team;
     if ((tracer && !no_tracers_rule) || forcetracer) {
-        const bool friendly = (local_player.valid() && params.owner.valid() &&
-                               params.owner.packed == local_player.packed) ||
-                              r.team == local_team;
-        const int32_t style = friendly ? ammo->tracer_type_friendly : ammo->tracer_type_enemy;
+        const int32_t style =
+                friendly_tracer ? ammo->tracer_type_friendly : ammo->tracer_type_enemy;
         if (style != 0) r.trail_slot = trails.alloc(style);
+    }
+
+    // The TrcrID item model + class bind [orig: @ 0x4ec787..0x4ec7b7 —
+    // team item selection with a missing-foe -> friendly fallback, independent
+    // of the per-shot tracer cadence; global NoTracers still suppresses it].
+    // The result becomes round ItemTypeIndex(+28); Entity_InitFromItemDef binds
+    // the class motor
+    // (+452) / think (+456) from the items.def ai_function/move_function tags,
+    // and the init callback seeds 1 deg/tick spin @ 0x4435A0].
+    r.yaw_bam = params.dir_yaw_bam;
+    r.pitch_bam = params.dir_pitch_bam;
+    const int32_t item_id = throwable_item_for_viewer(
+            ammo->tracer_item_friendly, ammo->tracer_item_enemy, r.team, local_team);
+    if (item_id != 0 && (!no_tracers_rule || forcetracer)) {
+        r.item_type_id = item_id;
+        if (const ThrowableClassRow *row = world.throwables.classes.get(item_id)) {
+            r.motor = row->motor;
+            r.think = row->think;
+        }
+        r.spin_yaw = 11930464;   // 1 deg/tick [orig: Entity_InitThrowableSpin_*]
+        r.spin_pitch = 11930464;
+        r.spin_roll = 11930464;
     }
 
     // Record the fire for the host present layer (sound + muzzle effect) — the
@@ -449,6 +524,64 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params) {
 
     ++active_count;
     return slot;
+}
+
+// The pellet fan [orig: Weapon_SpawnProjectileBurst @ 0x4eb900]: spread_count
+// (clamped 1..32) plain ballistic rounds; per pellet the fan PRNG draws yaw in
+// [base - pieslice, base + pieslice) and pitch in [base, base + pieslice);
+// pellets carry no tracer, no model, no fire event.
+int RoundSim::spawn_burst(World &world, const RoundSpawnParams &params,
+                          const AmmoTableEntry &ammo) {
+    int count = ammo.spread_count;
+    if (count > 32) count = 32;
+    if (count <= 0) count = 1;
+    Entity *owner_ent = world.registry.get(params.owner);
+    const uint32_t base_yaw = static_cast<uint32_t>(params.dir_yaw_bam) & 0xFFFF0000u;
+    const uint32_t base_pitch = static_cast<uint32_t>(params.dir_pitch_bam) & 0xFFFF0000u;
+    int first_slot = -1;
+    for (int n = 0; n < count; ++n) {
+        int slot = -1;
+        for (int i = 0; i < kCapacity; ++i) {
+            if (!rounds[static_cast<size_t>(i)].active) {
+                slot = i;
+                break;
+            }
+        }
+        if (slot < 0) break;
+        const int64_t pieslice = ammo.kz_pieslice_bam;
+        const uint16_t r1 = world.throwables.fan_prng();
+        const uint16_t r2 = world.throwables.fan_prng();
+        const int32_t yaw = static_cast<int32_t>(
+                base_yaw +
+                static_cast<uint32_t>(((2 * pieslice * r1 + 0x8000) >> 16) - pieslice));
+        const int32_t pitch = static_cast<int32_t>(
+                base_pitch + static_cast<uint32_t>((pieslice * r2 + 0x8000) >> 16));
+        const double bearing = double(yaw) * kRadPerBam;
+        const double pitch_rad = double(pitch) * kRadPerBam;
+        const double cp = std::cos(pitch_rad);
+        const double speed = double(ammo.velocity) / 62.0;
+        LiveRound &r = rounds[static_cast<size_t>(slot)];
+        r = LiveRound{};
+        r.active = true;
+        r.owner = params.owner;
+        r.shooter_handle = params.shooter_handle;
+        r.ammo_index = params.ammo_index;
+        r.adm_index = params.adm_index;
+        r.shot_seq = params.shot_seq;
+        r.pos = params.origin;
+        r.vel.x = static_cast<float>(std::cos(bearing) * cp * speed);
+        r.vel.y = static_cast<float>(std::sin(bearing) * cp * speed);
+        r.vel.z = static_cast<float>(std::sin(pitch_rad) * speed);
+        r.max_age_ticks = ammo.max_age_ticks;
+        r.team = owner_ent != nullptr ? static_cast<uint8_t>(owner_ent->team) : 0xFF;
+        r.tracer = false;
+        r.trail_slot = -1;
+        r.yaw_bam = yaw;
+        r.pitch_bam = pitch;
+        if (first_slot < 0) first_slot = slot;
+        ++active_count;
+    }
+    return first_slot;
 }
 
 void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
@@ -479,10 +612,27 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         LiveRound &r = rounds[static_cast<size_t>(i)];
         if (!r.active) continue;
 
-        if (++r.age_ticks > r.max_age_ticks) {
+        // The lifetime/armed-fuse head runs before the motor. Advance the
+        // stored age before dispatch; the custom motor compensates so its
+        // elapsed/remaining values match retail's post-motor decrement
+        // [orig: Projectile_UpdatePhysics @ 0x4e9da7..0x4e9f4e].
+        if (r.det_at_expiry || r.age_ticks >= r.max_age_ticks) {
+            // Only rounds the motor armed detonate at this head; an ordinary
+            // ballistic lifetime expiry vanishes silently.
             const AmmoTableEntry *fuze_ammo = world.ammo.by_index(r.ammo_index);
-            if (fuze_ammo != nullptr)
+            if (fuze_ammo != nullptr && r.det_at_expiry) {
                 detonate_round(world, r, r.pos, *fuze_ammo);
+                if (impacts.size() < kMaxPendingImpacts) {
+                    RoundImpact imp;
+                    imp.position = r.pos;
+                    imp.direction = Vec3{0.0f, 0.0f, 1.0f};
+                    imp.ammo_index = r.ammo_index;
+                    imp.effect_tag = 4; // the ammo obj row
+                    imp.tick = world.logic_tick;
+                    imp.source_order = next_impact_order++;
+                    impacts.push_back(imp);
+                }
+            }
             if (r.trail_slot >= 0) {
                 trails.append(r.trail_slot, r.pos);
                 trails.request_kill(r.trail_slot);
@@ -500,17 +650,33 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             --active_count;
             continue;
         }
+        ++r.age_ticks;
 
         if (r.trail_slot >= 0) trails.append(r.trail_slot, r.pos);
 
         const AmmoTableEntry *ammo = world.ammo.by_index(r.ammo_index);
         const uint32_t ammo_flags = ammo != nullptr ? ammo->flags : 0;
 
-        // `ignore` rounds only age. `useownmove` invokes an ammo-specific callback
-        // instead of the stock ballistic path in retail; that callback seam is not
-        // populated yet, so these rounds deliberately receive no invented stock ray,
-        // gravity, or drag here.
-        if ((ammo_flags & 0x2u) != 0 || (ammo_flags & 0x2000u) != 0) continue;
+        // `ignore` rounds only age.
+        if ((ammo_flags & 0x2u) != 0) continue;
+        // `useownmove` rounds run ONLY their class motor — no stock ray,
+        // gravity, or drag [orig: the +452 motor leg of Projectile_UpdatePhysics
+        // @ 0x4e9f06; the motor may convert the round into a placed device or
+        // detonate it, releasing the slot].
+        if ((ammo_flags & 0x2000u) != 0) {
+            bool alive = true;
+            if (ammo != nullptr)
+                alive = throwable_motor_tick(world, *this, r, *ammo, queries, terrain);
+            if (!alive) {
+                if (r.trail_slot >= 0) {
+                    trails.append(r.trail_slot, r.pos);
+                    trails.request_kill(r.trail_slot);
+                }
+                r.active = false;
+                --active_count;
+            }
+            continue;
+        }
 
         const FixedVec3 position_q16{to_fixed(r.pos.x), to_fixed(r.pos.y), to_fixed(r.pos.z)};
         FixedVec3 velocity_q16{to_fixed(r.vel.x), to_fixed(r.vel.y), to_fixed(r.vel.z)};

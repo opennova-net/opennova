@@ -21,6 +21,8 @@ func test_weapon_view_decodes_state_dict() -> void:
 		"clip": 24,
 		"reserve": 270,
 		"kick": 12,
+		"windup_active": true,
+		"windup_held_ticks": 31,
 		"emplaced_controls_valid": true,
 		"emplaced_gun_yaw": 0x1234,
 		"emplaced_gun_pitch": 0xFEDC,
@@ -37,6 +39,8 @@ func test_weapon_view_decodes_state_dict() -> void:
 	assert_eq(view.clip, 24)
 	assert_eq(view.reserve, 270)
 	assert_eq(view.kick, 12)
+	assert_true(view.windup_active)
+	assert_eq(view.windup_held_ticks, 31)
 	assert_true(view.emplaced_controls_valid)
 	assert_eq(view.emplaced_gun_yaw, 0x1234)
 	assert_eq(view.emplaced_gun_pitch, 0xFEDC)

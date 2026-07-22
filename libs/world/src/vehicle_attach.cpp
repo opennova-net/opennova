@@ -150,6 +150,7 @@ bool entity_detach_from_vehicle(World &world, EntityHandle player) {
     const uint16_t target_net_id = occ->mount_target_net_id;
     const int32_t target_bms_id = occ->mount_target_bms_id;
     const uint32_t target_spawn_origin = occ->mount_target_spawn_origin;
+    const uint16_t target_wire_handle = occ->mount_target.packed;
     Entity *veh = world.registry.get(occ->mount_target);
     // [orig: Entity_DetachFromVehicle @0x4355F0] MoveOrder &= ~0x300 (stance clear), then
     // every matching seat handle on the mount target releases (all 10 slots in the
@@ -183,7 +184,7 @@ bool entity_detach_from_vehicle(World &world, EntityHandle player) {
         // The vehicle is already gone; the stored identity carries the stop (host
         // cleanup — a spurious stop is idempotent downstream).
         emit_vehicle_control_stopped(world, target_net_id, target_bms_id,
-                                     target_spawn_origin);
+                                     target_spawn_origin, target_wire_handle);
     }
     return true;
 }

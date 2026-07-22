@@ -454,6 +454,47 @@ void test_destructible_death_chain() {
     CHECK(!w.round_sim.hits.empty()); // the AI reaction stamp fed
 }
 
+void test_synthetic_husk_events_preserve_distinct_handles() {
+    auto w_heap = std::make_unique<World>();
+    World &w = *w_heap;
+    w.registry.configure_pool(1, 4);
+
+    Entity seed;
+    seed.kind = EntityKind::Item;
+    seed.item_id = 500;
+    seed.bms_id = 0;
+    seed.spawn_origin = 0xFFFFFFFFu;
+    const EntityHandle first = w.registry.spawn(1, seed);
+    const EntityHandle second = w.registry.spawn(1, seed);
+    CHECK(first != second);
+    ItemDeathTraits traits = barrel_traits();
+    traits.particleother = "Effect_Smoke";
+    w.item_death_traits.set(500, traits);
+
+    process_destructible_death(w, *w.registry.get(first));
+    process_destructible_death(w, *w.registry.get(second));
+
+    CHECK(w.destruction.husk_swaps.size() == 2);
+    CHECK(w.destruction.husk_swaps[0].wire_handle == first.packed);
+    CHECK(w.destruction.husk_swaps[1].wire_handle == second.packed);
+    CHECK(w.destruction.husk_swaps[0].wire_handle !=
+          w.destruction.husk_swaps[1].wire_handle);
+
+    // The three attached banks must carry the same incarnation identity as
+    // the husk event. Without it, both runtime-only children collapse onto
+    // (net=0,bms=0,origin=sentinel) in the Godot presenter.
+    CHECK(w.destruction.effects.size() == 6);
+    for (size_t i = 0; i < w.destruction.effects.size(); ++i) {
+        const DestructionEffectEvent &fx = w.destruction.effects[i];
+        const EntityHandle expected = i < 3 ? first : second;
+        CHECK(fx.family == static_cast<uint8_t>((i % 3) + 1));
+        CHECK(fx.attach_net_id == 0);
+        CHECK(fx.attach_bms_id == 0);
+        CHECK(fx.attach_wire_handle == expected.packed);
+        CHECK(fx.attach_spawn_origin == 0xFFFFFFFFu);
+    }
+}
+
 // Retail transforms each husk-model KZ user point through the item's complete
 // authored Euler pose before adding its world position:
 // Rz(90-yaw) * Ry(-pitch) * Rx(roll).  These three +90 degree rotations make
@@ -1209,6 +1250,7 @@ int main() {
     test_explosion_cone_wrap();
     test_explosion_resolves_attacker_chain_for_events();
     test_destructible_death_chain();
+    test_synthetic_husk_events_preserve_distinct_handles();
     test_kz_point_full_euler();
     test_death_pieces();
     test_death_piece_ring_generation();

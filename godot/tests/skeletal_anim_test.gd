@@ -225,6 +225,206 @@ func _loaded_skeletal() -> NovaSkeletalAnim:
 	return sk
 
 
+func test_emplaced_pose_collapses_right_hand_bone_and_restores_off_mount() -> void:
+	# Retail zeros model bone 16 (BN17 R Hand) while an organic occupies a
+	# controller/gunner/driver parent slot. The personal weapon is baked into the
+	# character mesh, so this is a skeletal collapse, not a child-node visibility gate.
+	# [orig: Entity_BuildBoneTransformMatrices special rows; world-wac-ai-re.md §14.1]
+	var data := _open(CHARMODEL)
+	var root := NovaResourceRoot.new()
+	root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/anim"))
+	var sk := NovaSkeletalAnim.new()
+	assert_true(sk.load_from_resource_root(root, "soldier.adm",
+			data.get_bone_origins(), data.get_bone_parents()),
+			"the 19-bone character rig loads: %s" % sk.get_last_error())
+	assert_gt(sk.get_bone_count(), 16, "the fixture contains retail's BN17 R Hand row")
+
+	var deltas: Array = []
+	for _i in range(9):
+		deltas.append(Basis.IDENTITY)
+	var normal: Array = sk.eval_pose_overlay(
+			"anim_idle", 0.0, sk.get_overlay_classes(), deltas, "", 0.0, false)
+	var mounted: Array = sk.eval_pose_overlay(
+			"anim_idle", 0.0, sk.get_overlay_classes(), deltas, "", 0.0, true)
+	var normal_hand: Transform3D = normal[16]
+	var mounted_hand: Transform3D = mounted[16]
+	assert_true(mounted_hand.basis.x.is_zero_approx()
+			and mounted_hand.basis.y.is_zero_approx()
+			and mounted_hand.basis.z.is_zero_approx(),
+			"mounted BN17 has the zero-scale transform retail uses to clip the baked weapon")
+	assert_true(mounted_hand.origin.is_equal_approx(normal_hand.origin),
+			"the clip pose preserves BN17's sampled local joint")
+	assert_true(normal_hand.is_equal_approx(sk.eval_pose("anim_idle", 0.0)[16]),
+			"leaving the emplaced weapon restores BN17's authored pose")
+
+
+func _char_model_at(data: NovaObjectData, skeletal: NovaSkeletalAnim,
+		world_transform: Transform3D, collapse_right_hand: bool):
+	var model = NovaObjectModelScript.new()
+	add_child_autofree(model)
+	model.set_skeletal_anim(skeletal)
+	model.set_object_data(data)
+	model.global_transform = world_transform
+	model.play_body_clip_at("anim_idle", 0)
+	if collapse_right_hand:
+		model.set_right_hand_collapsed(true)
+	return model
+
+
+# CPU-evaluate the same linear skin matrices Godot submits for this Skeleton3D.
+# MeshInstance3D.bake_mesh_from_current_skeleton_pose() requires a renderer-
+# registered SkinReference that headless GUT does not create reliably, so this
+# keeps the regression deterministic while still measuring deformed triangles,
+# rather than inferring fidelity from one bone transform.
+func _skinned_geometry_metrics(data: NovaObjectData, skeleton: Skeleton3D) -> Dictionary:
+	var matrices: Array[Transform3D] = []
+	for bone in range(skeleton.get_bone_count()):
+		matrices.append(skeleton.global_transform
+				* skeleton.get_bone_global_pose(bone)
+				* skeleton.get_bone_global_rest(bone).affine_inverse())
+
+	var bounds := AABB()
+	var have_bounds := false
+	var max_triangle_edge := 0.0
+	var right_hand_vertices := 0
+	for entry_var in data.build_lod_submeshes(0, true, skeleton.get_bone_count()):
+		var entry: Dictionary = entry_var
+		if not bool(entry.get("is_skinned", false)):
+			continue
+		var mesh := entry.get("mesh") as ArrayMesh
+		if mesh == null:
+			continue
+		var arrays: Array = mesh.surface_get_arrays(0)
+		var vertices: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+		var bones: PackedInt32Array = arrays[Mesh.ARRAY_BONES]
+		var weights: PackedFloat32Array = arrays[Mesh.ARRAY_WEIGHTS]
+		var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
+		var influences_per_vertex := int(bones.size()) / vertices.size()
+		var skinned := PackedVector3Array()
+		skinned.resize(vertices.size())
+		for vertex_index in range(vertices.size()):
+			var point := Vector3.ZERO
+			var touches_right_hand := false
+			for influence in range(influences_per_vertex):
+				var at := vertex_index * influences_per_vertex + influence
+				var weight := float(weights[at])
+				if weight <= 0.0:
+					continue
+				point += (matrices[int(bones[at])] * vertices[vertex_index]) * weight
+				touches_right_hand = touches_right_hand or int(bones[at]) == 16
+			skinned[vertex_index] = point
+			if touches_right_hand:
+				right_hand_vertices += 1
+			if have_bounds:
+				bounds = bounds.expand(point)
+			else:
+				bounds = AABB(point, Vector3.ZERO)
+				have_bounds = true
+
+		var triangle_indices := indices
+		if triangle_indices.is_empty():
+			triangle_indices.resize(vertices.size())
+			for vertex_index in range(vertices.size()):
+				triangle_indices[vertex_index] = vertex_index
+		for triangle in range(0, triangle_indices.size() - 2, 3):
+			var a := skinned[int(triangle_indices[triangle])]
+			var b := skinned[int(triangle_indices[triangle + 1])]
+			var c := skinned[int(triangle_indices[triangle + 2])]
+			max_triangle_edge = maxf(max_triangle_edge,
+					maxf(a.distance_to(b), maxf(b.distance_to(c), c.distance_to(a))))
+
+	return {
+		"right_hand_vertices": right_hand_vertices,
+		"span": bounds.size.length(),
+		"max_triangle_edge": max_triangle_edge,
+	}
+
+
+func test_mounted_hand_collapse_does_not_stretch_skinned_triangles() -> void:
+	var data := _open(CHARMODEL)
+	var root := NovaResourceRoot.new()
+	root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/anim"))
+	var skeletal := NovaSkeletalAnim.new()
+	assert_true(skeletal.load_from_resource_root(root, "soldier.adm",
+			data.get_bone_origins(), data.get_bone_parents()))
+	var placement := Transform3D(
+			Basis(Vector3.UP, 0.37), Vector3(7.0, 3.0, -11.0))
+	# Keep the models separate: applying a zero-scale pose and restoring it on one
+	# Skeleton3D can make the result depend on setter/update history.
+	var authored_model = _char_model_at(data, skeletal, placement, false)
+	var collapsed_model = _char_model_at(data, skeletal, placement, true)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	authored_model.get_skeleton().force_update_all_bone_transforms()
+	collapsed_model.get_skeleton().force_update_all_bone_transforms()
+	var authored := _skinned_geometry_metrics(data, authored_model.get_skeleton())
+	var collapsed := _skinned_geometry_metrics(data, collapsed_model.get_skeleton())
+
+	assert_gt(int(authored.right_hand_vertices), 0,
+			"the fixture has vertices influenced by retail's BN17 R Hand row")
+	assert_gt(float(authored.max_triangle_edge), 0.0,
+			"the authored fixture has measurable triangle edges")
+	assert_lte(float(collapsed.max_triangle_edge),
+			float(authored.max_triangle_edge) * 1.1,
+			"collapsing BN17 cannot stretch a triangle across the frame")
+	assert_lte(float(collapsed.span), float(authored.span) * 1.1,
+			"collapsing BN17 cannot balloon the character's skinned bounds")
+
+
+func test_model_collapses_right_hand_at_joint_without_aim_overlay() -> void:
+	# The evaluator's zero-scale BN17 pose is a clip marker, not a world-space
+	# destination. Exercise NovaObjectModel's no-overlay fallback at a non-zero
+	# placement: the host must collapse the bone at its current joint. Sending
+	# partially weighted vertices to world origin stretches triangles across the
+	# frame instead of clipping the baked weapon.
+	var data := _open(CHARMODEL)
+	var root := NovaResourceRoot.new()
+	root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/anim"))
+	var sk := NovaSkeletalAnim.new()
+	assert_true(sk.load_from_resource_root(root, "soldier.adm",
+			data.get_bone_origins(), data.get_bone_parents()))
+	var model = NovaObjectModelScript.new()
+	add_child_autofree(model)
+	model.set_skeletal_anim(sk)
+	model.set_object_data(data)
+	model.global_transform = Transform3D(
+			Basis(Vector3.UP, 0.37), Vector3(7.0, 3.0, -11.0))
+	model.play_body_clip_at("anim_idle", 0)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var skeleton: Skeleton3D = model.get_skeleton()
+	skeleton.force_update_all_bone_transforms()
+	var authored_hand := (skeleton.global_transform
+			* skeleton.get_bone_global_pose(16)
+			* skeleton.get_bone_global_rest(16).affine_inverse())
+	var authored_joint := (skeleton.global_transform
+			* skeleton.get_bone_global_pose(16).origin)
+
+	model.set_right_hand_collapsed(true)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	skeleton.force_update_all_bone_transforms()
+	var collapsed_hand := (skeleton.global_transform
+			* skeleton.get_bone_global_pose(16)
+			* skeleton.get_bone_global_rest(16).affine_inverse())
+	assert_true(collapsed_hand.basis.x.is_zero_approx()
+			and collapsed_hand.basis.y.is_zero_approx()
+			and collapsed_hand.basis.z.is_zero_approx(),
+			"BN17 scale collapses even without overlay data")
+	assert_true(collapsed_hand.origin.is_equal_approx(authored_joint),
+			"BN17 collapses at the hand joint instead of dragging skin to world origin")
+
+	model.set_right_hand_collapsed(false)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	skeleton.force_update_all_bone_transforms()
+	var restored_hand := (skeleton.global_transform
+			* skeleton.get_bone_global_pose(16)
+			* skeleton.get_bone_global_rest(16).affine_inverse())
+	assert_true(restored_hand.is_equal_approx(authored_hand),
+			"dismount restores the authored hand transform after a joint-local collapse")
+
+
 func _bone_poses(skel: Skeleton3D) -> Array:
 	var out: Array = []
 	for i in range(skel.get_bone_count()):

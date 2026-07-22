@@ -118,6 +118,36 @@ def test_pyopennova_items_stride_reads_every_entry():
     assert names == ITEMS_HEAD
 
 
+def test_pyopennova_emplacement_attachment_nested_layout(tmp_path):
+    _skip_without_native()
+    path = tmp_path / "attachment_items.def"
+    path.write_text(
+        "begin AttachmentCarrier\n"
+        "  id 710100\n"
+        "  addeweapG abcdefghijklmnopq 710102 70 10 100 90\n"
+        "end\n",
+        encoding="ascii",
+    )
+    ifl = py_def.parse_items_def(str(path))
+    try:
+        assert ifl.count == 1
+        carrier = ifl.entries[0]
+        assert carrier.emplacement_attachments_count == 1
+        row = carrier.emplacement_attachments[0]
+        assert row.userpoint.decode() == "abcdefghijklmno"
+        assert row.item_id == 710102
+        assert row.down_angle == 70 * 11930464
+        assert row.up_angle == -10 * 11930464
+        assert row.right_angle == 100 * 11930464
+        assert row.left_angle == -90 * 11930464
+        assert row.angle_count == 4
+        assert row.kind == 1
+        assert carrier.emplacement_g_slot == 1
+        assert carrier.emplacement_c_slot == 0
+    finally:
+        py_def.free_items_def(ifl)
+
+
 def test_blender_stride_reads_every_entry():
     _skip_without_native()
     blender = _load_blender_def_ffi()

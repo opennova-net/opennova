@@ -1,6 +1,7 @@
 extends GutTest
 
 const WORLD_TEST_ROOT := "game_world_test"
+const ArmoryHost := preload("res://engine/world/armory_host.gd")
 
 
 func after_each() -> void:
@@ -91,6 +92,72 @@ class ImpactRuntimeStub:
 	var sim := ImpactSimStub.new()
 	func get_sim() -> ImpactSimStub:
 		return sim
+
+
+class FirstOpenArmorySimProxy:
+	extends RefCounted
+	var inner: NovaSimulation
+
+	func _init(p_inner: NovaSimulation) -> void:
+		inner = p_inner
+
+	func local_player_in_armory_zone() -> bool:
+		return true
+
+	func is_host_listening() -> bool:
+		return false
+
+	func is_joiner() -> bool:
+		return false
+
+	func get_local_player_class() -> int:
+		return inner.get_local_player_class()
+
+	func get_local_player_weapon_name() -> String:
+		return inner.get_local_player_weapon_name()
+
+	func get_local_player_loadout() -> Array:
+		return inner.get_local_player_loadout()
+
+	func get_local_player_inventory() -> Dictionary:
+		return inner.get_local_player_inventory()
+
+	func get_weapon_availability(weapon_name: String) -> int:
+		return inner.get_weapon_availability(weapon_name)
+
+	func apply_local_player_loadout(kit: Array, selected_class: int) -> bool:
+		return inner.apply_local_player_loadout(kit, selected_class)
+
+
+class FirstOpenArmoryWorldProxy:
+	extends Node
+	var inner: GameWorld
+	var sim: FirstOpenArmorySimProxy
+
+	func _init(p_inner: GameWorld) -> void:
+		inner = p_inner
+		sim = FirstOpenArmorySimProxy.new(inner.get_sim())
+
+	func get_sim():
+		return sim
+
+	func get_resource_root() -> NovaResourceRoot:
+		return inner.get_resource_root()
+
+	func get_weapon_database() -> NovaWeaponDatabase:
+		return inner.get_weapon_database()
+
+	func local_player_team() -> int:
+		return inner.local_player_team()
+
+	func local_player_viewmodel_def():
+		return inner.local_player_viewmodel_def()
+
+	func set_local_player_weapon_by_name(weapon_name: String) -> bool:
+		return inner.set_local_player_weapon_by_name(weapon_name)
+
+	func clear_local_player_weapon() -> void:
+		inner.clear_local_player_weapon()
 
 
 class ImpactAudioStub:
@@ -343,6 +410,38 @@ func test_round_impacts_route_generic_transient_and_audio_legs() -> void:
 	}], 'impact audio shares collision presentation with the visual transient')
 
 
+func test_round_impacts_route_sound_only_without_a_particle() -> void:
+	var world := ImpactGameWorldHarness.new()
+	var terrain := NovaTerrain.new()
+	terrain.name = 'NovaTerrain'
+	world.add_child(terrain)
+	add_child_autofree(world)
+	var runtime := ImpactRuntimeStub.new()
+	var effects := FxWorldStub.new()
+	var audio := ImpactAudioStub.new(null, null)
+	add_child_autofree(runtime)
+	add_child_autofree(effects)
+	world.configure(runtime, effects, audio)
+	runtime.sim.rows = [{
+		'position': Vector3(3, 2, 1),
+		'direction': Vector3.UP,
+		'effect': '',
+		'sound': 'IMP_GREN_DIRT',
+		'age_ticks': 0,
+		'source_tick': 43,
+		'source_order': 8,
+	}]
+
+	world.route_round_impacts()
+
+	assert_true(effects.spawns.is_empty(),
+			'a sound-only grenade bounce must not spawn its explosion particle')
+	assert_eq(audio.fires, [{
+		'name': 'IMP_GREN_DIRT',
+		'position': Vector3(3, 2, 1),
+	}], 'the first five grenade bounces retain their authored surface sound')
+
+
 func test_fixed_tick_orders_weapon_and_impact_before_particle_advance() -> void:
 	var world := ImpactGameWorldHarness.new()
 	var terrain := NovaTerrain.new()
@@ -436,6 +535,77 @@ func test_packaged_scene_instantiates_with_intact_wiring() -> void:
 	var terrain: NovaTerrain = world.get_node("NovaTerrain")
 	assert_eq(terrain.environment_path, NodePath("../NovaEnvironment"), "terrain env path survived extraction")
 	assert_eq(terrain.weather_path, NodePath("../NovaWeather"), "terrain weather path survived extraction")
+
+
+func test_armory_can_reuse_game_world_weapon_database_on_first_open() -> void:
+	NovaStrings.clear()
+	var root_dir := _stage_minimal_fixture("first_armory_open")
+	for files in [
+		["res://../fixtures/mnu/jo_weapon.mnu", "weapon.mnu"],
+		["res://../fixtures/def/weapon.def", "weapon.def"],
+		["res://../fixtures/rtxt/menutxt.bin", "menutxt.BIN"],
+		["res://../fixtures/rtxt/gametext.bin", "gametext.bin"],
+	]:
+		var target := root_dir.path_join(files[1])
+		if FileAccess.file_exists(target):
+			assert_eq(DirAccess.remove_absolute(target), OK)
+		assert_eq(DirAccess.copy_absolute(
+				ProjectSettings.globalize_path(files[0]), target), OK)
+
+	var world := _make_world()
+	add_child_autofree(world)
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(root_dir), OK)
+	world.set_resource_root(root)
+	world.set_local_player_spawn_loadout({
+		"primary": "WPN_M4AUTO",
+		"accessory": "WPN_SATCHEL_CHARGE",
+		"player_class": 8,
+	})
+	assert_eq(world.load_mission("mnml.bms"), OK)
+
+	assert_true(world.has_method("get_weapon_database"),
+		"the production world exposes the same weapon database seam ArmoryHost consumes")
+	if not world.has_method("get_weapon_database"):
+		return
+	var weapons := world.call("get_weapon_database") as NovaWeaponDatabase
+	assert_not_null(weapons, "first armory open lazily resolves weapon.def")
+	if weapons == null:
+		return
+	assert_true(weapons.is_loaded())
+	assert_gte(weapons.find_weapon("WPN_M4AUTO"), 0)
+	assert_gte(weapons.find_weapon("WPN_SATCHEL_CHARGE"), 0)
+	var sim := world.get_sim()
+	var expected_names := ["WPN_M4AUTO", "WPN_SATCHEL_CHARGE"]
+	var before_names: Array[String] = []
+	for value in sim.get_local_player_loadout():
+		before_names.append(String((value as Dictionary).get("name", "")))
+	assert_eq(before_names, expected_names,
+		"the production world promoted the PLAYER_INFO-style canonical profile")
+
+	var armory_world := FirstOpenArmoryWorldProxy.new(world)
+	add_child_autofree(armory_world)
+	var overlay := Control.new()
+	add_child_autofree(overlay)
+	overlay.size = Vector2(800, 600)
+	var host := ArmoryHost.new()
+	add_child_autofree(host)
+	host.setup(armory_world, null, overlay)
+	assert_true(host.try_open(), "the production world catalog reaches first armory open")
+	var menu := overlay.get_node("ArmoryMenu") as NovaMnuMenu
+	var primary := menu.find_child("PRIMARY", true, false) as NovaMnuCombo
+	var accessory := menu.find_child("ACCESSORY", true, false) as NovaMnuCombo
+	assert_gt(primary.get_selected(), 0, "the current primary is not NONE on first visit")
+	assert_gt(accessory.get_selected(), 0, "the current satchel is not NONE on first visit")
+
+	menu.find_child("ACCEPT", true, false).emit_signal("pressed")
+	var after_names: Array[String] = []
+	for value in sim.get_local_player_loadout():
+		after_names.append(String((value as Dictionary).get("name", "")))
+	assert_eq(after_names, expected_names,
+		"accepting the untouched first-open rows preserves the exact canonical kit")
+	world.unload()
+	NovaStrings.clear()
 
 
 func test_clear_color_environment_renders_the_witnessed_frame_clear() -> void:
@@ -1357,6 +1527,72 @@ func test_controller_net_id_does_not_alias_a_wire_handle() -> void:
 	assert_eq(world.present_item_fx(model, NovaMissionData.KIND_ITEM, DBUGGY_ITEM), 0)
 	assert_eq(effects.attached_spawns.size(), 0,
 			"event a is a simulation net id, not the presentation wire handle")
+
+
+func test_synthetic_controller_effects_are_scoped_to_their_wire_sibling() -> void:
+	const PLAYER_CONTROL_ITEM := 101291
+	var world := _make_item_fx_world()
+	add_child_autofree(world)
+	var effects := FxWorldStub.new()
+	world.add_child(effects)
+	var db := ItemFxDbStub.new()
+	db.attribs[PLAYER_CONTROL_ITEM] = 0x40
+	db.effects[PLAYER_CONTROL_ITEM] = {
+		"particlefx": {
+			"effect": "Effect_whiteExhaust",
+			"userpoint": "FX00",
+		},
+	}
+	var placer := ItemFxPlacerStub.new()
+	placer.item_db = db
+	world.configure_item_fx(effects, placer)
+
+	var siblings: Array[ItemFxModelStub] = []
+	for wire_handle in [0x1004, 0x1005]:
+		var model := ItemFxModelStub.new()
+		model.set_meta("entity_ref", {
+			"kind": NovaMissionData.KIND_ITEM,
+			"origin_kind": 0xff,
+			"index": 0xffffff,
+			"bms_id": 0,
+			"wire_handle": wire_handle,
+			"item_id": PLAYER_CONTROL_ITEM,
+		})
+		world.add_child(model)
+		siblings.append(model)
+		assert_eq(world.present_item_fx(
+				model, NovaMissionData.KIND_ITEM, PLAYER_CONTROL_ITEM), 0)
+
+	world.consume_runtime_effects([{
+		"kind": "vehicle_control_started",
+		"a": 0,
+		"b": 0,
+		"c": -1,
+		"wire_handle": 0x1004,
+	}])
+	assert_eq(effects.attached_spawns.size(), 1,
+			"mounting one synthetic emplacement starts only that sibling's effect")
+	assert_eq(String(effects.attached_spawns[0].owner),
+			"itemfx:%d:0" % siblings[0].get_instance_id())
+
+	world.consume_runtime_effects([{
+		"kind": "vehicle_control_stopped",
+		"a": 0,
+		"b": 0,
+		"c": -1,
+		"wire_handle": 0x1004,
+	}, {
+		"kind": "vehicle_control_started",
+		"a": 0,
+		"b": 0,
+		"c": -1,
+		"wire_handle": 0x1005,
+	}])
+	assert_eq(effects.stopped_groups, [1])
+	assert_eq(effects.attached_spawns.size(), 2)
+	assert_eq(String(effects.attached_spawns[1].owner),
+			"itemfx:%d:0" % siblings[1].get_instance_id(),
+			"the shared synthetic origin cannot activate a neighboring attachment")
 
 
 func test_static_item_effects_spawn_world_bound_from_value_descriptors() -> void:

@@ -44,6 +44,10 @@ var rescope_serial := 0
 var clip := 0              # rounds in the magazine
 var reserve := 0           # carried pool, rounds
 var kick := 0              # recoil kick intensity 0..20 [orig: MountSlot+0x5B]
+# The PowerThrow windup, feeding the HUD charge bar [orig: g_fireChargeStartTick
+# @0xB76800 read by HUD_DrawPowerThrowChargeBar @0x599830].
+var windup_active := false
+var windup_held_ticks := 0
 # The parent emplacement's named PANM controls while this player owns its
 # embedded UseGun slot. Values are wrapped uint16 BAM high words.
 var emplaced_controls_valid := false
@@ -84,6 +88,8 @@ static func from_state_dict(d: Dictionary) -> PlayerWeaponView:
 	out.clip = int(d.get("clip", 0))
 	out.reserve = int(d.get("reserve", 0))
 	out.kick = int(d.get("kick", 0))
+	out.windup_active = bool(d.get("windup_active", false))
+	out.windup_held_ticks = int(d.get("windup_held_ticks", 0))
 	out.emplaced_controls_valid = bool(
 			d.get("emplaced_controls_valid", false))
 	out.emplaced_gun_yaw = int(d.get("emplaced_gun_yaw", 0))

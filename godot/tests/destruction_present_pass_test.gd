@@ -85,6 +85,16 @@ class IndexStub:
 		return nodes.get(bms_id)
 
 
+class DynamicIndexStub:
+	extends IndexStub
+	var by_wire_handle: Dictionary = {}
+	var wire_resolve_calls: Array[int] = []
+
+	func resolve_wire_handle(wire_handle: int):
+		wire_resolve_calls.append(wire_handle)
+		return by_wire_handle.get(wire_handle)
+
+
 class ItemDbStub:
 	extends RefCounted
 
@@ -414,6 +424,163 @@ func test_zero_bms_husks_use_distinct_spawn_origins_for_identity_and_lookup() ->
 	assert_true(first_visual.visible)
 	assert_true(second_visual.visible,
 			'each canonical owner retains its own intact-visibility restore state')
+
+
+func test_synthetic_husks_use_distinct_wire_handles_for_identity_and_lookup() -> void:
+	var sim := SimStub.new()
+	var fx := FxStub.new()
+	var world := WorldStub.new()
+	var index := DynamicIndexStub.new()
+	var placer := PlacerStub.new()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var first := Node3D.new()
+	var first_visual := Node3D.new()
+	first.add_child(first_visual)
+	container.add_child(first)
+	var second := Node3D.new()
+	var second_visual := Node3D.new()
+	second.add_child(second_visual)
+	container.add_child(second)
+	index.by_wire_handle[0x1004] = first
+	index.by_wire_handle[0x1005] = second
+	# Pre-fix fallback: both synthetic children collapse to this same authored
+	# identity because they have no BMS id and share the non-BMS origin sentinel.
+	index.by_kind_index['255:16777215'] = first
+	sim.events = {
+		'husk_swaps': [{
+			'bms_id': 0,
+			'spawn_origin': DestructionPresentPass.SYNTHETIC_SPAWN_ORIGIN,
+			'wire_handle': 0x1004,
+			'item_id': 11,
+		}, {
+			'bms_id': 0,
+			'spawn_origin': DestructionPresentPass.SYNTHETIC_SPAWN_ORIGIN,
+			'wire_handle': 0x1005,
+			'item_id': 11,
+		}],
+	}
+	var presenter = DestructionPresentPass.new()
+	presenter.setup(sim, container, index, placer, ItemDbStub.new(), world,
+			Callable(), func(): return fx)
+
+	presenter.present()
+
+	assert_eq(index.wire_resolve_calls, [0x1004, 0x1005],
+			'each attachment child resolves through its packed runtime handle')
+	assert_eq(placer.built.size(), 2,
+			'distinct synthetic entities own distinct husk cache entries')
+	assert_false(first_visual.visible)
+	assert_false(second_visual.visible)
+	presenter.teardown()
+	assert_true(first_visual.visible)
+	assert_true(second_visual.visible,
+			'each dynamic owner retains its own intact-visibility restore state')
+
+
+func test_missing_synthetic_husk_node_never_falls_back_to_static_zero_id() -> void:
+	var sim := SimStub.new()
+	var index := DynamicIndexStub.new()
+	var placer := PlacerStub.new()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	# BMS id zero is valid for an authored static. A missing runtime wire node
+	# must not carve this unrelated instance or resolve through the sentinel.
+	placer.batched_transforms[0] = Transform3D.IDENTITY
+	var authored_zero := Node3D.new()
+	add_child_autofree(authored_zero)
+	index.by_kind_index['255:16777215'] = authored_zero
+	sim.events = {
+		'husk_swaps': [{
+			'bms_id': 0,
+			'spawn_origin': DestructionPresentPass.SYNTHETIC_SPAWN_ORIGIN,
+			'wire_handle': 0x1004,
+			'item_id': 11,
+		}],
+	}
+	var presenter = DestructionPresentPass.new()
+	presenter.setup(sim, container, index, placer, ItemDbStub.new(), WorldStub.new(),
+			Callable(), Callable(), null, index)
+
+	presenter.present()
+
+	assert_eq(index.wire_resolve_calls, [0x1004])
+	assert_true(index.resolve_calls.is_empty(),
+			'runtime identity never falls through to an authored origin lookup')
+	assert_true(placer.hidden.is_empty(),
+			'a missing wire node cannot hide the authored static with BMS id zero')
+	assert_true(placer.built.is_empty(),
+			'no unattached husk graft is built for a retired runtime row')
+	assert_eq(presenter.get_stats().no_husk, 1)
+
+
+func test_synthetic_wreck_families_use_distinct_moving_wire_anchors() -> void:
+	var sim := SimStub.new()
+	var fx := FxStub.new()
+	var world := WorldStub.new()
+	var index := DynamicIndexStub.new()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var first := Node3D.new()
+	var second := Node3D.new()
+	container.add_child(first)
+	container.add_child(second)
+	first.position = Vector3(1, 2, 3)
+	second.position = Vector3(7, 8, 9)
+	index.by_wire_handle[0x1004] = first
+	index.by_wire_handle[0x1005] = second
+	var effects: Array = []
+	for wire_handle in [0x1004, 0x1005]:
+		for family in [1, 2, 3]:
+			effects.append({
+				'effect': 'Effect_Family%d' % family,
+				'family': family,
+				'attach_net_id': 0,
+				'attach_bms_id': 0,
+				'attach_wire_handle': wire_handle,
+				'attach_spawn_origin': DestructionPresentPass.SYNTHETIC_SPAWN_ORIGIN,
+				'pos': Vector3(100, 100, 100),
+			})
+	# Even when a payload happens to carry a valid dynamic identity, family zero
+	# remains the one-shot transient path.
+	effects.append({
+		'effect': 'Effect_Transient',
+		'family': 0,
+		'attach_net_id': 0,
+		'attach_bms_id': 0,
+		'attach_wire_handle': 0x1004,
+		'attach_spawn_origin': DestructionPresentPass.SYNTHETIC_SPAWN_ORIGIN,
+		'pos': Vector3(20, 30, 40),
+	})
+	sim.events = {'effects': effects}
+	var presenter = DestructionPresentPass.new()
+	presenter.setup(sim, container, index, PlacerStub.new(), ItemDbStub.new(), world,
+			Callable(), func(): return fx, null, index)
+
+	presenter.present()
+
+	assert_eq(fx.owned_spawns.size(), 6,
+			'all attached death/fire/other banks stay owned for zero-net children')
+	assert_eq(fx.spawns.size(), 1, 'family-zero effects remain transient')
+	assert_eq(fx.spawns[0]['position'], Vector3(20, 30, 40))
+	assert_eq(index.wire_resolve_calls,
+			[0x1004, 0x1004, 0x1004, 0x1005, 0x1005, 0x1005])
+	for wire_handle in [0x1004, 0x1005]:
+		var node: Node3D = index.by_wire_handle[wire_handle]
+		for family in [1, 2, 3]:
+			var key := 'wreck:wire:%d:%d' % [wire_handle, family]
+			assert_true(world.anchors.has(key),
+					'each sibling/family pair owns a distinct effect group')
+			assert_eq(world.anchor_position(key), node.global_transform)
+		var fire_key := 'wreck:wire:%d:2' % wire_handle
+		assert_true(presenter.has_active_wreck_fire(fire_key),
+				'family 2 enters the per-owner wreck crackle set')
+	first.position = Vector3(-3, 4, 5)
+	second.position = Vector3(12, -2, 6)
+	assert_eq(world.anchor_position('wreck:wire:4100:1'), first.global_transform)
+	assert_eq(world.anchor_position('wreck:wire:4101:3'), second.global_transform,
+			'owned effects follow the live WirePresent nodes after they move')
+	presenter.teardown()
 
 
 func test_batched_husk_and_wreck_anchor_follow_the_live_present_pose() -> void:

@@ -20,6 +20,17 @@ static func scale_point(design: Vector2, surface: Vector2) -> Vector2:
 		floor((design.y * surface.y + DESIGN_HEIGHT * 0.5) / DESIGN_HEIGHT))
 
 
+## Convert an output-pixel delta back into virtual design units. Adding this to an
+## authored anchor before scale_point() preserves exact pixel-relative placement at
+## every surface size (integer pixel deltas commute with its round-to-nearest).
+static func pixel_delta_to_design(delta: Vector2, surface: Vector2) -> Vector2:
+	if surface.x <= 0.0 or surface.y <= 0.0:
+		return Vector2.ZERO
+	return Vector2(
+		delta.x * DESIGN_WIDTH / surface.x,
+		delta.y * DESIGN_HEIGHT / surface.y)
+
+
 ## Scale a design-space rect by scaling both corners as points (matching the original,
 ## which scales x1,y1 and x2,y2 independently, then takes the difference as the size).
 static func scale_rect(design: Rect2, surface: Vector2) -> Rect2:

@@ -17,6 +17,19 @@ func test_scale_point_scaled_surface() -> void:
 	assert_eq(HudLayout.scale_point(Vector2(512, 384), surface), Vector2(1024, 768))
 
 
+func test_output_pixel_delta_stays_exact_across_surface_sizes() -> void:
+	var anchor := Vector2(341, 512)
+	for surface in [Vector2(1024, 768), Vector2(1600, 900), Vector2(1920, 1080)]:
+		var anchor_px := HudLayout.scale_point(anchor, surface)
+		var label_design: Vector2 = anchor + HudLayout.pixel_delta_to_design(
+				Vector2(0, -15), surface)
+		var label_px := HudLayout.scale_point(label_design, surface)
+		assert_eq(label_px.x, anchor_px.x,
+				"a vertical output-pixel offset preserves x at %s" % surface)
+		assert_eq(label_px.y, anchor_px.y - 15,
+				"the label stays exactly 15 output pixels above at %s" % surface)
+
+
 func test_rect_from_corners() -> void:
 	# Health rect corners from the fixture: 2,739,141,757.
 	assert_eq(HudLayout.rect_from_corners(2, 739, 141, 757), Rect2(2, 739, 139, 18))

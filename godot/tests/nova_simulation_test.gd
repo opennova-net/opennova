@@ -102,14 +102,15 @@ func test_nvg_inset_scope_drop_refusal_and_restore_latch() -> void:
 	var sim := NovaSimulation.new()
 	assert_true(sim.load_from_mission_data(mission))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
-	sim.set_local_player_weapon({
+	var weapon := {
 		"name": "WPN_INSET_NVG_TEST",
 		"actions": [{"name": "idle", "delaystart": 0, "delayend": 0}],
 		"flags": 0x1,
 		"flags2": 0x200,
 		"clipsize": 30,
 		"startrounds": 60,
-	}, {})
+	}
+	sim.set_local_player_weapon(weapon, {})
 	sim.step()
 	assert_true(sim.request_local_player_scope_toggle())
 	for _i in range(7):
@@ -123,10 +124,17 @@ func test_nvg_inset_scope_drop_refusal_and_restore_latch() -> void:
 		sim.step()
 	assert_false(sim.request_local_player_scope_toggle(),
 			"Inset scope-up is refused while NVG remains active")
+	sim.rebake_local_player_weapon(weapon, {})
 
 	assert_false(sim.request_local_player_nvg_toggle())
 	assert_true(bool(sim.get_local_player_view().get("scope_engaged", false)),
-			"disabling NVG consumes the one-shot scope restore latch")
+			"a render-only same-weapon rebake preserves the scope restore latch")
+
+	assert_true(sim.request_local_player_nvg_toggle())
+	sim.set_local_player_weapon(weapon, {})
+	assert_false(sim.request_local_player_nvg_toggle())
+	assert_false(bool(sim.get_local_player_view().get("scope_engaged", true)),
+			"a real weapon mount invalidates the stale scope restore latch")
 	sim.free()
 
 
@@ -241,6 +249,64 @@ func _present_field_for_origin(sim: NovaSimulation, kind: int, index: int,
 				and int(snapshot[base + NovaSimulation.PF_INDEX]) == index:
 			return int(snapshot[base + field])
 	return -1
+
+
+func _mounted_npc_right_hand_verdict(seat_type: int) -> int:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var mount := md.add_entity(
+			NovaMissionData.KIND_ITEM, 101294,
+			Vector3(0, 8, 0), Vector3.ZERO)
+	var npc := md.add_entity(
+			NovaMissionData.KIND_ORGANIC, 105311,
+			Vector3(0, 8, 0), Vector3.ZERO)
+	assert_false(mount.is_empty())
+	assert_false(npc.is_empty())
+	assert_true(md.set_entity_property_int(
+			NovaMissionData.KIND_ORGANIC, int(npc["index"]),
+			"waypoint_id", 125))
+	assert_true(md.set_entity_property_int(
+			NovaMissionData.KIND_ORGANIC, int(npc["index"]),
+			"wp_number", int(mount["bms_id"])))
+	var source_names := {
+		1: "sitex00",
+		2: "ctrlx00",
+		3: "UseGun",
+		5: "drvrx00",
+	}
+	var sim := NovaSimulation.new()
+	sim.enable_listen_server(true)
+	sim.set_item_seat_specs([{
+		"type_id": 1294,
+		"mount_config_valid": true,
+		"mount_config": 6,
+		"seats": [{
+			"type": seat_type,
+			"bone_index": 6,
+			"position": Vector3.ZERO,
+			"source_name": String(source_names.get(seat_type, "")),
+		}],
+	}])
+	assert_true(sim.load_from_mission_data(md))
+	sim.step()
+	var verdict := _present_field_for_origin(
+			sim, NovaMissionData.KIND_ORGANIC, int(npc["index"]),
+			NovaSimulation.PF_RIGHT_HAND_COLLAPSED)
+	sim.free()
+	return verdict
+
+
+func test_mounted_npc_right_hand_predicate_excludes_passengers() -> void:
+	# Retail parentSlot codes: sitex=1 keeps the hand/weapon, while ctrlx=2,
+	# UseGun=3, and drvrx=5 zero BN17 for non-player organics.
+	for row in [
+		{"seat": 1, "collapsed": 0, "name": "Passenger"},
+		{"seat": 2, "collapsed": 1, "name": "Controller"},
+		{"seat": 3, "collapsed": 1, "name": "Gunner"},
+		{"seat": 5, "collapsed": 1, "name": "Driver"},
+	]:
+		assert_eq(_mounted_npc_right_hand_verdict(int(row["seat"])),
+				int(row["collapsed"]), "%s seat predicate" % row["name"])
 
 
 func test_aim_overlay_exports_the_retail_authored_pitch_sign() -> void:
@@ -908,6 +974,8 @@ func test_mounted_rendered_head_matrix_matches_collision_and_authoritative_shot(
 		sim.free()
 		return
 	assert_eq(int(snapshot[row_base + NovaSimulation.PF_AIM_OVERLAY_VALID]), 1)
+	assert_eq(int(snapshot[row_base + NovaSimulation.PF_RIGHT_HAND_COLLAPSED]), 1,
+			"the mounted NPC exports retail's BN17 final-row verdict")
 	var packed_body := Vector3(
 			snapshot[row_base + NovaSimulation.PF_AIM_BODY_PITCH_DEG],
 			snapshot[row_base + NovaSimulation.PF_AIM_BODY_YAW_DEG],
@@ -941,6 +1009,18 @@ func test_mounted_rendered_head_matrix_matches_collision_and_authoritative_shot(
 	await get_tree().process_frame
 
 	var skeleton: Skeleton3D = model.get_skeleton()
+	# Inspect the same composed pose once without the clip verdict to capture the
+	# animated joint, then restore the snapshot's mounted verdict.
+	model.set_right_hand_collapsed(false)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	skeleton.force_update_all_bone_transforms()
+	var authored_hand_joint := (skeleton.global_transform
+			* skeleton.get_bone_global_pose(16).origin)
+	model.set_right_hand_collapsed(true)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	skeleton.force_update_all_bone_transforms()
 	# Existing native fixture witness: CharModel COBJ 14/head authors
 	# center=(3578,65,54371) in signed 16.16 collision space. The retail
 	# fixed-to-render sandwich maps local collision (x,y,z) to the skeleton's
@@ -951,19 +1031,36 @@ func test_mounted_rendered_head_matrix_matches_collision_and_authoritative_shot(
 			* skeleton.get_bone_global_pose(14)
 			* skeleton.get_bone_global_rest(14).affine_inverse())
 	var rendered_head_center: Vector3 = rendered_head_matrix * head_center_model
+	var rendered_hand_matrix := (skeleton.global_transform
+			* skeleton.get_bone_global_pose(16)
+			* skeleton.get_bone_global_rest(16).affine_inverse())
+	assert_true(rendered_hand_matrix.basis.x.is_zero_approx()
+			and rendered_hand_matrix.basis.y.is_zero_approx()
+			and rendered_hand_matrix.basis.z.is_zero_approx(),
+			"render skinning receives retail's zero-scale BN17 basis")
+	assert_true(rendered_hand_matrix.origin.is_equal_approx(authored_hand_joint),
+			"render skinning collapses BN17 at the animated joint, never world origin")
 
 	var collision_head := Vector3.INF
+	var collision_hand := Vector3.INF
 	for value in sim.get_hitbox_debug().get("organics", []):
 		var section: Dictionary = value
 		if int(section.get("entity_handle", -1)) == enemy_handle \
 				and int(section.get("section", -1)) == 14:
 			collision_head = section.get("pos", Vector3.INF)
-			break
+		if int(section.get("entity_handle", -1)) == enemy_handle \
+				and int(section.get("section", -1)) == 16:
+			collision_hand = section.get("pos", Vector3.INF)
 	assert_ne(collision_head, Vector3.INF,
 			"authoritative collision exposes mounted head section 14")
 	if collision_head != Vector3.INF:
 		assert_lt(collision_head.distance_to(rendered_head_center), 0.01,
 				"rendered final head bone matrix and collision section 14 are identical")
+	assert_ne(collision_hand, Vector3.INF,
+			"authoritative collision exposes mounted right-hand section 16")
+	if collision_hand != Vector3.INF:
+		assert_true(collision_hand.is_zero_approx(),
+				"authoritative COBJ 16 retains retail's separate all-zero final row")
 
 	var health_before := int(card.get("health", 0))
 	var incoming := rendered_head_matrix.basis.x.normalized()
@@ -1014,9 +1111,33 @@ func test_weapon_event_batch_does_not_cross_lifecycle_boundaries() -> void:
 
 	sim.set_local_player_weapon(def, clips)
 	sim.step()
+	var before_rebake: Dictionary = sim.get_local_player_weapon_state()
+	# The FP model resolve explicitly rebakes the SAME weapon once its viewmodel
+	# loads. Queued presentation and the live action slot survive that late bind.
+	sim.rebake_local_player_weapon(def, clips)
+	var after_rebake: Dictionary = sim.get_local_player_weapon_state()
+	assert_eq(int(after_rebake.get("current", -1)), int(before_rebake.get("current", -2)))
+	assert_eq(int(after_rebake.get("next", -1)), int(before_rebake.get("next", -2)))
+	assert_eq(int(after_rebake.get("play_serial", -1)),
+		int(before_rebake.get("play_serial", -2)))
+	assert_false(sim.drain_local_player_weapon_events().is_empty(),
+		"an explicit same-weapon rebake preserves queued presentation")
+	sim.step()
+	# A real mount is a new epoch even when the def name is unchanged.
 	sim.set_local_player_weapon(def, clips)
 	assert_true(sim.drain_local_player_weapon_events().is_empty(),
-		"remount discards the previous weapon's queued presentation")
+		"a same-name real mount discards the previous epoch's presentation")
+	var remounted: Dictionary = sim.get_local_player_weapon_state()
+	assert_eq(int(remounted.get("current", -1)), 0)
+	assert_eq(int(remounted.get("next", -1)), 0)
+	assert_eq(int(remounted.get("play_serial", -1)), 0)
+	sim.step()
+	# A different-weapon mount has the same epoch boundary.
+	var def_b: Dictionary = def.duplicate(true)
+	def_b["name"] = "WPN_EVENT_LIFECYCLE_B"
+	sim.set_local_player_weapon(def_b, clips)
+	assert_true(sim.drain_local_player_weapon_events().is_empty(),
+		"a new-weapon mount discards the previous weapon's queued presentation")
 	sim.step()
 	sim.clear_local_player_weapon()
 	assert_true(sim.drain_local_player_weapon_events().is_empty(),
@@ -1026,6 +1147,50 @@ func test_weapon_event_batch_does_not_cross_lifecycle_boundaries() -> void:
 	sim.restart()
 	assert_true(sim.drain_local_player_weapon_events().is_empty(),
 		"restart cannot age a pre-rewind event across the logic-tick reset")
+	sim.free()
+
+
+func test_restart_clears_powerthrow_charge_and_input_latches() -> void:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	var def := {
+		"name": "WPN_RESTART_POWERTHROW",
+		"actions": [
+			{"name": "idle", "delaystart": 0, "delayend": 0},
+			{"name": "fire", "delaystart": 0, "delayend": 0},
+			{"name": "recoil", "delaystart": 0, "delayend": 0},
+		],
+		"flags": 1 << 31,
+		"clipsize": 1,
+		"startrounds": 0,
+	}
+	sim.set_local_player_weapon(def, {})
+	sim.step() # advance off tick zero so the idle sentinel cannot mask the windup
+	sim.set_local_player_weapon_input(true, true, false)
+	for _tick in range(5):
+		sim.step()
+	var wound: Dictionary = sim.get_local_player_weapon_state()
+	assert_true(bool(wound.get("windup_active", false)))
+	assert_gt(int(wound.get("windup_held_ticks", 0)), 0)
+
+	sim.restart()
+	var rewound: Dictionary = sim.get_local_player_weapon_state()
+	assert_false(bool(rewound.get("windup_active", true)))
+	assert_eq(int(rewound.get("windup_held_ticks", -1)), 0)
+	var fired_before := int(rewound.get("fired_serial", 0))
+	var rounds_before := int(rewound.get("round_ring_count", 0))
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	sim.step() # stale held input must not recreate the windup
+	assert_false(bool(sim.get_local_player_weapon_state().get("windup_active", true)))
+	sim.set_local_player_weapon_input(false, false, false)
+	for _tick in range(6):
+		sim.step()
+	var settled: Dictionary = sim.get_local_player_weapon_state()
+	assert_eq(int(settled.get("fired_serial", -1)), fired_before)
+	assert_eq(int(settled.get("round_ring_count", -1)), rounds_before)
 	sim.free()
 
 
@@ -1045,6 +1210,10 @@ func test_armory_reads_and_clears_authoritative_local_loadout() -> void:
 		"weapon-table load exposes the entity's stamped default instead of the FP fallback")
 	assert_false(sim.has_explicit_spawn_loadout(),
 		"the engine's WPN_M4AUTO fallback is not an authored spawn kit")
+	var fallback_loadout: Array = sim.get_local_player_loadout()
+	assert_eq(fallback_loadout.size(), 1,
+		"the canonical transport exposes the effective default kit")
+	assert_eq(String((fallback_loadout[0] as Dictionary).get("name", "")), "WPN_M4AUTO")
 	assert_true(sim.set_local_player_class(7),
 		"profile class can commit without replacing the current weapon kit")
 	assert_eq(sim.get_local_player_class(), 7)
@@ -1054,6 +1223,10 @@ func test_armory_reads_and_clears_authoritative_local_loadout() -> void:
 
 	assert_true(sim.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 6))
 	assert_eq(sim.get_local_player_class(), 6, "accepted class is authoritative on reopen")
+	var accepted_loadout: Array = sim.get_local_player_loadout()
+	assert_eq(accepted_loadout.size(), 1)
+	assert_eq(int((accepted_loadout[0] as Dictionary).get("ammo_primary", 0)), -1,
+		"unspecified canonical ammo remains the retail fallback sentinel")
 	var inv: Dictionary = sim.get_local_player_inventory()
 	assert_true(bool(inv.get("valid", false)), "the ACCEPT rebuilt the slot pool")
 	assert_eq(String(inv.get("equipped_name", "")), "WPN_M4AUTO",
@@ -1061,6 +1234,53 @@ func test_armory_reads_and_clears_authoritative_local_loadout() -> void:
 	assert_true(sim.apply_local_player_loadout([], 9), "the all-NONE kit is a valid apply")
 	assert_eq(sim.get_local_player_class(), 9, "NONE still commits the selected class")
 	assert_eq(sim.get_local_player_weapon_name(), "", "NONE clears the equipped AdmDef")
+	assert_true(sim.get_local_player_loadout().is_empty(),
+		"an explicit all-NONE kit remains empty instead of falling back to M4")
+	sim.free()
+
+
+func test_same_name_armory_accept_refills_the_live_weapon_slot() -> void:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/def")), OK)
+	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
+	var weapons := NovaWeaponDatabase.new()
+	assert_eq(weapons.load_from_resource_root(root, "weapon.def"), OK)
+	var m4_index := weapons.find_weapon("WPN_M4AUTO")
+	assert_gte(m4_index, 0)
+	var m4: Dictionary = weapons.get_weapon(m4_index)
+	assert_true(sim.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 8))
+	sim.set_local_player_weapon(m4, {})
+	sim.step()
+	var full_clip := int(sim.get_local_player_weapon_state().get("clip", -1))
+	sim.set_local_player_weapon_input(false, true, false)
+	sim.step()
+	sim.set_local_player_weapon_input(false, false, false)
+	var spent_clip := int(sim.get_local_player_weapon_state().get("clip", -1))
+	assert_lt(spent_clip, full_clip, "the live M4 spent a round before reopening armory")
+
+	assert_true(sim.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 8))
+	var inventory: Dictionary = sim.get_local_player_inventory()
+	var equipped_combo := int(inventory.get("equipped_combo", -1))
+	var rebuilt_clip := -1
+	for value in inventory.get("slots", []):
+		var slot: Dictionary = value
+		if int(slot.get("combo", -2)) == equipped_combo:
+			rebuilt_clip = int(slot.get("clip", -1))
+			break
+	assert_gt(rebuilt_clip, spent_clip, "ACCEPT rebuilt the same named slot at full clip")
+	sim.set_local_player_weapon(m4, {})
+	var mounted: Dictionary = sim.get_local_player_weapon_state()
+	assert_eq(int(mounted.get("clip", -1)), rebuilt_clip,
+		"same-name real mount reads the rebuilt authoritative inventory")
+	assert_eq(int(mounted.get("current", -1)), 0)
+	assert_eq(int(mounted.get("next", -1)), 0)
+	assert_false(bool(mounted.get("windup_active", true)))
+	assert_false(bool(sim.get_local_player_view().get("scope_engaged", true)))
 	sim.free()
 
 
@@ -1305,6 +1525,7 @@ func test_item_seat_specs_mount_command_125_spawn() -> void:
 	assert_true(md.set_entity_property_int(NovaMissionData.KIND_ORGANIC, int(soldier["index"]), "wp_number", int(vehicle["bms_id"])))
 
 	var sim := NovaSimulation.new()
+	sim.enable_listen_server(true)
 	sim.set_item_seat_specs([
 		{
 			"type_id": 1294,
@@ -1315,6 +1536,28 @@ func test_item_seat_specs_mount_command_125_spawn() -> void:
 		}
 	])
 	assert_true(sim.load_from_mission_data(md), "loaded command-125 mission with seat specs")
+	var started: Dictionary = {}
+	for effect_v in sim.drain_effects():
+		var effect: Dictionary = effect_v
+		if String(effect.get("kind", "")) == "vehicle_control_started":
+			started = effect
+			break
+	assert_false(started.is_empty(),
+			"command-125 controller mount emits the occupied-item lifecycle edge")
+	sim.step()
+	var expected_vehicle_handle := -1
+	var snapshot := sim.get_present_snapshot()
+	var stride := sim.get_present_stride()
+	for base in range(0, snapshot.size(), stride):
+		if int(snapshot[base + NovaSimulation.PF_TYPE_ID]) == 1294:
+			expected_vehicle_handle = int(
+					snapshot[base + NovaSimulation.PF_WIRE_HANDLE])
+			break
+	assert_gte(expected_vehicle_handle, 0)
+	assert_eq(int(started.get("wire_handle", -1)), expected_vehicle_handle,
+			"binding names the packed identity used by dynamic presentation")
+	assert_eq(int(started.get("d", -1)), expected_vehicle_handle,
+			"the generic effect payload retains the same packed identity")
 	var soldier_idx := _first_organic_ai_index(sim)
 	assert_true(soldier_idx >= 0, "found the soldier's AI row")
 	var pos := sim.get_entity_position(soldier_idx)
@@ -1785,8 +2028,21 @@ func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> vo
 	assert_gte(mounted_idx, 0)
 	var personal_def: Dictionary = weapons.get_weapon(personal_idx)
 	var mounted_def: Dictionary = weapons.get_weapon(mounted_idx)
-	sim.set_local_player_weapon(personal_def, {})
+	# Exercise the merge seam with a PowerThrow-shaped personal def while the
+	# authoritative inventory still selects WPN_M4AUTO. A UseGun handoff must
+	# cancel its windup before borrowing the parent's persistent slot.
+	var powerthrow_personal: Dictionary = personal_def.duplicate(true)
+	powerthrow_personal["flags"] = int(personal_def.get("flags", 0)) | (1 << 31)
+	sim.set_local_player_weapon(powerthrow_personal, {})
 	sim.drain_local_player_weapon_events()
+	sim.step() # move beyond tick zero, the windup's idle sentinel
+	sim.set_local_player_weapon_input(true, true, false)
+	for _tick in range(5):
+		sim.step()
+	var wound_before_mount: Dictionary = sim.get_local_player_weapon_state()
+	assert_true(bool(wound_before_mount.get("windup_active", false)))
+	var personal_fired_before := int(wound_before_mount.get("fired_serial", 0))
+	var personal_rounds_before := int(wound_before_mount.get("round_ring_count", 0))
 	var personal_clip := int(sim.get_local_player_weapon_state().get("clip", -1))
 	var inventory_clip := int(
 			sim.get_local_player_inventory().get("slots", [])[0].get("clip", -1))
@@ -1794,7 +2050,8 @@ func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> vo
 	assert_true(sim.local_player_toggle_mount())
 	assert_eq(sim.get_local_player_weapon_name(), "WPN_M4AUTO",
 			"local UseGun stages the parent slot instead of assigning it immediately")
-	# A simultaneous trigger edge cannot overwrite the pending mount action.
+	# The still-held PowerThrow plus a simultaneous trigger edge cannot overwrite
+	# the pending mount action.
 	sim.set_local_player_weapon_input(true, true, false)
 	sim.step()
 	sim.set_local_player_weapon_input(false, false, false)
@@ -1808,10 +2065,30 @@ func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> vo
 	assert_true(bool(mount_event.get("preserve_slot_state", false)),
 			"the host must not reset the emplacement's persistent slot")
 	assert_eq(sim.get_local_player_weapon_name(), "WPN_AVENGER")
+	var handed_off: Dictionary = sim.get_local_player_weapon_state()
+	assert_false(bool(handed_off.get("windup_active", true)),
+			"UseGun input suppression cancels the outgoing PowerThrow windup")
+	assert_eq(int(handed_off.get("fired_serial", -1)), personal_fired_before)
+	assert_eq(int(handed_off.get("round_ring_count", -1)), personal_rounds_before,
+			"releasing through the handoff cannot leak a charged personal round")
 	sim.set_local_player_weapon(mounted_def, {}, true)
 	var mounted_before: Dictionary = sim.get_local_player_weapon_state()
 	assert_eq(int(mounted_before.get("clip", -1)),
 			int(mounted_def.get("clipsize", -2)))
+	var mounted_slot_before_rebake := {
+		"current": int(mounted_before.get("current", -1)),
+		"next": int(mounted_before.get("next", -1)),
+		"phase": int(mounted_before.get("phase", -1)),
+		"clip": int(mounted_before.get("clip", -1)),
+	}
+	sim.rebake_local_player_weapon(mounted_def, {
+		"anim_wpn_idle": PackedFloat32Array([0.2]),
+	}, true)
+	var mounted_after_rebake: Dictionary = sim.get_local_player_weapon_state()
+	for field in mounted_slot_before_rebake:
+		assert_eq(int(mounted_after_rebake.get(field, -2)),
+				int(mounted_slot_before_rebake[field]),
+				"late mounted-def rebake preserves parent slot %s" % field)
 
 	sim.set_local_player_weapon_input(true, true, false)
 	var fired_before := int(mounted_before.get("fired_serial", 0))
@@ -2509,6 +2786,216 @@ func test_collision_uses_effective_lod0_and_never_first_live_lod() -> void:
 		(sim.get_hitbox_debug().get("entities", [])[0] as Dictionary)
 		.get("tris", PackedVector3Array()))
 	assert_eq(after, before, "LOD1 PANM never transforms model-level COBJ")
+	sim.free()
+
+
+func test_listen_snapshot_exports_authoritative_part_anim_channels() -> void:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var placed := md.add_entity(
+			NovaMissionData.KIND_ITEM, 105004, Vector3.ZERO, Vector3.ZERO)
+	var ssn := int(placed.get("bms_id", 0))
+	assert_gt(ssn, 0)
+	assert_false(md.add_event(0, 0, 0).is_empty())
+	assert_false(md.add_event_action(0, {
+		"action_type": 21,
+		"action_sub_type": 34,
+		"param1": ssn,
+		"param2": 1,
+		"param3": 1,
+		"param4": 65536,
+	}).is_empty())
+	var sim := NovaSimulation.new()
+	sim.enable_listen_server(true)
+	sim.set_item_seat_specs([{
+		"type_id": 5004,
+		"seats": [{
+			"type": 2,
+			"position": Vector3.ZERO,
+			"source_name": "ctrlx00",
+		}],
+	}])
+	assert_true(sim.load_from_mission_data(md))
+	for _tick in range(80):
+		sim.step()
+	assert_eq(_present_field_for_origin(
+			sim, NovaMissionData.KIND_ITEM, int(placed["index"]),
+			NovaSimulation.PF_ACTIVE1), 1)
+	assert_eq(_present_field_for_origin(
+			sim, NovaMissionData.KIND_ITEM, int(placed["index"]),
+			NovaSimulation.PF_PHASE1), 65535,
+			"SP/host presentation receives the authoritative PLAYPARTANIM pose")
+	sim.free()
+
+
+func test_listen_snapshot_attachment_follows_animated_userpoint() -> void:
+	# Build a deterministic PLAYPARTANIM track on the M1A1's real turret part,
+	# then hang the synthetic ewep from a userpoint owned by that part. A rigid
+	# parent-local reconstruction stays at the authored point; the authoritative
+	# mounted pose carries it four metres with the live part.
+	var data := NovaObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(
+			"res://../fixtures/3dp/dm1a1/dm1a1.3di")), OK)
+	var anchor_index := -1
+	var anchor_info := {}
+	for index in range(data.get_user_point_count()):
+		var candidate: Dictionary = data.get_user_point_info(index)
+		if String(candidate.get("name", "")).to_lower() == "ewep01":
+			anchor_index = index
+			anchor_info = candidate
+			break
+	assert_gte(anchor_index, 0, "M1A1 fixture has its authored ewep01 attachment point")
+	if anchor_index < 0:
+		return
+	var anchor_part := int(anchor_info.get("subobject", -1))
+	assert_gte(anchor_part, 0, "ewep01 is bound to a model part")
+	if anchor_part < 0:
+		return
+	for index in range(data.get_part_anim_count(0) - 1, -1, -1):
+		assert_true(data.delete_part_anim(0, index))
+	var anim := data.add_part_anim(0, anchor_part)
+	assert_eq(anim, 0)
+	assert_true(data.set_part_anim_channel_enabled(
+			0, anim, "translation", true))
+	assert_true(data.set_part_anim_channel_mode(
+			0, anim, "translation", "x", "control_register", 0))
+	assert_true(data.set_part_anim_channel_values(
+			0, anim, "translation", "x", 0.0, 4.0, 0.0))
+
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var placed := md.add_entity(
+			NovaMissionData.KIND_ITEM, 101291, Vector3.ZERO, Vector3.ZERO)
+	var ssn := int(placed.get("bms_id", 0))
+	assert_gt(ssn, 0)
+	assert_false(md.add_event(0, 0, 0).is_empty())
+	assert_false(md.add_event_action(0, {
+		"action_type": 21,
+		"action_sub_type": 34,
+		"param1": ssn,
+		"param2": 1,
+		"param3": 1,
+		"param4": 65536,
+	}).is_empty())
+	assert_false(md.add_event(0, 0, 0).is_empty())
+	assert_false(md.add_event_trigger(1, {
+		"main_type": 4,
+		"sub_type": 1,
+		"param1": 7,
+		"param2": 1,
+	}).is_empty())
+	assert_false(md.add_event_action(1, {
+		"action_type": 20,
+		"param1": ssn,
+	}).is_empty())
+
+	var sim := NovaSimulation.new()
+	sim.enable_listen_server(true)
+	sim.set_item_seat_specs([{
+		"type_id": 1291,
+		"model_data": data,
+		"seats": [{
+			"type": 2,
+			"position": Vector3.ZERO,
+			"source_name": "ctrlx00",
+		}],
+		"emplacement_attachments": [{
+			"item_id": 101419,
+			"stored_slot": 1,
+			"anchor_found": true,
+			"bone_index": anchor_index + 1,
+			"source_name": String(anchor_info.get("name", "")),
+			"local": MissionSeatDiagnostics.seat_local_from_user_point_position(
+					anchor_info.get("position", Vector3.ZERO)),
+		}],
+	}])
+	assert_true(sim.load_from_mission_data(md))
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/items.def")), OK)
+	sim.resolve_item_traits(item_db)
+
+	# First fold materializes the synthetic row before the scripted animation has
+	# reached its endpoint. Retain that baseline so the assertion cannot pass on
+	# a root-only follow implementation.
+	sim.step()
+	var stride := sim.get_present_stride()
+	var snapshot := sim.get_present_snapshot()
+	var initial_position := Vector3.INF
+	for record in range(snapshot.size() / stride):
+		var base := record * stride
+		if int(snapshot[base + NovaSimulation.PF_TYPE_ID]) == 1419:
+			initial_position = Vector3(
+					snapshot[base + NovaSimulation.PF_POS_X],
+					snapshot[base + NovaSimulation.PF_POS_Y],
+					snapshot[base + NovaSimulation.PF_POS_Z])
+			break
+	assert_true(initial_position.is_finite(), "synthetic ewep reached the listen client")
+	for _tick in range(79):
+		sim.step()
+	assert_eq(_present_field_for_origin(
+			sim, NovaMissionData.KIND_ITEM, int(placed["index"]),
+			NovaSimulation.PF_PHASE1), 65535,
+			"carrier reached the scripted live PANM endpoint")
+	snapshot = sim.get_present_snapshot()
+	var final_position := Vector3.INF
+	for record in range(snapshot.size() / stride):
+		var base := record * stride
+		if int(snapshot[base + NovaSimulation.PF_TYPE_ID]) == 1419:
+			final_position = Vector3(
+					snapshot[base + NovaSimulation.PF_POS_X],
+					snapshot[base + NovaSimulation.PF_POS_Y],
+					snapshot[base + NovaSimulation.PF_POS_Z])
+			break
+	assert_true(final_position.is_finite(), "animated attachment remains presented")
+	if initial_position.is_finite() and final_position.is_finite():
+		assert_gt(final_position.distance_to(initial_position), 3.9,
+				"presented attachment follows its animated userpoint, not only the parent root")
+		var expected: Vector3 = anchor_info.get("position", Vector3.ZERO) + Vector3(4, 0, 0)
+		assert_lt(final_position.distance_to(expected), 0.002,
+				"host snapshot uses the authoritative mounted child pose")
+
+	# A zero-health vehicle compact legitimately retires the decoded attachment
+	# subtree. Stop restores the authoritative baseline; its fresh decoded view
+	# must replay the load stream because this child has no live compact of its own.
+	sim.set_mission_variable(7, 1)
+	var retired := false
+	for _tick in range(80):
+		sim.step()
+		snapshot = sim.get_present_snapshot()
+		retired = true
+		for record in range(snapshot.size() / stride):
+			if int(snapshot[record * stride + NovaSimulation.PF_TYPE_ID]) == 1419:
+				retired = false
+				break
+		if retired:
+			break
+	assert_true(retired,
+			"decoded zero-health carrier retires the synthetic child subtree")
+
+	sim.restart()
+	snapshot = sim.get_present_snapshot()
+	var restored := false
+	for record in range(snapshot.size() / stride):
+		if int(snapshot[record * stride + NovaSimulation.PF_TYPE_ID]) == 1419:
+			restored = true
+			break
+	assert_true(restored,
+			"restart immediately replays restored NoNetworkCallback attachments")
+
+	# The first live 0x0A after replay must use the re-applied authoritative
+	# items.def classes. If restore had reverted the carrier callback width, this
+	# fold would desynchronize and lose/scatter the following child row.
+	sim.step()
+	snapshot = sim.get_present_snapshot()
+	var live_carrier := false
+	var live_child := false
+	for record in range(snapshot.size() / stride):
+		var type_id := int(snapshot[record * stride + NovaSimulation.PF_TYPE_ID])
+		live_carrier = live_carrier or type_id == 1291
+		live_child = live_child or type_id == 1419
+	assert_true(live_carrier and live_child,
+			"post-restart 0x0A keeps carrier and attachment class widths aligned")
 	sim.free()
 
 

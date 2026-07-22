@@ -93,6 +93,33 @@ func test_production_seat_specs_extract_target_phrase_set_config() -> void:
 			"target itemDef+0x86c phrase_set reaches the production seat spec")
 
 
+func test_emplacement_specs_resolve_userpoints_and_keep_missing_anchor_fallback() -> void:
+	var data := NovaObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(
+			"res://../fixtures/3dp/B50Cal/B50Cal.3di")), OK)
+	var rows := [
+		{"kind": 0, "key": "addeweap", "userpoint": "Usegun", "item_id": 710101},
+		{"kind": 1, "key": "addeweapG", "userpoint": "missing", "item_id": 710102},
+	]
+	var resolved := MissionSeatDiagnostics.emplacement_specs_from_model(
+			data, rows, true)
+	assert_eq(resolved.size(), 2, "a missing retail anchor still spawns at parent root")
+	assert_true(resolved[0]["anchor_found"])
+	assert_eq(resolved[0]["bone_index"], 6,
+			"attachment bone is the 1-based source USRP row")
+	assert_eq(resolved[0]["subobject"],
+			int(data.get_user_point_info(5)["subobject"]))
+	assert_eq(resolved[0]["local"],
+			MissionSeatDiagnostics.seat_local_from_user_point_position(
+					data.get_user_point_info(5)["position"]))
+	assert_false(resolved[1]["anchor_found"])
+	assert_eq(resolved[1]["bone_index"], 0)
+	assert_eq(resolved[1]["local"], Vector3.ZERO,
+			"retail's unresolved-anchor fallback copies the parent root")
+	assert_eq(resolved[1]["key"], "addeweapG",
+			"variant metadata survives model resolution")
+
+
 # An animatable placed entity: play_part_anim marks it for the registry, set_part_phase + Node3D
 # transform/visible let the present pass drive it.
 class FakeModel:
@@ -130,6 +157,20 @@ func test_setup_promotes_and_counts() -> void:
 	assert_eq(count, 2, "one organic + the auto-spawned host player")
 	assert_not_null(rt.get_sim(), "sim created")
 	assert_eq(rt.entity_count(), 2)
+
+
+func test_wire_presenter_resets_with_runtime_stop() -> void:
+	var w := _make_world(Transform3D.IDENTITY)
+	var rt := MissionRuntime.new()
+	add_child_autofree(rt)
+	var placer := RefCounted.new()
+	rt.setup(w.mission, w.container, {"placer": placer})
+	var wire_present := rt.get_wire_presenter()
+	assert_not_null(wire_present)
+	var reset_wire := Callable(wire_present, "reset_runtime_state")
+	assert_true(rt.simulation_restarted.is_connected(reset_wire),
+			"Stop clears wire handle/type caches before restored rows present again")
+	rt.stop()
 
 
 func test_presentation_clock_survives_setup_and_forwards_immediately() -> void:

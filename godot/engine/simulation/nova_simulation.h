@@ -128,6 +128,10 @@ public:
 				PF_AIM_ANGLES + 9 * PF_AIM_CLASS_STRIDE,
 		PF_EWEAP_GUNYAW,
 		PF_EWEAP_GUNPITCH,
+		// Retail's derived skeletal clipping verdict. For a non-player organic in
+		// controller/gunner/driver (never passenger), presentation zero-scales
+		// BN17 at its animated joint while collision emits its literal zero row.
+		PF_RIGHT_HAND_COLLAPSED,
 		PF_STRIDE
 	};
 
@@ -323,6 +327,10 @@ private:
 	// per-tick records because several logic ticks can run per render frame; the
 	// snapshot's monotonic serials remain diagnostics/rebuild state.
 	opennova::world::WeaponFsmDef weapon_def_{};
+	// Name of the weapon record weapon_def_ was baked from: the same-weapon
+	// re-install (the FP model resolve late-binding clip lengths) is a def
+	// rebake and must never reset the live action slot.
+	String weapon_def_name_;
 	opennova::world::WeaponSlotState weapon_slot_{};
 	// The local UseGun path borrows the parent's embedded MountSlot through the
 	// normal holster/commit/draw lifecycle. Nonlocal occupants still take the
@@ -357,6 +365,10 @@ private:
 	void queue_local_usegun_weapon_switch(bool p_same_category);
 	bool weapon_active_ = false;
 	bool weapon_fire_held_ = false;
+	// PowerThrow windup [orig: g_fireChargeStartTick @ 0xB76800]; 0 = idle. The
+	// release stamps pending_throw_charge_ for the next fire commit.
+	uint32_t power_throw_start_tick_ = 0;
+	uint8_t pending_throw_charge_ = 0;
 	bool weapon_fire_pressed_ = false;
 	bool weapon_reload_pressed_ = false;
 	uint64_t weapon_play_serial_ = 0;
@@ -380,6 +392,10 @@ private:
 	float weapon_ring_take_length(const char *p_key);
 	// Serve-then-advance play take; returns the served variant index (0 for ringless).
 	int weapon_ring_take_variant(const String &p_key);
+	void install_local_player_weapon(const Dictionary &p_def,
+	                                 const Dictionary &p_clip_seconds,
+	                                 bool p_preserve_slot_state,
+	                                 bool p_allow_same_weapon_rebake);
 	uint64_t weapon_fired_serial_ = 0;
 	// Per-shooter tag-2 sequence. Unlike the presentation serial above, this
 	// survives weapon remounts/switches and resets only with the mission/player
@@ -547,6 +563,10 @@ private:
 	// dispatches via its own items.def serialize callback [orig: itemDef+356 @0x50f2e2].
 	// Shared into the view's classifier lambda; survives per-load runtime rebuilds.
 	std::shared_ptr<const std::unordered_map<uint16_t, opennova::EntityClass>> item_class_table_;
+	// Mission-scoped source for the authoritative half of the same contract.
+	// World::restore rewinds registry entities to the pre-trait promotion baseline,
+	// so restart reapplies this database before rebuilding the decoded client view.
+	Ref<NovaItemDatabase> item_traits_db_;
 	// Install item_class_table_ on runtime_'s view (no-op until both exist). Called from
 	// resolve_item_traits, finish_load (per-load runtime rebuild), and enable_join.
 	void install_item_class_resolver();
@@ -768,14 +788,17 @@ public:
 	// a plain float is accepted as a single-variant convenience). The lengths seed the
 	// per-slot rings and the Anim_InitActions bake consumes them ring-wise: one
 	// serve-then-advance read per 'auto' delay field [orig: @ 0x541fa0;
-	// Anim_GetDurationTicks @ 0x53ee10]. Resets the slot to a fresh idle with a full
-	// magazine unless p_preserve_slot_state is true (UseGun presentation rebake;
-	// the parent/personal slot has already been selected by the switch commit).
-	// Retail bakes a def ONCE globally, so its rings persist across
-	// re-equips; this per-equip reset rides the existing per-equip re-bake shape,
-	// D-WPN-6 family).
+	// Anim_GetDurationTicks @ 0x53ee10]. A normal install is a real mount and
+	// resets the personal slot unless p_preserve_slot_state selects an already-live
+	// UseGun parent/personal slot.
 	void set_local_player_weapon(const Dictionary &p_def, const Dictionary &p_clip_seconds,
 	                             bool p_preserve_slot_state = false);
+	// Render-side late binding of .adm clip lengths for the already-mounted def.
+	// This is the only path allowed to preserve a same-name live action slot and
+	// queued presentation [orig: FP model resolve @ 0x4ded60 is not a mount].
+	void rebake_local_player_weapon(const Dictionary &p_def,
+	                                const Dictionary &p_clip_seconds,
+	                                bool p_preserve_slot_state = false);
 	void clear_local_player_weapon();
 	void set_local_player_first_person_model_available(bool p_available);
 	// Per-frame trigger state: fire held + edge, raw reload edge (the dispatch
@@ -882,6 +905,10 @@ public:
 	// Inventory snapshot for hosts/tests: {equipped_combo, equipped_name, slots:
 	// [{combo, name, clip}], pools: {class_name: rounds}, carry_flags}.
 	Dictionary get_local_player_inventory() const;
+	// Canonical, unexpanded current tuples for the armory host. Retail preselects
+	// visible parent rows from g_armoryLoadoutBufferByClass, never from the expanded
+	// weaponSlotArrayBase [orig: populate_ammo_type_combo_boxes @ 0x564930].
+	TypedArray<Dictionary> get_local_player_loadout() const;
 
 	// --- WAC scripts ------------------------------------------------------
 	// Install a compiled program on the script VM (NovaWacProgram). Applied now if
@@ -1174,6 +1201,12 @@ public:
 	// first, capped at RoundSim::kDebugTrailCap. Covers every resolved outcome
 	// including face-miss fly-ons (the "why didn't that register" case).
 	Dictionary get_round_debug() const;
+	// Per-frame visual snapshot of item-modeled throwables: tracer-cadence flying
+	// rounds with a TrcrID model plus placed devices. Entries: {key, item_id, pos (godot),
+	// rotation_deg (pitch, yaw, roll — placer convention)}; the enemy-team item
+	// swap follows the viewer team [orig: the S2C 0x59 dual TrcrID words +
+	// the spawner's team pick @ 0x4ec79b; world-wac-ai-re §27].
+	Array get_throwable_visuals() const;
 
 	// The round hit-detection reality for the F3 hitbox view:
 	// { entities: [ { entity_handle, pos, bound_radius, husk, has_faces,

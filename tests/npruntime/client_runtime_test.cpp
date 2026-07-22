@@ -447,7 +447,42 @@ bool run_host_startup_seeds_mounted_no_callback_carrier() {
 }
 
 // ---------------------------------------------------------------------------------------------------
-// (D) Host-owner registration boundary: a player created by tick_connections must be visible to
+// (D) Production HostOwner startup: the advertised ClaymorePref mission attribute feeds the
+// authoritative throwable rule. This is a host-only simulation setting, not a client-side decode.
+// ---------------------------------------------------------------------------------------------------
+bool run_host_startup_maps_claymore_preference() {
+	{
+		w::World world;
+		np::HostOwner owner;
+		owner.ctx.world = &world;
+		np::HostConfig cfg;
+		cfg.config.mp_attributes = 0x8000u;
+		cfg.socket_mode = np::SocketMode::Socketless;
+		np::start_host_session(owner, cfg);
+		if (!expect(world.throwables.team_trigger_claymore,
+		            "host startup enables same-team claymore triggers for mp_attributes 0x8000"))
+			return false;
+	}
+
+	{
+		w::World world;
+		world.throwables.team_trigger_claymore = true;
+		np::HostOwner owner;
+		owner.ctx.world = &world;
+		np::HostConfig cfg;
+		cfg.config.mp_attributes = 0x3A06u;
+		cfg.socket_mode = np::SocketMode::Socketless;
+		np::start_host_session(owner, cfg);
+		if (!expect(!world.throwables.team_trigger_claymore,
+		            "host startup disables same-team claymore triggers for default mp_attributes 0x3A06"))
+			return false;
+	}
+
+	return true;
+}
+
+// ---------------------------------------------------------------------------------------------------
+// (E) Host-owner registration boundary: a player created by tick_connections must be visible to
 // adapter registration before its first authoritative body tick and per-connection 0x0A fan.
 // ---------------------------------------------------------------------------------------------------
 bool run_host_pump_hook_observes_remote_before_first_tick() {
@@ -514,6 +549,7 @@ bool run_host_pump_hook_observes_remote_before_first_tick() {
 int main() {
 	const bool ok = run_roundtrip() && run_host_as_client() &&
 	                run_host_startup_seeds_mounted_no_callback_carrier() &&
+	                run_host_startup_maps_claymore_preference() &&
 	                run_host_pump_hook_observes_remote_before_first_tick();
 	std::fprintf(stderr, ok ? "OK\n" : "FAIL\n");
 	return ok ? 0 : 1;
