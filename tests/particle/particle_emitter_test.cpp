@@ -78,14 +78,26 @@ bool test_init_randomizes_retail_emission_window_and_rate() {
 	return expect(near(e.emit_rate, 20.263929f, 0.0001f), __func__);
 }
 
-bool test_init_randomizes_orbital_speed_adjustment() {
+bool test_init_converts_authored_orbital_speed_and_adjustment_to_radians() {
 	using namespace opennova::particle;
-	ParticleDef def = make_minimal_def();
-	def.orbitalspeed = 10.0f;
-	def.orbitalspeed_adj = 2.0f;
-	Emitter e;
-	emitter_init(e, &def, {0, 0, 0}, 142u);
-	return expect(near(e.orbit_speed, 8.758553f, 0.0001f), __func__);
+	constexpr float kDegreesToRadians = 0.01745329251994329577f;
+
+	ParticleDef smoke = make_minimal_def();
+	smoke.orbitalspeed = 5.0f;
+	Emitter smoke_emitter;
+	emitter_init(smoke_emitter, &smoke, {0, 0, 0}, 142u);
+	if (!expect(near(smoke_emitter.orbit_speed, 5.0f * kDegreesToRadians, 0.0001f),
+			"base orbit speed is converted from authored degrees")) {
+		return false;
+	}
+
+	ParticleDef fire = make_minimal_def();
+	fire.orbitalspeed = 30.0f;
+	fire.orbitalspeed_adj = 15.0f;
+	Emitter fire_emitter;
+	emitter_init(fire_emitter, &fire, {0, 0, 0}, 142u);
+	return expect(near(fire_emitter.orbit_speed, 20.6891475f * kDegreesToRadians, 0.0001f),
+			"orbit adjustment is randomized in degrees before conversion");
 }
 
 bool test_rand_unit_includes_retail_one_endpoint() {
@@ -627,14 +639,14 @@ bool test_orbit_rotates_around_axis() {
 	// CParticleEmitter_UpdateAllParticles @ 0x5f3be0 — when `move & 4` (=
 	// `move_flag::Orbit` per the 0x848800 reorder) is set, the relative
 	// position vector and velocity rotate around `def.orbital_axis` by an
-	// angle proportional to time. Our portable simulator uses
-	// `def.orbitalspeed * dt` per frame; we verify that after one full 2π
-	// orbit the particle returns near its starting offset.
+	// angle proportional to time. The portable simulator converts authored
+	// degrees/sec to radians/sec before applying `orbit_speed * dt`; verify
+	// that after one full 2π orbit the particle returns near its start.
 	using namespace opennova::particle;
 	ParticleDef def = make_minimal_def();
 	def.move = move_flag::Orbit;
 	def.orbital_axis = {0.0f, 1.0f, 0.0f};
-	def.orbitalspeed = 6.2831853f;  // 2π rad/sec → one full orbit per second
+	def.orbitalspeed = 360.0f;  // authored degrees/sec: one full orbit per second
 	def.gravity = 0.0f;
 	def.drag = 0.0f;
 	def.age = 100.0f;
@@ -669,6 +681,36 @@ bool test_orbit_rotates_around_axis() {
 	if (!expect(std::fabs(full.x - 5.0f) < 0.5f && std::fabs(full.z) < 0.5f,
 			"full orbit returns near starting offset")) {
 		std::fprintf(stderr, "  pos=(%f,%f,%f)\n", full.x, full.y, full.z);
+		return false;
+	}
+	return true;
+}
+
+bool test_he_explosion_orbit_uses_authored_degrees() {
+	// The shipped Crazy_Fire HE explosion layer authors 30 degrees/sec. Treating
+	// that value as radians/sec produces about 4.77 turns in one second: the
+	// visible hurricane failure this regression protects against.
+	using namespace opennova::particle;
+	ParticleDef def = make_minimal_def();
+	def.move = move_flag::Orbit;
+	def.orbital_axis = {0.0f, 1.0f, 0.0f};
+	def.orbitalspeed = 30.0f;
+	def.gravity = 0.0f;
+	def.drag = 0.0f;
+	def.age = 100.0f;
+	def.emit_rate = 0.0f;
+
+	Emitter e;
+	emitter_init(e, &def, {0, 0, 0}, 1u);
+	emitter_spawn_one(e);
+	e.particles[0].position = {5.0f, 0.0f, 0.0f};
+	e.particles[0].velocity = {0.0f, 0.0f, 0.0f};
+
+	emitter_advance(e, 1.0f);
+	const Vec3 position = e.particles[0].position;
+	if (!expect(near(position.x, 4.330127f, 0.001f) && near(position.z, -2.5f, 0.001f),
+			"HE orbit advances 30 degrees in one second")) {
+		std::fprintf(stderr, "  pos=(%f,%f,%f)\n", position.x, position.y, position.z);
 		return false;
 	}
 	return true;
@@ -1069,7 +1111,7 @@ int main() {
 	int failures = 0;
 	if (!test_init())                       ++failures;
 	if (!test_init_randomizes_retail_emission_window_and_rate()) ++failures;
-	if (!test_init_randomizes_orbital_speed_adjustment()) ++failures;
+	if (!test_init_converts_authored_orbital_speed_and_adjustment_to_radians()) ++failures;
 	if (!test_rand_unit_includes_retail_one_endpoint()) ++failures;
 	if (!test_manual_spawn())               ++failures;
 	if (!test_nonpositive_and_nonfinite_lifetimes_are_rejected()) ++failures;
@@ -1101,6 +1143,7 @@ int main() {
 	if (!test_kill_plane_above_kills_when_particle_rises()) ++failures;
 	if (!test_kill_plane_below_kills_at_threshold_or_lower()) ++failures;
 	if (!test_orbit_rotates_around_axis())  ++failures;
+	if (!test_he_explosion_orbit_uses_authored_degrees()) ++failures;
 	if (!test_orbit_axis_y_keeps_y_constant()) ++failures;
 	if (!test_against_real_fixture())       ++failures;
 	if (failures != 0) {
