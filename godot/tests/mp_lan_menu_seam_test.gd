@@ -142,8 +142,6 @@ func test_lan_join_emits_selected_server() -> void:
 	var mp := MpMenuHost.new()
 	watch_signals(mp)
 	mp._servers = [{"name": "biggy", "host_ip": "192.168.1.10", "port": 32768}]
-	assert_eq(mp._format_server_row({"name": "biggy", "players": 1, "max_players": 4}),
-			"biggy (1/4)", "pre-auth LAN rows do not invent a mission label")
 	# A single-click selection relays the row index through the menu's aggregate signal.
 	mp._on_widget_value_changed("LAN_GAME_LIST", "list", 0, "biggy (1/4)")
 	mp._on_lan_join()
@@ -182,8 +180,8 @@ func test_swapping_lan_sessions_disconnects_the_previous_discovery_source() -> v
 
 	var server_list := menu.find_child("LAN_GAME_LIST", true, false) as NovaMnuList
 	assert_eq(server_list.get_item_count(), 1)
-	assert_true(server_list.get_item_text(0).contains("current"),
-		"events from a replaced discovery session cannot overwrite the current rows")
+	assert_eq(server_list.get_item_text(0), "current (1/4)",
+		"the current source wins and pre-auth rows do not invent a mission label")
 
 
 func test_shell_accepts_companion() -> void:

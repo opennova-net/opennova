@@ -194,7 +194,9 @@ bool run_session(std::vector<CaptureDatagram> &recorded) {
 
 	uint32_t tick = 1;
 
-	// Phase A: handshake + the §5.2a spawn-gate burst -> InMatch + deployed.
+	// Phase A: handshake + the retail post-auth mission exchange + the §5.2a spawn-gate burst ->
+	// InMatch + deployed. The fixture deliberately covers the newly retained 0x01 -> 0x02 -> 0x7B
+	// flow and ServerAuth initialization tags instead of the old abbreviated self-session.
 	ship_joiner(client.start());
 	bool ready = false;
 	for (int f = 0; f < 400 && !ready; ++f) {

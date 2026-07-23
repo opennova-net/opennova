@@ -10,8 +10,9 @@ namespace opennova::np {
 
 std::vector<uint8_t> build_lan_discovery_probe(uint32_t client_index) {
 	// Retail LAN enumeration uses the ordinary JO game-session identity built
-	// by CNapiNetwork_Init @ 0x4ca4a0. This helper lives in the neutral wire
-	// layer; no matchmaking/service configuration participates in discovery.
+	// by CNapiNetwork_Init [orig: NapiNPSession_SendAnnouncePacket @0x61fa00;
+	// CNapiNetwork_Init @0x4ca4a0]. This helper lives in the neutral wire layer;
+	// no matchmaking/service configuration participates in discovery.
 	const ClientHello hello = make_jointoperations_client_hello(client_index);
 	return nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
 }
