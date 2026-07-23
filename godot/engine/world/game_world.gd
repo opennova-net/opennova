@@ -576,7 +576,7 @@ func _on_net_mission(mission_name: String) -> void:
 	_mission_forces_indoors = (int(mission.get_info().get("attrib_flags", 0)) & 0x10) != 0
 	_prepare_autonomous_weather()
 	_set_water_host_rendering_enabled(true)
-	print("GameWorld(net): map %s -> terrain %s loaded" % [mission_name, mission.get_terrain_ref()])
+	print_verbose("GameWorld(net): map %s -> terrain %s loaded" % [mission_name, mission.get_terrain_ref()])
 
 
 # The ONE mission path — the file entry (load_mission) and the in-memory
@@ -692,7 +692,7 @@ func _place_mission_objects(mission: NovaMissionData, timeline: PerfTimeline = n
 		wire_container.name = MissionObjectPlacer.CONTAINER_NAME
 		add_child(wire_container)
 		_mission_stats = {}
-		print("GameWorld(joiner): mission objects render wire-direct — local placement skipped.")
+		print_verbose("GameWorld(joiner): mission objects render wire-direct — local placement skipped.")
 		return
 	var options := { "environment_node": _env }
 	if timeline != null:
@@ -704,7 +704,7 @@ func _place_mission_objects(mission: NovaMissionData, timeline: PerfTimeline = n
 	# inside Game_StartMission's model loops @ 0x524d9c/0x524e09, 0x524f32/0x524fe0].
 	options["progress"] = func() -> void: load_progress.emit(26)
 	_mission_stats = _placer.place(mission, self, options)
-	print("GameWorld: placed %d mission objects (%d batched / %d animated, %d unresolved, %d markers)" % [
+	print_verbose("GameWorld: placed %d mission objects (%d batched / %d animated, %d unresolved, %d markers)" % [
 		int(_mission_stats.get("placed", 0)),
 		int(_mission_stats.get("batched", 0)),
 		int(_mission_stats.get("animated", 0)),
@@ -2088,7 +2088,7 @@ func _maybe_start_nw_host(opts: Dictionary, bms_name: String) -> void:
 
 
 func _on_nw_host_registered() -> void:
-	print("GameWorld: listen host registered with the NovaWorld gate (browsable)")
+	print_verbose("GameWorld: listen host registered with the NovaWorld gate (browsable)")
 
 
 func _on_nw_host_error(message: String) -> void:
@@ -2165,7 +2165,7 @@ func _start_mission_audio(mission: NovaMissionData, bms_name: String) -> void:
 	var stats := _mission_audio.setup(mission, bms_name, self)
 	if _env != null and _env.get("time_of_day") != null:
 		_mission_audio.set_time_of_day_hhmm(float(_env.get("time_of_day")))
-	print("GameWorld: mission audio — %d/%d sound markers resolved, %d bank(s), %d ambient candidate(s), %d/%d physical channel(s) allocated" % [
+	print_verbose("GameWorld: mission audio — %d/%d sound markers resolved, %d bank(s), %d ambient candidate(s), %d/%d physical channel(s) allocated" % [
 		int(stats.get("markers_resolved", 0)),
 		int(stats.get("markers_total", 0)),
 		int(stats.get("banks_loaded", 0)),
@@ -2207,7 +2207,7 @@ func _start_effect_world() -> void:
 	# (resolved through the runtime), String keys are the per-item effect attaches
 	# (resolved to the placed node's live transform).
 	_effect_world.set_owner_position_provider(Callable(self, "_effect_owner_transform"))
-	print("GameWorld: effect world — %d effect(s) across %d .ptl file(s)" % [
+	print_verbose("GameWorld: effect world — %d effect(s) across %d .ptl file(s)" % [
 		count, _effect_world.file_count()])
 	_attach_item_effects()
 	if _runtime != null and _runtime.has_method("set_wire_node_spawned_callback"):
@@ -2340,7 +2340,7 @@ func _attach_item_effects() -> void:
 		attached += _attach_item_effect_to_static(
 				static_sources[source_index], source_index, item_db)
 	if attached > 0:
-		print("GameWorld: item effects — %d emitter(s)" % attached)
+		print_verbose("GameWorld: item effects — %d emitter(s)" % attached)
 
 
 func _on_wire_node_spawned(node: Node3D, kind: int, item_id: int) -> void:
