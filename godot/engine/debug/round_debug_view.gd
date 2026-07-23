@@ -122,7 +122,7 @@ static func describe_event(ev: Dictionary) -> String:
 	var ent := int(ev.get("entity_handle", 0xFFFF))
 	if ent != 0xFFFF:
 		var name := String(ev.get("entity_name", ""))
-		line += "  ent %d/%d%s" % [(ent >> 12) & 0xF, ent & 0xFFF,
+		line += "  ent %s%s" % [WireHandle.label(ent),
 				("  " + name) if not name.is_empty() else ""]
 	if bool(ev.get("husk", false)):
 		line += "  HUSK"
