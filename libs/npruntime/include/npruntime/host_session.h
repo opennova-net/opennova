@@ -62,7 +62,7 @@ struct HostOwner {
 
 // Attach a UdpSessionTransport to `peer`'s connection (idempotent) and, ONCE the spawn pipeline has
 // bound owned_entity, stream the joiner's NAMED dcb-bearing S2C 0x0C organic-spawn so the joiner
-// name-matches its own player (entity_name == its ClientHello.co) and learns its wire handle H (the
+// name-matches its own player (entity_name == its game ClientAuth.NA) and learns its wire handle H (the
 // admitted entity's packed handle; D.0 / §5.23; the F3 dcb-timing contract). No-ops until the
 // automatic spawn pipeline binds owned_entity, then announces exactly once.
 void admit_peer(HostOwner &owner, netsim::IDatagramSocket &sock, const PeerAddr &peer,

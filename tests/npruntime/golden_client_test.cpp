@@ -190,7 +190,7 @@ int main() {
 		            messages.size());
 
 		// --- C2S-1: the REAL client emission path produces a byte-exact 0x0C inner message ---
-		np::ClientRuntime client(ClientSession::Config::jointoperations(), "GoldenReplayClient");
+		np::ClientRuntime client("GoldenReplayClient");
 		client.seed_session(hdr.session_id, client_scrk, server_scrk, hdr.seq_num, hdr.ack_count,
 		                    sub.handle, sub.item_type_id);
 		std::vector<std::vector<uint8_t>> out = client.Client_ProcessNetworkFrame(up);

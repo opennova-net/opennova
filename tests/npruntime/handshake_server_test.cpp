@@ -16,6 +16,7 @@
 
 #include <npruntime/napi_np_protocol.h>
 #include <npruntime/ammo_table_build.h>   // build_ammo_table / resolve_weapon_round_types
+#include <npruntime/lan_discovery.h>
 #include <npruntime/weapon_table_build.h> // build_weapon_table (the D-NET-141 armory resolve)
 
 #include <def/def.h>
@@ -32,6 +33,8 @@
 #include <npwire/session_hello.h>
 #include <npwire/session_keys.h>
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <string>
@@ -79,13 +82,8 @@ std::vector<uint8_t> craft_session(std::string_view client_scrk, uint32_t seq,
 
 // Build a crafted 0x42 ClientAuth datagram with the given PN / HK (for the rejection cases).
 std::vector<uint8_t> craft_auth(const std::string &pn, uint32_t hk, uint32_t ck, std::string_view scrk) {
-	ClientAuth auth;
+	ClientAuth auth = make_jointoperations_client_auth(1, ck, hk, "TestJoiner", scrk);
 	auth.pn = pn;
-	auth.ci = 1;
-	auth.ck = ck;
-	auth.hk = hk;
-	auth.na = "jop:cus2";
-	auth.scrk = scrk;
 	return craft(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
 }
 
@@ -108,21 +106,18 @@ bool reply_has_tag(const std::vector<ProtocolMessage> &msgs, uint8_t tag) {
 // encrypted 0x83 replies.
 bool handshake(np::NapiNPServerCtx &ctx, const PeerAddr &peer, std::string_view client_scrk,
                uint32_t client_ck, std::string &out_server_scrk) {
-	ClientHello hello;
-	hello.pn = "JointOperations";
+	const std::size_t connections_before_hello = np::connection_count(ctx);
+	ClientHello hello = make_jointoperations_client_hello(1);
 	hello.co = "TestJoiner";
-	hello.ci = 1;
 	auto hdg = craft(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
 	auto rh = np::handle_server_datagram(ctx, peer, hdg.data(), hdg.size(), 1);
 	if (!expect(rh.outbound.size() == 1, "0x41 -> one ServerHello")) return false;
+	if (!expect(rh.events.empty(), "0x41 is stateless and emits no peer event")) return false;
+	if (!expect(np::connection_count(ctx) == connections_before_hello,
+	            "0x41 is stateless and creates no connection")) return false;
 
-	ClientAuth auth;
-	auth.pn = "JointOperations";
-	auth.ci = 1;
-	auth.ck = client_ck;
-	auth.hk = kHostKey;
-	auth.na = "jop:cus2";
-	auth.scrk = std::string(client_scrk);
+	ClientAuth auth = make_jointoperations_client_auth(
+			1, client_ck, kHostKey, "TestJoiner", client_scrk);
 	auto adg = craft(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
 	auto ra = np::handle_server_datagram(ctx, peer, adg.data(), adg.size(), 2);
 	if (!expect(ra.outbound.size() >= 1, "0x42 -> ServerAuth + post-handshake")) return false;
@@ -133,6 +128,119 @@ bool handshake(np::NapiNPServerCtx &ctx, const PeerAddr &peer, std::string_view 
 	ServerAuth sa;
 	if (!expect(parse_server_auth(body.data(), body.size(), sa), "0x82 parses")) return false;
 	out_server_scrk = sa.scrk;
+	return true;
+}
+
+// The socket owner broadcasts this neutral NP/NAPI 0x41 probe. A host replies
+// with its live retail ServerHello fields but does not admit the scanner; only
+// a subsequent validated 0x42 changes the player/connection count.
+bool run_lan_discovery_metadata_is_live_and_stateless() {
+	netsim::LoopbackChannel loopback;
+	np::NapiNPServerCtx ctx;
+	np::GameConfig config;
+	config.server_name = "Configured LAN Host";
+	config.game_type = 0x00010020u;
+	config.max_players = 11;
+	config.expansion = "jox99";
+	np::test::bring_up_host(ctx, np::ConnectionMode::HostClient, np::SocketMode::Lan,
+	                        kHostKey, &loopback, config);
+
+	const std::vector<uint8_t> probe = np::build_lan_discovery_probe(0x11223344u);
+	uint8_t probe_opcode = 0;
+	std::vector<uint8_t> probe_body;
+	if (!expect(nw_decode_inbound(probe.data(), probe.size(), probe_opcode, probe_body) &&
+	            probe_opcode == SESSION_OPCODE_CLIENT_HELLO,
+	            "LAN discovery probe is a framed 0x41")) return false;
+	ClientHello decoded_probe;
+	if (!expect(parse_client_hello(probe_body.data(), probe_body.size(), decoded_probe),
+	            "LAN discovery probe ClientHello parses")) return false;
+	if (!expect(decoded_probe.pn == "JOINTOPERATIONS" && decoded_probe.ci == 0x11223344u,
+	            "LAN discovery probe carries JointOperations identity and client index")) return false;
+	const std::array<uint8_t, 16> direct_join_pg =
+			{0x46, 0xD6, 0x74, 0xB0, 0xF9, 0x81, 0x5F, 0x47,
+			 0x92, 0xDA, 0xDE, 0xA7, 0x24, 0x7F, 0x14, 0x68};
+	if (!expect(decoded_probe.nvs ==
+	                    "NAPI NP Version 0.0.1 1/12/2004 - 2/20/2004 Milota Copyright 2004 NovaLogic" &&
+	            decoded_probe.co == "NovaLogic Inc, Calabasas CA U.S.A." &&
+	            decoded_probe.ap == "Jointops.exe" &&
+	            decoded_probe.bdat == "Jul 21 2009 18:54:42" &&
+	            decoded_probe.pv1 == "0.0.0 1/12/2004 EM" && decoded_probe.pv2 == "16" &&
+	            decoded_probe.pg_present && decoded_probe.pg == direct_join_pg,
+	            "LAN discovery probe matches the exact retail JO identity")) return false;
+
+	const PeerAddr scanner{0x0100007Fu, 32100};
+	const std::size_t before_scan = np::connection_count(ctx);
+	auto first = np::handle_server_datagram(ctx, scanner, probe.data(), probe.size(), 1);
+	if (!expect(first.outbound.size() == 1, "LAN discovery 0x41 receives one 0x81")) return false;
+	if (!expect(first.events.empty(), "LAN discovery 0x41 emits no peer event")) return false;
+	if (!expect(np::connection_count(ctx) == before_scan,
+	            "LAN discovery 0x41 does not register the scanner")) return false;
+
+	np::LanDiscoveryServer found;
+	if (!expect(np::parse_lan_discovery_reply(first.outbound[0].data(), first.outbound[0].size(), found),
+	            "LAN discovery parser accepts the host 0x81")) return false;
+	if (!expect(found.server_name == config.server_name, "0x81 SN reflects server_name")) return false;
+	if (!expect(found.gametype == config.game_type, "0x81 P1 reflects gametype")) return false;
+	if (!expect(found.current_players == 1, "0x81 NP counts the host loopback")) return false;
+	if (!expect(found.max_players == config.max_players, "0x81 MP reflects max_players")) return false;
+	if (!expect(found.expansion == config.expansion, "0x81 SUS2 reflects expansion")) return false;
+	if (!expect(found.session_id.empty(), "0x81 omits SUS1 when no real session user string exists")) return false;
+
+	// An unrelated service-shaped 0x81 received during the browse window must
+	// not become a clickable LAN game row merely because its flat TLV parses.
+	uint8_t first_opcode = 0;
+	std::vector<uint8_t> first_body;
+	ServerHello foreign;
+	if (!expect(nw_decode_inbound(first.outbound[0].data(), first.outbound[0].size(),
+	                              first_opcode, first_body) &&
+	                    parse_server_hello(first_body.data(), first_body.size(), foreign),
+	            "test can decode the discovered 0x81")) return false;
+	foreign.pn = "NOVAWORLDUDP";
+	const std::vector<uint8_t> foreign_reply = nw_encode_outbound(
+			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(foreign));
+	np::LanDiscoveryServer ignored;
+	if (!expect(!np::parse_lan_discovery_reply(
+	                    foreign_reply.data(), foreign_reply.size(), ignored),
+	            "LAN discovery rejects a non-JO 0x81")) return false;
+
+	const std::string scrk = "TESTCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
+	const PeerAddr joiner{0x0100007Fu, 32101};
+	auto auth = craft_auth("JOINTOPERATIONS", kHostKey, 0x12345678u, scrk);
+	auto joined = np::handle_server_datagram(ctx, joiner, auth.data(), auth.size(), 2);
+	if (!expect(!joined.outbound.empty(), "validated 0x42 admits the real joiner")) return false;
+	if (!expect(np::connection_count(ctx) == before_scan + 1,
+	            "only 0x42 adds the remote connection")) return false;
+
+	auto second = np::handle_server_datagram(ctx, scanner, probe.data(), probe.size(), 3);
+	np::LanDiscoveryServer refreshed;
+	if (!expect(second.outbound.size() == 1 &&
+	            np::parse_lan_discovery_reply(second.outbound[0].data(), second.outbound[0].size(), refreshed),
+	            "repeated LAN discovery receives a parseable 0x81")) return false;
+	if (!expect(refreshed.current_players == 2, "0x81 NP updates after admission")) return false;
+	if (!expect(np::connection_count(ctx) == before_scan + 1,
+	            "repeated discovery still creates no connection")) return false;
+
+	// Zero-valued gated fields are absent on the wire. The discovery parser
+	// must still report the live zeroes rather than ServerHello builder defaults.
+	np::NapiNPServerCtx dedicated;
+	np::GameConfig dedicated_config;
+	dedicated_config.server_name = "Empty Dedicated Host";
+	dedicated_config.game_type = 0;
+	dedicated_config.max_players = 4;
+	dedicated_config.expansion.clear();
+	np::test::bring_up_host(dedicated, np::ConnectionMode::HostOnly,
+	                        np::SocketMode::Lan, kHostKey, nullptr, dedicated_config);
+	auto empty_reply = np::handle_server_datagram(
+			dedicated, scanner, probe.data(), probe.size(), 4);
+	np::LanDiscoveryServer empty;
+	if (!expect(empty_reply.outbound.size() == 1 &&
+	            np::parse_lan_discovery_reply(empty_reply.outbound[0].data(),
+	                                          empty_reply.outbound[0].size(), empty),
+	            "empty dedicated host returns a parseable 0x81")) return false;
+	if (!expect(empty.current_players == 0 && empty.gametype == 0 && empty.expansion.empty(),
+	            "omitted NP/P1/SUS2 fields parse as live zero/empty values")) return false;
+	if (!expect(np::connection_count(dedicated) == 0,
+	            "dedicated-host discovery remains stateless")) return false;
 	return true;
 }
 
@@ -323,8 +431,8 @@ bool run_goodbye_despawns_player_entity() {
 }
 
 bool run_non_jo_peer_is_ignored() {
-	// The join legs validate the JO identity + HK echo (the @0x62b750 gate): a lobby (non-JO) PN, a
-	// non-JO 0x42, and a wrong-HK 0x42 must all be dropped with no reply and no connection.
+	// The join legs validate the complete retail JO identity + HK echo (the @0x6213b0/@0x62b750
+	// gates). Any mismatched version field is silently dropped with no reply and no connection.
 	np::NapiNPServerCtx ctx;
 	np::test::bring_up_host(ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan, kHostKey);
 	const PeerAddr peer{0x0100007Fu, 31000};
@@ -340,17 +448,55 @@ bool run_non_jo_peer_is_ignored() {
 		if (!expect(r.outbound.empty(), "lobby PN produces no JO ServerHello")) return false;
 		if (!expect(np::connection_count(ctx) == 0, "lobby PN registers no JO connection")) return false;
 	}
+	auto reject_hello = [&](ClientHello hello, uint32_t now, const char *message) {
+		auto dg = craft(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
+		auto r = np::handle_server_datagram(ctx, peer, dg.data(), dg.size(), now);
+		return expect(r.outbound.empty() && np::connection_count(ctx) == 0, message);
+	};
+	{
+		ClientHello hello = make_jointoperations_client_hello(1);
+		hello.nvs = "wrong";
+		if (!reject_hello(hello, 2, "wrong-NVS 0x41 is dropped")) return false;
+		hello = make_jointoperations_client_hello(1);
+		hello.pg[0] ^= 0xFFu;
+		if (!reject_hello(hello, 3, "wrong-PG 0x41 is dropped")) return false;
+		hello = make_jointoperations_client_hello(1);
+		hello.pv1 = "wrong";
+		if (!reject_hello(hello, 4, "wrong-PV1 0x41 is dropped")) return false;
+	}
 	// (b) non-JO ClientAuth -> no ServerAuth, no node (the join re-validates PN).
 	{
 		auto dg = craft_auth("NOVAWORLDUDP", kHostKey, 0xDEADBEEFu, scrk);
-		auto r = np::handle_server_datagram(ctx, peer, dg.data(), dg.size(), 2);
+		auto r = np::handle_server_datagram(ctx, peer, dg.data(), dg.size(), 5);
 		if (!expect(r.outbound.empty(), "non-JO 0x42 produces no ServerAuth")) return false;
 		if (!expect(np::connection_count(ctx) == 0, "non-JO 0x42 registers no connection")) return false;
 	}
+	auto reject_auth = [&](ClientAuth auth, uint32_t now, const char *message) {
+		auto dg = craft(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
+		auto r = np::handle_server_datagram(ctx, peer, dg.data(), dg.size(), now);
+		return expect(r.outbound.empty() && np::connection_count(ctx) == 0, message);
+	};
+	{
+		ClientAuth auth = make_jointoperations_client_auth(
+				1, 0xDEADBEEFu, kHostKey, "TestJoiner", scrk);
+		auth.nvs = "wrong";
+		if (!reject_auth(auth, 6, "wrong-NVS 0x42 is dropped")) return false;
+		auth = make_jointoperations_client_auth(1, 0xDEADBEEFu, kHostKey, "TestJoiner", scrk);
+		auth.pg_present = false;
+		if (!reject_auth(auth, 7, "missing-PG 0x42 is dropped")) return false;
+		auth = make_jointoperations_client_auth(1, 0xDEADBEEFu, kHostKey, "TestJoiner", scrk);
+		auth.pv1 = "wrong";
+		if (!reject_auth(auth, 8, "wrong-PV1 0x42 is dropped")) return false;
+		auth = make_jointoperations_client_auth(1, 0xDEADBEEFu, kHostKey, "TestJoiner", scrk);
+		auth.pv2 = "wrong";
+		if (!reject_auth(auth, 9, "wrong-PV2 0x42 is dropped")) return false;
+		auth = make_jointoperations_client_auth(1, 0xDEADBEEFu, kHostKey, "", scrk);
+		if (!reject_auth(auth, 10, "empty-NA 0x42 is dropped")) return false;
+	}
 	// (c) JO ClientAuth with the WRONG host key -> dropped (HK echo gate).
 	{
-		auto dg = craft_auth("JointOperations", kHostKey ^ 0x1u, 0xDEADBEEFu, scrk);
-		auto r = np::handle_server_datagram(ctx, peer, dg.data(), dg.size(), 3);
+		auto dg = craft_auth("JOINTOPERATIONS", kHostKey ^ 0x1u, 0xDEADBEEFu, scrk);
+		auto r = np::handle_server_datagram(ctx, peer, dg.data(), dg.size(), 11);
 		if (!expect(r.outbound.empty(), "wrong-HK 0x42 produces no ServerAuth")) return false;
 		if (!expect(np::connection_count(ctx) == 0, "wrong-HK 0x42 registers no connection")) return false;
 	}
@@ -364,10 +510,8 @@ bool run_handshake_rejected_when_host_down() {
 	if (!expect(ctx.np_protocol.host_running == 0, "host not running before create_session")) return false;
 	const PeerAddr peer{0x0100007Fu, 31100};
 
-	ClientHello hello;
-	hello.pn = "JointOperations";
+	ClientHello hello = make_jointoperations_client_hello(1);
 	hello.co = "EarlyBird";
-	hello.ci = 1;
 	auto dg = craft(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
 	auto r = np::handle_server_datagram(ctx, peer, dg.data(), dg.size(), 1);
 	if (!expect(r.outbound.empty(), "0x41 to a down host produces no ServerHello")) return false;
@@ -394,14 +538,12 @@ bool run_listen_host_lifecycle() {
 
 	const PeerAddr peer{0x0100007Fu, 31200};
 	const std::string scrk = "TESTCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
-	ClientHello hello;
-	hello.pn = "JointOperations";
+	ClientHello hello = make_jointoperations_client_hello(1);
 	hello.co = "RemoteJoiner";
-	hello.ci = 1;
 	auto h = craft(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
 	auto rh = np::handle_server_datagram(ctx, peer, h.data(), h.size(), 1);
 	if (!expect(rh.outbound.size() == 1, "remote 0x41 -> one ServerHello")) return false;
-	auto a = craft_auth("JointOperations", kHostKey, 0xDEADBEEFu, scrk);
+	auto a = craft_auth("JOINTOPERATIONS", kHostKey, 0xDEADBEEFu, scrk);
 	auto ra = np::handle_server_datagram(ctx, peer, a.data(), a.size(), 2);
 	if (!expect(ra.outbound.size() >= 1, "remote 0x42 -> ServerAuth + post-handshake")) return false;
 
@@ -426,7 +568,7 @@ bool run_retransmit_0x42_keeps_keys() {
 	const uint32_t ck = 0x12345678u;
 
 	auto first_auth = [&](uint32_t now, ServerAuth &out_sa) -> bool {
-		auto a = craft_auth("JointOperations", kHostKey, ck, scrk); // craft_auth uses CI = 1
+		auto a = craft_auth("JOINTOPERATIONS", kHostKey, ck, scrk); // craft_auth uses CI = 1
 		auto r = np::handle_server_datagram(ctx, peer, a.data(), a.size(), now);
 		if (!expect(r.outbound.size() >= 1, "0x42 -> ServerAuth + post-handshake")) return false;
 		uint8_t op = 0;
@@ -458,7 +600,7 @@ bool run_capacity_rejects_when_full() {
 	const std::string scrk = "TESTCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
 
 	auto join = [&](const PeerAddr &p, uint32_t ck, uint32_t now) {
-		auto a = craft_auth("JointOperations", kHostKey, ck, scrk);
+		auto a = craft_auth("JOINTOPERATIONS", kHostKey, ck, scrk);
 		return np::handle_server_datagram(ctx, p, a.data(), a.size(), now);
 	};
 
@@ -684,13 +826,9 @@ bool run_character_join_vars_parsed() {
 	np::test::bring_up_host(ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan, kHostKey);
 	const PeerAddr peer{0x0100007Fu, 30900};
 
-	ClientAuth auth;
-	auth.pn = "JointOperations";
-	auth.ci = 1;
-	auth.ck = 0x0BADF00Du;
-	auth.hk = kHostKey;
-	auth.na = "jop:cus2";
-	auth.scrk = "TESTCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
+	ClientAuth auth = make_jointoperations_client_auth(
+			1, 0x0BADF00Du, kHostKey, "TestJoiner",
+			"TESTCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB");
 	// The golden retail set, with wrinkles the parser must honor: CI0 as the full profile u32
 	// ("8126976" = 0x7C0200 — only the low u16 lands, the LoadFromConnTags WORD store), a
 	// lower-case tag name (Napi_StrCaseEqual is case-insensitive), TR=-1 (valid "auto"), and a
@@ -746,6 +884,7 @@ int main() {
 	ok = run_goodbye_despawns_player_entity() && ok;
 	ok = run_non_jo_peer_is_ignored() && ok;
 	ok = run_handshake_rejected_when_host_down() && ok;
+	ok = run_lan_discovery_metadata_is_live_and_stateless() && ok;
 	ok = run_listen_host_lifecycle() && ok;
 	ok = run_retransmit_0x42_keeps_keys() && ok;
 	ok = run_capacity_rejects_when_full() && ok;

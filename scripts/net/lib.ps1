@@ -55,6 +55,77 @@ function Find-GodotBinary {
     return $null
 }
 
+# Launch the OpenNova game project with an isolated set of NW_LAN_* variables.
+# Start-Process inherits this process's environment, so temporarily install only
+# the requested role, then restore the caller's exact LAN environment even when
+# process creation fails. The returned Process is already detached and visible.
+function Start-OpenNovaLanProcess {
+    param(
+        [Parameter(Mandatory = $true)] [hashtable] $LanEnvironment
+    )
+
+    $godot = Find-GodotBinary
+    if (-not $godot) {
+        throw "Godot 4.6.1 was not found. Set GODOT_BIN or populate a .godot-bin directory above the repo."
+    }
+
+    $projectDir = Join-Path (Get-RepoRoot) "godot"
+    if (-not (Test-Path (Join-Path $projectDir "project.godot"))) {
+        throw "OpenNova Godot project not found at: $projectDir"
+    }
+
+    foreach ($name in $LanEnvironment.Keys) {
+        if (-not ([string] $name).StartsWith("NW_LAN_", [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "Start-OpenNovaLanProcess accepts only NW_LAN_* variables (got '$name')."
+        }
+    }
+
+    # Keep this child on the local-LAN entry path even when the calling shell was
+    # previously used for online-gate, replay, or single-player development. Those
+    # alternate-mode variables are suppressed for the child and restored below.
+    $isolatedEntries = {
+        Get-ChildItem Env: | Where-Object {
+            $_.Name -like "NW_LAN_*" -or
+            $_.Name -like "NW_GATE_*" -or
+            $_.Name -like "NW_REPLAY*" -or
+            $_.Name -eq "NW_SP_MISSION"
+        }
+    }
+
+    $saved = @{}
+    foreach ($entry in @(& $isolatedEntries)) {
+        $saved[$entry.Name] = $entry.Value
+    }
+
+    try {
+        foreach ($entry in @(& $isolatedEntries)) {
+            [Environment]::SetEnvironmentVariable(
+                $entry.Name, $null, [EnvironmentVariableTarget]::Process)
+        }
+        foreach ($name in $LanEnvironment.Keys) {
+            [Environment]::SetEnvironmentVariable(
+                [string] $name, [string] $LanEnvironment[$name], [EnvironmentVariableTarget]::Process)
+        }
+
+        # No --headless/hidden flags: each child is an ordinary, visible game instance.
+        # Quote the project path because Start-Process flattens ArgumentList on Windows.
+        return Start-Process -FilePath $godot `
+            -WorkingDirectory $projectDir `
+            -ArgumentList @("--path", ('"{0}"' -f $projectDir)) `
+            -PassThru
+    }
+    finally {
+        foreach ($entry in @(& $isolatedEntries)) {
+            [Environment]::SetEnvironmentVariable(
+                $entry.Name, $null, [EnvironmentVariableTarget]::Process)
+        }
+        foreach ($name in $saved.Keys) {
+            [Environment]::SetEnvironmentVariable(
+                [string] $name, [string] $saved[$name], [EnvironmentVariableTarget]::Process)
+        }
+    }
+}
+
 # Locate dumpcap.exe: PATH first, then the standard Wireshark install dirs.
 # Returns $null if not found.
 function Find-Dumpcap {

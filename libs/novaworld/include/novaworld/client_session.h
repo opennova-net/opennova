@@ -113,11 +113,9 @@ public:
 
 		// Preset for the in-match game session: the ClientHello the client sends
 		// to a host after NWJoin, which flips the connection protocol from the
-		// lobby (NOVAWORLDUDP) to the game (JointOperations). PN/PV1/PG are the
-		// JointOperations identity. NOTE: PG is PROVISIONAL pending the
-		// StartPlaying @ 0x4d45e0 grill — sufficient to cross the proto boundary
-		// (our server rejects on PN alone) but not yet retail-valid for a real
-		// host. See docs/adr/0010 + docs/net/novaworld-net-re.md.
+		// lobby (NOVAWORLDUDP) to the game (JOINTOPERATIONS). The complete
+		// CO/AP/BDAT/PN/PG/PV1/PV2 identity is the retail CNapiNetwork_Init
+		// @ 0x4ca4a0 block, independently witnessed in the LAN ClientAuth capture.
 		static Config jointoperations();
 	};
 

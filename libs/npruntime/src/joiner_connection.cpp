@@ -5,40 +5,64 @@
 #include <npwire/session_hello.h>
 #include <npwire/session_keys.h>
 
+#include <chrono>
 #include <utility>
 
 // Verbatim port of novaworld::JoinerSession (the client mirror), with SCRK/seq/ack stored on the
 // type-2 NapiNPConnection conn_. The D.0 name-match in on_server_session is copied byte-for-byte.
 namespace opennova::np {
 
-JoinerConnection::JoinerConnection(ClientSession::Config config, std::string player_name)
-		: cfg_(std::move(config)), player_name_(std::move(player_name)) {
+namespace {
+
+// Use the initialized retail NAPI CS template's witnessed 1000-ms active-send interval (field 5)
+// for the pre-session resend cadence. Captures prove these handshake packets retransmit; the exact
+// state-machine timer xref is still ungrilled, so keep this policy tied to a known retail NAPI value.
+// [orig: CNapiGameSession_InitNPConnection @0x4d3e1f; NapiNPConnection CS field 5]
+constexpr uint64_t kHandshakeRetryMilliseconds = 1000;
+
+uint64_t steady_milliseconds() {
+	using namespace std::chrono;
+	return static_cast<uint64_t>(
+	        duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count());
+}
+
+// [orig: NetPacket_WritePositionWithPadding @0x42A360]. The golden S2C probe carries
+// padding_len=256 and retail emits a 256-byte C2S body: the two echoed position dwords followed by
+// random filler. Bound the peer-controlled allocation while preserving the witnessed body shape.
+std::vector<uint8_t> build_join_padding_echo(const JoinPaddingProbe &probe) {
+	constexpr uint32_t kMaxJoinPadding = 64u * 1024u;
+	if (probe.padding_len < 8 || probe.padding_len > kMaxJoinPadding) return {};
+
+	std::vector<uint8_t> echo(probe.padding_len, 0);
+	auto write_i32 = [&](std::size_t off, int32_t value) {
+		const uint32_t v = static_cast<uint32_t>(value);
+		echo[off + 0] = static_cast<uint8_t>(v);
+		echo[off + 1] = static_cast<uint8_t>(v >> 8);
+		echo[off + 2] = static_cast<uint8_t>(v >> 16);
+		echo[off + 3] = static_cast<uint8_t>(v >> 24);
+	};
+	write_i32(0, probe.pos_x);
+	write_i32(4, probe.pos_y);
+	for (std::size_t off = 8; off < echo.size();) {
+		const uint32_t random = make_random_session_u32();
+		for (unsigned byte = 0; byte < 4 && off < echo.size(); ++byte, ++off)
+			echo[off] = static_cast<uint8_t>(random >> (byte * 8));
+	}
+	return echo;
+}
+
+} // namespace
+
+JoinerConnection::JoinerConnection(std::string player_name)
+		: JoinerConnection(std::move(player_name), &steady_milliseconds) {}
+
+JoinerConnection::JoinerConnection(std::string player_name,
+		MonotonicMilliseconds monotonic_milliseconds)
+		: player_name_(std::move(player_name)),
+		  monotonic_milliseconds_(std::move(monotonic_milliseconds)) {
+	if (!monotonic_milliseconds_) monotonic_milliseconds_ = &steady_milliseconds;
 	conn_.type = 2;                  // client-side connection (the joiner's view of the host)
 	conn_.player_name = player_name_;
-	// Game-session 0x42 character vars — the per-side character selection the HOST folds into
-	// our player record (per-side minimap/char ids, requested side, soldier classes, avatar
-	// bytes). Without them the host stamps animSlot/NetId defaults and OTHER retail clients bind
-	// our player to a wrong-type character slot (the mirror of D-NET-146). Values = a fresh
-	// retail profile's defaults, wire-witnessed on both LAN captures (retail-ashi5a f=199140 /
-	// retail_join_v18 f=47676): CI0=512 (0x0200) CI1=33287 (0x8207) TR=-1 CTA=CTB=8 (rifleman)
-	// VCA=1 VCB=4. Only append when the caller hasn't provided its own set. [orig: client emit
-	// CNapiServerInfo_SerializeToSession @0x4c3650, type-2 chunks; host consume
-	// NapiNetConfig_LoadFromConnTags @0x4c7260 -> Server_PlayerAdd @0x51cbc0]
-	const bool has_char_vars = [&] {
-		for (const auto &v : cfg_.cu_vars) {
-			if (v.name == "CI0" || v.name == "VCA") return true;
-		}
-		return false;
-	}();
-	if (!has_char_vars) {
-		const std::pair<const char *, const char *> kCharVars[] = {
-				{"CI0", "512"}, {"CI1", "33287"}, {"TR", "-1"},  {"CTA", "8"},
-				{"CTB", "8"},   {"VCA", "1"},     {"VCB", "4"},
-		};
-		for (const auto &[name, value] : kCharVars) {
-			cfg_.cu_vars.push_back(ClientSession::Config::CuVar{name, value, /*type=*/2});
-		}
-	}
 }
 
 std::vector<uint8_t> JoinerConnection::start() {
@@ -47,30 +71,48 @@ std::vector<uint8_t> JoinerConnection::start() {
 	conn_.server_sk = 0;
 	conn_.server_scrk.clear();
 	conn_.seq = SessionSequencing{1, 0};
+	handshake_retry_clock_armed_ = false;
+	handshake_last_send_ms_ = 0;
 	pump_stage_ = 0;
+	pending_spawn_menu_request_ = false;
 	has_self_handle_ = false;
 	self_handle_ = 0;
 	spawn_ = SelfSpawn{};
+	mission_known_ = false;
+	server_name_.clear();
+	mission_name_.clear();
+	map_file_.clear();
+	expansion_.clear();
+	game_type_ = 0;
 	last_error_.clear();
 	phase_ = Phase::Hello;
-	return build_client_hello();
+	handshake_retry_datagram_ = build_client_hello();
+	handshake_last_send_ms_ = monotonic_milliseconds_();
+	handshake_retry_clock_armed_ = true;
+	return handshake_retry_datagram_;
 }
 
 std::vector<uint8_t> JoinerConnection::build_client_hello() {
-	// CO = the joiner's player name (the host echoes it into the organic-spawn entity_name — the
-	// name-match key). The identity struct-fill is shared with the lobby ClientSession (make_client_hello
-	// in novaworld/client_session.h); only the framing envelope (nw_encode_outbound) differs.
+	// The browse and connect legs use the same retail JO identity. The callsign
+	// belongs in ClientAuth.NA (not CO) and is later echoed into the organic-spawn
+	// name-match record by the host.
 	return nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO,
-	                          client_hello_to_bytes(make_client_hello(cfg_, player_name_)));
+	                          client_hello_to_bytes(make_jointoperations_client_hello(client_index_)));
 }
 
 std::vector<uint8_t> JoinerConnection::build_client_auth() {
-	ClientAuth auth = make_client_auth(cfg_, player_name_, server_hk_, conn_.client_scrk);
+	ClientAuth auth = make_jointoperations_client_auth(
+			client_index_, client_key_, server_hk_, player_name_, conn_.client_scrk);
 	// The GAME-session 0x42's NA TLV is the player CALLSIGN — the retail host's display-name
 	// source (the golden joiner's 0x0C record name equals its NA). The "jop:cus2" gate tag is
 	// the NOVAWORLD-gate connect's NA, not the game join's. [wire: retail-ashi5a f=199140
 	// na="FooPlayer" / retail_join_v18 f=47676 na="TestPlayer"; net-re §5.0b]
-	auth.na = player_name_;
+	// Retail serializes CI0/CI1/TR/CTA/CTB/VCA/VCB from the ACTIVE player profile here.
+	// They are not protocol identity and captured values vary by profile. OpenNova does not yet
+	// persist that full selection, so omit them exactly as retail's zero-value gates do and let the
+	// host's witnessed absent/invalid-field fallback choose the character. Do not replay one
+	// capture's packed registry ids as global defaults. [orig: UI_JoinSelectedSession @0x569C14;
+	// CNapiServerInfo_SerializeToSession @0x4c3650; host fallback @0x51d68b]
 	return nw_encode_outbound(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
 }
 
@@ -116,11 +158,13 @@ void JoinerConnection::on_server_hello(const std::vector<uint8_t> &body, PollRes
 	}
 	server_hk_ = sh.hk;          // echo this in ClientAuth.hk
 	phase_ = Phase::Auth;
-	out.outbound.push_back(build_client_auth());
+	handshake_retry_datagram_ = build_client_auth();
+	handshake_last_send_ms_ = monotonic_milliseconds_();
+	handshake_retry_clock_armed_ = true;
+	out.outbound.push_back(handshake_retry_datagram_);
 }
 
 void JoinerConnection::on_server_auth(const std::vector<uint8_t> &body, PollResult &out) {
-	(void)out;
 	ServerAuth sa;
 	if (!parse_server_auth(body.data(), body.size(), sa)) {
 		fail("bad ServerAuth");
@@ -137,8 +181,12 @@ void JoinerConnection::on_server_auth(const std::vector<uint8_t> &body, PollResu
 	                              // NapiNP_GetLocalConnectionId @0x4c6d40) and echoes it in the 0x48
 	                              // client-ack so the host stamps it into our 0x0C ownerConnectionId]
 	phase_ = Phase::Driving;
-	// NO auto-emit here. pump() drives the in-match spawn-gate burst; the game connection has no
-	// lobby-verify leg.
+	handshake_retry_datagram_.clear();
+	handshake_retry_clock_armed_ = false;
+	// Retail's game-session join FSM starts with this sequenced post-auth exchange. The host answers
+	// with S2C 0x02; only the C2S 0x02 response unlocks the 0x7B mission/session summary. This remains
+	// active while the binding holds world_ready_ false so a joiner can discover what it must load.
+	out.outbound.push_back(frame_inner(0x01, {}));
 }
 
 void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollResult &out) {
@@ -150,7 +198,15 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 		return; // lenient: an in-match streaming packet we can't parse is not fatal
 	}
 	for (const ProtocolMessage &m : messages) {
-		if (m.tag == 0x08) {
+		if (m.tag == 0x02) {
+			// Retail's response to the post-auth join probe. This sequenced reply is what causes the
+			// server to send the post-handshake burst containing authoritative S2C 0x7B metadata.
+			JoinPaddingProbe probe;
+			if (decode_join_padding_probe(m.payload.data(), m.payload.size(), probe)) {
+				std::vector<uint8_t> echo = build_join_padding_echo(probe);
+				if (!echo.empty()) out.outbound.push_back(frame_inner(0x02, std::move(echo)));
+			}
+		} else if (m.tag == 0x08) {
 			// Our initial-state burst carries the same g_GameType in the fixed
 			// session-config block before any live frame. Retail keeps this equal
 			// to the later 0x7B `extra` value.
@@ -158,11 +214,16 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			if (decode_session_config(m.payload.data(), m.payload.size(), config))
 				game_type_ = static_cast<uint32_t>(config.fields[3]);
 		} else if (m.tag == 0x7B) {
-			// The authoritative off-wire layout hint for later 0x0A phase-3
-			// frames. Every full-player-info record repeats g_GameType in extra.
+			// The retail post-auth source of truth for the session the joiner is about to load.
 			FullPlayerInfo info;
-			if (decode_full_player_info(m.payload.data(), m.payload.size(), info))
+			if (decode_full_player_info(m.payload.data(), m.payload.size(), info)) {
+				server_name_ = std::move(info.server_name);
+				mission_name_ = std::move(info.mission_name);
+				map_file_ = std::move(info.map_file);
 				game_type_ = info.extra;
+				expansion_ = std::move(info.game_name);
+				mission_known_ = true;
+			}
 		} else if (m.tag == 0x0C) {
 			// S2C 0x0C organic-spawn batch — the self name-match (§5.23). ALSO surface the whole
 			// batch to the NetClientView (below) so every other organic upserts too.
@@ -199,7 +260,10 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			// to 4 and starts the §5.2a world stream [orig: NapiNPServerMsg_HandlePlayerSpawnRequest
 			// @0x513260; golden retail-ashi5a S 0x11 f=201572 -> C 0x0A f=201573]. A host (ours or
 			// retail) never streams the world to a joiner that hasn't sent it (D-NET-150).
-			out.outbound.push_back(frame_inner(0x0A, {}));
+			if (world_ready_ && pump_stage_ >= 3)
+				out.outbound.push_back(frame_inner(0x0A, {}));
+			else
+				pending_spawn_menu_request_ = true;
 		}
 		// Other tags (game-start bundle scalars, world-state-load 0x0F) are not entity data.
 	}
@@ -207,7 +271,35 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 
 std::vector<std::vector<uint8_t>> JoinerConnection::pump(uint32_t /*now_tick*/) {
 	std::vector<std::vector<uint8_t>> out;
+	if (phase_ == Phase::Hello || phase_ == Phase::Auth) {
+		if (handshake_retry_datagram_.empty()) return out;
+		const uint64_t now_ms = monotonic_milliseconds_();
+		// Each initial send records its wall-clock timestamp. Keep a defensive lazy-anchor for a future
+		// caller that installs a pending leg without going through those builders.
+		if (!handshake_retry_clock_armed_) {
+			handshake_last_send_ms_ = now_ms;
+			handshake_retry_clock_armed_ = true;
+			return out;
+		}
+		if (now_ms >= handshake_last_send_ms_ &&
+		    now_ms - handshake_last_send_ms_ >= kHandshakeRetryMilliseconds) {
+			handshake_last_send_ms_ = now_ms;
+			out.push_back(handshake_retry_datagram_);
+		}
+		return out;
+	}
 	if (phase_ != Phase::Driving) return out; // only the pre-spawn drive window
+	// Retail learns the authoritative mission through 0x7B before beginning this drive. A pre-load
+	// binding additionally holds here until it has installed that mission locally.
+	if (!mission_known_ || !world_ready_) return out;
+	// If 0x11 arrived during a load hold, first replay the early retail drive stages. Releasing the
+	// spawn-menu request sooner lets a fast host stream the named 0x0C and move us to InMatch before
+	// the required 0x2F/0x0B stage has been sent. At stage 3, emit 0x0A immediately before that final
+	// loadout/status packet so the host observes the witnessed order without a tick gap.
+	if (pending_spawn_menu_request_ && pump_stage_ >= 3) {
+		out.push_back(frame_inner(0x0A, {}));
+		pending_spawn_menu_request_ = false;
+	}
 	switch (pump_stage_) {
 	case 0: { // 0x48 client-ack (echo our host-assigned ConnectionId, learned from the 0x82 MI) +
 	          // 0x37 mission request (begins world streaming). The host stamps our dcb into our 0x0C
@@ -287,11 +379,15 @@ void JoinerConnection::seed_in_match(uint32_t session_id, std::string client_scr
 	has_self_handle_ = true;
 	spawn_.item_type_id = self_type;
 	game_type_ = game_type;
+	handshake_retry_datagram_.clear();
+	handshake_retry_clock_armed_ = false;
 	phase_ = Phase::InMatch;
 }
 
 void JoinerConnection::fail(std::string reason) {
 	last_error_ = std::move(reason);
+	handshake_retry_datagram_.clear();
+	handshake_retry_clock_armed_ = false;
 	phase_ = Phase::Error;
 }
 

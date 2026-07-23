@@ -1040,6 +1040,75 @@ func test_failed_host_load_does_not_arm_the_next_mission_as_a_lan_host() -> void
 	world.unload()
 
 
+func test_lan_host_threads_truthful_base_metadata_into_the_native_session() -> void:
+	# GameConfig's old capture-shaped defaults include jox01; the production
+	# GameWorld handoff must explicitly replace them with the menu/root values,
+	# including the meaningful empty string for a base-game mount.
+	var world := _make_world()
+	add_child_autofree(world)
+	await get_tree().process_frame
+	world.set_playable(false)
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path("res://../fixtures/minimal/resources")), OK)
+	world.set_resource_root(root)
+
+	assert_eq(world.load_mission_as_host({
+		"mission": "mnml.bms",
+		"net_transport": "lan",
+		"bind_port": 0,
+		"gametype": 0x30020,
+		"expansion": "",
+	}), OK)
+	var sim: NovaSimulation = world.get_sim()
+	assert_not_null(sim)
+	if sim != null:
+		var config := sim.get_host_session_config()
+		assert_eq(int(config.get("gametype", 0)), 0x30020)
+		assert_eq(String(config.get("expansion", "missing")), "",
+			"base JO stays empty instead of falling back to captured jox01")
+	world.unload()
+
+
+func test_lan_host_bind_failure_is_reported_instead_of_falling_back_socketless() -> void:
+	# Reserve an OS-chosen endpoint, then request that exact port through the
+	# production GameWorld host path. The old behavior silently started an SP
+	# listen session and still emitted world_loaded, leaving joiners no socket.
+	var blocker := NovaUdpPump.new()
+	assert_eq(blocker.bind_listen(0), OK)
+	var occupied_port := blocker.local_port()
+	assert_gt(occupied_port, 0)
+
+	var world := _make_world()
+	add_child_autofree(world)
+	await get_tree().process_frame
+	world.set_playable(false)
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path("res://../fixtures/minimal/resources")), OK)
+	world.set_resource_root(root)
+	watch_signals(world)
+	var failures: Array[String] = []
+	world.load_failed.connect(func(reason: String): failures.append(reason))
+
+	var result := world.load_mission_as_host({
+		"mission": "mnml.bms",
+		"net_transport": "lan",
+		"bind_port": occupied_port,
+		"gametype": 0x30020,
+		"expansion": "",
+	})
+	assert_eq(result, ERR_CANT_CREATE)
+	assert_false(world.is_loaded())
+	assert_null(world.get_sim(), "a failed UDP host bind creates no socketless fallback sim")
+	assert_signal_not_emitted(world, "world_loaded")
+	assert_eq(failures.size(), 1)
+	if failures.size() == 1:
+		assert_string_contains(failures[0], str(occupied_port),
+			"the launch error identifies the exact requested port")
+	blocker.close()
+
+
 func test_failed_join_load_does_not_make_the_next_mission_wire_only() -> void:
 	var world := _make_world()
 	add_child_autofree(world)

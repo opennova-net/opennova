@@ -105,21 +105,10 @@ std::array<uint8_t, 16> novaworldudp_pg() {
 	return pg;
 }
 
-// The 16-byte JointOperations (in-match game) protocol GUID. PROVISIONAL: the
-// real bytes live in the game-session connect path (CNapiGameSession_StartPlaying
-// @ 0x4d45e0 / the InitNPConnection sibling that builds the host connection),
-// not yet grilled (IDA MCP was down). This placeholder is distinct from the
-// NOVAWORLDUDP GUID and deterministic, which is enough for local proto-switch
-// routing. Replace with the witnessed bytes for real-host parity; see
-// docs/net/novaworld-net-re.md.
-std::array<uint8_t, 16> jointoperations_pg() {
-	// ASCII "JO-PROVIS-PG\0\0\0\0" — visibly a placeholder in a hex dump.
-	return {'J', 'O', '-', 'P', 'R', 'O', 'V', 'I', 'S', '-', 'P', 'G', 0, 0, 0, 0};
-}
-
 // Pick the PG GUID that matches the protocol name carried in the hello/auth.
 std::array<uint8_t, 16> pg_for_pn(const std::string &pn) {
-	if (pn == "JointOperations") return jointoperations_pg();
+	if (is_jointoperations_protocol_name(pn))
+		return jointoperations_protocol_guid();
 	return novaworldudp_pg();
 }
 
@@ -146,10 +135,15 @@ std::vector<ClientSession::Config::CuVar> make_novaworld_join_cu(const NovaWorld
 
 ClientSession::Config ClientSession::Config::jointoperations() {
 	Config c;
-	c.pn  = "JointOperations";       // flips the session to the in-match game protocol
-	c.pv1 = "0.0.0 1/12/2004 EM";    // JointOperations game protocol PV1
-	c.pg  = jointoperations_pg();    // PROVISIONAL placeholder GUID
-	c.use_default_pg = false;        // use the explicit JO pg above
+	const ClientHello retail = make_jointoperations_client_hello(c.client_index);
+	c.co = retail.co;
+	c.ap = retail.ap;
+	c.bdat = retail.bdat;
+	c.pn = retail.pn;
+	c.pv1 = retail.pv1;
+	c.pv2 = retail.pv2;
+	c.pg = retail.pg;
+	c.use_default_pg = false;
 	return c;
 }
 

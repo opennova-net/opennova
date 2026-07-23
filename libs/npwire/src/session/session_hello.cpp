@@ -91,6 +91,72 @@ uint32_t read_u32_le(const uint8_t *data, size_t len) {
 
 } // namespace
 
+std::array<uint8_t, 16> jointoperations_protocol_guid() {
+	// QUuid(0xB074D646, 0x81F9, 0x475F,
+	//       0x92,0xDA,0xDE,0xA7,0x24,0x7F,0x14,0x68)
+	// in the retail static initializer at 0x7937a0. QUuid's first three
+	// components occupy native little-endian memory; PG copies those 16 bytes.
+	return {0x46, 0xD6, 0x74, 0xB0, 0xF9, 0x81, 0x5F, 0x47,
+	        0x92, 0xDA, 0xDE, 0xA7, 0x24, 0x7F, 0x14, 0x68};
+}
+
+bool is_jointoperations_protocol_name(std::string_view protocol_name) {
+	// These are the two JO spellings already accepted by the established PN router.
+	// Keep that compatibility policy in the neutral game-wire layer so npruntime
+	// does not depend on, or reimplement, NovaWorld service routing.
+	return protocol_name == "JointOperations" || protocol_name == "JOINTOPERATIONS";
+}
+
+ClientHello make_jointoperations_client_hello(uint32_t client_index) {
+	ClientHello hello;
+	hello.nvs = "NAPI NP Version 0.0.1 1/12/2004 - 2/20/2004 Milota Copyright 2004 NovaLogic";
+	hello.co = "NovaLogic Inc, Calabasas CA U.S.A.";
+	hello.ap = "Jointops.exe";
+	hello.bdat = "Jul 21 2009 18:54:42";
+	hello.pn = "JOINTOPERATIONS";
+	hello.pg = jointoperations_protocol_guid();
+	hello.pg_present = true;
+	hello.pv1 = "0.0.0 1/12/2004 EM";
+	hello.pv2 = "16";
+	hello.ci = client_index;
+	return hello;
+}
+
+ClientAuth make_jointoperations_client_auth(uint32_t client_index, uint32_t client_key,
+		uint32_t host_key, std::string_view player_name, std::string_view client_scrk) {
+	const ClientHello hello = make_jointoperations_client_hello(client_index);
+	ClientAuth auth;
+	auth.nvs = hello.nvs;
+	auth.co = hello.co;
+	auth.ap = hello.ap;
+	auth.bdat = hello.bdat;
+	auth.pn = hello.pn;
+	auth.pg = hello.pg;
+	auth.pg_present = true;
+	auth.pv1 = hello.pv1;
+	auth.pv2 = hello.pv2;
+	auth.ci = client_index;
+	auth.hk = host_key;
+	auth.ck = client_key;
+	auth.na = std::string(player_name);
+	auth.scrk = std::string(client_scrk);
+	return auth;
+}
+
+bool matches_jointoperations_identity(const ClientHello &hello) {
+	const ClientHello expected = make_jointoperations_client_hello(hello.ci);
+	return hello.nvs == expected.nvs && hello.pn == expected.pn &&
+			hello.pg_present && hello.pg == expected.pg &&
+			hello.pv1 == expected.pv1;
+}
+
+bool matches_jointoperations_identity(const ClientAuth &auth) {
+	const ClientHello expected = make_jointoperations_client_hello(auth.ci);
+	return auth.nvs == expected.nvs && auth.pn == expected.pn &&
+			auth.pg_present && auth.pg == expected.pg &&
+			auth.pv1 == expected.pv1 && auth.pv2 == expected.pv2;
+}
+
 bool parse_client_hello(const uint8_t *data, size_t len, ClientHello &out) {
 	if (!data) return false;
 	out = ClientHello{};
@@ -507,6 +573,16 @@ std::vector<uint8_t> server_hello_to_bytes(const ServerHello &msg) {
 bool parse_server_hello(const uint8_t *data, size_t len, ServerHello &out) {
 	if (!data) return false;
 	out = ServerHello{};
+	// Gated fields that are absent on the wire parse as absent. Keep this
+	// explicit so future builder defaults cannot leak into decoded discovery
+	// rows (for example, an empty dedicated host omits NP).
+	out.pl.clear();
+	out.p1 = 0;
+	out.p2 = 0;
+	out.np = 0;
+	out.mp = 0;
+	out.sus1.clear();
+	out.sus2.clear();
 	bool saw_hk = false;
 	size_t pos = 0;
 	while (pos < len) {

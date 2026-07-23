@@ -36,6 +36,9 @@
 
 #include <npwire/ingame_decode.h>
 #include <npwire/ingame_encode.h>
+#include <npwire/nw_session_framing.h>
+#include <npwire/session_hello.h>
+#include <npwire/session_keys.h>
 
 #include <world/ai.h>
 #include <world/entity.h>
@@ -66,7 +69,7 @@ bool expect(bool cond, const char *msg) {
 }
 
 bool run_seeded_objective_layout_hint() {
-	np::ClientRuntime client(ClientSession::Config::jointoperations(), "Replay");
+	np::ClientRuntime client("Replay");
 	client.seed_session(0x1234u, "client-key", "server-key",
 	                    7, 6, 0x0001, w::kPlayerInfantryTypeId, 0x30020u);
 	if (!expect(client.view().game_type() == 0x30020u,
@@ -184,6 +187,10 @@ bool run_roundtrip() {
 	// is run (B)). The host advertises this HK; ClientRuntime echoes it so the join HK gate passes.
 	np::GameConfig host_config;
 	host_config.game_type = 0x30020u; // captured Co-op: phase-3 objective layout is active
+	host_config.server_name = "Retail Sequence Host";
+	host_config.mission_name = "Cooperative Test Mission";
+	host_config.mission_file = "COOP_TEST.BMS";
+	host_config.expansion = "jox01";
 	np::test::bring_up_host(ctx, np::ConnectionMode::HostClient, np::SocketMode::Socketless,
 	                        0x0FE0E112u, nullptr, host_config);
 
@@ -202,10 +209,17 @@ bool run_roundtrip() {
 	const w::EntityHandle host_h = w::spawn_player(world, player_spawn({0, 0, 0}, 0, 0xFFF0));
 	if (!expect(host_h.valid(), "host's own player spawned (cached.local_player)")) return false;
 
-	np::ClientRuntime client(ClientSession::Config::jointoperations(), kName);
+	np::ClientRuntime client(kName);
+	client.set_world_ready(false); // discover the authoritative mission before installing its world
 
 	uint32_t tick = 1;
 	bool spawned = false;
+	bool saw_join_01 = false;
+	bool saw_join_02 = false;
+	bool join_02_shape_ok = false;
+	bool saw_client_auth = false;
+	bool client_auth_uses_callsign_without_fabricated_profile = false;
+	bool saw_drive_while_held = false;
 	std::string spawn_name;
 	auto note_event = [&](const np::HostAcceptEvent &e) {
 		if (e.kind == np::HostAcceptEvent::Kind::PeerSpawned && !spawned) {
@@ -217,13 +231,86 @@ bool run_roundtrip() {
 	// into the client's recv FIFO.
 	auto pump_host = [&](std::vector<uint8_t> dg) {
 		if (dg.empty()) return;
+		// Inspect the real framed client stream before the server consumes it. This pins the witnessed
+		// retail post-auth sequence and the 256-byte position/padding response shape.
+		uint8_t opcode = 0;
+		std::vector<uint8_t> session_body;
+		if (nw_decode_inbound(dg.data(), dg.size(), opcode, session_body) &&
+		    opcode == SESSION_OPCODE_CLIENT_AUTH) {
+			ClientAuth auth;
+			if (parse_client_auth(session_body.data(), session_body.size(), auth)) {
+				saw_client_auth = true;
+				client_auth_uses_callsign_without_fabricated_profile =
+						auth.na == kName && auth.cu.empty();
+			}
+		} else if (opcode == SESSION_OPCODE_PROTOCOL_MESSAGE) {
+			for (const np::NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+				if (!(conn.peer == peer)) continue;
+				SessionSequencing seq = conn.seq;
+				ProtocolPacketHeader hdr;
+				std::vector<ProtocolMessage> messages;
+				if (!deframe_session_packet(seq, SessionCrypto{{}, conn.client_scrk, 0},
+				                            session_body.data(), session_body.size(), hdr, messages)) break;
+				for (const ProtocolMessage &message : messages) {
+					if (message.tag == 0x01) saw_join_01 = true;
+					if (message.tag == 0x02) {
+						saw_join_02 = true;
+						join_02_shape_ok = message.payload.size() == 256 &&
+							message.payload[4] == 0x02 && message.payload[5] == 0 &&
+							message.payload[6] == 0 && message.payload[7] == 0;
+					}
+					if (!client.world_ready() &&
+					    (message.tag == 0x48 || message.tag == 0x37 || message.tag == 0x09 ||
+					     message.tag == 0x22 || message.tag == 0x2F || message.tag == 0x0B))
+						saw_drive_while_held = true;
+				}
+				break;
+			}
+		}
 		np::HandleResult r = np::handle_server_datagram(ctx, peer, dg.data(), dg.size(), tick++);
 		for (const np::HostAcceptEvent &e : r.events) note_event(e);
 		for (const std::vector<uint8_t> &o : r.outbound) client.receive(o.data(), o.size());
 	};
 
-	// --- 1) Handshake + spawn-gate burst, driven entirely from the per-frame client role ---
+	// --- 1) Retail post-auth exchange learns the mission while the world/load drive is held. ---
 	pump_host(client.start()); // ClientHello -> ServerHello (queued back to the client)
+	for (int f = 0; f < 20 && !client.mission_known(); ++f)
+		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) pump_host(std::move(d));
+	if (!expect(client.mission_known(), "joiner learned mission metadata from S2C 0x7B")) return false;
+	if (!expect(client.server_name() == host_config.server_name &&
+	                    client.mission_name() == host_config.mission_name &&
+	                    client.map_file() == host_config.mission_file &&
+	                    client.game_type() == host_config.game_type &&
+	                    client.expansion() == host_config.expansion,
+	            "S2C 0x7B retained authoritative server/mission/gametype/expansion")) return false;
+	if (!expect(saw_join_01 && saw_join_02 && join_02_shape_ok,
+	            "post-auth C2S 0x01 -> S2C 0x02 -> 256-byte C2S 0x02 sequence")) return false;
+	if (!expect(saw_client_auth && client_auth_uses_callsign_without_fabricated_profile,
+	            "game ClientAuth uses NA callsign and omits unbacked profile CUs")) return false;
+	if (!expect(client.phase() == np::JoinerConnection::Phase::Driving && !spawned,
+	            "mission discovery stays on the same pre-spawn connection")) return false;
+
+	uint32_t held_server_key = 0;
+	uint32_t held_connection_id = 0;
+	for (const np::NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		if (!(conn.peer == peer)) continue;
+		held_server_key = conn.server_sk;
+		held_connection_id = conn.connection_id;
+	}
+	for (int f = 0; f < 4; ++f) {
+		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) pump_host(std::move(d));
+		for (np::TickOut &t : np::tick_connections(ctx, 300, tick++)) {
+			for (const np::HostAcceptEvent &e : t.events) note_event(e);
+			for (const std::vector<uint8_t> &o : t.outbound) client.receive(o.data(), o.size());
+		}
+	}
+	if (!expect(!saw_drive_while_held && !spawned && !np::connection_spawned(ctx, peer),
+	            "0x48/0x37 and later load/spawn drive wait for world-ready")) return false;
+
+	// Install the advertised mission, then resume on the exact authenticated session.
+	client.set_world_ready(true);
+
+	// --- 2) Spawn-gate burst, driven entirely from the per-frame client role. ---
 	for (int f = 0; f < 120 && !spawned; ++f) {
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) pump_host(std::move(d));
 		// Several host ticks per frame so entity_batch_count climbs through world streaming (F3) and the
@@ -236,10 +323,16 @@ bool run_roundtrip() {
 		}
 	}
 	if (!expect(spawned, "the spawn-gate burst trips PeerSpawned")) return false;
-	if (!expect(spawn_name == kName, "PeerSpawned carries the joiner's ClientHello.co name")) return false;
+	if (!expect(spawn_name == kName, "PeerSpawned carries the joiner's ClientAuth.na name")) return false;
 	if (!expect(np::connection_spawned(ctx, peer), "host marks the peer spawned")) return false;
+	bool resumed_same_session = false;
+	for (const np::NapiNPConnection &conn : ctx.np_protocol.connection_list)
+		if (conn.peer == peer)
+			resumed_same_session = conn.server_sk == held_server_key &&
+			                       conn.connection_id == held_connection_id;
+	if (!expect(resumed_same_session, "world-ready resumes the same authenticated session")) return false;
 
-	// --- 2) Owner's PeerSpawned reaction: bind the connection's transport (the pipeline already bound
+	// --- 3) Owner's PeerSpawned reaction: bind the connection's transport (the pipeline already bound
 	//        owned_entity) + stream a NAMED organic-spawn so the client name-matches. ---
 	ns::UdpSessionTransport udp_host(ns::UdpSessionTransport::Role::Host);
 	w::EntityHandle Hh{};
@@ -271,7 +364,7 @@ bool run_roundtrip() {
 	            "joiner learned authoritative g_GameType before live 0x0A frames")) return false;
 	if (!expect(client.deployed(), "client is deployed on the spawn name-match (the 0x0C gate)")) return false;
 
-	// --- 3) In-match per-frame loop: client 0x0C -> apply_in_match_c2s -> Server_TickUpdate -> 0x0A fold ---
+	// --- 4) In-match per-frame loop: client 0x0C -> apply_in_match_c2s -> Server_TickUpdate -> 0x0A fold ---
 	PlayerExtendedUplink up;
 	up.carrier_handle = 0xFFFF;
 	up.pos_x = w::to_fixed(100.0);

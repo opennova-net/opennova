@@ -5,7 +5,6 @@
 #include <netsim/net_client_view.h>     // NetClientView / ClientState
 #include <netsim/session_transport.h>   // ISessionTransport
 
-#include <novaworld/client_session.h>   // ClientSession::Config (shared JO identity)
 #include <npwire/ingame_decode.h>     // PlayerExtendedUplink (the §5.10 0x0C body)
 
 #include <cstddef>
@@ -50,7 +49,10 @@ public:
 
 	// Remote-joiner runtime. Transport-less: framed bytes in via receive(), framed bytes out via
 	// the start()/Client_ProcessNetworkFrame() return values (the owner pumps the socket).
-	ClientRuntime(ClientSession::Config config, std::string player_name);
+	explicit ClientRuntime(std::string player_name);
+	// Same runtime with an injected monotonic wall clock for deterministic integration/tests.
+	ClientRuntime(std::string player_name,
+	              JoinerConnection::MonotonicMilliseconds monotonic_milliseconds);
 
 	// SP host-as-client runtime. `host_loopback` is the in-process channel the host's
 	// Server_TickUpdate emits S2C onto (non-owning). is_authority is implicit (no 0x0C uplink).
@@ -102,6 +104,14 @@ public:
 	void set_deployed(bool v) { deployed_ = v; }
 	bool deployed() const { return deployed_; }
 
+	// Pre-load join seam. Handshake traffic and the retail 0x01 -> 0x02 -> 0x7B exchange continue
+	// while false; only the subsequent load/spawn drive is held. HostClient has no join drive.
+	void set_world_ready(bool ready) {
+		if (joiner_) joiner_->set_world_ready(ready);
+	}
+	bool world_ready() const { return joiner_ ? joiner_->world_ready() : true; }
+	bool mission_known() const { return joiner_ && joiner_->mission_known(); }
+
 	// Joiner state passthrough (HostClient: never InMatch, no self handle).
 	bool in_match() const { return joiner_ && joiner_->in_match(); }
 	bool has_self_handle() const { return joiner_ && joiner_->has_self_handle(); }
@@ -113,6 +123,12 @@ public:
 	// ClientState position), so the binding spawns its local player L from it. Joiner-only; valid once
 	// in_match() (the caller gates on that). Mirrors the self_handle() passthrough.
 	const JoinerConnection::SelfSpawn &spawn_pose() const { return joiner_->spawn_pose(); }
+	uint32_t game_type() const { return joiner_ ? joiner_->game_type() : view_.game_type(); }
+	const std::string &server_name() const;
+	const std::string &mission_name() const;
+	const std::string &map_file() const;
+	const std::string &expansion() const;
+	const std::string &last_error() const;
 
 	const netsim::ClientState &state() const { return view_.state(); }
 	netsim::NetClientView &view() { return view_; }

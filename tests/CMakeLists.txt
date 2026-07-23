@@ -1838,6 +1838,14 @@ target_link_libraries(npruntime_client_runtime_test
     PRIVATE opennova_npruntime opennova_netsim opennova_world opennova_novaworld)
 add_test(NAME npruntime_client_runtime COMMAND npruntime_client_runtime_test)
 
+# Loss-tolerant pre-session UDP join: dropped 0x41/0x42 datagrams are retried on the retail active
+# send interval without changing their wire bytes, and the retried legs complete against the real host.
+add_executable(npruntime_joiner_handshake_retry_test npruntime/joiner_handshake_retry_test.cpp)
+target_link_libraries(npruntime_joiner_handshake_retry_test
+    PRIVATE opennova_npruntime opennova_netsim opennova_world)
+target_include_directories(npruntime_joiner_handshake_retry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_joiner_handshake_retry COMMAND npruntime_joiner_handshake_retry_test)
+
 # P5 Level-3 golden — drive the REAL client emission path (np::JoinerConnection::frame_c2s_uplink via
 # client_runtime) seeded from the gameplay capture and assert the emitted C2S 0x0C datagram is
 # byte-identical to the captured client datagram (emitted C2S == client-origin); plus fold the

@@ -74,6 +74,7 @@ add_library(${TARGET_NAME} SHARED
     network/nova_world_host.cpp
     network/nova_net_client.cpp
     network/nova_udp_pump.cpp
+    network/nova_lan_session.cpp
     terrain/nova_terrain.cpp
     terrain/nova_terrain_surface_inputs.cpp
     terrain/nova_terrain_build_job.cpp

@@ -9,7 +9,6 @@
 #include <npwire/protocol_message.h> // make_protocol_message (frame the burst messages)
 #include <npwire/session_hello.h>
 #include <npwire/session_keys.h>
-#include <novaworld/session_protocol.h> // classify_session_protocol
 
 #include <netsim/session_transport.h> // ISessionTransport::host_send (loopback burst delivery)
 
@@ -80,6 +79,17 @@ void erase_connection(NapiNPServerCtx &ctx, const PeerAddr &peer) {
 			return;
 		}
 	}
+}
+
+// The single current-player count used by both 0x81 NP advertisement and the
+// 0x42 capacity gate: the host's type-2 loopback plus admitted remote peers.
+// Stateless 0x41 probes never enter the connection list.
+uint32_t occupied_player_count(const NapiNPServerCtx &ctx) {
+	uint32_t occupied = 0;
+	for (const NapiNPConnection &connection : ctx.np_protocol.connection_list) {
+		if (connection.type == 2 || connection.phase >= ConnectionPhase::Joined) ++occupied;
+	}
+	return occupied;
 }
 
 // Build + frame a 0x82 ServerAuth for `conn` from its CURRENT keys (server_sk / server_scrk /
@@ -257,8 +267,8 @@ void handle_client_hello(NapiNPServerCtx &ctx, const PeerAddr &peer,
                          const std::vector<uint8_t> &body, HandleResult &out) {
 	ClientHello hello;
 	if (!parse_client_hello(body.data(), body.size(), hello)) return;
-	if (classify_session_protocol(hello.pn) != SessionProtocolKind::JointOperations) {
-		return; // not an in-match game join — the owner routes lobby PNs elsewhere (no node created)
+	if (!matches_jointoperations_identity(hello)) {
+		return; // not the retail JO game identity (no node created)
 	}
 	// The host must be up before it admits a join — Hello rejects while host_running == 0 (and only
 	// an authority accepts joins). This is P1's bring-up gate: create_session -> start_server sets
@@ -267,24 +277,27 @@ void handle_client_hello(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	if (!ctx.is_authority || ctx.np_protocol.host_running == 0) {
 		return; // host not started — no ServerHello, no node created
 	}
-	NapiNPConnection &conn = find_or_create_connection(ctx, peer);
-	conn.pn = hello.pn;
-	conn.player_name = hello.co; // the joiner's player name (CO is free/unvalidated); streamed back
-	                             // in the organic-spawn 0x0C name-match
-	conn.session_id = peer_session_id(peer);
-	conn.phase = ConnectionPhase::HelloReceived;
 	// client_ip_net: the builders take the IP as the four payload octets in LE packing (so retail's
 	// positional TLV reader prints a.b.c.d) — pass peer.ip verbatim, matching nw_udp_listener.
 	ServerHello reply = build_server_hello(hello, peer.ip, peer.port);
+	// A LAN 0x41 is a stateless enumerate/handshake probe. Populate the retail
+	// game-server fields from live host state without registering the source as
+	// a peer; only a validated 0x42 creates the connection node.
+	reply.sn = ctx.config.server_name;
+	reply.p1 = ctx.config.game_type;
+	// P2 and SUS1 are live host configuration/session values in retail. This runtime does not yet
+	// model either producer, so let the faithful encoder omit them instead of replaying the
+	// ServerHello struct's capture-oriented sample defaults as if they belonged to every host.
+	reply.p2 = 0;
+	reply.np = occupied_player_count(ctx);
+	reply.mp = ctx.np_protocol.max_players;
+	reply.sus1.clear();
+	reply.sus2 = ctx.config.expansion;
 	// R1: advertise our real host key (seed-injected via SessionStartup) rather than
 	// build_server_hello's placeholder default, when one is set. The retail 0x81 carries host_key.
 	if (ctx.np_protocol.host_key != 0) reply.hk = ctx.np_protocol.host_key;
 	out.outbound.push_back(
 			nw_encode_outbound(SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(reply)));
-	HostAcceptEvent ev;
-	ev.kind = HostAcceptEvent::Kind::PeerHandshakeAdvanced;
-	ev.peer = peer;
-	out.events.push_back(std::move(ev));
 }
 
 // 0x42 ClientAuth -> 0x82 ServerAuth (per-session SCRK established).
@@ -296,18 +309,16 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// Validate the join before admitting it (no ServerAuth, no node, on failure). The original
 	// re-runs the SAME identity gate as Hello on the 0x42 and additionally checks the HK echo
 	// against the host key, dropping the join (return 0) otherwise. [orig:
-	// NapiNPProtocol_HandleClientJoin @0x62b750 — NVS/PN/PG/PV1 + HK == host_key]
+	// NapiNPProtocol_HandleClientJoin @0x62b750 — NVS/PN/PG/PV1/PV2 + non-empty NA + HK]
 	if (!ctx.is_authority || ctx.np_protocol.host_running == 0) return; // host not started
-	if (classify_session_protocol(auth.pn) != SessionProtocolKind::JointOperations) return; // not JO
+	if (!matches_jointoperations_identity(auth) || auth.na.empty()) return; // not a retail JO game join
 	// HK echo: the joiner must echo the host key it learned in ServerHello.hk. Checked only when the
 	// host has a key set (a deterministic 0 seed means "unchecked", matching P1's pass-in startup).
 	if (ctx.np_protocol.host_key != 0 && auth.hk != ctx.np_protocol.host_key) return; // wrong host key
 
-	// [orig: NapiNPProtocol_HandleClientJoin @0x62b750] FindConnection, then branch on what it found.
-	// (Unlike retail — where the 0x41 leaves no persisted connection so the 0x42 always Creates —
-	// our handle_client_hello persists a HelloReceived node carrying the joiner's name; the normal
-	// first 0x42 therefore ADVANCES that node in place below, and only a genuine retransmit or a
-	// different client reusing the addr take the re-send / destroy paths.)
+	// [orig: NapiNPProtocol_HandleClientJoin @0x62b750] The stateless 0x41 leaves
+	// no node, so a first 0x42 creates one. Only retransmit/address-reuse paths
+	// find an existing admitted connection here.
 	if (NapiNPConnection *existing = find_connection(ctx, peer);
 	    existing != nullptr && existing->phase >= ConnectionPhase::Joined) {
 		// Retransmitted 0x42 from the SAME client (matching CI + CK) on an already-joined connection:
@@ -330,18 +341,13 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// is already full: the witnessed gate rejects on current_player_count >= max_players (CNapiNetwork
 	// +0xF28; spectator slots add in when enabled). The player count is the host's own type-2 loopback
 	// (when present) plus already-admitted (>= Joined) joiners — matching networkCtx[11], which counts
-	// added players and the host but not this still-joining peer's pre-join Hello node. Retail replies
+	// added players and the host. Retail replies
 	// with a draw-overlay reject (state 14, reason 4 "server full"); we model the reject as a silent
 	// drop + no node (consistent with the other 0x42 reject legs) — the overlay-reject packet is not
 	// modeled yet (tracked: D-NET overlay-reject).
-	std::size_t occupied = 0;
-	for (const NapiNPConnection &c : ctx.np_protocol.connection_list) {
-		if (c.peer == peer) continue; // this joiner does not count against itself
-		if (c.type == 2 || c.phase >= ConnectionPhase::Joined) ++occupied;
-	}
+	const uint32_t occupied = occupied_player_count(ctx);
 	if (occupied >= ctx.np_protocol.max_players) {
-		erase_connection(ctx, peer); // drop this peer's pre-join Hello node — the join is rejected
-		return;                      // server full
+		return; // server full; the stateless 0x41 left no node to clean up
 	}
 
 	NapiNPConnection &conn = find_or_create_connection(ctx, peer);

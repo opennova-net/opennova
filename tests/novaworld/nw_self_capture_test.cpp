@@ -167,7 +167,7 @@ bool run_session(std::vector<CaptureDatagram> &recorded) {
 	np::start_host_session(owner, host_cfg);
 
 	MemoryDatagramSocket sock;
-	np::ClientRuntime client(ClientSession::Config::jointoperations(), "SelfCapture");
+	np::ClientRuntime client("SelfCapture");
 
 	int cap_seq = 0;
 	auto record = [&](int src, int dst, const std::vector<uint8_t> &d) {

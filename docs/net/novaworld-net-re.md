@@ -27,7 +27,7 @@ per-game message sets:
 
 | Layer | Contents | Reimpl home |
 |---|---|---|
-| 4 — message sets | Selected by the `PN` field at CLIENT_HELLO. `PN=NOVAWORLDUDP` → container-based browser/session services (ClientHostRequest, ClientPlayRequest, ServerVerifyResult, ...; §3). `PN="JointOperations"` etc. → in-match TLV game traffic dispatched via the NAPI msginfo tables (§4). | `libs/novaworld` (PN dispatch inside the lib) |
+| 4 — message sets | Selected by the `PN` field at CLIENT_HELLO. `PN=NOVAWORLDUDP` → container-based browser/session services (ClientHostRequest, ClientPlayRequest, ServerVerifyResult, ...; §3). `PN="JointOperations"` etc. → in-match TLV game traffic dispatched via the NAPI msginfo tables (§4). | `libs/novaworld` (service) / `libs/npruntime` (game session) |
 | 3 — session + framing | Per-(ip,port) session state (`CK`, `SK`, `SCRK`, fragment buffers); the opcode `0x43`/`0x83` protocol-message envelope (flags/len/seq/frag). | `libs/napi` |
 | 2 — NWU wire framing | 4-byte LSB CRC32 header; 1-byte opcode `0x41` HELLO / `0x42` JOIN / `0x43` SESSION / `0x46` GOODBYE (server replies `0x81`/`0x82`/`0x83`/`0x86`); NWU stream-cipher payload encryption. | `libs/novacrypto` + `libs/napi` |
 | 1 — UDP sockets | Owned by the app, not a lib. | server app / Godot client |
@@ -520,6 +520,7 @@ were found. Divergence IDs referenced here are defined in the §8 catalog.
 | 5.0 | Session bring-up — single player is an in-process listen server |
 | 5.0a | Join-leg lifecycle fixes (grill 2026-06-26; D-NET-104/105/106) |
 | 5.0b | The game-session 0x42 CU var set (the joiner's character/profile upload; D-NET-146) |
+| 5.0c | Retail LAN enumeration and pre-load join lifecycle (2026-07-22) |
 | 5.1 | Loading-progress counter — `dword_A82370` |
 | 5.2 | Spawn-success gate — `dword_24C1928` |
 | 5.2a | Host-side spawn flow — how the listen-server host spawns its own player (R1, 2026-06-16) |
@@ -767,6 +768,61 @@ team and the session gametype's team-based bit (see D-NET-146 for the full consu
 `Server_BuildPlayerInfoAndAdd @ 0x51d560 → Server_PlayerAdd @ 0x51cbc0`). Note the IDB's
 `NapiNetConfig` field names are first-seen-tag artifacts shifted by one from these landings
 (e.g. the struct's `bt` field holds APPID); the table above is the witnessed tag→offset truth.
+
+### 5.0c — Retail LAN enumeration and pre-load join lifecycle (2026-07-22)
+
+LAN is a local transport choice, not a NovaWorld-service flow. It does not contact a gate,
+master server, HTTP endpoint, account service, or cookie jar. Retail reuses the low-level NP/NAPI
+**game-session** hello codec over UDP broadcast:
+
+1. `UI_RegisterLANMultiplayerCallbacks @ 0x558d20` wires `LAN_SEARCH`; its callback at `0x558c50`
+   starts the enumerator initialized by the `0x558300` block and
+   `CNapiGameSession_InitTransportConnection @ 0x4c9e10`.
+2. `CNapiNPConnection_PumpEnumeratorAndSend @ 0x6290c0` walks the configured LAN port range
+   (stock JO defaults `32768..32787`). `NapiNPSession_SendAnnouncePacket @ 0x61fa00` broadcasts one
+   ordinary game-session ClientHello (`0x41`) to each port. There is no second discovery protocol.
+   The exact retail identity is `NVS="NAPI NP Version 0.0.1 1/12/2004 - 2/20/2004 Milota Copyright
+   2004 NovaLogic"`, `CO="NovaLogic Inc, Calabasas CA U.S.A."`, `AP="Jointops.exe"`,
+   `BDAT="Jul 21 2009 18:54:42"`, `PN="JOINTOPERATIONS"`,
+   `PG=46 D6 74 B0 F9 81 5F 47 92 DA DE A7 24 7F 14 68`,
+   `PV1="0.0.0 1/12/2004 EM"`, and `PV2="16"` `[orig: CNapiNetwork_Init @ 0x4ca4a0;
+   JO protocol GUID static initializer @ 0x7937a0]`.
+3. A listening game host answers that datagram with its ordinary ServerHello (`0x81`) through
+   `NapiNPProtocol_SendServerInfoPacket @ 0x6204b0`. Enumeration is **stateless**: receiving a
+   search `0x41` does not create a player/connection node; the actual join begins at ClientAuth
+   (`0x42`). The reply's retail-visible session fields include server name/config/player counts
+   (`SN`, `P1`, `P2`, `NP`, `MP`) and the gated opaque user strings (`SUS1`, `SUS2`). OpenNova
+   emits only values backed by live host state; unmodeled `P2`/`SUS1` are omitted rather than
+   populated with capture-shaped placeholders.
+   The OpenNova game host applies retail's identity gates too: `0x41` requires exact
+   `NVS`/`PN`/`PG`/`PV1`; `0x42` rechecks those fields and additionally requires exact `PV2`,
+   non-empty callsign `NA`, and the `HK` echoed from `0x81`. Invalid probes/joins are silently
+   dropped as in the original handlers.
+4. `UI_ProcessLANSessionStateMachine @ 0x558de0` pumps replies for about 30 seconds, deduplicates
+   rows, and updates the list immediately. The observed source IP/port is the join target.
+
+Crucially, LAN enumeration does **not** carry the map filename. Retail does not repurpose reserved
+`SUS3`/`SUS4` or add an OpenNova-only side channel. After the player selects an endpoint, the normal
+game connection authenticates (`0x41→0x81`, `0x42→0x82`), then performs the witnessed post-auth
+round trip `C2S 0x01 → S2C 0x02 → C2S 0x02`; the resulting S2C `0x7B` full session record supplies
+`serverName`, `missionName`, `mapFile`, `g_GameType`, and expansion (§5.32). The client loads that
+local mission while retaining the same socket/session, then releases the existing load/spawn drive.
+While awaiting `0x81` or `0x82`, the pending retail datagram is resent unchanged on the connection's
+active-send interval; this covers both ordinary UDP loss and a joiner launched before a cold host has
+finished loading and bound its requested port.
+
+The game ClientAuth's character-selection CUs (`CI0`/`CI1`, `TR`, `CTA`/`CTB`, `VCA`/`VCB`) are
+not protocol identity and do not participate in enumeration. They are derived from the player's
+profile/selected characters. The fresh-profile values in §5.0b are capture witnesses, not universal
+constants; this LAN slice omits those CUs until real profile/character-selection plumbing supplies
+them. In particular, decimal `33287` is the captured packed side-B registry id `0x8207`, **not a UDP
+port** and not a value a different profile can safely reuse.
+
+**OpenNova mapping.** `NovaLanSession` owns only UDP broadcast/receive and normalized endpoint rows;
+the socket-free probe/reply projection lives in `libs/npruntime/lan_discovery`. Selecting a row enters
+the same `ClientRuntime` used by direct joins. The pre-load driver holds that runtime at its
+world-ready boundary until `0x7B` identifies an installed `.bms`, so discovery, authentication,
+mission load, and gameplay never require a reconnect or an invented metadata field.
 
 ### 5.1 Loading-progress counter — `dword_A82370`
 
@@ -3506,10 +3562,10 @@ Jointops.exe; behavioral, read-only (no IDB writes).
   `0x42E730` handler exceeds a clean single decompile — is not byte-anchored; the mechanism is empirically
   certain from the wire (H == the named record's `slot_id`, set before any C2S `0x0C`).
 
-**Port (libs/novaworld + godot/engine, this session; verdict MATCHING, unit-tested by `joiner_session` +
+**Port (`libs/npruntime` + `godot/engine`, this session; verdict MATCHING, unit-tested by `joiner_session` +
 `netsim_build_player_uplink`):**
-- `JoinerSession` (`libs/novaworld/src/joiner_session.cpp`) — the CLIENT MIRROR of `HostSessionAccept`:
-  ClientHello/Auth handshake (the joiner's player name rides `ClientHello.co`, the free/unvalidated field
+- `JoinerConnection` (`libs/npruntime/src/joiner_connection.cpp`) — the CLIENT MIRROR of the game host:
+  ClientHello/Auth handshake (the joiner's player name rides game `ClientAuth.NA`, the free/unvalidated field
   the host echoes into the organic-spawn `entity_name`), then `pump()` drives the in-match spawn-gate burst,
   then the S2C `0x0C` handler name-matches `entity_name == player_name` → adopts `slot_id` as the wire
   handle **H**. It does NOT compose `ClientSession` (whose post-`0x82` path is the matchmaking lobby-verify
@@ -3519,9 +3575,9 @@ Jointops.exe; behavioral, read-only (no IDB writes).
   (§5.38a) resolves the right peer; the wire present is self-filtered on H (render local L, not the host's
   SNAP of self). The joiner-side `NovaSimulation` mode is the next increment.
 - Host side: `NovaSimulation::announce_joiner_organic_spawn` builds a 1-record `OrganicSpawnBatch
-  {slot_id = the admitted handle, entity_name = the joiner's `ClientHello.co`, type 0x14B9, pose}` →
+  {slot_id = the admitted handle, entity_name = the joiner's `ClientAuth.NA`, type 0x14B9, pose}` →
   `encode_organic_spawn_batch` → `HostSessionAccept::frame_in_match_s2c(peer, 0x0C, …)`, so the joiner can
-  name-match. `HostSessionAccept` now captures `ClientHello.co` into `PeerState.player_name` and surfaces it
+  name-match. The game host captures `ClientAuth.NA` into `NapiNPConnection.player_name` and surfaces it
   on the `PeerSpawned` event.
 - ctests: `tests/novaworld/joiner_session_test` (drives a real `JoinerSession` against a real
   `HostSessionAccept` in-process: handshake → name-match → InMatch with H → C2S `0x0C` uplink →
@@ -3553,13 +3609,15 @@ reaches InMatch, the host admits it, and the two-handle present resolves both wa
   goes quiet mid-join. Equivalent in effect to the original server proactively pushing the organic-spawn
   when its gate opens.
 
-**Live confirmation + open issues (2026-06-23).** The two-instance localhost demo now WORKS end-to-end
-(beyond the headless `coop_two_sim_test`): a host and a joiner on one machine, and the joiner sees the
-remote player rendered in-game. Launch contract (the host listens on the witnessed `32768`): host =
-`NW_LAN_HOST=<m.bms>`; joiner = `NW_LAN_JOIN=<ip>:32768 NW_LAN_MISSION=<m.bms>`. **Footgun:** the joiner
-must pass the mission via `NW_LAN_MISSION`, NOT `NW_LAN_HOST` — `main_game.gd` tests `NW_LAN_HOST` first and
-takes the HOST path before it ever reads `NW_LAN_JOIN`, so a joiner with `NW_LAN_HOST` set silently becomes a
-second host (its `32768` bind fails, it falls back to a socketless listen server, and never dials).
+**Automated confirmation + open issues (updated 2026-07-22).** The real-socket
+`coop_two_sim_test` proves a host and joiner reach InMatch and present both sides in one process;
+the focused menu/GameWorld tests prove discovery handoff, retained-session mission loading, and
+visible bind failure. A final two-GUI smoke with installed retail assets remains a manual acceptance
+check for this delta, not an automated claim. The host listens on the requested retail-range port;
+the direct launch contract is `NW_LAN_HOST=<m.bms>` for the host and
+`NW_LAN_JOIN=<ip>:<port>` for the joiner. The joiner learns the mission from the retained game
+session's post-auth S2C `0x7B`, as retail does; `NW_LAN_MISSION` remains only an explicit
+compatibility/debug override for the older preloaded path.
 Tracked client-fidelity items:
 1. **[CLOSED 2026-06-25 — stream the DYNAMIC set during load]** *(was: the joiner saw only the host player,
    not the NPCs.)* The host streams the networked/dynamic set during the joiner's world-load via
@@ -8845,7 +8903,8 @@ minimap/character-slot ids (u16 of atol), `TR` = requested side (0/1, else clamp
 auto @ 0x4c752f), `CTA`/`CTB` = per-side soldier class, `VCA`/`VCB` = per-side avatar byte
 [orig: client emit CNapiServerInfo_SerializeToSession @ 0x4c3650 (each tag omitted when 0);
 wire: golden retail-ashi5a f=199140 and retail_join_v18 f=47676 both carry CI0=512(0x0200)
-CI1=33287(0x8207) TR=-1 CTA=CTB=8 VCA=1 VCB=4 — the fresh-profile defaults]. (2) The host
+CI1=33287(0x8207) TR=-1 CTA=CTB=8 VCA=1 VCB=4 — one captured profile selection, not
+universal protocol defaults]. (2) The host
 parses them into the connection's NapiNetConfig [orig: NapiNPProtocol_HandleClientJoin
 @ 0x62b750 CU loop (type-2 gate) -> NapiNetConfig_LoadFromConnTags @ 0x4c7260 ->
 jsp[56..63] + ci0.lo, Napi_StrCaseEqual names, atol values]. (3) `Server_BuildPlayerInfoAndAdd

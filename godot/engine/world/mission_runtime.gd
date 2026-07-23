@@ -65,6 +65,7 @@ var _presentation_time_ms := -1      # shared render/PANM DWORD; negative = dire
 # Stable mission identity for host-neutral diagnostics such as the F3 overlay.
 var _mission_file := ""
 var _mission_name := ""
+var _setup_error := OK
 
 # Value-only attachment poses for the current authoritative tick. Production
 # lookups stay in NovaSimulation's generation-bound native index; these boxed
@@ -80,10 +81,19 @@ var _effect_poses_by_ssn: Dictionary = {}
 
 ## Create + promote the mission, build the shared index over the placed nodes (`container`), and wire
 ## the present pass. options: { loco_scale, self_tick, present_options }. Returns the AI
-## entity count, or 0 on load failure (the orphan sim is freed). The sim is held off-tree by this driver.
+## entity count, or 0 on load failure (the orphan sim is freed). Inspect
+## get_setup_error() to distinguish a valid empty mission from a setup failure.
+## The sim is held off-tree by this driver.
 func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	_clear_present_effect_poses()
-	_sim = NovaSimulation.new()
+	_setup_error = OK
+	# A remote join may already own the live socket + NP session while it waits
+	# for S2C 0x7B to identify the mission. Keep that exact connection across the
+	# local map load instead of reconnecting after discovery. Normal host/SP/editor
+	# callers do not provide a simulation and retain the fresh-instance path.
+	_sim = options.get("simulation", null)
+	if _sim == null:
+		_sim = NovaSimulation.new()
 	var mission_path := String(options.get(
 			"debug_mission_file", options.get("mission_file", "")))
 	_mission_file = mission_path.replace("\\", "/").get_file()
@@ -112,8 +122,10 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	if is_joiner:
 		# Co-op LAN JOINER (a non-authority client): dial the host and run the witnessed
 		# in-match JOIN. The local player L is spawned on the name-match (inside the sim's
-		# joiner poll), NOT here. The player_name rides the ClientHello.co. [net-re §5.38b]
-		if not _sim.enable_join(String(options.get("host_ip", "127.0.0.1")),
+		# joiner poll), NOT here. The player_name rides game ClientAuth.NA. [net-re §5.38b]
+		# A preconnected simulation already completed this socket leg while the loading
+		# screen was up; do not replace its connection or restart its handshake.
+		if not _sim.is_joiner() and not _sim.enable_join(String(options.get("host_ip", "127.0.0.1")),
 				int(options.get("port", 32768)), String(options.get("player_name", "Player"))):
 			push_warning("MissionRuntime: could not dial co-op host %s:%d — joiner disabled." % [
 				String(options.get("host_ip", "127.0.0.1")), int(options.get("port", 32768))])
@@ -141,8 +153,14 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 		session_options["max_players"] = int(options.get("max_players", 16))
 		_sim.configure_host_session(session_options)
 		if not _sim.enable_host_listen(bind_port):
-			push_warning("MissionRuntime: could not bind co-op LAN host port %d — falling back to local listen server." % bind_port)
-			_sim.enable_listen_server(true)
+			# A requested LAN host that cannot own its UDP endpoint is not a host.
+			# Never degrade into the visually-identical socketless SP/listen path:
+			# the caller must surface the bind failure and keep the menu active.
+			_setup_error = ERR_CANT_CREATE
+			_sim.free()
+			_sim = null
+			_has_native_present_effect_pose_lookup = false
+			return 0
 	else:
 		# SP / editor preview: the in-process listen server. The host player auto-spawns at bring-up.
 		_sim.enable_listen_server(true)
@@ -153,6 +171,7 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	if options.has("terrain_til"):
 		_sim.set_terrain_til_data(options["terrain_til"])
 	if mission == null or not _sim.load_from_mission_data(mission):
+		_setup_error = ERR_CANT_OPEN
 		_sim.free()  # NovaSimulation is a Node (not RefCounted); free the orphan on load failure
 		_sim = null
 		_has_native_present_effect_pose_lookup = false
@@ -336,6 +355,10 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	# played or only stepped. Cheap; the game never Stops but holding the map costs nothing.
 	_capture_transforms()
 	return _sim.get_entity_count()
+
+
+func get_setup_error() -> int:
+	return _setup_error
 
 
 # World position of the entity addressed by a runtime SSN (WAC/BMS addressing),

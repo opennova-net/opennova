@@ -113,7 +113,11 @@ func test_start_game_emits_host_config() -> void:
 	var config: Dictionary = get_signal_parameters(mp, "lan_host_start_requested")[0]
 	assert_eq(config.get("server_name"), "CoopNight")
 	assert_eq(config.get("max_players"), 6)
-	assert_eq(config.get("game_type"), "AS", "the bring-up forces AS (one game type until it plays end-to-end)")
+	assert_eq(config.get("game_type"), "COOP", "the co-op-minimal bring-up reports Co-op")
+	assert_eq(config.get("gametype"), 0x30020,
+		"the session uses the witnessed retail Co-op g_GameType, not an AS capture value")
+	assert_eq(config.get("expansion"), "",
+		"a base/unmounted root advertises no expansion instead of captured jox01")
 	assert_eq(config.get("mission"), "alpha.bms")
 	assert_eq(config.get("channel"), "LAN")
 	# SERVERTYPE absent in the stand-in menu -> serve-and-play (dedicated=false). The real screen's
@@ -138,8 +142,10 @@ func test_lan_join_emits_selected_server() -> void:
 	var mp := MpMenuHost.new()
 	watch_signals(mp)
 	mp._servers = [{"name": "biggy", "host_ip": "192.168.1.10", "port": 32768}]
+	assert_eq(mp._format_server_row({"name": "biggy", "players": 1, "max_players": 4}),
+			"biggy (1/4)", "pre-auth LAN rows do not invent a mission label")
 	# A single-click selection relays the row index through the menu's aggregate signal.
-	mp._on_widget_value_changed("LAN_GAME_LIST", "list", 0, "biggy (1/4) - mission.bms")
+	mp._on_widget_value_changed("LAN_GAME_LIST", "list", 0, "biggy (1/4)")
 	mp._on_lan_join()
 	assert_signal_emitted(mp, "lan_join_requested")
 	var server: Dictionary = get_signal_parameters(mp, "lan_join_requested")[0]

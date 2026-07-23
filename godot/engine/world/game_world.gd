@@ -153,6 +153,12 @@ var _particles_hidden := false
 var _particle_debug := false
 var _playable := true
 var _host_config: Dictionary = {}  # set by load_mission_as_host; consumed once by _start_runtime
+# A retail LAN join authenticates before the local mission load. This off-tree
+# simulation owns that one live socket/session while S2C 0x7B supplies map_file;
+# _start_runtime consumes it so the connection is never restarted.
+var _join_preload_sim: NovaSimulation
+var _join_preload_root: NovaResourceRoot
+var _join_preload_request_id := 0
 var _local_player_spawn_loadout: Dictionary = {}
 var _perf_tick_us: int = 0
 var _perf_foliage_us: int = 0
@@ -304,14 +310,14 @@ func load_mission_as_host(config: Dictionary) -> int:
 	return err
 
 
-## Load a mission as a LAN co-op JOINER (a non-authority client). Same load path as a host
-## (terrain + environment from the .bms header), but the runtime dials the host and runs the
-## witnessed in-match JOIN instead of starting a listen server; dynamic entities (the host,
-## other joiners, NPCs) render WIRE-DIRECT (no .bms placement), so _place_mission_objects is
-## skipped for dynamics (statics/buildings arrive via S2C 0x10 in a follow-up). `server` is the
-## discovered/selected row { host_ip, port, mission }, `player_name` rides the ClientHello.co
-## (the host echoes it back so we self-identify by name-match). Returns the load_mission codes.
+## Load as a LAN co-op JOINER (a non-authority client). Retail LAN enumeration supplies an
+## endpoint, not a map name: authenticate first, learn map_file from the normal S2C 0x7B
+## post-handshake message, load that local .bms, then resume the SAME socket/session into the
+## spawn drive. A caller-provided `mission` remains an explicit debug/online-row override.
+## Dynamic entities render WIRE-DIRECT (no local .bms placement). `player_name` rides the game
+## ClientAuth and is echoed in our organic-spawn record for self-identification.
 func load_mission_as_joiner(server: Dictionary, player_name: String) -> int:
+	_cancel_join_preload()
 	_host_config = {
 		"net_transport": "lan-join",
 		"host_ip": String(server.get("host_ip", "127.0.0.1")),
@@ -322,9 +328,23 @@ func load_mission_as_joiner(server: Dictionary, player_name: String) -> int:
 	if bms.is_empty():
 		bms = mission_file
 	if bms.is_empty():
-		_host_config = {}
-		load_failed.emit("join: no mission name (the host's mission must be known)")
-		return ERR_INVALID_PARAMETER
+		var resource_root := _resolve_root(String(server.get("dir", "")))
+		if resource_root == null:
+			_host_config = {}
+			return ERR_CANT_OPEN
+		_join_preload_sim = NovaSimulation.new()
+		if not _join_preload_sim.enable_join(
+				String(_host_config["host_ip"]), int(_host_config["port"]), player_name):
+			_join_preload_sim.free()
+			_join_preload_sim = null
+			_host_config = {}
+			load_failed.emit("join: could not open the LAN session socket")
+			return ERR_CANT_CONNECT
+		_join_preload_sim.set_join_world_ready(false)
+		_join_preload_root = resource_root
+		_join_preload_request_id += 1
+		call_deferred("_drive_join_preload", _join_preload_request_id)
+		return OK
 	# NovaWorld's host row carries the retail basename (e.g. ASH_I5A), while the
 	# VFS load requires the resource filename. LAN callers that already supply the
 	# extension pass through unchanged.
@@ -334,6 +354,71 @@ func load_mission_as_joiner(server: Dictionary, player_name: String) -> int:
 	if err != OK:
 		_host_config = {}
 	return err
+
+
+# Drive only the witnessed connect/session exchange while the loading screen is
+# visible. The 60-second deadline is the retail ConnectOrHost timeout (0xEA60).
+func _drive_join_preload(request_id: int) -> void:
+	var deadline_ms := Time.get_ticks_msec() + 60000
+	while request_id == _join_preload_request_id and _join_preload_sim != null \
+			and not _join_preload_sim.has_join_mission():
+		_join_preload_sim.poll_join_preload()
+		var join_error := String(_join_preload_sim.get_join_error())
+		if not join_error.is_empty():
+			_fail_join_preload("join failed: %s" % join_error)
+			return
+		if Time.get_ticks_msec() >= deadline_ms:
+			_fail_join_preload("join timed out before the host identified its mission")
+			return
+		await get_tree().process_frame
+	if request_id != _join_preload_request_id or _join_preload_sim == null:
+		return
+
+	var bms := String(_join_preload_sim.get_join_mission_file()).strip_edges()
+	if bms.is_empty():
+		_fail_join_preload("join: host sent an empty map_file in S2C 0x7B")
+		return
+	if not bms.to_lower().ends_with(".bms"):
+		bms += ".bms"
+	var resource_root := _join_preload_root
+	if resource_root == null or not resource_root.has_file(
+			bms, NovaResourceRoot.LOOKUP_FORCE_ARCHIVE_ONLY):
+		_fail_join_preload("join: host mission %s is not installed locally" % bms)
+		return
+	var mission := NovaMissionData.new()
+	if mission.open_from_resource_root(
+			resource_root, bms, NovaResourceRoot.LOOKUP_FORCE_ARCHIVE_ONLY) != OK:
+		_fail_join_preload("join: failed to parse host mission %s: %s" % [
+			bms, mission.get_last_error()])
+		return
+
+	# Promote the authoritative session variables before the runtime consumes
+	# _host_config. None came from discovery; every value here came from 0x7B.
+	_host_config["server_name"] = _join_preload_sim.get_join_server_name()
+	_host_config["mission_name"] = _join_preload_sim.get_join_mission_name()
+	_host_config["mission_file"] = bms
+	_host_config["gametype"] = _join_preload_sim.get_join_game_type()
+	_host_config["expansion"] = _join_preload_sim.get_join_expansion()
+	_join_preload_root = null
+	var err := _load_mission_internal(mission, bms, resource_root)
+	if err != OK:
+		# _load_mission_internal emitted the specific resource/load failure.
+		_cancel_join_preload()
+		_host_config = {}
+
+
+func _fail_join_preload(reason: String) -> void:
+	_cancel_join_preload()
+	_host_config = {}
+	load_failed.emit(reason)
+
+
+func _cancel_join_preload() -> void:
+	_join_preload_request_id += 1
+	if _join_preload_sim != null:
+		_join_preload_sim.free()
+	_join_preload_sim = null
+	_join_preload_root = null
 
 
 # True between load_mission_as_joiner and _start_runtime's config consume: this load is a
@@ -522,8 +607,12 @@ func _load_mission_internal(mission: NovaMissionData, bms_name: String, resource
 	timeline.end_span()
 	load_progress.emit(41)
 	timeline.span("runtime")
-	_start_runtime(mission, bms_name)
+	var runtime_error := _start_runtime(mission, bms_name)
 	timeline.end_span()
+	if runtime_error != OK:
+		timeline.finish()
+		unload()
+		return runtime_error
 	load_progress.emit(70)
 	timeline.span("audio")
 	_start_mission_audio(mission, bms_name)
@@ -647,6 +736,7 @@ func get_mission_stats() -> Dictionary:
 ## Safe to call when nothing is loaded.
 func unload() -> void:
 	_loaded = false
+	_cancel_join_preload()
 	_set_weather_host_tick_driven(true)
 	_set_water_host_rendering_enabled(false)
 	_host_config = {}
@@ -1768,7 +1858,7 @@ func _route_round_impacts() -> void:
 # applied in-engine) + visibility onto its model. The game runs it at the faithful 62-frame cadence and
 # drives it explicitly from tick() (self_tick off); its drained side effects route through
 # _on_runtime_effects. A reload reuses this GameWorld, so any prior runtime is freed in unload() first.
-func _start_runtime(mission: NovaMissionData, bms_name: String) -> void:
+func _start_runtime(mission: NovaMissionData, bms_name: String) -> int:
 	var container := get_node_or_null(NodePath(MissionObjectPlacer.CONTAINER_NAME))
 	_runtime = MissionRuntime.new()
 	_runtime.name = "MissionRuntime"
@@ -1813,7 +1903,7 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> void:
 		if String(_host_config.get("net_transport", "")) != "lan-join":
 			opts["listen_server"] = true
 		for k in ["server_name", "max_players", "game_type", "gametype", "net_transport", "bind_port",
-				"advertise", "host_ip", "port", "player_name",
+				"advertise", "host_ip", "port", "player_name", "expansion",
 				"nw_gate_host", "nw_gate_port", "region", "dedicated", "channel"]:
 			if _host_config.has(k):
 				opts[k] = _host_config[k]
@@ -1831,12 +1921,27 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> void:
 	# The destruction present pass anchors its wreck/piece effect groups through
 	# register_effect_anchor and swaps husk models via the placer.
 	opts["game_world"] = self
+	# Consume the already-authenticated joiner. MissionRuntime adopts and frees
+	# this off-tree Node like its usual freshly-created simulation; clearing our
+	# reference before setup makes ownership singular even on a setup failure.
+	if _join_preload_sim != null:
+		opts["simulation"] = _join_preload_sim
+		_join_preload_sim = null
 	_runtime.setup(mission, container, opts)
+	if _runtime.get_sim() == null:
+		var setup_error := int(_runtime.get_setup_error()) \
+				if _runtime.has_method("get_setup_error") else ERR_CANT_CREATE
+		if String(opts.get("net_transport", "")) == "lan":
+			load_failed.emit("host start: could not bind LAN UDP port %d" %
+					int(opts.get("bind_port", 32768)))
+		else:
+			load_failed.emit("failed to start mission runtime")
+		_runtime.free()
+		_runtime = null
+		return setup_error if setup_error != OK else ERR_CANT_CREATE
 	_apply_local_player_spawn_loadout()
 	_runtime.set_presentation_time_ms(_panm_clock.time_ms)
-	if _runtime.get_sim() == null:
-		push_warning("GameWorld: failed to start mission runtime")
-	elif _water != null and _runtime.get_sim().has_method("set_water_z"):
+	if _water != null and _runtime.get_sim().has_method("set_water_z"):
 		# Water may have been built before the runtime existed — re-push the
 		# sim-side plane the footstep/landing legs compare feet against.
 		_runtime.get_sim().set_water_z(float(_water.water_height))
@@ -1849,6 +1954,7 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> void:
 	# The game starts running (tick() gates on is_playing, so the overlay's
 	# transport can pause/step a live mission).
 	_runtime.play()
+	return OK
 
 
 # Register a browsable listen host with the NovaWorld gate (F1, ADR 0010). The host-direction
@@ -1861,9 +1967,8 @@ func _maybe_start_nw_host(opts: Dictionary, bms_name: String) -> void:
 		return
 	if String(opts.get("net_transport", "")) != "lan":
 		return
-	# Register with the NovaWorld gate when the host picked the NovaWorld channel (a browsable
-	# online host) or when a gate was injected via env (NW_GATE_HOST). The in-match wire is the
-	# SAME either way (net_transport "lan"); only discovery/registration differs (LAN vs NovaWorld).
+	# Register only when the explicit NovaWorld host flow supplied a gate. The in-match wire is
+	# shared, but the LAN menu path never reads or manufactures service configuration.
 	var channel := String(opts.get("channel", "LAN"))
 	var gate_host := String(opts.get("nw_gate_host", ""))
 	if gate_host.is_empty():

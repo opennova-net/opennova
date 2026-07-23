@@ -91,6 +91,65 @@ func _moving_eweap_userpoint(data: NovaObjectData) -> Dictionary:
 	return {}
 
 
+func test_joiner_learns_mission_before_local_load_on_same_session() -> void:
+	var mission := _two_organics()
+	assert_true(mission.set_header_string("mission_name", "Preload Island"))
+
+	var host := NovaSimulation.new()
+	host.configure_host_session({
+		"server_name": "Preload Host",
+		"mission_name": "Preload Island",
+		"mission_file": "PRELOAD_A1.BMS",
+		"expansion": "jox01",
+		"gametype": 0x30020,
+		"max_players": 4,
+	})
+	assert_true(host.enable_host_listen(0))
+	assert_true(host.load_from_mission_data(mission))
+
+	var joiner := NovaSimulation.new()
+	assert_true(joiner.enable_join(
+			"127.0.0.1", host.get_host_listen_port(), "PreloadJoiner"))
+	joiner.set_join_world_ready(false)
+
+	# Retail authenticates before loading the map. Drive only that connection
+	# until the post-auth 0x7B supplies map_file; no local World exists yet and
+	# the spawn/load drive remains held.
+	var learned := false
+	for _i in range(600):
+		joiner.poll_join_preload()
+		host.step()
+		if joiner.has_join_mission():
+			learned = true
+			break
+		OS.delay_msec(2)
+	assert_true(learned, "joiner learned the host mission through the post-auth 0x7B")
+	assert_eq(joiner.get_join_server_name(), "Preload Host")
+	assert_eq(joiner.get_join_mission_name(), "Preload Island")
+	assert_eq(joiner.get_join_mission_file(), "PRELOAD_A1.BMS")
+	assert_eq(joiner.get_join_game_type(), 0x30020)
+	assert_eq(joiner.get_join_expansion(), "jox01")
+	assert_false(joiner.is_loaded(), "metadata connect did not fabricate or pre-load a World")
+	assert_false(joiner.is_joined_in_match(), "spawn drive waits for the local map")
+	assert_eq(host.get_host_peer_count(), 1, "one authenticated connection exists before load")
+
+	# Loading preserves that same ClientRuntime/socket and releases its world-ready
+	# gate. A reconnect would create a second host node or lose the live session.
+	assert_true(joiner.load_from_mission_data(mission))
+	var reached := false
+	for _i in range(800):
+		host.step()
+		joiner.step()
+		if joiner.is_joined_in_match():
+			reached = true
+			break
+		OS.delay_msec(2)
+	assert_true(reached, "the preloaded session resumed through spawn on the same socket")
+	assert_eq(host.get_host_peer_count(), 1, "resume did not reconnect")
+	joiner.free()
+	host.free()
+
+
 func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 	var host := NovaSimulation.new()
 	# Captured retail Co-op g_GameType: bit 0x20000 makes every phase-3

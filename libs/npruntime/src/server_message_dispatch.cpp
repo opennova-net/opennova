@@ -386,7 +386,7 @@ PlayerReplicationState make_rep_state(const GameConfig &cfg, const NapiNPConnect
 	}
 	// D-NET-132 / §6.9: the roster identity is read THROUGH link.owned_entity (the single binding) — the
 	// wire handle off owned_entity.packed and the team off the live registry Entity (team @entity+344).
-	// player_slot / player_name stay on conn.reply (roster order + the echoed ClientHello.co). A
+	// player_slot / player_name stay on conn.reply (roster order + the echoed ClientAuth.NA). A
 	// World-less bind (bind_session_reply_player) stamps owned_entity with the bare wire handle, so the
 	// handle resolves here and the team keeps its default.
 	if (conn.link.owned_entity.valid()) {

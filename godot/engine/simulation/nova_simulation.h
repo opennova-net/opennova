@@ -698,12 +698,24 @@ public:
 	// --- co-op LAN joiner (D.2) -------------------------------------------
 	// Turn the sim into a co-op LAN JOINER: dial the host at `host_ip:port` and run
 	// the witnessed in-match JOIN as a non-authority client. `player_name` rides the
-	// ClientHello.co and is the key the host echoes into our organic-spawn record so
+	// game ClientAuth.NA and is the key the host echoes into our organic-spawn record so
 	// we self-identify (name-match) and learn our wire handle H. Call BEFORE loading
 	// the mission (the next load arms the joiner frame path). Implies the client view;
 	// a sim is host XOR joiner. Returns false if the socket can't be dialed.
 	bool enable_join(const String &p_host_ip, int p_port, const String &p_player_name);
 	bool is_joiner() const { return joiner_; }
+	// Retail connects before loading the local map: drive only the socket/session
+	// legs until S2C 0x7B identifies the mission, then resume the same connection
+	// after the caller has loaded it. No World tick or gameplay uplink runs here.
+	void set_join_world_ready(bool p_ready);
+	bool poll_join_preload();
+	bool has_join_mission() const;
+	String get_join_server_name() const;
+	String get_join_mission_name() const;
+	String get_join_mission_file() const;
+	String get_join_expansion() const;
+	int64_t get_join_game_type() const;
+	String get_join_error() const;
 	// True once the joiner has name-matched its organic-spawn record (self handle H known).
 	bool is_joined_in_match() const;
 	// The JoinerSession phase as an int (JoinerSession::Phase), -1 when not joining.

@@ -1,0 +1,67 @@
+extends GutTest
+
+# Production LAN browser seam over real loopback UDP. The browser sends the
+# retail game-session 0x41 probe and projects the host's 0x81 reply; it does not
+# use an online service and intentionally cannot know the mission before join.
+
+
+func _mission() -> NovaMissionData:
+	var mission := NovaMissionData.new()
+	assert_eq(mission.create_default(), OK)
+	assert_true(mission.set_header_string("mission_name", "Discovery Island"))
+	mission.add_entity(3, 0, Vector3.ZERO, Vector3.ZERO)
+	return mission
+
+
+func test_browser_discovers_live_host_without_pre_auth_mission_metadata() -> void:
+	var host := NovaSimulation.new()
+	host.configure_host_session({
+		"server_name": "Kitchen LAN",
+		"mission_name": "Discovery Island",
+		"mission_file": "DISCOVERY_A1.BMS",
+		"expansion": "jox01",
+		"gametype": 0x30020,
+		"max_players": 6,
+	})
+	assert_true(host.enable_host_listen(0))
+	assert_true(host.load_from_mission_data(_mission()))
+	var port := host.get_host_listen_port()
+	assert_gt(port, 0)
+
+	var browser := NovaLanSession.new()
+	add_child_autofree(browser)
+	assert_eq(browser.start_browsing("127.0.0.1", port, port), OK)
+	assert_true(browser.is_browsing())
+
+	var rows: Array = []
+	for _i in range(180):
+		host.step()
+		await get_tree().process_frame
+		rows = browser.get_servers()
+		if not rows.is_empty():
+			break
+		OS.delay_msec(2)
+	assert_eq(rows.size(), 1, "one endpoint reply becomes one browser row")
+	if rows.size() == 1:
+		var row: Dictionary = rows[0]
+		assert_eq(String(row.get("server_name", "")), "Kitchen LAN")
+		assert_eq(String(row.get("host_ip", "")), "127.0.0.1")
+		assert_eq(int(row.get("port", 0)), port)
+		assert_eq(int(row.get("players", 0)), 1, "listen host occupies one player slot")
+		assert_eq(int(row.get("max_players", 0)), 6)
+		assert_eq(int(row.get("gametype", 0)), 0x30020)
+		assert_eq(String(row.get("expansion", "")), "jox01")
+		assert_eq(String(row.get("session_id", "")), "",
+				"an unmodeled SUS1 is omitted instead of fabricated")
+		assert_false(row.has("mission"),
+				"retail discovery does not invent pre-auth mission metadata")
+	browser.stop()
+	assert_false(browser.is_browsing())
+	host.free()
+
+
+func test_invalid_port_range_fails_without_browsing() -> void:
+	var browser := NovaLanSession.new()
+	add_child_autofree(browser)
+	assert_eq(browser.start_browsing("127.0.0.1", 32788, 32768), ERR_INVALID_PARAMETER)
+	assert_false(browser.is_browsing())

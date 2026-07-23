@@ -23,8 +23,8 @@ inline constexpr uint32_t kFirstJoinerDcb = kHostPlayerDcb + 1;
 // The per-connection lifecycle phase a server-side node walks from a fresh datagram to an
 // in-match player (§5.0 / §5.2a). Names mirror the witnessed original flow:
 //
+//   0x41 [NapiNPProtocol_HandleClientHello @0x6213b0] -> emit 0x81 statelessly
 //   New -> ValidateJoin [CNapiNetwork_ValidateJoinRequest @0x4c61b0]
-//       -> HelloReceived 0x41 [NapiNPProtocol_HandleClientHello @0x6213b0] -> emit 0x81
 //       -> Joined        0x42 [NapiNPProtocol_HandleClientJoin  @0x62b750] -> emit 0x82 (SCRK)
 //       -> NewConnection      [NapiNPServer_HandleNewConnection  @0x4c8040]
 //       -> InitRound          [Server_InitNewRoundState          @0x51c8e0]
@@ -39,7 +39,6 @@ inline constexpr uint32_t kFirstJoinerDcb = kHostPlayerDcb + 1;
 enum class ConnectionPhase : uint8_t {
 	New = 0,
 	ValidateJoin,
-	HelloReceived,
 	Joined,
 	NewConnection,
 	InitRound,
@@ -110,8 +109,9 @@ struct PreSpawnJoinerPose {
 // side by the ASSIGNED team and stamps the entity. [orig: client emit
 // CNapiServerInfo_SerializeToSession @0x4c3650; host parse NapiNPProtocol_HandleClientJoin
 // @0x62b750 CU loop -> NapiNetConfig_LoadFromConnTags @0x4c7260 (jsp[56..63] + ci0.lo); consume
-// Server_PlayerAdd @0x51cbc0. Wire: golden retail-ashi5a 0x42 f=199140 carries CI0=512 CI1=33287
-// TR=-1 CTA=CTB=8 VCA=1 VCB=4 — the joiner's 0x0C record echoes 0x8207/4. net-re D-NET-146]
+// Server_PlayerAdd @0x51cbc0. Wire example: golden retail-ashi5a 0x42 f=199140 carries CI0=512
+// CI1=33287 TR=-1 CTA=CTB=8 VCA=1 VCB=4 — profile-derived values, not protocol defaults; the
+// joiner's 0x0C record echoes 0x8207/4. net-re D-NET-146]
 struct CharacterJoinVars {
 	uint16_t char_id[2] = {0, 0};   // CI0 / CI1 -> jsp[56] / jsp[58]
 	uint8_t team_request = 0;       // TR -> jsp[60] (retail clamp: != 0xFF && >= 2 -> 0xFF)
@@ -170,7 +170,7 @@ struct SessionReplyState {
 	// pool-0 entity (team @entity+344), so the reply builders now read the handle from
 	// link.owned_entity.packed and the team from the live registry Entity through it — not a parallel
 	// cache. player_slot (roster ORDER, not stored on the entity) stays a field; player_name is the
-	// echoed ClientHello.co the entity does not carry in the reimpl. The pre-World reactive path
+	// echoed game ClientAuth.NA the entity does not carry in the reimpl. The pre-World reactive path
 	// (bind_session_reply_player) now stamps link.owned_entity with the bare wire handle instead of a
 	// separate handle cache, so a World-less session-responder host resolves the same way.
 	std::string player_name;
@@ -209,8 +209,8 @@ struct NapiNPConnection {
 	PeerAddr peer{};               // the transport-addr key (distinct from connection_id; the
 	                               // host scans connection_list by this to route a datagram).
 
-	std::string pn;                // ClientHello.pn — drives classify_session_protocol
-	std::string player_name;       // ClientHello.co — echoed into the organic-spawn 0x0C (D.0)
+	std::string pn;                // ClientHello.pn — game-session protocol identity
+	std::string player_name;       // game ClientAuth.na — echoed into the organic-spawn 0x0C (D.0)
 	std::string client_scrk;       // ClientAuth.scrk — decrypts inbound 0x43
 	std::string server_scrk;       // our SCRK — encrypts outbound 0x83, echoed in ServerAuth
 	uint32_t client_ck = 0;        // ClientAuth.ck -> session_id on our S2C

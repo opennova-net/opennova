@@ -2,12 +2,12 @@
 
 #include "npruntime/napi_np_connection.h"
 
-#include <novaworld/client_session.h>   // ClientSession::Config (shared JO identity)
 #include <npwire/ingame_decode.h>     // OrganicSpawnBatch / PlayerExtendedUplink / EntityPacketSubHeader
 #include <npwire/protocol_message.h>  // ProtocolMessage
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -20,14 +20,17 @@
 // other in-process with no sockets.
 //
 // It does NOT compose ClientSession: ClientSession's post-0x82 path is the matchmaking lobby-verify
-// flow, the WRONG channel for the in-match game connection. The game connection goes straight from
-// ServerAuth into the witnessed in-match C2S burst that trips the host's spawn gate. Only
-// ClientSession::Config (the JointOperations identity preset) is reused.
+// flow, the WRONG channel for the in-match game connection. The game connection follows retail's
+// post-auth 0x01 -> 0x02 exchange, learns its mission from 0x7B, then drives the witnessed in-match
+// C2S burst that trips the host's spawn gate. Its identity comes from npwire's neutral retail JO
+// helper; this LAN/game-session state machine has no NovaWorld service dependency.
 //
 //   start()                         -> ClientHello (0x41)   [Idle -> Hello]
 //   <- ServerHello (0x81)             : learn host key hk; send ClientAuth (0x42)
-//   <- ServerAuth  (0x82)             : learn server key sk + server scrk (cr==1)  [-> Driving]
-//   pump() x4                         : 0x37 -> 0x09 -> 0x22 -> (0x2F,0x2F,0x0B)
+//   <- ServerAuth  (0x82)             : learn server keys; send C2S 0x01          [-> Driving]
+//   <- S2C 0x02                       : send witnessed 256-byte C2S 0x02 response
+//   <- S2C 0x7B                       : retain authoritative mission/session metadata
+//   pump() x4 (world ready)           : 0x37 -> 0x09 -> 0x22 -> (0x2F,0x2F,0x0B)
 //   <- S2C 0x0C organic-spawn (0x83)  : find the record whose entity_name == our player name ->
 //                                       learn self wire handle H, cache spawn pose  [-> InMatch]
 //   frame_c2s_uplink(H, ...)          : per-frame C2S 0x0C player uplink
@@ -45,6 +48,8 @@ namespace opennova::np {
 
 class JoinerConnection {
 public:
+	using MonotonicMilliseconds = std::function<uint64_t()>;
+
 	enum class Phase {
 		Idle,     // nothing sent yet
 		Hello,    // ClientHello sent, awaiting ServerHello
@@ -72,9 +77,11 @@ public:
 		bool reached_in_match = false;                // true on the datagram that learns H
 	};
 
-	// `player_name` is BOTH the on-wire ClientHello.co (the host echoes it into the organic-spawn
-	// entity_name) AND the local key the joiner name-matches against.
-	JoinerConnection(ClientSession::Config config, std::string player_name);
+	// `player_name` is the on-wire game ClientAuth.NA callsign and the local key the joiner
+	// name-matches against. ClientHello.CO remains retail's company identity.
+	explicit JoinerConnection(std::string player_name);
+	// Injectable monotonic wall clock for deterministic hosts/tests. Production uses steady_clock.
+	JoinerConnection(std::string player_name, MonotonicMilliseconds monotonic_milliseconds);
 
 	// Begin the handshake. Returns the ClientHello datagram to send (Idle -> Hello).
 	std::vector<uint8_t> start();
@@ -83,8 +90,10 @@ public:
 	// any surfaced 0x0A bodies + whether this datagram learned H.
 	PollResult handle_datagram(const uint8_t *raw, std::size_t len);
 
-	// Emit the NEXT stage of the witnessed in-match spawn-gate burst (one datagram per call; empty
-	// once all stages are sent or before Driving). `now_tick` is reserved for future frame-pacing.
+	// While awaiting 0x81/0x82, re-emit the exact pending 0x41/0x42 wire datagram on retail's active
+	// send interval measured by the monotonic wall clock (independent of render/simulation cadence).
+	// Once Driving, emit the NEXT stage of the witnessed in-match spawn-gate burst (one datagram per
+	// call; empty once all stages are sent or while mission/world readiness holds it).
 	std::vector<std::vector<uint8_t>> pump(uint32_t now_tick);
 
 	// Build a C2S 0x0C player uplink datagram: 5-byte sub-header (handle = H, item_type_id = type,
@@ -112,12 +121,24 @@ public:
 	                   uint32_t next_seq, uint32_t last_ack, uint16_t self_handle,
 	                   uint16_t self_type, uint32_t game_type = 0);
 
+	// Retail completes the 0x01 -> 0x02 exchange and learns the mission from S2C 0x7B before it
+	// begins the load/spawn drive. A binding that must load that advertised mission sets this false
+	// before start(), keeps pumping the handshake, then flips it true after the world is installed.
+	// Direct-loaded callers retain their historical behavior through the true default.
+	void set_world_ready(bool ready) { world_ready_ = ready; }
+	bool world_ready() const { return world_ready_; }
+	bool mission_known() const { return mission_known_; }
+
 	Phase phase() const { return phase_; }
 	bool in_match() const { return phase_ == Phase::InMatch; }
 	bool has_self_handle() const { return has_self_handle_; }
 	uint16_t self_handle() const { return self_handle_; } // the wire handle H
 	const SelfSpawn &spawn_pose() const { return spawn_; }
 	uint32_t game_type() const { return game_type_; }
+	const std::string &server_name() const { return server_name_; }
+	const std::string &mission_name() const { return mission_name_; }
+	const std::string &map_file() const { return map_file_; }
+	const std::string &expansion() const { return expansion_; }
 	const std::string &player_name() const { return player_name_; }
 	uint32_t server_key() const { return conn_.server_sk; }
 	const std::string &client_scrk() const { return conn_.client_scrk; }
@@ -137,7 +158,8 @@ private:
 	void on_server_session(const std::vector<uint8_t> &body, PollResult &out);
 	void fail(std::string reason);
 
-	ClientSession::Config cfg_;
+	uint32_t client_index_ = 1;
+	uint32_t client_key_ = 1;
 	std::string player_name_;
 	Phase phase_ = Phase::Idle;
 
@@ -145,12 +167,25 @@ private:
 	NapiNPConnection conn_;
 
 	uint32_t server_hk_ = 0;    // ServerHello.hk — echoed in ClientAuth.hk (transient)
+	// Pre-session UDP legs are reliable-by-retransmit in retail. Cache the already-framed bytes so
+	// retrying never regenerates identity/session material (especially ClientAuth CK/SCRK).
+	MonotonicMilliseconds monotonic_milliseconds_;
+	std::vector<uint8_t> handshake_retry_datagram_;
+	uint64_t handshake_last_send_ms_ = 0;
+	bool handshake_retry_clock_armed_ = false;
 	int pump_stage_ = 0;        // cursor into the in-match spawn-gate burst stages
+	bool world_ready_ = true;   // binding-controlled: local advertised mission is installed
+	bool mission_known_ = false; // structurally valid authoritative S2C 0x7B received
+	bool pending_spawn_menu_request_ = false; // S2C 0x11 arrived while the local world was held
 
 	bool has_self_handle_ = false;
 	uint16_t self_handle_ = 0;  // wire handle H, learned via the name-match (pool<<12|slot)
 	SelfSpawn spawn_;
 	uint32_t game_type_ = 0;    // authoritative g_GameType learned from S2C 0x08 field 3 / 0x7B extra
+	std::string server_name_;   // authoritative S2C 0x7B field 3
+	std::string mission_name_;  // authoritative S2C 0x7B field 4
+	std::string map_file_;      // authoritative S2C 0x7B field 5
+	std::string expansion_;     // authoritative S2C 0x7B field 7
 
 	std::string last_error_;
 };

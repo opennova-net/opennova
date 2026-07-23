@@ -18,14 +18,45 @@ std::vector<uint8_t> le32(uint32_t v) {
 	        static_cast<uint8_t>(v >> 24)};
 }
 
+const std::string &empty_runtime_string() {
+	static const std::string empty;
+	return empty;
+}
+
 } // namespace
 
-ClientRuntime::ClientRuntime(ClientSession::Config config, std::string player_name)
+ClientRuntime::ClientRuntime(std::string player_name)
 		: role_(Role::Joiner),
-		  joiner_(std::make_unique<JoinerConnection>(std::move(config), std::move(player_name))) {}
+		  joiner_(std::make_unique<JoinerConnection>(std::move(player_name))) {}
+
+ClientRuntime::ClientRuntime(std::string player_name,
+		JoinerConnection::MonotonicMilliseconds monotonic_milliseconds)
+		: role_(Role::Joiner),
+		  joiner_(std::make_unique<JoinerConnection>(
+		          std::move(player_name), std::move(monotonic_milliseconds))) {}
 
 ClientRuntime::ClientRuntime(netsim::ISessionTransport &host_loopback)
 		: role_(Role::HostClient), loopback_(&host_loopback) {}
+
+const std::string &ClientRuntime::server_name() const {
+	return joiner_ ? joiner_->server_name() : empty_runtime_string();
+}
+
+const std::string &ClientRuntime::mission_name() const {
+	return joiner_ ? joiner_->mission_name() : empty_runtime_string();
+}
+
+const std::string &ClientRuntime::map_file() const {
+	return joiner_ ? joiner_->map_file() : empty_runtime_string();
+}
+
+const std::string &ClientRuntime::expansion() const {
+	return joiner_ ? joiner_->expansion() : empty_runtime_string();
+}
+
+const std::string &ClientRuntime::last_error() const {
+	return joiner_ ? joiner_->last_error() : empty_runtime_string();
+}
 
 std::vector<uint8_t> ClientRuntime::start() {
 	if (role_ != Role::Joiner) return {};
@@ -103,11 +134,10 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(const PlayerExtendedU
 
 	if (role_ == Role::HostClient) return outbound; // host: no connect-drive, no housekeeping send, no 0x0C
 
-	// (1b) CONNECT-DRIVE — while Driving, advance the in-match spawn-gate burst one stage per frame
-	// [the original drives the burst from the same per-frame pump loop, via NapiClient_WaitForGameStart].
-	if (joiner_->phase() == JoinerConnection::Phase::Driving) {
-		for (std::vector<uint8_t> &d : joiner_->pump(now_tick)) outbound.push_back(std::move(d));
-	}
+	// (1b) CONNECT-DRIVE — the same per-frame pump retransmits an unanswered pre-session 0x41/0x42,
+	// then (once Driving) advances the in-match spawn-gate burst. [orig: NapiNPConnection active-send
+	// interval; NapiClient_WaitForGameStart]
+	for (std::vector<uint8_t> &d : joiner_->pump(now_tick)) outbound.push_back(std::move(d));
 
 	// (0x4C) net-quality / anti-cheat report — after the recv pump; gated is_in_session &&
 	// is_mp_session_peer (a Joiner in-match satisfies both). [orig @0x42c23e..0x42c279]

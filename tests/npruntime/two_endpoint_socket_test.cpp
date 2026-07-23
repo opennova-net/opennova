@@ -140,7 +140,7 @@ int main() {
 
 	// ---- joiner: a headless ClientRuntime over the joiner socket ----
 	const std::string kName = "SocketJoiner";
-	np::ClientRuntime client(ClientSession::Config::jointoperations(), kName);
+	np::ClientRuntime client(kName);
 
 	// ---- capture both directions at the joiner boundary (for the §5.2a order decode; the 0x42/0x82
 	//      handshake is included so decode_capture_to_messages recovers the SCRK). ----

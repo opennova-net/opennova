@@ -78,7 +78,7 @@ struct HostAcceptEvent {
 	                                           // fails ("Could not find player dcb"). Witnessed:
 	                                           // working retail join ack==eFlags==3; a guess does not.
 	std::string peer_name;                     // valid for PeerEnteredWorldStreaming / PeerSpawned:
-	                                           // the joiner's ClientHello.co (player name), streamed
+	                                           // the joiner's game ClientAuth.NA callsign, streamed
 	                                           // back as the S2C 0x0C organic entity_name so the
 	                                           // joiner name-matches.
 	std::vector<ProtocolMessage> in_match_c2s; // valid when kind == PeerC2SInMatch

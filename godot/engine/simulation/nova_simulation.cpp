@@ -4011,9 +4011,16 @@ void NovaSimulation::finish_load(const opennova::bms::File &file) {
 	// is registered (the joiner never serializes; run_logic_tick(false) leaves World::net the default
 	// LocalSink for WAC/BMS sinks). The local player L is spawned in joiner_pump on the name-match.
 	if (joiner_) {
-		runtime_ = std::make_unique<opennova::np::ClientRuntime>(
-				opennova::ClientSession::Config::jointoperations(), joiner_player_name_);
-		joiner_started_ = false;
+		// A retail-style menu join has already authenticated and learned the map
+		// from S2C 0x7B before this local load. Preserve that exact runtime/socket;
+		// rebuilding it here would silently reconnect and discard the witnessed
+		// pre-load session. Direct-loaded callers have not started yet and retain
+		// the historical fresh-runtime reset.
+		if (!joiner_started_ || !runtime_) {
+			runtime_ = std::make_unique<opennova::np::ClientRuntime>(joiner_player_name_);
+			joiner_started_ = false;
+		}
+		runtime_->set_world_ready(true);
 		joiner_local_spawned_ = false;
 		joiner_self_wire_handle_ = 0;
 	}
@@ -4078,6 +4085,15 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("admit_test_remote_peer", "position", "yaw_deg", "team"), &NovaSimulation::admit_test_remote_peer);
 	ClassDB::bind_method(D_METHOD("enable_join", "host_ip", "port", "player_name"), &NovaSimulation::enable_join);
 	ClassDB::bind_method(D_METHOD("is_joiner"), &NovaSimulation::is_joiner);
+	ClassDB::bind_method(D_METHOD("set_join_world_ready", "ready"), &NovaSimulation::set_join_world_ready);
+	ClassDB::bind_method(D_METHOD("poll_join_preload"), &NovaSimulation::poll_join_preload);
+	ClassDB::bind_method(D_METHOD("has_join_mission"), &NovaSimulation::has_join_mission);
+	ClassDB::bind_method(D_METHOD("get_join_server_name"), &NovaSimulation::get_join_server_name);
+	ClassDB::bind_method(D_METHOD("get_join_mission_name"), &NovaSimulation::get_join_mission_name);
+	ClassDB::bind_method(D_METHOD("get_join_mission_file"), &NovaSimulation::get_join_mission_file);
+	ClassDB::bind_method(D_METHOD("get_join_expansion"), &NovaSimulation::get_join_expansion);
+	ClassDB::bind_method(D_METHOD("get_join_game_type"), &NovaSimulation::get_join_game_type);
+	ClassDB::bind_method(D_METHOD("get_join_error"), &NovaSimulation::get_join_error);
 	ClassDB::bind_method(D_METHOD("is_joined_in_match"), &NovaSimulation::is_joined_in_match);
 	ClassDB::bind_method(D_METHOD("get_joiner_phase"), &NovaSimulation::get_joiner_phase);
 	ClassDB::bind_method(D_METHOD("get_joiner_self_handle"), &NovaSimulation::get_joiner_self_handle);
@@ -7336,7 +7352,7 @@ Dictionary NovaSimulation::get_host_session_config() const {
 bool NovaSimulation::enable_join(const String &p_host_ip, int p_port, const String &p_player_name) {
 	// P7: the joiner is a non-authority np::ClientRuntime (Joiner role) built per-load in finish_load;
 	// it owns the connect-leg state machine + the S2C->ClientState fold internally. Here we only dial
-	// the socket + store the player name (the ClientHello.co the host echoes for the name-match). Leave
+	// the socket + store the player name (the ClientAuth.NA the host echoes for the name-match). Leave
 	// listen_server_ false (the present gate adds || joiner_); a sim is host XOR joiner.
 	if (pump_.is_null()) pump_.instantiate();
 	if (pump_->dial(p_host_ip, p_port) != 0) {
@@ -7346,8 +7362,7 @@ bool NovaSimulation::enable_join(const String &p_host_ip, int p_port, const Stri
 	joiner_player_name_ = std::string(p_player_name.utf8().get_data());
 	// Build the Joiner runtime now so get_joiner_phase reads Idle before the first load (the contract
 	// the legacy joiner_session_ held); finish_load rebuilds it fresh on each (re)load.
-	runtime_ = std::make_unique<opennova::np::ClientRuntime>(
-			opennova::ClientSession::Config::jointoperations(), joiner_player_name_);
+	runtime_ = std::make_unique<opennova::np::ClientRuntime>(joiner_player_name_);
 	install_item_class_resolver();
 	joiner_ = true;
 	if (world_) {
@@ -7358,6 +7373,65 @@ bool NovaSimulation::enable_join(const String &p_host_ip, int p_port, const Stri
 	joiner_local_spawned_ = false;
 	joiner_self_wire_handle_ = 0;
 	return true;
+}
+
+void NovaSimulation::set_join_world_ready(bool p_ready) {
+	if (joiner_ && runtime_) runtime_->set_world_ready(p_ready);
+}
+
+bool NovaSimulation::poll_join_preload() {
+	if (!joiner_ || !runtime_) return false;
+
+	// This is the pre-mission subset of joiner_pump: the same UDP socket and
+	// ClientRuntime advance the retail connect exchange, but no World exists yet
+	// to tick and the runtime's world-ready gate suppresses the load/spawn drive.
+	if (!joiner_started_) {
+		const std::vector<uint8_t> hello = runtime_->start();
+		if (!hello.empty()) ship_to_host(hello);
+		joiner_started_ = true;
+	}
+	if (pump_.is_valid()) {
+		pump_->poll();
+		while (pump_->has_inbound()) {
+			const Dictionary d = pump_->take_inbound();
+			const PackedByteArray bytes = d.get("bytes", PackedByteArray());
+			runtime_->receive(bytes.ptr(), static_cast<std::size_t>(bytes.size()));
+		}
+	}
+	for (const std::vector<uint8_t> &dg :
+			runtime_->Client_ProcessNetworkFrame(now_tick_)) {
+		ship_to_host(dg);
+	}
+	++now_tick_;
+	return true;
+}
+
+bool NovaSimulation::has_join_mission() const {
+	return joiner_ && runtime_ && runtime_->mission_known();
+}
+
+String NovaSimulation::get_join_server_name() const {
+	return (joiner_ && runtime_) ? String(runtime_->server_name().c_str()) : String();
+}
+
+String NovaSimulation::get_join_mission_name() const {
+	return (joiner_ && runtime_) ? String(runtime_->mission_name().c_str()) : String();
+}
+
+String NovaSimulation::get_join_mission_file() const {
+	return (joiner_ && runtime_) ? String(runtime_->map_file().c_str()) : String();
+}
+
+String NovaSimulation::get_join_expansion() const {
+	return (joiner_ && runtime_) ? String(runtime_->expansion().c_str()) : String();
+}
+
+int64_t NovaSimulation::get_join_game_type() const {
+	return (joiner_ && runtime_) ? static_cast<int64_t>(runtime_->game_type()) : -1;
+}
+
+String NovaSimulation::get_join_error() const {
+	return (joiner_ && runtime_) ? String(runtime_->last_error().c_str()) : String();
 }
 
 bool NovaSimulation::is_joined_in_match() const {
