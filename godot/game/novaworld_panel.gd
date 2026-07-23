@@ -14,7 +14,7 @@ extends Control
 # Where to reach the server. Dev default is localhost (matching the launcher's
 # dev mode and the dev compose). Prod sets this from the resolved server IP.
 @export var server_host := "127.0.0.1"
-@export var gate_port := 7597
+@export var gate_port := NovaWorldSettings.GATE_PORT
 @export var player_name := "Player"
 
 signal closed()

@@ -21,11 +21,6 @@ script = ExtResource("2_io4ac")
 [node name="FpsLabel" parent="HUD" unique_id=788385088 instance=ExtResource("3_fps")]
 layout_mode = 3
 
-[node name="Label" type="Label" parent="HUD" unique_id=65127373]
-offset_right = 40.0
-offset_bottom = 23.0
-text = "Runtime with engine-spec foliage (NovaFoliageDispatcher)"
-
 [node name="MenuLayer" type="CanvasLayer" parent="."]
 layer = 2
 

@@ -478,11 +478,8 @@ func _wire_host() -> void:
 		_mp_host.set_lan_session(_lan_session)
 	else:
 		push_warning("MainGame: NovaLanSession is unavailable; LAN browsing is disabled")
-	if _menu_host.has_method("add_companion"):
-		_menu_host.add_companion(_mp_host)
-		_menu_host.add_companion(_player_info_host)
-	elif _menu_host.has_method("set_companion"):
-		_menu_host.set_companion(_mp_host)
+	_menu_host.add_companion(_mp_host)
+	_menu_host.add_companion(_player_info_host)
 	_mp_host.lan_host_start_requested.connect(_on_lan_host_start_requested)
 	_mp_host.lan_join_requested.connect(_on_lan_join_requested)
 	_player_info_host.avatar_chosen.connect(_on_avatar_chosen)
@@ -1037,7 +1034,7 @@ func _on_exit_to_desktop() -> void:
 
 
 # CanvasLayer contents toggle: hide/show the HUD's CanvasItem children (the FPS
-# label + debug label) so they do not draw over the menu.
+# label + any mounted feeds) so they do not draw over the menu.
 func _set_hud_visible(v: bool) -> void:
 	if _hud == null:
 		return
