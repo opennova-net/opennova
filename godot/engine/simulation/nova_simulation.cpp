@@ -4700,123 +4700,18 @@ void NovaSimulation::host_pump() {
 // magazine and queue a second C2S 0x25. [orig: Game_ProcessMainFrame @0x5263f0;
 // Client_ProcessNetworkFrame @0x42c180]
 void NovaSimulation::joiner_pump() {
-	namespace np = opennova::np;
 	if (!runtime_) return;
-	const uint32_t now = now_tick_;
-	// ClientHello once (Idle -> Hello) the first armed frame.
-	if (!joiner_started_) {
-		const std::vector<uint8_t> hello = runtime_->start();
-		if (!hello.empty()) ship_to_host(hello);
-		joiner_started_ = true;
-	}
-	// Deposit received framed datagrams for this frame's recv pump.
-	if (pump_.is_valid()) {
-		pump_->poll();
-		while (pump_->has_inbound()) {
-			const Dictionary d = pump_->take_inbound();
-			const PackedByteArray bytes = d.get("bytes", PackedByteArray());
-			runtime_->receive(bytes.ptr(), static_cast<std::size_t>(bytes.size()));
-		}
-	}
-	// Run the client net frame first: recv-fold (-> ClientState) + connect-drive + the C2S 0x0C
-	// uplink (gated InMatch && deployed inside the runtime). The uplink describes L's pose as left by
-	// the previous entity update; this frame's raw-input/motor pass follows all inbound application.
-	const uint32_t health_updates_before =
-			runtime_->state().health_updates_applied;
-	const uint32_t objective_updates_before =
-			runtime_->state().objective_updates_applied;
-	std::vector<std::vector<uint8_t>> outs;
-	const bool have_L = joiner_local_spawned_ && world_->ai && world_->cached.local_player.valid();
-	const opennova::world::Entity *e = have_L ? world_->registry.get(world_->cached.local_player) : nullptr;
-	const opennova::world::AiEntity *ae = have_L ? world_->ai->for_handle(world_->cached.local_player) : nullptr;
-	if (e && ae) {
-		const opennova::PlayerExtendedUplink up = opennova::netsim::build_player_uplink(*e, *ae);
-		outs = runtime_->Client_ProcessNetworkFrame(up, now);
-	} else {
-		outs = runtime_->Client_ProcessNetworkFrame(now);
-	}
-	for (const std::vector<uint8_t> &dg : outs) ship_to_host(dg);
-	const bool received_authoritative_health =
-			runtime_->state().health_updates_applied != health_updates_before;
-	const bool received_authoritative_objectives =
-			runtime_->state().objective_updates_applied != objective_updates_before;
-	if (received_authoritative_objectives) {
-		const opennova::netsim::ClientState &client = runtime_->state();
-		world_->subgoals.won = client.objective_won;
-		world_->subgoals.lost = client.objective_lost;
-		world_->subgoals.show_win = client.objective_show_win;
-		world_->subgoals.show_lose = client.objective_show_lose;
-	}
-
-	// On reaching in-match (detected by the recv-fold above): learn H + spawn L at the host-advertised
-	// pose. L is the joiner's OWN motor-driven pool-0 entity (publishes cached.local_player); H is the
-	// wire identity the host knows us by — the two stay distinct, reconciled by the name-match (§5.38b).
-	if (runtime_->in_match() && !joiner_local_spawned_ && world_->ai) {
-		joiner_self_wire_handle_ = runtime_->self_handle();
-		const np::JoinerConnection::SelfSpawn &sp = runtime_->spawn_pose();
-		const opennova::world::PlayerSpawn spawn = spawn_from_self(sp);
-		const opennova::world::EntityHandle h = opennova::world::spawn_player(*world_, spawn);
-		joiner_local_spawned_ = h.valid();
-		// Arm L the way the host's own spawn does at Player_InitPlayer time: the
-		// shell applied the profile kit/class BEFORE L existed (the pre-spawn
-		// apply latched it into the inventory), so stamp the deferred class +
-		// damage classes + equipped adm on the fresh entity now. [orig:
-		// Player_InitPlayer weapon leg @ 0x4e15f0; equippedAdmIndex stamp @ 0x4dd727]
-		if (opennova::world::Entity *L = world_->registry.get(h)) {
-			if (pending_local_player_class_ >= 5 && pending_local_player_class_ <= 9)
-				L->player_class = static_cast<uint8_t>(pending_local_player_class_);
-			sync_local_player_damage_classes();
-			if (local_inventory_valid_ && local_inventory_.equipped_combo >= 0) {
-				const opennova::world::WeaponInventorySlot *slot =
-						local_inventory_.slot(local_inventory_.equipped_combo);
-				if (slot != nullptr && slot->adm_index >= 0)
-					L->equipped_adm_index = static_cast<uint8_t>(slot->adm_index);
-			}
-		}
-		resolve_new_infantry_adm_ids();
-		player_input_ = opennova::world::PlayerInput{};
-		// Retail polls live keys; a press during the join wait must not cross
-		// the spawn edge as a queued shot/reload. Clear the consume-latches too.
-		weapon_fire_held_ = false;
-		weapon_fire_pressed_ = false;
-		weapon_reload_pressed_ = false;
-		player_input_.look_heading = opennova::world::bam_heading_from_mission_yaw_deg(spawn.yaw);
-		stance_latch_ = 0;
-		look_px_accum_x_ = look_px_accum_y_ = 0.0f;
-	}
-
-	// The 0x0A tail is the authoritative health source for the recipient's OWN
-	// player. H belongs to the host's handle space; apply that recipient-local
-	// scalar to the joiner's distinct motor entity L without touching L's
-	// predicted pose. A fresh-frame guard prevents ClientState's pre-frame zero
-	// default from killing L during the handshake. Once L is dead, a later stale
-	// positive tail is ignored: retail requires the separate deploy edge before
-	// clearing Flags bit 1 and restoring health.
-	// [orig: tail health read @0x430428; store to local Health @0x4305df]
-	if (received_authoritative_health && joiner_local_spawned_ &&
-			world_->cached.local_player.valid()) {
-		const opennova::world::EntityHandle local_h =
-				world_->cached.local_player;
-		opennova::world::Entity *local =
-				world_->registry.get(local_h);
-		AiEntity *local_ai =
-				world_->ai ? world_->ai->for_handle(local_h) : nullptr;
-		if (local != nullptr && local_ai != nullptr) {
-			// ClientRuntime latches deployment closed on any decoded zero tail,
-			// even if a later packet in this recv pump carries stale positive HP.
-			const int16_t health = runtime_->deployed()
-					? runtime_->state().local_health : 0;
-			if (health <= 0) {
-				local->health = health;
-				local_ai->health = health;
-				local->alive = false;
-				local->flags |= 2u;
-			} else if (local->alive && (local->flags & 2u) == 0u) {
-				local->health = health;
-				local_ai->health = health;
-			}
-		}
-	}
+	joiner_send_hello_once();
+	joiner_deposit_inbound();
+	// Retail dispatches received messages before the entity/weapon-action pumps,
+	// so decoded consequences are applied to L before this frame's local World
+	// tick. In particular, an S2C 0x49 arriving on a reload's DONE boundary must
+	// refill the slot before IDLE can observe the stale empty magazine and queue
+	// a second C2S 0x25. [orig: Game_ProcessMainFrame @0x5263f0;
+	// Client_ProcessNetworkFrame @0x42c180]
+	const JoinerFrameSignals decoded = joiner_run_client_net_frame();
+	joiner_spawn_and_arm_local_player();
+	if (decoded.health) joiner_apply_authoritative_health();
 
 	// Received projectile/reload gameplay and the decoded remote collision
 	// proxies are live inputs to this frame's entity/round/weapon pumps. Applying
@@ -4836,6 +4731,130 @@ void NovaSimulation::joiner_pump() {
 	// [orig: WeaponAction_ProcessAllEntities @ 0x526786]
 	if (joiner_local_spawned_) tick_local_player_weapon();
 	++now_tick_;
+}
+
+// ClientHello once (Idle -> Hello) the first armed frame.
+void NovaSimulation::joiner_send_hello_once() {
+	if (joiner_started_) return;
+	const std::vector<uint8_t> hello = runtime_->start();
+	if (!hello.empty()) ship_to_host(hello);
+	joiner_started_ = true;
+}
+
+// Deposit received framed datagrams for this frame's recv pump.
+void NovaSimulation::joiner_deposit_inbound() {
+	if (!pump_.is_valid()) return;
+	pump_->poll();
+	while (pump_->has_inbound()) {
+		const Dictionary d = pump_->take_inbound();
+		const PackedByteArray bytes = d.get("bytes", PackedByteArray());
+		runtime_->receive(bytes.ptr(), static_cast<std::size_t>(bytes.size()));
+	}
+}
+
+// Run the client net frame: recv-fold (-> ClientState) + connect-drive + the C2S 0x0C
+// uplink (gated InMatch && deployed inside the runtime). The uplink describes L's pose as left by
+// the previous entity update; this frame's raw-input/motor pass follows all inbound application.
+NovaSimulation::JoinerFrameSignals NovaSimulation::joiner_run_client_net_frame() {
+	const uint32_t health_updates_before =
+			runtime_->state().health_updates_applied;
+	const uint32_t objective_updates_before =
+			runtime_->state().objective_updates_applied;
+	std::vector<std::vector<uint8_t>> outs;
+	const bool have_L = joiner_local_spawned_ && world_->ai && world_->cached.local_player.valid();
+	const opennova::world::Entity *e = have_L ? world_->registry.get(world_->cached.local_player) : nullptr;
+	const opennova::world::AiEntity *ae = have_L ? world_->ai->for_handle(world_->cached.local_player) : nullptr;
+	if (e && ae) {
+		const opennova::PlayerExtendedUplink up = opennova::netsim::build_player_uplink(*e, *ae);
+		outs = runtime_->Client_ProcessNetworkFrame(up, now_tick_);
+	} else {
+		outs = runtime_->Client_ProcessNetworkFrame(now_tick_);
+	}
+	for (const std::vector<uint8_t> &dg : outs) ship_to_host(dg);
+	JoinerFrameSignals decoded;
+	decoded.health =
+			runtime_->state().health_updates_applied != health_updates_before;
+	decoded.objectives =
+			runtime_->state().objective_updates_applied != objective_updates_before;
+	if (decoded.objectives) {
+		const opennova::netsim::ClientState &client = runtime_->state();
+		world_->subgoals.won = client.objective_won;
+		world_->subgoals.lost = client.objective_lost;
+		world_->subgoals.show_win = client.objective_show_win;
+		world_->subgoals.show_lose = client.objective_show_lose;
+	}
+	return decoded;
+}
+
+// On reaching in-match (detected by the recv-fold): learn H + spawn L at the host-advertised
+// pose. L is the joiner's OWN motor-driven pool-0 entity (publishes cached.local_player); H is the
+// wire identity the host knows us by — the two stay distinct, reconciled by the name-match (§5.38b).
+void NovaSimulation::joiner_spawn_and_arm_local_player() {
+	namespace np = opennova::np;
+	if (!runtime_->in_match() || joiner_local_spawned_ || !world_->ai) return;
+	joiner_self_wire_handle_ = runtime_->self_handle();
+	const np::JoinerConnection::SelfSpawn &sp = runtime_->spawn_pose();
+	const opennova::world::PlayerSpawn spawn = spawn_from_self(sp);
+	const opennova::world::EntityHandle h = opennova::world::spawn_player(*world_, spawn);
+	joiner_local_spawned_ = h.valid();
+	// Arm L the way the host's own spawn does at Player_InitPlayer time: the
+	// shell applied the profile kit/class BEFORE L existed (the pre-spawn
+	// apply latched it into the inventory), so stamp the deferred class +
+	// damage classes + equipped adm on the fresh entity now. [orig:
+	// Player_InitPlayer weapon leg @ 0x4e15f0; equippedAdmIndex stamp @ 0x4dd727]
+	if (opennova::world::Entity *L = world_->registry.get(h)) {
+		if (pending_local_player_class_ >= 5 && pending_local_player_class_ <= 9)
+			L->player_class = static_cast<uint8_t>(pending_local_player_class_);
+		sync_local_player_damage_classes();
+		if (local_inventory_valid_ && local_inventory_.equipped_combo >= 0) {
+			const opennova::world::WeaponInventorySlot *slot =
+					local_inventory_.slot(local_inventory_.equipped_combo);
+			if (slot != nullptr && slot->adm_index >= 0)
+				L->equipped_adm_index = static_cast<uint8_t>(slot->adm_index);
+		}
+	}
+	resolve_new_infantry_adm_ids();
+	player_input_ = opennova::world::PlayerInput{};
+	// Retail polls live keys; a press during the join wait must not cross
+	// the spawn edge as a queued shot/reload. Clear the consume-latches too.
+	weapon_fire_held_ = false;
+	weapon_fire_pressed_ = false;
+	weapon_reload_pressed_ = false;
+	player_input_.look_heading = opennova::world::bam_heading_from_mission_yaw_deg(spawn.yaw);
+	stance_latch_ = 0;
+	look_px_accum_x_ = look_px_accum_y_ = 0.0f;
+}
+
+// The 0x0A tail is the authoritative health source for the recipient's OWN
+// player. H belongs to the host's handle space; apply that recipient-local
+// scalar to the joiner's distinct motor entity L without touching L's
+// predicted pose. A fresh-frame guard prevents ClientState's pre-frame zero
+// default from killing L during the handshake. Once L is dead, a later stale
+// positive tail is ignored: retail requires the separate deploy edge before
+// clearing Flags bit 1 and restoring health.
+// [orig: tail health read @0x430428; store to local Health @0x4305df]
+void NovaSimulation::joiner_apply_authoritative_health() {
+	if (!joiner_local_spawned_ || !world_->cached.local_player.valid()) return;
+	const opennova::world::EntityHandle local_h =
+			world_->cached.local_player;
+	opennova::world::Entity *local =
+			world_->registry.get(local_h);
+	AiEntity *local_ai =
+			world_->ai ? world_->ai->for_handle(local_h) : nullptr;
+	if (local == nullptr || local_ai == nullptr) return;
+	// ClientRuntime latches deployment closed on any decoded zero tail,
+	// even if a later packet in this recv pump carries stale positive HP.
+	const int16_t health = runtime_->deployed()
+			? runtime_->state().local_health : 0;
+	if (health <= 0) {
+		local->health = health;
+		local_ai->health = health;
+		local->alive = false;
+		local->flags |= 2u;
+	} else if (local->alive && (local->flags & 2u) == 0u) {
+		local->health = health;
+		local_ai->health = health;
+	}
 }
 
 NovaSimulation::WireCollisionShape NovaSimulation::wire_collision_shape_for_type(
