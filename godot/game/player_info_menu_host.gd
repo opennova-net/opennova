@@ -1,5 +1,5 @@
 class_name PlayerInfoMenuHost
-extends RefCounted
+extends MenuCompanion
 
 # Drives the JO PLAYER_INFO screen (player.mnu) by control NAME: fills the
 # NATIONALITY / DIVISION / COMBO_LIST / PLAYERVOICE comboboxes from Avatars.def and
@@ -39,8 +39,6 @@ const VOICE_PREVIEW_TRIGGER_FORMAT := "VOICE_%d"
 # resolved combo; it plays the witnessed raw-.bad idle when those assets resolve.
 const AvatarPreviewScript := preload("res://engine/avatar/avatar_preview.gd")
 
-var _menu: Node                         # the built NovaMnuMenu (typed Node: only its tree is used)
-var _root: NovaResourceRoot
 var _db: NovaAvatarDatabase
 var _weapons: NovaWeaponDatabase     # weapon.def loadout table (PRIMARY/SECONDARY/ACCESSORY)
 var _slot_rows: Dictionary = {}         # control name -> row-aligned weapon transport dicts
@@ -64,11 +62,9 @@ func owns_menu(menu: Node) -> bool:
 		and menu.find_child("COMBO_LIST", true, false) != null
 
 
-# Called by NovaMenuHost after each open_menu (re)build of a menu we own. The screen's
-# controls are freshly built children, so we wire and populate from scratch each time.
-func on_menu_built(menu: Node, _file: String, _screen: String, root: NovaResourceRoot) -> void:
-	_menu = menu
-	_root = root
+# The screen's controls are freshly built children on each (re)build, so we wire and
+# populate from scratch each time.
+func _wire(_file: String, _screen: String) -> void:
 	_ensure_db()
 	_wire_team_radios()
 	_connect_combo("NATIONALITY", _on_nat_selected)
@@ -481,16 +477,3 @@ func _menu_text(key: String, fallback: String) -> String:
 	return fallback
 
 
-func _find(name: String) -> Node:
-	return _menu.find_child(name, true, false) if _menu != null else null
-
-
-func _connect_pressed(name: String, handler: Callable) -> void:
-	var node := _find(name)
-	if node is BaseButton and not (node as BaseButton).pressed.is_connected(handler):
-		(node as BaseButton).pressed.connect(handler)
-
-
-func _edit_text(name: String) -> String:
-	var node := _find(name)
-	return (node as LineEdit).text if node is LineEdit else ""

@@ -759,10 +759,7 @@ func _resolve_default_mission() -> String:
 			return sel
 	# The mounted menu root — the world's own root stays null until a mission loads. This is the same
 	# object the menu shell + mp host list missions from, and is non-null whenever the panel can open.
-	if _root != null and _root.has_method("list_files"):
-		for m in _root.list_files(".bms"):
-			return String(m).get_file()
-	return ""
+	return MissionCatalog.first_mission_name(_root)
 
 
 # --- Menu <-> world transitions ----------------------------------------------

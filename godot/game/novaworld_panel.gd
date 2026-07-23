@@ -411,9 +411,8 @@ func _populate_missions() -> void:
 	if _mission_option == null:
 		return
 	_mission_option.clear()
-	if resource_root != null and resource_root.has_method("list_files"):
-		for m in resource_root.list_files(".bms"):
-			_mission_option.add_item(String(m).get_file())
+	for m in MissionCatalog.mission_names(resource_root):
+		_mission_option.add_item(m)
 	if _mission_option.item_count > 0:
 		_mission_option.select(0)
 

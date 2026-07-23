@@ -1,5 +1,5 @@
 class_name MpMenuHost
-extends RefCounted
+extends MenuCompanion
 
 # Drives the multiplayer menu (mp.mnu) by control NAME for the LAN co-op path. It is a
 # companion the game-agnostic NovaMenuHost (menu_shell.gd) delegates to: when the shell
@@ -28,8 +28,6 @@ signal lan_join_requested(server: Dictionary)
 # START_GAME on the host screen, with the co-op-minimal host config (see _read_host_config).
 signal lan_host_start_requested(config: Dictionary)
 
-var _menu: Node  # the NovaMnuMenu at runtime; typed Node so we depend only on its tree + signals
-var _root: NovaResourceRoot
 var _lan_session = null        # NovaLanSession; injected by MainGame
 var _servers: Array = []       # last LAN browse result; rows for LAN_GAME_LIST
 var _selected_server := -1
@@ -63,19 +61,15 @@ func set_lan_session(session) -> void:
 		_lan_session.error_occurred.connect(_on_lan_browse_error)
 
 
-# Called by NovaMenuHost after each open_menu (re)build of a menu we own. All of mp.mnu's
-# screens are built as (hidden) children at once, so we wire every owned screen's controls
-# here by name regardless of which screen is visible — matching how the shell wires.
-func on_menu_built(menu: Node, _file: String, _screen: String, root: NovaResourceRoot) -> void:
-	_menu = menu
-	_root = root
-	if menu == null:
-		return
+# All of mp.mnu's screens are built as (hidden) children at once, so we wire every owned
+# screen's controls by name regardless of which screen is visible — matching how the
+# shell wires.
+func _wire(_file: String, _screen: String) -> void:
 	# Single-click selection in the LAN list relays through the menu's aggregate signal.
 	# Connected by name so the companion stays decoupled from the concrete menu class.
-	if menu.has_signal("widget_value_changed") \
-			and not menu.is_connected("widget_value_changed", _on_widget_value_changed):
-		menu.connect("widget_value_changed", _on_widget_value_changed)
+	if _menu.has_signal("widget_value_changed") \
+			and not _menu.is_connected("widget_value_changed", _on_widget_value_changed):
+		_menu.connect("widget_value_changed", _on_widget_value_changed)
 	_wire_lan_browser()
 	_wire_host_settings()
 
@@ -174,11 +168,7 @@ func _wire_host_settings() -> void:
 # Fill MISSION_LIST with the resource dir's missions (the available pool). The selected
 # rotation is the SELECTED_MISSIONS table, maintained by ADD/REMOVE.
 func _seed_mission_list(list: NovaMnuList) -> void:
-	var names := PackedStringArray()
-	if _root != null:
-		for m in _root.list_files(".bms"):
-			names.append(String(m).get_file())
-	list.set_items(names)
+	list.set_items(MissionCatalog.mission_names(_root))
 
 
 func _on_add_missions() -> void:
@@ -269,23 +259,6 @@ func _table_has_mission(table: NovaMnuTable, name: String) -> bool:
 		if table.get_cell_text(r, 0) == name:
 			return true
 	return false
-
-
-func _find(name: String) -> Node:
-	return _menu.find_child(name, true, false) if _menu != null else null
-
-
-func _connect_pressed(name: String, handler: Callable) -> void:
-	var node := _find(name)
-	if node is BaseButton and not (node as BaseButton).pressed.is_connected(handler):
-		(node as BaseButton).pressed.connect(handler)
-
-
-func _edit_text(name: String, default_value: String) -> String:
-	var node := _find(name)
-	if node is LineEdit:  # NovaMnuEdit extends LineEdit
-		return (node as LineEdit).text
-	return default_value
 
 
 # Returns the selected spin-list item's `value=` attribute (the semantic value the

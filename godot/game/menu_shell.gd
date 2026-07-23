@@ -346,11 +346,7 @@ func _connect_named(names: PackedStringArray, handler: Callable) -> void:
 
 
 func _seed_mission_list(list: NovaMnuList) -> void:
-	var missions := _root.list_files(".bms") if _root != null else PackedStringArray()
-	var names := PackedStringArray()
-	for m in missions:
-		names.append(String(m).get_file())
-	list.set_items(names)
+	list.set_items(MissionCatalog.mission_names(_root))
 	if not list.item_activated.is_connected(_on_mission_activated):
 		list.item_activated.connect(_on_mission_activated)
 
@@ -534,9 +530,7 @@ func _on_start_control() -> void:
 	if mission.is_empty():
 		# No explicit pick: fall back to the first available mission so a menu
 		# without a list (or before a selection) can still start something.
-		var missions := _root.list_files(".bms") if _root != null else PackedStringArray()
-		if missions.size() > 0:
-			mission = String(missions[0]).get_file()
+		mission = MissionCatalog.first_mission_name(_root)
 	if mission.is_empty():
 		push_warning("NovaMenuHost: start pressed with no mission available")
 		return
