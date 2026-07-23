@@ -1109,7 +1109,7 @@ func test_joiner_off_by_default() -> void:
 	sim.free()
 
 
-# The REAL shell ordering (game_world._start_runtime -> _apply_local_player_spawn_loadout):
+# The REAL shell ordering (game_world runtime start -> the spawn-loadout apply):
 # the profile kit is applied right after runtime setup, BEFORE the joiner has name-matched
 # and spawned L, and the shell arms the weapon FSM only when that apply reports success and
 # the inventory is valid. The two-GUI regression: the pre-spawn apply was dropped, so the
