@@ -70,7 +70,7 @@ std::vector<uint8_t> JoinerConnection::start() {
 	server_hk_ = 0;
 	conn_.server_sk = 0;
 	conn_.server_scrk.clear();
-	conn_.seq = SessionSequencing{1, 0};
+	conn_.seq = make_jo_game_session_sequencing();
 	handshake_retry_clock_armed_ = false;
 	handshake_last_send_ms_ = 0;
 	pump_stage_ = 0;
@@ -144,6 +144,10 @@ JoinerConnection::PollResult JoinerConnection::handle_datagram(const uint8_t *ra
 	case SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE:
 		if (phase_ == Phase::Driving || phase_ == Phase::InMatch) on_server_session(body, out);
 		break;
+	case SESSION_OPCODE_SERVER_RESEND_LIST:
+		if (phase_ == Phase::Driving || phase_ == Phase::InMatch)
+			on_server_resend_list(body, out);
+		break;
 	default:
 		break; // server-only / unexpected opcodes are non-fatal
 	}
@@ -193,9 +197,14 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 	// Joiner recv: decrypt inbound 0x83 with the server's SCRK; deframe latches conn_.seq.last_inbound_seq.
 	ProtocolPacketHeader hdr;
 	std::vector<ProtocolMessage> messages;
-	if (!deframe_session_packet(conn_.seq, SessionCrypto{{}, conn_.server_scrk, 0}, body.data(),
-	                            body.size(), hdr, messages)) {
+	SessionDeframeAdmission admission;
+	if (!deframe_session_packet(
+			conn_.seq, SessionCrypto{{}, conn_.server_scrk, 0, client_key_}, body.data(),
+	                            body.size(), hdr, messages, &admission)) {
 		return; // lenient: an in-match streaming packet we can't parse is not fatal
+	}
+	if (admission.admitted) {
+		acknowledge_session_packets(conn_.seq, admission.max_ack_count);
 	}
 	for (const ProtocolMessage &m : messages) {
 		if (m.tag == 0x02) {
@@ -254,6 +263,10 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 		} else if (m.tag == 0x0A) {
 			// Per-frame world snapshot — surface for the caller's NetClientView.
 			out.inbound_0a.push_back(m.payload);
+		} else if (m.tag == 0x49) {
+			// The host echoes the same four-byte C2S 0x25 reload body as S2C 0x49.
+			// Surface it once through the decoded client-view event path.
+			out.inbound_gameplay.emplace_back(m.tag, m.payload);
 		} else if (m.tag == 0x11) {
 			// S2C 0x11 ends the player-sync bundle; the retail client answers with the EMPTY C2S
 			// 0x0A spawn-menu request — the message that advances the host's session sync state
@@ -266,6 +279,30 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 				pending_spawn_menu_request_ = true;
 		}
 		// Other tags (game-start bundle scalars, world-state-load 0x0F) are not entity data.
+	}
+}
+
+void JoinerConnection::on_server_resend_list(
+		const std::vector<uint8_t> &body, PollResult &out) {
+	std::vector<uint32_t> requested;
+	if (!decode_session_resend_list(
+			body.data(), body.size(), client_key_, requested)) {
+		return;
+	}
+
+	for (uint32_t requested_sequence : requested) {
+		const uint32_t sequence = requested_sequence == 0
+				? conn_.seq.next_outbound_seq
+				: requested_sequence;
+		std::vector<uint8_t> session_body;
+		if (!frame_session_packet_for_sequence(
+				conn_.seq,
+				SessionCrypto{conn_.client_scrk, {}, conn_.server_sk},
+				sequence, session_body)) {
+			continue;
+		}
+		out.outbound.push_back(nw_encode_outbound(
+				SESSION_OPCODE_PROTOCOL_MESSAGE, std::move(session_body)));
 	}
 }
 
@@ -287,6 +324,21 @@ std::vector<std::vector<uint8_t>> JoinerConnection::pump(uint32_t /*now_tick*/) 
 			out.push_back(handshake_retry_datagram_);
 		}
 		return out;
+	}
+	// Pump is the receive-batch boundary used by ClientRuntime: every framed datagram has already
+	// been drained through handle_datagram before this call. Clear retail's future-packet latch
+	// once here; emit 0x44 only if the contiguous drain still left a gap.
+	if (conn_.seq.missing_request_pending) {
+		conn_.seq.missing_request_pending = false;
+		if (!conn_.seq.queued_inbound.empty()) {
+			const std::vector<uint32_t> missing =
+					build_session_missing_sequence_list(conn_.seq, false);
+			std::vector<uint8_t> missing_body;
+			if (encode_session_resend_list(conn_.server_sk, missing, missing_body)) {
+				out.push_back(nw_encode_outbound(
+						SESSION_OPCODE_CLIENT_RESEND_LIST, std::move(missing_body)));
+			}
+		}
 	}
 	if (phase_ != Phase::Driving) return out; // only the pre-spawn drive window
 	// Retail learns the authoritative mission through 0x7B before beginning this drive. A pre-load
@@ -374,7 +426,8 @@ void JoinerConnection::seed_in_match(uint32_t session_id, std::string client_scr
 	conn_.server_sk = session_id;            // 0x43 header session_id (= ServerAuth.sk)
 	conn_.client_scrk = std::move(client_scrk); // encrypts our outbound 0x43 (the captured client SCRK)
 	conn_.server_scrk = std::move(server_scrk); // decrypts inbound 0x83 (for the S2C fold half)
-	conn_.seq = SessionSequencing{next_seq, last_ack}; // frame_session stamps next_seq then post-increments; last_ack -> 0x43 ack_count
+	conn_.seq = make_jo_game_session_sequencing(next_seq, last_ack);
+	// frame_session stamps next_seq then post-increments; last_ack -> 0x43 ack_count
 	self_handle_ = self_handle;
 	has_self_handle_ = true;
 	spawn_.item_type_id = self_type;

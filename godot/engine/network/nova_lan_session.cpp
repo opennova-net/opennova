@@ -16,7 +16,6 @@ namespace godot {
 namespace {
 
 constexpr const char *DEFAULT_BROADCAST = "255.255.255.255";
-constexpr const char *LOOPBACK = "127.0.0.1";
 constexpr double BROWSE_WINDOW_SECONDS = 30.0;
 
 uint32_t pick_random_uint32() {
@@ -128,12 +127,6 @@ int NovaLanSession::start_browsing(const String &destination, int port_min, int 
 	};
 
 	send_range(target);
-	// Global broadcast does not loop back reliably on every OS/network stack.
-	// Scan localhost as well for the two-instance developer/player use case, but
-	// only for the default broadcast so an explicit subnet/host remains exact.
-	if (target == DEFAULT_BROADCAST) {
-		send_range(LOOPBACK);
-	}
 
 	if (sent == 0) {
 		const Error send_error = first_send_error == OK ? ERR_CANT_CONNECT : first_send_error;
@@ -202,7 +195,7 @@ void NovaLanSession::upsert_server(const Dictionary &row, const std::string &key
 	if (server_indices_.find(key) != server_indices_.end()) {
 		return;
 	}
-	server_indices_.emplace(key, servers_.size());
+	server_indices_.emplace(key, static_cast<int>(servers_.size()));
 	servers_.push_back(row);
 	emit_signal("servers_changed", get_servers());
 }

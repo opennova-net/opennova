@@ -18,6 +18,10 @@
 #include <napi/session.h>            // make_client_host_request, ClientVar
 #include <novaworld/client_session.h>
 #include <novaworld/connection/manager.h>
+#include <npruntime/joiner_connection.h>
+#include <npwire/nw_session_framing.h>
+#include <npwire/protocol_message.h>
+#include <npwire/session_keys.h>
 
 #include "net_sockets.h"
 
@@ -159,6 +163,102 @@ int main() {
 			if (players == 2) break;
 		}
 		expect(players == 2, "ClientHostUpdate refreshed the player count to 2");
+	}
+
+	// The same real listener also owns the JO game-session responder. Drop the joiner's first
+	// post-auth 0x43, deliver sequence two, and require the listener's actual socket receive-batch
+	// boundary to emit the retail server 0x84 requesting sequence one.
+	{
+		uint16_t jo_client_port = 0;
+		auto jo_client = opennova::net::udp_bind(0, &jo_client_port);
+		expect(jo_client.is_valid(), "JO loss-probe UDP socket bound");
+		opennova::np::JoinerConnection joiner("E2ELossProbe");
+
+		auto send_jo = [&](const std::vector<uint8_t> &dg) {
+			if (!dg.empty()) {
+				opennova::net::udp_send_to(
+						jo_client, server_ep, dg.data(), dg.size());
+			}
+		};
+		auto receive_jo = [&](std::vector<uint8_t> &dg) {
+			opennova::net::Endpoint from;
+			const int n = opennova::net::udp_recv_from(
+					jo_client, rx, sizeof rx, from, 1000);
+			if (n <= 0) return false;
+			dg.assign(rx, rx + n);
+			return true;
+		};
+
+		send_jo(joiner.start());
+		std::vector<uint8_t> inbound;
+		const bool got_server_hello = receive_jo(inbound);
+		expect(got_server_hello, "JO loss probe receives ServerHello");
+		if (got_server_hello) {
+			auto hello = joiner.handle_datagram(inbound.data(), inbound.size());
+			const bool has_client_auth = hello.outbound.size() == 1;
+			expect(has_client_auth, "JO ServerHello produces ClientAuth");
+			if (has_client_auth) {
+				send_jo(hello.outbound[0]);
+			}
+		}
+		inbound.clear();
+		std::vector<uint8_t> dropped_first;
+		const bool got_server_auth = receive_jo(inbound);
+		expect(got_server_auth, "JO loss probe receives ServerAuth");
+		if (got_server_auth) {
+			auto auth = joiner.handle_datagram(inbound.data(), inbound.size());
+			const bool has_first_request = auth.outbound.size() == 1;
+			expect(has_first_request,
+			       "JO ServerAuth produces first sequenced request");
+			if (has_first_request) {
+				dropped_first = auth.outbound[0]; // deliberately do not send sequence one
+			}
+		}
+
+		const std::vector<uint8_t> second = joiner.frame_inner(0x34, {});
+		expect(!dropped_first.empty() && !second.empty(),
+		       "JO loss probe frames dropped sequence one and delivered sequence two");
+		send_jo(second);
+
+		inbound.clear();
+		const bool got_missing_response = receive_jo(inbound);
+		expect(got_missing_response,
+		       "real listener emits a missing-sequence response after FIFO drain");
+		if (got_missing_response) {
+			uint8_t opcode = 0;
+			std::vector<uint8_t> body;
+			std::vector<uint32_t> requested;
+			expect(opennova::nw_decode_inbound(
+			               inbound.data(), inbound.size(), opcode, body) &&
+			               opcode == opennova::SESSION_OPCODE_SERVER_RESEND_LIST &&
+			               opennova::decode_session_resend_list(
+			                       body.data(), body.size(), 1, requested) &&
+			               requested == std::vector<uint32_t>({1}),
+			       "real listener 0x84 requests the missing first C2S sequence");
+
+			auto resend = joiner.handle_datagram(inbound.data(), inbound.size());
+			const bool has_reconstructed = resend.outbound.size() == 1;
+			expect(has_reconstructed,
+			       "joiner reconstructs one packet for the listener's 0x84");
+			if (has_reconstructed) {
+				uint8_t resend_opcode = 0;
+				std::vector<uint8_t> resend_body;
+				opennova::ProtocolPacketHeader resend_header;
+				std::vector<opennova::ProtocolMessage> resend_messages;
+				expect(opennova::nw_decode_inbound(
+				               resend.outbound[0].data(), resend.outbound[0].size(),
+				               resend_opcode, resend_body) &&
+				               resend_opcode == opennova::SESSION_OPCODE_PROTOCOL_MESSAGE &&
+				               opennova::decode_protocol_packet_plaintext(
+				                       resend_body.data(), resend_body.size(),
+				                       joiner.connection().client_scrk,
+				                       resend_header, resend_messages) &&
+				               resend_header.seq_num == 1,
+				       "listener NACK reconstructs C2S sequence one under its old number");
+				send_jo(resend.outbound[0]);
+			}
+		}
+		opennova::net::close_socket(jo_client);
 	}
 
 	send(session.build_goodbye());

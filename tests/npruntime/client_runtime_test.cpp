@@ -91,6 +91,124 @@ bool run_seeded_objective_layout_hint() {
 	              "seeded replay folds objective body before recipient tail");
 }
 
+bool run_fire_queue_stamps_runtime_tick() {
+	const std::string client_scrk = "CLIENT-FIRE-TICK-SCRK";
+	const std::string server_scrk = "SERVER-FIRE-TICK-SCRK";
+	constexpr uint16_t self_handle = 0x0002;
+	np::ClientRuntime client("Shooter");
+	client.seed_session(0x11223344u, client_scrk, server_scrk,
+	                    1, 0, self_handle, w::kPlayerInfantryTypeId);
+
+	// Retail's packet producer reads the client network role's currentTick, not
+	// the independently-started World::logic_tick. Advance three network frames
+	// before queueing so a caller-supplied/world tick cannot pass accidentally.
+	for (uint32_t tick = 0; tick < 3; ++tick) {
+		if (!expect(client.Client_ProcessNetworkFrame(1000 + tick).empty(),
+		            "seeded replay idle frame emits no housekeeping"))
+			return false;
+	}
+
+	ClientFiredRound fire;
+	fire.current_tick = 0xDEADBEEFu; // poison: the runtime owns this wire field
+	fire.shooter_handle = self_handle;
+	if (!expect(client.queue_fired_round(fire), "in-match self fire queues"))
+		return false;
+
+	const std::vector<std::vector<uint8_t>> outbound =
+			client.Client_ProcessNetworkFrame(1003);
+	if (!expect(outbound.size() == 1, "queued fire emits one seeded-replay datagram"))
+		return false;
+
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	ProtocolPacketHeader header;
+	std::vector<ProtocolMessage> messages;
+	if (!expect(nw_decode_inbound(outbound[0].data(), outbound[0].size(), opcode, body) &&
+	                    opcode == SESSION_OPCODE_PROTOCOL_MESSAGE &&
+	                    decode_protocol_packet_plaintext(body.data(), body.size(), client_scrk,
+	                                                     header, messages),
+	            "decode queued C2S fire session packet"))
+		return false;
+	if (!expect(messages.size() == 1 && messages[0].tag == 0x06,
+	            "queued gameplay packet contains C2S 0x06"))
+		return false;
+
+	ClientFiredRound decoded;
+	size_t consumed = 0;
+	if (!expect(decode_client_fired_round(messages[0].payload.data(),
+	                                      messages[0].payload.size(), decoded, consumed) &&
+	                    consumed == 45,
+	            "decode runtime-produced fixed C2S 0x06 body"))
+		return false;
+	return expect(decoded.current_tick == 3,
+	              "C2S 0x06 uses the current runtime tick at queue time");
+}
+
+bool run_duplicate_s2c_session_one_shot_is_not_replayed() {
+	const std::string client_scrk = "CLIENT-REPLAY-SCRK";
+	const std::string server_scrk = "SERVER-REPLAY-SCRK";
+	np::JoinerConnection joiner("Replay");
+	joiner.seed_in_match(0x11223344u, client_scrk, server_scrk,
+	                     1, 0, 0x0001, w::kPlayerInfantryTypeId);
+
+	WeaponReload reload;
+	reload.entity_handle = 0x0001;
+	reload.reload_param = 0x00C5;
+	SessionSequencing server_tx{1, 0};
+	std::vector<uint8_t> first_body;
+	if (!expect(frame_session_packet(server_tx, SessionCrypto{server_scrk, {}, 1},
+	                                 {make_protocol_message(0x49, encode_weapon_reload(reload))},
+	                                 first_body),
+	            "frame first S2C 0x49 session packet"))
+		return false;
+	const std::vector<uint8_t> first =
+			nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(first_body));
+
+	np::JoinerConnection::PollResult initial =
+			joiner.handle_datagram(first.data(), first.size());
+	if (!expect(initial.inbound_gameplay.size() == 1 &&
+	                    initial.inbound_gameplay[0].first == 0x49,
+	            "first S2C 0x83 surfaces its one-shot reload event"))
+		return false;
+	np::JoinerConnection::PollResult duplicate =
+			joiner.handle_datagram(first.data(), first.size());
+	if (!expect(duplicate.inbound_gameplay.empty(),
+	            "exact duplicate S2C 0x83 does not replay its one-shot event"))
+		return false;
+
+	reload.reload_param = 0x00C6;
+	std::vector<uint8_t> second_body;
+	if (!expect(frame_session_packet(server_tx, SessionCrypto{server_scrk, {}, 1},
+	                                 {make_protocol_message(0x49, encode_weapon_reload(reload))},
+	                                 second_body),
+	            "frame next contiguous S2C 0x49 session packet"))
+		return false;
+	const std::vector<uint8_t> second =
+			nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(second_body));
+	if (!expect(joiner.handle_datagram(second.data(), second.size()).inbound_gameplay.size() == 1,
+	            "next contiguous S2C 0x83 dispatches"))
+		return false;
+	if (!expect(joiner.handle_datagram(first.data(), first.size()).inbound_gameplay.empty(),
+	            "older replayed S2C 0x83 stays suppressed"))
+		return false;
+	if (!expect(joiner.connection().seq.last_inbound_seq == 2,
+	            "older replay cannot regress the joiner ACK latch"))
+		return false;
+
+	const std::vector<uint8_t> ack = joiner.frame_inner(0x34, {});
+	uint8_t opcode = 0;
+	std::vector<uint8_t> ack_body;
+	ProtocolPacketHeader ack_hdr;
+	std::vector<ProtocolMessage> ack_messages;
+	if (!expect(nw_decode_inbound(ack.data(), ack.size(), opcode, ack_body) &&
+	                    opcode == SESSION_OPCODE_PROTOCOL_MESSAGE &&
+	                    decode_protocol_packet_plaintext(ack_body.data(), ack_body.size(), client_scrk,
+	                                                     ack_hdr, ack_messages),
+	            "decode joiner ACK-bearing C2S packet"))
+		return false;
+	return expect(ack_hdr.ack_count == 2, "joiner echoes the highest contiguous S2C sequence");
+}
+
 struct NullDatagramSocket final : ns::IDatagramSocket {
 	int recv_from(uint8_t *, std::size_t, PeerAddr &) override { return 0; }
 	void send_to(const PeerAddr &, const uint8_t *, std::size_t) override {}
@@ -356,7 +474,11 @@ bool run_roundtrip() {
 		if (!expect(np::frame_in_match_s2c(ctx, peer, 0x0C, body, sdg), "host frames the named 0x0C"))
 			return false;
 		client.receive(sdg.data(), sdg.size());
-		client.Client_ProcessNetworkFrame(tick++); // fold + name-match
+		// Folding the name-match reaches InMatch in this same frame, so the retail send block may also
+		// emit its first sequenced 0x2C.  The runtime contract requires the owner to ship every returned
+		// datagram; discarding it would manufacture a sequence hole that retail correctly queues behind.
+		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick++))
+			pump_host(std::move(d));
 	}
 	if (!expect(client.in_match() && client.self_handle() == Hh.packed,
 	            "client reached InMatch via the name-match; H == the host wire handle")) return false;
@@ -377,6 +499,7 @@ bool run_roundtrip() {
 	for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(up, tick)) {
 		np::HandleResult r = np::handle_server_datagram(ctx, peer, d.data(), d.size(), tick++);
 		for (const np::HostAcceptEvent &e : r.events) staged += np::apply_in_match_c2s(ctx, e);
+		for (const std::vector<uint8_t> &o : r.outbound) client.receive(o.data(), o.size());
 	}
 	if (!expect(staged == 1, "exactly one C2S 0x0C staged via apply_in_match_c2s")) return false;
 
@@ -407,7 +530,8 @@ bool run_roundtrip() {
 		}
 	}
 	if (!expect(got_0a, "Server_TickUpdate emitted an S2C 0x0A for the joiner connection")) return false;
-	client.Client_ProcessNetworkFrame(tick++); // fold the 0x0A into ClientState
+	for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick++))
+		pump_host(std::move(d)); // fold the 0x0A and ship any same-frame housekeeping
 
 	// The client's decoded view reflects the server's 0x0A: its anchor IS the joiner's post-SNAP
 	// position (emit_connection_s2c anchors to owned_entity), tying 0x0C-in -> 0x0A-out -> ClientState.
@@ -433,7 +557,8 @@ bool run_roundtrip() {
 	if (!expect(np::frame_in_match_s2c(ctx, peer, 0x0A, short_0a, short_dg),
 	            "host frames the deliberately short 0x0A")) return false;
 	client.receive(short_dg.data(), short_dg.size());
-	client.Client_ProcessNetworkFrame(tick++);
+	for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick++))
+		pump_host(std::move(d));
 	if (!expect(client.state().frames_applied == frames_before_short_frame + 1,
 	            "partial frame remains available to the lenient view fold")) return false;
 	if (!expect(client.state().local_health == health_before_short_frame,
@@ -469,6 +594,7 @@ bool run_roundtrip() {
 		np::HandleResult r = np::handle_server_datagram(ctx, peer, d.data(), d.size(), tick++);
 		for (const np::HostAcceptEvent &event : r.events)
 			staged_after_death += np::apply_in_match_c2s(ctx, event);
+		for (const std::vector<uint8_t> &o : r.outbound) client.receive(o.data(), o.size());
 	}
 	if (!expect(client.state().frames_applied == frames_before_death + 1,
 	            "client folded the fresh authoritative death frame")) return false;
@@ -486,6 +612,25 @@ bool run_roundtrip() {
 // ---------------------------------------------------------------------------------------------------
 // (B) Host-as-client (D-NET-121/122): the host's own loopback view anchors to its player, not dvxi5.
 // ---------------------------------------------------------------------------------------------------
+bool run_host_client_discards_authority_owned_reload_echoes() {
+	ns::LoopbackChannel host_loop;
+	np::ClientRuntime host_view(host_loop);
+
+	WeaponReload reload;
+	reload.entity_handle = 0x0001;
+	for (uint16_t i = 0; i < 256; ++i) {
+		reload.reload_param = i;
+		host_loop.host_send(0x49, encode_weapon_reload(reload));
+		host_view.Client_ProcessNetworkFrame(i);
+	}
+
+	if (!expect(host_loop.s2c_pending() == 0,
+	            "host client pumps every loopback S2C 0x49 notification"))
+		return false;
+	return expect(host_view.drain_reload_notifications().empty(),
+	              "host client does not retain authority-owned reload notifications");
+}
+
 bool run_host_as_client() {
 	np::NapiNPServerCtx ctx;
 	ns::LoopbackChannel host_loop; // the in-process channel the host emits its own S2C onto
@@ -734,7 +879,11 @@ bool run_host_pump_hook_observes_remote_before_first_tick() {
 
 int main() {
 	const bool ok = run_seeded_objective_layout_hint() &&
-	                run_roundtrip() && run_host_as_client() &&
+	                run_fire_queue_stamps_runtime_tick() &&
+	                run_duplicate_s2c_session_one_shot_is_not_replayed() &&
+	                run_roundtrip() &&
+	                run_host_client_discards_authority_owned_reload_echoes() &&
+	                run_host_as_client() &&
 	                run_host_startup_seeds_mounted_no_callback_carrier() &&
 	                run_host_startup_maps_claymore_preference() &&
 	                run_host_pump_hook_observes_remote_before_first_tick();

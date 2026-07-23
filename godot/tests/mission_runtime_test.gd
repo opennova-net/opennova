@@ -133,6 +133,24 @@ class FakeModel:
 		phases.append([channel, phase])
 
 
+class FireAudioStub:
+	extends RefCounted
+	var calls: Array = []
+
+	func fire_soundset(set_name: String, world_pos: Vector3,
+			source_bms_id: int = 0) -> bool:
+		calls.append({
+			"set": set_name,
+			"pos": world_pos,
+			"source_bms_id": source_bms_id,
+		})
+		return true
+
+	func slot_soundset(_set_name: String, _world_pos: Vector3,
+			_exclusive_key: String = "") -> bool:
+		return true
+
+
 # Build a one-organic mission + a container holding one fake node tagged to match it by (kind,index)
 # (the in-memory mission has bms_id 0, so the present index resolves by the fallback key).
 func _make_world(authored: Transform3D) -> Dictionary:
@@ -159,6 +177,46 @@ func test_setup_promotes_and_counts() -> void:
 	assert_eq(count, 2, "one organic + the auto-spawned host player")
 	assert_not_null(rt.get_sim(), "sim created")
 	assert_eq(rt.entity_count(), 2)
+
+
+func test_joiner_runtime_owns_fire_and_throwable_presenters() -> void:
+	# Joiner S2C tag-2 descriptors append to the visual RoundSim's fired queue
+	# and may carry a flying throwable TrcrID. MissionRuntime must own both
+	# consumers on the joiner just as it does on the host. A pre-connected sim
+	# pins the real production setup branch without requiring a live peer.
+	var w := _make_world(Transform3D.IDENTITY)
+	var joiner := NovaSimulation.new()
+	assert_true(joiner.enable_join("127.0.0.1", 9, "PresentJoiner"))
+	var audio := FireAudioStub.new()
+	var rt := MissionRuntime.new()
+	add_child_autofree(rt)
+	assert_gt(int(rt.setup(w.mission, w.container, {
+		"simulation": joiner,
+		"net_transport": "lan-join",
+		"fire_audio": func(): return audio,
+	})), 0)
+
+	var fire_stats := rt.get_fire_present_stats()
+	assert_true(fire_stats.has("fires"),
+			"the joiner constructs the fire queue consumer")
+	assert_true(rt.get_throwable_present_stats().has("live"),
+			"the joiner constructs the flying-throwable snapshot consumer")
+
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
+			"res://../fixtures/def")), OK)
+	assert_eq(rt.get_sim().load_ammo_table(root, "ammo.def"), OK)
+	for _frame in range(64):
+		assert_gte(rt.get_sim().debug_spawn_round(
+				Vector3(0, 2, 0), Vector3.FORWARD,
+				"AMMO_CAR15_556MM"), 0)
+		assert_true(rt.tick())
+		assert_true(rt.get_sim().drain_fire_presentation_events().is_empty(),
+				"the runtime drained the complete fire queue this frame")
+
+	assert_eq(audio.calls.size(), 64,
+			"each remote-style round reaches the joiner's fire presenter once")
+	assert_eq(int(rt.get_fire_present_stats()["fires"]), 64)
 
 
 func test_wire_presenter_resets_with_runtime_stop() -> void:

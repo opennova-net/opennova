@@ -7,6 +7,24 @@
 
 namespace opennova::netsim {
 
+// One decoded S2C 0x0A tag-2 fire descriptor, lifted into absolute fixed-point
+// coordinates. It is a remote ROUND SPAWN, not a hit/impact notification: the
+// receiving client re-simulates it visually and authority remains on the host.
+struct ClientRoundEvent {
+	uint8_t flags = 0;
+	uint8_t adm_index = 0;
+	uint8_t subtype = 0;
+	uint8_t slot_byte = 0;
+	uint16_t shooter_handle = 0xFFFF;
+	uint16_t target_handle = 0xFFFF;
+	uint16_t shot_seq = 0;
+	int32_t origin_x = 0;
+	int32_t origin_y = 0;
+	int32_t origin_z = 0;
+	int32_t dir_yaw_bam = 0;
+	int32_t dir_pitch_bam = 0;
+};
+
 // One entity as the local client has DECODED it off the wire. Per ADR 0011 the
 // present pass reads THIS, not the authoritative sim directly — so single-player
 // renders exactly the state a networked peer would see.

@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <vector>
 
+#include "terrain/height_field.h"
 #include "world/collision.h"
 #include "world/world.h"
 
@@ -59,7 +60,7 @@ struct Rig {
         dud.max_age_ticks = 7;
     }
 
-    int fire() {
+    int fire(RoundConsequenceMode mode = RoundConsequenceMode::Authoritative) {
         RoundSpawnParams p;
         p.owner = shooter;
         p.shooter_handle = shooter.packed;
@@ -67,7 +68,7 @@ struct Rig {
         p.dir_yaw_bam = 0;
         p.dir_pitch_bam = 0;
         p.ammo_index = 0;
-        return world.round_sim.spawn(world, p);
+        return world.round_sim.spawn(world, p, mode);
     }
 
     void clear_events() {
@@ -536,14 +537,248 @@ void test_network_oneshot_authority_and_session_gate() {
         r.world.mp_session = true;
         r.world.projectile_authority = false;
         r.world.one_shot_kill = true;
-        r.world.registry.get(r.target)->health = 3000;
+        Entity *target = r.world.registry.get(r.target);
+        CHECK(target != nullptr);
+        if (target == nullptr) return;
+        // Pin the independent retail world-role gate. Even if a client caller
+        // forgets to mark its round VisualOnly, a non-authority network world
+        // cannot normalize entity words or queue the impact kill zone.
+        target->health = 0x1FFFF;
+        target->health_max = 0x1FFFE;
+        AmmoTableEntry &ammo = r.world.ammo.entries[0];
+        ammo.kztype = ammo_kz::kStandard;
+        ammo.kz_maxradius = 5.0f;
+        ammo.kz_damage = 50;
         CHECK(r.fire() >= 0);
         r.world.round_sim.tick(r.world, nullptr);
-        CHECK(r.world.registry.get(r.target)->health == 3000);
+        CHECK(target->health == 0x1FFFF);
+        CHECK(target->health_max == 0x1FFFE);
         CHECK(r.world.round_sim.hits.empty());
+        CHECK(r.world.explosions.queue.empty());
         CHECK(r.world.round_sim.impacts.size() == 1); // client prediction remains visual
         CHECK(r.world.round_sim.active_count == 0);
+
+        // The same world-role gate covers spawn-time instant kill zones.
+        AmmoTableEntry instant;
+        instant.name = "CLIENT_INSTANT";
+        instant.valid = true;
+        instant.flags = 0x400u;
+        instant.kztype = ammo_kz::kStandard;
+        instant.kz_maxradius = 4.0f;
+        instant.kz_damage = 40;
+        const int instant_index = static_cast<int>(r.world.ammo.entries.size());
+        r.world.ammo.entries.push_back(instant);
+        RoundSpawnParams instant_params;
+        instant_params.owner = r.shooter;
+        instant_params.shooter_handle = r.shooter.packed;
+        instant_params.origin = {1.0f, 0.0f, 1.0f};
+        instant_params.ammo_index = instant_index;
+        CHECK(r.world.round_sim.spawn(r.world, instant_params) < 0);
+        CHECK(r.world.explosions.queue.empty());
     }
+}
+
+void test_visual_only_rounds_have_no_gameplay_consequences() {
+    Rig r;
+    r.world.mp_session = true;
+    r.world.projectile_authority = false;
+    r.world.one_shot_kill = true;
+    Entity *shooter = r.world.registry.get(r.shooter);
+    Entity *target = r.world.registry.get(r.target);
+    CHECK(shooter != nullptr && target != nullptr);
+    if (shooter == nullptr || target == nullptr) return;
+
+    shooter->group_id = 3;
+    shooter->net_id = 7;
+    target->group_id = 4;
+    target->net_id = 9;
+    // Values outside signed-word range catch the old consequence-boundary
+    // normalization even when calculated damage happened to be zero.
+    target->health = 0x1FFFF;
+    target->health_max = 0x1FFFE;
+    target->armor_impact = 0x1FFFD;
+    target->armor_kz = 0x1FFFC;
+    target->flags = 0x10000u;
+    target->last_attacker = r.shooter;
+    target->death_anim_state = 77;
+    const Entity before = *target;
+
+    AmmoTableEntry &bullet = r.world.ammo.entries[0];
+    bullet.arm_age_ticks = 0;
+    bullet.kztype = ammo_kz::kStandard;
+    bullet.kz_maxradius = 5.0f;
+    bullet.kz_damage = 50;
+    CHECK(r.fire(RoundConsequenceMode::VisualOnly) >= 0);
+    r.world.round_sim.tick(r.world, nullptr);
+
+    CHECK(r.world.round_sim.impacts.size() == 1);
+    CHECK(r.world.round_sim.hits.empty());
+    CHECK(r.world.round_sim.deaths.empty());
+    CHECK(r.world.explosions.queue.empty());
+    CHECK(target->health == before.health);
+    CHECK(target->health_max == before.health_max);
+    CHECK(target->armor_impact == before.armor_impact);
+    CHECK(target->armor_kz == before.armor_kz);
+    CHECK(target->flags == before.flags);
+    CHECK(target->last_attacker == before.last_attacker);
+    CHECK(target->death_anim_state == before.death_anim_state);
+    CHECK(!r.world.relations.group_group(
+        TriggerRelations::kShot, shooter->group_id, target->group_id));
+    CHECK(!r.world.relations.single_group(
+        TriggerRelations::kShot, shooter->net_id, target->group_id));
+    CHECK(!r.world.relations.group_single(
+        TriggerRelations::kShot, shooter->group_id, target->net_id));
+    CHECK(!r.world.relations.single_single(
+        TriggerRelations::kShot, shooter->net_id, target->net_id));
+    CHECK(r.world.relations.group(target->group_id).alert ==
+          TriggerRelations::kAlertGreen);
+
+    auto entity_count = [&]() {
+        int count = 0;
+        r.world.registry.for_each([&](const Entity &) { ++count; });
+        return count;
+    };
+    const int entities_before = entity_count();
+    const size_t devices_before = r.world.throwables.devices.size();
+
+    // Spawn-time instant killzones still emit their visual impact descriptor,
+    // but may not queue the authoritative explosion.
+    AmmoTableEntry instant;
+    instant.name = "VISUAL_INSTANT";
+    instant.valid = true;
+    instant.flags = 0x400u;
+    instant.kztype = ammo_kz::kStandard;
+    instant.kz_maxradius = 4.0f;
+    instant.kz_damage = 40;
+    const int instant_index = static_cast<int>(r.world.ammo.entries.size());
+    r.world.ammo.entries.push_back(instant);
+    RoundSpawnParams instant_params;
+    instant_params.owner = r.shooter;
+    instant_params.shooter_handle = r.shooter.packed;
+    instant_params.origin = {1.0f, 0.0f, 1.0f};
+    instant_params.ammo_index = instant_index;
+    const size_t impacts_before = r.world.round_sim.impacts.size();
+    CHECK(r.world.round_sim.spawn(r.world, instant_params,
+                                  RoundConsequenceMode::VisualOnly) < 0);
+    CHECK(r.world.round_sim.impacts.size() == impacts_before + 1);
+    CHECK(r.world.explosions.queue.empty());
+
+    // A visual use-own-move charge reaches the exact retail rest conversion,
+    // then releases without cloning a placed-device entity.
+    AmmoTableEntry charge;
+    charge.name = "VISUAL_CHARGE";
+    charge.valid = true;
+    charge.flags = 0x2000u;
+    charge.velocity = 62;
+    charge.max_age_ticks = 20;
+    charge.drag_fp16 = 65536;
+    const int charge_index = static_cast<int>(r.world.ammo.entries.size());
+    r.world.ammo.entries.push_back(charge);
+    RoundSpawnParams charge_params;
+    charge_params.owner = r.shooter;
+    charge_params.shooter_handle = r.shooter.packed;
+    charge_params.origin = {0.0f, 0.0f, 0.0f};
+    charge_params.ammo_index = charge_index;
+    const int charge_slot = r.world.round_sim.spawn(
+        r.world, charge_params, RoundConsequenceMode::VisualOnly);
+    CHECK(charge_slot >= 0);
+    if (charge_slot >= 0) {
+        LiveRound &round =
+            r.world.round_sim.rounds[static_cast<size_t>(charge_slot)];
+        round.motor = ThrowClass::kSatchel;
+        round.vel = Vec3{};
+    }
+    std::vector<uint16_t> heights(512u * 512u, 0);
+    std::vector<int> sectors(256u, 1);
+    opennova::terrain::TerrainHeightField flat;
+    flat.heightmap = heights.data();
+    flat.dim = 512;
+    flat.layout.sector_grid = sectors.data();
+    r.world.round_sim.tick(r.world, &flat, nullptr);
+    CHECK(r.world.throwables.devices.size() == devices_before);
+    CHECK(entity_count() == entities_before);
+    CHECK(r.world.explosions.queue.empty());
+}
+
+void test_visual_person_proxy_keeps_wire_identity_out_of_authority() {
+    World world;
+    world.registry.configure_pool(0, 8);
+
+    // Occupy local slot zero so valid wire H=0 and local L=1 are distinct.
+    // The hidden dummy remains in the registry person table but cannot collide.
+    Entity dummy;
+    dummy.kind = EntityKind::Organic;
+    dummy.hidden = true;
+    dummy.position = {100.0f, 100.0f, 0.0f};
+    CHECK(world.registry.spawn(0, dummy).packed == 0);
+
+    Entity local;
+    local.kind = EntityKind::Organic;
+    local.has_item_def = true;
+    local.item_type = 3;
+    local.position = {8.0f, 0.0f, 0.0f};
+    local.health = 100;
+    const EntityHandle local_l = world.registry.spawn(0, local);
+    CHECK(local_l.packed == 1);
+    world.cached.local_player = local_l;
+
+    // H=0 is the local player's valid server identity. The remote H deliberately
+    // aliases local L's packed value: excluding owners by casting H -> L would
+    // drop the actual remote target and make this trace miss.
+    constexpr uint16_t self_h = 0;
+    std::vector<ProjectilePersonProxy> proxies{
+        ProjectilePersonProxy{self_h, FixedVec3{2 * 65536, 0, 0}},
+        ProjectilePersonProxy{local_l.packed, FixedVec3{5 * 65536, 0, 0}},
+    };
+    CollisionWorld collision;
+    collision.replace_projectile_person_proxies(proxies, self_h);
+    collision.build_tick_tables(world);
+    world.collision = &collision;
+
+    ProjectileTrace trace;
+    trace.start = FixedVec3{0, 0, 58982};
+    trace.end = FixedVec3{10 * 65536, 0, 58982};
+    trace.owner = local_l;
+    trace.shooter_wire_handle = self_h;
+    CHECK(!collision.trace_projectile(world, trace).hit());
+
+    trace.include_person_proxies = true;
+    const ProjectileHit hit = collision.trace_projectile(world, trace);
+    CHECK(hit.hit_class == ProjectileHitClass::Person);
+    CHECK(!hit.geometry_entity.valid());
+    CHECK(hit.bone_index == -1 && hit.hit_zone == -1);
+    CHECK(hit.position_q16.x > 4 * 65536);
+    CHECK(hit.position_q16.x < 5 * 65536);
+
+    AmmoTableEntry ammo;
+    ammo.name = "VISUAL_PROXY";
+    ammo.valid = true;
+    ammo.velocity = 620; // 10 units/tick
+    ammo.max_age_ticks = 20;
+    ammo.weight_in_grains = 875;
+    ammo.max_damage = 25;
+    world.ammo.entries.push_back(ammo);
+    world.mp_session = true;
+    world.projectile_authority = false;
+
+    RoundSpawnParams params;
+    params.owner = local_l;
+    params.shooter_handle = self_h;
+    params.origin = {0.0f, 0.0f, kOrganicStandInCenterZ};
+    params.ammo_index = 0;
+    CHECK(world.round_sim.spawn(
+              world, params, RoundConsequenceMode::VisualOnly) >= 0);
+    world.round_sim.tick(world, nullptr, &collision);
+
+    CHECK(world.round_sim.impacts.size() == 1);
+    CHECK(world.round_sim.impacts[0].effect_tag == 2);
+    CHECK(to_fixed(world.round_sim.impacts[0].position.x) == hit.position_q16.x);
+    CHECK(world.round_sim.hits.empty());
+    CHECK(world.round_sim.deaths.empty());
+    CHECK(world.explosions.queue.empty());
+    CHECK(world.registry.get(local_l)->health == 100);
+    CHECK(world.round_sim.debug_trail_count == 1);
+    CHECK(world.round_sim.debug_trail[0].entity == EntityHandle::kInvalid);
 }
 
 void test_signed_armor_equality_and_damage_state_gates() {
@@ -861,6 +1096,8 @@ int main() {
     test_item_type_zone_domain_and_attrib_0200_sections();
     test_shooter_damage_class_runs_after_zone_truncation();
     test_network_oneshot_authority_and_session_gate();
+    test_visual_only_rounds_have_no_gameplay_consequences();
+    test_visual_person_proxy_keeps_wire_identity_out_of_authority();
     test_signed_armor_equality_and_damage_state_gates();
     test_signed_health_subtraction_wraps_at_entity_word();
     test_exact_one_hop_vehicle_parent_damage_routing();

@@ -2396,40 +2396,51 @@ carries guided traffic (the 2026-06-16b loopback fired no rockets). Verdict:
 ### 5.16 C2S 0x06 — client-fired-round (3-player loopback 2026-06-16d)
 
 `[orig: NapiNPServerMsg_0x006_ClientFiredRound @ 0x513310]`. Fixed **45 B** body. The
-joiner reports a discrete weapon-fire event: origin, direction, target, body part hit,
-and a 5-u16 muzzle-offset block the host applies to the shooter entity's local
-coordinate frame (entity+1..6) before running `Server_ValidateAndFireRound @ 0x50BAA0`.
+joiner reports a discrete weapon-fire event: calculated fire pose, target, shot sequence,
+and five u16 low-word deltas that let the host reconstruct that same pose against its live
+shooter entity dwords before running `Server_ClientFiredRound @ 0x50BAA0`. The five words
+are **not** an independent or weapon-specific muzzle-offset vector.
 On success, when `fire_flags & 1 == 0` (primary fire), the host advances the shooter's
 ammo-tick counter at `playerSlot+0x178D8` by `AdmDef_GetEntryByIndex(adm_index)[276]`
 (reload-cooldown ticks).
 
 | off | bytes | field | landing (host receiver) |
 |---|---|---|---|
-| 0 | 4 | `current_tick` (u32 LE) | tick anchor — compared against `playerSlot+0x178D8` for cooldown gate |
+| 0 | 4 | `current_tick` (u32 LE) | client network-role `currentTick @ 0xA8229C`; compared against `playerSlot+0x178D8` for cooldown/freshness |
 | 4 | 2 | `shooter_handle` (u16 LE, `pool<<12\|slot`) | pool resolve via `g_pool_list`; `0xFFFF` or `(h&0xF000)>=0x5000` rejects |
 | 6 | 1 | `fire_flags` (u8) | bit 0 = alt fire (skips ammo decrement), bit 1 = AdmDef-indexed primary, bits 4-5 = the pre-consume magazine count's low two bits; → `dest[3]` |
 | 7 | 1 | `adm_index` (u8) | `AdmDef_GetEntryByIndex @ 0x53FC80` key (action-descriptor — same index space as §5.9.1 weapon-hit `adm_index`) |
-| 8 | 4 | `pos_x` (i32 LE, 16.16) | shooter world position at fire moment (entity+4 + map origin); → `dest[4]` |
+| 8 | 4 | `pos_x` (i32 LE, 16.16) | calculated fire-pose origin X; → `dest[4]` |
 | 12 | 4 | `pos_y` | → `dest[5]` |
 | 16 | 4 | `pos_z` | → `dest[6]` |
 | 20 | 4 | `dir_x` (i32 LE) | fire YAW as a 16.16 TURN FRACTION — the MISSION BEARING directly, NOT the 0x0A euler_z heading frame (which is 90° − yaw): v29 wire-proof, two duel baselines within 1.4° (D-NET-153). Host applies `<< 16` (= BAM32, `dir_x_shifted`); → `dest[7]` |
 | 24 | 4 | `dir_y` | fire PITCH, same encoding + `<< 16` shift; → `dest[8]` |
 | 28 | 2 | `target_handle` (u16 LE) | hit entity; `0xFFFF` = no specific target; → `dest[16]` |
-| 30 | 2 | `hit_part` (u16 LE) | body-part / collision sub-section index; → `dest[17]` |
-| 32 | 1 | `extra_byte1` (u8) | → `dest[18]` |
+| 30 | 2 | `hit_part` (u16 LE) | per-shot sequence; → `dest[17]` → `word_B7C670` → tag-2 `shot_seq` |
+| 32 | 1 | `extra_byte1` (u8) | low byte of shooter `entity+352`; → `dest[18]` |
 | 33 | 1 | `extra_byte2` (u8) | → `dword_C86FB4` (last-fire global) → `dest[19]` |
 | 34 | 1 | `misc_byte` (u8) | → `LOBYTE(dest[20])` |
-| 35 | 2 | `base_offset` (u16 LE) | applied to `shooter_entity[1]` before validate — relative muzzle x-base |
-| 37 | 2 | `offset_x` (u16 LE) | applied to `shooter_entity[2]` |
-| 39 | 2 | `offset_y` (u16 LE) | applied to `shooter_entity[3]` |
-| 41 | 2 | `offset_z` (u16 LE) | applied to `shooter_entity[4]` |
-| 43 | 2 | `offset_w` (u16 LE) | applied to `shooter_entity[5]` |
+| 35 | 2 | `base_offset` (u16 LE) | `low16(fire X) − low16(shooter X)`; host adds to `shooter_entity[1]` → `dest[10]` |
+| 37 | 2 | `offset_x` (u16 LE) | `low16(fire Y) − low16(shooter Y)`; host adds to `shooter_entity[2]` → `dest[11]` |
+| 39 | 2 | `offset_y` (u16 LE) | `low16(fire Z) − low16(shooter Z)`; host adds to `shooter_entity[3]` → `dest[12]` |
+| 41 | 2 | `offset_z` (u16 LE) | `low16(fire Yaw) − low16(shooter Yaw)`; host adds to `shooter_entity[4]` → `dest[13]` |
+| 43 | 2 | `offset_w` (u16 LE) | `low16(fire Pitch) − low16(shooter Pitch)`; host adds to `shooter_entity[5]` → `dest[14]` |
+
+**Exact client producer.** `WeaponAction_Fire @ 0x542B10` obtains a six-dword
+`{X,Y,Z,Yaw,Pitch,Roll}` descriptor from `Entity_CalcWeaponFirePosition @ 0x4DC750`;
+the ordinary on-foot leg is `{Position + CameraOffset, Yaw, Pitch + pitchBlend, Roll}`,
+with separate mounted/scoped transform legs. `Entity_FireWeaponAndSendPacket @ 0x42BD80`
+passes that descriptor to `NetPacket_WriteEntityPositionUpdate @ 0x42A610`. The writer
+stores full X/Y/Z, rounded angle high words, and the five modulo-u16 differences above.
+The receiver at `@0x513310` keeps the claimed full fire pose in `dest[4..8]` and rebuilds
+`dest[10..14]` from its current shooter pose plus those words; the latter feeds the
+moving-carrier re-anchor paths in `Server_ClientFiredRound`.
 
 **Cross-witness against `host_and_join_game_on_opennovaworld_loopback_threeplayers_more_gameplay.pcapng`:**
 - f=2057 (adm=7, fire_flags=0x02): `tick=15532061 pos=(-444.8, -413.2, 14.5) hit_part=1025`.
 - f=2061 (adm=7, +7 ticks ≈ 113 ms): `tick=15532068`, hit_part increments to 1026 — a monotonic
   fire-counter / shot-sequence carried in `hit_part`.
-- f=2278: weapon switch → `adm=61, fire_flags=0x32` (primary + pre-consume clip low bits 3), distinct muzzle-offset
+- f=2278: weapon switch → `adm=61, fire_flags=0x32` (primary + pre-consume clip low bits 3), distinct pose-delta
   signature. The byte-witness pin is `tests/novaworld/nw_ingame_c2s_uplink_test::test_client_fired_round`.
 
 **Weapon-variety witness (probe3_again, 2026-06-19).** The richer 2-shooter session exercises the
@@ -3321,9 +3332,9 @@ flag). [orig: `NapiNPClientMsg_0x059 @ 0x4228E0` → `Entity_SpawnOrUpdateFromSl
 That is **codec coverage, not production client consumption**: the reimpl
 `NetClientView` does not fold decoded 0x59 rows into live placed entities,
 and the throwable host path emits neither 0x59 spawn nor 0x12 removal. Together
-with the absent tag-2 round-event → client `RoundSim` fold, remote clients see
-neither the flying throwable nor its persisted-device replacement
-(D-THROW-7).
+with that missing placed-device path, remote clients do not receive the
+persisted-device replacement. The tag-2 round-event → visual-only client
+`RoundSim` fold now presents the flying throwable itself (D-THROW-7).
 
 **S2C `0x44` — entity-routed sub-packet.** A 5-B sub-header `[u16 field0][i16 netId][u8 subtype]` then a
 class-dependent body the dispatcher routes to the target entity's per-class serialize callback (`entity
@@ -5495,13 +5506,18 @@ arrives.** Witnessed chain:
 2. FSM `WeaponAction_Reload @ 0x5430B0`: first tick sends reliable **C2S 0x25**
    `[u16 packed entity handle][u16 weaponSlotCombo = category*65+rank]` (via the misnomered
    `NetPacket_SendEntityDeathNotification @ 0x432930`, combo @0x5430E7) and sets the slot's
-   **0x80 reload-pending flag** (@0x543108) — which BLOCKS further reload requests until cleared.
+   **0x80 reload-pending flag** (@0x543108). This is an entry-time guard, not an ACK latch:
+   the shared `ActionSlot_BeginActivePhase` shim overwrites the phase with 2 on that same first
+   handler tick (§5.62).
 3. Server: `NapiNPServerMsg_HandleReloadRequest @ 0x514DF0` (dispatch @0x82B5D8) validates and
    **broadcasts S2C 0x49** with the same payload (two filtered sends @0x4C87E0), applying
-   `WeaponSlot_ReloadAmmo @ 0x541720` on its own copy for remote requesters.
+   `WeaponSlot_ReloadAmmo @ 0x541720` on its own copy for remote requesters. The gate requires
+   a live, non-dead requester and a live payload-addressed pool entity; it deliberately does not
+   require those handles to be equal because mounted reloads may address a vehicle weapon.
 4. Client: `NapiNPClientMsg_WeaponReload_0x049 @ 0x42C0A0` (dispatch @0x82AE28): local player →
    `WeaponSlot_ReloadAmmo` — **the only place a client's clip refills** (clears the 0x80 flag
-   @0x5417A2; also stamps `entity+0x372 = 80`, the 3P body reload-clip window — ANIMNUM 65/66,
+   if still present @0x5417A2; also stamps `entity+0x372 = 80`, the 3P body reload-clip
+   window — ANIMNUM 65/66,
    world-wac-ai-re.md §14.8.5); other players → +0x371 = 80 (CORRECTED 2026-07-09: not a clip
    window — the arms-dip `headLookDecay` feed, §14.8.5; a pure client shows remote reloads as
    the dip only, the host shows the full clip via its own-copy refill); vehicle weapons →
@@ -5509,9 +5525,10 @@ arrives.** Witnessed chain:
 
 Reload ammo math: `WeaponSlot_ReloadAmmo` transfers `def[22] (clipsize) × def[56]
 (pool-units/round)` from the per-ammo-class carried pool (`Entity_GetScoreValueBySlotType
-@ 0x5406E0`, class byte def+0xD8; pool cap = `ammoclass_max_carry` @ 0x24E7DE0). A host that
-ignores C2S 0x25 permanently wedges the joiner's weapon (one attempt sets 0x80; no 0x49 ever
-clears it) — D-NET-142.
+@ 0x5406E0`, class byte def+0xD8; pool cap = `ammoclass_max_carry` @ 0x24E7DE0). If a host
+ignores C2S 0x25, the joiner's clip stays empty; when the reload action returns to idle, the
+empty-magazine logic queues another reload, producing repeated reload animations/requests rather
+than a permanent 0x80 wedge. The S2C 0x49 refill is what ends that cycle — D-NET-142.
 
 Host-side bookkeeping (witnessed in full 2026-07-03): after the two relayed sends, the host
 calls `WeaponSlot_ReloadAmmo @ 0x541720` on its OWN copy iff the requester is REMOTE
@@ -5910,11 +5927,17 @@ resolution (position, normalized direction, tag) →
 `NovaSimulation::drain_round_impacts` resolves the rows baked by `np::build_ammo_table`
 (`world/ammo_table.h kImpactEffectTagNames`) → `game_world._route_round_impacts`
 destructively drains each row and presents both its generic World-domain particle transient
-and 3D soundset, retaining production tick/order and catch-up age. A joiner still does not
-feed decoded S2C tag-2 round events into a presentation `RoundSim` (D-WPN-8 /
-D-THROW-7), so the impact route and flying throwable item models are currently
-host/SP-only; deployed throwables additionally lack the 0x59/0x12 runtime path
-(§5.36). Three ledger rows record the audit:
+and 3D soundset, retaining production tick/order and catch-up age. Joiners now feed decoded
+S2C tag-2 round events through `NetClientView`/`ClientRuntime` into a visual-only
+`RoundSim`, so the impact route and flying throwable item presentation run client-side while
+the authority gates above continue to prevent client damage. Remote-player collision currently
+uses decoded position plus a torso-center proxy rather than retail's posed bones. Moving decoded
+non-player Infantry and vehicle poses are not yet projected into the client's projectile collision
+world; adding them requires their wire-keyed geometry/pose model rather than casting server handles
+into the client-local registry. Shooter team and per-weapon tracer cadence are not retained in the
+client state, and clean 0x46/0x5D disconnect retirement is not yet folded into the player proxy set.
+Deployed throwables still lack the 0x59/0x12
+runtime path (D-WPN-8/D-THROW-7; §5.36). Three ledger rows record the audit:
 **D-WPN-14 is resolved as a false reading** (ballistic arrival timing already matches),
 **D-WPN-15** carries selection legs:
 charmap sampler + `.TIL` overrides unported → terrain always takes the retail no-map dirt
@@ -6496,10 +6519,13 @@ busy-child/underwater/score-lock legs + kick sound gate (D-WPN-3); the heat mode
 weapon-switch machinery seams (D-WPN-5); local-player + occupied mounted-parent pump,
 with general non-local/unmounted coverage still open (D-WPN-6); production runtime
 action-table bake lacks the ADM-duration source for authored `auto` delays (D-WPN-26); interim
-ammo seed clipsize/startrounds (D-WPN-7); FSM↔net residual — authority/SP fire now
-appends the primary ring row (including ordinary hip/raise/3P subtype 12) and spawns
-`RoundSim` synchronously, while settled-FP/first-person-mounted zoom subtypes, joiner C2S 0x06/0x25
-uplink, and client S2C tag-2 round presentation remain unwired (D-WPN-8); the
+ammo seed clipsize/startrounds (D-WPN-7); FSM↔net integration now carries joiner C2S 0x06
+fire, the payload-addressed C2S 0x25 → S2C 0x49 reload round-trip, and decoded S2C tag-2
+events into a visual-only client `RoundSim`; authority/SP fire continues to append the primary
+ring row (including ordinary hip/raise/3P subtype 12) and spawn `RoundSim` synchronously.
+D-WPN-8 remains open for settled-FP/mounted zoom subtypes, remote/vehicle 0x49 presentation,
+remote shooter-team/per-weapon tracer metadata, posed-bone player collision, moving decoded
+non-player Infantry/vehicle collision projection, and clean-disconnect proxy retirement; the
 standard Scoped/Sighted SIGHTS-card selector, including SWITCHFROM and
 NoCardSwitch/ForceScoped suppression, is ported; remaining ADS residuals are the
 zoom-level keys, scope net notify, stance/NVG gates, movement reversal/auto-raise,
@@ -8290,7 +8316,7 @@ subset) function-by-function against the kong IDB. Scope and verdicts:
 
 | System | Reimpl | Verdict | Key witness |
 |---|---|---|---|
-| SessionSequencing/SessionCrypto framing | `frame_session_packet`/`deframe_session_packet` (`libs/npwire/protocol_message.{h,cpp}`) | **MATCHING** | `CNapiNPConnection_SendSessionPacket @ 0x61edd0` (header `[remote_key 0x150][seq 0x7ac][ack 0x7b8][u8 0]`, inner SCRK = TX key @ conn+0xCC, outer static NWU key) / `CNapiNPConnection_ParseMessages @ 0x625bc0` (RX key @ conn+0x10c, `recv_ack_seq` latch) / `CNapiNPConnection_BuildOutgoingPackets @ 0x628430` (`++out_packet_seq` per packet ⇒ identical wire seq 1,2,3…). Original is resend-capable (messages pre-assigned to a seq, node+52); ours frames at send time — wire-identical for first sends. TX/RX key split = `GenerateTxKey @ 0x61dfe0` self key vs peer key. |
+| SessionSequencing/SessionCrypto framing | `frame_session_packet`/`deframe_session_packet` (`libs/npwire/protocol_message.{h,cpp}`) | **PARTIAL — framing, contiguous gate, and LAN loss recovery matching** | `CNapiNPConnection_SendSessionPacket @ 0x61edd0` stamps `[remote_key][seq][ack][u8 0]`; `CNapiNPConnection_ParseMessages @ 0x625bc0` admits only the contiguous frontier and prunes retained records by admitted ACK; `BuildMissingSeqList @0x6234b0` / `SendMissingSeqList @0x623560` emit client `0x44` or server `0x84` only after the receive pump drains; `NapiNP_HandleResendList @0x623800` validates the local key and rebuilds retained message records under the requested old sequence with the sender's current ACK. OpenNova now mirrors those paths in both directions, including the ordinary `0x43`/`0x83` receiver-local session-key gate, 16-sequence request cap, 100-packet future queue, same-batch reorder suppression, resend-list key validation, zero sentinel, and ACK retirement. LAN retention uses the witnessed `msg_out_max=0x4b0` override (`CNapiNetwork_Init @0x4cab20/@0x4cabf0`; combined-count guard in `NapiNPMessage_Create @0x627fc0`). The ordered gate and retention are explicit owner opt-ins: generic lobby `ClientSession` remains on its prior direct decode/latch path because no NOVAWORLDUDP `0x44`/`0x84` owner was witnessed in this slice. Remaining tail: retail's retained-record timeout expiry and overflow-triggered disconnect policy are not modeled. |
 | `np::slice_batch_pages` chunker | `libs/npruntime/batch_chunker.h` | **MATCHING (byte boundary)** — D-NET-135 fixed 2026-07-20 | budget 650 with per-pool margin, guard AFTER each record: 0x0C `+100 > 650` (`serialize_entity_states_to_buffer @ 0x5030a0` @0x50340d), 0x20 `+30 > 650` (`@ 0x503460` @0x503694), 0x10 `+40 > 650` (`serialize_pool2_static_to_buffer @ 0x5042F0`), 0x0D `+110 > 650` (`serialize_entity_pool_to_packet_0 @ 0x503940`). Phase order 0x10→0x0D→0x0C→0x20→0x45 confirmed (`Server_SendInitialGameStateToPlayer @ 0x51bba0` state-4 cases 1..5). |
 | Retail-join player record (minimap flags / net_id / playerClass) | `build_pool0_organic_batch` (`libs/netsim/entity_wire_bridge.cpp`) | flags bit 0x100 + playerClass clamp **matching**; bit 0x01 model **divergent** (D-NET-136); net_id encoding **divergent-tolerable** (D-NET-137) | `Server_PlayerAdd @ 0x51cbc0` (`entity+36 \|= 1` @0x51d0da per-entity, remote adds only; class [5,9]-else-8 clamp @0x51d102; entity+120 = event+76 = connection_id @0x51d068); packer `lookup_entity_slot_and_pack_entry @ 0x57ad40` (@0x57ae47); decoder `MinimapSlot_FindByPackedId @ 0x57a270` (renamed from `sub_57A270`); client self-heal `NapiNPClientMsg_0x00C @ 0x42eadb`. |
 | 0x22→0x46 ack-walk | `dispatch_session_replies case 0x22` + `encode_player_sync`/`_removal` | **FIXED to echo** (was server-computed) | §5.33 update: echo @ 0x505f05, client walk-terminator @ `NapiNPClientMsg_PlayerSync @ 0x431370` tail (`slot+1 < g_max_player_slots`, re-request `0x5CF7`); removal = 3-B early return @ 0x505f37; `Server_PlayerAdd` broadcast fieldFlags 0x1CF7 (`push 7415` @0x51d2bf). `cstr_fixed` misnomer → `cstr_capped` (strings are strlen+1 on the wire). |
@@ -8332,6 +8358,7 @@ in [divergence-ledger.md](../divergence-ledger.md).
 - **D-NET-6** [HIGH, FIXED] LEN8(0x20)/LEN16(0x40) parse precedence inverted — retail tests LEN8 FIRST. [orig: CNapiNPConnection_ParseMessages @ 0x625bc0]
 - **D-NET-7** [MED, FIXED] reassembly clears the buffer on the FIRST fragment (`(flags&6)==4`) before appending — implemented in `reassemble_protocol_payload` (`protocol_message.cpp`, verified 2026-06-27; carries a regression-history note vs an earlier `frag_first && !frag_end` rewrite). [orig: CNapiNPConnection_DispatchMessage @ 0x622570 / NapiBuffer_SetLength @ 0x634220]
 - **D-NET-8** [LOW, FIXED 2026-06-27] truncated inner stream: the original substitutes 0 for missing fields and still dispatches the final partial message (read from its zero-padded 64 KB buffer), then stops — it does not bail. `parse_protocol_messages` (`protocol_message.cpp`) now emits the partial message (payload = available bytes zero-padded to the claimed length) on a truncated LEN8/LEN16/SKIP/body field instead of dropping it; valid packets are unaffected. Test: `protocol_message` `check_truncated_message_is_dispatched_zero_padded`. [orig: CNapiNPConnection_ParseMessages @ 0x625bc0]
+- **D-NET-164** [HIGH, PARTIAL — contiguous gate + LAN NACK/resend PORTED 2026-07-23] Retail validates the receiver-local key before reading session sequence state, then dispatches only across the contiguous inbound frontier. The LAN/game-session opt-in consumes stale/exact duplicates without redispatch, queues future packets (cap 100), and drains them in order when a gap closes. A future packet latches a missing check; the host and joiner resolve it only after their receive FIFO drains, so seq 3 then seq 2 in one batch sends no needless NACK, while a surviving gap emits one direction-correct `0x84`/`0x44`. The body is the peer-local key followed by up to sixteen missing-sequence dwords; receivers validate their own key. Senders retain reliable message records by assigned sequence and reconstruct a requested packet with its old sequence plus the current ACK; only ACKs from packets admitted through the contiguous gate retire records. LAN/game connections opt into the directly witnessed 1200-record cap (`CNapiNetwork_Init @0x4cab20/@0x4cabf0` writes `0x4b0`; `NapiNPMessage_Create @0x627fc0` checks pending + retained + 1). Generic lobby `ClientSession` explicitly stays recovery-disabled and retention-off because this slice has no NOVAWORLDUDP owner witness; this avoids silently queuing behind a loss it cannot request. Regressions cover ordinary session-key mismatch, both true-loss directions, malformed/key-mismatched requests, current-ACK reconstruction, ACK retirement, same-batch reorder suppression, the standalone JO listener's real socket-drain NACK, queue bounds, and encode-failure transactionality (`npruntime_session_resend`, `novaworld_protocol_message`, `nw_host_register_e2e`). **Residual:** retained-record timeout expiry and retail's overflow-disconnect side effect remain unported; the exact LAN count bound is enforced. [orig: NapiNPProtocol_HandleSessionPacket @0x626b72 / CNapiNPConnection_ParseMessages @0x625bc0 / BuildMissingSeqList @0x6234b0 / SendMissingSeqList @0x623560 / NapiNP_HandleResendList @0x623800 / CNapiNPConnection_BuildOutgoingPackets @0x628430]
 
 `gate_response.cpp` (A2):
 - **D-NET-9** [LOW, WITNESSED — deferred low-value] `NapiScript_ParseLiteralValue @0x62db00` tries, in order: char-literal `'x'` → `NapiScript_ParseHexValue @0x62d610` → `parse_octal_integer @0x62d7b0` → `parse_binary_literal @0x62d900` → `NapiScript_ParseDecimalIntegerB @0x62da20`. The reimpl parses gate port/literal fields as DECIMAL only. Real gate responses are decimal, so the other four radixes are unexercised robustness — re-prioritized MED→LOW; the 4-radix port is witnessed-and-ready but deferred (poor value/risk). [orig: NapiScript_ParseLiteralValue @ 0x62db00]
@@ -8849,10 +8876,11 @@ Pinned by npruntime_weapon_table + the handshake armory cases. LIVE-VERIFIED ret
 {255,10,10,1,2,3,3}, secondaries 255, restriction 0, slot-combo order — resolved from the
 host's own 126-weapon VFS view.
 
-**D-NET-142** [reimpl gap, FIXED 2026-07-02] **The host ignored C2S 0x25 (reload request) —
-one reload attempt permanently wedged a retail joiner's weapon.** The reload FSM sends 0x25 and
-sets the slot's 0x80 reload-pending flag; only the server's S2C 0x49 broadcast clears it and
-refills the clip (§5.58, `NapiNPServerMsg_HandleReloadRequest @ 0x514DF0` →
+**D-NET-142** [reimpl gap, FIXED 2026-07-02] **The host ignored C2S 0x25 (reload request), so
+a retail joiner's reload animation repeated without refilling the clip.** The reload FSM sends
+0x25 and sets a transient 0x80 entry guard that the begin-active shim overwrites with phase 2;
+the server's S2C 0x49 broadcast is the client's clip-refill event (§5.58,
+`NapiNPServerMsg_HandleReloadRequest @ 0x514DF0` →
 `NapiNPClientMsg_WeaponReload_0x049 @ 0x42C0A0`). Live-witnessed as retail-join v15 "cannot
 reload". FIXED: dispatch case 0x25 decodes + re-encodes the `[u16 handle][u16 weaponSlotCombo]`
 body (ADR 0003) and stages S2C 0x49 on EVERY in-match connection's transport INCLUDING the

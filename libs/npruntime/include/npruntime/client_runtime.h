@@ -91,6 +91,14 @@ public:
 	// No-uplink frame (HostClient, or a pre-deploy Joiner): recv pump + connect-drive only, no 0x0C.
 	std::vector<std::vector<uint8_t>> Client_ProcessNetworkFrame(uint32_t now_tick = 0);
 
+	// Typed gameplay seams used by the simulation; protocol tags/framing remain
+	// owned here. Fire is predicted locally before queueing C2S 0x06. The spent clip
+	// remains unchanged until the host's S2C 0x49 echo appears in the reload drain.
+	bool queue_fired_round(const ClientFiredRound &round);
+	bool queue_reload_request(const WeaponReload &reload);
+	std::vector<netsim::ClientRoundEvent> drain_round_events();
+	std::vector<WeaponReload> drain_reload_notifications();
+
 	// Deterministic golden replay (Joiner): seed the connection keys + seq/ack + self handle/type so
 	// frame_c2s_uplink reproduces a captured C2S 0x0C datagram byte-for-byte. [ROADMAP "Determinism"]
 	void seed_session(uint32_t session_id, std::string client_scrk, std::string server_scrk,
@@ -144,6 +152,7 @@ private:
 	netsim::NetClientView view_;
 	netsim::ISessionTransport *loopback_ = nullptr;   // HostClient only (non-owning)
 	std::deque<std::vector<uint8_t>> recv_fifo_;      // Joiner: framed inbound awaiting the recv pump
+	std::deque<ProtocolMessage> gameplay_send_queue_; // Joiner: typed C2S 0x06/0x25 awaiting SEND
 	bool deployed_ = false;
 
 	// --- §5.44 per-frame housekeeping counters (P6) — mirror the witnessed per-instance globals of

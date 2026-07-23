@@ -1616,6 +1616,24 @@ int32_t entity_proximity_radius(const CollisionWorld &cw, const Entity &e,
 
 } // namespace
 
+void CollisionWorld::replace_projectile_person_proxies(
+        std::vector<ProjectilePersonProxy> proxies,
+        uint16_t local_player_wire_handle) {
+    proxies.erase(
+        std::remove_if(proxies.begin(), proxies.end(),
+                       [](const ProjectilePersonProxy &proxy) {
+                           return proxy.wire_handle == EntityHandle::kInvalid;
+                       }),
+        proxies.end());
+    std::stable_sort(
+        proxies.begin(), proxies.end(),
+        [](const ProjectilePersonProxy &a, const ProjectilePersonProxy &b) {
+            return a.wire_handle < b.wire_handle;
+        });
+    projectile_person_proxies_ = std::move(proxies);
+    projectile_local_player_wire_handle_ = local_player_wire_handle;
+}
+
 void CollisionWorld::build_tick_tables(World &world) {
     // Packed pool/slot handles are reused. Remove every binding whose recorded
     // lifetime no longer names the registry occupant before any proximity,
@@ -2141,7 +2159,11 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
     // Consume the pose owner's COBJ matrices when available. The bounded torso
     // fallback is only for entities whose production pose has not been
     // published; both paths preserve retail's first-qualifying-person table
-    // behavior rather than choosing the globally nearest person.
+    // behavior rather than choosing the globally nearest person. Visual decoded
+    // players join this bounded presentation walk without entering the registry
+    // or any consequence-producing table. The client's own L retains local
+    // geometry/ignore identity but uses its supplied server H only as an ordering
+    // key, keeping the proxy subset and retail server pool order comparable.
     constexpr int32_t kOrganicCenterZQ16 = 58982;
     int32_t effective_radius = std::max(trace.radius_q16, 0);
     const bool authority_fat_bullet =
@@ -2150,7 +2172,87 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
         trace.owner != world.cached.local_player;
     if (authority_fat_bullet)
         effective_radius = std::max(effective_radius, kProjectileAuthorityMinRadiusQ16);
-    for (const PersonSlot &slot : persons_) {
+    constexpr int32_t kFallbackAuthoredRadiusQ16 = 78642; // 1.2u
+    auto trace_torso_fallback = [&](const FixedVec3 &feet, ProjectileHit &eh,
+                                    int32_t &hit_distance) {
+        const int32_t center[3] = {
+            feet.x, feet.y, feet.z + kOrganicCenterZQ16,
+        };
+        const int32_t projection = static_cast<int32_t>(
+            (static_cast<int64_t>(ray.dir[0]) * (center[0] - ray.start[0]) +
+             static_cast<int64_t>(ray.dir[1]) * (center[1] - ray.start[1]) +
+             static_cast<int64_t>(ray.dir[2]) * (center[2] - ray.start[2])) >> 16);
+        if (projection < 0 || projection > segment_length) return false;
+        int32_t closest[3] = {};
+        for (int axis = 0; axis < 3; ++axis) {
+            closest[axis] = ray.start[axis] + static_cast<int32_t>(
+                (static_cast<int64_t>(ray.dir[axis]) * projection + 0x8000) >> 16);
+        }
+        const int32_t center_distance =
+            vec_len_ftol(closest[0] - center[0], closest[1] - center[1],
+                         closest[2] - center[2]);
+        const int32_t hit_radius = effective_radius + 3276 +
+                                   45 * kFallbackAuthoredRadiusQ16 / 100;
+        if (center_distance > hit_radius) return false;
+        hit_distance = projection - (kFallbackAuthoredRadiusQ16 >> 1);
+        // No authored section identity exists. RoundSim maps this sentinel to
+        // synthetic torso 1 for presentation/reactions while preserving a
+        // neutral damage multiplier.
+        eh.section_index = -1;
+        eh.bone_index = -1;
+        eh.hit_zone = -1;
+        return true;
+    };
+    auto finish_person_hit = [&](ProjectileHit &eh, int32_t hit_distance) {
+        eh.hit_class = ProjectileHitClass::Person;
+        eh.t_q16 = t_for_distance(hit_distance);
+        const int32_t impact[3] = {
+            ray.start[0] + static_cast<int32_t>(
+                (static_cast<int64_t>(ray.dir[0]) * hit_distance + 0x8000) >> 16),
+            ray.start[1] + static_cast<int32_t>(
+                (static_cast<int64_t>(ray.dir[1]) * hit_distance + 0x8000) >> 16),
+            ray.start[2] + static_cast<int32_t>(
+                (static_cast<int64_t>(ray.dir[2]) * hit_distance + 0x8000) >> 16),
+        };
+        eh.position_q16 = FixedVec3{impact[0], impact[1], impact[2]};
+        eh.surface_type = 19;
+        consider(eh, hit_distance);
+    };
+
+    size_t person_index = 0;
+    size_t proxy_index = trace.include_person_proxies
+        ? 0
+        : projectile_person_proxies_.size();
+    auto person_order_key = [&](const PersonSlot &slot) {
+        if (projectile_local_player_wire_handle_ != EntityHandle::kInvalid &&
+            slot.h == world.cached.local_player)
+            return projectile_local_player_wire_handle_;
+        return slot.h.packed;
+    };
+    while (person_index < persons_.size() ||
+           proxy_index < projectile_person_proxies_.size()) {
+        const bool use_proxy =
+            person_index >= persons_.size() ||
+            (proxy_index < projectile_person_proxies_.size() &&
+             projectile_person_proxies_[proxy_index].wire_handle <
+                 person_order_key(persons_[person_index]));
+        if (use_proxy) {
+            const ProjectilePersonProxy &proxy =
+                projectile_person_proxies_[proxy_index++];
+            // The wire identity is used only for ordered projection and the
+            // self gate. In particular it is never assigned to geometry_entity.
+            if ((trace.ammo_flags & 4u) == 0 &&
+                proxy.wire_handle == trace.shooter_wire_handle)
+                continue;
+            ProjectileHit eh;
+            int32_t hit_distance = 0;
+            if (!trace_torso_fallback(proxy.position_q16, eh, hit_distance))
+                continue;
+            finish_person_hit(eh, hit_distance); // geometry_entity stays invalid
+            break;
+        }
+
+        const PersonSlot &slot = persons_[person_index++];
         if (ignored(slot.h)) continue;
         const Entity *e = world.registry.get(slot.h);
         if (e == nullptr || e->kind != EntityKind::Organic || e->hidden ||
@@ -2225,55 +2327,15 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
         }
 
         if (live_pose_available && !person_hit) continue;
-        if (!live_pose_available) {
-            // Bounded fallback until the pose owner publishes organic bone
-            // matrices. It follows the same projection/radius arithmetic using
-            // one characterized torso COBJ rather than a geometric sphere entry.
-            constexpr int32_t kFallbackAuthoredRadiusQ16 = 78642; // 1.2u
-            const int32_t center[3] = {
-                to_fixed(e->position.x),
-                to_fixed(e->position.y),
-                to_fixed(e->position.z) + kOrganicCenterZQ16,
-            };
-            const int32_t projection = static_cast<int32_t>(
-                (static_cast<int64_t>(ray.dir[0]) * (center[0] - ray.start[0]) +
-                 static_cast<int64_t>(ray.dir[1]) * (center[1] - ray.start[1]) +
-                 static_cast<int64_t>(ray.dir[2]) * (center[2] - ray.start[2])) >> 16);
-            if (projection < 0 || projection > segment_length) continue;
-            int32_t closest[3] = {};
-            for (int axis = 0; axis < 3; ++axis) {
-                closest[axis] = ray.start[axis] + static_cast<int32_t>(
-                    (static_cast<int64_t>(ray.dir[axis]) * projection + 0x8000) >> 16);
-            }
-            const int32_t center_distance =
-                vec_len_ftol(closest[0] - center[0], closest[1] - center[1],
-                             closest[2] - center[2]);
-            const int32_t hit_radius = effective_radius + 3276 +
-                                       45 * kFallbackAuthoredRadiusQ16 / 100;
-            if (center_distance > hit_radius) continue;
-            hit_distance = projection - (kFallbackAuthoredRadiusQ16 >> 1);
-            // No authored section identity exists. RoundSim maps this sentinel
-            // to synthetic torso 1 for presentation/reactions while preserving
-            // a neutral damage multiplier.
-            eh.section_index = -1;
-            eh.bone_index = -1;
-            eh.hit_zone = -1;
-        }
+        if (!live_pose_available &&
+            !trace_torso_fallback(
+                FixedVec3{to_fixed(e->position.x), to_fixed(e->position.y),
+                          to_fixed(e->position.z)},
+                eh, hit_distance))
+            continue;
 
-        eh.hit_class = ProjectileHitClass::Person;
         eh.geometry_entity = e->handle;
-        eh.t_q16 = t_for_distance(hit_distance);
-        const int32_t impact[3] = {
-            ray.start[0] + static_cast<int32_t>(
-                (static_cast<int64_t>(ray.dir[0]) * hit_distance + 0x8000) >> 16),
-            ray.start[1] + static_cast<int32_t>(
-                (static_cast<int64_t>(ray.dir[1]) * hit_distance + 0x8000) >> 16),
-            ray.start[2] + static_cast<int32_t>(
-                (static_cast<int64_t>(ray.dir[2]) * hit_distance + 0x8000) >> 16),
-        };
-        eh.position_q16 = FixedVec3{impact[0], impact[1], impact[2]};
-        eh.surface_type = 19;
-        consider(eh, hit_distance);
+        finish_person_hit(eh, hit_distance);
         break;
     }
 

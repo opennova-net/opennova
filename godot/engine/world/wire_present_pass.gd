@@ -192,16 +192,20 @@ func present() -> void:
 		return
 	var snap: PackedFloat32Array = _sim.get_present_snapshot()
 	var count: int = snap.size() / stride
-	var local_handle := int(_sim.get_local_player_wire_handle())  # the host's own player (drawn by LocalPlayerHost)
+	# Packed handle zero is valid, so the numeric getter cannot also carry
+	# presence. NovaSimulation exposes the same explicit validity seam used by
+	# its native joiner self-filter.
+	var has_local_player: bool = bool(_sim.has_local_player())
+	var local_handle := int(_sim.get_local_player_wire_handle())
 	var live := {}
 	for i in range(count):
 		var base := i * stride
 		var type_id := int(snap[base + NovaSimulation.PF_TYPE_ID])
 		var handle := int(snap[base + NovaSimulation.PF_WIRE_HANDLE])
-		# A zero type/handle row is the joiner's self-filtered echo (H) or an unresolved record;
-		# the local player handle is the host's own pool-0 player (drawn by LocalPlayerHost). Skip
-		# both — on the joiner local_handle is L, which never appears in the wire stream (harmless).
-		if type_id == 0 or handle == 0 or handle == local_handle:
+		# A zero type row is the joiner's self-filtered echo (H) or an unresolved record;
+		# the local player handle is drawn by LocalPlayerHost. Packed handle zero is a
+		# valid pool-0 slot, so only type and the explicit local identity may filter it.
+		if type_id == 0 or (has_local_player and handle == local_handle):
 			continue
 		if _synthetic_origin_only and not (
 				int(snap[base + NovaSimulation.PF_KIND]) == 255

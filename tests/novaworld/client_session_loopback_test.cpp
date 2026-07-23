@@ -121,7 +121,9 @@ struct MiniServer {
 	std::string nwuid = "feedfacecafebeef0011223344556677889900aabbccddeeff0011223344"; // SessionInit NWUID the client must echo
 	std::string client_scrk;               // learned from ClientAuth
 	uint32_t last_client_hk = 0;           // captured for the echo assertion
-	uint32_t next_seq = 0;
+	// Retail protocol packets are 1-based in both directions; sequence zero is the
+	// no-packet/force-send sentinel and never crosses the contiguous admission gate.
+	uint32_t next_seq = 1;
 	LobbyState lobby;
 	LobbySession session;
 

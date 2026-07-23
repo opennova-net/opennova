@@ -68,10 +68,11 @@ std::vector<uint8_t> craft(uint8_t opcode, std::vector<uint8_t> body) {
 
 // Craft an inbound 0x43 SESSION datagram carrying `messages`, inner-encrypted with the joiner's SCRK
 // (== the server's stored client_scrk).
-std::vector<uint8_t> craft_session(std::string_view client_scrk, uint32_t seq,
+std::vector<uint8_t> craft_session(std::string_view client_scrk, uint32_t server_sk,
+                                   uint32_t seq,
                                    const std::vector<ProtocolMessage> &messages) {
 	ProtocolPacketHeader hdr;
-	hdr.session_id = 0; // server reads seq_num only; session_id unchecked on receive
+	hdr.session_id = server_sk; // receiver-local key advertised by ServerAuth
 	hdr.seq_num = seq;
 	hdr.ack_count = 0;
 	hdr.connection_flags = 0;
@@ -105,7 +106,8 @@ bool reply_has_tag(const std::vector<ProtocolMessage> &msgs, uint8_t tag) {
 // Complete the 0x41/0x42 handshake for `peer` and recover the server SCRK so the test can decode the
 // encrypted 0x83 replies.
 bool handshake(np::NapiNPServerCtx &ctx, const PeerAddr &peer, std::string_view client_scrk,
-               uint32_t client_ck, std::string &out_server_scrk) {
+               uint32_t client_ck, std::string &out_server_scrk,
+               uint32_t *out_server_sk = nullptr) {
 	const std::size_t connections_before_hello = np::connection_count(ctx);
 	ClientHello hello = make_jointoperations_client_hello(1);
 	hello.co = "TestJoiner";
@@ -128,6 +130,7 @@ bool handshake(np::NapiNPServerCtx &ctx, const PeerAddr &peer, std::string_view 
 	ServerAuth sa;
 	if (!expect(parse_server_auth(body.data(), body.size(), sa), "0x82 parses")) return false;
 	out_server_scrk = sa.scrk;
+	if (out_server_sk != nullptr) *out_server_sk = sa.sk;
 	return true;
 }
 
@@ -256,12 +259,13 @@ bool run_reactive_replies() {
 	const std::string client_scrk = "TESTCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB"; // 61
 	const uint32_t client_ck = 0xDEADBEEFu;
 	std::string server_scrk;
-	if (!handshake(ctx, peer, client_scrk, client_ck, server_scrk)) return false;
+	uint32_t server_sk = 0;
+	if (!handshake(ctx, peer, client_scrk, client_ck, server_scrk, &server_sk)) return false;
 
 	uint32_t seq = 1;
 	auto send_session = [&](std::vector<ProtocolMessage> msgs, uint32_t now,
 	                        std::vector<ProtocolMessage> &out) -> bool {
-		auto dg = craft_session(client_scrk, seq++, msgs);
+		auto dg = craft_session(client_scrk, server_sk, seq++, msgs);
 		auto r = np::handle_server_datagram(ctx, peer, dg.data(), dg.size(), now);
 		if (r.outbound.empty()) return false;
 		ProtocolPacketHeader hdr;
@@ -373,15 +377,19 @@ bool run_plain_join_tag29_draws_no_tag51() {
 	const std::string client_scrk = "TESTCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
 	const uint32_t client_ck = 0xBEEFCAFEu;
 	std::string server_scrk;
-	if (!handshake(ctx, peer, client_scrk, client_ck, server_scrk)) return false;
+	uint32_t server_sk = 0;
+	if (!handshake(ctx, peer, client_scrk, client_ck, server_scrk, &server_sk)) return false;
 
 	uint32_t seq = 1;
-	auto mission_dg = craft_session(client_scrk, seq++, {make_protocol_message(0x37, {})});
+	auto mission_dg = craft_session(
+			client_scrk, server_sk, seq++, {make_protocol_message(0x37, {})});
 	np::handle_server_datagram(ctx, peer, mission_dg.data(), mission_dg.size(), 100);
 	if (!expect(np::bind_connection_player(ctx, peer, 1, 0x0005),
 	            "server binds the connection to its allocated player entity handle")) return false;
 
-	auto spawn_req = craft_session(client_scrk, seq++, {make_protocol_message(0x29, {0x00, 0x00})});
+	auto spawn_req = craft_session(
+			client_scrk, server_sk, seq++,
+			{make_protocol_message(0x29, {0x00, 0x00})});
 	auto spawn_r = np::handle_server_datagram(ctx, peer, spawn_req.data(), spawn_req.size(), 200);
 	for (const auto &dg : spawn_r.outbound) {
 		ProtocolPacketHeader hdr;
@@ -649,12 +657,14 @@ bool run_loadout_resolve_with_armory() {
 	const PeerAddr peer{0x0100007Fu, 30100};
 	const std::string client_scrk = "TESTCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
 	std::string server_scrk;
-	if (!handshake(ctx, peer, client_scrk, 0xDEADBEE2u, server_scrk)) return false;
+	uint32_t server_sk = 0;
+	if (!handshake(
+			ctx, peer, client_scrk, 0xDEADBEE2u, server_scrk, &server_sk)) return false;
 
 	uint32_t seq = 1;
 	auto send_session = [&](std::vector<ProtocolMessage> msgs, uint32_t now,
 	                        std::vector<ProtocolMessage> &out) -> bool {
-		auto dg = craft_session(client_scrk, seq++, msgs);
+		auto dg = craft_session(client_scrk, server_sk, seq++, msgs);
 		auto r = np::handle_server_datagram(ctx, peer, dg.data(), dg.size(), now);
 		if (r.outbound.empty()) return false;
 		ProtocolPacketHeader hdr;
@@ -676,7 +686,9 @@ bool run_loadout_resolve_with_armory() {
 	};
 	auto malformed_loadout_rejected = [&](const std::vector<uint8_t> &req, uint32_t now,
 	                                      const char *label) -> bool {
-		auto dg = craft_session(client_scrk, seq++, {make_protocol_message(0x2F, req)});
+		auto dg = craft_session(
+				client_scrk, server_sk, seq++,
+				{make_protocol_message(0x2F, req)});
 		auto response = np::handle_server_datagram(ctx, peer, dg.data(), dg.size(), now);
 		bool saw_5a = false;
 		for (const std::vector<uint8_t> &outbound : response.outbound) {

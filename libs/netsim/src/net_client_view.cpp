@@ -76,6 +76,16 @@ void NetClientView::apply(uint8_t tag, const std::vector<uint8_t> &body) {
 	case kTag0aFrameUpdate:
 		apply_frame_update(body);
 		break;
+	case 0x49: { // weapon reload echo (same four-byte body as C2S 0x25)
+		WeaponReload reload;
+		size_t consumed = 0;
+		if (decode_weapon_reload(body.data(), body.size(), reload, consumed) &&
+		    consumed == body.size())
+			pending_weapon_reloads_.push_back(reload);
+		else
+			++unknown_tags_;
+		break;
+	}
 	case 0x0C: // pool-0 organic spawn batch (§5.23)
 		apply_organic_spawn(body);
 		break;
@@ -93,6 +103,18 @@ void NetClientView::apply(uint8_t tag, const std::vector<uint8_t> &body) {
 		++unknown_tags_;
 		break;
 	}
+}
+
+std::vector<ClientRoundEvent> NetClientView::drain_round_events() {
+	std::vector<ClientRoundEvent> out;
+	out.swap(pending_round_events_);
+	return out;
+}
+
+std::vector<WeaponReload> NetClientView::drain_weapon_reloads() {
+	std::vector<WeaponReload> out;
+	out.swap(pending_weapon_reloads_);
+	return out;
 }
 
 void NetClientView::pump(ISessionTransport &channel) {
@@ -308,6 +330,27 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 		state_.objective_show_win = static_cast<uint32_t>(fu.objective.state[2]);
 		state_.objective_show_lose = static_cast<uint32_t>(fu.objective.state[3]);
 		++state_.objective_updates_applied;
+	}
+
+	// Tag 2 carries a fire origin and direction. Lift the compressed origin by
+	// this frame's anchor now, while those transient coordinates are together.
+	for (const RoundEventRecord &rec : fu.round_events) {
+		ClientRoundEvent ev;
+		ev.flags = rec.flags;
+		ev.adm_index = rec.adm_index;
+		ev.subtype = rec.subtype;
+		ev.slot_byte = rec.slot_byte;
+		ev.shooter_handle = rec.shooter_handle;
+		ev.target_handle = rec.target_handle;
+		ev.shot_seq = rec.shot_seq;
+		ev.origin_x = fu.anchor_x + network_decompress_fixedpoint(rec.pos_x_compressed);
+		ev.origin_y = fu.anchor_y + network_decompress_fixedpoint(rec.pos_y_compressed);
+		ev.origin_z = fu.anchor_z + network_decompress_fixedpoint(rec.pos_z_compressed);
+		ev.dir_yaw_bam = static_cast<int32_t>(
+				static_cast<uint32_t>(rec.yaw_bam_high) << 16);
+		ev.dir_pitch_bam = static_cast<int32_t>(
+				static_cast<uint32_t>(rec.pitch_bam_high) << 16);
+		pending_round_events_.push_back(ev);
 	}
 
 	for (ClientEntityState &e : state_.entities) e.seen_this_frame = false;

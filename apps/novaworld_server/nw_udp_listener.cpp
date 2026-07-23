@@ -2,6 +2,7 @@
 
 #include "server_config.h"
 
+#include <net_datagram_socket.h>
 #include <net_sockets.h>
 #include <napi/envelope.h>
 #include <napi/tlv.h>
@@ -231,11 +232,31 @@ void NwUdpListener::run_loop() {
 	}
 
 	uint8_t rx[4096];
+	bool receive_batch_active = false;
 	while (!stop_requested_.load()) {
 		opennova::net::Endpoint from{};
+		// Block for the first datagram of a receive batch, then switch to non-blocking reads until
+		// the OS FIFO is empty. That empty read is the same boundary where retail drains queued
+		// contiguous session packets and decides whether a surviving gap needs one 0x84.
+		// [orig: NapiNPProtocol_PumpRecvQueues @0x6266A0..0x6269D6]
+		const int timeout_ms = receive_batch_active ? 0 : 250;
 		const int n = opennova::net::udp_recv_from(socket.get(), rx, sizeof(rx),
-		                                           from, /*timeout_ms=*/250);
-		if (n <= 0) continue;
+		                                           from, timeout_ms);
+		if (n <= 0) {
+			if (receive_batch_active) {
+				for (np::TickOut &item : np::flush_server_missing_requests(jo_ctx_)) {
+					const opennova::net::Endpoint to =
+							opennova::net::NetDatagramSocket::to_endpoint(item.peer);
+					for (const std::vector<uint8_t> &dg : item.outbound) {
+						opennova::net::udp_send_to(
+								socket.get(), to, dg.data(), dg.size());
+					}
+				}
+				receive_batch_active = false;
+			}
+			continue;
+		}
+		receive_batch_active = true;
 
 		uint8_t opcode = 0;
 		std::vector<uint8_t> body;

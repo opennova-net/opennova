@@ -28,6 +28,110 @@ const BUILDING_TYPE := 0x0123 # a static structure
 const MARKER_TYPE := 0x1773   # a start marker
 
 
+func _combat_mission() -> NovaMissionData:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	# Two independent north-facing fire lanes. Spawn selection puts the host at
+	# x=20 first (farthest from the two organics), then the joiner at x=0
+	# (farthest from the already-spawned host). Both yaw-zero players therefore
+	# have a Generic Soldier down their own +mission-y lane (host at nine
+	# metres, joiner at eight); the unequal scores avoid the retail rand tie.
+	assert_false(md.add_entity(NovaMissionData.KIND_ORGANIC, 5311,
+			Vector3(0, 8, 0), Vector3.ZERO).is_empty())
+	assert_false(md.add_entity(NovaMissionData.KIND_ORGANIC, 5311,
+			Vector3(20, 9, 0), Vector3.ZERO).is_empty())
+	assert_false(md.add_entity(NovaMissionData.KIND_MARKER, 6002,
+			Vector3(20, 0, 0), Vector3.ZERO).is_empty())
+	assert_false(md.add_entity(NovaMissionData.KIND_MARKER, 6002,
+			Vector3(0, 0, 0), Vector3.ZERO).is_empty())
+	return md
+
+
+func _peer_duel_mission() -> NovaMissionData:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	# The host first takes the marker farthest from the lone organic: (0, 8).
+	# Once the host is in the retail avoid set, the joiner takes (0, 0). Both
+	# yaw-zero players face +mission-y, putting the host directly in the
+	# joiner's fire lane without a debug teleport or invented aim override.
+	assert_false(md.add_entity(NovaMissionData.KIND_ORGANIC, 5311,
+			Vector3(4, 0, 0), Vector3.ZERO).is_empty())
+	assert_false(md.add_entity(NovaMissionData.KIND_MARKER, 6002,
+			Vector3(0, 8, 0), Vector3.ZERO).is_empty())
+	assert_false(md.add_entity(NovaMissionData.KIND_MARKER, 6002,
+			Vector3(0, 0, 0), Vector3.ZERO).is_empty())
+	return md
+
+
+func _install_combat_tables(sim: NovaSimulation) -> void:
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
+			"res://../fixtures/def")), OK)
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load_from_resource_root(root, "items.def"), OK)
+	sim.resolve_item_traits(item_db)
+	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
+	assert_eq(sim.load_ammo_table(root, "ammo.def"), OK)
+
+
+func _retail_m4() -> Dictionary:
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
+			"res://../fixtures/def")), OK)
+	var weapons := NovaWeaponDatabase.new()
+	assert_eq(weapons.load_from_resource_root(root, "weapon.def"), OK)
+	var index := weapons.find_weapon("WPN_M4AUTO")
+	assert_gte(index, 0)
+	return weapons.get_weapon(index) if index >= 0 else {}
+
+
+func _retail_m9() -> Dictionary:
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
+			"res://../fixtures/def")), OK)
+	var weapons := NovaWeaponDatabase.new()
+	assert_eq(weapons.load_from_resource_root(root, "weapon.def"), OK)
+	var index := weapons.find_weapon("WPN_M9Beretta")
+	assert_gte(index, 0)
+	return weapons.get_weapon(index) if index >= 0 else {}
+
+
+func _inventory_clip(sim: NovaSimulation, weapon_name: String) -> int:
+	for value in sim.get_local_player_inventory().get("slots", []):
+		var slot: Dictionary = value
+		if String(slot.get("name", "")) == weapon_name:
+			return int(slot.get("clip", -1))
+	return -1
+
+
+func _organic_index_at_x(sim: NovaSimulation, x: float) -> int:
+	for ai_index in range(sim.get_entity_count()):
+		var card: Dictionary = sim.get_entity_debug(ai_index)
+		var item_id := int(card.get("item_id", 0))
+		if item_id != 5311 and item_id != 105311:
+			continue
+		var pos: Vector3 = card.get("position", Vector3.INF)
+		if absf(pos.x - x) < 0.25:
+			return ai_index
+	return -1
+
+
+func _drive_pair_to_match(host: NovaSimulation, joiner: NovaSimulation) -> bool:
+	for _i in range(800):
+		host.step()
+		joiner.step()
+		if joiner.is_joined_in_match():
+			# Give the recipient round watermark a quiet frame to arm so the
+			# following shot is live traffic, never pre-join backlog.
+			for _settle in range(8):
+				host.step()
+				joiner.step()
+				OS.delay_msec(2)
+			return true
+		OS.delay_msec(2)
+	return false
+
+
 func _anim_root() -> NovaResourceRoot:
 	var root := NovaResourceRoot.new()
 	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
@@ -245,7 +349,7 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 		var whandle := int(jsnap[base + NovaSimulation.PF_WIRE_HANDLE])
 		if whandle == h:
 			saw_self_echo = true
-		if tid == 0x14B9 and whandle != h and whandle != 0:
+		if tid == 0x14B9 and whandle != h:
 			joiner_sees_host = true
 			host_player_anim_state = int(
 					jsnap[base + NovaSimulation.PF_ANIM_STATE])
@@ -483,6 +587,516 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 			"ambiguous same-type children retain the rigid decoded fallback")
 	host.free()
 	joiner.free()
+
+
+func test_joiner_fire_and_reload_round_trip_over_real_udp() -> void:
+	var mission := _combat_mission()
+	var host := NovaSimulation.new()
+	host.configure_host_session({"gametype": 0x30020})
+	assert_true(host.enable_host_listen(0))
+	assert_true(host.load_from_mission_data(mission))
+	_install_combat_tables(host)
+
+	var joiner := NovaSimulation.new()
+	assert_true(joiner.enable_join(
+			"127.0.0.1", host.get_host_listen_port(), "CombatJoiner"))
+	assert_true(joiner.load_from_mission_data(mission))
+	_install_combat_tables(joiner)
+	assert_true(_drive_pair_to_match(host, joiner),
+			"joiner reached the real-UDP in-match seam")
+	if not joiner.is_joined_in_match():
+		joiner.free()
+		host.free()
+		return
+
+	assert_true(joiner.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 8))
+	joiner.set_local_player_weapon(_retail_m4(), {})
+	for _settle in range(3):
+		joiner.step()
+		host.step()
+
+	var host_target := _organic_index_at_x(host, 0.0)
+	var joiner_target := _organic_index_at_x(joiner, 0.0)
+	assert_gte(host_target, 0, "host resolved the joiner's north-lane target")
+	assert_gte(joiner_target, 0, "joiner retained its visual copy of the target")
+	var host_health_before := int(host.get_entity_debug(host_target).get("health", -1))
+	var joiner_health_before := int(joiner.get_entity_debug(joiner_target).get("health", -1))
+	var before_fire: Dictionary = joiner.get_local_player_weapon_state()
+	var fired_before := int(before_fire.get("fired_serial", 0))
+	joiner.drain_round_impacts()
+	host.drain_round_impacts()
+	joiner.drain_fire_presentation_events()
+
+	joiner.set_local_player_weapon_input(false, true, false)
+	var host_impacts: Array = []
+	var joiner_impacts: Array = []
+	var joiner_fire_events: Array = []
+	for _tick in range(20):
+		joiner.step()
+		host.step()
+		host_impacts.append_array(host.drain_round_impacts())
+		joiner_impacts.append_array(joiner.drain_round_impacts())
+		joiner_fire_events.append_array(joiner.drain_fire_presentation_events())
+		OS.delay_msec(2)
+
+	var after_fire: Dictionary = joiner.get_local_player_weapon_state()
+	assert_eq(int(after_fire.get("fired_serial", 0)), fired_before + 1,
+			"one local weapon action fired")
+	assert_lt(int(host.get_entity_debug(host_target).get("health", host_health_before)),
+			host_health_before,
+			"the framed C2S 0x06 spawned a damaging authoritative host round")
+	assert_eq(int(joiner.get_entity_debug(joiner_target).get("health", -1)),
+			joiner_health_before,
+			"the joiner's predicted projectile is visual-only")
+	assert_eq(host_impacts.size(), 1,
+			"the authoritative projectile resolved one collision/impact")
+	assert_eq(joiner_impacts.size(), 1,
+			"the shooter predicted and resolved its own visual impact")
+	assert_eq(joiner_fire_events.size(), 1,
+			"one predicted fire presentation event was emitted")
+	if joiner_fire_events.size() == 1:
+		assert_true(bool((joiner_fire_events[0] as Dictionary).get(
+				"is_local_player", false)),
+				"the predicted event maps local L even though wire attribution uses H")
+
+	# The joiner has spent one round. One reload action must queue one C2S 0x25;
+	# only the requester's echoed S2C 0x49 may refill it, and it is applied once.
+	var spent_clip := int(after_fire.get("clip", -1))
+	var reload_before := int(after_fire.get("reload_serial", 0))
+	var applied_before := int(after_fire.get("reload_applied_serial", 0))
+	assert_lt(spent_clip, 30, "the fire consumed one local magazine round")
+	joiner.set_local_player_weapon_input(false, false, true)
+	joiner.step()
+	var awaiting_echo: Dictionary = joiner.get_local_player_weapon_state()
+	assert_eq(int(awaiting_echo.get("reload_serial", 0)), reload_before + 1,
+			"the local action queued one C2S 0x25 before the host pumped")
+	assert_eq(int(awaiting_echo.get("reload_applied_serial", 0)), applied_before,
+			"the request cannot eagerly apply its own refill")
+	assert_eq(int(awaiting_echo.get("clip", -1)), spent_clip,
+			"ammo remains spent until S2C 0x49 returns")
+	for _tick in range(120):
+		host.step()
+		joiner.step()
+		OS.delay_msec(2)
+	var reloaded: Dictionary = joiner.get_local_player_weapon_state()
+	assert_eq(int(reloaded.get("reload_serial", 0)), reload_before + 1,
+			"one reload action queues exactly one C2S 0x25")
+	assert_eq(int(reloaded.get("reload_applied_serial", 0)), applied_before + 1,
+			"the echoed S2C 0x49 applies exactly once")
+	assert_eq(int(reloaded.get("clip", -1)), 30,
+			"only the echoed reload notification refills the joiner's clip")
+
+	joiner.free()
+	host.free()
+
+
+func test_listen_host_reload_relays_over_loopback_without_double_refill() -> void:
+	var mission := _combat_mission()
+	var host := NovaSimulation.new()
+	host.configure_host_session({"gametype": 0x30020})
+	assert_true(host.enable_host_listen(0))
+	assert_true(host.load_from_mission_data(mission))
+	_install_combat_tables(host)
+
+	var joiner := NovaSimulation.new()
+	assert_true(joiner.enable_join(
+			"127.0.0.1", host.get_host_listen_port(), "HostReloadWitness"))
+	assert_true(joiner.load_from_mission_data(mission))
+	_install_combat_tables(joiner)
+	assert_true(_drive_pair_to_match(host, joiner),
+			"joiner reached the real-UDP in-match seam")
+	if not joiner.is_joined_in_match():
+		joiner.free()
+		host.free()
+		return
+
+	var m4 := _retail_m4()
+	assert_true(host.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 8))
+	assert_true(joiner.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 8))
+	host.set_local_player_weapon(m4, {})
+	joiner.set_local_player_weapon(m4, {})
+	for _settle in range(3):
+		host.step()
+		joiner.step()
+
+	# Spend one host round, then wait for the local FSM to return to an input-
+	# accepting state. The authority refill remains immediate, but retail also
+	# queues the local player's C2S 0x25 through transport-mode-1 so every peer
+	# receives the same S2C 0x49.
+	host.set_local_player_weapon_input(false, true, false)
+	for _tick in range(20):
+		host.step()
+		joiner.step()
+		OS.delay_msec(2)
+	var spent: Dictionary = host.get_local_player_weapon_state()
+	assert_lt(int(spent.get("clip", -1)), 30,
+			"the listen host spent a magazine round before reloading")
+	var host_reload_before := int(spent.get("reload_serial", 0))
+	var host_applied_before := int(spent.get("reload_applied_serial", 0))
+	var expected_reload_combo := int(host.get_local_player_inventory().get(
+			"equipped_combo", -1))
+	var joiner_received_before := int(joiner.get_local_player_weapon_state().get(
+			"reload_received_serial", 0))
+
+	host.set_local_player_weapon_input(false, false, true)
+	host.step()
+	var immediate: Dictionary = host.get_local_player_weapon_state()
+	assert_eq(int(immediate.get("reload_serial", 0)), host_reload_before + 1,
+			"the listen-host action emitted one local reload request")
+	assert_eq(int(immediate.get("reload_applied_serial", 0)),
+			host_applied_before + 1,
+			"authority applied the local refill once at action start")
+	assert_eq(int(immediate.get("clip", -1)), 30,
+			"the authority refill completed immediately")
+
+	for _tick in range(30):
+		host.step()
+		joiner.step()
+		OS.delay_msec(2)
+	var host_after: Dictionary = host.get_local_player_weapon_state()
+	var joiner_after: Dictionary = joiner.get_local_player_weapon_state()
+	assert_eq(int(host_after.get("reload_serial", 0)), host_reload_before + 1,
+			"the loopback echo does not start another host reload")
+	assert_eq(int(host_after.get("reload_applied_serial", 0)),
+			host_applied_before + 1,
+			"the loopback S2C 0x49 does not refill the authority twice")
+	assert_eq(int(host_after.get("clip", -1)), 30,
+			"the host magazine remains full after its loopback echo")
+	assert_eq(int(joiner_after.get("reload_received_serial", 0)),
+			joiner_received_before + 1,
+			"the remote peer decoded exactly one relayed S2C 0x49")
+	assert_eq(int(joiner_after.get("reload_received_entity", -1)),
+			host.get_local_player_wire_handle(),
+			"the relay names the listen host's player entity")
+	assert_eq(int(joiner_after.get("reload_received_param", -1)),
+			expected_reload_combo,
+			"the relay carries the retail category*65+rank slot combo")
+
+	joiner.free()
+	host.free()
+
+
+func test_late_reload_echo_refills_payload_weapon_after_joiner_switches() -> void:
+	var mission := _combat_mission()
+	var host := NovaSimulation.new()
+	host.configure_host_session({"gametype": 0x30020})
+	assert_true(host.enable_host_listen(0))
+	assert_true(host.load_from_mission_data(mission))
+	_install_combat_tables(host)
+
+	var joiner := NovaSimulation.new()
+	assert_true(joiner.enable_join(
+			"127.0.0.1", host.get_host_listen_port(), "LateReloadJoiner"))
+	assert_true(joiner.load_from_mission_data(mission))
+	_install_combat_tables(joiner)
+	assert_true(_drive_pair_to_match(host, joiner),
+			"joiner reached the real-UDP in-match seam")
+	if not joiner.is_joined_in_match():
+		joiner.free()
+		host.free()
+		return
+
+	assert_true(joiner.apply_local_player_loadout([
+		{"name": "WPN_M4AUTO"},
+		{"name": "WPN_M9Beretta"},
+	], 8))
+	joiner.set_local_player_weapon(_retail_m4(), {})
+	for _settle in range(3):
+		joiner.step()
+		host.step()
+
+	# Spend one M4 round while it is equipped, then queue its reload without
+	# pumping the host. The request can reach the host socket, but no S2C 0x49
+	# can be produced until the authority is stepped below.
+	joiner.set_local_player_weapon_input(false, true, false)
+	for _tick in range(20):
+		joiner.step()
+		host.step()
+		OS.delay_msec(2)
+	joiner.set_local_player_weapon_input(false, false, false)
+	var spent_m4_clip := _inventory_clip(joiner, "WPN_M4AUTO")
+	assert_lt(spent_m4_clip, 30, "the M4 slot spent one magazine round")
+	assert_eq(_inventory_clip(joiner, "WPN_M9Beretta"), 15,
+			"the secondary starts with its independent full magazine")
+
+	var before_reload: Dictionary = joiner.get_local_player_weapon_state()
+	var reload_before := int(before_reload.get("reload_serial", 0))
+	var applied_before := int(before_reload.get("reload_applied_serial", 0))
+	joiner.set_local_player_weapon_input(false, false, true)
+	joiner.step()
+	joiner.set_local_player_weapon_input(false, false, false)
+	assert_eq(int(joiner.get_local_player_weapon_state().get(
+			"reload_serial", 0)), reload_before + 1,
+			"the M4 reload request was queued before the host pumped")
+	assert_eq(int(joiner.get_local_player_weapon_state().get(
+			"reload_applied_serial", 0)), applied_before,
+			"the joiner cannot apply the refill before the echo")
+
+	# Let the first reload action reach its retail DONE seam, but intercept it
+	# before the empty-magazine loop can enter another reload. A category edge
+	# during the ACTIVE phase is intentionally an action-cancel request in the
+	# retail switch writer; issuing it at DONE makes this test exercise a committed
+	# weapon switch rather than that separate input-timing rule.
+	var reload_finished := false
+	for _tick in range(120):
+		var reload_state: Dictionary = joiner.get_local_player_weapon_state()
+		if (int(reload_state.get("current", -1)) == 4
+				and int(reload_state.get("phase", -1)) == 4):
+			reload_finished = true
+			break
+		joiner.step()
+	assert_true(reload_finished, "the first M4 reload action reached DONE without an echo")
+	assert_eq(int(joiner.get_local_player_weapon_state().get(
+			"reload_serial", 0)), reload_before + 1,
+			"the delayed host pump has not started a second reload request")
+
+	# Switch the authoritative inventory selection while the echo is withheld.
+	# The echoed payload still names the M4 combo and must not refill whichever
+	# weapon happens to be equipped when it arrives.
+	joiner.request_local_player_weapon_category(2)
+	var switched := false
+	for _tick in range(120):
+		joiner.step()
+		if String(joiner.get_local_player_inventory().get(
+				"equipped_name", "")) == "WPN_M9Beretta":
+			switched = true
+			break
+	assert_true(switched, "the joiner switched to its secondary before the echo")
+	# Mirror LocalPlayerHost consuming the committed switch event: mount the
+	# newly selected definition so later ticks bridge the M9 FSM to the M9 slot.
+	joiner.set_local_player_weapon(_retail_m9(), {})
+	assert_eq(_inventory_clip(joiner, "WPN_M4AUTO"), spent_m4_clip,
+			"the original M4 slot stays spent while its echo is withheld")
+	assert_eq(_inventory_clip(joiner, "WPN_M9Beretta"), 15,
+			"switching does not alter the secondary magazine")
+
+	for _tick in range(120):
+		host.step()
+		joiner.step()
+		OS.delay_msec(2)
+	var after_echo: Dictionary = joiner.get_local_player_weapon_state()
+	assert_eq(int(after_echo.get("reload_applied_serial", 0)), applied_before + 1,
+			"the delayed S2C 0x49 applies exactly once")
+	assert_eq(String(joiner.get_local_player_inventory().get(
+			"equipped_name", "")), "WPN_M9Beretta",
+			"the late echo does not change the selected weapon")
+	assert_eq(_inventory_clip(joiner, "WPN_M4AUTO"), 30,
+			"the payload-addressed M4 slot receives the delayed refill")
+	assert_eq(_inventory_clip(joiner, "WPN_M9Beretta"), 15,
+			"the currently equipped secondary is not refilled by the M4 echo")
+
+	joiner.free()
+	host.free()
+
+
+func test_reload_echo_at_done_prevents_same_slot_reload_loop() -> void:
+	var mission := _combat_mission()
+	var host := NovaSimulation.new()
+	host.configure_host_session({"gametype": 0x30020})
+	assert_true(host.enable_host_listen(0))
+	assert_true(host.load_from_mission_data(mission))
+	_install_combat_tables(host)
+
+	var joiner := NovaSimulation.new()
+	assert_true(joiner.enable_join(
+			"127.0.0.1", host.get_host_listen_port(), "DoneEchoJoiner"))
+	assert_true(joiner.load_from_mission_data(mission))
+	_install_combat_tables(joiner)
+	assert_true(_drive_pair_to_match(host, joiner),
+			"joiner reached the real-UDP in-match seam")
+	if not joiner.is_joined_in_match():
+		joiner.free()
+		host.free()
+		return
+
+	assert_true(joiner.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 8))
+	joiner.set_local_player_weapon(_retail_m4(), {})
+	for _settle in range(3):
+		joiner.step()
+		host.step()
+
+	# Empty the magazine through the real local FSM/C2S fire path. Stop pumping
+	# the host on the exact joiner frame that queues the empty-slot reload, so its
+	# one C2S 0x25 is present but the echoed S2C 0x49 cannot yet exist.
+	var before: Dictionary = joiner.get_local_player_weapon_state()
+	var reload_before := int(before.get("reload_serial", 0))
+	var applied_before := int(before.get("reload_applied_serial", 0))
+	joiner.set_local_player_weapon_input(true, true, false)
+	var first_reload_queued := false
+	for _tick in range(400):
+		joiner.step()
+		var state: Dictionary = joiner.get_local_player_weapon_state()
+		if int(state.get("reload_serial", 0)) == reload_before + 1:
+			first_reload_queued = true
+			break
+		host.step()
+		OS.delay_msec(2)
+	joiner.set_local_player_weapon_input(false, false, false)
+	assert_true(first_reload_queued,
+			"emptying the M4 queued its first automatic C2S 0x25")
+	assert_eq(int(joiner.get_local_player_weapon_state().get("clip", -1)), 0,
+			"the regression reaches the empty-magazine reload path")
+	assert_eq(int(joiner.get_local_player_weapon_state().get(
+			"reload_applied_serial", 0)), applied_before,
+			"the withheld host cannot have echoed the refill")
+
+	# Hold the authority still while the first local reload animation reaches its
+	# DONE transition. The next joiner weapon pump would enter idle, observe the
+	# still-empty clip, and queue another reload unless this frame's echo is folded
+	# before weapon actions, as retail Client_ProcessNetworkFrame does.
+	var reload_finished := false
+	for _tick in range(160):
+		var state: Dictionary = joiner.get_local_player_weapon_state()
+		if int(state.get("current", -1)) == 4 \
+				and int(state.get("phase", -1)) == 4:
+			reload_finished = true
+			break
+		joiner.step()
+	assert_true(reload_finished,
+			"the first empty-magazine reload reached DONE with its echo withheld")
+	assert_eq(int(joiner.get_local_player_weapon_state().get(
+			"reload_serial", 0)), reload_before + 1,
+			"only the original reload request exists at the DONE boundary")
+
+	# Let the host consume that one request and place its one 0x49 echo on the
+	# joiner's socket, then cross the DONE->IDLE boundary without switching slots.
+	# A few extra client-only ticks make a stale queued kReload observable as a
+	# second reload_requested edge.
+	OS.delay_msec(2)
+	host.step()
+	OS.delay_msec(2)
+	for _tick in range(4):
+		joiner.step()
+	var after_echo: Dictionary = joiner.get_local_player_weapon_state()
+	assert_eq(int(after_echo.get("reload_applied_serial", 0)), applied_before + 1,
+			"the single delayed S2C 0x49 was applied")
+	assert_eq(int(after_echo.get("reload_serial", 0)), reload_before + 1,
+			"recv-before-actions prevents a second same-slot C2S 0x25")
+	assert_eq(int(after_echo.get("clip", -1)), 30,
+			"the payload-addressed magazine was refilled once")
+
+	joiner.free()
+	host.free()
+
+
+func test_joiner_round_hits_host_authoritatively_and_predicts_peer_impact() -> void:
+	var mission := _peer_duel_mission()
+	var host := NovaSimulation.new()
+	host.configure_host_session({"gametype": 0x30020})
+	assert_true(host.enable_host_listen(0))
+	assert_true(host.load_from_mission_data(mission))
+	_install_combat_tables(host)
+
+	var joiner := NovaSimulation.new()
+	assert_true(joiner.enable_join(
+			"127.0.0.1", host.get_host_listen_port(), "PeerShooter"))
+	assert_true(joiner.load_from_mission_data(mission))
+	_install_combat_tables(joiner)
+	assert_true(_drive_pair_to_match(host, joiner),
+			"peer shooter reached the real-UDP in-match seam")
+	if not joiner.is_joined_in_match():
+		joiner.free()
+		host.free()
+		return
+
+	assert_true(joiner.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 8))
+	joiner.set_local_player_weapon(_retail_m4(), {})
+	for _settle in range(3):
+		joiner.step()
+		host.step()
+
+	var host_health_before := host.get_local_player_health()
+	var joiner_health_before := joiner.get_local_player_health()
+	assert_gt(host_health_before, 0, "host peer starts alive in the joiner's fire lane")
+	assert_gt(joiner_health_before, 0, "joiner starts alive before its predicted shot")
+	host.drain_round_impacts()
+	joiner.drain_round_impacts()
+
+	joiner.set_local_player_weapon_input(false, true, false)
+	var host_impacts: Array = []
+	var joiner_impacts: Array = []
+	for _tick in range(20):
+		joiner.step()
+		host.step()
+		host_impacts.append_array(host.drain_round_impacts())
+		joiner_impacts.append_array(joiner.drain_round_impacts())
+		OS.delay_msec(2)
+
+	# The minimal test items.def lacks retail's id-105305 multiplayer Player
+	# template (it only carries the distinct id-105310 SP player), so the host's
+	# faithful ItemDef-null guard consumes the person collision without damage.
+	# The authoritative collision itself is pinned by host_impacts below; retail
+	# data supplies the real 0x14B9 ItemDef and therefore reaches damage.
+	assert_eq(host.get_local_player_health(), host_health_before,
+			"the stripped fixture cannot apply player damage without ItemDef 105305")
+	assert_eq(joiner.get_local_player_health(), joiner_health_before,
+			"the shooter's peer proxy cannot mutate its local World health")
+	assert_eq(host_impacts.size(), 1,
+			"host authority resolves exactly one peer collision")
+	assert_eq(joiner_impacts.size(), 1,
+			"the shooter predicts exactly one visual impact on the decoded peer")
+	if joiner_impacts.size() == 1:
+		var predicted_hit: Vector3 = (joiner_impacts[0] as Dictionary).get(
+				"position", Vector3.ZERO)
+		assert_lt(predicted_hit.distance_to(Vector3(0, 1, -7.4)), 0.75,
+				"the visual impact lands on the host, never a self-H/local-L alias")
+
+	joiner.free()
+	host.free()
+
+
+func test_remote_host_round_event_resimulates_visually_on_joiner() -> void:
+	var mission := _combat_mission()
+	var host := NovaSimulation.new()
+	host.configure_host_session({"gametype": 0x30020})
+	assert_true(host.enable_host_listen(0))
+	assert_true(host.load_from_mission_data(mission))
+	_install_combat_tables(host)
+	assert_true(host.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 8))
+	host.set_local_player_weapon(_retail_m4(), {})
+
+	var joiner := NovaSimulation.new()
+	assert_true(joiner.enable_join(
+			"127.0.0.1", host.get_host_listen_port(), "RoundObserver"))
+	assert_true(joiner.load_from_mission_data(mission))
+	_install_combat_tables(joiner)
+	assert_true(_drive_pair_to_match(host, joiner),
+			"observer reached the real-UDP in-match seam")
+	if not joiner.is_joined_in_match():
+		joiner.free()
+		host.free()
+		return
+
+	var host_target := _organic_index_at_x(host, 20.0)
+	var joiner_target := _organic_index_at_x(joiner, 20.0)
+	assert_gte(host_target, 0, "host resolved its own north-lane target")
+	assert_gte(joiner_target, 0, "observer retained the remote visual target")
+	var host_health_before := int(host.get_entity_debug(host_target).get("health", -1))
+	var joiner_health_before := int(joiner.get_entity_debug(joiner_target).get("health", -1))
+	joiner.drain_round_impacts()
+	host.drain_round_impacts()
+
+	host.set_local_player_weapon_input(false, true, false)
+	var host_impacts: Array = []
+	var joiner_impacts: Array = []
+	for _tick in range(20):
+		host.step()
+		joiner.step()
+		host_impacts.append_array(host.drain_round_impacts())
+		joiner_impacts.append_array(joiner.drain_round_impacts())
+		OS.delay_msec(2)
+
+	assert_lt(int(host.get_entity_debug(host_target).get("health", host_health_before)),
+			host_health_before, "host fire remains authoritative")
+	assert_eq(int(joiner.get_entity_debug(joiner_target).get("health", -1)),
+			joiner_health_before,
+			"the observer's tag-2 re-simulation cannot change health")
+	assert_eq(host_impacts.size(), 1, "host projectile resolved one impact")
+	assert_eq(joiner_impacts.size(), 1,
+			"decoded S2C 0x0A tag-2 fire re-simulates one visual impact")
+
+	joiner.free()
+	host.free()
 
 
 func test_joiner_off_by_default() -> void:

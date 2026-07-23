@@ -482,14 +482,23 @@ public:
 };
 
 // ---------------------------------------------------------------------------
-// Authoritative projectile trace. This is the single collision seam used by
-// RoundSim: fixed-point terrain/entity arbitration lives here; arming, armor,
-// health, scoring, and effects remain consequences owned by RoundSim.
+// Projectile trace shared by authoritative and explicitly visual-only rounds.
+// Fixed-point terrain/entity arbitration lives here; arming, armor, health,
+// scoring, and effects remain consequences owned by RoundSim.
 // ---------------------------------------------------------------------------
 struct FixedVec3 {
     int32_t x = 0, y = 0, z = 0;
 
     constexpr int32_t operator[](int i) const { return i == 0 ? x : (i == 1 ? y : z); }
+};
+
+// One decoded remote player exposed only to visual projectile collision. It is
+// deliberately not an Entity: the wire handle belongs to the server's address
+// space and must never alias a client-local registry handle or participate in
+// movement, AI, explosions, or authoritative damage.
+struct ProjectilePersonProxy {
+    uint16_t wire_handle = 0xFFFF;
+    FixedVec3 position_q16;
 };
 
 enum class ProjectileHitClass : uint8_t {
@@ -511,6 +520,11 @@ struct ProjectileTrace {
     uint32_t ammo_flags = 0;
     // The additional per-projectile exclusion carried by the retail ray context.
     EntityHandle extra_ignore;
+    // Remote decoded player proxies are a client-presentation input only. The
+    // caller opts in explicitly for a VisualOnly round and supplies the wire
+    // shooter identity for the normal flag-4-aware self-collision rule.
+    bool include_person_proxies = false;
+    uint16_t shooter_wire_handle = 0xFFFF;
 };
 
 struct ProjectileHit {
@@ -577,9 +591,16 @@ public:
     // slices (dyn radius+4.0u / statics; pool-1 radius+6.0u) into a 3000-entry arena.
     void build_tick_tables(World &world);
 
-    // Segment arbitration used by the authoritative projectile loop. The
-    // query is read-only: callers must publish/build collision snapshots at
-    // the normal tick seam before tracing.
+    // Replace the persistent decoded-player collision projection. Sorting by
+    // wire handle gives the proxy-only subset deterministic order; no wire
+    // handle is ever converted to EntityHandle.
+    void replace_projectile_person_proxies(
+            std::vector<ProjectilePersonProxy> proxies,
+            uint16_t local_player_wire_handle = 0xFFFF);
+
+    // Segment arbitration shared by authoritative and visual-only projectile
+    // loops. The query is read-only: callers must publish/build collision
+    // snapshots at the normal tick seam before tracing.
     ProjectileHit trace_projectile(const World &world,
                                    const ProjectileTrace &trace) const;
 
@@ -882,6 +903,10 @@ private:
 
     std::vector<DynSlot> dynamics_;     // [orig: g_DynProx*]
     std::vector<PersonSlot> persons_;   // [orig: g_PersonProx*]
+    std::vector<ProjectilePersonProxy> projectile_person_proxies_;
+    // Server H used solely as local L's ordering key during proxy-enabled
+    // person walks. Geometry and ignore logic continue to use L.
+    uint16_t projectile_local_player_wire_handle_ = 0xFFFF;
     std::vector<EntityHandle> arena_;   // cap 3000 [orig: g_ProxCandidateArena]
     std::unordered_map<uint16_t, CandidateSlice> candidates_;
 };

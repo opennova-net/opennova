@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <map>
 #include <string>
@@ -19,6 +20,27 @@ namespace opennova::np {
 // @0x51cbc0 writes entity+0x78 = conn->connection_id; net-re §5.2a/§5.2b]
 inline constexpr uint32_t kHostPlayerDcb = 2;
 inline constexpr uint32_t kFirstJoinerDcb = kHostPlayerDcb + 1;
+
+// Retail's Joint Operations connection template bounds the reliable outbound-message pool at
+// 0x4B0 records.
+// NapiNPMessage_Create rejects a new record when pending + retained + 1 exceeds this field; admitted
+// peer ACKs retire retained records. Keep this opt-in at the JO in-match connection seam. The
+// NOVAWORLDUDP lobby ClientSession has no witnessed 0x44/0x84 owner in this slice and remains on the
+// generic, recovery-disabled SessionSequencing behavior.
+// [orig: CNapiNetwork_Init @0x4CAB20/@0x4CABF0 writes cs_dir0.msg_out_max = 0x4B0;
+// NapiNPMessage_Create @0x627FC0 checks the combined count]
+inline constexpr std::size_t JO_GAME_SESSION_OUTBOUND_MESSAGE_MAX =
+		JO_SESSION_OUTBOUND_MESSAGE_MAX;
+
+inline SessionSequencing make_jo_game_session_sequencing(
+		uint32_t next_outbound_seq = 1, uint32_t last_inbound_seq = 0) {
+	SessionSequencing sequencing;
+	sequencing.next_outbound_seq = next_outbound_seq;
+	sequencing.last_inbound_seq = last_inbound_seq;
+	sequencing.ordered_recovery_enabled = true;
+	sequencing.outbound_message_limit = JO_GAME_SESSION_OUTBOUND_MESSAGE_MAX;
+	return sequencing;
+}
 
 // The per-connection lifecycle phase a server-side node walks from a fresh datagram to an
 // in-match player (§5.0 / §5.2a). Names mirror the witnessed original flow:
@@ -218,7 +240,8 @@ struct NapiNPConnection {
 	                               // leg compares a repeat 0x42 against [orig: session_keys.client_id
 	                               // == CI && session_keys.remote_key == CK @ HandleClientJoin 0x62b750]
 	uint32_t server_sk = 0;        // our ServerAuth.SK
-	SessionSequencing seq{};       // outbound seq (from 1) + last inbound ack [ADR 0013 shared framing]
+	SessionSequencing seq = make_jo_game_session_sequencing();
+	                               // outbound seq (from 1) + last inbound ack [ADR 0013 shared framing]
 	uint32_t peer_acked_seq = 0;   // highest hdr.ack_count the peer has echoed = the last of OUR 0x83
 	                               // seqs it confirmed. Drives the initial-state backlog throttle: the
 	                               // original stalls both burst tracks while the connection's

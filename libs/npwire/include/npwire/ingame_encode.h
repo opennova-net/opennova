@@ -19,6 +19,7 @@
 // [orig: serialize_entity_pool_to_packet   @ 0x503460]  — S2C 0x20 bulk pool-3 sync.
 // [orig: serialize_entity_pool_to_packet_0 @ 0x503940]  — S2C 0x0D pool spawn (TODO).
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -218,6 +219,24 @@ std::vector<uint8_t> encode_frame_update(const FrameUpdate &fu);
 // [orig: Pool_SerializeEntityViaVTable @ 0x4D64E0]
 std::vector<uint8_t> encode_entity_packet_sub_header(const EntityPacketSubHeader &hdr);
 
+// Stamp the calculated pose fields of a C2S 0x06 descriptor. Retail writes
+// full X/Y/Z, rounds Yaw/Pitch to their high words, then writes five modulo
+// 2^16 low-word deltas against the shooter's live {X,Y,Z,Yaw,Pitch} dwords.
+// The deltas reconstruct the same pose; they are not an independent
+// weapon-specific muzzle-offset vector.
+// [orig: NetPacket_WriteEntityPositionUpdate @0x42A6A1..0x42A890]
+void set_client_fired_round_pose(
+		ClientFiredRound &round,
+		const std::array<int32_t, 5> &fire_pose,
+		const std::array<int32_t, 5> &shooter_pose);
+
+// Encode the fixed 45-byte C2S 0x06 fired-round descriptor -- the exact inverse
+// of decode_client_fired_round. The local joiner predicts the same round, then
+// sends this descriptor so the host can validate ammo/ownership and become the
+// sole damaging authority. [orig: Entity_FireWeaponAndSendPacket @0x42bd80 ->
+// NapiNPServerMsg_0x006_ClientFiredRound @0x513310]
+std::vector<uint8_t> encode_client_fired_round(const ClientFiredRound &r);
+
 // Encode the §5.10 extended (type-10) player uplink body — 43 B fixed, the inverse
 // of decode_player_extended_uplink. This is the C2S 0x0C body a remote joiner sends
 // for its own player each frame; the 5-byte sub-header (encode_entity_packet_sub_header)
@@ -287,7 +306,7 @@ std::vector<uint8_t> encode_weapon_loadout(const WeaponLoadout &loadout);
 // S2C 0x49 WEAPON-RELOAD — [u16 entityHandle][u16 weaponSlotCombo] (4 B): the host's broadcast
 // relay of a C2S 0x25 reload request (same payload, rebuilt per ADR 0003). The client-side apply
 // (NapiNPClientMsg_WeaponReload_0x049 @0x42C0A0 -> WeaponSlot_ReloadAmmo @0x541720) is the ONLY
-// place a client's clip refills / the slot's 0x80 reload-pending flag clears (§5.58, D-NET-142).
+// place a client's clip refills. The entry-time 0x80 phase bit is transient (§5.58, D-NET-142).
 // [orig: NapiNPServerMsg_HandleReloadRequest @ 0x514DF0]
 std::vector<uint8_t> encode_weapon_reload(const WeaponReload &reload);
 

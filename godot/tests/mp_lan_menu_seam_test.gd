@@ -162,6 +162,10 @@ func test_refreshed_lan_rows_require_a_fresh_selection() -> void:
 	menu.emit_signal("widget_value_changed", "LAN_GAME_LIST", "list", 0, "old")
 
 	session.publish([{"name": "replacement", "host_ip": "192.168.1.11", "port": 32769}])
+	var server_list := menu.find_child("LAN_GAME_LIST", true, false) as NovaMnuList
+	assert_eq(server_list.get_item_count(), 1,
+		"a servers_changed payload replaces the prior full snapshot instead of appending")
+	assert_eq(server_list.get_item_text(0), "replacement (0/0)")
 	_press(menu, "LAN_JOINGAME")
 	assert_signal_not_emitted(mp, "lan_join_requested",
 		"refreshed rows invalidate the selection from the previous result set")

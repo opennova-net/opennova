@@ -604,11 +604,66 @@ std::vector<uint8_t> encode_entity_packet_sub_header(const EntityPacketSubHeader
 	return out;
 }
 
-// [orig: NetPacket_SerializePlayerState case 3/4 @ 0x4C09C0] — the 43-B extended
+// [orig: Entity_FireWeaponAndSendPacket @0x42bd80] -- the fixed 45-byte
+// descriptor queued by the joiner's locally predicted fire action.
+void set_client_fired_round_pose(
+		ClientFiredRound &round,
+		const std::array<int32_t, 5> &fire_pose,
+		const std::array<int32_t, 5> &shooter_pose) {
+	const auto rounded_high_word = [](int32_t angle) {
+		const uint32_t high =
+				(static_cast<uint32_t>(angle) + 0x8000u) >> 16;
+		return high < 0x8000u
+				? static_cast<int32_t>(high)
+				: static_cast<int32_t>(high) - 0x10000;
+	};
+	const auto low_word_delta = [](int32_t fire, int32_t shooter) {
+		return static_cast<uint16_t>(
+				static_cast<uint16_t>(fire) - static_cast<uint16_t>(shooter));
+	};
+	round.pos_x = fire_pose[0];
+	round.pos_y = fire_pose[1];
+	round.pos_z = fire_pose[2];
+	round.dir_x = rounded_high_word(fire_pose[3]);
+	round.dir_y = rounded_high_word(fire_pose[4]);
+	round.base_offset = low_word_delta(fire_pose[0], shooter_pose[0]);
+	round.offset_x = low_word_delta(fire_pose[1], shooter_pose[1]);
+	round.offset_y = low_word_delta(fire_pose[2], shooter_pose[2]);
+	round.offset_z = low_word_delta(fire_pose[3], shooter_pose[3]);
+	round.offset_w = low_word_delta(fire_pose[4], shooter_pose[4]);
+}
+
+std::vector<uint8_t> encode_client_fired_round(const ClientFiredRound &r) {
+	std::vector<uint8_t> out;
+	out.reserve(45);
+	Writer w{out};
+	w.u32(r.current_tick);
+	w.u16(r.shooter_handle);
+	w.u8(r.fire_flags);
+	w.u8(r.adm_index);
+	w.u32(static_cast<uint32_t>(r.pos_x));
+	w.u32(static_cast<uint32_t>(r.pos_y));
+	w.u32(static_cast<uint32_t>(r.pos_z));
+	w.u32(static_cast<uint32_t>(r.dir_x));
+	w.u32(static_cast<uint32_t>(r.dir_y));
+	w.u16(r.target_handle);
+	w.u16(r.hit_part);
+	w.u8(r.extra_byte1);
+	w.u8(r.extra_byte2);
+	w.u8(r.misc_byte);
+	w.u16(r.base_offset);
+	w.u16(r.offset_x);
+	w.u16(r.offset_y);
+	w.u16(r.offset_z);
+	w.u16(r.offset_w);
+	return out;
+}
+
+// [orig: NetPacket_SerializePlayerState case 3/4 @ 0x4C09C0] -- the 43-B extended
 // uplink body, the exact bytes decode_player_extended_uplink consumes. The host
 // driver fills PlayerExtendedUplink from the joiner's owned entity; this writes the
-// wire bytes. Positions are i32 16.16 — CARRIER-LOCAL (and heading carrier-relative)
-// when carrier_handle != 0xFFFF, absolute world otherwise (§5.10, D-NET-151).
+// wire bytes. Positions are i32 16.16 -- CARRIER-LOCAL (and heading carrier-relative)
+// when carrier_handle != 0xFFFF, absolute world otherwise (section 5.10, D-NET-151).
 std::vector<uint8_t> encode_player_extended_uplink(const PlayerExtendedUplink &r) {
 	std::vector<uint8_t> out;
 	Writer w{out};

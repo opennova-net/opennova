@@ -47,9 +47,9 @@ const MAX_CATCHUP_TICKS := 31        # spiral-of-death clamp: port of the 500 ms
 var _sim: NovaSimulation
 var _present                          # MissionPresentPass: placed nodes (host/SP/editor); null on a joiner
 var _wire_present                     # WirePresentPass: un-placed network entities or SP attachment children
-var _fire_present                     # FirePresentPass: AI/remote fire sound + muzzle + tracers (host); else null
+var _fire_present                     # FirePresentPass: non-local fire sound + muzzle + tracers; else null
 var _destruction_present              # DestructionPresentPass: husk swap + debris + wreck effects (host); else null
-var _throwable_present                # ThrowablePresentPass: thrown/placed device models (host); else null
+var _throwable_present                # ThrowablePresentPass: flying/placed throwable models
 var _index
 var _self_tick := false              # editor: self-tick via _process while playing; game: host calls tick()
 var _playing := false
@@ -237,10 +237,13 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 			})
 		simulation_restarted.connect(
 				Callable(_wire_present, 'reset_runtime_state'))
-	# The host fire-presentation pass: AI/remote fire sound + muzzle effect + tracer
-	# streaks off the sim's fired/tracer drains — providers come from the host shell
-	# (game_world). A joiner's presentation seam is its own decode path (net views).
-	if not is_joiner and options.has("fire_audio"):
+	# The viewing client's fire-presentation pass: AI/remote fire sound + muzzle
+	# effect + tracer streaks off the sim's fired/tracer drains. A joiner re-runs
+	# decoded S2C tag-2 rounds through the same visual RoundSim, so it must drain
+	# this queue too. FirePresentPass filters the locally predicted round by
+	# is_local_player; the first-person action slot remains its sole presenter.
+	# [orig: remote tag-2 receive -> RoundData_SpawnRound; net-re §5.60]
+	if options.has("fire_audio"):
 		_fire_present = FirePresentPass.new()
 		_fire_present.setup(_sim, container,
 			options.get("fire_audio", Callable()),
@@ -260,14 +263,16 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 		simulation_restarted.connect(
 				Callable(_destruction_present, 'reset_runtime_state'))
 	# The throwable-presentation pass: item models for flying grenades/satchels
-	# and placed devices, reconciled from the sim's visual snapshot
+	# and placed devices, reconciled from the sim's visual snapshot. Joiners need
+	# the flying-round half because decoded S2C tag-2 descriptors run the visual
+	# throwable motor locally. Placed-device replication remains the separate
+	# unported 0x59/0x12 seam; enabling this read-only pass does not invent it.
 	# (world-wac-ai-re §27; the sim stays render-free).
-	if not is_joiner:
-		_throwable_present = ThrowablePresentPass.new()
-		_throwable_present.setup(_sim, container, options.get("placer"),
-			options.get("item_db"), options.get("env_node"))
-		simulation_restarted.connect(
-				Callable(_throwable_present, 'reset_runtime_state'))
+	_throwable_present = ThrowablePresentPass.new()
+	_throwable_present.setup(_sim, container, options.get("placer"),
+		options.get("item_db"), options.get("env_node"))
+	simulation_restarted.connect(
+		Callable(_throwable_present, 'reset_runtime_state'))
 	# Spawn the host's own player as an authoritative pool-0 entity (ADR 0012 / net-re §5.2b).
 	# After load (the spawn needs the AI system wired). The spawn POSE is selected the way the
 	# original engine does — by game type, from the mission's player-START marker FARTHEST from the
@@ -405,10 +410,11 @@ func has_current_present_effect_snapshot() -> bool:
 func presented_entity_effect_transform(entity_ref: Dictionary) -> Variant:
 	if not has_current_present_effect_snapshot():
 		return null
-	var wire_handle := int(entity_ref.get("wire_handle", 0))
+	var has_wire_handle := entity_ref.has("wire_handle")
+	var wire_handle := int(entity_ref.get("wire_handle", -1))
 	if _has_native_present_effect_pose_lookup:
 		var state := PackedVector3Array()
-		if wire_handle > 0:
+		if has_wire_handle and wire_handle >= 0 and wire_handle <= 0xffff:
 			state = _sim.get_present_effect_state_for_wire_handle(wire_handle)
 		else:
 			var native_bms_id := int(entity_ref.get("bms_id", 0))
@@ -425,7 +431,7 @@ func presented_entity_effect_transform(entity_ref: Dictionary) -> Variant:
 
 	# Compatibility path for a snapshot-source test seam without the compact API.
 	_ensure_present_effect_poses()
-	if wire_handle > 0:
+	if has_wire_handle and wire_handle >= 0 and wire_handle <= 0xffff:
 		return _effect_poses_by_wire_handle.get(wire_handle)
 	var bms_id := int(entity_ref.get("bms_id", 0))
 	if bms_id > 0:
@@ -497,7 +503,8 @@ func _ensure_present_effect_poses() -> void:
 					snapshot[base + NovaSimulation.PF_POS_Y],
 					snapshot[base + NovaSimulation.PF_POS_Z]))
 		var wire_handle := int(snapshot[base + NovaSimulation.PF_WIRE_HANDLE])
-		if wire_handle > 0:
+		var type_id := int(snapshot[base + NovaSimulation.PF_TYPE_ID])
+		if type_id != 0 and wire_handle >= 0 and wire_handle <= 0xffff:
 			_effect_poses_by_wire_handle[wire_handle] = transform
 		var bms_id := int(snapshot[base + NovaSimulation.PF_BMS_ID])
 		if bms_id > 0:
@@ -550,6 +557,10 @@ func local_player_team() -> int:
 # Fire-presentation counters (probe/diagnostic seam; empty when the pass is absent).
 func get_fire_present_stats() -> Dictionary:
 	return _fire_present.get_stats() if _fire_present != null else {}
+
+
+func get_throwable_present_stats() -> Dictionary:
+	return _throwable_present.get_stats() if _throwable_present != null else {}
 
 
 func get_destruction_present_stats() -> RefCounted:

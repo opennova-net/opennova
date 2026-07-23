@@ -116,7 +116,7 @@ public:
 		PF_ALIVE,      // 1 when alive
 		PF_RESPAWN_REVISION, // decoded organic dead->alive epoch; resets remote body state
 		PF_TYPE_ID,    // items.def runtime type id from the wire (0 = none); keys the joiner's wire avatars
-		PF_WIRE_HANDLE,// (pool<<12)|slot wire handle from the decoded stream (joiner render key; 0 = none)
+		PF_WIRE_HANDLE,// (pool<<12)|slot wire handle; zero is a valid pool-0 identity
 		// Final output of anim::compute_aim_overlay_angles. Presentation consumes
 		// this result; it never repeats the mounted config selector.
 		PF_AIM_OVERLAY_VALID,
@@ -295,7 +295,9 @@ private:
 	bool joiner_ = false;
 	bool joiner_started_ = false;          // ClientHello emitted (Idle -> Hello)
 	bool joiner_local_spawned_ = false;    // L spawned at reached_in_match (one-shot guard)
-	uint16_t joiner_self_wire_handle_ = 0; // H: stamped in the C2S 0x0C + present self-filter
+	// H is stamped in C2S 0x0C and used by the present self-filter. Zero is a
+	// valid handle; runtime_->has_self_handle() carries validity independently.
+	uint16_t joiner_self_wire_handle_ = 0;
 	// Send one framed datagram to the dialed host (the joiner's send_datagram).
 	void ship_to_host(const std::vector<uint8_t> &dg);
 	// SelfSpawn (mission i32 16.16 + full BAM32 orientation) -> PlayerSpawn for L.
@@ -411,6 +413,14 @@ private:
 	uint16_t local_round_sequence_ = 0;
 	uint64_t weapon_dry_serial_ = 0;
 	uint64_t weapon_reload_serial_ = 0;
+	uint64_t weapon_reload_applied_serial_ = 0;
+	// Every decoded S2C 0x49, including another player's/vehicle's notification.
+	// The apply serial above remains requester-local; this receive serial is a
+	// diagnostic/test witness that the server broadcast traversed the remote wire.
+	uint64_t weapon_reload_received_serial_ = 0;
+	uint16_t weapon_reload_received_entity_ =
+			opennova::world::EntityHandle::kInvalid;
+	uint16_t weapon_reload_received_param_ = 0;
 	uint64_t weapon_unscope_serial_ = 0;
 	uint64_t weapon_rescope_serial_ = 0;
 	// The action-begin seam: serial + the started slot id; the state dict resolves
@@ -581,12 +591,24 @@ private:
 	// Per-load host bring-up: mode 3 -> create_session(&host_loop_) -> configure_session_runtime
 	// -> Server_InitNewRoundState -> the faithful host-player auto-spawn. Mirrors apps/nw_server.
 	void bringup_host_runtime(const opennova::bms::File &file);
-	// The per-frame host owner loop (recv-drain -> tick_connections -> Server_TickUpdate -> S2C
-	// flush -> fold host_loop_ into ClientState). Socket legs gated on host_listen_ (pure SP has none).
+	// Route the listen host's socketless gameplay C2S through the same message
+	// dispatcher as remote connections before Server_TickUpdate drains 0x0C.
+	void drain_host_client_gameplay_requests();
+	// The per-frame host owner loop (local loopback gameplay + recv-drain -> tick_connections ->
+	// Server_TickUpdate -> S2C flush -> fold host_loop_ into ClientState). Socket legs gated on
+	// host_listen_ (pure SP has none).
 	void host_pump();
-	// The per-frame non-authority client loop (recv -> run_logic_tick(false) for L's motor ->
-	// Client_ProcessNetworkFrame -> ship the C2S 0x0C; spawn L on the in-match edge).
+	// The per-frame non-authority client loop (recv -> Client_ProcessNetworkFrame + decoded
+	// consequences -> run_logic_tick(false) for L's motor/weapon actions -> ship C2S; spawn L on
+	// the in-match edge).
 	void joiner_pump();
+	// Drain typed S2C gameplay events after the client recv pump: tag-2 fires
+	// spawn visual-only rounds; the requester's 0x49 echo performs its refill.
+	void apply_joiner_gameplay_events();
+	// Project persistent decoded remote Player poses into collision-only visual
+	// proxies. Wire H remains presentation identity; local World authority never
+	// receives a cloned entity or an H->L owner mapping.
+	void refresh_joiner_projectile_person_proxies();
 
 	// Terrain the AI grounds on. We own copies of the host's depth buffer + 16x16 sector grid so
 	// the portable TerrainHeightField's raw pointers outlive the source NovaTerrainData and survive
@@ -738,9 +760,10 @@ public:
 	int spawn_local_player_at_start();
 	// True once a local player has been spawned (World::cached.local_player valid).
 	bool has_local_player() const;
-	// The local player's wire handle ((pool<<12)|slot), 0 when none. The wire present pass
-	// excludes it — the local player is drawn by LocalPlayerHost, not from the wire stream
-	// (host: its own pool-0 player; joiner: L, never present in the wire stream anyway).
+	// The local player's wire identity ((pool<<12)|slot). Packed zero is valid: callers that
+	// need presence use has_local_player()/the runtime's has_self_handle() instead of a sentinel.
+	// The host returns its pool-0 player; a joiner returns H, the host-assigned identity that its
+	// wire-present pass excludes while LocalPlayerHost draws the distinct local motor entity L.
 	int get_local_player_wire_handle() const;
 	// Feed one frame of player input: the move keys + look yaw/pitch (mission degrees). Applied
 	// to the player's body input at the top of the next frame. Movement keys + the lean

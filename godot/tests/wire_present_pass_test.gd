@@ -46,12 +46,17 @@ class FakeModel:
 class FakeSim:
 	extends RefCounted
 	var entities: Array = []
+	var local_player_present := true
+	var local_player_handle := 1
 
 	func get_present_stride() -> int:
 		return NovaSimulation.PF_STRIDE
 
+	func has_local_player() -> bool:
+		return local_player_present
+
 	func get_local_player_wire_handle() -> int:
-		return 1
+		return local_player_handle
 
 	func get_present_snapshot() -> PackedFloat32Array:
 		var stride := NovaSimulation.PF_STRIDE
@@ -224,6 +229,40 @@ func test_wire_handle_resolver_keeps_synthetic_siblings_distinct() -> void:
 	presenter.present()
 	assert_null(presenter.resolve_wire_handle(0x1004),
 			'a retired wire row no longer resolves through its reused pool slot')
+
+
+func test_zero_wire_handle_is_a_valid_remote_pool_slot() -> void:
+	var sim := FakeSim.new()
+	sim.local_player_present = false
+	sim.entities = [{"type_id": 0x14B9, "handle": 0, "x": 3.0}]
+	var placer := FakePlacer.new()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var presenter := WirePresentPass.new()
+	presenter.setup(sim, placer, container)
+
+	presenter.present()
+
+	assert_eq(placer.built.size(), 1,
+			"packed handle zero is a real remote pool-0 slot")
+	assert_eq(presenter.resolve_wire_handle(0), placer.built[0])
+	assert_almost_eq(placer.built[0].position.x, 3.0, 0.001)
+
+
+func test_zero_wire_handle_is_filtered_when_it_is_the_explicit_local_player() -> void:
+	var sim := FakeSim.new()
+	sim.local_player_handle = 0
+	sim.entities = [{"type_id": 0x14B9, "handle": 0}]
+	var placer := FakePlacer.new()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var presenter := WirePresentPass.new()
+	presenter.setup(sim, placer, container)
+
+	presenter.present()
+
+	assert_eq(placer.built.size(), 0,
+			"packed handle zero is hidden only when explicit local-player validity says it is self")
 
 
 func test_unresolved_slot_retries_after_disappearance_and_reuse() -> void:

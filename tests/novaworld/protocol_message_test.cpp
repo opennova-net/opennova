@@ -231,15 +231,162 @@ bool check_session_packet_frame_deframe() {
 	            "manual header-fill + encode")) return false;
 	if (!expect(framed == manual, "frame body == manual header-fill + encode (byte-identical)")) return false;
 
-	opennova::SessionSequencing rx{1, 0};
-	opennova::SessionCrypto rx_crypto{{}, scrk, 0};
+	// Retail's outer HandleSessionPacket admits only the next contiguous sequence into
+	// ParseMessages. Seed the receiver immediately before this captured seq=7 packet.
+	opennova::SessionSequencing rx{1, 6};
+	rx.ordered_recovery_enabled = true;
+	opennova::SessionCrypto rx_crypto{{}, scrk, 0, 0x11223344u};
 	opennova::ProtocolPacketHeader got_hdr;
 	std::vector<opennova::ProtocolMessage> got;
-	if (!expect(opennova::deframe_session_packet(rx, rx_crypto, framed.data(), framed.size(), got_hdr, got),
+	opennova::SessionDeframeAdmission admission;
+	if (!expect(opennova::deframe_session_packet(
+			rx, rx_crypto, framed.data(), framed.size(), got_hdr, got, &admission),
 	            "deframe_session_packet decodes")) return false;
 	if (!expect(got_hdr.seq_num == 7 && got_hdr.session_id == 0x11223344u, "deframed header round-trips")) return false;
 	if (!expect(rx.last_inbound_seq == 7, "deframe latches last_inbound_seq = hdr.seq_num")) return false;
 	if (!expect(got.size() == 2 && got[0].tag == 0x10 && got[1].tag == 0x57, "inner messages round-trip")) return false;
+	if (!expect(admission.admitted && admission.max_ack_count == 3,
+	            "contiguous packet reports its ACK through the admission gate")) return false;
+
+	// The receiver-local key is checked before sequence admission and inner parsing. A delayed
+	// datagram from a prior connection can share this endpoint and SCRK-shaped bytes, but retail
+	// drops it before it can poison the new connection's contiguous frontier.
+	opennova::ProtocolPacketHeader wrong_session_hdr = manual_hdr;
+	wrong_session_hdr.session_id = 0x55667788u;
+	wrong_session_hdr.seq_num = 8;
+	wrong_session_hdr.ack_count = 99;
+	std::vector<uint8_t> wrong_session;
+	if (!expect(opennova::encode_protocol_packet_plaintext(
+			wrong_session_hdr, messages, scrk, wrong_session),
+	            "encode wrong-session packet")) return false;
+	got = {opennova::make_protocol_message(0x7F, {0xAA})};
+	if (!expect(opennova::deframe_session_packet(
+			rx, rx_crypto, wrong_session.data(), wrong_session.size(),
+			got_hdr, got, &admission),
+	            "wrong-session packet is quietly consumed")) return false;
+	if (!expect(got.empty() && !admission.admitted &&
+	                    rx.last_inbound_seq == 7 && rx.queued_inbound.empty(),
+	            "wrong-session packet cannot parse, dispatch, or mutate sequencing"))
+		return false;
+
+	// The exact same UDP datagram can be observed more than once. Retail returns success for
+	// seq <= recv_ack_seq without calling ParseMessages, so one-shot gameplay records must not be
+	// dispatched twice and the contiguous ACK latch must not move backwards.
+	opennova::ProtocolPacketHeader duplicate_hdr = manual_hdr;
+	duplicate_hdr.ack_count = 41;
+	std::vector<uint8_t> duplicate;
+	if (!expect(opennova::encode_protocol_packet_plaintext(duplicate_hdr, messages, scrk, duplicate),
+	            "encode duplicate session packet with a newer peer ACK")) return false;
+	got.clear();
+	if (!expect(opennova::deframe_session_packet(
+			rx, rx_crypto, duplicate.data(), duplicate.size(), got_hdr, got, &admission),
+	            "duplicate session packet is consumed")) return false;
+	if (!expect(got.empty(), "duplicate session packet is not redispatched")) return false;
+	if (!expect(rx.last_inbound_seq == 7, "duplicate leaves the contiguous inbound ACK at 7")) return false;
+	if (!expect(!admission.admitted && admission.max_ack_count == 0,
+	            "duplicate packet cannot advance the peer ACK")) return false;
+
+	opennova::ProtocolPacketHeader stale_hdr = manual_hdr;
+	stale_hdr.seq_num = 5;
+	stale_hdr.ack_count = 42;
+	std::vector<uint8_t> stale;
+	if (!expect(opennova::encode_protocol_packet_plaintext(stale_hdr, messages, scrk, stale),
+	            "encode stale session packet")) return false;
+	got.clear();
+	if (!expect(opennova::deframe_session_packet(
+			rx, rx_crypto, stale.data(), stale.size(), got_hdr, got, &admission),
+	            "stale session packet is consumed")) return false;
+	if (!expect(got.empty(), "stale session packet is not redispatched")) return false;
+	if (!expect(rx.last_inbound_seq == 7, "stale packet cannot regress the inbound ACK")) return false;
+	if (!expect(!admission.admitted && admission.max_ack_count == 0,
+	            "stale packet cannot advance the peer ACK")) return false;
+
+	opennova::ProtocolPacketHeader gap_hdr = manual_hdr;
+	gap_hdr.seq_num = 9;
+	gap_hdr.ack_count = 15;
+	const std::vector<opennova::ProtocolMessage> gap_messages = {
+		opennova::make_protocol_message(0x31, {0x99}),
+	};
+	std::vector<uint8_t> gap;
+	if (!expect(opennova::encode_protocol_packet_plaintext(gap_hdr, gap_messages, scrk, gap),
+	            "encode future-gap session packet")) return false;
+	got.clear();
+	if (!expect(opennova::deframe_session_packet(
+			rx, rx_crypto, gap.data(), gap.size(), got_hdr, got, &admission),
+	            "future-gap session packet is consumed")) return false;
+	if (!expect(got.empty(), "future-gap packet waits for the missing sequence")) return false;
+	if (!expect(rx.last_inbound_seq == 7, "future-gap packet cannot skip the contiguous ACK")) return false;
+	if (!expect(!admission.admitted && admission.max_ack_count == 0,
+	            "future-gap packet cannot advance the peer ACK before admission")) return false;
+	if (!expect(admission.future_packet_seen,
+	            "future-gap packet raises the one-pump retail NACK latch")) return false;
+	if (!expect(rx.missing_request_pending,
+	            "future-gap packet leaves the receive-batch missing check pending")) return false;
+
+	got.clear();
+	if (!expect(opennova::deframe_session_packet(
+			rx, rx_crypto, gap.data(), gap.size(), got_hdr, got, &admission),
+	            "duplicate queued future packet is consumed")) return false;
+	if (!expect(got.empty() && admission.future_packet_seen &&
+	                    rx.queued_inbound.size() == 1,
+	            "duplicate future packet re-raises NACK without duplicating queue storage"))
+		return false;
+
+	opennova::ProtocolPacketHeader next_hdr = manual_hdr;
+	next_hdr.seq_num = 8;
+	next_hdr.ack_count = 20;
+	const std::vector<opennova::ProtocolMessage> next_messages = {
+		opennova::make_protocol_message(0x30, {0x88}),
+	};
+	std::vector<uint8_t> next;
+	if (!expect(opennova::encode_protocol_packet_plaintext(next_hdr, next_messages, scrk, next),
+	            "encode next contiguous session packet")) return false;
+	got.clear();
+	if (!expect(opennova::deframe_session_packet(
+			rx, rx_crypto, next.data(), next.size(), got_hdr, got, &admission),
+	            "next contiguous session packet decodes")) return false;
+	if (!expect(got.size() == 2,
+	            "next contiguous packet dispatches itself and the queued future packet")) return false;
+	if (!expect(got[0].tag == 0x30 && got[0].payload == std::vector<uint8_t>({0x88}) &&
+	            got[1].tag == 0x31 && got[1].payload == std::vector<uint8_t>({0x99}),
+	            "gap close dispatches the next packet before the queued packet")) return false;
+	if (!expect(rx.last_inbound_seq == 9,
+	            "closing the gap advances the inbound ACK through the queued packet")) return false;
+	if (!expect(admission.admitted && admission.max_ack_count == 20,
+	            "gap close reports the greatest ACK across every admitted packet")) return false;
+	if (!expect(rx.missing_request_pending,
+	            "gap close leaves boundary code to clear the earlier batch latch")) return false;
+
+	// Retail bounds each connection's future-packet queue at packet_queue_max=100.
+	// Keep sequence 1 missing and offer one packet more than the queue can retain.
+	opennova::SessionSequencing bounded_rx{1, 0};
+	bounded_rx.ordered_recovery_enabled = true;
+	for (uint32_t future_seq = 2;
+	     future_seq <= static_cast<uint32_t>(opennova::SESSION_PACKET_QUEUE_MAX) + 2;
+	     ++future_seq) {
+		opennova::ProtocolPacketHeader future_hdr = manual_hdr;
+		future_hdr.seq_num = future_seq;
+		future_hdr.ack_count = 1000 + future_seq;
+		std::vector<uint8_t> future;
+		if (!expect(opennova::encode_protocol_packet_plaintext(
+				future_hdr, next_messages, scrk, future),
+		            "encode bounded future session packet")) return false;
+		got.clear();
+		if (!expect(opennova::deframe_session_packet(
+				bounded_rx, rx_crypto, future.data(), future.size(), got_hdr, got, &admission),
+		            "bounded future session packet is consumed")) return false;
+		if (!expect(!admission.admitted && admission.max_ack_count == 0,
+		            "queued future packet cannot advance the peer ACK")) return false;
+		if (!expect(admission.future_packet_seen,
+		            "even a cap-dropped future packet raises the retail NACK latch")) return false;
+	}
+	if (!expect(bounded_rx.queued_inbound.size() == opennova::SESSION_PACKET_QUEUE_MAX,
+	            "future packet queue stays bounded at SESSION_PACKET_QUEUE_MAX")) return false;
+	if (!expect(bounded_rx.queued_inbound.count(
+			static_cast<uint32_t>(opennova::SESSION_PACKET_QUEUE_MAX) + 1) == 1 &&
+	            bounded_rx.queued_inbound.count(
+			static_cast<uint32_t>(opennova::SESSION_PACKET_QUEUE_MAX) + 2) == 0,
+	            "the first 100 future packets are retained and excess packets are dropped")) return false;
 
 	// out_scrk is genuinely applied: a different key yields a different encrypted body.
 	opennova::SessionSequencing seq2{7, 3};
@@ -251,8 +398,190 @@ bool check_session_packet_frame_deframe() {
 	return true;
 }
 
+bool check_session_resend_list_wire_and_gap_selection() {
+	opennova::SessionSequencing rx{1, 3};
+	rx.queued_inbound.emplace(5, opennova::QueuedSessionPacket{});
+	rx.queued_inbound.emplace(7, opennova::QueuedSessionPacket{});
+	rx.queued_inbound.emplace(10, opennova::QueuedSessionPacket{});
+
+	const std::vector<uint32_t> missing =
+			opennova::build_session_missing_sequence_list(rx, false);
+	if (!expect(missing == std::vector<uint32_t>({4, 6, 8, 9}),
+	            "retail missing list starts at expected and lists holes below the queued tail"))
+		return false;
+	const std::vector<uint32_t> forced =
+			opennova::build_session_missing_sequence_list(rx, true);
+	if (!expect(forced == std::vector<uint32_t>({4, 0, 6, 8, 9}),
+	            "forced retail missing list places the zero sentinel after expected"))
+		return false;
+
+	std::vector<uint8_t> body;
+	if (!expect(opennova::encode_session_resend_list(0x11223344u, forced, body),
+	            "encode resend-list plaintext"))
+		return false;
+	const std::vector<uint8_t> expected_wire = {
+		0x44, 0x33, 0x22, 0x11,
+		0x04, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00,
+		0x06, 0x00, 0x00, 0x00,
+		0x08, 0x00, 0x00, 0x00,
+		0x09, 0x00, 0x00, 0x00,
+	};
+	if (!expect(body == expected_wire,
+	            "resend-list plaintext is key then LE dwords with no count or terminator"))
+		return false;
+
+	std::vector<uint32_t> decoded;
+	if (!expect(opennova::decode_session_resend_list(
+			body.data(), body.size(), 0x11223344u, decoded) &&
+		            decoded == forced,
+	            "matching local key decodes every complete resend dword"))
+		return false;
+	if (!expect(!opennova::decode_session_resend_list(
+			body.data(), body.size(), 0x55667788u, decoded),
+	            "resend-list key mismatch is rejected"))
+		return false;
+	const uint8_t short_body[] = {0x44, 0x33, 0x22};
+	if (!expect(!opennova::decode_session_resend_list(
+			short_body, sizeof(short_body), 0x11223344u, decoded),
+	            "resend-list shorter than its key is rejected"))
+		return false;
+	body.push_back(0xAA);
+	body.push_back(0xBB);
+	if (!expect(opennova::decode_session_resend_list(
+			body.data(), body.size(), 0x11223344u, decoded) &&
+		            decoded == forced,
+	            "retail ignores one to three trailing resend-list bytes"))
+		return false;
+
+	opennova::SessionSequencing capped{1, 10};
+	capped.queued_inbound.emplace(40, opennova::QueuedSessionPacket{});
+	const std::vector<uint32_t> capped_missing =
+			opennova::build_session_missing_sequence_list(capped, false);
+	if (!expect(capped_missing.size() == opennova::SESSION_RESEND_LIST_MAX &&
+	                    capped_missing.front() == 11 && capped_missing.back() == 26,
+	            "retail missing-list builder caps the ascending request list at sixteen"))
+		return false;
+	return true;
+}
+
+bool check_session_retransmit_retention_and_current_ack() {
+	const std::string scrk = "RETRANSMIT-SCRK";
+	const opennova::SessionCrypto crypto{scrk, {}, 0x11223344u};
+	const std::vector<opennova::ProtocolMessage> original_messages = {
+		opennova::make_protocol_message(0x49, {0x34, 0x12, 0xC5, 0x00}),
+	};
+	opennova::SessionSequencing tx{7, 3};
+	tx.outbound_message_limit = 16;
+
+	std::vector<uint8_t> original;
+	if (!expect(opennova::frame_session_packet(
+			tx, crypto, original_messages, original),
+	            "first send retains the records assigned to sequence seven"))
+		return false;
+	tx.last_inbound_seq = 9;
+	std::vector<uint8_t> resent;
+	if (!expect(opennova::frame_session_packet_for_sequence(
+			tx, crypto, 7, resent),
+	            "retained packet can be reframed at its original sequence"))
+		return false;
+	if (!expect(tx.next_outbound_seq == 8,
+	            "reframing an old sequence does not advance the outbound counter"))
+		return false;
+
+	opennova::ProtocolPacketHeader resent_header;
+	std::vector<opennova::ProtocolMessage> resent_messages;
+	if (!expect(opennova::decode_protocol_packet_plaintext(
+			resent.data(), resent.size(), scrk, resent_header, resent_messages),
+	            "decode reframed retained packet"))
+		return false;
+	if (!expect(resent_header.seq_num == 7 && resent_header.ack_count == 9,
+	            "retransmit keeps its sequence but carries the sender's current ACK"))
+		return false;
+	if (!expect(resent_messages.size() == 1 && resent_messages[0].tag == 0x49 &&
+	                    resent_messages[0].payload == original_messages[0].payload,
+	            "retransmit reconstructs the original reliable message records"))
+		return false;
+	if (!expect(resent != original,
+	            "current ACK makes the reconstructed retransmit differ from the original datagram body"))
+		return false;
+
+	if (!expect(!opennova::frame_session_packet_for_sequence(
+			tx, crypto, 9, resent),
+	            "a resend request beyond the next outbound sequence is skipped"))
+		return false;
+	if (!expect(opennova::frame_session_packet_for_sequence(
+			tx, crypto, 8, resent),
+	            "requesting exactly the next sequence emits a new empty session packet"))
+		return false;
+	if (!expect(tx.next_outbound_seq == 9,
+	            "emitting the requested next sequence advances the outbound counter"))
+		return false;
+	resent_messages.clear();
+	if (!expect(opennova::decode_protocol_packet_plaintext(
+			resent.data(), resent.size(), scrk, resent_header, resent_messages) &&
+		            resent_header.seq_num == 8 && resent_header.ack_count == 9 &&
+		            resent_messages.empty(),
+	            "requested next sequence has the current ACK and no retained records"))
+		return false;
+
+	opennova::acknowledge_session_packets(tx, 7);
+	if (!expect(opennova::frame_session_packet_for_sequence(
+			tx, crypto, 7, resent),
+	            "retail can still reconstruct an acknowledged old sequence as an empty packet"))
+		return false;
+	resent_messages.clear();
+	if (!expect(opennova::decode_protocol_packet_plaintext(
+			resent.data(), resent.size(), scrk, resent_header, resent_messages) &&
+		            resent_header.seq_num == 7 && resent_messages.empty(),
+	            "admitted peer ACK retires the retained message records"))
+		return false;
+
+	opennova::SessionSequencing opt_out{1, 0};
+	if (!expect(opennova::frame_session_packet(
+			opt_out, crypto, original_messages, original) &&
+		            opt_out.retained_outbound.empty(),
+	            "sessions that do not opt into retransmission retain no outbound records"))
+		return false;
+
+	opennova::SessionSequencing bounded{1, 0};
+	bounded.outbound_message_limit = 1;
+	if (!expect(opennova::frame_session_packet(
+			bounded, crypto, original_messages, original),
+	            "bounded retransmission queue admits its first record"))
+		return false;
+	if (!expect(!opennova::frame_session_packet(
+			bounded, crypto, original_messages, original) &&
+		            bounded.next_outbound_seq == 2,
+	            "witnessed outbound message cap rejects growth before assigning another sequence"))
+		return false;
+	opennova::acknowledge_session_packets(bounded, 1);
+	if (!expect(opennova::frame_session_packet(
+			bounded, crypto, original_messages, original) &&
+		            bounded.next_outbound_seq == 3,
+	            "an admitted ACK frees retention capacity for the next message"))
+		return false;
+
+	opennova::ProtocolMessage invalid =
+			opennova::make_protocol_message(0x49, std::vector<uint8_t>(256, 0xAA), 0x20);
+	opennova::SessionSequencing transactional{20, 0};
+	transactional.outbound_message_limit = 4;
+	std::vector<uint8_t> invalid_body = {0xCC};
+	if (!expect(!opennova::frame_session_packet(
+			transactional, crypto, {invalid}, invalid_body) &&
+		            transactional.next_outbound_seq == 21 &&
+		            transactional.retained_outbound.empty() &&
+		            transactional.retained_outbound_message_count == 0 &&
+		            invalid_body.empty(),
+	            "encode failure consumes the assigned sequence but leaves no phantom retained record"))
+		return false;
+	return true;
+}
+
 int main() {
 	bool ok = true;
+	ok = check_session_retransmit_retention_and_current_ack() && ok;
+	ok = check_session_resend_list_wire_and_gap_selection() && ok;
 	ok = check_session_packet_frame_deframe() && ok;
 	ok = check_truncated_message_is_dispatched_zero_padded() && ok;
 	ok = check_plaintext_encode_decode_roundtrip() && ok;

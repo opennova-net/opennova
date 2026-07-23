@@ -986,8 +986,8 @@ bool decode_player_extended_uplink(const uint8_t *body, size_t len,
 
 // ===========================================================================
 // C2S 0x06 — "client fired round". Fixed 45 B. Joiner reports a single
-// weapon-fire event (origin + direction + target + shot counter + muzzle
-// offset block). The host validates it in Server_ClientFiredRound @0x50baa0
+// weapon-fire event (calculated pose + target + shot counter + five low-word
+// pose deltas). The host validates it in Server_ClientFiredRound @0x50baa0
 // (anti-spoof, cease-fire, adm lookup, warp compensation, mounted-fire, ammo)
 // and an accepted PRIMARY fire runs the adm 'fire' action → re-enters the
 // validator locally → RoundData_AddRound appends a g_round_ring event that
@@ -997,25 +997,28 @@ bool decode_player_extended_uplink(const uint8_t *body, size_t len,
 // ===========================================================================
 
 struct ClientFiredRound {
-	uint32_t current_tick = 0;        // server-side game tick anchor
+	uint32_t current_tick = 0;        // client network-role currentTick; host cooldown/freshness anchor
 	uint16_t shooter_handle = 0xFFFF; // pool<<12|slot; >= 0x5000 high nibble = invalid
 	uint8_t  fire_flags = 0;          // bit 0 set → "alt fire" path (ammo not deducted)
 	uint8_t  adm_index = 0;           // AdmDef_GetEntryByIndex key — action descriptor (§5.9.1 shares this)
-	int32_t  pos_x = 0;               // fire origin world coords (i32 LE, 16.16)
+	int32_t  pos_x = 0;               // calculated fire-pose origin (i32 LE, 16.16)
 	int32_t  pos_y = 0;
 	int32_t  pos_z = 0;
 	int32_t  dir_x = 0;               // direction (host shifts << 16 to BAM-extend); wire is raw i32 LE
 	int32_t  dir_y = 0;
 	uint16_t target_handle = 0xFFFF;  // 0xFFFF = no target
-	uint16_t hit_part = 0;            // body part / collision sub-section
-	uint8_t  extra_byte1 = 0;         // → dest[18] / extra_val1
+	uint16_t hit_part = 0;            // per-shot sequence; round-trips through word_B7C670
+	uint8_t  extra_byte1 = 0;         // shooter entity+352 low byte → dest[18]
 	uint8_t  extra_byte2 = 0;         // → dword_C86FB4 global (last-fire context)
 	uint8_t  misc_byte = 0;           // → LOBYTE(dest[20])
-	uint16_t base_offset = 0;         // dest[10] += this — muzzle offset on entity coords
-	uint16_t offset_x = 0;            // dest[11] += this
-	uint16_t offset_y = 0;            // dest[12] += this
-	uint16_t offset_z = 0;            // dest[13] += this
-	uint16_t offset_w = 0;            // dest[14] += this
+	// Low-word modulo deltas: calculated fire pose {X,Y,Z,Yaw,Pitch} minus
+	// shooter live pose dwords 1..5. Host adds them to its shooter pose to
+	// reconstruct dest[10..14]. Legacy field names preserve API compatibility.
+	uint16_t base_offset = 0;         // fire X low16 - shooter X low16
+	uint16_t offset_x = 0;            // fire Y low16 - shooter Y low16
+	uint16_t offset_y = 0;            // fire Z low16 - shooter Z low16
+	uint16_t offset_z = 0;            // fire Yaw low16 - shooter Yaw low16
+	uint16_t offset_w = 0;            // fire Pitch low16 - shooter Pitch low16
 };
 
 bool decode_client_fired_round(const uint8_t *body, size_t len,

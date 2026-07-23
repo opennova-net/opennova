@@ -967,14 +967,33 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// @0x514DF0 — validates the [u16 entityHandle][u16 weaponSlotCombo] body, then relays it
 				// verbatim as S2C 0x49 via two NapiNPServer_SendFiltered @0x4C87E0 sends that together
 				// reach ALL in-match connections INCLUDING the requester. The client's 0x49 apply is the
-				// ONLY place its clip refills / the slot's 0x80 reload-pending flag clears — a host that
-				// ignores 0x25 wedges the joiner's weapon after one attempt (§5.58, D-NET-142). Staged on
+				// ONLY place its clip refills. The 0x80 phase bit is transient; without the echo, the
+				// empty clip returns to idle and auto-reload requests again (§5.58, D-NET-142). Staged on
 				// each recipient's transport; the per-connection flush frames it with that connection's
-				// own sequencing. Host-side WeaponSlot_ReloadAmmo bookkeeping needs the weapon-slot/pool
-				// model — deferred (tracked, D-NET-142 tail).]
+				// own sequencing. The reimpl's per-owner slot map covers player weapons; the addressed
+				// vehicle-slot store remains deferred.]
 				WeaponReload req;
 				size_t consumed = 0;
 				if (!decode_weapon_reload(msg.payload.data(), msg.payload.size(), req, consumed))
+					break;
+				// Retail resolves both the requesting player and the payload-addressed
+				// entity before relaying. The two need not be the same: a mounted player
+				// may address a vehicle weapon, so this is deliberately not an anti-spoof
+				// equality check. [orig: requester player slot/dead mark @0x514e02..1f;
+				// packed pool/slot + live item-def checks @0x514e5c..91]
+				if (world == nullptr || !is_in_match(conn) ||
+				    !conn.link.owned_entity.valid())
+					break;
+				const world::Entity *requester =
+						world->registry.get(conn.link.owned_entity);
+				if (requester == nullptr || requester->health <= 0) break;
+				if (req.entity_handle == 0xFFFFu ||
+				    (req.entity_handle & 0xF000u) >= 0x5000u)
+					break;
+				const world::EntityHandle addressed{req.entity_handle};
+				if (static_cast<size_t>(addressed.slot()) >=
+				            world->registry.pool_capacity(addressed.pool()) ||
+				    world->registry.get(addressed) == nullptr)
 					break;
 				const std::vector<uint8_t> body = encode_weapon_reload(req); // rebuilt, never raw (ADR 0003)
 				for (NapiNPConnection &c : roster) {
@@ -986,10 +1005,19 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// Refund + ammo-pool clamp deferred -> refill to capacity @0x541811]. The wire
 				// combo (the second u16) keys the same slot the 0x06 pipeline decrements
 				// [orig: slotIndex = HIWORD @0x514f03; slot = playerSlot+464+100*combo @0x54176d].
-				if (world != nullptr && !world->weapons.empty() &&
+				if (!world->weapons.empty() &&
 				    conn.link.mode != netsim::TransportMode::Loopback) {
-					auto slot_it = conn.weapon_slots.find(req.reload_param);
-					if (slot_it != conn.weapon_slots.end()) {
+					NapiNPConnection *addressed_owner = nullptr;
+					for (NapiNPConnection &candidate : roster) {
+						if (candidate.link.owned_entity.valid() &&
+						    candidate.link.owned_entity.packed == req.entity_handle) {
+							addressed_owner = &candidate;
+							break;
+						}
+					}
+					if (addressed_owner == nullptr) break; // vehicle slots are not modeled yet
+					auto slot_it = addressed_owner->weapon_slots.find(req.reload_param);
+					if (slot_it != addressed_owner->weapon_slots.end()) {
 						const world::WeaponTableEntry *adm =
 								world->weapons.by_index(slot_it->second.adm_index);
 						if (adm != nullptr && adm->clipsize != -1)

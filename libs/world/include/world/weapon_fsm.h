@@ -74,7 +74,7 @@ enum : uint8_t {
     kActive = 2,    // anim playing / counter ticking
     kDone = 4,      // handler finished; pending action may transition in
     kHeld = 0x40,   // held-ready variant (the pump's second transition path)
-    kReloadPendingBit = 0x80, // OR'd while the reload request is in flight
+    kReloadPendingBit = 0x80, // entry-time request guard; begin-active replaces phase with 2
                               // [orig: @ 0x543108; cleared by the first shim tick's
                               //  phase=2 write and by WeaponSlot_ReloadAmmo @ 0x5417a2]
 };

@@ -1,5 +1,7 @@
 #include "npruntime/client_runtime.h"
 
+#include <npwire/ingame_encode.h>
+
 #include <utility>
 
 namespace opennova::np {
@@ -68,6 +70,40 @@ void ClientRuntime::receive(const uint8_t *raw, std::size_t len) {
 	recv_fifo_.emplace_back(raw, raw + len);
 }
 
+bool ClientRuntime::queue_fired_round(const ClientFiredRound &round) {
+	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_->in_match() ||
+	    !deployed_ || !joiner_->has_self_handle() ||
+	    round.shooter_handle != joiner_->self_handle())
+		return false;
+	ClientFiredRound stamped = round;
+	// The retail producer reads the client network role's currentTick at the
+	// fire action, before the next Client_ProcessNetworkFrame increment. It is
+	// independent of the local World's logic clock, which starts after load.
+	// [orig: NetPacket_WriteEntityPositionUpdate @0x42A62F]
+	stamped.current_tick = current_tick_;
+	gameplay_send_queue_.push_back(
+			make_protocol_message(0x06, encode_client_fired_round(stamped)));
+	return true;
+}
+
+bool ClientRuntime::queue_reload_request(const WeaponReload &reload) {
+	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_->in_match() ||
+	    !deployed_ || !joiner_->has_self_handle() ||
+	    reload.entity_handle != joiner_->self_handle())
+		return false;
+	gameplay_send_queue_.push_back(
+			make_protocol_message(0x25, encode_weapon_reload(reload)));
+	return true;
+}
+
+std::vector<netsim::ClientRoundEvent> ClientRuntime::drain_round_events() {
+	return view_.drain_round_events();
+}
+
+std::vector<WeaponReload> ClientRuntime::drain_reload_notifications() {
+	return view_.drain_weapon_reloads();
+}
+
 void ClientRuntime::seed_session(uint32_t session_id, std::string client_scrk,
                                  std::string server_scrk, uint32_t next_seq, uint32_t last_ack,
                                  uint16_t self_handle, uint16_t self_type,
@@ -102,6 +138,10 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(const PlayerExtendedU
 	if (role_ == Role::HostClient) {
 		// The SP host's own loopback carries inner {tag,body} (ADR 0011 §3 SP crypto bypass).
 		if (loopback_ != nullptr) view_.pump(*loopback_);
+		// Host authority already spawned every accepted round/refill. Its decoded
+		// listen-client view must not retain duplicate visual gameplay events.
+		view_.drain_round_events();
+		view_.drain_weapon_reloads();
 	} else {
 		// A remote joiner: framed datagrams. JoinerConnection decodes the 0x83 SESSION envelope and
 		// surfaces the inner bodies, which we fold via NetClientView::apply (the single remote-wire
@@ -115,6 +155,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(const PlayerExtendedU
 			view_.set_game_type(joiner_->game_type());
 			for (std::vector<uint8_t> &reply : pr.outbound) outbound.push_back(std::move(reply));
 			for (const auto &tb : pr.inbound_world) view_.apply(tb.first, tb.second); // 0x0C/0x0D/0x10/0x20
+			for (const auto &tb : pr.inbound_gameplay) view_.apply(tb.first, tb.second);
 			if (pr.reached_in_match) deployed_ = true; // deploy on the spawn name-match (§5.44 gate)
 			for (const std::vector<uint8_t> &a : pr.inbound_0a) {
 				const uint32_t health_before = view_.state().health_updates_applied;
@@ -160,6 +201,15 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(const PlayerExtendedU
 		// !is_authority && !dword_81474C && !g_spawn_success_gate. A Joiner is always !is_authority;
 		// deployed_ mirrors !g_spawn_success_gate (§5.44).
 		const bool deployed_joiner = joiner_->in_match() && deployed_ && joiner_->has_self_handle();
+		if (!deployed_joiner) gameplay_send_queue_.clear();
+
+		// Weapon actions queue typed gameplay before Client_ProcessNetworkFrame;
+		// PumpClientProtocolSend flushes them through this same sequenced 0x43 path.
+		while (deployed_joiner && !gameplay_send_queue_.empty()) {
+			ProtocolMessage msg = std::move(gameplay_send_queue_.front());
+			gameplay_send_queue_.pop_front();
+			outbound.push_back(joiner_->frame_inner(msg.tag, std::move(msg.payload)));
+		}
 
 		// (0x2C) RTT timestamp ping — Joiner only. [orig @0x42c3fa..0x42c44a]. Body = [u32 ts][u8 1]
 		// (NetPacket_WriteInt32AndByte; echoFlag=1 requests the S2C 0x57 pong, §5.34). retail uses

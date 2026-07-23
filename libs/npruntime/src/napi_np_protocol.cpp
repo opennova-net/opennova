@@ -444,8 +444,10 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// Host recv: decrypt with the joiner's client_scrk; deframe latches conn.seq.last_inbound_seq.
 	ProtocolPacketHeader hdr;
 	std::vector<ProtocolMessage> messages;
-	if (!deframe_session_packet(conn.seq, SessionCrypto{{}, conn.client_scrk, 0}, body.data(),
-	                            body.size(), hdr, messages)) {
+	SessionDeframeAdmission admission;
+	if (!deframe_session_packet(
+			conn.seq, SessionCrypto{{}, conn.client_scrk, 0, conn.server_sk}, body.data(),
+	                            body.size(), hdr, messages, &admission)) {
 		return;
 	}
 
@@ -454,7 +456,10 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// less keepalive datagrams; the golden world-stream gap has no C2S game messages yet the stream
 	// advances). High-water only: a reordered older ack must not un-confirm. [orig: header layout
 	// @0x61edd0 field +8; consumed by the conn+0x768 outstanding gate @0x51bf1b/0x51bc04]
-	if (hdr.ack_count > conn.peer_acked_seq) conn.peer_acked_seq = hdr.ack_count;
+	if (admission.admitted && admission.max_ack_count > conn.peer_acked_seq)
+		conn.peer_acked_seq = admission.max_ack_count;
+	if (admission.admitted)
+		acknowledge_session_packets(conn.seq, admission.max_ack_count);
 
 	// Learn the joiner's own ConnectionId (NapiNPConnection.unk_18 = its dcb, our connection_id)
 	// from its in-match 0x48 client-ack (a 4-byte LE u32). This is the value the client's
@@ -515,6 +520,36 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 			ev.in_match_c2s = std::move(c2s);
 			out.events.push_back(std::move(ev));
 		}
+	}
+}
+
+// 0x44 ClientResendList -> reconstructed 0x83 packets. The request body names this host
+// connection's local SK, followed by requested sequence dwords. Retail retains message records,
+// not encrypted datagrams, so each old sequence is reframed with the current inbound ACK.
+// [orig: NapiNP_HandleResendList @0x623800; SendSessionPacket @0x61EDD0]
+void handle_client_resend_list(NapiNPServerCtx &ctx, const PeerAddr &peer,
+		const std::vector<uint8_t> &body, HandleResult &out) {
+	NapiNPConnection *conn = find_connection(ctx, peer);
+	if (conn == nullptr || conn->server_scrk.empty()) return;
+
+	std::vector<uint32_t> requested;
+	if (!decode_session_resend_list(
+			body.data(), body.size(), conn->server_sk, requested)) {
+		return;
+	}
+	for (uint32_t requested_sequence : requested) {
+		const uint32_t sequence = requested_sequence == 0
+				? conn->seq.next_outbound_seq
+				: requested_sequence;
+		std::vector<uint8_t> session_body;
+		if (!frame_session_packet_for_sequence(
+				conn->seq,
+				SessionCrypto{conn->server_scrk, {}, conn->client_ck},
+				sequence, session_body)) {
+			continue;
+		}
+		out.outbound.push_back(nw_encode_outbound(
+				SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(session_body)));
 	}
 }
 
@@ -589,11 +624,35 @@ HandleResult handle_server_datagram(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	case SESSION_OPCODE_PROTOCOL_MESSAGE:
 		handle_client_session(ctx, peer, body, now_tick, out);
 		break;
+	case SESSION_OPCODE_CLIENT_RESEND_LIST:
+		handle_client_resend_list(ctx, peer, body, out);
+		break;
 	case SESSION_OPCODE_CLIENT_GOODBYE:
 		handle_client_goodbye(ctx, peer, out);
 		break;
 	default:
 		break;
+	}
+	return out;
+}
+
+std::vector<TickOut> flush_server_missing_requests(NapiNPServerCtx &ctx) {
+	std::vector<TickOut> out;
+	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		if (conn.type != 1 || !conn.seq.missing_request_pending) continue;
+		conn.seq.missing_request_pending = false;
+		if (conn.seq.queued_inbound.empty()) continue;
+
+		const std::vector<uint32_t> missing =
+				build_session_missing_sequence_list(conn.seq, false);
+		std::vector<uint8_t> missing_body;
+		if (!encode_session_resend_list(conn.client_ck, missing, missing_body)) continue;
+
+		TickOut item;
+		item.peer = conn.peer;
+		item.outbound.push_back(nw_encode_outbound(
+				SESSION_OPCODE_SERVER_RESEND_LIST, std::move(missing_body)));
+		out.push_back(std::move(item));
 	}
 	return out;
 }

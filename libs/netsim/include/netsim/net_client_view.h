@@ -38,6 +38,11 @@ public:
 	std::uint32_t frames_applied() const { return state_.frames_applied; }
 	std::size_t unknown_tags() const { return unknown_tags_; }
 
+	// One-shot gameplay notifications surfaced by apply(). Draining keeps the
+	// decoded ClientState persistent while preventing event replay on later frames.
+	std::vector<ClientRoundEvent> drain_round_events();
+	std::vector<WeaponReload> drain_weapon_reloads();
+
 	// Install the items.def-derived per-type classifier — the table the retail client
 	// itself dispatches 0x0A records through (each type's serialize callback, seeded
 	// from the *_function class tag at items.def load [orig: itemDef+356 dispatch
@@ -81,6 +86,8 @@ private:
 	std::function<EntityClass(uint16_t)> item_resolver_; // items.def table (authoritative)
 	std::function<EntityClass(uint16_t)> resolver_;      // phase-1 heuristic fallback
 	std::unordered_map<uint16_t, EntityClass> learned_classes_;
+	std::vector<ClientRoundEvent> pending_round_events_;
+	std::vector<WeaponReload> pending_weapon_reloads_;
 	std::size_t unknown_tags_ = 0;
 	uint32_t game_type_ = 0;
 };

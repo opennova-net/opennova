@@ -333,7 +333,8 @@ void follow_parent(World &world, LiveRound &r) {
 // ----------------------------------------------------------------------------
 static bool motor_nade(World &world, RoundSim &sim, LiveRound &r,
                        const AmmoTableEntry &ammo, CollisionWorld *collision,
-                       const terrain::TerrainHeightField *terrain) {
+                       const terrain::TerrainHeightField *terrain,
+                       bool allow_consequences) {
     if (r.parent.valid()) follow_parent(world, r);
     MotorFrame f;
     load_frame(r, f);
@@ -487,7 +488,7 @@ static bool motor_nade(World &world, RoundSim &sim, LiveRound &r,
             } else {
                 push_motor_effect(sim, r, 26, r.pos, world.logic_tick);
             }
-            detonate_round(world, r, r.pos, ammo);
+            if (allow_consequences) detonate_round(world, r, r.pos, ammo);
             r.det_at_expiry = false;
             return false; // slot releases
         }
@@ -503,7 +504,7 @@ static bool motor_nade(World &world, RoundSim &sim, LiveRound &r,
 static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
                          const AmmoTableEntry &ammo, CollisionWorld *collision,
                          const terrain::TerrainHeightField *terrain,
-                         bool claymore) {
+                         bool claymore, bool allow_consequences) {
     if (r.parent.valid()) follow_parent(world, r);
     MotorFrame f;
     load_frame(r, f);
@@ -631,7 +632,8 @@ static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
         // rest leg], then convert.
         if (!r.parent.valid()) r.pos.z += static_cast<float>(from_fixed(4096));
         r.vel = Vec3{0.0f, 0.0f, 0.0f};
-        world.throwables.place_from_round(world, r, ammo);
+        if (allow_consequences)
+            world.throwables.place_from_round(world, r, ammo);
         return false; // the round slot releases [orig: source round expires]
     }
     return true;
@@ -639,15 +641,19 @@ static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
 
 bool throwable_motor_tick(World &world, RoundSim &sim, LiveRound &round,
                           const AmmoTableEntry &ammo, CollisionWorld *collision,
-                          const terrain::TerrainHeightField *terrain) {
+                          const terrain::TerrainHeightField *terrain,
+                          bool allow_consequences) {
     switch (round.motor) {
     case ThrowClass::kNade:
-        return motor_nade(world, sim, round, ammo, collision, terrain);
+        return motor_nade(world, sim, round, ammo, collision, terrain,
+                          allow_consequences);
     case ThrowClass::kSatchel:
     case ThrowClass::kAVMine: // AT mine authors move_function schl
-        return motor_charge(world, sim, round, ammo, collision, terrain, false);
+        return motor_charge(world, sim, round, ammo, collision, terrain, false,
+                            allow_consequences);
     case ThrowClass::kClaymore:
-        return motor_charge(world, sim, round, ammo, collision, terrain, true);
+        return motor_charge(world, sim, round, ammo, collision, terrain, true,
+                            allow_consequences);
     default:
         // no motor bound: the round drifts unmoved (retail leaves +452 null)
         return true;

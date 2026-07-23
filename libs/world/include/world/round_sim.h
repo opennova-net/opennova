@@ -50,6 +50,7 @@
 
 #include <array>
 #include <cstdint>
+#include <unordered_map>
 #include <vector>
 
 #include "world/entity.h"
@@ -69,6 +70,15 @@ class World;
 struct AmmoTableEntry; // world/ammo_table.h
 
 enum class ThrowClass : uint8_t; // world/throwables.h
+
+// A client re-runs S2C tag-2 descriptors for presentation, but none of that
+// flight may produce authoritative gameplay consequences. Presentation state
+// (trails, cosmetic cadence, impacts, debug) still advances normally. Carry the
+// mode on each round so mixed callers cannot infer safety from zero damage alone.
+enum class RoundConsequenceMode : uint8_t {
+    Authoritative,
+    VisualOnly,
+};
 
 struct RoundSpawnParams {
     EntityHandle owner;               // the shooter entity (skipped in the hit test)
@@ -90,6 +100,7 @@ struct RoundSpawnParams {
 // (+368), shot-seq word (+120).]
 struct LiveRound {
     bool active = false;
+    RoundConsequenceMode consequence_mode = RoundConsequenceMode::Authoritative;
     EntityHandle owner;
     uint16_t shooter_handle = 0xFFFF;
     int32_t ammo_index = -1;
@@ -291,12 +302,13 @@ public:
 
     // Spawn one round at fire time [orig: RoundData_SpawnRound @ 0x4EC0D0 default path].
     // Returns the round slot, or -1 (pool full / non-ballistic ammo / null ammo).
-    int spawn(World &world, const RoundSpawnParams &params);
+    int spawn(World &world, const RoundSpawnParams &params,
+              RoundConsequenceMode mode = RoundConsequenceMode::Authoritative);
 
     // The pellet fan for claymore-flag ammo [orig: Weapon_SpawnProjectileBurst
     // @ 0x4EB900]. Returns the first pellet slot or -1.
     int spawn_burst(World &world, const RoundSpawnParams &params,
-                    const AmmoTableEntry &ammo);
+                    const AmmoTableEntry &ammo, RoundConsequenceMode mode);
 
     // One 62 Hz step for every live round [orig: Weapon_UpdateAllProjectiles @ 0x4EC020
     // -> Projectile_UpdatePhysics @ 0x4E9D70]: advance along velocity, terrain stop,
@@ -309,6 +321,12 @@ public:
 
     // Mission restart discards all transient projectile/presentation state.
     void reset() noexcept;
+
+private:
+    // Retail advances tracer cadence on each remote shooter's weapon slot. A
+    // visual tag-2 round has wire H but no local Entity owner, so this is that
+    // per-remote presentation field projected onto the decoded identity.
+    std::unordered_map<uint16_t, uint32_t> remote_visual_tracer_counters_;
 };
 
 // Queue an explosive round's kill zone at its stop [orig: the kztype-gated

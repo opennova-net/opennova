@@ -113,6 +113,12 @@ void configure_session_runtime(NapiNPServerCtx &ctx);
 HandleResult handle_server_datagram(NapiNPServerCtx &ctx, const PeerAddr &peer,
                                     const uint8_t *raw, std::size_t len, uint32_t now_tick = 0);
 
+// Finalize one host socket receive batch. Future packets latch a missing-sequence check while
+// handle_server_datagram drains; only here, after later datagrams could have closed the gap, does
+// the host emit one 0x84 per connection whose ordered queue is still nonempty.
+// [orig: recv latch in HandleSessionPacket @0x626A00; SendMissingSeqList @0x623560 after PumpRecv]
+std::vector<TickOut> flush_server_missing_requests(NapiNPServerCtx &ctx);
+
 // Drive the periodic emitter for every connection NOT yet Spawned (so entity_batch_count climbs and
 // the spawn gate opens) and frame each session's replies. PeerEnteredWorldStreaming surfaces here
 // the tick a peer's batches start (F3). Spawned peers are skipped — Server_TickUpdate owns their 0x0A.

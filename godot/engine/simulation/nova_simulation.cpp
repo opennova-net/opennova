@@ -3,6 +3,7 @@
 #include <wac/compiler.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -17,6 +18,7 @@
 #include <npwire/ingame_decode.h> // class_from_tag (§5.10b *_function -> wire class)
 #include <npwire/ingame_encode.h> // encode_organic_spawn_batch (+ OrganicSpawnBatch)
 
+#include <npruntime/server_message_dispatch.h> // dispatch_session_replies (local loopback gameplay C2S)
 #include <npruntime/server_session.h> // set_connection_mode / set_transport_mode / create_session / mark_host_client_in_match
 #include <npruntime/server_spawn.h>   // Server_ProcessPendingPlayerSpawns (faithful host-player auto-spawn)
 #include <npruntime/server_tick.h>    // Server_TickUpdate (the single C2S drain + logic tick + 0x0A fan)
@@ -4571,9 +4573,61 @@ void NovaSimulation::resolve_infantry_adm_before_server_tick(void *p_context) {
 	static_cast<NovaSimulation *>(p_context)->resolve_new_infantry_adm_ids();
 }
 
+void NovaSimulation::drain_host_client_gameplay_requests() {
+	if (!world_ || !host_owner_.serve_and_play) return;
+
+	// The local player is a real type-2 connection over transport-mode-1. Its
+	// socketless C2S FIFO still enters the SAME per-message server dispatcher as
+	// a remote type-1 connection; only the outer 0x43/SCRK envelope is absent.
+	// Server_TickUpdate's generic transport fan owns 0x0C and ignores other tags,
+	// so consume the local gameplay messages at this recv-before-logic boundary.
+	// [orig: WeaponAction_Reload @0x5430B0 ->
+	// NapiNPServerMsg_HandleReloadRequest @0x514DF0]
+	opennova::np::NapiNPConnection *local = nullptr;
+	for (opennova::np::NapiNPConnection &conn :
+			ctx_.np_protocol.connection_list) {
+		if (conn.type == 2 && conn.link.transport == &host_loop_) {
+			local = &conn;
+			break;
+		}
+	}
+	if (local == nullptr) return;
+
+	opennova::netsim::Datagram dg;
+	std::vector<opennova::netsim::Datagram> deferred;
+	while (host_loop_.host_recv(dg)) {
+		// This seam owns only the witnessed local reload producer. Preserve
+		// every other C2S datagram, in FIFO order, for Server_TickUpdate's
+		// authoritative transport drain (notably a future/local 0x0C).
+		if (dg.tag != 0x25) {
+			deferred.push_back(std::move(dg));
+			continue;
+		}
+		std::vector<opennova::ProtocolMessage> messages;
+		messages.push_back(opennova::make_protocol_message(
+				dg.tag, std::move(dg.body)));
+		std::vector<opennova::ProtocolMessage> replies =
+				opennova::np::dispatch_session_replies(
+						ctx_.config, *local, messages, host_owner_.now_tick,
+						ctx_.np_protocol.connection_list, world_.get(),
+						ctx_.np_protocol.session_seed_id);
+		// A loopback direct reply is already an inner {tag,body} datagram. The
+		// 0x25 handler itself returns no direct reply; its 0x49 is broadcast to
+		// every transport (including this one) inside the shared dispatcher.
+		for (opennova::ProtocolMessage &reply : replies) {
+			host_loop_.host_send(reply.tag, std::move(reply.payload));
+		}
+	}
+	for (opennova::netsim::Datagram &preserved : deferred) {
+		host_loop_.deliver_c2s(
+				preserved.tag, std::move(preserved.body));
+	}
+}
+
 void NovaSimulation::host_pump() {
 	namespace np = opennova::np;
 	const uint32_t now = host_owner_.now_tick;
+	drain_host_client_gameplay_requests();
 	apply_player_input_pre_tick(); // input -> the host player's body input, before logic (ADR 0009/0012)
 	NovaUdpPumpDatagramSocket sock(host_listen_ ? pump_.ptr() : nullptr);
 	np::host_session_pump(host_owner_, sock,
@@ -4590,9 +4644,11 @@ void NovaSimulation::host_pump() {
 
 // P7: the per-frame non-authority client loop — the Godot equivalent of the joiner half of
 // Client_ProcessNetworkFrame (§5.44). The recv-fold + the C2S 0x0C uplink are fused inside the
-// runtime; run_logic_tick(false) runs first so the uplink reflects L's just-integrated pose
-// (matches the legacy "uplink-after-tick"). The recv-fold writes only ClientState (read after the
-// frame), so folding it after the motor is harmless.
+// runtime. Retail dispatches received messages before the entity/weapon-action pumps, so decoded
+// consequences are applied to L before this frame's local World tick. In particular, an S2C 0x49
+// arriving on a reload's DONE boundary must refill the slot before IDLE can observe the stale empty
+// magazine and queue a second C2S 0x25. [orig: Game_ProcessMainFrame @0x5263f0;
+// Client_ProcessNetworkFrame @0x42c180]
 void NovaSimulation::joiner_pump() {
 	namespace np = opennova::np;
 	if (!runtime_) return;
@@ -4612,14 +4668,9 @@ void NovaSimulation::joiner_pump() {
 			runtime_->receive(bytes.ptr(), static_cast<std::size_t>(bytes.size()));
 		}
 	}
-	apply_player_input_pre_tick();                  // input -> L's body input
-	world_->run_logic_tick(/*is_authority=*/false); // local World tick: moves L's motor ONLY (never Server_TickUpdate)
-	sync_local_mounted_input_heading();
-	tick_local_player_view();   // retail promotes the per-frame view before weapon actions
-	tick_local_player_weapon(); // the equipped-slot FSM pump, after the view promoter
-
-	// Run the client frame: recv-fold (-> ClientState) + connect-drive + the C2S 0x0C uplink (gated
-	// InMatch && deployed inside the runtime). Build the uplink from L once it exists.
+	// Run the client net frame first: recv-fold (-> ClientState) + connect-drive + the C2S 0x0C
+	// uplink (gated InMatch && deployed inside the runtime). The uplink describes L's pose as left by
+	// the previous entity update; this frame's raw-input/motor pass follows all inbound application.
 	const uint32_t health_updates_before =
 			runtime_->state().health_updates_applied;
 	const uint32_t objective_updates_before =
@@ -4695,7 +4746,139 @@ void NovaSimulation::joiner_pump() {
 			}
 		}
 	}
+
+	// Received projectile/reload gameplay and the decoded remote-person collision
+	// proxies are live inputs to this frame's entity/round/weapon pumps. Applying
+	// them here is the retail recv-before-actions boundary, not presentation work.
+	refresh_joiner_projectile_person_proxies();
+	apply_joiner_gameplay_events();
+
+	apply_player_input_pre_tick();                  // input -> L's body input
+	world_->run_logic_tick(/*is_authority=*/false); // local World tick: moves L's motor ONLY (never Server_TickUpdate)
+	sync_local_mounted_input_heading();
+	tick_local_player_view();   // retail promotes the per-frame view before weapon actions
+	tick_local_player_weapon(); // the equipped-slot FSM pump, after the view promoter
 	++now_tick_;
+}
+
+void NovaSimulation::refresh_joiner_projectile_person_proxies() {
+	std::vector<opennova::world::ProjectilePersonProxy> proxies;
+	uint16_t self_wire_handle = opennova::world::EntityHandle::kInvalid;
+	if (runtime_ && runtime_->has_self_handle())
+		self_wire_handle = runtime_->self_handle();
+	if (joiner_ && runtime_ && runtime_->in_match()) {
+		for (const opennova::netsim::ClientEntityState &entity :
+				runtime_->state().entities) {
+			if (entity.cls != opennova::EntityClass::Player ||
+					entity.handle == opennova::world::EntityHandle::kInvalid ||
+					(self_wire_handle != opennova::world::EntityHandle::kInvalid &&
+					 entity.handle == self_wire_handle) ||
+					(entity.state_flags_known &&
+					 (entity.state_flags & 0x01u) != 0))
+				continue;
+
+			opennova::world::ProjectilePersonProxy proxy;
+			proxy.wire_handle = entity.handle;
+			proxy.position_q16 = opennova::world::FixedVec3{
+					entity.x, entity.y, entity.z};
+			proxies.push_back(proxy);
+		}
+	}
+	// ClientState is persistent and frame-budgeted; omission from one 0x0A is
+	// not a despawn signal, so this intentionally does not read seen_this_frame.
+	// Known-dead bit 1 is retained too: retail dead bodies remain person blockers.
+	collision_world_.replace_projectile_person_proxies(
+			std::move(proxies), self_wire_handle);
+}
+
+void NovaSimulation::apply_joiner_gameplay_events() {
+	if (!joiner_ || !runtime_ || !world_) return;
+
+	// Retail's S2C 0x0A tag-2 record is a fired-round descriptor. Re-run the
+	// normal round spawner so tracers and physical impacts are produced locally;
+	// World::run_logic_tick admits this pool only under the explicit
+	// mp_session && !projectile_authority visual-client gate. Every descriptor
+	// is spawned VisualOnly below, and that mode gates every gameplay consequence.
+	for (const opennova::netsim::ClientRoundEvent &ev :
+			runtime_->drain_round_events()) {
+		// The retail deserializer dispatches only the alt/projectile bit or the
+		// standard adm-indexed bit [orig: @0x42f2a8]. Other flag shapes do not
+		// enter RoundData_SpawnRound.
+		if ((ev.flags & 0x03u) == 0) continue;
+		const opennova::world::WeaponTableEntry *adm =
+				world_->weapons.by_index(ev.adm_index);
+		if (adm == nullptr || adm->ammo_index < 0) continue;
+		opennova::world::RoundSpawnParams round;
+		round.owner = opennova::world::EntityHandle{};
+		round.shooter_handle = ev.shooter_handle;
+		round.origin.x = static_cast<float>(ev.origin_x) / kFixed16;
+		round.origin.y = static_cast<float>(ev.origin_y) / kFixed16;
+		round.origin.z = static_cast<float>(ev.origin_z) / kFixed16;
+		round.dir_yaw_bam = ev.dir_yaw_bam;
+		round.dir_pitch_bam = ev.dir_pitch_bam;
+		round.ammo_index = adm->ammo_index;
+		round.adm_index = ev.adm_index;
+		round.shot_seq = ev.shot_seq;
+		round.charge = ev.slot_byte;
+		world_->round_sim.spawn(
+				*world_, round,
+				opennova::world::RoundConsequenceMode::VisualOnly);
+	}
+
+	for (const opennova::WeaponReload &reload :
+			runtime_->drain_reload_notifications()) {
+		++weapon_reload_received_serial_;
+		weapon_reload_received_entity_ = reload.entity_handle;
+		weapon_reload_received_param_ = reload.reload_param;
+		if (!local_inventory_valid_ || !runtime_->has_self_handle() ||
+				reload.entity_handle != runtime_->self_handle())
+			continue;
+
+		const int32_t combo = reload.reload_param;
+		opennova::world::WeaponInventorySlot *reloaded =
+				local_inventory_.slot(combo);
+		const opennova::world::WeaponTableEntry *def =
+				(reloaded != nullptr && reloaded->adm_index >= 0)
+						? world_->weapons.by_index(
+								static_cast<uint8_t>(reloaded->adm_index))
+						: nullptr;
+		if (reloaded == nullptr || def == nullptr) continue;
+
+		// WeaponSlot_ReloadAmmo is run only on the echoed notification: refund
+		// the payload-addressed slot's remaining clip to its ammo-class pool and
+		// draw a full clip. A late echo still reloads that exact slot after a switch;
+		// only the currently active personal slot has an FSM mirror to update here.
+		opennova::world::weapon_inventory_reload_slot(
+				world_->weapons, local_inventory_, combo);
+		if (weapon_active_ && !local_usegun_slot_active_ &&
+				local_inventory_.equipped_combo >= 0) {
+			opennova::world::WeaponSlotState &active_slot =
+					*active_local_weapon_slot();
+			const opennova::world::WeaponInventorySlot *equipped =
+					local_inventory_.slot(local_inventory_.equipped_combo);
+			const opennova::world::WeaponTableEntry *equipped_def =
+					(equipped != nullptr && equipped->adm_index >= 0)
+							? world_->weapons.by_index(
+									static_cast<uint8_t>(equipped->adm_index))
+							: nullptr;
+			if (equipped_def != nullptr) {
+				active_slot.reserve = opennova::world::weapon_pool_get(
+						local_inventory_, equipped_def->ammo_class_id);
+			}
+			if (combo == local_inventory_.equipped_combo) {
+				active_slot.clip = reloaded->clip;
+				active_slot.phase = static_cast<uint8_t>(
+						active_slot.phase &
+						~opennova::world::weapon_phase::kReloadPendingBit);
+			}
+		}
+		++weapon_reload_applied_serial_;
+		AiEntity *player = world_->ai
+				? world_->ai->for_handle(world_->cached.local_player)
+				: nullptr;
+		if (player != nullptr && player->inf.active)
+			player->inf.reload_anim_ticks = 80;
+	}
 }
 
 void NovaSimulation::apply_player_input_pre_tick() {
@@ -5270,6 +5453,11 @@ void NovaSimulation::install_local_player_weapon(const Dictionary &p_def,
 	weapon_anim_variant_ = 0;
 	weapon_anim_tick_ = 0;
 	weapon_fired_serial_ = weapon_dry_serial_ = weapon_reload_serial_ = 0;
+	weapon_reload_applied_serial_ = 0;
+	weapon_reload_received_serial_ = 0;
+	weapon_reload_received_entity_ =
+			opennova::world::EntityHandle::kInvalid;
+	weapon_reload_received_param_ = 0;
 	weapon_unscope_serial_ = weapon_rescope_serial_ = 0;
 	weapon_action_serial_ = 0;
 	weapon_action_started_ = -1;
@@ -5747,7 +5935,7 @@ void NovaSimulation::tick_local_player_weapon() {
 		// RoundData_AddRound @ 0x4fdb40 inline RoundData_SpawnRound @ 0x4ec0d0]
 		opennova::world::Entity *shooter =
 				world_->registry.get(world_->cached.local_player);
-		if (!joiner_ && shooter != nullptr && p != nullptr) {
+		if (shooter != nullptr && p != nullptr) {
 			const uint8_t adm_index = shooter->equipped_adm_index;
 			const opennova::world::WeaponTableEntry *adm =
 					world_->weapons.by_index(adm_index);
@@ -5776,7 +5964,9 @@ void NovaSimulation::tick_local_player_weapon() {
 				const uint16_t shot_seq = local_round_sequence_;
 
 				opennova::world::RoundEvent round_event;
-				round_event.shooter_handle = world_->cached.local_player.packed;
+				round_event.shooter_handle = joiner_
+						? joiner_self_wire_handle_
+						: world_->cached.local_player.packed;
 				round_event.origin_x = static_cast<int32_t>(
 						std::lround(double(origin.x) * kFixed16));
 				round_event.origin_y = static_cast<int32_t>(
@@ -5810,11 +6000,11 @@ void NovaSimulation::tick_local_player_weapon() {
 				// speed [orig: WeaponAction_Fire arg 6 <- MountSlot+0x5C ->
 				// descriptor +20 @ 0x4ec5bb; deserializer restore @ 0x42f769].
 				round_event.slot_byte = pending_throw_charge_;
-				world_->rounds.add(round_event);
+				if (!joiner_) world_->rounds.add(round_event);
 
 				opennova::world::RoundSpawnParams round;
 				round.owner = world_->cached.local_player;
-				round.shooter_handle = world_->cached.local_player.packed;
+				round.shooter_handle = round_event.shooter_handle;
 				round.origin = origin;
 				round.dir_yaw_bam = dir_yaw;
 				round.dir_pitch_bam = dir_pitch;
@@ -5822,14 +6012,94 @@ void NovaSimulation::tick_local_player_weapon() {
 				round.adm_index = adm_index;
 				round.shot_seq = shot_seq;
 				round.charge = pending_throw_charge_;
-				world_->round_sim.spawn(*world_, round);
+				world_->round_sim.spawn(
+						*world_, round,
+						joiner_
+								? opennova::world::RoundConsequenceMode::VisualOnly
+								: opennova::world::RoundConsequenceMode::Authoritative);
+
+				if (joiner_ && runtime_) {
+					// The client-side half of Entity_FireWeaponAndSendPacket predicts
+					// above, then queues the fixed C2S 0x06 descriptor. The pose helper
+					// writes full XYZ, rounded Yaw/Pitch high words, and retail's five
+					// low-word deltas against the live shooter pose. The runtime stamps
+					// its own currentTick when accepting it.
+					// [orig: @0x42A62F/@0x42A6A1..0x42A890]
+					opennova::ClientFiredRound fire;
+					fire.shooter_handle = joiner_self_wire_handle_;
+					fire.fire_flags = round_event.mode_flags;
+					fire.adm_index = adm_index;
+					fire.target_handle = 0xFFFF;
+					fire.hit_part = shot_seq;
+					fire.extra_byte2 = round_event.subtype;
+					fire.misc_byte = pending_throw_charge_;
+					const std::array<int32_t, 5> fire_pose = {
+							round_event.origin_x,
+							round_event.origin_y,
+							round_event.origin_z,
+							dir_yaw,
+							dir_pitch,
+					};
+					const std::array<int32_t, 5> shooter_pose = {
+							p->pos[0],
+							p->pos[1],
+							p->pos[2],
+							p->heading,
+							p->pitch,
+					};
+					opennova::set_client_fired_round_pose(
+							fire, fire_pose, shooter_pose);
+					runtime_->queue_fired_round(fire);
+				}
 				pending_throw_charge_ = 0;
 			}
 		}
 	}
 	if (ev.dry_fired) ++weapon_dry_serial_;
-	if (ev.reload_requested) ++weapon_reload_serial_;
+	if (ev.reload_requested) {
+		++weapon_reload_serial_;
+		opennova::WeaponReload reload;
+		bool have_wire_reload = false;
+		if (!borrowed_usegun_slot && local_inventory_valid_ &&
+				local_inventory_.equipped_combo >= 0) {
+			reload.entity_handle = joiner_
+					? joiner_self_wire_handle_
+					: world_->cached.local_player.packed;
+			reload.reload_param = static_cast<uint16_t>(
+					local_inventory_.equipped_combo);
+			have_wire_reload = true;
+		} else if (borrowed_usegun_slot && !joiner_ &&
+				local_usegun_mount_.valid()) {
+			// parentSlot==3 addresses the PARENT entity, not the actor, and
+			// recomputes the combo from the mounted Def. The authority's local
+			// parent handle is already the canonical wire handle. A joiner has
+			// no proven local-parent -> host-H map yet, so that half remains
+			// explicitly deferred in D-WPN-8.
+			// [orig: WeaponAction_Reload @0x543108..0x543157]
+			const opennova::world::WeaponTableEntry *mounted_def =
+					world_->weapons.by_index(local_usegun_weapon_adm_);
+			if (mounted_def != nullptr) {
+				reload.entity_handle = local_usegun_mount_.packed;
+				reload.reload_param = static_cast<uint16_t>(
+						static_cast<uint16_t>(mounted_def->category) * 65u +
+						static_cast<uint16_t>(mounted_def->rank));
+				have_wire_reload = true;
+			}
+		}
+		if (have_wire_reload && runtime_) {
+			if (joiner_) {
+				runtime_->queue_reload_request(reload);
+			} else if (host_owner_.serve_and_play) {
+				// Authority already performed WeaponSlot_ReloadAmmo above. The
+				// loopback request exists to relay 0x49 to every client; the
+				// server handler's local-connection gate prevents a second refill.
+				host_loop_.client_send(
+						0x25, opennova::encode_weapon_reload(reload));
+			}
+		}
+	}
 	if (ev.reload_applied) {
+		++weapon_reload_applied_serial_;
 		// The refill stamps the 3P body reload-anim window on the entity — 80 ticks; the
 		// infantry weapon channel then wants state 65 reload until it expires (and the
 		// locked clip plays to its end). In the original the stamp lives inside the
@@ -5968,6 +6238,14 @@ Dictionary NovaSimulation::get_local_player_weapon_state() const {
 	out["fired_serial"] = static_cast<int64_t>(weapon_fired_serial_);
 	out["dry_serial"] = static_cast<int64_t>(weapon_dry_serial_);
 	out["reload_serial"] = static_cast<int64_t>(weapon_reload_serial_);
+	out["reload_applied_serial"] =
+			static_cast<int64_t>(weapon_reload_applied_serial_);
+	out["reload_received_serial"] =
+			static_cast<int64_t>(weapon_reload_received_serial_);
+	out["reload_received_entity"] =
+			static_cast<int64_t>(weapon_reload_received_entity_);
+	out["reload_received_param"] =
+			static_cast<int64_t>(weapon_reload_received_param_);
 	out["unscope_serial"] = static_cast<int64_t>(weapon_unscope_serial_);
 	out["rescope_serial"] = static_cast<int64_t>(weapon_rescope_serial_);
 	out["clip"] = active_slot.clip;
@@ -6272,7 +6550,6 @@ Array NovaSimulation::drain_fire_presentation_events() {
 	if (!loaded_) return out;
 	constexpr double kRadPerBam = (2.0 * 3.14159265358979323846) / 4294967296.0;
 	const bool have_local = world_->cached.local_player.valid();
-	const uint16_t local_packed = have_local ? world_->cached.local_player.packed : 0xFFFF;
 	for (const opennova::world::FireEvent &fe : world_->round_sim.fired) {
 		Dictionary d;
 		d["origin"] = Vector3(fe.origin.x, fe.origin.z, -fe.origin.y);
@@ -6283,11 +6560,9 @@ Array NovaSimulation::drain_fire_presentation_events() {
 				static_cast<real_t>(std::sin(pitch)),
 				static_cast<real_t>(-std::sin(bearing) * cp));
 		d["shooter_handle"] = static_cast<int>(fe.shooter_handle);
-		opennova::world::EntityHandle shooter_handle;
-		shooter_handle.packed = fe.shooter_handle;
-		const opennova::world::Entity *shooter = world_->registry.get(shooter_handle);
+		const opennova::world::Entity *shooter = world_->registry.get(fe.shooter);
 		d["source_bms_id"] = shooter != nullptr ? shooter->bms_id : 0;
-		d["is_local_player"] = have_local && fe.shooter_handle == local_packed;
+		d["is_local_player"] = have_local && fe.shooter == world_->cached.local_player;
 		d["ammo_index"] = fe.ammo_index;
 		const opennova::world::AmmoTableEntry *ammo = world_->ammo.by_index(fe.ammo_index);
 		d["sound_set"] = ammo ? String(ammo->ai_launch_set.c_str()) : String();
@@ -7043,8 +7318,8 @@ void NovaSimulation::ensure_present_effect_pose_cache() const {
 	for (const opennova::netsim::ClientEntityState &entity_state : client.entities) {
 		// Match present_snapshot_from_client_view's joiner self-filter: the host's
 		// wire echo H is not drawn and therefore cannot own a presented effect.
-		if (joiner_ && joiner_self_wire_handle_ != 0 &&
-				entity_state.handle == joiner_self_wire_handle_) {
+		if (joiner_ && runtime_->has_self_handle() &&
+				entity_state.handle == runtime_->self_handle()) {
 			continue;
 		}
 
@@ -7118,7 +7393,7 @@ PackedVector3Array NovaSimulation::get_present_effect_state_for_ssn(int p_ssn) c
 
 PackedVector3Array NovaSimulation::get_present_effect_state_for_wire_handle(
 		int p_wire_handle) const {
-	if (p_wire_handle <= 0 ||
+	if (p_wire_handle < 0 ||
 			p_wire_handle > static_cast<int>(std::numeric_limits<uint16_t>::max())) {
 		return PackedVector3Array();
 	}
@@ -7534,7 +7809,8 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 		// it back in 0x0A; we draw our local player L via LocalPlayerHost, so drop the wire
 		// echo here. The row stays at its zero/unresolved defaults (PF_TYPE_ID 0), which the
 		// wire render pass skips. [net-re §5.38b two-handle L-vs-H reconciliation]
-		if (joiner_ && joiner_self_wire_handle_ != 0 && es.handle == joiner_self_wire_handle_) {
+		if (joiner_ && runtime_->has_self_handle() &&
+				es.handle == runtime_->self_handle()) {
 			continue;
 		}
 		// Wire identity for the render pass. The joiner has no authoritative registry for

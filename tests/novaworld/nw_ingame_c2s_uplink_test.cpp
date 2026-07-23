@@ -11,6 +11,7 @@
 #include <npwire/ingame_decode.h>
 #include <npwire/ingame_encode.h>
 
+#include <array>
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
@@ -197,7 +198,77 @@ int test_client_fired_round() {
 	EXPECT(r.offset_x == 0x4259);
 	EXPECT(r.offset_y == 0xd8b9);
 	EXPECT(r.offset_w == 0x018c);
+	const std::vector<uint8_t> encoded = encode_client_fired_round(r);
+	EXPECT(encoded.size() == sizeof(kFiredRound_f2061));
+	EXPECT(std::memcmp(encoded.data(), kFiredRound_f2061,
+	                   sizeof(kFiredRound_f2061)) == 0);
 	std::printf("PASS client_fired_round\n");
+	return 0;
+}
+
+int test_client_fired_round_pose_deltas() {
+	ClientFiredRound r;
+	const std::array<int32_t, 5> shooter_pose = {
+		int32_t(0x12345678u),
+		int32_t(0x89abcdefu),
+		int32_t(0x00010010u),
+		int32_t(0x10203040u),
+		int32_t(0x7fff8000u),
+	};
+	// High halves deliberately differ: retail subtracts only the low words.
+	// The expected words reproduce the independently witnessed f=2061
+	// trailing signature from worked pose pairs.
+	const std::array<int32_t, 5> fire_pose = {
+		int32_t(0x777791ccu), // 0x91cc - 0x5678 = 0x3b54
+		int32_t(0x22221048u), // 0x1048 - 0xcdef = 0x4259 modulo 2^16
+		int32_t(0x3333d8c9u), // 0xd8c9 - 0x0010 = 0xd8b9
+		int32_t(0x44443040u), // 0x3040 - 0x3040 = 0
+		int32_t(0x5555818cu), // 0x818c - 0x8000 = 0x018c
+	};
+	set_client_fired_round_pose(r, fire_pose, shooter_pose);
+
+	EXPECT(uint32_t(r.pos_x) == 0x777791ccu);
+	EXPECT(uint32_t(r.pos_y) == 0x22221048u);
+	EXPECT(uint32_t(r.pos_z) == 0x3333d8c9u);
+	EXPECT(uint32_t(r.dir_x) == 0x00004444u);
+	EXPECT(uint32_t(r.dir_y) == 0x00005556u);
+	EXPECT(r.base_offset == 0x3b54);
+	EXPECT(r.offset_x == 0x4259);
+	EXPECT(r.offset_y == 0xd8b9);
+	EXPECT(r.offset_z == 0x0000);
+	EXPECT(r.offset_w == 0x018c);
+
+	const std::vector<uint8_t> encoded = encode_client_fired_round(r);
+	const uint8_t expected_words[] = {
+		0x54, 0x3b, 0x59, 0x42, 0xb9, 0xd8, 0x00, 0x00, 0x8c, 0x01,
+	};
+	EXPECT(encoded.size() == 45);
+	EXPECT(std::memcmp(encoded.data() + 35, expected_words,
+	                   sizeof(expected_words)) == 0);
+	std::printf("PASS client_fired_round retail pose deltas\n");
+	return 0;
+}
+
+int test_client_fired_round_angle_rounding_boundaries() {
+	ClientFiredRound r;
+	const std::array<int32_t, 5> shooter_pose = {};
+
+	set_client_fired_round_pose(r, {
+			0, 0, 0,
+			int32_t(0x00007fffu),
+			int32_t(0x00008000u),
+	}, shooter_pose);
+	EXPECT(r.dir_x == 0);
+	EXPECT(r.dir_y == 1);
+
+	set_client_fired_round_pose(r, {
+			0, 0, 0,
+			int32_t(0xffff8000u),
+			int32_t(0x7fffffffu),
+	}, shooter_pose);
+	EXPECT(r.dir_x == 0);
+	EXPECT(r.dir_y == -32768);
+	std::printf("PASS client_fired_round angle rounding boundaries\n");
 	return 0;
 }
 
@@ -277,6 +348,8 @@ int main() {
 	rc |= test_extended_uplink_roundtrip();
 	rc |= test_extended_uplink_short_body();
 	rc |= test_client_fired_round();
+	rc |= test_client_fired_round_pose_deltas();
+	rc |= test_client_fired_round_angle_rounding_boundaries();
 	rc |= test_client_checksum_reply();
 	if (rc == 0) std::printf("nw_ingame_c2s_uplink_test: ALL PASS\n");
 	return rc;

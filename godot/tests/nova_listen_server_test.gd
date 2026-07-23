@@ -339,7 +339,41 @@ func test_present_effect_lookup_matches_client_snapshot_and_reloads_cleanly() ->
 	assert_eq(replacement_state.size(), NovaSimulation.EFFECT_STATE_COUNT)
 	assert_gt(replacement_state[NovaSimulation.EFFECT_STATE_POSITION].distance_to(
 			expected_position), 40.0,
-		"world replacement invalidates an equal-tick pose cache")
+			"world replacement invalidates an equal-tick pose cache")
+	sim.free()
+
+
+func test_present_effect_lookup_accepts_zero_wire_handle() -> void:
+	var mission := NovaMissionData.new()
+	assert_eq(mission.create_default(), OK)
+	assert_false(mission.add_entity(
+			NovaMissionData.KIND_ORGANIC, 5311,
+			Vector3(12, 4, -3), Vector3.ZERO).is_empty())
+
+	var sim := NovaSimulation.new()
+	sim.enable_listen_server(true)
+	assert_true(sim.load_from_mission_data(mission))
+	sim.step()
+
+	var stride := sim.get_present_stride()
+	var snapshot: PackedFloat32Array = sim.get_present_snapshot()
+	var row_base := -1
+	for record in range(snapshot.size() / stride):
+		var base := record * stride
+		if int(snapshot[base + NovaSimulation.PF_TYPE_ID]) != 0 \
+				and int(snapshot[base + NovaSimulation.PF_WIRE_HANDLE]) == 0:
+			row_base = base
+			break
+	assert_gte(row_base, 0, "the first organic keeps its valid packed handle zero")
+	var state := sim.get_present_effect_state_for_wire_handle(0)
+	assert_eq(state.size(), NovaSimulation.EFFECT_STATE_COUNT,
+			"the compact effect lookup accepts packed handle zero")
+	if row_base >= 0 and state.size() == NovaSimulation.EFFECT_STATE_COUNT:
+		var expected := Vector3(
+				snapshot[row_base + NovaSimulation.PF_POS_X],
+				snapshot[row_base + NovaSimulation.PF_POS_Y],
+				snapshot[row_base + NovaSimulation.PF_POS_Z])
+		assert_true(state[NovaSimulation.EFFECT_STATE_POSITION].is_equal_approx(expected))
 	sim.free()
 
 

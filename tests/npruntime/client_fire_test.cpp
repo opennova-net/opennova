@@ -14,6 +14,7 @@
 // rejects; a table-less host accepts without bookkeeping.
 
 #include <npruntime/napi_np_connection.h>
+#include <npruntime/napi_np_protocol.h>
 #include <npruntime/napi_np_server_ctx.h>
 #include <npruntime/server_message_dispatch.h>
 
@@ -23,7 +24,9 @@
 #include <netsim/udp_session_transport.h>
 
 #include <npwire/ingame_decode.h>
+#include <npwire/nw_session_framing.h>
 #include <npwire/protocol_message.h>
+#include <npwire/session_keys.h>
 
 #include <world/ai.h>
 #include <world/player_spawn.h>
@@ -32,6 +35,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <string>
 #include <vector>
 
 namespace {
@@ -116,9 +120,108 @@ int dispatch_fire(np::NapiNPConnection &conn, std::vector<np::NapiNPConnection> 
 	return int(replies.size());
 }
 
+// Exercise the actual 0x43 session receive boundary, not the message dispatcher in isolation.
+// Retail's HandleSessionPacket drops seq <= recv_ack_seq before ParseMessages, so replaying the
+// identical UDP datagram must neither append another round nor spend another cartridge.
+bool check_duplicate_c2s_session_does_not_refire() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	w::AiSystem ai;
+	world.ai = &ai;
+	const w::EntityHandle shooter = w::spawn_remote_player(world, player_spawn(0xFFF1));
+	if (!expect(shooter.valid(), "session replay shooter spawned")) return false;
+
+	world.weapons.entries.resize(6);
+	w::WeaponTableEntry &rifle = world.weapons.entries[5];
+	rifle.name = "WPN_TESTRIFLE";
+	rifle.category = 3;
+	rifle.rank = 2;
+	rifle.clipsize = 30;
+	rifle.ammo_index = 0;
+	rifle.valid = true;
+	world.ammo.entries.resize(1);
+	world.ammo.entries[0].name = "REMOTE_POWER_THROW";
+	world.ammo.entries[0].velocity = 620;
+	world.ammo.entries[0].max_age_ticks = 248;
+	world.ammo.entries[0].valid = true;
+
+	const PeerAddr peer{0x0100007Fu, 30123};
+	const std::string client_scrk = "CLIENT-REPLAY-SCRK";
+	const std::string server_scrk = "SERVER-REPLAY-SCRK";
+	np::NapiNPServerCtx ctx;
+	ctx.world = &world;
+	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
+	np::NapiNPConnection conn =
+			make_conn(3, 1, nullptr, ns::TransportMode::Client, shooter, true);
+	conn.peer = peer;
+	conn.client_scrk = client_scrk;
+	conn.server_scrk = server_scrk;
+	conn.client_ck = 0x11223344u;
+	conn.server_sk = 0x55667788u;
+	ctx.np_protocol.connection_list.push_back(std::move(conn));
+
+	const std::vector<uint8_t> shot =
+			fire_body(shooter.packed, 0x22, 5, 0, 0, 0, 0, 0, 0xFFFF, 1, 12, 0);
+	SessionSequencing client_tx{1, 0};
+	std::vector<uint8_t> session_body;
+	if (!expect(frame_session_packet(client_tx, SessionCrypto{client_scrk, {}, 0x55667788u},
+	                                 {make_protocol_message(0x06, shot)}, session_body),
+	            "frame C2S 0x06 session packet"))
+		return false;
+	const std::vector<uint8_t> fire_datagram =
+			nw_encode_outbound(SESSION_OPCODE_PROTOCOL_MESSAGE, std::move(session_body));
+
+	np::handle_server_datagram(ctx, peer, fire_datagram.data(), fire_datagram.size(), 100);
+	if (!expect(world.rounds.count == 1, "first C2S 0x06 appends one authoritative round"))
+		return false;
+	const uint16_t combo = uint16_t(3 * 65 + 2);
+	if (!expect(ctx.np_protocol.connection_list[0].weapon_slots[combo].clip == 29,
+	            "first C2S 0x06 spends one cartridge"))
+		return false;
+
+	np::handle_server_datagram(ctx, peer, fire_datagram.data(), fire_datagram.size(), 101);
+	if (!expect(world.rounds.count == 1, "exact duplicate C2S 0x06 does not append a second round"))
+		return false;
+	if (!expect(ctx.np_protocol.connection_list[0].weapon_slots[combo].clip == 29,
+	            "exact duplicate C2S 0x06 does not spend a second cartridge"))
+		return false;
+
+	std::vector<uint8_t> heartbeat_body;
+	if (!expect(frame_session_packet(client_tx, SessionCrypto{client_scrk, {}, 0x55667788u},
+	                                 {make_protocol_message(0x34, {})}, heartbeat_body),
+	            "frame next contiguous C2S session packet"))
+		return false;
+	const std::vector<uint8_t> heartbeat_datagram =
+			nw_encode_outbound(SESSION_OPCODE_PROTOCOL_MESSAGE, std::move(heartbeat_body));
+	np::handle_server_datagram(ctx, peer, heartbeat_datagram.data(), heartbeat_datagram.size(), 102);
+	np::handle_server_datagram(ctx, peer, fire_datagram.data(), fire_datagram.size(), 103);
+	if (!expect(ctx.np_protocol.connection_list[0].seq.last_inbound_seq == 2,
+	            "replayed older C2S packet cannot regress the host ACK latch"))
+		return false;
+
+	std::vector<uint8_t> ack_datagram;
+	if (!expect(np::frame_in_match_s2c(ctx, peer, 0x34, {}, ack_datagram),
+	            "host frames an ACK-bearing S2C packet"))
+		return false;
+	uint8_t opcode = 0;
+	std::vector<uint8_t> ack_body;
+	ProtocolPacketHeader ack_hdr;
+	std::vector<ProtocolMessage> ack_messages;
+	if (!expect(nw_decode_inbound(ack_datagram.data(), ack_datagram.size(), opcode, ack_body) &&
+	                    opcode == SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE &&
+	                    decode_protocol_packet_plaintext(ack_body.data(), ack_body.size(), server_scrk,
+	                                                     ack_hdr, ack_messages),
+	            "decode host ACK-bearing S2C packet"))
+		return false;
+	return expect(ack_hdr.ack_count == 2, "host echoes the highest contiguous C2S sequence");
+}
+
 } // namespace
 
 int main() {
+	if (!check_duplicate_c2s_session_does_not_refire()) return 1;
+
 	w::World world;
 	world.registry.configure_pool(0, 16);
 	w::AiSystem ai;

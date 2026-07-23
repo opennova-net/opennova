@@ -1838,6 +1838,14 @@ target_link_libraries(npruntime_client_runtime_test
     PRIVATE opennova_npruntime opennova_netsim opennova_world opennova_novaworld)
 add_test(NAME npruntime_client_runtime COMMAND npruntime_client_runtime_test)
 
+# Retail in-match loss recovery: future 0x43/0x83 packets trigger direction-specific 0x84/0x44
+# missing-sequence lists, and each endpoint reconstructs retained reliable records under the old
+# sequence with its current ACK. [orig: SendMissingSeqList @0x623560; HandleResendList @0x623800]
+add_executable(npruntime_session_resend_test npruntime/session_resend_test.cpp)
+target_link_libraries(npruntime_session_resend_test
+    PRIVATE opennova_npruntime opennova_netsim opennova_world opennova_novaworld)
+add_test(NAME npruntime_session_resend COMMAND npruntime_session_resend_test)
+
 # Loss-tolerant pre-session UDP join: dropped 0x41/0x42 datagrams are retried on the retail active
 # send interval without changing their wire bytes, and the retried legs complete against the real host.
 add_executable(npruntime_joiner_handshake_retry_test npruntime/joiner_handshake_retry_test.cpp)

@@ -74,6 +74,9 @@ public:
 		// Raw S2C world-stream spawn/static bodies the host sends during load, as (tag, body):
 		// 0x0C organics, 0x0D pool-1, 0x10 statics, 0x20 markers.
 		std::vector<std::pair<uint8_t, std::vector<uint8_t>>> inbound_world;
+		// Live S2C gameplay bodies consumed by NetClientView (currently the 0x49
+		// reload echo; 0x0A tag-2 rounds remain embedded in inbound_0a).
+		std::vector<std::pair<uint8_t, std::vector<uint8_t>>> inbound_gameplay;
 		bool reached_in_match = false;                // true on the datagram that learns H
 	};
 
@@ -156,6 +159,7 @@ private:
 	void on_server_hello(const std::vector<uint8_t> &body, PollResult &out);
 	void on_server_auth(const std::vector<uint8_t> &body, PollResult &out);
 	void on_server_session(const std::vector<uint8_t> &body, PollResult &out);
+	void on_server_resend_list(const std::vector<uint8_t> &body, PollResult &out);
 	void fail(std::string reason);
 
 	uint32_t client_index_ = 1;

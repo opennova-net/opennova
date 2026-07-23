@@ -869,11 +869,14 @@ void World::run_logic_tick(bool is_authority, bool pre_mission) {
     //  WeaponAction_ProcessAllEntities @0x526786]
     if (!pre_mission && ai != nullptr)
         ai->pump_mounted_weapon_slots(*this, logic_tick);
-    // Live rounds then step authority-only; the client's visual round re-sim is
-    // not modeled here [orig: Entity_UpdateAllEntities ->
-    // Weapon_UpdateAllProjectiles @0x4ec020; damage is authority-gated end-to-end,
-    // §5.60]. Terrain is the host-wired sampler shared with AI grounding.
-    if (is_authority && !pre_mission)
+    // Live rounds step on the host and on an explicitly configured MP
+    // non-authority client. The latter is the retail tag-2 visual re-sim path;
+    // every decoded/predicted round carries VisualOnly through all consequence
+    // sites, so only the host can mutate gameplay state. Do not infer a client
+    // role from is_authority=false alone -- tests and pre-mission callers use it too.
+    // [orig: Weapon_UpdateAllProjectiles @0x4ec020; §5.60]
+    if (!pre_mission &&
+        (is_authority || (mp_session && !projectile_authority)))
         round_sim.tick(*this, terrain, ai != nullptr ? ai->collision : nullptr);
     if (is_authority && !pre_mission) {
         // The explosion-queue drain runs once per frame after the projectile

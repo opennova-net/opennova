@@ -92,6 +92,12 @@ void host_session_pump(HostOwner &owner, netsim::IDatagramSocket &sock,
 		}
 		for (const HostAcceptEvent &ev : r.events) dispatch_event(owner, sock, peer, ev);
 	}
+	// Resolve the retail missing-sequence latch only after the receive FIFO is empty. A later
+	// datagram in this same drain may have closed the gap and emptied the ordered queue.
+	for (TickOut &t : flush_server_missing_requests(owner.ctx)) {
+		for (const std::vector<uint8_t> &dg : t.outbound)
+			sock.send_to(t.peer, dg.data(), dg.size());
+	}
 
 	// (2) tick_connections — drive each not-yet-spawned peer's §5.2a burst; surface F3/PeerSpawned.
 	for (TickOut &t : tick_connections(owner.ctx, /*elapsed_ms=*/16, now)) {

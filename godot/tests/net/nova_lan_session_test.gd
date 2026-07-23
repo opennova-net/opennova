@@ -60,6 +60,94 @@ func test_browser_discovers_live_host_without_pre_auth_mission_metadata() -> voi
 	host.free()
 
 
+func test_duplicate_replies_from_one_endpoint_collapse_to_one_row() -> void:
+	var host := NovaSimulation.new()
+	host.configure_host_session({
+		"server_name": "Duplicate Reply LAN",
+		"gametype": 0x30020,
+		"max_players": 4,
+	})
+	assert_true(host.enable_host_listen(0))
+	assert_true(host.load_from_mission_data(_mission()))
+	var host_port := host.get_host_listen_port()
+	assert_gt(host_port, 0)
+
+	# Relay one browser probe through a live production host to obtain its real
+	# ServerHello, then send that exact 0x81 twice from one controlled endpoint.
+	# This drives NovaLanSession's endpoint de-duplication without depending on
+	# whether the platform loops global broadcast back to the local machine.
+	var responder := PacketPeerUDP.new()
+	assert_eq(responder.bind(0, "127.0.0.1"), OK)
+	var responder_port := responder.get_local_port()
+	assert_gt(responder_port, 0)
+
+	var browser := NovaLanSession.new()
+	add_child_autofree(browser)
+	assert_eq(browser.start_browsing("127.0.0.1", responder_port, responder_port), OK)
+
+	var probe := PackedByteArray()
+	var browser_ip := ""
+	var browser_port := 0
+	for _i in range(180):
+		if responder.get_available_packet_count() > 0:
+			probe = responder.get_packet()
+			browser_ip = responder.get_packet_ip()
+			browser_port = responder.get_packet_port()
+			break
+		await get_tree().process_frame
+		OS.delay_msec(2)
+	assert_false(probe.is_empty(), "controlled responder received the browser's 0x41")
+	assert_gt(browser_port, 0)
+	if probe.is_empty() or browser_port <= 0:
+		browser.stop()
+		responder.close()
+		host.free()
+		return
+
+	assert_eq(responder.set_dest_address("127.0.0.1", host_port), OK)
+	assert_eq(responder.put_packet(probe), OK)
+	var reply := PackedByteArray()
+	for _i in range(180):
+		host.step()
+		await get_tree().process_frame
+		while responder.get_available_packet_count() > 0:
+			var candidate := responder.get_packet()
+			var source_port := responder.get_packet_port()
+			if source_port == host_port:
+				reply = candidate
+				break
+		if not reply.is_empty():
+			break
+		OS.delay_msec(2)
+	assert_false(reply.is_empty(), "live host returned a production 0x81 through the responder")
+	if reply.is_empty():
+		browser.stop()
+		responder.close()
+		host.free()
+		return
+
+	assert_eq(responder.set_dest_address(browser_ip, browser_port), OK)
+	assert_eq(responder.put_packet(reply), OK)
+	assert_eq(responder.put_packet(reply), OK)
+
+	# Let both loopback datagrams reach the socket before observing the final
+	# snapshot. Breaking on the first visible row would let a late duplicate
+	# arrive after the assertion and weaken this regression.
+	for _i in range(30):
+		await get_tree().process_frame
+		OS.delay_msec(2)
+	var rows: Array = browser.get_servers()
+	assert_eq(rows.size(), 1, "duplicate 0x81 replies from one endpoint remain one browser row")
+	if rows.size() == 1:
+		assert_eq(String(rows[0].get("server_name", "")), "Duplicate Reply LAN")
+		assert_eq(String(rows[0].get("host_ip", "")), "127.0.0.1")
+		assert_eq(int(rows[0].get("port", 0)), responder_port)
+
+	browser.stop()
+	responder.close()
+	host.free()
+
+
 func test_invalid_port_range_fails_without_browsing() -> void:
 	var browser := NovaLanSession.new()
 	add_child_autofree(browser)
