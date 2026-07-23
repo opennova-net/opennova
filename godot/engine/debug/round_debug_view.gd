@@ -1,4 +1,4 @@
-extends Node3D
+extends SimDebugView
 
 # Draws the RoundSim debug ring over the scene: every recently resolved round
 # outcome as its flight segment + hit marker, color-coded by outcome kind, with
@@ -12,8 +12,6 @@ extends Node3D
 # resolved (libs/world round_sim.cpp ring). Rebuilds only when the ring
 # advances. Built / freed by GameWorld on the overlay's "Show round trails"
 # toggle, like the collision view.
-
-const MissionOverlayUtil := preload("res://engine/mission/mission_overlay_util.gd")
 
 # RoundDebugEvent::Kind -> color.
 static func kind_color(kind: int) -> Color:
@@ -36,61 +34,28 @@ static func kind_color(kind: int) -> Color:
 const LABELED_NEWEST := 6      # detail labels on this many newest events
 const SEGMENT_DIM := 0.45      # segment line brightness vs the hit marker
 
-var _world: Node               # duck-typed host (get_sim()); re-resolved every frame
 var _mesh: ImmediateMesh
 var _labels: Array[Label3D] = []
 var _signature := 0
 
 
-func setup(world: Node) -> void:
-	_world = world
+func _sim_debug_method() -> String:
+	return "get_round_debug"
+
+
+func _build_view() -> void:
 	_mesh = ImmediateMesh.new()
-	var mi := MeshInstance3D.new()
-	mi.name = "RoundDebugLines"
-	mi.mesh = _mesh
-	var mat := MissionOverlayUtil.line_material()
-	mat.no_depth_test = true
-	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	mi.material_override = mat
-	add_child(mi)
+	add_child(_make_lines_node("RoundDebugLines", _mesh))
 	for i in range(LABELED_NEWEST):
-		var lb := Label3D.new()
-		lb.name = "RoundDebugLabel%d" % i
-		lb.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-		lb.fixed_size = false
-		lb.pixel_size = 0.005
-		lb.no_depth_test = true
-		lb.font_size = 40
-		lb.outline_size = 10
-		lb.outline_modulate = Color(0.0, 0.0, 0.0, 0.85)
-		lb.visible = false
+		var lb := _make_overlay_label("RoundDebugLabel%d" % i, 0.005, 40, 10)
 		add_child(lb)
 		_labels.append(lb)
 
 
-func _process(_delta: float) -> void:
-	refresh_now()
-
-
-## Immediately refresh from the current simulation (tests and tooling can call
-## this without Godot's private frame callback).
-func refresh_now() -> void:
-	var sim := _resolve_sim()
-	if sim == null:
-		_clear_all()
-		return
+func _refresh_from_sim(sim: Object) -> void:
 	var debug: Dictionary = sim.get_round_debug()
 	var events: Array = debug.get("events", [])
 	_update(events)
-
-
-func _resolve_sim() -> Object:
-	if _world == null or not is_instance_valid(_world) or not _world.has_method("get_sim"):
-		return null
-	var sim: Variant = _world.get_sim()
-	if sim == null or not is_instance_valid(sim) or not (sim as Object).has_method("get_round_debug"):
-		return null
-	return sim
 
 
 func _clear_all() -> void:
@@ -185,20 +150,3 @@ static func describe_event(ev: Dictionary) -> String:
 		_:
 			pass
 	return line
-
-
-func _cross(segments: Array, at: Vector3, arm: float, color: Color) -> void:
-	segments.append({ "a": at - Vector3(arm, 0, 0), "b": at + Vector3(arm, 0, 0), "color": color })
-	segments.append({ "a": at - Vector3(0, arm, 0), "b": at + Vector3(0, arm, 0), "color": color })
-	segments.append({ "a": at - Vector3(0, 0, arm), "b": at + Vector3(0, 0, arm), "color": color })
-
-
-func _diamond(segments: Array, at: Vector3, r: float, color: Color) -> void:
-	var px := at + Vector3(r, 0, 0)
-	var nx := at + Vector3(-r, 0, 0)
-	var pz := at + Vector3(0, 0, r)
-	var nz := at + Vector3(0, 0, -r)
-	segments.append({ "a": px, "b": pz, "color": color })
-	segments.append({ "a": pz, "b": nx, "color": color })
-	segments.append({ "a": nx, "b": nz, "color": color })
-	segments.append({ "a": nz, "b": px, "color": color })

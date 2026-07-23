@@ -1,4 +1,4 @@
-extends Node3D
+extends SimDebugView
 
 # Draws the render-occlusion portal data over the world: every nearby
 # portal-carrying building's occlusion faces as type-colored outlines, with a
@@ -14,8 +14,6 @@ extends Node3D
 # traversal and occluder culling test. The mesh + labels rebuild only when the
 # payload changes (static per mission apart from the weld retypes at load).
 # Built / freed by GameWorld on the overlay's toggle, like the collision view.
-
-const MissionOverlayUtil := preload("res://engine/mission/mission_overlay_util.gd")
 
 # The engine's own portal-slot collection radius [orig: the 250 u range in
 # collect_visible_sector_userpoints @ 0x5c6b60] -- the drawn sweep matches the
@@ -62,46 +60,25 @@ static func section_name(section: int) -> String:
 	return "ext" if section == 0 else "s%d" % section
 
 
-var _world: Node                # duck-typed GameWorld (get_sim()); re-resolved every frame
 var _mesh: ImmediateMesh
 var _labels: Node3D
 var _signature := 0             # hash of building poses + record geometry
 var _has_surface := false
 
 
-# `world` is the node owning the running sim (the GameWorld); the sim is
-# re-resolved through it every frame so mission reloads never leave this view
-# pointing at a freed NovaSimulation.
-func setup(world: Node) -> void:
-	_world = world
+func _sim_debug_method() -> String:
+	return "get_occlusion_portal_debug"
+
+
+func _build_view() -> void:
 	_mesh = ImmediateMesh.new()
-	var mi := MeshInstance3D.new()
-	mi.name = "OcclusionPortalLines"
-	mi.mesh = _mesh
-	# Unshaded, vertex-colored, depth-test off so the outlines read through the
-	# walls they sit in (the collision-view overlay recipe).
-	var mat := MissionOverlayUtil.line_material()
-	mat.no_depth_test = true
-	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	mi.material_override = mat
-	add_child(mi)
+	add_child(_make_lines_node("OcclusionPortalLines", _mesh))
 	_labels = Node3D.new()
 	_labels.name = "OcclusionPortalLabels"
 	add_child(_labels)
 
 
-func _process(_delta: float) -> void:
-	refresh_now()
-
-
-## Immediately refresh the portal geometry from the current simulation.
-## The process hook delegates here; tests and tooling can request a
-## deterministic refresh without reaching into Godot's private frame callback.
-func refresh_now() -> void:
-	var sim := _resolve_sim()
-	if sim == null:
-		_clear_all()
-		return
+func _refresh_from_sim(sim: Object) -> void:
 	var anchor := Vector3.ZERO
 	if is_inside_tree():
 		var camera := get_viewport().get_camera_3d()
@@ -109,16 +86,6 @@ func refresh_now() -> void:
 			anchor = camera.global_position
 	var debug: Dictionary = sim.get_occlusion_portal_debug(anchor, RANGE_UNITS)
 	_update_geometry(debug.get("buildings", []))
-
-
-func _resolve_sim() -> Object:
-	if _world == null or not is_instance_valid(_world) or not _world.has_method("get_sim"):
-		return null
-	var sim: Variant = _world.get_sim()
-	if sim == null or not is_instance_valid(sim) \
-			or not (sim as Object).has_method("get_occlusion_portal_debug"):
-		return null
-	return sim
 
 
 func _clear_all() -> void:

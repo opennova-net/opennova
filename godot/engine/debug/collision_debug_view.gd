@@ -1,4 +1,4 @@
-extends Node3D
+extends SimDebugView
 
 # Draws the live collision world over the scene: every nearby object's collision
 # volumes as type-colored wireframe boxes, plus the local player's capsule test
@@ -15,7 +15,6 @@ extends Node3D
 # capsule redraws every frame. Built / freed by GameWorld on the overlay's
 # "Show collision" toggle, like the skeleton view.
 
-const MissionOverlayUtil := preload("res://engine/mission/mission_overlay_util.gd")
 const TYPE_CD := 9
 const TYPE_CT := 10
 const TYPE_CF := 13
@@ -57,7 +56,6 @@ const BOX_EDGES := [
 	[0, 4], [1, 5], [2, 6], [3, 7],
 ]
 
-var _world: Node                # duck-typed GameWorld (get_sim()); re-resolved every frame
 var _hull_mesh: ImmediateMesh
 var _player_mesh: ImmediateMesh
 var _gap_label: Label3D
@@ -65,66 +63,24 @@ var _hull_signature := 0        # hash of instance pose + emitted geometry
 var _hull_has_surface := false
 
 
-# `world` is the node owning the running sim (the GameWorld); the sim is
-# re-resolved through it every frame so mission reloads never leave this view
-# pointing at a freed NovaSimulation.
-func setup(world: Node) -> void:
-	_world = world
+func _sim_debug_method() -> String:
+	return "get_collision_debug"
+
+
+func _build_view() -> void:
 	_hull_mesh = ImmediateMesh.new()
 	add_child(_make_lines_node("CollisionHullLines", _hull_mesh))
 	_player_mesh = ImmediateMesh.new()
 	add_child(_make_lines_node("CollisionPlayerLines", _player_mesh))
-	_gap_label = Label3D.new()
-	_gap_label.name = "CollisionGapLabel"
-	_gap_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	_gap_label.fixed_size = false
-	_gap_label.pixel_size = 0.006
-	_gap_label.no_depth_test = true
-	_gap_label.font_size = 48
-	_gap_label.outline_size = 12
+	_gap_label = _make_overlay_label("CollisionGapLabel", 0.006, 48, 12)
 	_gap_label.modulate = COLOR_CAPSULE
-	_gap_label.outline_modulate = Color(0.0, 0.0, 0.0, 0.85)
-	_gap_label.visible = false
 	add_child(_gap_label)
 
 
-func _make_lines_node(node_name: String, mesh: ImmediateMesh) -> MeshInstance3D:
-	var mi := MeshInstance3D.new()
-	mi.name = node_name
-	mi.mesh = mesh
-	# Unshaded, vertex-colored, depth-test off so the wireframes read through the
-	# object meshes they describe (the skeleton-view overlay recipe).
-	var mat := MissionOverlayUtil.line_material()
-	mat.no_depth_test = true
-	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	mi.material_override = mat
-	return mi
-
-
-func _process(_delta: float) -> void:
-	refresh_now()
-
-
-## Immediately refresh the debug geometry from the current simulation.
-## The process hook delegates here; tests and tooling can request a deterministic
-## refresh without reaching into Godot's private frame callback.
-func refresh_now() -> void:
-	var sim := _resolve_sim()
-	if sim == null:
-		_clear_all()
-		return
+func _refresh_from_sim(sim: Object) -> void:
 	var debug: Dictionary = sim.get_collision_debug()
 	_update_hulls(debug.get("instances", []))
 	_update_player(debug.get("player", {}))
-
-
-func _resolve_sim() -> Object:
-	if _world == null or not is_instance_valid(_world) or not _world.has_method("get_sim"):
-		return null
-	var sim: Variant = _world.get_sim()
-	if sim == null or not is_instance_valid(sim) or not (sim as Object).has_method("get_collision_debug"):
-		return null
-	return sim
 
 
 func _clear_all() -> void:
@@ -218,22 +174,3 @@ func _update_player(player: Dictionary) -> void:
 		_gap_label.position = head + Vector3(0.0, 0.35, 0.0)
 		_gap_label.text = "ground gap %.2f\ncapsule %.2f / %.2f" % [gap, bottom, top]
 		_gap_label.modulate = ray_color
-
-
-func _cross(segments: Array, at: Vector3, arm: float, color: Color) -> void:
-	segments.append({ "a": at - Vector3(arm, 0, 0), "b": at + Vector3(arm, 0, 0), "color": color })
-	segments.append({ "a": at - Vector3(0, arm, 0), "b": at + Vector3(0, arm, 0), "color": color })
-	segments.append({ "a": at - Vector3(0, 0, arm), "b": at + Vector3(0, 0, arm), "color": color })
-
-
-# A horizontal diamond (4 segments) of radius `r` around `at` -- reads as the
-# point's test radius without the vertex cost of a circle.
-func _diamond(segments: Array, at: Vector3, r: float, color: Color) -> void:
-	var px := at + Vector3(r, 0, 0)
-	var nx := at + Vector3(-r, 0, 0)
-	var pz := at + Vector3(0, 0, r)
-	var nz := at + Vector3(0, 0, -r)
-	segments.append({ "a": px, "b": pz, "color": color })
-	segments.append({ "a": pz, "b": nx, "color": color })
-	segments.append({ "a": nx, "b": nz, "color": color })
-	segments.append({ "a": nz, "b": px, "color": color })
