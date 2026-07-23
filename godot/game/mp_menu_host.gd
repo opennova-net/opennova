@@ -288,14 +288,7 @@ func _edit_text(name: String, default_value: String) -> String:
 	return default_value
 
 
-func _spin_value(name: String, default_value: String) -> String:
-	var node := _find(name)
-	if node != null and node.has_method("get_value"):  # NovaMnuSpinList
-		return String(node.get_value())
-	return default_value
-
-
-# Like _spin_value but returns the selected item's `value=` attribute (the semantic value the
+# Returns the selected spin-list item's `value=` attribute (the semantic value the
 # original reads), not its localized display label. Used to map SERVERTYPE/GAME_TYPE to behavior.
 func _spin_attr(name: String, default_value: String) -> String:
 	var node := _find(name)

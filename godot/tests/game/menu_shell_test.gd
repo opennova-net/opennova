@@ -255,7 +255,6 @@ func test_mods_tab_lists_mounts_and_persists_expansion() -> void:
 		NovaResourceDirSettings.set_expansion(saved)
 		_rm_runtime_dir(dir)
 		return
-	watch_signals(host)
 	assert_eq(NovaMusicService.current_context(), "menu", "base MENU music starts with the shell")
 	assert_not_null(NovaMusicService.current_script(), "base MENUMUS.BIN resolves")
 	if NovaMusicService.current_script() != null:
@@ -266,9 +265,8 @@ func test_mods_tab_lists_mounts_and_persists_expansion() -> void:
 	assert_not_null(avail, "AVAIL_LIST built")
 	assert_eq(avail.item_count, 1, "one expansion discovered under expansion/")
 	assert_eq(avail.get_item_text(0), "jox01")
-	# Activation mounts + persists + describes + announces.
+	# Activation mounts + persists + describes.
 	host._on_mod_activated(0)
-	assert_signal_emitted_with_parameters(host, "expansion_selected", ["jox01"])
 	assert_eq(host.get_selected_expansion(), "jox01")
 	assert_eq(NovaResourceDirSettings.get_expansion(), "jox01", "choice persisted to config")
 	assert_not_null(NovaMusicService.current_script(), "expansion menu context reopens")
@@ -311,7 +309,7 @@ func test_mods_ok_applies_expansion_without_launching() -> void:
 	watch_signals(host)
 	(accept as BaseButton).pressed.emit()  # press OK
 	assert_signal_not_emitted(host, "start_requested", "OK on the Mods screen must not launch")
-	assert_signal_emitted_with_parameters(host, "expansion_selected", ["jox01"])  # OK applied the highlighted mod
+	assert_eq(host.get_selected_expansion(), "jox01", "OK applied the highlighted mod")
 	assert_eq(NovaResourceDirSettings.get_expansion(), "jox01", "applied choice persisted")
 	host._root.clear()
 	NovaResourceDirSettings.set_expansion(saved)

@@ -126,10 +126,6 @@ signal resume_requested()
 # The player chose NovaWorld (online multiplayer) from the menu. main_game
 # opens the NovaWorld panel; the host stays out of the networking itself.
 signal novaworld_requested()
-# Emitted when the player activates an expansion/mod in Options. The choice is also
-# mounted onto the live root and persisted (read back at the next launch/world load
-# by main_game.gd), so it affects gameplay, not just the menu.
-signal expansion_selected(name: String)
 # Emitted after the Options spin list changes so an active HUD can reload its art.
 signal crosshair_style_changed(style: int)
 
@@ -162,16 +158,9 @@ func _ready() -> void:
 
 
 # Install a companion that owns game-specific menus the generic shell does not handle
-# (e.g. the JO multiplayer menu, mp_menu_host.gd). When the companion claims the loaded
-# menu, the shell delegates its named-control wiring to it (see _wire_named_controls).
-# Back-compat single-install: replaces the companion list with just this one.
-func set_companion(companion) -> void:
-	_companions = [companion] if companion != null else []
-
-
-# Add a companion to the delegate list (the shell can drive several game-specific
-# menus — e.g. mp.mnu and player.mnu). Companions are tried in install order; the
-# first whose owns_menu() claims the loaded menu drives it.
+# (the JO multiplayer menu — mp_menu_host.gd; the PLAYER_INFO screen). The shell can
+# drive several: companions are tried in install order, and the first whose
+# owns_menu() claims the loaded menu drives it (see _wire_named_controls).
 func add_companion(companion) -> void:
 	if companion != null and not _companions.has(companion):
 		_companions.append(companion)
@@ -436,9 +425,9 @@ func _on_apply_selected_mod() -> void:
 
 
 # Mount the chosen expansion onto the live root, refresh the content that depends on
-# it, persist the choice, and announce it. The persisted key is read at the next
-# launch/world load by main_game.gd, so the selection affects gameplay too. A failed
-# mount clears the root, so the previous expansion is re-mounted to recover.
+# it, and persist the choice. The persisted key is read at the next launch/world load
+# by main_game.gd, so the selection affects gameplay too. A failed mount clears the
+# root, so the previous expansion is re-mounted to recover.
 func _apply_expansion(name: String) -> void:
 	if _root == null or name.is_empty() or name == _current_expansion():
 		return
@@ -459,7 +448,6 @@ func _apply_expansion(name: String) -> void:
 	NovaMusicService.set_var(MUSIC_VAR_INDEX, active_music_var)
 	_refresh_dependent_content()
 	_update_mod_desc(name)
-	expansion_selected.emit(name)
 
 
 # After a mount change, re-fill anything seeded from the resource dir so the
