@@ -50,6 +50,22 @@ var _row_kinds := PackedInt32Array()
 var _row_indices := PackedInt32Array()
 var _row_nodes: Array = []
 
+# Per-row node capabilities, resolved once at plan rebuild (has_method is a
+# per-frame string lookup otherwise), plus last-applied edge state so calls
+# whose node-side setter would no-op are never dispatched at all.
+const CAP_BODY_CLIP := 1
+const CAP_BODY_SLOT := 2
+const CAP_BODY_PLAY := 4
+const CAP_AIM := 8
+const CAP_RHC := 16
+const CAP_CTRL := 32
+var _row_caps := PackedInt32Array()
+var _row_aim_valid := PackedInt32Array()
+var _row_rhc := PackedInt32Array()
+# infantry_anim_key(state) allocates its String natively per call; the state->key
+# map is global and tiny, so cache it for every pass instance.
+static var _infantry_key_cache: Dictionary = {}
+
 
 ## options: { drive_transform, drive_part_anim, drive_visibility } (all default true). The editor
 ## preview drives all three; the game drives all three too (its NPCs were previously static-placed).
@@ -96,16 +112,36 @@ func present_snapshot(
 			# A freed cached node cannot be written through. The next call will
 			# rebuild because validation rejects it.
 			continue
+		var caps := int(_row_caps[row])
 		if _drive_transform:
 			_apply_transform(node, snap, base)
-		PresentAimOverlay.apply(node, snap, base, false)
+		# Inline of PresentAimOverlay.apply(node, snap, base, false) with the
+		# capability lookups hoisted into the row plan and the no-overlay clear
+		# gated to the valid->invalid edge (the node-side setters no-op on
+		# repeats; these gates skip the dispatch itself).
+		if caps & CAP_RHC:
+			var rhc := int(snap[base + NovaSimulation.PF_RIGHT_HAND_COLLAPSED])
+			if rhc != int(_row_rhc[row]):
+				node.set_right_hand_collapsed(rhc != 0)
+				_row_rhc[row] = rhc
+		if caps & CAP_AIM:
+			var aim_valid := int(snap[base + NovaSimulation.PF_AIM_OVERLAY_VALID])
+			if aim_valid != 0:
+				PresentAimOverlay.apply_valid(node, snap, base, false)
+			elif int(_row_aim_valid[row]) != 0:
+				node.set_aim_overlay([])
+			_row_aim_valid[row] = aim_valid
 		if _drive_part_anim:
-			# Remove last tick's semantic mount ownership before generic model-order
-			# channels run. A generic PLAYPARTANIM can itself address EWEAP_*; it
-			# must survive dismount, while live gunner aim still overlays it last.
-			PresentEmplacedWeapon.clear(node)
-			_apply_procedural_part(node, snap, base)
-			_stats.posed += PresentEmplacedWeapon.apply(node, snap, base, false)
+			if caps & CAP_CTRL:
+				# Remove last tick's semantic mount ownership before generic model-order
+				# channels run. A generic PLAYPARTANIM can itself address EWEAP_*; it
+				# must survive dismount, while live gunner aim still overlays it last.
+				PresentEmplacedWeapon.clear(node)
+				_apply_procedural_part(node, snap, base)
+				_stats.posed += PresentEmplacedWeapon.apply(node, snap, base, false)
+			else:
+				# No ctrl channels on this node: clear/apply are permanent no-ops.
+				_apply_procedural_part(node, snap, base)
 		if _drive_visibility:
 			# Death is not disappearance: a dead ORGANIC keeps rendering as a corpse
 			# (its death anim holds the last frame) until the sim despawns it via
@@ -129,8 +165,10 @@ func present_snapshot(
 				node.visible = visible
 			if not visible:
 				_stats.hidden += 1
-		_apply_body_anim(node, snap, base)
-		_push_muzzle(node, int(snap[base + NovaSimulation.PF_NET_ID]))
+		_apply_body_anim(node, snap, base, caps)
+		var net_id := int(snap[base + NovaSimulation.PF_NET_ID])
+		if net_id > 0:
+			_push_muzzle(node, net_id)
 
 
 func _current_index_generation() -> int:
@@ -174,6 +212,9 @@ func _rebuild_row_plan(
 	_row_kinds.clear()
 	_row_indices.clear()
 	_row_nodes.clear()
+	_row_caps.clear()
+	_row_aim_valid.clear()
+	_row_rhc.clear()
 	_row_plan_revision = layout_revision
 	_row_plan_stride = stride
 	_row_plan_snapshot_size = snap.size()
@@ -194,6 +235,25 @@ func _rebuild_row_plan(
 		_row_kinds.append(kind)
 		_row_indices.append(index)
 		_row_nodes.append(node)
+		# Capability lookups are stable per node script: resolve them once per
+		# topology change so the per-frame loop never pays has_method() again.
+		var caps := 0
+		if node.has_method("play_body_clip_at"):
+			caps |= CAP_BODY_CLIP
+		if node.has_method("play_body_anim_at"):
+			caps |= CAP_BODY_SLOT
+		if node.has_method("play_body_anim"):
+			caps |= CAP_BODY_PLAY
+		if node.has_method("set_aim_overlay"):
+			caps |= CAP_AIM
+		if node.has_method("set_right_hand_collapsed"):
+			caps |= CAP_RHC
+		if node.has_method("set_ctrl_value") and node.has_method("clear_ctrl_value"):
+			caps |= CAP_CTRL
+		_row_caps.append(caps)
+		# Last-applied edge state (-1 = unknown, first frame always applies).
+		_row_aim_valid.append(-1)
+		_row_rhc.append(-1)
 
 
 # The D-AI-6 muzzle seam: feed each posed model's gun-flash userpoint world position
@@ -252,19 +312,28 @@ func _apply_procedural_part(node, snap: PackedFloat32Array, base: int) -> void:
 # the skeleton is posed to the exact phase that produced root motion, so idles stay planted instead
 # of host-side free-running against a separately advanced root track. PF_BODY_ANIM_SLOT is the
 # coarse fallback path for compatible non-infantry nodes.
-func _apply_body_anim(node, snap: PackedFloat32Array, base: int) -> void:
-	var anim_phase := int(snap[base + NovaSimulation.PF_ANIM_PHASE_TICKS])
+func _apply_body_anim(node, snap: PackedFloat32Array, base: int, caps: int) -> void:
 	var anim_state := int(snap[base + NovaSimulation.PF_ANIM_STATE])
-	if anim_state >= 0 and node.has_method("play_body_clip_at"):
-		var key := NovaSimulation.infantry_anim_key(anim_state)
+	if anim_state >= 0 and (caps & CAP_BODY_CLIP):
+		var key := _infantry_key(anim_state)
 		if not key.is_empty():
-			node.play_body_clip_at(key, anim_phase)
+			node.play_body_clip_at(
+					key, int(snap[base + NovaSimulation.PF_ANIM_PHASE_TICKS]))
 			return
 	var body_anim_slot := int(snap[base + NovaSimulation.PF_BODY_ANIM_SLOT])
 	if body_anim_slot < 0:
 		return
-	if node.has_method("play_body_anim_at"):
-		node.play_body_anim_at(body_anim_slot, anim_phase)
+	if caps & CAP_BODY_SLOT:
+		node.play_body_anim_at(
+				body_anim_slot, int(snap[base + NovaSimulation.PF_ANIM_PHASE_TICKS]))
 		return
-	if node.has_method("play_body_anim"):
+	if caps & CAP_BODY_PLAY:
 		node.play_body_anim(body_anim_slot)
+
+
+static func _infantry_key(state: int) -> String:
+	var key = _infantry_key_cache.get(state)
+	if key == null:
+		key = NovaSimulation.infantry_anim_key(state)
+		_infantry_key_cache[state] = key
+	return key
