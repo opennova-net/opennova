@@ -30,6 +30,13 @@ const ZONE_RADIUS := 18.0   # metres of a capture-zone ring
 const KILL_SIZE := 2.0      # metres of a kill-X arm
 const NONE_HANDLE := 65535  # the 0xFFFF "no entity" sentinel get_events() carries
 
+# Zone-event aux bit: the zone has been cleared and stops drawing (mirrors the
+# viewer's zoneStates()).
+const ZONE_CLEARED_AUX_BIT := 0x20
+# Capture-zone icon ids -> team (g_minimap_overlay_color_table, net-re §5.19).
+const ZONE_ICON_RED := 0x09
+const ZONE_ICON_BLUE := 0x0a
+
 const COL_FIRE := Color(1.0, 0.82, 0.29)
 const COL_HIT := Color(1.0, 0.35, 0.35)
 const COL_KILL := Color(1.0, 0.48, 0.09)
@@ -152,7 +159,7 @@ func _draw_kill(e: Dictionary, frame: int, alpha: float) -> void:
 
 
 # Latest capture-zone state per source at/under `frame`, drawn as a coloured ring;
-# a cleared zone (aux & 0x20) draws nothing. Mirrors the viewer's zoneStates().
+# a cleared zone draws nothing. Mirrors the viewer's zoneStates().
 func _draw_zones(events: Array, frame: int) -> void:
 	var latest := {}
 	for e in events:
@@ -161,7 +168,7 @@ func _draw_zones(events: Array, frame: int) -> void:
 		latest[int(e.get("source", NONE_HANDLE))] = e
 	for src in latest:
 		var e: Dictionary = latest[src]
-		if int(e.get("aux", 0)) & 0x20:
+		if int(e.get("aux", 0)) & ZONE_CLEARED_AUX_BIT:
 			continue
 		var pm = _event_or_entity_pos(e, src, frame)
 		if pm == null:
@@ -185,8 +192,7 @@ func _event_or_entity_pos(e: Dictionary, handle, frame: int):
 
 
 func _zone_color(icon: int) -> Color:
-	# Capture-zone icon colour -> team (g_minimap_overlay_color_table, §5.19).
 	match icon:
-		0x09: return COL_RED
-		0x0a: return COL_BLUE
+		ZONE_ICON_RED: return COL_RED
+		ZONE_ICON_BLUE: return COL_BLUE
 		_: return COL_NEUTRAL
