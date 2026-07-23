@@ -163,6 +163,16 @@ var _rnd_list: ItemList
 var _rnd_trails_check: CheckBox
 var _rnd_hitbox_check: CheckBox
 
+# Net pane: the sim's net-session state — every session is a listen server
+# (ADR 0011), so this shows which ROLE this sim runs (SP local loopback, LAN
+# host with a bound socket + peers, or joiner with its connect phase), read
+# off the sim's public net accessors each refresh. Read-only, no toggles.
+var _net_status_label: Label
+var _net_list: ItemList
+var _net_rows_signature := ""
+# npruntime JoinerConnection::Phase, surfaced by NovaSimulation.get_joiner_phase().
+const JOINER_PHASE_NAMES := ["Idle", "Hello", "Auth", "Driving", "InMatch", "Error"]
+
 
 # Player pane: the authoritative local-player pose plus a one-click disk dump.
 var _player_mission_label: Label
@@ -288,6 +298,7 @@ func _build_panel() -> void:
 	_build_particles_tab()
 	_build_occlusion_tab()
 	_build_rounds_tab()
+	_build_net_tab()
 	_build_perf_tab()
 	_build_player_tab()
 	_build_view_tab()
@@ -441,6 +452,28 @@ func _build_rounds_tab() -> void:
 	_rnd_hitbox_check.button_pressed = false
 	_rnd_hitbox_check.toggled.connect(_on_hitbox_debug_toggled)
 	tab.add_child(_rnd_hitbox_check)
+
+
+# The net-session inspector: which net role this sim runs (every session is a
+# listen server — ADR 0011), the host's session row + bound port + peer count,
+# and the joiner's connect phase / self wire handle / error. Read-only.
+func _build_net_tab() -> void:
+	var tab := VBoxContainer.new()
+	tab.name = "Net"
+	tab.add_theme_constant_override("separation", 6)
+	_tabs.add_child(tab)
+
+	_net_status_label = Label.new()
+	_net_status_label.name = "NetStatus"
+	_net_status_label.text = "No net session."
+	_net_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	tab.add_child(_net_status_label)
+
+	_net_list = ItemList.new()
+	_net_list.name = "NetDetails"
+	_net_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_net_list.focus_mode = Control.FOCUS_NONE
+	tab.add_child(_net_list)
 
 
 # Render-debug toggles. Unlike the other tabs these don't read the sim: the checkbox holds
@@ -641,6 +674,8 @@ func _refresh() -> void:
 	_refresh_occlusion(sim)
 	# The rounds pane reads the RoundSim debug ring the same way.
 	_refresh_rounds(sim)
+	# The net pane reads the sim's public net accessors and self-clears.
+	_refresh_net(sim)
 	# The other tabs stay usable without a sim too: the panes that need one
 	# clear to their empty states (their handlers already null-check).
 	if not live:
@@ -1118,6 +1153,52 @@ func _clear_rounds_pane(message: String) -> void:
 	_rnd_status_label.text = message
 	if _rnd_list.item_count > 0:
 		_rnd_list.clear()
+
+
+func _refresh_net(sim: Object) -> void:
+	if _net_status_label == null:
+		return
+	if sim == null or not sim.has_method("is_joiner"):
+		_clear_net_pane("No net session.")
+		return
+	var rows := PackedStringArray()
+	if bool(sim.is_joiner()):
+		var phase := int(sim.get_joiner_phase())
+		var phase_name: String = JOINER_PHASE_NAMES[phase] \
+				if phase >= 0 and phase < JOINER_PHASE_NAMES.size() else str(phase)
+		_net_status_label.text = "Joiner — connect phase %s" % phase_name
+		rows.append("in match: %s" % ("yes" if bool(sim.is_joined_in_match()) else "no"))
+		rows.append("self wire handle: %d" % int(sim.get_joiner_self_handle()))
+		var join_error := String(sim.get_join_error())
+		if not join_error.is_empty():
+			rows.append("error: %s" % join_error)
+		rows.append("server: %s" % String(sim.get_join_server_name()))
+		rows.append("mission: %s (%s)" % [String(sim.get_join_mission_name()),
+				String(sim.get_join_mission_file())])
+	elif bool(sim.is_host_listening()):
+		_net_status_label.text = "Host — listening on UDP %d, %d peer(s)" % [
+				int(sim.get_host_listen_port()), int(sim.get_host_peer_count())]
+		var config: Dictionary = sim.get_host_session_config()
+		for key in ["server_name", "mission", "game_type", "gametype",
+				"max_players", "dedicated", "net_transport"]:
+			if config.has(key):
+				rows.append("%s: %s" % [key, str(config[key])])
+	else:
+		_net_status_label.text = "Local listen server (no bound socket) — SP session."
+	# Rebuild the rows only when they change (ItemList rebuilds are the cost).
+	var signature := "\n".join(rows)
+	if signature != _net_rows_signature:
+		_net_rows_signature = signature
+		_net_list.clear()
+		for row in rows:
+			_net_list.add_item(row, null, false)
+
+
+func _clear_net_pane(message: String) -> void:
+	_net_status_label.text = message
+	_net_rows_signature = ""
+	if _net_list != null and _net_list.item_count > 0:
+		_net_list.clear()
 
 
 func _on_round_debug_toggled(pressed: bool) -> void:

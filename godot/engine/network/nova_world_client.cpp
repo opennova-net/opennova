@@ -98,6 +98,7 @@ void NovaWorldClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_state"), &NovaWorldClient::get_state);
 	ClassDB::bind_method(D_METHOD("is_session_active"), &NovaWorldClient::is_session_active);
 	ClassDB::bind_method(D_METHOD("get_server_info"), &NovaWorldClient::get_server_info);
+	ClassDB::bind_method(D_METHOD("get_session_debug"), &NovaWorldClient::get_session_debug);
 	ClassDB::bind_method(D_METHOD("get_server_rows"), &NovaWorldClient::get_server_rows);
 	ClassDB::bind_method(D_METHOD("refresh_server_list"), &NovaWorldClient::refresh_server_list);
 	ClassDB::bind_method(D_METHOD("login", "username", "password"), &NovaWorldClient::login);
@@ -147,6 +148,26 @@ void NovaWorldClient::set_player_name(const String &name) { player_name_ = name;
 String NovaWorldClient::get_player_name() const { return player_name_; }
 
 Dictionary NovaWorldClient::get_server_info() const { return server_info_; }
+
+void NovaWorldClient::trace(const String &line) {
+	if (trace_ring_.size() >= kTraceRingCap) {
+		trace_ring_.remove_at(0);
+	}
+	trace_ring_.push_back(line);
+}
+
+Dictionary NovaWorldClient::get_session_debug() const {
+	Dictionary out;
+	out["state"] = String(state_name(state_));
+	out["gate"] = host_ + String(":") + String::num_int64(gate_port_);
+	out["session_endpoint"] =
+			nw_udp_host_ + String(":") + String::num_int64(static_cast<int64_t>(nw_udp_port_));
+	out["web_domain"] = nw_web_domain_;
+	out["server_rows"] = server_rows_.size();
+	out["gsb_in_flight"] = gsb_request_in_flight_;
+	out["trace"] = trace_ring_;
+	return out;
+}
 
 void NovaWorldClient::_ready() {
 	set_process(true);
@@ -334,7 +355,7 @@ void NovaWorldClient::poll_gate() {
 		info["udp_code2"] = String(parsed.udp_code2.c_str());
 		info["met_label"] = String(parsed.met_label.c_str());
 		server_info_ = info;
-		UtilityFunctions::print(String("[NovaWorldClient] gate response: udp_code1='")
+		trace(String("gate response: udp_code1='")
 		    + String(parsed.udp_code1.c_str()) + "' udp_code2='"
 		    + String(parsed.udp_code2.c_str()) + "' (empty => live NW likely needs login)");
 		emit_signal("server_info_received", info);
@@ -402,7 +423,7 @@ void NovaWorldClient::begin_session() {
 	identity_vars_ = opennova::make_lobby_identity_vars(idp);
 	cfg.verify_cookie_vars = identity_vars_;
 
-	UtilityFunctions::print(String("[NovaWorldClient] 0x42 join carries ")
+	trace(String("0x42 join carries ")
 	    + String::num_int64(static_cast<int64_t>(cfg.cu_vars.size()))
 	    + " CU chunks; verify carries "
 	    + String::num_int64(static_cast<int64_t>(cfg.verify_cookie_vars.size()))
@@ -445,7 +466,7 @@ void NovaWorldClient::send_nw_datagram(const std::vector<uint8_t> &dg) {
 	// the server keys its session by our (ip, port), so a changing local_port
 	// between the ClientHello and ClientAuth would make the server drop the
 	// join with no reply (opennova-int handle_client_join: "No session found").
-	UtilityFunctions::print(String("[NovaWorldClient] >> sent ")
+	trace(String(">> sent ")
 	    + String::num_int64(static_cast<int64_t>(dg.size())) + "B op=" + String(op_buf)
 	    + " to " + nw_udp_host_ + ":"
 	    + String::num_int64(static_cast<int64_t>(nw_udp_port_)) + " local_port="
@@ -489,15 +510,14 @@ void NovaWorldClient::poll_session() {
 		// "[domainname]". This is what makes the HTTP login/GSB/join target real NW.
 		if (nw_web_domain_.is_empty() && !session_->server_web_domain().empty()) {
 			nw_web_domain_ = String(session_->server_web_domain().c_str());
-			UtilityFunctions::print(String("[NovaWorldClient] web host (SessionInit): ")
-			    + nw_web_domain_);
+			trace(String("web host (SessionInit): ") + nw_web_domain_);
 		}
 
 		// Diagnostics: a recv line for every inbound datagram. If state doesn't
 		// advance (e.g. auth->auth) with ok=1 and replies=0, the datagram was
 		// an unexpected opcode the session ignored; if no recv line appears
 		// after the ClientAuth send, the server sent nothing (or it was lost).
-		String msg = String("[NovaWorldClient] << recv ")
+		String msg = String("<< recv ")
 		    + String::num_int64(static_cast<int64_t>(bytes.size())) + "B op=" + String(op_buf)
 		    + " from " + src_ip + ":"
 		    + String::num_int64(static_cast<int64_t>(src_port)) + " state "
@@ -516,7 +536,7 @@ void NovaWorldClient::poll_session() {
 			              static_cast<int>(session_->server_scrk().size()));
 			msg += String(sk_buf);
 		}
-		UtilityFunctions::print(msg);
+		trace(msg);
 
 		for (const auto &dg : replies) {
 			send_nw_datagram(dg);
@@ -635,7 +655,7 @@ void NovaWorldClient::trigger_gsb() {
 	}
 	if (ship_spec(browser_http_, spec) != OK) {
 		gsb_request_in_flight_ = false;
-		UtilityFunctions::print(String("[NovaWorldClient] GSB request did not start: ")
+		UtilityFunctions::push_warning(String("[NovaWorldClient] GSB request did not start: ")
 			+ String(spec.url.c_str()));
 		return;
 	}
@@ -652,7 +672,7 @@ void NovaWorldClient::on_gsb_request_completed(int result, int response_code,
 	opennova::GsbResponse parsed;
 	if (!flow_.on_gsb_response(result == HTTPRequest::RESULT_SUCCESS, response_code,
 	                           from_pba(body), parsed)) {
-		UtilityFunctions::print(String("[NovaWorldClient] GSB fetch failed result=")
+		UtilityFunctions::push_warning(String("[NovaWorldClient] GSB fetch failed result=")
 			+ String::num_int64(result) + " code=" + String::num_int64(response_code));
 		return;
 	}
@@ -677,8 +697,7 @@ void NovaWorldClient::on_gsb_request_completed(int result, int response_code,
 		rows.push_back(row);
 	}
 	server_rows_ = rows;
-	UtilityFunctions::print(String("[NovaWorldClient] server browser: ")
-		+ String::num_int64(rows.size()) + " server(s)");
+	trace(String("server browser: ") + String::num_int64(rows.size()) + " server(s)");
 	emit_signal("server_list_updated", server_rows_);
 }
 
@@ -726,7 +745,7 @@ void NovaWorldClient::on_login_request_completed(int result, int response_code,
 		}
 		break;
 	case opennova::LoginResult::Kind::Succeeded:
-		UtilityFunctions::print(String("[NovaWorldClient] logged in as ")
+		trace(String("logged in as ")
 			+ String(r.nwhandle.c_str()) + " (PCID " + String(r.pcid.c_str()) + ")");
 		emit_signal("login_succeeded", String(r.nwhandle.c_str()));
 		trigger_gsb();  // re-fetch the browser now authenticated (NWHANDLE/PCID ride along)
@@ -781,8 +800,7 @@ void NovaWorldClient::on_join_request_completed(int result, int response_code,
 		}
 		break;
 	case opennova::JoinResult::Kind::Resolved:
-		UtilityFunctions::print(String("[NovaWorldClient] join resolved host ")
-			+ String(r.host_ip.c_str()) + ":"
+		trace(String("join resolved host ") + String(r.host_ip.c_str()) + ":"
 			+ String::num_int64(static_cast<int64_t>(r.host_port)));
 		resolve_join_target(String(r.host_ip.c_str()), r.host_port);
 		break;
@@ -803,7 +821,7 @@ void NovaWorldClient::on_join_request_completed(int result, int response_code,
 // hello and stop" dead-end that never reached gameplay). LAN, NW-routed, and env joins now converge
 // on the one joiner seam (ADR 0009; .agents/README.md "do not create a second gameplay network path").
 void NovaWorldClient::resolve_join_target(const String &host, uint16_t port) {
-	UtilityFunctions::print(String("[NovaWorldClient] join target resolved ") + host + ":"
+	trace(String("join target resolved ") + host + ":"
 		+ String::num_int64(static_cast<int64_t>(port))
 		+ " — handing off to the in-match joiner (NovaSimulation owns the ClientHello)");
 	enter_state(STATE_IN_GAME_HELLO);
@@ -814,8 +832,7 @@ void NovaWorldClient::enter_state(State next, const String &reason) {
 	if (state_ == next) return;
 	const State previous = state_;
 	state_ = next;
-	UtilityFunctions::print(
-		String("[NovaWorldClient] ") + state_name(previous) + " -> " + state_name(next)
+	trace(String(state_name(previous)) + " -> " + state_name(next)
 		+ (reason.is_empty() ? String() : (String(" (") + reason + String(")"))));
 	emit_signal("state_changed", static_cast<int>(state_));
 	if (next == STATE_CONNECTED) {
