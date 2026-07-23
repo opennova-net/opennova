@@ -362,6 +362,18 @@ class PanmDataPlacer:
 		return expose_occlusion and panm_data != null and panm_data.has_occlusion()
 
 
+class PanmRuntimeModel:
+	extends NovaObjectModel
+	var robj_eval_count := 0
+
+	func _apply_robj_transforms() -> bool:
+		robj_eval_count += 1
+		return false
+
+	func run_runtime_frame(delta: float = 0.016) -> void:
+		_process(delta)
+
+
 const ARMRY_3DI := "res://../fixtures/3dp/armry01/Armry01.3di"
 
 
@@ -497,3 +509,46 @@ func test_place_single_routes_live_panm_graphic_to_a_live_model() -> void:
 	assert_eq(int(delta.get("animated", -1)), 1,
 		"place_single routes a live-PANM graphic to a live model")
 	assert_eq(int(delta.get("batched", -1)), 0, "not to a single-instance batch")
+
+
+func test_inert_panm_model_applies_robj_base_once_not_every_frame() -> void:
+	var data := _armry_data(false)
+	assert_not_null(data, "inert PANM fixture loads")
+	if data == null:
+		return
+	assert_false(data.has_live_panm_for_lod(0), "fixture PANM is exactly inert")
+	var model := PanmRuntimeModel.new()
+	add_child_autofree(model)
+	model.set_object_data(data)
+	var build_evals := model.robj_eval_count
+	assert_eq(build_evals, 1, "rebuild applies the authored ROBJ base pose exactly once")
+
+	model.run_runtime_frame()
+	model.run_runtime_frame()
+
+	assert_eq(model.robj_eval_count, build_evals,
+			"inert ROBJ transforms are retained instead of re-evaluated per frame")
+	model.set_ctrl_value("test_mutation", 123)
+	assert_eq(model.robj_eval_count, build_evals + 1,
+			"an exact runtime mutator still forces one defensive ROBJ refresh")
+	model.run_runtime_frame()
+	assert_eq(model.robj_eval_count, build_evals + 1,
+			"the mutation refresh does not turn back into continuous work")
+
+
+func test_live_panm_model_keeps_evaluating_robj_each_frame() -> void:
+	var data := _armry_data(true)
+	assert_not_null(data, "live PANM fixture loads")
+	if data == null:
+		return
+	assert_true(data.has_live_panm_for_lod(0), "fixture carries a live PANM track")
+	var model := PanmRuntimeModel.new()
+	add_child_autofree(model)
+	model.set_object_data(data)
+	var build_evals := model.robj_eval_count
+
+	model.run_runtime_frame()
+	model.run_runtime_frame()
+
+	assert_eq(model.robj_eval_count, build_evals + 2,
+			"live time/register PANM retains one ROBJ evaluation per frame")

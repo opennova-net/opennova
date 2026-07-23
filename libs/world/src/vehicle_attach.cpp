@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include "world/ai.h"
+#include "world/collision.h"
 #include "world/world.h"
 
 namespace opennova::world {
@@ -215,6 +216,25 @@ bool scan_entity_rejected(World &world, const Entity &cand, const Entity &player
     return vehicle_has_enemy_occupant(world, cand, player);
 }
 
+// The scan container: the player's proximity slice when the per-tick tables are
+// live [orig: entity+444/448 @0x435d60], the registry sweep only for sliceless
+// worlds (headless callers that never ran the table build). An absent slice on
+// a live world scans nothing — retail's BSS-zero start behaves the same way.
+template <typename Fn>
+void for_each_scan_candidate(World &world, const Entity &player, Fn &&fn) {
+    CollisionWorld *cw = world.collision;
+    if (cw != nullptr && cw->attach_candidate_slices_authoritative()) {
+        int32_t n = 0;
+        const EntityHandle *slice = cw->candidate_slice(player.handle, n);
+        for (int32_t i = 0; i < n; ++i) {
+            const Entity *c = world.registry.get(slice[i]);
+            if (c != nullptr) fn(*c);
+        }
+        return;
+    }
+    world.registry.for_each(fn);
+}
+
 } // namespace
 
 bool find_nearest_free_seat(World &world, const Entity &player, NearestSeatHit &out,
@@ -256,9 +276,13 @@ bool find_nearest_free_seat(World &world, const Entity &player, NearestSeatHit &
         found = true;
     };
 
-    // The original walks the player's proximity list [orig: entity+444/448 @0x435d60]; the
-    // registry sweep is the container rebase — behavior-equal inside the 4.0 u gate.
-    world.registry.for_each([&](const Entity &cand) {
+    // The original walks the player's proximity list [orig: entity+444/448
+    // @0x435d60 — the slice Entity_BuildProximityListsFromPools fills @0x4b8eb0].
+    // for_each_scan_candidate below walks that same slice; the former
+    // whole-registry sweep (the container rebase) was behavior-equal inside the
+    // 4.0 u gate but ran O(world) per frame — and vehicle_has_enemy_occupant's
+    // own witnessed pool-0 scan per candidate multiplied it into O(world x pool).
+    for_each_scan_candidate(world, player, [&](const Entity &cand) {
         if (scan_entity_rejected(world, cand, player)) return;
         // While seated, the OWN vehicle's other seats are LOS-blocked by its hull in
         // retail (the ray walks pool-1 collision models) — that is why USE exits
@@ -315,7 +339,7 @@ void collect_attach_labels(World &world, const Entity &player, bool armory_mode,
         out.push_back(label);
     };
 
-    world.registry.for_each([&](const Entity &cand) {
+    for_each_scan_candidate(world, player, [&](const Entity &cand) {
         // A ready weapon limits labels to the nearest entity [orig: !Player_CanFireWeapon()
         // || entity == nearest_entity @0x5a3354].
         if (can_fire && cand.handle != nearest.vehicle) return;

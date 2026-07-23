@@ -111,6 +111,13 @@ class FakeSim:
 		return out
 
 
+class RevisionFakeSim:
+	extends FakeSim
+	var layout_revision := 1
+	func get_present_layout_revision() -> int:
+		return layout_revision
+
+
 class FakePlacer:
 	extends RefCounted
 	var built: Array[Node3D] = []
@@ -145,6 +152,18 @@ class EmptyIndex:
 	extends RefCounted
 	func resolve(_bms_id: int, _kind: int, _index: int):
 		return null
+
+
+class CountingDeferIndex:
+	extends RefCounted
+	var by_bms_id: Dictionary = {}
+	var resolve_calls := 0
+	var generation := 1
+	func resolve(bms_id: int, _kind: int, _index: int):
+		resolve_calls += 1
+		return by_bms_id.get(bms_id)
+	func get_generation() -> int:
+		return generation
 
 
 class SpawnObserver:
@@ -283,6 +302,93 @@ func test_live_slot_type_change_rebuilds_the_visual() -> void:
 	assert_eq(placer.attempts, [166, 167])
 	assert_ne(second, first, "recycled handle cannot keep the prior type model")
 	assert_eq(int(second.get_meta("entity_ref", {}).get("runtime_type_id", 0)), 167)
+
+
+func test_stable_host_layout_skips_repeat_defer_resolution() -> void:
+	var sim := RevisionFakeSim.new()
+	sim.entities = [{
+		"type_id": 166,
+		"handle": 0x1004,
+		"bms_id": 11,
+		"kind": 1,
+		"index": 0,
+	}]
+	var placed := Node3D.new()
+	add_child_autofree(placed)
+	var index := CountingDeferIndex.new()
+	index.by_bms_id = { 11: placed }
+	var placer := SelectiveFakePlacer.new()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var presenter := WirePresentPass.new()
+	presenter.setup(sim, placer, container, null, index)
+	presenter.present()
+	assert_eq(index.resolve_calls, 1)
+	assert_true(placer.attempts.is_empty(),
+			"the placed row remains owned by MissionPresentPass")
+
+	sim.entities[0]["x"] = 9.0
+	presenter.present()
+	assert_eq(index.resolve_calls, 1,
+			"stable topology with no wire nodes takes the empty fast path")
+
+	sim.entities[0] = {
+		"type_id": 167,
+		"handle": 0x1005,
+		"bms_id": 12,
+		"kind": -1,
+		"index": -1,
+	}
+	sim.layout_revision += 1
+	presenter.present()
+	assert_eq(index.resolve_calls, 2)
+	assert_eq(placer.attempts, [167],
+			"same-size placed-to-wire replacement rebuilds classification")
+
+
+func test_wire_plan_survives_reorder_then_prunes_and_rebuilds_reused_type() -> void:
+	var sim := RevisionFakeSim.new()
+	sim.entities = [
+		{"type_id": 166, "handle": 0x1004, "x": 4.0},
+		{"type_id": 167, "handle": 0x1005, "x": 5.0},
+	]
+	var placer := SelectiveFakePlacer.new()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var presenter := WirePresentPass.new()
+	presenter.setup(sim, placer, container)
+	presenter.present()
+	var first := presenter.resolve_wire_handle(0x1004)
+	var second := presenter.resolve_wire_handle(0x1005)
+
+	sim.entities = [
+		{"type_id": 167, "handle": 0x1005, "x": 50.0},
+		{"type_id": 166, "handle": 0x1004, "x": 40.0},
+	]
+	sim.layout_revision += 1
+	presenter.present()
+	assert_eq(presenter.resolve_wire_handle(0x1004), first)
+	assert_eq(presenter.resolve_wire_handle(0x1005), second)
+	assert_almost_eq(first.position.x, 40.0, 0.001)
+	assert_almost_eq(second.position.x, 50.0, 0.001)
+
+	sim.entities = [
+		{"type_id": 167, "handle": 0x1005, "x": 51.0},
+	]
+	sim.layout_revision += 1
+	presenter.present()
+	assert_null(presenter.resolve_wire_handle(0x1004),
+			"despawn prunes the retired row plan and visual")
+	assert_eq(presenter.entity_count(), 1)
+
+	sim.entities[0] = {"type_id": 168, "handle": 0x1005, "x": 60.0}
+	sim.layout_revision += 1
+	presenter.present()
+	var replacement := presenter.resolve_wire_handle(0x1005)
+	assert_ne(replacement, second,
+			"a recycled handle with a new type cannot retain the old visual")
+	assert_almost_eq(replacement.position.x, 60.0, 0.001)
+	assert_eq(placer.attempts, [166, 167, 168])
 
 
 func test_runtime_reset_rematerializes_the_restored_same_type_slot() -> void:

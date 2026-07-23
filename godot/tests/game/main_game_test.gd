@@ -103,6 +103,35 @@ func test_loading_background_query_is_false_without_a_live_handoff() -> void:
 			"the public loading-art query is safe while the shell is idle")
 
 
+func test_main_frame_probe_spans_are_default_off() -> void:
+	var game := _make()
+	var world := GameWorld.new()
+	var terrain := NovaTerrain.new()
+	terrain.name = "NovaTerrain"
+	world.add_child(terrain)
+	add_child_autofree(world)
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	world.set("_loaded", true)
+	game.set("_world", world)
+	game.set("_camera", camera)
+	game.set("_state", MainGameScript.State.WORLD)
+
+	game.call("_process", 0.0)
+	assert_true((game.get("_perf_probe_spans") as Dictionary).is_empty(),
+			"ordinary main frames make no clock reads or span writes")
+
+	game.call("set_perf_probe_enabled", true)
+	game.call("_process", 0.0)
+	var spans: Dictionary = game.get("_perf_probe_spans")
+	assert_true(spans.has_all(["before", "world", "after", "hud"]),
+			"an explicitly enabled probe captures each main-frame phase")
+
+	game.call("set_perf_probe_enabled", false)
+	assert_true((game.get("_perf_probe_spans") as Dictionary).is_empty(),
+			"probe teardown cannot leave stale measurements behind")
+
+
 func test_runtime_root_honors_the_persisted_game_profile() -> void:
 	_shell = await _make_packed_shell("jodemo")
 	if _shell == null:

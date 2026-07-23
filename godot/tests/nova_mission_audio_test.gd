@@ -24,50 +24,80 @@ class OcclusionProviderStub:
 		return raw_distance_q16
 
 
-func _marker(holder: Node3D, pos: Vector3, slot_sets: PackedStringArray,
-		players_by_set: Dictionary, stagger := 0.0, source_bms_id := 0) -> Dictionary:
+func _marker(pos: Vector3, slot_sets: PackedStringArray,
+		layers_by_set: Dictionary, stagger := 0.0, source_bms_id := 0) -> Dictionary:
 	return {
-		"node": holder,
 		"pos": pos,
 		"source_bms_id": source_bms_id,
 		"slot_sets": slot_sets,
 		"stagger_h": stagger,
-		"voices": players_by_set,
+		"layers_by_set": layers_by_set,
 	}
 
 
-func _voice(holder: Node3D, falloff: int, min_dist := 0, volume := 255, clamp_vol := 255) -> AudioStreamPlayer3D:
-	var player := AudioStreamPlayer3D.new()
-	player.volume_db = SILENT_DB
-	player.set_meta("layer_params", {
+func _layer(falloff: int, min_dist := 0, volume := 255, clamp_vol := 255) -> Dictionary:
+	var stream := AudioStreamWAV.new()
+	stream.format = AudioStreamWAV.FORMAT_16_BITS
+	stream.mix_rate = 22050
+	var samples := PackedByteArray()
+	samples.resize(32)
+	stream.data = samples
+	return {
+		"stream": stream,
 		"falloff_radius": falloff,
 		"min_distance": min_dist,
 		"volume": volume,
 		"clamp_volume": clamp_vol,
-	})
-	holder.add_child(player)
-	return player
+		"base_pitch": 1.0,
+	}
 
 
-func test_only_the_loudest_eight_voices_mix() -> void:
+func _players(container: Node) -> Array[AudioStreamPlayer3D]:
+	var out: Array[AudioStreamPlayer3D] = []
+	for value in container.find_children("*", "AudioStreamPlayer3D", true, false):
+		out.append(value as AudioStreamPlayer3D)
+	return out
+
+
+func _active_ids(container: Node) -> Array[int]:
+	var out: Array[int] = []
+	for player in _players(container):
+		if player.has_meta("ambient_candidate_id"):
+			out.append(int(player.get_meta("ambient_candidate_id")))
+	out.sort()
+	return out
+
+
+func _active_player(container: Node, candidate_id: int) -> AudioStreamPlayer3D:
+	for player in _players(container):
+		if int(player.get_meta("ambient_candidate_id", -1)) == candidate_id:
+			return player
+	return null
+
+
+func test_only_the_loudest_eight_candidates_mix() -> void:
 	var audio = NovaMissionAudioScript.new(null, null)
 	var holder := Node3D.new()
 	add_child_autofree(holder)
-	var players: Array[AudioStreamPlayer3D] = []
 	var markers: Array = []
 	# 12 markers on a line, nearer = louder under the witnessed (1 - d/r)^2 curve.
 	for i in range(12):
-		var p := _voice(holder, 2000)
-		players.append(p)
-		markers.append(_marker(holder, Vector3(float(10 + i * 50), 0, 0), ["amb", "amb", "amb", "amb"], {"amb": [p]}))
-	audio.set_markers(markers)
+		markers.append(_marker(
+			Vector3(float(10 + i * 50), 0, 0),
+			["amb", "amb", "amb", "amb"], {"amb": [_layer(2000)]}))
+	audio.set_markers(markers, holder)
+	assert_eq(_players(holder).size(), 0,
+		"virtual ambient candidates do not create SceneTree audio nodes")
 	audio.tick(Vector3.ZERO)
-	for i in range(12):
-		if i < 8:
-			assert_gt(players[i].volume_db, SILENT_DB, "voice %d (near) is in the 8-channel mix" % i)
-		else:
-			assert_eq(players[i].volume_db, SILENT_DB, "voice %d (far) is silenced by the budget" % i)
-	# Nearer voices are louder (quadratic falloff ordering).
+	var players := _players(holder)
+	assert_eq(players.size(), 8, "the physical ambient pool never exceeds its eight channels")
+	players.sort_custom(func(a, b): return a.position.x < b.position.x)
+	for i in players.size():
+		assert_eq(players[i].position.x, float(10 + i * 50),
+			"only the nearest eight virtual candidates occupy channels")
+		assert_gt(players[i].volume_db, SILENT_DB)
+		assert_eq(players[i].process_mode, Node.PROCESS_MODE_INHERIT)
+	# Nearer candidates are louder (quadratic falloff ordering).
 	assert_gt(players[0].volume_db, players[7].volume_db, "closest voice is loudest")
 
 
@@ -75,10 +105,12 @@ func test_beyond_falloff_radius_is_hard_silent() -> void:
 	var audio = NovaMissionAudioScript.new(null, null)
 	var holder := Node3D.new()
 	add_child_autofree(holder)
-	var p := _voice(holder, 100)
-	audio.set_markers([_marker(holder, Vector3(150, 0, 0), ["amb", "amb", "amb", "amb"], {"amb": [p]})])
+	audio.set_markers([_marker(
+		Vector3(150, 0, 0), ["amb", "amb", "amb", "amb"],
+		{"amb": [_layer(100)]})], holder)
 	audio.tick(Vector3.ZERO)
-	assert_eq(p.volume_db, SILENT_DB, "a voice at d >= falloff_radius is silent [orig: 0x75ca31]")
+	assert_eq(_players(holder).size(), 0,
+		"a candidate at d >= falloff_radius consumes no physical channel [orig: 0x75ca31]")
 
 
 func test_ambient_queries_occlusion_once_per_raw_audible_marker() -> void:
@@ -89,53 +121,54 @@ func test_ambient_queries_occlusion_once_per_raw_audible_marker() -> void:
 	audio.set_simulation(provider)
 	var holder := Node3D.new()
 	add_child_autofree(holder)
-	var near_a := _voice(holder, 100)
-	var near_b := _voice(holder, 100)
-	var far := _voice(holder, 100)
 	audio.set_markers([
-		_marker(holder, Vector3(10, 0, 0), ["amb", "amb", "amb", "amb"],
-			{"amb": [near_a, near_b]}, 0.0, 123),
-		_marker(holder, Vector3(150, 0, 0), ["amb", "amb", "amb", "amb"],
-			{"amb": [far]}, 0.0, 456),
-	])
+		_marker(Vector3(10, 0, 0), ["amb", "amb", "amb", "amb"],
+			{"amb": [_layer(100), _layer(100)]}, 0.0, 123),
+		_marker(Vector3(150, 0, 0), ["amb", "amb", "amb", "amb"],
+			{"amb": [_layer(100)]}, 0.0, 456),
+	], holder)
 
 	audio.tick(Vector3.ZERO)
 
 	assert_eq(provider.calls, 1,
-		"only the raw-audible marker queries once despite carrying two voices")
+		"only the raw-audible marker queries once despite carrying two layers")
 	assert_eq(provider.source_bms_ids, [123], "the audible marker keeps its source identity")
-	assert_gt(near_a.volume_db, SILENT_DB)
-	assert_gt(near_b.volume_db, SILENT_DB)
-	assert_eq(far.volume_db, SILENT_DB, "raw-silent marker remains outside the mix")
+	assert_eq(_players(holder).size(), 2)
+	for player in _players(holder):
+		assert_gt(player.volume_db, SILENT_DB)
 
 
 func test_time_of_day_slot_selects_the_active_set() -> void:
 	var audio = NovaMissionAudioScript.new(null, null)
 	var holder := Node3D.new()
 	add_child_autofree(holder)
-	var night := _voice(holder, 500)
 	# Night-only marker (a flourescent light): soundloop_4 filled, 1..3 empty.
-	audio.set_markers([_marker(holder, Vector3(10, 0, 0), ["", "", "", "night_hum"], {"night_hum": [night]})])
+	audio.set_markers([_marker(
+		Vector3(10, 0, 0), ["", "", "", "night_hum"],
+		{"night_hum": [_layer(500)]})], holder)
 
 	audio.set_time_of_day_hhmm(1200.0)  # noon -> region 1 (day) -> empty slot
 	audio.tick(Vector3.ZERO)
-	assert_eq(night.volume_db, SILENT_DB, "day region with an empty slot plays nothing")
+	assert_eq(_players(holder).size(), 0, "day region with an empty slot plays nothing")
 
 	audio.set_time_of_day_hhmm(2300.0)  # 23:00 -> region 3 (night)
 	audio.tick(Vector3.ZERO)
-	assert_gt(night.volume_db, SILENT_DB, "night region plays the night slot")
+	assert_eq(_players(holder).size(), 1)
+	assert_gt(_players(holder)[0].volume_db, SILENT_DB, "night region plays the night slot")
 
 
 func test_region_crossfade_scales_volume() -> void:
 	var audio = NovaMissionAudioScript.new(null, null)
 	var holder := Node3D.new()
 	add_child_autofree(holder)
-	var day := _voice(holder, 500)
-	var markers := [_marker(holder, Vector3(10, 0, 0), ["", "day_amb", "", ""], {"day_amb": [day]})]
-	audio.set_markers(markers)
+	var markers := [_marker(
+		Vector3(10, 0, 0), ["", "day_amb", "", ""],
+		{"day_amb": [_layer(500)]})]
+	audio.set_markers(markers, holder)
 
 	audio.set_time_of_day_hhmm(1200.0)  # mid-day: full blend
 	audio.tick(Vector3.ZERO)
+	var day := _players(holder)[0]
 	var full_db := day.volume_db
 	assert_gt(full_db, SILENT_DB)
 
@@ -150,12 +183,14 @@ func test_same_set_neighbours_suppress_the_crossfade_dip() -> void:
 	var audio = NovaMissionAudioScript.new(null, null)
 	var holder := Node3D.new()
 	add_child_autofree(holder)
-	var allday := _voice(holder, 500)
 	# The same set in every slot (a marker whose soundloop_1..4 all name one set).
-	audio.set_markers([_marker(holder, Vector3(10, 0, 0), ["amb", "amb", "amb", "amb"], {"amb": [allday]})])
+	audio.set_markers([_marker(
+		Vector3(10, 0, 0), ["amb", "amb", "amb", "amb"],
+		{"amb": [_layer(500)]})], holder)
 
 	audio.set_time_of_day_hhmm(1200.0)
 	audio.tick(Vector3.ZERO)
+	var allday := _players(holder)[0]
 	var full_db := allday.volume_db
 
 	audio.set_time_of_day_hhmm(1001.0)  # in the 10h blend window
@@ -168,21 +203,77 @@ func test_tick_writes_only_on_change() -> void:
 	var audio = NovaMissionAudioScript.new(null, null)
 	var holder := Node3D.new()
 	add_child_autofree(holder)
-	var p := _voice(holder, 500)
-	audio.set_markers([_marker(holder, Vector3(10, 0, 0), ["amb", "amb", "amb", "amb"], {"amb": [p]})])
+	audio.set_markers([_marker(
+		Vector3(10, 0, 0), ["amb", "amb", "amb", "amb"],
+		{"amb": [_layer(500)]})], holder)
 
 	audio.tick(Vector3.ZERO)
 	assert_eq(int(audio.get_perf_counters().get("voice_writes", -1)), 1, "first tick writes the voice on")
+	var p := _players(holder)[0]
+	var first_stream := p.stream
 
 	audio.tick(Vector3.ZERO)
 	assert_eq(int(audio.get_perf_counters().get("voice_writes", -1)), 0, "unchanged mix writes nothing")
+	assert_eq(_players(holder)[0], p, "the incumbent keeps its physical channel")
+	assert_eq(_players(holder)[0].stream, first_stream, "the incumbent playback is not restarted")
 
 	audio.tick(Vector3(2000, 0, 0))  # walk out of range
 	assert_eq(int(audio.get_perf_counters().get("voice_writes", -1)), 1, "leaving range writes the silence once")
 	assert_eq(p.volume_db, SILENT_DB)
+	assert_null(p.stream, "a dropout releases its bound stream")
+	assert_eq(p.process_mode, Node.PROCESS_MODE_DISABLED,
+		"an unused physical channel leaves SceneTree processing")
 
 	audio.tick(Vector3(2000, 0, 0))
 	assert_eq(int(audio.get_perf_counters().get("voice_writes", -1)), 0, "steady silence writes nothing")
+
+	audio.tick(Vector3.ZERO)
+	assert_eq(int(audio.get_perf_counters().get("voice_writes", -1)), 1,
+		"re-entering the mix binds and restarts the voice once")
+	assert_eq(_players(holder)[0], p, "the bounded pool reuses its free channel")
+	assert_ne(_players(holder)[0].stream, first_stream,
+		"a candidate that dropped out restarts with a fresh looping stream binding")
+	assert_eq(p.process_mode, Node.PROCESS_MODE_INHERIT,
+		"an audible entrant returns the physical channel to processing")
+
+	audio.tick(Vector3.ZERO)
+	assert_eq(int(audio.get_perf_counters().get("voice_writes", -1)), 0,
+		"the resumed steady mix stays write-free")
+
+
+func test_top_eight_membership_reuses_pool_and_restarts_only_entrants() -> void:
+	var audio = NovaMissionAudioScript.new(null, null)
+	var holder := Node3D.new()
+	add_child_autofree(holder)
+	var markers: Array = []
+	for i in range(12):
+		markers.append(_marker(
+			Vector3(float(i * 100), 0, 0), ["amb", "amb", "amb", "amb"],
+			{"amb": [_layer(2000)]}))
+	audio.set_markers(markers, holder)
+
+	audio.tick(Vector3.ZERO)
+	assert_eq(_active_ids(holder), [1, 2, 3, 4, 5, 6, 7, 8])
+	var candidate_one_stream := _active_player(holder, 1).stream
+	var pool_ids: Array[int] = []
+	for player in _players(holder):
+		pool_ids.append(player.get_instance_id())
+	pool_ids.sort()
+
+	audio.tick(Vector3(1100, 0, 0))
+	assert_eq(_active_ids(holder), [5, 6, 7, 8, 9, 10, 11, 12],
+		"the closest eight virtual candidates replace the four dropouts")
+	var moved_pool_ids: Array[int] = []
+	for player in _players(holder):
+		moved_pool_ids.append(player.get_instance_id())
+	moved_pool_ids.sort()
+	assert_eq(moved_pool_ids, pool_ids, "entrant replacement allocates no ninth channel")
+
+	audio.tick(Vector3.ZERO)
+	assert_eq(_active_ids(holder), [1, 2, 3, 4, 5, 6, 7, 8])
+	assert_ne(_active_player(holder, 1).stream, candidate_one_stream,
+		"a dropped candidate restarts when it becomes an entrant again")
+	assert_eq(_players(holder).size(), 8)
 
 
 func test_setup_dispatches_envs_items_across_entity_kinds() -> void:
@@ -240,10 +331,131 @@ end
 		"only the items.def envs class participates, regardless of BMS entity kind")
 	assert_eq(int(stats.get("markers_resolved", 0)), 1,
 		"an envs decoration/building resolves its ambient soundloop")
-	assert_gt(int(stats.get("voices", 0)), 0)
+	assert_gt(int(stats.get("ambient_candidates", 0)), 0)
+	assert_eq(int(stats.get("physical_channels", -1)), 0)
+	assert_eq(_players(container).size(), 0,
+		"mission setup stores marker/layer data without creating candidate nodes")
 	audio.tick(Vector3.ZERO)
+	assert_lte(_players(container).size(), NovaMissionAudioScript.MIX_CHANNELS)
+	assert_eq(int(audio.get_stats().get("physical_channels", -1)), _players(container).size())
 	assert_eq(provider.source_bms_ids, [int(env_building.get("bms_id", 0))],
 		"setup retains the authored emitter identity through the ambient LOS call")
+	audio.teardown()
+	_remove_dir_recursive(fixture_dir)
+
+
+func test_lazy_decode_failure_is_counted_and_falls_through_to_playable_candidate() -> void:
+	var fixture_dir := OS.get_cache_dir().path_join(
+		"mission_audio_bad_wav_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(fixture_dir)
+	var items := """begin "Bad ambient"
+  id 100001
+  type decoration
+  move_function envs
+  soundloop_1 BAD_AMB
+  soundloop_2 BAD_AMB
+  soundloop_3 BAD_AMB
+  soundloop_4 BAD_AMB
+end
+
+begin "Good ambient"
+  id 100002
+  type decoration
+  move_function envs
+  soundloop_1 GOOD_AMB
+  soundloop_2 GOOD_AMB
+  soundloop_3 GOOD_AMB
+  soundloop_4 GOOD_AMB
+end
+"""
+	_write_text(fixture_dir.path_join("items.def"), items)
+	_write_bytes(fixture_dir.path_join("bad.wav"), PackedByteArray([1, 2, 3, 4]))
+	_write_bytes(fixture_dir.path_join("good.wav"),
+		FileAccess.get_file_as_bytes(
+			ProjectSettings.globalize_path("res://../fixtures/menu_sound/selecta1.wav")))
+	var lwf := NovaLwfData.new()
+	lwf.create_empty()
+	_add_lwf_set(lwf, "BAD_AMB", "bad.wav", 2000)
+	_add_lwf_set(lwf, "GOOD_AMB", "good.wav", 2000)
+	assert_eq(lwf.save_file(fixture_dir.path_join("probe.LWF")), OK)
+
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(fixture_dir), OK)
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load_from_resource_root(root, "items.def"), OK)
+	var mission := NovaMissionData.new()
+	mission.create_default()
+	mission.add_entity(
+		NovaMissionData.KIND_BUILDING, 100001, Vector3(1, 0, 0), Vector3.ZERO)
+	mission.add_entity(
+		NovaMissionData.KIND_BUILDING, 100002, Vector3(10, 0, 0), Vector3.ZERO)
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var audio = NovaMissionAudioScript.new(root, item_db)
+	var stats: Dictionary = audio.setup(mission, "probe.bms", container)
+
+	assert_eq(int(stats.get("ambient_candidates", 0)), 2)
+	assert_eq(int(stats.get("ambient_candidates_validated", -1)), 0,
+		"setup remains descriptor-only and has not decoded either WAV")
+	assert_eq(int(stats.get("ambient_decode_failures", -1)), 0)
+	audio.tick(Vector3.ZERO)
+	assert_eq(int(stats.get("ambient_candidates_validated", -1)), 2)
+	assert_eq(int(stats.get("ambient_decode_failures", -1)), 1,
+		"the corrupt virtual candidate is visible in runtime stats")
+	assert_eq(_players(container).size(), 1,
+		"the next-ranked playable candidate receives the physical channel")
+	audio.teardown()
+	_remove_dir_recursive(fixture_dir)
+
+
+func test_repeated_setup_clears_dialog_dbf_queue_and_wac_voice() -> void:
+	var fixture_dir := OS.get_cache_dir().path_join(
+		"mission_audio_reuse_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(fixture_dir)
+	_write_bytes(fixture_dir.path_join("first.DBF"),
+		FileAccess.get_file_as_bytes(
+			ProjectSettings.globalize_path("res://../fixtures/dbf/00TRg.DBF")))
+	_write_bytes(fixture_dir.path_join("tone.wav"),
+		FileAccess.get_file_as_bytes(
+			ProjectSettings.globalize_path("res://../fixtures/menu_sound/selecta1.wav")))
+	var lwf := NovaLwfData.new()
+	lwf.create_empty()
+	_add_lwf_set(lwf, "Z00gR100", "tone.wav", 200)
+	assert_eq(lwf.save_file(fixture_dir.path_join("game.LWF")), OK)
+
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(fixture_dir), OK)
+	var mission := NovaMissionData.new()
+	mission.create_default()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var audio = NovaMissionAudioScript.new(root, null)
+	audio.setup(mission, "first.bms", container)
+	assert_eq(audio.resolve_dialog_set(1), "Z00gR100")
+	assert_true(audio.play_dialog(1))
+	var old_dialog: AudioStreamPlayer = audio.dialog_voice()
+	assert_not_null(old_dialog)
+	assert_true(audio.play_dialog(1), "a second line is queued behind the active voice")
+	assert_true(audio.play_wac_wave("tone.wav"))
+	var old_wac: AudioStreamPlayer = null
+	for value in container.find_children("*", "AudioStreamPlayer", true, false):
+		var player := value as AudioStreamPlayer
+		if player != old_dialog:
+			old_wac = player
+			break
+	assert_not_null(old_wac)
+
+	audio.setup(mission, "second.bms", container)
+	assert_null(audio.dialog_voice(), "the old mission's active dialog is released")
+	assert_eq(audio.resolve_dialog_set(1), "",
+		"a mission without a DBF cannot retain the previous mission's dialog mapping")
+	if old_dialog != null:
+		assert_false(old_dialog.playing)
+		old_dialog.finished.emit()
+	assert_null(audio.dialog_voice(),
+		"a late finished signal cannot pump the previous mission's queued dialog")
+	if old_wac != null:
+		assert_false(old_wac.playing, "the previous mission's WAC channel is stopped")
 	audio.teardown()
 	_remove_dir_recursive(fixture_dir)
 
@@ -282,6 +494,17 @@ func _write_bytes(path: String, value: PackedByteArray) -> void:
 	assert_not_null(file)
 	if file != null:
 		file.store_buffer(value)
+
+
+func _add_lwf_set(
+		lwf: NovaLwfData, set_name: String, wav_path: String,
+		falloff_radius: int) -> void:
+	var set_i := lwf.add_set()
+	lwf.set_set_field(set_i, "name", set_name)
+	var layer_i := lwf.add_layer(set_i)
+	lwf.set_layer_field(set_i, layer_i, "falloff_radius", falloff_radius)
+	var member_i := lwf.add_member(set_i, layer_i)
+	lwf.set_member_field(set_i, layer_i, member_i, "wav_path", wav_path)
 
 
 func _reverb_count(bus_idx: int) -> int:

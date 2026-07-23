@@ -11,11 +11,13 @@ const NovaSoundBankScript = preload("res://engine/world/nova_sound_bank.gd")
 class ResourceRootStub:
 	extends RefCounted
 	var files := {}  # filename(lower) -> PackedByteArray
+	var read_calls := 0
 
 	func has_file(name: String) -> bool:
 		return files.has(name.to_lower())
 
 	func read_file(name: String) -> PackedByteArray:
+		read_calls += 1
 		return files.get(name.to_lower(), PackedByteArray())
 
 
@@ -94,11 +96,30 @@ func test_spawn_ambient_loops_the_full_decoded_stream() -> void:
 	assert_not_null(player, "holder carries an AudioStreamPlayer3D voice")
 	if player == null:
 		return
-	assert_true(player.playing, "ambient voice is playing")
+	assert_eq(player.process_mode, Node.PROCESS_MODE_DISABLED,
+		"a dormant ambient candidate does not run internal spatial-audio physics")
 	var s: AudioStreamWAV = player.stream
 	assert_eq(s.loop_mode, AudioStreamWAV.LOOP_FORWARD, "ambient voice loops")
 	assert_eq(s.loop_begin, 0)
 	assert_eq(s.loop_end, 16, "loop region spans the full decoded stream")
+
+
+func test_ambient_description_defers_and_caches_wav_decode() -> void:
+	var root := ResourceRootStub.new()
+	var samples := PackedByteArray()
+	samples.resize(32)
+	root.files["z00ar100.wav"] = _build_wav(samples, 1, 22050, 16)
+	var bank = NovaSoundBankScript.new(root)
+	bank.add_bank(_profile_with_set("Z00AMB1", "Z00aR100.wav"))
+
+	var descriptors: Array = bank.describe_ambient("Z00AMB1")
+	assert_eq(descriptors.size(), 1)
+	assert_eq(root.read_calls, 0,
+		"describing a virtual ambient layer does not read or decode its WAV")
+	assert_not_null(bank.resolve_ambient_stream(descriptors[0]))
+	assert_eq(root.read_calls, 1, "the first selected candidate resolves lazily")
+	assert_not_null(bank.resolve_ambient_stream(descriptors[0]))
+	assert_eq(root.read_calls, 1, "the bank cache prevents a second VFS read")
 
 
 # --- The witnessed distance-volume curve [orig: SoundBank_CalcDistanceVolPan

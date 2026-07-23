@@ -2,7 +2,7 @@ extends SceneTree
 
 # Headless probe (NOT collected by GUT): runs the runtime mission-audio setup
 # (NovaMissionAudio) for one or more missions against a mounted install and
-# prints the per-mission stats — how many "snd:" markers resolved to voices and
+# prints the per-mission stats — how many "snd:" markers resolved to candidates and
 # which banks loaded. Used to compare stock vs mod missions when in-game
 # ambience is reported silent.
 #
@@ -58,13 +58,13 @@ func _run() -> void:
 		get_root().add_child(container)
 		var audio = NovaMissionAudioScript.new(root, item_db)
 		var stats: Dictionary = audio.setup(mission, m, container)
-		print("[probe] %-28s resolved %3d/%3d markers, %d banks, %d voices, %d dialogs" % [
+		print("[probe] %-28s resolved %3d/%3d markers, %d banks, %d candidates, %d dialogs" % [
 			m, int(stats.get("markers_resolved", 0)), int(stats.get("markers_total", 0)),
-			int(stats.get("banks_loaded", 0)), int(stats.get("voices", 0)),
+			int(stats.get("banks_loaded", 0)), int(stats.get("ambient_candidates", 0)),
 			int(stats.get("dialogs", 0))])
-		# A voice can exist yet be inaudible: a looping stream whose loop region is
-		# empty (loop_end <= loop_begin) wraps at sample 0 forever = silence. This
-		# is what "210 voices but no ambience in-game" looked like.
+		# Materialize only the current top-eight candidates, then verify the physical
+		# pool's loop regions. A loop_end <= loop_begin wraps at sample 0 forever.
+		audio.tick(Vector3.ZERO)
 		var loop_voices := 0
 		var loop_empty := 0
 		for p in container.find_children("*", "AudioStreamPlayer3D", true, false):

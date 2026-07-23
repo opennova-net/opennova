@@ -463,9 +463,9 @@ void OcclusionWorld::collect_buildings(World &world, CollisionWorld &collision,
         // Per-axis XY cull against the fog distance on the quantized prox
         // coords. [orig: @ 0x5c6bcb-0x5c6bff]
         const int32_t limit = (static_cast<int32_t>(slot.radius) << 16) + cam.fog_dist;
-        const int32_t dx = abs32((static_cast<int32_t>(slot.x) << 16) - cam.pos_fixed[0]);
+        const int32_t dx = abs32(static_slot_coord_q16(slot.x) - cam.pos_fixed[0]);
         if (dx > limit) continue;
-        const int32_t dy = abs32((static_cast<int32_t>(slot.y) << 16) - cam.pos_fixed[1]);
+        const int32_t dy = abs32(static_slot_coord_q16(slot.y) - cam.pos_fixed[1]);
         if (dy > limit) continue;
 
         Entity *e = world.registry.get(slot.h);

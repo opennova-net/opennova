@@ -77,6 +77,69 @@ func get_set_names() -> PackedStringArray:
 	return out
 
 
+## Return lightweight layer descriptors for the mission ambient mixer. No WAV
+## is read or decoded here: placed emitters remain data until one of the eight
+## physical channels actually needs the layer. The emitter path always uses
+## member 0 of each layer [orig: SoundEmitter_UpdateAndMixTop8 @ 0x528649].
+func describe_ambient(name: String) -> Array:
+	var loc := _find_set(name)
+	if loc.is_empty():
+		return []
+	var lwf = _banks[loc.bank]
+	var set_d: Dictionary = lwf.get_set(loc.set)
+	var layers: Array = set_d.get("layers", [])
+	var out: Array = []
+	for li in layers.size():
+		var layer_d: Dictionary = layers[li]
+		var members: Array = layer_d.get("members", [])
+		if members.is_empty():
+			continue
+		var member: Dictionary = members[0]
+		var wav_path := String(member.get("wav_path", ""))
+		if wav_path.is_empty():
+			continue
+		# Match _resolve_stream's basename lookup without paying its read/decode
+		# cost during mission setup. Corrupt data is rejected lazily and cached
+		# if the candidate first reaches the physical channel budget.
+		if _resource_root == null or not _resource_root.has_method("read_file"):
+			continue
+		if _resource_root.has_method("has_file") and not _resource_root.has_file(wav_path.get_file()):
+			continue
+		out.append({
+			"wav_path": wav_path,
+			"falloff_radius": int(layer_d.get("falloff_radius", 0)),
+			"min_distance": int(layer_d.get("min_distance", 0)),
+			"volume": int(member.get("volume", 255)),
+			"clamp_volume": int(member.get("clamp_volume", 255)),
+			"base_pitch": float(member.get("base_pitch", 1.0)),
+		})
+	return out
+
+
+## Resolve a descriptor returned by describe_ambient(). Description and decode
+## are separate so hundreds of candidates can be ranked while only selected
+## channel entrants cause VFS reads and WAV decoding.
+func resolve_ambient_stream(descriptor: Dictionary) -> AudioStreamWAV:
+	return _resolve_stream({"wav_path": String(descriptor.get("wav_path", ""))})
+
+
+## Bind a resolved stream to a reusable physical ambient channel. Playback is
+## owned by NovaMissionAudio: incumbents continue while new bindings restart.
+static func configure_ambient_player(
+		player: AudioStreamPlayer3D, stream: AudioStreamWAV,
+		descriptor: Dictionary, bus: StringName) -> void:
+	var loop_stream: AudioStreamWAV = stream.duplicate()
+	loop_stream.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	loop_stream.loop_begin = 0
+	loop_stream.loop_end = _stream_frames(loop_stream)
+	player.stream = loop_stream
+	player.attenuation_model = AudioStreamPlayer3D.ATTENUATION_DISABLED
+	if bus != StringName() and AudioServer.get_bus_index(bus) >= 0:
+		player.bus = bus
+	var base_pitch := float(descriptor.get("base_pitch", 1.0))
+	player.pitch_scale = base_pitch if base_pitch > 0.01 else 1.0
+
+
 ## Spawn the looping ambient voices for the named sound set at `world_pos`,
 ## parented under `parent`. One AudioStreamPlayer3D per layer, playing the
 ## layer's FIRST member — the emitter path does not run the selection machine
@@ -114,9 +177,16 @@ func spawn_ambient(parent: Node3D, world_pos: Vector3, name: String, bus: String
 			"volume": int(member.get("volume", 255)),
 			"clamp_volume": int(member.get("clamp_volume", 255)),
 		})
-		player.stream_paused = true
 		holder.add_child(player)
 		player.play()
+		# Ambient candidates are data until the top-eight mixer selects them.
+		# play() clears stream_paused, so pause only after starting the looping
+		# playback, then remove the silent player from SceneTree processing. An
+		# inherited AudioStreamPlayer3D keeps an internal physics callback alive
+		# even at -80 dB; dense missions otherwise revisit hundreds of silent
+		# candidates on every physics catch-up step.
+		player.stream_paused = true
+		player.process_mode = Node.PROCESS_MODE_DISABLED
 	return holder
 
 

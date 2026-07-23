@@ -5,10 +5,10 @@ extends RefCounted
 ## global banks into a NovaSoundBank, resolves each placed envs-class entity's
 ## time-of-day slot sets BY NAME (items.def soundloop_1..4 = morning/day/
 ## evening/night [orig: Entity_UpdateEnvSoundEmitter @ 0x4a8080]; the engine is
-## name-keyed — see docs/audio/lwf-dbf-sound-re.md), and spawns looping
-## AudioStreamPlayer3D voices at the marker. tick(camera_pos) runs the witnessed
+## name-keyed — see docs/audio/lwf-dbf-sound-re.md), and retains each layer as
+## lightweight candidate data. tick(camera_pos) runs the witnessed
 ## ambient emitter mix: per-voice two-radius distance volumes, region
-## crossfades, and the loudest-8 channel budget [orig:
+## crossfades, and an eight-player physical channel pool [orig:
 ## SoundEmitter_UpdateAndMixTop8 @ 0x5284a0]. Also exposes the PlayWavList
 ## action seam and the music/reverb bed.
 ##
@@ -70,12 +70,19 @@ var _simulation: Object = null  # NovaSimulation (occlusion LOS); optional
 var _bank: NovaSoundBank
 var _dbf  # NovaDbfData (mission co-named dialog bank; null if absent)
 var _audio_root: Node3D
-# Placed ambient markers ("snd:" items). Each carries the four time-of-day slot
-# set names (soundloop_1..4) and one spawned voice group per DISTINCT set; the
-# mix tick picks the active slot by region and drives volumes/pauses.
-# [{ node, pos:Vector3, slot_sets:PackedStringArray(4), stagger_h:float,
-#    voices:{set_name: Array[AudioStreamPlayer3D]} }]
+# Placed ambient markers ("snd:" items) are data, not scene nodes. Each carries
+# the four time-of-day slot set names and lightweight layer descriptors for each
+# distinct set. A candidate_id identifies one marker/set/layer for the lifetime
+# of the mission, allowing incumbents to retain playback across ranking ticks.
+# [{ pos:Vector3, slot_sets:PackedStringArray(4), stagger_h:float,
+#    layers_by_set:{set_name: Array[Dictionary]} }]
 var _markers: Array = []
+# At most MIX_CHANNELS entries: [{player:AudioStreamPlayer3D, candidate_id:int}].
+var _channels: Array = []
+var _next_candidate_id := 1
+var _failed_candidate_ids: Dictionary = {}
+var _validated_candidate_ids: Dictionary = {}
+var _warned_ambient_decode_failure := false
 var _strategy: int = STRATEGY_ITEM_SOUNDLOOP
 var _stats: Dictionary = {}
 var _time_of_day_hhmm: float = 1200.0  # HHMM like NovaEnvironment.time_of_day; noon default
@@ -102,14 +109,36 @@ func _init(resource_root, item_db) -> void:
 	_item_db = item_db
 
 
-## Load banks, spawn ambient marker voices under `container`, apply the reverb bed.
+## Load banks, describe ambient marker candidates under `container`, and apply the reverb bed.
 ## `mission_name` is the .bms filename (its basename selects the co-named .LWF).
 ## Returns a stats dictionary.
 func setup(mission, mission_name: String, container: Node3D) -> Dictionary:
-	_stats = {"markers_total": 0, "markers_resolved": 0, "banks_loaded": 0, "voices": 0}
+	_stats = {
+		"markers_total": 0,
+		"markers_resolved": 0,
+		"banks_loaded": 0,
+		"ambient_candidates": 0,
+		"ambient_candidates_validated": 0,
+		"ambient_decode_failures": 0,
+		"physical_channels": 0,
+		"channel_budget": MIX_CHANNELS,
+	}
 	if mission == null or container == null or _resource_root == null:
 		return _stats
 	var mission_info: Dictionary = mission.get_info()
+	# A repeated setup is not the normal host lifecycle, but it must not orphan
+	# an earlier physical pool or carry dialog state into the next mission.
+	_stop_all_ambient_channels()
+	_reset_mission_playback_state()
+	if _audio_root != null and is_instance_valid(_audio_root):
+		_audio_root.queue_free()
+	_audio_root = null
+	_markers.clear()
+	_channels.clear()
+	_failed_candidate_ids.clear()
+	_validated_candidate_ids.clear()
+	_warned_ambient_decode_failure = false
+	_next_candidate_id = 1
 
 	_bank = NovaSoundBank.new(_resource_root)
 	_bank.occlusion_provider = _simulation
@@ -158,39 +187,36 @@ func setup(mission, mission_name: String, container: Node3D) -> Dictionary:
 		if distinct.is_empty():
 			continue
 		var pos: Vector3 = MissionObjectPlacer.bms_to_godot_position(entity.get("position", Vector3.ZERO))
-		# One voice group per distinct time-of-day set; all spawn silent+paused
-		# and the mix tick activates the region's slot. The original registers
-		# only the CURRENT region's set each tick [orig: Entity_UpdateEnvSoundEmitter
-		# @ 0x4a81da]; persistent paused voices are the host equivalent.
-		var voices: Dictionary = {}
-		var voice_count := 0
-		var marker_node: Node3D = null
+		# Keep layer candidates as data. The original registers only the current
+		# region's set and has eight physical channels; it does not materialize a
+		# player for every marker/time-of-day layer [orig: @ 0x4a81da].
+		var layers_by_set: Dictionary = {}
+		var candidate_count := 0
 		for set_name in distinct:
-			var node := _bank.spawn_ambient(_audio_root, pos, set_name, AMBIENT_BUS)
-			if node == null:
+			var described: Array = _bank.describe_ambient(set_name)
+			if described.is_empty():
 				continue
-			if marker_node == null:
-				marker_node = node
-			var players: Array[AudioStreamPlayer3D] = []
-			for child in node.get_children():
-				if child is AudioStreamPlayer3D:
-					players.append(child)
-			voices[set_name] = players
-			voice_count += players.size()
-		if voices.is_empty():
+			var layers: Array = []
+			for layer_value in described:
+				var layer: Dictionary = (layer_value as Dictionary).duplicate()
+				layer["candidate_id"] = _next_candidate_id
+				_next_candidate_id += 1
+				layers.append(layer)
+			layers_by_set[set_name] = layers
+			candidate_count += layers.size()
+		if layers_by_set.is_empty():
 			continue
 		_markers.append({
-			"node": marker_node,
 			"pos": pos,
 			"source_bms_id": int(entity.get("bms_id", 0)),
 			"slot_sets": slot_sets,
 			# De-sync marker crossfades like the engine's per-entity clock
 			# stagger [orig: @ 0x408158 (poolHandle & 0xF) << 11 Q16 hours].
 			"stagger_h": float((_markers.size() & 0xF) << 11) / 65536.0,
-			"voices": voices,
+			"layers_by_set": layers_by_set,
 		})
 		_stats.markers_resolved += 1
-		_stats.voices += voice_count
+		_stats.ambient_candidates += candidate_count
 
 	# Silence here has historically gone unnoticed (a bare stats print) — warn on
 	# the two states that mean "no ambience will play" so they surface in logs.
@@ -212,11 +238,31 @@ func get_stats() -> Dictionary:
 
 
 ## Read/drive seams (ADR 0018): tests and diagnostics go through these, never
-## the private fields. set_markers injects fully-resolved marker entries (the
+## the private fields. set_markers injects fully-described marker entries (the
 ## shape _markers documents above) so the mix tick can be driven without a
-## mission; dialog_voice exposes the active serialized-dialog voice.
-func set_markers(markers: Array) -> void:
+## mission. `container` supplies a SceneTree home for the physical test channels.
+func set_markers(markers: Array, container: Node3D = null) -> void:
+	_stop_all_ambient_channels()
 	_markers = markers
+	_failed_candidate_ids.clear()
+	_validated_candidate_ids.clear()
+	_warned_ambient_decode_failure = false
+	_next_candidate_id = 1
+	if container != null and (_audio_root == null or not is_instance_valid(_audio_root)):
+		_audio_root = Node3D.new()
+		_audio_root.name = "MissionAudio"
+		container.add_child(_audio_root)
+	for marker_value in _markers:
+		var marker: Dictionary = marker_value
+		var layers_by_set: Dictionary = marker.get("layers_by_set", {})
+		for set_name in layers_by_set:
+			var layers: Array = layers_by_set[set_name]
+			for layer_value in layers:
+				var layer: Dictionary = layer_value
+				if not layer.has("candidate_id"):
+					layer["candidate_id"] = _next_candidate_id
+				_next_candidate_id = maxi(
+					_next_candidate_id, int(layer.get("candidate_id", 0)) + 1)
 
 
 func set_resolution_strategy(strategy: int) -> void:
@@ -228,10 +274,18 @@ func dialog_voice() -> AudioStreamPlayer:
 
 
 func get_perf_counters() -> Dictionary:
+	var active_channels := 0
+	for state_value in _channels:
+		var state: Dictionary = state_value
+		if int(state.get("candidate_id", -1)) >= 0:
+			active_channels += 1
 	return {
 		"tick_us": _perf_tick_us,
 		"markers": _perf_markers,
 		"voice_writes": _perf_voice_writes,
+		"physical_channels": _channels.size(),
+		"active_channels": active_channels,
+		"ambient_decode_failures": _failed_candidate_ids.size(),
 	}
 
 
@@ -392,12 +446,12 @@ func set_simulation(sim: Object) -> void:
 
 
 ## The per-frame ambient emitter mix [orig: SoundEmitter_UpdateAndMixTop8
-## @ 0x5284a0]: every marker voice computes its witnessed distance volume for
-## the CURRENT time-of-day slot, the loudest MIX_CHANNELS play, everything else
-## pauses. Volume = member volume x the region crossfade blend through the
+## @ 0x5284a0]: every virtual layer computes its witnessed distance volume for
+## the CURRENT time-of-day slot and the loudest MIX_CHANNELS bind to reusable
+## players. Everything else remains data. Volume = member volume x the region crossfade blend through the
 ## two-radius curve; a voice at or beyond its falloff radius is hard silent
-## (which is also the cull [orig: @ 0x5285da]). Persistent paused voices stand
-## in for the original's transient re-registered slots —
+## (which is also the cull [orig: @ 0x5285da]). Stable candidate IDs let selected
+## incumbents continue while an entrant restarts, matching transient registration —
 ## docs/audio/lwf-dbf-sound-re.md (D-SND-6, D-SND-8). Occlusion inflates the
 ## mixed distance through the sim's two-ray LOS [orig: the
 ## Sound_ApplyOcclusionDistance call @ 0x528659, after the range cull]; rays
@@ -410,16 +464,15 @@ func tick(camera_pos: Vector3) -> void:
 	var writes := 0
 	var hhmm := _time_of_day_hhmm
 	var base_hours := _hhmm_to_hours(hhmm)
-	var candidates: Array = []  # [{player, vol}]
-	var silent: Array[AudioStreamPlayer3D] = []
-	for m in _markers:
-		var holder: Node3D = m.node
-		if holder == null or not is_instance_valid(holder):
-			continue
+	var candidates: Array = []  # [{candidate_id, descriptor, pos, vol}]
+	for marker_value in _markers:
+		var m: Dictionary = marker_value
 		var tod := time_of_day_region(base_hours + float(m.stagger_h))
 		var region := int(tod.region)
 		var slot_sets: PackedStringArray = m.slot_sets
 		var active_set := String(slot_sets[region])
+		if active_set.is_empty():
+			continue
 		var blend := float(tod.blend)
 		# Neighbouring regions sharing the set keep full volume through the
 		# crossfade [orig: @ 0x4a819d same-slot check].
@@ -428,72 +481,215 @@ func tick(camera_pos: Vector3) -> void:
 		var vol_byte := crossfade_volume_byte(blend)
 		var dist_q16 := int((m.pos as Vector3).distance_to(camera_pos) * 65536.0)
 		var dist_occluded_q16 := -1  # lazy: at most one two-ray LOS per marker per tick
-		var voices: Dictionary = m.voices
-		for set_name in voices.keys():
-			var players: Array = voices[set_name]
-			var is_active: bool = String(set_name) == active_set and not active_set.is_empty()
-			for player in players:
-				if not (player is AudioStreamPlayer3D) or not is_instance_valid(player):
-					continue
-				var vol := 0
-				if is_active and player.has_meta("layer_params"):
-					var lp: Dictionary = player.get_meta("layer_params")
-					var falloff := int(lp.get("falloff_radius", 0))
-					var min_d := int(lp.get("min_distance", 0))
-					var member_vol := int(lp.get("volume", NovaSoundBank.VOLUME_BYTE_MAX))
-					var clamp_vol := int(lp.get("clamp_volume", NovaSoundBank.VOLUME_BYTE_MAX))
+		var layers_by_set: Dictionary = m.get("layers_by_set", {})
+		var layers: Array = layers_by_set.get(active_set, [])
+		for layer_value in layers:
+			var layer: Dictionary = layer_value
+			var falloff := int(layer.get("falloff_radius", 0))
+			var min_d := int(layer.get("min_distance", 0))
+			var member_vol := int(layer.get("volume", NovaSoundBank.VOLUME_BYTE_MAX))
+			var clamp_vol := int(layer.get("clamp_volume", NovaSoundBank.VOLUME_BYTE_MAX))
+			var vol := NovaSoundBank.emitter_layer_volume(
+				dist_q16, falloff, min_d, vol_byte, member_vol, clamp_vol)
+			if vol > 0 and _simulation != null:
+				if dist_occluded_q16 < 0:
+					dist_occluded_q16 = int(_simulation.sound_occlusion_distance_q16(
+						camera_pos, m.pos, dist_q16,
+						int(m.get("source_bms_id", 0))))
+				if dist_occluded_q16 != dist_q16:
 					vol = NovaSoundBank.emitter_layer_volume(
-						dist_q16, falloff, min_d, vol_byte, member_vol, clamp_vol)
-					if vol > 0 and _simulation != null:
-						if dist_occluded_q16 < 0:
-							dist_occluded_q16 = int(_simulation.sound_occlusion_distance_q16(
-								camera_pos, m.pos, dist_q16,
-								int(m.get("source_bms_id", 0))))
-						if dist_occluded_q16 != dist_q16:
-							vol = NovaSoundBank.emitter_layer_volume(
-								dist_occluded_q16, falloff, min_d, vol_byte, member_vol, clamp_vol)
-				if vol > 0:
-					candidates.append({"player": player, "vol": vol})
-				else:
-					silent.append(player)
-	# Loudest-first; only the top MIX_CHANNELS mix [orig: the top-8 sort
-	# @ 0x5287ab and the drop-out channel stop @ 0x528a70]. Writes are gated on
-	# volume_db (not stream_paused readback — the headless dummy audio driver
-	# always reads stream_paused back as false, which would defeat idempotence).
-	candidates.sort_custom(func(a, b): return int(a.vol) > int(b.vol))
-	for i in candidates.size():
-		var c: Dictionary = candidates[i]
-		var player: AudioStreamPlayer3D = c.player
-		if i < MIX_CHANNELS:
-			var db := NovaSoundBank.volume_db_from_255(int(c.vol))
-			if not is_equal_approx(player.volume_db, db):
-				player.volume_db = db
-				player.stream_paused = false
-				writes += 1
-		else:
-			silent.append(player)
-	for player in silent:
-		if player.volume_db > SILENT_DB:
-			player.volume_db = SILENT_DB
-			player.stream_paused = true
+						dist_occluded_q16, falloff, min_d,
+						vol_byte, member_vol, clamp_vol)
+			if vol > 0:
+				candidates.append({
+					"candidate_id": int(layer.get("candidate_id", 0)),
+					"descriptor": layer,
+					"pos": m.pos,
+					"vol": vol,
+				})
+
+	# Deterministic tie-breaking keeps membership stable when equally loud layers
+	# straddle the budget. A physical incumbent is never rebound merely because
+	# its rank within the selected eight changed.
+	candidates.sort_custom(func(a, b):
+		var av := int(a.vol)
+		var bv := int(b.vol)
+		return av > bv if av != bv else int(a.candidate_id) < int(b.candidate_id))
+	var incumbent_by_id: Dictionary = {}
+	for state_value in _channels:
+		var state: Dictionary = state_value
+		var incumbent_id := int(state.get("candidate_id", -1))
+		if incumbent_id >= 0:
+			incumbent_by_id[incumbent_id] = state
+
+	# Resolve streams only for new candidates that would enter the top eight.
+	# Failed/corrupt descriptors are cached out and the next-ranked candidate
+	# gets the channel, matching the old eager path's "unresolvable = absent".
+	var selected: Array = []
+	for candidate_value in candidates:
+		if selected.size() >= MIX_CHANNELS:
+			break
+		var candidate: Dictionary = candidate_value
+		var candidate_id := int(candidate.candidate_id)
+		if _failed_candidate_ids.has(candidate_id):
+			continue
+		if not incumbent_by_id.has(candidate_id):
+			var stream := _validate_candidate_stream(
+				candidate_id, candidate.descriptor)
+			if stream == null:
+				_failed_candidate_ids[candidate_id] = true
+				continue
+			candidate["resolved_stream"] = stream
+		selected.append(candidate)
+
+	var selected_ids: Dictionary = {}
+	for candidate_value in selected:
+		var candidate: Dictionary = candidate_value
+		selected_ids[int(candidate.candidate_id)] = true
+
+	# Dropouts release their physical slot. If the same virtual candidate later
+	# re-enters it is rebound and play() starts it from the beginning, like the
+	# original transient channel registration.
+	for state_value in _channels:
+		var state: Dictionary = state_value
+		var candidate_id := int(state.get("candidate_id", -1))
+		if candidate_id < 0 or selected_ids.has(candidate_id):
+			continue
+		var player: AudioStreamPlayer3D = state.player
+		player.stop()
+		player.stream = null
+		player.volume_db = SILENT_DB
+		player.process_mode = Node.PROCESS_MODE_DISABLED
+		player.remove_meta("ambient_candidate_id")
+		state["candidate_id"] = -1
+		writes += 1
+
+	for candidate_value in selected:
+		var candidate: Dictionary = candidate_value
+		var candidate_id := int(candidate.candidate_id)
+		var state: Dictionary = incumbent_by_id.get(candidate_id, {})
+		if state.is_empty():
+			state = _free_or_new_channel()
+			if state.is_empty():
+				continue
+			var player: AudioStreamPlayer3D = state.player
+			var stream: AudioStreamWAV = candidate.get("resolved_stream")
+			NovaSoundBank.configure_ambient_player(
+				player, stream, candidate.descriptor, AMBIENT_BUS)
+			player.position = candidate.pos
+			player.volume_db = NovaSoundBank.volume_db_from_255(int(candidate.vol))
+			player.process_mode = Node.PROCESS_MODE_INHERIT
+			player.set_meta("ambient_candidate_id", candidate_id)
+			state["candidate_id"] = candidate_id
+			player.play()
+			writes += 1
+			continue
+		var incumbent: AudioStreamPlayer3D = state.player
+		var changed := false
+		if incumbent.position != candidate.pos:
+			incumbent.position = candidate.pos
+			changed = true
+		var db := NovaSoundBank.volume_db_from_255(int(candidate.vol))
+		if not is_equal_approx(incumbent.volume_db, db):
+			incumbent.volume_db = db
+			changed = true
+		if changed:
 			writes += 1
 	_perf_markers = _markers.size()
 	_perf_voice_writes = writes
 	_perf_tick_us = Time.get_ticks_usec() - start
+	if not _stats.is_empty():
+		_stats["physical_channels"] = _channels.size()
+
+
+func _resolve_candidate_stream(descriptor: Dictionary) -> AudioStreamWAV:
+	var injected = descriptor.get("stream")
+	if injected is AudioStreamWAV:
+		return injected
+	if _bank == null:
+		return null
+	return _bank.resolve_ambient_stream(descriptor)
+
+
+func _validate_candidate_stream(
+		candidate_id: int, descriptor: Dictionary) -> AudioStreamWAV:
+	var first_validation := not _validated_candidate_ids.has(candidate_id)
+	var stream := _resolve_candidate_stream(descriptor)
+	if first_validation:
+		_validated_candidate_ids[candidate_id] = true
+		if not _stats.is_empty():
+			_stats["ambient_candidates_validated"] = _validated_candidate_ids.size()
+	if stream != null:
+		return stream
+	if not _stats.is_empty():
+		_stats["ambient_decode_failures"] = _failed_candidate_ids.size() + 1
+	if not _warned_ambient_decode_failure:
+		_warned_ambient_decode_failure = true
+		push_warning(
+			"NovaMissionAudio: ambient WAV '%s' failed to decode; excluding failed candidates from the eight-channel mix" %
+			String(descriptor.get("wav_path", "<injected>")))
+	return null
+
+
+func _free_or_new_channel() -> Dictionary:
+	for state_value in _channels:
+		var state: Dictionary = state_value
+		if int(state.get("candidate_id", -1)) < 0:
+			return state
+	if _channels.size() >= MIX_CHANNELS or _audio_root == null:
+		return {}
+	var player := AudioStreamPlayer3D.new()
+	player.name = "AmbientChannel%d" % _channels.size()
+	player.volume_db = SILENT_DB
+	player.process_mode = Node.PROCESS_MODE_DISABLED
+	_audio_root.add_child(player)
+	var state := {"player": player, "candidate_id": -1}
+	_channels.append(state)
+	return state
+
+
+func _stop_all_ambient_channels() -> void:
+	for state_value in _channels:
+		var state: Dictionary = state_value
+		var player: AudioStreamPlayer3D = state.player
+		if player != null and is_instance_valid(player):
+			player.stop()
+			player.stream = null
+			player.volume_db = SILENT_DB
+			player.process_mode = Node.PROCESS_MODE_DISABLED
+			player.remove_meta("ambient_candidate_id")
+		state["candidate_id"] = -1
+
+
+func _reset_mission_playback_state() -> void:
+	# Dialog and WAC voices are mission-owned even though they use separate
+	# physical players from ambience. Stop them before replacing/queuing their
+	# audio root so neither playback nor a queued dialog can cross missions.
+	if _dialog_voice != null and is_instance_valid(_dialog_voice):
+		_dialog_voice.stop()
+	if _wac_voice != null and is_instance_valid(_wac_voice):
+		_wac_voice.stop()
+	_dialog_queue.clear()
+	_dialog_voice = null
+	_wac_voice = null
+	_wac_wav_cache.clear()
+	_dbf = null
 
 
 func teardown() -> void:
 	# Dropping _audio_root frees the dialog + wac voice nodes too; just drop our refs
 	# so a late `finished` after teardown can't pump a freed queue.
 	_apply_reverb(0)
-	_dialog_queue.clear()
-	_dialog_voice = null
-	_wac_voice = null
-	_wac_wav_cache.clear()
+	_stop_all_ambient_channels()
+	_reset_mission_playback_state()
 	if _audio_root != null and is_instance_valid(_audio_root):
 		_audio_root.queue_free()
 	_audio_root = null
 	_markers.clear()
+	_channels.clear()
+	_failed_candidate_ids.clear()
+	_validated_candidate_ids.clear()
+	_warned_ambient_decode_failure = false
 	_bank = null
 
 

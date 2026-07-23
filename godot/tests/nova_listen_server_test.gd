@@ -277,6 +277,10 @@ func test_present_effect_lookup_matches_client_snapshot_and_reloads_cleanly() ->
 
 	var stride := sim.get_present_stride()
 	var snapshot: PackedFloat32Array = sim.get_present_snapshot()
+	var layout_revision := sim.get_present_layout_revision()
+	sim.get_present_snapshot()
+	assert_eq(sim.get_present_layout_revision(), layout_revision,
+			"re-reading an unchanged ordered identity layout keeps its revision")
 	var row_base := -1
 	for record in range(snapshot.size() / stride):
 		var base := record * stride
@@ -318,6 +322,11 @@ func test_present_effect_lookup_matches_client_snapshot_and_reloads_cleanly() ->
 				expected_position), "compact lookup keeps the decoded wire position")
 		assert_true(state[NovaSimulation.EFFECT_STATE_ROTATION_DEG].is_equal_approx(
 				expected_rotation), "compact lookup keeps the present-pass yaw conversion")
+	# A second identity in the same epoch resolves independently of the first
+	# lazily materialized owner.
+	var other_state: PackedVector3Array = \
+			sim.get_present_effect_state_for_origin(3, 0)
+	assert_eq(other_state.size(), NovaSimulation.EFFECT_STATE_COUNT)
 	assert_eq(sim.get_present_effect_state_for_wire_handle(-1).size(), 0,
 		"invalid wire identity stays absent")
 	assert_eq(sim.get_present_effect_state_for_bms_id(0).size(), 0,
@@ -327,6 +336,19 @@ func test_present_effect_lookup_matches_client_snapshot_and_reloads_cleanly() ->
 	assert_eq(sim.get_present_effect_state_for_origin(-1, 0).size(), 0,
 		"invalid origin identity stays absent")
 
+	# Every catch-up tick is a new decoded-client epoch. Re-resolve the moving
+	# owner from that tick's row.
+	sim.debug_set_entity_position(1, Vector3(70, 4, -3))
+	sim.step()
+	sim.get_present_snapshot()
+	assert_eq(sim.get_present_layout_revision(), layout_revision,
+			"pose-only movement does not invalidate presentation row routing")
+	var moved_state: PackedVector3Array = \
+			sim.get_present_effect_state_for_origin(3, 1)
+	assert_eq(moved_state.size(), NovaSimulation.EFFECT_STATE_COUNT)
+	assert_gt(moved_state[NovaSimulation.EFFECT_STATE_POSITION].distance_to(
+			expected_position), 30.0, "the next epoch resolves the moved client pose")
+
 	# A replacement world restarts both generation counters at the same values.
 	# The cache must still belong to the new presentation epoch.
 	var replacement := NovaMissionData.new()
@@ -334,12 +356,62 @@ func test_present_effect_lookup_matches_client_snapshot_and_reloads_cleanly() ->
 	replacement.add_entity(3, 0, Vector3(96, 4, -3), Vector3.ZERO)
 	assert_true(sim.load_from_mission_data(replacement))
 	sim.step()
+	sim.get_present_snapshot()
+	assert_ne(sim.get_present_layout_revision(), layout_revision,
+			"world replacement invalidates the exact ordered row topology")
 	var replacement_state: PackedVector3Array = \
 			sim.get_present_effect_state_for_origin(3, 0)
 	assert_eq(replacement_state.size(), NovaSimulation.EFFECT_STATE_COUNT)
 	assert_gt(replacement_state[NovaSimulation.EFFECT_STATE_POSITION].distance_to(
 			expected_position), 40.0,
 		"world replacement invalidates an equal-tick pose cache")
+	sim.free()
+
+
+func test_present_effect_missing_handle_retries_on_the_next_client_epoch() -> void:
+	var mission := NovaMissionData.new()
+	assert_eq(mission.create_default(), OK)
+	mission.add_entity(3, 0, Vector3(8, 0, 0), Vector3.ZERO)
+
+	var sim := NovaSimulation.new()
+	assert_true(sim.enable_host_listen(0))
+	assert_true(sim.load_from_mission_data(mission))
+	# Establish the host client's initial decoded epoch before admitting a peer.
+	sim.step()
+
+	var admitted_pos := Vector3(40, 0, 24)
+	var before := sim.get_entity_count()
+	assert_true(sim.admit_test_remote_peer(admitted_pos, 0.0, 2))
+	assert_eq(sim.get_entity_count(), before + 1)
+	var admitted_handle := 0
+	for entity_index in range(sim.get_entity_count()):
+		var entity_pos: Vector3 = sim.get_entity_position(entity_index)
+		if entity_pos.distance_to(admitted_pos) < 0.5 \
+				and sim.get_entity_owner_connection_id(entity_index) != 0:
+			admitted_handle = sim.get_entity_wire_handle(entity_index)
+			break
+	assert_gt(admitted_handle, 0, "the new authoritative peer has a wire identity")
+
+	# Admission mutates the authoritative World immediately, but the local
+	# ClientRuntime does not see that row until the next host pump. Both calls
+	# therefore hit the same stable missing-owner epoch; the second is served by
+	# the native negative cache rather than walking the decoded entity vector.
+	assert_true(sim.get_present_effect_state_for_wire_handle(
+			admitted_handle).is_empty())
+	assert_true(sim.get_present_effect_state_for_wire_handle(
+			admitted_handle).is_empty(),
+			"a repeated missing owner stays absent for the current client epoch")
+
+	# The next host tick folds the admitted row. Epoch invalidation must discard
+	# the remembered miss so the same identity can resolve immediately.
+	sim.step()
+	var admitted_state: PackedVector3Array = \
+			sim.get_present_effect_state_for_wire_handle(admitted_handle)
+	assert_eq(admitted_state.size(), NovaSimulation.EFFECT_STATE_COUNT,
+			"a new decoded-client epoch retries a formerly missing identity")
+	if admitted_state.size() == NovaSimulation.EFFECT_STATE_COUNT:
+		assert_lt(admitted_state[NovaSimulation.EFFECT_STATE_POSITION].distance_to(
+				admitted_pos), 0.5)
 	sim.free()
 
 
