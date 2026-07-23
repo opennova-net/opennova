@@ -199,8 +199,10 @@ func test_joiner_runtime_owns_fire_and_throwable_presenters() -> void:
 	var fire_stats := rt.get_fire_present_stats()
 	assert_true(fire_stats.has("fires"),
 			"the joiner constructs the fire queue consumer")
-	assert_true(rt.get_throwable_present_stats().has("live"),
+	var throwable_stats := rt.get_throwable_present_stats()
+	assert_not_null(throwable_stats,
 			"the joiner constructs the flying-throwable snapshot consumer")
+	assert_eq(throwable_stats.live, 0)
 
 	var root := NovaResourceRoot.new()
 	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(

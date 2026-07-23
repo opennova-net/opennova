@@ -80,11 +80,15 @@ func test_remote_flying_round_snapshot_builds_and_retires_its_model() -> void:
 	presenter.present()
 	assert_eq(placer.built.size(), 1,
 			"the remote flying-round snapshot materializes its TrcrID item")
+	var live_stats := presenter.get_stats()
+	assert_true(live_stats is ThrowablePresentPass.Stats)
+	assert_eq(live_stats.live, 1)
 	var model := placer.built[0]
 	assert_eq(model.position, Vector3(4, 5, 6))
 
 	sim.visuals = []
 	presenter.present()
+	assert_eq(presenter.get_stats().live, 0)
 	assert_true(model.is_queued_for_deletion(),
 			"the model retires when the remote visual round slot is gone")
 	presenter.teardown()

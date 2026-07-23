@@ -559,8 +559,10 @@ func get_fire_present_stats() -> Dictionary:
 	return _fire_present.get_stats() if _fire_present != null else {}
 
 
-func get_throwable_present_stats() -> Dictionary:
-	return _throwable_present.get_stats() if _throwable_present != null else {}
+func get_throwable_present_stats() -> RefCounted:
+	# ThrowablePresentPass.Stats (typed counters, ADR 0017); null until the
+	# presentation pass exists.
+	return _throwable_present.get_stats() if _throwable_present != null else null
 
 
 func get_destruction_present_stats() -> RefCounted:

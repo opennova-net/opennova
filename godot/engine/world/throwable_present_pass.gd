@@ -22,6 +22,12 @@ var _env_node
 var _models := {}
 
 
+## Typed diagnostic snapshot (ADR 0017).
+class Stats:
+	extends RefCounted
+	var live: int = 0
+
+
 func setup(sim, container: Node3D, placer, item_db, env_node) -> void:
 	_sim = sim
 	_container = container
@@ -30,8 +36,10 @@ func setup(sim, container: Node3D, placer, item_db, env_node) -> void:
 	_env_node = env_node
 
 
-func get_stats() -> Dictionary:
-	return {"live": _models.size()}
+func get_stats() -> Stats:
+	var stats := Stats.new()
+	stats.live = _models.size()
+	return stats
 
 
 func present() -> void:
