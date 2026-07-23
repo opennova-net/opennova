@@ -165,11 +165,11 @@ const uint8_t kFiredRound_f2061[] = {
 	0x03,                          // extra_byte1
 	0x0c,                          // extra_byte2
 	0x00,                          // misc_byte
-	0x54, 0x3b,                    // base_offset = 0x3b54
-	0x59, 0x42,                    // offset_x = 0x4259
-	0xb9, 0xd8,                    // offset_y = 0xd8b9
-	0x00, 0x00,                    // offset_z = 0
-	0x8c, 0x01,                    // offset_w = 0x018c
+	0x54, 0x3b,                    // delta_x = 0x3b54
+	0x59, 0x42,                    // delta_y = 0x4259
+	0xb9, 0xd8,                    // delta_z = 0xd8b9
+	0x00, 0x00,                    // delta_yaw = 0
+	0x8c, 0x01,                    // delta_pitch = 0x018c
 };
 static_assert(sizeof(kFiredRound_f2061) == 45, "C2S 0x06 body is 45 B");
 
@@ -194,10 +194,10 @@ int test_client_fired_round() {
 	EXPECT(r.extra_byte1 == 0x03);
 	EXPECT(r.extra_byte2 == 0x0c);
 	EXPECT(r.misc_byte == 0x00);
-	EXPECT(r.base_offset == 0x3b54);
-	EXPECT(r.offset_x == 0x4259);
-	EXPECT(r.offset_y == 0xd8b9);
-	EXPECT(r.offset_w == 0x018c);
+	EXPECT(r.delta_x == 0x3b54);
+	EXPECT(r.delta_y == 0x4259);
+	EXPECT(r.delta_z == 0xd8b9);
+	EXPECT(r.delta_pitch == 0x018c);
 	const std::vector<uint8_t> encoded = encode_client_fired_round(r);
 	EXPECT(encoded.size() == sizeof(kFiredRound_f2061));
 	EXPECT(std::memcmp(encoded.data(), kFiredRound_f2061,
@@ -232,11 +232,11 @@ int test_client_fired_round_pose_deltas() {
 	EXPECT(uint32_t(r.pos_z) == 0x3333d8c9u);
 	EXPECT(uint32_t(r.dir_x) == 0x00004444u);
 	EXPECT(uint32_t(r.dir_y) == 0x00005556u);
-	EXPECT(r.base_offset == 0x3b54);
-	EXPECT(r.offset_x == 0x4259);
-	EXPECT(r.offset_y == 0xd8b9);
-	EXPECT(r.offset_z == 0x0000);
-	EXPECT(r.offset_w == 0x018c);
+	EXPECT(r.delta_x == 0x3b54);
+	EXPECT(r.delta_y == 0x4259);
+	EXPECT(r.delta_z == 0xd8b9);
+	EXPECT(r.delta_yaw == 0x0000);
+	EXPECT(r.delta_pitch == 0x018c);
 
 	const std::vector<uint8_t> encoded = encode_client_fired_round(r);
 	const uint8_t expected_words[] = {

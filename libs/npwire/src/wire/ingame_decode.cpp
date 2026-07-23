@@ -675,11 +675,11 @@ bool decode_client_fired_round(const uint8_t *body, size_t len,
 	out.extra_byte1     = c.u8();
 	out.extra_byte2     = c.u8();
 	out.misc_byte       = c.u8();
-	out.base_offset     = c.u16();
-	out.offset_x        = c.u16();
-	out.offset_y        = c.u16();
-	out.offset_z        = c.u16();
-	out.offset_w        = c.u16();
+	out.delta_x         = c.u16();
+	out.delta_y         = c.u16();
+	out.delta_z         = c.u16();
+	out.delta_yaw       = c.u16();
+	out.delta_pitch     = c.u16();
 	if (!c.ok) return false;
 	consumed = size_t(c.p - body);
 	return consumed == 45;

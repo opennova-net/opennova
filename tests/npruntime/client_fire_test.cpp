@@ -103,11 +103,11 @@ std::vector<uint8_t> fire_body(uint16_t shooter, uint8_t fire_flags, uint8_t adm
 	b.push_back(0x07);            // extra_byte1
 	b.push_back(extra2);          // extra_byte2 -> ring subtype composite
 	b.push_back(misc);            // misc_byte -> ring slot_byte
-	put_u16(b, 0);                // base_offset
-	put_u16(b, 0);                // offset_x
-	put_u16(b, 0);                // offset_y
-	put_u16(b, 0);                // offset_z
-	put_u16(b, 0);                // offset_w
+	put_u16(b, 0);                // delta_x
+	put_u16(b, 0);                // delta_y
+	put_u16(b, 0);                // delta_z
+	put_u16(b, 0);                // delta_yaw
+	put_u16(b, 0);                // delta_pitch
 	return b;
 }
 

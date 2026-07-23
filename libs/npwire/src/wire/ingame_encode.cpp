@@ -626,11 +626,11 @@ void set_client_fired_round_pose(
 	round.pos_z = fire_pose[2];
 	round.dir_x = rounded_high_word(fire_pose[3]);
 	round.dir_y = rounded_high_word(fire_pose[4]);
-	round.base_offset = low_word_delta(fire_pose[0], shooter_pose[0]);
-	round.offset_x = low_word_delta(fire_pose[1], shooter_pose[1]);
-	round.offset_y = low_word_delta(fire_pose[2], shooter_pose[2]);
-	round.offset_z = low_word_delta(fire_pose[3], shooter_pose[3]);
-	round.offset_w = low_word_delta(fire_pose[4], shooter_pose[4]);
+	round.delta_x = low_word_delta(fire_pose[0], shooter_pose[0]);
+	round.delta_y = low_word_delta(fire_pose[1], shooter_pose[1]);
+	round.delta_z = low_word_delta(fire_pose[2], shooter_pose[2]);
+	round.delta_yaw = low_word_delta(fire_pose[3], shooter_pose[3]);
+	round.delta_pitch = low_word_delta(fire_pose[4], shooter_pose[4]);
 }
 
 std::vector<uint8_t> encode_client_fired_round(const ClientFiredRound &r) {
@@ -651,11 +651,11 @@ std::vector<uint8_t> encode_client_fired_round(const ClientFiredRound &r) {
 	w.u8(r.extra_byte1);
 	w.u8(r.extra_byte2);
 	w.u8(r.misc_byte);
-	w.u16(r.base_offset);
-	w.u16(r.offset_x);
-	w.u16(r.offset_y);
-	w.u16(r.offset_z);
-	w.u16(r.offset_w);
+	w.u16(r.delta_x);
+	w.u16(r.delta_y);
+	w.u16(r.delta_z);
+	w.u16(r.delta_yaw);
+	w.u16(r.delta_pitch);
 	return out;
 }
 

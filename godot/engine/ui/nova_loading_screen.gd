@@ -185,6 +185,33 @@ func setup(root: NovaResourceRoot, info: Dictionary) -> void:
 	queue_redraw()
 
 
+## Refresh mid-load: a JOINER learns the authoritative session record (server/
+## mission names, game type, and the mission file driving the sidecar
+## background) from the post-auth S2C 0x7B AFTER the screen is already up.
+## Retail fills the same buffers from the connect stream during its load
+## [orig: parse_server_session_variables @ 0x5202f0 -> the title/mission bufs
+## @ 0x51f533/0x51f53a]. Empty values keep the current ones.
+func update_session_info(root: NovaResourceRoot, info: Dictionary) -> void:
+	var mission_file := String(info.get("mission_file", ""))
+	if not mission_file.is_empty():
+		var bg := resolve_background(root, mission_file)
+		var texture := load_background_texture(root, String(bg["name"]))
+		if texture != null:
+			_has_custom_bg = bool(bg["custom"])
+			_texture = texture
+	if _in_session:
+		var title := String(info.get("server_name", ""))
+		if not title.is_empty():
+			_title = title
+		var mission_name := String(info.get("mission_name", ""))
+		if not mission_name.is_empty():
+			_mission_name = mission_name
+		if int(info.get("game_type", -1)) >= 0:
+			_game_type_text = _lookup_loading_text(
+					gametype_text_key(int(info.get("game_type", 0))), _game_type_text)
+	queue_redraw()
+
+
 ## Report load progress [orig: the per-stage/per-model calls into
 ## LoadingScreen_UpdateAndPresent, e.g. Game_StartMission @ 0x52498f..0x525d29].
 func set_progress(percent: int) -> void:

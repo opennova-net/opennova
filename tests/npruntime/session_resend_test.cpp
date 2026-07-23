@@ -417,6 +417,51 @@ bool check_c2s_loss_requests_0x84_and_joiner_reconstructs() {
 	              "joiner ACK retires the host's ACK-bearing session records");
 }
 
+// Retail's resend receiver walks EVERY requested dword in the one datagram —
+// the 16-entry bound is the BUILDER's stack buffer, not a receiver cap
+// [orig: NapiNP_HandleResendList @ 0x623917..0x6239da do-while over
+// buf..buf+size-4; the 16 lives in SendMissingSeqList's missing_seq_buf[16]
+// @ 0x62367a]. Three retained records requested in one 0x44 come back as
+// three reconstructed packets, each under its old sequence, in request order.
+bool check_multi_sequence_resend_request_reconstructs_each() {
+	np::NapiNPServerCtx ctx;
+	seed_host(ctx);
+	np::JoinerConnection joiner("MultiNack");
+	joiner.seed_in_match(kServerKey, kClientScrk, kServerScrk,
+	                    1, 0, 0x0001, 0x14B9);
+
+	std::vector<uint8_t> framed;
+	const uint8_t payloads[3] = {0xD1, 0xD2, 0xD3};
+	for (uint8_t byte : payloads) {
+		if (!expect(np::frame_in_match_s2c(ctx, kPeer, 0x49, {byte}, framed),
+		            "host frames and retains three S2C packets"))
+			return false;
+	}
+
+	const std::vector<uint8_t> nack = make_resend_datagram(
+			SESSION_OPCODE_CLIENT_RESEND_LIST, kServerKey, {1, 2, 3});
+	const np::HandleResult resent = np::handle_server_datagram(
+			ctx, kPeer, nack.data(), nack.size(), 3);
+	if (!expect(resent.outbound.size() == 3,
+	            "one 0x44 carrying three requested sequences reconstructs three packets"))
+		return false;
+	for (int i = 0; i < 3; ++i) {
+		ProtocolPacketHeader header;
+		std::vector<ProtocolMessage> messages;
+		if (!expect(decode_session_datagram(
+				resent.outbound[static_cast<size_t>(i)],
+				SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, kServerScrk,
+				header, messages) &&
+		                    header.seq_num == static_cast<uint32_t>(i + 1) &&
+		                    messages.size() == 1 &&
+		                    messages[0].payload ==
+		                            std::vector<uint8_t>({payloads[i]}),
+		            "each reconstructed packet carries its old sequence and record"))
+			return false;
+	}
+	return true;
+}
+
 } // namespace
 
 int main() {
@@ -425,5 +470,6 @@ int main() {
 	ok = check_reordered_same_batch_closes_gap_without_nack() && ok;
 	ok = check_s2c_loss_requests_0x44_and_host_reconstructs() && ok;
 	ok = check_c2s_loss_requests_0x84_and_joiner_reconstructs() && ok;
+	ok = check_multi_sequence_resend_request_reconstructs_each() && ok;
 	return ok ? 0 : 1;
 }

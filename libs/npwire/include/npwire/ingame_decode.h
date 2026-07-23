@@ -1013,12 +1013,13 @@ struct ClientFiredRound {
 	uint8_t  misc_byte = 0;           // → LOBYTE(dest[20])
 	// Low-word modulo deltas: calculated fire pose {X,Y,Z,Yaw,Pitch} minus
 	// shooter live pose dwords 1..5. Host adds them to its shooter pose to
-	// reconstruct dest[10..14]. Legacy field names preserve API compatibility.
-	uint16_t base_offset = 0;         // fire X low16 - shooter X low16
-	uint16_t offset_x = 0;            // fire Y low16 - shooter Y low16
-	uint16_t offset_y = 0;            // fire Z low16 - shooter Z low16
-	uint16_t offset_z = 0;            // fire Yaw low16 - shooter Yaw low16
-	uint16_t offset_w = 0;            // fire Pitch low16 - shooter Pitch low16
+	// reconstruct dest[10..14] [orig: NetPacket_WriteEntityPositionUpdate
+	// @ 0x42a80f..0x42a890 producer; @0x513310 receiver].
+	uint16_t delta_x = 0;             // fire X low16 - shooter X low16
+	uint16_t delta_y = 0;             // fire Y low16 - shooter Y low16
+	uint16_t delta_z = 0;             // fire Z low16 - shooter Z low16
+	uint16_t delta_yaw = 0;           // fire Yaw low16 - shooter Yaw low16
+	uint16_t delta_pitch = 0;         // fire Pitch low16 - shooter Pitch low16
 };
 
 bool decode_client_fired_round(const uint8_t *body, size_t len,

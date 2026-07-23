@@ -841,6 +841,18 @@ func _show_loading_screen(load_info: Dictionary) -> void:
 	_loading_screen.size = _loading_screen.get_viewport_rect().size
 	if not _world.load_progress.is_connected(_on_load_progress):
 		_world.load_progress.connect(_on_load_progress)
+	if _world.has_signal("join_session_identified") and \
+			not _world.join_session_identified.is_connected(_on_join_session_identified):
+		_world.join_session_identified.connect(_on_join_session_identified)
+
+
+# The joiner's 0x7B session record resolved mid-load: refresh the screen's
+# session text and sidecar background the way retail's connect stream fills
+# the same buffers before its local load [orig: parse_server_session_variables
+# @ 0x5202f0 -> the loading-screen title/mission bufs @ 0x51f533/0x51f53a].
+func _on_join_session_identified(info: Dictionary) -> void:
+	if _loading_screen != null and _world_load_pending:
+		_loading_screen.update_session_info(_root, info)
 
 
 func _on_load_progress(percent: int) -> void:

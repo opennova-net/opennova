@@ -2426,11 +2426,11 @@ ammo-tick counter at `playerSlot+0x178D8` by `AdmDef_GetEntryByIndex(adm_index)[
 | 32 | 1 | `extra_byte1` (u8) | low byte of shooter `entity+352`; → `dest[18]` |
 | 33 | 1 | `extra_byte2` (u8) | → `dword_C86FB4` (last-fire global) → `dest[19]` |
 | 34 | 1 | `misc_byte` (u8) | → `LOBYTE(dest[20])` |
-| 35 | 2 | `base_offset` (u16 LE) | `low16(fire X) − low16(shooter X)`; host adds to `shooter_entity[1]` → `dest[10]` |
-| 37 | 2 | `offset_x` (u16 LE) | `low16(fire Y) − low16(shooter Y)`; host adds to `shooter_entity[2]` → `dest[11]` |
-| 39 | 2 | `offset_y` (u16 LE) | `low16(fire Z) − low16(shooter Z)`; host adds to `shooter_entity[3]` → `dest[12]` |
-| 41 | 2 | `offset_z` (u16 LE) | `low16(fire Yaw) − low16(shooter Yaw)`; host adds to `shooter_entity[4]` → `dest[13]` |
-| 43 | 2 | `offset_w` (u16 LE) | `low16(fire Pitch) − low16(shooter Pitch)`; host adds to `shooter_entity[5]` → `dest[14]` |
+| 35 | 2 | `delta_x` (u16 LE) | `low16(fire X) − low16(shooter X)`; host adds to `shooter_entity[1]` → `dest[10]` |
+| 37 | 2 | `delta_y` (u16 LE) | `low16(fire Y) − low16(shooter Y)`; host adds to `shooter_entity[2]` → `dest[11]` |
+| 39 | 2 | `delta_z` (u16 LE) | `low16(fire Z) − low16(shooter Z)`; host adds to `shooter_entity[3]` → `dest[12]` |
+| 41 | 2 | `delta_yaw` (u16 LE) | `low16(fire Yaw) − low16(shooter Yaw)`; host adds to `shooter_entity[4]` → `dest[13]` |
+| 43 | 2 | `delta_pitch` (u16 LE) | `low16(fire Pitch) − low16(shooter Pitch)`; host adds to `shooter_entity[5]` → `dest[14]` |
 
 **Exact client producer.** `WeaponAction_Fire @ 0x542B10` obtains a six-dword
 `{X,Y,Z,Yaw,Pitch,Roll}` descriptor from `Entity_CalcWeaponFirePosition @ 0x4DC750`;
@@ -2438,6 +2438,15 @@ the ordinary on-foot leg is `{Position + CameraOffset, Yaw, Pitch + pitchBlend, 
 with separate mounted/scoped transform legs. `Entity_FireWeaponAndSendPacket @ 0x42BD80`
 passes that descriptor to `NetPacket_WriteEntityPositionUpdate @ 0x42A610`. The writer
 stores full X/Y/Z, rounded angle high words, and the five modulo-u16 differences above.
+Grilled 2026-07-23, the remaining field sources: `target_handle` (off 28) is the writer's
+pool-resolve of `entity->aiRuntime[3]` — the AI CURRENT-TARGET pointer — with null (a human
+player has no aiRuntime) encoding `0xFFFF` [@0x542c15; @0x42a70d..0x42a7b1], so a human
+shooter's fire always carries `0xFFFF`; `hit_part` (off 30) is the client-spawned round's
+session-slot shot-seq word (`session_ctx[195*RoundData_SpawnRound(...)+30]` @0x42c030); and
+the wire `fire_flags` byte is composed AT THE FIRE CALL SITE as
+`(MountSlot "seatMask" & 3) << 4 | mode-bits` BEFORE `consume_weapon_ammo` [@0x542c11] —
+confirming the bits-4-5 pre-consume-magazine reading (`seatMask` is a suspected IDB field
+misnomer, unrenamed pending a full-use sweep).
 The receiver at `@0x513310` keeps the claimed full fire pose in `dest[4..8]` and rebuilds
 `dest[10..14]` from its current shooter pose plus those words; the latter feeds the
 moving-carrier re-anchor paths in `Server_ClientFiredRound`.
@@ -6546,11 +6555,15 @@ events into a visual-only client `RoundSim`; authority/SP fire continues to appe
 ring row (including ordinary hip/raise/3P subtype 12) and spawn `RoundSim` synchronously.
 D-WPN-8 remains open for settled-FP/mounted zoom subtypes, remote/vehicle 0x49 presentation,
 remote shooter-team/per-weapon tracer metadata, posed-bone person-proxy collision (players AND
-decoded infantry share the torso stand-in), clean-disconnect proxy retirement, the joiner C2S 0x0C
-uplink describing L's pose as of the previous frame's entity update (retail packs inside the net
-frame after movement — one 16-ms tick of input latency, presentation-only), and the C2S 0x06
-`target_handle` stamped 0xFFFF pending the retail producer's target-selection rule (NEEDS-RE:
-what `Entity_FireWeaponAndSendPacket @ 0x42BD80` stamps for an aimed-at entity); moving
+decoded infantry share the torso stand-in), clean-disconnect proxy retirement, and the joiner C2S 0x0C uplink's one-frame LOOK-ANGLE
+lag (grilled 2026-07-23: retail's net frame packs BEFORE the motor — the
+`Game_ProcessMainFrame @ 0x5263f0` chain — so the uplink POSITION being the previous tick's
+integration is FAITHFUL; retail samples the look axes in `Input_ProcessFrame` before packing
+while ours applies input after the net frame — one 16-ms tick of look lag, presentation-only).
+The 0x06 `target_handle` NEEDS-RE is CLOSED (2026-07-23): the producer stamps
+`aiRuntime[3]` — the AI current-target pointer — pool-packed by the writer with null → `0xFFFF`
+[orig: WeaponAction_Fire @ 0x542c15; NetPacket_WriteEntityPositionUpdate @ 0x42a70d], so a
+human shooter always sends `0xFFFF` and the joiner's `0xFFFF` is the witnessed value (§5.16); moving
 decoded non-player Infantry/vehicle collision projection LANDED 2026-07-23 (wire-keyed
 person + dynamic proxies at the decoded pose; visual-client local pool-0/1 ghost slots
 excluded from the projectile walks — residuals: PANM/turret section posing and husk-model

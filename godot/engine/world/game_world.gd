@@ -52,6 +52,12 @@ const ITEM_EFFECT_USER_POINT_SCAN_LIMIT := 16
 
 signal world_loaded()
 signal load_failed(reason: String)
+## A joiner's authoritative session record (post-auth S2C 0x7B) resolved during
+## the pre-load wait: server/mission names + the local mission file about to
+## load. The shell refreshes its loading screen from this — retail's connect
+## stream fills the same session vars before its local load
+## [orig: parse_server_session_variables @ 0x5202f0].
+signal join_session_identified(info: Dictionary)
 # Mission-load progress, 0..100, emitted at the stage boundaries below and
 # pulsed (at the stage's constant value) from inside the object-placement loop.
 # The values are the witnessed schedule's anchor points; the original pumps its
@@ -400,6 +406,12 @@ func _drive_join_preload(request_id: int) -> void:
 	_host_config["gametype"] = _join_preload_sim.get_join_game_type()
 	_host_config["expansion"] = _join_preload_sim.get_join_expansion()
 	_join_preload_root = null
+	join_session_identified.emit({
+		"server_name": String(_host_config["server_name"]),
+		"mission_name": String(_host_config["mission_name"]),
+		"mission_file": bms,
+		"game_type": int(_host_config["gametype"]),
+	})
 	var err := _load_mission_internal(mission, bms, resource_root)
 	if err != OK:
 		# _load_mission_internal emitted the specific resource/load failure.

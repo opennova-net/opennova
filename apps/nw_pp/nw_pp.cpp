@@ -721,8 +721,9 @@ void print_tag_06_c2s(const std::vector<uint8_t> &body) {
 		return;
 	}
 	std::printf("        [0x06 C2S] tick=%u shooter=%s flags=0x%02x adm=%u "
-	            "pos=(%.1f, %.1f, %.1f) dir=(%.4f, %.4f) target=%s hit_part=%u "
-	            "extras=(0x%02x,0x%02x,0x%02x) muzzle=(off=0x%04x x=0x%04x y=0x%04x z=0x%04x w=0x%04x)\n",
+	            "pos=(%.1f, %.1f, %.1f) dir=(%.4f, %.4f) target=%s shot_seq=%u "
+	            "extras=(0x%02x,0x%02x,0x%02x) "
+	            "pose_delta=(x=0x%04x y=0x%04x z=0x%04x yaw=0x%04x pitch=0x%04x)\n",
 	            r.current_tick, handle_str(r.shooter_handle).c_str(),
 	            unsigned(r.fire_flags), unsigned(r.adm_index),
 	            fp16(r.pos_x), fp16(r.pos_y), fp16(r.pos_z),
@@ -730,9 +731,9 @@ void print_tag_06_c2s(const std::vector<uint8_t> &body) {
 	            handle_str(r.target_handle).c_str(), unsigned(r.hit_part),
 	            unsigned(r.extra_byte1), unsigned(r.extra_byte2),
 	            unsigned(r.misc_byte),
-	            unsigned(r.base_offset), unsigned(r.offset_x),
-	            unsigned(r.offset_y), unsigned(r.offset_z),
-	            unsigned(r.offset_w));
+	            unsigned(r.delta_x), unsigned(r.delta_y),
+	            unsigned(r.delta_z), unsigned(r.delta_yaw),
+	            unsigned(r.delta_pitch));
 }
 
 void print_tag_21_c2s(const std::vector<uint8_t> &body) {
