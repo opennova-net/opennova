@@ -77,7 +77,7 @@ func _process(delta: float) -> void:
 	# old camera can remain alive. Re-resolve that transition instead of
 	# continuing to follow a stale, still-in-tree camera.
 	if not _cached_cam or not _cached_cam.is_inside_tree() or not _cached_cam.current:
-		_cached_cam = _find_camera()
+		_cached_cam = EnvRenderCamera.find(self)
 	if _cached_cam and mesh_instance:
 		# The dome follows the camera in xz and rides at HALF the camera height
 		# [orig: render_skybox @ 0x5790d0 - world translation z = camHeight >> 1].
@@ -198,12 +198,3 @@ func _scroll_source(sky_speed: float, delta: float) -> Object:
 	return _fallback_scroll
 
 
-func _find_camera() -> Camera3D:
-	if Engine.is_editor_hint():
-		var editor_interface = Engine.get_singleton("EditorInterface")
-		if editor_interface:
-			var viewport = editor_interface.get_editor_viewport_3d(0)
-			if viewport:
-				return viewport.get_camera_3d()
-	var viewport := get_viewport()
-	return viewport.get_camera_3d() if viewport else null
