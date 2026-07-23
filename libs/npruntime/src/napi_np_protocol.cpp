@@ -354,11 +354,18 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	if (conn.session_id.empty()) conn.session_id = peer_session_id(peer);
 	// The joiner's display name: the GAME join's NA TLV is the player CALLSIGN — the retail
 	// client puts its company string in CO ("NovaLogic Inc, Calabasas CA U.S.A.") and the
-	// callsign in NA, and the golden host's 0x0C record name equals NA ("FooPlayer"). A
-	// ':'-shaped NA is a gate tag (the NOVAWORLD-connect flavor, e.g. "jop:cus2" — older
-	// opennova joiners sent it on game joins too) — fall back to CO / the Hello name there.
+	// callsign in NA, and the golden host's 0x0C record name equals NA ("FooPlayer"). Only
+	// the witnessed NOVAWORLD-connect gate tags ("jop:cus2" retail / "jopd:cus4" demo — a
+	// "jop"-prefixed tag) fall back to CO / the Hello name: a callsign is free text and may
+	// itself contain ':' — treating any colon as a gate tag stalled that joiner's 0x0C
+	// name-match (the host would name it the company string, never equal to its NA).
 	// [wire: retail-ashi5a f=199140 / retail_join_v18 f=47676; net-re §5.0b]
-	if (!auth.na.empty() && auth.na.find(':') == std::string::npos) {
+	const bool na_is_gate_tag = auth.na.size() >= 4 &&
+			(std::tolower(static_cast<unsigned char>(auth.na[0])) == 'j') &&
+			(std::tolower(static_cast<unsigned char>(auth.na[1])) == 'o') &&
+			(std::tolower(static_cast<unsigned char>(auth.na[2])) == 'p') &&
+			auth.na.find(':') != std::string::npos;
+	if (!auth.na.empty() && !na_is_gate_tag) {
 		conn.player_name = auth.na;
 	} else if (conn.player_name.empty() && !auth.co.empty()) {
 		conn.player_name = auth.co;

@@ -793,13 +793,19 @@ master server, HTTP endpoint, account service, or cookie jar. Retail reuses the 
    (`0x42`). The reply's retail-visible session fields include server name/config/player counts
    (`SN`, `P1`, `P2`, `NP`, `MP`) and the gated opaque user strings (`SUS1`, `SUS2`). OpenNova
    emits only values backed by live host state; unmodeled `P2`/`SUS1` are omitted rather than
-   populated with capture-shaped placeholders.
+   populated with capture-shaped placeholders (D-NET-165 — retail-browser tolerance of the
+   absent tags is unwitnessed).
    The OpenNova game host applies retail's identity gates too: `0x41` requires exact
    `NVS`/`PN`/`PG`/`PV1`; `0x42` rechecks those fields and additionally requires exact `PV2`,
    non-empty callsign `NA`, and the `HK` echoed from `0x81`. Invalid probes/joins are silently
    dropped as in the original handlers.
 4. `UI_ProcessLANSessionStateMachine @ 0x558de0` pumps replies for about 30 seconds, deduplicates
    rows, and updates the list immediately. The observed source IP/port is the join target.
+   Enumeration is a CADENCE, not one burst: while enumerating, the pump re-broadcasts the whole
+   port walk every 3000 ms (`CNapiNPConnection_PumpEnumeratorAndSend @ 0x6290c0` sets the
+   enumerating send interval to 3000 at conn+368 and gates on `tick - last_send_tick`), which is
+   how a cold host that binds mid-window still appears. `NovaLanSession` re-announces the stored
+   probe burst on that witnessed 3-second cadence.
 
 Crucially, LAN enumeration does **not** carry the map filename. Retail does not repurpose reserved
 `SUS3`/`SUS4` or add an OpenNova-only side channel. After the player selects an endpoint, the normal
@@ -3573,8 +3579,8 @@ Jointops.exe; behavioral, read-only (no IDB writes).
   `0x42E730` handler exceeds a clean single decompile — is not byte-anchored; the mechanism is empirically
   certain from the wire (H == the named record's `slot_id`, set before any C2S `0x0C`).
 
-**Port (`libs/npruntime` + `godot/engine`, this session; verdict MATCHING, unit-tested by `joiner_session` +
-`netsim_build_player_uplink`):**
+**Port (`libs/npruntime` + `godot/engine`, this session; verdict MATCHING, unit-tested by
+`npruntime_client_runtime` + `npruntime_two_endpoint_socket` + `netsim_build_player_uplink`):**
 - `JoinerConnection` (`libs/npruntime/src/joiner_connection.cpp`) — the CLIENT MIRROR of the game host:
   ClientHello/Auth handshake (the joiner's player name rides game `ClientAuth.NA`, the free/unvalidated field
   the host echoes into the organic-spawn `entity_name`), then `pump()` drives the in-match spawn-gate burst,
@@ -3590,9 +3596,11 @@ Jointops.exe; behavioral, read-only (no IDB writes).
   `encode_organic_spawn_batch` → `HostSessionAccept::frame_in_match_s2c(peer, 0x0C, …)`, so the joiner can
   name-match. The game host captures `ClientAuth.NA` into `NapiNPConnection.player_name` and surfaces it
   on the `PeerSpawned` event.
-- ctests: `tests/novaworld/joiner_session_test` (drives a real `JoinerSession` against a real
-  `HostSessionAccept` in-process: handshake → name-match → InMatch with H → C2S `0x0C` uplink →
-  `PeerC2SInMatch` → `NetSystem` apply SNAP; plus a wrong-name decoy that must NOT match);
+- ctests: `tests/npruntime/client_runtime_test` + `tests/npruntime/two_endpoint_socket_test`
+  (the promoted `np::JoinerConnection` driven against the real np server legs on the World path:
+  handshake → name-match → InMatch with H → C2S `0x0C` uplink → host apply; the old
+  `joiner_session_test`, which drove the retired `novaworld::JoinerSession` against the retired
+  `HostSessionAccept`, was deleted with those classes at P8);
   `tests/netsim/build_player_uplink_test` (the joiner-side uplink body builder).
 
 **Port status — D.2 (joiner `NovaSimulation` mode + wire-direct present, 2026-06-23).** The joiner-side
@@ -6538,7 +6546,11 @@ events into a visual-only client `RoundSim`; authority/SP fire continues to appe
 ring row (including ordinary hip/raise/3P subtype 12) and spawn `RoundSim` synchronously.
 D-WPN-8 remains open for settled-FP/mounted zoom subtypes, remote/vehicle 0x49 presentation,
 remote shooter-team/per-weapon tracer metadata, posed-bone person-proxy collision (players AND
-decoded infantry share the torso stand-in), and clean-disconnect proxy retirement; moving
+decoded infantry share the torso stand-in), clean-disconnect proxy retirement, the joiner C2S 0x0C
+uplink describing L's pose as of the previous frame's entity update (retail packs inside the net
+frame after movement — one 16-ms tick of input latency, presentation-only), and the C2S 0x06
+`target_handle` stamped 0xFFFF pending the retail producer's target-selection rule (NEEDS-RE:
+what `Entity_FireWeaponAndSendPacket @ 0x42BD80` stamps for an aimed-at entity); moving
 decoded non-player Infantry/vehicle collision projection LANDED 2026-07-23 (wire-keyed
 person + dynamic proxies at the decoded pose; visual-client local pool-0/1 ghost slots
 excluded from the projectile walks — residuals: PANM/turret section posing and husk-model
@@ -8376,7 +8388,8 @@ in [divergence-ledger.md](../divergence-ledger.md).
 - **D-NET-6** [HIGH, FIXED] LEN8(0x20)/LEN16(0x40) parse precedence inverted — retail tests LEN8 FIRST. [orig: CNapiNPConnection_ParseMessages @ 0x625bc0]
 - **D-NET-7** [MED, FIXED] reassembly clears the buffer on the FIRST fragment (`(flags&6)==4`) before appending — implemented in `reassemble_protocol_payload` (`protocol_message.cpp`, verified 2026-06-27; carries a regression-history note vs an earlier `frag_first && !frag_end` rewrite). [orig: CNapiNPConnection_DispatchMessage @ 0x622570 / NapiBuffer_SetLength @ 0x634220]
 - **D-NET-8** [LOW, FIXED 2026-06-27] truncated inner stream: the original substitutes 0 for missing fields and still dispatches the final partial message (read from its zero-padded 64 KB buffer), then stops — it does not bail. `parse_protocol_messages` (`protocol_message.cpp`) now emits the partial message (payload = available bytes zero-padded to the claimed length) on a truncated LEN8/LEN16/SKIP/body field instead of dropping it; valid packets are unaffected. Test: `protocol_message` `check_truncated_message_is_dispatched_zero_padded`. [orig: CNapiNPConnection_ParseMessages @ 0x625bc0]
-- **D-NET-164** [HIGH, PARTIAL — contiguous gate + LAN NACK/resend PORTED 2026-07-23] Retail validates the receiver-local key before reading session sequence state, then dispatches only across the contiguous inbound frontier. The LAN/game-session opt-in consumes stale/exact duplicates without redispatch, queues future packets (cap 100), and drains them in order when a gap closes. A future packet latches a missing check; the host and joiner resolve it only after their receive FIFO drains, so seq 3 then seq 2 in one batch sends no needless NACK, while a surviving gap emits one direction-correct `0x84`/`0x44`. The body is the peer-local key followed by up to sixteen missing-sequence dwords; receivers validate their own key. Senders retain reliable message records by assigned sequence and reconstruct a requested packet with its old sequence plus the current ACK; only ACKs from packets admitted through the contiguous gate retire records. LAN/game connections opt into the directly witnessed 1200-record cap (`CNapiNetwork_Init @0x4cab20/@0x4cabf0` writes `0x4b0`; `NapiNPMessage_Create @0x627fc0` checks pending + retained + 1). Generic lobby `ClientSession` explicitly stays recovery-disabled and retention-off because this slice has no NOVAWORLDUDP owner witness; this avoids silently queuing behind a loss it cannot request. Regressions cover ordinary session-key mismatch, both true-loss directions, malformed/key-mismatched requests, current-ACK reconstruction, ACK retirement, same-batch reorder suppression, the standalone JO listener's real socket-drain NACK, queue bounds, and encode-failure transactionality (`npruntime_session_resend`, `novaworld_protocol_message`, `nw_host_register_e2e`). **Residual:** retained-record timeout expiry and retail's overflow-disconnect side effect remain unported; the exact LAN count bound is enforced. [orig: NapiNPProtocol_HandleSessionPacket @0x626b72 / CNapiNPConnection_ParseMessages @0x625bc0 / BuildMissingSeqList @0x6234b0 / SendMissingSeqList @0x623560 / NapiNP_HandleResendList @0x623800 / CNapiNPConnection_BuildOutgoingPackets @0x628430]
+- **D-NET-164** [HIGH, PARTIAL — contiguous gate + LAN NACK/resend PORTED 2026-07-23] Retail validates the receiver-local key before reading session sequence state, then dispatches only across the contiguous inbound frontier. The LAN/game-session opt-in consumes stale/exact duplicates without redispatch, queues future packets (cap 100), and drains them in order when a gap closes. A future packet latches a missing check; the host and joiner resolve it only after their receive FIFO drains, so seq 3 then seq 2 in one batch sends no needless NACK, while a surviving gap emits one direction-correct `0x84`/`0x44`. The body is the peer-local key followed by up to sixteen missing-sequence dwords — a BUILDER cap: `SendMissingSeqList` passes max 16 into `BuildMissingSeqList @0x6234b0` (`missing_seq_buf[16]` @0x62367a), while the RECEIVER validates its own key then walks every dword present up to the 0x10000 size guard (`buf+size-4` loop @0x623917..0x6239da) — the reimpl decoder deliberately mirrors the uncapped receiver. A requested sequence of ZERO is live retail behavior, not a dead sentinel: the handler substitutes `out_packet_seq+1` (@0x6239a4), sends that fresh next-sequence packet, and advances `out_packet_seq` when it minted one (@0x6239c9..0x6239e3). Senders retain reliable message records by assigned sequence and reconstruct a requested packet with its old sequence plus the current ACK; only ACKs from packets admitted through the contiguous gate retire records. LAN/game connections opt into the directly witnessed 1200-record cap (`CNapiNetwork_Init` loads `ebp = 0x4B0` @0x4ca9dc and stores it to both connection-config profiles @0x4cab20/@0x4cabf0; `NapiNPMessage_Create @0x627fc0` checks pending + retained + 1). Generic lobby `ClientSession` explicitly stays recovery-disabled and retention-off because this slice has no NOVAWORLDUDP owner witness; this avoids silently queuing behind a loss it cannot request. Regressions cover ordinary session-key mismatch, both true-loss directions, malformed/key-mismatched requests, current-ACK reconstruction, ACK retirement, same-batch reorder suppression, the standalone JO listener's real socket-drain NACK, queue bounds, and encode-failure transactionality (`npruntime_session_resend`, `novaworld_protocol_message`, `nw_host_register_e2e`). **Residual:** retained-record timeout expiry and retail's overflow-disconnect side effect remain unported; the exact LAN count bound is enforced. [orig: NapiNPProtocol_HandleSessionPacket @0x626b72 / CNapiNPConnection_ParseMessages @0x625bc0 / BuildMissingSeqList @0x6234b0 / SendMissingSeqList @0x623560 / NapiNP_HandleResendList @0x623800 / CNapiNPConnection_BuildOutgoingPackets @0x628430]
+- **D-NET-165** [LOW, OPEN + NEEDS-RE] The LAN `0x81` ServerHello omits `P2` and `SUS1` (both unmodeled live host state) instead of replaying capture-shaped placeholders (§5.0c). Stock hosts populate them; whether a retail browser tolerates their absence (blank row column vs dropped row) is unwitnessed — settle by pointing a stock client's LAN browser at an OpenNova host. [orig: NapiNPProtocol_SendServerInfoPacket @ 0x6204b0 (conditional per-tag writes); Nwu_HandleServerHello @ 0x626d20 (the browser consume)]
 
 `gate_response.cpp` (A2):
 - **D-NET-9** [LOW, WITNESSED — deferred low-value] `NapiScript_ParseLiteralValue @0x62db00` tries, in order: char-literal `'x'` → `NapiScript_ParseHexValue @0x62d610` → `parse_octal_integer @0x62d7b0` → `parse_binary_literal @0x62d900` → `NapiScript_ParseDecimalIntegerB @0x62da20`. The reimpl parses gate port/literal fields as DECIMAL only. Real gate responses are decimal, so the other four radixes are unexercised robustness — re-prioritized MED→LOW; the 4-radix port is witnessed-and-ready but deferred (poor value/risk). [orig: NapiScript_ParseLiteralValue @ 0x62db00]

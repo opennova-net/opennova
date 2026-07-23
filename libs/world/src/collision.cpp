@@ -2411,8 +2411,12 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
         CollisionPolygonHit table_hit;
         bool table_found = false;
         for (const ProjectileDynamicProxy &proxy : projectile_dynamic_proxies_) {
-            // The mounted shooter's own carrier, resolved from the decoded
-            // carrier_handle (the ray[18] mount-exclusion analog).
+            // Self-site immunity: the shooter's own wire slot (a decoded
+            // vehicle/item shooter never clips itself) and the mounted
+            // shooter's own carrier, resolved from the decoded carrier_handle
+            // — the ray[17..20] exclusion-set analog [orig: the four-slot
+            // compare before Physics_RaycastAgainstBoneCollision @ 0x4e5572].
+            if (proxy.wire_handle == trace.shooter_wire_handle) continue;
             if (proxy.wire_handle == trace.shooter_carrier_wire_handle) continue;
             const float sc[3] = {
                 static_cast<float>(proxy.position_q16.x) / 65536.0f,
@@ -2558,8 +2562,11 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
         consider(eh, hit_distance);
     };
 
-    size_t person_index = 0;
-    size_t proxy_index = trace.include_wire_proxies
+    // The motor sweep's pools-2/1-only contract: no person leg at all, local
+    // or proxied [orig: Projectile_RaycastProximitySlots(2/1) only
+    // @ 0x444619..0x444667].
+    size_t person_index = trace.walk_persons ? 0 : persons_.size();
+    size_t proxy_index = (trace.include_wire_proxies && trace.walk_persons)
         ? 0
         : projectile_person_proxies_.size();
     auto person_order_key = [&](const PersonSlot &slot) {

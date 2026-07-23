@@ -94,6 +94,8 @@ record splits a divergence into facets (e.g. D-NET-133), the facets get separate
 | D-NET-139 | 0x0A priority score ports distance/age/own-boost; the view-interest / LOS / enemy-team-bonus terms contribute 0 | A | OPEN (approximation) | PAR-NET |
 | D-NET-147 | Residual 0x10 tail: sectioned-destructible `sectionMask` rebuild + armory `weaponByte`/`attachRef` + `scoreFlag` gate deferred (the four base fields fixed + streamed) | A | WITNESSED-READY-DEFERRED | PAR-NET |
 | D-NET-163 | The dev golden-harness host (`nw_server`, ADR 0013) does not emit retail's full S2C tag set — 21 tags across the anti-cheat/CRC challenge, gameplay-event, and low-frequency session/roster families; the `nw_golden_diff` baseline now names each deferral by ID | A | WITNESSED-READY-DEFERRED | PAR-NET |
+| D-NET-164 | Game-session ordered gate + `0x44`/`0x84` NACK/resend ported (contiguous frontier, retained records, LAN 0x4B0 cap); retained-record timeout expiry and retail's overflow-disconnect side effect remain unmodeled | A | OPEN (PARTIAL port 2026-07-23) | PAR-NET |
+| D-NET-165 | LAN `0x81` omits `P2`/`SUS1` (unmodeled live host state) instead of replaying capture-shaped placeholders; stock hosts populate them, and retail-browser tolerance of their absence is unwitnessed | B | OPEN + NEEDS-RE (retail browser consume) | PAR-NET |
 
 Closed 2026-07-05: **D-NET-30** -> `FIXED` — one `Cookie: name=value;` header
 per cookie (`CookieJar::cookie_header_lines()`; our own server already merged
@@ -720,7 +722,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 
 | Domain | OPEN | NEEDS-RE | WITNESSED-READY-DEFERRED | Domain open total | Closed rows still tabled |
 |---|---|---|---|---|---|
-| Net | 9 | 1 | 10 | 20 | 1 |
+| Net | 11 | 1 | 10 | 22 | 1 |
 | Environment | 0 | 0 | 3 | 3 | 4 |
 | World / AI + events | 55 | 4 | 6 | 65 | 26 |
 | UI (menu/ctrl/sound/playerinfo/HUD) | 13 | 1 | 6 | 20 | 8 |
@@ -737,9 +739,9 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Render — materials/state | 0 | 0 | 1 | 1 | 1 |
 | Render — draw order | 2 | 0 | 1 | 3 | 3 |
 | Render — lighting | 4 | 0 | 2 | 6 | 0 |
-| **Total** | **91** | **13** | **31** | **135** | 86 |
+| **Total** | **93** | **13** | **31** | **137** | 86 |
 
-Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-INF-20, D-NET-136, D-NET-64.
+Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-INF-20, D-NET-136, D-NET-165, D-NET-64.
 
 <!-- scoreboard:generated:end -->
 

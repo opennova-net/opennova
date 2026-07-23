@@ -144,6 +144,9 @@ public:
 	const std::string &expansion() const { return expansion_; }
 	const std::string &player_name() const { return player_name_; }
 	uint32_t server_key() const { return conn_.server_sk; }
+	// This connection's own numeric key (ClientAuth.CK; fresh per start()) — the
+	// receiver-local key a host's 0x84 resend request addresses us by.
+	uint32_t client_key() const { return client_key_; }
 	const std::string &client_scrk() const { return conn_.client_scrk; }
 	const std::string &server_scrk() const { return conn_.server_scrk; }
 	const std::string &last_error() const { return last_error_; }

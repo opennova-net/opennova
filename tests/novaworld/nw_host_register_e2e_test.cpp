@@ -232,7 +232,8 @@ int main() {
 			               inbound.data(), inbound.size(), opcode, body) &&
 			               opcode == opennova::SESSION_OPCODE_SERVER_RESEND_LIST &&
 			               opennova::decode_session_resend_list(
-			                       body.data(), body.size(), 1, requested) &&
+			                       body.data(), body.size(), joiner.client_key(),
+			                       requested) &&
 			               requested == std::vector<uint32_t>({1}),
 			       "real listener 0x84 requests the missing first C2S sequence");
 

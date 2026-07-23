@@ -215,11 +215,22 @@ bool motor_item_sweep(World &world, CollisionWorld *collision, const LiveRound &
     trace.owner = r.owner;
     trace.radius_q16 = 0;
     trace.ammo_flags = 0; // foliage/material gates ride the caller ammo below
+    // Pools 2/1 only: no person walk, so a bystander cannot mask the vehicle
+    // behind them (the post-trace class filter below cannot recover a farther
+    // hit the nearest-person result already consumed).
+    trace.walk_persons = false;
+    // A visual client's decoded remote throwable sweeps the wire-keyed dyn
+    // proxies exactly like the bullet walk (round_sim.cpp): on a retail client
+    // this sweep IS the ordinary pool-2/1 walk over its wire-built entities.
+    trace.include_wire_proxies =
+        r.consequence_mode == RoundConsequenceMode::VisualOnly;
+    trace.shooter_wire_handle = r.shooter_handle;
+    trace.shooter_carrier_wire_handle = r.shooter_carrier_handle;
     const ProjectileHit hit = collision->trace_projectile(world, trace);
     if (!hit.hit()) return false;
     if (hit.hit_class != ProjectileHitClass::StaticEntity &&
         hit.hit_class != ProjectileHitClass::DynamicEntity)
-        return false; // terrain/water/person legs are not part of the motor sweep
+        return false; // terrain/water legs are not part of the motor sweep
     out = hit;
     return true;
 }
@@ -437,7 +448,11 @@ static bool motor_nade(World &world, RoundSim &sim, LiveRound &r,
             f.px = hit.position_q16.x;
             f.py = hit.position_q16.y;
             f.pz = hit.position_q16.z;
-            if (bounce_eligible && hit.geometry_entity.valid()) {
+            // Every sweep return is an item hit; a wire-proxy hit carries no
+            // registry identity but still reflects (retail's decoded pool-1
+            // entities bounce grenades). reflect_velocity's -v fallback covers
+            // the normal-less sphere stand-ins.
+            if (bounce_eligible) {
                 const int32_t n[3] = {hit.normal_q16.x, hit.normal_q16.y,
                                       hit.normal_q16.z};
                 reflect_velocity(f, n);
@@ -588,11 +603,15 @@ static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
             f.py = hit.position_q16.y;
             f.pz = hit.position_q16.z;
             ++r.bounce_count;
-            if (hit.geometry_entity.valid()) {
+            {
                 const int32_t n[3] = {hit.normal_q16.x, hit.normal_q16.y,
                                       hit.normal_q16.z};
                 reflect_velocity(f, n);
-                if (throwable_surface_accepts_stick(hit.normal_q16)) {
+                // Stick/parenting needs a registry entity: a wire-proxy hit
+                // reflects but cannot parent — device-on-decoded-vehicle
+                // tracking is the D-THROW-7/D-WPN-8 residual.
+                if (hit.geometry_entity.valid() &&
+                    throwable_surface_accepts_stick(hit.normal_q16)) {
                     // stick to the face
                     stick_pose_from_normal(n, claymore, r.yaw_bam, r.pitch_bam,
                                            r.roll_bam);

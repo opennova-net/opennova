@@ -7957,20 +7957,23 @@ bool NovaSimulation::has_join_mission() const {
 	return joiner_ && runtime_ && runtime_->mission_known();
 }
 
+// String::utf8, not the Latin-1 const char* constructor: the LAN browser rows
+// decode the same wire fields as UTF-8, and both presentations of one host's
+// metadata must agree byte-for-byte.
 String NovaSimulation::get_join_server_name() const {
-	return (joiner_ && runtime_) ? String(runtime_->server_name().c_str()) : String();
+	return (joiner_ && runtime_) ? String::utf8(runtime_->server_name().c_str()) : String();
 }
 
 String NovaSimulation::get_join_mission_name() const {
-	return (joiner_ && runtime_) ? String(runtime_->mission_name().c_str()) : String();
+	return (joiner_ && runtime_) ? String::utf8(runtime_->mission_name().c_str()) : String();
 }
 
 String NovaSimulation::get_join_mission_file() const {
-	return (joiner_ && runtime_) ? String(runtime_->map_file().c_str()) : String();
+	return (joiner_ && runtime_) ? String::utf8(runtime_->map_file().c_str()) : String();
 }
 
 String NovaSimulation::get_join_expansion() const {
-	return (joiner_ && runtime_) ? String(runtime_->expansion().c_str()) : String();
+	return (joiner_ && runtime_) ? String::utf8(runtime_->expansion().c_str()) : String();
 }
 
 int64_t NovaSimulation::get_join_game_type() const {

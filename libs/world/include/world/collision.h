@@ -566,6 +566,12 @@ struct ProjectileTrace {
     // carrier_handle instead. [orig: the mount exclusion setup feeding
     // Physics_RaycastAgainstBoneCollision @ 0x4e4cb0 via ray[18]]
     uint16_t shooter_carrier_wire_handle = 0xFFFF;
+    // The throwable/useownmove motor sweep walks pools 2/1 only — a flying
+    // grenade passes through people, and a person in front of a vehicle must
+    // not mask the vehicle hit [orig: the two
+    // Projectile_RaycastProximitySlots(2/1, ...) calls @ 0x444619..0x444667].
+    // Bullets keep the default full walk.
+    bool walk_persons = true;
 };
 
 struct ProjectileHit {

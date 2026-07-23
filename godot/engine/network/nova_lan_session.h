@@ -9,14 +9,16 @@
 
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace godot {
 
 // LAN browser for the retail game-server UDP range. A browse sends the same
-// witnessed 0x41 ClientHello to every candidate port, then collects the 0x81
-// ServerHello replies for the retail 30-second discovery window. The portable
-// npruntime helper owns the wire format; this node owns only Godot UDP, result
-// normalization, and the MpMenuHost-facing signal.
+// witnessed 0x41 ClientHello to every candidate port, re-announcing on the
+// retail enumerator cadence, then collects the 0x81 ServerHello replies for
+// the retail 30-second discovery window. The portable npruntime helper owns
+// the wire format; this node owns only Godot UDP, result normalization, and
+// the MpMenuHost-facing signal.
 class NovaLanSession : public Node {
 	GDCLASS(NovaLanSession, Node)
 
@@ -37,15 +39,19 @@ protected:
 
 private:
 	void poll_replies();
+	int send_probe_burst(Error &first_send_error);
 	void upsert_server(const Dictionary &row, const std::string &key);
 	void emit_error(const String &message);
 
 	Ref<PacketPeerUDP> socket_;
 	Array servers_;
 	std::unordered_map<std::string, int> server_indices_;
+	String browse_target_;
+	PackedByteArray probe_;
 	int port_min_ = 32768;
 	int port_max_ = 32787;
 	double browse_elapsed_s_ = 0.0;
+	double announce_elapsed_s_ = 0.0;
 	bool browsing_ = false;
 };
 

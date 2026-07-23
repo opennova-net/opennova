@@ -1109,6 +1109,78 @@ func test_lan_host_bind_failure_is_reported_instead_of_falling_back_socketless()
 	blocker.close()
 
 
+func test_lan_host_bind_failure_survives_synchronous_teardown_handler() -> void:
+	# The game shell returns to the menu from INSIDE load_failed — its teardown
+	# calls unload(), which frees the failed runtime. The bind-failure leg must
+	# free/null its runtime before emitting; emitting first made the handler's
+	# reentry turn the follow-up free into a null-instance error.
+	var blocker := NovaUdpPump.new()
+	assert_eq(blocker.bind_listen(0), OK)
+	var occupied_port := blocker.local_port()
+	assert_gt(occupied_port, 0)
+
+	var world := _make_world()
+	add_child_autofree(world)
+	await get_tree().process_frame
+	world.set_playable(false)
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path("res://../fixtures/minimal/resources")), OK)
+	world.set_resource_root(root)
+	var failures: Array[String] = []
+	world.load_failed.connect(func(reason: String):
+		failures.append(reason)
+		world.unload())
+
+	var result := world.load_mission_as_host({
+		"mission": "mnml.bms",
+		"net_transport": "lan",
+		"bind_port": occupied_port,
+		"gametype": 0x30020,
+		"expansion": "",
+	})
+	assert_eq(result, ERR_CANT_CREATE)
+	assert_eq(failures.size(), 1)
+	assert_false(world.is_loaded())
+	assert_null(world.get_sim())
+	blocker.close()
+
+
+func test_escape_aborts_the_joiner_preload_wait() -> void:
+	# ESC during a load: the joiner's pre-load connect/session wait is the one
+	# interruptible leg — the reachable analog of the original per-asset abort
+	# poll [orig: Client_CheckDisconnectOrEscDuringLoad @ 0x520270]
+	# (docs/interface/loading-screen-re.md D-LOADSCR-7).
+	var blocker := NovaUdpPump.new()  # a bound but silent "host": never replies
+	assert_eq(blocker.bind_listen(0), OK)
+	var silent_port := blocker.local_port()
+	assert_gt(silent_port, 0)
+
+	var world := _make_world()
+	add_child_autofree(world)
+	await get_tree().process_frame
+	world.set_playable(false)
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path("res://../fixtures/minimal/resources")), OK)
+	world.set_resource_root(root)
+	var failures: Array[String] = []
+	world.load_failed.connect(func(reason: String): failures.append(reason))
+
+	assert_false(world.cancel_join_preload(), "no preload in flight is a no-op")
+	assert_eq(world.load_mission_as_joiner(
+			{"host_ip": "127.0.0.1", "port": silent_port}, "EscTester"), OK)
+	await get_tree().process_frame  # the deferred preload driver starts
+	assert_true(world.cancel_join_preload(), "an in-flight preload aborts")
+	assert_eq(failures.size(), 1)
+	if failures.size() == 1:
+		assert_string_contains(failures[0], "aborted")
+	assert_false(world.is_loaded())
+	await get_tree().process_frame  # the canceled driver loop unwinds quietly
+	assert_eq(failures.size(), 1, "the canceled driver does not double-report")
+	blocker.close()
+
+
 func test_failed_join_load_does_not_make_the_next_mission_wire_only() -> void:
 	var world := _make_world()
 	add_child_autofree(world)

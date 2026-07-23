@@ -407,6 +407,19 @@ func _drive_join_preload(request_id: int) -> void:
 		_host_config = {}
 
 
+# ESC/abort for the only interruptible load leg: the joiner's pre-load
+# connect/session wait (the SP/host load remains one synchronous call the
+# SceneTree cannot interrupt). Returns true when an in-flight preload was
+# aborted; the ordinary load-failure leg reports it to the shell [orig: the
+# "Mission loading aborted" early return of Client_CheckDisconnectOrEscDuringLoad
+# @ 0x520270] (docs/interface/loading-screen-re.md D-LOADSCR-7).
+func cancel_join_preload() -> bool:
+	if _join_preload_sim == null:
+		return false
+	_fail_join_preload("Mission loading aborted")
+	return true
+
+
 func _fail_join_preload(reason: String) -> void:
 	_cancel_join_preload()
 	_host_config = {}
@@ -1986,13 +1999,18 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> int:
 	if _runtime.get_sim() == null:
 		var setup_error := int(_runtime.get_setup_error()) \
 				if _runtime.has_method("get_setup_error") else ERR_CANT_CREATE
-		if String(opts.get("net_transport", "")) == "lan":
-			load_failed.emit("host start: could not bind LAN UDP port %d" %
-					int(opts.get("bind_port", 32768)))
-		else:
-			load_failed.emit("failed to start mission runtime")
+		var lan_bind_failure := String(opts.get("net_transport", "")) == "lan"
+		var bind_port := int(opts.get("bind_port", 32768))
+		# Free before emitting: a load_failed handler may synchronously tear
+		# the world down (the game shell returns to the menu via unload()),
+		# and unload() frees _runtime — emitting first turned this leg into a
+		# null-instance free on reentry.
 		_runtime.free()
 		_runtime = null
+		if lan_bind_failure:
+			load_failed.emit("host start: could not bind LAN UDP port %d" % bind_port)
+		else:
+			load_failed.emit("failed to start mission runtime")
 		return setup_error if setup_error != OK else ERR_CANT_CREATE
 	_apply_local_player_spawn_loadout()
 	_runtime.set_presentation_time_ms(_panm_clock.time_ms)

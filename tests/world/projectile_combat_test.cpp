@@ -975,6 +975,140 @@ void test_visual_dynamic_proxy_carrier_gate_and_sphere_standin() {
     CHECK(sphere_hit.position_q16.x <= 5 * 65536);
 }
 
+// A decoded vehicle/item shooter never clips its own wire slot: the dyn-proxy
+// walk applies the same self-site immunity as the local tables (the retail
+// four-slot ray[17..20] exclusion), and an unrelated proxy behind it still
+// stops the round.
+void test_visual_dynamic_proxy_excludes_shooter_self_slot() {
+    World world;
+    world.registry.configure_pool(0, 4);
+    world.mp_session = true;
+    world.projectile_authority = false;
+
+    Entity shooter;
+    shooter.kind = EntityKind::Organic;
+    shooter.item_type = 3;
+    const EntityHandle sh = world.registry.spawn(0, shooter);
+    world.cached.local_player = sh;
+
+    CollisionWorld collision;
+    const int32_t model_id =
+        collision.add_model(proxy_face_quad_model(/*material=*/9));
+    collision.build_tick_tables(world);
+    world.collision = &collision;
+
+    ProjectileDynamicProxy self;
+    self.wire_handle = 0x1004; // the decoded shooter's own pool-1 slot
+    self.model_id = model_id;
+    self.position_q16 = FixedVec3{6 * 65536, 0, 0};
+    self.pitch_bam = 0x40000000; // vertical plane across the lane
+    self.bound_radius_q16 = 3 * 65536;
+    ProjectileDynamicProxy behind = self;
+    behind.wire_handle = 0x1007;
+    behind.position_q16 = FixedVec3{10 * 65536, 0, 0};
+    collision.replace_projectile_dynamic_proxies({self, behind});
+
+    ProjectileTrace trace;
+    trace.start = FixedVec3{0, 0, 0};
+    trace.end = FixedVec3{14 * 65536, 0, 0};
+    trace.owner = sh;
+    trace.include_wire_proxies = true;
+    trace.shooter_wire_handle = 0x1004; // firing AS the decoded vehicle
+    const ProjectileHit hit = collision.trace_projectile(world, trace);
+    CHECK(hit.hit_class == ProjectileHitClass::DynamicEntity);
+    // The shooter's own plane (<= 7) was ridden through; the unrelated proxy
+    // stops the round on its vertical plane at X~10.
+    CHECK(hit.position_q16.x > 8 * 65536);
+    CHECK(hit.position_q16.x < 12 * 65536);
+}
+
+// A visual client's decoded remote throwable sweeps the wire dyn proxies like
+// the bullet walk: the motor rides through the shooter's own carrier, stops on
+// (and reflects off) an unrelated decoded mover instead of flying through it.
+void test_visual_throwable_motor_sweeps_wire_proxies() {
+    World world;
+    world.registry.configure_pool(0, 4);
+    world.registry.configure_pool(1, 4);
+    world.mp_session = true;
+    world.projectile_authority = false;
+
+    Entity shooter;
+    shooter.kind = EntityKind::Organic;
+    shooter.item_type = 3;
+    const EntityHandle sh = world.registry.spawn(0, shooter);
+    world.cached.local_player = sh;
+
+    CollisionWorld collision;
+    const int32_t model_id =
+        collision.add_model(proxy_face_quad_model(/*material=*/7));
+    collision.build_tick_tables(world);
+    world.collision = &collision;
+
+    ProjectileDynamicProxy carrier;
+    carrier.wire_handle = 0x1004; // the decoded shooter's own carrier
+    carrier.model_id = model_id;
+    carrier.position_q16 = FixedVec3{6 * 65536, 0, 0};
+    carrier.pitch_bam = 0x40000000; // vertical plane across the lane
+    carrier.bound_radius_q16 = 3 * 65536;
+    ProjectileDynamicProxy target = carrier;
+    target.wire_handle = 0x1007;
+    target.position_q16 = FixedVec3{10 * 65536, 0, 0};
+    collision.replace_projectile_dynamic_proxies({carrier, target});
+
+    AmmoTableEntry nade;
+    nade.name = "VISUAL_NADE";
+    nade.valid = true;
+    nade.flags = 0x2000u | 0x80u; // useownmove + nocollide-terrain
+    nade.velocity = 124;          // 2 units/tick
+    nade.max_age_ticks = 60;
+    nade.drag_fp16 = 65536;       // dragless: keep the 2 u/tick lane speed
+    const int nade_index = static_cast<int>(world.ammo.entries.size());
+    world.ammo.entries.push_back(nade);
+
+    RoundSpawnParams params;
+    params.owner = sh;
+    params.shooter_handle = 0x0002;
+    params.origin = {0.0f, 0.0f, 0.5f};
+    params.ammo_index = nade_index;
+    const int slot = world.round_sim.spawn(
+        world, params, RoundConsequenceMode::VisualOnly);
+    CHECK(slot >= 0);
+    if (slot < 0) return;
+    LiveRound &round = world.round_sim.rounds[static_cast<size_t>(slot)];
+    round.motor = ThrowClass::kNade;
+    round.shooter_carrier_handle = 0x1004;
+    round.vel = Vec3{2.0f, 0.0f, 0.0f};
+
+    // The pitched quads sit one unit shy of their proxy origins: the carrier
+    // plane crosses the lane at X=5, the target plane at X=9.
+    float first_bounce_x = -1.0f;
+    float speed_before = 2.0f;
+    float speed_after = -1.0f;
+    for (int tick = 0; tick < 10; ++tick) {
+        const float vx_entering =
+            world.round_sim.rounds[static_cast<size_t>(slot)].vel.x;
+        world.round_sim.tick(world, nullptr, &collision);
+        const LiveRound &r = world.round_sim.rounds[static_cast<size_t>(slot)];
+        if (first_bounce_x < 0.0f && r.bounce_count > 0) {
+            first_bounce_x = r.pos.x;
+            speed_before = vx_entering;
+            speed_after = r.vel.x;
+        }
+        if (!r.active) break;
+    }
+    // The sweep found the wire geometry (a fly-through regression records no
+    // bounce at all), and the FIRST contact is the unrelated mover's plane at
+    // X=9 — the shooter's own carrier plane at X=5 was ridden through.
+    CHECK(first_bounce_x > 8.0f);
+    CHECK(first_bounce_x < 9.6f);
+    // The contact reflected the motor: retail's 0.35 impact-speed retention
+    // [orig: Physics_ComputeReflectionForce @ 0x4e4310].
+    CHECK(speed_after >= 0.0f
+              ? speed_after < speed_before * 0.4f
+              : -speed_after < speed_before * 0.4f);
+    CHECK(world.explosions.queue.empty());
+}
+
 // A decoded non-player Infantry proxy joins the person walk exactly like the
 // remote-player proxy: torso stand-in at the decoded position, consequence-free.
 void test_visual_infantry_proxy_joins_person_walk() {
@@ -1342,6 +1476,8 @@ int main() {
     test_visual_person_proxy_keeps_wire_identity_out_of_authority();
     test_visual_dynamic_proxy_projects_decoded_pose_geometry();
     test_visual_dynamic_proxy_carrier_gate_and_sphere_standin();
+    test_visual_dynamic_proxy_excludes_shooter_self_slot();
+    test_visual_throwable_motor_sweeps_wire_proxies();
     test_visual_infantry_proxy_joins_person_walk();
     test_signed_armor_equality_and_damage_state_gates();
     test_signed_health_subtraction_wraps_at_entity_word();

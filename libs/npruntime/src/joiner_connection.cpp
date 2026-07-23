@@ -67,6 +67,14 @@ JoinerConnection::JoinerConnection(std::string player_name,
 
 std::vector<uint8_t> JoinerConnection::start() {
 	conn_.client_scrk = make_dev_scrk();
+	// Fresh per-connection numeric key, like the per-connection key material
+	// retail regenerates on connect [orig: CNapiNPConnection_GenerateTxKey
+	// @ 0x61dfe0 charset-PRNG pattern]: a CONSTANT ck would alias a quick
+	// reconnect from the same endpoint to the host's same-(CI,CK) retransmit
+	// echo (stale auth material) instead of a fresh node. CI stays 1 — the
+	// first connection node's index. 0 is reserved (absent-key sentinel).
+	client_key_ = make_random_session_u32();
+	if (client_key_ == 0) client_key_ = 1;
 	server_hk_ = 0;
 	conn_.server_sk = 0;
 	conn_.server_scrk.clear();

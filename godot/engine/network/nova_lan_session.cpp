@@ -17,6 +17,11 @@ namespace {
 
 constexpr const char *DEFAULT_BROADCAST = "255.255.255.255";
 constexpr double BROWSE_WINDOW_SECONDS = 30.0;
+// Retail re-announces across the whole port walk every 3000 ms while the
+// enumerator is active — discovery is a cadence, not a single burst [orig:
+// CNapiNPConnection_PumpEnumeratorAndSend @ 0x6290c0 sets the enumerating
+// send interval to 3000 and gates on tick - last_send_tick].
+constexpr double ANNOUNCE_INTERVAL_SECONDS = 3.0;
 
 uint32_t pick_random_uint32() {
 	static thread_local std::mt19937 gen{std::random_device{}()};
@@ -106,27 +111,17 @@ int NovaLanSession::start_browsing(const String &destination, int port_min, int 
 	}
 	socket_->set_broadcast_enabled(true);
 
-	const PackedByteArray probe = to_packed_bytes(
+	// One identity per browse window: retail keeps its connection identity
+	// across the enumerator's re-announce pumps, so every burst repeats the
+	// same probe bytes.
+	probe_ = to_packed_bytes(
 			opennova::np::build_lan_discovery_probe(pick_random_uint32()));
-	Error first_send_error = OK;
-	int sent = 0;
-	auto send_range = [&](const String &address) {
-		for (int port = port_min; port <= port_max; ++port) {
-			const Error destination_error = socket_->set_dest_address(address, port);
-			if (destination_error != OK) {
-				if (first_send_error == OK) first_send_error = destination_error;
-				continue;
-			}
-			const Error send_error = socket_->put_packet(probe);
-			if (send_error == OK) {
-				++sent;
-			} else if (first_send_error == OK) {
-				first_send_error = send_error;
-			}
-		}
-	};
+	browse_target_ = target;
+	port_min_ = port_min;
+	port_max_ = port_max;
 
-	send_range(target);
+	Error first_send_error = OK;
+	const int sent = send_probe_burst(first_send_error);
 
 	if (sent == 0) {
 		const Error send_error = first_send_error == OK ? ERR_CANT_CONNECT : first_send_error;
@@ -136,12 +131,32 @@ int NovaLanSession::start_browsing(const String &destination, int port_min, int 
 		return static_cast<int>(send_error);
 	}
 
-	port_min_ = port_min;
-	port_max_ = port_max;
 	browse_elapsed_s_ = 0.0;
+	announce_elapsed_s_ = 0.0;
 	browsing_ = true;
 	set_process(true);
 	return static_cast<int>(OK);
+}
+
+int NovaLanSession::send_probe_burst(Error &first_send_error) {
+	int sent = 0;
+	if (!socket_.is_valid()) {
+		return sent;
+	}
+	for (int port = port_min_; port <= port_max_; ++port) {
+		const Error destination_error = socket_->set_dest_address(browse_target_, port);
+		if (destination_error != OK) {
+			if (first_send_error == OK) first_send_error = destination_error;
+			continue;
+		}
+		const Error send_error = socket_->put_packet(probe_);
+		if (send_error == OK) {
+			++sent;
+		} else if (first_send_error == OK) {
+			first_send_error = send_error;
+		}
+	}
+	return sent;
 }
 
 void NovaLanSession::stop() {
@@ -165,8 +180,18 @@ void NovaLanSession::_process(double delta) {
 
 	poll_replies();
 	browse_elapsed_s_ += delta;
+	announce_elapsed_s_ += delta;
 	if (browse_elapsed_s_ >= BROWSE_WINDOW_SECONDS) {
 		stop();
+		return;
+	}
+	// A cold host that binds its port mid-window is only discoverable because
+	// the enumerator keeps announcing; transient send errors during a
+	// re-announce are dropped like retail's fire-and-forget pump.
+	if (announce_elapsed_s_ >= ANNOUNCE_INTERVAL_SECONDS) {
+		announce_elapsed_s_ = 0.0;
+		Error ignored_error = OK;
+		send_probe_burst(ignored_error);
 	}
 }
 

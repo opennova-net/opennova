@@ -13,6 +13,27 @@ func _mission() -> NovaMissionData:
 	return mission
 
 
+func test_browse_defaults_pin_the_retail_game_port_range() -> void:
+	# Stock JO's enumerator walks 32768..32787 by default, broadcasting to the
+	# configured discovery target [orig: CNapiNPConnection_PumpEnumeratorAndSend
+	# @ 0x6290c0 port walk; docs/net/novaworld-net-re.md 5.0c]. The registered
+	# defaults are the seam every menu browse rides.
+	var found := false
+	for m in ClassDB.class_get_method_list("NovaLanSession"):
+		if String(m.get("name", "")) != "start_browsing":
+			continue
+		found = true
+		var defaults: Array = m.get("default_args", [])
+		assert_eq(defaults.size(), 3,
+				"destination/port_min/port_max all carry registered defaults")
+		if defaults.size() == 3:
+			assert_eq(String(defaults[0]), "255.255.255.255",
+					"the default discovery target is the local broadcast address")
+			assert_eq(int(defaults[1]), 32768, "retail range start")
+			assert_eq(int(defaults[2]), 32787, "retail range end")
+	assert_true(found, "start_browsing is registered")
+
+
 func test_browser_discovers_live_host_without_pre_auth_mission_metadata() -> void:
 	var host := NovaSimulation.new()
 	host.configure_host_session({

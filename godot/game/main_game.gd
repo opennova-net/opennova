@@ -947,12 +947,15 @@ func _on_world_load_failed(reason: String) -> void:
 
 func _on_camera_escape() -> void:
 	# Esc: pause <-> resume while in a world (the armory closes back to play);
-	# ignored in the main menu (EXIT quits). During a load Esc is inert: our
-	# SP/host load is a single synchronous call the SceneTree cannot interrupt,
-	# so there is no reachable analog of the original's per-asset ESC/disconnect
-	# abort poll [orig: Client_CheckDisconnectOrEscDuringLoad @ 0x520270]
-	# (docs/interface/loading-screen-re.md D-LOADSCR-7).
+	# ignored in the main menu (EXIT quits). During a load, the joiner's
+	# pre-load connect/session wait is the one interruptible leg — aborting it
+	# is the reachable analog of the original's per-asset ESC/disconnect abort
+	# poll [orig: Client_CheckDisconnectOrEscDuringLoad @ 0x520270]. The
+	# SP/host load remains a single synchronous call the SceneTree cannot
+	# interrupt (docs/interface/loading-screen-re.md D-LOADSCR-7).
 	if _world_load_pending:
+		if _world != null and _world.has_method("cancel_join_preload"):
+			_world.cancel_join_preload()
 		return
 	# Round over: ESC leaves the mission instead of pausing [orig: ESC (0x1B) sets
 	# g_mission_exit_reason = 1 during the epilog, Input_HandleSpecialKeys @0x49c8e2].
