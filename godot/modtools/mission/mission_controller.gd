@@ -23,9 +23,9 @@ signal changed  # Mission loaded or cleared; the inspector rebuilds on this.
 signal status_reported(message: String, is_error: bool)
 
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
-const MissionWaypointOverlay := preload("res://engine/mission/mission_waypoint_overlay.gd")
-const MissionAreaTriggerOverlay := preload("res://engine/mission/mission_area_trigger_overlay.gd")
-const MissionMarkerOverlay := preload("res://engine/mission/mission_marker_overlay.gd")
+const MissionWaypointOverlay := preload("res://modtools/mission/mission_waypoint_overlay.gd")
+const MissionAreaTriggerOverlay := preload("res://modtools/mission/mission_area_trigger_overlay.gd")
+const MissionMarkerOverlay := preload("res://modtools/mission/mission_marker_overlay.gd")
 const ObjectUserPointOverlayScript := preload("res://engine/object/object_user_point_overlay.gd")
 const MissionGizmo := preload("res://modtools/framework/transform_gizmo_3d.gd")
 const MissionEntityRegistry := preload("res://engine/world/mission_entity_registry.gd")
