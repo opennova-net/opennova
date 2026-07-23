@@ -275,7 +275,7 @@ func _apply_husk_swap(husk: Dictionary) -> void:
 		return
 	_stats.husk_swaps += 1
 	var item_id := int(husk.get("item_id", 0))
-	var def_id := item_id + 100000  # mission::kItemIdOffset (item DB keys)
+	var def_id := item_id + NovaMissionData.ITEM_ID_OFFSET  # wire type id -> items.def id
 	var husk_graphic := ""
 	if _item_db != null:
 		husk_graphic = String(_item_db.get_husk(def_id))

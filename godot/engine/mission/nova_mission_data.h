@@ -111,6 +111,11 @@ public:
 		ATTRIB_TEAM_KING_OF_THE_HILL = 0x40000000,
 		ATTRIB_SEARCH_AND_DESTROY = 0x80000000,
 		ATTRIB_GAME_MODE_MASK = 0xFF830000,
+		// items.def id = wire type id + this offset (libs/mission kItemIdOffset;
+		// pinned by static_assert in the .cpp). Bound so GDScript never
+		// re-hardcodes the 100000. [orig: the +100000 item-id bias in the BMS
+		// entity records — mission/mission.h]
+		ITEM_ID_OFFSET = 100000,
 	};
 
 	Error open_file(const String &path);
