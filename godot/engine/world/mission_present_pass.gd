@@ -38,6 +38,17 @@ var _drive_transform := true
 var _drive_part_anim := true
 var _drive_visibility := true
 var _stats: Dictionary = { "moved": 0, "posed": 0, "hidden": 0, "muzzles": 0 }
+var _row_plan_revision := -1
+var _row_plan_stride := 0
+var _row_plan_snapshot_size := -1
+var _row_plan_index_generation := -1
+var _row_bases := PackedInt32Array()
+var _row_handles := PackedInt32Array()
+var _row_types := PackedInt32Array()
+var _row_bms_ids := PackedInt32Array()
+var _row_kinds := PackedInt32Array()
+var _row_indices := PackedInt32Array()
+var _row_nodes: Array = []
 
 
 ## options: { drive_transform, drive_part_anim, drive_visibility } (all default true). The editor
@@ -56,10 +67,6 @@ func get_stats() -> Dictionary:
 
 ## Apply the current sim state onto every resolved animated node. Called once per logic tick by the
 ## runtime driver (after the sim advances).
-var _perf_probe_skip_transform := false
-var _perf_probe_skip_body_anim := false
-
-
 func present() -> void:
 	if _sim == null or _index == null:
 		return
@@ -67,18 +74,31 @@ func present() -> void:
 	if stride <= 0:
 		return
 	var snap: PackedFloat32Array = _sim.get_present_snapshot()
-	var count: int = snap.size() / stride
-	for i in range(count):
-		var base := i * stride
-		var node = _index.resolve(
-			int(snap[base + NovaSimulation.PF_BMS_ID]),
-			int(snap[base + NovaSimulation.PF_KIND]),
-			int(snap[base + NovaSimulation.PF_INDEX]))
+	var layout_revision := -1
+	if _sim.has_method("get_present_layout_revision"):
+		layout_revision = int(_sim.get_present_layout_revision())
+	present_snapshot(snap, stride, layout_revision)
+
+
+## Apply a snapshot already fetched by MissionRuntime. Compatible callers may
+## keep using present(); a source without a layout revision simply rebuilds the
+## routing plan every call.
+func present_snapshot(
+		snap: PackedFloat32Array, stride: int, layout_revision: int = -1) -> void:
+	if _index == null or stride <= 0:
+		return
+	if not _row_plan_is_current(snap, stride, layout_revision):
+		_rebuild_row_plan(snap, stride, layout_revision)
+	for row in range(_row_nodes.size()):
+		var base := int(_row_bases[row])
+		var node: Variant = _row_nodes[row]
 		if node == null or not is_instance_valid(node):
+			# A freed cached node cannot be written through. The next call will
+			# rebuild because validation rejects it.
 			continue
-		if _drive_transform and not _perf_probe_skip_transform:
+		if _drive_transform:
 			_apply_transform(node, snap, base)
-		PresentAimOverlay.apply(node, snap, base)
+		PresentAimOverlay.apply(node, snap, base, false)
 		if _drive_part_anim:
 			# Remove last tick's semantic mount ownership before generic model-order
 			# channels run. A generic PLAYPARTANIM can itself address EWEAP_*; it
@@ -105,12 +125,75 @@ func present() -> void:
 					int(snap[base + NovaSimulation.PF_HIDDEN]) == 0
 					and int(snap[base +
 							NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED]) == 0)
-			node.visible = visible
+			if node.visible != visible:
+				node.visible = visible
 			if not visible:
 				_stats.hidden += 1
-		if not _perf_probe_skip_body_anim:
-			_apply_body_anim(node, snap, base)
+		_apply_body_anim(node, snap, base)
 		_push_muzzle(node, int(snap[base + NovaSimulation.PF_NET_ID]))
+
+
+func _current_index_generation() -> int:
+	if _index != null and _index.has_method("get_generation"):
+		return int(_index.get_generation())
+	return 0
+
+
+func _row_plan_is_current(
+		snap: PackedFloat32Array, stride: int, layout_revision: int) -> bool:
+	# No revision means a compatible fake/custom source: preserve the original
+	# full-resolution behavior rather than trusting an unverifiable row order.
+	if layout_revision < 0 \
+			or _row_plan_revision != layout_revision \
+			or _row_plan_stride != stride \
+			or _row_plan_snapshot_size != snap.size() \
+			or _row_plan_index_generation != _current_index_generation():
+		return false
+	for row in range(_row_nodes.size()):
+		var base := int(_row_bases[row])
+		if base < 0 or base + stride > snap.size():
+			return false
+		var node: Variant = _row_nodes[row]
+		if node == null or not is_instance_valid(node):
+			return false
+		if (int(snap[base + NovaSimulation.PF_WIRE_HANDLE]) != int(_row_handles[row])
+				or int(snap[base + NovaSimulation.PF_TYPE_ID]) != int(_row_types[row])
+				or int(snap[base + NovaSimulation.PF_BMS_ID]) != int(_row_bms_ids[row])
+				or int(snap[base + NovaSimulation.PF_KIND]) != int(_row_kinds[row])
+				or int(snap[base + NovaSimulation.PF_INDEX]) != int(_row_indices[row])):
+			return false
+	return true
+
+
+func _rebuild_row_plan(
+		snap: PackedFloat32Array, stride: int, layout_revision: int) -> void:
+	_row_bases.clear()
+	_row_handles.clear()
+	_row_types.clear()
+	_row_bms_ids.clear()
+	_row_kinds.clear()
+	_row_indices.clear()
+	_row_nodes.clear()
+	_row_plan_revision = layout_revision
+	_row_plan_stride = stride
+	_row_plan_snapshot_size = snap.size()
+	_row_plan_index_generation = _current_index_generation()
+	var count: int = snap.size() / stride
+	for row in range(count):
+		var base := row * stride
+		var bms_id := int(snap[base + NovaSimulation.PF_BMS_ID])
+		var kind := int(snap[base + NovaSimulation.PF_KIND])
+		var index := int(snap[base + NovaSimulation.PF_INDEX])
+		var node = _index.resolve(bms_id, kind, index)
+		if node == null or not is_instance_valid(node):
+			continue
+		_row_bases.append(base)
+		_row_handles.append(int(snap[base + NovaSimulation.PF_WIRE_HANDLE]))
+		_row_types.append(int(snap[base + NovaSimulation.PF_TYPE_ID]))
+		_row_bms_ids.append(bms_id)
+		_row_kinds.append(kind)
+		_row_indices.append(index)
+		_row_nodes.append(node)
 
 
 # The D-AI-6 muzzle seam: feed each posed model's gun-flash userpoint world position
@@ -143,8 +226,13 @@ func _apply_transform(node, snap: PackedFloat32Array, base: int) -> void:
 		snap[base + NovaSimulation.PF_PITCH_DEG],
 		snap[base + NovaSimulation.PF_YAW_DEG],
 		snap[base + NovaSimulation.PF_ROLL_DEG])
-	node.transform = Transform3D(MissionObjectPlacer.bms_to_godot_basis(rot), pos)
-	_stats.moved += 1
+	var entity_basis := MissionObjectPlacer.bms_to_godot_basis(rot)
+	var root_basis := (PresentAimOverlay.root_basis(snap, base, entity_basis)
+			if node.has_method("set_aim_overlay") else entity_basis)
+	var next_transform := Transform3D(root_basis, pos)
+	if node.transform != next_transform:
+		node.transform = next_transform
+		_stats.moved += 1
 
 
 # PANM: the engine integrates each channel's phase (Entity_ApplyCommand @0x43ab60 case 0x22); the host

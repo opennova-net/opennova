@@ -223,7 +223,7 @@ bool scan_entity_rejected(World &world, const Entity &cand, const Entity &player
 template <typename Fn>
 void for_each_scan_candidate(World &world, const Entity &player, Fn &&fn) {
     CollisionWorld *cw = world.collision;
-    if (cw != nullptr && cw->tick_tables_ready()) {
+    if (cw != nullptr && cw->attach_candidate_slices_authoritative()) {
         int32_t n = 0;
         const EntityHandle *slice = cw->candidate_slice(player.handle, n);
         for (int32_t i = 0; i < n; ++i) {

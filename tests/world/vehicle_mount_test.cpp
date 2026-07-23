@@ -105,6 +105,19 @@ struct FakeMountedPoseProvider final : IMountedPoseProvider {
     }
 };
 
+struct StubCollisionMatrixProvider final : ICollisionSectionMatrixProvider {
+    int calls = 0;
+
+    bool build_section_matrices(World &, EntityHandle, int32_t,
+                                const CollisionMatrix &entity_world,
+                                const CollisionModel &model,
+                                std::vector<CollisionMatrix> &out) override {
+        ++calls;
+        out.assign(model.sections.size(), entity_world);
+        return true;
+    }
+};
+
 struct HeadingMountedPoseProvider final : IMountedPoseProvider {
     std::vector<int32_t> headings;
     std::vector<int32_t> pitches;
@@ -451,13 +464,52 @@ void test_attach_scan_never_built_fallback_and_initial_empty_slice() {
         CHECK(hit.vehicle == r.veh_h);
     }
     {
+        // Headless/GDScript fixtures can publish seat metadata without a 3DI
+        // collision bound. Before the first candidate-slice epoch, retain the
+        // compatibility registry walk rather than treating an absent slice as
+        // authoritative.
+        Rig r(2.0f);
+        CollisionWorld cw;
+        r.w.collision = &cw;
+        cw.build_tick_tables(r.w);
+        CHECK(cw.tick_tables_ready());
+        CHECK(!cw.attach_candidate_slices_authoritative());
+        NearestSeatHit hit;
+        CHECK(find_nearest_free_seat(r.w, r.player(), hit, false));
+        CHECK(hit.vehicle == r.veh_h);
+    }
+    {
+        // A live host may know the seat before the model/collision hull resolves.
+        // The short pre-slice epoch retains compatibility discovery; once the
+        // 17-tick proximity epoch lands, the seat-only carrier itself is in the
+        // bounded slice and no per-frame registry fallback is needed.
+        Rig r(2.0f);
+        CollisionWorld cw;
+        StubCollisionMatrixProvider provider;
+        cw.set_section_matrix_provider(&provider);
+        r.w.collision = &cw;
+        cw.build_tick_tables(r.w);
+        CHECK(cw.tick_tables_ready());
+        CHECK(!cw.attach_candidate_slices_authoritative());
+        NearestSeatHit hit;
+        CHECK(find_nearest_free_seat(r.w, r.player(), hit, false));
+        CHECK(hit.vehicle == r.veh_h);
+        for (int i = 1; i < 17; ++i) cw.build_tick_tables(r.w);
+        CHECK(cw.attach_candidate_slices_authoritative());
+        CHECK(cw.candidate_count(r.player_h) == 1);
+        hit = NearestSeatHit{};
+        CHECK(find_nearest_free_seat(r.w, r.player(), hit, false));
+        CHECK(hit.vehicle == r.veh_h);
+        CHECK(provider.calls == 0);
+    }
+    {
         Rig r(2.0f);
         CollisionWorld cw;
         r.w.collision = &cw;
         r.veh().bound_radius = 3.0f;
         cw.build_tick_tables(r.w);
         NearestSeatHit hit;
-        CHECK(!find_nearest_free_seat(r.w, r.player(), hit, false));
+        CHECK(find_nearest_free_seat(r.w, r.player(), hit, false));
         for (int i = 1; i < 17; ++i) cw.build_tick_tables(r.w);
         CHECK(find_nearest_free_seat(r.w, r.player(), hit, false));
         CHECK(hit.vehicle == r.veh_h);

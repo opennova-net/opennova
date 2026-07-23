@@ -978,14 +978,32 @@ func _sample_panm_clock() -> void:
 ## foliage coverage around the viewer, then the mission runtime (MissionRuntime.tick advances the
 ## logic at the 62-frame cadence, presents entity state onto the placed nodes, and drains side
 ## effects), then the audio render pass. Effects come back through MissionRuntime.effects_drained.
-var _perf_probe_spans := {}
+var _perf_probe_enabled := false
+var _perf_probe_spans: Dictionary = {}
 var _perf_probe_skip_occl := false
 var _perf_probe_skip_effect_tick := false
 var _perf_probe_skip_fixed_handlers := false
+var _perf_probe_occlusion_skipped := false
+
+
+## Enables the manual frame-span/A-B probe. Disabling restores every skip
+## request to its retail default and drops any sampled frame transport.
+func set_perf_probe_enabled(enabled: bool) -> void:
+	_perf_probe_enabled = enabled
+	_perf_probe_spans.clear()
+	if not enabled:
+		_perf_probe_skip_occl = false
+		_perf_probe_skip_effect_tick = false
+		_perf_probe_skip_fixed_handlers = false
+		_perf_probe_occlusion_skipped = false
 
 
 func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta: float = TICK_DT) -> void:
 	_sample_panm_clock()
+	var probe_enabled := _perf_probe_enabled
+	var skip_occlusion := probe_enabled and _perf_probe_skip_occl
+	if probe_enabled:
+		_perf_probe_spans.clear()
 	var tick_start := Time.get_ticks_usec()
 	_last_tick_camera_pos = camera_pos  # the fire present pass's listener (audio-tick source)
 	var foliage_start := tick_start
@@ -1014,10 +1032,22 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 	# present, it never force-shows a node the sim wants hidden. Safe while
 	# paused too: the culled/hidden sets only ever contain nodes occlusion
 	# itself hid while they were visible.
-	var __pf_t := Time.get_ticks_usec()
-	if _loaded and not _perf_probe_skip_occl:
+	var probe_phase_start := Time.get_ticks_usec() if probe_enabled else 0
+	if _loaded:
 		_restore_occlusion_overrides()
-	_perf_probe_spans["occl_restore"] = Time.get_ticks_usec() - __pf_t
+		# Section masks persist on the de-batched model nodes. On the edge into
+		# occlusion A/B, release only that render override; mission blink/indoors
+		# semantics remain authoritative and iris exposure keeps sampling below.
+		if probe_enabled:
+			if skip_occlusion and not _perf_probe_occlusion_skipped:
+				if _water != null:
+					_water.visible = not _blink_water_suppressed
+				_reset_occlusion_section_masks()
+			_perf_probe_occlusion_skipped = skip_occlusion
+	elif probe_enabled:
+		_perf_probe_occlusion_skipped = false
+	if probe_enabled:
+		_perf_probe_spans["occl_restore"] = Time.get_ticks_usec() - probe_phase_start
 	# Gate on the runtime transport so MissionRuntime._playing is THE play flag
 	# in both hosts: the debug overlay's Pause/Step work in the game too, not
 	# just the editor preview. _start_runtime calls play(), so normal missions
@@ -1040,27 +1070,36 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 	# remains 62.5 Hz. Each weather quantum advances integer fixed24 time, which
 	# recomputes TOD targets, then ticks every weather block exactly once
 	# [orig: Environment_UpdateWeatherTick @ 0x57e9b0].
-	__pf_t = Time.get_ticks_usec()
+	probe_phase_start = Time.get_ticks_usec() if probe_enabled else 0
 	if (_loaded and _runtime != null and _runtime.is_playing()
 			and _env != null):
 		_advance_hosted_weather(delta)
-	_perf_probe_spans["weather"] = Time.get_ticks_usec() - __pf_t
+	if probe_enabled:
+		_perf_probe_spans["weather"] = Time.get_ticks_usec() - probe_phase_start
 	# Blink flags only change on sim ticks; re-apply the frame gates then.
-	__pf_t = Time.get_ticks_usec()
+	probe_phase_start = Time.get_ticks_usec() if probe_enabled else 0
 	if _loaded and runtime_ticks > 0:
 		_apply_blink_frame_gates()
-	_perf_probe_spans["blink"] = Time.get_ticks_usec() - __pf_t
+	if probe_enabled:
+		_perf_probe_spans["blink"] = Time.get_ticks_usec() - probe_phase_start
 	# The render-occlusion frame is camera-driven: it runs every render frame
 	# (retail collects visible entities per scene render, not per sim tick).
 	# [orig: Terrain_CollectVisibleEntities @ 0x5c9160 from
 	# Terrain_RenderSceneWithReflection @ 0x5c94f0]
-	__pf_t = Time.get_ticks_usec()
-	if _loaded and not _perf_probe_skip_occl:
-		_apply_occlusion_frame(camera_xform)
-		_perf_probe_spans["occl_frame"] = Time.get_ticks_usec() - __pf_t
-		__pf_t = Time.get_ticks_usec()
+	if _loaded:
+		probe_phase_start = Time.get_ticks_usec() if probe_enabled else 0
+		if not skip_occlusion:
+			_apply_occlusion_frame(camera_xform)
+		if probe_enabled:
+			_perf_probe_spans["occl_frame"] = (0 if skip_occlusion
+					else Time.get_ticks_usec() - probe_phase_start)
+		probe_phase_start = Time.get_ticks_usec() if probe_enabled else 0
 		_stamp_iris_samples(camera_xform)
-		_perf_probe_spans["iris"] = Time.get_ticks_usec() - __pf_t
+		if probe_enabled:
+			_perf_probe_spans["iris"] = Time.get_ticks_usec() - probe_phase_start
+	elif probe_enabled:
+		_perf_probe_spans["occl_frame"] = 0
+		_perf_probe_spans["iris"] = 0
 	var audio_start := Time.get_ticks_usec()
 	if _loaded and _mission_audio != null:
 		# Ambient soundloop regions read that same clock [orig:
@@ -1940,7 +1979,9 @@ func _on_runtime_effects(effects: Array) -> void:
 
 
 func _on_runtime_fixed_tick(_logic_tick: int) -> void:
-	if _perf_probe_skip_fixed_handlers:
+	var probe_enabled := _perf_probe_enabled
+	var skip_fixed_handlers := probe_enabled and _perf_probe_skip_fixed_handlers
+	if skip_fixed_handlers:
 		return
 	# Retail executes local weapon actions and physical impacts before the same
 	# frame's global particle update. Consume each source tick synchronously so
@@ -1949,8 +1990,9 @@ func _on_runtime_fixed_tick(_logic_tick: int) -> void:
 	if _local_player_weapon_tick_consumer.is_valid():
 		_local_player_weapon_tick_consumer.call(drain_local_player_weapon_events())
 	_route_round_impacts()
+	var skip_effect_tick := probe_enabled and _perf_probe_skip_effect_tick
 	if _effect_world != null and _effect_world.has_method("advance_fixed_tick") \
-			and not _perf_probe_skip_effect_tick:
+			and not skip_effect_tick:
 		_effect_world.advance_fixed_tick(MissionRuntime.TICK_DT)
 
 
@@ -1988,11 +2030,13 @@ func _start_mission_audio(mission: NovaMissionData, bms_name: String) -> void:
 	var stats := _mission_audio.setup(mission, bms_name, self)
 	if _env != null and _env.get("time_of_day") != null:
 		_mission_audio.set_time_of_day_hhmm(float(_env.get("time_of_day")))
-	print("GameWorld: mission audio — %d/%d sound markers resolved, %d bank(s), %d voice(s)" % [
+	print("GameWorld: mission audio — %d/%d sound markers resolved, %d bank(s), %d ambient candidate(s), %d/%d physical channel(s) allocated" % [
 		int(stats.get("markers_resolved", 0)),
 		int(stats.get("markers_total", 0)),
 		int(stats.get("banks_loaded", 0)),
-		int(stats.get("voices", 0)),
+		int(stats.get("ambient_candidates", 0)),
+		int(stats.get("physical_channels", 0)),
+		int(stats.get("channel_budget", NovaMissionAudio.MIX_CHANNELS)),
 	])
 	# Open the GAME music context + seed the witnessed vars [orig: Game_StartMission
 	# @ 0x525581-0x52561b]. Retail gates the open on is_mp_session_peer and STOPS
@@ -2717,15 +2761,23 @@ func _restore_occlusion_overrides() -> void:
 	_occlusion_hidden_buildings.clear()
 
 
-func _reset_occlusion_frame() -> void:
-	_restore_occlusion_overrides()
+## Release only the render-owned section masks when the occlusion A/B seam is
+## entered. Unlike _reset_occlusion_frame(), this deliberately preserves the
+## mission's forced-indoors semantic state.
+func _reset_occlusion_section_masks(restore_visibility: bool = false) -> void:
 	for bms_id in _occlusion_masked_nodes:
 		var node = _occlusion_masked_nodes[bms_id]
 		if is_instance_valid(node):
-			(node as Node3D).visible = true
+			if restore_visibility and node is Node3D:
+				(node as Node3D).visible = true
 			if node.has_method("set_section_visibility_mask"):
 				node.set_section_visibility_mask(-1)
 	_occlusion_masked_nodes.clear()
+
+
+func _reset_occlusion_frame() -> void:
+	_restore_occlusion_overrides()
+	_reset_occlusion_section_masks(true)
 	_mission_forces_indoors = false
 
 

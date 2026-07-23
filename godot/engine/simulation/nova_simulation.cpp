@@ -639,6 +639,8 @@ void NovaSimulation::reset_world() {
 	last_net_tick_us_ = 0;
 	last_present_snapshot_us_ = 0;
 	last_present_entity_count_ = 0;
+	present_layout_.clear();
+	++present_layout_revision_;
 	// Collision models/instances are mission-scoped: drop them with the world (the
 	// sweep re-registers on the next load) and re-point the fresh ai_ at the container.
 	collision_item_db_.unref();
@@ -4206,6 +4208,8 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_entity_body_anim_slot", "index"), &NovaSimulation::get_entity_body_anim_slot);
 	ClassDB::bind_method(D_METHOD("get_entity_hidden", "index"), &NovaSimulation::get_entity_hidden);
 	ClassDB::bind_method(D_METHOD("get_present_snapshot"), &NovaSimulation::get_present_snapshot);
+	ClassDB::bind_method(D_METHOD("get_present_layout_revision"),
+			&NovaSimulation::get_present_layout_revision);
 	ClassDB::bind_method(D_METHOD("get_present_stride"), &NovaSimulation::get_present_stride);
 	ClassDB::bind_method(D_METHOD("set_terrain_height_field", "terrain"), &NovaSimulation::set_terrain_height_field);
 	ClassDB::bind_method(D_METHOD("set_item_seat_specs", "specs"), &NovaSimulation::set_item_seat_specs);
@@ -6998,6 +7002,10 @@ void NovaSimulation::invalidate_present_effect_pose_cache() const {
 	present_effect_handles_by_bms_id_.clear();
 	present_effect_handles_by_ssn_.clear();
 	present_effect_handles_by_origin_.clear();
+	present_effect_missing_handles_.clear();
+	present_effect_missing_bms_ids_.clear();
+	present_effect_missing_ssns_.clear();
+	present_effect_missing_origins_.clear();
 }
 
 void NovaSimulation::ensure_present_effect_pose_cache() const {
@@ -7019,61 +7027,72 @@ void NovaSimulation::ensure_present_effect_pose_cache() const {
 	present_effect_handles_by_bms_id_.clear();
 	present_effect_handles_by_ssn_.clear();
 	present_effect_handles_by_origin_.clear();
-	present_effect_poses_by_handle_.reserve(client.entities.size());
-	present_effect_handles_by_bms_id_.reserve(client.entities.size());
-	present_effect_handles_by_ssn_.reserve(client.entities.size());
-	present_effect_handles_by_origin_.reserve(client.entities.size());
-
-	for (const opennova::netsim::ClientEntityState &entity_state : client.entities) {
-		// Match present_snapshot_from_client_view's joiner self-filter: the host's
-		// wire echo H is not drawn and therefore cannot own a presented effect.
-		if (joiner_ && joiner_self_wire_handle_ != 0 &&
-				entity_state.handle == joiner_self_wire_handle_) {
-			continue;
-		}
-
-		const int32_t heading_bam = static_cast<int32_t>(
-				static_cast<uint32_t>(entity_state.yaw_byte) << 24);
-		// Host/listen presentation can recover the authored pitch and roll from
-		// the authoritative registry. The compact peer row only carries yaw;
-		// joiners therefore retain the wire-only zeroes here.
-		const opennova::world::Entity *entity = joiner_ ? nullptr : world_->registry.get(
-				opennova::world::EntityHandle{entity_state.handle});
-		PresentEffectPose pose;
-		pose.position = Vector3(
-				static_cast<float>(entity_state.x / kFixed16),
-				static_cast<float>(entity_state.z / kFixed16),
-				static_cast<float>(-entity_state.y / kFixed16));
-		pose.rotation_deg = Vector3(
-				entity ? static_cast<float>(entity->pitch) : 0.0f,
-				static_cast<float>(opennova::world::mission_yaw_deg_from_bam_heading(
-						heading_bam)),
-				entity ? static_cast<float>(entity->roll) : 0.0f);
-		present_effect_poses_by_handle_[entity_state.handle] = pose;
-
-		// A joiner's decoded handles belong to the host, so only wire identity is
-		// meaningful there. Host/listen views can resolve the same registry entity
-		// used by get_present_snapshot() for BMS origin and SSN identity.
-		if (joiner_) continue;
-		if (!entity) continue;
-		if (entity->bms_id > 0) {
-			present_effect_handles_by_bms_id_[static_cast<int>(entity->bms_id)] =
-					entity_state.handle;
-		}
-		if (entity->net_id > 0) {
-			present_effect_handles_by_ssn_[static_cast<int>(entity->net_id)] =
-					entity_state.handle;
-		}
-		const int kind = static_cast<int>(entity->spawn_origin >> 24);
-		const int index = static_cast<int>(entity->spawn_origin & 0xFFFFFFu);
-		present_effect_handles_by_origin_[present_effect_origin_key(kind, index)] =
-				entity_state.handle;
-	}
-
+	present_effect_missing_handles_.clear();
+	present_effect_missing_bms_ids_.clear();
+	present_effect_missing_ssns_.clear();
+	present_effect_missing_origins_.clear();
 	present_effect_pose_cache_logic_tick_ = logic_tick;
 	present_effect_pose_cache_client_frame_ = client.frames_applied;
 	present_effect_pose_cache_runtime_ = runtime_.get();
 	present_effect_pose_cache_valid_ = true;
+}
+
+bool NovaSimulation::cache_present_effect_pose(
+		const opennova::netsim::ClientEntityState &p_entity_state) const {
+	// Match present_snapshot_from_client_view's joiner self-filter: the host's
+	// wire echo H is not drawn and therefore cannot own a presented effect.
+	if (joiner_ && joiner_self_wire_handle_ != 0 &&
+			p_entity_state.handle == joiner_self_wire_handle_) {
+		return false;
+	}
+	if (present_effect_poses_by_handle_.find(p_entity_state.handle) !=
+			present_effect_poses_by_handle_.end()) {
+		return true;
+	}
+
+	const int32_t heading_bam = static_cast<int32_t>(
+			static_cast<uint32_t>(p_entity_state.yaw_byte) << 24);
+	// Host/listen presentation can recover the authored pitch and roll from the
+	// authoritative registry. The compact peer row only carries yaw; joiners
+	// therefore retain the wire-only zeroes here.
+	const opennova::world::Entity *entity = joiner_ ? nullptr : world_->registry.get(
+			opennova::world::EntityHandle{p_entity_state.handle});
+	PresentEffectPose pose;
+	pose.position = Vector3(
+			static_cast<float>(p_entity_state.x / kFixed16),
+			static_cast<float>(p_entity_state.z / kFixed16),
+			static_cast<float>(-p_entity_state.y / kFixed16));
+	pose.rotation_deg = Vector3(
+			entity ? static_cast<float>(entity->pitch) : 0.0f,
+			static_cast<float>(opennova::world::mission_yaw_deg_from_bam_heading(
+					heading_bam)),
+			entity ? static_cast<float>(entity->roll) : 0.0f);
+	present_effect_poses_by_handle_[p_entity_state.handle] = pose;
+	present_effect_missing_handles_.erase(p_entity_state.handle);
+
+	// A joiner's decoded handles belong to the host, so only wire identity is
+	// meaningful there. Host/listen views can resolve every alias from the same
+	// registry entity used by get_present_snapshot().
+	if (joiner_ || !entity) return true;
+	if (entity->bms_id > 0) {
+		const int bms_id = static_cast<int>(entity->bms_id);
+		present_effect_handles_by_bms_id_[bms_id] =
+				p_entity_state.handle;
+		present_effect_missing_bms_ids_.erase(bms_id);
+	}
+	if (entity->net_id > 0) {
+		const int ssn = static_cast<int>(entity->net_id);
+		present_effect_handles_by_ssn_[ssn] =
+				p_entity_state.handle;
+		present_effect_missing_ssns_.erase(ssn);
+	}
+	const int kind = static_cast<int>(entity->spawn_origin >> 24);
+	const int index = static_cast<int>(entity->spawn_origin & 0xFFFFFFu);
+	const uint64_t origin = present_effect_origin_key(kind, index);
+	present_effect_handles_by_origin_[origin] =
+			p_entity_state.handle;
+	present_effect_missing_origins_.erase(origin);
+	return true;
 }
 
 PackedVector3Array NovaSimulation::cached_present_effect_state_for_handle(
@@ -7089,15 +7108,48 @@ PackedVector3Array NovaSimulation::cached_present_effect_state_for_handle(
 
 PackedVector3Array NovaSimulation::present_effect_state_for_handle(uint16_t p_handle) const {
 	ensure_present_effect_pose_cache();
-	return cached_present_effect_state_for_handle(p_handle);
+	PackedVector3Array cached = cached_present_effect_state_for_handle(p_handle);
+	if (!cached.is_empty() || !runtime_) return cached;
+	if (present_effect_missing_handles_.find(p_handle) !=
+			present_effect_missing_handles_.end()) {
+		return PackedVector3Array();
+	}
+	for (const opennova::netsim::ClientEntityState &entity_state :
+			runtime_->state().entities) {
+		if (entity_state.handle != p_handle) continue;
+		if (cache_present_effect_pose(entity_state)) {
+			return cached_present_effect_state_for_handle(p_handle);
+		}
+		break;
+	}
+	present_effect_missing_handles_.insert(p_handle);
+	return PackedVector3Array();
 }
 
 PackedVector3Array NovaSimulation::get_present_effect_state_for_ssn(int p_ssn) const {
 	if (p_ssn <= 0) return PackedVector3Array();
 	ensure_present_effect_pose_cache();
 	const auto found = present_effect_handles_by_ssn_.find(p_ssn);
-	if (found == present_effect_handles_by_ssn_.end()) return PackedVector3Array();
-	return cached_present_effect_state_for_handle(found->second);
+	if (found != present_effect_handles_by_ssn_.end()) {
+		return cached_present_effect_state_for_handle(found->second);
+	}
+	if (!runtime_ || joiner_) return PackedVector3Array();
+	if (present_effect_missing_ssns_.find(p_ssn) !=
+			present_effect_missing_ssns_.end()) {
+		return PackedVector3Array();
+	}
+	for (const opennova::netsim::ClientEntityState &entity_state :
+			runtime_->state().entities) {
+		const opennova::world::Entity *entity = world_->registry.get(
+				opennova::world::EntityHandle{entity_state.handle});
+		if (!entity || static_cast<int>(entity->net_id) != p_ssn) continue;
+		if (cache_present_effect_pose(entity_state)) {
+			return cached_present_effect_state_for_handle(entity_state.handle);
+		}
+		break;
+	}
+	present_effect_missing_ssns_.insert(p_ssn);
+	return PackedVector3Array();
 }
 
 PackedVector3Array NovaSimulation::get_present_effect_state_for_wire_handle(
@@ -7113,18 +7165,57 @@ PackedVector3Array NovaSimulation::get_present_effect_state_for_bms_id(int p_bms
 	if (p_bms_id <= 0) return PackedVector3Array();
 	ensure_present_effect_pose_cache();
 	const auto found = present_effect_handles_by_bms_id_.find(p_bms_id);
-	if (found == present_effect_handles_by_bms_id_.end()) return PackedVector3Array();
-	return cached_present_effect_state_for_handle(found->second);
+	if (found != present_effect_handles_by_bms_id_.end()) {
+		return cached_present_effect_state_for_handle(found->second);
+	}
+	if (!runtime_ || joiner_) return PackedVector3Array();
+	if (present_effect_missing_bms_ids_.find(p_bms_id) !=
+			present_effect_missing_bms_ids_.end()) {
+		return PackedVector3Array();
+	}
+	for (const opennova::netsim::ClientEntityState &entity_state :
+			runtime_->state().entities) {
+		const opennova::world::Entity *entity = world_->registry.get(
+				opennova::world::EntityHandle{entity_state.handle});
+		if (!entity || static_cast<int>(entity->bms_id) != p_bms_id) continue;
+		if (cache_present_effect_pose(entity_state)) {
+			return cached_present_effect_state_for_handle(entity_state.handle);
+		}
+		break;
+	}
+	present_effect_missing_bms_ids_.insert(p_bms_id);
+	return PackedVector3Array();
 }
 
 PackedVector3Array NovaSimulation::get_present_effect_state_for_origin(
 		int p_kind, int p_index) const {
 	if (p_kind < 0 || p_index < 0) return PackedVector3Array();
 	ensure_present_effect_pose_cache();
-	const auto found = present_effect_handles_by_origin_.find(
-			present_effect_origin_key(p_kind, p_index));
-	if (found == present_effect_handles_by_origin_.end()) return PackedVector3Array();
-	return cached_present_effect_state_for_handle(found->second);
+	const uint64_t requested_origin = present_effect_origin_key(p_kind, p_index);
+	const auto found = present_effect_handles_by_origin_.find(requested_origin);
+	if (found != present_effect_handles_by_origin_.end()) {
+		return cached_present_effect_state_for_handle(found->second);
+	}
+	if (!runtime_ || joiner_) return PackedVector3Array();
+	if (present_effect_missing_origins_.find(requested_origin) !=
+			present_effect_missing_origins_.end()) {
+		return PackedVector3Array();
+	}
+	for (const opennova::netsim::ClientEntityState &entity_state :
+			runtime_->state().entities) {
+		const opennova::world::Entity *entity = world_->registry.get(
+				opennova::world::EntityHandle{entity_state.handle});
+		if (!entity) continue;
+		const int kind = static_cast<int>(entity->spawn_origin >> 24);
+		const int index = static_cast<int>(entity->spawn_origin & 0xFFFFFFu);
+		if (present_effect_origin_key(kind, index) != requested_origin) continue;
+		if (cache_present_effect_pose(entity_state)) {
+			return cached_present_effect_state_for_handle(entity_state.handle);
+		}
+		break;
+	}
+	present_effect_missing_origins_.insert(requested_origin);
+	return PackedVector3Array();
 }
 
 int NovaSimulation::get_entity_bms_id(int p_index) const {
@@ -7198,6 +7289,22 @@ PackedFloat32Array NovaSimulation::get_present_snapshot() const {
 		out = present_snapshot_from_client_view();
 	}
 	last_present_entity_count_ = static_cast<int>(out.size() / PF_STRIDE);
+	std::vector<PresentRowIdentity> next_layout;
+	next_layout.reserve(static_cast<std::size_t>(last_present_entity_count_));
+	const float *rows = out.ptr();
+	for (int i = 0; i < last_present_entity_count_; ++i) {
+		const float *row = rows + static_cast<int64_t>(i) * PF_STRIDE;
+		next_layout.push_back(PresentRowIdentity{
+				static_cast<int32_t>(row[PF_WIRE_HANDLE]),
+				static_cast<int32_t>(row[PF_TYPE_ID]),
+				static_cast<int32_t>(row[PF_BMS_ID]),
+				static_cast<int32_t>(row[PF_KIND]),
+				static_cast<int32_t>(row[PF_INDEX])});
+	}
+	if (next_layout != present_layout_) {
+		present_layout_ = std::move(next_layout);
+		++present_layout_revision_;
+	}
 	last_present_snapshot_us_ = perf_now_us() - start_us;
 	return out;
 }

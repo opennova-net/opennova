@@ -37,12 +37,14 @@ func test_jo_00tra_sound_marker_resolution() -> void:
 	gut.p("bank exposes %d sound sets" % audio.get_bank().get_set_names().size())
 	assert_gt(int(stats.get("banks_loaded", 0)), 0, "the mission .LWF / game.lwf / gamelocl.LWF load")
 	assert_true(audio.get_bank().has_set("LPNV_LIGHT"), "game.lwf ambient-loop sets are loaded")
-	# The payoff: a real JO mission spawns looping ambient voices at its sound
-	# markers. 00TRa resolves ~210 of its 390 markers (the rest are waypoints /
+	# The payoff: a real JO mission describes ambient layers at its sound markers
+	# without materializing one player per layer. 00TRa resolves ~210 of its 390
+	# markers (the rest are waypoints /
 	# spawns / time-of-day one-shot markers, which use nightshot/dawnshot/duskshot).
 	assert_gt(int(stats.get("markers_resolved", 0)), 0, "sound markers resolve to real sound sets")
-	assert_gte(int(stats.get("voices", 0)), int(stats.get("markers_resolved", 0)),
-		"each resolved marker spawned at least one decoded voice (time-of-day slot variants may add more)")
+	assert_gte(int(stats.get("ambient_candidates", 0)),
+		int(stats.get("markers_resolved", 0)),
+		"each resolved marker describes at least one ambient layer candidate")
 	assert_between(int(stats.get("markers_resolved", 0)), 0, int(stats.get("markers_total", 0)),
 		"resolved markers are a subset of total markers")
 	audio.teardown()

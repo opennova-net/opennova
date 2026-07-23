@@ -1196,6 +1196,26 @@ bool collision_raycast_polygons(const CollisionTargetView &target,
 // ----------------------------------------------------------------------------
 // Contact force. [orig: Entity_ComputeBoneCollisionForce @ 0x4ae150]
 // ----------------------------------------------------------------------------
+namespace {
+
+// The target entity's placement bound is available without resolving its live
+// section matrices. Keep this predicate identical to the contact walk's first
+// gate so proximity candidates that cannot touch any query point never invoke
+// the host pose callback.
+bool contact_query_overlaps_bound(const int32_t target_pos[3], int32_t target_bound_radius,
+                                  const ContactQuery &q) {
+    for (int32_t i = 0; i < q.num_points; ++i) {
+        const int32_t combined = target_bound_radius + q.radii[i];
+        if (abs32(q.points[i].x - target_pos[0]) <= combined &&
+            abs32(q.points[i].y - target_pos[1]) <= combined &&
+            abs32(q.points[i].z - target_pos[2]) <= combined)
+            return true;
+    }
+    return false;
+}
+
+} // namespace
+
 bool collision_contact_force(const CollisionTargetView &target, const ContactQuery &q,
                              BlinkAccum &blink, LadderContact &ladder, ContactResult &out) {
     out = ContactResult{};
@@ -1205,19 +1225,7 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
     if (model.sections.empty() || q.num_points <= 0) return false;
 
     // Broad phase per point. [orig: @ 0x4ae1d0]
-    {
-        bool any = false;
-        for (int32_t i = 0; i < q.num_points; ++i) {
-            const int32_t combined = target.bound_radius + q.radii[i];
-            if (abs32(q.points[i].x - target.pos[0]) <= combined &&
-                abs32(q.points[i].y - target.pos[1]) <= combined &&
-                abs32(q.points[i].z - target.pos[2]) <= combined) {
-                any = true;
-                break;
-            }
-        }
-        if (!any) return false;
-    }
+    if (!contact_query_overlaps_bound(target.pos, target.bound_radius, q)) return false;
 
     int32_t any_collision = 0;
     int32_t max_penetration = 0;
@@ -1729,20 +1737,10 @@ void CollisionWorld::build_tables(World &world, bool advance_candidate_slices) {
     };
     // [orig: pass 1 = itemDef type == Building; pass 2 = everything else with a
     // def — our instance map plays the "has a collision model" role.]
-    world.registry.for_each([&](const Entity &e) {
-        if (e.handle.pool() == 2 && e.kind == EntityKind::Building) push_static(e);
-    });
-    static_building_count_ = static_cast<int32_t>(statics_.size());
-    world.registry.for_each([&](const Entity &e) {
-        if (e.handle.pool() != 2 || e.kind == EntityKind::Building) return;
-        push_static(e);
-    });
-    static_count_ = static_cast<int32_t>(statics_.size());
-
     // --- pool-0 persons + pool-1 dynamics. [orig: 0x4b9340] ---
     persons_.clear();
     dynamics_.clear();
-    world.registry.for_each([&](const Entity &e) {
+    auto push_person = [&](const Entity &e) {
         if (e.kind != EntityKind::Organic || (e.flags & 1u) != 0) return;
         PersonSlot p;
         int32_t pf[3];
@@ -1751,23 +1749,57 @@ void CollisionWorld::build_tables(World &world, bool advance_candidate_slices) {
         p.radius = 0x10000; // [orig: entity boundRadius; person capsule ~1u] (D-COL-3)
         p.h = e.handle;
         persons_.push_back(p);
-    });
-    // Dynamics = mounted-object pool entities with instances that are NOT buildings
-    // (vehicles ride here once vehicle collision instances land).
-    world.registry.for_each([&](const Entity &e) {
+    };
+    // Dynamics = mounted-object pool entities with instances that are NOT
+    // buildings. Seat/armory carriers also belong in the proximity table when
+    // their visual has no collision hull: attach scans consume this same slice,
+    // and the old whole-registry fallback must not be their only discovery path.
+    auto push_dynamic = [&](const Entity &e) {
         if (e.kind != EntityKind::Item || (e.flags & 1u) != 0) return;
         auto it = instances_.find(e.handle.packed);
         const CollisionModel *attached =
             it != instances_.end() ? model(it->second.model_id) : nullptr;
-        if (attached == nullptr && e.bound_radius <= 0.0f) return;
+        const bool attachable = !e.seats.empty() || !e.armory_points.empty();
+        if (attached == nullptr && e.bound_radius <= 0.0f && !attachable) return;
         DynSlot d;
         int32_t pf[3];
         entity_pos_fixed(e, pf);
         d.x = pf[0]; d.y = pf[1]; d.z = pf[2];
         d.radius = entity_proximity_radius(*this, e, attached);
+        // Without a model/entity bound, retain a conservative sphere that
+        // contains every authored interaction point. Rotation preserves this
+        // local-space length; the source's +4u slice pad then covers the attach
+        // gate around the point itself.
+        if (attached == nullptr && e.bound_radius <= 0.0f) {
+            auto include_point = [&](const Vec3 &p) {
+                const double len = std::sqrt(
+                        static_cast<double>(p.x) * p.x +
+                        static_cast<double>(p.y) * p.y +
+                        static_cast<double>(p.z) * p.z);
+                d.radius = std::max(d.radius, to_fixed(len));
+            };
+            for (const Seat &seat : e.seats) include_point(seat.seat_local);
+            for (const Vec3 &point : e.armory_points) include_point(point);
+        }
         d.h = e.handle;
         dynamics_.push_back(d);
+    };
+
+    // Each output table retains the same registry-relative order, but their
+    // independent filters share one capacity walk. Statics still require a
+    // second pass so the complete Building prefix precedes every other pool-2
+    // entry exactly as retail authored it.
+    world.registry.for_each([&](const Entity &e) {
+        if (e.handle.pool() == 2 && e.kind == EntityKind::Building) push_static(e);
+        push_person(e);
+        push_dynamic(e);
     });
+    static_building_count_ = static_cast<int32_t>(statics_.size());
+    world.registry.for_each([&](const Entity &e) {
+        if (e.handle.pool() != 2 || e.kind == EntityKind::Building) return;
+        push_static(e);
+    });
+    static_count_ = static_cast<int32_t>(statics_.size());
 
     if (!advance_candidate_slices) return;
 
@@ -1824,10 +1856,12 @@ void CollisionWorld::build_tables(World &world, bool advance_candidate_slices) {
         }
         candidates_[e.handle.packed] = slice;
     };
-    world.registry.for_each([&](const Entity &e) {
-        if (e.kind == EntityKind::Organic && (e.flags & 1u) == 0)
-            build_for(e, 0x40000); // [orig: pool-0 +4.0u]
-    });
+    // persons_ uses the same registry order and exact organic/active predicate,
+    // so it is also the already-compacted source walk for this refresh.
+    for (const PersonSlot &person : persons_) {
+        const Entity *e = world.registry.get(person.h);
+        if (e != nullptr) build_for(*e, 0x40000); // [orig: pool-0 +4.0u]
+    }
     // Pool-1 SOURCE slices for motor-driven vehicles (the hull contact query's
     // candidate set). [orig: Entity_BuildProximityListsFromPools @ 0x4b8eb0 — the
     // pool-1 leg, radius +6.0u @ 0x4b902f]
@@ -2572,6 +2606,8 @@ int32_t CollisionWorld::raycast_ground(World &world, EntityHandle source, const 
     auto it = candidates_.find(source.packed);
     if (it != candidates_.end()) {
         const CandidateSlice slice = it->second;
+        CollisionTargetView view;
+        std::vector<CollisionMatrix> mats;
         for (int32_t i = 0; i < slice.count; ++i) {
             const EntityHandle ch = arena_[slice.start + i];
             const Entity *ce = world.registry.get(ch);
@@ -2587,20 +2623,26 @@ int32_t CollisionWorld::raycast_ground(World &world, EntityHandle source, const 
             }
             if (standing_on_source) continue;
 
-            CollisionTargetView view;
-            std::vector<CollisionMatrix> mats;
+            // Broad phase vs the ray box + line distance. [orig: @ 0x413948-0x413a66]
+            // The same entity/model metadata backs target_view below, but does
+            // not require the live section-matrix provider.
+            int32_t bound_pos[3];
+            int32_t bound_radius = 0;
+            if (!target_bound(world, ch, bound_pos, bound_radius)) continue;
+            if (abs32(ray.mid[1] - bound_pos[1]) >
+                    bound_radius + static_cast<int32_t>(ray.half[1]) ||
+                abs32(ray.mid[0] - bound_pos[0]) >
+                    bound_radius + static_cast<int32_t>(ray.half[0]) ||
+                abs32(ray.mid[2] - bound_pos[2]) >
+                    bound_radius + static_cast<int32_t>(ray.half[2]))
+                continue;
+            if (ray_line_distance(ray.start, ray.dir, bound_pos) > bound_radius) continue;
+
             const CollisionTargetView *tv = target_view(world, ch, view, mats);
             if (tv == nullptr) continue;
-            // Broad phase vs the ray box + line distance. [orig: @ 0x413948-0x413a66]
-            if (abs32(ray.mid[1] - tv->pos[1]) >
-                    tv->bound_radius + static_cast<int32_t>(ray.half[1]) ||
-                abs32(ray.mid[0] - tv->pos[0]) >
-                    tv->bound_radius + static_cast<int32_t>(ray.half[0]) ||
-                abs32(ray.mid[2] - tv->pos[2]) >
-                    tv->bound_radius + static_cast<int32_t>(ray.half[2]))
-                continue;
-            if (ray_line_distance(ray.start, ray.dir, tv->pos) > tv->bound_radius) continue;
-            if (collision_raycast_model(*tv, ray) && out_hit_entity) *out_hit_entity = ch;
+            if (collision_raycast_model(*tv, ray)) {
+                if (out_hit_entity) *out_hit_entity = ch;
+            }
         }
     }
     return ray.end[2];
@@ -2932,27 +2974,29 @@ bool CollisionWorld::sound_los_clear(World &world, EntityHandle listener, Entity
             const Entity *ce = world.registry.get(ch);
             if (ce == nullptr) continue;
             if ((ce->flags & 1u) != 0) continue; // [orig: @ 0x538792]
+            if (ce->kind != EntityKind::Building) continue; // [orig: itemDef+92 == 5]
             // Candidates standing on the listener/source are excluded (one
             // level). [orig: the +0x28 groundEntity checks @ 0x538843-0x538877]
             if (ce->ground_target == listener) continue;
             if (source.valid() && ce->ground_target == source) continue;
 
+            int32_t bound_pos[3];
+            int32_t bound_radius = 0;
+            if (!target_bound(world, ch, bound_pos, bound_radius)) continue;
+            if (abs32(ray.mid[1] - bound_pos[1]) >
+                        bound_radius + broad_r + static_cast<int32_t>(ray.half[1]) ||
+                abs32(ray.mid[0] - bound_pos[0]) >
+                        bound_radius + broad_r + static_cast<int32_t>(ray.half[0]) ||
+                abs32(ray.mid[2] - bound_pos[2]) >
+                        bound_radius + broad_r + static_cast<int32_t>(ray.half[2]))
+                continue;
+            if (ray_line_distance(ray.start, ray.dir, bound_pos) > bound_radius + broad_r)
+                continue;
+
             CollisionTargetView view;
             std::vector<CollisionMatrix> mats;
             const CollisionTargetView *tv = target_view(world, ch, view, mats);
             if (tv == nullptr) continue;
-            if (!tv->is_building) continue; // [orig: the itemDef+92 == 5 gate @ 0x539baf]
-            // Broad phase vs the ray box + line distance, radius-padded.
-            // [orig: @ 0x5387c4-0x5389a4]
-            if (abs32(ray.mid[1] - tv->pos[1]) >
-                    tv->bound_radius + broad_r + static_cast<int32_t>(ray.half[1]) ||
-                abs32(ray.mid[0] - tv->pos[0]) >
-                    tv->bound_radius + broad_r + static_cast<int32_t>(ray.half[0]) ||
-                abs32(ray.mid[2] - tv->pos[2]) >
-                    tv->bound_radius + broad_r + static_cast<int32_t>(ray.half[2]))
-                continue;
-            if (ray_line_distance(ray.start, ray.dir, tv->pos) > tv->bound_radius + broad_r)
-                continue;
             if (sound_segment_blocked(*tv, ray, clip_radius)) return false; // blocked
         }
     }
@@ -2977,21 +3021,26 @@ bool CollisionWorld::segment_hits_static(World &world, const int32_t a[3], const
 
     for (int32_t i = 0; i < static_count_; ++i) {
         const StaticSlot &s = statics_[i];
+        // The iris path can cast nine sun rays per rendered frame. Preserve the
+        // witnessed walker order here too: reject on cheap entity metadata
+        // before resolving live section matrices for the few gate survivors.
+        int32_t bound_pos[3];
+        int32_t bound_radius = 0;
+        if (!target_bound(world, s.h, bound_pos, bound_radius)) continue;
+        if (abs32(ray.mid[1] - bound_pos[1]) >
+                    bound_radius + broad_r + static_cast<int32_t>(ray.half[1]) ||
+            abs32(ray.mid[0] - bound_pos[0]) >
+                    bound_radius + broad_r + static_cast<int32_t>(ray.half[0]) ||
+            abs32(ray.mid[2] - bound_pos[2]) >
+                    bound_radius + broad_r + static_cast<int32_t>(ray.half[2]))
+            continue;
+        if (ray_line_distance(ray.start, ray.dir, bound_pos) > bound_radius + broad_r)
+            continue;
+
         CollisionTargetView view;
         std::vector<CollisionMatrix> mats;
         const CollisionTargetView *tv = target_view(world, s.h, view, mats);
         if (tv == nullptr) continue;
-        // Broad phase vs the ray box + line distance, radius-padded.
-        // [orig: @ 0x5387c4-0x5389a4]
-        if (abs32(ray.mid[1] - tv->pos[1]) >
-                tv->bound_radius + broad_r + static_cast<int32_t>(ray.half[1]) ||
-            abs32(ray.mid[0] - tv->pos[0]) >
-                tv->bound_radius + broad_r + static_cast<int32_t>(ray.half[0]) ||
-            abs32(ray.mid[2] - tv->pos[2]) >
-                tv->bound_radius + broad_r + static_cast<int32_t>(ray.half[2]))
-            continue;
-        if (ray_line_distance(ray.start, ray.dir, tv->pos) > tv->bound_radius + broad_r)
-            continue;
         if (sound_segment_blocked(*tv, ray, radius)) return true;
     }
     return false;
@@ -3054,6 +3103,8 @@ int32_t CollisionWorld::resolve_vehicle_hull(World &world, EntityHandle source,
     BlinkAccum blink;       // vehicles accumulate no blink state
     LadderContact ladder;   // nor ladder contact frames
     int32_t severity = 0;
+    CollisionTargetView view;
+    std::vector<CollisionMatrix> mats;
 
     for (int32_t i = 0; i < slice.count; ++i) {
         const EntityHandle ch = arena_[slice.start + i];
@@ -3061,8 +3112,10 @@ int32_t CollisionWorld::resolve_vehicle_hull(World &world, EntityHandle source,
         // Skip the carrier chain like the original's groundEntity walk
         // [orig: @ 0x462e3d-0x462e4f].
         if (ent != nullptr && ent->ground_target == ch) continue;
-        CollisionTargetView view;
-        std::vector<CollisionMatrix> mats;
+        int32_t bound_pos[3];
+        int32_t bound_radius = 0;
+        if (!target_bound(world, ch, bound_pos, bound_radius)) continue;
+        if (!contact_query_overlaps_bound(bound_pos, bound_radius, q)) continue;
         const CollisionTargetView *tv = target_view(world, ch, view, mats);
         if (tv == nullptr) continue;
         ContactResult res;
@@ -3219,6 +3272,8 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     auto it = candidates_.find(source.packed);
     if (it != candidates_.end()) {
         const CandidateSlice slice = it->second;
+        CollisionTargetView view;
+        std::vector<CollisionMatrix> mats;
         for (int pass = 0; pass < 2; ++pass) {
             // [orig: first pass @ 0x4b2f54, second relaxation pass at shifted points
             // adds half the force @ 0x4b3549-0x4b36ec]
@@ -3226,8 +3281,10 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
             bool pass_contact = false;
             for (int32_t i = 0; i < slice.count; ++i) {
                 const EntityHandle ch = arena_[slice.start + i];
-                CollisionTargetView view;
-                std::vector<CollisionMatrix> mats;
+                int32_t bound_pos[3];
+                int32_t bound_radius = 0;
+                if (!target_bound(world, ch, bound_pos, bound_radius)) continue;
+                if (!contact_query_overlaps_bound(bound_pos, bound_radius, q)) continue;
                 const CollisionTargetView *tv = target_view(world, ch, view, mats);
                 if (tv == nullptr) continue;
                 if (ent != nullptr) {

@@ -653,6 +653,30 @@ func is_playing() -> bool:
 	return _playing
 
 
+func _present_entity_rows() -> void:
+	if _sim == null or (_present == null and _wire_present == null):
+		return
+	var stride := int(_sim.get_present_stride())
+	if stride <= 0:
+		return
+	# Both entity presenters consume the same immutable row buffer. Fetching it
+	# once also makes their topology revision refer to exactly the same layout.
+	var snapshot: PackedFloat32Array = _sim.get_present_snapshot()
+	var layout_revision := -1
+	if _sim.has_method("get_present_layout_revision"):
+		layout_revision = int(_sim.get_present_layout_revision())
+	if _present != null:
+		if _present.has_method("present_snapshot"):
+			_present.present_snapshot(snapshot, stride, layout_revision)
+		else:
+			_present.present()
+	if _wire_present != null:
+		if _wire_present.has_method("present_snapshot"):
+			_wire_present.present_snapshot(snapshot, stride, layout_revision)
+		else:
+			_wire_present.present()
+
+
 ## Advance EXACTLY ONE cadence step and present. Returns true when a logic tick fired (and effects
 ## were drained). The deterministic single-tick primitive: editor Step, the MCP, and tests use this.
 ## Real-time hosts (game + editor preview) use tick_realtime() instead, which accumulates wall-clock.
@@ -670,10 +694,7 @@ func tick() -> bool:
 	_perf_present_us = 0
 	if did_tick:
 		var present_start := Time.get_ticks_usec()
-		if _present != null:
-			_present.present()
-		if _wire_present != null:
-			_wire_present.present()
+		_present_entity_rows()
 		if _fire_present != null:
 			_fire_present.present(1)
 		if _destruction_present != null:
@@ -690,14 +711,9 @@ func tick() -> bool:
 # One logic tick + drain/emit effects, WITHOUT presenting. Shared by tick() (which presents once
 # after) and tick_realtime() (which presents once after the whole catch-up batch). Updates the
 # sim/effects perf counters. Returns true when a logic tick fired.
-var _perf_probe_skip_sim := false
-var _perf_probe_skip_present := false
-
-
 func _advance_one_tick_no_present() -> bool:
 	var sim_start := Time.get_ticks_usec()
-	# one 62 Hz logic tick (the WAC VM self-gates inside)
-	var did_tick := false if _perf_probe_skip_sim else _sim.step()
+	var did_tick := _sim.step()  # one 62 Hz logic tick (the WAC VM self-gates inside)
 	_perf_sim_us = Time.get_ticks_usec() - sim_start
 	_perf_effects_us = 0
 	if did_tick:
@@ -735,12 +751,9 @@ func tick_realtime(delta: float) -> int:
 		# must not wait for the next 62.5 Hz quantum. Fire and destruction
 		# presentation remain tick-driven because no gameplay state advanced here.
 		_perf_present_us = 0
-		if (_present != null or _wire_present != null) and not _perf_probe_skip_present:
+		if _present != null or _wire_present != null:
 			var present_start := Time.get_ticks_usec()
-			if _present != null:
-				_present.present()
-			if _wire_present != null:
-				_wire_present.present()
+			_present_entity_rows()
 			_perf_present_us = Time.get_ticks_usec() - present_start
 		_ticks_last_frame = 0
 		_perf_tick_us = Time.get_ticks_usec() - tick_start
@@ -760,13 +773,9 @@ func tick_realtime(delta: float) -> int:
 	_perf_effects_us = effects_us
 	_perf_present_us = 0
 	if (_present != null or _wire_present != null or _fire_present != null
-			or _destruction_present != null or _throwable_present != null) \
-			and not _perf_probe_skip_present:
+			or _destruction_present != null or _throwable_present != null):
 		var present_start := Time.get_ticks_usec()
-		if _present != null:
-			_present.present()
-		if _wire_present != null:
-			_wire_present.present()
+		_present_entity_rows()
 		if _fire_present != null:
 			_fire_present.present(n)
 		if _destruction_present != null:

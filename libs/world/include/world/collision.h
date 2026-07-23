@@ -767,6 +767,13 @@ public:
     // between "no candidates near" and "this world never ran the table build"
     // (headless callers), which keep whole-registry fallbacks.
     bool tick_tables_ready() const { return tick_tables_built_; }
+    // Attach scans switch from their compatibility registry walk only after a
+    // real candidate-slice epoch exists. Initial table snapshots deliberately
+    // precede the retail 17-tick slice cadence, so treating those as an empty
+    // authoritative slice would make nearby seats temporarily disappear.
+    bool attach_candidate_slices_authoritative() const {
+        return candidate_slices_built_;
+    }
 
     // Static prox-table slot view (quantized u16 coords/radius like the retail
     // tables) — the render-occlusion engine walks the building prefix through

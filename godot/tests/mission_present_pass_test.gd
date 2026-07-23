@@ -55,6 +55,17 @@ class FakeIndex:
 		return n if (n != null and is_instance_valid(n)) else null
 
 
+class CountingIndex:
+	extends FakeIndex
+	var resolve_calls := 0
+	var generation := 1
+	func resolve(bms_id: int, kind: int, index: int) -> Node:
+		resolve_calls += 1
+		return super.resolve(bms_id, kind, index)
+	func get_generation() -> int:
+		return generation
+
+
 # Emits a flat PF-layout snapshot, just like NovaSimulation.get_present_snapshot(). Each entity is a
 # Dictionary of overrides; unset fields default sanely (alive, not hidden, identity).
 class FakeSim:
@@ -72,6 +83,8 @@ class FakeSim:
 			out[b + NovaSimulation.PF_KIND] = float(e.get("kind", -1))
 			out[b + NovaSimulation.PF_INDEX] = float(e.get("index", -1))
 			out[b + NovaSimulation.PF_BMS_ID] = float(e.get("bms_id", 0))
+			out[b + NovaSimulation.PF_TYPE_ID] = float(e.get("type_id", 0))
+			out[b + NovaSimulation.PF_WIRE_HANDLE] = float(e.get("handle", 0))
 			out[b + NovaSimulation.PF_NET_ID] = float(e.get("net_id", 0))
 			out[b + NovaSimulation.PF_POS_X] = float(e.get("pos_x", 0.0))
 			out[b + NovaSimulation.PF_POS_Y] = float(e.get("pos_y", 0.0))
@@ -112,6 +125,13 @@ class FakeSim:
 				out[ob + 1] = a.y
 				out[ob + 2] = a.z
 		return out
+
+
+class RevisionFakeSim:
+	extends FakeSim
+	var layout_revision := 1
+	func get_present_layout_revision() -> int:
+		return layout_revision
 
 
 func _make_pass(index, sim, options: Dictionary = {}) -> Object:
@@ -320,6 +340,100 @@ func test_transform_applied_from_snapshot() -> void:
 	# yaw 90 -> RotY(180 - 90) = RotY(90deg); model +x maps toward -z.
 	var fwd := model.transform.basis * Vector3(1, 0, 0)
 	assert_almost_eq(fwd.z, -1.0, 0.001, "yaw drives the heading basis (RotY(180 - yaw))")
+
+
+func test_stable_snapshot_does_not_redirty_the_transform_tree() -> void:
+	var model := FakeModel.new()
+	add_child_autofree(model)
+	var index := FakeIndex.new()
+	index.by_bms_id = { 21: model }
+	var sim := FakeSim.new()
+	sim.entities = [{
+		"bms_id": 21,
+		"pos_x": 12.0,
+		"yaw_deg": 15.0,
+		"aim_overlay_valid": 1,
+		"aim_body": Vector3(3.0, 27.0, -2.0),
+	}]
+	var presenter := _make_pass(index, sim)
+	presenter.present()
+	assert_eq(int(presenter.get_stats()["moved"]), 1)
+	presenter.present()
+	assert_eq(int(presenter.get_stats()["moved"]), 1,
+			"an unchanged row cannot recursively dirty every model descendant again")
+	assert_true(model.basis.is_equal_approx(MissionObjectPlacer.bms_to_godot_basis(
+			Vector3(3.0, 27.0, -2.0))),
+			"aim body rotation is composed into the one root transform write")
+
+
+func test_stable_layout_reuses_resolution_but_reads_fresh_pose() -> void:
+	var model := FakeModel.new()
+	add_child_autofree(model)
+	var index := CountingIndex.new()
+	index.by_bms_id = { 21: model }
+	var sim := RevisionFakeSim.new()
+	sim.entities = [
+		{ "bms_id": 21, "handle": 2, "type_id": 101, "pos_x": 1.0 },
+		{ "bms_id": 999, "handle": 3, "type_id": 102, "pos_x": 50.0 },
+	]
+	var presenter := _make_pass(index, sim)
+	presenter.present()
+	assert_eq(index.resolve_calls, 2, "the cold layout resolves each row once")
+	assert_almost_eq(model.position.x, 1.0, 0.001)
+
+	sim.entities[0]["pos_x"] = 9.0
+	presenter.present()
+	assert_eq(index.resolve_calls, 2,
+			"pose-only updates reuse the revision-bound row plan")
+	assert_almost_eq(model.position.x, 9.0, 0.001,
+			"cached routing still reads fresh row values")
+
+
+func test_layout_plan_rebinds_after_reorder_removal_and_replacement() -> void:
+	var a := FakeModel.new()
+	var b := FakeModel.new()
+	var c := FakeModel.new()
+	add_child_autofree(a)
+	add_child_autofree(b)
+	add_child_autofree(c)
+	var index := CountingIndex.new()
+	index.by_bms_id = { 11: a, 22: b, 33: c }
+	var sim := RevisionFakeSim.new()
+	sim.entities = [
+		{ "bms_id": 11, "handle": 2, "type_id": 101, "pos_x": 1.0 },
+		{ "bms_id": 22, "handle": 3, "type_id": 102, "pos_x": 2.0 },
+	]
+	var presenter := _make_pass(index, sim)
+	presenter.present()
+
+	sim.entities = [
+		{ "bms_id": 22, "handle": 3, "type_id": 102, "pos_x": 20.0 },
+		{ "bms_id": 11, "handle": 2, "type_id": 101, "pos_x": 10.0 },
+	]
+	sim.layout_revision += 1
+	presenter.present()
+	assert_eq(index.resolve_calls, 4, "row reorder rebuilds the plan")
+	assert_almost_eq(a.position.x, 10.0, 0.001)
+	assert_almost_eq(b.position.x, 20.0, 0.001)
+
+	sim.entities = [
+		{ "bms_id": 11, "handle": 2, "type_id": 101, "pos_x": 12.0 },
+	]
+	sim.layout_revision += 1
+	presenter.present()
+	assert_eq(index.resolve_calls, 5, "row removal cannot retain a stale base")
+	assert_almost_eq(a.position.x, 12.0, 0.001)
+	assert_almost_eq(b.position.x, 20.0, 0.001)
+
+	sim.entities = [
+		{ "bms_id": 33, "handle": 4, "type_id": 103, "pos_x": 30.0 },
+	]
+	sim.layout_revision += 1
+	presenter.present()
+	assert_eq(index.resolve_calls, 6,
+			"same-size identity replacement is resolved against the new row")
+	assert_almost_eq(a.position.x, 12.0, 0.001)
+	assert_almost_eq(c.position.x, 30.0, 0.001)
 
 
 func test_transform_ignores_body_clip_visual_offsets() -> void:

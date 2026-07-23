@@ -12,10 +12,17 @@ extends RefCounted
 # resolves without an editor re-import.
 
 var _by_bms_id: Dictionary = {}     # bms_id (SSN) -> Node
-var _by_kind_index: Dictionary = {} # "kind:index" -> Node (fallback when bms_id is 0)
+var _by_kind_index: Dictionary = {} # packed (kind,index) -> Node (fallback when bms_id is 0)
 var _by_group: Dictionary = {}      # group_id -> Array[Node]
 var _nodes: Array = []              # [{ node, pos (mission-space Vector3), team }]
 var _area_triggers: Array = []      # cached mission.get_area_triggers()
+var _generation := 0                # invalidates presentation row plans after rebuild/clear
+
+
+static func _origin_key(kind: int, index: int) -> int:
+	# Keep both signed 32-bit inputs distinct without allocating a formatted
+	# String in the per-frame present path.
+	return (kind << 32) | (index & 0xffffffff)
 
 
 ## (Re)build the indexes from the animatable entity nodes under `container`, reading each node's
@@ -37,7 +44,7 @@ func build(container: Node, mission) -> void:
 		var kind := int(ref.get("kind", -1))
 		var index := int(ref.get("index", -1))
 		if kind >= 0 and index >= 0:
-			_by_kind_index["%d:%d" % [kind, index]] = child
+			_by_kind_index[_origin_key(kind, index)] = child
 		var group := int(ref.get("group", -1))
 		if group >= 0:
 			if not _by_group.has(group):
@@ -51,11 +58,16 @@ func build(container: Node, mission) -> void:
 
 
 func clear() -> void:
+	_generation += 1
 	_by_bms_id.clear()
 	_by_kind_index.clear()
 	_by_group.clear()
 	_nodes.clear()
 	_area_triggers = []
+
+
+func get_generation() -> int:
+	return _generation
 
 
 ## Resolve one entity's node for the present pass: by file id (bms_id) first -- stable when a mission
@@ -67,7 +79,7 @@ func resolve(bms_id: int, kind: int, index: int) -> Node:
 	if bms_id != 0:
 		node = _by_bms_id.get(bms_id, null)
 	if (node == null or not is_instance_valid(node)) and kind >= 0 and index >= 0:
-		node = _by_kind_index.get("%d:%d" % [kind, index], null)
+		node = _by_kind_index.get(_origin_key(kind, index), null)
 	return node if (node != null and is_instance_valid(node)) else null
 
 

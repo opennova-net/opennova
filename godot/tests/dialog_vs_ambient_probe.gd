@@ -98,7 +98,7 @@ func _run() -> void:
 	var audio = NovaMissionAudioScript.new(root, item_db)
 	if not ambient:
 		# STRATEGY_TARGET_ID resolves no marker names -> banks + .DBF still load,
-		# zero ambient voices spawn. This is the "ambient sounds disabled" arm.
+		# zero ambient candidates resolve. This is the "ambient sounds disabled" arm.
 		audio.set_resolution_strategy(NovaMissionAudioScript.STRATEGY_TARGET_ID)
 	var stats: Dictionary = audio.setup(mission, mission_name, container)
 	print("[dlgprobe] setup: %s" % str(stats))
@@ -106,14 +106,9 @@ func _run() -> void:
 	# Listener parked at the player start when the sim arm resolved one (the real
 	# play-test position), else at the resolved-marker centroid. (Headless has no
 	# camera; without this the 3D voices attenuate against the origin.)
-	var marker_players: Array = container.find_children("*", "AudioStreamPlayer3D", true, false)
 	var listen_pos := player_pos
 	if not (listen_pos.is_finite() and listen_pos != Vector3.INF):
 		listen_pos = Vector3.ZERO
-		if not marker_players.is_empty():
-			for p in marker_players:
-				listen_pos += (p as Node3D).global_position
-			listen_pos /= float(marker_players.size())
 	# A current Camera3D is the audio listener (a bare AudioListener3D in a
 	# script-built tree leaves 3D voices mixing at zero — loop_matrix_probe.gd).
 	var listener := Camera3D.new()
@@ -122,6 +117,8 @@ func _run() -> void:
 	listener.make_current()
 	# The real game culls voices beyond 240u from the camera each frame.
 	audio.tick(listen_pos)
+	var marker_players: Array = container.find_children(
+		"*", "AudioStreamPlayer3D", true, false)
 	var near := 0
 	var near_120 := 0
 	for p in marker_players:
@@ -130,8 +127,9 @@ func _run() -> void:
 			near += 1
 		if d <= 120.0:
 			near_120 += 1
-	print("[dlgprobe] ambient voices=%d (within 240u of listener: %d, within 120u: %d) listener=%s" % [
-		marker_players.size(), near, near_120, str(listen_pos)])
+	print("[dlgprobe] ambient candidates=%d physical voices=%d (within 240u of listener: %d, within 120u: %d) listener=%s" % [
+		int(stats.get("ambient_candidates", 0)), marker_players.size(),
+		near, near_120, str(listen_pos)])
 
 	# Per-voice state for the nearest few: distinguishes "not playing" from
 	# "playing but mixed to nothing" (headless 3D-audio artifact vs real bug).

@@ -13,13 +13,19 @@ extends SceneTree
 const LOAD_TIMEOUT_WALL_SECONDS := 240.0
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
 const MountGuard := preload("res://tests/perf_probe_mount_guard.gd")
+const PropertyGuard := preload("res://tests/perf_probe_property_guard.gd")
 
 var _mount_guard = MountGuard.new()
+var _property_guard = PropertyGuard.new()
+var _probe_state_error: Error = OK
+var _requested_exit_code := 1
 var _runtime = null
+var _present = null
 var _sim = null
 var _effect_world = null
 var _main = null
 var _gw = null
+var _hud_host = null
 var _vprid := RID()
 # Frame segmentation: [post_draw -> process_frame] = swap/present + OS pump +
 # physics; [process_frame -> pre_draw] = the process step; [pre -> post] = draw.
@@ -58,18 +64,22 @@ func _initialize() -> void:
 
 
 func _finalize() -> void:
-	_restore_mount()
+	var state_err := _restore_probe_state()
+	var mount_err := _restore_mount()
+	if _requested_exit_code == 0 and (state_err != OK or mount_err != OK):
+		_requested_exit_code = 1
+		quit(1)
 
 
 func _run() -> void:
 	var bms := OS.get_environment("NW_SP_MISSION").strip_edges()
 	if bms.is_empty():
 		push_error("[pfg] set NW_SP_MISSION=<mission.bms>")
-		quit(1)
+		_finish(1)
 		return
 	if _mount_guard.capture() != OK:
 		push_error("[pfg] could not snapshot the shared mount config")
-		quit(1)
+		_finish(1)
 		return
 	var res_dir := OS.get_environment("NW_RESOURCE_DIR").strip_edges()
 	if not res_dir.is_empty():
@@ -81,16 +91,14 @@ func _run() -> void:
 	var packed := load("res://game/main_game.tscn") as PackedScene
 	if packed == null:
 		push_error("[pfg] failed to load main_game.tscn")
-		_restore_mount()
-		quit(1)
+		_finish(1)
 		return
 	var game := packed.instantiate()
 	root.add_child(game)
 	var world = game.get_node_or_null("World")
 	if world == null:
 		push_error("[pfg] main_game lacks World")
-		_restore_mount()
-		quit(1)
+		_finish(1)
 		return
 
 	var wall_start := Time.get_ticks_msec()
@@ -98,8 +106,7 @@ func _run() -> void:
 		await process_frame
 		if float(Time.get_ticks_msec() - wall_start) / 1000.0 > LOAD_TIMEOUT_WALL_SECONDS:
 			push_error("[pfg] player never spawned (mission load stalled?)")
-			_restore_mount()
-			quit(1)
+			_finish(1)
 			return
 	print("[pfg] mission=%s loaded, player spawned" % bms)
 	await _settle_ms(5000)
@@ -107,9 +114,13 @@ func _run() -> void:
 	_runtime = _find_by_method(root, "tick_realtime")
 	if _runtime != null and _runtime.has_method("get_sim"):
 		_sim = _runtime.get_sim()
+	if _runtime != null:
+		_present = _runtime.get("_present")
 	_effect_world = _find_by_method(root, "get_debug_group_report")
 	_main = game
 	_gw = world
+	_hud_host = _main.get("_hud_host")
+	_enable_perf_probe_spans()
 
 	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
 	Engine.max_fps = 0
@@ -128,6 +139,10 @@ func _run() -> void:
 		fire_s = 3.0
 
 	var base := await _measure("baseline", 5000)
+	if OS.get_environment("NOVA_PF_BASELINE_ONLY") == "1":
+		_report("BASELINE", base)
+		_finish(0)
+		return
 	_mouse_btn(MOUSE_BUTTON_LEFT, true)
 	var fire1 := await _measure("firing1", int(fire_s * 1000.0))
 	_mouse_btn(MOUSE_BUTTON_LEFT, false)
@@ -154,15 +169,13 @@ func _run() -> void:
 		elif gh is CanvasItem:
 			hud_node = gh
 	var hudoff := {avg = -1.0}
-	if hud_node != null:
-		hud_node.set("visible", false)
+	if _set_guarded_if_present(hud_node, &"visible", false):
 		hudoff = await _measure("hudoff", 3000)
-		hud_node.set("visible", true)
+		_restore_guarded(hud_node, &"visible")
 
-	# Water-reflection A/B: the reflection SubViewport renders the whole scene
+	# Locate the water renderer for the hard reflection A/B below. The reflection
 	# a second time each frame (its own camera — main-camera cull masks and the
 	# root viewport's 3D scale never touch it).
-	var refloff := {avg = -1.0}
 	var water: Node = null
 	var stack: Array = [root]
 	while not stack.is_empty():
@@ -174,50 +187,44 @@ func _run() -> void:
 			break
 		for ch in n.get_children():
 			stack.push_back(ch)
-	if water != null:
-		var rvp = water.get("reflection_viewport")
-		if rvp is SubViewport:
-			var prev_mode: int = (rvp as SubViewport).render_target_update_mode
-			(rvp as SubViewport).render_target_update_mode = SubViewport.UPDATE_DISABLED
-			refloff = await _measure("refloff", 3000)
-			(rvp as SubViewport).render_target_update_mode = prev_mode
-
 	# Split A/B: which half of the main-game frame callback drags the out-of-process cost
 	# with it (deferred/RS-side work its calls generate)?
 	var worldoff := {avg = -1.0}
 	var hudtickoff := {avg = -1.0}
-	if _main != null and _main.get("_perf_probe_skip_world") != null:
-		_main.set("_perf_probe_skip_world", true)
+	if _set_guarded_if_present(_main, &"_perf_probe_skip_world", true):
 		worldoff = await _measure("worldoff", 3000)
-		_main.set("_perf_probe_skip_world", false)
+		_restore_guarded(_main, &"_perf_probe_skip_world")
+	if _set_guarded_if_present(_main, &"_perf_probe_skip_hud", true):
 		await _settle_ms(500)
-		_main.set("_perf_probe_skip_hud", true)
 		hudtickoff = await _measure("hudtickoff", 3000)
-		_main.set("_perf_probe_skip_hud", false)
+		_restore_guarded(_main, &"_perf_probe_skip_hud")
 
-	# Present-pass sub-step A/B: transforms vs body anim.
+	# Existing presenter options provide state-safe A/Bs without a production
+	# probe branch: freeze transform/visibility submission independently while
+	# simulation, body posing, and muzzle feedback continue normally.
 	var xformoff := {avg = -1.0}
-	var bodyoff := {avg = -1.0}
-	var present = _runtime.get("_present") if _runtime != null else null
-	if present != null and present.get("_perf_probe_skip_transform") != null:
+	var visoff := {avg = -1.0}
+	if _set_guarded_if_present(_present, &"_drive_transform", false):
 		await _settle_ms(500)
-		present.set("_perf_probe_skip_transform", true)
 		xformoff = await _measure("xformoff", 3000)
-		present.set("_perf_probe_skip_transform", false)
+		_restore_guarded(_present, &"_drive_transform")
+	if _set_guarded_if_present(_present, &"_drive_visibility", false):
 		await _settle_ms(500)
-		present.set("_perf_probe_skip_body_anim", true)
-		bodyoff = await _measure("bodyanimoff", 3000)
-		present.set("_perf_probe_skip_body_anim", false)
+		visoff = await _measure("visoff", 3000)
+		_restore_guarded(_present, &"_drive_visibility")
 
 	# Occlusion legs A/B (visibility writes across the occluded set per frame).
 	var occloff := {avg = -1.0}
-	if _gw != null and _gw.get("_perf_probe_skip_occl") != null:
+	var occlusion_setter := StringName()
+	if _gw != null and _gw.has_method("set_perf_probe_occlusion_suspended"):
+		occlusion_setter = &"set_perf_probe_occlusion_suspended"
+	if _set_guarded_if_present(
+			_gw, &"_perf_probe_skip_occl", true, occlusion_setter):
 		await _settle_ms(500)
-		_gw.set("_perf_probe_skip_occl", true)
 		occloff = await _measure("occloff", 3000)
-		_gw.set("_perf_probe_skip_occl", false)
+		_restore_guarded(_gw, &"_perf_probe_skip_occl")
 
-	# HARD reflection off: stop the water script FIRST (it re-asserts the update
+	# HARD reflection off: stop the water script first (it re-asserts the update
 	# mode every frame — the earlier soft toggle was overwritten within a frame),
 	# THEN disable the RTT.
 	var reflhard := {avg = -1.0}
@@ -225,38 +232,32 @@ func _run() -> void:
 		var rvp2 = water.get("reflection_viewport")
 		if rvp2 is SubViewport:
 			await _settle_ms(500)
-			water.set_process(false)
-			(rvp2 as SubViewport).render_target_update_mode = SubViewport.UPDATE_DISABLED
-			reflhard = await _measure("reflhardoff", 3000)
-			water.set_process(true)
+			var process_guarded := _set_guarded_method(
+					water, &"process_enabled", &"is_processing", &"set_process", false)
+			var viewport_guarded := _set_guarded_if_present(
+					rvp2, &"render_target_update_mode", SubViewport.UPDATE_DISABLED)
+			if process_guarded and viewport_guarded:
+				reflhard = await _measure("reflhardoff", 3000)
+			if viewport_guarded:
+				_restore_guarded(rvp2, &"render_target_update_mode")
+			if process_guarded:
+				_restore_guarded(water, &"process_enabled")
 
 	# Particle fixed-tick A/B (advance_fixed_tick runs per 62 Hz tick — 8-9x per
 	# frame at low FPS).
 	var fxtickoff := {avg = -1.0}
-	if _gw != null and _gw.get("_perf_probe_skip_effect_tick") != null:
+	if _set_guarded_if_present(_gw, &"_perf_probe_skip_effect_tick", true):
 		await _settle_ms(500)
-		_gw.set("_perf_probe_skip_effect_tick", true)
 		fxtickoff = await _measure("fxtickoff", 3000)
-		_gw.set("_perf_probe_skip_effect_tick", false)
+		_restore_guarded(_gw, &"_perf_probe_skip_effect_tick")
 
-	# tick_realtime partition: sim step / present bundle / fixed-tick handlers.
-	var simoff := {avg = -1.0}
-	var presentoff := {avg = -1.0}
+	# The direct simulation/presentation timing counters remain observational;
+	# skipping either bundle would mutate gameplay state and corrupt later legs.
 	var handleroff := {avg = -1.0}
-	if _runtime != null and _runtime.get("_perf_probe_skip_sim") != null:
+	if _set_guarded_if_present(_gw, &"_perf_probe_skip_fixed_handlers", true):
 		await _settle_ms(500)
-		_runtime.set("_perf_probe_skip_sim", true)
-		simoff = await _measure("simoff", 3000)
-		_runtime.set("_perf_probe_skip_sim", false)
-		await _settle_ms(500)
-		_runtime.set("_perf_probe_skip_present", true)
-		presentoff = await _measure("presentoff", 3000)
-		_runtime.set("_perf_probe_skip_present", false)
-	if _gw != null and _gw.get("_perf_probe_skip_fixed_handlers") != null:
-		await _settle_ms(500)
-		_gw.set("_perf_probe_skip_fixed_handlers", true)
 		handleroff = await _measure("handleroff", 3000)
-		_gw.set("_perf_probe_skip_fixed_handlers", false)
+		_restore_guarded(_gw, &"_perf_probe_skip_fixed_handlers")
 
 	_report("BASELINE", base)
 	_report("FIRING1 ", fire1)
@@ -265,9 +266,6 @@ func _run() -> void:
 	if float(hudoff.avg) >= 0.0:
 		print("[pfg] HUDOFF   avg=%.2fms (canvas share vs cooldown: %+.2fms)" % [
 				float(hudoff.avg), float(cool.avg) - float(hudoff.avg)])
-	if float(refloff.avg) >= 0.0:
-		print("[pfg] REFLOFF  avg=%.2fms (reflection share vs cooldown: %+.2fms)" % [
-				float(refloff.avg), float(cool.avg) - float(refloff.avg)])
 	if float(worldoff.avg) >= 0.0:
 		print("[pfg] WORLDOFF avg=%.2fms (world.tick share vs cooldown: %+.2fms)" % [
 				float(worldoff.avg), float(cool.avg) - float(worldoff.avg)])
@@ -277,9 +275,9 @@ func _run() -> void:
 	if float(xformoff.avg) >= 0.0:
 		print("[pfg] XFORMOFF avg=%.2fms (present transform share vs cooldown: %+.2fms)" % [
 				float(xformoff.avg), float(cool.avg) - float(xformoff.avg)])
-	if float(bodyoff.avg) >= 0.0:
-		print("[pfg] BODYANIMOFF avg=%.2fms (body anim share vs cooldown: %+.2fms)" % [
-				float(bodyoff.avg), float(cool.avg) - float(bodyoff.avg)])
+	if float(visoff.avg) >= 0.0:
+		print("[pfg] VISOFF   avg=%.2fms (present visibility share vs cooldown: %+.2fms)" % [
+				float(visoff.avg), float(cool.avg) - float(visoff.avg)])
 	if float(occloff.avg) >= 0.0:
 		print("[pfg] OCCLOFF  avg=%.2fms (occlusion share vs cooldown: %+.2fms)" % [
 				float(occloff.avg), float(cool.avg) - float(occloff.avg)])
@@ -289,12 +287,6 @@ func _run() -> void:
 	if float(fxtickoff.avg) >= 0.0:
 		print("[pfg] FXTICKOFF avg=%.2fms (particle tick share vs cooldown: %+.2fms)" % [
 				float(fxtickoff.avg), float(cool.avg) - float(fxtickoff.avg)])
-	if float(simoff.avg) >= 0.0:
-		print("[pfg] SIMOFF   avg=%.2fms (sim step share vs cooldown: %+.2fms)" % [
-				float(simoff.avg), float(cool.avg) - float(simoff.avg)])
-	if float(presentoff.avg) >= 0.0:
-		print("[pfg] PRESENTOFF avg=%.2fms (present bundle share vs cooldown: %+.2fms)" % [
-				float(presentoff.avg), float(cool.avg) - float(presentoff.avg)])
 	if float(handleroff.avg) >= 0.0:
 		print("[pfg] HANDLEROFF avg=%.2fms (fixed handlers share vs cooldown: %+.2fms)" % [
 				float(handleroff.avg), float(cool.avg) - float(handleroff.avg)])
@@ -313,10 +305,7 @@ func _run() -> void:
 	print("[pfg] VERDICT: %s" % ("REGRESSION — firing is markedly slower than baseline"
 			if regressed else "GREEN — firing within baseline envelope"))
 	var exit_code := 2 if regressed else 0
-	var restore_err := _restore_mount()
-	if restore_err != OK and exit_code == 0:
-		exit_code = 1
-	quit(exit_code)
+	_finish(exit_code)
 
 
 func _measure(phase: String, duration_ms: int) -> Dictionary:
@@ -337,6 +326,8 @@ func _measure(phase: String, duration_ms: int) -> Dictionary:
 		sec_frames += 1
 		if sec_accum >= 1000.0:
 			print(_counter_row(sec_frames, sec_accum))
+			# Do not charge the probe's own diagnostic pulls to the next frame.
+			last = Time.get_ticks_usec()
 			sec_accum = 0.0
 			sec_frames = 0
 	print(_counter_row(sec_frames, sec_accum))
@@ -389,15 +380,20 @@ func _counter_row(sec_frames: int, sec_accum: float) -> String:
 				alive += int((e_v as Dictionary).get("alive", 0))
 		parts = "%d/%d" % [groups.size(), alive]
 	var spans := ""
+	var world_producer_skipped := false
+	var hud_producer_skipped := false
 	if _main != null:
+		if _property_guard.has_property(_main, &"_perf_probe_skip_world"):
+			world_producer_skipped = bool(_main.get("_perf_probe_skip_world"))
+		if _property_guard.has_property(_main, &"_perf_probe_skip_hud"):
+			hud_producer_skipped = bool(_main.get("_perf_probe_skip_hud"))
 		var mg = _main.get("_perf_probe_spans")
 		if mg is Dictionary and not (mg as Dictionary).is_empty():
 			spans += " main{before=%.1f world=%.1f after=%.1f hud=%.1f}" % [
 					float(mg.get("before", 0)) / 1000.0, float(mg.get("world", 0)) / 1000.0,
 					float(mg.get("after", 0)) / 1000.0, float(mg.get("hud", 0)) / 1000.0]
-		var hh = _main.get("_hud_host")
-		if hh != null:
-			var hg = hh.get("_perf_probe_spans")
+		if _hud_host != null and not hud_producer_skipped:
+			var hg = _hud_host.get("_perf_probe_spans")
 			if hg is Dictionary and not (hg as Dictionary).is_empty():
 				spans += " hud{scal=%.1f attach=%.1f wp=%.1f info=%.1f flush=%.1f}" % [
 						float(hg.get("scalars", 0)) / 1000.0,
@@ -405,7 +401,7 @@ func _counter_row(sec_frames: int, sec_accum: float) -> String:
 						float(hg.get("waypoint", 0)) / 1000.0,
 						float(hg.get("update_info", 0)) / 1000.0,
 						float(hg.get("flush", 0)) / 1000.0]
-	if _gw != null:
+	if _gw != null and not world_producer_skipped:
 		var gg = _gw.get("_perf_probe_spans")
 		if gg is Dictionary and not (gg as Dictionary).is_empty():
 			spans += " gw{occl_r=%.1f occl_f=%.1f iris=%.1f weather=%.1f blink=%.1f}" % [
@@ -463,7 +459,7 @@ func _census() -> void:
 	while not stack.is_empty():
 		var n: Node = stack.pop_back()
 		for cls in ["MeshInstance3D", "MultiMeshInstance3D", "GPUParticles3D",
-				"CPUParticles3D", "Camera3D", "AnimationPlayer"]:
+				"CPUParticles3D", "Camera3D", "AnimationPlayer", "AudioStreamPlayer3D"]:
 			if n.is_class(cls):
 				counts[cls] = int(counts.get(cls, 0)) + 1
 		for ch in n.get_children():
@@ -474,6 +470,77 @@ func _census() -> void:
 func _report(label: String, st: Dictionary) -> void:
 	print("[pfg] %s frames=%5d avg=%6.2fms p50=%6.2fms p95=%6.2fms max=%7.2fms worst=[%s]" % [
 			label, st.n, st.avg, st.p50, st.p95, st.mx, ", ".join(st.worst)])
+
+
+func _enable_perf_probe_spans() -> void:
+	for target_v in [_main, _hud_host, _gw]:
+		var target := target_v as Object
+		var setter_method := StringName()
+		if is_instance_valid(target) and target.has_method("set_perf_probe_enabled"):
+			setter_method = &"set_perf_probe_enabled"
+		_set_guarded_if_present(
+				target, &"_perf_probe_enabled", true, setter_method)
+
+
+func _set_guarded_if_present(
+		target: Object,
+		property_name: StringName,
+		value: Variant,
+		setter_method: StringName = StringName()) -> bool:
+	if not _property_guard.has_property(target, property_name):
+		return false
+	var err: Error = _property_guard.set_temporary(
+			target, property_name, value, setter_method)
+	if err != OK:
+		_record_probe_state_error(err, "set %s" % property_name)
+		return false
+	return true
+
+
+func _set_guarded_method(
+		target: Object,
+		state_key: StringName,
+		getter_method: StringName,
+		setter_method: StringName,
+		value: Variant) -> bool:
+	var err: Error = _property_guard.set_temporary_method(
+			target, state_key, getter_method, setter_method, value)
+	if err != OK:
+		_record_probe_state_error(err, "set %s" % state_key)
+		return false
+	return true
+
+
+func _restore_guarded(target: Object, property_name: StringName) -> bool:
+	var err: Error = _property_guard.restore_property(target, property_name)
+	if err != OK:
+		_record_probe_state_error(err, "restore %s" % property_name)
+		return false
+	return true
+
+
+func _restore_probe_state() -> Error:
+	var err: Error = _property_guard.restore_all()
+	if err != OK:
+		_record_probe_state_error(err, "restore remaining probe properties")
+	return _probe_state_error
+
+
+func _record_probe_state_error(err: Error, operation: String) -> void:
+	if err == OK:
+		return
+	if _probe_state_error == OK:
+		_probe_state_error = err
+	push_error("[pfg] failed to %s (error %d)" % [operation, err])
+
+
+func _finish(exit_code: int) -> void:
+	var state_err := _restore_probe_state()
+	var mount_err := _restore_mount()
+	if exit_code == 0 and (state_err != OK or mount_err != OK):
+		exit_code = 1
+	_requested_exit_code = exit_code
+	quit(exit_code)
 
 
 func _restore_mount() -> Error:

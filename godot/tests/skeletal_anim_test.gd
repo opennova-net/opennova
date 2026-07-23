@@ -517,12 +517,16 @@ func test_play_body_clip_at_pins_ida_phase_ticks() -> void:
 	var expected_time := float(phase_ticks) / (2.0 * fps)
 
 	model.call("play_body_clip_at", "anim_walk_forward", phase_ticks)
-	var pinned_pose := model.get_skeleton().get_bone_pose_position(0)
+	var skeleton: Skeleton3D = model.get_skeleton()
+	assert_eq(skeleton.modifier_callback_mode_process,
+			Skeleton3D.MODIFIER_CALLBACK_MODE_PROCESS_MANUAL,
+			"direct-pose skeletons do not run an empty modifier callback every frame")
+	var pinned_pose := skeleton.get_bone_pose_position(0)
 	model.advance_body_animation(0.5)
 
 	assert_almost_eq(model.get_animation_time(), expected_time, 0.001,
 		"IDA half-frame phase ticks map to skeleton pose seconds")
-	assert_true(model.get_skeleton().get_bone_pose_position(0).is_equal_approx(pinned_pose),
+	assert_true(skeleton.get_bone_pose_position(0).is_equal_approx(pinned_pose),
 		"externally phased playback does not free-run between sim snapshots")
 
 

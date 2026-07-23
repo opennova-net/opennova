@@ -1535,6 +1535,110 @@ struct CountingMatrixProvider final : ICollisionSectionMatrixProvider {
     }
 };
 
+void test_ground_and_resolver_prefilter_stale_candidates_before_section_matrices() {
+    Rig rig(box_model(1, 0, 3.0, 3.0, 1.0));
+    rig.move_soldier(10.0, 10.0, 1.05);
+
+    // Build a second, initially-near static into the source's 17-tick candidate
+    // slice, then move it without refreshing that slice. Both queries must use
+    // its live bound to reject it before asking the host for section matrices.
+    Entity stale_seed;
+    stale_seed.kind = EntityKind::Building;
+    stale_seed.position = {10.0f, 10.0f, 0.0f};
+    stale_seed.yaw = 90;
+    stale_seed.alive = true;
+    const EntityHandle stale = rig.world.registry.spawn(2, stale_seed);
+    CHECK(stale.valid());
+    rig.cw.assign_entity(stale, 0);
+    rig.rebuild();
+    CHECK(rig.cw.candidate_count(rig.soldier) == 2);
+    Entity *stale_live = rig.world.registry.get(stale);
+    CHECK(stale_live != nullptr);
+    if (stale_live != nullptr) stale_live->position = {100.0f, 100.0f, 0.0f};
+
+    CountingMatrixProvider provider;
+    rig.cw.set_section_matrix_provider(&provider);
+
+    const int32_t probe[3] = {fx(10.0), fx(10.0), fx(5.0)};
+    EntityHandle hit;
+    const int32_t ground =
+            rig.cw.raycast_ground(rig.world, rig.soldier, probe, 0, 0, 0, fx(10.0), &hit);
+    CHECK(std::abs(ground - fx(1.0)) < fx(0.02));
+    CHECK(hit == rig.building);
+    CHECK(provider.calls_for(rig.building) == 1);
+    CHECK(provider.calls_for(stale) == 0);
+
+    provider.build_handles.clear();
+    int32_t pos[3] = {fx(10.0), fx(10.0), fx(1.05)};
+    const int32_t before_xy[2] = {pos[0], pos[1]};
+    int32_t vel[3] = {0, 0, 0};
+    int16_t health = 100;
+    CollisionWorld::ResolveState state;
+    rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2], 0, fx(1.8), 0, 0,
+                          false, true, 0, 43, 0u, health);
+    const Entity *soldier = rig.world.registry.get(rig.soldier);
+    CHECK(pos[0] == before_xy[0]);
+    CHECK(pos[1] == before_xy[1]);
+    CHECK(health == 100);
+    CHECK(soldier != nullptr && soldier->ground_target == rig.building);
+    CHECK(provider.calls_for(stale) == 0);
+    CHECK(provider.calls_for(rig.building) >= 2);
+}
+
+void test_vehicle_hull_prefilters_stale_candidates_before_section_matrices() {
+    World world;
+    world.registry.configure_pool(1, 4);
+    world.registry.configure_pool(2, 8);
+    CollisionWorld collision;
+
+    Entity vehicle_seed;
+    vehicle_seed.kind = EntityKind::Item;
+    vehicle_seed.item_id = 900;
+    vehicle_seed.position = {13.0f, 10.0f, 0.0f};
+    vehicle_seed.bound_radius = 1.0f;
+    vehicle_seed.alive = true;
+    const EntityHandle vehicle = world.registry.spawn(1, vehicle_seed);
+    CHECK(vehicle.valid());
+    VehicleTraits traits;
+    traits.physics = 1;
+    world.vehicle_traits.set(vehicle_seed.item_id, traits);
+
+    auto spawn_static = [&](float y) {
+        Entity seed;
+        seed.kind = EntityKind::Building;
+        seed.position = {10.0f, y, 0.0f};
+        seed.yaw = 90;
+        seed.alive = true;
+        return world.registry.spawn(2, seed);
+    };
+    const EntityHandle wall = spawn_static(10.0f);
+    const EntityHandle stale = spawn_static(12.0f);
+    CHECK(wall.valid() && stale.valid());
+
+    const int32_t model_id = collision.add_model(box_model(1, 0, 2.0, 2.0, 3.0));
+    collision.assign_entity(wall, model_id);
+    collision.assign_entity(stale, model_id);
+    for (int i = 0; i < 17; ++i) collision.build_tick_tables(world);
+    CHECK(collision.candidate_count(vehicle) == 2);
+    Entity *stale_live = world.registry.get(stale);
+    CHECK(stale_live != nullptr);
+    if (stale_live != nullptr) stale_live->position = {100.0f, 100.0f, 0.0f};
+
+    CountingMatrixProvider provider;
+    collision.set_section_matrix_provider(&provider);
+    const int32_t moved[3] = {fx(13.0), fx(10.0), 0};
+    const int32_t previous[3] = {fx(14.0), fx(10.0), 0};
+    int32_t push[2] = {};
+    const int32_t severity =
+            collision.resolve_vehicle_hull(world, vehicle, moved, previous, push);
+    CHECK(severity == 3);
+    CHECK(push[0] > 0);
+    CHECK(push[1] == 0);
+    CHECK(provider.calls_for(wall) == 1);
+    CHECK(provider.calls_for(stale) == 0);
+    CHECK(provider.build_handles.size() == 1);
+}
+
 struct DemandPersonProvider final : ICollisionSectionMatrixProvider {
     CollisionWorld *collision = nullptr;
     int32_t model_id = -1;
@@ -1668,6 +1772,103 @@ void test_f3_debug_prefilters_before_building_section_matrices() {
     CHECK(provider.calls_for(far_person) == 0);
     CHECK(provider.calls_for(near_static) == 0);
     CHECK(provider.calls_for(far_static) == 0);
+}
+
+void test_iris_static_rays_prefilter_before_section_matrices() {
+    World world;
+    world.registry.configure_pool(2, 64);
+    CollisionWorld collision;
+    const int32_t model_id = collision.add_model(box_model(1, 0, 1.0, 1.0, 2.0));
+
+    std::vector<EntityHandle> far_statics;
+    for (int i = 0; i < 32; ++i) {
+        Entity seed;
+        seed.kind = EntityKind::Building;
+        seed.position = Vec3{100.0f + static_cast<float>(i), 0.0f, 0.0f};
+        seed.yaw = 90;
+        seed.alive = true;
+        const EntityHandle h = world.registry.spawn(2, seed);
+        CHECK(h.valid());
+        collision.assign_entity(h, model_id);
+        far_statics.push_back(h);
+    }
+    Entity near_seed;
+    near_seed.kind = EntityKind::Building;
+    near_seed.position = Vec3{5.0f, 0.0f, 0.0f};
+    near_seed.yaw = 90;
+    near_seed.alive = true;
+    const EntityHandle near_static = world.registry.spawn(2, near_seed);
+    CHECK(near_static.valid());
+    collision.assign_entity(near_static, model_id);
+    collision.build_initial_tables(world);
+
+    CountingMatrixProvider provider;
+    collision.set_section_matrix_provider(&provider);
+    const int32_t start[3] = {0, 0, fx(1.0)};
+    const int32_t end[3] = {fx(10.0), 0, fx(1.0)};
+    CHECK(collision.segment_hits_static(world, start, end, 0));
+    CHECK(provider.calls_for(near_static) == 1);
+    CHECK(provider.build_handles.size() == 1);
+    for (const EntityHandle h : far_statics)
+        CHECK(provider.calls_for(h) == 0);
+}
+
+void test_sound_los_prefilters_candidates_before_section_matrices() {
+    World world;
+    world.registry.configure_pool(0, 4);
+    world.registry.configure_pool(1, 16);
+    world.registry.configure_pool(2, 32);
+    CollisionWorld collision;
+    const int32_t model_id = collision.add_model(box_model(1, 0, 1.0, 1.0, 2.0));
+
+    Entity listener_seed;
+    listener_seed.kind = EntityKind::Organic;
+    listener_seed.bound_radius = 1.0f;
+    listener_seed.alive = true;
+    const EntityHandle listener = world.registry.spawn(0, listener_seed);
+    CHECK(listener.valid());
+
+    std::vector<EntityHandle> rejected;
+    for (int i = 0; i < 8; ++i) {
+        Entity dynamic_seed;
+        dynamic_seed.kind = EntityKind::Item;
+        dynamic_seed.position = Vec3{1.0f, static_cast<float>(i) * 0.25f, 0.0f};
+        dynamic_seed.yaw = 90;
+        dynamic_seed.alive = true;
+        const EntityHandle h = world.registry.spawn(1, dynamic_seed);
+        collision.assign_entity(h, model_id);
+        rejected.push_back(h);
+    }
+    for (int i = 0; i < 16; ++i) {
+        Entity far_seed;
+        far_seed.kind = EntityKind::Building;
+        far_seed.position = Vec3{3.0f, static_cast<float>(i) * 0.1f, 0.0f};
+        far_seed.yaw = 90;
+        far_seed.alive = true;
+        const EntityHandle h = world.registry.spawn(2, far_seed);
+        collision.assign_entity(h, model_id);
+        rejected.push_back(h);
+    }
+    Entity blocker_seed;
+    blocker_seed.kind = EntityKind::Building;
+    blocker_seed.position = Vec3{0.0f, 5.0f, 0.0f};
+    blocker_seed.yaw = 90;
+    blocker_seed.alive = true;
+    const EntityHandle blocker = world.registry.spawn(2, blocker_seed);
+    collision.assign_entity(blocker, model_id);
+    for (int i = 0; i < 17; ++i) collision.build_tick_tables(world);
+
+    CountingMatrixProvider provider;
+    collision.set_section_matrix_provider(&provider);
+    const int32_t start[3] = {0, 0, fx(1.0)};
+    const int32_t end[3] = {0, fx(10.0), fx(1.0)};
+    const int32_t inflated = collision.sound_occlusion_inflate(
+            world, listener, EntityHandle{}, start, end, fx(10.0));
+    CHECK(inflated > fx(10.0));
+    CHECK(provider.calls_for(blocker) == 2);
+    CHECK(provider.build_handles.size() == 2);
+    for (const EntityHandle h : rejected)
+        CHECK(provider.calls_for(h) == 0);
 }
 
 void test_late_person_instance_is_demand_resolved_for_rounds_and_debug() {
@@ -2959,7 +3160,11 @@ int main() {
     test_face_raycast_husk_omits_spawned_piece_sections();
     test_face_raycast_uses_callback_matrix_per_section();
     test_person_section_raycast_uses_posed_bone_matrix();
+    test_ground_and_resolver_prefilter_stale_candidates_before_section_matrices();
+    test_vehicle_hull_prefilters_stale_candidates_before_section_matrices();
     test_f3_debug_prefilters_before_building_section_matrices();
+    test_iris_static_rays_prefilter_before_section_matrices();
+    test_sound_los_prefilters_candidates_before_section_matrices();
     test_late_person_instance_is_demand_resolved_for_rounds_and_debug();
     test_reused_registry_slot_rejects_old_collision_identity();
     test_person_section_reverse_scan_and_mask();

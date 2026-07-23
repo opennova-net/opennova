@@ -11,6 +11,10 @@ class PartAnimModel:
 	var regs: Array = ["reg0", "reg1"]  # the model's two part-anim channels
 	func _resolve_anim_channel_register(slot: int) -> String:
 		return String(regs[slot]) if slot >= 0 and slot < regs.size() else ""
+	func mark_body_pose_clean() -> void:
+		_body_pose_dirty = false
+	func is_body_pose_dirty() -> bool:
+		return _body_pose_dirty
 
 
 func _model() -> PartAnimModel:
@@ -105,3 +109,19 @@ func test_restart_reverse_seeds_max() -> void:
 	var m := _model()
 	m.restart_part_anim(1, -1, 1.0)   # reverse restart -> seed the max end
 	assert_eq(int(m.get_ctrl_values().get("reg0", -1)), 65535, "reverse restart seeds the start at max")
+
+
+func test_unchanged_aim_overlay_does_not_redirty_body_pose() -> void:
+	var m := _model()
+	m.mark_body_pose_clean()
+	m.set_aim_overlay([])
+	assert_false(m.is_body_pose_dirty(),
+			"repeated disabled overlays preserve the body-pose fast path")
+
+	var deltas: Array = [Basis.from_euler(Vector3(0.1, -0.2, 0.3))]
+	m.set_aim_overlay(deltas)
+	assert_true(m.is_body_pose_dirty(), "a new overlay invalidates the pose")
+	m.mark_body_pose_clean()
+	m.set_aim_overlay(deltas.duplicate())
+	assert_false(m.is_body_pose_dirty(),
+			"an identical active overlay cannot re-evaluate and upload the skeleton")
