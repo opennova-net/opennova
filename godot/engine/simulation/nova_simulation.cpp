@@ -46,6 +46,16 @@
 #include "terrain/nova_terrain_data.h"
 
 using namespace godot;
+
+// The GDScript-facing seat codes are the SAME values libs/world computes with —
+// a drifted copy here would silently corrupt every host-side seat-spec walk.
+static_assert(NovaSimulation::SEAT_NONE == static_cast<int>(opennova::world::SeatType::None));
+static_assert(NovaSimulation::SEAT_PASSENGER == static_cast<int>(opennova::world::SeatType::Passenger));
+static_assert(NovaSimulation::SEAT_CONTROLLER == static_cast<int>(opennova::world::SeatType::Controller));
+static_assert(NovaSimulation::SEAT_GUNNER == static_cast<int>(opennova::world::SeatType::Gunner));
+static_assert(NovaSimulation::SEAT_ARMORY_POINT == static_cast<int>(opennova::world::SeatType::ArmoryPoint));
+static_assert(NovaSimulation::SEAT_DRIVER == static_cast<int>(opennova::world::SeatType::Driver));
+
 using opennova::world::AiBrain;
 using opennova::world::AiEntity;
 using opennova::world::AiSystem;
@@ -4366,6 +4376,17 @@ void NovaSimulation::_bind_methods() {
 	BIND_ENUM_CONSTANT(EFFECT_STATE_POSITION);
 	BIND_ENUM_CONSTANT(EFFECT_STATE_ROTATION_DEG);
 	BIND_ENUM_CONSTANT(EFFECT_STATE_COUNT);
+
+	BIND_ENUM_CONSTANT(SEAT_NONE);
+	BIND_ENUM_CONSTANT(SEAT_PASSENGER);
+	BIND_ENUM_CONSTANT(SEAT_CONTROLLER);
+	BIND_ENUM_CONSTANT(SEAT_GUNNER);
+	BIND_ENUM_CONSTANT(SEAT_ARMORY_POINT);
+	BIND_ENUM_CONSTANT(SEAT_DRIVER);
+
+	BIND_ENUM_CONSTANT(MOUNT_COMMAND_PASSENGER_ONLY);
+	BIND_ENUM_CONSTANT(MOUNT_COMMAND_SKIP_CONTROLLER);
+	BIND_ENUM_CONSTANT(MOUNT_COMMAND_ANY_SEAT);
 
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "playing"), "set_playing", "is_playing");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "loco_scale"), "set_loco_scale", "get_loco_scale");

@@ -3,16 +3,19 @@ extends RefCounted
 
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
 
-const SEAT_NONE := 0
-const SEAT_PASSENGER := 1
-const SEAT_CONTROLLER := 2
-const SEAT_GUNNER := 3
-const SEAT_DRIVER := 5
+# Local aliases of the binding's single-source codes — NovaSimulation /
+# NovaMissionData pin these to libs/world + libs/mission by static_assert, so
+# a native change can never silently drift past this file's seat walks.
+const SEAT_NONE := NovaSimulation.SEAT_NONE
+const SEAT_PASSENGER := NovaSimulation.SEAT_PASSENGER
+const SEAT_CONTROLLER := NovaSimulation.SEAT_CONTROLLER
+const SEAT_GUNNER := NovaSimulation.SEAT_GUNNER
+const SEAT_DRIVER := NovaSimulation.SEAT_DRIVER
 
-const COMMAND_PASSENGER_ONLY := 123
-const COMMAND_SKIP_CONTROLLER := 124
-const COMMAND_ANY_SEAT := 125
-const ITEM_ID_OFFSET := 100000
+const COMMAND_PASSENGER_ONLY := NovaSimulation.MOUNT_COMMAND_PASSENGER_ONLY
+const COMMAND_SKIP_CONTROLLER := NovaSimulation.MOUNT_COMMAND_SKIP_CONTROLLER
+const COMMAND_ANY_SEAT := NovaSimulation.MOUNT_COMMAND_ANY_SEAT
+const ITEM_ID_OFFSET := NovaMissionData.ITEM_ID_OFFSET
 
 
 static func model_name_for_graphic(graphic: String) -> String:

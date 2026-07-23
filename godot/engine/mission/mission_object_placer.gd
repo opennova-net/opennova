@@ -465,8 +465,8 @@ func resolve_player_visual_item_id(runtime_type_id: int) -> int:
 	if item_db != null:
 		if item_db.has_item(runtime_type_id):
 			return runtime_type_id
-		if runtime_type_id > 0 and runtime_type_id < 100000:
-			var authored_item_id := runtime_type_id + 100000
+		if runtime_type_id > 0 and runtime_type_id < NovaMissionData.ITEM_ID_OFFSET:
+			var authored_item_id := runtime_type_id + NovaMissionData.ITEM_ID_OFFSET
 			if item_db.has_item(authored_item_id):
 				return authored_item_id
 	return runtime_type_id

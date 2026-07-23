@@ -148,6 +148,28 @@ public:
 		EFFECT_STATE_COUNT
 	};
 
+	// Seat-bone type codes, surfaced so GDScript reads ONE source — the values
+	// are pinned to libs/world's SeatType by static_assert in the .cpp.
+	// [orig: Entity_FindBestSeatSlot @0x4351f0 classifies "sitex"->1,
+	// "ctrlx"->2, "UseGun"->3, armory scan ->4 @0x436417, "drvrx"->5]
+	enum SeatCode {
+		SEAT_NONE = 0,
+		SEAT_PASSENGER = 1,
+		SEAT_CONTROLLER = 2,
+		SEAT_GUNNER = 3,
+		SEAT_ARMORY_POINT = 4,
+		SEAT_DRIVER = 5,
+	};
+
+	// The WAC/AI attach-to-seat command ids (world.h SeatSelectionMode maps
+	// them to seat filters). [orig: command 123 = sitex only, 124 = reject
+	// ctrlx, 125 = any seat — the Entity_RequestVehicleAttach command gates]
+	enum MountCommand {
+		MOUNT_COMMAND_PASSENGER_ONLY = 123,
+		MOUNT_COMMAND_SKIP_CONTROLLER = 124,
+		MOUNT_COMMAND_ANY_SEAT = 125,
+	};
+
 private:
 	std::unique_ptr<opennova::world::World> world_;
 	std::unique_ptr<opennova::world::AiSystem> ai_;
@@ -1433,3 +1455,5 @@ public:
 
 VARIANT_ENUM_CAST(godot::NovaSimulation::PresentField);
 VARIANT_ENUM_CAST(godot::NovaSimulation::EffectStateField);
+VARIANT_ENUM_CAST(godot::NovaSimulation::SeatCode);
+VARIANT_ENUM_CAST(godot::NovaSimulation::MountCommand);
