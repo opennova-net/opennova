@@ -1161,7 +1161,7 @@ Error NovaTerrainData::_load_from_trn_text(const std::string &trn_content, const
 	// gracefully.
 	if (trn.polydata.empty()) {
 		loaded = true;
-		UtilityFunctions::print("NovaTerrainData: Loaded terrain '", terrain_name,
+		UtilityFunctions::print_verbose("NovaTerrainData: Loaded terrain '", terrain_name,
 			"' (no CPT — editor project mode)");
 		return OK;
 	}
@@ -1188,7 +1188,7 @@ Error NovaTerrainData::_load_from_trn_text(const std::string &trn_content, const
 
 	loaded = true;
 
-	UtilityFunctions::print("NovaTerrainData: Loaded terrain '", terrain_name,
+	UtilityFunctions::print_verbose("NovaTerrainData: Loaded terrain '", terrain_name,
 		"' — ", static_cast<int>(cpt.tiles.size()), " tiles, depth buffer ",
 		static_cast<int>(cpt.depth_buffer.size()), " pixels");
 
