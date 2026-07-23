@@ -92,6 +92,16 @@ var _remote_pending_flags := 0
 var _remote_pending_end_time := INF
 var _body_pose_dirty := true
 var _bounds_dirty := true
+# Applied-phase stamp for the external-phase body path: play_body_clip_at() can
+# prove a repeat call identical (same key, same tick, still external, pose clean)
+# before paying clip lookups or a playhead scrub. Any other writer of the
+# key/playhead/external state drops the stamp (directly or via _set_body_playhead).
+var _body_phase_stamp_valid := false
+var _body_phase_ticks_applied := 0
+# Single-entry slot->key cache for the per-frame play_body_anim_at() path; a
+# skeletal swap invalidates it.
+var _last_slot_resolved := -1
+var _last_slot_key := ""
 
 # Per-frame work skips. Each cached value is re-derived in rebuild() (or on the exact
 # mutator), so a skip only ever omits re-pushing state that is byte-identical to what is
@@ -191,6 +201,7 @@ func reset_animation_time() -> void:
 	_anim_time_ms = 0
 	_anim_time = 0.0
 	_anim_external_phase = false
+	_body_phase_stamp_valid = false
 	reset_remote_body_state()
 	_apply_runtime_state(0.0)
 
@@ -208,6 +219,9 @@ func set_skeletal_anim(skeletal) -> void:
 	_anim_time = 0.0
 	_anim_playing = false
 	_anim_external_phase = false
+	_body_phase_stamp_valid = false
+	_last_slot_resolved = -1
+	_last_slot_key = ""
 	_body_pose_dirty = true
 	rebuild()
 
@@ -290,6 +304,7 @@ func play_body_clip_variant(key: String, variant: int) -> void:
 		return
 	if key == _anim_key and variant == _anim_variant:
 		_anim_external_phase = false
+		_body_phase_stamp_valid = false
 		_anim_playing = true
 		return
 	_anim_key = key
@@ -297,6 +312,7 @@ func play_body_clip_variant(key: String, variant: int) -> void:
 	_anim_time = 0.0
 	_anim_playing = true
 	_anim_external_phase = false
+	_body_phase_stamp_valid = false
 	_body_pose_dirty = true
 
 
@@ -324,6 +340,14 @@ func play_body_clip_variant_at_time(key: String, variant: int, seconds: float) -
 ## AnimMap phase advances in half-frame ticks, so seconds = ticks / (2 * clip_fps).
 ## The model does not free-run this clip between sim snapshots.
 func play_body_clip_at(key: String, phase_ticks: int) -> void:
+	# Repeat-call fast path: the stamp proves this exact (key, tick) pair is what
+	# posed the skeleton last, nothing else touched the playhead since, and no
+	# other input dirtied the pose — the full body below would be a no-op.
+	if (_body_phase_stamp_valid and _anim_external_phase
+			and not _body_pose_dirty
+			and phase_ticks == _body_phase_ticks_applied
+			and key == _anim_key):
+		return
 	if _skeletal == null or not _skeletal.has_clip(key):
 		return
 	var previous_key := _anim_key
@@ -339,6 +363,8 @@ func play_body_clip_at(key: String, phase_ticks: int) -> void:
 	_set_body_playhead(seconds)
 	_anim_playing = false
 	_anim_external_phase = true
+	_body_phase_stamp_valid = true
+	_body_phase_ticks_applied = phase_ticks
 	if same_external and not _body_pose_dirty:
 		return
 	_body_pose_dirty = true
@@ -447,6 +473,7 @@ func _promote_remote_body_pending_if_due() -> bool:
 func stop_body_clip() -> void:
 	_anim_playing = false
 	_anim_external_phase = false
+	_body_phase_stamp_valid = false
 	reset_remote_body_state()
 
 
@@ -473,10 +500,12 @@ func play_body_anim(slot: int) -> void:
 func play_body_anim_at(slot: int, phase_ticks: int) -> void:
 	if _skeletal == null or slot < 0:
 		return
-	var key: String = _skeletal.slot_to_key(slot)
-	if key.is_empty():
+	if slot != _last_slot_resolved:
+		_last_slot_key = _skeletal.slot_to_key(slot)
+		_last_slot_resolved = slot
+	if _last_slot_key.is_empty():
 		return
-	play_body_clip_at(key, phase_ticks)
+	play_body_clip_at(_last_slot_key, phase_ticks)
 
 
 func get_animation_time_ms() -> int:
@@ -499,6 +528,9 @@ func set_animation_time(seconds: float) -> void:
 
 
 func _set_body_playhead(seconds: float) -> void:
+	# Any playhead write outside play_body_clip_at's own apply (which re-stamps
+	# right after) invalidates the applied-phase stamp.
+	_body_phase_stamp_valid = false
 	var length: float = _skeletal.get_clip_length(_anim_key, _anim_variant)
 	if length <= 0.0:
 		_anim_time = 0.0
@@ -747,9 +779,30 @@ func advance_body_animation(delta: float) -> void:
 		_body_pose_dirty = true
 	if not _body_pose_dirty:
 		return
+	var use_overlay: bool = (not _aim_overlay_deltas.is_empty()
+			and not _aim_overlay_classes.is_empty())
+	if _skeletal.has_method("pose_skeleton"):
+		# The whole evaluate-and-write-bones loop in one native call: this runs per
+		# animated model per render frame, and the per-bone Variant boxing + three
+		# cross-boundary Skeleton3D calls from script dominated the present pass.
+		var wpn_time := 0.0
+		if use_overlay and not _wpn_key.is_empty():
+			# Weapon-channel playhead: half-frame ticks -> seconds, the
+			# play_body_clip_at convention (seconds = ticks / (2 * clip_fps)).
+			var wfps: float = _skeletal.get_clip_fps(_wpn_key)
+			if wfps > 0.0:
+				wpn_time = float(maxi(_wpn_phase_ticks, 0)) / (2.0 * wfps)
+		_skeletal.pose_skeleton(
+				_skeleton, _anim_key, _anim_time, _anim_variant,
+				_aim_overlay_classes if use_overlay else PackedInt32Array(),
+				_aim_overlay_deltas if use_overlay else [],
+				_wpn_key if use_overlay else "", wpn_time, _collapse_right_hand)
+		_body_pose_dirty = false
+		return
+	# Script fallback for duck-typed skeletal doubles (tests) without the native
+	# batch entry.
 	var pose: Array
-	if not _aim_overlay_deltas.is_empty() and not _aim_overlay_classes.is_empty() \
-			and _skeletal.has_method("eval_pose_overlay"):
+	if use_overlay and _skeletal.has_method("eval_pose_overlay"):
 		# Weapon-channel playhead: half-frame ticks -> seconds, the play_body_clip_at
 		# convention (seconds = ticks / (2 * clip_fps)).
 		var wpn_time := 0.0

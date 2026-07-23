@@ -2,6 +2,7 @@
 
 #include "resource_index/nova_resource_root.h"
 
+#include <godot_cpp/classes/skeleton3d.hpp>
 #include <godot_cpp/variant/basis.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
@@ -145,17 +146,36 @@ std::vector<int> to_model_parents(const PackedInt32Array &p_parents) {
 
 }  // namespace
 
+std::string NovaSkeletalAnim::fold_clip_key(const String &p_key) {
+	const CharString utf8 = p_key.utf8();
+	std::string out(utf8.get_data(), static_cast<size_t>(utf8.length()));
+	for (char &ch : out) {
+		if (ch >= 'A' && ch <= 'Z') {
+			ch = static_cast<char>(ch - 'A' + 'a');
+		}
+	}
+	return out;
+}
+
+void NovaSkeletalAnim::rebuild_clip_index() {
+	clip_index_.clear();
+	for (size_t i = 0; i < clips_.size(); ++i) {
+		clip_index_[fold_clip_key(clips_[i].key)].push_back(i);
+	}
+}
+
 const NovaSkeletalAnim::LoadedClip *NovaSkeletalAnim::find_clip(const String &p_key) const {
 	// Case-insensitive: JOTAC-era weapon.def ACTION rows author ANIM_WPN_* uppercase
 	// while the .adm stores anim_wpn_* lowercase — an exact match starves the FSM
 	// bake's clip lengths (every 'auto' delay collapsed to 0) and has_anim.
-	// [orig: AnimMap_FindSlotByName @ 0x40cfa0 — stricmp]
-	for (const LoadedClip &c : clips_) {
-		if (c.key.nocasecmp_to(p_key) == 0) {
-			return &c;
-		}
+	// [orig: AnimMap_FindSlotByName @ 0x40cfa0 — stricmp]. Served from the
+	// case-folded index: the present pass resolves clips per animated model per
+	// render frame, so a linear nocasecmp scan here was a frame cost.
+	const auto it = clip_index_.find(fold_clip_key(p_key));
+	if (it == clip_index_.end() || it->second.empty()) {
+		return nullptr;
 	}
-	return nullptr;
+	return &clips_[it->second.front()];
 }
 
 const NovaSkeletalAnim::LoadedClip *NovaSkeletalAnim::find_clip_variant(
@@ -163,24 +183,13 @@ const NovaSkeletalAnim::LoadedClip *NovaSkeletalAnim::find_clip_variant(
 	if (p_variant <= 0) {
 		return find_clip(p_key);
 	}
-	// Two passes over the small clip table: count the same-key run, then serve the
-	// wrapped index — variants registered under one key stay in .adm file order.
-	int count = 0;
-	for (const LoadedClip &c : clips_) {
-		if (c.key.nocasecmp_to(p_key) == 0) {
-			++count;
-		}
-	}
-	if (count == 0) {
+	// Variants registered under one key stay in .adm file order — the index keeps
+	// the same-key run in insertion order, so the wrapped serve is unchanged.
+	const auto it = clip_index_.find(fold_clip_key(p_key));
+	if (it == clip_index_.end() || it->second.empty()) {
 		return nullptr;
 	}
-	int want = p_variant % count;
-	for (const LoadedClip &c : clips_) {
-		if (c.key.nocasecmp_to(p_key) == 0 && want-- == 0) {
-			return &c;
-		}
-	}
-	return nullptr;  // unreachable
+	return &clips_[it->second[static_cast<size_t>(p_variant) % it->second.size()]];
 }
 
 bool NovaSkeletalAnim::load_from_resource_root(const Ref<NovaResourceRoot> &p_resource_root, const String &p_adm_name,
@@ -188,6 +197,7 @@ bool NovaSkeletalAnim::load_from_resource_root(const Ref<NovaResourceRoot> &p_re
 	bones_.clear();
 	bind_local_.clear();
 	clips_.clear();
+	clip_index_.clear();  // indices dangle the moment clips_ is cleared
 	loaded_ = false;
 	last_error_ = String();
 	adm_name_ = p_adm_name;
@@ -285,6 +295,7 @@ bool NovaSkeletalAnim::load_from_bad_files(const Ref<NovaResourceRoot> &p_resour
 	bones_.clear();
 	bind_local_.clear();
 	clips_.clear();
+	clip_index_.clear();  // indices dangle the moment clips_ is cleared
 	loaded_ = false;
 	last_error_ = String();
 	adm_name_ = p_skeleton_bad;  // diagnostic label (there is no .adm on this path)
@@ -418,9 +429,11 @@ bool NovaSkeletalAnim::build_from_bad_bytes(const PackedByteArray &p_reset_bytes
 
 	if (clips_.empty()) {
 		last_error_ = "No animation clips could be loaded";
+		rebuild_clip_index();
 		return false;
 	}
 
+	rebuild_clip_index();
 	loaded_ = true;
 	return true;
 }
@@ -701,6 +714,44 @@ Array NovaSkeletalAnim::eval_pose_overlay(const String &p_key, double p_playhead
 	return pose;
 }
 
+void NovaSkeletalAnim::pose_skeleton(Skeleton3D *p_skeleton, const String &p_key,
+		double p_playhead_seconds, int p_variant,
+		const PackedInt32Array &p_classes, const Array &p_deltas,
+		const String &p_wpn_key, double p_wpn_playhead_seconds,
+		bool p_collapse_right_hand) const {
+	if (p_skeleton == nullptr) {
+		return;
+	}
+	// Branch mirror of NovaObjectModel.advance_body_animation: overlay inputs
+	// present -> the composed overlay pose, else the plain clip pose.
+	Array pose;
+	if (!p_deltas.is_empty() && !p_classes.is_empty()) {
+		pose = eval_pose_overlay(p_key, p_playhead_seconds, p_classes, p_deltas,
+				p_wpn_key, p_wpn_playhead_seconds, p_collapse_right_hand);
+	} else {
+		pose = eval_pose(p_key, p_playhead_seconds, p_variant);
+	}
+	const int count = MIN(static_cast<int>(pose.size()),
+			static_cast<int>(p_skeleton->get_bone_count()));
+	for (int i = 0; i < count; ++i) {
+		const Transform3D t = pose[i];
+		if (p_collapse_right_hand && i == 16) {
+			// eval_pose_overlay preserves BN17's sampled parent-local joint origin
+			// while clearing its basis. Apply that origin directly and collapse
+			// scale there (zero scale keeps mixed-weight triangles at the actor
+			// instead of spanning to world zero). Also covers the no-overlay
+			// eval_pose fallback.
+			p_skeleton->set_bone_pose_position(i, t.origin);
+			p_skeleton->set_bone_pose_rotation(i, Quaternion());
+			p_skeleton->set_bone_pose_scale(i, Vector3(0, 0, 0));
+		} else {
+			p_skeleton->set_bone_pose_position(i, t.origin);
+			p_skeleton->set_bone_pose_rotation(i, t.basis.get_rotation_quaternion());
+			p_skeleton->set_bone_pose_scale(i, t.basis.get_scale());
+		}
+	}
+}
+
 void NovaSkeletalAnim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("load_from_resource_root", "resource_root", "adm_name", "model_bone_origins", "model_bone_parents"), &NovaSkeletalAnim::load_from_resource_root, DEFVAL(PackedVector3Array()), DEFVAL(PackedInt32Array()));
 	ClassDB::bind_method(D_METHOD("load_from_bad_files", "resource_root", "skeleton_bad", "key_to_bad", "model_bone_origins", "model_bone_parents"), &NovaSkeletalAnim::load_from_bad_files, DEFVAL(PackedVector3Array()), DEFVAL(PackedInt32Array()));
@@ -721,4 +772,5 @@ void NovaSkeletalAnim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("eval_pose", "key", "playhead_seconds", "variant"), &NovaSkeletalAnim::eval_pose, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("get_overlay_classes"), &NovaSkeletalAnim::get_overlay_classes);
 	ClassDB::bind_method(D_METHOD("eval_pose_overlay", "key", "playhead_seconds", "classes", "deltas", "wpn_key", "wpn_playhead_seconds", "collapse_right_hand"), &NovaSkeletalAnim::eval_pose_overlay, DEFVAL(String()), DEFVAL(0.0), DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("pose_skeleton", "skeleton", "key", "playhead_seconds", "variant", "classes", "deltas", "wpn_key", "wpn_playhead_seconds", "collapse_right_hand"), &NovaSkeletalAnim::pose_skeleton, DEFVAL(String()), DEFVAL(0.0), DEFVAL(false));
 }
