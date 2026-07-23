@@ -569,6 +569,28 @@ void test_outdoor_masks() {
 }
 
 // ---------------------------------------------------------------------------
+void test_negative_static_slot_fog_collection() {
+    Rig rig;
+    const EntityHandle building =
+        rig.add_building(-20.0, -10.0, building_collision(2, 2, 3), OcclusionModel{});
+    rig.rebuild();
+    rig.ow.init_mission(rig.world, rig.cw);
+
+    // Static proximity coordinates are stored as u16 words. The building is
+    // five units ahead at a negative mission coordinate; signed decoding must
+    // keep it inside both this tight fog gate and the +X camera frustum.
+    Entity *entity = rig.world.registry.get(building);
+    CHECK(entity != nullptr);
+    if (entity != nullptr) entity->occlusion_latch = 1;
+    OcclusionFrameCamera cam = rig.camera(-25.0, -10.0, 1.5);
+    cam.fog_dist = fx(10.0);
+    rig.ow.build_frame(rig.world, rig.cw, cam);
+
+    CHECK(rig.ow.building_batched(building));
+    CHECK(rig.ow.building_visible(building));
+}
+
+// ---------------------------------------------------------------------------
 void test_indoor_masks_and_gate() {
     Rig rig;
     const EntityHandle building =
@@ -828,6 +850,7 @@ int main() {
     test_weld_and_flags();
     test_tilted_pose_weld();
     test_outdoor_masks();
+    test_negative_static_slot_fog_collection();
     test_indoor_masks_and_gate();
     test_outside_in_viewthru();
     test_toc_occlusion();

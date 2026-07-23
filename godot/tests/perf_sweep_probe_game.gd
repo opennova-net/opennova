@@ -13,13 +13,18 @@ extends SceneTree
 const LOAD_TIMEOUT_WALL_SECONDS := 240.0
 const PHASE_MS := 2600
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
+const MountGuard := preload("res://tests/perf_probe_mount_guard.gd")
+const ProcessGuard := preload("res://tests/perf_probe_process_guard.gd")
 
-var _saved_resource_dir := ""
-var _saved_expansion := ""
+var _mount_guard = MountGuard.new()
 
 
 func _initialize() -> void:
 	call_deferred("_run")
+
+
+func _finalize() -> void:
+	_restore_mount()
 
 
 func _run() -> void:
@@ -28,8 +33,10 @@ func _run() -> void:
 		push_error("[sw] set NW_SP_MISSION=<mission.bms>")
 		quit(1)
 		return
-	_saved_resource_dir = ResourceDirSettings.get_resource_dir()
-	_saved_expansion = ResourceDirSettings.get_expansion()
+	if _mount_guard.capture() != OK:
+		push_error("[sw] could not snapshot the shared mount config")
+		quit(1)
+		return
 	var res_dir := OS.get_environment("NW_RESOURCE_DIR").strip_edges()
 	if not res_dir.is_empty():
 		ResourceDirSettings.set_resource_dir(res_dir)
@@ -102,17 +109,12 @@ func _run() -> void:
 	var results: Array = []
 	for key in groups.keys():
 		var nodes: Array = groups[key].nodes
-		for n_v in nodes:
-			var n := n_v as Node
-			if is_instance_valid(n):
-				n.set_process(false)
-				n.set_physics_process(false)
+		# Processing modes can legitimately change while earlier groups are being
+		# measured. Snapshot this group's live state immediately before its phase,
+		# not during the minutes-earlier census.
+		var node_states := ProcessGuard.disable_processing(nodes)
 		var st := await _measure_ms(PHASE_MS)
-		for n_v in nodes:
-			var n := n_v as Node
-			if is_instance_valid(n):
-				n.set_process(true)
-				n.set_physics_process(true)
+		ProcessGuard.restore_processing(node_states)
 		var saved: float = base.avg - st.avg
 		results.append({key = key, avg = st.avg, saved = saved})
 		print("[sw] off:%-46s avg=%7.2fms saved=%+7.2fms" % [key, st.avg, saved])
@@ -146,8 +148,8 @@ func _run() -> void:
 			print("[sw]   %-46s saved=%+8.2fms -> avg %.2fms" % [r.key, r.saved, r.avg])
 	print("[sw] baseline %.2fms | half-res saves %.2fms | cull-all saves %.2fms" % [
 			base.avg, base.avg - half.avg, base.avg - culled.avg])
-	_restore_mount()
-	quit(0)
+	var restore_err := _restore_mount()
+	quit(1 if restore_err != OK else 0)
 
 
 func _measure_ms(duration_ms: int) -> Dictionary:
@@ -171,12 +173,11 @@ func _measure_ms(duration_ms: int) -> Dictionary:
 	return {avg = sum / n, n = n}
 
 
-func _restore_mount() -> void:
-	if not _saved_resource_dir.is_empty() \
-			and _saved_resource_dir != ResourceDirSettings.get_resource_dir():
-		ResourceDirSettings.set_resource_dir(_saved_resource_dir)
-	if _saved_expansion != ResourceDirSettings.get_expansion():
-		ResourceDirSettings.set_expansion(_saved_expansion)
+func _restore_mount() -> Error:
+	var err: Error = _mount_guard.restore()
+	if err != OK:
+		push_error("[sw] failed to restore the shared mount config (error %d)" % err)
+	return err
 
 
 func _settle_ms(ms: int) -> void:

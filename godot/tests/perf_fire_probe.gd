@@ -16,12 +16,12 @@ extends Node
 # fails to return to baseline. GREEN exits 0.
 
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
+const MountGuard := preload("res://tests/perf_probe_mount_guard.gd")
 const EditorScene := preload("res://modtools/editor/editor_main.tscn")
 const OUT_DIR := "res://../.scratch/perf"
 
 var _out_abs := ""
-var _saved_resource_dir := ""
-var _saved_expansion := ""
+var _mount_guard = MountGuard.new()
 var _world = null
 var _sim = null
 var _runtime = null
@@ -41,11 +41,13 @@ func _ready() -> void:
 	DirAccess.make_dir_recursive_absolute(_out_abs)
 	# The resource dir/expansion are persisted user:// state SHARED with the
 	# user's editor — restore both on every exit path.
-	_saved_resource_dir = ResourceDirSettings.get_resource_dir()
-	_saved_expansion = ResourceDirSettings.get_expansion()
+	if _mount_guard.capture() != OK:
+		push_error("[pf] could not snapshot the shared mount config")
+		get_tree().quit(1)
+		return
 	var root := OS.get_environment("NOVA_RESOURCE_DIR").strip_edges()
 	if root.is_empty():
-		root = _saved_resource_dir
+		root = ResourceDirSettings.get_resource_dir()
 	# Only override the expansion when the env var is set — the default run
 	# reproduces the user's persisted mount (resource dir + expansion) exactly.
 	var expn := OS.get_environment("NOVA_WR_EXPANSION").strip_edges()
@@ -154,16 +156,22 @@ func _ready() -> void:
 		print("[pf] LEAK SUSPECT: cooldown never returned to baseline")
 	print("[pf] VERDICT: %s" % ("REGRESSION — firing is markedly slower than baseline"
 			if regressed else "GREEN — firing within baseline envelope"))
+	var exit_code := 2 if regressed else 0
+	var restore_err := _restore_mount()
+	if restore_err != OK and exit_code == 0:
+		exit_code = 1
+	get_tree().quit(exit_code)
+
+
+func _restore_mount() -> Error:
+	var err: Error = _mount_guard.restore()
+	if err != OK:
+		push_error("[pf] failed to restore the shared mount config (error %d)" % err)
+	return err
+
+
+func _exit_tree() -> void:
 	_restore_mount()
-	get_tree().quit(2 if regressed else 0)
-
-
-func _restore_mount() -> void:
-	if not _saved_resource_dir.is_empty() \
-			and _saved_resource_dir != ResourceDirSettings.get_resource_dir():
-		ResourceDirSettings.set_resource_dir(_saved_resource_dir)
-	if _saved_expansion != ResourceDirSettings.get_expansion():
-		ResourceDirSettings.set_expansion(_saved_expansion)
 
 
 func _process(_delta: float) -> void:

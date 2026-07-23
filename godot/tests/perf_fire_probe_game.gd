@@ -12,9 +12,9 @@ extends SceneTree
 
 const LOAD_TIMEOUT_WALL_SECONDS := 240.0
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
+const MountGuard := preload("res://tests/perf_probe_mount_guard.gd")
 
-var _saved_resource_dir := ""
-var _saved_expansion := ""
+var _mount_guard = MountGuard.new()
 var _runtime = null
 var _sim = null
 var _effect_world = null
@@ -57,14 +57,20 @@ func _initialize() -> void:
 	call_deferred("_run")
 
 
+func _finalize() -> void:
+	_restore_mount()
+
+
 func _run() -> void:
 	var bms := OS.get_environment("NW_SP_MISSION").strip_edges()
 	if bms.is_empty():
 		push_error("[pfg] set NW_SP_MISSION=<mission.bms>")
 		quit(1)
 		return
-	_saved_resource_dir = ResourceDirSettings.get_resource_dir()
-	_saved_expansion = ResourceDirSettings.get_expansion()
+	if _mount_guard.capture() != OK:
+		push_error("[pfg] could not snapshot the shared mount config")
+		quit(1)
+		return
 	var res_dir := OS.get_environment("NW_RESOURCE_DIR").strip_edges()
 	if not res_dir.is_empty():
 		ResourceDirSettings.set_resource_dir(res_dir)
@@ -176,7 +182,7 @@ func _run() -> void:
 			refloff = await _measure("refloff", 3000)
 			(rvp as SubViewport).render_target_update_mode = prev_mode
 
-	# Split A/B: which half of main_game._process drags the out-of-process cost
+	# Split A/B: which half of the main-game frame callback drags the out-of-process cost
 	# with it (deferred/RS-side work its calls generate)?
 	var worldoff := {avg = -1.0}
 	var hudtickoff := {avg = -1.0}
@@ -306,8 +312,11 @@ func _run() -> void:
 		print("[pfg] LEAK SUSPECT: cooldown never returned to baseline")
 	print("[pfg] VERDICT: %s" % ("REGRESSION — firing is markedly slower than baseline"
 			if regressed else "GREEN — firing within baseline envelope"))
-	_restore_mount()
-	quit(2 if regressed else 0)
+	var exit_code := 2 if regressed else 0
+	var restore_err := _restore_mount()
+	if restore_err != OK and exit_code == 0:
+		exit_code = 1
+	quit(exit_code)
 
 
 func _measure(phase: String, duration_ms: int) -> Dictionary:
@@ -467,12 +476,11 @@ func _report(label: String, st: Dictionary) -> void:
 			label, st.n, st.avg, st.p50, st.p95, st.mx, ", ".join(st.worst)])
 
 
-func _restore_mount() -> void:
-	if not _saved_resource_dir.is_empty() \
-			and _saved_resource_dir != ResourceDirSettings.get_resource_dir():
-		ResourceDirSettings.set_resource_dir(_saved_resource_dir)
-	if _saved_expansion != ResourceDirSettings.get_expansion():
-		ResourceDirSettings.set_expansion(_saved_expansion)
+func _restore_mount() -> Error:
+	var err: Error = _mount_guard.restore()
+	if err != OK:
+		push_error("[pfg] failed to restore the shared mount config (error %d)" % err)
+	return err
 
 
 func _find_by_method(node: Node, method: String) -> Node:

@@ -2187,7 +2187,7 @@ void NovaSimulation::occlusion_init_mission() {
 	// @ 0x525e11 — runs over the static prox tables, so make sure they exist
 	// before the register pass walks the building prefix.]
 	if (!world_) return;
-	collision_world_.build_tick_tables(*world_);
+	collision_world_.build_initial_tables(*world_);
 	occlusion_world_.init_mission(*world_, collision_world_);
 }
 
