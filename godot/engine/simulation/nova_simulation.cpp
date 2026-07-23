@@ -4749,6 +4749,11 @@ void NovaSimulation::joiner_pump() {
 		}
 		resolve_new_infantry_adm_ids();
 		player_input_ = opennova::world::PlayerInput{};
+		// Retail polls live keys; a press during the join wait must not cross
+		// the spawn edge as a queued shot/reload. Clear the consume-latches too.
+		weapon_fire_held_ = false;
+		weapon_fire_pressed_ = false;
+		weapon_reload_pressed_ = false;
 		player_input_.look_heading = opennova::world::bam_heading_from_mission_yaw_deg(spawn.yaw);
 		stance_latch_ = 0;
 		look_px_accum_x_ = look_px_accum_y_ = 0.0f;
@@ -4797,7 +4802,13 @@ void NovaSimulation::joiner_pump() {
 	world_->run_logic_tick(/*is_authority=*/false); // local World tick: moves L's motor ONLY (never Server_TickUpdate)
 	sync_local_mounted_input_heading();
 	tick_local_player_view();   // retail promotes the per-frame view before weapon actions
-	tick_local_player_weapon(); // the equipped-slot FSM pump, after the view promoter
+	// The equipped-slot FSM pump, after the view promoter. Gated on L: retail
+	// pumps weapon actions per-entity, so a joiner whose player has not spawned
+	// has no slot to pump — without this gate a click during the join wait
+	// (the world reveals at local-load completion, D-LOADSCR-3) discharged the
+	// pre-armed FSM with no shooter and the joiner deployed a round short.
+	// [orig: WeaponAction_ProcessAllEntities @ 0x526786]
+	if (joiner_local_spawned_) tick_local_player_weapon();
 	++now_tick_;
 }
 

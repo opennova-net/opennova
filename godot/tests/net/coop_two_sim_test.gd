@@ -1138,6 +1138,11 @@ func test_joiner_kit_applied_before_spawn_still_arms_fire_and_reload() -> void:
 		if inventory_valid:
 			joiner.set_local_player_weapon(_retail_m4(), {})
 
+	# A click during the join wait (the world reveals at local-load completion,
+	# one wire gate early — D-LOADSCR-3) must not discharge the pre-armed FSM
+	# before L exists, nor cross the spawn edge as a queued phantom shot.
+	joiner.set_local_player_weapon_input(false, true, false)
+
 	assert_true(_drive_pair_to_match(host, joiner),
 			"joiner reached the real-UDP in-match seam")
 	if not joiner.is_joined_in_match():
@@ -1151,6 +1156,11 @@ func test_joiner_kit_applied_before_spawn_still_arms_fire_and_reload() -> void:
 	assert_true(applied, "the pre-spawn kit apply must latch, not drop, the kit")
 	assert_true(inventory_valid,
 			"the pre-spawn inventory must be valid so the shell arms the FSM")
+	var at_spawn: Dictionary = joiner.get_local_player_weapon_state()
+	assert_eq(int(at_spawn.get("fired_serial", 0)), 0,
+			"a join-wait click fires no phantom pre-spawn round")
+	assert_eq(int(at_spawn.get("clip", -1)), 30,
+			"the joiner deploys with a full magazine")
 
 	var before_fire: Dictionary = joiner.get_local_player_weapon_state()
 	var fired_before := int(before_fire.get("fired_serial", 0))
