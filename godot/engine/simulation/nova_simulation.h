@@ -182,6 +182,14 @@ private:
 	// Negative demand cache: one unresolved entity is attempted at most once per
 	// mission unless the host explicitly asks for another full resolve sweep.
 	std::unordered_map<uint16_t, uint64_t> collision_resolution_attempted_;
+	// Wire-side collision resolution for decoded pool-1 movers: runtime type id
+	// -> {model id, bound radius}, sharing the by-graphic caches above. -1 model
+	// with 0 radius latches an unresolvable type so it is attempted once.
+	struct WireCollisionShape {
+		int32_t model_id = -1;
+		float bound_radius = 0.0f;
+	};
+	std::unordered_map<uint16_t, WireCollisionShape> wire_collision_shape_by_type_;
 	// Only models with a sampler-live PANM track enter the Generic callback
 	// path. Inert PANM rows remain on CollisionWorld's bit-exact Simple path.
 	std::unordered_map<int32_t, Ref<NovaObjectData>> collision_pose_data_;
@@ -642,10 +650,15 @@ private:
 	// Drain typed S2C gameplay events after the client recv pump: tag-2 fires
 	// spawn visual-only rounds; the requester's 0x49 echo performs its refill.
 	void apply_joiner_gameplay_events();
-	// Project persistent decoded remote Player poses into collision-only visual
-	// proxies. Wire H remains presentation identity; local World authority never
-	// receives a cloned entity or an H->L owner mapping.
-	void refresh_joiner_projectile_person_proxies();
+	// Project persistent decoded remote poses into collision-only visual
+	// proxies: Player/Infantry rows join the person walk, pool-1 movers carry
+	// their authored collision geometry at the decoded pose. Wire H remains
+	// presentation identity; local World authority never receives a cloned
+	// entity or an H->L owner mapping.
+	void refresh_joiner_projectile_proxies();
+	// Wire-side authored-shape resolution for one decoded runtime type id
+	// (items.def graphic -> the shared by-graphic collision model cache).
+	WireCollisionShape wire_collision_shape_for_type(uint16_t type_id);
 
 	// Terrain the AI grounds on. We own copies of the host's depth buffer + 16x16 sector grid so
 	// the portable TerrainHeightField's raw pointers outlive the source NovaTerrainData and survive

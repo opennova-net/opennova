@@ -1045,6 +1045,92 @@ func test_joiner_round_hits_host_authoritatively_and_predicts_peer_impact() -> v
 	host.free()
 
 
+# Moving decoded non-player infantry collide at their DECODED wire pose, not at
+# the joiner's load-frozen local placement. The two sides deliberately load a
+# mission that differs only in the AI's authored position — a deterministic
+# stand-in for any AI the host has walked away from its spawn: the host (and the
+# wire) hold the soldier at mission (0, 8) while the joiner's local copy froze at
+# (0, 12). The joiner's predicted round must impact the wire pose and leave the
+# local ghost untouched and non-colliding.
+func test_joiner_round_hits_decoded_ai_at_wire_pose_not_local_ghost() -> void:
+	var host_mission := NovaMissionData.new()
+	assert_eq(host_mission.create_default(), OK)
+	assert_false(host_mission.add_entity(NovaMissionData.KIND_ORGANIC, 5311,
+			Vector3(0, 8, 0), Vector3.ZERO).is_empty())
+	assert_false(host_mission.add_entity(NovaMissionData.KIND_MARKER, 6002,
+			Vector3(20, 0, 0), Vector3.ZERO).is_empty())
+	assert_false(host_mission.add_entity(NovaMissionData.KIND_MARKER, 6002,
+			Vector3(0, 0, 0), Vector3.ZERO).is_empty())
+	var joiner_mission := NovaMissionData.new()
+	assert_eq(joiner_mission.create_default(), OK)
+	assert_false(joiner_mission.add_entity(NovaMissionData.KIND_ORGANIC, 5311,
+			Vector3(0, 12, 0), Vector3.ZERO).is_empty())
+	assert_false(joiner_mission.add_entity(NovaMissionData.KIND_MARKER, 6002,
+			Vector3(20, 0, 0), Vector3.ZERO).is_empty())
+	assert_false(joiner_mission.add_entity(NovaMissionData.KIND_MARKER, 6002,
+			Vector3(0, 0, 0), Vector3.ZERO).is_empty())
+
+	var host := NovaSimulation.new()
+	host.configure_host_session({"gametype": 0x30020})
+	assert_true(host.enable_host_listen(0))
+	assert_true(host.load_from_mission_data(host_mission))
+	_install_combat_tables(host)
+
+	var joiner := NovaSimulation.new()
+	assert_true(joiner.enable_join(
+			"127.0.0.1", host.get_host_listen_port(), "GhostWatch"))
+	assert_true(joiner.load_from_mission_data(joiner_mission))
+	_install_combat_tables(joiner)
+	assert_true(_drive_pair_to_match(host, joiner),
+			"ghost-pose shooter reached the real-UDP in-match seam")
+	if not joiner.is_joined_in_match():
+		joiner.free()
+		host.free()
+		return
+
+	assert_true(joiner.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 8))
+	joiner.set_local_player_weapon(_retail_m4(), {})
+	for _settle in range(3):
+		joiner.step()
+		host.step()
+
+	var ghost_index := _organic_index_at_x(joiner, 0.0)
+	assert_gte(ghost_index, 0, "the joiner's local frozen AI copy exists")
+	var ghost_health_before := int(
+			joiner.get_entity_debug(ghost_index).get("health", -1)) \
+			if ghost_index >= 0 else -1
+	host.drain_round_impacts()
+	joiner.drain_round_impacts()
+
+	joiner.set_local_player_weapon_input(false, true, false)
+	var host_impacts: Array = []
+	var joiner_impacts: Array = []
+	for _tick in range(20):
+		joiner.step()
+		host.step()
+		host_impacts.append_array(host.drain_round_impacts())
+		joiner_impacts.append_array(joiner.drain_round_impacts())
+		OS.delay_msec(2)
+
+	assert_eq(joiner_impacts.size(), 1,
+			"the shooter predicts exactly one visual impact on the decoded AI")
+	if joiner_impacts.size() == 1:
+		var predicted_hit: Vector3 = (joiner_impacts[0] as Dictionary).get(
+				"position", Vector3.ZERO)
+		assert_lt(predicted_hit.distance_to(Vector3(0, 1, -7.4)), 0.75,
+				"the visual impact lands at the DECODED wire pose (mission y=8), "
+				+ "never at the load-frozen local copy (y=12)")
+	assert_eq(host_impacts.size(), 1,
+			"host authority resolves the same round against its live AI")
+	if ghost_index >= 0:
+		assert_eq(int(joiner.get_entity_debug(ghost_index).get("health", -1)),
+				ghost_health_before,
+				"the joiner's local frozen AI never takes client damage")
+
+	joiner.free()
+	host.free()
+
+
 func test_remote_host_round_event_resimulates_visually_on_joiner() -> void:
 	var mission := _combat_mission()
 	var host := NovaSimulation.new()

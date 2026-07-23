@@ -83,6 +83,10 @@ enum class RoundConsequenceMode : uint8_t {
 struct RoundSpawnParams {
     EntityHandle owner;               // the shooter entity (skipped in the hit test)
     uint16_t shooter_handle = 0xFFFF; // pool<<12|slot, for death credit
+    // The decoded shooter's carrier at fire time (visual-only rounds): keeps a
+    // mounted shooter's re-simulated round from clipping the shooter's own
+    // vehicle proxy — the wire-side ray[18] mount-exclusion analog.
+    uint16_t shooter_carrier_handle = 0xFFFF;
     Vec3 origin;                      // fire origin, mission units
     int32_t dir_yaw_bam = 0;          // wire fire direction (engine-frame BAM32, §5.16)
     int32_t dir_pitch_bam = 0;
@@ -103,6 +107,7 @@ struct LiveRound {
     RoundConsequenceMode consequence_mode = RoundConsequenceMode::Authoritative;
     EntityHandle owner;
     uint16_t shooter_handle = 0xFFFF;
+    uint16_t shooter_carrier_handle = 0xFFFF;
     int32_t ammo_index = -1;
     uint8_t adm_index = 0;
     uint16_t shot_seq = 0;

@@ -537,6 +537,10 @@ void test_network_oneshot_authority_and_session_gate() {
         r.world.mp_session = true;
         r.world.projectile_authority = false;
         r.world.one_shot_kill = true;
+        // A visual client's only live LOCAL person is its own player L; other
+        // local pool-0 slots are load-frozen ghosts excluded from the
+        // projectile walks (their live poses arrive as wire proxies).
+        r.world.cached.local_player = r.target;
         Entity *target = r.world.registry.get(r.target);
         CHECK(target != nullptr);
         if (target == nullptr) return;
@@ -583,6 +587,9 @@ void test_visual_only_rounds_have_no_gameplay_consequences() {
     r.world.mp_session = true;
     r.world.projectile_authority = false;
     r.world.one_shot_kill = true;
+    // The consequence gates are proven against the one local person a visual
+    // client still collides with: its own player L (ghost slots are excluded).
+    r.world.cached.local_player = r.target;
     Entity *shooter = r.world.registry.get(r.shooter);
     Entity *target = r.world.registry.get(r.target);
     CHECK(shooter != nullptr && target != nullptr);
@@ -742,7 +749,7 @@ void test_visual_person_proxy_keeps_wire_identity_out_of_authority() {
     trace.shooter_wire_handle = self_h;
     CHECK(!collision.trace_projectile(world, trace).hit());
 
-    trace.include_person_proxies = true;
+    trace.include_wire_proxies = true;
     const ProjectileHit hit = collision.trace_projectile(world, trace);
     CHECK(hit.hit_class == ProjectileHitClass::Person);
     CHECK(!hit.geometry_entity.valid());
@@ -779,6 +786,241 @@ void test_visual_person_proxy_keeps_wire_identity_out_of_authority() {
     CHECK(world.registry.get(local_l)->health == 100);
     CHECK(world.round_sim.debug_trail_count == 1);
     CHECK(world.round_sim.debug_trail[0].entity == EntityHandle::kInvalid);
+}
+
+// A one-section q8 CFAC quad (two triangles) at section-local z = 1, normal +z,
+// spanning (+-1, +-1) — the same fixture shape the collision suite's face-walk
+// tests use, here exercised through the wire dynamic-proxy pass.
+CollisionModel proxy_face_quad_model(uint8_t material) {
+    CollisionModel m;
+    m.face_vertices = {{-256, -256, 256}, {256, -256, 256}, {256, 256, 256},
+                       {-256, 256, 256}}; // Q8: (+-1, +-1, 1)
+    auto face = [&](int a, int b, int c) {
+        CollisionFace f;
+        f.v[0] = static_cast<int16_t>(a);
+        f.v[1] = static_cast<int16_t>(b);
+        f.v[2] = static_cast<int16_t>(c);
+        f.normal[0] = 0;
+        f.normal[1] = 0;
+        f.normal[2] = 16384;
+        f.axis = 1;
+        f.plane_dist = -0x10000; // on-plane at z=1
+        f.min[0] = -0x10000; f.max[0] = 0x10000;
+        f.min[1] = -0x10000; f.max[1] = 0x10000;
+        f.min[2] = 0x10000;  f.max[2] = 0x10000;
+        f.material = material;
+        m.faces.push_back(f);
+    };
+    face(0, 1, 2);
+    face(0, 2, 3);
+    m.sections.assign(1, {});
+    m.sections[0].face_start = 0;
+    m.sections[0].face_count = 2;
+    m.sections[0].face_vertex_start = 0;
+    m.sections[0].face_vertex_count = 4;
+    return m;
+}
+
+// Moving decoded pool-1 movers collide through their wire-keyed authored
+// geometry at the DECODED pose, while a visual client's load-frozen local
+// pool-1 ghost stops serving projectile collision.
+void test_visual_dynamic_proxy_projects_decoded_pose_geometry() {
+    World world;
+    world.registry.configure_pool(0, 8);
+    world.registry.configure_pool(1, 8);
+    world.mp_session = true;
+    world.projectile_authority = false;
+
+    Entity shooter;
+    shooter.kind = EntityKind::Organic;
+    shooter.item_type = 3;
+    shooter.position = {0.0f, 0.0f, 0.0f};
+    const EntityHandle sh = world.registry.spawn(0, shooter);
+    world.cached.local_player = sh;
+
+    // The load-frozen local ghost: the same vehicle the wire also carries, at
+    // its authored spawn X=5 — the pose the host long since moved it away from.
+    Entity ghost;
+    ghost.kind = EntityKind::Item;
+    ghost.has_item_def = true;
+    ghost.position = {5.0f, 0.0f, 0.0f};
+    const EntityHandle gh = world.registry.spawn(1, ghost);
+
+    CollisionWorld collision;
+    const int32_t model_id =
+        collision.add_model(proxy_face_quad_model(/*material=*/7));
+    collision.assign_entity(gh, model_id);
+    collision.build_tick_tables(world);
+    world.collision = &collision;
+
+    // The decoded wire pose: the same authored geometry at X=12. The quad
+    // plane sits at proxy-local z=1, so a ray descending through world
+    // z=1 over (12, 0) crosses it.
+    ProjectileDynamicProxy proxy;
+    proxy.wire_handle = 0x1002; // host pool-1 slot 2
+    proxy.model_id = model_id;
+    proxy.position_q16 = FixedVec3{12 * 65536, 0, 0};
+    proxy.bound_radius_q16 = 3 * 65536;
+    collision.replace_projectile_dynamic_proxies({proxy});
+
+    auto trace_down_at = [&](int32_t x_q16, bool include) {
+        ProjectileTrace trace;
+        trace.start = FixedVec3{x_q16, 0, 3 * 65536};
+        trace.end = FixedVec3{x_q16, 0, -3 * 65536};
+        trace.owner = sh;
+        trace.include_wire_proxies = include;
+        return collision.trace_projectile(world, trace);
+    };
+
+    // The stale local pose no longer stops rounds on a visual client...
+    CHECK(!trace_down_at(5 * 65536, true).hit());
+    // ...while the decoded pose does, through the authored CFAC mesh.
+    const ProjectileHit hit = trace_down_at(12 * 65536, true);
+    CHECK(hit.hit_class == ProjectileHitClass::DynamicEntity);
+    CHECK(!hit.geometry_entity.valid());
+    CHECK(hit.surface_type == 7);
+    // The proxy-local z=1 plane, unrotated pose (the face walk's distance
+    // split quantizes within a few Q16 ULPs).
+    CHECK(hit.position_q16.z > 0xF000);
+    CHECK(hit.position_q16.z < 0x11000);
+    // A round that never opted into wire proxies (an authoritative round
+    // mistakenly stepped on a client world) sees neither representation.
+    CHECK(!trace_down_at(12 * 65536, false).hit());
+
+    // The same world WITH authority keeps the ordinary local-table behavior.
+    world.projectile_authority = true;
+    CHECK(trace_down_at(5 * 65536, false).hit_class ==
+          ProjectileHitClass::DynamicEntity);
+    world.projectile_authority = false;
+
+    // The decoded heading rotates the authored geometry with the visual: at
+    // heading 90 deg the (+-1, +-1) quad still spans the section origin, but a
+    // proxy REPOSED under pitch 90 deg turns the z=1 plane vertical and the
+    // descending ray at its center now passes through where the flat plane
+    // would have stopped it.
+    ProjectileDynamicProxy pitched = proxy;
+    pitched.pitch_bam = 0x40000000;
+    collision.replace_projectile_dynamic_proxies({pitched});
+    CHECK(!trace_down_at(12 * 65536, true).hit());
+
+    // A horizontal ray across the now-vertical plane hits it instead.
+    ProjectileTrace across;
+    across.start = FixedVec3{9 * 65536, 0, 0};
+    across.end = FixedVec3{15 * 65536, 0, 0};
+    across.owner = sh;
+    across.include_wire_proxies = true;
+    CHECK(collision.trace_projectile(world, across).hit_class ==
+          ProjectileHitClass::DynamicEntity);
+}
+
+// The decoded shooter's own carrier is excluded exactly like the retail
+// ray[18] mount exclusion; an unrelated proxy behind it still stops the round.
+// An unresolvable graphic keeps the bounded sphere stand-in.
+void test_visual_dynamic_proxy_carrier_gate_and_sphere_standin() {
+    World world;
+    world.registry.configure_pool(0, 4);
+    world.mp_session = true;
+    world.projectile_authority = false;
+
+    Entity shooter;
+    shooter.kind = EntityKind::Organic;
+    shooter.item_type = 3;
+    const EntityHandle sh = world.registry.spawn(0, shooter);
+    world.cached.local_player = sh;
+
+    CollisionWorld collision;
+    const int32_t model_id =
+        collision.add_model(proxy_face_quad_model(/*material=*/9));
+    collision.build_tick_tables(world);
+    world.collision = &collision;
+
+    ProjectileDynamicProxy carrier;
+    carrier.wire_handle = 0x1004;
+    carrier.model_id = model_id;
+    carrier.position_q16 = FixedVec3{6 * 65536, 0, 0};
+    carrier.pitch_bam = 0x40000000; // vertical plane across the lane
+    carrier.bound_radius_q16 = 3 * 65536;
+    ProjectileDynamicProxy behind = carrier;
+    behind.wire_handle = 0x1007;
+    behind.position_q16 = FixedVec3{10 * 65536, 0, 0};
+    collision.replace_projectile_dynamic_proxies({carrier, behind});
+
+    ProjectileTrace trace;
+    trace.start = FixedVec3{0, 0, 0};
+    trace.end = FixedVec3{14 * 65536, 0, 0};
+    trace.owner = sh;
+    trace.include_wire_proxies = true;
+    trace.shooter_wire_handle = 0x0003;
+    trace.shooter_carrier_wire_handle = 0x1004;
+    const ProjectileHit hit = collision.trace_projectile(world, trace);
+    CHECK(hit.hit_class == ProjectileHitClass::DynamicEntity);
+    // The carrier at X=6 was ridden through; the unrelated proxy at X=10
+    // stops the round on its vertical plane (X=10 +- 1 depending on the
+    // rotation sign). Anything past X=8 proves the carrier plane (<= 7) was
+    // skipped rather than struck.
+    CHECK(hit.position_q16.x > 8 * 65536);
+    CHECK(hit.position_q16.x < 12 * 65536);
+
+    // Unresolved graphic: the bounded compatibility sphere still stops rounds
+    // (the D-ITEM-1 stand-in rule, applied wire-side).
+    ProjectileDynamicProxy unresolved;
+    unresolved.wire_handle = 0x1009;
+    unresolved.model_id = -1;
+    unresolved.position_q16 = FixedVec3{5 * 65536, 0, 0};
+    unresolved.bound_radius_q16 = 0x18000; // 1.5 u
+    collision.replace_projectile_dynamic_proxies({unresolved});
+    const ProjectileHit sphere_hit = collision.trace_projectile(world, trace);
+    CHECK(sphere_hit.hit_class == ProjectileHitClass::DynamicEntity);
+    CHECK(!sphere_hit.geometry_entity.valid());
+    CHECK(sphere_hit.position_q16.x <= 5 * 65536);
+}
+
+// A decoded non-player Infantry proxy joins the person walk exactly like the
+// remote-player proxy: torso stand-in at the decoded position, consequence-free.
+void test_visual_infantry_proxy_joins_person_walk() {
+    World world;
+    world.registry.configure_pool(0, 8);
+    world.mp_session = true;
+    world.projectile_authority = false;
+
+    Entity local;
+    local.kind = EntityKind::Organic;
+    local.item_type = 3;
+    const EntityHandle local_l = world.registry.spawn(0, local);
+    world.cached.local_player = local_l;
+
+    // The load-frozen local mission AI at its authored spawn on the lane. On a
+    // visual client this ghost no longer stops rounds; its live decoded proxy
+    // (the host moved it to X=9) serves instead.
+    Entity frozen_ai;
+    frozen_ai.kind = EntityKind::Organic;
+    frozen_ai.has_item_def = true;
+    frozen_ai.item_type = 3;
+    frozen_ai.position = {5.0f, 0.0f, -0.9f};
+    frozen_ai.health = 100;
+    const EntityHandle ai_h = world.registry.spawn(0, frozen_ai);
+
+    CollisionWorld collision;
+    collision.build_tick_tables(world);
+    world.collision = &collision;
+
+    std::vector<ProjectilePersonProxy> proxies{
+        ProjectilePersonProxy{ai_h.packed, FixedVec3{9 * 65536, 0, -58982}},
+    };
+    collision.replace_projectile_person_proxies(proxies, /*self H*/ 0x0002);
+
+    ProjectileTrace trace;
+    trace.start = FixedVec3{0, 0, 0};
+    trace.end = FixedVec3{14 * 65536, 0, 0};
+    trace.owner = local_l;
+    trace.shooter_wire_handle = 0x0002;
+    trace.include_wire_proxies = true;
+    const ProjectileHit hit = collision.trace_projectile(world, trace);
+    CHECK(hit.hit_class == ProjectileHitClass::Person);
+    CHECK(!hit.geometry_entity.valid());
+    // The impact lands at the DECODED torso (X~9), not the frozen spawn (X=5).
+    CHECK(hit.position_q16.x > 8 * 65536);
+    CHECK(world.registry.get(ai_h)->health == 100);
 }
 
 void test_signed_armor_equality_and_damage_state_gates() {
@@ -1098,6 +1340,9 @@ int main() {
     test_network_oneshot_authority_and_session_gate();
     test_visual_only_rounds_have_no_gameplay_consequences();
     test_visual_person_proxy_keeps_wire_identity_out_of_authority();
+    test_visual_dynamic_proxy_projects_decoded_pose_geometry();
+    test_visual_dynamic_proxy_carrier_gate_and_sphere_standin();
+    test_visual_infantry_proxy_joins_person_walk();
     test_signed_armor_equality_and_damage_state_gates();
     test_signed_health_subtraction_wraps_at_entity_word();
     test_exact_one_hop_vehicle_parent_damage_routing();

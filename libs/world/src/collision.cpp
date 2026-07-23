@@ -1701,6 +1701,22 @@ void CollisionWorld::replace_projectile_person_proxies(
     projectile_local_player_wire_handle_ = local_player_wire_handle;
 }
 
+void CollisionWorld::replace_projectile_dynamic_proxies(
+        std::vector<ProjectileDynamicProxy> proxies) {
+    proxies.erase(
+        std::remove_if(proxies.begin(), proxies.end(),
+                       [](const ProjectileDynamicProxy &proxy) {
+                           return proxy.wire_handle == EntityHandle::kInvalid;
+                       }),
+        proxies.end());
+    std::stable_sort(
+        proxies.begin(), proxies.end(),
+        [](const ProjectileDynamicProxy &a, const ProjectileDynamicProxy &b) {
+            return a.wire_handle < b.wire_handle;
+        });
+    projectile_dynamic_proxies_ = std::move(proxies);
+}
+
 void CollisionWorld::build_tick_tables(World &world) {
     build_tables(world, true);
 }
@@ -2192,17 +2208,15 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
     // Compatibility sphere for an item whose graphic has no resolved collision
     // instance. An assigned BVOL-only model is deliberately NOT substituted:
     // gameplay volumes (CB/CL/CA/VC/BB/etc.) are not projectile CFAC geometry.
-    auto unresolved_sphere_distance = [&](const Entity &entity, int32_t &out_distance) {
-        const int32_t radius = entity.bound_radius > 0.0f
-            ? to_fixed(entity.bound_radius)
-            : 0;
+    auto sphere_distance = [&](const int32_t center[3], int32_t radius,
+                               int32_t &out_distance) {
         if (radius <= 0) return false;
         const long double fx = static_cast<long double>(trace.start.x) -
-                               static_cast<long double>(to_fixed(entity.position.x));
+                               static_cast<long double>(center[0]);
         const long double fy = static_cast<long double>(trace.start.y) -
-                               static_cast<long double>(to_fixed(entity.position.y));
+                               static_cast<long double>(center[1]);
         const long double fz = static_cast<long double>(trace.start.z) -
-                               static_cast<long double>(to_fixed(entity.position.z));
+                               static_cast<long double>(center[2]);
         const long double dx = delta[0], dy = delta[1], dz = delta[2];
         const long double a = dx * dx + dy * dy + dz * dz;
         const long double c = fx * fx + fy * fy + fz * fz -
@@ -2231,6 +2245,61 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
         static_cast<float>(trace.end.x) / 65536.0f,
         static_cast<float>(trace.end.y) / 65536.0f,
         static_cast<float>(trace.end.z) / 65536.0f,
+    };
+
+    // The per-candidate CFAC narrow phase shared by the local slot tables and
+    // the decoded wire projection. False = this candidate does not stop the
+    // round (no CFAC mesh, or the segment misses it).
+    auto narrow_phase = [&](const CollisionTargetView &target,
+                            CollisionPolygonHit &model_hit) {
+        const CollisionModel &model_ref = *target.model;
+        const bool indexed_mesh = !model_ref.faces.empty() &&
+                                  !model_ref.vertices.empty() &&
+                                  !model_ref.normals.empty();
+        const bool q8_mesh = !model_ref.faces.empty() &&
+                             !model_ref.face_vertices.empty();
+        if (indexed_mesh) {
+            return collision_raycast_polygons(target, ray, segment_length,
+                                              trace.ammo_flags, model_hit);
+        }
+        if (q8_mesh) {
+            RayFaceHit face_hit;
+            if (!collision_raycast_faces(target, ray.start, ray.end,
+                                         trace.ammo_flags, face_hit))
+                return false;
+            model_hit.distance_q16 = face_hit.dist;
+            const int32_t t = t_for_distance(face_hit.dist);
+            const FixedVec3 p = point_at(t);
+            model_hit.position_q16[0] = p.x;
+            model_hit.position_q16[1] = p.y;
+            model_hit.position_q16[2] = p.z;
+            model_hit.section_index = face_hit.section;
+            model_hit.section_face_index = face_hit.face;
+            model_hit.poly_type = face_hit.material;
+            model_hit.material_flags = face_hit.face_flags;
+            if (face_hit.section >= 0 &&
+                face_hit.section < static_cast<int32_t>(model_ref.sections.size())) {
+                const CollisionSection &section =
+                    model_ref.sections[face_hit.section];
+                const int32_t global_face = section.face_start + face_hit.face;
+                model_hit.face_index = global_face;
+                if (global_face >= 0 &&
+                    global_face < static_cast<int32_t>(model_ref.faces.size())) {
+                    const CollisionFace &face = model_ref.faces[global_face];
+                    const int32_t local_normal[3] = {
+                        static_cast<int32_t>(face.normal[0]) << 2,
+                        static_cast<int32_t>(face.normal[1]) << 2,
+                        static_cast<int32_t>(face.normal[2]) << 2,
+                    };
+                    target.matrices[face_hit.section].rotate_point(
+                        local_normal, model_hit.normal_q16);
+                }
+            }
+            return true;
+        }
+        // A resolved model without CFAC is BVOL-only and does not stop
+        // ordinary bullets, regardless of its gameplay volume types.
+        return false;
     };
 
     // Each table query uses <= internally: a later equal face, section, or
@@ -2276,61 +2345,20 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
             CollisionPolygonHit model_hit;
             const CollisionTargetView *target = target_view(world, h, view, matrices);
             if (target == nullptr) {
-                if (!unresolved_sphere_distance(*entity, model_hit.distance_q16)) continue;
+                const int32_t center[3] = {to_fixed(entity->position.x),
+                                           to_fixed(entity->position.y),
+                                           to_fixed(entity->position.z)};
+                const int32_t radius = entity->bound_radius > 0.0f
+                    ? to_fixed(entity->bound_radius)
+                    : 0;
+                if (!sphere_distance(center, radius, model_hit.distance_q16)) continue;
                 const int32_t t = t_for_distance(model_hit.distance_q16);
                 const FixedVec3 p = point_at(t);
                 model_hit.position_q16[0] = p.x;
                 model_hit.position_q16[1] = p.y;
                 model_hit.position_q16[2] = p.z;
-            } else {
-                const CollisionModel &model_ref = *target->model;
-                const bool indexed_mesh = !model_ref.faces.empty() &&
-                                          !model_ref.vertices.empty() &&
-                                          !model_ref.normals.empty();
-                const bool q8_mesh = !model_ref.faces.empty() &&
-                                     !model_ref.face_vertices.empty();
-                if (indexed_mesh) {
-                    if (!collision_raycast_polygons(*target, ray, segment_length,
-                                                    trace.ammo_flags, model_hit))
-                        continue;
-                } else if (q8_mesh) {
-                    RayFaceHit face_hit;
-                    if (!collision_raycast_faces(*target, ray.start, ray.end,
-                                                 trace.ammo_flags, face_hit))
-                        continue;
-                    model_hit.distance_q16 = face_hit.dist;
-                    const int32_t t = t_for_distance(face_hit.dist);
-                    const FixedVec3 p = point_at(t);
-                    model_hit.position_q16[0] = p.x;
-                    model_hit.position_q16[1] = p.y;
-                    model_hit.position_q16[2] = p.z;
-                    model_hit.section_index = face_hit.section;
-                    model_hit.section_face_index = face_hit.face;
-                    model_hit.poly_type = face_hit.material;
-                    model_hit.material_flags = face_hit.face_flags;
-                    if (face_hit.section >= 0 &&
-                        face_hit.section < static_cast<int32_t>(model_ref.sections.size())) {
-                        const CollisionSection &section =
-                            model_ref.sections[face_hit.section];
-                        const int32_t global_face = section.face_start + face_hit.face;
-                        model_hit.face_index = global_face;
-                        if (global_face >= 0 &&
-                            global_face < static_cast<int32_t>(model_ref.faces.size())) {
-                            const CollisionFace &face = model_ref.faces[global_face];
-                            const int32_t local_normal[3] = {
-                                static_cast<int32_t>(face.normal[0]) << 2,
-                                static_cast<int32_t>(face.normal[1]) << 2,
-                                static_cast<int32_t>(face.normal[2]) << 2,
-                            };
-                            target->matrices[face_hit.section].rotate_point(
-                                local_normal, model_hit.normal_q16);
-                        }
-                    }
-                } else {
-                    // A resolved model without CFAC is BVOL-only and does not
-                    // stop ordinary bullets, regardless of its gameplay volume types.
-                    continue;
-                }
+            } else if (!narrow_phase(*target, model_hit)) {
+                continue;
             }
             if (!table_found || model_hit.distance_q16 <= table_hit.distance_q16) {
                 table_found = true;
@@ -2354,9 +2382,118 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
         eh.material_flags = table_hit.material_flags;
         consider(eh, table_hit.distance_q16);
     };
+    // A visual-only MP client (mp_session && !projectile_authority) holds
+    // load-frozen local copies of the host-simulated pools: the mission promote
+    // spawned pool-0/pool-1 entities that never move on a non-authority world.
+    // Retail has no such ghosts — its client pools ARE the decoded entities
+    // (the 0x0C/0x0D handlers spawn-or-update the client's own slots, §5.23) —
+    // so those local slots are excluded from the projectile walks here and the
+    // wire-keyed projections below serve instead. Pool-2 statics stay local:
+    // both sides load them from the same .bms. The local player L remains the
+    // one live local person (retail's own-player entity plays that role).
+    const bool wire_projected = world.mp_session && !world.projectile_authority;
+
     trace_polygon_table(statics_, ProjectileHitClass::StaticEntity, 1.0f, true);
-    trace_polygon_table(dynamics_, ProjectileHitClass::DynamicEntity,
-                        1.0f / 65536.0f, false);
+    if (!wire_projected)
+        trace_polygon_table(dynamics_, ProjectileHitClass::DynamicEntity,
+                            1.0f / 65536.0f, false);
+
+    // The decoded pool-1 wire projection: authored CFAC geometry posed from the
+    // decoded wire state, walked in wire-handle (= host pool slot) order as the
+    // visual client's dyn-table stand-in, in the same pass position (after
+    // statics, before persons). On a retail client this pass IS the ordinary
+    // dyn-table walk over its wire-built pool-1 entities
+    // [orig: Projectile_RaycastProximitySlots @ 0x4e5340]; the wire-keyed
+    // proxy layer is the documented visual-only-client reimpl model
+    // (docs/net/novaworld-net-re.md §5.60). Wire identities never become
+    // registry handles: geometry_entity stays invalid on a proxy hit.
+    if (trace.include_wire_proxies && !projectile_dynamic_proxies_.empty()) {
+        CollisionPolygonHit table_hit;
+        bool table_found = false;
+        for (const ProjectileDynamicProxy &proxy : projectile_dynamic_proxies_) {
+            // The mounted shooter's own carrier, resolved from the decoded
+            // carrier_handle (the ray[18] mount-exclusion analog).
+            if (proxy.wire_handle == trace.shooter_carrier_wire_handle) continue;
+            const float sc[3] = {
+                static_cast<float>(proxy.position_q16.x) / 65536.0f,
+                static_cast<float>(proxy.position_q16.y) / 65536.0f,
+                static_cast<float>(proxy.position_q16.z) / 65536.0f,
+            };
+            const int32_t broad_radius = proxy.bound_radius_q16 > 0
+                ? proxy.bound_radius_q16
+                : 0x10000;
+            if (!round_broad_phase(p0f, p1f, sc,
+                                   static_cast<float>(broad_radius) / 65536.0f))
+                continue;
+            CollisionPolygonHit model_hit;
+            const CollisionModel *proxy_model = model(proxy.model_id);
+            if (proxy_model != nullptr && proxy_model->valid()) {
+                const int32_t pos[3] = {proxy.position_q16.x, proxy.position_q16.y,
+                                        proxy.position_q16.z};
+                // The decoded pose mirrors the retail client entity fields the
+                // placement matrix reads: live coarse heading (entity+16 high
+                // byte) plus the retained spawn/dead pitch/roll samples
+                // (entity+20/+24) [orig: the placement matrix @ 0x613f40].
+                const CollisionMatrix world_mat =
+                    (proxy.pitch_bam != 0 || proxy.roll_bam != 0)
+                        ? collision_matrix_from_euler(proxy.heading_bam,
+                                                      proxy.pitch_bam,
+                                                      proxy.roll_bam, pos)
+                        : collision_matrix_from_heading(proxy.heading_bam, pos);
+                std::vector<CollisionMatrix> proxy_matrices(
+                    proxy_model->sections.size(), world_mat);
+                CollisionTargetView view;
+                view.model = proxy_model;
+                view.matrices = proxy_matrices.data();
+                view.pos[0] = pos[0];
+                view.pos[1] = pos[1];
+                view.pos[2] = pos[2];
+                view.yaw_bam = proxy.heading_bam;
+                view.pitch_bam = proxy.pitch_bam;
+                view.bound_radius = broad_radius;
+                view.pool_index = proxy.wire_handle & 0xFFF;
+                view.live_section_pose = false;
+                if (!narrow_phase(view, model_hit)) continue;
+            } else if (proxy.bound_radius_q16 > 0) {
+                // The bounded compatibility stand-in for an unresolvable
+                // graphic, matching the local-table rule (D-ITEM-1 family).
+                const int32_t center[3] = {proxy.position_q16.x,
+                                           proxy.position_q16.y,
+                                           proxy.position_q16.z};
+                if (!sphere_distance(center, proxy.bound_radius_q16,
+                                     model_hit.distance_q16))
+                    continue;
+                const int32_t t = t_for_distance(model_hit.distance_q16);
+                const FixedVec3 p = point_at(t);
+                model_hit.position_q16[0] = p.x;
+                model_hit.position_q16[1] = p.y;
+                model_hit.position_q16[2] = p.z;
+            } else {
+                continue;
+            }
+            if (!table_found || model_hit.distance_q16 <= table_hit.distance_q16) {
+                table_found = true;
+                table_hit = model_hit;
+            }
+        }
+        if (table_found) {
+            ProjectileHit eh;
+            eh.hit_class = ProjectileHitClass::DynamicEntity;
+            eh.t_q16 = t_for_distance(table_hit.distance_q16);
+            eh.position_q16 = FixedVec3{table_hit.position_q16[0],
+                                        table_hit.position_q16[1],
+                                        table_hit.position_q16[2]};
+            eh.normal_q16 = FixedVec3{table_hit.normal_q16[0],
+                                      table_hit.normal_q16[1],
+                                      table_hit.normal_q16[2]};
+            eh.section_index = table_hit.section_index;
+            eh.bone_index = table_hit.section_index;
+            eh.face_index = table_hit.section_face_index;
+            eh.surface_type = table_hit.poly_type;
+            eh.material_flags = table_hit.material_flags;
+            consider(eh, table_hit.distance_q16);
+        }
+    }
 
     // Consume the pose owner's COBJ matrices when available. The bounded torso
     // fallback is only for entities whose production pose has not been
@@ -2422,7 +2559,7 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
     };
 
     size_t person_index = 0;
-    size_t proxy_index = trace.include_person_proxies
+    size_t proxy_index = trace.include_wire_proxies
         ? 0
         : projectile_person_proxies_.size();
     auto person_order_key = [&](const PersonSlot &slot) {
@@ -2455,6 +2592,12 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
         }
 
         const PersonSlot &slot = persons_[person_index++];
+        // Visual-client ghost suppression: local pool-0 slots other than L are
+        // the load-frozen mission organics whose live poses arrive on the wire;
+        // their decoded person proxies (folded into this same ordered walk)
+        // serve instead. Consuming the skipped slot keeps the wire-handle merge
+        // sequence intact.
+        if (wire_projected && slot.h != world.cached.local_player) continue;
         if (ignored(slot.h)) continue;
         const Entity *e = world.registry.get(slot.h);
         if (e == nullptr || e->kind != EntityKind::Organic || e->hidden ||

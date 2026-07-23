@@ -5930,11 +5930,24 @@ destructively drains each row and presents both its generic World-domain particl
 and 3D soundset, retaining production tick/order and catch-up age. Joiners now feed decoded
 S2C tag-2 round events through `NetClientView`/`ClientRuntime` into a visual-only
 `RoundSim`, so the impact route and flying throwable item presentation run client-side while
-the authority gates above continue to prevent client damage. Remote-player collision currently
-uses decoded position plus a torso-center proxy rather than retail's posed bones. Moving decoded
-non-player Infantry and vehicle poses are not yet projected into the client's projectile collision
-world; adding them requires their wire-keyed geometry/pose model rather than casting server handles
-into the client-local registry. Shooter team and per-weapon tracer cadence are not retained in the
+the authority gates above continue to prevent client damage. Decoded remote collision
+(2026-07-23) is the wire-keyed proxy projection — never a cast of server handles into the
+client-local registry: Player AND non-player Infantry rows join the person walk as
+`ProjectilePersonProxy` (decoded position + torso stand-in; retail's posed bones remain the
+shared D-WPN-8 residual), and decoded pool-1 movers join the dynamics pass as
+`ProjectileDynamicProxy` — the AUTHORED collision geometry (items.def graphic → the same
+CFAC model the local ghost had) posed from the decoded fields the retail client entity holds
+(live coarse heading byte → entity+16; retained spawn/dead pitch/roll → entity+20/+24), in
+wire-handle (= host pool slot) order in the retail pass position. A visual client's
+load-frozen local pool-0/1 mission copies are excluded from the projectile walks (retail has
+no such ghosts — its client pools ARE the decoded entities, §5.23); pool-2 statics keep
+serving from the local load. The mounted shooter's own carrier is excluded via the decoded
+carrier + host-fed seat table (Controller/Gunner/Driver, the ray[18] analog). Residuals:
+PANM/turret section posing and husk-model substitution for wire dynamic proxies; movement
+contact/blink/LOS still read the load-frozen local set; the person-table pin is
+`projectile_combat` (`test_visual_dynamic_proxy_*`, `test_visual_infantry_proxy_*`) plus the
+`coop_two_sim` decoded-vs-ghost pose test. Shooter team and per-weapon tracer cadence are not
+retained in the
 client state, and clean 0x46/0x5D disconnect retirement is not yet folded into the player proxy set.
 Deployed throwables still lack the 0x59/0x12
 runtime path (D-WPN-8/D-THROW-7; §5.36). Three ledger rows record the audit:
@@ -6524,8 +6537,13 @@ fire, the payload-addressed C2S 0x25 → S2C 0x49 reload round-trip, and decoded
 events into a visual-only client `RoundSim`; authority/SP fire continues to append the primary
 ring row (including ordinary hip/raise/3P subtype 12) and spawn `RoundSim` synchronously.
 D-WPN-8 remains open for settled-FP/mounted zoom subtypes, remote/vehicle 0x49 presentation,
-remote shooter-team/per-weapon tracer metadata, posed-bone player collision, moving decoded
-non-player Infantry/vehicle collision projection, and clean-disconnect proxy retirement; the
+remote shooter-team/per-weapon tracer metadata, posed-bone person-proxy collision (players AND
+decoded infantry share the torso stand-in), and clean-disconnect proxy retirement; moving
+decoded non-player Infantry/vehicle collision projection LANDED 2026-07-23 (wire-keyed
+person + dynamic proxies at the decoded pose; visual-client local pool-0/1 ghost slots
+excluded from the projectile walks — residuals: PANM/turret section posing and husk-model
+substitution for wire dynamic proxies, and movement-contact projection, still read the
+load-frozen local set); the
 standard Scoped/Sighted SIGHTS-card selector, including SWITCHFROM and
 NoCardSwitch/ForceScoped suppression, is ported; remaining ADS residuals are the
 zoom-level keys, scope net notify, stance/NVG gates, movement reversal/auto-raise,

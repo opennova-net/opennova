@@ -443,6 +443,7 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params,
     r.consequence_mode = mode;
     r.owner = params.owner;
     r.shooter_handle = params.shooter_handle;
+    r.shooter_carrier_handle = params.shooter_carrier_handle;
     r.ammo_index = params.ammo_index;
     r.adm_index = params.adm_index;
     r.shot_seq = params.shot_seq;
@@ -581,6 +582,7 @@ int RoundSim::spawn_burst(World &world, const RoundSpawnParams &params,
         r.consequence_mode = mode;
         r.owner = params.owner;
         r.shooter_handle = params.shooter_handle;
+        r.shooter_carrier_handle = params.shooter_carrier_handle;
         r.ammo_index = params.ammo_index;
         r.adm_index = params.adm_index;
         r.shot_seq = params.shot_seq;
@@ -739,12 +741,14 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         trace.radius_q16 = ammo != nullptr ? ammo->bullet_radius_fp16 : 0;
         trace.ammo_flags = ammo_flags;
         // Only decoded remote presentation rounds may trace the client-state
-        // person table. A default Authoritative round in a non-authority MP
-        // world is consequence-gated above, but it must not silently become a
-        // proxy/presentation round merely because this process lacks authority.
-        trace.include_person_proxies =
+        // proxy projections (person + dynamic). A default Authoritative round
+        // in a non-authority MP world is consequence-gated above, but it must
+        // not silently become a proxy/presentation round merely because this
+        // process lacks authority.
+        trace.include_wire_proxies =
             r.consequence_mode == RoundConsequenceMode::VisualOnly;
         trace.shooter_wire_handle = r.shooter_handle;
+        trace.shooter_carrier_wire_handle = r.shooter_carrier_handle;
         const ProjectileHit collision = queries->trace_projectile(world, trace);
         if (!collision.hit()) {
             r.pos = vec_from_fixed(end_q16);

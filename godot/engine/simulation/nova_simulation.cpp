@@ -654,6 +654,7 @@ void NovaSimulation::reset_world() {
 	collision_husk_kz_points_by_graphic_.clear();
 	collision_husk_pieces_by_graphic_.clear();
 	collision_resolution_attempted_.clear();
+	wire_collision_shape_by_type_.clear();
 	collision_pose_data_.clear();
 	collision_skeletal_sources_.clear();
 	infantry_adm_resource_root_.unref();
@@ -4796,10 +4797,10 @@ void NovaSimulation::joiner_pump() {
 		}
 	}
 
-	// Received projectile/reload gameplay and the decoded remote-person collision
+	// Received projectile/reload gameplay and the decoded remote collision
 	// proxies are live inputs to this frame's entity/round/weapon pumps. Applying
 	// them here is the retail recv-before-actions boundary, not presentation work.
-	refresh_joiner_projectile_person_proxies();
+	refresh_joiner_projectile_proxies();
 	apply_joiner_gameplay_events();
 
 	apply_player_input_pre_tick();                  // input -> L's body input
@@ -4816,34 +4817,118 @@ void NovaSimulation::joiner_pump() {
 	++now_tick_;
 }
 
-void NovaSimulation::refresh_joiner_projectile_person_proxies() {
-	std::vector<opennova::world::ProjectilePersonProxy> proxies;
+NovaSimulation::WireCollisionShape NovaSimulation::wire_collision_shape_for_type(
+		uint16_t p_type_id) {
+	const auto cached = wire_collision_shape_by_type_.find(p_type_id);
+	if (cached != wire_collision_shape_by_type_.end()) return cached->second;
+	WireCollisionShape shape;
+	if (collision_item_db_.is_valid() && collision_placer_.is_valid()) {
+		// The same items.def graphic resolution the registry sweep runs
+		// (resolve_collision_instances), keyed by the WIRE type id. Sharing the
+		// by-graphic caches means a mission whose local load already registered
+		// this graphic reuses the exact model id the ghost had.
+		const int def_id =
+				static_cast<int>(p_type_id) + opennova::mission::kItemIdOffset;
+		const String graphic = collision_item_db_->get_graphic(def_id);
+		if (!graphic.is_empty()) {
+			const std::string key(graphic.utf8().get_data());
+			auto it = collision_model_by_graphic_.find(key);
+			if (it == collision_model_by_graphic_.end()) {
+				int32_t model_id = -1;
+				int32_t occlusion_id = -1;
+				float bound_radius = 0.0f;
+				Ref<NovaObjectData> data =
+						collision_placer_->call("object_data_for", graphic);
+				if (data.is_valid()) {
+					opennova::world::CollisionModel model;
+					if (collision_model_from_ir(data->native_ir().collision, model,
+							data->has_collision())) {
+						model_id = collision_world_.add_model(std::move(model));
+						if (data->has_live_panm_for_lod(0))
+							collision_pose_data_[model_id] = data;
+					}
+					opennova::world::OcclusionModel occ;
+					if (occlusion_model_from_ir(data->native_ir().occlusion, occ))
+						occlusion_id = occlusion_world_.add_model(std::move(occ));
+					bound_radius = model_bound_radius_from_ir(data->native_ir());
+				}
+				it = collision_model_by_graphic_.emplace(key, model_id).first;
+				collision_occlusion_by_graphic_.emplace(key, occlusion_id);
+				collision_radius_by_graphic_.emplace(key, bound_radius);
+			}
+			shape.model_id = it->second;
+			shape.bound_radius = collision_radius_by_graphic_[key];
+		}
+	}
+	wire_collision_shape_by_type_.emplace(p_type_id, shape);
+	return shape;
+}
+
+void NovaSimulation::refresh_joiner_projectile_proxies() {
+	std::vector<opennova::world::ProjectilePersonProxy> person_proxies;
+	std::vector<opennova::world::ProjectileDynamicProxy> dynamic_proxies;
 	uint16_t self_wire_handle = opennova::world::EntityHandle::kInvalid;
 	if (runtime_ && runtime_->has_self_handle())
 		self_wire_handle = runtime_->self_handle();
 	if (joiner_ && runtime_ && runtime_->in_match()) {
 		for (const opennova::netsim::ClientEntityState &entity :
 				runtime_->state().entities) {
-			if (entity.cls != opennova::EntityClass::Player ||
-					entity.handle == opennova::world::EntityHandle::kInvalid ||
+			if (entity.handle == opennova::world::EntityHandle::kInvalid ||
 					(self_wire_handle != opennova::world::EntityHandle::kInvalid &&
 					 entity.handle == self_wire_handle) ||
 					(entity.state_flags_known &&
 					 (entity.state_flags & 0x01u) != 0))
 				continue;
 
-			opennova::world::ProjectilePersonProxy proxy;
+			// Pool-0 organics (players AND non-player infantry) join the person
+			// walk at the decoded position; retail's client walks its wire-built
+			// pool 0 the same way [orig: Physics_RaycastAgainstProximityList
+			// @ 0x4e4a30 over the client-built person table].
+			if (entity.cls == opennova::EntityClass::Player ||
+					entity.cls == opennova::EntityClass::Infantry) {
+				opennova::world::ProjectilePersonProxy proxy;
+				proxy.wire_handle = entity.handle;
+				proxy.position_q16 = opennova::world::FixedVec3{
+						entity.x, entity.y, entity.z};
+				person_proxies.push_back(proxy);
+				continue;
+			}
+
+			// Pool-1 movers (vehicles, emplacements, runtime items) project
+			// their authored collision geometry at the decoded pose. Pool-2
+			// statics keep colliding through the locally loaded mission set.
+			if (((entity.handle >> 12) & 0xF) != 1) continue;
+			const WireCollisionShape shape =
+					wire_collision_shape_for_type(entity.type_id);
+			if (shape.model_id < 0 && shape.bound_radius <= 0.0f) continue;
+			opennova::world::ProjectileDynamicProxy proxy;
 			proxy.wire_handle = entity.handle;
+			proxy.model_id = shape.model_id;
 			proxy.position_q16 = opennova::world::FixedVec3{
 					entity.x, entity.y, entity.z};
-			proxies.push_back(proxy);
+			// The decoded pose mirrors the retail client entity fields: live
+			// coarse heading (compact high byte -> entity+16) plus the retained
+			// spawn/dead pitch/roll samples (entity+20/+24, live compacts omit
+			// both for vehicles).
+			proxy.heading_bam = static_cast<int32_t>(
+					static_cast<uint32_t>(entity.yaw_byte) << 24);
+			proxy.pitch_bam = entity.pitch_bam;
+			proxy.roll_bam = entity.roll_bam;
+			proxy.bound_radius_q16 = shape.bound_radius > 0.0f
+					? static_cast<int32_t>(shape.bound_radius * 65536.0f)
+					: 0;
+			dynamic_proxies.push_back(proxy);
 		}
 	}
 	// ClientState is persistent and frame-budgeted; omission from one 0x0A is
 	// not a despawn signal, so this intentionally does not read seen_this_frame.
-	// Known-dead bit 1 is retained too: retail dead bodies remain person blockers.
+	// Known-dead bit 1 is retained too: retail dead bodies remain person blockers
+	// and a destroyed vehicle's shell keeps blocking (husk-model substitution for
+	// wire proxies is a tracked residual).
 	collision_world_.replace_projectile_person_proxies(
-			std::move(proxies), self_wire_handle);
+			std::move(person_proxies), self_wire_handle);
+	collision_world_.replace_projectile_dynamic_proxies(
+			std::move(dynamic_proxies));
 }
 
 void NovaSimulation::apply_joiner_gameplay_events() {
@@ -4866,6 +4951,33 @@ void NovaSimulation::apply_joiner_gameplay_events() {
 		opennova::world::RoundSpawnParams round;
 		round.owner = opennova::world::EntityHandle{};
 		round.shooter_handle = ev.shooter_handle;
+		// The mounted shooter's own vehicle joins the trace exclusion exactly
+		// like retail's mount rule (Controller/Gunner/Driver seats only, the
+		// ray[18] leg) — resolved from the decoded carrier + the host-fed seat
+		// table instead of live mount pointers. [orig: the ignored-mount select
+		// feeding Physics_RaycastAgainstBoneCollision @ 0x4e4cb0]
+		const opennova::netsim::ClientEntityState *shooter_row =
+				client_entity_for_handle(runtime_->state(), ev.shooter_handle);
+		if (shooter_row != nullptr && shooter_row->carrier_handle != 0xFFFFu &&
+				shooter_row->mount_bone != 0) {
+			const opennova::netsim::ClientEntityState *carrier =
+					client_entity_for_handle(runtime_->state(),
+							shooter_row->carrier_handle);
+			const opennova::mission::ItemSeatSpec *spec = carrier != nullptr
+					? item_seat_spec_for_type(item_seat_specs_, carrier->type_id)
+					: nullptr;
+			if (spec != nullptr) {
+				for (const opennova::world::Seat &seat : spec->seats) {
+					if (seat.bone_index != shooter_row->mount_bone) continue;
+					if (seat.type == opennova::world::SeatType::Controller ||
+							seat.type == opennova::world::SeatType::Gunner ||
+							seat.type == opennova::world::SeatType::Driver)
+						round.shooter_carrier_handle =
+								shooter_row->carrier_handle;
+					break;
+				}
+			}
+		}
 		round.origin.x = static_cast<float>(ev.origin_x) / kFixed16;
 		round.origin.y = static_cast<float>(ev.origin_y) / kFixed16;
 		round.origin.z = static_cast<float>(ev.origin_z) / kFixed16;

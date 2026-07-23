@@ -507,13 +507,32 @@ struct FixedVec3 {
     constexpr int32_t operator[](int i) const { return i == 0 ? x : (i == 1 ? y : z); }
 };
 
-// One decoded remote player exposed only to visual projectile collision. It is
-// deliberately not an Entity: the wire handle belongs to the server's address
-// space and must never alias a client-local registry handle or participate in
-// movement, AI, explosions, or authoritative damage.
+// One decoded remote person (player or non-player infantry) exposed only to
+// visual projectile collision. It is deliberately not an Entity: the wire
+// handle belongs to the server's address space and must never alias a
+// client-local registry handle or participate in movement, AI, explosions, or
+// authoritative damage.
 struct ProjectilePersonProxy {
     uint16_t wire_handle = 0xFFFF;
     FixedVec3 position_q16;
+};
+
+// One decoded pool-1 mover (vehicle, emplacement, runtime item) projected into
+// visual projectile collision with its AUTHORED collision geometry at the
+// decoded wire pose. Same wire-keyed rule as the person proxy: never an
+// Entity, never a registry handle. The pose mirrors what the retail client
+// holds on its own pool entity — the live compact updates the coarse heading
+// byte (entity+16 high byte) while entity+20/+24 retain the last spawn/dead
+// Euler sample [orig: the 0x0D spawn angle landings + the compact fold; the
+// collision placement matrix @ 0x613f40 reads those same three fields].
+struct ProjectileDynamicProxy {
+    uint16_t wire_handle = 0xFFFF;
+    int32_t model_id = -1;          // CollisionWorld model registry id; -1 = unresolved
+    FixedVec3 position_q16;
+    int32_t heading_bam = 0;        // reconstructed entity+16 (yaw_byte << 24)
+    int32_t pitch_bam = 0;          // retained entity+20 spawn/dead sample
+    int32_t roll_bam = 0;           // retained entity+24 spawn/dead sample
+    int32_t bound_radius_q16 = 0;   // broad-phase sphere (entity+0 boundRadius stand-in)
 };
 
 enum class ProjectileHitClass : uint8_t {
@@ -535,11 +554,18 @@ struct ProjectileTrace {
     uint32_t ammo_flags = 0;
     // The additional per-projectile exclusion carried by the retail ray context.
     EntityHandle extra_ignore;
-    // Remote decoded player proxies are a client-presentation input only. The
-    // caller opts in explicitly for a VisualOnly round and supplies the wire
-    // shooter identity for the normal flag-4-aware self-collision rule.
-    bool include_person_proxies = false;
+    // Remote decoded proxies (person + dynamic) are a client-presentation input
+    // only. The caller opts in explicitly for a VisualOnly round and supplies
+    // the wire shooter identity for the normal flag-4-aware self-collision rule.
+    bool include_wire_proxies = false;
     uint16_t shooter_wire_handle = 0xFFFF;
+    // The decoded shooter's carrier at fire time — the wire-side analog of the
+    // retail ray[18] mount exclusion (a mounted shooter's round never clips its
+    // own vehicle). Retail resolves it off the live shooter entity's mount
+    // pointers; a visual client resolves it off the shooter's decoded
+    // carrier_handle instead. [orig: the mount exclusion setup feeding
+    // Physics_RaycastAgainstBoneCollision @ 0x4e4cb0 via ray[18]]
+    uint16_t shooter_carrier_wire_handle = 0xFFFF;
 };
 
 struct ProjectileHit {
@@ -613,12 +639,17 @@ public:
     // that epoch it preserves retail's initial 16 sliceless logic ticks.
     void refresh_after_registry_change(World &world);
 
-    // Replace the persistent decoded-player collision projection. Sorting by
+    // Replace the persistent decoded-person collision projection. Sorting by
     // wire handle gives the proxy-only subset deterministic order; no wire
     // handle is ever converted to EntityHandle.
     void replace_projectile_person_proxies(
             std::vector<ProjectilePersonProxy> proxies,
             uint16_t local_player_wire_handle = 0xFFFF);
+
+    // Replace the decoded pool-1 mover projection (authored geometry at the
+    // decoded pose). Same ordering/aliasing rules as the person replace.
+    void replace_projectile_dynamic_proxies(
+            std::vector<ProjectileDynamicProxy> proxies);
 
     // Segment arbitration shared by authoritative and visual-only projectile
     // loops. The query is read-only: callers must publish/build collision
@@ -952,6 +983,7 @@ private:
     std::vector<DynSlot> dynamics_;     // [orig: g_DynProx*]
     std::vector<PersonSlot> persons_;   // [orig: g_PersonProx*]
     std::vector<ProjectilePersonProxy> projectile_person_proxies_;
+    std::vector<ProjectileDynamicProxy> projectile_dynamic_proxies_;
     // Server H used solely as local L's ordering key during proxy-enabled
     // person walks. Geometry and ignore logic continue to use L.
     uint16_t projectile_local_player_wire_handle_ = 0xFFFF;
