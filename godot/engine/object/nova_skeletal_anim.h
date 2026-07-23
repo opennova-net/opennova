@@ -13,6 +13,8 @@
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
 
+#include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -21,6 +23,7 @@
 namespace godot {
 
 class NovaResourceRoot;
+class Skeleton3D;
 
 // Host adapter over the portable .bad/.adm skeletal runtime (libs/anim + libs/bad +
 // libs/adm). Loads a model's .adm (a key -> .bad-basename map), parses + samples every
@@ -55,9 +58,19 @@ private:
 	// the per-entity animState (+72) — this class is the loaded clip data only, so
 	// the two viewmodel parts sharing one .adm stay in lockstep.
 	std::vector<LoadedClip> clips_;
+	// Case-folded key -> clips_ indices in insertion (= .adm file / ring) order.
+	// The present pass resolves clips per animated model per render frame
+	// (has_clip / get_clip_fps / get_clip_length / eval), so lookups must not
+	// linear-scan clips_ with per-entry case-insensitive compares.
+	std::unordered_map<std::string, std::vector<size_t>> clip_index_;
 	String adm_name_;
 	String last_error_;
 	bool loaded_ = false;
+
+	// ASCII case fold matching nocasecmp_to over this format's key alphabet
+	// (.adm/.def keys are ASCII; non-ASCII bytes pass through unfolded).
+	static std::string fold_clip_key(const String &p_key);
+	void rebuild_clip_index();
 
 	const LoadedClip *find_clip(const String &p_key) const;
 	// The p_variant-th same-key clip (file order, wrapped modulo the variant count —
@@ -180,6 +193,19 @@ public:
 	// the sampled pose. Collision adapts that verdict to its final-row convention.
 	// [orig: Entity_BuildBoneTransformMatrices @0x4b1290; world-wac-ai-re.md §14/§14.8.6]
 	Array eval_pose_overlay(const String &p_key, double p_playhead_seconds,
+			const PackedInt32Array &p_classes, const Array &p_deltas,
+			const String &p_wpn_key = String(), double p_wpn_playhead_seconds = 0.0,
+			bool p_collapse_right_hand = false) const;
+
+	// The whole per-frame body-pose write in one call: evaluate the pose
+	// (eval_pose_overlay when classes+deltas are non-empty, eval_pose otherwise)
+	// and write every bone's position/rotation/scale onto p_skeleton, including
+	// the BN17 zero-scale collapse branch. Exactly the loop NovaObjectModel ran
+	// in GDScript — moved native because it executes per animated model per
+	// render frame (bone-count boxed Transform3Ds + 3 cross-boundary calls per
+	// bone from script dominated the present pass).
+	void pose_skeleton(Skeleton3D *p_skeleton, const String &p_key,
+			double p_playhead_seconds, int p_variant,
 			const PackedInt32Array &p_classes, const Array &p_deltas,
 			const String &p_wpn_key = String(), double p_wpn_playhead_seconds = 0.0,
 			bool p_collapse_right_hand = false) const;

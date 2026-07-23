@@ -40,7 +40,14 @@ static func apply(
 	if int(snap[base + NovaSimulation.PF_AIM_OVERLAY_VALID]) == 0:
 		node.set_aim_overlay([])
 		return
+	apply_valid(node, snap, base, drive_root_basis)
 
+
+## The valid-overlay leg alone: capability and validity already checked by the
+## caller (MissionPresentPass gates both per row from its rebuilt plan).
+static func apply_valid(
+		node, snap: PackedFloat32Array, base: int,
+		drive_root_basis: bool = true) -> void:
 	var body_basis := root_basis(snap, base, node.basis)
 	if drive_root_basis and node.basis != body_basis:
 		node.basis = body_basis
