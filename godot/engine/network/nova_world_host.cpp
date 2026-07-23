@@ -408,7 +408,9 @@ void NovaWorldHost::send_host_request() {
 	keepalive_accum_ = 0.0;
 	update_accum_ = 0.0;
 	emit_signal("registered");
-	UtilityFunctions::print(String("[NovaWorldHost] registered '") + server_name_ +
+	// The `registered` signal is the structured notification; the console line
+	// rides the verbose channel only.
+	UtilityFunctions::print_verbose(String("[NovaWorldHost] registered '") + server_name_ +
 	                        "' game_port=" + String::num_int64(game_port_) +
 	                        " -> gate " + nw_udp_host_ + ":" +
 	                        String::num_int64(nw_udp_port_));

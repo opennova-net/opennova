@@ -81,6 +81,12 @@ public:
 	bool is_session_active() const { return state_ == STATE_CONNECTED; }
 	Dictionary get_server_info() const;
 
+	// Structured session diagnostics: the state snapshot plus a bounded wire/
+	// session trace ring (newest last). The trace lines keep the retail
+	// _connectlog "SENDING N BYTES ... [0xNN]" shape so a capture diff still
+	// lines up — this replaces the old always-on stdout traces.
+	Dictionary get_session_debug() const;
+
 	// Server browser (ADR 0010 Phase 2). The list is fetched over HTTP from
 	// the GSB endpoint once the session is verified; rows arrive asynchronously
 	// (watch the `server_list_updated` signal, then read get_server_rows()).
@@ -149,6 +155,9 @@ private:
 
 	void enter_state(State next, const String &reason = String());
 
+	// Append one line to the bounded diagnostics ring (get_session_debug()).
+	void trace(const String &line);
+
 	// Config.
 	String host_ = "127.0.0.1";
 	int gate_port_ = 7597;
@@ -198,6 +207,10 @@ private:
 	double heartbeat_interval_s_ = 2.0;
 	double handshake_timeout_s_ = 5.0;
 	double handshake_elapsed_ = 0.0;
+
+	// The wire/session trace ring behind get_session_debug(), newest last.
+	static constexpr int kTraceRingCap = 64;
+	PackedStringArray trace_ring_;
 };
 
 } // namespace godot
