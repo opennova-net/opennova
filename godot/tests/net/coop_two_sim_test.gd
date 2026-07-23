@@ -1107,3 +1107,77 @@ func test_joiner_off_by_default() -> void:
 	assert_false(sim.is_joined_in_match(), "not in a match")
 	assert_eq(sim.get_joiner_self_handle(), 0, "no wire handle when not joining")
 	sim.free()
+
+
+# The REAL shell ordering (game_world._start_runtime -> _apply_local_player_spawn_loadout):
+# the profile kit is applied right after runtime setup, BEFORE the joiner has name-matched
+# and spawned L, and the shell arms the weapon FSM only when that apply reports success and
+# the inventory is valid. The two-GUI regression: the pre-spawn apply was dropped, so the
+# joiner could never shoot or reload.
+func test_joiner_kit_applied_before_spawn_still_arms_fire_and_reload() -> void:
+	var mission := _combat_mission()
+	var host := NovaSimulation.new()
+	host.configure_host_session({"gametype": 0x30020})
+	assert_true(host.enable_host_listen(0))
+	assert_true(host.load_from_mission_data(mission))
+	_install_combat_tables(host)
+
+	var joiner := NovaSimulation.new()
+	assert_true(joiner.enable_join(
+			"127.0.0.1", host.get_host_listen_port(), "PrespawnKitJoiner"))
+	assert_true(joiner.load_from_mission_data(mission))
+	_install_combat_tables(joiner)
+
+	# Mirror _apply_local_player_spawn_loadout: apply, then sync the FSM only on
+	# success + a valid inventory — the shell's exact gate chain.
+	var applied := bool(joiner.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 8))
+	var inventory_valid := false
+	if applied:
+		var inventory: Dictionary = joiner.get_local_player_inventory()
+		inventory_valid = bool(inventory.get("valid", false))
+		if inventory_valid:
+			joiner.set_local_player_weapon(_retail_m4(), {})
+
+	assert_true(_drive_pair_to_match(host, joiner),
+			"joiner reached the real-UDP in-match seam")
+	if not joiner.is_joined_in_match():
+		joiner.free()
+		host.free()
+		return
+	for _settle in range(3):
+		joiner.step()
+		host.step()
+
+	assert_true(applied, "the pre-spawn kit apply must latch, not drop, the kit")
+	assert_true(inventory_valid,
+			"the pre-spawn inventory must be valid so the shell arms the FSM")
+
+	var before_fire: Dictionary = joiner.get_local_player_weapon_state()
+	var fired_before := int(before_fire.get("fired_serial", 0))
+	joiner.set_local_player_weapon_input(false, true, false)
+	for _tick in range(20):
+		joiner.step()
+		host.step()
+		OS.delay_msec(2)
+	var after_fire: Dictionary = joiner.get_local_player_weapon_state()
+	assert_eq(int(after_fire.get("fired_serial", 0)), fired_before + 1,
+			"the joiner can fire with a kit applied before spawn")
+	var spent_clip := int(after_fire.get("clip", -1))
+	assert_lt(spent_clip, 30, "the fire consumed one magazine round")
+
+	var reload_before := int(after_fire.get("reload_serial", 0))
+	var applied_before := int(after_fire.get("reload_applied_serial", 0))
+	joiner.set_local_player_weapon_input(false, false, true)
+	for _tick in range(120):
+		host.step()
+		joiner.step()
+		OS.delay_msec(2)
+	var reloaded: Dictionary = joiner.get_local_player_weapon_state()
+	assert_eq(int(reloaded.get("reload_serial", 0)), reload_before + 1,
+			"the joiner can reload with a kit applied before spawn")
+	assert_eq(int(reloaded.get("reload_applied_serial", 0)), applied_before + 1,
+			"the echoed S2C 0x49 refilled the pre-spawn-kit joiner")
+	assert_eq(int(reloaded.get("clip", -1)), 30, "the clip refilled to capacity")
+
+	joiner.free()
+	host.free()

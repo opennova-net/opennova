@@ -298,6 +298,12 @@ private:
 	// H is stamped in C2S 0x0C and used by the present self-filter. Zero is a
 	// valid handle; runtime_->has_self_handle() carries validity independently.
 	uint16_t joiner_self_wire_handle_ = 0;
+	// The shell applies the profile kit/class right after runtime setup — on a
+	// joiner that is BEFORE L exists (L spawns on the name-match). Latch the
+	// requested class here and stamp it with the equipped weapon at L's spawn,
+	// the same Player_InitPlayer-time arm the host's own spawn performs.
+	// [orig: Player_InitPlayer weapon leg @ 0x4e15f0]
+	int pending_local_player_class_ = -1;
 	// Send one framed datagram to the dialed host (the joiner's send_datagram).
 	void ship_to_host(const std::vector<uint8_t> &dg);
 	// SelfSpawn (mission i32 16.16 + full BAM32 orientation) -> PlayerSpawn for L.

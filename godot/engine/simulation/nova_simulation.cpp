@@ -3341,7 +3341,12 @@ int NovaSimulation::get_weapon_availability(const String &p_weapon_name) const {
 bool NovaSimulation::set_local_player_class(int p_player_class) {
 	if (!world_ || p_player_class < 5 || p_player_class > 9) return false;
 	opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);
-	if (e == nullptr) return false;
+	if (e == nullptr) {
+		// A joiner's shell applies the profile class before L has spawned
+		// (name-match). Latch it; the joiner spawn block stamps the entity.
+		pending_local_player_class_ = p_player_class;
+		return true;
+	}
 	e->player_class = static_cast<uint8_t>(p_player_class);
 	return true;
 }
@@ -3352,10 +3357,19 @@ bool NovaSimulation::apply_local_player_loadout(const TypedArray<Dictionary> &p_
 	// leg: parse the tuples, expand sub-weapons, reset + refill the slot table, apply
 	// the requested ammo, re-select the equipped slot].
 	if (!world_) return false;
+	// A joiner applies its kit before L exists (the shell runs the spawn-loadout
+	// apply right after runtime setup; L spawns later, on the name-match). Build
+	// the inventory now — it is sim-side state — and defer only the entity
+	// stamps (class + equipped adm) to the joiner spawn block, mirroring the
+	// host's Player_InitPlayer-time arm. Dropping the kit here left the joiner
+	// unable to fire, reload, or switch (the two-GUI regression).
 	opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);
-	if (e == nullptr) return false;
-	if (p_player_class >= 5 && p_player_class <= 9)
-		e->player_class = static_cast<uint8_t>(p_player_class);
+	if (p_player_class >= 5 && p_player_class <= 9) {
+		if (e != nullptr)
+			e->player_class = static_cast<uint8_t>(p_player_class);
+		else
+			pending_local_player_class_ = p_player_class;
+	}
 	std::vector<opennova::world::WeaponKitEntry> kit;
 	for (int i = 0; i < p_kit.size(); ++i) {
 		opennova::world::WeaponKitEntry entry = kit_entry_from_dict(p_kit[i]);
@@ -3443,8 +3457,10 @@ void NovaSimulation::rebuild_local_player_loadout(bool p_select_spawn_default) {
 	// RecalculateAmmoFromCapacity -> Player_SelectWeaponSlot(195) ->
 	// Player_SwitchToWeaponByHandle(195)].
 	if (!world_) return;
+	// Entity-optional: a joiner rebuilds its inventory before L spawns. The
+	// inventory/equip selection is sim-side state; entity stamps (class, damage
+	// classes, equipped adm) re-run at the joiner spawn block once L exists.
 	opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);
-	if (e == nullptr) return;
 	const opennova::world::WeaponTable &table = world_->weapons;
 	sync_local_player_damage_classes();
 	if (table.empty()) return;
@@ -3458,8 +3474,15 @@ void NovaSimulation::rebuild_local_player_loadout(bool p_select_spawn_default) {
 			                                                    local_inventory_);
 	for (const std::string &w : fill.warnings)
 		print_verbose(String::utf8(w.c_str())); // [orig: ErrorLog_WriteTimestamped]
-	opennova::world::weapon_inventory_seed_pools(table, local_inventory_,
-	                                             e->player_class);
+	// Pre-spawn the class comes from the latched shell request; 8 is retail's
+	// out-of-range clamp default [orig: Server_PlayerAdd class clamp @ 0x51d102].
+	const uint8_t seed_class = e != nullptr
+			? e->player_class
+			: static_cast<uint8_t>(
+					pending_local_player_class_ >= 5 && pending_local_player_class_ <= 9
+							? pending_local_player_class_
+							: 8);
+	opennova::world::weapon_inventory_seed_pools(table, local_inventory_, seed_class);
 	opennova::world::weapon_inventory_recalc_clips(table, local_inventory_);
 	local_inventory_valid_ = true;
 	weapon_switch_in_flight_ = false;
@@ -3471,7 +3494,7 @@ void NovaSimulation::rebuild_local_player_loadout(bool p_select_spawn_default) {
 	            opennova::world::weapon_combo::kDefaultSpawnCombo,
 	            !gates.equip_blocked)) {
 		// An empty table (the armory all-NONE kit) equips nothing.
-		e->equipped_adm_index = 0xFF;
+		if (e != nullptr) e->equipped_adm_index = 0xFF;
 		return;
 	}
 	// Player_InitPlayer follows the select with SwitchToWeaponByHandle(195)
@@ -4025,6 +4048,7 @@ void NovaSimulation::finish_load(const opennova::bms::File &file) {
 		runtime_->set_world_ready(true);
 		joiner_local_spawned_ = false;
 		joiner_self_wire_handle_ = 0;
+		pending_local_player_class_ = -1; // the shell re-applies the kit after each load
 	}
 	// Re-arm the fresh runtime's decode view with the items.def class table (built by a
 	// prior resolve_item_traits; the shell also re-resolves per load, which re-installs).
@@ -4707,6 +4731,22 @@ void NovaSimulation::joiner_pump() {
 		const opennova::world::PlayerSpawn spawn = spawn_from_self(sp);
 		const opennova::world::EntityHandle h = opennova::world::spawn_player(*world_, spawn);
 		joiner_local_spawned_ = h.valid();
+		// Arm L the way the host's own spawn does at Player_InitPlayer time: the
+		// shell applied the profile kit/class BEFORE L existed (the pre-spawn
+		// apply latched it into the inventory), so stamp the deferred class +
+		// damage classes + equipped adm on the fresh entity now. [orig:
+		// Player_InitPlayer weapon leg @ 0x4e15f0; equippedAdmIndex stamp @ 0x4dd727]
+		if (opennova::world::Entity *L = world_->registry.get(h)) {
+			if (pending_local_player_class_ >= 5 && pending_local_player_class_ <= 9)
+				L->player_class = static_cast<uint8_t>(pending_local_player_class_);
+			sync_local_player_damage_classes();
+			if (local_inventory_valid_ && local_inventory_.equipped_combo >= 0) {
+				const opennova::world::WeaponInventorySlot *slot =
+						local_inventory_.slot(local_inventory_.equipped_combo);
+				if (slot != nullptr && slot->adm_index >= 0)
+					L->equipped_adm_index = static_cast<uint8_t>(slot->adm_index);
+			}
+		}
 		resolve_new_infantry_adm_ids();
 		player_input_ = opennova::world::PlayerInput{};
 		player_input_.look_heading = opennova::world::bam_heading_from_mission_yaw_deg(spawn.yaw);
