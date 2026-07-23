@@ -324,7 +324,7 @@ func _update_labels(entities: Array, organics: Array) -> void:
 		var is_organic: bool = order[i][1]
 		var e3: Dictionary = order[i][2]
 		var ent := int(e3.get("entity_handle", 0xFFFF))
-		var text := "%d/%d" % [(ent >> 12) & 0xF, ent & 0xFFF]
+		var text := WireHandle.label(ent)
 		var label_position: Vector3
 		var label_modulate: Color
 		if is_organic:

@@ -29,9 +29,6 @@ const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer
 const PresentAimOverlay := preload("res://engine/world/present_aim_overlay.gd")
 const PresentEmplacedWeapon := preload(
 		"res://engine/world/present_emplaced_weapon.gd")
-# [orig: EntityPool_FindByNetId @ 0x4f0a20]
-const WIRE_HANDLE_POOL_SHIFT := 12
-const WIRE_HANDLE_POOL_MASK := 0xF
 
 var _sim                   # NovaSimulation (snapshot source)
 var _placer                # MissionObjectPlacer (build_player_animated_model -> NovaObjectModel)
@@ -65,7 +62,7 @@ var _deferred_nodes: Array = []
 # joiner intentionally has no authoritative BMS origin and therefore receives
 # PF_KIND=-1. [orig: pools 0/1/2/3 = organic/item/building/marker].
 static func _mission_kind_for_wire_handle(handle: int) -> int:
-	match (handle >> WIRE_HANDLE_POOL_SHIFT) & WIRE_HANDLE_POOL_MASK:
+	match WireHandle.pool(handle):
 		0:
 			return NovaMissionData.KIND_ORGANIC
 		1:

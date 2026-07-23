@@ -1124,7 +1124,7 @@ func _refresh_rounds(sim: Object) -> void:
 		var row := "t%d  %s" % [int(ev.get("tick", 0)), String(ev.get("kind_name", "?"))]
 		var ent := int(ev.get("entity_handle", 0xFFFF))
 		if ent != 0xFFFF:
-			row += "  %d/%d" % [(ent >> 12) & 0xF, ent & 0xFFF]
+			row += "  " + WireHandle.label(ent)
 			var ent_name := String(ev.get("entity_name", ""))
 			if not ent_name.is_empty():
 				row += " " + ent_name
