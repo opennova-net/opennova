@@ -9,7 +9,22 @@ const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer
 const OVERLAY_CLASS_COUNT := 9
 
 
-static func apply(node, snap: PackedFloat32Array, base: int) -> void:
+## Final root basis for a presented row. Aim-valid rows own the body rotation;
+## all others retain the ordinary entity rotation supplied by the presenter.
+static func root_basis(
+		snap: PackedFloat32Array, base: int, fallback: Basis) -> Basis:
+	if int(snap[base + NovaSimulation.PF_AIM_OVERLAY_VALID]) == 0:
+		return fallback
+	var body_angles := Vector3(
+			snap[base + NovaSimulation.PF_AIM_BODY_PITCH_DEG],
+			snap[base + NovaSimulation.PF_AIM_BODY_YAW_DEG],
+			snap[base + NovaSimulation.PF_AIM_BODY_ROLL_DEG])
+	return MissionObjectPlacer.bms_to_godot_basis(body_angles)
+
+
+static func apply(
+		node, snap: PackedFloat32Array, base: int,
+		drive_root_basis: bool = true) -> void:
 	if node == null:
 		return
 	# The mounted-seat selector is resolved beside the overlay in native code for
@@ -26,12 +41,9 @@ static func apply(node, snap: PackedFloat32Array, base: int) -> void:
 		node.set_aim_overlay([])
 		return
 
-	var body_angles := Vector3(
-			snap[base + NovaSimulation.PF_AIM_BODY_PITCH_DEG],
-			snap[base + NovaSimulation.PF_AIM_BODY_YAW_DEG],
-			snap[base + NovaSimulation.PF_AIM_BODY_ROLL_DEG])
-	var body_basis := MissionObjectPlacer.bms_to_godot_basis(body_angles)
-	node.basis = body_basis
+	var body_basis := root_basis(snap, base, node.basis)
+	if drive_root_basis and node.basis != body_basis:
+		node.basis = body_basis
 
 	var inverse_body := body_basis.inverse()
 	var deltas: Array = []

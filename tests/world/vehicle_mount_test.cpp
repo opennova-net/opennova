@@ -105,6 +105,19 @@ struct FakeMountedPoseProvider final : IMountedPoseProvider {
     }
 };
 
+struct StubCollisionMatrixProvider final : ICollisionSectionMatrixProvider {
+    int calls = 0;
+
+    bool build_section_matrices(World &, EntityHandle, int32_t,
+                                const CollisionMatrix &entity_world,
+                                const CollisionModel &model,
+                                std::vector<CollisionMatrix> &out) override {
+        ++calls;
+        out.assign(model.sections.size(), entity_world);
+        return true;
+    }
+};
+
 struct HeadingMountedPoseProvider final : IMountedPoseProvider {
     std::vector<int32_t> headings;
     std::vector<int32_t> pitches;
@@ -436,6 +449,151 @@ void test_toggle_nearest_seat() {
         CHECK(!player_toggle_vehicle_mount(r.w, r.player_h));
         CHECK(!r.player().mounted);
     }
+}
+
+// The portable whole-registry walk is only for a world that never built the
+// collision tables. Once a live table build has happened, the retail BSS-zero
+// cadence leaves the first 16 ticks deliberately sliceless.
+void test_attach_scan_never_built_fallback_and_initial_empty_slice() {
+    {
+        Rig r(2.0f);
+        CollisionWorld cw;
+        r.w.collision = &cw;
+        NearestSeatHit hit;
+        CHECK(find_nearest_free_seat(r.w, r.player(), hit, false));
+        CHECK(hit.vehicle == r.veh_h);
+    }
+    {
+        // Headless/GDScript fixtures can publish seat metadata without a 3DI
+        // collision bound. Before the first candidate-slice epoch, retain the
+        // compatibility registry walk rather than treating an absent slice as
+        // authoritative.
+        Rig r(2.0f);
+        CollisionWorld cw;
+        r.w.collision = &cw;
+        cw.build_tick_tables(r.w);
+        CHECK(cw.tick_tables_ready());
+        CHECK(!cw.attach_candidate_slices_authoritative());
+        NearestSeatHit hit;
+        CHECK(find_nearest_free_seat(r.w, r.player(), hit, false));
+        CHECK(hit.vehicle == r.veh_h);
+    }
+    {
+        // A live host may know the seat before the model/collision hull resolves.
+        // The short pre-slice epoch retains compatibility discovery; once the
+        // 17-tick proximity epoch lands, the seat-only carrier itself is in the
+        // bounded slice and no per-frame registry fallback is needed.
+        Rig r(2.0f);
+        CollisionWorld cw;
+        StubCollisionMatrixProvider provider;
+        cw.set_section_matrix_provider(&provider);
+        r.w.collision = &cw;
+        cw.build_tick_tables(r.w);
+        CHECK(cw.tick_tables_ready());
+        CHECK(!cw.attach_candidate_slices_authoritative());
+        NearestSeatHit hit;
+        CHECK(find_nearest_free_seat(r.w, r.player(), hit, false));
+        CHECK(hit.vehicle == r.veh_h);
+        for (int i = 1; i < 17; ++i) cw.build_tick_tables(r.w);
+        CHECK(cw.attach_candidate_slices_authoritative());
+        CHECK(cw.candidate_count(r.player_h) == 1);
+        hit = NearestSeatHit{};
+        CHECK(find_nearest_free_seat(r.w, r.player(), hit, false));
+        CHECK(hit.vehicle == r.veh_h);
+        CHECK(provider.calls == 0);
+    }
+    {
+        Rig r(2.0f);
+        CollisionWorld cw;
+        r.w.collision = &cw;
+        r.veh().bound_radius = 3.0f;
+        cw.build_tick_tables(r.w);
+        NearestSeatHit hit;
+        CHECK(find_nearest_free_seat(r.w, r.player(), hit, false));
+        for (int i = 1; i < 17; ++i) cw.build_tick_tables(r.w);
+        CHECK(find_nearest_free_seat(r.w, r.player(), hit, false));
+        CHECK(hit.vehicle == r.veh_h);
+    }
+}
+
+// A deploy/respawn after a completed proximity epoch rebuilds the new player's
+// source slice immediately. Waiting for the normal 17-tick cadence would make
+// USE and attach labels disappear just after spawning.
+void test_post_epoch_player_spawn_discovers_nearby_seat_immediately() {
+    World w;
+    AiSystem ai;
+    CollisionWorld cw;
+    w.ai = &ai;
+    w.collision = &cw;
+    w.registry.configure_pool(0, 8);
+    w.registry.configure_pool(1, 8);
+
+    Entity vehicle;
+    vehicle.kind = EntityKind::Item;
+    vehicle.position = {10.0f, 20.0f, 0.0f};
+    vehicle.health = 100;
+    vehicle.alive = true;
+    vehicle.bound_radius = 3.0f;
+    Seat seat;
+    seat.type = SeatType::Passenger;
+    seat.bone_index = 1;
+    seat.source_name = "sitex00";
+    seat.seat_local = {0.0f, 0.0f, 1.0f};
+    vehicle.seats.push_back(seat);
+    const EntityHandle vehicle_h = w.registry.spawn(1, vehicle);
+
+    for (int i = 0; i < 17; ++i) cw.build_tick_tables(w);
+
+    PlayerSpawn spawn;
+    spawn.position = {12.0f, 20.0f, 0.0f};
+    spawn.health = 100;
+    const EntityHandle player_h = spawn_player(w, spawn);
+    CHECK(player_h.valid());
+    const Entity *player = w.registry.get(player_h);
+    CHECK(player != nullptr);
+    if (player != nullptr) {
+        NearestSeatHit hit;
+        CHECK(find_nearest_free_seat(w, *player, hit, false));
+        CHECK(hit.vehicle == vehicle_h);
+    }
+}
+
+// Registry rewind must replace the candidate arena from the later play epoch.
+// Otherwise a restored player keeps scanning the vehicles that were near its
+// pre-restore position until the next 17-tick refresh.
+void test_restore_refreshes_completed_candidate_epoch() {
+    Rig r(2.0f);
+    CollisionWorld cw;
+    r.w.collision = &cw;
+    r.veh().bound_radius = 3.0f;
+
+    Entity other;
+    other.kind = EntityKind::Item;
+    other.position = {200.0f, 200.0f, 10.0f};
+    other.health = 100;
+    other.alive = true;
+    other.bound_radius = 3.0f;
+    Seat seat;
+    seat.type = SeatType::Passenger;
+    seat.bone_index = 1;
+    seat.source_name = "sitex00";
+    seat.seat_local = {0.0f, 0.0f, 1.0f};
+    other.seats.push_back(seat);
+    const EntityHandle other_h = r.w.registry.spawn(1, other);
+
+    for (int i = 0; i < 17; ++i) cw.build_tick_tables(r.w);
+    const World::Snapshot baseline = r.w.snapshot();
+
+    r.player().position = {202.0f, 200.0f, 10.0f};
+    for (int i = 0; i < 17; ++i) cw.build_tick_tables(r.w);
+    NearestSeatHit hit;
+    CHECK(find_nearest_free_seat(r.w, r.player(), hit, false));
+    CHECK(hit.vehicle == other_h);
+
+    r.w.restore(baseline);
+    hit = NearestSeatHit{};
+    CHECK(find_nearest_free_seat(r.w, r.player(), hit, false));
+    CHECK(hit.vehicle == r.veh_h);
 }
 
 // The deck path: standing ON the vehicle (ground_target) picks the BEST seat by weight —
@@ -1118,6 +1276,9 @@ int main() {
     test_usegun_attach_presnaps_local_look();
     test_live_mounted_pose_provider_and_static_fallback();
     test_toggle_nearest_seat();
+    test_attach_scan_never_built_fallback_and_initial_empty_slice();
+    test_post_epoch_player_spawn_discovers_nearby_seat_immediately();
+    test_restore_refreshes_completed_candidate_epoch();
     test_toggle_deck_best_seat();
     test_toggle_dismount_and_swap();
     test_enemy_occupant_blocks_scan();

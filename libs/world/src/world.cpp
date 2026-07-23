@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "world/angle.h"
+#include "world/collision.h"
 #include "world/vehicle_attach.h"
 
 #include "world/ai.h" // AiSystem / AiEntity / ai_apply_command — the AI-change command target
@@ -1022,6 +1023,7 @@ void World::restore(const Snapshot &s) {
     round_end = RoundEndState{};
     kill_stats = MissionKillStats{};
     load_systems(); // systems re-init their per-mission state
+    if (collision != nullptr) collision->refresh_after_registry_change(*this);
     registry.for_each([&](const Entity &vehicle) {
         if (vehicle.primary_occupant.valid())
             emit_vehicle_control_started(*this, vehicle);

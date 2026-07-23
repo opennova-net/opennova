@@ -1,0 +1,4 @@
+[gd_scene load_steps=2 format=3 uid="uid://cperffirepr0be"]
+[ext_resource type="Script" path="res://tests/perf_fire_probe.gd" id="1_pfprobe"]
+[node name="PerfFireProbe" type="Node"]
+script = ExtResource("1_pfprobe")

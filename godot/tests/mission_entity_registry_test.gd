@@ -42,6 +42,31 @@ func test_resolve_single_by_bms_id() -> void:
 	assert_null(reg.resolve_single(0), "bms_id 0 -> null (no entity has SSN 0)")
 
 
+func test_kind_index_fallback_uses_distinct_packed_integer_keys() -> void:
+	var container := Node.new()
+	add_child_autofree(container)
+	var a := _node(container, 0, 0, 0, Vector3.ZERO)
+	var b := _node(container, 0, 0, 0, Vector3.ZERO)
+	a.set_meta("entity_ref", {
+		"kind": 1, "index": 0x1000000, "bms_id": 0,
+		"group": -1, "team": 0, "position": Vector3.ZERO,
+	})
+	b.set_meta("entity_ref", {
+		"kind": 2, "index": 0, "bms_id": 0,
+		"group": -1, "team": 0, "position": Vector3.ZERO,
+	})
+	var reg := Registry.new()
+	reg.build(container, null)
+	assert_eq(reg.resolve(0, 1, 0x1000000), a)
+	assert_eq(reg.resolve(0, 2, 0), b)
+	assert_eq(reg.resolve(9999, 2, 0), b,
+			"an absent primary SSN still falls back to the packed origin")
+	var generation := reg.get_generation()
+	reg.clear()
+	assert_gt(reg.get_generation(), generation,
+			"clear invalidates any presentation row plan bound to this registry")
+
+
 func test_resolve_group_members() -> void:
 	var container := Node.new()
 	add_child_autofree(container)

@@ -18,6 +18,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <mission/event_runtime.h>
@@ -242,6 +243,26 @@ private:
 	uint64_t last_net_tick_us_ = 0;
 	mutable uint64_t last_present_snapshot_us_ = 0;
 	mutable int last_present_entity_count_ = 0;
+	// Exact identity/order of the most recently returned PF_* buffer. Dynamic
+	// values (pose, animation, visibility) deliberately do not participate:
+	// GDScript row plans may keep their offsets while reading fresh values.
+	struct PresentRowIdentity {
+		int32_t wire_handle = 0;
+		int32_t type_id = 0;
+		int32_t bms_id = 0;
+		int32_t kind = -1;
+		int32_t index = -1;
+
+		bool operator==(const PresentRowIdentity &p_other) const {
+			return wire_handle == p_other.wire_handle &&
+			       type_id == p_other.type_id &&
+			       bms_id == p_other.bms_id &&
+			       kind == p_other.kind &&
+			       index == p_other.index;
+		}
+	};
+	mutable std::vector<PresentRowIdentity> present_layout_;
+	mutable uint64_t present_layout_revision_ = 0;
 
 	// FollowOwner consumes the same wire-decoded pose as the present pass, but it
 	// does so once per fixed tick inside a catch-up batch. Keep the identity index
@@ -259,8 +280,18 @@ private:
 	mutable std::unordered_map<int, uint16_t> present_effect_handles_by_bms_id_;
 	mutable std::unordered_map<int, uint16_t> present_effect_handles_by_ssn_;
 	mutable std::unordered_map<uint64_t, uint16_t> present_effect_handles_by_origin_;
+	// A missing owner is also stable for one decoded-client epoch. Remember
+	// misses so stale effect attachments cannot turn lazy lookup into one full
+	// entity scan per fixed tick/query. Positive caches remain authoritative
+	// when another alias materializes the same row.
+	mutable std::unordered_set<uint16_t> present_effect_missing_handles_;
+	mutable std::unordered_set<int> present_effect_missing_bms_ids_;
+	mutable std::unordered_set<int> present_effect_missing_ssns_;
+	mutable std::unordered_set<uint64_t> present_effect_missing_origins_;
 	void invalidate_present_effect_pose_cache() const;
 	void ensure_present_effect_pose_cache() const;
+	bool cache_present_effect_pose(
+			const opennova::netsim::ClientEntityState &p_entity_state) const;
 	PackedVector3Array cached_present_effect_state_for_handle(uint16_t p_handle) const;
 	PackedVector3Array present_effect_state_for_handle(uint16_t p_handle) const;
 
@@ -1145,6 +1176,11 @@ public:
 	// get_entity_count() records, PF_STRIDE floats each, fields per the PresentField enum. Avoids the
 	// ~10 Variant-boxed scalar getter calls per entity the present loop would otherwise make.
 	PackedFloat32Array get_present_snapshot() const;
+	// Revision for the exact ordered identity layout of the most recently
+	// returned snapshot. Pose-only changes keep this stable.
+	int64_t get_present_layout_revision() const {
+		return static_cast<int64_t>(present_layout_revision_);
+	}
 	int get_present_stride() const { return PF_STRIDE; }
 
 	// Wire the terrain the AI grounds on (the host's loaded NovaTerrainData). Copies the depth

@@ -2104,6 +2104,7 @@ class OcclusionSimStub:
 	var culled := PackedInt32Array()
 	var water_visible := true
 	var frame_calls := 0
+	var iris_calls := 0
 	func local_player_blink_flags() -> int:
 		return blink_flags
 	func run_occlusion_frame(_camera: Transform3D, _fov_y: float, _aspect: float,
@@ -2115,6 +2116,10 @@ class OcclusionSimStub:
 		return culled
 	func occlusion_water_visible() -> bool:
 		return water_visible
+	func compute_iris_samples(_origin: Vector3, _forward: Vector3,
+			_light_dir: Vector3) -> PackedFloat32Array:
+		iris_calls += 1
+		return PackedFloat32Array([0.25, 0.5, 0.75])
 
 
 class OcclusionRegistryStub:
@@ -2147,6 +2152,11 @@ class MaskedBuildingStub:
 	var applied_mask := -1
 	func set_section_visibility_mask(mask: int) -> void:
 		applied_mask = mask
+
+
+class IrisWeatherStub:
+	extends Node
+	var iris_samples := PackedFloat32Array()
 
 
 func test_occlusion_frame_drives_masks_gates_and_water_override() -> void:
@@ -2240,6 +2250,76 @@ func test_occlusion_never_resurrects_sim_hidden_nodes() -> void:
 	npc.visible = true
 	world.tick(Vector3.ZERO)
 	assert_true(npc.visible, "an un-culled, un-hidden npc stays visible")
+
+
+func test_probe_occlusion_skip_restores_frame_state_and_keeps_iris_live() -> void:
+	var world := _make_world()
+	var water := Node3D.new()
+	water.name = "NovaWater"
+	world.add_child(water)
+	var weather := IrisWeatherStub.new()
+	weather.name = "NovaWeather"
+	world.add_child(weather)
+	add_child_autofree(world)
+	var runtime := OcclusionRuntimeStub.new()
+	add_child_autofree(runtime)
+	var building := MaskedBuildingStub.new()
+	world.add_child(building)
+	var npc := Node3D.new()
+	world.add_child(npc)
+	runtime.registry.nodes[42] = building
+	runtime.registry.nodes[7] = npc
+	# A zero batch-visible bit hides the whole building while the low word still
+	# drives its section mask.
+	runtime.sim.building_vis = PackedInt64Array([42, 0x5])
+	runtime.sim.culled = PackedInt32Array([7])
+	runtime.sim.blink_flags = 0x8
+	runtime.sim.water_visible = true
+	_install_runtime(world, runtime)
+
+	world.tick(Vector3.ZERO)
+	assert_false(building.visible)
+	assert_eq(building.applied_mask, 0x5)
+	assert_false(npc.visible)
+	assert_true(water.visible,
+			"the prior occlusion frame may override the authored water suppression")
+	assert_eq(runtime.sim.iris_calls, 1)
+	assert_true((world.get("_perf_probe_spans") as Dictionary).is_empty(),
+			"normal frames do not pay for or retain probe spans")
+
+	world.set("_mission_forces_indoors", true)
+	world.call("set_perf_probe_enabled", true)
+	world.set("_perf_probe_skip_occl", true)
+	var frame_calls := runtime.sim.frame_calls
+	world.tick(Vector3.ZERO)
+	assert_eq(runtime.sim.frame_calls, frame_calls,
+			"the probe skips only the new occlusion frame")
+	assert_true(building.visible, "the prior frame's whole-building hide is restored")
+	assert_eq(building.applied_mask, -1,
+			"entering the skip resets retained section masks exactly once")
+	assert_true(npc.visible, "the prior frame's entity cull is restored")
+	assert_false(water.visible,
+			"entering the skip restores authored water visibility before bypassing occlusion")
+	assert_true(bool(world.get("_mission_forces_indoors")),
+			"probe cleanup cannot erase authored mission semantics")
+	assert_eq(runtime.sim.iris_calls, 2, "iris exposure still samples while occlusion is skipped")
+	assert_eq(weather.iris_samples, PackedFloat32Array([0.25, 0.5, 0.75]))
+	var spans: Dictionary = world.get("_perf_probe_spans")
+	assert_eq(int(spans.get("occl_frame", -1)), 0,
+			"a skipped phase reports zero rather than a stale prior span")
+	assert_true(spans.has("iris"), "enabled probe frames publish the live iris span")
+
+	world.set("_perf_probe_skip_occl", false)
+	world.tick(Vector3.ZERO)
+	assert_eq(runtime.sim.frame_calls, frame_calls + 1,
+			"leaving the skip resumes the render-occlusion frame")
+	assert_false(building.visible,
+			"leaving the skip reapplies whole-building visibility")
+	assert_eq(building.applied_mask, 0x5,
+			"leaving the skip reapplies retained section masks")
+	assert_false(npc.visible, "leaving the skip reapplies entity culling")
+	assert_true(water.visible,
+			"the resumed occlusion frame may reapply its water override")
 
 
 func test_occlusion_debug_view_builds_and_frees() -> void:

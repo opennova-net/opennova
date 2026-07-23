@@ -53,6 +53,17 @@ namespace opennova::world {
 
 class World;
 
+// Static proximity coordinates are signed whole mission units stored in u16
+// table words. Decode explicitly instead of relying on signed left-shift wrap.
+inline int32_t static_slot_coord_units(uint16_t word) {
+    const int32_t raw = static_cast<int32_t>(word);
+    return raw >= 0x8000 ? raw - 0x10000 : raw;
+}
+
+inline int32_t static_slot_coord_q16(uint16_t word) {
+    return static_slot_coord_units(word) * 0x10000;
+}
+
 // ----------------------------------------------------------------------------
 // Runtime collision model (per graphic).
 // ----------------------------------------------------------------------------
@@ -166,6 +177,10 @@ struct CollisionModel {
     // refinement @ 0x5c4920, the water-straddle checks @ 0x5c8922, and
     // Entity_ComputeBoundingSphere @ 0x5c69a0]
     int32_t min[3] = {}, max[3] = {};
+    // Conservative model-origin sphere used only when Entity::bound_radius was
+    // not host-stamped. Cached at finalize time; u64 retains the full unscaled
+    // Q16 diagonal before per-entity scale and signed-runtime clamping.
+    uint64_t fallback_bound_radius_q16 = 0x10000u;
     bool valid() const { return !sections.empty(); }
 
     // Derive section AABB/bound-sphere from its volumes (the loader precomputes
@@ -590,6 +605,13 @@ public:
     // [orig: Entity_BuildProximityListsFromPools @ 0x4b8eb0] per-entity candidate
     // slices (dyn radius+4.0u / statics; pool-1 radius+6.0u) into a 3000-entry arena.
     void build_tick_tables(World &world);
+    // Mission-init pool snapshot for pre-logic consumers such as portal setup.
+    // Deliberately does not advance the 17-tick candidate-slice cadence.
+    void build_initial_tables(World &world);
+    // A spawn or registry rewind keeps an existing pool snapshot coherent. After
+    // the first candidate-slice epoch it also replaces slices immediately; before
+    // that epoch it preserves retail's initial 16 sliceless logic ticks.
+    void refresh_after_registry_change(World &world);
 
     // Replace the persistent decoded-player collision projection. Sorting by
     // wire handle gives the proxy-only subset deterministic order; no wire
@@ -757,6 +779,22 @@ public:
     int32_t static_count() const { return static_count_; }
     int32_t static_building_count() const { return static_building_count_; }
     int32_t candidate_count(EntityHandle h) const;
+    // The entity's proximity slice [orig: entity+444/448 — the g_ProxCandidateArena
+    // window Entity_BuildProximityListsFromPools fills @ 0x4b8eb0]. Pointer into
+    // the arena, valid until the next 17th-tick rebuild; null when the entity has
+    // no slice (retail's BSS-zero start: the first 16 ticks scan nothing).
+    const EntityHandle *candidate_slice(EntityHandle h, int32_t &count_out) const;
+    // True once the per-tick pool tables have been built — the discriminator
+    // between "no candidates near" and "this world never ran the table build"
+    // (headless callers), which keep whole-registry fallbacks.
+    bool tick_tables_ready() const { return tick_tables_built_; }
+    // Attach scans switch from their compatibility registry walk only after a
+    // real candidate-slice epoch exists. Initial table snapshots deliberately
+    // precede the retail 17-tick slice cadence, so treating those as an empty
+    // authoritative slice would make nearby seats temporarily disappear.
+    bool attach_candidate_slices_authoritative() const {
+        return candidate_slices_built_;
+    }
 
     // Static prox-table slot view (quantized u16 coords/radius like the retail
     // tables) — the render-occlusion engine walks the building prefix through
@@ -840,6 +878,7 @@ public:
             int32_t max_entities);
 
 private:
+    void build_tables(World &world, bool advance_candidate_slices);
     // Contact-flag side effects shared by both resolver passes (DH/DM/DL damage +
     // the CA/CM entity flags). [orig: the dispatch @ 0x4b30b7-0x4b351e]
     void apply_touch_flags(Entity *ent, uint32_t flags, int16_t &health, bool is_authority);
@@ -880,6 +919,11 @@ private:
     const CollisionTargetView *target_view(const World &world, EntityHandle h,
                                            CollisionTargetView &scratch,
                                            std::vector<CollisionMatrix> &mat_scratch) const;
+    // target_view's model selection without the section-matrix build: fills the
+    // entity position and bound radius for the witnessed gate-before-view order.
+    // False exactly when target_view would return null.
+    bool target_bound(const World &world, EntityHandle h, int32_t pos_out[3],
+                      int32_t &radius_out) const;
 
     // One sound-occlusion LOS ray (terrain + building legs); true = clear.
     // [orig: Entity_CheckLineOfSightTerrainAndEntities @ 0x53b130]
@@ -894,6 +938,10 @@ private:
     std::vector<StaticSlot> statics_;   // cap 1199 counted [orig: g_StaticProx*]
     int32_t static_count_ = 0;
     int32_t static_building_count_ = 0;
+    // Build state is independent of table contents: an empty-but-built table is
+    // still authoritative and must not fall back to whole-registry scans.
+    bool tick_tables_built_ = false;
+    bool candidate_slices_built_ = false;
     // Candidate slices rebuild only every 17th tick — the counter increments per
     // tick and the rebuild fires (and resets it) once it reaches 16; pool tables
     // rebuild every tick. BSS-zero start: retail's first slice build lands on

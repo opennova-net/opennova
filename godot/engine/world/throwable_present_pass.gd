@@ -71,7 +71,10 @@ func present() -> void:
 		var pos: Vector3 = entry.get("pos", Vector3.ZERO)
 		var rot: Vector3 = entry.get("rotation_deg", Vector3.ZERO)
 		# the placer euler convention: rotation_deg = (pitch, MISSION yaw, roll)
-		node.transform = Transform3D(MissionObjectPlacer.bms_to_godot_basis(rot), pos)
+		var next_transform := Transform3D(
+				MissionObjectPlacer.bms_to_godot_basis(rot), pos)
+		if node.transform != next_transform:
+			node.transform = next_transform
 	# release models whose sim state is gone (detonated, converted, removed)
 	for key in _models.keys():
 		if not seen.has(key):

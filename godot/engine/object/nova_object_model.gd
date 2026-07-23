@@ -98,6 +98,7 @@ var _bounds_dirty := true
 # already resident on the materials -- invisible in Godot's retained-mode renderer, and so
 # parity-preserving against the original engine's output.
 var _has_lights := false
+var _has_live_panm := false
 var _material_needs_eval: Array[bool] = []          # parallel to _surface_materials
 var _dynamic_material_slots: PackedInt32Array = PackedInt32Array()
 var _last_env_gen := -1
@@ -712,10 +713,16 @@ func set_weapon_channel(key: String, phase_ticks: int) -> void:
 
 
 func set_aim_overlay(deltas: Array) -> void:
-	_aim_overlay_deltas = deltas
+	var overlay_changed := deltas != _aim_overlay_deltas
+	var classes_changed := false
 	if not deltas.is_empty() and _aim_overlay_classes.is_empty() and _skeletal != null \
 			and _skeletal.has_method("get_overlay_classes"):
-		_aim_overlay_classes = _skeletal.get_overlay_classes()
+		var next_classes: PackedInt32Array = _skeletal.get_overlay_classes()
+		classes_changed = next_classes != _aim_overlay_classes
+		_aim_overlay_classes = next_classes
+	if not overlay_changed and not classes_changed:
+		return
+	_aim_overlay_deltas = deltas
 	_body_pose_dirty = true
 
 
@@ -793,6 +800,7 @@ func rebuild() -> void:
 	_body_pose_dirty = true
 	_bounds_dirty = true
 	_has_lights = false
+	_has_live_panm = false
 	_material_needs_eval.clear()
 	_dynamic_material_slots = PackedInt32Array()
 	_last_env_gen = -1
@@ -803,6 +811,7 @@ func rebuild() -> void:
 
 	_material_defs = _build_material_defs()
 	_active_lod = _clamp_lod_index(_active_lod)
+	_refresh_live_panm_classification()
 	# A loaded .adm drives the model: build a Skeleton3D from its .bad skeleton. This applies to
 	# BOTH per-vertex skinned models (organic bodies/arms) AND rigid models (first-person weapons) --
 	# rigid parts ride a bone via "fake skinning" (build_lod_submeshes(skeletal=true)). Without a
@@ -841,7 +850,6 @@ func rebuild() -> void:
 
 	_classify_materials()
 	_has_lights = object_data.has_method("get_light_count") and int(object_data.get_light_count()) > 0
-	_apply_robj_transforms()
 	_apply_runtime_state(0.0)
 	refresh_render_order()
 
@@ -871,6 +879,14 @@ func refresh_render_order() -> void:
 func _build_skeleton() -> void:
 	_skeleton = Skeleton3D.new()
 	_skeleton.name = "Skeleton3D"
+	# This model writes final bone poses directly and only parents skinned
+	# MeshInstance3D nodes below the skeleton; it never installs a
+	# SkeletonModifier3D, BoneAttachment3D, or physical-bone simulator. Godot's
+	# default IDLE modifier mode registers an internal process callback anyway.
+	# MANUAL removes that empty per-frame modifier pass; pose setters still queue
+	# the independent deferred skeleton/skin update.
+	_skeleton.modifier_callback_mode_process = (
+			Skeleton3D.MODIFIER_CALLBACK_MODE_PROCESS_MANUAL)
 	add_child(_skeleton)
 	var bones: Array = _skeletal.get_skeleton_bones()
 	# The rig is INDEX-driven (the model bone table pairs channels/parts by row —
@@ -909,6 +925,8 @@ func _on_object_changed() -> void:
 		# never go stale relative to the current IR -- otherwise a newly-animated material
 		# would stay frozen on this no-rebuild fast path.
 		_classify_materials()
+		_refresh_live_panm_classification()
+		_bounds_dirty = true
 		_apply_runtime_state(0.0)
 		return
 	rebuild()
@@ -921,7 +939,46 @@ func _last_object_update_mask() -> int:
 
 
 func _process(delta: float) -> void:
+	if object_data == null or not object_data.has_document():
+		return
+	if not _needs_runtime_frame_work():
+		# Keep the private preview clock continuous even while the model has no
+		# time-driven consumer. A later OED edit can make a material/PANM track
+		# live and must observe the same model age it did before this fast path.
+		# Shared-clock mission models simply sample that clock when work resumes.
+		if _panm_clock == null and _is_playing:
+			_anim_time_ms = (_anim_time_ms + int(delta * 1000.0)) & 0xffffffff
+		# Lighting/fog is the one retained-state input that can change without a
+		# model mutator. Its generation gate makes this an integer comparison in
+		# the steady state while avoiding all other per-model runtime work.
+		_apply_environment_to_materials()
+		return
 	_apply_runtime_state(delta)
+
+
+func _needs_runtime_frame_work() -> bool:
+	if (_bounds_dirty
+			or _has_live_panm
+			or not _dynamic_material_slots.is_empty()
+			or _has_lights
+			or not _part_anims.is_empty()):
+		return true
+	if _skeleton == null or _skeletal == null or _anim_key.is_empty():
+		return false
+	return (_body_pose_dirty
+			or (_is_playing and _anim_playing and not _anim_external_phase)
+			or _remote_pending_state >= 0)
+
+
+func _refresh_live_panm_classification() -> void:
+	if object_data == null:
+		_has_live_panm = false
+	elif object_data.has_method("has_live_panm_for_lod"):
+		_has_live_panm = bool(object_data.has_live_panm_for_lod(_active_lod))
+	else:
+		# Compatible/custom data without the exact classifier keeps the former
+		# conservative behavior: if it can evaluate PANM, assume it can change.
+		_has_live_panm = object_data.has_method("evaluate_panm")
 
 
 func _clamp_lod_index(lod_index: int) -> int:
@@ -1048,7 +1105,13 @@ func _apply_runtime_state(delta: float) -> void:
 			var frame_index := int(object_data.compute_anim_frame(material_index, _anim_time_ms, _ctrl_values))
 			if frame_index >= 0 and frame_index < frames.size() and frames[frame_index] is Texture2D:
 				material.set_shader_parameter("u_diffuse", frames[frame_index])
-	var robj_changed := _apply_robj_transforms()
+	# evaluate_panm builds native vectors plus a Dictionary of every ROBJ
+	# transform. For an inert PANM block those transforms are immutable: rebuild
+	# (or an exact mutator, via _bounds_dirty) applies the base pose once. Only a
+	# live time/register/view track needs this allocation-heavy call every frame.
+	var robj_changed := false
+	if _has_live_panm or _bounds_dirty:
+		robj_changed = _apply_robj_transforms()
 	_apply_lights()
 	_apply_environment_to_materials()
 	if _bounds_dirty or part_changed or robj_changed:

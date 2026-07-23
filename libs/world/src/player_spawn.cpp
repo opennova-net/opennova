@@ -2,6 +2,7 @@
 
 #include "world/angle.h"
 #include "world/ai.h"           // AiSystem, AiEntity
+#include "world/collision.h"
 #include "world/entity_spawn.h" // entity_reset_to_spawn_state
 #include "world/geom.h"         // to_fixed
 #include "world/infantry.h"     // anim_state
@@ -108,6 +109,8 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     // Publish the local-player handle ONLY for the host's own player — the net anchor + present
     // resolve it. A remote peer never becomes the local player. [ADR 0012]
     if (is_local) world.cached.local_player = h;
+    if (world.collision != nullptr)
+        world.collision->refresh_after_registry_change(world);
     return h;
 }
 

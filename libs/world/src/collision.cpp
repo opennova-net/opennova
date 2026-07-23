@@ -64,6 +64,31 @@ int32_t vec_len_ftol(int32_t x, int32_t y, int32_t z) {
                      static_cast<double>(z) * z);
 }
 
+uint64_t ceil_sqrt_u64(uint64_t value) {
+    // Restoring bit-by-bit integer square root. All intermediate values stay
+    // within u64, including the maximum three-axis Q16 squared sum used when a
+    // CollisionModel is finalized.
+    uint64_t remainder = value;
+    uint64_t root = 0;
+    uint64_t bit = uint64_t{1} << 62; // highest power of four representable in u64
+    while (bit > remainder) bit >>= 2;
+    while (bit != 0) {
+        if (remainder >= root + bit) {
+            remainder -= root + bit;
+            root = (root >> 1) + bit;
+        } else {
+            root >>= 1;
+        }
+        bit >>= 2;
+    }
+    return root + (remainder != 0 ? 1u : 0u);
+}
+
+uint64_t int32_magnitude(int32_t value) {
+    return value < 0 ? static_cast<uint64_t>(-static_cast<int64_t>(value))
+                     : static_cast<uint64_t>(value);
+}
+
 int32_t person_effective_radius(int32_t section, int32_t authored_radius,
                                 int32_t extra_radius) {
     const int32_t scale = section == 14 ? 65 : 45;
@@ -194,6 +219,26 @@ void CollisionModel::finalize_sections() {
         if (s.min_z < min[2]) min[2] = s.min_z;
         if (s.max_z > max[2]) max[2] = s.max_z;
     }
+
+    // Cache the model-derived fallback sphere once. Per-query broad phases only
+    // apply entity scale to this value; they never rescan sections or take a
+    // square root. Combining the farthest extent on each axis is conservative
+    // even when the extrema come from different sections. Each component is at
+    // most 2^31, so the three squares total at most 3*2^62 and fit in u64.
+    uint64_t farthest[3] = {};
+    for (const CollisionSection &s : sections) {
+        const int32_t lo[3] = {s.min_x, s.min_y, s.min_z};
+        const int32_t hi[3] = {s.max_x, s.max_y, s.max_z};
+        for (int axis = 0; axis < 3; ++axis) {
+            farthest[axis] = std::max(farthest[axis], int32_magnitude(lo[axis]));
+            farthest[axis] = std::max(farthest[axis], int32_magnitude(hi[axis]));
+        }
+    }
+    const uint64_t squared = farthest[0] * farthest[0] +
+                             farthest[1] * farthest[1] +
+                             farthest[2] * farthest[2];
+    fallback_bound_radius_q16 =
+            std::max<uint64_t>(ceil_sqrt_u64(squared), 0x10000u);
 }
 
 // ----------------------------------------------------------------------------
@@ -1151,6 +1196,26 @@ bool collision_raycast_polygons(const CollisionTargetView &target,
 // ----------------------------------------------------------------------------
 // Contact force. [orig: Entity_ComputeBoneCollisionForce @ 0x4ae150]
 // ----------------------------------------------------------------------------
+namespace {
+
+// The target entity's placement bound is available without resolving its live
+// section matrices. Keep this predicate identical to the contact walk's first
+// gate so proximity candidates that cannot touch any query point never invoke
+// the host pose callback.
+bool contact_query_overlaps_bound(const int32_t target_pos[3], int32_t target_bound_radius,
+                                  const ContactQuery &q) {
+    for (int32_t i = 0; i < q.num_points; ++i) {
+        const int32_t combined = target_bound_radius + q.radii[i];
+        if (abs32(q.points[i].x - target_pos[0]) <= combined &&
+            abs32(q.points[i].y - target_pos[1]) <= combined &&
+            abs32(q.points[i].z - target_pos[2]) <= combined)
+            return true;
+    }
+    return false;
+}
+
+} // namespace
+
 bool collision_contact_force(const CollisionTargetView &target, const ContactQuery &q,
                              BlinkAccum &blink, LadderContact &ladder, ContactResult &out) {
     out = ContactResult{};
@@ -1160,19 +1225,7 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
     if (model.sections.empty() || q.num_points <= 0) return false;
 
     // Broad phase per point. [orig: @ 0x4ae1d0]
-    {
-        bool any = false;
-        for (int32_t i = 0; i < q.num_points; ++i) {
-            const int32_t combined = target.bound_radius + q.radii[i];
-            if (abs32(q.points[i].x - target.pos[0]) <= combined &&
-                abs32(q.points[i].y - target.pos[1]) <= combined &&
-                abs32(q.points[i].z - target.pos[2]) <= combined) {
-                any = true;
-                break;
-            }
-        }
-        if (!any) return false;
-    }
+    if (!contact_query_overlaps_bound(target.pos, target.bound_radius, q)) return false;
 
     int32_t any_collision = 0;
     int32_t max_penetration = 0;
@@ -1541,6 +1594,16 @@ int32_t CollisionWorld::candidate_count(EntityHandle h) const {
     return it == candidates_.end() ? 0 : it->second.count;
 }
 
+const EntityHandle *CollisionWorld::candidate_slice(EntityHandle h, int32_t &count_out) const {
+    auto it = candidates_.find(h.packed);
+    if (it == candidates_.end() || it->second.count <= 0) {
+        count_out = 0;
+        return nullptr;
+    }
+    count_out = it->second.count;
+    return arena_.data() + it->second.start;
+}
+
 CollisionWorld::StaticSlotView CollisionWorld::static_slot(int32_t i) const {
     StaticSlotView v;
     if (i < 0 || i >= static_count_) return v;
@@ -1595,23 +1658,27 @@ void entity_pos_fixed(const Entity &e, int32_t out[3]) {
 // Collision-model fallback for hosts/tests that have not stamped entity+0.
 // The real proximity-table radius is the model-header bound on Entity; deriving
 // max |collision AABB corner| is only the best available fallback.
-int32_t entity_bound_radius(const CollisionWorld &cw, const CollisionModel *model) {
+int32_t entity_bound_radius(const CollisionWorld &cw, const CollisionModel *model,
+                            int32_t uniform_scale_q16 = 0) {
     (void)cw;
     if (model == nullptr) return 0x10000;
-    int32_t r = 0x10000;
-    for (const CollisionSection &s : model->sections) {
-        const int32_t corners[6] = {abs32(s.min_x), abs32(s.max_x), abs32(s.min_y),
-                                    abs32(s.max_y), abs32(s.min_z), abs32(s.max_z)};
-        for (int i = 0; i < 6; ++i)
-            if (corners[i] > r) r = corners[i];
+    uint64_t radius = model->fallback_bound_radius_q16;
+
+    // Zero is the ordinary unscaled sentinel. A host-stamped Entity bound is
+    // already effective; only this model-derived fallback needs matrix scale.
+    if (uniform_scale_q16 != 0) {
+        const uint64_t scale = int32_magnitude(uniform_scale_q16);
+        radius = (radius * scale + 0xFFFFu) >> 16; // ceil Q16 multiplication
     }
-    return r;
+    constexpr uint64_t kMaxSafeRadius = 2147352576u; // leaves static-table pad headroom
+    if (radius > kMaxSafeRadius) radius = kMaxSafeRadius;
+    return static_cast<int32_t>(radius);
 }
 
 int32_t entity_proximity_radius(const CollisionWorld &cw, const Entity &e,
                                 const CollisionModel *fallback_model) {
     if (e.bound_radius > 0.0f) return to_fixed(e.bound_radius);
-    return entity_bound_radius(cw, fallback_model);
+    return entity_bound_radius(cw, fallback_model, e.uniform_scale_q16);
 }
 
 } // namespace
@@ -1635,6 +1702,15 @@ void CollisionWorld::replace_projectile_person_proxies(
 }
 
 void CollisionWorld::build_tick_tables(World &world) {
+    build_tables(world, true);
+}
+
+void CollisionWorld::build_initial_tables(World &world) {
+    build_tables(world, false);
+}
+
+void CollisionWorld::build_tables(World &world, bool advance_candidate_slices) {
+    tick_tables_built_ = true;
     // Packed pool/slot handles are reused. Remove every binding whose recorded
     // lifetime no longer names the registry occupant before any proximity,
     // contact, or occlusion consumer can observe its old model or husk.
@@ -1679,20 +1755,10 @@ void CollisionWorld::build_tick_tables(World &world) {
     };
     // [orig: pass 1 = itemDef type == Building; pass 2 = everything else with a
     // def — our instance map plays the "has a collision model" role.]
-    world.registry.for_each([&](const Entity &e) {
-        if (e.handle.pool() == 2 && e.kind == EntityKind::Building) push_static(e);
-    });
-    static_building_count_ = static_cast<int32_t>(statics_.size());
-    world.registry.for_each([&](const Entity &e) {
-        if (e.handle.pool() != 2 || e.kind == EntityKind::Building) return;
-        push_static(e);
-    });
-    static_count_ = static_cast<int32_t>(statics_.size());
-
     // --- pool-0 persons + pool-1 dynamics. [orig: 0x4b9340] ---
     persons_.clear();
     dynamics_.clear();
-    world.registry.for_each([&](const Entity &e) {
+    auto push_person = [&](const Entity &e) {
         if (e.kind != EntityKind::Organic || (e.flags & 1u) != 0) return;
         PersonSlot p;
         int32_t pf[3];
@@ -1701,23 +1767,59 @@ void CollisionWorld::build_tick_tables(World &world) {
         p.radius = 0x10000; // [orig: entity boundRadius; person capsule ~1u] (D-COL-3)
         p.h = e.handle;
         persons_.push_back(p);
-    });
-    // Dynamics = mounted-object pool entities with instances that are NOT buildings
-    // (vehicles ride here once vehicle collision instances land).
-    world.registry.for_each([&](const Entity &e) {
+    };
+    // Dynamics = mounted-object pool entities with instances that are NOT
+    // buildings. Seat/armory carriers also belong in the proximity table when
+    // their visual has no collision hull: attach scans consume this same slice,
+    // and the old whole-registry fallback must not be their only discovery path.
+    auto push_dynamic = [&](const Entity &e) {
         if (e.kind != EntityKind::Item || (e.flags & 1u) != 0) return;
         auto it = instances_.find(e.handle.packed);
         const CollisionModel *attached =
             it != instances_.end() ? model(it->second.model_id) : nullptr;
-        if (attached == nullptr && e.bound_radius <= 0.0f) return;
+        const bool attachable = !e.seats.empty() || !e.armory_points.empty();
+        if (attached == nullptr && e.bound_radius <= 0.0f && !attachable) return;
         DynSlot d;
         int32_t pf[3];
         entity_pos_fixed(e, pf);
         d.x = pf[0]; d.y = pf[1]; d.z = pf[2];
         d.radius = entity_proximity_radius(*this, e, attached);
+        // Without a model/entity bound, retain a conservative sphere that
+        // contains every authored interaction point. Rotation preserves this
+        // local-space length; the source's +4u slice pad then covers the attach
+        // gate around the point itself.
+        if (attached == nullptr && e.bound_radius <= 0.0f) {
+            auto include_point = [&](const Vec3 &p) {
+                const double len = std::sqrt(
+                        static_cast<double>(p.x) * p.x +
+                        static_cast<double>(p.y) * p.y +
+                        static_cast<double>(p.z) * p.z);
+                d.radius = std::max(d.radius, to_fixed(len));
+            };
+            for (const Seat &seat : e.seats) include_point(seat.seat_local);
+            for (const Vec3 &point : e.armory_points) include_point(point);
+        }
         d.h = e.handle;
         dynamics_.push_back(d);
+    };
+
+    // Each output table retains the same registry-relative order, but their
+    // independent filters share one capacity walk. Statics still require a
+    // second pass so the complete Building prefix precedes every other pool-2
+    // entry exactly as retail authored it.
+    world.registry.for_each([&](const Entity &e) {
+        if (e.handle.pool() == 2 && e.kind == EntityKind::Building) push_static(e);
+        push_person(e);
+        push_dynamic(e);
     });
+    static_building_count_ = static_cast<int32_t>(statics_.size());
+    world.registry.for_each([&](const Entity &e) {
+        if (e.handle.pool() != 2 || e.kind == EntityKind::Building) return;
+        push_static(e);
+    });
+    static_count_ = static_cast<int32_t>(statics_.size());
+
+    if (!advance_candidate_slices) return;
 
     // --- per-entity candidate slices, every 17th tick. [orig: 0x4b8eb0 — pool 0
     // radius +4.0u, pool 1 +6.0u, shared 3000-entry arena; the call is gated on
@@ -1730,6 +1832,7 @@ void CollisionWorld::build_tick_tables(World &world) {
         return; // keep the previous slices/arena
     }
     slice_refresh_counter_ = 0;
+    candidate_slices_built_ = true;
     arena_.clear();
     candidates_.clear();
     auto build_for = [&](const Entity &e, int32_t pad) {
@@ -1755,9 +1858,9 @@ void CollisionWorld::build_tick_tables(World &world) {
         for (int32_t i = 0; i < static_cast<int32_t>(statics_.size()); ++i) {
             const StaticSlot &s = statics_[i];
             if (s.h == e.handle) continue;
-            const int32_t sx = static_cast<int32_t>(s.x) << 16;
-            const int32_t sy = static_cast<int32_t>(s.y) << 16;
-            const int32_t sz = static_cast<int32_t>(s.z) << 16;
+            const int32_t sx = static_slot_coord_q16(s.x);
+            const int32_t sy = static_slot_coord_q16(s.y);
+            const int32_t sz = static_slot_coord_q16(s.z);
             // No quantization slack: the original accepts the +-0.5u table error
             // as-is (the +111876 radius pad at table build absorbs it).
             // [orig: total = range + (radius << 16) @ 0x4b902f]
@@ -1771,10 +1874,12 @@ void CollisionWorld::build_tick_tables(World &world) {
         }
         candidates_[e.handle.packed] = slice;
     };
-    world.registry.for_each([&](const Entity &e) {
-        if (e.kind == EntityKind::Organic && (e.flags & 1u) == 0)
-            build_for(e, 0x40000); // [orig: pool-0 +4.0u]
-    });
+    // persons_ uses the same registry order and exact organic/active predicate,
+    // so it is also the already-compacted source walk for this refresh.
+    for (const PersonSlot &person : persons_) {
+        const Entity *e = world.registry.get(person.h);
+        if (e != nullptr) build_for(*e, 0x40000); // [orig: pool-0 +4.0u]
+    }
     // Pool-1 SOURCE slices for motor-driven vehicles (the hull contact query's
     // candidate set). [orig: Entity_BuildProximityListsFromPools @ 0x4b8eb0 — the
     // pool-1 leg, radius +6.0u @ 0x4b902f]
@@ -1784,6 +1889,21 @@ void CollisionWorld::build_tick_tables(World &world) {
         if (vt == nullptr || vt->physics == 0) return;
         build_for(e, 0x60000);
     });
+}
+
+void CollisionWorld::refresh_after_registry_change(World &world) {
+    if (!candidate_slices_built_) {
+        // A pre-logic pool snapshot is already authoritative, so keep it
+        // coherent after spawn/restore without consuming one of the initial 16
+        // sliceless logic ticks. Never-built headless worlds retain fallback.
+        if (tick_tables_built_) build_initial_tables(world);
+        return;
+    }
+    // Entity_BuildAllProximityLists is the spawn/teleport path in retail. Route
+    // through the normal builder so pool snapshots and the shared arena remain
+    // one coherent epoch; forcing the cadence gate also resets its counter.
+    slice_refresh_counter_ = 16;
+    build_tick_tables(world);
 }
 
 const CollisionTargetView *CollisionWorld::target_view(const World &world, EntityHandle h,
@@ -1873,13 +1993,61 @@ const CollisionTargetView *CollisionWorld::target_view(const World &world, Entit
     scratch.pitch_bam =
             bam_from_degrees_wrapped(static_cast<double>(e->pitch));
     scratch.entity_flags = e->flags;
-    scratch.bound_radius = entity_bound_radius(*this, m);
+    scratch.bound_radius = entity_proximity_radius(*this, *e, m);
     scratch.is_building = (e->kind == EntityKind::Building);
     scratch.pool_index = h.slot();
     scratch.is_ground_of_source = false;
     scratch.uniform_scale_q16 = e->uniform_scale_q16;
     scratch.live_section_pose = live_pose;
     return &scratch;
+}
+
+// The witnessed projectile broad phase over the pools-2/1 proximity slots
+// [orig: Projectile_RaycastProximitySlots @ 0x4e53d4-0x4e554a]: per-axis
+// |slotCenter - segCenter| <= radius + halfExtent, then the UNCLAMPED
+// perpendicular line distance <= radius — a segment entirely inside the bound
+// passes trivially (the D-ITEM-13d lesson: inside-sphere segments are the
+// common case near buildings). Restored from #266's round_broad_phase after
+// the #276 trace_projectile restructure dropped it, leaving every round to
+// resolve a target view (and its per-section matrix vector) for every table
+// entity each tick.
+static bool round_broad_phase(const float p0[3], const float p1[3], const float c[3],
+                              float r) {
+    const float hx = std::fabs(p1[0] - p0[0]) * 0.5f;
+    const float hy = std::fabs(p1[1] - p0[1]) * 0.5f;
+    const float hz = std::fabs(p1[2] - p0[2]) * 0.5f;
+    if (std::fabs((p0[0] + p1[0]) * 0.5f - c[0]) > r + hx) return false;
+    if (std::fabs((p0[1] + p1[1]) * 0.5f - c[1]) > r + hy) return false;
+    if (std::fabs((p0[2] + p1[2]) * 0.5f - c[2]) > r + hz) return false;
+    const float dx = p1[0] - p0[0], dy = p1[1] - p0[1], dz = p1[2] - p0[2];
+    const float len2 = dx * dx + dy * dy + dz * dz;
+    if (len2 <= 0.0f)
+        return true; // zero-length segment inside the AABB gate: the axis test decided
+    const float t = ((c[0] - p0[0]) * dx + (c[1] - p0[1]) * dy + (c[2] - p0[2]) * dz) / len2;
+    const float px = p0[0] + dx * t - c[0];
+    const float py = p0[1] + dy * t - c[1];
+    const float pz = p0[2] + dz * t - c[2];
+    return px * px + py * py + pz * pz <= r * r;
+}
+
+bool CollisionWorld::target_bound(const World &world, EntityHandle h, int32_t pos_out[3],
+                                  int32_t &radius_out) const {
+    // target_view's model selection (live identity, the husk swap, validity)
+    // WITHOUT the section-matrix build — bound-gate metadata only, so callers
+    // can run the witnessed cheap gate first and build the full view for gate
+    // survivors alone. Returns false exactly when target_view would return null.
+    const Instance *instance = live_instance(world, h);
+    if (instance == nullptr) return false;
+    const Entity *e = world.registry.get(h);
+    if (e == nullptr) return false;
+    const bool using_husk =
+            (e->engine_flags & 0x4u) != 0 && instance->husk_model_id >= 0;
+    const CollisionModel *m =
+            model(using_husk ? instance->husk_model_id : instance->model_id);
+    if (m == nullptr || !m->valid()) return false;
+    entity_pos_fixed(*e, pos_out);
+    radius_out = entity_proximity_radius(*this, *e, m);
+    return true;
 }
 
 ProjectileHit CollisionWorld::trace_projectile(const World &world,
@@ -2053,16 +2221,49 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
         return true;
     };
 
+    // Segment endpoints in slot-table units for the witnessed broad phase.
+    const float p0f[3] = {
+        static_cast<float>(trace.start.x) / 65536.0f,
+        static_cast<float>(trace.start.y) / 65536.0f,
+        static_cast<float>(trace.start.z) / 65536.0f,
+    };
+    const float p1f[3] = {
+        static_cast<float>(trace.end.x) / 65536.0f,
+        static_cast<float>(trace.end.y) / 65536.0f,
+        static_cast<float>(trace.end.z) / 65536.0f,
+    };
+
     // Each table query uses <= internally: a later equal face, section, or
     // entity overwrites the earlier result. Cross-pass arbitration stays strict.
-    auto trace_polygon_table = [&](const auto &slots, ProjectileHitClass hit_class) {
+    // `slot_to_units` scales the table's stored coordinates to world units:
+    // static slots are signed whole-unit coordinates carried in u16 storage
+    // (their +1.707u radius pad absorbs the rounding [orig: the u16 tables
+    // built @ 0x4b94cb]); dynamic slots store signed full 16.16.
+    auto trace_polygon_table = [&](const auto &slots, ProjectileHitClass hit_class,
+                                   float slot_to_units, bool signed_word_coords) {
         CollisionPolygonHit table_hit;
         EntityHandle table_entity;
         bool table_found = false;
         for (const auto &slot : slots) {
             const EntityHandle h = slot.h;
+            if (ignored(h)) continue;
+            // The slot gate runs on table fields alone; the entity resolves
+            // only for gate survivors [orig: @ 0x4e53d4 reads the slot x/y/z/
+            // radius words before any entity deref].
+            const auto coord_to_units = [&](auto value) {
+                if (signed_word_coords)
+                    return static_cast<float>(
+                            static_slot_coord_units(static_cast<uint16_t>(value)));
+                int32_t raw = static_cast<int32_t>(value);
+                return static_cast<float>(raw) * slot_to_units;
+            };
+            const float sc[3] = {coord_to_units(slot.x), coord_to_units(slot.y),
+                                 coord_to_units(slot.z)};
+            if (!round_broad_phase(p0f, p1f, sc,
+                                   static_cast<float>(slot.radius) * slot_to_units))
+                continue;
             const Entity *entity = world.registry.get(h);
-            if (ignored(h) || entity == nullptr || entity->hidden ||
+            if (entity == nullptr || entity->hidden ||
                 (entity->engine_flags & 0x02000001u) != 0)
                 continue;
             // Item self-site immunity: candidate refNum vs the mount
@@ -2153,8 +2354,9 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
         eh.material_flags = table_hit.material_flags;
         consider(eh, table_hit.distance_q16);
     };
-    trace_polygon_table(statics_, ProjectileHitClass::StaticEntity);
-    trace_polygon_table(dynamics_, ProjectileHitClass::DynamicEntity);
+    trace_polygon_table(statics_, ProjectileHitClass::StaticEntity, 1.0f, true);
+    trace_polygon_table(dynamics_, ProjectileHitClass::DynamicEntity,
+                        1.0f / 65536.0f, false);
 
     // Consume the pose owner's COBJ matrices when available. The bounded torso
     // fallback is only for entities whose production pose has not been
@@ -2380,9 +2582,9 @@ void CollisionWorld::refresh_blink(World &world, Entity &ent) {
         for (int32_t i = 0; i < static_building_count_; ++i) {
             const StaticSlot &s = statics_[i];
             if (s.h == ent.handle) continue; // [orig: the self check @ 0x4b3f13]
-            const int32_t sx = static_cast<int32_t>(s.x) << 16;
-            const int32_t sy = static_cast<int32_t>(s.y) << 16;
-            const int32_t sz = static_cast<int32_t>(s.z) << 16;
+            const int32_t sx = static_slot_coord_q16(s.x);
+            const int32_t sy = static_slot_coord_q16(s.y);
+            const int32_t sz = static_slot_coord_q16(s.z);
             const int32_t range = (static_cast<int32_t>(s.radius) << 16) + 0x8000;
             if (abs32(sx - pt.x) > range || abs32(sy - pt.y) > range || abs32(sz - pt.z) > range)
                 continue;
@@ -2416,9 +2618,9 @@ void CollisionWorld::query_blink_boxes_at_point(World &world, const int32_t pos[
     const int32_t radius = 0x8000; // [orig: searchRadius = 0x8000 @ 0x4af376]
     for (int32_t i = 0; i < static_building_count_; ++i) {
         const StaticSlot &s = statics_[i];
-        const int32_t sx = static_cast<int32_t>(s.x) << 16;
-        const int32_t sy = static_cast<int32_t>(s.y) << 16;
-        const int32_t sz = static_cast<int32_t>(s.z) << 16;
+        const int32_t sx = static_slot_coord_q16(s.x);
+        const int32_t sy = static_slot_coord_q16(s.y);
+        const int32_t sz = static_slot_coord_q16(s.z);
         const int32_t range = (static_cast<int32_t>(s.radius) << 16) + 0x8000;
         if (abs32(sx - pt.x) > range || abs32(sy - pt.y) > range || abs32(sz - pt.z) > range)
             continue;
@@ -2466,6 +2668,8 @@ int32_t CollisionWorld::raycast_ground(World &world, EntityHandle source, const 
     auto it = candidates_.find(source.packed);
     if (it != candidates_.end()) {
         const CandidateSlice slice = it->second;
+        CollisionTargetView view;
+        std::vector<CollisionMatrix> mats;
         for (int32_t i = 0; i < slice.count; ++i) {
             const EntityHandle ch = arena_[slice.start + i];
             const Entity *ce = world.registry.get(ch);
@@ -2481,20 +2685,26 @@ int32_t CollisionWorld::raycast_ground(World &world, EntityHandle source, const 
             }
             if (standing_on_source) continue;
 
-            CollisionTargetView view;
-            std::vector<CollisionMatrix> mats;
+            // Broad phase vs the ray box + line distance. [orig: @ 0x413948-0x413a66]
+            // The same entity/model metadata backs target_view below, but does
+            // not require the live section-matrix provider.
+            int32_t bound_pos[3];
+            int32_t bound_radius = 0;
+            if (!target_bound(world, ch, bound_pos, bound_radius)) continue;
+            if (abs32(ray.mid[1] - bound_pos[1]) >
+                    bound_radius + static_cast<int32_t>(ray.half[1]) ||
+                abs32(ray.mid[0] - bound_pos[0]) >
+                    bound_radius + static_cast<int32_t>(ray.half[0]) ||
+                abs32(ray.mid[2] - bound_pos[2]) >
+                    bound_radius + static_cast<int32_t>(ray.half[2]))
+                continue;
+            if (ray_line_distance(ray.start, ray.dir, bound_pos) > bound_radius) continue;
+
             const CollisionTargetView *tv = target_view(world, ch, view, mats);
             if (tv == nullptr) continue;
-            // Broad phase vs the ray box + line distance. [orig: @ 0x413948-0x413a66]
-            if (abs32(ray.mid[1] - tv->pos[1]) >
-                    tv->bound_radius + static_cast<int32_t>(ray.half[1]) ||
-                abs32(ray.mid[0] - tv->pos[0]) >
-                    tv->bound_radius + static_cast<int32_t>(ray.half[0]) ||
-                abs32(ray.mid[2] - tv->pos[2]) >
-                    tv->bound_radius + static_cast<int32_t>(ray.half[2]))
-                continue;
-            if (ray_line_distance(ray.start, ray.dir, tv->pos) > tv->bound_radius) continue;
-            if (collision_raycast_model(*tv, ray) && out_hit_entity) *out_hit_entity = ch;
+            if (collision_raycast_model(*tv, ray)) {
+                if (out_hit_entity) *out_hit_entity = ch;
+            }
         }
     }
     return ray.end[2];
@@ -2709,22 +2919,46 @@ bool CollisionWorld::raycast_clear(World &world, const int32_t a[3], const int32
         if (e.ground_target.valid() &&
             (e.ground_target == exclude_a || e.ground_target == exclude_b))
             return false;
+        // The bound gate runs on target_bound's cheap metadata BEFORE the
+        // view/matrix build — the witnessed order [orig: the bound-sphere fold
+        // @ 0x5387c4-0x5389a4 gates first; the @ 0x413060 clip core only runs
+        // for gate survivors]. Same pos/radius inputs as the old post-view
+        // gate, so the reject set is unchanged.
+        int32_t bp[3];
+        int32_t br = 0;
+        if (!target_bound(world, e.handle, bp, br)) return false;
+        if (abs32(ray.mid[0] - bp[0]) > br + static_cast<int32_t>(ray.half[0]) ||
+            abs32(ray.mid[1] - bp[1]) > br + static_cast<int32_t>(ray.half[1]) ||
+            abs32(ray.mid[2] - bp[2]) > br + static_cast<int32_t>(ray.half[2]))
+            return false;
+        if (ray_line_distance(ray.start, ray.dir, bp) > br) return false;
         CollisionTargetView view;
         std::vector<CollisionMatrix> mats;
         const CollisionTargetView *tv = target_view(world, e.handle, view, mats);
         if (tv == nullptr) return false;
-        if (abs32(ray.mid[0] - tv->pos[0]) >
-                    tv->bound_radius + static_cast<int32_t>(ray.half[0]) ||
-            abs32(ray.mid[1] - tv->pos[1]) >
-                    tv->bound_radius + static_cast<int32_t>(ray.half[1]) ||
-            abs32(ray.mid[2] - tv->pos[2]) >
-                    tv->bound_radius + static_cast<int32_t>(ray.half[2]))
-            return false;
-        if (ray_line_distance(ray.start, ray.dir, tv->pos) > tv->bound_radius) return false;
         CollisionRay probe = ray; // model clip clips end in place; keep the walk ray whole
         return collision_raycast_model(*tv, probe);
     };
 
+    // Pool passes over the per-tick tables — the same membership the witnessed
+    // pool walk covers (@ 0x539a3a pool 2 then pool 1), without a whole-registry
+    // sweep per ray. Entities absent from the tables (no model AND no bound)
+    // could never block: target_bound returns false for them. Entries spawned
+    // after this tick's table build are missed for at most one 62 Hz tick.
+    if (tick_tables_ready()) {
+        for (const StaticSlot &s : statics_) { // pass 1: pool-2 statics
+            const Entity *e = world.registry.get(s.h);
+            if (e != nullptr && blocked_by(*e)) return false;
+        }
+        for (const DynSlot &d : dynamics_) { // pass 2: dynamics (Item kind)
+            if (d.h.pool() == 2) continue; // statics table already covered pool 2
+            const Entity *e = world.registry.get(d.h);
+            if (e != nullptr && blocked_by(*e)) return false;
+        }
+        return true;
+    }
+    // Un-ticked worlds (headless callers that never ran the per-tick table
+    // build) keep the registry sweep so LOS still sees their entities.
     bool blocked = false;
     world.registry.for_each([&](const Entity &e) { // pass 1: pool-2 statics
         if (blocked || e.handle.pool() != 2) return;
@@ -2802,27 +3036,29 @@ bool CollisionWorld::sound_los_clear(World &world, EntityHandle listener, Entity
             const Entity *ce = world.registry.get(ch);
             if (ce == nullptr) continue;
             if ((ce->flags & 1u) != 0) continue; // [orig: @ 0x538792]
+            if (ce->kind != EntityKind::Building) continue; // [orig: itemDef+92 == 5]
             // Candidates standing on the listener/source are excluded (one
             // level). [orig: the +0x28 groundEntity checks @ 0x538843-0x538877]
             if (ce->ground_target == listener) continue;
             if (source.valid() && ce->ground_target == source) continue;
 
+            int32_t bound_pos[3];
+            int32_t bound_radius = 0;
+            if (!target_bound(world, ch, bound_pos, bound_radius)) continue;
+            if (abs32(ray.mid[1] - bound_pos[1]) >
+                        bound_radius + broad_r + static_cast<int32_t>(ray.half[1]) ||
+                abs32(ray.mid[0] - bound_pos[0]) >
+                        bound_radius + broad_r + static_cast<int32_t>(ray.half[0]) ||
+                abs32(ray.mid[2] - bound_pos[2]) >
+                        bound_radius + broad_r + static_cast<int32_t>(ray.half[2]))
+                continue;
+            if (ray_line_distance(ray.start, ray.dir, bound_pos) > bound_radius + broad_r)
+                continue;
+
             CollisionTargetView view;
             std::vector<CollisionMatrix> mats;
             const CollisionTargetView *tv = target_view(world, ch, view, mats);
             if (tv == nullptr) continue;
-            if (!tv->is_building) continue; // [orig: the itemDef+92 == 5 gate @ 0x539baf]
-            // Broad phase vs the ray box + line distance, radius-padded.
-            // [orig: @ 0x5387c4-0x5389a4]
-            if (abs32(ray.mid[1] - tv->pos[1]) >
-                    tv->bound_radius + broad_r + static_cast<int32_t>(ray.half[1]) ||
-                abs32(ray.mid[0] - tv->pos[0]) >
-                    tv->bound_radius + broad_r + static_cast<int32_t>(ray.half[0]) ||
-                abs32(ray.mid[2] - tv->pos[2]) >
-                    tv->bound_radius + broad_r + static_cast<int32_t>(ray.half[2]))
-                continue;
-            if (ray_line_distance(ray.start, ray.dir, tv->pos) > tv->bound_radius + broad_r)
-                continue;
             if (sound_segment_blocked(*tv, ray, clip_radius)) return false; // blocked
         }
     }
@@ -2847,21 +3083,26 @@ bool CollisionWorld::segment_hits_static(World &world, const int32_t a[3], const
 
     for (int32_t i = 0; i < static_count_; ++i) {
         const StaticSlot &s = statics_[i];
+        // The iris path can cast nine sun rays per rendered frame. Preserve the
+        // witnessed walker order here too: reject on cheap entity metadata
+        // before resolving live section matrices for the few gate survivors.
+        int32_t bound_pos[3];
+        int32_t bound_radius = 0;
+        if (!target_bound(world, s.h, bound_pos, bound_radius)) continue;
+        if (abs32(ray.mid[1] - bound_pos[1]) >
+                    bound_radius + broad_r + static_cast<int32_t>(ray.half[1]) ||
+            abs32(ray.mid[0] - bound_pos[0]) >
+                    bound_radius + broad_r + static_cast<int32_t>(ray.half[0]) ||
+            abs32(ray.mid[2] - bound_pos[2]) >
+                    bound_radius + broad_r + static_cast<int32_t>(ray.half[2]))
+            continue;
+        if (ray_line_distance(ray.start, ray.dir, bound_pos) > bound_radius + broad_r)
+            continue;
+
         CollisionTargetView view;
         std::vector<CollisionMatrix> mats;
         const CollisionTargetView *tv = target_view(world, s.h, view, mats);
         if (tv == nullptr) continue;
-        // Broad phase vs the ray box + line distance, radius-padded.
-        // [orig: @ 0x5387c4-0x5389a4]
-        if (abs32(ray.mid[1] - tv->pos[1]) >
-                tv->bound_radius + broad_r + static_cast<int32_t>(ray.half[1]) ||
-            abs32(ray.mid[0] - tv->pos[0]) >
-                tv->bound_radius + broad_r + static_cast<int32_t>(ray.half[0]) ||
-            abs32(ray.mid[2] - tv->pos[2]) >
-                tv->bound_radius + broad_r + static_cast<int32_t>(ray.half[2]))
-            continue;
-        if (ray_line_distance(ray.start, ray.dir, tv->pos) > tv->bound_radius + broad_r)
-            continue;
         if (sound_segment_blocked(*tv, ray, radius)) return true;
     }
     return false;
@@ -2924,6 +3165,8 @@ int32_t CollisionWorld::resolve_vehicle_hull(World &world, EntityHandle source,
     BlinkAccum blink;       // vehicles accumulate no blink state
     LadderContact ladder;   // nor ladder contact frames
     int32_t severity = 0;
+    CollisionTargetView view;
+    std::vector<CollisionMatrix> mats;
 
     for (int32_t i = 0; i < slice.count; ++i) {
         const EntityHandle ch = arena_[slice.start + i];
@@ -2931,8 +3174,10 @@ int32_t CollisionWorld::resolve_vehicle_hull(World &world, EntityHandle source,
         // Skip the carrier chain like the original's groundEntity walk
         // [orig: @ 0x462e3d-0x462e4f].
         if (ent != nullptr && ent->ground_target == ch) continue;
-        CollisionTargetView view;
-        std::vector<CollisionMatrix> mats;
+        int32_t bound_pos[3];
+        int32_t bound_radius = 0;
+        if (!target_bound(world, ch, bound_pos, bound_radius)) continue;
+        if (!contact_query_overlaps_bound(bound_pos, bound_radius, q)) continue;
         const CollisionTargetView *tv = target_view(world, ch, view, mats);
         if (tv == nullptr) continue;
         ContactResult res;
@@ -3089,6 +3334,8 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     auto it = candidates_.find(source.packed);
     if (it != candidates_.end()) {
         const CandidateSlice slice = it->second;
+        CollisionTargetView view;
+        std::vector<CollisionMatrix> mats;
         for (int pass = 0; pass < 2; ++pass) {
             // [orig: first pass @ 0x4b2f54, second relaxation pass at shifted points
             // adds half the force @ 0x4b3549-0x4b36ec]
@@ -3096,8 +3343,10 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
             bool pass_contact = false;
             for (int32_t i = 0; i < slice.count; ++i) {
                 const EntityHandle ch = arena_[slice.start + i];
-                CollisionTargetView view;
-                std::vector<CollisionMatrix> mats;
+                int32_t bound_pos[3];
+                int32_t bound_radius = 0;
+                if (!target_bound(world, ch, bound_pos, bound_radius)) continue;
+                if (!contact_query_overlaps_bound(bound_pos, bound_radius, q)) continue;
                 const CollisionTargetView *tv = target_view(world, ch, view, mats);
                 if (tv == nullptr) continue;
                 if (ent != nullptr) {

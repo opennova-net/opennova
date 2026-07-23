@@ -45,6 +45,19 @@ var _unresolved := {}      # wire_handle -> runtime type_id (don't retry same fa
 var _respawn_revisions := {} # wire_handle -> last presented dead->alive epoch
 var _stats: Dictionary = { "spawned": 0, "unresolved": 0, "live": 0 }
 var _node_spawned_callback := Callable()
+var _row_plan_revision := -1
+var _row_plan_stride := 0
+var _row_plan_snapshot_size := -1
+var _row_plan_index_generation := -1
+var _row_plan_local_handle := -1
+var _row_bases := PackedInt32Array()
+var _row_handles := PackedInt32Array()
+var _row_types := PackedInt32Array()
+var _row_bms_ids := PackedInt32Array()
+var _row_kinds := PackedInt32Array()
+var _row_indices := PackedInt32Array()
+var _row_nodes: Array = []
+var _deferred_nodes: Array = []
 
 
 # Runtime handles encode the original entity pool in their high nibble. That
@@ -104,6 +117,7 @@ func reset_runtime_state() -> void:
 	_nodes.clear()
 	_unresolved.clear()
 	_respawn_revisions.clear()
+	_clear_row_plan()
 	_stats.live = 0
 
 
@@ -191,12 +205,33 @@ func present() -> void:
 	if stride <= 0:
 		return
 	var snap: PackedFloat32Array = _sim.get_present_snapshot()
+	var layout_revision := -1
+	if _sim.has_method("get_present_layout_revision"):
+		layout_revision = int(_sim.get_present_layout_revision())
+	present_snapshot(snap, stride, layout_revision)
+
+
+## Present a snapshot already fetched by MissionRuntime. Compatible sources
+## without a topology revision rebuild their routing plan every call.
+func present_snapshot(
+		snap: PackedFloat32Array, stride: int, layout_revision: int = -1) -> void:
+	if (_sim == null or _placer == null or _container == null
+			or not is_instance_valid(_container) or stride <= 0):
+		return
+	# Packed handle zero is a valid pool-0 identity, so the numeric getter cannot
+	# also carry presence. Fold the sim's explicit validity seam into a -1
+	# sentinel: the row filter needs no separate flag, and the row-plan key then
+	# distinguishes "no local player yet" from a genuine slot-0 local handle.
+	var local_handle := int(_sim.get_local_player_wire_handle()) \
+			if bool(_sim.has_local_player()) else -1
+	if _row_plan_is_current(snap, stride, layout_revision, local_handle):
+		for row in range(_row_nodes.size()):
+			_present_wire_row(
+					_row_nodes[row], snap, int(_row_bases[row]),
+					int(_row_handles[row]), false, 0, 0)
+		return
+	_begin_row_plan(snap, stride, layout_revision, local_handle)
 	var count: int = snap.size() / stride
-	# Packed handle zero is valid, so the numeric getter cannot also carry
-	# presence. NovaSimulation exposes the same explicit validity seam used by
-	# its native joiner self-filter.
-	var has_local_player: bool = bool(_sim.has_local_player())
-	var local_handle := int(_sim.get_local_player_wire_handle())
 	var live := {}
 	for i in range(count):
 		var base := i * stride
@@ -204,8 +239,8 @@ func present() -> void:
 		var handle := int(snap[base + NovaSimulation.PF_WIRE_HANDLE])
 		# A zero type row is the joiner's self-filtered echo (H) or an unresolved record;
 		# the local player handle is drawn by LocalPlayerHost. Packed handle zero is a
-		# valid pool-0 slot, so only type and the explicit local identity may filter it.
-		if type_id == 0 or (has_local_player and handle == local_handle):
+		# valid pool-0 slot, so local_handle is -1 (never a wire value) with no local player.
+		if type_id == 0 or handle == local_handle:
 			continue
 		if _synthetic_origin_only and not (
 				int(snap[base + NovaSimulation.PF_KIND]) == 255
@@ -223,6 +258,7 @@ func present() -> void:
 				int(snap[base + NovaSimulation.PF_KIND]),
 				int(snap[base + NovaSimulation.PF_INDEX]))
 			if placed != null and is_instance_valid(placed):
+				_deferred_nodes.append(placed)
 				continue
 		live[handle] = true
 		if _unresolved.has(handle):
@@ -230,11 +266,9 @@ func present() -> void:
 				continue
 			_unresolved.erase(handle)
 		var node = _nodes.get(handle)
-		if node != null and is_instance_valid(node):
-			var existing_ref: Dictionary = node.get_meta("entity_ref", {})
-			if int(existing_ref.get("runtime_type_id", 0)) != type_id:
-				_free_wire_node(handle)
-				node = null
+		if node != null and not _wire_node_matches_row(node, snap, base, type_id):
+			_free_wire_node(handle)
+			node = null
 		var spawned_now := false
 		if node == null or not is_instance_valid(node):
 			# build_player_animated_model maps the player runtime type (0x14B9) to its visual
@@ -258,47 +292,9 @@ func present() -> void:
 			_nodes[handle] = node
 			_stats.spawned += 1
 			spawned_now = true
-		var respawn_revision := int(
-				snap[base + NovaSimulation.PF_RESPAWN_REVISION])
-		var respawned_since_present := (
-				not spawned_now
-				and _respawn_revisions.has(handle)
-				and int(_respawn_revisions[handle]) != respawn_revision)
-		# Position is already Godot-space (x, z, -y); yaw is mission-space degrees. Build the
-		# basis through the ONE placement convention so a wire entity sits exactly where a
-		# placed/host-present entity would. Yaw-only (pitch/roll arrive 0 for infantry).
-		var pos := Vector3(
-			snap[base + NovaSimulation.PF_POS_X],
-			snap[base + NovaSimulation.PF_POS_Y],
-			snap[base + NovaSimulation.PF_POS_Z])
-		var rot := Vector3(
-			snap[base + NovaSimulation.PF_PITCH_DEG],
-			snap[base + NovaSimulation.PF_YAW_DEG],
-			snap[base + NovaSimulation.PF_ROLL_DEG])
-		node.transform = Transform3D(MissionObjectPlacer.bms_to_godot_basis(rot), pos)
-		PresentAimOverlay.apply(node, snap, base)
-		PresentEmplacedWeapon.clear(node)
-		_apply_procedural_part(node, snap, base)
-		PresentEmplacedWeapon.apply(node, snap, base, false)
-		# Respawn begins a fresh remote animation epoch. The decoded revision can
-		# advance even when death and respawn frames were folded by one network
-		# pump, so compare revisions rather than looking for a rendered dead row.
-		if respawned_since_present and node.has_method("reset_remote_body_state"):
-			node.reset_remote_body_state()
-		_apply_body_anim(node, snap, base)
-		_respawn_revisions[handle] = respawn_revision
-		# Host-side dynamic mount targets reach this pass instead of the placed
-		# MissionPresentPass, so consume the same retail local-view cull verdict.
-		# Joiner snapshots leave the bit clear.
-		# Death is not disappearance: non-organics retain their graphic or
-		# husk, and organics retain their corpse, until PF_HIDDEN ends their
-		# presentation. This is the same contract as MissionPresentPass.
-		node.visible = (
-				int(snap[base + NovaSimulation.PF_HIDDEN]) == 0
-				and int(snap[base +
-						NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED]) == 0)
-		if spawned_now and _node_spawned_callback.is_valid():
-			_node_spawned_callback.call(node, runtime_kind, visual_item_id)
+		_append_row_plan(node, snap, base, handle, type_id)
+		_present_wire_row(node, snap, base, handle, spawned_now,
+				runtime_kind, visual_item_id)
 	_stats.live = live.size()
 	for handle_v in _nodes.keys():
 		var handle := int(handle_v)
@@ -307,6 +303,154 @@ func present() -> void:
 	for handle_v in _unresolved.keys():
 		if not live.has(int(handle_v)):
 			_unresolved.erase(handle_v)
+
+
+func _current_index_generation() -> int:
+	if _defer_index != null and _defer_index.has_method("get_generation"):
+		return int(_defer_index.get_generation())
+	return 0
+
+
+func _clear_row_plan() -> void:
+	_row_plan_revision = -1
+	_row_plan_stride = 0
+	_row_plan_snapshot_size = -1
+	_row_plan_index_generation = -1
+	_row_plan_local_handle = -1
+	_row_bases.clear()
+	_row_handles.clear()
+	_row_types.clear()
+	_row_bms_ids.clear()
+	_row_kinds.clear()
+	_row_indices.clear()
+	_row_nodes.clear()
+	_deferred_nodes.clear()
+
+
+func _begin_row_plan(
+		snap: PackedFloat32Array,
+		stride: int,
+		layout_revision: int,
+		local_handle: int) -> void:
+	_clear_row_plan()
+	_row_plan_revision = layout_revision
+	_row_plan_stride = stride
+	_row_plan_snapshot_size = snap.size()
+	_row_plan_index_generation = _current_index_generation()
+	_row_plan_local_handle = local_handle
+
+
+func _append_row_plan(
+		node: Variant,
+		snap: PackedFloat32Array,
+		base: int,
+		handle: int,
+		type_id: int) -> void:
+	_row_bases.append(base)
+	_row_handles.append(handle)
+	_row_types.append(type_id)
+	_row_bms_ids.append(int(snap[base + NovaSimulation.PF_BMS_ID]))
+	_row_kinds.append(int(snap[base + NovaSimulation.PF_KIND]))
+	_row_indices.append(int(snap[base + NovaSimulation.PF_INDEX]))
+	_row_nodes.append(node)
+
+
+func _row_plan_is_current(
+		snap: PackedFloat32Array,
+		stride: int,
+		layout_revision: int,
+		local_handle: int) -> bool:
+	# Without a source revision, preserve compatibility by taking the cold path.
+	if layout_revision < 0 \
+			or _row_plan_revision != layout_revision \
+			or _row_plan_stride != stride \
+			or _row_plan_snapshot_size != snap.size() \
+			or _row_plan_index_generation != _current_index_generation() \
+			or _row_plan_local_handle != local_handle:
+		return false
+	for row in range(_row_nodes.size()):
+		var base := int(_row_bases[row])
+		var handle := int(_row_handles[row])
+		if base < 0 or base + stride > snap.size():
+			return false
+		var node: Variant = _row_nodes[row]
+		if (node == null or not is_instance_valid(node)
+				or _nodes.get(handle) != node):
+			return false
+		if (int(snap[base + NovaSimulation.PF_WIRE_HANDLE]) != handle
+				or int(snap[base + NovaSimulation.PF_TYPE_ID]) != int(_row_types[row])
+				or int(snap[base + NovaSimulation.PF_BMS_ID]) != int(_row_bms_ids[row])
+				or int(snap[base + NovaSimulation.PF_KIND]) != int(_row_kinds[row])
+				or int(snap[base + NovaSimulation.PF_INDEX]) != int(_row_indices[row])):
+			return false
+	for node_v in _deferred_nodes:
+		if node_v == null or not is_instance_valid(node_v):
+			return false
+	return true
+
+
+func _wire_node_matches_row(
+		node: Variant,
+		snap: PackedFloat32Array,
+		base: int,
+		type_id: int) -> bool:
+	if node == null or not is_instance_valid(node):
+		return false
+	var existing_ref: Dictionary = node.get_meta("entity_ref", {})
+	return (
+			int(existing_ref.get("runtime_type_id", 0)) == type_id
+			and int(existing_ref.get("origin_kind", -1)) ==
+					int(snap[base + NovaSimulation.PF_KIND])
+			and int(existing_ref.get("index", -1)) ==
+					int(snap[base + NovaSimulation.PF_INDEX])
+			and int(existing_ref.get("bms_id", 0)) ==
+					int(snap[base + NovaSimulation.PF_BMS_ID]))
+
+
+func _present_wire_row(
+		node: Variant,
+		snap: PackedFloat32Array,
+		base: int,
+		handle: int,
+		spawned_now: bool,
+		runtime_kind: int,
+		visual_item_id: int) -> void:
+	var respawn_revision := int(
+			snap[base + NovaSimulation.PF_RESPAWN_REVISION])
+	var respawned_since_present := (
+			not spawned_now
+			and _respawn_revisions.has(handle)
+			and int(_respawn_revisions[handle]) != respawn_revision)
+	var pos := Vector3(
+		snap[base + NovaSimulation.PF_POS_X],
+		snap[base + NovaSimulation.PF_POS_Y],
+		snap[base + NovaSimulation.PF_POS_Z])
+	var rot := Vector3(
+		snap[base + NovaSimulation.PF_PITCH_DEG],
+		snap[base + NovaSimulation.PF_YAW_DEG],
+		snap[base + NovaSimulation.PF_ROLL_DEG])
+	var entity_basis := MissionObjectPlacer.bms_to_godot_basis(rot)
+	var root_basis := (PresentAimOverlay.root_basis(snap, base, entity_basis)
+			if node.has_method("set_aim_overlay") else entity_basis)
+	var next_transform := Transform3D(root_basis, pos)
+	if node.transform != next_transform:
+		node.transform = next_transform
+	PresentAimOverlay.apply(node, snap, base, false)
+	PresentEmplacedWeapon.clear(node)
+	_apply_procedural_part(node, snap, base)
+	PresentEmplacedWeapon.apply(node, snap, base, false)
+	if respawned_since_present and node.has_method("reset_remote_body_state"):
+		node.reset_remote_body_state()
+	_apply_body_anim(node, snap, base)
+	_respawn_revisions[handle] = respawn_revision
+	var next_visible := (
+			int(snap[base + NovaSimulation.PF_HIDDEN]) == 0
+			and int(snap[base +
+					NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED]) == 0)
+	if node.visible != next_visible:
+		node.visible = next_visible
+	if spawned_now and _node_spawned_callback.is_valid():
+		_node_spawned_callback.call(node, runtime_kind, visual_item_id)
 
 
 func entity_count() -> int:
