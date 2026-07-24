@@ -363,10 +363,15 @@ func load_mission_as_joiner(target: JoinTarget) -> int:
 	return err
 
 
+# The joiner's pre-load connect deadline: the retail ConnectOrHost timeout
+# [orig: 0xEA60 ms wait in the ConnectOrHost leg of Game_StartMission].
+const JOIN_CONNECT_TIMEOUT_MS := 60000
+
+
 # Drive only the witnessed connect/session exchange while the loading screen is
-# visible. The 60-second deadline is the retail ConnectOrHost timeout (0xEA60).
+# visible.
 func _drive_join_preload(request_id: int) -> void:
-	var deadline_ms := Time.get_ticks_msec() + 60000
+	var deadline_ms := Time.get_ticks_msec() + JOIN_CONNECT_TIMEOUT_MS
 	while request_id == _join_preload_request_id and _join_preload_sim != null \
 			and not _join_preload_sim.has_join_mission():
 		_join_preload_sim.poll_join_preload()
