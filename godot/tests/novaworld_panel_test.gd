@@ -40,9 +40,10 @@ func test_host_pressed_emits_selected_mission() -> void:
 	watch_signals(panel)
 	panel._on_host_pressed()
 	assert_signal_emitted(panel, "host_requested")
-	var config: Dictionary = get_signal_parameters(panel, "host_requested")[0]
-	assert_eq(config.get("mission"), "bravo.bms", "the picked map rides the host request")
-	assert_eq(config.get("channel"), "NovaWorld", "panel hosts on the NovaWorld channel")
+	var config: HostSessionConfig = get_signal_parameters(panel, "host_requested")[0]
+	assert_eq(config.mission, "bravo.bms", "the picked map rides the host request")
+	assert_eq(config.channel, HostSessionConfig.CHANNEL_NOVAWORLD,
+		"panel hosts on the NovaWorld channel")
 
 
 func test_host_pressed_reports_when_no_missions() -> void:

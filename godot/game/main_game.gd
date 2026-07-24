@@ -10,7 +10,6 @@ extends Node3D
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
 const DebugOverlayScript := preload("res://engine/debug/nova_debug_overlay.gd")
 const DebugViewContext := preload("res://engine/debug/nova_debug_view_context.gd")
-const NetKillFeedScript := preload("res://game/net_killfeed.gd")
 const LocalPlayerHostScript := preload("res://engine/world/local_player_host.gd")
 
 # Re-summon the game-folder picker. The original engine has no "change game dir"
@@ -55,7 +54,7 @@ var _root: NovaResourceRoot
 var _state: int = State.MENU
 var _host_wired := false
 var _debug_overlay  # NovaDebugOverlay, lazily built on the first F3
-var _net_killfeed   # net spectator kill feed, built while in a net session
+var _net: NetSessionController  # every net-session entry (LAN/NovaWorld/replay + env hooks)
 # The in-game HUD rides the SHARED NovaGameHudHost — the same component ONED
 # play-in-editor mounts, so both shells run one HUD code path (editor-runtime
 # parity). It owns the lazy GameHud build, the per-frame info rebuild, and the
@@ -125,6 +124,27 @@ func has_loading_background() -> bool:
 	return _loading_screen != null and _loading_screen.has_background()
 
 
+## The mounted menu/runtime resource root (null before the first mount) —
+## so shell components (NetSessionController) and lifecycle tests resolve
+## missions/titles through one seam instead of shell internals.
+func current_resource_root() -> NovaResourceRoot:
+	return _root
+
+
+## Enter the world DIRECTLY (no menu, no loading screen): the replay-spectate
+## entry's shell half — reveal the world + HUD, enter WORLD state, and wire the
+## load-result signals. NetSessionController drives the actual net-session load.
+func enter_net_world() -> void:
+	_menu_host.hide_menu()
+	_world.visible = true
+	_set_hud_visible(true)
+	_state = State.WORLD
+	if not _world.world_loaded.is_connected(_on_world_loaded):
+		_world.world_loaded.connect(_on_world_loaded)
+	if not _world.load_failed.is_connected(_on_world_load_failed):
+		_world.load_failed.connect(_on_world_load_failed)
+
+
 func _ready() -> void:
 	if _world == null or _camera == null or _menu_host == null:
 		return
@@ -174,6 +194,14 @@ func _ready() -> void:
 	_hud_host.name = "GameHudHost"
 	add_child(_hud_host)
 	_hud_host.setup(_world, _player_host, _hud if _hud != null else self)
+	# Every net-session ENTRY (LAN browser/host, NovaWorld panel, replay + env hooks)
+	# lives on the NetSessionController component; the shell keeps the state
+	# machine, the load pipeline, and the session-presentation states.
+	_net = NetSessionController.new()
+	_net.name = "NetSessionController"
+	add_child(_net)
+	_net.setup(self, _world, _menu_host, _camera,
+			_hud if _hud != null else self, $MenuLayer)
 	# One shared frame-stats board across the shell, the world host and the HUD
 	# host; the world re-hands it to each mission runtime it creates.
 	_world.set_frame_stats_board(_frame_stats)
@@ -183,11 +211,7 @@ func _ready() -> void:
 	if _world.has_signal("mission_effects") \
 			and not _world.mission_effects.is_connected(_on_shell_mission_effects):
 		_world.mission_effects.connect(_on_shell_mission_effects)
-	# Net-replay connect mode: when NW_REPLAY is set (the env all F5/F6 instances
-	# inherit from the editor), skip the menu and dial the replay tool / server
-	# directly — each instance gets slotted into a role on connect.
-	if not OS.get_environment("NW_REPLAY").is_empty():
-		_enter_net_session()
+	if _net.maybe_launch_replay_from_env():
 		return
 	var dir := ResourceDirSettings.get_resource_dir()
 	if dir.is_empty():
@@ -201,39 +225,9 @@ func _ready() -> void:
 	if not sp_mission.is_empty():
 		_on_start_requested(sp_mission)
 		return
-	# Co-op LAN demo hooks. These remain useful for deterministic smoke runs even though
-	# mp.mnu's LAN_SEARCH now browses live hosts through NovaLanSession.
-	# NW_LAN_HOST=<mission.bms> boots straight in as a co-op host on port 32768;
-	# NW_LAN_JOIN=<ip[:port]> boots as a joiner dialing that host. The normal path learns
-	# the mission from S2C 0x7B after authentication; NW_LAN_MISSION is only an explicit
-	# legacy/debug override for isolating the already-loaded joiner runtime.
-	# Two instances on localhost = the bidirectional co-op demo. Mirrors NW_SP_MISSION above.
-	var lan_host := OS.get_environment("NW_LAN_HOST")
-	if not lan_host.is_empty():
-		# "gametype" = the numeric session g_GameType the host config chooses at host start
-		# [orig: g_GameType = session gametype setting @0x4a6657]. This LAN slice is Co-op;
-		# retail derives 0x30020 from ATTRIB_COOP. NW_LAN_GAMETYPE remains an explicit
-		# diagnostic override rather than inheriting the ASH_I5A capture's 0x10010.
-		var lan_gametype := OS.get_environment("NW_LAN_GAMETYPE")
-		_on_lan_host_start_requested({
-			"mission": lan_host,
-			"net_transport": "lan",
-			"bind_port": int(OS.get_environment("NW_LAN_PORT")) if not OS.get_environment("NW_LAN_PORT").is_empty() else 32768,
-			"game_type": "COOP",
-			"gametype": int(lan_gametype) if not lan_gametype.is_empty() else 0x30020,
-			"server_name": "DEMOHOST",
-			"max_players": 4,
-		})
-		return
-	var lan_join := OS.get_environment("NW_LAN_JOIN")
-	if not lan_join.is_empty():
-		var jp := lan_join.split(":")
-		join_lan_server({
-			"host_ip": jp[0] if jp.size() > 0 else "127.0.0.1",
-			"port": int(jp[1]) if jp.size() > 1 else 32768,
-			"mission": OS.get_environment("NW_LAN_MISSION"),
-			"player_name": _resolve_player_callsign(),
-		})
+	# Co-op LAN demo hooks (NW_LAN_HOST / NW_LAN_JOIN) ride the controller.
+	# Mirrors NW_SP_MISSION above; two instances on localhost = the co-op demo.
+	_net.maybe_launch_lan_from_env()
 
 
 # Consume Esc before weapon.mnu's host-wired CANCEL hotkey and FlyCamera can both
@@ -309,6 +303,26 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 
 
+# The F3 View-tab intent signals -> the setter each drives (the overlay only
+# emits intent; the shell owns the hosts). Data-driven so a new toggle is one
+# table row, not another boilerplate relay method.
+const WORLD_DEBUG_RELAYS := {
+	"skeleton_debug_toggled": "set_skeleton_debug",
+	"user_points_toggled": "set_user_point_debug",
+	"collision_debug_toggled": "set_collision_debug",
+	"foliage_hidden_toggled": "set_foliage_hidden",
+	"particles_hidden_toggled": "set_particles_hidden",
+	"particle_boxes_toggled": "set_particle_debug",
+	"occlusion_debug_toggled": "set_occlusion_debug",
+	"round_debug_toggled": "set_round_debug",
+	"hitbox_debug_toggled": "set_hitbox_debug",
+}
+const PLAYER_DEBUG_RELAYS := {
+	"viewmodel_forced_toggled": "set_debug_force_viewmodel",
+	"body_in_first_person_toggled": "set_debug_body_in_first_person",
+}
+
+
 # F3: the mission debug overlay over the live runtime. Built lazily; without a
 # running mission it just reports so (the runtime source re-resolves per
 # refresh, so reloads and menu round-trips never leave it stale).
@@ -323,17 +337,10 @@ func toggle_debug_overlay() -> void:
 		_debug_overlay.set_frame_stats_board(_frame_stats)
 		_debug_overlay.set_world_source(func(): return _world)
 		# The View tab toggles: the overlay only emits intent; we own the world.
-		_debug_overlay.skeleton_debug_toggled.connect(_on_skeleton_debug_toggled)
-		_debug_overlay.user_points_toggled.connect(_on_user_points_toggled)
-		_debug_overlay.collision_debug_toggled.connect(_on_collision_debug_toggled)
-		_debug_overlay.foliage_hidden_toggled.connect(_on_foliage_hidden_toggled)
-		_debug_overlay.viewmodel_forced_toggled.connect(_on_viewmodel_forced_toggled)
-		_debug_overlay.body_in_first_person_toggled.connect(_on_body_in_first_person_toggled)
-		_debug_overlay.particles_hidden_toggled.connect(_on_particles_hidden_toggled)
-		_debug_overlay.particle_boxes_toggled.connect(_on_particle_boxes_toggled)
-		_debug_overlay.occlusion_debug_toggled.connect(_on_occlusion_debug_toggled)
-		_debug_overlay.round_debug_toggled.connect(_on_round_debug_toggled)
-		_debug_overlay.hitbox_debug_toggled.connect(_on_hitbox_debug_toggled)
+		for signal_name in WORLD_DEBUG_RELAYS:
+			_debug_overlay.connect(signal_name, Callable(_world, WORLD_DEBUG_RELAYS[signal_name]))
+		for signal_name in PLAYER_DEBUG_RELAYS:
+			_debug_overlay.connect(signal_name, Callable(_player_host, PLAYER_DEBUG_RELAYS[signal_name]))
 		_debug_overlay.set_effect_world_source(_current_effect_world)
 	_debug_overlay.toggle()
 	if is_debug_overlay_open():
@@ -448,61 +455,6 @@ func hud_objective_line() -> String:
 	return _hud_host.hud_objective_line() if _hud_host != null else ""
 
 
-func _on_skeleton_debug_toggled(enabled: bool) -> void:
-	if _world != null:
-		_world.set_skeleton_debug(enabled)
-
-
-func _on_user_points_toggled(enabled: bool) -> void:
-	if _world != null:
-		_world.set_user_point_debug(enabled)
-
-
-func _on_collision_debug_toggled(enabled: bool) -> void:
-	if _world != null:
-		_world.set_collision_debug(enabled)
-
-
-func _on_round_debug_toggled(enabled: bool) -> void:
-	if _world != null:
-		_world.set_round_debug(enabled)
-
-
-func _on_hitbox_debug_toggled(enabled: bool) -> void:
-	if _world != null:
-		_world.set_hitbox_debug(enabled)
-
-
-func _on_foliage_hidden_toggled(hidden: bool) -> void:
-	if _world != null:
-		_world.set_foliage_hidden(hidden)
-
-
-func _on_viewmodel_forced_toggled(enabled: bool) -> void:
-	if _player_host != null:
-		_player_host.set_debug_force_viewmodel(enabled)
-
-
-func _on_body_in_first_person_toggled(enabled: bool) -> void:
-	if _player_host != null:
-		_player_host.set_debug_body_in_first_person(enabled)
-
-
-func _on_particles_hidden_toggled(hidden: bool) -> void:
-	if _world != null:
-		_world.set_particles_hidden(hidden)
-
-
-func _on_particle_boxes_toggled(enabled: bool) -> void:
-	if _world != null:
-		_world.set_particle_debug(enabled)
-
-
-func _on_occlusion_debug_toggled(enabled: bool) -> void:
-	if _world != null:
-		_world.set_occlusion_debug(enabled)
-
-
 # Whether the folder picker may be summoned right now: only from the menu front-end
 # and only when one is not already open. Pure predicate so it is unit-testable
 # headless (the native dialog itself cannot be shown without a display).
@@ -540,7 +492,7 @@ func _wire_host() -> void:
 	_menu_host.return_to_menu_requested.connect(_on_return_to_menu)
 	_menu_host.resume_requested.connect(_on_resume)
 	if _menu_host.has_signal("novaworld_requested"):
-		_menu_host.novaworld_requested.connect(_on_novaworld_requested)
+		_menu_host.novaworld_requested.connect(_net.open_novaworld_panel)
 	if _menu_host.has_signal("crosshair_style_changed"):
 		_menu_host.crosshair_style_changed.connect(_on_crosshair_style_changed)
 	# The multiplayer menu (mp.mnu) and the PLAYER_INFO character screen (player.mnu) are
@@ -556,8 +508,7 @@ func _wire_host() -> void:
 		push_warning("MainGame: NovaLanSession is unavailable; LAN browsing is disabled")
 	_menu_host.add_companion(_mp_host)
 	_menu_host.add_companion(_player_info_host)
-	_mp_host.lan_host_start_requested.connect(_on_lan_host_start_requested)
-	_mp_host.lan_join_requested.connect(_on_lan_join_requested)
+	_net.wire_menu_companions(_mp_host)
 	_player_info_host.avatar_chosen.connect(_on_avatar_chosen)
 
 
@@ -676,176 +627,27 @@ func _cleanup_picker() -> void:
 		_picker = null
 
 
-# --- NovaWorld (online multiplayer) ------------------------------------------
-
-var _novaworld_panel: NovaWorldPanel
-
-func _on_novaworld_requested() -> void:
-	if _novaworld_panel != null:
-		return
-	_novaworld_panel = NovaWorldPanel.new()
-	# Dev default: localhost. A prod build sets the server host from the
-	# resolved server IP before showing the panel.
-	# Hand the panel the mounted menu root so its host Map picker can list .bms missions (the world's
-	# own root is null until a mission loads). Set BEFORE add_child so the panel's _build_ui sees it.
-	_novaworld_panel.resource_root = _root
-	_menu_host.hide_menu()
-	$MenuLayer.add_child(_novaworld_panel)
-	_novaworld_panel.closed.connect(_on_novaworld_closed)
-	# Bridge the panel's resolved join into the ONE joiner path (the same handler the LAN browser +
-	# NW_LAN_JOIN env use); the panel's join dict { host_ip, port, mission, player_name } matches
-	# load_mission_as_joiner's row. Hosting from the panel routes through the shared host bring-up.
-	_novaworld_panel.join_in_match_requested.connect(_on_novaworld_join_requested)
-	_novaworld_panel.host_requested.connect(_on_novaworld_host_requested)
-
-
-func _on_novaworld_closed() -> void:
-	_dismiss_novaworld_panel()
-	_menu_host.show_menu()
-
-
-func _dismiss_novaworld_panel() -> void:
-	if _novaworld_panel != null:
-		_novaworld_panel.queue_free()
-		_novaworld_panel = null
-
-
-# The NovaWorld panel asked to host. Resolve a mission (the menu's selected one, else the first
-# available .bms), fill the callsign, and stand up a browsable listen host through the SAME bring-up
-# the mp.mnu host screen uses — the panel supplied the gate (nw_gate_host) + channel=NovaWorld, so
-# game_world._maybe_start_nw_host registers it. (A mission picker in the panel is a follow-up.)
-func _on_novaworld_host_requested(config: Dictionary) -> void:
-	# The panel picks the map; fall back to the first available .bms only if it sent none.
-	var mission := String(config.get("mission", ""))
-	if mission.is_empty():
-		mission = _resolve_default_mission()
-	if mission.is_empty():
-		# Report back so the panel leaves "Starting..." instead of hanging silently.
-		push_warning("MainGame: NovaWorld host requested but no mission is available")
-		if _novaworld_panel != null and _novaworld_panel.has_method("host_failed"):
-			_novaworld_panel.host_failed("No mission available to host (check the game folder).")
-		return
-	_dismiss_novaworld_panel()
-	config = config.duplicate(true)
-	config["mission"] = mission
-	config["net_transport"] = "lan"
-	config["bind_port"] = 32768
-	config["player_name"] = _resolve_player_callsign()
-	config["server_name"] = String(config.get("server_name", "OpenNova Host"))
-	_start_world_load({
-		"mission_file": mission,
-		"in_session": true,
-		"server_name": String(config["server_name"]),
-		"mission_name": _resolve_mission_title(mission),
-		"game_type": int(config.get("gametype", 0)),
-		"custom_text": String(config.get("custom_text", "")),
-	}, Callable(_world, "load_mission_as_host").bind(config))
-
-
-# The NovaWorld panel resolved a join target. Tear down the panel overlay, then enter the match
-# through the SAME joiner entry the LAN browser + NW_LAN_JOIN env use (info already carries
-# host_ip/port/mission/player_name).
-func _on_novaworld_join_requested(info: Dictionary) -> void:
-	_dismiss_novaworld_panel()
-	join_lan_server(info)
-
-
-# A default mission for a panel-initiated host: the mission highlighted in the menu if any, else the
-# first .bms the resource root exposes. Empty when no mission is reachable.
-func _resolve_default_mission() -> String:
-	if _menu_host != null and _menu_host.has_method("get_selected_mission"):
-		var sel := String(_menu_host.get_selected_mission())
-		if not sel.is_empty():
-			return sel
-	# The mounted menu root — the world's own root stays null until a mission loads. This is the same
-	# object the menu shell + mp host list missions from, and is non-null whenever the panel can open.
-	return MissionCatalog.first_mission_name(_root)
-
-
 # --- Menu <-> world transitions ----------------------------------------------
 
 func _on_start_requested(bms_name: String) -> void:
 	# Single-player: the loading screen is the sidecar image alone — no session
 	# text [orig: the not-in-session path draws only the background @ 0x521ebe].
-	_start_world_load(
+	start_world_load(
 		{"mission_file": bms_name},
 		Callable(_world, "load_mission").bind(bms_name))
 
 
-# Host a LAN co-op game: the same menu->world handoff as a single-player start, but the
-# world loads as a listen-server host (ADR 0011) configured from the mp.mnu host screen.
-func _on_lan_host_start_requested(config: Dictionary) -> void:
-	config = config.duplicate(true)
-	# The callsign is part of the local game session. LAN does not inspect or inherit
-	# any NovaWorld service configuration; online registration is owned exclusively
-	# by _on_novaworld_host_requested and the config that panel supplies.
-	config["player_name"] = _resolve_player_callsign()
-	# g_ExpansionName is the expansion the process actually mounted (empty for base
-	# JO), not a session template or a value copied from one capture.
-	config["expansion"] = _root.get_expansion() if _root != null else ""
-	var host_mission := String(config.get("mission", ""))
-	var load_info := {
-		"mission_file": host_mission,
-		"in_session": true,
-		"server_name": String(config.get("server_name", "")),
-		"mission_name": _resolve_mission_title(host_mission),
-		"game_type": int(config.get("gametype", 0)),
-		"custom_text": String(config.get("custom_text", "")),
-	}
-	_start_world_load(
-		load_info,
-		Callable(_world, "load_mission_as_host").bind(config))
+## Public delegate for "join this server" — kept on the shell so lifecycle tests
+## and external drivers keep one ADR-0018 entry; the controller owns the path.
+func join_lan_server(target: JoinTarget) -> void:
+	_net.join_lan_server(target)
 
 
-# The player picked a discovered LAN server to join: dial it as a co-op JOINER. Same
-# menu->world handoff as a host start; the world loads as a non-authority client that runs
-# the witnessed in-match JOIN and renders the host + NPCs wire-direct (net-re §5.38b). The
-# LAN row carries only the observed host_ip/port and browse-time server fields. The mission
-# arrives after authentication in the normal S2C 0x7B session record.
-func _on_lan_join_requested(server: Dictionary) -> void:
-	join_lan_server(server)
 
 
-## Public entry for "join this LAN server row" — the shell seam behind the
-## browser's `lan_join_requested` signal, the NovaWorld panel row, and the
-## `NW_LAN_JOIN` env hook (ADR 0018).
-func join_lan_server(server: Dictionary) -> void:
-	server = server.duplicate(true)
-	# Joiner: the retail client obtains the full session-variable set from the
-	# connect stream before local mission load [orig: parse_server_session_variables
-	# @ 0x5202f0]. Browse-time values are display hints only; GameWorld replaces
-	# them with the authoritative post-auth record before starting MissionRuntime.
-	# Retail also holds the screen through the post-load connection/game-start
-	# waits [orig: NapiClient_WaitForDisconnect @ 0x42cb20 then
-	# NapiClient_WaitForGameStart @ 0x42cc10]. GameWorld pumps the loaded runtime
-	# while hidden and reports the authoritative admission/deploy edge separately
-	# (docs/interface/loading-screen-re.md, the load-flow case matrix).
-	var load_info := {
-		"mission_file": String(server.get("mission", "")),
-		"in_session": true,
-		"server_name": String(server.get("server_name", String(server.get("name", "")))),
-		"game_type": int(server.get("gametype", -1)),
-	}
-	var pname := String(server.get("player_name", _resolve_player_callsign()))
-	_start_world_load(
-		load_info,
-		Callable(_world, "load_mission_as_joiner").bind(server, pname))
-
-
-# The local player's callsign — rides the game ClientAuth.NA (the host echoes it back so we
-# self-identify by name-match, which makes a duplicate callsign unjoinable — D-NET-169).
-# The persisted profile default is uniquified per machine (NovaPlayerProfile); NW_LAN_NAME
-# overrides for the two-instance demo.
-func _resolve_player_callsign() -> String:
-	# The override rides the same Name[16] wire echo as the profile value, so it gets
-	# the same 15-character clamp — a longer callsign can never satisfy the name-match
-	# self-ID and the join would die 60 s later with a misleading stall reason.
-	var n := OS.get_environment("NW_LAN_NAME").strip_edges() \
-			.left(NovaPlayerProfile.MAX_CALLSIGN_LENGTH)
-	return n if not n.is_empty() else NovaPlayerProfile.load_callsign()
-
-
-# Shared menu->world handoff: hide the menu, raise the loading screen, enter WORLD
+## THE load seam every mission start (the menu's SP start and every one of
+## NetSessionController's LAN/NovaWorld/env entries) routes through: hide the
+## menu, raise the loading screen, enter WORLD
 # state, and connect the load-result signals. The caller then starts the specific
 # load. The world + HUD stay hidden until the load lands — during the load only
 # the loading screen presents [orig: Game_StartMission renders via
@@ -854,7 +656,7 @@ func _resolve_player_callsign() -> String:
 # `load_info` feeds the screen: mission_file, and for a net session the session
 # variables (in_session, server_name, mission_name, game_type, custom_text)
 # [orig: the SERVERNAME/MISSIONNAME/GAMETYPE/CUSTOMTEXT session vars @ 0x5202f0].
-func _start_world_load(load_info: Dictionary, operation: Callable) -> void:
+func start_world_load(load_info: Dictionary, operation: Callable) -> void:
 	if _world_load_pending:
 		return
 	if _lan_session != null and _lan_session.has_method("stop"):
@@ -954,62 +756,6 @@ func _dismiss_loading_screen() -> void:
 		_loading_screen.queue_free()
 		_loading_screen = null
 
-
-# MISSIONNAME for the loading screen = the mission text .bin's [info]/title
-# [orig: serialize_mission_info_to_datastream @ 0x523620 ->
-# TextResource_FindEntryBySectionAndKey(g_TextMission, "info", "title"); an
-# empty title falls back to the mission-header title]. Our fallback: the
-# mission basename.
-func _resolve_mission_title(bms_name: String) -> String:
-	var base := bms_name.get_file().get_basename()
-	if _root == null:
-		return base
-	var bytes := _root.read_file(base + ".bin")
-	if bytes.is_empty():
-		return base
-	var table := RtxtStringFile.new()
-	if table.load_from_byte_array(bytes) != OK:
-		return base
-	if not table.has_string_in_section("info", "title"):
-		return base
-	var title := table.get_string_in_section("info", "title")
-	return title if not title.is_empty() else base
-
-
-# Spectate a net session (no menu). The source (replay tool or a real server) is
-# at NW_REPLAY="host:port"; the map name comes off the wire, so only the resource
-# dir is needed: NW_REPLAY_DIR (else the persisted one), NW_REPLAY_LOOSE for a flat
-# extract, and NW_REPLAY_ITEMS as an optional items.def override.
-func _enter_net_session() -> void:
-	var ep := OS.get_environment("NW_REPLAY")
-	var parts := ep.split(":")
-	_menu_host.hide_menu()
-	_world.visible = true
-	_set_hud_visible(true)
-	_state = State.WORLD
-	if not _world.world_loaded.is_connected(_on_world_loaded):
-		_world.world_loaded.connect(_on_world_loaded)
-	if not _world.load_failed.is_connected(_on_world_load_failed):
-		_world.load_failed.connect(_on_world_load_failed)
-	var err := _world.load_net_session({
-		"replay_host": parts[0] if parts.size() > 0 else "127.0.0.1",
-		"replay_port": int(parts[1]) if parts.size() > 1 else 42000,
-		"dir": OS.get_environment("NW_REPLAY_DIR"),
-		"loose": not OS.get_environment("NW_REPLAY_LOOSE").is_empty(),
-		"items": OS.get_environment("NW_REPLAY_ITEMS"),
-		"camera": _camera,
-	})
-	if err != OK:
-		push_warning("MainGame: net session failed to start (%d)" % err)
-		return
-	# Kill feed over the spectator: reads the same decoded event stream NetEventView
-	# draws in 3D, posting kill / objective lines to a top-right HUD feed.
-	if _net_killfeed == null:
-		_net_killfeed = NetKillFeedScript.new()
-		_net_killfeed.name = "NetKillFeed"
-		var host: Node = _hud if _hud != null else self
-		host.add_child(_net_killfeed)
-	_net_killfeed.set_client(_world.get_net_client())
 
 
 func _on_world_loaded() -> void:
@@ -1181,9 +927,8 @@ func _teardown_world_to_menu() -> void:
 	_world.unload()
 	if _player_host != null:
 		_player_host.setup(_world, _camera)
-	if _net_killfeed != null:
-		_net_killfeed.queue_free()
-		_net_killfeed = null
+	if _net != null:
+		_net.on_world_teardown()
 	if _hud_host != null:
 		_hud_host.teardown()
 	if _root != null:

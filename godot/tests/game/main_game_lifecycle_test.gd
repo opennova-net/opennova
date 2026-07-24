@@ -208,11 +208,11 @@ func test_join_loading_stays_raised_until_authoritative_admission() -> void:
 	world.world_loaded.connect(func() -> void:
 		observed["local_load"] = true
 	, CONNECT_ONE_SHOT)
-	_shell.join_lan_server({
-		"host_ip": "127.0.0.1",
-		"port": host.get_host_listen_port(),
-		"server_name": "browse-time hint",
-	})
+	var target := JoinTarget.new()
+	target.host_ip = "127.0.0.1"
+	target.port = host.get_host_listen_port()
+	target.server_name = "browse-time hint"
+	_shell.join_lan_server(target)
 
 	for _frame in range(1200):
 		host.step()

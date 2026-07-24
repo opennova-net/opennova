@@ -324,12 +324,16 @@ func test_joiner_runtime_owns_fire_and_throwable_presenters() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
 	var joiner := NovaSimulation.new()
 	assert_true(joiner.enable_join("127.0.0.1", 9, "PresentJoiner"))
+	var target := JoinTarget.new()
+	target.host_ip = "127.0.0.1"
+	target.port = 9
+	target.player_name = "PresentJoiner"
 	var audio := FireAudioStub.new()
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
 	assert_gt(int(rt.setup(w.mission, w.container, {
 		"simulation": joiner,
-		"net_transport": "lan-join",
+		"join_target": target,
 		"fire_audio": func(): return audio,
 	})), 0)
 
