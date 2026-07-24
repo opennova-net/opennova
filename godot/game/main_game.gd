@@ -156,30 +156,34 @@ func _ready() -> void:
 	# Two instances on localhost = the bidirectional co-op demo. Mirrors NW_SP_MISSION above.
 	var lan_host := OS.get_environment("NW_LAN_HOST")
 	if not lan_host.is_empty():
-		# "gametype" = the numeric session g_GameType the host config chooses at host start
+		# game_type = the numeric session g_GameType the host config chooses at host start
 		# [orig: g_GameType = session gametype setting @0x4a6657]. This LAN slice is Co-op;
-		# retail derives 0x30020 from ATTRIB_COOP. NW_LAN_GAMETYPE remains an explicit
-		# diagnostic override rather than inheriting the ASH_I5A capture's 0x10010.
+		# retail derives 0x30020 from ATTRIB_COOP (the record's default). NW_LAN_GAMETYPE
+		# remains an explicit diagnostic override rather than inheriting the ASH_I5A
+		# capture's 0x10010.
 		var lan_gametype := OS.get_environment("NW_LAN_GAMETYPE")
-		_on_lan_host_start_requested({
-			"mission": lan_host,
-			"net_transport": "lan",
-			"bind_port": int(OS.get_environment("NW_LAN_PORT")) if not OS.get_environment("NW_LAN_PORT").is_empty() else 32768,
-			"game_type": "COOP",
-			"gametype": int(lan_gametype) if not lan_gametype.is_empty() else 0x30020,
-			"server_name": "DEMOHOST",
-			"max_players": 4,
-		})
+		var lan_port := OS.get_environment("NW_LAN_PORT")
+		var demo_config := HostSessionConfig.new()
+		demo_config.mission = lan_host
+		demo_config.server_name = "DEMOHOST"
+		demo_config.max_players = 4
+		if not lan_port.is_empty():
+			demo_config.bind_port = int(lan_port)
+		if not lan_gametype.is_empty():
+			demo_config.game_type = int(lan_gametype)
+		_on_lan_host_start_requested(demo_config)
 		return
 	var lan_join := OS.get_environment("NW_LAN_JOIN")
 	if not lan_join.is_empty():
 		var jp := lan_join.split(":")
-		_on_lan_join_requested({
-			"host_ip": jp[0] if jp.size() > 0 else "127.0.0.1",
-			"port": int(jp[1]) if jp.size() > 1 else 32768,
-			"mission": OS.get_environment("NW_LAN_MISSION"),
-			"player_name": _resolve_player_callsign(),
-		})
+		var demo_target := JoinTarget.new()
+		if jp.size() > 0 and not jp[0].is_empty():
+			demo_target.host_ip = jp[0]
+		if jp.size() > 1:
+			demo_target.port = int(jp[1])
+		demo_target.mission = OS.get_environment("NW_LAN_MISSION")
+		demo_target.player_name = _resolve_player_callsign()
+		_on_lan_join_requested(demo_target)
 
 
 # Consume Esc before weapon.mnu's host-wired CANCEL hotkey and FlyCamera can both
@@ -611,8 +615,8 @@ func _on_novaworld_requested() -> void:
 	$MenuLayer.add_child(_novaworld_panel)
 	_novaworld_panel.closed.connect(_on_novaworld_closed)
 	# Bridge the panel's resolved join into the ONE joiner path (the same handler the LAN browser +
-	# NW_LAN_JOIN env use); the panel's join dict { host_ip, port, mission, player_name } matches
-	# load_mission_as_joiner's row. Hosting from the panel routes through the shared host bring-up.
+	# NW_LAN_JOIN env use); the panel emits the same typed JoinTarget load_mission_as_joiner
+	# consumes. Hosting from the panel routes through the shared host bring-up.
 	_novaworld_panel.join_in_match_requested.connect(_on_novaworld_join_requested)
 	_novaworld_panel.host_requested.connect(_on_novaworld_host_requested)
 
@@ -630,11 +634,11 @@ func _dismiss_novaworld_panel() -> void:
 
 # The NovaWorld panel asked to host. Resolve a mission (the menu's selected one, else the first
 # available .bms), fill the callsign, and stand up a browsable listen host through the SAME bring-up
-# the mp.mnu host screen uses — the panel supplied the gate (nw_gate_host) + channel=NovaWorld, so
-# game_world._maybe_start_nw_host registers it. (A mission picker in the panel is a follow-up.)
-func _on_novaworld_host_requested(config: Dictionary) -> void:
+# the mp.mnu host screen uses — the panel supplied the gate (nw_gate_host) + the NovaWorld channel,
+# so game_world._maybe_start_nw_host registers it. (A mission picker in the panel is a follow-up.)
+func _on_novaworld_host_requested(config: HostSessionConfig) -> void:
 	# The panel picks the map; fall back to the first available .bms only if it sent none.
-	var mission := String(config.get("mission", ""))
+	var mission := config.mission
 	if mission.is_empty():
 		mission = _resolve_default_mission()
 	if mission.is_empty():
@@ -644,28 +648,26 @@ func _on_novaworld_host_requested(config: Dictionary) -> void:
 			_novaworld_panel.host_failed("No mission available to host (check the game folder).")
 		return
 	_dismiss_novaworld_panel()
-	config = config.duplicate(true)
-	config["mission"] = mission
-	config["net_transport"] = "lan"
-	config["bind_port"] = 32768
-	config["player_name"] = _resolve_player_callsign()
-	config["server_name"] = String(config.get("server_name", "OpenNova Host"))
+	config.mission = mission
+	config.player_name = _resolve_player_callsign()
+	if config.server_name.is_empty():
+		config.server_name = "OpenNova Host"
 	_start_world_load({
 		"mission_file": mission,
 		"in_session": true,
-		"server_name": String(config["server_name"]),
+		"server_name": config.server_name,
 		"mission_name": _resolve_mission_title(mission),
-		"game_type": int(config.get("gametype", 0)),
-		"custom_text": String(config.get("custom_text", "")),
+		"game_type": config.game_type,
+		"custom_text": config.custom_text,
 	}, Callable(_world, "load_mission_as_host").bind(config))
 
 
 # The NovaWorld panel resolved a join target. Tear down the panel overlay, then enter the match
-# through the SAME joiner entry the LAN browser + NW_LAN_JOIN env use (info already carries
-# host_ip/port/mission/player_name).
-func _on_novaworld_join_requested(info: Dictionary) -> void:
+# through the SAME joiner entry the LAN browser + NW_LAN_JOIN env use (the target already
+# carries host_ip/port/mission/player_name).
+func _on_novaworld_join_requested(target: JoinTarget) -> void:
 	_dismiss_novaworld_panel()
-	_on_lan_join_requested(info)
+	_on_lan_join_requested(target)
 
 
 # A default mission for a panel-initiated host: the mission highlighted in the menu if any, else the
@@ -692,23 +694,21 @@ func _on_start_requested(bms_name: String) -> void:
 
 # Host a LAN co-op game: the same menu->world handoff as a single-player start, but the
 # world loads as a listen-server host (ADR 0011) configured from the mp.mnu host screen.
-func _on_lan_host_start_requested(config: Dictionary) -> void:
-	config = config.duplicate(true)
+func _on_lan_host_start_requested(config: HostSessionConfig) -> void:
 	# The callsign is part of the local game session. LAN does not inspect or inherit
 	# any NovaWorld service configuration; online registration is owned exclusively
 	# by _on_novaworld_host_requested and the config that panel supplies.
-	config["player_name"] = _resolve_player_callsign()
+	config.player_name = _resolve_player_callsign()
 	# g_ExpansionName is the expansion the process actually mounted (empty for base
 	# JO), not a session template or a value copied from one capture.
-	config["expansion"] = _root.get_expansion() if _root != null else ""
-	var host_mission := String(config.get("mission", ""))
+	config.expansion = _root.get_expansion() if _root != null else ""
 	var load_info := {
-		"mission_file": host_mission,
+		"mission_file": config.mission,
 		"in_session": true,
-		"server_name": String(config.get("server_name", "")),
-		"mission_name": _resolve_mission_title(host_mission),
-		"game_type": int(config.get("gametype", 0)),
-		"custom_text": String(config.get("custom_text", "")),
+		"server_name": config.server_name,
+		"mission_name": _resolve_mission_title(config.mission),
+		"game_type": config.game_type,
+		"custom_text": config.custom_text,
 	}
 	_start_world_load(
 		load_info,
@@ -720,8 +720,7 @@ func _on_lan_host_start_requested(config: Dictionary) -> void:
 # the witnessed in-match JOIN and renders the host + NPCs wire-direct (net-re §5.38b). The
 # LAN row carries only the observed host_ip/port and browse-time server fields. The mission
 # arrives after authentication in the normal S2C 0x7B session record.
-func _on_lan_join_requested(server: Dictionary) -> void:
-	server = server.duplicate(true)
+func _on_lan_join_requested(target: JoinTarget) -> void:
 	# Joiner: the retail client obtains the full session-variable set from the
 	# connect stream before local mission load [orig: parse_server_session_variables
 	# @ 0x5202f0]. Browse-time values are display hints only; GameWorld replaces
@@ -733,16 +732,17 @@ func _on_lan_join_requested(server: Dictionary) -> void:
 	# local load lands and run the handshake in-world (the wire spawn gate is
 	# not surfaced above libs/npwire) (docs/interface/loading-screen-re.md
 	# D-LOADSCR-3, the load-flow case matrix).
+	if target.player_name.is_empty():
+		target.player_name = _resolve_player_callsign()
 	var load_info := {
-		"mission_file": String(server.get("mission", "")),
+		"mission_file": target.mission,
 		"in_session": true,
-		"server_name": String(server.get("server_name", String(server.get("name", "")))),
-		"game_type": int(server.get("gametype", -1)),
+		"server_name": target.server_name,
+		"game_type": target.game_type,
 	}
-	var pname := String(server.get("player_name", _resolve_player_callsign()))
 	_start_world_load(
 		load_info,
-		Callable(_world, "load_mission_as_joiner").bind(server, pname))
+		Callable(_world, "load_mission_as_joiner").bind(target))
 
 
 # The local player's callsign — rides the game ClientAuth.NA (the host echoes it back so we

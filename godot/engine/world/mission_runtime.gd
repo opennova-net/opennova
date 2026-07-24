@@ -80,10 +80,11 @@ var _effect_poses_by_ssn: Dictionary = {}
 
 
 ## Create + promote the mission, build the shared index over the placed nodes (`container`), and wire
-## the present pass. options: { loco_scale, self_tick, present_options }. Returns the AI
-## entity count, or 0 on load failure (the orphan sim is freed). Inspect
-## get_setup_error() to distinguish a valid empty mission from a setup failure.
-## The sim is held off-tree by this driver.
+## the present pass. options: { loco_scale, self_tick, present_options, and for a net
+## session the typed request under "host_session" (HostSessionConfig) or "join_target"
+## (JoinTarget) }. Returns the AI entity count, or 0 on load failure (the orphan sim is
+## freed). Inspect get_setup_error() to distinguish a valid empty mission from a setup
+## failure. The sim is held off-tree by this driver.
 func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	_clear_present_effect_poses()
 	_setup_error = OK
@@ -117,42 +118,42 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	# it too (the no-net AI-pool present is retired). A co-op LAN host additionally binds a real UDP
 	# socket; a joiner is the non-authority client.
 	var playable := bool(options.get("playable", false))
-	var net_transport := String(options.get("net_transport", ""))
-	var is_joiner := net_transport == "lan-join"
+	var join_target: JoinTarget = options.get("join_target")
+	var host_session: HostSessionConfig = options.get("host_session")
+	var is_joiner := join_target != null or _sim.is_joiner()
 	if is_joiner:
 		# Co-op LAN JOINER (a non-authority client): dial the host and run the witnessed
 		# in-match JOIN. The local player L is spawned on the name-match (inside the sim's
 		# joiner poll), NOT here. The player_name rides game ClientAuth.NA. [net-re §5.38b]
 		# A preconnected simulation already completed this socket leg while the loading
 		# screen was up; do not replace its connection or restart its handshake.
-		if not _sim.is_joiner() and not _sim.enable_join(String(options.get("host_ip", "127.0.0.1")),
-				int(options.get("port", 32768)), String(options.get("player_name", "Player"))):
+		if not _sim.is_joiner() and not _sim.enable_join(
+				join_target.host_ip, join_target.port, join_target.player_name):
 			push_warning("MissionRuntime: could not dial co-op host %s:%d — joiner disabled." % [
-				String(options.get("host_ip", "127.0.0.1")), int(options.get("port", 32768))])
-	elif net_transport == "lan":
-		# Default to the witnessed retail LAN host port — the first of the [32768, 32787]
-		# range [orig: game.cfg mplanserverportmin/max, JO_SERVER]; matches host_and_join_lan.pcapng.
-		var bind_port := int(options.get("bind_port", 32768))
-		var session_options := options.duplicate()
-		var mission_name := String(session_options.get("mission_name", "")).strip_edges()
+				join_target.host_ip, join_target.port])
+	elif host_session != null:
+		# Co-op LAN HOST: encode the typed session request at the FFI boundary (ADR 0017)
+		# and stamp the mission-derived identity the session advertises on top. bind_port
+		# defaults to the witnessed retail LAN host port (HostSessionConfig.DEFAULT_LAN_PORT);
+		# serve-and-play vs DEDICATED and the lobby player cap ride to_session_options()
+		# (net-re §5.2b, host_session_pump step 5).
+		var session_options := host_session.to_session_options()
+		var mission_name := String(options.get("mission_name", "")).strip_edges()
 		if mission_name.is_empty() and mission != null and mission.has_method("get_mission_name"):
 			mission_name = String(mission.get_mission_name()).strip_edges()
-		var mission_file := String(session_options.get("mission_file", ""))
+		var mission_file := String(options.get("mission_file", ""))
 		if mission_name.is_empty() and not mission_file.is_empty():
 			mission_name = mission_file.get_basename()
+		if not mission_file.is_empty():
+			session_options["mission_file"] = mission_file
+		if options.has("spawn_names"):
+			session_options["spawn_names"] = options["spawn_names"]
 		if not mission_name.is_empty():
 			session_options["mission_name"] = mission_name
-			if not session_options.has("spawn_names") or Array(session_options.get("spawn_names", [])).is_empty():
+			if Array(session_options.get("spawn_names", [])).is_empty():
 				session_options["spawn_names"] = [mission_name]
-		session_options["bind_port"] = bind_port
-		# Server type: serve-and-play (default) spawns + renders the host's own player and folds its
-		# loopback view; a DEDICATED host (config "dedicated") runs the listen server with NO local
-		# player and discards its loopback (net-re §5.2b, host_session_pump step 5). max_players is the
-		# lobby-advertised cap (clamped host-side to the witnessed 1..65).
-		session_options["serve_and_play"] = not bool(options.get("dedicated", false))
-		session_options["max_players"] = int(options.get("max_players", 16))
 		_sim.configure_host_session(session_options)
-		if not _sim.enable_host_listen(bind_port):
+		if not _sim.enable_host_listen(host_session.bind_port):
 			# A requested LAN host that cannot own its UDP endpoint is not a host.
 			# Never degrade into the visually-identical socketless SP/listen path:
 			# the caller must surface the bind failure and keep the menu active.

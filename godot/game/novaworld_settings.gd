@@ -14,9 +14,10 @@ enum Target { OPENNOVA = 0, REAL = 1 }
 # The original NovaWorld gate host — matches GATE_DEFAULT_HOST in
 # libs/novaworld/gate_probe.h. The OpenNova host is configured per build/run
 # (dev: localhost), so it is not stored here. GATE_PORT is the gate's UDP port,
-# shared by both targets (NovaWorldPanel's default).
+# shared by both targets (NovaWorldPanel's default); the engine-side session
+# record owns the value.
 const REAL_NOVAWORLD_HOST := "gs.novaworld.net"
-const GATE_PORT := 7597
+const GATE_PORT := HostSessionConfig.DEFAULT_GATE_PORT
 
 static func load_target() -> int:
 	var cfg := ConfigFile.new()

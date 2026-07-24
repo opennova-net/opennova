@@ -110,20 +110,20 @@ func test_start_game_emits_host_config() -> void:
 	_press(menu, "ADD_MISSIONS")
 	_press(menu, "START_GAME")
 	assert_signal_emitted(mp, "lan_host_start_requested")
-	var config: Dictionary = get_signal_parameters(mp, "lan_host_start_requested")[0]
-	assert_eq(config.get("server_name"), "CoopNight")
-	assert_eq(config.get("max_players"), 6)
-	assert_eq(config.get("game_type"), "COOP", "the co-op-minimal bring-up reports Co-op")
-	assert_eq(config.get("gametype"), 0x30020,
+	var config: HostSessionConfig = get_signal_parameters(mp, "lan_host_start_requested")[0]
+	assert_eq(config.server_name, "CoopNight")
+	assert_eq(config.max_players, 6)
+	assert_eq(config.game_type, HostSessionConfig.GAME_TYPE_COOP,
 		"the session uses the witnessed retail Co-op g_GameType, not an AS capture value")
-	assert_eq(config.get("expansion"), "",
+	assert_eq(config.game_type_attr, "", "no GAME_TYPE spin in the stand-in menu")
+	assert_eq(config.expansion, "",
 		"a base/unmounted root advertises no expansion instead of captured jox01")
-	assert_eq(config.get("mission"), "alpha.bms")
-	assert_eq(config.get("channel"), "LAN")
+	assert_eq(config.mission, "alpha.bms")
+	assert_eq(config.channel, HostSessionConfig.CHANNEL_LAN)
 	# SERVERTYPE absent in the stand-in menu -> serve-and-play (dedicated=false). The real screen's
 	# SERVERTYPE spinlist (HG_SERVEONLY value=1) flips this; the value-attr read is unit-tested in
 	# mnu_widgets_test (test_spinlist_get_value_attr_returns_value_not_label).
-	assert_eq(config.get("dedicated"), false, "no SERVERTYPE control -> serve-and-play default")
+	assert_eq(config.dedicated, false, "no SERVERTYPE control -> serve-and-play default")
 
 
 func test_start_game_defaults() -> void:
@@ -132,10 +132,12 @@ func test_start_game_defaults() -> void:
 	var menu := _make_host_menu()
 	mp.on_menu_built(menu, "jo_mp.mnu", "MULTI_PLAYER_HOST", null)
 	_press(menu, "START_GAME")
-	var config: Dictionary = get_signal_parameters(mp, "lan_host_start_requested")[0]
-	assert_eq(config.get("server_name"), "COOPGAME", "blank name -> default")
-	assert_eq(config.get("max_players"), 4, "blank cap -> default 4")
-	assert_eq(config.get("mission"), "", "no missions selected -> empty")
+	var config: HostSessionConfig = get_signal_parameters(mp, "lan_host_start_requested")[0]
+	assert_eq(config.server_name, "COOPGAME", "blank name -> default")
+	assert_eq(config.max_players, 4, "blank cap -> default 4")
+	assert_eq(config.mission, "", "no missions selected -> empty")
+	assert_eq(config.bind_port, HostSessionConfig.DEFAULT_LAN_PORT,
+		"the witnessed retail LAN host port rides the record default")
 
 
 func test_lan_join_emits_selected_server() -> void:
@@ -146,9 +148,11 @@ func test_lan_join_emits_selected_server() -> void:
 	mp._on_widget_value_changed("LAN_GAME_LIST", "list", 0, "biggy (1/4)")
 	mp._on_lan_join()
 	assert_signal_emitted(mp, "lan_join_requested")
-	var server: Dictionary = get_signal_parameters(mp, "lan_join_requested")[0]
-	assert_eq(server.get("host_ip"), "192.168.1.10")
-	assert_eq(server.get("port"), 32768)
+	var target: JoinTarget = get_signal_parameters(mp, "lan_join_requested")[0]
+	assert_eq(target.host_ip, "192.168.1.10")
+	assert_eq(target.port, 32768)
+	assert_eq(target.server_name, "biggy", "the browse-row name rides as a display hint")
+	assert_eq(target.mission, "", "map identity is absent pre-auth; 0x7B supplies it")
 
 
 func test_refreshed_lan_rows_require_a_fresh_selection() -> void:

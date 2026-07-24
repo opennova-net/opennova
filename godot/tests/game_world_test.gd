@@ -1016,6 +1016,24 @@ func test_injected_root_bypasses_settings_mount() -> void:
 		"the error names the injected root's directory, proving no settings mount ran")
 
 
+# Typed net-session request builders (the records GameWorld's host/joiner entries
+# consume; expansion/game_type ride the record defaults: "" + GAME_TYPE_COOP).
+func _lan_host_config(mission: String, bind_port: int) -> HostSessionConfig:
+	var config := HostSessionConfig.new()
+	config.mission = mission
+	config.bind_port = bind_port
+	return config
+
+
+func _join_target(host_ip: String, port: int, mission := "", player_name := "Joiner") -> JoinTarget:
+	var target := JoinTarget.new()
+	target.host_ip = host_ip
+	target.port = port
+	target.mission = mission
+	target.player_name = player_name
+	return target
+
+
 func test_failed_host_load_does_not_arm_the_next_mission_as_a_lan_host() -> void:
 	var world := _make_world()
 	add_child_autofree(world)
@@ -1026,11 +1044,8 @@ func test_failed_host_load_does_not_arm_the_next_mission_as_a_lan_host() -> void
 			ProjectSettings.globalize_path("res://../fixtures/minimal/resources")), OK)
 	world.set_resource_root(root)
 
-	assert_eq(world.load_mission_as_host({
-		"mission": "missing.bms",
-		"net_transport": "lan",
-		"bind_port": 0,
-	}), ERR_FILE_NOT_FOUND)
+	assert_eq(world.load_mission_as_host(_lan_host_config("missing.bms", 0)),
+		ERR_FILE_NOT_FOUND)
 	assert_eq(world.load_mission("mnml.bms"), OK)
 	var sim: NovaSimulation = world.get_sim()
 	assert_not_null(sim)
@@ -1053,13 +1068,7 @@ func test_lan_host_threads_truthful_base_metadata_into_the_native_session() -> v
 			ProjectSettings.globalize_path("res://../fixtures/minimal/resources")), OK)
 	world.set_resource_root(root)
 
-	assert_eq(world.load_mission_as_host({
-		"mission": "mnml.bms",
-		"net_transport": "lan",
-		"bind_port": 0,
-		"gametype": 0x30020,
-		"expansion": "",
-	}), OK)
+	assert_eq(world.load_mission_as_host(_lan_host_config("mnml.bms", 0)), OK)
 	var sim: NovaSimulation = world.get_sim()
 	assert_not_null(sim)
 	if sim != null:
@@ -1091,13 +1100,7 @@ func test_lan_host_bind_failure_is_reported_instead_of_falling_back_socketless()
 	var failures: Array[String] = []
 	world.load_failed.connect(func(reason: String): failures.append(reason))
 
-	var result := world.load_mission_as_host({
-		"mission": "mnml.bms",
-		"net_transport": "lan",
-		"bind_port": occupied_port,
-		"gametype": 0x30020,
-		"expansion": "",
-	})
+	var result := world.load_mission_as_host(_lan_host_config("mnml.bms", occupied_port))
 	assert_eq(result, ERR_CANT_CREATE)
 	assert_false(world.is_loaded())
 	assert_null(world.get_sim(), "a failed UDP host bind creates no socketless fallback sim")
@@ -1132,13 +1135,7 @@ func test_lan_host_bind_failure_survives_synchronous_teardown_handler() -> void:
 		failures.append(reason)
 		world.unload())
 
-	var result := world.load_mission_as_host({
-		"mission": "mnml.bms",
-		"net_transport": "lan",
-		"bind_port": occupied_port,
-		"gametype": 0x30020,
-		"expansion": "",
-	})
+	var result := world.load_mission_as_host(_lan_host_config("mnml.bms", occupied_port))
 	assert_eq(result, ERR_CANT_CREATE)
 	assert_eq(failures.size(), 1)
 	assert_false(world.is_loaded())
@@ -1169,7 +1166,7 @@ func test_escape_aborts_the_joiner_preload_wait() -> void:
 
 	assert_false(world.cancel_join_preload(), "no preload in flight is a no-op")
 	assert_eq(world.load_mission_as_joiner(
-			{"host_ip": "127.0.0.1", "port": silent_port}, "EscTester"), OK)
+			_join_target("127.0.0.1", silent_port, "", "EscTester")), OK)
 	await get_tree().process_frame  # the deferred preload driver starts
 	assert_true(world.cancel_join_preload(), "an in-flight preload aborts")
 	assert_eq(failures.size(), 1)
@@ -1191,11 +1188,8 @@ func test_failed_join_load_does_not_make_the_next_mission_wire_only() -> void:
 			ProjectSettings.globalize_path("res://../fixtures/minimal/resources")), OK)
 	world.set_resource_root(root)
 
-	assert_eq(world.load_mission_as_joiner({
-		"mission": "missing.bms",
-		"host_ip": "127.0.0.1",
-		"port": 9,
-	}, "Joiner"), ERR_FILE_NOT_FOUND)
+	assert_eq(world.load_mission_as_joiner(
+			_join_target("127.0.0.1", 9, "missing.bms")), ERR_FILE_NOT_FOUND)
 	assert_eq(world.load_mission("mnml.bms"), OK)
 	assert_gt(int(world.get_mission_stats().get("markers", 0)), 0,
 		"a rejected join request cannot make a later ordinary mission wire-only")
@@ -1466,11 +1460,7 @@ func test_joiner_accepts_novaworld_advertised_mission_basename() -> void:
 	assert_eq(root.set_root_dir(fixture_dir), OK)
 	world.set_resource_root(root)
 
-	var err := world.load_mission_as_joiner({
-		"mission": "mnml",
-		"host_ip": "127.0.0.1",
-		"port": 9,
-	}, "Joiner")
+	var err := world.load_mission_as_joiner(_join_target("127.0.0.1", 9, "mnml"))
 	assert_eq(err, OK, "A NovaWorld host-row basename resolves to its .bms resource.")
 	assert_eq(world.get_loaded_mission_file(), "mnml.bms",
 		"The normalized filename reaches the active mission/text-table seam.")
