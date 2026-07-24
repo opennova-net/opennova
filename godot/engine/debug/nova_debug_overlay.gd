@@ -1224,9 +1224,11 @@ func _refresh_net(sim: Object) -> void:
 	elif bool(sim.is_host_listening()):
 		_net_status_label.text = "Host — listening on UDP %d, %d peer(s)" % [
 				int(sim.get_host_listen_port()), int(sim.get_host_peer_count())]
+		# Keys as get_host_session_config() emits them (nova_simulation_net.cpp).
 		var config: Dictionary = sim.get_host_session_config()
-		for key in ["server_name", "mission", "game_type", "gametype",
-				"max_players", "dedicated", "net_transport"]:
+		for key in ["server_name", "mission_name", "mission_file", "gametype",
+				"max_players", "serve_and_play", "expansion", "player_name",
+				"bind_port"]:
 			if config.has(key):
 				rows.append("%s: %s" % [key, str(config[key])])
 	else:

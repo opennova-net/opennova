@@ -1,16 +1,10 @@
 #include "nova_world_host.h"
 
-#include <godot_cpp/classes/packet_peer_udp.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
-#include <napi/envelope.h>
 #include <napi/session.h>
-#include <novaworld/gate_probe.h>
-#include <novaworld/gate_response.h>
 
-#include <cstring>
-#include <random>
 #include <string>
 #include <utility>
 #include <vector>
@@ -19,50 +13,33 @@ namespace godot {
 
 namespace {
 
-PackedByteArray to_pba(const std::vector<uint8_t> &v) {
-	PackedByteArray out;
-	out.resize(static_cast<int>(v.size()));
-	if (!v.empty()) {
-		std::memcpy(out.ptrw(), v.data(), v.size());
-	}
-	return out;
-}
-
-std::vector<uint8_t> from_pba(const PackedByteArray &pba) {
-	std::vector<uint8_t> out(pba.size());
-	if (!out.empty()) {
-		std::memcpy(out.data(), pba.ptr(), out.size());
-	}
-	return out;
-}
-
-uint32_t pick_random_uint32() {
-	static thread_local std::mt19937 gen{std::random_device{}()};
-	return std::uniform_int_distribution<uint32_t>(1)(gen);
-}
-
 std::string to_std(const String &s) {
 	return std::string(s.utf8().get_data());
 }
 
-const char *host_state_name(NovaWorldHost::State s) {
-	switch (s) {
-	case NovaWorldHost::STATE_IDLE: return "idle";
-	case NovaWorldHost::STATE_GATE_PROBING: return "gate_probing";
-	case NovaWorldHost::STATE_SESSION_HELLO: return "session_hello";
-	case NovaWorldHost::STATE_SESSION_JOIN: return "session_join";
-	case NovaWorldHost::STATE_REGISTERING: return "registering";
-	case NovaWorldHost::STATE_HOSTING: return "hosting";
-	case NovaWorldHost::STATE_DISCONNECTED: return "disconnected";
-	case NovaWorldHost::STATE_ERROR: return "error";
-	}
-	return "unknown";
-}
-
 } // namespace
 
-NovaWorldHost::NovaWorldHost() = default;
+NovaWorldHost::NovaWorldHost() :
+		lobby_(make_lobby_hooks()) {}
 NovaWorldHost::~NovaWorldHost() = default;
+
+// The host's role-specific halves of the shared NwuLobbySession driver. The
+// gate auth codes and the CU set are stashed/built by the driver itself; the
+// host only supplies its minimal verify identity — the OpenNova gate is
+// permissive (verify is not credential-gated, NW-S5), and NWUID is echoed from
+// the ServerSessionInit by ClientSession so the request stays well-formed.
+NwuLobbySession::Hooks NovaWorldHost::make_lobby_hooks() {
+	NwuLobbySession::Hooks hooks;
+	hooks.verify_cookie_vars = []() {
+		return std::vector<std::pair<std::string, std::string>>{{"NWUID", ""}};
+	};
+	hooks.on_session_state = [this]() { sync_session_state(); };
+	hooks.on_fatal = [this](const String &message) { enter_state(STATE_ERROR, message); };
+	hooks.on_soft_error = [this](const String &message) {
+		emit_signal("error_occurred", message);
+	};
+	return hooks;
+}
 
 void NovaWorldHost::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_host", "host"), &NovaWorldHost::set_host);
@@ -161,47 +138,27 @@ void NovaWorldHost::start() {
 	if (state_ != STATE_IDLE && state_ != STATE_DISCONNECTED && state_ != STATE_ERROR) {
 		return;
 	}
-	client_index_ = pick_random_uint32();
-	client_key_ = pick_random_uint32();
-	session_.reset();
-	server_nwuid_.clear();
-	nw_udp_host_ = String();
-	nw_udp_port_ = 0;
-	handshake_elapsed_ = 0.0;
 	keepalive_accum_ = 0.0;
 	update_accum_ = 0.0;
 	update_pending_ = false;
 
-	gate_socket_.instantiate();
-	nw_socket_.instantiate();
-	if (gate_socket_->bind(0, "0.0.0.0") != OK) {
-		enter_state(STATE_ERROR, String("gate UDP bind failed"));
-		return;
-	}
-	if (nw_socket_->bind(0, "0.0.0.0") != OK) {
-		enter_state(STATE_ERROR, String("nw UDP bind failed"));
+	// The driver binds the gate/NW sockets and mints the ci/ck pair; a bind
+	// failure lands in STATE_ERROR through the on_fatal hook.
+	if (!lobby_.open()) {
 		return;
 	}
 
 	enter_state(STATE_GATE_PROBING);
-	send_gate_probe();
+	lobby_.probe(host_, gate_port_);
 }
 
 void NovaWorldHost::stop() {
-	if (session_ && nw_socket_.is_valid() && session_->is_verified()) {
+	if (lobby_.sockets_open() && lobby_.session_verified()) {
 		// Tell the gate to drop the host row, then close the session.
-		send_nw_datagram(session_->build_lobby_message(opennova::make_client_stop_hosting()));
-		send_nw_datagram(session_->build_goodbye());
+		lobby_.send(lobby_.session()->build_lobby_message(opennova::make_client_stop_hosting()));
+		lobby_.send(lobby_.session()->build_goodbye());
 	}
-	session_.reset();
-	if (gate_socket_.is_valid()) {
-		gate_socket_->close();
-		gate_socket_.unref();
-	}
-	if (nw_socket_.is_valid()) {
-		nw_socket_->close();
-		nw_socket_.unref();
-	}
+	lobby_.close();
 	if (state_ != STATE_DISCONNECTED && state_ != STATE_IDLE) {
 		enter_state(STATE_DISCONNECTED, String("stopped"));
 	}
@@ -211,17 +168,18 @@ void NovaWorldHost::_process(double delta) {
 	if (state_ == STATE_IDLE || state_ == STATE_DISCONNECTED || state_ == STATE_ERROR) {
 		return;
 	}
-	if (gate_socket_.is_valid()) poll_gate();
-	if (nw_socket_.is_valid()) poll_session();
+	// The driver pumps the gate + session sockets and the handshake timeout;
+	// role progress arrives through the hooks (sync_session_state).
+	lobby_.process(delta);
 
-	if (state_ == STATE_HOSTING && session_) {
+	if (state_ == STATE_HOSTING && lobby_.session()) {
 		// Keep the NWU session alive (the gate times out idle sessions) and push
 		// a ClientHostUpdate on the refresh interval or whenever the player count
 		// changed.
 		keepalive_accum_ += delta;
 		if (keepalive_accum_ >= keepalive_interval_s_) {
 			keepalive_accum_ = 0.0;
-			send_nw_datagram(session_->build_heartbeat());
+			lobby_.send(lobby_.session()->build_heartbeat());
 		}
 		update_accum_ += delta;
 		if (update_pending_ || update_accum_ >= update_interval_s_) {
@@ -230,135 +188,13 @@ void NovaWorldHost::_process(double delta) {
 			send_host_update();
 		}
 	}
-
-	if (state_ == STATE_GATE_PROBING || state_ == STATE_SESSION_HELLO ||
-	    state_ == STATE_SESSION_JOIN) {
-		handshake_elapsed_ += delta;
-		if (handshake_elapsed_ >= handshake_timeout_s_) {
-			enter_state(STATE_ERROR,
-			            String("handshake timeout in state ") + host_state_name(state_));
-		}
-	}
-}
-
-void NovaWorldHost::send_gate_probe() {
-	if (!gate_socket_.is_valid()) return;
-	auto probe = opennova::gate_probe_build(opennova::GATE_PROBE_TAG_JOINTOPS);
-	std::vector<uint8_t> packet(probe.size() + 4);
-	size_t out_size = 0;
-	if (opennova::napi_envelope_encode(probe.data(), probe.size(),
-	                                   packet.data(), packet.size(), &out_size) != 0) {
-		enter_state(STATE_ERROR, String("gate probe envelope encode failed"));
-		return;
-	}
-	packet.resize(out_size);
-	gate_socket_->set_dest_address(host_, gate_port_);
-	gate_socket_->put_packet(to_pba(packet));
-}
-
-void NovaWorldHost::poll_gate() {
-	if (!gate_socket_.is_valid()) return;
-	while (gate_socket_->get_available_packet_count() > 0) {
-		auto bytes = from_pba(gate_socket_->get_packet());
-		std::vector<uint8_t> inner(bytes.size());
-		size_t inner_size = 0;
-		if (opennova::napi_envelope_decode(bytes.data(), bytes.size(),
-		                                   inner.data(), inner.size(), &inner_size) != 0) {
-			emit_signal("error_occurred", String("bad gate envelope"));
-			continue;
-		}
-		inner.resize(inner_size);
-
-		opennova::GateResponse parsed;
-		if (!opennova::gate_response_decrypt_and_parse(inner.data(), inner.size(), parsed)) {
-			emit_signal("error_occurred", String("bad gate response"));
-			continue;
-		}
-		// Gate-issued session-auth codes the 0x42 join must carry as CU chunks
-		// (NW-S3): METLABEL -> MetTag, UDPCODE1/2 -> UdpCode1/2. Empty against the
-		// OpenNova gate; populated when registering against live NovaWorld.
-		gate_met_tag_ = parsed.met_label;
-		gate_udp_code1_ = parsed.udp_code1;
-		gate_udp_code2_ = parsed.udp_code2;
-		std::string udp_host;
-		uint16_t udp_port = 0;
-		if (!opennova::parse_host_port(parsed.udp_novaworld, udp_host, udp_port)) {
-			enter_state(STATE_ERROR, String("UDPNOVAWORLD malformed"));
-			return;
-		}
-		nw_udp_host_ = String(udp_host.c_str());
-		nw_udp_port_ = udp_port;
-		begin_session();
-	}
-}
-
-void NovaWorldHost::begin_session() {
-	opennova::ClientSession::Config cfg;
-	cfg.client_index = client_index_;
-	cfg.client_key = client_key_;
-
-	// 0x42-join CU set (NW-S3) — the same set retail builds in
-	// CNapiGameSession_ConnectToNovaWorld @ 0x4d4640 for any NovaWorld connection,
-	// host or join. Empty codes against the permissive OpenNova gate; populated
-	// from the gate response when registering against live NovaWorld so the
-	// server's join callbacks accept the host's session. GateTag = cfg.na (the
-	// const protocol/gate tag).
-	opennova::NovaWorldJoinCu cu;
-	cu.gate_tag = cfg.na;
-	cu.met_tag = gate_met_tag_;
-	cu.udp_code1 = gate_udp_code1_;
-	cu.udp_code2 = gate_udp_code2_;
-	cfg.cu_vars = opennova::make_novaworld_join_cu(cu);
-
-	// Minimal lobby identity — the OpenNova gate is permissive (verify is not
-	// credential-gated, NW-S5). NWUID is echoed from the ServerSessionInit so the
-	// verify request is well-formed.
-	cfg.verify_cookie_vars = {{"NWUID", ""}};
-	session_ = std::make_unique<opennova::ClientSession>(cfg);
-	enter_state(STATE_SESSION_HELLO);
-	handshake_elapsed_ = 0.0;
-	send_nw_datagram(session_->start());
-}
-
-void NovaWorldHost::send_nw_datagram(const std::vector<uint8_t> &dg) {
-	if (!nw_socket_.is_valid() || dg.empty()) return;
-	nw_socket_->set_dest_address(nw_udp_host_, nw_udp_port_);
-	nw_socket_->put_packet(to_pba(dg));
-}
-
-void NovaWorldHost::poll_session() {
-	if (!nw_socket_.is_valid() || !session_) return;
-	while (nw_socket_->get_available_packet_count() > 0) {
-		auto bytes = from_pba(nw_socket_->get_packet());
-		std::vector<std::vector<uint8_t>> replies;
-		const bool ok = session_->handle_datagram(bytes.data(), bytes.size(), replies);
-		if (server_nwuid_.empty() && !session_->server_nwuid().empty()) {
-			server_nwuid_ = session_->server_nwuid();
-		}
-		for (const auto &dg : replies) {
-			send_nw_datagram(dg);
-		}
-		if (!ok) {
-			enter_state(STATE_ERROR, String(session_->last_error().c_str()));
-			return;
-		}
-		sync_session_state();
-	}
-
-	// Match the retail session boundary: ClientConnected is a one-shot from the
-	// periodic update after ServerSessionInit, not a synchronous 0x82 reply.
-	// [orig: CNapiGameSession_ProcessPeriodicUpdate @ 0x4d4400]
-	std::vector<std::vector<uint8_t>> periodic;
-	session_->process_periodic_update(periodic);
-	for (const auto &dg : periodic) {
-		send_nw_datagram(dg);
-	}
 }
 
 void NovaWorldHost::sync_session_state() {
-	if (!session_) return;
+	const opennova::ClientSession *session = lobby_.session();
+	if (!session) return;
 	using S = opennova::ClientSession::State;
-	switch (session_->state()) {
+	switch (session->state()) {
 	case S::Hello:
 		enter_state(STATE_SESSION_HELLO);
 		break;
@@ -366,7 +202,6 @@ void NovaWorldHost::sync_session_state() {
 	case S::Verifying:
 		if (state_ != STATE_SESSION_JOIN) {
 			enter_state(STATE_SESSION_JOIN);
-			handshake_elapsed_ = 0.0;
 		}
 		break;
 	case S::Verified:
@@ -376,7 +211,7 @@ void NovaWorldHost::sync_session_state() {
 		}
 		break;
 	case S::Error:
-		enter_state(STATE_ERROR, String(session_->last_error().c_str()));
+		enter_state(STATE_ERROR, String(session->last_error().c_str()));
 		break;
 	default:
 		break;
@@ -399,10 +234,11 @@ opennova::HostRegistration NovaWorldHost::host_cfg() const {
 }
 
 void NovaWorldHost::send_host_request() {
-	if (!session_ || !session_->is_verified()) return;
+	if (!lobby_.session_verified()) return;
 	// [orig: CNapiGameSession_SendHostRequest @ 0x4d3700]
-	auto req = opennova::make_host_request(host_cfg(), server_nwuid_);
-	send_nw_datagram(session_->build_lobby_message(req));
+	// NWUID: echoed from the ServerSessionInit into the request's Cookie.
+	auto req = opennova::make_host_request(host_cfg(), lobby_.session()->server_nwuid());
+	lobby_.send(lobby_.session()->build_lobby_message(req));
 
 	enter_state(STATE_HOSTING);
 	keepalive_accum_ = 0.0;
@@ -412,15 +248,15 @@ void NovaWorldHost::send_host_request() {
 	// rides the verbose channel only.
 	UtilityFunctions::print_verbose(String("[NovaWorldHost] registered '") + server_name_ +
 	                        "' game_port=" + String::num_int64(game_port_) +
-	                        " -> gate " + nw_udp_host_ + ":" +
-	                        String::num_int64(nw_udp_port_));
+	                        " -> gate " + lobby_.nw_udp_host() + ":" +
+	                        String::num_int64(static_cast<int64_t>(lobby_.nw_udp_port())));
 }
 
 void NovaWorldHost::send_host_update() {
-	if (!session_ || !session_->is_verified()) return;
+	if (!lobby_.session_verified()) return;
 	// [orig: CNapiGameSession_SendHostUpdate @ 0x4d3860]
 	auto upd = opennova::make_host_update(host_cfg());
-	send_nw_datagram(session_->build_lobby_message(upd));
+	lobby_.send(lobby_.session()->build_lobby_message(upd));
 	emit_signal("host_update_sent");
 }
 
