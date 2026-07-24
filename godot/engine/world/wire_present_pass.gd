@@ -26,9 +26,9 @@ extends RefCounted
 # the packed aim overlay is then applied to that clip in the same snapshot row.
 
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
-const PresentAimOverlay := preload("res://engine/world/present_aim_overlay.gd")
+const PresentAimOverlay := preload("res://engine/world/aim_overlay_present_pass.gd")
 const PresentEmplacedWeapon := preload(
-		"res://engine/world/present_emplaced_weapon.gd")
+		"res://engine/world/emplaced_weapon_present_pass.gd")
 
 var _sim                   # NovaSimulation (snapshot source)
 var _placer                # MissionObjectPlacer (build_player_animated_model -> NovaObjectModel)
