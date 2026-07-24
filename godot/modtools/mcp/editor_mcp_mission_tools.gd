@@ -10,7 +10,7 @@ extends RefCounted
 ## by construction.
 
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
-const MissionSeatDiagnostics := preload("res://engine/world/mission_seat_diagnostics.gd")
+const ItemSeatSpecs := preload("res://engine/world/item_seat_specs.gd")
 
 ## Watchdog budget for tools that (re)load the mission's terrain and place
 ## its objects — that path can take seconds on large maps.
@@ -808,9 +808,9 @@ func _mount_command_filter(raw: Variant) -> Dictionary:
 		for value in raw:
 			out[int(value)] = true
 	else:
-		out[MissionSeatDiagnostics.COMMAND_PASSENGER_ONLY] = true
-		out[MissionSeatDiagnostics.COMMAND_SKIP_CONTROLLER] = true
-		out[MissionSeatDiagnostics.COMMAND_ANY_SEAT] = true
+		out[ItemSeatSpecs.COMMAND_PASSENGER_ONLY] = true
+		out[ItemSeatSpecs.COMMAND_SKIP_CONTROLLER] = true
+		out[ItemSeatSpecs.COMMAND_ANY_SEAT] = true
 	return out
 
 
@@ -837,7 +837,7 @@ func _mount_analysis_row(organic: Dictionary, target: Dictionary, command_id: in
 		target_card["found"] = true
 		var type_id := int(target.get("type_id", 0))
 		if not seat_cache.has(type_id):
-			seat_cache[type_id] = MissionSeatDiagnostics.seat_specs_for_item(
+			seat_cache[type_id] = ItemSeatSpecs.seat_specs_for_item(
 					root, item_db, int(target.get("item_id", 0)), type_id, true)
 		var spec: Dictionary = seat_cache[type_id]
 		seats = spec.get("seats", [])
@@ -850,12 +850,12 @@ func _mount_analysis_row(organic: Dictionary, target: Dictionary, command_id: in
 			diagnostics.append(String(spec["error"]))
 		if seats.is_empty():
 			diagnostics.append("no_target_seats")
-	var prediction := MissionSeatDiagnostics.predict_best_seat(seats, command_id)
+	var prediction := ItemSeatSpecs.predict_best_seat(seats, command_id)
 	if int(prediction.get("seat_index", -1)) < 0 and not seats.is_empty():
 		diagnostics.append("no_eligible_seat")
 	var row := {
 		"organic": _mount_entity_card(organic, item_db),
-		"command": MissionSeatDiagnostics.command_rule(command_id),
+		"command": ItemSeatSpecs.command_rule(command_id),
 		"target": target_card,
 		"seat_candidates": prediction.get("candidates", []),
 		"prediction": {

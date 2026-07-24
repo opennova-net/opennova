@@ -969,7 +969,7 @@ The requester's premise listed **passenger** among the hidden cases; the binary 
 `sitex` passengers keep the personal weapon visible and may fire (open boats/trucks). Only
 control (2), gunner (3), and driver (5) hide it. When third-person held-weapon rendering is
 implemented, gate the weapon node's visibility on this predicate, reusing the existing seat
-taxonomy (`godot/engine/world/mission_seat_diagnostics.gd` SEAT_PASSENGER/CONTROLLER/GUNNER/
+taxonomy (`godot/engine/world/item_seat_specs.gd` SEAT_PASSENGER/CONTROLLER/GUNNER/
 DRIVER) and the `mount_type` already exported through `nova_simulation.cpp`. The exact
 `Entity_CanFireWeapon` predicate (incl. the `Flags & 2` weapon-disabled gate and the local
 gunner third-person condition) is the faithful rule. **Open follow-ups:** IDB hygiene (rename
@@ -1129,7 +1129,7 @@ The local controller train remains, and mounted selection is now an animation-ow
   `tests/anim/aim_overlay_test.cpp` pins the map, on-foot formulas, and the compose
   invariants (identity = passthrough; uniform delta = world delta; differential = bend).
 - **Production metadata + lifecycle**: `libs/def` parses signed `phrase_set` and presence;
-  `NovaItemDatabase` exposes both; `MissionSeatDiagnostics` and `ItemSeatSpec` promote them to the
+  `NovaItemDatabase` exposes both; `ItemSeatSpecs` and `ItemSeatSpec` promote them to the
   target entity. Both mount entry paths copy the pair to the occupant; both dismount paths clear it;
   registry snapshot/restore value-copies it. This replaces `emplaced_pose_variant`'s ambiguous default
   without changing the existing seat-frame body/leg/pitch/roll synchronization. `NovaSimulation`

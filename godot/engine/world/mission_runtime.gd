@@ -35,7 +35,7 @@ const WirePresentPass := preload("res://engine/world/wire_present_pass.gd")
 const FirePresentPass := preload("res://engine/world/fire_present_pass.gd")
 const DestructionPresentPass := preload("res://engine/world/destruction_present_pass.gd")
 const ThrowablePresentPass := preload("res://engine/world/throwable_present_pass.gd")
-const MissionSeatDiagnostics := preload("res://engine/world/mission_seat_diagnostics.gd")
+const ItemSeatSpecs := preload("res://engine/world/item_seat_specs.gd")
 
 # Fixed-timestep accumulator. The original decouples the simulation from rendering: the master
 # loop accumulates real elapsed time and dispatches the logic update once per 16 ms (62.5 Hz),
@@ -629,31 +629,31 @@ func entity_count() -> int:
 
 
 func _build_item_seat_specs(mission, resource_root, item_db) -> Array:
-	return MissionSeatDiagnostics.build_item_seat_specs(mission, resource_root, item_db)
+	return ItemSeatSpecs.build_item_seat_specs(mission, resource_root, item_db)
 
 
 func _model_name_for_graphic(graphic: String) -> String:
-	return MissionSeatDiagnostics.model_name_for_graphic(graphic)
+	return ItemSeatSpecs.model_name_for_graphic(graphic)
 
 
 func _seat_specs_from_model(data: NovaObjectData) -> Array:
-	return MissionSeatDiagnostics.seat_specs_from_model(data)
+	return ItemSeatSpecs.seat_specs_from_model(data)
 
 
 func _seat_local_from_user_point_position(pos: Vector3) -> Vector3:
-	return MissionSeatDiagnostics.seat_local_from_user_point_position(pos)
+	return ItemSeatSpecs.seat_local_from_user_point_position(pos)
 
 
 func _seat_yaw_offset_from_user_point_rotation(direction: Vector3) -> int:
-	return MissionSeatDiagnostics.seat_yaw_offset_from_user_point_rotation(direction)
+	return ItemSeatSpecs.seat_yaw_offset_from_user_point_rotation(direction)
 
 
 func _seat_type_for_user_point(name: String) -> int:
-	return MissionSeatDiagnostics.seat_type_for_user_point(name)
+	return ItemSeatSpecs.seat_type_for_user_point(name)
 
 
 func _seat_pose_index_for_user_point(name: String) -> int:
-	return MissionSeatDiagnostics.seat_pose_index_for_user_point(name)
+	return ItemSeatSpecs.seat_pose_index_for_user_point(name)
 
 
 func _log_infantry_debug_mounts() -> void:

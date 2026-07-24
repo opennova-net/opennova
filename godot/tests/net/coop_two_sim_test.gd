@@ -466,7 +466,7 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 		return
 	var anchor_index := int(moving_anchor["index"])
 	var anchor: Dictionary = moving_anchor["info"]
-	var seat_specs := MissionSeatDiagnostics.seat_specs_from_model(model)
+	var seat_specs := ItemSeatSpecs.seat_specs_from_model(model)
 	assert_eq(seat_specs.size(), 1, "B50Cal exposes its authored Usegun seat")
 	var specs := [{
 		"type_id": 5004,
@@ -479,7 +479,7 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 			"anchor_found": true,
 			"bone_index": anchor_index + 1,
 			"source_name": String(anchor.get("name", "")),
-			"local": MissionSeatDiagnostics.seat_local_from_user_point_position(
+			"local": ItemSeatSpecs.seat_local_from_user_point_position(
 					anchor.get("position", Vector3.ZERO)),
 		}],
 	}]
