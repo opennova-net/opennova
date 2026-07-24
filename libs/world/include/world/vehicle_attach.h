@@ -94,6 +94,13 @@ struct AttachLabel {
     Vec3 world_pos;
 };
 
+// Optional deterministic work counters for attach-label performance tests and probes.
+// The label gather is called every render frame; one gather may visit many proximity
+// candidates, but it must not rescan the whole entity registry for every candidate.
+struct AttachLabelScanStats {
+    uint32_t enemy_occupancy_registry_passes = 0;
+};
+
 // The floating seat/armory label list for the local player, a structural translation of
 // the selection half of [orig: draw_vehicle_seat_and_armory_labels @0x5a3290]:
 //  - no nearest scan hit -> no labels at all [orig: the Entity_FindNearestSeatOrArmory
@@ -109,7 +116,8 @@ struct AttachLabel {
 //    [orig: @0x5a36f5..@0x5a38e2].
 // Labels append to out in scan order; nearest marks the scan winner's own label.
 void collect_attach_labels(World &world, const Entity &player, bool armory_mode,
-                           bool can_fire, std::vector<AttachLabel> &out);
+                           bool can_fire, std::vector<AttachLabel> &out,
+                           AttachLabelScanStats *stats = nullptr);
 
 // The use-key mount toggle [orig: Entity_ToggleVehicleMount @0x436950 +
 // Entity_TryEnterNearestVehicle @0x4368c0]:

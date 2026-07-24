@@ -661,8 +661,47 @@ void test_enemy_occupant_blocks_scan() {
     ee->mount_seat = 0;
     ee->mount_type = SeatType::Controller;
     r.veh().seats[0].occupant = eh;
+
+    auto label_count = [&]() {
+        std::vector<AttachLabel> labels;
+        collect_attach_labels(r.w, r.player(), false, false, labels);
+        return labels.size();
+    };
+    NearestSeatHit hit;
     CHECK(!player_toggle_vehicle_mount(r.w, r.player_h));
     CHECK(!r.player().mounted);
+    CHECK(!find_nearest_free_seat(r.w, r.player(), hit, false));
+    CHECK(label_count() == 0);
+    CHECK(!entity_process_vehicle_attach(r.w, r.player_h, r.veh_h, 2));
+
+    // Same-team, dead, or detached riders do not block the vehicle. The occupied
+    // seat itself remains hidden independently, leaving the passenger seat.
+    ee->team = 1;
+    CHECK(find_nearest_free_seat(r.w, r.player(), hit, false));
+    CHECK(label_count() == 1);
+    ee->team = 2;
+    ee->alive = false;
+    CHECK(find_nearest_free_seat(r.w, r.player(), hit, false));
+    CHECK(label_count() == 1);
+    ee->alive = true;
+    ee->health = 0;
+    CHECK(find_nearest_free_seat(r.w, r.player(), hit, false));
+    CHECK(label_count() == 1);
+    ee->health = 150;
+    CHECK(!find_nearest_free_seat(r.w, r.player(), hit, false));
+    CHECK(label_count() == 0);
+    ee->mounted = false;
+    CHECK(find_nearest_free_seat(r.w, r.player(), hit, false));
+    CHECK(label_count() == 1);
+
+    // Retail's hostile-parent scan is pool-0-only. A mounted lookalike in pool 1
+    // must not block, even though it carries the same direct mount target.
+    Entity pool1_enemy = *ee;
+    pool1_enemy.mounted = true;
+    pool1_enemy.mount_target = r.veh_h;
+    CHECK(r.w.registry.spawn(1, pool1_enemy).valid());
+    CHECK(find_nearest_free_seat(r.w, r.player(), hit, false));
+    CHECK(label_count() == 1);
 }
 
 // The four BMS Player mount triggers [orig: subs 38-41 -> @0x4f10d0/0x4f1260/0x4f1150/
@@ -1131,6 +1170,73 @@ void test_attach_labels_armory_mode() {
     for (const AttachLabel &l : labels) CHECK(!l.armory);
 }
 
+// The HUD calls collect_attach_labels every render frame. One gather may walk many
+// proximity candidates, but enemy occupancy is a world property and must be indexed
+// with one registry pass rather than recomputed independently for every candidate.
+void test_attach_labels_build_enemy_occupancy_once() {
+    World w;
+    CollisionWorld collision;
+    w.collision = &collision;
+    w.registry.configure_pool(0, 128);
+    w.registry.configure_pool(1, 64);
+
+    Entity player_seed;
+    player_seed.kind = EntityKind::Organic;
+    player_seed.position = {100.0f, 200.0f, 10.0f};
+    player_seed.health = 100;
+    player_seed.alive = true;
+    player_seed.team = 1;
+    const EntityHandle player_h = w.registry.spawn(0, player_seed);
+    CHECK(player_h.valid());
+
+    EntityHandle enemy_occupied_vehicle;
+    for (int i = 0; i < 32; ++i) {
+        Entity vehicle;
+        vehicle.kind = EntityKind::Item;
+        vehicle.position = {
+            100.1f + 0.05f * static_cast<float>(i), 200.0f, 10.0f};
+        vehicle.health = 100;
+        vehicle.alive = true;
+        vehicle.bound_radius = 1.0f;
+        Seat seat;
+        seat.type = SeatType::Passenger;
+        seat.bone_index = 1;
+        seat.source_name = "sitex00";
+        seat.seat_local = {0.0f, 0.0f, 1.0f};
+        vehicle.seats.push_back(seat);
+        const EntityHandle vehicle_h = w.registry.spawn(1, vehicle);
+        CHECK(vehicle_h.valid());
+        if (i == 31) enemy_occupied_vehicle = vehicle_h;
+    }
+
+    for (int i = 0; i < 64; ++i) {
+        Entity organic;
+        organic.kind = EntityKind::Organic;
+        organic.position = {120.0f + static_cast<float>(i), 200.0f, 10.0f};
+        organic.health = 100;
+        organic.alive = true;
+        organic.team = i == 63 ? 2 : 1;
+        organic.mounted = i == 63;
+        organic.mount_target = i == 63 ? enemy_occupied_vehicle : EntityHandle{};
+        CHECK(w.registry.spawn(0, organic).valid());
+    }
+
+    for (int i = 0; i < 17; ++i) collision.build_tick_tables(w);
+    CHECK(collision.attach_candidate_slices_authoritative());
+    CHECK(collision.candidate_count(player_h) == 32);
+
+    const Entity *player = w.registry.get(player_h);
+    CHECK(player != nullptr);
+    if (player == nullptr) return;
+    AttachLabelScanStats stats;
+    std::vector<AttachLabel> labels;
+    collect_attach_labels(w, *player, false, false, labels, &stats);
+    CHECK(labels.size() == 31);
+    for (const AttachLabel &label : labels)
+        CHECK(label.entity != enemy_occupied_vehicle);
+    CHECK(stats.enemy_occupancy_registry_passes == 1);
+}
+
 } // namespace
 
 // The hull-vs-world contact stops a driving vehicle at a building wall instead of
@@ -1291,6 +1397,7 @@ int main() {
     test_attach_labels_seats();
     test_attach_labels_can_fire_gate();
     test_attach_labels_armory_mode();
+    test_attach_labels_build_enemy_occupancy_once();
     test_vehicle_hull_stops_at_building();
     if (failures == 0) std::printf("vehicle_mount_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
