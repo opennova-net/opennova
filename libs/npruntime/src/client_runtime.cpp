@@ -156,7 +156,9 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(const PlayerExtendedU
 			for (std::vector<uint8_t> &reply : pr.outbound) outbound.push_back(std::move(reply));
 			for (const auto &tb : pr.inbound_world) view_.apply(tb.first, tb.second); // 0x0C/0x0D/0x10/0x20
 			for (const auto &tb : pr.inbound_gameplay) view_.apply(tb.first, tb.second);
-			if (pr.reached_in_match) deployed_ = true; // deploy on the spawn name-match (§5.44 gate)
+			// The name-match may precede loadout by dozens of world-stream packets. Retail only
+			// opens its uplink gate after that handle is known and the post-loadout 0x5A arrives.
+			if (pr.reached_in_match) deployed_ = true;
 			for (const std::vector<uint8_t> &a : pr.inbound_0a) {
 				const uint32_t health_before = view_.state().health_updates_applied;
 				view_.apply(0x0A, a); // per-frame 0x0A
@@ -174,11 +176,6 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(const PlayerExtendedU
 	}
 
 	if (role_ == Role::HostClient) return outbound; // host: no connect-drive, no housekeeping send, no 0x0C
-
-	// (1b) CONNECT-DRIVE — the same per-frame pump retransmits an unanswered pre-session 0x41/0x42,
-	// then (once Driving) advances the in-match spawn-gate burst. [orig: NapiNPConnection active-send
-	// interval; NapiClient_WaitForGameStart]
-	for (std::vector<uint8_t> &d : joiner_->pump(now_tick)) outbound.push_back(std::move(d));
 
 	// (0x4C) net-quality / anti-cheat report — after the recv pump; gated is_in_session &&
 	// is_mp_session_peer (a Joiner in-match satisfies both). [orig @0x42c23e..0x42c279]
@@ -227,6 +224,9 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(const PlayerExtendedU
 			                                             joiner_->spawn_pose().item_type_id, *uplink));
 		}
 	}
+	// Connection send boundary: advance the pre-spawn drive, emit retained-message active probes,
+	// and flush an ACK only if no substantive C2S producer above already carried it.
+	for (std::vector<uint8_t> &d : joiner_->pump(now_tick)) outbound.push_back(std::move(d));
 	return outbound;
 }
 

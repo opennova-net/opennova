@@ -35,6 +35,7 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_joiner"), &NovaSimulation::is_joiner);
 	ClassDB::bind_method(D_METHOD("set_join_world_ready", "ready"), &NovaSimulation::set_join_world_ready);
 	ClassDB::bind_method(D_METHOD("poll_join_preload"), &NovaSimulation::poll_join_preload);
+	ClassDB::bind_method(D_METHOD("is_join_preload_ready"), &NovaSimulation::is_join_preload_ready);
 	ClassDB::bind_method(D_METHOD("has_join_mission"), &NovaSimulation::has_join_mission);
 	ClassDB::bind_method(D_METHOD("get_join_server_name"), &NovaSimulation::get_join_server_name);
 	ClassDB::bind_method(D_METHOD("get_join_mission_name"), &NovaSimulation::get_join_mission_name);

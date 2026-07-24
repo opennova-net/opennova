@@ -368,19 +368,19 @@ func load_mission_as_joiner(target: JoinTarget) -> int:
 const JOIN_CONNECT_TIMEOUT_MS := 60000
 
 
-# Drive only the witnessed connect/session exchange while the loading screen is
-# visible.
+# Drive the witnessed pre-world connect/session exchange while the loading
+# screen is visible.
 func _drive_join_preload(request_id: int) -> void:
 	var deadline_ms := Time.get_ticks_msec() + JOIN_CONNECT_TIMEOUT_MS
 	while request_id == _join_preload_request_id and _join_preload_sim != null \
-			and not _join_preload_sim.has_join_mission():
+			and not _join_preload_sim.is_join_preload_ready():
 		_join_preload_sim.poll_join_preload()
 		var join_error := String(_join_preload_sim.get_join_error())
 		if not join_error.is_empty():
 			_fail_join_preload("join failed: %s" % join_error)
 			return
 		if Time.get_ticks_msec() >= deadline_ms:
-			_fail_join_preload("join timed out before the host identified its mission")
+			_fail_join_preload("join timed out before the host completed preload admission")
 			return
 		await get_tree().process_frame
 	if request_id != _join_preload_request_id or _join_preload_sim == null:

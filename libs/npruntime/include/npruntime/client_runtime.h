@@ -107,18 +107,21 @@ public:
 
 	// The "deployed" predicate gating the 0x0C uplink. It defaults true on reaching InMatch;
 	// a complete recipient-local 0x0A tail with health <= 0 closes it before the same frame's send.
-	// Positive health does not reopen it. The explicit deploy/respawn exchange that reopens the gate
-	// remains deferred; set_deployed(true) is the integration seam for that future edge.
+	// Positive health does not reopen it. Initial-join deployment is handled by JoinerConnection;
+	// the post-death respawn exchange that reopens this gate remains deferred, with
+	// set_deployed(true) as the integration seam for that future edge.
 	void set_deployed(bool v) { deployed_ = v; }
 	bool deployed() const { return deployed_; }
 
-	// Pre-load join seam. Handshake traffic and the retail 0x01 -> 0x02 -> 0x7B exchange continue
-	// while false; only the subsequent load/spawn drive is held. HostClient has no join drive.
+	// Pre-load join seam. Handshake and admission traffic continue through terminal S2C 0x11 while
+	// false; only C2S 0x0A and the resulting world/deployment stream are held.
 	void set_world_ready(bool ready) {
 		if (joiner_) joiner_->set_world_ready(ready);
 	}
 	bool world_ready() const { return joiner_ ? joiner_->world_ready() : true; }
 	bool mission_known() const { return joiner_ && joiner_->mission_known(); }
+	// The terminal pre-world sync marker was received and its ACK reached the send boundary.
+	bool preload_ready() const { return joiner_ && joiner_->preload_ready(); }
 
 	// Joiner state passthrough (HostClient: never InMatch, no self handle).
 	bool in_match() const { return joiner_ && joiner_->in_match(); }

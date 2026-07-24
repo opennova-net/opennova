@@ -21,18 +21,22 @@
 //
 // It does NOT compose ClientSession: ClientSession's post-0x82 path is the matchmaking lobby-verify
 // flow, the WRONG channel for the in-match game connection. The game connection follows retail's
-// post-auth 0x01 -> 0x02 exchange, learns its mission from 0x7B, then drives the witnessed in-match
-// C2S burst that trips the host's spawn gate. Its identity comes from npwire's neutral retail JO
-// helper; this LAN/game-session state machine has no NovaWorld service dependency.
+// post-auth 0x00 -> 0x01 -> 0x02 exchange, learns its mission from 0x7B, then drives the witnessed
+// in-match C2S burst that trips the host's spawn gate. Its identity comes from npwire's neutral
+// retail JO helper; this LAN/game-session state machine has no NovaWorld service dependency.
 //
 //   start()                         -> ClientHello (0x41)   [Idle -> Hello]
 //   <- ServerHello (0x81)             : learn host key hk; send ClientAuth (0x42)
-//   <- ServerAuth  (0x82)             : learn server keys; send C2S 0x01          [-> Driving]
+//   <- ServerAuth  (0x82)             : learn server keys                       [-> Driving]
+//   <- initial S2C settings            : header-only ACK; send C2S 0x00 JOIN
+//   <- S2C 0x00                       : header-only ACK; send C2S 0x01 {0}
 //   <- S2C 0x02                       : send witnessed 256-byte C2S 0x02 response
-//   <- S2C 0x7B                       : retain authoritative mission/session metadata
-//   pump() x4 (world ready)           : 0x37 -> 0x09 -> 0x22 -> (0x2F,0x2F,0x0B)
-//   <- S2C 0x0C organic-spawn (0x83)  : find the record whose entity_name == our player name ->
-//                                       learn self wire handle H, cache spawn pose  [-> InMatch]
+//   <- S2C 0x05/0x60/0x64/0x16       : reactively complete admission and file-transfer requests
+//   <- S2C 0x11                       : ACK terminal pre-world sync; hold 0x0A until world ready
+//   <- S2C 0x0C organic-spawn (0x83)  : name-match self and retain wire handle H
+//   <- S2C 0x1A                       : send retail loadout/status bundle
+//   <- initial S2C 0x5A grant pair    : if 0x0F advertises spawn zones, send C2S 0x0E {FFFF}
+//   <- applicable final S2C 0x5A      : initial grant (no zones) or post-pick release [-> InMatch]
 //   frame_c2s_uplink(H, ...)          : per-frame C2S 0x0C player uplink
 //
 // SELF-IDENTIFICATION = NAME-MATCH (D.0, docs/net §5.23): the host streams the joiner's admitted
@@ -54,8 +58,8 @@ public:
 		Idle,     // nothing sent yet
 		Hello,    // ClientHello sent, awaiting ServerHello
 		Auth,     // ClientAuth sent, awaiting ServerAuth
-		Driving,  // ServerAuth accepted; pump() drives the in-match spawn-gate burst
-		InMatch,  // name-matched our organic-spawn record -> self handle H learned
+		Driving,  // ServerAuth accepted; reactive admission/world/deployment FSM is active
+		InMatch,  // self handle is known and the applicable final deployment release was received
 		Error,    // protocol/envelope error or server rejection
 	};
 
@@ -77,7 +81,7 @@ public:
 		// Live S2C gameplay bodies consumed by NetClientView (currently the 0x49
 		// reload echo; 0x0A tag-2 rounds remain embedded in inbound_0a).
 		std::vector<std::pair<uint8_t, std::vector<uint8_t>>> inbound_gameplay;
-		bool reached_in_match = false;                // true on the datagram that learns H
+		bool reached_in_match = false;                // true when handle discovery + deployment meet
 	};
 
 	// `player_name` is the on-wire game ClientAuth.NA callsign and the local key the joiner
@@ -95,8 +99,8 @@ public:
 
 	// While awaiting 0x81/0x82, re-emit the exact pending 0x41/0x42 wire datagram on retail's active
 	// send interval measured by the monotonic wall clock (independent of render/simulation cadence).
-	// Once Driving, emit the NEXT stage of the witnessed in-match spawn-gate burst (one datagram per
-	// call; empty once all stages are sent or while mission/world readiness holds it).
+	// Once Driving, flush deferred ACKs, loss-recovery probes, and the held C2S 0x0A after local
+	// world readiness. Semantic admission transitions are emitted reactively from handle_datagram().
 	std::vector<std::vector<uint8_t>> pump(uint32_t now_tick);
 
 	// Build a C2S 0x0C player uplink datagram: 5-byte sub-header (handle = H, item_type_id = type,
@@ -124,13 +128,16 @@ public:
 	                   uint32_t next_seq, uint32_t last_ack, uint16_t self_handle,
 	                   uint16_t self_type, uint32_t game_type = 0);
 
-	// Retail completes the 0x01 -> 0x02 exchange and learns the mission from S2C 0x7B before it
+	// Retail completes the 0x00 -> 0x01 -> 0x02 exchange and learns the mission from S2C 0x7B before it
 	// begins the load/spawn drive. A binding that must load that advertised mission sets this false
 	// before start(), keeps pumping the handshake, then flips it true after the world is installed.
 	// Direct-loaded callers retain their historical behavior through the true default.
 	void set_world_ready(bool ready) { world_ready_ = ready; }
 	bool world_ready() const { return world_ready_; }
 	bool mission_known() const { return mission_known_; }
+	// Retail's safe synchronous-load boundary: the pre-world admission exchange has completed and
+	// S2C 0x11 was ACKed, but C2S 0x0A still waits for the local mission to be installed.
+	bool preload_ready() const { return preload_ready_; }
 
 	Phase phase() const { return phase_; }
 	bool in_match() const { return phase_ == Phase::InMatch; }
@@ -155,9 +162,26 @@ public:
 	const NapiNPConnection &connection() const { return conn_; }
 
 private:
+	enum class PostAuthStage {
+		Inactive,
+		AwaitServerSettings,
+		AwaitJoinAck,
+		AwaitPaddingProbe,
+		AwaitGameStart,
+		AwaitServerInfo,
+		AwaitMissionData,
+		AwaitPlayerList,
+		AwaitInitialSyncTail,
+		AwaitWorldStreamEnd,
+		AwaitDeployment,
+		AwaitDeployRelease,
+		Complete,
+	};
+
 	std::vector<uint8_t> build_client_hello();
 	std::vector<uint8_t> build_client_auth();
 	std::vector<uint8_t> frame_session(const std::vector<ProtocolMessage> &messages);
+	std::vector<uint8_t> frame_retained_session(uint32_t sequence);
 
 	void on_server_hello(const std::vector<uint8_t> &body, PollResult &out);
 	void on_server_auth(const std::vector<uint8_t> &body, PollResult &out);
@@ -172,6 +196,7 @@ private:
 
 	// SCRK / seq / ack live on the client-side connection node (folded, as on the server side).
 	NapiNPConnection conn_;
+	std::string advertised_expansion_; // ServerHello.SUS2, echoed as C2S JOIN EXP
 
 	uint32_t server_hk_ = 0;    // ServerHello.hk — echoed in ClientAuth.hk (transient)
 	// Pre-session UDP legs are reliable-by-retransmit in retail. Cache the already-framed bytes so
@@ -180,9 +205,20 @@ private:
 	std::vector<uint8_t> handshake_retry_datagram_;
 	uint64_t handshake_last_send_ms_ = 0;
 	bool handshake_retry_clock_armed_ = false;
-	int pump_stage_ = 0;        // cursor into the in-match spawn-gate burst stages
+	PostAuthStage post_auth_stage_ = PostAuthStage::Inactive;
+	uint64_t session_last_send_ms_ = 0;
+	bool session_send_clock_armed_ = false;
+	bool session_ack_pending_ = false; // admitted S2C messages with no substantive C2S reply yet
 	bool world_ready_ = true;   // binding-controlled: local advertised mission is installed
 	bool mission_known_ = false; // structurally valid authoritative S2C 0x7B received
+	bool preload_ready_ = false; // terminal pre-world S2C 0x11 received and ACK boundary reached
+	bool player_list_seen_ = false; // valid S2C 0x16 may arrive before the 0x64 transfer completes
+	bool deployment_policy_seen_ = false; // a valid S2C 0x0F supplied gameFlags
+	bool deployment_pick_required_ = false; // S2C 0x0F gameFlags bit0: host has spawn zones
+	uint8_t initial_loadout_grant_count_ = 0; // both profile-side 0x5A grants precede the pick
+	bool deployment_pick_sent_ = false;
+	uint32_t deployment_pick_sequence_ = 0; // release 0x5A must cumulatively ACK this C2S 0x0E
+	bool deployment_reply_seen_ = false; // applicable final S2C 0x5A; pairs with self-handle discovery
 	bool pending_spawn_menu_request_ = false; // S2C 0x11 arrived while the local world was held
 
 	bool has_self_handle_ = false;

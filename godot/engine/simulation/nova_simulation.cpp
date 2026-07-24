@@ -294,7 +294,8 @@ void NovaSimulation::finish_load(const opennova::bms::File &file) {
 	// P7 co-op LAN joiner: a pure non-authority client. Build a fresh np::ClientRuntime (Joiner role)
 	// per (re)load — start() fully resets the session, so a reload reconnects cleanly. No net ISystem
 	// is registered (the joiner never serializes; run_logic_tick(false) leaves World::net the default
-	// LocalSink for WAC/BMS sinks). The local player L is spawned in joiner_pump on the name-match.
+	// LocalSink for WAC/BMS sinks). The local player L is spawned in joiner_pump after the
+	// name-match and applicable deployment release.
 	if (joiner_) {
 		// A retail-style menu join has already authenticated and learned the map
 		// from S2C 0x7B before this local load. Preserve that exact runtime/socket;

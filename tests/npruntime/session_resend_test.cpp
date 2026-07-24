@@ -162,9 +162,18 @@ bool check_reordered_same_batch_closes_gap_without_nack() {
 	                    joiner.connection().seq.queued_inbound.empty(),
 	            "later S2C packet in the batch closes and drains the gap"))
 		return false;
-	if (!expect(joiner.pump(1).empty() &&
+	const std::vector<std::vector<uint8_t>> joiner_boundary = joiner.pump(1);
+	ProtocolPacketHeader joiner_ack_header;
+	std::vector<ProtocolMessage> joiner_ack_messages;
+	if (!expect(joiner_boundary.size() == 1 &&
+	                    decode_session_datagram(
+							joiner_boundary[0], SESSION_OPCODE_PROTOCOL_MESSAGE,
+							kClientScrk, joiner_ack_header, joiner_ack_messages) &&
+	                    joiner_ack_header.seq_num == 1 &&
+	                    joiner_ack_header.ack_count == 3 &&
+	                    joiner_ack_messages.empty() &&
 	                    !joiner.connection().seq.missing_request_pending,
-	            "joiner batch boundary suppresses a NACK after same-batch recovery"))
+	            "joiner batch boundary suppresses a NACK and carries the recovered ACK"))
 		return false;
 
 	// Host mirror: frontier=1, then C2S seq3 before seq2 in one socket drain.

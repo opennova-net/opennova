@@ -814,6 +814,10 @@ bool NovaSimulation::poll_join_preload() {
 	return true;
 }
 
+bool NovaSimulation::is_join_preload_ready() const {
+	return joiner_ && runtime_ && runtime_->preload_ready();
+}
+
 bool NovaSimulation::has_join_mission() const {
 	return joiner_ && runtime_ && runtime_->mission_known();
 }
