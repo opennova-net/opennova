@@ -1,5 +1,6 @@
 #include "world/vehicle_attach.h"
 
+#include <bitset>
 #include <cmath>
 #include <cstdint>
 
@@ -11,22 +12,65 @@ namespace opennova::world {
 
 namespace {
 
+constexpr std::size_t kEntityHandleDomain =
+        static_cast<std::size_t>(EntityRegistry::kPoolCount) << 12;
+
+bool is_blocking_enemy_rider(const Entity &entity, const Entity &requester) {
+    if (entity.handle == requester.handle) return false;
+    if (entity.health <= 0 || !entity.alive) return false;
+    if (entity.team == requester.team) return false;
+    return entity.mounted;
+}
+
 // A live ENEMY occupies `vehicle` (or one of its carried guns — gun-carrier traversal is
 // unmodeled; tracked D-NET-157). Scans pool 0, skipping dead / self / same-team occupants,
 // so same-team co-boarding never blocks. [orig: Vehicle_HasEnemyOccupant @0x4359F0 —
 // pool-0 scan, dead skip, +0x162 team compare @0x435a5f, parentEntity(0x16C) == root hit]
 bool vehicle_has_enemy_occupant(const World &world, const Entity &vehicle,
                                 const Entity &requester) {
-    bool hit = false;
-    world.registry.for_each([&](const Entity &e) {
-        if (hit) return;
-        if (e.handle.pool() != 0) return;
-        if (e.handle == requester.handle) return;      // self [orig: skip requester]
-        if (e.health <= 0 || !e.alive) return;         // dead [orig: Flags & 2 skip]
-        if (e.team == requester.team) return;          // same team never blocks
-        if (e.mounted && e.mount_target == vehicle.handle) hit = true;
-    });
-    return hit;
+    const std::size_t pool_capacity = world.registry.pool_capacity(0);
+    for (std::size_t slot = 0; slot < pool_capacity; ++slot) {
+        const Entity *entity =
+                world.registry.get(EntityHandle::make(0, static_cast<int>(slot)));
+        if (entity != nullptr && is_blocking_enemy_rider(*entity, requester) &&
+            entity->mount_target == vehicle.handle)
+            return true;
+    }
+    return false;
+}
+
+// Requester-relative hostile mount targets for one synchronous attach query. The
+// source-of-truth remains the witnessed pool-0 rider parent link; this is only a
+// per-call index, so attach/detach, death, team changes, restore, and handle reuse
+// need no cross-frame invalidation.
+class HostileMountIndex {
+public:
+    HostileMountIndex(const World &world, const Entity &requester,
+                      AttachLabelScanStats *stats) {
+        if (stats != nullptr) ++stats->enemy_occupancy_registry_passes;
+        const std::size_t pool_capacity = world.registry.pool_capacity(0);
+        for (std::size_t slot = 0; slot < pool_capacity; ++slot) {
+            const Entity *entity =
+                    world.registry.get(EntityHandle::make(0, static_cast<int>(slot)));
+            if (entity == nullptr || !is_blocking_enemy_rider(*entity, requester) ||
+                !entity->mount_target.valid())
+                continue;
+            const std::size_t target = entity->mount_target.packed;
+            if (target < blocked_.size()) blocked_.set(target);
+        }
+    }
+
+    bool blocks(EntityHandle vehicle) const {
+        return vehicle.valid() && vehicle.packed < blocked_.size() &&
+               blocked_.test(vehicle.packed);
+    }
+
+private:
+    std::bitset<kEntityHandleDomain> blocked_;
+};
+
+bool candidate_relevant_for_mode(const Entity &candidate, bool armory_mode) {
+    return armory_mode ? !candidate.armory_points.empty() : !candidate.seats.empty();
 }
 
 // Shared host attach write block. Retail splits UseGun from ordinary vehicle slots at
@@ -209,11 +253,12 @@ bool point_los_clear(World &world, const Entity &player, const Entity &cand, con
 // The shared per-entity reject set of the scan and the label pass
 // [orig: @0x435e28..0x435eae / @0x5a335a..0x5a3395 — dead/destroyed skip, itemDef/model
 // presence, enemy-occupant reject; the carrier legs are unmodeled (D-AI-11)].
-bool scan_entity_rejected(World &world, const Entity &cand, const Entity &player) {
+bool scan_entity_rejected(const Entity &cand, const Entity &player,
+                          const HostileMountIndex &hostile_mounts) {
     if (cand.handle == player.handle) return true;
     if (!cand.alive || cand.health <= 0) return true; // [orig: Flags & 2 skip]
     if ((cand.flags & 2u) != 0) return true;
-    return vehicle_has_enemy_occupant(world, cand, player);
+    return hostile_mounts.blocks(cand.handle);
 }
 
 // The scan container: the player's proximity slice when the per-tick tables are
@@ -237,8 +282,9 @@ void for_each_scan_candidate(World &world, const Entity &player, Fn &&fn) {
 
 } // namespace
 
-bool find_nearest_free_seat(World &world, const Entity &player, NearestSeatHit &out,
-                            bool armory_mode) {
+static bool find_nearest_free_seat_impl(World &world, const Entity &player,
+                                        NearestSeatHit &out, bool armory_mode,
+                                        const HostileMountIndex &hostile_mounts) {
     // Range caps, verbatim 16.16 [orig: @0x435d90 maxDistance = 0x3FFFFFC0, the mounted
     // override @0x435d9a = 0x38E38E0].
     const int32_t max_dist3d = player.mounted ? 59652320 : 1073741760;
@@ -280,15 +326,16 @@ bool find_nearest_free_seat(World &world, const Entity &player, NearestSeatHit &
     // @0x435d60 — the slice Entity_BuildProximityListsFromPools fills @0x4b8eb0].
     // for_each_scan_candidate below walks that same slice; the former
     // whole-registry sweep (the container rebase) was behavior-equal inside the
-    // 4.0 u gate but ran O(world) per frame — and vehicle_has_enemy_occupant's
-    // own witnessed pool-0 scan per candidate multiplied it into O(world x pool).
+    // 4.0 u gate but ran O(world) per frame. Hostile occupancy is indexed once
+    // per query above so its witnessed pool-0 scan is not multiplied here.
     for_each_scan_candidate(world, player, [&](const Entity &cand) {
-        if (scan_entity_rejected(world, cand, player)) return;
+        if (!candidate_relevant_for_mode(cand, armory_mode)) return;
         // While seated, the OWN vehicle's other seats are LOS-blocked by its hull in
         // retail (the ray walks pool-1 collision models) — that is why USE exits
         // instead of cycling seats. Pool-1 hulls are unbuilt (D-AI-11 j), so the hull
         // occlusion is modeled as this candidate skip (D-AI-11 j).
         if (player.mounted && cand.handle == player.mount_target) return;
+        if (scan_entity_rejected(cand, player, hostile_mounts)) return;
         if (!armory_mode) {
             // [orig: the searchMode-0 seat loop @0x435f1e]
             for (int i = 0; i < static_cast<int>(cand.seats.size()); ++i) {
@@ -308,12 +355,23 @@ bool find_nearest_free_seat(World &world, const Entity &player, NearestSeatHit &
     return found;
 }
 
+bool find_nearest_free_seat(World &world, const Entity &player, NearestSeatHit &out,
+                            bool armory_mode) {
+    const HostileMountIndex hostile_mounts(world, player, nullptr);
+    return find_nearest_free_seat_impl(
+            world, player, out, armory_mode, hostile_mounts);
+}
+
 void collect_attach_labels(World &world, const Entity &player, bool armory_mode,
-                           bool can_fire, std::vector<AttachLabel> &out) {
+                           bool can_fire, std::vector<AttachLabel> &out,
+                           AttachLabelScanStats *stats) {
+    const HostileMountIndex hostile_mounts(world, player, stats);
     // No nearest hit -> no labels at all [orig: the Entity_FindNearestSeatOrArmory gate
     // @0x5a32e2 brackets the whole pass].
     NearestSeatHit nearest;
-    if (!find_nearest_free_seat(world, player, nearest, armory_mode)) return;
+    if (!find_nearest_free_seat_impl(
+                world, player, nearest, armory_mode, hostile_mounts))
+        return;
 
     // One label point [orig: the shared draw block @0x5a3553..0x5a36c9 — the +0.1875 u
     // lift, the 4.0 u 3D gate from the player POSITION, LOS, then the draw].
@@ -343,7 +401,8 @@ void collect_attach_labels(World &world, const Entity &player, bool armory_mode,
         // A ready weapon limits labels to the nearest entity [orig: !Player_CanFireWeapon()
         // || entity == nearest_entity @0x5a3354].
         if (can_fire && cand.handle != nearest.vehicle) return;
-        if (scan_entity_rejected(world, cand, player)) return;
+        if (!candidate_relevant_for_mode(cand, armory_mode)) return;
+        if (scan_entity_rejected(cand, player, hostile_mounts)) return;
         if (!armory_mode) {
             // [orig: the seat-label loop @0x5a3464; occupied seats never label @0x5a348f]
             for (int i = 0; i < static_cast<int>(cand.seats.size()); ++i) {
