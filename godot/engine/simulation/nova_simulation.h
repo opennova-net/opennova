@@ -777,10 +777,12 @@ public:
 	bool enable_join(const String &p_host_ip, int p_port, const String &p_player_name);
 	bool is_joiner() const { return joiner_; }
 	// Retail connects before loading the local map: drive only the socket/session
-	// legs until S2C 0x7B identifies the mission, then resume the same connection
+	// legs until the terminal pre-world sync marker has been received and ACKed
+	// (S2C 0x7B identifies the mission earlier), then resume the same connection
 	// after the caller has loaded it. No World tick or gameplay uplink runs here.
 	void set_join_world_ready(bool p_ready);
 	bool poll_join_preload();
+	bool is_join_preload_ready() const;
 	bool has_join_mission() const;
 	String get_join_server_name() const;
 	String get_join_mission_name() const;
@@ -788,9 +790,10 @@ public:
 	String get_join_expansion() const;
 	int64_t get_join_game_type() const;
 	String get_join_error() const;
-	// True once the joiner has name-matched its organic-spawn record (self handle H known).
+	// True once the joiner has name-matched its organic-spawn record and received the
+	// applicable deployment release (self handle H known and gameplay uplink enabled).
 	bool is_joined_in_match() const;
-	// The JoinerSession phase as an int (JoinerSession::Phase), -1 when not joining.
+	// The JoinerConnection phase as an int (JoinerConnection::Phase), -1 when not joining.
 	int get_joiner_phase() const;
 	// The learned wire handle H, 0 until in-match (debug / test).
 	int get_joiner_self_handle() const;

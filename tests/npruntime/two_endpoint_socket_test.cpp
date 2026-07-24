@@ -6,7 +6,8 @@
 //
 // WHAT THIS PROVES (the P6 bar):
 //   (1) Over real sockets: handshake (0x41/0x42) -> the §5.2a spawn-gate burst -> the host streams the
-//       joiner's NAMED dcb-bearing 0x0C -> the joiner name-matches -> InMatch (learns wire handle H).
+//       joiner's NAMED dcb-bearing 0x0C -> the joiner name-matches and receives the applicable
+//       deployment release -> InMatch (learns wire handle H).
 //   (2) Per frame: ClientRuntime emits a framed C2S 0x0C (+ the §5.44 0x2C RTT housekeeping) over UDP ->
 //       handle_server_datagram surfaces PeerC2SInMatch -> apply_in_match_c2s stages it -> Server_TickUpdate
 //       drains+SNAPs the entity + fans an S2C 0x0A -> the owner reframes it 0x83 over UDP -> the client

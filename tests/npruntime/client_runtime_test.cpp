@@ -5,7 +5,7 @@
 //        handshake (0x41/0x42) via ClientRuntime.start()/receive()/Client_ProcessNetworkFrame()
 //        -> the spawn-gate burst (driven from the per-frame client role) -> PeerSpawned
 //        -> the owner binds the joiner connection's transport + streams a NAMED organic-spawn
-//        -> client name-matches -> InMatch (learns wire handle H)
+//        -> client name-matches + receives the deployment release -> InMatch (learns wire handle H)
 //        -> each frame: ClientRuntime emits a framed C2S 0x0C -> handle_server_datagram surfaces
 //           PeerC2SInMatch -> apply_in_match_c2s deliver_c2s's it onto the connection's transport
 //           -> Server_TickUpdate drains+SNAPs the entity + fans an S2C 0x0A
@@ -52,6 +52,7 @@
 #include <cstdio>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -62,10 +63,97 @@ namespace np = opennova::np;
 namespace ns = opennova::netsim;
 namespace w = opennova::world;
 
+std::vector<uint8_t> make_organic_spawn(
+		uint16_t slot_id, const std::string &name, int32_t x,
+		int32_t y, int32_t z, int32_t orient, uint8_t team,
+		uint16_t net_id);
+
 bool expect(bool cond, const char *msg) {
 	if (cond) return true;
 	std::fprintf(stderr, "FAIL: %s\n", msg);
 	return false;
+}
+
+std::vector<uint8_t> frame_server_session(SessionSequencing &seq,
+		const std::string &server_scrk, uint32_t client_key,
+		const std::vector<ProtocolMessage> &messages) {
+	std::vector<uint8_t> body;
+	if (!frame_session_packet(
+			seq, SessionCrypto{server_scrk, {}, client_key}, messages, body)) {
+		return {};
+	}
+	return nw_encode_outbound(
+			SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(body));
+}
+
+bool decode_client_session(const std::vector<uint8_t> &datagram,
+		const std::string &client_scrk, ProtocolPacketHeader &header,
+		std::vector<ProtocolMessage> &messages) {
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	return nw_decode_inbound(datagram.data(), datagram.size(), opcode, body) &&
+			opcode == SESSION_OPCODE_PROTOCOL_MESSAGE &&
+			decode_protocol_packet_plaintext(
+					body.data(), body.size(), client_scrk, header, messages);
+}
+
+const std::vector<uint8_t> &retail_join_request() {
+	static const std::vector<uint8_t> body = {
+			'V', 'E', 'R', 'S', 'I', 'O', 'N', 'C',
+			'R', 'C', 'S', 'T', 'R', 'I', 'N', 'G',
+			0x00, 0x02, 0x00, 0x30, 0x00,
+	};
+	return body;
+}
+
+std::vector<uint8_t> retail_expansion_join_request(std::string_view expansion) {
+	std::vector<uint8_t> body = {
+			'E', 'X', 'P', 0x00,
+			static_cast<uint8_t>(expansion.size() + 1), 0x00,
+	};
+	body.insert(body.end(), expansion.begin(), expansion.end());
+	body.push_back(0);
+	const std::vector<uint8_t> &crc = retail_join_request();
+	body.insert(body.end(), crc.begin(), crc.end());
+	return body;
+}
+
+const std::vector<uint8_t> &retail_full_player_info() {
+	static const std::vector<uint8_t> body = {
+			'R', 'e', 't', 'a', 'i', 'l', 'P', 'r', 'e', 'l', 'u', 'd', 'e', 0x00,
+			0x00,
+			'R', 'e', 't', 'a', 'i', 'l', ' ', 'H', 'o', 's', 't', 0x00,
+			'R', 'e', 't', 'a', 'i', 'l', ' ', 'M', 'i', 's', 's', 'i', 'o', 'n', 0x00,
+			'R', 'E', 'T', 'A', 'I', 'L', '.', 'B', 'M', 'S', 0x00,
+			0x20, 0x00, 0x03, 0x00,
+			0x00,
+			'J', 'o', 'i', 'n', 't', ' ', 'O', 'p', 'e', 'r', 'a', 't', 'i', 'o', 'n', 's', 0x00,
+	};
+	return body;
+}
+
+std::vector<uint8_t> retail_transfer_chunk(
+		uint32_t transfer_id, uint32_t total_size, uint8_t fill) {
+	std::vector<uint8_t> body;
+	auto append_u32 = [&](uint32_t value) {
+		body.push_back(static_cast<uint8_t>(value));
+		body.push_back(static_cast<uint8_t>(value >> 8));
+		body.push_back(static_cast<uint8_t>(value >> 16));
+		body.push_back(static_cast<uint8_t>(value >> 24));
+	};
+	append_u32(transfer_id);
+	append_u32(total_size);
+	append_u32(0);
+	body.insert(body.end(), total_size, fill);
+	return body;
+}
+
+bool matches_client_header(const ProtocolPacketHeader &header,
+		uint32_t session_id, uint32_t sequence, uint32_t ack) {
+	return header.session_id == session_id &&
+			header.seq_num == sequence &&
+			header.ack_count == ack &&
+			header.connection_flags == 0;
 }
 
 bool run_seeded_objective_layout_hint() {
@@ -142,6 +230,535 @@ bool run_fire_queue_stamps_runtime_tick() {
 		return false;
 	return expect(decoded.current_tick == 3,
 	              "C2S 0x06 uses the current runtime tick at queue time");
+}
+
+bool run_retail_post_auth_prelude() {
+	constexpr uint32_t kServerKey = 0x11223344u;
+	constexpr uint32_t kConnectionId = 3;
+	const std::string server_scrk = "SERVER-RETAIL-PRELUDE-SCRK";
+	np::JoinerConnection joiner("RetailPrelude");
+
+	// Drive the real 0x41/0x42 builders so the post-auth fixture uses this
+	// connection's live client key and SCRK.
+	const std::vector<uint8_t> hello_datagram = joiner.start();
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	ClientHello hello;
+	if (!expect(nw_decode_inbound(
+				hello_datagram.data(), hello_datagram.size(), opcode, body) &&
+				opcode == SESSION_OPCODE_CLIENT_HELLO &&
+				parse_client_hello(body.data(), body.size(), hello),
+			"decode retail-prelude ClientHello")) {
+		return false;
+	}
+
+	ServerHello server_hello = build_server_hello(hello, 0x7F000001u, 32769);
+	server_hello.hk = 0x55667788u;
+	server_hello.sus2 = "revx02";
+	const std::vector<uint8_t> server_hello_datagram = nw_encode_outbound(
+			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(server_hello));
+	const np::JoinerConnection::PollResult hello_result = joiner.handle_datagram(
+			server_hello_datagram.data(), server_hello_datagram.size());
+	if (!expect(hello_result.outbound.size() == 1,
+			"ServerHello emits one ClientAuth")) {
+		return false;
+	}
+
+	ClientAuth client_auth;
+	if (!expect(nw_decode_inbound(
+				hello_result.outbound[0].data(), hello_result.outbound[0].size(),
+				opcode, body) &&
+				opcode == SESSION_OPCODE_CLIENT_AUTH &&
+				parse_client_auth(body.data(), body.size(), client_auth),
+			"decode retail-prelude ClientAuth")) {
+		return false;
+	}
+	ServerAuth server_auth = build_server_auth(
+			client_auth, 0x7F000001u, 32769, kServerKey, server_scrk,
+			"", "", "", false);
+	server_auth.mi = kConnectionId;
+	const std::vector<uint8_t> server_auth_datagram = nw_encode_outbound(
+			SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(server_auth));
+	const np::JoinerConnection::PollResult auth_result = joiner.handle_datagram(
+			server_auth_datagram.data(), server_auth_datagram.size());
+	if (!expect(auth_result.outbound.empty(),
+			"ServerAuth waits for retail's initial sequenced settings packet")) {
+		return false;
+	}
+
+	// Golden retail frame 6: two settings-update records in S2C sequence 1.
+	// The client acknowledges that packet with an empty sequence 1, then sends
+	// the exact JOIN request in sequence 2.
+	SessionSequencing server_seq = np::make_jo_game_session_sequencing();
+	const std::vector<ProtocolMessage> initial_settings = {
+			make_protocol_message(
+					0x00, {0x00, 0x00, 0x20, 0x00, 0x00, 0x14, 0x05, 0x00, 0x00},
+					0xA0),
+			make_protocol_message(
+					0x00, {0x01, 0x00, 0x20, 0x00, 0x00, 0x14, 0x05, 0x00, 0x00},
+					0xA0),
+	};
+	const std::vector<uint8_t> settings_datagram = frame_server_session(
+			server_seq, server_scrk, client_auth.ck, initial_settings);
+	const np::JoinerConnection::PollResult settings_result =
+			joiner.handle_datagram(settings_datagram.data(), settings_datagram.size());
+	if (!expect(settings_result.outbound.size() == 2,
+			"initial settings emit header-only ACK then JOIN")) {
+		return false;
+	}
+
+	ProtocolPacketHeader client_header;
+	std::vector<ProtocolMessage> client_messages;
+	if (!expect(decode_client_session(
+				settings_result.outbound[0], client_auth.scrk,
+				client_header, client_messages) &&
+				settings_result.outbound[0].size() == 18 &&
+				client_messages.empty() &&
+				matches_client_header(client_header, kServerKey, 1, 1),
+			"first post-auth C2S packet is retail's header-only ACK")) {
+		return false;
+	}
+
+	if (!expect(decode_client_session(
+				settings_result.outbound[1], client_auth.scrk,
+				client_header, client_messages) &&
+				settings_result.outbound[1].size() == 55 &&
+				client_messages.size() == 1 &&
+				client_messages[0].tag == 0x00 &&
+				client_messages[0].full_tag == 0x00 &&
+				client_messages[0].flags.raw == 0x20 &&
+				client_messages[0].payload ==
+						retail_expansion_join_request(server_hello.sus2) &&
+				matches_client_header(client_header, kServerKey, 2, 1),
+			"second post-auth C2S packet carries retail EXP then VERSIONCRCSTRING")) {
+		return false;
+	}
+
+	// Golden retail frame 9: the host acknowledges JOIN with an empty S2C
+	// 0x00. Retail answers with another header-only ACK and C2S 0x01 {0}.
+	server_seq.last_inbound_seq = 2;
+	const std::vector<uint8_t> join_ack_datagram = frame_server_session(
+			server_seq, server_scrk, client_auth.ck,
+			{make_protocol_message(0x00, {})});
+	const np::JoinerConnection::PollResult join_ack_result =
+			joiner.handle_datagram(join_ack_datagram.data(), join_ack_datagram.size());
+	if (!expect(join_ack_result.outbound.size() == 2,
+			"S2C JOIN ack emits header-only ACK then form post")) {
+		return false;
+	}
+	if (!expect(decode_client_session(
+				join_ack_result.outbound[0], client_auth.scrk,
+				client_header, client_messages) &&
+				join_ack_result.outbound[0].size() == 18 &&
+				client_messages.empty() &&
+				matches_client_header(client_header, kServerKey, 3, 2),
+			"JOIN response receives retail's header-only ACK")) {
+		return false;
+	}
+	if (!expect(decode_client_session(
+				join_ack_result.outbound[1], client_auth.scrk,
+				client_header, client_messages) &&
+				join_ack_result.outbound[1].size() == 22 &&
+				client_messages.size() == 1 &&
+				client_messages[0].tag == 0x01 &&
+				client_messages[0].full_tag == 0x01 &&
+				client_messages[0].flags.raw == 0x20 &&
+				client_messages[0].payload == std::vector<uint8_t>{0x00} &&
+				matches_client_header(client_header, kServerKey, 4, 2),
+			"form post carries retail's required one-byte zero body")) {
+		return false;
+	}
+
+	// The existing padding response remains the final prelude leg, now reached
+	// through the retail ordering rather than OpenNova's former 0x01 shortcut.
+	std::vector<uint8_t> padding_probe(512, 0xA5);
+	auto write_u32 = [&](std::size_t offset, uint32_t value) {
+		padding_probe[offset + 0] = static_cast<uint8_t>(value);
+		padding_probe[offset + 1] = static_cast<uint8_t>(value >> 8);
+		padding_probe[offset + 2] = static_cast<uint8_t>(value >> 16);
+		padding_probe[offset + 3] = static_cast<uint8_t>(value >> 24);
+	};
+	write_u32(0, 0x0057673Eu);
+	write_u32(4, 0x00000002u);
+	write_u32(8, 256);
+	server_seq.last_inbound_seq = 4;
+	const std::vector<uint8_t> padding_datagram = frame_server_session(
+			server_seq, server_scrk, client_auth.ck,
+			{make_protocol_message(0x02, std::move(padding_probe))});
+	const np::JoinerConnection::PollResult padding_result =
+			joiner.handle_datagram(padding_datagram.data(), padding_datagram.size());
+	if (!expect(padding_result.outbound.size() == 1 &&
+				decode_client_session(
+						padding_result.outbound[0], client_auth.scrk,
+						client_header, client_messages) &&
+				padding_result.outbound[0].size() == 278 &&
+				client_messages.size() == 1 &&
+				client_messages[0].tag == 0x02 &&
+				client_messages[0].full_tag == 0x02 &&
+				client_messages[0].flags.raw == 0x40 &&
+				client_messages[0].payload.size() == 256 &&
+				matches_client_header(client_header, kServerKey, 5, 3),
+			"retail challenge receives the sequenced 256-byte padding echo")) {
+		return false;
+	}
+	if (!expect(
+			client_messages[0].payload[0] == 0x3E &&
+				client_messages[0].payload[1] == 0x67 &&
+				client_messages[0].payload[2] == 0x57 &&
+				client_messages[0].payload[3] == 0x00 &&
+				client_messages[0].payload[4] == 0x02 &&
+				client_messages[0].payload[5] == 0x00 &&
+				client_messages[0].payload[6] == 0x00 &&
+				client_messages[0].payload[7] == 0x00,
+			"padding echo preserves the retail challenge position")) {
+		return false;
+	}
+
+	// Retail frame 14 is a post-handshake metadata bundle. While mission loading
+	// holds the gameplay drive, the client still sends frame 15's header-only ACK
+	// so the reliable server stream can advance.
+	joiner.set_world_ready(false);
+	server_seq.last_inbound_seq = 5;
+	const std::vector<uint8_t> metadata_datagram = frame_server_session(
+			server_seq, server_scrk, client_auth.ck,
+			{make_protocol_message(0x03, {0x01})});
+	const np::JoinerConnection::PollResult metadata_result =
+			joiner.handle_datagram(metadata_datagram.data(), metadata_datagram.size());
+	if (!expect(metadata_result.outbound.empty(),
+			"metadata with no semantic response defers its ACK to the send boundary")) {
+		return false;
+	}
+	const std::vector<std::vector<uint8_t>> metadata_ack = joiner.pump(0);
+	if (!expect(metadata_ack.size() == 1 &&
+				metadata_ack[0].size() == 18 &&
+				decode_client_session(
+						metadata_ack[0], client_auth.scrk,
+						client_header, client_messages) &&
+				client_messages.empty() &&
+				matches_client_header(client_header, kServerKey, 6, 4),
+			"held mission load still ACKs the post-handshake metadata packet")) {
+		return false;
+	}
+
+	// Golden retail frame 16: the game-start flag is carried after a second
+	// settings pair and before the authoritative full-player-info row. Retail
+	// reacts immediately, even while the local mission/world remains held.
+	server_seq.last_inbound_seq = 6;
+	const std::vector<uint8_t> game_start_datagram = frame_server_session(
+			server_seq, server_scrk, client_auth.ck,
+			{
+					make_protocol_message(0x03, {0x00}),
+					initial_settings[0],
+					initial_settings[1],
+					make_protocol_message(0x05, {0x01}),
+					make_protocol_message(0x04, std::vector<uint8_t>(24, 0)),
+					make_protocol_message(0x7B, retail_full_player_info()),
+			});
+	const np::JoinerConnection::PollResult game_start_result =
+			joiner.handle_datagram(
+					game_start_datagram.data(), game_start_datagram.size());
+	if (!expect(game_start_result.outbound.size() == 1 &&
+				decode_client_session(
+						game_start_result.outbound[0], client_auth.scrk,
+						client_header, client_messages) &&
+				matches_client_header(client_header, kServerKey, 7, 5) &&
+				client_messages.size() == 5 &&
+				client_messages[0].tag == 0x4E &&
+				client_messages[0].payload == std::vector<uint8_t>(4, 0) &&
+				client_messages[1].tag == 0x03 &&
+				client_messages[1].payload == std::vector<uint8_t>(4, 0) &&
+				client_messages[2].tag == 0x48 &&
+				client_messages[2].payload ==
+						std::vector<uint8_t>({0x03, 0x00, 0x00, 0x00}) &&
+				client_messages[3].tag == 0x47 &&
+				client_messages[3].payload.empty() &&
+				client_messages[4].tag == 0x33 &&
+				client_messages[4].payload == std::vector<uint8_t>(8, 0),
+			"game-start emits retail frame 17's grouped pre-world admission request")) {
+		return false;
+	}
+	if (!expect(joiner.mission_known() && !joiner.world_ready(),
+			"full-player-info advertises the mission without releasing the local world hold")) {
+		return false;
+	}
+
+	// Golden frames 18-20: completion of the server-info transfer emits two
+	// distinct packets, never a bundled or empty-body approximation.
+	server_seq.last_inbound_seq = 7;
+	const std::vector<uint8_t> server_info_datagram = frame_server_session(
+			server_seq, server_scrk, client_auth.ck,
+			{
+					make_protocol_message(0x75, {0x00, 0x02}),
+					make_protocol_message(
+							0x60, retail_transfer_chunk(1, 171, 0xA5)),
+			});
+	const np::JoinerConnection::PollResult server_info_result =
+			joiner.handle_datagram(
+					server_info_datagram.data(), server_info_datagram.size());
+	if (!expect(server_info_result.outbound.size() == 2,
+			"final server-info chunk emits retail's two response packets")) {
+		return false;
+	}
+	if (!expect(decode_client_session(
+				server_info_result.outbound[0], client_auth.scrk,
+				client_header, client_messages) &&
+				matches_client_header(client_header, kServerKey, 8, 6) &&
+				client_messages.size() == 1 &&
+				client_messages[0].tag == 0x47 &&
+				client_messages[0].payload.empty(),
+			"retail frame 19 is a standalone empty 0x47")) {
+		return false;
+	}
+	if (!expect(decode_client_session(
+				server_info_result.outbound[1], client_auth.scrk,
+				client_header, client_messages) &&
+				matches_client_header(client_header, kServerKey, 9, 6) &&
+				client_messages.size() == 1 &&
+				client_messages[0].tag == 0x37 &&
+				client_messages[0].payload == std::vector<uint8_t>(8, 0),
+			"retail frame 20 is a standalone eight-zero 0x37")) {
+		return false;
+	}
+
+	// Golden frames 21-23: the final mission-data chunk is followed by a valid
+	// player list. The client carries the pending ACK into ONE grouped 0x09+0x22
+	// packet instead of manufacturing an intervening header-only sequence.
+	server_seq.last_inbound_seq = 9;
+	const std::vector<uint8_t> mission_data_datagram = frame_server_session(
+			server_seq, server_scrk, client_auth.ck,
+			{
+					make_protocol_message(0x75, {0x00, 0x02}),
+					make_protocol_message(
+							0x64, retail_transfer_chunk(1, 180, 0x5A)),
+			});
+	const np::JoinerConnection::PollResult mission_data_result =
+			joiner.handle_datagram(
+					mission_data_datagram.data(), mission_data_datagram.size());
+	if (!expect(mission_data_result.outbound.empty(),
+			"final mission-data chunk waits for the player-list boundary")) {
+		return false;
+	}
+
+	const std::vector<uint8_t> player_list_datagram = frame_server_session(
+			server_seq, server_scrk, client_auth.ck,
+			{make_protocol_message(
+					0x16, encode_player_list({{0, 1}, {1, 2}}))});
+	const np::JoinerConnection::PollResult player_list_result =
+			joiner.handle_datagram(
+					player_list_datagram.data(), player_list_datagram.size());
+	if (!expect(player_list_result.outbound.size() == 1 &&
+				decode_client_session(
+						player_list_result.outbound[0], client_auth.scrk,
+						client_header, client_messages) &&
+				matches_client_header(client_header, kServerKey, 10, 8) &&
+				client_messages.size() == 2 &&
+				client_messages[0].tag == 0x09 &&
+				client_messages[0].payload.empty() &&
+				client_messages[1].tag == 0x22 &&
+				client_messages[1].payload ==
+						std::vector<uint8_t>({0x00, 0xF7, 0x1C}),
+			"player list emits retail frame 23's grouped 0x09+0x22 packet")) {
+		return false;
+	}
+
+	// S2C 0x11 is the safe preload boundary. While the binding still holds the
+	// advertised mission, the only allowed response is its send-boundary ACK:
+	// no spawn-menu 0x0A and no loadout/status packet may escape.
+	server_seq.last_inbound_seq = 10;
+	const std::vector<uint8_t> sync_tail_datagram = frame_server_session(
+			server_seq, server_scrk, client_auth.ck,
+			{make_protocol_message(0x11, {})});
+	const np::JoinerConnection::PollResult sync_tail_result =
+			joiner.handle_datagram(
+					sync_tail_datagram.data(), sync_tail_datagram.size());
+	if (!expect(sync_tail_result.outbound.empty(),
+			"terminal sync tail remains held before the local world is ready")) {
+		return false;
+	}
+	const std::vector<std::vector<uint8_t>> sync_tail_ack = joiner.pump(0);
+	if (!expect(sync_tail_ack.size() == 1 &&
+				decode_client_session(
+						sync_tail_ack[0], client_auth.scrk,
+						client_header, client_messages) &&
+				matches_client_header(client_header, kServerKey, 11, 9) &&
+				client_messages.empty() &&
+				joiner.preload_ready(),
+			"terminal 0x11 reaches preload_ready with only a header-only ACK")) {
+		return false;
+	}
+	if (!expect(joiner.pump(0).empty(),
+			"preload hold prohibits 0x0A and loadout before world_ready")) {
+		return false;
+	}
+
+	// Installing the advertised mission releases exactly the empty 0x0A
+	// spawn-menu request. Loadout remains reactive to the later world-stream
+	// terminator rather than sharing this boundary.
+	joiner.set_world_ready(true);
+	const std::vector<std::vector<uint8_t>> world_release = joiner.pump(0);
+	if (!expect(world_release.size() == 1 &&
+				decode_client_session(
+						world_release[0], client_auth.scrk,
+						client_header, client_messages) &&
+				matches_client_header(client_header, kServerKey, 12, 9) &&
+				client_messages.size() == 1 &&
+				client_messages[0].tag == 0x0A &&
+				client_messages[0].payload.empty(),
+			"world_ready releases only the empty spawn-menu request")) {
+		return false;
+	}
+
+	server_seq.last_inbound_seq = 12;
+	const std::vector<uint8_t> world_end_datagram = frame_server_session(
+			server_seq, server_scrk, client_auth.ck,
+			{make_protocol_message(0x1A, {})});
+	const np::JoinerConnection::PollResult world_end_result =
+			joiner.handle_datagram(
+					world_end_datagram.data(), world_end_datagram.size());
+	if (!expect(world_end_result.outbound.size() == 1 &&
+				decode_client_session(
+						world_end_result.outbound[0], client_auth.scrk,
+						client_header, client_messages) &&
+				matches_client_header(client_header, kServerKey, 13, 10) &&
+				client_messages.size() == 3 &&
+				client_messages[0].tag == 0x2F &&
+				!client_messages[0].payload.empty() &&
+				client_messages[1].tag == 0x2F &&
+				!client_messages[1].payload.empty() &&
+				client_messages[0].payload != client_messages[1].payload &&
+				client_messages[2].tag == 0x0B &&
+				!client_messages[2].payload.empty(),
+			"world-stream 0x1A triggers one grouped loadout/status packet")) {
+		return false;
+	}
+
+	// The player's named organic record arrives during the world stream. Knowing
+	// the wire handle is necessary but must not release gameplay while retail's
+	// spawn-zone deployment gate is still pending.
+	constexpr uint16_t kRetailSelfHandle = 0x00C6;
+	server_seq.last_inbound_seq = 13;
+	const std::vector<uint8_t> self_spawn_datagram = frame_server_session(
+			server_seq, server_scrk, client_auth.ck,
+			{make_protocol_message(
+					0x0C,
+					make_organic_spawn(
+							kRetailSelfHandle, "RetailPrelude",
+							0x10000, 0x20000, 0x30000, 0, 1, 7))});
+	const np::JoinerConnection::PollResult self_spawn_result =
+			joiner.handle_datagram(
+					self_spawn_datagram.data(), self_spawn_datagram.size());
+	if (!expect(self_spawn_result.outbound.empty() &&
+				joiner.has_self_handle() &&
+				joiner.self_handle() == kRetailSelfHandle &&
+				!joiner.in_match(),
+			"self name-match remains hidden before the retail deployment release")) {
+		return false;
+	}
+
+	// The first 0x5A grants the submitted loadout but cannot decide deployment
+	// before 0x0F supplies gameFlags. Split the grant and policy across packets
+	// to pin both retail's same-packet ordering and OpenNova's later-0x0F order.
+	const std::vector<uint8_t> first_grant_datagram = frame_server_session(
+			server_seq, server_scrk, client_auth.ck,
+			{make_protocol_message(
+					0x5A, {0x08, 0x03, 0x0A, 0xFF, 0x00, 0xFF})});
+	const np::JoinerConnection::PollResult first_grant_result =
+			joiner.handle_datagram(
+					first_grant_datagram.data(), first_grant_datagram.size());
+	if (!expect(first_grant_result.outbound.empty() && !joiner.in_match(),
+			"loadout grant waits while the deployment policy is unknown")) {
+		return false;
+	}
+
+	std::vector<uint8_t> zoned_world_state(23, 0);
+	zoned_world_state[22] = 0x01;
+	const std::vector<uint8_t> deployment_policy_datagram = frame_server_session(
+			server_seq, server_scrk, client_auth.ck,
+			{make_protocol_message(0x0F, std::move(zoned_world_state))});
+	const np::JoinerConnection::PollResult granted_loadout_result =
+			joiner.handle_datagram(
+					deployment_policy_datagram.data(),
+					deployment_policy_datagram.size());
+	if (!expect(granted_loadout_result.outbound.empty() &&
+				!joiner.in_match(),
+			"spawn-zone policy still waits for the second profile-side grant")) {
+		return false;
+	}
+
+	// The second initial grant completes the pair and emits exactly one deploy
+	// pick. Record its server sequence so the duplicate-retransmit case below
+	// can rebuild that old message with a newer ACK.
+	server_seq.last_inbound_seq = 13;
+	const uint32_t second_grant_sequence = server_seq.next_outbound_seq;
+	const std::vector<uint8_t> split_second_grant_datagram =
+			frame_server_session(
+					server_seq, server_scrk, client_auth.ck,
+					{make_protocol_message(
+							0x5A,
+							{0x08, 0x03, 0x0A, 0xFF, 0x00, 0xFF})});
+	const np::JoinerConnection::PollResult split_second_grant_result =
+			joiner.handle_datagram(
+					split_second_grant_datagram.data(),
+					split_second_grant_datagram.size());
+	if (!expect(split_second_grant_result.outbound.size() == 1 &&
+				decode_client_session(
+						split_second_grant_result.outbound[0],
+						client_auth.scrk, client_header, client_messages) &&
+				client_messages.size() == 1 &&
+				client_messages[0].tag == 0x0E &&
+				client_messages[0].payload ==
+						std::vector<uint8_t>({0xFF, 0xFF}) &&
+				!joiner.in_match(),
+			"granted loadout emits one retail deploy pick without entering the match")) {
+		return false;
+	}
+
+	// A retained retransmit reuses the old server sequence but carries the
+	// sender's current ACK, which now covers our 0x0E. Reliable deduplication
+	// must suppress that old grant rather than treating it as the release.
+	server_seq.last_inbound_seq = client_header.seq_num;
+	std::vector<uint8_t> retransmit_body;
+	if (!expect(frame_session_packet_for_sequence(
+				server_seq,
+				SessionCrypto{server_scrk, {}, client_auth.ck},
+				second_grant_sequence, retransmit_body),
+			"rebuild retained second grant with the post-pick ACK")) {
+		return false;
+	}
+	const std::vector<uint8_t> retransmitted_second_grant =
+			nw_encode_outbound(
+					SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE,
+					std::move(retransmit_body));
+	const np::JoinerConnection::PollResult retransmitted_grant_result =
+			joiner.handle_datagram(
+					retransmitted_second_grant.data(),
+					retransmitted_second_grant.size());
+	if (!expect(retransmitted_grant_result.outbound.empty() &&
+				!retransmitted_grant_result.reached_in_match &&
+				!joiner.in_match(),
+			"ACK-updated retransmit of an initial grant cannot release the player")) {
+		return false;
+	}
+
+	const std::vector<uint8_t> deploy_release_datagram = frame_server_session(
+			server_seq, server_scrk, client_auth.ck,
+			{
+					make_protocol_message(
+							0x5A, {0x08, 0x03, 0x0A, 0xFF, 0x00, 0xFF}),
+					make_protocol_message(0x61, {0x00, 0x00, 0xED, 0x00}),
+			});
+	const np::JoinerConnection::PollResult deploy_release_result =
+			joiner.handle_datagram(
+					deploy_release_datagram.data(),
+					deploy_release_datagram.size());
+	if (!expect(deploy_release_result.outbound.empty() &&
+				deploy_release_result.reached_in_match &&
+				joiner.in_match() &&
+				joiner.self_handle() == kRetailSelfHandle,
+			"post-pick 0x5A releases the hidden retail player into the match")) {
+		return false;
+	}
+	return true;
 }
 
 bool run_duplicate_s2c_session_one_shot_is_not_replayed() {
@@ -332,12 +949,15 @@ bool run_roundtrip() {
 
 	uint32_t tick = 1;
 	bool spawned = false;
+	bool saw_join_00 = false;
+	bool join_00_shape_ok = false;
 	bool saw_join_01 = false;
+	bool join_01_shape_ok = false;
 	bool saw_join_02 = false;
 	bool join_02_shape_ok = false;
 	bool saw_client_auth = false;
-	bool client_auth_uses_callsign_without_fabricated_profile = false;
-	bool saw_drive_while_held = false;
+	bool client_auth_has_retail_environment = false;
+	bool saw_world_drive_while_held = false;
 	std::string spawn_name;
 	auto note_event = [&](const np::HostAcceptEvent &e) {
 		if (e.kind == np::HostAcceptEvent::Kind::PeerSpawned && !spawned) {
@@ -358,8 +978,27 @@ bool run_roundtrip() {
 			ClientAuth auth;
 			if (parse_client_auth(session_body.data(), session_body.size(), auth)) {
 				saw_client_auth = true;
-				client_auth_uses_callsign_without_fabricated_profile =
-						auth.na == kName && auth.cu.empty();
+				bool saw_vn = false;
+				bool saw_bn = false;
+				bool saw_mbn = false;
+				bool saw_sopd = false;
+				for (const std::vector<uint8_t> &blob : auth.cu) {
+					uint8_t type = 0;
+					std::string name;
+					std::string value;
+					if (!parse_client_cu_chunk(
+							blob.data(), blob.size(), type, name, value) ||
+					    type != 2) {
+						continue;
+					}
+					saw_vn |= name == "VN" && value == "2";
+					saw_bn |= name == "BN" && value == "1";
+					saw_mbn |= name == "MBN" && value == "20042002";
+					saw_sopd |= name == "SOPD" && value == "180";
+				}
+				client_auth_has_retail_environment =
+						auth.na == kName && saw_vn && saw_bn &&
+						saw_mbn && saw_sopd;
 			}
 		} else if (opcode == SESSION_OPCODE_PROTOCOL_MESSAGE) {
 			for (const np::NapiNPConnection &conn : ctx.np_protocol.connection_list) {
@@ -370,7 +1009,16 @@ bool run_roundtrip() {
 				if (!deframe_session_packet(seq, SessionCrypto{{}, conn.client_scrk, 0},
 				                            session_body.data(), session_body.size(), hdr, messages)) break;
 				for (const ProtocolMessage &message : messages) {
-					if (message.tag == 0x01) saw_join_01 = true;
+					if (message.tag == 0x00) {
+						saw_join_00 = true;
+						join_00_shape_ok =
+								message.payload ==
+								retail_expansion_join_request(host_config.expansion);
+					}
+					if (message.tag == 0x01) {
+						saw_join_01 = true;
+						join_01_shape_ok = message.payload == std::vector<uint8_t>{0x00};
+					}
 					if (message.tag == 0x02) {
 						saw_join_02 = true;
 						join_02_shape_ok = message.payload.size() == 256 &&
@@ -378,9 +1026,9 @@ bool run_roundtrip() {
 							message.payload[6] == 0 && message.payload[7] == 0;
 					}
 					if (!client.world_ready() &&
-					    (message.tag == 0x48 || message.tag == 0x37 || message.tag == 0x09 ||
-					     message.tag == 0x22 || message.tag == 0x2F || message.tag == 0x0B))
-						saw_drive_while_held = true;
+					    (message.tag == 0x0A || message.tag == 0x2F ||
+					     message.tag == 0x0B))
+						saw_world_drive_while_held = true;
 				}
 				break;
 			}
@@ -401,10 +1049,16 @@ bool run_roundtrip() {
 	                    client.game_type() == host_config.game_type &&
 	                    client.expansion() == host_config.expansion,
 	            "S2C 0x7B retained authoritative server/mission/gametype/expansion")) return false;
-	if (!expect(saw_join_01 && saw_join_02 && join_02_shape_ok,
-	            "post-auth C2S 0x01 -> S2C 0x02 -> 256-byte C2S 0x02 sequence")) return false;
-	if (!expect(saw_client_auth && client_auth_uses_callsign_without_fabricated_profile,
-	            "game ClientAuth uses NA callsign and omits unbacked profile CUs")) return false;
+	if (!expect(saw_join_00 && join_00_shape_ok &&
+	                    saw_join_01 && join_01_shape_ok &&
+	                    saw_join_02 && join_02_shape_ok,
+	            "exact C2S 0x00 -> 0x01 -> S2C 0x02 -> 256-byte C2S 0x02 sequence")) return false;
+	if (!expect(
+			saw_client_auth &&
+					client_auth_has_retail_environment,
+			"game ClientAuth sends the retail build/environment CU block")) {
+		return false;
+	}
 	if (!expect(client.phase() == np::JoinerConnection::Phase::Driving && !spawned,
 	            "mission discovery stays on the same pre-spawn connection")) return false;
 
@@ -422,8 +1076,9 @@ bool run_roundtrip() {
 			for (const std::vector<uint8_t> &o : t.outbound) client.receive(o.data(), o.size());
 		}
 	}
-	if (!expect(!saw_drive_while_held && !spawned && !np::connection_spawned(ctx, peer),
-	            "0x48/0x37 and later load/spawn drive wait for world-ready")) return false;
+	if (!expect(!saw_world_drive_while_held &&
+	                    !spawned && !np::connection_spawned(ctx, peer),
+	            "0x0A and loadout/status wait for world-ready")) return false;
 
 	// Install the advertised mission, then resume on the exact authenticated session.
 	client.set_world_ready(true);
@@ -474,17 +1129,21 @@ bool run_roundtrip() {
 		if (!expect(np::frame_in_match_s2c(ctx, peer, 0x0C, body, sdg), "host frames the named 0x0C"))
 			return false;
 		client.receive(sdg.data(), sdg.size());
-		// Folding the name-match reaches InMatch in this same frame, so the retail send block may also
-		// emit its first sequenced 0x2C.  The runtime contract requires the owner to ship every returned
-		// datagram; discarding it would manufacture a sequence hole that retail correctly queues behind.
+		// The name-match and the post-0x0E deploy release may arrive on adjacent
+		// receive drains. The runtime contract requires the owner to ship every
+		// returned datagram; discarding one would manufacture a sequence hole.
+		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick++))
+			pump_host(std::move(d));
+	}
+	for (int f = 0; f < 4 && !client.in_match(); ++f) {
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick++))
 			pump_host(std::move(d));
 	}
 	if (!expect(client.in_match() && client.self_handle() == Hh.packed,
-	            "client reached InMatch via the name-match; H == the host wire handle")) return false;
+	            "client reached InMatch after name-match plus deploy release; H == the host wire handle")) return false;
 	if (!expect(client.view().game_type() == host_config.game_type,
 	            "joiner learned authoritative g_GameType before live 0x0A frames")) return false;
-	if (!expect(client.deployed(), "client is deployed on the spawn name-match (the 0x0C gate)")) return false;
+	if (!expect(client.deployed(), "client is deployed after name-match plus the applicable 0x5A release")) return false;
 
 	// --- 4) In-match per-frame loop: client 0x0C -> apply_in_match_c2s -> Server_TickUpdate -> 0x0A fold ---
 	PlayerExtendedUplink up;
@@ -880,6 +1539,7 @@ bool run_host_pump_hook_observes_remote_before_first_tick() {
 int main() {
 	const bool ok = run_seeded_objective_layout_hint() &&
 	                run_fire_queue_stamps_runtime_tick() &&
+	                run_retail_post_auth_prelude() &&
 	                run_duplicate_s2c_session_one_shot_is_not_replayed() &&
 	                run_roundtrip() &&
 	                run_host_client_discards_authority_owned_reload_echoes() &&

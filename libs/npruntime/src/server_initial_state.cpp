@@ -14,6 +14,7 @@
 #include <npwire/ingame_encode.h>      // encode_organic_spawn_batch / encode_pool3_sync_batch
 #include <world/entity.h>                 // world::Entity (0x0F spawn pose)
 #include <world/geom.h>                   // world::to_fixed (0x0F spawn pose)
+#include <world/spawn_select.h>           // world_has_spawn_zone (0x0F gameFlags bit0)
 #include <world/world.h>
 
 namespace opennova::np {
@@ -167,8 +168,10 @@ std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const Napi
 	put_u16(b, static_cast<uint16_t>(yaw));       // yaw  (i16, client <<16)
 	put_u16(b, 0);                                // pitch
 	put_u16(b, 0);                                // roll
-	b.push_back(0x01);                            // gameFlags bit0 = spawn zones exist
-	                                              // [orig: SpawnZoneList_GetCount()!=0 @0x502da7]
+	const bool has_spawn_zones =
+			ctx.world != nullptr && world::world_has_spawn_zone(*ctx.world);
+	b.push_back(has_spawn_zones ? 0x01 : 0x00);  // gameFlags bit0 = spawn zones exist
+	                                             // [orig: SpawnZoneList_GetCount()!=0 @0x502da7]
 	// The fixed 128-i32 block is the per-slot-type SCORE table (client outTable @0xB75FE8;
 	// readers Entity_GetScoreValueBySlotType / WeaponSlot_*), NOT zone data — zeros are the
 	// fresh-round values and benign for the deploy picker (§5.29 correction, witness 2026-07-03).

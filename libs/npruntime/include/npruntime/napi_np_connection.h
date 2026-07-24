@@ -242,6 +242,8 @@ struct NapiNPConnection {
 	uint32_t server_sk = 0;        // our ServerAuth.SK
 	SessionSequencing seq = make_jo_game_session_sequencing();
 	                               // outbound seq (from 1) + last inbound ack [ADR 0013 shared framing]
+	uint32_t active_send_elapsed_ms = 0; // retained-message active-send interval; reset by every
+	                                     // framed S2C packet, ticked by tick_connections
 	uint32_t peer_acked_seq = 0;   // highest hdr.ack_count the peer has echoed = the last of OUR 0x83
 	                               // seqs it confirmed. Drives the initial-state backlog throttle: the
 	                               // original stalls both burst tracks while the connection's

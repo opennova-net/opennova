@@ -4037,7 +4037,8 @@ void NovaSimulation::finish_load(const opennova::bms::File &file) {
 	// P7 co-op LAN joiner: a pure non-authority client. Build a fresh np::ClientRuntime (Joiner role)
 	// per (re)load — start() fully resets the session, so a reload reconnects cleanly. No net ISystem
 	// is registered (the joiner never serializes; run_logic_tick(false) leaves World::net the default
-	// LocalSink for WAC/BMS sinks). The local player L is spawned in joiner_pump on the name-match.
+	// LocalSink for WAC/BMS sinks). The local player L is spawned in joiner_pump after the
+	// name-match and applicable deployment release.
 	if (joiner_) {
 		// A retail-style menu join has already authenticated and learned the map
 		// from S2C 0x7B before this local load. Preserve that exact runtime/socket;
@@ -4116,6 +4117,7 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_joiner"), &NovaSimulation::is_joiner);
 	ClassDB::bind_method(D_METHOD("set_join_world_ready", "ready"), &NovaSimulation::set_join_world_ready);
 	ClassDB::bind_method(D_METHOD("poll_join_preload"), &NovaSimulation::poll_join_preload);
+	ClassDB::bind_method(D_METHOD("is_join_preload_ready"), &NovaSimulation::is_join_preload_ready);
 	ClassDB::bind_method(D_METHOD("has_join_mission"), &NovaSimulation::has_join_mission);
 	ClassDB::bind_method(D_METHOD("get_join_server_name"), &NovaSimulation::get_join_server_name);
 	ClassDB::bind_method(D_METHOD("get_join_mission_name"), &NovaSimulation::get_join_mission_name);
@@ -7951,6 +7953,10 @@ bool NovaSimulation::poll_join_preload() {
 	}
 	++now_tick_;
 	return true;
+}
+
+bool NovaSimulation::is_join_preload_ready() const {
+	return joiner_ && runtime_ && runtime_->preload_ready();
 }
 
 bool NovaSimulation::has_join_mission() const {

@@ -20,11 +20,19 @@
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
+#include <limits>
 #include <utility>
 
 namespace opennova::np {
 
 namespace {
+
+// Retail's initialized JO connection-template active-send interval (CS field 5). If reliable
+// records remain unacknowledged and no other packet was built for longer than this interval,
+// BuildOutgoingPackets mints a fresh header-only sequence. The induced gap asks the peer's ordinary
+// 0x44/0x84 machinery to reconstruct a lost semantic packet.
+// [orig: CNapiNPConnection_PumpSendIntervals @0x628FD0 -> BuildOutgoingPackets @0x628430]
+constexpr uint32_t kActiveSendIntervalMilliseconds = 1000;
 
 // ASCII case-insensitive tag-name compare [orig: Napi_StrCaseEqual @0x616e70 — the
 // NapiNetConfig_LoadFromConnTags match].
@@ -148,7 +156,37 @@ std::vector<uint8_t> frame_session_replies(NapiNPConnection &conn,
 	                          body_out)) {
 		return {};
 	}
+	conn.active_send_elapsed_ms = 0;
 	return nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(body_out));
+}
+
+std::vector<uint8_t> frame_retained_session_reply(
+		NapiNPConnection &conn, uint32_t sequence) {
+	const auto retained = conn.seq.retained_outbound.find(sequence);
+	if (retained == conn.seq.retained_outbound.end() || retained->second.empty()) return {};
+
+	std::vector<uint8_t> body_out;
+	if (!frame_session_packet_for_sequence(
+			conn.seq, SessionCrypto{conn.server_scrk, {}, conn.client_ck},
+			sequence, body_out)) {
+		return {};
+	}
+	return nw_encode_outbound(
+			SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(body_out));
+}
+
+// Retail follows ServerAuth with one sequenced packet that installs the 1300-byte packet ceiling
+// in both control-setting directions. The joiner ACKs this as C2S sequence 1 before sending JOIN.
+// [wire: host_and_join_lan frames 6-8; flags 0xA0 = settings update + u8 length]
+std::vector<ProtocolMessage> make_game_session_initial_settings() {
+	return {
+			make_protocol_message(
+					0x00, {0x00, 0x00, 0x20, 0x00, 0x00, 0x14, 0x05, 0x00, 0x00},
+					0xA0),
+			make_protocol_message(
+					0x00, {0x01, 0x00, 0x20, 0x00, 0x00, 0x14, 0x05, 0x00, 0x00},
+					0xA0),
+	};
 }
 
 // ---------------------------------------------------------------------------
@@ -329,6 +367,13 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		// NapiNPConnection_SendSessionInit @0x620ef0 (re-emits the same 0x82), return 1]
 		if (existing->client_ci == auth.ci && existing->client_ck == auth.ck) {
 			out.outbound.push_back(make_server_auth_datagram(ctx, auth, peer, *existing));
+			// A retry normally means the original ServerAuth/settings pair was lost. Reconstruct the
+			// retained first session packet under sequence 1 rather than minting a new sequence.
+			if (existing->peer_acked_seq < 1) {
+				std::vector<uint8_t> settings =
+						frame_retained_session_reply(*existing, 1);
+				if (!settings.empty()) out.outbound.push_back(std::move(settings));
+			}
 			return;
 		}
 		// A different client (CI/CK) reusing an already-joined addr: drop the stale node and recreate
@@ -431,6 +476,9 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	}
 	conn.phase = ConnectionPhase::Joined;
 	out.outbound.push_back(make_server_auth_datagram(ctx, auth, peer, conn));
+	std::vector<uint8_t> initial_settings =
+			frame_session_replies(conn, make_game_session_initial_settings());
+	if (!initial_settings.empty()) out.outbound.push_back(std::move(initial_settings));
 
 	HostAcceptEvent ev;
 	ev.kind = HostAcceptEvent::Kind::PeerHandshakeAdvanced;
@@ -666,13 +714,38 @@ std::vector<TickOut> flush_server_missing_requests(NapiNPServerCtx &ctx) {
 
 std::vector<TickOut> tick_connections(NapiNPServerCtx &ctx, int elapsed_ms, uint32_t now_tick) {
 	std::vector<TickOut> out;
-	(void)elapsed_ms; // the world-stream burst is one-shot per join, not paced by elapsed time (D-NET-114)
+	auto append_active_probe = [](NapiNPConnection &conn, TickOut &to) {
+		if (conn.type != 1 || conn.server_scrk.empty() ||
+		    conn.seq.retained_outbound_message_count == 0 ||
+		    conn.active_send_elapsed_ms <= kActiveSendIntervalMilliseconds) {
+			return;
+		}
+		std::vector<uint8_t> datagram = frame_session_replies(conn, {});
+		if (!datagram.empty()) to.outbound.push_back(std::move(datagram));
+	};
 
 	// P3 World-driven path: spawn any accepted-but-unspawned players once per tick (idempotent), before
 	// walking the connections to advance their bursts.
 	if (ctx.world != nullptr) Server_ProcessPendingPlayerSpawns(ctx, *ctx.world);
 
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		// Accumulate the active-send interval before application production, but defer minting its
+		// header probe until afterward. Any semantic packet framed below resets the timer and takes
+		// this sequence slot, matching BuildOutgoingPackets rather than inserting an empty packet
+		// immediately before queued data.
+		if (conn.type == 1 && !conn.server_scrk.empty()) {
+			if (conn.seq.retained_outbound_message_count == 0) {
+				conn.active_send_elapsed_ms = 0;
+			} else if (elapsed_ms > 0) {
+				const uint64_t total =
+						static_cast<uint64_t>(conn.active_send_elapsed_ms) +
+						static_cast<uint32_t>(elapsed_ms);
+				conn.active_send_elapsed_ms = static_cast<uint32_t>(
+						total < std::numeric_limits<uint32_t>::max()
+								? total
+								: std::numeric_limits<uint32_t>::max());
+			}
+		}
 		if (conn.burst.spawned) {
 			// Spawned peers: Server_TickUpdate owns their per-frame 0x0A — but the roster
 			// version check must keep running here so EXISTING clients learn about LATER
@@ -680,25 +753,31 @@ std::vector<TickOut> tick_connections(NapiNPServerCtx &ctx, int elapsed_ms, uint
 			// i.e. once, on each connection's own burst-completion tick — the v30 wire
 			// showed the first joiner never received the grown 47-B 0x16 when the second
 			// spawned (its HUD count stayed at 2).
+			TickOut to;
+			to.peer = conn.peer;
 			if (conn.type == 1 &&
 			    conn.reply.roster_seen_gen != ctx.np_protocol.roster_generation) {
-				TickOut to;
-				to.peer = conn.peer;
 				std::vector<ProtocolMessage> roster_reply{build_player_list_message(
 						ctx.config, ctx.np_protocol.connection_list, ctx.world)};
 				std::vector<uint8_t> dg = frame_session_replies(conn, roster_reply);
 				if (!dg.empty()) to.outbound.push_back(std::move(dg));
 				conn.reply.roster_seen_gen = ctx.np_protocol.roster_generation;
-				if (!to.outbound.empty()) out.push_back(std::move(to));
 			}
+			append_active_probe(conn, to);
+			if (!to.outbound.empty()) out.push_back(std::move(to));
 			continue;
 		}
 
 		TickOut to;
 		to.peer = conn.peer;
 
-		if (ctx.world == nullptr) continue; // no World -> no world-stream burst to advance (the reactive
-		                                    // §5.1 replies are datagram-driven, not ticked)
+		if (ctx.world == nullptr) {
+			// No World means no semantic burst, but reliable settings/handshake records still need
+			// the transport-level probe that induces the peer's missing-sequence request.
+			append_active_probe(conn, to);
+			if (!to.outbound.empty()) out.push_back(std::move(to));
+			continue;
+		}
 		// Advance this connection's §5.2a burst one step and frame/ship the bodies (built from real
 		// World/bms state). conn.burst is authoritative for the spawn-gate latches.
 		// Golden ordering: the post-handshake burst (case 0x02 → 0x16 player-list) PRECEDES the
@@ -748,6 +827,7 @@ std::vector<TickOut> tick_connections(NapiNPServerCtx &ctx, int elapsed_ms, uint
 		// datagram-driven handle_client_session path — whichever observes the burst change first wins.
 		surface_burst_events(ctx, conn, to.events);
 
+		append_active_probe(conn, to);
 		if (to.outbound.empty() && to.events.empty()) continue;
 		out.push_back(std::move(to));
 	}
