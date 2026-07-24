@@ -1,7 +1,7 @@
 extends GutTest
 
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
-const MissionSeatDiagnostics := preload("res://engine/world/mission_seat_diagnostics.gd")
+const ItemSeatSpecs := preload("res://engine/world/item_seat_specs.gd")
 const NovaObjectModelScript := preload("res://engine/object/nova_object_model.gd")
 const PresentAimOverlay := preload("res://engine/world/aim_overlay_present_pass.gd")
 const NATIVE_RUNTIME_TIMING_KEYS := [
@@ -1557,7 +1557,7 @@ func test_late_spawn_player_resolves_own_adm_before_configured_usegun_pose() -> 
 	var sim := NovaSimulation.new()
 	sim.set_item_seat_specs([{
 			"type_id": 1419,
-			"seats": MissionSeatDiagnostics.seat_specs_from_model(object_data),
+			"seats": ItemSeatSpecs.seat_specs_from_model(object_data),
 			"mount_config_valid": true,
 			"mount_config": 4,
 			"primary_weapon": "WPN_EMPLCD50NA",
@@ -1960,7 +1960,7 @@ func test_local_usegun_aim_articulates_emplaced_weapon_model() -> void:
 	var object_data := NovaObjectData.new()
 	assert_eq(object_data.open_file(ProjectSettings.globalize_path(
 			"res://../fixtures/3dp/B50Cal/B50Cal.3di")), OK)
-	var seat_specs := MissionSeatDiagnostics.seat_specs_from_model(object_data)
+	var seat_specs := ItemSeatSpecs.seat_specs_from_model(object_data)
 	assert_eq(seat_specs.size(), 1, "B50Cal exposes its authored Usegun seat")
 	var usegun_info: Dictionary = object_data.get_user_point_info(
 			int((seat_specs[0] as Dictionary).get("bone_index", 0)) - 1)
@@ -3209,7 +3209,7 @@ func test_listen_snapshot_attachment_follows_animated_userpoint() -> void:
 			"anchor_found": true,
 			"bone_index": anchor_index + 1,
 			"source_name": String(anchor_info.get("name", "")),
-			"local": MissionSeatDiagnostics.seat_local_from_user_point_position(
+			"local": ItemSeatSpecs.seat_local_from_user_point_position(
 					anchor_info.get("position", Vector3.ZERO)),
 		}],
 	}])

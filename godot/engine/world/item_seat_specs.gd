@@ -1,5 +1,13 @@
-class_name MissionSeatDiagnostics
+class_name ItemSeatSpecs
 extends RefCounted
+
+# Builds the per-item SEAT SPECS the runtime feeds NovaSimulation.set_item_seat_specs
+# (the libs-side ItemSeatSpec records): the seat/armory/emplacement userpoint walk over
+# each mission item's .3di model + items.def row — seat typing by the witnessed name
+# prefixes, retail slot layout, yaw-zero local frames, and the phrase_set mount config.
+# The tail (command_rule / predict_best_seat) mirrors the witnessed attach-command seat
+# selection for the MCP mission tools and probes; the sim performs the real selection.
+# (Formerly "MissionSeatDiagnostics" — a misnomer: this is production extraction.)
 
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
 

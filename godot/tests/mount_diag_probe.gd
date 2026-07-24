@@ -1,6 +1,6 @@
 extends SceneTree
 
-const MissionSeatDiagnostics := preload("res://engine/world/mission_seat_diagnostics.gd")
+const ItemSeatSpecs := preload("res://engine/world/item_seat_specs.gd")
 
 
 func _init() -> void:
@@ -58,7 +58,7 @@ func _init() -> void:
 		if not target.is_empty():
 			var type_id := int(target.get("type_id", 0))
 			if not seat_cache.has(type_id):
-				seat_cache[type_id] = MissionSeatDiagnostics.seat_specs_for_item(
+				seat_cache[type_id] = ItemSeatSpecs.seat_specs_for_item(
 						root, item_db, int(target.get("item_id", 0)), type_id, true)
 			spec = seat_cache[type_id]
 			seats = spec.get("seats", [])
@@ -67,10 +67,10 @@ func _init() -> void:
 			target_summary["seat_error"] = String(spec.get("error", ""))
 			target_summary["model"] = String(spec.get("model", ""))
 			target_summary["model_seat_points"] = _model_seat_points(root, String(spec.get("model", "")))
-		var prediction := MissionSeatDiagnostics.predict_best_seat(seats, command_id)
+		var prediction := ItemSeatSpecs.predict_best_seat(seats, command_id)
 		rows.append({
 			"organic": _entity_summary(organic, item_db),
-			"command": MissionSeatDiagnostics.command_rule(command_id),
+			"command": ItemSeatSpecs.command_rule(command_id),
 			"target": target_summary,
 			"prediction": {
 				"seat_index": prediction.get("seat_index", -1),
@@ -80,7 +80,7 @@ func _init() -> void:
 		})
 
 	var sim := NovaSimulation.new()
-	sim.set_item_seat_specs(MissionSeatDiagnostics.build_item_seat_specs(mission, root, item_db, true))
+	sim.set_item_seat_specs(ItemSeatSpecs.build_item_seat_specs(mission, root, item_db, true))
 	if sim.load_from_mission_data(mission):
 		for i in range(int(sim.get_entity_count())):
 			var card: Dictionary = sim.get_entity_debug(i)
@@ -133,11 +133,11 @@ func _model_seat_points(root: NovaResourceRoot, model_name: String) -> Array:
 	for i in range(data.get_user_point_count()):
 		var up: Dictionary = data.get_user_point_info(i)
 		var source_name := String(up.get("name", ""))
-		var seat_type := MissionSeatDiagnostics.seat_type_for_user_point(source_name)
-		if seat_type == MissionSeatDiagnostics.SEAT_NONE:
+		var seat_type := ItemSeatSpecs.seat_type_for_user_point(source_name)
+		if seat_type == ItemSeatSpecs.SEAT_NONE:
 			continue
 		var raw_position: Vector3 = up.get("position", Vector3.ZERO)
-		var raw_bms := MissionSeatDiagnostics.seat_local_from_user_point_position(raw_position)
+		var raw_bms := ItemSeatSpecs.seat_local_from_user_point_position(raw_position)
 		var subobject := int(up.get("subobject", -1))
 		var transformed_position := raw_position
 		var xform_found := false
@@ -145,12 +145,12 @@ func _model_seat_points(root: NovaResourceRoot, model_name: String) -> Array:
 			var xf: Transform3D = part_xforms[subobject]
 			transformed_position = xf * raw_position
 			xform_found = true
-		var transformed_bms := MissionSeatDiagnostics.seat_local_from_user_point_position(transformed_position)
+		var transformed_bms := ItemSeatSpecs.seat_local_from_user_point_position(transformed_position)
 		out.append({
 			"userpoint_index": i,
 			"source_name": source_name,
 			"seat_type": seat_type,
-			"pose_index": MissionSeatDiagnostics.seat_pose_index_for_user_point(source_name),
+			"pose_index": ItemSeatSpecs.seat_pose_index_for_user_point(source_name),
 			"subobject": subobject,
 			"point_type": int(up.get("point_type", 0)),
 			"raw_godot": raw_position,
@@ -235,7 +235,7 @@ func _body_visual_anchor_diag(root: NovaResourceRoot, item_db: NovaItemDatabase,
 		return out
 	if not adm_name.to_lower().ends_with(".adm"):
 		adm_name += ".adm"
-	var model_name := MissionSeatDiagnostics.model_name_for_graphic(graphic)
+	var model_name := ItemSeatSpecs.model_name_for_graphic(graphic)
 	var data := NovaObjectData.new()
 	if data.open_from_resource_root(root, model_name) != OK:
 		out["error"] = "model_load_failed"
