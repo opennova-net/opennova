@@ -737,6 +737,10 @@ Dictionary NovaSimulation::get_host_session_config() const {
 	out["expansion"] = String(session.expansion.c_str());
 	out["gametype"] = static_cast<int64_t>(session.game_type);
 	out["mpattrib"] = static_cast<int64_t>(session.mp_attributes);
+	// UI host-config values held on the sim (not in GameConfig): the lobby player
+	// cap and the serve-and-play/dedicated selector, for the F3 Net tab.
+	out["max_players"] = static_cast<int64_t>(host_max_players_);
+	out["serve_and_play"] = host_serve_and_play_;
 	out["fat_bullets"] = session.fat_bullets;
 	out["one_shot_kill"] = session.one_shot_kill;
 	out["spawn_x"] = static_cast<int64_t>(session.spawn_x);

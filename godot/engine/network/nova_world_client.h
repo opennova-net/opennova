@@ -2,7 +2,6 @@
 
 #include <godot_cpp/classes/http_request.hpp>
 #include <godot_cpp/classes/node.hpp>
-#include <godot_cpp/classes/packet_peer_udp.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
@@ -13,6 +12,8 @@
 #include <novaworld/client_session.h>
 #include <novaworld/http_flow.h>
 #include <novaworld/lobby_vars.h>
+
+#include "network/nwu_lobby_session.h"
 
 #include <cstdint>
 #include <memory>
@@ -114,16 +115,15 @@ protected:
 	static void _bind_methods();
 
 private:
-	// Wire helpers. The gate leg stays here (it yields the session host:port);
-	// the session protocol lives in libs/novaworld/client_session — this
-	// binding is the socket pump (PacketPeerUDP + signals).
-	void send_gate_probe();
-	void begin_session();                                   // create ClientSession, send ClientHello
-	void send_nw_datagram(const std::vector<uint8_t> &dg);  // put_packet on the NW socket
-	void sync_session_state();                              // ClientSession::State -> our State + signals
-
-	void poll_gate();
-	void poll_session();
+	// The gate/session pump is the shared NwuLobbySession driver (lobby_);
+	// these hooks feed it the role-specific pieces and map its progress onto
+	// our State + signals + trace ring.
+	NwuLobbySession::Hooks make_lobby_hooks();
+	void on_gate_response(const opennova::GateResponse &parsed);
+	std::vector<std::pair<std::string, std::string>> make_verify_cookie_vars();
+	void trace_sent_datagram(const std::vector<uint8_t> &dg);
+	void on_session_datagram(const NwuLobbySession::RxInfo &rx);
+	void sync_session_state(); // ClientSession::State -> our State + signals
 
 	// Server-browser HTTP leg. trigger_gsb() ships the GSB GET the flow builds; the
 	// completion callback feeds the response back and caches the parsed rows.
@@ -166,12 +166,12 @@ private:
 	// State.
 	State state_ = STATE_IDLE;
 	Dictionary server_info_;
-	Ref<PacketPeerUDP> gate_socket_;
-	Ref<PacketPeerUDP> nw_socket_;
-	std::unique_ptr<opennova::ClientSession> session_;  // owns the session protocol
+	// The shared gate/session driver: sockets, ClientSession, ci/ck, the NW
+	// endpoint, and the handshake timeout all live in here.
+	NwuLobbySession lobby_;
 
-	// The CD-key/hardware identity set (CountryName..NWHWI), built once in
-	// begin_session and used for BOTH the UDP verify var-list and the HTTP login
+	// The CD-key/hardware identity set (CountryName..NWHWI), built once per
+	// session and used for BOTH the UDP verify var-list and the HTTP login
 	// cookies. NWUID is left empty here and filled from the SessionInit at use.
 	std::vector<std::pair<std::string, std::string>> identity_vars_;
 
@@ -191,22 +191,11 @@ private:
 	// back in. Context is set from the gate/session legs via sync_flow_context().
 	opennova::LobbyHttpFlow flow_;
 
-	// In-match game session (PN=JointOperations). The third UDP socket; we send
-	// one ClientHello to the host and stop (the proto-switch milestone boundary).
-	Ref<PacketPeerUDP> game_socket_;
-	std::unique_ptr<opennova::ClientSession> game_session_;
-
-	uint32_t client_index_ = 0;       // ci — generated at start()
-	uint32_t client_key_ = 0;         // ck — generated at start()
-	uint16_t nw_udp_port_ = 0;        // populated from gate response
-	String nw_udp_host_;              // populated from gate response
 	String nw_web_domain_;            // NovaworldWebDomainNameAndPortNumber from the
 	                                  // SessionInit (real NW); the HTTP login/GSB/join
 	                                  // host that replaces the startupurl [domainname]
 	double tick_accum_ = 0.0;
 	double heartbeat_interval_s_ = 2.0;
-	double handshake_timeout_s_ = 5.0;
-	double handshake_elapsed_ = 0.0;
 
 	// The wire/session trace ring behind get_session_debug(), newest last.
 	static constexpr int kTraceRingCap = 64;

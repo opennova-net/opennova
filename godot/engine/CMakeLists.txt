@@ -72,6 +72,7 @@ add_library(${TARGET_NAME} SHARED
     register_types.cpp
     network/nova_world_client.cpp
     network/nova_world_host.cpp
+    network/nwu_lobby_session.cpp
     network/nova_net_client.cpp
     network/nova_udp_pump.cpp
     network/nova_lan_session.cpp
