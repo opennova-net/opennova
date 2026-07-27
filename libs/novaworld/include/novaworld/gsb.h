@@ -10,7 +10,8 @@ namespace opennova {
 // Joint Operations / DF:X2 IB3 browser consumes from `/jop_2.gsb?a=1`.
 //
 // Witnessed against the retail parser `NapiGameList_ProcessEncryptedResponse
-// @ 0x63d740` (docs/net/novaworld-net-re.md §8 Wave 7, D-NET-32..35). The blob
+// @ 0x63d740` (docs/net/novaworld-net-re.md §7 Waves 7+9, D-NET-32..36 +
+// D-NET-190..193). The blob
 // is a FLAT sequence of chunks — there is NO leading bare "GSB " file header;
 // "GSB " is simply the first chunk's tag (the init/reset record).
 //
@@ -24,14 +25,19 @@ namespace opennova {
 //   "XXXX" (0x58585858) — terminator.
 //
 // Server row (positional, keyed by the FLDS field-name table):
-//   [u32 LE rid][u32 LE port]
+//   [u32 LE rid][4-byte server IPv4, in_addr byte order (a.b.c.d on the wire)]
 //   [field_count × (ASCII value + NUL)]   — one per FLDS name, in order
 //   [u16 LE player_count][player_count × (player name + NUL)]
 //
-// The first row u32 is the host id used for `/NWJoin.dll?rid=` — retail's parser
-// names it "serverIP", but the witnessed `.204` values (e.g. 0x0A002728 =
-// 167782696) are host ids in the join-`rid` range, NOT IPv4 addresses; the real
-// host IP arrives later in the NK join token, not in the browser list.
+// The first row u32 is the host id spliced over `@RID@` in the markup join URL
+// (`NWJoin.dll?...&rid=@RID@`) — the browser event handler prints it `%d`
+// [orig: CLanServerBrowser_UpdateServerList_0 @ 0x660200, sprintf @ 0x660386].
+// Retail's parser locals called it "serverIP", but the witnessed `.204` values
+// (e.g. 0x0A002728) are host ids in the join-`rid` range, NOT IPv4 addresses.
+// The SECOND dword is the host's real IPv4: on the XXXX finalize retail formats
+// entry+4 as an in_addr and pings every row with it
+// [orig: NapiGameList_StartPingSweep @ 0x63BCF0]. The join address still
+// arrives separately via the NK token from `/NWJoin.dll?rid=`.
 //
 // Each chunk payload is encrypted INDEPENDENTLY with the 22-digit GSB key.
 // Retail decodes with `NapiNP_DecryptBuffer @ 0x618880` (the SUBTRACT chain ==
@@ -48,10 +54,14 @@ inline constexpr const char *GSB_NWU_KEY = "3209452104342624532341";
 // the FLDS field-name table (see GSB_FIELD_NAMES in gsb.cpp); field lookup is
 // case-insensitive, matching the retail browser.
 struct GsbServerEntry {
-	// Row header: [u32 rid][u32 port]. `rid` is the host id for the join URL;
-	// the host's IP is not in the browser list (it comes from the NK join token).
+	// Row header: [u32 rid][4-byte IPv4]. `rid` is the host id the client
+	// substitutes for `@RID@` in the join URL; `ip` is the host's IPv4 in
+	// dotted-quad text — emitted/parsed in in_addr byte order (a.b.c.d bytes on
+	// the wire), the address retail's browser pings on the XXXX finalize
+	// [orig: NapiGameList_StartPingSweep @ 0x63BCF0]. Unparseable/empty emits
+	// 0.0.0.0.
 	uint32_t rid = 0;
-	uint16_t port = 0;
+	std::string ip = "0.0.0.0";
 
 	std::string server_name = "Unnamed Server";  // ServerName
 	std::string game_type   = "COOP";            // GameType
@@ -93,19 +103,23 @@ std::vector<uint8_t> gsb_build_response(const std::vector<GsbServerEntry> &serve
 
 // Decoded GSB response — what the client recovers from the wire blob.
 struct GsbResponse {
-	int total_servers = 0;                   // = servers.size() (derived; retail counts rows)
-	int total_players = 0;                   // = sum of per-row player_names.size() (retail tail count)
-	std::vector<std::string> field_names;    // FLDS — the column order
-	std::vector<GsbServerEntry> servers;     // SVRS — the rows
+	int total_servers = 0;                   // = servers.size() (derived; retail sums declared SVRS counts at ctx+120)
+	int total_players = 0;                   // = sum of per-row player_names.size() (retail sums row u16 tails at ctx+124)
+	std::vector<std::string> field_names;    // FLDS — the column order (last FLDS record wins)
+	std::vector<GsbServerEntry> servers;     // SVRS — the rows (all SVRS records, accumulated)
 };
 
 // Parse a GSB response blob into rows — the client-side inverse of
 // gsb_build_response, matching retail `NapiGameList_ProcessEncryptedResponse
 // @ 0x63d740`: walk [magic][u32 len][payload] chunks (payload decrypted with the
 // SUBTRACT chain / our nwu_encrypt under GSB_NWU_KEY); FLDS gives the column
-// names; each SVRS row is read positionally ([u32 ip][u32 port][N values][u16
-// player_count][names]). Returns true on a well-formed blob (through the XXXX
-// terminator), false on a short/corrupt buffer.
+// names; each SVRS row is read positionally ([u32 rid][4-byte IPv4][N values]
+// [u16 player_count][names]) and SVRS records ACCUMULATE across the stream; a
+// valid "GSB " record resets the accumulated list; undersized record payloads
+// are skipped exactly like retail. Returns true on a well-formed blob (through
+// the XXXX terminator), false on a short/corrupt buffer. (Retail itself is an
+// incremental HTTP callback with no error path — requiring the terminator and
+// bounds-checking every in-chunk read is our documented host hardening.)
 bool gsb_parse_response(const uint8_t *data, size_t len, GsbResponse &out);
 
 } // namespace opennova

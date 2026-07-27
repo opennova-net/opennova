@@ -1,5 +1,5 @@
 // Sanity-check that gsb_build_response emits the retail GSB wire format
-// (NapiGameList_ProcessEncryptedResponse @ 0x63d740, docs §8 Wave 7):
+// (NapiGameList_ProcessEncryptedResponse @ 0x63d740, docs §7 Waves 7+9):
 //   flat chunk stream, each chunk = <4-byte magic PREFIX><u32 LE len><payload>,
 //   no bare file header, tags in the order GSB / FLDS / SVRS / XXXX.
 // Per-chunk decrypt (nwu_encrypt, the SUBTRACT chain) must yield the values.
@@ -77,7 +77,7 @@ bool contains_ascii(const std::vector<uint8_t> &haystack, const std::string &nee
 int main() {
 	opennova::GsbServerEntry entry{};
 	entry.rid = 0xDEADBEEF;
-	entry.port = 64206;
+	entry.ip = "203.0.113.7";
 	entry.server_name = "Test";
 	entry.game_type = "COOP";
 	entry.mission_name = "ASH_G11A";
@@ -99,6 +99,18 @@ int main() {
 	if (!expect_next_chunk(wire.data(), wire.size(), cursor, "FLDS")) return 1;   // field names
 	if (!expect_next_chunk(wire.data(), wire.size(), cursor, "SVRS", &servers_payload)) return 1; // rows
 	if (!expect_next_chunk(wire.data(), wire.size(), cursor, "XXXX")) return 1;   // terminator
+
+	// Row header: [u32 rid][4-byte IPv4]. The IP must be the raw a.b.c.d in_addr
+	// bytes at payload[6..9] (after [u16 count][u32 rid]) — retail casts entry+4
+	// to `struct in_addr` for the XXXX ping sweep [orig: NapiGameList_StartPingSweep
+	// @ 0x63BCF0]; a little-endian integer here (the old u16-port encoding) makes
+	// retail ping garbage addresses (D-NET-190).
+	if (servers_payload.size() < 10 ||
+	    servers_payload[6] != 203 || servers_payload[7] != 0 ||
+	    servers_payload[8] != 113 || servers_payload[9] != 7) {
+		std::fprintf(stderr, "FAIL: SVRS row dword1 is not the in_addr bytes of 203.0.113.7\n");
+		return 1;
+	}
 
 	if (!contains_ascii(servers_payload, "Test") ||
 	    !contains_ascii(servers_payload, "COOP") ||

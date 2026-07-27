@@ -670,10 +670,10 @@ void NovaWorldClient::on_gsb_request_completed(int result, int response_code,
 		row["password"] = String(s.password.c_str());
 		row["country"] = String(s.country.c_str());
 		row["region"] = String(s.region.c_str());
-		row["port"] = s.port;
-		// The GSB browse list carries no host IP — only the rid + port. The real
-		// host address is resolved on join via the NK token (/NWJoin.dll?rid=).
-		row["ip"] = String("");
+		// Row dword1 is the host's IPv4 — retail's browser pings it on the XXXX
+		// finalize [orig: NapiGameList_StartPingSweep @ 0x63BCF0]. The connect
+		// address is still resolved on join via the NK token (/NWJoin.dll?rid=).
+		row["ip"] = String(s.ip.c_str());
 		rows.push_back(row);
 	}
 	server_rows_ = rows;
