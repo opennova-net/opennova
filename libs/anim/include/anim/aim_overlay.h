@@ -107,7 +107,7 @@ void splice_weapon_channel_rotations(const std::vector<int> &parent_index,
 // The entity angle state feeding the overlay, all BAM32.
 // [orig fields: Yaw/Pitch/Roll +0x10/+0x14/+0x18, bodyHeading/bodyPitch +0x8c/+0x90,
 //  leg chase yaws +0x2d4/+0x2d8, torsoRoll +0x2dc, leanAngle +0xb0, pitchBlend +0x380,
-//  headLookDecay +0x36c]
+//  pitchKickAccum +0x36c]
 struct AimOverlayInputs {
     int32_t aim_yaw = 0;
     int32_t aim_pitch = 0;
@@ -119,7 +119,7 @@ struct AimOverlayInputs {
     int32_t torso_roll = 0;
     int32_t lean = 0;
     int32_t pitch_blend = 0;
-    int32_t head_look_decay = 0;
+    int32_t pitch_kick_accum = 0;
     // g_animStateFlagsTable[animStateId] & 0x40: the aim-overlay branch. Prone walks
     // (0x603), rolls, and deaths lack it and take the reduced branch.
     bool aim_state = false;
@@ -151,6 +151,35 @@ struct AimOverlayAngles {
 // top-of-function v142/v143/v144 @ 0x4b17ad..0x4b185c; docs section 14.3]
 void compute_aim_overlay_angles(const AimOverlayInputs &in,
                                 AimOverlayAngles out[kOverlayClassCount]);
+
+// The HELD-WEAPON ATTACHMENT orientation — the third-person gun's own basis.
+//
+// This is NOT one of the nine bone classes and must not be taken from any of them: the
+// head class carries full-aim PITCH and the arm class carries BLENDED yaw, so either one
+// aims the rifle visibly off-axis. The original builds it separately and the bone loop
+// never reads it — it exists only to orient the weapon model, which is drawn RIGID (one
+// matrix stamped into every bone slot) at the bone-16 attach point.
+//
+// Its shape in the original is an idiom rather than a matrix blend: the code temporarily
+// OVERWRITES the entity's own Yaw/Pitch/Roll with the triple below and builds a transform
+// from the entity, which is why the result reads as an entity orientation and not as an
+// overlay delta.
+//   aim state (g_animStateFlagsTable & 0x40):
+//     yaw = aim yaw (PURE — not the 3/4 blend the arms use)
+//     pitch = aim pitch + pitchKickAccum + 2*pitchBlend      [orig: @ 0x4b1bdc..0x4b1bf8]
+//     roll = roll + lean
+//   non-aim state: the same, WITHOUT the pitch-kick term    [orig: @ 0x4b1dd9..0x4b1dfa,
+//                                                            and the sibling @ 0x4b1d60]
+//
+// MOUNTED bodies are deliberately NOT handled here. The original does not compute a
+// triple for them at all — it copies an already-built matrix, either the body or the arm
+// one, per mount branch [orig: qmemcpy @ 0x4b193e / 0x4b19cf / 0x4b1ab2 / 0x4b1b35 /
+// 0x4b1b94]. Correlating each of those five branches to a mount mode is unfinished, so
+// this returns the ON-FOOT result regardless and callers must not draw a held weapon for
+// a mounted body on the strength of it. In practice the exposure is small: the draw gate
+// hides the weapon outright for control/gunner/driver seats, leaving only the passenger
+// seat [orig: Entity_CanFireWeapon @ 0x4dcb10].
+AimOverlayAngles compute_held_weapon_attach_angles(const AimOverlayInputs &in);
 
 // Apply per-bone world-orientation deltas to a parent-local pose, re-anchoring children
 // on their parents -- the pose-space equivalent of the original's world-matrix overlay +

@@ -254,7 +254,8 @@ uint8_t power_throw_charge_from_hold(int32_t held_ticks);
 // ----------------------------------------------------------------------------
 bool throwable_motor_tick(World &world, RoundSim &sim, LiveRound &round,
                           const AmmoTableEntry &ammo, CollisionWorld *collision,
-                          const terrain::TerrainHeightField *terrain);
+                          const terrain::TerrainHeightField *terrain,
+                          bool allow_consequences = true);
 
 } // namespace opennova::world
 

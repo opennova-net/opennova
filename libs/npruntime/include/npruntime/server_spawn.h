@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
+#include <vector>
 
 #include <world/player_spawn.h> // world::kRetailPlayerMinEntitySlot (canonical)
 
@@ -27,6 +29,27 @@ namespace opennova::np {
 // Re-export the canonical world::kRetailPlayerMinEntitySlot into np for the spawn call sites (one
 // definition, shared with the Godot listen host). [orig: §5.2b spawn placement]
 inline constexpr uint16_t kRetailPlayerMinEntitySlot = world::kRetailPlayerMinEntitySlot;
+
+// Reserve the team written to both the pre-spawn S2C 0x04 slot assignment and
+// the later player entity. Repeated calls for one connection are idempotent.
+// Pending MP reservations participate in autobalance, so admissions received
+// in one socket drain cannot all observe stale World counts.
+// [orig: Server_AssignPlayerTeam @0x4fe310 writes playerSlot+416 before
+// NetPacket_WriteSlotAssignment @0x502b30 reads it]
+uint8_t Server_ReservePlayerTeam(const GameConfig &config, bool is_in_session,
+		const std::vector<NapiNPConnection> &roster, NapiNPConnection &conn,
+		const world::World &world);
+
+// Reserve the first free fixed roster-table row before S2C 0x04 advertises it.
+// Existing player bindings and other pre-spawn reservations both occupy rows;
+// repeated calls for one connection return the same row. Player-add consumes
+// the reservation, while erasing the connection releases it. No row at or
+// above the advertised slot capacity can be reserved.
+// [orig: Server_PlayerAdd's dword_A87048 row is already attached to the
+// playerSlot record consumed by NetPacket_WriteSlotAssignment @0x502b30]
+std::optional<uint8_t> Server_ReservePlayerSlot(
+		const std::vector<NapiNPConnection> &roster, NapiNPConnection &conn,
+		uint32_t slot_capacity);
 
 // §5.2a step 1 — [orig: Server_InitNewRoundState @0x51c8e0]. Set up the local-player/round context
 // for an authority host. Structural: clears the loading-progress counter for a fresh round (the

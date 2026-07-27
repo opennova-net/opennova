@@ -40,6 +40,9 @@ bool run_field_mapping() {
 	w::Entity src_e{};
 	src_e.net_move_input = 3; // the +0x12C movement-input byte (NOT the visual anim slot)
 	src_e.equipped_adm_index = 0x08; // entity+0x2B0 — the wire byte-24 source (D-NET-143)
+	// entity+0x24 low byte, raw: bit4 scope + bit3 binoculars + an out-of-mask bit that
+	// must still ride the wire unmasked (the original writes the byte whole).
+	src_e.flags = 0x10u | 0x08u | 0x20u;
 	w::AiEntity src_ae{};
 	src_ae.pos[0] = w::to_fixed(12.5);
 	src_ae.pos[1] = w::to_fixed(-34.0);
@@ -60,8 +63,58 @@ bool run_field_mapping() {
 	if (!expect(up.equipped_adm_index == 0x08,
 	            "equipped adm index carried from Entity.equipped_adm_index (D-NET-143)"))
 		return false;
+	if (!expect(up.state_flags_byte == 0x38u,
+	            "state flags = the RAW entity+0x24 low byte, unmasked on the write side"))
+		return false;
 	if (!expect(up.priority_handle_0 == 0 && up.priority_score_0 == 0,
 	            "anti-cheat counters 0 (host receive ignores them)")) return false;
+	return true;
+}
+
+// ADS/scope is replicated by exactly ONE wire field: bit 0x10 of the uplink's state byte.
+// There is no scope message and no scoped anim id on the wire — every observer re-derives
+// the third-person scoped hold pose locally from this flag plus the ADM index. Prove the
+// bit survives the whole joiner->host leg, because shipping a hardcoded 0 here (the
+// pre-fix behaviour) left the host's copy of the joiner's Flags permanently unscoped and
+// no other player ever saw the joiner aim down sights.
+// [orig: write NetPacket_SerializePlayerState case 3 @0x4c1b17 `mov cl, [edi+24h]`;
+//  host apply @0x4c1e4d `flags ^= (flags ^ wire) & 0x1C`; re-broadcast @0x4c0c7d;
+//  the observer's scoped-variant selection Entity_UpdateInfantryPlayerBody @0x4b5deb]
+bool run_scope_flag_reaches_host() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	w::Entity peer;
+	peer.kind = w::EntityKind::Organic;
+	peer.item_id = 0x14B9;
+	const w::EntityHandle ph = world.registry.spawn(0, peer);
+	if (!expect(ph.valid(), "peer spawned")) return false;
+	world.cached.local_player = w::EntityHandle::make(0, 7); // not the peer
+
+	// The joiner scopes: apply_player_input_pre_tick folds bit 0x10 into its own entity.
+	w::Entity src_e{};
+	src_e.flags = 0x10u;
+	w::AiEntity src_ae{};
+
+	ns::PlayerIntent intent;
+	intent.entity_handle = ph.packed;
+	intent.item_type_id = 0x14B9;
+	intent.state_flags = ns::build_player_uplink(src_e, src_ae).state_flags_byte;
+	ns::apply_player_intent(world, intent);
+	if (!expect((world.registry.get(ph)->flags & 0x10u) != 0,
+	            "the host's copy of the joiner's entity is SCOPED after the uplink"))
+		return false;
+	// The re-broadcast the observers actually read is the raw low byte of that same word.
+	if (!expect((ns::snapshot_of(*world.registry.get(ph)).state_flags & 0x10u) != 0,
+	            "the S2C 0x0A player record re-broadcasts the scoped bit"))
+		return false;
+
+	// Un-scoping is the same channel: the replace-bits apply clears it again.
+	src_e.flags = 0u;
+	intent.state_flags = ns::build_player_uplink(src_e, src_ae).state_flags_byte;
+	ns::apply_player_intent(world, intent);
+	if (!expect((world.registry.get(ph)->flags & 0x10u) == 0,
+	            "lowering the scope clears the host's bit (a REPLACE, not an OR)"))
+		return false;
 	return true;
 }
 
@@ -182,6 +235,7 @@ int main() {
 	bool ok = true;
 	ok = run_field_mapping() && ok;
 	ok = run_roundtrip_to_host_snap() && ok;
+	ok = run_scope_flag_reaches_host() && ok;
 	ok = run_equipped_adm_ingest_gate() && ok;
 	return ok ? 0 : 1;
 }

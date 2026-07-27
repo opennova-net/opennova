@@ -113,11 +113,11 @@ void test_aim_branch_blends() {
     CHECK(std::abs(out[kOverlaySpine].pitch) <= std::abs(out[kOverlayUpperSpine].pitch));
     CHECK(std::abs(out[kOverlayUpperSpine].pitch) <= std::abs(out[kOverlayHead].pitch));
 
-    // pitch_blend / head_look_decay terms land where witnessed. [orig: @ 0x4b1bce]
+    // pitch_blend / pitch_kick_accum terms land where witnessed. [orig: @ 0x4b1bce]
     in.pitch_blend = 4 * kBamDeg;
-    in.head_look_decay = 8 * kBamDeg;
+    in.pitch_kick_accum = 8 * kBamDeg;
     compute_aim_overlay_angles(in, out);
-    CHECK(out[kOverlayArm].pitch == P + in.head_look_decay + 2 * in.pitch_blend);
+    CHECK(out[kOverlayArm].pitch == P + in.pitch_kick_accum + 2 * in.pitch_blend);
     CHECK(out[kOverlayUpperSpine].pitch == P + in.pitch_blend);
     CHECK(out[kOverlaySpine].pitch == (P >> 2) + (in.pitch_blend >> 1));
 }
@@ -127,7 +127,7 @@ void test_non_aim_branch() {
     in.aim_yaw = 90 * kBamDeg;
     in.aim_pitch = -30 * kBamDeg;
     in.body_yaw = 60 * kBamDeg;
-    in.head_look_decay = 8 * kBamDeg;
+    in.pitch_kick_accum = 8 * kBamDeg;
     in.aim_state = false;
     AimOverlayAngles out[kOverlayClassCount];
     compute_aim_overlay_angles(in, out);
@@ -136,7 +136,7 @@ void test_non_aim_branch() {
     CHECK(out[kOverlaySpine].yaw == in.body_yaw && out[kOverlaySpine].pitch == 0);
     CHECK(out[kOverlayNeck].yaw == in.body_yaw);
     CHECK(out[kOverlayHead].yaw == in.aim_yaw && out[kOverlayHead].pitch == in.aim_pitch);
-    CHECK(out[kOverlayArm].pitch == in.aim_pitch + (in.head_look_decay >> 2));
+    CHECK(out[kOverlayArm].pitch == in.aim_pitch + (in.pitch_kick_accum >> 2));
     in.arms_locked = true; // Flags & 0x100000 [orig: @ 0x4b1d48]
     compute_aim_overlay_angles(in, out);
     CHECK(out[kOverlayArm].yaw == in.body_yaw && out[kOverlayArm].pitch == 0);
@@ -440,6 +440,51 @@ void test_blends_wrap_across_the_bam_seam() {
 
 } // namespace
 
+// The HELD-WEAPON attach basis. It is deliberately NOT any of the nine bone classes:
+// the head class carries full-aim pitch and the arm class carries the 3/4-blended yaw, so
+// reusing either points the third-person rifle visibly off-axis. Pins the yaw purity, the
+// pitch-kick term's presence in the aim branch and absence outside it, and the roll term.
+// [orig: aim @ 0x4b1bdc..0x4b1bf8; non-aim @ 0x4b1dd9..0x4b1dfa]
+void test_held_weapon_attach_basis() {
+    AimOverlayInputs in;
+    in.aim_yaw = 40 * kBamDeg;
+    in.body_yaw = 0;              // a wide aim/body split makes a blended yaw obvious
+    in.aim_pitch = 10 * kBamDeg;
+    in.body_pitch = 0;
+    in.roll = 3 * kBamDeg;
+    in.lean = 6 * kBamDeg;
+    in.pitch_blend = 2 * kBamDeg;
+    in.pitch_kick_accum = 5 * kBamDeg;
+    in.aim_state = true;
+
+    AimOverlayAngles nine[kOverlayClassCount];
+    compute_aim_overlay_angles(in, nine);
+    const AimOverlayAngles w = compute_held_weapon_attach_angles(in);
+
+    // Yaw is the PURE aim yaw — not the arms' 3/4 blend toward the body.
+    CHECK(w.yaw == in.aim_yaw);
+    CHECK(w.yaw != nine[kOverlayArm].yaw);
+    // Pitch carries the pitch kick + twice the pitch blend, which matches the ARM class here
+    // and differs from the HEAD class (full aim pitch, no extra terms).
+    CHECK(w.pitch == opennova::io::bam_add(
+                             opennova::io::bam_add(in.aim_pitch, in.pitch_kick_accum),
+                             in.pitch_blend * 2));
+    CHECK(w.pitch == nine[kOverlayArm].pitch);
+    CHECK(w.pitch != nine[kOverlayHead].pitch);
+    CHECK(w.roll == opennova::io::bam_add(in.roll, in.lean));
+
+    // Outside an aim state the pitch-kick term is simply absent.
+    in.aim_state = false;
+    const AimOverlayAngles n = compute_held_weapon_attach_angles(in);
+    CHECK(n.yaw == in.aim_yaw);
+    CHECK(n.pitch == opennova::io::bam_add(in.aim_pitch, in.pitch_blend * 2));
+    CHECK(n.roll == opennova::io::bam_add(in.roll, in.lean));
+
+    // States 41/42 zero the roll source before any build, so the lean stands alone.
+    in.rolling = true;
+    CHECK(compute_held_weapon_attach_angles(in).roll == in.lean);
+}
+
 int main() {
     test_bone_class_map();
     test_aim_branch_blends();
@@ -452,6 +497,7 @@ int main() {
     test_apply_world_delta_reaches_target();
     test_apply_differential_bend();
     test_weapon_channel_splices_world_rotations();
+    test_held_weapon_attach_basis();
     if (failures == 0) std::printf("aim_overlay_test: all passed\n");
     return failures == 0 ? 0 : 1;
 }

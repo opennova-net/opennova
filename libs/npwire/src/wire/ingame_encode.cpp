@@ -604,11 +604,66 @@ std::vector<uint8_t> encode_entity_packet_sub_header(const EntityPacketSubHeader
 	return out;
 }
 
-// [orig: NetPacket_SerializePlayerState case 3/4 @ 0x4C09C0] — the 43-B extended
+// [orig: Entity_FireWeaponAndSendPacket @0x42bd80] -- the fixed 45-byte
+// descriptor queued by the joiner's locally predicted fire action.
+void set_client_fired_round_pose(
+		ClientFiredRound &round,
+		const std::array<int32_t, 5> &fire_pose,
+		const std::array<int32_t, 5> &shooter_pose) {
+	const auto rounded_high_word = [](int32_t angle) {
+		const uint32_t high =
+				(static_cast<uint32_t>(angle) + 0x8000u) >> 16;
+		return high < 0x8000u
+				? static_cast<int32_t>(high)
+				: static_cast<int32_t>(high) - 0x10000;
+	};
+	const auto low_word_delta = [](int32_t fire, int32_t shooter) {
+		return static_cast<uint16_t>(
+				static_cast<uint16_t>(fire) - static_cast<uint16_t>(shooter));
+	};
+	round.pos_x = fire_pose[0];
+	round.pos_y = fire_pose[1];
+	round.pos_z = fire_pose[2];
+	round.dir_x = rounded_high_word(fire_pose[3]);
+	round.dir_y = rounded_high_word(fire_pose[4]);
+	round.delta_x = low_word_delta(fire_pose[0], shooter_pose[0]);
+	round.delta_y = low_word_delta(fire_pose[1], shooter_pose[1]);
+	round.delta_z = low_word_delta(fire_pose[2], shooter_pose[2]);
+	round.delta_yaw = low_word_delta(fire_pose[3], shooter_pose[3]);
+	round.delta_pitch = low_word_delta(fire_pose[4], shooter_pose[4]);
+}
+
+std::vector<uint8_t> encode_client_fired_round(const ClientFiredRound &r) {
+	std::vector<uint8_t> out;
+	out.reserve(45);
+	Writer w{out};
+	w.u32(r.current_tick);
+	w.u16(r.shooter_handle);
+	w.u8(r.fire_flags);
+	w.u8(r.adm_index);
+	w.u32(static_cast<uint32_t>(r.pos_x));
+	w.u32(static_cast<uint32_t>(r.pos_y));
+	w.u32(static_cast<uint32_t>(r.pos_z));
+	w.u32(static_cast<uint32_t>(r.dir_x));
+	w.u32(static_cast<uint32_t>(r.dir_y));
+	w.u16(r.target_handle);
+	w.u16(r.hit_part);
+	w.u8(r.extra_byte1);
+	w.u8(r.extra_byte2);
+	w.u8(r.misc_byte);
+	w.u16(r.delta_x);
+	w.u16(r.delta_y);
+	w.u16(r.delta_z);
+	w.u16(r.delta_yaw);
+	w.u16(r.delta_pitch);
+	return out;
+}
+
+// [orig: NetPacket_SerializePlayerState case 3/4 @ 0x4C09C0] -- the 43-B extended
 // uplink body, the exact bytes decode_player_extended_uplink consumes. The host
 // driver fills PlayerExtendedUplink from the joiner's owned entity; this writes the
-// wire bytes. Positions are i32 16.16 — CARRIER-LOCAL (and heading carrier-relative)
-// when carrier_handle != 0xFFFF, absolute world otherwise (§5.10, D-NET-151).
+// wire bytes. Positions are i32 16.16 -- CARRIER-LOCAL (and heading carrier-relative)
+// when carrier_handle != 0xFFFF, absolute world otherwise (section 5.10, D-NET-151).
 std::vector<uint8_t> encode_player_extended_uplink(const PlayerExtendedUplink &r) {
 	std::vector<uint8_t> out;
 	Writer w{out};
@@ -743,6 +798,24 @@ std::vector<uint8_t> encode_weapon_loadout(const WeaponLoadout &loadout) {
 	return out;
 }
 
+// [orig: NetPacket_SendLoadoutSubmit @ 0x42cdc0 — header stores @0x42cea3..0x42ceae,
+// 4-byte row group @0x42cf35/@0x42d021..0x42d045, terminator @0x42d076]
+std::vector<uint8_t> encode_loadout_submit(const LoadoutSubmit &submit) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.u8(submit.team);
+	w.u8(submit.player_class);
+	w.u32(submit.weapon_slot_index);
+	for (const LoadoutSubmitEntry &e : submit.entries) {
+		w.u8(e.adm_index);
+		w.u8(e.ammo_primary);
+		w.u8(e.ammo_secondary);
+		w.u8(e.variant);
+	}
+	w.u8(0xFF);
+	return out;
+}
+
 // [orig: NapiNPServerMsg_HandleReloadRequest @ 0x514DF0 — S2C 0x49 carries the same
 // [u16 handle][u16 weaponSlotCombo] payload as the C2S 0x25 request it relays (§5.58)]
 std::vector<uint8_t> encode_weapon_reload(const WeaponReload &reload) {
@@ -750,6 +823,29 @@ std::vector<uint8_t> encode_weapon_reload(const WeaponReload &reload) {
 	Writer w{out};
 	w.u16(reload.entity_handle);
 	w.u16(reload.reload_param);
+	return out;
+}
+
+// [orig: NapiNPServerMsg_SendEmptySlots @ 0x51a600 -> the pool-0 walk + append
+//  builder @ 0x5160f0 — a bare index run, no count word]
+std::vector<uint8_t> encode_destroy_entity_list(const DestroyEntityList &list) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	for (uint16_t index : list.pool0_indices) w.u16(index);
+	return out;
+}
+
+// [orig: Server_ChangeEntityTeam @ 0x518D70; the client field order is the read
+//  order of NapiNPClientMsg_0x050 @ 0x431910]
+std::vector<uint8_t> encode_team_assign(const TeamAssign &assign) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.u16(assign.entity_handle);
+	w.u8(assign.team);
+	// Both zero for a non-player entity in retail (the Flags & 0x100 gate @0x506b3d);
+	// the caller owns that gate. [orig: write_entity_handle_packet @ 0x506ad0]
+	w.u16(assign.net_id);
+	w.u8(assign.anim_slot);
 	return out;
 }
 

@@ -97,3 +97,37 @@ func test_two_joiners_keep_distinct_source_ports() -> void:
 		var pkt: Dictionary = host.take_inbound()
 		ports[int(pkt.get("port"))] = int(pkt.get("bytes")[0])
 	assert_eq(ports.size(), 2, "two distinct source ports (one per joiner)")
+
+
+func test_dialed_pump_accepts_only_the_resolved_host_endpoint() -> void:
+	var host = _pump()
+	var join = _pump()
+	var spoof = _pump()
+	assert_eq(host.bind_listen(0), OK)
+	assert_eq(spoof.bind_listen(0), OK)
+	# Deliberately dial by hostname: the retained endpoint must be canonicalized
+	# so the host's numeric packet source still matches.
+	assert_eq(join.dial("localhost", host.local_port()), OK)
+
+	# Teach the real host where the joiner is listening.
+	assert_eq(join.send_to_host(PackedByteArray([0x41])), OK)
+	assert_eq(_poll_until(host, 1), 1)
+	var ping: Dictionary = host.take_inbound()
+	var joiner_ip := String(ping.get("ip"))
+	var joiner_port := int(ping.get("port"))
+
+	var forged := PackedByteArray([0xBA, 0xD0])
+	var authentic := PackedByteArray([0x0A, 0x01])
+	assert_eq(spoof.send_to(joiner_ip, joiner_port, forged), OK,
+			"a second socket can address the joiner's UDP port")
+	assert_eq(host.send_to(joiner_ip, joiner_port, authentic), OK)
+
+	assert_eq(_poll_until(join, 1), 1, "the authentic host datagram is admitted")
+	# Give the forged datagram time to reach the socket too. A dialed pump must
+	# discard it at the UDP boundary instead of exposing it to protocol consumers.
+	for i in range(20):
+		join.poll()
+		OS.delay_msec(2)
+	assert_eq(join.inbound_count(), 1, "the non-host source port is rejected")
+	assert_eq(join.take_inbound().get("bytes"), authentic,
+			"the surviving datagram came from the dialed host")

@@ -67,14 +67,14 @@ const std::map<Key, const char *> kDeferredGaps = {
     // Periodic integrity / anti-cheat challenge-response pairs (harness drives none).
     {{'C', 0x08}, "D-NET-163"}, // time-sync-reply (no S2C 0x43 ping to answer)
     {{'S', 0x43}, "D-NET-163"}, // time-sync-ping
-    {{'C', 0x1c}, "D-NET-163"}, // anim-crc-reply (no S2C 0x39 challenge)
-    {{'S', 0x39}, "D-NET-163"}, // anim-crc-challenge
+    {{'C', 0x1c}, "D-NET-163"}, // charattr-crc-reply (no S2C 0x39 challenge)
+    {{'S', 0x39}, "D-NET-163"}, // charattr-crc-challenge
     {{'C', 0x20}, "D-NET-163"}, // entity-checksum-reply (no S2C 0x30 request)
     {{'S', 0x30}, "D-NET-163"}, // entity-checksum-req
     {{'C', 0x21}, "D-NET-163"}, // loadout-checksum-reply (no S2C 0x31 request)
     {{'S', 0x31}, "D-NET-163"}, // loadout-crc-req
-    {{'C', 0x3d}, "D-NET-163"}, // entity-index-reply (no S2C 0x68 request)
-    {{'S', 0x68}, "D-NET-163"}, // entity-index-request
+    {{'C', 0x3d}, "D-NET-163"}, // loaded-model page (no S2C 0x68 request)
+    {{'S', 0x68}, "D-NET-163"}, // loaded-model page request
     // Gameplay-event traffic a join-only capture never produces (no kills/scores).
     {{'S', 0x26}, "D-NET-163"}, // kill-sync
     {{'S', 0x4e}, "D-NET-163"}, // kill-by-slot

@@ -157,6 +157,43 @@ int main(void) {
         return 1;
     }
 
+    /* The smoke row, pinned against the BASE JO ammo.def this fixture is a
+       byte-exact copy of: TrcrID 1875, 30-second fuse, five-second pour
+       boundary, 30 units/s throw speed. The revx02 expansion overrides the
+       fuse and throw speed to 40 s / 20 units/s; a mounted JO+revx02 stack
+       therefore resolves those two fields differently, which is a property of
+       the mount order and not of this parser. Pin the file we actually ship
+       here -- never edit the retail extract to match an expansion recipe
+       (docs/adr/0003-no-raw-passthrough-create-from-scratch.md). */
+    const DefAmmoDef *smoke = NULL;
+    for (size_t i = 0; i < ammo.count; ++i) {
+        if (strcmp(ammo.entries[i].name, "grenadesm") == 0) {
+            smoke = &ammo.entries[i];
+            break;
+        }
+    }
+    if (!smoke || smoke->max_age_ticks != 30 * 62 ||
+        smoke->arm_age_ticks != 5 * 62 || smoke->velocity != 30 ||
+        smoke->frndly_trcr_type_id != 1875) {
+        fprintf(stderr,
+                "FAIL: grenadesm want age/arm/velocity/item=1860/310/30/1875; "
+                "got found=%d %d/%d/%d/%d\n",
+                smoke != NULL,
+                smoke ? smoke->max_age_ticks : -1,
+                smoke ? smoke->arm_age_ticks : -1,
+                smoke ? smoke->velocity : -1,
+                smoke ? smoke->frndly_trcr_type_id : -1);
+        def_free_ammo(&ammo);
+        return 1;
+    }
+    if (smoke->effects_table_count == 0 ||
+        strcmp(smoke->effects_table[0].surface_type, "move") != 0 ||
+        strcmp(smoke->effects_table[0].hit_effect, "Effect_SmokeToss") != 0) {
+        fprintf(stderr, "FAIL: grenadesm move effect row missing/mismatched\n");
+        def_free_ammo(&ammo);
+        return 1;
+    }
+
     struct { const char *what; long got, want; } checks[] = {
         {"velocity", car15->velocity, 854},
         {"max_age_ticks", car15->max_age_ticks, 186},

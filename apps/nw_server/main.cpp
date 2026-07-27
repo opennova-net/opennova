@@ -1,6 +1,6 @@
-// nw-server — the headless in-match game HOST (libs/npruntime P6). A pure C++ Listen server: it loads a
-// mission, stands up the npruntime runtime as a NovaWorld listen host (ConnectionMode::HostClient, the
-// witnessed SP/co-op shape, §5.0), opens a real UDP socket, and drives the in-match host loop at the
+// nw-server — the headless in-match game HOST (libs/npruntime P6). A pure C++ dedicated server: it
+// loads a mission, stands up the npruntime runtime as a NovaWorld HostOnly session, opens a real UDP
+// socket, and drives the in-match host loop at the
 // original 62 Hz cadence so retail-wire-compatible clients (opennova or, as a follow-up, stock retail)
 // can join -> spawn -> play. All protocol/crypto/framing live in the libs; this binary only owns the
 // socket + the cadence (npruntime/host_session.h is the shared owner loop, also used by the P6 test).
@@ -12,8 +12,6 @@
 
 #include "net_datagram_socket.h" // net::Socket-backed netsim::IDatagramSocket adapter
 #include "net_sockets.h"         // net::startup / udp_bind / ScopedSocket
-
-#include <netsim/loopback_channel.h> // the host's own dcb-2 client (Listen host)
 
 #include <mission/mission.h> // MissionDocument
 #include <mission/promote.h> // promote_mission
@@ -82,11 +80,9 @@ int main() {
 		return 1;
 	}
 
-	// --- Stand up the npruntime runtime as a LISTEN host (HostClient + a loopback host player at
-	//     dcb 2; joiners get dcb 3+, reproducing the retail LAN host/join scheme, §5.0 / §5.2a). ---
+	// --- Stand up the npruntime runtime as a dedicated HostOnly server. There is no synthetic
+	//     loopback player; every roster row belongs to an admitted remote peer. ---
 	np::HostOwner owner;
-	netsim::LoopbackChannel host_loop; // the host's own dcb-2 client (its 0x0A drained in-process)
-	owner.host_loopback = &host_loop;
 	owner.ctx.world = &world;
 	owner.ctx.mission = &doc.bms_file();
 
@@ -94,8 +90,8 @@ int main() {
 	host_cfg.config.server_name = "OpenNova nw-server";
 	host_cfg.config.max_players = 16;
 	host_cfg.socket_mode = np::SocketMode::Lan; // a real LAN socket (Socketless=1 would be in-process SP)
-	host_cfg.serve_and_play = false;            // headless dedicated host: the loopback view is discarded
-	np::start_host_session(owner, host_cfg);    // the §5.0 listen-host bring-up; host player spawns in the loop
+	host_cfg.serve_and_play = false;            // headless dedicated host: no local-player registration
+	np::start_host_session(owner, host_cfg);
 
 	std::signal(SIGINT, on_signal);
 	std::signal(SIGTERM, on_signal);

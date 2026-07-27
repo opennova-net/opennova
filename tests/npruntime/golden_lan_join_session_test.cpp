@@ -26,6 +26,7 @@
 //           strings, live UT uptime), not builder logic.
 //   The full byte diff is printed below for the record.
 
+#include <npruntime/lan_discovery.h>
 #include <npruntime/napi_np_protocol.h>
 
 #include "host_test_setup.h"
@@ -85,7 +86,7 @@ int main() {
 
 	// Partition: the host is the source of the 0x81/0x82 server replies; the joiner is the source of
 	// the 0x42 ClientAuth. Grab the first of each + the joiner's port.
-	std::vector<uint8_t> raw42, g81, g82;
+	std::vector<uint8_t> raw42, raw81, g81, g82;
 	int joiner_port = 0;
 	for (const auto &p : pkts) {
 		uint8_t op = 0;
@@ -95,6 +96,7 @@ int main() {
 			raw42 = p.payload; // the REAL golden ClientAuth datagram (envelope on) — replayed below
 			joiner_port = p.srcport;
 		} else if (op == SESSION_OPCODE_SERVER_HELLO && g81.empty()) {
+			raw81 = p.payload; // envelope on — the LAN browse gate consumes raw datagrams
 			g81 = body;
 		} else if (op == SESSION_OPCODE_SERVER_AUTH && g82.empty()) {
 			g82 = body;
@@ -115,6 +117,17 @@ int main() {
 		std::vector<uint8_t> body42;
 		nw_decode_inbound(raw42.data(), raw42.size(), op, body42);
 		if (!expect(parse_client_auth(body42.data(), body42.size(), gca), "golden 0x42 parses")) return 1;
+	}
+
+	// The LAN browse reply gate must accept a REAL retail 0x81: the gate keys on
+	// the retail JO identity (is_game_server + PN/PG/PV1/PV2) and must tolerate
+	// the retail build's extra tags (AP/BDAT/PV3, live UT) our own hosts omit.
+	{
+		np::LanDiscoveryServer row;
+		if (!expect(np::parse_lan_discovery_reply(raw81.data(), raw81.size(), row),
+		            "retail golden 0x81 passes the LAN browse reply gate")) return 1;
+		if (!expect(row.server_name == gh.sn, "browse row carries the golden SN")) return 1;
+		if (!expect(row.max_players == gh.mp, "browse row carries the golden MP")) return 1;
 	}
 
 	// The joiner peer: src port from the capture; IP from the host's reflected RIP (so the replies'

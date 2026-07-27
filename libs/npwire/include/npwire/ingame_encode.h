@@ -19,6 +19,7 @@
 // [orig: serialize_entity_pool_to_packet   @ 0x503460]  — S2C 0x20 bulk pool-3 sync.
 // [orig: serialize_entity_pool_to_packet_0 @ 0x503940]  — S2C 0x0D pool spawn (TODO).
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -218,6 +219,24 @@ std::vector<uint8_t> encode_frame_update(const FrameUpdate &fu);
 // [orig: Pool_SerializeEntityViaVTable @ 0x4D64E0]
 std::vector<uint8_t> encode_entity_packet_sub_header(const EntityPacketSubHeader &hdr);
 
+// Stamp the calculated pose fields of a C2S 0x06 descriptor. Retail writes
+// full X/Y/Z, rounds Yaw/Pitch to their high words, then writes five modulo
+// 2^16 low-word deltas against the shooter's live {X,Y,Z,Yaw,Pitch} dwords.
+// The deltas reconstruct the same pose; they are not an independent
+// weapon-specific muzzle-offset vector.
+// [orig: NetPacket_WriteEntityPositionUpdate @0x42A6A1..0x42A890]
+void set_client_fired_round_pose(
+		ClientFiredRound &round,
+		const std::array<int32_t, 5> &fire_pose,
+		const std::array<int32_t, 5> &shooter_pose);
+
+// Encode the fixed 45-byte C2S 0x06 fired-round descriptor -- the exact inverse
+// of decode_client_fired_round. The local joiner predicts the same round, then
+// sends this descriptor so the host can validate ammo/ownership and become the
+// sole damaging authority. [orig: Entity_FireWeaponAndSendPacket @0x42bd80 ->
+// NapiNPServerMsg_0x006_ClientFiredRound @0x513310]
+std::vector<uint8_t> encode_client_fired_round(const ClientFiredRound &r);
+
 // Encode the §5.10 extended (type-10) player uplink body — 43 B fixed, the inverse
 // of decode_player_extended_uplink. This is the C2S 0x0C body a remote joiner sends
 // for its own player each frame; the 5-byte sub-header (encode_entity_packet_sub_header)
@@ -284,11 +303,44 @@ std::vector<uint8_t> encode_player_list(const std::vector<PlayerListEntry> &play
 // 4-byte group per slot; terminator @0x5028b5.]
 std::vector<uint8_t> encode_weapon_loadout(const WeaponLoadout &loadout);
 
+// C2S 0x2F LOADOUT SUBMIT — the inverse of decode_loadout_submit (§5.56):
+// `[u8 team][u8 playerClass][u32 weaponSlotIndex]` then per kit row
+// `[u8 admIndex][u8 ammoPrimary][u8 ammoSecondary][u8 variant]`, 0xFF-terminated.
+// The caller owns row resolution (name → ADM index, unknown names skipped) AND the
+// already-resolved slot value: retail's builder RE-RESOLVES the slot at send time
+// against the local player's team side (side mask 2 for teams 1/3, 1 for 2/4, else 3)
+// — keep the passed slot when its def's +128 mask matches @0x42ce5d, else the first
+// side-legal def in the same 65-slot page @0x42ce63..0x42ce8b, else the raw argument
+// (an empty/unbuilt slot table falls through raw — the golden slot-195 case). This
+// encoder deliberately takes the resolved value instead of modelling that walk.
+// [orig: NetPacket_SendLoadoutSubmit @ 0x42cdc0
+// (ex-NetPacket_SendWeaponRestrictionMask misnomer) — team = byte_A85B48, the
+// S2C 0x04 tail byte; playerClass = the profile's per-side class byte 5..9;
+// rows from the 2048-B {name\0 ammoPri\0 ammoSec\0 flags\0}* kit tuple buffer
+// via AvatarDef_FindIndexByName + atol, terminator @0x42d076.]
+std::vector<uint8_t> encode_loadout_submit(const LoadoutSubmit &submit);
+
 // S2C 0x49 WEAPON-RELOAD — [u16 entityHandle][u16 weaponSlotCombo] (4 B): the host's broadcast
 // relay of a C2S 0x25 reload request (same payload, rebuilt per ADR 0003). The client-side apply
 // (NapiNPClientMsg_WeaponReload_0x049 @0x42C0A0 -> WeaponSlot_ReloadAmmo @0x541720) is the ONLY
-// place a client's clip refills / the slot's 0x80 reload-pending flag clears (§5.58, D-NET-142).
+// place a client's clip refills. The entry-time 0x80 phase bit is transient (§5.58, D-NET-142).
 // [orig: NapiNPServerMsg_HandleReloadRequest @ 0x514DF0]
 std::vector<uint8_t> encode_weapon_reload(const WeaponReload &reload);
+
+// S2C 0x5D EMPTY-SLOT SWEEP — the inverse of decode_destroy_entity_list: a bare
+// `[u16 pool0Index] × N` run with no count word. Retail's builder walks pool 0
+// and appends the index of every entry whose occupancy dword is zero, then the
+// handler ships it to the REQUESTER ONLY (send_mask 32, target = requester slot).
+// [orig: NapiNPServerMsg_SendEmptySlots @ 0x51a600 -> the body builder @ 0x5160f0]
+std::vector<uint8_t> encode_destroy_entity_list(const DestroyEntityList &list);
+
+// S2C 0x50 TEAM ASSIGN — the inverse of decode_team_assign:
+// `[u16 entityHandle][u8 team][u16 netId][u8 animSlot]` (6 B). The trailing pair is the
+// entity's identity (entity+0x15C / entity+0x374), which retail's shared handle writer
+// ZEROES for a non-player entity behind the `Flags & 0x100` gate @0x506b3d; the caller
+// owns that gate. [orig: producer Server_ChangeEntityTeam @ 0x518D70 ->
+//  write_entity_handle_packet @ 0x506ad0; client handler NapiNPClientMsg_0x050 @ 0x431910
+//  stores them back @0x431b3a / @0x431b46]
+std::vector<uint8_t> encode_team_assign(const TeamAssign &assign);
 
 } // namespace opennova

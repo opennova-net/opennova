@@ -276,7 +276,19 @@ int main() {
 	TEST_EXPECT(as_string(eb) == "exp model");   // expansion archive content
 	TEST_EXPECT(exp_index.read_file("baseonly.trn", eb));
 	TEST_EXPECT(as_string(eb) == "base trn");    // base archive still reachable
+	TEST_EXPECT(exp_index.mounted_expansion() == "jox01");
 	exp_index.clear();
+	TEST_EXPECT(exp_index.mounted_expansion().empty());
+
+	// scan() succeeds for an expansion that is not installed and silently mounts base game.
+	// mounted_expansion() is the only evidence of that, so a caller whose data set must match
+	// a peer's (the LAN joiner, D-NET-178) can detect it instead of trusting its own request.
+	opennova::ResourceIndex missing_exp_index;
+	TEST_EXPECT(missing_exp_index.scan(game.string(), "revx02"));
+	TEST_EXPECT(missing_exp_index.mounted_expansion().empty());
+	TEST_EXPECT(missing_exp_index.read_file("baseonly.trn", eb));
+	TEST_EXPECT(!missing_exp_index.read_file("exponly.3di", eb));
+	missing_exp_index.clear();
 
 	// --- mount modes: LooseOnly (editor) ignores archives; Packed (shipping runtime)
 	// ignores loose overrides. The default above is PackedWithLooseOverride (runtime /d). ---
@@ -295,6 +307,33 @@ int main() {
 		TEST_EXPECT(as_string(mb) == "local env");          // L.pff wins; loose ignored
 		TEST_EXPECT(packed_idx.read_file("exponly.3di", mb)); // archive entry present
 		packed_idx.clear();
+	}
+
+	// --- remount in place: scan() on an ALREADY-MOUNTED index replaces the whole mount
+	// instead of layering onto it, in both directions. The LAN joiner remounts its live
+	// runtime root when the host's expansion differs (D-NET-178); an entry surviving from
+	// the previous mount would run the match on the wrong data set. ---
+	{
+		std::vector<uint8_t> rb;
+		opennova::ResourceIndex remount_idx;
+		TEST_EXPECT(remount_idx.scan(game.string(), "", opennova::VfsMountMode::Packed));
+		TEST_EXPECT(remount_idx.mounted_expansion().empty());
+		TEST_EXPECT(remount_idx.read_file("shared.env", rb));
+		TEST_EXPECT(as_string(rb) == "base env");
+		TEST_EXPECT(!remount_idx.read_file("exponly.3di", rb));
+
+		TEST_EXPECT(remount_idx.scan(game.string(), "jox01", opennova::VfsMountMode::Packed));
+		TEST_EXPECT(remount_idx.mounted_expansion() == "jox01");
+		TEST_EXPECT(remount_idx.read_file("shared.env", rb));
+		TEST_EXPECT(as_string(rb) == "local env");   // the expansion's L.pff now wins
+		TEST_EXPECT(remount_idx.read_file("exponly.3di", rb));
+
+		TEST_EXPECT(remount_idx.scan(game.string(), "", opennova::VfsMountMode::Packed));
+		TEST_EXPECT(remount_idx.mounted_expansion().empty());
+		TEST_EXPECT(remount_idx.read_file("shared.env", rb));
+		TEST_EXPECT(as_string(rb) == "base env");    // and the expansion layers really leave
+		TEST_EXPECT(!remount_idx.read_file("exponly.3di", rb));
+		remount_idx.clear();
 	}
 	fs::remove_all(game);
 

@@ -7,6 +7,7 @@
 
 #include <npruntime/server_session.h>
 #include <npruntime/server_spawn.h>
+#include <npruntime/napi_np_protocol.h>
 
 #include "host_test_setup.h"
 
@@ -66,8 +67,10 @@ int main() {
 	// Stand up the listen host with its own loopback (P0->P1->P2), then wire the authoritative World.
 	ns::LoopbackChannel loopback;
 	np::NapiNPServerCtx ctx;
+	np::GameConfig listen_settings;
+	listen_settings.max_players = 8;
 	np::test::bring_up_host(ctx, np::ConnectionMode::HostClient, np::SocketMode::Socketless,
-	                        /*host_key=*/0, &loopback);
+	                        /*host_key=*/0, &loopback, listen_settings);
 	ctx.world = &world;
 
 	// --- §5.2a step 1-2: spawn the host's OWN player (the type-2 loopback). ---
@@ -161,6 +164,82 @@ int main() {
 		if (!expect(player_count == 20, "twenty players spawned")) return 1;
 		if (!expect(all_ssn_zero, "every player carries net_id 0 (no SSN — D-NET-112)")) return 1;
 		if (!expect(dcbs.size() == 20, "twenty distinct ownerConnectionId(dcb) — the player identity")) return 1;
+	}
+
+	// A roster slot is an identity, not the current player count. When a non-tail player leaves,
+	// the next player must reuse that first free slot rather than collide with the surviving tail.
+	// [orig: Server_PlayerAdd @0x51cbc0 writes the first free dword_A87048 player slot]
+	{
+		w::World slot_world;
+		w::AiSystem slot_ai;
+		make_world(slot_world, slot_ai);
+
+		np::NapiNPServerCtx slot_ctx;
+		np::GameConfig settings;
+		settings.max_players = 8;
+		np::test::bring_up_host(slot_ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan,
+		                        /*host_key=*/0, nullptr, settings);
+		slot_ctx.world = &slot_world;
+
+		const opennova::PeerAddr peers[] = {
+				{0x0100007Fu, 33001}, {0x0100007Fu, 33002},
+				{0x0100007Fu, 33003}, {0x0100007Fu, 33004}};
+		for (int i = 0; i < 3; ++i) {
+			np::NapiNPConnection player;
+			player.peer = peers[i];
+			player.type = 1;
+			player.connection_id = np::kFirstJoinerDcb + static_cast<uint32_t>(i);
+			player.self_id_seen = true;
+			player.phase = np::ConnectionPhase::Joined;
+			slot_ctx.np_protocol.connection_list.push_back(std::move(player));
+		}
+		if (!expect(np::Server_ProcessPendingPlayerSpawns(slot_ctx, slot_world) == 3,
+		            "slot reuse fixture spawns three players")) return 1;
+		if (!expect(slot_ctx.np_protocol.connection_list[0].reply.player_slot == 0 &&
+		                    slot_ctx.np_protocol.connection_list[1].reply.player_slot == 1 &&
+		                    slot_ctx.np_protocol.connection_list[2].reply.player_slot == 2,
+		            "first three players occupy roster slots 0, 1, 2")) return 1;
+
+		if (!expect(np::drop_connection(slot_ctx, peers[1]),
+		            "non-tail player disconnects")) return 1;
+		np::NapiNPConnection replacement;
+		replacement.peer = peers[3];
+		replacement.type = 1;
+		replacement.connection_id = np::kFirstJoinerDcb + 3;
+		replacement.self_id_seen = true;
+		replacement.phase = np::ConnectionPhase::Joined;
+		slot_ctx.np_protocol.connection_list.push_back(std::move(replacement));
+		if (!expect(np::Server_ProcessPendingPlayerSpawns(slot_ctx, slot_world) == 1,
+		            "replacement player spawns")) return 1;
+		if (!expect(slot_ctx.np_protocol.connection_list.back().reply.player_slot == 1,
+		            "replacement reuses the first free roster slot instead of colliding with slot 2"))
+			return 1;
+	}
+
+	// The explicit bind seam may attach an authoritative entity before advancing
+	// phase. It still owns its supplied roster row, and the advertised capacity is
+	// a hard upper bound on reservations.
+	{
+		std::vector<np::NapiNPConnection> roster(3);
+		roster[0].phase = np::ConnectionPhase::Joined;
+		roster[0].reply.player_slot = 0;
+		roster[0].link.owned_entity.packed = 1;
+		roster[1].reply.player_slot = 1;
+		roster[1].reply.player_slot_reserved = true;
+
+		const std::optional<uint8_t> within_capacity =
+				np::Server_ReservePlayerSlot(roster, roster[2], 3);
+		if (!expect(
+					within_capacity.has_value() && *within_capacity == 2,
+					"bound entities and pending reservations both occupy roster rows")) {
+			return 1;
+		}
+		roster[2].reply.player_slot_reserved = false;
+		if (!expect(
+					!np::Server_ReservePlayerSlot(roster, roster[2], 2).has_value(),
+					"slot reservation never escapes the advertised capacity")) {
+			return 1;
+		}
 	}
 
 	// --- D-NET-146: the character stamp — per-side CU vars picked by ASSIGNED team. ---

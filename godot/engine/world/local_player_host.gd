@@ -118,6 +118,8 @@ var _camera: Camera3D
 var _input_source := Callable()
 var _third_person := false
 var _avatar: Node3D = null
+var _held_weapon: Node3D = null      # the 3P gun; a SIBLING of _avatar (see GameWorld)
+var _held_weapon_graphic := ""      # the gfx3 the live node was built from
 var _viewmodel: Node3D = null
 # The FP render pass nodes (see PLAYER_VIEWMODEL_RENDERFOV_H_DEG).
 var _vm_pass_layer: CanvasLayer = null
@@ -685,7 +687,45 @@ func _action_particle_model_to_world(part: Node3D, info: Dictionary) -> Transfor
 # World-space spawn point for an ACTION particle: the named user point on a
 # viewmodel part (the gun carries the muzzle points), composed through its live
 # subobject/bone pose. Falls back to the first part's origin, then the player eye.
+# The THIRD-PERSON action-particle anchor: the same authored userpoint name resolved
+# against the gfx3 world gun instead of the first-person viewmodel. Retail keeps two
+# resolved indices for one authored name — ActionDef+56 against gfx1 and +57 against
+# gfx3 — and picks by the first-person bit, which requires the camera to be in first
+# person at all [orig: the FP bit gate @0x540e8c..0x540eca requires g_camera_mode == 0;
+# the gfx1/gfx3 resolvers @0x54039e/@0x54040f].
+#
+# This matters because _vm_parts is the FIRST-PERSON viewmodel: it is re-pinned to the
+# camera every frame and merely HIDDEN in third person, never detached, so resolving
+# against it while in third person anchors the muzzle flash to the player's own eye.
+# The weapon model is drawn rigid at its attach transform, so a model-space userpoint
+# just rides that transform.
+# Returns { "pos": Vector3, "dir": Vector3 } or an empty Dictionary when unresolved.
+func _third_person_action_particle(userpoint: String) -> Dictionary:
+	if not _third_person or userpoint.is_empty():
+		return {}
+	if _held_weapon == null or not is_instance_valid(_held_weapon) 			or not _held_weapon.visible or not _held_weapon.has_method("get_object_data"):
+		return {}
+	var data = _held_weapon.get_object_data()
+	if data == null or not data.has_method("get_user_point_count"):
+		return {}
+	var xform: Transform3D = _held_weapon.global_transform
+	for i in range(int(data.get_user_point_count())):
+		var info: Dictionary = data.get_user_point_info(i)
+		if String(info.get("name", "")).nocasecmp_to(userpoint) != 0:
+			continue
+		var direction: Vector3 = xform.basis * Vector3(info.get("rotation", Vector3(0, 0, 1)))
+		return {
+			"pos": xform * Vector3(info.get("position", Vector3.ZERO)),
+			"dir": direction.normalized() if direction.length_squared() > 0.000001
+					else -xform.basis.z.normalized(),
+		}
+	return {}
+
+
 func _action_particle_world_position(userpoint: String) -> Vector3:
+	var tp := _third_person_action_particle(userpoint)
+	if not tp.is_empty():
+		return tp["pos"]
 	var fallback := Vector3.INF
 	for part in _vm_parts:
 		if part == null or not is_instance_valid(part) or not part.has_method("get_object_data"):
@@ -704,10 +744,16 @@ func _action_particle_world_position(userpoint: String) -> Vector3:
 				return model_to_world * Vector3(info.get("position", Vector3.ZERO))
 	if fallback != Vector3.INF:
 		return fallback
-	return _eye_position(_world.local_player_position())
+	# Retail's deepest fallback is the ENTITY ORIGIN [orig: loc_401867 @0x401867..0x401887
+	# copies entity+4/+8/+0xC]. The eye was our own invention and put the flash on the
+	# player's face whenever a userpoint failed to resolve.
+	return _world.local_player_position()
 
 
 func _action_particle_world_forward(userpoint: String) -> Vector3:
+	var tp := _third_person_action_particle(userpoint)
+	if not tp.is_empty():
+		return tp["dir"]
 	for part in _vm_parts:
 		if part == null or not is_instance_valid(part) or not part.has_method("get_object_data"):
 			continue
@@ -899,6 +945,10 @@ func _ensure_models() -> void:
 
 
 func _clear_models() -> void:
+	if _held_weapon != null and is_instance_valid(_held_weapon):
+		_held_weapon.queue_free()
+	_held_weapon = null
+	_held_weapon_graphic = ""
 	if _avatar != null and is_instance_valid(_avatar):
 		_avatar.queue_free()
 	if _viewmodel != null and is_instance_valid(_viewmodel):
@@ -1000,6 +1050,50 @@ func _avatar_head_world() -> Vector3:
 	if skel == null or skel.get_bone_count() <= PLAYER_HEAD_BONE_INDEX:
 		return Vector3.INF
 	return skel.global_transform * skel.get_bone_global_pose(PLAYER_HEAD_BONE_INDEX).origin
+
+
+## The soldier's third-person gun: retail's draw 5. The model is the equipped weapon's
+## gfx3 and it is drawn RIGID — one matrix into every bone slot — so it carries no clip
+## and no skeleton of its own; everything is the attach transform built here.
+##
+## Position is bone 16's own pivot, nudged, carried through that bone's posed matrix: the
+## original's `M16 · (pivot16 + nudge)`, and since `M16 · pivot16` IS the joint world
+## position, that reduces to joint + M16_rotation · nudge, which is what the pose gives us
+## directly. Orientation is NOT bone 16's rotation and NOT one of the aim-overlay classes
+## — it is the weapon's own attach basis (see PlayerAimOverlay.weapon_attach_angles).
+## [orig: draw @0x4e3c87..0x4e3d99; matrix build @0x4b2180..0x4b22f8; gate
+##  Entity_CanFireWeapon @0x4dcb10]
+func _update_held_weapon(overlay: PlayerAimOverlay) -> void:
+	if _world == null:
+		return
+	var def: PlayerViewmodelDef = _world.local_player_viewmodel_def() 			if _world.has_method("local_player_viewmodel_def") else null
+	# 27 of the 94 shipped weapon rows author no gfx3 at all; drawing nothing is the
+	# correct, retail behaviour there, not a missing asset.
+	var graphic := def.gfx3 if def != null else ""
+	if graphic != _held_weapon_graphic:
+		if _held_weapon != null and is_instance_valid(_held_weapon):
+			_held_weapon.queue_free()
+		_held_weapon = null
+		_held_weapon_graphic = graphic
+		if not graphic.is_empty() and _world.has_method("build_local_player_held_weapon"):
+			_held_weapon = _world.build_local_player_held_weapon(graphic)
+	if _held_weapon == null or not is_instance_valid(_held_weapon):
+		return
+	if overlay == null or not overlay.weapon_visible:
+		_held_weapon.visible = false
+		return
+	var attach: Variant = PresentHeldWeapon.attach_transform(
+			_avatar, overlay.weapon_attach_angles, overlay.weapon_hand_frame) 			if _avatar != null and is_instance_valid(_avatar) else null
+	if attach == null:
+		_held_weapon.visible = false
+		return
+	_held_weapon.global_transform = attach as Transform3D
+	_held_weapon.visible = true
+	# Same layer rule as the body: first person hides it from the player camera by LAYER,
+	# so the water mirror still sees the soldier holding his rifle.
+	_set_visual_layers(_held_weapon, NovaWater.VISUAL_LAYER_WORLD
+			if (_third_person or debug_body_in_first_person)
+			else NovaWater.VISUAL_LAYER_BODY_REFLECTION_ONLY)
 
 
 func _find_skeleton(root: Node) -> Skeleton3D:
@@ -1130,6 +1224,7 @@ func _update_avatar(pos: Vector3) -> void:
 	_set_visual_layers(_avatar, NovaWater.VISUAL_LAYER_WORLD
 			if (_third_person or debug_body_in_first_person)
 			else NovaWater.VISUAL_LAYER_BODY_REFLECTION_ONLY)
+	_update_held_weapon(overlay)
 	var anim_key := String(_world.local_player_anim_key()) if _world.has_method("local_player_anim_key") else ""
 	var anim_phase := int(_world.local_player_anim_phase_ticks()) if _world.has_method("local_player_anim_phase_ticks") else 0
 	# The upper-body weapon channel: the sim's secondary-channel clip (reload etc.) posed

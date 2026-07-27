@@ -7,10 +7,19 @@ Status: accepted
 Three independent servers sit behind an opennova multiplayer session (see
 [docs/net/novaworld-net-re.md](../net/novaworld-net-re.md) §6.9 and the corrected
 architecture): the **gate** (:7597) points a client at NovaWorld; the **NovaWorld
-server** (docker :64206 / :8080) is matchmaking / NAT rendezvous only — its World-less
-responder is correct by design and never hosts a match; and the **game server is the
+server** (docker :64206 / :8080) is matchmaking / NAT rendezvous only — its JO
+game-session responder exists to answer gate probes and transport-level joins, never to
+serve gameplay (2026-07-25: since the LAN-responder leg of decision 3 folded onto the
+shared `start_host_session` bring-up, that responder rides the same `HostOwner` machinery
+as the real hosts and therefore carries a MINIMAL world — an empty mission plus one
+synthesized start marker so the shared spawn pipeline stays well-defined. That world is
+service infrastructure, not a parity surface: no mission is loaded, and the service's
+role remains matchmaking-only. The recorded caution: a mis-addressed retail client can
+now walk admission further into that phantom world than the old World-less responder
+allowed — capping the responder's admission depth is fair follow-up work); and the
+**game server is the
 opennova Godot game itself** — `NovaSimulation` owns a `libs/npruntime` `HostOwner`,
-`start_host_session` stands up a real `world::World` + a mode-3 listen server, and
+`start_host_session` stands up a real `world::World` plus the selected host role, and
 `host_session_pump` drives the 62 Hz owner loop (ADRs [0009](0009-in-match-net-seam.md)–
 [0012](0012-player-is-host-side-server-entity.md)). Aligning that game server with the
 witnessed original so a retail JO client joins and plays fully is the ongoing work.
@@ -75,13 +84,16 @@ path); `player_slot` (roster order, not stored on the entity) stays a field rega
 
 ### 3. One host bring-up, folded to the shared helper
 
-The witnessed §5.0 listen-host bring-up (`set_connection_mode(3)` →
-`set_transport_mode` → `create_session(&loopback)` [→ `Server_InitNewRoundState`] →
-`configure_session_runtime`, then the serve-and-play own-player spawn + in-match latch)
-lives once in `np::start_host_session(HostOwner&, HostConfig&)`
-[orig: `SinglePlayer_StartMission @ 0x561af0`]. The Godot host (`NovaSimulation`) now
-delegates to it instead of hand-composing the primitives, matching the CLI server and the
-host-session tests. `create_session` owns the single `Server_InitNewRoundState` call.
+The witnessed §5.0 host bring-up lives once in
+`np::start_host_session(HostOwner&, HostConfig&)`: serve-and-play selects mode 3 and
+passes the type-2 loopback into `create_session`; serve-only selects mode 1 and passes
+no local client. Both continue through `set_transport_mode` → `create_session`
+[→ `Server_InitNewRoundState`] → `configure_session_runtime`; only mode 3 runs the
+own-player spawn/initial-stream path
+[orig: `SinglePlayer_StartMission @0x561af0`;
+`UI_HandleHostSessionStart @0x556d00`]. The Godot host (`NovaSimulation`) delegates to
+the same helper as the CLI harness and host-session tests. `create_session` owns the
+single `Server_InitNewRoundState` call.
 
 ## Consequences
 
@@ -110,6 +122,11 @@ host-session tests. `create_session` owns the single `Server_InitNewRoundState` 
     copies — `frame_session_packet` / `deframe_session_packet` (`libs/novaworld/.../protocol_message.h`),
     used by the host S2C (`NapiNPConnection`), joiner C2S (`JoinerConnection`), and lobby C2S
     (`ClientSession`) framing paths (each keeps its own byte-identical outer NWU envelope). Wire-neutral.
+  - **DONE (2026-07-25, PR #300):** `nw_udp_listener`'s JO responder folded onto
+    `start_host_session` — the third copy-paste site from consolidation problem 3. Cost:
+    the shared machinery requires a `ctx.world`, so the service now carries the minimal
+    infrastructure world described in Context, with the admission-depth caution recorded
+    there.
   - **Remaining:** collapsing the two byte-identical outer framers (`encode_session_outbound` /
     `nw_encode_outbound`); folding `nw_udp_listener`'s app-side server-direction `lobby_state` onto the
     shared helper. Both optional, wire-neutral, low priority.

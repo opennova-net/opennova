@@ -89,6 +89,10 @@ public:
 	// the session default; without it, retained loose roots are visible only to explicit retail
 	// force-loose-first calls. `game_code` (the `/game <code>` launch flag, default "jo") selects
 	// the SCR decode key so demo data decodes correctly.
+	// Safe to call on an already-mounted root: the mount is replaced, not layered (the index
+	// rebuilds, the resolver caches drop, and the epoch bump self-clears every epoch-keyed
+	// holder), so holders of this object move with it — the in-place expansion switch the
+	// Mods screen and the LAN joiner both perform.
 	Error mount_runtime(const String &path, const String &expansion = String(),
 	                    bool allow_loose_override = false, const String &game_code = "jo");
 	// Global cache epoch (see util/engine_caches.h): bumped by every mount/clear on ANY
@@ -97,10 +101,20 @@ public:
 	// editing files on disk without remounting.
 	static int64_t cache_epoch();
 	static void bump_cache_epoch();
-	// The expansion name this root was runtime-mounted with ("" for base game or
-	// editor/loose mounts). Feeds the expansion bank slots and the M<exp>/G<exp>
-	// music forms [orig: Expansion_LoadAssets @ 0x4a4730].
+	// The expansion this root ACTUALLY mounted ("" for base game, editor/loose mounts, and
+	// after mount_runtime's silent base fallback for an expansion that is not installed).
+	// Feeds the expansion bank slots and the M<exp>/G<exp> music forms
+	// [orig: Expansion_LoadAssets @ 0x4a4730]. Never reports the requested name back: a
+	// caller that must not run on the wrong data set (the LAN joiner reconciling against the
+	// host's authoritative expansion, D-NET-178) needs this to be evidence, not an echo.
 	String get_expansion() const;
+	// True only while a successful mount_runtime() mount is live: this root's data is the
+	// packed game install. Editor mounts (set_root_dir), never-mounted roots, clear(), and
+	// every failed mount report false. A caller re-mounting a root it did not create (the LAN
+	// joiner switching an injected runtime root to the host's expansion, D-NET-178) reads this
+	// to pick the right entry point: re-mounting a runtime root through set_root_dir would
+	// silently drop its archives and leave the session on loose files.
+	bool is_runtime_mount() const;
 
 	// Expansion names discoverable under `<path>/expansion/` (each subdir with a matching
 	// <name>.pff). Independent of the currently mounted root, so the UI can list before mounting.

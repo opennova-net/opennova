@@ -1,5 +1,6 @@
 #include "network/nova_udp_pump.h"
 
+#include <godot_cpp/classes/ip.hpp>
 #include <godot_cpp/core/error_macros.hpp>
 
 #include <utility>
@@ -23,6 +24,9 @@ int NovaUdpPump::bind_listen(int port) {
 
 int NovaUdpPump::dial(const String &host, int port) {
 	close();
+	const String resolved_host = IP::get_singleton()->resolve_hostname(host, IP::TYPE_IPV4);
+	if (resolved_host.is_empty()) return static_cast<int>(ERR_CANT_RESOLVE);
+
 	socket_.instantiate();
 	const Error err = socket_->bind(0, "0.0.0.0");
 	if (err != OK) {
@@ -30,9 +34,11 @@ int NovaUdpPump::dial(const String &host, int port) {
 		return static_cast<int>(err);
 	}
 	local_port_ = static_cast<int>(socket_->get_local_port());
-	dest_ip_ = host;
+	// Retain a numeric endpoint: packet sources are reported numerically, so
+	// names such as "localhost" can be compared when poll() admits packets.
+	dest_ip_ = resolved_host;
 	dest_port_ = port;
-	socket_->set_dest_address(host, port);
+	socket_->set_dest_address(dest_ip_, port);
 	return static_cast<int>(OK);
 }
 
@@ -54,6 +60,10 @@ int NovaUdpPump::poll() {
 		Inbound in;
 		in.ip = socket_->get_packet_ip();
 		in.port = static_cast<int>(socket_->get_packet_port());
+		// A listener accepts every source to discover joiners. A dialed pump is
+		// bound to exactly one resolved endpoint; discard injected datagrams at
+		// the UDP boundary before any protocol consumer can observe them.
+		if (dest_port_ != 0 && (in.ip != dest_ip_ || in.port != dest_port_)) continue;
 		in.bytes = pkt;
 		inbound_.push_back(std::move(in));
 		++n;

@@ -467,81 +467,50 @@ void AiSystem::infantry_torso_roll_tick(AiEntity &e) {
 //  + AnimMap_UpdateDualChannels @0x40b8c0 (advance; deferred promotion at clip end
 //  via AnimMap_UpdateEntity @0x40b77b); witness world-wac-ai-re.md §14.8]
 // ----------------------------------------------------------------------------
-void AiSystem::infantry_weapon_channel(AiEntity &e) {
+void AiSystem::infantry_weapon_channel(AiEntity &e, World &world, uint32_t logic_tick) {
     InfantryState &inf = e.inf;
 
-    // The arms-dip / head-look decay block [orig: @0x4b5cab..0x4b5ce7]: while the dip
+    // The arms-dip / pitch-kick block [orig: @0x4b5cab..0x4b5ce7]: while the dip
     // window runs, the decay term drops 0x2800000 per tick BEFORE the eighth-step ease;
     // the window byte decrements in BOTH branches — twice per tick — so the 20-tick
     // weapon-switch stamp dips for 10 ticks (the 0x49 remote-reload 80 for 40).
     if (inf.arms_dip_ticks > 0) {
         --inf.arms_dip_ticks;             // [orig: @0x4b5cb5]
-        inf.head_look_decay -= 0x2800000; // [orig: @0x4b5cb7 += 0xFD800000]
+        inf.pitch_kick_accum -= 0x2800000; // [orig: @0x4b5cb7 += 0xFD800000]
     }
-    inf.head_look_decay -=
-        io::bam_sar(io::bam_add(inf.head_look_decay, 4), 3); // [orig: @0x4b5cc7..0x4b5cd5]
+    inf.pitch_kick_accum -=
+        io::bam_sar(io::bam_add(inf.pitch_kick_accum, 4), 3); // [orig: @0x4b5cc7..0x4b5cd5]
     if (inf.arms_dip_ticks > 0) --inf.arms_dip_ticks;        // [orig: @0x4b5cdb..0x4b5ce7]
 
     // The 3P reload-anim window counts down once per tick [orig: @0x4b5cf9].
     if (inf.reload_anim_ticks > 0) --inf.reload_anim_ticks;
 
-    // Desired state [orig: @0x4b5dad..0x4b5e6f]: the held weapon's hold kind (the
-    // AdmDefs dword @0x24E8084 + 0x460*idx = the def's special_hold key) selects the
-    // pose ladder; the default (rifles, kind 0) MIRRORS the primary state.
-    int desired;
-    switch (inf.wpn_hold_kind) {
-        case 1: // knife family -> 50 [orig: @0x4b5dc0 lea eax,[ecx+31h]]
-            desired = anim_state::kHoldKnife;
-            break;
-        case 2: // pistol -> 51 [orig: @0x4b5dcd]
-            desired = anim_state::kHoldPistol;
-            break;
-        case 3: // grenade -> 52 [orig: @0x4b5dd7]
-            desired = anim_state::kHoldGrenade;
-            break;
-        case 4: // stinger/AT4/RPG -> 53 [orig: @0x4b5de1]
-            desired = anim_state::kHoldStinger;
-            break;
-        case 5: // designator -> 54, scoped 55 [orig: @0x4b5deb test Flags&0x10]
-            desired = inf.scope_raised ? anim_state::kHoldDesignatorScoped
-                                       : anim_state::kHoldDesignator;
-            break;
-        case 6: // P90 -> 56, scoped 57 [orig: @0x4b5dfe]
-            desired = inf.scope_raised ? anim_state::kHoldP90Scoped : anim_state::kHoldP90;
-            break;
-        case 7: // MP7 -> 58, scoped 59 [orig: @0x4b5e11]
-            desired = inf.scope_raised ? anim_state::kHoldMP7Scoped : anim_state::kHoldMP7;
-            break;
-        case 8: // javelin -> 60, scoped 61 [orig: @0x4b5e24]
-            desired = inf.scope_raised ? anim_state::kHoldJavelinScoped
-                                       : anim_state::kHoldJavelin;
-            break;
-        default:
-            // MIRROR the primary state — 43 idle when the primary is locked (flag 4);
-            // 49 idle_3 when scoped [orig: @0x4b5e37..0x4b5e4e].
-            desired = (infantry_anim_flags(inf.anim_state) & 0x4u) != 0 ? anim_state::kIdle
-                                                                        : inf.anim_state;
-            if (inf.scope_raised) desired = anim_state::kIdle3;
-            break;
-    }
-    // Overrides, strongest last [orig: @0x4b5e53..0x4b5e6f]: binoculars 64, then the
-    // reload window — 66 reload2 when the hold kind is 2 (pistol), else 65 reload.
-    if (inf.binoculars_raised) desired = anim_state::kBinoculars; // [orig: @0x4b5e53]
-    if (inf.reload_anim_ticks > 0)
-        desired = inf.wpn_hold_kind == 2 ? anim_state::kReload2
-                                         : anim_state::kReload; // [orig: @0x4b5e5e..0x4b5e6f]
-
-    // Commit [orig: @0x4b5e72]: same -> skip; a locked (flag 4: attacks 62/63, reloads
-    // 65/66) or emote (0x20) current defers the change to clip end; else stamp now.
-    if (desired != inf.wpn_state) {
-        const uint32_t curf = infantry_anim_flags(inf.wpn_state);
-        if ((curf & 0x4u) != 0 || (curf & 0x20u) != 0) {
-            inf.wpn_deferred = desired; // [orig: @0x4b5e88/@0x4b5e95]
-        } else {
-            inf.wpn_state = desired;    // [orig: @0x4b5e9d]
-            inf.wpn_deferred = 0;       // [orig: @0x4b5ea3]
-            inf.wpn_clip_phase = 0;     // channel re-init (D-INF-1: no blend window)
+    // The SELECTION + COMMIT run only on retail's 16-tick slow pass, not every tick
+    // [orig: gate @0x4b5d6d/@0x4b5d71, key `current_tick & 0xF` stored @0x4b4e79]. The
+    // key is the RAW tick — unstaggered, unlike the org1 `logic_tick + 36*net_id`
+    // idiom a few lines up — so every body selects on the same phase. Consequences are
+    // witnessed behavior, not approximation: a hold-pose change lands 0-15 ticks late,
+    // and the 80-tick reload window is sampled by five passes rather than eighty.
+    // Everything below this block (deferred promotion, playhead advance) stays per-tick
+    // because in the original it lives in AnimMap_UpdateDualChannels @0x40b8c0, ahead
+    // of the gate. Retail's slow pass carries much more than the weapon channel (the
+    // slot timer, threat scan, damage and the music gamescript block, @0x4b5d77..
+    // @0x4b637b); this ports the weapon-channel tenant only.
+    if ((logic_tick & 0xFu) == 0u) {
+        // The hold kind is re-read from the ADM table EVERY selection pass, keyed by
+        // this entity's OWN equipped index — the original keeps no per-player copy
+        // (`dword_24E8084[280 * entityData->equippedAdmIndex]`). That is precisely what
+        // lets any observer derive a REMOTE player's hold pose from the single wire
+        // byte at entity+0x2B0, so resolving it here rather than from a local-player
+        // scalar is what makes the non-local case work at all.
+        // [orig: @0x4b5dba]
+        inf.wpn_hold_kind = 0;
+        if (const Entity *owner = world.registry.get(e.handle)) {
+            if (const WeaponTableEntry *held =
+                        world.weapons.by_index(owner->equipped_adm_index))
+                inf.wpn_hold_kind = held->special_hold;
         }
+        infantry_weapon_channel_select(e);
     }
 
     // Deferred promotion when the playing clip reaches its end — the channel end-flag
@@ -560,6 +529,84 @@ void AiSystem::infantry_weapon_channel(AiEntity &e) {
     if (root_motion != nullptr) {
         RootMotionFrame discard;
         root_motion->advance(inf.adm_id, inf.wpn_state, inf.wpn_clip_phase, discard);
+    }
+}
+
+// The pose ladder itself — see the infantry.h contract. Pure so both the motor-driven
+// path (local player, and wire peers on the authority) and the decode-only path (a
+// joiner's view of its peers, which has no motor entity to run) resolve the SAME
+// selection from the same four inputs, instead of two ladders drifting apart.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4b5dad..0x4b5e6f]
+int infantry_weapon_hold_state(int hold_kind, int primary_anim_state, bool scope_raised,
+                               bool binoculars_raised, bool reloading) {
+    // Desired state [orig: @0x4b5dad..0x4b5e6f]: the held weapon's hold kind (the
+    // AdmDefs dword @0x24E8084 + 0x460*idx = the def's special_hold key) selects the
+    // pose ladder; the default (rifles, kind 0) MIRRORS the primary state.
+    int desired;
+    switch (hold_kind) {
+        case 1: // knife family -> 50 [orig: @0x4b5dc0 lea eax,[ecx+31h]]
+            desired = anim_state::kHoldKnife;
+            break;
+        case 2: // pistol -> 51 [orig: @0x4b5dcd]
+            desired = anim_state::kHoldPistol;
+            break;
+        case 3: // grenade -> 52 [orig: @0x4b5dd7]
+            desired = anim_state::kHoldGrenade;
+            break;
+        case 4: // stinger/AT4/RPG -> 53 [orig: @0x4b5de1]
+            desired = anim_state::kHoldStinger;
+            break;
+        case 5: // designator -> 54, scoped 55 [orig: @0x4b5deb test Flags&0x10]
+            desired = scope_raised ? anim_state::kHoldDesignatorScoped
+                                   : anim_state::kHoldDesignator;
+            break;
+        case 6: // P90 -> 56, scoped 57 [orig: @0x4b5dfe]
+            desired = scope_raised ? anim_state::kHoldP90Scoped : anim_state::kHoldP90;
+            break;
+        case 7: // MP7 -> 58, scoped 59 [orig: @0x4b5e11]
+            desired = scope_raised ? anim_state::kHoldMP7Scoped : anim_state::kHoldMP7;
+            break;
+        case 8: // javelin -> 60, scoped 61 [orig: @0x4b5e24]
+            desired = scope_raised ? anim_state::kHoldJavelinScoped
+                                   : anim_state::kHoldJavelin;
+            break;
+        default:
+            // MIRROR the primary state — 43 idle when the primary is locked (flag 4);
+            // 49 idle_3 when scoped [orig: @0x4b5e37..0x4b5e4e].
+            desired = (infantry_anim_flags(primary_anim_state) & 0x4u) != 0
+                              ? anim_state::kIdle
+                              : primary_anim_state;
+            if (scope_raised) desired = anim_state::kIdle3;
+            break;
+    }
+    // Overrides, strongest last [orig: @0x4b5e53..0x4b5e6f]: binoculars 64, then the
+    // reload window — 66 reload2 when the hold kind is 2 (pistol), else 65 reload.
+    if (binoculars_raised) desired = anim_state::kBinoculars; // [orig: @0x4b5e53]
+    if (reloading)
+        desired = hold_kind == 2 ? anim_state::kReload2
+                                 : anim_state::kReload; // [orig: @0x4b5e5e..0x4b5e6f]
+    return desired;
+}
+
+// The selection + commit half of the weapon channel, behind the 16-tick gate above.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4b5dad..0x4b5ea3]
+void AiSystem::infantry_weapon_channel_select(AiEntity &e) {
+    InfantryState &inf = e.inf;
+    const int desired = infantry_weapon_hold_state(
+            inf.wpn_hold_kind, inf.anim_state, inf.scope_raised, inf.binoculars_raised,
+            inf.reload_anim_ticks > 0);
+
+    // Commit [orig: @0x4b5e72]: same -> skip; a locked (flag 4: attacks 62/63, reloads
+    // 65/66) or emote (0x20) current defers the change to clip end; else stamp now.
+    if (desired != inf.wpn_state) {
+        const uint32_t curf = infantry_anim_flags(inf.wpn_state);
+        if ((curf & 0x4u) != 0 || (curf & 0x20u) != 0) {
+            inf.wpn_deferred = desired; // [orig: @0x4b5e88/@0x4b5e95]
+        } else {
+            inf.wpn_state = desired;    // [orig: @0x4b5e9d]
+            inf.wpn_deferred = 0;       // [orig: @0x4b5ea3]
+            inf.wpn_clip_phase = 0;     // channel re-init (D-INF-1: no blend window)
+        }
     }
 }
 
@@ -592,6 +639,64 @@ bool infantry_weapon_channel_visible(const InfantryState &inf, bool weapon_in_ha
                                      bool mount_blocks_channel) {
     return inf.active && weapon_in_hands && !mount_blocks_channel &&
            (infantry_anim_flags(inf.anim_state) & 0x40u) != 0;
+}
+
+// See the infantry.h contract: the motor store is the writer of the two-store pair, so a
+// redeploy that only writes the registry Entity is undone by finish_infantry_tick.
+void infantry_respawn_snap(AiEntity &e, const int32_t pos[3], int32_t heading,
+                           int16_t health) {
+    e.pos[0] = pos[0];
+    e.pos[1] = pos[1];
+    e.pos[2] = pos[2];
+    e.heading = heading;
+    e.pitch = 0;
+    e.roll = 0;
+    e.body_pitch = 0;
+    e.health = health;
+    e.vel_x = 0;
+    e.vel_z = 0;
+    // Nothing is in flight toward the old pose any more; a stale interpolation target
+    // would drag a redeployed body back toward where it died.
+    e.net_smooth_target[0] = pos[0];
+    e.net_smooth_target[1] = pos[1];
+    e.net_smooth_target[2] = pos[2];
+    e.net_smooth_heading = heading;
+    e.net_smooth_pitch = 0;
+    e.net_interp_progress = 0;
+    e.net_interp_steps = 0;
+    e.collide_state = {};
+
+    InfantryState &inf = e.inf;
+    inf.player_moving = false;
+    inf.player_move_dir_index = 0;
+    inf.move_mode = 0;
+    inf.target_dist = 0;
+    // The death clip is a LOCKED anim family (flags 0x82), so the selection commit would
+    // defer every later change to clip end and keep the corpse posed. Reseed the spawn
+    // idle the way the original's respawn does [orig: @0x4b9714 — spawn body state 44].
+    inf.anim_state = anim_state::kIdle;
+    inf.anim_pending = 0;
+    inf.anim_prev = anim_state::kIdle;
+    inf.clip_phase = 0;
+    inf.reload_anim_ticks = 0;
+    inf.arms_dip_ticks = 0;
+    inf.pitch_kick_accum = 0;
+    inf.idle_counter = 0;
+    inf.lean_left = false;
+    inf.lean_right = false;
+    inf.lean_angle = 0;
+    inf.torso_roll = 0;
+    inf.body_heading = heading;
+    inf.target_heading = heading;
+    inf.leg_yaw[0] = inf.leg_yaw[1] = heading;
+    inf.leg_target[0] = inf.leg_target[1] = heading;
+    inf.vel[0] = inf.vel[1] = inf.vel[2] = 0;
+    inf.stance = InfantryState::Stance::kStand;
+    inf.standing_on_entity = false;
+    inf.airborne = false;
+    inf.jump_requested = false;
+    inf.jump_cooldown = 0;
+    inf.ground_cache_valid = false;
 }
 
 // ----------------------------------------------------------------------------
@@ -897,12 +1002,12 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         infantry_torso_roll_tick(e);
     }
 
-    // The secondary (weapon) channel and its arms/head-look decay block run on every
+    // The secondary (weapon) channel and its arms/pitch-kick block run on every
     // local-player body tick, including death ticks. The primary death state disables
     // rendering through its flag gate, but the independent playhead/timers do not
     // freeze on the corpse. NPC/remote threading remains tracked by D-INF-11.
     // [orig: the same body updater drives both pairs @0x4b40e0; witness §14.8]
-    if (inf.is_local_player) infantry_weapon_channel(e);
+    if (inf.is_local_player) infantry_weapon_channel(e, world, logic_tick);
 
     // 3. Advance the selected playing clip and fetch its root motion (every tick).
     if (reset_capsule_bottom_state(inf.anim_state)) inf.prev_capsule_bottom = 0;
@@ -1916,6 +2021,22 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
     // body pass. [orig: @0x4b5c97 / @0x4b7dbf / @0x4b5cff]
     infantry_lean_tick(e);
     infantry_torso_roll_tick(e);
+
+    // The upper-body weapon channel runs for a WIRE PEER exactly as it does for the
+    // local player. The original has no ownership test on it: the only locality check
+    // in the whole region guards the refresh of Flags bits 2-4 from the local
+    // g_weaponScopeActive / g_binocularsRaised / NVG globals, and a non-local entity
+    // jumps straight past it into the hold-kind ladder [orig: @0x4b5d77
+    // `cmp g_local_player_entity, esi ; jnz short loc_4B5DAD`]. For a peer those same
+    // three bits arrive over the wire instead — the host has already replaced them
+    // from the sender's C2S 0x0C state byte (mask 0x1C) — so the selection reads the
+    // peer's OWN entity for both of its inputs: bit 0x10 scoped [orig: test @0x4b5deb]
+    // and the equipped ADM index at +0x2B0 [orig: read @0x4b5dba]. Without this a
+    // remote player holds a rifle pose whatever it carries, and never adopts the
+    // scoped stance the wire is already reporting.
+    inf.scope_raised = (ent->flags & 0x10u) != 0;
+    inf.binoculars_raised = (ent->flags & 0x08u) != 0;
+    infantry_weapon_channel(e, world, logic_tick);
 
     // Advance the playing clip's channel every tick — the wire ratio source. Uses the real
     // .adm loop rate when the host has anim data; without it the phase self-advances on a

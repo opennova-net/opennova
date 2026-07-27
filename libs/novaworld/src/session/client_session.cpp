@@ -105,21 +105,10 @@ std::array<uint8_t, 16> novaworldudp_pg() {
 	return pg;
 }
 
-// The 16-byte JointOperations (in-match game) protocol GUID. PROVISIONAL: the
-// real bytes live in the game-session connect path (CNapiGameSession_StartPlaying
-// @ 0x4d45e0 / the InitNPConnection sibling that builds the host connection),
-// not yet grilled (IDA MCP was down). This placeholder is distinct from the
-// NOVAWORLDUDP GUID and deterministic, which is enough for local proto-switch
-// routing. Replace with the witnessed bytes for real-host parity; see
-// docs/net/novaworld-net-re.md.
-std::array<uint8_t, 16> jointoperations_pg() {
-	// ASCII "JO-PROVIS-PG\0\0\0\0" — visibly a placeholder in a hex dump.
-	return {'J', 'O', '-', 'P', 'R', 'O', 'V', 'I', 'S', '-', 'P', 'G', 0, 0, 0, 0};
-}
-
 // Pick the PG GUID that matches the protocol name carried in the hello/auth.
 std::array<uint8_t, 16> pg_for_pn(const std::string &pn) {
-	if (pn == "JointOperations") return jointoperations_pg();
+	if (is_jointoperations_protocol_name(pn))
+		return jointoperations_protocol_guid();
 	return novaworldudp_pg();
 }
 
@@ -146,10 +135,15 @@ std::vector<ClientSession::Config::CuVar> make_novaworld_join_cu(const NovaWorld
 
 ClientSession::Config ClientSession::Config::jointoperations() {
 	Config c;
-	c.pn  = "JointOperations";       // flips the session to the in-match game protocol
-	c.pv1 = "0.0.0 1/12/2004 EM";    // JointOperations game protocol PV1
-	c.pg  = jointoperations_pg();    // PROVISIONAL placeholder GUID
-	c.use_default_pg = false;        // use the explicit JO pg above
+	const ClientHello retail = make_jointoperations_client_hello(c.client_index);
+	c.co = retail.co;
+	c.ap = retail.ap;
+	c.bdat = retail.bdat;
+	c.pn = retail.pn;
+	c.pv1 = retail.pv1;
+	c.pv2 = retail.pv2;
+	c.pg = retail.pg;
+	c.use_default_pg = false;
 	return c;
 }
 
@@ -359,6 +353,10 @@ void ClientSession::on_server_hello(const std::vector<uint8_t> &body,
 		fail("bad ServerHello");
 		return;
 	}
+	// CI is the client's correlation token. A shared UDP receive path can
+	// observe a valid reply for another in-flight hello; ignore it without
+	// advancing this connection's handshake.
+	if (sh.ci != cfg_.client_index) return;
 	server_hk_ = sh.hk;       // [Phase 1] the value we must echo in ClientAuth
 	state_ = State::Auth;
 	out.push_back(build_client_auth());
@@ -370,6 +368,9 @@ void ClientSession::on_server_auth(const std::vector<uint8_t> &body) {
 		fail("bad ServerAuth");
 		return;
 	}
+	// ServerAuth echoes both correlation values chosen by this client. Do not
+	// install a foreign connection's session/SCRK material.
+	if (sa.ci != cfg_.client_index || sa.ck != cfg_.client_key) return;
 	if (sa.cr != 1) {
 		fail("ServerAuth rejected (cr=" + std::to_string(sa.cr) + ")");
 		return;
@@ -413,7 +414,8 @@ void ClientSession::on_server_protocol_message(const std::vector<uint8_t> &body,
 	ProtocolPacketHeader hdr;
 	std::vector<ProtocolMessage> messages;
 	// Lobby recv: decrypt inbound 0x83 with the server's SCRK; deframe latches seq_.last_inbound_seq.
-	if (!deframe_session_packet(seq_, SessionCrypto{{}, server_scrk_, 0}, body.data(), body.size(), hdr,
+	if (!deframe_session_packet(seq_, SessionCrypto{{}, server_scrk_, 0, cfg_.client_key},
+	                            body.data(), body.size(), hdr,
 	                            messages)) {
 		fail("bad 0x83 protocol packet");
 		return;
@@ -496,12 +498,10 @@ std::vector<uint8_t> ClientSession::build_heartbeat() {
 }
 
 std::vector<uint8_t> ClientSession::build_goodbye() {
-	std::vector<uint8_t> body(4);
-	const uint32_t ci = cfg_.client_index;
-	body[0] = static_cast<uint8_t>(ci & 0xFFu);
-	body[1] = static_cast<uint8_t>((ci >> 8) & 0xFFu);
-	body[2] = static_cast<uint8_t>((ci >> 16) & 0xFFu);
-	body[3] = static_cast<uint8_t>((ci >> 24) & 0xFFu);
+	// The leading dword is the receiver's local session key (ServerAuth.SK),
+	// followed by retail's zeroed disconnect-stat TLVs. CI is not part of this
+	// packet and using it makes a keyed receiver reject the leave.
+	std::vector<uint8_t> body = client_goodbye_to_bytes(server_sk_);
 	state_ = State::Closed;
 	return encode_session_outbound(SESSION_OPCODE_CLIENT_GOODBYE, std::move(body));
 }

@@ -111,7 +111,17 @@ public:
 	const ThreediModelIR &native_ir() const { return ir; }
 
 	Error open_file(const String &p_path);
-	Error open_from_resource_root(const Ref<NovaResourceRoot> &p_resource_root, const String &p_name);
+	// Mounted .3DI loads also feed the retail-compatible network challenge registry.
+	// Foliage definitions pass false: retail marks their shared model-def node and
+	// excludes it from the snapshot built for C2S 0x3D.
+	Error open_from_resource_root(const Ref<NovaResourceRoot> &p_resource_root,
+			const String &p_name, bool p_include_in_network_challenge = true);
+	// A renderer mesh-cache hit is still a logical model-definition load in the
+	// new mission generation. Recreate retail's sticky foliage mark without
+	// reparsing/rebuilding the cached .3DI.
+	static void mark_cached_network_challenge_foliage_model(const String &p_name);
+	static void reset_network_challenge_model_registry();
+	static int64_t network_challenge_model_count();
 	Error save_project_to_dir(const String &p_dir_path);
 	Error export_3di_to_dir(const String &p_dir_path, int p_update_mask = 0);
 	void reset_empty(const String &p_name = "untitled");

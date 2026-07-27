@@ -113,6 +113,12 @@ public:
     std::vector<VfsFileLocation> list_files() const;
 
     const std::string &game_root() const;     // root passed to mount_game ("" if unset)
+    // The expansion whose layers ACTUALLY mounted, not the one that was requested. Because
+    // mount_game silently falls back to base-game mounting for a missing/unknown expansion,
+    // a caller that must not run on the wrong data set (the LAN joiner reconciling against
+    // the host's authoritative expansion — D-NET-178) cannot read the request back as proof;
+    // this reports the truth. Empty = base game, including after a fallback.
+    const std::string &mounted_expansion() const;
     const std::string &last_error() const;
 
 private:

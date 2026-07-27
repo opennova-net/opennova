@@ -133,6 +133,74 @@ class FakeModel:
 		phases.append([channel, phase])
 
 
+class FireAudioStub:
+	extends RefCounted
+	var calls: Array = []
+
+	func fire_soundset(set_name: String, world_pos: Vector3,
+			source_bms_id: int = 0) -> bool:
+		calls.append({
+			"set": set_name,
+			"pos": world_pos,
+			"source_bms_id": source_bms_id,
+		})
+		return true
+
+	func slot_soundset(_set_name: String, _world_pos: Vector3,
+			_exclusive_key: String = "") -> bool:
+		return true
+
+
+class CatchupEffectAnchorHost:
+	extends RefCounted
+	var anchors: Dictionary = {}
+
+	func register_effect_anchor(owner_key: Variant, resolver: Callable) -> void:
+		anchors[owner_key] = resolver
+
+	func unregister_effect_anchor(owner_key: Variant) -> void:
+		anchors.erase(owner_key)
+
+
+class CatchupEffectWorld:
+	extends RefCounted
+	var anchor_host: CatchupEffectAnchorHost
+	var owner_key: Variant
+	var group_live := false
+	var spawn_count := 0
+	var fixed_advance_count := 0
+	var active_tick_numbers: Array[int] = []
+	var active_poses: Array[Transform3D] = []
+	var stops_after_advance: Array[int] = []
+
+	func _init(host: CatchupEffectAnchorHost) -> void:
+		anchor_host = host
+
+	func spawn_effect_owned_request(key: Variant, _name: String,
+			_position: Vector3, _orientation: Vector3) -> Dictionary:
+		owner_key = key
+		group_live = true
+		spawn_count += 1
+		return {"spawned": true, "effect_handle": 1, "group_id": 91}
+
+	func stop_group(group_id: int) -> void:
+		assert(group_id == 91)
+		group_live = false
+		stops_after_advance.append(fixed_advance_count)
+
+	func advance_fixed_tick(_delta: float) -> void:
+		fixed_advance_count += 1
+		if not group_live:
+			return
+		var resolver: Variant = anchor_host.anchors.get(owner_key)
+		if not (resolver is Callable) or not (resolver as Callable).is_valid():
+			return
+		var pose: Variant = (resolver as Callable).call()
+		if pose is Transform3D:
+			active_tick_numbers.append(fixed_advance_count)
+			active_poses.append(pose)
+
+
 # Build a one-organic mission + a container holding one fake node tagged to match it by (kind,index)
 # (the in-memory mission has bms_id 0, so the present index resolves by the fallback key).
 func _make_world(authored: Transform3D) -> Dictionary:
@@ -159,6 +227,91 @@ func test_setup_promotes_and_counts() -> void:
 	assert_eq(count, 2, "one organic + the auto-spawned host player")
 	assert_not_null(rt.get_sim(), "sim created")
 	assert_eq(rt.entity_count(), 2)
+
+
+# The world tick is the ONLY pump for the session socket, so the Play/Step/Stop
+# transport must not be able to halt a live net session: the F3 overlay ships in
+# the game shell, and a paused joiner (or a stopped listen host) starves the
+# uplink until the peer reaps at cs_dir0.timeout_ms = 120000
+# [orig: CNapiNetwork_Init @0x4ca4a0]. A single-player runtime keeps the
+# editor/preview transport it has always had.
+func test_transport_is_locked_out_of_a_live_net_session() -> void:
+	var w := _make_world(Transform3D.IDENTITY)
+	var joiner := NovaSimulation.new()
+	assert_true(joiner.enable_join("127.0.0.1", 9, "TransportLockJoiner"))
+	var rt := MissionRuntime.new()
+	add_child_autofree(rt)
+	assert_gt(int(rt.setup(w.mission, w.container, {
+		"simulation": joiner,
+		"net_transport": "lan-join",
+	})), 0)
+
+	assert_true(rt.is_transport_locked(), "a joiner runtime reports a locked transport")
+	rt.play()
+	assert_true(rt.is_playing(), "play still starts the session ticking")
+	rt.pause()
+	assert_true(rt.is_playing(), "F3 Pause cannot silence a live joiner's socket")
+	rt.step_once()
+	assert_true(rt.is_playing(), "F3 Step cannot drop a live joiner out of the tick loop")
+	rt.stop()
+	assert_true(rt.is_playing(), "F3 Stop cannot rewind the world under a live peer")
+
+
+func test_transport_still_works_without_a_net_session() -> void:
+	var w := _make_world(Transform3D.IDENTITY)
+	var rt := MissionRuntime.new()
+	add_child_autofree(rt)
+	assert_gt(int(rt.setup(w.mission, w.container)), 0)
+	# P7 stands every preview up as an in-process listen server, but with no bound
+	# socket and no peers it is not a live net session and keeps its transport.
+	assert_false(rt.is_transport_locked(),
+			"a local preview is not a live net session")
+	rt.play()
+	assert_true(rt.is_playing())
+	rt.pause()
+	assert_false(rt.is_playing(), "the editor/preview transport still pauses")
+
+
+func test_joiner_runtime_owns_fire_and_throwable_presenters() -> void:
+	# Joiner S2C tag-2 descriptors append to the visual RoundSim's fired queue
+	# and may carry a flying throwable TrcrID. MissionRuntime must own both
+	# consumers on the joiner just as it does on the host. A pre-connected sim
+	# pins the real production setup branch without requiring a live peer.
+	var w := _make_world(Transform3D.IDENTITY)
+	var joiner := NovaSimulation.new()
+	assert_true(joiner.enable_join("127.0.0.1", 9, "PresentJoiner"))
+	var audio := FireAudioStub.new()
+	var rt := MissionRuntime.new()
+	add_child_autofree(rt)
+	assert_gt(int(rt.setup(w.mission, w.container, {
+		"simulation": joiner,
+		"net_transport": "lan-join",
+		"fire_audio": func(): return audio,
+	})), 0)
+
+	var fire_stats := rt.get_fire_present_stats()
+	assert_true(fire_stats.has("fires"),
+			"the joiner constructs the fire queue consumer")
+	var throwable_stats := rt.get_throwable_present_stats()
+	assert_not_null(throwable_stats,
+			"the joiner constructs the flying-throwable snapshot consumer")
+	assert_eq(throwable_stats.live, 0)
+
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
+			"res://../fixtures/def")), OK)
+	assert_eq(rt.get_sim().load_ammo_table(root, "ammo.def"), OK)
+	for _frame in range(64):
+		assert_gte(rt.get_sim().debug_spawn_round(
+				Vector3(0, 2, 0), Vector3.FORWARD,
+				"AMMO_CAR15_556MM"), 0)
+		assert_true(rt.tick())
+		assert_true(rt.get_sim().drain_fire_presentation_events().is_empty(),
+				"the runtime drained the complete fire queue this frame")
+
+	assert_eq(audio.calls.size(), 64,
+			"each remote-style round reaches the joiner's fire presenter once")
+	assert_eq(int(rt.get_fire_present_stats()["fires"]), 64)
 
 
 func test_wire_presenter_resets_with_runtime_stop() -> void:
@@ -359,6 +512,66 @@ func test_catchup_exposes_each_fixed_ticks_pose_before_batched_presentation() ->
 	assert_true((w.model as Node3D).global_position.is_equal_approx(
 			final_effect_pose.origin),
 			"the one final Node presentation matches the last fixed-tick value")
+
+
+func test_catchup_advances_round_move_effect_at_each_live_pose_and_stops_before_expiry() -> void:
+	# The scene-node present stays batched, but a round-bound effects_table move
+	# group is part of the fixed-tick particle simulation. A four-second
+	# flashbang exercises the same attached-effect path as the smoke grenade in
+	# a short, production-authored lifetime.
+	var w := _make_world(Transform3D.IDENTITY)
+	var anchor_host := CatchupEffectAnchorHost.new()
+	var effect_world := CatchupEffectWorld.new(anchor_host)
+	var rt := MissionRuntime.new()
+	add_child_autofree(rt)
+	rt.setup(w.mission, w.container, {
+		"fire_fx": func() -> Variant: return effect_world,
+		"game_world": anchor_host,
+	})
+	var def_root := NovaResourceRoot.new()
+	def_root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/def"))
+	assert_eq(rt.get_sim().load_ammo_table(def_root, "ammo.def"), OK)
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/items.def")), OK)
+	rt.get_sim().resolve_item_traits(item_db)
+	assert_gte(rt.get_sim().debug_spawn_round(
+			Vector3(100, 100, 100), Vector3.RIGHT, "grenadefb"), 0)
+	rt.fixed_tick_completed.connect(func(_logic_tick: int) -> void:
+		effect_world.advance_fixed_tick(MissionRuntime.TICK_DT)
+	)
+	rt.play()
+
+	assert_eq(rt.tick_realtime(0.05), 3,
+			"one render frame catches up the first three round ticks")
+	assert_eq(effect_world.spawn_count, 1,
+			"the attached move group exists before its first particle advance")
+	assert_eq(effect_world.active_tick_numbers, [1, 2, 3],
+			"every birth-batch fixed tick advances the live group")
+	assert_eq(effect_world.active_poses.size(), 3)
+	if effect_world.active_poses.size() == 3:
+		assert_false(effect_world.active_poses[0].origin.is_equal_approx(
+				effect_world.active_poses[1].origin),
+				"the second emission sees the second simulated round pose")
+		assert_false(effect_world.active_poses[1].origin.is_equal_approx(
+				effect_world.active_poses[2].origin),
+				"catch-up does not emit repeatedly from the frame-start pose")
+
+	# max_age 4 parses to 248 fixed ticks. Stop at age 240, then expire eight
+	# ticks into a twelve-tick catch-up batch: advances 248..252 must observe no
+	# live group, rather than emitting five stale ticks until final presentation.
+	for _batch in range(7):
+		assert_eq(rt.tick_realtime(31.0 * MissionRuntime.TICK_DT), 31)
+	assert_eq(rt.tick_realtime(20.0 * MissionRuntime.TICK_DT), 20)
+	assert_eq(effect_world.fixed_advance_count, 240)
+	assert_eq(rt.tick_realtime(12.0 * MissionRuntime.TICK_DT), 12)
+	assert_eq(effect_world.fixed_advance_count, 252)
+	assert_eq(effect_world.active_tick_numbers.size(), 247,
+			"the group advances exactly while the round is alive")
+	assert_eq(effect_world.active_tick_numbers[-1], 247,
+			"the expiry tick never advances a released round effect")
+	assert_eq(effect_world.stops_after_advance, [247],
+			"release happens before fixed advance 248, inside the catch-up batch")
 
 
 func test_tick_realtime_drains_effects_per_tick() -> void:

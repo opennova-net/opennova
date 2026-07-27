@@ -339,6 +339,10 @@ const std::string &ResourceIndex::root_dir() const {
 	return impl_->root_dir;
 }
 
+const std::string &ResourceIndex::mounted_expansion() const {
+	return impl_->vfs.mounted_expansion();
+}
+
 const std::string &ResourceIndex::last_error() const {
 	return impl_->last_error;
 }

@@ -2,6 +2,7 @@
 
 #include "server_config.h"
 
+#include <net_datagram_socket.h>
 #include <net_sockets.h>
 #include <napi/envelope.h>
 #include <napi/tlv.h>
@@ -9,8 +10,6 @@
 #include <novaworld/connection/manager.h>
 #include <novaworld/db/sqlite.h>
 #include <novaworld/host_repository.h>
-#include <npwire/ingame_decode.h> // OrganicSpawnBatch/Record
-#include <npwire/ingame_encode.h> // encode_organic_spawn_batch
 #include <novaworld/lobby_session.h>
 #include <npwire/nw_session_framing.h>
 #include <npwire/protocol_message.h>
@@ -19,9 +18,16 @@
 #include <novaworld/session_protocol.h>
 #include <novaworld/unknown_tracker.h>
 
+#include <mission/bms.h>
+#include <world/ai.h>
+#include <world/entity.h>
+#include <world/world.h>
+
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <deque>
 #include <exception>
 #include <mutex>
 #include <random>
@@ -114,14 +120,136 @@ NapiMessage make_server_verify_failure(const std::string &message) {
 	return reply;
 }
 
+// The shared HostOwner pump expects sole ownership of an IDatagramSocket's
+// receive stream. This listener also serves lobby traffic on the same OS
+// socket, so demultiplexed JO datagrams are queued here while sends go
+// straight back through that socket.
+class QueuedJoSocket final : public netsim::IDatagramSocket {
+public:
+	explicit QueuedJoSocket(opennova::net::Socket &socket) : sender_(socket) {}
+
+	void push(const PeerAddr &peer, const uint8_t *data, std::size_t size) {
+		Pending item;
+		item.peer = peer;
+		item.bytes.assign(data, data + size);
+		pending_.push_back(std::move(item));
+	}
+
+	int recv_from(uint8_t *data, std::size_t capacity, PeerAddr &peer) override {
+		if (pending_.empty()) return 0;
+		Pending item = std::move(pending_.front());
+		pending_.pop_front();
+		if (item.bytes.size() > capacity) return -1;
+		peer = item.peer;
+		std::memcpy(data, item.bytes.data(), item.bytes.size());
+		return static_cast<int>(item.bytes.size());
+	}
+
+	void send_to(const PeerAddr &peer, const uint8_t *data, std::size_t size) override {
+		sender_.send_to(peer, data, size);
+	}
+
+private:
+	struct Pending {
+		PeerAddr peer{};
+		std::vector<uint8_t> bytes;
+	};
+
+	opennova::net::NetDatagramSocket sender_;
+	std::deque<Pending> pending_;
+};
+
 } // namespace
 
 NwUdpListener::NwUdpListener(ConnectionManager &manager) : manager_(manager) {}
 
 NwUdpListener::~NwUdpListener() { stop(); }
 
+void NwUdpListener::initialize_jo_host() {
+	jo_ai_ = std::make_unique<world::AiSystem>();
+	jo_world_ = std::make_unique<world::World>();
+	jo_world_->ai = jo_ai_.get();
+	jo_world_->registry.configure_pool(0, 64);
+	jo_world_->registry.configure_pool(3, 4);
+
+	// A loaded mission normally supplies this marker. The standalone gate has
+	// no mission path, so its minimal authoritative world uses the spawn
+	// pipeline's ordinary start-marker input at the origin.
+	world::Entity start;
+	start.kind = world::EntityKind::Marker;
+	start.item_id = 6002;
+	jo_world_->registry.spawn(3, start);
+
+	jo_mission_ = std::make_unique<bms::File>();
+	jo_mission_->header.magic[0] = 'B';
+	jo_mission_->header.magic[1] = 'M';
+	jo_mission_->header.magic[2] = 'S';
+	jo_mission_->header.magic[3] = static_cast<char>(bms::kMinVersion);
+
+	jo_owner_ = std::make_unique<np::HostOwner>();
+	jo_owner_->ctx.world = jo_world_.get();
+	jo_owner_->ctx.mission = jo_mission_.get();
+
+	np::HostConfig config;
+	config.config.server_name = "OpenNova";
+	config.config.max_players = 64;
+	config.socket_mode = np::SocketMode::Lan;
+	config.serve_and_play = false;
+	np::start_host_session(*jo_owner_, config);
+}
+
+void NwUdpListener::reset_per_run_state(const char *reason) {
+	// Retire every exact ConnectionManager address this listener admitted,
+	// including peers that stopped after a valid Hello and never reached Auth.
+	// The manager can be shared, so never sweep its full registry here.
+	// erase_lobby_state remains the fallback when no on_lost callback is
+	// installed.
+	std::vector<PeerAddr> lobby_peers;
+	{
+		std::lock_guard<std::mutex> lock(lobby_states_mu_);
+		lobby_peers.reserve(lobby_peers_.size());
+		for (const PeerAddr &peer : lobby_peers_) lobby_peers.push_back(peer);
+	}
+	for (const PeerAddr &peer : lobby_peers) {
+		manager_.notify_logout_addr(peer);
+		erase_lobby_state(peer, reason);
+	}
+	{
+		std::lock_guard<std::mutex> lock(lobby_states_mu_);
+		lobby_peers_.clear();
+		lobby_states_.clear();
+	}
+
+	jo_peers_.clear();
+	jo_owner_.reset();
+	jo_mission_.reset();
+	jo_world_.reset();
+	jo_ai_.reset();
+}
+
+void NwUdpListener::observe_jo_event(
+		void *context, const np::HostAcceptEvent &event) {
+	if (event.kind != np::HostAcceptEvent::Kind::PeerGoodbye) return;
+	auto &listener = *static_cast<NwUdpListener *>(context);
+	if (!listener.jo_owner_) {
+		listener.jo_peers_.erase(event.peer);
+		return;
+	}
+	// A changed ClientAuth can retire an old node and create its replacement
+	// in one HandleResult. Keep routing when that fresh connection exists.
+	const bool replacement_exists = std::any_of(
+			listener.jo_owner_->ctx.np_protocol.connection_list.begin(),
+			listener.jo_owner_->ctx.np_protocol.connection_list.end(),
+			[&event](const np::NapiNPConnection &connection) {
+				return connection.type == 1 && connection.peer == event.peer;
+			});
+	if (!replacement_exists) listener.jo_peers_.erase(event.peer);
+}
+
 bool NwUdpListener::start(const ServerConfig &config) {
 	if (running_.load()) return true;
+	if (worker_.joinable()) worker_.join();
+	reset_per_run_state("restart");
 
 	if (opennova::net::startup() != 0) {
 		std::fprintf(stderr, "[nwudp] net::startup failed\n");
@@ -139,16 +267,7 @@ bool NwUdpListener::start(const ServerConfig &config) {
 	bound_port_ = config.nw_udp_port;
 
 	stop_requested_.store(false);
-	// Bring up the World-less JO session-responder host (P0->P1->P2): HostOnly authority over the UDP
-	// socket, accepting JointOperations joins so a probing JO client gets the §5.1 handshake replies.
-	// No World => session responder only (no spawn). host_key stays 0 (unchecked). [orig: §5.0]
-	np::set_connection_mode(jo_ctx_, np::ConnectionMode::HostOnly);
-	np::set_transport_mode(jo_ctx_, np::SocketMode::Lan);
-	np::GameConfig jo_config;
-	jo_config.server_name = "OpenNova";
-	jo_config.max_players = 64; // accept many JO probes (npruntime capacity gate, D-NET-106)
-	np::create_session(jo_ctx_, jo_config, np::SessionStartup{}); // sets host_running (is_authority)
-	np::configure_session_runtime(jo_ctx_);
+	initialize_jo_host();
 	running_.store(true);
 	worker_ = std::thread([this] { run_loop(); });
 	std::printf("[nwudp] listening on UDP :%u\n",
@@ -159,9 +278,8 @@ bool NwUdpListener::start(const ServerConfig &config) {
 void NwUdpListener::stop() {
 	stop_requested_.store(true);
 	if (worker_.joinable()) worker_.join();
-	// The npruntime ctx owns no thread/socket (the worker above owns the socket), so there is no
-	// runtime to stop — dropping jo_ctx_ on destruction releases its connection state.
 	running_.store(false);
+	reset_per_run_state("listener-stop");
 }
 
 void NwUdpListener::erase_lobby_state(const PeerAddr &peer, const char *reason) {
@@ -169,6 +287,10 @@ void NwUdpListener::erase_lobby_state(const PeerAddr &peer, const char *reason) 
 	uint32_t rid = 0;
 	{
 		std::lock_guard<std::mutex> lk(lobby_states_mu_);
+		// This method is the ConnectionManager on_lost sink as well as the
+		// lobby-state cleanup hook. Forget ownership even for Hello-only peers,
+		// which intentionally have no LobbyConnState yet.
+		lobby_peers_.erase(peer);
 		auto it = lobby_states_.find(peer);
 		if (it == lobby_states_.end()) return;
 		was_hosting = it->second.lobby.hosting;
@@ -229,13 +351,46 @@ void NwUdpListener::run_loop() {
 		running_.store(false);
 		return;
 	}
+	QueuedJoSocket jo_socket(socket.get());
+	using PumpClock = std::chrono::steady_clock;
+	const auto pump_period = std::chrono::nanoseconds(1000000000LL / 62);
+	auto next_pump = PumpClock::now();
 
 	uint8_t rx[4096];
+	bool receive_batch_active = false;
 	while (!stop_requested_.load()) {
+		if (!receive_batch_active) {
+			const auto now = PumpClock::now();
+			if (now >= next_pump) {
+				if (jo_owner_) {
+					np::host_session_pump(
+							*jo_owner_, jo_socket, nullptr, nullptr,
+							&NwUdpListener::observe_jo_event, this);
+				}
+				do {
+					next_pump += pump_period;
+				} while (next_pump <= now);
+			}
+		}
+
 		opennova::net::Endpoint from{};
+		// Block for the first datagram of a receive batch, then switch to non-blocking reads until
+		// the OS FIFO is empty. That empty read is the same boundary where retail drains queued
+		// contiguous session packets and decides whether a surviving gap needs one 0x84.
+		// [orig: NapiNPProtocol_PumpRecvQueues @0x6266A0..0x6269D6]
+		const auto until_pump = std::chrono::duration_cast<std::chrono::milliseconds>(
+				next_pump - PumpClock::now()).count();
+		const int timeout_ms = receive_batch_active
+				? 0
+				: static_cast<int>(std::max<int64_t>(
+						1, std::min<int64_t>(16, until_pump + 1)));
 		const int n = opennova::net::udp_recv_from(socket.get(), rx, sizeof(rx),
-		                                           from, /*timeout_ms=*/250);
-		if (n <= 0) continue;
+		                                           from, timeout_ms);
+		if (n <= 0) {
+			receive_batch_active = false;
+			continue;
+		}
+		receive_batch_active = true;
 
 		uint8_t opcode = 0;
 		std::vector<uint8_t> body;
@@ -255,87 +410,20 @@ void NwUdpListener::run_loop() {
 		              from.ip[0], from.ip[1], from.ip[2], from.ip[3]);
 		const std::string client_ip_str = ip_only_buf;
 
-		// JointOperations in-match join → the World-less npruntime session-responder ctx
-		// (np::handle_server_datagram — the same legs the in-engine listen server drives). PN is
-		// learned at HELLO; thereafter route 0x42/0x43/0x46 by membership so the lobby (NOVAWORLDUDP)
-		// container path below only ever sees lobby peers. jo_ctx_ owns these peers' handshake/SCRK
-		// state + the §5.1 reply config; with no World it answers the handshake but never drives a
-		// spawn (PeerSpawned does not surface) — the standalone server is a session responder, not a
-		// live-sim host.
+		// Demultiplex JO onto the shared authoritative host pump. A route is
+		// installed only for the complete retail JO Hello identity; subsequent
+		// opcodes stay on that route so the lobby path never sees game SCRKs.
 		bool route_jo = jo_peers_.count(peer) != 0;
 		if (opcode == SESSION_OPCODE_CLIENT_HELLO) {
 			ClientHello probe;
 			if (parse_client_hello(body.data(), body.size(), probe) &&
-			    classify_session_protocol(probe.pn) ==
-			            SessionProtocolKind::JointOperations) {
+			    matches_jointoperations_identity(probe)) {
 				route_jo = true;
 				jo_peers_.insert(peer);
 			}
 		}
-		if (route_jo) {
-			manager_.notify_seen_addr(peer, now_ms());
-			auto result = np::handle_server_datagram(
-			        jo_ctx_, peer, rx, static_cast<size_t>(n),
-			        static_cast<uint32_t>(now_ms() & 0xFFFFFFFFu));
-			for (const auto &dg : result.outbound) {
-				opennova::net::udp_send_to(socket.get(), from, dg.data(), dg.size());
-			}
-			// React to the host-accept events (the in-engine listen server does
-			// this in NovaSimulation::host_net_poll; the standalone server used to
-			// DISCARD them, so the joiner never got a named, dcb-bearing 0x0C and
-			// the retail client fatal'd in Player_FindLocalPlayerEntity @0x4e0090).
-			// We have no World, so we don't admit_peer into a sim — we only stream
-			// the one S2C 0x0C organic-spawn the client needs to self-identify.
-			for (const auto &ev : result.events) {
-				if (ev.kind == np::HostAcceptEvent::Kind::PeerGoodbye) {
-					jo_spawns_.erase(peer);
-					continue;
-				}
-				if (ev.kind != np::HostAcceptEvent::Kind::PeerSpawned) continue;
-				JoPeerSpawn &js = jo_spawns_[peer];
-				if (js.announced) continue; // once per peer
-				js.announced = true;
-				// dcb = the joiner's own ConnectionId (unk_18) it reported in the
-				// lobby ClientPlayerEnterRequest, correlated by its game port; else
-				// a join-order fallback (host/server reserves 0).
-				{
-					std::lock_guard<std::mutex> lk(lobby_states_mu_);
-					auto it = dcb_by_game_port_.find(peer.port);
-					js.dcb = (it != dcb_by_game_port_.end()) ? it->second
-					                                          : next_jo_dcb_++;
-				}
-				js.slot = next_jo_slot_++; // pool-0 wire handle H
-
-				opennova::OrganicSpawnBatch batch;
-				batch.entity_count = 1;
-				opennova::OrganicSpawnRecord rec;
-				rec.slot_id = js.slot;          // pool 0, slot js.slot -> H
-				rec.has_body = true;
-				rec.item_type_id = 0x14B9;      // player infantry template
-				rec.entity_name = ev.peer_name; // joiner's ClientHello.co
-				rec.entity_flags = js.dcb;      // entity+0x78 == its connection+0x18
-				rec.minimap_flags = 0x100;      // entity+0x36 local-player/minimap bit
-				rec.pos_x = ev.pose.pos_x;
-				rec.pos_y = ev.pose.pos_y;
-				rec.pos_z = ev.pose.pos_z;
-				rec.orientation = static_cast<int32_t>(ev.pose.heading) << 16;
-				rec.team = ev.pose.team;
-				rec.net_id = static_cast<uint16_t>(0x0200u + js.slot);
-				batch.records.push_back(rec);
-
-				std::vector<uint8_t> dg;
-				if (np::frame_in_match_s2c(
-				        jo_ctx_, peer, 0x0C, opennova::encode_organic_spawn_batch(batch), dg)) {
-					opennova::net::udp_send_to(socket.get(), from, dg.data(), dg.size());
-					std::printf("[nwudp] %s spawned -> 0x0C dcb=%u slot=%u name=%s\n",
-					            client_label.c_str(), js.dcb, js.slot,
-					            ev.peer_name.c_str());
-				}
-			}
-			if (opcode == SESSION_OPCODE_CLIENT_GOODBYE) {
-				jo_peers_.erase(peer);
-				jo_spawns_.erase(peer);
-			}
+		if (route_jo && jo_owner_) {
+			jo_socket.push(peer, rx, static_cast<std::size_t>(n));
 			continue;
 		}
 
@@ -359,12 +447,20 @@ void NwUdpListener::run_loop() {
 			}
 			Connection conn;
 			conn.id = hello.ci;
+			conn.reported_id = hello.ci;
 			conn.addr = peer;
 			conn.state = ConnectionState::Handshaking;
 			conn.created_ms = now_ms();
 			conn.last_seen_ms = conn.created_ms;
 			conn.pn = hello.pn;
 			manager_.notify_handshake(conn);
+			{
+				// Insert after notify_handshake: a replacement Hello can fire
+				// on_lost synchronously for the prior occupant, whose cleanup
+				// removes the old ownership record.
+				std::lock_guard<std::mutex> lk(lobby_states_mu_);
+				lobby_peers_.insert(peer);
+			}
 
 			ServerHello reply = build_server_hello(hello, client_ip_net,
 			                                       client_port);
@@ -385,6 +481,71 @@ void NwUdpListener::run_loop() {
 				             client_label.c_str());
 				break;
 			}
+			// Lobby Auth is not stateless. It belongs only to the exact
+			// ClientHello-owned address/CI/protocol row created above. Without
+			// this gate, a direct 0x42 minted ServerAuth and LobbyConnState even
+			// though mark_active_by_addr had no manager row to promote; that
+			// zombie state could neither accept SESSION nor expire.
+			const std::optional<Connection> hello_owner =
+					manager_.registry().find_by_addr(peer);
+			const bool hello_identity_matches =
+					hello_owner.has_value() &&
+					hello_owner->reported_id == auth.ci &&
+					hello_owner->pn == auth.pn &&
+					classify_session_protocol(hello_owner->pn) ==
+							SessionProtocolKind::Lobby;
+			// Pre-session reliability is byte-for-byte retransmission. Once a
+			// ClientAuth has minted this endpoint's session material, an exact
+			// repeat must replay the same ServerAuth without disturbing lobby,
+			// sequence, or reassembly state. In particular, a delayed first
+			// 0x82 remains safe for the client to accept after this retry.
+			std::vector<uint8_t> cached_server_auth;
+			std::string cached_server_scrk;
+			{
+				std::lock_guard<std::mutex> lk(lobby_states_mu_);
+				const auto it = lobby_states_.find(peer);
+				if (it != lobby_states_.end() &&
+				    it->second.client_ci == auth.ci &&
+				    it->second.client_ck == auth.ck &&
+				    it->second.client_auth_body == body &&
+				    !it->second.server_auth_datagram.empty()) {
+					cached_server_auth = it->second.server_auth_datagram;
+					cached_server_scrk = it->second.server_scrk;
+				}
+			}
+			if (hello_identity_matches && !cached_server_auth.empty()) {
+				// ClientHello may have reinserted this address as Handshaking,
+				// so restore the same cached keys in the registry as well.
+				manager_.notify_active_addr(
+						peer, /*identity=*/auth.na,
+						/*client_scrk=*/auth.scrk,
+						/*server_scrk=*/cached_server_scrk);
+				manager_.notify_seen_addr(peer, now_ms());
+				opennova::net::udp_send_to(
+						socket.get(), from, cached_server_auth.data(),
+						cached_server_auth.size());
+				std::printf(
+						"[nwudp] AUTH retry from %s ci=0x%08x ck=0x%08x"
+						" -> cached ServerAuth (%zu B)\n",
+						client_label.c_str(), auth.ci, auth.ck,
+						cached_server_auth.size());
+				break;
+			}
+
+			if (!hello_identity_matches ||
+			    hello_owner->state != ConnectionState::Handshaking) {
+				std::printf(
+						"[nwudp] AUTH without matching lobby Hello from %s"
+						" ci=0x%08x pn=%s; dropped\n",
+						client_label.c_str(), auth.ci, auth.pn.c_str());
+				break;
+			}
+
+			// Any non-identical auth for this endpoint is a new logical
+			// connection. Retire its prior lobby/DB state before installing a
+			// fresh key set and fresh sequence frontier.
+			erase_lobby_state(peer, "reauth");
+
 			const std::string server_scrk = make_dev_scrk();
 			const std::string nwuid = make_dev_nwuid();
 			// auth.scrk is the CLIENT-generated session key — store it for
@@ -398,14 +559,6 @@ void NwUdpListener::run_loop() {
 			// connection record onto instance 2's, so subsequent
 			// find_by_addr(instance_1) returned instance 2's scrk and
 			// retail #1 got "INCOMING PACKET ERROR" on every reply.
-			manager_.notify_active_addr(peer, /*identity*/ auth.na,
-			                            /*client_scrk=*/auth.scrk,
-			                            /*server_scrk=*/server_scrk);
-			manager_.notify_seen_addr(peer, now_ms());
-
-			std::printf("[nwudp] AUTH scrks: client_scrk=%zuB server_scrk=%zuB ck=0x%08x\n",
-			            auth.scrk.size(), server_scrk.size(), auth.ck);
-
 			// Stash the client's CK + our generated server SK in the
 			// per-connection lobby state. CK feeds outbound SESSION headers
 			// (retail's validator wants session_id == its own local_key ==
@@ -417,13 +570,6 @@ void NwUdpListener::run_loop() {
 			// ci=0x00000001, so keying by ci would have the second AUTH
 			// overwrite the first's per-connection state.
 			const uint32_t server_sk = make_random_session_u32();
-			{
-				std::lock_guard<std::mutex> lk(lobby_states_mu_);
-				auto &state = lobby_states_[peer];
-				state.client_ck = auth.ck;
-				state.server_sk = server_sk;
-			}
-
 			ServerAuth reply = build_server_auth(auth, client_ip_net,
 			                                     client_port, server_sk,
 			                                     server_scrk,
@@ -432,6 +578,27 @@ void NwUdpListener::run_loop() {
 			                                     /*nwuid=*/nwuid);
 			auto packet = nw_encode_outbound(SESSION_OPCODE_SERVER_AUTH,
 			                                 server_auth_to_bytes(reply));
+			{
+				std::lock_guard<std::mutex> lk(lobby_states_mu_);
+				LobbyConnState state;
+				state.client_ci = auth.ci;
+				state.client_ck = auth.ck;
+				state.server_sk = server_sk;
+				state.client_auth_body = body;
+				state.server_scrk = server_scrk;
+				state.server_auth_datagram = packet;
+				// Auth is still lobby-routed even if a client skipped/reordered
+				// Hello. Preserve the teardown invariant for every state entry.
+				lobby_peers_.insert(peer);
+				lobby_states_[peer] = std::move(state);
+			}
+			manager_.notify_active_addr(peer, /*identity*/ auth.na,
+			                            /*client_scrk=*/auth.scrk,
+			                            /*server_scrk=*/server_scrk);
+			manager_.notify_seen_addr(peer, now_ms());
+
+			std::printf("[nwudp] AUTH scrks: client_scrk=%zuB server_scrk=%zuB ck=0x%08x\n",
+			            auth.scrk.size(), server_scrk.size(), auth.ck);
 			opennova::net::udp_send_to(socket.get(), from, packet.data(),
 			                           packet.size());
 			std::printf("[nwudp] AUTH from %s ci=0x%08x na='%s' -> ServerAuth (%zu B)\n",
@@ -441,8 +608,6 @@ void NwUdpListener::run_loop() {
 		}
 
 		case SESSION_OPCODE_PROTOCOL_MESSAGE: {
-			manager_.notify_seen_addr(peer, now_ms());
-
 			auto conn_opt = manager_.registry().find_by_addr(peer);
 			if (!conn_opt || conn_opt->client_scrk.empty()) {
 				// SESSION before AUTH completed — drop quietly.
@@ -456,17 +621,13 @@ void NwUdpListener::run_loop() {
 			            conn_opt->client_scrk.size());
 
 			ProtocolPacketHeader hdr;
-			std::vector<ProtocolMessage> messages;
-			if (!decode_protocol_packet_plaintext(body.data(), body.size(),
-			                                      conn_opt->client_scrk, hdr, messages)) {
+			if (!parse_protocol_packet_header(body.data(), body.size(), hdr)) {
 				std::fprintf(stderr, "[nwudp] %s — bad SESSION envelope\n",
 				             client_label.c_str());
 				break;
 			}
-			std::printf("[nwudp]   hdr.session_id=0x%08x seq=%u ack=%u messages=%zu\n",
-			            hdr.session_id, hdr.seq_num, hdr.ack_count, messages.size());
 
-			// Look up (or create) per-connection lobby state, keyed by the
+			// Look up the AUTH-created per-connection lobby state, keyed by the
 			// peer address (NOT ClientHello.ci — both retail processes send
 			// ci=0x00000001 so keying by ci aliased their state, see G.7).
 			// Hold the lock for the WHOLE dispatch — the HTTP thread's
@@ -474,12 +635,45 @@ void NwUdpListener::run_loop() {
 			// std::map fields), and a race against the dispatch's writes
 			// manifests as a SIGSEGV on /api/hosts under load (2026-04-28).
 			std::lock_guard<std::mutex> dispatch_lk(lobby_states_mu_);
-			auto &lobby_state = lobby_states_[peer];
-			lobby_state.last_inbound_seq = hdr.seq_num;
+			auto lobby_it = lobby_states_.find(peer);
+			if (lobby_it == lobby_states_.end()) {
+				std::printf("[nwudp] SESSION without lobby auth state from %s; dropped\n",
+				            client_label.c_str());
+				break;
+			}
+			auto &lobby_state = lobby_it->second;
+			// Inbound SESSION addresses our receiver-local key, the SK we
+			// advertised in ServerAuth. Reject a foreign/stale connection
+			// before sequence, reassembly, or lobby state can advance.
+			if (hdr.session_id != lobby_state.server_sk) {
+				std::printf(
+						"[nwudp] SESSION key mismatch from %s got=0x%08x expected=0x%08x; dropped\n",
+						client_label.c_str(), hdr.session_id, lobby_state.server_sk);
+				break;
+			}
+			std::vector<ProtocolMessage> messages;
+			SessionDeframeAdmission admission;
+			if (!deframe_session_packet(
+					lobby_state.sequencing,
+					SessionCrypto{{}, conn_opt->client_scrk, 0,
+					              lobby_state.server_sk},
+					body.data(), body.size(), hdr, messages, &admission)) {
+				std::fprintf(stderr, "[nwudp] %s — bad SESSION envelope\n",
+				             client_label.c_str());
+				break;
+			}
+			// Only a receiver-key-valid, successfully authenticated SESSION is
+			// activity on this connection. Correct-key stale/duplicate packets
+			// still count, but a prior endpoint occupant cannot extend liveness.
+			manager_.notify_seen_addr(peer, now_ms());
+			std::printf(
+					"[nwudp]   hdr.session_id=0x%08x seq=%u ack=%u admitted=%d messages=%zu\n",
+					hdr.session_id, hdr.seq_num, hdr.ack_count,
+					admission.admitted ? 1 : 0, messages.size());
 
 			std::vector<ProtocolMessage> replies;
 			const SessionProtocolKind protocol = classify_session_protocol(conn_opt->pn);
-			// JointOperations peers are routed to the npruntime jo_ctx_ above and
+			// JointOperations peers are routed to the shared HostOwner above and
 			// never reach this switch — only the lobby (NOVAWORLDUDP) container
 			// path and unsupported PNs land here.
 			if (protocol == SessionProtocolKind::Lobby) {
@@ -549,19 +743,6 @@ void NwUdpListener::run_loop() {
 							result = lobby_session_.dispatch(outer, lobby_state.lobby,
 							                                client_ip_str, from.port);
 						}
-						// The joiner reported its own dcb (ConnectionId) + game port
-						// in ClientPlayerEnterRequest. Record it so the JO branch can
-						// stamp it into that peer's 0x0C entity_flags (correlate by the
-						// game PortNumber == the JO peer's UDP source port). Under
-						// lobby_states_mu_ (held here); the JO branch locks it to read.
-						if (result.has_player_enter && result.player_game_port != 0) {
-							dcb_by_game_port_[result.player_game_port] =
-								result.player_connection_id;
-							std::printf("[nwudp] player-enter dcb=%u game_port=%u ip=%s\n",
-							            result.player_connection_id,
-							            result.player_game_port,
-							            result.player_ip_field.c_str());
-						}
 						if (!result.label.empty()) {
 							std::printf("[nwudp] %s SESSION recv name=%s -> %zu replies\n",
 							            client_label.c_str(), result.label.c_str(),
@@ -616,8 +797,8 @@ void NwUdpListener::run_loop() {
 			// TOSS our reply with code [4] — confirmed via _connectlog.txt
 			// 2026-04-27.
 			rhdr.session_id = lobby_state.client_ck;
-			rhdr.seq_num = lobby_state.next_outbound_seq++;
-			rhdr.ack_count = lobby_state.last_inbound_seq;
+			rhdr.seq_num = lobby_state.sequencing.next_outbound_seq++;
+			rhdr.ack_count = lobby_state.sequencing.last_inbound_seq;
 			rhdr.connection_flags = 0;
 
 			std::vector<uint8_t> body_out;
@@ -635,14 +816,39 @@ void NwUdpListener::run_loop() {
 		}
 
 		case SESSION_OPCODE_CLIENT_GOODBYE: {
-			// Drop the entry on graceful exit. The 4-byte conn id sits at
-			// the head of the GoodBye payload (per onnet's nw_udp_server.py).
-			uint32_t ci = 0;
-			if (body.size() >= 4) {
-				std::memcpy(&ci, body.data(), 4); // little-endian
+			// The leading dword addresses this receiver by the per-peer SK
+			// advertised in ServerAuth. Trailing disconnect TLVs are lenient,
+			// but malformed and stale-key packets must not evict a live peer.
+			if (body.size() < 4) {
+				std::printf("[nwudp] malformed GOODBYE from %s; dropped\n",
+				            client_label.c_str());
+				break;
 			}
-			std::printf("[nwudp] GOODBYE from %s ci=0x%08x\n",
-			            client_label.c_str(), ci);
+			const uint32_t remote_key =
+					static_cast<uint32_t>(body[0]) |
+					(static_cast<uint32_t>(body[1]) << 8) |
+					(static_cast<uint32_t>(body[2]) << 16) |
+					(static_cast<uint32_t>(body[3]) << 24);
+			uint32_t expected_key = 0;
+			{
+				std::lock_guard<std::mutex> lk(lobby_states_mu_);
+				const auto it = lobby_states_.find(peer);
+				if (it == lobby_states_.end()) {
+					std::printf(
+							"[nwudp] GOODBYE without lobby auth state from %s; dropped\n",
+							client_label.c_str());
+					break;
+				}
+				expected_key = it->second.server_sk;
+			}
+			if (remote_key != expected_key) {
+				std::printf(
+						"[nwudp] GOODBYE key mismatch from %s got=0x%08x expected=0x%08x; dropped\n",
+						client_label.c_str(), remote_key, expected_key);
+				break;
+			}
+			std::printf("[nwudp] GOODBYE from %s sk=0x%08x\n",
+			            client_label.c_str(), remote_key);
 			// Addr-keyed (G.7): two retail processes both ship ci=1, so
 			// notify_logout(ci) would drop the wrong connection.
 			manager_.notify_logout_addr(peer);

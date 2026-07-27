@@ -78,7 +78,7 @@ struct HostAcceptEvent {
 	                                           // fails ("Could not find player dcb"). Witnessed:
 	                                           // working retail join ack==eFlags==3; a guess does not.
 	std::string peer_name;                     // valid for PeerEnteredWorldStreaming / PeerSpawned:
-	                                           // the joiner's ClientHello.co (player name), streamed
+	                                           // the joiner's game ClientAuth.NA callsign, streamed
 	                                           // back as the S2C 0x0C organic entity_name so the
 	                                           // joiner name-matches.
 	std::vector<ProtocolMessage> in_match_c2s; // valid when kind == PeerC2SInMatch
@@ -86,6 +86,10 @@ struct HostAcceptEvent {
 
 struct HandleResult {
 	std::vector<std::vector<uint8_t>> outbound; // fully-framed datagrams to send to `peer`
+	// When the host owner asks to defer an in-match reply, these ordinary ProtocolMessages are
+	// framed at the end of the same owner tick beside the per-frame transport output. This is the
+	// retail send-boundary batching seam (for example S2C 0x57 + 0x0A).
+	std::vector<ProtocolMessage>       deferred_session_replies;
 	std::vector<HostAcceptEvent>      events;
 };
 
@@ -111,7 +115,14 @@ void configure_session_runtime(NapiNPServerCtx &ctx);
 // still on). `now_tick` feeds the game-session tag clock. Returns the outbound datagrams to ship
 // back + events to react to. [orig: NapiNPConnection_ParseMessages @0x625BC0 / the accept switch]
 HandleResult handle_server_datagram(NapiNPServerCtx &ctx, const PeerAddr &peer,
-                                    const uint8_t *raw, std::size_t len, uint32_t now_tick = 0);
+                                    const uint8_t *raw, std::size_t len, uint32_t now_tick = 0,
+                                    bool defer_in_match_replies = false);
+
+// Finalize one host socket receive batch. Future packets latch a missing-sequence check while
+// handle_server_datagram drains; only here, after later datagrams could have closed the gap, does
+// the host emit one 0x84 per connection whose ordered queue is still nonempty.
+// [orig: recv latch in HandleSessionPacket @0x626A00; SendMissingSeqList @0x623560 after PumpRecv]
+std::vector<TickOut> flush_server_missing_requests(NapiNPServerCtx &ctx);
 
 // Drive the periodic emitter for every connection NOT yet Spawned (so entity_batch_count climbs and
 // the spawn gate opens) and frame each session's replies. PeerEnteredWorldStreaming surfaces here
@@ -123,6 +134,12 @@ std::vector<TickOut> tick_connections(NapiNPServerCtx &ctx, int elapsed_ms, uint
 // if the peer is unknown / pre-auth.
 bool frame_in_match_s2c(NapiNPServerCtx &ctx, const PeerAddr &peer, uint8_t inner_tag,
                         const std::vector<uint8_t> &inner_body, std::vector<uint8_t> &out_datagram);
+
+// Multi-message form used by the host owner to preserve one retail send boundary. The caller is
+// responsible for MTU-aware grouping; this advances the connection's sequence exactly once.
+bool frame_in_match_s2c_batch(NapiNPServerCtx &ctx, const PeerAddr &peer,
+                              const std::vector<ProtocolMessage> &messages,
+                              std::vector<uint8_t> &out_datagram);
 
 // P5 — the production PeerC2SInMatch consumer. Route each decoded in-match C2S 0x0C carried by a
 // PeerC2SInMatch `event` onto its owning connection's transport (ISessionTransport::deliver_c2s), so
@@ -144,7 +161,7 @@ bool bind_connection_player(NapiNPServerCtx &ctx, const PeerAddr &peer, uint8_t 
 // Owner-initiated eviction of `peer`'s connection node — the recv-timeout / dead-endpoint path where
 // no 0x46 ClientGoodbye ever arrives (a crashed or half-open peer would otherwise leak its
 // connection_list node and keep getting per-frame 0x0A framed to a dead address). Mirrors
-// handle_client_goodbye's teardown (erase the node) without emitting
+// handle_client_goodbye's complete player/entity/roster teardown without emitting
 // an event — the owner already knows it is dropping. The owner is responsible for releasing its own
 // (non-owning) transport for that peer. Returns true if a node was dropped. [orig: the timeout sweep
 // under NapiNPProtocol_DrainTimers feeds Nwu_HandleDisconnect @0x624250 the same teardown.]

@@ -56,6 +56,48 @@ func _combo(menu: Node, name: String) -> NovaMnuCombo:
 	return menu.find_child(name, true, false) as NovaMnuCombo
 
 
+func test_join_auth_profile_uses_retail_avatar_packing_and_defaults() -> void:
+	var db := _load_db()
+	var profile := GameWorld.character_join_profile_from_database(db)
+	var ids: Array = profile.get("character_ids", [])
+	var classes: Array = profile.get("player_classes", [])
+	var avatars: Array = profile.get("avatars", [])
+
+	assert_eq(ids, [0x0200, 0x8207],
+			"fresh profile selects the first good/evil Avatars.def entries")
+	assert_eq(classes, [8, 8],
+			"fresh retail profile is rifleman on both sides")
+	assert_eq(avatars, [1, 10],
+			"zero voice overrides resolve through each selected combo's head voice")
+	assert_eq(int(profile.get("team_request", 0)), -1,
+			"fresh profile asks the host to assign a side")
+
+
+func test_join_auth_profile_packs_the_selected_character_for_its_side() -> void:
+	var db := _load_db()
+	var selected := {
+		"team": 0,
+		"nationality": 0,
+		"division": 0,
+		"combo": 1,
+		"player_class": 6,
+	}
+	var profile := GameWorld.character_join_profile_from_database(db, selected)
+	var ids: Array = profile.get("character_ids", [])
+	var avatars: Array = profile.get("avatars", [])
+	var combo: Dictionary = db.get_combo(0, 0, 1)
+	var head: Dictionary = combo.get("head", {})
+
+	assert_eq(int(ids[0]), 0x0400,
+			"nat 0 / div 0 / combo id 2 packs into bits 0..14")
+	assert_eq(int(ids[1]), 0x8207,
+			"choosing side A does not erase side B's profile selection")
+	assert_eq(int(avatars[0]), int(head.get("voice", -1)),
+			"the selected combo supplies its retail avatar byte")
+	assert_eq(profile.get("player_classes", []), [6, 6],
+			"retail commits the chosen class to both side blocks")
+
+
 func test_owns_menu_detects_player_info() -> void:
 	var host := PlayerInfoMenuHost.new()
 	var menu := _make_menu()

@@ -1712,6 +1712,10 @@ add_test(NAME netsim_build_player_uplink COMMAND netsim_build_player_uplink_test
 # 0x0A tag-1 records (header-only no-callback vs vehicle/infantry compacts) and
 # outranks the 0x0D pool-blanket learner — a mis-sized record desyncs the frame and
 # scatters every later record around the recipient anchor.
+add_executable(netsim_client_view_arms_dip_test netsim/client_view_arms_dip_test.cpp)
+target_link_libraries(netsim_client_view_arms_dip_test PRIVATE opennova_netsim)
+add_test(NAME netsim_client_view_arms_dip COMMAND netsim_client_view_arms_dip_test)
+
 add_executable(netsim_client_view_class_resolver_test netsim/client_view_class_resolver_test.cpp)
 target_link_libraries(netsim_client_view_class_resolver_test PRIVATE opennova_netsim)
 add_test(NAME netsim_client_view_class_resolver COMMAND netsim_client_view_class_resolver_test)
@@ -1755,6 +1759,14 @@ target_link_libraries(npruntime_weapon_table_test
     PRIVATE opennova_npruntime opennova_world opennova_def)
 target_include_directories(npruntime_weapon_table_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_weapon_table COMMAND npruntime_weapon_table_test)
+
+# D-NET-168 / D-NET-176 / D-NET-177: the S2C 0x50 team-assign re-latch + 0x2F re-submit, the
+# C2S 0x32 -> S2C 0x5D empty-slot sweep (entity removal) vs the bookkeeping-only 0x46 bit15, and
+# the in-match session-loss surface [orig: @0x431910 / @0x51a600 + @0x429730 / @0x4ca4a0 -> @0x4c63d0].
+add_executable(npruntime_entity_lifecycle_net_test npruntime/entity_lifecycle_net_test.cpp)
+target_link_libraries(npruntime_entity_lifecycle_net_test
+    PRIVATE opennova_npruntime opennova_netsim opennova_novaworld opennova_world)
+add_test(NAME npruntime_entity_lifecycle_net COMMAND npruntime_entity_lifecycle_net_test)
 
 # D-NET-142: the C2S 0x25 reload-request relay — dispatch broadcasts S2C 0x49 onto every in-match
 # connection's transport (requester included) [orig: @0x514DF0 -> SendFiltered @0x4C87E0]; §5.58.
@@ -1838,6 +1850,32 @@ target_link_libraries(npruntime_client_runtime_test
     PRIVATE opennova_npruntime opennova_netsim opennova_world opennova_novaworld)
 add_test(NAME npruntime_client_runtime COMMAND npruntime_client_runtime_test)
 
+# Retail in-match loss recovery: future 0x43/0x83 packets trigger direction-specific 0x84/0x44
+# missing-sequence lists, and each endpoint reconstructs retained reliable records under the old
+# sequence with its current ACK. [orig: SendMissingSeqList @0x623560; HandleResendList @0x623800]
+add_executable(npruntime_session_resend_test npruntime/session_resend_test.cpp)
+target_link_libraries(npruntime_session_resend_test
+    PRIVATE opennova_npruntime opennova_netsim opennova_world opennova_novaworld)
+add_test(NAME npruntime_session_resend COMMAND npruntime_session_resend_test)
+
+# The host-initiated close (the connection-description record, settings flag + tag 3) pinned against
+# the 80 captured bytes of a live retail deploy-screen idle punt, plus the S2C 0x30/0x31 anti-cheat
+# CRC challenges a stock host streams at every joiner. [orig: Server_LogCRCMismatchPunt @0x517ed0 ->
+# NapiNPDataTransfer_SendDescription @0x628c80; CNapiNPConnection_HandleDescriptionPacket @0x621ae0;
+# NapiNPClientMsg_HandleChecksumRequest @0x431170; NapiNPClientMsg_0x031 @0x4311e0]
+add_executable(npruntime_host_punt_test npruntime/host_punt_test.cpp)
+target_link_libraries(npruntime_host_punt_test
+    PRIVATE opennova_npruntime opennova_netsim opennova_world)
+add_test(NAME npruntime_host_punt COMMAND npruntime_host_punt_test)
+
+# Loss-tolerant pre-session UDP join: dropped 0x41/0x42 datagrams are retried on the retail active
+# send interval without changing their wire bytes, and the retried legs complete against the real host.
+add_executable(npruntime_joiner_handshake_retry_test npruntime/joiner_handshake_retry_test.cpp)
+target_link_libraries(npruntime_joiner_handshake_retry_test
+    PRIVATE opennova_npruntime opennova_netsim opennova_world)
+target_include_directories(npruntime_joiner_handshake_retry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_joiner_handshake_retry COMMAND npruntime_joiner_handshake_retry_test)
+
 # P5 Level-3 golden — drive the REAL client emission path (np::JoinerConnection::frame_c2s_uplink via
 # client_runtime) seeded from the gameplay capture and assert the emitted C2S 0x0C datagram is
 # byte-identical to the captured client datagram (emitted C2S == client-origin); plus fold the
@@ -1881,3 +1919,6 @@ if(BUILD_SHARED_LIB)
                     --lib "$<TARGET_FILE:opennova_shared>")
     endif()
 endif()
+
+# weapon.sav player-profile format tests (libs/playersav).
+add_subdirectory(playersav)

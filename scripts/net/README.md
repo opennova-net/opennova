@@ -17,10 +17,60 @@ All output goes to `<repo>\.scratch\` (gitignored). Never commit raw captures,
 | `capture.ps1` | `-Action start\|stop -Tag <t>` — dumpcap to `.scratch\<tag>-<stamp>.pcapng`. Defaults to the loopback adapter; `-Iface` for a real NIC. |
 | `decode.ps1` | Decode a `.pcapng`/`.sph` with `nw_pp` (+ optional `nw_replay --print-roles`). Finds the tool in Release or Debug. |
 | `launch_retail.ps1` | Phase 0: launch stock `Jointops.exe` with `/connectlog` + `/profile` oracle flags (host/join still manual). Needs `-GameDir` or `$env:JO_GAME_DIR`. |
+| `host_opennova.ps1` | Launch a visible OpenNova listen host for a mission over the existing `NW_LAN_*` contract. |
+| `join_opennova.ps1` | Launch a visible OpenNova joiner for a host/IP, port, and callsign. |
+| `run_lan_pair.ps1` | Launch a host, wait briefly, then launch a joiner; defaults to a two-instance localhost session. |
 | `diff_vs_golden.ps1` | `-Ours <our.pcapng> -Golden <golden.pcapng> [-Items <items.def>]` -- decode both with `nw_pp --histogram` and report per-(direction, wire tag) coverage: GAP (retail emits it, we don't), SPURIOUS (we emit an S2C tag retail doesn't), plus any messages in ours that did not decode cleanly. Writes `<our>.vs-golden.txt`; exits non-zero on any gap/spurious/decode-failure. |
 
-(Phase 2 adds `tools/retail_driver` to drive retail host/join unattended; Phase 3
-adds `host_opennova.ps1`/`join_opennova.ps1` and the `run_*` orchestrators.)
+(Phase 2 adds `tools/retail_driver` to drive retail host/join unattended.)
+
+## OpenNova LAN host/join (Phase 3)
+
+These helpers launch the Godot game project at `<repo>\godot`. They find Godot
+through `$env:GODOT_BIN` or the repo's `.godot-bin` convention used by the other
+network scripts.
+
+**First-run prerequisite:** launch OpenNova normally, select the Joint Operations
+resource directory, and close it before using these helpers. The selection is
+persistent user state; the scripts deliberately do not select or copy game data.
+Both instances must be able to load the same mission locally.
+
+Start the two roles separately (host first):
+
+```powershell
+pwsh -File scripts\net\host_opennova.ps1 `
+    -Mission ASH_I5A.BMS -Name Host -Port 32768
+
+pwsh -File scripts\net\join_opennova.ps1 `
+    -Host 127.0.0.1 -Name Joiner -Port 32768
+```
+
+Or launch a two-instance localhost pair in one command:
+
+```powershell
+pwsh -File scripts\net\run_lan_pair.ps1 -Mission ASH_I5A.BMS
+```
+
+`run_lan_pair.ps1` starts the host, waits 1500 ms, then starts the joiner. Use
+`-JoinDelayMs` to adjust that bounded 0-10000 ms delay. Pass a machine's LAN IPv4
+address or hostname with `-Host` when the joiner is not dialing localhost, and
+allow inbound UDP on the selected port (32768 by default).
+
+The normal join launch contract contains only the endpoint and callsign; the LAN
+session supplies its own mission metadata. For debugging an older direct-load
+runtime that still requires the pre-session environment hook, opt in explicitly
+with `join_opennova.ps1 -MissionOverride ASH_I5A.BMS` or
+`run_lan_pair.ps1 -JoinMissionOverride ASH_I5A.BMS`. The override sets
+`NW_LAN_MISSION` solely for that compatibility path and is not part of normal LAN
+discovery.
+
+Each launcher clears inherited `NW_LAN_*` variables before starting its child and
+restores the caller's environment immediately afterward, so a stale host variable
+cannot turn the joiner into a second host. The scripts print their child PID(s).
+Alternate online-service, replay, and single-player launch overrides are also
+suppressed in the child, keeping these helpers strictly on the local-LAN path; the
+caller's values are restored. Add `-Wait` to keep the launcher attached until its
+child exits.
 
 ## Multi-interface dumpcap gotchas (learned 2026-07-02)
 

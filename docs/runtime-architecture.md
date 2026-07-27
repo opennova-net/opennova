@@ -53,7 +53,8 @@ The editor "Play the mission" goes through the **same** `MissionRuntime` and the
 one entity index, and one present *step* — see
 [ADR 0006](adr/0006-unified-mission-runtime-present-pass.md). That step has grown into a fixed
 sequence of per-system passes, each owning one drain of the sim, and each installed only where its
-role applies: a joiner places nothing and so runs `WirePresentPass` alone, while a host or
+role applies: a joiner places nothing and so runs the decode-driven passes only
+(`WirePresentPass`, plus the fire/throwable presentation of decoded S2C events), while a host or
 single-player session runs the full ladder. Adding a system means adding a pass to that sequence,
 not a second present loop.
 The single-tick `MissionRuntime.tick()` survives as the deterministic primitive for editor Step,

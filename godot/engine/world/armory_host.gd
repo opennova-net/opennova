@@ -42,7 +42,6 @@ var _team := 0
 # [orig: entity playerClass feeds Armory_ResolveSelectedClass @0x5642f0]. Stamped
 # by the armory ACCEPT until the spawn path carries a class of its own.
 var _player_class := 0
-var _warned_mp_unavailable := false
 
 var _menu: NovaMnuMenu = null
 var _menu_root: NovaResourceRoot = null  # the root the built menu was fed from
@@ -83,14 +82,15 @@ func try_open() -> bool:
 		return false
 	if not sim.local_player_in_armory_zone():
 		return false  # [orig: Flags & 0x400000 gate @0x4e0b4d]
-	# The current Godot client has no live C2S 0x2F submission API. Letting a LAN
-	# client use the SP-local apply would bypass the server's availability/class
-	# checks, so keep the surface offline-only until that request/reply path lands.
-	if _in_multiplayer_session(sim):
-		if not _warned_mp_unavailable:
-			_warned_mp_unavailable = true
-			push_warning("NovaArmoryHost: multiplayer armory waits for the live 0x2F/0x5A loadout service")
-		return false
+	# MP is live: a joiner's ACCEPT re-submits C2S 0x2F from the applied kit (the
+	# sim queues it — apply_local_player_loadout's in-match leg), the listen host's
+	# apply is server-authoritative in-process. The client-side S2C 0x5A grant IS
+	# applied (D-NET-170 fixed): NovaSimulation::apply_joiner_authoritative_loadout
+	# folds the server's availability/class-filtered slots into the local ones at the
+	# joiner's recv-before-actions boundary. What stays a tracked divergence is this
+	# screen's OPTIMISTIC local refill on ACCEPT, ahead of the grant — retail resets
+	# the slots and waits for the echo.
+	# [orig: WeaponLoadout_ApplyFromBuffer @0x565cd0 is_in_session leg @0x565d94]
 	if not _ensure_menu():
 		return false
 	# The on-show protocol: the screen re-resolves the class and repopulates every
@@ -345,12 +345,6 @@ func _load_style(root: NovaResourceRoot) -> MnsStyleSheet:
 		return null
 	var s := MnsStyleSheet.new()
 	return s if s.load_from_bytes(bytes) == OK else null
-
-
-func _in_multiplayer_session(sim) -> bool:
-	if sim.has_method("is_host_listening") and bool(sim.is_host_listening()):
-		return true
-	return sim.has_method("is_joiner") and bool(sim.is_joiner())
 
 
 func _connect_layout_source() -> void:

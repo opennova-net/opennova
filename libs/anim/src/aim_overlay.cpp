@@ -29,7 +29,7 @@ void compute_aim_overlay_angles(const AimOverlayInputs &in,
     const int32_t TR = in.rolling ? 0 : in.torso_roll;
     const int32_t LN = in.lean;
     const int32_t PB = in.pitch_blend;
-    const int32_t HLD = in.head_look_decay;
+    const int32_t HLD = in.pitch_kick_accum;
 
     // Built unconditionally at the top of the original, before the branch split.
     // v142 (head/full aim): Roll = torsoRoll + lean/2 while Yaw/Pitch stay the aim pair.
@@ -116,7 +116,7 @@ void compute_aim_overlay_angles(const AimOverlayInputs &in,
 
     if (in.aim_state) {
         // The aim branch (g_animStateFlagsTable & 0x40). [orig: @ 0x4b1bbe..0x4b1ce4]
-        // elbow (arms): 3/4 aim yaw, full aim pitch + head-look + 2x pitch blend.
+        // elbow (arms): 3/4 aim yaw, full aim pitch + pitch-kick + 2x pitch blend.
         out[kOverlayArm] = {bam_add(A, bam_sar(bam_sub(B, A), 2)),
                             bam_add(bam_add(P, HLD), bam_dbl(PB)),
                             bam_add(R, LN)};
@@ -144,12 +144,31 @@ void compute_aim_overlay_angles(const AimOverlayInputs &in,
             // Flags & 0x100000: arms ride the body matrix too. [orig: @ 0x4b1d48]
             out[kOverlayArm] = out[kOverlayBody];
         } else {
-            // [orig: @ 0x4b1da4..0x4b1dce -- head-look decays to a quarter here]
+            // [orig: @ 0x4b1da4..0x4b1dce -- the pitch kick decays to a quarter here]
             out[kOverlayArm] = {bam_add(A, bam_sar(bam_sub(B, A), 2)),
                                 bam_add(bam_add(P, bam_sar(HLD, 2)), bam_dbl(PB)),
                                 bam_add(R, LN)};
         }
     }
+}
+
+// See the aim_overlay.h contract: the attach basis, built from the entity's own angle
+// triple rather than blended from the body/aim pair.
+AimOverlayAngles compute_held_weapon_attach_angles(const AimOverlayInputs &in) {
+    const int32_t R = in.rolling ? 0 : in.roll;
+    // Pure aim yaw — the arms take 3/4 of the body->aim delta here, the weapon does not.
+    // [orig: entity->Yaw = Yaw @ 0x4b1bf2 / @ 0x4b1df4]
+    const int32_t yaw = in.aim_yaw;
+    // [orig: entity->Roll = savedRoll + leanAngle @ 0x4b1bdc / @ 0x4b1de5]
+    const int32_t roll = bam_add(R, in.lean);
+    // The pitch-kick term is present only in the aim branch.
+    // [orig: aim @ 0x4b1bf5 savedPitch + pitchKickAccum + 2*pitchBlend;
+    //  non-aim @ 0x4b1df7 savedPitch + 2*pitchBlend]
+    const int32_t pitch = in.aim_state
+                                  ? bam_add(bam_add(in.aim_pitch, in.pitch_kick_accum),
+                                            bam_dbl(in.pitch_blend))
+                                  : bam_add(in.aim_pitch, bam_dbl(in.pitch_blend));
+    return {yaw, pitch, roll};
 }
 
 void splice_weapon_channel_rotations(const std::vector<int> &parent_index,

@@ -147,10 +147,20 @@ void handler_idle(const WeaponFsmDef &def, const WeaponFsmAction &desc,
         begin_active(desc, slot, in, out);
         return;
     }
-    if (in.is_local) { // [orig: AnimMap_PlayAnimBySlot(adm, 241) @ 0x542955]
-        out.play_anim = true;
-        copy_key(out.anim_key, "anim_wpn_idle");
-    }
+    // UNGUARDED, deliberately: the original plays this on EVERY owner, local or not
+    // [orig: AnimMap_PlayAnimBySlot(weaponDefPtr->field_174, 241) @ 0x542955 — no
+    // owner test]. Every sibling play onto that object IS gated on
+    // `ownerEntity == g_local_player_entity` [orig: ActionSlot_ExecuteActionWithEffect
+    // @0x541893/@0x54195A/@0x5419B8], so retail's omission here is a defect — and a
+    // live A/B on a stock host confirmed it: with two retail players on the SAME
+    // weapon, the host's own first-person gun visibly reacted to the other player's
+    // shots, stopped the instant either switched weapon, and never affected the
+    // non-authority side. That is D-NET-184; the shared object it corrupts is the
+    // per-WeaponDef field_174. We keep the original's shape rather than "improving"
+    // it, but the symptom cannot follow: our anim state is per-entity, and the only
+    // consumer of play_anim is the LOCAL viewmodel pump.
+    out.play_anim = true;
+    copy_key(out.anim_key, "anim_wpn_idle");
     slot.phase = weapon_phase::kDone;
     if (def.clip_capacity < 0) return;   // [orig: @ 0x54296c infinite -> effects only]
     if (has_rounds(def, slot)) return;   // [orig: @ 0x542981]
@@ -175,10 +185,11 @@ void handler_emptyidle(const WeaponFsmDef &def, const WeaponFsmAction &desc,
         begin_active(desc, slot, in, out);
         return;
     }
-    if (in.is_local) { // [orig: AnimMap_PlayAnimBySlot(adm, 242) @ 0x542a53]
-        out.play_anim = true;
-        copy_key(out.anim_key, "anim_wpn_empty_idle");
-    }
+    // UNGUARDED for the same reason as handler_idle's slot-241 play — the original
+    // has no owner test here either [orig: AnimMap_PlayAnimBySlot(weaponDefPtr->
+    // field_174, 242) @ 0x542a53]. See D-NET-184.
+    out.play_anim = true;
+    copy_key(out.anim_key, "anim_wpn_empty_idle");
     if (def.clip_capacity >= 0 && !has_rounds(def, slot)) {
         if (slot.reserve > 0) {
             weapon_fsm_request_reload(slot); // [orig: @ 0x542aa3]

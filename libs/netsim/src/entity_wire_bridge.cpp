@@ -45,7 +45,20 @@ namespace {
 // (5..9) or the JOINER's client skips body-anim channel (+0x188) registration at round-load
 // and then cannot move/crouch/prone — the body motor early-bails on a NULL anim channel. The
 // client resolves the soldier model from playerClass at round-load, NOT from the wire
-// avatar/anim_slot. [orig: Game_ReloadEntityModelsAndCallbacks @0x522830 ->
+// avatar/anim_slot.
+//
+// CORRECTION 2026-07-27 — that second sentence is true but MISLEADING, and reading it as
+// "playerClass picks the character" cost us a live bug. What playerClass resolves at
+// round-load is a charattr `*_CAMMO` items.def id, and every MP class resolves to the
+// same one, whose graphic is `us01`: that is retail's FALLBACK body, not the character.
+// The character is a separate replicated identity — the renderer draws the TWO-PART
+// `entity->CharacterEntity` (+0x3C, an Avatars.def combo instance) and falls back to the
+// items.def graphic only when that instance or its first model is null
+// [orig: Entity_RenderWithLODCallback @0x5d6ef0 @0x5d6fdf..0x5d701e]. We never build such
+// an instance, so we sit permanently in the fallback branch and EVERY remote player
+// renders as us01 — observed live against a retail host 2026-07-27. Tracked in
+// D-PLAYERINFO-1.
+// [orig: Game_ReloadEntityModelsAndCallbacks @0x522830 ->
 // AnimMap_GetSlotPropertyInt(playerClass) @0x4127b0 -> ADM -> AnimMap_RegisterEntity @0x40bb60;
 // class 0 -> slot 15 -> empty ADM -> registration skipped -> Entity_UpdateInfantryPlayerBody
 // @0x4b40e0 bails @0x4b4135. re-grill 2026-06-28.] Carry the entity's loadout class; default a
@@ -230,13 +243,16 @@ uint16_t player_wire_flags(const world::Entity &e, world::EntityHandle recipient
 // @0x57ad40 when stale; serialized at serialize_entity_states_to_buffer @0x5030a0 name+21 =
 // *(u16)(entity+348)]. The REAL packing (witnessed in the packer @0x57ae47 and its decoder
 // MinimapSlot_FindByPackedId @0x57a270) is type(bits 0-4) | subtype(5-8) | index(9-14) |
-// alive(15) over the 288-byte minimap slot array — golden 0x0200 = index 1, 0x8207 = type 7 +
-// index 1 + alive. It MUST be nonzero: a 0 net_id makes the JOINER's MinimapSlot_HasEntity(0)
+// side(15) over the 288-byte minimap slot array — bit 15 is the nationality ALIGNMENT, not a
+// liveness bit (net-re §5.59; game_world.gd's join packer writes it from the selected
+// nationality's alignment): golden 0x0200 = index 1 on side A, 0x8207 = type 7 + index 1 on
+// side B. It MUST be nonzero: a 0 net_id makes the JOINER's MinimapSlot_HasEntity(0)
 // match the first zero-initialized slot, so its handler SKIPS minimap allocation and the remote
 // player is left unregistered — the remote-only divergence behind the C2S 0x0F flood grill,
 // while the joiner's OWN player is immune (its minimap slot is set by local deploy, not this
-// wire record). Our formula below is an ENCODING SHIM, not the retail packing (its 0x8000 sits
-// in the `alive` bit, `slot` lands in the `type` field): interop-safe because the client
+// wire record). Our formula below is an ENCODING SHIM, not the retail packing: its team==2
+// 0x8000 does land in the right bit (side), but `slot` lands in the `type` field with
+// subtype/index left unpopulated. It stays interop-safe because the client
 // self-heals any UNMATCHED net_id — NapiNPClientMsg_0x00C @0x42eadb reallocates and overwrites
 // entity->NetId when MinimapSlot_HasEntity fails. Faithful port = minimap slot-array alloc;
 // docs/net/novaworld-net-re.md (D-NET-137). [golden diff + minimap grill 2026-07-01]
@@ -644,10 +660,10 @@ bool apply_player_intent(world::World &world, const PlayerIntent &intent) {
 
 PlayerExtendedUplink build_player_uplink(const world::Entity &e, const world::AiEntity &ae) {
 	PlayerExtendedUplink up; // wire defaults: carrier_handle 0xFFFF, all counters 0
-	// Free-standing carrier: our motor has no platform-physics pass yet (retail sets
-	// groundEntity when standing on an entity [orig: @0x4b3291] and op3 uplinks it), so our
-	// own player always reports free-standing. World coords stay correct either way — the
-	// grounded form is a frame change, not a different position (D-NET-151 residual).
+	// Relationship attach/detach is live, but this uplink still reports every local player as
+	// free-standing. Retail sends groundEntity/carrier plus carrier-local pose both for standing
+	// platforms [orig: @0x4b3291] and mounted players. Static emplacements mask the difference;
+	// moving/rotated carriers need the D-NET-151 local-frame uplink follow-up.
 	up.carrier_handle = 0xFFFFu;
 	// Live engine-frame pose (the AiEntity store apply_player_intent SNAPs back on receive):
 	// pos[] is already i32 16.16; heading/pitch are BAM32 whose HIGH half is the i16 wire field
@@ -663,6 +679,18 @@ PlayerExtendedUplink build_player_uplink(const world::Entity &e, const world::Ai
 	// exported from the motor, carry the last known value (0 = idle). [witness 2026-07-02:
 	// corrected from the anim_slot misnomer — this byte is locomotion input, not an anim slot.]
 	up.move_input_byte = e.net_move_input;
+	// The RAW entity+0x24 (Flags) low byte, written verbatim and unmasked — the byte the
+	// original serializes straight after the movement-input byte and straight before the
+	// analog triplet. The host REPLACES bits 2-4 of its copy from it
+	// (`flags ^= (flags ^ wire) & 0x1C` [orig: @0x4c1e4d]), then re-broadcasts its copy raw
+	// in every S2C 0x0A player compact record [orig: @0x4c0c7d], and each observer's own
+	// body updater re-derives the third-person weapon-channel pose from bit 0x10 — the
+	// scoped hold variants [orig: Entity_UpdateInfantryPlayerBody @0x4b5deb]. Leaving this
+	// at 0 held the host's copy of our scope/NVG/binocular bits permanently clear, so no
+	// other player ever saw this joiner aim down sights. Masking here would be wrong twice
+	// over: the original does not mask on the write side, and the receiver already does.
+	// [orig: NetPacket_SerializePlayerState case 3 @0x4c1b17 `mov cl, [edi+24h]`]
+	up.state_flags_byte = static_cast<uint8_t>(e.flags & 0xFFu);
 	// The equipped-weapon adm index for our own player — the host ingests it (category-gated)
 	// and echoes it at our 0x0A off-16 so other clients resolve our weapon-anim def. Carries
 	// the spawn default (WPN_M4AUTO) until joiner-side weapon switching exports a live value.

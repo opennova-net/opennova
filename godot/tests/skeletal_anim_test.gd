@@ -502,6 +502,38 @@ func test_play_body_clip_is_idempotent_for_same_key() -> void:
 		"re-playing the active clip must not restart its playhead")
 
 
+func test_models_sharing_one_anim_definition_keep_entity_local_poses() -> void:
+	# Players with the same weapon legitimately share parsed ADM/BAD data. Retail
+	# registers two AnimMap channels per entity; choosing or advancing a clip for
+	# one entity cannot mutate another entity's channel or Skeleton3D.
+	# [orig: Game_ReloadEntityModelsAndCallbacks @0x522830 ->
+	#  AnimMap_RegisterEntity @0x40BB60]
+	var shared_skeletal := _loaded_skeletal()
+	var shared_model_data := _open(SHED)
+	var host_model = NovaObjectModelScript.new()
+	var joiner_model = NovaObjectModelScript.new()
+	add_child_autofree(host_model)
+	add_child_autofree(joiner_model)
+	for model in [host_model, joiner_model]:
+		model.set_skeletal_anim(shared_skeletal)
+		model.set_object_data(shared_model_data)
+
+	host_model.play_body_clip_at("anim_idle", 7)
+	var host_time_before: float = host_model.get_animation_time()
+	var host_pose_before := _bone_poses(host_model.get_skeleton())
+
+	# Stand in for the joiner's accepted shot/body request while both actors use
+	# the same parsed animation set.
+	joiner_model.play_body_clip_at("anim_walk_forward", 13)
+
+	assert_eq(host_model.get_active_body_clip(), "anim_idle",
+			"the joiner's channel selection cannot select a clip on the host")
+	assert_almost_eq(host_model.get_animation_time(), host_time_before, 0.0001,
+			"the joiner's channel cannot move the host playhead")
+	assert_eq(_bone_poses(host_model.get_skeleton()), host_pose_before,
+			"the joiner's channel cannot partially pose the host skeleton")
+
+
 func test_play_body_clip_at_pins_ida_phase_ticks() -> void:
 	var model = NovaObjectModelScript.new()
 	add_child_autofree(model)

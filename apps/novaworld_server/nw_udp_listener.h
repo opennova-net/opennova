@@ -2,31 +2,48 @@
 
 #include <atomic>
 #include <cstdint>
+#include <memory>
 #include <mutex>
+#include <string>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 #include <novaworld/connection/registry.h>  // PeerAddr / PeerAddrHash
 #include <novaworld/lobby_session.h>
 #include <npwire/protocol_message.h>
-#include <npruntime/napi_np_protocol.h>     // np::handle_server_datagram / frame_in_match_s2c (P8)
-#include <npruntime/server_session.h>       // np::set_connection_mode / create_session (host bring-up)
+#include <npruntime/host_session.h>
 
 namespace opennova {
 class ConnectionManager;
 class UnknownTracker;
 namespace db { class Database; }
+namespace bms { struct File; }
+namespace world {
+class AiSystem;
+class World;
+}
 }
 
 namespace opennova::server {
 
 // Per-connection state owned by NwUdpListener (in addition to the wire-level
-// info ConnectionRegistry tracks). Keyed by ConnectionRegistry id.
+// info ConnectionRegistry tracks). Keyed by peer address.
 struct LobbyConnState {
 	LobbyState lobby;
-	uint32_t next_outbound_seq = 1;
-	uint32_t last_inbound_seq = 0;
+	// Lobby has no two-way 0x44/0x84 retained-resend pump, so it uses the
+	// shared no-queue high-water policy: newer packets skip a permanent loss,
+	// while zero/stale/duplicate packets never redispatch.
+	SessionSequencing sequencing;
+	// Exact ClientAuth fingerprint and the already-enveloped ServerAuth reply.
+	// A lost/delayed 0x82 makes the client retransmit the same 0x42. Replaying
+	// these cached bytes keeps SK/SCRK/NWUID stable and, critically, does not
+	// rewind sequencing that may already have admitted lobby traffic.
+	uint32_t client_ci = 0;
+	std::vector<uint8_t> client_auth_body;
+	std::string server_scrk;
+	std::vector<uint8_t> server_auth_datagram;
 	// Client's ClientAuth.ck — this is retail's "local_key" per the
 	// session_id validation in NapiNPProtocol_HandleSessionPacket
 	// (libs/npwire/include/npwire/protocol_message.h notes). We
@@ -57,8 +74,8 @@ struct ServerConfig;
 //   0x46 ClientGoodBye -> 0x86 ServerGoodBye + drop the connection
 //
 // PN dispatch happens at HELLO time. "NOVAWORLDUDP" peers use the lobby
-// container path; "JointOperations"/"JOINTOPERATIONS" peers use a World-less
-// npruntime session-responder ctx on the same retail UDP session port.
+// container path; "JointOperations"/"JOINTOPERATIONS" peers use the shared
+// authoritative npruntime host lifecycle on the same retail UDP session port.
 class NwUdpListener {
 public:
 	explicit NwUdpListener(ConnectionManager &manager);
@@ -112,6 +129,9 @@ public:
 
 private:
 	void run_loop();
+	void initialize_jo_host();
+	void reset_per_run_state(const char *reason);
+	static void observe_jo_event(void *context, const np::HostAcceptEvent &event);
 
 	ConnectionManager &manager_;
 	std::thread worker_;
@@ -123,28 +143,22 @@ private:
 	// state lives in the map (keyed by PeerAddr — see erase_lobby_state
 	// comment above for why CI was the wrong key).
 	LobbySession lobby_session_;
-	// JointOperations in-match join: a World-less npruntime session-responder ctx (the same legs the
-	// in-engine listen server drives via np::handle_server_datagram). It owns the JO peers'
-	// handshake/SCRK state + the reactive §5.1 reply config; the lobby (NOVAWORLDUDP) container path
-	// below is independent. `jo_peers_` tracks which peers classified as JointOperations at HELLO so
-	// 0x42/0x43/0x46 route to the ctx without re-parsing PN each datagram. With no World wired this is a
-	// session responder, not a live-sim host — it answers the handshake but never drives a spawn
-	// (PeerSpawned does not surface; the real in-match spawn happens on the host's listen server). (P8)
-	np::NapiNPServerCtx jo_ctx_;
+	// JointOperations peers run through the same HostOwner/start_host_session/
+	// host_session_pump lifecycle as apps/nw_server. This listener contributes
+	// only UDP protocol demultiplexing; the minimal authoritative World makes
+	// the complete named-spawn stream reachable.
+	std::unique_ptr<world::AiSystem> jo_ai_;
+	std::unique_ptr<world::World> jo_world_;
+	std::unique_ptr<bms::File> jo_mission_;
+	std::unique_ptr<np::HostOwner> jo_owner_;
 	std::unordered_set<PeerAddr, PeerAddrHash> jo_peers_;
-	// Per-JO-peer dcb (the joiner's NapiNPConnection.unk_18) and pool-0 wire
-	// slot, assigned at PeerSpawned and stamped into the S2C 0x0C organic-spawn
-	// `entity_flags`/`slot_id`. dcb is taken from the lobby ClientPlayerEnterRequest
-	// the joiner sent (correlated by its reported game PortNumber); a join-order
-	// counter is the fallback when no lobby entry exists.
-	struct JoPeerSpawn { uint32_t dcb = 0; uint16_t slot = 0; bool announced = false; };
-	std::unordered_map<PeerAddr, JoPeerSpawn, PeerAddrHash> jo_spawns_;
-	uint32_t next_jo_dcb_ = 1;   // host/server reserves 0 (witnessed: dedicatedserver=0)
-	uint16_t next_jo_slot_ = 1;  // pool-0 slot counter for joiners
-	// game PortNumber -> ConnectionId(dcb), populated from the lobby
-	// ClientPlayerEnterRequest (the joiner reports its own unk_18 + game port).
-	std::unordered_map<uint16_t, uint32_t> dcb_by_game_port_;
 	mutable std::mutex lobby_states_mu_;
+	// Every peer address this listener admitted onto the lobby route. This is
+	// deliberately broader than lobby_states_: a valid ClientHello owns a
+	// ConnectionManager entry before ClientAuth creates LobbyConnState.
+	// Per-run teardown snapshots this exact set so a shared manager keeps
+	// connections owned by other listeners.
+	std::unordered_set<PeerAddr, PeerAddrHash> lobby_peers_;
 	std::unordered_map<PeerAddr, LobbyConnState, PeerAddrHash> lobby_states_;
 	opennova::db::Database *db_ = nullptr;
 	opennova::UnknownTracker *tracker_ = nullptr;

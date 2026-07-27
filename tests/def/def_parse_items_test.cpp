@@ -213,6 +213,33 @@ int main(void) {
 
     printf("Parsed %zu items\n", items.count);
 
+    /* The smoke grenade's TrcrID is a real throwable item, not an effect-only
+       placeholder. The mounted JO+revx02 data resolves id 101875 to the
+       Flsh_3rd model with nade/nade callbacks; dropping any of those fields
+       makes the loose-fixture LAN path either invisible or fall back to the
+       stock ballistic motor. */
+    const DefItemDef *smoke_grenade = NULL;
+    for (size_t i = 0; i < items.count; ++i) {
+        if (items.entries[i].id == 101875) {
+            smoke_grenade = &items.entries[i];
+            break;
+        }
+    }
+    if (!smoke_grenade ||
+        strcmp(smoke_grenade->graphic, "Flsh_3rd") != 0 ||
+        strcmp(smoke_grenade->ai_function, "nade") != 0 ||
+        strcmp(smoke_grenade->move_function, "nade") != 0) {
+        fprintf(stderr,
+                "FAIL: smoke grenade item want id=101875 graphic=Flsh_3rd "
+                "ai/move=nade; got found=%d graphic='%s' ai='%s' move='%s'\n",
+                smoke_grenade != NULL,
+                smoke_grenade ? smoke_grenade->graphic : "",
+                smoke_grenade ? smoke_grenade->ai_function : "",
+                smoke_grenade ? smoke_grenade->move_function : "");
+        def_free_items(&items);
+        return 1;
+    }
+
     /* Find the Dune Buggy entry by sid */
     const DefItemDef *buggy = NULL;
     for (size_t i = 0; i < items.count; ++i) {

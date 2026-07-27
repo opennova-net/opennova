@@ -183,6 +183,33 @@ void run_ticks(AiSystem &ai, World &w, uint32_t from, uint32_t to_excl) {
     }
 }
 
+// Run up to and INCLUDING the next 16-tick slow-pass boundary — the phase the original
+// gates its weapon-channel selection on, so a test that wants a selection to happen must
+// cross one. [orig: key `current_tick & 0xF` stored @0x4b4e79, tested @0x4b5d71]
+uint32_t run_to_next_selection(AiSystem &ai, World &w, uint32_t from) {
+    const uint32_t sel = ((from + 15u) / 16u) * 16u;
+    run_ticks(ai, w, from, sel + 1u);
+    return sel + 1u;
+}
+
+// Give a motor soldier the registry Entity and ADM table row the weapon channel reads its
+// hold kind through. The original keeps no per-player hold-kind copy: it indexes AdmDefs
+// by the posed entity's OWN equipped index every selection pass, which is exactly what
+// lets a remote player's pose resolve from one replicated byte [orig: @0x4b5dba].
+void give_held_weapon(World &w, AiEntity *e, uint8_t adm, int special_hold) {
+    if (w.registry.get(e->handle) == nullptr) {
+        w.registry.configure_pool(0, 4);
+        Entity ent;
+        ent.kind = EntityKind::Organic;
+        w.registry.spawn(0, ent);
+    }
+    Entity *ent = w.registry.get(e->handle);
+    ent->equipped_adm_index = adm;
+    if (w.weapons.entries.size() <= adm) w.weapons.entries.resize(adm + 1u);
+    w.weapons.entries[adm].valid = true;
+    w.weapons.entries[adm].special_hold = special_hold;
+}
+
 void test_hurt_volume_updates_registry_health() {
     Field flat([](int) { return static_cast<uint16_t>(0); });
     World world;
@@ -566,48 +593,61 @@ void test_player_weapon_channel() {
     e->health = 100;
 
     // Rifle default: the secondary channel MIRRORS the primary [orig: @0x4b5e46].
-    run_ticks(ai, w, 1, 4);
+    // Selections land only on the 16-tick slow pass, so each step below crosses one.
+    uint32_t t = 1;
+    t = run_to_next_selection(ai, w, t);
     CHECK(e->inf.anim_state == anim_state::kIdle);
     CHECK(e->inf.wpn_state == anim_state::kIdle);
     e->inf.player_moving = true;
-    run_ticks(ai, w, 4, 8);
+    t = run_to_next_selection(ai, w, t);
     CHECK(e->inf.anim_state == anim_state::kWalkForward);
     CHECK(e->inf.wpn_state == anim_state::kWalkForward);
     CHECK(e->inf.wpn_clip_phase > 0); // the secondary playhead advances on its own
 
     // The refill stamps the 80-tick window -> the channel wants 65 reload; idle/walk
-    // currents are not locked, so the stamp lands immediately [orig: @0x4b5e67/@0x4b5e9d].
+    // currents are not locked, so the stamp lands on the next selection pass rather than
+    // the next tick [orig: @0x4b5e67/@0x4b5e9d behind the @0x4b5d71 gate].
     e->inf.reload_anim_ticks = 80; // [orig: WeaponSlot_ReloadAmmo @0x54173c]
-    run_ticks(ai, w, 8, 9);
+    t = run_to_next_selection(ai, w, t);
     CHECK(e->inf.wpn_state == anim_state::kReload);
     CHECK(e->inf.wpn_clip_phase == 1);          // fresh channel re-init + first advance
     CHECK(e->inf.anim_state == anim_state::kWalkForward); // the legs keep locomotion
 
-    // While the window runs, the desire holds; the primary is untouched.
-    run_ticks(ai, w, 9, 40);
+    // The window itself still counts down EVERY tick — only the selection is gated.
+    const int32_t before = e->inf.reload_anim_ticks;
+    run_ticks(ai, w, t, t + 8);
+    t += 8;
+    CHECK(e->inf.reload_anim_ticks == before - 8);
     CHECK(e->inf.wpn_state == anim_state::kReload);
-    CHECK(e->inf.reload_anim_ticks == 80 - 32);
 
     // The clip ends (40 phase ticks) BEFORE the window does: 65 is locked (flag 0x84),
     // so the mirror desire defers, and the deferred state only lands once BOTH the
     // window has expired (desire leaves 65) and the clip end promotes it
     // [orig: defer @0x4b5e88; promote @0x40b77b].
-    run_ticks(ai, w, 40, 88);
+    e->inf.reload_anim_ticks = 1;
+    t = run_to_next_selection(ai, w, t);
     CHECK(e->inf.reload_anim_ticks == 0);
+    CHECK(e->inf.wpn_state == anim_state::kReload);         // still locked in its clip
+    CHECK(e->inf.wpn_deferred == anim_state::kWalkForward); // the exit is queued
+    run_ticks(ai, w, t, t + 41); // the 40-tick clip completes -> promotion fires
+    t += 41;
     CHECK(e->inf.wpn_state == anim_state::kWalkForward); // promoted back to the mirror
     CHECK(e->inf.wpn_deferred == 0);
 
-    // Window expiring MID-CLIP: re-stamp, then cut it short after 10 ticks — the locked
-    // reload keeps playing to its own end, the mirror desire waits in the deferred slot.
+    // Window expiring MID-CLIP: re-stamp, then cut it short — the locked reload keeps
+    // playing to its own end, the mirror desire waits in the deferred slot.
     e->inf.reload_anim_ticks = 80;
-    run_ticks(ai, w, 88, 89);
+    t = run_to_next_selection(ai, w, t);
     CHECK(e->inf.wpn_state == anim_state::kReload);
-    e->inf.reload_anim_ticks = 10;
-    run_ticks(ai, w, 89, 99); // window over, clip at ~11/40
+    e->inf.reload_anim_ticks = 2;
+    t = run_to_next_selection(ai, w, t); // window over, clip still mid-play
     CHECK(e->inf.reload_anim_ticks == 0);
     CHECK(e->inf.wpn_state == anim_state::kReload);          // still locked in
     CHECK(e->inf.wpn_deferred == anim_state::kWalkForward);  // the exit is queued
-    run_ticks(ai, w, 99, 89 + 41); // ...until the clip's 40 phase ticks complete
+    run_ticks(ai, w, t, t + 41); // ...until the clip's 40 phase ticks complete
+    std::fprintf(stderr, "DBG wpn_state=%d deferred=%d phase=%d primary=%d\n",
+                 e->inf.wpn_state, e->inf.wpn_deferred, e->inf.wpn_clip_phase,
+                 e->inf.anim_state);
     CHECK(e->inf.wpn_state == anim_state::kWalkForward);
     CHECK(e->inf.wpn_deferred == 0);
 }
@@ -632,49 +672,58 @@ void test_player_weapon_hold_kinds() {
     e->inf.is_local_player = true;
     e->health = 100;
 
+    // The hold kind now resolves through the ADM table by the entity's own equipped
+    // index, the way every observer resolves it for every player body.
+    give_held_weapon(w, e, /*adm=*/5, /*special_hold=*/0);
     uint32_t tick = 1;
-    auto step = [&](int n) { run_ticks(ai, w, tick, tick + n); tick += n; };
+    auto select = [&](int kind) {
+        w.weapons.entries[5].special_hold = kind;
+        tick = run_to_next_selection(ai, w, tick);
+    };
 
     // Kinds 1-4: fixed holds 50-53; the scope flag is ignored [orig: lea eax,[ecx+31h]
     // @0x4b5dc5/0x4b5dd2/0x4b5ddc/0x4b5de6].
     static constexpr int kFixedHold[4] = {anim_state::kHoldKnife, anim_state::kHoldPistol,
                                           anim_state::kHoldGrenade, anim_state::kHoldStinger};
     for (int kind = 1; kind <= 4; ++kind) {
-        e->inf.wpn_hold_kind = kind;
         e->inf.scope_raised = (kind & 1) != 0; // must not matter for 1-4
-        step(1);
+        select(kind);
         CHECK(e->inf.wpn_state == kFixedHold[kind - 1]);
     }
     // Kinds 5-8: 54/56/58/60, +1 scoped [orig: test Flags&0x10 @0x4b5df0..0x4b5e35].
     static constexpr int kScopedHold[4] = {anim_state::kHoldDesignator, anim_state::kHoldP90,
                                            anim_state::kHoldMP7, anim_state::kHoldJavelin};
     for (int kind = 5; kind <= 8; ++kind) {
-        e->inf.wpn_hold_kind = kind;
         e->inf.scope_raised = false;
-        step(1);
+        select(kind);
         CHECK(e->inf.wpn_state == kScopedHold[kind - 5]);
         e->inf.scope_raised = true;
-        step(1);
+        select(kind);
         CHECK(e->inf.wpn_state == kScopedHold[kind - 5] + 1);
     }
     // Rifle (kind 0) + scope: the mirror default coerces to 49 idle_3; dropping the
     // scope returns the mirror [orig: @0x4b5e48..0x4b5e4e].
-    e->inf.wpn_hold_kind = 0;
     e->inf.scope_raised = true;
-    step(1);
+    select(0);
     CHECK(e->inf.wpn_state == anim_state::kIdle3);
     e->inf.scope_raised = false;
-    step(1);
+    select(0);
     CHECK(e->inf.wpn_state == e->inf.anim_state);
+
+    // An entity holding NOTHING (no ADM row) falls to the rifle mirror, which is what a
+    // peer whose equipped index has not arrived yet must look like.
+    w.registry.get(e->handle)->equipped_adm_index = 0xFF;
+    select(7); // the table row is irrelevant now — the index resolves to no entry
+    CHECK(e->inf.wpn_state == e->inf.anim_state);
+    w.registry.get(e->handle)->equipped_adm_index = 5;
 
     // Binoculars override the hold pose [orig: @0x4b5e53]; the reload window overrides
     // binoculars, and the pistol kind (2) selects reload2 [orig: @0x4b5e5e..0x4b5e6f].
-    e->inf.wpn_hold_kind = 2;
     e->inf.binoculars_raised = true;
-    step(1);
+    select(2);
     CHECK(e->inf.wpn_state == anim_state::kBinoculars);
     e->inf.reload_anim_ticks = 80;
-    step(1);
+    select(2);
     CHECK(e->inf.wpn_state == anim_state::kReload2);
 }
 
@@ -698,9 +747,9 @@ void test_player_weapon_attack_stamp() {
     AiEntity *e = soldier(ai);
     e->inf.is_local_player = true;
     e->health = 100;
-    e->inf.wpn_hold_kind = 1; // knife family
+    give_held_weapon(w, e, /*adm=*/5, /*special_hold=*/1); // knife family
 
-    run_ticks(ai, w, 1, 3);
+    uint32_t t = run_to_next_selection(ai, w, 1);
     CHECK(e->inf.wpn_state == anim_state::kHoldKnife);
 
     // Rifle / unknown kinds: NO body stamp [orig: only the 1/2 compares].
@@ -715,7 +764,7 @@ void test_player_weapon_attack_stamp() {
     CHECK(e->inf.wpn_state == anim_state::kKnifeAttack);
     CHECK(e->inf.wpn_deferred == 0);
     CHECK(e->inf.wpn_clip_phase == 0); // fresh clip on the target change
-    run_ticks(ai, w, 3, 4);
+    t = run_to_next_selection(ai, w, t);
     CHECK(e->inf.wpn_state == anim_state::kKnifeAttack);
     CHECK(e->inf.wpn_deferred == anim_state::kHoldKnife); // the exit is queued
 
@@ -728,16 +777,15 @@ void test_player_weapon_attack_stamp() {
     CHECK(e->inf.wpn_deferred == 0);
 
     // Clip end -> promotion back to the hold pose [orig: @0x40b77b].
-    run_ticks(ai, w, 4, 40);
+    run_ticks(ai, w, t, t + 40);
     CHECK(e->inf.wpn_state == anim_state::kHoldKnife);
 
     // The grenade kind stamps 63 [orig: @0x542be0].
-    e->inf.wpn_hold_kind = 3;
     infantry_weapon_attack_stamp(e->inf, 2);
     CHECK(e->inf.wpn_state == anim_state::kGrenadeAttack);
 }
 
-// The arms-dip feed [orig: @0x4b5cab..0x4b5ce7]: while the window runs the head-look
+// The arms-dip feed [orig: @0x4b5cab..0x4b5ce7]: while the window runs the pitch-kick
 // decay term drops 0x2800000/tick before the eighth-step ease, and the window
 // decrements TWICE per tick — the 20-tick weapon-switch stamp dips for 10 ticks —
 // then the ease brings the term back toward rest.
@@ -758,15 +806,15 @@ void test_player_arms_dip() {
     // window decrements.
     const int32_t d = -0x2800000;
     const int32_t expected = d - opennova::io::bam_sar(opennova::io::bam_add(d, 4), 3);
-    CHECK(e->inf.head_look_decay == expected);
+    CHECK(e->inf.pitch_kick_accum == expected);
     CHECK(e->inf.arms_dip_ticks == 18);
 
     run_ticks(ai, w, 2, 11); // 9 more ticks: the window drains at 2/tick
     CHECK(e->inf.arms_dip_ticks == 0);
-    CHECK(e->inf.head_look_decay < d); // accumulated deeper than a single tick's dip
+    CHECK(e->inf.pitch_kick_accum < d); // accumulated deeper than a single tick's dip
 
     run_ticks(ai, w, 11, 200); // the eighth-step ease settles back near rest
-    CHECK(opennova::io::bam_abs(e->inf.head_look_decay) <= 8);
+    CHECK(opennova::io::bam_abs(e->inf.pitch_kick_accum) <= 8);
 }
 
 // The dual-channel body update and arms/HLD block continue on dead local-player ticks.
@@ -787,7 +835,7 @@ void test_player_weapon_channel_ticks_while_dead() {
     e->inf.wpn_clip_phase = 4;
     e->inf.reload_anim_ticks = 3;
     e->inf.arms_dip_ticks = 4;
-    e->inf.head_look_decay = -1000;
+    e->inf.pitch_kick_accum = -1000;
 
     run_ticks(ai, w, 1, 2);
     CHECK(e->inf.anim_state == anim_state::kDeathFire);
@@ -795,7 +843,7 @@ void test_player_weapon_channel_ticks_while_dead() {
     CHECK(e->inf.wpn_clip_phase == 5);
     CHECK(e->inf.reload_anim_ticks == 2);
     CHECK(e->inf.arms_dip_ticks == 2);
-    CHECK(e->inf.head_look_decay != -1000);
+    CHECK(e->inf.pitch_kick_accum != -1000);
     CHECK(!infantry_weapon_channel_visible(e->inf, true, false));
 }
 

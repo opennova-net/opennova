@@ -53,12 +53,12 @@ uint8_t teamfilter_bit(const char *token) {
 	return 0;
 }
 
-bool loadout_entry_permitted(const world::WeaponTableEntry &entry, uint8_t player_class,
-                             uint8_t soldier_type) {
+bool loadout_entry_permitted(const world::WeaponTableEntry &entry, uint8_t team,
+                             uint8_t player_class) {
 	// [orig: Server_SendWeaponSlotListToPlayer — team mask @0x502666, char mask @0x502693,
 	//  the slot filter @0x502716]
 	uint8_t team_mask;
-	switch (player_class) {
+	switch (team) {
 		case 1:
 		case 3:
 			team_mask = 0x02; // blue
@@ -72,9 +72,9 @@ bool loadout_entry_permitted(const world::WeaponTableEntry &entry, uint8_t playe
 			break;
 	}
 	uint8_t char_mask = 0;
-	if (soldier_type >= 5 && soldier_type <= 9)
-		char_mask = static_cast<uint8_t>(1u << (soldier_type - 5));
-	else if (soldier_type >= 1 && soldier_type <= 3)
+	if (player_class >= 5 && player_class <= 9)
+		char_mask = static_cast<uint8_t>(1u << (player_class - 5));
+	else if (player_class >= 1 && player_class <= 3)
 		char_mask = 0xFF; // the pre-MP persona classes pass everything [orig: @0x50269a]
 	return (team_mask & entry.teamfilter) != 0 && (char_mask & entry.charfilter) != 0;
 }
@@ -171,7 +171,14 @@ world::WeaponTable build_weapon_table(const DefWeaponsFile &weapons) {
 		e.attach_text_id = d.attach_text_id; // the attach-label Overlays key [orig: +0x3A0]
 		e.flags = d.flags;
 		e.flags2 = d.flags2;
+		// The 3P body-channel triple — see the WeaponTableEntry contract. The motor
+		// resolves these per ENTITY from its own equipped index, so they must live on
+		// the table rather than on a local-player scalar.
+		e.special_hold = d.special_hold;
+		e.attack_anim = d.attack_anim;
+		e.run_anim = d.run_anim;
 		e.has_first_person_model_reference = d.gfx1[0] != '\0';
+		e.third_person_model = d.gfx3; // the held 3P gun [orig: tpModel +0x170]
 		// Bind this weapon's ACTION rows into the same 12-state descriptor table
 		// consumed by a MountSlot. The resource-only table has no ADM duration ring,
 		// so auto fields take the original unresolved-clip zero fallback here; hosts

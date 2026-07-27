@@ -341,6 +341,49 @@ func test_replacing_an_owned_group_detaches_the_old_group_transform() -> void:
 			"only the replacement follows the owner")
 
 
+func test_release_effect_binding_drops_generation_scoped_token_and_pose_state() -> void:
+	var world := _make_world()
+	var file := _make_short_effect_file()
+	file.find_particle("puff dots").flags = 1 << 18
+	world.load_particle_file(file)
+	var owner_key := "throwable-move:1024"
+	var receipt := world.spawn_effect_owned_request(
+			owner_key, "puff", Vector3(1, 2, 3), Vector3.UP)
+	assert_true(bool(receipt.get("spawned", false)))
+	assert_true(world.has_owner_binding(owner_key),
+			"a live owned spawn holds its binding identity in every table")
+	assert_true(world.has_cached_owner_pose(owner_key),
+			"a live owned spawn seeds a native owner pose")
+
+	world.stop_group(int(receipt.get("group_id", 0)))
+	world.release_effect_binding(owner_key)
+
+	assert_true(world.has_no_owner_bindings(),
+			"retired round keys do not accumulate admission tokens, owner tokens, reverse lookups, or poses")
+	assert_true(bool(_single_group(world).detached),
+			"the already-live particles remain detached to drain naturally")
+
+
+func test_release_effect_binding_cleans_a_rejected_spawn_identity() -> void:
+	var world := _make_world()
+	# No stockeffect fallback: the unknown name is rejected after the facade has
+	# allocated its generation-scoped slot and owner identities.
+	world.load_particle_file(_make_short_effect_file())
+	var owner_key := "throwable-move:2048"
+	var receipt := world.spawn_effect_owned_request(
+			owner_key, "missing-effect", Vector3.ZERO, Vector3.UP)
+	assert_false(bool(receipt.get("spawned", false)))
+	assert_true(world.has_owner_binding(owner_key),
+			"a rejected ReplaceOwned spawn still allocates its binding identities")
+	assert_false(world.has_cached_owner_pose(owner_key),
+			"a rejected ReplaceOwned spawn never seeds a native owner pose")
+
+	world.release_effect_binding(owner_key)
+
+	assert_true(world.has_no_owner_bindings(),
+			"failed throwable spawns leave no script-side binding state")
+
+
 func test_authored_water_flags_bind_to_the_mission_water_plane() -> void:
 	var cases := [
 		{"flag": 1 << 27, "mode": 1},  # BELOWH20: kill above.

@@ -77,9 +77,6 @@ substrate; the divergence is wire/visually equivalent or host-internal.
   `_controlfp(_PC_24, _MCW_PC)` parity sub-build for when byte-exactness is needed.
 - **D-MNU-4** — the original truncates each scaled quad rect to int per element; the
   reimpl applies one float `CanvasItem` scale. A sub-pixel cosmetic difference.
-- **D-NET-131** — a dedicated ("serve only") host runs as a mode-3 in-process listen
-  server with `serve_and_play=false`, not the original's mode-1 host-only. Wire-equivalent
-  to a joiner ([ADR 0011](0011-single-player-in-process-listen-server.md)).
 - **D-NET-140** — the listen host's own loopback gets the full 0x0A record set (retail
   sends its local player header-only frames); the frame never leaves the process
   ([ADR 0011](0011-single-player-in-process-listen-server.md)).

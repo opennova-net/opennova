@@ -6,7 +6,11 @@
 
 #include <netsim/entity_wire_bridge.h> // snapshot_world / GameEntitySnapshot
 #include <netsim/connection_fan.h>     // drain_connection_c2s / emit_connection_s2c
+#include <world/ai.h>                  // AiEntity / AiSystem::for_handle (the motor store)
+#include <world/angle.h>               // bam_heading_from_mission_yaw_deg
 #include <world/entity_spawn.h>        // entity_reset_to_spawn_state (respawn release)
+#include <world/geom.h>                // to_fixed
+#include <world/infantry.h>            // infantry_respawn_snap (the motor half of a respawn)
 #include <world/vehicle_motor.h>       // VehicleTraits (the 0x40 vehicle-blip icons)
 #include <world/world.h>               // World::run_logic_tick
 #include <world/zone_capture.h>        // the 1 Hz AS capture pass (slice 2)
@@ -200,6 +204,9 @@ void release_due_respawns(NapiNPServerCtx &ctx, world::World &world) {
 			e->position = e->spawn_position;
 			world::entity_reset_to_spawn_state(*e);
 			e->alive = true; // the route_round_deaths dead mark lifts with the respawn
+			e->hidden = false;
+			e->death_anim_state = 0;
+			e->corpse_timer = 0;
 			// Spawn health = the item template's healthMax [orig: Entity_InitFromItemDef
 			// @0x49e550; the player_item_hp mirror, D-NET-144]. Same signed-i16 gate as
 			// the first spawn (player_spawn.cpp) — healthMax is a signed WORD in retail.
@@ -209,6 +216,25 @@ void release_due_respawns(NapiNPServerCtx &ctx, world::World &world) {
 				e->health = e->health_max;
 			else
 				e->health = 100;
+			// The listen host's own player is MOTOR-simulated, and the motor is the writer
+			// of the Entity/AiEntity pose pair (finish_infantry_tick mirrors AiEntity.pos
+			// into Entity.position every tick). Writing only the registry store above put
+			// the player back at full health but left the body — and its death clip — at
+			// the spot where it was killed, which reads as "I cannot respawn". Reset the
+			// motor half to the same deployed pose so the one original store is modelled.
+			world::AiEntity *ae =
+					world.ai ? world.ai->for_handle(it->victim) : nullptr;
+			if (ae != nullptr && ae->inf.active) {
+				const int32_t pos[3] = {
+						world::to_fixed(e->position.x),
+						world::to_fixed(e->position.y),
+						world::to_fixed(e->position.z),
+				};
+				world::infantry_respawn_snap(
+						*ae, pos,
+						world::bam_heading_from_mission_yaw_deg(e->yaw),
+						e->health);
+			}
 		}
 		it = ctx.respawn_queue.erase(it);
 	}

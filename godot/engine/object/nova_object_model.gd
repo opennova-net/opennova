@@ -437,7 +437,12 @@ func _queue_remote_body_state(state_id: int, key: String, flags: int) -> void:
 	_remote_pending_flags = flags
 	var length: float = _skeletal.get_clip_length(_anim_key, _anim_variant)
 	if length <= 0.0:
-		_remote_pending_end_time = INF
+		# A hold clip whose length cannot resolve completes IMMEDIATELY — an INF
+		# deadline here wedged the remote body-state machine forever (every later
+		# stance/anim request queued behind it), freezing the remote player's pose
+		# for the rest of the session. Retail's hold ends with the animation; a
+		# zero-length animation is already over.
+		_remote_pending_end_time = 0.0
 	elif _skeletal.is_clip_looping(_anim_key, _anim_variant):
 		_remote_pending_end_time = (floorf(_anim_time / length) + 1.0) * length
 	else:

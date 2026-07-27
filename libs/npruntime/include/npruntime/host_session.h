@@ -53,16 +53,15 @@ struct HostOwner {
 	netsim::ISessionTransport *host_loopback = nullptr; // non-owning; the host's own dcb-2 client (Listen)
 	std::map<PeerAddr, PeerLink, PeerAddrLess> peers;
 	uint32_t now_tick = 0;
-	// false (dedicated/headless): the pump drain-discards the host's own loopback 0x0A (step 5). true
-	// (serve-and-play): the owner instead folds host_loopback into its ClientState to render the host's
-	// own view (e.g. NovaSimulation via a ClientRuntime), so the pump must NOT consume it. Set by
-	// start_host_session from HostConfig.serve_and_play.
+	// false (dedicated/headless): HostOnly registers no local-player connection; an adapter-supplied
+	// unused channel may be defensively drained. true (serve-and-play): HostClient registers the
+	// loopback and the owner folds it into ClientState, so the pump must preserve it.
 	bool serve_and_play = false;
 };
 
 // Attach a UdpSessionTransport to `peer`'s connection (idempotent) and, ONCE the spawn pipeline has
 // bound owned_entity, stream the joiner's NAMED dcb-bearing S2C 0x0C organic-spawn so the joiner
-// name-matches its own player (entity_name == its ClientHello.co) and learns its wire handle H (the
+// name-matches its own player (entity_name == its game ClientAuth.NA) and learns its wire handle H (the
 // admitted entity's packed handle; D.0 / §5.23; the F3 dcb-timing contract). No-ops until the
 // automatic spawn pipeline binds owned_entity, then announces exactly once.
 void admit_peer(HostOwner &owner, netsim::IDatagramSocket &sock, const PeerAddr &peer,
@@ -77,15 +76,18 @@ void dispatch_event(HostOwner &owner, netsim::IDatagramSocket &sock, const PeerA
 //   (2) tick_connections: pre-spawn §5.2a bursts (framed 0x83 for remote peers) + surface F3/spawned
 //   (3) Server_TickUpdate: the single C2S drain + one logic tick + per-connection 0x0A fan
 //   (4) S2C flush: pop each remote transport's identity [tag][body] -> frame_in_match_s2c (0x83) -> send
-//   (5) drain the host's own loopback (no socket consumer for a headless Listen host)
+//   (5) drain an unused adapter loopback for HostOnly; preserve the HostClient local view
 // `before_server_tick`, when supplied, runs after tick_connections has completed any
 // player spawns and before their first authoritative logic update / 0x0A fan. The opaque
 // context keeps this shared owner loop independent of adapter-specific registration state.
 // Advances owner.now_tick by 1.
 using HostBeforeServerTickFn = void (*)(void *context);
+using HostEventObserverFn = void (*)(void *context, const HostAcceptEvent &event);
 void host_session_pump(HostOwner &owner, netsim::IDatagramSocket &sock,
 		HostBeforeServerTickFn before_server_tick = nullptr,
-		void *before_server_tick_context = nullptr);
+		void *before_server_tick_context = nullptr,
+		HostEventObserverFn event_observer = nullptr,
+		void *event_observer_context = nullptr);
 
 // Host bring-up config. The owner sets owner.ctx.world / owner.ctx.mission and owner.host_loopback (its
 // dcb-2 LoopbackChannel) BEFORE start_host_session; this fills the rest.
@@ -94,18 +96,18 @@ struct HostConfig {
 	// game type) + the §6.9 rule globals + the §5.1 reactive-reply config (mission / player / spawn).
 	GameConfig config;
 	SocketMode socket_mode = SocketMode::Lan; // Lan (real socket) / Socketless (SP in-process loopback)
-	uint32_t host_key = 0;                     // deterministic for tests; a real host mints randomly
-	bool serve_and_play = false;               // true: spawn + latch the host's own player for a local view
+	// Nonzero values are deterministic overrides for golden/tests. Zero asks the production helper
+	// to mint the volatile retail startup value.
+	uint32_t host_key = 0;
+	uint32_t host_start_tick = 0;
+	uint32_t session_seed_id = 0;
+	bool serve_and_play = false; // true: HostClient + local player; false: HostOnly, no local player
 };
 
-// Stand `owner` up as a NovaWorld in-match Listen host (ConnectionMode::HostClient, §5.0) — the common
-// bring-up the headless server (apps/nw_server) and the serve-and-play Godot host share, dedup'd from
-// the copies in main.cpp and nova_simulation.cpp [orig: the SinglePlayer_StartMission @0x561af0
-// sequence]: set_connection_mode(3) -> set_transport_mode -> create_session(loopback) ->
-// configure_session_runtime -> Server_InitNewRoundState. When cfg.serve_and_play (and ctx.world is set),
-// ALSO spawns the host's own player and queues its unpaced type-2 initial-state burst before the first
-// per-frame 0x0A; a dedicated/headless host skips that (its player spawns lazily in the pump and its
-// loopback is discarded in step 5).
+// Stand `owner` up through the shared in-match host bring-up used by apps/nw_server and the Godot
+// host. `serve_and_play` selects HostClient and registers the type-2 loopback; otherwise it selects
+// HostOnly and creates no local player. When serve-and-play also has a World, spawn the host player
+// and queue its initial-state burst before the first per-frame 0x0A.
 void start_host_session(HostOwner &owner, const HostConfig &cfg);
 
 } // namespace opennova::np

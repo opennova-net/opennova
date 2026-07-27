@@ -2,8 +2,8 @@
 // (the SAME [u16 handle][u16 weaponSlotCombo] body, rebuilt per ADR 0003) onto EVERY in-match
 // connection's transport INCLUDING the requester [orig: NapiNPServerMsg_HandleReloadRequest
 // @0x514DF0 -> two NapiNPServer_SendFiltered @0x4C87E0 sends], because the client's 0x49 apply is
-// the only place its clip refills / the slot's 0x80 reload-pending flag clears (§5.58). A host
-// that ignores 0x25 wedges the joiner's weapon after one attempt — the retail-join v15 defect.
+// the only place its clip refills (§5.58). The 0x80 phase bit is transient: without the echo the
+// empty clip returns to idle and auto-reload requests again — the retail-join v15 defect.
 //
 // Coverage: three in-match connections (the host's own type-2 loopback + two type-1 remotes) each
 // pop exactly one 0x49 with the relayed body; the direct reply list carries NO 0x49 (transports
@@ -66,7 +66,9 @@ np::NapiNPConnection make_conn(uint32_t id, int type, ns::ISessionTransport *t,
 }
 
 // Pop exactly one staged S2C datagram from a transport and assert it is the relayed 0x49.
-bool pops_one_relayed_49(ns::ISessionTransport &t, bool udp_raw, const char *who) {
+bool pops_one_relayed_49(ns::ISessionTransport &t, bool udp_raw,
+                         uint16_t expected_handle, uint16_t expected_combo,
+                         const char *who) {
 	uint8_t tag = 0;
 	std::vector<uint8_t> body;
 	if (udp_raw) {
@@ -92,7 +94,7 @@ bool pops_one_relayed_49(ns::ISessionTransport &t, bool udp_raw, const char *who
 	if (!expect(decode_weapon_reload(body.data(), body.size(), r, consumed) && consumed == 4,
 	            "relayed 0x49 body decodes (4 B)"))
 		return false;
-	if (!expect(r.entity_handle == 0x1005 && r.reload_param == 0x00C3,
+	if (!expect(r.entity_handle == expected_handle && r.reload_param == expected_combo,
 	            "relayed body carries the request's handle + weaponSlotCombo")) {
 		std::fprintf(stderr, "  (%s: handle=0x%04x combo=0x%04x)\n", who, r.entity_handle,
 		             r.reload_param);
@@ -129,8 +131,9 @@ int main() {
 	roster.push_back(make_conn(4, 1, &udp_c, ns::TransportMode::Client, hc, true));
 	roster.push_back(make_conn(5, 1, &udp_d, ns::TransportMode::Client, {}, false)); // pre-spawn
 
-	// Requester = remote B. C2S 0x25 [u16 handle=0x1005][u16 combo=0x00C3].
-	const std::vector<uint8_t> req_body = {0x05, 0x10, 0xC3, 0x00};
+	// Requester = remote B. C2S 0x25 [u16 live addressed handle][u16 combo=0x00C3].
+	const WeaponReload request{hb.packed, 0x00C3};
+	const std::vector<uint8_t> req_body = encode_weapon_reload(request);
 	std::vector<ProtocolMessage> msgs;
 	msgs.push_back(make_protocol_message(0x25, req_body));
 	std::vector<ProtocolMessage> replies =
@@ -140,9 +143,9 @@ int main() {
 	for (const ProtocolMessage &m : replies)
 		if (!expect(m.tag != 0x49, "no 0x49 in the direct replies (broadcast path only)")) return 1;
 
-	if (!pops_one_relayed_49(loop, /*udp_raw=*/false, "loopback")) return 1;
-	if (!pops_one_relayed_49(udp_b, /*udp_raw=*/true, "requester")) return 1;
-	if (!pops_one_relayed_49(udp_c, /*udp_raw=*/true, "peer C")) return 1;
+	if (!pops_one_relayed_49(loop, /*udp_raw=*/false, hb.packed, 0x00C3, "loopback")) return 1;
+	if (!pops_one_relayed_49(udp_b, /*udp_raw=*/true, hb.packed, 0x00C3, "requester")) return 1;
+	if (!pops_one_relayed_49(udp_c, /*udp_raw=*/true, hb.packed, 0x00C3, "peer C")) return 1;
 	{
 		std::vector<uint8_t> raw;
 		if (!expect(!udp_d.pop_outbound(raw), "pre-spawn connection receives nothing")) return 1;
@@ -157,6 +160,34 @@ int main() {
 		ns::Datagram dg;
 		if (!expect(!udp_b.pop_outbound(raw) && !udp_c.pop_outbound(raw) && !loop.client_recv(dg),
 		            "short 0x25 dropped without any send"))
+			return 1;
+	}
+
+	// A syntactically valid request still needs a live addressed pool slot.
+	std::vector<ProtocolMessage> stale;
+	stale.push_back(make_protocol_message(
+			0x25, encode_weapon_reload(WeaponReload{0x1005, 0x00C3})));
+	replies = np::dispatch_session_replies(
+			np::GameConfig{}, roster[1], stale, 102, roster, &world);
+	{
+		std::vector<uint8_t> raw;
+		ns::Datagram dg;
+		if (!expect(!udp_b.pop_outbound(raw) && !udp_c.pop_outbound(raw) && !loop.client_recv(dg),
+		            "an unconfigured/stale addressed slot is not relayed"))
+			return 1;
+	}
+
+	// Retail's requester dead-mark gate precedes the addressed-entity relay.
+	w::Entity *requester_entity = world.registry.get(hb);
+	if (!expect(requester_entity != nullptr, "requester remains live in the registry")) return 1;
+	requester_entity->health = 0;
+	replies = np::dispatch_session_replies(
+			np::GameConfig{}, roster[1], msgs, 103, roster, &world);
+	{
+		std::vector<uint8_t> raw;
+		ns::Datagram dg;
+		if (!expect(!udp_b.pop_outbound(raw) && !udp_c.pop_outbound(raw) && !loop.client_recv(dg),
+		            "a dead requester cannot relay a reload"))
 			return 1;
 	}
 

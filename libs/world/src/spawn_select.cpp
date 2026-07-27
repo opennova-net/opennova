@@ -1,5 +1,6 @@
 #include "world/spawn_select.h"
 
+#include <algorithm>
 #include <limits>
 #include <vector>
 
@@ -117,6 +118,58 @@ bool world_has_spawn_zone(const World &world) {
         if (e.is_spawn_point && e.alive) any = true;
     });
     return any;
+}
+
+SpawnZoneRegistry build_spawn_zone_list(const World &world) {
+    // [orig: Entity_BuildSpawnZoneList @0x43EAE0]. Collect pool 2 then pool 1 in slot
+    // order (the original walks each pool base upward), def attrib 0x40000 only, no
+    // alive filter; AABB accumulated as it goes (the original seeds its bounds at 0,
+    // so a mission's positive coords always include the origin — reproduced for the
+    // deploy-map zoom parity).
+    SpawnZoneRegistry reg;
+    struct Row {
+        EntityHandle handle;
+        int32_t key = 0;
+    };
+    std::vector<Row> rows;
+    auto collect_pool = [&](int pool) {
+        world.registry.for_each([&](const Entity &e) {
+            if (e.handle.pool() != pool || !e.is_spawn_point) return;
+            Row row;
+            row.handle = e.handle;
+            // key = typePriority<<16 | (unitType & 0xFF)<<8 | zone# & 0x1F
+            // [orig: @0x43ec9b — ItemDef.type 1 (vehicle) -> 2, 32 -> 1, else 0]
+            const int type_priority = e.item_type == 1 ? 2 : (e.item_type == 32 ? 1 : 0);
+            const ItemDeathTraits *traits = world.item_death_traits.get(e.item_id);
+            const uint8_t unit_type =
+                    traits ? static_cast<uint8_t>(traits->unit_type) : 0;
+            row.key = (type_priority << 16) | (unit_type << 8) | (e.zone_number & 0x1F);
+            rows.push_back(row);
+            const int32_t x = to_fixed(e.position.x);
+            const int32_t y = to_fixed(e.position.y);
+            if (x < reg.min_x) reg.min_x = x;
+            if (y < reg.min_y) reg.min_y = y;
+            if (x > reg.max_x) reg.max_x = x;
+            if (y > reg.max_y) reg.max_y = y;
+        });
+    };
+    collect_pool(2);
+    collect_pool(1);
+    // Ascending stable sort = the original bubble sort's behavior for nonzero keys.
+    // The original's BOTH-ZERO-key address tie (@0x43ecc6) is modeled as collect
+    // order (see the header note).
+    std::stable_sort(rows.begin(), rows.end(),
+                     [](const Row &a, const Row &b) { return a.key < b.key; });
+    reg.entries.reserve(rows.size());
+    for (const Row &row : rows) reg.entries.push_back(row.handle);
+    return reg;
+}
+
+int spawn_zone_index_of(const SpawnZoneRegistry &registry, EntityHandle handle) {
+    // [orig: SpawnZoneList_IndexOf @0x43B990 — linear scan, -1 on miss]
+    for (size_t i = 0; i < registry.entries.size(); ++i)
+        if (registry.entries[i].packed == handle.packed) return static_cast<int>(i);
+    return -1;
 }
 
 const Entity *find_spawn_zone_for_team(const World &world, const ZoneChain &chain,

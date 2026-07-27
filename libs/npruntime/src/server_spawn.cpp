@@ -4,6 +4,10 @@
 #include <world/spawn_select.h> // select_player_spawn (§5.2c) / world_has_spawn_zone (§5.61)
 #include <world/world.h>        // World, registry, cached
 
+#include <algorithm>
+#include <array>
+#include <optional>
+
 namespace opennova::np {
 
 namespace {
@@ -26,20 +30,92 @@ namespace {
 // players already added (2-team: (t1 > t2) + 1). The spectator branch, the requested-team-name
 // (g_team1/2_name) and team-preference legs, and 4-team placement are the follow-up MP path (the
 // join request carries no team/spectator field yet); they default into the autobalance below.
-uint8_t assign_player_team(const NapiNPServerCtx &ctx, const world::World &world) {
+uint8_t assign_player_team(const GameConfig &config, bool is_in_session,
+		const std::vector<NapiNPConnection> &roster,
+		const NapiNPConnection &joining, const world::World &world) {
 	constexpr uint32_t kCoopGameTypeMasked = 0x10020u;
-	const uint32_t gt = ctx.config.game_type;
-	if (!ctx.is_in_session || (gt & 0xFFFDFFFFu) == kCoopGameTypeMasked) return 1;
+	const uint32_t gt = config.game_type;
+	if (!is_in_session || (gt & 0xFFFDFFFFu) == kCoopGameTypeMasked) return 1;
 	uint32_t team1 = 0, team2 = 0;
 	world.registry.for_each([&](const world::Entity &e) {
 		if (e.handle.pool() != 0 || e.item_id != world::kPlayerInfantryTypeId) return;
 		if (e.team == 1) ++team1;
 		else if (e.team == 2) ++team2;
 	});
+	// Reservations without an entity are already player-slot assignments for
+	// balancing. Spawned reservations are represented by the World walk above.
+	for (const NapiNPConnection &c : roster) {
+		if (&c == &joining || !c.assigned_team_valid ||
+		    c.link.owned_entity.valid())
+			continue;
+		if (c.assigned_team == 1) ++team1;
+		else if (c.assigned_team == 2) ++team2;
+	}
 	return static_cast<uint8_t>((team1 > team2) + 1);
 }
 
+// Roster slots are stable identities. Retail walks the fixed player-slot table and installs the
+// player into the first empty row; counting live players collides after a non-tail leave.
+// [orig: Server_PlayerAdd @0x51CBC0 writes the first free dword_A87048 row]
+bool connection_claims_player_slot(const NapiNPConnection &connection) {
+	return connection.reply.player_slot_reserved ||
+			connection.phase >= ConnectionPhase::PlayerAdded ||
+			connection.link.owned_entity.valid();
+}
+
+std::optional<uint8_t> first_free_player_slot(
+		const std::vector<NapiNPConnection> &roster,
+		const NapiNPConnection *joining, uint32_t slot_capacity) {
+	std::array<bool, 256> occupied{};
+	for (const NapiNPConnection &connection : roster) {
+		if (&connection == joining ||
+		    !connection_claims_player_slot(connection)) continue;
+		occupied[connection.reply.player_slot] = true;
+	}
+	const std::size_t bounded_capacity =
+			std::min<std::size_t>(slot_capacity, occupied.size());
+	for (std::size_t slot = 0; slot < bounded_capacity; ++slot) {
+		if (!occupied[slot]) return static_cast<uint8_t>(slot);
+	}
+	return std::nullopt;
+}
+
 } // namespace
+
+std::optional<uint8_t> Server_ReservePlayerSlot(
+		const std::vector<NapiNPConnection> &roster, NapiNPConnection &conn,
+		uint32_t slot_capacity) {
+	if (connection_claims_player_slot(conn)) {
+		if (conn.reply.player_slot >= slot_capacity) return std::nullopt;
+		// A repeated post-handshake send and the alternate explicit-bind seam
+		// are idempotent, but never bless a duplicate claim as authoritative.
+		for (const NapiNPConnection &other : roster) {
+			if (&other == &conn ||
+			    !connection_claims_player_slot(other)) continue;
+			if (other.reply.player_slot == conn.reply.player_slot)
+				return std::nullopt;
+		}
+		return conn.reply.player_slot;
+	}
+
+	const std::optional<uint8_t> slot =
+			first_free_player_slot(roster, &conn, slot_capacity);
+	if (!slot.has_value()) return std::nullopt;
+	conn.reply.player_slot = *slot;
+	conn.reply.player_slot_reserved = true;
+	return slot;
+}
+
+uint8_t Server_ReservePlayerTeam(const GameConfig &config, bool is_in_session,
+		const std::vector<NapiNPConnection> &roster, NapiNPConnection &conn,
+		const world::World &world) {
+	if (!conn.assigned_team_valid) {
+		conn.assigned_team =
+				assign_player_team(config, is_in_session, roster, conn, world);
+		conn.assigned_team_valid = true;
+	}
+	return conn.assigned_team;
+}
 
 // [orig: Server_InitNewRoundState @0x51c8e0] — local-player/round context for an authority host.
 void Server_InitNewRoundState(NapiNPServerCtx &ctx) {
@@ -55,13 +131,21 @@ void Server_InitNewRoundState(NapiNPServerCtx &ctx) {
 // [orig: Server_BuildPlayerInfoAndAdd @0x51d560 -> Server_PlayerAdd @0x51cbc0]
 world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPConnection &conn,
                                                  world::World &world) {
+	const std::optional<uint8_t> player_slot =
+			Server_ReservePlayerSlot(
+					ctx.np_protocol.connection_list, conn,
+					std::min<uint32_t>(ctx.config.max_players, 251u));
+	if (!player_slot.has_value()) return {};
+
 	world::PlayerSpawn spawn;
 	// Team FIRST — a team gametype's start markers are per-team (6096-6099 primary,
 	// 6003/6004/6090/6091 fallback), so the AS join spawn needs the assigned team before the
 	// §5.2c marker scan; without the split both teams land in team 1's base (net-re §5.61).
 	// [orig: Server_AssignPlayerTeam @0x4fe310 runs in Server_PlayerAdd BEFORE
 	// Server_PositionPlayerForSpawn's team switch @0x50d266]
-	spawn.team = assign_player_team(ctx, world); // [orig: Server_AssignPlayerTeam @0x4fe310]
+	spawn.team = Server_ReservePlayerTeam(
+			ctx.config, ctx.is_in_session, ctx.np_protocol.connection_list,
+			conn, world); // [orig: Server_AssignPlayerTeam @0x4fe310]
 	const world::SpawnPointResult sel =
 			world::select_player_spawn_for_team(world, spawn.team, ctx.config.game_type);
 	if (sel.found) {
@@ -153,17 +237,13 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	// (0x4D) all point at THIS player's REAL slot + entity handle. Without it the joiner is told
 	// player-slot 0 -> entity 0 (≠ its dcb entity at the actual pool-0 slot) and can never bind its
 	// local player -> never deploys (golden: 0x4D=1, 0x16 grows to slot 1, 0x46 slot 1 -> the joiner's
-	// own entity). Slot assignment = host loopback (type 2) = slot 0, joiners = 1, 2, ... by add order.
+	// own entity). Slot assignment walks the fixed roster table and takes its first free row, so a
+	// non-tail disconnect can be reused without colliding with a later live player.
 	// [orig: Server_PlayerAdd @0x51cbc0 writes the player into dword_A87048[slot]; 0x4D/0x16/0x46 read it]
-	uint8_t player_slot = 0;
-	for (const NapiNPConnection &c : ctx.np_protocol.connection_list) {
-		if (&c == &conn) continue;
-		if (c.phase >= ConnectionPhase::PlayerAdded) ++player_slot;
-	}
 	// D-NET-132: link.owned_entity (bound above) IS the roster binding — the reply builders read the
 	// wire handle off owned_entity.packed and the team off the live entity (team @entity+344). Only the
 	// roster ORDER (player_slot) and the echoed name stay on conn.reply.
-	conn.reply.player_slot = player_slot;
+	conn.reply.player_slot = *player_slot;
 	// Golden parity: a player carries a NAME in BOTH its 0x0C organic record (entity name, read by
 	// build_pool0_organic_batch) and its 0x46 player-sync (conn.reply.player_name). The host's own
 	// loopback connection carries no ClientHello name, so fall back to the host profile name
@@ -177,6 +257,7 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	}
 
 	conn.phase = ConnectionPhase::PlayerAdded;
+	conn.reply.player_slot_reserved = false;
 	return h;
 }
 
@@ -193,8 +274,8 @@ int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world)
 	int spawned = 0;
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		// Spawn an accepted-but-unspawned player: the host loopback (self_id_seen latched at
-		// create_session) or a joiner past the 0x42 join (self_id_seen latched in handle_client_join /
-		// the 0x48 ack). Mid-handshake nodes (self_id_seen == false) are skipped until accepted.
+		// create_session) or a joiner that completed the C2S 0x00 -> 0x01 -> 0x02 admission
+		// exchange (and may later restamp its dcb via 0x48). Mid-handshake nodes are skipped.
 		if (!conn.self_id_seen) continue;
 		if (conn.phase >= ConnectionPhase::PlayerAdded) continue; // already spawned
 		if (Server_BuildPlayerInfoAndAdd(ctx, conn, world).valid()) ++spawned;
@@ -233,6 +314,8 @@ world::EntityHandle admit_synthetic_peer(NapiNPServerCtx &ctx, world::World &wor
 		ctx.np_protocol.connection_list.push_back(c);
 		conn = &ctx.np_protocol.connection_list.back();
 	}
+	conn->assigned_team = spawn.team;
+	conn->assigned_team_valid = true;
 	conn->link.owned_entity = h;
 	conn->link.transport = transport;
 	conn->link.mode = netsim::TransportMode::Client;

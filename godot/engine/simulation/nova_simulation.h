@@ -23,6 +23,7 @@
 
 #include <mission/event_runtime.h>
 #include <mission/promote.h>
+#include <playersav/weapon_sav.h> // weapon.sav: the per-side profile class + kit pages
 #include <terrain/height_field.h>
 #include <terrain/surface_type_map.h>
 #include <wac/wac_system.h>
@@ -35,6 +36,7 @@
 #include <world/player_look.h>
 #include <world/player_spawn.h>
 #include <world/player_view.h>
+#include <world/spawn_select.h>
 #include <world/weapon_fsm.h>
 #include <world/weapon_inventory.h>
 #include <world/world.h>
@@ -110,6 +112,13 @@ public:
 		PF_ANIM_STATE, // InfantryState.anim_state (full off_8135F0 state id; -1 when unavailable)
 		PF_ANIM_PHASE_TICKS, // body-clip phase in IDA half-frame ticks; -1 when the compact omits it
 		PF_ANIM_REMOTE_REQUEST, // 1 = compact request needs receive-side arbitration; 0 = authoritative current state
+		// The SECONDARY (upper-body weapon) channel — the hold-pose ladder every
+		// observer re-derives for every player body, local or remote. -1 = no channel
+		// this frame. These MUST stay ahead of PF_AIM_OVERLAY_VALID: rows are seeded
+		// only up to that point, and anim state 0 is a valid key (anim_reset), so a
+		// zero-filled weapon state would splice the reset clip over every arm.
+		PF_WPN_ANIM_STATE,
+		PF_WPN_PHASE_TICKS, // secondary clip phase in IDA half-frame ticks
 		PF_HIDDEN,     // 1 when the entity is hidden
 		// Local render-only verdict: skip this placed entity's own world model.
 		// Does not mutate Entity.hidden, collision, simulation, or attached actors.
@@ -117,7 +126,7 @@ public:
 		PF_ALIVE,      // 1 when alive
 		PF_RESPAWN_REVISION, // decoded organic dead->alive epoch; resets remote body state
 		PF_TYPE_ID,    // items.def runtime type id from the wire (0 = none); keys the joiner's wire avatars
-		PF_WIRE_HANDLE,// (pool<<12)|slot wire handle from the decoded stream (joiner render key; 0 = none)
+		PF_WIRE_HANDLE,// (pool<<12)|slot wire handle; zero is a valid pool-0 identity
 		// Final output of anim::compute_aim_overlay_angles. Presentation consumes
 		// this result; it never repeats the mounted config selector.
 		PF_AIM_OVERLAY_VALID,
@@ -136,6 +145,26 @@ public:
 		// controller/gunner/driver (never passenger), presentation zero-scales
 		// BN17 at its animated joint while collision emits its literal zero row.
 		PF_RIGHT_HAND_COLLAPSED,
+		// The THIRD-PERSON held weapon: which ADM model this body is holding, and the
+		// weapon's own attach orientation (mission euler degrees). These sit in the
+		// zero-filled tail deliberately: a default ADM of 0 means DRAW NOTHING, which is
+		// both our weapon table's null row and the original's own precondition
+		// [orig: `if (entity->equippedAdmIndex)` @ 0x4e3c97]. The draw gate is folded in
+		// here rather than carried separately — a hidden weapon simply reports 0.
+		PF_HELD_WEAPON_ADM,
+		PF_HELD_WEAPON_PITCH_DEG,
+		PF_HELD_WEAPON_YAW_DEG,
+		PF_HELD_WEAPON_ROLL_DEG,
+		// Which of the original's TWO attach frames this body's weapon takes. Retail
+		// picks between them on one bit of the WEAPON-channel hold state:
+		// `g_animStateFlagsTable[entity+0x2C8] & 0x80` selects the hand-oriented frame
+		// (bone 16's matrix with a fixed calibration) instead of the entity angle triple
+		// [orig: gate @ 0x4b21b6, branch @ 0x4b220f]. Bit 0x80 is set for the knife,
+		// grenade and designator holds, both melee attacks, binoculars, BOTH reload
+		// states, and the death family — so this is an ordinary-play path, not an edge
+		// case. Zero (the default) means the entity-triple frame, which is what an
+		// unarmed or hidden body should report anyway.
+		PF_HELD_WEAPON_HAND_FRAME,
 		PF_STRIDE
 	};
 
@@ -182,6 +211,14 @@ private:
 	// Negative demand cache: one unresolved entity is attempted at most once per
 	// mission unless the host explicitly asks for another full resolve sweep.
 	std::unordered_map<uint16_t, uint64_t> collision_resolution_attempted_;
+	// Wire-side collision resolution for decoded pool-1 movers: runtime type id
+	// -> {model id, bound radius}, sharing the by-graphic caches above. -1 model
+	// with 0 radius latches an unresolvable type so it is attempted once.
+	struct WireCollisionShape {
+		int32_t model_id = -1;
+		float bound_radius = 0.0f;
+	};
+	std::unordered_map<uint16_t, WireCollisionShape> wire_collision_shape_by_type_;
 	// Only models with a sampler-live PANM track enter the Generic callback
 	// path. Inert PANM rows remain on CollisionWorld's bit-exact Simple path.
 	std::unordered_map<int32_t, Ref<NovaObjectData>> collision_pose_data_;
@@ -326,7 +363,34 @@ private:
 	bool joiner_ = false;
 	bool joiner_started_ = false;          // ClientHello emitted (Idle -> Hello)
 	bool joiner_local_spawned_ = false;    // L spawned at reached_in_match (one-shot guard)
-	uint16_t joiner_self_wire_handle_ = 0; // H: stamped in the C2S 0x0C + present self-filter
+	// Retail authenticates with one packed Avatars.def selection for each side.
+	// GameWorld resolves the active profile before enable_join; retain it here
+	// because a direct-loaded join rebuilds ClientRuntime in finish_load.
+	opennova::np::CharacterJoinVars join_character_vars_{};
+	bool join_character_vars_set_ = false;
+	// ClientRuntime raises a monotonic edge only for an ACK-qualified deployment
+	// release. The simulation remembers it separately from 0x0A health so a stale
+	// positive tail cannot revive a dead L.
+	uint64_t joiner_deployment_release_revision_seen_ = 0;
+	// S2C 0x50 re-latched OUR OWN team (the second byte_A85B48 writer). The join-time
+	// team arrives through spawn_from_self, so only later edges are applied here.
+	// [orig: NapiNPClientMsg_0x050 @0x431910 — the latch @0x4319db]
+	uint64_t joiner_self_team_revision_seen_ = 0;
+	bool joiner_redeploy_release_pending_ = false;
+	uint32_t joiner_redeploy_health_updates_at_release_ = 0;
+	// H is stamped in C2S 0x0C and used by the present self-filter. Zero is a
+	// valid handle; runtime_->has_self_handle() carries validity independently.
+	uint16_t joiner_self_wire_handle_ = 0;
+	// Last authoritative S2C 0x5A grant installed into the local slot pool.
+	// Requests may rebuild optimistically, but only a newer host grant becomes
+	// the durable spawn/respawn kit.
+	uint64_t joiner_applied_loadout_revision_ = 0;
+	// The shell applies the profile kit/class right after runtime setup — on a
+	// joiner that is BEFORE L exists (L spawns on the name-match). Latch the
+	// requested class here and stamp it with the equipped weapon at L's spawn,
+	// the same Player_InitPlayer-time arm the host's own spawn performs.
+	// [orig: Player_InitPlayer weapon leg @ 0x4e15f0]
+	int pending_local_player_class_ = -1;
 	// Send one framed datagram to the dialed host (the joiner's send_datagram).
 	void ship_to_host(const std::vector<uint8_t> &dg);
 	// SelfSpawn (mission i32 16.16 + full BAM32 orientation) -> PlayerSpawn for L.
@@ -337,6 +401,9 @@ private:
 	// player then locomotes through the same infantry motor as an NPC. [net-re §5.38]
 	opennova::world::PlayerInput player_input_{};
 	void apply_player_input_pre_tick();
+	// Retail's held-weapon draw gate, local-player branch — the weapon model is shown
+	// iff the soldier may fire it. [orig: Entity_CanFireWeapon @ 0x4dcb10]
+	bool local_held_weapon_visible(const opennova::world::Entity &p_entity) const;
 	// Retail has one input-owned entity yaw. An authoritative attach can snap the
 	// split world/AI copy during the logic tick, so mirror it back into the host
 	// latch before the next pre-tick input write can restore the old look.
@@ -442,6 +509,14 @@ private:
 	uint16_t local_round_sequence_ = 0;
 	uint64_t weapon_dry_serial_ = 0;
 	uint64_t weapon_reload_serial_ = 0;
+	uint64_t weapon_reload_applied_serial_ = 0;
+	// Every decoded S2C 0x49, including another player's/vehicle's notification.
+	// The apply serial above remains requester-local; this receive serial is a
+	// diagnostic/test witness that the server broadcast traversed the remote wire.
+	uint64_t weapon_reload_received_serial_ = 0;
+	uint16_t weapon_reload_received_entity_ =
+			opennova::world::EntityHandle::kInvalid;
+	uint16_t weapon_reload_received_param_ = 0;
 	uint64_t weapon_unscope_serial_ = 0;
 	uint64_t weapon_rescope_serial_ = 0;
 	// The action-begin seam: serial + the started slot id; the state dict resolves
@@ -503,7 +578,6 @@ private:
 	// original's per-entity previous-held record and suppressing false dips between
 	// differently named weapons that share one map.
 	// [orig: AdmDefs +0/+0xA4/+0xA8; the +0x371 = 20 switch stamp @ 0x4b46f5].
-	int weapon_hold_kind_ = 0;
 	int weapon_attack_kind_ = 0;
 	String weapon_anim_map_;
 	uint64_t weapon_anim_map_serial_ = 0;
@@ -521,6 +595,17 @@ private:
 	// default [orig: the default literal @ 0x5246be applies only when neither the
 	// mission entry nor the profile authored a buffer].
 	bool spawn_kit_set_ = false;
+	// The ACTIVE player weapon profile record — retail's g_charSelClass slot: two
+	// side blocks (blue/red), each carrying the class byte that selects both the wire
+	// class and one of five 2048-byte kit pages, plus the single-player page.
+	// [orig: PlayerProfile_LoadAllFromDisk @0x54f4d0 reads five 0x1080C records;
+	//  Game_StartMission @0x525767..@0x525836 selects the block and the page]
+	// Seeded from the shipped defaults so it is NEVER empty even when weapon.sav is
+	// absent [orig: PlayerProfile_InitDefaults @0x54bb40 — class 8 both sides,
+	// WPN_M4AUTO/WPN_AK47AUTO pages].
+	opennova::playersav::Record weapon_profile_ =
+			opennova::playersav::make_defaults().slots[0];
+	bool weapon_profile_loaded_ = false;
 	opennova::world::WeaponAvailability weapon_availability_;
 	// A queued manual switch: the FSM plays SWITCHFROM/SWITCHRANK on the outgoing
 	// weapon; its completion commits pending -> equipped [orig: MountWeaponSlot
@@ -535,6 +620,14 @@ private:
 	// idle — set by every switch commit and by the spawn mount
 	// [orig: the switch chain runs switchfrom -> mount -> switchto].
 	bool weapon_start_in_switchto_ = false;
+	// A weapon selection committed while the local player entity did not exist yet
+	// (the joiner applies its kit/grant before L spawns). Retail puts NO entity
+	// precondition on the presentation half of a selection — the FP viewmodel is
+	// re-resolved by a per-frame consumer off EquippedSlot [orig:
+	// Player_RenderFirstPersonViewModel @0x4DED60], so the notification must not be
+	// dropped. Latched here and replayed as exactly ONE PendingWeaponEvent at the
+	// joiner spawn block, naming the weapon the inventory actually selected.
+	bool weapon_presentation_pending_ = false;
 	void commit_pending_weapon_switch();
 	// Shared mount/deny routing for the category, cycle, and switchcategory walks
 	// [orig: Player_MountWeaponSlot @ 0x4dfa40 / the deny play @ 0x4e0354].
@@ -544,6 +637,37 @@ private:
 	// Player_InitPlayer's weapon leg [orig: @ 0x4e15f0]; shared by table load,
 	// respawn, and the ACCEPT apply (which passes the freshly stored kit).
 	void rebuild_local_player_loadout(bool p_select_spawn_default);
+	// Copies the assigned side's profile page into the resident kit buffer (spawn_kit_)
+	// in a live session — retail's single restrictionData [orig: Game_StartMission
+	// @0x525813; re-run per side by NapiNPClientMsg_TeamAssign @0x431a9a]. False when
+	// not in a session, before the catalog exists, or when the page resolves empty.
+	bool seed_session_kit_from_profile();
+	// Re-copies the page when the SIDE the team selector names stops matching the side
+	// the resident buffer came from — the S2C 0x04 latch arriving after the catalog, or
+	// a later S2C 0x50 reassignment [orig: byte_A85B48 @0x425499 / @0x4319db].
+	bool reseed_session_kit_on_side_change();
+	// Which side the resident kit buffer was last copied from (-1 = never seeded).
+	int weapon_profile_seeded_side_ = -1;
+	// Push the submission content (class + ADM rows + equipped combo) into the joiner
+	// runtime's 0x2F loadout-submission seam. No-op for hosts/SP.
+	void push_joiner_loadout_kit();
+	// Re-entry latch: rebuild_local_player_loadout re-pushes the seam once the live
+	// equipped combo has settled, so the push must never drive a rebuild back.
+	bool pushing_joiner_loadout_kit_ = false;
+	bool apply_local_player_loadout_impl(
+			const TypedArray<Dictionary> &p_kit, int p_player_class,
+			bool p_submit_joiner_request);
+	// Fold the latest authoritative S2C 0x5A grant into the local slot pool at
+	// the same recv-before-actions boundary as the retail handler.
+	void apply_joiner_authoritative_loadout();
+	// Project the requester-local decoded 0x0A mount relationship onto L only
+	// after the host confirms C2S 0x26/0x27.
+	void sync_joiner_authoritative_mount();
+	// The deploy/spawn-zone registry (letters/pick-index space), built lazily per
+	// load [orig: Entity_BuildSpawnZoneList @0x43EAE0].
+	const opennova::world::SpawnZoneRegistry &deploy_zone_registry();
+	opennova::world::SpawnZoneRegistry deploy_zone_registry_;
+	bool deploy_zone_registry_built_ = false;
 	// Copy each accepted kit row's fourth value into the retail per-ammo
 	// shooter damage-class table (1 = x0.9, 2 = x1.1).
 	void sync_local_player_damage_classes();
@@ -593,9 +717,21 @@ private:
 	opennova::np::NapiNPServerCtx &ctx_ = host_owner_.ctx;    // alias: host only (is_authority)
 	opennova::netsim::LoopbackChannel host_loop_;             // the host's own dcb-2 client; Server_TickUpdate's 0x0A target
 	std::unique_ptr<opennova::np::ClientRuntime> runtime_;    // HostClient (host/SP) OR Joiner; the present-snapshot source
+	// Retail loads this process-scoped table from charattr.def before joining.
+	// Keep the byte image outside ClientRuntime so a direct mission load can
+	// reinstall it when finish_load rebuilds an as-yet-unstarted joiner.
+	opennova::np::CharAttrChallengeTable charattr_challenge_table_{};
+	bool charattr_challenge_loaded_ = false;
 	opennova::bms::File mission_file_;                        // persisted so ctx_.mission outlives the match (the 0x0B burst body)
 	std::string joiner_player_name_;                          // persisted for the Joiner runtime ctor on (re)load
 	uint32_t now_tick_ = 0;                                   // the JOINER's per-frame clock (the host uses host_owner_.now_tick)
+	std::size_t joiner_last_gap_depth_ = 0;                   // ~1 Hz frozen-session tripwire state
+	uint32_t joiner_last_frontier_seq_ = 0;
+	uint32_t joiner_last_records_applied_ = 0;
+	uint32_t joiner_last_outbound_seq_ = 0;
+	bool joiner_diagnostic_sampled_ = false;
+	int joiner_flat_seconds_ = 0;
+	bool joiner_freeze_suspected_ = false;
 	// wire-id -> §5.10b replication class, built from items.def in resolve_item_traits.
 	// The DECODE-side twin of the per-entity net_class_code stamp: the runtime's client
 	// view sizes each inbound 0x0A tag-1 record by class, exactly as the retail client
@@ -609,15 +745,36 @@ private:
 	// Install item_class_table_ on runtime_'s view (no-op until both exist). Called from
 	// resolve_item_traits, finish_load (per-load runtime rebuild), and enable_join.
 	void install_item_class_resolver();
+	// Install or clear the retained boot charattr table on the current Joiner runtime.
+	void install_charattr_challenge_table();
+	// Install the retained retail player-profile join block on the current runtime.
+	void install_character_join_vars();
 	// Per-load host bring-up: mode 3 -> create_session(&host_loop_) -> configure_session_runtime
 	// -> Server_InitNewRoundState -> the faithful host-player auto-spawn. Mirrors apps/nw_server.
 	void bringup_host_runtime(const opennova::bms::File &file);
-	// The per-frame host owner loop (recv-drain -> tick_connections -> Server_TickUpdate -> S2C
-	// flush -> fold host_loop_ into ClientState). Socket legs gated on host_listen_ (pure SP has none).
+	// Route the listen host's socketless gameplay C2S through the same message
+	// dispatcher as remote connections before Server_TickUpdate drains 0x0C.
+	void drain_host_client_gameplay_requests();
+	// The per-frame host owner loop (local loopback gameplay + recv-drain -> tick_connections ->
+	// Server_TickUpdate -> S2C flush -> fold host_loop_ into ClientState). Socket legs gated on
+	// host_listen_ (pure SP has none).
 	void host_pump();
-	// The per-frame non-authority client loop (recv -> run_logic_tick(false) for L's motor ->
-	// Client_ProcessNetworkFrame -> ship the C2S 0x0C; spawn L on the in-match edge).
+	// The per-frame non-authority client loop (recv -> Client_ProcessNetworkFrame + decoded
+	// consequences -> run_logic_tick(false) for L's motor/weapon actions -> ship C2S; spawn L on
+	// the in-match edge).
 	void joiner_pump();
+	// Drain typed S2C gameplay events after the client recv pump: tag-2 fires
+	// spawn visual-only rounds; the requester's 0x49 echo performs its refill.
+	void apply_joiner_gameplay_events();
+	// Project persistent decoded remote poses into collision-only visual
+	// proxies: Player/Infantry rows join the person walk, pool-1 movers carry
+	// their authored collision geometry at the decoded pose. Wire H remains
+	// presentation identity; local World authority never receives a cloned
+	// entity or an H->L owner mapping.
+	void refresh_joiner_projectile_proxies();
+	// Wire-side authored-shape resolution for one decoded runtime type id
+	// (items.def graphic -> the shared by-graphic collision model cache).
+	WireCollisionShape wire_collision_shape_for_type(uint16_t type_id);
 
 	// Terrain the AI grounds on. We own copies of the host's depth buffer + 16x16 sector grid so
 	// the portable TerrainHeightField's raw pointers outlive the source NovaTerrainData and survive
@@ -670,6 +827,11 @@ protected:
 
 public:
 	NovaSimulation();
+	// A dying joiner sim ships the retail goodbye burst before the socket drops — retail sends
+	// its disconnect packets from the connection teardown that Destroy also runs, so freeing the
+	// sim (ESC abort, watchdog abort, return-to-menu) must not leak an admitted peer on the host.
+	// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253c0, called by Destroy]
+	~NovaSimulation() override;
 
 	// Load + promote the editor's live mission (the in-memory bms::File, including unsaved
 	// edits). This is the editor-integration entry: simulate exactly what is on screen.
@@ -729,15 +891,84 @@ public:
 	// --- co-op LAN joiner (D.2) -------------------------------------------
 	// Turn the sim into a co-op LAN JOINER: dial the host at `host_ip:port` and run
 	// the witnessed in-match JOIN as a non-authority client. `player_name` rides the
-	// ClientHello.co and is the key the host echoes into our organic-spawn record so
+	// game ClientAuth.NA and is the key the host echoes into our organic-spawn record so
 	// we self-identify (name-match) and learn our wire handle H. Call BEFORE loading
 	// the mission (the next load arms the joiner frame path). Implies the client view;
 	// a sim is host XOR joiner. Returns false if the socket can't be dialed.
 	bool enable_join(const String &p_host_ip, int p_port, const String &p_player_name);
 	bool is_joiner() const { return joiner_; }
-	// True once the joiner has name-matched its organic-spawn record (self handle H known).
+	// Set the per-side character ids/classes/avatar bytes carried by ClientAuth.
+	// Must be called before enable_join; later runtime rebuilds retain the values.
+	void set_join_character_profile(const Dictionary &p_profile);
+	// Load the process-scoped anti-cheat CHARACTER table before the first join
+	// network pump. Missing/empty charattr.def is soft and leaves all rows inactive,
+	// matching Game_Run's continue-after-error behavior.
+	bool load_charattr_challenge(
+			const Ref<class NovaResourceRoot> &p_resource_root);
+	// Ship the 0x46 ClientGoodBye burst now (idempotent; joiner-only no-op otherwise). The
+	// destructor calls this too, so explicit calls are only needed when the socket must close
+	// before the sim is freed.
+	void leave_net_session();
+	// Retail connects before loading the local map: drive only the socket/session
+	// legs until the terminal pre-world sync marker has been received and ACKed
+	// (S2C 0x7B identifies the mission earlier), then resume the same connection
+	// after the caller has loaded it. No World tick or gameplay uplink runs here.
+	void set_join_world_ready(bool p_ready);
+	// Freeze the renderer's unique loaded, non-foliage .3DI definition count
+	// into the joiner's C2S 0x3D paging seam. GameWorld calls this once after
+	// mission/render model setup and before revealing the loaded world; later
+	// S2C entity spawns and presentation loads deliberately cannot mutate it.
+	void finalize_loaded_model_challenge_snapshot();
+	bool poll_join_preload();
+	bool is_join_preload_ready() const;
+	// The joiner's admission-FSM stage name (diagnostics: the shell's post-load join
+	// watchdog names the stage a stalled join is parked in). Empty when not joining.
+	String get_join_admission_stage() const;
+	bool has_join_mission() const;
+	String get_join_server_name() const;
+	String get_join_mission_name() const;
+	String get_join_mission_file() const;
+	String get_join_expansion() const;
+	int64_t get_join_game_type() const;
+	String get_join_error() const;
+	// Session loss: empty while healthy, else a player-facing reason the shell surfaces the
+	// way it surfaces a join failure. Two causes — the host's explicit close (the punt
+	// channel) and in-match silence past the reap window. Retail exits the mission with a
+	// mapped exit reason here and shows no in-world dialog.
+	// [orig: the cs_dir0.timeout_ms = 120000 reap installed by CNapiNetwork_Init @0x4ca4a0
+	//  and the punt record CNapiNPConnection_HandleDescriptionPacket @0x621ae0, both ->
+	//  CNapiNetwork_OnDisconnectedFromServer @0x4c63d0]
+	String get_session_loss_reason() const;
+	// The same edge as a state test rather than a presentation string: in-world surfaces
+	// (the deploy screen) need to know the session is gone, not what to tell the player.
+	bool is_session_lost() const;
+	// True once the joiner has name-matched its organic-spawn record and received the
+	// applicable deployment release (self handle H known and gameplay uplink enabled).
 	bool is_joined_in_match() const;
-	// The JoinerSession phase as an int (JoinerSession::Phase), -1 when not joining.
+	// The per-second joiner trace is deliberately opt-in for release play. Set
+	// OPENNOVA_NET_DIAGNOSTICS=1 to emit it. The snapshot remains available so
+	// tests/debug UI can distinguish a real ordered gap from ordinary idle traffic.
+	bool is_joiner_network_diagnostics_enabled() const;
+	Dictionary get_joiner_network_diagnostics() const;
+	// Player-paced deployment (the deploy-map screen; net-re §5.61/§5.0d). True while
+	// the join owes the player a deployment pick or awaits the host's release of one —
+	// the shell shows the DEATH deploy screen and the join watchdog stops (the
+	// remaining transitions are player-paced).
+	bool is_join_deploy_pick_pending() const;
+	// The DEATH screen's SPAWNPOINTS_LIST rows: {param:int, letter:String,
+	// name_key:String} per team-owned secured deploy zone, letters/names keyed by the
+	// spawn-zone registry index. Row 0 (the Default Spawn, param 0) is the shell's.
+	// [orig: UI_UpdateDeathScreenContent @0x5536a0]
+	TypedArray<Dictionary> get_deploy_spawn_zones();
+	// Send the player's deploy pick: 0 = default spawn (0xFFFF), 65534 = auto team
+	// spawn (0xFFFE), else the 1-based registry index resolved to its entity handle.
+	// Re-picks while awaiting the release match retail (the host silently drops an
+	// invalid pick and the screen stays). [orig: Input_HandleActionBinding case 12]
+	bool send_deployment_pick(int p_param);
+	// The joiner's server-assigned team — the S2C 0x04 tail-byte latch the deploy
+	// screen colors/filters by [orig: byte_A85B48]. 0 when not joining.
+	int get_join_assigned_team() const;
+	// The JoinerConnection phase as an int (JoinerConnection::Phase), -1 when not joining.
 	int get_joiner_phase() const;
 	// The learned wire handle H, 0 until in-match (debug / test).
 	int get_joiner_self_handle() const;
@@ -757,9 +988,10 @@ public:
 	int spawn_local_player_at_start();
 	// True once a local player has been spawned (World::cached.local_player valid).
 	bool has_local_player() const;
-	// The local player's wire handle ((pool<<12)|slot), 0 when none. The wire present pass
-	// excludes it — the local player is drawn by LocalPlayerHost, not from the wire stream
-	// (host: its own pool-0 player; joiner: L, never present in the wire stream anyway).
+	// The local player's wire identity ((pool<<12)|slot). Packed zero is valid: callers that
+	// need presence use has_local_player()/the runtime's has_self_handle() instead of a sentinel.
+	// The host returns its pool-0 player; a joiner returns H, the host-assigned identity that its
+	// wire-present pass excludes while LocalPlayerHost draws the distinct local motor entity L.
 	int get_local_player_wire_handle() const;
 	// Feed one frame of player input: the move keys + look yaw/pitch (mission degrees). Applied
 	// to the player's body input at the top of the next frame. Movement keys + the lean
@@ -818,6 +1050,8 @@ public:
 	// MissionObjectPlacer.bms_to_godot_basis (the single-sourced frame conversion) and
 	// feeds NovaObjectModel.set_aim_overlay. Empty/invalid when no player.
 	Dictionary get_local_player_aim_overlay() const;
+	// The third-person held-weapon model name for an ADM index (weapon.def gfx3).
+	String get_weapon_third_person_model(int p_adm_index) const;
 
 	// --- the local player's equipped-weapon FSM (net-re §5.62) -------------
 	// Install the equipped weapon: p_def is the NovaWeaponDatabase weapon dict (the
@@ -927,6 +1161,20 @@ public:
 	bool apply_local_player_loadout(const TypedArray<Dictionary> &p_kit, int p_player_class);
 	// Commit the profile class without replacing a mission-authored weapon kit.
 	bool set_local_player_class(int p_player_class);
+	// Load the player's weapon profile (weapon.sav) from an ABSOLUTE filesystem path.
+	// This is a save file, not a mounted PFF/loose resource, so it is read through
+	// FileAccess rather than the resource root. Header gate: magic "FPBC" + version
+	// "0211", then five 0x1080C profile-slot records; slot 0 becomes the active
+	// record and its class bytes are clamped to [5,9]. A missing or malformed file is
+	// NOT fatal — the shipped defaults stay installed and an Error is returned so the
+	// caller can warn. [orig: PlayerProfile_LoadAllFromDisk @0x54f4d0 (the
+	// "expansion\\<g_ExpansionName>\\weapon.sav" path build @0x54f68c..@0x54f6b7);
+	// the session-start clamp apply_session_settings_to_globals @0x5516ab]
+	Error load_weapon_profile(const String &p_path);
+	// Read-only view of the active profile record for the shell's status copy:
+	// {loaded, blue: {player_class, avatar_a, avatar_b, avatar_packed, kit: [names]},
+	//  red: {...}}. The kit array is the SELECTED page — the one the class byte picks.
+	Dictionary get_weapon_profile_summary() const;
 	// Rebuild the local player's slot pool from the spawn kit and select the spawn
 	// default — the Player_InitPlayer weapon leg [orig: @ 0x4e15f0: display list ->
 	// table fill -> pool seed -> clip recalc -> SelectWeaponSlot(195) ->

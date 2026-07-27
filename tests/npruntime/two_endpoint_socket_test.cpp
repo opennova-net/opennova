@@ -6,12 +6,13 @@
 //
 // WHAT THIS PROVES (the P6 bar):
 //   (1) Over real sockets: handshake (0x41/0x42) -> the §5.2a spawn-gate burst -> the host streams the
-//       joiner's NAMED dcb-bearing 0x0C -> the joiner name-matches -> InMatch (learns wire handle H).
+//       joiner's NAMED dcb-bearing 0x0C -> the joiner name-matches and receives the applicable
+//       deployment release -> InMatch (learns wire handle H).
 //   (2) Per frame: ClientRuntime emits a framed C2S 0x0C (+ the §5.44 0x2C RTT housekeeping) over UDP ->
 //       handle_server_datagram surfaces PeerC2SInMatch -> apply_in_match_c2s stages it -> Server_TickUpdate
 //       drains+SNAPs the entity + fans an S2C 0x0A -> the owner reframes it 0x83 over UDP -> the client
-//       folds it into ClientState. The peer SNAPs to the uplink; the host's own player is untouched; the
-//       client's ClientState anchor == the joiner's post-SNAP position.
+//       folds it into ClientState. The peer SNAPs to the uplink, no synthetic host player exists, and
+//       the client's ClientState anchor == the joiner's post-SNAP position.
 //   (3) The host's emitted S2C stream (recorded at the joiner socket) appears in the §5.2a order, and —
 //       when the gitignored golden is present (NW_GOLDEN_LAN_JOIN) — agrees pairwise with the retail LAN
 //       host/join capture's S2C order on the common tags. Order-only (body byte-parity is deferred: our
@@ -29,7 +30,6 @@
 
 #include "host_test_setup.h"
 
-#include <netsim/loopback_channel.h>
 #include <netsim/udp_session_transport.h>
 
 #include <npwire/ingame_decode.h>
@@ -125,22 +125,20 @@ int main() {
 	mission.header.magic[2] = 'S';
 	mission.header.magic[3] = static_cast<char>(bms::kMinVersion);
 
-	// ---- host: stand up the Listen-host runtime (HostClient + a loopback host player at dcb 2). ----
+	// ---- host: stand up the dedicated HostOnly runtime (no local player). ----
 	np::HostOwner owner;
-	ns::LoopbackChannel host_loop;
-	owner.host_loopback = &host_loop;
 	owner.ctx.world = &world;
 	owner.ctx.mission = &mission;
 	np::HostConfig host_cfg;
 	host_cfg.config.server_name = "OpenNova nw-server";
-	host_cfg.config.max_players = 16; // host loopback occupies dcb 2; leave room for the joiner (D-NET-106)
+	host_cfg.config.max_players = 16;
 	host_cfg.socket_mode = np::SocketMode::Lan;
-	host_cfg.serve_and_play = false;         // headless: the loopback is discarded (mirrors apps/nw_server)
+	host_cfg.serve_and_play = false;
 	np::start_host_session(owner, host_cfg); // the SAME §5.0 bring-up apps/nw_server runs
 
 	// ---- joiner: a headless ClientRuntime over the joiner socket ----
 	const std::string kName = "SocketJoiner";
-	np::ClientRuntime client(ClientSession::Config::jointoperations(), kName);
+	np::ClientRuntime client(kName);
 
 	// ---- capture both directions at the joiner boundary (for the §5.2a order decode; the 0x42/0x82
 	//      handshake is included so decode_capture_to_messages recovers the SCRK). ----
@@ -187,8 +185,8 @@ int main() {
 		return 1;
 	}
 
-	// The host's bound entities: the joiner (type-1, keyed by its addr) and the host's own loopback
-	// player (type-2). owned_entity was bound by the automatic spawn pipeline.
+	// The dedicated host binds only the joiner (type-1, keyed by its addr);
+	// owned_entity was assigned by the automatic spawn pipeline.
 	const PeerAddr jpeer = joiner_peer_addr(joiner_port);
 	w::EntityHandle Hh{}, host_h{};
 	for (np::NapiNPConnection &c : owner.ctx.np_protocol.connection_list) {
@@ -200,8 +198,10 @@ int main() {
 		net::shutdown();
 		return 1;
 	}
-	const w::Entity *ho0 = host_h.valid() ? world.registry.get(host_h) : nullptr;
-	const w::Vec3 host_pos0 = ho0 ? ho0->position : w::Vec3{};
+	if (!expect(!host_h.valid(), "HostOnly creates no synthetic type-2 player")) {
+		net::shutdown();
+		return 1;
+	}
 
 	// ---- Phase B: in-match per-frame play — the 0x0C -> 0x0A round-trip over UDP ----
 	PlayerExtendedUplink up;
@@ -229,12 +229,6 @@ int main() {
 		                    je->position.y == static_cast<float>(w::from_fixed(up.pos_y)) &&
 		                    je->position.z == static_cast<float>(w::from_fixed(up.pos_z)),
 		            "joiner entity SNAPped to the C2S 0x0C uplink pose (delivered over UDP)") && ok;
-	}
-	if (ho0) {
-		const w::Entity *ho = world.registry.get(host_h);
-		ok = expect(ho && ho->position.x == host_pos0.x && ho->position.y == host_pos0.y &&
-		                    ho->position.z == host_pos0.z,
-		            "host's own player pose unchanged by the peer's 0x0C (entity-scoped owner gate)") && ok;
 	}
 	if (je) {
 		ok = expect(client.state().anchor_x == w::to_fixed(je->position.x) &&

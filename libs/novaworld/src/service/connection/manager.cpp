@@ -15,8 +15,17 @@ const char *drop_reason_name(DropReason r) {
 }
 
 void ConnectionManager::notify_handshake(Connection conn) {
+	if (conn.reported_id == 0) conn.reported_id = conn.id;
 	const auto existing_for_addr = registry_.find_by_addr(conn.addr);
-	if (existing_for_addr && existing_for_addr->id != conn.id && lost_handler_) {
+	if (existing_for_addr &&
+	    existing_for_addr->reported_id == conn.reported_id &&
+	    existing_for_addr->pn == conn.pn) {
+		// ClientHello is retransmitted before ClientAuth (and may be repeated
+		// later when ServerHello was delayed). Preserve the registry's
+		// synthetic id, Active state, SCRKs, and the listener's cached auth.
+		return;
+	}
+	if (existing_for_addr && lost_handler_) {
 		lost_handler_(*existing_for_addr, DropReason::Replaced);
 	}
 	registry_.add(conn);

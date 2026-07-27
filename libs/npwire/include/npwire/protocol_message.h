@@ -2,6 +2,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -164,15 +166,92 @@ bool encode_protocol_packet_plaintext(const ProtocolPacketHeader &hdr,
                                       std::string_view scrk,
                                       std::vector<uint8_t> &body_out);
 
-// The per-session SEQUENCING state (ADR 0013): one outbound counter + the last inbound seq echoed as
-// ack. Shared by the three framing paths (host S2C / joiner C2S / lobby C2S) that all fill a
-// ProtocolPacketHeader with `seq_num = next_outbound_seq++` and `ack_count = last_inbound_seq`. The
-// per-site initial value differs by convention and is preserved by each owner (in-match starts at 1;
-// the lobby field default is 0 but ClientSession::start() resets it to 1 — the live first packet is
-// seq=1 either way).
+// The per-session SEQUENCING state (ADR 0013): one outbound counter plus the inbound sequence echoed
+// as ACK. The three framing paths (host S2C / joiner C2S / lobby C2S) fill a ProtocolPacketHeader with
+// `seq_num = next_outbound_seq++` and `ack_count = last_inbound_seq`. Owners with a complete retail
+// recovery pump opt into contiguous admission; generic consumers use a no-queue high-water gate
+// that admits newer sequences across gaps and suppresses zero/stale/duplicate packets. The per-site
+// initial value differs by convention and is preserved by each owner
+// (in-match starts at 1; the lobby field default is 0 but ClientSession::start() resets it to 1 — the
+// live first packet is seq=1 either way).
+// One decoded future packet held behind a missing sequence. Retail keeps the encrypted packet on
+// its per-connection packet queue; retaining the decoded value here is equivalent at this seam.
+struct QueuedSessionPacket {
+	ProtocolPacketHeader header{};
+	std::vector<ProtocolMessage> messages;
+};
+
+// The default cs_dir0.packet_queue_max copied into every retail connection. The JOINTOPERATIONS
+// game template sets the same 100 as the NOVAWORLDUDP service template.
+// Future packets beyond this many queued sequence numbers are consumed but not retained.
+// [orig: CNapiNetwork_Init @0x4ca4a0 stores @0x4cab10/@0x4cabe0; HandleSessionPacket @0x626c18]
+constexpr size_t SESSION_PACKET_QUEUE_MAX = 100;
+
 struct SessionSequencing {
 	uint32_t next_outbound_seq = 1; // post-incremented per framed packet
-	uint32_t last_inbound_seq = 0;  // = last decoded hdr.seq_num, echoed as the next outbound ack_count
+	uint32_t last_inbound_seq = 0;  // highest contiguous inbound seq; echoed as next ack_count
+	// Only owners with a complete 0x44/0x84 receive-batch pump enable the retail contiguous gate.
+	// Generic protocol consumers preserve the earlier decode-and-latch behavior so sharing this
+	// framing helper cannot create an unrecoverable queue behind a missing packet.
+	bool ordered_recovery_enabled = false;
+	std::map<uint32_t, QueuedSessionPacket> queued_inbound;
+	// Set when any future packet is observed and cleared only at the owner's receive-batch boundary.
+	// The queue may have drained by then; in that case the boundary clears this without sending a
+	// needless NACK. This is the retail recv-pump latch, not a per-datagram send trigger.
+	bool missing_request_pending = false;
+	// Retail retains the reliable message nodes assigned to each outbound packet sequence, not the
+	// encrypted datagram. A requested resend reconstructs the records under that old sequence with
+	// the sender's current ACK in the session header.
+	std::map<uint32_t, std::vector<ProtocolMessage>> retained_outbound;
+	size_t retained_outbound_message_count = 0;
+	// Zero keeps retention disabled for protocol users that have not opted into the 0x44/0x84 flow.
+	// Joint Operations game-session connections set this to retail's cs_dir0.msg_out_max (1200).
+	size_t outbound_message_limit = 0;
+};
+
+// Joint Operations overrides the generic NAPI template's outbound-message pool to 0x4B0 records
+// for both directions. Connection owners opt into retention by assigning this limit; zero remains
+// the default for protocol-only callers that do not own the 0x44/0x84 recovery pump.
+// [orig: CNapiNetwork_Init @0x4CAB20/@0x4CABF0]
+constexpr size_t JO_SESSION_OUTBOUND_MESSAGE_MAX = 0x4B0;
+
+// Retail's 0x44/0x84 NACK carries at most sixteen requested packet sequences. Its outer-NWU-
+// decrypted body is `[peer_local_key:u32le][requested_seq:u32le...]`; there is no count field.
+// [orig: BuildMissingSeqList @0x6234B0; SendMissingSeqList @0x623560;
+// NapiNP_HandleResendList @0x623800]
+constexpr size_t SESSION_RESEND_LIST_MAX = 16;
+
+std::vector<uint32_t> build_session_missing_sequence_list(
+		const SessionSequencing &seq, bool include_zero);
+
+bool encode_session_resend_list(uint32_t remote_key,
+		const std::vector<uint32_t> &requested_sequences,
+		std::vector<uint8_t> &body_out);
+
+bool decode_session_resend_list(const uint8_t *body, size_t body_len,
+		uint32_t local_key, std::vector<uint32_t> &requested_sequences_out);
+
+// Metadata from packets admitted by the active receive policy. Header-only packets count as
+// admitted; stale/duplicate packets do not. Under ordered recovery, future packets remain
+// unadmitted until their gap closes, and max_ack_count preserves the cumulative effect when one
+// close drains several queued packet headers.
+struct SessionDeframeAdmission {
+	struct Packet {
+		ProtocolPacketHeader header;
+		std::vector<ProtocolMessage> messages;
+	};
+
+	bool admitted = false;
+	uint32_t max_ack_count = 0;
+	// True when this datagram was ahead of the contiguous frontier, including a duplicate already
+	// queued or a new packet dropped because the future queue is full. Runtime clears the equivalent
+	// retail latch after deciding whether a nonempty queue needs one 0x44/0x84 request.
+	bool future_packet_seen = false;
+	// Every packet admitted while closing this receive frontier, in sequence order. Keeping the
+	// packet header beside its messages is required by semantic handlers whose decision depends on
+	// the containing packet's cumulative ACK (deployment release is one such handler). The legacy
+	// flat `messages_out` remains available for callers that do not need packet-local metadata.
+	std::vector<Packet> packets;
 };
 
 // A per-session CRYPTO view (ADR 0013), assembled at frame/deframe time from a connection's handshake
@@ -184,6 +263,11 @@ struct SessionCrypto {
 	std::string_view out_scrk;       // encrypts our outbound inner region (frame_session_packet)
 	std::string_view in_scrk;        // decrypts the peer's inbound inner region (deframe_session_packet)
 	uint32_t session_id = 0;         // the peer local_key stamped into the outbound header
+	// The receiver's local key expected in an inbound header. `nullopt` preserves the generic
+	// decode/test API; live ordered JO/game-session owners provide the negotiated key. Retail
+	// rejects a mismatch before reading sequence state or decrypting/parsing the inner stream.
+	// [orig: NapiNPProtocol_HandleSessionPacket @0x626b72]
+	std::optional<uint32_t> expected_inbound_session_id;
 };
 
 // Frame `messages` into a ProtocolPacketHeader + SCRK-encrypted inner body (NO outer NWU envelope — the
@@ -201,17 +285,33 @@ bool frame_session_packet(SessionSequencing &seq, const SessionCrypto &crypto,
                           const std::vector<ProtocolMessage> &messages,
                           std::vector<uint8_t> &body_out);
 
-// Inverse: SCRK-decrypt `body` into `hdr_out` + `messages_out` and latch seq.last_inbound_seq =
-// hdr_out.seq_num. Returns false (leaving seq untouched) if the inner decode fails; the caller applies
-// its own failure policy. The outer NWU envelope must already be stripped by the caller.
-// [orig: CNapiNPConnection_ParseMessages @ 0x625bc0] reads seq at payload+0, ack at payload+4, the
-// reserved byte at payload+8, sets conn->recv_ack_seq = inbound seq (the value echoed as the next
-// outbound ack), and SCRK-decrypts the records with the INBOUND crypto_key (@ conn+0x10c) — the peer
-// key, distinct from the outbound tx_crypto_key. This direction split is what SessionCrypto models.
+// Reconstruct one requested session packet. An old sequence does not advance the counter; exactly
+// `next_outbound_seq` creates a new (normally empty) packet and advances it; a future sequence is
+// rejected. Missing/ACK-retired records produce a valid header-only packet, matching retail.
+bool frame_session_packet_for_sequence(SessionSequencing &seq, const SessionCrypto &crypto,
+		uint32_t packet_sequence, std::vector<uint8_t> &body_out);
+
+// Retire reliable records whose assigned packet sequence is covered by an ACK from a packet that
+// crossed the contiguous receive gate.
+void acknowledge_session_packets(SessionSequencing &seq, uint32_t ack_sequence);
+
+// Inverse: validate the receiver-local session_id, SCRK-decrypt `body`, then apply the owner's receive
+// policy. With `ordered_recovery_enabled`, exactly the next sequence dispatches; stale/duplicate
+// sequences succeed with no messages; future sequences queue until the gap closes, when all newly
+// contiguous messages drain in order. Generic consumers use a no-queue high-water policy: a newer
+// sequence is admitted even across a gap, while zero/stale/duplicate sequences are suppressed.
+// Returns false (leaving seq untouched) only if decode fails; a wrong session_id is quietly
+// consumed without changing sequencing state. `admission_out`, when supplied, distinguishes admitted
+// header-only packets from stale/future packets and reports the greatest ACK carried by every packet
+// admitted during this call. The outer NWU envelope must already be stripped.
+// [orig: NapiNPProtocol_HandleSessionPacket @0x626A00 gates/queues @0x626be0..0x626c3a;
+// CNapiNPConnection_ParseMessages @0x625bc0 latches the admitted seq and decrypts records with the
+// INBOUND crypto_key @conn+0x10c — the peer key, distinct from the outbound tx_crypto_key.]
 bool deframe_session_packet(SessionSequencing &seq, const SessionCrypto &crypto,
                             const uint8_t *body, size_t body_len,
                             ProtocolPacketHeader &hdr_out,
-                            std::vector<ProtocolMessage> &messages_out);
+                            std::vector<ProtocolMessage> &messages_out,
+                            SessionDeframeAdmission *admission_out = nullptr);
 
 // Applies retail fragment semantics and returns true when `payload_out`
 // contains a complete payload ready for higher-level dispatch.

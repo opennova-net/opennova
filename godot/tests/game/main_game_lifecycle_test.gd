@@ -82,6 +82,12 @@ func before_each() -> void:
 	for variable in ISOLATED_ENV:
 		_saved_env[variable] = OS.get_environment(variable)
 		OS.set_environment(variable, "")
+	# The persisted expansion is process-wide state an earlier suite file can leave set, and
+	# these cases join a fixture host that has no expansion archives at all. A stale name makes
+	# the host advertise an expansion this install cannot mount, which the joiner's preload
+	# correctly refuses (D-NET-178) — a failure about suite order, not about what is under test.
+	# after_each restores the whole config file, so pinning it here leaks nothing.
+	NovaResourceDirSettings.set_expansion("")
 
 
 func after_each() -> void:
@@ -167,6 +173,102 @@ func test_mission_return_restores_menu_frame_and_supports_another_load() -> void
 	menu_host.start_requested.emit("missing-mission.bms")
 	assert_true(_shell.is_world_loading(), "a failed load enters the deferred handoff")
 	await _wait_for_load_to_settle()
+	await get_tree().process_frame
+	_assert_clean_menu(world, terrain, menu_host, boot_clear)
+
+
+func test_join_loading_stays_raised_until_authoritative_admission() -> void:
+	_shell = await _make_shell()
+	if _shell == null:
+		return
+	var world = _shell.get_node("World")
+
+	# The host's world contents are irrelevant to this shell boundary; its
+	# authoritative session record names the packed mnml.bms installed in the
+	# lifecycle fixture, which is what the joiner must load locally.
+	var mission := NovaMissionData.new()
+	assert_eq(mission.create_default(), OK)
+	var host := NovaSimulation.new()
+	host.configure_host_session({
+		"server_name": "Loading Hold Host",
+		"mission_name": "Minimal",
+		"mission_file": "mnml.bms",
+		"gametype": 0x30020,
+		"max_players": 4,
+		# The lifecycle fixture ships base archives only. Say so on the wire: an unset field
+		# leaves the host advertising whatever expansion this machine last persisted, and the
+		# joiner's preload then correctly refuses a data set this install cannot mount
+		# (D-NET-178) — a failure about machine state, not about the loading-screen hold.
+		"expansion": "",
+	})
+	assert_true(host.enable_host_listen(0))
+	assert_true(host.load_from_mission_data(mission))
+
+	var observed := {"local_load": false, "held": false}
+	world.world_loaded.connect(func() -> void:
+		observed["local_load"] = true
+	, CONNECT_ONE_SHOT)
+	_shell.join_lan_server({
+		"host_ip": "127.0.0.1",
+		"port": host.get_host_listen_port(),
+		"server_name": "browse-time hint",
+	})
+
+	for _frame in range(1200):
+		host.step()
+		await get_tree().process_frame
+		if bool(observed["local_load"]) and not bool(observed["held"]):
+			# All handlers for world_loaded have now returned. The old behavior
+			# dismissed the loading screen in MainGame's handler here.
+			observed["held"] = _shell.is_world_loading() and not world.visible
+		if bool(observed["local_load"]) and not _shell.is_world_loading():
+			break
+
+	assert_true(bool(observed["local_load"]), "the joiner completed its local mission load")
+	assert_true(bool(observed["held"]),
+			"local world_loaded cannot reveal the joiner before host admission")
+	assert_false(_shell.is_world_loading(),
+			"the loading screen releases after the authoritative join edge")
+	assert_true(world.visible, "the admitted world is revealed")
+	assert_true(world.get_sim() != null and world.get_sim().is_joined_in_match())
+	host.free()
+
+
+# An in-match session loss must tear the world down to the menu through the SAME
+# abort presentation a join failure or a load abort uses -- retail exits the mission
+# with a mapped exit reason and shows no in-world dialog. The signal is GameWorld's
+# public surface, so this drives the shell leg without reaching into shell state; the
+# mission it happens to be in is irrelevant to the shell boundary under test.
+# [orig: the cs_dir0.timeout_ms = 120000 reap CNapiNetwork_Init @ 0x4ca4a0 ->
+#  CNapiNetwork_OnDisconnectedFromServer @ 0x4c63d0 -> g_mission_exit_reason]
+func test_in_match_session_loss_returns_to_the_menu() -> void:
+	_shell = await _make_shell()
+	if _shell == null:
+		return
+	var world = _shell.get_node("World")
+	var terrain = world.get_node("NovaTerrain")
+	var menu_host = _shell.get_node("MenuLayer/MenuHost")
+	var boot_clear: Color = world.get_current_frame_clear_color()
+	assert_true(world.has_signal("session_lost"),
+			"GameWorld publishes the in-match session-loss edge")
+
+	menu_host.start_requested.emit("mnml.bms")
+	await _wait_for_world_load(world)
+	await _wait_for_visible_terrain(terrain)
+	_assert_loaded(world, terrain, menu_host)
+
+	world.session_lost.emit("lost connection to the host (no traffic for 120 seconds)")
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_assert_clean_menu(world, terrain, menu_host, boot_clear)
+
+	# The shell is usable again straight afterwards: a loss is an abort, not a wedge.
+	menu_host.start_requested.emit("mnml.bms")
+	await _wait_for_world_load(world)
+	await _wait_for_visible_terrain(terrain)
+	_assert_loaded(world, terrain, menu_host)
+	menu_host.return_to_menu_requested.emit()
+	await get_tree().process_frame
 	await get_tree().process_frame
 	_assert_clean_menu(world, terrain, menu_host, boot_clear)
 

@@ -215,11 +215,22 @@ bool motor_item_sweep(World &world, CollisionWorld *collision, const LiveRound &
     trace.owner = r.owner;
     trace.radius_q16 = 0;
     trace.ammo_flags = 0; // foliage/material gates ride the caller ammo below
+    // Pools 2/1 only: no person walk, so a bystander cannot mask the vehicle
+    // behind them (the post-trace class filter below cannot recover a farther
+    // hit the nearest-person result already consumed).
+    trace.walk_persons = false;
+    // A visual client's decoded remote throwable sweeps the wire-keyed dyn
+    // proxies exactly like the bullet walk (round_sim.cpp): on a retail client
+    // this sweep IS the ordinary pool-2/1 walk over its wire-built entities.
+    trace.include_wire_proxies =
+        r.consequence_mode == RoundConsequenceMode::VisualOnly;
+    trace.shooter_wire_handle = r.shooter_handle;
+    trace.shooter_carrier_wire_handle = r.shooter_carrier_handle;
     const ProjectileHit hit = collision->trace_projectile(world, trace);
     if (!hit.hit()) return false;
     if (hit.hit_class != ProjectileHitClass::StaticEntity &&
         hit.hit_class != ProjectileHitClass::DynamicEntity)
-        return false; // terrain/water/person legs are not part of the motor sweep
+        return false; // terrain/water legs are not part of the motor sweep
     out = hit;
     return true;
 }
@@ -333,7 +344,8 @@ void follow_parent(World &world, LiveRound &r) {
 // ----------------------------------------------------------------------------
 static bool motor_nade(World &world, RoundSim &sim, LiveRound &r,
                        const AmmoTableEntry &ammo, CollisionWorld *collision,
-                       const terrain::TerrainHeightField *terrain) {
+                       const terrain::TerrainHeightField *terrain,
+                       bool allow_consequences) {
     if (r.parent.valid()) follow_parent(world, r);
     MotorFrame f;
     load_frame(r, f);
@@ -436,7 +448,11 @@ static bool motor_nade(World &world, RoundSim &sim, LiveRound &r,
             f.px = hit.position_q16.x;
             f.py = hit.position_q16.y;
             f.pz = hit.position_q16.z;
-            if (bounce_eligible && hit.geometry_entity.valid()) {
+            // Every sweep return is an item hit; a wire-proxy hit carries no
+            // registry identity but still reflects (retail's decoded pool-1
+            // entities bounce grenades). reflect_velocity's -v fallback covers
+            // the normal-less sphere stand-ins.
+            if (bounce_eligible) {
                 const int32_t n[3] = {hit.normal_q16.x, hit.normal_q16.y,
                                       hit.normal_q16.z};
                 reflect_velocity(f, n);
@@ -487,7 +503,7 @@ static bool motor_nade(World &world, RoundSim &sim, LiveRound &r,
             } else {
                 push_motor_effect(sim, r, 26, r.pos, world.logic_tick);
             }
-            detonate_round(world, r, r.pos, ammo);
+            if (allow_consequences) detonate_round(world, r, r.pos, ammo);
             r.det_at_expiry = false;
             return false; // slot releases
         }
@@ -503,7 +519,7 @@ static bool motor_nade(World &world, RoundSim &sim, LiveRound &r,
 static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
                          const AmmoTableEntry &ammo, CollisionWorld *collision,
                          const terrain::TerrainHeightField *terrain,
-                         bool claymore) {
+                         bool claymore, bool allow_consequences) {
     if (r.parent.valid()) follow_parent(world, r);
     MotorFrame f;
     load_frame(r, f);
@@ -587,11 +603,15 @@ static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
             f.py = hit.position_q16.y;
             f.pz = hit.position_q16.z;
             ++r.bounce_count;
-            if (hit.geometry_entity.valid()) {
+            {
                 const int32_t n[3] = {hit.normal_q16.x, hit.normal_q16.y,
                                       hit.normal_q16.z};
                 reflect_velocity(f, n);
-                if (throwable_surface_accepts_stick(hit.normal_q16)) {
+                // Stick/parenting needs a registry entity: a wire-proxy hit
+                // reflects but cannot parent — device-on-decoded-vehicle
+                // tracking is the D-THROW-7/D-WPN-8 residual.
+                if (hit.geometry_entity.valid() &&
+                    throwable_surface_accepts_stick(hit.normal_q16)) {
                     // stick to the face
                     stick_pose_from_normal(n, claymore, r.yaw_bam, r.pitch_bam,
                                            r.roll_bam);
@@ -631,7 +651,8 @@ static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
         // rest leg], then convert.
         if (!r.parent.valid()) r.pos.z += static_cast<float>(from_fixed(4096));
         r.vel = Vec3{0.0f, 0.0f, 0.0f};
-        world.throwables.place_from_round(world, r, ammo);
+        if (allow_consequences)
+            world.throwables.place_from_round(world, r, ammo);
         return false; // the round slot releases [orig: source round expires]
     }
     return true;
@@ -639,15 +660,19 @@ static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
 
 bool throwable_motor_tick(World &world, RoundSim &sim, LiveRound &round,
                           const AmmoTableEntry &ammo, CollisionWorld *collision,
-                          const terrain::TerrainHeightField *terrain) {
+                          const terrain::TerrainHeightField *terrain,
+                          bool allow_consequences) {
     switch (round.motor) {
     case ThrowClass::kNade:
-        return motor_nade(world, sim, round, ammo, collision, terrain);
+        return motor_nade(world, sim, round, ammo, collision, terrain,
+                          allow_consequences);
     case ThrowClass::kSatchel:
     case ThrowClass::kAVMine: // AT mine authors move_function schl
-        return motor_charge(world, sim, round, ammo, collision, terrain, false);
+        return motor_charge(world, sim, round, ammo, collision, terrain, false,
+                            allow_consequences);
     case ThrowClass::kClaymore:
-        return motor_charge(world, sim, round, ammo, collision, terrain, true);
+        return motor_charge(world, sim, round, ammo, collision, terrain, true,
+                            allow_consequences);
     default:
         // no motor bound: the round drifts unmoved (retail leaves +452 null)
         return true;

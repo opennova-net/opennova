@@ -273,15 +273,90 @@ func test_runtime_expansion_override_chain() -> void:
 	var resources := NovaResourceRoot.new()
 	# Packed runtime (no /d): archive chain {name}L.pff > {name}.pff > base; loose ignored.
 	assert_eq(resources.mount_runtime(root, "jox01"), OK)
+	assert_eq(resources.get_expansion(), "jox01", "A real expansion mount reports itself.")
 	assert_eq(resources.read_file("shared.env").get_string_from_utf8(), "local env", "{name}L.pff wins among archives.")
 	assert_eq(resources.read_file("exponly.3di").get_string_from_utf8(), "exp model", "Expansion archive beats base.")
 	assert_eq(resources.read_file("baseonly.trn").get_string_from_utf8(), "base trn", "Base archive still reachable.")
 	# With /d the loose expansion file overrides every archive.
 	assert_eq(resources.mount_runtime(root, "jox01", true), OK)
 	assert_eq(resources.read_file("shared.env").get_string_from_utf8(), "loose env", "Loose expansion file wins under /d.")
-	# A missing expansion falls back to base-game mounting (no error).
+	# A missing expansion falls back to base-game mounting (no error). get_expansion() must
+	# report the FALLBACK, not echo the request: it is the only evidence a caller whose data
+	# set has to match a peer's has that the mount did not take (the LAN joiner, D-NET-178).
 	assert_eq(resources.mount_runtime(root, "doesnotexist"), OK)
+	assert_eq(resources.get_expansion(), "",
+		"A silently-unmounted expansion must never be reported as mounted.")
 	assert_eq(resources.read_file("baseonly.trn").get_string_from_utf8(), "base trn")
+	assert_false(resources.has_file("exponly.3di"), "and the expansion archive really is gone")
+
+
+func test_runtime_remount_in_place_switches_expansion() -> void:
+	# Re-mounting a LIVE runtime root replaces its data set rather than layering onto it:
+	# the LAN joiner reconciles an already-mounted root against the host's authoritative
+	# expansion (D-NET-178), so nothing the previous mount indexed or decoded may survive.
+	var root := _make_flat_root("remount_expansion")
+	DirAccess.make_dir_recursive_absolute(root.path_join("expansion/jox01"))
+	_write_pff(root.path_join("resource.pff"), [
+		{"name": "shared.env", "bytes": "base env"},
+		{"name": "baseonly.trn", "bytes": "base trn"},
+		{"name": "briefing.pcx", "bytes": _solid_test_pcx(Color.RED)},
+	])
+	_write_pff(root.path_join("expansion/jox01/jox01.pff"), [
+		{"name": "shared.env", "bytes": "exp env"},
+		{"name": "exponly.3di", "bytes": "exp model"},
+		{"name": "briefing.pcx", "bytes": _solid_test_pcx(Color.BLUE)},
+	])
+
+	var resources := NovaResourceRoot.new()
+	assert_eq(resources.mount_runtime(root), OK)
+	assert_true(resources.is_runtime_mount())
+	assert_eq(resources.get_expansion(), "")
+	assert_eq(resources.read_file("shared.env").get_string_from_utf8(), "base env")
+	assert_false(resources.has_file("exponly.3di"))
+	var base_texture: Texture2D = resources.load_texture("briefing.pcx")
+	assert_not_null(base_texture)
+	if base_texture != null:
+		assert_true(base_texture.get_image().get_pixel(0, 0).is_equal_approx(Color.RED))
+
+	# Same object, no clear() in between.
+	assert_eq(resources.mount_runtime(root, "jox01"), OK)
+	assert_true(resources.is_runtime_mount(), "A remount stays a runtime mount.")
+	assert_eq(resources.get_expansion(), "jox01", "get_expansion() reports the data set the remount landed on.")
+	assert_eq(resources.read_file("shared.env").get_string_from_utf8(), "exp env",
+		"The expansion archive wins after the remount; the previous mount's entry is gone.")
+	assert_eq(resources.read_file("baseonly.trn").get_string_from_utf8(), "base trn", "Base archives stay mounted.")
+	assert_true(resources.has_file("exponly.3di"), "Expansion-only entries appear after the remount.")
+	var expansion_texture: Texture2D = resources.load_texture("briefing.pcx")
+	assert_not_null(expansion_texture)
+	if expansion_texture != null:
+		assert_true(
+			expansion_texture.get_image().get_pixel(0, 0).is_equal_approx(Color.BLUE),
+			"The decoded-texture cache must not serve the previous mount's image."
+		)
+
+
+func test_is_runtime_mount_discriminates_runtime_from_editor_mounts() -> void:
+	# The discriminator for a caller re-mounting a root it did not create: only a live
+	# mount_runtime() mount may be re-mounted with mount_runtime.
+	var root := _make_flat_root("mount_kind")
+	_write_file(root.path_join("Alpha.TRN"), "loose trn")
+	_write_pff(root.path_join("resource.pff"), [{"name": "Bravo.env", "bytes": "archived env"}])
+
+	var resources := NovaResourceRoot.new()
+	assert_false(resources.is_runtime_mount(), "A never-mounted root is not a runtime mount.")
+	assert_eq(resources.set_root_dir(root), OK)
+	assert_false(resources.is_runtime_mount(), "An editor loose mount is not a runtime mount.")
+	assert_eq(resources.mount_runtime(root), OK)
+	assert_true(resources.is_runtime_mount())
+
+	var loose_only := _make_flat_root("mount_kind_loose_only")
+	_write_file(loose_only.path_join("Alpha.TRN"), "loose trn")
+	assert_eq(resources.mount_runtime(loose_only), ERR_FILE_NOT_FOUND)
+	assert_false(resources.is_runtime_mount(), "A failed runtime mount leaves no runtime mount behind.")
+
+	assert_eq(resources.mount_runtime(root), OK)
+	resources.clear()
+	assert_false(resources.is_runtime_mount(), "clear() drops the runtime mount.")
 
 
 func test_boot_manifest_reports_missing_fatal_resources() -> void:

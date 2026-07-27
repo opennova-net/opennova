@@ -231,6 +231,8 @@ struct Vfs::Impl {
     std::unique_ptr<ArchiveMount> primary;
     std::vector<std::unique_ptr<ArchiveMount>> secondaries; // add order
     std::string game_root;
+    // The expansion whose layers actually mounted (empty after the silent base fallback).
+    std::string mounted_expansion;
     std::string last_error;
     int scr_policy = VFS_SCR_VERSION_DETECT; // how read_file keys SCR payloads (game-driven)
     VfsMountMode session_mount_mode = VfsMountMode::PackedWithLooseOverride;
@@ -453,6 +455,9 @@ bool Vfs::mount_game(const std::string &game_root, const std::string &expansion,
         exp_dir = root / "expansion" / expansion;
         if (fs::exists(exp_dir / (expansion + ".pff"), ec)) {
             have_expansion = true;
+            // Record what actually mounted so callers can tell a real expansion mount from
+            // the fallback below without re-deriving the predicate (D-NET-178).
+            impl_->mounted_expansion = expansion;
         }
         // A missing/unknown expansion silently falls back to base-game mounting.
     }
@@ -530,6 +535,7 @@ void Vfs::clear() {
     impl_->primary.reset();
     impl_->secondaries.clear();
     impl_->game_root.clear();
+    impl_->mounted_expansion.clear();
     impl_->last_error.clear();
     impl_->session_mount_mode = VfsMountMode::PackedWithLooseOverride;
     impl_->index.clear();
@@ -640,6 +646,7 @@ std::vector<VfsFileLocation> Vfs::list_files() const {
 }
 
 const std::string &Vfs::game_root() const { return impl_->game_root; }
+const std::string &Vfs::mounted_expansion() const { return impl_->mounted_expansion; }
 const std::string &Vfs::last_error() const { return impl_->last_error; }
 
 std::vector<std::string> vfs_list_expansions(const std::string &game_root) {

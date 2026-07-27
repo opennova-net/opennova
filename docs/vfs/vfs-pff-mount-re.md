@@ -87,7 +87,26 @@ stands confirmed.
    (File_SetLoggingEnabled @ 0x75a470).
 7. **Remount** (menu expansion switch): Expansion_SwitchTo @ 0x5688c0 —
    LoadAssets → PFF_CloseAllOpenArchives @ 0x4a4380 → OpenAllArchives →
-   full asset reload.
+   full asset reload (weapon defs, player profiles, mission list, sound
+   profiles, items.def, entity-def callbacks). Two properties the host copy
+   must honour: the switch is a NO-OP when `expansion\<exp>\<exp>.pff` is
+   absent (`@ 0x568914` — `g_ExpansionName` keeps its old value and the caller
+   is not told), and it mutates the ONE global mount rather than building a
+   second one. **Joining a session drives the same call** before connecting
+   (`UI_JoinSelectedSession @ 0x5699d0` @ 0x569b02, from the browser session
+   record's expansion @ 0x569afa) — the host copy's join leg is D-NET-178.
+   Ours re-points a live `NovaResourceRoot` in place (`mount_runtime` on an
+   already-mounted root): the archive set is REPLACED, not layered
+   (`Vfs::mount_game` clears first), the index is re-scanned, `expansion_` is
+   re-derived from what actually layered, and the texture-resolver caches plus
+   the global cache epoch are invalidated BEFORE the new mount populates
+   anything. `mount_runtime` reports the mount kind through
+   `NovaResourceRoot::is_runtime_mount()`, so callers can tell a runtime mount
+   (the only kind that layers expansions) from an editor `set_root_dir` one.
+   Pinned by `resource_root_contract_test.gd`
+   (`test_runtime_remount_in_place_switches_expansion`,
+   `test_is_runtime_mount_discriminates_runtime_from_editor_mounts`) and the
+   in-place re-scan block in the `resource_index` ctest.
 
 ## Structures + globals
 

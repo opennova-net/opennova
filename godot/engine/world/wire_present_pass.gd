@@ -58,6 +58,31 @@ var _row_kinds := PackedInt32Array()
 var _row_indices := PackedInt32Array()
 var _row_nodes: Array = []
 var _deferred_nodes: Array = []
+# Capability bits + last-applied edge caches, hoisted into the row plan exactly like
+# MissionPresentPass's #302 gating: the per-tick loop pays no has_method(), no aim
+# clear on already-clear rows, and no body-anim re-dispatch (with its per-call
+# state->key String) while the wire state is unchanged.
+const CAP_AIM := 1
+const CAP_CTRL := 2
+const CAP_PART := 4
+const CAP_REMOTE_BODY := 8
+const CAP_BODY_CLIP := 16
+const CAP_BODY_CLIP_AT := 32
+const CAP_BODY_SLOT_AT := 64
+const CAP_BODY_SLOT := 128
+const CAP_RHC := 256
+const CAP_WPN := 512
+var _row_caps := PackedInt32Array()
+var _row_aim_valid := PackedInt32Array()
+var _row_rhc := PackedInt32Array()
+var _row_anim_state := PackedInt32Array()
+var _row_anim_request := PackedInt32Array()
+# The third-person held weapon per wire handle: {handle: Node3D} and the gfx3 each live
+# node was built from, so a weapon switch rebuilds and an unarmed row frees. Kept beside
+# _nodes rather than parented under the body: NovaObjectModel.rebuild() frees all of its
+# children, so a child weapon would vanish on any body rebuild.
+var _weapon_nodes := {}
+var _weapon_graphics := {}
 
 
 # Runtime handles encode the original entity pool in their high nibble. That
@@ -100,20 +125,36 @@ func get_stats() -> Dictionary:
 ## same packed pool/slot handle that keys this pass.
 func resolve_wire_handle(wire_handle: int) -> Node3D:
 	var node_v: Variant = _nodes.get(wire_handle)
-	return node_v as Node3D if node_v is Node3D and is_instance_valid(node_v) else null
+	# is_instance_valid FIRST: an `is` type check on an already-freed instance is a
+	# script error (the world teardown frees the container's children before this
+	# pass tears down, so freed entries here are an ordinary case, not a bug).
+	return node_v as Node3D if is_instance_valid(node_v) and node_v is Node3D else null
 
 
 func _free_wire_node(wire_handle: int) -> void:
 	var node_v: Variant = _nodes.get(wire_handle)
-	if node_v is Node3D and is_instance_valid(node_v):
+	if is_instance_valid(node_v) and node_v is Node3D:
 		(node_v as Node3D).queue_free()
 	_nodes.erase(wire_handle)
 	_respawn_revisions.erase(wire_handle)
+	_free_held_weapon(wire_handle)
+
+
+func _free_held_weapon(wire_handle: int) -> void:
+	var weapon_v: Variant = _weapon_nodes.get(wire_handle)
+	if is_instance_valid(weapon_v) and weapon_v is Node3D:
+		(weapon_v as Node3D).queue_free()
+	_weapon_nodes.erase(wire_handle)
+	_weapon_graphics.erase(wire_handle)
 
 
 func reset_runtime_state() -> void:
 	for handle_v in _nodes.keys():
 		_free_wire_node(int(handle_v))
+	for handle_v in _weapon_nodes.keys():
+		_free_held_weapon(int(handle_v))
+	_weapon_nodes.clear()
+	_weapon_graphics.clear()
 	_nodes.clear()
 	_unresolved.clear()
 	_respawn_revisions.clear()
@@ -127,12 +168,26 @@ func teardown() -> void:
 
 # Keep the wire-driven skeletal primary pose on the same projection path as
 # MissionPresentPass. Infantry uses its exact state-to-clip key; compatible
-# non-infantry nodes retain the coarse body-slot fallback.
-func _apply_body_anim(node, snap: PackedFloat32Array, base: int) -> void:
-	var anim_phase := int(snap[base + NovaSimulation.PF_ANIM_PHASE_TICKS])
+# non-infantry nodes retain the coarse body-slot fallback. REMOTE-request rows
+# (the joiner's wire players) skip re-dispatch entirely while the wire state is
+# unchanged: the model consumes phase only on an accepted transition and already
+# early-outs on a same-state request, so the skip is behavior-identical and
+# avoids the per-call state->key String for every row every tick. Host-loopback
+# rows (remote_request 0) keep per-tick dispatch — their playhead rides
+# play_body_clip_at's phase.
+func _apply_body_anim_gated(
+		node, snap: PackedFloat32Array, base: int, caps: int, row: int) -> void:
 	var anim_state := int(snap[base + NovaSimulation.PF_ANIM_STATE])
-	var remote_request := (
-			int(snap[base + NovaSimulation.PF_ANIM_REMOTE_REQUEST]) != 0)
+	var remote_request_i := int(snap[base + NovaSimulation.PF_ANIM_REMOTE_REQUEST])
+	if (row >= 0 and remote_request_i != 0
+			and anim_state == int(_row_anim_state[row])
+			and remote_request_i == int(_row_anim_request[row])):
+		return
+	if row >= 0:
+		_row_anim_state[row] = anim_state
+		_row_anim_request[row] = remote_request_i
+	var anim_phase := int(snap[base + NovaSimulation.PF_ANIM_PHASE_TICKS])
+	var remote_request := remote_request_i != 0
 	if anim_state >= 0:
 		var key := NovaSimulation.infantry_anim_key(anim_state)
 		if not key.is_empty():
@@ -140,30 +195,30 @@ func _apply_body_anim(node, snap: PackedFloat32Array, base: int) -> void:
 			# clip time and completion. Forward every raw wire request; the model
 			# consumes player phase only on an accepted transition and starts a
 			# queued state at tick zero. [orig: @0x4c0859/@0x4c11a6]
-			if remote_request and node.has_method("apply_remote_body_state"):
+			if remote_request and (caps & CAP_REMOTE_BODY) != 0:
 				node.apply_remote_body_state(anim_state, key,
 						NovaSimulation.infantry_anim_flags(anim_state), anim_phase)
 				return
-			if remote_request and node.has_method("play_body_clip"):
+			if remote_request and (caps & CAP_BODY_CLIP) != 0:
 				node.play_body_clip(key)
 				return
 			# Host-loopback rows expose the authority's already-accepted CURRENT
 			# state and playhead. Re-arbitrating that result can defer it for an
 			# extra loop, so pose it directly as before.
 			if (not remote_request and anim_phase >= 0
-					and node.has_method("play_body_clip_at")):
+					and (caps & CAP_BODY_CLIP_AT) != 0):
 				node.play_body_clip_at(key, anim_phase)
 				return
-			if not remote_request and node.has_method("play_body_clip"):
+			if not remote_request and (caps & CAP_BODY_CLIP) != 0:
 				node.play_body_clip(key)
 				return
 	var body_anim_slot := int(snap[base + NovaSimulation.PF_BODY_ANIM_SLOT])
 	if body_anim_slot < 0:
 		return
-	if anim_phase >= 0 and node.has_method("play_body_anim_at"):
+	if anim_phase >= 0 and (caps & CAP_BODY_SLOT_AT) != 0:
 		node.play_body_anim_at(body_anim_slot, anim_phase)
 		return
-	if node.has_method("play_body_anim"):
+	if (caps & CAP_BODY_SLOT) != 0:
 		node.play_body_anim(body_anim_slot)
 
 
@@ -218,12 +273,17 @@ func present_snapshot(
 	if (_sim == null or _placer == null or _container == null
 			or not is_instance_valid(_container) or stride <= 0):
 		return
-	var local_handle := int(_sim.get_local_player_wire_handle())
+	# Packed handle zero is a valid pool-0 identity, so the numeric getter cannot
+	# also carry presence. Fold the sim's explicit validity seam into a -1
+	# sentinel: the row filter needs no separate flag, and the row-plan key then
+	# distinguishes "no local player yet" from a genuine slot-0 local handle.
+	var local_handle := int(_sim.get_local_player_wire_handle()) \
+			if bool(_sim.has_local_player()) else -1
 	if _row_plan_is_current(snap, stride, layout_revision, local_handle):
 		for row in range(_row_nodes.size()):
 			_present_wire_row(
 					_row_nodes[row], snap, int(_row_bases[row]),
-					int(_row_handles[row]), false, 0, 0)
+					int(_row_handles[row]), false, 0, 0, row)
 		return
 	_begin_row_plan(snap, stride, layout_revision, local_handle)
 	var count: int = snap.size() / stride
@@ -232,10 +292,10 @@ func present_snapshot(
 		var base := i * stride
 		var type_id := int(snap[base + NovaSimulation.PF_TYPE_ID])
 		var handle := int(snap[base + NovaSimulation.PF_WIRE_HANDLE])
-		# A zero type/handle row is the joiner's self-filtered echo (H) or an unresolved record;
-		# the local player handle is the host's own pool-0 player (drawn by LocalPlayerHost). Skip
-		# both — on the joiner local_handle is L, which never appears in the wire stream (harmless).
-		if type_id == 0 or handle == 0 or handle == local_handle:
+		# A zero type row is the joiner's self-filtered echo (H) or an unresolved record;
+		# the local player handle is drawn by LocalPlayerHost. Packed handle zero is a
+		# valid pool-0 slot, so local_handle is -1 (never a wire value) with no local player.
+		if type_id == 0 or handle == local_handle:
 			continue
 		if _synthetic_origin_only and not (
 				int(snap[base + NovaSimulation.PF_KIND]) == 255
@@ -289,7 +349,7 @@ func present_snapshot(
 			spawned_now = true
 		_append_row_plan(node, snap, base, handle, type_id)
 		_present_wire_row(node, snap, base, handle, spawned_now,
-				runtime_kind, visual_item_id)
+				runtime_kind, visual_item_id, _row_nodes.size() - 1)
 	_stats.live = live.size()
 	for handle_v in _nodes.keys():
 		var handle := int(handle_v)
@@ -320,6 +380,11 @@ func _clear_row_plan() -> void:
 	_row_indices.clear()
 	_row_nodes.clear()
 	_deferred_nodes.clear()
+	_row_caps.clear()
+	_row_aim_valid.clear()
+	_row_rhc.clear()
+	_row_anim_state.clear()
+	_row_anim_request.clear()
 
 
 func _begin_row_plan(
@@ -335,6 +400,31 @@ func _begin_row_plan(
 	_row_plan_local_handle = local_handle
 
 
+static func _node_caps(node: Variant) -> int:
+	var caps := 0
+	if node.has_method("set_aim_overlay"):
+		caps |= CAP_AIM
+	if node.has_method("set_ctrl_value") and node.has_method("clear_ctrl_value"):
+		caps |= CAP_CTRL
+	if node.has_method("set_part_phase"):
+		caps |= CAP_PART
+	if node.has_method("apply_remote_body_state"):
+		caps |= CAP_REMOTE_BODY
+	if node.has_method("play_body_clip"):
+		caps |= CAP_BODY_CLIP
+	if node.has_method("play_body_clip_at"):
+		caps |= CAP_BODY_CLIP_AT
+	if node.has_method("play_body_anim_at"):
+		caps |= CAP_BODY_SLOT_AT
+	if node.has_method("play_body_anim"):
+		caps |= CAP_BODY_SLOT
+	if node.has_method("set_right_hand_collapsed"):
+		caps |= CAP_RHC
+	if node.has_method("set_weapon_channel"):
+		caps |= CAP_WPN
+	return caps
+
+
 func _append_row_plan(
 		node: Variant,
 		snap: PackedFloat32Array,
@@ -348,6 +438,12 @@ func _append_row_plan(
 	_row_kinds.append(int(snap[base + NovaSimulation.PF_KIND]))
 	_row_indices.append(int(snap[base + NovaSimulation.PF_INDEX]))
 	_row_nodes.append(node)
+	_row_caps.append(_node_caps(node))
+	# Last-applied edge state (-1 = unknown, first hot frame always applies).
+	_row_aim_valid.append(-1)
+	_row_rhc.append(-1)
+	_row_anim_state.append(-2)
+	_row_anim_request.append(-1)
 
 
 func _row_plan_is_current(
@@ -409,7 +505,9 @@ func _present_wire_row(
 		handle: int,
 		spawned_now: bool,
 		runtime_kind: int,
-		visual_item_id: int) -> void:
+		visual_item_id: int,
+		row: int = -1) -> void:
+	var caps := int(_row_caps[row]) if row >= 0 else _node_caps(node)
 	var respawn_revision := int(
 			snap[base + NovaSimulation.PF_RESPAWN_REVISION])
 	var respawned_since_present := (
@@ -426,17 +524,54 @@ func _present_wire_row(
 		snap[base + NovaSimulation.PF_ROLL_DEG])
 	var entity_basis := MissionObjectPlacer.bms_to_godot_basis(rot)
 	var root_basis := (PresentAimOverlay.root_basis(snap, base, entity_basis)
-			if node.has_method("set_aim_overlay") else entity_basis)
+			if (caps & CAP_AIM) != 0 else entity_basis)
 	var next_transform := Transform3D(root_basis, pos)
 	if node.transform != next_transform:
 		node.transform = next_transform
-	PresentAimOverlay.apply(node, snap, base, false)
-	PresentEmplacedWeapon.clear(node)
-	_apply_procedural_part(node, snap, base)
-	PresentEmplacedWeapon.apply(node, snap, base, false)
+	# The mounted right-hand collapse rides its own packed field (the bundled
+	# legacy apply() drove it); edge-gated to the value change like MissionPresentPass.
+	if caps & CAP_RHC:
+		var rhc := int(snap[base + NovaSimulation.PF_RIGHT_HAND_COLLAPSED])
+		if row < 0 or rhc != int(_row_rhc[row]):
+			node.set_right_hand_collapsed(rhc != 0)
+		if row >= 0:
+			_row_rhc[row] = rhc
+	# Aim overlay, edge-gated like MissionPresentPass: apply while valid, clear only
+	# on the valid->invalid edge instead of every tick.
+	if caps & CAP_AIM:
+		var aim_valid := int(snap[base + NovaSimulation.PF_AIM_OVERLAY_VALID])
+		if aim_valid != 0:
+			PresentAimOverlay.apply_valid(node, snap, base, false)
+		elif row < 0 or int(_row_aim_valid[row]) != 0:
+			node.set_aim_overlay([])
+		if row >= 0:
+			_row_aim_valid[row] = aim_valid
+	if caps & CAP_CTRL:
+		# Semantic mount ownership must clear before generic model-order channels
+		# and re-apply after them — only meaningful on nodes with CTRL channels.
+		PresentEmplacedWeapon.clear(node)
+		if caps & CAP_PART:
+			_apply_procedural_part(node, snap, base)
+		PresentEmplacedWeapon.apply(node, snap, base, false)
+	elif caps & CAP_PART:
+		_apply_procedural_part(node, snap, base)
 	if respawned_since_present and node.has_method("reset_remote_body_state"):
 		node.reset_remote_body_state()
-	_apply_body_anim(node, snap, base)
+		if row >= 0:
+			_row_anim_state[row] = -2 # force the next body-anim dispatch through
+	_apply_body_anim_gated(node, snap, base, caps, row)
+	# The upper-body weapon channel: the hold pose this player's held weapon and
+	# scope state select. The sim derives the state (there is no anim id on the
+	# wire — every observer re-derives it); -1 means this row has no channel this
+	# frame, which clears any pose left over from the weapon it was holding before.
+	# [orig: the selection Entity_UpdateInfantryPlayerBody @0x4b5dad, which retail
+	#  runs for every player body it draws, not just the local one]
+	if caps & CAP_WPN:
+		var wpn_state := int(snap[base + NovaSimulation.PF_WPN_ANIM_STATE])
+		node.set_weapon_channel(
+				NovaSimulation.infantry_anim_key(wpn_state) if wpn_state >= 0 else "",
+				int(snap[base + NovaSimulation.PF_WPN_PHASE_TICKS]))
+	_update_held_weapon(handle, node, snap, base)
 	_respawn_revisions[handle] = respawn_revision
 	var next_visible := (
 			int(snap[base + NovaSimulation.PF_HIDDEN]) == 0
@@ -448,5 +583,83 @@ func _present_wire_row(
 		_node_spawned_callback.call(node, runtime_kind, visual_item_id)
 
 
+## World position of a named userpoint on this wire body's HELD WEAPON — the anchor
+## retail's adm-arm fire effect spawns at. The weapon model is drawn rigid at the
+## attach transform, so a model-space userpoint just rides that transform; no bone
+## walk is needed, unlike the character's own userpoints.
+##
+## Returns the body's own origin when the weapon, its model data or the named point
+## cannot be resolved: retail's deepest fallback is the entity origin, NOT the wire
+## fire position (which is the shooter's eye), so falling back to the caller's origin
+## would defeat the point of anchoring at all.
+## [orig: the rigid weapon draw @0x4e3d71; the userpoint fallback @0x401867..0x401887]
+func muzzle_world_for(handle: int, userpoint: String) -> Vector3:
+	var node_v: Variant = _nodes.get(handle)
+	var body_origin := Vector3.INF
+	if is_instance_valid(node_v) and node_v is Node3D:
+		body_origin = (node_v as Node3D).global_transform.origin
+	if userpoint.is_empty():
+		return body_origin
+	var weapon_v: Variant = _weapon_nodes.get(handle)
+	if not is_instance_valid(weapon_v) or not (weapon_v is Node3D):
+		return body_origin
+	var weapon := weapon_v as Node3D
+	if not weapon.visible or not weapon.has_method("get_object_data"):
+		return body_origin
+	var data = weapon.get_object_data()
+	if data == null or not data.has_method("get_user_point_count"):
+		return body_origin
+	for i in range(int(data.get_user_point_count())):
+		var info: Dictionary = data.get_user_point_info(i)
+		if String(info.get("name", "")).nocasecmp_to(userpoint) == 0:
+			return weapon.global_transform * Vector3(info.get("position", Vector3.ZERO))
+	return body_origin
+
+
 func entity_count() -> int:
 	return _nodes.size()
+
+
+## This body's third-person gun — retail's draw 5, for a remote player. The sim already
+## folded the draw gate in: a hidden or unarmed body reports ADM 0, which is both our
+## weapon table's null row and the original's own `if (entity->equippedAdmIndex)`
+## precondition, so there is no separate visibility field to consult.
+##
+## The model is drawn RIGID (one matrix into every bone slot), so it needs no skeleton and
+## no clip of its own; it is posed entirely by bone 16's joint plus the weapon's own attach
+## basis, which is neither bone 16's rotation nor any aim-overlay class.
+## [orig: BoneCallback_org0_World draw 5 @0x4e3c87..0x4e3d99; matrix @0x4b2180..0x4b22f8;
+##  gate Entity_CanFireWeapon @0x4dcb10]
+func _update_held_weapon(handle: int, node: Node3D, snap: PackedFloat32Array, base: int) -> void:
+	var adm := int(snap[base + NovaSimulation.PF_HELD_WEAPON_ADM])
+	var graphic := ""
+	if adm > 0 and _sim != null and _sim.has_method("get_weapon_third_person_model"):
+		graphic = String(_sim.get_weapon_third_person_model(adm))
+	if graphic != String(_weapon_graphics.get(handle, "")):
+		_free_held_weapon(handle)
+		if not graphic.is_empty() and _placer != null:
+			var built: Node3D = _placer.build_model_from_graphic(
+					graphic, "", _container, "", _env_node)
+			if built != null:
+				built.name = "WireWeapon_%04x" % handle
+				_weapon_nodes[handle] = built
+		_weapon_graphics[handle] = graphic
+	var weapon_v: Variant = _weapon_nodes.get(handle)
+	if not is_instance_valid(weapon_v) or not (weapon_v is Node3D):
+		return
+	var weapon := weapon_v as Node3D
+	if adm <= 0 or not node.visible:
+		weapon.visible = false
+		return
+	var attach: Variant = PresentHeldWeapon.attach_transform(
+			node,
+			Vector3(
+					snap[base + NovaSimulation.PF_HELD_WEAPON_PITCH_DEG],
+					snap[base + NovaSimulation.PF_HELD_WEAPON_YAW_DEG],
+					snap[base + NovaSimulation.PF_HELD_WEAPON_ROLL_DEG]),
+			snap[base + NovaSimulation.PF_HELD_WEAPON_HAND_FRAME] != 0.0)
+	if attach == null:
+		weapon.visible = false
+		return
+	weapon.global_transform = attach as Transform3D
+	weapon.visible = true

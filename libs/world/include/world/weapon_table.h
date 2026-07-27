@@ -57,10 +57,28 @@ struct WeaponTableEntry {
     // duplicate third-person emplacement for a local first-person gunner.
     // [orig: Entity_RenderVehicleModel @0x440824/@0x440833]
     bool has_first_person_model_reference = false;
+    // The THIRD-PERSON world model this weapon is drawn as in a soldier's hands
+    // (weapon.def `gfx3`). Kept HERE, on the table the runtime already indexes by ADM
+    // index, so a held weapon resolves through the one catalog the wire's index actually
+    // refers to. NOTE the IDB locals in WeaponDef_ResolveAllReferences @0x54042c are
+    // swapped: `model_1p` there reads +0x170, which is this field.
+    // [orig: WeaponDef.tpModel +0x170, read @ 0x4e3cd3]
+    std::string third_person_model;
     // weapon_class routing slot (0=accessory 1=primary 2=secondary 3=grenade). The
     // switch eligibility exempts 1/2 from the has-ammo requirement [orig: AdmDef+0x3A4
     // read @0x4e0294; keyword 'weapon_class' -> +0x3A4].
     int32_t weapon_class_slot = 0;
+    // The THIRD-PERSON body-channel triple. The original keeps no per-player copy of
+    // these: the body updater indexes the AdmDefs table by the entity's OWN equipped
+    // index every selection pass (`dword_24E8084[280 * entityData->equippedAdmIndex]`),
+    // which is what lets every observer re-derive any player's upper-body pose from the
+    // one wire byte at entity+0x2B0. Keeping them here rather than on a per-player
+    // scalar is what makes a REMOTE player's hold pose resolvable at all.
+    // [orig: special_hold AdmDef+0xA4 read @ 0x4b5dba; attack_anim +0xA8 read
+    //  @ 0x542bbc; run_anim +0xAC read @ 0x4b72cf]
+    int32_t special_hold = 0; // 1..8 selects the hold-pose ladder; 0 = rifles (mirror)
+    int32_t attack_anim = 0;  // 1 knife_attack 62 / 2 grenade_attack 63; else no stamp
+    int32_t run_anim = 0;     // run-gait class
     // Per-char-class startrounds overrides at the original's raw value-table indices
     // (medic=1 sniper=2 gunner=3 rifleman=5 engineer=6; 0/4 unused; 0 = absent)
     // [orig: 'classrounds' handler @0x543ab0 -> AdmDef+0x60+value*4].

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <map>
 #include <string>
@@ -20,11 +21,37 @@ namespace opennova::np {
 inline constexpr uint32_t kHostPlayerDcb = 2;
 inline constexpr uint32_t kFirstJoinerDcb = kHostPlayerDcb + 1;
 
+// Retail's Joint Operations connection template bounds the reliable outbound-message pool at
+// 0x4B0 records.
+// NapiNPMessage_Create rejects a new record when pending + retained + 1 exceeds this field; admitted
+// peer ACKs retire retained records. Keep this opt-in at the JO in-match connection seam. The
+// NOVAWORLDUDP lobby ClientSession has no witnessed 0x44/0x84 owner in this slice and remains on the
+// generic, recovery-disabled SessionSequencing behavior.
+// [orig: CNapiNetwork_Init @0x4CAB20/@0x4CABF0 writes cs_dir0.msg_out_max = 0x4B0;
+// NapiNPMessage_Create @0x627FC0 checks the combined count]
+inline constexpr std::size_t JO_GAME_SESSION_OUTBOUND_MESSAGE_MAX =
+		JO_SESSION_OUTBOUND_MESSAGE_MAX;
+
+// Both JO game-session direction profiles reap a connection after 120000 ms without receive
+// activity. The client keepalive interval is deliberately shorter (30000 ms).
+// [orig: CNapiNetwork_Init @0x4caa81/@0x4cab54]
+inline constexpr uint32_t JO_GAME_SESSION_TIMEOUT_MS = 120000;
+
+inline SessionSequencing make_jo_game_session_sequencing(
+		uint32_t next_outbound_seq = 1, uint32_t last_inbound_seq = 0) {
+	SessionSequencing sequencing;
+	sequencing.next_outbound_seq = next_outbound_seq;
+	sequencing.last_inbound_seq = last_inbound_seq;
+	sequencing.ordered_recovery_enabled = true;
+	sequencing.outbound_message_limit = JO_GAME_SESSION_OUTBOUND_MESSAGE_MAX;
+	return sequencing;
+}
+
 // The per-connection lifecycle phase a server-side node walks from a fresh datagram to an
 // in-match player (§5.0 / §5.2a). Names mirror the witnessed original flow:
 //
+//   0x41 [NapiNPProtocol_HandleClientHello @0x6213b0] -> emit 0x81 statelessly
 //   New -> ValidateJoin [CNapiNetwork_ValidateJoinRequest @0x4c61b0]
-//       -> HelloReceived 0x41 [NapiNPProtocol_HandleClientHello @0x6213b0] -> emit 0x81
 //       -> Joined        0x42 [NapiNPProtocol_HandleClientJoin  @0x62b750] -> emit 0x82 (SCRK)
 //       -> NewConnection      [NapiNPServer_HandleNewConnection  @0x4c8040]
 //       -> InitRound          [Server_InitNewRoundState          @0x51c8e0]
@@ -39,7 +66,6 @@ inline constexpr uint32_t kFirstJoinerDcb = kHostPlayerDcb + 1;
 enum class ConnectionPhase : uint8_t {
 	New = 0,
 	ValidateJoin,
-	HelloReceived,
 	Joined,
 	NewConnection,
 	InitRound,
@@ -49,6 +75,21 @@ enum class ConnectionPhase : uint8_t {
 	Spawned,
 	InMatch,
 	Goodbye,
+};
+
+// The three-turn game admission exchange after 0x42/0x82 key setup. A fresh remote connection may
+// decrypt SESSION traffic at AwaitJoinRequest, but it is not a player yet: only the witnessed
+// 0x00 JOIN -> 0x01 form post -> 0x02 challenge echo sequence makes it spawn-eligible. `Complete`
+// is the default for type-2 loopback/synthetic connections, which do not traverse the UDP join FSM.
+// Rejected is a transient signal to the protocol owner to tear the pending connection down.
+// [wire: retail LAN frames 8-13; orig: NapiNPServerMsg_0x000/001/002
+// @0x512AA0/@0x512ED0/@0x512FD0]
+enum class GameAdmissionStage : uint8_t {
+	Complete = 0,
+	AwaitJoinRequest,
+	AwaitFormPost,
+	AwaitPaddingEcho,
+	Rejected,
 };
 
 // The §5.2a initial-state burst cursor for one connection — Server_SendInitialGameStateToPlayer's
@@ -75,11 +116,6 @@ struct InitialStateBurst {
 	                                    // same datagram batch and the client never gets to send 0x2F.
 	// (the prior loadout_wait_ticks fallback counter was removed — the phase-8 wait has NO
 	//  timeout: the golden host emits nothing in-match until the joiner's 0x2F, D-NET-145)
-	uint16_t roster_wait_ticks = 0;     // ticks waited for the post-handshake round-trip (roster_pushed)
-	                                    // before starting the world-stream — auto-proceeds after a
-	                                    // generous window so the opennova client (which doesn't send
-	                                    // C2S 0x01/0x02) isn't stuck; the retail client sets
-	                                    // roster_pushed via its C2S 0x02 long before this fires.
 	bool     spawned = false;           // set with game_state==9 (the PeerSpawned source)
 };
 
@@ -110,8 +146,9 @@ struct PreSpawnJoinerPose {
 // side by the ASSIGNED team and stamps the entity. [orig: client emit
 // CNapiServerInfo_SerializeToSession @0x4c3650; host parse NapiNPProtocol_HandleClientJoin
 // @0x62b750 CU loop -> NapiNetConfig_LoadFromConnTags @0x4c7260 (jsp[56..63] + ci0.lo); consume
-// Server_PlayerAdd @0x51cbc0. Wire: golden retail-ashi5a 0x42 f=199140 carries CI0=512 CI1=33287
-// TR=-1 CTA=CTB=8 VCA=1 VCB=4 — the joiner's 0x0C record echoes 0x8207/4. net-re D-NET-146]
+// Server_PlayerAdd @0x51cbc0. Wire example: golden retail-ashi5a 0x42 f=199140 carries CI0=512
+// CI1=33287 TR=-1 CTA=CTB=8 VCA=1 VCB=4 — profile-derived values, not protocol defaults; the
+// joiner's 0x0C record echoes 0x8207/4. net-re D-NET-146]
 struct CharacterJoinVars {
 	uint16_t char_id[2] = {0, 0};   // CI0 / CI1 -> jsp[56] / jsp[58]
 	uint8_t team_request = 0;       // TR -> jsp[60] (retail clamp: != 0xFF && >= 2 -> 0xFF)
@@ -170,11 +207,16 @@ struct SessionReplyState {
 	// pool-0 entity (team @entity+344), so the reply builders now read the handle from
 	// link.owned_entity.packed and the team from the live registry Entity through it — not a parallel
 	// cache. player_slot (roster ORDER, not stored on the entity) stays a field; player_name is the
-	// echoed ClientHello.co the entity does not carry in the reimpl. The pre-World reactive path
+	// echoed game ClientAuth.NA the entity does not carry in the reimpl. The pre-World reactive path
 	// (bind_session_reply_player) now stamps link.owned_entity with the bare wire handle instead of a
 	// separate handle cache, so a World-less session-responder host resolves the same way.
 	std::string player_name;
 	uint8_t player_slot = 0;
+	// S2C 0x04 advertises player_slot before Server_BuildPlayerInfoAndAdd runs.
+	// Keep that pre-spawn table claim explicit because slot 0 is a valid identity,
+	// not an available/uninitialized sentinel. Player-add consumes the claim; a
+	// connection erase releases it.
+	bool player_slot_reserved = false;
 };
 
 // One node on the host's connection_list — the reimpl of a NapiNPConnection [orig: the list
@@ -188,6 +230,16 @@ struct NapiNPConnection {
 	// [orig +0x18] ConnectionId / dcb — the join-order id a player record is matched by [orig:
 	// NapiNP_GetLocalConnectionId @0x4c6d40; Player_FindLocalPlayerEntity @0x4e0090 numeric match].
 	uint32_t connection_id = 0;
+
+	// The PER-PLAYER tick seed shipped as S2C 0x61 and stamped into this player's slot as the
+	// fire-freshness floor. Retail re-rolls it as `((rand() & 0xFE) + 1) << 16` on join, death,
+	// revive and deploy release, so it is per-connection state, never a session constant — a
+	// shared constant would re-seed every client's clock to the same value on every deploy.
+	// The zero form is the witnessed round-end disarm.
+	// [orig: Server_SendRandomSeedToPlayer @0x5101a0 — value @0x5101d4, slot stamp
+	//  playerCtx+0x178D8 / arm +0x178E0; senders @0x51a982 join, @0x516ef4 / @0x51796d death,
+	//  @0x517e47 revive; disarm @0x510237]
+	uint32_t tick_seed = 0;
 
 	// [orig: NapiNPConnection_Create @0x62ACB0 direction mirroring, §6.5] 1 = server-side
 	// connection (the host's view of a client), 2 = client-side connection (a client's view of
@@ -209,8 +261,8 @@ struct NapiNPConnection {
 	PeerAddr peer{};               // the transport-addr key (distinct from connection_id; the
 	                               // host scans connection_list by this to route a datagram).
 
-	std::string pn;                // ClientHello.pn — drives classify_session_protocol
-	std::string player_name;       // ClientHello.co — echoed into the organic-spawn 0x0C (D.0)
+	std::string pn;                // ClientHello.pn — game-session protocol identity
+	std::string player_name;       // game ClientAuth.na — echoed into the organic-spawn 0x0C (D.0)
 	std::string client_scrk;       // ClientAuth.scrk — decrypts inbound 0x43
 	std::string server_scrk;       // our SCRK — encrypts outbound 0x83, echoed in ServerAuth
 	uint32_t client_ck = 0;        // ClientAuth.ck -> session_id on our S2C
@@ -218,7 +270,12 @@ struct NapiNPConnection {
 	                               // leg compares a repeat 0x42 against [orig: session_keys.client_id
 	                               // == CI && session_keys.remote_key == CK @ HandleClientJoin 0x62b750]
 	uint32_t server_sk = 0;        // our ServerAuth.SK
-	SessionSequencing seq{};       // outbound seq (from 1) + last inbound ack [ADR 0013 shared framing]
+	SessionSequencing seq = make_jo_game_session_sequencing();
+	                               // outbound seq (from 1) + last inbound ack [ADR 0013 shared framing]
+	uint32_t active_send_elapsed_ms = 0; // retained-message active-send interval; reset by every
+	                                     // framed S2C packet, ticked by tick_connections
+	uint32_t receive_inactive_ms = 0;     // elapsed since the last cryptographically receiver-valid
+	                                     // packet; the 120 s timeout sweep resets it on activity
 	uint32_t peer_acked_seq = 0;   // highest hdr.ack_count the peer has echoed = the last of OUR 0x83
 	                               // seqs it confirmed. Drives the initial-state backlog throttle: the
 	                               // original stalls both burst tracks while the connection's
@@ -229,11 +286,14 @@ struct NapiNPConnection {
 	                               // counts unconfirmed outbound datagrams (next_outbound_seq-1 minus
 	                               // this); exact retail inc/dec sites pending an IDA pass.
 	std::string session_id;        // key into the GameServerRuntime sessions_ (the peer label)
+	GameAdmissionStage admission_stage = GameAdmissionStage::Complete;
+	uint32_t admission_padding_x = 0; // S2C 0x02 challenge prefix the C2S echo must preserve
+	uint32_t admission_padding_y = 0;
 
-	// self_id (the joiner's own ConnectionId / dcb / unk_18, learned from its in-match 0x48
-	// client-ack) UNIFIES onto connection_id above (+0x18) — the value the client's
-	// Player_FindLocalPlayerEntity @0x4e0090 numeric-matches. Written only once self_id_seen.
-	bool self_id_seen = false;             // true once the 0x48 client-ack has been parsed
+	// self_id (the joiner's own ConnectionId / dcb / unk_18) UNIFIES onto connection_id above
+	// (+0x18), the value Player_FindLocalPlayerEntity @0x4e0090 numeric-matches. LAN latches the
+	// host-assigned id after admission 0x02; a later 0x48 echo may restamp it (NovaWorld supplies it).
+	bool self_id_seen = false;             // true only once player admission has completed
 	bool world_stream_announced = false;   // F3 edge-latch (PeerEnteredWorldStreaming fires once)
 	bool spawned_announced = false;        // edge-latch (PeerSpawned fires once)
 
@@ -245,6 +305,13 @@ struct NapiNPConnection {
 
 	// The joiner's 0x42 CU character vars (above) — parsed at the join, consumed by the player add.
 	CharacterJoinVars char_vars{};
+
+	// Reserved before S2C 0x04 advertises the team, then consumed by the later
+	// player-add pass. The validity bit is separate because team 0 is the future
+	// spectator value, not an uninitialized sentinel.
+	// [orig: playerSlot+416 is populated before NetPacket_WriteSlotAssignment @0x502b30]
+	bool assigned_team_valid = false;
+	uint8_t assigned_team = 0;
 
 	// Host-side per-weapon-slot fire/ammo state, by slot combo (WeaponSlotState above). Seeded
 	// lazily on the first 0x06 for a combo; refilled by the 0x25 relay. (D-NET-152)
