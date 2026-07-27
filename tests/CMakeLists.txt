@@ -1724,6 +1724,21 @@ add_executable(netsim_world_stream_extractors_test netsim/world_stream_extractor
 target_link_libraries(netsim_world_stream_extractors_test PRIVATE opennova_netsim)
 add_test(NAME netsim_world_stream_extractors COMMAND netsim_world_stream_extractors_test)
 
+# The non-COOP follower repro: replays the retail vehicle-session golden through
+# NetClientView and pins every organic-parented pool-1 spawn (§5.11 spawnFlags
+# 0x0100) to its own §5.10b compact wire positions. Env-gated: needs the
+# gitignored golden (NW_GOLDEN_VEHICLE_SESSION, DEFAULT below) and an items.def
+# class table (NW_ITEMS_DEF); skips clean when either is absent.
+add_executable(netsim_client_view_capture_parent_follow_test
+    netsim/client_view_capture_parent_follow_test.cpp)
+target_link_libraries(netsim_client_view_capture_parent_follow_test
+    PRIVATE opennova_netsim opennova_npwire opennova_def opennova_scr
+    opennova_app_common)
+target_compile_definitions(netsim_client_view_capture_parent_follow_test PRIVATE
+    DEFAULT_VEHICLE_SESSION_PCAP="${CMAKE_SOURCE_DIR}/.scratch/golden/retail-vehicle-session.pcapng")
+add_test(NAME netsim_client_view_capture_parent_follow
+    COMMAND netsim_client_view_capture_parent_follow_test)
+
 # npruntime tests — the IDA-faithful in-match NAPI NP runtime (the named server/client
 # state machines + frame loop). Server-first (the plan's P0..P8).
 # P0/P1: the in-process listen-server bring-up state writes (§5.0).

@@ -272,6 +272,20 @@ void NetClientView::refresh_parented_pool_entities() {
 	for (int depth = 0; depth < 8; ++depth) {
 		for (ClientEntityState &child : state_.entities) {
 			if (child.parent_handle == 0xFFFFu) continue;
+			// Only the addeweap/no-callback family rides this persistent
+			// recompose: those children never receive compact motion samples,
+			// so the load-time 0x0D parent relation is their only pose source.
+			// A compact-sampled class (player/vehicle/infantry) moves by its
+			// OWN records — its carrier composition happens per record on the
+			// record's own carrier field — and its 0x0D parentHandle is the
+			// occupantEntity/+368 DRIVER back-reference, never a transform
+			// parent [orig: 0x0D store @0x433289; vehicle-compact carrier
+			// compose @0x4608ce]. Recomposing such a row here glued the
+			// vehicle to its spawn-time occupant — on non-COOP retail hosts,
+			// "a vehicle follows the player around" (one per map, whichever
+			// spawn record carried flag 0x0100).
+			if (classify(child.type_id) != EntityClass::NoNetworkCallback)
+				continue;
 			ClientEntityState *parent = state_.find(child.parent_handle);
 			if (parent == nullptr) continue; // a later batch may still provide it
 			// 0x0D entity_flags bit 1 is a spawn/movement gate, not a death
@@ -418,6 +432,12 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 		uint16_t cy;
 		uint16_t cz;
 		uint8_t local_yaw_byte;
+		// Player/infantry compacts carry a carrier-RELATIVE yaw byte; the
+		// vehicle compact's orientation stays world-absolute even when its
+		// position is carrier-local [orig: the read path stores the wire
+		// eulerZ untransformed at entity+576 @0x4607f5 while the position
+		// goes through Entity_TransformLocalToWorld @0x4608ce].
+		bool compose_yaw;
 	};
 	std::vector<PendingCarrierPose> pending_carrier_poses;
 	pending_carrier_poses.reserve(fu.records.size());
@@ -494,7 +514,7 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 			if (rec.player.carrier_handle != 0xFFFFu) {
 				pending_carrier_poses.push_back(PendingCarrierPose{
 						rec.handle, rec.player.carrier_handle, cx, cy, cz,
-						rec.player.yaw_byte});
+						rec.player.yaw_byte, /*compose_yaw=*/true});
 				skip_pos = true;
 			} else {
 				es.yaw_byte = rec.player.yaw_byte;
@@ -504,6 +524,24 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 			cx = rec.vehicle.pos_x_compressed;
 			cy = rec.vehicle.pos_y_compressed;
 			cz = rec.vehicle.pos_z_compressed;
+			// The §5.13 compact's own parent field is the CARRIER (deck/ground
+			// entity), consumed per record: a resolving parent composes THIS
+			// record's vehicle-local position against the carrier's live pose,
+			// an absent one takes the anchor-relative leg, and the stored
+			// carrier ref is re-landed (nulled included) from every record
+			// [orig: Entity_SerializeVehicleState read side — resolve
+			// @0x46085d, local->world @0x4608ce, entity+40 (re)store
+			// @0x460802]. The 0x0D spawn's parentHandle is a DIFFERENT slot —
+			// occupantEntity/+368, a driver back-reference with no transform
+			// semantics [orig: store @0x433289] — see
+			// refresh_parented_pool_entities for the class gate that keeps it
+			// out of this row's pose.
+			if (rec.vehicle.parent_slot_handle != 0xFFFFu) {
+				pending_carrier_poses.push_back(PendingCarrierPose{
+						rec.handle, rec.vehicle.parent_slot_handle, cx, cy, cz,
+						0, /*compose_yaw=*/false});
+				skip_pos = true;
+			}
 			es.yaw_byte = static_cast<uint8_t>(
 					static_cast<uint16_t>(rec.vehicle.euler_z) >> 8);
 			es.state_flags = rec.vehicle.flags_byte;
@@ -539,7 +577,7 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 			if (rec.infantry.vehicle_slot_handle != 0xFFFFu) {
 				pending_carrier_poses.push_back(PendingCarrierPose{
 						rec.handle, rec.infantry.vehicle_slot_handle, cx, cy, cz,
-						rec.infantry.yaw_byte});
+						rec.infantry.yaw_byte, /*compose_yaw=*/true});
 				skip_pos = true;
 			} else {
 				es.yaw_byte = rec.infantry.yaw_byte;
@@ -574,8 +612,11 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 		child->y = w.y;
 		child->z = w.z;
 		// World yaw byte = carrier yaw + local yaw; BAM addition holds in the
-		// 8-bit ring used by the compact view.
-		child->yaw_byte = uint8_t(carrier->yaw_byte + pending.local_yaw_byte);
+		// 8-bit ring used by the compact view. Vehicle records keep their
+		// world-absolute wire euler instead (compose_yaw false) [orig: the
+		// untransformed entity+576 store @0x4607f5].
+		if (pending.compose_yaw)
+			child->yaw_byte = uint8_t(carrier->yaw_byte + pending.local_yaw_byte);
 	}
 
 	refresh_parented_pool_entities();

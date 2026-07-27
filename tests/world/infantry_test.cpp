@@ -346,6 +346,24 @@ void test_remote_player_body_anim() {
     // 62 idle selection passes (4-tick cadence) promote 43 -> 44 [orig: @0x4b727b].
     run_ticks(ai, w, 40, 40 + 62 * 4 + 4);
     CHECK(ent->net_anim_state == anim_state::kIdle2);
+
+    // Prone lean = the roll pair, from the replicated MoveOrder lean bits 6/7
+    // [orig: @0x4b731b-0x4b7354 — gated prone + alive + !airborne @0x4b7322;
+    //  left @0x4b7335, right @0x4b734c]. A remote peer's rolls derive on the
+    //  host exactly like the local player's — no ownership gate.
+    src.clips.insert(anim_state::kRollLeft);
+    src.clips.insert(anim_state::kRollRight);
+    const int t_roll = 40 + 62 * 4 + 4;
+    ent->net_stance_bits = 1;
+    ent->net_move_input = 0x40; // lean-left, stationary, prone
+    run_ticks(ai, w, t_roll, t_roll + 8);
+    CHECK(ent->net_anim_state == anim_state::kRollLeft);
+    // Both lean bits held: right wins the ladder [orig: bit-7 write @0x4b734c
+    // lands after bit-6's]. 41 is transition-locked (flags 0x285 bit 0x4), so
+    // the winner parks in the pending slot until the clip completes.
+    ent->net_move_input = 0xC0;
+    run_ticks(ai, w, t_roll + 8, t_roll + 16);
+    CHECK(e->inf.anim_pending == anim_state::kRollRight);
 }
 
 // Local-player leg chase + body midpoint — the witnessed org2 model (D-INF-12

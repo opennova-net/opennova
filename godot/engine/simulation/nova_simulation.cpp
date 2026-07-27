@@ -184,9 +184,15 @@ const opennova::netsim::ClientEntityState *client_entity_for_handle(
 const opennova::mission::ItemSeatSpec *item_seat_spec_for_type(
 		const std::vector<opennova::mission::ItemSeatSpec> &specs,
 		uint16_t type_id) {
-	for (const opennova::mission::ItemSeatSpec &spec : specs) {
-		if (spec.type_id == static_cast<int32_t>(type_id)) return &spec;
-	}
+	// specs are sorted by type_id at install (resolve_item_traits); a joiner
+	// probes this per present row per frame, so the scan is a binary search.
+	const auto it = std::lower_bound(
+			specs.begin(), specs.end(), static_cast<int32_t>(type_id),
+			[](const opennova::mission::ItemSeatSpec &spec, int32_t t) {
+				return spec.type_id < t;
+			});
+	if (it != specs.end() && it->type_id == static_cast<int32_t>(type_id))
+		return &*it;
 	return nullptr;
 }
 
@@ -4528,6 +4534,13 @@ void NovaSimulation::set_item_seat_specs(const Array &p_specs) {
 		    !spec.primary_weapon.empty() || !spec.emplacement_attachments.empty())
 			item_seat_specs_.push_back(std::move(spec));
 	}
+	// Lookup table, ordered for the binary search in item_seat_spec_for_type —
+	// a joiner probes it once per present row per frame.
+	std::sort(item_seat_specs_.begin(), item_seat_specs_.end(),
+			[](const opennova::mission::ItemSeatSpec &a,
+					const opennova::mission::ItemSeatSpec &b) {
+				return a.type_id < b.type_id;
+			});
 }
 
 void NovaSimulation::set_terrain_height_field(const Ref<NovaTerrainData> &p_terrain) {

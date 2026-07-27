@@ -75,6 +75,11 @@ const CAP_WPN := 512
 var _row_caps := PackedInt32Array()
 var _row_aim_valid := PackedInt32Array()
 var _row_rhc := PackedInt32Array()
+# state id -> "anim_<name>" String, memoized once per process (the same cache
+# MissionPresentPass carries): the native call allocates a fresh String per
+# invocation, which on a joiner ran twice per row per frame.
+static var _infantry_key_cache := {}
+
 var _row_anim_state := PackedInt32Array()
 var _row_anim_request := PackedInt32Array()
 # The third-person held weapon per wire handle: {handle: Node3D} and the gfx3 each live
@@ -175,6 +180,14 @@ func teardown() -> void:
 # avoids the per-call state->key String for every row every tick. Host-loopback
 # rows (remote_request 0) keep per-tick dispatch — their playhead rides
 # play_body_clip_at's phase.
+static func _infantry_key(state: int) -> String:
+	var key = _infantry_key_cache.get(state)
+	if key == null:
+		key = NovaSimulation.infantry_anim_key(state)
+		_infantry_key_cache[state] = key
+	return key
+
+
 func _apply_body_anim_gated(
 		node, snap: PackedFloat32Array, base: int, caps: int, row: int) -> void:
 	var anim_state := int(snap[base + NovaSimulation.PF_ANIM_STATE])
@@ -189,7 +202,7 @@ func _apply_body_anim_gated(
 	var anim_phase := int(snap[base + NovaSimulation.PF_ANIM_PHASE_TICKS])
 	var remote_request := remote_request_i != 0
 	if anim_state >= 0:
-		var key := NovaSimulation.infantry_anim_key(anim_state)
+		var key := _infantry_key(anim_state)
 		if not key.is_empty():
 			# NovaObjectModel owns current/pending acceptance because it also owns
 			# clip time and completion. Forward every raw wire request; the model
@@ -569,7 +582,7 @@ func _present_wire_row(
 	if caps & CAP_WPN:
 		var wpn_state := int(snap[base + NovaSimulation.PF_WPN_ANIM_STATE])
 		node.set_weapon_channel(
-				NovaSimulation.infantry_anim_key(wpn_state) if wpn_state >= 0 else "",
+				_infantry_key(wpn_state) if wpn_state >= 0 else "",
 				int(snap[base + NovaSimulation.PF_WPN_PHASE_TICKS]))
 	_update_held_weapon(handle, node, snap, base)
 	_respawn_revisions[handle] = respawn_revision
