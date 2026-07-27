@@ -23,8 +23,6 @@ var _requested_exit_code := 1
 var _runtime = null
 var _main = null
 var _gw = null
-var _hud_host = null
-var _wire = null
 var _vprid := RID()
 var _seg_t_pf := 0
 var _seg_t_pre := 0
@@ -110,10 +108,7 @@ func _run() -> void:
 	_runtime = _find_by_method(root, "tick_realtime")
 	_main = game
 	_gw = world
-	_hud_host = _main.get("_hud_host")
-	if _runtime != null:
-		_wire = _runtime.get("_wire_present")
-	for target_v in [_main, _hud_host, _gw]:
+	for target_v in [_main, _gw]:
 		var t := target_v as Object
 		if is_instance_valid(t) and t.has_method("set_perf_probe_enabled"):
 			t.set_perf_probe_enabled(true)
@@ -143,8 +138,6 @@ func _run() -> void:
 	if float(worldoff.avg) >= 0.0:
 		print("[pwj] WORLDOFF avg=%.2fms (world.tick share vs baseline: %+.2fms)" % [
 				float(worldoff.avg), float(base.avg) - float(worldoff.avg)])
-	if _wire != null and _wire.has_method("get_stats"):
-		print("[pwj] wire stats: ", _wire.get_stats(), " entities=", _wire.entity_count())
 	_finish(0)
 
 
