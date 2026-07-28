@@ -269,6 +269,71 @@ bool run_compact_pose_fields_survive_client_fold() {
 	return true;
 }
 
+// The other locally integrated remote field. Only move_input bits 6/7 ride the wire;
+// each end integrates the angle itself, in the retail body pass's DECAY-then-RAMP
+// order. Ramp-then-decay sheds a sixteenth of every ramp step on the same tick that
+// applies it and settles a whole step short (~±0x2D000000 ≈ 4.2° flatter), so both the
+// first tick and the equilibrium are pinned here.
+// [orig: decay lean -= (lean+8)>>4 @0x4b5c97, then the on-foot ramp @0x4b7dbf/@0x4b7dd6
+//  — one Entity_UpdateInfantryPlayerBody @0x4b40e0 pass]
+bool run_remote_lean_integrator_decays_before_ramping() {
+	nw::FrameUpdate frame;
+	frame.flags2 = 0;
+	frame.mount_handle = 0xFFFF;
+
+	nw::FrameUpdateRecord left;
+	left.handle = 0x0001;
+	left.type_id = 0x14B9;
+	left.cls = nw::EntityClass::Player;
+	left.player.carrier_handle = 0xFFFF;
+	left.player.anim_def_index = 0xFF;
+	left.player.move_input_byte = 0x40; // lean LEFT held
+	frame.records.push_back(left);
+	nw::FrameUpdateRecord right = left;
+	right.handle = 0x0002;
+	right.player.move_input_byte = 0x80; // lean RIGHT held
+	frame.records.push_back(right);
+
+	ns::NetClientView view([](uint16_t) { return nw::EntityClass::Player; });
+	view.apply(ns::kTag0aFrameUpdate, nw::encode_frame_update(frame));
+	const ns::ClientEntityState *l = view.state().find(0x0001);
+	const ns::ClientEntityState *r = view.state().find(0x0002);
+	if (!expect(l != nullptr && r != nullptr && l->move_input == 0x40 &&
+	                    r->move_input == 0x80 && l->lean_angle == 0 && r->lean_angle == 0,
+	            "lean bits decode off the compact record, angle unintegrated")) return false;
+
+	// Tick 1 from a level angle: the decay takes (0+8)>>4 == 0, so the ramp step lands
+	// whole. Ramp-first would already read ∓0x2D00000.
+	view.tick_lean();
+	if (!expect(l->lean_angle == -0x3000000 && r->lean_angle == 0x3000000,
+	            "first tick decays the level angle, then applies one whole ramp step"))
+		return false;
+
+	// Held: the decay cancels exactly one ramp step at ~16x it, not ~15x.
+	for (int tick = 1; tick < 400; ++tick) view.tick_lean();
+	if (!expect(l->lean_angle < -0x2F000000 && l->lean_angle > -0x31000000 &&
+	                    r->lean_angle > 0x2F000000 && r->lean_angle < 0x31000000,
+	            "held lean settles on the witnessed ±0x30000000 equilibrium")) return false;
+
+	// Bits cleared by the next frame: the decay keeps running for the row, so the angle
+	// returns to level (the ramp is the only gated half).
+	const int32_t held_left = l->lean_angle;
+	frame.records[0].player.move_input_byte = 0;
+	frame.records[1].player.move_input_byte = 0;
+	view.apply(ns::kTag0aFrameUpdate, nw::encode_frame_update(frame));
+	l = view.state().find(0x0001);
+	r = view.state().find(0x0002);
+	view.tick_lean();
+	if (!expect(l != nullptr && r != nullptr && l->lean_angle > held_left &&
+	                    l->lean_angle < 0 && r->lean_angle > 0,
+	            "released lean decays back toward level")) return false;
+	// The decay's +8 rounding parks the tail a few BAM units off zero rather than on it.
+	for (int tick = 1; tick < 400; ++tick) view.tick_lean();
+	return expect(l->lean_angle > -0x1000 && l->lean_angle <= 0 &&
+	                      r->lean_angle >= 0 && r->lean_angle < 0x1000,
+	              "released lean settles level");
+}
+
 nw::FrameUpdate compact_lifecycle_frame(uint8_t player_flags,
 		uint8_t infantry_flags) {
 	nw::FrameUpdate frame;
@@ -874,6 +939,7 @@ int main() {
 	                run_carrier_pitch_roll_persists_across_live_records() &&
 	                run_parented_pool_spawn_follows_and_retires() &&
 	                run_mounted_infantry_pose_fields_round_trip() &&
+	                run_remote_lean_integrator_decays_before_ramping() &&
 	                run_header_only_records_are_ignored_by_client_view() &&
 	                run_apply_player_intent_stages_remote_peer() &&
 	                run_apply_rejects_own_player() &&

@@ -5,14 +5,15 @@
 #include <netsim/net_client_view.h>     // NetClientView / ClientState
 #include <netsim/session_transport.h>   // ISessionTransport
 
-#include <novaworld/client_session.h>   // ClientSession::Config (shared JO identity)
 #include <npwire/ingame_decode.h>     // PlayerExtendedUplink (the §5.10 0x0C body)
 
 #include <cstddef>
 #include <cstdint>
+#include <array>
 #include <deque>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 // P5 — the headless, socket-free CLIENT runtime. The faithful reimpl of the per-frame client net
@@ -50,7 +51,10 @@ public:
 
 	// Remote-joiner runtime. Transport-less: framed bytes in via receive(), framed bytes out via
 	// the start()/Client_ProcessNetworkFrame() return values (the owner pumps the socket).
-	ClientRuntime(ClientSession::Config config, std::string player_name);
+	explicit ClientRuntime(std::string player_name);
+	// Same runtime with an injected monotonic wall clock for deterministic integration/tests.
+	ClientRuntime(std::string player_name,
+	              JoinerConnection::MonotonicMilliseconds monotonic_milliseconds);
 
 	// SP host-as-client runtime. `host_loopback` is the in-process channel the host's
 	// Server_TickUpdate emits S2C onto (non-owning). is_authority is implicit (no 0x0C uplink).
@@ -67,6 +71,56 @@ public:
 	// Mirrors CNapiNetwork_PumpManagerReceive feeding the byte recv FIFO ahead of the frame's recv
 	// pump. No-op for HostClient (it reads its loopback transport directly).
 	void receive(const uint8_t *raw, std::size_t len);
+
+	// Frame the retail leave burst (0x46 ClientGoodBye x4) for the owner to ship before dropping
+	// the socket. Empty for HostClient, before ServerAuth, or on a repeat call.
+	// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253c0]
+	std::vector<std::vector<uint8_t>> disconnect();
+
+	// One C2S 0x1D stance-change datagram (0xA9 crouch / 0xAA prone / 0xAC stand), sent
+	// immediately from the stance key SELECT. Empty for HostClient or pre-in-match.
+	// [orig: @0x4e0d77/@0x4e0df3/@0x4e0e3e]
+	std::vector<uint8_t> send_stance_change(uint16_t action_id) {
+		if (role_ != Role::Joiner || joiner_ == nullptr) return {};
+		return joiner_->frame_stance_change(action_id);
+	}
+
+	// The uplink gate: true once admitted+spawned, cleared on a death sample. Every C2S
+	// gameplay send (0x0C uplink, 0x06 fire, 0x2C ping) rides it.
+	bool is_deployed() const { return deployed_; }
+	// Monotonic receive-side deployment release edge. It advances only when
+	// JoinerConnection accepts the ACK-qualified 0x5A that completes either the
+	// initial deployment or a later re-deployment. Consumers use the revision,
+	// rather than positive health alone, to distinguish a real respawn from a
+	// stale 0x0A tail.
+	uint64_t deployment_release_revision() const {
+		return deployment_release_revision_;
+	}
+
+	// The inbound ordered frontier (our echoed ack_count) and our outbound sequence.
+	// A frontier that stops advancing while the socket still carries traffic is the
+	// replication-freeze signature: the peer's reliable records never retire, so it
+	// stops emitting new semantic messages, and we stop admitting new ones.
+	uint32_t inbound_frontier_seq() const {
+		return (role_ == Role::Joiner && joiner_ != nullptr)
+				? joiner_->connection().seq.last_inbound_seq
+				: 0;
+	}
+	uint32_t outbound_seq() const {
+		return (role_ == Role::Joiner && joiner_ != nullptr)
+				? joiner_->connection().seq.next_outbound_seq
+				: 0;
+	}
+
+	// Inbound-gap / retention diagnostics (0 for HostClient) — the frozen-session
+	// signature is a gap queue that never drains + retention that only grows.
+	std::size_t inbound_gap_depth() const {
+		return (role_ == Role::Joiner && joiner_ != nullptr) ? joiner_->inbound_gap_depth() : 0;
+	}
+	std::size_t retained_outbound_depth() const {
+		return (role_ == Role::Joiner && joiner_ != nullptr) ? joiner_->retained_outbound_depth()
+		                                                     : 0;
+	}
 
 	// The per-frame client net role [orig: Client_ProcessNetworkFrame @0x42c180], in witnessed order:
 	//   (1) recv pump: Joiner drains the recv FIFO -> JoinerConnection decodes -> drive the connect
@@ -89,18 +143,116 @@ public:
 	// No-uplink frame (HostClient, or a pre-deploy Joiner): recv pump + connect-drive only, no 0x0C.
 	std::vector<std::vector<uint8_t>> Client_ProcessNetworkFrame(uint32_t now_tick = 0);
 
+	// Typed gameplay seams used by the simulation; protocol tags/framing remain
+	// owned here. Fire is predicted locally before queueing C2S 0x06. The spent clip
+	// remains unchanged until the host's S2C 0x49 echo appears in the reload drain.
+	bool queue_fired_round(const ClientFiredRound &round);
+	bool queue_reload_request(const WeaponReload &reload);
+	bool queue_vehicle_attach(uint16_t vehicle_handle, uint8_t model_bone_index);
+	bool queue_vehicle_detach(uint16_t vehicle_handle);
+	std::vector<netsim::ClientRoundEvent> drain_round_events();
+	std::vector<WeaponReload> drain_reload_notifications();
+
 	// Deterministic golden replay (Joiner): seed the connection keys + seq/ack + self handle/type so
 	// frame_c2s_uplink reproduces a captured C2S 0x0C datagram byte-for-byte. [ROADMAP "Determinism"]
-	void seed_session(uint32_t session_id, std::string client_scrk, std::string server_scrk,
-	                  uint32_t next_seq, uint32_t last_ack, uint16_t self_handle,
-	                  uint16_t self_type, uint32_t game_type = 0);
+	// `tick_seed` is the capture's live network-role tick (the value its S2C 0x61 seeded);
+	// without it a replayed client's clock stays parked at zero and stamps 0 into every 0x06.
+	void seed_session(uint32_t session_id, uint32_t client_key, std::string client_scrk,
+	                  std::string server_scrk, uint32_t next_seq, uint32_t last_ack,
+	                  uint16_t self_handle, uint16_t self_type, uint32_t game_type = 0,
+	                  uint32_t tick_seed = 0, bool replay_mode = true);
 
 	// The "deployed" predicate gating the 0x0C uplink. It defaults true on reaching InMatch;
 	// a complete recipient-local 0x0A tail with health <= 0 closes it before the same frame's send.
-	// Positive health does not reopen it. The explicit deploy/respawn exchange that reopens the gate
-	// remains deferred; set_deployed(true) is the integration seam for that future edge.
+	// Positive health does not reopen it: death re-enters JoinerConnection's deployment-pick FSM,
+	// and only the ACK-qualified post-pick 0x5A release returns to InMatch and reopens the gate.
+	// set_deployed remains an explicit simulation/test override.
 	void set_deployed(bool v) { deployed_ = v; }
 	bool deployed() const { return deployed_; }
+
+	// The shell's kit for the 0x1A-released loadout-submission pair (Joiner only; see
+	// JoinerConnection::set_loadout_kit). HostClient has no 0x2F leg — its player fills
+	// server-side [orig: Server_InitAllPlayerEntitiesForRound @0x516aa0].
+	void set_loadout_kit(JoinerConnection::LoadoutKit kit) {
+		if (joiner_) joiner_->set_loadout_kit(std::move(kit));
+	}
+	void set_character_join_vars(CharacterJoinVars vars) {
+		if (joiner_) joiner_->set_character_join_vars(vars);
+	}
+	void set_charattr_challenge_table(CharAttrChallengeTable table) {
+		if (joiner_) joiner_->set_charattr_challenge_table(std::move(table));
+	}
+	void clear_charattr_challenge_table() {
+		if (joiner_) joiner_->clear_charattr_challenge_table();
+	}
+	void set_loaded_model_challenge_snapshot(std::vector<uint32_t> values) {
+		if (joiner_)
+			joiner_->set_loaded_model_challenge_snapshot(std::move(values));
+	}
+	// Queue the armory-ACCEPT loadout re-submission; the next frame's send boundary emits
+	// one C2S 0x2F from the current kit seam (see JoinerConnection::frame_loadout_resubmit).
+	void queue_loadout_resubmit() {
+		if (joiner_) pending_loadout_resubmit_ = true;
+	}
+
+	// Player-paced deployment (the deploy-map screen; see JoinerConnection).
+	void set_player_paced_deployment(bool paced) {
+		if (joiner_) joiner_->set_player_paced_deployment(paced);
+	}
+	bool deployment_pick_pending() const {
+		return joiner_ && joiner_->deployment_pick_pending();
+	}
+	// The joiner's server-assigned team (the S2C 0x04 latch) — the deploy screen's
+	// row filter and color source [orig: byte_A85B48].
+	uint8_t assigned_team() const { return joiner_ ? joiner_->assigned_team() : 0; }
+	// This client's own roster slot id (S2C 0x04 byte 17). Bits 9.. of every fired
+	// round's hit_part word [orig: @0x50bda5]; 0 attributes our shots to the host.
+	uint8_t local_player_slot() const { return joiner_ ? joiner_->local_player_slot() : 0; }
+	// Monotonic edge counter for the S2C 0x50 re-latch of OUR OWN team. The
+	// simulation re-styles friend/foe when it advances (the 0x04 latch at join is
+	// consumed through the spawn instead). [orig: byte_A85B48 store @0x4319db]
+	uint64_t self_team_revision() const { return self_team_revision_; }
+	// Roster slots whose bookkeeping the host cleared via S2C 0x46 bit15. Draining
+	// keeps it a one-shot; the associated ENTITY row is deliberately untouched
+	// (only S2C 0x5D retires an entity). [orig: @0x431411..0x43144c]
+	std::vector<uint8_t> drain_cleared_player_slots() {
+		std::vector<uint8_t> out;
+		out.swap(cleared_player_slots_);
+		return out;
+	}
+
+	// Session loss (Joiner only): empty while healthy, else a player-facing reason.
+	// Either the host explicitly closed the session (its connection-description punt,
+	// terminal at any stage) or nothing arrived for the reap window while in-match.
+	// Retail exits the mission with a reason here; there is no in-world dialog.
+	// [orig: CNapiNPConnection_HandleDescriptionPacket @0x621ae0; the
+	//  cs_dir0.timeout_ms = 120000 reap @0x4ca4a0 ->
+	//  CNapiNetwork_OnDisconnectedFromServer @0x4c63d0]
+	std::string session_loss_reason() const {
+		return joiner_ ? joiner_->session_loss_reason() : std::string();
+	}
+	bool session_lost() const { return joiner_ && joiner_->session_lost(); }
+	// Queue the player's C2S 0x0E pick (0xFFFF default, 0xFFFE auto, else a spawn-target
+	// handle); the next frame emits it. Re-picks while awaiting the release are allowed.
+	void queue_deployment_pick(uint16_t wire_value) {
+		if (!joiner_) return;
+		pending_deployment_pick_ = wire_value;
+		pending_deployment_pick_set_ = true;
+	}
+
+	// Pre-load join seam. Handshake and admission traffic continue through terminal S2C 0x11 while
+	// false; only C2S 0x0A and the resulting world/deployment stream are held.
+	void set_world_ready(bool ready) {
+		if (joiner_) joiner_->set_world_ready(ready);
+	}
+	bool world_ready() const { return joiner_ ? joiner_->world_ready() : true; }
+	bool mission_known() const { return joiner_ && joiner_->mission_known(); }
+	// The terminal pre-world sync marker was received and its ACK reached the send boundary.
+	bool preload_ready() const { return joiner_ && joiner_->preload_ready(); }
+	// Admission-stage name for diagnostics (the shell's post-load join watchdog).
+	const char *admission_stage_name() const {
+		return joiner_ ? joiner_->post_auth_stage_name() : "no session";
+	}
 
 	// Joiner state passthrough (HostClient: never InMatch, no self handle).
 	bool in_match() const { return joiner_ && joiner_->in_match(); }
@@ -113,8 +265,32 @@ public:
 	// ClientState position), so the binding spawns its local player L from it. Joiner-only; valid once
 	// in_match() (the caller gates on that). Mirrors the self_handle() passthrough.
 	const JoinerConnection::SelfSpawn &spawn_pose() const { return joiner_->spawn_pose(); }
+	uint32_t game_type() const { return joiner_ ? joiner_->game_type() : view_.game_type(); }
+	const std::string &server_name() const;
+	const std::string &mission_name() const;
+	const std::string &map_file() const;
+	const std::string &expansion() const;
+	const std::string &last_error() const;
+
+	struct ZoneState {
+		bool has_value = false;
+		ZoneTimerValue value;
+		bool has_window = false;
+		ZoneTimerWindow window;
+	};
+	const std::unordered_map<uint16_t, ZoneState> &zone_states() const {
+		return zone_states_;
+	}
+	uint64_t authoritative_loadout_revision() const {
+		return authoritative_loadout_revision_;
+	}
+	const WeaponLoadout &authoritative_loadout() const {
+		return authoritative_loadout_;
+	}
+	uint32_t send_holdoff_countdown() const { return send_holdoff_countdown_; }
 
 	const netsim::ClientState &state() const { return view_.state(); }
+	netsim::ClientState &state() { return view_.state(); }
 	netsim::NetClientView &view() { return view_; }
 	std::size_t unknown_tags() const { return view_.unknown_tags(); }
 
@@ -128,7 +304,26 @@ private:
 	netsim::NetClientView view_;
 	netsim::ISessionTransport *loopback_ = nullptr;   // HostClient only (non-owning)
 	std::deque<std::vector<uint8_t>> recv_fifo_;      // Joiner: framed inbound awaiting the recv pump
+	std::deque<ProtocolMessage> gameplay_send_queue_; // Joiner: typed C2S 0x06/0x25 awaiting SEND
+	// Some receive handlers must allocate an exact wire packet immediately: handshake/admission
+	// packets preserve their retail grouping, and 0x84 reconstruction must reuse an old sequence.
+	// They still belong to PumpClientProtocolSend, so hold the already-framed datagrams behind the
+	// same field-3 gate and flush them before any later sequence allocated at the open boundary.
+	std::deque<std::vector<uint8_t>> framed_send_queue_;
+	// 0x34/0x4C and semantic receive replies are produced before retail reaches the holdoff-gated
+	// send pump. Keep them across held frames, then batch them at the first open boundary beside
+	// one-shots/gameplay.
+	std::deque<ProtocolMessage> pre_send_queue_;
+	std::unordered_map<uint16_t, ZoneState> zone_states_;
+	WeaponLoadout authoritative_loadout_;
+	uint64_t authoritative_loadout_revision_ = 0;
 	bool deployed_ = false;
+	uint64_t deployment_release_revision_ = 0;
+	uint64_t self_team_revision_ = 0;           // S2C 0x50 self re-latch edges
+	std::vector<uint8_t> cleared_player_slots_; // S2C 0x46 bit15 roster clears
+	bool pending_loadout_resubmit_ = false;     // one-shot: armory-ACCEPT 0x2F re-send
+	bool pending_deployment_pick_set_ = false;  // one-shot: the player's 0x0E pick below
+	uint16_t pending_deployment_pick_ = 0xFFFF;
 
 	// --- §5.44 per-frame housekeeping counters (P6) — mirror the witnessed per-instance globals of
 	// [orig: Client_ProcessNetworkFrame @0x42c180]. The 0x34 keepalive / 0x4C net-quality / 0x2C RTT
@@ -136,9 +331,9 @@ private:
 	uint32_t current_tick_ = 0;          // [orig: currentTick @0xA8229C] bumped once per run_frame
 	uint32_t last_keepalive_tick_ = 0;   // [orig: g_lastKeepaliveTick @0xA822A0] 0x34 send latch
 	uint32_t net_quality_timer_ = 0;     // [orig: g_netQualityReportTimer @0xA85B84] 0x4C cadence
-	uint32_t tag2c_send_cooldown_ = 0;   // [orig: g_tag2CSendCooldown @0xA860D8] set 62 on a 0x2C send,
-	                                     // decremented per frame; NOT read as a send gate in this fn
-	                                     // (a nuance vs §5.44 "62-tick holdoff" — see ROADMAP/re-doc).
+	uint32_t tag2c_send_cooldown_ = 0;   // [orig: g_tag2CSendCooldown @0xA860D8] set 62 on a 0x2C send
+	                                     // and decremented, but never compared in @0x42C180;
+	                                     // vestigial/telemetry state, not a send throttle.
 	uint8_t  net_quality_ = 0;           // [orig: g_netQuality byte @0x82BF88] 0 = best (host clamps 0..4)
 	uint32_t send_holdoff_countdown_ = 0;// [orig: NapiNPConnection+0x648] 0 = send block open (default)
 

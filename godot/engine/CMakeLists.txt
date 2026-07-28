@@ -45,6 +45,7 @@ add_subdirectory(../../libs/dbf opennova_dbf)
 add_subdirectory(../../libs/audio opennova_audio)
 add_subdirectory(../../libs/oned_edit opennova_oned_edit)
 add_subdirectory(../../libs/controls opennova_controls)
+add_subdirectory(../../libs/playersav opennova_playersav)
 add_subdirectory(../../libs/novacrypto opennova_novacrypto)
 add_subdirectory(../../libs/napi opennova_napi)
 # sqlite is only needed to DEFINE the novaworld service-leg target; the
@@ -74,6 +75,7 @@ add_library(${TARGET_NAME} SHARED
     network/nova_world_host.cpp
     network/nova_net_client.cpp
     network/nova_udp_pump.cpp
+    network/nova_lan_session.cpp
     terrain/nova_terrain.cpp
     terrain/nova_terrain_surface_inputs.cpp
     terrain/nova_terrain_build_job.cpp
@@ -213,6 +215,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     opennova_audio_family
     opennova_oned_edit
     opennova_controls
+    opennova_playersav
     opennova_novacrypto
     opennova_napi
     opennova_npwire

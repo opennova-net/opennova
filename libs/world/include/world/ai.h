@@ -817,7 +817,14 @@ public:
     // (unparsed) so the rifle default (mirror the primary) applies. [orig:
     // Entity_UpdateInfantryPlayerBody @0x4b5cab..0x4b5ea9 + AnimMap_UpdateDualChannels
     // @0x40b8c0; witness world-wac-ai-re.md §14.8.4/.5]
-    void infantry_weapon_channel(AiEntity &e);
+    // The per-tick half: the arms-dip/pitch-kick, the reload window, the deferred
+    // promotion and the playhead advance. Runs the selection half below only on the
+    // witnessed 16-tick slow-pass phase.
+    void infantry_weapon_channel(AiEntity &e, World &world, uint32_t logic_tick);
+    // The selection + commit half [orig: @0x4b5dad..0x4b5ea3]. Split out because the
+    // original gates it to `(current_tick & 0xF) == 0` while the advance around it runs
+    // every tick from AnimMap_UpdateDualChannels @0x40b8c0.
+    void infantry_weapon_channel_select(AiEntity &e);
     // Availability resolution against root_motion->has_clip with the cited fallback chains.
     int infantry_resolve_state(int adm_id, int state) const;
     // The slope pass: 4 ground probes around the entity feeding the slide impulse and

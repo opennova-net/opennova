@@ -85,6 +85,33 @@ func test_immediate_fire_keeps_source_identity() -> void:
 	presenter.teardown()
 
 
+func test_joiner_style_drain_presents_remote_and_discards_local_prediction() -> void:
+	# A joiner feeds both its local predicted round and decoded remote tag-2
+	# rounds into one visual RoundSim queue. The pass must consume every record
+	# (so the queue cannot grow frame-over-frame) while only presenting the
+	# remote record; the local action-slot leg already presented the prediction.
+	var sim := SimStub.new()
+	var audio := AudioStub.new()
+	var presenter = _make_pass(sim, audio)
+	var local := _event(Vector3(1, 0, 0), 11)
+	local["is_local_player"] = true
+	var remote := _event(Vector3(2, 0, 0), 22)
+
+	for _frame in range(128):
+		sim.events = [local.duplicate(), remote.duplicate()]
+		presenter.present()
+		assert_true(sim.events.is_empty(),
+				"the complete mixed queue is drained each presentation")
+
+	assert_eq(audio.calls.size(), 128,
+			"only one decoded remote shot is presented per frame")
+	assert_eq(int(presenter.get_stats()["fires"]), 128)
+	for call_v in audio.calls:
+		assert_eq(int((call_v as Dictionary)["source_bms_id"]), 22,
+				"the local predicted record never reaches the remote-fire leg")
+	presenter.teardown()
+
+
 func test_delayed_fire_keeps_source_identity_until_playback() -> void:
 	var sim := SimStub.new()
 	var audio := AudioStub.new()

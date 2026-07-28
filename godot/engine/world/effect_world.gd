@@ -322,12 +322,12 @@ func spawn_effect(name: String, position: Vector3,
 	return spawn_effect_transient(name, position, orientation)
 
 
-func spawn_effect_owned(owner_key: Variant, name: String, position: Vector3,
-		orientation: Vector3 = Vector3.ZERO) -> int:
+func spawn_effect_owned_request(owner_key: Variant, name: String, position: Vector3,
+		orientation: Vector3 = Vector3.ZERO) -> Dictionary:
 	if _particles_disabled:
-		return 0
+		return _disabled_receipt()
 	var initial_transform := _pose(position, orientation)
-	var receipt := spawn_effect_request(name, initial_transform, {
+	return spawn_effect_request(name, initial_transform, {
 		"admission": ADMISSION_REPLACE_OWNED,
 		"binding": BINDING_FOLLOW_OWNER,
 		"slot_key": owner_key,
@@ -335,6 +335,11 @@ func spawn_effect_owned(owner_key: Variant, name: String, position: Vector3,
 		"owner_transform": initial_transform,
 		"owner_relative_transform": Transform3D.IDENTITY,
 	})
+
+
+func spawn_effect_owned(owner_key: Variant, name: String, position: Vector3,
+		orientation: Vector3 = Vector3.ZERO) -> int:
+	var receipt := spawn_effect_owned_request(owner_key, name, position, orientation)
 	return int(receipt.get("effect_handle", 0))
 
 
@@ -388,6 +393,53 @@ func spawn_effect_by_handle(handle: int, position: Vector3,
 
 func stop_group(group_id: int) -> void:
 	_scene.detach(group_id)
+
+
+## Releases the script/native binding identity for an owner whose lifecycle is
+## complete. Call after stopping its group: generation-scoped owners (flying
+## rounds, debris pieces) otherwise accumulate one slot key, owner key, and
+## cached pose for every lifetime until the whole mission is reset.
+func release_effect_binding(owner_key: Variant) -> void:
+	if _slot_tokens.has(owner_key):
+		_scene.detach_slot(int(_slot_tokens[owner_key]))
+		_slot_tokens.erase(owner_key)
+	if not _owner_tokens.has(owner_key):
+		return
+	var owner_token := int(_owner_tokens[owner_key])
+	# A group may already be detached by stop_group(), but explicitly retiring
+	# the native pose keeps this safe for rejected spawns and callers that only
+	# know the owner identity.
+	_scene.apply_owner_poses([{
+		"owner_token": owner_token,
+		"present": false,
+	}])
+	_owner_pose_cache.erase(owner_token)
+	_owner_keys_by_token.erase(owner_token)
+	_owner_tokens.erase(owner_key)
+
+
+## True while this owner key holds a live binding identity (slot token, owner
+## token, and reverse lookup). Leak-check seam for generation-scoped owners
+## (flying rounds, debris pieces) whose keys must not accumulate across
+## lifetimes (ADR 0017: typed scalars, not a Dictionary report).
+func has_owner_binding(owner_key: Variant) -> bool:
+	return _slot_tokens.has(owner_key) and _owner_tokens.has(owner_key) \
+			and _owner_keys_by_token.has(_owner_tokens.get(owner_key, -1))
+
+
+## True while this owner key's binding also carries a cached native pose. A
+## rejected ReplaceOwned spawn allocates its identities but never seeds one.
+func has_cached_owner_pose(owner_key: Variant) -> bool:
+	if not _owner_tokens.has(owner_key):
+		return false
+	return _owner_pose_cache.has(int(_owner_tokens[owner_key]))
+
+
+## True when every owner-binding table is empty, i.e. no retired owner key is
+## still holding a slot token, owner token, reverse lookup, or cached pose.
+func has_no_owner_bindings() -> bool:
+	return _slot_tokens.is_empty() and _owner_tokens.is_empty() \
+			and _owner_keys_by_token.is_empty() and _owner_pose_cache.is_empty()
 
 
 func _sync_owner_poses(refresh_frame := true) -> void:

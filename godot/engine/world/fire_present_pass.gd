@@ -1,8 +1,8 @@
 extends RefCounted
 
-# THE host fire-presentation pass: presents the sim's authoritative fired rounds on
-# the viewing host — AI (and remote-player) fire sound, muzzle effect, and in-flight
-# tracers, none of which SP had before this pass. The local player's own fire keeps
+# THE viewing-client fire-presentation pass: presents the sim's authoritative
+# host rounds or decoded visual-only joiner rounds — AI/remote-player fire sound,
+# muzzle effect, and in-flight tracers. The local player's own predicted fire keeps
 # its action-slot presentation (local_player_host._fire_action_effects) and is
 # self-filtered here, exactly like wire_present_pass filters the local avatar.
 #
@@ -61,6 +61,10 @@ var _sim                        # NovaSimulation (drain + trail source)
 var _audio_provider := Callable()     # -> NovaMissionAudio (or null)
 var _fx_provider := Callable()        # -> NovaEffectWorld (or null)
 var _listener_provider := Callable()  # -> Vector3 listener position (camera)
+# (wire_handle: int, userpoint: String) -> Vector3 world muzzle point, or Vector3.INF.
+# Retail's adm arm spawns at the shooter's own WEAPON, not at the wire position, so
+# presentation needs a way back to that body's held-weapon node.
+var _muzzle_provider := Callable()
 var _mesh: ImmediateMesh
 var _mesh_instance: MeshInstance3D
 var _mat_additive: StandardMaterial3D  # std/rapid/sniper/df1/NVG [orig: fog-black additive]
@@ -190,11 +194,12 @@ func ribbon_mesh() -> ImmediateMesh:
 
 
 func setup(sim, container: Node3D, audio_provider: Callable, fx_provider: Callable,
-		listener_provider: Callable) -> void:
+		listener_provider: Callable, muzzle_provider := Callable()) -> void:
 	_sim = sim
 	_audio_provider = audio_provider
 	_fx_provider = fx_provider
 	_listener_provider = listener_provider
+	_muzzle_provider = muzzle_provider
 	if container != null and is_instance_valid(container):
 		_mesh = ImmediateMesh.new()
 		_mesh_instance = MeshInstance3D.new()
@@ -294,6 +299,30 @@ func _drain_fires() -> void:
 		_stats.fires += 1
 		var origin: Vector3 = ev.get("origin", Vector3.ZERO)
 		var sound_set := String(ev.get("sound_set", ""))
+		var effect := String(ev.get("effect", ""))
+		# THE ARM SPLIT. Retail's round-event receive path has two mutually exclusive
+		# arms and only one of them is the ammo-def pair. The adm-indexed arm plays no
+		# ammo-def sound and spawns no ammo-def effect: it executes the ADDRESSED def's
+		# FIRE action row instead, at that weapon's own userpoint on the gfx3 model.
+		# This matters because the wire position is the shooter's EYE — retail sends
+		# Position + CameraOffset [orig: Entity_CalcWeaponFirePosition @0x4dc750] — so
+		# running the ammo-def leg on this arm draws every remote muzzle flash out of
+		# the shooter's face, roughly a metre behind the barrel.
+		# [orig: arms @0x42f521 / @0x42f6ce; ammo legs @0x42f5dc / @0x42f6c2;
+		#  the fire row @0x42f777 / @0x42f98f]
+		if bool(ev.get("adm_arm", false)):
+			sound_set = String(ev.get("action_sound_set", ""))
+			effect = String(ev.get("action_effect", ""))
+			# The anchor: this shooter's held weapon, not the wire point. Falling back
+			# to the wire eye position would reintroduce the very bug this fixes, so an
+			# unresolvable anchor takes the provider's own body-origin fallback —
+			# retail's deepest fallback is the entity origin [orig: @0x401867..0x401887].
+			if _muzzle_provider.is_valid():
+				var anchored: Vector3 = _muzzle_provider.call(
+						int(ev.get("shooter_handle", -1)),
+						String(ev.get("action_userpoint", "")))
+				if anchored.is_finite():
+					origin = anchored
 		var source_bms_id := int(ev.get("source_bms_id", 0))
 		if audio != null and not sound_set.is_empty():
 			# Propagation delay for far shots [orig: @ 0x528ed4-0x528ef2:
@@ -315,7 +344,6 @@ func _drain_fires() -> void:
 			else:
 				audio.fire_soundset(sound_set, origin, source_bms_id)
 				_stats.sounds += 1
-		var effect := String(ev.get("effect", ""))
 		if fx != null and not effect.is_empty():
 			# The muzzle effect at the fire origin along the fire direction
 			# [orig: the 56-B spawn descriptor -> CEffectWorld_SpawnEmitterAtPosition

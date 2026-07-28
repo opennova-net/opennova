@@ -8,12 +8,17 @@
 namespace opennova {
 
 // Witnessed against the retail GSB parser NapiGameList_ProcessEncryptedResponse
-// @ 0x63d740 (docs/net/novaworld-net-re.md §8 Wave 7). The blob is a flat chunk
-// stream [magic:4][u32 LE len][payload], advance len+8 — magic is a PREFIX and
-// "GSB " is the first chunk's tag, NOT a bare file header (D-NET-32/33). Chunk
-// roles: "GSB "=init (payload dword0==0x00010000), "FLDS"=field names,
-// "SVRS"=server rows, "XXXX"=terminator (D-NET-34). Row =
-// [u32 ip][u32 port][N values][u16 player_count][player names] (D-NET-35).
+// @ 0x63d740 (docs/net/novaworld-net-re.md §7 Waves 7+9, the 2026-07-27 grill).
+// The blob is a flat chunk stream [magic:4][u32 LE len][payload], advance len+8
+// — magic is a PREFIX and "GSB " is the first chunk's tag, NOT a bare file
+// header (D-NET-32/33). Chunk roles: "GSB "=reset (only honored when payload
+// dword0==0x00010000, @ 0x63d8f2), "FLDS"=field names (replaces the table),
+// "SVRS"=server rows (records ACCUMULATE, D-NET-191), "XXXX"=finalize
+// (D-NET-34; retail then pings every row and never advances past it). Row =
+// [u32 rid][4-byte IPv4 in_addr][N values][u16 player_count][player names]
+// (D-NET-35 as corrected by D-NET-190: the second dword is the ping-target IP,
+// not a port — NapiGameList_StartPingSweep @ 0x63bcf0 formats entry+4 via
+// Network_FormatIPAddressToString).
 
 namespace {
 
@@ -67,6 +72,45 @@ void push_u32_le(std::vector<uint8_t> &buf, uint32_t v) {
 void push_ascii_cstr(std::vector<uint8_t> &buf, const std::string &s) {
 	buf.insert(buf.end(), s.begin(), s.end());
 	buf.push_back(0x00);
+}
+
+// IPv4 dotted-quad -> the row's 4 wire bytes, in_addr byte order (a.b.c.d in
+// memory) — exactly what retail casts to `struct in_addr` at entry+4
+// [orig: NapiGameList_StartPingSweep @ 0x63BCF0]. Unparseable input emits
+// 0.0.0.0 rather than failing the whole blob.
+void push_ipv4_dotted(std::vector<uint8_t> &buf, const std::string &dotted) {
+	uint8_t octets[4] = {0, 0, 0, 0};
+	unsigned acc = 0, digits = 0, idx = 0;
+	bool ok = true;
+	for (const char c : dotted) {
+		if (c >= '0' && c <= '9') {
+			acc = acc * 10 + static_cast<unsigned>(c - '0');
+			if (++digits > 3 || acc > 255) { ok = false; break; }
+		} else if (c == '.') {
+			if (digits == 0 || idx >= 3) { ok = false; break; }
+			octets[idx++] = static_cast<uint8_t>(acc);
+			acc = 0;
+			digits = 0;
+		} else {
+			ok = false;
+			break;
+		}
+	}
+	if (ok && idx == 3 && digits > 0) {
+		octets[3] = static_cast<uint8_t>(acc);
+	} else {
+		octets[0] = octets[1] = octets[2] = octets[3] = 0;
+	}
+	buf.insert(buf.end(), octets, octets + 4);
+}
+
+std::string ipv4_bytes_to_dotted(const uint8_t bytes[4]) {
+	std::string out;
+	for (int i = 0; i < 4; ++i) {
+		if (i) out.push_back('.');
+		out += std::to_string(static_cast<unsigned>(bytes[i]));
+	}
+	return out;
 }
 
 // Emit one chunk: [4-byte magic PREFIX][u32 LE payload_length][encrypted payload].
@@ -148,15 +192,15 @@ std::vector<uint8_t> build_fields_payload() {
 
 // SVRS chunk — per-server rows.
 //   [u16 LE server_count]
-//   per server: [u32 LE rid][u32 LE port]
+//   per server: [u32 LE rid][4-byte IPv4, in_addr order]
 //               [field_count × (ASCII value + NUL)]   (FIELD_NAMES order)
 //               [u16 LE player_count][player_count × (player name + NUL)]
 std::vector<uint8_t> build_servers_payload(const std::vector<GsbServerEntry> &servers) {
 	std::vector<uint8_t> payload;
 	push_u16_le(payload, static_cast<uint16_t>(servers.size()));
 	for (const auto &s : servers) {
-		push_u32_le(payload, s.rid);   // host id (the /NWJoin.dll?rid= value)
-		push_u32_le(payload, static_cast<uint32_t>(s.port));
+		push_u32_le(payload, s.rid);   // host id (the @RID@ join value)
+		push_ipv4_dotted(payload, s.ip);  // ping target [orig: 0x63BCF0]
 		for (size_t i = 0; i < GSB_FIELD_COUNT; ++i) {
 			push_ascii_cstr(payload, field_value(s, i));
 		}
@@ -292,22 +336,24 @@ bool parse_fields(const std::vector<uint8_t> &payload, std::vector<std::string> 
 	return true;
 }
 
-// SVRS: [u16 count][count × ([u32 rid][u32 port][N values][u16 player_count][names])],
-// where N == field_names.size() and values are read positionally.
+// SVRS: [u16 count][count × ([u32 rid][4-byte IPv4][N values][u16 player_count][names])],
+// where N == field_names.size() and values are read positionally. APPENDS to
+// `servers` — retail accumulates rows across SVRS records with no clear
+// [orig: 0x63d740 @ 0x63dbec..0x63dc0d]; only a valid "GSB " reset record (or a
+// new fetch) empties the list.
 bool parse_servers(const std::vector<uint8_t> &payload,
                    const std::vector<std::string> &field_names,
                    std::vector<GsbServerEntry> &servers) {
 	size_t pos = 0;
 	uint16_t count = 0;
 	if (!read_u16_le(payload.data(), payload.size(), pos, count)) return false;
-	servers.clear();
-	servers.reserve(count);
+	servers.reserve(servers.size() + count);
 	for (uint16_t i = 0; i < count; ++i) {
 		GsbServerEntry e{};
 		if (!read_u32_le(payload.data(), payload.size(), pos, e.rid)) return false;  // host id
-		uint32_t port = 0;
-		if (!read_u32_le(payload.data(), payload.size(), pos, port)) return false;
-		e.port = static_cast<uint16_t>(port & 0xFFFFu);
+		if (pos + 4 > payload.size()) return false;
+		e.ip = ipv4_bytes_to_dotted(payload.data() + pos);  // in_addr wire bytes
+		pos += 4;
 		for (const std::string &name : field_names) {
 			std::string value;
 			if (!read_cstr(payload, pos, value)) return false;
@@ -338,11 +384,26 @@ bool gsb_parse_response(const uint8_t *data, size_t len, GsbResponse &out) {
 		GsbChunk chunk;
 		if (!read_chunk(data, len, pos, chunk)) return false;
 		if (magic_is(chunk, "GSB ")) {
-			// Init/reset record (payload dword0 == 0x00010000) — no data to keep.
+			// Reset record: honored only when the payload starts with u32
+			// 0x00010000 [orig: 0x63d740 @ 0x63d8f2] — retail then frees the
+			// field table + every accumulated row and zeroes the totals; an
+			// undersized/mismatched "GSB " record is skipped, not an error.
+			if (chunk.payload.size() >= 4 &&
+			    chunk.payload[0] == 0x00 && chunk.payload[1] == 0x00 &&
+			    chunk.payload[2] == 0x01 && chunk.payload[3] == 0x00) {
+				out.field_names.clear();
+				out.servers.clear();
+			}
 		} else if (magic_is(chunk, "FLDS")) {
-			if (!parse_fields(chunk.payload, out.field_names)) return false;
+			// Retail skips a FLDS record with payload < 2 [orig: @ 0x63d7c2].
+			if (chunk.payload.size() >= 2) {
+				if (!parse_fields(chunk.payload, out.field_names)) return false;
+			}
 		} else if (magic_is(chunk, "SVRS")) {
-			if (!parse_servers(chunk.payload, out.field_names, out.servers)) return false;
+			// Retail skips an SVRS record with payload < 2 [orig: @ 0x63da43].
+			if (chunk.payload.size() >= 2) {
+				if (!parse_servers(chunk.payload, out.field_names, out.servers)) return false;
+			}
 		} else if (magic_is(chunk, "XXXX")) {
 			reached_terminator = true;
 			break;

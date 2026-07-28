@@ -675,11 +675,11 @@ bool decode_client_fired_round(const uint8_t *body, size_t len,
 	out.extra_byte1     = c.u8();
 	out.extra_byte2     = c.u8();
 	out.misc_byte       = c.u8();
-	out.base_offset     = c.u16();
-	out.offset_x        = c.u16();
-	out.offset_y        = c.u16();
-	out.offset_z        = c.u16();
-	out.offset_w        = c.u16();
+	out.delta_x         = c.u16();
+	out.delta_y         = c.u16();
+	out.delta_z         = c.u16();
+	out.delta_yaw       = c.u16();
+	out.delta_pitch     = c.u16();
 	if (!c.ok) return false;
 	consumed = size_t(c.p - body);
 	return consumed == 45;
@@ -975,6 +975,20 @@ bool decode_frame_update(const uint8_t *body, size_t len,
 }
 
 // S2C 0x1E game event — 8 B fixed. [orig: NetPacket_HandleGameEvent @ 0x426270]
+// S2C 0x61 tick seed. The retail handler reads the dword only when four bytes are
+// present and otherwise seeds ZERO, then stores it unconditionally — a short body is a
+// seed of 0, not an error, and 0 is itself the witnessed round-end disarm value.
+// [orig: NapiNPClientMsg_HandleSessionKey @0x4297c0 — the `keyData+4 <= keyData+dataLen`
+//  guard @0x4297eb, the stores @0x4297f8 / @0x4297fd]
+bool decode_tick_seed(const uint8_t *body, size_t len, uint32_t &out) {
+	out = 0;
+	if (body != nullptr && len >= 4) {
+		out = static_cast<uint32_t>(body[0]) | (static_cast<uint32_t>(body[1]) << 8) |
+		      (static_cast<uint32_t>(body[2]) << 16) | (static_cast<uint32_t>(body[3]) << 24);
+	}
+	return true;
+}
+
 bool decode_game_event(const uint8_t *body, size_t len, GameEventRecord &out,
                        size_t &consumed) {
 	consumed = 0;
@@ -1064,6 +1078,36 @@ bool decode_batch_kill(const uint8_t *body, size_t len, BatchKillBatch &out) {
 	while (c.p + 2 <= c.end)
 		out.slots.push_back(c.u16());
 	return (c.p == c.end);
+}
+
+// S2C 0x5D empty-slot sweep. No count word: the handler walks `[i16 pool0Index]`
+// pairs to the end of the body. Each index is a RAW pool-0 slot number
+// (Pool_GetEntryUnchecked(0, idx)), not a packed handle.
+// [orig: NapiNPClientMsg_DestroyEntityList @ 0x429730]
+bool decode_destroy_entity_list(const uint8_t *body, size_t len,
+                                DestroyEntityList &out) {
+	out = DestroyEntityList{};
+	Cursor c{body, body + len, true};
+	while (c.p + 2 <= c.end)
+		out.pool0_indices.push_back(c.u16());
+	return (c.p == c.end);
+}
+
+// S2C 0x50 team assign. A short body leaves every REMAINING field at zero — the
+// handler reads what arrived and never fails on a truncated tail.
+// [orig: NapiNPClientMsg_0x050 @ 0x431910]
+bool decode_team_assign(const uint8_t *body, size_t len, TeamAssign &out,
+                        size_t &consumed) {
+	out = TeamAssign{};
+	consumed = 0;
+	Cursor c{body, body + len, true};
+	out.entity_handle = c.u16();
+	if (!c.ok) return false; // the handle itself is the one mandatory field
+	if (c.p + 1 <= c.end) out.team = c.u8();
+	if (c.p + 2 <= c.end) out.net_id = c.u16();
+	if (c.p + 1 <= c.end) out.anim_slot = c.u8();
+	consumed = size_t(c.p - body);
+	return true;
 }
 
 // ===========================================================================
@@ -1210,6 +1254,15 @@ bool decode_burst_visible_request(const uint8_t * /*body*/, size_t len, size_t &
 	return len == 0;
 }
 
+// C2S 0x32 empty-slot sweep request. The host handler reads no fields — it walks
+// pool 0 and answers S2C 0x5D — so this consumes nothing and accepts any body
+// length (a stock client's exact filler, if any, is unwitnessed).
+// [orig: NapiNPServerMsg_SendEmptySlots @ 0x51a600]
+bool decode_empty_slots_request(const uint8_t * /*body*/, size_t /*len*/, size_t &consumed) {
+	consumed = 0;
+	return true;
+}
+
 // C2S 0x28 weapon-loadout request. [orig: NapiNPServerMsg_HandleWeaponLoadoutRequest @ 0x51A550]
 bool decode_burst_loadout_request(const uint8_t *body, size_t len,
                                   BurstLoadoutRequest &out, size_t &consumed) {
@@ -1341,6 +1394,19 @@ bool decode_entity_checksum_request(const uint8_t *body, size_t len,
 	Cursor c{body, body + len, true};
 	out.entity_id = c.u8();
 	out.checksum  = c.u16();
+	if (!c.ok) return false;
+	consumed = size_t(c.p - body);
+	return consumed == 3;
+}
+
+// S2C 0x31 loadout/ammo CRC request — [u8 ammoIndex][u16 xorKey] (3 B) → C2S 0x21.
+// [orig: NapiNPClientMsg_0x031 @ 0x4311E0]
+bool decode_loadout_crc_request(const uint8_t *body, size_t len,
+                                LoadoutCrcRequest &out, size_t &consumed) {
+	consumed = 0;
+	Cursor c{body, body + len, true};
+	out.ammo_index = c.u8();
+	out.xor_key    = c.u16();
 	if (!c.ok) return false;
 	consumed = size_t(c.p - body);
 	return consumed == 3;
@@ -1623,8 +1689,8 @@ bool decode_join_padding_probe(const uint8_t *body, size_t len, JoinPaddingProbe
 bool decode_loadout_submit(const uint8_t *body, size_t len, LoadoutSubmit &out) {
 	out = LoadoutSubmit{};
 	Cursor c{body, body + len, true};
+	out.team = c.u8();
 	out.player_class = c.u8();
-	out.soldier_type = c.u8();
 	out.weapon_slot_index = c.u32();
 	while (c.ok) {
 		const uint8_t adm = c.u8();

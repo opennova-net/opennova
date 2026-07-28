@@ -29,6 +29,10 @@ ClientEntityState &ClientState::upsert(uint16_t handle) {
 	return entities.back();
 }
 
+void ClientState::clear_anim_pulses() {
+	for (ClientEntityState &e : entities) e.anim_state_pulse = -1;
+}
+
 // ---- NetClientView ----------------------------------------------------------
 
 NetClientView::NetClientView()
@@ -76,6 +80,16 @@ void NetClientView::apply(uint8_t tag, const std::vector<uint8_t> &body) {
 	case kTag0aFrameUpdate:
 		apply_frame_update(body);
 		break;
+	case 0x49: { // weapon reload echo (same four-byte body as C2S 0x25)
+		WeaponReload reload;
+		size_t consumed = 0;
+		if (decode_weapon_reload(body.data(), body.size(), reload, consumed) &&
+		    consumed == body.size())
+			pending_weapon_reloads_.push_back(reload);
+		else
+			++unknown_tags_;
+		break;
+	}
 	case 0x0C: // pool-0 organic spawn batch (§5.23)
 		apply_organic_spawn(body);
 		break;
@@ -93,6 +107,18 @@ void NetClientView::apply(uint8_t tag, const std::vector<uint8_t> &body) {
 		++unknown_tags_;
 		break;
 	}
+}
+
+std::vector<ClientRoundEvent> NetClientView::drain_round_events() {
+	std::vector<ClientRoundEvent> out;
+	out.swap(pending_round_events_);
+	return out;
+}
+
+std::vector<WeaponReload> NetClientView::drain_weapon_reloads() {
+	std::vector<WeaponReload> out;
+	out.swap(pending_weapon_reloads_);
+	return out;
 }
 
 void NetClientView::pump(ISessionTransport &channel) {
@@ -131,6 +157,45 @@ void NetClientView::apply_organic_spawn(const std::vector<uint8_t> &body) {
 		es.yaw_byte = yaw_byte_from_bam(rec.orientation);
 		es.pitch_bam = 0; // organic spawn carries no entity+20/+24 Euler fields
 		es.roll_bam = 0;
+		es.team = rec.team;
+	}
+}
+
+// The per-body-tick lean integrator, run once per client frame for every remote
+// organic: the decay first, then the ramp from the latest wire bits — the same
+// locally integrated model retail runs at both ends (only the bits replicate).
+// The order is load-bearing: decay-then-ramp settles at ~±0x30000000 ≈ 67.5°,
+// ramp-then-decay one ramp step short of it (~±0x2D000000).
+// [orig: both legs of the single Entity_UpdateInfantryPlayerBody @0x4b40e0 pass —
+//  decay lean -= (lean+8)>>4 @0x4b5c97, then the on-foot ramp @0x4b7dbf (bit 6 left
+//  −0x3000000/tick) / @0x4b7dd6 (bit 7 right +0x3000000/tick)]
+// The producer's ramp gates (alive/prone, and the seated ±0x1400000 variant) are not
+// applied here: the decoded row carries no honest stance/seat state for them (D-INF-17).
+void NetClientView::tick_lean() {
+	for (ClientEntityState &es : state_.entities) {
+		if (es.cls != EntityClass::Player && es.cls != EntityClass::Infantry)
+			continue;
+		es.lean_angle -= (es.lean_angle + 8) >> 4;
+		if ((es.move_input & 0x40u) != 0) es.lean_angle -= 0x3000000;
+		if ((es.move_input & 0x80u) != 0) es.lean_angle += 0x3000000;
+	}
+}
+
+// The remote arms-dip integrator: the exact block AiSystem::infantry_weapon_channel
+// runs for authoritative bodies, applied here to wire-decoded peers. The window byte
+// decrements in BOTH branches -- twice per tick -- so an 80 stamp dips for 40 ticks.
+// [orig: @0x4b5cab..0x4b5ce7]
+void NetClientView::tick_arms_dip() {
+	for (ClientEntityState &es : state_.entities) {
+		if (es.cls != EntityClass::Player && es.cls != EntityClass::Infantry)
+			continue;
+		if (es.arms_dip_ticks > 0) {
+			--es.arms_dip_ticks;                 // [orig: @0x4b5cb5]
+			es.pitch_kick_accum -= 0x2800000;     // [orig: @0x4b5cb7 += 0xFD800000]
+		}
+		es.pitch_kick_accum -=
+		    io::bam_sar(io::bam_add(es.pitch_kick_accum, 4), 3); // [orig: @0x4b5cc7..0x4b5cd5]
+		if (es.arms_dip_ticks > 0) --es.arms_dip_ticks;         // [orig: @0x4b5cdb..0x4b5ce7]
 	}
 }
 
@@ -187,6 +252,23 @@ void NetClientView::erase_entity_tree(uint16_t root_handle) {
 			state_.entities.end());
 }
 
+// [orig: NapiNPClientMsg_DestroyEntityList @0x429730 — the body carries RAW pool-0
+//  indices, resolved with Pool_GetEntryUnchecked(0, idx), so the wire handle is
+//  (0 << 12) | idx]
+void NetClientView::destroy_pool0_slot(uint16_t pool0_index) {
+	if ((pool0_index & 0xF000u) != 0u) return; // not a pool-0 slot index
+	if (state_.find(pool0_index) == nullptr) return;
+	erase_entity_tree(pool0_index);
+}
+
+// [orig: NapiNPClientMsg_0x050 @0x431910 — the non-authority entity team store @0x4319ee]
+void NetClientView::apply_team_assign(uint16_t handle, uint8_t team) {
+	// Retail's gates: not the 0xFFFF sentinel, and the pool nibble must address one
+	// of the five entity pools (@0x431910 header checks).
+	if (handle == 0xFFFFu || ((handle >> 12) & 0xFu) >= 5u) return;
+	state_.upsert(handle).team = team;
+}
+
 void NetClientView::refresh_parented_pool_entities() {
 	std::vector<uint16_t> dead_children;
 	// Repeating the parent-before-child composition makes nested attachment
@@ -194,6 +276,20 @@ void NetClientView::refresh_parented_pool_entities() {
 	for (int depth = 0; depth < 8; ++depth) {
 		for (ClientEntityState &child : state_.entities) {
 			if (child.parent_handle == 0xFFFFu) continue;
+			// Only the addeweap/no-callback family rides this persistent
+			// recompose: those children never receive compact motion samples,
+			// so the load-time 0x0D parent relation is their only pose source.
+			// A compact-sampled class (player/vehicle/infantry) moves by its
+			// OWN records — its carrier composition happens per record on the
+			// record's own carrier field — and its 0x0D parentHandle is the
+			// occupantEntity/+368 DRIVER back-reference, never a transform
+			// parent [orig: 0x0D store @0x433289; vehicle-compact carrier
+			// compose @0x4608ce]. Recomposing such a row here glued the
+			// vehicle to its spawn-time occupant — on non-COOP retail hosts,
+			// "a vehicle follows the player around" (one per map, whichever
+			// spawn record carried flag 0x0100).
+			if (classify(child.type_id) != EntityClass::NoNetworkCallback)
+				continue;
 			ClientEntityState *parent = state_.find(child.parent_handle);
 			if (parent == nullptr) continue; // a later batch may still provide it
 			// 0x0D entity_flags bit 1 is a spawn/movement gate, not a death
@@ -310,6 +406,28 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 		++state_.objective_updates_applied;
 	}
 
+	// Tag 2 carries a fire origin and direction. Lift the compressed origin by
+	// this frame's anchor now, while those transient coordinates are together.
+	for (const RoundEventRecord &rec : fu.round_events) {
+		ClientRoundEvent ev;
+		ev.flags = rec.flags;
+		ev.adm_index = rec.adm_index;
+		ev.subtype = rec.subtype;
+		ev.slot_byte = rec.slot_byte;
+		ev.shooter_handle = rec.shooter_handle;
+		ev.target_handle = rec.target_handle;
+		ev.shot_seq = rec.shot_seq;
+		ev.origin_x = fu.anchor_x + network_decompress_fixedpoint(rec.pos_x_compressed);
+		ev.origin_y = fu.anchor_y + network_decompress_fixedpoint(rec.pos_y_compressed);
+		ev.origin_z = fu.anchor_z + network_decompress_fixedpoint(rec.pos_z_compressed);
+		ev.dir_yaw_bam = static_cast<int32_t>(
+				static_cast<uint32_t>(rec.yaw_bam_high) << 16);
+		ev.dir_pitch_bam = static_cast<int32_t>(
+				static_cast<uint32_t>(rec.pitch_bam_high) << 16);
+		pending_round_events_.push_back(ev);
+	}
+
+	state_.compact_records_applied += static_cast<std::uint32_t>(fu.records.size());
 	for (ClientEntityState &e : state_.entities) e.seen_this_frame = false;
 	struct PendingCarrierPose {
 		uint16_t child_handle;
@@ -318,6 +436,12 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 		uint16_t cy;
 		uint16_t cz;
 		uint8_t local_yaw_byte;
+		// Player/infantry compacts carry a carrier-RELATIVE yaw byte; the
+		// vehicle compact's orientation stays world-absolute even when its
+		// position is carrier-local [orig: the read path stores the wire
+		// eulerZ untransformed at entity+576 @0x4607f5 while the position
+		// goes through Entity_TransformLocalToWorld @0x4608ce].
+		bool compose_yaw;
 	};
 	std::vector<PendingCarrierPose> pending_carrier_poses;
 	pending_carrier_poses.reserve(fu.records.size());
@@ -327,6 +451,18 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 			continue;
 		}
 		ClientEntityState &es = state_.upsert(rec.handle);
+		// Capture the previous body-anim sample before the per-record clear: if
+		// this record REPLACES it with a different state within one decode fold,
+		// the old value becomes the transition PULSE presentation still has to
+		// dispatch — retail applies each record's anim byte through the receive
+		// arbitration as it decodes [orig: @0x4c1153], and a tapped prone roll
+		// rides the wire for only 1-2 ticks (the byte is `pending ?: current`).
+		// A row's first-ever organic sample never pulses (its default 0 would
+		// read as the anim_reset clip).
+		const bool prev_anim_sampled = es.cls == EntityClass::Player ||
+		                               es.cls == EntityClass::Infantry;
+		const uint8_t prev_anim_state = es.anim_state_id;
+		const uint8_t prev_anim_ratio = es.anim_channel_ratio;
 		es.type_id = rec.type_id;
 		es.cls = rec.cls;
 		es.seen_this_frame = true;
@@ -388,11 +524,13 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 			es.pitch_byte = rec.player.pitch_byte;
 			es.anim_state_id = rec.player.anim_state_id;
 			es.anim_channel_ratio = rec.player.anim_channel_ratio;
+			es.equipped_adm_index = rec.player.anim_def_index;
 			es.state_flags = rec.player.state_flags;
+			es.move_input = rec.player.move_input_byte;
 			if (rec.player.carrier_handle != 0xFFFFu) {
 				pending_carrier_poses.push_back(PendingCarrierPose{
 						rec.handle, rec.player.carrier_handle, cx, cy, cz,
-						rec.player.yaw_byte});
+						rec.player.yaw_byte, /*compose_yaw=*/true});
 				skip_pos = true;
 			} else {
 				es.yaw_byte = rec.player.yaw_byte;
@@ -402,6 +540,24 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 			cx = rec.vehicle.pos_x_compressed;
 			cy = rec.vehicle.pos_y_compressed;
 			cz = rec.vehicle.pos_z_compressed;
+			// The §5.13 compact's own parent field is the CARRIER (deck/ground
+			// entity), consumed per record: a resolving parent composes THIS
+			// record's vehicle-local position against the carrier's live pose,
+			// an absent one takes the anchor-relative leg, and the stored
+			// carrier ref is re-landed (nulled included) from every record
+			// [orig: Entity_SerializeVehicleState read side — resolve
+			// @0x46085d, local->world @0x4608ce, entity+40 (re)store
+			// @0x460802]. The 0x0D spawn's parentHandle is a DIFFERENT slot —
+			// occupantEntity/+368, a driver back-reference with no transform
+			// semantics [orig: store @0x433289] — see
+			// refresh_parented_pool_entities for the class gate that keeps it
+			// out of this row's pose.
+			if (rec.vehicle.parent_slot_handle != 0xFFFFu) {
+				pending_carrier_poses.push_back(PendingCarrierPose{
+						rec.handle, rec.vehicle.parent_slot_handle, cx, cy, cz,
+						0, /*compose_yaw=*/false});
+				skip_pos = true;
+			}
 			es.yaw_byte = static_cast<uint8_t>(
 					static_cast<uint16_t>(rec.vehicle.euler_z) >> 8);
 			es.state_flags = rec.vehicle.flags_byte;
@@ -437,7 +593,7 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 			if (rec.infantry.vehicle_slot_handle != 0xFFFFu) {
 				pending_carrier_poses.push_back(PendingCarrierPose{
 						rec.handle, rec.infantry.vehicle_slot_handle, cx, cy, cz,
-						rec.infantry.yaw_byte});
+						rec.infantry.yaw_byte, /*compose_yaw=*/true});
 				skip_pos = true;
 			} else {
 				es.yaw_byte = rec.infantry.yaw_byte;
@@ -445,6 +601,18 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 			break;
 		default:
 			break; // unresolved/guided records are not compact motion samples
+		}
+		// Latch the overwritten body-anim state as this row's transition pulse.
+		// LAST transition wins: in a fold of [41, 48] the 41 is the state being
+		// buried (the 48 latched by the first transition was already presented
+		// last frame, and re-dispatching a presented state is a same-state
+		// no-op at the model). The presenter drains the pulse once per frame.
+		if (prev_anim_sampled &&
+				(rec.cls == EntityClass::Player ||
+						rec.cls == EntityClass::Infantry) &&
+				es.anim_state_id != prev_anim_state) {
+			es.anim_state_pulse = static_cast<int16_t>(prev_anim_state);
+			es.anim_pulse_ratio = prev_anim_ratio;
 		}
 		if (!skip_pos) {
 			es.x = fu.anchor_x + network_decompress_fixedpoint(cx);
@@ -472,8 +640,11 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 		child->y = w.y;
 		child->z = w.z;
 		// World yaw byte = carrier yaw + local yaw; BAM addition holds in the
-		// 8-bit ring used by the compact view.
-		child->yaw_byte = uint8_t(carrier->yaw_byte + pending.local_yaw_byte);
+		// 8-bit ring used by the compact view. Vehicle records keep their
+		// world-absolute wire euler instead (compose_yaw false) [orig: the
+		// untransformed entity+576 store @0x4607f5].
+		if (pending.compose_yaw)
+			child->yaw_byte = uint8_t(carrier->yaw_byte + pending.local_yaw_byte);
 	}
 
 	refresh_parented_pool_entities();

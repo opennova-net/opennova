@@ -8,6 +8,7 @@ class FakeModel:
 	extends Node3D
 	var overlay_calls: Array = []
 	var right_hand_collapse_calls: Array[bool] = []
+	var weapon_channel_calls: Array = []
 	var body_calls: Array = []
 	var remote_body_calls: Array = []
 	var reset_remote_body_calls := 0
@@ -36,6 +37,8 @@ class FakeModel:
 	func set_right_hand_collapsed(collapsed: bool) -> void:
 		right_hand_collapse_calls.append(collapsed)
 		pose_call_order.append("right_hand")
+	func set_weapon_channel(key: String, phase_ticks: int) -> void:
+		weapon_channel_calls.append([key, phase_ticks])
 	func set_ctrl_value(name: String, value: int) -> void:
 		ctrl_values[name] = value
 	func clear_ctrl_value(name: String) -> void:
@@ -46,12 +49,22 @@ class FakeModel:
 class FakeSim:
 	extends RefCounted
 	var entities: Array = []
+	var local_player_present := true
+	var local_player_handle := 1
 
 	func get_present_stride() -> int:
 		return NovaSimulation.PF_STRIDE
 
+	# The ADM-indexed third-person model lookup the present pass asks the sim for —
+	# deliberately by INDEX, since that is what the wire row carries.
+	func get_weapon_third_person_model(adm_index: int) -> String:
+		return "WPN%d_3rd" % adm_index if adm_index > 0 else ""
+
+	func has_local_player() -> bool:
+		return local_player_present
+
 	func get_local_player_wire_handle() -> int:
-		return 1
+		return local_player_handle
 
 	func get_present_snapshot() -> PackedFloat32Array:
 		var stride := NovaSimulation.PF_STRIDE
@@ -86,6 +99,10 @@ class FakeSim:
 					entity.get("anim_phase", -1))
 			out[base + NovaSimulation.PF_ANIM_REMOTE_REQUEST] = float(
 					entity.get("anim_remote_request", 1))
+			out[base + NovaSimulation.PF_ANIM_STATE_PULSE] = float(
+					entity.get("anim_pulse", -1))
+			out[base + NovaSimulation.PF_ANIM_PULSE_TICKS] = float(
+					entity.get("anim_pulse_ticks", -1))
 			out[base + NovaSimulation.PF_AIM_OVERLAY_VALID] = float(
 					entity.get("aim_overlay_valid", 0))
 			var body: Vector3 = entity.get("aim_body", Vector3.ZERO)
@@ -100,6 +117,12 @@ class FakeSim:
 					entity.get("emplaced_gun_pitch", 0))
 			out[base + NovaSimulation.PF_RIGHT_HAND_COLLAPSED] = float(
 					entity.get("right_hand_collapsed", 0))
+			out[base + NovaSimulation.PF_HELD_WEAPON_ADM] = float(
+					entity.get("held_weapon_adm", 0))
+			out[base + NovaSimulation.PF_WPN_ANIM_STATE] = float(
+					entity.get("wpn_anim_state", -1))
+			out[base + NovaSimulation.PF_WPN_PHASE_TICKS] = float(
+					entity.get("wpn_phase_ticks", -1))
 			var angles: PackedVector3Array = entity.get(
 					"aim_angles", PackedVector3Array())
 			for cls in range(mini(angles.size(), 9)):
@@ -121,12 +144,22 @@ class RevisionFakeSim:
 class FakePlacer:
 	extends RefCounted
 	var built: Array[Node3D] = []
+	var graphic_builds: Array[String] = []
 
 	func build_player_animated_model(_type_id: int, parent: Node3D,
 			_env_node: Node = null) -> Node3D:
 		var node := FakeModel.new()
 		parent.add_child(node)
 		built.append(node)
+		return node
+
+	# The held-weapon path: a plain rigid model built by graphic NAME, no adm/clip.
+	func build_model_from_graphic(graphic: String, _adm_name: String, parent: Node3D,
+			_clip_key: String = "", _env_node: Node = null,
+			_rig_graphic: String = "") -> Node3D:
+		var node := Node3D.new()
+		parent.add_child(node)
+		graphic_builds.append(graphic)
 		return node
 
 
@@ -245,6 +278,40 @@ func test_wire_handle_resolver_keeps_synthetic_siblings_distinct() -> void:
 			'a retired wire row no longer resolves through its reused pool slot')
 
 
+func test_zero_wire_handle_is_a_valid_remote_pool_slot() -> void:
+	var sim := FakeSim.new()
+	sim.local_player_present = false
+	sim.entities = [{"type_id": 0x14B9, "handle": 0, "x": 3.0}]
+	var placer := FakePlacer.new()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var presenter := WirePresentPass.new()
+	presenter.setup(sim, placer, container)
+
+	presenter.present()
+
+	assert_eq(placer.built.size(), 1,
+			"packed handle zero is a real remote pool-0 slot")
+	assert_eq(presenter.resolve_wire_handle(0), placer.built[0])
+	assert_almost_eq(placer.built[0].position.x, 3.0, 0.001)
+
+
+func test_zero_wire_handle_is_filtered_when_it_is_the_explicit_local_player() -> void:
+	var sim := FakeSim.new()
+	sim.local_player_handle = 0
+	sim.entities = [{"type_id": 0x14B9, "handle": 0}]
+	var placer := FakePlacer.new()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var presenter := WirePresentPass.new()
+	presenter.setup(sim, placer, container)
+
+	presenter.present()
+
+	assert_eq(placer.built.size(), 0,
+			"packed handle zero is hidden only when explicit local-player validity says it is self")
+
+
 func test_unresolved_slot_retries_after_disappearance_and_reuse() -> void:
 	var sim := FakeSim.new()
 	sim.entities = [{"type_id": 166, "handle": 0x1004}]
@@ -341,9 +408,43 @@ func test_stable_host_layout_skips_repeat_defer_resolution() -> void:
 	}
 	sim.layout_revision += 1
 	presenter.present()
-	assert_eq(index.resolve_calls, 2)
+	assert_eq(index.resolve_calls, 1,
+			"identity-less wire rows never consult the defer index")
 	assert_eq(placer.attempts, [167],
 			"same-size placed-to-wire replacement rebuilds classification")
+
+
+func test_placed_identity_rows_defer_even_without_a_resolvable_node() -> void:
+	# A batched static (MultiMesh instance) deliberately has NO per-entity node,
+	# so the registry resolves null — yet the row carries its placed .bms
+	# identity, and the placed representation owns the render. The wire pass must
+	# not spawn a duplicate (the joiner's pre-convergence double-render). Rows
+	# without placed identity (the joiner's players/streamed AI) still spawn.
+	var sim := FakeSim.new()
+	sim.entities = [{
+		"type_id": 164,
+		"handle": 0x1004,
+		"bms_id": 11,
+		"kind": 1,
+		"index": 3,
+	}, {
+		"type_id": 166,
+		"handle": 0x0010,
+		"bms_id": 0,
+		"kind": -1,
+		"index": -1,
+	}]
+	var placer := ResolvingFakePlacer.new()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var presenter := WirePresentPass.new()
+	presenter.setup(sim, placer, container, null, EmptyIndex.new())
+	presenter.present()
+	assert_eq(placer.built.size(), 1,
+			"the batched-static row defers; only the identity-less row materializes")
+	assert_null(presenter.resolve_wire_handle(0x1004),
+			"no wire duplicate exists for the placed identity")
+	assert_not_null(presenter.resolve_wire_handle(0x0010))
 
 
 func test_wire_plan_survives_reorder_then_prunes_and_rebuilds_reused_type() -> void:
@@ -535,6 +636,44 @@ func test_wire_model_applies_the_same_packed_overlay_result() -> void:
 	], "raw compact requests reach the completion-aware remote animation channel")
 
 
+func test_wire_model_receives_the_transition_pulse_before_the_current_state() -> void:
+	# A tapped prone roll rides the wire as 41/42 for a single 0x0A sample (the
+	# emitted byte is `pending ?: current`), and several datagrams fold per
+	# render frame, so the sim surfaces the buried transition as
+	# PF_ANIM_STATE_PULSE. Presentation dispatches it FIRST — retail applies the
+	# anim byte per record [orig: @0x4c1153] — so the locked roll clip accepts
+	# and the follow-up state queues behind it at the model. Revisioned sim: the
+	# second leg pins the edge gate staying closed once the pulse is drained.
+	var sim := RevisionFakeSim.new()
+	sim.entities = [{
+		"type_id": 4567,
+		"handle": 0x1004,
+		"anim_state": 48,
+		"anim_phase": 60,
+		"anim_pulse": 41,
+		"anim_pulse_ticks": 6,
+	}]
+	var placer := FakePlacer.new()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var presenter := WirePresentPass.new()
+	presenter.setup(sim, placer, container)
+	presenter.present()
+	var model := placer.built[0] as FakeModel
+	assert_eq(model.remote_body_calls, [
+		[41, "anim_roll_left", NovaSimulation.infantry_anim_flags(41), 6],
+		[48, "anim_idle_prone", NovaSimulation.infantry_anim_flags(48), 60],
+	], "the buried pulse dispatches before the current state, carrying its own phase")
+
+	# A steady frame with no pulse and an unchanged state stays on the edge-gated
+	# fast path: no re-dispatch.
+	sim.entities[0]["anim_pulse"] = -1
+	sim.entities[0]["anim_pulse_ticks"] = -1
+	presenter.present()
+	assert_eq(model.remote_body_calls.size(), 2,
+			"pulse-free same-state frames keep the edge-gate skip")
+
+
 func test_wire_model_free_runs_compact_infantry_when_phase_is_absent() -> void:
 	# Production infantry compacts carry the state byte but no player-channel
 	# phase byte. Re-presenting that snapshot must preserve local playback
@@ -722,3 +861,77 @@ func test_wire_model_clears_overlay_when_snapshot_selector_is_invalid() -> void:
 	var model := placer.built[0] as FakeModel
 	assert_eq(model.overlay_calls, [[]],
 			"a remote model cannot retain an overlay after selector invalidation")
+
+
+# A remote player's upper-body weapon pose. The sim derives the state (nothing about the
+# weapon channel crosses the wire — every observer re-derives it from the peer's equipped
+# ADM index and Flags bit 0x10), and the wire pass drives it onto that peer's model. A -1
+# state means "no channel this frame" and must CLEAR the pose, or a peer keeps the hold it
+# had before it switched weapons.
+# [orig: the selection Entity_UpdateInfantryPlayerBody @0x4b5dad, which retail runs for
+#  every player body it draws rather than only the local one]
+func test_wire_model_applies_and_clears_the_remote_weapon_channel() -> void:
+	var sim := FakeSim.new()
+	sim.entities = [{
+		"type_id": 4567,
+		"handle": 0x1004,
+		"aim_overlay_valid": 1,
+		"wpn_anim_state": 51,   # pistol hold
+		"wpn_phase_ticks": -1,  # the secondary playhead is not replicated
+	}]
+	var placer := FakePlacer.new()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var presenter := WirePresentPass.new()
+	presenter.setup(sim, placer, container)
+	presenter.present()
+	var model := placer.built[0] as FakeModel
+	assert_eq(model.weapon_channel_calls.size(), 1,
+			"the remote row drove the weapon channel")
+	if model.weapon_channel_calls.size() == 1:
+		assert_eq(model.weapon_channel_calls[0][0],
+				NovaSimulation.infantry_anim_key(51),
+				"the state id resolves to the pistol hold clip key")
+		assert_eq(model.weapon_channel_calls[0][1], -1)
+
+	# The peer stows its weapon: the channel goes away and the pose must clear.
+	sim.entities[0]["wpn_anim_state"] = -1
+	presenter.present()
+	assert_eq(model.weapon_channel_calls[-1], ["", -1],
+			"a -1 state clears the hold pose rather than leaving the last one posed")
+
+
+# A remote player's HELD WEAPON. The sim folds the draw gate into the ADM field — a hidden
+# or unarmed body reports 0, which is both our weapon table's null row and the original's
+# own `if (entity->equippedAdmIndex)` precondition — so a zero row must build no model at
+# all, and a nonzero one must resolve its gfx3 through the ADM-indexed table.
+# [orig: BoneCallback_org0_World draw 5, precondition @0x4e3c97; gate
+#  Entity_CanFireWeapon @0x4dcb10]
+func test_wire_row_builds_a_held_weapon_only_when_it_is_armed() -> void:
+	var sim := FakeSim.new()
+	sim.entities = [{
+		"type_id": 4567,
+		"handle": 0x1004,
+		"aim_overlay_valid": 1,
+		"held_weapon_adm": 0,   # unarmed / hidden by the gate
+	}]
+	var placer := FakePlacer.new()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var presenter := WirePresentPass.new()
+	presenter.setup(sim, placer, container)
+	presenter.present()
+	assert_eq(placer.graphic_builds.size(), 0,
+			"an ADM of 0 draws nothing — no model is built at all")
+
+	# Now the peer is holding something the table can resolve.
+	sim.entities[0]["held_weapon_adm"] = 16
+	presenter.present()
+	assert_eq(placer.graphic_builds, ["WPN16_3rd"],
+			"the model is resolved from the ADM index the wire carries")
+
+	# Stowing it again retires the node rather than leaving a gun floating.
+	sim.entities[0]["held_weapon_adm"] = 0
+	presenter.present()
+	assert_eq(placer.graphic_builds.size(), 1,
+			"going unarmed frees the weapon rather than rebuilding one")

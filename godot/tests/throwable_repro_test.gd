@@ -89,6 +89,14 @@ func _visual_ids() -> Array[int]:
 	return out
 
 
+func _visual_move_effect(item_id: int) -> String:
+	for value in _sim.get_throwable_visuals():
+		var visual := value as Dictionary
+		if int(visual.get("item_id", 0)) == item_id:
+			return String(visual.get("move_effect", ""))
+	return ""
+
+
 func _wait_for_idle(max_ticks: int) -> bool:
 	for _i in max_ticks:
 		var s: Dictionary = _sim.get_local_player_weapon_state()
@@ -325,6 +333,77 @@ func test_grenade_round_survives_its_flight_until_the_fuse() -> void:
 			if int(d.get("kind", -1)) == 4 and expired_tick < 0:  # kExpired
 				expired_tick = t
 	assert_between(expired_tick, 240, 260, "the fuse, not an impact, ends the round")
+
+
+# The production smoke ammo reuses the flashbang's nade/nade TrcrID item.  Its
+# five-second ARM boundary fires the obj row once (the witnessed smoke-pour
+# start) but the projectile remains alive and harmless until its fuse expires.
+# The same obj row presents again at actual expiry.
+#
+# The fuse length here is whatever the MOUNTED ammo.def authors.  This test loads
+# fixtures/def/ammo.def, which is a byte-exact copy of BASE JO: max_age 30 ->
+# 1860 ticks.  The revx02 expansion re-authors that row to max_age 40 (and
+# velocity 20), so a JO+revx02 mount resolves a 2480-tick fuse instead — a
+# property of the mount order, not of the physics under test.  Pin the file this
+# test actually reads rather than editing the retail extract to match the
+# expansion (docs/adr/0003-no-raw-passthrough-create-from-scratch.md).
+# [orig: Entity_UpdateGrenadePhysics @0x444908/@0x444976;
+# world-wac-ai-re.md section 27.2/27.4]
+func test_production_smoke_grenade_survives_arm_event_until_fuse() -> void:
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load_from_resource_root(_root, "items.def"), OK)
+	assert_eq(item_db.get_graphic(101875), "Flsh_3rd",
+			"the loose row mirrors the production smoke grenade model")
+	assert_eq(item_db.get_ai_function(101875).to_lower(), "nade")
+	assert_eq(item_db.get_move_function(101875).to_lower(), "nade")
+	_sim.resolve_item_traits(item_db)
+	var health_before := _sim.get_local_player_health()
+	var slot := _sim.debug_spawn_round(
+			Vector3(100, 100, 0), Vector3(1, 1, 0), "grenadesm")
+	assert_gt(slot, -1, "the real ammo.def grenadesm row spawned")
+	assert_eq(_visual_move_effect(1875), "Effect_SmokeToss",
+			"the production effects_table move row is live from spawn")
+
+	var arm_events: Array[Dictionary] = []
+	var move_effect_survived_arm := true
+	for _tick in 312:
+		_sim.step()
+		move_effect_survived_arm = move_effect_survived_arm \
+				and _visual_move_effect(1875) == "Effect_SmokeToss"
+		for value in _sim.drain_round_impacts():
+			var event := value as Dictionary
+			if String(event.get("sound", "")) == "EXPLO_SMOK_GREN":
+				arm_events.append(event)
+
+	assert_eq(arm_events.size(), 1, "the five-second arm boundary emits one presentation event")
+	if arm_events.size() == 1:
+		assert_eq(String(arm_events[0].get("effect", "")), "",
+				"the authored smoke obj row has no particle leg")
+		assert_eq(String(arm_events[0].get("sound", "")), "EXPLO_SMOK_GREN",
+				"the arm boundary presents the authored smoke-pour sound")
+	assert_true(_visual_ids().has(1875),
+			"the smoke grenade remains alive after its five-second arm event")
+	assert_true(move_effect_survived_arm,
+			"the continuously attached smoke move effect survives arm_age")
+	assert_eq(_visual_move_effect(1875), "Effect_SmokeToss",
+			"arm_age does not retire the round-bound smoke trail")
+	assert_eq(_sim.get_local_player_health(), health_before,
+			"the arm event has no authoritative detonation consequence")
+
+	var fuse_tick := -1
+	var fuse_sounds := 0
+	for tick in 2300:
+		_sim.step()
+		for value in _sim.drain_round_impacts():
+			var event := value as Dictionary
+			if String(event.get("sound", "")) == "EXPLO_SMOK_GREN":
+				fuse_sounds += 1
+		if fuse_tick < 0 and not _visual_ids().has(1875):
+			fuse_tick = tick + 312
+			break
+	assert_between(fuse_tick, 1850, 1870,
+			"the smoke grenade expires on base JO's 30-second (1860-tick) fuse")
+	assert_eq(fuse_sounds, 1, "the obj-row fuse sound is presented only at expiry")
 
 
 # The windup exposure the HUD charge bar reads [orig: g_fireChargeStartTick ->

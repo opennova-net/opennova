@@ -165,6 +165,7 @@ static int test_mount_game_expansion() {
     Vfs v;
     CHECK(v.mount_game(root.string(), "jox01"), "mount_game jox01");
     CHECK(v.game_root() == fs::path(root).string(), "game_root recorded");
+    CHECK(v.mounted_expansion() == "jox01", "the expansion that mounted is reported");
     CHECK(read_vfs(v, "shared.txt") == "LOOSE", "loose expansion file wins");
     CHECK(read_vfs(v, "arch_shared.txt") == "LOCAL", "L.pff (primary) beats main + base");
     CHECK(read_vfs(v, "expmain.txt") == "EXP_MAIN_ONLY", "expansion main beats base");
@@ -179,6 +180,12 @@ static int test_mount_game_no_expansion() {
     Vfs v;
     CHECK(v.mount_game(root.string(), "doesnotexist"), "mount_game falls back");
     CHECK(read_vfs(v, "only.txt") == "BASE", "base archive reachable without expansion");
+    // The fallback is silent in the return value, so the caller's only evidence is this:
+    // an uninstalled expansion reports base game, never the name that was requested. The
+    // LAN joiner's host-expansion reconcile depends on it (D-NET-178).
+    CHECK(v.mounted_expansion().empty(), "the silent base fallback reports no expansion");
+    CHECK(v.mount_game(root.string(), ""), "remount base");
+    CHECK(v.mounted_expansion().empty(), "base game reports no expansion");
     return 1;
 }
 

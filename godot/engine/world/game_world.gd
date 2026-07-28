@@ -37,6 +37,9 @@ const ParticleDebugView := preload("res://engine/debug/particle_debug_view.gd")
 const RoundDebugView := preload("res://engine/debug/round_debug_view.gd")
 const HitboxDebugView := preload("res://engine/debug/hitbox_debug_view.gd")
 const NET_CONTAINER_NAME := "NetObjects"
+# The retail ConnectOrHost wait window, shared by the joiner's pre-load admission
+# drive and the post-load deployment watchdog [orig: 0xEA60 = 60000 ms].
+const JOIN_CONNECT_TIMEOUT_MS := 60000
 const SKELETON_DEBUG_NAME := "SkeletonDebug"
 const USER_POINT_DEBUG_NAME := "UserPointDebug"
 const COLLISION_DEBUG_NAME := "CollisionDebug"
@@ -52,6 +55,30 @@ const ITEM_EFFECT_USER_POINT_SCAN_LIMIT := 16
 
 signal world_loaded()
 signal load_failed(reason: String)
+## A joiner's authoritative session record (post-auth S2C 0x7B) resolved during
+## the pre-load wait: server/mission names + the local mission file about to
+## load. The shell refreshes its loading screen from this — retail's connect
+## stream fills the same session vars before its local load
+## [orig: parse_server_session_variables @ 0x5202f0].
+signal join_session_identified(info: Dictionary)
+## A joiner crossed the authoritative admission edge. Local terrain/mission load
+## completion is intentionally separate: the shell keeps the loading presentation
+## raised until this edge (or until the host requests a deployment-zone pick).
+signal join_admission_ready()
+## A pick-required join reached the player-paced deployment stage: the host granted
+## the loadouts and holds this player respawn-pending until a deploy pick. The shell
+## opens the DEATH deploy screen; the join watchdog has stopped (everything past this
+## point is player-paced). [orig: 0x0A flags1 bit1 -> the DEATH screen; net-re 5.61]
+signal join_deploy_pick_required()
+## An ESTABLISHED in-match session went silent past the witnessed connection reap
+## window (JO cs_dir0.timeout_ms = 120000 ms). Retail does not raise an in-world
+## dialog for this: its transport reaps the peer and the disconnect event maps an
+## error code onto g_mission_exit_reason, i.e. it EXITS THE MISSION with a reason.
+## The shell's analog is return-to-menu with `reason` surfaced the same way a join
+## failure is. Emitted at most ONCE per session.
+## [orig: CNapiNetwork_Init @ 0x4ca4a0 (timeout stores @ 0x4caa81/@ 0x4cab54) ->
+##  CNapiNetwork_OnDisconnectedFromServer @ 0x4c63d0]
+signal session_lost(reason: String)
 # Mission-load progress, 0..100, emitted at the stage boundaries below and
 # pulsed (at the stage's constant value) from inside the object-placement loop.
 # The values are the witnessed schedule's anchor points; the original pumps its
@@ -153,6 +180,22 @@ var _particles_hidden := false
 var _particle_debug := false
 var _playable := true
 var _host_config: Dictionary = {}  # set by load_mission_as_host; consumed once by _start_runtime
+# A retail LAN join authenticates before the local mission load. This off-tree
+# simulation owns that one live socket/session while S2C 0x7B supplies map_file;
+# _start_runtime consumes it so the connection is never restarted.
+var _join_preload_sim: NovaSimulation
+var _join_preload_root: NovaResourceRoot
+var _join_preload_request_id := 0
+# Admission and deploy notifications are edges, not per-frame state reports.
+# The deploy latch releases when pending clears so a later death can reopen DEATH.
+var _join_admission_ready_emitted := false
+var _join_deploy_signal_active := false
+# One session-loss notification per session (the reason stays true afterwards).
+var _session_lost_emitted := false
+# The post-load admission wait is an async coroutine that awaits process_frame
+# every iteration, so unlike the synchronous host load it IS interruptible.
+var _join_admission_watch_active := false
+var _join_admission_abort := false
 var _local_player_spawn_loadout: Dictionary = {}
 var _perf_tick_us: int = 0
 var _perf_foliage_us: int = 0
@@ -304,14 +347,116 @@ func load_mission_as_host(config: Dictionary) -> int:
 	return err
 
 
-## Load a mission as a LAN co-op JOINER (a non-authority client). Same load path as a host
-## (terrain + environment from the .bms header), but the runtime dials the host and runs the
-## witnessed in-match JOIN instead of starting a listen server; dynamic entities (the host,
-## other joiners, NPCs) render WIRE-DIRECT (no .bms placement), so _place_mission_objects is
-## skipped for dynamics (statics/buildings arrive via S2C 0x10 in a follow-up). `server` is the
-## discovered/selected row { host_ip, port, mission }, `player_name` rides the ClientHello.co
-## (the host echoes it back so we self-identify by name-match). Returns the load_mission codes.
+# Retail's ClientAuth does not invent a network-only player id: it uploads the
+# two profile character selections packed from Avatars.def. The packed value is
+# [nat:5 | division:4 | combo:6 | alignment:1], and the companion avatar byte is
+# the selected combo's head voice unless the profile has an explicit override.
+# [orig: PlayerProfile_InitDefaults @0x54BB40,
+#  lookup_entity_slot_and_pack_entry @0x57AD40,
+#  sub_57AE60 @0x57AE60, CNapiServerInfo_SerializeToSession @0x4C3650]
+static func _join_character_selection(
+		db: NovaAvatarDatabase, nat_index: int, div_index: int,
+		combo_index: int, expected_alignment: int) -> Dictionary:
+	if db == null or nat_index < 0 or nat_index >= db.get_nationality_count():
+		return {}
+	var nat: Dictionary = db.get_nationality(nat_index)
+	if int(nat.get("alignment", -1)) != expected_alignment:
+		return {}
+	if div_index < 0 or div_index >= db.get_division_count(nat_index):
+		return {}
+	if combo_index < 0 or combo_index >= db.get_combo_count(nat_index, div_index):
+		return {}
+	var div: Dictionary = db.get_division(nat_index, div_index)
+	var combo: Dictionary = db.get_combo(nat_index, div_index, combo_index)
+	if nat.is_empty() or div.is_empty() or combo.is_empty():
+		return {}
+	var packed_id := (
+			(int(nat.get("id", 0)) & 0x1F)
+			| ((int(div.get("id", 0)) & 0x0F) << 5)
+			| ((int(combo.get("id", 0)) & 0x3F) << 9)
+			| ((1 if expected_alignment != 0 else 0) << 15))
+	var head: Dictionary = combo.get("head", {})
+	return {
+		"character_id": packed_id,
+		"avatar": int(head.get("voice", 1)),
+	}
+
+
+static func _first_join_character_selection(
+		db: NovaAvatarDatabase, alignment: int) -> Dictionary:
+	if db == null:
+		return {}
+	for nat_index in db.get_nationality_count():
+		var nat: Dictionary = db.get_nationality(nat_index)
+		if int(nat.get("alignment", -1)) != alignment:
+			continue
+		for div_index in db.get_division_count(nat_index):
+			if db.get_combo_count(nat_index, div_index) > 0:
+				return _join_character_selection(
+						db, nat_index, div_index, 0, alignment)
+	return {}
+
+
+# Public test seam over the exact profile-to-wire projection. `selection` is the
+# PLAYER_INFO snapshot; its chosen side replaces that side's retail default.
+static func character_join_profile_from_database(
+		db: NovaAvatarDatabase, selection: Dictionary = {}) -> Dictionary:
+	var side_selections: Array[Dictionary] = [
+		_first_join_character_selection(db, 0),
+		_first_join_character_selection(db, 1),
+	]
+	var selected_side := int(selection.get("team", -1))
+	if selected_side == 0 or selected_side == 1:
+		var chosen := _join_character_selection(
+				db,
+				int(selection.get("nationality", -1)),
+				int(selection.get("division", -1)),
+				int(selection.get("combo", -1)),
+				selected_side)
+		if not chosen.is_empty():
+			side_selections[selected_side] = chosen
+
+	var player_class := int(selection.get("player_class", 8))
+	if player_class < 5 or player_class > 9:
+		player_class = 8
+	return {
+		"character_ids": [
+			int(side_selections[0].get("character_id", 0)),
+			int(side_selections[1].get("character_id", 0)),
+		],
+		"player_classes": [player_class, player_class],
+		"avatars": [
+			int(side_selections[0].get("avatar", 1)),
+			int(side_selections[1].get("avatar", 1)),
+		],
+		"team_request": -1,
+	}
+
+
+func _build_join_character_profile(
+		resource_root: NovaResourceRoot, selection: Dictionary) -> Dictionary:
+	if resource_root == null:
+		return {}
+	var db := NovaAvatarDatabase.new()
+	if db.load_from_resource_root(resource_root, "Avatars.def") != OK \
+			or not db.is_loaded():
+		push_warning("GameWorld: Avatars.def not loaded for LAN join profile (%s)"
+				% db.get_last_error())
+		return {}
+	return character_join_profile_from_database(db, selection)
+
+
+## Load as a LAN co-op JOINER (a non-authority client). Retail LAN enumeration supplies an
+## endpoint, not a map name: authenticate first, learn map_file from the normal S2C 0x7B
+## post-handshake message, load that local .bms, then resume the SAME socket/session into the
+## spawn drive. A caller-provided `mission` remains an explicit debug/online-row override.
+## Dynamic entities render WIRE-DIRECT (no local .bms placement). `player_name` rides the game
+## ClientAuth and is echoed in our organic-spawn record for self-identification.
 func load_mission_as_joiner(server: Dictionary, player_name: String) -> int:
+	_cancel_join_preload()
+	_join_admission_ready_emitted = false
+	_join_deploy_signal_active = false
+	_session_lost_emitted = false
 	_host_config = {
 		"net_transport": "lan-join",
 		"host_ip": String(server.get("host_ip", "127.0.0.1")),
@@ -322,9 +467,30 @@ func load_mission_as_joiner(server: Dictionary, player_name: String) -> int:
 	if bms.is_empty():
 		bms = mission_file
 	if bms.is_empty():
-		_host_config = {}
-		load_failed.emit("join: no mission name (the host's mission must be known)")
-		return ERR_INVALID_PARAMETER
+		var resource_root := _resolve_root(String(server.get("dir", "")))
+		if resource_root == null:
+			_host_config = {}
+			return ERR_CANT_OPEN
+		_join_preload_sim = NovaSimulation.new()
+		# Retail builds g_CharAttr from the boot-soft charattr.def before any
+		# network receive can deliver the 0x41 property clears or 0x39 challenge.
+		# A missing file deliberately leaves the inactive all-zero table.
+		_join_preload_sim.load_charattr_challenge(resource_root)
+		_join_preload_sim.set_join_character_profile(
+				_build_join_character_profile(
+						resource_root, _local_player_spawn_loadout))
+		if not _join_preload_sim.enable_join(
+				String(_host_config["host_ip"]), int(_host_config["port"]), player_name):
+			_join_preload_sim.free()
+			_join_preload_sim = null
+			_host_config = {}
+			load_failed.emit("join: could not open the LAN session socket")
+			return ERR_CANT_CONNECT
+		_join_preload_sim.set_join_world_ready(false)
+		_join_preload_root = resource_root
+		_join_preload_request_id += 1
+		call_deferred("_drive_join_preload", _join_preload_request_id)
+		return OK
 	# NovaWorld's host row carries the retail basename (e.g. ASH_I5A), while the
 	# VFS load requires the resource filename. LAN callers that already supply the
 	# extension pass through unchanged.
@@ -333,13 +499,317 @@ func load_mission_as_joiner(server: Dictionary, player_name: String) -> int:
 	var err := load_mission(bms, String(server.get("dir", "")))
 	if err != OK:
 		_host_config = {}
-	return err
+		return err
+	# An explicit-mission joiner (the NovaWorld panel row, NW_LAN_MISSION) skips the
+	# preload drive, but its post-load admission is identical to the preload path's:
+	# arm the same watchdog so the player-paced deployment pick emits
+	# join_deploy_pick_required (the sim parks at AwaitDeployPick for EVERY joiner)
+	# and a stalled host still aborts with the stage-named reason instead of
+	# holding the loading screen forever.
+	_watch_join_admission(_runtime)
+	return OK
+
+
+# Drive the witnessed pre-world connect/session exchange while the loading
+# screen is visible. The 60-second deadline is the retail ConnectOrHost timeout
+# (0xEA60).
+func _drive_join_preload(request_id: int) -> void:
+	var deadline_ms := Time.get_ticks_msec() + JOIN_CONNECT_TIMEOUT_MS
+	while request_id == _join_preload_request_id and _join_preload_sim != null \
+			and not _join_preload_sim.is_join_preload_ready():
+		_join_preload_sim.poll_join_preload()
+		var join_error := String(_join_preload_sim.get_join_error())
+		if not join_error.is_empty():
+			_fail_join_preload("join failed: %s" % join_error)
+			return
+		if Time.get_ticks_msec() >= deadline_ms:
+			_fail_join_preload("join timed out before the host completed preload admission")
+			return
+		await get_tree().process_frame
+	if request_id != _join_preload_request_id or _join_preload_sim == null:
+		return
+	# Reconcile the mount with the host's data set BEFORE anything is resolved through it:
+	# the host's mission itself may exist only inside the expansion, so this precedes the
+	# .bms lookup as well as weapon.def/items.def (D-NET-178).
+	if not _reconcile_join_expansion():
+		return
+
+	var bms := String(_join_preload_sim.get_join_mission_file()).strip_edges()
+	if bms.is_empty():
+		_fail_join_preload("join: host sent an empty map_file in S2C 0x7B")
+		return
+	if not bms.to_lower().ends_with(".bms"):
+		bms += ".bms"
+	var resource_root := _join_preload_root
+	if resource_root == null or not resource_root.has_file(
+			bms, NovaResourceRoot.LOOKUP_FORCE_ARCHIVE_ONLY):
+		_fail_join_preload("join: host mission %s is not installed locally" % bms)
+		return
+	var mission := NovaMissionData.new()
+	if mission.open_from_resource_root(
+			resource_root, bms, NovaResourceRoot.LOOKUP_FORCE_ARCHIVE_ONLY) != OK:
+		_fail_join_preload("join: failed to parse host mission %s: %s" % [
+			bms, mission.get_last_error()])
+		return
+
+	# Promote the authoritative session variables before the runtime consumes
+	# _host_config. None came from discovery; every value here came from 0x7B.
+	_host_config["server_name"] = _join_preload_sim.get_join_server_name()
+	_host_config["mission_name"] = _join_preload_sim.get_join_mission_name()
+	_host_config["mission_file"] = bms
+	_host_config["gametype"] = _join_preload_sim.get_join_game_type()
+	# The MOUNTED expansion, which _reconcile_join_expansion has just proven equal to the
+	# host's (case aside) or aborted the join over. Reporting the mount rather than the wire
+	# claim keeps this value evidence of what our data set actually is.
+	_host_config["expansion"] = resource_root.get_expansion()
+	_join_preload_root = null
+	join_session_identified.emit({
+		"server_name": String(_host_config["server_name"]),
+		"mission_name": String(_host_config["mission_name"]),
+		"mission_file": bms,
+		"game_type": int(_host_config["gametype"]),
+	})
+	var err := _load_mission_internal(mission, bms, resource_root)
+	if err != OK:
+		# _load_mission_internal emitted the specific resource/load failure.
+		_cancel_join_preload()
+		_host_config = {}
+		return
+	_watch_join_admission(_runtime)
+
+
+# Point the joiner's resource root at the HOST's expansion (S2C 0x7B field 7, net-re
+# §5.32) before any of the host's data is resolved through it. The ADM weapon index space
+# is expansion-scoped, so a joiner mounted on a different expansion than the host misreads
+# every wire ADM index from the first diverging weapon.def row on — in BOTH directions, and
+# in both its own C2S 0x2F kit and the host's S2C 0x5A grant / round events (D-NET-178).
+# Retail switches THE ONE global mount in place on this same leg — it copies the session
+# record's expansion over the pending name, switches, and only then connects
+# [orig: UI_JoinSelectedSession @ 0x5699d0 (expansion copy @ 0x569afa, switch @ 0x569b02,
+# connect @ 0x569ded) -> Expansion_SwitchTo @ 0x5688c0 -> PFF_CloseAllOpenArchives @ 0x4a4380
+# / PFF_OpenAllArchives @ 0x4a4310]. There is no second mount object, and the switch is
+# sticky: the shell keeps running on the host's expansion after the session.
+# Returns false when the join has been failed and the driver must stop.
+func _reconcile_join_expansion() -> bool:
+	var resource_root := _join_preload_root
+	if resource_root == null:
+		return true
+	var plan := JoinExpansionPlan.decide(
+		String(_join_preload_sim.get_join_expansion()),
+		String(resource_root.get_expansion()),
+		resource_root.list_expansions(resource_root.get_root_dir()))
+	if plan.action == JoinExpansionPlan.ACTION_KEEP:
+		return true
+	# Only a runtime mount layers expansion archives at all. A loose authoring root
+	# (play-in-editor hands the editor's VFS over, tests hand fixtures over) has no expansion
+	# to switch AND reports an empty installed set by construction, so it can neither honour
+	# the host's expansion nor prove it missing — every decision below is meaningless there.
+	# Report the mismatch and let the authored data stand. This precedes the abort: policing
+	# an install we do not own would fail every editor/fixture join against an expansion host.
+	# The shipping game always arrives here on a runtime mount (main_game hands GameWorld its
+	# live menu mount), so D-NET-178's protection is unaffected.
+	if not resource_root.is_runtime_mount():
+		push_warning("GameWorld: host expansion '%s' differs from the loose root's '%s'; the authoring mount stands"
+			% [String(_join_preload_sim.get_join_expansion()), String(resource_root.get_expansion())])
+		return true
+	# A runtime mount that cannot supply the host's expansion aborts the join. Retail's switch
+	# is a no-op when expansion\<name>\<name>.pff is missing and it connects on its own data set
+	# anyway [orig: Expansion_SwitchTo @ 0x5688c0, missing-.pff gate @ 0x568914] — that is
+	# precisely the ADM index-space corruption D-NET-178 records, so we refuse the join instead
+	# (tracked divergence).
+	if plan.action == JoinExpansionPlan.ACTION_FAIL:
+		_fail_join_preload(plan.error)
+		return false
+	var dir := resource_root.get_root_dir()
+	var previous := String(resource_root.get_expansion())
+	# Switch THIS root rather than swapping in a second one, the same in-place remount
+	# menu_shell._apply_expansion does for the Mods screen: every holder (the menu shell, the
+	# loading screen) is meant to move with it, and mount_runtime rebuilds the index and bumps
+	# the cache epoch, so their caches self-clear. The persisted expansion setting is NOT
+	# written — the host owns this session's data set, not the local menu choice. Same layering
+	# as _mount_runtime_root (see it for the flag rules); only the expansion differs.
+	if resource_root.mount_runtime(dir, plan.expansion, NovaLaunchFlags.loose_override_enabled(),
+			NovaLaunchFlags.game(ResourceDirSettings.get_game())) != OK:
+		# A hard mount failure clears the root, and the shell shares this object, so put the
+		# previous expansion back before aborting to the menu (menu_shell._apply_expansion rolls
+		# back the same way). The failure surfaces through the preload's abort leg rather than a
+		# bare load_failed, so the live session is torn down too.
+		var mount_error := String(resource_root.get_last_error())
+		resource_root.mount_runtime(dir, previous, NovaLaunchFlags.loose_override_enabled(),
+			NovaLaunchFlags.game(ResourceDirSettings.get_game()))
+		_fail_join_preload("join: could not mount host expansion '%s' from %s: %s" % [
+			plan.expansion, dir, mount_error])
+		return false
+	# mount_runtime succeeds even when the expansion never layered (opennova::Vfs::mount_game
+	# falls back to base game silently), so read back what ACTUALLY mounted. Without this the
+	# abort leg above would be bypassed by a root that is quietly base game again. No rollback
+	# here: unlike the hard failure above, the root holds a valid mount of whatever DID layer,
+	# so the shell survives the abort on it.
+	if String(resource_root.get_expansion()).to_lower() != plan.expansion.to_lower():
+		_fail_join_preload("join: host runs expansion '%s' but %s mounted '%s' (installed: %s)" % [
+			plan.expansion, dir, String(resource_root.get_expansion()),
+			JoinExpansionPlan.describe_installed(resource_root.list_expansions(dir))])
+		return false
+	return true
+
+
+# Post-load joiner watchdog: the admission tail (C2S 0x0A -> world stream -> loadout
+# grants) is server-driven with no protocol-level timeout, so a stalled or incompatible
+# host would leave the player loaded but hidden forever with no feedback. Reuse the
+# retail ConnectOrHost window (0xEA60) from world-ready and surface a stage-named
+# failure through the shell's abort-to-menu leg — the reachable analog of retail's
+# post-load network-wait failure returns [orig: NapiClient_WaitForGameStart @ 0x42cc10
+# failure legs -> "Mission loading aborted"]. The deadline covers only SERVER-owed
+# transitions: once the join reaches the player-paced deployment pick (the DEATH deploy
+# screen), the watchdog ends — retail has no in-world join timeout there, the screen
+# simply waits (a rejected pick stays up for a re-pick; net-re 5.61).
+func _watch_join_admission(runtime) -> void:  # MissionRuntime, untyped like _runtime
+	var deadline_ms := Time.get_ticks_msec() + JOIN_CONNECT_TIMEOUT_MS
+	_join_admission_watch_active = true
+	_join_admission_abort = false
+	while is_instance_valid(runtime) and runtime == _runtime:
+		var sim: NovaSimulation = runtime.get_sim()
+		if sim == null or not sim.is_joiner():
+			_join_admission_watch_active = false
+			return
+		if _join_admission_abort:
+			_join_admission_watch_active = false
+			_join_admission_abort = false
+			load_failed.emit("Mission loading aborted")
+			return
+		if sim.has_method("is_join_deploy_pick_pending") \
+				and bool(sim.is_join_deploy_pick_pending()):
+			_join_admission_watch_active = false
+			_emit_join_deploy_pick_required()
+			return
+		if sim.is_joined_in_match():
+			_join_admission_watch_active = false
+			_emit_join_admission_ready()
+			return
+		var join_error := String(sim.get_join_error())
+		if not join_error.is_empty():
+			_join_admission_watch_active = false
+			load_failed.emit("join failed: %s" % join_error)
+			return
+		if Time.get_ticks_msec() >= deadline_ms:
+			_join_admission_watch_active = false
+			load_failed.emit("join stalled waiting for the host (%s)"
+					% String(sim.get_join_admission_stage()))
+			return
+		await get_tree().process_frame
+	_join_admission_watch_active = false
+
+
+func _emit_join_admission_ready() -> void:
+	if _join_admission_ready_emitted:
+		return
+	_join_admission_ready_emitted = true
+	join_admission_ready.emit()
+
+
+func _emit_join_deploy_pick_required() -> void:
+	if _join_deploy_signal_active:
+		return
+	_join_deploy_signal_active = true
+	join_deploy_pick_required.emit()
+
+
+# The initial watchdog stops at admission or the player-paced deployment screen.
+# Continue observing deploy state afterward: death can create another pending edge
+# in the same session.
+func _update_joiner_admission_signals() -> void:
+	# Render/occlusion tests install deliberately narrow runtime doubles. This
+	# observer is optional outside a real MissionRuntime, so keep the seam
+	# duck-typed instead of forcing every render-only double to model networking.
+	if _runtime == null or not _runtime.has_method("get_sim"):
+		return
+	var sim: Variant = _runtime.get_sim()
+	if sim == null or not sim.has_method("is_joiner") or not bool(sim.is_joiner()):
+		return
+	var deploy_pending: bool = sim.has_method("is_join_deploy_pick_pending") \
+			and bool(sim.is_join_deploy_pick_pending())
+	if deploy_pending:
+		_emit_join_deploy_pick_required()
+	else:
+		_join_deploy_signal_active = false
+	if sim.has_method("is_joined_in_match") and bool(sim.is_joined_in_match()):
+		_emit_join_admission_ready()
+	_update_session_loss_signal(sim)
+
+
+## Per-frame in-match session-loss observer, read once per frame off the same seam
+## as the admission signals. The reason latches true inside the runtime, so this
+## emits exactly once per session. [orig: the reap @ 0x4ca4a0 -> @ 0x4c63d0]
+func _update_session_loss_signal(sim: Variant) -> void:
+	if _session_lost_emitted or not sim.has_method("get_session_loss_reason"):
+		return
+	var reason := String(sim.get_session_loss_reason())
+	if reason.is_empty():
+		return
+	_session_lost_emitted = true
+	session_lost.emit(reason)
+
+
+# ESC/abort for the only interruptible load leg: the joiner's pre-load
+# connect/session wait (the SP/host load remains one synchronous call the
+# SceneTree cannot interrupt). Returns true when an in-flight preload was
+# aborted; the ordinary load-failure leg reports it to the shell [orig: the
+# "Mission loading aborted" early return of Client_CheckDisconnectOrEscDuringLoad
+# @ 0x520270] (docs/interface/loading-screen-re.md D-LOADSCR-7).
+func cancel_join_preload() -> bool:
+	if _join_preload_sim == null:
+		return false
+	_fail_join_preload("Mission loading aborted")
+	return true
+
+
+## ESC/abort for the SECOND interruptible joiner wait: the post-load admission
+## tail, where the map is loaded but the world stays hidden until the host drives
+## the join to its deploy pick or in-match edge. D-LOADSCR-7's "single synchronous
+## operation.call()" reasoning covers the host/SP map load, NOT this one --
+## _watch_join_admission awaits process_frame every iteration, so the ESC window
+## is as reachable here as it is in the pre-load connect wait. Without this a
+## player who joins a host that stalls after the local load has no way out for the
+## full JOIN_CONNECT_TIMEOUT_MS. Returns true when a live admission wait was told
+## to abort; the watchdog reports it through the ordinary load-failure leg.
+func cancel_join_admission() -> bool:
+	if not _join_admission_watch_active:
+		return false
+	_join_admission_abort = true
+	return true
+
+
+func _fail_join_preload(reason: String) -> void:
+	_cancel_join_preload()
+	_host_config = {}
+	load_failed.emit(reason)
+
+
+func _cancel_join_preload() -> void:
+	_join_preload_request_id += 1
+	if _join_preload_sim != null:
+		_join_preload_sim.free()
+	_join_preload_sim = null
+	_join_preload_root = null
 
 
 # True between load_mission_as_joiner and _start_runtime's config consume: this load is a
 # co-op joiner, so dynamic objects render from the wire rather than from local placement.
 func _is_joiner() -> bool:
 	return String(_host_config.get("net_transport", "")) == "lan-join"
+
+
+## True while this world is a live network session (a co-op JOINER or a LISTEN HOST).
+## The shell uses it to keep the world ticking through the in-game menu: the world tick
+## is the only pump for the session socket, so freezing it silences the connection and a
+## peer eventually drops us on its connection timeout. Retail multiplayer cannot pause at
+## all — the ESC menu overlays a running match [orig: the pause path has no MP leg; the
+## reaping side is cs_dir0.timeout_ms = 120000, CNapiNetwork_Init @0x4ca4a0].
+func is_net_session() -> bool:
+	var sim := get_sim()
+	if sim == null:
+		return false
+	return bool(sim.is_joiner()) or bool(sim.is_host_listening())
 
 
 ## Load an IN-MEMORY mission (the editor's live document, unsaved edits included):
@@ -489,6 +959,12 @@ func _load_mission_internal(mission: NovaMissionData, bms_name: String, resource
 	# load costs stay comparable (one timeline ring serves both).
 	var timeline := PerfTimeline.begin("Mission load %s" % bms_name)
 	_resource_root = resource_root
+	# Game_StartMission destroys the previous shared .3DI definition cache before
+	# reloading this mission's render resources. Reset before environment/terrain:
+	# NovaCelestial resolves its models from _load_environment, and foliage loaded
+	# by terrain must remain present-but-excluded in the same generation.
+	# [orig: sub_5B5710 @0x524A6F]
+	NovaObjectData.reset_network_challenge_model_registry()
 	_load_mission_tile_info(bms_name, resource_root)
 	# Progress values are anchor points from the witnessed schedule (2..100);
 	# our pipeline has fewer stages than the original's ~30 call sites, so each
@@ -522,8 +998,23 @@ func _load_mission_internal(mission: NovaMissionData, bms_name: String, resource
 	timeline.end_span()
 	load_progress.emit(41)
 	timeline.span("runtime")
-	_start_runtime(mission, bms_name)
+	var runtime_error := _start_runtime(mission, bms_name)
 	timeline.end_span()
+	if runtime_error != OK:
+		timeline.finish()
+		unload()
+		return runtime_error
+	# Retail freezes its non-foliage loaded-.3DI page once, after the entity,
+	# celestial, HUD, and renderer resource loads and before the loading screen
+	# drops. MissionRuntime.setup has now resolved the placed/wire mission models
+	# (including collision/husk definitions); late network spawns must not change
+	# this page. [orig: sub_5B3A80 @0x5871CF from Game_StartMission @0x525A6E]
+	var challenge_sim: NovaSimulation = _runtime.get_sim()
+	if challenge_sim != null and challenge_sim.is_joiner():
+		_prewarm_loaded_model_challenge_definitions()
+	if challenge_sim != null and challenge_sim.has_method(
+			"finalize_loaded_model_challenge_snapshot"):
+		challenge_sim.finalize_loaded_model_challenge_snapshot()
 	load_progress.emit(70)
 	timeline.span("audio")
 	_start_mission_audio(mission, bms_name)
@@ -550,6 +1041,9 @@ func _load_mission_internal(mission: NovaMissionData, bms_name: String, resource
 # loose files override the archives only under the `/d` dev flag, and the `/game <code>`
 # flag (or persisted setting, default "jo") selects the SCR decode key so demo data
 # decodes correctly. Emits load_failed and returns null on a bad root.
+# The expansion here is the LOCAL choice, which is only authoritative for single-player and
+# for hosting. A joiner's is the HOST's, learned after this mount and reconciled by
+# _reconcile_join_expansion before any host data is read (D-NET-178).
 func _mount_runtime_root(dir: String) -> NovaResourceRoot:
 	var resource_root := NovaResourceRoot.new()
 	var expansion := NovaLaunchFlags.expansion(ResourceDirSettings.get_expansion())
@@ -568,19 +1062,17 @@ func _place_mission_objects(mission: NovaMissionData, timeline: PerfTimeline = n
 	_placer = MissionObjectPlacer.new(_resource_root)
 	_panm_clock.sample_frame()
 	_placer.set_panm_clock(_panm_clock)
-	# A co-op joiner renders all dynamic entities WIRE-DIRECT (the faithful client model), so
-	# it does NOT place the .bms organics/vehicles — they would be frozen duplicates of the
-	# wire avatars. Still build the placer (the local-player avatar + the wire present pass
-	# resolve models through it) and an empty MissionObjects container (the wire avatars'
-	# parent + the unload() teardown target). Statics/buildings (S2C 0x10) are a follow-up.
-	if _is_joiner():
-		var wire_container := Node3D.new()
-		wire_container.name = MissionObjectPlacer.CONTAINER_NAME
-		add_child(wire_container)
-		_mission_stats = {}
-		print("GameWorld(joiner): mission objects render wire-direct — local placement skipped.")
-		return
 	var options := { "environment_node": _env }
+	# A joiner places the mission like any other client of it — the retail client
+	# loads and renders its local .bms through the normal pipeline, applying net
+	# state on top — MINUS the organics: players and streamed AI have no stable
+	# .bms identity on the wire and render wire-direct. Placed pools 1-3 share the
+	# host's pool/slot handle space (promote order mirrors Mission_LoadBMSFile
+	# @0x40f4e0 on both sides), so the wire present pass defers their rows onto
+	# these placed nodes by identity, restoring MultiMesh batching, occlusion,
+	# and registry resolution to the joiner.
+	if _is_joiner():
+		options["skip_kinds"] = [NovaMissionData.KIND_ORGANIC]
 	if timeline != null:
 		options["timeline"] = timeline
 	# Pulse the load-progress screen from inside the model-load loop at the
@@ -647,6 +1139,10 @@ func get_mission_stats() -> Dictionary:
 ## Safe to call when nothing is loaded.
 func unload() -> void:
 	_loaded = false
+	_cancel_join_preload()
+	_join_admission_ready_emitted = false
+	_join_deploy_signal_active = false
+	_session_lost_emitted = false
 	_set_weather_host_tick_driven(true)
 	_set_water_host_rendering_enabled(false)
 	_host_config = {}
@@ -1060,6 +1556,7 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 		else:
 			runtime_ticks = 1 if bool(_runtime.tick()) else 0
 		_perf_runtime_us = Time.get_ticks_usec() - runtime_start
+		_update_joiner_admission_signals()
 		# Keep the gate's advertised occupancy current (host + admitted joiners).
 		# set_player_count self-dedupes, so this is a no-op until the count changes.
 		if _nw_host != null and _runtime.has_method("get_sim"):
@@ -1197,6 +1694,19 @@ func request_local_player_stance(stance: int) -> bool:
 ## witnessed water mirror re-renders the world scene, local body included
 ## [orig: Water_ReflectionPrerender @ 0x5c2780 -> render_main_scene @ 0x5c1240]. Null
 ## when the resource root / item graphic is unavailable. 0x14B9 = player infantry [net-re §5.2b].
+## The soldier's THIRD-PERSON gun. Built as a SIBLING of the avatar rather than a child:
+## NovaObjectModel.rebuild() frees all of its children, so a weapon parented under the
+## avatar would silently vanish whenever the body model rebuilds. It carries no skeleton
+## and no clip — the original stamps ONE matrix into every bone slot of this model, i.e.
+## it is drawn rigid, posed entirely by its attach basis.
+## [orig: BoneCallback_org0_World draw 5 @0x4e3c87..0x4e3d99; model = WeaponDef.tpModel
+##  (+0x170, weapon.def gfx3) @0x4e3cd3]
+func build_local_player_held_weapon(graphic: String) -> Node3D:
+	if _placer == null or graphic.is_empty():
+		return null
+	return _placer.build_model_from_graphic(graphic, "", self, "", _env)
+
+
 func build_local_player_avatar() -> Node3D:
 	if _placer == null:
 		return null
@@ -1204,6 +1714,35 @@ func build_local_player_avatar() -> Node3D:
 	# freezes at the noon preview defaults (retail relights every entity per
 	# frame [orig: setup_entity_lighting_and_shader_constants @ 0x5d98a0]).
 	return _placer.build_player_animated_model(0x14B9, self, _env)
+
+
+# Resolve the .3DI definitions that LocalPlayerHost would otherwise load only on
+# its first visible frame. Retail's Game_ReloadEntityModelsAndCallbacks and HUD
+# model pass load the player + current weapon overlay before sub_5B3A80 freezes
+# the C2S 0x3D source; doing the lightweight data lookup here gives our snapshot
+# the same boundary without constructing hidden scene nodes. Later builders hit
+# the placer's cache, so they cannot introduce a definition just after freeze.
+func _prewarm_loaded_model_challenge_definitions() -> void:
+	if _placer == null:
+		return
+	var visual_item_id := int(_placer.resolve_player_visual_item_id(0x14B9))
+	var avatar_graphic := String(_placer.graphic_for(visual_item_id))
+	if not avatar_graphic.is_empty():
+		_placer.object_data_for(avatar_graphic)
+
+	if _viewmodel_weapon_cleared:
+		return
+	var def := local_player_viewmodel_def()
+	var gun_name := def.gfx1 if def != null else "ak47_1st"
+	var arms_name := "armsG"
+	if def != null and not def.gfx1a.is_empty():
+		arms_name = def.gfx1a
+	var show_arms := def == null or (def.flags & 0x80) == 0
+	if not gun_name.is_empty():
+		_placer.object_data_for(gun_name)
+	if show_arms and not arms_name.is_empty():
+		_placer.object_data_for(arms_name)
+
 
 ## Build a host-managed FIRST-PERSON weapon viewmodel for the local player (shown in 1st person; the
 ## inverse of the 3rd-person avatar). Faithful composition: the equipped weapon's FP gun model PLUS
@@ -1823,7 +2362,7 @@ func _route_round_impacts() -> void:
 # applied in-engine) + visibility onto its model. The game runs it at the faithful 62-frame cadence and
 # drives it explicitly from tick() (self_tick off); its drained side effects route through
 # _on_runtime_effects. A reload reuses this GameWorld, so any prior runtime is freed in unload() first.
-func _start_runtime(mission: NovaMissionData, bms_name: String) -> void:
+func _start_runtime(mission: NovaMissionData, bms_name: String) -> int:
 	var container := get_node_or_null(NodePath(MissionObjectPlacer.CONTAINER_NAME))
 	_runtime = MissionRuntime.new()
 	_runtime.name = "MissionRuntime"
@@ -1865,10 +2404,14 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> void:
 	# (host_ip/port/player_name) and is NOT a listen server. Consumed once per load; absent for
 	# a normal single-player start, which keeps the in-process (socketless) listen server.
 	if not _host_config.is_empty():
-		if String(_host_config.get("net_transport", "")) != "lan-join":
+		var net_transport := String(_host_config.get("net_transport", ""))
+		if net_transport != "lan-join":
 			opts["listen_server"] = true
+		else:
+			opts["join_character_profile"] = _build_join_character_profile(
+					_resource_root, _local_player_spawn_loadout)
 		for k in ["server_name", "max_players", "game_type", "gametype", "net_transport", "bind_port",
-				"advertise", "host_ip", "port", "player_name",
+				"advertise", "host_ip", "port", "player_name", "expansion",
 				"nw_gate_host", "nw_gate_port", "region", "dedicated", "channel"]:
 			if _host_config.has(k):
 				opts[k] = _host_config[k]
@@ -1886,12 +2429,37 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> void:
 	# The destruction present pass anchors its wreck/piece effect groups through
 	# register_effect_anchor and swaps husk models via the placer.
 	opts["game_world"] = self
+	# Consume the already-authenticated joiner. MissionRuntime adopts and frees
+	# this off-tree Node like its usual freshly-created simulation; clearing our
+	# reference before setup makes ownership singular even on a setup failure.
+	if _join_preload_sim != null:
+		opts["simulation"] = _join_preload_sim
+		_join_preload_sim = null
 	_runtime.setup(mission, container, opts)
+	if _runtime.get_sim() == null:
+		var setup_error := int(_runtime.get_setup_error()) \
+				if _runtime.has_method("get_setup_error") else ERR_CANT_CREATE
+		var lan_bind_failure := String(opts.get("net_transport", "")) == "lan"
+		var bind_port := int(opts.get("bind_port", 32768))
+		# Free before emitting: a load_failed handler may synchronously tear
+		# the world down (the game shell returns to the menu via unload()),
+		# and unload() frees _runtime — emitting first turned this leg into a
+		# null-instance free on reentry.
+		_runtime.free()
+		_runtime = null
+		if lan_bind_failure:
+			load_failed.emit("host start: could not bind LAN UDP port %d" % bind_port)
+		else:
+			load_failed.emit("failed to start mission runtime")
+		return setup_error if setup_error != OK else ERR_CANT_CREATE
+	# The player profile's saved weapon kits, loaded before ANY kit is applied or
+	# submitted: in a net session the original's spawn kit is a page of this file,
+	# selected by the very class byte it also puts on the wire
+	# [orig: Game_StartMission @ 0x525767-0x525836].
+	_load_player_weapon_profile()
 	_apply_local_player_spawn_loadout()
 	_runtime.set_presentation_time_ms(_panm_clock.time_ms)
-	if _runtime.get_sim() == null:
-		push_warning("GameWorld: failed to start mission runtime")
-	elif _water != null and _runtime.get_sim().has_method("set_water_z"):
+	if _water != null and _runtime.get_sim().has_method("set_water_z"):
 		# Water may have been built before the runtime existed — re-push the
 		# sim-side plane the footstep/landing legs compare feet against.
 		_runtime.get_sim().set_water_z(float(_water.water_height))
@@ -1904,6 +2472,55 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> void:
 	# The game starts running (tick() gates on is_playing, so the overlay's
 	# transport can pause/step a live mission).
 	_runtime.play()
+	return OK
+
+
+# The on-disk path of the player profile's weapon file. Retail builds it from the
+# ACTIVE expansion name — with an expansion loaded it looks ONLY under that
+# expansion's directory (there is no base-game fallback leg), otherwise it reads the
+# game root's copy [orig: PlayerProfile_LoadAllFromDisk @ 0x54f4d0, path build
+# @ 0x54f68c-@ 0x54f6b7: g_ExpansionName[0] ? "expansion\<name>\weapon.sav" :
+# "weapon.sav"]. The mount is the authority on both halves — for a joiner it has
+# already been reconciled to the HOST's expansion (D-NET-178), which is what makes
+# the profile's ADM index space agree with the host's.
+func _weapon_profile_path(resource_root: NovaResourceRoot) -> String:
+	if resource_root == null:
+		return ""
+	var dir := String(resource_root.get_root_dir())
+	if dir.is_empty():
+		return ""
+	var expansion := String(resource_root.get_expansion())
+	if expansion.is_empty():
+		return dir.path_join("weapon.sav")
+	return dir.path_join("expansion").path_join(expansion).path_join("weapon.sav")
+
+
+# Load weapon.sav onto the sim: five profile-slot records, each carrying a per-side
+# class byte and the five 2048-byte class kit pages the MP loadout submit indexes BY
+# that class byte [orig: PlayerProfile_LoadAllFromDisk @ 0x54f4d0 — header check
+# @ 0x54f586 ("FPBC"/"0211"), the 5 x 0x1080C record reads]. This is a plain disk
+# file, not archive content, so it is read through the mount's directory rather than
+# the VFS. A file that is absent or not a profile is NOT a load failure: retail's
+# own miss leaves PlayerProfile_InitDefaults' shipped defaults in place (BLUE/RED
+# class 8, one weapon name per class page) [orig: @ 0x54bb40].
+func _load_player_weapon_profile() -> void:
+	# Probed rather than called straight through, like the other optional sim seams
+	# in this file: the profile reader is a native method, so a build whose
+	# GDExtension predates it must degrade to the defaults instead of failing to
+	# parse this script.
+	var sim: Variant = get_sim()
+	if sim == null or not sim.has_method("load_weapon_profile"):
+		return
+	var path := _weapon_profile_path(_resource_root)
+	if path.is_empty():
+		return
+	if not FileAccess.file_exists(path):
+		print_verbose("GameWorld: no weapon.sav at %s — keeping the shipped profile defaults" % path)
+		return
+	var err := int(sim.load_weapon_profile(path))
+	if err != OK:
+		push_warning("GameWorld: weapon.sav at %s not accepted (error %d) — keeping the shipped profile defaults"
+				% [path, err])
 
 
 # Register a browsable listen host with the NovaWorld gate (F1, ADR 0010). The host-direction
@@ -1916,9 +2533,8 @@ func _maybe_start_nw_host(opts: Dictionary, bms_name: String) -> void:
 		return
 	if String(opts.get("net_transport", "")) != "lan":
 		return
-	# Register with the NovaWorld gate when the host picked the NovaWorld channel (a browsable
-	# online host) or when a gate was injected via env (NW_GATE_HOST). The in-match wire is the
-	# SAME either way (net_transport "lan"); only discovery/registration differs (LAN vs NovaWorld).
+	# Register only when the explicit NovaWorld host flow supplied a gate. The in-match wire is
+	# shared, but the LAN menu path never reads or manufactures service configuration.
 	var channel := String(opts.get("channel", "LAN"))
 	var gate_host := String(opts.get("nw_gate_host", ""))
 	if gate_host.is_empty():

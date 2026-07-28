@@ -398,7 +398,11 @@ func test_open_populates_the_authored_grenade_combo_from_weapon_def() -> void:
 	simulation.free()
 
 
-func test_multiplayer_open_is_gated_until_live_loadout_submission_exists() -> void:
+func test_multiplayer_open_is_live() -> void:
+	# The 0x2F loadout service exists now: a joiner's ACCEPT re-submits from the
+	# applied kit (the sim's in-match queue leg) and the listen host applies
+	# server-authoritatively, so the armory opens in MP like retail
+	# [orig: WeaponLoadout_ApplyFromBuffer @0x565cd0 is_in_session leg @0x565d94].
 	var sim := FakeSim.new()
 	sim.multiplayer = true
 	var world := FakeWorld.new()
@@ -413,7 +417,5 @@ func test_multiplayer_open_is_gated_until_live_loadout_submission_exists() -> vo
 	add_child_autofree(host)
 	host.setup(world, null, overlay)
 
-	assert_false(host.try_open(),
-		"LAN armory cannot bypass the unimplemented authoritative 0x2F/0x5A path")
-	assert_null(overlay.get_node_or_null("ArmoryMenu"))
-	assert_true(sim.applies.is_empty(), "no local-only loadout mutation occurred")
+	assert_true(host.try_open(), "the MP armory opens over live play")
+	assert_not_null(overlay.get_node_or_null("ArmoryMenu"))

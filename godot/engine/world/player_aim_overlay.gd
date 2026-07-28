@@ -12,6 +12,18 @@ extends RefCounted
 
 var body_angles := Vector3.ZERO
 var segment_angles := PackedVector3Array()
+## The THIRD-PERSON held weapon's own attach basis (BMS euler degrees) and retail's
+## draw verdict for it. The basis is deliberately none of `segment_angles`: the head
+## class carries full-aim pitch and the arm class the blended yaw, so either one aims
+## the gun visibly off-axis. [orig: the attach build @0x4b1bdc..0x4b1bf8; the gate
+## Entity_CanFireWeapon @0x4dcb10]
+var weapon_attach_angles := Vector3.ZERO
+var weapon_visible := false
+## True when retail would pose this body's weapon at the HAND instead of at
+## `weapon_attach_angles` — the weapon channel's hold state carrying flag 0x80 (knife,
+## grenade and designator holds, both melee attacks, binoculars, both reloads).
+## [orig: gate @0x4b21b6 / branch @0x4b220f]
+var weapon_hand_frame := false
 
 
 ## Decode the simulation's transport dict; null when the overlay is absent/invalid
@@ -22,4 +34,7 @@ static func from_sim_dict(d: Dictionary) -> PlayerAimOverlay:
 	var out := PlayerAimOverlay.new()
 	out.body_angles = d.get("body", Vector3.ZERO)
 	out.segment_angles = d.get("angles", PackedVector3Array())
+	out.weapon_attach_angles = d.get("weapon_attach", Vector3.ZERO)
+	out.weapon_visible = bool(d.get("weapon_visible", false))
+	out.weapon_hand_frame = bool(d.get("weapon_hand_frame", false))
 	return out

@@ -40,6 +40,7 @@ void NovaResourceRoot::_bind_methods() {
 			&NovaResourceRoot::mount_runtime, DEFVAL(String()), DEFVAL(false), DEFVAL("jo"));
 	ClassDB::bind_method(D_METHOD("list_expansions", "path"), &NovaResourceRoot::list_expansions);
 	ClassDB::bind_method(D_METHOD("get_expansion"), &NovaResourceRoot::get_expansion);
+	ClassDB::bind_method(D_METHOD("is_runtime_mount"), &NovaResourceRoot::is_runtime_mount);
 	ClassDB::bind_method(D_METHOD("get_root_dir"), &NovaResourceRoot::get_root_dir);
 	ClassDB::bind_method(D_METHOD("get_last_error"), &NovaResourceRoot::get_last_error);
 	ClassDB::bind_method(D_METHOD("clear"), &NovaResourceRoot::clear);
@@ -112,6 +113,10 @@ String NovaResourceRoot::lookup_name(const String &name) {
 
 String NovaResourceRoot::get_expansion() const {
 	return expansion_;
+}
+
+bool NovaResourceRoot::is_runtime_mount() const {
+	return mount_kind_ == MountKind::Runtime;
 }
 
 Dictionary NovaResourceRoot::file_entry_to_dictionary(const opennova::ResourceFileEntry &entry) {
@@ -188,7 +193,11 @@ Error NovaResourceRoot::mount_runtime(const String &path, const String &expansio
 		last_error_ = "No game data archives could be opened";
 		return ERR_FILE_NOT_FOUND;
 	}
-	expansion_ = expansion;
+	// The expansion that actually mounted, which is NOT necessarily the requested one:
+	// opennova::Vfs::mount_game falls back to base-game mounting for a missing/unknown
+	// expansion and still succeeds. Reporting the request back would make every caller-side
+	// "did my expansion take?" check tautological (D-NET-178).
+	expansion_ = String(index_.mounted_expansion().c_str());
 	mount_kind_ = MountKind::Runtime;
 	return OK;
 }

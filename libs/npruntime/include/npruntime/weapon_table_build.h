@@ -18,13 +18,13 @@ uint8_t charfilter_bit(const char *token);
 // teamfilter token -> bit: red=1 blue=2 [orig: token table @0x830ED8, OR-ed @0x543FE3].
 uint8_t teamfilter_bit(const char *token);
 
-// Whether one armory entry is visible to a player of (player_class, soldier_type) — the reply
+// Whether one armory entry is visible to a player of (team, player_class) — the reply
 // builder's slot filter [orig: Server_SendWeaponSlotListToPlayer @0x502716]:
-//   team mask: class 1/3 -> blue(2), 2/4 -> red(1), else both(3)      [orig: @0x502666]
-//   char mask: soldier 5..9 -> 1<<(t-5), 1..3 -> all, else none        [orig: @0x502693]
+//   team mask: team 1/3 -> blue(2), 2/4 -> red(1), else both(3)       [orig: @0x502666]
+//   char mask: class 5..9 -> 1<<(c-5), 1..3 -> all, else none         [orig: @0x502693]
 // Both masks must intersect the entry's teamfilter/charfilter.
-bool loadout_entry_permitted(const world::WeaponTableEntry &entry, uint8_t player_class,
-                             uint8_t soldier_type);
+bool loadout_entry_permitted(const world::WeaponTableEntry &entry, uint8_t team,
+                             uint8_t player_class);
 
 // The S2C 0x5A per-slot ammo bytes for one accepted request entry.
 //   primary  = the slot's TOTAL AMMO IN CLIPS [orig: WeaponSlot_GetTotalClips @0x5425F0]:

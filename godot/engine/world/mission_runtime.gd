@@ -47,9 +47,9 @@ const MAX_CATCHUP_TICKS := 31        # spiral-of-death clamp: port of the 500 ms
 var _sim: NovaSimulation
 var _present                          # MissionPresentPass: placed nodes (host/SP/editor); null on a joiner
 var _wire_present                     # WirePresentPass: un-placed network entities or SP attachment children
-var _fire_present                     # FirePresentPass: AI/remote fire sound + muzzle + tracers (host); else null
+var _fire_present                     # FirePresentPass: non-local fire sound + muzzle + tracers; else null
 var _destruction_present              # DestructionPresentPass: husk swap + debris + wreck effects (host); else null
-var _throwable_present                # ThrowablePresentPass: thrown/placed device models (host); else null
+var _throwable_present                # ThrowablePresentPass: flying/placed throwable models
 var _index
 var _self_tick := false              # editor: self-tick via _process while playing; game: host calls tick()
 var _playing := false
@@ -65,6 +65,7 @@ var _presentation_time_ms := -1      # shared render/PANM DWORD; negative = dire
 # Stable mission identity for host-neutral diagnostics such as the F3 overlay.
 var _mission_file := ""
 var _mission_name := ""
+var _setup_error := OK
 
 # Value-only attachment poses for the current authoritative tick. Production
 # lookups stay in NovaSimulation's generation-bound native index; these boxed
@@ -80,10 +81,19 @@ var _effect_poses_by_ssn: Dictionary = {}
 
 ## Create + promote the mission, build the shared index over the placed nodes (`container`), and wire
 ## the present pass. options: { loco_scale, self_tick, present_options }. Returns the AI
-## entity count, or 0 on load failure (the orphan sim is freed). The sim is held off-tree by this driver.
+## entity count, or 0 on load failure (the orphan sim is freed). Inspect
+## get_setup_error() to distinguish a valid empty mission from a setup failure.
+## The sim is held off-tree by this driver.
 func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	_clear_present_effect_poses()
-	_sim = NovaSimulation.new()
+	_setup_error = OK
+	# A remote join may already own the live socket + NP session while it waits
+	# for S2C 0x7B to identify the mission. Keep that exact connection across the
+	# local map load instead of reconnecting after discovery. Normal host/SP/editor
+	# callers do not provide a simulation and retain the fresh-instance path.
+	_sim = options.get("simulation", null)
+	if _sim == null:
+		_sim = NovaSimulation.new()
 	var mission_path := String(options.get(
 			"debug_mission_file", options.get("mission_file", "")))
 	_mission_file = mission_path.replace("\\", "/").get_file()
@@ -112,8 +122,18 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	if is_joiner:
 		# Co-op LAN JOINER (a non-authority client): dial the host and run the witnessed
 		# in-match JOIN. The local player L is spawned on the name-match (inside the sim's
-		# joiner poll), NOT here. The player_name rides the ClientHello.co. [net-re §5.38b]
-		if not _sim.enable_join(String(options.get("host_ip", "127.0.0.1")),
+		# joiner poll), NOT here. The player_name rides game ClientAuth.NA. [net-re §5.38b]
+		# A preconnected simulation already completed this socket leg while the loading
+		# screen was up; do not replace its connection, restart its handshake, or
+		# reload charattr after ordered S2C 0x41 mutations have already landed.
+		var needs_join_connection := not _sim.is_joiner()
+		if needs_join_connection and options.get("resource_root") != null \
+				and _sim.has_method("load_charattr_challenge"):
+			_sim.load_charattr_challenge(options["resource_root"])
+		if needs_join_connection and options.has("join_character_profile") \
+				and _sim.has_method("set_join_character_profile"):
+			_sim.set_join_character_profile(options["join_character_profile"])
+		if needs_join_connection and not _sim.enable_join(String(options.get("host_ip", "127.0.0.1")),
 				int(options.get("port", 32768)), String(options.get("player_name", "Player"))):
 			push_warning("MissionRuntime: could not dial co-op host %s:%d — joiner disabled." % [
 				String(options.get("host_ip", "127.0.0.1")), int(options.get("port", 32768))])
@@ -141,8 +161,14 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 		session_options["max_players"] = int(options.get("max_players", 16))
 		_sim.configure_host_session(session_options)
 		if not _sim.enable_host_listen(bind_port):
-			push_warning("MissionRuntime: could not bind co-op LAN host port %d — falling back to local listen server." % bind_port)
-			_sim.enable_listen_server(true)
+			# A requested LAN host that cannot own its UDP endpoint is not a host.
+			# Never degrade into the visually-identical socketless SP/listen path:
+			# the caller must surface the bind failure and keep the menu active.
+			_setup_error = ERR_CANT_CREATE
+			_sim.free()
+			_sim = null
+			_has_native_present_effect_pose_lookup = false
+			return 0
 	else:
 		# SP / editor preview: the in-process listen server. The host player auto-spawns at bring-up.
 		_sim.enable_listen_server(true)
@@ -153,6 +179,7 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	if options.has("terrain_til"):
 		_sim.set_terrain_til_data(options["terrain_til"])
 	if mission == null or not _sim.load_from_mission_data(mission):
+		_setup_error = ERR_CANT_OPEN
 		_sim.free()  # NovaSimulation is a Node (not RefCounted); free the orphan on load failure
 		_sim = null
 		_has_native_present_effect_pose_lookup = false
@@ -197,36 +224,46 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	_self_tick = bool(options.get("self_tick", false))
 	_index = MissionEntityRegistry.new()
 	_index.build(container, mission)
-	# The registry present drives placed mission nodes (host listen-server / SP / editor preview);
-	# a joiner has none, so it skips it.
-	if not is_joiner:
-		_present = MissionPresentPass.new()
-		_present.setup(_sim, _index, options.get("present_options", {}))
+	# The registry present drives placed mission nodes on EVERY role. A joiner places the
+	# mission too (minus organics), and its snapshot rows carry the local defer identity for
+	# pools 1-3, so this pass drives its placed vehicles/buildings exactly as on the host —
+	# the wire pass below defers those rows and renders only what has no placed node.
+	_present = MissionPresentPass.new()
+	_present.setup(_sim, _index, options.get("present_options", {}))
 	# Co-op needs remote PLAYERS rendered WIRE-DIRECT: a dynamically-spawned player (an admitted
 	# joiner on the host, or — on the joiner — the host + everyone) has no .bms placement, so
-	# MissionPresentPass can't resolve it. The host keeps MissionPresentPass for its placed NPCs and
-	# adds this pass for the spawned players, deferring any row that resolves to a placed node (via
-	# _index) so nothing double-renders. The joiner places nothing (index null -> render every row).
+	# MissionPresentPass can't resolve it. Both net roles keep MissionPresentPass for their
+	# placed entities and add this pass for the spawned players/organics, deferring any row
+	# that resolves to a placed node (via _index) so nothing double-renders.
 	var full_wire_present := is_joiner or _sim.is_host_listening()
 	var sp_attachment_present := (
 			not full_wire_present and options.get("placer") != null)
 	if full_wire_present or sp_attachment_present:
 		_wire_present = WirePresentPass.new()
 		_wire_present.setup(_sim, options.get("placer"), container, options.get("env_node"),
-			null if is_joiner else _index, {
+			_index, {
 				"synthetic_origin_only": sp_attachment_present,
 			})
 		simulation_restarted.connect(
 				Callable(_wire_present, 'reset_runtime_state'))
-	# The host fire-presentation pass: AI/remote fire sound + muzzle effect + tracer
-	# streaks off the sim's fired/tracer drains — providers come from the host shell
-	# (game_world). A joiner's presentation seam is its own decode path (net views).
-	if not is_joiner and options.has("fire_audio"):
+	# The viewing client's fire-presentation pass: AI/remote fire sound + muzzle
+	# effect + tracer streaks off the sim's fired/tracer drains. A joiner re-runs
+	# decoded S2C tag-2 rounds through the same visual RoundSim, so it must drain
+	# this queue too. FirePresentPass filters the locally predicted round by
+	# is_local_player; the first-person action slot remains its sole presenter.
+	# [orig: remote tag-2 receive -> RoundData_SpawnRound; net-re §5.60]
+	if options.has("fire_audio"):
 		_fire_present = FirePresentPass.new()
+		# The muzzle anchor for retail's adm-arm fire effect. Bound to the WIRE pass
+		# (built just above) because that pass owns the per-handle held-weapon node the
+		# effect spawns at; an absent wire pass simply leaves the Callable invalid and
+		# the fire pass keeps the wire position, which is the pre-existing behaviour.
 		_fire_present.setup(_sim, container,
 			options.get("fire_audio", Callable()),
 			options.get("fire_fx", Callable()),
-			options.get("fire_listener", Callable()))
+			options.get("fire_listener", Callable()),
+			Callable(_wire_present, "muzzle_world_for") if _wire_present != null
+					else Callable())
 	# The host destruction-presentation pass: husk model swaps, death-piece
 	# debris, wreck fire/smoke, destruction sounds — off the sim's destruction
 	# drain (world/destruction.h; world-wac-ai-re §24). Shares the fire pass's
@@ -241,14 +278,17 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 		simulation_restarted.connect(
 				Callable(_destruction_present, 'reset_runtime_state'))
 	# The throwable-presentation pass: item models for flying grenades/satchels
-	# and placed devices, reconciled from the sim's visual snapshot
+	# and placed devices, reconciled from the sim's visual snapshot. Joiners need
+	# the flying-round half because decoded S2C tag-2 descriptors run the visual
+	# throwable motor locally. Placed-device replication remains the separate
+	# unported 0x59/0x12 seam; enabling this read-only pass does not invent it.
 	# (world-wac-ai-re §27; the sim stays render-free).
-	if not is_joiner:
-		_throwable_present = ThrowablePresentPass.new()
-		_throwable_present.setup(_sim, container, options.get("placer"),
-			options.get("item_db"), options.get("env_node"))
-		simulation_restarted.connect(
-				Callable(_throwable_present, 'reset_runtime_state'))
+	_throwable_present = ThrowablePresentPass.new()
+	_throwable_present.setup(_sim, container, options.get("placer"),
+		options.get("item_db"), options.get("env_node"),
+		options.get("fire_fx", Callable()), options.get("game_world"))
+	simulation_restarted.connect(
+		Callable(_throwable_present, 'reset_runtime_state'))
 	# Spawn the host's own player as an authoritative pool-0 entity (ADR 0012 / net-re §5.2b).
 	# After load (the spawn needs the AI system wired). The spawn POSE is selected the way the
 	# original engine does — by game type, from the mission's player-START marker FARTHEST from the
@@ -304,7 +344,24 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 		#  catalog + Mission_LoadBMSFile's filtered restrictionData write @0x40f961;
 		#  the sim's interim default-kit rebuild inside load_weapon_table converges
 		#  onto this kit.]
-		if mission != null:
+		# SINGLE-PLAYER ONLY. In a net session the original never READS either chunk:
+		# Mission_LoadBMSFile tests the session flag and fseeks past the loadout chunk
+		# and then past the availability chunk, so no map kit and no map availability
+		# table are ever promoted [orig: Mission_LoadBMSFile @0x40F4E0 — gate
+		#  @0x40f694/@0x40f6a1, loadout-chunk skip @0x40f6b2, availability-chunk skip
+		#  @0x40f6e1; the availability filter @0x40f834, the {WPN_KNIFE,-1,-1,-1}
+		#  fallback @0x40f899 and the restrictionData write @0x40f961 all live on the
+		#  non-session branch]. is_in_session is true for a LISTEN HOST as well as for a
+		# joiner, so both skip it — the MP kit instead comes from the player profile's
+		# per-class page, indexed by the very class byte that also goes on the wire
+		# [orig: Game_StartMission @0x525767-0x525836], which is what keeps retail's
+		# submitted kit class-legal at the host's accept gate [orig:
+		# NapiNPServerMsg_HandlePlayerLoadout @0x515790, test @0x515A36]. Our equivalent
+		# of is_in_session is the pair game_world.is_net_session() spells out; read it
+		# off the sim rather than the requested transport so a session that never came
+		# up is not treated as one.
+		var in_net_session := bool(_sim.is_joiner()) or bool(_sim.is_host_listening())
+		if mission != null and not in_net_session:
 			if mission.has_method("get_item_availability"):
 				_sim.set_weapon_availability(mission.get_item_availability())
 			if mission.has_method("get_weapon_loadout"):
@@ -336,6 +393,10 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	# played or only stepped. Cheap; the game never Stops but holding the map costs nothing.
 	_capture_transforms()
 	return _sim.get_entity_count()
+
+
+func get_setup_error() -> int:
+	return _setup_error
 
 
 # World position of the entity addressed by a runtime SSN (WAC/BMS addressing),
@@ -382,10 +443,11 @@ func has_current_present_effect_snapshot() -> bool:
 func presented_entity_effect_transform(entity_ref: Dictionary) -> Variant:
 	if not has_current_present_effect_snapshot():
 		return null
-	var wire_handle := int(entity_ref.get("wire_handle", 0))
+	var has_wire_handle := entity_ref.has("wire_handle")
+	var wire_handle := int(entity_ref.get("wire_handle", -1))
 	if _has_native_present_effect_pose_lookup:
 		var state := PackedVector3Array()
-		if wire_handle > 0:
+		if has_wire_handle and wire_handle >= 0 and wire_handle <= 0xffff:
 			state = _sim.get_present_effect_state_for_wire_handle(wire_handle)
 		else:
 			var native_bms_id := int(entity_ref.get("bms_id", 0))
@@ -402,7 +464,7 @@ func presented_entity_effect_transform(entity_ref: Dictionary) -> Variant:
 
 	# Compatibility path for a snapshot-source test seam without the compact API.
 	_ensure_present_effect_poses()
-	if wire_handle > 0:
+	if has_wire_handle and wire_handle >= 0 and wire_handle <= 0xffff:
 		return _effect_poses_by_wire_handle.get(wire_handle)
 	var bms_id := int(entity_ref.get("bms_id", 0))
 	if bms_id > 0:
@@ -474,7 +536,8 @@ func _ensure_present_effect_poses() -> void:
 					snapshot[base + NovaSimulation.PF_POS_Y],
 					snapshot[base + NovaSimulation.PF_POS_Z]))
 		var wire_handle := int(snapshot[base + NovaSimulation.PF_WIRE_HANDLE])
-		if wire_handle > 0:
+		var type_id := int(snapshot[base + NovaSimulation.PF_TYPE_ID])
+		if type_id != 0 and wire_handle >= 0 and wire_handle <= 0xffff:
 			_effect_poses_by_wire_handle[wire_handle] = transform
 		var bms_id := int(snapshot[base + NovaSimulation.PF_BMS_ID])
 		if bms_id > 0:
@@ -527,6 +590,12 @@ func local_player_team() -> int:
 # Fire-presentation counters (probe/diagnostic seam; empty when the pass is absent).
 func get_fire_present_stats() -> Dictionary:
 	return _fire_present.get_stats() if _fire_present != null else {}
+
+
+func get_throwable_present_stats() -> RefCounted:
+	# ThrowablePresentPass.Stats (typed counters, ADR 0017); null until the
+	# presentation pass exists.
+	return _throwable_present.get_stats() if _throwable_present != null else null
 
 
 func get_destruction_present_stats() -> RefCounted:
@@ -722,6 +791,12 @@ func _advance_one_tick_no_present() -> bool:
 		# this tick and the fixed-tick particle advance both observe this exact
 		# client-view pose, even inside a multi-tick catch-up batch.
 		_begin_present_effect_tick(logic_tick)
+		# Round-bound ammo move groups are particle-simulation state, even though
+		# their item-model Nodes stay render-batched. Reconcile them before the
+		# fixed_tick_completed consumer advances EffectWorld so birth, motion,
+		# and release all happen on the exact owning round tick.
+		if _throwable_present != null:
+			_throwable_present.sync_fixed_tick_effects()
 		var effects_start := Time.get_ticks_usec()
 		var effects := _sim.drain_effects()
 		_perf_effects_us = Time.get_ticks_usec() - effects_start
@@ -808,12 +883,30 @@ func _process(delta: float) -> void:
 
 # --- Editor transport (Play / Step / Stop) ------------------------------------
 
+## True while a live net session owns this runtime, i.e. the Play/Step/Stop
+## transport is locked out. The world tick is the
+## ONLY pump for the session socket (`NovaSimulation::step` is the sole caller of
+## host_pump/joiner_pump), so halting it stops the C2S uplink, the keepalive and
+## the empty-send interval, and the peer reaps us at `cs_dir0.timeout_ms = 120000`
+## [orig: CNapiNetwork_Init @0x4ca4a0]. Retail multiplayer has no pause at all —
+## its in-game menu overlays a running match — and on a listen host a stopped
+## world would do this to every joiner at once. The ESC pause honours the same
+## rule in the shell; this is the single home so the F3 transport, the perf probe
+## and any future caller cannot bypass it.
+func is_transport_locked() -> bool:
+	if _sim == null:
+		return false
+	return bool(_sim.is_joiner()) or bool(_sim.is_host_listening())
+
+
 func play() -> void:
 	_playing = true
 	_accum = 0.0  # discard wall-clock banked while paused / loading, so Play doesn't burst-catch-up
 
 
 func pause() -> void:
+	if is_transport_locked():
+		return
 	_playing = false
 	_accum = 0.0
 
@@ -821,6 +914,10 @@ func pause() -> void:
 ## One manual tick (editor Step): one logic tick + present, without running the self-tick loop.
 ## Both tick modes advance one logic tick per call, so Step behaves identically under DIVIDED.
 func step_once() -> void:
+	# Stepping drops out of the self-tick loop, which starves the socket between
+	# steps just as pause() does. See is_transport_locked().
+	if is_transport_locked():
+		return
 	_playing = false
 	_accum = 0.0  # manual stepping is fully decoupled from wall-clock
 	tick()
@@ -829,6 +926,10 @@ func step_once() -> void:
 ## Stop: rewind the world to the play-start baseline AND restore the authored node transforms, so the
 ## placed world is left exactly as it was. Safe to call when never played.
 func stop() -> void:
+	# Worse than pause on a live session: the restart below rewinds the world under
+	# peers that are still streaming against it. See is_transport_locked().
+	if is_transport_locked():
+		return
 	_playing = false
 	_accum = 0.0  # a Stop -> Play cycle must not replay banked time
 	if _sim != null:

@@ -91,6 +91,92 @@ uint32_t read_u32_le(const uint8_t *data, size_t len) {
 
 } // namespace
 
+std::array<uint8_t, 16> jointoperations_protocol_guid() {
+	// QUuid(0xB074D646, 0x81F9, 0x475F,
+	//       0x92,0xDA,0xDE,0xA7,0x24,0x7F,0x14,0x68)
+	// in the retail static initializer at 0x7937a0. QUuid's first three
+	// components occupy native little-endian memory; PG copies those 16 bytes.
+	return {0x46, 0xD6, 0x74, 0xB0, 0xF9, 0x81, 0x5F, 0x47,
+	        0x92, 0xDA, 0xDE, 0xA7, 0x24, 0x7F, 0x14, 0x68};
+}
+
+namespace {
+// ASCII case-insensitive compare — the retail identity gate compares every string
+// field through Napi_StrCaseEqual, not exact equality.
+// [orig: Napi_StrCaseEqual @0x616e70, used by HandleClientJoin @0x62B750]
+bool str_case_equal(std::string_view a, std::string_view b) {
+	if (a.size() != b.size()) return false;
+	for (size_t i = 0; i < a.size(); ++i) {
+		if (std::tolower(static_cast<unsigned char>(a[i])) !=
+		    std::tolower(static_cast<unsigned char>(b[i])))
+			return false;
+	}
+	return true;
+}
+} // namespace
+
+bool is_jointoperations_protocol_name(std::string_view protocol_name) {
+	// The retail PN compare is case-insensitive, which subsumes the two spellings the
+	// established NovaWorld PN router accepted; keep the policy in the neutral
+	// game-wire layer so npruntime does not reimplement service routing.
+	return str_case_equal(protocol_name, "JOINTOPERATIONS");
+}
+
+ClientHello make_jointoperations_client_hello(uint32_t client_index) {
+	ClientHello hello;
+	hello.nvs = "NAPI NP Version 0.0.1 1/12/2004 - 2/20/2004 Milota Copyright 2004 NovaLogic";
+	hello.co = "NovaLogic Inc, Calabasas CA U.S.A.";
+	hello.ap = "Jointops.exe";
+	hello.bdat = "Jul 21 2009 18:54:42";
+	hello.pn = "JOINTOPERATIONS";
+	hello.pg = jointoperations_protocol_guid();
+	hello.pg_present = true;
+	hello.pv1 = "0.0.0 1/12/2004 EM";
+	hello.pv2 = "16";
+	hello.ci = client_index;
+	return hello;
+}
+
+ClientAuth make_jointoperations_client_auth(uint32_t client_index, uint32_t client_key,
+		uint32_t host_key, std::string_view player_name, std::string_view client_scrk) {
+	const ClientHello hello = make_jointoperations_client_hello(client_index);
+	ClientAuth auth;
+	auth.nvs = hello.nvs;
+	auth.co = hello.co;
+	auth.ap = hello.ap;
+	auth.bdat = hello.bdat;
+	auth.pn = hello.pn;
+	auth.pg = hello.pg;
+	auth.pg_present = true;
+	auth.pv1 = hello.pv1;
+	auth.pv2 = hello.pv2;
+	auth.ci = client_index;
+	auth.hk = host_key;
+	auth.ck = client_key;
+	auth.na = std::string(player_name);
+	auth.scrk = std::string(client_scrk);
+	return auth;
+}
+
+// String fields compare case-insensitively like the witnessed gate; the PG GUID stays a
+// raw 16-byte compare. [orig: HandleClientJoin @0x62B750 via Napi_StrCaseEqual @0x616e70]
+bool matches_jointoperations_identity(const ClientHello &hello) {
+	const ClientHello expected = make_jointoperations_client_hello(hello.ci);
+	return str_case_equal(hello.nvs, expected.nvs) &&
+			is_jointoperations_protocol_name(hello.pn) &&
+			hello.pg_present && hello.pg == expected.pg &&
+			str_case_equal(hello.pv1, expected.pv1);
+}
+
+bool matches_jointoperations_identity(const ClientAuth &auth) {
+	const ClientHello expected = make_jointoperations_client_hello(auth.ci);
+	return str_case_equal(auth.nvs, expected.nvs) &&
+			is_jointoperations_protocol_name(auth.pn) &&
+			auth.pg_present && auth.pg == expected.pg &&
+			str_case_equal(auth.pv1, expected.pv1) &&
+			str_case_equal(auth.pv2, expected.pv2);
+}
+
 bool parse_client_hello(const uint8_t *data, size_t len, ClientHello &out) {
 	if (!data) return false;
 	out = ClientHello{};
@@ -234,6 +320,70 @@ std::vector<uint8_t> client_auth_to_bytes(const ClientAuth &msg) {
 	}
 	if (!msg.scrk.empty()) append_string_field(buf, "SCRK", msg.scrk);
 	return buf;
+}
+
+// [orig: CNapiNPConnection_SendDisconnectPacket @0x61f2a0]. The key dword is written raw ahead
+// of the TLV stream; every TLV is written unconditionally (DSTR/DDSTR ship their NUL even when
+// empty), and the receiver (Nwu_HandleDisconnect @0x623ce0) walks them case-insensitively with
+// zero defaults, validating only the leading key dword.
+std::vector<uint8_t> client_goodbye_to_bytes(uint32_t remote_session_key) {
+	std::vector<uint8_t> buf;
+	buf.reserve(64);
+	buf.push_back(static_cast<uint8_t>(remote_session_key & 0xFFu));
+	buf.push_back(static_cast<uint8_t>((remote_session_key >> 8) & 0xFFu));
+	buf.push_back(static_cast<uint8_t>((remote_session_key >> 16) & 0xFFu));
+	buf.push_back(static_cast<uint8_t>((remote_session_key >> 24) & 0xFFu));
+	append_u32_field(buf, "DS", 0);  // role — the receiver discards it and re-derives locally
+	append_u32_field(buf, "DC", 0);  // reason code: 0 = ordinary leave
+	append_u32_field(buf, "DP1", 0);
+	append_u32_field(buf, "DP2", 0);
+	append_string_field(buf, "DSTR", std::string());
+	append_u32_field(buf, "DPC", 0);
+	append_string_field(buf, "DDSTR", std::string());
+	return buf;
+}
+
+// [orig: CNapiNPConnection_HandleDescriptionPacket @0x621ae0]. The retail walk reads name-keyed
+// TLVs in whatever order they arrive, compares each name through Napi_StrCaseEqual, ignores names
+// it does not know (the cursor has already skipped their value by its length), and stops at an
+// empty name. DS is read off the wire and deliberately dropped: the receiver re-derives the role
+// from its own connection. A value shorter than its field's width reads as zero here; retail's
+// unguarded `*(_DWORD *)value` would read past it, and bounds safety is a platform primitive.
+bool parse_disconnect_event(const uint8_t *data, size_t len, DisconnectEvent &out) {
+	if (!data) return false;
+	out = DisconnectEvent{};
+	bool saw_known_field = false;
+	size_t pos = 0;
+	while (pos < len) {
+		// An empty name terminates the walk BEFORE its length is read @0x621b96.
+		if (data[pos] == 0) break;
+		std::string name;
+		const uint8_t *value = nullptr;
+		uint16_t size = 0;
+		const size_t next = read_tlv_field(data, len, pos, name, value, size);
+		if (next == static_cast<size_t>(-1)) return false;
+		if (str_case_equal(name, "DS")) {
+			out.ds = read_u32_le(value, size);
+		} else if (str_case_equal(name, "DC")) {
+			out.dc = read_u32_le(value, size);
+		} else if (str_case_equal(name, "DP1")) {
+			out.dp1 = read_u32_le(value, size);
+		} else if (str_case_equal(name, "DP2")) {
+			out.dp2 = read_u32_le(value, size);
+		} else if (str_case_equal(name, "DSTR")) {
+			out.dstr = strip_nul(value, size);
+		} else if (str_case_equal(name, "DPC")) {
+			out.dpc = read_u32_le(value, size);
+		} else if (str_case_equal(name, "DDSTR")) {
+			out.ddstr = strip_nul(value, size);
+		} else {
+			pos = next;
+			continue;
+		}
+		saw_known_field = true;
+		pos = next;
+	}
+	return saw_known_field;
 }
 
 std::vector<uint8_t> make_client_cu_chunk(uint8_t type, std::string_view name,
@@ -507,6 +657,16 @@ std::vector<uint8_t> server_hello_to_bytes(const ServerHello &msg) {
 bool parse_server_hello(const uint8_t *data, size_t len, ServerHello &out) {
 	if (!data) return false;
 	out = ServerHello{};
+	// Gated fields that are absent on the wire parse as absent. Keep this
+	// explicit so future builder defaults cannot leak into decoded discovery
+	// rows (for example, an empty dedicated host omits NP).
+	out.pl.clear();
+	out.p1 = 0;
+	out.p2 = 0;
+	out.np = 0;
+	out.mp = 0;
+	out.sus1.clear();
+	out.sus2.clear();
 	bool saw_hk = false;
 	size_t pos = 0;
 	while (pos < len) {

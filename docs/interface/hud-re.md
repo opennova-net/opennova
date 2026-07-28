@@ -788,6 +788,7 @@ behind it.
 | D-HUD-16 | the SP waypoint track is built sim-side at mission load from the BMS nav channel (`flags & 2`) + pool-3 markers — no 0x0F wire leg in the loop | retail always routes the list through the S2C 0x0F apply, even in SP mode 3 (the local server serializes, the local client applies) | Same data, same selection rule, no serialization round-trip. The npwire 0x0F waypoint block already decodes (net-re §5.29); wire-parity for MP join is the npwire follow-up, not a HUD divergence. |
 | D-HUD-17 | proximity advance ports the distance/last-entry/skip-done legs; `SpawnPoint_CheckWeaponRestrictions @0x4dbe80` (the AAS spawn-point weapon-restriction pass gate) is modeled as always-pass; the MP POI list (`Entity_BuildMapPoiLists @0x42de40`) and spectate reuse are unported | the restriction check reads the 4 weapon slots vs the event-system restriction mask and can force-advance | SP missions author no weapon restrictions on route markers; port the check with the AAS/MP HUD phase. |
 | D-HUD-18 | the objectives panel draws Godot rects/polylines for the checkbox + backing box, a full-alpha toggle, and skips the win-score add, the "New Objective" toast, and the header unknown5[2]/[3] team-banner legs; the toggle key is a host mapping (KEY_O) | checkbox/checkmark = ten `draw_clipped_2d_line` calls (operands elided by the decompiler), box = `HUD_DrawLabelBox @0x5baaba`, toggle alpha ramps the row color, score add `@0x454526`, toast `HUD_ShowObjectiveNotification`, banner masks `byte_A762D6/D7`, binding row = the input layer | The state machine, row walk, gray completed fold, chat/banner announcements are exact; the residuals are presentation polish + the unported input-binding/score/notification systems. |
+| D-HUD-19 | the DEATH deploy screen (`NovaDeployScreenHost`, death.mnu) ships the authored chrome, the witnessed SPAWNPOINTS_LIST populate, and the pick flow — its MAP window renders no map image | the MAP window's render pass draws the windowed map view `MapOverlay_DrawView @0x5a58e0` (terrain layers + blips + labels; pan/zoom via `command_map_overlay_input_handler @0x554310`), the sibling of the fullscreen `HUD_DrawMapOverlay @0x5a5f40` | The pick behavior is complete without the image (the list is the pick surface); the map draw internals are the tracked next map-phase witness — port `MapOverlay_DrawView` and feed both the CMAP and DEATH windows from it. |
 
 ## Follow-ups (not yet witnessed / deferred)
 
@@ -800,7 +801,12 @@ behind it.
   `STROVER_DEFENSIVEPOSITION`), `%01.2fk` distances, `MapOverlay_RenderAllLayers`.
   Structured this session; the draw internals are the next map-phase witness.
   (The old "radar/minimap @0x599700" pointer was the heat-bar misnomer —
-  resolved 2026-07-18, see D-HUD-2.)
+  resolved 2026-07-18, see D-HUD-2.) 2026-07-24 addition: the WINDOWED sibling
+  `MapOverlay_DrawView @0x5a58e0` (ex-sub_5A58E0; `(rect, centerX, centerY,
+  scale)`) is the map view the CMAP command-map screen and the DEATH deploy
+  screen draw inside their .mnu MAP windows (net-re §5.61's screen witness);
+  the ported deploy screen ships chrome-only until this draw is witnessed —
+  D-HUD-19.
 - **Chat channel geometry** — the `dword_28E4DF8` table (rows 1/2 chat, 3/4
   system/debug) that `Chat_RebuildDisplayBuffers @0x498bd0` wraps against and
   the drawer anchors with; its writer is unwitnessed (D-HUD-6).

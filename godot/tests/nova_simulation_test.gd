@@ -2387,7 +2387,7 @@ func test_death_during_usegun_draw_restores_personal_weapon() -> void:
 	sim.free()
 
 
-func test_unarmed_local_usegun_toggle_is_rejected() -> void:
+func test_unarmed_offline_local_usegun_toggle_is_rejected() -> void:
 	var md := NovaMissionData.new()
 	assert_eq(md.create_default(), OK)
 	assert_false(md.add_entity(NovaMissionData.KIND_ITEM, 101294,
@@ -2403,7 +2403,26 @@ func test_unarmed_local_usegun_toggle_is_rejected() -> void:
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 	sim.clear_local_player_weapon()
 	assert_false(sim.local_player_toggle_mount(),
-			"retail rejects ordinary UseGun attach without EquippedSlot/Def")
+			"retail rejects offline player UseGun attach without EquippedSlot")
+	sim.free()
+
+
+func test_unarmed_offline_local_ordinary_seat_toggle_is_allowed() -> void:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	assert_false(md.add_entity(NovaMissionData.KIND_ITEM, 101294,
+			Vector3(2, 0, 0), Vector3.ZERO).is_empty())
+	var sim := NovaSimulation.new()
+	sim.set_item_seat_specs([{
+		"type_id": 1294,
+		"seats": [{"type": 1, "position": Vector3(0, -1, 1),
+				"source_name": "sitex00"}],
+	}])
+	assert_true(sim.load_from_mission_data(md))
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	sim.clear_local_player_weapon()
+	assert_true(sim.local_player_toggle_mount(),
+			"the null EquippedSlot gate is UseGun-only, not a generic seat gate")
 	sim.free()
 
 

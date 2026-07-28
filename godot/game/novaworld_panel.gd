@@ -254,15 +254,16 @@ func _refresh_servers() -> void:
 	if _client != null and _client.has_method("get_server_rows"):
 		for row in _client.get_server_rows():
 			_rows.append(row)
-			_server_list.add_item(_format_server_row(row))
+			var idx := _server_list.add_item(_format_server_row(row))
+			_server_list.set_item_tooltip(idx, _server_row_tooltip(row))
 	if _server_list.item_count == 0:
 		_server_list.add_item("No games are being hosted yet.")
 	# A fresh list clears any prior selection.
 	_join_button.disabled = true
 
 
-# "ServerName  (3/16)  AAS  [locked]" — name, occupancy, game type, and a lock
-# marker when the server is passworded or locked.
+# "ServerName  (3/16)  AAS  198.51.100.23  [locked]" — name, occupancy, game
+# type, the server's address, and a lock marker when passworded or locked.
 func _format_server_row(row: Dictionary) -> String:
 	var name := String(row.get("name", "server"))
 	var players := int(row.get("players", 0))
@@ -271,9 +272,33 @@ func _format_server_row(row: Dictionary) -> String:
 	var game_type := String(row.get("game_type", ""))
 	if not game_type.is_empty():
 		label += "  " + game_type
+	# The GSB row's host address (the one the browser pings). 0.0.0.0 means the
+	# server did not report one — show nothing rather than a bogus address.
+	var ip := String(row.get("ip", ""))
+	if not ip.is_empty() and ip != "0.0.0.0":
+		label += "  " + ip
 	if String(row.get("password", "N")) == "Y" or String(row.get("locked", "N")) == "Y":
 		label += "  [locked]"
 	return label
+
+
+# Hover details for a browser row: the mission and locale fields that don't fit
+# the one-line label.
+func _server_row_tooltip(row: Dictionary) -> String:
+	var parts := PackedStringArray()
+	var mission := String(row.get("mission_name", ""))
+	if not mission.is_empty():
+		parts.append("Mission: %s" % mission)
+	var region := String(row.get("region", ""))
+	if not region.is_empty():
+		parts.append("Region: %s" % region)
+	var country := String(row.get("country", ""))
+	if not country.is_empty():
+		parts.append("Country: %s" % country)
+	var ip := String(row.get("ip", ""))
+	if not ip.is_empty() and ip != "0.0.0.0":
+		parts.append("Address: %s" % ip)
+	return "\n".join(parts)
 
 
 func _on_server_list_updated(_updated: Array) -> void:

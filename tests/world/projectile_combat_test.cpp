@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <vector>
 
+#include "terrain/height_field.h"
 #include "world/collision.h"
 #include "world/world.h"
 
@@ -59,7 +60,7 @@ struct Rig {
         dud.max_age_ticks = 7;
     }
 
-    int fire() {
+    int fire(RoundConsequenceMode mode = RoundConsequenceMode::Authoritative) {
         RoundSpawnParams p;
         p.owner = shooter;
         p.shooter_handle = shooter.packed;
@@ -67,7 +68,7 @@ struct Rig {
         p.dir_yaw_bam = 0;
         p.dir_pitch_bam = 0;
         p.ammo_index = 0;
-        return world.round_sim.spawn(world, p);
+        return world.round_sim.spawn(world, p, mode);
     }
 
     void clear_events() {
@@ -536,14 +537,697 @@ void test_network_oneshot_authority_and_session_gate() {
         r.world.mp_session = true;
         r.world.projectile_authority = false;
         r.world.one_shot_kill = true;
-        r.world.registry.get(r.target)->health = 3000;
+        // A visual client's only live LOCAL person is its own player L; other
+        // local pool-0 slots are load-frozen ghosts excluded from the
+        // projectile walks (their live poses arrive as wire proxies).
+        r.world.cached.local_player = r.target;
+        Entity *target = r.world.registry.get(r.target);
+        CHECK(target != nullptr);
+        if (target == nullptr) return;
+        // Pin the independent retail world-role gate. Even if a client caller
+        // forgets to mark its round VisualOnly, a non-authority network world
+        // cannot normalize entity words or queue the impact kill zone.
+        target->health = 0x1FFFF;
+        target->health_max = 0x1FFFE;
+        AmmoTableEntry &ammo = r.world.ammo.entries[0];
+        ammo.kztype = ammo_kz::kStandard;
+        ammo.kz_maxradius = 5.0f;
+        ammo.kz_damage = 50;
         CHECK(r.fire() >= 0);
         r.world.round_sim.tick(r.world, nullptr);
-        CHECK(r.world.registry.get(r.target)->health == 3000);
+        CHECK(target->health == 0x1FFFF);
+        CHECK(target->health_max == 0x1FFFE);
         CHECK(r.world.round_sim.hits.empty());
+        CHECK(r.world.explosions.queue.empty());
         CHECK(r.world.round_sim.impacts.size() == 1); // client prediction remains visual
         CHECK(r.world.round_sim.active_count == 0);
+
+        // The same world-role gate covers spawn-time instant kill zones.
+        AmmoTableEntry instant;
+        instant.name = "CLIENT_INSTANT";
+        instant.valid = true;
+        instant.flags = 0x400u;
+        instant.kztype = ammo_kz::kStandard;
+        instant.kz_maxradius = 4.0f;
+        instant.kz_damage = 40;
+        const int instant_index = static_cast<int>(r.world.ammo.entries.size());
+        r.world.ammo.entries.push_back(instant);
+        RoundSpawnParams instant_params;
+        instant_params.owner = r.shooter;
+        instant_params.shooter_handle = r.shooter.packed;
+        instant_params.origin = {1.0f, 0.0f, 1.0f};
+        instant_params.ammo_index = instant_index;
+        CHECK(r.world.round_sim.spawn(r.world, instant_params) < 0);
+        CHECK(r.world.explosions.queue.empty());
     }
+}
+
+void test_visual_only_rounds_have_no_gameplay_consequences() {
+    Rig r;
+    r.world.mp_session = true;
+    r.world.projectile_authority = false;
+    r.world.one_shot_kill = true;
+    // The consequence gates are proven against the one local person a visual
+    // client still collides with: its own player L (ghost slots are excluded).
+    r.world.cached.local_player = r.target;
+    Entity *shooter = r.world.registry.get(r.shooter);
+    Entity *target = r.world.registry.get(r.target);
+    CHECK(shooter != nullptr && target != nullptr);
+    if (shooter == nullptr || target == nullptr) return;
+
+    shooter->group_id = 3;
+    shooter->net_id = 7;
+    target->group_id = 4;
+    target->net_id = 9;
+    // Values outside signed-word range catch the old consequence-boundary
+    // normalization even when calculated damage happened to be zero.
+    target->health = 0x1FFFF;
+    target->health_max = 0x1FFFE;
+    target->armor_impact = 0x1FFFD;
+    target->armor_kz = 0x1FFFC;
+    target->flags = 0x10000u;
+    target->last_attacker = r.shooter;
+    target->death_anim_state = 77;
+    const Entity before = *target;
+
+    AmmoTableEntry &bullet = r.world.ammo.entries[0];
+    bullet.arm_age_ticks = 0;
+    bullet.kztype = ammo_kz::kStandard;
+    bullet.kz_maxradius = 5.0f;
+    bullet.kz_damage = 50;
+    CHECK(r.fire(RoundConsequenceMode::VisualOnly) >= 0);
+    r.world.round_sim.tick(r.world, nullptr);
+
+    CHECK(r.world.round_sim.impacts.size() == 1);
+    CHECK(r.world.round_sim.hits.empty());
+    CHECK(r.world.round_sim.deaths.empty());
+    CHECK(r.world.explosions.queue.empty());
+    CHECK(target->health == before.health);
+    CHECK(target->health_max == before.health_max);
+    CHECK(target->armor_impact == before.armor_impact);
+    CHECK(target->armor_kz == before.armor_kz);
+    CHECK(target->flags == before.flags);
+    CHECK(target->last_attacker == before.last_attacker);
+    CHECK(target->death_anim_state == before.death_anim_state);
+    CHECK(!r.world.relations.group_group(
+        TriggerRelations::kShot, shooter->group_id, target->group_id));
+    CHECK(!r.world.relations.single_group(
+        TriggerRelations::kShot, shooter->net_id, target->group_id));
+    CHECK(!r.world.relations.group_single(
+        TriggerRelations::kShot, shooter->group_id, target->net_id));
+    CHECK(!r.world.relations.single_single(
+        TriggerRelations::kShot, shooter->net_id, target->net_id));
+    CHECK(r.world.relations.group(target->group_id).alert ==
+          TriggerRelations::kAlertGreen);
+
+    auto entity_count = [&]() {
+        int count = 0;
+        r.world.registry.for_each([&](const Entity &) { ++count; });
+        return count;
+    };
+    const int entities_before = entity_count();
+    const size_t devices_before = r.world.throwables.devices.size();
+
+    // Spawn-time instant killzones still emit their visual impact descriptor,
+    // but may not queue the authoritative explosion.
+    AmmoTableEntry instant;
+    instant.name = "VISUAL_INSTANT";
+    instant.valid = true;
+    instant.flags = 0x400u;
+    instant.kztype = ammo_kz::kStandard;
+    instant.kz_maxradius = 4.0f;
+    instant.kz_damage = 40;
+    const int instant_index = static_cast<int>(r.world.ammo.entries.size());
+    r.world.ammo.entries.push_back(instant);
+    RoundSpawnParams instant_params;
+    instant_params.owner = r.shooter;
+    instant_params.shooter_handle = r.shooter.packed;
+    instant_params.origin = {1.0f, 0.0f, 1.0f};
+    instant_params.ammo_index = instant_index;
+    const size_t impacts_before = r.world.round_sim.impacts.size();
+    CHECK(r.world.round_sim.spawn(r.world, instant_params,
+                                  RoundConsequenceMode::VisualOnly) < 0);
+    CHECK(r.world.round_sim.impacts.size() == impacts_before + 1);
+    CHECK(r.world.explosions.queue.empty());
+
+    // A visual use-own-move charge reaches the exact retail rest conversion,
+    // then releases without cloning a placed-device entity.
+    AmmoTableEntry charge;
+    charge.name = "VISUAL_CHARGE";
+    charge.valid = true;
+    charge.flags = 0x2000u;
+    charge.velocity = 62;
+    charge.max_age_ticks = 20;
+    charge.drag_fp16 = 65536;
+    const int charge_index = static_cast<int>(r.world.ammo.entries.size());
+    r.world.ammo.entries.push_back(charge);
+    RoundSpawnParams charge_params;
+    charge_params.owner = r.shooter;
+    charge_params.shooter_handle = r.shooter.packed;
+    charge_params.origin = {0.0f, 0.0f, 0.0f};
+    charge_params.ammo_index = charge_index;
+    const int charge_slot = r.world.round_sim.spawn(
+        r.world, charge_params, RoundConsequenceMode::VisualOnly);
+    CHECK(charge_slot >= 0);
+    if (charge_slot >= 0) {
+        LiveRound &round =
+            r.world.round_sim.rounds[static_cast<size_t>(charge_slot)];
+        round.motor = ThrowClass::kSatchel;
+        round.vel = Vec3{};
+    }
+    std::vector<uint16_t> heights(512u * 512u, 0);
+    std::vector<int> sectors(256u, 1);
+    opennova::terrain::TerrainHeightField flat;
+    flat.heightmap = heights.data();
+    flat.dim = 512;
+    flat.layout.sector_grid = sectors.data();
+    r.world.round_sim.tick(r.world, &flat, nullptr);
+    CHECK(r.world.throwables.devices.size() == devices_before);
+    CHECK(entity_count() == entities_before);
+    CHECK(r.world.explosions.queue.empty());
+}
+
+void test_visual_person_proxy_keeps_wire_identity_out_of_authority() {
+    World world;
+    world.registry.configure_pool(0, 8);
+
+    // Occupy local slot zero so valid wire H=0 and local L=1 are distinct.
+    // The hidden dummy remains in the registry person table but cannot collide.
+    Entity dummy;
+    dummy.kind = EntityKind::Organic;
+    dummy.hidden = true;
+    dummy.position = {100.0f, 100.0f, 0.0f};
+    CHECK(world.registry.spawn(0, dummy).packed == 0);
+
+    Entity local;
+    local.kind = EntityKind::Organic;
+    local.has_item_def = true;
+    local.item_type = 3;
+    local.position = {8.0f, 0.0f, 0.0f};
+    local.health = 100;
+    const EntityHandle local_l = world.registry.spawn(0, local);
+    CHECK(local_l.packed == 1);
+    world.cached.local_player = local_l;
+
+    // H=0 is the local player's valid server identity. The remote H deliberately
+    // aliases local L's packed value: excluding owners by casting H -> L would
+    // drop the actual remote target and make this trace miss.
+    constexpr uint16_t self_h = 0;
+    std::vector<ProjectilePersonProxy> proxies{
+        ProjectilePersonProxy{self_h, FixedVec3{2 * 65536, 0, 0}},
+        ProjectilePersonProxy{local_l.packed, FixedVec3{5 * 65536, 0, 0}},
+    };
+    CollisionWorld collision;
+    collision.replace_projectile_person_proxies(proxies, self_h);
+    collision.build_tick_tables(world);
+    world.collision = &collision;
+
+    ProjectileTrace trace;
+    trace.start = FixedVec3{0, 0, 58982};
+    trace.end = FixedVec3{10 * 65536, 0, 58982};
+    trace.owner = local_l;
+    trace.shooter_wire_handle = self_h;
+    CHECK(!collision.trace_projectile(world, trace).hit());
+
+    trace.include_wire_proxies = true;
+    const ProjectileHit hit = collision.trace_projectile(world, trace);
+    CHECK(hit.hit_class == ProjectileHitClass::Person);
+    CHECK(!hit.geometry_entity.valid());
+    CHECK(hit.bone_index == -1 && hit.hit_zone == -1);
+    CHECK(hit.position_q16.x > 4 * 65536);
+    CHECK(hit.position_q16.x < 5 * 65536);
+
+    AmmoTableEntry ammo;
+    ammo.name = "VISUAL_PROXY";
+    ammo.valid = true;
+    ammo.velocity = 620; // 10 units/tick
+    ammo.max_age_ticks = 20;
+    ammo.weight_in_grains = 875;
+    ammo.max_damage = 25;
+    world.ammo.entries.push_back(ammo);
+    world.mp_session = true;
+    world.projectile_authority = false;
+
+    RoundSpawnParams params;
+    params.owner = local_l;
+    params.shooter_handle = self_h;
+    params.origin = {0.0f, 0.0f, kOrganicStandInCenterZ};
+    params.ammo_index = 0;
+    CHECK(world.round_sim.spawn(
+              world, params, RoundConsequenceMode::VisualOnly) >= 0);
+    world.round_sim.tick(world, nullptr, &collision);
+
+    CHECK(world.round_sim.impacts.size() == 1);
+    CHECK(world.round_sim.impacts[0].effect_tag == 2);
+    CHECK(to_fixed(world.round_sim.impacts[0].position.x) == hit.position_q16.x);
+    CHECK(world.round_sim.hits.empty());
+    CHECK(world.round_sim.deaths.empty());
+    CHECK(world.explosions.queue.empty());
+    CHECK(world.registry.get(local_l)->health == 100);
+    CHECK(world.round_sim.debug_trail_count == 1);
+    CHECK(world.round_sim.debug_trail[0].entity == EntityHandle::kInvalid);
+}
+
+// A one-section q8 CFAC quad (two triangles) at section-local z = 1, normal +z,
+// spanning (+-1, +-1) — the same fixture shape the collision suite's face-walk
+// tests use, here exercised through the wire dynamic-proxy pass.
+CollisionModel proxy_face_quad_model(uint8_t material) {
+    CollisionModel m;
+    m.face_vertices = {{-256, -256, 256}, {256, -256, 256}, {256, 256, 256},
+                       {-256, 256, 256}}; // Q8: (+-1, +-1, 1)
+    auto face = [&](int a, int b, int c) {
+        CollisionFace f;
+        f.v[0] = static_cast<int16_t>(a);
+        f.v[1] = static_cast<int16_t>(b);
+        f.v[2] = static_cast<int16_t>(c);
+        f.normal[0] = 0;
+        f.normal[1] = 0;
+        f.normal[2] = 16384;
+        f.axis = 1;
+        f.plane_dist = -0x10000; // on-plane at z=1
+        f.min[0] = -0x10000; f.max[0] = 0x10000;
+        f.min[1] = -0x10000; f.max[1] = 0x10000;
+        f.min[2] = 0x10000;  f.max[2] = 0x10000;
+        f.material = material;
+        m.faces.push_back(f);
+    };
+    face(0, 1, 2);
+    face(0, 2, 3);
+    m.sections.assign(1, {});
+    m.sections[0].face_start = 0;
+    m.sections[0].face_count = 2;
+    m.sections[0].face_vertex_start = 0;
+    m.sections[0].face_vertex_count = 4;
+    return m;
+}
+
+// Moving decoded pool-1 movers collide through their wire-keyed authored
+// geometry at the DECODED pose, while a visual client's load-frozen local
+// pool-1 ghost stops serving projectile collision.
+void test_visual_dynamic_proxy_projects_decoded_pose_geometry() {
+    World world;
+    world.registry.configure_pool(0, 8);
+    world.registry.configure_pool(1, 8);
+    world.mp_session = true;
+    world.projectile_authority = false;
+
+    Entity shooter;
+    shooter.kind = EntityKind::Organic;
+    shooter.item_type = 3;
+    shooter.position = {0.0f, 0.0f, 0.0f};
+    const EntityHandle sh = world.registry.spawn(0, shooter);
+    world.cached.local_player = sh;
+
+    // The load-frozen local ghost: the same vehicle the wire also carries, at
+    // its authored spawn X=5 — the pose the host long since moved it away from.
+    Entity ghost;
+    ghost.kind = EntityKind::Item;
+    ghost.has_item_def = true;
+    ghost.position = {5.0f, 0.0f, 0.0f};
+    const EntityHandle gh = world.registry.spawn(1, ghost);
+
+    CollisionWorld collision;
+    const int32_t model_id =
+        collision.add_model(proxy_face_quad_model(/*material=*/7));
+    collision.assign_entity(gh, model_id);
+    collision.build_tick_tables(world);
+    world.collision = &collision;
+
+    // The decoded wire pose: the same authored geometry at X=12. The quad
+    // plane sits at proxy-local z=1, so a ray descending through world
+    // z=1 over (12, 0) crosses it.
+    ProjectileDynamicProxy proxy;
+    proxy.wire_handle = 0x1002; // host pool-1 slot 2
+    proxy.model_id = model_id;
+    proxy.position_q16 = FixedVec3{12 * 65536, 0, 0};
+    proxy.bound_radius_q16 = 3 * 65536;
+    collision.replace_projectile_dynamic_proxies({proxy});
+
+    auto trace_down_at = [&](int32_t x_q16, bool include) {
+        ProjectileTrace trace;
+        trace.start = FixedVec3{x_q16, 0, 3 * 65536};
+        trace.end = FixedVec3{x_q16, 0, -3 * 65536};
+        trace.owner = sh;
+        trace.include_wire_proxies = include;
+        return collision.trace_projectile(world, trace);
+    };
+
+    // The stale local pose no longer stops rounds on a visual client...
+    CHECK(!trace_down_at(5 * 65536, true).hit());
+    // ...while the decoded pose does, through the authored CFAC mesh.
+    const ProjectileHit hit = trace_down_at(12 * 65536, true);
+    CHECK(hit.hit_class == ProjectileHitClass::DynamicEntity);
+    CHECK(!hit.geometry_entity.valid());
+    CHECK(hit.surface_type == 7);
+    // The proxy-local z=1 plane, unrotated pose (the face walk's distance
+    // split quantizes within a few Q16 ULPs).
+    CHECK(hit.position_q16.z > 0xF000);
+    CHECK(hit.position_q16.z < 0x11000);
+    // A round that never opted into wire proxies (an authoritative round
+    // mistakenly stepped on a client world) sees neither representation.
+    CHECK(!trace_down_at(12 * 65536, false).hit());
+
+    // The same world WITH authority keeps the ordinary local-table behavior.
+    world.projectile_authority = true;
+    CHECK(trace_down_at(5 * 65536, false).hit_class ==
+          ProjectileHitClass::DynamicEntity);
+    world.projectile_authority = false;
+
+    // The decoded heading rotates the authored geometry with the visual: at
+    // heading 90 deg the (+-1, +-1) quad still spans the section origin, but a
+    // proxy REPOSED under pitch 90 deg turns the z=1 plane vertical and the
+    // descending ray at its center now passes through where the flat plane
+    // would have stopped it.
+    ProjectileDynamicProxy pitched = proxy;
+    pitched.pitch_bam = 0x40000000;
+    collision.replace_projectile_dynamic_proxies({pitched});
+    CHECK(!trace_down_at(12 * 65536, true).hit());
+
+    // A horizontal ray across the now-vertical plane hits it instead.
+    ProjectileTrace across;
+    across.start = FixedVec3{9 * 65536, 0, 0};
+    across.end = FixedVec3{15 * 65536, 0, 0};
+    across.owner = sh;
+    across.include_wire_proxies = true;
+    CHECK(collision.trace_projectile(world, across).hit_class ==
+          ProjectileHitClass::DynamicEntity);
+}
+
+// The decoded shooter's own carrier is excluded exactly like the retail
+// ray[18] mount exclusion; an unrelated proxy behind it still stops the round.
+// An unresolvable graphic keeps the bounded sphere stand-in.
+void test_visual_dynamic_proxy_carrier_gate_and_sphere_standin() {
+    World world;
+    world.registry.configure_pool(0, 4);
+    world.mp_session = true;
+    world.projectile_authority = false;
+
+    Entity shooter;
+    shooter.kind = EntityKind::Organic;
+    shooter.item_type = 3;
+    const EntityHandle sh = world.registry.spawn(0, shooter);
+    world.cached.local_player = sh;
+
+    CollisionWorld collision;
+    const int32_t model_id =
+        collision.add_model(proxy_face_quad_model(/*material=*/9));
+    collision.build_tick_tables(world);
+    world.collision = &collision;
+
+    ProjectileDynamicProxy carrier;
+    carrier.wire_handle = 0x1004;
+    carrier.model_id = model_id;
+    carrier.position_q16 = FixedVec3{6 * 65536, 0, 0};
+    carrier.pitch_bam = 0x40000000; // vertical plane across the lane
+    carrier.bound_radius_q16 = 3 * 65536;
+    ProjectileDynamicProxy behind = carrier;
+    behind.wire_handle = 0x1007;
+    behind.position_q16 = FixedVec3{10 * 65536, 0, 0};
+    collision.replace_projectile_dynamic_proxies({carrier, behind});
+
+    ProjectileTrace trace;
+    trace.start = FixedVec3{0, 0, 0};
+    trace.end = FixedVec3{14 * 65536, 0, 0};
+    trace.owner = sh;
+    trace.include_wire_proxies = true;
+    trace.shooter_wire_handle = 0x0003;
+    trace.shooter_carrier_wire_handle = 0x1004;
+    const ProjectileHit hit = collision.trace_projectile(world, trace);
+    CHECK(hit.hit_class == ProjectileHitClass::DynamicEntity);
+    // The carrier at X=6 was ridden through; the unrelated proxy at X=10
+    // stops the round on its vertical plane (X=10 +- 1 depending on the
+    // rotation sign). Anything past X=8 proves the carrier plane (<= 7) was
+    // skipped rather than struck.
+    CHECK(hit.position_q16.x > 8 * 65536);
+    CHECK(hit.position_q16.x < 12 * 65536);
+
+    // Unresolved graphic: the bounded compatibility sphere still stops rounds
+    // (the D-ITEM-1 stand-in rule, applied wire-side).
+    ProjectileDynamicProxy unresolved;
+    unresolved.wire_handle = 0x1009;
+    unresolved.model_id = -1;
+    unresolved.position_q16 = FixedVec3{5 * 65536, 0, 0};
+    unresolved.bound_radius_q16 = 0x18000; // 1.5 u
+    collision.replace_projectile_dynamic_proxies({unresolved});
+    const ProjectileHit sphere_hit = collision.trace_projectile(world, trace);
+    CHECK(sphere_hit.hit_class == ProjectileHitClass::DynamicEntity);
+    CHECK(!sphere_hit.geometry_entity.valid());
+    CHECK(sphere_hit.position_q16.x <= 5 * 65536);
+}
+
+// A decoded vehicle/item shooter never clips its own wire slot: the dyn-proxy
+// walk applies the same self-site immunity as the local tables (the retail
+// four-slot ray[17..20] exclusion), and an unrelated proxy behind it still
+// stops the round.
+void test_visual_dynamic_proxy_excludes_shooter_self_slot() {
+    World world;
+    world.registry.configure_pool(0, 4);
+    world.mp_session = true;
+    world.projectile_authority = false;
+
+    Entity shooter;
+    shooter.kind = EntityKind::Organic;
+    shooter.item_type = 3;
+    const EntityHandle sh = world.registry.spawn(0, shooter);
+    world.cached.local_player = sh;
+
+    CollisionWorld collision;
+    const int32_t model_id =
+        collision.add_model(proxy_face_quad_model(/*material=*/9));
+    collision.build_tick_tables(world);
+    world.collision = &collision;
+
+    ProjectileDynamicProxy self;
+    self.wire_handle = 0x1004; // the decoded shooter's own pool-1 slot
+    self.model_id = model_id;
+    self.position_q16 = FixedVec3{6 * 65536, 0, 0};
+    self.pitch_bam = 0x40000000; // vertical plane across the lane
+    self.bound_radius_q16 = 3 * 65536;
+    ProjectileDynamicProxy behind = self;
+    behind.wire_handle = 0x1007;
+    behind.position_q16 = FixedVec3{10 * 65536, 0, 0};
+    collision.replace_projectile_dynamic_proxies({self, behind});
+
+    ProjectileTrace trace;
+    trace.start = FixedVec3{0, 0, 0};
+    trace.end = FixedVec3{14 * 65536, 0, 0};
+    trace.owner = sh;
+    trace.include_wire_proxies = true;
+    trace.shooter_wire_handle = 0x1004; // firing AS the decoded vehicle
+    const ProjectileHit hit = collision.trace_projectile(world, trace);
+    CHECK(hit.hit_class == ProjectileHitClass::DynamicEntity);
+    // The shooter's own plane (<= 7) was ridden through; the unrelated proxy
+    // stops the round on its vertical plane at X~10.
+    CHECK(hit.position_q16.x > 8 * 65536);
+    CHECK(hit.position_q16.x < 12 * 65536);
+}
+
+// A visual client's decoded remote throwable sweeps the wire dyn proxies like
+// the bullet walk: the motor rides through the shooter's own carrier, stops on
+// (and reflects off) an unrelated decoded mover instead of flying through it.
+void test_visual_throwable_motor_sweeps_wire_proxies() {
+    World world;
+    world.registry.configure_pool(0, 4);
+    world.registry.configure_pool(1, 4);
+    world.mp_session = true;
+    world.projectile_authority = false;
+
+    Entity shooter;
+    shooter.kind = EntityKind::Organic;
+    shooter.item_type = 3;
+    const EntityHandle sh = world.registry.spawn(0, shooter);
+    world.cached.local_player = sh;
+
+    CollisionWorld collision;
+    const int32_t model_id =
+        collision.add_model(proxy_face_quad_model(/*material=*/7));
+    collision.build_tick_tables(world);
+    world.collision = &collision;
+
+    ProjectileDynamicProxy carrier;
+    carrier.wire_handle = 0x1004; // the decoded shooter's own carrier
+    carrier.model_id = model_id;
+    carrier.position_q16 = FixedVec3{6 * 65536, 0, 0};
+    carrier.pitch_bam = 0x40000000; // vertical plane across the lane
+    carrier.bound_radius_q16 = 3 * 65536;
+    ProjectileDynamicProxy target = carrier;
+    target.wire_handle = 0x1007;
+    target.position_q16 = FixedVec3{10 * 65536, 0, 0};
+    collision.replace_projectile_dynamic_proxies({carrier, target});
+
+    AmmoTableEntry nade;
+    nade.name = "VISUAL_NADE";
+    nade.valid = true;
+    nade.flags = 0x2000u | 0x80u; // useownmove + nocollide-terrain
+    nade.velocity = 124;          // 2 units/tick
+    nade.max_age_ticks = 60;
+    nade.drag_fp16 = 65536;       // dragless: keep the 2 u/tick lane speed
+    const int nade_index = static_cast<int>(world.ammo.entries.size());
+    world.ammo.entries.push_back(nade);
+
+    RoundSpawnParams params;
+    params.owner = sh;
+    params.shooter_handle = 0x0002;
+    params.origin = {0.0f, 0.0f, 0.5f};
+    params.ammo_index = nade_index;
+    const int slot = world.round_sim.spawn(
+        world, params, RoundConsequenceMode::VisualOnly);
+    CHECK(slot >= 0);
+    if (slot < 0) return;
+    LiveRound &round = world.round_sim.rounds[static_cast<size_t>(slot)];
+    round.motor = ThrowClass::kNade;
+    round.shooter_carrier_handle = 0x1004;
+    round.vel = Vec3{2.0f, 0.0f, 0.0f};
+
+    // The pitched quads sit one unit shy of their proxy origins: the carrier
+    // plane crosses the lane at X=5, the target plane at X=9.
+    float first_bounce_x = -1.0f;
+    float speed_before = 2.0f;
+    float speed_after = -1.0f;
+    for (int tick = 0; tick < 10; ++tick) {
+        const float vx_entering =
+            world.round_sim.rounds[static_cast<size_t>(slot)].vel.x;
+        world.round_sim.tick(world, nullptr, &collision);
+        const LiveRound &r = world.round_sim.rounds[static_cast<size_t>(slot)];
+        if (first_bounce_x < 0.0f && r.bounce_count > 0) {
+            first_bounce_x = r.pos.x;
+            speed_before = vx_entering;
+            speed_after = r.vel.x;
+        }
+        if (!r.active) break;
+    }
+    // The sweep found the wire geometry (a fly-through regression records no
+    // bounce at all), and the FIRST contact is the unrelated mover's plane at
+    // X=9 — the shooter's own carrier plane at X=5 was ridden through.
+    CHECK(first_bounce_x > 8.0f);
+    CHECK(first_bounce_x < 9.6f);
+    // The contact reflected the motor: retail's 0.35 impact-speed retention
+    // [orig: Physics_ComputeReflectionForce @ 0x4e4310].
+    CHECK(speed_after >= 0.0f
+              ? speed_after < speed_before * 0.4f
+              : -speed_after < speed_before * 0.4f);
+    CHECK(world.explosions.queue.empty());
+}
+
+// A decoded non-player Infantry proxy joins the person walk exactly like the
+// remote-player proxy: torso stand-in at the decoded position, consequence-free.
+void test_visual_infantry_proxy_joins_person_walk() {
+    World world;
+    world.registry.configure_pool(0, 8);
+    world.mp_session = true;
+    world.projectile_authority = false;
+
+    Entity local;
+    local.kind = EntityKind::Organic;
+    local.item_type = 3;
+    const EntityHandle local_l = world.registry.spawn(0, local);
+    world.cached.local_player = local_l;
+
+    // The load-frozen local mission AI at its authored spawn on the lane. On a
+    // visual client this ghost no longer stops rounds; its live decoded proxy
+    // (the host moved it to X=9) serves instead.
+    Entity frozen_ai;
+    frozen_ai.kind = EntityKind::Organic;
+    frozen_ai.has_item_def = true;
+    frozen_ai.item_type = 3;
+    frozen_ai.position = {5.0f, 0.0f, -0.9f};
+    frozen_ai.health = 100;
+    const EntityHandle ai_h = world.registry.spawn(0, frozen_ai);
+
+    CollisionWorld collision;
+    collision.build_tick_tables(world);
+    world.collision = &collision;
+
+    std::vector<ProjectilePersonProxy> proxies{
+        ProjectilePersonProxy{ai_h.packed, FixedVec3{9 * 65536, 0, -58982}},
+    };
+    collision.replace_projectile_person_proxies(proxies, /*self H*/ 0x0002);
+
+    ProjectileTrace trace;
+    trace.start = FixedVec3{0, 0, 0};
+    trace.end = FixedVec3{14 * 65536, 0, 0};
+    trace.owner = local_l;
+    trace.shooter_wire_handle = 0x0002;
+    trace.include_wire_proxies = true;
+    const ProjectileHit hit = collision.trace_projectile(world, trace);
+    CHECK(hit.hit_class == ProjectileHitClass::Person);
+    CHECK(!hit.geometry_entity.valid());
+    // The impact lands at the DECODED torso (X~9), not the frozen spawn (X=5).
+    CHECK(hit.position_q16.x > 8 * 65536);
+    CHECK(world.registry.get(ai_h)->health == 100);
+}
+
+// The merged person walk is ordered by the SUBSTITUTED key, not by the order the
+// registry happens to hand out: L sits at a high local slot while carrying a low
+// server H, so the local pool order and the wire order disagree. Both cases keep
+// L nearer than the proxy, so distance alone cannot explain either victim.
+void test_person_walk_orders_local_player_by_its_server_handle() {
+    const auto run_case = [](uint16_t local_wire_h) {
+        World world;
+        world.registry.configure_pool(0, 8);
+        world.mp_session = true;
+        world.projectile_authority = false;
+
+        // Load-frozen mission organics at local slots 0..3. A visual client
+        // never collides them (their decoded proxies serve instead), but they
+        // push L to a local slot whose packed value outruns the proxy handle.
+        for (int i = 0; i < 4; ++i) {
+            Entity ghost;
+            ghost.kind = EntityKind::Organic;
+            ghost.has_item_def = true;
+            ghost.item_type = 3;
+            ghost.position = {100.0f + static_cast<float>(i), 100.0f, -0.9f};
+            ghost.health = 100;
+            CHECK(world.registry.spawn(0, ghost).packed ==
+                  static_cast<uint16_t>(i));
+        }
+
+        Entity local;
+        local.kind = EntityKind::Organic;
+        local.has_item_def = true;
+        local.item_type = 3;
+        local.position = {4.0f, 0.0f, -0.9f};
+        local.health = 100;
+        const EntityHandle local_l = world.registry.spawn(0, local);
+        CHECK(local_l.packed == 4);
+        world.cached.local_player = local_l;
+
+        CollisionWorld collision;
+        collision.build_tick_tables(world);
+        world.collision = &collision;
+
+        // One decoded remote, FARTHER down the lane than L, holding a handle
+        // between L's two test identities.
+        std::vector<ProjectilePersonProxy> proxies{
+            ProjectilePersonProxy{0x0002, FixedVec3{9 * 65536, 0, -58982}},
+        };
+        collision.replace_projectile_person_proxies(proxies, local_wire_h);
+
+        ProjectileTrace trace;
+        trace.start = FixedVec3{0, 0, 0};
+        trace.end = FixedVec3{14 * 65536, 0, 0};
+        trace.owner = EntityHandle{}; // a decoded remote shooter owns no entity
+        trace.shooter_wire_handle = 0x0007;
+        trace.include_wire_proxies = true;
+        return collision.trace_projectile(world, trace);
+    };
+
+    // H=1 sorts L ahead of the proxy: the first qualifying person is L, even
+    // though every local slot ahead of L carries a larger packed handle.
+    const ProjectileHit low = run_case(0x0001);
+    CHECK(low.hit_class == ProjectileHitClass::Person);
+    CHECK(low.geometry_entity.valid());
+    CHECK(low.geometry_entity.packed == 4);
+    CHECK(low.position_q16.x > 3 * 65536);
+    CHECK(low.position_q16.x < 4 * 65536);
+
+    // H=5 sorts L behind the proxy: the farther proxy wins, so the walk is
+    // ordered by handle rather than by distance.
+    const ProjectileHit high = run_case(0x0005);
+    CHECK(high.hit_class == ProjectileHitClass::Person);
+    CHECK(!high.geometry_entity.valid());
+    CHECK(high.position_q16.x > 8 * 65536);
+    CHECK(high.position_q16.x < 9 * 65536);
 }
 
 void test_signed_armor_equality_and_damage_state_gates() {
@@ -861,6 +1545,14 @@ int main() {
     test_item_type_zone_domain_and_attrib_0200_sections();
     test_shooter_damage_class_runs_after_zone_truncation();
     test_network_oneshot_authority_and_session_gate();
+    test_visual_only_rounds_have_no_gameplay_consequences();
+    test_visual_person_proxy_keeps_wire_identity_out_of_authority();
+    test_visual_dynamic_proxy_projects_decoded_pose_geometry();
+    test_visual_dynamic_proxy_carrier_gate_and_sphere_standin();
+    test_visual_dynamic_proxy_excludes_shooter_self_slot();
+    test_visual_throwable_motor_sweeps_wire_proxies();
+    test_visual_infantry_proxy_joins_person_walk();
+    test_person_walk_orders_local_player_by_its_server_handle();
     test_signed_armor_equality_and_damage_state_gates();
     test_signed_health_subtraction_wraps_at_entity_word();
     test_exact_one_hop_vehicle_parent_damage_routing();

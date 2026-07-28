@@ -167,7 +167,7 @@ bool run_session(std::vector<CaptureDatagram> &recorded) {
 	np::start_host_session(owner, host_cfg);
 
 	MemoryDatagramSocket sock;
-	np::ClientRuntime client(ClientSession::Config::jointoperations(), "SelfCapture");
+	np::ClientRuntime client("SelfCapture");
 
 	int cap_seq = 0;
 	auto record = [&](int src, int dst, const std::vector<uint8_t> &d) {
@@ -194,7 +194,9 @@ bool run_session(std::vector<CaptureDatagram> &recorded) {
 
 	uint32_t tick = 1;
 
-	// Phase A: handshake + the §5.2a spawn-gate burst -> InMatch + deployed.
+	// Phase A: handshake + the retail post-auth mission exchange + the §5.2a spawn-gate burst ->
+	// InMatch + deployed. The fixture deliberately covers the newly retained 0x01 -> 0x02 -> 0x7B
+	// flow and ServerAuth initialization tags instead of the old abbreviated self-session.
 	ship_joiner(client.start());
 	bool ready = false;
 	for (int f = 0; f < 400 && !ready; ++f) {
@@ -353,6 +355,25 @@ int main() {
 	if (fixture.empty()) {
 		std::printf("FAIL: fixture decoded to zero messages — regenerate it "
 		            "(OPENNOVA_WRITE_SELF_FIXTURE=1)\n");
+		return 1;
+	}
+	// Tripwire: the tag-SET gate cannot see a shrinking fixture — a regen that drops
+	// half the session still carries every tag once. Pin a decoded-message floor and a
+	// datagram floor so a silent fixture shrink fails loudly; raise them deliberately
+	// (with the coverage-delta justification) when the driven session legitimately grows.
+	// The DATAGRAM floor was lowered 100 -> 85 on 2026-07-25. The datagram count is the
+	// weaker of the two signals: it counts envelopes, and this branch's ACK/pacing fixes
+	// legitimately removed ~47 content-free header-only datagrams from the driven session
+	// (139 -> 92) with the decoded-message content unchanged. That shrink was invisible
+	// until a tag delta forced the first regen since. The MESSAGE floor is the real
+	// content tripwire and stays where it is.
+	long fixture_total_messages = 0;
+	for (const auto &kv : fixture) fixture_total_messages += kv.second;
+	if (fixture_pkts.size() < 85 || fixture_total_messages < 120) {
+		std::printf("FAIL: committed fixture shrank below the pinned floor (%zu datagrams, "
+		            "%ld decoded messages; floors 85/120) — a regen dropped part of the "
+		            "session\n",
+		            fixture_pkts.size(), fixture_total_messages);
 		return 1;
 	}
 

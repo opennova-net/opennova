@@ -146,3 +146,33 @@ state and spawn markers.
   framing, SCRK, and ProtocolMessage live in `libs/npwire` (ADR 0019); the PN
   classifier (`classify_session_protocol`) stays in `libs/novaworld`.
 
+
+## Known RETAIL-side defects — do NOT chase these as ours
+
+Symptoms that look like our wire output but are the original engine misbehaving.
+Each was live-A/B'd retail↔retail before being written down. If you see one,
+stop: it is not a bug in OpenNova.
+
+- **The host's own first-person weapon reacts when another player fires the SAME
+  weapon** (D-NET-184, net-re §5.67). Listen-host only, first-person only, stops
+  the instant either side switches weapon, never affects the non-authority side,
+  and happens firing into the air. The host poses its viewmodel straight out of
+  the shared per-weapon-type `WeaponDef+372` anim object
+  [orig: `Player_RenderFirstPersonViewModel @0x4DEF75`], and `WeaponAction_Idle`
+  re-seeds that object with **no owner guard** [orig: `@0x542955`] while all three
+  sibling plays ARE guarded on `ownerEntity == g_local_player_entity`
+  [orig: `@0x541893`/`@0x54195A`/`@0x5419B8`]. Two entities holding one weapon
+  share one `Def` pointer **inside the host's process** — the joiner's process is
+  not involved at all; a script emitting valid C2S `0x06` reproduces it.
+  **Confirmed retail-native 2026-07-26** with two stock clients
+  (`.scratch/golden/retail-retail-same-weapon-viewmodel-ab.pcapng`).
+  Two of our own wire bugs were found and fixed while chasing this and NEITHER
+  was the cause — do not re-open them as suspects: the `hit_part` packing
+  (D-WPN-8) and C2S `0x06` off32 (D-WPN-8). Both are real divergences, both are
+  fixed, and the symptom survived each.
+
+**Method note that cost most of a session.** The first retail↔retail capture was
+used to argue "this does not happen retail↔retail". It could not support that:
+only ONE entity ever fired in it and the two players held DIFFERENT primaries, so
+the same-weapon precondition was never exercised. **Before treating a control run
+as a falsification, verify it actually exercised the precondition.**

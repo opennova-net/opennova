@@ -24,8 +24,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
-#include <unordered_map>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 using namespace godot;
@@ -33,6 +34,43 @@ using namespace godot;
 namespace {
 
 using opennova::to_std;
+
+// Retail's C2S 0x3D producer is a renderer-side cache of unique loaded .3DI
+// definitions, not the live entity pool. The normal mission path destroys this
+// cache, loads entity/celestial/HUD definitions, then freezes a non-foliage
+// snapshot in sub_5B3A80. Keep the load registry here, at the one production
+// boundary every mounted .3DI crosses. The resource epoch prevents names from a
+// previous mount/rescan leaking into a later renderer generation.
+struct NetworkChallengeModelRegistry {
+	int64_t epoch = -1;
+	std::unordered_set<std::string> loaded;
+	std::unordered_set<std::string> foliage;
+};
+
+NetworkChallengeModelRegistry &network_challenge_model_registry() {
+	static NetworkChallengeModelRegistry registry;
+	const int64_t epoch = NovaResourceRoot::cache_epoch();
+	if (registry.epoch != epoch) {
+		registry.epoch = epoch;
+		registry.loaded.clear();
+		registry.foliage.clear();
+	}
+	return registry;
+}
+
+std::string network_challenge_model_key(const String &name) {
+	return std::string(name.get_file().to_lower().utf8().get_data());
+}
+
+void register_network_challenge_model(const String &name, bool include) {
+	const std::string key = network_challenge_model_key(name);
+	if (key.empty()) return;
+	NetworkChallengeModelRegistry &registry = network_challenge_model_registry();
+	registry.loaded.insert(key);
+	// Retail's foliage mark is sticky on the shared model-def node. A definition
+	// loaded through both paths therefore remains excluded until the cache reset.
+	if (!include) registry.foliage.insert(key);
+}
 
 std::string to_native_path(const String &path) {
 	String global = path;
@@ -1298,7 +1336,18 @@ void NovaObjectData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("snapshot_edit_state"), &NovaObjectData::snapshot_edit_state);
 	ClassDB::bind_method(D_METHOD("apply_edit_state", "bytes"), &NovaObjectData::apply_edit_state);
 	ClassDB::bind_method(D_METHOD("open_file", "path"), &NovaObjectData::open_file);
-	ClassDB::bind_method(D_METHOD("open_from_resource_root", "resource_root", "name"), &NovaObjectData::open_from_resource_root);
+	ClassDB::bind_method(D_METHOD("open_from_resource_root", "resource_root", "name",
+			"include_in_network_challenge"), &NovaObjectData::open_from_resource_root,
+			DEFVAL(true));
+	ClassDB::bind_static_method("NovaObjectData",
+			D_METHOD("mark_cached_network_challenge_foliage_model", "name"),
+			&NovaObjectData::mark_cached_network_challenge_foliage_model);
+	ClassDB::bind_static_method("NovaObjectData",
+			D_METHOD("reset_network_challenge_model_registry"),
+			&NovaObjectData::reset_network_challenge_model_registry);
+	ClassDB::bind_static_method("NovaObjectData",
+			D_METHOD("network_challenge_model_count"),
+			&NovaObjectData::network_challenge_model_count);
 	ClassDB::bind_method(D_METHOD("save_project_to_dir", "dir_path"), &NovaObjectData::save_project_to_dir);
 	ClassDB::bind_method(D_METHOD("export_3di_to_dir", "dir_path", "update_mask"), &NovaObjectData::export_3di_to_dir, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("reset_empty", "name"), &NovaObjectData::reset_empty, DEFVAL("untitled"));
@@ -1538,7 +1587,9 @@ Error NovaObjectData::open_file(const String &p_path) {
 	return ERR_FILE_UNRECOGNIZED;
 }
 
-Error NovaObjectData::open_from_resource_root(const Ref<NovaResourceRoot> &p_resource_root, const String &p_name) {
+Error NovaObjectData::open_from_resource_root(
+		const Ref<NovaResourceRoot> &p_resource_root, const String &p_name,
+		bool p_include_in_network_challenge) {
 	if (p_resource_root.is_null() || p_resource_root->get_root_dir().is_empty()) {
 		last_error = "Resource root is not configured";
 		return ERR_INVALID_PARAMETER;
@@ -1558,9 +1609,33 @@ Error NovaObjectData::open_from_resource_root(const Ref<NovaResourceRoot> &p_res
 	if (err == OK) {
 		resource_root = p_resource_root;
 		source_dir = p_resource_root->get_root_dir();
+		register_network_challenge_model(
+				file, p_include_in_network_challenge);
 		_notify_object_changed();
 	}
 	return err;
+}
+
+void NovaObjectData::mark_cached_network_challenge_foliage_model(
+		const String &p_name) {
+	register_network_challenge_model(p_name, false);
+}
+
+void NovaObjectData::reset_network_challenge_model_registry() {
+	NetworkChallengeModelRegistry &registry =
+			network_challenge_model_registry();
+	registry.loaded.clear();
+	registry.foliage.clear();
+}
+
+int64_t NovaObjectData::network_challenge_model_count() {
+	const NetworkChallengeModelRegistry &registry =
+			network_challenge_model_registry();
+	std::size_t included = 0;
+	for (const std::string &name : registry.loaded) {
+		if (registry.foliage.find(name) == registry.foliage.end()) ++included;
+	}
+	return static_cast<int64_t>(included);
 }
 
 Error NovaObjectData::_open_3di(const String &p_path) {

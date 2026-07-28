@@ -16,8 +16,7 @@ extends RefCounted
 #
 # Scope this pass is CO-OP-MINIMAL: the host reads GAME_NAME, the selected missions, the
 # player cap, and forces COOP; the rest of the host-settings controls render but are not
-# read. LAN search/join call the discovery seam (NovaLanSession, Phase 3); until that is
-# provided the browser list stays empty.
+# read. LAN search/join call the production NovaLanSession discovery seam.
 
 # The mp.mnu screens this companion owns. The shell skips its generic start/mission
 # wiring on a menu containing these so START_GAME is not double-bound to a SP launch.
@@ -31,9 +30,10 @@ signal lan_host_start_requested(config: Dictionary)
 
 var _menu: Node  # the NovaMnuMenu at runtime; typed Node so we depend only on its tree + signals
 var _root: NovaResourceRoot
-var _lan_session = null        # NovaLanSession (Phase 3); null -> no discovery yet
+var _lan_session = null        # NovaLanSession; injected by MainGame
 var _servers: Array = []       # last LAN browse result; rows for LAN_GAME_LIST
 var _selected_server := -1
+var _browse_error := ""        # last LAN search failure, shown in the empty list
 
 
 # True when this menu is the JO multiplayer menu (so the shell delegates to us). Keyed on
@@ -46,15 +46,21 @@ func owns_menu(menu: Node) -> bool:
 		or menu.find_child("SELECTED_MISSIONS", true, false) != null
 
 
-# Provide the LAN discovery/advertise session (Phase 3). Optional in Phase 1.
+# Provide the LAN discovery session. Kept injectable for menu and socket seam tests.
 func set_lan_session(session) -> void:
 	if _lan_session != null and _lan_session.has_signal("servers_changed") \
 			and _lan_session.servers_changed.is_connected(_on_servers_changed):
 		_lan_session.servers_changed.disconnect(_on_servers_changed)
+	if _lan_session != null and _lan_session.has_signal("error_occurred") \
+			and _lan_session.error_occurred.is_connected(_on_lan_browse_error):
+		_lan_session.error_occurred.disconnect(_on_lan_browse_error)
 	_lan_session = session
 	if _lan_session != null and _lan_session.has_signal("servers_changed") \
 			and not _lan_session.servers_changed.is_connected(_on_servers_changed):
 		_lan_session.servers_changed.connect(_on_servers_changed)
+	if _lan_session != null and _lan_session.has_signal("error_occurred") \
+			and not _lan_session.error_occurred.is_connected(_on_lan_browse_error):
+		_lan_session.error_occurred.connect(_on_lan_browse_error)
 
 
 # Called by NovaMenuHost after each open_menu (re)build of a menu we own. All of mp.mnu's
@@ -87,15 +93,30 @@ func _wire_lan_browser() -> void:
 
 
 func _on_lan_search() -> void:
-	# Begin LAN session discovery. The discovery session is Phase 3; until it exists this
-	# is a no-op (the list stays empty), which is the faithful "searching, none found" shape.
+	# Begin LAN session discovery. A missing binding remains a safe no-op so the retail
+	# menu can still render in parser-only/test builds.
+	_browse_error = ""
 	if _lan_session != null and _lan_session.has_method("start_browsing"):
-		_lan_session.start_browsing()
+		# Returns a Godot Error; the session also emits error_occurred with the
+		# specific reason, which lands in _browse_error first.
+		if int(_lan_session.start_browsing()) != OK and _browse_error.is_empty():
+			_on_lan_browse_error("could not start the search")
+			return
+	_refresh_lan_list()
+
+
+# A failed bind or an all-sends-failed probe burst was previously console-only,
+# leaving the player staring at a silently empty list.
+func _on_lan_browse_error(message: String) -> void:
+	_browse_error = String(message)
+	_refresh_lan_list()
 
 
 func _on_servers_changed(servers: Array) -> void:
 	_servers = servers
 	_selected_server = -1
+	if not servers.is_empty():
+		_browse_error = ""
 	_refresh_lan_list()
 
 
@@ -106,6 +127,10 @@ func _refresh_lan_list() -> void:
 	var rows := PackedStringArray()
 	for s in _servers:
 		rows.append(_format_server_row(s))
+	# Surface a search failure in the list itself (the row is inert: the join
+	# guard checks against _servers, which stays empty).
+	if rows.is_empty() and not _browse_error.is_empty():
+		rows.append("Search failed - %s" % _browse_error)
 	(list as NovaMnuList).set_items(rows)
 
 
@@ -113,8 +138,15 @@ func _format_server_row(s: Dictionary) -> String:
 	var name := String(s.get("name", "?"))
 	var cur := int(s.get("players", 0))
 	var max_p := int(s.get("max_players", 0))
-	var mission := String(s.get("mission", ""))
-	return "%s (%d/%d) - %s" % [name, cur, max_p, mission]
+	# Retail LAN enumeration has not joined the session yet, so map identity is
+	# deliberately absent here; it arrives in the normal post-auth 0x7B stream.
+	# The row format is the witnessed retail pair: with an advertised expansion
+	# variant "%s - %s (%ld/%ld)", else "%s (%ld/%ld)".
+	# [orig: UI_ProcessLANSessionStateMachine @ 0x558de0 sprintf @0x559493/@0x5594b9]
+	var expansion := String(s.get("expansion", "")).strip_edges()
+	if expansion.is_empty():
+		return "%s (%d/%d)" % [name, cur, max_p]
+	return "%s - %s (%d/%d)" % [name, expansion, cur, max_p]
 
 
 func _on_lan_list_activated(index: int) -> void:
@@ -186,17 +218,21 @@ func _read_host_config() -> Dictionary:
 	var max_text := _edit_text("MAX_PLAYERS", "")
 	var max_players := clampi(int(max_text) if max_text.is_valid_int() else 4, 1, 99)
 	var missions := _selected_missions()
+	# Retail's game-name field is the expansion currently mounted by the game,
+	# and is empty for the base game. Never substitute a captured expansion id.
+	var expansion := _root.get_expansion() if _root != null else ""
 	return {
 		"server_name": server_name,
 		"missions": missions,
 		"mission": String(missions[0]) if missions.size() > 0 else "",
 		"max_players": max_players,
-		"game_type": "AS",                         # the bring-up target: one game type until a full
-		                                           # AS game plays end-to-end (gametype 0x10010 below)
+		"game_type": "COOP",
 		"game_type_raw": _spin_attr("GAME_TYPE", ""),  # the GAME_TYPE value attr (HG_COOP=2, ...), for later
-		"gametype": 0x10010,                       # numeric g_GameType the S2C 0x08 advertises: AS + team
-		                                           # flag — the golden retail ASH_I5A value (D-NET-146);
-		                                           # without it a menu-hosted session advertised gametype 0
+		# This slice deliberately supports only Co-op. Retail derives 0x30020
+		# from an ATTRIB_COOP mission (AI_GetTaskTypeFromFlags @0x40DAE0 ->
+		# Game_StartMission @0x524360); 0x10010 was an ASH_I5A capture value.
+		"gametype": 0x30020,
+		"expansion": expansion,
 		"channel": "LAN",
 		"net_transport": "lan",
 		"bind_port": 32768,                        # witnessed retail LAN host port [game.cfg mplanserverport 32768-32787]

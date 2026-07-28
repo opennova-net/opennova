@@ -230,14 +230,14 @@ struct InfantryState {
     // off when dead / spawn-gated / inputFlags&0x1E; no host binoculars input yet)].
     bool scope_raised = false;
     bool binoculars_raised = false;
-    // The arms-dip feed (entity+0x371 byte / +0x36C head-look decay term): while the
-    // dip window runs, head_look_decay drops 0x2800000 per tick before the eighth-step
+    // The arms-dip feed (entity+0x371 byte / +0x36C pitch-kick term): while the
+    // dip window runs, pitch_kick_accum drops 0x2800000 per tick before the eighth-step
     // ease, and the window decrements TWICE per tick (both witnessed sub-1 sites), so
     // the 20-tick weapon-switch stamp dips for 10 ticks. Seeds: 20 on a held-weapon
     // adm change [orig: @ 0x4b46f5], 80 by the remote-reload 0x49 path (net-re §5.58).
     // [orig: @ 0x4b5cab..0x4b5ce7; consumed by the section-14.2 aim overlay]
     int32_t arms_dip_ticks = 0;
-    int32_t head_look_decay = 0;
+    int32_t pitch_kick_accum = 0;
     // Standing-idle tick counter (entity+0x148): the player-body idle starts at 43 and
     // promotes to 44 once >= 62 idle ticks; any movement resets it. [orig:
     // Entity_UpdateInfantryPlayerBody @0x4b727b-0x4b7293 (state = 0x2B + (cnt >= 0x3E)),
@@ -350,6 +350,41 @@ void infantry_weapon_switch_stamp(InfantryState &inf, uint64_t anim_map_serial);
 // [orig: Flags&0x100 + mount-class tests + PRIMARY state flag 0x40 @0x4b14a7]
 bool infantry_weapon_channel_visible(const InfantryState &inf, bool weapon_in_hands,
                                      bool mount_blocks_channel);
+
+// The upper-body hold-pose ladder: which secondary anim state a player body should be
+// showing, given the held weapon's `special_hold` kind, that body's current PRIMARY
+// state, and its scoped / binocular / reloading conditions.
+//
+// Every observer runs this for every player body it draws — the original applies no
+// ownership test to it, so a remote player's pose is re-derived locally from the two
+// bytes the wire already carries (the equipped ADM index at entity+0x2B0 and Flags bit
+// 0x10) rather than replicated. Kept pure and free-standing because the two roles reach
+// it differently: the authority runs it from the infantry motor's InfantryState, while a
+// joiner has no motor entity for its peers at all and derives straight off the decoded
+// row.
+// [orig: Entity_UpdateInfantryPlayerBody @ 0x4b5dad..0x4b5e6f]
+int infantry_weapon_hold_state(int hold_kind, int primary_anim_state, bool scope_raised,
+                               bool binoculars_raised, bool reloading);
+
+struct AiEntity;
+
+// Snap a motor-driven infantry entity back to a deployed pose, standing and idle.
+//
+// The original has ONE Entity store, so its respawn writes Position/Yaw/Health once and
+// the mover reads them back. Our AiEntity motor store is a tracked split of that store
+// (see finish_infantry_tick's two-store reconciliation), and the motor is the WRITER of
+// the pair: it mirrors AiEntity.pos/heading into the registry Entity every tick. A
+// respawn that touches only the registry Entity is therefore silently reverted on the
+// next tick, leaving the body at the corpse pose. Anything that redeploys a
+// motor-simulated entity must reset BOTH stores, which is what this does for the motor
+// half — velocities, the interpolation staging, the collide cache, and the InfantryState
+// pose/stance/anim latches that would otherwise keep the death clip.
+//
+// [orig: the deploy flow places the entity, then Entity_ResetToSpawnState @ 0x4B9610
+//  re-records Position and reseeds the body-anim channel; the death-family anim latch it
+//  clears is @0x4b9714]
+void infantry_respawn_snap(AiEntity &e, const int32_t pos[3], int32_t heading,
+                           int16_t health);
 
 } // namespace opennova::world
 

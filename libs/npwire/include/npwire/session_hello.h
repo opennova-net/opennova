@@ -61,9 +61,11 @@ struct ServerHello {
 	uint32_t eip = 0; // external IP (echo of ClientHello.eip)
 	uint32_t epn = 0; // external port (echo of ClientHello.epn)
 
-	// Game-server-only fields. When `is_game_server` is true these are
-	// emitted between SN/PL and NC (SF/P1/P2/NP/MP), and SUS1/SUS2 are
-	// emitted between RPN and EIP. Witnessed in the retail capture
+	// Game-server fields. The flat retail builder emits SF unconditionally and
+	// gates the remaining numeric/string fields individually; `is_game_server`
+	// is therefore a parse-side marker rather than an encoder switch. The
+	// SF/P1/P2/NP/MP fields appear between SN and NC, and SUS1/SUS2 appear
+	// between RPN and EIP. Witnessed in the retail capture
 	// (notes/retail_capture2_decoded.txt frame 62334) — the host's
 	// ServerHello on the game-server UDP port carries these extra fields
 	// so the client knows the game type, current/max players, expansion,
@@ -72,12 +74,12 @@ struct ServerHello {
 	// game UI (e.g. cmap.mnu spawn-selection).
 	bool is_game_server = false;
 	uint32_t sf = 0;          // server flags; retail observed = 0
-	uint32_t p1 = 0x00010010; // gametype: 0x10000 = AS (Advance & Secure); low 0x10 unwitnessed (some feature flag)
-	uint32_t p2 = 0x00000404; // game-config (purpose unwitnessed beyond observation)
-	uint32_t np = 1;          // current player count
-	uint32_t mp = 2;          // max-players or game-mode parameter (retail had 2)
-	std::string sus1 = "GSID-10-OPENNOVA-DEV";  // unique session id (retail format: GSID-NN-XXXXXXXX-timestamp-hash)
-	std::string sus2 = "jox01";                 // expansion-pack archive name (Kendari expansion; one of its terrains is "dvxi5", used by ASH_I5A.bms)
+	uint32_t p1 = 0;          // gametype; supplied by the live host configuration
+	uint32_t p2 = 0;          // game-config; omitted until its live producer is modeled
+	uint32_t np = 0;          // current player count; supplied by the live host
+	uint32_t mp = 0;          // max players; supplied by the live host
+	std::string sus1;         // unique session id (retail format: GSID-NN-XXXXXXXX-timestamp-hash)
+	std::string sus2;         // expansion-pack archive name, supplied by the live host configuration
 };
 
 // Parse a ClientHello TLV payload (the bytes AFTER the 0x41 opcode and
@@ -109,14 +111,13 @@ std::vector<uint8_t> server_hello_to_bytes(const ServerHello &msg);
 // game-server set (SF/P1/P2/NP/MP + SUS1/SUS2). Returns true on success.
 bool parse_server_hello(const uint8_t *data, size_t len, ServerHello &out);
 
-// ---- ClientAuth / ServerAuth (novaworld-service auth step) -------------
+// ---- ClientAuth / ServerAuth (NP connection admission) -----------------
 //
-// NOTE ON NAMING: onnet calls these "ClientJoin" / "ServerJoin". That's
-// misleading — this is NOT joining a game server. It's the client
-// authenticating itself to the NovaWorld matchmaking service after the
-// Hello exchange. The real "join a game" event happens much later, on a
-// fresh connection to a specific game server. We use `Auth` in code;
-// `Join` appears only in doc comments as an onnet-compat alias.
+// NOTE ON NAMING: onnet calls these "ClientJoin" / "ServerJoin". The same
+// NP/NAPI exchange admits a connection to either a service session or a game
+// session, so neither lobby-specific nor game-specific semantics belong in
+// this neutral wire layer. We use `Auth` for connection admission; higher
+// layers decide what kind of session the connection carries.
 //
 // Opcodes: `0x42` ClientAuth (C→S), `0x82` ServerAuth (S→C).
 
@@ -162,6 +163,64 @@ bool parse_client_auth(const uint8_t *data, size_t len, ClientAuth &out);
 // validates it in HandleClientJoin @ 0x62B750 and drops the join without it
 // (the original "real NW never sends ServerAuth" bug — RE doc NW-S2).
 std::vector<uint8_t> client_auth_to_bytes(const ClientAuth &msg);
+
+// C2S 0x46 ClientGoodBye body: [u32 remote session key][DS][DC][DP1][DP2][DSTR][DPC][DDSTR].
+// The key dword is validated by the receiver against its local session key; the TLVs carry the
+// sender's disconnect-event stats and a cleanly-leaving client ships them zeroed with empty
+// strings (retail's receiver discards DS and re-derives the role locally; the rest feed logs).
+// The NWU crypt over bytes [1..] rides the ordinary nw_encode_outbound wrap.
+// [orig: CNapiNPConnection_SendDisconnectPacket @0x61f2a0 (builder);
+//  Nwu_HandleDisconnect @0x623ce0 (receiver key check + lenient TLV walk)]
+std::vector<uint8_t> client_goodbye_to_bytes(uint32_t remote_session_key);
+
+// The CONNECTION-DESCRIPTION record — the transport's own disconnect event carried as an INNER
+// protocol message instead of a session opcode: high/settings flag set, low tag 3, i.e. full tag
+// 0x103. Both directions route it through the same high-bit msginfo table, so a host sends the
+// identical record a leaving client sends. Its TLV field set is exactly the 0x46 ClientGoodBye's
+// minus the leading session-key dword, and the receiver walks the names case-insensitively with
+// zero defaults, in ANY order, stopping at an empty name. Receipt is terminal: state 5 -> 6 (which
+// tears the active connection down) or, mid-connect, a pending-disconnect latch.
+// [orig: builder NapiNPDataTransfer_SendDescription @0x628c80 ->
+//  NapiNPMessage_Create(msg_id 3, msg_class 1) @0x627fc0; receiver
+//  CNapiNPConnection_HandleDescriptionPacket @0x621ae0 (g_np_msginfo_highbit @0x849e80 row 3),
+//  TLV walk @0x621b8c..0x621c7d, terminal state @0x621d53..0x621d6b]
+constexpr uint16_t PROTOCOL_TAG_CONNECTION_DESCRIPTION = 0x103;
+
+struct DisconnectEvent {
+	uint32_t ds = 0;    // sender role (1 server / 2 client) — the receiver DISCARDS it and
+	                    // re-derives the role from its own connection [orig: @0x621ba5 no store]
+	uint32_t dc = 0;    // disconnect class; 2 is the description family the client dispatches on
+	                    // [orig: the `== 2` gate @0x4c6563]
+	uint32_t dp1 = 0;
+	uint32_t dp2 = 0;
+	std::string dstr;   // free-form text (retail keeps the first 128 bytes)
+	uint32_t dpc = 0;   // reason code; the client's exit-reason switch reads THIS [orig: @0x4c6569]
+	std::string ddstr;  // event tag (retail keeps the first 32 bytes)
+};
+
+// Parse a connection-description body (the inner message payload, already SCRK-decrypted). Unknown
+// names are skipped by their length and field order is not assumed, matching the retail walk.
+// Returns false when the body is not a well-formed flat-TLV run or carries none of the seven known
+// names — the narrow shape gate a dispatcher needs before treating a settings-flagged message as a
+// disconnect. [orig: CNapiNPConnection_HandleDescriptionPacket @0x621ae0]
+bool parse_disconnect_event(const uint8_t *data, size_t len, DisconnectEvent &out);
+
+// Retail JO game-session identity shared by LAN enumeration and the actual
+// game connection. These values come from CNapiNetwork_Init @ 0x4ca4a0 and
+// the retail LAN ClientAuth capture; they are unrelated to NovaWorld's lobby
+// identity. `player_name` is the game ClientAuth NA/callsign.
+std::array<uint8_t, 16> jointoperations_protocol_guid();
+bool is_jointoperations_protocol_name(std::string_view protocol_name);
+ClientHello make_jointoperations_client_hello(uint32_t client_index);
+ClientAuth make_jointoperations_client_auth(uint32_t client_index, uint32_t client_key,
+		uint32_t host_key, std::string_view player_name, std::string_view client_scrk);
+
+// Retail's game host silently drops 0x41/0x42 messages unless their version
+// block matches the identity installed by CNapiNetwork_Init. The 0x42 gate
+// additionally compares PV2; CO/AP/BDAT remain intentionally free because the
+// retail handlers parse but do not compare them.
+bool matches_jointoperations_identity(const ClientHello &hello);
+bool matches_jointoperations_identity(const ClientAuth &auth);
 
 // ---- ClientAuth CU chunks (NW-S3) --------------------------------------
 //

@@ -15,6 +15,10 @@ var weapon_name := ""
 var gfx1 := ""       # the FP gun model (.3di basename)
 var gfx1a := ""      # the character arms riding the gun's skeleton
 var gfx1b := ""      # alternate arm skin (unused until team/skin selection)
+var gfx3 := ""       # the THIRD-person world gun, drawn in the soldier's hands
+                     # [orig: WeaponDef.tpModel +0x170, read @0x4e3cd3. NOTE the IDB
+                     #  locals in WeaponDef_ResolveAllReferences @0x54042c are swapped:
+                     #  `model_1p` there reads +0x170, which is THIS field.]
 var animadm := ""    # the shared animation set (.adm basename)
 var pos_units := Vector3.ZERO       # hip view bias, raw def units
 var rot_bias_deg := Vector3.ZERO    # def rot columns: yaw/pitch/roll degrees
@@ -42,6 +46,7 @@ static func from_weapon_dict(d: Dictionary) -> PlayerViewmodelDef:
 	out.gfx1 = String(d.get("gfx1", ""))
 	out.gfx1a = String(d.get("gfx1a", ""))
 	out.gfx1b = String(d.get("gfx1b", ""))
+	out.gfx3 = String(d.get("gfx3", ""))
 	out.animadm = String(d.get("animadm", ""))
 	var pos: PackedFloat32Array = d.get("pos", PackedFloat32Array())
 	if pos.size() >= 6:

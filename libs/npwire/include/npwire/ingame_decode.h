@@ -851,6 +851,20 @@ struct GameEventRecord {
 bool decode_game_event(const uint8_t *body, size_t len, GameEventRecord &out,
                        size_t &consumed);
 
+// S2C 0x61 — the per-player TICK SEED (the "session key" name is a misnomer). The client
+// anchors its whole network-role clock to this value: it stores the seed into currentTick
+// AND the keepalive anchor, skips the per-frame increment while the clock is zero, and
+// stamps the resulting tick at off-0 of every C2S 0x06. The host stamps the same value as
+// that player's fire-freshness floor and rejects a shot whose tick is zero or not past it,
+// so a client that ignores this message can never land a shot on a stock host. A body
+// shorter than four bytes seeds ZERO — which is also the witnessed round-end disarm form,
+// so a short read is a valid seed, not a decode failure (this always returns true).
+// [orig: NapiNPClientMsg_HandleSessionKey @0x4297c0 — currentTick @0xA8229C @0x4297f8,
+//  g_lastKeepaliveTick @0xA822A0 @0x4297fd, short-body zero @0x4297eb;
+//  Server_SendRandomSeedToPlayer @0x5101a0 (value @0x5101d4, disarm @0x510237);
+//  gate PlayerSlot_IsActive @0x4fc760]
+bool decode_tick_seed(const uint8_t *body, size_t len, uint32_t &out);
+
 // Coarse classification of a 0x1E event_type, derived structurally from the
 // handler's switch [orig: 0x426270]. Drives the viewer's kill-feed styling.
 enum class GameEventKind : uint8_t {
@@ -882,6 +896,56 @@ struct BatchKillBatch {
 	std::vector<uint16_t> slots;    // (pool<<12)|slot of each despawned entity
 };
 bool decode_batch_kill(const uint8_t *body, size_t len, BatchKillBatch &out);
+
+// S2C 0x5D — the EMPTY-SLOT SWEEP. `[i16 pool0Index] × N` — RAW POOL-0 INDICES,
+// not packed (pool<<12|slot) handles: the handler resolves each with
+// `Pool_GetEntryUnchecked(0, idx)`. Per entry it runs `Entity_Destroy`, then
+// `PlayerSlot_FindByType(idx)` and, when that slot is active (slot+13), calls
+// `PlayerSlot_ClearAndUnlink @0x434730`. The whole handler is gated
+// `!is_authority`. It is the reply to a client's C2S 0x32 request: the server
+// answers with the pool-0 slots IT considers empty and the client destroys
+// whatever it still holds there — a permanent-ghost sweep, not a per-kill
+// despawn. [orig: NapiNPClientMsg_DestroyEntityList @ 0x429730; sender
+//  NapiNPServerMsg_SendEmptySlots @ 0x51a600, body builder @ 0x5160f0]
+struct DestroyEntityList {
+	std::vector<uint16_t> pool0_indices; // raw pool-0 slot indices (NOT handles)
+};
+bool decode_destroy_entity_list(const uint8_t *body, size_t len,
+                                DestroyEntityList &out);
+
+// S2C 0x50 — TEAM ASSIGN. `[u16 entityHandle][u8 team][u16 netId][u8 animSlot]`;
+// a short body defaults each REMAINING field to 0 (the handler reads what is
+// there and leaves the rest zero). Gates: handle != 0xFFFF,
+// `(handle & 0xF000) < 0x5000`, slot < that pool's capacity.
+// Legs, in the witnessed order:
+//   (1) entity == local player -> `byte_A85B48 = team` @0x4319db — the SAME latch
+//       the S2C 0x04 tail byte writes (our JoinerConnection::assigned_team_);
+//   (2) !is_authority -> `entity->Team = team` @0x4319ee for ANY pool 0..4 entity;
+//   (3) the player-slot team byte mirrors it (slot+14, @0x431a0b);
+//   (4) `entity->Flags & 0x100` (a player) AND entity == local player -> retail
+//       re-selects the per-side profile (team 1/3 -> side A block, else side B),
+//       refreshes restrictionData, and RE-SENDS ONE C2S 0x2F via
+//       NetPacket_SendLoadoutSubmit @0x431a9e carrying the NEW team, the per-side
+//       profile class, and slot 195 RAW (the pre-Player_InitPlayer form, NOT the
+//       live g_currentWeaponSlot), then C2S 0x22/0x23 acks (@0x431acb..0x431b05),
+//       Player_InitPlayer(1) @0x431b14, then the identity stores
+//       `entity->animSlot = animSlot` @0x431b3a / `entity->NetId = netId` @0x431b46
+//       and the minimap maintenance they feed (@0x431b4d..0x431b91).
+// [orig: NapiNPClientMsg_0x050 @ 0x431910; host producer Server_ChangeEntityTeam
+//  @ 0x518D70 — it retargets ANY entity, including capture zones (§5.61)]
+struct TeamAssign {
+	uint16_t entity_handle = 0xFFFF; // (pool<<12)|slot
+	uint8_t  team = 0;
+	// entity+0x15C wire NetId + entity+0x374 animSlot, the same identity pair the 0x0C
+	// player record carries (fields 3-4 / 5). Retail's producer ZEROES both for a
+	// non-player entity — the `entity->Flags & 0x100` gate @0x506b3d picks between the
+	// live values @0x506b51/@0x506b6b and the zero arms @0x506b96/@0x506bab — so any
+	// future emitter must reproduce that gate. [orig: write_entity_handle_packet @0x506ad0]
+	uint16_t net_id = 0;
+	uint8_t  anim_slot = 0;
+};
+bool decode_team_assign(const uint8_t *body, size_t len, TeamAssign &out,
+                        size_t &consumed);
 
 // ===========================================================================
 // C2S 0x0C — per-entity client-to-host packet. Outer body starts with a 5-byte
@@ -986,8 +1050,8 @@ bool decode_player_extended_uplink(const uint8_t *body, size_t len,
 
 // ===========================================================================
 // C2S 0x06 — "client fired round". Fixed 45 B. Joiner reports a single
-// weapon-fire event (origin + direction + target + shot counter + muzzle
-// offset block). The host validates it in Server_ClientFiredRound @0x50baa0
+// weapon-fire event (calculated pose + target + shot counter + five low-word
+// pose deltas). The host validates it in Server_ClientFiredRound @0x50baa0
 // (anti-spoof, cease-fire, adm lookup, warp compensation, mounted-fire, ammo)
 // and an accepted PRIMARY fire runs the adm 'fire' action → re-enters the
 // validator locally → RoundData_AddRound appends a g_round_ring event that
@@ -996,26 +1060,53 @@ bool decode_player_extended_uplink(const uint8_t *body, size_t len,
 // [orig: NapiNPServerMsg_0x006_ClientFiredRound @ 0x513310]
 // ===========================================================================
 
+// C2S 0x06 hit_part packing: `(roster slot << 9) | (shot seq & 0x1FF)`
+// [orig: Server_ClientFiredRound @0x50bda5]. The 9-bit split is the witnessed one; the
+// roster slot is the S2C 0x04 body byte 17 the host assigned this client
+// [orig: NetPacket_WriteSlotAssignment @0x502b30]. Named because sending a bare
+// sequence (slot bits 0) makes a retail host attribute the round to its OWN slot 0.
+inline uint16_t pack_fired_round_hit_part(uint8_t roster_slot, uint16_t shot_seq)
+{
+	return static_cast<uint16_t>((static_cast<uint16_t>(roster_slot) << 9) |
+	                             (shot_seq & 0x1FFu));
+}
+inline uint8_t fired_round_hit_part_slot(uint16_t hit_part) { return static_cast<uint8_t>(hit_part >> 9); }
+inline uint16_t fired_round_hit_part_seq(uint16_t hit_part) { return static_cast<uint16_t>(hit_part & 0x1FFu); }
+
 struct ClientFiredRound {
-	uint32_t current_tick = 0;        // server-side game tick anchor
+	uint32_t current_tick = 0;        // client network-role currentTick; host cooldown/freshness anchor
 	uint16_t shooter_handle = 0xFFFF; // pool<<12|slot; >= 0x5000 high nibble = invalid
 	uint8_t  fire_flags = 0;          // bit 0 set → "alt fire" path (ammo not deducted)
 	uint8_t  adm_index = 0;           // AdmDef_GetEntryByIndex key — action descriptor (§5.9.1 shares this)
-	int32_t  pos_x = 0;               // fire origin world coords (i32 LE, 16.16)
+	int32_t  pos_x = 0;               // calculated fire-pose origin (i32 LE, 16.16)
 	int32_t  pos_y = 0;
 	int32_t  pos_z = 0;
 	int32_t  dir_x = 0;               // direction (host shifts << 16 to BAM-extend); wire is raw i32 LE
 	int32_t  dir_y = 0;
 	uint16_t target_handle = 0xFFFF;  // 0xFFFF = no target
-	uint16_t hit_part = 0;            // body part / collision sub-section
-	uint8_t  extra_byte1 = 0;         // → dest[18] / extra_val1
+	// NOT a bare sequence — a PACKED word, `(roster slot << 9) | (shot seq & 0x1FF)`.
+	// The host copies it verbatim into the global word_B7C670 on the network arm
+	// [orig: Server_ClientFiredRound @0x50c2ba / @0x50c774], and its own composition of
+	// the same word packs the shooter's per-player record slot+20 into bits 9.. exactly
+	// this way [orig: @0x50bda5 `(*((WORD*)v91 + 10) << 9) | (packet & 0x1FF)`]. slot+20
+	// is the roster id the S2C 0x04 hands the client in body byte 17
+	// [orig: NetPacket_WriteSlotAssignment @0x502b30].
+	// Leaving bits 9.. zero names roster slot 0 — on a listen host, the HOST ITSELF —
+	// and a live retail host then attributed our rounds to its own player. Build it with
+	// npwire::pack_fired_round_hit_part.
+	uint16_t hit_part = 0;
+	uint8_t  extra_byte1 = 0;         // shooter entity+352 low byte → dest[18]
 	uint8_t  extra_byte2 = 0;         // → dword_C86FB4 global (last-fire context)
 	uint8_t  misc_byte = 0;           // → LOBYTE(dest[20])
-	uint16_t base_offset = 0;         // dest[10] += this — muzzle offset on entity coords
-	uint16_t offset_x = 0;            // dest[11] += this
-	uint16_t offset_y = 0;            // dest[12] += this
-	uint16_t offset_z = 0;            // dest[13] += this
-	uint16_t offset_w = 0;            // dest[14] += this
+	// Low-word modulo deltas: calculated fire pose {X,Y,Z,Yaw,Pitch} minus
+	// shooter live pose dwords 1..5. Host adds them to its shooter pose to
+	// reconstruct dest[10..14] [orig: NetPacket_WriteEntityPositionUpdate
+	// @ 0x42a80f..0x42a890 producer; @0x513310 receiver].
+	uint16_t delta_x = 0;             // fire X low16 - shooter X low16
+	uint16_t delta_y = 0;             // fire Y low16 - shooter Y low16
+	uint16_t delta_z = 0;             // fire Z low16 - shooter Z low16
+	uint16_t delta_yaw = 0;           // fire Yaw low16 - shooter Yaw low16
+	uint16_t delta_pitch = 0;         // fire Pitch low16 - shooter Pitch low16
 };
 
 bool decode_client_fired_round(const uint8_t *body, size_t len,
@@ -1187,6 +1278,17 @@ bool decode_burst_player_sync_request(const uint8_t *body, size_t len,
 // with a visible-players snapshot. [orig: NapiNPServerMsg_0x023 @ 0x514D50]
 bool decode_burst_visible_request(const uint8_t *body, size_t len, size_t &consumed);
 
+// C2S 0x32 — EMPTY-SLOT SWEEP REQUEST. The client queues it inside its S2C 0x0F
+// world-state-load reply burst (@0x42e647, beside 0x28/0x29/0x2D — §5.29); the
+// host's handler reads NO fields from it and answers S2C 0x5D with every empty
+// pool-0 slot index. The handler is authority-gated and skipped while
+// `g_net_spawn_suspended` or `g_spawn_success_gate` (round over) is set. Because
+// the body is never read, this decoder consumes nothing and accepts any length —
+// the sender's exact filler (if retail writes any) is unwitnessed.
+// [orig: NapiNPServerMsg_SendEmptySlots @ 0x51a600; body builder @ 0x5160f0;
+//  client sender NapiNPClientMsg_0x00F @ 0x42e647]
+bool decode_empty_slots_request(const uint8_t *body, size_t len, size_t &consumed);
+
 // C2S 0x28 — weapon-loadout request `[u32 loadoutFilter][u32 flags][u16 extra]`
 // (10 B). Server replies S2C 0x4E.
 // [orig: NapiNPServerMsg_HandleWeaponLoadoutRequest @ 0x51A550]
@@ -1243,13 +1345,13 @@ bool decode_rtt_sample(const uint8_t *body, size_t len,
 // (4 B) and queues a fixed reply built from local state; the inbound parse is
 // structurally identical across the three, so one reader serves all of them.
 // Per-tag semantics (field meaning + the reply each triggers):
-//   0x68  start_index      → reply C2S 0x3D (entity-index list, paged from start_index)
+//   0x68  start_index      → reply C2S 0x3D (frozen loaded-model rows, paged from start_index)
 //                            [orig: NapiNPClientMsg_0x068 @ 0x42DAA0]
 //   0x43  server_timestamp → reply C2S 0x08 (`[u32 server_ts][u32 GetTickCount]`,
 //                            the time-sync / anti-speedhack echo)
 //                            [orig: NapiNPClientMsg_0x043 @ 0x42FA90]
-//   0x39  challenge_seed   → reply C2S 0x1C (AnimMap_GetSlotChecksum of the local
-//                            player's anim slot — anti-cheat CRC challenge)
+//   0x39  challenge_seed   → reply C2S 0x1C (seed XOR CRC of the local player's
+//                            124-byte charattr CHARACTER row)
 //                            [orig: NapiNPClientMsg_HandleChecksumChallenge @ 0x42E6D0]
 bool decode_u32_scalar(const uint8_t *body, size_t len,
                        uint32_t &out_value, size_t &consumed);
@@ -1313,6 +1415,19 @@ struct EntityChecksumRequest {
 };
 bool decode_entity_checksum_request(const uint8_t *body, size_t len,
                                     EntityChecksumRequest &out, size_t &consumed);
+
+// S2C 0x31 — loadout/ammo CRC request. Same 3-byte shape as 0x30 but a different source: the
+// client CRCs the indexed 276-byte ammo-definition record (six volatile dwords temporarily
+// zeroed), XORs with `xor_key`, and replies C2S 0x21 `[u8 index][u32 crc^key][u32 key]`. An index
+// outside the loaded table writes a ZERO crc dword, not `key ^ 0`.
+// [orig: NapiNPClientMsg_0x031 @ 0x4311E0 -> NetPacket_WriteEntityCRCChecksum @ 0x42B020
+//  (out-of-range arm @0x42B114)]
+struct LoadoutCrcRequest {
+	uint8_t  ammo_index = 0;
+	uint16_t xor_key = 0;
+};
+bool decode_loadout_crc_request(const uint8_t *body, size_t len,
+                                LoadoutCrcRequest &out, size_t &consumed);
 
 // S2C 0x42 — input/state-flags push `[u16 stateFlags]` (2 B) → Input_UnpackStateFlags.
 // [orig: NapiNPClientMsg_0x042 @ 0x4281A0]
@@ -1578,14 +1693,21 @@ struct JoinPaddingProbe {
 bool decode_join_padding_probe(const uint8_t *body, size_t len, JoinPaddingProbe &out);
 
 // §5.56 C2S 0x2F — LOADOUT SUBMIT (spawn-menu accept). The client uploads its
-// chosen class/soldier-type plus the ADM weapon-slot picks; the server
-// validates (class 1..4; type 5..9 gated by the restriction mask
-// dword_24D59FC, out-of-range → forced 8), writes soldier type to
-// entity+660 (playerClass), rebuilds the avatar display list + weapon slots,
-// and replies with the S2C 0x5A weapon-slot list. Entries repeat until an
-// 0xFF adm_index terminator — the same {typeId, ammoP, ammoS, variant} slot
-// vocabulary as the §5.30 S2C 0x5A downlink.
-// [orig: NapiNPServerMsg_HandlePlayerLoadout @ 0x515790]
+// server-assigned team, chosen character class, current weapon slot, and the
+// ADM weapon-slot picks of its per-side profile kit; the server validates the
+// envelope FIRST (team 1..4 — above 4 only in a team-less game type @0x5158a9;
+// a NONZERO class must be 5..9 @0x5158b1, else the handler aborts @0x515fa5 and
+// only re-sends the player's current slot list), writes the class to entity+660
+// (playerClass — class 0 applies with an empty soldier-type mask @0x5159af),
+// rebuilds the avatar display list + weapon slots, and replies with the S2C 0x5A
+// weapon-slot list. The in-range class is remapped through the host class-allow
+// mask g_hostClassAllowMask @0x24D59FC (@0x5158e6) before the [5,9]-else-8 tail
+// @0x515913. Entries repeat until an 0xFF adm_index terminator — the same
+// {typeId, ammoP, ammoS, variant} slot vocabulary as the §5.30 S2C 0x5A downlink.
+// [orig: builder NetPacket_SendLoadoutSubmit @ 0x42cdc0 (team = byte_A85B48,
+//  the S2C 0x04 tail byte; class = the profile's per-side class byte; slot =
+//  195 pre-Player_InitPlayer, g_currentWeaponSlot after);
+//  decoder NapiNPServerMsg_HandlePlayerLoadout @ 0x515790]
 struct LoadoutSubmitEntry {
 	uint8_t adm_index = 0;      // AdmDef index (0xFF = list terminator, not stored)
 	uint8_t ammo_primary = 0;   // clamped to admEntry[83], scaled by admEntry[22]
@@ -1593,8 +1715,8 @@ struct LoadoutSubmitEntry {
 	uint8_t variant = 0;        // → player+89688+admEntry[1]
 };
 struct LoadoutSubmit {
-	uint8_t  player_class = 0;      // wire byte 0; server accepts 1..4
-	uint8_t  soldier_type = 0;      // wire byte 1; 5..9 → entity+660 playerClass
+	uint8_t  team = 0;              // wire byte 0; read SIGNED, accepted 1..4 [orig: byte_A85B48]
+	uint8_t  player_class = 0;      // wire byte 1; 0 or 5..9 → entity+660 playerClass
 	uint32_t weapon_slot_index = 0; // selected weapon slot (entity+280 binding)
 	std::vector<LoadoutSubmitEntry> entries;
 	bool     terminated = false;    // saw the 0xFF terminator

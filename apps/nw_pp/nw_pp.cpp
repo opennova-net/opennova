@@ -465,12 +465,12 @@ void print_tag_0d_c2s(const std::vector<uint8_t> &body) {
 	            m.channel, m.text.c_str(), clean ? "" : " DECODE INCOMPLETE");
 }
 
-// C2S 0x2F LOADOUT SUBMIT (§5.56) — spawn-menu accept: class/type + ADM slots.
+// C2S 0x2F LOADOUT SUBMIT (§5.56) — spawn-menu accept: team/class + ADM slots.
 void print_tag_2f_c2s(const std::vector<uint8_t> &body) {
 	LoadoutSubmit l;
 	const bool clean = decode_loadout_submit(body.data(), body.size(), l);
-	std::printf("        [C 0x2f] class=%u soldierType=%u weaponSlot=%u entries=%zu:",
-	            l.player_class, l.soldier_type, l.weapon_slot_index, l.entries.size());
+	std::printf("        [C 0x2f] team=%u class=%u weaponSlot=%u entries=%zu:",
+	            l.team, l.player_class, l.weapon_slot_index, l.entries.size());
 	for (const LoadoutSubmitEntry &e : l.entries)
 		std::printf(" {adm=%u ammo=%u/%u var=%u}", e.adm_index, e.ammo_primary,
 		            e.ammo_secondary, e.variant);
@@ -721,8 +721,9 @@ void print_tag_06_c2s(const std::vector<uint8_t> &body) {
 		return;
 	}
 	std::printf("        [0x06 C2S] tick=%u shooter=%s flags=0x%02x adm=%u "
-	            "pos=(%.1f, %.1f, %.1f) dir=(%.4f, %.4f) target=%s hit_part=%u "
-	            "extras=(0x%02x,0x%02x,0x%02x) muzzle=(off=0x%04x x=0x%04x y=0x%04x z=0x%04x w=0x%04x)\n",
+	            "pos=(%.1f, %.1f, %.1f) dir=(%.4f, %.4f) target=%s shot_seq=%u "
+	            "extras=(0x%02x,0x%02x,0x%02x) "
+	            "pose_delta=(x=0x%04x y=0x%04x z=0x%04x yaw=0x%04x pitch=0x%04x)\n",
 	            r.current_tick, handle_str(r.shooter_handle).c_str(),
 	            unsigned(r.fire_flags), unsigned(r.adm_index),
 	            fp16(r.pos_x), fp16(r.pos_y), fp16(r.pos_z),
@@ -730,9 +731,9 @@ void print_tag_06_c2s(const std::vector<uint8_t> &body) {
 	            handle_str(r.target_handle).c_str(), unsigned(r.hit_part),
 	            unsigned(r.extra_byte1), unsigned(r.extra_byte2),
 	            unsigned(r.misc_byte),
-	            unsigned(r.base_offset), unsigned(r.offset_x),
-	            unsigned(r.offset_y), unsigned(r.offset_z),
-	            unsigned(r.offset_w));
+	            unsigned(r.delta_x), unsigned(r.delta_y),
+	            unsigned(r.delta_z), unsigned(r.delta_yaw),
+	            unsigned(r.delta_pitch));
 }
 
 void print_tag_21_c2s(const std::vector<uint8_t> &body) {
@@ -1113,14 +1114,15 @@ void print_tag_2c_c2s(const std::vector<uint8_t> &body) {
 	            r.echo_flag ? "ping->S2C 0x57" : "measure rtt");
 }
 
-// S2C 0x68 entity-index-list request -> reply C2S 0x3D.
+// S2C 0x68 loaded-model-page request -> reply C2S 0x3D. Older notes called
+// this an entity-index list; the producer is the frozen renderer model cache.
 void print_tag_68(const std::vector<uint8_t> &body) {
 	uint32_t v = 0; size_t used = 0;
 	if (!decode_u32_scalar(body.data(), body.size(), v, used)) {
-		std::printf("        [0x68] entity-index-request decode failed (need 4 B got %zu)\n", body.size());
+		std::printf("        [0x68] loaded-model-page request decode failed (need 4 B got %zu)\n", body.size());
 		return;
 	}
-	std::printf("        [0x68] entity-index-request startIdx=%u -> reply C2S 0x3D\n", v);
+	std::printf("        [0x68] loaded-model-page request startIdx=%u -> reply C2S 0x3D\n", v);
 }
 
 // S2C 0x43 time-sync ping -> reply C2S 0x08.
@@ -1133,14 +1135,14 @@ void print_tag_43(const std::vector<uint8_t> &body) {
 	std::printf("        [0x43] time-sync-ping serverTs=0x%08x -> reply C2S 0x08\n", v);
 }
 
-// S2C 0x39 anim-map CRC challenge -> reply C2S 0x1C.
+// S2C 0x39 charattr CHARACTER-row CRC challenge -> reply C2S 0x1C.
 void print_tag_39(const std::vector<uint8_t> &body) {
 	uint32_t v = 0; size_t used = 0;
 	if (!decode_u32_scalar(body.data(), body.size(), v, used)) {
-		std::printf("        [0x39] anim-crc-challenge decode failed (need 4 B got %zu)\n", body.size());
+		std::printf("        [0x39] charattr-crc-challenge decode failed (need 4 B got %zu)\n", body.size());
 		return;
 	}
-	std::printf("        [0x39] anim-crc-challenge seed=0x%08x -> reply C2S 0x1C\n", v);
+	std::printf("        [0x39] charattr-crc-challenge seed=0x%08x -> reply C2S 0x1C\n", v);
 }
 
 // S2C 0x6B minimap overlay batch.
@@ -1189,6 +1191,18 @@ void print_tag_30(const std::vector<uint8_t> &body) {
 	}
 	std::printf("        [0x30] entity-checksum-req entityId=0x%02x checksum=0x%04x -> reply C2S 0x20\n",
 	            unsigned(r.entity_id), unsigned(r.checksum));
+}
+
+// S2C 0x31 loadout/ammo CRC request -> reply C2S 0x21.
+void print_tag_31(const std::vector<uint8_t> &body) {
+	LoadoutCrcRequest r;
+	size_t used = 0;
+	if (!decode_loadout_crc_request(body.data(), body.size(), r, used)) {
+		std::printf("        [0x31] loadout-crc-req decode failed (need 3 B got %zu)\n", body.size());
+		return;
+	}
+	std::printf("        [0x31] loadout-crc-req ammoIndex=0x%02x xorKey=0x%04x -> reply C2S 0x21\n",
+	            unsigned(r.ammo_index), unsigned(r.xor_key));
 }
 
 // S2C 0x42 input/state-flags push.
@@ -1414,6 +1428,7 @@ void print_payload(char dir, int frame, int tag,
 	else if (dir == 'S' && tag == 0x49) print_tag_49(payload);
 	else if (dir == 'S' && tag == 0x13) print_tag_13(payload);
 	else if (dir == 'S' && tag == 0x30) print_tag_30(payload);
+	else if (dir == 'S' && tag == 0x31) print_tag_31(payload);
 	else if (dir == 'S' && tag == 0x42) print_tag_42(payload);
 	else if (dir == 'S' && tag == 0x79) print_tag_79(payload);
 	else if (dir == 'S' && tag == 0x2A) print_tag_2a(payload);

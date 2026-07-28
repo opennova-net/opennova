@@ -303,6 +303,47 @@ void test_capture_loop_flip_and_secure() {
     CHECK(z2a->team == 2);
 }
 
+// The deploy/spawn-zone registry: collect pools 2 then 1, sort by the composite
+// (typePriority, unitType, zone#) key, AABB over the registered zones — the letter/
+// pick-index space the deploy screen and the 0x6E zoneIdx ride.
+// [orig: Entity_BuildSpawnZoneList @0x43EAE0; SpawnZoneList_IndexOf @0x43B990]
+void test_spawn_zone_registry() {
+    AshFixture f;
+    // A pool-2 building zone (zone 0, ground type) and a pool-1 VEHICLE spawn point:
+    // vehicles sort LAST (typePriority 2), ground zones lead by zone number.
+    Entity building;
+    building.kind = EntityKind::Building;
+    building.item_id = 0x0500;
+    building.position = {500.0f, 600.0f, 0.0f};
+    building.team = 1;
+    building.is_spawn_point = true;
+    building.alive = true;
+    const EntityHandle bh = f.w.registry.spawn(2, building);
+    Entity vehicle;
+    vehicle.kind = EntityKind::Item;
+    vehicle.item_id = 2001;
+    vehicle.position = {-600.0f, -700.0f, 0.0f};
+    vehicle.team = 1;
+    vehicle.item_type = 1; // ItemDef.type 1 = vehicle -> typePriority 2
+    vehicle.is_spawn_point = true;
+    vehicle.alive = true;
+    const EntityHandle vh = f.w.registry.spawn(1, vehicle);
+    const SpawnZoneRegistry reg = build_spawn_zone_list(f.w);
+    CHECK(reg.entries.size() == 6); // 4 zones + building + vehicle
+    // Ground zones ascend by zone number (building zone 0 first), vehicle trails.
+    CHECK(reg.entries[0].packed == bh.packed);
+    CHECK(reg.entries[1].packed == f.z1.packed);
+    CHECK(reg.entries[2].packed == f.z2a.packed);
+    CHECK(reg.entries[3].packed == f.z2b.packed);
+    CHECK(reg.entries[4].packed == f.z3.packed);
+    CHECK(reg.entries[5].packed == vh.packed);
+    CHECK(spawn_zone_index_of(reg, f.z3) == 4);
+    CHECK(spawn_zone_index_of(reg, EntityHandle::make(0, 5)) == -1);
+    // The AABB spans every registered zone (16.16 world).
+    CHECK(reg.min_x == to_fixed(-600.0) && reg.max_x == to_fixed(500.0));
+    CHECK(reg.min_y == to_fixed(-700.0) && reg.max_y == to_fixed(600.0));
+}
+
 } // namespace
 
 int main() {
@@ -316,6 +357,7 @@ int main() {
     test_spawn_zone_presence_and_zone_info();
     test_control_delta_formula();
     test_capture_loop_flip_and_secure();
+    test_spawn_zone_registry();
     if (failures == 0) std::printf("zone_chain_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }

@@ -149,6 +149,15 @@ static func load_mesh(resource_root: NovaResourceRoot, graphic: String) -> Mesh:
 		return null
 	var cache_key := _cache_key(root_key, basename)
 	if _mesh_cache.has(cache_key):
+		# Game_StartMission resets the logical renderer-definition registry, but
+		# MainGame deliberately retains this expensive geometry cache with its
+		# mounted root. A cache hit in the new mission is still a loaded shared
+		# model-def node, so recreate retail's sticky foliage bit without parsing
+		# or rebuilding the .3DI.
+		var cached_model_path := String(_model_path_cache.get(
+				cache_key, basename + ".3di"))
+		NovaObjectData.mark_cached_network_challenge_foliage_model(
+				cached_model_path)
 		return _mesh_cache[cache_key]
 
 	var model_path := _find_model_path(resource_root, basename)
@@ -156,7 +165,10 @@ static func load_mesh(resource_root: NovaResourceRoot, graphic: String) -> Mesh:
 		return null
 
 	var data := NovaObjectData.new()
-	if data.open_from_resource_root(resource_root, model_path) != OK:
+	# Retail marks foliage model-def nodes before it freezes the C2S 0x3D
+	# renderer-definition snapshot; they remain renderable but are excluded from
+	# that network page. [orig: sub_5B2220 writes node+0x3D4 before sub_5B3A80]
+	if data.open_from_resource_root(resource_root, model_path, false) != OK:
 		return null
 	var submeshes: Array = data.build_lod_submeshes(0)
 	var mesh: ArrayMesh = _aggregate_lod0_submeshes(submeshes)

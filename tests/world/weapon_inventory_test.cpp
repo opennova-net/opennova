@@ -387,7 +387,36 @@ void test_kit_damage_classes() {
 
 } // namespace
 
+
+// REPRO (2026-07-26, reported live): a joiner granted a knife by the host cannot
+// equip it. WPN_KNIFE authors no `weapon_class` and no `ammoclass` line at all, so
+// weapon_class_slot is 0 and its ammo pool is the classless byte-0 bucket, and it is
+// a no-clip weapon (clipsize -1). Retail's manual-switch predicate is
+// `weapon_class == 1 || weapon_class == 2 || calculate_kill_score(slot, entity, 0, 0)`
+// [orig: Player_SwitchToWeaponByHandle @0x4e0294..0x4e02c3], so the knife rides
+// entirely on that score term.
+static int test_knife_is_selectable() {
+	Fixture f;
+	WeaponInventory inv;
+	inv.reset(f.t);
+	weapon_inventory_load_from_display(f.t, {"WPN_KNIFE", "WPN_M4AUTO"}, inv);
+	weapon_inventory_seed_pools(f.t, inv, 8);
+	weapon_inventory_recalc_clips(f.t, inv);
+	inv.equipped_combo = 3 * 65; // holding the rifle
+	WeaponSwitchGates gates;
+	gates.equipped_valid = true;
+	// The knife occupies category 1 rank 0.
+	CHECK(inv.slot(1 * 65) != nullptr);
+	CHECK(inv.slot(1 * 65)->adm_index == f.knife);
+	const WeaponSwitchOutcome r = weapon_switch_to_handle(f.t, inv, 1 * 65, gates);
+	CHECK(r.kind == WeaponSwitchOutcome::kMount);
+	CHECK(r.combo == 1 * 65);
+	std::printf("PASS knife is manually selectable\n");
+	return 0;
+}
+
 int main() {
+    test_knife_is_selectable();
     test_availability_pairs();
     test_kit_filter();
     test_display_expand_and_fill();

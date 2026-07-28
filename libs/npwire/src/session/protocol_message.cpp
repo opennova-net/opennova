@@ -2,6 +2,7 @@
 
 #include <novacrypto/nwu.h>
 
+#include <algorithm>
 #include <utility>
 
 namespace opennova {
@@ -49,7 +50,13 @@ ProtocolMessage make_protocol_message(uint8_t tag, std::vector<uint8_t> payload,
 	msg.full_tag = tag;
 	msg.payload = std::move(payload);
 	msg.length = static_cast<uint32_t>(msg.payload.size());
-	if (flags_raw == 0) {
+	// Retail frames an empty message as the 2-byte zero-flag form [0x00][tag] — no
+	// length field at all (the parser reads no-length-flag as length 0). Auto-pick a
+	// length flag only when there is a payload to describe, so the empty 0x47/0x09/0x0A
+	// legs stay byte-identical to the golden capture.
+	// [orig: NapiNP_WriteMessageRecord @0x61da90 length-flag gating;
+	//  CNapiNPConnection_ParseMessages @0x625bc0 zero-flag read]
+	if (flags_raw == 0 && !msg.payload.empty()) {
 		flags_raw = msg.payload.size() > 0xFFu ? 0x40u : 0x20u;
 	}
 	msg.flags = decode_flags(flags_raw);
@@ -258,22 +265,203 @@ bool encode_protocol_packet_plaintext(const ProtocolPacketHeader &hdr,
 bool frame_session_packet(SessionSequencing &seq, const SessionCrypto &crypto,
                           const std::vector<ProtocolMessage> &messages,
                           std::vector<uint8_t> &body_out) {
+	const bool retain = seq.outbound_message_limit != 0 && !messages.empty();
+	if (retain &&
+	    (seq.retained_outbound_message_count > seq.outbound_message_limit ||
+	     messages.size() > seq.outbound_message_limit -
+	             seq.retained_outbound_message_count)) {
+		body_out.clear();
+		return false;
+	}
+
 	ProtocolPacketHeader hdr;
 	hdr.session_id = crypto.session_id;
 	hdr.seq_num = seq.next_outbound_seq++; // post-increment: the pre-increment value is stamped
 	hdr.ack_count = seq.last_inbound_seq;
 	hdr.connection_flags = 0; // always 0 on every witnessed encode site
+	if (!encode_protocol_packet_plaintext(hdr, messages, crypto.out_scrk, body_out)) {
+		return false;
+	}
+	if (retain) {
+		seq.retained_outbound[hdr.seq_num] = messages;
+		seq.retained_outbound_message_count += messages.size();
+	}
+	return true;
+}
+
+bool frame_session_packet_for_sequence(SessionSequencing &seq, const SessionCrypto &crypto,
+		uint32_t packet_sequence, std::vector<uint8_t> &body_out) {
+	if (packet_sequence > seq.next_outbound_seq) {
+		body_out.clear();
+		return false;
+	}
+	if (packet_sequence == seq.next_outbound_seq) {
+		++seq.next_outbound_seq;
+	}
+
+	const auto retained = seq.retained_outbound.find(packet_sequence);
+	static const std::vector<ProtocolMessage> no_messages;
+	const std::vector<ProtocolMessage> &messages =
+			retained != seq.retained_outbound.end() ? retained->second : no_messages;
+	const ProtocolPacketHeader hdr{
+		crypto.session_id,
+		packet_sequence,
+		seq.last_inbound_seq,
+		0,
+	};
 	return encode_protocol_packet_plaintext(hdr, messages, crypto.out_scrk, body_out);
+}
+
+void acknowledge_session_packets(SessionSequencing &seq, uint32_t ack_sequence) {
+	auto retained = seq.retained_outbound.begin();
+	while (retained != seq.retained_outbound.end() &&
+	       retained->first <= ack_sequence) {
+		seq.retained_outbound_message_count -= retained->second.size();
+		retained = seq.retained_outbound.erase(retained);
+	}
+}
+
+std::vector<uint32_t> build_session_missing_sequence_list(
+		const SessionSequencing &seq, bool include_zero) {
+	std::vector<uint32_t> missing;
+	missing.reserve(SESSION_RESEND_LIST_MAX);
+	const uint32_t expected = seq.last_inbound_seq + 1;
+	missing.push_back(expected);
+	if (include_zero && missing.size() < SESSION_RESEND_LIST_MAX) {
+		missing.push_back(0);
+	}
+	if (seq.queued_inbound.empty()) {
+		return missing;
+	}
+
+	// The witnessed walk is bounded by the queue's HEAD node — the lowest queued
+	// sequence for our ordered map — not the highest: gaps between later queued
+	// packets are requested on a later pass, after the frontier advances.
+	// [orig: CNapiNPConnection_BuildMissingSeqList @0x6234b0 — the
+	//  `while (candidate < head_node->seq)` bound @0x623527]
+	const uint32_t first_queued = seq.queued_inbound.begin()->first;
+	for (uint32_t candidate = expected + 1;
+	     candidate < first_queued && missing.size() < SESSION_RESEND_LIST_MAX;
+	     ++candidate) {
+		if (seq.queued_inbound.find(candidate) == seq.queued_inbound.end()) {
+			missing.push_back(candidate);
+		}
+	}
+	return missing;
+}
+
+bool encode_session_resend_list(uint32_t remote_key,
+		const std::vector<uint32_t> &requested_sequences,
+		std::vector<uint8_t> &body_out) {
+	if (requested_sequences.size() > SESSION_RESEND_LIST_MAX) {
+		body_out.clear();
+		return false;
+	}
+	body_out.clear();
+	body_out.reserve(4 + requested_sequences.size() * 4);
+	append_u32_le(body_out, remote_key);
+	for (uint32_t sequence : requested_sequences) {
+		append_u32_le(body_out, sequence);
+	}
+	return true;
+}
+
+bool decode_session_resend_list(const uint8_t *body, size_t body_len,
+		uint32_t local_key, std::vector<uint32_t> &requested_sequences_out) {
+	requested_sequences_out.clear();
+	if (!body || body_len < 4 || body_len > 0x10000u ||
+	    read_u32_le(body) != local_key) {
+		return false;
+	}
+	for (size_t pos = 4; pos + 4 <= body_len; pos += 4) {
+		requested_sequences_out.push_back(read_u32_le(body + pos));
+	}
+	return true;
 }
 
 bool deframe_session_packet(SessionSequencing &seq, const SessionCrypto &crypto,
                             const uint8_t *body, size_t body_len,
                             ProtocolPacketHeader &hdr_out,
-                            std::vector<ProtocolMessage> &messages_out) {
-	if (!decode_protocol_packet_plaintext(body, body_len, crypto.in_scrk, hdr_out, messages_out)) {
+                            std::vector<ProtocolMessage> &messages_out,
+                            SessionDeframeAdmission *admission_out) {
+	if (admission_out != nullptr) *admission_out = SessionDeframeAdmission{};
+	// Retail validates the receiver-local session key before it reads the sequence number or enters
+	// ParseMessages. Parse only the plaintext header here so a stale packet from a prior connection
+	// cannot mutate ordering/ACK state or make us decrypt and parse its inner stream.
+	// [orig: NapiNPProtocol_HandleSessionPacket @0x626b32..0x626b72]
+	if (!parse_protocol_packet_header(body, body_len, hdr_out)) {
+		return false;
+	}
+	if (crypto.expected_inbound_session_id.has_value() &&
+	    hdr_out.session_id != *crypto.expected_inbound_session_id) {
+		messages_out.clear();
+		return true; // retail quietly consumes/drops a packet addressed to a different connection
+	}
+	std::vector<ProtocolMessage> decoded;
+	if (!decode_protocol_packet_plaintext(body, body_len, crypto.in_scrk, hdr_out, decoded)) {
 		return false; // leave seq untouched; the caller applies its own failure policy
 	}
+	messages_out.clear();
+	if (!seq.ordered_recovery_enabled) {
+		// Protocol-only consumers do not own the two-way retained-resend pump needed by the retail
+		// contiguous queue. Use a best-effort high-water gate instead: any strictly newer packet is
+		// admitted (so a permanent loss cannot deadlock the session), while sequence zero, stale
+		// packets, and duplicates are consumed without redispatch or ACK regression.
+		if (hdr_out.seq_num == 0 || hdr_out.seq_num <= seq.last_inbound_seq)
+			return true;
+		messages_out = std::move(decoded);
+		seq.last_inbound_seq = hdr_out.seq_num;
+		if (admission_out != nullptr) {
+			admission_out->admitted = true;
+			admission_out->max_ack_count = hdr_out.ack_count;
+			admission_out->packets.push_back(
+					SessionDeframeAdmission::Packet{hdr_out, messages_out});
+		}
+		return true;
+	}
+
+	// HandleSessionPacket admits only recv_ack_seq+1 to ParseMessages. Sequence zero and
+	// seq <= recv_ack_seq are consumed without dispatch; a future packet is retained on
+	// the connection queue until its gap closes. [orig: @0x626bcc..0x626c3a]
+	if (hdr_out.seq_num == 0 || hdr_out.seq_num <= seq.last_inbound_seq) return true;
+	const uint32_t expected = seq.last_inbound_seq + 1;
+	if (hdr_out.seq_num != expected) {
+		if (admission_out != nullptr) admission_out->future_packet_seen = true;
+		seq.missing_request_pending = true;
+		const auto existing = seq.queued_inbound.find(hdr_out.seq_num);
+		if (existing == seq.queued_inbound.end() &&
+		    seq.queued_inbound.size() < SESSION_PACKET_QUEUE_MAX) {
+			seq.queued_inbound.emplace(
+					hdr_out.seq_num, QueuedSessionPacket{hdr_out, std::move(decoded)});
+		}
+		return true;
+	}
+
+	const ProtocolPacketHeader admitted_header = hdr_out;
+	messages_out = std::move(decoded);
 	seq.last_inbound_seq = hdr_out.seq_num;
+	SessionDeframeAdmission admission;
+	admission.admitted = true;
+	admission.max_ack_count = hdr_out.ack_count;
+	admission.packets.push_back(
+			SessionDeframeAdmission::Packet{admitted_header, messages_out});
+	for (;;) {
+		auto queued = seq.queued_inbound.find(seq.last_inbound_seq + 1);
+		if (queued == seq.queued_inbound.end()) break;
+		admission.packets.push_back(SessionDeframeAdmission::Packet{
+				queued->second.header, queued->second.messages});
+		for (ProtocolMessage &message : queued->second.messages)
+			messages_out.push_back(std::move(message));
+		admission.max_ack_count = std::max(
+				admission.max_ack_count, queued->second.header.ack_count);
+		seq.last_inbound_seq = queued->first;
+		seq.queued_inbound.erase(queued);
+	}
+	// `hdr_out` describes the datagram passed to this call. Draining queued successors must not
+	// silently replace it with the last recovered packet's header; packet-local headers are exposed
+	// above for handlers that dispatch the whole recovered run.
+	hdr_out = admitted_header;
+	if (admission_out != nullptr) *admission_out = admission;
 	return true;
 }
 

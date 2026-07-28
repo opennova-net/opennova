@@ -17,13 +17,14 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
-#include "world/geom.h" // Vec3
+#include "world/entity.h" // Entity, EntityHandle
+#include "world/geom.h"   // Vec3
 
 namespace opennova::world {
 
 class World;
-struct Entity; // world/entity.h
 
 // The 60xx player-start marker family, in selection priority (SP/DM, then coop, then team). A
 // mission is authored for one mode, so typically exactly one of these is present.
@@ -82,6 +83,34 @@ const Entity *resolve_spawn_target(const World &world, uint8_t requester_team,
 // @0x502da7; the client builds its own picker list from local BMS, pools 2+1, the same
 // def gate — Entity_BuildSpawnZoneList @0x43EAE0].
 bool world_has_spawn_zone(const World &world);
+
+// The deploy/spawn-zone REGISTRY — the sorted zone list whose INDICES are the
+// deploy-screen letters ('A' + index), the S2C 0x6E zoneIdx, the 0x1E zone-event
+// attacker bytes, and the space the deploy screen's pick parameter (index + 1)
+// resolves through. Collect order: every pool-2 then pool-1 entity whose ItemDef
+// carries attrib 0x40000 "SpawnPoint" (no alive filter — the original registers
+// dead zones too), accumulating the deploy-map AABB from the entity x/y as it
+// goes; then bubble-sort ascending by the composite key
+//   ((type==1 ? 2 : type==32 ? 1 : 0) << 16) | ((unitType & 0xFF) << 8) | (zone# & 0x1F)
+// so ground zones lead and vehicles trail. Equal nonzero keys keep collect
+// order (the original's bubble sort is stable there); BOTH-ZERO keys tie-break
+// by entity ADDRESS in the original (allocation order across pools) — modeled
+// here as collect order, a documented approximation that only reorders
+// zero-key zones split across pools.
+// [orig: Entity_BuildSpawnZoneList @0x43EAE0 (collect @0x43eb2e/@0x43ebad, AABB
+//  @0x43eb59.., sort keys @0x43ec9b/@0x43ecb6, zero-key address tie @0x43ecc6);
+//  SpawnZoneList_IndexOf @0x43B990]
+struct SpawnZoneRegistry {
+    std::vector<EntityHandle> entries;
+    // Deploy-map AABB over the registered zones (i32 16.16 world x/y). True
+    // min/max names — the original's g_WorldBoundsMax/Min globals hold these
+    // SWAPPED (the "Max" global accumulates the minimum; IDB misnomer).
+    int32_t min_x = 0, min_y = 0, max_x = 0, max_y = 0;
+    bool empty() const { return entries.empty(); }
+};
+SpawnZoneRegistry build_spawn_zone_list(const World &world);
+// Registry index of a zone entity, -1 when absent [orig: SpawnZoneList_IndexOf @0x43B990].
+int spawn_zone_index_of(const SpawnZoneRegistry &registry, EntityHandle handle);
 
 // The 0xFFFE auto-deploy pick: the requester team's own zone that sits ON the
 // frontier — enemy-capturable, or carrying the team's frontier number — with

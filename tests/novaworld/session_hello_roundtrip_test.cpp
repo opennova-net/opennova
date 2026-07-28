@@ -25,6 +25,7 @@ using opennova::client_hello_to_bytes;
 using opennova::parse_client_auth;
 using opennova::parse_client_hello;
 using opennova::parse_server_auth;
+using opennova::parse_server_hello;
 using opennova::server_auth_to_bytes;
 using opennova::server_hello_to_bytes;
 
@@ -174,6 +175,35 @@ int test_server_hello_ut_is_nonzero_gated() {
 	return 0;
 }
 
+int test_server_hello_omitted_metadata_parses_empty() {
+	ServerHello hello;
+	hello.p1 = 0;
+	hello.p2 = 0;
+	hello.np = 0;
+	hello.mp = 0;
+	hello.sus1.clear();
+	hello.sus2.clear();
+
+	const auto bytes = server_hello_to_bytes(hello);
+	TEST_EXPECT(!has_tlv_field(bytes, "P1"));
+	TEST_EXPECT(!has_tlv_field(bytes, "P2"));
+	TEST_EXPECT(!has_tlv_field(bytes, "NP"));
+	TEST_EXPECT(!has_tlv_field(bytes, "MP"));
+	TEST_EXPECT(!has_tlv_field(bytes, "SUS1"));
+	TEST_EXPECT(!has_tlv_field(bytes, "SUS2"));
+
+	ServerHello parsed;
+	TEST_EXPECT(parse_server_hello(bytes.data(), bytes.size(), parsed));
+	TEST_EXPECT(parsed.p1 == 0);
+	TEST_EXPECT(parsed.p2 == 0);
+	TEST_EXPECT(parsed.np == 0);
+	TEST_EXPECT(parsed.mp == 0);
+	TEST_EXPECT(parsed.sus1.empty());
+	TEST_EXPECT(parsed.sus2.empty());
+	TEST_EXPECT(parsed.pl.empty());
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -183,6 +213,7 @@ int main() {
 	if (test_client_auth_minimum_for_acceptance() != 0) return 1;
 	if (test_server_auth_rejection_roundtrip() != 0) return 1;
 	if (test_server_hello_ut_is_nonzero_gated() != 0) return 1;
+	if (test_server_hello_omitted_metadata_parses_empty() != 0) return 1;
 	std::printf("OK: session hello/auth serializer roundtrip and gating\n");
 	return 0;
 }

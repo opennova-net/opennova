@@ -33,6 +33,8 @@
 #include <terrain/height_field.h>
 
 #include <world/ai.h>
+#include <world/geom.h>
+#include <world/infantry.h>
 #include <world/player_spawn.h>
 #include <world/world.h>
 
@@ -420,15 +422,36 @@ int main() {
 	if (!expect(ctx.respawn_queue.size() == 1, "host player queued for respawn")) return 1;
 	{
 		// Displace the corpse to prove the release snaps back [orig: the D-NET-66
-		// death/respawn teleport].
+		// death/respawn teleport]. The listen host's own player is MOTOR-simulated, and
+		// the motor is the WRITER of the Entity/AiEntity pose pair — finish_infantry_tick
+		// mirrors AiEntity.pos into Entity.position every tick. Displacing BOTH stores is
+		// what makes this falsifiable: a respawn that writes only the registry Entity is
+		// reverted on the next tick and the player is left standing in its own corpse's
+		// spot at full health, which is indistinguishable from "I cannot respawn".
 		w::Entity *host = world.registry.get(ha);
 		host->position.x = 12.0f;
+		w::AiEntity *host_ae = ai.for_handle(ha);
+		if (!expect(host_ae != nullptr && host_ae->inf.active,
+		            "the host player is motor-simulated")) return 1;
+		host_ae->pos[0] = w::to_fixed(12.0);
+		host_ae->inf.stance = w::InfantryState::Stance::kProne;
 		for (int i = 0; i < 621; ++i) np::Server_TickUpdate(ctx, anchor);
 		if (!expect(ctx.respawn_queue.empty(), "respawn released after the timer")) return 1;
 		host = world.registry.get(ha);
 		if (!expect(host->health == 150, "respawn restores template health")) return 1;
 		if (!expect(std::fabs(host->position.x - 60.0f) < 0.01f,
 		            "respawn snaps to the spawn point"))
+			return 1;
+		host_ae = ai.for_handle(ha);
+		if (!expect(host_ae != nullptr, "the respawned host player kept its motor entity"))
+			return 1;
+		if (!expect(host_ae->pos[0] == w::to_fixed(60.0),
+		            "respawn snaps the MOTOR store too, so the mirror cannot revert it"))
+			return 1;
+		if (!expect(host_ae->health == 150, "the motor health store respawns with it"))
+			return 1;
+		if (!expect(host_ae->inf.stance == w::InfantryState::Stance::kStand,
+		            "the respawned body stands up out of the death pose"))
 			return 1;
 	}
 
@@ -464,9 +487,20 @@ int main() {
 			}
 			if (m.tag == 0x61) {
 				saw_61 = true;
-				if (!expect(m.payload.size() == 4 && m.payload[0] == 0xD4 &&
-				                    m.payload[3] == 0xA1,
-				            "deploy 0x61 carries the session seed"))
+				// The deploy release re-rolls this player's TICK SEED — per connection,
+				// never the session constant (a shared value would re-seed every client's
+				// clock to the same tick on every deploy). The witnessed shape is
+				// ((rand() & 0xFE) + 1) << 16: the low word is always zero, the seed is
+				// never zero, it never exceeds 0xFF0000, and bit 16 is always set.
+				// [orig: Server_SendRandomSeedToPlayer @0x5101a0 value @0x5101d4]
+				const uint32_t seed = static_cast<uint32_t>(m.payload[0]) |
+						(static_cast<uint32_t>(m.payload[1]) << 8) |
+						(static_cast<uint32_t>(m.payload[2]) << 16) |
+						(static_cast<uint32_t>(m.payload[3]) << 24);
+				if (!expect(m.payload.size() == 4 && (seed & 0xFFFFu) == 0 && seed != 0 &&
+				                    seed <= 0xFF0000u && (seed & 0x10000u) != 0 &&
+				                    seed == conn.tick_seed,
+				            "deploy 0x61 carries this connection's re-rolled tick seed"))
 					return 1;
 			}
 		}
@@ -494,6 +528,7 @@ int main() {
 	// spawn also records a FireEvent for the host present drain (§17.4).
 	{
 		world.ammo.entries[1].tracer_rate = 3;
+		world.ammo.entries[1].tracer_item_friendly = 1883;
 		w::Entity *shooter = world.registry.get(hb);
 		shooter->tracer_shot_counter = 0;
 		world.round_sim.fired.clear();
@@ -509,6 +544,13 @@ int main() {
 			if (!expect(world.round_sim.rounds[size_t(slot)].tracer == want,
 			            "tracer cadence: tracer exactly on the counter wrap"))
 				return 1;
+			const w::LiveRound &round =
+					world.round_sim.rounds[size_t(slot)];
+			if (!expect(round.item_type_id == 1883 &&
+			                    w::round_visible_item_id(round) ==
+			                            (want ? 1883 : 0),
+			            "TrcrID stays class-bound while only cadence tracer shots show its model"))
+				return 1;
 			if (!expect(world.round_sim.rounds[size_t(slot)].team == shooter->team,
 			            "tracer round carries the shooter team"))
 				return 1;
@@ -518,12 +560,42 @@ int main() {
 		if (!expect(s0 >= 0 && !world.round_sim.rounds[size_t(s0)].tracer,
 		            "tracer_rate 0 -> never a tracer"))
 			return 1;
+		if (!expect(
+		            world.round_sim.rounds[size_t(s0)].item_type_id == 1883 &&
+		                    w::round_visible_item_id(
+		                            world.round_sim.rounds[size_t(s0)]) == 0,
+		            "non-tracer cadence keeps the TrcrID bind but clears its visible model"))
+			return 1;
 		world.ammo.entries[1].flags |= 0x8000u; // forcetracer
 		int s1 = world.round_sim.spawn(world, rp);
 		if (!expect(s1 >= 0 && world.round_sim.rounds[size_t(s1)].tracer,
 		            "FORCETRACER overrides rate 0"))
 			return 1;
+		if (!expect(w::round_visible_item_id(
+		                    world.round_sim.rounds[size_t(s1)]) == 1883,
+		            "FORCETRACER keeps the selected TrcrID model visible"))
+			return 1;
 		world.ammo.entries[1].flags &= ~0x8000u;
+
+		w::RoundSim lifetime_sim;
+		const int first_lifetime_slot = lifetime_sim.spawn(world, rp);
+		if (!expect(first_lifetime_slot >= 0,
+		            "presentation-lifetime probe spawned its first round"))
+			return 1;
+		const uint64_t first_generation =
+				lifetime_sim.rounds[size_t(first_lifetime_slot)]
+						.presentation_generation;
+		lifetime_sim.rounds[size_t(first_lifetime_slot)].active = false;
+		--lifetime_sim.active_count;
+		const int second_lifetime_slot = lifetime_sim.spawn(world, rp);
+		if (!expect(second_lifetime_slot == first_lifetime_slot &&
+		                    lifetime_sim.rounds[size_t(second_lifetime_slot)]
+		                                    .presentation_generation !=
+		                            first_generation,
+		            "same-slot reuse receives a new presentation lifetime identity"))
+			return 1;
+
+		world.ammo.entries[1].tracer_item_friendly = 0;
 		if (!expect(world.round_sim.fired.size() == 8 &&
 		                    world.round_sim.fired.back().ammo_index == 1 &&
 		                    world.round_sim.fired.back().shooter_handle == hb.packed,

@@ -22,10 +22,13 @@ namespace opennova {
 // Session opcode layout (byte 0 of CRC-stripped packet):
 //   0x41 — ClientHello (C2S)
 //   0x42 — ClientJoin  (C2S)
-//   0x43 — ProtocolMessage (C2S or S2C, payload is a stream of containers)
+//   0x43 — ProtocolMessage (C2S, payload is a stream of containers)
+//   0x44 — ClientResendList (C2S)
 //   0x46 — ClientGoodBye (C2S)
 //   0x81 — ServerHello (S2C response to 0x41)
 //   0x82 — ServerJoin  (S2C response to 0x42)
+//   0x83 — ProtocolMessage (S2C, payload is a stream of containers)
+//   0x84 — ServerResendList (S2C)
 
 inline constexpr const char *SESSION_NWU_KEY =
 		"asdfj2349857qu23rija;sdlvzx09caweklrj1234hldfj";
@@ -40,10 +43,12 @@ inline constexpr uint8_t SESSION_OPCODE_CLIENT_HELLO = 0x41;
 inline constexpr uint8_t SESSION_OPCODE_CLIENT_AUTH = 0x42;
 inline constexpr uint8_t SESSION_OPCODE_CLIENT_JOIN = SESSION_OPCODE_CLIENT_AUTH; // alias
 inline constexpr uint8_t SESSION_OPCODE_PROTOCOL_MESSAGE = 0x43;
+inline constexpr uint8_t SESSION_OPCODE_CLIENT_RESEND_LIST = 0x44;
 inline constexpr uint8_t SESSION_OPCODE_CLIENT_GOODBYE = 0x46;
 inline constexpr uint8_t SESSION_OPCODE_SERVER_HELLO = 0x81;
 inline constexpr uint8_t SESSION_OPCODE_SERVER_AUTH = 0x82;
 inline constexpr uint8_t SESSION_OPCODE_SERVER_JOIN = SESSION_OPCODE_SERVER_AUTH; // alias
 inline constexpr uint8_t SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE = 0x83;
+inline constexpr uint8_t SESSION_OPCODE_SERVER_RESEND_LIST = 0x84;
 
 } // namespace opennova

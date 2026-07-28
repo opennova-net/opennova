@@ -2,14 +2,9 @@
 //
 // After NWJoin the client opens a session to the host and sends a ClientHello
 // whose PN flips the connection protocol from the lobby (NOVAWORLDUDP) to the
-// in-match game (JointOperations). This pins that ClientSession::Config::
-// jointoperations() builds that hello: PN == "JointOperations" and a PG distinct
-// from the lobby GUID. The default (NOVAWORLDUDP) hello is unchanged — the
-// per-PN PG selector must not regress the lobby path.
-//
-// PG for JointOperations is PROVISIONAL pending the StartPlaying @ 0x4d45e0
-// grill. PV1 is witnessed separately and must differ from the NOVAWORLDUDP
-// lobby PV1.
+// in-match game (JOINTOPERATIONS). This pins the exact retail identity populated
+// by CNapiNetwork_Init @ 0x4ca4a0. The default NOVAWORLDUDP hello remains
+// unchanged, so the per-PN identity selector cannot regress the lobby path.
 
 #include <novaworld/client_session.h>
 #include <npwire/session_hello.h>
@@ -55,19 +50,26 @@ bool decode_hello(const std::vector<uint8_t> &raw, ClientHello &out) {
 } // namespace
 
 int main() {
-	// The provisional JointOperations PG placeholder (mirror of jointoperations_pg()
-	// in client_session.cpp). Update both together when the real GUID is grilled.
-	const std::array<uint8_t, 16> kProvisionalJoPg{
-	    'J', 'O', '-', 'P', 'R', 'O', 'V', 'I', 'S', '-', 'P', 'G', 0, 0, 0, 0};
+	const std::array<uint8_t, 16> kRetailJoPg{
+	    0x46, 0xD6, 0x74, 0xB0, 0xF9, 0x81, 0x5F, 0x47,
+	    0x92, 0xDA, 0xDE, 0xA7, 0x24, 0x7F, 0x14, 0x68};
 
-	// JointOperations hello.
+	// Exact retail JointOperations game-session hello.
 	ClientSession jo{ClientSession::Config::jointoperations()};
 	ClientHello jo_hello;
 	check(decode_hello(jo.start(), jo_hello), "JO hello decodes");
-	check(jo_hello.pn == "JointOperations", "JO hello PN == JointOperations");
+	check(jo_hello.nvs ==
+	              "NAPI NP Version 0.0.1 1/12/2004 - 2/20/2004 Milota Copyright 2004 NovaLogic",
+	      "JO hello NVS == retail Milota version");
+	check(jo_hello.co == "NovaLogic Inc, Calabasas CA U.S.A.",
+	      "JO hello CO == retail NovaLogic company");
+	check(jo_hello.ap == "Jointops.exe", "JO hello AP == retail executable");
+	check(jo_hello.bdat == "Jul 21 2009 18:54:42", "JO hello BDAT == retail build stamp");
+	check(jo_hello.pn == "JOINTOPERATIONS", "JO hello PN == JOINTOPERATIONS");
 	check(jo_hello.pv1 == "0.0.0 1/12/2004 EM", "JO hello PV1 == game protocol date");
+	check(jo_hello.pv2 == "16", "JO hello PV2 == retail game protocol version");
 	check(jo_hello.pg_present, "JO hello carries PG");
-	check(jo_hello.pg == kProvisionalJoPg, "JO hello PG == provisional JO GUID");
+	check(jo_hello.pg == kRetailJoPg, "JO hello PG == retail JO GUID");
 
 	// Default (lobby) hello — unchanged.
 	ClientSession nw{};  // default Config -> NOVAWORLDUDP

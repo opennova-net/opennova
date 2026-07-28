@@ -539,6 +539,11 @@ func test_set_selected_position_round_trips_under_an_offset_container() -> void:
 const ITEMS_PATH := "res://../fixtures/def/items.def"
 
 
+# The item database _loaded_with_item_db injected, so palette-cardinality
+# assertions read the fixture db directly instead of the placer's private field.
+var _injected_item_db: NovaItemDatabase = null
+
+
 func _loaded_with_item_db() -> MissionController:
 	var stub := StubTerrainEditor.new()
 	stub.resource_root = _dvxi5_root()
@@ -552,6 +557,7 @@ func _loaded_with_item_db() -> MissionController:
 	# The dvxi5 fixture dir carries no items.def, so the open left the placer's db null;
 	# inject the fixture db so the palette + kind mapping have real item types.
 	controller._placer.item_db = db
+	_injected_item_db = db
 	return controller
 
 
@@ -632,11 +638,13 @@ func test_kind_for_item_type_matches_shipping_data() -> void:
 
 func test_get_placeable_items_includes_markers() -> void:
 	# Markers are general placeable entities (player start, insertion, waypoint, ...), so the
-	# palette offers them alongside meshes; the 16-item fixture includes one marker,
-	# the #264 ewep 50cal row, and the retail grenade row used by throwable coverage.
+	# palette offers them alongside meshes. Keep the cardinality tied to the loaded fixture:
+	# gameplay regressions intentionally add real item rows (including the #264 ewep 50cal
+	# and retail grenade), and the palette contract is that every loaded row is present.
 	var controller := _loaded_with_item_db()
 	var items := controller.get_placeable_items()
-	assert_eq(items.size(), 16, "every items.def entry is placeable, markers included")
+	assert_eq(items.size(), _injected_item_db.get_count(),
+		"every items.def entry is placeable, markers included")
 	var has_marker := false
 	for it in items:
 		assert_true(it.has("id") and it.has("display_name"), "each palette entry has id + name")

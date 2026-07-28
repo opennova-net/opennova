@@ -25,7 +25,12 @@ enum class ConnectionState {
 // ProtocolPacketHeader (witnessed at offset +1 of opcode 0x43 / 0x83
 // packets — see libs/npwire/include/npwire/protocol_message.h).
 struct Connection {
+	// Server-local registry identity. It starts as ClientHello.CI, but the
+	// registry may synthesize it when another endpoint already owns that CI.
 	uint32_t id = 0;
+	// The unmodified ClientHello.CI. Keeping it separate lets an exact later
+	// Hello be recognized as a retransmit even when `id` was synthesized.
+	uint32_t reported_id = 0;
 	PeerAddr addr;
 	ConnectionState state = ConnectionState::Handshaking;
 	uint64_t created_ms = 0;

@@ -98,22 +98,24 @@ inline int coords_sector_id_at_cell(const SectorLayout &layout, int row, int col
 	return coords_clampi(layout.sector_grid[row * COORDS_SECTOR_GRID_DIM + col], 0, COORDS_SECTOR_ID_MAX);
 }
 
-// World -> source/atlas coordinate transform.
-// Returns an invalid result (valid == false) for an out-of-extent cell (editor
-// mode) or a sector id <= 0, matching the negative-sentinel contract the
-// GDScript callers branch on.
-template <typename Real>
-CoordsResult<Real> coords_world_to_source(const SectorLayout &layout, Real world_x, Real world_z,
-                                          const CoordsOptions &opts) {
-	CoordsResult<Real> out;
+// One sector's resolved atlas mapping — the per-sample-invariant half of
+// coords_world_to_source. Exposed so hot callers that walk many samples
+// through the same sector (the LOS raycast crosses a 512 u sector in ~128
+// four-unit steps) can memoize it; the template below delegates here so the
+// two can never drift.
+struct CoordsSectorResolve {
+	bool valid = false;
+	int sector_id = 0;
+	int quadrant_x = 0;
+	int quadrant_z = 0;
+};
+
+inline CoordsSectorResolve coords_resolve_sector(const SectorLayout &layout, int sector_sx,
+                                                 int sector_sz, const CoordsOptions &opts) {
+	CoordsSectorResolve out;
 	if (!layout.sector_grid) {
 		return out;
 	}
-	const int sector_sx = static_cast<int>(std::floor(world_x / static_cast<Real>(COORDS_SECTOR_SIZE)));
-	const int sector_sz = static_cast<int>(std::floor(world_z / static_cast<Real>(COORDS_SECTOR_SIZE)));
-	out.sector_sx = sector_sx;
-	out.sector_sz = sector_sz;
-
 	const int grid_x = sector_sx - layout.origin_x;
 	const int grid_z = sector_sz - layout.origin_y;
 
@@ -137,7 +139,34 @@ CoordsResult<Real> coords_world_to_source(const SectorLayout &layout, Real world
 	if (sector_id <= 0) {
 		return out;
 	}
+	out.valid = true;
 	out.sector_id = sector_id;
+	out.quadrant_x = coords_quadrant_offset_x(sector_id);
+	out.quadrant_z = coords_quadrant_offset_z(sector_id);
+	return out;
+}
+
+// World -> source/atlas coordinate transform.
+// Returns an invalid result (valid == false) for an out-of-extent cell (editor
+// mode) or a sector id <= 0, matching the negative-sentinel contract the
+// GDScript callers branch on.
+template <typename Real>
+CoordsResult<Real> coords_world_to_source(const SectorLayout &layout, Real world_x, Real world_z,
+                                          const CoordsOptions &opts) {
+	CoordsResult<Real> out;
+	if (!layout.sector_grid) {
+		return out;
+	}
+	const int sector_sx = static_cast<int>(std::floor(world_x / static_cast<Real>(COORDS_SECTOR_SIZE)));
+	const int sector_sz = static_cast<int>(std::floor(world_z / static_cast<Real>(COORDS_SECTOR_SIZE)));
+	out.sector_sx = sector_sx;
+	out.sector_sz = sector_sz;
+
+	const CoordsSectorResolve sector = coords_resolve_sector(layout, sector_sx, sector_sz, opts);
+	if (!sector.valid) {
+		return out;
+	}
+	out.sector_id = sector.sector_id;
 
 	// sector_sx * 512 is an exact integer well within Real's exact range for the
 	// bounded sector extent, so the multiply order matches both the editor's
@@ -151,8 +180,8 @@ CoordsResult<Real> coords_world_to_source(const SectorLayout &layout, Real world
 		local_z = local_z < lo ? lo : (local_z > hi ? hi : local_z);
 	}
 
-	out.source_x = static_cast<Real>(coords_quadrant_offset_x(sector_id)) + local_x;
-	out.source_z = static_cast<Real>(coords_quadrant_offset_z(sector_id)) + local_z;
+	out.source_x = static_cast<Real>(sector.quadrant_x) + local_x;
+	out.source_z = static_cast<Real>(sector.quadrant_z) + local_z;
 	out.valid = true;
 	return out;
 }

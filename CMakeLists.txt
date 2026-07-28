@@ -45,6 +45,7 @@ add_subdirectory(libs/audio)
 add_subdirectory(libs/oned_edit)
 add_subdirectory(libs/refs)
 add_subdirectory(libs/controls)
+add_subdirectory(libs/playersav)
 
 # Family link-interface groups (LIBS-2, ADR 0024) — defined once every member
 # target exists; consumed by whole-family linkers (the godot/engine root).

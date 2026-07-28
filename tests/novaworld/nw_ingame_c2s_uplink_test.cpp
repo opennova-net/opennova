@@ -11,6 +11,7 @@
 #include <npwire/ingame_decode.h>
 #include <npwire/ingame_encode.h>
 
+#include <array>
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
@@ -164,11 +165,11 @@ const uint8_t kFiredRound_f2061[] = {
 	0x03,                          // extra_byte1
 	0x0c,                          // extra_byte2
 	0x00,                          // misc_byte
-	0x54, 0x3b,                    // base_offset = 0x3b54
-	0x59, 0x42,                    // offset_x = 0x4259
-	0xb9, 0xd8,                    // offset_y = 0xd8b9
-	0x00, 0x00,                    // offset_z = 0
-	0x8c, 0x01,                    // offset_w = 0x018c
+	0x54, 0x3b,                    // delta_x = 0x3b54
+	0x59, 0x42,                    // delta_y = 0x4259
+	0xb9, 0xd8,                    // delta_z = 0xd8b9
+	0x00, 0x00,                    // delta_yaw = 0
+	0x8c, 0x01,                    // delta_pitch = 0x018c
 };
 static_assert(sizeof(kFiredRound_f2061) == 45, "C2S 0x06 body is 45 B");
 
@@ -193,11 +194,81 @@ int test_client_fired_round() {
 	EXPECT(r.extra_byte1 == 0x03);
 	EXPECT(r.extra_byte2 == 0x0c);
 	EXPECT(r.misc_byte == 0x00);
-	EXPECT(r.base_offset == 0x3b54);
-	EXPECT(r.offset_x == 0x4259);
-	EXPECT(r.offset_y == 0xd8b9);
-	EXPECT(r.offset_w == 0x018c);
+	EXPECT(r.delta_x == 0x3b54);
+	EXPECT(r.delta_y == 0x4259);
+	EXPECT(r.delta_z == 0xd8b9);
+	EXPECT(r.delta_pitch == 0x018c);
+	const std::vector<uint8_t> encoded = encode_client_fired_round(r);
+	EXPECT(encoded.size() == sizeof(kFiredRound_f2061));
+	EXPECT(std::memcmp(encoded.data(), kFiredRound_f2061,
+	                   sizeof(kFiredRound_f2061)) == 0);
 	std::printf("PASS client_fired_round\n");
+	return 0;
+}
+
+int test_client_fired_round_pose_deltas() {
+	ClientFiredRound r;
+	const std::array<int32_t, 5> shooter_pose = {
+		int32_t(0x12345678u),
+		int32_t(0x89abcdefu),
+		int32_t(0x00010010u),
+		int32_t(0x10203040u),
+		int32_t(0x7fff8000u),
+	};
+	// High halves deliberately differ: retail subtracts only the low words.
+	// The expected words reproduce the independently witnessed f=2061
+	// trailing signature from worked pose pairs.
+	const std::array<int32_t, 5> fire_pose = {
+		int32_t(0x777791ccu), // 0x91cc - 0x5678 = 0x3b54
+		int32_t(0x22221048u), // 0x1048 - 0xcdef = 0x4259 modulo 2^16
+		int32_t(0x3333d8c9u), // 0xd8c9 - 0x0010 = 0xd8b9
+		int32_t(0x44443040u), // 0x3040 - 0x3040 = 0
+		int32_t(0x5555818cu), // 0x818c - 0x8000 = 0x018c
+	};
+	set_client_fired_round_pose(r, fire_pose, shooter_pose);
+
+	EXPECT(uint32_t(r.pos_x) == 0x777791ccu);
+	EXPECT(uint32_t(r.pos_y) == 0x22221048u);
+	EXPECT(uint32_t(r.pos_z) == 0x3333d8c9u);
+	EXPECT(uint32_t(r.dir_x) == 0x00004444u);
+	EXPECT(uint32_t(r.dir_y) == 0x00005556u);
+	EXPECT(r.delta_x == 0x3b54);
+	EXPECT(r.delta_y == 0x4259);
+	EXPECT(r.delta_z == 0xd8b9);
+	EXPECT(r.delta_yaw == 0x0000);
+	EXPECT(r.delta_pitch == 0x018c);
+
+	const std::vector<uint8_t> encoded = encode_client_fired_round(r);
+	const uint8_t expected_words[] = {
+		0x54, 0x3b, 0x59, 0x42, 0xb9, 0xd8, 0x00, 0x00, 0x8c, 0x01,
+	};
+	EXPECT(encoded.size() == 45);
+	EXPECT(std::memcmp(encoded.data() + 35, expected_words,
+	                   sizeof(expected_words)) == 0);
+	std::printf("PASS client_fired_round retail pose deltas\n");
+	return 0;
+}
+
+int test_client_fired_round_angle_rounding_boundaries() {
+	ClientFiredRound r;
+	const std::array<int32_t, 5> shooter_pose = {};
+
+	set_client_fired_round_pose(r, {
+			0, 0, 0,
+			int32_t(0x00007fffu),
+			int32_t(0x00008000u),
+	}, shooter_pose);
+	EXPECT(r.dir_x == 0);
+	EXPECT(r.dir_y == 1);
+
+	set_client_fired_round_pose(r, {
+			0, 0, 0,
+			int32_t(0xffff8000u),
+			int32_t(0x7fffffffu),
+	}, shooter_pose);
+	EXPECT(r.dir_x == 0);
+	EXPECT(r.dir_y == -32768);
+	std::printf("PASS client_fired_round angle rounding boundaries\n");
 	return 0;
 }
 
@@ -267,6 +338,37 @@ int test_extended_uplink_short_body() {
 	return 0;
 }
 
+// C2S 0x06 hit_part is a PACKED word, not a bare sequence:
+// (roster slot << 9) | (shot seq & 0x1FF) [orig: Server_ClientFiredRound @0x50bda5].
+// Pinned against the two live captures taken 2026-07-26: a retail joiner at
+// mySlot=1 sent 0x0201/0x0202/0x0203 for shots 1/2/3, while our client sent
+// 0x0001/0x0002/0x0003 — slot bits zero, i.e. roster slot 0, which on a listen host
+// is the HOST ITSELF. The host copies the raw word into the global word_B7C670
+// (@0x50c2ba) and attributed our rounds to its own player, so its first-person
+// weapon reacted every time the joiner fired.
+static int test_fired_round_hit_part_packing() {
+	// The exact bytes a retail joiner at roster slot 1 put on the wire.
+	EXPECT(pack_fired_round_hit_part(1, 1) == 0x0201);
+	EXPECT(pack_fired_round_hit_part(1, 2) == 0x0202);
+	EXPECT(pack_fired_round_hit_part(1, 3) == 0x0203);
+	// Slot 0 must stay reachable — a listen host's own player legitimately packs 0.
+	EXPECT(pack_fired_round_hit_part(0, 1) == 0x0001);
+	// The sequence is 9 bits and wraps inside the field without disturbing the slot.
+	EXPECT(pack_fired_round_hit_part(1, 0x1FF) == 0x03FF);
+	EXPECT(pack_fired_round_hit_part(1, 0x200) == 0x0200);
+	EXPECT(pack_fired_round_hit_part(3, 5) == 0x0605);
+	// Round-trip both fields back out.
+	for (uint8_t slot = 0; slot < 8; ++slot) {
+		for (uint16_t seq = 0; seq < 0x200; seq += 37) {
+			const uint16_t packed = pack_fired_round_hit_part(slot, seq);
+			EXPECT(fired_round_hit_part_slot(packed) == slot);
+			EXPECT(fired_round_hit_part_seq(packed) == seq);
+		}
+	}
+	std::printf("PASS fired_round hit_part packing (slot << 9 | seq)\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -277,7 +379,10 @@ int main() {
 	rc |= test_extended_uplink_roundtrip();
 	rc |= test_extended_uplink_short_body();
 	rc |= test_client_fired_round();
+	rc |= test_client_fired_round_pose_deltas();
+	rc |= test_client_fired_round_angle_rounding_boundaries();
 	rc |= test_client_checksum_reply();
+	rc |= test_fired_round_hit_part_packing();
 	if (rc == 0) std::printf("nw_ingame_c2s_uplink_test: ALL PASS\n");
 	return rc;
 }

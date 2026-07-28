@@ -196,6 +196,32 @@ int check_S_1E_game_event() {
 	return 0;
 }
 
+// S2C 0x61 — the per-player TICK SEED (not an SCRK exchange). Four LE bytes, and a body
+// shorter than that seeds ZERO rather than failing: zero is itself the witnessed round-end
+// disarm value, so the decode always succeeds and the caller applies whatever it yields.
+// [orig: NapiNPClientMsg_HandleSessionKey @0x4297c0 — the four-byte guard @0x4297eb;
+//  the sender Server_SendRandomSeedToPlayer @0x5101a0 rolls ((rand() & 0xFE) + 1) << 16]
+int check_S_61_tick_seed() {
+	LE w;
+	w.u32(0x00110000u);
+	EXPECT(w.b.size() == 4);
+	uint32_t seed = 0xDEADBEEFu;
+	EXPECT(decode_tick_seed(w.b.data(), w.b.size(), seed));
+	EXPECT(seed == 0x00110000u);
+	// Short body -> a seed of zero, never a garbage read past the payload.
+	const uint8_t short_body[2] = {0x11, 0x22};
+	seed = 0xDEADBEEFu;
+	EXPECT(decode_tick_seed(short_body, sizeof(short_body), seed));
+	EXPECT(seed == 0);
+	// The witnessed disarm form.
+	const uint8_t zero_body[4] = {0, 0, 0, 0};
+	seed = 0xDEADBEEFu;
+	EXPECT(decode_tick_seed(zero_body, sizeof(zero_body), seed));
+	EXPECT(seed == 0);
+	cover('S', 0x61);
+	return 0;
+}
+
 // S2C 0x26 — kill record: [u16 victim][u16 attacker].
 int check_S_26_kill() {
 	LE w;
@@ -608,6 +634,22 @@ int check_S_30_checksum_request() {
 	return 0;
 }
 
+// S2C 0x31 — loadout/ammo CRC request: [u8 ammoIndex][u16 xorKey] (3 B).
+int check_S_31_loadout_crc_request() {
+	LE w;
+	w.u8(0x07);
+	w.u16(0x1234);
+	EXPECT(w.b.size() == 3);
+	LoadoutCrcRequest r;
+	size_t consumed = 0;
+	EXPECT(decode_loadout_crc_request(w.b.data(), w.b.size(), r, consumed));
+	EXPECT(consumed == 3);
+	EXPECT(r.ammo_index == 0x07);
+	EXPECT(r.xor_key == 0x1234);
+	cover('S', 0x31);
+	return 0;
+}
+
 // S2C 0x42 — input/state-flags: [u16] (2 B).
 int check_S_42_input_flags() {
 	LE w;
@@ -920,8 +962,8 @@ int check_S_02_join_padding_probe() {
 // C2S 0x2F — loadout submit (§5.56): header + 2 ADM entries + 0xFF terminator.
 int check_C_2F_loadout_submit() {
 	LE w;
-	w.u8(2);                 // class
-	w.u8(8);                 // soldier type
+	w.u8(2);                 // team
+	w.u8(8);                 // player class
 	w.u32(1);                // weapon slot index
 	w.u8(10); w.u8(3); w.u8(2); w.u8(0);   // entry: adm 10
 	w.u8(24); w.u8(1); w.u8(0); w.u8(5);   // entry: adm 24
@@ -929,11 +971,80 @@ int check_C_2F_loadout_submit() {
 	EXPECT(w.b.size() == 15);
 	LoadoutSubmit out;
 	EXPECT(decode_loadout_submit(w.b.data(), w.b.size(), out));
-	EXPECT(out.player_class == 2 && out.soldier_type == 8);
+	EXPECT(out.team == 2 && out.player_class == 8);
 	EXPECT(out.entries.size() == 2);
 	EXPECT(out.entries[1].adm_index == 24 && out.entries[1].variant == 5);
 	EXPECT(out.terminated);
 	cover('C', 0x2F);
+	return 0;
+}
+
+// S2C 0x50 — team assign (§5.62): 6 B, round-tripped through the real encoder,
+// plus the witnessed short-body default-to-zero tail.
+// [orig: NapiNPClientMsg_0x050 @0x431910]
+int check_S_50_team_assign() {
+	TeamAssign in;
+	in.entity_handle = 0x0007;
+	in.team = 2;
+	in.net_id = 0x1234;
+	in.anim_slot = 1;
+	const std::vector<uint8_t> wire = encode_team_assign(in);
+	EXPECT(wire.size() == 6);
+	TeamAssign out;
+	size_t consumed = 0;
+	EXPECT(decode_team_assign(wire.data(), wire.size(), out, consumed));
+	EXPECT(consumed == 6);
+	EXPECT(out.entity_handle == 0x0007);
+	EXPECT(out.team == 2);
+	EXPECT(out.net_id == 0x1234);
+	EXPECT(out.anim_slot == 1);
+	// Short body: the handle + team arrive, the remaining fields stay zero.
+	const uint8_t short_body[3] = {0x08, 0x00, 0x03};
+	TeamAssign shortened;
+	size_t short_consumed = 0;
+	EXPECT(decode_team_assign(short_body, sizeof(short_body), shortened, short_consumed));
+	EXPECT(short_consumed == 3);
+	EXPECT(shortened.entity_handle == 0x0008 && shortened.team == 3);
+	EXPECT(shortened.net_id == 0 && shortened.anim_slot == 0);
+	// A body too short even for the handle is not a team assign.
+	const uint8_t stub[1] = {0x08};
+	TeamAssign rejected;
+	size_t rejected_consumed = 1;
+	EXPECT(!decode_team_assign(stub, sizeof(stub), rejected, rejected_consumed));
+	cover('S', 0x50);
+	return 0;
+}
+
+// S2C 0x5D — empty-slot sweep: a bare `[u16 pool0Index] x N` run, no count word.
+// [orig: NapiNPClientMsg_DestroyEntityList @0x429730]
+int check_S_5D_destroy_list() {
+	DestroyEntityList in;
+	in.pool0_indices = {3, 9, 41};
+	const std::vector<uint8_t> wire = encode_destroy_entity_list(in);
+	EXPECT(wire.size() == 6);
+	DestroyEntityList out;
+	EXPECT(decode_destroy_entity_list(wire.data(), wire.size(), out));
+	EXPECT(out.pool0_indices.size() == 3);
+	EXPECT(out.pool0_indices[0] == 3 && out.pool0_indices[2] == 41);
+	// An EMPTY sweep (no empty slots) is valid and carries no entries.
+	DestroyEntityList empty;
+	EXPECT(decode_destroy_entity_list(nullptr, 0, empty));
+	EXPECT(empty.pool0_indices.empty());
+	// A trailing odd byte is not a whole index — the walk must reject it.
+	const uint8_t ragged[3] = {0x01, 0x00, 0x02};
+	DestroyEntityList bad;
+	EXPECT(!decode_destroy_entity_list(ragged, sizeof(ragged), bad));
+	cover('S', 0x5D);
+	return 0;
+}
+
+// C2S 0x32 — empty-slot sweep request: the host reads no fields.
+// [orig: NapiNPServerMsg_SendEmptySlots @0x51a600]
+int check_C_32_empty_slots_request() {
+	size_t consumed = 1;
+	EXPECT(decode_empty_slots_request(nullptr, 0, consumed));
+	EXPECT(consumed == 0);
+	cover('C', 0x32);
 	return 0;
 }
 
@@ -965,6 +1076,7 @@ int main() {
 	if (check_S_0C_organic()) return 1;
 	if (check_S_40_capture_zone()) return 1;
 	if (check_S_1E_game_event()) return 1;
+	if (check_S_61_tick_seed()) return 1;
 	if (check_S_26_kill()) return 1;
 	if (check_S_4E_batch_kill()) return 1;
 	if (check_S_10_static_entity()) return 1;
@@ -990,6 +1102,7 @@ int main() {
 	if (check_C_25_reload_request()) return 1;
 	if (check_S_13_entity_death()) return 1;
 	if (check_S_30_checksum_request()) return 1;
+	if (check_S_31_loadout_crc_request()) return 1;
 	if (check_S_42_input_flags()) return 1;
 	if (check_S_79_spectator_flag()) return 1;
 	if (check_S_2A_chat_history()) return 1;
@@ -1006,6 +1119,9 @@ int main() {
 	if (check_S_08_session_config()) return 1;
 	if (check_S_02_join_padding_probe()) return 1;
 	if (check_C_2F_loadout_submit()) return 1;
+	if (check_S_50_team_assign()) return 1;
+	if (check_S_5D_destroy_list()) return 1;
+	if (check_C_32_empty_slots_request()) return 1;
 	if (test_decoded_drift_guard()) return 1;
 	std::printf("ALL nw_message_coverage tests passed\n");
 	return 0;

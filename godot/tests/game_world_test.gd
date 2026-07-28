@@ -63,6 +63,30 @@ class ViewmodelWorldHarness:
 		model_availability.append(available)
 
 
+class ChallengePrewarmPlacerStub:
+	extends RefCounted
+	var loaded: Array[String] = []
+	func resolve_player_visual_item_id(_runtime_type_id: int) -> int:
+		return 101001
+	func graphic_for(_item_id: int) -> String:
+		return "player_body"
+	func object_data_for(graphic: String):
+		loaded.append(graphic)
+		return null
+
+
+class ChallengePrewarmWorldHarness:
+	extends GameWorld
+	var requested_def: PlayerViewmodelDef
+	func install_prewarm_fixture(def: PlayerViewmodelDef, placer) -> void:
+		requested_def = def
+		_placer = placer
+	func local_player_viewmodel_def() -> PlayerViewmodelDef:
+		return requested_def
+	func prewarm_challenge_models() -> void:
+		_prewarm_loaded_model_challenge_definitions()
+
+
 class ImpactSimStub:
 	extends RefCounted
 	var drain_count := 0
@@ -1040,6 +1064,147 @@ func test_failed_host_load_does_not_arm_the_next_mission_as_a_lan_host() -> void
 	world.unload()
 
 
+func test_lan_host_threads_truthful_base_metadata_into_the_native_session() -> void:
+	# GameConfig's old capture-shaped defaults include jox01; the production
+	# GameWorld handoff must explicitly replace them with the menu/root values,
+	# including the meaningful empty string for a base-game mount.
+	var world := _make_world()
+	add_child_autofree(world)
+	await get_tree().process_frame
+	world.set_playable(false)
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path("res://../fixtures/minimal/resources")), OK)
+	world.set_resource_root(root)
+
+	assert_eq(world.load_mission_as_host({
+		"mission": "mnml.bms",
+		"net_transport": "lan",
+		"bind_port": 0,
+		"gametype": 0x30020,
+		"expansion": "",
+	}), OK)
+	var sim: NovaSimulation = world.get_sim()
+	assert_not_null(sim)
+	if sim != null:
+		var config := sim.get_host_session_config()
+		assert_eq(int(config.get("gametype", 0)), 0x30020)
+		assert_eq(String(config.get("expansion", "missing")), "",
+			"base JO stays empty instead of falling back to captured jox01")
+	world.unload()
+
+
+func test_lan_host_bind_failure_is_reported_instead_of_falling_back_socketless() -> void:
+	# Reserve an OS-chosen endpoint, then request that exact port through the
+	# production GameWorld host path. The old behavior silently started an SP
+	# listen session and still emitted world_loaded, leaving joiners no socket.
+	var blocker := NovaUdpPump.new()
+	assert_eq(blocker.bind_listen(0), OK)
+	var occupied_port := blocker.local_port()
+	assert_gt(occupied_port, 0)
+
+	var world := _make_world()
+	add_child_autofree(world)
+	await get_tree().process_frame
+	world.set_playable(false)
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path("res://../fixtures/minimal/resources")), OK)
+	world.set_resource_root(root)
+	watch_signals(world)
+	var failures: Array[String] = []
+	world.load_failed.connect(func(reason: String): failures.append(reason))
+
+	var result := world.load_mission_as_host({
+		"mission": "mnml.bms",
+		"net_transport": "lan",
+		"bind_port": occupied_port,
+		"gametype": 0x30020,
+		"expansion": "",
+	})
+	assert_eq(result, ERR_CANT_CREATE)
+	assert_false(world.is_loaded())
+	assert_null(world.get_sim(), "a failed UDP host bind creates no socketless fallback sim")
+	assert_signal_not_emitted(world, "world_loaded")
+	assert_eq(failures.size(), 1)
+	if failures.size() == 1:
+		assert_string_contains(failures[0], str(occupied_port),
+			"the launch error identifies the exact requested port")
+	blocker.close()
+
+
+func test_lan_host_bind_failure_survives_synchronous_teardown_handler() -> void:
+	# The game shell returns to the menu from INSIDE load_failed — its teardown
+	# calls unload(), which frees the failed runtime. The bind-failure leg must
+	# free/null its runtime before emitting; emitting first made the handler's
+	# reentry turn the follow-up free into a null-instance error.
+	var blocker := NovaUdpPump.new()
+	assert_eq(blocker.bind_listen(0), OK)
+	var occupied_port := blocker.local_port()
+	assert_gt(occupied_port, 0)
+
+	var world := _make_world()
+	add_child_autofree(world)
+	await get_tree().process_frame
+	world.set_playable(false)
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path("res://../fixtures/minimal/resources")), OK)
+	world.set_resource_root(root)
+	var failures: Array[String] = []
+	world.load_failed.connect(func(reason: String):
+		failures.append(reason)
+		world.unload())
+
+	var result := world.load_mission_as_host({
+		"mission": "mnml.bms",
+		"net_transport": "lan",
+		"bind_port": occupied_port,
+		"gametype": 0x30020,
+		"expansion": "",
+	})
+	assert_eq(result, ERR_CANT_CREATE)
+	assert_eq(failures.size(), 1)
+	assert_false(world.is_loaded())
+	assert_null(world.get_sim())
+	blocker.close()
+
+
+func test_escape_aborts_the_joiner_preload_wait() -> void:
+	# ESC during a load: the joiner's pre-load connect/session wait is the one
+	# interruptible leg — the reachable analog of the original per-asset abort
+	# poll [orig: Client_CheckDisconnectOrEscDuringLoad @ 0x520270]
+	# (docs/interface/loading-screen-re.md D-LOADSCR-7).
+	var blocker := NovaUdpPump.new()  # a bound but silent "host": never replies
+	assert_eq(blocker.bind_listen(0), OK)
+	var silent_port := blocker.local_port()
+	assert_gt(silent_port, 0)
+
+	var world := _make_world()
+	add_child_autofree(world)
+	await get_tree().process_frame
+	world.set_playable(false)
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path("res://../fixtures/minimal/resources")), OK)
+	world.set_resource_root(root)
+	var failures: Array[String] = []
+	world.load_failed.connect(func(reason: String): failures.append(reason))
+
+	assert_false(world.cancel_join_preload(), "no preload in flight is a no-op")
+	assert_eq(world.load_mission_as_joiner(
+			{"host_ip": "127.0.0.1", "port": silent_port}, "EscTester"), OK)
+	await get_tree().process_frame  # the deferred preload driver starts
+	assert_true(world.cancel_join_preload(), "an in-flight preload aborts")
+	assert_eq(failures.size(), 1)
+	if failures.size() == 1:
+		assert_string_contains(failures[0], "aborted")
+	assert_false(world.is_loaded())
+	await get_tree().process_frame  # the canceled driver loop unwinds quietly
+	assert_eq(failures.size(), 1, "the canceled driver does not double-report")
+	blocker.close()
+
+
 func test_failed_join_load_does_not_make_the_next_mission_wire_only() -> void:
 	var world := _make_world()
 	add_child_autofree(world)
@@ -1316,6 +1481,23 @@ func test_valid_emplaced_def_without_gfx1_builds_no_fallback_gun() -> void:
 			"the render gate observes that no first-person gun model resolved")
 
 
+func test_joiner_challenge_prewarm_loads_player_and_current_viewmodels_before_freeze() -> void:
+	var world: ChallengePrewarmWorldHarness = autofree(
+			ChallengePrewarmWorldHarness.new())
+	var placer := ChallengePrewarmPlacerStub.new()
+	world.install_prewarm_fixture(PlayerViewmodelDef.from_weapon_dict({
+		"name": "WPN_TEST",
+		"gfx1": "test_gun",
+		"gfx1a": "test_arms",
+		"flags": 0,
+	}), placer)
+
+	world.prewarm_challenge_models()
+
+	assert_eq(placer.loaded, ["player_body", "test_gun", "test_arms"],
+		"the frozen 0x3D source includes every .3DI the first player frame would load")
+
+
 func test_joiner_accepts_novaworld_advertised_mission_basename() -> void:
 	var world := _make_world()
 	add_child_autofree(world)
@@ -1422,6 +1604,34 @@ class SimlessRuntimeStub:
 	extends Node
 	func is_playing() -> bool:
 		return false
+
+
+# The joiner observer's seam: a PLAYING runtime whose sim reports the in-match
+# joiner state game_world reads once per host tick.
+class JoinerSignalSimStub:
+	extends RefCounted
+	var loss_reason := ""
+	var in_match := true
+	var deploy_pending := false
+	func is_joiner() -> bool:
+		return true
+	func is_joined_in_match() -> bool:
+		return in_match
+	func is_join_deploy_pick_pending() -> bool:
+		return deploy_pending
+	func get_session_loss_reason() -> String:
+		return loss_reason
+
+
+class JoinerSignalRuntimeStub:
+	extends Node
+	var sim = null
+	func is_playing() -> bool:
+		return true
+	func tick() -> bool:
+		return true
+	func get_sim():
+		return sim
 
 
 func test_tick_feeds_dispatcher_silhouette_anchors_from_the_sim() -> void:
@@ -2267,6 +2477,56 @@ func test_occlusion_debug_view_builds_and_frees() -> void:
 	world.set_occlusion_debug(false)
 	assert_false(world.is_occlusion_debug())
 	assert_true(view.is_queued_for_deletion(), "disabling frees the view")
+
+
+# An ESTABLISHED in-match session that goes silent past the witnessed connection
+# reap window must reach the shell exactly once. Retail reaps at
+# cs_dir0.timeout_ms = 120000 and its disconnect event exits the mission with a
+# mapped reason -- there is no in-world dialog -- so the host surfaces a reason and
+# the shell owns the presentation.
+# [orig: CNapiNetwork_Init @ 0x4ca4a0 -> CNapiNetwork_OnDisconnectedFromServer @ 0x4c63d0]
+func test_tick_emits_session_lost_once_for_an_in_match_loss() -> void:
+	var world := _make_world()
+	add_child_autofree(world)
+	var runtime := JoinerSignalRuntimeStub.new()
+	var sim := JoinerSignalSimStub.new()
+	runtime.sim = sim
+	add_child_autofree(runtime)
+	_install_runtime(world, runtime)
+	var reasons: Array = []
+	world.session_lost.connect(func(reason: String) -> void: reasons.append(reason))
+
+	world.tick(Vector3.ZERO)
+	assert_eq(reasons.size(), 0, "a healthy in-match session emits no loss")
+
+	sim.loss_reason = "lost connection to the host (no traffic for 120 seconds)"
+	world.tick(Vector3.ZERO)
+	assert_eq(reasons, ["lost connection to the host (no traffic for 120 seconds)"],
+		"the loss edge surfaces the host's reason verbatim")
+
+	# The reason latches true inside the runtime; the observer must not re-notify.
+	world.tick(Vector3.ZERO)
+	world.tick(Vector3.ZERO)
+	assert_eq(reasons.size(), 1, "a latched loss reason emits exactly once per session")
+
+	_detach_runtime(world)
+
+
+func test_tick_never_emits_session_lost_for_a_non_joiner_or_a_silent_seam() -> void:
+	# The observer is duck-typed: a render-only runtime double with no session seam
+	# must not be treated as a lost session.
+	var world := _make_world()
+	add_child_autofree(world)
+	var runtime := TransportRuntimeStub.new()
+	add_child_autofree(runtime)
+	runtime.play()
+	_install_runtime(world, runtime)
+	var reasons: Array = []
+	world.session_lost.connect(func(reason: String) -> void: reasons.append(reason))
+	world.tick(Vector3.ZERO)
+	world.tick(Vector3.ZERO)
+	assert_eq(reasons.size(), 0, "a runtime without the session seam never reports a loss")
+	_detach_runtime(world)
 
 
 func _make_world() -> GameWorld:

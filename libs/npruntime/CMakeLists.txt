@@ -2,12 +2,14 @@ add_library(opennova_npruntime STATIC
     src/server_session.cpp
     src/napi_np_protocol.cpp
     src/server_message_dispatch.cpp
+    src/charattr_challenge.cpp
     src/joiner_connection.cpp
     src/server_spawn.cpp
     src/server_initial_state.cpp
     src/server_tick.cpp
     src/client_runtime.cpp
     src/host_session.cpp
+    src/lan_discovery.cpp
     src/weapon_table_build.cpp
     src/ammo_table_build.cpp
 )
@@ -31,7 +33,7 @@ target_include_directories(opennova_npruntime
 # (D-NET-141); def is a leaf C library — no cycle.
 # opennova_io: header-only strutil (ascii iequals) for the ammo effects-table bake.
 target_link_libraries(opennova_npruntime PUBLIC
-    opennova_netsim opennova_npwire opennova_novaworld_session opennova_world opennova_mission_format opennova_def opennova_io)
+    opennova_netsim opennova_npwire opennova_world opennova_mission_format opennova_def opennova_io)
 
 target_compile_features(opennova_npruntime PUBLIC cxx_std_17)
 

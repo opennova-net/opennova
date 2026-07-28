@@ -1,5 +1,5 @@
-// Authoritative round flight + damage. See round_sim.h for the witness map and the
-// tracked reimpl deferrals. docs/net/novaworld-net-re.md §5.60.
+// Round flight and presentation, with authoritative consequences carried explicitly
+// per round. See round_sim.h and docs/net/novaworld-net-re.md §5.60.
 #include "world/round_sim.h"
 
 #include <algorithm>
@@ -350,16 +350,22 @@ void RoundSim::reset() noexcept {
 	hits.clear();
 	fired.clear();
 	next_impact_order = 1;
+	next_presentation_generation_ = 1;
 	debug_trail = {};
 	debug_trail_next = 0;
 	debug_trail_count = 0;
 	trails.reset(); // [orig: the pool memset in CEffectEmitterPool_ResetAndBuildStyles
 	                //  @ 0x5db3b0, run from Game_StartMission]
+	remote_visual_tracer_counters_.clear();
 }
 
-int RoundSim::spawn(World &world, const RoundSpawnParams &params) {
+int RoundSim::spawn(World &world, const RoundSpawnParams &params,
+                    RoundConsequenceMode mode) {
     const AmmoTableEntry *ammo = world.ammo.by_index(params.ammo_index);
     if (ammo == nullptr) return -1;
+    const bool authoritative =
+        mode == RoundConsequenceMode::Authoritative &&
+        (!world.mp_session || world.projectile_authority);
     // The retail spawn dispatch order [orig: RoundData_SpawnRound @ 0x4ec1f3..
     // 0x4ec2a5]: instantkillzone -> Detonatesatchels -> designator -> claymore
     // fan -> shotgun -> the ballistic default.
@@ -374,7 +380,7 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params) {
         explosion.ammo_index = params.ammo_index;
         explosion.owner = params.owner;
         explosion.hit_word = params.shot_seq;
-        world.explosions.queue_explosion(world, explosion);
+        if (authoritative) world.explosions.queue_explosion(world, explosion);
         if (impacts.size() < kMaxPendingImpacts) {
             // the detonation's obj-row effect [orig: AmmoDef_ProcessImpactEffect
             // tag 4 at the descriptor position in every think handler]
@@ -391,12 +397,13 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params) {
     }
     if ((ammo->flags & 0x20u) != 0) {
         // Detonatesatchels [orig: @ 0x4ec234 -> Entity_DetonateSatchelsByOwner]
-        world.throwables.detonate_satchels_by_owner(world, params.owner);
+        if (authoritative)
+            world.throwables.detonate_satchels_by_owner(world, params.owner);
         return -1;
     }
     if ((ammo->flags & 0x20000u) != 0) {
         // the claymore shrapnel fan [orig: @ 0x4ec288 -> Weapon_SpawnProjectileBurst]
-        return spawn_burst(world, params, *ammo);
+        return spawn_burst(world, params, *ammo, mode);
     }
     // Null/non-ballistic ammo spawns nothing at this altitude: the Knife(1)/Medic(3)
     // kill zones are the immediate-raycast leaves [orig: kztype dispatch @0x4ec21f],
@@ -434,11 +441,14 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params) {
     LiveRound &r = rounds[static_cast<size_t>(slot)];
     r = LiveRound{};
     r.active = true;
+    r.consequence_mode = mode;
     r.owner = params.owner;
     r.shooter_handle = params.shooter_handle;
+    r.shooter_carrier_handle = params.shooter_carrier_handle;
     r.ammo_index = params.ammo_index;
     r.adm_index = params.adm_index;
     r.shot_seq = params.shot_seq;
+    r.presentation_generation = next_presentation_generation_++;
     r.pos = params.origin;
     r.vel.x = static_cast<float>(std::cos(bearing) * cp * speed_per_tick);
     r.vel.y = static_cast<float>(std::sin(bearing) * cp * speed_per_tick);
@@ -463,12 +473,24 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params) {
         if (++owner_ent->tracer_shot_counter >= ammo->tracer_rate)
             owner_ent->tracer_shot_counter = 0;
         tracer = (owner_ent->tracer_shot_counter == 0);
+    } else if (mode == RoundConsequenceMode::VisualOnly &&
+               params.shooter_handle != 0xFFFF) {
+        // The retail receiver resolves H to the remote shooter and advances
+        // that shooter's slot cadence. Our visual World deliberately does not
+        // clone remote entities, so retain the same field by wire identity.
+        uint32_t &counter = remote_visual_tracer_counters_[params.shooter_handle];
+        if (++counter >= static_cast<uint32_t>(ammo->tracer_rate)) counter = 0;
+        tracer = counter == 0;
     }                                      // [orig: @0x4ec1cf no slot + rate != 0 -> stays true]
     if ((ammo->flags & 0x8000u) != 0) tracer = true; // [orig: forcetracer @0x4ec1db]
     r.tracer = tracer;
-    // No shooter -> team 0xFF (always the ENEMY style on every client) [orig: the
-    // !sourceEntity arm @ 0x4ec721; the slot+4 & 0x200 0xFF override is unmodeled].
-    r.team = owner_ent != nullptr ? static_cast<uint8_t>(owner_ent->team) : 0xFF;
+    // A local owner supplies the team; a decoded remote round carries the resolved
+    // wire shooter's team in params (retail resolves the wire shooter entity and
+    // copies its team @0x4ec705). 0xFF (always the ENEMY style) is only the truly
+    // unresolvable-source arm [orig: the !sourceEntity arm @ 0x4ec721; the
+    // slot+4 & 0x200 0xFF override is unmodeled].
+    r.team = owner_ent != nullptr ? static_cast<uint8_t>(owner_ent->team)
+                                  : params.shooter_team;
 
     // The tracer VISUAL — a trail channel allocated at spawn, styled friendly/enemy
     // against the presenting client's team [orig: RoundData_SpawnRound @ 0x4ec740:
@@ -520,6 +542,8 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params) {
     fe.origin = params.origin;
     fe.yaw_bam = params.dir_yaw_bam;
     fe.pitch_bam = params.dir_pitch_bam;
+    fe.wire_round_flags = params.wire_round_flags;
+    fe.adm_index = params.adm_index;
     fired.push_back(fe);
 
     ++active_count;
@@ -531,7 +555,7 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params) {
 // [base - pieslice, base + pieslice) and pitch in [base, base + pieslice);
 // pellets carry no tracer, no model, no fire event.
 int RoundSim::spawn_burst(World &world, const RoundSpawnParams &params,
-                          const AmmoTableEntry &ammo) {
+                          const AmmoTableEntry &ammo, RoundConsequenceMode mode) {
     int count = ammo.spread_count;
     if (count > 32) count = 32;
     if (count <= 0) count = 1;
@@ -563,17 +587,21 @@ int RoundSim::spawn_burst(World &world, const RoundSpawnParams &params,
         LiveRound &r = rounds[static_cast<size_t>(slot)];
         r = LiveRound{};
         r.active = true;
+        r.consequence_mode = mode;
         r.owner = params.owner;
         r.shooter_handle = params.shooter_handle;
+        r.shooter_carrier_handle = params.shooter_carrier_handle;
         r.ammo_index = params.ammo_index;
         r.adm_index = params.adm_index;
         r.shot_seq = params.shot_seq;
+        r.presentation_generation = next_presentation_generation_++;
         r.pos = params.origin;
         r.vel.x = static_cast<float>(std::cos(bearing) * cp * speed);
         r.vel.y = static_cast<float>(std::sin(bearing) * cp * speed);
         r.vel.z = static_cast<float>(std::sin(pitch_rad) * speed);
         r.max_age_ticks = ammo.max_age_ticks;
-        r.team = owner_ent != nullptr ? static_cast<uint8_t>(owner_ent->team) : 0xFF;
+        r.team = owner_ent != nullptr ? static_cast<uint8_t>(owner_ent->team)
+                                      : params.shooter_team;
         r.tracer = false;
         r.trail_slot = -1;
         r.yaw_bam = yaw;
@@ -611,6 +639,9 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
     for (int i = 0; i < kCapacity; ++i) {
         LiveRound &r = rounds[static_cast<size_t>(i)];
         if (!r.active) continue;
+        const bool authoritative =
+            r.consequence_mode == RoundConsequenceMode::Authoritative &&
+            (!world.mp_session || world.projectile_authority);
 
         // The lifetime/armed-fuse head runs before the motor. Advance the
         // stored age before dispatch; the custom motor compensates so its
@@ -621,7 +652,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             // ballistic lifetime expiry vanishes silently.
             const AmmoTableEntry *fuze_ammo = world.ammo.by_index(r.ammo_index);
             if (fuze_ammo != nullptr && r.det_at_expiry) {
-                detonate_round(world, r, r.pos, *fuze_ammo);
+                if (authoritative) detonate_round(world, r, r.pos, *fuze_ammo);
                 if (impacts.size() < kMaxPendingImpacts) {
                     RoundImpact imp;
                     imp.position = r.pos;
@@ -666,7 +697,8 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         if ((ammo_flags & 0x2000u) != 0) {
             bool alive = true;
             if (ammo != nullptr)
-                alive = throwable_motor_tick(world, *this, r, *ammo, queries, terrain);
+                alive = throwable_motor_tick(
+                    world, *this, r, *ammo, queries, terrain, authoritative);
             if (!alive) {
                 if (r.trail_slot >= 0) {
                     trails.append(r.trail_slot, r.pos);
@@ -718,6 +750,15 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         trace.owner = r.owner;
         trace.radius_q16 = ammo != nullptr ? ammo->bullet_radius_fp16 : 0;
         trace.ammo_flags = ammo_flags;
+        // Only decoded remote presentation rounds may trace the client-state
+        // proxy projections (person + dynamic). A default Authoritative round
+        // in a non-authority MP world is consequence-gated above, but it must
+        // not silently become a proxy/presentation round merely because this
+        // process lacks authority.
+        trace.include_wire_proxies =
+            r.consequence_mode == RoundConsequenceMode::VisualOnly;
+        trace.shooter_wire_handle = r.shooter_handle;
+        trace.shooter_carrier_wire_handle = r.shooter_carrier_handle;
         const ProjectileHit collision = queries->trace_projectile(world, trace);
         if (!collision.hit()) {
             r.pos = vec_from_fixed(end_q16);
@@ -802,7 +843,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         // (+0x190/+0x192) are signed WORDs in retail. Entity intentionally exposes
         // int32_t carriers to the rest of OpenNova, so enforce the storage width at
         // this consequence boundary before any signed comparisons are made.
-        if (target != nullptr) {
+        if (authoritative && target != nullptr) {
             target->health = retail_signed_i16(target->health);
             target->health_max = retail_signed_i16(target->health_max);
             target->armor_impact = retail_signed_i16(target->armor_impact);
@@ -828,7 +869,8 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         // Projectile_ProcessDamageOnTarget returns before damage calculation when
         // target->ItemDef is null.  Geometry still consumed the round above, so
         // the physical impact remains observable even though no hit is recorded.
-        if (target != nullptr && target->has_item_def && !not_armed && ammo != nullptr) {
+        if (authoritative && target != nullptr && target->has_item_def &&
+            !not_armed && ammo != nullptr) {
             const Entity *shooter = world.registry.get(r.owner);
             int32_t damage = calc_impact_damage(velocity_q16, *ammo, collision.hit_zone,
                                                 collision.bone_index, *target, shooter,
@@ -904,10 +946,9 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             imp.effect_tag = 5; // no-charmap retail default: dirt
         } else if (collision.hit_class == ProjectileHitClass::Water) {
             imp.effect_tag = 11;
-        } else if (impact_target != nullptr &&
-                   (impact_target->item_type == 3 ||
-                    (impact_target->item_type == 0 &&
-                     impact_target->kind == EntityKind::Organic))) {
+        } else if (person_collision) {
+            // A decoded remote-player proxy intentionally has no registry
+            // target, but it is still the retail person collision class.
             imp.effect_tag = 2;
         } else if (impact_target != nullptr &&
                    impact_target->kind == EntityKind::Building &&
@@ -926,7 +967,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         // Every explosive round stop queues its authored kill zone. The queue
         // drains after the round simulation, preserving direct-hit-before-AoE
         // consequence ordering.
-        if (ammo != nullptr)
+        if (authoritative && ammo != nullptr)
             detonate_round(world, r, impact_position, *ammo);
 
         RoundDebugEvent event;

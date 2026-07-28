@@ -47,9 +47,9 @@ namespace {
 
 // --- wire collectors ---------------------------------------------------------
 int n_s57 = 0, n_c2c = 0;                 // RTT ping/pong
-int n_s68 = 0, n_c3d = 0;                 // entity-index req / reply
+int n_s68 = 0, n_c3d = 0;                 // loaded-model page req / reply
 int n_s43 = 0, n_c08 = 0;                 // time-sync ping / reply
-int n_s39 = 0, n_c1c = 0;                 // anim-crc challenge / reply
+int n_s39 = 0, n_c1c = 0;                 // charattr-row challenge / reply
 int n_06 = 0;                             // C2S fired-round
 int n_5d = 0;                             // S2C destroy-list (clean despawn)
 int n_59 = 0;                             // S2C deployed-item
@@ -172,9 +172,9 @@ int main() {
 	check(n_s57 > 5000 && n_c2c > 5000, "RTT ping/pong is high-volume (>5000 each)");
 	int rtt_diff = n_s57 - n_c2c; if (rtt_diff < 0) rtt_diff = -rtt_diff;
 	check(rtt_diff <= 4, "RTT 0x57 and C2S 0x2C counts pair (within 4)");
-	check(n_s68 > 0 && n_c3d > 0, "entity-index req 0x68 <-> reply C2S 0x3D co-present");
+	check(n_s68 > 0 && n_c3d > 0, "loaded-model req 0x68 <-> page C2S 0x3D co-present");
 	check(n_s43 > 0 && n_c08 > 0, "time-sync ping 0x43 <-> reply C2S 0x08 co-present");
-	check(n_s39 > 0 && n_c1c > 0, "anim-crc challenge 0x39 <-> reply C2S 0x1C co-present");
+	check(n_s39 > 0 && n_c1c > 0, "charattr-row challenge 0x39 <-> reply C2S 0x1C co-present");
 
 	// --- multi-client identity + lifecycle (Wave 4) --------------------------
 	check(names_7b.size() >= 2, "at least 2 distinct players named via S2C 0x7B");

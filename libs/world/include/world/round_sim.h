@@ -50,6 +50,7 @@
 
 #include <array>
 #include <cstdint>
+#include <unordered_map>
 #include <vector>
 
 #include "world/entity.h"
@@ -70,9 +71,28 @@ struct AmmoTableEntry; // world/ammo_table.h
 
 enum class ThrowClass : uint8_t; // world/throwables.h
 
+// A client re-runs S2C tag-2 descriptors for presentation, but none of that
+// flight may produce authoritative gameplay consequences. Presentation state
+// (trails, cosmetic cadence, impacts, debug) still advances normally. Carry the
+// mode on each round so mixed callers cannot infer safety from zero damage alone.
+enum class RoundConsequenceMode : uint8_t {
+    Authoritative,
+    VisualOnly,
+};
+
 struct RoundSpawnParams {
     EntityHandle owner;               // the shooter entity (skipped in the hit test)
     uint16_t shooter_handle = 0xFFFF; // pool<<12|slot, for death credit
+    // The decoded shooter's carrier at fire time (visual-only rounds): keeps a
+    // mounted shooter's re-simulated round from clipping the shooter's own
+    // vehicle proxy — the wire-side ray[18] mount-exclusion analog.
+    uint16_t shooter_carrier_handle = 0xFFFF;
+    // The decoded wire shooter's team, for rounds spawned WITHOUT a local owner
+    // entity (the joiner's remote rounds): retail resolves the wire shooter and
+    // copies its team — the friend/enemy TrcrID item and tracer styling key on it;
+    // 0xFF is only the truly-unresolvable-source arm.
+    // [orig: the sourceEntity team copy @0x4ec705; the !sourceEntity arm @0x4ec721]
+    uint8_t shooter_team = 0xFF;
     Vec3 origin;                      // fire origin, mission units
     int32_t dir_yaw_bam = 0;          // wire fire direction (engine-frame BAM32, §5.16)
     int32_t dir_pitch_bam = 0;
@@ -83,6 +103,10 @@ struct RoundSpawnParams {
     // 1..254 scale the ammo velocity by charge/256 @ 0x4ec5bb, 0/255 = full].
     // Rides the wire as the round event's slot_byte (ring+32).
     uint8_t charge = 0;
+    // The wire round-event flags byte, for rounds re-spawned from a received
+    // descriptor. Zero for host/AI-originated fire. See FireEvent::wire_round_flags.
+    // [orig: NetPacket_DeserializeRoundEvent @0x42f270 arm tests @0x42f521/@0x42f6ce]
+    uint8_t wire_round_flags = 0;
 };
 
 // One in-flight round. [orig: 780-B record; the fields we simulate: pos, velocity
@@ -90,11 +114,17 @@ struct RoundSpawnParams {
 // (+368), shot-seq word (+120).]
 struct LiveRound {
     bool active = false;
+    RoundConsequenceMode consequence_mode = RoundConsequenceMode::Authoritative;
     EntityHandle owner;
     uint16_t shooter_handle = 0xFFFF;
+    uint16_t shooter_carrier_handle = 0xFFFF;
     int32_t ammo_index = -1;
     uint8_t adm_index = 0;
     uint16_t shot_seq = 0;
+    // Host-local lifetime identity for presentation. Pool slots are reused,
+    // potentially between two rendered frames during fixed-tick catch-up; a
+    // slot index alone would teleport an old owned effect onto the new round.
+    uint64_t presentation_generation = 0;
     Vec3 pos;            // mission units
     Vec3 vel;            // mission units per TICK [orig: velocity = ammo speed / 62]
     int32_t age_ticks = 0;
@@ -120,7 +150,8 @@ struct LiveRound {
     uint8_t bounce_count = 0;      // [orig: byte +341]
     // The TrcrID item the round renders as (items.def id - 100000) — picked
     // friendly/enemy by the spawning host's team [orig: +28 ItemTypeIndex
-    // @ 0x4ec79b -> Entity_InitFromItemDef].
+    // @ 0x4ec79b -> Entity_InitFromItemDef]. The class/motor binding survives
+    // a non-tracer cadence shot; only its separate visible-model pointer clears.
     int32_t item_type_id = 0;
     // Class bindings resolved from the item's ai_function/move_function tags
     // [orig: itemDef updateCallback -> +452, deathCallback -> +456].
@@ -137,6 +168,13 @@ struct LiveRound {
     // [orig: the runtime 0x1000 flag @ 0x444a29 consumed by the update head].
     bool det_at_expiry = false;
 };
+
+// Retail keeps the selected TrcrID item/class bound independently of tracer
+// cadence (@0x4ec79b..0x4ec7b7), but clears the round+0x30 visible-model
+// pointer when this particular shot is not a tracer (@0x4ec900).
+inline int32_t round_visible_item_id(const LiveRound &round) {
+    return round.tracer ? round.item_type_id : 0;
+}
 
 // A death the damage pass detected this tick — drained by the host session, which owns
 // the wire (S2C 0x13 / 0x1E / 0x26 staging) and the respawn queue [orig: the death
@@ -199,6 +237,22 @@ struct FireEvent {
     Vec3 origin;          // mission units
     int32_t yaw_bam = 0;  // fire direction (engine-frame BAM32, §5.16)
     int32_t pitch_bam = 0;
+    // Which arm of retail's round-event RECEIVE path produced this, for rounds that
+    // came off the wire. The two arms are mutually exclusive and pick different
+    // presentation entirely: bit 0 set -> the ammo-def arm, which plays ammoDef+64 and
+    // spawns ammoDef+68 at the wire position; bit 0 clear with bit 1 set -> the
+    // adm-indexed arm, which spawns NO ammo-def effect and instead executes the
+    // addressed ADM def's fire and recoil action rows at the weapon's own userpoint.
+    // Zero means this fire did NOT come off the wire (our own host/AI presentation,
+    // which retail runs inline at the shooter instead) and keeps the ammo-def legs.
+    // [orig: NetPacket_DeserializeRoundEvent @0x42f270 — bit 0 @0x42f521, bit 1
+    //  @0x42f6ce; ammo arm @0x42f527..0x42f6c7 (sound @0x42f5dc, effect @0x42f6c2);
+    //  adm arm action pair @0x42f777/@0x42f785 and @0x42f98f/@0x42f9d0]
+    uint8_t wire_round_flags = 0;
+    // The ADM def the adm arm addresses. It is the WIRE-ADDRESSED def, not the
+    // observed shooter's equipped weapon — conflating them is a port bug.
+    // [orig: AdmDef_GetEntryByIndex @0x42f6d9]
+    uint8_t adm_index = 0;
 };
 
 // One resolved hit-test outcome, kept in a persistent ring for the F3 Rounds
@@ -291,12 +345,13 @@ public:
 
     // Spawn one round at fire time [orig: RoundData_SpawnRound @ 0x4EC0D0 default path].
     // Returns the round slot, or -1 (pool full / non-ballistic ammo / null ammo).
-    int spawn(World &world, const RoundSpawnParams &params);
+    int spawn(World &world, const RoundSpawnParams &params,
+              RoundConsequenceMode mode = RoundConsequenceMode::Authoritative);
 
     // The pellet fan for claymore-flag ammo [orig: Weapon_SpawnProjectileBurst
     // @ 0x4EB900]. Returns the first pellet slot or -1.
     int spawn_burst(World &world, const RoundSpawnParams &params,
-                    const AmmoTableEntry &ammo);
+                    const AmmoTableEntry &ammo, RoundConsequenceMode mode);
 
     // One 62 Hz step for every live round [orig: Weapon_UpdateAllProjectiles @ 0x4EC020
     // -> Projectile_UpdatePhysics @ 0x4E9D70]: advance along velocity, terrain stop,
@@ -309,6 +364,13 @@ public:
 
     // Mission restart discards all transient projectile/presentation state.
     void reset() noexcept;
+
+private:
+    uint64_t next_presentation_generation_ = 1;
+    // Retail advances tracer cadence on each remote shooter's weapon slot. A
+    // visual tag-2 round has wire H but no local Entity owner, so this is that
+    // per-remote presentation field projected onto the decoded identity.
+    std::unordered_map<uint16_t, uint32_t> remote_visual_tracer_counters_;
 };
 
 // Queue an explosive round's kill zone at its stop [orig: the kztype-gated

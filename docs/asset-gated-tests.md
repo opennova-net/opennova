@@ -29,6 +29,7 @@ tracked files. Capture files default to `${CMAKE_SOURCE_DIR}/.scratch/…`
 | `NW_GOLDEN_GAMEPLAY` | ctest `npruntime_golden_gameplay`, `npruntime_golden_client`, `nw_golden_diff` | golden retail↔retail gameplay capture (`.scratch/golden/retail-gameplay-session.pcapng`) | never |
 | `NW_GOLDEN_LAN_JOIN` / `NW_GOLDEN_LAN_JOIN_SESSION` | ctest `npruntime_golden_lan_join`, `npruntime_two_endpoint_socket` cross-check, `npruntime_golden_lan_join_session` | golden retail LAN host/join captures | never |
 | `NW_GOLDEN_OURS` | ctest `nw_golden_diff` ("ours" side) | our own freshly captured join | committable in principle, but the diff needs the retail golden too |
+| `OPENNOVA_WEAPON_SAV` | ctest `playersav_weapon_sav` (corpus leg only; its synthesized cases run ungated) | a retail `weapon.sav` player profile — `<install>/expansion/<exp>/weapon.sav`, else `<install>/weapon.sav` (net-re §5.66) | never (player profile data, and the file carries the local player's callsign-adjacent selections) |
 | `OPENNOVA_MODSUPEROED_DIR` | pytest modsuperoed automation smoke | third-party OED pack | already in CI (LFS submodule; the `modsuperoed-smoke` job) |
 
 Manual probes/tools share the gating pattern but are not CI-collected (see

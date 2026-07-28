@@ -45,6 +45,9 @@ public:
 	// editor's browse index must see arbitrary modder archives — a deliberate divergence,
 	// docs/vfs/vfs-pff-mount-re.md D-VFS-2); the game runtime passes RetailTable (the
 	// witnessed fixed boot table [orig: PFF_OpenAllArchives @ 0x4a4310]).
+	// Scanning an already-mounted index REPLACES the mount outright (clear() first: archives
+	// closed, search paths dropped, entries rebuilt) — it never layers onto the previous one,
+	// so a remount in place is how a live root moves to another expansion.
 	bool scan(const std::string &root_dir, const std::string &expansion = std::string(),
 	          VfsMountMode mode = VfsMountMode::PackedWithLooseOverride,
 	          VfsArchiveDiscovery discovery = VfsArchiveDiscovery::ScanAll);
@@ -64,6 +67,11 @@ public:
 	bool read_file(const std::string &name, std::vector<uint8_t> &out) const;
 	bool read_file(const std::string &name, std::vector<uint8_t> &out, VfsLookupPolicy policy) const;
 	const std::string &root_dir() const;
+	// The expansion whose layers ACTUALLY mounted, empty for base game — including after
+	// scan()'s silent fallback for a missing/unknown expansion (opennova::Vfs::mount_game).
+	// Read this, never the requested name, when running on the wrong data set is a bug
+	// (the LAN joiner's host-expansion reconcile, D-NET-178).
+	const std::string &mounted_expansion() const;
 	const std::string &last_error() const;
 
 private:

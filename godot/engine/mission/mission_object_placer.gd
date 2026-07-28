@@ -239,6 +239,11 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 	# original's per-model loading-screen presents [orig: Game_StartMission's
 	# in-loop LoadingScreen_UpdateAndPresent calls @ 0x524d9c/0x524f32].
 	var progress: Callable = options.get("progress", Callable())
+	# Optional entity-kind exclusion (NovaMissionData.KIND_*). The joiner places
+	# the mission minus organics: players and streamed AI render wire-direct,
+	# while items/buildings/markers become ordinary placed (batched, occludable)
+	# nodes the wire present pass defers to by identity.
+	var skip_kinds: Array = options.get("skip_kinds", [])
 	var container := _ensure_container(parent)
 
 	# Bucket entities by graphic, split static vs animated.
@@ -258,6 +263,8 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 	var animated: Array = []  # [{ graphic, xform, (kind, index in edit_mode) }]
 	for e in mission.get_all_entities():
 		var entity: Dictionary = e
+		if not skip_kinds.is_empty() and int(entity.get("kind", -1)) in skip_kinds:
+			continue
 		if int(entity.get("kind", -1)) == NovaMissionData.KIND_MARKER:
 			stats.markers += 1
 			continue

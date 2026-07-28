@@ -120,8 +120,11 @@ struct MiniServer {
 	std::string server_scrk = "ZZSERVERSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABC"; // 61 chars
 	std::string nwuid = "feedfacecafebeef0011223344556677889900aabbccddeeff0011223344"; // SessionInit NWUID the client must echo
 	std::string client_scrk;               // learned from ClientAuth
+	uint32_t client_ck = 0;
 	uint32_t last_client_hk = 0;           // captured for the echo assertion
-	uint32_t next_seq = 0;
+	// Retail protocol packets are 1-based in both directions; sequence zero is the
+	// no-packet/force-send sentinel and never crosses the contiguous admission gate.
+	uint32_t next_seq = 1;
 	LobbyState lobby;
 	LobbySession session;
 
@@ -173,6 +176,7 @@ struct MiniServer {
 			expect(auth.pv1 == "0.0.0 2/10/2004 EM", "ClientAuth PV1 == retail PV1");
 			expect(auth.pv2 == "1", "ClientAuth PV2 == retail PV2 (is_server gate)");
 			last_client_hk = auth.hk;
+			client_ck = auth.ck;
 			client_scrk = auth.scrk;
 			ServerAuth reply = build_server_auth(auth, 0x7F000001u, 5000,
 			                                     server_sk, server_scrk,
@@ -218,7 +222,7 @@ struct MiniServer {
 			if (replies.empty()) return {}; // ack-only (e.g. heartbeat)
 
 			ProtocolPacketHeader rhdr;
-			rhdr.session_id = 0; // client doesn't validate this against our SK in Phase 1
+			rhdr.session_id = client_ck;
 			rhdr.seq_num = next_seq++;
 			rhdr.ack_count = hdr.seq_num;
 			rhdr.connection_flags = 0;
@@ -248,7 +252,7 @@ void test_parser_roundtrip() {
 	       "parse_server_hello succeeds");
 	expect(sh_parsed.hk == 0xABAD1DEAu, "parse_server_hello recovers hk");
 	expect(sh_parsed.ci == 0x11223344u, "parse_server_hello recovers ci");
-	expect(sh_parsed.pl == sh.pl, "parse_server_hello recovers PL");
+	expect(sh_parsed.pl.empty(), "parse_server_hello leaves absent PL empty");
 
 	ClientAuth ca;
 	ca.ci = 0x11223344u;
@@ -321,10 +325,72 @@ void test_parser_roundtrip() {
 	}
 }
 
+void test_client_correlates_handshake_echoes() {
+	ClientSession::Config cfg;
+	cfg.client_index = 0x11223344u;
+	cfg.client_key = 0x55667788u;
+	ClientSession client(cfg);
+	const std::vector<uint8_t> hello_datagram = client.start();
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	expect(server_decode_inbound(hello_datagram, opcode, body),
+	       "echo-guard decodes lobby ClientHello");
+	ClientHello hello;
+	expect(parse_client_hello(body.data(), body.size(), hello),
+	       "echo-guard parses lobby ClientHello");
+
+	ServerHello wrong_hello = build_server_hello(hello, 0x7F000001u, 5000);
+	wrong_hello.ci ^= 1u;
+	const std::vector<uint8_t> wrong_hello_datagram = server_encode_outbound(
+			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(wrong_hello));
+	std::vector<std::vector<uint8_t>> out;
+	expect(client.handle_datagram(
+			       wrong_hello_datagram.data(), wrong_hello_datagram.size(), out) &&
+	               out.empty() && client.state() == ClientSession::State::Hello,
+	       "lobby ServerHello for another CI is ignored");
+
+	ServerHello valid_hello = build_server_hello(hello, 0x7F000001u, 5000);
+	const std::vector<uint8_t> valid_hello_datagram = server_encode_outbound(
+			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(valid_hello));
+	out.clear();
+	expect(client.handle_datagram(
+			       valid_hello_datagram.data(), valid_hello_datagram.size(), out) &&
+	               out.size() == 1 && client.state() == ClientSession::State::Auth,
+	       "matching lobby ServerHello advances to Auth");
+	ClientAuth auth;
+	expect(server_decode_inbound(out[0], opcode, body) &&
+	               parse_client_auth(body.data(), body.size(), auth),
+	       "echo-guard parses lobby ClientAuth");
+	ServerAuth wrong_auth = build_server_auth(
+			auth, 0x7F000001u, 5000, 0xAABBCCDDu, "SERVER-ECHO-GUARD-SCRK");
+	wrong_auth.ci ^= 2u;
+	const std::vector<uint8_t> wrong_auth_datagram = server_encode_outbound(
+			SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(wrong_auth));
+	out.clear();
+	expect(client.handle_datagram(
+			       wrong_auth_datagram.data(), wrong_auth_datagram.size(), out) &&
+	               client.state() == ClientSession::State::Auth &&
+	               client.server_key() == 0,
+	       "lobby ServerAuth with mismatched CI cannot install keys");
+
+	ServerAuth wrong_key_auth = build_server_auth(
+			auth, 0x7F000001u, 5000, 0xAABBCCDDu, "SERVER-ECHO-GUARD-SCRK");
+	wrong_key_auth.ck ^= 4u;
+	const std::vector<uint8_t> wrong_key_auth_datagram = server_encode_outbound(
+			SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(wrong_key_auth));
+	out.clear();
+	expect(client.handle_datagram(
+			       wrong_key_auth_datagram.data(), wrong_key_auth_datagram.size(), out) &&
+	               client.state() == ClientSession::State::Auth &&
+	               client.server_key() == 0,
+	       "lobby ServerAuth with mismatched CK cannot install keys");
+}
+
 } // namespace
 
 int main() {
 	test_parser_roundtrip();
+	test_client_correlates_handshake_echoes();
 
 	MiniServer server;
 	ClientSession::Config cfg;
@@ -387,6 +453,49 @@ int main() {
 	// 5) ServerStartVerify -> client emits ClientRequestVerifyResult.
 	auto s_start_verify = server.respond(d_connected);
 	expect(!s_start_verify.empty(), "ServerStartVerify datagram non-empty");
+	// A validly-encrypted packet addressed to another local session key is
+	// quietly dropped before either sequence state or lobby semantics advance.
+	// Feeding the original packet with the same sequence immediately afterward
+	// must still admit it.
+	{
+		uint8_t wrong_opcode = 0;
+		std::vector<uint8_t> wrong_body;
+		ProtocolPacketHeader wrong_header;
+		std::vector<ProtocolMessage> wrong_messages;
+		expect(server_decode_inbound(s_start_verify, wrong_opcode, wrong_body) &&
+		               wrong_opcode == SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE &&
+		               decode_protocol_packet_plaintext(
+				               wrong_body.data(), wrong_body.size(),
+				               server.server_scrk, wrong_header, wrong_messages),
+		       "wrong-session regression decodes ServerStartVerify fixture");
+		wrong_header.session_id ^= 0x01010101u;
+		std::vector<uint8_t> rewritten_body;
+		expect(encode_protocol_packet_plaintext(
+			               wrong_header, wrong_messages, server.server_scrk,
+			               rewritten_body),
+		       "wrong-session regression rewrites only session_id");
+		const auto wrong_session = server_encode_outbound(
+				SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(rewritten_body));
+		std::vector<std::vector<uint8_t>> rejected_out;
+		expect(client.handle_datagram(
+			               wrong_session.data(), wrong_session.size(), rejected_out) &&
+		               rejected_out.empty() &&
+		               client.state() == ClientSession::State::Verifying,
+		       "wrong inbound lobby session_id is rejected without dispatch");
+
+		const auto ack_probe = client.build_heartbeat();
+		uint8_t probe_opcode = 0;
+		std::vector<uint8_t> probe_body;
+		ProtocolPacketHeader probe_header;
+		std::vector<ProtocolMessage> probe_messages;
+		expect(server_decode_inbound(ack_probe, probe_opcode, probe_body) &&
+		               probe_opcode == SESSION_OPCODE_PROTOCOL_MESSAGE &&
+		               decode_protocol_packet_plaintext(
+				               probe_body.data(), probe_body.size(),
+				               server.client_scrk, probe_header, probe_messages) &&
+		               probe_header.ack_count == 0,
+		       "wrong inbound lobby session_id cannot advance receive sequence");
+	}
 	out.clear();
 	expect(client.handle_datagram(s_start_verify.data(), s_start_verify.size(), out),
 	       "client handles ServerStartVerify");
@@ -540,6 +649,22 @@ int main() {
 				}
 			}
 		}
+	}
+
+	// 0x46 addresses the receiver by ServerAuth.SK and carries the full retail
+	// disconnect-stat TLV body, rather than sending ClientHello.CI as a lone
+	// dword.
+	{
+		const auto goodbye = client.build_goodbye();
+		uint8_t goodbye_opcode = 0;
+		std::vector<uint8_t> goodbye_body;
+		expect(server_decode_inbound(goodbye, goodbye_opcode, goodbye_body) &&
+		               goodbye_opcode == SESSION_OPCODE_CLIENT_GOODBYE,
+		       "ClientSession goodbye decodes as C2S 0x46");
+		expect(goodbye_body == client_goodbye_to_bytes(server.server_sk),
+		       "ClientSession goodbye body is keyed by ServerAuth.SK with retail TLVs");
+		expect(client.state() == ClientSession::State::Closed,
+		       "ClientSession closes after building goodbye");
 	}
 
 	if (g_failures == 0) {

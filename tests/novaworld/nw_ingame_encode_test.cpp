@@ -584,6 +584,38 @@ int test_weapon_reload_roundtrip() {
 	return 0;
 }
 
+// C2S 0x2F loadout submit: encode_loadout_submit <-> decode_loadout_submit identity,
+// plus the golden capture-default pair byte shape (the joiner's canned submission).
+// [orig: NetPacket_SendLoadoutSubmit @0x42cdc0 / NapiNPServerMsg_HandlePlayerLoadout @0x515790]
+int test_loadout_submit_roundtrip() {
+	LoadoutSubmit s;
+	s.team = 2;
+	s.player_class = 6;
+	s.weapon_slot_index = 212;
+	s.entries.push_back(LoadoutSubmitEntry{0x18, 0x03, 0xFF, 0xFF});
+	s.entries.push_back(LoadoutSubmitEntry{0x2C, 0xFF, 0x02, 0x01});
+	const std::vector<uint8_t> wire = encode_loadout_submit(s);
+	EXPECT(wire == std::vector<uint8_t>({0x02, 0x06, 0xD4, 0x00, 0x00, 0x00,
+	                                     0x18, 0x03, 0xFF, 0xFF,
+	                                     0x2C, 0xFF, 0x02, 0x01, 0xFF}));
+	LoadoutSubmit d;
+	EXPECT(decode_loadout_submit(wire.data(), wire.size(), d));
+	EXPECT(d.team == 2 && d.player_class == 6 && d.weapon_slot_index == 212);
+	EXPECT(d.entries.size() == 2 && d.terminated);
+	EXPECT(d.entries[0].adm_index == 0x18 && d.entries[0].ammo_primary == 0x03);
+	EXPECT(d.entries[1].adm_index == 0x2C && d.entries[1].variant == 0x01);
+	// The empty-kit form stays a bare header + terminator (7 B).
+	LoadoutSubmit empty;
+	empty.team = 1;
+	empty.player_class = 8;
+	empty.weapon_slot_index = 195;
+	const std::vector<uint8_t> empty_wire = encode_loadout_submit(empty);
+	EXPECT(empty_wire ==
+	       std::vector<uint8_t>({0x01, 0x08, 0xC3, 0x00, 0x00, 0x00, 0xFF}));
+	std::printf("PASS loadout_submit_roundtrip\n");
+	return 0;
+}
+
 // network_compress_fixedpoint <-> network_decompress_fixedpoint, the position
 // codec the field-driven 0x0A builder uses. The codec is lossy (12-bit float-like)
 // and its XOR-fold is asymmetric for negatives, so only representable positives are
@@ -1029,6 +1061,7 @@ int main() {
 	rc |= test_vehicle_compact_roundtrip_unmounted();
 	rc |= test_player_compact_roundtrip();
 	rc |= test_weapon_reload_roundtrip();
+	rc |= test_loadout_submit_roundtrip();
 	rc |= test_player_sync_roundtrip();
 	rc |= test_player_list_roundtrip();
 	rc |= test_terrain_load_header_chunk_roundtrip();

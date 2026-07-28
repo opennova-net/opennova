@@ -2,6 +2,8 @@
 
 #include "npruntime/batch_chunker.h" // np::slice_batch_pages (the shared byte-budget pager, ADR 0013)
 
+#include <npwire/nw_session_framing.h> // make_random_session_u32 (the per-player tick seed)
+
 #include <array>
 #include <cstdint>
 #include <cstdio>
@@ -14,6 +16,7 @@
 #include <npwire/ingame_encode.h>      // encode_organic_spawn_batch / encode_pool3_sync_batch
 #include <world/entity.h>                 // world::Entity (0x0F spawn pose)
 #include <world/geom.h>                   // world::to_fixed (0x0F spawn pose)
+#include <world/spawn_select.h>           // world_has_spawn_zone (0x0F gameFlags bit0)
 #include <world/world.h>
 
 namespace opennova::np {
@@ -167,8 +170,10 @@ std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const Napi
 	put_u16(b, static_cast<uint16_t>(yaw));       // yaw  (i16, client <<16)
 	put_u16(b, 0);                                // pitch
 	put_u16(b, 0);                                // roll
-	b.push_back(0x01);                            // gameFlags bit0 = spawn zones exist
-	                                              // [orig: SpawnZoneList_GetCount()!=0 @0x502da7]
+	const bool has_spawn_zones =
+			ctx.world != nullptr && world::world_has_spawn_zone(*ctx.world);
+	b.push_back(has_spawn_zones ? 0x01 : 0x00);  // gameFlags bit0 = spawn zones exist
+	                                             // [orig: SpawnZoneList_GetCount()!=0 @0x502da7]
 	// The fixed 128-i32 block is the per-slot-type SCORE table (client outTable @0xB75FE8;
 	// readers Entity_GetScoreValueBySlotType / WeaponSlot_*), NOT zone data — zeros are the
 	// fresh-round values and benign for the deploy picker (§5.29 correction, witness 2026-07-03).
@@ -416,11 +421,17 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 			step.messages.push_back(InitialStateMessage{0x42, {0x00, 0x00}}); // input-state-flags=0x0000 [NetPacket_WriteInputStateFlags @0x505ba0]
 			step.messages.push_back(InitialStateMessage{0x0F, std::move(wsl)}); // world-state-load (§5.29)
 			step.messages.push_back(InitialStateMessage{0x4D, {static_cast<uint8_t>(conn.reply.player_slot)}}); // player-index [NapiNPClientMsg_0x04D @0x4317B0]
-			const uint32_t seed = ctx.np_protocol.session_seed_id;
+			// The join tick seed is PER PLAYER, re-rolled per connection — the client
+			// anchors currentTick (and its fire freshness) to it, and the host stamps the
+			// same value as that player's freshness floor. Never the session constant.
+			// [orig: Server_SendRandomSeedToPlayer @0x5101a0 — value @0x5101d4
+			//  ((rand() & 0xFE) + 1) << 16; join sender @0x51a982]
+			conn.tick_seed = ((make_random_session_u32() & 0xFEu) + 1u) << 16;
+			const uint32_t seed = conn.tick_seed;
 			step.messages.push_back(InitialStateMessage{0x61, {static_cast<uint8_t>(seed & 0xFFu),
 			                                                    static_cast<uint8_t>((seed >> 8) & 0xFFu),
 			                                                    static_cast<uint8_t>((seed >> 16) & 0xFFu),
-			                                                    static_cast<uint8_t>((seed >> 24) & 0xFFu)}}); // session-key/seed [Server_SendRandomSeedToPlayer @0x5101a0]
+			                                                    static_cast<uint8_t>((seed >> 24) & 0xFFu)}}); // per-player tick seed [Server_SendRandomSeedToPlayer @0x5101a0]
 			step.messages.push_back(InitialStateMessage{0x3E, {}}); // terminator
 			std::fprintf(stderr,
 			             "[burst] game-start bundle: 0x42(2) 0x0F(%zu) 0x4D(1) 0x61(4) 0x3E(0) -> drives joiner deploy\n",
