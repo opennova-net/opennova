@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <unordered_map>
 #include <vector>
+#include <io/log.h>
 
 namespace opennova {
 
@@ -232,7 +233,8 @@ void write_depth_section(BitWriter &bits,
 		}
 
 		if (clamped_blocks > 0) {
-			std::fprintf(stderr, "CDEP: clamped %d block(s) to 15-bit delta limit\n", clamped_blocks);
+			opennova::io::logf(opennova::io::LogLevel::kWarn,
+		"CDEP: clamped %d block(s) to 15-bit delta limit", clamped_blocks);
 		}
 		return;
 	}

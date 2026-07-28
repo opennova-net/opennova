@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <io/log.h>
 
 // ============================================================================
 // Triangulation helpers
@@ -526,8 +527,9 @@ static void assign_surface_types(const ThreediGpFile *gp, ThreediModelIR *ir) {
         for (int32_t f = 1; f < obj->face_count; ++f) {
             size_t fi = face_cursor + (size_t)f;
             if (fi < (size_t)col->face_count && col->faces[fi].surface_type != st) {
-                fprintf(stderr, "WARNING: GP collision object %d has mixed surface_types "
-                        "(face 0: 0x%02X, face %d: 0x%02X)\n",
+                opennova::io::logf(opennova::io::LogLevel::kWarn,
+		"WARNING: GP collision object %d has mixed surface_types "
+                        "(face 0: 0x%02X, face %d: 0x%02X)",
                         obj_idx, st, f, col->faces[fi].surface_type);
                 break;
             }

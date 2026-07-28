@@ -11,6 +11,7 @@
 #include <random>
 #include <sstream>
 #include <utility>
+#include <io/log.h>
 
 namespace opennova {
 
@@ -240,13 +241,15 @@ LobbyDispatchResult LobbySession::dispatch(const NapiMessage &inner_message,
 	// next ClientHostUpdate arrives. (G.6 lifecycle.)
 	else if (name == "ClientHostPlayerAdded") {
 		state.player_count = std::max(1, state.player_count + 1);
-		std::printf("[lobby] player_added rid=%u players=%d/%d\n",
+		opennova::io::logf(opennova::io::LogLevel::kInfo,
+		"[lobby] player_added rid=%u players=%d/%d",
 		            state.rid, state.player_count, state.max_players);
 		return {{}, "ClientHostPlayerAdded"};
 	}
 	else if (name == "ClientHostPlayerRemoved") {
 		state.player_count = std::max(0, state.player_count - 1);
-		std::printf("[lobby] player_removed rid=%u players=%d/%d\n",
+		opennova::io::logf(opennova::io::LogLevel::kInfo,
+		"[lobby] player_removed rid=%u players=%d/%d",
 		            state.rid, state.player_count, state.max_players);
 		return {{}, "ClientHostPlayerRemoved"};
 	}
@@ -257,10 +260,12 @@ LobbyDispatchResult LobbySession::dispatch(const NapiMessage &inner_message,
 		if (db_ && rid != 0) {
 			try { hostdb::remove_host_by_rid(*db_, rid); }
 			catch (const std::exception &e) {
-				std::fprintf(stderr, "[lobby] WARN stop-host remove: %s\n", e.what());
+				opennova::io::logf(opennova::io::LogLevel::kWarn,
+		"[lobby] WARN stop-host remove: %s", e.what());
 			}
 		}
-		std::printf("[lobby] stopped rid=%u reason=ClientStopHosting\n", rid);
+		opennova::io::logf(opennova::io::LogLevel::kInfo,
+		"[lobby] stopped rid=%u reason=ClientStopHosting", rid);
 		return {{}, "ClientStopHosting"};
 	}
 	else if (name == "ClientStopPlaying") {
@@ -357,8 +362,9 @@ LobbyDispatchResult LobbySession::handle_client_host_request(
 	{
 		std::string host_keys;
 		for (const auto &kv : host_info) { host_keys += kv.first; host_keys += ' '; }
-		std::printf("[lobby] host-addr request observed=%s:%u advertised ServerIP=%s "
-		            "ServerPortNumber(Host)=%s ServerPortNumber(Setup)=%s stored=%s:%d Host{ %s}\n",
+		opennova::io::logf(opennova::io::LogLevel::kInfo,
+		"[lobby] host-addr request observed=%s:%u advertised ServerIP=%s "
+		            "ServerPortNumber(Host)=%s ServerPortNumber(Setup)=%s stored=%s:%d Host{ %s}",
 		            remote_ip.c_str(), static_cast<unsigned>(remote_port),
 		            host_info.count("ServerIP") ? host_info["ServerIP"].c_str() : "(absent)",
 		            host_info.count("ServerPortNumber") ? host_info["ServerPortNumber"].c_str() : "(absent)",
@@ -381,7 +387,8 @@ LobbyDispatchResult LobbySession::handle_client_host_request(
 	append_server_var(host_commands, "GSID", state.gsid);
 	reply.children.push_back(std::move(host_commands));
 
-	std::printf("[lobby] started rid=%u gsid=%s server_name='%s' host=%s:%d game=%s app_id=%s\n",
+	opennova::io::logf(opennova::io::LogLevel::kInfo,
+		"[lobby] started rid=%u gsid=%s server_name='%s' host=%s:%d game=%s app_id=%s",
 	            state.rid, state.gsid.c_str(), state.server_name.c_str(),
 	            state.host_ip.c_str(), state.host_port, state.game.c_str(),
 	            state.app_id.c_str());
@@ -393,13 +400,15 @@ LobbyDispatchResult LobbySession::handle_client_host_request(
 		// PCIDKey-bearing update would, via INSERT OR REPLACE, wipe the stored
 		// pcid_key back to empty (onnet's upsert preserves it). Watch this go
 		// non-empty -> empty across requests.
-		std::printf("[lobby] host request upsert rid=%u pcid_key=%zuB host_key=%zuB\n",
+		opennova::io::logf(opennova::io::LogLevel::kInfo,
+		"[lobby] host request upsert rid=%u pcid_key=%zuB host_key=%zuB",
 		            state.rid, state.pcid_key.size(), state.host_key.size());
 		try {
 			hostdb::upsert_host(*db_,
 				hostdb::row_from_lobby(state, remote_ip, remote_port));
 		} catch (const std::exception &e) {
-			std::fprintf(stderr, "[lobby] WARN active_hosts upsert: %s\n", e.what());
+			opennova::io::logf(opennova::io::LogLevel::kWarn,
+		"[lobby] WARN active_hosts upsert: %s", e.what());
 		}
 	}
 
@@ -421,7 +430,8 @@ LobbyDispatchResult LobbySession::handle_client_host_update(
 		// expired". Dump the Host var keys + the resolved key lengths.
 		std::string update_keys;
 		for (const auto &kv : host_vars) { update_keys += kv.first; update_keys += ' '; }
-		std::printf("[lobby] host update vars Host{ %s} host_key=%zuB pcid_key=%zuB\n",
+		opennova::io::logf(opennova::io::LogLevel::kInfo,
+		"[lobby] host update vars Host{ %s} host_key=%zuB pcid_key=%zuB",
 		            update_keys.c_str(), state.host_key.size(), state.pcid_key.size());
 	}
 	if (host_vars.count("ServerIP"))        state.host_ip   = host_vars.at("ServerIP");
@@ -440,11 +450,13 @@ LobbyDispatchResult LobbySession::handle_client_host_update(
 	if (!reflect_ip_.empty()) state.host_ip   = reflect_ip_;
 	if (reflect_port_ != 0)   state.host_port = reflect_port_;
 
-	std::printf("[lobby] update rid=%u players=%d/%d server_name='%s'\n",
+	opennova::io::logf(opennova::io::LogLevel::kInfo,
+		"[lobby] update rid=%u players=%d/%d server_name='%s'",
 	            state.rid, state.player_count, state.max_players,
 	            state.server_name.c_str());
-	std::printf("[lobby] host-addr update observed=%s advertised ServerIP=%s "
-	            "ServerPortNumber=%s stored=%s:%d\n",
+	opennova::io::logf(opennova::io::LogLevel::kInfo,
+		"[lobby] host-addr update observed=%s advertised ServerIP=%s "
+	            "ServerPortNumber=%s stored=%s:%d",
 	            remote_ip.c_str(),
 	            host_vars.count("ServerIP") ? host_vars.at("ServerIP").c_str() : "(absent)",
 	            host_vars.count("ServerPortNumber") ? host_vars.at("ServerPortNumber").c_str() : "(absent)",
@@ -459,7 +471,8 @@ LobbyDispatchResult LobbySession::handle_client_host_update(
 			hostdb::update_host(*db_,
 				hostdb::row_from_lobby(state, remote_ip, /*peer_port=*/0));
 		} catch (const std::exception &e) {
-			std::fprintf(stderr, "[lobby] WARN active_hosts update: %s\n", e.what());
+			opennova::io::logf(opennova::io::LogLevel::kWarn,
+		"[lobby] WARN active_hosts update: %s", e.what());
 		}
 	}
 

@@ -75,6 +75,36 @@ def count_libs_uncited_src_files(allowlist: set[str]) -> int:
     return count
 
 
+LIBS_PRINT = re.compile(
+    r"(?<![\w:])(?:std::)?fprintf\s*\(\s*(?:stderr|stdout)\b"
+    r"|(?<![\w:.])(?:std::)?printf\s*\("
+    r"|std::cout\b|std::cerr\b"
+    r"|(?<![\w:.])puts\s*\(")
+
+
+def count_libs_stdout_prints() -> int:
+    """Console writes inside libs/ (W1-3): libraries route diagnostics through
+    the io/log.h sink and stay silent by default — a host installs the sink.
+    FILE*-parameter writers (fprintf(fp, ...)) are deliberately not matched."""
+    count = 0
+    libs = REPO / "libs"
+    for sub in ("src", "include"):
+        for path in libs.glob(f"*/{sub}/**/*"):
+            if path.suffix.lower() not in (".c", ".cc", ".cpp", ".h", ".hpp"):
+                continue
+            if path.name == "log.h" and path.parent.name == "io":
+                continue  # the sink's own vsnprintf lives here
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            for line in text.splitlines():
+                code = line.split("//", 1)[0]
+                if LIBS_PRINT.search(code):
+                    count += 1
+    return count
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--enforce", action="store_true",
@@ -90,6 +120,7 @@ def main() -> int:
     current = {
         "test_private_pokes": count_test_private_pokes(),
         "libs_uncited_src_files": count_libs_uncited_src_files(allowlist),
+        "libs_stdout_prints": count_libs_stdout_prints(),
     }
 
     if args.write_baseline:

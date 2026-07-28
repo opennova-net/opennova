@@ -18,6 +18,7 @@
 #include <world/geom.h>                   // world::to_fixed (0x0F spawn pose)
 #include <world/spawn_select.h>           // world_has_spawn_zone (0x0F gameFlags bit0)
 #include <world/world.h>
+#include <io/log.h>
 
 namespace opennova::np {
 
@@ -213,8 +214,8 @@ void log_deferred_once(uint8_t tag) {
 	static std::array<bool, 256> logged{};
 	if (logged[tag]) return;
 	logged[tag] = true;
-	std::fprintf(stderr,
-	             "[P3] deferred §5.2a serializer 0x%02X — emitted as nothing pending the grill wave\n",
+	opennova::io::logf(opennova::io::LogLevel::kWarn,
+		"[P3] deferred §5.2a serializer 0x%02X — emitted as nothing pending the grill wave",
 	             tag);
 }
 
@@ -433,8 +434,8 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 			                                                    static_cast<uint8_t>((seed >> 16) & 0xFFu),
 			                                                    static_cast<uint8_t>((seed >> 24) & 0xFFu)}}); // per-player tick seed [Server_SendRandomSeedToPlayer @0x5101a0]
 			step.messages.push_back(InitialStateMessage{0x3E, {}}); // terminator
-			std::fprintf(stderr,
-			             "[burst] game-start bundle: 0x42(2) 0x0F(%zu) 0x4D(1) 0x61(4) 0x3E(0) -> drives joiner deploy\n",
+			opennova::io::logf(opennova::io::LogLevel::kWarn,
+		"[burst] game-start bundle: 0x42(2) 0x0F(%zu) 0x4D(1) 0x61(4) 0x3E(0) -> drives joiner deploy",
 			             wsl_sz);
 			break;
 		}
@@ -612,7 +613,8 @@ InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiN
 			              static_cast<unsigned>(m.body.size()));
 			seq += buf;
 		}
-		std::fprintf(stderr, "[burst] tick: %zu msg(s) | %s%s\n", step.messages.size(), seq.c_str(),
+		opennova::io::logf(opennova::io::LogLevel::kDebug,
+		"[burst] tick: %zu msg(s) | %s%s", step.messages.size(), seq.c_str(),
 		             b.sync_state == 5 ? "(§5.2a COMPLETE)" : "");
 	}
 
