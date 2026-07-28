@@ -80,10 +80,6 @@ func set_text_color(color: Color) -> void:
 	queue_redraw()
 
 
-func get_text_color() -> Color:
-	return _text_color
-
-
 func set_half_bright(enabled: bool) -> void:
 	_half_bright = enabled
 	queue_redraw()

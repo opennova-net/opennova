@@ -36,10 +36,6 @@ func register(def: McpToolDef, handler: Callable, source := "builtin") -> Error:
 	return OK
 
 
-func unregister(name: String) -> void:
-	_tools.erase(name)
-
-
 func has_tool(name: String) -> bool:
 	return _tools.has(name)
 
@@ -51,14 +47,6 @@ func is_serial(name: String) -> bool:
 	if not _tools.has(name):
 		return true
 	return (_tools[name]["def"] as McpToolDef).serial
-
-
-func builtin_names() -> PackedStringArray:
-	var names := PackedStringArray()
-	for name in _tools:
-		if _tools[name]["source"] == "builtin":
-			names.append(name)
-	return names
 
 
 func source_of(name: String) -> String:

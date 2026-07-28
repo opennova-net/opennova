@@ -83,16 +83,6 @@ func get_table(name: String) -> RtxtStringFile:
 	return _tables.get(name.to_lower())
 
 
-## Loads a .bin and registers it in one step. Returns OK on success.
-func load_and_register_table(name: String, path: String) -> Error:
-	var table := RtxtStringFile.new()
-	var err := table.load_from_path(path)
-	if err != OK:
-		return err
-	register_table(name, table)
-	return OK
-
-
 ## --- Override table [orig: TextResource_LoadOverrideTable @ 0x75D5C0] ---
 
 ## Sets the table consulted before every lookup (the original engine loads the

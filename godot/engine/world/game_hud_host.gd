@@ -520,10 +520,6 @@ func toggle_objectives() -> void:
 	_objectives_visible = not _objectives_visible
 
 
-func objectives_visible() -> bool:
-	return _objectives_visible
-
-
 # The panel's resolved rows: shown win-condition slots with mission-text lines
 # and their completed state. [orig: HUD_DrawWinConditions @0x5ba940 — rows from
 # the header table walk, text = mission WinConditions/STRWINCOND%03i]

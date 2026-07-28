@@ -26,7 +26,6 @@ struct CommandDef {
 
 // Flag bit semantics (faithful to the original record flags byte).
 inline constexpr bool cmd_is_condition(const CommandDef &c) { return (c.flags & 0xFE) == 0; }
-inline constexpr bool cmd_targets_entity(const CommandDef &c) { return (c.flags & 0x10) != 0; }
 inline constexpr bool cmd_is_replicated(const CommandDef &c) { return (c.flags & 0x18) != 0; }
 
 // The registry (generated). 165 entries; index == bytecode command id.

@@ -167,8 +167,8 @@ func add_companion(companion) -> void:
 
 
 # Build the shell against a resource root and open the main menu. Idempotent on
-# the asset/menu/director wiring (only assembled once); call reset_to_root() to
-# return to the main menu on later entries. Returns false when the main menu
+# the asset/menu/director wiring (only assembled once); show_menu() returns to
+# the main menu on later entries. Returns false when the main menu
 # cannot be resolved/loaded (an empty/incomplete resource dir).
 func setup(root: NovaResourceRoot) -> bool:
 	_root = root
@@ -256,14 +256,6 @@ func open_menu(file: String, target_screen: String) -> bool:
 	_wire_named_controls()
 	_recompute_fit()
 	return true
-
-
-# Return to the main menu from anywhere (e.g. quit-to-main from the pause menu).
-func reset_to_root() -> void:
-	_in_game = false
-	_menu_stack.clear()
-	_enter_menu_music()
-	open_menu(main_menu_file, "")
 
 
 func show_menu() -> void:

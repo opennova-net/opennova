@@ -123,10 +123,6 @@ func free_dock() -> void:
 	_dock = null
 
 
-func get_dock() -> Control:
-	return _dock
-
-
 func _ensure_dock() -> void:
 	if _host == null or not bool(_uses_detail.call()):
 		return

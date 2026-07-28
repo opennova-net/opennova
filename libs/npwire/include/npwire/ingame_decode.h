@@ -11,8 +11,7 @@
 // Single decoder shared between:
 //   - tests/novaworld/nw_ingame_pool_records_test  (byte-witness assertions)
 //   - apps/nw_pp                                   (pretty-printer)
-//   - libs/novaworld/src/game_session.cpp          (real handlers — pending
-//                                                  D-NET-53 + D-NET-55 fixes)
+//   - libs/npruntime + libs/netsim                 (the in-match runtime's fold paths)
 //   - any future replay tool                       (re-emit captured C2S)
 //
 // Convention: every conditional field is left default-constructed when its

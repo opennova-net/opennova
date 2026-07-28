@@ -219,9 +219,5 @@ bool emitter_spawn_one(Emitter &e);
 // (e.g. moving emitters following a parent transform).
 void emitter_translate(Emitter &e, Vec3 new_pos) noexcept;
 
-// Number of currently-alive particles.
-inline std::size_t emitter_alive_count(const Emitter &e) noexcept {
-	return e.particles.size();
-}
 
 } // namespace opennova::particle

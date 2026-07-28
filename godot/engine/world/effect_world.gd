@@ -105,10 +105,6 @@ func set_owner_position_provider(provider: Callable) -> void:
 	_owner_position_provider = provider
 
 
-func get_owner_position_provider() -> Callable:
-	return _owner_position_provider
-
-
 func set_water_height(value: float) -> void:
 	_water_height = value
 

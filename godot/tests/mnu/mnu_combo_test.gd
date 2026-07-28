@@ -30,7 +30,7 @@ func _build_menu(edit_mode: bool = false, path: String = FIXTURE) -> NovaMnuMenu
 	var menu := NovaMnuMenu.new()
 	menu.build_on_ready = false
 	add_child_autofree(menu)
-	# The runtime shell pins the menu to the 800x600 design space (menu_shell.gd);
+	# The runtime shell pins the menu to the 800x600 design space (nova_menu_host.gd);
 	# the catcher overlay sizes itself to this rect.
 	menu.size = Vector2(800, 600)
 	menu.set_edit_mode(edit_mode)

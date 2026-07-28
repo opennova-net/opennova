@@ -135,11 +135,6 @@ func table_count() -> int:
 	return particle_file.tables.size() if particle_file != null else 0
 
 
-## Ask the live preview to re-apply the current selection (no model reload).
-func request_preview_refresh() -> void:
-	preview_refresh_requested.emit()
-
-
 ## Commit an in-place particle/graphic edit without rebuilding its inspector.
 func notify_particle_changed() -> void:
 	_set_dirty(true)

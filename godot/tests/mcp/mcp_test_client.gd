@@ -1,7 +1,7 @@
 extends RefCounted
 
 # Loopback HTTP/JSON-RPC client for MCP server tests. Not a *_test.gd, so GUT
-# ignores it (menu_shell_probe.gd precedent); tests preload() it. Every wait
+# ignores it (nova_menu_host_probe.gd precedent); tests preload() it. Every wait
 # loop awaits process frames so the McpServer node under test keeps polling.
 
 const MAX_WAIT_FRAMES := 600

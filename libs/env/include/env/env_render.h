@@ -617,8 +617,6 @@ Rgb tile_overlay_tint_factor(const TerrainTint &tint);
 // bodies place at kCelestialBodyDistance (64). The +16/+64 offsets and the
 // 0x2000 alpha belong to the caller-less dead variant @ 0x5ac230.
 inline constexpr float kCelestialDomeDistance = 2000.0f;
-inline constexpr float kCelestialLayerOffsetNear = 16.0f;  // dead variant
-inline constexpr float kCelestialLayerOffsetFar = 64.0f;   // dead variant
 inline constexpr float kCelestialLayerAlpha = float(0x2000) / 65536.0f; // dead variant
 
 // Cloud UV scroll [orig: render_skybox @ 0x5791de..0x579260 + weather tick]:

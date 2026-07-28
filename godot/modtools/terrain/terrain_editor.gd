@@ -567,19 +567,6 @@ func get_terrain_name_value() -> String:
 	return _document.get_terrain_name()
 
 
-func set_terrain_name_value(value: String) -> void:
-	if is_export_running() or not _data:
-		return
-	var next_value := value.strip_edges()
-	if next_value.is_empty():
-		next_value = "untitled"
-	if _data.get_terrain_name() == next_value:
-		return
-	_data.set_terrain_name(next_value)
-	is_dirty = true
-	_mark_ui_state_changed()
-
-
 func get_detail_density() -> int:
 	return _data.get_detail_density() if _data else 0
 
@@ -742,10 +729,6 @@ func get_surface_palette_bytes() -> PackedByteArray:
 
 func get_selected_surface_label() -> String:
 	return TerrainEditorSurfacePaint.get_surface_label(selected_surface_index)
-
-
-func get_selected_surface_color() -> Color:
-	return TerrainEditorSurfacePaint.get_surface_color(selected_surface_index, get_surface_palette_bytes())
 
 
 const FOLIAGE_DEFS_LIMIT := 4
@@ -1034,16 +1017,6 @@ func get_resource_root() -> NovaResourceRoot:
 	return null
 
 
-func get_sector_cell(row: int, col: int) -> int:
-	if not _data:
-		return 0
-	var idx := row * NovaTerrainData.SECTOR_GRID_DIM + col
-	var grid: PackedInt32Array = _data.get_sector_grid()
-	if idx < 0 or idx >= grid.size():
-		return 0
-	return clampi(grid[idx], 0, NovaTerrainData.SECTOR_ID_MAX)
-
-
 func set_sector_cell(row: int, col: int, value: int) -> bool:
 	if is_export_running() or not _data:
 		return false
@@ -1145,10 +1118,6 @@ func is_tile_edit_mode() -> bool:
 	return current_tool == Tool.TILE_STAMP and _tile_interaction_mode == TileInteractionMode.EDIT_SELECTED and has_selected_tileinfo_entry()
 
 
-func is_tile_placement_mode() -> bool:
-	return current_tool == Tool.TILE_STAMP and not is_tile_edit_mode()
-
-
 func clear_tileinfo_selection() -> void:
 	if _document.get_tileinfo_selected_index() < 0 and _tile_interaction_mode == TileInteractionMode.PLACE:
 		return
@@ -1213,13 +1182,6 @@ func stamp_tileinfo_cell(cell_x: int, cell_z: int) -> bool:
 	if int(result.get("index", -1)) >= 0:
 		_tile_interaction_mode = TileInteractionMode.EDIT_SELECTED
 	return _finalize_tileinfo_edit(before_state, bool(result.get("changed", false)))
-
-
-func apply_tile_stamp_to_selected_entry() -> bool:
-	if is_export_running():
-		return false
-	var before_state := _document.capture_tileinfo_history_state()
-	return _finalize_tileinfo_edit(before_state, _document.apply_stamp_to_selected_tileinfo_entry())
 
 
 func delete_selected_tileinfo_entry() -> bool:
@@ -2003,10 +1965,6 @@ func _source_image_for_kind(kind: int) -> Image:
 		TerrainEditHistory.Kind.COLORMAP:
 			return _colormap_image
 	return null
-
-
-func get_ui_state_version() -> int:
-	return _ui_state_version
 
 
 func _mark_ui_state_changed() -> void:

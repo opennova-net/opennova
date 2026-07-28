@@ -82,7 +82,6 @@ func set_document(value: FntEditorDocument) -> void:
 	_refresh_all()
 
 
-
 # The workspace's dirty state derives from get_editor_document() (B6): this
 # editor is that document surface, so it forwards its document's flag.
 func is_dirty() -> bool:
@@ -125,28 +124,6 @@ func paint_pixel(page: int, x: int, y: int, alpha: int = 255) -> Error:
 	else:
 		_push_pixel_operation([change])
 		_refresh_atlas()
-	return OK
-
-
-func clear_glyph(char_code: int = _selected_char) -> Error:
-	if _document == null or _document.resource == null:
-		return ERR_UNAVAILABLE
-	var rect: Rect2i = _document.resource.get_glyph_rect(char_code)
-	var page: int = _document.resource.get_glyph_page(char_code)
-	if page < 0:
-		return ERR_INVALID_PARAMETER
-	var changes: Array[Dictionary] = []
-	_begin_batch()
-	for y in range(rect.position.y, rect.position.y + rect.size.y):
-		for x in range(rect.position.x, rect.position.x + rect.size.x):
-			var before := int(_document.resource.get_pixel_alpha(page, x, y))
-			if before == 0:
-				continue
-			changes.append({"page": page, "x": x, "y": y, "before": before, "after": 0})
-			_document.resource.set_pixel_alpha(page, x, y, 0)
-	if not changes.is_empty():
-		_push_pixel_operation(changes)
-	_end_batch()
 	return OK
 
 

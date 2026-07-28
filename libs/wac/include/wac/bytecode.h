@@ -84,7 +84,6 @@ inline constexpr uint32_t instr_operand24(uint32_t w) { return w & kOperand24Mas
 inline constexpr uint16_t instr_command_index(uint32_t w) {
     return static_cast<uint16_t>(w & kCommandIndexMask);
 }
-inline constexpr bool instr_push(uint32_t w) { return (w & kPushBit) != 0; }
 inline constexpr bool instr_negate(uint32_t w) { return (w & kNegateBit) != 0; }
 
 // ---- Operand references (rebased from the original's absolute pointers) ----

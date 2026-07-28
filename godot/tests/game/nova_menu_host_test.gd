@@ -5,7 +5,7 @@ extends GutTest
 # quit), drives the music director's screen var, launches a selected mission, and
 # degrades gracefully when menu assets are missing - all headless, no blocking.
 
-const MenuHostScript := preload("res://game/menu_shell.gd")
+const MenuHostScript := preload("res://game/nova_menu_host.gd")
 
 const MAIN_FIXTURE := "res://../fixtures/mnu/jo_main.mnu"   # STARTUP, MUSICVAR 1
 const SP_FIXTURE := "res://../fixtures/mnu/jo_loadout.mnu"  # the cross-.mnu target

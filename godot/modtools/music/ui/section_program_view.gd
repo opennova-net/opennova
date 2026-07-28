@@ -675,9 +675,6 @@ func _apply_restored_scroll() -> void:
 
 # --- host surface ----------------------------------------------------------
 
-func current_section_index() -> int:
-	return _section_index
-
 
 # How many values a caller (or the engine) hands the shown state -- the hidden
 # frame ops' locals counts. The Inputs card explains the leading ones; the

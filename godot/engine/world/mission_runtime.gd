@@ -715,10 +715,6 @@ func get_wire_presenter() -> RefCounted:
 	return _wire_present
 
 
-func get_present_index():
-	return _index
-
-
 func entity_count() -> int:
 	return _sim.get_entity_count() if _sim != null else 0
 

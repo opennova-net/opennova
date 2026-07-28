@@ -226,12 +226,6 @@ func play_animation(clip_key: String) -> void:
 		_arms_model.play_body_clip(clip_key)
 
 
-func clear_animation_set() -> void:
-	_skeletal = null
-	_current_clip = ""
-	_clear_skeletal_binding()
-
-
 func get_animation_error() -> String:
 	return _last_anim_error
 

@@ -6,7 +6,7 @@ extends GutTest
 # (which controls do what, and the host config START_GAME reports). The live two-machine
 # flow (real discovery + a second client spawning) is the manual smoke; this is the unit.
 
-const MenuShell := preload("res://game/menu_shell.gd")
+const MenuShell := preload("res://game/nova_menu_host.gd")
 
 
 class _LanSessionStub extends RefCounted:

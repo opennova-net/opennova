@@ -136,10 +136,6 @@ func available() -> bool:
 	return _current_plan() != null
 
 
-func can_launch() -> bool:
-	return available() and not String(_resource_dir.call()).is_empty()
-
-
 ## Re-gate the button (called by the shell whenever the resource root or the
 ## active workspace changes).
 func refresh() -> void:

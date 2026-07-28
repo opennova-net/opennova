@@ -597,10 +597,6 @@ THREEDI_EXPORT int threedi_ir_from_gp(const struct ThreediGpFile *gp, ThreediMod
 // Returns 0 on success, -1 on error
 THREEDI_EXPORT int threedi_ir_read(const char *path, ThreediModelIR *out);
 
-// Convert IR back to Modern model (for format conversion)
-// Returns 0 on success, -1 on error
-THREEDI_EXPORT int threedi_ir_to_3di3(const ThreediModelIR *ir, struct Threedi3di3 *out);
-
 // Compute a model's placement "ground anchor" — the point of the model that
 // should sit at an object's placed position. Resolution order:
 //   1. The first userpoint whose name matches "ground" case-insensitively.

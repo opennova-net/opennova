@@ -65,10 +65,6 @@ func commit_edit() -> void:
 		host._history_applied("commit")
 
 
-func is_burst_open() -> bool:
-	return _burst_open
-
-
 ## Record a caller-provided PRE-mutation snapshot as one equal-gated step —
 ## the shadow-step funnel (B4): the mutation already happened by the time its
 ## deferred change signal arrives, so the caller hands in the baseline it

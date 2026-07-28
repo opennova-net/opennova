@@ -32,13 +32,6 @@ func setup(shader_catalog: Array, current: String) -> void:
 	_syncing = false
 
 
-func get_selected_tag() -> String:
-	var index := selected
-	if index < 0 or index >= get_item_count():
-		return ""
-	return get_item_text(index)
-
-
 func _index_for_tag(tag: String) -> int:
 	for i in range(get_item_count()):
 		if get_item_text(i) == tag:
