@@ -127,6 +127,17 @@ single `Server_InitNewRoundState` call.
     the shared machinery requires a `ctx.world`, so the service now carries the minimal
     infrastructure world described in Context, with the admission-depth caution recorded
     there.
-  - **Remaining:** collapsing the two byte-identical outer framers (`encode_session_outbound` /
-    `nw_encode_outbound`); folding `nw_udp_listener`'s app-side server-direction `lobby_state` onto the
-    shared helper. Both optional, wire-neutral, low priority.
+  - **DONE (2026-07-28, quality campaign W2-2):** the byte-identical outer framers are collapsed —
+    `libs/novaworld`'s `encode_session_outbound` / `decode_session_inbound` are deleted and their
+    call sites use npwire's `nw_encode_outbound` / `nw_decode_inbound` (it was four functions, both
+    directions, not two). And `nw_udp_listener`'s server-direction **framing** leg now calls the
+    shared `frame_session_packet` instead of hand-stamping a `ProtocolPacketHeader` beside the raw
+    `encode_protocol_packet_plaintext` — the last copy of the stamping `npruntime`'s
+    `frame_session_replies` already owned. Wire-neutral, proven before/after against the local
+    goldens (472 decoded S2C tags, 2351 C2S `0x0C` / 2361 S2C `0x0A`, the `0x2A` byte-exact records,
+    and the `0x81`/`0x82` first-diff offsets all unchanged; `golden_client`'s re-framed-datagram
+    byte assertion covers the framing path directly).
+  - **Remaining:** `nw_udp_listener` still owns the per-connection lobby REGISTRY lifecycle
+    (`LobbyConnState`, `erase_lobby_state`, `snapshot_hosted`) beside `libs/novaworld`'s own
+    `LobbyState` / `row_from_lobby` — the app-side state half of that consolidation item, distinct
+    from the framing half closed above. Optional, wire-neutral, low priority.

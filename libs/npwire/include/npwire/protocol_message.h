@@ -161,6 +161,10 @@ bool decode_protocol_packet_plaintext(const uint8_t *body, size_t body_len,
                                       ProtocolPacketHeader &hdr_out,
                                       std::vector<ProtocolMessage> &messages_out);
 
+// PREFER frame_session_packet: it owns the seq/ack/session_id stamping every live
+// owner needs, and hand-stamping a header beside this call is how the listener's
+// copy of that logic drifted (ADR 0013). This raw form stays public for tests and
+// capture fixtures that must control the header explicitly.
 bool encode_protocol_packet_plaintext(const ProtocolPacketHeader &hdr,
                                       const std::vector<ProtocolMessage> &messages,
                                       std::string_view scrk,
@@ -271,7 +275,7 @@ struct SessionCrypto {
 };
 
 // Frame `messages` into a ProtocolPacketHeader + SCRK-encrypted inner body (NO outer NWU envelope — the
-// caller applies nw_encode_outbound / encode_session_outbound). Stamps session_id, seq_num =
+// caller applies nw_encode_outbound). Stamps session_id, seq_num =
 // seq.next_outbound_seq++, ack_count = seq.last_inbound_seq, connection_flags = 0. Returns false only if
 // the inner encode fails.
 // [orig: CNapiNPConnection_SendSessionPacket @ 0x61edd0] fills the same 13-byte header after the opcode:

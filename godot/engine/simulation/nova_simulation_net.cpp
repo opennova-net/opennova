@@ -134,13 +134,11 @@ public:
 
 	void send_to(const opennova::PeerAddr &to, const uint8_t *data, std::size_t len) override {
 		if (pump_ == nullptr || !pump_->is_open() || len == 0) return;
-		char ipbuf[32];
-		std::snprintf(ipbuf, sizeof(ipbuf), "%u.%u.%u.%u", to.ip & 0xFFu, (to.ip >> 8) & 0xFFu,
-		              (to.ip >> 16) & 0xFFu, (to.ip >> 24) & 0xFFu);
+		const std::string ip = opennova::peer_addr_ip_to_string(to);
 		PackedByteArray bytes;
 		bytes.resize(static_cast<int64_t>(len));
 		std::memcpy(bytes.ptrw(), data, len);
-		pump_->send_to(String(ipbuf), to.port, bytes);
+		pump_->send_to(String(ip.c_str()), to.port, bytes);
 	}
 
 private:

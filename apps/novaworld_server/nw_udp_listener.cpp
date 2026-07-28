@@ -64,12 +64,6 @@ std::string hex_sig(uint32_t value, int min_width = 2) {
 // The "network byte order" comment in session_hello.h was misleading;
 // the value goes onto the wire as plain LE — what matters is how the
 // receiver interprets the four payload bytes as octets.
-uint32_t ip_to_le(const std::array<uint8_t, 4> &ip) {
-	return uint32_t(ip[0])
-	     | (uint32_t(ip[1]) <<  8)
-	     | (uint32_t(ip[2]) << 16)
-	     | (uint32_t(ip[3]) << 24);
-}
 
 // make_dev_scrk / make_dev_nwuid / make_random_session_u32 and the NW-UDP
 // envelope transform (nw_decode_inbound / nw_encode_outbound) moved to
@@ -296,10 +290,8 @@ void NwUdpListener::erase_lobby_state(const PeerAddr &peer, const char *reason) 
 		was_hosting = it->second.lobby.hosting;
 		rid = it->second.lobby.rid;
 		if (was_hosting) {
-			std::printf("[lobby] stopped addr=%u.%u.%u.%u:%u rid=%u server_name='%s' reason=%s\n",
-			             peer.ip        & 0xff, (peer.ip >>  8) & 0xff,
-			            (peer.ip >> 16) & 0xff, (peer.ip >> 24) & 0xff,
-			            peer.port, it->second.lobby.rid,
+			std::printf("[lobby] stopped addr=%s rid=%u server_name='%s' reason=%s\n",
+			            peer_addr_to_string(peer).c_str(), it->second.lobby.rid,
 			            it->second.lobby.server_name.c_str(), reason);
 		}
 		lobby_states_.erase(it);
@@ -310,18 +302,15 @@ void NwUdpListener::erase_lobby_state(const PeerAddr &peer, const char *reason) 
 	// joining peer's own host_players entry is keyed by peer addr.
 	if (db_) {
 		try {
-			// PeerAddr.ip is LE (ip_to_le) — read low->high so the dotted
-			// string matches the peer_ip stored at add_player time (built
-			// from the network-order octets), or remove_player_by_peer won't
-			// match and host_players rows leak until the host row cascades.
-			char ip_buf[32];
-			std::snprintf(ip_buf, sizeof(ip_buf), "%u.%u.%u.%u",
-			               peer.ip        & 0xff, (peer.ip >>  8) & 0xff,
-			              (peer.ip >> 16) & 0xff, (peer.ip >> 24) & 0xff);
+			// The DB key MUST be the same spelling add_player stored, or
+			// remove_player_by_peer stops matching and host_players rows leak
+			// until the host row cascades. Both sides now render through
+			// peer_addr_ip_to_string, so they cannot drift apart.
+			const std::string ip_key = peer_addr_ip_to_string(peer);
 			if (was_hosting && rid != 0) {
 				hostdb::remove_host_by_rid(*db_, rid);
 			}
-			hostdb::remove_player_by_peer(*db_, ip_buf, peer.port);
+			hostdb::remove_player_by_peer(*db_, ip_key, peer.port);
 		} catch (const std::exception &e) {
 			std::fprintf(stderr, "[lobby] WARN db cleanup on erase_lobby_state: %s\n", e.what());
 		}
@@ -401,14 +390,13 @@ void NwUdpListener::run_loop() {
 			continue;
 		}
 
-		const PeerAddr peer{ip_to_le(from.ip), from.port};
+		const PeerAddr peer = peer_addr_from_octets(from.ip, from.port);
 		const uint32_t client_ip_net = peer.ip;
 		const uint16_t client_port = from.port;
 		const auto client_label = opennova::net::endpoint_to_string(from);
-		char ip_only_buf[32];
-		std::snprintf(ip_only_buf, sizeof(ip_only_buf), "%u.%u.%u.%u",
-		              from.ip[0], from.ip[1], from.ip[2], from.ip[3]);
-		const std::string client_ip_str = ip_only_buf;
+		// Same rendering the erase path keys the DB with (peer_addr_ip_to_string):
+		// add_player and remove_player_by_peer must agree byte for byte.
+		const std::string client_ip_str = peer_addr_ip_to_string(peer);
 
 		// Demultiplex JO onto the shared authoritative host pump. A route is
 		// installed only for the complete retail JO Hello identity; subsequent
@@ -790,20 +778,18 @@ void NwUdpListener::run_loop() {
 				}
 			}
 
-			ProtocolPacketHeader rhdr;
-			// session_id = retail's local_key = retail's ClientAuth.ck
-			// (per protocol_message.h NapiNPProtocol_HandleSessionPacket
-			// witness). Using conn_opt->id (= ClientHello.ci) made retail
-			// TOSS our reply with code [4] — confirmed via _connectlog.txt
-			// 2026-04-27.
-			rhdr.session_id = lobby_state.client_ck;
-			rhdr.seq_num = lobby_state.sequencing.next_outbound_seq++;
-			rhdr.ack_count = lobby_state.sequencing.last_inbound_seq;
-			rhdr.connection_flags = 0;
-
+			// The ONE seq/ack framer (ADR 0013): it stamps session_id,
+			// seq_num = next_outbound_seq++, ack_count = last_inbound_seq and
+			// connection_flags = 0 exactly as this leg used to by hand.
+			// session_id = retail's local_key = retail's ClientAuth.ck (per
+			// protocol_message.h's NapiNPProtocol_HandleSessionPacket witness).
+			// Using conn_opt->id (= ClientHello.ci) made retail TOSS our reply
+			// with code [4] — confirmed via _connectlog.txt 2026-04-27.
 			std::vector<uint8_t> body_out;
-			if (!encode_protocol_packet_plaintext(rhdr, replies, conn_opt->server_scrk, body_out)) {
-				std::fprintf(stderr, "[nwudp] %s — encode_protocol_packet_plaintext failed\n",
+			if (!frame_session_packet(lobby_state.sequencing,
+			                          SessionCrypto{conn_opt->server_scrk, {}, lobby_state.client_ck},
+			                          replies, body_out)) {
+				std::fprintf(stderr, "[nwudp] %s — frame_session_packet failed\n",
 				             client_label.c_str());
 				break;
 			}
