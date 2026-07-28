@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <io/log.h>
 
 // ============================================================================
 // Byte Reader
@@ -208,7 +209,8 @@ ThreediGpMeshType threedi_gp_detect(const uint8_t *data, size_t data_len) {
 #define GP_ASSERT_ZERO(r, label) do { \
     uint32_t _v = gp_u32(r); \
     if (_v != 0) { \
-        fprintf(stderr, "[threedi_gp] expected zero for %s, got 0x%08X at pos=%zu\n", \
+        opennova::io::logf(opennova::io::LogLevel::kWarn, \
+                "[threedi_gp] expected zero for %s, got 0x%08X at pos=%zu", \
                 label, _v, (r)->pos - 4); \
         return -1; \
     } \
@@ -235,7 +237,8 @@ static int parse_header(GpReader *r, ThreediGpHeader *out) {
 
     out->format_ver = raw[0x03];
     if (out->format_ver != 0x02) {
-        fprintf(stderr, "[threedi_gp] unsupported format_ver 0x%02X (expected 0x02)\n",
+        opennova::io::logf(opennova::io::LogLevel::kWarn,
+		"[threedi_gp] unsupported format_ver 0x%02X (expected 0x02)",
                 out->format_ver);
         return -1;
     }
@@ -472,8 +475,9 @@ static int parse_collision(GpReader *r, ThreediGpCollision **out) {
             obj->volume_count = gp_i32(&br);
             obj->volume_ptr = gp_u32(&br);
             if (obj->vertex_ptr | obj->face_ptr | obj->normal_ptr | obj->volume_ptr) {
-                fprintf(stderr, "[threedi_gp] warning: collision_obj[%d] has stale runtime ptrs "
-                        "(v=0x%08X f=0x%08X n=0x%08X vol=0x%08X)\n",
+                opennova::io::logf(opennova::io::LogLevel::kWarn,
+		"[threedi_gp] warning: collision_obj[%d] has stale runtime ptrs "
+                        "(v=0x%08X f=0x%08X n=0x%08X vol=0x%08X)",
                         i, obj->vertex_ptr, obj->face_ptr, obj->normal_ptr, obj->volume_ptr);
             }
             obj->parent_subobject = gp_i32(&br);
@@ -541,7 +545,8 @@ static int parse_collision(GpReader *r, ThreediGpCollision **out) {
             vol->plane_count = gp_i32(&br);
             vol->plane_ptr = gp_u32(&br);
             if (vol->plane_ptr != 0) {
-                fprintf(stderr, "[threedi_gp] expected zero for collision_vol.plane_ptr, got 0x%08X at pos=%zu\n",
+                opennova::io::logf(opennova::io::LogLevel::kWarn,
+		"[threedi_gp] expected zero for collision_vol.plane_ptr, got 0x%08X at pos=%zu",
                         vol->plane_ptr, br.pos - 4);
                 free(col); return -1;
             }
@@ -550,7 +555,8 @@ static int parse_collision(GpReader *r, ThreediGpCollision **out) {
     }
 
     if (!br.ok) {
-        fprintf(stderr, "[threedi_gp] collision blob parse incomplete at pos=%zu/%zu\n", br.pos, br.size);
+        opennova::io::logf(opennova::io::LogLevel::kWarn,
+		"[threedi_gp] collision blob parse incomplete at pos=%zu/%zu", br.pos, br.size);
     }
 
     *out = col;
@@ -699,7 +705,8 @@ static int parse_rmodel(GpReader *r, ThreediGpMeshType mesh_type, ThreediGpRMode
             ThreediGpSubObject *sub = &out->subobjects[i];
             sub->unk_00 = gp_u32(&rbr);
             if (sub->unk_00 != 0) {
-                fprintf(stderr, "[threedi_gp] expected zero for subobject.unk_00, got 0x%08X at pos=%zu\n",
+                opennova::io::logf(opennova::io::LogLevel::kWarn,
+		"[threedi_gp] expected zero for subobject.unk_00, got 0x%08X at pos=%zu",
                         sub->unk_00, rbr.pos - 4);
                 return -1;
             }
@@ -1185,7 +1192,8 @@ static int parse_vstream(GpReader *r, int rverts_count, ThreediGpVStream **out) 
 
     vs->buffer_ptr = gp_u32(r);
     if (vs->buffer_ptr != 0) {
-        fprintf(stderr, "[threedi_gp] expected zero for vstream.buffer_ptr, got 0x%08X at pos=%zu\n",
+        opennova::io::logf(opennova::io::LogLevel::kWarn,
+		"[threedi_gp] expected zero for vstream.buffer_ptr, got 0x%08X at pos=%zu",
                 vs->buffer_ptr, r->pos - 4);
         free(vs); return -1;
     }
@@ -1349,7 +1357,8 @@ int threedi_gp_parse(const uint8_t *data, size_t data_len, ThreediGpFile *out) {
 
     // Parse header
     if (parse_header(&r, &out->header) != 0) {
-        fprintf(stderr, "[threedi_gp] parse_header failed at pos=%zu\n", r.pos);
+        opennova::io::logf(opennova::io::LogLevel::kWarn,
+		"[threedi_gp] parse_header failed at pos=%zu", r.pos);
         threedi_gp_free(out);
         return -1;
     }
@@ -1357,21 +1366,24 @@ int threedi_gp_parse(const uint8_t *data, size_t data_len, ThreediGpFile *out) {
     // Parse userpoints
     if (parse_userpoints(&r, out->header.userpoint_count,
                          &out->userpoints, &out->userpoint_count) != 0) {
-        fprintf(stderr, "[threedi_gp] parse_userpoints failed at pos=%zu\n", r.pos);
+        opennova::io::logf(opennova::io::LogLevel::kWarn,
+		"[threedi_gp] parse_userpoints failed at pos=%zu", r.pos);
         threedi_gp_free(out);
         return -1;
     }
 
     // Parse material lookup
     if (parse_material_lookup(&r, &out->material_lookups, &out->material_lookup_count) != 0) {
-        fprintf(stderr, "[threedi_gp] parse_material_lookup failed at pos=%zu\n", r.pos);
+        opennova::io::logf(opennova::io::LogLevel::kWarn,
+		"[threedi_gp] parse_material_lookup failed at pos=%zu", r.pos);
         threedi_gp_free(out);
         return -1;
     }
 
     // Parse collision
     if (parse_collision(&r, &out->collision) != 0) {
-        fprintf(stderr, "[threedi_gp] parse_collision failed at pos=%zu\n", r.pos);
+        opennova::io::logf(opennova::io::LogLevel::kWarn,
+		"[threedi_gp] parse_collision failed at pos=%zu", r.pos);
         threedi_gp_free(out);
         return -1;
     }
@@ -1379,7 +1391,8 @@ int threedi_gp_parse(const uint8_t *data, size_t data_len, ThreediGpFile *out) {
     // Parse rverts
     if (parse_rverts(&r, out->header.mesh_type, out->header.rverts_count,
                      &out->rverts, &out->rvert_count) != 0) {
-        fprintf(stderr, "[threedi_gp] parse_rverts failed at pos=%zu\n", r.pos);
+        opennova::io::logf(opennova::io::LogLevel::kWarn,
+		"[threedi_gp] parse_rverts failed at pos=%zu", r.pos);
         threedi_gp_free(out);
         return -1;
     }
@@ -1395,7 +1408,8 @@ int threedi_gp_parse(const uint8_t *data, size_t data_len, ThreediGpFile *out) {
 
         for (int i = 0; i < out->header.num_lods; ++i) {
             if (parse_rmodel(&r, out->header.mesh_type, &out->rmodels[i]) != 0) {
-                fprintf(stderr, "[threedi_gp] parse_rmodel %d failed at pos=%zu\n", i, r.pos);
+                opennova::io::logf(opennova::io::LogLevel::kWarn,
+		"[threedi_gp] parse_rmodel %d failed at pos=%zu", i, r.pos);
                 threedi_gp_free(out);
                 return -1;
             }
@@ -1405,7 +1419,8 @@ int threedi_gp_parse(const uint8_t *data, size_t data_len, ThreediGpFile *out) {
     // Parse control registers
     if (parse_control_registers(&r, out->header.ctrl_reg_count,
                                 &out->control_registers, &out->control_register_count) != 0) {
-        fprintf(stderr, "[threedi_gp] parse_control_registers failed at pos=%zu\n", r.pos);
+        opennova::io::logf(opennova::io::LogLevel::kWarn,
+		"[threedi_gp] parse_control_registers failed at pos=%zu", r.pos);
         threedi_gp_free(out);
         return -1;
     }
@@ -1413,14 +1428,16 @@ int threedi_gp_parse(const uint8_t *data, size_t data_len, ThreediGpFile *out) {
     // Parse matrices
     if (parse_matrices(&r, out->header.matrix_count,
                        &out->matrices, &out->matrix_count) != 0) {
-        fprintf(stderr, "[threedi_gp] parse_matrices failed at pos=%zu\n", r.pos);
+        opennova::io::logf(opennova::io::LogLevel::kWarn,
+		"[threedi_gp] parse_matrices failed at pos=%zu", r.pos);
         threedi_gp_free(out);
         return -1;
     }
 
     if ((out->header.flags & 1) != 0) {
         if (parse_light_info(&r, out) != 0) {
-            fprintf(stderr, "[threedi_gp] parse_light_info failed at pos=%zu\n", r.pos);
+            opennova::io::logf(opennova::io::LogLevel::kWarn,
+		"[threedi_gp] parse_light_info failed at pos=%zu", r.pos);
             threedi_gp_free(out);
             return -1;
         }
@@ -1428,7 +1445,8 @@ int threedi_gp_parse(const uint8_t *data, size_t data_len, ThreediGpFile *out) {
 
     if ((out->header.flags & 2) != 0) {
         if (parse_vstream(&r, out->header.rverts_count, &out->vstream) != 0) {
-            fprintf(stderr, "[threedi_gp] parse_vstream failed at pos=%zu\n", r.pos);
+            opennova::io::logf(opennova::io::LogLevel::kWarn,
+		"[threedi_gp] parse_vstream failed at pos=%zu", r.pos);
             threedi_gp_free(out);
             return -1;
         }
@@ -1436,7 +1454,8 @@ int threedi_gp_parse(const uint8_t *data, size_t data_len, ThreediGpFile *out) {
 
     if ((out->header.flags & 4) != 0) {
         if (parse_occlusion(&r, out->header.occlusion_count, &out->occlusion) != 0) {
-            fprintf(stderr, "[threedi_gp] parse_occlusion failed at pos=%zu\n", r.pos);
+            opennova::io::logf(opennova::io::LogLevel::kWarn,
+		"[threedi_gp] parse_occlusion failed at pos=%zu", r.pos);
             threedi_gp_free(out);
             return -1;
         }

@@ -27,6 +27,8 @@
 #include <fstream>
 #include <sstream>
 #include <thread>
+#include <cstdlib>
+#include <io/log.h>
 
 namespace {
 
@@ -81,7 +83,21 @@ void apply_seed(opennova::db::Database &db,
 
 } // namespace
 
+
+namespace {
+// The libs/ diagnostic channel (io/log.h): libraries are silent until the host
+// installs a sink. Reproduce the historical stream split — lifecycle to stdout,
+// warnings and errors to stderr; per-tick kDebug tracing opts in via NW_LOG_DEBUG.
+bool g_log_debug_enabled = false;
+void app_log_sink(opennova::io::LogLevel level, const char *msg) {
+	if (level == opennova::io::LogLevel::kDebug && !g_log_debug_enabled) return;
+	std::fprintf(level >= opennova::io::LogLevel::kWarn ? stderr : stdout, "%s\n", msg);
+}
+} // namespace
+
 int main() {
+	g_log_debug_enabled = std::getenv("NW_LOG_DEBUG") != nullptr;
+	opennova::io::set_log_sink(&app_log_sink);
 	using namespace opennova;
 	using namespace opennova::server;
 

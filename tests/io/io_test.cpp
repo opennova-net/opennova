@@ -4,12 +4,14 @@
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <io/bit_stream.h>
 #include <io/byte_reader.h>
 #include <io/byte_writer.h>
 #include <io/bam.h>
+#include <io/log.h>
 #include <io/fixed.h>
 #include <io/le.h>
 #include <io/strutil.h>
@@ -185,6 +187,34 @@ static int test_bam_wrap_arithmetic()
     return 0;
 }
 
+
+// --- io/log.h: the one libs/ diagnostic sink (W1-3) -------------------------
+static std::vector<std::pair<int, std::string>> g_log_seen;
+static void log_test_sink(opennova::io::LogLevel level, const char *msg)
+{
+    g_log_seen.emplace_back(static_cast<int>(level), msg);
+}
+
+static int test_log_sink()
+{
+    using opennova::io::LogLevel;
+    // Silent default: no sink installed, the call is a no-op (and must not crash).
+    opennova::io::set_log_sink(nullptr);
+    opennova::io::logf(LogLevel::kWarn, "dropped %d", 1);
+    // An installed sink receives the formatted message, no trailing newline.
+    opennova::io::set_log_sink(&log_test_sink);
+    opennova::io::logf(LogLevel::kInfo, "hello %s %d", "world", 7);
+    opennova::io::logf(LogLevel::kError, "plain");
+    opennova::io::set_log_sink(nullptr);
+    opennova::io::logf(LogLevel::kWarn, "after uninstall %d", 2);
+    TEST_EXPECT(g_log_seen.size() == 2);
+    TEST_EXPECT(g_log_seen[0].first == static_cast<int>(LogLevel::kInfo));
+    TEST_EXPECT(g_log_seen[0].second == "hello world 7");
+    TEST_EXPECT(g_log_seen[1].first == static_cast<int>(LogLevel::kError));
+    TEST_EXPECT(g_log_seen[1].second == "plain");
+    return 0;
+}
+
 int main()
 {
     if (test_le_primitives()) return 1;
@@ -194,6 +224,8 @@ int main()
     if (test_byte_writer_roundtrip()) return 1;
     if (test_bit_stream_roundtrip()) return 1;
     if (test_strutil()) return 1;
+    if (test_log_sink()) return 1;
     std::printf("io_test: all checks passed\n");
     return 0;
 }
+

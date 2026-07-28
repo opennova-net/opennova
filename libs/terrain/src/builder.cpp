@@ -11,6 +11,7 @@
 #include <cstring>
 #include <filesystem>
 #include <stdexcept>
+#include <io/log.h>
 
 namespace fs = std::filesystem;
 
@@ -161,12 +162,15 @@ void build_terrain(const TpjProject& project,
 
     std::vector<uint16_t> smoothed;
     if (!apply_smoothing) {
-        std::fprintf(stderr,"Loading 16-bit depth map: %s\n", depthmap_path.c_str());
+        opennova::io::logf(opennova::io::LogLevel::kInfo,
+		"Loading 16-bit depth map: %s", depthmap_path.c_str());
         smoothed = load_depthmap_raw16(depthmap_path);
     } else {
-        std::fprintf(stderr,"Loading depth map: %s\n", depthmap_path.c_str());
+        opennova::io::logf(opennova::io::LogLevel::kInfo,
+		"Loading depth map: %s", depthmap_path.c_str());
         auto raw_depth = load_depthmap_raw(depthmap_path);
-        std::fprintf(stderr,"Smoothing depth map...\n");
+        opennova::io::logf(opennova::io::LogLevel::kInfo,
+		"Smoothing depth map...");
         smoothed = smooth_depthmap(raw_depth);
     }
     progress.finish_phase("load_depthmap",
@@ -174,7 +178,8 @@ void build_terrain(const TpjProject& project,
                           kLoadDepthUnits);
 
     progress.report("base_meshes", "Generating base terrain meshes...", 0, kBaseMeshUnits);
-    std::fprintf(stderr,"Generating base terrain meshes...\n");
+    opennova::io::logf(opennova::io::LogLevel::kInfo,
+		"Generating base terrain meshes...");
     set_mesh_corner_locks(
         project.lock_topleft.x, project.lock_topleft.y,
         project.lock_topright.x, project.lock_topright.y,
@@ -183,7 +188,8 @@ void build_terrain(const TpjProject& project,
     generate_base_terrain_meshes();
     progress.finish_phase("base_meshes", "Generated base terrain meshes.", kBaseMeshUnits);
 
-    std::fprintf(stderr,"Building quadtree (tile=%d, min=%d)...\n", tile_size, min_tile_size);
+    opennova::io::logf(opennova::io::LogLevel::kInfo,
+		"Building quadtree (tile=%d, min=%d)...", tile_size, min_tile_size);
     auto root = build_quadtree(tile_size, min_tile_size);
 
     std::vector<uint16_t> rasterized_depth = smoothed;
@@ -194,12 +200,14 @@ void build_terrain(const TpjProject& project,
     ctx.rasterized_depth = &rasterized_depth;
     ctx.output_prefix = output_prefix;
     ctx.progress_callback = [&](int current, int total, const std::string& message) {
-        std::fprintf(stderr,"  %s\n", message.c_str());
+        opennova::io::logf(opennova::io::LogLevel::kInfo,
+		"  %s", message.c_str());
         progress.report("quadtree", message, current, total);
     };
 
     progress.report("quadtree", "Processing quadtree...", 0, quadtree_units);
-    std::fprintf(stderr,"Processing quadtree...\n");
+    opennova::io::logf(opennova::io::LogLevel::kInfo,
+		"Processing quadtree...");
     process_quadtree(root.get(), ctx);
     progress.finish_phase("quadtree", "Processed quadtree.", quadtree_units);
 
@@ -207,7 +215,8 @@ void build_terrain(const TpjProject& project,
         const auto& dep_out = should_rasterize_depth ? rasterized_depth : smoothed;
         std::string dep_path = output_prefix + "Output.dep";
         progress.report("write_depth", "Writing Output.dep...", 0, kWriteDepthUnits);
-        std::fprintf(stderr,"Writing %s...%s\n", dep_path.c_str(),
+        opennova::io::logf(opennova::io::LogLevel::kInfo,
+		"Writing %s...%s", dep_path.c_str(),
                     should_rasterize_depth ? "" : " (passthrough, no rasterize)");
         FILE* f = std::fopen(dep_path.c_str(), "wb");
         if (f) {
@@ -219,7 +228,8 @@ void build_terrain(const TpjProject& project,
 
     std::string cpt_path = output_prefix + ".cpt";
     progress.report("cpt_tml", "Exporting CPT (.tml pass)...", 0, cpt_units);
-    std::fprintf(stderr,"Exporting CPT (tml pass)...\n");
+    opennova::io::logf(opennova::io::LogLevel::kInfo,
+		"Exporting CPT (tml pass)...");
     export_terrain_cpt(
         output_prefix, "tml", cpt_path,
         tile_size, min_tile_size,
@@ -231,7 +241,8 @@ void build_terrain(const TpjProject& project,
     progress.finish_phase("cpt_tml", "Exported CPT (.tml pass).", cpt_units);
 
     progress.report("tms_tiles", "Generating multi-resolution tiles...", 0, tms_units);
-    std::fprintf(stderr,"Generating multi-resolution tiles...\n");
+    opennova::io::logf(opennova::io::LogLevel::kInfo,
+		"Generating multi-resolution tiles...");
     {
         int sz = tile_size;
         int depth = 0;
@@ -297,7 +308,8 @@ next_tms_level:
     progress.finish_phase("tms_tiles", "Generated multi-resolution tiles.", tms_units);
 
     progress.report("cpt_tms", "Exporting CPT (.tms pass)...", 0, cpt_units);
-    std::fprintf(stderr,"Exporting CPT (tms pass)...\n");
+    opennova::io::logf(opennova::io::LogLevel::kInfo,
+		"Exporting CPT (tms pass)...");
     export_terrain_cpt(
         output_prefix, "tms", cpt_path,
         tile_size, min_tile_size,
@@ -308,7 +320,8 @@ next_tms_level:
         });
     progress.finish_phase("cpt_tms", "Exported CPT (.tms pass).", cpt_units);
 
-    std::fprintf(stderr,"Build complete: %s\n", cpt_path.c_str());
+    opennova::io::logf(opennova::io::LogLevel::kInfo,
+		"Build complete: %s", cpt_path.c_str());
     progress.complete("Build complete.");
 }
 

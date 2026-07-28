@@ -69,7 +69,7 @@ target_include_directories(opennova_novaworld_service
 )
 
 target_link_libraries(opennova_novaworld_service
-    PUBLIC opennova_npwire opennova_novacrypto opennova_napi
+    PUBLIC opennova_npwire opennova_novacrypto opennova_napi opennova_io
     PRIVATE opennova_sqlite
 )
 

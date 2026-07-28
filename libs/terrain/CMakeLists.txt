@@ -29,6 +29,7 @@ target_include_directories(opennova_terrain
 target_link_libraries(opennova_terrain
     PUBLIC
         opennova_cpt
+        opennova_io
         opennova_pcx
         opennova_terrain_query
         opennova_tpj

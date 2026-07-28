@@ -3,7 +3,6 @@
 #include <string>
 #include <string_view>
 #include <vector>
-#include <chrono>
 #include <cstdlib>
 #include <cstdio>
 #include <filesystem>
@@ -13,7 +12,6 @@
 #include <iterator>
 #include <cstring>
 #include <type_traits>
-#include <fstream>
 #include <cctype>
 #include <array>
 
@@ -21,10 +19,9 @@
 
 #include "oed/types.h"
 #include "oed/export_3di.h"
+#include <io/log.h>
 
 namespace oed {
-
-static int stripify_call_counter = 0;
 
 void normalize_vec3(float (&v)[3]) {
   const float len =
@@ -327,10 +324,6 @@ StripifyResult stripify_triangles(const std::vector<uint16_t> &tris,
   if (tris.empty()) return out;
 
   const char *debug_stripify = std::getenv("OED_STRIPIFY_DEBUG");
-  const char *log_dir_env = std::getenv("OED_STRIPIFY_LOG_PATH");
-  const std::string log_dir = log_dir_env ? log_dir_env : ".";
-  stripify_call_counter = 0;
-  const int call_index = stripify_call_counter++;
 
   StripifyContext ctx = build_stripify_context(tris);
   constexpr int kMaxStripLenPassA = 1024;
@@ -358,8 +351,10 @@ StripifyResult stripify_triangles(const std::vector<uint16_t> &tris,
     bool use_adj_heuristic = true;  // corresponds to useAdjacencyHeuristic in IDA, toggled on odd-length strips
 
     // Optional diagnostics: emit per-seed edge stats when env is set.
+    // Off by default: the per-seed diag strings are expensive to build and are
+    // pure diagnostics; opt in with OED_STRIPIFY_SEED_DIAG=1.
     const char *diag_env = std::getenv("OED_STRIPIFY_SEED_DIAG");
-    const bool diag_enabled = diag_env ? (std::strcmp(diag_env, "0") != 0) : true;
+    const bool diag_enabled = diag_env != nullptr && std::strcmp(diag_env, "0") != 0;
     std::vector<std::string> seed_diag;
 
     while (true) {
@@ -530,8 +525,8 @@ StripifyResult stripify_triangles(const std::vector<uint16_t> &tris,
       const int delta =
           static_cast<int>(forward.score) - static_cast<int>(ctx.score);
       if (debug_diag) {
-        std::fprintf(stderr,
-                     "  cand idx=%zu len=%zu flip=%d rev=%d delta=%d score=%u\n",
+        opennova::io::logf(opennova::io::LogLevel::kDebug,
+		"  cand idx=%zu len=%zu flip=%d rev=%d delta=%d score=%u",
                      i, strip.indices.size(), strip.flip_parity ? 1 : 0,
                      use_reverse ? 1 : 0, delta, forward.score);
       }
@@ -574,7 +569,8 @@ StripifyResult stripify_triangles(const std::vector<uint16_t> &tris,
     while (!strips.empty()) {
       select_strip_in_place(strips, ctx);
       if (debug_diag) {
-        std::fprintf(stderr, "select idx=0 reverse_applied=%d remaining=%zu\n",
+        opennova::io::logf(opennova::io::LogLevel::kDebug,
+		"select idx=0 reverse_applied=%d remaining=%zu",
                      0, strips.size());
       }
 
@@ -611,15 +607,16 @@ StripifyResult stripify_triangles(const std::vector<uint16_t> &tris,
   if (debug_diag) {
     auto dump_strips = [&](const char *name,
                            const std::vector<CandidateStrip> &strips) {
-      std::fprintf(stderr, "pass %s strip_count=%zu\n", name, strips.size());
+      opennova::io::logf(opennova::io::LogLevel::kDebug,
+		"pass %s strip_count=%zu", name, strips.size());
       for (size_t i = 0; i < strips.size(); ++i) {
         const auto &s = strips[i];
-        std::fprintf(stderr, "  %s[%zu] flip=%d len=%zu:",
-                     name, i, s.flip_parity ? 1 : 0, s.indices.size());
-        for (uint16_t idx : s.indices) {
-          std::fprintf(stderr, " %u", idx);
-        }
-        std::fprintf(stderr, "\n");
+        std::string line;
+        for (uint16_t idx : s.indices) line += " " + std::to_string(idx);
+        opennova::io::logf(opennova::io::LogLevel::kDebug,
+		"  %s[%zu] flip=%d len=%zu:%s",
+                     name, i, s.flip_parity ? 1 : 0, s.indices.size(),
+                     line.c_str());
       }
     };
     dump_strips("A", strips_a);
@@ -638,101 +635,24 @@ StripifyResult stripify_triangles(const std::vector<uint16_t> &tris,
   const bool use_b =
       !force_a && (force_b || (!strips_b.empty() && (count_a == 0 || count_b < count_a)));
   if (debug_stripify) {
-    std::fprintf(stderr,
-                 "stripify tri_count=%zu stripsA=%zu stripsB=%zu countA=%d "
-                 "countB=%d choose=%c\n",
+    opennova::io::logf(opennova::io::LogLevel::kDebug,
+		"stripify tri_count=%zu stripsA=%zu stripsB=%zu countA=%d "
+                 "countB=%d choose=%c",
                  tris.size() / 3, strips_a.size(), strips_b.size(), count_a, count_b,
                  use_b ? 'B' : 'A');
   }
 
-  std::ofstream log(log_dir + "/stripify_call_" + std::to_string(call_index) +
-                    ".log");
-  if (log.is_open()) {
-    const auto now = std::chrono::system_clock::to_time_t(
-        std::chrono::system_clock::now());
-    log << "timestamp=" << static_cast<long long>(now) << "\n";
-    log << "call=" << call_index << "\n";
-    log << "subobject=" << subobject_index << " material=" << material_index
-        << "\n";
-    log << "tri_count=" << tris.size() / 3 << "\n";
-    log << "tris:";
-    for (uint16_t v : tris) log << " " << v;
-    log << "\n";
-    log << "stripify_tris:";
-    for (uint16_t v : ctx.indices) log << " " << v;
-    log << "\n";
-    // Log neighbor counts for diagnostics.
-    {
-      log << "neighbors:";
-      std::fill(ctx.visited.begin(), ctx.visited.end(), 0);
-      for (int tri = 0; tri < ctx.triCount(); ++tri) {
-        log << " " << count_unvisited_neighbors(ctx, tri);
-      }
-      log << "\n";
-      log << "adj:";
-      for (int tri = 0; tri < ctx.triCount(); ++tri) {
-        log << " [" << tri << ":" << ctx.adjacency[tri * 3 + 0] << ","
-            << ctx.adjacency[tri * 3 + 1] << ","
-            << ctx.adjacency[tri * 3 + 2] << "]";
-      }
-      log << "\n";
-    }
-    auto log_pass = [&](const char *name,
-                        const std::vector<CandidateStrip> &strips,
-                        const std::vector<uint16_t> &flat, int count,
-                        const std::vector<StripBuildIteration> &iters,
-                        const std::vector<std::string> &seed_diag) {
-      log << "pass " << name << " strip_count=" << strips.size()
-          << " index_count=" << count << "\n";
-      for (const auto &line : seed_diag) {
-        log << "  diag " << line << "\n";
-      }
-      for (const auto &it : iters) {
-        log << "  iter " << it.iteration
-            << " tri=" << it.seed_tri
-            << " edge=" << it.seed_edge
-            << " neighbors=" << it.neighbor_count
-            << " len=" << it.length
-            << " skipped=" << it.skipped
-            << " ratio=" << it.ratio
-            << " tri_parity=" << (it.tri_path_parity ? 1 : 0)
-            << " use_adj_before=" << (it.use_adj_before ? 1 : 0)
-            << " use_adj_after=" << (it.use_adj_after ? 1 : 0) << "\n";
-      }
-      for (size_t i = 0; i < strips.size(); ++i) {
-        log << "  " << name << "[" << i << "] flip=" << strips[i].flip_parity
-            << " len=" << strips[i].indices.size()
-            << " seed_tri=" << strips[i].seed_tri
-            << " seed_edge=" << strips[i].seed_edge << ":";
-        for (uint16_t idx : strips[i].indices) log << " " << idx;
-        log << "\n";
-        log << "    tri_path:";
-        for (int t : strips[i].tri_path) log << " " << t;
-        log << "\n";
-        log << "    edge_path:";
-        for (int e : strips[i].edge_path) log << " " << e;
-        log << "\n";
-      }
-      log << "  flat (" << flat.size() << "):";
-      for (uint16_t idx : flat) log << " " << idx;
-      log << "\n";
-    };
-    log_pass("A", strips_a, flatten_copy(strips_a), count_a, build_a.iterations,
-             build_a.seed_diag);
-    log_pass("B", strips_b, flatten_copy(strips_b), count_b, build_b.iterations,
-             build_b.seed_diag);
-    log << "chosen=" << (use_b ? 'B' : 'A') << "\n";
-  }
 
   std::vector<uint16_t> strip_indices =
       use_b ? flatten_strips(strips_b) : flatten_strips(strips_a);
   if (debug_stripify) {
     const size_t limit = debug_diag ? strip_indices.size() : std::min<size_t>(30, strip_indices.size());
-    std::fprintf(stderr, "strip_indices size=%zu (first %zu):", strip_indices.size(), limit);
-    for (size_t i = 0; i < limit; ++i) {
-      std::fprintf(stderr, " %u", strip_indices[i]);
-    }
-    std::fprintf(stderr, "\n");
+    std::string line;
+    for (size_t i = 0; i < limit; ++i)
+      line += " " + std::to_string(strip_indices[i]);
+    opennova::io::logf(opennova::io::LogLevel::kDebug,
+		"strip_indices size=%zu (first %zu):%s", strip_indices.size(), limit,
+		line.c_str());
   }
 
   // Convert strip indices back to a triangle list (discard degenerate tris).
