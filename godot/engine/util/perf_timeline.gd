@@ -122,10 +122,12 @@ func brief(top_n := 4) -> String:
 	var parts := PackedStringArray()
 	for i in range(mini(top_n, tops.size())):
 		var s: Dictionary = tops[i]
-		parts.append("%s %s" % [s["name"], _fmt_ms(float(int(s["end_us"]) - int(s["start_us"])) / 1000.0)])
-	var head := _fmt_ms(total_ms())
+		parts.append("%s %s" % [s["name"], format_ms(float(int(s["end_us"]) - int(s["start_us"])) / 1000.0)])
+	var head := format_ms(total_ms())
 	return head if parts.is_empty() else "%s — %s" % [head, ", ".join(parts)]
 
 
-static func _fmt_ms(ms: float) -> String:
+## The one duration rendering every perf surface shares (the summary line and
+## the F3 Perf tree agree by construction).
+static func format_ms(ms: float) -> String:
 	return ("%.1fs" % (ms / 1000.0)) if ms >= 1000.0 else ("%dms" % int(roundf(ms)))

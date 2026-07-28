@@ -45,7 +45,7 @@ var _organic_signature_valid := false
 # Stable per-material color: golden-ratio hue walk, saturated and bright so
 # adjacent material bytes read as clearly different families.
 static func material_color(mat: int) -> Color:
-	return Color.from_hsv(fposmod(float(mat) * 0.618033988749895, 1.0), 0.75, 1.0)
+	return Color.from_hsv(IndexHue.hue_for_index(mat), 0.75, 1.0)
 
 
 ## Color contract for the organic section spheres. Masked sections win so an

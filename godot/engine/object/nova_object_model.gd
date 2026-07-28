@@ -1451,7 +1451,7 @@ func _load_texture_name(texture_name: String) -> Texture2D:
 
 
 func _hash_color_for_index(idx: int) -> Color:
-	var h := fposmod(float(idx) * 0.61803398, 1.0)
+	var h := IndexHue.hue_for_index(idx)
 	return Color.from_hsv(h, 0.35, 0.85)
 
 

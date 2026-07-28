@@ -26,7 +26,7 @@ const NovaEnvironmentScript = preload("res://engine/environment/nova_environment
 const NovaSkyScript = preload("res://engine/environment/nova_sky.gd")
 const NovaWaterScript = preload("res://engine/environment/nova_water.gd")
 const NovaWeatherScript = preload("res://engine/environment/nova_weather.gd")
-const HHMM_DAY := 2400.0
+const HHMM_DAY := NovaEnvironment.HHMM_DAY
 
 # The bound app-owned environment DOCUMENT (EnvironmentEditor); null until
 # bind_environment_editor. The host keeps its own handle for shell consumers.

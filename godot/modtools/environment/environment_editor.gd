@@ -120,7 +120,7 @@ func _save_to_path(path: String, clear_dirty: bool) -> Error:
 
 
 func set_time_of_day(value: float, mark_dirty: bool = true) -> void:
-	time_of_day = fposmod(value, 2400.0)
+	time_of_day = fposmod(value, NovaEnvironment.HHMM_DAY)
 	if env_file:
 		# Guard the inner EnvFile change so its environment_changed echo does not
 		# fan out a second, redundant environment_changed/state_changed for this
