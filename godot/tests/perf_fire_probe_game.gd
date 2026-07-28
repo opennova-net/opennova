@@ -204,6 +204,7 @@ func _run() -> void:
 	# simulation, body posing, and muzzle feedback continue normally.
 	var xformoff := {avg = -1.0}
 	var visoff := {avg = -1.0}
+	var bodyoff := {avg = -1.0}
 	if _set_guarded_if_present(_present, &"_drive_transform", false):
 		await _settle_ms(500)
 		xformoff = await _measure("xformoff", 3000)
@@ -212,6 +213,13 @@ func _run() -> void:
 		await _settle_ms(500)
 		visoff = await _measure("visoff", 3000)
 		_restore_guarded(_present, &"_drive_visibility")
+	# Body-anim A/B: freeze the pose dispatch (and with it the Skeleton3D
+	# update chain those writes dirty) — the deferred/off-span suspect the
+	# WORLDOFF-minus-spans residual points at.
+	if _set_guarded_if_present(_present, &"_drive_body_anim", false):
+		await _settle_ms(500)
+		bodyoff = await _measure("bodyoff", 3000)
+		_restore_guarded(_present, &"_drive_body_anim")
 
 	# Occlusion legs A/B (visibility writes across the occluded set per frame).
 	var occloff := {avg = -1.0}
@@ -259,6 +267,30 @@ func _run() -> void:
 		handleroff = await _measure("handleroff", 3000)
 		_restore_guarded(_gw, &"_perf_probe_skip_fixed_handlers")
 
+	# Residual bisect, LAST because it broadly mutates processing state: turn
+	# off every OTHER node's _process (main_game keeps ticking the world). If
+	# the frame collapses toward the measured shell spans, the process residual
+	# is node _process work (bisect by subtree next); if it barely moves, the
+	# residual is engine-internal.
+	var otherprocoff := {avg = -1.0}
+	var process_disabled: Array = []
+	var walk: Array = [root]
+	while not walk.is_empty():
+		var walk_node: Node = walk.pop_back()
+		for walk_child in walk_node.get_children():
+			walk.push_back(walk_child)
+		if walk_node == _main or walk_node == root:
+			continue
+		if walk_node.is_processing():
+			walk_node.set_process(false)
+			process_disabled.append(walk_node)
+	print("[pfg] otherprocoff: disabled _process on %d node(s)" % process_disabled.size())
+	await _settle_ms(500)
+	otherprocoff = await _measure("otherprocoff", 3000)
+	for restored_node in process_disabled:
+		if is_instance_valid(restored_node):
+			(restored_node as Node).set_process(true)
+
 	_report("BASELINE", base)
 	_report("FIRING1 ", fire1)
 	_report("FIRING2 ", fire2)
@@ -278,6 +310,9 @@ func _run() -> void:
 	if float(visoff.avg) >= 0.0:
 		print("[pfg] VISOFF   avg=%.2fms (present visibility share vs cooldown: %+.2fms)" % [
 				float(visoff.avg), float(cool.avg) - float(visoff.avg)])
+	if float(bodyoff.avg) >= 0.0:
+		print("[pfg] BODYOFF  avg=%.2fms (body-anim/skeleton share vs cooldown: %+.2fms)" % [
+				float(bodyoff.avg), float(cool.avg) - float(bodyoff.avg)])
 	if float(occloff.avg) >= 0.0:
 		print("[pfg] OCCLOFF  avg=%.2fms (occlusion share vs cooldown: %+.2fms)" % [
 				float(occloff.avg), float(cool.avg) - float(occloff.avg)])
@@ -290,6 +325,9 @@ func _run() -> void:
 	if float(handleroff.avg) >= 0.0:
 		print("[pfg] HANDLEROFF avg=%.2fms (fixed handlers share vs cooldown: %+.2fms)" % [
 				float(handleroff.avg), float(cool.avg) - float(handleroff.avg)])
+	if float(otherprocoff.avg) >= 0.0:
+		print("[pfg] OTHERPROCOFF avg=%.2fms (other nodes' _process share vs cooldown: %+.2fms)" % [
+				float(otherprocoff.avg), float(cool.avg) - float(otherprocoff.avg)])
 	var base_avg: float = base.avg
 	var base_p95: float = base.p95
 	var cool_avg: float = cool.avg

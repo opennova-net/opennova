@@ -574,3 +574,24 @@ func test_occlusion_claim_blocks_the_show_but_never_the_hide() -> void:
 	present_pass.present()
 	assert_true(model.visible,
 			"with the claim cleared the present drive owns visibility again")
+
+
+func test_body_anim_dispatch_gates_on_the_ab_seam() -> void:
+	# _drive_body_anim mirrors the _drive_transform/_drive_visibility probe
+	# seams: freezing it stops every pose dispatch so probes can isolate the
+	# skeleton-update share of the frame.
+	var model := FakeModel.new()
+	add_child_autofree(model)
+	var index := FakeIndex.new()
+	index.by_bms_id = { 11: model }
+	var sim := FakeSim.new()
+	sim.entities = [{ "bms_id": 11, "body_anim_slot": 1, "anim_state": 43, "anim_phase": 9 }]
+	var present_pass := _make_pass(index, sim)
+	present_pass.present()
+	assert_eq(model.body_calls.size(), 1, "body anim dispatches by default")
+	present_pass._drive_body_anim = false
+	present_pass.present()
+	assert_eq(model.body_calls.size(), 1, "the frozen seam dispatches nothing new")
+	present_pass._drive_body_anim = true
+	present_pass.present()
+	assert_eq(model.body_calls.size(), 2, "restoring the seam resumes dispatch")
